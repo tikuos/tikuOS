@@ -1,5 +1,6 @@
-## Hi there 👋
+## TikuOS:: Simple. Ubiquitous. Intelligence, Everywhere. ## 
 
+We are developing an operating system for ubiqutious d
 <!--
 **tikuos/tikuOS** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
