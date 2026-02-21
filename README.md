@@ -62,19 +62,6 @@ TIKU_AUTOSTART_PROCESSES(&blink_process);
 
 ---
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Getting Started](docs/GettingStarted.md) | Setup guide and first steps |
-| [Examples](docs/Examples.md) | Ready-to-run example applications |
-| [Architecture](docs/Architecture.md) | System design and internals |
-| [API Reference](docs/APIReference.md) | Complete API documentation |
-| [Coding Convention](docs/CodingConvention.md) | Code style guidelines |
-| [Porting Guide](docs/PortingGuide.md) | How to port to new platforms |
-
----
-
 ## Project Structure
 
 ```
