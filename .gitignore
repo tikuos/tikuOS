@@ -1,0 +1,22 @@
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Code Composer Studio
+Debug/
+Release/
+targetConfigs/
+.ccsproject
+.cproject
+.project
+.settings/
+*.launch
+
+# Build artifacts
+*.obj
+*.out
+*.map
+*.d
+*.d_raw
+*.opt
+*_linkInfo.xml

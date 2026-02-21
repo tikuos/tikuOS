@@ -1,0 +1,75 @@
+/*
+ * Tiku Operating System
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_board_fr5969_launchpad.h - MSP430FR5969 LaunchPad board definitions
+ *
+ * This header defines the PCB-level GPIO pin assignments for the
+ * MSP430FR5969 LaunchPad development board: LEDs, buttons, and
+ * other board-specific peripherals.
+ *
+ * Board layout (per TI MSP-EXP430FR5969 schematic):
+ *   - LED1 (Red)   -> P4.6
+ *   - LED2 (Green) -> P1.0
+ *   - Button S1    -> P4.5 (Active low)
+ *   - Button S2    -> P1.1 (Active low)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef TIKU_BOARD_FR5969_LAUNCHPAD_H_
+#define TIKU_BOARD_FR5969_LAUNCHPAD_H_
+
+/*---------------------------------------------------------------------------*/
+/* BOARD IDENTIFICATION                                                      */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_BOARD_NAME             "MSP430FR5969 LaunchPad"
+
+/*---------------------------------------------------------------------------*/
+/* LED1 (Red) - P4.6                                                         */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_BOARD_LED1_INIT()      do { P4DIR |= BIT6; P4OUT &= ~BIT6; } while(0)
+#define TIKU_BOARD_LED1_ON()        do { P4OUT |= BIT6; } while(0)
+#define TIKU_BOARD_LED1_OFF()       do { P4OUT &= ~BIT6; } while(0)
+#define TIKU_BOARD_LED1_TOGGLE()    do { P4OUT ^= BIT6; } while(0)
+
+/*---------------------------------------------------------------------------*/
+/* LED2 (Green) - P1.0                                                       */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_BOARD_LED2_INIT()      do { P1DIR |= BIT0; P1OUT &= ~BIT0; } while(0)
+#define TIKU_BOARD_LED2_ON()        do { P1OUT |= BIT0; } while(0)
+#define TIKU_BOARD_LED2_OFF()       do { P1OUT &= ~BIT0; } while(0)
+#define TIKU_BOARD_LED2_TOGGLE()    do { P1OUT ^= BIT0; } while(0)
+
+/*---------------------------------------------------------------------------*/
+/* Button S1 - P4.5 (Active low)                                             */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_BOARD_BTN1_INIT()      do { P4DIR &= ~BIT5; P4REN |= BIT5; P4OUT |= BIT5; } while(0)
+#define TIKU_BOARD_BTN1_PRESSED()   (!(P4IN & BIT5))
+
+/*---------------------------------------------------------------------------*/
+/* Button S2 - P1.1 (Active low)                                             */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_BOARD_BTN2_INIT()      do { P1DIR &= ~BIT1; P1REN |= BIT1; P1OUT |= BIT1; } while(0)
+#define TIKU_BOARD_BTN2_PRESSED()   (!(P1IN & BIT1))
+
+#endif /* TIKU_BOARD_FR5969_LAUNCHPAD_H_ */

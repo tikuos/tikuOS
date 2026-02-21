@@ -1,0 +1,83 @@
+/*
+ * Tiku Operating System
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_device_fr5969.h - MSP430FR5969 silicon-level constants
+ *
+ * This header defines the hardware capabilities of the MSP430FR5969
+ * microcontroller: available GPIO ports, crystal pin routing, memory
+ * sizes, and peripheral availability. Board-level (PCB) definitions
+ * such as LED and button pin assignments belong in the board header.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef TIKU_DEVICE_FR5969_H_
+#define TIKU_DEVICE_FR5969_H_
+
+/*---------------------------------------------------------------------------*/
+/* DEVICE IDENTIFICATION                                                     */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_NAME            "MSP430FR5969"
+
+/*---------------------------------------------------------------------------*/
+/* GPIO PORT AVAILABILITY                                                    */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_HAS_PORT1       1
+#define TIKU_DEVICE_HAS_PORT2       1
+#define TIKU_DEVICE_HAS_PORT3       1
+#define TIKU_DEVICE_HAS_PORT4       1
+#define TIKU_DEVICE_HAS_PORT5       0
+#define TIKU_DEVICE_HAS_PORT6       0
+#define TIKU_DEVICE_HAS_PORT7       0
+#define TIKU_DEVICE_HAS_PORT8       0
+#define TIKU_DEVICE_HAS_PORT9       0
+#define TIKU_DEVICE_HAS_PORTJ       1
+
+/*---------------------------------------------------------------------------*/
+/* CRYSTAL PIN ROUTING                                                       */
+/*---------------------------------------------------------------------------*/
+
+/** LFXT (32.768 kHz) crystal pins: PJ.4 = LFXIN, PJ.5 = LFXOUT */
+#define TIKU_DEVICE_LFXT_PSEL_REG       PJSEL0
+#define TIKU_DEVICE_LFXT_PSEL_BITS      (BIT4 | BIT5)
+#define TIKU_DEVICE_LFXT_PSEL1_REG      PJSEL1
+#define TIKU_DEVICE_LFXT_PSEL1_BITS     (BIT4 | BIT5)
+
+/** HFXT crystal pins: PJ.2 = HFXIN, PJ.3 = HFXOUT */
+#define TIKU_DEVICE_HFXT_PSEL_REG       PJSEL0
+#define TIKU_DEVICE_HFXT_PSEL_BITS      (BIT2 | BIT3)
+#define TIKU_DEVICE_HFXT_PSEL1_REG      PJSEL1
+#define TIKU_DEVICE_HFXT_PSEL1_BITS     (BIT2 | BIT3)
+
+/*---------------------------------------------------------------------------*/
+/* CLOCK CAPABILITIES                                                        */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_HAS_HFXT        1
+#define TIKU_DEVICE_MAX_STABLE_MHZ  8
+
+/*---------------------------------------------------------------------------*/
+/* MEMORY SIZES                                                              */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_FRAM_SIZE       (64 * 1024UL)   /* 64 KB FRAM */
+#define TIKU_DEVICE_RAM_SIZE        (2 * 1024UL)    /* 2 KB SRAM */
+
+#endif /* TIKU_DEVICE_FR5969_H_ */
