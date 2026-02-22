@@ -45,10 +45,9 @@
 /**
  * @brief Initialize eUSCI_A0 UART at 9600 baud, 8N1.
  *
- * Configures for 8 MHz SMCLK (set by tiku_cpu_freq_init before this
- * is called).  Baud-rate values from TI baud-rate calculator:
- *   BRW   = 52
- *   MCTLW = (0x49 << 8) | UCOS16 | (0x01 << 4)
+ * Clock source and baud-rate parameters are board-specific:
+ *   FR5969: 8 MHz SMCLK, oversampling (BRW=52)
+ *   FR2433: 5 MHz MODCLK (MODOSC), oversampling (BRW=32)
  */
 void
 tiku_uart_init(void)
@@ -59,12 +58,12 @@ tiku_uart_init(void)
     /* Put eUSCI_A0 in reset before configuration */
     UCA0CTLW0 = UCSWRST;
 
-    /* SMCLK as baud-rate clock source */
-    UCA0CTLW0 |= UCSSEL__SMCLK;
+    /* Board-specific clock source */
+    UCA0CTLW0 |= TIKU_BOARD_UART_CLK_SEL;
 
-    /* 9600 baud @ 8 MHz SMCLK (oversampling enabled) */
-    UCA0BRW = 52;
-    UCA0MCTLW = (0x49 << 8) | UCOS16 | (0x01 << 4);
+    /* Board-specific baud-rate registers (9600 baud) */
+    UCA0BRW = TIKU_BOARD_UART_BRW;
+    UCA0MCTLW = TIKU_BOARD_UART_MCTLW;
 
     /* Release from reset — UART is now active */
     UCA0CTLW0 &= ~UCSWRST;

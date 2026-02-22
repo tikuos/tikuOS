@@ -61,7 +61,13 @@
 /* Backchannel UART - TXD P1.4, RXD P1.5                                    */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_BOARD_UART_PINS_INIT() do { P1SEL0 |= BIT4 | BIT5; } while(0)
+#define TIKU_BOARD_UART_PINS_INIT() do { P1SEL0 |= BIT4 | BIT5; P1SEL1 &= ~(BIT4 | BIT5); } while(0)
+
+/** UART baud-rate config: 9600 baud from 5 MHz MODCLK (MODOSC, ±0.5%).
+ *  N = 5000000/9600 = 520.83 → oversampling: BRW=32, BRF=9, BRS=0x00. */
+#define TIKU_BOARD_UART_CLK_SEL     UCSSEL__MODCLK
+#define TIKU_BOARD_UART_BRW         32
+#define TIKU_BOARD_UART_MCTLW       (UCOS16 | (0x09 << 4))
 
 /*---------------------------------------------------------------------------*/
 /* Button S1 - P2.3 (Active low)                                             */

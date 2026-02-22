@@ -49,6 +49,7 @@ static tiku_clk_freq_t g_cpu_freq;
 // Global variable to store the SMCLK divider
 static tiku_clk_div_t g_sfreq_div;
 
+
 /**
  * @brief Converts CPU frequency enum to actual MHz string for display
  */
@@ -424,42 +425,66 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
       */
      __bis_SR_register(SCG0);  /* Disable FLL */
 
+     CSCTL3 = SELREF__REFOCLK; /* FLL reference = REFO (32768 Hz) */
+
     switch (freq) {
         case TIKU_CLK_FREQ_1MHZ:
-            CSCTL1 = DCORSEL_0;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_0;
+            CSCTL2 = FLLD_0 + 30;   /* 32768*(30+1) = 1,015,808 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_1MHZ;
             break;
         case TIKU_CLK_FREQ_2_677MHZ:
-            CSCTL1 = DCORSEL_1;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_1;
+            CSCTL2 = FLLD_0 + 81;   /* 32768*(81+1) = 2,686,976 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_2_677MHZ;
             break;
         case TIKU_CLK_FREQ_3_5MHZ:
-            CSCTL1 = DCORSEL_2;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
+            CSCTL2 = FLLD_0 + 106;  /* 32768*(106+1) = 3,506,176 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_3_5MHZ;
             break;
         case TIKU_CLK_FREQ_4MHZ:
-            CSCTL1 = DCORSEL_3;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
+            CSCTL2 = FLLD_0 + 121;  /* 32768*(121+1) = 3,997,696 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_4MHZ;
             break;
         case TIKU_CLK_FREQ_5_33MHZ:
-            CSCTL1 = DCORSEL_4;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_4;
+            CSCTL2 = FLLD_0 + 162;  /* 32768*(162+1) = 5,341,184 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_5_33MHZ;
             break;
         case TIKU_CLK_FREQ_7MHZ:
-            CSCTL1 = DCORSEL_5;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_5;
+            CSCTL2 = FLLD_0 + 213;  /* 32768*(213+1) = 7,012,352 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_7MHZ;
             break;
         case TIKU_CLK_FREQ_8MHZ:
-            CSCTL1 = DCORSEL_6;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_6;
+            CSCTL2 = FLLD_0 + 243;  /* 32768*(243+1) = 7,995,392 Hz */
             g_cpu_freq = TIKU_CLK_FREQ_8MHZ;
             break;
         default:
-            CSCTL1 = DCORSEL_6;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_6;
+            CSCTL2 = FLLD_0 + 243;
             g_cpu_freq = TIKU_CLK_FREQ_8MHZ;
             break;
     }
 
+     __delay_cycles(3);
      __bic_SR_register(SCG0);  /* Re-enable FLL */
+
+     /* Clear DCO fault, then wait for FLL to lock (bounded) */
+     CSCTL7 &= ~DCOFFG;
+     __delay_cycles(200000);   /* ~25 ms at 8 MHz for FLL to settle */
+     {
+         unsigned long fllWait = 500000UL;
+         while ((CSCTL7 & (FLLUNLOCK0 | FLLUNLOCK1)) && --fllWait)
+             ;
+     }
+
+     /* Disable FLL to freeze DCO at the locked frequency.
+      * This eliminates FLL hunting jitter that corrupts UART. */
+     __bis_SR_register(SCG0);
 
 #else
      /* FR5969/FR5994 CS_A module: DCO frequency set via DCOFSEL + DCORSEL.
