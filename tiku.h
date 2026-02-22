@@ -132,7 +132,7 @@
  */
 
 /** Enable debug printing for process management */
-#define DEBUG_PROCESS 1
+#define DEBUG_PROCESS 0
 
 /** Enable debug printing for hardware timer */
 #define DEBUG_HTIMER 0
@@ -141,10 +141,10 @@
 #define DEBUG_CPU_FREQ 0
 
 /** Enable debug printing for main application */
-#define DEBUG_MAIN 1
+#define DEBUG_MAIN 0
 
 /** Enable debug printing for timer subsystem */
-#define DEBUG_TIMER 1
+#define DEBUG_TIMER 0
 
 /** Enable debug printing for clock architecture */
 #define DEBUG_CLOCK_ARCH 0
