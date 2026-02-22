@@ -12,7 +12,7 @@ targetConfigs/
 .settings/
 *.launch
 
-# Build artifacts
+# CCS build artifacts
 *.obj
 *.out
 *.map
@@ -20,3 +20,25 @@ targetConfigs/
 *.d_raw
 *.opt
 *_linkInfo.xml
+
+# GCC / Makefile build artifacts
+build/
+*.o
+*.elf
+*.hex
+*.bin
+*.lst
+
+# Linker scripts (CCS-generated)
+lnk_*.cmd
+
+# Editor / OS temp files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.orig
