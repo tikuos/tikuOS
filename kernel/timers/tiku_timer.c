@@ -120,6 +120,7 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
       while (*pp != NULL) {
         if ((*pp)->p == dead) {
           struct tiku_timer *victim = *pp;
+          TIMER_PRINTF("Cleanup: removed timer for exited process\n");
           *pp = victim->next;
           victim->next = NULL;
           victim->active = 0;
@@ -155,10 +156,12 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
 
         /* Dispatch based on mode */
         if (t->mode == TIKU_TIMER_MODE_CALLBACK && t->func != NULL) {
+          TIMER_PRINTF("Expired: callback dispatched\n");
           TIKU_PROCESS_CONTEXT_BEGIN(t->p);
           t->func(t->ptr);
           TIKU_PROCESS_CONTEXT_END(t->p);
         } else if (t->mode == TIKU_TIMER_MODE_EVENT && t->p != NULL) {
+          TIMER_PRINTF("Expired: event posted to %s\n", t->p->name);
           tiku_process_post(t->p, TIKU_EVENT_TIMER, t);
         }
 
@@ -179,6 +182,7 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
 void tiku_timer_init(void) {
   timer_list = NULL;
   tiku_process_start(&tiku_timer_process, NULL);
+  TIMER_PRINTF("Init complete\n");
 }
 
 /*---------------------------------------------------------------------------*/
@@ -192,6 +196,7 @@ void tiku_timer_set_callback(struct tiku_timer *t, tiku_clock_time_t ticks,
   t->ptr = ptr;
   t->p = TIKU_PROCESS_CURRENT();
 
+  TIMER_PRINTF("Set callback: interval=%u ticks\n", ticks);
   timer_insert(t);
 }
 
@@ -205,6 +210,7 @@ void tiku_timer_set_event(struct tiku_timer *t, tiku_clock_time_t ticks) {
   t->ptr = NULL;
   t->p = TIKU_PROCESS_CURRENT();
 
+  TIMER_PRINTF("Set event: interval=%u ticks\n", ticks);
   timer_insert(t);
 }
 
@@ -225,7 +231,10 @@ void tiku_timer_restart(struct tiku_timer *t) {
 
 /*---------------------------------------------------------------------------*/
 
-void tiku_timer_stop(struct tiku_timer *t) { timer_remove(t); }
+void tiku_timer_stop(struct tiku_timer *t) {
+  TIMER_PRINTF("Stopped timer\n");
+  timer_remove(t);
+}
 
 /*---------------------------------------------------------------------------*/
 

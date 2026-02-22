@@ -59,6 +59,17 @@
 #define TIKU_BOARD_LED2_TOGGLE()    do { P1OUT ^= BIT0; } while(0)
 
 /*---------------------------------------------------------------------------*/
+/* Backchannel UART - TXD P2.0, RXD P2.1                                    */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_BOARD_UART_PINS_INIT() do { P2SEL1 |= BIT0 | BIT1; P2SEL0 &= ~(BIT0 | BIT1); } while(0)
+
+/** UART baud-rate config: 9600 baud from 8 MHz SMCLK (oversampling). */
+#define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
+#define TIKU_BOARD_UART_BRW         52
+#define TIKU_BOARD_UART_MCTLW       ((0x49 << 8) | UCOS16 | (0x01 << 4))
+
+/*---------------------------------------------------------------------------*/
 /* Button S1 - P4.5 (Active low)                                             */
 /*---------------------------------------------------------------------------*/
 

@@ -28,12 +28,11 @@
 /* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
-#include <stdio.h>
-
 #include "tiku_boot.h"
 #include "kernel/cpu/tiku_common.h"
 #include "kernel/timers/tiku_clock.h"
 #include "kernel/scheduler/tiku_sched.h"
+#include "arch/msp430/tiku_uart_arch.h"
 
 
 /*---------------------------------------------------------------------------*/
@@ -85,41 +84,50 @@ tiku_cpu_full_init(unsigned int cpu_freq)
 
     /* CPU initialization stage */
     current_boot_stage = TIKU_BOOT_STAGE_CPU;
+    MAIN_PRINTF("Boot: CPU init\n");
 
     result = tiku_boot_init_cpu(cpu_freq);
     if (result != TIKU_BOOT_SUCCESS) {
         return result;
     }
+    MAIN_PRINTF("Boot: CPU done\n");
 
     /* Memory initialization stage */
     current_boot_stage = TIKU_BOOT_STAGE_MEMORY;
+    MAIN_PRINTF("Boot: Memory init\n");
 
     result = tiku_boot_init_memory();
     if (result != TIKU_BOOT_SUCCESS) {
         return result;
     }
-    
+    MAIN_PRINTF("Boot: Memory done\n");
+
     /* Peripheral initialization stage */
     current_boot_stage = TIKU_BOOT_STAGE_PERIPHERALS;
+    MAIN_PRINTF("Boot: Peripherals init\n");
 
     result = tiku_boot_init_peripherals();
     if (result != TIKU_BOOT_SUCCESS) {
         return result;
     }
-    
+    MAIN_PRINTF("Boot: Peripherals done\n");
+
     /* System services initialization stage */
     current_boot_stage = TIKU_BOOT_STAGE_SERVICES;
-    
+    MAIN_PRINTF("Boot: Services init\n");
+
     result = tiku_boot_init_services();
     if (result != TIKU_BOOT_SUCCESS) {
         return result;
     }
-    
+    MAIN_PRINTF("Boot: Services done\n");
+
     /* Mark boot as complete */
     current_boot_stage = TIKU_BOOT_STAGE_COMPLETE;
 
     boot_complete = 1;
-    
+    MAIN_PRINTF("Boot: complete\n");
+
     return TIKU_BOOT_SUCCESS;
 }
 
@@ -187,6 +195,10 @@ tiku_boot_init_memory(void)
 static int
 tiku_boot_init_peripherals(void)
 {
+    /* UART must be initialized before clock so printf is available
+     * as early as possible (GPIO is already unlocked by init_cpu). */
+    tiku_uart_init();
+
     /* System clock must be up before timers or scheduler */
     tiku_clock_init();
 

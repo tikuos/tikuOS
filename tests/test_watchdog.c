@@ -22,7 +22,7 @@
  */
 
 #include "test_watchdog.h"
-
+#include <arch/msp430/tiku_compiler.h>
 
 #ifdef PLATFORM_MSP430
 
@@ -42,8 +42,7 @@
  static volatile unsigned int interval_isr_count = 0;
  
  /* Watchdog interval timer ISR (if using interval mode) */
- #pragma vector = WDT_VECTOR
-__interrupt void WDT_ISR(void)
+TIKU_ISR(WDT_VECTOR, WDT_ISR)
  {
     interval_isr_count++;
 

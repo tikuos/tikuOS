@@ -34,6 +34,7 @@
 
 #include <tiku.h>
 #include "tiku_htimer_arch.h"
+#include <arch/msp430/tiku_compiler.h>
 #include <msp430.h>
 #include <stdio.h>
 
@@ -41,8 +42,7 @@
 /* INTERRUPT HANDLER                                                         */
 /*---------------------------------------------------------------------------*/
 
-#pragma vector=TIMER1_A0_VECTOR
-__interrupt void tiku_htimer_isr(void)
+TIKU_ISR(TIMER1_A0_VECTOR, tiku_htimer_isr)
 {
     HTIMER_ARCH_PRINTF("Timer interrupt fired at %u\n",
                        tiku_htimer_arch_now());
@@ -86,8 +86,22 @@ void tiku_htimer_arch_configure_aclk(void)
 
     HTIMER_ARCH_PRINTF("Configuring ACLK clock source\n");
 
+#if TIKU_DEVICE_CS_HAS_KEY
     CSCTL0_H = CSKEY_H;
+#endif
 
+#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
+    /* FR2433: ACLK source is in CSCTL4 (SELA bit) */
+    #if TIKU_ACLK_CONFIG_SOURCE == TIKU_ACLK_SOURCE_VLOCLK
+        /* FR2433 ACLK doesn't support VLO directly; use REFOCLK */
+        CSCTL4 = (CSCTL4 & ~SELA__REFOCLK) | SELA__REFOCLK;
+        HTIMER_ARCH_PRINTF("ACLK source: REFOCLK (FR2433 fallback)\n");
+    #else
+        CSCTL4 = (CSCTL4 & ~SELA__REFOCLK) | SELA__REFOCLK;
+        HTIMER_ARCH_PRINTF("ACLK source: REFOCLK (default)\n");
+    #endif
+#else
+    /* FR5969/FR5994: ACLK source is in CSCTL2 */
     #if TIKU_ACLK_CONFIG_SOURCE == TIKU_ACLK_SOURCE_VLOCLK
         CSCTL2 = (CSCTL2 & ~SELA_7) | SELA__VLOCLK;
         HTIMER_ARCH_PRINTF("ACLK source: VLOCLK (~10kHz)\n");
@@ -95,8 +109,11 @@ void tiku_htimer_arch_configure_aclk(void)
         CSCTL2 = (CSCTL2 & ~SELA_7) | SELA__VLOCLK;
         HTIMER_ARCH_PRINTF("ACLK source: VLOCLK (default)\n");
     #endif
+#endif
 
+#if TIKU_DEVICE_CS_HAS_KEY
     CSCTL0_H = 0;
+#endif
 
 #endif /* TIKU_HTIMER_CLOCK_SOURCE == TIKU_HTIMER_SOURCE_ACLK */
 }

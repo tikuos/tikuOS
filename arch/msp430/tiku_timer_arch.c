@@ -23,9 +23,9 @@
 
 /**
  * @file tiku_timer_arch.c
- * @brief MSP430FR5969 architecture-specific clock implementation
+ * @brief MSP430 architecture-specific clock implementation
  *
- * System clock using Timer A0 on the MSP430FR5969. Provides tick
+ * System clock using Timer A0 on MSP430. Provides tick
  * counting, delays, and time measurement functionality.
  */
 
@@ -35,6 +35,7 @@
 
 #include "tiku_timer_arch.h"
 #include <tiku.h>
+#include <arch/msp430/tiku_compiler.h>
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
@@ -42,9 +43,21 @@
 /*---------------------------------------------------------------------------*/
 
 #if DEBUG_CLOCK_ARCH
-#define CLOCK_PRINTF(...) printf("[CLOCK_ARCH] " __VA_ARGS__)
+#define CLOCK_PRINTF(...) TIKU_PRINTF("[CLOCK_ARCH] " __VA_ARGS__)
 #else
 #define CLOCK_PRINTF(...)
+#endif
+
+/*---------------------------------------------------------------------------*/
+/* CS MODULE ABSTRACTION                                                     */
+/*---------------------------------------------------------------------------*/
+
+#if TIKU_DEVICE_CS_HAS_KEY
+#define TIKU_CS_UNLOCK()    do { CSCTL0_H = CSKEY_H; } while(0)
+#define TIKU_CS_LOCK()      do { CSCTL0_H = 0; } while(0)
+#else
+#define TIKU_CS_UNLOCK()    do { } while(0)
+#define TIKU_CS_LOCK()      do { } while(0)
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -93,37 +106,55 @@ tiku_arch_read_tar(void)
 }
 
 /**
- * @brief Configure XT1 crystal oscillator (32.768 kHz)
+ * @brief Configure clock source for Timer A0.
  *
- * The MSP430FR5969 LaunchPad has a 32.768 kHz crystal connected
- * to PJ.4 (XIN) and PJ.5 (XOUT).
+ * On devices with LFXT (FR5969, FR5994): uses 32.768 kHz crystal on ACLK.
+ * On devices without LFXT (FR2433): uses REFOCLK (32.768 kHz internal) on ACLK.
  */
-static void tiku_configure_xt1_crystal(void)
+static void tiku_configure_aclk_source(void)
 {
+#if TIKU_DEVICE_HAS_LFXT
+    /* Configure XT1 crystal oscillator (32.768 kHz) */
     TIKU_DEVICE_LFXT_PSEL_REG |= TIKU_DEVICE_LFXT_PSEL_BITS;
 
-    CSCTL0_H = CSKEY >> 8;
+    TIKU_CS_UNLOCK();
 
     CSCTL4 &= ~LFXTOFF;
+    CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_3; /* Max drive for startup */
 
     unsigned int xt1_timeout = 0;
     do {
         CSCTL5 &= ~LFXTOFFG;
         SFRIFG1 &= ~OFIFG;
+        __delay_cycles(10000); /* Give crystal time to settle */
         if (++xt1_timeout > 50000U) {
             CLOCK_PRINTF("XT1 fault timeout, falling back to VLO\n");
             CSCTL4 |= LFXTOFF;
             CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
-            CSCTL0_H = 0;
+            TIKU_CS_LOCK();
             return;
         }
-    } while (SFRIFG1 & OFIFG);
+    } while (CSCTL5 & LFXTOFFG);
+
+    CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_0; /* Reduce drive once stable */
 
     CSCTL2 = SELA__LFXTCLK | SELS__DCOCLK | SELM__DCOCLK;
 
-    CSCTL0_H = 0;
+    TIKU_CS_LOCK();
 
     CLOCK_PRINTF("XT1 crystal configured (32.768 kHz)\n");
+
+#else
+    /* No external crystal — use REFOCLK (32.768 kHz internal reference)
+     * for ACLK on FR2433. MCLK+SMCLK stay on DCOCLKDIV. */
+    TIKU_CS_UNLOCK();
+
+    CSCTL4 = SELA__REFOCLK | SELMS__DCOCLKDIV;
+
+    TIKU_CS_LOCK();
+
+    CLOCK_PRINTF("REFOCLK configured for ACLK (32.768 kHz internal)\n");
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
@@ -131,8 +162,7 @@ static void tiku_configure_xt1_crystal(void)
 /*---------------------------------------------------------------------------*/
 
 /** Timer A0 CCR0 interrupt service routine */
-#pragma vector=TIMER0_A0_VECTOR
-__interrupt void timer0_a0_isr(void)
+TIKU_ISR(TIMER0_A0_VECTOR, timer0_a0_isr)
 {
     tiku_arch_last_tar = TA0R;
 
@@ -142,7 +172,7 @@ __interrupt void timer0_a0_isr(void)
         ++tiku_arch_seconds;
     }
 
-    tiku_timer_request_poll();    
+    tiku_timer_request_poll();
 
     __bic_SR_register_on_exit(LPM3_bits);
 }
@@ -155,8 +185,8 @@ void tiku_clock_arch_init(void)
 {
     CLOCK_PRINTF("Initializing system clock architecture\n");
 
-    CLOCK_PRINTF("Configuring XT1 crystal oscillator\n");
-    tiku_configure_xt1_crystal();
+    CLOCK_PRINTF("Configuring ACLK source\n");
+    tiku_configure_aclk_source();
 
     __disable_interrupt();
 

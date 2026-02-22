@@ -70,7 +70,9 @@
 /* CLOCK CAPABILITIES                                                        */
 /*---------------------------------------------------------------------------*/
 
+#define TIKU_DEVICE_HAS_LFXT        1
 #define TIKU_DEVICE_HAS_HFXT        1
+#define TIKU_DEVICE_CS_HAS_KEY      1
 #define TIKU_DEVICE_MAX_STABLE_MHZ  8
 
 /*---------------------------------------------------------------------------*/

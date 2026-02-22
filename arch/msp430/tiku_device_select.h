@@ -45,6 +45,11 @@
 #include <arch/msp430/devices/tiku_device_fr5994.h>
 #include <arch/msp430/boards/tiku_board_fr5994_launchpad.h>
 
+#elif defined(TIKU_DEVICE_MSP430FR2433)
+
+#include <arch/msp430/devices/tiku_device_fr2433.h>
+#include <arch/msp430/boards/tiku_board_fr2433_launchpad.h>
+
 #else
 
 #error "No TikuOS device selected. Define TIKU_DEVICE_MSP430FR5969 (or another supported device) in tiku.h"

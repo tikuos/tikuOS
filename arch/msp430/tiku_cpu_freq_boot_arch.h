@@ -463,4 +463,9 @@ void tiku_cpu_boot_msp430_global_interrupts_disable(void);
  */
 void tiku_cpu_boot_msp430_reset(void);
 
+/**
+ * @brief Initialize CPU boot sequence (GPIO pins, LOCKLPM5, interrupts)
+ */
+void tiku_cpu_boot_msp430_init(void);
+
 #endif /* CPU_MSP430_FREQ_ARCH_H_ */
