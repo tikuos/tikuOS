@@ -65,7 +65,6 @@ TIKU_PROCESS_THREAD(blink_process, ev, data)
         /* Block until the timer fires */
         TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
 
-        printf("Led toggled\n");
         /* Toggle the LED */
         tiku_common_led1_toggle();
 

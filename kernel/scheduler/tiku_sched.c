@@ -60,15 +60,20 @@ void tiku_sched_init(void)
     sched_state = TIKU_SCHED_RUNNING;
     idle_hook = (tiku_sched_idle_hook_t)0;
 
+    SCHED_PRINTF("Init: process subsystem\n");
     tiku_process_init();
+    SCHED_PRINTF("Init: hardware timer\n");
     tiku_htimer_init();
+    SCHED_PRINTF("Init: software timers\n");
     tiku_timer_init();
+    SCHED_PRINTF("Init complete\n");
 }
 
 /*---------------------------------------------------------------------------*/
 
 void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
 {
+    SCHED_PRINTF("Started: %s\n", p->name);
     tiku_process_start(p, data);
 }
 
@@ -109,6 +114,8 @@ uint8_t tiku_sched_run_once(void)
  */
 void tiku_sched_loop(void)
 {
+    SCHED_PRINTF("Entering scheduler loop\n");
+
 #if TIKU_AUTOSTART_ENABLE
     tiku_autostart_start(tiku_autostart_processes);
 #endif
@@ -144,6 +151,7 @@ void tiku_sched_loop(void)
 
 void tiku_sched_stop(void)
 {
+    SCHED_PRINTF("Stopped\n");
     sched_state = TIKU_SCHED_STOPPED;
 }
 

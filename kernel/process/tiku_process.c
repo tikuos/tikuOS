@@ -30,6 +30,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_process.h"
+#include <arch/msp430/tiku_compiler.h>
 #include <hal/tiku_cpu.h>
 #include <stddef.h>
 
@@ -67,8 +68,7 @@ struct tiku_process *tiku_current_process = NULL;
  * TIKU_AUTOSTART_PROCESSES(). If no override is provided,
  * the scheduler starts with no autostart processes.
  */
-#pragma WEAK(tiku_autostart_processes)
-struct tiku_process * const tiku_autostart_processes[] = {NULL};
+TIKU_WEAK struct tiku_process * const tiku_autostart_processes[] = {NULL};
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE FUNCTION PROTOTYPES                                               */
@@ -93,6 +93,7 @@ void tiku_process_init(void)
     tiku_current_process = NULL;
     q_head = 0;
     q_len = 0;
+    PROCESS_PRINTF("Init complete\n");
 }
 
 /**
@@ -119,6 +120,8 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
 
     tiku_atomic_exit();
 
+    PROCESS_PRINTF("Started: %s\n", p->name);
+
     /* Ensure INIT is delivered even if the queue is full. */
     if (!tiku_process_post(p, TIKU_EVENT_INIT, data)) {
         call_process(p, TIKU_EVENT_INIT, data);
@@ -137,6 +140,8 @@ void tiku_process_exit(struct tiku_process *p)
     if (!p->is_running) {
         return;
     }
+
+    PROCESS_PRINTF("Exited: %s\n", p->name);
 
     /* Protect list modification — same rationale as tiku_process_start */
     tiku_atomic_enter();
@@ -287,6 +292,7 @@ void tiku_autostart_start(struct tiku_process * const processes[])
     int i;
 
     for (i = 0; processes[i] != NULL; i++) {
+        PROCESS_PRINTF("Autostart: %s\n", processes[i]->name);
         tiku_process_start(processes[i], NULL);
     }
 }

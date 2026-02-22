@@ -31,14 +31,23 @@
 /* PLATFORM CONFIGURATION                                                   */
 /*---------------------------------------------------------------------------*/
 
+#ifndef PLATFORM_MSP430
 #define PLATFORM_MSP430 1
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* DEVICE SELECTION                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** Select the target device. Only one TIKU_DEVICE_* should be defined. */
-#define TIKU_DEVICE_MSP430FR5969 1
+/**
+ * Device selection: passed via -DTIKU_DEVICE_MSP430FRxxxx=1 from the Makefile.
+ * Default to FR2433 if nothing is defined (e.g. compiling without the Makefile).
+ */
+#if !defined(TIKU_DEVICE_MSP430FR5969) && \
+    !defined(TIKU_DEVICE_MSP430FR5994) && \
+    !defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_DEVICE_MSP430FR2433 1
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* SYSTEM CONFIGURATION (before includes to avoid circular dependencies)    */
@@ -51,10 +60,26 @@
 /* SYSTEM INCLUDES                                                          */
 /*---------------------------------------------------------------------------*/
 
-#include <msp430.h> /* MSP430 specific header file */
-#include <stdio.h>  /* Standard I/O functions */
+#include <msp430.h>   /* MSP430 specific header file */
+#include <stddef.h>   /* NULL */
 
 #include <arch/msp430/tiku_device_select.h> /* Device + board headers */
+
+/*---------------------------------------------------------------------------*/
+/* COMPILER-AWARE PRINTF                                                     */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * Under CCS: printf() routes through CIO semihosting (JTAG debugger).
+ * Under GCC: tiku_uart_printf() routes through eUSCI_A0 backchannel UART.
+ */
+#if defined(__TI_COMPILER_VERSION__)
+#include <stdio.h>
+#define TIKU_PRINTF(...) printf(__VA_ARGS__)
+#else
+#include <arch/msp430/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* TIKU OS INCLUDES                                                         */
@@ -98,6 +123,8 @@
  * - CLOCK_PRINTF()      - Clock architecture debug
  * - TEST_PRINTF()       - Test module debug
  * - HTIMER_ARCH_PRINTF()- Hardware timer arch debug
+ * - SCHED_PRINTF()      - Scheduler debug
+ * - WDT_PRINTF()        - Watchdog timer debug
  *
  * All debug messages are disabled by default (flags set to 0).
  * Set any flag to 1 to enable debug output for that subsystem.
@@ -105,7 +132,7 @@
  */
 
 /** Enable debug printing for process management */
-#define DEBUG_PROCESS 0
+#define DEBUG_PROCESS 1
 
 /** Enable debug printing for hardware timer */
 #define DEBUG_HTIMER 0
@@ -114,16 +141,22 @@
 #define DEBUG_CPU_FREQ 0
 
 /** Enable debug printing for main application */
-#define DEBUG_MAIN 0
+#define DEBUG_MAIN 1
 
 /** Enable debug printing for timer subsystem */
-#define DEBUG_TIMER 0
+#define DEBUG_TIMER 1
 
 /** Enable debug printing for clock architecture */
 #define DEBUG_CLOCK_ARCH 0
 
 /** Enable debug printing for test modules */
 #define DEBUG_TESTS 0
+
+/** Enable debug printing for scheduler */
+#define DEBUG_SCHED 0
+
+/** Enable debug printing for watchdog timer */
+#define DEBUG_WDT 0
 
 /** @} */ /* End of TIKU_DEBUG_CONFIG group */
 
@@ -138,57 +171,69 @@
  */
 
 #if DEBUG_MAIN
-#define MAIN_PRINTF(...) printf("[MAIN] " __VA_ARGS__)
+#define MAIN_PRINTF(...) TIKU_PRINTF("[MAIN] " __VA_ARGS__)
 #else
 #define MAIN_PRINTF(...)
 #endif
 
 #if DEBUG_PROCESS
-#define PROCESS_PRINTF(...) printf("[PROCESS] " __VA_ARGS__)
+#define PROCESS_PRINTF(...) TIKU_PRINTF("[PROCESS] " __VA_ARGS__)
 #else
 #define PROCESS_PRINTF(...)
 #endif
 
 #if DEBUG_HTIMER
-#define HTIMER_PRINTF(...) printf("[HTIMER] " __VA_ARGS__)
+#define HTIMER_PRINTF(...) TIKU_PRINTF("[HTIMER] " __VA_ARGS__)
 #else
 #define HTIMER_PRINTF(...)
 #endif
 
 #if DEBUG_TIMER
-#define TIMER_PRINTF(...) printf("[TIMER] " __VA_ARGS__)
+#define TIMER_PRINTF(...) TIKU_PRINTF("[TIMER] " __VA_ARGS__)
 #else
 #define TIMER_PRINTF(...)
 #endif
 
 #if DEBUG_CPU_FREQ
-#define CPU_FREQ_PRINTF(...) printf("[CPU_FREQ] " __VA_ARGS__)
+#define CPU_FREQ_PRINTF(...) TIKU_PRINTF("[CPU_FREQ] " __VA_ARGS__)
 #else
 #define CPU_FREQ_PRINTF(...)
 #endif
 
 #if DEBUG_CLOCK_ARCH
-#define CLOCK_ARCH_PRINTF(...) printf("[CLOCK_ARCH] " __VA_ARGS__)
+#define CLOCK_ARCH_PRINTF(...) TIKU_PRINTF("[CLOCK_ARCH] " __VA_ARGS__)
 #else
 #define CLOCK_ARCH_PRINTF(...)
 #endif
 
 #if DEBUG_TESTS
-#define TEST_PRINTF(...) printf("[TEST] " __VA_ARGS__)
+#define TEST_PRINTF(...) TIKU_PRINTF("[TEST] " __VA_ARGS__)
 #else
 #define TEST_PRINTF(...)
 #endif
 
 #if DEBUG_HTIMER
-#define HTIMER_ARCH_PRINTF(...) printf("[HTIMER_ARCH] " __VA_ARGS__)
+#define HTIMER_ARCH_PRINTF(...) TIKU_PRINTF("[HTIMER_ARCH] " __VA_ARGS__)
 #else
 #define HTIMER_ARCH_PRINTF(...)
 #endif
 
 #if DEBUG_AES
-#define AES_PRINTF(...) printf("[AES] " __VA_ARGS__)
+#define AES_PRINTF(...) TIKU_PRINTF("[AES] " __VA_ARGS__)
 #else
 #define AES_PRINTF(...)
+#endif
+
+#if DEBUG_SCHED
+#define SCHED_PRINTF(...) TIKU_PRINTF("[SCHED] " __VA_ARGS__)
+#else
+#define SCHED_PRINTF(...)
+#endif
+
+#if DEBUG_WDT
+#define WDT_PRINTF(...) TIKU_PRINTF("[WDT] " __VA_ARGS__)
+#else
+#define WDT_PRINTF(...)
 #endif
 
 /** @} */ /* End of TIKU_DEBUG_MACROS group */

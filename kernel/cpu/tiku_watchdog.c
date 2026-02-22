@@ -52,6 +52,7 @@ int tiku_watchdog_kick_on_start = 1;  /* Good practice to kick on start */
 */
 void tiku_watchdog_init(void)
 {
+    WDT_PRINTF("Init\n");
 
 #ifdef PLATFORM_MSP430
     tiku_cpu_msp430_watchdog_on_arch(tiku_watchdog_clk, tiku_watchdog_interval);
@@ -70,6 +71,7 @@ void tiku_watchdog_init(void)
 */
 void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk, tiku_wdt_interval_t interval, int start_held, int kick_on_start)
 {
+    WDT_PRINTF("Configured: mode=%u clk=%u\n", mode, clk);
     tiku_watchdog_mode = mode;
     tiku_watchdog_clk = clk;
     tiku_watchdog_interval = interval;
@@ -153,6 +155,7 @@ void tiku_watchdog_resume_with_kick(void)
 */
 void tiku_watchdog_off(void)
 {
+    WDT_PRINTF("Disabled\n");
 
 #ifdef PLATFORM_MSP430
     tiku_cpu_msp430_watchdog_off_arch();

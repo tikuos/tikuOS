@@ -52,10 +52,9 @@ int main(void) {
   /* Step 1: Disable watchdog immediately (before any other init) */
   tiku_watchdog_off();
 
-  MAIN_PRINTF("TikuOS starting up...\n");
-
   /* Step 2: Full system boot sequence
    *   - CPU frequency configuration
+   *   - UART init (enables printf under GCC; no-op under CCS)
    *   - Clock initialization
    *   - Process subsystem, hardware timer, software timers (via scheduler)
    */
@@ -64,6 +63,8 @@ int main(void) {
     MAIN_PRINTF("ERROR: Boot failed at stage %d\n", ret);
     while (1) { /* halt */ }
   }
+
+  MAIN_PRINTF("TikuOS starting up...\n");
 
   MAIN_PRINTF("Boot complete\n");
 
