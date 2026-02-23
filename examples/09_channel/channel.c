@@ -40,7 +40,7 @@
  *   LED2 = P4.6  -- toggled by producer for every message sent
  *
  * What you learn:
- *   - Initializing a channel with static storage
+ *   - Declaring a type-safe channel with TIKU_CHANNEL_DECLARE
  *   - Putting and getting typed messages
  *   - Combining channels with events to wake a consumer
  *   - Querying channel state (empty / free slots)
@@ -61,14 +61,9 @@ struct sensor_msg {
 };
 
 /*--------------------------------------------------------------------------*/
-/* Channel storage                                                           */
+/* Channel declaration (type-safe)                                           */
 /*--------------------------------------------------------------------------*/
-
-/** Number of messages the channel can buffer */
-#define CHAN_CAPACITY   4
-
-static struct sensor_msg chan_buf[CHAN_CAPACITY];
-static struct tiku_channel sensor_chan;
+TIKU_CHANNEL_DECLARE(sensor_ch, struct sensor_msg, 4);
 
 /*--------------------------------------------------------------------------*/
 /* Custom event                                                              */
@@ -93,11 +88,7 @@ TIKU_PROCESS_THREAD(sensor_proc, ev, data)
     TIKU_PROCESS_BEGIN();
 
     tiku_common_led2_init();
-
-    /* Initialize the channel once at startup */
-    tiku_channel_init(&sensor_chan, chan_buf,
-                      sizeof(struct sensor_msg), CHAN_CAPACITY);
-
+    sensor_ch_init();
     tiku_timer_set_event(&sensor_timer, TIKU_CLOCK_SECOND);
 
     while (1) {
@@ -108,8 +99,8 @@ TIKU_PROCESS_THREAD(sensor_proc, ev, data)
         msg.seq   = seq++;
         msg.value = seq * 10;   /* simulated reading */
 
-        /* Try to put it into the channel */
-        if (tiku_channel_put(&sensor_chan, &msg)) {
+        /* Try to put it into the channel (type-safe) */
+        if (sensor_ch_put(&msg)) {
             /* Notify the consumer that data is available */
             tiku_process_post(&display_proc, EVENT_DATA_READY, NULL);
             tiku_common_led2_toggle();
@@ -137,7 +128,7 @@ TIKU_PROCESS_THREAD(display_proc, ev, data)
 
         /* Drain every pending message in one go */
         struct sensor_msg msg;
-        while (tiku_channel_get(&sensor_chan, &msg)) {
+        while (sensor_ch_get(&msg)) {
             /* Use msg.seq / msg.value here -- e.g., display,
              * threshold check, or logging via UART.          */
             (void)msg;

@@ -268,6 +268,45 @@ uint8_t tiku_process_queue_length(void);
 uint8_t tiku_process_is_running(struct tiku_process *p);
 
 /*---------------------------------------------------------------------------*/
+/* CHANNEL DECLARATION MACRO                                                 */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @def TIKU_CHANNEL_DECLARE(name, type, depth)
+ * @brief Declare a channel with type-safe inline accessors
+ *
+ * Generates static storage, a channel instance, and typed
+ * init / put / get helpers.  The compiler will reject pointer
+ * type mismatches at call sites.
+ *
+ * @param name  Identifier prefix (used for buffer, channel, helpers)
+ * @param type  Message type (e.g., struct sensor_msg)
+ * @param depth Maximum number of buffered messages
+ *
+ * Example:
+ * @code
+ *   TIKU_CHANNEL_DECLARE(sensor_ch, struct sensor_msg, 4);
+ *
+ *   sensor_ch_init();
+ *   sensor_ch_put(&msg);
+ *   sensor_ch_get(&msg);
+ * @endcode
+ */
+#define TIKU_CHANNEL_DECLARE(name, type, depth)                             \
+    static type name##_buf[depth];                                          \
+    static struct tiku_channel name;                                        \
+    static inline void name##_init(void) {                                  \
+        tiku_channel_init(&name, name##_buf,                                \
+                          sizeof(type), (depth));                           \
+    }                                                                       \
+    static inline uint8_t name##_put(const type *m) {                       \
+        return tiku_channel_put(&name, m);                                  \
+    }                                                                       \
+    static inline uint8_t name##_get(type *m) {                             \
+        return tiku_channel_get(&name, m);                                  \
+    }
+
+/*---------------------------------------------------------------------------*/
 /* CHANNEL PROTOTYPES                                                        */
 /*---------------------------------------------------------------------------*/
 
