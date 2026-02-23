@@ -104,9 +104,12 @@ TIKU_PROCESS_THREAD(sensor_proc, ev, data)
             /* Notify the consumer that data is available */
             tiku_process_post(&display_proc, EVENT_DATA_READY, NULL);
             tiku_common_led2_toggle();
+            TIKU_PRINTF("[Sensor] sent seq=%u val=%u\n",
+                        msg.seq, msg.value);
+        } else {
+            TIKU_PRINTF("[Sensor] channel full, dropped seq=%u\n",
+                        msg.seq);
         }
-        /* If channel is full the message is simply dropped;
-         * the consumer will catch up on the next drain cycle. */
 
         tiku_timer_reset(&sensor_timer);
     }
@@ -129,10 +132,8 @@ TIKU_PROCESS_THREAD(display_proc, ev, data)
         /* Drain every pending message in one go */
         struct sensor_msg msg;
         while (sensor_ch_get(&msg)) {
-            /* Use msg.seq / msg.value here -- e.g., display,
-             * threshold check, or logging via UART.          */
-            (void)msg;
-
+            TIKU_PRINTF("[Display] recv seq=%u val=%u\n",
+                        msg.seq, msg.value);
             tiku_common_led1_toggle();
         }
     }

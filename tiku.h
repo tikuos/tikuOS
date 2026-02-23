@@ -141,7 +141,7 @@
 #define DEBUG_CPU_FREQ 0
 
 /** Enable debug printing for main application */
-#define DEBUG_MAIN 0
+#define DEBUG_MAIN 1
 
 /** Enable debug printing for timer subsystem */
 #define DEBUG_TIMER 0

@@ -94,6 +94,7 @@ SRCS += examples/05_state_machine/state_machine.c
 SRCS += examples/06_callback_timer/callback_timer.c
 SRCS += examples/07_broadcast/broadcast.c
 SRCS += examples/08_timeout/timeout.c
+SRCS += examples/09_channel/channel.c
 
 # Object files in build directory
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
