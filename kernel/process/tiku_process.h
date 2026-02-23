@@ -230,6 +230,29 @@ uint8_t tiku_process_run(void);
  */
 void tiku_process_poll(struct tiku_process *p);
 
+/**
+* @brief checks if queue has space
+* @return number of free slots in the queue
+*/
+uint8_t tiku_process_queue_space(void);
+/**
+* @brief checks if queue is full
+* @return 1 if queue is full, 0 otherwise   
+*/
+uint8_t tiku_process_queue_full(void);
+/**
+* @brief checks if queue is empty
+* @return 1 if queue is empty, 0 otherwise   
+*/
+uint8_t tiku_process_queue_empty(void);
+/**
+* @brief gets the number of events in the queue
+* @return number of events in the queue
+*/
+uint8_t tiku_process_queue_length(void);
+
+
+
 /*---------------------------------------------------------------------------*/
 /* GLOBAL VARIABLES                                                          */
 /*---------------------------------------------------------------------------*/
