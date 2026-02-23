@@ -91,6 +91,24 @@ typedef struct tiku_process {
 } tiku_process_t;
 
 /*---------------------------------------------------------------------------*/
+/* CHANNEL STRUCTURE                                                         */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Channel control block
+ *
+ * Provides a typed, fixed-size message queue for inter-process
+ * communication. Storage is caller-provided (statically allocated).
+ */
+typedef struct tiku_channel {
+    uint8_t *buf;               /**< Pointer to message storage */
+    uint8_t  msg_size;          /**< Size of each message in bytes */
+    uint8_t  capacity;          /**< Maximum number of messages */
+    volatile uint8_t head;      /**< Index of oldest message */
+    volatile uint8_t count;     /**< Number of messages in channel */
+} tiku_channel_t;
+
+/*---------------------------------------------------------------------------*/
 /* PROCESS DECLARATION MACROS                                                */
 /*---------------------------------------------------------------------------*/
 
@@ -230,34 +248,73 @@ uint8_t tiku_process_run(void);
  */
 void tiku_process_poll(struct tiku_process *p);
 
-/**
-* @brief checks if queue has space
-* @return number of free slots in the queue
-*/
+/*---------------------------------------------------------------------------*/
+/* QUEUE QUERY PROTOTYPES                                                    */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Return the number of free slots in the event queue */
 uint8_t tiku_process_queue_space(void);
-/**
-* @brief checks if queue is full
-* @return 1 if queue is full, 0 otherwise   
-*/
+
+/** @brief Check if the event queue is full */
 uint8_t tiku_process_queue_full(void);
-/**
-* @brief checks if queue is empty
-* @return 1 if queue is empty, 0 otherwise   
-*/
+
+/** @brief Check if the event queue is empty */
 uint8_t tiku_process_queue_empty(void);
-/**
-* @brief gets the number of events in the queue
-* @return number of events in the queue
-*/
+
+/** @brief Return the number of pending events in the queue */
 uint8_t tiku_process_queue_length(void);
 
-/**
-* @brief checks if process is running
-* @param p Process to check
-* @return 1 if process is running, 0 otherwise
-*/
-uint8_t tiku_process_is_running(struct tiku_process *);
+/** @brief Check if a process is running */
+uint8_t tiku_process_is_running(struct tiku_process *p);
 
+/*---------------------------------------------------------------------------*/
+/* CHANNEL PROTOTYPES                                                        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize a channel
+ *
+ * @param ch       Channel to initialize
+ * @param buf      Pointer to caller-provided storage
+ * @param msg_size Size of each message in bytes
+ * @param capacity Maximum number of messages
+ */
+void tiku_channel_init(struct tiku_channel *ch, void *buf,
+                       uint8_t msg_size, uint8_t capacity);
+
+/**
+ * @brief Put a message into a channel
+ *
+ * @param ch  Channel to put message into
+ * @param msg Pointer to message data
+ * @return 1 if stored, 0 if channel is full
+ */
+uint8_t tiku_channel_put(struct tiku_channel *ch, const void *msg);
+
+/**
+ * @brief Get a message from a channel
+ *
+ * @param ch  Channel to read from
+ * @param out Pointer to destination buffer
+ * @return 1 if retrieved, 0 if channel is empty
+ */
+uint8_t tiku_channel_get(struct tiku_channel *ch, void *out);
+
+/**
+ * @brief Check if a channel is empty
+ *
+ * @param ch Channel to check
+ * @return 1 if empty, 0 otherwise
+ */
+uint8_t tiku_channel_is_empty(struct tiku_channel *ch);
+
+/**
+ * @brief Return the number of free slots in a channel
+ *
+ * @param ch Channel to check
+ * @return Number of free message slots
+ */
+uint8_t tiku_channel_free(struct tiku_channel *ch);
 
 /*---------------------------------------------------------------------------*/
 /* GLOBAL VARIABLES                                                          */

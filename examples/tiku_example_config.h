@@ -52,7 +52,8 @@
 #define TIKU_EXAMPLE_STATE_MACHINE   0  /**< 05: Event-driven state machine */
 #define TIKU_EXAMPLE_CALLBACK_TIMER  0  /**< 06: Callback-mode timers */
 #define TIKU_EXAMPLE_BROADCAST       0  /**< 07: Broadcast events */
-#define TIKU_EXAMPLE_TIMEOUT         1  /**< 08: Timeout pattern */
+#define TIKU_EXAMPLE_TIMEOUT         0  /**< 08: Timeout pattern */
+#define TIKU_EXAMPLE_CHANNEL         1  /**< 09: Channel message passing */
 
 /** @} */ /* End of TIKU_EXAMPLES group */
 
