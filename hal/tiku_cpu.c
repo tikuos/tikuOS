@@ -37,37 +37,46 @@
 #endif
 
 /*
- * Atomic section nesting depth.
+ * Atomic section nesting depth and saved GIE state.
  *
- * A simple disable/enable pair has a subtle issue: if tiku_atomic_exit()
- * is called from ISR context, __enable_interrupt() would briefly re-enable
- * GIE before the ISR returns. On MSP430 this is safe for TikuOS because
- * the Timer A0 CCR0 flag is auto-cleared on ISR entry, and no other ISR
- * source would cause re-entrancy issues.
+ * On the outermost tiku_atomic_enter() (nesting == 0) we snapshot
+ * the current GIE bit BEFORE disabling interrupts.  On the matching
+ * outermost tiku_atomic_exit() we only re-enable interrupts if GIE
+ * was originally set.  This prevents atomic sections from
+ * unconditionally enabling interrupts as a side-effect.
  *
- * A save/restore approach with a static variable is NOT safe because
- * the ISR can overwrite the saved SR between __get_interrupt_state()
- * and __disable_interrupt() in the main context, permanently disabling
- * interrupts. The nesting counter avoids shared state between contexts.
+ * ISR safety: if an ISR fires between __get_interrupt_state() and
+ * __disable_interrupt() during the outermost enter, the ISR runs its
+ * own balanced enter/exit pair (which sees nesting == 0, saves
+ * GIE == 0 since the hardware clears GIE on ISR entry, and does not
+ * re-enable on exit).  When the ISR returns via RETI, GIE is
+ * restored from the stacked SR, and the main context continues with
+ * its local `sr` still valid on the stack.
  */
 static volatile unsigned int tiku_atomic_nesting = 0;
+static volatile unsigned int tiku_atomic_gie_saved = 0;
 
 /*
- * Enter atomic section: disable interrupts and track nesting
+ * Enter atomic section: save GIE on outermost call, then disable
  */
 void tiku_atomic_enter() {
 
+  unsigned int sr = __get_interrupt_state();
   __disable_interrupt();
+  if (tiku_atomic_nesting == 0) {
+    tiku_atomic_gie_saved = (sr & GIE) != 0;
+  }
   tiku_atomic_nesting++;
 
 }
 
 /*
- * Exit atomic section: re-enable interrupts only when fully unnested
+ * Exit atomic section: restore GIE only when fully unnested and
+ * only if it was set before the outermost enter.
  */
 void tiku_atomic_exit() {
 
-  if (--tiku_atomic_nesting == 0) {
+  if (--tiku_atomic_nesting == 0 && tiku_atomic_gie_saved) {
     __enable_interrupt();
   }
 

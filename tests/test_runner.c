@@ -166,6 +166,11 @@ static void test_run_process(void)
     tiku_common_delay_ms(TEST_DELAY_MS);
 #endif
 
+#if TEST_PROCESS_QUEUE
+    test_process_queue_query();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
     MAIN_PRINTF("Process/threading tests completed\n");
 #endif
 }
