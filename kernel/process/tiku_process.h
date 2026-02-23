@@ -251,6 +251,12 @@ uint8_t tiku_process_queue_empty(void);
 */
 uint8_t tiku_process_queue_length(void);
 
+/**
+* @brief checks if process is running
+* @param p Process to check
+* @return 1 if process is running, 0 otherwise
+*/
+uint8_t tiku_process_is_running(struct tiku_process *);
 
 
 /*---------------------------------------------------------------------------*/
