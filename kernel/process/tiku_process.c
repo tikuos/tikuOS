@@ -41,9 +41,9 @@
 
 /** @brief Single entry in the event queue */
 struct event_item {
-    tiku_event_t ev;
     tiku_event_data_t data;
     struct tiku_process *p;
+    tiku_event_t ev;
 };
 
 /*---------------------------------------------------------------------------*/
@@ -224,8 +224,9 @@ uint8_t tiku_process_run(void)
 
     /* Dispatch outside atomic section to avoid long interrupt latency */
     if (receiver == TIKU_PROCESS_BROADCAST) {
-        struct tiku_process *p;
-        for (p = tiku_list_head; p != NULL; p = p->next) {
+        struct tiku_process *p, *next;
+        for (p = tiku_list_head; p != NULL; p = next) {
+            next = p->next;
             call_process(p, ev, data);
         }
     } else {
@@ -256,7 +257,7 @@ void tiku_process_poll(struct tiku_process *p)
  * @brief Dispatch an event to a single process
  *
  * Runs the process thread and handles automatic exit when the
- * thread returns PT_EXITED, PT_ENDED, or receives TIKU_EVENT_EXIT.
+ * thread returns PT_EXITED, PT_ENDED, or receives TIKU_EVENT_FORCE_EXIT.
  *
  * @param p    Target process
  * @param ev   Event to deliver
@@ -265,13 +266,14 @@ void tiku_process_poll(struct tiku_process *p)
 static void call_process(struct tiku_process *p, tiku_event_t ev,
                          tiku_event_data_t data)
 {
-    int ret;
+    char ret;
 
     if (p->is_running && p->thread) {
         tiku_current_process = p;
         ret = p->thread(&p->pt, ev, data);
+        tiku_current_process = NULL;
         if (ret == PT_EXITED || ret == PT_ENDED ||
-            ev == TIKU_EVENT_EXIT) {
+            ev == TIKU_EVENT_FORCE_EXIT) {
             tiku_process_exit(p);
         }
     }

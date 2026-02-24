@@ -34,5 +34,8 @@ void test_process_broadcast(void);
 void test_process_poll(void);
 void test_process_queue_query(void);
 void test_process_local_storage(void);
+void test_process_broadcast_exit(void);
+void test_process_graceful_exit(void);
+void test_process_current_cleared(void);
 
 #endif /* TEST_PROCESS_H_ */

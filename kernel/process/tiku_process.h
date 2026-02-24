@@ -55,6 +55,7 @@
 #define TIKU_EVENT_CONTINUE     0x03
 #define TIKU_EVENT_POLL         0x04
 #define TIKU_EVENT_EXITED       0x05
+#define TIKU_EVENT_FORCE_EXIT   0x06
 #define TIKU_EVENT_USER         0x10
 #define TIKU_EVENT_TIMER        0x88
 

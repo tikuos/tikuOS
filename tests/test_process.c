@@ -860,4 +860,345 @@ void test_process_local_storage(void)
 
 #endif /* TEST_PROCESS_LOCAL */
 
+/*---------------------------------------------------------------------------*/
+/* TEST 8: BROADCAST EXIT SAFETY                                             */
+/*---------------------------------------------------------------------------*/
+
+#if TEST_PROCESS_BROADCAST_EXIT
+
+/**
+ * Verifies fix for broadcast list corruption: if a process exits while
+ * the scheduler is iterating the process list during a broadcast, the
+ * remaining processes must still receive the event.
+ *
+ * Setup: three processes [A] -> [B] -> [C].
+ * B exits itself on receiving the broadcast event.
+ * A and C must still receive the event.
+ */
+
+static volatile unsigned int bce_count_a = 0;
+static volatile unsigned int bce_count_b = 0;
+static volatile unsigned int bce_count_c = 0;
+
+TIKU_PROCESS(test_bce_proc_a, "bce_a");
+TIKU_PROCESS(test_bce_proc_b, "bce_b");
+TIKU_PROCESS(test_bce_proc_c, "bce_c");
+
+TIKU_PROCESS_THREAD(test_bce_proc_a, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT();
+
+        if (ev == TEST_EVENT_CUSTOM) {
+            bce_count_a++;
+            TEST_PRINTF("BCE A: received event\n");
+        }
+    }
+
+    TIKU_PROCESS_END();
+}
+
+TIKU_PROCESS_THREAD(test_bce_proc_b, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT();
+
+        if (ev == TEST_EVENT_CUSTOM) {
+            bce_count_b++;
+            TEST_PRINTF("BCE B: received event, exiting\n");
+            TIKU_PROCESS_EXIT();    /* unlinks B during broadcast */
+        }
+    }
+
+    TIKU_PROCESS_END();
+}
+
+TIKU_PROCESS_THREAD(test_bce_proc_c, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT();
+
+        if (ev == TEST_EVENT_CUSTOM) {
+            bce_count_c++;
+            TEST_PRINTF("BCE C: received event\n");
+        }
+    }
+
+    TIKU_PROCESS_END();
+}
+
+void test_process_broadcast_exit(void)
+{
+    TEST_PRINTF("\n=== Test: Broadcast Exit Safety ===\n");
+
+    bce_count_a = 0;
+    bce_count_b = 0;
+    bce_count_c = 0;
+
+    tiku_process_init();
+    tiku_process_start(&test_bce_proc_a, NULL);
+    tiku_process_start(&test_bce_proc_b, NULL);
+    tiku_process_start(&test_bce_proc_c, NULL);
+
+    /* Drain INIT events */
+    while (tiku_process_run()) {
+        /* drain */
+    }
+
+    /* Broadcast: B will exit itself mid-iteration */
+    tiku_process_post(TIKU_PROCESS_BROADCAST, TEST_EVENT_CUSTOM, NULL);
+    while (tiku_process_run()) {
+        /* drain */
+    }
+
+    /* A must have received the event */
+    if (bce_count_a == 1) {
+        TEST_PRINTF("PASS: Process A received broadcast\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Process A count = %d (expected 1)\n",
+                     bce_count_a);
+    }
+
+    /* B received it and then exited */
+    if (bce_count_b == 1) {
+        TEST_PRINTF("PASS: Process B received broadcast before exit\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Process B count = %d (expected 1)\n",
+                     bce_count_b);
+    }
+
+    /* B must actually be stopped */
+    if (!test_bce_proc_b.is_running) {
+        TEST_PRINTF("PASS: Process B exited during broadcast\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Process B still running\n");
+    }
+
+    /* C must have received the event despite B unlinking mid-iteration */
+    if (bce_count_c == 1) {
+        TEST_PRINTF("PASS: Process C received broadcast after B exited\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Process C count = %d (expected 1)\n",
+                     bce_count_c);
+    }
+
+    /* Clean up */
+    tiku_process_exit(&test_bce_proc_a);
+    tiku_process_exit(&test_bce_proc_c);
+    TEST_PRINTF("Broadcast exit safety test completed\n\n");
+}
+
+#endif /* TEST_PROCESS_BROADCAST_EXIT */
+
+/*---------------------------------------------------------------------------*/
+/* TEST 9: GRACEFUL EXIT VS FORCE EXIT                                       */
+/*---------------------------------------------------------------------------*/
+
+#if TEST_PROCESS_GRACEFUL_EXIT
+
+/**
+ * Verifies the TIKU_EVENT_EXIT / TIKU_EVENT_FORCE_EXIT split:
+ *
+ * Part A: TIKU_EVENT_EXIT is a polite request — the process thread
+ *         can handle it, do cleanup, and decide when to exit.
+ *
+ * Part B: TIKU_EVENT_FORCE_EXIT unconditionally kills the process
+ *         regardless of what the thread returns.
+ */
+
+static volatile unsigned int ge_cleanup_done = 0;
+static volatile unsigned int fe_cleanup_done = 0;
+
+TIKU_PROCESS(test_graceful_proc, "graceful");
+TIKU_PROCESS(test_force_proc, "force");
+
+TIKU_PROCESS_THREAD(test_graceful_proc, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT();
+
+        if (ev == TIKU_EVENT_EXIT) {
+            /* Graceful: do cleanup, then explicitly exit */
+            ge_cleanup_done = 1;
+            TEST_PRINTF("Graceful proc: cleanup done, exiting\n");
+            TIKU_PROCESS_EXIT();
+        }
+    }
+
+    TIKU_PROCESS_END();
+}
+
+TIKU_PROCESS_THREAD(test_force_proc, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT();
+
+        if (ev == TIKU_EVENT_FORCE_EXIT) {
+            /* This cleanup runs but the process will be killed
+             * regardless of what we return */
+            fe_cleanup_done = 1;
+            TEST_PRINTF("Force proc: got force exit\n");
+            /* Don't call TIKU_PROCESS_EXIT — just yield.
+             * The scheduler should kill us anyway. */
+        }
+    }
+
+    TIKU_PROCESS_END();
+}
+
+void test_process_graceful_exit(void)
+{
+    TEST_PRINTF("\n=== Test: Graceful Exit vs Force Exit ===\n");
+
+    ge_cleanup_done = 0;
+    fe_cleanup_done = 0;
+
+    tiku_process_init();
+
+    /*---------------------------------------------------------------*/
+    /* Part A: TIKU_EVENT_EXIT — process decides when to die         */
+    /*---------------------------------------------------------------*/
+
+    tiku_process_start(&test_graceful_proc, NULL);
+    while (tiku_process_run()) {
+        /* drain INIT */
+    }
+
+    /* Send polite exit request */
+    tiku_process_post(&test_graceful_proc, TIKU_EVENT_EXIT, NULL);
+    while (tiku_process_run()) {
+        /* drain */
+    }
+
+    if (ge_cleanup_done == 1) {
+        TEST_PRINTF("PASS: Graceful process ran cleanup\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Graceful process did not run cleanup\n");
+    }
+
+    if (!test_graceful_proc.is_running) {
+        TEST_PRINTF("PASS: Graceful process exited after cleanup\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Graceful process still running\n");
+    }
+
+    /*---------------------------------------------------------------*/
+    /* Part B: TIKU_EVENT_FORCE_EXIT — unconditional kill            */
+    /*---------------------------------------------------------------*/
+
+    tiku_process_start(&test_force_proc, NULL);
+    while (tiku_process_run()) {
+        /* drain INIT */
+    }
+
+    /* Send force exit — process does NOT call TIKU_PROCESS_EXIT */
+    tiku_process_post(&test_force_proc, TIKU_EVENT_FORCE_EXIT, NULL);
+    while (tiku_process_run()) {
+        /* drain */
+    }
+
+    if (fe_cleanup_done == 1) {
+        TEST_PRINTF("PASS: Force process thread body executed\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Force process thread body did not run\n");
+    }
+
+    /* Process must be killed even though thread didn't PT_EXIT */
+    if (!test_force_proc.is_running) {
+        TEST_PRINTF("PASS: Force process killed unconditionally\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: Force process still running\n");
+    }
+
+    TEST_PRINTF("Graceful/force exit test completed\n\n");
+}
+
+#endif /* TEST_PROCESS_GRACEFUL_EXIT */
+
+/*---------------------------------------------------------------------------*/
+/* TEST 10: CURRENT PROCESS CLEARED AFTER DISPATCH                           */
+/*---------------------------------------------------------------------------*/
+
+#if TEST_PROCESS_CURRENT_CLEARED
+
+/**
+ * Verifies that tiku_current_process (TIKU_THIS()) is NULL after
+ * call_process returns, so code outside process context (main loop,
+ * ISRs) does not see a stale pointer.
+ */
+
+static volatile unsigned int cc_inside_ok = 0;
+
+TIKU_PROCESS(test_cc_proc, "cc_proc");
+
+TIKU_PROCESS_THREAD(test_cc_proc, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    /* Verify TIKU_THIS() is valid inside the thread */
+    if (TIKU_THIS() == &test_cc_proc) {
+        cc_inside_ok = 1;
+    }
+
+    TIKU_PROCESS_WAIT_EVENT();
+
+    TIKU_PROCESS_END();
+}
+
+void test_process_current_cleared(void)
+{
+    TEST_PRINTF("\n=== Test: Current Process Cleared After Dispatch ===\n");
+
+    cc_inside_ok = 0;
+
+    tiku_process_init();
+    tiku_process_start(&test_cc_proc, NULL);
+
+    /* Drain INIT — thread runs, sets cc_inside_ok */
+    while (tiku_process_run()) {
+        /* drain */
+    }
+
+    /* Inside the thread, TIKU_THIS() should have been &test_cc_proc */
+    if (cc_inside_ok == 1) {
+        TEST_PRINTF("PASS: TIKU_THIS() valid inside process thread\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: TIKU_THIS() wrong inside process thread\n");
+    }
+
+    /* After dispatch returns, TIKU_THIS() must be NULL */
+    if (TIKU_THIS() == NULL) {
+        TEST_PRINTF("PASS: TIKU_THIS() is NULL after dispatch\n");
+        tiku_common_led1_toggle();
+    } else {
+        TEST_PRINTF("FAIL: TIKU_THIS() still points to %s\n",
+                     TIKU_THIS()->name);
+    }
+
+    /* Clean up */
+    tiku_process_exit(&test_cc_proc);
+    TEST_PRINTF("Current process cleared test completed\n\n");
+}
+
+#endif /* TEST_PROCESS_CURRENT_CLEARED */
+
 #endif /* PLATFORM_MSP430 */

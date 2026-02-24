@@ -89,13 +89,24 @@
 #define TEST_PROCESS_QUEUE 0
 
 /** Enable process local storage test */
-#define TEST_PROCESS_LOCAL 1
+#define TEST_PROCESS_LOCAL 0
+
+/** Enable broadcast exit safety test (list corruption fix) */
+#define TEST_PROCESS_BROADCAST_EXIT 0
+
+/** Enable graceful exit vs force exit test */
+#define TEST_PROCESS_GRACEFUL_EXIT 0
+
+/** Enable current process cleared after dispatch test */
+#define TEST_PROCESS_CURRENT_CLEARED 0
 
 /** Auto-derived: true if any process test is enabled */
-#define TEST_PROCESS (TEST_PROCESS_LIFECYCLE || TEST_PROCESS_EVENTS || \
-                      TEST_PROCESS_YIELD || TEST_PROCESS_BROADCAST || \
-                      TEST_PROCESS_POLL || TEST_PROCESS_QUEUE ||      \
-                      TEST_PROCESS_LOCAL)
+#define TEST_PROCESS (TEST_PROCESS_LIFECYCLE || TEST_PROCESS_EVENTS ||    \
+                      TEST_PROCESS_YIELD || TEST_PROCESS_BROADCAST ||     \
+                      TEST_PROCESS_POLL || TEST_PROCESS_QUEUE ||          \
+                      TEST_PROCESS_LOCAL || TEST_PROCESS_BROADCAST_EXIT ||\
+                      TEST_PROCESS_GRACEFUL_EXIT ||                       \
+                      TEST_PROCESS_CURRENT_CLEARED)
 
 /*---------------------------------------------------------------------------*/
 /* TIMER TESTS                                                               */
