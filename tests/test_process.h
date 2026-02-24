@@ -33,5 +33,6 @@ void test_process_yield(void);
 void test_process_broadcast(void);
 void test_process_poll(void);
 void test_process_queue_query(void);
+void test_process_local_storage(void);
 
 #endif /* TEST_PROCESS_H_ */
