@@ -33,6 +33,7 @@
 #include <arch/msp430/tiku_compiler.h>
 #include <hal/tiku_cpu.h>
 #include <stddef.h>
+#include <string.h>
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE TYPES                                                             */
@@ -40,9 +41,9 @@
 
 /** @brief Single entry in the event queue */
 struct event_item {
-    tiku_event_t ev;
     tiku_event_data_t data;
     struct tiku_process *p;
+    tiku_event_t ev;
 };
 
 /*---------------------------------------------------------------------------*/
@@ -223,8 +224,9 @@ uint8_t tiku_process_run(void)
 
     /* Dispatch outside atomic section to avoid long interrupt latency */
     if (receiver == TIKU_PROCESS_BROADCAST) {
-        struct tiku_process *p;
-        for (p = tiku_list_head; p != NULL; p = p->next) {
+        struct tiku_process *p, *next;
+        for (p = tiku_list_head; p != NULL; p = next) {
+            next = p->next;
             call_process(p, ev, data);
         }
     } else {
@@ -255,7 +257,7 @@ void tiku_process_poll(struct tiku_process *p)
  * @brief Dispatch an event to a single process
  *
  * Runs the process thread and handles automatic exit when the
- * thread returns PT_EXITED, PT_ENDED, or receives TIKU_EVENT_EXIT.
+ * thread returns PT_EXITED, PT_ENDED, or receives TIKU_EVENT_FORCE_EXIT.
  *
  * @param p    Target process
  * @param ev   Event to deliver
@@ -264,13 +266,14 @@ void tiku_process_poll(struct tiku_process *p)
 static void call_process(struct tiku_process *p, tiku_event_t ev,
                          tiku_event_data_t data)
 {
-    int ret;
+    char ret;
 
     if (p->is_running && p->thread) {
         tiku_current_process = p;
         ret = p->thread(&p->pt, ev, data);
+        tiku_current_process = NULL;
         if (ret == PT_EXITED || ret == PT_ENDED ||
-            ev == TIKU_EVENT_EXIT) {
+            ev == TIKU_EVENT_FORCE_EXIT) {
             tiku_process_exit(p);
         }
     }
@@ -295,4 +298,157 @@ void tiku_autostart_start(struct tiku_process * const processes[])
         PROCESS_PRINTF("Autostart: %s\n", processes[i]->name);
         tiku_process_start(processes[i], NULL);
     }
+}
+
+/*---------------------------------------------------------------------------*/
+/* QUEUE QUERY FUNCTIONS                                                     */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Return the number of free slots in the event queue
+ *
+ * @return Number of free slots
+ */
+uint8_t tiku_process_queue_space(void)
+{
+    return TIKU_QUEUE_SIZE - q_len;
+}
+
+/**
+ * @brief Check if the event queue is full
+ *
+ * @return 1 if full, 0 otherwise
+ */
+uint8_t tiku_process_queue_full(void)
+{
+    return q_len == TIKU_QUEUE_SIZE;
+}
+
+/**
+ * @brief Check if the event queue is empty
+ *
+ * @return 1 if empty, 0 otherwise
+ */
+uint8_t tiku_process_queue_empty(void)
+{
+    return q_len == 0;
+}
+
+/**
+ * @brief Return the number of pending events in the queue
+ *
+ * @return Number of queued events
+ */
+uint8_t tiku_process_queue_length(void)
+{
+    return q_len;
+}
+
+/**
+ * @brief Check if a process is running
+ *
+ * @param p Process to check
+ * @return 1 if running, 0 otherwise
+ */
+uint8_t tiku_process_is_running(struct tiku_process *p)
+{
+    return p->is_running;
+}
+
+/*---------------------------------------------------------------------------*/
+/* CHANNEL FUNCTIONS                                                         */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize a channel
+ *
+ * @param ch       Channel to initialize
+ * @param buf      Pointer to caller-provided storage
+ * @param msg_size Size of each message in bytes
+ * @param capacity Maximum number of messages
+ */
+void tiku_channel_init(struct tiku_channel *ch, void *buf,
+                       uint8_t msg_size, uint8_t capacity)
+{
+    ch->buf      = (uint8_t *)buf;
+    ch->msg_size = msg_size;
+    ch->capacity = capacity;
+    ch->head     = 0;
+    ch->count    = 0;
+}
+
+/**
+ * @brief Put a message into a channel
+ *
+ * Safe to call from interrupt context.
+ *
+ * @param ch  Channel to put message into
+ * @param msg Pointer to message data (msg_size bytes copied)
+ * @return 1 if message stored, 0 if channel is full
+ */
+uint8_t tiku_channel_put(struct tiku_channel *ch, const void *msg)
+{
+    uint8_t tail;
+
+    tiku_atomic_enter();
+
+    if (ch->count >= ch->capacity) {
+        tiku_atomic_exit();
+        return 0;
+    }
+
+    tail = (ch->head + ch->count) % ch->capacity;
+    memcpy(&ch->buf[tail * ch->msg_size], msg, ch->msg_size);
+    ch->count++;
+
+    tiku_atomic_exit();
+    return 1;
+}
+
+/**
+ * @brief Get a message from a channel
+ *
+ * Safe to call from interrupt context.
+ *
+ * @param ch  Channel to read from
+ * @param out Pointer to destination buffer (msg_size bytes copied)
+ * @return 1 if a message was retrieved, 0 if channel is empty
+ */
+uint8_t tiku_channel_get(struct tiku_channel *ch, void *out)
+{
+    tiku_atomic_enter();
+
+    if (ch->count == 0) {
+        tiku_atomic_exit();
+        return 0;
+    }
+
+    memcpy(out, &ch->buf[ch->head * ch->msg_size], ch->msg_size);
+    ch->head = (ch->head + 1) % ch->capacity;
+    ch->count--;
+
+    tiku_atomic_exit();
+    return 1;
+}
+
+/**
+ * @brief Check if a channel is empty
+ *
+ * @param ch Channel to check
+ * @return 1 if empty, 0 otherwise
+ */
+uint8_t tiku_channel_is_empty(struct tiku_channel *ch)
+{
+    return ch->count == 0;
+}
+
+/**
+ * @brief Return the number of free slots in a channel
+ *
+ * @param ch Channel to check
+ * @return Number of free message slots
+ */
+uint8_t tiku_channel_free(struct tiku_channel *ch)
+{
+    return ch->capacity - ch->count;
 }

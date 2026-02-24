@@ -183,11 +183,18 @@ TIKU_ISR(TIMER0_A0_VECTOR, timer0_a0_isr)
 
 void tiku_clock_arch_init(void)
 {
+    unsigned int state;
+
     CLOCK_PRINTF("Initializing system clock architecture\n");
 
     CLOCK_PRINTF("Configuring ACLK source\n");
     tiku_configure_aclk_source();
 
+    /* Save and restore interrupt state — do NOT unconditionally
+     * enable GIE.  The application (or test runner) decides when
+     * global interrupts are safe to enable.  The hardware counter
+     * (TA0R) runs regardless of GIE; only the CCR0 ISR needs it. */
+    state = __get_interrupt_state();
     __disable_interrupt();
 
     TA0CTL = 0;
@@ -204,8 +211,9 @@ void tiku_clock_arch_init(void)
 
     TA0CTL |= MC_1;
 
-    __enable_interrupt();
+    __set_interrupt_state(state);
 
+    /* Timer counter runs independently of GIE — verify it's ticking */
     unsigned short tar1 = TA0R;
     __delay_cycles(10000);
     unsigned short tar2 = TA0R;

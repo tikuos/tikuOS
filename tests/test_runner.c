@@ -166,6 +166,31 @@ static void test_run_process(void)
     tiku_common_delay_ms(TEST_DELAY_MS);
 #endif
 
+#if TEST_PROCESS_QUEUE
+    test_process_queue_query();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PROCESS_LOCAL
+    test_process_local_storage();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PROCESS_BROADCAST_EXIT
+    test_process_broadcast_exit();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PROCESS_GRACEFUL_EXIT
+    test_process_graceful_exit();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PROCESS_CURRENT_CLEARED
+    test_process_current_cleared();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
     MAIN_PRINTF("Process/threading tests completed\n");
 #endif
 }

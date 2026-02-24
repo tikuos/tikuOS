@@ -43,7 +43,7 @@
  */
 
 /** Master example enable - set to 1 to allow example selection */
-#define TIKU_EXAMPLES_ENABLE         1
+#define TIKU_EXAMPLES_ENABLE         0
 
 #define TIKU_EXAMPLE_BLINK           0  /**< 01: Single LED blink */
 #define TIKU_EXAMPLE_DUAL_BLINK      0  /**< 02: Two LEDs, two processes */
@@ -52,7 +52,8 @@
 #define TIKU_EXAMPLE_STATE_MACHINE   0  /**< 05: Event-driven state machine */
 #define TIKU_EXAMPLE_CALLBACK_TIMER  0  /**< 06: Callback-mode timers */
 #define TIKU_EXAMPLE_BROADCAST       0  /**< 07: Broadcast events */
-#define TIKU_EXAMPLE_TIMEOUT         1  /**< 08: Timeout pattern */
+#define TIKU_EXAMPLE_TIMEOUT         0  /**< 08: Timeout pattern */
+#define TIKU_EXAMPLE_CHANNEL         0  /**< 09: Channel message passing */
 
 /** @} */ /* End of TIKU_EXAMPLES group */
 
