@@ -14,19 +14,27 @@
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Toolchain
+# Toolchain  (auto-detected from PATH; override with TOOLCHAIN_DIR=…)
 # ---------------------------------------------------------------------------
-TOOLCHAIN_DIR = $(HOME)/tigcc
+TOOLCHAIN_DIR ?= $(shell \
+	p=$$(command -v msp430-elf-gcc 2>/dev/null) && dirname $$(dirname "$$p") \
+	|| echo "$(HOME)/tigcc")
+
 CC            = $(TOOLCHAIN_DIR)/bin/msp430-elf-gcc
 OBJCOPY       = $(TOOLCHAIN_DIR)/bin/msp430-elf-objcopy
 SIZE          = $(TOOLCHAIN_DIR)/bin/msp430-elf-size
 GDB           = $(TOOLCHAIN_DIR)/bin/msp430-elf-gdb
 
+# Auto-detect MSP430 GCC support files (msp430.h, linker scripts)
+MSP430_SUPPORT_DIR ?= $(shell \
+	find $(TOOLCHAIN_DIR)/include -type f -name "msp430.h" 2>/dev/null \
+	| head -1 | xargs -r dirname)
+
 # ---------------------------------------------------------------------------
-# Debug / Flash tools
+# Debug / Flash tools  (auto-detected from PATH; override with MSPDEBUG=…)
 # ---------------------------------------------------------------------------
-MSPDEBUG = mspdebug
-DEBUGGER = tilib
+MSPDEBUG ?= $(shell command -v mspdebug 2>/dev/null || echo mspdebug)
+DEBUGGER  = tilib
 
 # ---------------------------------------------------------------------------
 # Target MCU  (override on command line: make MCU=msp430fr5969 or mcu=msp430fr5969)
@@ -55,11 +63,17 @@ CFLAGS  = -mmcu=$(MCU) -O2 -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -DPLATFORM_MSP430=1
 CFLAGS += -I$(TOOLCHAIN_DIR)/include
+ifneq ($(MSP430_SUPPORT_DIR),)
+CFLAGS += -I$(MSP430_SUPPORT_DIR)
+endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
 
 LDFLAGS  = -mmcu=$(MCU)
 LDFLAGS += -L$(TOOLCHAIN_DIR)/include
+ifneq ($(MSP430_SUPPORT_DIR),)
+LDFLAGS += -L$(MSP430_SUPPORT_DIR)
+endif
 LDFLAGS += -Wl,--gc-sections
 
 # ---------------------------------------------------------------------------
