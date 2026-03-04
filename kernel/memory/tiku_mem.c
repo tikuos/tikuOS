@@ -37,20 +37,23 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Round a size up to 2-byte alignment
+ * @brief Round a size up to the platform's required alignment
  *
- * MSP430 is a 16-bit architecture. Unaligned word access causes a bus
- * fault, so every allocation must start on an even address. This rounds
- * odd sizes up to the next multiple of 2.
+ * Uses TIKU_MEM_ARCH_ALIGNMENT (provided by the memory HAL) so the
+ * same code works across 16-bit, 32-bit, and 64-bit targets.
  *
- * Example: 3 -> 4, 4 -> 4, 1 -> 2, 0 -> 0
+ * The standard power-of-two round-up formula:
+ *   (size + (align - 1)) & ~(align - 1)
+ *
+ * Example (alignment = 4): 3 -> 4, 4 -> 4, 5 -> 8, 0 -> 0
  *
  * @param size  Raw size in bytes
- * @return Size rounded up to 2-byte boundary
+ * @return Size rounded up to TIKU_MEM_ARCH_ALIGNMENT boundary
  */
-static uint16_t align2(uint16_t size)
+static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
-    return (size + 1U) & ~1U;
+    const tiku_mem_arch_size_t mask = TIKU_MEM_ARCH_ALIGNMENT - 1U;
+    return (size + mask) & ~mask;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -71,7 +74,7 @@ static uint16_t align2(uint16_t size)
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
  */
 tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
-                                 uint16_t size, uint8_t id)
+                                 tiku_mem_arch_size_t size, uint8_t id)
 {
     if (arena == NULL || buf == NULL) {
         return TIKU_MEM_ERR_INVALID;
@@ -99,26 +102,26 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
  *   Removing individual free eliminates per-object metadata, free-list
  *   traversal, and fragmentation — all critical on small SRAM.
  *
- * Why 2-byte alignment:
- *   MSP430 requires word-aligned access for 16-bit loads and stores.
- *   An unaligned word access triggers a bus fault. Aligning every
- *   allocation to 2 bytes ensures any returned pointer is safe for
- *   uint16_t or struct access.
+ * Why alignment:
+ *   The target architecture may require word-aligned access. Unaligned
+ *   access can trigger a bus fault or incur a performance penalty.
+ *   Aligning every allocation to TIKU_MEM_ARCH_ALIGNMENT bytes ensures
+ *   any returned pointer is safe for native word or struct access.
  *
  * @param arena    Arena to allocate from (must be active)
  * @param size     Bytes requested (must be > 0)
  * @return Aligned pointer, or NULL on failure
  */
-void *tiku_arena_alloc(tiku_arena_t *arena, uint16_t size)
+void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 {
-    uint16_t aligned;
+    tiku_mem_arch_size_t aligned;
     void *ptr;
 
     if (arena == NULL || !arena->active || size == 0) {
         return NULL;
     }
 
-    aligned = align2(size);
+    aligned = align_up(size);
 
     /* Check for overflow: would the new offset exceed capacity? */
     if (aligned > arena->capacity - arena->offset) {
@@ -171,55 +174,26 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 /**
  * @brief Securely reset an arena, zeroing all memory before reclaiming
  *
- * Overwrites the entire backing buffer with zeros using a volatile
- * pointer, then resets the arena state. The volatile qualifier
- * ensures the compiler cannot optimize away the zeroing — without it,
- * the compiler sees that the zeroed memory is never read afterward
- * and is free to eliminate the entire loop (observed with GCC -O2 and
- * LLVM on MSP430).
+ * Delegates to tiku_mem_arch_secure_wipe() for a platform-optimized
+ * zeroing implementation, then resets the arena state. The arch layer
+ * uses a volatile pointer (or equivalent) to ensure the compiler
+ * cannot optimize away the zeroing.
  *
- * CPU-cycle cost on MSP430 (16-bit RISC, single-cycle SRAM writes):
- *   The inner loop compiles to roughly:
- *       MOV.B #0, 0(Rn)    ; 4 cycles (indexed mode)
- *       INC   Rn            ; 1 cycle
- *       CMP   Rn, Rm        ; 1 cycle
- *       JNZ   loop          ; 2 cycles (taken)
- *   Total: ~8 cycles per byte on MSP430, ~5 cycles per byte on MSP430X.
- *   For comparison, tiku_arena_reset() is ~6 cycles total (constant).
- *
- *   Concrete examples at 16 MHz MCLK:
- *     64 B arena  →   ~512 cycles →   32 us
- *    256 B arena  →  ~2048 cycles →  128 us
- *   2048 B arena  → ~16384 cycles → 1024 us  (1 ms)
- *
- *   This is the price you pay for scrubbing sensitive data. Use
- *   tiku_arena_reset() for the fast path and this function only
- *   when the arena held cryptographic keys, nonces, or other
- *   secrets that must not survive in memory.
+ * This is O(n) in buffer size — use tiku_arena_reset() for the fast
+ * path and this function only when the arena held cryptographic keys,
+ * nonces, or other secrets that must not survive in memory.
  *
  * @param arena    Arena to securely reset
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if arena is NULL
  */
 tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 {
-    volatile uint8_t *p;
-    uint16_t i;
-
     if (arena == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /*
-     * Zero the entire buffer through a volatile pointer.
-     * The volatile cast prevents the compiler from eliding this loop
-     * even though the memory is not read afterward. This is the
-     * standard portable technique for secure memset (see also
-     * C11 memset_s, explicit_bzero on BSD/Linux).
-     */
-    p = (volatile uint8_t *)arena->buf;
-    for (i = 0; i < arena->capacity; i++) {
-        p[i] = 0;
-    }
+    /* Delegate to the arch layer for a platform-optimized secure wipe. */
+    tiku_mem_arch_secure_wipe(arena->buf, arena->capacity);
 
     arena->offset = 0;
     arena->count  = 0;
@@ -256,12 +230,14 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /**
  * @brief Initialize the memory management module
  *
- * Currently a no-op. This is the entry point that tiku_cpu_full_init()
- * (or equivalent) will call. As additional allocator subsystems (pool,
- * slab, etc.) are added, their initialization will go here.
+ * Called during boot from tiku_boot_init_memory(). Performs
+ * platform-specific memory hardware setup via the arch layer,
+ * then initializes any module-level state. Arena initialization
+ * remains per-instance via tiku_arena_create().
  */
 void tiku_mem_init(void)
 {
-    /* Nothing to do yet — arena initialization is per-instance via
-     * tiku_arena_create(). Future subsystems will be initialized here. */
+    tiku_mem_arch_init();
+
+    /* Future: initialize pool, slab, or other allocator subsystems. */
 }

@@ -30,6 +30,7 @@
 
 #include "tiku_boot.h"
 #include "kernel/cpu/tiku_common.h"
+#include "kernel/memory/tiku_mem.h"
 #include "kernel/timers/tiku_clock.h"
 #include "kernel/scheduler/tiku_sched.h"
 #include "arch/msp430/tiku_uart_arch.h"
@@ -178,13 +179,12 @@ tiku_boot_init_cpu(unsigned int cpu_freq)
  * @brief Initialize memory subsystem
  * @return TIKU_BOOT_SUCCESS on success, TIKU_BOOT_ERROR on failure
  */
-static int 
+static int
 tiku_boot_init_memory(void)
 {
-    /* Initialize memory management */
-    /* For embedded systems, this is typically minimal */
-    /* as memory is statically allocated */
-    
+    /* Initialize memory subsystem (arch-specific setup + module state) */
+    tiku_mem_init();
+
     return TIKU_BOOT_SUCCESS;
 }
 

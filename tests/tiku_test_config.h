@@ -133,6 +133,44 @@
 /** Enable hardware timer periodic test */
 #define TEST_HTIMER_PERIODIC 0
 
+/*---------------------------------------------------------------------------*/
+/* MEMORY TESTS                                                              */
+/*---------------------------------------------------------------------------*/
+
+/** Enable arena creation and initial stats test */
+#define TEST_MEM_CREATE 0
+
+/** Enable basic allocation and pointer correctness test */
+#define TEST_MEM_ALLOC 0
+
+/** Enable alignment of odd-sized requests test */
+#define TEST_MEM_ALIGNMENT 0
+
+/** Enable arena full returns NULL test */
+#define TEST_MEM_FULL 0
+
+/** Enable reset restores offset but preserves peak test */
+#define TEST_MEM_RESET 0
+
+/** Enable peak tracking across resets test */
+#define TEST_MEM_PEAK 0
+
+/** Enable null and zero-size inputs rejected test */
+#define TEST_MEM_INVALID 0
+
+/** Enable secure reset zeros memory test */
+#define TEST_MEM_SECURE_RESET 0
+
+/** Enable two independent arenas test */
+#define TEST_MEM_TWO_ARENAS 0
+
+/** Auto-derived: true if any memory test is enabled */
+#define TEST_MEM (TEST_MEM_CREATE || TEST_MEM_ALLOC ||                     \
+                  TEST_MEM_ALIGNMENT || TEST_MEM_FULL ||                   \
+                  TEST_MEM_RESET || TEST_MEM_PEAK ||                       \
+                  TEST_MEM_INVALID || TEST_MEM_SECURE_RESET ||             \
+                  TEST_MEM_TWO_ARENAS)
+
 /** @} */ /* End of TIKU_TEST_CONFIG group */
 
 #endif /* TIKU_TEST_CONFIG_H_ */

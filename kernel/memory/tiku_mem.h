@@ -42,6 +42,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include <stdint.h>
+#include "hal/tiku_mem_hal.h"
 
 /*---------------------------------------------------------------------------*/
 /* ERROR CODES                                                               */
@@ -66,13 +67,13 @@ typedef enum {
  * @brief Memory usage statistics
  *
  * Snapshot of an allocator's current state. All sizes are in bytes.
- * uint16_t is sufficient — MSP430 SRAM never exceeds 64 KB.
+ * The size type is provided by the memory HAL for the target platform.
  */
 typedef struct {
-    uint16_t total_bytes;       /**< Total capacity of the backing buffer */
-    uint16_t used_bytes;        /**< Currently allocated bytes */
-    uint16_t peak_bytes;        /**< High-water mark (lifetime maximum) */
-    uint16_t alloc_count;       /**< Number of successful allocations */
+    tiku_mem_arch_size_t total_bytes;  /**< Total capacity of the backing buffer */
+    tiku_mem_arch_size_t used_bytes;   /**< Currently allocated bytes */
+    tiku_mem_arch_size_t peak_bytes;   /**< High-water mark (lifetime maximum) */
+    tiku_mem_arch_size_t alloc_count;  /**< Number of successful allocations */
 } tiku_mem_stats_t;
 
 /*---------------------------------------------------------------------------*/
@@ -96,13 +97,13 @@ typedef struct {
  *   active    – non-zero if the arena has been initialized
  */
 typedef struct {
-    uint8_t  *buf;              /**< Backing buffer (caller-provided) */
-    uint16_t  capacity;         /**< Buffer size in bytes */
-    uint16_t  offset;           /**< Current bump-pointer position */
-    uint16_t  peak;             /**< Lifetime high-water mark */
-    uint16_t  count;            /**< Allocations since last reset */
-    uint8_t   id;               /**< Arena identifier for debugging */
-    uint8_t   active;           /**< Non-zero if initialized */
+    uint8_t              *buf;       /**< Backing buffer (caller-provided) */
+    tiku_mem_arch_size_t  capacity;  /**< Buffer size in bytes */
+    tiku_mem_arch_size_t  offset;    /**< Current bump-pointer position */
+    tiku_mem_arch_size_t  peak;      /**< Lifetime high-water mark */
+    tiku_mem_arch_size_t  count;     /**< Allocations since last reset */
+    uint8_t               id;        /**< Arena identifier for debugging */
+    uint8_t               active;    /**< Non-zero if initialized */
 } tiku_arena_t;
 
 /*---------------------------------------------------------------------------*/
@@ -122,13 +123,14 @@ typedef struct {
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if arena or buf is NULL
  */
 tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
-                                 uint16_t size, uint8_t id);
+                                 tiku_mem_arch_size_t size, uint8_t id);
 
 /**
  * @brief Allocate memory from an arena
  *
- * Bump-pointer allocation. The returned pointer is always 2-byte aligned
- * for MSP430 word access. Odd-sized requests are rounded up internally.
+ * Bump-pointer allocation. The returned pointer is aligned to the
+ * platform's native word boundary (TIKU_MEM_ARCH_ALIGNMENT). Requests
+ * that are not a multiple of the alignment are rounded up internally.
  *
  * There is no individual free. Use tiku_arena_reset() to reclaim all
  * allocations at once.
@@ -138,7 +140,7 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
  * @return Pointer to the allocated memory, or NULL if the arena is full
  *         or the arguments are invalid
  */
-void *tiku_arena_alloc(tiku_arena_t *arena, uint16_t size);
+void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size);
 
 /**
  * @brief Reset an arena, reclaiming all allocations

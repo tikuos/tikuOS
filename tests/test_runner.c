@@ -47,6 +47,10 @@
 #include "tests/test_timer.h"
 #endif
 
+#if TEST_MEM
+#include "tests/test_tiku_mem.h"
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PRIVATE CONSTANTS                                                        */
 /*---------------------------------------------------------------------------*/
@@ -61,6 +65,7 @@ static void test_run_cpuclock(void);
 static void test_run_watchdog(void);
 static void test_run_process(void);
 static void test_run_timer(void);
+static void test_run_mem(void);
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                         */
@@ -74,6 +79,7 @@ void test_run_all(void)
     test_run_cpuclock();
     test_run_watchdog();
     test_run_process();
+    test_run_mem();
 
     /* Enable global interrupts (needed for timer ISRs) */
     MAIN_PRINTF("Enabling global interrupts\n");
@@ -192,6 +198,60 @@ static void test_run_process(void)
 #endif
 
     MAIN_PRINTF("Process/threading tests completed\n");
+#endif
+}
+
+static void test_run_mem(void)
+{
+#if TEST_MEM
+    MAIN_PRINTF("Running memory tests\n");
+
+#if TEST_MEM_CREATE
+    test_mem_create_and_stats();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_ALLOC
+    test_mem_basic_alloc();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_ALIGNMENT
+    test_mem_alignment();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_FULL
+    test_mem_arena_full();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_RESET
+    test_mem_reset();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_PEAK
+    test_mem_peak_tracking();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_INVALID
+    test_mem_invalid_inputs();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_SECURE_RESET
+    test_mem_secure_reset();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MEM_TWO_ARENAS
+    test_mem_two_arenas();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+    MAIN_PRINTF("Memory tests completed\n");
 #endif
 }
 

@@ -9,6 +9,9 @@
  * Standalone test program for the memory management module. Compiles
  * and runs on a host machine with GCC — no MSP430 toolchain needed.
  *
+ * Host mode (no MSP430 toolchain needed — HAL provides fallback
+ * defaults: 4-byte alignment, uint32_t sizes):
+ *
  *   gcc -std=c99 -Wall -Wextra -I. \
  *       tests/test_tiku_mem.c kernel/memory/tiku_mem.c \
  *       -o test_tiku_mem && ./test_tiku_mem
@@ -34,6 +37,43 @@
 #include "kernel/memory/tiku_mem.h"
 
 /*---------------------------------------------------------------------------*/
+/* HOST-MODE ARCH STUBS                                                      */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * When compiling on a host (no PLATFORM_MSP430), the HAL provides
+ * fallback type/alignment defaults but no function bodies. Supply
+ * minimal portable implementations so the test stays single-file
+ * compilable without the MSP430 arch sources.
+ */
+#ifndef PLATFORM_MSP430
+
+void tiku_mem_arch_init(void)
+{
+    /* No-op on host. */
+}
+
+void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)
+{
+    volatile uint8_t *p = (volatile uint8_t *)buf;
+    tiku_mem_arch_size_t i;
+
+    for (i = 0; i < len; i++) {
+        p[i] = 0;
+    }
+}
+
+#endif /* !PLATFORM_MSP430 */
+
+/*---------------------------------------------------------------------------*/
+/* TEST HELPERS                                                              */
+/*---------------------------------------------------------------------------*/
+
+/** Round @p x up to the platform alignment — mirrors the kernel's align_up */
+#define TEST_ALIGN_UP(x) \
+    (((x) + (TIKU_MEM_ARCH_ALIGNMENT - 1U)) & ~(TIKU_MEM_ARCH_ALIGNMENT - 1U))
+
+/*---------------------------------------------------------------------------*/
 /* TEST HARNESS                                                              */
 /*---------------------------------------------------------------------------*/
 
@@ -57,7 +97,7 @@ static int tests_failed = 0;
 /* TEST 1: CREATION AND INITIAL STATS                                        */
 /*---------------------------------------------------------------------------*/
 
-static void test_create_and_stats(void)
+void test_mem_create_and_stats(void)
 {
     uint8_t buf[64];
     tiku_arena_t arena;
@@ -83,7 +123,7 @@ static void test_create_and_stats(void)
 /* TEST 2: BASIC ALLOCATION AND POINTER CORRECTNESS                          */
 /*---------------------------------------------------------------------------*/
 
-static void test_basic_alloc(void)
+void test_mem_basic_alloc(void)
 {
     uint8_t buf[64];
     tiku_arena_t arena;
@@ -114,49 +154,60 @@ static void test_basic_alloc(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* TEST 3: 2-BYTE ALIGNMENT OF ODD-SIZED REQUESTS                           */
+/* TEST 3: ALIGNMENT OF ODD-SIZED REQUESTS                                   */
 /*---------------------------------------------------------------------------*/
 
-static void test_alignment(void)
+void test_mem_alignment(void)
 {
     uint8_t buf[64];
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     void *p1, *p2, *p3;
+    const unsigned int A = TIKU_MEM_ARCH_ALIGNMENT;
 
-    printf("\n--- Test: 2-Byte Alignment ---\n");
+    /* Compute expected aligned sizes for the three requests */
+    const tiku_mem_arch_size_t a1 = TEST_ALIGN_UP(3);  /* 3 -> 4 */
+    const tiku_mem_arch_size_t a2 = TEST_ALIGN_UP(1);  /* 1 -> A */
+    const tiku_mem_arch_size_t a3 = TEST_ALIGN_UP(5);  /* 5 -> next multiple of A */
+
+    printf("\n--- Test: %u-Byte Alignment ---\n", A);
 
     tiku_arena_create(&arena, buf, sizeof(buf), 3);
 
-    /* Request 3 bytes — should be rounded up to 4 */
+    /* Request 3 bytes — rounded up to a1 */
     p1 = tiku_arena_alloc(&arena, 3);
     TEST_ASSERT(p1 == &buf[0], "odd alloc (3) starts at base");
 
-    /* Next alloc should start at offset 4, not 3 */
+    /* Next alloc should start at offset a1, not 3 */
     p2 = tiku_arena_alloc(&arena, 1);
-    TEST_ASSERT(p2 == &buf[4], "next alloc after 3-byte request starts at offset 4");
+    TEST_ASSERT(p2 == &buf[a1], "next alloc after 3-byte request starts at aligned offset");
 
-    /* Request 5 bytes — rounded to 6, next starts at 4+2+6 = offset 12 */
+    /* Request 5 bytes — rounded to a3 */
     p3 = tiku_arena_alloc(&arena, 5);
-    TEST_ASSERT(p3 == &buf[6], "5-byte request starts at offset 6 (after 4+2)");
+    TEST_ASSERT(p3 == &buf[a1 + a2], "5-byte request starts at correct aligned offset");
 
     tiku_arena_stats(&arena, &stats);
-    /* 4 + 2 + 6 = 12 bytes used (aligned sizes) */
-    TEST_ASSERT(stats.used_bytes == 12, "used_bytes reflects aligned sizes (4+2+6=12)");
+    TEST_ASSERT(stats.used_bytes == a1 + a2 + a3,
+                "used_bytes reflects aligned sizes");
 
-    /* Verify all returned pointers are 2-byte aligned */
-    TEST_ASSERT(((uintptr_t)p1 % 2) == 0, "pointer 1 is 2-byte aligned");
-    TEST_ASSERT(((uintptr_t)p2 % 2) == 0, "pointer 2 is 2-byte aligned");
-    TEST_ASSERT(((uintptr_t)p3 % 2) == 0, "pointer 3 is 2-byte aligned");
+    /* Verify all returned pointers meet platform alignment */
+    TEST_ASSERT(((uintptr_t)p1 % A) == 0, "pointer 1 is aligned");
+    TEST_ASSERT(((uintptr_t)p2 % A) == 0, "pointer 2 is aligned");
+    TEST_ASSERT(((uintptr_t)p3 % A) == 0, "pointer 3 is aligned");
 }
 
 /*---------------------------------------------------------------------------*/
 /* TEST 4: ARENA FULL RETURNS NULL                                           */
 /*---------------------------------------------------------------------------*/
 
-static void test_arena_full(void)
+void test_mem_arena_full(void)
 {
-    uint8_t buf[8];
+    /*
+     * Use a buffer whose size is 4 * alignment so the test works
+     * identically on 2-byte (MSP430) and 4-byte (host/ARM) targets.
+     */
+    const unsigned int A = TIKU_MEM_ARCH_ALIGNMENT;
+    uint8_t buf[4 * TIKU_MEM_ARCH_ALIGNMENT];
     tiku_arena_t arena;
     void *p1, *p2, *p3;
 
@@ -164,17 +215,17 @@ static void test_arena_full(void)
 
     tiku_arena_create(&arena, buf, sizeof(buf), 4);
 
-    /* Allocate 6 bytes (aligned to 6) — fits in 8-byte buffer */
-    p1 = tiku_arena_alloc(&arena, 6);
-    TEST_ASSERT(p1 != NULL, "6-byte alloc succeeds in 8-byte arena");
+    /* Allocate 3*A bytes — fits, leaves exactly A bytes */
+    p1 = tiku_arena_alloc(&arena, 3 * A);
+    TEST_ASSERT(p1 != NULL, "3*A alloc succeeds in 4*A arena");
 
-    /* Only 2 bytes remain — request 4 should fail */
-    p2 = tiku_arena_alloc(&arena, 4);
-    TEST_ASSERT(p2 == NULL, "4-byte alloc fails when only 2 bytes remain");
+    /* Only A bytes remain — request 2*A should fail */
+    p2 = tiku_arena_alloc(&arena, 2 * A);
+    TEST_ASSERT(p2 == NULL, "2*A alloc fails when only A bytes remain");
 
-    /* Request exactly 2 bytes — should succeed */
-    p3 = tiku_arena_alloc(&arena, 2);
-    TEST_ASSERT(p3 != NULL, "2-byte alloc succeeds with exactly 2 bytes left");
+    /* Request exactly A bytes — should succeed */
+    p3 = tiku_arena_alloc(&arena, A);
+    TEST_ASSERT(p3 != NULL, "A-byte alloc succeeds with exactly A bytes left");
 
     /* Arena is now completely full */
     p2 = tiku_arena_alloc(&arena, 1);
@@ -185,7 +236,7 @@ static void test_arena_full(void)
 /* TEST 5: RESET RESTORES OFFSET BUT PRESERVES PEAK                         */
 /*---------------------------------------------------------------------------*/
 
-static void test_reset(void)
+void test_mem_reset(void)
 {
     uint8_t buf[64];
     tiku_arena_t arena;
@@ -196,9 +247,9 @@ static void test_reset(void)
 
     tiku_arena_create(&arena, buf, sizeof(buf), 5);
 
-    /* Allocate 20 bytes */
-    tiku_arena_alloc(&arena, 10);
-    tiku_arena_alloc(&arena, 10);
+    /* Allocate 20 bytes (sizes already aligned to any power-of-2) */
+    tiku_arena_alloc(&arena, 12);
+    tiku_arena_alloc(&arena, 8);
 
     tiku_arena_stats(&arena, &stats);
     TEST_ASSERT(stats.used_bytes == 20, "20 bytes used before reset");
@@ -222,7 +273,7 @@ static void test_reset(void)
 /* TEST 6: PEAK TRACKS LIFETIME MAXIMUM ACROSS RESETS                        */
 /*---------------------------------------------------------------------------*/
 
-static void test_peak_tracking(void)
+void test_mem_peak_tracking(void)
 {
     uint8_t buf[64];
     tiku_arena_t arena;
@@ -232,25 +283,25 @@ static void test_peak_tracking(void)
 
     tiku_arena_create(&arena, buf, sizeof(buf), 6);
 
-    /* Cycle 1: allocate 10 bytes */
-    tiku_arena_alloc(&arena, 10);
+    /* Cycle 1: allocate 12 bytes */
+    tiku_arena_alloc(&arena, 12);
     tiku_arena_stats(&arena, &stats);
-    TEST_ASSERT(stats.peak_bytes == 10, "peak is 10 after first cycle");
+    TEST_ASSERT(stats.peak_bytes == 12, "peak is 12 after first cycle");
 
     tiku_arena_reset(&arena);
 
-    /* Cycle 2: allocate 30 bytes — new peak */
+    /* Cycle 2: allocate 32 bytes — new peak */
     tiku_arena_alloc(&arena, 20);
-    tiku_arena_alloc(&arena, 10);
+    tiku_arena_alloc(&arena, 12);
     tiku_arena_stats(&arena, &stats);
-    TEST_ASSERT(stats.peak_bytes == 30, "peak is 30 after second cycle");
+    TEST_ASSERT(stats.peak_bytes == 32, "peak is 32 after second cycle");
 
     tiku_arena_reset(&arena);
 
-    /* Cycle 3: allocate only 8 bytes — peak should remain 30 */
+    /* Cycle 3: allocate only 8 bytes — peak should remain 32 */
     tiku_arena_alloc(&arena, 8);
     tiku_arena_stats(&arena, &stats);
-    TEST_ASSERT(stats.peak_bytes == 30, "peak remains 30 after smaller third cycle");
+    TEST_ASSERT(stats.peak_bytes == 32, "peak remains 32 after smaller third cycle");
     TEST_ASSERT(stats.used_bytes == 8, "used_bytes is 8 in third cycle");
 }
 
@@ -258,7 +309,7 @@ static void test_peak_tracking(void)
 /* TEST 7: NULL AND ZERO-SIZE INPUTS REJECTED                                */
 /*---------------------------------------------------------------------------*/
 
-static void test_invalid_inputs(void)
+void test_mem_invalid_inputs(void)
 {
     uint8_t buf[32];
     tiku_arena_t arena;
@@ -302,14 +353,14 @@ static void test_invalid_inputs(void)
 /* TEST 8: SECURE RESET ZEROS MEMORY AND RESETS STATE                         */
 /*---------------------------------------------------------------------------*/
 
-static void test_secure_reset(void)
+void test_mem_secure_reset(void)
 {
     uint8_t buf[32];
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
     int all_zero;
-    uint16_t i;
+    unsigned int i;
     void *p;
 
     printf("\n--- Test: Secure Reset ---\n");
@@ -358,7 +409,7 @@ static void test_secure_reset(void)
 /* TEST 9: TWO INDEPENDENT ARENAS                                            */
 /*---------------------------------------------------------------------------*/
 
-static void test_two_arenas(void)
+void test_mem_two_arenas(void)
 {
     uint8_t buf_a[32];
     uint8_t buf_b[64];
@@ -405,25 +456,27 @@ static void test_two_arenas(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* MAIN                                                                      */
+/* MAIN (host-only standalone test runner)                                   */
 /*---------------------------------------------------------------------------*/
 
+#ifndef PLATFORM_MSP430
 int main(void)
 {
     printf("=== TikuOS Arena Allocator Tests ===\n");
 
-    test_create_and_stats();
-    test_basic_alloc();
-    test_alignment();
-    test_arena_full();
-    test_reset();
-    test_peak_tracking();
-    test_invalid_inputs();
-    test_secure_reset();
-    test_two_arenas();
+    test_mem_create_and_stats();
+    test_mem_basic_alloc();
+    test_mem_alignment();
+    test_mem_arena_full();
+    test_mem_reset();
+    test_mem_peak_tracking();
+    test_mem_invalid_inputs();
+    test_mem_secure_reset();
+    test_mem_two_arenas();
 
     printf("\n=== Results: %d/%d passed, %d failed ===\n",
            tests_passed, tests_run, tests_failed);
 
     return tests_failed > 0 ? 1 : 0;
 }
+#endif /* !PLATFORM_MSP430 */
