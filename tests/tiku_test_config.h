@@ -138,7 +138,7 @@
 /*---------------------------------------------------------------------------*/
 
 /** Enable arena creation and initial stats test */
-#define TEST_MEM_CREATE 0
+#define TEST_MEM_CREATE 1
 
 /** Enable basic allocation and pointer correctness test */
 #define TEST_MEM_ALLOC 0

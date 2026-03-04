@@ -101,6 +101,7 @@ SRCS += tests/test_cpuclock.c
 SRCS += tests/test_process.c
 SRCS += tests/test_runner.c
 SRCS += tests/test_timer.c
+SRCS += tests/test_tiku_mem.c
 SRCS += tests/test_watchdog.c
 SRCS += examples/01_blink/blink.c
 SRCS += examples/02_dual_blink/dual_blink.c
@@ -123,7 +124,7 @@ TARGET = main.elf
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean flash run debug erase size monitor
+.PHONY: all clean flash run debug erase size monitor docs docs-clean
 
 all: $(TARGET) size
 
@@ -142,6 +143,15 @@ size: $(TARGET)
 
 clean:
 	rm -rf build/ $(TARGET)
+
+# ---------------------------------------------------------------------------
+# Presentations  (delegates to presentation/Makefile)
+# ---------------------------------------------------------------------------
+docs:
+	@$(MAKE) -C presentation --no-print-directory
+
+docs-clean:
+	@$(MAKE) -C presentation distclean --no-print-directory
 
 # ---------------------------------------------------------------------------
 # Flash / Debug / Erase
