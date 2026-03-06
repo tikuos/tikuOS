@@ -4,7 +4,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * test_cpuclock.h - CPU clock test interface
+ * test_cpuclock_basic.c - CPU clock basic test
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
- #ifndef TEST_CPUCLOCK_H
- #define TEST_CPUCLOCK_H
+#include "test_cpuclock.h"
 
- #include "tiku.h"
 
- void test_cpuclock_basic(void);
+void test_cpuclock_basic(void)
+{
+    TEST_PRINTF("Starting CPU clock test\n");
 
- #endif
+
+#ifdef PLATFORM_MSP430
+
+    TEST_PRINTF("Configuring P3.4 for clock output\n");
+
+    P3DIR |= BIT4;    // Make P3.4 an output
+    P3SEL1 |= BIT4;   // Select special function (clock output)
+    P3SEL0 |= BIT4;
+
+    TEST_PRINTF("P3.4 configured for clock output\n");
+
+#endif
+
+    TEST_PRINTF("CPU clock test completed\n");
+}
