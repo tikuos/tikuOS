@@ -229,12 +229,15 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /**
  * @brief Initialize the memory management module
  *
- * Called during boot from tiku_boot_init_memory(). Performs
- * platform-specific memory hardware setup via the arch layer,
- * then initializes any module-level state. Arena initialization
- * remains per-instance via tiku_arena_create().
+ * Called during boot from tiku_boot_init_memory(). Activates MPU
+ * FRAM protection first — this is the earliest point we can lock
+ * down FRAM, before any other subsystem has a chance to run.
+ * Then performs platform-specific memory hardware setup.
  */
 void tiku_mem_init(void)
 {
+    /* Activate FRAM write-protection before anything else */
+    tiku_mpu_init();
+
     tiku_mem_arch_init();
 }

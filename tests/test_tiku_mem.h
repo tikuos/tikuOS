@@ -47,5 +47,10 @@ void test_persist_full(void);
 void test_persist_reboot_survival(void);
 void test_persist_wear_check(void);
 void test_persist_register_twice(void);
+void test_mpu_init_defaults(void);
+void test_mpu_unlock_lock(void);
+void test_mpu_set_permissions(void);
+void test_mpu_scoped_write(void);
+void test_mpu_idempotent(void);
 
 #endif /* TEST_TIKU_MEM_H_ */

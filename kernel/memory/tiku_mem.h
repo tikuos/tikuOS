@@ -43,6 +43,7 @@
 
 #include <stdint.h>
 #include "hal/tiku_mem_hal.h"
+#include "hal/tiku_mpu_hal.h"
 
 /*---------------------------------------------------------------------------*/
 /* ERROR CODES                                                               */
@@ -355,14 +356,111 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
                              uint32_t *write_count);
 
 /*---------------------------------------------------------------------------*/
+/* MPU (MEMORY PROTECTION UNIT)                                              */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * FRAM write-protection via the MSP430 MPU.
+ *
+ * Default policy: all three MPU segments are read+execute, no write.
+ * This prevents stray pointers and runaway code from corrupting FRAM.
+ *
+ * To perform an intentional FRAM write the caller must explicitly
+ * unlock, write, and relock:
+ *
+ *   uint16_t saved = tiku_mpu_unlock_fram();
+ *   // ... write to FRAM ...
+ *   tiku_mpu_lock_fram(saved);
+ *
+ * For convenience, tiku_mpu_scoped_write() wraps the full sequence
+ * and disables interrupts for the duration. Interrupts are disabled
+ * because an ISR that fires while FRAM is unlocked could itself write
+ * to FRAM through a bug, defeating the protection.
+ */
+
+/**
+ * @brief MPU segment identifiers
+ *
+ * The MSP430FR MPU divides the address space into three segments.
+ */
+typedef enum {
+    TIKU_MPU_SEG1 = 0,
+    TIKU_MPU_SEG2 = 1,
+    TIKU_MPU_SEG3 = 2
+} tiku_mpu_seg_t;
+
+/**
+ * @brief MPU permission flags
+ *
+ * Bit-field values that map directly to the MPUSAM register layout.
+ * Combine with bitwise OR for compound permissions.
+ */
+typedef enum {
+    TIKU_MPU_READ  = 0x01,
+    TIKU_MPU_WRITE = 0x02,
+    TIKU_MPU_EXEC  = 0x04,
+    TIKU_MPU_RD_WR   = 0x03,
+    TIKU_MPU_RD_EXEC = 0x05,
+    TIKU_MPU_ALL     = 0x07
+} tiku_mpu_perm_t;
+
+/** Function pointer type for tiku_mpu_scoped_write callback */
+typedef void (*tiku_mpu_write_fn)(void *ctx);
+
+/**
+ * @brief Initialize the MPU with default FRAM protection
+ *
+ * Sets all three segments to read+execute (no write) and enables
+ * the MPU. Called early in boot before any other subsystem runs.
+ */
+void tiku_mpu_init(void);
+
+/**
+ * @brief Set permissions on a single MPU segment
+ *
+ * @param seg    Segment to configure (0-2)
+ * @param perm   Permission flags (combination of TIKU_MPU_* values)
+ */
+void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm);
+
+/**
+ * @brief Unlock FRAM for writing on all segments
+ *
+ * Sets the write bit on all three segments. Returns the previous
+ * MPUSAM value so it can be restored by tiku_mpu_lock_fram().
+ *
+ * @return Previous MPUSAM register value
+ */
+uint16_t tiku_mpu_unlock_fram(void);
+
+/**
+ * @brief Restore MPU state after an FRAM write
+ *
+ * @param saved_state  Value returned by a prior tiku_mpu_unlock_fram()
+ */
+void tiku_mpu_lock_fram(uint16_t saved_state);
+
+/**
+ * @brief Execute a function with FRAM unlocked, interrupts disabled
+ *
+ * Disables interrupts, unlocks FRAM, calls fn(ctx), relocks FRAM,
+ * and re-enables interrupts. The write function must be short to
+ * avoid missing interrupts for too long.
+ *
+ * @param fn   Function to call while FRAM is writable
+ * @param ctx  Opaque context pointer passed to fn
+ */
+void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
+
+/*---------------------------------------------------------------------------*/
 /* FUNCTION PROTOTYPES — MODULE                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Initialize the memory management module
  *
- * Entry point for the memory subsystem. Currently a no-op — will
- * initialize additional allocator subsystems as they are added.
+ * Entry point for the memory subsystem. Activates MPU FRAM protection
+ * first, then performs platform-specific memory hardware setup.
  */
 void tiku_mem_init(void);
 

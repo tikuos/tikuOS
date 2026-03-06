@@ -1,0 +1,835 @@
+% ===========================================================================
+%  TikuOS — Memory Management: MPU Write-Protection Wrappers
+%  Beamer Presentation
+% ===========================================================================
+\documentclass[aspectratio=169, 10pt]{beamer}
+
+% ---- Theme ----------------------------------------------------------------
+\usetheme{Madrid}
+\usecolortheme{whale}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}{%
+  \leavevmode\hbox{%
+    \begin{beamercolorbox}[wd=.33\paperwidth,ht=2.5ex,dp=1ex,center]{author in head/foot}%
+      \usebeamerfont{author in head/foot}\insertshortauthor
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.34\paperwidth,ht=2.5ex,dp=1ex,center]{title in head/foot}%
+      \usebeamerfont{title in head/foot}\insertshorttitle
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.33\paperwidth,ht=2.5ex,dp=1ex,right]{date in head/foot}%
+      \usebeamerfont{date in head/foot}\insertshortdate{}\hspace*{2em}%
+      \insertframenumber{}/\inserttotalframenumber\hspace*{2ex}
+    \end{beamercolorbox}}%
+  \vskip0pt%
+}
+
+% ---- Packages -------------------------------------------------------------
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc, decorations.pathreplacing}
+
+% ---- Code listing style ---------------------------------------------------
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{red!70!black},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!30},
+  backgroundcolor=\color{blue!3},
+  tabsize=4,
+}
+\lstdefinestyle{cstyle}{
+  language=C,
+  morekeywords={uint8_t,uint16_t,uint32_t,tiku_mpu_seg_t,tiku_mpu_perm_t,
+                tiku_mpu_write_fn,tiku_mem_err_t,tiku_mem_arch_size_t,
+                TIKU_MPU_SEG1,TIKU_MPU_SEG2,TIKU_MPU_SEG3,
+                TIKU_MPU_READ,TIKU_MPU_WRITE,TIKU_MPU_EXEC,
+                TIKU_MPU_RD_WR,TIKU_MPU_RD_EXEC,TIKU_MPU_ALL,
+                TIKU_MEM_OK,NULL},
+}
+\lstdefinestyle{bashstyle}{
+  language=bash,
+  morekeywords={sudo,apt,make,gcc},
+}
+
+% ---- Metadata -------------------------------------------------------------
+\title[TikuOS MPU]{TikuOS MPU Write-Protection Wrappers}
+\subtitle{Simple. Ubiquitous. Intelligence, Everywhere.}
+\author[Ambuj Varshney]{Ambuj Varshney \\ \texttt{ambuj@tiku-os.org}}
+\date{\today}
+
+% ===========================================================================
+\begin{document}
+
+% ---------------------------------------------------------------------------
+\begin{frame}
+\titlepage
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Outline}
+\tableofcontents
+\end{frame}
+
+% ===========================================================================
+\section{Why FRAM Write-Protection?}
+% ===========================================================================
+
+\begin{frame}{The Problem: Unprotected FRAM}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Without MPU protection:}
+\begin{itemize}
+  \item Wild pointers can corrupt FRAM silently
+  \item Runaway code can overwrite calibration data
+  \item ISR bugs can damage persistent state
+  \item Stack overflows can reach FRAM regions
+  \item Corruption persists across reboots
+\end{itemize}
+
+\vspace{0.5em}
+\begin{alertblock}{FRAM Makes It Worse}
+Unlike SRAM, FRAM is non-volatile --- a single wild write
+persists across power cycles. A corrupted calibration value
+stays corrupted until explicitly fixed.
+\end{alertblock}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{TikuOS MPU wrappers:}
+\begin{itemize}
+  \item Default: FRAM is read+execute, \textbf{no write}
+  \item Explicit unlock/lock for intentional writes
+  \item Scoped write helper disables interrupts
+  \item Per-segment permission control
+  \item Password-protected hardware registers
+\end{itemize}
+
+\vspace{0.5em}
+\begin{block}{Defense in Depth}
+The MPU acts as a hardware safety net --- even if software has
+a bug, it cannot accidentally modify FRAM without going through
+the controlled unlock sequence.
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{MSP430 MPU Hardware}
+% ===========================================================================
+
+\begin{frame}{MPU Register Architecture}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Three key registers:}
+
+\vspace{0.5em}
+\begin{tabular}{@{}lp{5cm}@{}}
+\toprule
+\textbf{Register} & \textbf{Purpose} \\
+\midrule
+\texttt{MPUCTL0} & Control: password (upper byte), enable bit, lock bit \\
+\texttt{MPUCTL1} & Violation flags (which segment was violated) \\
+\texttt{MPUSAM} & Segment Access Mode: R/W/X permissions per segment \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\begin{alertblock}{Password Protection}
+Every write to \texttt{MPUCTL0} must include \texttt{0xA500} in
+the upper byte. Without it, the hardware ignores the write (or
+triggers a reset). This prevents wild pointers from accidentally
+changing memory protection.
+\end{alertblock}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{MPUSAM bit layout:}
+\begin{center}
+\begin{tikzpicture}[
+    cell/.style={draw, minimum width=0.7cm, minimum height=0.6cm,
+                 font=\tiny\ttfamily},
+    label/.style={font=\tiny\sffamily},
+    >=Stealth
+  ]
+  % Bit numbers
+  \foreach \i/\b in {0/11,1/10,2/9,3/8,4/7,5/6,6/5,7/4,8/3,9/2,10/1,11/0} {
+    \node[label] at (\i*0.7+0.35, 0.6) {\b};
+  }
+  % Segment 3 bits
+  \foreach \i/\v in {0/?,1/X,2/W,3/R} {
+    \node[cell, fill=red!15] at (\i*0.7+0.35, 0) {\v};
+  }
+  % Segment 2 bits
+  \foreach \i/\v in {4/?,5/X,6/W,7/R} {
+    \node[cell, fill=green!15] at (\i*0.7+0.35, 0) {\v};
+  }
+  % Segment 1 bits
+  \foreach \i/\v in {8/?,9/X,10/W,11/R} {
+    \node[cell, fill=blue!15] at (\i*0.7+0.35, 0) {\v};
+  }
+  % Segment labels
+  \draw[decorate, decoration={brace, amplitude=4pt}]
+    (0, -0.4) -- (2.8, -0.4) node[midway, below=0.2cm, font=\tiny\sffamily] {Segment 3};
+  \draw[decorate, decoration={brace, amplitude=4pt}]
+    (2.8, -0.4) -- (5.6, -0.4) node[midway, below=0.2cm, font=\tiny\sffamily] {Segment 2};
+  \draw[decorate, decoration={brace, amplitude=4pt}]
+    (5.6, -0.4) -- (8.4, -0.4) node[midway, below=0.2cm, font=\tiny\sffamily] {Segment 1};
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.3em}
+\small
+Each segment has 3 permission bits (R/W/X) in a 4-bit nybble.
+
+\vspace{0.3em}
+\textbf{Default value \texttt{0x0555}:}\\
+\texttt{0x5} = \texttt{0b0101} = R+X (no W) per segment.\\
+Three segments: \texttt{0x0555}.
+
+\vspace{0.3em}
+\textbf{Unlock value \texttt{0x0222}:}\\
+ORing this sets the W bit in all three segments.
+\end{column}
+\end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Architecture \& Types}
+% ===========================================================================
+
+\begin{frame}[fragile]{MPU Types (kernel/memory/tiku\_mem.h)}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Segment identifiers}]
+typedef enum {
+    TIKU_MPU_SEG1 = 0,
+    TIKU_MPU_SEG2 = 1,
+    TIKU_MPU_SEG3 = 2
+} tiku_mpu_seg_t;
+\end{lstlisting}
+
+\begin{lstlisting}[style=cstyle, title={Permission flags}]
+typedef enum {
+    TIKU_MPU_READ    = 0x01,
+    TIKU_MPU_WRITE   = 0x02,
+    TIKU_MPU_EXEC    = 0x04,
+    TIKU_MPU_RD_WR   = 0x03,
+    TIKU_MPU_RD_EXEC = 0x05,
+    TIKU_MPU_ALL     = 0x07
+} tiku_mpu_perm_t;
+\end{lstlisting}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Scoped write callback}]
+typedef void (*tiku_mpu_write_fn)(
+    void *ctx);
+\end{lstlisting}
+
+\vspace{0.5em}
+\begin{block}{Design Choices}
+\begin{itemize}
+  \item Permission flags map directly to hardware bit positions
+  \item Compound permissions (\texttt{RD\_WR}, \texttt{RD\_EXEC}) are
+        pre-defined for convenience
+  \item Callback takes an opaque \texttt{void *ctx} so the caller
+        can pass any data without globals
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Platform Layering}
+% ===========================================================================
+
+\begin{frame}[fragile]{Three-Layer Architecture}
+\begin{center}
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners, minimum width=4.5cm, minimum height=1cm,
+                font=\small\ttfamily, align=center},
+    arrow/.style={->, thick, >=Stealth},
+    label/.style={font=\small\sffamily, text width=5cm, align=left}
+  ]
+  \node[box, fill=blue!15] (kernel) at (0, 3)
+    {kernel/memory/\\tiku\_mpu.c};
+  \node[box, fill=green!15] (hal) at (0, 1.5)
+    {hal/\\tiku\_mpu\_hal.h};
+  \node[box, fill=red!15] (arch) at (0, 0)
+    {arch/msp430/\\tiku\_mpu\_arch.c};
+
+  \draw[arrow] (kernel) -- (hal);
+  \draw[arrow] (hal) -- (arch);
+
+  \node[label, anchor=west] at (3, 3) {Platform-independent logic:\\
+    init, set\_permissions, unlock, lock, scoped\_write};
+  \node[label, anchor=west] at (3, 1.5) {Routes to arch header;\\
+    declares HAL function signatures};
+  \node[label, anchor=west] at (3, 0) {MSP430 hardware access:\\
+    MPUCTL0 password, MPUSAM, intrinsics};
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.3em}
+\begin{block}{Why This Layering?}
+The kernel MPU code (\texttt{tiku\_mpu.c}) contains only bit manipulation
+and sequencing logic --- no \texttt{\#include <msp430.h>}, no register names,
+no intrinsics. Porting to a new platform means writing a new arch file; the
+kernel code stays untouched.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{HAL Interface}
+\begin{lstlisting}[style=cstyle, title={hal/tiku\_mpu\_hal.h --- Platform functions}]
+/* Read the segment-access-mode register */
+uint16_t tiku_mpu_arch_get_sam(void);
+
+/* Write new permissions (handles password/unlock internally) */
+void tiku_mpu_arch_set_sam(uint16_t sam);
+
+/* Read MPU control register (check enable bit) */
+uint16_t tiku_mpu_arch_get_ctl(void);
+
+/* Interrupt control for critical sections */
+void tiku_mpu_arch_disable_irq(void);
+void tiku_mpu_arch_enable_irq(void);
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Kernel Calls HAL}
+The kernel never writes to hardware registers directly.
+It calls \texttt{tiku\_mpu\_arch\_set\_sam()} which handles
+the password sequence internally.
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{block}{Host Testing}
+On the host, these functions are stubbed with plain
+variables. Tests can inspect the resulting state
+without real MPU hardware.
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{MSP430 Arch Implementation}
+\begin{lstlisting}[style=cstyle, title={arch/msp430/tiku\_mpu\_arch.c}]
+#include "tiku_mpu_arch.h"
+#include <msp430.h>
+
+uint16_t tiku_mpu_arch_get_sam(void) {
+    return MPUSAM;
+}
+
+void tiku_mpu_arch_set_sam(uint16_t sam) {
+    MPUCTL0 = MPUPW;            /* Unlock with password (0xA500) */
+    MPUSAM  = sam;              /* Set new permissions */
+    MPUCTL0 = MPUPW | MPUENA;  /* Re-enable MPU */
+}
+
+uint16_t tiku_mpu_arch_get_ctl(void) {
+    return MPUCTL0;
+}
+
+void tiku_mpu_arch_disable_irq(void) { __disable_interrupt(); }
+void tiku_mpu_arch_enable_irq(void)  { __enable_interrupt(); }
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{alertblock}{All Hardware Access in One File}
+The password (\texttt{MPUPW}), enable bit (\texttt{MPUENA}), and
+MSP430 intrinsics are confined to this single arch file. The kernel
+layer never needs to know these details.
+\end{alertblock}
+\end{frame}
+
+% ===========================================================================
+\section{API Reference}
+% ===========================================================================
+
+\begin{frame}[fragile]{tiku\_mpu\_init()}
+\begin{lstlisting}[style=cstyle]
+void tiku_mpu_init(void);
+\end{lstlisting}
+
+\begin{itemize}
+  \item Sets all three segments to \textbf{read + execute, no write} (\texttt{0x0555})
+  \item Called by \texttt{tiku\_mem\_init()} at boot --- first thing before any other subsystem
+  \item After this call, any attempt to write to FRAM triggers an MPU violation
+\end{itemize}
+
+\vspace{0.3em}
+\begin{lstlisting}[style=cstyle, title={kernel/memory/tiku\_mpu.c}]
+#define MPU_SAM_DEFAULT   0x0555  /* R+X on all 3 segments */
+
+void tiku_mpu_init(void) {
+    tiku_mpu_arch_set_sam(MPU_SAM_DEFAULT);
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Boot Sequence}
+\texttt{tiku\_mem\_init()} calls \texttt{tiku\_mpu\_init()} first, then
+\texttt{tiku\_mem\_arch\_init()}. FRAM is write-protected before any
+other memory subsystem initialization runs.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{tiku\_mpu\_unlock\_fram() / tiku\_mpu\_lock\_fram()}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Unlock: enable writes}]
+uint16_t tiku_mpu_unlock_fram(void)
+{
+    uint16_t saved =
+        tiku_mpu_arch_get_sam();
+
+    tiku_mpu_arch_set_sam(
+        saved | 0x0222);
+
+    return saved;
+}
+\end{lstlisting}
+
+\begin{itemize}
+  \item Saves current SAM state
+  \item ORs in write bit for all segments
+  \item Returns saved state for later restore
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Lock: restore state}]
+void tiku_mpu_lock_fram(
+    uint16_t saved_state)
+{
+    tiku_mpu_arch_set_sam(saved_state);
+}
+\end{lstlisting}
+
+\begin{itemize}
+  \item Restores SAM to pre-unlock value
+  \item Removes write permission
+  \item Safe to call when already locked
+\end{itemize}
+
+\vspace{0.5em}
+\begin{block}{Usage Pattern}
+\texttt{saved = unlock();}\\
+\texttt{// ... write to FRAM ...}\\
+\texttt{lock(saved);}
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{tiku\_mpu\_scoped\_write()}
+\begin{lstlisting}[style=cstyle]
+void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
+\end{lstlisting}
+
+\begin{lstlisting}[style=cstyle, title={kernel/memory/tiku\_mpu.c}]
+void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx) {
+    uint16_t saved;
+
+    tiku_mpu_arch_disable_irq();   /* 1. Disable interrupts */
+    saved = tiku_mpu_unlock_fram(); /* 2. Unlock FRAM */
+
+    fn(ctx);                        /* 3. Execute write function */
+
+    tiku_mpu_lock_fram(saved);      /* 4. Relock FRAM */
+    tiku_mpu_arch_enable_irq();    /* 5. Re-enable interrupts */
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{alertblock}{Why Disable Interrupts?}
+While FRAM is unlocked, any ISR has write access.
+A bug in an ISR could corrupt persistent data.
+Disabling interrupts ensures only the caller's
+function writes to FRAM.
+\end{alertblock}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{alertblock}{Keep It Short}
+While interrupts are disabled, hardware events
+queue up. The write function must be brief ---
+long operations should be split across multiple
+\texttt{scoped\_write} calls.
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{tiku\_mpu\_set\_permissions()}
+\begin{lstlisting}[style=cstyle]
+void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm);
+\end{lstlisting}
+
+\begin{lstlisting}[style=cstyle, title={kernel/memory/tiku\_mpu.c}]
+void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm) {
+    uint16_t shift = (uint16_t)seg * 4U;
+    uint16_t mask  = (uint16_t)0x07 << shift;
+    uint16_t sam   = tiku_mpu_arch_get_sam();
+
+    sam = (sam & ~mask) | (((uint16_t)perm & 0x07) << shift);
+    tiku_mpu_arch_set_sam(sam);
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{itemize}
+  \item Modifies only the targeted segment's 3-bit permission field
+  \item Other segments are left untouched
+  \item Use when you need finer control than the all-segments unlock/lock
+\end{itemize}
+
+\vspace{0.3em}
+\textbf{Example:} Make segment 3 writable while keeping segments 1--2 locked:
+\begin{lstlisting}[style=cstyle]
+tiku_mpu_set_permissions(TIKU_MPU_SEG3, TIKU_MPU_RD_WR);
+/* ... write to segment 3 FRAM region ... */
+tiku_mpu_set_permissions(TIKU_MPU_SEG3, TIKU_MPU_RD_EXEC);
+\end{lstlisting}
+\end{frame}
+
+% ===========================================================================
+\section{Complete Usage Example}
+% ===========================================================================
+
+\begin{frame}[fragile]{End-to-End: Persisting Sensor Calibration}
+\begin{lstlisting}[style=cstyle]
+/* Context for the scoped write callback */
+typedef struct {
+    tiku_persist_store_t *store;
+    const uint8_t *data;
+    tiku_mem_arch_size_t len;
+} cal_write_ctx_t;
+
+static void write_cal(void *arg) {
+    cal_write_ctx_t *ctx = (cal_write_ctx_t *)arg;
+    tiku_persist_write(ctx->store, "cal", ctx->data, ctx->len);
+}
+
+void save_calibration(tiku_persist_store_t *store,
+                       const uint8_t *cal_data, tiku_mem_arch_size_t len)
+{
+    cal_write_ctx_t ctx = { store, cal_data, len };
+
+    /* scoped_write: disable IRQ -> unlock FRAM -> write -> lock -> enable IRQ */
+    tiku_mpu_scoped_write(write_cal, &ctx);
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Safety Guarantees}
+FRAM is writable only during the \texttt{write\_cal} callback.
+Interrupts are disabled so no ISR can interfere. After return,
+FRAM is write-protected again automatically.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Manual Unlock/Lock for Batched Writes}
+\begin{lstlisting}[style=cstyle]
+void batch_persist_update(tiku_persist_store_t *store) {
+    uint16_t saved;
+    uint8_t cfg_data[] = {0x01, 0x02};
+    uint8_t cal_data[] = {0xAA, 0xBB, 0xCC};
+
+    /* Batch multiple FRAM writes in one unlock window */
+    saved = tiku_mpu_unlock_fram();
+
+    tiku_persist_write(store, "cfg", cfg_data, sizeof(cfg_data));
+    tiku_persist_write(store, "cal", cal_data, sizeof(cal_data));
+
+    tiku_mpu_lock_fram(saved);
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{alertblock}{Trade-off: Batching vs Safety}
+Manual unlock/lock avoids per-write overhead but leaves FRAM
+unprotected for longer. Use \texttt{scoped\_write} for single writes;
+manual unlock for known-safe batches where the caller controls the
+critical section.
+\end{alertblock}
+\end{frame}
+
+% ===========================================================================
+\section{File Organization}
+% ===========================================================================
+
+\begin{frame}[fragile]{Module File Organization}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Layer} & \textbf{File} & \textbf{Role} \\
+\midrule
+\multirow{3}{*}{Kernel (portable)}
+  & \texttt{kernel/memory/tiku\_mem.h}  & Unified API: arena + persist + MPU types \\
+  & \texttt{kernel/memory/tiku\_mem.c}  & Arena allocator, module init \\
+  & \texttt{kernel/memory/tiku\_mpu.c}  & MPU logic: init, unlock, lock, scoped write \\
+\midrule
+\multirow{2}{*}{HAL}
+  & \texttt{hal/tiku\_mem\_hal.h}  & Routes to arch memory header \\
+  & \texttt{hal/tiku\_mpu\_hal.h}  & Routes to arch MPU header \\
+\midrule
+\multirow{2}{*}{Arch (MSP430)}
+  & \texttt{arch/msp430/tiku\_mpu\_arch.h} & MPU arch function declarations \\
+  & \texttt{arch/msp430/tiku\_mpu\_arch.c} & MPUCTL0/MPUSAM register access \\
+\midrule
+Tests
+  & \texttt{tests/test\_tiku\_mem.c} & 25 test cases (arena + persist + MPU) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.5em}
+\begin{block}{Porting to a New Architecture}
+Only the arch files change:
+\begin{enumerate}
+  \item Implement \texttt{tiku\_mpu\_arch\_get\_sam()} / \texttt{set\_sam()} for your MPU hardware
+  \item Implement \texttt{disable\_irq()} / \texttt{enable\_irq()} for your interrupt controller
+  \item The kernel MPU logic and all tests remain untouched
+\end{enumerate}
+\end{block}
+\end{frame}
+
+% ===========================================================================
+\section{API Summary}
+% ===========================================================================
+
+\begin{frame}{API at a Glance}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Function} & \textbf{Returns} & \textbf{Complexity} & \textbf{Description} \\
+\midrule
+\texttt{tiku\_mpu\_init}       & \texttt{void}     & O(1) & Set default FRAM protection \\
+\texttt{tiku\_mpu\_set\_permissions} & \texttt{void} & O(1) & Set permissions on one segment \\
+\texttt{tiku\_mpu\_unlock\_fram}   & \texttt{uint16\_t} & O(1) & Enable writes, return saved state \\
+\texttt{tiku\_mpu\_lock\_fram}    & \texttt{void}     & O(1) & Restore saved protection state \\
+\texttt{tiku\_mpu\_scoped\_write} & \texttt{void}     & O(1)+fn & IRQ-safe unlock/write/lock \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.5em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Safety Guarantees}
+\begin{itemize}
+  \item FRAM write-protected by default
+  \item Hardware password prevents accidental unlock
+  \item Scoped write disables interrupts
+  \item Lock/unlock are idempotent
+\end{itemize}
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{block}{Design Choices}
+\begin{itemize}
+  \item Platform-independent kernel code
+  \item All register access in arch layer
+  \item HAL routes to correct platform
+  \item Host-testable with stub registers
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Test Suite}
+% ===========================================================================
+
+\begin{frame}[fragile]{Test Configuration}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Host-native (no hardware):}
+\begin{lstlisting}[style=bashstyle]
+gcc -std=c99 -Wall -Wextra -I. \
+  tests/test_tiku_mem.c \
+  kernel/memory/tiku_mem.c \
+  kernel/memory/tiku_persist.c \
+  kernel/memory/tiku_mpu.c \
+  -o test_tiku_mem \
+  && ./test_tiku_mem
+\end{lstlisting}
+
+\vspace{0.3em}
+Host mode provides stub implementations of all HAL functions ---
+plain variables mimic MPU registers so the test can inspect
+resulting state without hardware.
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Host HAL stubs in test file}]
+/* Stub MPU registers */
+static uint16_t stub_mpuctl0;
+static uint16_t stub_mpusam;
+
+uint16_t tiku_mpu_arch_get_sam(void)
+{ return stub_mpusam; }
+
+void tiku_mpu_arch_set_sam(uint16_t sam)
+{
+    stub_mpuctl0 = 0xA500;
+    stub_mpusam  = sam;
+    stub_mpuctl0 = 0xA500 | 0x0001;
+}
+
+void tiku_mpu_arch_disable_irq(void)
+{ /* no-op */ }
+void tiku_mpu_arch_enable_irq(void)
+{ /* no-op */ }
+\end{lstlisting}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{MPU Test Cases}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}clp{7.5cm}@{}}
+\toprule
+\textbf{\#} & \textbf{Test Name} & \textbf{What It Verifies} \\
+\midrule
+21 & Init defaults       & SAM = 0x0555 (all R+X); CTL enable bit set \\
+22 & Unlock / Lock       & Unlock returns saved state (0x0555); SAM becomes 0x0777;
+                           lock restores 0x0555 \\
+23 & Set permissions     & Changing one segment leaves others untouched \\
+24 & Scoped write        & Callback invoked with write bits set; SAM relocked after return \\
+25 & Idempotency         & Lock when locked is no-op; double unlock returns correct states;
+                           original saved state restores correctly \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.5em}
+\begin{block}{Combined Test Binary}
+MPU tests (5 groups, 14 assertions) run alongside arena (9 tests) and
+persistent store (11 tests) in a single binary --- 136 total assertions,
+all passing on host GCC.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Test Deep Dive: Scoped Write}
+\begin{lstlisting}[style=cstyle, title={test\_tiku\_mem.c --- Scoped write test}]
+typedef struct {
+    int called;
+    uint16_t sam_during;
+} scoped_write_ctx_t;
+
+static void scoped_write_cb(void *arg) {
+    scoped_write_ctx_t *ctx = (scoped_write_ctx_t *)arg;
+    ctx->called = 1;
+    ctx->sam_during = tiku_mpu_arch_get_sam();  /* capture state during write */
+}
+
+void test_mpu_scoped_write(void) {
+    scoped_write_ctx_t ctx = { 0, 0 };
+
+    tiku_mpu_init();
+    tiku_mpu_scoped_write(scoped_write_cb, &ctx);
+
+    TEST_ASSERT(ctx.called == 1);                       /* callback was invoked */
+    TEST_ASSERT((ctx.sam_during & 0x0222) == 0x0222);   /* write bits set during */
+    TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0555);     /* locked after return */
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{What This Proves}
+The test captures the SAM register \emph{inside} the callback, proving
+that FRAM was unlocked during execution. After return, SAM is verified
+to be relocked --- confirming the full unlock/write/lock sequence works.
+\end{block}
+\end{frame}
+
+% ===========================================================================
+\section{Summary}
+% ===========================================================================
+
+\begin{frame}{Summary}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{MPU Wrapper Design}
+\begin{itemize}
+  \item Hardware FRAM write-protection
+  \item Default: read+execute, no write
+  \item Explicit unlock/lock pattern
+  \item Scoped write with IRQ protection
+  \item Per-segment fine-grained control
+  \item Password-protected registers
+  \item Platform-independent kernel code
+  \item All hardware access in arch layer
+\end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{block}{Test Coverage}
+\begin{itemize}
+  \item 5 MPU test groups (14 assertions)
+  \item Runs on host GCC with stub registers
+  \item Covers: init, unlock/lock, per-segment,
+        scoped write, idempotency
+  \item Part of unified memory test binary (136 total)
+\end{itemize}
+\end{block}
+
+\vspace{0.3em}
+\begin{alertblock}{Part of the Memory Module}
+The MPU wrappers extend \texttt{tiku\_mem.h} alongside the arena
+allocator and persistent store --- same header, same HAL pattern,
+same test binary.
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Thank You}
+\begin{center}
+\Large\textbf{TikuOS MPU Write-Protection Wrappers}\\[0.5em]
+\normalsize FRAM Safety for Physical AI Endpoints\\[1.5em]
+
+\begin{tabular}{rl}
+  Repository: & \url{https://github.com/tikuos/tikuOS} \\
+  License:    & Apache 2.0 \\
+  API Header: & \texttt{kernel/memory/tiku\_mem.h} \\
+  MPU Logic:  & \texttt{kernel/memory/tiku\_mpu.c} \\
+  Tests:      & \texttt{tests/test\_tiku\_mem.c} \\
+\end{tabular}
+\end{center}
+\end{frame}
+
+\end{document}
