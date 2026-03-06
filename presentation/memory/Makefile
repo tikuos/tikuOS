@@ -1,25 +1,29 @@
 # ===========================================================================
-#  TikuOS Memory Presentation — LaTeX Build Makefile
+#  TikuOS Memory Presentations — LaTeX Build Makefile
 # ===========================================================================
 #
 #  Usage:
-#    make              Build PDF (default: pdflatex)
-#    make pdflatex     Build with pdflatex
-#    make lualatex     Build with lualatex
-#    make xelatex      Build with xelatex
-#    make view         Build and open PDF viewer
-#    make watch        Continuous rebuild on file changes (needs inotifywait)
+#    make              Build all presentation PDFs
+#    make arena        Build arena allocator presentation
+#    make persist      Build persistent store presentation
+#    make view-arena   Build and open arena PDF
+#    make view-persist Build and open persistent store PDF
 #    make clean        Remove all build artifacts
-#    make distclean    Remove artifacts + output PDF
+#    make distclean    Remove artifacts + output PDFs
 #    make help         Show this help
+#
+#  Engine override:
+#    make ENGINE=lualatex
+#    make ENGINE=xelatex
 #
 # ===========================================================================
 
 # --- Configuration ---------------------------------------------------------
-TEX_FILE   := tikuos_memory
-ENGINE     ?= pdflatex
-VIEWER     ?= xdg-open
-BUILD_DIR  := build
+TEX_ARENA   := tikuos_memory_arena
+TEX_PERSIST := tikuos_memory_persist
+ENGINE      ?= pdflatex
+VIEWER      ?= xdg-open
+BUILD_DIR   := build
 
 # Engine-specific flags
 PDFLATEX_FLAGS := -interaction=nonstopmode -halt-on-error -output-directory=$(BUILD_DIR)
@@ -27,71 +31,55 @@ LUALATEX_FLAGS := -interaction=nonstopmode -halt-on-error -output-directory=$(BU
 XELATEX_FLAGS  := -interaction=nonstopmode -halt-on-error -output-directory=$(BUILD_DIR)
 
 # --- Targets ---------------------------------------------------------------
-.PHONY: all pdflatex lualatex xelatex view watch clean distclean help
+.PHONY: all arena persist view-arena view-persist clean distclean help
 
-all: $(TEX_FILE).pdf
+all: arena persist
 
-# Build with pdflatex (default)
-pdflatex: ENGINE := pdflatex
-pdflatex: $(TEX_FILE).pdf
+arena: $(TEX_ARENA).pdf
 
-# Build with lualatex
-lualatex: ENGINE := lualatex
-lualatex: $(TEX_FILE).pdf
+persist: $(TEX_PERSIST).pdf
 
-# Build with xelatex
-xelatex: ENGINE := xelatex
-xelatex: $(TEX_FILE).pdf
-
-# --- Main build rule -------------------------------------------------------
-$(TEX_FILE).pdf: $(TEX_FILE).tex
+# --- Build rules -----------------------------------------------------------
+%.pdf: %.tex
 	@mkdir -p $(BUILD_DIR)
-	@echo "==> Building with $(ENGINE) (pass 1/2)..."
-	$(ENGINE) $($(shell echo $(ENGINE) | tr a-z A-Z)_FLAGS) $(TEX_FILE).tex
-	@echo "==> Building with $(ENGINE) (pass 2/2)..."
-	$(ENGINE) $($(shell echo $(ENGINE) | tr a-z A-Z)_FLAGS) $(TEX_FILE).tex
-	@cp $(BUILD_DIR)/$(TEX_FILE).pdf .
-	@echo "==> Output: $(TEX_FILE).pdf"
+	@echo "==> Building $< with $(ENGINE) (pass 1/2)..."
+	$(ENGINE) $($(shell echo $(ENGINE) | tr a-z A-Z)_FLAGS) $<
+	@echo "==> Building $< with $(ENGINE) (pass 2/2)..."
+	$(ENGINE) $($(shell echo $(ENGINE) | tr a-z A-Z)_FLAGS) $<
+	@cp $(BUILD_DIR)/$@ .
+	@echo "==> Output: $@"
 
 # --- View -------------------------------------------------------------------
-view: $(TEX_FILE).pdf
-	@echo "==> Opening $(TEX_FILE).pdf..."
-	$(VIEWER) $(TEX_FILE).pdf &
+view-arena: $(TEX_ARENA).pdf
+	@echo "==> Opening $(TEX_ARENA).pdf..."
+	$(VIEWER) $(TEX_ARENA).pdf &
 
-# --- Watch for changes (requires inotifywait) ------------------------------
-watch:
-	@command -v inotifywait >/dev/null 2>&1 || \
-		{ echo "Error: install inotify-tools (sudo apt install inotify-tools)"; exit 1; }
-	@echo "==> Watching $(TEX_FILE).tex for changes (Ctrl-C to stop)..."
-	@while true; do \
-		$(MAKE) --no-print-directory all; \
-		echo "==> Waiting for changes..."; \
-		inotifywait -q -e modify $(TEX_FILE).tex; \
-	done
+view-persist: $(TEX_PERSIST).pdf
+	@echo "==> Opening $(TEX_PERSIST).pdf..."
+	$(VIEWER) $(TEX_PERSIST).pdf &
 
 # --- Clean ------------------------------------------------------------------
 clean:
 	@echo "==> Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)
-	rm -f $(TEX_FILE).{aux,log,nav,out,snm,toc,vrb}
+	rm -f *.aux *.log *.nav *.out *.snm *.toc *.vrb
 
 distclean: clean
-	rm -f $(TEX_FILE).pdf
+	rm -f $(TEX_ARENA).pdf $(TEX_PERSIST).pdf
 
 # --- Help -------------------------------------------------------------------
 help:
 	@echo ""
-	@echo "  TikuOS Memory Presentation Build System"
-	@echo "  ========================================"
+	@echo "  TikuOS Memory Presentations Build System"
+	@echo "  ========================================="
 	@echo ""
-	@echo "  make              Build PDF with pdflatex (default)"
-	@echo "  make pdflatex     Build PDF with pdflatex"
-	@echo "  make lualatex     Build PDF with lualatex"
-	@echo "  make xelatex      Build PDF with xelatex"
-	@echo "  make view         Build and open in PDF viewer"
-	@echo "  make watch        Continuous rebuild on file changes"
+	@echo "  make              Build all presentations"
+	@echo "  make arena        Build arena allocator presentation"
+	@echo "  make persist      Build persistent store presentation"
+	@echo "  make view-arena   Build and open arena PDF"
+	@echo "  make view-persist Build and open persistent store PDF"
 	@echo "  make clean        Remove build artifacts"
-	@echo "  make distclean    Remove artifacts + output PDF"
+	@echo "  make distclean    Remove artifacts + output PDFs"
 	@echo "  make help         Show this help"
 	@echo ""
 	@echo "  Variables:"

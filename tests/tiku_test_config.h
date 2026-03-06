@@ -138,7 +138,7 @@
 /*---------------------------------------------------------------------------*/
 
 /** Enable arena creation and initial stats test */
-#define TEST_MEM_CREATE 1
+#define TEST_MEM_CREATE 0
 
 /** Enable basic allocation and pointer correctness test */
 #define TEST_MEM_ALLOC 0
@@ -164,12 +164,57 @@
 /** Enable two independent arenas test */
 #define TEST_MEM_TWO_ARENAS 0
 
-/** Auto-derived: true if any memory test is enabled */
+/** Auto-derived: true if any arena memory test is enabled */
 #define TEST_MEM (TEST_MEM_CREATE || TEST_MEM_ALLOC ||                     \
                   TEST_MEM_ALIGNMENT || TEST_MEM_FULL ||                   \
                   TEST_MEM_RESET || TEST_MEM_PEAK ||                       \
                   TEST_MEM_INVALID || TEST_MEM_SECURE_RESET ||             \
                   TEST_MEM_TWO_ARENAS)
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT STORE TESTS                                                    */
+/*---------------------------------------------------------------------------*/
+
+/** Enable persist init on zeroed store test */
+#define TEST_PERSIST_INIT        1
+
+/** Enable persist register and count test */
+#define TEST_PERSIST_REGISTER    0
+
+/** Enable persist write then read back test */
+#define TEST_PERSIST_WRITE_READ  0
+
+/** Enable persist read with too-small buffer test */
+#define TEST_PERSIST_SMALL_BUF   0
+
+/** Enable persist write exceeding capacity test */
+#define TEST_PERSIST_OVERFLOW    0
+
+/** Enable persist read non-existent key test */
+#define TEST_PERSIST_NOT_FOUND   0
+
+/** Enable persist delete entry test */
+#define TEST_PERSIST_DELETE      0
+
+/** Enable persist store full test */
+#define TEST_PERSIST_FULL        0
+
+/** Enable persist reboot survival test */
+#define TEST_PERSIST_REBOOT      0
+
+/** Enable persist wear check test */
+#define TEST_PERSIST_WEAR        0
+
+/** Enable persist register same key twice test */
+#define TEST_PERSIST_DUP_KEY     0
+
+/** Auto-derived: true if any persistent store test is enabled */
+#define TEST_PERSIST (TEST_PERSIST_INIT || TEST_PERSIST_REGISTER ||        \
+                      TEST_PERSIST_WRITE_READ || TEST_PERSIST_SMALL_BUF || \
+                      TEST_PERSIST_OVERFLOW || TEST_PERSIST_NOT_FOUND ||   \
+                      TEST_PERSIST_DELETE || TEST_PERSIST_FULL ||          \
+                      TEST_PERSIST_REBOOT || TEST_PERSIST_WEAR ||         \
+                      TEST_PERSIST_DUP_KEY)
 
 /** @} */ /* End of TIKU_TEST_CONFIG group */
 

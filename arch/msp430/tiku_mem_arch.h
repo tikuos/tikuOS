@@ -80,4 +80,33 @@ void tiku_mem_arch_init(void);
  */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len);
 
+/**
+ * @brief Read from non-volatile memory into SRAM
+ *
+ * On MSP430, FRAM is memory-mapped so this is a memcpy. Abstracted
+ * through the arch layer because other platforms may require special
+ * bus configuration, wait states, or non-memory-mapped NVM access.
+ *
+ * @param dst   SRAM destination buffer
+ * @param src   NVM source address
+ * @param len   Number of bytes to read
+ */
+void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
+                             tiku_mem_arch_size_t len);
+
+/**
+ * @brief Write from SRAM into non-volatile memory
+ *
+ * On MSP430, FRAM is memory-mapped so this is a memcpy. The caller
+ * is responsible for unlocking the MPU before calling this function.
+ * Abstracted through the arch layer because other NVM technologies
+ * (Flash, EEPROM) may require erase-before-write or page alignment.
+ *
+ * @param dst   NVM destination address
+ * @param src   SRAM source buffer
+ * @param len   Number of bytes to write
+ */
+void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
+                              tiku_mem_arch_size_t len);
+
 #endif /* TIKU_MEM_ARCH_H_ */

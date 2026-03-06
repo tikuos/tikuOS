@@ -79,3 +79,54 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)
         p[i] = 0;
     }
 }
+
+/*---------------------------------------------------------------------------*/
+/* tiku_mem_arch_nvm_read                                                    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Read from FRAM into SRAM
+ *
+ * FRAM on MSP430 is memory-mapped, so this is a straight memcpy.
+ * The abstraction exists because other NVM technologies (Flash, EEPROM)
+ * may not be memory-mapped and require special read sequences.
+ *
+ * @param dst   SRAM destination
+ * @param src   FRAM source
+ * @param len   Bytes to copy
+ */
+void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
+                             tiku_mem_arch_size_t len)
+{
+    tiku_mem_arch_size_t i;
+
+    for (i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
+}
+
+/*---------------------------------------------------------------------------*/
+/* tiku_mem_arch_nvm_write                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Write from SRAM into FRAM
+ *
+ * FRAM on MSP430 is memory-mapped, so this is a straight memcpy.
+ * The caller must unlock the MPU before calling — this function does
+ * not manage MPU state, allowing the caller to batch multiple writes
+ * in a single MPU-unlocked critical section.
+ *
+ * @param dst   FRAM destination
+ * @param src   SRAM source
+ * @param len   Bytes to copy
+ */
+void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
+                              tiku_mem_arch_size_t len)
+{
+    tiku_mem_arch_size_t i;
+
+    for (i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
+}

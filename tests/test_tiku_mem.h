@@ -36,5 +36,16 @@ void test_mem_peak_tracking(void);
 void test_mem_invalid_inputs(void);
 void test_mem_secure_reset(void);
 void test_mem_two_arenas(void);
+void test_persist_init_zeroed(void);
+void test_persist_register_and_count(void);
+void test_persist_write_read(void);
+void test_persist_read_small_buffer(void);
+void test_persist_write_exceeds_capacity(void);
+void test_persist_read_not_found(void);
+void test_persist_delete(void);
+void test_persist_full(void);
+void test_persist_reboot_survival(void);
+void test_persist_wear_check(void);
+void test_persist_register_twice(void);
 
 #endif /* TEST_TIKU_MEM_H_ */

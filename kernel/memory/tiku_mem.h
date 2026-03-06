@@ -56,7 +56,9 @@
 typedef enum {
     TIKU_MEM_OK         = 0,    /**< Operation succeeded */
     TIKU_MEM_ERR_INVALID = -1,  /**< Invalid argument (NULL pointer, etc.) */
-    TIKU_MEM_ERR_NOMEM  = -2    /**< Out of memory */
+    TIKU_MEM_ERR_NOMEM  = -2,   /**< Out of memory */
+    TIKU_MEM_ERR_FULL   = -3,   /**< Store is full (no free slots) */
+    TIKU_MEM_ERR_NOT_FOUND = -4 /**< Key not found in store */
 } tiku_mem_err_t;
 
 /*---------------------------------------------------------------------------*/
@@ -194,6 +196,163 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena);
  */
 tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
                                 tiku_mem_stats_t *stats);
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT FRAM KEY-VALUE STORE                                           */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Manages non-volatile FRAM storage with validation. Entries are registered
+ * at boot with caller-provided FRAM buffers. A magic number (TIKU_PERSIST_MAGIC)
+ * distinguishes valid entries from uninitialized FRAM, allowing the store to
+ * recover registered data across reboots.
+ */
+
+/** Maximum number of persistent entries the store can hold */
+#ifndef TIKU_PERSIST_MAX_ENTRIES
+#define TIKU_PERSIST_MAX_ENTRIES  16
+#endif
+
+/** Maximum key length in bytes (including null terminator) */
+#ifndef TIKU_PERSIST_MAX_KEY_LEN
+#define TIKU_PERSIST_MAX_KEY_LEN  8
+#endif
+
+/** Magic number written into valid entries to distinguish from FRAM garbage */
+#define TIKU_PERSIST_MAGIC  0x544B5553U
+
+/** Default FRAM write-endurance warning threshold (cycles) */
+#ifndef TIKU_PERSIST_WEAR_THRESHOLD
+#define TIKU_PERSIST_WEAR_THRESHOLD  1000000000UL
+#endif
+
+/**
+ * @brief One entry in the persistent store
+ *
+ * Each entry maps a short string key to a caller-provided FRAM buffer.
+ * The magic number and valid flag together indicate whether the entry
+ * contains real data or is uninitialized FRAM.
+ */
+typedef struct {
+    char      key[TIKU_PERSIST_MAX_KEY_LEN]; /**< Null-terminated key string */
+    uint8_t  *fram_ptr;   /**< Pointer to caller-provided FRAM buffer */
+    tiku_mem_arch_size_t value_len;  /**< Current length of stored value */
+    tiku_mem_arch_size_t capacity;   /**< Maximum capacity of FRAM buffer */
+    uint32_t  write_count; /**< Number of writes (wear monitoring) */
+    uint32_t  magic;       /**< Must equal TIKU_PERSIST_MAGIC if valid */
+    uint8_t   valid;       /**< Non-zero if entry is in use */
+} tiku_persist_entry_t;
+
+/**
+ * @brief Persistent store control block
+ *
+ * Contains an array of entries and a count of active entries.
+ */
+typedef struct {
+    tiku_persist_entry_t entries[TIKU_PERSIST_MAX_ENTRIES];
+    tiku_mem_arch_size_t count;  /**< Number of valid entries */
+} tiku_persist_store_t;
+
+/*---------------------------------------------------------------------------*/
+/* FUNCTION PROTOTYPES — PERSISTENT STORE                                    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize the persistent store, recovering valid entries
+ *
+ * Scans all slots: entries with correct magic and valid flag are kept,
+ * all others are cleared. Call once at boot.
+ *
+ * @param store   Store to initialize
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if store is NULL
+ */
+tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store);
+
+/**
+ * @brief Register a FRAM buffer under a key
+ *
+ * If the key already exists, updates the FRAM pointer but preserves
+ * existing data (survives firmware updates). Otherwise allocates the
+ * first empty slot.
+ *
+ * @param store     Store to register into
+ * @param key       Null-terminated key string
+ * @param fram_buf  Pointer to caller-provided FRAM buffer
+ * @param capacity  Size of the FRAM buffer in bytes
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_FULL
+ */
+tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
+                                     const char *key,
+                                     uint8_t *fram_buf,
+                                     tiku_mem_arch_size_t capacity);
+
+/**
+ * @brief Read a value from the persistent store into an SRAM buffer
+ *
+ * Copies from FRAM to the caller's buffer. FRAM has wait states on
+ * MSP430, so reading into SRAM gives faster subsequent access.
+ *
+ * @param store     Store to read from
+ * @param key       Key to look up
+ * @param buf       Destination SRAM buffer
+ * @param buf_size  Size of destination buffer
+ * @param out_len   Output: actual length of stored value
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
+ *         or TIKU_MEM_ERR_INVALID
+ */
+tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
+                                  const char *key,
+                                  uint8_t *buf,
+                                  tiku_mem_arch_size_t buf_size,
+                                  tiku_mem_arch_size_t *out_len);
+
+/**
+ * @brief Write a value from SRAM into the persistent FRAM store
+ *
+ * Copies data into the FRAM buffer, updates value_len, and increments
+ * write_count for wear monitoring. Does not unlock MPU internally —
+ * the caller is expected to batch writes within an MPU-unlocked region.
+ *
+ * @param store     Store to write into
+ * @param key       Key to look up
+ * @param data      Source data in SRAM
+ * @param data_len  Length of source data
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
+ *         or TIKU_MEM_ERR_INVALID
+ */
+tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
+                                   const char *key,
+                                   const uint8_t *data,
+                                   tiku_mem_arch_size_t data_len);
+
+/**
+ * @brief Delete an entry from the persistent store
+ *
+ * Clears the entry slot with memset so the key can no longer be found.
+ *
+ * @param store   Store to delete from
+ * @param key     Key to delete
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, or TIKU_MEM_ERR_INVALID
+ */
+tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
+                                    const char *key);
+
+/**
+ * @brief Check wear level for a key
+ *
+ * Returns the write count and whether it exceeds the warning threshold.
+ * FRAM has finite write endurance (~10^15 typical, but tracking matters
+ * for safety-critical systems and hot keys).
+ *
+ * @param store       Store to query
+ * @param key         Key to check
+ * @param write_count Output: number of writes to this key (may be NULL)
+ * @return 1 if write_count exceeds threshold, 0 if within limits,
+ *         or a negative tiku_mem_err_t on error
+ */
+int tiku_persist_wear_check(tiku_persist_store_t *store,
+                             const char *key,
+                             uint32_t *write_count);
 
 /*---------------------------------------------------------------------------*/
 /* FUNCTION PROTOTYPES — MODULE                                              */

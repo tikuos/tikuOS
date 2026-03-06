@@ -70,4 +70,24 @@ void tiku_mem_arch_init(void);
  */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len);
 
+/**
+ * @brief Read from non-volatile memory into SRAM
+ *
+ * @param dst   SRAM destination buffer
+ * @param src   NVM source address
+ * @param len   Number of bytes to read
+ */
+void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
+                             tiku_mem_arch_size_t len);
+
+/**
+ * @brief Write from SRAM into non-volatile memory
+ *
+ * @param dst   NVM destination address
+ * @param src   SRAM source buffer
+ * @param len   Number of bytes to write
+ */
+void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
+                              tiku_mem_arch_size_t len);
+
 #endif /* TIKU_MEM_HAL_H_ */

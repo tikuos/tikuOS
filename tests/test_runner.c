@@ -47,7 +47,7 @@
 #include "tests/test_timer.h"
 #endif
 
-#if TEST_MEM
+#if TEST_MEM || TEST_PERSIST
 #include "tests/test_tiku_mem.h"
 #endif
 
@@ -66,6 +66,7 @@ static void test_run_watchdog(void);
 static void test_run_process(void);
 static void test_run_timer(void);
 static void test_run_mem(void);
+static void test_run_persist(void);
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                         */
@@ -80,6 +81,7 @@ void test_run_all(void)
     test_run_watchdog();
     test_run_process();
     test_run_mem();
+    test_run_persist();
 
     /* Enable global interrupts (needed for timer ISRs) */
     MAIN_PRINTF("Enabling global interrupts\n");
@@ -252,6 +254,70 @@ static void test_run_mem(void)
 #endif
 
     MAIN_PRINTF("Memory tests completed\n");
+#endif
+}
+
+static void test_run_persist(void)
+{
+#if TEST_PERSIST
+    MAIN_PRINTF("Running persistent store tests\n");
+
+#if TEST_PERSIST_INIT
+    test_persist_init_zeroed();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_REGISTER
+    test_persist_register_and_count();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_WRITE_READ
+    test_persist_write_read();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_SMALL_BUF
+    test_persist_read_small_buffer();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_OVERFLOW
+    test_persist_write_exceeds_capacity();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_NOT_FOUND
+    test_persist_read_not_found();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_DELETE
+    test_persist_delete();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_FULL
+    test_persist_full();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_REBOOT
+    test_persist_reboot_survival();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_WEAR
+    test_persist_wear_check();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_PERSIST_DUP_KEY
+    test_persist_register_twice();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+    MAIN_PRINTF("Persistent store tests completed\n");
 #endif
 }
 

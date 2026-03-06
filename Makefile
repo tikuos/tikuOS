@@ -95,6 +95,7 @@ SRCS += kernel/timers/tiku_clock.c
 SRCS += kernel/timers/tiku_htimer.c
 SRCS += kernel/timers/tiku_timer.c
 SRCS += kernel/memory/tiku_mem.c
+SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/process/tiku_process.c
 SRCS += kernel/scheduler/tiku_sched.c
 SRCS += tests/test_cpuclock.c

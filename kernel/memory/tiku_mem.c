@@ -4,11 +4,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem.c - Memory management implementation
+ * tiku_mem.c - Arena allocator implementation
  *
  * Implements the arena (bump-pointer) allocator for fragmentation-free
- * memory management on microcontrollers with small SRAM. Additional
- * allocator types will be added to this file as the module grows.
+ * memory management on microcontrollers with small SRAM.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -238,6 +237,4 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 void tiku_mem_init(void)
 {
     tiku_mem_arch_init();
-
-    /* Future: initialize pool, slab, or other allocator subsystems. */
 }
