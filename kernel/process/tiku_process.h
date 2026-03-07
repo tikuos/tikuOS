@@ -92,7 +92,7 @@ typedef struct tiku_process {
     void *local;                    /**< Per-process local storage pointer.
                                          NULL if no local state.
                                          Points to a user-defined static
-                                         struct. Cost: 2 bytes on MSP430. */
+                                         struct. Cost: one pointer width. */
 } tiku_process_t;
 
 /*---------------------------------------------------------------------------*/
@@ -118,8 +118,8 @@ typedef struct tiku_channel {
 /*---------------------------------------------------------------------------*/
 
 struct tiku_msg {
-    uint8_t type;      /* message type — lets receiver know how to cast */
-    uint8_t len;       /* payload size — for validation */
+    uint8_t type;      /**< Message type — lets receiver know how to cast */
+    uint8_t len;       /**< Payload size — for validation */
 };
 
 /*---------------------------------------------------------------------------*/

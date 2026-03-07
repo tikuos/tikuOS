@@ -4,7 +4,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * test_process.h - Process subsystem test interface
+ * test_cpuclock.h - CPU clock test interface
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,21 +21,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef TEST_PROCESS_H_
-#define TEST_PROCESS_H_
+#ifndef TEST_CPUCLOCK_H
+#define TEST_CPUCLOCK_H
 
 #include "tiku.h"
-#include "kernel/cpu/tiku_common.h"
 
-void test_process_lifecycle(void);
-void test_process_events(void);
-void test_process_yield(void);
-void test_process_broadcast(void);
-void test_process_poll(void);
-void test_process_queue_query(void);
-void test_process_local_storage(void);
-void test_process_broadcast_exit(void);
-void test_process_graceful_exit(void);
-void test_process_current_cleared(void);
+void test_cpuclock_basic(void);
 
-#endif /* TEST_PROCESS_H_ */
+#endif /* TEST_CPUCLOCK_H */

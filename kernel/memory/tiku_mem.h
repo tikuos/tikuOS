@@ -163,7 +163,7 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena);
  * Same as tiku_arena_reset() but first overwrites the entire buffer
  * with zeros. Use this when the arena held sensitive data such as
  * cryptographic keys, nonces, or credentials that must not linger
- * in SRAM (physical probing, memory-dump bugs) or in FRAM (persists
+ * in SRAM (physical probing, memory-dump bugs) or in NVM (persists
  * across reboots).
  *
  * A volatile pointer is used for the zeroing loop to prevent the
@@ -173,12 +173,12 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena);
  *
  * CPU-cycle penalty vs tiku_arena_reset():
  *   tiku_arena_reset()        — O(1), ~6 cycles regardless of size.
- *   tiku_arena_secure_reset() — O(n), approximately 5 cycles per byte
- *       on MSP430 (MOV.B + INC + CMP + JNZ loop body). For typical
- *       arena sizes:
- *         64 B   ~  320 cycles  (  20 us @ 16 MHz)
- *        256 B   ~ 1280 cycles  (  80 us @ 16 MHz)
- *       2048 B   ~10240 cycles  ( 640 us @ 16 MHz)
+ *   tiku_arena_secure_reset() — O(n), approximately 3-5 cycles per
+ *       byte depending on the target platform. For typical arena
+ *       sizes:
+ *         64 B   ~  320 cycles
+ *        256 B   ~ 1280 cycles
+ *       2048 B   ~10240 cycles
  *       Only use when the security benefit justifies the cost.
  *
  * @param arena    Arena to securely reset
@@ -199,13 +199,13 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
                                 tiku_mem_stats_t *stats);
 
 /*---------------------------------------------------------------------------*/
-/* PERSISTENT FRAM KEY-VALUE STORE                                           */
+/* PERSISTENT NVM KEY-VALUE STORE                                            */
 /*---------------------------------------------------------------------------*/
 
 /*
- * Manages non-volatile FRAM storage with validation. Entries are registered
- * at boot with caller-provided FRAM buffers. A magic number (TIKU_PERSIST_MAGIC)
- * distinguishes valid entries from uninitialized FRAM, allowing the store to
+ * Manages non-volatile storage with validation. Entries are registered
+ * at boot with caller-provided NVM buffers. A magic number (TIKU_PERSIST_MAGIC)
+ * distinguishes valid entries from uninitialized NVM, allowing the store to
  * recover registered data across reboots.
  */
 
@@ -219,10 +219,10 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 #define TIKU_PERSIST_MAX_KEY_LEN  8
 #endif
 
-/** Magic number written into valid entries to distinguish from FRAM garbage */
+/** Magic number written into valid entries to distinguish from NVM garbage */
 #define TIKU_PERSIST_MAGIC  0x544B5553U
 
-/** Default FRAM write-endurance warning threshold (cycles) */
+/** Default NVM write-endurance warning threshold (cycles) */
 #ifndef TIKU_PERSIST_WEAR_THRESHOLD
 #define TIKU_PERSIST_WEAR_THRESHOLD  1000000000UL
 #endif
@@ -230,15 +230,15 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /**
  * @brief One entry in the persistent store
  *
- * Each entry maps a short string key to a caller-provided FRAM buffer.
+ * Each entry maps a short string key to a caller-provided NVM buffer.
  * The magic number and valid flag together indicate whether the entry
- * contains real data or is uninitialized FRAM.
+ * contains real data or is uninitialized NVM.
  */
 typedef struct {
     char      key[TIKU_PERSIST_MAX_KEY_LEN]; /**< Null-terminated key string */
-    uint8_t  *fram_ptr;   /**< Pointer to caller-provided FRAM buffer */
+    uint8_t  *fram_ptr;   /**< Pointer to caller-provided NVM buffer */
     tiku_mem_arch_size_t value_len;  /**< Current length of stored value */
-    tiku_mem_arch_size_t capacity;   /**< Maximum capacity of FRAM buffer */
+    tiku_mem_arch_size_t capacity;   /**< Maximum capacity of NVM buffer */
     uint32_t  write_count; /**< Number of writes (wear monitoring) */
     uint32_t  magic;       /**< Must equal TIKU_PERSIST_MAGIC if valid */
     uint8_t   valid;       /**< Non-zero if entry is in use */
@@ -270,16 +270,16 @@ typedef struct {
 tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store);
 
 /**
- * @brief Register a FRAM buffer under a key
+ * @brief Register an NVM buffer under a key
  *
- * If the key already exists, updates the FRAM pointer but preserves
+ * If the key already exists, updates the NVM pointer but preserves
  * existing data (survives firmware updates). Otherwise allocates the
  * first empty slot.
  *
  * @param store     Store to register into
  * @param key       Null-terminated key string
- * @param fram_buf  Pointer to caller-provided FRAM buffer
- * @param capacity  Size of the FRAM buffer in bytes
+ * @param fram_buf  Pointer to caller-provided NVM buffer
+ * @param capacity  Size of the NVM buffer in bytes
  * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_FULL
  */
 tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
@@ -290,8 +290,9 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
 /**
  * @brief Read a value from the persistent store into an SRAM buffer
  *
- * Copies from FRAM to the caller's buffer. FRAM has wait states on
- * MSP430, so reading into SRAM gives faster subsequent access.
+ * Copies from NVM to the caller's buffer via the HAL. NVM may have
+ * wait states on some platforms, so reading into SRAM gives faster
+ * subsequent access.
  *
  * @param store     Store to read from
  * @param key       Key to look up
@@ -308,11 +309,12 @@ tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
                                   tiku_mem_arch_size_t *out_len);
 
 /**
- * @brief Write a value from SRAM into the persistent FRAM store
+ * @brief Write a value from SRAM into the persistent NVM store
  *
- * Copies data into the FRAM buffer, updates value_len, and increments
- * write_count for wear monitoring. Does not unlock MPU internally —
- * the caller is expected to batch writes within an MPU-unlocked region.
+ * Copies data into the NVM buffer via the HAL, updates value_len,
+ * and increments write_count for wear monitoring. Does not unlock
+ * NVM write-protection internally — the caller is expected to batch
+ * writes within an unprotected region.
  *
  * @param store     Store to write into
  * @param key       Key to look up
@@ -342,8 +344,8 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
  * @brief Check wear level for a key
  *
  * Returns the write count and whether it exceeds the warning threshold.
- * FRAM has finite write endurance (~10^15 typical, but tracking matters
- * for safety-critical systems and hot keys).
+ * NVM technologies have finite write endurance (tracking matters for
+ * safety-critical systems and hot keys).
  *
  * @param store       Store to query
  * @param key         Key to check
@@ -360,28 +362,28 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 /*---------------------------------------------------------------------------*/
 
 /*
- * FRAM write-protection via the MSP430 MPU.
+ * NVM write-protection via the platform MPU (HAL layer).
  *
  * Default policy: all three MPU segments are read+execute, no write.
- * This prevents stray pointers and runaway code from corrupting FRAM.
+ * This prevents stray pointers and runaway code from corrupting NVM.
  *
- * To perform an intentional FRAM write the caller must explicitly
+ * To perform an intentional NVM write the caller must explicitly
  * unlock, write, and relock:
  *
  *   uint16_t saved = tiku_mpu_unlock_fram();
- *   // ... write to FRAM ...
+ *   // ... write to NVM ...
  *   tiku_mpu_lock_fram(saved);
  *
  * For convenience, tiku_mpu_scoped_write() wraps the full sequence
  * and disables interrupts for the duration. Interrupts are disabled
- * because an ISR that fires while FRAM is unlocked could itself write
- * to FRAM through a bug, defeating the protection.
+ * because an ISR that fires while NVM is unlocked could itself write
+ * to NVM through a bug, defeating the protection.
  */
 
 /**
  * @brief MPU segment identifiers
  *
- * The MSP430FR MPU divides the address space into three segments.
+ * The platform MPU divides the address space into three segments.
  */
 typedef enum {
     TIKU_MPU_SEG1 = 0,
@@ -392,8 +394,8 @@ typedef enum {
 /**
  * @brief MPU permission flags
  *
- * Bit-field values that map directly to the MPUSAM register layout.
- * Combine with bitwise OR for compound permissions.
+ * Bit-field values that the HAL maps to the platform's MPU register
+ * layout. Combine with bitwise OR for compound permissions.
  */
 typedef enum {
     TIKU_MPU_READ  = 0x01,
@@ -408,10 +410,11 @@ typedef enum {
 typedef void (*tiku_mpu_write_fn)(void *ctx);
 
 /**
- * @brief Initialize the MPU with default FRAM protection
+ * @brief Initialize the MPU with default NVM protection
  *
- * Sets all three segments to read+execute (no write) and enables
- * the MPU. Called early in boot before any other subsystem runs.
+ * Sets all three segments to read+execute (no write) via the HAL
+ * and enables the MPU. Called early in boot before any other
+ * subsystem runs.
  */
 void tiku_mpu_init(void);
 
@@ -424,30 +427,30 @@ void tiku_mpu_init(void);
 void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm);
 
 /**
- * @brief Unlock FRAM for writing on all segments
+ * @brief Unlock NVM for writing on all segments
  *
- * Sets the write bit on all three segments. Returns the previous
- * MPUSAM value so it can be restored by tiku_mpu_lock_fram().
+ * Sets the write bit on all three segments via the HAL. Returns the
+ * previous state so it can be restored by tiku_mpu_lock_fram().
  *
- * @return Previous MPUSAM register value
+ * @return Previous MPU state value
  */
 uint16_t tiku_mpu_unlock_fram(void);
 
 /**
- * @brief Restore MPU state after an FRAM write
+ * @brief Restore MPU state after an NVM write
  *
  * @param saved_state  Value returned by a prior tiku_mpu_unlock_fram()
  */
 void tiku_mpu_lock_fram(uint16_t saved_state);
 
 /**
- * @brief Execute a function with FRAM unlocked, interrupts disabled
+ * @brief Execute a function with NVM unlocked, interrupts disabled
  *
- * Disables interrupts, unlocks FRAM, calls fn(ctx), relocks FRAM,
+ * Disables interrupts, unlocks NVM, calls fn(ctx), relocks NVM,
  * and re-enables interrupts. The write function must be short to
  * avoid missing interrupts for too long.
  *
- * @param fn   Function to call while FRAM is writable
+ * @param fn   Function to call while NVM is writable
  * @param ctx  Opaque context pointer passed to fn
  */
 void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
@@ -459,7 +462,7 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
 /**
  * @brief Initialize the memory management module
  *
- * Entry point for the memory subsystem. Activates MPU FRAM protection
+ * Entry point for the memory subsystem. Activates MPU NVM protection
  * first, then performs platform-specific memory hardware setup.
  */
 void tiku_mem_init(void);

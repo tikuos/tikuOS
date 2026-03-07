@@ -6,8 +6,8 @@
  *
  * tiku_watchdog.h - Watchdog timer interface
  *
- * Platform-independent watchdog timer API. Delegates to
- * architecture-specific implementations.
+ * Platform-independent watchdog timer API. All hardware access is
+ * delegated to the HAL (tiku_watchdog_hal.h).
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,25 +24,51 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-
 #ifndef TIKU_WATCHDOG_H_
 #define TIKU_WATCHDOG_H_
 
+/*---------------------------------------------------------------------------*/
+/* INCLUDES                                                                  */
+/*---------------------------------------------------------------------------*/
+
 #include <hal/tiku_watchdog_hal.h>
 
-#ifdef PLATFORM_MSP430
-// Function prototype for MSP430-specific configuration
+/*---------------------------------------------------------------------------*/
+/* FUNCTION PROTOTYPES                                                       */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Configure the watchdog timer with custom parameters
+ *
+ * Sets mode, clock source, interval, and startup behaviour. Only
+ * available on platforms whose HAL exposes these parameters.
+ *
+ * @param mode          Watchdog or interval timer mode
+ * @param clk           Clock source selection
+ * @param interval      Timeout interval
+ * @param start_held    If non-zero, start in held (paused) state
+ * @param kick_on_start If non-zero, kick the timer on start
+ */
 void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
                          tiku_wdt_interval_t interval, int start_held,
                          int kick_on_start);
-#endif
 
-// Platform-independent function prototypes
+/** @brief Initialize the watchdog timer with default settings */
 void tiku_watchdog_init(void);
+
+/** @brief Kick (reset) the watchdog timer to prevent timeout */
 void tiku_watchdog_kick(void);
+
+/** @brief Pause the watchdog timer */
 void tiku_watchdog_pause(void);
+
+/** @brief Resume the watchdog timer */
 void tiku_watchdog_resume(void);
+
+/** @brief Resume the watchdog timer with an immediate kick */
 void tiku_watchdog_resume_with_kick(void);
+
+/** @brief Disable the watchdog timer entirely */
 void tiku_watchdog_off(void);
 
 #endif /* TIKU_WATCHDOG_H_ */

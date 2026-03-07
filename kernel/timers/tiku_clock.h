@@ -24,14 +24,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_clock.h
- * @brief Platform-independent system clock interface
- *
- * Provides tick counting, time queries, and delay functions.
- * Delegates to architecture-specific implementations via the HAL.
- */
-
 #ifndef TIKU_CLOCK_H_
 #define TIKU_CLOCK_H_
 

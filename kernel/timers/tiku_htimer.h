@@ -25,42 +25,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_htimer.h
- * @brief Hardware Timer - ISR-driven, single-shot, microsecond precision
- *
- * The htimer (hardware timer) provides high-resolution timing using
- * hardware timer interrupts. Unlike software timers (tiku_timer),
- * htimer callbacks execute directly in interrupt context with
- * minimal latency.
- *
- * Constraints:
- *   - Only ONE htimer can be active at a time
- *   - Callbacks run in ISR context — keep them short
- *   - A callback may reschedule itself for periodic operation
- *
- * @code
- *   static struct tiku_htimer ht;
- *
- *   void my_isr(struct tiku_htimer *t, void *ptr) {
- *       gpio_toggle(LED_PIN);
- *       // Reschedule for drift-free periodic operation
- *       tiku_htimer_set(&ht, TIKU_HTIMER_TIME(t) + PERIOD, my_isr, NULL);
- *   }
- *
- *   // Schedule 100ms from now
- *   tiku_htimer_set(&ht, TIKU_HTIMER_NOW() + TIKU_HTIMER_SECOND / 10,
- *                   my_isr, NULL);
- * @endcode
- */
-
 #ifndef TIKU_HTIMER_H_
 #define TIKU_HTIMER_H_
 
 #include <hal/tiku_htimer_hal.h>
 
 /*---------------------------------------------------------------------------*/
-/* TYPES */
+/* TYPE DEFINITIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -100,7 +71,7 @@ struct tiku_htimer {
 };
 
 /*---------------------------------------------------------------------------*/
-/* RETURN CODES */
+/* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
 enum tiku_htimer_status {
@@ -111,7 +82,7 @@ enum tiku_htimer_status {
 };
 
 /*---------------------------------------------------------------------------*/
-/* CLOCK ARITHMETIC */
+/* CLOCK ARITHMETIC                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -129,7 +100,7 @@ enum tiku_htimer_status {
 #define TIKU_HTIMER_CLOCK_LT(a, b) (TIKU_HTIMER_CLOCK_DIFF((a), (b)) < 0)
 
 /*---------------------------------------------------------------------------*/
-/* CORE API */
+/* CORE API                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -178,7 +149,7 @@ int tiku_htimer_is_scheduled(void);
 void tiku_htimer_run_next(void);
 
 /*---------------------------------------------------------------------------*/
-/* PLATFORM INTERFACE (implemented per-architecture) */
+/* PLATFORM INTERFACE (implemented per-architecture)                          */
 /*---------------------------------------------------------------------------*/
 
 /** Initialize platform timer hardware */
@@ -191,7 +162,7 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t);
 tiku_htimer_clock_t tiku_htimer_arch_now(void);
 
 /*---------------------------------------------------------------------------*/
-/* PLATFORM CONSTANTS */
+/* PLATFORM CONSTANTS                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -231,17 +202,6 @@ tiku_htimer_clock_t tiku_htimer_arch_now(void);
 #define TIKU_HTIMER_GUARD_TIME TIKU_HTIMER_CONF_GUARD_TIME
 #else
 #define TIKU_HTIMER_GUARD_TIME (TIKU_HTIMER_ARCH_SECOND >> 14)
-#endif
-
-/*---------------------------------------------------------------------------*/
-/* DEBUG */
-/*---------------------------------------------------------------------------*/
-
-#ifdef TIKU_HTIMER_DEBUG
-#include <stdio.h>
-#define HTIMER_PRINTF(...) printf(__VA_ARGS__)
-#else
-#define HTIMER_PRINTF(...)
 #endif
 
 #endif /* TIKU_HTIMER_H_ */

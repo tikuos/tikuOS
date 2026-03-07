@@ -24,16 +24,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_htimer.c
- * @brief Hardware Timer Implementation
- *
- * Single-shot hardware timer with ISR-context callbacks.
- * Only one htimer can be pending at a time.
- */
-
 /*---------------------------------------------------------------------------*/
-/* INCLUDES */
+/* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
 #include <tiku.h>
@@ -41,14 +33,14 @@
 #include <stddef.h>
 
 /*---------------------------------------------------------------------------*/
-/* MODULE STATE */
+/* MODULE STATE                                                              */
 /*---------------------------------------------------------------------------*/
 
 /** The one pending htimer, or NULL */
 static struct tiku_htimer *pending = NULL;
 
 /*---------------------------------------------------------------------------*/
-/* PUBLIC API */
+/* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
 void tiku_htimer_init(void) {

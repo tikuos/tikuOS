@@ -176,13 +176,13 @@
 /*---------------------------------------------------------------------------*/
 
 /** Enable persist init on zeroed store test */
-#define TEST_PERSIST_INIT        1
+#define TEST_PERSIST_INIT        0
 
 /** Enable persist register and count test */
 #define TEST_PERSIST_REGISTER    0
 
 /** Enable persist write then read back test */
-#define TEST_PERSIST_WRITE_READ  0
+#define TEST_PERSIST_WRITE_READ  1
 
 /** Enable persist read with too-small buffer test */
 #define TEST_PERSIST_SMALL_BUF   0

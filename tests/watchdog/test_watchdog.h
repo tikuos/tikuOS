@@ -27,9 +27,21 @@
 #include "tiku.h"
 #include "kernel/cpu/tiku_common.h"
 
+/*---------------------------------------------------------------------------*/
+/* SHARED TEST CONSTANTS                                                     */
+/*---------------------------------------------------------------------------*/
+
+#define TEST_WATCHDOG_MAX_KICKS     30
+#define TEST_WATCHDOG_KICK_INTERVAL 500  /* milliseconds */
+#define TEST_WATCHDOG_DELAY_NORMAL  2500  /* milliseconds */
+
+/*---------------------------------------------------------------------------*/
+/* TEST FUNCTION DECLARATIONS                                                */
+/*---------------------------------------------------------------------------*/
+
 void test_watchdog_basic(void);
 void test_watchdog_pause_resume(void);
 void test_watchdog_interval_timer(void);
 void test_watchdog_timeout(void);
 
-#endif
+#endif /* TEST_WATCHDOG_H */

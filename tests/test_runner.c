@@ -32,23 +32,23 @@
 #include "kernel/cpu/tiku_common.h"
 
 #if TEST_WATCHDOG
-#include "tests/test_watchdog.h"
+#include "tests/watchdog/test_watchdog.h"
 #endif
 
 #if TEST_CPUCLOCK
-#include "tests/test_cpuclock.h"
+#include "tests/cpuclock/test_cpuclock.h"
 #endif
 
 #if TEST_PROCESS
-#include "tests/test_process.h"
+#include "tests/process/test_process.h"
 #endif
 
 #if TEST_TIMER
-#include "tests/test_timer.h"
+#include "tests/timer/test_timer.h"
 #endif
 
 #if TEST_MEM || TEST_PERSIST
-#include "tests/test_tiku_mem.h"
+#include "tests/memory/test_tiku_mem.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

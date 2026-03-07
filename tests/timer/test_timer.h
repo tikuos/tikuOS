@@ -27,6 +27,22 @@
 #include "tiku.h"
 #include "kernel/cpu/tiku_common.h"
 
+/*---------------------------------------------------------------------------*/
+/* SHARED TEST CONSTANTS                                                     */
+/*---------------------------------------------------------------------------*/
+
+#define TEST_TIMER_INTERVAL     (TIKU_CLOCK_SECOND)      /* 1 second */
+#define TEST_TIMER_SHORT        (TIKU_CLOCK_SECOND / 4)  /* 250 ms */
+#define TEST_TIMER_PERIODIC_CNT 3
+#define TEST_TIMER_DRAIN_MAX    500  /* max scheduler loops */
+
+#define TEST_HTIMER_PERIOD      (TIKU_HTIMER_SECOND / 10)  /* 100 ms */
+#define TEST_HTIMER_REPEAT_CNT  5
+
+/*---------------------------------------------------------------------------*/
+/* TEST FUNCTION DECLARATIONS                                                */
+/*---------------------------------------------------------------------------*/
+
 /* Software timer tests */
 void test_timer_event(void);
 void test_timer_callback(void);

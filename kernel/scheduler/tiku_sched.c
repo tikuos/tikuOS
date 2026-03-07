@@ -109,8 +109,8 @@ uint8_t tiku_sched_run_once(void)
  *
  * The idle hook is called inside an atomic section so that no
  * interrupt is lost between the "is there work?" check and the
- * low-power entry. The platform's LPM instruction atomically
- * re-enables interrupts on MSP430.
+ * low-power entry. The platform's low-power instruction should
+ * atomically re-enable interrupts (the HAL guarantees this).
  */
 void tiku_sched_loop(void)
 {
