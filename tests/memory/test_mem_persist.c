@@ -246,41 +246,97 @@ void test_persist_full(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* TEST 18: REBOOT SURVIVAL (RE-INIT PRESERVES VALID ENTRIES)                */
+/* TEST 18: REBOOT SURVIVAL (REAL HARDWARE RESET)                            */
+/*                                                                           */
+/* This test requires real hardware. It uses two phases across an actual      */
+/* device reset to verify that FRAM-backed persist data survives reboot:     */
+/*                                                                           */
+/*   Phase WRITE  (first boot):  write data, set phase flag, trigger BOR     */
+/*   Phase VERIFY (after reboot): re-init store, read back, compare          */
+/*                                                                           */
+/* The phase flag, store, and FRAM buffer are all placed in FRAM via          */
+/* #pragma PERSISTENT so they survive the reset while SRAM is wiped.         */
 /*---------------------------------------------------------------------------*/
+
+#ifdef PLATFORM_MSP430
+
+#pragma PERSISTENT(test_reboot_phase)
+static uint8_t test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_WRITE;
+
+#pragma PERSISTENT(test_reboot_store)
+static tiku_persist_store_t test_reboot_store = {0};
+
+#pragma PERSISTENT(test_reboot_fram_buf)
+static uint8_t test_reboot_fram_buf[16] = {0};
 
 void test_persist_reboot_survival(void)
 {
-    tiku_persist_store_t store;
-    uint8_t fram_buf[16];
     uint8_t read_buf[16];
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
     const uint8_t data[] = {0x42, 0x43, 0x44};
+    uint16_t mpu_state;
 
     TEST_PRINT("\n--- Test: Persist Reboot Survival ---\n");
 
-    memset(&store, 0, sizeof(store));
-    tiku_persist_init(&store);
+    if (test_reboot_phase == TEST_PERSIST_REBOOT_PHASE_WRITE) {
+        /*-- Phase 0: write data and trigger a real reset ----------------*/
+        TEST_PRINT("  Phase: WRITE (first boot)\n");
 
-    tiku_persist_register(&store, "boot", fram_buf, sizeof(fram_buf));
-    tiku_persist_write(&store, "boot", data, sizeof(data));
+        mpu_state = tiku_mpu_unlock_fram();
 
-    /* Simulate reboot: re-init the same store (entries have magic set) */
-    tiku_persist_init(&store);
+        memset(&test_reboot_store, 0, sizeof(test_reboot_store));
+        tiku_persist_init(&test_reboot_store);
 
-    TEST_ASSERT(store.count == 1, "count is 1 after re-init");
+        tiku_persist_register(&test_reboot_store, "boot",
+                              test_reboot_fram_buf,
+                              sizeof(test_reboot_fram_buf));
+        tiku_persist_write(&test_reboot_store, "boot", data, sizeof(data));
 
-    /* Data should still be readable */
-    memset(read_buf, 0, sizeof(read_buf));
-    err = tiku_persist_read(&store, "boot", read_buf, sizeof(read_buf),
-                            &out_len);
-    TEST_ASSERT(err == TIKU_MEM_OK, "read after re-init returns OK");
-    TEST_ASSERT(out_len == sizeof(data),
-                "data length preserved after re-init");
-    TEST_ASSERT(memcmp(read_buf, data, sizeof(data)) == 0,
-                "data intact after re-init (reboot survival)");
+        test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_VERIFY;
+
+        tiku_mpu_lock_fram(mpu_state);
+
+        TEST_PRINT("  Triggering software reset...\n");
+        PMMCTL0 = PMMPW | PMMSWPOR;
+        /* Device resets — execution never reaches here */
+
+    } else {
+        /*-- Phase 1: verify data survived the reboot -------------------*/
+        TEST_PRINT("  Phase: VERIFY (after reboot)\n");
+
+        mpu_state = tiku_mpu_unlock_fram();
+
+        tiku_persist_init(&test_reboot_store);
+
+        TEST_ASSERT(test_reboot_store.count == 1,
+                    "count is 1 after reboot");
+
+        memset(read_buf, 0, sizeof(read_buf));
+        err = tiku_persist_read(&test_reboot_store, "boot", read_buf,
+                                sizeof(read_buf), &out_len);
+        TEST_ASSERT(err == TIKU_MEM_OK, "read after reboot returns OK");
+        TEST_ASSERT(out_len == sizeof(data),
+                    "data length preserved after reboot");
+        TEST_ASSERT(memcmp(read_buf, data, sizeof(data)) == 0,
+                    "data intact after reboot");
+
+        /* Reset phase for next test run */
+        test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_WRITE;
+
+        tiku_mpu_lock_fram(mpu_state);
+    }
 }
+
+#else /* !PLATFORM_MSP430 */
+
+void test_persist_reboot_survival(void)
+{
+    TEST_PRINT("\n--- Test: Persist Reboot Survival ---\n");
+    TEST_PRINT("  SKIP: requires real hardware (PLATFORM_MSP430)\n");
+}
+
+#endif /* PLATFORM_MSP430 */
 
 /*---------------------------------------------------------------------------*/
 /* TEST 19: WEAR CHECK                                                        */

@@ -82,6 +82,12 @@ void test_mem_two_arenas(void);
 /* PERSISTENT STORE TESTS                                                    */
 /*---------------------------------------------------------------------------*/
 
+/** Reboot survival test phase: write data and trigger reset */
+#define TEST_PERSIST_REBOOT_PHASE_WRITE   0
+
+/** Reboot survival test phase: verify data after reboot */
+#define TEST_PERSIST_REBOOT_PHASE_VERIFY  1
+
 void test_persist_init_zeroed(void);
 void test_persist_register_and_count(void);
 void test_persist_write_read(void);
