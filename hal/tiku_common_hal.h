@@ -4,11 +4,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_watchdog_hal.h - Platform-routing header for watchdog timer
+ * tiku_common_hal.h - Platform-routing header for common utilities
  *
- * Routes to the correct architecture-specific watchdog header based
+ * Routes to the correct architecture-specific common header based
  * on the selected platform. This is the single point where the arch
- * watchdog header enters the include chain.
+ * common header enters the include chain.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,28 +25,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef TIKU_WATCHDOG_HAL_H_
-#define TIKU_WATCHDOG_HAL_H_
+#ifndef TIKU_COMMON_HAL_H_
+#define TIKU_COMMON_HAL_H_
 
 #ifdef PLATFORM_MSP430
-#include "arch/msp430/tiku_cpu_watchdog_arch.h"
+#include "arch/msp430/tiku_cpu_common.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* HAL-to-arch mapping macros                                                */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_WDT_INTERVAL_DEFAULT   WDTIS__32768
+#define tiku_common_arch_delay_ms(ms)   tiku_cpu_msp430_delay_ms(ms)
 
-#define tiku_watchdog_arch_on(src, isel) \
-    tiku_cpu_msp430_watchdog_on_arch((src), (isel))
-#define tiku_watchdog_arch_off() \
-    tiku_cpu_msp430_watchdog_off_arch()
-#define tiku_watchdog_arch_kick() \
-    tiku_cpu_msp430_watchdog_kick_arch()
-#define tiku_watchdog_arch_pause() \
-    tiku_cpu_msp430_watchdog_pause_arch()
-#define tiku_watchdog_arch_resume(kick) \
-    tiku_cpu_msp430_watchdog_resume_arch(kick)
+#define tiku_common_arch_led1_init()    TIKU_BOARD_LED1_INIT()
+#define tiku_common_arch_led2_init()    TIKU_BOARD_LED2_INIT()
+#define tiku_common_arch_led1_on()      TIKU_BOARD_LED1_ON()
+#define tiku_common_arch_led2_on()      TIKU_BOARD_LED2_ON()
+#define tiku_common_arch_led1_off()     TIKU_BOARD_LED1_OFF()
+#define tiku_common_arch_led2_off()     TIKU_BOARD_LED2_OFF()
+#define tiku_common_arch_led1_toggle()  TIKU_BOARD_LED1_TOGGLE()
+#define tiku_common_arch_led2_toggle()  TIKU_BOARD_LED2_TOGGLE()
 
-#endif /* TIKU_WATCHDOG_HAL_H_ */
+#endif /* TIKU_COMMON_HAL_H_ */
