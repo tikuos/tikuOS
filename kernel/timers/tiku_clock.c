@@ -23,13 +23,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_clock.c
- * @brief Platform-independent system clock implementation
- *
- * Thin wrappers around the architecture-specific clock functions.
- */
-
 /*---------------------------------------------------------------------------*/
 /* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/

@@ -32,7 +32,7 @@ void test_persist_init_zeroed(void)
     tiku_persist_store_t store;
     tiku_mem_err_t err;
 
-    printf("\n--- Test: Persist Init on Zeroed Store ---\n");
+    TEST_PRINT("\n--- Test: Persist Init on Zeroed Store ---\n");
 
     memset(&store, 0, sizeof(store));
     err = tiku_persist_init(&store);
@@ -53,7 +53,7 @@ void test_persist_register_and_count(void)
     tiku_persist_store_t store;
     uint8_t fram_buf[32];
 
-    printf("\n--- Test: Persist Register and Count ---\n");
+    TEST_PRINT("\n--- Test: Persist Register and Count ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -86,7 +86,7 @@ void test_persist_write_read(void)
     tiku_mem_err_t err;
     const uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF};
 
-    printf("\n--- Test: Persist Write Then Read ---\n");
+    TEST_PRINT("\n--- Test: Persist Write Then Read ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -117,7 +117,7 @@ void test_persist_read_small_buffer(void)
     tiku_mem_err_t err;
     const uint8_t data[] = {1, 2, 3, 4, 5, 6, 7, 8};
 
-    printf("\n--- Test: Persist Read Small Buffer ---\n");
+    TEST_PRINT("\n--- Test: Persist Read Small Buffer ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -142,7 +142,7 @@ void test_persist_write_exceeds_capacity(void)
     const uint8_t big_data[] = {1, 2, 3, 4, 5, 6, 7, 8};
     tiku_mem_err_t err;
 
-    printf("\n--- Test: Persist Write Exceeds Capacity ---\n");
+    TEST_PRINT("\n--- Test: Persist Write Exceeds Capacity ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -164,7 +164,7 @@ void test_persist_read_not_found(void)
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
 
-    printf("\n--- Test: Persist Read Not Found ---\n");
+    TEST_PRINT("\n--- Test: Persist Read Not Found ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -187,7 +187,7 @@ void test_persist_delete(void)
     tiku_mem_err_t err;
     const uint8_t data[] = {0xAA, 0xBB};
 
-    printf("\n--- Test: Persist Delete ---\n");
+    TEST_PRINT("\n--- Test: Persist Delete ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -222,7 +222,7 @@ void test_persist_full(void)
     tiku_mem_err_t err;
     int i;
 
-    printf("\n--- Test: Persist Store Full ---\n");
+    TEST_PRINT("\n--- Test: Persist Store Full ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -258,7 +258,7 @@ void test_persist_reboot_survival(void)
     tiku_mem_err_t err;
     const uint8_t data[] = {0x42, 0x43, 0x44};
 
-    printf("\n--- Test: Persist Reboot Survival ---\n");
+    TEST_PRINT("\n--- Test: Persist Reboot Survival ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -294,7 +294,7 @@ void test_persist_wear_check(void)
     int result;
     tiku_persist_entry_t *entry;
 
-    printf("\n--- Test: Persist Wear Check ---\n");
+    TEST_PRINT("\n--- Test: Persist Wear Check ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
@@ -333,7 +333,7 @@ void test_persist_register_twice(void)
     tiku_mem_err_t err;
     const uint8_t data[] = {0x11, 0x22, 0x33};
 
-    printf("\n--- Test: Persist Register Same Key Twice ---\n");
+    TEST_PRINT("\n--- Test: Persist Register Same Key Twice ---\n");
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);

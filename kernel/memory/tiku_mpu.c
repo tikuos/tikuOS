@@ -6,14 +6,14 @@
  *
  * tiku_mpu.c - MPU write-protection wrappers (platform-independent)
  *
- * Provides a controlled interface for FRAM protection using the MPU.
+ * Provides a controlled interface for NVM protection using the MPU.
  * All hardware register access is routed through the HAL functions
  * (tiku_mpu_arch_get_sam, tiku_mpu_arch_set_sam, etc.), so this file
  * contains only platform-independent logic.
  *
  * Default policy: all three MPU segments are read+execute, no write.
- * This prevents stray pointers and runaway code from corrupting FRAM.
- * To write to FRAM, code explicitly unlocks, writes, and relocks.
+ * This prevents stray pointers and runaway code from corrupting NVM.
+ * To write to NVM, code explicitly unlocks, writes, and relocks.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,10 +41,10 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * What 0x0555 means in MPUSAM:
- *   Each segment occupies 4 bits in the SAM register. Within those
- *   4 bits, the lower 3 are R/W/X permissions. 0x5 = 0b0101 =
- *   READ | EXEC (no WRITE). Three segments at 0x5 each: 0x0555.
+ * What 0x0555 means in the segment-access-mode (SAM) register:
+ *   Each segment occupies 4 bits. Within those 4 bits, the lower 3
+ *   are R/W/X permissions. 0x5 = 0b0101 = READ | EXEC (no WRITE).
+ *   Three segments at 0x5 each: 0x0555.
  *
  *     Bits [3:0]   = Segment 1: 0x5 (R+X)
  *     Bits [7:4]   = Segment 2: 0x5 (R+X)
@@ -91,14 +91,14 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
 
 /*
  * Why unlock is coarse-grained (all segments at once):
- *   Most FRAM write operations need to touch multiple segments (code
+ *   Most NVM write operations need to touch multiple segments (code
  *   constants in one, data in another). Unlocking all at once keeps the
  *   critical section short. For finer control, use tiku_mpu_set_permissions()
  *   on individual segments.
  */
 
 /**
- * @brief Unlock FRAM for writing — ORs the write bit into all segments
+ * @brief Unlock NVM for writing — ORs the write bit into all segments
  *
  * @return Previous SAM value for later restoration
  */
@@ -121,10 +121,10 @@ void tiku_mpu_lock_fram(uint16_t saved_state)
 
 /*
  * Why scoped_write disables interrupts:
- *   While FRAM is unlocked, any ISR that fires has write access to
- *   FRAM. A bug in an ISR could corrupt persistent data. By disabling
+ *   While NVM is unlocked, any ISR that fires has write access to
+ *   NVM. A bug in an ISR could corrupt persistent data. By disabling
  *   interrupts for the duration of the unlock window, we guarantee that
- *   only the caller's function can write to FRAM.
+ *   only the caller's function can write to NVM.
  *
  * Caveat: the write function (fn) must be short — while it runs,
  * interrupts are masked and hardware events queue up. Long writes
@@ -132,7 +132,7 @@ void tiku_mpu_lock_fram(uint16_t saved_state)
  */
 
 /**
- * @brief Execute a function with FRAM unlocked and interrupts disabled
+ * @brief Execute a function with NVM unlocked and interrupts disabled
  */
 void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
 {

@@ -34,7 +34,7 @@ void test_mem_create_and_stats(void)
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
 
-    printf("\n--- Test: Creation and Initial Stats ---\n");
+    TEST_PRINT("\n--- Test: Creation and Initial Stats ---\n");
 
     err = tiku_arena_create(&arena, buf, sizeof(buf), 1);
     TEST_ASSERT(err == TIKU_MEM_OK, "arena_create returns OK");
@@ -60,7 +60,7 @@ void test_mem_basic_alloc(void)
     tiku_mem_stats_t stats;
     void *p1, *p2;
 
-    printf("\n--- Test: Basic Allocation ---\n");
+    TEST_PRINT("\n--- Test: Basic Allocation ---\n");
 
     tiku_arena_create(&arena, buf, sizeof(buf), 2);
 
@@ -100,7 +100,7 @@ void test_mem_alignment(void)
     const tiku_mem_arch_size_t a2 = TEST_ALIGN_UP(1);  /* 1 -> A */
     const tiku_mem_arch_size_t a3 = TEST_ALIGN_UP(5);  /* 5 -> next multiple of A */
 
-    printf("\n--- Test: %u-Byte Alignment ---\n", A);
+    TEST_PRINT("\n--- Test: %u-Byte Alignment ---\n", A);
 
     tiku_arena_create(&arena, buf, sizeof(buf), 3);
 
@@ -141,7 +141,7 @@ void test_mem_arena_full(void)
     tiku_arena_t arena;
     void *p1, *p2, *p3;
 
-    printf("\n--- Test: Arena Full ---\n");
+    TEST_PRINT("\n--- Test: Arena Full ---\n");
 
     tiku_arena_create(&arena, buf, sizeof(buf), 4);
 
@@ -173,7 +173,7 @@ void test_mem_reset(void)
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
 
-    printf("\n--- Test: Reset ---\n");
+    TEST_PRINT("\n--- Test: Reset ---\n");
 
     tiku_arena_create(&arena, buf, sizeof(buf), 5);
 
@@ -209,7 +209,7 @@ void test_mem_peak_tracking(void)
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
 
-    printf("\n--- Test: Peak Tracking Across Resets ---\n");
+    TEST_PRINT("\n--- Test: Peak Tracking Across Resets ---\n");
 
     tiku_arena_create(&arena, buf, sizeof(buf), 6);
 
@@ -247,7 +247,7 @@ void test_mem_invalid_inputs(void)
     tiku_mem_err_t err;
     void *p;
 
-    printf("\n--- Test: Invalid Inputs ---\n");
+    TEST_PRINT("\n--- Test: Invalid Inputs ---\n");
 
     /* NULL arena pointer */
     err = tiku_arena_create(NULL, buf, sizeof(buf), 0);
@@ -293,7 +293,7 @@ void test_mem_secure_reset(void)
     unsigned int i;
     void *p;
 
-    printf("\n--- Test: Secure Reset ---\n");
+    TEST_PRINT("\n--- Test: Secure Reset ---\n");
 
     tiku_arena_create(&arena, buf, sizeof(buf), 8);
 
@@ -347,7 +347,7 @@ void test_mem_two_arenas(void)
     tiku_mem_stats_t stats_a, stats_b;
     void *pa, *pb;
 
-    printf("\n--- Test: Two Independent Arenas ---\n");
+    TEST_PRINT("\n--- Test: Two Independent Arenas ---\n");
 
     tiku_arena_create(&arena_a, buf_a, sizeof(buf_a), 10);
     tiku_arena_create(&arena_b, buf_b, sizeof(buf_b), 20);

@@ -25,47 +25,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_timer.h
- * @brief Unified Software Timer Module for TikuOS
- *
- * Each timer can operate in one of two modes:
- *   - CALLBACK mode: calls a function directly when expired
- *   - EVENT mode: posts TIKU_EVENT_TIMER to a process
- *
- * Both modes share the same structure, the same linked list, and
- * the same single management process.
- *
- * Quick reference:
- * @code
- *   // --- Callback timer ---
- *   static struct tiku_timer t;
- *   tiku_timer_set_callback(&t, TIKU_CLOCK_SECOND, my_func, NULL);
- *
- *   // --- Event timer ---
- *   static struct tiku_timer t;
- *   tiku_timer_set_event(&t, TIKU_CLOCK_SECOND);
- *   TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
- *
- *   // --- Periodic (either mode) ---
- *   void my_func(void *ptr) {
- *       tiku_timer_reset(&t);   // drift-free reschedule
- *   }
- * @endcode
- */
-
 #ifndef TIKU_TIMER_H_
 #define TIKU_TIMER_H_
 
 /*---------------------------------------------------------------------------*/
-/* INCLUDES */
+/* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
 #include "../process/tiku_process.h"
 #include "tiku_clock.h"
 
 /*---------------------------------------------------------------------------*/
-/* TIMER MODES */
+/* TIMER MODES                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -78,7 +49,7 @@ enum tiku_timer_mode {
 };
 
 /*---------------------------------------------------------------------------*/
-/* TYPE DEFINITIONS */
+/* TYPE DEFINITIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -116,7 +87,7 @@ struct tiku_timer {
 };
 
 /*---------------------------------------------------------------------------*/
-/* CORE API */
+/* CORE API                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -215,7 +186,7 @@ tiku_clock_time_t tiku_timer_remaining(struct tiku_timer *t);
 tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t);
 
 /*---------------------------------------------------------------------------*/
-/* SYSTEM QUERIES */
+/* SYSTEM QUERIES                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -238,14 +209,14 @@ tiku_clock_time_t tiku_timer_next_expiration(void);
 void tiku_timer_request_poll(void);
 
 /*---------------------------------------------------------------------------*/
-/* SYSTEM PROCESS */
+/* SYSTEM PROCESS                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** The single timer management process */
 extern struct tiku_process tiku_timer_process;
 
 /*---------------------------------------------------------------------------*/
-/* CONVENIENCE MACROS */
+/* CONVENIENCE MACROS                                                        */
 /*---------------------------------------------------------------------------*/
 
 /** One second in timer ticks */

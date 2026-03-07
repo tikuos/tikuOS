@@ -23,15 +23,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_timer.c
- * @brief Unified Software Timer Implementation
- *
- * Single process, single linked list, handles both callback and event timers.
- */
-
 /*---------------------------------------------------------------------------*/
-/* INCLUDES */
+/* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_timer.h"
@@ -39,14 +32,14 @@
 #include <stddef.h>
 
 /*---------------------------------------------------------------------------*/
-/* MODULE STATE */
+/* MODULE STATE                                                              */
 /*---------------------------------------------------------------------------*/
 
 /** Head of the active timer singly-linked list */
 static struct tiku_timer *timer_list = NULL;
 
 /*---------------------------------------------------------------------------*/
-/* INTERNAL HELPERS */
+/* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -95,7 +88,7 @@ static void timer_insert(struct tiku_timer *t) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* TIMER MANAGEMENT PROCESS */
+/* TIMER MANAGEMENT PROCESS                                                  */
 /*---------------------------------------------------------------------------*/
 
 TIKU_PROCESS(tiku_timer_process, "Timer");
@@ -176,7 +169,7 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* PUBLIC API */
+/* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
 void tiku_timer_init(void) {

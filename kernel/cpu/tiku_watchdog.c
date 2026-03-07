@@ -6,8 +6,9 @@
  *
  * tiku_watchdog.c - Watchdog timer implementation
  *
- * Platform-independent watchdog timer implementation. Delegates to
- * architecture-specific functions.
+ * Platform-independent watchdog timer logic. All hardware register
+ * access is delegated to the HAL layer so this file contains only
+ * platform-independent code.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,52 +25,54 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/*---------------------------------------------------------------------------*/
+/* INCLUDES                                                                  */
+/*---------------------------------------------------------------------------*/
+
 #include <tiku.h>
 #include "tiku_watchdog.h"
 
-#ifdef PLATFORM_MSP430
+/*---------------------------------------------------------------------------*/
+/* PRIVATE VARIABLES                                                         */
+/*---------------------------------------------------------------------------*/
 
-/*
- * Watchdog timer configuration
+/* Default watchdog configuration — platform HAL provides the types */
+static tiku_wdt_mode_t     tiku_watchdog_mode       = TIKU_WDT_MODE_WATCHDOG;
+static tiku_wdt_clk_t      tiku_watchdog_clk        = TIKU_WDT_SRC_ACLK;
+static tiku_wdt_interval_t tiku_watchdog_interval    = TIKU_WDT_INTERVAL_DEFAULT;
+static int                 tiku_watchdog_start_held  = 0;
+static int                 tiku_watchdog_kick_on_start = 1;
+
+/*---------------------------------------------------------------------------*/
+/* PUBLIC FUNCTIONS                                                          */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize the watchdog timer with current configuration
  *
- * This function initializes the watchdog timer with default values.
- * This aligns with the default values in the watchdog timer configuration with platforms without
- * such configurations for watchdog timer.
+ * Delegates to the HAL to program the watchdog hardware.
  */
-tiku_wdt_mode_t tiku_watchdog_mode = TIKU_WDT_MODE_WATCHDOG;
-tiku_wdt_clk_t tiku_watchdog_clk = TIKU_WDT_SRC_ACLK;
-tiku_wdt_interval_t tiku_watchdog_interval = WDTIS__32768;  /* ~1 second with 32kHz ACLK */
-int tiku_watchdog_start_held = 0;
-int tiku_watchdog_kick_on_start = 1;  /* Good practice to kick on start */
-#endif
-
-/*
- * Initialize the watchdog timer
- *
- * This function initializes the watchdog timer.
- *
- * @return void
-*/
 void tiku_watchdog_init(void)
 {
     WDT_PRINTF("Init\n");
-
-#ifdef PLATFORM_MSP430
-    tiku_cpu_msp430_watchdog_on_arch(tiku_watchdog_clk, tiku_watchdog_interval);
-#endif
-
+    tiku_watchdog_arch_on(tiku_watchdog_clk, tiku_watchdog_interval);
 }
 
-#ifdef PLATFORM_MSP430
-/*
- * Configure the watchdog timer
+/**
+ * @brief Configure the watchdog timer with custom parameters
  *
- * This function configures the watchdog timer.
- * This function is used to configure the watchdog timer with custom values.
+ * Stores the new configuration and re-initializes the hardware
+ * via the HAL.
  *
- * @return void
-*/
-void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk, tiku_wdt_interval_t interval, int start_held, int kick_on_start)
+ * @param mode          Watchdog or interval timer mode
+ * @param clk           Clock source selection
+ * @param interval      Timeout interval
+ * @param start_held    If non-zero, start in held (paused) state
+ * @param kick_on_start If non-zero, kick the timer on start
+ */
+void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
+                          tiku_wdt_interval_t interval, int start_held,
+                          int kick_on_start)
 {
     WDT_PRINTF("Configured: mode=%u clk=%u\n", mode, clk);
     tiku_watchdog_mode = mode;
@@ -80,85 +83,44 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk, tiku_wdt_int
 
     tiku_watchdog_init();
 }
-#endif
 
-/*
- * Kick the watchdog timer
- *
- * This function kicks the watchdog timer.
- *
- * @return void
-*/
+/**
+ * @brief Kick (reset) the watchdog timer to prevent timeout
+ */
 void tiku_watchdog_kick(void)
 {
-
-#ifdef PLATFORM_MSP430
-    tiku_cpu_msp430_watchdog_kick_arch();
-#endif
-
+    tiku_watchdog_arch_kick();
 }
 
-/*
- * Pause the watchdog timer
- *
- * This function pauses the watchdog timer.
- *
- * @return void
-*/
+/**
+ * @brief Pause the watchdog timer
+ */
 void tiku_watchdog_pause(void)
 {
-
-#ifdef PLATFORM_MSP430
-    tiku_cpu_msp430_watchdog_pause_arch();
-#endif
-
+    tiku_watchdog_arch_pause();
 }
 
-/*
- * Resume the watchdog timer
- *
- * This function resumes the watchdog timer.
- *
- * @return void
-*/
+/**
+ * @brief Resume the watchdog timer
+ */
 void tiku_watchdog_resume(void)
 {
-
-#ifdef PLATFORM_MSP430
-    tiku_cpu_msp430_watchdog_resume_arch(0);
-#endif
-
+    tiku_watchdog_arch_resume(0);
 }
 
-/*
- * Resume the watchdog timer with kick
- *
- * This function resumes the watchdog timer with kick.
- *
- * @return void
-*/
+/**
+ * @brief Resume the watchdog timer with an immediate kick
+ */
 void tiku_watchdog_resume_with_kick(void)
 {
-
-#ifdef PLATFORM_MSP430
-    tiku_cpu_msp430_watchdog_resume_arch(1);
-#endif
-
+    tiku_watchdog_arch_resume(1);
 }
 
-/*  
- * Off the watchdog timer
- *
- * This function turns off the watchdog timer.
- *
- * @return void
-*/
+/**
+ * @brief Disable the watchdog timer entirely
+ */
 void tiku_watchdog_off(void)
 {
     WDT_PRINTF("Disabled\n");
-
-#ifdef PLATFORM_MSP430
-    tiku_cpu_msp430_watchdog_off_arch();
-#endif
-
+    tiku_watchdog_arch_off();
 }

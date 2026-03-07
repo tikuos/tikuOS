@@ -28,26 +28,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file lc.h
- * @brief Local Continuations - Lightweight mechanism for saving/restoring execution state
- *
- * Local continuations provide a low-level mechanism to capture and restore
- * a function's execution state (program counter position). They form the
- * foundation for implementing protothreads and other cooperative multitasking
- * primitives in resource-constrained systems.
- * 
- * This implementation supports multiple backends:
- * - Switch-based (default): Uses switch statements and line numbers
- * - Address labels (optional): Uses GCC's address-of-label extension
- * - Custom implementations can be added via LC_CONF_INCLUDE
- */
-
 #ifndef TIKU_LC_H_
 #define TIKU_LC_H_
 
 /*---------------------------------------------------------------------------*/
-/* CONFIGURATION */
+/* CONFIGURATION                                                             */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -79,7 +64,7 @@
 typedef unsigned short lc_t;
 
 /*---------------------------------------------------------------------------*/
-/* CORE MACROS */
+/* CORE MACROS                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -171,7 +156,7 @@ typedef unsigned short lc_t;
 #define LC_END(s) }
 
 /*---------------------------------------------------------------------------*/
-/* ADVANCED MACROS */
+/* ADVANCED MACROS                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -204,7 +189,7 @@ typedef unsigned short lc_t;
 #endif /* LC_CONF_INCLUDE */
 
 /*---------------------------------------------------------------------------*/
-/* USAGE NOTES AND LIMITATIONS */
+/* USAGE NOTES AND LIMITATIONS                                               */
 /*---------------------------------------------------------------------------*/
 
 /**

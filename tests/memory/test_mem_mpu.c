@@ -29,7 +29,7 @@
 
 void test_mpu_init_defaults(void)
 {
-    printf("\n--- Test: MPU Init Defaults ---\n");
+    TEST_PRINT("\n--- Test: MPU Init Defaults ---\n");
 
     tiku_mpu_init();
 
@@ -50,7 +50,7 @@ void test_mpu_unlock_lock(void)
 {
     uint16_t saved;
 
-    printf("\n--- Test: MPU Unlock / Lock ---\n");
+    TEST_PRINT("\n--- Test: MPU Unlock / Lock ---\n");
 
     tiku_mpu_init();
 
@@ -75,7 +75,7 @@ void test_mpu_set_permissions(void)
 {
     uint16_t sam;
 
-    printf("\n--- Test: MPU Set Permissions ---\n");
+    TEST_PRINT("\n--- Test: MPU Set Permissions ---\n");
 
     tiku_mpu_init();
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0555, "baseline is 0x0555");
@@ -114,7 +114,7 @@ void test_mpu_scoped_write(void)
 {
     scoped_write_ctx_t ctx;
 
-    printf("\n--- Test: MPU Scoped Write ---\n");
+    TEST_PRINT("\n--- Test: MPU Scoped Write ---\n");
 
     tiku_mpu_init();
 
@@ -139,7 +139,7 @@ void test_mpu_idempotent(void)
 {
     uint16_t saved1, saved2;
 
-    printf("\n--- Test: MPU Lock/Unlock Idempotency ---\n");
+    TEST_PRINT("\n--- Test: MPU Lock/Unlock Idempotency ---\n");
 
     tiku_mpu_init();
 

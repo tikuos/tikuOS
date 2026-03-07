@@ -6,8 +6,8 @@
  *
  * tiku_common.h - Common utility functions
  *
- * This file provides common utility functions for the Tiku Operating System
- * including LED control, delay functions, and platform abstraction.
+ * Platform-independent utility functions including LED control and
+ * delay functions. All hardware access is delegated to the HAL.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,25 +32,10 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku.h"
-
-#ifdef PLATFORM_MSP430
-#include "arch/msp430/tiku_cpu_common.h"
-#endif
+#include <hal/tiku_common_hal.h>
 
 /*---------------------------------------------------------------------------*/
-/* CONSTANTS AND MACROS                                                     */
-/*---------------------------------------------------------------------------*/
-
-/* None */
-
-/*---------------------------------------------------------------------------*/
-/* TYPE DEFINITIONS                                                         */
-/*---------------------------------------------------------------------------*/
-
-/* None */
-
-/*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES                                                      */
+/* FUNCTION PROTOTYPES                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**

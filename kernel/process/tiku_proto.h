@@ -28,22 +28,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file proto.h
- * @brief Protothreads - Lightweight stackless threads for C
- *
- * Protothreads provide a blocking context on top of an event-driven system,
- * without the overhead of per-thread stacks. They are useful for embedded
- * systems and other memory-constrained environments.
- */
-
 #ifndef TIKU_PROTO_H_
 #define TIKU_PROTO_H_
 
 #include "tiku_lc.h"
 
 /*---------------------------------------------------------------------------*/
-/* CORE DATA STRUCTURES */
+/* CORE DATA STRUCTURES                                                      */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -58,7 +49,7 @@ struct pt {
 };
 
 /*---------------------------------------------------------------------------*/
-/* RETURN CODES */
+/* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Thread is waiting for a condition */
@@ -74,7 +65,7 @@ struct pt {
 #define PT_ENDED   3
 
 /*---------------------------------------------------------------------------*/
-/* INITIALIZATION */
+/* INITIALIZATION                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -94,7 +85,7 @@ struct pt {
 #define PT_INIT(pt) LC_INIT((pt)->lc)
 
 /*---------------------------------------------------------------------------*/
-/* THREAD DECLARATION AND DEFINITION */
+/* THREAD DECLARATION AND DEFINITION                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -146,7 +137,7 @@ struct pt {
 }
 
 /*---------------------------------------------------------------------------*/
-/* BLOCKING OPERATIONS */
+/* BLOCKING OPERATIONS                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -189,7 +180,7 @@ struct pt {
 #define PT_WAIT_WHILE(pt, cond) PT_WAIT_UNTIL((pt), !(cond))
 
 /*---------------------------------------------------------------------------*/
-/* HIERARCHICAL PROTOTHREADS */
+/* HIERARCHICAL PROTOTHREADS                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -227,7 +218,7 @@ struct pt {
   } while(0)
 
 /*---------------------------------------------------------------------------*/
-/* THREAD CONTROL */
+/* THREAD CONTROL                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -259,7 +250,7 @@ struct pt {
   } while(0)
 
 /*---------------------------------------------------------------------------*/
-/* SCHEDULING */
+/* SCHEDULING                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -281,7 +272,7 @@ struct pt {
 #define PT_SCHEDULE(f) ((f) < PT_EXITED)
 
 /*---------------------------------------------------------------------------*/
-/* COOPERATIVE YIELDING */
+/* COOPERATIVE YIELDING                                                      */
 /*---------------------------------------------------------------------------*/
 
 /**

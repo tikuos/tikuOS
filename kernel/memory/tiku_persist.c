@@ -4,10 +4,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_persist.c - Persistent FRAM key-value store implementation
+ * tiku_persist.c - Persistent NVM key-value store implementation
  *
- * Implements a registry that maps short string keys to FRAM-backed
- * buffers. Entries are registered at boot with caller-provided FRAM
+ * Implements a registry that maps short string keys to NVM-backed
+ * buffers. Entries are registered at boot with caller-provided NVM
  * regions. A magic number validates entries across reboots, and
  * write counts track wear for endurance monitoring.
  *
@@ -70,13 +70,21 @@ static tiku_persist_entry_t *persist_find(tiku_persist_store_t *store,
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/*
+/**
+ * @brief Initialize the persistent store, recovering valid entries
+ *
+ * Scans all slots: entries with correct magic and valid flag are kept,
+ * all others are cleared. Call once at boot.
+ *
  * Why init scans for magic numbers:
- *   On first boot, FRAM contains arbitrary values. After a reboot,
- *   FRAM retains whatever was written. The magic number lets init
+ *   On first boot, NVM contains arbitrary values. After a reboot,
+ *   NVM retains whatever was written. The magic number lets init
  *   distinguish real entries (written by persist_register) from
- *   FRAM garbage — only entries with the correct magic and valid
+ *   NVM garbage — only entries with the correct magic and valid
  *   flag are counted as live.
+ *
+ * @param store   Store to initialize
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if store is NULL
  */
 tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
 {
@@ -101,13 +109,25 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
     return TIKU_MEM_OK;
 }
 
-/*
+/**
+ * @brief Register an NVM buffer under a key
+ *
+ * If the key already exists, updates the NVM pointer but preserves
+ * existing data (survives firmware updates). Otherwise allocates the
+ * first empty slot.
+ *
  * Why register preserves existing data:
  *   After a firmware update the application re-registers the same keys.
  *   If the key already exists (magic + valid + matching name), we update
- *   the FRAM pointer (it may have moved in the new binary) but keep the
- *   stored value_len, write_count, and the FRAM data intact. This lets
+ *   the NVM pointer (it may have moved in the new binary) but keep the
+ *   stored value_len, write_count, and the NVM data intact. This lets
  *   configuration and calibration values survive across firmware updates.
+ *
+ * @param store     Store to register into
+ * @param key       Null-terminated key string
+ * @param fram_buf  Pointer to caller-provided NVM buffer
+ * @param capacity  Size of the NVM buffer in bytes
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_FULL
  */
 tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
                                      const char *key,
@@ -152,16 +172,22 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
     return TIKU_MEM_ERR_FULL;
 }
 
-/*
- * Why read copies to SRAM:
- *   FRAM on MSP430 has wait states (1-2 at higher clock speeds).
- *   Copying into an SRAM buffer means subsequent accesses to the
- *   data are at full CPU speed. The copy is also safer — the
- *   caller's buffer won't be affected by concurrent NVM writes.
+/**
+ * @brief Read a value from the persistent store into an SRAM buffer
  *
- *   Delegates to tiku_mem_arch_nvm_read() so the arch layer can
- *   handle platform-specific NVM access (memory-mapped FRAM on
- *   MSP430, SPI Flash elsewhere, etc.).
+ * Copies from NVM to the caller's buffer via the HAL
+ * (tiku_mem_arch_nvm_read). NVM may have wait states on some
+ * platforms, so reading into SRAM gives faster subsequent access.
+ * The copy is also safer — the caller's buffer won't be affected
+ * by concurrent NVM writes.
+ *
+ * @param store     Store to read from
+ * @param key       Key to look up
+ * @param buf       Destination SRAM buffer
+ * @param buf_size  Size of destination buffer
+ * @param out_len   Output: actual length of stored value
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
+ *         or TIKU_MEM_ERR_INVALID
  */
 tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
                                   const char *key,
@@ -191,23 +217,32 @@ tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
     return TIKU_MEM_OK;
 }
 
-/*
- * Why write doesn't unlock MPU internally:
- *   On MSP430, FRAM writes require the MPU to be unlocked. Rather
- *   than unlocking/locking per write (expensive and risky if
- *   interrupted), the caller batches multiple writes in a single
- *   MPU-unlocked critical section and calls persist_write for each.
+/**
+ * @brief Write a value from SRAM into the persistent NVM store
  *
- *   Delegates to tiku_mem_arch_nvm_write() so the arch layer can
- *   handle platform-specific NVM write sequences (direct write on
- *   memory-mapped FRAM, erase+program on Flash, etc.).
+ * Copies data into the NVM buffer via the HAL
+ * (tiku_mem_arch_nvm_write), updates value_len, and increments
+ * write_count for wear monitoring.
+ *
+ * Why write doesn't unlock MPU internally:
+ *   On platforms with NVM write-protection (e.g., MPU-guarded FRAM),
+ *   writes require the protection to be unlocked. Rather than
+ *   unlocking/locking per write (expensive and risky if interrupted),
+ *   the caller batches multiple writes in a single unlocked critical
+ *   section and calls persist_write for each.
  *
  * Why wear tracking matters:
- *   FRAM has finite write endurance (~10^15 cycles typical for TI
- *   MSP430). While far higher than Flash, hot keys (e.g. a counter
- *   incremented every second) can approach limits over years.
+ *   NVM technologies have finite write endurance. Hot keys (e.g. a
+ *   counter incremented every second) can approach limits over years.
  *   Tracking write_count lets the application detect and warn before
  *   a cell degrades.
+ *
+ * @param store     Store to write into
+ * @param key       Key to look up
+ * @param data      Source data in SRAM
+ * @param data_len  Length of source data
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
+ *         or TIKU_MEM_ERR_INVALID
  */
 tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
                                    const char *key,
@@ -236,6 +271,15 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
     return TIKU_MEM_OK;
 }
 
+/**
+ * @brief Delete an entry from the persistent store
+ *
+ * Clears the entry slot with memset so the key can no longer be found.
+ *
+ * @param store   Store to delete from
+ * @param key     Key to delete
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, or TIKU_MEM_ERR_INVALID
+ */
 tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
                                     const char *key)
 {
@@ -256,6 +300,19 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
     return TIKU_MEM_OK;
 }
 
+/**
+ * @brief Check wear level for a key
+ *
+ * Returns the write count and whether it exceeds the warning threshold.
+ * NVM technologies have finite write endurance; tracking matters for
+ * safety-critical systems and hot keys.
+ *
+ * @param store       Store to query
+ * @param key         Key to check
+ * @param write_count Output: number of writes to this key (may be NULL)
+ * @return 1 if write_count exceeds threshold, 0 if within limits,
+ *         or a negative tiku_mem_err_t on error
+ */
 int tiku_persist_wear_check(tiku_persist_store_t *store,
                              const char *key,
                              uint32_t *write_count)

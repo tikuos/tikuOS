@@ -33,6 +33,17 @@
 /* TEST HARNESS                                                              */
 /*---------------------------------------------------------------------------*/
 
+/*
+ * On MSP430 target, bare printf() has no UART backend — route through
+ * TIKU_PRINTF.  In host-mode builds, plain printf() works fine.
+ */
+#ifdef PLATFORM_MSP430
+#include "tiku.h"
+#define TEST_PRINT(...) TIKU_PRINTF(__VA_ARGS__)
+#else
+#define TEST_PRINT(...) printf(__VA_ARGS__)
+#endif
+
 extern int tests_run;
 extern int tests_passed;
 extern int tests_failed;
@@ -42,10 +53,10 @@ extern int tests_failed;
         tests_run++;                                                        \
         if (cond) {                                                         \
             tests_passed++;                                                 \
-            printf("  PASS: %s\n", msg);                                    \
+            TEST_PRINT("  PASS: %s\n", msg);                                \
         } else {                                                            \
             tests_failed++;                                                 \
-            printf("  FAIL: %s\n", msg);                                    \
+            TEST_PRINT("  FAIL: %s\n", msg);                                \
         }                                                                   \
     } while (0)
 

@@ -6,8 +6,8 @@
  *
  * tiku_common.c - Common utility functions
  *
- * This file provides common utility functions for the Tiku Operating System
- * including LED control, delay functions, and platform abstraction.
+ * Platform-independent utility functions including LED control and
+ * delay functions. All hardware access is delegated to the HAL.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,170 +30,86 @@
 
 #include "tiku_common.h"
 
-#ifdef PLATFORM_MSP430
-#include "arch/msp430/tiku_cpu_common.h"
-#endif
-
 /*---------------------------------------------------------------------------*/
-/* PRIVATE CONSTANTS                                                        */
-/*---------------------------------------------------------------------------*/
-
-/* None */
-
-/*---------------------------------------------------------------------------*/
-/* PRIVATE TYPES                                                            */
-/*---------------------------------------------------------------------------*/
-
-/* None */
-
-/*---------------------------------------------------------------------------*/
-/* PRIVATE VARIABLES                                                        */
-/*---------------------------------------------------------------------------*/
-
-/* None */
-
-/*---------------------------------------------------------------------------*/
-/* PRIVATE FUNCTION PROTOTYPES                                              */
-/*---------------------------------------------------------------------------*/
-
-/* None */
-
-/*---------------------------------------------------------------------------*/
-/* PUBLIC FUNCTIONS                                                         */
+/* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Delay for specified number of milliseconds
+ *
+ * Delegates to the HAL for platform-specific busy-wait.
+ *
  * @param ms Number of milliseconds to delay
- * 
- * Platform-independent delay function that delegates to
- * the appropriate platform-specific implementation.
- * 
- * @note Accuracy depends on platform implementation
- * @warning Not suitable for precise timing requirements
  */
-void 
-tiku_common_delay_ms(unsigned int ms)
+void tiku_common_delay_ms(unsigned int ms)
 {
-    #ifdef PLATFORM_MSP430
-        tiku_cpu_msp430_delay_ms(ms);
-    #endif
+    tiku_common_arch_delay_ms(ms);
 }
 
 /**
  * @brief Initialize LED1 hardware
- * 
- * Configures LED1 GPIO pin as output and sets initial state to off.
- * Platform-specific implementation handles actual pin configuration.
+ *
+ * Configures LED1 GPIO pin as output via the HAL.
  */
-void 
-tiku_common_led1_init(void)
+void tiku_common_led1_init(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED1_INIT();
-    #endif
+    tiku_common_arch_led1_init();
 }
 
 /**
  * @brief Initialize LED2 hardware
- * 
- * Configures LED2 GPIO pin as output and sets initial state to off.
- * Platform-specific implementation handles actual pin configuration.
+ *
+ * Configures LED2 GPIO pin as output via the HAL.
  */
-void 
-tiku_common_led2_init(void)
+void tiku_common_led2_init(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED2_INIT();
-    #endif
+    tiku_common_arch_led2_init();
 }
 
 /**
  * @brief Turn on LED1
- * 
- * Sets LED1 to the illuminated state by setting the
- * appropriate GPIO pin high.
  */
-void 
-tiku_common_led1_on(void)
+void tiku_common_led1_on(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED1_ON();
-    #endif
+    tiku_common_arch_led1_on();
 }
 
 /**
  * @brief Turn on LED2
- * 
- * Sets LED2 to the illuminated state by setting the
- * appropriate GPIO pin high.
  */
-void 
-tiku_common_led2_on(void)
+void tiku_common_led2_on(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED2_ON();
-    #endif
-}
-
-/**
- * @brief Turn off LED2
- * 
- * Sets LED2 to the off state by clearing the
- * appropriate GPIO pin.
- */
-void 
-tiku_common_led2_off(void)
-{
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED2_OFF();
-    #endif
+    tiku_common_arch_led2_on();
 }
 
 /**
  * @brief Turn off LED1
- * 
- * Sets LED1 to the off state by clearing the
- * appropriate GPIO pin.
  */
-void 
-tiku_common_led1_off(void)
+void tiku_common_led1_off(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED1_OFF();
-    #endif
+    tiku_common_arch_led1_off();
+}
+
+/**
+ * @brief Turn off LED2
+ */
+void tiku_common_led2_off(void)
+{
+    tiku_common_arch_led2_off();
 }
 
 /**
  * @brief Toggle LED1 state
- * 
- * Inverts the current state of LED1. If LED1 is on,
- * it will be turned off, and vice versa.
  */
-void 
-tiku_common_led1_toggle(void)
+void tiku_common_led1_toggle(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED1_TOGGLE();
-    #endif
+    tiku_common_arch_led1_toggle();
 }
 
 /**
  * @brief Toggle LED2 state
- * 
- * Inverts the current state of LED2. If LED2 is on,
- * it will be turned off, and vice versa.
  */
-void 
-tiku_common_led2_toggle(void)
+void tiku_common_led2_toggle(void)
 {
-    #ifdef PLATFORM_MSP430
-        TIKU_BOARD_LED2_TOGGLE();
-    #endif
+    tiku_common_arch_led2_toggle();
 }
-
-/*---------------------------------------------------------------------------*/
-/* PRIVATE FUNCTIONS                                                        */
-/*---------------------------------------------------------------------------*/
-
-/* None */
