@@ -264,7 +264,7 @@ All constants can be overridden with \texttt{\#define} before including
 \begin{frame}[fragile]{HAL-Routed NVM Access}
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
-\begin{lstlisting}[style=cstyle, title={kernel/memory/tiku\_mem.c (portable)}]
+\begin{lstlisting}[style=cstyle, title={kernel/memory/tiku\_persist.c (portable)}]
 /* Read: delegates to arch layer */
 tiku_mem_arch_nvm_read(
     buf, entry->fram_ptr,
@@ -323,19 +323,22 @@ void tiku_mem_arch_nvm_write(
 \toprule
 \textbf{Layer} & \textbf{File} & \textbf{Role} \\
 \midrule
-\multirow{2}{*}{Kernel (portable)}
+\multirow{3}{*}{Kernel (portable)}
   & \texttt{kernel/memory/tiku\_mem.h} & Types, constants, API declarations \\
-  & \texttt{kernel/memory/tiku\_mem.c} & Store logic: find, init, register, R/W \\
+  & \texttt{kernel/memory/tiku\_persist.c} & Store logic: find, init, register, R/W \\
+  & \texttt{kernel/memory/tiku\_mpu.c} & MPU lock/unlock, scoped write \\
 \midrule
-HAL
+\multirow{2}{*}{HAL}
   & \texttt{hal/tiku\_mem\_hal.h} & Routes to arch; declares NVM functions \\
+  & \texttt{hal/tiku\_mpu\_hal.h} & Routes to arch; declares MPU functions \\
 \midrule
 \multirow{2}{*}{Arch (MSP430)}
-  & \texttt{arch/msp430/tiku\_mem\_arch.h} & NVM read/write declarations \\
-  & \texttt{arch/msp430/tiku\_mem\_arch.c} & FRAM byte-copy implementations \\
+  & \texttt{arch/msp430/tiku\_mem\_arch.\{h,c\}} & NVM read/write (FRAM byte-copy) \\
+  & \texttt{arch/msp430/tiku\_mpu\_arch.c} & MPU register access \\
 \midrule
-\multirow{2}{*}{Tests}
-  & \texttt{tests/test\_tiku\_mem.c} & 11 persist test cases + host stubs \\
+\multirow{3}{*}{Tests}
+  & \texttt{tests/memory/test\_mem\_persist.c} & 11 persist test cases \\
+  & \texttt{tests/memory/test\_mem\_common.c} & Host stubs + test main \\
   & \texttt{tests/tiku\_test\_config.h} & Per-test enable flags \\
 \bottomrule
 \end{tabular}
@@ -371,11 +374,16 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store);
 \vspace{0.3em}
 \textbf{Usage:}
 \begin{lstlisting}[style=cstyle]
-static tiku_persist_store_t store;
+/* Store in .persistent section so it
+   resides in FRAM and survives reboots */
+static tiku_persist_store_t
+    __attribute__((section(".persistent")))
+    store = {0};
 
 void boot_init(void) {
     tiku_persist_init(&store);
-    /* store.count tells you how many entries survived the reboot */
+    /* store.count tells you how many
+       entries survived the reboot */
 }
 \end{lstlisting}
 
@@ -405,11 +413,13 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
 \vspace{0.3em}
 \textbf{Usage:}
 \begin{lstlisting}[style=cstyle]
-/* Declare FRAM buffer (on MSP430: __persistent or linker section) */
-static uint8_t __persistent cfg_fram[32];
+/* Declare FRAM buffer in .persistent section (GCC) */
+static uint8_t
+    __attribute__((section(".persistent")))
+    cfg_fram[32] = {0};
 
-tiku_mem_err_t err = tiku_persist_register(&store, "cfg",
-                                            cfg_fram, sizeof(cfg_fram));
+tiku_mem_err_t err = tiku_persist_register(
+    &store, "cfg", cfg_fram, sizeof(cfg_fram));
 \end{lstlisting}
 
 \vspace{0.3em}
@@ -522,10 +532,14 @@ Early warning lets the application relocate hot keys.
 
 \begin{frame}[fragile]{End-to-End Example: Device Configuration}
 \begin{lstlisting}[style=cstyle]
-/* 1. Declare FRAM-backed buffers (persist across reboots) */
-static uint8_t __persistent cfg_fram[32];
-static uint8_t __persistent cal_fram[16];
-static tiku_persist_store_t store;
+/* 1. Declare FRAM-backed buffers (persist across reboots)
+      GCC: __attribute__((section(".persistent")))       */
+static uint8_t __attribute__((section(".persistent")))
+    cfg_fram[32] = {0};
+static uint8_t __attribute__((section(".persistent")))
+    cal_fram[16] = {0};
+static tiku_persist_store_t __attribute__((section(".persistent")))
+    store = {0};
 
 void app_init(void) {
     /* 2. Init store (recovers valid entries from previous boot) */
@@ -553,7 +567,8 @@ void app_init(void) {
 % ---------------------------------------------------------------------------
 \begin{frame}[fragile]{End-to-End Example: Boot Counter \& Wear Monitoring}
 \begin{lstlisting}[style=cstyle]
-static uint8_t __persistent counter_fram[4];
+static uint8_t __attribute__((section(".persistent")))
+    counter_fram[4] = {0};
 
 void track_boot_count(void) {
     uint32_t boot_count = 0;
@@ -639,18 +654,19 @@ void track_boot_count(void) {
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
 \begin{lstlisting}[style=cstyle, title={tests/tiku\_test\_config.h}]
-/* Persistent store test flags */
-#define TEST_PERSIST_INIT        1
-#define TEST_PERSIST_REGISTER    1
-#define TEST_PERSIST_WRITE_READ  1
-#define TEST_PERSIST_SMALL_BUF   1
-#define TEST_PERSIST_OVERFLOW    1
-#define TEST_PERSIST_NOT_FOUND   1
-#define TEST_PERSIST_DELETE      1
-#define TEST_PERSIST_FULL        1
+/* Persistent store test flags
+   (0 = off, 1 = on; enable as needed) */
+#define TEST_PERSIST_INIT        0
+#define TEST_PERSIST_REGISTER    0
+#define TEST_PERSIST_WRITE_READ  0
+#define TEST_PERSIST_SMALL_BUF   0
+#define TEST_PERSIST_OVERFLOW    0
+#define TEST_PERSIST_NOT_FOUND   0
+#define TEST_PERSIST_DELETE      0
+#define TEST_PERSIST_FULL        0
 #define TEST_PERSIST_REBOOT      1
-#define TEST_PERSIST_WEAR        1
-#define TEST_PERSIST_DUP_KEY     1
+#define TEST_PERSIST_WEAR        0
+#define TEST_PERSIST_DUP_KEY     0
 \end{lstlisting}
 \end{column}
 
@@ -658,20 +674,25 @@ void track_boot_count(void) {
 \textbf{Host-native (no hardware):}
 \begin{lstlisting}[style=bashstyle]
 gcc -std=c99 -Wall -Wextra -I. \
-  tests/test_tiku_mem.c \
+  tests/memory/test_mem_common.c \
+  tests/memory/test_mem_arena.c \
+  tests/memory/test_mem_persist.c \
+  tests/memory/test_mem_mpu.c \
   kernel/memory/tiku_mem.c \
+  kernel/memory/tiku_persist.c \
+  kernel/memory/tiku_mpu.c \
   -o test_tiku_mem \
   && ./test_tiku_mem
 \end{lstlisting}
 
 \vspace{0.3em}
-Host mode provides portable stubs for arch NVM functions ---
-\texttt{nvm\_read/write} become \texttt{memcpy}.
+Host mode provides portable stubs for arch NVM and
+MPU functions in \texttt{test\_mem\_common.c}.
 
 \vspace{0.5em}
 \begin{block}{Combined Test Binary}
-Arena and persistent store tests share one test binary.
-All 119 assertions run together.
+Arena, persistent store, and MPU tests share one
+test binary.
 \end{block}
 \end{column}
 \end{columns}
@@ -706,31 +727,35 @@ All 119 assertions run together.
 \begin{frame}[fragile]{Test Deep Dive: Reboot Survival \& Wear}
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
-\begin{lstlisting}[style=cstyle, title={Reboot survival test}]
-tiku_persist_store_t store;
-uint8_t fram_buf[16];
-uint8_t read_buf[16];
-const uint8_t data[] = {0x42, 0x43, 0x44};
+\begin{lstlisting}[style=cstyle, title={Reboot survival (two-phase, real HW)}]
+/* All in .persistent (FRAM) */
+static uint8_t
+  __attribute__((section(".persistent")))
+  phase = PHASE_WRITE;
+static tiku_persist_store_t
+  __attribute__((section(".persistent")))
+  store = {0};
+static uint8_t
+  __attribute__((section(".persistent")))
+  fram_buf[16] = {0};
 
-/* First boot: register and write */
-memset(&store, 0, sizeof(store));
-tiku_persist_init(&store);
-tiku_persist_register(&store,
-    "boot", fram_buf, 16);
-tiku_persist_write(&store,
-    "boot", data, 3);
-
-/* Simulate reboot: re-init */
-tiku_persist_init(&store);
-TEST_ASSERT(store.count == 1);
-
-/* Data survives */
-tiku_mem_arch_size_t len;
-tiku_persist_read(&store,
-    "boot", read_buf, 16, &len);
-TEST_ASSERT(len == 3);
-TEST_ASSERT(memcmp(read_buf,
-    data, 3) == 0);
+if (phase == PHASE_WRITE) {
+  /* Phase 0: write, then HW reset */
+  mpu_state = tiku_mpu_unlock_fram();
+  tiku_persist_init(&store);
+  tiku_persist_register(&store,
+      "boot", fram_buf, 16);
+  tiku_persist_write(&store,
+      "boot", data, 3);
+  phase = PHASE_VERIFY;
+  tiku_mpu_lock_fram(mpu_state);
+  PMMCTL0 = PMMPW | PMMSWPOR; /*reset*/
+} else {
+  /* Phase 1: verify after reboot */
+  tiku_persist_init(&store);
+  TEST_ASSERT(store.count == 1);
+  /* ... read back and compare ... */
+}
 \end{lstlisting}
 \end{column}
 
@@ -811,7 +836,7 @@ the arena allocator --- same header, same HAL, same test binary.
   Repository: & \url{https://github.com/tikuos/tikuOS} \\
   License:    & Apache 2.0 \\
   API Header: & \texttt{kernel/memory/tiku\_mem.h} \\
-  Tests:      & \texttt{tests/test\_tiku\_mem.c} \\
+  Tests:      & \texttt{tests/memory/test\_mem\_persist.c} \\
 \end{tabular}
 \end{center}
 \end{frame}

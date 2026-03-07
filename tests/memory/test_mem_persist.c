@@ -255,19 +255,19 @@ void test_persist_full(void)
 /*   Phase VERIFY (after reboot): re-init store, read back, compare          */
 /*                                                                           */
 /* The phase flag, store, and FRAM buffer are all placed in FRAM via          */
-/* #pragma PERSISTENT so they survive the reset while SRAM is wiped.         */
+/* __attribute__((section(".persistent"))) so they survive the reset.         */
 /*---------------------------------------------------------------------------*/
 
 #ifdef PLATFORM_MSP430
 
-#pragma PERSISTENT(test_reboot_phase)
-static uint8_t test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_WRITE;
+static uint8_t __attribute__((section(".persistent")))
+    test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_WRITE;
 
-#pragma PERSISTENT(test_reboot_store)
-static tiku_persist_store_t test_reboot_store = {0};
+static tiku_persist_store_t __attribute__((section(".persistent")))
+    test_reboot_store = {0};
 
-#pragma PERSISTENT(test_reboot_fram_buf)
-static uint8_t test_reboot_fram_buf[16] = {0};
+static uint8_t __attribute__((section(".persistent")))
+    test_reboot_fram_buf[16] = {0};
 
 void test_persist_reboot_survival(void)
 {
