@@ -200,16 +200,61 @@
 #define TEST_PERSIST_FULL        0
 
 /** Enable persist reboot survival test (software reset) */
-#define TEST_PERSIST_REBOOT      1
+#define TEST_PERSIST_REBOOT      0
 
 /** Enable persist power-cycle survival test (requires manual power removal) */
-#define TEST_PERSIST_POWERCYCLE  1
+#define TEST_PERSIST_POWERCYCLE  0
 
 /** Enable persist wear check test */
 #define TEST_PERSIST_WEAR        0
 
 /** Enable persist register same key twice test */
 #define TEST_PERSIST_DUP_KEY     0
+
+/*---------------------------------------------------------------------------*/
+/* MPU TESTS                                                                 */
+/*---------------------------------------------------------------------------*/
+
+/** Enable MPU init defaults test */
+#define TEST_MPU_INIT            0
+
+/** Enable MPU unlock/lock FRAM test */
+#define TEST_MPU_UNLOCK_LOCK     1
+
+/** Enable MPU set permissions test */
+#define TEST_MPU_SET_PERM        0
+
+/** Enable MPU scoped write test */
+#define TEST_MPU_SCOPED          0
+
+/** Enable MPU lock/unlock idempotency test */
+#define TEST_MPU_IDEMPOTENT      0
+
+/** Enable MPU all segments independent test */
+#define TEST_MPU_ALL_SEGMENTS    0
+
+/** Enable MPU permission flags test */
+#define TEST_MPU_PERM_FLAGS      0
+
+/** Enable MPU re-init restores defaults test */
+#define TEST_MPU_REINIT          0
+
+/** Enable MPU unlock with custom base permissions test */
+#define TEST_MPU_UNLOCK_CUSTOM   0
+
+/** Enable MPU scoped write with custom base test */
+#define TEST_MPU_SCOPED_CUSTOM   0
+
+/** Enable MPU violation detection test (intentional write to locked segment) */
+#define TEST_MPU_VIOLATION       1
+
+/** Auto-derived: true if any MPU test is enabled */
+#define TEST_MPU (TEST_MPU_INIT || TEST_MPU_UNLOCK_LOCK ||                  \
+                  TEST_MPU_SET_PERM || TEST_MPU_SCOPED ||                    \
+                  TEST_MPU_IDEMPOTENT || TEST_MPU_ALL_SEGMENTS ||            \
+                  TEST_MPU_PERM_FLAGS || TEST_MPU_REINIT ||                  \
+                  TEST_MPU_UNLOCK_CUSTOM || TEST_MPU_SCOPED_CUSTOM ||        \
+                  TEST_MPU_VIOLATION)
 
 /** Auto-derived: true if any persistent store test is enabled */
 #define TEST_PERSIST (TEST_PERSIST_INIT || TEST_PERSIST_REGISTER ||        \

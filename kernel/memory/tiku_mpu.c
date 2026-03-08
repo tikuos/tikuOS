@@ -62,13 +62,15 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize MPU — all segments read+execute, no write
+ * @brief Initialize MPU — configure boundaries and default protection
  *
- * Sets the segment-access-mode register to 0x0555 via the arch HAL,
- * which gives all three segments read+execute with no write permission.
+ * First sets up the segment boundaries so the MPU knows which
+ * address ranges belong to each segment, then sets the SAM to
+ * 0x0555 (read+execute, no write on all three segments).
  */
 void tiku_mpu_init(void)
 {
+    tiku_mpu_arch_init_segments();
     tiku_mpu_arch_set_sam(MPU_SAM_DEFAULT);
 }
 
@@ -145,4 +147,30 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
 
     tiku_mpu_lock_fram(saved);
     tiku_mpu_arch_enable_irq();
+}
+
+/*---------------------------------------------------------------------------*/
+/* VIOLATION DETECTION                                                       */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * On MSP430, an MPU violation with MPUSEGIE=0 causes a PUC (reset).
+ * Enabling the violation NMI (MPUSEGIE=1) switches to a System NMI
+ * instead, so the CPU can continue after the violating instruction
+ * and software can inspect which segment was violated.
+ */
+
+void tiku_mpu_enable_violation_nmi(void)
+{
+    tiku_mpu_arch_enable_violation_nmi();
+}
+
+uint16_t tiku_mpu_get_violation_flags(void)
+{
+    return tiku_mpu_arch_get_ctl1();
+}
+
+void tiku_mpu_clear_violation_flags(void)
+{
+    tiku_mpu_arch_clear_ctl1();
 }

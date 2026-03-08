@@ -88,4 +88,41 @@ void tiku_mpu_arch_disable_irq(void);
  */
 void tiku_mpu_arch_enable_irq(void);
 
+/**
+ * @brief Read violation flags from the MPU control register
+ *
+ * Returns segment violation flags. Bit 0 = segment 1 violation,
+ * bit 1 = segment 2, bit 2 = segment 3. A set bit means a write
+ * was attempted while that segment lacked write permission.
+ *
+ * @return Violation flags (bits [2:0] meaningful)
+ */
+uint16_t tiku_mpu_arch_get_ctl1(void);
+
+/**
+ * @brief Clear all MPU violation flags
+ *
+ * Resets all segment violation flags so the next violation can be
+ * detected cleanly.
+ */
+void tiku_mpu_arch_clear_ctl1(void);
+
+/**
+ * @brief Configure MPU segment boundaries
+ *
+ * Sets the hardware boundary registers to partition FRAM into three
+ * segments. Must be called before enabling MPU protection so that
+ * the SAM permissions map to meaningful address ranges.
+ */
+void tiku_mpu_arch_init_segments(void);
+
+/**
+ * @brief Enable NMI on MPU violation (instead of device reset)
+ *
+ * On platforms where the default MPU violation response is a reset,
+ * this function switches to a non-maskable interrupt instead, allowing
+ * software to detect and handle violations without losing state.
+ */
+void tiku_mpu_arch_enable_violation_nmi(void);
+
 #endif /* TIKU_MPU_HAL_H_ */

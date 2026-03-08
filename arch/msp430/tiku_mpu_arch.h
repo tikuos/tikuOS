@@ -76,4 +76,47 @@ void tiku_mpu_arch_disable_irq(void);
  */
 void tiku_mpu_arch_enable_irq(void);
 
+/**
+ * @brief Read MPUCTL1 violation flags
+ *
+ * Returns the current segment violation flags. Each bit corresponds
+ * to one segment: bit 0 = segment 1, bit 1 = segment 2, bit 2 = segment 3.
+ * A set bit means a write was attempted on that segment while it lacked
+ * write permission.
+ *
+ * @return Current MPUCTL1 value (violation flags in bits [2:0])
+ */
+uint16_t tiku_mpu_arch_get_ctl1(void);
+
+/**
+ * @brief Clear MPUCTL1 violation flags
+ *
+ * Clears all segment violation flags (MPUSEG1IFG, MPUSEG2IFG,
+ * MPUSEG3IFG) so subsequent violations can be detected cleanly.
+ */
+void tiku_mpu_arch_clear_ctl1(void);
+
+/**
+ * @brief Configure MPU segment boundaries
+ *
+ * Sets MPUSEGB1 and MPUSEGB2 to partition FRAM into three segments.
+ * Boundary addresses are taken from device-level constants
+ * (TIKU_DEVICE_MPU_SEG2_START, TIKU_DEVICE_MPU_SEG3_START) and
+ * right-shifted by 4 before writing to the boundary registers.
+ *
+ * Must be called before enabling MPU protection so that the SAM
+ * permissions map to meaningful address ranges.
+ */
+void tiku_mpu_arch_init_segments(void);
+
+/**
+ * @brief Enable NMI on MPU violation instead of PUC reset
+ *
+ * Sets the MPUSEGIE bit in MPUCTL0. When a violation occurs the
+ * CPU vectors to the SYSNMI handler rather than performing a full
+ * power-up clear (reset). This allows violation detection without
+ * losing system state.
+ */
+void tiku_mpu_arch_enable_violation_nmi(void);
+
 #endif /* TIKU_MPU_ARCH_H_ */

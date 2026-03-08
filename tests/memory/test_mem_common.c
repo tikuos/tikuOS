@@ -78,6 +78,14 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  */
 static uint16_t stub_mpuctl0;
 static uint16_t stub_mpusam;
+static uint16_t stub_mpusegb1;
+static uint16_t stub_mpusegb2;
+
+void tiku_mpu_arch_init_segments(void)
+{
+    stub_mpusegb1 = 0x0800;  /* 0x8000 >> 4 */
+    stub_mpusegb2 = 0x0C00;  /* 0xC000 >> 4 */
+}
 
 uint16_t tiku_mpu_arch_get_sam(void) { return stub_mpusam; }
 void tiku_mpu_arch_set_sam(uint16_t sam)
@@ -89,6 +97,31 @@ void tiku_mpu_arch_set_sam(uint16_t sam)
 uint16_t tiku_mpu_arch_get_ctl(void) { return stub_mpuctl0; }
 void tiku_mpu_arch_disable_irq(void) { /* no-op on host */ }
 void tiku_mpu_arch_enable_irq(void)  { /* no-op on host */ }
+
+static uint16_t stub_mpuctl1;
+
+uint16_t tiku_mpu_arch_get_ctl1(void)  { return stub_mpuctl1; }
+void tiku_mpu_arch_clear_ctl1(void)    { stub_mpuctl1 = 0; }
+void tiku_mpu_arch_enable_violation_nmi(void)
+{
+    stub_mpuctl0 |= 0x0010;  /* MPUSEGIE bit */
+}
+
+/*
+ * Host-only: simulate a write attempt to a given segment.
+ * Checks the current SAM permissions — if the segment lacks the write
+ * bit, the corresponding violation flag is set in stub_mpuctl1,
+ * mimicking what MSP430 hardware does on a real violation.
+ */
+void test_mpu_trigger_seg_violation(tiku_mpu_seg_t seg)
+{
+    uint16_t shift = (uint16_t)seg * 4U;
+    uint16_t perm  = (stub_mpusam >> shift) & 0x07;
+
+    if (!(perm & 0x02)) {  /* Write bit not set — violation */
+        stub_mpuctl1 |= (1U << (uint16_t)seg);
+    }
+}
 
 /*---------------------------------------------------------------------------*/
 /* HOST-ONLY MAIN                                                            */
@@ -128,6 +161,12 @@ int main(void)
     test_mpu_set_permissions();
     test_mpu_scoped_write();
     test_mpu_idempotent();
+    test_mpu_all_segments();
+    test_mpu_permission_flags();
+    test_mpu_reinit_restores();
+    test_mpu_unlock_custom_base();
+    test_mpu_scoped_write_custom();
+    test_mpu_violation_detect();
 
     printf("\n=== Results: %d/%d passed, %d failed ===\n",
            tests_passed, tests_run, tests_failed);

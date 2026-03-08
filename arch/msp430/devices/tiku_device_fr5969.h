@@ -82,4 +82,27 @@
 #define TIKU_DEVICE_FRAM_SIZE       (64 * 1024UL)   /* 64 KB FRAM */
 #define TIKU_DEVICE_RAM_SIZE        (2 * 1024UL)    /* 2 KB SRAM */
 
+/*---------------------------------------------------------------------------*/
+/* FRAM ADDRESS RANGE                                                        */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_FRAM_START      0x4400U  /* First byte of main FRAM */
+#define TIKU_DEVICE_FRAM_END        0xFFFFU  /* Last byte of main FRAM */
+
+/*---------------------------------------------------------------------------*/
+/* MPU SEGMENT BOUNDARIES                                                    */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Default 3-way partition of main FRAM for MPU protection:
+ *   Segment 1: 0x4400 – 0x7FFF  (~15 KB, code)
+ *   Segment 2: 0x8000 – 0xBFFF  (16 KB, code/data)
+ *   Segment 3: 0xC000 – 0xFFFF  (16 KB, data + vectors)
+ *
+ * These are actual addresses. The arch code shifts right by 4 before
+ * writing to the MPUSEGB registers.
+ */
+#define TIKU_DEVICE_MPU_SEG2_START  0x8000U
+#define TIKU_DEVICE_MPU_SEG3_START  0xC000U
+
 #endif /* TIKU_DEVICE_FR5969_H_ */

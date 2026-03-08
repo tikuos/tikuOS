@@ -81,4 +81,18 @@
 #define TIKU_DEVICE_FRAM_SIZE       (256 * 1024UL)  /* 256 KB FRAM */
 #define TIKU_DEVICE_RAM_SIZE        (8 * 1024UL)    /* 8 KB SRAM */
 
+/*---------------------------------------------------------------------------*/
+/* FRAM ADDRESS RANGE                                                        */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_FRAM_START      0x4000U  /* First byte of main FRAM */
+#define TIKU_DEVICE_FRAM_END        0xFFFFU  /* Last byte of lower 64 KB */
+
+/*---------------------------------------------------------------------------*/
+/* MPU SEGMENT BOUNDARIES                                                    */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_MPU_SEG2_START  0x8000U
+#define TIKU_DEVICE_MPU_SEG3_START  0xC000U
+
 #endif /* TIKU_DEVICE_FR5994_H_ */

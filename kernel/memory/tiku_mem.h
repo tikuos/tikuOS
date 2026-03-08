@@ -455,6 +455,35 @@ void tiku_mpu_lock_fram(uint16_t saved_state);
  */
 void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
 
+/**
+ * @brief Enable NMI on MPU violation instead of device reset
+ *
+ * By default, an MPU violation on MSP430 causes a power-up clear
+ * (full reset). This function switches to an NMI instead, allowing
+ * the violation to be detected and handled without losing state.
+ * Must be called before any intentional violation testing.
+ */
+void tiku_mpu_enable_violation_nmi(void);
+
+/**
+ * @brief Read MPU violation flags
+ *
+ * Returns per-segment violation flags: bit 0 = segment 1,
+ * bit 1 = segment 2, bit 2 = segment 3. A non-zero return
+ * means at least one segment access violation was detected.
+ *
+ * @return Violation flags (bits [2:0])
+ */
+uint16_t tiku_mpu_get_violation_flags(void);
+
+/**
+ * @brief Clear all MPU violation flags
+ *
+ * Resets all segment violation flags to zero so the next
+ * violation can be detected cleanly.
+ */
+void tiku_mpu_clear_violation_flags(void);
+
 /*---------------------------------------------------------------------------*/
 /* FUNCTION PROTOTYPES — MODULE                                              */
 /*---------------------------------------------------------------------------*/

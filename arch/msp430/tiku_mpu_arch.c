@@ -31,7 +31,27 @@
  */
 
 #include "tiku_mpu_arch.h"
+#include "tiku_device_select.h"
+#include "tiku_compiler.h"
 #include <msp430.h>
+
+/*---------------------------------------------------------------------------*/
+/* MPU SEGMENT BOUNDARY SETUP                                                */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The MPU needs valid segment boundaries before SAM permissions
+ * have any effect. MPUSEGB1 and MPUSEGB2 divide the FRAM address
+ * space into three segments. The register values are the actual
+ * boundary addresses right-shifted by 4.
+ */
+void tiku_mpu_arch_init_segments(void)
+{
+    MPUCTL0  = MPUPW;                                  /* Unlock config */
+    MPUSEGB1 = TIKU_DEVICE_MPU_SEG2_START >> 4;
+    MPUSEGB2 = TIKU_DEVICE_MPU_SEG3_START >> 4;
+    MPUCTL0  = MPUPW | MPUENA;                         /* Re-enable MPU */
+}
 
 /*---------------------------------------------------------------------------*/
 /* MPU REGISTER ACCESS                                                       */
@@ -49,12 +69,17 @@ uint16_t tiku_mpu_arch_get_sam(void)
  *   then write password | enable to MPUCTL0 to re-activate. Bundling
  *   this into set_sam means the kernel never needs to know about the
  *   password or the enable bit.
+ *
+ *   MPUSEGIE (violation NMI enable) is preserved across calls so that
+ *   enabling violation detection is not accidentally undone by a later
+ *   permission change.
  */
 void tiku_mpu_arch_set_sam(uint16_t sam)
 {
-    MPUCTL0 = MPUPW;           /* Unlock config */
-    MPUSAM  = sam;             /* Set permissions */
-    MPUCTL0 = MPUPW | MPUENA; /* Re-enable MPU */
+    uint16_t flags = MPUCTL0 & MPUSEGIE;  /* Preserve MPUSEGIE */
+    MPUCTL0 = MPUPW;                       /* Unlock config */
+    MPUSAM  = sam;                          /* Set permissions */
+    MPUCTL0 = MPUPW | MPUENA | flags;     /* Re-enable + preserved flags */
 }
 
 uint16_t tiku_mpu_arch_get_ctl(void)
@@ -70,4 +95,50 @@ void tiku_mpu_arch_disable_irq(void)
 void tiku_mpu_arch_enable_irq(void)
 {
     __enable_interrupt();
+}
+
+/*---------------------------------------------------------------------------*/
+/* MPU VIOLATION FLAGS                                                       */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Software-latched violation flags. Reading SYSSNIV in the NMI ISR
+ * clears the corresponding MPUCTL1 flag as a hardware side effect.
+ * To let callers inspect which segment was violated, the ISR saves
+ * MPUCTL1 here before acknowledging the interrupt.
+ */
+static volatile uint16_t latched_violation_flags;
+
+uint16_t tiku_mpu_arch_get_ctl1(void)
+{
+    return latched_violation_flags;
+}
+
+void tiku_mpu_arch_clear_ctl1(void)
+{
+    latched_violation_flags = 0;
+    MPUCTL0 = MPUPW;                        /* Unlock config */
+    MPUCTL1 &= ~(MPUSEG1IFG | MPUSEG2IFG | MPUSEG3IFG);
+    MPUCTL0 = MPUPW | MPUENA | MPUSEGIE;   /* Re-enable MPU + NMI */
+}
+
+void tiku_mpu_arch_enable_violation_nmi(void)
+{
+    MPUCTL0 = MPUPW | MPUENA | MPUSEGIE;
+}
+
+/*---------------------------------------------------------------------------*/
+/* SYSNMI ISR — MPU VIOLATION HANDLER                                        */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * When MPUSEGIE is set, an MPU violation triggers a System NMI instead
+ * of a PUC (reset). We latch MPUCTL1 before reading SYSSNIV because
+ * the read clears the hardware violation flags. The latched value
+ * can then be inspected by tiku_mpu_get_violation_flags().
+ */
+TIKU_ISR(SYSNMI_VECTOR, tiku_mpu_sysnmi_isr)
+{
+    latched_violation_flags |= MPUCTL1;
+    (void)SYSSNIV;  /* Acknowledge NMI — clears hardware flags */
 }

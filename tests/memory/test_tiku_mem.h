@@ -116,5 +116,23 @@ void test_mpu_unlock_lock(void);
 void test_mpu_set_permissions(void);
 void test_mpu_scoped_write(void);
 void test_mpu_idempotent(void);
+void test_mpu_all_segments(void);
+void test_mpu_permission_flags(void);
+void test_mpu_reinit_restores(void);
+void test_mpu_unlock_custom_base(void);
+void test_mpu_scoped_write_custom(void);
+void test_mpu_violation_detect(void);
+
+/*---------------------------------------------------------------------------*/
+/* HOST-ONLY TEST HELPERS                                                    */
+/*---------------------------------------------------------------------------*/
+
+#ifndef PLATFORM_MSP430
+/**
+ * Simulate a write attempt to a given MPU segment.
+ * Sets the violation flag if the segment lacks write permission.
+ */
+void test_mpu_trigger_seg_violation(tiku_mpu_seg_t seg);
+#endif
 
 #endif /* TEST_TIKU_MEM_H_ */

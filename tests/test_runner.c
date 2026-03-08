@@ -47,7 +47,7 @@
 #include "tests/timer/test_timer.h"
 #endif
 
-#if TEST_MEM || TEST_PERSIST
+#if TEST_MEM || TEST_PERSIST || TEST_MPU
 #include "tests/memory/test_tiku_mem.h"
 #endif
 
@@ -66,6 +66,7 @@ static void test_run_watchdog(void);
 static void test_run_process(void);
 static void test_run_timer(void);
 static void test_run_mem(void);
+static void test_run_mpu(void);
 static void test_run_persist(void);
 
 /*---------------------------------------------------------------------------*/
@@ -81,6 +82,7 @@ void test_run_all(void)
     test_run_watchdog();
     test_run_process();
     test_run_mem();
+    test_run_mpu();
     test_run_persist();
 
     /* Enable global interrupts (needed for timer ISRs) */
@@ -254,6 +256,70 @@ static void test_run_mem(void)
 #endif
 
     MAIN_PRINTF("Memory tests completed\n");
+#endif
+}
+
+static void test_run_mpu(void)
+{
+#if TEST_MPU
+    MAIN_PRINTF("Running MPU tests\n");
+
+#if TEST_MPU_INIT
+    test_mpu_init_defaults();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_UNLOCK_LOCK
+    test_mpu_unlock_lock();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_SET_PERM
+    test_mpu_set_permissions();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_SCOPED
+    test_mpu_scoped_write();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_IDEMPOTENT
+    test_mpu_idempotent();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_ALL_SEGMENTS
+    test_mpu_all_segments();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_PERM_FLAGS
+    test_mpu_permission_flags();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_REINIT
+    test_mpu_reinit_restores();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_UNLOCK_CUSTOM
+    test_mpu_unlock_custom_base();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_SCOPED_CUSTOM
+    test_mpu_scoped_write_custom();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_MPU_VIOLATION
+    test_mpu_violation_detect();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+    MAIN_PRINTF("MPU tests completed\n");
 #endif
 }
 
