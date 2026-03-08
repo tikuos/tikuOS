@@ -94,6 +94,7 @@
 
 #define TIKU_DEVICE_FRAM_SIZE       (16 * 1024UL)   /* 16 KB FRAM (15.5 KB usable) */
 #define TIKU_DEVICE_RAM_SIZE        (4 * 1024UL)    /* 4 KB SRAM */
+#define TIKU_DEVICE_RAM_START       0x2000U         /* First byte of SRAM */
 
 /*---------------------------------------------------------------------------*/
 /* FRAM ADDRESS RANGE                                                        */

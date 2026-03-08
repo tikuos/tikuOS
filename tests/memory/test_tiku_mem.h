@@ -65,6 +65,36 @@ extern int tests_failed;
     (((x) + (TIKU_MEM_ARCH_ALIGNMENT - 1U)) & ~(TIKU_MEM_ARCH_ALIGNMENT - 1U))
 
 /*---------------------------------------------------------------------------*/
+/* SHARED TEST POOLS                                                         */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Static pools for region-aware testing. Arena tests allocate from the
+ * SRAM pool; persist tests use the NVM pool. On MSP430, test_nvm_pool
+ * is placed in FRAM via the .persistent section attribute.
+ */
+
+/** Size of the shared SRAM test pool in bytes */
+#ifndef TEST_SRAM_POOL_SIZE
+#define TEST_SRAM_POOL_SIZE  256
+#endif
+
+/** Size of the shared NVM test pool in bytes */
+#ifndef TEST_NVM_POOL_SIZE
+#define TEST_NVM_POOL_SIZE   256
+#endif
+
+extern uint8_t test_sram_pool[];
+extern uint8_t test_nvm_pool[];
+
+/**
+ * Reinitialize the region registry with the platform table.
+ * Clears the claimed regions array. Call before each test that
+ * creates arenas or claims regions to start with a clean slate.
+ */
+void test_region_reinit(void);
+
+/*---------------------------------------------------------------------------*/
 /* ARENA ALLOCATOR TESTS                                                     */
 /*---------------------------------------------------------------------------*/
 
@@ -141,6 +171,23 @@ void test_pool_block_size_alignment(void);
 void test_pool_stats_mapping(void);
 void test_pool_debug_poisoning(void);
 void test_pool_alloc_within_buffer(void);
+
+/*---------------------------------------------------------------------------*/
+/* REGION REGISTRY TESTS                                                     */
+/*---------------------------------------------------------------------------*/
+
+void test_region_init_valid(void);
+void test_region_init_invalid(void);
+void test_region_contains_basic(void);
+void test_region_contains_wrong_type(void);
+void test_region_contains_boundary(void);
+void test_region_contains_overflow(void);
+void test_region_claim_unclaim(void);
+void test_region_claim_overlap(void);
+void test_region_claim_unknown(void);
+void test_region_claim_full(void);
+void test_region_get_type_found(void);
+void test_region_get_type_not_found(void);
 
 /*---------------------------------------------------------------------------*/
 /* HOST-ONLY TEST HELPERS                                                    */
