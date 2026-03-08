@@ -29,14 +29,15 @@
 
 void test_mem_create_and_stats(void)
 {
-    uint8_t buf[64];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
 
     TEST_PRINT("\n--- Test: Creation and Initial Stats ---\n");
+    test_region_reinit();
 
-    err = tiku_arena_create(&arena, buf, sizeof(buf), 1);
+    err = tiku_arena_create(&arena, buf, 64, 1);
     TEST_ASSERT(err == TIKU_MEM_OK, "arena_create returns OK");
     TEST_ASSERT(arena.active == 1, "arena is active after create");
     TEST_ASSERT(arena.id == 1, "arena ID is set correctly");
@@ -55,14 +56,15 @@ void test_mem_create_and_stats(void)
 
 void test_mem_basic_alloc(void)
 {
-    uint8_t buf[64];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     void *p1, *p2;
 
     TEST_PRINT("\n--- Test: Basic Allocation ---\n");
+    test_region_reinit();
 
-    tiku_arena_create(&arena, buf, sizeof(buf), 2);
+    tiku_arena_create(&arena, buf, 64, 2);
 
     p1 = tiku_arena_alloc(&arena, 8);
     TEST_ASSERT(p1 != NULL, "first alloc returns non-NULL");
@@ -89,7 +91,7 @@ void test_mem_basic_alloc(void)
 
 void test_mem_alignment(void)
 {
-    uint8_t buf[64];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     void *p1, *p2, *p3;
@@ -101,8 +103,9 @@ void test_mem_alignment(void)
     const tiku_mem_arch_size_t a3 = TEST_ALIGN_UP(5);  /* 5 -> next multiple of A */
 
     TEST_PRINT("\n--- Test: %u-Byte Alignment ---\n", A);
+    test_region_reinit();
 
-    tiku_arena_create(&arena, buf, sizeof(buf), 3);
+    tiku_arena_create(&arena, buf, 64, 3);
 
     /* Request 3 bytes — rounded up to a1 */
     p1 = tiku_arena_alloc(&arena, 3);
@@ -137,13 +140,15 @@ void test_mem_arena_full(void)
      * identically on 2-byte (MSP430) and 4-byte (host/ARM) targets.
      */
     const unsigned int A = TIKU_MEM_ARCH_ALIGNMENT;
-    uint8_t buf[4 * TIKU_MEM_ARCH_ALIGNMENT];
+    uint8_t *buf = test_sram_pool;
+    tiku_mem_arch_size_t buf_size = 4 * A;
     tiku_arena_t arena;
     void *p1, *p2, *p3;
 
     TEST_PRINT("\n--- Test: Arena Full ---\n");
+    test_region_reinit();
 
-    tiku_arena_create(&arena, buf, sizeof(buf), 4);
+    tiku_arena_create(&arena, buf, buf_size, 4);
 
     /* Allocate 3*A bytes — fits, leaves exactly A bytes */
     p1 = tiku_arena_alloc(&arena, 3 * A);
@@ -168,14 +173,15 @@ void test_mem_arena_full(void)
 
 void test_mem_reset(void)
 {
-    uint8_t buf[64];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
 
     TEST_PRINT("\n--- Test: Reset ---\n");
+    test_region_reinit();
 
-    tiku_arena_create(&arena, buf, sizeof(buf), 5);
+    tiku_arena_create(&arena, buf, 64, 5);
 
     /* Allocate 20 bytes (sizes already aligned to any power-of-2) */
     tiku_arena_alloc(&arena, 12);
@@ -205,13 +211,14 @@ void test_mem_reset(void)
 
 void test_mem_peak_tracking(void)
 {
-    uint8_t buf[64];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
 
     TEST_PRINT("\n--- Test: Peak Tracking Across Resets ---\n");
+    test_region_reinit();
 
-    tiku_arena_create(&arena, buf, sizeof(buf), 6);
+    tiku_arena_create(&arena, buf, 64, 6);
 
     /* Cycle 1: allocate 12 bytes */
     tiku_arena_alloc(&arena, 12);
@@ -241,16 +248,17 @@ void test_mem_peak_tracking(void)
 
 void test_mem_invalid_inputs(void)
 {
-    uint8_t buf[32];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
     void *p;
 
     TEST_PRINT("\n--- Test: Invalid Inputs ---\n");
+    test_region_reinit();
 
     /* NULL arena pointer */
-    err = tiku_arena_create(NULL, buf, sizeof(buf), 0);
+    err = tiku_arena_create(NULL, buf, 32, 0);
     TEST_ASSERT(err == TIKU_MEM_ERR_INVALID, "create with NULL arena rejected");
 
     /* NULL buffer pointer */
@@ -262,7 +270,7 @@ void test_mem_invalid_inputs(void)
     TEST_ASSERT(p == NULL, "alloc from NULL arena returns NULL");
 
     /* Alloc zero bytes */
-    tiku_arena_create(&arena, buf, sizeof(buf), 7);
+    tiku_arena_create(&arena, buf, 32, 7);
     p = tiku_arena_alloc(&arena, 0);
     TEST_ASSERT(p == NULL, "alloc of 0 bytes returns NULL");
 
@@ -285,7 +293,7 @@ void test_mem_invalid_inputs(void)
 
 void test_mem_secure_reset(void)
 {
-    uint8_t buf[32];
+    uint8_t *buf = test_sram_pool;
     tiku_arena_t arena;
     tiku_mem_stats_t stats;
     tiku_mem_err_t err;
@@ -294,8 +302,9 @@ void test_mem_secure_reset(void)
     void *p;
 
     TEST_PRINT("\n--- Test: Secure Reset ---\n");
+    test_region_reinit();
 
-    tiku_arena_create(&arena, buf, sizeof(buf), 8);
+    tiku_arena_create(&arena, buf, 32, 8);
 
     /* Fill the arena with a known pattern */
     p = tiku_arena_alloc(&arena, 32);
@@ -312,7 +321,7 @@ void test_mem_secure_reset(void)
 
     /* Verify every byte is zero */
     all_zero = 1;
-    for (i = 0; i < sizeof(buf); i++) {
+    for (i = 0; i < 32; i++) {
         if (buf[i] != 0) {
             all_zero = 0;
             break;
@@ -341,16 +350,17 @@ void test_mem_secure_reset(void)
 
 void test_mem_two_arenas(void)
 {
-    uint8_t buf_a[32];
-    uint8_t buf_b[64];
+    uint8_t *buf_a = test_sram_pool;
+    uint8_t *buf_b = test_sram_pool + 128;
     tiku_arena_t arena_a, arena_b;
     tiku_mem_stats_t stats_a, stats_b;
     void *pa, *pb;
 
     TEST_PRINT("\n--- Test: Two Independent Arenas ---\n");
+    test_region_reinit();
 
-    tiku_arena_create(&arena_a, buf_a, sizeof(buf_a), 10);
-    tiku_arena_create(&arena_b, buf_b, sizeof(buf_b), 20);
+    tiku_arena_create(&arena_a, buf_a, 32, 10);
+    tiku_arena_create(&arena_b, buf_b, 64, 20);
 
     /* Allocate different amounts from each */
     pa = tiku_arena_alloc(&arena_a, 8);

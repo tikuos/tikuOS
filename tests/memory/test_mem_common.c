@@ -32,6 +32,42 @@ int tests_passed = 0;
 int tests_failed = 0;
 
 /*---------------------------------------------------------------------------*/
+/* SHARED TEST POOLS                                                         */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Static pools for region-aware testing. Arena tests use test_sram_pool
+ * (natural SRAM / BSS on both host and target). Persist tests use
+ * test_nvm_pool (placed in FRAM on MSP430, plain memory on host).
+ */
+
+uint8_t test_sram_pool[TEST_SRAM_POOL_SIZE];
+
+#ifdef PLATFORM_MSP430
+uint8_t __attribute__((section(".persistent")))
+    test_nvm_pool[TEST_NVM_POOL_SIZE] = {0};
+#else
+uint8_t test_nvm_pool[TEST_NVM_POOL_SIZE];
+#endif
+
+/*---------------------------------------------------------------------------*/
+/* REGION REINIT HELPER                                                      */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Reinitialize the region registry from the platform table, clearing
+ * the claimed-regions array. Called at the start of each test that
+ * creates arenas (which call tiku_region_claim internally) to ensure
+ * a clean slate.
+ */
+void test_region_reinit(void)
+{
+    tiku_mem_arch_size_t count;
+
+    tiku_region_init(tiku_region_arch_get_table(&count), count);
+}
+
+/*---------------------------------------------------------------------------*/
 /* HOST-MODE ARCH STUBS                                                      */
 /*---------------------------------------------------------------------------*/
 
@@ -69,6 +105,31 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 {
     memcpy(dst, src, len);
 }
+
+/*---------------------------------------------------------------------------*/
+/* REGION HAL STUB                                                           */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Host-mode region table — maps test_sram_pool as SRAM and
+ * test_nvm_pool as NVM. On real hardware, the platform arch layer
+ * returns the actual memory map instead.
+ */
+static const tiku_mem_region_t test_region_table[] = {
+    { test_sram_pool, sizeof(test_sram_pool), TIKU_MEM_REGION_SRAM },
+    { test_nvm_pool,  sizeof(test_nvm_pool),  TIKU_MEM_REGION_NVM  },
+};
+
+const struct tiku_mem_region *tiku_region_arch_get_table(
+    tiku_mem_arch_size_t *count)
+{
+    *count = sizeof(test_region_table) / sizeof(test_region_table[0]);
+    return test_region_table;
+}
+
+/*---------------------------------------------------------------------------*/
+/* MPU HAL STUBS                                                             */
+/*---------------------------------------------------------------------------*/
 
 /*
  * MPU HAL stubs — plain variables mimic MPU registers on the host.
@@ -158,6 +219,9 @@ void test_mpu_trigger_seg_violation(tiku_mpu_seg_t seg)
 
 int main(void)
 {
+    /* Initialize memory subsystem (region registry + MPU stubs) */
+    tiku_mem_init();
+
     printf("=== TikuOS Memory Module Tests ===\n");
 
     /* Arena allocator tests */
@@ -212,6 +276,20 @@ int main(void)
     test_pool_stats_mapping();
     test_pool_debug_poisoning();
     test_pool_alloc_within_buffer();
+
+    /* Region registry tests */
+    test_region_init_valid();
+    test_region_init_invalid();
+    test_region_contains_basic();
+    test_region_contains_wrong_type();
+    test_region_contains_boundary();
+    test_region_contains_overflow();
+    test_region_claim_unclaim();
+    test_region_claim_overlap();
+    test_region_claim_unknown();
+    test_region_claim_full();
+    test_region_get_type_found();
+    test_region_get_type_not_found();
 
     printf("\n=== Results: %d/%d passed, %d failed ===\n",
            tests_passed, tests_run, tests_failed);

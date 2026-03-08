@@ -47,7 +47,7 @@
 #include "tests/timer/test_timer.h"
 #endif
 
-#if TEST_MEM || TEST_PERSIST || TEST_MPU || TEST_POOL
+#if TEST_MEM || TEST_PERSIST || TEST_MPU || TEST_POOL || TEST_REGION
 #include "tests/memory/test_tiku_mem.h"
 #endif
 
@@ -69,6 +69,7 @@ static void test_run_mem(void);
 static void test_run_mpu(void);
 static void test_run_persist(void);
 static void test_run_pool(void);
+static void test_run_region(void);
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                         */
@@ -86,6 +87,7 @@ void test_run_all(void)
     test_run_mpu();
     test_run_persist();
     test_run_pool();
+    test_run_region();
 
     /* Enable global interrupts (needed for timer ISRs) */
     MAIN_PRINTF("Enabling global interrupts\n");
@@ -509,5 +511,74 @@ static void test_run_timer(void)
 #endif
 
     MAIN_PRINTF("Timer subsystem tests completed\n");
+#endif
+}
+
+static void test_run_region(void)
+{
+#if TEST_REGION
+    MAIN_PRINTF("Running region registry tests\n");
+
+#if TEST_REGION_INIT
+    test_region_init_valid();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_INIT_INVALID
+    test_region_init_invalid();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_CONTAINS
+    test_region_contains_basic();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_WRONG_TYPE
+    test_region_contains_wrong_type();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_BOUNDARY
+    test_region_contains_boundary();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_OVERFLOW
+    test_region_contains_overflow();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_CLAIM
+    test_region_claim_unclaim();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_CLAIM_OVERLAP
+    test_region_claim_overlap();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_CLAIM_UNKNOWN
+    test_region_claim_unknown();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_CLAIM_FULL
+    test_region_claim_full();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_GET_TYPE
+    test_region_get_type_found();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_REGION_NOT_FOUND
+    test_region_get_type_not_found();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+    MAIN_PRINTF("Region registry tests completed\n");
 #endif
 }

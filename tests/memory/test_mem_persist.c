@@ -51,7 +51,7 @@ void test_persist_init_zeroed(void)
 void test_persist_register_and_count(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf[32];
+    uint8_t *fram_buf = test_nvm_pool;
 
     TEST_PRINT("\n--- Test: Persist Register and Count ---\n");
 
@@ -59,7 +59,7 @@ void test_persist_register_and_count(void)
     tiku_persist_init(&store);
     TEST_ASSERT(store.count == 0, "count is 0 before register");
 
-    tiku_persist_register(&store, "cfg", fram_buf, sizeof(fram_buf));
+    tiku_persist_register(&store, "cfg", fram_buf, 32);
     TEST_ASSERT(store.count == 1, "count is 1 after first register");
 
     /* NULL args rejected */
@@ -80,7 +80,7 @@ void test_persist_register_and_count(void)
 void test_persist_write_read(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf[32];
+    uint8_t *fram_buf = test_nvm_pool;
     uint8_t read_buf[32];
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
@@ -90,7 +90,7 @@ void test_persist_write_read(void)
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
-    tiku_persist_register(&store, "cal", fram_buf, sizeof(fram_buf));
+    tiku_persist_register(&store, "cal", fram_buf, 32);
 
     err = tiku_persist_write(&store, "cal", data, sizeof(data));
     TEST_ASSERT(err == TIKU_MEM_OK, "write returns OK");
@@ -111,7 +111,7 @@ void test_persist_write_read(void)
 void test_persist_read_small_buffer(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf[32];
+    uint8_t *fram_buf = test_nvm_pool;
     uint8_t tiny_buf[2];
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
@@ -121,7 +121,7 @@ void test_persist_read_small_buffer(void)
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
-    tiku_persist_register(&store, "big", fram_buf, sizeof(fram_buf));
+    tiku_persist_register(&store, "big", fram_buf, 32);
     tiku_persist_write(&store, "big", data, sizeof(data));
 
     out_len = 0;
@@ -138,7 +138,7 @@ void test_persist_read_small_buffer(void)
 void test_persist_write_exceeds_capacity(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf[4];
+    uint8_t *fram_buf = test_nvm_pool;
     const uint8_t big_data[] = {1, 2, 3, 4, 5, 6, 7, 8};
     tiku_mem_err_t err;
 
@@ -146,7 +146,7 @@ void test_persist_write_exceeds_capacity(void)
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
-    tiku_persist_register(&store, "tiny", fram_buf, sizeof(fram_buf));
+    tiku_persist_register(&store, "tiny", fram_buf, 4);
 
     err = tiku_persist_write(&store, "tiny", big_data, sizeof(big_data));
     TEST_ASSERT(err == TIKU_MEM_ERR_NOMEM,
@@ -181,7 +181,7 @@ void test_persist_read_not_found(void)
 void test_persist_delete(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf[16];
+    uint8_t *fram_buf = test_nvm_pool;
     uint8_t read_buf[16];
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
@@ -191,7 +191,7 @@ void test_persist_delete(void)
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
-    tiku_persist_register(&store, "del", fram_buf, sizeof(fram_buf));
+    tiku_persist_register(&store, "del", fram_buf, 16);
     tiku_persist_write(&store, "del", data, sizeof(data));
 
     err = tiku_persist_delete(&store, "del");
@@ -216,8 +216,7 @@ void test_persist_delete(void)
 void test_persist_full(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_bufs[TIKU_PERSIST_MAX_ENTRIES][4];
-    uint8_t extra_buf[4];
+    uint8_t *extra_buf = test_nvm_pool + TIKU_PERSIST_MAX_ENTRIES * 4;
     char key[TIKU_PERSIST_MAX_KEY_LEN];
     tiku_mem_err_t err;
     int i;
@@ -227,11 +226,11 @@ void test_persist_full(void)
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
 
-    /* Fill all slots */
+    /* Fill all slots — each gets a 4-byte slice of the NVM pool */
     for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
         snprintf(key, sizeof(key), "k%d", i);
-        err = tiku_persist_register(&store, key, fram_bufs[i],
-                                    sizeof(fram_bufs[i]));
+        err = tiku_persist_register(&store, key,
+                                    test_nvm_pool + i * 4, 4);
         TEST_ASSERT(err == TIKU_MEM_OK, "register slot succeeds");
     }
 
@@ -239,8 +238,7 @@ void test_persist_full(void)
                 "count equals max entries");
 
     /* One more should fail */
-    err = tiku_persist_register(&store, "extra", extra_buf,
-                                sizeof(extra_buf));
+    err = tiku_persist_register(&store, "extra", extra_buf, 4);
     TEST_ASSERT(err == TIKU_MEM_ERR_FULL,
                 "register beyond max returns ERR_FULL");
 }
@@ -454,7 +452,7 @@ void test_persist_powercycle_survival(void)
 void test_persist_wear_check(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf[8];
+    uint8_t *fram_buf = test_nvm_pool;
     uint32_t wc;
     int result;
     tiku_persist_entry_t *entry;
@@ -463,7 +461,7 @@ void test_persist_wear_check(void)
 
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
-    tiku_persist_register(&store, "wear", fram_buf, sizeof(fram_buf));
+    tiku_persist_register(&store, "wear", fram_buf, 8);
 
     result = tiku_persist_wear_check(&store, "wear", &wc);
     TEST_ASSERT(result == 0, "wear check returns 0 initially");
@@ -491,8 +489,8 @@ void test_persist_wear_check(void)
 void test_persist_register_twice(void)
 {
     tiku_persist_store_t store;
-    uint8_t fram_buf1[16];
-    uint8_t fram_buf2[32];
+    uint8_t *fram_buf1 = test_nvm_pool;
+    uint8_t *fram_buf2 = test_nvm_pool + 128;
     uint8_t read_buf[32];
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
@@ -503,11 +501,11 @@ void test_persist_register_twice(void)
     memset(&store, 0, sizeof(store));
     tiku_persist_init(&store);
 
-    tiku_persist_register(&store, "dup", fram_buf1, sizeof(fram_buf1));
+    tiku_persist_register(&store, "dup", fram_buf1, 16);
     tiku_persist_write(&store, "dup", data, sizeof(data));
 
     /* Re-register with different buffer — should update pointer, keep data */
-    err = tiku_persist_register(&store, "dup", fram_buf2, sizeof(fram_buf2));
+    err = tiku_persist_register(&store, "dup", fram_buf2, 32);
     TEST_ASSERT(err == TIKU_MEM_OK, "re-register same key returns OK");
     TEST_ASSERT(store.count == 1, "count stays 1 (no duplicate slot)");
 

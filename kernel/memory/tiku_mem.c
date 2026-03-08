@@ -79,6 +79,12 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
         return TIKU_MEM_ERR_INVALID;
     }
 
+    /* Verify the backing buffer resides in SRAM */
+    if (!tiku_region_contains(buf, size, TIKU_MEM_REGION_SRAM)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    tiku_region_claim(buf, size, id);
+
     arena->buf      = buf;
     arena->capacity = size;
     arena->offset   = 0;
@@ -229,13 +235,20 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /**
  * @brief Initialize the memory management module
  *
- * Called during boot from tiku_boot_init_memory(). Activates MPU
- * NVM write-protection first — this is the earliest point we can
- * lock down NVM, before any other subsystem has a chance to run.
- * Then performs platform-specific memory hardware setup via the HAL.
+ * Called during boot from tiku_boot_init_memory(). Initializes the
+ * region registry first — it must be available before any other
+ * subsystem so that arena and persist registrations can validate
+ * their buffers. Then activates MPU NVM write-protection, and
+ * finally performs platform-specific memory hardware setup via
+ * the HAL.
  */
 void tiku_mem_init(void)
 {
+    tiku_mem_arch_size_t count;
+
+    /* Region registry must be available before any other subsystem */
+    tiku_region_init(tiku_region_arch_get_table(&count), count);
+
     /* Activate NVM write-protection before anything else */
     tiku_mpu_init();
 

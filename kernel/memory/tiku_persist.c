@@ -141,6 +141,11 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
         return TIKU_MEM_ERR_INVALID;
     }
 
+    /* Verify the FRAM buffer resides in NVM */
+    if (!tiku_region_contains(fram_buf, capacity, TIKU_MEM_REGION_NVM)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
     /* If key already exists, update pointer but preserve data */
     entry = persist_find(store, key);
     if (entry != NULL) {

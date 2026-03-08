@@ -51,6 +51,7 @@
 #include <stdint.h>
 #include "hal/tiku_mem_hal.h"
 #include "hal/tiku_mpu_hal.h"
+#include "hal/tiku_region_hal.h"
 
 /*---------------------------------------------------------------------------*/
 /* ERROR CODES                                                               */
@@ -85,6 +86,145 @@ typedef struct {
     tiku_mem_arch_size_t peak_bytes;   /**< High-water mark (lifetime maximum) */
     tiku_mem_arch_size_t alloc_count;  /**< Number of successful allocations */
 } tiku_mem_stats_t;
+
+/*---------------------------------------------------------------------------*/
+/* MEMORY REGION REGISTRY                                                    */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The region registry maps the physical memory layout at boot time.
+ * Subsystems query it to verify that their buffers are in the correct
+ * memory type (SRAM for arenas, NVM for persistent storage). Claims
+ * track which subsystem owns each region to detect overlaps early.
+ */
+
+/** Maximum number of platform-defined memory regions */
+#ifndef TIKU_REGION_MAX_REGIONS
+#define TIKU_REGION_MAX_REGIONS  10
+#endif
+
+/** Maximum number of claimed (owned) memory regions */
+#ifndef TIKU_REGION_MAX_CLAIMS
+#define TIKU_REGION_MAX_CLAIMS  16
+#endif
+
+/**
+ * @brief Memory region type classification
+ *
+ * Identifies the type of a memory region in the platform's address map.
+ */
+typedef enum {
+    TIKU_MEM_REGION_SRAM,       /**< Volatile SRAM */
+    TIKU_MEM_REGION_NVM,        /**< Non-volatile memory (FRAM, EEPROM) */
+    TIKU_MEM_REGION_PERIPHERAL, /**< Memory-mapped peripheral registers */
+    TIKU_MEM_REGION_FLASH       /**< Read-only flash (code, constants) */
+} tiku_mem_region_type_t;
+
+/**
+ * @brief Memory region descriptor
+ *
+ * Describes one contiguous region in the platform's physical memory
+ * map. The platform provides a const table of these at boot.
+ */
+typedef struct tiku_mem_region {
+    const uint8_t          *base; /**< Start address of the region */
+    tiku_mem_arch_size_t    size; /**< Size of the region in bytes */
+    tiku_mem_region_type_t  type; /**< Region type (SRAM, NVM, etc.) */
+} tiku_mem_region_t;
+
+/**
+ * @brief Claimed region descriptor (for overlap detection)
+ *
+ * Records that a subsystem has claimed ownership of a memory range.
+ * Used at init time to detect conflicting buffer assignments.
+ */
+typedef struct {
+    const uint8_t          *base;     /**< Start address of claimed range */
+    tiku_mem_arch_size_t    size;     /**< Size of claimed range in bytes */
+    uint8_t                 owner_id; /**< Subsystem identifier */
+} tiku_mem_claimed_t;
+
+/*---------------------------------------------------------------------------*/
+/* FUNCTION PROTOTYPES — REGION REGISTRY                                     */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize the region registry with a platform-provided table
+ *
+ * Stores the platform's memory region table and validates that no two
+ * regions overlap. Called once at early boot, before any other memory
+ * subsystem initializes.
+ *
+ * @param table  Pointer to the platform's region descriptor array (const)
+ * @param count  Number of entries in the table
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if table is NULL,
+ *         count is 0, count exceeds TIKU_REGION_MAX_REGIONS, or any two
+ *         regions overlap
+ */
+tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
+                                 tiku_mem_arch_size_t count);
+
+/**
+ * @brief Check if a memory range falls within a region of the expected type
+ *
+ * Performs a linear scan of the region table. The entire range
+ * [ptr, ptr+size) must fall within a single region of the matching
+ * type. Pointer arithmetic is done in uintptr_t to avoid undefined
+ * behavior and overflow.
+ *
+ * @param ptr            Start of the range to check
+ * @param size           Size of the range in bytes
+ * @param expected_type  Required region type
+ * @return 1 if the range is fully contained in a matching region,
+ *         0 otherwise
+ */
+tiku_mem_err_t tiku_region_contains(const uint8_t *ptr,
+                                     tiku_mem_arch_size_t size,
+                                     tiku_mem_region_type_t expected_type);
+
+/**
+ * @brief Claim a memory range for a subsystem
+ *
+ * Registers that a subsystem has taken ownership of a range. The range
+ * must fall within a declared region and must not overlap with any
+ * existing claim.
+ *
+ * @param ptr       Start of the range to claim
+ * @param size      Size of the range in bytes
+ * @param owner_id  Identifier of the claiming subsystem
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if the range
+ *         is not within a declared region or overlaps an existing claim,
+ *         TIKU_MEM_ERR_FULL if the claimed table is full
+ */
+tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
+                                  tiku_mem_arch_size_t size,
+                                  uint8_t owner_id);
+
+/**
+ * @brief Release a previously claimed memory range
+ *
+ * Removes the claim identified by its base pointer. The slot is
+ * cleared and becomes available for future claims.
+ *
+ * @param ptr  Base pointer of the claimed range to release
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_NOT_FOUND if no claim
+ *         matches the given pointer
+ */
+tiku_mem_err_t tiku_region_unclaim(const uint8_t *ptr);
+
+/**
+ * @brief Look up the region type for an address
+ *
+ * Scans the region table to find which region contains the given
+ * address and returns its type. Useful for debug/diagnostic printing.
+ *
+ * @param ptr       Address to look up
+ * @param out_type  Output: region type of the containing region
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_NOT_FOUND if the
+ *         address is not within any declared region
+ */
+tiku_mem_err_t tiku_region_get_type(const uint8_t *ptr,
+                                     tiku_mem_region_type_t *out_type);
 
 /*---------------------------------------------------------------------------*/
 /* ARENA ALLOCATOR                                                           */
@@ -638,8 +778,9 @@ void tiku_mpu_clear_violation_flags(void);
 /**
  * @brief Initialize the memory management module
  *
- * Entry point for the memory subsystem. Activates MPU NVM protection
- * first, then performs platform-specific memory hardware setup.
+ * Entry point for the memory subsystem. Initializes the region
+ * registry first, then activates MPU NVM protection, and finally
+ * performs platform-specific memory hardware setup.
  */
 void tiku_mem_init(void);
 
