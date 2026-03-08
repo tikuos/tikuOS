@@ -7,9 +7,16 @@
  * tiku_mem.h - Memory management module
  *
  * TikuOS memory management for microcontrollers with small SRAM (2-8 KB).
- * The first allocator is the arena (bump-pointer) allocator, designed for
- * groups of allocations that share a lifetime. More allocator types (pool,
- * slab, etc.) will be added to this module over time.
+ *
+ * Two allocator types are provided:
+ *
+ *   Arena (bump-pointer) — for groups of allocations that share a
+ *   lifetime. O(1) alloc, O(1) bulk free. Zero per-object metadata.
+ *   No individual free.
+ *
+ *   Pool (fixed-size block) — for individual alloc/free of equal-sized
+ *   objects. O(1) alloc, O(1) free. Zero per-block metadata via an
+ *   embedded freelist. Zero fragmentation.
  *
  * Why arenas:
  *   malloc/free on small SRAM leads to fragmentation that is fatal on
@@ -199,6 +206,146 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
                                 tiku_mem_stats_t *stats);
 
 /*---------------------------------------------------------------------------*/
+/* POOL ALLOCATOR                                                            */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Debug poisoning for pool allocator
+ *
+ * When TIKU_POOL_DEBUG is non-zero, tiku_pool_free() writes 0xDE to
+ * all bytes of a freed block (after the freelist pointer). This makes
+ * use-after-free bugs immediately visible in memory dumps and often
+ * causes a crash rather than silent corruption.
+ *
+ * Disable in production to avoid the per-free overhead.
+ */
+#ifndef TIKU_POOL_DEBUG
+#define TIKU_POOL_DEBUG  0
+#endif
+
+/**
+ * @brief Fixed-size block pool allocator control block
+ *
+ * A pool manages a contiguous caller-provided buffer divided into
+ * equal-sized blocks. Free blocks form an embedded freelist — each
+ * free block stores a pointer to the next free block inside its own
+ * memory, so there is zero per-block metadata overhead.
+ *
+ * When a block is allocated, its entire memory is available to the
+ * caller. When freed, the first sizeof(void *) bytes are repurposed
+ * as the next-pointer in the freelist.
+ *
+ * Fields:
+ *   buf         – pointer to the start of the backing buffer
+ *   block_size  – aligned size of each block in bytes
+ *   block_count – total number of blocks in the pool
+ *   free_head   – head of the embedded freelist (NULL if pool is empty)
+ *   used_count  – number of blocks currently allocated
+ *   peak_count  – lifetime high-water mark of used_count
+ *   id          – user-assigned identifier for debugging
+ *   active      – non-zero if the pool has been initialized
+ */
+typedef struct {
+    uint8_t              *buf;         /**< Backing buffer (caller-provided) */
+    tiku_mem_arch_size_t  block_size;  /**< Aligned block size in bytes */
+    tiku_mem_arch_size_t  block_count; /**< Total number of blocks */
+    void                 *free_head;   /**< Head of embedded freelist */
+    tiku_mem_arch_size_t  used_count;  /**< Currently allocated blocks */
+    tiku_mem_arch_size_t  peak_count;  /**< Lifetime high-water mark */
+    uint8_t               id;          /**< Pool identifier for debugging */
+    uint8_t               active;      /**< Non-zero if initialized */
+} tiku_pool_t;
+
+/*---------------------------------------------------------------------------*/
+/* FUNCTION PROTOTYPES — POOL                                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize a pool over a caller-provided buffer
+ *
+ * Divides the buffer into block_count blocks of block_size bytes each
+ * and chains them into an embedded freelist. The block_size is rounded
+ * up to TIKU_MEM_ARCH_ALIGNMENT and clamped to a minimum of
+ * sizeof(void *) (also aligned), since each free block must hold the
+ * freelist pointer.
+ *
+ * The pool does not own the buffer — the caller provides a statically
+ * allocated array. The buffer must be at least
+ * aligned_block_size * block_count bytes.
+ *
+ * @param pool         Pool control block to initialize
+ * @param buf          Pointer to the backing buffer
+ * @param block_size   Requested size of each block in bytes
+ * @param block_count  Number of blocks
+ * @param id           User-assigned identifier (0-255)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pool or buf
+ *         is NULL or block_count is 0
+ */
+tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
+                                 tiku_mem_arch_size_t block_size,
+                                 tiku_mem_arch_size_t block_count,
+                                 uint8_t id);
+
+/**
+ * @brief Allocate a block from the pool
+ *
+ * Pops the head of the embedded freelist. O(1) — no search, no
+ * fragmentation. Tracks used_count and peak_count.
+ *
+ * @param pool   Pool to allocate from (must be active)
+ * @return Pointer to the allocated block, or NULL if the pool is empty
+ *         or the arguments are invalid
+ */
+void *tiku_pool_alloc(tiku_pool_t *pool);
+
+/**
+ * @brief Return a block to the pool
+ *
+ * Pushes the block back onto the freelist head. O(1). Validates that
+ * ptr falls within the pool's buffer range and is aligned to a block
+ * boundary — returns TIKU_MEM_ERR_INVALID if not. This catches
+ * common bugs: freeing a pointer from a different allocator, freeing
+ * a stack pointer, or freeing at the wrong offset.
+ *
+ * When TIKU_POOL_DEBUG is enabled, the freed block is poisoned with
+ * 0xDE bytes (after the freelist pointer) to catch use-after-free.
+ *
+ * @param pool   Pool the block belongs to
+ * @param ptr    Pointer previously returned by tiku_pool_alloc
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if ptr is
+ *         outside the pool or not aligned to a block boundary
+ */
+tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr);
+
+/**
+ * @brief Get current statistics for a pool
+ *
+ * Fills a tiku_mem_stats_t with a snapshot of the pool's state.
+ * Fields are mapped as: total_bytes = block_size * block_count,
+ * used_bytes = block_size * used_count, peak_bytes = block_size *
+ * peak_count, alloc_count = used_count.
+ *
+ * @param pool    Pool to query
+ * @param stats   Output structure (caller-provided)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if either
+ *         pointer is NULL
+ */
+tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
+                                tiku_mem_stats_t *stats);
+
+/**
+ * @brief Reset the pool, returning all blocks to the freelist
+ *
+ * Re-chains all blocks into the freelist and resets used_count to
+ * zero. The peak high-water mark is preserved across resets for
+ * lifetime tracking. O(n) in block_count.
+ *
+ * @param pool   Pool to reset
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pool is NULL
+ */
+tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool);
+
+/*---------------------------------------------------------------------------*/
 /* PERSISTENT NVM KEY-VALUE STORE                                            */
 /*---------------------------------------------------------------------------*/
 
@@ -364,15 +511,15 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 /*
  * NVM write-protection via the platform MPU (HAL layer).
  *
- * Default policy: all three MPU segments are read+execute, no write.
+ * Default policy: all MPU segments are read+execute, no write.
  * This prevents stray pointers and runaway code from corrupting NVM.
  *
  * To perform an intentional NVM write the caller must explicitly
  * unlock, write, and relock:
  *
- *   uint16_t saved = tiku_mpu_unlock_fram();
+ *   uint16_t saved = tiku_mpu_unlock_nvm();
  *   // ... write to NVM ...
- *   tiku_mpu_lock_fram(saved);
+ *   tiku_mpu_lock_nvm(saved);
  *
  * For convenience, tiku_mpu_scoped_write() wraps the full sequence
  * and disables interrupts for the duration. Interrupts are disabled
@@ -429,19 +576,19 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm);
 /**
  * @brief Unlock NVM for writing on all segments
  *
- * Sets the write bit on all three segments via the HAL. Returns the
- * previous state so it can be restored by tiku_mpu_lock_fram().
+ * Adds write permission to all segments via the arch layer. Returns
+ * an opaque saved state so it can be restored by tiku_mpu_lock_nvm().
  *
  * @return Previous MPU state value
  */
-uint16_t tiku_mpu_unlock_fram(void);
+uint16_t tiku_mpu_unlock_nvm(void);
 
 /**
  * @brief Restore MPU state after an NVM write
  *
- * @param saved_state  Value returned by a prior tiku_mpu_unlock_fram()
+ * @param saved_state  Value returned by a prior tiku_mpu_unlock_nvm()
  */
-void tiku_mpu_lock_fram(uint16_t saved_state);
+void tiku_mpu_lock_nvm(uint16_t saved_state);
 
 /**
  * @brief Execute a function with NVM unlocked, interrupts disabled
@@ -458,10 +605,10 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
 /**
  * @brief Enable NMI on MPU violation instead of device reset
  *
- * By default, an MPU violation on MSP430 causes a power-up clear
- * (full reset). This function switches to an NMI instead, allowing
- * the violation to be detected and handled without losing state.
- * Must be called before any intentional violation testing.
+ * On platforms where the default MPU violation response is a reset,
+ * this function switches to an NMI instead, allowing the violation
+ * to be detected and handled without losing state. Must be called
+ * before any intentional violation testing.
  */
 void tiku_mpu_enable_violation_nmi(void);
 

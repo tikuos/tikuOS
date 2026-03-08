@@ -7,11 +7,12 @@
  * tiku_mpu.c - MPU write-protection wrappers (platform-independent)
  *
  * Provides a controlled interface for NVM protection using the MPU.
- * All hardware register access is routed through the HAL functions
- * (tiku_mpu_arch_get_sam, tiku_mpu_arch_set_sam, etc.), so this file
- * contains only platform-independent logic.
+ * All hardware register access and bit manipulation is routed through
+ * the arch-level functions (tiku_mpu_arch_set_default_protection,
+ * tiku_mpu_arch_set_seg_perm, tiku_mpu_arch_unlock_nvm, etc.), so
+ * this file contains only platform-independent orchestration logic.
  *
- * Default policy: all three MPU segments are read+execute, no write.
+ * Default policy: all MPU segments are read+execute, no write.
  * This prevents stray pointers and runaway code from corrupting NVM.
  * To write to NVM, code explicitly unlocks, writes, and relocks.
  *
@@ -37,27 +38,6 @@
 #include "tiku_mem.h"
 
 /*---------------------------------------------------------------------------*/
-/* CONSTANTS                                                                 */
-/*---------------------------------------------------------------------------*/
-
-/*
- * What 0x0555 means in the segment-access-mode (SAM) register:
- *   Each segment occupies 4 bits. Within those 4 bits, the lower 3
- *   are R/W/X permissions. 0x5 = 0b0101 = READ | EXEC (no WRITE).
- *   Three segments at 0x5 each: 0x0555.
- *
- *     Bits [3:0]   = Segment 1: 0x5 (R+X)
- *     Bits [7:4]   = Segment 2: 0x5 (R+X)
- *     Bits [11:8]  = Segment 3: 0x5 (R+X)
- *
- * What 0x0222 means:
- *   Bit 1 (WRITE) set in each segment's nybble. ORing this into
- *   the current SAM value adds write permission to all segments.
- */
-#define MPU_SAM_DEFAULT   0x0555  /* R+X on all 3 segments */
-#define MPU_SAM_WRITE_ALL 0x0222  /* Write bit for all 3 segments */
-
-/*---------------------------------------------------------------------------*/
 /* MPU FUNCTIONS                                                             */
 /*---------------------------------------------------------------------------*/
 
@@ -65,30 +45,24 @@
  * @brief Initialize MPU — configure boundaries and default protection
  *
  * First sets up the segment boundaries so the MPU knows which
- * address ranges belong to each segment, then sets the SAM to
- * 0x0555 (read+execute, no write on all three segments).
+ * address ranges belong to each segment, then sets the default
+ * protection policy (read+execute, no write on all segments).
  */
 void tiku_mpu_init(void)
 {
     tiku_mpu_arch_init_segments();
-    tiku_mpu_arch_set_sam(MPU_SAM_DEFAULT);
+    tiku_mpu_arch_set_default_protection();
 }
 
 /**
  * @brief Set permissions on one segment
  *
- * Computes the bit position from the segment number (seg * 4), clears
- * the old 3-bit permission field, and sets the new bits. The 4th bit
- * in each nybble is reserved and left untouched.
+ * Delegates to the arch layer which handles the platform-specific
+ * register encoding for setting per-segment permissions.
  */
 void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
 {
-    uint16_t shift = (uint16_t)seg * 4U;
-    uint16_t mask  = (uint16_t)0x07 << shift;
-    uint16_t sam   = tiku_mpu_arch_get_sam();
-
-    sam = (sam & ~mask) | (((uint16_t)perm & 0x07) << shift);
-    tiku_mpu_arch_set_sam(sam);
+    tiku_mpu_arch_set_seg_perm((uint8_t)seg, (uint8_t)perm);
 }
 
 /*
@@ -100,25 +74,21 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
  */
 
 /**
- * @brief Unlock NVM for writing — ORs the write bit into all segments
+ * @brief Unlock NVM for writing — adds write permission to all segments
  *
- * @return Previous SAM value for later restoration
+ * @return Previous protection state for later restoration
  */
-uint16_t tiku_mpu_unlock_fram(void)
+uint16_t tiku_mpu_unlock_nvm(void)
 {
-    uint16_t saved = tiku_mpu_arch_get_sam();
-
-    tiku_mpu_arch_set_sam(saved | MPU_SAM_WRITE_ALL);
-
-    return saved;
+    return tiku_mpu_arch_unlock_nvm();
 }
 
 /**
  * @brief Restore MPU to a previously saved state
  */
-void tiku_mpu_lock_fram(uint16_t saved_state)
+void tiku_mpu_lock_nvm(uint16_t saved_state)
 {
-    tiku_mpu_arch_set_sam(saved_state);
+    tiku_mpu_arch_lock_nvm(saved_state);
 }
 
 /*
@@ -141,11 +111,11 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
     uint16_t saved;
 
     tiku_mpu_arch_disable_irq();
-    saved = tiku_mpu_unlock_fram();
+    saved = tiku_mpu_unlock_nvm();
 
     fn(ctx);
 
-    tiku_mpu_lock_fram(saved);
+    tiku_mpu_lock_nvm(saved);
     tiku_mpu_arch_enable_irq();
 }
 
@@ -154,10 +124,10 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
 /*---------------------------------------------------------------------------*/
 
 /*
- * On MSP430, an MPU violation with MPUSEGIE=0 causes a PUC (reset).
- * Enabling the violation NMI (MPUSEGIE=1) switches to a System NMI
- * instead, so the CPU can continue after the violating instruction
- * and software can inspect which segment was violated.
+ * On platforms with hardware MPU, violations may default to a device
+ * reset. Enabling the violation NMI switches to an interrupt instead,
+ * so the CPU can continue and software can inspect which segment was
+ * violated.
  */
 
 void tiku_mpu_enable_violation_nmi(void)
@@ -167,10 +137,10 @@ void tiku_mpu_enable_violation_nmi(void)
 
 uint16_t tiku_mpu_get_violation_flags(void)
 {
-    return tiku_mpu_arch_get_ctl1();
+    return tiku_mpu_arch_get_violation_flags();
 }
 
 void tiku_mpu_clear_violation_flags(void)
 {
-    tiku_mpu_arch_clear_ctl1();
+    tiku_mpu_arch_clear_violation_flags();
 }

@@ -96,6 +96,7 @@ SRCS += kernel/timers/tiku_clock.c
 SRCS += kernel/timers/tiku_htimer.c
 SRCS += kernel/timers/tiku_timer.c
 SRCS += kernel/memory/tiku_mem.c
+SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/process/tiku_process.c
@@ -106,6 +107,7 @@ SRCS += tests/memory/test_mem_common.c
 SRCS += tests/memory/test_mem_arena.c
 SRCS += tests/memory/test_mem_persist.c
 SRCS += tests/memory/test_mem_mpu.c
+SRCS += tests/memory/test_mem_pool.c
 SRCS += tests/process/test_process_lifecycle.c
 SRCS += tests/process/test_process_events.c
 SRCS += tests/process/test_process_yield.c
@@ -147,7 +149,7 @@ TARGET = main.elf
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean flash run debug erase size monitor docs docs-clean
+.PHONY: all clean flash run debug erase size monitor deploy docs docs-clean
 
 all: $(TARGET) size
 
@@ -189,6 +191,8 @@ debug: all
 
 erase:
 	$(MSPDEBUG) $(DEBUGGER) "erase"
+
+deploy: clean flash monitor
 
 # ---------------------------------------------------------------------------
 # Serial Monitor  (auto-detects TI LaunchPad, picks picocom or screen)

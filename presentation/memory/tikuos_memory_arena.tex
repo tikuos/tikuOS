@@ -167,9 +167,11 @@ statically allocated array. No dynamic allocation anywhere.
 \begin{column}{0.48\textwidth}
 \begin{lstlisting}[style=cstyle, title={Error codes}]
 typedef enum {
-    TIKU_MEM_OK         =  0,
+    TIKU_MEM_OK          =  0,
     TIKU_MEM_ERR_INVALID = -1,
-    TIKU_MEM_ERR_NOMEM  = -2
+    TIKU_MEM_ERR_NOMEM   = -2,
+    TIKU_MEM_ERR_FULL    = -3,
+    TIKU_MEM_ERR_NOT_FOUND = -4
 } tiku_mem_err_t;
 \end{lstlisting}
 
@@ -472,50 +474,188 @@ Useful for capacity planning and right-sizing buffers.
 \end{frame}
 
 % ===========================================================================
-\section{Complete Usage Example}
+\section{Usage Examples}
 % ===========================================================================
 
-\begin{frame}[fragile]{End-to-End Example}
-\begin{lstlisting}[style=cstyle]
-/* 1. Declare a static buffer and arena */
-static uint8_t sensor_buf[128];
-static tiku_arena_t sensor_arena;
+\begin{frame}{When to Use an Arena}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Arena is the right choice when\ldots}
+\begin{itemize}
+  \item All allocations share a \textbf{common lifetime}
+  \item You allocate, use, and discard as a batch
+  \item No individual free is needed
+  \item You want O(1) alloc with zero overhead
+\end{itemize}
+\vspace{0.3em}
+\textbf{Examples:}
+\begin{itemize}
+  \item Parse a sensor frame $\rightarrow$ discard
+  \item Format a radio packet $\rightarrow$ transmit $\rightarrow$ discard
+  \item Batch ADC readings $\rightarrow$ average $\rightarrow$ discard
+\end{itemize}
+\end{block}
+\end{column}
 
-void process_sensor_data(void) {
-    tiku_mem_stats_t stats;
+\begin{column}{0.48\textwidth}
+\begin{alertblock}{Arena is \textbf{not} right when\ldots}
+\begin{itemize}
+  \item Objects have independent lifetimes (packet arrives
+        at time~1, processed at time~5)
+  \item You need to free individual objects
+  \item Objects are different sizes and recycled one at a time
+\end{itemize}
+\vspace{0.3em}
+$\rightarrow$ Use the \textbf{pool allocator} instead.
+\end{alertblock}
 
-    /* 2. Create the arena once */
-    tiku_arena_create(&sensor_arena, sensor_buf, sizeof(sensor_buf), 1);
-
-    /* 3. Allocate temporary buffers */
-    uint16_t *raw = tiku_arena_alloc(&sensor_arena, 10 * sizeof(uint16_t));
-    uint8_t  *pkt = tiku_arena_alloc(&sensor_arena, 24);
-
-    if (raw == NULL || pkt == NULL) {
-        /* arena full - handle gracefully */
-        return;
-    }
-
-    /* 4. Use the memory ... */
-    read_sensors(raw, 10);
-    format_packet(pkt, raw, 10);
-    transmit(pkt, 24);
-
-    /* 5. Check stats, then reset for next cycle */
-    tiku_arena_stats(&sensor_arena, &stats);
-    /* stats.peak_bytes tells you the max ever used */
-
-    tiku_arena_reset(&sensor_arena);  /* O(1) - ready for reuse */
-}
-\end{lstlisting}
+\vspace{0.5em}
+\begin{block}{The Key Insight}
+Arena = ``allocate many, free all at once.''\\
+Pool = ``allocate one, free one.''\\
+Together they replace \texttt{malloc}/\texttt{free}.
+\end{block}
+\end{column}
+\end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{Multi-Arena Pattern}
+\begin{frame}[fragile]{Example 1: Sensor Data Pipeline}
 \begin{lstlisting}[style=cstyle]
-/* Two independent arenas for different subsystems */
-static uint8_t net_buf[64];
-static uint8_t crypto_buf[32];
+/* Cyclic pattern: alloc -> use -> reset -> repeat */
+static uint8_t sensor_buf[128];
+static tiku_arena_t sensor_arena;
+
+void sensor_init(void) {
+    tiku_arena_create(&sensor_arena, sensor_buf, sizeof(sensor_buf), 1);
+}
+
+void sensor_cycle(void) {    /* called every 100 ms by the scheduler */
+    /* 1. Allocate temporary buffers for this cycle */
+    uint16_t *raw = tiku_arena_alloc(&sensor_arena, 10 * sizeof(uint16_t));
+    uint8_t  *pkt = tiku_arena_alloc(&sensor_arena, 24);
+
+    if (raw == NULL || pkt == NULL) { return; }  /* arena full */
+
+    /* 2. Use the memory — all allocations alive at the same time */
+    adc_read_batch(raw, 10);
+    format_packet(pkt, raw, 10);
+    radio_transmit(pkt, 24);
+
+    /* 3. All done — reset the arena for the next cycle [O(1)] */
+    tiku_arena_reset(&sensor_arena);
+    /* raw and pkt are now invalid, but we don't need them anymore */
+}
+\end{lstlisting}
+
+\begin{block}{Same Lifetime = Arena}
+All buffers are allocated, used, and discarded together each cycle.
+No need for individual free --- a single O(1) reset reclaims everything.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 2: Capacity Planning with Stats}
+\begin{lstlisting}[style=cstyle]
+void health_report(void) {
+    tiku_mem_stats_t stats;
+    tiku_arena_stats(&sensor_arena, &stats);
+
+    TIKU_PRINTF("Arena: %u/%u bytes used (%u allocs)\n",
+                stats.used_bytes, stats.total_bytes, stats.alloc_count);
+    TIKU_PRINTF("Peak:  %u bytes (lifetime maximum)\n", stats.peak_bytes);
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Right-Sizing Buffers}
+After running in the field for hours:
+\begin{itemize}
+  \item \texttt{total\_bytes} = 128
+  \item \texttt{peak\_bytes} = 44
+\end{itemize}
+Peak is only 34\% of capacity $\rightarrow$ the buffer could be
+shrunk to 64\,bytes, saving 64\,bytes of precious SRAM.
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{alertblock}{Peak Never Decreases}
+\texttt{peak\_bytes} survives resets. It records the \textbf{lifetime
+high-water mark} --- the worst case your application ever hit.
+Use it to set buffer sizes with confidence.
+\end{alertblock}
+
+\vspace{0.3em}
+\begin{block}{Example Output}
+\small\ttfamily
+Arena: 0/128 bytes used (0 allocs)\\
+Peak:  44 bytes (lifetime maximum)
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 3: Why Secure Reset Matters on FRAM}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Problem: FRAM remembers secrets}]
+static uint8_t key_buf[32];
+static tiku_arena_t crypto_arena;
+
+void authenticate(void) {
+    tiku_arena_create(&crypto_arena,
+        key_buf, sizeof(key_buf), 1);
+
+    uint8_t *key = tiku_arena_alloc(
+        &crypto_arena, 16);
+    derive_session_key(key);
+    encrypt_payload(key);
+
+    /* WRONG: just resets the pointer */
+    tiku_arena_reset(&crypto_arena);
+    /* key bytes are still in FRAM! */
+    /* A memory dump reveals the key */
+}
+\end{lstlisting}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Fix: secure reset wipes memory}]
+void authenticate(void) {
+    tiku_arena_create(&crypto_arena,
+        key_buf, sizeof(key_buf), 1);
+
+    uint8_t *key = tiku_arena_alloc(
+        &crypto_arena, 16);
+    derive_session_key(key);
+    encrypt_payload(key);
+
+    /* RIGHT: zeros all bytes first */
+    tiku_arena_secure_reset(
+        &crypto_arena);
+    /* key bytes are now 0x00 */
+    /* safe from memory dumps */
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{alertblock}{FRAM vs SRAM}
+On SRAM, secrets vanish at power-off. On FRAM, they
+\textbf{persist across reboots}. Secure reset is essential for
+any arena holding cryptographic keys, credentials, or nonces.
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 4: Multi-Arena for Subsystem Isolation}
+\begin{lstlisting}[style=cstyle]
+/* Independent arenas prevent subsystems from interfering */
+static uint8_t net_buf[64], crypto_buf[32];
 static tiku_arena_t net_arena, crypto_arena;
 
 void init(void) {
@@ -525,20 +665,22 @@ void init(void) {
 
 void on_packet_received(void) {
     uint8_t *frame = tiku_arena_alloc(&net_arena, 48);
-    /* ... process frame ... */
+    parse_packet(frame, 48);
     tiku_arena_reset(&net_arena);             /* O(1) reuse */
 }
 
 void on_auth_complete(void) {
     uint8_t *key = tiku_arena_alloc(&crypto_arena, 16);
-    /* ... use key ... */
+    verify_signature(key);
     tiku_arena_secure_reset(&crypto_arena);   /* wipe secrets */
 }
 \end{lstlisting}
 
-\begin{block}{Independence}
-Each arena has its own buffer, offset, peak, and count.
-Resetting one does not affect the other.
+\begin{block}{Isolation Benefits}
+Resetting the network arena does not affect the crypto arena.
+Each subsystem's memory budget is fixed at compile time ---
+no subsystem can starve another. Different security policies
+(normal reset vs secure reset) per subsystem.
 \end{block}
 \end{frame}
 
@@ -562,8 +704,9 @@ Resetting one does not affect the other.
   & \texttt{arch/msp430/tiku\_mem\_arch.h} & Alignment, size type \\
   & \texttt{arch/msp430/tiku\_mem\_arch.c} & Secure wipe, arch init \\
 \midrule
-\multirow{2}{*}{Tests}
-  & \texttt{tests/test\_tiku\_mem.c} & 9 test cases \\
+\multirow{3}{*}{Tests}
+  & \texttt{tests/memory/test\_mem\_arena.c} & 9 arena test cases \\
+  & \texttt{tests/memory/test\_mem\_common.c} & Host stubs + test main \\
   & \texttt{tests/tiku\_test\_config.h} & Per-test enable flags \\
 \bottomrule
 \end{tabular}
@@ -638,7 +781,7 @@ Only two files need to change:
 /* Master enable */
 #define TEST_ENABLE 1
 
-/* Memory test flags */
+/* Arena memory test flags */
 #define TEST_MEM_CREATE       1
 #define TEST_MEM_ALLOC        1
 #define TEST_MEM_ALIGNMENT    1
@@ -664,7 +807,8 @@ make monitor
 \textbf{Host-native (no hardware):}
 \begin{lstlisting}[style=bashstyle]
 gcc -std=c99 -Wall -Wextra -I. \
-  tests/test_tiku_mem.c \
+  tests/memory/test_mem_common.c \
+  tests/memory/test_mem_arena.c \
   kernel/memory/tiku_mem.c \
   -o test_tiku_mem \
   && ./test_tiku_mem
@@ -866,7 +1010,7 @@ secrets don't survive across reboots.
   Repository: & \url{https://github.com/tikuos/tikuOS} \\
   License:    & Apache 2.0 \\
   API Header: & \texttt{kernel/memory/tiku\_mem.h} \\
-  Tests:      & \texttt{tests/test\_tiku\_mem.c} \\
+  Tests:      & \texttt{tests/memory/test\_mem\_arena.c} \\
 \end{tabular}
 \end{center}
 \end{frame}

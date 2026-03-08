@@ -219,7 +219,7 @@
 #define TEST_MPU_INIT            0
 
 /** Enable MPU unlock/lock FRAM test */
-#define TEST_MPU_UNLOCK_LOCK     1
+#define TEST_MPU_UNLOCK_LOCK     0
 
 /** Enable MPU set permissions test */
 #define TEST_MPU_SET_PERM        0
@@ -246,7 +246,7 @@
 #define TEST_MPU_SCOPED_CUSTOM   0
 
 /** Enable MPU violation detection test (intentional write to locked segment) */
-#define TEST_MPU_VIOLATION       1
+#define TEST_MPU_VIOLATION       0
 
 /** Auto-derived: true if any MPU test is enabled */
 #define TEST_MPU (TEST_MPU_INIT || TEST_MPU_UNLOCK_LOCK ||                  \
@@ -263,6 +263,61 @@
                       TEST_PERSIST_DELETE || TEST_PERSIST_FULL ||          \
                       TEST_PERSIST_REBOOT || TEST_PERSIST_POWERCYCLE ||   \
                       TEST_PERSIST_WEAR || TEST_PERSIST_DUP_KEY)
+
+/*---------------------------------------------------------------------------*/
+/* POOL ALLOCATOR TESTS                                                      */
+/*---------------------------------------------------------------------------*/
+
+/** Enable pool creation and initial stats test */
+#define TEST_POOL_CREATE         0
+
+/** Enable pool basic alloc and free test */
+#define TEST_POOL_ALLOC_FREE     0
+
+/** Enable pool exhaustion test */
+#define TEST_POOL_EXHAUSTION     0
+
+/** Enable pool free out-of-range pointer test */
+#define TEST_POOL_FREE_RANGE     0
+
+/** Enable pool free misaligned pointer test */
+#define TEST_POOL_FREE_ALIGN     0
+
+/** Enable pool alloc-free-realloc (LIFO) test */
+#define TEST_POOL_REALLOC        0
+
+/** Enable pool peak tracking test */
+#define TEST_POOL_PEAK           0
+
+/** Enable pool reset test */
+#define TEST_POOL_RESET          0
+
+/** Enable pool invalid inputs test */
+#define TEST_POOL_INVALID        0
+
+/** Enable two independent pools test */
+#define TEST_POOL_TWO_POOLS      0
+
+/** Enable pool block size alignment and minimum test */
+#define TEST_POOL_BLOCK_ALIGN    0
+
+/** Enable pool stats mapping test */
+#define TEST_POOL_STATS          0
+
+/** Enable pool debug poisoning test */
+#define TEST_POOL_POISON         0
+
+/** Enable pool alloc within buffer test */
+#define TEST_POOL_WITHIN_BUF     1
+
+/** Auto-derived: true if any pool test is enabled */
+#define TEST_POOL (TEST_POOL_CREATE || TEST_POOL_ALLOC_FREE ||              \
+                   TEST_POOL_EXHAUSTION || TEST_POOL_FREE_RANGE ||          \
+                   TEST_POOL_FREE_ALIGN || TEST_POOL_REALLOC ||            \
+                   TEST_POOL_PEAK || TEST_POOL_RESET ||                    \
+                   TEST_POOL_INVALID || TEST_POOL_TWO_POOLS ||             \
+                   TEST_POOL_BLOCK_ALIGN || TEST_POOL_STATS ||             \
+                   TEST_POOL_POISON || TEST_POOL_WITHIN_BUF)
 
 /** @} */ /* End of TIKU_TEST_CONFIG group */
 

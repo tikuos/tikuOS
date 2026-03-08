@@ -283,7 +283,7 @@ void test_persist_reboot_survival(void)
         /*-- Phase 0: write data and trigger a real reset ----------------*/
         TEST_PRINT("  Phase: WRITE (first boot)\n");
 
-        mpu_state = tiku_mpu_unlock_fram();
+        mpu_state = tiku_mpu_unlock_nvm();
 
         memset(&test_reboot_store, 0, sizeof(test_reboot_store));
         tiku_persist_init(&test_reboot_store);
@@ -295,7 +295,7 @@ void test_persist_reboot_survival(void)
 
         test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_VERIFY;
 
-        tiku_mpu_lock_fram(mpu_state);
+        tiku_mpu_lock_nvm(mpu_state);
 
         TEST_PRINT("  Triggering software reset...\n");
         PMMCTL0 = PMMPW | PMMSWPOR;
@@ -305,7 +305,7 @@ void test_persist_reboot_survival(void)
         /*-- Phase 1: verify data survived the reboot -------------------*/
         TEST_PRINT("  Phase: VERIFY (after reboot)\n");
 
-        mpu_state = tiku_mpu_unlock_fram();
+        mpu_state = tiku_mpu_unlock_nvm();
 
         tiku_persist_init(&test_reboot_store);
 
@@ -324,7 +324,7 @@ void test_persist_reboot_survival(void)
         /* Reset phase for next test run */
         test_reboot_phase = TEST_PERSIST_REBOOT_PHASE_WRITE;
 
-        tiku_mpu_lock_fram(mpu_state);
+        tiku_mpu_lock_nvm(mpu_state);
     }
 }
 
@@ -365,7 +365,7 @@ void test_persist_powercycle_survival(void)
         /*-- Phase 0: write data, then wait for user to remove power -----*/
         TEST_PRINT("  Phase: WRITE (first boot)\n");
 
-        mpu_state = tiku_mpu_unlock_fram();
+        mpu_state = tiku_mpu_unlock_nvm();
 
         memset(&test_pwrcycle_store, 0, sizeof(test_pwrcycle_store));
         tiku_persist_init(&test_pwrcycle_store);
@@ -378,7 +378,7 @@ void test_persist_powercycle_survival(void)
 
         test_pwrcycle_phase = TEST_PERSIST_PWRCYCLE_PHASE_VERIFY;
 
-        tiku_mpu_lock_fram(mpu_state);
+        tiku_mpu_lock_nvm(mpu_state);
 
         TEST_PRINT("  Data written to FRAM.\n");
         TEST_PRINT("\n");
@@ -405,7 +405,7 @@ void test_persist_powercycle_survival(void)
         tiku_common_delay_ms(10000);
         TEST_PRINT("  Starting verification.\n");
 
-        mpu_state = tiku_mpu_unlock_fram();
+        mpu_state = tiku_mpu_unlock_nvm();
 
         tiku_persist_init(&test_pwrcycle_store);
 
@@ -425,7 +425,7 @@ void test_persist_powercycle_survival(void)
         /* Reset phase for next test run */
         test_pwrcycle_phase = TEST_PERSIST_PWRCYCLE_PHASE_WRITE;
 
-        tiku_mpu_lock_fram(mpu_state);
+        tiku_mpu_lock_nvm(mpu_state);
 
         TEST_PRINT("  FRAM data survived full power-cycle!\n");
     }
