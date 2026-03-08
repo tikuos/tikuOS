@@ -537,12 +537,12 @@ void sensor_cycle(void) {    /* called every 100 ms by the scheduler */
 
     if (raw == NULL || pkt == NULL) { return; }  /* arena full */
 
-    /* 2. Use the memory — all allocations alive at the same time */
+    /* 2. Use the memory -- all allocations alive at the same time */
     adc_read_batch(raw, 10);
     format_packet(pkt, raw, 10);
     radio_transmit(pkt, 24);
 
-    /* 3. All done — reset the arena for the next cycle [O(1)] */
+    /* 3. All done -- reset the arena for the next cycle [O(1)] */
     tiku_arena_reset(&sensor_arena);
     /* raw and pkt are now invalid, but we don't need them anymore */
 }
