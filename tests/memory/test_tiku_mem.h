@@ -88,6 +88,12 @@ void test_mem_two_arenas(void);
 /** Reboot survival test phase: verify data after reboot */
 #define TEST_PERSIST_REBOOT_PHASE_VERIFY  1
 
+/** Power-cycle survival test phase: write data and wait for power removal */
+#define TEST_PERSIST_PWRCYCLE_PHASE_WRITE   0
+
+/** Power-cycle survival test phase: verify data after power restore */
+#define TEST_PERSIST_PWRCYCLE_PHASE_VERIFY  1
+
 void test_persist_init_zeroed(void);
 void test_persist_register_and_count(void);
 void test_persist_write_read(void);
@@ -97,6 +103,7 @@ void test_persist_read_not_found(void);
 void test_persist_delete(void);
 void test_persist_full(void);
 void test_persist_reboot_survival(void);
+void test_persist_powercycle_survival(void);
 void test_persist_wear_check(void);
 void test_persist_register_twice(void);
 

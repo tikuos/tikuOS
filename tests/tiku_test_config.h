@@ -199,8 +199,11 @@
 /** Enable persist store full test */
 #define TEST_PERSIST_FULL        0
 
-/** Enable persist reboot survival test */
+/** Enable persist reboot survival test (software reset) */
 #define TEST_PERSIST_REBOOT      1
+
+/** Enable persist power-cycle survival test (requires manual power removal) */
+#define TEST_PERSIST_POWERCYCLE  1
 
 /** Enable persist wear check test */
 #define TEST_PERSIST_WEAR        0
@@ -213,8 +216,8 @@
                       TEST_PERSIST_WRITE_READ || TEST_PERSIST_SMALL_BUF || \
                       TEST_PERSIST_OVERFLOW || TEST_PERSIST_NOT_FOUND ||   \
                       TEST_PERSIST_DELETE || TEST_PERSIST_FULL ||          \
-                      TEST_PERSIST_REBOOT || TEST_PERSIST_WEAR ||         \
-                      TEST_PERSIST_DUP_KEY)
+                      TEST_PERSIST_REBOOT || TEST_PERSIST_POWERCYCLE ||   \
+                      TEST_PERSIST_WEAR || TEST_PERSIST_DUP_KEY)
 
 /** @} */ /* End of TIKU_TEST_CONFIG group */
 

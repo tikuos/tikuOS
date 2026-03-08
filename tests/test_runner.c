@@ -307,6 +307,11 @@ static void test_run_persist(void)
     tiku_common_delay_ms(TEST_DELAY_MS);
 #endif
 
+#if TEST_PERSIST_POWERCYCLE
+    test_persist_powercycle_survival();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
 #if TEST_PERSIST_WEAR
     test_persist_wear_check();
     tiku_common_delay_ms(TEST_DELAY_MS);
