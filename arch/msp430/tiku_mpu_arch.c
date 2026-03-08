@@ -98,6 +98,75 @@ void tiku_mpu_arch_enable_irq(void)
 }
 
 /*---------------------------------------------------------------------------*/
+/* HIGHER-LEVEL ARCH FUNCTIONS                                               */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * These functions encapsulate MSP430-specific register-level details
+ * (SAM bit layout, write-bit positions) so the kernel never needs to
+ * know the register format. The kernel calls these instead of
+ * manipulating SAM values directly.
+ */
+
+/**
+ * @brief Set default NVM protection: R+X (no write) on all 3 segments
+ *
+ * SAM value 0x0555: each segment's nybble is 0x5 = R | X (no W).
+ */
+void tiku_mpu_arch_set_default_protection(void)
+{
+    tiku_mpu_arch_set_sam(0x0555);
+}
+
+/**
+ * @brief Set permissions on a single MPU segment
+ *
+ * Each segment occupies a 4-bit nybble in the SAM register. The lower
+ * 3 bits are R/W/X permissions; the 4th bit is reserved. This function
+ * clears the old permission bits and sets the new ones, leaving all
+ * other segments untouched.
+ *
+ * @param seg    Segment number (0-2)
+ * @param perm   Permission flags (TIKU_MPU_READ/WRITE/EXEC or combinations)
+ */
+void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
+{
+    uint16_t shift = (uint16_t)seg * 4U;
+    uint16_t mask  = (uint16_t)0x07 << shift;
+    uint16_t sam   = tiku_mpu_arch_get_sam();
+
+    sam = (sam & ~mask) | (((uint16_t)perm & 0x07) << shift);
+    tiku_mpu_arch_set_sam(sam);
+}
+
+/**
+ * @brief Unlock NVM for writing on all segments
+ *
+ * ORs the write bit (bit 1) into each segment's nybble:
+ *   0x0222 = write bit set for all 3 segments.
+ *
+ * @return Previous SAM value (opaque to the kernel, used by lock_nvm)
+ */
+uint16_t tiku_mpu_arch_unlock_nvm(void)
+{
+    uint16_t saved = tiku_mpu_arch_get_sam();
+
+    tiku_mpu_arch_set_sam(saved | 0x0222);
+
+    return saved;
+}
+
+/**
+ * @brief Restore NVM protection to a previously saved state
+ *
+ * @param saved_state  Value returned by a prior tiku_mpu_arch_unlock_nvm()
+ */
+void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
+{
+    tiku_mpu_arch_set_sam(saved_state);
+}
+
+/*---------------------------------------------------------------------------*/
 /* MPU VIOLATION FLAGS                                                       */
 /*---------------------------------------------------------------------------*/
 
@@ -109,12 +178,12 @@ void tiku_mpu_arch_enable_irq(void)
  */
 static volatile uint16_t latched_violation_flags;
 
-uint16_t tiku_mpu_arch_get_ctl1(void)
+uint16_t tiku_mpu_arch_get_violation_flags(void)
 {
     return latched_violation_flags;
 }
 
-void tiku_mpu_arch_clear_ctl1(void)
+void tiku_mpu_arch_clear_violation_flags(void)
 {
     latched_violation_flags = 0;
     MPUCTL0 = MPUPW;                        /* Unlock config */

@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION DECLARATIONS                                                     */
+/* LOW-LEVEL REGISTER ACCESS                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -66,6 +66,10 @@ void tiku_mpu_arch_set_sam(uint16_t sam);
  */
 uint16_t tiku_mpu_arch_get_ctl(void);
 
+/*---------------------------------------------------------------------------*/
+/* INTERRUPT CONTROL                                                         */
+/*---------------------------------------------------------------------------*/
+
 /**
  * @brief Disable interrupts via __disable_interrupt() intrinsic
  */
@@ -76,25 +80,9 @@ void tiku_mpu_arch_disable_irq(void);
  */
 void tiku_mpu_arch_enable_irq(void);
 
-/**
- * @brief Read MPUCTL1 violation flags
- *
- * Returns the current segment violation flags. Each bit corresponds
- * to one segment: bit 0 = segment 1, bit 1 = segment 2, bit 2 = segment 3.
- * A set bit means a write was attempted on that segment while it lacked
- * write permission.
- *
- * @return Current MPUCTL1 value (violation flags in bits [2:0])
- */
-uint16_t tiku_mpu_arch_get_ctl1(void);
-
-/**
- * @brief Clear MPUCTL1 violation flags
- *
- * Clears all segment violation flags (MPUSEG1IFG, MPUSEG2IFG,
- * MPUSEG3IFG) so subsequent violations can be detected cleanly.
- */
-void tiku_mpu_arch_clear_ctl1(void);
+/*---------------------------------------------------------------------------*/
+/* HIGHER-LEVEL ARCH FUNCTIONS (called by kernel)                            */
+/*---------------------------------------------------------------------------*/
 
 /**
  * @brief Configure MPU segment boundaries
@@ -108,6 +96,64 @@ void tiku_mpu_arch_clear_ctl1(void);
  * permissions map to meaningful address ranges.
  */
 void tiku_mpu_arch_init_segments(void);
+
+/**
+ * @brief Set default NVM protection: R+X (no write) on all segments
+ *
+ * Configures the SAM register so all three segments are read+execute
+ * with no write permission. Called by the kernel during MPU init.
+ */
+void tiku_mpu_arch_set_default_protection(void);
+
+/**
+ * @brief Set permissions on a single MPU segment
+ *
+ * Updates the permission bits for one segment without affecting the
+ * other segments. The seg and perm values use the platform-independent
+ * TIKU_MPU_SEG and TIKU_MPU_PERM enums (passed as uint8_t to avoid
+ * circular header dependencies).
+ *
+ * @param seg    Segment number (0-2)
+ * @param perm   Permission flags (TIKU_MPU_READ/WRITE/EXEC or combinations)
+ */
+void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
+
+/**
+ * @brief Unlock NVM for writing on all segments
+ *
+ * Adds write permission to all segments. Returns an opaque saved state
+ * that must be passed to tiku_mpu_arch_lock_nvm() to restore protection.
+ *
+ * @return Previous protection state (opaque to the kernel)
+ */
+uint16_t tiku_mpu_arch_unlock_nvm(void);
+
+/**
+ * @brief Restore NVM protection to a previously saved state
+ *
+ * @param saved_state  Value returned by a prior tiku_mpu_arch_unlock_nvm()
+ */
+void tiku_mpu_arch_lock_nvm(uint16_t saved_state);
+
+/**
+ * @brief Read violation flags
+ *
+ * Returns per-segment violation flags. Each bit corresponds to one
+ * segment: bit 0 = segment 1, bit 1 = segment 2, bit 2 = segment 3.
+ * A set bit means a write was attempted on that segment while it
+ * lacked write permission.
+ *
+ * @return Violation flags (bits [2:0] meaningful)
+ */
+uint16_t tiku_mpu_arch_get_violation_flags(void);
+
+/**
+ * @brief Clear all MPU violation flags
+ *
+ * Resets all segment violation flags so subsequent violations can be
+ * detected cleanly.
+ */
+void tiku_mpu_arch_clear_violation_flags(void);
 
 /**
  * @brief Enable NMI on MPU violation instead of PUC reset

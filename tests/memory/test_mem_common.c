@@ -100,8 +100,37 @@ void tiku_mpu_arch_enable_irq(void)  { /* no-op on host */ }
 
 static uint16_t stub_mpuctl1;
 
-uint16_t tiku_mpu_arch_get_ctl1(void)  { return stub_mpuctl1; }
-void tiku_mpu_arch_clear_ctl1(void)    { stub_mpuctl1 = 0; }
+void tiku_mpu_arch_set_default_protection(void)
+{
+    tiku_mpu_arch_set_sam(0x0555);
+}
+
+void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
+{
+    uint16_t shift = (uint16_t)seg * 4U;
+    uint16_t mask  = (uint16_t)0x07 << shift;
+    uint16_t sam   = tiku_mpu_arch_get_sam();
+
+    sam = (sam & ~mask) | (((uint16_t)perm & 0x07) << shift);
+    tiku_mpu_arch_set_sam(sam);
+}
+
+uint16_t tiku_mpu_arch_unlock_nvm(void)
+{
+    uint16_t saved = tiku_mpu_arch_get_sam();
+
+    tiku_mpu_arch_set_sam(saved | 0x0222);
+
+    return saved;
+}
+
+void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
+{
+    tiku_mpu_arch_set_sam(saved_state);
+}
+
+uint16_t tiku_mpu_arch_get_violation_flags(void)  { return stub_mpuctl1; }
+void tiku_mpu_arch_clear_violation_flags(void)    { stub_mpuctl1 = 0; }
 void tiku_mpu_arch_enable_violation_nmi(void)
 {
     stub_mpuctl0 |= 0x0010;  /* MPUSEGIE bit */
@@ -167,6 +196,22 @@ int main(void)
     test_mpu_unlock_custom_base();
     test_mpu_scoped_write_custom();
     test_mpu_violation_detect();
+
+    /* Pool allocator tests */
+    test_pool_create_and_stats();
+    test_pool_basic_alloc_free();
+    test_pool_exhaustion();
+    test_pool_free_out_of_range();
+    test_pool_free_misaligned();
+    test_pool_alloc_free_realloc();
+    test_pool_peak_tracking();
+    test_pool_reset();
+    test_pool_invalid_inputs();
+    test_pool_two_pools();
+    test_pool_block_size_alignment();
+    test_pool_stats_mapping();
+    test_pool_debug_poisoning();
+    test_pool_alloc_within_buffer();
 
     printf("\n=== Results: %d/%d passed, %d failed ===\n",
            tests_passed, tests_run, tests_failed);

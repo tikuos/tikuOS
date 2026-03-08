@@ -124,6 +124,25 @@ void test_mpu_scoped_write_custom(void);
 void test_mpu_violation_detect(void);
 
 /*---------------------------------------------------------------------------*/
+/* POOL ALLOCATOR TESTS                                                      */
+/*---------------------------------------------------------------------------*/
+
+void test_pool_create_and_stats(void);
+void test_pool_basic_alloc_free(void);
+void test_pool_exhaustion(void);
+void test_pool_free_out_of_range(void);
+void test_pool_free_misaligned(void);
+void test_pool_alloc_free_realloc(void);
+void test_pool_peak_tracking(void);
+void test_pool_reset(void);
+void test_pool_invalid_inputs(void);
+void test_pool_two_pools(void);
+void test_pool_block_size_alignment(void);
+void test_pool_stats_mapping(void);
+void test_pool_debug_poisoning(void);
+void test_pool_alloc_within_buffer(void);
+
+/*---------------------------------------------------------------------------*/
 /* HOST-ONLY TEST HELPERS                                                    */
 /*---------------------------------------------------------------------------*/
 

@@ -43,7 +43,7 @@ void test_mpu_init_defaults(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* TEST 22: MPU UNLOCK / LOCK FRAM                                            */
+/* TEST 22: MPU UNLOCK / LOCK NVM                                             */
 /*---------------------------------------------------------------------------*/
 
 void test_mpu_unlock_lock(void)
@@ -54,7 +54,7 @@ void test_mpu_unlock_lock(void)
 
     tiku_mpu_init();
 
-    saved = tiku_mpu_unlock_fram();
+    saved = tiku_mpu_unlock_nvm();
     TEST_ASSERT(saved == 0x0555,
                 "unlock returns previous SAM (0x0555)");
 
@@ -62,7 +62,7 @@ void test_mpu_unlock_lock(void)
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0777,
                 "SAM has write bits after unlock (0x0777)");
 
-    tiku_mpu_lock_fram(saved);
+    tiku_mpu_lock_nvm(saved);
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0555,
                 "SAM restored to 0x0555 after lock");
 }
@@ -144,22 +144,22 @@ void test_mpu_idempotent(void)
     tiku_mpu_init();
 
     /* Lock when already locked — state should not change */
-    tiku_mpu_lock_fram(0x0555);
+    tiku_mpu_lock_nvm(0x0555);
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0555,
                 "lock when already locked keeps 0x0555");
 
     /* Double unlock — second call should return the already-unlocked state */
-    saved1 = tiku_mpu_unlock_fram();
+    saved1 = tiku_mpu_unlock_nvm();
     TEST_ASSERT(saved1 == 0x0555, "first unlock returns 0x0555");
 
-    saved2 = tiku_mpu_unlock_fram();
+    saved2 = tiku_mpu_unlock_nvm();
     TEST_ASSERT(saved2 == 0x0777,
                 "second unlock returns 0x0777 (already unlocked)");
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0777,
                 "SAM still 0x0777 after double unlock");
 
     /* Restoring with saved1 should relock properly */
-    tiku_mpu_lock_fram(saved1);
+    tiku_mpu_lock_nvm(saved1);
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0555,
                 "lock with original saved state restores 0x0555");
 }
@@ -292,7 +292,7 @@ void test_mpu_unlock_custom_base(void)
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0541,
                 "custom base is 0x0541");
 
-    saved = tiku_mpu_unlock_fram();
+    saved = tiku_mpu_unlock_nvm();
     TEST_ASSERT(saved == 0x0541,
                 "unlock returns custom base (0x0541)");
 
@@ -310,7 +310,7 @@ void test_mpu_unlock_custom_base(void)
                 "seg3: R+X | WRITE = 0x7");
 
     /* Lock restores original custom base */
-    tiku_mpu_lock_fram(saved);
+    tiku_mpu_lock_nvm(saved);
     TEST_ASSERT(tiku_mpu_arch_get_sam() == 0x0541,
                 "lock restores custom base 0x0541");
 }
@@ -418,7 +418,7 @@ void test_mpu_violation_detect(void)
      * Unlock FRAM so all segments gain write permission. A write
      * should now succeed without setting any violation flag.
      */
-    saved = tiku_mpu_unlock_fram();
+    saved = tiku_mpu_unlock_nvm();
     tiku_mpu_clear_violation_flags();
 
 #ifdef PLATFORM_MSP430
@@ -433,5 +433,5 @@ void test_mpu_violation_detect(void)
     TEST_ASSERT(tiku_mpu_get_violation_flags() == 0,
                 "no violation when segment is writable");
 
-    tiku_mpu_lock_fram(saved);
+    tiku_mpu_lock_nvm(saved);
 }

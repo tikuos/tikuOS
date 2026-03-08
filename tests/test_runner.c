@@ -47,7 +47,7 @@
 #include "tests/timer/test_timer.h"
 #endif
 
-#if TEST_MEM || TEST_PERSIST || TEST_MPU
+#if TEST_MEM || TEST_PERSIST || TEST_MPU || TEST_POOL
 #include "tests/memory/test_tiku_mem.h"
 #endif
 
@@ -68,6 +68,7 @@ static void test_run_timer(void);
 static void test_run_mem(void);
 static void test_run_mpu(void);
 static void test_run_persist(void);
+static void test_run_pool(void);
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                         */
@@ -84,6 +85,7 @@ void test_run_all(void)
     test_run_mem();
     test_run_mpu();
     test_run_persist();
+    test_run_pool();
 
     /* Enable global interrupts (needed for timer ISRs) */
     MAIN_PRINTF("Enabling global interrupts\n");
@@ -389,6 +391,85 @@ static void test_run_persist(void)
 #endif
 
     MAIN_PRINTF("Persistent store tests completed\n");
+#endif
+}
+
+static void test_run_pool(void)
+{
+#if TEST_POOL
+    MAIN_PRINTF("Running pool allocator tests\n");
+
+#if TEST_POOL_CREATE
+    test_pool_create_and_stats();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_ALLOC_FREE
+    test_pool_basic_alloc_free();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_EXHAUSTION
+    test_pool_exhaustion();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_FREE_RANGE
+    test_pool_free_out_of_range();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_FREE_ALIGN
+    test_pool_free_misaligned();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_REALLOC
+    test_pool_alloc_free_realloc();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_PEAK
+    test_pool_peak_tracking();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_RESET
+    test_pool_reset();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_INVALID
+    test_pool_invalid_inputs();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_TWO_POOLS
+    test_pool_two_pools();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_BLOCK_ALIGN
+    test_pool_block_size_alignment();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_STATS
+    test_pool_stats_mapping();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_POISON
+    test_pool_debug_poisoning();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+#if TEST_POOL_WITHIN_BUF
+    test_pool_alloc_within_buffer();
+    tiku_common_delay_ms(TEST_DELAY_MS);
+#endif
+
+    MAIN_PRINTF("Pool allocator tests completed\n");
 #endif
 }
 

@@ -527,45 +527,81 @@ Early warning lets the application relocate hot keys.
 \end{frame}
 
 % ===========================================================================
-\section{Complete Usage Example}
+\section{Usage Examples}
 % ===========================================================================
 
-\begin{frame}[fragile]{End-to-End Example: Device Configuration}
+\begin{frame}{When to Use a Persistent Store}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Persistent Store IS Right When\ldots}
+\begin{itemize}
+  \item Device configuration must survive reboots
+  \item Sensor calibration set once at factory
+  \item Boot counter or error log for diagnostics
+  \item Firmware updates must not lose user data
+  \item You need wear tracking for hot FRAM cells
+\end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{alertblock}{Persistent Store Is NOT Needed When\ldots}
+\begin{itemize}
+  \item Data is recomputed from sensors every boot
+  \item Values change every millisecond (use SRAM)
+  \item You only need scratch memory (use arena/pool)
+  \item Data is streamed out and never re-read locally
+\end{itemize}
+\end{alertblock}
+\end{column}
+\end{columns}
+
+\vspace{0.5em}
+\begin{block}{Rule of Thumb}
+If the answer to ``does this data need to be the same after the next
+power cycle?'' is yes, put it in the persistent store. If the answer
+is ``no'' or ``it will be re-derived from hardware'', keep it in SRAM
+and save the FRAM write cycles.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 1: Device Configuration with Defaults}
 \begin{lstlisting}[style=cstyle]
-/* 1. Declare FRAM-backed buffers (persist across reboots)
-      GCC: __attribute__((section(".persistent")))       */
+/* FRAM-backed buffers (survive reboots) */
 static uint8_t __attribute__((section(".persistent")))
     cfg_fram[32] = {0};
-static uint8_t __attribute__((section(".persistent")))
-    cal_fram[16] = {0};
 static tiku_persist_store_t __attribute__((section(".persistent")))
     store = {0};
 
 void app_init(void) {
-    /* 2. Init store (recovers valid entries from previous boot) */
-    tiku_persist_init(&store);
-
-    /* 3. Register keys with their FRAM buffers */
+    tiku_persist_init(&store);     /* recover valid entries from previous boot */
     tiku_persist_register(&store, "cfg", cfg_fram, sizeof(cfg_fram));
-    tiku_persist_register(&store, "cal", cal_fram, sizeof(cal_fram));
 
-    /* 4. Read existing config into SRAM for fast access */
+    /* Try to load saved config into fast SRAM copy */
     uint8_t config[32];
     tiku_mem_arch_size_t len;
 
     if (tiku_persist_read(&store, "cfg", config, sizeof(config), &len)
         == TIKU_MEM_OK) {
-        apply_config(config, len);       /* use saved config */
+        apply_config(config, len);           /* use saved config */
     } else {
-        load_defaults(config, &len);     /* first boot */
-        tiku_persist_write(&store, "cfg", config, len);
+        load_defaults(config, &len);         /* first boot: apply defaults */
+        tiku_persist_write(&store, "cfg", config, len);  /* save for next boot */
     }
 }
 \end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Pattern: Read-or-Default}
+On first boot, \texttt{persist\_read} returns \texttt{ERR\_NOT\_FOUND} so
+defaults are loaded and written. On every subsequent boot, the saved
+config is restored automatically.
+\end{block}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{End-to-End Example: Boot Counter \& Wear Monitoring}
+\begin{frame}[fragile]{Example 2: Boot Counter \& Wear Monitoring}
 \begin{lstlisting}[style=cstyle]
 static uint8_t __attribute__((section(".persistent")))
     counter_fram[4] = {0};
@@ -590,8 +626,134 @@ void track_boot_count(void) {
     /* Check FRAM wear on hot keys */
     uint32_t writes;
     if (tiku_persist_wear_check(&store, "boots", &writes) == 1) {
-        /* warn: approaching wear limit */
+        uart_puts("WARN: boot counter approaching FRAM wear limit\r\n");
     }
+}
+\end{lstlisting}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 3: Firmware Update Survival}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Firmware v1.0}]
+/* FRAM buffer at fixed address */
+static uint8_t
+  __attribute__((section(".persistent")))
+  cal_fram[16] = {0};
+
+void v1_init(void) {
+    tiku_persist_init(&store);
+    tiku_persist_register(&store,
+        "cal", cal_fram, 16);
+
+    /* Write factory calibration */
+    uint8_t cal[] = {0x42, 0x37};
+    tiku_persist_write(&store,
+        "cal", cal, 2);
+}
+/* Device ships with "cal" = {0x42,0x37}
+   write_count = 1 */
+\end{lstlisting}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Firmware v2.0 (reflashed)}]
+/* Buffer may be at a different address
+   in the new binary */
+static uint8_t
+  __attribute__((section(".persistent")))
+  cal_fram[16] = {0};
+
+void v2_init(void) {
+    tiku_persist_init(&store);
+    /* Re-register: updates pointer,
+       preserves existing data! */
+    tiku_persist_register(&store,
+        "cal", cal_fram, 16);
+
+    uint8_t cal[16];
+    tiku_mem_arch_size_t len;
+    tiku_persist_read(&store,
+        "cal", cal, 16, &len);
+    /* cal = {0x42, 0x37} -- survived! */
+    /* write_count = 1 -- preserved! */
+}
+\end{lstlisting}
+\end{column}
+\end{columns}
+
+\vspace{0.3em}
+\begin{block}{How It Works}
+\texttt{persist\_register} checks if the key already exists. If it does,
+it updates the FRAM buffer pointer (which may have moved in the new binary)
+but preserves the existing data and write count. Factory calibration
+survives firmware updates without any migration code.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 4: MPU-Protected Persistent Writes}
+\begin{lstlisting}[style=cstyle]
+/* Combine MPU scoped_write with persist_write for maximum safety */
+typedef struct {
+    tiku_persist_store_t *store;
+    const uint8_t *data;
+    tiku_mem_arch_size_t len;
+} safe_write_ctx_t;
+
+static void do_write(void *arg) {
+    safe_write_ctx_t *ctx = (safe_write_ctx_t *)arg;
+    tiku_persist_write(ctx->store, "cfg", ctx->data, ctx->len);
+}
+
+void safe_config_update(tiku_persist_store_t *store,
+                         const uint8_t *new_cfg, tiku_mem_arch_size_t len)
+{
+    safe_write_ctx_t ctx = { store, new_cfg, len };
+    tiku_mpu_scoped_write(do_write, &ctx);
+    /* scoped_write guarantees:
+       1. Interrupts disabled (no ISR can corrupt FRAM)
+       2. NVM unlocked only during do_write()
+       3. NVM re-locked automatically after return */
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{alertblock}{Best Practice}
+Always use \texttt{scoped\_write} for individual persist writes. This
+ensures FRAM is protected for the minimum possible time and no ISR can
+interfere.
+\end{alertblock}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 5: Multi-Key Device Profile}
+\begin{lstlisting}[style=cstyle]
+/* A sensor node with config, calibration, and error log */
+static uint8_t __attribute__((section(".persistent")))
+    cfg_fram[32]={0}, cal_fram[16]={0}, err_fram[64]={0};
+
+void device_profile_init(tiku_persist_store_t *store) {
+    tiku_persist_init(store);
+    tiku_persist_register(store, "cfg", cfg_fram, sizeof(cfg_fram));
+    tiku_persist_register(store, "cal", cal_fram, sizeof(cal_fram));
+    tiku_persist_register(store, "err", err_fram, sizeof(err_fram));
+}
+
+void log_error(tiku_persist_store_t *store, uint8_t code) {
+    uint8_t log[64];
+    tiku_mem_arch_size_t len;
+    /* Append to existing error log */
+    tiku_persist_read(store, "err", log, sizeof(log), &len);
+    if (len < sizeof(log)) {
+        log[len] = code;
+        tiku_persist_write(store, "err", log, len + 1);
+    }
+    /* Check if error log is wearing out FRAM */
+    uint32_t writes;
+    if (tiku_persist_wear_check(store, "err", &writes) == 1)
+        rotate_error_log(store);   /* move to a fresh FRAM region */
 }
 \end{lstlisting}
 \end{frame}
@@ -665,6 +827,7 @@ void track_boot_count(void) {
 #define TEST_PERSIST_DELETE      0
 #define TEST_PERSIST_FULL        0
 #define TEST_PERSIST_REBOOT      1
+#define TEST_PERSIST_POWERCYCLE  0
 #define TEST_PERSIST_WEAR        0
 #define TEST_PERSIST_DUP_KEY     0
 \end{lstlisting}
@@ -715,43 +878,71 @@ test binary.
 15 & Not found          & Read/write on missing key returns ERR\_NOT\_FOUND \\
 16 & Delete             & Entry removed; count decremented; read fails \\
 17 & Store full         & Fill all slots; one more returns ERR\_FULL \\
-18 & Reboot survival    & Re-init preserves entries with valid magic \\
-19 & Wear check         & Returns 0 initially; 1 after threshold crossed \\
-20 & Duplicate key      & Re-register updates pointer, preserves data \\
+18 & Reboot survival    & Re-init preserves entries with valid magic (software reset) \\
+19 & Power-cycle        & Data survives full power removal and restore (hardware test) \\
+20 & Wear check         & Returns 0 initially; 1 after threshold crossed \\
+21 & Duplicate key      & Re-register updates pointer, preserves data \\
 \bottomrule
 \end{tabular}
 \end{table}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{Test Deep Dive: Reboot Survival \& Wear}
-\begin{columns}[T]
-\begin{column}{0.48\textwidth}
-\begin{lstlisting}[style=cstyle, title={Reboot survival (two-phase, real HW)}]
-/* All in .persistent (FRAM) */
-static uint8_t
-  __attribute__((section(".persistent")))
-  phase = PHASE_WRITE;
-static tiku_persist_store_t
-  __attribute__((section(".persistent")))
-  store = {0};
-static uint8_t
-  __attribute__((section(".persistent")))
-  fram_buf[16] = {0};
+\begin{frame}[fragile]{Test Deep Dive: Reboot Survival}
+\begin{lstlisting}[style=cstyle, title={Reboot survival --- two-phase test across real hardware reset}]
+/* All variables in .persistent (FRAM) --- survive reset */
+static uint8_t  __attribute__((section(".persistent")))
+    phase = PHASE_WRITE;
+static tiku_persist_store_t __attribute__((section(".persistent")))
+    store = {0};
+static uint8_t  __attribute__((section(".persistent")))
+    fram_buf[16] = {0};
 
 if (phase == PHASE_WRITE) {
-  /* Phase 0: write, then HW reset */
-  mpu_state = tiku_mpu_unlock_fram();
+    /* Phase 0: write data, then trigger software reset */
+    mpu_state = tiku_mpu_unlock_nvm();
+    tiku_persist_init(&store);
+    tiku_persist_register(&store, "boot", fram_buf, 16);
+    tiku_persist_write(&store, "boot", data, 3);
+    phase = PHASE_VERIFY;
+    tiku_mpu_lock_nvm(mpu_state);
+    PMMCTL0 = PMMPW | PMMSWPOR;    /* Trigger software reset */
+} else {
+    /* Phase 1: verify data survived the reboot */
+    tiku_persist_init(&store);
+    TEST_ASSERT(store.count == 1);
+    tiku_persist_read(&store, "boot", read_buf, sizeof(read_buf), &out_len);
+    TEST_ASSERT(memcmp(read_buf, data, 3) == 0);  /* data intact */
+}
+\end{lstlisting}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Test Deep Dive: Power-Cycle Survival \& Wear}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, title={Power-cycle survival (manual)}]
+/* Same two-phase pattern as reboot,
+   but requires physical power removal
+   instead of software reset */
+
+if (phase == PHASE_WRITE) {
+  mpu_state = tiku_mpu_unlock_nvm();
   tiku_persist_init(&store);
   tiku_persist_register(&store,
-      "boot", fram_buf, 16);
+      "pwr", fram_buf, 16);
   tiku_persist_write(&store,
-      "boot", data, 3);
+      "pwr", data, 5);
   phase = PHASE_VERIFY;
-  tiku_mpu_lock_fram(mpu_state);
-  PMMCTL0 = PMMPW | PMMSWPOR; /*reset*/
+  tiku_mpu_lock_nvm(mpu_state);
+  /* Blink LED and wait for user
+     to physically remove power */
+  for (;;) {
+    tiku_common_led1_toggle();
+    tiku_common_delay_ms(500);
+  }
 } else {
-  /* Phase 1: verify after reboot */
+  /* After power restore: verify */
   tiku_persist_init(&store);
   TEST_ASSERT(store.count == 1);
   /* ... read back and compare ... */
@@ -784,6 +975,14 @@ r = tiku_persist_wear_check(
     &store, "wear", &wc);
 TEST_ASSERT(r == 1);
 \end{lstlisting}
+
+\vspace{0.3em}
+\begin{alertblock}{Why Power-Cycle?}
+A software reset never drops Vcc to 0\,V ---
+FRAM is trivially preserved. A true power-cycle
+tests the real-world scenario of battery swaps,
+brown-outs, and field power interruptions.
+\end{alertblock}
 \end{column}
 \end{columns}
 \end{frame}
@@ -811,9 +1010,9 @@ TEST_ASSERT(r == 1);
 \begin{column}{0.48\textwidth}
 \begin{block}{Test Coverage}
 \begin{itemize}
-  \item 11 dedicated test cases
+  \item 12 dedicated test cases
   \item Runs on-target or host-native
-  \item Covers: init, register, read/write, delete, full, reboot survival, wear, duplicates
+  \item Covers: init, register, read/write, delete, full, reboot survival, power-cycle survival, wear, duplicates
 \end{itemize}
 \end{block}
 
