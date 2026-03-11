@@ -132,4 +132,23 @@
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
 
+/*---------------------------------------------------------------------------*/
+/* 1-Wire on P1.2 (BoosterPack J1 pin 4)                                    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * 1-Wire (Dallas/Maxim) bit-banged on P1.2.
+ * Requires an external 4.7 kohm pull-up resistor from P1.2 to 3.3V.
+ *
+ * Note: P1.2 is also ADC channel A2. If using both 1-Wire and ADC,
+ * choose a different pin for one of them.
+ */
+#define TIKU_BOARD_OW_AVAILABLE     1
+#define TIKU_BOARD_OW_DIR           P1DIR
+#define TIKU_BOARD_OW_OUT           P1OUT
+#define TIKU_BOARD_OW_IN            P1IN
+#define TIKU_BOARD_OW_SEL0          P1SEL0
+#define TIKU_BOARD_OW_SEL1          P1SEL1
+#define TIKU_BOARD_OW_BIT           BIT2
+
 #endif /* TIKU_BOARD_FR5969_LAUNCHPAD_H_ */

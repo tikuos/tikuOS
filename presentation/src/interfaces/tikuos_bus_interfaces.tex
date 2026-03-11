@@ -76,7 +76,7 @@
 }
 
 % ---- Metadata -------------------------------------------------------------
-\title[TikuOS Bus Interfaces]{TikuOS Bus Interfaces: I2C, SPI \& ADC}
+\title[TikuOS Bus Interfaces]{TikuOS Bus Interfaces: I2C, SPI, ADC \& 1-Wire}
 \subtitle{Simple. Ubiquitous. Intelligence, Everywhere.}
 \author[Ambuj Varshney]{Ambuj Varshney \\ \texttt{ambuj@tiku-os.org}}
 \date{\today}
@@ -1105,6 +1105,329 @@ Set \texttt{PxSEL0|=BITn; PxSEL1|=BITn;} (SEL1:SEL0 = 1:1) for analog input.
 \end{frame}
 
 % ===========================================================================
+\section{1-Wire Interface}
+% ===========================================================================
+
+% ---------------------------------------------------------------------------
+\subsection{1-Wire Overview}
+
+\begin{frame}[fragile]{1-Wire: Single-Pin Digital Buses}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Dallas/Maxim 1-Wire Protocol:}
+\begin{itemize}
+  \item Single data line (DQ) + GND
+  \item External 4.7\,k$\Omega$ pull-up to VDD
+  \item Master initiates all communication
+  \item Bit-banged via GPIO (timing-critical)
+  \item Each device has unique 64-bit ROM ID
+  \item Interrupt-protected $\mu$s-level timing
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Typical 1-Wire sensors:}
+\begin{itemize}
+  \item DS18B20 --- digital temperature (12-bit)
+  \item DS18S20 --- digital temperature (9-bit)
+  \item DS2401 --- silicon serial number
+  \item iButton --- authentication tokens
+\end{itemize}
+
+\vspace{0.3em}
+\begin{alertblock}{Same Three-Layer Pattern}
+\texttt{interfaces/onewire/} $\rightarrow$
+\texttt{hal/} $\rightarrow$
+\texttt{arch/msp430/}
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\subsection{1-Wire API}
+
+\begin{frame}[fragile]{1-Wire API \& ROM Commands}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle,
+  title={interfaces/onewire/tiku\_onewire.h}]
+/* Status codes */
+#define TIKU_OW_OK              0
+#define TIKU_OW_ERR_NO_DEVICE (-1)
+#define TIKU_OW_ERR_PARAM     (-2)
+
+/* ROM commands */
+#define TIKU_OW_CMD_SKIP_ROM   0xCC
+#define TIKU_OW_CMD_READ_ROM   0x33
+#define TIKU_OW_CMD_MATCH_ROM  0x55
+#define TIKU_OW_CMD_SEARCH_ROM 0xF0
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Skip ROM}
+When only one device is on the bus,
+\texttt{Skip ROM} (0xCC) addresses it
+without knowing its 64-bit ID.
+\end{block}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{API Functions:}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{@{}lp{4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Description} \\
+\midrule
+\texttt{init()}         & Configure GPIO pin \\
+\texttt{close()}        & Release pin \\
+\texttt{reset()}        & 480\,$\mu$s reset pulse, detect presence \\
+\texttt{write\_bit()}   & Write 1 or 0 (70\,$\mu$s slot) \\
+\texttt{read\_bit()}    & Read 1 bit (70\,$\mu$s slot) \\
+\texttt{write\_byte()}  & 8 write slots, LSB first \\
+\texttt{read\_byte()}   & 8 read slots, LSB first \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.3em}
+\begin{alertblock}{No Validation Layer}
+Unlike I2C/SPI, the 1-Wire interface layer
+is a thin delegation --- all timing logic
+lives in the arch implementation.
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\subsection{1-Wire Architecture}
+
+\begin{frame}[fragile]{1-Wire Arch: GPIO Bit-Bang Timing}
+\begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
+  title={arch/msp430/tiku\_onewire\_arch.c --- timing and GPIO helpers}]
+/* Microsecond delay assuming 8 MHz MCLK */
+#define OW_DELAY_US(us)  __delay_cycles((unsigned long)(us) * 8UL)
+
+static inline void ow_drive_low(void) {        /* Output, drive low */
+    TIKU_BOARD_OW_OUT &= ~TIKU_BOARD_OW_BIT;
+    TIKU_BOARD_OW_DIR |= TIKU_BOARD_OW_BIT;
+}
+static inline void ow_release(void) {           /* Input, pull-up drives high */
+    TIKU_BOARD_OW_DIR &= ~TIKU_BOARD_OW_BIT;
+}
+static inline uint8_t ow_read(void) {           /* Sample line state */
+    return (TIKU_BOARD_OW_IN & TIKU_BOARD_OW_BIT) ? 1 : 0;
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Board Macros (P1.2)}
+\scriptsize
+\begin{tabular}{@{}ll@{}}
+\texttt{TIKU\_BOARD\_OW\_DIR}  & \texttt{P1DIR} \\
+\texttt{TIKU\_BOARD\_OW\_OUT}  & \texttt{P1OUT} \\
+\texttt{TIKU\_BOARD\_OW\_IN}   & \texttt{P1IN}  \\
+\texttt{TIKU\_BOARD\_OW\_BIT}  & \texttt{BIT2}  \\
+\end{tabular}
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{block}{Open-Drain Protocol}
+The master only drives the line \textbf{low}.
+To send a ``1'' or to read, the master
+\textbf{releases} the line and the external
+4.7\,k$\Omega$ pull-up drives it high.
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{1-Wire Arch: Reset \& Bit Operations}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
+  title={Reset: detect device presence}]
+int tiku_onewire_arch_reset(void)
+{
+    uint8_t presence;
+    uint16_t sr;
+
+    sr = __get_SR_register() & GIE;
+    __bic_SR_register(GIE);  /* IRQ off */
+
+    ow_drive_low();
+    OW_DELAY_US(480);       /* Reset pulse */
+
+    ow_release();
+    OW_DELAY_US(70);        /* Wait for presence */
+
+    presence = ow_read();   /* 0 = present */
+
+    OW_DELAY_US(410);       /* Complete window */
+
+    __bis_SR_register(sr);  /* IRQ restore */
+
+    return presence
+        ? TIKU_OW_ERR_NO_DEVICE
+        : TIKU_OW_OK;
+}
+\end{lstlisting}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
+  title={Write bit: 1 vs 0 timing}]
+void tiku_onewire_arch_write_bit(
+    uint8_t bit)
+{
+    sr = __get_SR_register() & GIE;
+    __bic_SR_register(GIE);
+
+    if (bit & 1) {
+        ow_drive_low();
+        OW_DELAY_US(6);   /* Short pulse */
+        ow_release();
+        OW_DELAY_US(64);  /* Recovery */
+    } else {
+        ow_drive_low();
+        OW_DELAY_US(60);  /* Long pulse */
+        ow_release();
+        OW_DELAY_US(10);  /* Recovery */
+    }
+
+    __bis_SR_register(sr);
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Interrupt Protection}
+All timing-critical operations save and
+disable GIE, then restore it. A single
+missed $\mu$s can corrupt a bit.
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{DS18B20 Wiring: MSP430FR5969 LaunchPad}
+\begin{center}
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum height=2cm,
+                minimum width=3cm, align=center, font=\small\sffamily},
+    >=Stealth
+  ]
+
+  % MCU and Sensor
+  \node[box, fill=blue!15] (mcu) {MSP430FR5969\\{\scriptsize LaunchPad}};
+  \node[box, fill=green!15, right=5cm of mcu] (sensor) {DS18B20\\{\scriptsize TO-92}};
+
+  % Signal line (single wire)
+  \draw[<->, thick, blue!70!black]
+    (mcu.east) -- node[above, font=\scriptsize\ttfamily] {P1.2 (DQ) --- J1 pin 4}
+    (sensor.west);
+
+  % Pull-up
+  \node[font=\tiny, text=red!70!black, above=1.0cm of mcu.east, xshift=2.5cm]
+    (vcc) {3.3V};
+  \draw[red!70!black] ([xshift=2.5cm]mcu.east) --
+    ++(0,0.6) node[midway, right, font=\tiny] {4.7k};
+
+  % Power
+  \draw[->, thick, red]
+    ([yshift=-18pt]mcu.east) -- node[below, font=\scriptsize\ttfamily] {3.3V (VDD)}
+    ([yshift=-18pt]sensor.west);
+  \draw[->, thick, black!60]
+    ([yshift=-28pt]mcu.east) -- node[below, font=\scriptsize\ttfamily] {GND}
+    ([yshift=-28pt]sensor.west);
+
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.3em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Connections}
+\begin{tabular}{@{}ll@{}}
+\textbf{LaunchPad} & \textbf{DS18B20 (TO-92)} \\
+P1.2 (J1 pin 4) & Pin 2 (DQ / Data) \\
+3.3V             & Pin 3 (VDD) \\
+GND              & Pin 1 (GND) \\
+\end{tabular}
+
+\vspace{0.3em}
+4.7\,k$\Omega$ pull-up from DQ to 3.3V (required!)
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{block}{DS18B20 Specs}
+\scriptsize
+\begin{tabular}{@{}ll@{}}
+Resolution   & 12-bit (0.0625\,\textdegree C/LSB) \\
+Range        & $-55$ to $+125$\,\textdegree C \\
+Conversion   & 750\,ms max \\
+Supply       & 3.0--5.5\,V \\
+Protocol     & 1-Wire (Skip ROM + commands) \\
+\end{tabular}
+
+\vspace{0.3em}
+\normalsize
+\textbf{Pin 1 is GND} (flat side facing you,
+left to right: GND, DQ, VDD).
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Example 11: DS18B20 1-Wire Temp Sensor}
+\begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
+  title={examples/11\_ds18b20\_temp/ds18b20\_temp.c --- periodic 1-Wire temperature read}]
+#define DS18B20_CMD_CONVERT_T       0x44
+#define DS18B20_CMD_READ_SCRATCHPAD 0xBE
+
+static int ds18b20_start_conversion(void) {
+    if (tiku_onewire_reset() != TIKU_OW_OK) return TIKU_OW_ERR_NO_DEVICE;
+    tiku_onewire_write_byte(TIKU_OW_CMD_SKIP_ROM);
+    tiku_onewire_write_byte(DS18B20_CMD_CONVERT_T);
+    return TIKU_OW_OK;
+}
+
+TIKU_PROCESS_THREAD(ds18b20_process, ev, data)
+{
+    static int16_t temp_int;  static uint8_t temp_frac, temp_neg;
+
+    TIKU_PROCESS_BEGIN();
+    tiku_onewire_init();
+    if (tiku_onewire_reset() != TIKU_OW_OK) {
+        TIKU_PRINTF("[DS18B20] No device found\n");
+        TIKU_PROCESS_EXIT();
+    }
+
+    while (1) {
+        ds18b20_start_conversion();
+        tiku_timer_set_event(&poll_timer, 2 * TIKU_CLOCK_SECOND);
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+
+        if (ds18b20_read_temp(&temp_int, &temp_frac, &temp_neg) == TIKU_OW_OK) {
+            int frac = (int)((uint16_t)temp_frac * 625 / 100);
+            TIKU_PRINTF("[DS18B20] Temp: %s%d.%d C\n",
+                        temp_neg ? "-" : "", (int)temp_int, frac);
+            tiku_common_led1_toggle();
+        }
+    }
+    TIKU_PROCESS_END();
+}
+\end{lstlisting}
+\end{frame}
+
+% ===========================================================================
 \section{Usage Examples}
 % ===========================================================================
 
@@ -1367,22 +1690,29 @@ ADC API
   & \texttt{interfaces/adc/tiku\_adc.h}  & Public types \& prototypes \\
   & \texttt{interfaces/adc/tiku\_adc.c}  & Validation, delegates to arch \\
 \midrule
+1-Wire API
+  & \texttt{interfaces/onewire/tiku\_onewire.h}  & Public types \& ROM commands \\
+  & \texttt{interfaces/onewire/tiku\_onewire.c}  & Delegates to arch \\
+\midrule
 HAL
   & \texttt{hal/tiku\_i2c\_hal.h} & Routes to I2C arch \\
   & \texttt{hal/tiku\_spi\_hal.h} & Routes to SPI arch \\
   & \texttt{hal/tiku\_adc\_hal.h} & Routes to ADC arch \\
+  & \texttt{hal/tiku\_onewire\_hal.h} & Routes to 1-Wire arch \\
 \midrule
-\multirow{3}{*}{Arch (MSP430)}
+\multirow{4}{*}{Arch (MSP430)}
   & \texttt{arch/msp430/tiku\_i2c\_arch.c/.h}  & eUSCI\_B0 I2C master \\
   & \texttt{arch/msp430/tiku\_spi\_arch.c/.h}  & eUSCI\_A1 SPI master \\
   & \texttt{arch/msp430/tiku\_adc\_arch.c/.h}  & ADC12\_B analog input \\
+  & \texttt{arch/msp430/tiku\_onewire\_arch.c/.h}  & GPIO bit-bang 1-Wire \\
 \midrule
 \multirow{2}{*}{Board Config}
   & \texttt{.../tiku\_device\_fr5969.h}  & eUSCI availability flags \\
   & \texttt{.../tiku\_board\_fr5969\_launchpad.h}  & Pin select \& prescaler macros \\
 \midrule
-Example
+\multirow{2}{*}{Examples}
   & \texttt{examples/10\_i2c\_temp/}  & I2C temp sensor (MCP9808/ADT7410) \\
+  & \texttt{examples/11\_ds18b20\_temp/}  & 1-Wire DS18B20 temp sensor \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1418,9 +1748,17 @@ Example
 \begin{block}{ADC}
 \begin{itemize}
   \item ADC12\_B: 8/10/12-bit resolution
-  \item 16 external channels + temp sensor + battery
-  \item AVCC / 1.2V / 2.0V / 2.5V reference
-  \item Blocking single-conversion reads
+  \item 16 external channels + temp/battery
+  \item Multiple reference voltages
+\end{itemize}
+\end{block}
+
+\begin{block}{1-Wire}
+\begin{itemize}
+  \item Single data pin (DQ) + pull-up
+  \item GPIO bit-bang, interrupt-protected
+  \item $\mu$s-level timing at 8\,MHz MCLK
+  \item DS18B20 temp sensor example
 \end{itemize}
 \end{block}
 \end{column}
@@ -1441,8 +1779,8 @@ Example
 eUSCI\_A0 & UART (backchannel) \\
 eUSCI\_A1 & SPI \\
 eUSCI\_B0 & I2C \\
-eUSCI\_B1 & (available) \\
 ADC12\_B  & Analog input \\
+P1.2 GPIO & 1-Wire (bit-bang) \\
 \end{tabular}
 \end{block}
 \end{column}
@@ -1453,17 +1791,16 @@ ADC12\_B  & Analog input \\
 \begin{frame}{Thank You}
 \begin{center}
 \Large\textbf{TikuOS Bus Interfaces}\\[0.5em]
-\normalsize I2C, SPI \& ADC for Physical AI Endpoints\\[1.5em]
+\normalsize I2C, SPI, ADC \& 1-Wire for Physical AI Endpoints\\[1.5em]
 
 \begin{tabular}{rl}
-  Repository: & \url{https://github.com/tikuos/tikuOS} \\
-  License:    & Apache 2.0 \\
-  I2C API:    & \texttt{interfaces/bus/tiku\_i2c\_bus.h} \\
-  SPI API:    & \texttt{interfaces/bus/tiku\_spi\_bus.h} \\
-  ADC API:    & \texttt{interfaces/adc/tiku\_adc.h} \\
-  I2C Arch:   & \texttt{arch/msp430/tiku\_i2c\_arch.c} \\
-  SPI Arch:   & \texttt{arch/msp430/tiku\_spi\_arch.c} \\
-  ADC Arch:   & \texttt{arch/msp430/tiku\_adc\_arch.c} \\
+  Repository:  & \url{https://github.com/tikuos/tikuOS} \\
+  License:     & Apache 2.0 \\
+  I2C API:     & \texttt{interfaces/bus/tiku\_i2c\_bus.h} \\
+  SPI API:     & \texttt{interfaces/bus/tiku\_spi\_bus.h} \\
+  ADC API:     & \texttt{interfaces/adc/tiku\_adc.h} \\
+  1-Wire API:  & \texttt{interfaces/onewire/tiku\_onewire.h} \\
+  1-Wire Arch: & \texttt{arch/msp430/tiku\_onewire\_arch.c} \\
 \end{tabular}
 \end{center}
 \end{frame}
