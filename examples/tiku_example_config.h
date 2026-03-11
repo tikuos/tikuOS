@@ -54,7 +54,16 @@
 #define TIKU_EXAMPLE_BROADCAST       0  /**< 07: Broadcast events */
 #define TIKU_EXAMPLE_TIMEOUT         0  /**< 08: Timeout pattern */
 #define TIKU_EXAMPLE_CHANNEL         0  /**< 09: Channel message passing */
-#define TIKU_EXAMPLE_MCP9808_TEMP    1  /**< 10: MCP9808 I2C temp sensor */
+#define TIKU_EXAMPLE_I2C_TEMP        1  /**< 10: I2C temperature sensor */
+
+/**
+ * @defgroup TIKU_TEMP_SENSOR Temperature Sensor Selection (Example 10)
+ * @brief Select ONE I2C temperature sensor (set to 1). All others must be 0.
+ * @{
+ */
+#define TIKU_TEMP_SENSOR_MCP9808     0  /**< Microchip MCP9808 (addr 0x18) */
+#define TIKU_TEMP_SENSOR_ADT7410     1  /**< Analog Devices ADT7410 (addr 0x48) */
+/** @} */
 
 /** @} */ /* End of TIKU_EXAMPLES group */
 

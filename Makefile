@@ -142,7 +142,7 @@ SRCS += examples/06_callback_timer/callback_timer.c
 SRCS += examples/07_broadcast/broadcast.c
 SRCS += examples/08_timeout/timeout.c
 SRCS += examples/09_channel/channel.c
-SRCS += examples/10_mcp9808_temp/mcp9808_temp.c
+SRCS += examples/10_i2c_temp/i2c_temp.c
 
 # Object files in build directory
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
