@@ -104,6 +104,8 @@
 #include <kernel/timers/tiku_timer.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
 #include <interfaces/bus/tiku_spi_bus.h>
+#include <interfaces/adc/tiku_adc.h>
+#include <interfaces/onewire/tiku_onewire.h>
 
 /*---------------------------------------------------------------------------*/
 /* TEST CONFIGURATION                                                       */

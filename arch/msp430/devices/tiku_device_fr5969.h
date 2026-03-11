@@ -115,4 +115,11 @@
 #define TIKU_DEVICE_HAS_EUSCIB0     1   /**< eUSCI_B0 present (I2C) */
 #define TIKU_DEVICE_HAS_EUSCIB1     1   /**< eUSCI_B1 present */
 
+/*---------------------------------------------------------------------------*/
+/* ADC PERIPHERAL                                                            */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
+#define TIKU_DEVICE_ADC_CHANNELS    16  /**< External channels A0-A15 */
+
 #endif /* TIKU_DEVICE_FR5969_H_ */
