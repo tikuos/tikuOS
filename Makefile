@@ -84,6 +84,7 @@ SRCS += arch/msp430/tiku_cpu_common.c
 SRCS += arch/msp430/tiku_cpu_freq_boot_arch.c
 SRCS += arch/msp430/tiku_cpu_watchdog_arch.c
 SRCS += arch/msp430/tiku_htimer_arch.c
+SRCS += arch/msp430/tiku_i2c_arch.c
 SRCS += arch/msp430/tiku_timer_arch.c
 SRCS += arch/msp430/tiku_uart_arch.c
 SRCS += arch/msp430/tiku_mem_arch.c
@@ -96,6 +97,7 @@ SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/timers/tiku_clock.c
 SRCS += kernel/timers/tiku_htimer.c
 SRCS += kernel/timers/tiku_timer.c
+SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += kernel/memory/tiku_mem.c
 SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
@@ -140,6 +142,7 @@ SRCS += examples/06_callback_timer/callback_timer.c
 SRCS += examples/07_broadcast/broadcast.c
 SRCS += examples/08_timeout/timeout.c
 SRCS += examples/09_channel/channel.c
+SRCS += examples/10_i2c_temp/i2c_temp.c
 
 # Object files in build directory
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))

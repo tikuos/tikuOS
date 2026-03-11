@@ -41,8 +41,17 @@
 
 /**
  * Device selection: passed via -DTIKU_DEVICE_MSP430FRxxxx=1 from the Makefile.
- * Default to FR2433 if nothing is defined (e.g. compiling without the Makefile).
+ * CCS passes -D__MSP430FRxxxx__ instead, so map those automatically.
+ * Default to FR2433 if nothing is defined.
  */
+#if defined(__MSP430FR5969__) && !defined(TIKU_DEVICE_MSP430FR5969)
+#define TIKU_DEVICE_MSP430FR5969 1
+#elif defined(__MSP430FR5994__) && !defined(TIKU_DEVICE_MSP430FR5994)
+#define TIKU_DEVICE_MSP430FR5994 1
+#elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_DEVICE_MSP430FR2433 1
+#endif
+
 #if !defined(TIKU_DEVICE_MSP430FR5969) && \
     !defined(TIKU_DEVICE_MSP430FR5994) && \
     !defined(TIKU_DEVICE_MSP430FR2433)
@@ -93,6 +102,8 @@
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>
 #include <kernel/timers/tiku_timer.h>
+#include <interfaces/bus/tiku_i2c_bus.h>
+#include <interfaces/bus/tiku_spi_bus.h>
 
 /*---------------------------------------------------------------------------*/
 /* TEST CONFIGURATION                                                       */
@@ -157,6 +168,12 @@
 
 /** Enable debug printing for watchdog timer */
 #define DEBUG_WDT 0
+
+/** Enable debug printing for I2C bus */
+#define DEBUG_I2C 0
+
+/** Enable debug printing for SPI bus */
+#define DEBUG_SPI 0
 
 /** @} */ /* End of TIKU_DEBUG_CONFIG group */
 
@@ -234,6 +251,18 @@
 #define WDT_PRINTF(...) TIKU_PRINTF("[WDT] " __VA_ARGS__)
 #else
 #define WDT_PRINTF(...)
+#endif
+
+#if DEBUG_I2C
+#define I2C_PRINTF(...) TIKU_PRINTF("[I2C] " __VA_ARGS__)
+#else
+#define I2C_PRINTF(...)
+#endif
+
+#if DEBUG_SPI
+#define SPI_PRINTF(...) TIKU_PRINTF("[SPI] " __VA_ARGS__)
+#else
+#define SPI_PRINTF(...)
 #endif
 
 /** @} */ /* End of TIKU_DEBUG_MACROS group */

@@ -83,4 +83,39 @@
 #define TIKU_BOARD_BTN2_INIT()      do { P1DIR &= ~BIT1; P1REN |= BIT1; P1OUT |= BIT1; } while(0)
 #define TIKU_BOARD_BTN2_PRESSED()   (!(P1IN & BIT1))
 
+/*---------------------------------------------------------------------------*/
+/* I2C on eUSCI_B0: P1.6 = SDA, P1.7 = SCL                                  */
+/*---------------------------------------------------------------------------*/
+
+/** Configure P1.6 and P1.7 for eUSCI_B0 I2C function (SEL1=1, SEL0=0). */
+#define TIKU_BOARD_I2C_PINS_INIT() \
+    do { P1SEL1 |= BIT6 | BIT7; P1SEL0 &= ~(BIT6 | BIT7); } while(0)
+
+/** I2C clock prescaler for 100 kHz from 8 MHz SMCLK: 8000000/100000 = 80. */
+#define TIKU_BOARD_I2C_BRW_100K     80
+
+/** I2C clock prescaler for 400 kHz from 8 MHz SMCLK: 8000000/400000 = 20. */
+#define TIKU_BOARD_I2C_BRW_400K     20
+
+/*---------------------------------------------------------------------------*/
+/* SPI on eUSCI_A1: P2.5 = CLK, P2.6 = SIMO, P2.7 = SOMI                   */
+/*---------------------------------------------------------------------------*/
+
+/** Configure P2.5/P2.6/P2.7 for eUSCI_A1 SPI function (SEL1=1, SEL0=0). */
+#define TIKU_BOARD_SPI_PINS_INIT() \
+    do { P2SEL1 |= BIT5 | BIT6 | BIT7; \
+         P2SEL0 &= ~(BIT5 | BIT6 | BIT7); } while(0)
+
+/** SPI prescaler for 4 MHz from 8 MHz SMCLK: 8000000/4000000 = 2. */
+#define TIKU_BOARD_SPI_BRW_4MHZ     2
+
+/** SPI prescaler for 2 MHz from 8 MHz SMCLK: 8000000/2000000 = 4. */
+#define TIKU_BOARD_SPI_BRW_2MHZ     4
+
+/** SPI prescaler for 1 MHz from 8 MHz SMCLK: 8000000/1000000 = 8. */
+#define TIKU_BOARD_SPI_BRW_1MHZ     8
+
+/** SPI prescaler for 500 kHz from 8 MHz SMCLK: 8000000/500000 = 16. */
+#define TIKU_BOARD_SPI_BRW_500KHZ   16
+
 #endif /* TIKU_BOARD_FR5969_LAUNCHPAD_H_ */

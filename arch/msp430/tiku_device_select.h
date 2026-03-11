@@ -32,6 +32,18 @@
 #define TIKU_DEVICE_SELECT_H_
 
 /*---------------------------------------------------------------------------*/
+/* AUTO-DETECT FROM TI COMPILER DEFINES                                      */
+/*---------------------------------------------------------------------------*/
+
+#if defined(__MSP430FR5969__) && !defined(TIKU_DEVICE_MSP430FR5969)
+#define TIKU_DEVICE_MSP430FR5969 1
+#elif defined(__MSP430FR5994__) && !defined(TIKU_DEVICE_MSP430FR5994)
+#define TIKU_DEVICE_MSP430FR5994 1
+#elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_DEVICE_MSP430FR2433 1
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* DEVICE SELECTION ROUTER                                                   */
 /*---------------------------------------------------------------------------*/
 
