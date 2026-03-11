@@ -833,35 +833,103 @@ Timeouts guard against hardware faults only.
 \section{Usage Examples}
 % ===========================================================================
 
-\begin{frame}[fragile]{Example: Reading a Temperature Sensor (I2C)}
+\begin{frame}[fragile]{Example: MCP9808 Temperature Sensor (I2C)}
 \begin{lstlisting}[style=cstyle,
-  title={I2C sensor read --- TMP102 temperature sensor at address 0x48}]
-#define TMP102_ADDR     0x48
-#define TMP102_REG_TEMP 0x00
+  title={I2C sensor read --- MCP9808 at address 0x18 (A0=A1=A2=GND)}]
+#define MCP9808_ADDR            0x18
+#define MCP9808_REG_TEMP        0x05  /* Ambient temperature register */
+#define MCP9808_REG_MANUF_ID    0x06  /* Expected: 0x0054 (Microchip) */
+#define MCP9808_REG_DEVICE_ID   0x07  /* Expected: 0x0400 */
 
-static void read_temperature(void)
+/* Read a 16-bit big-endian register */
+static int mcp9808_read_reg16(uint8_t reg, uint16_t *value)
 {
-    tiku_i2c_config_t cfg = { .speed = TIKU_I2C_SPEED_STANDARD };
-    uint8_t reg = TMP102_REG_TEMP;
     uint8_t buf[2];
-    int rc;
+    int rc = tiku_i2c_write_read(MCP9808_ADDR, &reg, 1, buf, 2);
+    if (rc == TIKU_I2C_OK)
+        *value = ((uint16_t)buf[0] << 8) | buf[1];
+    return rc;
+}
 
-    tiku_i2c_init(&cfg);
-
-    /* Write register address, then read 2 bytes (repeated START) */
-    rc = tiku_i2c_write_read(TMP102_ADDR, &reg, 1, buf, 2);
-
-    if (rc == TIKU_I2C_OK) {
-        /* TMP102: 12-bit result, MSB first, 0.0625 deg C per LSB */
-        int16_t raw = ((int16_t)buf[0] << 4) | (buf[1] >> 4);
-        TIKU_PRINTF("Temp: %d.%02d C\n", raw / 16, (raw % 16) * 625 / 100);
-    } else {
-        TIKU_PRINTF("I2C error: %d\n", rc);
-    }
-
-    tiku_i2c_close();
+/* Parse ambient temperature register (13-bit signed, 0.0625 C/LSB) */
+static int mcp9808_read_temp(int16_t *temp_int, uint8_t *temp_frac)
+{
+    uint16_t raw;
+    int rc = mcp9808_read_reg16(MCP9808_REG_TEMP, &raw);
+    if (rc != TIKU_I2C_OK) return rc;
+    uint8_t upper = (uint8_t)(raw >> 8) & 0x0F;
+    uint8_t lower = (uint8_t)(raw & 0xFF);
+    *temp_int  = (int16_t)(upper << 4) | (lower >> 4);
+    *temp_frac = lower & 0x0F;
+    return TIKU_I2C_OK;
 }
 \end{lstlisting}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{MCP9808 Wiring: MSP430FR5969 LaunchPad}
+\begin{center}
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum height=2cm,
+                minimum width=3cm, align=center, font=\small\sffamily},
+    >=Stealth
+  ]
+
+  % MCU and Sensor
+  \node[box, fill=blue!15] (mcu) {MSP430FR5969\\{\scriptsize LaunchPad}};
+  \node[box, fill=orange!15, right=5cm of mcu] (sensor) {MCP9808\\{\scriptsize Temp Sensor}};
+
+  % Signal lines
+  \draw[<->, thick, blue!70!black]
+    ([yshift=8pt]mcu.east) -- node[above, font=\scriptsize\ttfamily] {P1.6 (SDA)}
+    ([yshift=8pt]sensor.west);
+  \draw[<->, thick, green!50!black]
+    ([yshift=-8pt]mcu.east) -- node[below, font=\scriptsize\ttfamily] {P1.7 (SCL)}
+    ([yshift=-8pt]sensor.west);
+
+  % Pull-ups
+  \node[font=\tiny, text=red!70!black, above=1.2cm of mcu.east, xshift=2.5cm]
+    (vcc) {3.3V};
+  \draw[red!70!black] ([yshift=8pt, xshift=2cm]mcu.east) --
+    ++(0,0.4) node[midway, right, font=\tiny] {4.7k};
+  \draw[red!70!black] ([yshift=-8pt, xshift=2.5cm]mcu.east) --
+    ++(0,0.5) node[midway, right, font=\tiny] {4.7k};
+
+  % Power
+  \draw[->, thick, red]
+    ([yshift=-22pt]mcu.east) -- node[below, font=\scriptsize\ttfamily] {3.3V}
+    ([yshift=-22pt]sensor.west);
+  \draw[->, thick, black!60]
+    ([yshift=-32pt]mcu.east) -- node[below, font=\scriptsize\ttfamily] {GND}
+    ([yshift=-32pt]sensor.west);
+
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.5em}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Connections}
+\begin{tabular}{@{}ll@{}}
+\textbf{LaunchPad} & \textbf{MCP9808} \\
+P1.6 (J1 pin 10) & SDA \\
+P1.7 (J1 pin 9)  & SCL \\
+3.3V              & VDD \\
+GND               & GND, A0, A1, A2 \\
+\end{tabular}
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{block}{Notes}
+\begin{itemize}
+  \item Pull-ups: 4.7\,k$\Omega$ on SDA/SCL to 3.3V
+        (most breakouts include these)
+  \item A0=A1=A2=GND $\rightarrow$ address \texttt{0x18}
+  \item Alert pin: optional, active-low open-drain
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -900,39 +968,45 @@ static void flash_read(uint32_t addr, uint8_t *buf, uint16_t len)
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{Example: Process-Based Sensor Polling}
+\begin{frame}[fragile]{Example 10: MCP9808 Process (examples/10\_mcp9808\_temp/)}
 \begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
-  title={Periodic I2C sensor read using TikuOS process + timer}]
-#define SENSOR_ADDR 0x48
-#define SENSOR_REG  0x00
-
+  title={Periodic MCP9808 temperature read --- TikuOS process + event timer}]
 static struct tiku_timer poll_timer;
+TIKU_PROCESS(mcp9808_process, "MCP9808");
 
-TIKU_PROCESS(sensor_process, "I2C Sensor");
-
-TIKU_PROCESS_THREAD(sensor_process, ev, data)
+TIKU_PROCESS_THREAD(mcp9808_process, ev, data)
 {
-    static tiku_i2c_config_t cfg = { .speed = TIKU_I2C_SPEED_STANDARD };
-    static uint8_t reg = SENSOR_REG;
-    static uint8_t buf[2];
+    static tiku_i2c_config_t i2c_cfg;
+    static int16_t temp_int;
+    static uint8_t temp_frac;
 
     TIKU_PROCESS_BEGIN();
+    tiku_common_led1_init();
 
-    tiku_i2c_init(&cfg);
-    tiku_timer_set_event(&poll_timer, TIKU_CLOCK_SECOND * 2);
+    /* Init I2C at 100 kHz, verify sensor IDs */
+    i2c_cfg.speed = TIKU_I2C_SPEED_STANDARD;
+    tiku_i2c_init(&i2c_cfg);
+    if (!mcp9808_verify_id()) {          /* Check manuf=0x0054, dev=0x04xx */
+        tiku_i2c_close();
+        TIKU_PROCESS_EXIT();
+    }
+
+    tiku_timer_set_event(&poll_timer, 2 * TIKU_CLOCK_SECOND);
 
     while (1) {
         TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
 
-        if (tiku_i2c_write_read(SENSOR_ADDR, &reg, 1, buf, 2) == TIKU_I2C_OK)
-            TIKU_PRINTF("Sensor: 0x%x%x\n", buf[0], buf[1]);
-
-        tiku_timer_reset(&poll_timer);  /* drift-free 2s interval */
+        if (mcp9808_read_temp(&temp_int, &temp_frac) == TIKU_I2C_OK) {
+            int frac_decimal = (int)((uint16_t)temp_frac * 625 / 100);
+            TIKU_PRINTF("[MCP9808] Temp: %d.%d C\n", (int)temp_int,
+                        frac_decimal);
+            tiku_common_led1_toggle();
+        }
+        tiku_timer_reset(&poll_timer);
     }
-
     TIKU_PROCESS_END();
 }
-TIKU_AUTOSTART_PROCESSES(&sensor_process);
+TIKU_AUTOSTART_PROCESSES(&mcp9808_process);
 \end{lstlisting}
 \end{frame}
 
@@ -967,6 +1041,9 @@ HAL
 \multirow{2}{*}{Board Config}
   & \texttt{.../tiku\_device\_fr5969.h}  & eUSCI availability flags \\
   & \texttt{.../tiku\_board\_fr5969\_launchpad.h}  & Pin select \& prescaler macros \\
+\midrule
+Example
+  & \texttt{examples/10\_mcp9808\_temp/}  & MCP9808 I2C temp sensor demo \\
 \bottomrule
 \end{tabular}
 \end{table}

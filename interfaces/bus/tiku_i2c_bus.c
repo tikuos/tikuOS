@@ -30,6 +30,9 @@
 
 #include "tiku_i2c_bus.h"
 #include "tiku.h"
+
+#ifdef TIKU_BOARD_I2C_BRW_100K  /* Board supports I2C */
+
 #include <hal/tiku_i2c_hal.h>
 
 /*---------------------------------------------------------------------------*/
@@ -88,3 +91,5 @@ tiku_i2c_write_read(uint8_t addr,
 
     return tiku_i2c_arch_write_read(addr, tx_buf, tx_len, rx_buf, rx_len);
 }
+
+#endif /* TIKU_BOARD_I2C_BRW_100K */

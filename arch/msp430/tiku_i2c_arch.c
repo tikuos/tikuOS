@@ -33,6 +33,8 @@
 #include "tiku_i2c_arch.h"
 #include "tiku.h"
 
+#ifdef TIKU_BOARD_I2C_BRW_100K  /* Board supports I2C */
+
 /*---------------------------------------------------------------------------*/
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
@@ -156,6 +158,9 @@ tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
     uint16_t i;
     int rc;
 
+    /* Clear stale interrupt flags from any previous transaction */
+    UCB0IFG = 0;
+
     /* Set slave address */
     UCB0I2CSA = addr;
 
@@ -199,6 +204,9 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
     uint16_t i;
     uint16_t timeout;
     int rc;
+
+    /* Clear stale interrupt flags from any previous transaction */
+    UCB0IFG = 0;
 
     /* Set slave address */
     UCB0I2CSA = addr;
@@ -264,6 +272,9 @@ tiku_i2c_arch_write_read(uint8_t addr,
     uint16_t timeout;
     int rc;
 
+    /* Clear stale interrupt flags from any previous transaction */
+    UCB0IFG = 0;
+
     /* --- Write phase --------------------------------------------------- */
 
     UCB0I2CSA = addr;
@@ -326,3 +337,5 @@ tiku_i2c_arch_write_read(uint8_t addr,
 
     return i2c_wait_stop();
 }
+
+#endif /* TIKU_BOARD_I2C_BRW_100K */

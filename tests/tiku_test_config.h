@@ -39,7 +39,7 @@
  */
 
 /** Master test enable - set to 1 to run test suite from main */
-#define TEST_ENABLE 1
+#define TEST_ENABLE 0
 
 /*---------------------------------------------------------------------------*/
 /* WATCHDOG TESTS                                                            */

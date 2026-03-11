@@ -41,8 +41,17 @@
 
 /**
  * Device selection: passed via -DTIKU_DEVICE_MSP430FRxxxx=1 from the Makefile.
- * Default to FR2433 if nothing is defined (e.g. compiling without the Makefile).
+ * CCS passes -D__MSP430FRxxxx__ instead, so map those automatically.
+ * Default to FR2433 if nothing is defined.
  */
+#if defined(__MSP430FR5969__) && !defined(TIKU_DEVICE_MSP430FR5969)
+#define TIKU_DEVICE_MSP430FR5969 1
+#elif defined(__MSP430FR5994__) && !defined(TIKU_DEVICE_MSP430FR5994)
+#define TIKU_DEVICE_MSP430FR5994 1
+#elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_DEVICE_MSP430FR2433 1
+#endif
+
 #if !defined(TIKU_DEVICE_MSP430FR5969) && \
     !defined(TIKU_DEVICE_MSP430FR5994) && \
     !defined(TIKU_DEVICE_MSP430FR2433)
