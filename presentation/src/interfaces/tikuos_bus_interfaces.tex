@@ -1,5 +1,5 @@
 % ===========================================================================
-%  TikuOS — Bus Interfaces: I2C & SPI
+%  TikuOS — Bus Interfaces: I2C, SPI & ADC
 %  Beamer Presentation
 % ===========================================================================
 \documentclass[aspectratio=169, 10pt]{beamer}
@@ -61,6 +61,13 @@
                 TIKU_BOARD_SPI_BRW_2MHZ,TIKU_BOARD_SPI_BRW_500KHZ,
                 TIKU_BOARD_I2C_BRW_100K,TIKU_BOARD_I2C_BRW_400K,
                 TIKU_BOARD_I2C_PINS_INIT,TIKU_BOARD_SPI_PINS_INIT,
+                TIKU_ADC_OK,TIKU_ADC_ERR_TIMEOUT,TIKU_ADC_ERR_PARAM,
+                TIKU_ADC_RES_8BIT,TIKU_ADC_RES_10BIT,TIKU_ADC_RES_12BIT,
+                TIKU_ADC_REF_AVCC,TIKU_ADC_REF_1V2,
+                TIKU_ADC_REF_2V0,TIKU_ADC_REF_2V5,
+                TIKU_ADC_CH_TEMP,TIKU_ADC_CH_BATTERY,
+                TIKU_BOARD_ADC_AVAILABLE,
+                tiku_adc_config_t,
                 TIKU_PROCESS,TIKU_PROCESS_THREAD,
                 TIKU_PROCESS_BEGIN,TIKU_PROCESS_END,
                 TIKU_PROCESS_WAIT_EVENT,TIKU_PROCESS_WAIT_EVENT_UNTIL,
@@ -69,7 +76,7 @@
 }
 
 % ---- Metadata -------------------------------------------------------------
-\title[TikuOS Bus Interfaces]{TikuOS Bus Interfaces: I2C \& SPI}
+\title[TikuOS Bus Interfaces]{TikuOS Bus Interfaces: I2C, SPI \& ADC}
 \subtitle{Simple. Ubiquitous. Intelligence, Everywhere.}
 \author[Ambuj Varshney]{Ambuj Varshney \\ \texttt{ambuj@tiku-os.org}}
 \date{\today}
@@ -830,6 +837,274 @@ Timeouts guard against hardware faults only.
 \end{frame}
 
 % ===========================================================================
+\section{ADC Interface}
+% ===========================================================================
+
+% ---------------------------------------------------------------------------
+\subsection{ADC Overview}
+
+\begin{frame}[fragile]{ADC: Reading Analog Sensors}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{ADC12\_B on MSP430FR5x:}
+\begin{itemize}
+  \item 12-bit SAR ADC (configurable 8/10/12-bit)
+  \item 16 external channels (A0--A15)
+  \item Internal channels: temperature sensor (ch30),
+        battery monitor (ch31)
+  \item Multiple reference sources: AVCC, 1.2V, 2.0V, 2.5V
+  \item Single-channel single-conversion mode
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Typical analog sensors:}
+\begin{itemize}
+  \item LM35/TMP36 --- temperature (10\,mV/\textdegree C)
+  \item Photoresistor (LDR) --- light level
+  \item Potentiometer --- position/angle
+  \item Force/pressure sensors
+  \item Internal MCU temp sensor (no wiring!)
+\end{itemize}
+
+\vspace{0.3em}
+\begin{alertblock}{Same Three-Layer Pattern}
+\texttt{interfaces/adc/} $\rightarrow$
+\texttt{hal/} $\rightarrow$
+\texttt{arch/msp430/}
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\subsection{ADC API}
+
+\begin{frame}[fragile]{ADC Configuration \& Status Codes}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle,
+  title={interfaces/adc/tiku\_adc.h}]
+/* Resolution */
+#define TIKU_ADC_RES_8BIT    0
+#define TIKU_ADC_RES_10BIT   1
+#define TIKU_ADC_RES_12BIT   2
+
+/* Reference voltage */
+#define TIKU_ADC_REF_AVCC    0  /* 3.3V */
+#define TIKU_ADC_REF_1V2     1
+#define TIKU_ADC_REF_2V0     2
+#define TIKU_ADC_REF_2V5     3
+
+/* Status codes */
+#define TIKU_ADC_OK           0
+#define TIKU_ADC_ERR_TIMEOUT (-1)
+#define TIKU_ADC_ERR_PARAM   (-2)
+
+typedef struct tiku_adc_config {
+    uint8_t resolution;
+    uint8_t reference;
+} tiku_adc_config_t;
+\end{lstlisting}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Resolution vs.\ range:}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{@{}ccc@{}}
+\toprule
+\textbf{Bits} & \textbf{Max Value} & \textbf{Step (3.3V)} \\
+\midrule
+8  & 255   & 12.9\,mV \\
+10 & 1023  & 3.22\,mV \\
+12 & 4095  & 0.81\,mV \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.5em}
+\textbf{Reference selection:}
+\begin{itemize}
+  \item \texttt{AVCC}: Full 0--3.3V range
+  \item \texttt{1V2/2V0/2V5}: Higher precision
+        for low-voltage sensors
+  \item Internal ref uses the REF module
+\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{ADC API Functions}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}lp{8cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Description} \\
+\midrule
+\texttt{tiku\_adc\_init(config)}         & Configure ADC12\_B resolution and reference \\
+\texttt{tiku\_adc\_close()}              & Disable ADC and reference (save power) \\
+\midrule
+\texttt{tiku\_adc\_channel\_init(ch)}    & Set pin to analog mode for external channel \\
+\texttt{tiku\_adc\_read(ch, \&value)}    & Single-conversion blocking read \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.3em}
+\begin{lstlisting}[style=cstyle, title={Reading an analog sensor on A2 (P1.2)}]
+tiku_adc_config_t cfg = {
+    .resolution = TIKU_ADC_RES_12BIT,
+    .reference  = TIKU_ADC_REF_AVCC
+};
+uint16_t value;
+
+tiku_adc_init(&cfg);
+tiku_adc_channel_init(2);        /* P1.2 = A2 for analog */
+tiku_adc_read(2, &value);        /* Raw 12-bit result: 0-4095 */
+
+/* Convert to millivolts: mV = value * 3300 / 4095 */
+\end{lstlisting}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\subsection{ADC Architecture}
+
+\begin{frame}[fragile]{ADC Arch: Initialization}
+\begin{lstlisting}[style=cstyle,
+  title={arch/msp430/tiku\_adc\_arch.c --- tiku\_adc\_arch\_init()}]
+int tiku_adc_arch_init(const tiku_adc_config_t *config)
+{
+    ADC12CTL0 &= ~ADC12ENC;                /* Disable before config */
+    ADC12CTL0 = ADC12ON | ADC12SHT0_6;     /* On, 128-cycle S&H */
+
+    /* Single-channel, single-conversion, sampling timer, MODCLK */
+    ADC12CTL1 = ADC12SHP | ADC12CONSEQ_0 | ADC12SSEL_0;
+
+    /* Resolution: 8, 10, or 12 bits */
+    ADC12CTL2 = adc_resolution_bits(config->resolution);
+
+    /* Enable internal channel mapping (temp sensor, battery) */
+    ADC12CTL3 = ADC12TCMAP | ADC12BATMAP;
+
+    /* Configure internal reference if not using AVCC */
+    adc_reference_bits(config->reference);
+    adc_wait_ref_ready();
+
+    return TIKU_ADC_OK;
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Sample-and-Hold Time}
+ADC12SHT0\_6 = 128 MODCLK cycles ($\approx$25\,$\mu$s at 5\,MHz).
+Safe for all sources including the internal temperature sensor
+(which requires $\geq$30\,$\mu$s).
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{ADC Arch: Channel Init \& Read}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
+  title={Pin configuration per channel}]
+int tiku_adc_arch_channel_init(
+    uint8_t channel)
+{
+    if (channel >= 30) /* internal */
+        return TIKU_ADC_OK;
+
+    /* Set SEL0=SEL1=1 for analog */
+    switch (channel) {
+    case 0: P1SEL0 |= BIT0;
+            P1SEL1 |= BIT0; break;
+    case 1: P1SEL0 |= BIT1;
+            P1SEL1 |= BIT1; break;
+    /* ... A2-A5 on P1.2-P1.5 */
+    /* ... A8-A11 on P4.0-P4.3 */
+    /* ... A12-A15 on P3.0-P3.3 */
+    }
+    return TIKU_ADC_OK;
+}
+\end{lstlisting}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=cstyle, basicstyle=\ttfamily\tiny,
+  title={Single-conversion read}]
+int tiku_adc_arch_read(
+    uint8_t ch, uint16_t *value)
+{
+    uint16_t timeout;
+
+    ADC12CTL0 &= ~ADC12ENC;
+    /* Channel + reference select */
+    ADC12MCTL0 = vrsel | ch;
+    ADC12IFGR0 &= ~ADC12IFG0;
+
+    /* Start conversion */
+    ADC12CTL0 |= ADC12ENC | ADC12SC;
+
+    /* Wait for completion */
+    timeout = 10000U;
+    while (!(ADC12IFGR0 & ADC12IFG0))
+        if (--timeout == 0)
+            return TIKU_ADC_ERR_TIMEOUT;
+
+    *value = ADC12MEM0;
+    return TIKU_ADC_OK;
+}
+\end{lstlisting}
+
+\vspace{0.3em}
+\begin{block}{Internal Channels}
+Channel 30 = on-chip temperature sensor.\\
+Channel 31 = (AVCC--AVSS)/2 for battery.\\
+No pin init needed for internal channels.
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{FR5969 LaunchPad ADC Channel Map}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}clll@{}}
+\toprule
+\textbf{Channel} & \textbf{Pin} & \textbf{BoosterPack} & \textbf{Note} \\
+\midrule
+A0  & P1.0 & J1.2   & Conflicts with LED2 \\
+A1  & P1.1 & J2.19  & Conflicts with Button S2 \\
+A2  & P1.2 & J1.4   & Available \\
+A3  & P1.3 & J1.5   & Available \\
+A4  & P1.4 & J1.6   & Available \\
+A5  & P1.5 & J1.7   & Available \\
+\midrule
+A12 & P3.0 & J2.15  & Available \\
+A13 & P3.1 & J2.14  & Available \\
+A14 & P3.2 & J2.13  & Available \\
+A15 & P3.3 & J2.12  & Available \\
+\midrule
+30  & \multicolumn{2}{l}{Internal temp sensor} & Use with 1.2V ref \\
+31  & \multicolumn{2}{l}{(AVCC--AVSS)/2}       & Battery monitoring \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.3em}
+\begin{alertblock}{Pin Analog Mode}
+Set \texttt{PxSEL0|=BITn; PxSEL1|=BITn;} (SEL1:SEL0 = 1:1) for analog input.
+\texttt{tiku\_adc\_channel\_init(ch)} does this automatically.
+\end{alertblock}
+\end{frame}
+
+% ===========================================================================
 \section{Usage Examples}
 % ===========================================================================
 
@@ -1088,13 +1363,19 @@ TIKU_AUTOSTART_PROCESSES(&temp_sensor_process);
   & \texttt{interfaces/bus/tiku\_spi\_bus.h} & Public types \& prototypes \\
   & \texttt{interfaces/bus/tiku\_spi\_bus.c} & Validation, delegates to arch \\
 \midrule
+ADC API
+  & \texttt{interfaces/adc/tiku\_adc.h}  & Public types \& prototypes \\
+  & \texttt{interfaces/adc/tiku\_adc.c}  & Validation, delegates to arch \\
+\midrule
 HAL
   & \texttt{hal/tiku\_i2c\_hal.h} & Routes to I2C arch \\
   & \texttt{hal/tiku\_spi\_hal.h} & Routes to SPI arch \\
+  & \texttt{hal/tiku\_adc\_hal.h} & Routes to ADC arch \\
 \midrule
-\multirow{2}{*}{Arch (MSP430)}
+\multirow{3}{*}{Arch (MSP430)}
   & \texttt{arch/msp430/tiku\_i2c\_arch.c/.h}  & eUSCI\_B0 I2C master \\
   & \texttt{arch/msp430/tiku\_spi\_arch.c/.h}  & eUSCI\_A1 SPI master \\
+  & \texttt{arch/msp430/tiku\_adc\_arch.c/.h}  & ADC12\_B analog input \\
 \midrule
 \multirow{2}{*}{Board Config}
   & \texttt{.../tiku\_device\_fr5969.h}  & eUSCI availability flags \\
@@ -1133,12 +1414,21 @@ Example
   \item Up to 4\,MHz from 8\,MHz SMCLK
 \end{itemize}
 \end{block}
+
+\begin{block}{ADC}
+\begin{itemize}
+  \item ADC12\_B: 8/10/12-bit resolution
+  \item 16 external channels + temp sensor + battery
+  \item AVCC / 1.2V / 2.0V / 2.5V reference
+  \item Blocking single-conversion reads
+\end{itemize}
+\end{block}
 \end{column}
 
 \begin{column}{0.48\textwidth}
 \begin{block}{Architecture}
 \begin{itemize}
-  \item Platform-independent API in \texttt{interfaces/bus/}
+  \item Platform-independent API in \texttt{interfaces/}
   \item HAL routing in \texttt{hal/}
   \item MSP430 arch in \texttt{arch/msp430/}
   \item Board macros for pin config \& clock
@@ -1152,6 +1442,7 @@ eUSCI\_A0 & UART (backchannel) \\
 eUSCI\_A1 & SPI \\
 eUSCI\_B0 & I2C \\
 eUSCI\_B1 & (available) \\
+ADC12\_B  & Analog input \\
 \end{tabular}
 \end{block}
 \end{column}
@@ -1162,15 +1453,17 @@ eUSCI\_B1 & (available) \\
 \begin{frame}{Thank You}
 \begin{center}
 \Large\textbf{TikuOS Bus Interfaces}\\[0.5em]
-\normalsize I2C \& SPI for Physical AI Endpoints\\[1.5em]
+\normalsize I2C, SPI \& ADC for Physical AI Endpoints\\[1.5em]
 
 \begin{tabular}{rl}
   Repository: & \url{https://github.com/tikuos/tikuOS} \\
   License:    & Apache 2.0 \\
   I2C API:    & \texttt{interfaces/bus/tiku\_i2c\_bus.h} \\
   SPI API:    & \texttt{interfaces/bus/tiku\_spi\_bus.h} \\
+  ADC API:    & \texttt{interfaces/adc/tiku\_adc.h} \\
   I2C Arch:   & \texttt{arch/msp430/tiku\_i2c\_arch.c} \\
   SPI Arch:   & \texttt{arch/msp430/tiku\_spi\_arch.c} \\
+  ADC Arch:   & \texttt{arch/msp430/tiku\_adc\_arch.c} \\
 \end{tabular}
 \end{center}
 \end{frame}

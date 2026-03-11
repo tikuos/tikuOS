@@ -96,4 +96,24 @@
 #define TIKU_DEVICE_MPU_SEG2_START  0x8000U
 #define TIKU_DEVICE_MPU_SEG3_START  0xC000U
 
+/*---------------------------------------------------------------------------*/
+/* eUSCI PERIPHERAL AVAILABILITY                                             */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_HAS_EUSCIA0     1   /**< eUSCI_A0 present (UART) */
+#define TIKU_DEVICE_HAS_EUSCIA1     1   /**< eUSCI_A1 present */
+#define TIKU_DEVICE_HAS_EUSCIA2     1   /**< eUSCI_A2 present */
+#define TIKU_DEVICE_HAS_EUSCIA3     1   /**< eUSCI_A3 present */
+#define TIKU_DEVICE_HAS_EUSCIB0     1   /**< eUSCI_B0 present (I2C) */
+#define TIKU_DEVICE_HAS_EUSCIB1     1   /**< eUSCI_B1 present */
+#define TIKU_DEVICE_HAS_EUSCIB2     1   /**< eUSCI_B2 present */
+#define TIKU_DEVICE_HAS_EUSCIB3     1   /**< eUSCI_B3 present */
+
+/*---------------------------------------------------------------------------*/
+/* ADC PERIPHERAL                                                            */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
+#define TIKU_DEVICE_ADC_CHANNELS    32  /**< External channels A0-A31 */
+
 #endif /* TIKU_DEVICE_FR5994_H_ */

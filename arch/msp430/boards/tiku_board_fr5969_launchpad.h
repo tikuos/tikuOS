@@ -118,4 +118,18 @@
 /** SPI prescaler for 500 kHz from 8 MHz SMCLK: 8000000/500000 = 16. */
 #define TIKU_BOARD_SPI_BRW_500KHZ   16
 
+/*---------------------------------------------------------------------------*/
+/* ADC12_B                                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * ADC12_B is available on the FR5969 LaunchPad.
+ * External channels A2-A5 (P1.2-P1.5) and A8-A15 (P4.0-P4.3, P3.0-P3.3)
+ * are accessible on the BoosterPack headers.
+ *
+ * Note: A0 (P1.0) conflicts with LED2, A1 (P1.1) conflicts with Button S2.
+ * Internal channels: ch30 = temperature sensor, ch31 = battery monitor.
+ */
+#define TIKU_BOARD_ADC_AVAILABLE    1
+
 #endif /* TIKU_BOARD_FR5969_LAUNCHPAD_H_ */
