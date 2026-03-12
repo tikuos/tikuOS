@@ -43,3 +43,7 @@ Thumbs.db
 *.bak
 *.orig
 tikukits/
+
+# Separate repos
+examples/
+tests/
