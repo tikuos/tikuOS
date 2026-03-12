@@ -56,7 +56,7 @@
 
 #if TIKU_EXAMPLE_DS18B20_TEMP
 
-#include <tikukits/sensors/tiku_kits_sensor_ds18b20.h>
+#include <tikukits/sensors/temperature/tiku_kits_sensor_ds18b20.h>
 
 /*--------------------------------------------------------------------------*/
 /* Constants                                                                */

@@ -76,9 +76,9 @@
 #endif
 
 #if TIKU_TEMP_SENSOR_MCP9808
-#include <tikukits/sensors/tiku_kits_sensor_mcp9808.h>
+#include <tikukits/sensors/temperature/tiku_kits_sensor_mcp9808.h>
 #elif TIKU_TEMP_SENSOR_ADT7410
-#include <tikukits/sensors/tiku_kits_sensor_adt7410.h>
+#include <tikukits/sensors/temperature/tiku_kits_sensor_adt7410.h>
 #endif
 
 /** Polling interval */
