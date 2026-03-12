@@ -111,13 +111,21 @@
 /* TEST CONFIGURATION                                                       */
 /*---------------------------------------------------------------------------*/
 
+#if defined(HAS_TESTS)
 #include <tests/tiku_test_config.h>
+#else
+#define TEST_ENABLE 0
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* EXAMPLE CONFIGURATION                                                    */
 /*---------------------------------------------------------------------------*/
 
+#if defined(HAS_EXAMPLES)
 #include <examples/tiku_example_config.h>
+#else
+#define TIKU_EXAMPLES_ENABLE 0
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* DEBUG CONFIGURATION                                                      */

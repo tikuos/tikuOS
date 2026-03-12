@@ -57,6 +57,14 @@ PROJ_DIR  = $(CURDIR)
 BUILD_DIR = build/$(MCU)
 
 # ---------------------------------------------------------------------------
+# Optional components (auto-detected; override: make HAS_TESTS=0 etc.)
+# ---------------------------------------------------------------------------
+HAS_TESTS        ?= $(if $(wildcard $(PROJ_DIR)/tests/test_runner.c),1,0)
+HAS_EXAMPLES     ?= $(if $(wildcard $(PROJ_DIR)/examples/tiku_example_config.h),1,0)
+HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
+HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
+
+# ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
 CFLAGS  = -mmcu=$(MCU) -O2 -Wall -Wextra
@@ -69,6 +77,16 @@ endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
 
+ifeq ($(HAS_TESTS),1)
+CFLAGS += -DHAS_TESTS=1
+endif
+ifeq ($(HAS_EXAMPLES),1)
+CFLAGS += -DHAS_EXAMPLES=1
+endif
+ifeq ($(HAS_TIKUKITS),1)
+CFLAGS += -DHAS_TIKUKITS=1
+endif
+
 LDFLAGS  = -mmcu=$(MCU)
 LDFLAGS += -L$(TOOLCHAIN_DIR)/include
 ifneq ($(MSP430_SUPPORT_DIR),)
@@ -77,7 +95,7 @@ endif
 LDFLAGS += -Wl,--gc-sections
 
 # ---------------------------------------------------------------------------
-# Source files  (core OS — examples are excluded)
+# Source files — core OS (always compiled)
 # ---------------------------------------------------------------------------
 SRCS  = main.c
 SRCS += arch/msp430/tiku_cpu_common.c
@@ -109,6 +127,11 @@ SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/process/tiku_process.c
 SRCS += kernel/scheduler/tiku_sched.c
+
+# ---------------------------------------------------------------------------
+# Tests (only if tests/ is present)
+# ---------------------------------------------------------------------------
+ifeq ($(HAS_TESTS),1)
 SRCS += tests/test_runner.c
 SRCS += tests/cpuclock/test_cpuclock_basic.c
 SRCS += tests/memory/test_mem_common.c
@@ -137,6 +160,12 @@ SRCS += tests/watchdog/test_watchdog_basic.c
 SRCS += tests/watchdog/test_watchdog_pause_resume.c
 SRCS += tests/watchdog/test_watchdog_interval.c
 SRCS += tests/watchdog/test_watchdog_timeout.c
+endif
+
+# ---------------------------------------------------------------------------
+# Examples (only if examples/ is present)
+# ---------------------------------------------------------------------------
+ifeq ($(HAS_EXAMPLES),1)
 SRCS += examples/01_blink/blink.c
 SRCS += examples/02_dual_blink/dual_blink.c
 SRCS += examples/03_button_led/button_led.c
@@ -148,6 +177,15 @@ SRCS += examples/08_timeout/timeout.c
 SRCS += examples/09_channel/channel.c
 SRCS += examples/10_i2c_temp/i2c_temp.c
 SRCS += examples/11_ds18b20_temp/ds18b20_temp.c
+endif
+
+# ---------------------------------------------------------------------------
+# TikuKits (only if tikukits/ is present)
+# ---------------------------------------------------------------------------
+ifeq ($(HAS_TIKUKITS),1)
+SRCS += $(wildcard tikukits/maths/linear_algebra/*.c)
+SRCS += $(wildcard tikukits/sensors/temperature/*.c)
+endif
 
 # Object files in build directory
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
@@ -184,10 +222,18 @@ clean:
 # Presentations  (delegates to presentation/Makefile)
 # ---------------------------------------------------------------------------
 docs:
+ifeq ($(HAS_PRESENTATION),1)
 	@$(MAKE) -C presentation --no-print-directory
+else
+	@echo "Skipped: presentation/ directory not found"
+endif
 
 docs-clean:
+ifeq ($(HAS_PRESENTATION),1)
 	@$(MAKE) -C presentation distclean --no-print-directory
+else
+	@echo "Skipped: presentation/ directory not found"
+endif
 
 # ---------------------------------------------------------------------------
 # Flash / Debug / Erase
