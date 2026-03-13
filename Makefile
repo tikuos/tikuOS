@@ -184,7 +184,27 @@ endif
 # ---------------------------------------------------------------------------
 ifeq ($(HAS_TIKUKITS),1)
 SRCS += $(wildcard tikukits/maths/linear_algebra/*.c)
+SRCS += $(wildcard tikukits/maths/statistics/*.c)
+SRCS += $(wildcard tikukits/maths/distance/*.c)
 SRCS += $(wildcard tikukits/sensors/temperature/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/peak/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/zcr/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/histogram/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/delta/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/goertzel/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/zscore/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/scale/*.c)
+SRCS += $(wildcard tikukits/textcompression/rle/*.c)
+SRCS += $(wildcard tikukits/textcompression/bpe/*.c)
+SRCS += $(wildcard tikukits/textcompression/heatshrink/*.c)
+
+# TikuKits tests (requires both tikukits and test framework)
+ifeq ($(HAS_TESTS),1)
+SRCS += $(wildcard tikukits/tests/maths/*.c)
+SRCS += $(wildcard tikukits/tests/sensors/*.c)
+SRCS += $(wildcard tikukits/tests/sigfeatures/*.c)
+SRCS += $(wildcard tikukits/tests/textcompression/*.c)
+endif
 endif
 
 # Object files in build directory
