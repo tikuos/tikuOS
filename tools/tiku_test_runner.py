@@ -220,12 +220,20 @@ CATEGORIES = [
         "flags": ["TEST_KITS_TEXTCOMPRESSION"],
         "requires_tikukits": True,
     },
+    {
+        "key": "ml-linreg",
+        "name": "TikuKits: ML Linear Regression",
+        "description": "Streaming OLS fit, slope, intercept, predict, R-squared, edge cases",
+        "flags": ["TEST_KITS_ML_LINREG"],
+        "requires_tikukits": True,
+    },
 ]
 
 # Flags that are auto-derived (computed via || expressions) — never touch these
 AUTO_DERIVED_FLAGS = {
     "TEST_PROCESS", "TEST_MEM", "TEST_PERSIST", "TEST_MPU",
-    "TEST_POOL", "TEST_REGION", "TEST_KITS_MATHS", "TEST_KITS",
+    "TEST_POOL", "TEST_REGION", "TEST_KITS_MATHS", "TEST_KITS_ML",
+    "TEST_KITS",
 }
 
 # All settable flags (union of all category flags)

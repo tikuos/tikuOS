@@ -197,6 +197,7 @@ SRCS += $(wildcard tikukits/sigfeatures/scale/*.c)
 SRCS += $(wildcard tikukits/textcompression/rle/*.c)
 SRCS += $(wildcard tikukits/textcompression/bpe/*.c)
 SRCS += $(wildcard tikukits/textcompression/heatshrink/*.c)
+SRCS += $(wildcard tikukits/ml/regression/*.c)
 
 # TikuKits tests (requires both tikukits and test framework)
 ifeq ($(HAS_TESTS),1)
@@ -204,6 +205,7 @@ SRCS += $(wildcard tikukits/tests/maths/*.c)
 SRCS += $(wildcard tikukits/tests/sensors/*.c)
 SRCS += $(wildcard tikukits/tests/sigfeatures/*.c)
 SRCS += $(wildcard tikukits/tests/textcompression/*.c)
+SRCS += $(wildcard tikukits/tests/ml/*.c)
 endif
 endif
 
