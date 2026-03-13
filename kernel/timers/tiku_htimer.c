@@ -61,12 +61,15 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
     return TIKU_HTIMER_ERR_INVALID;
   }
 
-  /* Guard: reject if too close to now */
+  /* Guard: reject if too close to now (or wrapped past half-range) */
   now = TIKU_HTIMER_NOW();
-  if (TIKU_HTIMER_CLOCK_DIFF(time, now) < TIKU_HTIMER_GUARD_TIME) {
-    HTIMER_PRINTF("htimer: ERR_TIME (time=%u now=%u diff=%d)\n", time, now,
-                  TIKU_HTIMER_CLOCK_DIFF(time, now));
-    return TIKU_HTIMER_ERR_TIME;
+  {
+    signed short diff = TIKU_HTIMER_CLOCK_DIFF(time, now);
+    if (diff < (signed short)TIKU_HTIMER_GUARD_TIME) {
+      HTIMER_PRINTF("htimer: ERR_TIME (time=%u now=%u diff=%d)\n", time, now,
+                    (int)diff);
+      return TIKU_HTIMER_ERR_TIME;
+    }
   }
 
   /* Configure */
@@ -119,14 +122,11 @@ void tiku_htimer_run_next(void) {
 
   HTIMER_PRINTF("htimer: firing at %u\n", t->time);
 
-  /* Execute in ISR context */
+  /* Execute in ISR context.
+   * If the callback reschedules via tiku_htimer_set(), that function
+   * already programs the hardware — no second arm needed here.
+   */
   t->func(t, t->ptr);
-
-  /* If callback rescheduled, arm the hardware */
-  if (pending != NULL) {
-    tiku_htimer_arch_schedule(pending->time);
-    HTIMER_PRINTF("htimer: rescheduled to %u\n", pending->time);
-  }
 }
 
 /*---------------------------------------------------------------------------*/

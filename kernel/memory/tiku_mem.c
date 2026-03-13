@@ -30,6 +30,7 @@
 
 #include "tiku_mem.h"
 #include <stddef.h>
+#include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE HELPERS                                                           */
@@ -85,8 +86,18 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
     }
     tiku_region_claim(buf, size, id);
 
-    arena->buf      = buf;
-    arena->capacity = size;
+    /* Align the buffer base up to the platform's required alignment.
+     * The claim covers the original range; the arena uses the aligned
+     * subset so every returned pointer is naturally aligned. */
+    {
+        uintptr_t raw     = (uintptr_t)buf;
+        uintptr_t mask    = (uintptr_t)(TIKU_MEM_ARCH_ALIGNMENT - 1U);
+        uintptr_t aligned = (raw + mask) & ~mask;
+        tiku_mem_arch_size_t adj = (tiku_mem_arch_size_t)(aligned - raw);
+
+        arena->buf      = (uint8_t *)aligned;
+        arena->capacity = size - adj;
+    }
     arena->offset   = 0;
     arena->peak     = 0;
     arena->count    = 0;

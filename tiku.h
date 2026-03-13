@@ -65,6 +65,38 @@
 /** Clock time type definition */
 #define TIKU_CLOCK_CONF_TIME_T unsigned short
 
+/** Target CPU frequency setting (enum value, not MHz):
+ * 1=1MHz, 2=2.67MHz, 3=3.5MHz, 4=4MHz, 5=5.33MHz, 6=7MHz, 7=8MHz (max)
+ * NOTE: 16MHz (value 8) is currently DISABLED due to stability issues.
+ * Maximum supported frequency is 8MHz for MSP430FR5969.
+ */
+#define MAIN_CPU_FREQ 7 /* 8 MHz (maximum supported) */
+
+/** Compile-time mapping from MAIN_CPU_FREQ enum to actual Hz.
+ * Used by htimer and other subsystems that need the clock frequency
+ * as a compile-time constant.  SMCLK divider is 1 (see
+ * tiku_cpu_freq_msp430_init), so SMCLK = MCLK = DCO.
+ */
+#if   MAIN_CPU_FREQ == 1
+#define TIKU_MAIN_CPU_HZ  1000000UL
+#elif MAIN_CPU_FREQ == 2
+#define TIKU_MAIN_CPU_HZ  2670000UL
+#elif MAIN_CPU_FREQ == 3
+#define TIKU_MAIN_CPU_HZ  3500000UL
+#elif MAIN_CPU_FREQ == 4
+#define TIKU_MAIN_CPU_HZ  4000000UL
+#elif MAIN_CPU_FREQ == 5
+#define TIKU_MAIN_CPU_HZ  5330000UL
+#elif MAIN_CPU_FREQ == 6
+#define TIKU_MAIN_CPU_HZ  7000000UL
+#elif MAIN_CPU_FREQ == 7
+#define TIKU_MAIN_CPU_HZ  8000000UL
+#elif MAIN_CPU_FREQ == 8
+#define TIKU_MAIN_CPU_HZ  16000000UL
+#else
+#error "Unknown MAIN_CPU_FREQ value"
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* SYSTEM INCLUDES                                                          */
 /*---------------------------------------------------------------------------*/
@@ -286,25 +318,10 @@
 /** @} */ /* End of TIKU_DEBUG_MACROS group */
 
 /*---------------------------------------------------------------------------*/
-/* SYSTEM CONFIGURATION                                                     */
+/* ADDITIONAL SYSTEM CONFIGURATION                                          */
 /*---------------------------------------------------------------------------*/
-
-/**
- * @defgroup TIKU_SYS_CONFIG System Configuration
- * @brief Core system configuration parameters
- * @{
- */
 
 /** Enable autostart process functionality */
 #define TIKU_AUTOSTART_ENABLE 1
-
-/** Target CPU frequency setting (enum value, not MHz):
- * 1=1MHz, 2=2.67MHz, 3=3.5MHz, 4=4MHz, 5=5.33MHz, 6=7MHz, 7=8MHz (max)
- * NOTE: 16MHz (value 8) is currently DISABLED due to stability issues.
- * Maximum supported frequency is 8MHz for MSP430FR5969.
- */
-#define MAIN_CPU_FREQ 7 /* 8 MHz (maximum supported) */
-
-/** @} */ /* End of TIKU_SYS_CONFIG group */
 
 #endif /* TIKU_H_ */

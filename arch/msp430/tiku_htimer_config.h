@@ -84,19 +84,19 @@
 /*---------------------------------------------------------------------------*/
 
 #ifdef TIKU_HTIMER_CONFIG_HIGH_ACCURACY
-/* High accuracy mode: SMCLK @ 8MHz / 8 = 1 MHz timer */
+/* High accuracy mode: SMCLK / 8 */
 #define TIKU_HTIMER_CLOCK_SOURCE     TIKU_HTIMER_SOURCE_SMCLK
 #define TIKU_HTIMER_DIVIDER          TIKU_HTIMER_DIV_8
 #define TIKU_HTIMER_EX_DIVIDER       TIKU_HTIMER_EXDIV_1
-#define TIKU_HTIMER_BASE_FREQ        8000000UL  /* 8 MHz SMCLK */
+#define TIKU_HTIMER_BASE_FREQ        TIKU_MAIN_CPU_HZ  /* SMCLK = MCLK */
 #define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_VLOCLK  /* Not used */
 
 #elif defined(TIKU_HTIMER_CONFIG_BALANCED)
-/* Balanced mode: SMCLK @ 8MHz / 64 = 125 kHz timer */
+/* Balanced mode: SMCLK / 64 */
 #define TIKU_HTIMER_CLOCK_SOURCE     TIKU_HTIMER_SOURCE_SMCLK
 #define TIKU_HTIMER_DIVIDER          TIKU_HTIMER_DIV_8
 #define TIKU_HTIMER_EX_DIVIDER       TIKU_HTIMER_EXDIV_8
-#define TIKU_HTIMER_BASE_FREQ        8000000UL  /* 8 MHz SMCLK */
+#define TIKU_HTIMER_BASE_FREQ        TIKU_MAIN_CPU_HZ  /* SMCLK = MCLK */
 #define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_VLOCLK  /* Not used */
 
 #elif defined(TIKU_HTIMER_CONFIG_LOW_POWER)
@@ -139,7 +139,7 @@
 #define TIKU_HTIMER_CLOCK_SOURCE     TIKU_HTIMER_SOURCE_SMCLK
 #define TIKU_HTIMER_DIVIDER          TIKU_HTIMER_DIV_8
 #define TIKU_HTIMER_EX_DIVIDER       TIKU_HTIMER_EXDIV_1
-#define TIKU_HTIMER_BASE_FREQ        8000000UL
+#define TIKU_HTIMER_BASE_FREQ        TIKU_MAIN_CPU_HZ  /* SMCLK = MCLK */
 #define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_VLOCLK
 #endif
 
