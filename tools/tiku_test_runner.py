@@ -269,13 +269,91 @@ CATEGORIES = [
         "flags": ["TEST_KITS_ML_TNN"],
         "requires_tikukits": True,
     },
+    # --- TikuKits DS tests ---
+    {
+        "key": "ds-array",
+        "name": "TikuKits: DS Array",
+        "description": "Init, push/pop, set/get, insert/remove, find, fill, bounds, clear, null",
+        "flags": ["TEST_KITS_DS_ARRAY"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-ringbuf",
+        "name": "TikuKits: DS Ring Buffer",
+        "description": "Init, push/pop, wraparound, peek, full/empty, overwrite, count, clear, null",
+        "flags": ["TEST_KITS_DS_RINGBUF"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-stack",
+        "name": "TikuKits: DS Stack",
+        "description": "Init, push/pop, peek, overflow, underflow, size, LIFO order, clear, null",
+        "flags": ["TEST_KITS_DS_STACK"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-queue",
+        "name": "TikuKits: DS Queue",
+        "description": "Init, enqueue/dequeue, FIFO order, peek, full/empty, wraparound, size, clear, null",
+        "flags": ["TEST_KITS_DS_QUEUE"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-pqueue",
+        "name": "TikuKits: DS Priority Queue",
+        "description": "Init, basic priority, multi-level, dequeue order, peek, full, empty, clear, null",
+        "flags": ["TEST_KITS_DS_PQUEUE"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-list",
+        "name": "TikuKits: DS Linked List",
+        "description": "Init, push front/back, pop, insert after, remove, find, traversal, clear, null",
+        "flags": ["TEST_KITS_DS_LIST"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-htable",
+        "name": "TikuKits: DS Hash Table",
+        "description": "Init, put/get, update, remove/tombstone, contains, collision, full, clear, null",
+        "flags": ["TEST_KITS_DS_HTABLE"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-bitmap",
+        "name": "TikuKits: DS Bitmap",
+        "description": "Init, set/clear/test, toggle, set_all/clear_all, popcount, find first, boundary, null",
+        "flags": ["TEST_KITS_DS_BITMAP"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-sortarray",
+        "name": "TikuKits: DS Sorted Array",
+        "description": "Init, sorted insert, remove, binary search, get by index, min/max, duplicates, null",
+        "flags": ["TEST_KITS_DS_SORTARRAY"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-btree",
+        "name": "TikuKits: DS B-Tree",
+        "description": "Init, insert single/multiple, search found/not found, min/max, split root, height, null",
+        "flags": ["TEST_KITS_DS_BTREE"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-sm",
+        "name": "TikuKits: DS State Machine",
+        "description": "Init, set transition, process event, action callback, undefined, get/set state, multi-state, null",
+        "flags": ["TEST_KITS_DS_SM"],
+        "requires_tikukits": True,
+    },
 ]
 
 # Flags that are auto-derived (computed via || expressions) — never touch these
 AUTO_DERIVED_FLAGS = {
     "TEST_PROCESS", "TEST_MEM", "TEST_PERSIST", "TEST_MPU",
     "TEST_POOL", "TEST_REGION", "TEST_KITS_MATHS", "TEST_KITS_ML",
-    "TEST_KITS",
+    "TEST_KITS_DS", "TEST_KITS",
 }
 
 # All settable flags (union of all category flags)
