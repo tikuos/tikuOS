@@ -227,6 +227,48 @@ CATEGORIES = [
         "flags": ["TEST_KITS_ML_LINREG"],
         "requires_tikukits": True,
     },
+    {
+        "key": "ml-logreg",
+        "name": "TikuKits: ML Logistic Regression",
+        "description": "Init, pre-trained weights, sigmoid, SGD training, 2-D classify, edge cases",
+        "flags": ["TEST_KITS_ML_LOGREG"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ml-dtree",
+        "name": "TikuKits: ML Decision Tree",
+        "description": "Init, simple/multi-feature trees, depth, predict_proba, boundary, edge cases",
+        "flags": ["TEST_KITS_ML_DTREE"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ml-knn",
+        "name": "TikuKits: ML k-Nearest Neighbors",
+        "description": "Init, 1-D/2-D classification, k=1, change k, ring buffer, negative values, edge cases",
+        "flags": ["TEST_KITS_ML_KNN"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ml-nbayes",
+        "name": "TikuKits: ML Naive Bayes",
+        "description": "Init, binary/multi-class, log-likelihood, Laplace smoothing, imbalanced, edge cases",
+        "flags": ["TEST_KITS_ML_NBAYES"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ml-linsvm",
+        "name": "TikuKits: ML Linear SVM",
+        "description": "Init, pre-trained weights, decision function, training, 2-feature, lr/lambda config, edge cases",
+        "flags": ["TEST_KITS_ML_LINSVM"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ml-tnn",
+        "name": "TikuKits: ML Tiny Neural Network",
+        "description": "Init, pre-trained, forward pass, training, 3-class, lr config, weight access, edge cases",
+        "flags": ["TEST_KITS_ML_TNN"],
+        "requires_tikukits": True,
+    },
 ]
 
 # Flags that are auto-derived (computed via || expressions) — never touch these
