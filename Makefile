@@ -231,6 +231,10 @@ SRCS += $(wildcard tikukits/ds/btree/*.c)
 SRCS += $(wildcard tikukits/ds/sortarray/*.c)
 SRCS += $(wildcard tikukits/ds/htable/*.c)
 SRCS += $(wildcard tikukits/ds/sm/*.c)
+SRCS += $(wildcard tikukits/ds/bloom/*.c)
+SRCS += $(wildcard tikukits/ds/circlog/*.c)
+SRCS += $(wildcard tikukits/ds/deque/*.c)
+SRCS += $(wildcard tikukits/ds/trie/*.c)
 
 endif
 

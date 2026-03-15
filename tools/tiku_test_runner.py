@@ -347,6 +347,34 @@ CATEGORIES = [
         "flags": ["TEST_KITS_DS_SM"],
         "requires_tikukits": True,
     },
+    {
+        "key": "ds-bloom",
+        "name": "TikuKits: DS Bloom Filter",
+        "description": "Init, add/check, absent keys, multiple keys, clear, count, hash variations, binary keys, null",
+        "flags": ["TEST_KITS_DS_BLOOM"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-circlog",
+        "name": "TikuKits: DS Circular Log",
+        "description": "Init, append/read, multiple entries, wraparound, read order, sequence, clear, payload, null",
+        "flags": ["TEST_KITS_DS_CIRCLOG"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-deque",
+        "name": "TikuKits: DS Deque",
+        "description": "Init, push/pop front/back, mixed ops, peek, random access, full/empty, clear, null",
+        "flags": ["TEST_KITS_DS_DEQUE"],
+        "requires_tikukits": True,
+    },
+    {
+        "key": "ds-trie",
+        "name": "TikuKits: DS Trie",
+        "description": "Init, insert/search, absent keys, contains, multiple keys, remove, overwrite, clear, null",
+        "flags": ["TEST_KITS_DS_TRIE"],
+        "requires_tikukits": True,
+    },
 ]
 
 # Flags that are auto-derived (computed via || expressions) — never touch these
