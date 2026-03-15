@@ -59,7 +59,7 @@ static volatile uint8_t q_len = 0;
 /* PUBLIC VARIABLES                                                          */
 /*---------------------------------------------------------------------------*/
 
-struct tiku_process *tiku_list_head = NULL;
+struct tiku_process *tiku_process_list_head = NULL;
 struct tiku_process *tiku_current_process = NULL;
 
 /**
@@ -90,7 +90,7 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
  */
 void tiku_process_init(void)
 {
-    tiku_list_head = NULL;
+    tiku_process_list_head = NULL;
     tiku_current_process = NULL;
     q_head = 0;
     q_len = 0;
@@ -115,8 +115,8 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
 
     PT_INIT(&p->pt);
 
-    p->next = tiku_list_head;
-    tiku_list_head = p;
+    p->next = tiku_process_list_head;
+    tiku_process_list_head = p;
     p->is_running = 1;
 
     tiku_atomic_exit();
@@ -149,10 +149,10 @@ void tiku_process_exit(struct tiku_process *p)
 
     p->is_running = 0;
 
-    if (tiku_list_head == p) {
-        tiku_list_head = p->next;
+    if (tiku_process_list_head == p) {
+        tiku_process_list_head = p->next;
     } else {
-        for (q = tiku_list_head; q != NULL; q = q->next) {
+        for (q = tiku_process_list_head; q != NULL; q = q->next) {
             if (q->next == p) {
                 q->next = p->next;
                 break;
@@ -225,7 +225,7 @@ uint8_t tiku_process_run(void)
     /* Dispatch outside atomic section to avoid long interrupt latency */
     if (receiver == TIKU_PROCESS_BROADCAST) {
         struct tiku_process *p, *next;
-        for (p = tiku_list_head; p != NULL; p = next) {
+        for (p = tiku_process_list_head; p != NULL; p = next) {
             next = p->next;
             call_process(p, ev, data);
         }

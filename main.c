@@ -80,6 +80,10 @@ int main(void) {
   example_kits_run();
 #endif
 
+#if TIKU_APPS_ENABLE
+  MAIN_PRINTF("App mode active\n");
+#endif
+
   /* Step 3: Enter the scheduler loop (dispatches events, runs protothreads) */
   MAIN_PRINTF("Entering scheduler\n");
   tiku_sched_loop();

@@ -57,10 +57,25 @@ PROJ_DIR  = $(CURDIR)
 BUILD_DIR = build/$(MCU)
 
 # ---------------------------------------------------------------------------
-# Optional components (auto-detected; override: make HAS_TESTS=0 etc.)
+# App selection (mutually exclusive with tests and examples)
+#   make APP=cli MCU=msp430fr5969   — build with CLI app
+#   make MCU=msp430fr5969           — default (tests/examples as before)
 # ---------------------------------------------------------------------------
+APP ?=
+
+# ---------------------------------------------------------------------------
+# Optional components (auto-detected; override: make HAS_TESTS=0 etc.)
+# When APP is set, tests and examples are excluded automatically.
+# ---------------------------------------------------------------------------
+ifneq ($(APP),)
+HAS_APPS         = 1
+HAS_TESTS        = 0
+HAS_EXAMPLES     = 0
+else
+HAS_APPS         = 0
 HAS_TESTS        ?= $(if $(wildcard $(PROJ_DIR)/tests/test_runner.c),1,0)
 HAS_EXAMPLES     ?= $(if $(wildcard $(PROJ_DIR)/examples/tiku_example_config.h),1,0)
+endif
 HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 
@@ -77,6 +92,9 @@ endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
 
+ifeq ($(HAS_APPS),1)
+CFLAGS += -DHAS_APPS=1
+endif
 ifeq ($(HAS_TESTS),1)
 CFLAGS += -DHAS_TESTS=1
 endif
@@ -198,6 +216,19 @@ SRCS += $(wildcard examples/kits/sensors/*.c)
 SRCS += $(wildcard examples/kits/sigfeatures/*.c)
 SRCS += $(wildcard examples/kits/textcompression/*.c)
 endif
+endif
+
+# ---------------------------------------------------------------------------
+# Apps (only when APP=<name> is specified)
+# ---------------------------------------------------------------------------
+ifeq ($(APP),cli)
+CFLAGS += -DTIKU_APP_CLI=1
+SRCS += apps/cli/tiku_cli_io.c
+SRCS += apps/cli/tiku_cli_parser.c
+SRCS += apps/cli/tiku_cli.c
+SRCS += apps/cli/commands/tiku_cli_cmd_ps.c
+SRCS += apps/cli/commands/tiku_cli_cmd_info.c
+SRCS += apps/cli/commands/tiku_cli_cmd_timer.c
 endif
 
 # ---------------------------------------------------------------------------

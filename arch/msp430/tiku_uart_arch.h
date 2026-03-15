@@ -31,6 +31,8 @@
 #ifndef TIKU_UART_ARCH_H_
 #define TIKU_UART_ARCH_H_
 
+#include <stdint.h>
+
 /**
  * @brief Initialize the UART peripheral for printf output.
  *
@@ -66,5 +68,24 @@ void tiku_uart_puts(const char *s);
  * and long modifier (e.g. %ld, %4ld). Lightweight (~60 bytes of stack).
  */
 void tiku_uart_printf(const char *fmt, ...);
+
+/**
+ * @brief Check whether a received character is available.
+ *
+ * Non-blocking. Returns non-zero if tiku_uart_getc() will succeed.
+ *
+ * @return 1 if a character is ready, 0 otherwise
+ */
+uint8_t tiku_uart_rx_ready(void);
+
+/**
+ * @brief Read one character from the UART (non-blocking).
+ *
+ * Call tiku_uart_rx_ready() first, or check the return value.
+ * Reading the hardware register clears the RX-ready flag.
+ *
+ * @return The received character (0-255), or -1 if none available
+ */
+int tiku_uart_getc(void);
 
 #endif /* TIKU_UART_ARCH_H_ */

@@ -160,11 +160,21 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* MUTUAL EXCLUSION: tests and examples cannot run together                  */
+/* APP CONFIGURATION                                                        */
 /*---------------------------------------------------------------------------*/
 
-#if TEST_ENABLE && TIKU_EXAMPLES_ENABLE
-#error "TEST_ENABLE and TIKU_EXAMPLES_ENABLE cannot both be 1"
+#if defined(HAS_APPS)
+#include <apps/tiku_app_config.h>
+#else
+#define TIKU_APPS_ENABLE 0
+#endif
+
+/*---------------------------------------------------------------------------*/
+/* MUTUAL EXCLUSION: only one of tests, examples, apps may be active         */
+/*---------------------------------------------------------------------------*/
+
+#if (!!TEST_ENABLE + !!TIKU_EXAMPLES_ENABLE + !!TIKU_APPS_ENABLE) > 1
+#error "Only one of TEST_ENABLE, TIKU_EXAMPLES_ENABLE, TIKU_APPS_ENABLE may be set"
 #endif
 
 /*---------------------------------------------------------------------------*/

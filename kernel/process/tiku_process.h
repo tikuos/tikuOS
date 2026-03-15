@@ -471,4 +471,7 @@ uint8_t tiku_channel_free(struct tiku_channel *ch);
 /** @brief Pointer to the currently executing process */
 extern struct tiku_process *tiku_current_process;
 
+/** @brief Head of the active process linked list */
+extern struct tiku_process *tiku_process_list_head;
+
 #endif /* TIKU_PROCESS_H_ */

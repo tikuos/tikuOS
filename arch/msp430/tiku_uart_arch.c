@@ -236,6 +236,29 @@ tiku_uart_printf(const char *fmt, ...)
     va_end(ap);
 }
 
+/**
+ * @brief Check whether the UART RX buffer has a character.
+ */
+uint8_t
+tiku_uart_rx_ready(void)
+{
+    return (UCA0IFG & UCRXIFG) ? 1 : 0;
+}
+
+/**
+ * @brief Non-blocking read of one received character.
+ *
+ * Reading UCA0RXBUF automatically clears UCRXIFG.
+ */
+int
+tiku_uart_getc(void)
+{
+    if (!(UCA0IFG & UCRXIFG)) {
+        return -1;
+    }
+    return (int)(unsigned char)UCA0RXBUF;
+}
+
 /*---------------------------------------------------------------------------*/
 /* CCS BUILD — CIO semihosting handles printf; stubs only                    */
 /*---------------------------------------------------------------------------*/
@@ -246,5 +269,7 @@ void tiku_uart_init(void)  { }
 void tiku_uart_putc(char c) { (void)c; }
 void tiku_uart_puts(const char *s) { (void)s; }
 void tiku_uart_printf(const char *fmt, ...) { (void)fmt; }
+uint8_t tiku_uart_rx_ready(void) { return 0; }
+int tiku_uart_getc(void) { return -1; }
 
 #endif

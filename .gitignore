@@ -44,7 +44,11 @@ Thumbs.db
 *.orig
 tikukits/
 
+# Paper drafts (unpublished)
+paper/
+
 # Separate repos
 examples/
 tests/
 presentation/
+apps/
