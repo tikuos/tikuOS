@@ -62,8 +62,8 @@ void tiku_uart_puts(const char *s);
 /**
  * @brief Lightweight printf replacement for UART output.
  *
- * Supports: %s, %d, %u, %x, %c, %%. No width/padding.
- * Uses only ~40 bytes of stack (vs ~400 for newlib printf).
+ * Supports: %s, %d, %u, %x, %c, %%, optional field width (e.g. %4d),
+ * and long modifier (e.g. %ld, %4ld). Lightweight (~60 bytes of stack).
  */
 void tiku_uart_printf(const char *fmt, ...);
 

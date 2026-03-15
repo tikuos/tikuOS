@@ -912,7 +912,7 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
 #endif
          SFRIFG1 &= ~OFIFG;                      // clear master fault
 
-         CPU_FREQ_PRINTF("Clearing fault flags (SFRIFG1=0x%d)\n", SFRIFG1);
+         CPU_FREQ_PRINTF("Clearing fault flags (SFRIFG1=0x%x)\n", SFRIFG1);
      } while (SFRIFG1 & OFIFG);                      // repeat if it re-asserts
 
      TIKU_CS_LOCK();

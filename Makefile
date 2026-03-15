@@ -160,6 +160,16 @@ SRCS += tests/watchdog/test_watchdog_basic.c
 SRCS += tests/watchdog/test_watchdog_pause_resume.c
 SRCS += tests/watchdog/test_watchdog_interval.c
 SRCS += tests/watchdog/test_watchdog_timeout.c
+
+# TikuKits tests (requires both test framework and tikukits library)
+ifeq ($(HAS_TIKUKITS),1)
+SRCS += $(wildcard tests/kits/maths/*.c)
+SRCS += $(wildcard tests/kits/sensors/*.c)
+SRCS += $(wildcard tests/kits/sigfeatures/*.c)
+SRCS += $(wildcard tests/kits/textcompression/*.c)
+SRCS += $(wildcard tests/kits/ml/*.c)
+SRCS += $(wildcard tests/kits/ds/*.c)
+endif
 endif
 
 # ---------------------------------------------------------------------------
@@ -177,6 +187,17 @@ SRCS += examples/08_timeout/timeout.c
 SRCS += examples/09_channel/channel.c
 SRCS += examples/10_i2c_temp/i2c_temp.c
 SRCS += examples/11_ds18b20_temp/ds18b20_temp.c
+
+# TikuKits examples (requires both examples/ and tikukits/)
+ifeq ($(HAS_TIKUKITS),1)
+SRCS += examples/kits/example_kits_runner.c
+SRCS += $(wildcard examples/kits/maths/*.c)
+SRCS += $(wildcard examples/kits/ds/*.c)
+SRCS += $(wildcard examples/kits/ml/*.c)
+SRCS += $(wildcard examples/kits/sensors/*.c)
+SRCS += $(wildcard examples/kits/sigfeatures/*.c)
+SRCS += $(wildcard examples/kits/textcompression/*.c)
+endif
 endif
 
 # ---------------------------------------------------------------------------
@@ -211,15 +232,6 @@ SRCS += $(wildcard tikukits/ds/sortarray/*.c)
 SRCS += $(wildcard tikukits/ds/htable/*.c)
 SRCS += $(wildcard tikukits/ds/sm/*.c)
 
-# TikuKits tests (requires both tikukits and test framework)
-ifeq ($(HAS_TESTS),1)
-SRCS += $(wildcard tikukits/tests/maths/*.c)
-SRCS += $(wildcard tikukits/tests/sensors/*.c)
-SRCS += $(wildcard tikukits/tests/sigfeatures/*.c)
-SRCS += $(wildcard tikukits/tests/textcompression/*.c)
-SRCS += $(wildcard tikukits/tests/ml/*.c)
-SRCS += $(wildcard tikukits/tests/ds/*.c)
-endif
 endif
 
 # Object files in build directory

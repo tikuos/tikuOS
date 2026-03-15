@@ -31,6 +31,7 @@
 #include <tiku.h>
 #include "tiku_htimer.h"
 #include <stddef.h>
+#include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
 /* MODULE STATE                                                              */
@@ -57,7 +58,9 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 
   /* Validate */
   if (ht == NULL || func == NULL) {
-    HTIMER_PRINTF("htimer: ERR_INVALID (ht=%p func=%p)\n", ht, func);
+    HTIMER_PRINTF("htimer: ERR_INVALID (ht=0x%x func=0x%x)\n",
+                   (unsigned int)(uintptr_t)ht,
+                   (unsigned int)(uintptr_t)func);
     return TIKU_HTIMER_ERR_INVALID;
   }
 

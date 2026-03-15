@@ -95,26 +95,35 @@ tiku_uart_puts(const char *s)
     }
 }
 
+
 /**
- * @brief Print an unsigned integer in the given base (10 or 16).
+ * @brief Print a value into buf (reversed) and return digit count.
  */
-static void
-uart_print_unsigned(unsigned long val, int base)
+static int
+uart_render_unsigned(char *buf, int bufsz, unsigned long val, int base)
 {
-    char buf[12];
     int i = 0;
 
     if (val == 0) {
-        tiku_uart_putc('0');
-        return;
+        buf[i++] = '0';
+        return i;
     }
-    while (val > 0) {
+    while (val > 0 && i < bufsz) {
         unsigned int digit = val % base;
         buf[i++] = (digit < 10) ? ('0' + digit) : ('a' + digit - 10);
         val /= base;
     }
-    while (i > 0) {
-        tiku_uart_putc(buf[--i]);
+    return i;
+}
+
+/**
+ * @brief Emit `count` copies of character `c`.
+ */
+static void
+uart_pad(char c, int count)
+{
+    while (count-- > 0) {
+        tiku_uart_putc(c);
     }
 }
 
@@ -122,6 +131,7 @@ uart_print_unsigned(unsigned long val, int base)
  * @brief Lightweight printf replacement.
  *
  * Supports: %s, %d, %u, %x, %l (as %ld/%lu/%lx), %c, %%.
+ * Also supports optional field width (e.g. %4d, %6ld).
  */
 void
 tiku_uart_printf(const char *fmt, ...)
@@ -139,6 +149,13 @@ tiku_uart_printf(const char *fmt, ...)
         }
         fmt++; /* skip '%' */
 
+        /* Parse optional field width */
+        int width = 0;
+        while (*fmt >= '0' && *fmt <= '9') {
+            width = width * 10 + (*fmt - '0');
+            fmt++;
+        }
+
         int is_long = 0;
         if (*fmt == 'l') {
             is_long = 1;
@@ -149,33 +166,59 @@ tiku_uart_printf(const char *fmt, ...)
         case 's': {
             const char *s = va_arg(ap, const char *);
             if (s) {
+                if (width > 0) {
+                    int len = 0;
+                    const char *p = s;
+                    while (*p++) {
+                        len++;
+                    }
+                    uart_pad(' ', width - len);
+                }
                 tiku_uart_puts(s);
             }
             break;
         }
         case 'd': {
             long val = is_long ? va_arg(ap, long) : (long)va_arg(ap, int);
-            if (val < 0) {
+            int neg = (val < 0);
+            unsigned long uval = neg ? (unsigned long)(-(val + 1)) + 1
+                                     : (unsigned long)val;
+            char buf[12];
+            int len = uart_render_unsigned(buf, sizeof(buf), uval, 10);
+            uart_pad(' ', width - len - neg);
+            if (neg) {
                 tiku_uart_putc('-');
-                val = -val;
             }
-            uart_print_unsigned((unsigned long)val, 10);
+            while (len > 0) {
+                tiku_uart_putc(buf[--len]);
+            }
             break;
         }
         case 'u': {
             unsigned long val = is_long ? va_arg(ap, unsigned long)
                                         : (unsigned long)va_arg(ap, unsigned int);
-            uart_print_unsigned(val, 10);
+            char buf[12];
+            int len = uart_render_unsigned(buf, sizeof(buf), val, 10);
+            uart_pad(' ', width - len);
+            while (len > 0) {
+                tiku_uart_putc(buf[--len]);
+            }
             break;
         }
         case 'x': {
             unsigned long val = is_long ? va_arg(ap, unsigned long)
                                         : (unsigned long)va_arg(ap, unsigned int);
-            uart_print_unsigned(val, 16);
+            char buf[12];
+            int len = uart_render_unsigned(buf, sizeof(buf), val, 16);
+            uart_pad(' ', width - len);
+            while (len > 0) {
+                tiku_uart_putc(buf[--len]);
+            }
             break;
         }
         case 'c': {
             char c = (char)va_arg(ap, int);
+            uart_pad(' ', width - 1);
             tiku_uart_putc(c);
             break;
         }

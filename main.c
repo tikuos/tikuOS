@@ -35,6 +35,10 @@
 #include "tests/test_runner.h"
 #endif
 
+#if defined(HAS_TIKUKITS) && defined(HAS_EXAMPLES)
+#include "examples/kits/example_kits_runner.h"
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -70,6 +74,10 @@ int main(void) {
 
 #if TEST_ENABLE
   test_run_all();
+#endif
+
+#if defined(HAS_TIKUKITS) && defined(HAS_EXAMPLES) && TIKU_EXAMPLES_ENABLE
+  example_kits_run();
 #endif
 
   /* Step 3: Enter the scheduler loop (dispatches events, runs protothreads) */
