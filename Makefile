@@ -229,6 +229,7 @@ SRCS += apps/cli/tiku_cli.c
 SRCS += apps/cli/commands/tiku_cli_cmd_ps.c
 SRCS += apps/cli/commands/tiku_cli_cmd_info.c
 SRCS += apps/cli/commands/tiku_cli_cmd_timer.c
+SRCS += apps/cli/commands/tiku_cli_cmd_kill.c
 endif
 
 # ---------------------------------------------------------------------------
