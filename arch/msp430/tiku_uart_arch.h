@@ -100,4 +100,16 @@ int tiku_uart_getc(void);
  */
 uint16_t tiku_uart_overrun_count(void);
 
+/**
+ * @brief Inject one byte into the RX ring buffer (test only).
+ *
+ * Allows unit tests to feed bytes into the UART receive path
+ * without the RX ISR running.  Only available when HAS_TESTS=1.
+ *
+ * @param byte Byte to inject
+ */
+#ifdef HAS_TESTS
+void tiku_uart_test_inject(uint8_t byte);
+#endif
+
 #endif /* TIKU_UART_ARCH_H_ */

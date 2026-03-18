@@ -326,6 +326,24 @@ tiku_uart_overrun_count(void)
     return uart_overrun_count;
 }
 
+/**
+ * @brief Inject a byte into the RX ring buffer without the ISR.
+ *
+ * Used by unit tests to feed the SLIP decoder when interrupts
+ * are not yet enabled.
+ */
+#ifdef HAS_TESTS
+void
+tiku_uart_test_inject(uint8_t byte)
+{
+    uint8_t next = (uart_rx_head + 1) & TIKU_UART_RXBUF_MASK;
+    if (next != uart_rx_tail) {
+        uart_rxbuf[uart_rx_head] = byte;
+        uart_rx_head = next;
+    }
+}
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* CCS BUILD — CIO semihosting handles printf; stubs only                    */
 /*---------------------------------------------------------------------------*/
@@ -339,5 +357,8 @@ void tiku_uart_printf(const char *fmt, ...) { (void)fmt; }
 uint8_t tiku_uart_rx_ready(void) { return 0; }
 int tiku_uart_getc(void) { return -1; }
 uint16_t tiku_uart_overrun_count(void) { return 0; }
+#ifdef HAS_TESTS
+void tiku_uart_test_inject(uint8_t byte) { (void)byte; }
+#endif
 
 #endif

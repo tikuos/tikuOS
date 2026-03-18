@@ -82,7 +82,7 @@ HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 # ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
-CFLAGS  = -mmcu=$(MCU) -O2 -Wall -Wextra
+CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -DPLATFORM_MSP430=1
 CFLAGS += -I$(TOOLCHAIN_DIR)/include
@@ -91,6 +91,7 @@ CFLAGS += -I$(MSP430_SUPPORT_DIR)
 endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
+CFLAGS += $(EXTRA_CFLAGS)
 
 ifeq ($(HAS_APPS),1)
 CFLAGS += -DHAS_APPS=1
@@ -229,6 +230,7 @@ SRCS += $(wildcard examples/kits/ml/*.c)
 SRCS += $(wildcard examples/kits/sensors/*.c)
 SRCS += $(wildcard examples/kits/sigfeatures/*.c)
 SRCS += $(wildcard examples/kits/textcompression/*.c)
+SRCS += $(wildcard examples/kits/net/*.c)
 endif
 endif
 
@@ -288,6 +290,8 @@ SRCS += $(wildcard tikukits/ds/deque/*.c)
 SRCS += $(wildcard tikukits/ds/trie/*.c)
 SRCS += $(wildcard tikukits/net/slip/*.c)
 SRCS += $(wildcard tikukits/net/ipv4/*.c)
+SRCS += $(wildcard tikukits/time/*.c)
+SRCS += $(wildcard tikukits/time/ntp/*.c)
 
 endif
 
