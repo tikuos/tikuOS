@@ -58,6 +58,96 @@ if not supports_color():
 # ---------------------------------------------------------------------------
 
 CATEGORIES = [
+    # --- UART tests ---
+    {
+        "key": "uart",
+        "name": "UART Subsystem",
+        "description": "Init, TX binary, overrun detection (no host echo needed)",
+        "flags": [
+            "TEST_UART_INIT", "TEST_UART_TX_BINARY", "TEST_UART_OVERRUN",
+        ],
+        "requires_tikukits": False,
+    },
+    {
+        "key": "uart-loopback",
+        "name": "UART Binary Loopback",
+        "description": "Binary echo for all 256 bytes, ring buffer burst, SLIP-critical bytes",
+        "flags": [
+            "TEST_UART_LOOPBACK", "TEST_UART_RINGBUF", "TEST_UART_SLIP_BYTES",
+        ],
+        "requires_tikukits": False,
+        "echo": True,
+        "note": "Host provides byte-for-byte echo service automatically",
+    },
+    {
+        "key": "uart-stress",
+        "name": "UART Stress + Capacity",
+        "description": "2048-byte sustained throughput, 200-byte near-capacity burst, full-duplex",
+        "flags": [
+            "TEST_UART_STRESS", "TEST_UART_CAPACITY", "TEST_UART_DUPLEX",
+        ],
+        "requires_tikukits": False,
+        "echo": True,
+        "note": "Host echo; stress test takes ~30s at 9600 baud",
+    },
+    {
+        "key": "uart-slip-frame",
+        "name": "UART SLIP Frame Round-Trip",
+        "description": "SLIP encode -> UART TX -> host echo -> UART RX -> SLIP decode -> verify",
+        "flags": [
+            "TEST_UART_SLIP_FRAME",
+        ],
+        "requires_tikukits": True,
+        "echo": True,
+        "note": "Key diagnostic for IPv4-over-SLIP failure",
+    },
+    {
+        "key": "uart-overrun-provoke",
+        "name": "UART Overrun Provocation",
+        "description": "Deliberately trigger hardware overrun (UCOE) and verify detection",
+        "flags": [
+            "TEST_UART_OVERRUN_PROVOKE",
+        ],
+        "requires_tikukits": False,
+        "echo": True,
+    },
+    {
+        "key": "uart-isr-contention",
+        "name": "UART ISR Contention",
+        "description": "Loopback with 128 Hz clock tick ISR active",
+        "flags": [
+            "TEST_UART_ISR_CONTENTION",
+        ],
+        "requires_tikukits": False,
+        "echo": True,
+    },
+    {
+        "key": "uart-full",
+        "name": "UART Full Suite",
+        "description": "All 12 UART tests: init, TX, overrun, loopback, SLIP, stress, duplex, ISR",
+        "flags": [
+            "TEST_UART_INIT", "TEST_UART_TX_BINARY", "TEST_UART_OVERRUN",
+            "TEST_UART_LOOPBACK", "TEST_UART_RINGBUF", "TEST_UART_SLIP_BYTES",
+            "TEST_UART_STRESS", "TEST_UART_CAPACITY",
+            "TEST_UART_OVERRUN_PROVOKE", "TEST_UART_SLIP_FRAME",
+            "TEST_UART_DUPLEX", "TEST_UART_ISR_CONTENTION",
+        ],
+        "requires_tikukits": True,
+        "echo": True,
+        "note": "Comprehensive suite; takes ~2 min at 9600 baud",
+    },
+    {
+        "key": "uart-baud-sweep",
+        "name": "UART Baud Rate Sweep",
+        "description": "Loopback test at 4800/9600/19200/38400/57600/115200 baud",
+        "flags": [
+            "TEST_UART_LOOPBACK", "TEST_UART_SLIP_BYTES",
+        ],
+        "requires_tikukits": False,
+        "echo": True,
+        "baud_sweep": True,
+        "note": "Rebuilds firmware at each baud rate (takes several minutes)",
+    },
     # --- Core OS tests ---
     {
         "key": "watchdog",
@@ -375,11 +465,18 @@ CATEGORIES = [
         "flags": ["TEST_KITS_DS_TRIE"],
         "requires_tikukits": True,
     },
+    {
+        "key": "net",
+        "name": "TikuKits: Networking",
+        "description": "Byte-order helpers, IPv4 checksum, ICMP echo reply, SLIP constants, IPv4 input validation",
+        "flags": ["TEST_KITS_NET"],
+        "requires_tikukits": True,
+    },
 ]
 
 # Flags that are auto-derived (computed via || expressions) — never touch these
 AUTO_DERIVED_FLAGS = {
-    "TEST_PROCESS", "TEST_MEM", "TEST_PERSIST", "TEST_MPU",
+    "TEST_UART", "TEST_PROCESS", "TEST_MEM", "TEST_PERSIST", "TEST_MPU",
     "TEST_POOL", "TEST_REGION", "TEST_KITS_MATHS", "TEST_KITS_ML",
     "TEST_KITS_DS", "TEST_KITS",
 }
@@ -493,13 +590,121 @@ def build_and_flash(mcu):
 
 
 # ---------------------------------------------------------------------------
+# UART baud-rate sweep: firmware board-header manipulation
+# ---------------------------------------------------------------------------
+
+BOARD_HEADER = os.path.join(
+    PROJ_DIR, "arch", "msp430", "boards", "tiku_board_fr5969_launchpad.h"
+)
+
+# TI SLAU367 Table 30-5: eUSCI_A UART, BRCLK = 8 MHz, UCOS16 = 1
+# (baud, BRW, BRF, BRS_hex)
+BAUD_CONFIGS = {
+    4800:   (104, 2,  0xD6),
+    9600:   (52,  1,  0x49),
+    19200:  (26,  0,  0xB6),
+    38400:  (13,  0,  0x84),
+    57600:  (8,   10, 0xF7),
+    115200: (4,   5,  0x55),
+}
+
+# Regexes for the board header lines we modify
+RE_UART_COMMENT = re.compile(
+    r"^(/\*\*\s*UART baud-rate config:\s*)\d+(\s*baud.*)$"
+)
+RE_UART_BRW = re.compile(
+    r"^(#define\s+TIKU_BOARD_UART_BRW\s+)\d+(.*)$"
+)
+RE_UART_MCTLW = re.compile(
+    r"^(#define\s+TIKU_BOARD_UART_MCTLW\s+).*$"
+)
+RE_UART_TABLE_COMMENT = re.compile(
+    r"^( \*\s*Values from TI SLAU367 Table 30-5:\s*).*$"
+)
+
+
+def modify_board_baud(target_baud):
+    """
+    Rewrite BRW and MCTLW in the FR5969 board header for the given baud rate.
+    Returns the previous baud rate (detected from BRW), or None on error.
+    """
+    if target_baud not in BAUD_CONFIGS:
+        print(f"{C.RED}[ERROR]{C.RESET} No UART config for {target_baud} baud")
+        return None
+
+    brw, brf, brs = BAUD_CONFIGS[target_baud]
+    mctlw_str = f"((0x{brs:02X} << 8) | UCOS16 | (0x{brf:02X} << 4))"
+
+    with open(BOARD_HEADER, "r") as f:
+        lines = f.readlines()
+
+    prev_baud = None
+    modified = []
+    for line in lines:
+        # Detect previous BRW to infer old baud
+        m = RE_UART_BRW.match(line)
+        if m:
+            old_brw = int(re.search(r"\d+", line.split()[-1]).group())
+            for b, (bw, _, _) in BAUD_CONFIGS.items():
+                if bw == old_brw:
+                    prev_baud = b
+                    break
+            modified.append(f"{m.group(1)}{brw}\n")
+            continue
+
+        m = RE_UART_MCTLW.match(line)
+        if m:
+            modified.append(
+                f"{m.group(1)}{mctlw_str}\n"
+            )
+            continue
+
+        m = RE_UART_COMMENT.match(line)
+        if m:
+            modified.append(f"{m.group(1)}{target_baud}{m.group(2)}\n")
+            continue
+
+        m = RE_UART_TABLE_COMMENT.match(line)
+        if m:
+            modified.append(
+                f"{m.group(1)}BRW={brw}, BRF={brf}, BRS=0x{brs:02X}. */\n"
+            )
+            continue
+
+        modified.append(line)
+
+    with open(BOARD_HEADER, "w") as f:
+        f.writelines(modified)
+
+    return prev_baud
+
+
+# ---------------------------------------------------------------------------
 # Serial monitor and output parsing
 # ---------------------------------------------------------------------------
 
-def monitor_serial(port, baud, timeout_sec):
+def _display_line(line):
+    """Colorize and print one parsed text line."""
+    if line.startswith("[T:P:"):
+        sys.stdout.write(f"  {C.GREEN}{line}{C.RESET}\n")
+    elif line.startswith("[T:F:"):
+        sys.stdout.write(f"  {C.RED}{line}{C.RESET}\n")
+    elif line.startswith("[TS:") or line.startswith("[TG:"):
+        sys.stdout.write(f"  {C.CYAN}{line}{C.RESET}\n")
+    else:
+        sys.stdout.write(f"  {C.DIM}{line}{C.RESET}\n")
+    sys.stdout.flush()
+
+
+def _open_serial(port, baud):
     """
-    Read UART output from the device until [TS:END] or timeout.
-    Returns list of raw lines.
+    Open a pyserial port with retry logic for eZ-FET USB-CDC quirks.
+
+    The eZ-FET debugger sometimes isn't ready immediately after flashing,
+    causing tcflush (called inside pyserial's open()) to fail with
+    termios.error (ENOTTY).  We retry up to 5 times with increasing delay.
+
+    Returns (ser, pyserial).
     """
     try:
         import serial as pyserial
@@ -508,22 +713,143 @@ def monitor_serial(port, baud, timeout_sec):
         print(f"  Install with: {C.CYAN}pip install pyserial{C.RESET}")
         sys.exit(1)
 
+    # termios.error is NOT a subclass of OSError — catch it explicitly
+    try:
+        import termios
+        _serial_errors = (pyserial.SerialException, OSError, termios.error)
+    except ImportError:
+        _serial_errors = (pyserial.SerialException, OSError)
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        delay = 1.5 + attempt * 1.0  # 1.5s, 2.5s, 3.5s, ...
+        time.sleep(delay)
+
+        try:
+            ser = pyserial.Serial(port, baud, timeout=1)
+        except _serial_errors as e:
+            if attempt < max_retries - 1:
+                print(f"{C.DIM}  Retry {attempt + 1}/{max_retries}: "
+                      f"cannot open {port} ({e}){C.RESET}")
+                continue
+            print(f"{C.RED}[ERROR]{C.RESET} Cannot open {port}: {e}")
+            print(f"  Is the LaunchPad plugged in?  Try: ls /dev/ttyACM*")
+            sys.exit(1)
+
+        # If pyserial's internal _reset_input_buffer succeeded during
+        # open(), we're good.  Do an explicit flush just in case.
+        try:
+            ser.reset_input_buffer()
+        except _serial_errors:
+            pass  # best-effort; already opened successfully
+
+        return ser, pyserial
+
+    # Should not reach here
+    sys.exit(1)
+
+
+def monitor_serial_echo(port, baud, timeout_sec):
+    """
+    Read UART output with automatic byte-echo for loopback tests.
+
+    Echoes every received byte back to the device.  The firmware drains
+    stale echoed text before entering each binary test phase, so
+    always-echo mode is safe.  Text lines are still accumulated and
+    displayed for result parsing.
+    """
+    ser, pyserial = _open_serial(port, baud)
+
+    print(f"\n{C.CYAN}[MONITOR]{C.RESET} Opening {port} @ {baud} baud "
+          f"(echo mode, timeout {timeout_sec}s)")
+    print(f"{C.DIM}  Echo service active — every byte echoed back{C.RESET}")
+
+    lines = []
+    line_buf = bytearray()
+    start = time.time()
+    suite_ended = False
+    echo_count = 0
+
+    # Short blocking timeout: just enough to avoid busy-spin,
+    # short enough to keep up with 115200 baud (~11520 bytes/sec).
+    ser.timeout = 0.005  # 5 ms
+
+    while (time.time() - start) < timeout_sec:
+        try:
+            # Read whatever is available.  in_waiting tells us how
+            # many bytes the OS has buffered; read at least 1 (blocks
+            # up to ser.timeout), then grab any additional bytes that
+            # arrived during that read.
+            waiting = ser.in_waiting
+            chunk = ser.read(waiting if waiting > 0 else 1)
+            if chunk and ser.in_waiting:
+                chunk += ser.read(ser.in_waiting)
+        except pyserial.SerialException:
+            break
+
+        if not chunk:
+            continue
+
+        # Echo the entire chunk back in one write
+        try:
+            ser.write(chunk)
+            ser.flush()
+            echo_count += len(chunk)
+        except pyserial.SerialException:
+            pass
+
+        # Process each byte for text line accumulation
+        for byte in chunk:
+            if byte == 0x0A:  # LF
+                try:
+                    line = line_buf.decode("utf-8", errors="replace").rstrip("\r")
+                except Exception:
+                    line_buf = bytearray()
+                    continue
+
+                line_buf = bytearray()
+
+                if not line:
+                    continue
+
+                lines.append(line)
+                _display_line(line)
+
+                if line.startswith("[TS:END]"):
+                    suite_ended = True
+                    break
+            else:
+                line_buf.append(byte)
+
+        if suite_ended:
+            break
+
+    ser.close()
+
+    print(f"{C.DIM}  Echo service: {echo_count} bytes echoed{C.RESET}")
+
+    if not suite_ended:
+        # Try to parse any remaining partial line
+        if line_buf:
+            try:
+                line = line_buf.decode("utf-8", errors="replace").rstrip("\r")
+                if line:
+                    lines.append(line)
+            except Exception:
+                pass
+
+    return lines
+
+
+def monitor_serial(port, baud, timeout_sec):
+    """
+    Read UART output from the device until [TS:END] or timeout.
+    Returns list of raw lines.
+    """
     print(f"\n{C.CYAN}[MONITOR]{C.RESET} Opening {port} @ {baud} baud "
           f"(timeout {timeout_sec}s)")
 
-    # Small delay to let the programmer release the port
-    time.sleep(1.5)
-
-    try:
-        ser = pyserial.Serial(port, baud, timeout=1)
-    except pyserial.SerialException as e:
-        print(f"{C.RED}[ERROR]{C.RESET} Cannot open {port}: {e}")
-        print(f"  Is the LaunchPad plugged in?")
-        print(f"  Try: ls /dev/ttyACM*")
-        sys.exit(1)
-
-    # Flush any stale data
-    ser.reset_input_buffer()
+    ser, pyserial = _open_serial(port, baud)
 
     print(f"{C.DIM}  Waiting for test output...{C.RESET}")
 
@@ -860,6 +1186,99 @@ def show_menu(has_tikukits):
 
 
 # ---------------------------------------------------------------------------
+# Baud rate sweep
+# ---------------------------------------------------------------------------
+
+SWEEP_BAUDS = [4800, 9600, 19200, 38400, 57600, 115200]
+
+
+def run_baud_sweep(category, args):
+    """
+    Run UART loopback tests at each baud rate in SWEEP_BAUDS.
+
+    For each rate: modify board header -> rebuild -> flash -> echo-monitor.
+    Restores the original baud rate (9600) when done.
+    """
+    port = args.port or detect_serial_port()
+    if not port:
+        print(f"\n{C.RED}[ERROR]{C.RESET} No serial port found")
+        sys.exit(1)
+
+    # Configure test flags once
+    print(f"\n{C.CYAN}[CONFIG]{C.RESET} Enabling UART loopback flags")
+    modify_config(category)
+
+    sweep_results = []
+    line_w = 72
+
+    print(f"\n{C.BOLD}{'=' * line_w}{C.RESET}")
+    print(f"{C.BOLD}  UART BAUD RATE SWEEP{C.RESET}")
+    print(f"{'=' * line_w}")
+    print(f"  Testing: {', '.join(str(b) for b in SWEEP_BAUDS)} baud")
+    print(f"  Port: {port}   MCU: {args.mcu}")
+    print(f"{'=' * line_w}\n")
+
+    for baud in SWEEP_BAUDS:
+        print(f"\n{C.BOLD}{'─' * line_w}{C.RESET}")
+        print(f"{C.BOLD}  BAUD {baud}{C.RESET}")
+        print(f"{'─' * line_w}")
+
+        # Modify firmware baud rate
+        print(f"{C.CYAN}[BAUD]{C.RESET} Setting firmware to {baud} baud")
+        prev = modify_board_baud(baud)
+        if prev is None:
+            sweep_results.append((baud, None, "no config"))
+            continue
+
+        # Build and flash
+        if not build_and_flash(args.mcu):
+            print(f"{C.RED}[FAIL]{C.RESET} Build failed at {baud} baud")
+            sweep_results.append((baud, None, "build failed"))
+            continue
+
+        # Monitor with echo at this baud rate
+        lines = monitor_serial_echo(port, baud, args.timeout)
+        result = parse_results(lines)
+        display_results(result, {
+            "name": f"UART @ {baud} baud",
+            "description": category["description"],
+        })
+
+        sweep_results.append((baud, result, "ok"))
+
+    # Restore to 9600
+    print(f"\n{C.CYAN}[BAUD]{C.RESET} Restoring firmware to 9600 baud")
+    modify_board_baud(9600)
+
+    # --- Sweep summary ---
+    print(f"\n{C.BOLD}{'=' * line_w}{C.RESET}")
+    print(f"{C.BOLD}  BAUD RATE SWEEP SUMMARY{C.RESET}")
+    print(f"{'=' * line_w}")
+    print(f"  {'Baud':>8s}  {'Status':>8s}  {'Total':>6s}  {'Pass':>6s}  {'Fail':>6s}")
+    print(f"  {'─' * 48}")
+
+    any_fail = False
+    for baud, result, status in sweep_results:
+        if status != "ok" or result is None:
+            print(f"  {baud:>8d}  {C.RED}{'SKIP':>8s}{C.RESET}  "
+                  f"{'—':>6s}  {'—':>6s}  {'—':>6s}  ({status})")
+            any_fail = True
+        elif result["failed"] > 0:
+            print(f"  {baud:>8d}  {C.RED}{'FAIL':>8s}{C.RESET}  "
+                  f"{result['total']:>6d}  {result['passed']:>6d}  "
+                  f"{C.RED}{result['failed']:>6d}{C.RESET}")
+            any_fail = True
+        else:
+            print(f"  {baud:>8d}  {C.GREEN}{'PASS':>8s}{C.RESET}  "
+                  f"{result['total']:>6d}  {result['passed']:>6d}  "
+                  f"{result['failed']:>6d}")
+
+    print(f"{'=' * line_w}\n")
+
+    sys.exit(1 if any_fail else 0)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1051,6 +1470,11 @@ def main():
             print("  Aborted.")
             sys.exit(0)
 
+    # --- Baud sweep mode ---
+    if category.get("baud_sweep"):
+        run_baud_sweep(category, args)
+        return
+
     # Modify config
     print(f"\n{C.CYAN}[CONFIG]{C.RESET} Modifying {os.path.relpath(CONFIG_FILE, PROJ_DIR)}")
     modify_config(category)
@@ -1076,8 +1500,12 @@ def main():
         print(f"  Specify manually: --port /dev/ttyACM1")
         sys.exit(1)
 
-    # Monitor
-    lines = monitor_serial(port, args.baud, args.timeout)
+    # Monitor — use echo mode for loopback tests
+    use_echo = category.get("echo", False)
+    if use_echo:
+        lines = monitor_serial_echo(port, args.baud, args.timeout)
+    else:
+        lines = monitor_serial(port, args.baud, args.timeout)
 
     # Parse and display
     result = parse_results(lines)

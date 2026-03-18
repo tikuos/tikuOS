@@ -119,7 +119,12 @@
 #define TIKU_PRINTF(...) printf(__VA_ARGS__)
 #else
 #include <arch/msp430/tiku_uart_arch.h>
+#if defined(TIKU_APP_NET)
+/* UART is dedicated to SLIP — suppress all debug printf */
+#define TIKU_PRINTF(...)
+#else
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+#endif
 #endif
 
 /*---------------------------------------------------------------------------*/

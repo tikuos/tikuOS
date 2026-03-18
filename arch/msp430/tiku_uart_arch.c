@@ -42,21 +42,67 @@
 
 #if defined(__GNUC__) && !defined(__TI_COMPILER_VERSION__)
 
+/*---------------------------------------------------------------------------*/
+/* RX RING BUFFER (interrupt-driven)                                         */
+/*---------------------------------------------------------------------------*/
+
+#ifndef TIKU_UART_RXBUF_SIZE
+#define TIKU_UART_RXBUF_SIZE  256
+#endif
+
+#if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0
+#error "TIKU_UART_RXBUF_SIZE must be a power of two"
+#endif
+
+#define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1)
+
+static volatile uint8_t  uart_rxbuf[TIKU_UART_RXBUF_SIZE];
+static volatile uint8_t  uart_rx_head;   /* ISR writes here */
+static volatile uint8_t  uart_rx_tail;   /* getc reads here */
+
+/** Hardware overrun counter — incremented when eUSCI_A0 reports UCOE. */
+static volatile uint16_t uart_overrun_count;
+
+__attribute__((interrupt(USCI_A0_VECTOR)))
+void
+tiku_uart_isr(void)
+{
+    if (UCA0IFG & UCRXIFG) {
+        /* Check for hardware overrun (byte lost inside the UART shift
+         * register before we could read RXBUF).  Reading RXBUF clears
+         * UCOE, so sample it first. */
+        if (UCA0STATW & UCOE) {
+            uart_overrun_count++;
+        }
+
+        uint8_t byte = UCA0RXBUF;  /* read clears UCRXIFG + UCOE */
+        uint8_t next = (uart_rx_head + 1) & TIKU_UART_RXBUF_MASK;
+        if (next != uart_rx_tail) {
+            uart_rxbuf[uart_rx_head] = byte;
+            uart_rx_head = next;
+        }
+    }
+}
+
+/*---------------------------------------------------------------------------*/
+/* INIT                                                                      */
+/*---------------------------------------------------------------------------*/
+
 /**
  * @brief Initialize eUSCI_A0 UART at 9600 baud, 8N1.
  *
- * Clock source and baud-rate parameters are board-specific:
- *   FR5969: 8 MHz SMCLK, oversampling (BRW=52)
- *   FR2433: 5 MHz MODCLK (MODOSC), oversampling (BRW=32)
+ * Enables the RX interrupt so incoming bytes are buffered in a
+ * software ring buffer regardless of when the application polls.
  */
 void
 tiku_uart_init(void)
 {
+    /* Keep the UART quiescent while retargeting pins and clearing state. */
+    UCA0IE = 0;
+    UCA0CTLW0 = UCSWRST;
+
     /* Select UART function on board-specific pins */
     TIKU_BOARD_UART_PINS_INIT();
-
-    /* Put eUSCI_A0 in reset before configuration */
-    UCA0CTLW0 = UCSWRST;
 
     /* Board-specific clock source */
     UCA0CTLW0 |= TIKU_BOARD_UART_CLK_SEL;
@@ -65,8 +111,20 @@ tiku_uart_init(void)
     UCA0BRW = TIKU_BOARD_UART_BRW;
     UCA0MCTLW = TIKU_BOARD_UART_MCTLW;
 
+    /* Clear any stale status from boot/flash-tool traffic before enabling RX. */
+    UCA0STATW = 0;
+    while (UCA0IFG & UCRXIFG) {
+        (void)UCA0RXBUF;
+    }
+
     /* Release from reset — UART is now active */
     UCA0CTLW0 &= ~UCSWRST;
+
+    /* Reset ring buffer, overrun counter, and enable RX interrupt */
+    uart_rx_head = 0;
+    uart_rx_tail = 0;
+    uart_overrun_count = 0;
+    UCA0IE |= UCRXIE;
 }
 
 /**
@@ -237,26 +295,35 @@ tiku_uart_printf(const char *fmt, ...)
 }
 
 /**
- * @brief Check whether the UART RX buffer has a character.
+ * @brief Check whether the software RX ring buffer has data.
  */
 uint8_t
 tiku_uart_rx_ready(void)
 {
-    return (UCA0IFG & UCRXIFG) ? 1 : 0;
+    return (uart_rx_head != uart_rx_tail) ? 1 : 0;
 }
 
 /**
- * @brief Non-blocking read of one received character.
- *
- * Reading UCA0RXBUF automatically clears UCRXIFG.
+ * @brief Non-blocking read of one byte from the RX ring buffer.
  */
 int
 tiku_uart_getc(void)
 {
-    if (!(UCA0IFG & UCRXIFG)) {
+    if (uart_rx_head == uart_rx_tail) {
         return -1;
     }
-    return (int)(unsigned char)UCA0RXBUF;
+    uint8_t c = uart_rxbuf[uart_rx_tail];
+    uart_rx_tail = (uart_rx_tail + 1) & TIKU_UART_RXBUF_MASK;
+    return (int)c;
+}
+
+/**
+ * @brief Return the number of hardware overruns detected since init.
+ */
+uint16_t
+tiku_uart_overrun_count(void)
+{
+    return uart_overrun_count;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -271,5 +338,6 @@ void tiku_uart_puts(const char *s) { (void)s; }
 void tiku_uart_printf(const char *fmt, ...) { (void)fmt; }
 uint8_t tiku_uart_rx_ready(void) { return 0; }
 int tiku_uart_getc(void) { return -1; }
+uint16_t tiku_uart_overrun_count(void) { return 0; }
 
 #endif

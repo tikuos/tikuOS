@@ -111,6 +111,7 @@ ifneq ($(MSP430_SUPPORT_DIR),)
 LDFLAGS += -L$(MSP430_SUPPORT_DIR)
 endif
 LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
 
 # ---------------------------------------------------------------------------
 # Source files — core OS (always compiled)
@@ -151,6 +152,18 @@ SRCS += kernel/scheduler/tiku_sched.c
 # ---------------------------------------------------------------------------
 ifeq ($(HAS_TESTS),1)
 SRCS += tests/test_runner.c
+SRCS += tests/uart/test_uart_init.c
+SRCS += tests/uart/test_uart_tx_binary.c
+SRCS += tests/uart/test_uart_loopback.c
+SRCS += tests/uart/test_uart_ringbuf.c
+SRCS += tests/uart/test_uart_overrun.c
+SRCS += tests/uart/test_uart_slip_bytes.c
+SRCS += tests/uart/test_uart_stress.c
+SRCS += tests/uart/test_uart_capacity.c
+SRCS += tests/uart/test_uart_overrun_provoke.c
+SRCS += tests/uart/test_uart_slip_frame.c
+SRCS += tests/uart/test_uart_duplex.c
+SRCS += tests/uart/test_uart_isr_contention.c
 SRCS += tests/cpuclock/test_cpuclock_basic.c
 SRCS += tests/memory/test_mem_common.c
 SRCS += tests/memory/test_mem_arena.c
@@ -187,6 +200,7 @@ SRCS += $(wildcard tests/kits/sigfeatures/*.c)
 SRCS += $(wildcard tests/kits/textcompression/*.c)
 SRCS += $(wildcard tests/kits/ml/*.c)
 SRCS += $(wildcard tests/kits/ds/*.c)
+SRCS += $(wildcard tests/kits/net/*.c)
 endif
 endif
 
@@ -232,6 +246,11 @@ SRCS += apps/cli/commands/tiku_cli_cmd_timer.c
 SRCS += apps/cli/commands/tiku_cli_cmd_kill.c
 endif
 
+ifeq ($(APP),net)
+CFLAGS += -DTIKU_APP_NET=1
+SRCS += apps/net/tiku_app_net.c
+endif
+
 # ---------------------------------------------------------------------------
 # TikuKits (only if tikukits/ is present)
 # ---------------------------------------------------------------------------
@@ -267,6 +286,8 @@ SRCS += $(wildcard tikukits/ds/bloom/*.c)
 SRCS += $(wildcard tikukits/ds/circlog/*.c)
 SRCS += $(wildcard tikukits/ds/deque/*.c)
 SRCS += $(wildcard tikukits/ds/trie/*.c)
+SRCS += $(wildcard tikukits/net/slip/*.c)
+SRCS += $(wildcard tikukits/net/ipv4/*.c)
 
 endif
 

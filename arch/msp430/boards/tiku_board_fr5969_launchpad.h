@@ -62,9 +62,19 @@
 /* Backchannel UART - TXD P2.0, RXD P2.1                                    */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_BOARD_UART_PINS_INIT() do { P2SEL1 |= BIT0 | BIT1; P2SEL0 &= ~(BIT0 | BIT1); } while(0)
+#define TIKU_BOARD_UART_PINS_INIT()                                            \
+    do {                                                                       \
+        /* Backchannel UART on eUSCI_A0: P2.0 = TXD, P2.1 = RXD. */           \
+        P2DIR |= BIT0;                                                         \
+        P2DIR &= (uint8_t)~BIT1;                                               \
+        P2REN &= (uint8_t)~(BIT0 | BIT1);                                      \
+        P2OUT &= (uint8_t)~BIT0;                                               \
+        P2SEL1 |= BIT0 | BIT1;                                                 \
+        P2SEL0 &= (uint8_t)~(BIT0 | BIT1);                                     \
+    } while(0)
 
-/** UART baud-rate config: 9600 baud from 8 MHz SMCLK (oversampling). */
+/** UART baud-rate config: 9600 baud from 8 MHz SMCLK (oversampling).
+ *  Values from TI SLAU367 Table 30-5: BRW=52, BRF=1, BRS=0x49. */
 #define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
 #define TIKU_BOARD_UART_BRW         52
 #define TIKU_BOARD_UART_MCTLW       ((0x49 << 8) | UCOS16 | (0x01 << 4))

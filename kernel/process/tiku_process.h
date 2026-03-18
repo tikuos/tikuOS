@@ -278,6 +278,7 @@ struct tiku_msg {
  * @endcode
  */
 #define TIKU_AUTOSTART_PROCESSES(...)                                       \
+    __attribute__((used))                                                  \
     struct tiku_process * const tiku_autostart_processes[] =                \
         {__VA_ARGS__, NULL}
 

@@ -88,4 +88,16 @@ uint8_t tiku_uart_rx_ready(void);
  */
 int tiku_uart_getc(void);
 
+/**
+ * @brief Return the number of hardware UART overruns since init.
+ *
+ * An overrun (UCOE) occurs when a new byte arrives before the
+ * previous one was read from the shift register.  The ISR counts
+ * each occurrence so firmware and tests can detect transport
+ * reliability problems.
+ *
+ * @return Cumulative overrun count (reset to 0 by tiku_uart_init)
+ */
+uint16_t tiku_uart_overrun_count(void);
+
 #endif /* TIKU_UART_ARCH_H_ */
