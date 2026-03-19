@@ -993,9 +993,12 @@ void tiku_cpu_boot_msp430_init(void)
      // This activates previously configured port settings
      PM5CTL0 &= ~LOCKLPM5;
 
-     // Enable global interrupts
-     CPU_FREQ_PRINTF("Enabling global interrupts\n");
-     tiku_cpu_boot_msp430_global_interrupts_enable();
+     /* Do NOT enable global interrupts here.  The scheduler loop
+      * (tiku_sched_loop) enables GIE at the correct time, after
+      * autostart processes have been launched and the event queue
+      * is ready.  Enabling GIE prematurely causes timer ISRs to
+      * fire before the process system is initialized, flooding the
+      * event queue with unhandled POLL events. */
 
      CPU_FREQ_PRINTF("Bootup completed\n");
 

@@ -161,6 +161,13 @@ void tiku_process_exit(struct tiku_process *p)
     }
 
     tiku_atomic_exit();
+
+    /* Notify other processes (e.g. timer process) so they can
+     * clean up resources belonging to the exited process.  The
+     * data pointer carries the exited process's identity. */
+    tiku_process_post(TIKU_PROCESS_BROADCAST,
+                      TIKU_EVENT_EXITED,
+                      (tiku_event_data_t)p);
 }
 
 /**

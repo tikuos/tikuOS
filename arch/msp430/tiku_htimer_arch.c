@@ -56,6 +56,7 @@ TIKU_ISR(TIMER1_A0_VECTOR, tiku_htimer_isr)
 
 void tiku_htimer_arch_init(void)
 {
+    unsigned int sr = __get_interrupt_state();
     __disable_interrupt();
 
     HTIMER_ARCH_PRINTF("Initializing Timer A1 for hardware timer\n");
@@ -75,7 +76,11 @@ void tiku_htimer_arch_init(void)
 
     HTIMER_ARCH_PRINTF("Timer A1 initialization complete\n");
 
-    __enable_interrupt();
+    /* Restore the interrupt state that was active before this
+     * function was called, rather than unconditionally enabling.
+     * The scheduler loop (tiku_sched_loop) enables GIE at the
+     * correct time after autostart processes are launched. */
+    __set_interrupt_state(sr);
 }
 
 /*---------------------------------------------------------------------------*/
