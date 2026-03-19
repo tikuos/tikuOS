@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Platform Abstraction - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html">Processes</a></li>
+    <li><a href="events.html">Events &amp; IPC</a></li>
+    <li><a href="timers.html">Timers</a></li>
+    <li><a href="scheduler.html">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html" class="active">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>Platform Abstraction</h1>
+
+<p class="lead">TikuOS uses a two-level abstraction for hardware support: device
+headers define silicon-level constants (memory sizes, peripheral availability),
+and board headers define PCB-level assignments (LED pins, button pins, UART
+routing). A selector header routes to the correct pair based on a single
+<code>TIKU_DEVICE_*</code> define.</p>
+
+<h2>Two-Level Abstraction</h2>
+
+<h3>Device Headers (Silicon)</h3>
+
+<p>Located in <code>arch/msp430/devices/</code>. Each device header defines the
+hardware capabilities of a specific MSP430 variant:</p>
+
+<ul>
+  <li>GPIO port availability (<code>TIKU_DEVICE_HAS_PORT1</code> through <code>TIKU_DEVICE_HAS_PORTJ</code>)</li>
+  <li>Crystal pin routing (LFXT, HFXT)</li>
+  <li>Clock capabilities (max stable MHz, CS key protection)</li>
+  <li>Memory sizes (FRAM, SRAM, address ranges)</li>
+  <li>MPU segment boundaries</li>
+  <li>Peripheral availability (eUSCI, ADC)</li>
+</ul>
+
+<h3>Board Headers (PCB)</h3>
+
+<p>Located in <code>arch/msp430/boards/</code>. Each board header defines the
+pin assignments for a specific development board or custom PCB:</p>
+
+<ul>
+  <li>LED macros (<code>TIKU_BOARD_LED1_INIT</code>, <code>_ON</code>, <code>_OFF</code>, <code>_TOGGLE</code>)</li>
+  <li>Button macros (<code>TIKU_BOARD_BTN1_INIT</code>, <code>_PRESSED</code>)</li>
+  <li>UART pin configuration and baud-rate constants</li>
+  <li>I2C pin configuration and clock prescalers</li>
+  <li>SPI pin configuration</li>
+  <li>1-Wire pin assignments</li>
+</ul>
+
+<h2>Supported Boards</h2>
+
+<table>
+  <tr>
+    <th>Device</th>
+    <th>Board</th>
+    <th>RAM</th>
+    <th>FRAM</th>
+    <th>Max Clock</th>
+    <th>Crystals</th>
+  </tr>
+  <tr>
+    <td>MSP430FR2433</td>
+    <td>MSP-EXP430FR2433 LaunchPad</td>
+    <td>4 KB</td>
+    <td>16 KB</td>
+    <td>16 MHz</td>
+    <td>None</td>
+  </tr>
+  <tr>
+    <td>MSP430FR5969</td>
+    <td>MSP-EXP430FR5969 LaunchPad</td>
+    <td>2 KB</td>
+    <td>64 KB</td>
+    <td>8 MHz</td>
+    <td>LFXT, HFXT</td>
+  </tr>
+  <tr>
+    <td>MSP430FR5994</td>
+    <td>MSP-EXP430FR5994 LaunchPad</td>
+    <td>8 KB</td>
+    <td>256 KB</td>
+    <td>16 MHz</td>
+    <td>LFXT, HFXT</td>
+  </tr>
+</table>
+
+<h2>Device Header Example</h2>
+
+<p>The FR5969 device header (<code>arch/msp430/devices/tiku_device_fr5969.h</code>)
+defines constants like:</p>
+
+<pre><code>#define TIKU_DEVICE_NAME            "MSP430FR5969"
+
+/* Memory sizes */
+#define TIKU_DEVICE_FRAM_SIZE       (64 * 1024UL)   /* 64 KB FRAM */
+#define TIKU_DEVICE_RAM_SIZE        (2 * 1024UL)    /* 2 KB SRAM */
+#define TIKU_DEVICE_RAM_START       0x1C00U
+
+/* FRAM address range */
+#define TIKU_DEVICE_FRAM_START      0x4400U
+#define TIKU_DEVICE_FRAM_END        0xFFFFU
+
+/* MPU segment boundaries */
+#define TIKU_DEVICE_MPU_SEG2_START  0x8000U
+#define TIKU_DEVICE_MPU_SEG3_START  0xC000U
+
+/* Clock */
+#define TIKU_DEVICE_HAS_LFXT        1
+#define TIKU_DEVICE_HAS_HFXT        1
+#define TIKU_DEVICE_MAX_STABLE_MHZ  8</code></pre>
+
+<h2>Board Header Example</h2>
+
+<p>The FR5969 LaunchPad board header
+(<code>arch/msp430/boards/tiku_board_fr5969_launchpad.h</code>) maps pins:</p>
+
+<pre><code>#define TIKU_BOARD_NAME             "MSP430FR5969 LaunchPad"
+
+/* LED1 (Red) - P4.6 */
+#define TIKU_BOARD_LED1_INIT()      do { P4DIR |= BIT6; P4OUT &= ~BIT6; } while(0)
+#define TIKU_BOARD_LED1_TOGGLE()    do { P4OUT ^= BIT6; } while(0)
+
+/* LED2 (Green) - P1.0 */
+#define TIKU_BOARD_LED2_INIT()      do { P1DIR |= BIT0; P1OUT &= ~BIT0; } while(0)
+#define TIKU_BOARD_LED2_TOGGLE()    do { P1OUT ^= BIT0; } while(0)
+
+/* Backchannel UART - TXD P2.0, RXD P2.1 */
+#define TIKU_BOARD_UART_BRW         52    /* 9600 baud from 8 MHz */
+
+/* Button S1 - P4.5 (Active low) */
+#define TIKU_BOARD_BTN1_INIT()      do { P4DIR &= ~BIT5; P4REN |= BIT5; \
+                                         P4OUT |= BIT5; } while(0)
+#define TIKU_BOARD_BTN1_PRESSED()   (!(P4IN & BIT5))</code></pre>
+
+<h2>tiku_device_select.h</h2>
+
+<p>The device selector header (<code>arch/msp430/tiku_device_select.h</code>) routes
+to the correct device and board headers based on a single define:</p>
+
+<pre><code>/* Auto-detect from TI compiler defines */
+#if defined(__MSP430FR5969__) && !defined(TIKU_DEVICE_MSP430FR5969)
+#define TIKU_DEVICE_MSP430FR5969 1
+#elif defined(__MSP430FR5994__) && !defined(TIKU_DEVICE_MSP430FR5994)
+#define TIKU_DEVICE_MSP430FR5994 1
+#elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_DEVICE_MSP430FR2433 1
+#endif
+
+/* Route to correct headers */
+#if defined(TIKU_DEVICE_MSP430FR5969)
+#include &lt;arch/msp430/devices/tiku_device_fr5969.h&gt;
+#include &lt;arch/msp430/boards/tiku_board_fr5969_launchpad.h&gt;
+#elif defined(TIKU_DEVICE_MSP430FR5994)
+#include &lt;arch/msp430/devices/tiku_device_fr5994.h&gt;
+#include &lt;arch/msp430/boards/tiku_board_fr5994_launchpad.h&gt;
+#elif defined(TIKU_DEVICE_MSP430FR2433)
+#include &lt;arch/msp430/devices/tiku_device_fr2433.h&gt;
+#include &lt;arch/msp430/boards/tiku_board_fr2433_launchpad.h&gt;
+#else
+#error "No TikuOS device selected."
+#endif</code></pre>
+
+<h2>HAL Layer</h2>
+
+<p>Between the kernel and the architecture-specific code sits a HAL (Hardware
+Abstraction Layer). Each HAL header declares the interface that the arch code
+must implement:</p>
+
+<table>
+  <tr>
+    <th>HAL Header</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><code>hal/tiku_cpu.h</code></td>
+    <td>CPU control: boot init, frequency config, atomic sections, interrupt enable/disable</td>
+  </tr>
+  <tr>
+    <td><code>hal/tiku_clock_hal.h</code></td>
+    <td>System clock: init, time query, tick configuration</td>
+  </tr>
+  <tr>
+    <td><code>hal/tiku_watchdog_hal.h</code></td>
+    <td>Watchdog timer: stop, start, configure</td>
+  </tr>
+  <tr>
+    <td><code>hal/tiku_mem_hal.h</code></td>
+    <td>Memory: alignment constants, size types, secure wipe, NVM copy</td>
+  </tr>
+  <tr>
+    <td><code>hal/tiku_mpu_hal.h</code></td>
+    <td>MPU: segment config, lock/unlock, violation handling</td>
+  </tr>
+</table>
+
+<p>All arch <code>.c</code> files use generic <code>TIKU_DEVICE_*</code> and
+<code>TIKU_BOARD_*</code> macros rather than directly accessing hardware registers.
+This keeps the arch code device-agnostic within the MSP430 family.</p>
+
+<h2>Adding a New Variant</h2>
+
+<p>Adding support for a new MSP430 variant requires four steps:</p>
+
+<ol>
+  <li><strong>Device header</strong> &mdash; create
+      <code>arch/msp430/devices/tiku_device_frXXXX.h</code> with silicon constants
+      (memory sizes, crystal pins, peripheral availability). Use
+      <code>tiku_device_fr5969.h</code> as a template.</li>
+  <li><strong>Board header</strong> &mdash; create
+      <code>arch/msp430/boards/tiku_board_frXXXX_launchpad.h</code> with GPIO
+      pin assignments (LEDs, buttons, UART). Use
+      <code>tiku_board_fr5969_launchpad.h</code> as a template.</li>
+  <li><strong>Selector clause</strong> &mdash; add an <code>#elif</code> in
+      <code>arch/msp430/tiku_device_select.h</code> to route the new
+      <code>TIKU_DEVICE_MSP430FRXXXX</code> define to the new headers.</li>
+  <li><strong>Linker script</strong> &mdash; provide a linker command file
+      (<code>lnk_msp430frXXXX.cmd</code>) that defines the memory layout
+      for the new device.</li>
+</ol>
+
+<div class="note">
+<strong>Note:</strong> No changes to the kernel or arch <code>.c</code> files should
+be necessary. The entire adaptation happens through the device/board header
+macros and the linker script.
+</div>
+
+<h2>Build System</h2>
+
+<p>The build system uses the <code>MCU</code> variable to select the target:</p>
+
+<pre><code>make MCU=msp430fr5969    # Build for FR5969
+make MCU=msp430fr5994    # Build for FR5994
+make MCU=msp430fr2433    # Build for FR2433</code></pre>
+
+<p>The Makefile auto-detects the toolchain (TI GCC or CCS) and sets compiler
+flags accordingly. Source files are collected via <code>SRCS</code> wildcard
+patterns from <code>kernel/</code>, <code>arch/</code>, <code>boot/</code>, and
+optionally <code>tests/</code>, <code>examples/</code>, or <code>apps/</code>.</p>
+</main>
+</body>
+</html>

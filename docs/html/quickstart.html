@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Start - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html" class="active">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html">Processes</a></li>
+    <li><a href="events.html">Events &amp; IPC</a></li>
+    <li><a href="timers.html">Timers</a></li>
+    <li><a href="scheduler.html">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>Quick Start</h1>
+
+<p class="lead">Get TikuOS built, flashed, and running on your MSP430FR5969
+LaunchPad in under 5 minutes.</p>
+
+<h2>Prerequisites</h2>
+
+<p>Before you begin, make sure you have the following installed on your system:</p>
+
+<ul>
+  <li><strong>MSP430-GCC toolchain</strong> &mdash; the TI-provided GCC compiler for MSP430.
+      Install it to <code>~/tigcc</code> or update the <code>Makefile</code> paths accordingly.</li>
+  <li><strong>mspdebug</strong> &mdash; open-source flash and debug tool for MSP430 devices.
+      Available via <code>apt</code> (Linux) or <code>brew</code> (macOS).</li>
+  <li><strong>Python 3</strong> with <code>pyserial</code> &mdash; required if you plan to run
+      TikuBench automated tests or use the serial monitor helper.</li>
+  <li><strong>Hardware</strong> &mdash; an MSP430FR5969 LaunchPad (MSP-EXP430FR5969) connected via USB.</li>
+</ul>
+
+<p>See the <a href="install.html">Installation</a> page for detailed setup instructions.</p>
+
+<h2>5-Minute Getting Started</h2>
+
+<h3>1. Clone the repository</h3>
+
+<pre><code>git clone https://github.com/your-org/tikuOS.git
+cd tikuOS</code></pre>
+
+<h3>2. Build the firmware</h3>
+
+<pre><code>make MCU=msp430fr5969</code></pre>
+
+<h3>3. Flash the device</h3>
+
+<pre><code>make flash</code></pre>
+
+<h3>4. Open a serial terminal</h3>
+
+<pre><code>make monitor</code></pre>
+
+<p>Or manually connect with any serial terminal at <strong>9600 baud, 8N1</strong>:</p>
+
+<pre><code>screen /dev/ttyACM0 9600</code></pre>
+
+<h3>5. Done</h3>
+
+<p>You should see TikuOS boot output on the serial console. The default firmware
+initializes all kernel subsystems and enters the scheduler loop.</p>
+
+<h2>Build Commands</h2>
+
+<table>
+  <tr>
+    <th>Command</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>make MCU=msp430fr5969</code></td>
+    <td>Build firmware for the FR5969 target (tests/examples auto-detected)</td>
+  </tr>
+  <tr>
+    <td><code>make flash</code></td>
+    <td>Flash the compiled <code>.out</code> binary onto the connected LaunchPad</td>
+  </tr>
+  <tr>
+    <td><code>make monitor</code></td>
+    <td>Open a serial monitor on the eZ-FET backchannel UART</td>
+  </tr>
+  <tr>
+    <td><code>make clean</code></td>
+    <td>Remove all build artifacts</td>
+  </tr>
+  <tr>
+    <td><code>make APP=cli MCU=msp430fr5969</code></td>
+    <td>Build with the CLI application (excludes tests and examples)</td>
+  </tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> Only one of <code>APP=</code>, tests, or examples can be active at a time.
+When <code>APP=</code> is specified, tests and examples are automatically excluded from
+the build.
+</div>
+
+<h2>What Happens at Boot</h2>
+
+<p>When TikuOS starts on the MSP430, it executes a deterministic boot sequence:</p>
+
+<ol>
+  <li><strong>Watchdog off</strong> &mdash; the watchdog timer is halted immediately to prevent
+      an unwanted reset during initialization.</li>
+  <li><strong>CPU init</strong> &mdash; the CPU clock is configured (DCO, MCLK, SMCLK, ACLK),
+      GPIO pins are set to a known state, and FRAM wait states are configured.</li>
+  <li><strong>sched_init</strong> &mdash; the scheduler initializes the process list, event queue,
+      and all timer subsystems (etimer, ctimer, rtimer).</li>
+  <li><strong>Autostart processes</strong> &mdash; any processes registered with
+      <code>TIKU_AUTOSTART_PROCESSES</code> are started and receive an
+      <code>INIT</code> event.</li>
+  <li><strong>sched_loop</strong> &mdash; the main event loop runs forever, dispatching events to
+      processes and entering low-power mode when idle.</li>
+</ol>
+
+<pre><code>/* Simplified boot flow in main.c */
+int main(void)
+{
+    tiku_watchdog_stop();
+    tiku_cpu_init();
+    tiku_sched_init();
+    tiku_autostart_start(autostart_processes);
+    tiku_sched_loop();          /* never returns */
+    return 0;
+}</code></pre>
+
+<h2>Verify It Works</h2>
+
+<p>After flashing, connect a serial terminal to the LaunchPad's backchannel UART:</p>
+
+<ul>
+  <li><strong>Port:</strong> <code>/dev/ttyACM0</code> (Linux) or <code>/dev/cu.usbmodemXXXX</code> (macOS)</li>
+  <li><strong>Baud rate:</strong> 9600</li>
+  <li><strong>Data bits:</strong> 8, <strong>Parity:</strong> None, <strong>Stop bits:</strong> 1</li>
+</ul>
+
+<p>If the build includes the CLI application (<code>make APP=cli</code>), you will see a
+<code>tikuos&gt;</code> prompt. Type <code>help</code> to list available commands.</p>
+
+<p>If the build includes the default test configuration (<code>TEST_ENABLE 1</code> in
+<code>tiku.h</code>), you will see test results printed to the console.</p>
+
+<div class="warning">
+<strong>Tip:</strong> If you see no output, double-check that your serial terminal is
+connected to the correct port and baud rate. On Linux, you may need to add your
+user to the <code>dialout</code> group for permission to access <code>/dev/ttyACM0</code>.
+</div>
+</main>
+</body>
+</html>

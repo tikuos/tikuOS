@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scheduler - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html">Processes</a></li>
+    <li><a href="events.html">Events &amp; IPC</a></li>
+    <li><a href="timers.html">Timers</a></li>
+    <li><a href="scheduler.html" class="active">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>Scheduler</h1>
+
+<p class="lead">The TikuOS scheduler is the central event loop. It drains the event
+queue, checks for expired timers, and enters a low-power idle state when no work
+is pending. The entire scheduler lives in a single file and exposes a small API
+that <code>main.c</code> calls at startup.</p>
+
+<h2>What the Scheduler Does</h2>
+
+<p>On every iteration the scheduler performs three steps:</p>
+
+<ol>
+  <li><strong>Drain events</strong> &mdash; dispatch all pending events from the process
+      event queue by repeatedly calling <code>tiku_sched_run_once()</code>.</li>
+  <li><strong>Check timers</strong> &mdash; the timer process is polled by the clock ISR;
+      expired timers post events that get drained in step 1.</li>
+  <li><strong>Enter idle</strong> &mdash; if no events remain and no timers are due, call
+      the idle hook inside an atomic section so the platform can enter
+      a low-power mode without missing interrupts.</li>
+</ol>
+
+<h2>Startup Sequence</h2>
+
+<p>The boot code in <code>main.c</code> calls exactly two scheduler functions:</p>
+
+<pre><code>tiku_sched_init();   /* initialize all subsystems */
+tiku_sched_loop();   /* run forever */</code></pre>
+
+<h3>tiku_sched_init()</h3>
+
+<p>Initializes the scheduler and all managed subsystems. The order matters:</p>
+
+<ol>
+  <li><strong>Process system</strong> &mdash; <code>tiku_process_init()</code> resets the
+      process list and event queue.</li>
+  <li><strong>Hardware timer</strong> &mdash; <code>tiku_htimer_init()</code> sets up the
+      platform timer peripheral (Timer_A on MSP430).</li>
+  <li><strong>Software timers</strong> &mdash; <code>tiku_timer_init()</code> starts the
+      timer management process, which requires the process system to already
+      be running.</li>
+</ol>
+
+<pre><code>void tiku_sched_init(void)
+{
+    sched_state = TIKU_SCHED_RUNNING;
+    idle_hook = (tiku_sched_idle_hook_t)0;
+
+    tiku_process_init();    /* 1. process subsystem */
+    tiku_htimer_init();     /* 2. hardware timer */
+    tiku_timer_init();      /* 3. software timers */
+}</code></pre>
+
+<div class="note">
+<strong>Note:</strong> Initialization order is critical. The software timer
+subsystem starts a process (<code>tiku_timer_process</code>), so the process
+system must be initialized first. The hardware timer generates ticks that the
+software timer process consumes, so it must be initialized before software
+timers start waiting for ticks.
+</div>
+
+<h3>tiku_sched_loop()</h3>
+
+<p>Enters the main event loop, which never returns under normal operation:</p>
+
+<ol>
+  <li><strong>Autostart processes</strong> &mdash; starts all processes registered with
+      <code>TIKU_AUTOSTART_PROCESSES()</code>.</li>
+  <li><strong>Enable interrupts</strong> &mdash; calls <code>__enable_interrupt()</code>
+      so ISRs (timer tick, UART RX, etc.) can fire.</li>
+  <li><strong>Main loop</strong> &mdash; drain events, then enter idle atomically.</li>
+</ol>
+
+<pre><code>void tiku_sched_loop(void)
+{
+#if TIKU_AUTOSTART_ENABLE
+    tiku_autostart_start(tiku_autostart_processes);
+#endif
+
+    __enable_interrupt();
+
+    while (sched_state == TIKU_SCHED_RUNNING) {
+
+        /* Drain all pending work */
+        while (tiku_sched_run_once()) {
+            /* keep dispatching */
+        }
+
+        /* No more events -- enter idle atomically */
+        tiku_atomic_enter();
+
+        if (!tiku_sched_has_pending()) {
+            if (idle_hook != (tiku_sched_idle_hook_t)0) {
+                idle_hook();
+            }
+        }
+
+        tiku_atomic_exit();
+    }
+}</code></pre>
+
+<h2>API Reference</h2>
+
+<h3>tiku_sched_run_once()</h3>
+
+<p>Dispatches one event from the process event queue. Timer polling is handled
+by the clock ISR (which calls <code>tiku_timer_request_poll()</code> on each tick)
+and by <code>timer_insert()</code> when a timer is set or reset.</p>
+
+<pre><code>uint8_t tiku_sched_run_once(void);
+/* Returns 1 if an event was dispatched, 0 if idle */</code></pre>
+
+<h3>tiku_sched_has_pending()</h3>
+
+<p>Checks if the timer linked list has any active entries. If timers are pending,
+the timer process will eventually generate events when polled. This is used in
+the idle path to decide whether to enter low-power mode.</p>
+
+<pre><code>uint8_t tiku_sched_has_pending(void);
+/* Returns non-zero if work is pending */</code></pre>
+
+<h3>tiku_sched_set_idle_hook()</h3>
+
+<p>Registers a function that is called whenever the scheduler has drained the
+event queue and no timers are immediately due. The typical use is to enter
+a platform-specific low-power mode (e.g., LPM0 on MSP430).</p>
+
+<pre><code>void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook);
+/* Pass NULL to clear the hook */</code></pre>
+
+<div class="note">
+<strong>Note:</strong> The idle hook is called inside an atomic section. The
+platform's low-power instruction should atomically re-enable interrupts
+(the MSP430 HAL guarantees this).
+</div>
+
+<h3>tiku_sched_notify()</h3>
+
+<p>Called from ISR context (typically the clock tick ISR) to request the timer
+process to poll for expired timers. Internally this calls
+<code>tiku_timer_request_poll()</code>, which posts a <code>TIKU_EVENT_POLL</code>
+to the timer process.</p>
+
+<pre><code>void tiku_sched_notify(void);
+/* Safe to call from any ISR */</code></pre>
+
+<h3>tiku_sched_stop()</h3>
+
+<p>Sets a flag that causes <code>tiku_sched_loop()</code> to return on its next
+iteration. Primarily useful for test harnesses that need the scheduler to
+exit cleanly.</p>
+
+<pre><code>void tiku_sched_stop(void);
+/* Sets sched_state = TIKU_SCHED_STOPPED */</code></pre>
+
+<h2>The Atomic Idle Pattern</h2>
+
+<p>The idle section of the main loop uses <code>tiku_atomic_enter()</code> and
+<code>tiku_atomic_exit()</code> to prevent a race condition known as the
+"lost interrupt" problem:</p>
+
+<pre><code>/* Without atomic section (BROKEN):
+ *
+ *   if (!has_pending()) {   // <-- ISR fires here, posts event
+ *       idle();             // <-- we sleep, missing the event
+ *   }
+ *
+ * With atomic section (CORRECT):
+ *
+ *   tiku_atomic_enter();    // disable interrupts
+ *   if (!has_pending()) {
+ *       idle();             // LPM0 atomically re-enables interrupts
+ *   }
+ *   tiku_atomic_exit();     // restore interrupt state
+ */</code></pre>
+
+<p>The key insight: the platform's low-power instruction (e.g., <code>__bis_SR_register(LPM0_bits | GIE)</code>
+on MSP430) atomically enters sleep <em>and</em> re-enables interrupts in a single
+instruction. This means no interrupt can fire between the "is there work?"
+check and the sleep entry, preventing lost wakeups.</p>
+
+<div class="warning">
+<strong>Warning:</strong> If you implement a custom idle hook, your low-power
+entry must atomically re-enable interrupts. Simply calling
+<code>__enable_interrupt()</code> followed by a separate sleep instruction
+creates a window where an interrupt can be lost.
+</div>
+
+<h2>Scheduler Constants</h2>
+
+<table>
+  <tr>
+    <th>Constant</th>
+    <th>Value</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>TIKU_SCHED_RUNNING</code></td>
+    <td>0</td>
+    <td>Scheduler is running normally</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_SCHED_STOPPED</code></td>
+    <td>1</td>
+    <td>Scheduler has been asked to stop</td>
+  </tr>
+</table>
+</main>
+</body>
+</html>

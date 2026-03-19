@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Processes - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html" class="active">Processes</a></li>
+    <li><a href="events.html">Events &amp; IPC</a></li>
+    <li><a href="timers.html">Timers</a></li>
+    <li><a href="scheduler.html">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>Processes</h1>
+
+<p class="lead">Processes are the fundamental unit of execution in TikuOS.
+Each process is a protothread &mdash; a stackless, cooperative task that yields
+control back to the scheduler at explicit yield points.</p>
+
+<h2>What Is a Process?</h2>
+
+<p>A TikuOS process is a lightweight cooperative task built on the
+<strong>protothread</strong> mechanism. Unlike preemptive threads, protothreads:</p>
+
+<ul>
+  <li>Share a single stack (no per-thread stack allocation)</li>
+  <li>Yield only at explicit yield points (cooperative, not preemptive)</li>
+  <li>Use C's <code>switch</code>/<code>case</code> mechanism internally for continuation</li>
+  <li>Consume only 2 bytes of RAM for continuation state</li>
+</ul>
+
+<p>This makes them ideal for ultra-low-memory microcontrollers like the MSP430
+where 2 KB of SRAM is all you have.</p>
+
+<h2>Declaring a Process</h2>
+
+<h3><code>TIKU_PROCESS(name, strname)</code></h3>
+
+<p>The standard way to declare a process. Creates a <code>struct tiku_process</code>
+and forward-declares the thread function:</p>
+
+<pre><code>TIKU_PROCESS(my_process, "My Process");</code></pre>
+
+<h3><code>TIKU_PROCESS_WITH_LOCAL(name, strname, local_type)</code></h3>
+
+<p>Declares a process with an associated block of typed local storage. The local
+data is allocated statically alongside the process struct and accessible via
+<code>process-&gt;local</code>:</p>
+
+<pre><code>typedef struct {
+    uint16_t counter;
+    uint8_t  state;
+} my_locals_t;
+
+TIKU_PROCESS_WITH_LOCAL(my_process, "My Process", my_locals_t);</code></pre>
+
+<h3><code>TIKU_PROCESS_TYPED(name, strname, type)</code></h3>
+
+<p>Declares a process with a custom process struct type. Use this when you need
+to extend the process struct with additional fields:</p>
+
+<pre><code>typedef struct {
+    struct tiku_process p;
+    uint16_t sensor_id;
+} sensor_process_t;
+
+TIKU_PROCESS_TYPED(sensor_process, "Sensor", sensor_process_t);</code></pre>
+
+<h2>Writing the Thread Function</h2>
+
+<pre><code>TIKU_PROCESS_THREAD(my_process, ev, data)
+{
+    static uint16_t count;    /* must be static! */
+
+    TIKU_PROCESS_BEGIN();
+
+    count = 0;
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT();
+        count++;
+    }
+
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<p>The macro <code>TIKU_PROCESS_THREAD(name, ev, data)</code> expands to a static
+function with the signature:</p>
+
+<pre><code>static int name_thread(struct tiku_process *process,
+                       tiku_event_t ev,
+                       void *data)</code></pre>
+
+<p>Parameters <code>ev</code> and <code>data</code> carry the event that woke the
+process. The scheduler calls this function each time an event is dispatched to
+the process.</p>
+
+<h2>Process Lifecycle</h2>
+
+<table>
+  <tr>
+    <th>State</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><strong>INIT</strong></td>
+    <td>Process is started and receives <code>TIKU_EVENT_INIT</code>. Initialization
+        code before the first yield runs here.</td>
+  </tr>
+  <tr>
+    <td><strong>Running</strong></td>
+    <td>Process is actively executing code between yield points.</td>
+  </tr>
+  <tr>
+    <td><strong>Yielded</strong></td>
+    <td>Process has yielded at a <code>WAIT</code> or <code>YIELD</code> macro.
+        The scheduler will resume it when the next matching event arrives.</td>
+  </tr>
+  <tr>
+    <td><strong>Exited</strong></td>
+    <td>Process has exited (via <code>PROCESS_EXIT</code>, reaching <code>PROCESS_END</code>,
+        or being killed externally). It receives <code>TIKU_EVENT_EXIT</code>.</td>
+  </tr>
+</table>
+
+<h2>TIKU_PROCESS_BEGIN / END</h2>
+
+<p>Every thread function <strong>must</strong> be bracketed by these two macros:</p>
+
+<pre><code>TIKU_PROCESS_THREAD(name, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+    /* ... process body ... */
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<p><code>TIKU_PROCESS_BEGIN()</code> expands to a <code>switch</code> statement
+that jumps to the saved continuation point. <code>TIKU_PROCESS_END()</code> closes
+the switch, marks the process as exited, and returns. Omitting either macro will
+cause a compile error.</p>
+
+<h2>Waiting and Yielding</h2>
+
+<h3><code>TIKU_PROCESS_WAIT_EVENT()</code></h3>
+
+<p>Yields the protothread and resumes on the next event of any type:</p>
+
+<pre><code>TIKU_PROCESS_WAIT_EVENT();
+/* resumes here on any event */</code></pre>
+
+<h3><code>TIKU_PROCESS_WAIT_EVENT_UNTIL(condition)</code></h3>
+
+<p>Yields and resumes only when the given condition is true. Events that do not
+satisfy the condition are silently discarded (the thread yields again):</p>
+
+<pre><code>TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+/* only resumes when a TIMER event arrives */</code></pre>
+
+<h3><code>TIKU_PROCESS_YIELD()</code></h3>
+
+<p>Yields once unconditionally and resumes on the next scheduler invocation:</p>
+
+<pre><code>TIKU_PROCESS_YIELD();
+/* resumes on the very next event dispatch */</code></pre>
+
+<h3><code>TIKU_PROCESS_YIELD_UNTIL(condition)</code></h3>
+
+<p>Yields repeatedly until the condition becomes true:</p>
+
+<pre><code>TIKU_PROCESS_YIELD_UNTIL(sensor_ready());
+/* resumes once sensor_ready() returns true */</code></pre>
+
+<h2>Starting Processes</h2>
+
+<h3>Autostart (most common)</h3>
+
+<pre><code>TIKU_AUTOSTART_PROCESSES(&amp;proc_a, &amp;proc_b, &amp;proc_c);</code></pre>
+
+<p>Processes listed here are started automatically during boot. Each receives an
+<code>TIKU_EVENT_INIT</code> event.</p>
+
+<h3>Manual start from another process</h3>
+
+<pre><code>tiku_process_start(&amp;child_process);</code></pre>
+
+<h3>Scheduler-level start</h3>
+
+<pre><code>tiku_sched_start(&amp;my_process);</code></pre>
+
+<h2>Stopping Processes</h2>
+
+<h3>From inside the process</h3>
+
+<pre><code>TIKU_PROCESS_THREAD(my_process, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    if (error_condition) {
+        TIKU_PROCESS_EXIT();   /* immediately exits */
+    }
+
+    TIKU_PROCESS_END();        /* natural exit */
+}</code></pre>
+
+<h3>From outside the process</h3>
+
+<pre><code>tiku_process_exit(&amp;target_process);</code></pre>
+
+<p>The target process receives <code>TIKU_EVENT_EXIT</code> and is removed from
+the scheduler's process list.</p>
+
+<h3>Natural end</h3>
+
+<p>If execution flows past the last statement and reaches
+<code>TIKU_PROCESS_END()</code>, the process exits naturally.</p>
+
+<h2>Important Rules</h2>
+
+<div class="warning">
+<strong>No switch statements inside threads.</strong> Because protothreads use
+<code>switch</code>/<code>case</code> internally for continuation, you
+<strong>cannot</strong> use <code>switch</code> statements inside the protothread
+body (between <code>BEGIN</code> and <code>END</code>). Use
+<code>if</code>/<code>else if</code> chains instead.
+</div>
+
+<div class="warning">
+<strong>No local variables across yield points.</strong> Protothreads are
+stackless. When a protothread yields, its stack frame is destroyed. Any
+non-static local variable will be uninitialized when the thread resumes.
+Declare persistent variables as <code>static</code> or use process-local
+storage via <code>TIKU_PROCESS_WITH_LOCAL</code>.
+
+<pre><code>/* WRONG -- count is garbage after yield */
+int count = 0;
+while (1) {
+    TIKU_PROCESS_WAIT_EVENT();
+    count++;  /* undefined behavior! */
+}
+
+/* CORRECT -- static persists across yields */
+static int count = 0;
+while (1) {
+    TIKU_PROCESS_WAIT_EVENT();
+    count++;  /* works as expected */
+}</code></pre>
+</div>
+
+<div class="warning">
+<strong>Each yield must be on a unique source line.</strong> The continuation
+mechanism uses <code>__LINE__</code> to create case labels. Two yield macros on
+the same source line will collide and cause a compile error. Place each
+<code>WAIT</code>, <code>YIELD</code>, or <code>EXIT</code> on its own line.
+</div>
+
+<h2>The Process Struct</h2>
+
+<pre><code>struct tiku_process {
+    struct tiku_process *next;     /* linked list pointer       */
+    const char          *name;     /* human-readable label      */
+    int (*thread)(struct tiku_process *, tiku_event_t, void *);
+                                    /* protothread entry point   */
+    struct pt            pt;       /* continuation state (2 B)  */
+    uint8_t              is_running; /* 1 if active, 0 if exited */
+    void                *local;    /* optional local storage    */
+};</code></pre>
+
+<p>The <code>next</code> pointer chains all active processes into a singly-linked list
+managed by the scheduler. The <code>pt</code> field holds only an
+<code>unsigned short</code> (the line number of the last yield), making each
+process extremely lightweight.</p>
+
+<h2>Code Examples</h2>
+
+<h3>One-shot process</h3>
+
+<pre><code>TIKU_PROCESS(init_hw, "HW Init");
+
+TIKU_PROCESS_THREAD(init_hw, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    /* Runs once and exits */
+    configure_gpio();
+    configure_uart();
+    tiku_process_start(&amp;app_process);
+
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<h3>Process with local storage</h3>
+
+<pre><code>typedef struct {
+    uint16_t sample_count;
+    int16_t  last_reading;
+} sensor_local_t;
+
+TIKU_PROCESS_WITH_LOCAL(sensor_proc, "Sensor", sensor_local_t);
+
+TIKU_PROCESS_THREAD(sensor_proc, ev, data)
+{
+    sensor_local_t *local = (sensor_local_t *)process-&gt;local;
+
+    TIKU_PROCESS_BEGIN();
+
+    local-&gt;sample_count = 0;
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+        local-&gt;last_reading = read_sensor();
+        local-&gt;sample_count++;
+    }
+
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<h3>Parent-child process pattern</h3>
+
+<pre><code>TIKU_PROCESS(parent, "Parent");
+TIKU_PROCESS(child, "Child");
+
+TIKU_PROCESS_THREAD(parent, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    /* Start child and wait for it to finish */
+    tiku_process_start(&amp;child);
+    TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_EXIT);
+
+    /* Child is done, continue */
+    process_results();
+
+    TIKU_PROCESS_END();
+}
+
+TIKU_PROCESS_THREAD(child, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    do_work();
+    /* Falls through to PROCESS_END and exits naturally */
+
+    TIKU_PROCESS_END();
+}</code></pre>
+</main>
+</body>
+</html>

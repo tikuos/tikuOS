@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikuKits Libraries - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html">Processes</a></li>
+    <li><a href="events.html">Events &amp; IPC</a></li>
+    <li><a href="timers.html">Timers</a></li>
+    <li><a href="scheduler.html">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html" class="active">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>TikuKits Libraries</h1>
+
+<p class="lead">TikuKits is a collection of 46 reusable sub-modules across 8 domains,
+designed for ultra-low-power microcontrollers. Everything is statically allocated,
+uses fixed-point math (no FPU required), and follows TikuOS naming conventions.</p>
+
+<h2>Naming Convention</h2>
+
+<table>
+  <tr>
+    <th>Identifier</th>
+    <th>Pattern</th>
+    <th>Example</th>
+  </tr>
+  <tr>
+    <td>Functions</td>
+    <td><code>tiku_kits_&lt;library&gt;_&lt;action&gt;()</code></td>
+    <td><code>tiku_kits_sensor_mcp9808_read()</code></td>
+  </tr>
+  <tr>
+    <td>Types</td>
+    <td><code>tiku_kits_&lt;library&gt;_name_t</code></td>
+    <td><code>tiku_kits_sensor_temp_t</code></td>
+  </tr>
+  <tr>
+    <td>Constants</td>
+    <td><code>TIKU_KITS_&lt;LIBRARY&gt;_NAME</code></td>
+    <td><code>TIKU_KITS_SENSOR_OK</code></td>
+  </tr>
+  <tr>
+    <td>Header guards</td>
+    <td><code>TIKU_KITS_&lt;LIBRARY&gt;_H_</code></td>
+    <td><code>TIKU_KITS_MATRIX_H_</code></td>
+  </tr>
+  <tr>
+    <td>Files</td>
+    <td><code>tiku_kits_&lt;library&gt;[_detail].h/.c</code></td>
+    <td><code>tiku_kits_sensor_ds18b20.c</code></td>
+  </tr>
+</table>
+
+<p>Return codes are defined in each top-level common header and shared by all
+sub-modules beneath them. Individual sub-modules do not define their own return
+codes.</p>
+
+<h2>Maths</h2>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>matrix</code></td>
+    <td>Linear algebra: multiply, transpose, add, identity, determinant, inverse. Fixed-point Q8 elements. Configurable max size via <code>TIKU_KITS_MATRIX_MAX_SIZE</code>.</td>
+  </tr>
+  <tr>
+    <td><code>statistics</code></td>
+    <td>Online statistics: Welford's running mean/variance, EWMA (exponentially weighted moving average), min/max tracking.</td>
+  </tr>
+  <tr>
+    <td><code>distance</code></td>
+    <td>Distance metrics: Manhattan (L1), Euclidean (L2), cosine similarity, Hamming distance. Used by ML classifiers.</td>
+  </tr>
+</table>
+
+<h2>ML (Machine Learning)</h2>
+
+<p>Seven machine learning algorithms, all using fixed-point Q8 arithmetic and
+zero dynamic allocation. No FPU required.</p>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>linreg</code></td>
+    <td>Linear regression (least squares fit)</td>
+  </tr>
+  <tr>
+    <td><code>logreg</code></td>
+    <td>Logistic regression (binary classification)</td>
+  </tr>
+  <tr>
+    <td><code>dtree</code></td>
+    <td>Decision tree classifier (static tree structure)</td>
+  </tr>
+  <tr>
+    <td><code>knn</code></td>
+    <td>K-nearest neighbors (configurable K, uses distance module)</td>
+  </tr>
+  <tr>
+    <td><code>nbayes</code></td>
+    <td>Naive Bayes classifier (Gaussian features)</td>
+  </tr>
+  <tr>
+    <td><code>linsvm</code></td>
+    <td>Linear support vector machine</td>
+  </tr>
+  <tr>
+    <td><code>tnn</code></td>
+    <td>Tiny neural network (feedforward, fixed-point weights)</td>
+  </tr>
+</table>
+
+<h2>DS (Data Structures)</h2>
+
+<p>15 data structures, all statically allocated with caller-provided buffers.</p>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr><td><code>array</code></td><td>Dynamic-sized array (within static buffer)</td></tr>
+  <tr><td><code>ringbuf</code></td><td>Lock-free circular buffer</td></tr>
+  <tr><td><code>stack</code></td><td>LIFO stack</td></tr>
+  <tr><td><code>queue</code></td><td>FIFO queue</td></tr>
+  <tr><td><code>pqueue</code></td><td>Priority queue (min-heap)</td></tr>
+  <tr><td><code>list</code></td><td>Singly-linked list with pool-backed nodes</td></tr>
+  <tr><td><code>htable</code></td><td>Hash table (open addressing)</td></tr>
+  <tr><td><code>bitmap</code></td><td>Bit-level array operations</td></tr>
+  <tr><td><code>sortarray</code></td><td>Sorted array with binary search</td></tr>
+  <tr><td><code>btree</code></td><td>B-tree for ordered key-value storage</td></tr>
+  <tr><td><code>sm</code></td><td>Finite state machine framework</td></tr>
+  <tr><td><code>bloom</code></td><td>Bloom filter (probabilistic membership)</td></tr>
+  <tr><td><code>circlog</code></td><td>Circular log buffer</td></tr>
+  <tr><td><code>deque</code></td><td>Double-ended queue</td></tr>
+  <tr><td><code>trie</code></td><td>Prefix tree for string lookup</td></tr>
+</table>
+
+<h2>Sensors</h2>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Interface</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>mcp9808</code></td>
+    <td>I2C</td>
+    <td>Microchip MCP9808 high-accuracy temperature sensor</td>
+  </tr>
+  <tr>
+    <td><code>adt7410</code></td>
+    <td>I2C</td>
+    <td>Analog Devices ADT7410 temperature sensor</td>
+  </tr>
+  <tr>
+    <td><code>ds18b20</code></td>
+    <td>1-Wire</td>
+    <td>Dallas DS18B20 digital temperature sensor</td>
+  </tr>
+</table>
+
+<h2>Signal Features</h2>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr><td><code>peak</code></td><td>Peak detection in time-series data</td></tr>
+  <tr><td><code>zcr</code></td><td>Zero-crossing rate</td></tr>
+  <tr><td><code>histogram</code></td><td>Histogram binning</td></tr>
+  <tr><td><code>delta</code></td><td>First-difference (derivative approximation)</td></tr>
+  <tr><td><code>goertzel</code></td><td>Single-frequency DFT (Goertzel algorithm)</td></tr>
+  <tr><td><code>zscore</code></td><td>Z-score anomaly detection</td></tr>
+  <tr><td><code>scale</code></td><td>Min-max and standard scaling</td></tr>
+</table>
+
+<h2>Text Compression</h2>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr><td><code>rle</code></td><td>Run-length encoding</td></tr>
+  <tr><td><code>bpe</code></td><td>Byte pair encoding</td></tr>
+  <tr><td><code>heatshrink</code></td><td>LZSS-based compression for embedded systems</td></tr>
+</table>
+
+<h2>Net (Networking)</h2>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr><td><code>slip</code></td><td>SLIP framing over UART (RFC 1055)</td></tr>
+  <tr><td><code>ipv4</code></td><td>IPv4 packet build/parse with checksum</td></tr>
+  <tr><td><code>icmp</code></td><td>ICMP echo request/reply (ping)</td></tr>
+  <tr><td><code>udp</code></td><td>UDP datagram build/parse</td></tr>
+  <tr><td><code>tftp</code></td><td>TFTP client (file transfer)</td></tr>
+</table>
+
+<h2>Time</h2>
+
+<table>
+  <tr>
+    <th>Module</th>
+    <th>Description</th>
+  </tr>
+  <tr><td><code>ntp</code></td><td>NTP client for time synchronization over UDP</td></tr>
+</table>
+
+<h2>Quick Code Examples</h2>
+
+<h3>Matrix Multiply</h3>
+
+<pre><code>#include "tikukits/maths/linear_algebra/tiku_kits_matrix.h"
+
+tiku_kits_matrix_t A, B, C;
+tiku_kits_matrix_elem_t a_data[4] = {256, 0, 0, 256};   /* Q8: identity */
+tiku_kits_matrix_elem_t b_data[4] = {512, 256, 128, 64}; /* Q8 values */
+tiku_kits_matrix_elem_t c_data[4];
+
+tiku_kits_matrix_init(&A, a_data, 2, 2);
+tiku_kits_matrix_init(&B, b_data, 2, 2);
+tiku_kits_matrix_init(&C, c_data, 2, 2);
+
+int rc = tiku_kits_matrix_multiply(&A, &B, &C);
+/* rc == TIKU_KITS_MATHS_OK, C contains A * B */</code></pre>
+
+<h3>ML Prediction (KNN)</h3>
+
+<pre><code>#include "tikukits/ml/tiku_kits_ml_knn.h"
+
+tiku_kits_ml_knn_t model;
+tiku_kits_ml_knn_init(&model, features, labels, n_samples,
+                      n_features, k);
+
+uint8_t predicted_class;
+int rc = tiku_kits_ml_knn_predict(&model, test_sample,
+                                   &predicted_class);
+/* rc == TIKU_KITS_ML_OK */</code></pre>
+
+<h2>Directory Structure</h2>
+
+<pre><code>tikukits/
++-- sensors/
+|   +-- tiku_kits_sensor.h              # Common types and return codes
+|   +-- temperature/
+|       +-- tiku_kits_sensor_mcp9808.h/.c
+|       +-- tiku_kits_sensor_adt7410.h/.c
+|       +-- tiku_kits_sensor_ds18b20.h/.c
++-- maths/
+|   +-- tiku_kits_maths.h              # Common return codes
+|   +-- linear_algebra/
+|   |   +-- tiku_kits_matrix.h/.c
+|   +-- statistics/
+|   +-- fixed_point/
++-- ml/
+|   +-- tiku_kits_ml.h
+|   +-- tiku_kits_ml_linreg.h/.c
+|   +-- tiku_kits_ml_logreg.h/.c
+|   +-- tiku_kits_ml_dtree.h/.c
+|   +-- tiku_kits_ml_knn.h/.c
+|   +-- tiku_kits_ml_nbayes.h/.c
+|   +-- tiku_kits_ml_linsvm.h/.c
+|   +-- tiku_kits_ml_tnn.h/.c
++-- ds/
+|   +-- tiku_kits_ds.h
+|   +-- tiku_kits_ds_array.h/.c
+|   +-- tiku_kits_ds_ringbuf.h/.c
+|   +-- ... (15 data structures)
++-- sigfeatures/
+|   +-- tiku_kits_sigfeatures.h
+|   +-- tiku_kits_sigfeatures_peak.h/.c
+|   +-- ... (7 feature extractors)
++-- textcompression/
+|   +-- tiku_kits_textcompression.h
+|   +-- tiku_kits_textcompression_rle.h/.c
+|   +-- tiku_kits_textcompression_bpe.h/.c
+|   +-- tiku_kits_textcompression_heatshrink.h/.c
++-- net/
+|   +-- tiku_kits_net.h
+|   +-- tiku_kits_net_slip.h/.c
+|   +-- tiku_kits_net_ipv4.h/.c
+|   +-- tiku_kits_net_icmp.h/.c
+|   +-- tiku_kits_net_udp.h/.c
+|   +-- tiku_kits_net_tftp.h/.c
++-- time/
+    +-- tiku_kits_time.h
+    +-- tiku_kits_time_ntp.h/.c</code></pre>
+
+<div class="note">
+<strong>Convention for new sub-modules:</strong> Place files in the appropriate
+category subdirectory, include the parent common header via
+<code>#include "../tiku_kits_&lt;kit&gt;.h"</code>, use shared return codes from
+the common header, and keep module-specific configuration macros in the module
+header.
+</div>
+</main>
+</body>
+</html>

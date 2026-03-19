@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Events &amp; IPC - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html">Processes</a></li>
+    <li><a href="events.html" class="active">Events &amp; IPC</a></li>
+    <li><a href="timers.html">Timers</a></li>
+    <li><a href="scheduler.html">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>Events &amp; IPC</h1>
+
+<p class="lead">TikuOS processes communicate through events &mdash; lightweight
+(type, data) pairs delivered via a circular queue &mdash; and through typed
+channels for structured inter-process data transfer.</p>
+
+<h2>Event Model</h2>
+
+<p>An event in TikuOS is a pair: an integer <strong>event type</strong> and an
+optional <code>void *</code> <strong>data pointer</strong>. Events are stored in a
+global circular queue with 32 entries. The scheduler drains this queue on each
+iteration of the main loop, dispatching events to their target processes.</p>
+
+<pre><code>/* Internal event queue entry */
+struct tiku_event {
+    tiku_event_t         type;     /* event type identifier     */
+    void                *data;     /* optional payload pointer  */
+    struct tiku_process *target;   /* destination process       */
+};</code></pre>
+
+<h2>System Events</h2>
+
+<table>
+  <tr>
+    <th>Event</th>
+    <th>Value</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>TIKU_EVENT_INIT</code></td>
+    <td>0x80</td>
+    <td>Delivered once when a process is started. Use for one-time initialization.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_EVENT_EXIT</code></td>
+    <td>0x81</td>
+    <td>Delivered when a process is about to be removed from the scheduler.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_EVENT_CONTINUE</code></td>
+    <td>0x82</td>
+    <td>Generic wake-up event with no specific meaning. Used internally.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_EVENT_POLL</code></td>
+    <td>0x83</td>
+    <td>Delivered when <code>tiku_process_poll()</code> is called. Signals that
+        the process should check for new data or state changes.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_EVENT_TIMER</code></td>
+    <td>0x84</td>
+    <td>Delivered when a software event timer expires.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_EVENT_USER</code></td>
+    <td>0x90</td>
+    <td>Base value for application-defined events.</td>
+  </tr>
+</table>
+
+<h2>Custom Events</h2>
+
+<p>Define application-specific events starting from <code>TIKU_EVENT_USER</code>:</p>
+
+<pre><code>#define EV_SENSOR_READY   (TIKU_EVENT_USER + 0)
+#define EV_DATA_LOGGED    (TIKU_EVENT_USER + 1)
+#define EV_BUTTON_PRESS   (TIKU_EVENT_USER + 2)
+#define EV_ALARM          (TIKU_EVENT_USER + 3)</code></pre>
+
+<h2>Posting Events</h2>
+
+<h3>Targeted post</h3>
+
+<p>Send an event to a specific process:</p>
+
+<pre><code>/* Post a sensor-ready event with a data pointer */
+tiku_process_post(&amp;logger_process, EV_SENSOR_READY, &amp;reading);</code></pre>
+
+<p>The event is enqueued and delivered on the next scheduler iteration. The
+<code>data</code> pointer is passed through to the target process's thread
+function.</p>
+
+<h3>Broadcasting</h3>
+
+<p>Send an event to <strong>all</strong> running processes:</p>
+
+<pre><code>tiku_process_post(TIKU_PROCESS_BROADCAST, EV_ALARM, NULL);</code></pre>
+
+<p>The scheduler delivers the event to every active process in the process list.</p>
+
+<h3>Polling</h3>
+
+<p>Request that a process be woken up with a <code>TIKU_EVENT_POLL</code>:</p>
+
+<pre><code>tiku_process_poll(&amp;uart_process);</code></pre>
+
+<div class="note">
+<strong>ISR-safe:</strong> <code>tiku_process_poll()</code> is safe to call from
+an interrupt service routine (ISR). It sets a flag on the target process and
+does not touch the event queue directly. The scheduler checks poll flags at the
+top of each loop iteration and delivers <code>TIKU_EVENT_POLL</code> events
+before draining the regular queue. This is the <strong>recommended way</strong>
+to signal a process from an ISR.
+</div>
+
+<div class="note">
+<strong>ISR safety for post:</strong> <code>tiku_process_post()</code> is
+<strong>not</strong> safe to call from an ISR because it modifies the event queue
+without disabling interrupts. From ISR context, always use
+<code>tiku_process_poll()</code> instead.
+</div>
+
+<h3>Code example: event-driven sensor pipeline</h3>
+
+<pre><code>/* Sensor process: reads sensor and notifies logger */
+TIKU_PROCESS_THREAD(sensor_proc, ev, data)
+{
+    static struct tiku_timer timer;
+    static int16_t reading;
+
+    TIKU_PROCESS_BEGIN();
+
+    tiku_timer_set_event(&amp;timer, TIKU_CLOCK_SECOND * 5,
+                         &amp;sensor_proc);
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+        reading = read_temperature();
+        tiku_process_post(&amp;logger_proc, EV_SENSOR_READY,
+                          &amp;reading);
+        tiku_timer_reset(&amp;timer);
+    }
+
+    TIKU_PROCESS_END();
+}
+
+/* Logger process: waits for sensor data */
+TIKU_PROCESS_THREAD(logger_proc, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == EV_SENSOR_READY);
+        int16_t *reading = (int16_t *)data;
+        log_to_fram(*reading);
+    }
+
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<h2>Event Queue Queries</h2>
+
+<p>These functions inspect the state of the global event queue:</p>
+
+<table>
+  <tr>
+    <th>Function</th>
+    <th>Returns</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>tiku_event_queue_empty()</code></td>
+    <td><code>uint8_t</code></td>
+    <td>Non-zero if the queue has no pending events.</td>
+  </tr>
+  <tr>
+    <td><code>tiku_event_queue_full()</code></td>
+    <td><code>uint8_t</code></td>
+    <td>Non-zero if the queue has no room for more events.</td>
+  </tr>
+  <tr>
+    <td><code>tiku_event_queue_length()</code></td>
+    <td><code>uint8_t</code></td>
+    <td>Number of events currently in the queue (0..32).</td>
+  </tr>
+  <tr>
+    <td><code>tiku_event_queue_space()</code></td>
+    <td><code>uint8_t</code></td>
+    <td>Number of free slots remaining in the queue.</td>
+  </tr>
+</table>
+
+<pre><code>if (tiku_event_queue_full()) {
+    /* Cannot post -- queue is full, handle gracefully */
+    error_count++;
+}</code></pre>
+
+<h2>Channels</h2>
+
+<p>Channels provide <strong>typed, bounded, FIFO data transfer</strong> between
+processes. Unlike raw events (which carry only a <code>void *</code>), channels
+transfer copies of typed data through a statically-allocated ring buffer.</p>
+
+<h3>Declaring a Channel</h3>
+
+<pre><code>/* Declare a channel named "temp_ch" carrying int16_t with depth 8 */
+TIKU_CHANNEL_DECLARE(temp_ch, int16_t, 8);</code></pre>
+
+<p>This macro expands to a struct containing a ring buffer of 8
+<code>int16_t</code> entries, plus head/tail indices and a count.</p>
+
+<h3>Initializing</h3>
+
+<pre><code>temp_ch_init();</code></pre>
+
+<p>Resets the channel to empty. Call this once during process initialization.</p>
+
+<h3>Putting Data</h3>
+
+<pre><code>int16_t sample = 2350;
+temp_ch_put(&amp;sample);</code></pre>
+
+<p>Copies the value into the channel buffer. Returns non-zero if the channel was
+full (data not written).</p>
+
+<h3>Getting Data</h3>
+
+<pre><code>int16_t value;
+temp_ch_get(&amp;value);</code></pre>
+
+<p>Copies the oldest entry out of the channel. Returns non-zero if the channel
+was empty (no data read).</p>
+
+<h3>Query Functions</h3>
+
+<table>
+  <tr>
+    <th>Function</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>tiku_channel_is_empty(&amp;ch)</code></td>
+    <td>Returns non-zero if the channel has no data.</td>
+  </tr>
+  <tr>
+    <td><code>tiku_channel_free(&amp;ch)</code></td>
+    <td>Returns the number of free slots in the channel.</td>
+  </tr>
+</table>
+
+<h3>Producer-Consumer Pattern</h3>
+
+<pre><code>/* Shared channel: 16 entries of sensor_reading_t */
+typedef struct {
+    int16_t  temperature;
+    uint16_t timestamp;
+} sensor_reading_t;
+
+TIKU_CHANNEL_DECLARE(readings_ch, sensor_reading_t, 16);
+
+/* --- Producer process --- */
+TIKU_PROCESS(producer, "Producer");
+
+TIKU_PROCESS_THREAD(producer, ev, data)
+{
+    static struct tiku_timer timer;
+    static sensor_reading_t sample;
+
+    TIKU_PROCESS_BEGIN();
+
+    readings_ch_init();
+    tiku_timer_set_event(&amp;timer, TIKU_CLOCK_SECOND,
+                         &amp;producer);
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+
+        sample.temperature = read_sensor();
+        sample.timestamp   = tiku_clock_time();
+
+        if (readings_ch_put(&amp;sample) == 0) {
+            /* Notify consumer that data is available */
+            tiku_process_post(&amp;consumer, EV_SENSOR_READY,
+                              NULL);
+        }
+
+        tiku_timer_reset(&amp;timer);
+    }
+
+    TIKU_PROCESS_END();
+}
+
+/* --- Consumer process --- */
+TIKU_PROCESS(consumer, "Consumer");
+
+TIKU_PROCESS_THREAD(consumer, ev, data)
+{
+    static sensor_reading_t entry;
+
+    TIKU_PROCESS_BEGIN();
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == EV_SENSOR_READY);
+
+        /* Drain all available readings */
+        while (readings_ch_get(&amp;entry) == 0) {
+            log_reading(entry.temperature, entry.timestamp);
+        }
+    }
+
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<div class="note">
+<strong>Thread safety:</strong> Channel operations are not interrupt-safe by
+default. If an ISR produces data, use <code>tiku_process_poll()</code> from the
+ISR to wake the consumer, and perform the actual <code>_put()</code> from process
+context (e.g., in a POLL event handler that copies data from a
+volatile ISR buffer into the channel).
+</div>
+</main>
+</body>
+</html>

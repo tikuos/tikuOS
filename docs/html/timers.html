@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timers - TikuOS Documentation</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="logo">TikuOS</div>
+  <ul>
+    <li><a href="index.html">Home</a></li>
+    <li class="section">Getting Started</li>
+    <li><a href="quickstart.html">Quick Start</a></li>
+    <li><a href="install.html">Installation</a></li>
+    <li><a href="hello-blink.html">Hello Blink</a></li>
+    <li class="section">Core Kernel</li>
+    <li><a href="processes.html">Processes</a></li>
+    <li><a href="events.html">Events &amp; IPC</a></li>
+    <li><a href="timers.html" class="active">Timers</a></li>
+    <li><a href="scheduler.html">Scheduler</a></li>
+    <li><a href="memory.html">Memory</a></li>
+    <li class="section">Examples</li>
+    <li><a href="examples.html">Walkthrough</a></li>
+    <li class="section">Reference</li>
+    <li><a href="tikukits.html">TikuKits Libraries</a></li>
+    <li><a href="tikubench.html">TikuBench Testing</a></li>
+    <li><a href="platform.html">Platform Abstraction</a></li>
+    <li><a href="internals.html">Kernel Internals</a></li>
+  </ul>
+</nav>
+
+<main>
+<h1>Timers</h1>
+
+<p class="lead">TikuOS provides two tiers of timers: software timers for
+process-level scheduling (millisecond resolution) and hardware timers for
+precise, interrupt-level timing (microsecond resolution).</p>
+
+<h2>Two Timer Modes</h2>
+
+<table>
+  <tr>
+    <th>Feature</th>
+    <th>Software Timers</th>
+    <th>Hardware Timers</th>
+  </tr>
+  <tr>
+    <td>Resolution</td>
+    <td>~7.8 ms (1/128 s)</td>
+    <td>~1 us (1 MHz)</td>
+  </tr>
+  <tr>
+    <td>Tick constant</td>
+    <td><code>TIKU_CLOCK_SECOND</code> (128)</td>
+    <td><code>TIKU_HTIMER_SECOND</code> (~1,000,000)</td>
+  </tr>
+  <tr>
+    <td>Callback context</td>
+    <td>Timer process (cooperative)</td>
+    <td>ISR (interrupt level)</td>
+  </tr>
+  <tr>
+    <td>Delivery</td>
+    <td>Event or callback</td>
+    <td>Callback only</td>
+  </tr>
+  <tr>
+    <td>Struct</td>
+    <td><code>struct tiku_timer</code></td>
+    <td><code>struct tiku_htimer</code></td>
+  </tr>
+</table>
+
+<h2>Software Timer Struct</h2>
+
+<pre><code>struct tiku_timer {
+    struct tiku_timer   *next;       /* linked list (managed by kernel) */
+    tiku_clock_time_t    interval;   /* ticks between firings           */
+    tiku_clock_time_t    start;      /* tick count when timer was set   */
+    struct tiku_process *process;    /* target process (event mode)     */
+    void (*callback)(void *);        /* callback function (cb mode)     */
+    void                *cb_data;    /* data passed to callback         */
+    uint8_t              active;     /* 1 if armed, 0 if stopped        */
+};</code></pre>
+
+<p>You never need to fill these fields manually &mdash; the API functions handle
+initialization.</p>
+
+<h2>Event Timers</h2>
+
+<p>An event timer delivers <code>TIKU_EVENT_TIMER</code> to a target process when
+it expires. This is the most common timer pattern in TikuOS.</p>
+
+<h3>Setting an event timer</h3>
+
+<pre><code>static struct tiku_timer my_timer;
+
+/* Fire after 2 seconds, deliver event to current process */
+tiku_timer_set_event(&amp;my_timer, TIKU_CLOCK_SECOND * 2,
+                     &amp;my_process);</code></pre>
+
+<h3>Handling the event</h3>
+
+<pre><code>TIKU_PROCESS_THREAD(my_process, ev, data)
+{
+    static struct tiku_timer timer;
+
+    TIKU_PROCESS_BEGIN();
+
+    tiku_timer_set_event(&amp;timer, TIKU_CLOCK_SECOND,
+                         &amp;my_process);
+
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+
+        /* Timer fired -- do periodic work */
+        toggle_led();
+
+        /* Reschedule (drift-free) */
+        tiku_timer_reset(&amp;timer);
+    }
+
+    TIKU_PROCESS_END();
+}</code></pre>
+
+<h2>Callback Timers</h2>
+
+<p>A callback timer invokes a function when it expires. The callback runs in the
+<strong>timer process context</strong> (not in an ISR), so it is safe to call
+most kernel functions from it.</p>
+
+<h3>Setting a callback timer</h3>
+
+<pre><code>static struct tiku_timer cb_timer;
+
+void on_timeout(void *data)
+{
+    uint8_t *flag = (uint8_t *)data;
+    *flag = 1;
+}
+
+static uint8_t timeout_flag = 0;
+
+tiku_timer_set_callback(&amp;cb_timer, TIKU_CLOCK_SECOND * 10,
+                        on_timeout, &amp;timeout_flag);</code></pre>
+
+<h3>Callback timer example: debounce</h3>
+
+<pre><code>static struct tiku_timer debounce_timer;
+
+void debounce_done(void *data)
+{
+    /* 50 ms debounce period elapsed -- read button state */
+    if (button_pressed()) {
+        tiku_process_post(&amp;app_process, EV_BUTTON_PRESS, NULL);
+    }
+}
+
+/* Called from button ISR handler process */
+tiku_timer_set_callback(&amp;debounce_timer,
+                        TIKU_CLOCK_SECOND / 20,   /* ~50 ms */
+                        debounce_done, NULL);</code></pre>
+
+<h2>Rescheduling</h2>
+
+<h3><code>tiku_timer_reset(&amp;timer)</code> &mdash; drift-free</h3>
+
+<p>Reschedules the timer relative to its <strong>previous expiration time</strong>.
+If the timer was supposed to fire at tick 256 with an interval of 128, the next
+expiration is tick 384 &mdash; regardless of when the process actually handled the
+event. This prevents cumulative timing drift.</p>
+
+<pre><code>/* Drift-free 1 Hz periodic timer */
+tiku_timer_reset(&amp;timer);</code></pre>
+
+<h3><code>tiku_timer_restart(&amp;timer)</code> &mdash; from now</h3>
+
+<p>Reschedules the timer relative to the <strong>current time</strong>. Useful for
+timeout patterns where you want "N seconds from right now," not periodic
+firing:</p>
+
+<pre><code>/* Reset inactivity timeout: 30 seconds from now */
+tiku_timer_restart(&amp;inactivity_timer);</code></pre>
+
+<h2>Stopping a Timer</h2>
+
+<pre><code>tiku_timer_stop(&amp;my_timer);</code></pre>
+
+<p>Removes the timer from the active list. The timer struct can be reused
+immediately with a new <code>set_event</code> or <code>set_callback</code> call.</p>
+
+<h2>Timer Queries</h2>
+
+<table>
+  <tr>
+    <th>Function</th>
+    <th>Returns</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>tiku_timer_expired(&amp;t)</code></td>
+    <td><code>uint8_t</code></td>
+    <td>Non-zero if the timer has fired and not been reset.</td>
+  </tr>
+  <tr>
+    <td><code>tiku_timer_remaining(&amp;t)</code></td>
+    <td><code>tiku_clock_time_t</code></td>
+    <td>Ticks remaining until expiration (0 if expired).</td>
+  </tr>
+  <tr>
+    <td><code>tiku_timer_expiration_time(&amp;t)</code></td>
+    <td><code>tiku_clock_time_t</code></td>
+    <td>Absolute tick count when the timer will fire.</td>
+  </tr>
+  <tr>
+    <td><code>tiku_timer_any_pending()</code></td>
+    <td><code>uint8_t</code></td>
+    <td>Non-zero if any software timer is currently active.</td>
+  </tr>
+  <tr>
+    <td><code>tiku_timer_next_expiration()</code></td>
+    <td><code>tiku_clock_time_t</code></td>
+    <td>Tick count of the earliest pending timer expiration.</td>
+  </tr>
+</table>
+
+<pre><code>/* Check if we should enter low-power mode */
+if (!tiku_timer_any_pending()) {
+    enter_lpm4();   /* deepest sleep, no timers running */
+} else {
+    tiku_clock_time_t next = tiku_timer_next_expiration();
+    configure_wakeup(next);
+    enter_lpm3();
+}</code></pre>
+
+<h2>Hardware Timers</h2>
+
+<p>Hardware timers (<code>struct tiku_htimer</code>) provide microsecond-resolution
+timing by programming the MCU's Timer_A peripheral directly. Callbacks run in
+<strong>interrupt context</strong>.</p>
+
+<h3>Hardware timer struct</h3>
+
+<pre><code>struct tiku_htimer {
+    tiku_htimer_time_t   time;       /* expiration time (htimer ticks)  */
+    void (*callback)(struct tiku_htimer *ht, void *data);
+    void                *data;       /* user data for callback          */
+};</code></pre>
+
+<h3>Setting a hardware timer</h3>
+
+<pre><code>static struct tiku_htimer ht;
+
+void precise_callback(struct tiku_htimer *ht, void *data)
+{
+    /* Runs in ISR context -- keep it short! */
+    TIKU_BOARD_LED1_OUT ^= TIKU_BOARD_LED1_PIN;
+}
+
+/* Fire 500 us from now */
+tiku_htimer_time_t now = TIKU_HTIMER_NOW();
+tiku_htimer_set(&amp;ht, now + TIKU_HTIMER_SECOND / 2000,
+                precise_callback, NULL);</code></pre>
+
+<h3>Hardware timer macros</h3>
+
+<table>
+  <tr>
+    <th>Macro</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>TIKU_HTIMER_NOW()</code></td>
+    <td>Returns the current hardware timer tick count.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_HTIMER_TIME(ht)</code></td>
+    <td>Returns the scheduled expiration time of hardware timer <code>ht</code>.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_HTIMER_SECOND</code></td>
+    <td>Number of hardware timer ticks per second (~1,000,000 at 1 MHz).</td>
+  </tr>
+</table>
+
+<h3>Guard time</h3>
+
+<div class="warning">
+<strong>Guard time:</strong> When setting a hardware timer, the expiration time
+must be far enough in the future for the hardware to latch the compare value
+before the counter passes it. If you schedule a timer that is too close to
+<code>TIKU_HTIMER_NOW()</code> (within a few ticks), the timer may not fire until
+the counter wraps around. Always add a small margin:
+
+<pre><code>/* Safe: at least 10 ticks of margin */
+tiku_htimer_set(&amp;ht, TIKU_HTIMER_NOW() + delay + 10,
+                callback, NULL);</code></pre>
+</div>
+
+<h3>Periodic hardware timer</h3>
+
+<p>Hardware timers are one-shot. To create a periodic hardware timer, reschedule
+from within the callback:</p>
+
+<pre><code>#define PERIOD (TIKU_HTIMER_SECOND / 1000)  /* 1 ms */
+
+void periodic_isr(struct tiku_htimer *ht, void *data)
+{
+    /* Do time-critical work */
+    sample_adc();
+
+    /* Reschedule relative to current expiration (drift-free) */
+    tiku_htimer_set(ht, TIKU_HTIMER_TIME(ht) + PERIOD,
+                    periodic_isr, data);
+}</code></pre>
+
+<div class="note">
+<strong>ISR context:</strong> Hardware timer callbacks run inside an interrupt
+handler. Keep them as short as possible. Do not call
+<code>tiku_process_post()</code> or any blocking function. Use
+<code>tiku_process_poll()</code> to wake a process if you need to do heavier
+work after the ISR.
+</div>
+
+<h2>Timer Constants</h2>
+
+<table>
+  <tr>
+    <th>Constant</th>
+    <th>Value</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>TIKU_CLOCK_SECOND</code></td>
+    <td>128</td>
+    <td>Software timer ticks per second. Driven by the 32.768 kHz ACLK crystal
+        divided down. One tick is approximately 7.8 ms.</td>
+  </tr>
+  <tr>
+    <td><code>TIKU_HTIMER_SECOND</code></td>
+    <td>~1,000,000</td>
+    <td>Hardware timer ticks per second. Driven by SMCLK at 1 MHz (or the
+        configured DCO frequency). One tick is approximately 1 us.</td>
+  </tr>
+</table>
+
+<h3>Common time conversions</h3>
+
+<pre><code>/* Software timer durations */
+TIKU_CLOCK_SECOND          /* 1 second      */
+TIKU_CLOCK_SECOND / 2      /* 500 ms        */
+TIKU_CLOCK_SECOND / 4      /* 250 ms        */
+TIKU_CLOCK_SECOND / 10     /* ~100 ms       */
+TIKU_CLOCK_SECOND * 5      /* 5 seconds     */
+TIKU_CLOCK_SECOND * 60     /* 1 minute      */
+
+/* Hardware timer durations */
+TIKU_HTIMER_SECOND              /* 1 second  */
+TIKU_HTIMER_SECOND / 1000      /* 1 ms      */
+TIKU_HTIMER_SECOND / 1000000   /* 1 us      */</code></pre>
+
+<h2>Choosing the Right Timer</h2>
+
+<table>
+  <tr>
+    <th>Use Case</th>
+    <th>Timer Type</th>
+    <th>Why</th>
+  </tr>
+  <tr>
+    <td>Periodic LED blink</td>
+    <td>Event timer</td>
+    <td>Low precision is fine; process-level handling.</td>
+  </tr>
+  <tr>
+    <td>Inactivity timeout</td>
+    <td>Callback timer</td>
+    <td>Single action on expiry, no process needed.</td>
+  </tr>
+  <tr>
+    <td>Sensor sampling at 1 kHz</td>
+    <td>Hardware timer</td>
+    <td>Needs 1 ms precision; callback triggers ADC in ISR.</td>
+  </tr>
+  <tr>
+    <td>UART byte timeout</td>
+    <td>Hardware timer</td>
+    <td>Microsecond resolution for character gap detection.</td>
+  </tr>
+  <tr>
+    <td>Debouncing a button</td>
+    <td>Callback timer</td>
+    <td>50 ms delay, callback checks pin state.</td>
+  </tr>
+  <tr>
+    <td>Watchdog-style heartbeat</td>
+    <td>Event timer</td>
+    <td>Process checks health on each timer event.</td>
+  </tr>
+</table>
+</main>
+</body>
+</html>
