@@ -42,6 +42,7 @@ Thumbs.db
 # Backup files
 *.bak
 *.orig
+takenote.md
 tikukits/
 
 # Paper drafts (unpublished)
