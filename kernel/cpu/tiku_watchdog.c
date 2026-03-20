@@ -82,6 +82,10 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
     tiku_watchdog_kick_on_start = kick_on_start;
 
     tiku_watchdog_init();
+
+    if (tiku_watchdog_start_held) {
+        tiku_watchdog_arch_pause();
+    }
 }
 
 /**

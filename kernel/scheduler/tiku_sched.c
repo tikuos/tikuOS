@@ -164,11 +164,12 @@ void tiku_sched_stop(void)
 
 uint8_t tiku_sched_has_pending(void)
 {
-    /* Work is pending if the process layer can dispatch an event,
-     * or if any software timer is active (it will eventually fire
-     * and post an event). We check process_run's precondition
-     * indirectly — if timers are pending, the timer process will
-     * generate events when polled. */
+    /* Work is pending if the process event queue is non-empty
+     * or if any software timer is active. */
+    if (!tiku_process_queue_empty()) {
+        return 1;
+    }
+
     if (tiku_timer_any_pending()) {
         return 1;
     }
