@@ -23,12 +23,17 @@ omitted (magic cookie at offset 44, options at offset 48).  The
 compact format keeps OFFER/ACK packets under the eZ-FET's buffer
 limit.
 
-### 2. Single host-to-target write per session
+### 2. Reduced host-to-target write budget after reopen (~47 SLIP bytes)
 
-After the first serial connection is closed and reopened, subsequent
-connections cannot reliably deliver host-to-target data regardless of
-packet size.  Only the **first** `open_serial()` connection in a test
-session can successfully write to the device.
+The first `open_serial()` connection allows host-to-target writes up
+to the ~130-byte buffer limit.  After any close/reopen cycle
+(`reopen_serial`), the per-session write budget drops to approximately
+**47 SLIP bytes** — enough for CoAP GET requests (no payload) but too
+small for CoAP PUT/POST requests with payloads (~49-54 SLIP bytes).
+
+Frames ≤47 SLIP bytes are delivered reliably after reopen.  Frames
+≥49 SLIP bytes cause the eZ-FET to go completely silent (both
+directions) for ~8 seconds.
 
 This means multi-cycle DHCP exchanges (OFFER on connection 1, ACK on
 connection 2) cannot both deliver data to the device.  The test

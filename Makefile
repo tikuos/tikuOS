@@ -261,6 +261,8 @@ endif
 ifeq ($(APP),net)
 CFLAGS += -DTIKU_APP_NET=1
 SRCS += apps/net/tiku_app_net.c
+SRCS += labs/coap/tiku_kits_net_coap.c
+SRCS += labs/coap/tiku_kits_net_coap_process.c
 endif
 
 # ---------------------------------------------------------------------------
