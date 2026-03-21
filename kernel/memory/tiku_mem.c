@@ -80,8 +80,14 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* Verify the backing buffer resides in SRAM */
-    if (!tiku_region_contains(buf, size, TIKU_MEM_REGION_SRAM)) {
+    /* Determine which memory tier the buffer resides in.
+     * Both SRAM and NVM are valid backing stores — the tier is
+     * recorded so callers can introspect placement later. */
+    if (tiku_region_contains(buf, size, TIKU_MEM_REGION_SRAM)) {
+        arena->tier = TIKU_MEM_SRAM;
+    } else if (tiku_region_contains(buf, size, TIKU_MEM_REGION_NVM)) {
+        arena->tier = TIKU_MEM_NVM;
+    } else {
         return TIKU_MEM_ERR_INVALID;
     }
     tiku_region_claim(buf, size, id);

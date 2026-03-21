@@ -71,6 +71,24 @@ typedef enum {
 } tiku_mem_err_t;
 
 /*---------------------------------------------------------------------------*/
+/* MEMORY TIER CLASSIFICATION                                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Memory tier for placement-aware allocation
+ *
+ * Identifies the intended memory tier for an allocator's backing
+ * storage. Used by the tier allocator (tiku_tier_*) to carve
+ * buffers from the correct physical memory type, and stored in
+ * arena/pool control blocks for introspection.
+ */
+typedef enum {
+    TIKU_MEM_SRAM = 0, /**< Fast, volatile — for hot/temporary data */
+    TIKU_MEM_NVM  = 1, /**< Persistent, slower writes — for cold/stable data */
+    TIKU_MEM_AUTO = 2  /**< OS selects: prefers SRAM, falls back to NVM */
+} tiku_mem_tier_t;
+
+/*---------------------------------------------------------------------------*/
 /* STATISTICS                                                                */
 /*---------------------------------------------------------------------------*/
 
@@ -254,6 +272,7 @@ typedef struct {
     tiku_mem_arch_size_t  count;     /**< Allocations since last reset */
     uint8_t               id;        /**< Arena identifier for debugging */
     uint8_t               active;    /**< Non-zero if initialized */
+    tiku_mem_tier_t       tier;      /**< Memory tier (SRAM or NVM) */
 } tiku_arena_t;
 
 /*---------------------------------------------------------------------------*/
@@ -394,6 +413,7 @@ typedef struct {
     tiku_mem_arch_size_t  peak_count;  /**< Lifetime high-water mark */
     uint8_t               id;          /**< Pool identifier for debugging */
     uint8_t               active;      /**< Non-zero if initialized */
+    tiku_mem_tier_t       tier;        /**< Memory tier (SRAM or NVM) */
 } tiku_pool_t;
 
 /*---------------------------------------------------------------------------*/
@@ -770,6 +790,487 @@ uint16_t tiku_mpu_get_violation_flags(void);
  * violation can be detected cleanly.
  */
 void tiku_mpu_clear_violation_flags(void);
+
+/*---------------------------------------------------------------------------*/
+/* TIER ALLOCATOR                                                            */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The tier allocator manages pre-allocated backing pools for SRAM and
+ * NVM. Instead of providing a buffer, the caller specifies a memory
+ * tier and the tier allocator carves the buffer from the appropriate
+ * backing pool. Arenas and pools created this way are fully standard
+ * — only the buffer source differs.
+ *
+ * Usage:
+ *   tiku_tier_init();                              // once, after tiku_mem_init
+ *   tiku_tier_arena_create(&arena, TIKU_MEM_SRAM, 64, 1);
+ *   void *p = tiku_arena_alloc(&arena, 16);        // normal arena API
+ *
+ * NVM-backed pools: tiku_pool_alloc() and tiku_pool_free() write
+ * freelist pointers into the block memory. When the pool resides in
+ * NVM, the caller must bracket these calls with tiku_mpu_unlock_nvm()
+ * / tiku_mpu_lock_nvm(), or use tiku_mpu_scoped_write(). The tier
+ * allocator handles MPU unlock only during pool creation (freelist
+ * construction).
+ */
+
+/** Size of the SRAM tier backing pool in bytes. Override at compile time. */
+#ifndef TIKU_TIER_SRAM_SIZE
+#define TIKU_TIER_SRAM_SIZE  128
+#endif
+
+/** Size of the NVM tier backing pool in bytes. Override at compile time. */
+#ifndef TIKU_TIER_NVM_SIZE
+#define TIKU_TIER_NVM_SIZE   1024
+#endif
+
+/**
+ * @brief Initialize the tier allocator
+ *
+ * Must be called after tiku_mem_init() (which initializes the region
+ * registry and MPU). Resets the bump pointers for both tier backing
+ * pools.
+ *
+ * @return TIKU_MEM_OK on success
+ */
+tiku_mem_err_t tiku_tier_init(void);
+
+/**
+ * @brief Create an arena backed by the specified memory tier
+ *
+ * Allocates a buffer from the tier's backing pool and initializes
+ * an arena over it. The arena behaves identically to one created
+ * with tiku_arena_create() — only the buffer source differs.
+ *
+ * @param arena  Arena control block to initialize
+ * @param tier   Memory tier (SRAM, NVM, or AUTO)
+ * @param size   Desired arena capacity in bytes
+ * @param id     User-assigned identifier (0-255)
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOMEM, or TIKU_MEM_ERR_INVALID
+ */
+tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
+                                       tiku_mem_tier_t tier,
+                                       tiku_mem_arch_size_t size,
+                                       uint8_t id);
+
+/**
+ * @brief Create a pool backed by the specified memory tier
+ *
+ * Allocates a buffer from the tier's backing pool and initializes
+ * a fixed-size block pool over it. For NVM-backed pools, the MPU
+ * is temporarily unlocked during freelist construction.
+ *
+ * @param pool         Pool control block to initialize
+ * @param tier         Memory tier (SRAM, NVM, or AUTO)
+ * @param block_size   Size of each block in bytes
+ * @param block_count  Number of blocks
+ * @param id           User-assigned identifier (0-255)
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOMEM, or TIKU_MEM_ERR_INVALID
+ */
+tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
+                                      tiku_mem_tier_t tier,
+                                      tiku_mem_arch_size_t block_size,
+                                      tiku_mem_arch_size_t block_count,
+                                      uint8_t id);
+
+/**
+ * @brief Query which memory tier a pointer belongs to
+ *
+ * Checks the tier allocator's own backing pools first, then falls
+ * back to the region registry.
+ *
+ * @param ptr       Address to query
+ * @param out_tier  Output: memory tier of the containing region
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_NOT_FOUND if the
+ *         address is not in any known memory region
+ */
+tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
+                              tiku_mem_tier_t *out_tier);
+
+/**
+ * @brief Get usage statistics for a tier's backing pool
+ *
+ * @param tier   Memory tier to query (SRAM or NVM, not AUTO)
+ * @param stats  Output statistics
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if tier
+ *         is AUTO or the tier is not initialized
+ */
+tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
+                                tiku_mem_stats_t *stats);
+
+/*---------------------------------------------------------------------------*/
+/* WRITE-BACK CACHE (SRAM/FRAM)                                              */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Write-back buffer for hot FRAM regions.
+ *
+ * On MSP430, FRAM writes consume ~3x more energy than SRAM writes and
+ * have limited endurance (~10^15 cycles per cell). Frequently updated
+ * data — network stack state, sensor buffers, counters — benefits from
+ * being cached in SRAM during active processing and flushed to FRAM
+ * only before sleep or at explicit sync points.
+ *
+ * Usage:
+ *   static tiku_cached_region_t my_cache;
+ *   static uint8_t sram_buf[sizeof(my_data_t)];
+ *
+ *   tiku_cache_create(&my_cache, fram_addr, sram_buf, sizeof(my_data_t));
+ *   my_data_t *p = tiku_cache_get(&my_cache);  // fast SRAM pointer
+ *   p->field = value;                           // writes hit SRAM only
+ *   tiku_cache_flush(&my_cache);                // copy SRAM -> FRAM
+ *
+ * The MPU is unlocked/relocked around FRAM writes automatically.
+ * Callers should flush all regions before entering LPM (sleep).
+ */
+
+/** Maximum number of cached regions tracked by tiku_cache_flush_all() */
+#ifndef TIKU_CACHE_MAX_REGIONS
+#define TIKU_CACHE_MAX_REGIONS  8
+#endif
+
+/**
+ * @brief Cached FRAM region descriptor
+ *
+ * Pairs an SRAM working copy with a FRAM persistent backing store.
+ * The dirty flag tracks whether the SRAM copy has diverged from FRAM.
+ */
+typedef struct {
+    uint8_t              *sram_cache;    /**< SRAM working copy */
+    uint8_t              *fram_backing;  /**< FRAM persistent copy */
+    tiku_mem_arch_size_t  size;          /**< Region size in bytes */
+    uint8_t               dirty;         /**< Non-zero if SRAM != FRAM */
+    uint8_t               active;        /**< Non-zero if initialized */
+} tiku_cached_region_t;
+
+/*---------------------------------------------------------------------------*/
+/* FUNCTION PROTOTYPES — CACHE                                               */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Create a cached region over a FRAM address
+ *
+ * Registers the SRAM buffer as a write-back cache for the FRAM region.
+ * Copies the current FRAM contents into SRAM so the working copy
+ * starts in sync. The region is registered in the global table so
+ * tiku_cache_flush_all() can find it.
+ *
+ * @param region     Cache descriptor to initialize
+ * @param fram_addr  FRAM address to cache (must be in NVM region)
+ * @param sram_buf   Caller-provided SRAM buffer (must be >= size bytes)
+ * @param size       Size of the region in bytes (must be > 0)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad args,
+ *         TIKU_MEM_ERR_FULL if the global region table is full
+ */
+tiku_mem_err_t tiku_cache_create(tiku_cached_region_t *region,
+                                  uint8_t *fram_addr,
+                                  uint8_t *sram_buf,
+                                  tiku_mem_arch_size_t size);
+
+/**
+ * @brief Get a pointer to the SRAM working copy
+ *
+ * Returns the SRAM cache pointer and marks the region dirty, since
+ * the caller is assumed to be writing. For read-only access, the
+ * caller can use this pointer without flushing.
+ *
+ * @param region  Cache descriptor (must be active)
+ * @return Pointer to the SRAM working copy, or NULL if invalid
+ */
+void *tiku_cache_get(tiku_cached_region_t *region);
+
+/**
+ * @brief Mark a cached region as dirty
+ *
+ * Call this after modifying the SRAM cache obtained via
+ * tiku_cache_get(). This is only needed if you retrieved the pointer
+ * without calling tiku_cache_get() (which auto-marks dirty).
+ *
+ * @param region  Cache descriptor (must be active)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if region is
+ *         NULL or not active
+ */
+tiku_mem_err_t tiku_cache_mark_dirty(tiku_cached_region_t *region);
+
+/**
+ * @brief Flush a single cached region from SRAM back to FRAM
+ *
+ * Copies the SRAM working copy to the FRAM backing store if dirty.
+ * The MPU is unlocked for the duration of the write and relocked
+ * afterward. Clears the dirty flag on success.
+ *
+ * No-op if the region is not dirty.
+ *
+ * @param region  Cache descriptor to flush
+ * @return TIKU_MEM_OK on success (including not-dirty no-op),
+ *         TIKU_MEM_ERR_INVALID if region is NULL or not active
+ */
+tiku_mem_err_t tiku_cache_flush(tiku_cached_region_t *region);
+
+/**
+ * @brief Flush all registered cached regions
+ *
+ * Iterates the global region table and flushes every dirty region.
+ * The MPU is unlocked once for the entire batch to minimize
+ * unlock/lock overhead. Call this before entering LPM (sleep).
+ *
+ * @return TIKU_MEM_OK on success, or the first error encountered
+ */
+tiku_mem_err_t tiku_cache_flush_all(void);
+
+/**
+ * @brief Reload a cached region from FRAM into SRAM
+ *
+ * Overwrites the SRAM working copy with the current FRAM contents
+ * and clears the dirty flag. Useful after a DMA transfer or
+ * external update has modified the FRAM backing store.
+ *
+ * @param region  Cache descriptor to reload
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if region
+ *         is NULL or not active
+ */
+tiku_mem_err_t tiku_cache_reload(tiku_cached_region_t *region);
+
+/**
+ * @brief Destroy a cached region and remove it from the global table
+ *
+ * Does NOT flush — if the caller wants to persist changes, they
+ * must call tiku_cache_flush() before destroying.
+ *
+ * @param region  Cache descriptor to destroy
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if region
+ *         is NULL or not active
+ */
+tiku_mem_err_t tiku_cache_destroy(tiku_cached_region_t *region);
+
+/**
+ * @brief Get the number of registered cached regions
+ *
+ * Returns the current count of active entries in the global cache
+ * table. Used by the hibernate layer to iterate all regions.
+ *
+ * @return Number of registered regions (0 to TIKU_CACHE_MAX_REGIONS)
+ */
+tiku_mem_arch_size_t tiku_cache_get_count(void);
+
+/**
+ * @brief Get a cached region by index
+ *
+ * Returns a pointer to the cached region at the given index in the
+ * global table. Used by the hibernate layer to reload all regions
+ * on warm resume.
+ *
+ * @param index  Index into the global cache table
+ * @return Pointer to the cached region, or NULL if index is out of range
+ */
+tiku_cached_region_t *tiku_cache_get_region(tiku_mem_arch_size_t index);
+
+/*---------------------------------------------------------------------------*/
+/* PROCESS MEMORY CONTEXT                                                    */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Per-process isolated memory contexts.
+ *
+ * Without this layer any code can allocate from any tier. A process
+ * memory context binds a pair of arenas (SRAM scratch + NVM persistent)
+ * and an optional set of cached regions to a single process identifier.
+ * Isolation is enforced at allocation time — tiku_proc_alloc() checks
+ * the tier and delegates to the correct arena, which is bounds-checked
+ * by the arena allocator itself. This is cheap and correct for
+ * cooperative scheduling where processes do not preempt each other.
+ *
+ * Usage:
+ *   static tiku_proc_mem_t pmem;
+ *   tiku_proc_mem_create(&pmem, 1, TIKU_MEM_AUTO, 64, 128);
+ *   void *p = tiku_proc_alloc(&pmem, TIKU_MEM_SRAM, 16);
+ *   tiku_proc_mem_destroy(&pmem);
+ */
+
+/** Maximum number of cached regions a process context can own */
+#ifndef TIKU_PROC_MEM_MAX_CACHES
+#define TIKU_PROC_MEM_MAX_CACHES  4
+#endif
+
+/**
+ * @brief Per-process memory context
+ *
+ * Binds an SRAM scratch arena, an NVM persistent arena, and a set of
+ * cached regions to a process identifier. All allocations for the
+ * process go through this context, providing isolation by construction.
+ */
+typedef struct {
+    uint8_t               pid;          /**< Owning process identifier */
+    tiku_arena_t          sram_arena;   /**< Process's SRAM scratch space */
+    tiku_arena_t          nvm_arena;    /**< Process's persistent storage */
+    tiku_cached_region_t *caches[TIKU_PROC_MEM_MAX_CACHES];
+                                        /**< Process's cached regions */
+    uint8_t               cache_count;  /**< Number of attached caches */
+    uint8_t               active;       /**< Non-zero if context is live */
+} tiku_proc_mem_t;
+
+/*---------------------------------------------------------------------------*/
+/* FUNCTION PROTOTYPES — PROCESS MEMORY CONTEXT                              */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Create an isolated memory context for a process
+ *
+ * Allocates an SRAM arena and an NVM arena from the tier allocator,
+ * both bound to the given process identifier. Either size may be zero
+ * to skip that tier.
+ *
+ * @param pmem       Context to initialize
+ * @param pid        Owning process identifier (used as arena id)
+ * @param tier       Tier hint for arena placement (AUTO resolves per-arena)
+ * @param sram_size  SRAM arena capacity in bytes (0 to skip)
+ * @param nvm_size   NVM arena capacity in bytes (0 to skip)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad args,
+ *         TIKU_MEM_ERR_NOMEM if the tier allocator cannot satisfy the request
+ */
+tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
+                                     uint8_t pid,
+                                     tiku_mem_tier_t tier,
+                                     tiku_mem_arch_size_t sram_size,
+                                     tiku_mem_arch_size_t nvm_size);
+
+/**
+ * @brief Destroy a process memory context
+ *
+ * Flushes and destroys all attached cached regions, then resets both
+ * arenas. After this call the context is inactive and all memory
+ * previously allocated through it is invalid.
+ *
+ * @param pmem  Context to destroy
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
+ *         or not active
+ */
+tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem);
+
+/**
+ * @brief Allocate within a process context (bounds-checked)
+ *
+ * Selects the correct arena based on the requested tier and allocates
+ * from it. TIKU_MEM_AUTO prefers SRAM, falling back to NVM.
+ *
+ * @param pmem  Active process memory context
+ * @param tier  Memory tier (SRAM, NVM, or AUTO)
+ * @param size  Bytes requested (must be > 0)
+ * @return Pointer to the allocated memory, or NULL on failure
+ */
+void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
+                       tiku_mem_tier_t tier,
+                       tiku_mem_arch_size_t size);
+
+/**
+ * @brief Attach a cached region to a process context
+ *
+ * Adds an already-created cached region to the process context so
+ * that tiku_proc_mem_destroy() will flush and destroy it automatically.
+ *
+ * @param pmem    Active process memory context
+ * @param region  Cached region to attach (must be active)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_FULL if the process
+ *         has reached TIKU_PROC_MEM_MAX_CACHES
+ */
+tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
+                                           tiku_cached_region_t *region);
+
+/**
+ * @brief Get statistics for a process arena
+ *
+ * @param pmem   Active process memory context
+ * @param tier   Which arena to query (SRAM or NVM, not AUTO)
+ * @param stats  Output statistics
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad args
+ */
+tiku_mem_err_t tiku_proc_mem_stats(const tiku_proc_mem_t *pmem,
+                                    tiku_mem_tier_t tier,
+                                    tiku_mem_stats_t *stats);
+
+/*---------------------------------------------------------------------------*/
+/* HIBERNATE / RESUME                                                        */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Hibernate/resume orchestration for the memory subsystem.
+ *
+ * Before entering deep sleep (LPMx.5 on MSP430) all dirty write-back
+ * caches must be flushed to FRAM and a hibernate marker written so
+ * the next boot can distinguish a warm resume from a cold start.
+ *
+ * Usage:
+ *   // Before sleep:
+ *   tiku_mem_hibernate(fram_buf, rtc_now());
+ *   enter_lpm();
+ *
+ *   // On every boot, after tiku_mem_init():
+ *   tiku_hibernate_marker_t marker;
+ *   if (tiku_mem_resume(fram_buf, &marker) == TIKU_MEM_OK) {
+ *       // Warm resume — cached regions reloaded from FRAM
+ *       printf("Boot #%lu\n", marker.boot_count);
+ *   } else {
+ *       // Cold boot — first power-on or no valid marker
+ *   }
+ */
+
+/** Key used in the persist store for the hibernate marker */
+#define TIKU_HIBERNATE_KEY       "hib"
+
+/** Magic number to validate hibernate markers (ASCII "THIB") */
+#define TIKU_HIBERNATE_MAGIC     0x54484942U
+
+/**
+ * @brief Hibernate marker stored in FRAM via the persist layer
+ *
+ * Contains a magic number for corruption detection, a monotonic
+ * boot count incremented on each hibernate, and a caller-supplied
+ * timestamp for diagnostics.
+ */
+typedef struct {
+    uint32_t magic;       /**< TIKU_HIBERNATE_MAGIC if valid */
+    uint32_t boot_count;  /**< Monotonic hibernate cycle counter */
+    uint32_t timestamp;   /**< Caller-supplied timestamp */
+} tiku_hibernate_marker_t;
+
+/**
+ * @brief Prepare the memory subsystem for hibernation
+ *
+ * Flushes all dirty write-back caches to FRAM and writes a hibernate
+ * marker (boot count + timestamp) to the persist store. Call before
+ * entering any deep sleep that loses SRAM.
+ *
+ * @param fram_buf   FRAM buffer for the marker (NVM, >= sizeof marker)
+ * @param timestamp  Caller-supplied timestamp value
+ * @return TIKU_MEM_OK on success, or an error code
+ */
+tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp);
+
+/**
+ * @brief Check for warm resume after hibernation
+ *
+ * Call after tiku_mem_init() on every boot. If a valid hibernate
+ * marker is found, reloads all registered cached regions from FRAM
+ * and returns TIKU_MEM_OK (warm resume). Otherwise returns
+ * TIKU_MEM_ERR_NOT_FOUND (cold boot).
+ *
+ * @param fram_buf    FRAM buffer used for the hibernate marker
+ * @param marker_out  Output: marker data (may be NULL)
+ * @return TIKU_MEM_OK if warm resume, TIKU_MEM_ERR_NOT_FOUND if cold boot
+ */
+tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
+                                tiku_hibernate_marker_t *marker_out);
+
+/**
+ * @brief Reset the hibernate subsystem to uninitialized state
+ *
+ * Clears the internal persist store and initialization flag so the
+ * next call re-registers the marker key with value_len = 0.  Use in
+ * test harnesses between independent test groups; not needed in
+ * production (a real LPMx.5 wake clears SRAM naturally).
+ */
+void tiku_mem_hibernate_reset(void);
 
 /*---------------------------------------------------------------------------*/
 /* FUNCTION PROTOTYPES — MODULE                                              */

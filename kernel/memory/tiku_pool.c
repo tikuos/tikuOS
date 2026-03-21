@@ -186,6 +186,7 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
     pool->peak_count  = 0;
     pool->id          = id;
     pool->active      = 1;
+    pool->tier        = TIKU_MEM_SRAM; /* Default; tier allocator overrides */
 
     build_freelist(pool);
 

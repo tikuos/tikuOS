@@ -145,6 +145,10 @@ SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/memory/tiku_region.c
+SRCS += kernel/memory/tiku_tier.c
+SRCS += kernel/memory/tiku_cache.c
+SRCS += kernel/memory/tiku_hibernate.c
+SRCS += kernel/memory/tiku_proc_mem.c
 SRCS += kernel/process/tiku_process.c
 SRCS += kernel/scheduler/tiku_sched.c
 
@@ -174,6 +178,10 @@ SRCS += tests/memory/test_mem_mpu.c
 SRCS += tests/memory/test_mem_pool.c
 SRCS += tests/memory/test_mem_region.c
 SRCS += tests/memory/test_mem_edge.c
+SRCS += tests/memory/test_mem_tier.c
+SRCS += tests/memory/test_mem_cache.c
+SRCS += tests/memory/test_mem_hibernate.c
+SRCS += tests/memory/test_mem_proc_mem.c
 SRCS += tests/process/test_process_lifecycle.c
 SRCS += tests/process/test_process_events.c
 SRCS += tests/process/test_process_yield.c
@@ -211,6 +219,8 @@ SRCS += $(wildcard tests/kits/textcompression/*.c)
 SRCS += $(wildcard tests/kits/ml/*.c)
 SRCS += $(wildcard tests/kits/ds/*.c)
 SRCS += $(wildcard tests/kits/net/*.c)
+SRCS += $(wildcard tests/kits/codec/*.c)
+SRCS += $(wildcard tests/kits/crypto/*.c)
 endif
 endif
 
@@ -280,6 +290,9 @@ SRCS += $(wildcard tikukits/sigfeatures/delta/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/goertzel/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/zscore/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/scale/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/ema/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/median/*.c)
+SRCS += $(wildcard tikukits/sigfeatures/skip/*.c)
 SRCS += $(wildcard tikukits/textcompression/rle/*.c)
 SRCS += $(wildcard tikukits/textcompression/bpe/*.c)
 SRCS += $(wildcard tikukits/textcompression/heatshrink/*.c)
@@ -300,10 +313,20 @@ SRCS += $(wildcard tikukits/ds/bloom/*.c)
 SRCS += $(wildcard tikukits/ds/circlog/*.c)
 SRCS += $(wildcard tikukits/ds/deque/*.c)
 SRCS += $(wildcard tikukits/ds/trie/*.c)
+SRCS += $(wildcard tikukits/ds/timerwheel/*.c)
 SRCS += $(wildcard tikukits/net/slip/*.c)
 SRCS += $(wildcard tikukits/net/ipv4/*.c)
 SRCS += $(wildcard tikukits/time/*.c)
 SRCS += $(wildcard tikukits/time/ntp/*.c)
+SRCS += $(wildcard tikukits/codec/cbor/*.c)
+SRCS += $(wildcard tikukits/codec/json/*.c)
+SRCS += $(wildcard tikukits/codec/protobuf/*.c)
+SRCS += $(wildcard tikukits/codec/hex/*.c)
+SRCS += $(wildcard tikukits/crypto/aes128/*.c)
+SRCS += $(wildcard tikukits/crypto/sha256/*.c)
+SRCS += $(wildcard tikukits/crypto/hmac/*.c)
+SRCS += $(wildcard tikukits/crypto/crc/*.c)
+SRCS += $(wildcard tikukits/crypto/base64/*.c)
 
 endif
 
