@@ -151,6 +151,7 @@ SRCS += kernel/memory/tiku_hibernate.c
 SRCS += kernel/memory/tiku_proc_mem.c
 SRCS += kernel/process/tiku_process.c
 SRCS += kernel/scheduler/tiku_sched.c
+SRCS += server/vfs/tiku_vfs.c
 
 # ---------------------------------------------------------------------------
 # Tests (only if tests/ is present)
@@ -209,6 +210,7 @@ SRCS += tests/watchdog/test_watchdog_interval.c
 SRCS += tests/watchdog/test_watchdog_timeout.c
 SRCS += tests/uart/test_uart_edge.c
 SRCS += tests/watchdog/test_watchdog_edge.c
+SRCS += tests/server/vfs/test_vfs.c
 
 # TikuKits tests (requires both test framework and tikukits library)
 ifeq ($(HAS_TIKUKITS),1)
