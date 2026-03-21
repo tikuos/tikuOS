@@ -242,6 +242,7 @@ SRCS += examples/09_channel/channel.c
 SRCS += examples/10_i2c_temp/i2c_temp.c
 SRCS += examples/11_ds18b20_temp/ds18b20_temp.c
 SRCS += examples/12_udp_send/udp_send.c
+SRCS += examples/13_tcp_send/tcp_send.c
 
 # TikuKits examples (requires both examples/ and tikukits/)
 ifeq ($(HAS_TIKUKITS),1)

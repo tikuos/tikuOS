@@ -65,6 +65,56 @@ write) when it needs to capture device frames after a prior write.
 - `TikuBench/tikubench/net/tests/test_dhcp_exchange.py` — eZ-FET-aware test flow
 - `TikuBench/tikubench/common/serial_port.py` — `reopen_serial()` (standard reopen with SLIP END write)
 
+### 4. No full-duplex: target TX kills remaining host-to-target data (discovered 2026-03-21)
+
+When the host sends a burst of data (e.g. two SLIP frames back-to-back),
+the eZ-FET begins forwarding bytes to the target UART.  If the target
+**starts transmitting a reply** (target→host) before the eZ-FET has
+finished forwarding all host→target bytes, the eZ-FET **drops the
+remaining host→target data** and switches to buffering target→host data.
+
+This makes **TCP unusable over the eZ-FET backchannel** for anything
+beyond a single exchange:
+
+1. Host sends SYN (~57 SLIP bytes) → eZ-FET forwards to target ✓
+2. Target processes SYN, starts sending SYN+ACK → eZ-FET switches direction
+3. Any remaining host→target bytes (e.g. DATA+ACK) are **dropped**
+4. Host receives SYN+ACK but device never gets the DATA+ACK
+
+**Attempted workarounds that failed:**
+
+| Approach | Result |
+|---|---|
+| Send ACK+DATA after reopen | Post-reopen budget is ~47 SLIP bytes; TCP packets are ~55+ bytes (0x00 escaping). eZ-FET goes silent for 8s. |
+| `flush_serial` (no reopen) between exchanges | Partially works — packet reaches device but connection lookup fails (RST returned). Likely corrupted SLIP framing. |
+| `reopen_serial_full` (4.5s close gap) | Same 47-byte budget limit applies. |
+| Combined SYN+DATA in one `ser.write()` | eZ-FET drops DATA portion once target sends SYN+ACK. |
+| Predicted ISS blind burst | Same as above — target starts TX before host burst completes. |
+
+**Consequence:** TCP integration tests over eZ-FET are limited to
+single-exchange patterns:
+
+- **Works:** SYN → SYN+ACK (handshake verification, MSS option,
+  checksum validation)
+- **Works:** SYN to unbound port → RST+ACK
+- **Works:** Stale ACK → RST
+- **Works:** RST → silence (correctly ignored)
+- **Does NOT work:** Full TCP session (handshake + data + close)
+
+**Solution:** Use an external **FTDI or CP2102 USB-UART adapter**
+connected directly to MSP430 UART pins (P2.0 TXD, P2.1 RXD),
+bypassing the eZ-FET backchannel entirely.  External adapters
+support true full-duplex UART with no write budget or direction-
+switching limitations.
+
+### Affected files (TCP)
+
+- `TikuBench/tikubench/net/tcp.py` — TCP-over-SLIP helper with eZ-FET workaround code
+- `TikuBench/tikubench/net/tests/test_tcp_echo.py` — gracefully skips data exchange on eZ-FET
+- `TikuBench/tikubench/net/tests/test_tcp_handshake.py` — single-exchange, works on eZ-FET
+- `TikuBench/tikubench/net/tests/test_tcp_rst_*.py` — single-exchange RST tests
+- `tools/tiku_slip_tcp_test.py` — standalone TCP test script
+
 ### Known eZ-FET firmware bugs (prior knowledge)
 
 - **0x00 triggers target reset:** Two consecutive NUL bytes on the
