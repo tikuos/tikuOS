@@ -331,6 +331,9 @@ SRCS += $(wildcard tikukits/crypto/sha256/*.c)
 SRCS += $(wildcard tikukits/crypto/hmac/*.c)
 SRCS += $(wildcard tikukits/crypto/crc/*.c)
 SRCS += $(wildcard tikukits/crypto/base64/*.c)
+SRCS += $(wildcard tikukits/crypto/hkdf/*.c)
+SRCS += $(wildcard tikukits/crypto/gcm/*.c)
+SRCS += $(wildcard tikukits/crypto/tls/*.c)
 
 endif
 

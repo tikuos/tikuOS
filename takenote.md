@@ -249,3 +249,115 @@ Host  172.16.7.1:12345 -> Device 172.16.7.2:7
 The TCP stack is correct.  Handshake, data transfer, and close all
 work.  Echo data is not received due to eZ-FET one-directional
 transfer limitation (not a firmware issue).
+
+---
+
+## FT232 (SparkFun FTDI Basic) Connection to MSP430FR5969 LaunchPad (2026-03-22)
+
+An external FT232 UART adapter bypasses all eZ-FET backchannel bugs
+(0x00 reset, 47-byte limit, DTR reset, no full-duplex).
+
+### Hardware setup
+
+| FT232 Pin | LaunchPad Pin           | Signal                     |
+|-----------|-------------------------|----------------------------|
+| RX        | J13 TXD (target side)   | MSP430 transmits → FT232   |
+| TX        | J13 RXD (target side)   | FT232 transmits → MSP430   |
+| GND       | GND                     | Common ground              |
+
+**Do NOT connect FT232 VCC to the LaunchPad.**
+
+### Critical wiring notes
+
+1. **Connect at J13, not the BoosterPack headers.**  P2.0/P2.1
+   (eUSCI_A0) are NOT routed to the BoosterPack headers.  The
+   BoosterPack has P2.5/P2.6 (eUSCI_A1) — a different UART peripheral.
+
+2. **Remove only TXD and RXD jumpers from J13.**  Leave V+, GND, RST,
+   TST in place.  Connect FT232 to the **target side** (closer to
+   MSP430) of the removed jumper pins.
+
+3. **Power source jumper:** Ensure the LaunchPad power selection is set
+   to eZ-FET (USB) power, not external.  If set to external power and
+   no external supply is connected, removing TXD/RXD jumpers kills the
+   target (it was being parasitically powered through the UART lines
+   via ESD diodes — LED stops blinking, VCC reads 0V).
+
+4. **Voltage level:** Use a **3.3V** FT232 board.  SparkFun makes two
+   versions: green = 3.3V (DEV-09873), red = 5V (DEV-09716).  The
+   "3.3V" label on the power pin exists on BOTH boards (it's just the
+   regulator output).  Check I/O voltage by measuring the TX pin idle
+   voltage with a multimeter.  5V I/O will damage the MSP430 (max
+   input = VCC + 0.3V = 3.6V).
+
+5. **Serial port:** FT232 enumerates as `/dev/ttyUSB0` (not ttyACM*).
+   Needs `dialout` group membership or `chmod 666`.
+
+### Firmware changes
+
+- Reduced example runner delay from 20s to 2s in
+  `examples/kits/example_kits_runner.c`.  The 20s delay was an eZ-FET
+  workaround (host needed time to open the backchannel after flash).
+  The FT232 port can be opened independently of flashing.
+
+### Debugging timeline
+
+The initial FT232 connection attempts failed with 0xFF garbage or no
+output.  Root causes identified:
+
+1. **Power source jumper** set to external instead of eZ-FET USB —
+   MSP430 had no power with J13 UART jumpers removed
+2. **BoosterPack header confusion** — P2.0/P2.1 are only on J13
+3. **SparkFun board version** — user's red board turned out to be 3.3V
+   despite red color (verified with logic analyzer: TX idle = 3.3V)
+
+---
+
+## Claude Code Edit Tool: Whitespace Accumulation Bug (2026-03-22)
+
+When Claude Code edits files using the Edit tool (exact string
+replacement), each replacement can leave 1-2 extra trailing blank
+lines if the `old_string` / `new_string` boundaries don't precisely
+match the surrounding whitespace.  Over many edits to the same file,
+this causes blank lines to accumulate exponentially.
+
+**Example:** `tests/tiku_test_config.h` grew from ~1,970 lines to
+28,847 lines (94% blank) after dozens of edits across sessions.
+Each `#define` block had ~133 blank lines after it.
+
+### Why it happens
+
+The Edit tool does exact string matching.  If the replacement text
+has a trailing `\n` and the surrounding context also has a `\n`,
+the result is `\n\n` (one extra blank line).  Repeat this 50 times
+across sessions and each gap grows to 50+ blank lines.
+
+Config headers like `tiku_test_config.h` are especially vulnerable
+because they consist of many small `#define` blocks that get edited
+individually and frequently (toggling test flags, adding new tests).
+
+### Rules for future Claude instances
+
+1. **After editing a file more than 3 times in one session**, run
+   `wc -l` on it and compare to the expected size.  Config headers
+   should be hundreds of lines, not thousands.
+
+2. **If blank line bloat is detected**, fix it immediately:
+   ```bash
+   cat -s file.h > /tmp/clean.h && cp /tmp/clean.h file.h
+   ```
+   `cat -s` squeezes consecutive blank lines into a single blank.
+
+3. **When writing Edit tool replacements**, include the exact
+   surrounding blank lines in both `old_string` and `new_string`.
+   Do not assume trailing newlines — match them explicitly.
+
+4. **Files at risk:** Any file that gets frequent small edits:
+   - `tests/tiku_test_config.h` (test flags)
+   - `tiku.h` (platform config)
+   - `apps/cli/tiku_cli_config.h` (CLI command flags)
+   - `tikukits/net/tiku_kits_net.h` (network config)
+
+5. **Prefer single-block edits** over multiple small edits to the
+   same file.  If you need to change 5 `#define` values, do it in
+   one Edit call with a larger `old_string` that spans all 5.
