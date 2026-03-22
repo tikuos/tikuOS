@@ -170,6 +170,7 @@ SRCS += tests/uart/test_uart_overrun_provoke.c
 SRCS += tests/uart/test_uart_slip_frame.c
 SRCS += tests/uart/test_uart_duplex.c
 SRCS += tests/uart/test_uart_isr_contention.c
+SRCS += tests/uart/test_uart_ezfet_challenge.c
 SRCS += tests/cpuclock/test_cpuclock_basic.c
 SRCS += tests/cpuclock/test_clock_edge.c
 SRCS += tests/memory/test_mem_common.c

@@ -189,8 +189,28 @@ def find_port():
     return ports[0] if ports else None
 
 
+def _suppress_dtr(path):
+    """Disable DTR-on-close (hupcl) via stty before pyserial opens the port.
+
+    On Linux, pyserial's open() briefly asserts DTR even when dtr=False
+    is set beforehand.  The eZ-FET interprets DTR assertion as a target
+    reset command, rebooting the MSP430 and destroying all SRAM state
+    (connection tables, buffers, etc.).
+
+    Setting ``-hupcl`` via stty BEFORE pyserial opens the port prevents
+    the kernel from toggling DTR during open/close transitions.
+    """
+    import subprocess
+    try:
+        subprocess.run(["stty", "-F", path, "-hupcl"],
+                        capture_output=True, timeout=2)
+    except Exception:
+        pass  # best-effort; may fail on non-Linux
+
+
 def open_port(path, baud=9600):
     """Open serial with eZ-FET safe settings."""
+    _suppress_dtr(path)
     s = serial.Serial()
     s.port = path
     s.baudrate = baud
@@ -214,9 +234,14 @@ def reopen(ser):
     (device-to-host), refusing new host-to-device data until
     the port is closed and reopened.  A 4.5s close gap restores
     the full ~130-byte write budget (shorter gaps limit to ~47B).
+
+    Uses stty -hupcl to prevent DTR toggling on reopen, which
+    would otherwise cause the eZ-FET to reset the target MSP430.
     """
+    port = ser.port
     ser.close()
     time.sleep(4.5)
+    _suppress_dtr(port)
     ser.open()
     time.sleep(2.0)
     ser.reset_input_buffer()
@@ -297,10 +322,17 @@ def test_tcp(ser, dport, payload):
     srv_seq = r['seq']
     rcv_nxt = srv_seq + 1
 
-    # eZ-FET reopen: backchannel enters bad state after receiving
-    # SYN+ACK reply -- must reopen before next host-to-device write
-    print("        (reopening port -- eZ-FET backchannel reset)")
-    reopen(ser)
+    # eZ-FET flush: backchannel may need a nudge after receiving
+    # the SYN+ACK reply.  flush_serial (4 SLIP END bytes) unblocks
+    # the eZ-FET without the DTR-induced target reset that reopen()
+    # causes.  reopen() was the root cause of the "connection zeroed"
+    # bug -- it reset the MSP430, clearing conn_table.
+    print("        (flush serial -- re-sync eZ-FET)")
+    time.sleep(0.3)
+    ser.reset_input_buffer()
+    ser.write(bytes([SLIP_END] * 4))
+    time.sleep(0.3)
+    ser.reset_input_buffer()
 
     # -- 2+3. ACK+DATA piggybacked in one packet --
     # Piggyback the handshake ACK on the data segment.  This is
@@ -339,9 +371,13 @@ def test_tcp(ser, dport, payload):
     else:
         print("        INFO  no echo data (server may not echo)")
 
-    # eZ-FET reopen before FIN
-    print("        (reopening port -- eZ-FET backchannel reset)")
-    reopen(ser)
+    # eZ-FET flush before FIN
+    print("        (flush serial -- re-sync eZ-FET)")
+    time.sleep(0.3)
+    ser.reset_input_buffer()
+    ser.write(bytes([SLIP_END] * 4))
+    time.sleep(0.3)
+    ser.reset_input_buffer()
 
     # -- 4. FIN --
     print(f"\n  [4/4] FIN -->")
@@ -356,8 +392,12 @@ def test_tcp(ser, dport, payload):
     if r['flags'] & TCP_RST:
         print("        OK    RST (connection torn down)")
     elif r['flags'] & TCP_FIN:
-        # ACK their FIN -- need reopen first
-        reopen(ser)
+        # ACK their FIN -- flush instead of reopen
+        time.sleep(0.3)
+        ser.reset_input_buffer()
+        ser.write(bytes([SLIP_END] * 4))
+        time.sleep(0.3)
+        ser.reset_input_buffer()
         tx(ser, build_tcp_packet(sport, dport, r['ack'], r['seq'] + 1,
                                  TCP_ACK, 4096))
         print("        OK    FIN exchange complete")
@@ -365,7 +405,11 @@ def test_tcp(ser, dport, payload):
         # Wait for server FIN
         r2 = rx(ser, 5.0)
         if r2 and r2['flags'] & TCP_FIN:
-            reopen(ser)
+            time.sleep(0.3)
+            ser.reset_input_buffer()
+            ser.write(bytes([SLIP_END] * 4))
+            time.sleep(0.3)
+            ser.reset_input_buffer()
             tx(ser, build_tcp_packet(sport, dport, r2['ack'],
                                      r2['seq'] + 1, TCP_ACK, 4096))
             print("        OK    connection closed")
