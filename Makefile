@@ -249,6 +249,7 @@ SRCS += examples/15_http_get/http_get.c
 SRCS += examples/16_tcp_echo/tcp_echo.c
 SRCS += examples/17_http_fetch/http_fetch.c
 SRCS += examples/18_http_direct/http_direct.c
+SRCS += examples/19_https_direct/https_direct.c
 
 # TikuKits examples (requires both examples/ and tikukits/)
 ifeq ($(HAS_TIKUKITS),1)

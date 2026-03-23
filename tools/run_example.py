@@ -57,6 +57,16 @@ EXAMPLES = [
          "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_APP_NET=1"
          " -DTIKU_KITS_NET_SLIP_ESC_NUL_ENABLE=0"
          " -DTIKU_KITS_NET_MTU=300"),
+    (19, "HTTPS_DIRECT",         "HTTPS GET via PSK-TLS gateway",
+         "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_KITS_NET_HTTP_ENABLE=1"
+         " -DTIKU_APP_NET=1"
+         " -DTIKU_KITS_NET_SLIP_ESC_NUL_ENABLE=0"
+         " -DTIKU_KITS_NET_MTU=150"
+         " -DTIKU_KITS_NET_TCP_MAX_CONNS=1"
+         " -DTIKU_KITS_CRYPTO_TLS_MAX_FRAG_LEN=80"
+         " -DTIKU_KITS_CRYPTO_TLS_RECORD_BUF_SIZE=150"
+         " -DTIKU_KITS_NET_HTTP_REQ_BUF_SIZE=150"
+         " -DTIKU_KITS_NET_DNS_CACHE_SIZE=1"),
     (20, "KITS_MATRIX",          "Matrix operations",                ""),
     (21, "KITS_STATISTICS",      "Statistics functions",              ""),
     (22, "KITS_DISTANCE",        "Distance metrics",                 ""),
@@ -130,7 +140,7 @@ def find_port():
 def print_examples():
     """Print grouped example list."""
     categories = [
-        ("Core OS",          1,  18),
+        ("Core OS",          1,  19),
         ("Maths",           20,  22),
         ("Data Structures", 30,  44),
         ("Machine Learning",50,  56),
