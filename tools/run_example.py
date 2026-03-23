@@ -40,9 +40,23 @@ EXAMPLES = [
     (9,  "CHANNEL",              "Channel message passing",          ""),
     (10, "I2C_TEMP",             "I2C temperature sensor (MCP9808)", ""),
     (11, "DS18B20_TEMP",         "DS18B20 1-Wire temp sensor",       ""),
-    (12, "UDP_SEND",             "UDP sender over SLIP",             ""),
+    (12, "UDP_SEND",             "UDP sender over SLIP",
+         "-DTIKU_APP_NET=1"),
     (13, "TCP_SEND",             "TCP sender over SLIP",
-         "-DTIKU_KITS_NET_TCP_ENABLE=1"),
+         "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_APP_NET=1"),
+    (14, "DNS_RESOLVE",          "DNS resolver over SLIP",
+         "-DTIKU_APP_NET=1"),
+    (15, "HTTP_GET",             "HTTPS GET over SLIP",
+         "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_KITS_NET_HTTP_ENABLE=1"
+         " -DTIKU_APP_NET=1"),
+    (16, "TCP_ECHO",             "TCP echo client over SLIP",
+         "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_APP_NET=1"),
+    (17, "HTTP_FETCH",           "Fetch real webpage via gateway",
+         "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_APP_NET=1"),
+    (18, "HTTP_DIRECT",          "Direct HTTP GET to internet",
+         "-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_APP_NET=1"
+         " -DTIKU_KITS_NET_SLIP_ESC_NUL_ENABLE=0"
+         " -DTIKU_KITS_NET_MTU=300"),
     (20, "KITS_MATRIX",          "Matrix operations",                ""),
     (21, "KITS_STATISTICS",      "Statistics functions",              ""),
     (22, "KITS_DISTANCE",        "Distance metrics",                 ""),
@@ -79,6 +93,7 @@ EXAMPLES = [
     (74, "KITS_NET_DNS",         "DNS resolver (loopback)",          ""),
     (75, "KITS_NET_TLS",         "TLS 1.3 PSK crypto",
          "-DTIKU_KITS_NET_TCP_ENABLE=1"),
+    (76, "KITS_NET_HTTP",        "HTTP/1.1 client (loopback)",       ""),
 ]
 
 # ---------------------------------------------------------------------------
@@ -115,7 +130,7 @@ def find_port():
 def print_examples():
     """Print grouped example list."""
     categories = [
-        ("Core OS",          1,  13),
+        ("Core OS",          1,  18),
         ("Maths",           20,  22),
         ("Data Structures", 30,  44),
         ("Machine Learning",50,  56),

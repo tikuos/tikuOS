@@ -313,6 +313,314 @@ output.  Root causes identified:
 
 ---
 
+## MPU-Protected FRAM: Silent Write Failures (discovered 2026-03-23)
+
+Writing to `.persistent` (FRAM) variables without calling
+`tiku_mpu_unlock_nvm()` / `tiku_mpu_lock_nvm()` **silently fails**.
+The MSP430's Memory Protection Unit blocks the write, fires a silent
+NMI (when `MPUSEGIE` is set), and the FRAM retains its previous value.
+No crash, no error return — the code keeps running as if the write
+succeeded.
+
+This caused the HTTP fetch examples (17 and 18) to show
+`magic=0 status=0 body_len=0` in FRAM even though the TCP exchange
+completed successfully.  The bug affected two separate write sites:
+
+### Bug 1: HTTP parser body buffer writes
+
+The HTTP parser (`tiku_kits_net_http_parser_feed`) writes body bytes
+directly into the caller-supplied buffer via:
+
+```c
+p->body_buf[p->body_len++] = b;   /* line 187 of tiku_kits_net_http.c */
+```
+
+When `body_buf` points to a `.persistent` FRAM array (`resp_buf`), this
+write is blocked by the MPU.  The parser's `body_len` counter (in SRAM)
+increments correctly, but the FRAM buffer stays all zeros.
+
+**Symptom:** `body_len=256` but picocom shows blank body between the
+header and footer lines.
+
+**Fix:** Wrap `parser_feed()` calls with MPU unlock in the caller:
+
+```c
+uint16_t saved = tiku_mpu_unlock_nvm();
+tiku_kits_net_http_parser_feed(&parser, chunk, n);
+tiku_mpu_lock_nvm(saved);
+```
+
+### Bug 2: FRAM metadata save
+
+The example code wrote `resp_status`, `resp_body_len`, and `resp_magic`
+directly to FRAM without MPU unlock:
+
+```c
+resp_status   = parser.status_code;   /* silently fails */
+resp_body_len = parser.body_len;      /* silently fails */
+resp_magic    = RESP_MAGIC;           /* silently fails */
+```
+
+**Symptom:** `magic=0` on every boot, device never detects a cached
+response and always re-fetches.
+
+**Fix:** Wrap with `tiku_mpu_unlock_nvm()` / `tiku_mpu_lock_nvm()`.
+
+### Why this is insidious
+
+1. The TCP stack's `rx_write()` correctly unlocks MPU before writing
+   to its FRAM ring buffer — so TCP data reception works fine.
+2. The SRAM-resident parser struct (`parser.status_code`,
+   `parser.body_len`) is updated correctly — so diagnostic prints
+   from SRAM show the right values.
+3. Only the FRAM-resident copies (`resp_buf`, `resp_status`, etc.)
+   are silently dropped.
+
+This creates a confusing scenario where the TCP exchange succeeds,
+the parser reports correct values, but FRAM is empty.
+
+### Rule for future code
+
+**Any write to a `.persistent` variable MUST be wrapped with
+`tiku_mpu_unlock_nvm()` / `tiku_mpu_lock_nvm()`.**  The TCP stack
+does this correctly (see `rx_write()` in `tiku_kits_net_tcp.c`).
+Application code and examples must follow the same pattern.
+
+**Quick grep to audit:**
+
+```bash
+# Find .persistent variables
+grep -rn '__attribute__.*persistent' --include='*.c' --include='*.h'
+
+# Then verify each one has a corresponding mpu_unlock before writes
+```
+
+### Affected files (fixed 2026-03-23)
+
+- `examples/17_http_fetch/http_fetch.c` — added MPU unlock around
+  `parser_feed()` calls and FRAM metadata save
+- `examples/18_http_direct/http_direct.c` — same fixes
+
+---
+
+## SLIP NUL Escaping Breaks Kernel SLIP Driver (discovered 2026-03-23)
+
+The TikuOS SLIP encoder escapes `0x00` bytes as `[0xDB, 0xDE]` — a
+non-standard extension to work around an eZ-FET bug (two consecutive
+NUL bytes trigger a target reset).  The Linux kernel's `slattach`
+SLIP driver only understands standard RFC 1055 escaping and treats
+`[0xDB, 0xDE]` as `0xDE` (literal byte), corrupting every `0x00` in
+the IP packet.
+
+**Symptom:** `tcpdump -i sl0` shows `truncated-ip - 56832 bytes
+missing!` — the IP total length field `0x003A` (58) became `0xDE3A`
+(56890) because both 0x00 bytes were replaced with 0xDE.
+
+**Fix:** Added compile-time flag `TIKU_KITS_NET_SLIP_ESC_NUL_ENABLE`
+(default 1 for eZ-FET compatibility).  Example 18 sets it to 0 via
+`-DTIKU_KITS_NET_SLIP_ESC_NUL_ENABLE=0`.  The `case 0x00:` in
+`slip_send()` is `#if`-guarded.
+
+**Rule:** When using FT232/CP2102 + `slattach` (kernel SLIP), always
+disable NUL escaping.  When using eZ-FET backchannel or the Python
+gateway (which understands the custom escape), leave it enabled.
+
+### Affected files
+
+- `tikukits/net/tiku_kits_net.h` — new `SLIP_ESC_NUL_ENABLE` config
+- `tikukits/net/slip/tiku_kits_net_slip.c` — `#if`-guarded NUL case
+- `tools/run_example.py` — Example 18 passes `-DTIKU_KITS_NET_SLIP_ESC_NUL_ENABLE=0`
+
+---
+
+## Internet TCP Requires Larger MTU (discovered 2026-03-23)
+
+The default MTU of 128 bytes is sufficient for local SLIP links (the
+Python gateway sends small segments matching the device's MSS).  Real
+internet servers (Cloudflare, etc.) may send larger segments:
+
+- Cloudflare ignores MSS=100 and sends 200-byte TCP payloads
+- With a 40-byte IP+TCP header, the total packet is 240 bytes
+- The SLIP decoder silently drops frames exceeding `net_buf` (MTU)
+
+**Symptom:** `tcpdump` shows the HTTP 200 response arriving at sl0,
+but the device never ACKs it.  The server retransmits repeatedly,
+then the device RSTs.  FRAM shows `status=0 body_len=0`.
+
+**Fix:** Example 18 uses `-DTIKU_KITS_NET_MTU=300`, providing a
+300-byte packet buffer.  This accommodates the 240-byte response
+packets from Cloudflare.  Costs 172 extra bytes of SRAM.
+
+**Rule:** For internet-facing examples (Example 18), always use
+MTU >= 300.  For local gateway examples (Example 17), MTU=128 is
+sufficient.
+
+---
+
+## Protothread Event-Driven Wakeup Pitfall (discovered 2026-03-23)
+
+`TIKU_PROCESS_WAIT_EVENT_UNTIL(condition)` only evaluates `condition`
+when the process receives an event.  Setting a flag (like `connected`)
+from a callback does NOT wake the process — only timer events, poll
+events, or explicitly posted events do.
+
+**Symptom:** TCP handshake completes in <100ms, `connected=1` is set
+by the callback, but the process sleeps for 60 seconds (waiting for
+a one-shot timer).  The server times out and sends FIN before the
+device sends the HTTP GET.
+
+**Fix:** Replace one large timer with a short-interval polling loop:
+
+```c
+/* BAD: process sleeps until 60s timer fires */
+tiku_timer_set_event(&t, TIKU_CLOCK_SECOND * 60);
+TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER || flag);
+
+/* GOOD: process checks flag every 100ms */
+for (i = 0; i < 300 && !flag; i++) {
+    tiku_timer_set_event(&t, TIKU_CLOCK_MS_TO_TICKS(100));
+    TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+}
+```
+
+This is the same pattern the DNS resolver uses for polling.
+
+---
+
+## HTTP Fetch Gateway: TCP Window Overrun (discovered 2026-03-23)
+
+The Python gateway (`tools/http_fetch_gateway.py`) sent TCP data
+segments without respecting the device's receive window (255 bytes,
+from `TIKU_KITS_NET_TCP_RX_BUF_SIZE - 1`).  This caused two
+cascading failures:
+
+### The mechanism
+
+1. Device's TCP RX ring buffer is 255 bytes.
+2. Gateway sends 88-byte segments (MSS).  Segments 1-2 fit (176B).
+   Segment 3 only partially fits: device accepts 79 of 88 bytes,
+   filling the 255-byte buffer.
+3. Device's `rcv_nxt` advances by 79 (the accepted portion).
+4. Gateway's `our_seq` advances by 88 (the full segment size).
+5. **Gap of 9 bytes** between gateway's seq and device's `rcv_nxt`.
+6. The device's TCP stack only accepts **in-order segments**
+   (`seg_seq == rcv_nxt`, line 810 of `tiku_kits_net_tcp.c`).
+   All subsequent segments have `seg_seq != rcv_nxt` and are
+   **silently dropped** with a duplicate ACK.
+
+### The stale ACK problem
+
+After fixing the gateway to track partial ACKs and rewind `our_seq`,
+a second bug appeared: **stale window-update ACKs** from the device
+were misinterpreted as responses to newly sent segments.
+
+When the device's app reads from the TCP buffer, the TCP stack sends
+a window-update ACK with the same `ack` number (no new data) but an
+updated window size.  The gateway read this stale ACK and interpreted
+`acked = peer_ack - sent_seq = 0` as "0 bytes accepted," triggering
+unnecessary rewinds and retransmissions.
+
+### The fix (applied to `tools/http_fetch_gateway.py`)
+
+1. **Track actual ACK numbers:** After sending a segment, wait for
+   an ACK where `peer_ack > sent_seq` (new data acknowledged).
+   Skip ACKs where `peer_ack == sent_seq` (stale window updates).
+
+2. **Rewind on partial accept:** If `acked < expected`, rewind
+   `our_seq` and `offset` by the unaccepted portion.  Pause 1.5s
+   to let the device's app drain the buffer.
+
+3. **Handle window=0:** If all ACKs are stale and window=0, pause
+   for drain.  If window>0 but still no data ACK, abort (timeout).
+
+### Before/after
+
+**Before fix:**
+```
+Partial ACK: 79/88B accepted, window=0, pausing for drain...
+Partial ACK: 0/88B accepted, window=88, pausing for drain...
+Partial ACK: 0/88B accepted, window=255, pausing for drain...
+[repeats 4 more times, wasting ~9 seconds]
+ACK timeout, aborting
+```
+
+**After fix:**
+```
+Partial ACK: 79/88B, window=0
+Pausing for drain...
+Sent 612 bytes in 8 segments
+```
+
+### Key constants
+
+| Constant | Value | Location |
+|---|---|---|
+| `TIKU_KITS_NET_TCP_RX_BUF_SIZE` | 256 (255 usable) | `tiku_kits_net_tcp.h:268` |
+| `TIKU_KITS_NET_TCP_MSS` | 88 | `tiku_kits_net_tcp.h` |
+| Device TCP window (advertised) | 255 | `rcv_wnd = RX_BUF_SIZE - 1` |
+| Gateway `DEVICE_MSS` | 88 | `http_fetch_gateway.py:43` |
+
+### Affected files
+
+- `tools/http_fetch_gateway.py` — rewrote data send loop with ACK
+  tracking and stale ACK filtering
+
+---
+
+## Shared UART: Printf and SLIP Interference (discovered 2026-03-23)
+
+When using the FT232 adapter (`/dev/ttyUSB0`) for SLIP networking,
+`tiku_uart_printf()` output shares the **same physical UART**
+(eUSCI_A0) as SLIP-encoded TCP/IP frames.  This causes two problems:
+
+### Problem 1: Gateway sees printf as corrupt SLIP frames
+
+The device's boot-time `printf` output (e.g., `[FRAM] magic=0...`)
+is raw ASCII text injected into the UART TX stream.  The gateway's
+SLIP decoder accumulates these bytes until the next `0xC0` (SLIP END)
+delimiter, then delivers them as a "frame."  Since the bytes aren't
+a valid IP packet, `parse_ip_tcp()` returns None and the frame is
+dropped.
+
+This is **harmless** as long as the printf happens before or after
+the TCP exchange (the 2-second delay in both examples ensures this).
+But if printf were called **during** a SLIP frame transmission, it
+would corrupt the frame by injecting non-SLIP bytes mid-stream.
+
+### Problem 2: Picocom shows garbled binary
+
+When picocom is opened on `/dev/ttyUSB0` (with no gateway running),
+the device's SLIP frames appear as garbled binary (`�E����...`).
+The `0x45` byte (`E`) is the IPv4 version+IHL header — a recognizable
+signature of raw IP packets leaking through.
+
+Readable printf text is interleaved with binary SLIP data, making
+the output confusing.
+
+### Implications
+
+- **Cannot use picocom for debugging while SLIP is active.**  The
+  UART carries both printf text and SLIP binary; picocom shows both.
+- **Gateway must tolerate non-TCP frames** (Frames #1, #2 in every
+  run are printf debris).
+- **No separate console channel** when using FT232.  The eZ-FET
+  backchannel (ttyACM0/1) could theoretically serve as a console,
+  but its J13 TXD/RXD jumpers are removed for FT232 operation.
+
+### Workarounds
+
+1. **LED indicators:** Both examples use LED1 = HTTP 200 success,
+   LED2 = error.  Use LEDs instead of printf for real-time status.
+2. **FRAM-cached results:** After a successful fetch, press RESET
+   and open picocom.  The device detects `magic=0xBEEF` in FRAM
+   and prints the cached response without doing another TCP exchange
+   (no SLIP interference during the print).
+3. **Suppress printf during SLIP:** Future work could disable printf
+   when the net process is active, or route printf to eUSCI_A1
+   (BoosterPack header) via a second UART adapter.
+
+---
+
 ## Claude Code Edit Tool: Whitespace Accumulation Bug (2026-03-22)
 
 When Claude Code edits files using the Edit tool (exact string

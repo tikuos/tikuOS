@@ -244,6 +244,11 @@ SRCS += examples/10_i2c_temp/i2c_temp.c
 SRCS += examples/11_ds18b20_temp/ds18b20_temp.c
 SRCS += examples/12_udp_send/udp_send.c
 SRCS += examples/13_tcp_send/tcp_send.c
+SRCS += examples/14_dns_resolve/dns_resolve.c
+SRCS += examples/15_http_get/http_get.c
+SRCS += examples/16_tcp_echo/tcp_echo.c
+SRCS += examples/17_http_fetch/http_fetch.c
+SRCS += examples/18_http_direct/http_direct.c
 
 # TikuKits examples (requires both examples/ and tikukits/)
 ifeq ($(HAS_TIKUKITS),1)
@@ -320,6 +325,7 @@ SRCS += $(wildcard tikukits/ds/trie/*.c)
 SRCS += $(wildcard tikukits/ds/timerwheel/*.c)
 SRCS += $(wildcard tikukits/net/slip/*.c)
 SRCS += $(wildcard tikukits/net/ipv4/*.c)
+SRCS += $(wildcard tikukits/net/http/*.c)
 SRCS += $(wildcard tikukits/time/*.c)
 SRCS += $(wildcard tikukits/time/ntp/*.c)
 SRCS += $(wildcard tikukits/codec/cbor/*.c)
