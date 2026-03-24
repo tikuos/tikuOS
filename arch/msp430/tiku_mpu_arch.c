@@ -45,6 +45,13 @@
  * space into three segments. The register values are the actual
  * boundary addresses right-shifted by 4.
  */
+/**
+ * @brief Set up the three MPU segment boundaries from device macros.
+ *
+ * Writes MPUSEGB1 and MPUSEGB2 (boundary addresses right-shifted by 4)
+ * to divide the FRAM address space into three protection segments.
+ * Must be called before SAM permissions have any effect.
+ */
 void tiku_mpu_arch_init_segments(void)
 {
     MPUCTL0  = MPUPW;                                  /* Unlock config */
@@ -57,6 +64,7 @@ void tiku_mpu_arch_init_segments(void)
 /* MPU REGISTER ACCESS                                                       */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Read the current MPU Segment Access Management register. */
 uint16_t tiku_mpu_arch_get_sam(void)
 {
     return MPUSAM;
@@ -82,16 +90,19 @@ void tiku_mpu_arch_set_sam(uint16_t sam)
     MPUCTL0 = MPUPW | MPUENA | flags;     /* Re-enable + preserved flags */
 }
 
+/** @brief Read the raw MPUCTL0 register value. */
 uint16_t tiku_mpu_arch_get_ctl(void)
 {
     return MPUCTL0;
 }
 
+/** @brief Disable global interrupts (wrapper around __disable_interrupt). */
 void tiku_mpu_arch_disable_irq(void)
 {
     __disable_interrupt();
 }
 
+/** @brief Enable global interrupts (wrapper around __enable_interrupt). */
 void tiku_mpu_arch_enable_irq(void)
 {
     __enable_interrupt();
@@ -178,11 +189,13 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
  */
 static volatile uint16_t latched_violation_flags;
 
+/** @brief Return the software-latched MPU violation flags. */
 uint16_t tiku_mpu_arch_get_violation_flags(void)
 {
     return latched_violation_flags;
 }
 
+/** @brief Clear both the software latch and hardware MPUCTL1 flags. */
 void tiku_mpu_arch_clear_violation_flags(void)
 {
     latched_violation_flags = 0;
@@ -191,6 +204,7 @@ void tiku_mpu_arch_clear_violation_flags(void)
     MPUCTL0 = MPUPW | MPUENA | MPUSEGIE;   /* Re-enable MPU + NMI */
 }
 
+/** @brief Enable the MPU violation NMI (MPUSEGIE bit). */
 void tiku_mpu_arch_enable_violation_nmi(void)
 {
     MPUCTL0 = MPUPW | MPUENA | MPUSEGIE;

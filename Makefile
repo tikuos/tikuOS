@@ -272,6 +272,7 @@ CFLAGS += -DTIKU_APP_CLI=1
 SRCS += apps/cli/tiku_cli_io.c
 SRCS += apps/cli/tiku_cli_parser.c
 SRCS += apps/cli/tiku_cli.c
+SRCS += apps/cli/tiku_cli_io_tcp.c
 SRCS += apps/cli/commands/tiku_cli_cmd_ps.c
 SRCS += apps/cli/commands/tiku_cli_cmd_info.c
 SRCS += apps/cli/commands/tiku_cli_cmd_timer.c
@@ -355,6 +356,7 @@ TARGET = main.elf
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
+.SUFFIXES:
 .PHONY: all clean flash run debug erase size monitor deploy docs docs-clean
 
 all: $(TARGET) size

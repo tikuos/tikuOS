@@ -64,6 +64,13 @@ static int comp_match(const char *comp, size_t len, const char *name)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Register the root node of the VFS tree.
+ *
+ * All subsequent resolve/read/write calls walk from this root.
+ * The tree is static (built at compile time); init just stores
+ * the pointer.
+ */
 void tiku_vfs_init(const tiku_vfs_node_t *root)
 {
     vfs_root = root;
@@ -71,6 +78,15 @@ void tiku_vfs_init(const tiku_vfs_node_t *root)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Walk the VFS tree to resolve a slash-separated path.
+ *
+ * Splits the path into components, descends through directory
+ * nodes by matching each component against child names (linear
+ * scan per level).  Returns NULL on any mismatch, non-directory
+ * intermediate, or NULL root.  Handles leading/trailing/duplicate
+ * slashes gracefully.
+ */
 const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 {
     const tiku_vfs_node_t *node;
@@ -133,6 +149,11 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Resolve a path and invoke the file's read handler.
+ *
+ * Returns -1 if the path does not resolve to a readable file.
+ */
 int tiku_vfs_read(const char *path, char *buf, size_t max)
 {
     const tiku_vfs_node_t *node;
@@ -147,6 +168,11 @@ int tiku_vfs_read(const char *path, char *buf, size_t max)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Resolve a path and invoke the file's write handler.
+ *
+ * Returns -1 if the path does not resolve to a writable file.
+ */
 int tiku_vfs_write(const char *path, const char *data, size_t len)
 {
     const tiku_vfs_node_t *node;
@@ -161,6 +187,13 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief List the children of a directory node.
+ *
+ * Resolves the path, verifies it is a directory, then invokes
+ * @p callback for each child with name, type, and the caller's
+ * context pointer.  Returns -1 if the path is not a directory.
+ */
 int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
 {
     const tiku_vfs_node_t *node;

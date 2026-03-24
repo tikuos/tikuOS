@@ -6,6 +6,10 @@
  *
  * tiku_htimer_arch.c - MSP430 hardware timer architecture implementation
  *
+ * Timer A1-based single-shot compare-match timer for the htimer
+ * subsystem.  Runs in continuous mode; a compare interrupt on
+ * CCR0 fires the callback registered via tiku_htimer_set().
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
@@ -54,6 +58,13 @@ TIKU_ISR(TIMER1_A0_VECTOR, tiku_htimer_isr)
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Configure Timer A1 for continuous-mode compare-match operation.
+ *
+ * Sets the clock source, dividers, and enables the CCR0 interrupt.
+ * Saves and restores the interrupt state rather than unconditionally
+ * enabling GIE (the scheduler loop enables GIE at the correct time).
+ */
 void tiku_htimer_arch_init(void)
 {
     unsigned int sr = __get_interrupt_state();
@@ -85,6 +96,12 @@ void tiku_htimer_arch_init(void)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Configure the ACLK source for Timer A1 (device-specific).
+ *
+ * Only relevant when TIKU_HTIMER_CLOCK_SOURCE is ACLK.  Handles
+ * FR5969/FR5994 (CSCTL2) and FR2433 (CSCTL4) register differences.
+ */
 void tiku_htimer_arch_configure_aclk(void)
 {
 #if TIKU_HTIMER_CLOCK_SOURCE == TIKU_HTIMER_SOURCE_ACLK
@@ -125,6 +142,13 @@ void tiku_htimer_arch_configure_aclk(void)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Read the current Timer A1 counter with double-read stability.
+ *
+ * TA1R is an asynchronous register; reading it once may return a
+ * stale value if the counter increments between the CPU's two-phase
+ * read.  Reading twice until both match guarantees a valid snapshot.
+ */
 tiku_htimer_clock_t tiku_htimer_arch_now(void)
 {
     tiku_htimer_clock_t t1, t2;
@@ -139,6 +163,12 @@ tiku_htimer_clock_t tiku_htimer_arch_now(void)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Arm the Timer A1 CCR0 compare match for time @p t.
+ *
+ * Writes the target value to TA1CCR0, clears any pending interrupt
+ * flag, and enables the compare interrupt.
+ */
 void tiku_htimer_arch_schedule(tiku_htimer_clock_t t)
 {
     HTIMER_ARCH_PRINTF("Scheduling hardware interrupt: target=%u, now=%u\n",
@@ -153,6 +183,7 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Disable the Timer A1 CCR0 compare interrupt. */
 void tiku_htimer_arch_disable_interrupt(void)
 {
     TA1CCTL0 &= ~CCIE;
@@ -161,6 +192,7 @@ void tiku_htimer_arch_disable_interrupt(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Enable the Timer A1 CCR0 compare interrupt. */
 void tiku_htimer_arch_enable_interrupt(void)
 {
     TA1CCTL0 |= CCIE;
@@ -169,6 +201,7 @@ void tiku_htimer_arch_enable_interrupt(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Return non-zero if a Timer A1 CCR0 interrupt is pending. */
 int tiku_htimer_arch_interrupt_pending(void)
 {
     return (TA1CCTL0 & CCIFG) ? 1 : 0;
@@ -176,6 +209,7 @@ int tiku_htimer_arch_interrupt_pending(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Return the raw TA1CTL register value for diagnostics. */
 unsigned int tiku_htimer_arch_get_timer_config(void)
 {
     return TA1CTL;
@@ -183,6 +217,7 @@ unsigned int tiku_htimer_arch_get_timer_config(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Print the full htimer configuration to debug output. */
 void tiku_htimer_arch_print_config(void)
 {
     tiku_htimer_config_t config;
@@ -247,6 +282,7 @@ void tiku_htimer_arch_print_config(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Reset the Timer A1 counter to zero (TACLR). */
 void tiku_htimer_arch_reset_counter(void)
 {
     __disable_interrupt();

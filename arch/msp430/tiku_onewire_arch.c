@@ -78,6 +78,12 @@ ow_read(void)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise the 1-Wire GPIO pin.
+ *
+ * Configures the pin as input (pull-up drives the line high),
+ * clears the output latch, and ensures GPIO mode (SEL0=SEL1=0).
+ */
 int
 tiku_onewire_arch_init(void)
 {
@@ -92,6 +98,7 @@ tiku_onewire_arch_init(void)
     return TIKU_OW_OK;
 }
 
+/** @brief Release the 1-Wire pin (set to input, external pull-up holds high). */
 void
 tiku_onewire_arch_close(void)
 {

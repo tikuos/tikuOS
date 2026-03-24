@@ -71,6 +71,11 @@ void tiku_sched_init(void)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Start a process through the scheduler.
+ *
+ * Wrapper around tiku_process_start() that adds debug tracing.
+ */
 void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
 {
     SCHED_PRINTF("Started: %s\n", p->name);
@@ -154,6 +159,7 @@ void tiku_sched_loop(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Signal the scheduler to stop its main loop. */
 void tiku_sched_stop(void)
 {
     SCHED_PRINTF("Stopped\n");
@@ -162,6 +168,12 @@ void tiku_sched_stop(void)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Check if the scheduler has any pending work.
+ *
+ * Returns non-zero if the process event queue is non-empty or
+ * if any software timer is active.
+ */
 uint8_t tiku_sched_has_pending(void)
 {
     /* Work is pending if the process event queue is non-empty
@@ -179,6 +191,7 @@ uint8_t tiku_sched_has_pending(void)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Register a callback invoked when the scheduler is idle. */
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook)
 {
     idle_hook = hook;
@@ -186,6 +199,7 @@ void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook)
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Wake the timer management process to check for expired timers. */
 void tiku_sched_notify(void)
 {
     tiku_timer_request_poll();

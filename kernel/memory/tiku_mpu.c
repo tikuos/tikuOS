@@ -130,16 +130,19 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
  * violated.
  */
 
+/** @brief Enable NMI-on-violation (instead of device reset). */
 void tiku_mpu_enable_violation_nmi(void)
 {
     tiku_mpu_arch_enable_violation_nmi();
 }
 
+/** @brief Return the latched MPU violation flags from the NMI ISR. */
 uint16_t tiku_mpu_get_violation_flags(void)
 {
     return tiku_mpu_arch_get_violation_flags();
 }
 
+/** @brief Clear both the software latch and hardware violation flags. */
 void tiku_mpu_clear_violation_flags(void)
 {
     tiku_mpu_arch_clear_violation_flags();

@@ -56,8 +56,14 @@
 static volatile unsigned int tiku_atomic_nesting = 0;
 static volatile unsigned int tiku_atomic_gie_saved = 0;
 
-/*
- * Enter atomic section: save GIE on outermost call, then disable
+/**
+ * @brief Enter an atomic (interrupt-disabled) section.
+ *
+ * On the outermost call (nesting == 0), snapshots the current GIE
+ * bit and disables interrupts.  Nested calls simply increment the
+ * counter.  ISR-safe: if an ISR fires between __get_interrupt_state
+ * and __disable_interrupt, it runs its own balanced pair without
+ * corrupting the main context's saved state.
  */
 void tiku_atomic_enter() {
 
@@ -70,9 +76,12 @@ void tiku_atomic_enter() {
 
 }
 
-/*
- * Exit atomic section: restore GIE only when fully unnested and
- * only if it was set before the outermost enter.
+/**
+ * @brief Exit an atomic section.
+ *
+ * Decrements the nesting counter.  On the outermost exit
+ * (nesting reaches 0), re-enables interrupts only if GIE was
+ * originally set before the matching outermost enter.
  */
 void tiku_atomic_exit() {
 
@@ -82,8 +91,10 @@ void tiku_atomic_exit() {
 
 }
 
-/*
- * Initialize CPU boot sequence
+/**
+ * @brief Initialise the CPU boot sequence (platform-specific).
+ *
+ * On MSP430, stops the watchdog and configures initial pin state.
  */
 void tiku_cpu_boot_init(void) {
 
@@ -92,8 +103,11 @@ void tiku_cpu_boot_init(void) {
 #endif
 }
 
-/*
- * Initialize CPU frequency
+/**
+ * @brief Configure the CPU clock frequency (platform-specific).
+ *
+ * On MSP430, programs the DCO and CS module for the requested
+ * frequency.  Valid values are platform-dependent (1, 4, 8, 16 MHz).
  */
 void tiku_cpu_freq_init(unsigned int cpu_freq) {
 
