@@ -91,6 +91,13 @@ CFLAGS += -I$(MSP430_SUPPORT_DIR)
 endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
+
+# UART baud rate (default 9600; override: make UART_BAUD=115200)
+UART_BAUD ?=
+ifneq ($(UART_BAUD),)
+CFLAGS += -DTIKU_BOARD_UART_BAUD=$(UART_BAUD)
+endif
+
 CFLAGS += $(EXTRA_CFLAGS)
 
 ifeq ($(HAS_APPS),1)
@@ -328,6 +335,7 @@ SRCS += $(wildcard tikukits/ds/timerwheel/*.c)
 SRCS += $(wildcard tikukits/net/slip/*.c)
 SRCS += $(wildcard tikukits/net/ipv4/*.c)
 SRCS += $(wildcard tikukits/net/http/*.c)
+SRCS += $(wildcard tikukits/net/mqtt/*.c)
 SRCS += $(wildcard tikukits/time/*.c)
 SRCS += $(wildcard tikukits/time/ntp/*.c)
 SRCS += $(wildcard tikukits/codec/cbor/*.c)
@@ -413,22 +421,25 @@ deploy: clean flash monitor
 # ---------------------------------------------------------------------------
 # Serial Monitor  (auto-detects TI LaunchPad, picks picocom or screen)
 # ---------------------------------------------------------------------------
-BAUD ?= 9600
+BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),9600)
 
-# Auto-detect: prefer /dev/ttyACM* with TI vendor ID (0451/2047),
-# fall back to first /dev/ttyACM* present.
+# Auto-detect serial port.
+# Prefer /dev/ttyUSB* (FTDI/CP2102 external adapter) over ttyACM*
+# (eZ-FET backchannel) since external adapters are used for SLIP
+# networking and avoid the eZ-FET DTR-reset bug.
 PORT ?= $(shell \
-	for dev in /dev/ttyACM*; do \
+	ls /dev/ttyUSB* 2>/dev/null | head -1 || \
+	(for dev in /dev/ttyACM*; do \
 		[ -e "$$dev" ] || continue; \
 		vid=$$(cat "/sys/class/tty/$$(basename $$dev)/device/../idVendor" 2>/dev/null); \
 		if [ "$$vid" = "0451" ] || [ "$$vid" = "2047" ]; then echo "$$dev"; exit 0; fi; \
 	done; \
-	ls /dev/ttyACM* 2>/dev/null | head -1)
+	ls /dev/ttyACM* 2>/dev/null | head -1))
 
 monitor:
 	@if [ -z "$(PORT)" ]; then \
-		echo "Error: No serial port found (/dev/ttyACM*)"; \
-		echo "  Is the LaunchPad plugged in?"; \
+		echo "Error: No serial port found (/dev/ttyUSB* or /dev/ttyACM*)"; \
+		echo "  Is the FTDI adapter or LaunchPad plugged in?"; \
 		exit 1; \
 	fi; \
 	if command -v picocom >/dev/null 2>&1; then \

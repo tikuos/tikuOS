@@ -73,11 +73,48 @@
         P2SEL0 &= (uint8_t)~(BIT0 | BIT1);                                     \
     } while(0)
 
-/** UART baud-rate config: 9600 baud from 8 MHz SMCLK (oversampling).
- *  Values from TI SLAU367 Table 30-5: BRW=52, BRF=1, BRS=0x49. */
+/** UART baud-rate selection from 8 MHz SMCLK (oversampling).
+ *  Values from TI SLAU367 Table 30-5 for eUSCI_A @ 8 MHz.
+ *
+ *  Override at compile time:
+ *    make APP=cli MCU=msp430fr5969 UART_BAUD=115200
+ *
+ *  Supported: 9600 (default), 19200, 38400, 57600, 115200.
+ */
 #define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
+
+#ifndef TIKU_BOARD_UART_BAUD
+#define TIKU_BOARD_UART_BAUD        9600
+#endif
+
+#if   TIKU_BOARD_UART_BAUD == 9600
+/*  N = 8000000/9600 = 833.33  → BRW=52, BRF=1, BRS=0x49 */
 #define TIKU_BOARD_UART_BRW         52
 #define TIKU_BOARD_UART_MCTLW       ((0x49 << 8) | UCOS16 | (0x01 << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 19200
+/*  N = 8000000/19200 = 416.67 → BRW=26, BRF=0, BRS=0xB6 */
+#define TIKU_BOARD_UART_BRW         26
+#define TIKU_BOARD_UART_MCTLW       ((0xB6 << 8) | UCOS16 | (0x00 << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 38400
+/*  N = 8000000/38400 = 208.33 → BRW=13, BRF=0, BRS=0x84 */
+#define TIKU_BOARD_UART_BRW         13
+#define TIKU_BOARD_UART_MCTLW       ((0x84 << 8) | UCOS16 | (0x00 << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 57600
+/*  N = 8000000/57600 = 138.89 → BRW=8, BRF=10, BRS=0xF7 */
+#define TIKU_BOARD_UART_BRW         8
+#define TIKU_BOARD_UART_MCTLW       ((0xF7 << 8) | UCOS16 | (0x0A << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 115200
+/*  N = 8000000/115200 = 69.44 → BRW=4, BRF=5, BRS=0x55 */
+#define TIKU_BOARD_UART_BRW         4
+#define TIKU_BOARD_UART_MCTLW       ((0x55 << 8) | UCOS16 | (0x05 << 4))
+
+#else
+#error "Unsupported TIKU_BOARD_UART_BAUD (use 9600/19200/38400/57600/115200)"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* Button S1 - P4.5 (Active low)                                             */
