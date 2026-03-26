@@ -131,6 +131,57 @@ static void build_freelist(tiku_pool_t *pool)
 /*---------------------------------------------------------------------------*/
 
 /**
+ * @brief Initialize a pool without region-registry validation
+ *
+ * Lightweight variant of tiku_pool_create() that skips region
+ * checks. Intended for library code (e.g. tikukits/ds) that
+ * needs a pool over an embedded struct member where the region
+ * registry may not yet be initialized.
+ *
+ * The pool is marked as SRAM tier, id 0. All other pool operations
+ * (alloc, free, reset, stats) work identically.
+ *
+ * @param pool         Pool control block to initialize
+ * @param buf          Pointer to the backing buffer
+ * @param block_size   Requested size of each block in bytes
+ * @param block_count  Number of blocks
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
+ */
+tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
+                                     tiku_mem_arch_size_t block_size,
+                                     tiku_mem_arch_size_t block_count)
+{
+    tiku_mem_arch_size_t aligned_size;
+    tiku_mem_arch_size_t min_size;
+
+    if (pool == NULL || buf == NULL || block_count == 0) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
+    aligned_size = align_up(block_size);
+    min_size     = min_block_size();
+
+    if (aligned_size < min_size) {
+        aligned_size = min_size;
+    }
+
+    pool->buf         = buf;
+    pool->block_size  = aligned_size;
+    pool->block_count = block_count;
+    pool->used_count  = 0;
+    pool->peak_count  = 0;
+    pool->id          = 0;
+    pool->active      = 1;
+    pool->tier        = TIKU_MEM_SRAM;
+
+    build_freelist(pool);
+
+    return TIKU_MEM_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+
+/**
  * @brief Initialize a pool over a caller-provided buffer
  *
  * The pool does not own or allocate the buffer — the caller provides

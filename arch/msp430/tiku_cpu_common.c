@@ -62,11 +62,11 @@
 /**
  * @brief Delay for a specified number of milliseconds
  * @param ms Number of milliseconds to delay
- * 
+ *
  * This function provides a software-based delay using nested loops.
  * The delay is approximate and depends on CPU frequency and compiler
  * optimization settings.
- * 
+ *
  * @note This is a blocking delay function
  * @warning Not suitable for precise timing requirements
  * @warning Accuracy varies with CPU frequency and optimization level
@@ -75,15 +75,15 @@
 void tiku_cpu_msp430_delay_ms(unsigned int ms)
 {
     unsigned int i, j;
-    
+
     for (i = 0; i < ms; i++) {
 
         for (j = 0; j < TIKU_DELAY_LOOPS_PER_MS; j++) {
 
-            __no_operation(); 
-       
+            __no_operation();
+
         }
-    
+
     }
 }
 

@@ -21,8 +21,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef __TIKU_CPU_WATCHDOG_ARCH_H__
-#define __TIKU_CPU_WATCHDOG_ARCH_H__
+#ifndef TIKU_CPU_WATCHDOG_ARCH_H_
+#define TIKU_CPU_WATCHDOG_ARCH_H_
 
 #include <msp430.h>
 #include <stdint.h>
@@ -82,4 +82,4 @@ void tiku_cpu_msp430_watchdog_config_arch(tiku_wdt_mode_t mode,
 void tiku_cpu_msp430_watchdog_on_arch(tiku_wdt_clk_t src, tiku_wdt_interval_t isel);
 void tiku_cpu_msp430_watchdog_interval_timer_on_arch(tiku_wdt_clk_t src, tiku_wdt_interval_t isel);
 
-#endif /* __TIKU_CPU_WATCHDOG_ARCH_H__ */
+#endif /* TIKU_CPU_WATCHDOG_ARCH_H_ */

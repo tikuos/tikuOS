@@ -38,7 +38,7 @@
 /**
  * @def LC_CONF_INCLUDE
  * @brief Optional configuration to select a specific LC implementation
- * 
+ *
  * Define this before including lc.h to use a custom implementation.
  * Common values:
  * - "lc-switch.h" for switch-based implementation
@@ -56,7 +56,7 @@
 /**
  * @typedef lc_t
  * @brief Type for storing local continuation state
- * 
+ *
  * In the switch-based implementation, this stores the line number
  * where execution should resume. The type is unsigned short to
  * minimize memory usage while supporting files up to 65,535 lines.
@@ -71,10 +71,10 @@ typedef unsigned short lc_t;
  * @def LC_INIT(s)
  * @brief Initialize a local continuation variable
  * @param s The lc_t variable to initialize
- * 
+ *
  * Resets the continuation state to the beginning. Must be called
  * before first use of LC_RESUME.
- * 
+ *
  * Example:
  * @code
  *   lc_t continuation;
@@ -87,11 +87,11 @@ typedef unsigned short lc_t;
  * @def LC_RESUME(s)
  * @brief Resume execution from a saved continuation point
  * @param s The lc_t variable containing the saved state
- * 
+ *
  * Begins a switch statement that will jump to the previously saved
  * position (or case 0 if no position was saved). This macro must be
  * paired with LC_END(s).
- * 
+ *
  * Example:
  * @code
  *   LC_RESUME(continuation);
@@ -101,7 +101,7 @@ typedef unsigned short lc_t;
  *     // Next call will resume here
  *   LC_END(continuation);
  * @endcode
- * 
+ *
  * @warning The code between LC_RESUME and LC_END becomes part of a
  *          switch statement, so certain C constructs may not work as
  *          expected (e.g., variable declarations need to be in blocks).
@@ -112,16 +112,16 @@ typedef unsigned short lc_t;
  * @def LC_SET(s)
  * @brief Save the current execution position
  * @param s The lc_t variable to store the position in
- * 
+ *
  * Captures the current line number and creates a case label at this
  * position. When LC_RESUME is called with the same variable, execution
  * will jump to this point.
- * 
+ *
  * Technical details:
  * - Uses __LINE__ preprocessor macro to get the current line number
  * - Creates a case label with the same line number
  * - Stores the line number in the continuation variable
- * 
+ *
  * Example:
  * @code
  *   LC_SET(continuation);  // Save position
@@ -130,7 +130,7 @@ typedef unsigned short lc_t;
  *   }
  *   // Execution resumes here when ready
  * @endcode
- * 
+ *
  * @warning Cannot be used inside another switch statement
  * @warning Line numbers must be unique within the function
  */
@@ -142,10 +142,10 @@ typedef unsigned short lc_t;
  * @def LC_END(s)
  * @brief End the local continuation block
  * @param s The lc_t variable (included for symmetry, not used)
- * 
+ *
  * Closes the switch statement started by LC_RESUME. Every LC_RESUME
  * must have a corresponding LC_END.
- * 
+ *
  * Example:
  * @code
  *   LC_RESUME(continuation);
@@ -163,7 +163,7 @@ typedef unsigned short lc_t;
  * @def LC_RESET(s)
  * @brief Reset continuation to start from the beginning
  * @param s The lc_t variable to reset
- * 
+ *
  * Alias for LC_INIT, provided for semantic clarity when resetting
  * an already-used continuation.
  */
@@ -174,9 +174,9 @@ typedef unsigned short lc_t;
  * @brief Check if a continuation has been set
  * @param s The lc_t variable to check
  * @return Non-zero if continuation has been set, zero otherwise
- * 
+ *
  * Useful for determining if this is the first call or a resumed call.
- * 
+ *
  * Example:
  * @code
  *   if (!LC_IS_RESUMED(continuation)) {
@@ -194,42 +194,42 @@ typedef unsigned short lc_t;
 
 /**
  * @section lc_usage Usage Guidelines
- * 
+ *
  * Local continuations are typically used as building blocks for higher-level
  * abstractions like protothreads. Direct use requires careful attention to:
- * 
+ *
  * 1. **State Preservation**: Local variables are NOT preserved across
  *    continuation points. Use static variables or external storage for
  *    data that must persist.
- * 
+ *
  * 2. **Nesting Restrictions**: LC_SET cannot be used inside switch statements
  *    or other constructs that interfere with case labels.
- * 
+ *
  * 3. **Line Number Uniqueness**: Each LC_SET in a function must be on a
  *    different line to ensure unique case labels.
- * 
+ *
  * 4. **Function Scope**: Continuations only work within a single function.
  *    They cannot be used to jump between functions.
- * 
+ *
  * @section lc_example Complete Example
- * 
+ *
  * @code
  * int example_function(lc_t *lc, int *counter) {
  *   LC_RESUME(*lc);
- *   
+ *
  *   // First execution starts here
  *   *counter = 0;
- *   
+ *
  *   while (*counter < 10) {
  *     LC_SET(*lc);  // Save position before returning
  *     (*counter)++;
  *     return 0;     // Not done yet
  *   }
- *   
+ *
  *   LC_END(*lc);
  *   return 1;       // Done
  * }
- * 
+ *
  * // Usage:
  * lc_t lc;
  * int counter;
@@ -238,13 +238,13 @@ typedef unsigned short lc_t;
  *   // Function will be called 10 times
  * }
  * @endcode
- * 
+ *
  * @section lc_alternatives Alternative Implementations
- * 
+ *
  * For platforms with GCC or compatible compilers, the address-labels
  * implementation may provide better performance and fewer restrictions.
  * Define LC_CONF_INCLUDE to use an alternative:
- * 
+ *
  * @code
  * #define LC_CONF_INCLUDE "lc-addrlabels.h"
  * #include "lc.h"

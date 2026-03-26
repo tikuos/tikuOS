@@ -40,7 +40,7 @@
 /**
  * @struct pt
  * @brief Protothread control structure
- * 
+ *
  * Each protothread requires a control structure to maintain its state.
  * This structure must be preserved between calls to the protothread function.
  */
@@ -72,10 +72,10 @@ struct pt {
  * @def PT_INIT(pt)
  * @brief Initialize a protothread control structure
  * @param pt Pointer to the protothread control structure
- * 
+ *
  * Must be called before starting the protothread for the first time.
  * This resets the protothread to its initial state.
- * 
+ *
  * Example:
  * @code
  *   struct pt my_thread;
@@ -93,9 +93,9 @@ struct pt {
  * @brief Declare a protothread function
  * @param name_args Function name and parameters
  * @return char - One of the PT_* return codes
- * 
+ *
  * All protothread functions must return char and use this macro.
- * 
+ *
  * Example:
  * @code
  *   PT_THREAD(my_thread(struct pt *pt, int data))
@@ -112,7 +112,7 @@ struct pt {
  * @def PT_BEGIN(pt)
  * @brief Mark the beginning of a protothread
  * @param pt Pointer to the protothread control structure
- * 
+ *
  * This macro MUST be the first statement in a protothread function.
  * It sets up the protothread's execution context.
  */
@@ -125,7 +125,7 @@ struct pt {
  * @def PT_END(pt)
  * @brief Mark the end of a protothread
  * @param pt Pointer to the protothread control structure
- * 
+ *
  * This macro MUST be the last statement in a protothread function.
  * It cleans up the protothread and returns PT_ENDED.
  */
@@ -145,11 +145,11 @@ struct pt {
  * @brief Block the thread until a condition becomes true
  * @param pt Pointer to the protothread control structure
  * @param condition Boolean expression to evaluate
- * 
+ *
  * The thread will block and return PT_WAITING until the condition
  * evaluates to true. The condition is checked each time the thread
  * is scheduled.
- * 
+ *
  * Example:
  * @code
  *   PT_WAIT_UNTIL(pt, sensor_ready == 1);
@@ -168,10 +168,10 @@ struct pt {
  * @brief Block the thread while a condition is true
  * @param pt Pointer to the protothread control structure
  * @param cond Boolean expression to evaluate
- * 
+ *
  * The thread will block as long as the condition remains true.
  * This is the inverse of PT_WAIT_UNTIL.
- * 
+ *
  * Example:
  * @code
  *   PT_WAIT_WHILE(pt, buffer_full());
@@ -188,7 +188,7 @@ struct pt {
  * @brief Wait for a child protothread to complete
  * @param pt Pointer to the parent protothread control structure
  * @param thread Function call to the child protothread
- * 
+ *
  * Blocks the parent thread until the child thread exits.
  * The child thread function is called repeatedly until it returns
  * a value indicating completion (PT_EXITED or PT_ENDED).
@@ -201,10 +201,10 @@ struct pt {
  * @param pt Pointer to the parent protothread control structure
  * @param child Pointer to the child protothread control structure
  * @param thread Function call to the child protothread
- * 
+ *
  * This macro initializes a child protothread and waits for it to complete.
  * It's a convenience wrapper that combines PT_INIT and PT_WAIT_THREAD.
- * 
+ *
  * Example:
  * @code
  *   struct pt child_pt;
@@ -225,7 +225,7 @@ struct pt {
  * @def PT_RESTART(pt)
  * @brief Restart the protothread from the beginning
  * @param pt Pointer to the protothread control structure
- * 
+ *
  * Resets the thread's state and starts execution from PT_BEGIN.
  * Returns immediately with PT_WAITING.
  */
@@ -239,7 +239,7 @@ struct pt {
  * @def PT_EXIT(pt)
  * @brief Exit the protothread immediately
  * @param pt Pointer to the protothread control structure
- * 
+ *
  * Terminates the thread and resets its state.
  * Returns PT_EXITED to indicate abnormal termination.
  */
@@ -258,10 +258,10 @@ struct pt {
  * @brief Check if a protothread is still running
  * @param f Function call to the protothread
  * @return Non-zero if thread is running, zero if it has exited
- * 
+ *
  * Used to determine if a protothread should continue to be scheduled.
  * Returns true for PT_WAITING and PT_YIELDED, false for PT_EXITED and PT_ENDED.
- * 
+ *
  * Example:
  * @code
  *   while(PT_SCHEDULE(my_thread(&pt))) {
@@ -279,10 +279,10 @@ struct pt {
  * @def PT_YIELD(pt)
  * @brief Voluntarily yield execution to other threads
  * @param pt Pointer to the protothread control structure
- * 
+ *
  * Allows other threads to run. The thread will resume from this
  * point when it is next scheduled.
- * 
+ *
  * Example:
  * @code
  *   for(i = 0; i < 1000; i++) {
@@ -305,10 +305,10 @@ struct pt {
  * @brief Yield execution until a condition is met
  * @param pt Pointer to the protothread control structure
  * @param cond Boolean expression to evaluate
- * 
+ *
  * Similar to PT_YIELD, but only resumes when the condition is true.
  * Useful for implementing cooperative waiting without blocking.
- * 
+ *
  * Example:
  * @code
  *   PT_YIELD_UNTIL(pt, timer_expired());

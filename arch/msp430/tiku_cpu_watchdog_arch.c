@@ -21,7 +21,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "tiku_cpu_watchdog_arch.h" 
+#include "tiku_cpu_watchdog_arch.h"
 
 
 /**
@@ -89,7 +89,7 @@ void tiku_cpu_msp430_watchdog_interval_timer_on_arch(tiku_wdt_clk_t src, tiku_wd
  */
 void tiku_cpu_msp430_watchdog_off_arch(void)
 {
-    
+
     WDTCTL = WDTPW | WDTHOLD;
 
 }
@@ -114,7 +114,7 @@ void tiku_cpu_msp430_watchdog_pause_arch(void)
  * Atomically clears WDTHOLD and optionally WDTCNTCL while preserving
  * all other WDTCTL low-byte bits. Safe against ISR races.
  */
-void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume)  // <- Fixed name, removed static inline
+void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume)
 {
     uint16_t sr = __get_SR_register();
     __disable_interrupt();
@@ -135,14 +135,14 @@ void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume)  // <- Fixed name,
  * Clears the watchdog timer counter to prevent a reset.
  *
  * @note This function is used to prevent the watchdog timer from resetting
- *       the system.    
+ *       the system.
  */
-void tiku_cpu_msp430_watchdog_kick_arch(void)  // <- Fixed name, removed static inline
+void tiku_cpu_msp430_watchdog_kick_arch(void)
 {
     uint16_t sr = __get_SR_register();
     __disable_interrupt();
 
     WDTCTL = (WDTCTL & 0x00FF) | WDTPW | WDTCNTCL;
-    
+
     __bis_SR_register(sr & GIE);
 }

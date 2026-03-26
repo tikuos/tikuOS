@@ -61,6 +61,52 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 /*---------------------------------------------------------------------------*/
 
 /**
+ * @brief Initialize an arena without region-registry validation
+ *
+ * Lightweight variant of tiku_arena_create() that skips
+ * tiku_region_contains() and tiku_region_claim(). Intended for
+ * library code (e.g. tikukits/ds) that needs an arena over an
+ * embedded struct member where the region registry may not yet be
+ * initialized.
+ *
+ * The arena is marked as SRAM tier. All other arena operations
+ * (alloc, reset, secure_reset, stats) work identically.
+ *
+ * @param arena    Arena control block to initialize
+ * @param buf      Pointer to the backing buffer
+ * @param size     Size of the backing buffer in bytes
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
+ */
+tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
+                                      tiku_mem_arch_size_t size)
+{
+    if (arena == NULL || buf == NULL) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
+    /* Align the buffer base up to the platform's required alignment. */
+    {
+        uintptr_t raw     = (uintptr_t)buf;
+        uintptr_t mask    = (uintptr_t)(TIKU_MEM_ARCH_ALIGNMENT - 1U);
+        uintptr_t aligned = (raw + mask) & ~mask;
+        tiku_mem_arch_size_t adj = (tiku_mem_arch_size_t)(aligned - raw);
+
+        arena->buf      = (uint8_t *)aligned;
+        arena->capacity = size - adj;
+    }
+    arena->offset   = 0;
+    arena->peak     = 0;
+    arena->count    = 0;
+    arena->id       = 0;
+    arena->active   = 1;
+    arena->tier     = TIKU_MEM_SRAM;
+
+    return TIKU_MEM_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+
+/**
  * @brief Initialize an arena over a caller-provided buffer
  *
  * The arena does not own or allocate the buffer — the caller provides

@@ -208,7 +208,7 @@
  */
 
 /** Enable debug printing for process management */
-#define DEBUG_PROCESS 1
+#define DEBUG_PROCESS 0
 
 /** Enable debug printing for hardware timer */
 #define DEBUG_HTIMER 0
@@ -217,7 +217,7 @@
 #define DEBUG_CPU_FREQ 0
 
 /** Enable debug printing for main application */
-#define DEBUG_MAIN 1
+#define DEBUG_MAIN 0
 
 /** Enable debug printing for timer subsystem */
 #define DEBUG_TIMER 0
@@ -226,7 +226,7 @@
 #define DEBUG_CLOCK_ARCH 0
 
 /** Enable debug printing for test modules */
-#define DEBUG_TESTS 1
+#define DEBUG_TESTS 0
 
 /** Enable debug printing for scheduler */
 #define DEBUG_SCHED 0

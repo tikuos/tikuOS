@@ -25,8 +25,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#ifndef CPU_MSP430_FREQ_ARCH_H_
-#define CPU_MSP430_FREQ_ARCH_H_
+#ifndef TIKU_CPU_FREQ_BOOT_ARCH_H_
+#define TIKU_CPU_FREQ_BOOT_ARCH_H_
 
 #include <tiku.h>
 #include <stdint.h>
@@ -111,7 +111,7 @@ typedef enum {
 } tiku_clk_div_t;
 
 /*
-* @brif Common clock frequencies
+* @brief Common clock frequencies
 */
 typedef enum {  
     TIKU_CLK_FREQ_1MHZ = 1,
@@ -468,4 +468,4 @@ void tiku_cpu_boot_msp430_reset(void);
  */
 void tiku_cpu_boot_msp430_init(void);
 
-#endif /* CPU_MSP430_FREQ_ARCH_H_ */
+#endif /* TIKU_CPU_FREQ_BOOT_ARCH_H_ */

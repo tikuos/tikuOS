@@ -295,6 +295,21 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
                                  tiku_mem_arch_size_t size, uint8_t id);
 
 /**
+ * @brief Initialize an arena without region-registry validation
+ *
+ * Lightweight variant that skips tiku_region_contains() and
+ * tiku_region_claim(). For library code that manages arenas over
+ * embedded struct members without depending on the memory subsystem.
+ *
+ * @param arena    Arena control block to initialize
+ * @param buf      Pointer to the backing buffer
+ * @param size     Size of the backing buffer in bytes
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if arena or buf is NULL
+ */
+tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
+                                      tiku_mem_arch_size_t size);
+
+/**
  * @brief Allocate memory from an arena
  *
  * Bump-pointer allocation. The returned pointer is aligned to the
@@ -445,6 +460,24 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
                                  tiku_mem_arch_size_t block_size,
                                  tiku_mem_arch_size_t block_count,
                                  uint8_t id);
+
+/**
+ * @brief Initialize a pool without region-registry validation
+ *
+ * Lightweight variant that skips region checks. For library code
+ * that manages pools over embedded struct members without depending
+ * on the memory subsystem.
+ *
+ * @param pool         Pool control block to initialize
+ * @param buf          Pointer to the backing buffer
+ * @param block_size   Requested size of each block in bytes
+ * @param block_count  Number of blocks
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pool or buf
+ *         is NULL or block_count is 0
+ */
+tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
+                                     tiku_mem_arch_size_t block_size,
+                                     tiku_mem_arch_size_t block_count);
 
 /**
  * @brief Allocate a block from the pool

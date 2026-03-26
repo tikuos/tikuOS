@@ -35,7 +35,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialise the system clock.
+ * @brief Initialize the system clock.
  *
  * Delegates to the architecture-specific tiku_clock_arch_init()
  * which configures the hardware timer peripheral (Timer A0 on

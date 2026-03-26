@@ -45,7 +45,7 @@ static struct tiku_htimer *pending = NULL;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialise the hardware timer subsystem.
+ * @brief Initialize the hardware timer subsystem.
  *
  * Clears any pending htimer and delegates to the arch-level init
  * which configures the Timer A1 peripheral on MSP430.
