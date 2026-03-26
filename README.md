@@ -2,37 +2,23 @@
 
 **Simple. Ubiquitous. Intelligence, Everywhere.**
 
-TikuOS is an event-driven embedded operating system designed for ultra-low-power microcontrollers. Based on protothreads, it provides cooperative multitasking with minimal memory overhead, making it ideal for severely resource-constrained devices.
-
 ---
-
-## Key Features
-
-- **Event-Driven Architecture** - Processes communicate via a central event queue
-- **Protothread-Based** - Stackless lightweight threads using only 2 bytes per thread
-- **Ultra-Low Memory** - Runs on devices with as little as 2KB RAM
-- **Static Allocation** - No dynamic memory (malloc/free) for predictable behavior
-- **Power Efficient** - Designed for ultra-low-power modes (LPM0-4)
-- **Hardware Abstraction** - Clean separation between kernel and platform code
 
 ## Supported Boards
 
 | Board | MCU | RAM | FRAM |
 |-------|-----|-----|------|
-| MSP-EXP430FR2433 LaunchPad | MSP430FR2433 | 4 KB | 16 KB |
 | MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB |
-| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB |
 
-See [docs/platform.md](docs/platform.md) for detailed platform information, device/board differences, and how to add new variants.
+## Architecture
+
+- MSP430 with FRAM support variant
 
 ---
 
 ## Quick Start
 
 ```bash
-# Build for MSP430FR2433 (default)
-make
-
 # Build for a specific target
 make MCU=msp430fr5969
 
@@ -42,8 +28,6 @@ make flash MCU=msp430fr5969
 # Open serial monitor
 make monitor
 ```
-
-See [docs/install.md](docs/install.md) for full prerequisites, build options, flashing, debugging, and test configuration.
 
 ---
 
@@ -77,45 +61,22 @@ TIKU_AUTOSTART_PROCESSES(&blink_process);
 
 ---
 
-## Project Structure
-
-```
-TikuOS/
-├── arch/msp430/            # MSP430-specific implementations
-│   ├── boards/             # Per-board GPIO/UART pin assignments
-│   └── devices/            # Per-device silicon constants
-├── kernel/                 # Platform-independent kernel
-│   ├── process/            # Process & protothread management
-│   ├── timers/             # Timer subsystems (clock, htimer, timer)
-│   ├── cpu/                # CPU abstraction (boot, watchdog)
-│   └── lib/                # Utility libraries
-├── hal/                    # Hardware abstraction layer
-├── examples/               # Ready-to-run example applications
-├── tests/                  # Test suite
-├── docs/                   # Documentation
-├── tiku.h                  # Main configuration header
-├── main.c                  # System entry point
-└── Makefile                # Build system
-```
-
----
-
-## Documentation
-
-- [docs/install.md](docs/install.md) - Installation, building, flashing, debugging, and testing
-- [docs/platform.md](docs/platform.md) - Supported platforms, device selection, and adding new variants
-
----
-
 ## License
 
-Apache License, Version 2.0
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this software except in compliance with the License. You may obtain a copy
+of the License at:
 
-Copyright (c) 2025-2026 Ambuj Varshney
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
 
 ---
 
 ## Contact
 
 - Website: [http://tiku-os.org](http://tiku-os.org)
-- Author: Ambuj Varshney <ambuj@tiku-os.org>
+- Email: <ambuj@tiku-os.org>
