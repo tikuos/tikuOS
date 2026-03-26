@@ -2,6 +2,8 @@
 
 **Simple. Ubiquitous. Intelligence, Everywhere.**
 
+TikuOS is an operating system for microwatt computers: tiny, ubiquitous computers that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
+
 ---
 
 ## Supported Boards
