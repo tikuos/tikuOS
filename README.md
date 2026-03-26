@@ -63,6 +63,13 @@ TIKU_AUTOSTART_PROCESSES(&blink_process);
 
 ---
 
+## Handbook
+
+- **API References**
+  - [Core Kernel API Reference](handbook/references/api-reference.md)
+
+---
+
 ## License
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not
