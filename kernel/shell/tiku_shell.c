@@ -62,6 +62,12 @@
 #if TIKU_SHELL_CMD_QUEUE
 #include "commands/tiku_shell_cmd_queue.h"
 #endif
+#if TIKU_SHELL_CMD_REBOOT
+#include "commands/tiku_shell_cmd_reboot.h"
+#endif
+#if TIKU_SHELL_CMD_HISTORY
+#include "commands/tiku_shell_cmd_history.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* FORWARD DECLARATIONS                                                      */
@@ -105,6 +111,12 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_QUEUE
     {"queue",  "List pending events",      tiku_shell_cmd_queue},
+#endif
+#if TIKU_SHELL_CMD_REBOOT
+    {"reboot", "System reset",             tiku_shell_cmd_reboot},
+#endif
+#if TIKU_SHELL_CMD_HISTORY
+    {"history", "Last N commands from FRAM", tiku_shell_cmd_history},
 #endif
     {NULL, NULL, NULL}
 };
@@ -218,6 +230,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 SHELL_PRINTF("\n");
                 line_buf[line_pos] = '\0';
                 if (line_pos > 0) {
+#if TIKU_SHELL_CMD_HISTORY
+                    tiku_shell_history_record(line_buf);
+#endif
                     tiku_shell_parser_execute(line_buf);
                 }
                 line_pos = 0;
