@@ -186,6 +186,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_info.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_kill.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
 endif
 
 # ---------------------------------------------------------------------------

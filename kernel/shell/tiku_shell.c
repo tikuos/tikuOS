@@ -59,6 +59,9 @@
 #if TIKU_SHELL_CMD_RESUME
 #include "commands/tiku_shell_cmd_resume.h"
 #endif
+#if TIKU_SHELL_CMD_QUEUE
+#include "commands/tiku_shell_cmd_queue.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* FORWARD DECLARATIONS                                                      */
@@ -99,6 +102,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_RESUME
     {"resume", "Resume a stopped process", tiku_shell_cmd_resume},
+#endif
+#if TIKU_SHELL_CMD_QUEUE
+    {"queue",  "List pending events",      tiku_shell_cmd_queue},
 #endif
     {NULL, NULL, NULL}
 };

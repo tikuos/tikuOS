@@ -52,15 +52,9 @@ tiku_shell_cmd_info(uint8_t argc, const char *argv[])
     unsigned long hours = secs / 3600;
     unsigned long mins  = (secs % 3600) / 60;
     unsigned long s     = secs % 60;
-    struct tiku_process *p;
-    uint8_t proc_count = 0;
 
     (void)argc;
     (void)argv;
-
-    for (p = tiku_process_list_head; p != NULL; p = p->next) {
-        proc_count++;
-    }
 
     SHELL_PRINTF("Device:    %s\n", CLI_DEVICE_NAME);
     SHELL_PRINTF("CPU:       %lu MHz\n", TIKU_MAIN_CPU_HZ / 1000000UL);
@@ -70,5 +64,5 @@ tiku_shell_cmd_info(uint8_t argc, const char *argv[])
                 (unsigned)TIKU_CLOCK_SECOND, tiku_clock_time());
     SHELL_PRINTF("Queue:     %u/%u events\n",
                 tiku_process_queue_length(), TIKU_QUEUE_SIZE);
-    SHELL_PRINTF("Processes: %u active\n", proc_count);
+    SHELL_PRINTF("Processes: %u registered\n", tiku_process_count());
 }

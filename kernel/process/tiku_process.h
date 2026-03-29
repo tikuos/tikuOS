@@ -456,6 +456,17 @@ uint8_t tiku_process_queue_empty(void);
 /** @brief Return the number of pending events in the queue */
 uint8_t tiku_process_queue_length(void);
 
+/**
+ * @brief Peek at a queue entry by index (0 = head).
+ *
+ * @param index  Position from head (0 .. queue_length-1)
+ * @param ev     Output: event type (NULL to skip)
+ * @param target Output: target process pointer (NULL to skip)
+ * @return 0 on success, -1 if index out of range
+ */
+int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
+                               struct tiku_process **target);
+
 /** @brief Check if a process is running */
 uint8_t tiku_process_is_running(struct tiku_process *p);
 

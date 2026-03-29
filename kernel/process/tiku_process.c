@@ -373,6 +373,22 @@ uint8_t tiku_process_queue_length(void)
     return q_len;
 }
 
+int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
+                               struct tiku_process **target)
+{
+    if (index >= q_len) {
+        return -1;
+    }
+    uint8_t idx = (q_head + index) % TIKU_QUEUE_SIZE;
+    if (ev != NULL) {
+        *ev = queue[idx].ev;
+    }
+    if (target != NULL) {
+        *target = queue[idx].p;
+    }
+    return 0;
+}
+
 /**
  * @brief Check if a process is running
  *

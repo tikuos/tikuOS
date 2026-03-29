@@ -161,6 +161,13 @@ tiku_shell_io_printf(const char *fmt, ...)
         }
         fmt++;  /* skip '%' */
 
+        /* Optional '-' flag (left-align) */
+        int left_align = 0;
+        if (*fmt == '-') {
+            left_align = 1;
+            fmt++;
+        }
+
         /* Optional field width */
         int width = 0;
         while (*fmt >= '0' && *fmt <= '9') {
@@ -179,15 +186,18 @@ tiku_shell_io_printf(const char *fmt, ...)
         case 's': {
             const char *s = va_arg(ap, const char *);
             if (s) {
-                if (width > 0) {
-                    int len = 0;
-                    const char *p = s;
-                    while (*p++) {
-                        len++;
-                    }
+                int len = 0;
+                const char *p = s;
+                while (*p++) {
+                    len++;
+                }
+                if (!left_align && width > len) {
                     io_pad(' ', width - len);
                 }
                 tiku_shell_io_puts(s);
+                if (left_align && width > len) {
+                    io_pad(' ', width - len);
+                }
             }
             break;
         }
@@ -200,12 +210,17 @@ tiku_shell_io_printf(const char *fmt, ...)
                 : (unsigned long)val;
             char buf[12];
             int len = io_render_unsigned(buf, sizeof(buf), uval, 10);
-            io_pad(' ', width - len - neg);
+            if (!left_align) {
+                io_pad(' ', width - len - neg);
+            }
             if (neg) {
                 io_emit('-');
             }
             while (len > 0) {
                 io_emit(buf[--len]);
+            }
+            if (left_align) {
+                io_pad(' ', width - len - neg);
             }
             break;
         }
@@ -215,9 +230,14 @@ tiku_shell_io_printf(const char *fmt, ...)
                 : (unsigned long)va_arg(ap, unsigned int);
             char buf[12];
             int len = io_render_unsigned(buf, sizeof(buf), val, 10);
-            io_pad(' ', width - len);
+            if (!left_align) {
+                io_pad(' ', width - len);
+            }
             while (len > 0) {
                 io_emit(buf[--len]);
+            }
+            if (left_align) {
+                io_pad(' ', width - len);
             }
             break;
         }
@@ -227,9 +247,14 @@ tiku_shell_io_printf(const char *fmt, ...)
                 : (unsigned long)va_arg(ap, unsigned int);
             char buf[12];
             int len = io_render_unsigned(buf, sizeof(buf), val, 16);
-            io_pad(' ', width - len);
+            if (!left_align) {
+                io_pad(' ', width - len);
+            }
             while (len > 0) {
                 io_emit(buf[--len]);
+            }
+            if (left_align) {
+                io_pad(' ', width - len);
             }
             break;
         }

@@ -46,6 +46,7 @@
 #define TIKU_SHELL_CMD_TIMER  1  /**< timer  - Software timer status */
 #define TIKU_SHELL_CMD_KILL   1  /**< kill   - Stop a process */
 #define TIKU_SHELL_CMD_RESUME 1  /**< resume - Resume a stopped process */
+#define TIKU_SHELL_CMD_QUEUE  1  /**< queue  - List pending events */
 
 /** @} */
 
