@@ -64,6 +64,18 @@ BUILD_DIR = build/$(MCU)
 APP ?=
 
 # ---------------------------------------------------------------------------
+# Shell service (kernel service — orthogonal to APP/tests/examples)
+#   make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969   — build with shell
+#   make APP=cli MCU=msp430fr5969                — legacy alias (also enables shell)
+# ---------------------------------------------------------------------------
+TIKU_SHELL_ENABLE ?= 0
+
+# Legacy: APP=cli enables the kernel shell
+ifeq ($(APP),cli)
+TIKU_SHELL_ENABLE = 1
+endif
+
+# ---------------------------------------------------------------------------
 # Optional components (auto-detected; override: make HAS_TESTS=0 etc.)
 # When APP is set, tests and examples are excluded automatically.
 # ---------------------------------------------------------------------------
@@ -157,8 +169,25 @@ SRCS += kernel/memory/tiku_cache.c
 SRCS += kernel/memory/tiku_hibernate.c
 SRCS += kernel/memory/tiku_proc_mem.c
 SRCS += kernel/process/tiku_process.c
+SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/scheduler/tiku_sched.c
 SRCS += server/vfs/tiku_vfs.c
+
+# ---------------------------------------------------------------------------
+# Shell (kernel service — compiled when TIKU_SHELL_ENABLE=1)
+# ---------------------------------------------------------------------------
+ifeq ($(TIKU_SHELL_ENABLE),1)
+CFLAGS += -DTIKU_SHELL_ENABLE=1
+SRCS += kernel/shell/tiku_shell_io.c
+SRCS += kernel/shell/tiku_shell_parser.c
+SRCS += kernel/shell/tiku_shell.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_ps.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_info.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_kill.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
+endif
 
 # ---------------------------------------------------------------------------
 # Tests (only if tests/ is present)
@@ -203,6 +232,7 @@ SRCS += tests/process/test_process_graceful_exit.c
 SRCS += tests/process/test_process_current_cleared.c
 SRCS += tests/process/test_process_edge.c
 SRCS += tests/process/test_process_channel.c
+SRCS += tests/process/test_process_observe.c
 SRCS += tests/scheduler/test_sched.c
 SRCS += tests/timer/test_timer_event.c
 SRCS += tests/timer/test_timer_callback.c
@@ -230,7 +260,11 @@ SRCS += $(wildcard tests/kits/ml/*.c)
 SRCS += $(wildcard tests/kits/ds/*.c)
 SRCS += $(wildcard tests/kits/net/*.c)
 SRCS += $(wildcard tests/kits/codec/*.c)
-SRCS += $(wildcard tests/kits/crypto/*.c)
+SRCS += $(filter-out tests/kits/crypto/test_kits_crypto_tls.c, \
+          $(wildcard tests/kits/crypto/*.c))
+ifeq ($(HAS_TLS),1)
+SRCS += tests/kits/crypto/test_kits_crypto_tls.c
+endif
 endif
 endif
 
@@ -267,7 +301,11 @@ SRCS += $(wildcard examples/kits/ml/*.c)
 SRCS += $(wildcard examples/kits/sensors/*.c)
 SRCS += $(wildcard examples/kits/sigfeatures/*.c)
 SRCS += $(wildcard examples/kits/textcompression/*.c)
-SRCS += $(wildcard examples/kits/net/*.c)
+SRCS += $(filter-out examples/kits/net/example_net_tls.c, \
+          $(wildcard examples/kits/net/*.c))
+ifeq ($(HAS_TLS),1)
+SRCS += examples/kits/net/example_net_tls.c
+endif
 endif
 endif
 
@@ -276,14 +314,7 @@ endif
 # ---------------------------------------------------------------------------
 ifeq ($(APP),cli)
 CFLAGS += -DTIKU_APP_CLI=1
-SRCS += apps/cli/tiku_cli_io.c
-SRCS += apps/cli/tiku_cli_parser.c
-SRCS += apps/cli/tiku_cli.c
-SRCS += apps/cli/tiku_cli_io_tcp.c
-SRCS += apps/cli/commands/tiku_cli_cmd_ps.c
-SRCS += apps/cli/commands/tiku_cli_cmd_info.c
-SRCS += apps/cli/commands/tiku_cli_cmd_timer.c
-SRCS += apps/cli/commands/tiku_cli_cmd_kill.c
+# Shell sources now come from kernel/shell/ (see TIKU_SHELL_ENABLE above)
 endif
 
 ifeq ($(APP),net)
@@ -349,7 +380,10 @@ SRCS += $(wildcard tikukits/crypto/crc/*.c)
 SRCS += $(wildcard tikukits/crypto/base64/*.c)
 SRCS += $(wildcard tikukits/crypto/hkdf/*.c)
 SRCS += $(wildcard tikukits/crypto/gcm/*.c)
+# TLS requires TIKU_KITS_CRYPTO_TLS_RNG_FILL; compile only with HAS_TLS=1
+ifeq ($(HAS_TLS),1)
 SRCS += $(wildcard tikukits/crypto/tls/*.c)
+endif
 
 endif
 

@@ -35,6 +35,7 @@
 
 #include "tiku.h"
 #include "tiku_proto.h"
+#include <kernel/timers/tiku_clock.h>
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -43,6 +44,9 @@
 
 /** @brief Event queue size (power of 2 for fast modulo) */
 #define TIKU_QUEUE_SIZE         32
+
+/** @brief Maximum number of processes in the registry */
+#define TIKU_PROCESS_MAX        8
 
 /** @brief Post an event to all running processes */
 #define TIKU_PROCESS_BROADCAST  NULL
@@ -70,6 +74,17 @@
 typedef uint8_t tiku_event_t;
 typedef void *tiku_event_data_t;
 
+/**
+ * @brief Process state for observability
+ */
+typedef enum {
+    TIKU_PROCESS_STATE_RUNNING  = 0,
+    TIKU_PROCESS_STATE_READY    = 1,
+    TIKU_PROCESS_STATE_WAITING  = 2,
+    TIKU_PROCESS_STATE_SLEEPING = 3,
+    TIKU_PROCESS_STATE_STOPPED  = 4
+} tiku_process_state_t;
+
 /*---------------------------------------------------------------------------*/
 /* PROCESS STRUCTURE                                                         */
 /*---------------------------------------------------------------------------*/
@@ -94,6 +109,13 @@ typedef struct tiku_process {
                                          NULL if no local state.
                                          Points to a user-defined static
                                          struct. Cost: one pointer width. */
+    /* --- Observability fields --- */
+    tiku_process_state_t state;     /**< Current process state */
+    int8_t pid;                     /**< Registry index (-1 = unregistered) */
+    uint16_t sram_used;             /**< SRAM bytes allocated for this process */
+    uint16_t fram_used;             /**< FRAM bytes allocated for this process */
+    tiku_clock_time_t start_time;   /**< Tick count when process started */
+    uint16_t wake_count;            /**< Number of times scheduled */
 } tiku_process_t;
 
 /*---------------------------------------------------------------------------*/
@@ -138,7 +160,8 @@ struct tiku_msg {
     TIKU_PROCESS_THREAD(name, ev, data);                                    \
     struct tiku_process name = {                                             \
         NULL, strname, tiku_process_thread_##name, {0}, 0,                   \
-        NULL  /* local = NULL */                                             \
+        NULL, /* local = NULL */                                             \
+        TIKU_PROCESS_STATE_STOPPED, -1, 0, 0, 0, 0                          \
     }
 
 /**
@@ -167,7 +190,8 @@ struct tiku_msg {
     static local_type tiku_local_##name;                                    \
     struct tiku_process name = {                                             \
         NULL, strname, tiku_process_thread_##name, {0}, 0,                   \
-        &tiku_local_##name  /* local wired at compile time */                \
+        &tiku_local_##name, /* local wired at compile time */                \
+        TIKU_PROCESS_STATE_STOPPED, -1, 0, 0, 0, 0                          \
     }
 
 /**
@@ -360,6 +384,63 @@ uint8_t tiku_process_run(void);
 void tiku_process_poll(struct tiku_process *p);
 
 /*---------------------------------------------------------------------------*/
+/* PROCESS REGISTRY PROTOTYPES                                               */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Register a process in the registry
+ *
+ * Assigns a pid, starts the process, and records its start_time.
+ * The process is added to both the registry and the active linked list.
+ *
+ * @param name  Human-readable name (must match process struct name)
+ * @param p     Process to register (already declared with TIKU_PROCESS)
+ * @return pid (0..TIKU_PROCESS_MAX-1) on success, -1 if registry full
+ */
+int8_t tiku_process_register(const char *name, struct tiku_process *p);
+
+/**
+ * @brief Get a registered process by pid
+ *
+ * @param pid  Process identifier (0..TIKU_PROCESS_MAX-1)
+ * @return Pointer to the process, or NULL if pid is invalid/empty
+ */
+struct tiku_process *tiku_process_get(int8_t pid);
+
+/**
+ * @brief Stop a registered process (set state to STOPPED)
+ *
+ * The scheduler will skip this process until it is resumed.
+ *
+ * @param pid  Process identifier
+ * @return 0 on success, -1 on error
+ */
+int8_t tiku_process_stop(int8_t pid);
+
+/**
+ * @brief Resume a stopped process (set state to READY)
+ *
+ * @param pid  Process identifier
+ * @return 0 on success, -1 on error
+ */
+int8_t tiku_process_resume(int8_t pid);
+
+/**
+ * @brief Return the number of registered (active) processes
+ *
+ * @return Number of non-NULL registry entries
+ */
+uint8_t tiku_process_count(void);
+
+/**
+ * @brief Convert a process state enum to a string
+ *
+ * @param state  Process state value
+ * @return Static string representation (e.g. "running", "stopped")
+ */
+const char *tiku_process_state_str(tiku_process_state_t state);
+
+/*---------------------------------------------------------------------------*/
 /* QUEUE QUERY PROTOTYPES                                                    */
 /*---------------------------------------------------------------------------*/
 
@@ -374,6 +455,17 @@ uint8_t tiku_process_queue_empty(void);
 
 /** @brief Return the number of pending events in the queue */
 uint8_t tiku_process_queue_length(void);
+
+/**
+ * @brief Peek at a queue entry by index (0 = head).
+ *
+ * @param index  Position from head (0 .. queue_length-1)
+ * @param ev     Output: event type (NULL to skip)
+ * @param target Output: target process pointer (NULL to skip)
+ * @return 0 on success, -1 if index out of range
+ */
+int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
+                               struct tiku_process **target);
 
 /** @brief Check if a process is running */
 uint8_t tiku_process_is_running(struct tiku_process *p);

@@ -146,6 +146,18 @@
 #include <interfaces/onewire/tiku_onewire.h>
 
 /*---------------------------------------------------------------------------*/
+/* SHELL CONFIGURATION (kernel service — orthogonal to tests/examples/apps) */
+/*---------------------------------------------------------------------------*/
+
+#ifndef TIKU_SHELL_ENABLE
+#define TIKU_SHELL_ENABLE 0
+#endif
+
+#if TIKU_SHELL_ENABLE
+#include <kernel/shell/tiku_shell_config.h>
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* TEST CONFIGURATION                                                       */
 /*---------------------------------------------------------------------------*/
 

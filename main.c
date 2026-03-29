@@ -40,6 +40,10 @@
 #include "examples/kits/example_kits_runner.h"
 #endif
 
+#if TIKU_SHELL_ENABLE
+#include "kernel/shell/tiku_shell.h"
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -83,6 +87,10 @@ int main(void) {
 
 #if TIKU_APPS_ENABLE
   MAIN_PRINTF("App mode active\n");
+#endif
+
+#if TIKU_SHELL_ENABLE
+  tiku_shell_init();
 #endif
 
   /* Step 3: Enter the scheduler loop (dispatches events, runs protothreads) */

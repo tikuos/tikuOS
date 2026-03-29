@@ -33,6 +33,7 @@
 #include "tiku_process.h"
 #include <arch/msp430/tiku_compiler.h>
 #include <hal/tiku_cpu.h>
+#include <kernel/timers/tiku_clock.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -55,6 +56,9 @@ struct event_item {
 static struct event_item queue[TIKU_QUEUE_SIZE];
 static volatile uint8_t q_head = 0;
 static volatile uint8_t q_len = 0;
+
+/* Process registry — static array indexed by pid */
+static struct tiku_process *registry[TIKU_PROCESS_MAX];
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC VARIABLES                                                          */
@@ -91,10 +95,17 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
  */
 void tiku_process_init(void)
 {
+    uint8_t i;
+
     tiku_process_list_head = NULL;
     tiku_current_process = NULL;
     q_head = 0;
     q_len = 0;
+
+    for (i = 0; i < TIKU_PROCESS_MAX; i++) {
+        registry[i] = NULL;
+    }
+
     PROCESS_PRINTF("Init complete\n");
 }
 
@@ -119,6 +130,9 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     p->next = tiku_process_list_head;
     tiku_process_list_head = p;
     p->is_running = 1;
+    p->state = TIKU_PROCESS_STATE_READY;
+    p->start_time = tiku_clock_time();
+    p->wake_count = 0;
 
     tiku_atomic_exit();
 
@@ -149,6 +163,7 @@ void tiku_process_exit(struct tiku_process *p)
     tiku_atomic_enter();
 
     p->is_running = 0;
+    p->state = TIKU_PROCESS_STATE_STOPPED;
 
     if (tiku_process_list_head == p) {
         tiku_process_list_head = p->next;
@@ -278,11 +293,17 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
 
     if (p->is_running && p->thread) {
         tiku_current_process = p;
+        p->state = TIKU_PROCESS_STATE_RUNNING;
+        p->wake_count++;
         ret = p->thread(&p->pt, ev, data);
-        tiku_current_process = NULL;
         if (ret == PT_EXITED || ret == PT_ENDED ||
             ev == TIKU_EVENT_FORCE_EXIT) {
+            tiku_current_process = NULL;
             tiku_process_exit(p);
+        } else {
+            /* Process yielded — it is waiting for the next event */
+            p->state = TIKU_PROCESS_STATE_WAITING;
+            tiku_current_process = NULL;
         }
     }
 }
@@ -352,6 +373,22 @@ uint8_t tiku_process_queue_length(void)
     return q_len;
 }
 
+int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
+                               struct tiku_process **target)
+{
+    if (index >= q_len) {
+        return -1;
+    }
+    uint8_t idx = (q_head + index) % TIKU_QUEUE_SIZE;
+    if (ev != NULL) {
+        *ev = queue[idx].ev;
+    }
+    if (target != NULL) {
+        *target = queue[idx].p;
+    }
+    return 0;
+}
+
 /**
  * @brief Check if a process is running
  *
@@ -361,6 +398,137 @@ uint8_t tiku_process_queue_length(void)
 uint8_t tiku_process_is_running(struct tiku_process *p)
 {
     return p->is_running;
+}
+
+/*---------------------------------------------------------------------------*/
+/* PROCESS REGISTRY FUNCTIONS                                                */
+/*---------------------------------------------------------------------------*/
+
+/** @brief State name lookup table */
+static const char * const state_names[] = {
+    "running",
+    "ready",
+    "waiting",
+    "sleeping",
+    "stopped"
+};
+
+const char *tiku_process_state_str(tiku_process_state_t state)
+{
+    if (state > TIKU_PROCESS_STATE_STOPPED) {
+        return "unknown";
+    }
+    return state_names[state];
+}
+
+int8_t tiku_process_register(const char *name, struct tiku_process *p)
+{
+    uint8_t i;
+
+    if (p == NULL) {
+        return -1;
+    }
+
+    /* If the process already has a valid pid, return it */
+    if (p->pid >= 0 && p->pid < TIKU_PROCESS_MAX &&
+        registry[p->pid] == p) {
+        return p->pid;
+    }
+
+    /* Find a free slot */
+    for (i = 0; i < TIKU_PROCESS_MAX; i++) {
+        if (registry[i] == NULL) {
+            registry[i] = p;
+            p->pid = (int8_t)i;
+            if (name != NULL) {
+                p->name = name;
+            }
+            /* Start the process if it is not already running */
+            if (!p->is_running) {
+                tiku_process_start(p, NULL);
+            }
+            return (int8_t)i;
+        }
+    }
+
+    return -1;  /* registry full */
+}
+
+struct tiku_process *tiku_process_get(int8_t pid)
+{
+    if (pid < 0 || pid >= TIKU_PROCESS_MAX) {
+        return NULL;
+    }
+    return registry[pid];
+}
+
+int8_t tiku_process_stop(int8_t pid)
+{
+    struct tiku_process *p;
+
+    p = tiku_process_get(pid);
+    if (p == NULL) {
+        return -1;
+    }
+
+    tiku_atomic_enter();
+    p->state = TIKU_PROCESS_STATE_STOPPED;
+    p->is_running = 0;
+    tiku_atomic_exit();
+
+    return 0;
+}
+
+int8_t tiku_process_resume(int8_t pid)
+{
+    struct tiku_process *p;
+    struct tiku_process *q;
+    uint8_t in_list;
+
+    p = tiku_process_get(pid);
+    if (p == NULL || p->state != TIKU_PROCESS_STATE_STOPPED) {
+        return -1;
+    }
+
+    tiku_atomic_enter();
+
+    /* Check if process is still in the linked list */
+    in_list = 0;
+    for (q = tiku_process_list_head; q != NULL; q = q->next) {
+        if (q == p) {
+            in_list = 1;
+            break;
+        }
+    }
+
+    /* Re-add to list if it was removed (e.g., by tiku_process_exit) */
+    if (!in_list) {
+        p->next = tiku_process_list_head;
+        tiku_process_list_head = p;
+    }
+
+    p->state = TIKU_PROCESS_STATE_READY;
+    p->is_running = 1;
+
+    tiku_atomic_exit();
+
+    /* Post a CONTINUE event so the process wakes up */
+    tiku_process_post(p, TIKU_EVENT_CONTINUE, NULL);
+
+    return 0;
+}
+
+uint8_t tiku_process_count(void)
+{
+    uint8_t i;
+    uint8_t count = 0;
+
+    for (i = 0; i < TIKU_PROCESS_MAX; i++) {
+        if (registry[i] != NULL) {
+            count++;
+        }
+    }
+    return count;
 }
 
 /*---------------------------------------------------------------------------*/
