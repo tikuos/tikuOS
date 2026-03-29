@@ -157,6 +157,7 @@ SRCS += kernel/memory/tiku_cache.c
 SRCS += kernel/memory/tiku_hibernate.c
 SRCS += kernel/memory/tiku_proc_mem.c
 SRCS += kernel/process/tiku_process.c
+SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/scheduler/tiku_sched.c
 SRCS += server/vfs/tiku_vfs.c
 
@@ -230,7 +231,11 @@ SRCS += $(wildcard tests/kits/ml/*.c)
 SRCS += $(wildcard tests/kits/ds/*.c)
 SRCS += $(wildcard tests/kits/net/*.c)
 SRCS += $(wildcard tests/kits/codec/*.c)
-SRCS += $(wildcard tests/kits/crypto/*.c)
+SRCS += $(filter-out tests/kits/crypto/test_kits_crypto_tls.c, \
+          $(wildcard tests/kits/crypto/*.c))
+ifeq ($(HAS_TLS),1)
+SRCS += tests/kits/crypto/test_kits_crypto_tls.c
+endif
 endif
 endif
 
@@ -284,6 +289,7 @@ SRCS += apps/cli/commands/tiku_cli_cmd_ps.c
 SRCS += apps/cli/commands/tiku_cli_cmd_info.c
 SRCS += apps/cli/commands/tiku_cli_cmd_timer.c
 SRCS += apps/cli/commands/tiku_cli_cmd_kill.c
+SRCS += apps/cli/commands/tiku_cli_cmd_resume.c
 endif
 
 ifeq ($(APP),net)
@@ -349,7 +355,10 @@ SRCS += $(wildcard tikukits/crypto/crc/*.c)
 SRCS += $(wildcard tikukits/crypto/base64/*.c)
 SRCS += $(wildcard tikukits/crypto/hkdf/*.c)
 SRCS += $(wildcard tikukits/crypto/gcm/*.c)
+# TLS requires TIKU_KITS_CRYPTO_TLS_RNG_FILL; compile only with HAS_TLS=1
+ifeq ($(HAS_TLS),1)
 SRCS += $(wildcard tikukits/crypto/tls/*.c)
+endif
 
 endif
 
