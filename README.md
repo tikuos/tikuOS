@@ -1,20 +1,36 @@
-# TikuOS
+<h1 align="center">
+  <br>
+  <pre>
+  ___ _ _         ___  ___
+ |_ _|_) |_ _  _/ _ \/ __|
+  | || | / / || | (_) \__ \
+  |_||_|_\_\\_,_|\___/|___/
+  </pre>
+  <br>
+  <em>Simple. Ubiquitous. Intelligence, Everywhere.</em>
+</h1>
 
-**Simple. Ubiquitous. Intelligence, Everywhere.**
+<p align="center">
+  <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
+  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430FR-red?style=flat-square" alt="MCU"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
+  <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-22%20commands-orange?style=flat-square" alt="Shell"></a>
+  <a href="http://tiku-os.org"><img src="https://img.shields.io/badge/web-tiku--os.org-purple?style=flat-square" alt="Website"></a>
+</p>
 
-TikuOS is an operating system for microwatt computers: tiny, ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
+<p align="center">
+  TikuOS is an operating system for <strong>microwatt computers</strong>: tiny, ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
+</p>
 
 ---
 
 ## Supported Boards
 
-| Board | MCU | RAM | FRAM |
-|-------|-----|-----|------|
-| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB |
-
-## Architecture
-
-- MSP430 with FRAM support variant
+| Board | MCU | RAM | FRAM | Status |
+|-------|-----|-----|------|--------|
+| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | :green_circle: Primary |
+| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB | :yellow_circle: Supported |
+| MSP-EXP430FR2433 LaunchPad | MSP430FR2433 | 4 KB | 16 KB | :yellow_circle: Supported |
 
 ---
 
@@ -33,9 +49,9 @@ make monitor
 
 ---
 
-## Interactive Shell
+## :computer: Interactive Shell
 
-TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins, read sensors, manage processes, configure boot sequences, and inspect memory — all without recompiling.
+TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins, read sensors, manage processes, configure boot sequences, and inspect memory — **all without recompiling**.
 
 ```
   ___ _ _         ___  ___
@@ -53,16 +69,23 @@ tikuOS> help
   info       Device, CPU, uptime, clock
   free       Memory usage (SRAM/FRAM)
   reboot     System reset
+  history    Last N commands from FRAM
  --- Processes ---
   ps         List active processes
   start      Start/resume by name
   kill       Stop a process (by pid)
   resume     Resume a stopped process
+  queue      List pending events
+  timer      Software timer status
  --- Filesystem ---
   ls         List directory
   cd         Change directory
+  pwd        Print working directory
   read       Read a VFS node
   write      Write a VFS node
+  toggle     Flip a binary VFS node
+  cat        Read (alias)
+  echo       Write (alias)
  --- Hardware ---
   gpio       Read/write GPIO pins
   adc        Read analog channel
@@ -73,30 +96,71 @@ tikuOS> help
   init       Manage FRAM boot entries
 ```
 
-### Configurable Boot Sequence (FRAM-backed)
+---
 
-Every other RTOS: change boot behavior → recompile → reflash.
-TikuOS: change boot behavior → edit over shell → reboot.
+### :zap: Configurable Boot Sequence (FRAM-backed)
+
+> **Every other RTOS:** change boot behavior :arrow_right: recompile :arrow_right: reflash.
+>
+> **TikuOS:** change boot behavior :arrow_right: edit over shell :arrow_right: reboot.
 
 ```
 tikuOS> init add 05 network start net
+OK: 'network' at seq 05
+
 tikuOS> init add 10 mqtt    start mqtt
+OK: 'mqtt' at seq 10
+
 tikuOS> init add 20 leds    write /dev/led0 1
+OK: 'leds' at seq 20
+
 tikuOS> init list
  05  network      [on ]  start net
  10  mqtt         [on ]  start mqtt
  20  leds         [on ]  write /dev/led0 1
 ```
 
-Boot entries are stored in FRAM — they survive power cycles without flash erase cycles. Same firmware, different boot sequences per device.
+Boot entries are stored in **FRAM** — they survive power cycles without flash erase cycles. Same firmware, different boot sequences per device. Disable a service without removing it:
 
-### Hardware Debugging from the Shell
+```
+tikuOS> init disable mqtt
+OK: disabled 'mqtt'
+
+tikuOS> init list
+ 05  network      [on ]  start net
+ 10  mqtt         [off]  start mqtt
+ 20  leds         [on ]  write /dev/led0 1
+```
+
+Reboot. New behavior. No recompile. No reflash.
+
+---
+
+### :wrench: Hardware Debugging from the Shell
+
+Toggle GPIO pins, read ADC channels, inspect memory — a live hardware debugging tool on a microcontroller.
 
 ```
 tikuOS> gpio 4 6 t
 P4.6 -> 1
+
+tikuOS> gpio 4 6
+P4.6 = 1 (output)
+
 tikuOS> adc temp
 Atemp = 1847 (0x737)
+
+tikuOS> adc bat
+Abat = 2048 (0x800)
+```
+
+---
+
+### :bar_chart: Memory Introspection
+
+Real numbers from linker symbols and the stack pointer — not placeholders.
+
+```
 tikuOS> free
 --- Compile-time ---
 SRAM   2048 total
@@ -110,16 +174,76 @@ FRAM  65535 total
 SRAM
   stack now      80
   free now      910
-tikuOS> sleep lpm3
-Idle: LPM3
+FRAM
+  config rgn   1024 allocated
+  init table     70 (1/8 entries)
+--- Processes (1/8) ---
+ pid  name        sram  fram  state
+   0  Shell          0     0  running
 ```
 
-Build with the shell:
+---
+
+### :battery: Power Management
+
+Enter ultra-low-power modes from the shell. See what will wake you up.
+
+```
+tikuOS> sleep lpm3
+Idle: LPM3
+
+tikuOS> wake
+Wake sources:
+  Timer A0 (sys clock)  [on ]  wakes LPM0-3
+  Timer A1 (htimer)     [off]  wakes LPM0-3
+  UART RX  (eUSCI_A0)   [on ]  wakes LPM0
+  Watchdog (interval)   [off]  wakes LPM0-3
+  GPIO IRQ              [off]  wakes LPM0-4
+
+Note: LPM4 disables all clocks.
+  Only GPIO IRQ can wake from LPM4.
+```
+
+---
+
+### :open_file_folder: Virtual Filesystem
+
+Unix-like VFS for system introspection and device control.
+
+```
+tikuOS> ls /
+  sys/
+  dev/
+
+tikuOS> ls /dev
+  led0
+  led1
+
+tikuOS> read /sys/uptime
+42
+
+tikuOS> write /dev/led0 1
+
+tikuOS> cat /sys/mem/sram
+2048
+```
+
+---
+
+### Build Options
 
 ```bash
-make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969       # shell only
-make TIKU_INIT_ENABLE=1 MCU=msp430fr5969         # shell + init system
-make monitor                                      # connect over UART
+# Shell only
+make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969
+
+# Shell + FRAM-backed init system
+make TIKU_INIT_ENABLE=1 MCU=msp430fr5969
+
+# Connect over UART
+make monitor
+
+# Connect over Telnet (requires TCP stack)
+telnet 172.16.7.2
 ```
 
 ---
@@ -176,7 +300,6 @@ specific language governing permissions and limitations under the License.
 
 ---
 
-## Contact
-
-- Website: [http://tiku-os.org](http://tiku-os.org)
-- Email: <ambuj@tiku-os.org>
+<p align="center">
+  <a href="http://tiku-os.org">tiku-os.org</a> · <a href="mailto:ambuj@tiku-os.org">ambuj@tiku-os.org</a>
+</p>
