@@ -197,6 +197,16 @@ tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t);
 int tiku_timer_any_pending(void);
 
 /**
+ * @brief Return the number of active software timers.
+ */
+uint8_t tiku_timer_count(void);
+
+/**
+ * @brief Return the total number of timer expirations since boot.
+ */
+uint16_t tiku_timer_fired(void);
+
+/**
  * @brief Get next expiration time across all timers
  * @return Nearest expiration time, or 0 if none pending
  *

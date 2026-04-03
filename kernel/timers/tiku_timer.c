@@ -39,6 +39,9 @@
 /** Head of the active timer singly-linked list */
 static struct tiku_timer *timer_list = NULL;
 
+/** Running count of timer expirations (wraps at 65535) */
+static uint16_t timer_fire_count;
+
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -147,6 +150,7 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
         }
         t->next = NULL;
         t->active = 0;
+        timer_fire_count++;
 
         /* Dispatch based on mode */
         if (t->mode == TIKU_TIMER_MODE_CALLBACK && t->func != NULL) {
@@ -263,6 +267,17 @@ void tiku_timer_request_poll(void) { tiku_process_poll(&tiku_timer_process); }
 /*---------------------------------------------------------------------------*/
 
 int tiku_timer_any_pending(void) { return timer_list != NULL; }
+
+/*---------------------------------------------------------------------------*/
+
+uint8_t tiku_timer_count(void) {
+    struct tiku_timer *t;
+    uint8_t n = 0;
+    for (t = timer_list; t != NULL; t = t->next) { n++; }
+    return n;
+}
+
+uint16_t tiku_timer_fired(void) { return timer_fire_count; }
 
 /*---------------------------------------------------------------------------*/
 

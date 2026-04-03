@@ -32,6 +32,7 @@
 #include "tiku_vfs.h"
 #include "tiku.h"
 #include <kernel/timers/tiku_clock.h>
+#include <kernel/timers/tiku_timer.h>
 #include <kernel/cpu/tiku_common.h>
 #include <stdio.h>
 
@@ -175,6 +176,40 @@ power_wake_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/timer/count, /sys/timer/next                                         */
+/*---------------------------------------------------------------------------*/
+
+static int
+timer_count_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", tiku_timer_count());
+}
+
+static int
+timer_fired_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", tiku_timer_fired());
+}
+
+static int
+timer_next_read(char *buf, size_t max)
+{
+    tiku_clock_time_t next = tiku_timer_next_expiration();
+    tiku_clock_time_t now  = tiku_clock_time();
+
+    if (next == 0) {
+        return snprintf(buf, max, "none\n");
+    }
+
+    if (next > now) {
+        return snprintf(buf, max, "%lu\n",
+                        (unsigned long)(next - now));
+    }
+
+    return snprintf(buf, max, "0\n");
+}
+
+/*---------------------------------------------------------------------------*/
 /* /sys/version                                                              */
 /*---------------------------------------------------------------------------*/
 
@@ -238,6 +273,12 @@ static const tiku_vfs_node_t sys_power_children[] = {
     { "wake", TIKU_VFS_FILE, power_wake_read, NULL, NULL, 0 },
 };
 
+static const tiku_vfs_node_t sys_timer_children[] = {
+    { "count", TIKU_VFS_FILE, timer_count_read, NULL, NULL, 0 },
+    { "next",  TIKU_VFS_FILE, timer_next_read,  NULL, NULL, 0 },
+    { "fired", TIKU_VFS_FILE, timer_fired_read, NULL, NULL, 0 },
+};
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version", TIKU_VFS_FILE, version_read, NULL, NULL, 0 },
     { "device",  TIKU_VFS_FILE, device_read,  NULL, NULL, 0 },
@@ -245,6 +286,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "mem",     TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 2 },
     { "cpu",     TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
     { "power",   TIKU_VFS_DIR,  NULL, NULL, sys_power_children, 2 },
+    { "timer",   TIKU_VFS_DIR,  NULL, NULL, sys_timer_children, 3 },
 };
 
 static const tiku_vfs_node_t dev_children[] = {
@@ -253,7 +295,7 @@ static const tiku_vfs_node_t dev_children[] = {
 };
 
 static const tiku_vfs_node_t root_children[] = {
-    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 6 },
+    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 7 },
     { "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 2 },
 };
 

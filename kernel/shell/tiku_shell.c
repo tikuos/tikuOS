@@ -351,6 +351,10 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         }
 #endif
 
+        /* Re-arm poll timer first so commands that inspect
+         * /sys/timer/count see it as active during execution. */
+        tiku_timer_reset(&cli_timer);
+
         /* Drain all available characters from the backend */
         while (tiku_shell_io_rx_ready()) {
             ch = tiku_shell_io_getc();
@@ -392,7 +396,6 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #if TIKU_SHELL_TCP_ENABLE
         tiku_shell_io_tcp_flush();
 #endif
-        tiku_timer_reset(&cli_timer);
     }
 
     TIKU_PROCESS_END();
