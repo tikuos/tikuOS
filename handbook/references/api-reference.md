@@ -17,6 +17,7 @@ configuration, then include individual module headers as needed.
 - [System Clock](#system-clock) (`kernel/timers/tiku_clock.h`)
 - [Hardware Timer](#hardware-timer) (`kernel/timers/tiku_htimer.h`)
 - [Scheduler](#scheduler) (`kernel/scheduler/tiku_sched.h`)
+- [Virtual Filesystem (VFS)](#virtual-filesystem-vfs) (`server/vfs/tiku_vfs.h`)
 - [Memory Management](#memory-management) (`kernel/memory/tiku_mem.h`)
 - [Watchdog Timer](#watchdog-timer) (`kernel/cpu/tiku_watchdog.h`)
 - [Common Utilities](#common-utilities) (`kernel/cpu/tiku_common.h`)
@@ -610,6 +611,243 @@ Register an idle hook called when no work is pending. Pass `NULL` to clear.
 
 Call from any ISR that generates work (e.g., clock tick). Requests the timer
 process to poll for expired timers.
+
+---
+
+## Virtual Filesystem (VFS)
+
+**Headers:** `server/vfs/tiku_vfs.h`, `server/vfs/tiku_vfs_tree.h`, `kernel/process/tiku_proc_vfs.h`
+
+A static tree of named nodes that presents the entire system — peripherals,
+OS state, processes, and configuration — as readable/writable paths. No block
+storage, no inodes; just handler functions attached to path components.
+
+### Types
+
+```c
+typedef enum {
+    TIKU_VFS_DIR,
+    TIKU_VFS_FILE
+} tiku_vfs_type_t;
+
+typedef int (*tiku_vfs_read_fn)(char *buf, size_t max);
+typedef int (*tiku_vfs_write_fn)(const char *buf, size_t len);
+
+typedef struct tiku_vfs_node {
+    const char                  *name;        /* Path component             */
+    tiku_vfs_type_t              type;        /* DIR or FILE                */
+    tiku_vfs_read_fn             read;        /* NULL if not readable       */
+    tiku_vfs_write_fn            write;       /* NULL if not writable       */
+    const struct tiku_vfs_node  *children;    /* For DIR: child array       */
+    uint8_t                      child_count; /* For DIR: number of children*/
+} tiku_vfs_node_t;
+
+typedef void (*tiku_vfs_list_fn)(const tiku_vfs_node_t *node, void *ctx);
+```
+
+### Core API Functions
+
+#### void tiku_vfs_init(const tiku_vfs_node_t \*root)
+
+Register the root node. All subsequent resolve/read/write calls walk from this
+root.
+
+#### const tiku_vfs_node_t \*tiku_vfs_resolve(const char \*path)
+
+Walk the tree to find a node by path. Returns `NULL` if not found. Handles
+leading/trailing/duplicate slashes.
+
+```c
+const tiku_vfs_node_t *n = tiku_vfs_resolve("/sys/mem/free");
+if (n && n->type == TIKU_VFS_FILE && n->read) {
+    n->read(buf, sizeof(buf));
+}
+```
+
+#### int tiku_vfs_read(const char \*path, char \*buf, size_t max)
+
+Resolve path and invoke the file's read handler. Returns bytes written to buf,
+or -1 on error (not found, not a file, no read handler).
+
+#### int tiku_vfs_write(const char \*path, const char \*data, size_t len)
+
+Resolve path and invoke the file's write handler. Returns 0 on success, -1 on
+error.
+
+#### int tiku_vfs_list(const char \*path, tiku_vfs_list_fn callback, void \*ctx)
+
+List children of a directory node. Calls `callback` once per child with the
+full node pointer and user context. Returns -1 if not a directory.
+
+```c
+static void print_entry(const tiku_vfs_node_t *node, void *ctx) {
+    const char *perm = (node->read && node->write) ? "rw"
+                     : node->read                  ? "r-" : "--";
+    printf("  %s %s%s\n", perm, node->name,
+           node->type == TIKU_VFS_DIR ? "/" : "");
+}
+
+tiku_vfs_list("/dev", print_entry, NULL);
+```
+
+### Tree Initialization
+
+#### void tiku_vfs_tree_init(void)
+
+Build and register the production VFS tree with `/sys`, `/dev`, and `/proc`.
+Call once during boot, after processes are registered (so `/proc/` captures
+them). Internally unlocks the MPU to write FRAM-backed node arrays.
+
+#### void tiku_vfs_set_boot_count(uint32_t count)
+
+Set the boot count value exposed via `/sys/boot/count`. Call from the hibernate
+resume path after reading the marker.
+
+### Process VFS
+
+#### const tiku_vfs_node_t \*tiku_proc_vfs_get(void)
+
+Build and return the `/proc` directory node. Rebuilds per-pid directories from
+the process registry each time it is called. The returned node's children
+pointer remains valid until the next call.
+
+#### uint8_t tiku_proc_vfs_child_count(void)
+
+Return the number of children under `/proc` (count + queue + catalog + one per
+registered process).
+
+### Complete Node Tree
+
+All paths are accessible via the shell (`cat`, `ls`, `write`) and programmatic
+API (`tiku_vfs_read`, `tiku_vfs_write`).
+
+```
+/
+├── sys/
+│   ├── version              r-   OS version string
+│   ├── device               r-   MCU name
+│   ├── uptime               r-   seconds since boot
+│   ├── mem/
+│   │   ├── sram             r-   RAM size in bytes
+│   │   ├── nvm              r-   FRAM size in bytes
+│   │   ├── free             r-   live stack headroom (SP - BSS end)
+│   │   └── used             r-   sum of per-process SRAM allocation
+│   ├── cpu/
+│   │   └── freq             r-   clock frequency in Hz
+│   ├── power/
+│   │   ├── mode             r-   current LPM (off/LPM0/LPM3/LPM4)
+│   │   └── wake             r-   active wake sources
+│   ├── timer/
+│   │   ├── count            r-   active software timers
+│   │   ├── next             r-   ticks until next expiration
+│   │   ├── fired            r-   total expirations since boot
+│   │   └── list/
+│   │       ├── 0            r-   timer 0: mode, remaining, interval
+│   │       ├── 1            r-   timer 1
+│   │       ├── 2            r-   timer 2
+│   │       └── 3            r-   timer 3
+│   ├── clock/
+│   │   └── ticks            r-   raw tick counter
+│   ├── watchdog/
+│   │   └── mode             r-   "watchdog" or "interval"
+│   ├── htimer/
+│   │   ├── now              r-   hardware timer counter
+│   │   └── scheduled        r-   1 if pending, 0 if idle
+│   ├── boot/
+│   │   ├── reason           r-   last reset cause (brownout/wdt/rstnmi/...)
+│   │   └── count            r-   hibernate boot counter
+│   └── sched/
+│       └── idle             r-   scheduler idle entry count
+├── dev/
+│   ├── led0                 rw   LED1 state (0, 1, t=toggle)
+│   ├── led1                 rw   LED2 state
+│   ├── gpio/
+│   │   └── {1..4}/          per-port directory
+│   │       └── {0..7}       rw   pin state (0, 1, t=toggle, i=input)
+│   ├── gpio_dir/
+│   │   └── {1..4}           r-   pin directions (I=input, O=output)
+│   ├── uart/
+│   │   ├── overruns         r-   UART overrun count since boot
+│   │   └── baud             r-   configured baud rate
+│   ├── adc/
+│   │   ├── temp             r-   on-chip temperature sensor (raw ADC)
+│   │   └── battery          r-   battery voltage (raw ADC)
+│   ├── i2c/
+│   │   └── scan             r-   list responding I2C slave addresses
+│   └── spi/
+│       └── config           r-   SPI mode, bit order, prescaler (or "n/a")
+└── proc/
+    ├── count                r-   number of active processes
+    ├── queue/
+    │   ├── length           r-   pending events in queue
+    │   └── space            r-   free event slots
+    ├── catalog/
+    │   ├── count            r-   available-but-not-started processes
+    │   └── {0,1}/
+    │       └── name         r-   catalog entry name
+    └── {0..7}/              per-process directory (one per registered process)
+        ├── name             r-   process name
+        ├── state            r-   running/ready/waiting/sleeping/stopped
+        ├── pid              r-   numeric process id
+        ├── sram_used        r-   SRAM bytes allocated
+        ├── fram_used        r-   FRAM bytes allocated
+        ├── uptime           r-   seconds since start
+        ├── wake_count       r-   times scheduled
+        └── events           r-   pending events for this process
+```
+
+### Adding a New VFS Node
+
+1. Write a read handler (and optionally a write handler):
+   ```c
+   static int my_read(char *buf, size_t max) {
+       return snprintf(buf, max, "%u\n", my_value);
+   }
+   ```
+
+2. Add a `tiku_vfs_node_t` entry to the appropriate children array in
+   `server/vfs/tiku_vfs_tree.c`:
+   ```c
+   { "my_node", TIKU_VFS_FILE, my_read, NULL, NULL, 0 },
+   ```
+
+3. Update the parent directory's `child_count`.
+
+4. If the node is in FRAM (`.persistent` section), wrap writes in
+   `tiku_mpu_unlock_nvm()` / `tiku_mpu_lock_nvm()`.
+
+### Shell Commands
+
+| Command | VFS Operation | Example |
+|---------|---------------|---------|
+| `ls [path]` | `tiku_vfs_list()` | `ls /sys/mem` — lists `sram nvm free used` with `r-`/`rw`/`d` |
+| `cat <path>` | `tiku_vfs_read()` | `cat /sys/uptime` — prints seconds since boot |
+| `read <path>` | `tiku_vfs_read()` | Alias for `cat` |
+| `write <path> <value>` | `tiku_vfs_write()` | `write /dev/led0 1` — turn on LED |
+| `echo <path> <value>` | `tiku_vfs_write()` | Alias for `write` |
+| `toggle <path>` | read, flip, write | `toggle /dev/led0` — toggle a binary node |
+| `cd <path>` | set working directory | `cd /sys/mem` then `cat free` |
+
+### Testing
+
+**On-device tests** (`tests/server/vfs/test_vfs.c`, `test_vfs_tree.c`):
+
+```bash
+# Stub-based core VFS tests (path resolution, read/write, list, edge cases)
+python3 TikuBench/tikubench/runner.py --category vfs
+
+# Live production tree tests (all /sys, /dev, /proc nodes on real hardware)
+python3 TikuBench/tikubench/runner.py --category vfs-tree
+```
+
+**Python serial test** (`TikuBench/tikubench/vfs_test.py`):
+
+Exhaustive over-the-wire test that sends shell commands and validates responses
+for every VFS path.
+
+```bash
+python3 TikuBench/tikubench/vfs_test.py --port /dev/ttyUSB0 --baud 115200 --verbose
+```
 
 ---
 
