@@ -43,9 +43,9 @@ ls_print_entry(const char *name, tiku_vfs_type_t type, void *ctx)
     (void)ctx;
 
     if (type == TIKU_VFS_DIR) {
-        SHELL_PRINTF("  %s/\n", name);
+        SHELL_PRINTF("  d  %s/\n", name);
     } else {
-        SHELL_PRINTF("  %s\n", name);
+        SHELL_PRINTF("  f  %s\n", name);
     }
 }
 

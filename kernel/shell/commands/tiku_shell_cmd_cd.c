@@ -49,9 +49,16 @@ tiku_shell_cmd_cd(uint8_t argc, const char *argv[])
     tiku_shell_cwd_resolve(target, resolved, sizeof(resolved));
 
     /* Verify the target is a valid VFS directory */
-    if (tiku_vfs_resolve(resolved) == (const tiku_vfs_node_t *)0) {
-        SHELL_PRINTF("cd: no such directory '%s'\n", target);
-        return;
+    {
+        const tiku_vfs_node_t *n = tiku_vfs_resolve(resolved);
+        if (n == (const tiku_vfs_node_t *)0) {
+            SHELL_PRINTF("cd: no such directory '%s'\n", target);
+            return;
+        }
+        if (n->type != TIKU_VFS_DIR) {
+            SHELL_PRINTF("cd: not a directory '%s'\n", target);
+            return;
+        }
     }
 
     tiku_shell_cwd_set(resolved);
