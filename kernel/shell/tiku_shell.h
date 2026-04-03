@@ -33,6 +33,7 @@
 
 #include "tiku.h"
 #include "tiku_shell_io.h"       /* SHELL_PRINTF, I/O backend API */
+#include "tiku_shell_config.h"   /* SH_* color macros, command flags */
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/

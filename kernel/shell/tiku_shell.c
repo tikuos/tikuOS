@@ -255,10 +255,11 @@ tiku_shell_cmd_help(uint8_t argc, const char *argv[])
 
     for (cmd = tiku_shell_commands; cmd->name != NULL; cmd++) {
         if (cmd->handler == NULL) {
-            /* Category header with separator */
-            SHELL_PRINTF(" --- %s ---\n", cmd->name);
+            /* Category header */
+            SHELL_PRINTF(SH_CYAN " --- %s ---" SH_RST "\n", cmd->name);
         } else {
-            SHELL_PRINTF("  %-10s %s\n", cmd->name, cmd->help);
+            SHELL_PRINTF("  " SH_BOLD "%-10s" SH_RST " %s\n",
+                         cmd->name, cmd->help);
         }
     }
 }
@@ -296,19 +297,20 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #else
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
     SHELL_PRINTF("\n");
+    SHELL_PRINTF(SH_CYAN SH_BOLD);
     SHELL_PRINTF("  ___ _ _         ___  ___\n");
     SHELL_PRINTF(" |_ _|_) |_ _  _/ _ \\/ __|\n");
     SHELL_PRINTF("  | || | / / || | (_) \\__ \\\n");
-    SHELL_PRINTF("  |_||_|_\\_\\\\_,_|\\___/|___/  v%s\n",
-                 TIKU_VERSION);
-    SHELL_PRINTF("  %s\n", TIKU_TAGLINE);
+    SHELL_PRINTF("  |_||_|_\\_\\\\_,_|\\___/|___/");
+    SHELL_PRINTF(SH_RST SH_DIM "  v%s\n", TIKU_VERSION);
+    SHELL_PRINTF("  %s" SH_RST "\n", TIKU_TAGLINE);
     SHELL_PRINTF("\n");
-    SHELL_PRINTF("  %s  |  SRAM %luB  FRAM %luKB\n",
+    SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "  |  SRAM %luB  FRAM %luKB\n",
                  TIKU_DEVICE_NAME,
                  (unsigned long)TIKU_DEVICE_RAM_SIZE,
                  (unsigned long)(TIKU_DEVICE_FRAM_SIZE / 1024));
-    SHELL_PRINTF("  Type 'help' for commands.\n\n");
-    SHELL_PRINTF("tikuOS> ");
+    SHELL_PRINTF(SH_DIM "  Type 'help' for commands." SH_RST "\n\n");
+    SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
 #endif
 
     tiku_timer_set_event(&cli_timer, TIKU_SHELL_POLL_TICKS);
@@ -333,17 +335,18 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             tiku_shell_io_set_backend(&tiku_shell_io_tcp);
             line_pos = 0;
             SHELL_PRINTF("\n");
+            SHELL_PRINTF(SH_CYAN SH_BOLD);
             SHELL_PRINTF("  ___ _ _         ___  ___\n");
             SHELL_PRINTF(" |_ _|_) |_ _  _/ _ \\/ __|\n");
             SHELL_PRINTF("  | || | / / || | (_) \\__ \\\n");
-            SHELL_PRINTF("  |_||_|_\\_\\\\_,_|\\___/|___/  v%s\n",
-                         TIKU_VERSION);
-            SHELL_PRINTF("  %s\n", TIKU_TAGLINE);
+            SHELL_PRINTF("  |_||_|_\\_\\\\_,_|\\___/|___/");
+            SHELL_PRINTF(SH_RST SH_DIM "  v%s\n", TIKU_VERSION);
+            SHELL_PRINTF("  %s" SH_RST "\n", TIKU_TAGLINE);
             SHELL_PRINTF("\n");
-            SHELL_PRINTF("  %s  |  Telnet Shell\n",
+            SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "  |  Telnet Shell\n",
                          TIKU_DEVICE_NAME);
-            SHELL_PRINTF("  Type 'help' for commands.\n\n");
-            SHELL_PRINTF("tikuOS> ");
+            SHELL_PRINTF(SH_DIM "  Type 'help' for commands." SH_RST "\n\n");
+            SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
             tiku_shell_io_tcp_flush();
         }
 #endif
@@ -366,7 +369,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                     tiku_shell_parser_execute(line_buf);
                 }
                 line_pos = 0;
-                SHELL_PRINTF("tikuOS> ");
+                SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
 
             } else if (ch == '\b' || ch == 127) {
                 /* Backspace */

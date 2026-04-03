@@ -125,13 +125,13 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     }
 
     /* ---- Compile-time (fixed at link) ---- */
-    SHELL_PRINTF("--- Compile-time ---\n");
-    SHELL_PRINTF("SRAM  %5u total\n", sram_total);
+    SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
+    SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5u total\n", sram_total);
     SHELL_PRINTF("  .data+.bss  %5u\n", sram_static);
     SHELL_PRINTF("  reservd     %5u\n",
                  sram_total - sram_static);
 
-    SHELL_PRINTF("FRAM  %5u total\n", fram_total);
+    SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "  %5u total\n", fram_total);
     SHELL_PRINTF("  code        %5u\n", fram_code);
     SHELL_PRINTF("  const/data  %5u\n", fram_data);
     SHELL_PRINTF("  unallocd    %5u\n",
@@ -139,10 +139,10 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                  ? fram_total - fram_data - fram_code : 0);
 
     /* ---- Runtime (changes dynamically) ---- */
-    SHELL_PRINTF("--- Runtime ---\n");
-    SHELL_PRINTF("SRAM\n");
+    SHELL_PRINTF(SH_GREEN "--- Runtime ---" SH_RST "\n");
+    SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "\n");
     SHELL_PRINTF("  stack now   %5u\n", stack_used());
-    SHELL_PRINTF("  free now    %5u\n",
+    SHELL_PRINTF("  free now    " SH_BOLD "%5u" SH_RST "\n",
                  sram_total - sram_static - stack_used());
 
 #if TIKU_INIT_ENABLE
@@ -153,7 +153,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                                sizeof(tiku_init_entry_t);
 
         r = tiku_fram_region_get(TIKU_FRAM_REGION_CONFIG);
-        SHELL_PRINTF("FRAM\n");
+        SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "\n");
         if (r != (const tiku_fram_region_t *)0) {
             SHELL_PRINTF("  config rgn  %5u allocated\n", r->size);
             SHELL_PRINTF("  init table  %5u (%u/%u entries)\n",
@@ -174,7 +174,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
         return;
     }
 
-    SHELL_PRINTF("--- Processes (%u/%u) ---\n",
+    SHELL_PRINTF(SH_CYAN "--- Processes (%u/%u) ---" SH_RST "\n",
                  proc_count, TIKU_PROCESS_MAX);
     SHELL_PRINTF(" pid  %-10s  sram  fram  state\n", "name");
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {

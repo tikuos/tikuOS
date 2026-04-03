@@ -68,6 +68,51 @@
 
 /** @} */
 
+/** @defgroup TIKU_SHELL_COLOR ANSI Color Output
+ * @brief Enable colored shell output via ANSI escape codes.
+ *
+ * Build with:  make TIKU_SHELL_COLOR=1 MCU=msp430fr5969
+ *
+ * Requires a terminal that renders ANSI escapes (picocom, screen,
+ * minicom, PuTTY, telnet).  Disable for raw serial logging.
+ * @{
+ */
+
+#ifndef TIKU_SHELL_COLOR
+#define TIKU_SHELL_COLOR  0
+#endif
+
+#if TIKU_SHELL_COLOR
+
+#define SH_RST     "\033[0m"      /**< Reset all attributes */
+#define SH_BOLD    "\033[1m"      /**< Bold / bright */
+#define SH_DIM     "\033[2m"      /**< Dim / faint */
+
+#define SH_RED     "\033[31m"     /**< Red text */
+#define SH_GREEN   "\033[32m"     /**< Green text */
+#define SH_YELLOW  "\033[33m"     /**< Yellow text */
+#define SH_BLUE    "\033[34m"     /**< Blue text */
+#define SH_MAGENTA "\033[35m"     /**< Magenta text */
+#define SH_CYAN    "\033[36m"     /**< Cyan text */
+#define SH_WHITE   "\033[37m"     /**< White text */
+
+#else /* !TIKU_SHELL_COLOR */
+
+#define SH_RST     ""
+#define SH_BOLD    ""
+#define SH_DIM     ""
+#define SH_RED     ""
+#define SH_GREEN   ""
+#define SH_YELLOW  ""
+#define SH_BLUE    ""
+#define SH_MAGENTA ""
+#define SH_CYAN    ""
+#define SH_WHITE   ""
+
+#endif /* TIKU_SHELL_COLOR */
+
+/** @} */
+
 /** @defgroup TIKU_SHELL_BACKENDS CLI Backend Selection
  * @brief Enable optional I/O backends (UART is always available).
  * @{

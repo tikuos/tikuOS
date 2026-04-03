@@ -69,6 +69,7 @@ APP ?=
 #   make APP=cli MCU=msp430fr5969                — legacy alias (also enables shell)
 # ---------------------------------------------------------------------------
 TIKU_SHELL_ENABLE ?= 0
+TIKU_SHELL_COLOR  ?= 0
 TIKU_INIT_ENABLE  ?= 0
 TIKU_INIT_TEST    ?= 0
 
@@ -191,6 +192,9 @@ SRCS += server/vfs/tiku_vfs_tree.c
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_SHELL_ENABLE),1)
 CFLAGS += -DTIKU_SHELL_ENABLE=1
+ifeq ($(TIKU_SHELL_COLOR),1)
+CFLAGS += -DTIKU_SHELL_COLOR=1
+endif
 SRCS += kernel/shell/tiku_shell_io.c
 SRCS += kernel/shell/tiku_shell_parser.c
 SRCS += kernel/shell/tiku_shell.c
