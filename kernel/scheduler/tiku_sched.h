@@ -134,6 +134,11 @@ uint8_t tiku_sched_has_pending(void);
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook);
 
 /**
+ * @brief Return the number of times the scheduler entered idle.
+ */
+uint16_t tiku_sched_idle_count(void);
+
+/**
  * @brief Notify the scheduler from ISR context
  *
  * Call this from any ISR that generates work (e.g., clock tick ISR).

@@ -207,6 +207,12 @@ uint8_t tiku_timer_count(void);
 uint16_t tiku_timer_fired(void);
 
 /**
+ * @brief Get an active timer by index (0 = first in list).
+ * @return Pointer to timer, or NULL if index out of range
+ */
+struct tiku_timer *tiku_timer_get(uint8_t idx);
+
+/**
  * @brief Get next expiration time across all timers
  * @return Nearest expiration time, or 0 if none pending
  *

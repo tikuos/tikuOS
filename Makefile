@@ -218,8 +218,9 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
-SRCS += arch/msp430/tiku_gpio_arch.c
 endif
+# GPIO arch is always needed (VFS tree references GPIO read/write/dir)
+SRCS += arch/msp430/tiku_gpio_arch.c
 
 # ---------------------------------------------------------------------------
 # Init system (FRAM-backed configurable boot — requires shell)
@@ -291,6 +292,7 @@ SRCS += tests/watchdog/test_watchdog_timeout.c
 SRCS += tests/uart/test_uart_edge.c
 SRCS += tests/watchdog/test_watchdog_edge.c
 SRCS += tests/server/vfs/test_vfs.c
+SRCS += tests/server/vfs/test_vfs_tree.c
 SRCS += tests/init/test_catalog.c
 SRCS += tests/init/test_init_table.c
 SRCS += tests/init/test_init_boot.c

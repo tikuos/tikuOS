@@ -279,6 +279,16 @@ uint8_t tiku_timer_count(void) {
 
 uint16_t tiku_timer_fired(void) { return timer_fire_count; }
 
+struct tiku_timer *tiku_timer_get(uint8_t idx) {
+    struct tiku_timer *t;
+    uint8_t n = 0;
+    for (t = timer_list; t != NULL; t = t->next) {
+        if (n == idx) { return t; }
+        n++;
+    }
+    return (struct tiku_timer *)0;
+}
+
 /*---------------------------------------------------------------------------*/
 
 tiku_clock_time_t tiku_timer_next_expiration(void) {

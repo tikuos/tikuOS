@@ -33,8 +33,20 @@
 #include "tiku.h"
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_timer.h>
+#include <kernel/timers/tiku_htimer.h>
 #include <kernel/cpu/tiku_common.h>
+#include <kernel/cpu/tiku_watchdog.h>
+#include <kernel/memory/tiku_mem.h>
+#include <kernel/process/tiku_proc_vfs.h>
 #include <arch/msp430/tiku_gpio_arch.h>
+#include <arch/msp430/tiku_uart_arch.h>
+#include <kernel/process/tiku_process.h>
+#include <kernel/scheduler/tiku_sched.h>
+#include <interfaces/adc/tiku_adc.h>
+#include <interfaces/bus/tiku_i2c_bus.h>
+#if TIKU_SPI_ENABLE
+#include <interfaces/bus/tiku_spi_bus.h>
+#endif
 #include <stdio.h>
 
 #if TIKU_SHELL_ENABLE
@@ -138,6 +150,127 @@ nvm_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/mem/free — live stack headroom                                        */
+/*---------------------------------------------------------------------------*/
+
+extern char _end;
+extern char __stack;
+
+static int
+mem_free_read(char *buf, size_t max)
+{
+    uint16_t sp;
+    uint16_t end_addr = (uint16_t)(uintptr_t)&_end;
+
+#ifdef PLATFORM_MSP430
+    __asm__ volatile ("mov r1, %0" : "=r"(sp));
+#else
+    sp = (uint16_t)(uintptr_t)&__stack;
+#endif
+
+    if (sp > end_addr) {
+        return snprintf(buf, max, "%u\n", sp - end_addr);
+    }
+    return snprintf(buf, max, "0\n");
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/mem/used — sum of per-process SRAM allocation                        */
+/*---------------------------------------------------------------------------*/
+
+static int
+mem_used_read(char *buf, size_t max)
+{
+    uint16_t total = 0;
+    uint8_t i;
+    for (i = 0; i < TIKU_PROCESS_MAX; i++) {
+        struct tiku_process *p = tiku_process_get((int8_t)i);
+        if (p != NULL) {
+            total += p->sram_used;
+        }
+    }
+    return snprintf(buf, max, "%u\n", total);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/boot/reason — last reset cause from SYSRSTIV                         */
+/*---------------------------------------------------------------------------*/
+
+static uint16_t boot_reset_cause;
+
+static const char *
+reset_cause_str(uint16_t iv)
+{
+    switch (iv) {
+    case 0x0000: return "none";
+    case 0x0002: return "brownout";
+    case 0x0004: return "rstnmi";
+    case 0x0006: return "sw-bor";
+    case 0x0008: return "lpm5-wake";
+    case 0x000A: return "security";
+    case 0x000E: return "svs";
+    case 0x0014: return "sw-por";
+    case 0x0016: return "wdt-timeout";
+    case 0x0018: return "wdt-pwviol";
+    case 0x001A: return "fram-pwviol";
+    case 0x001C: return "fram-bit-err";
+    case 0x001E: return "periph-fetch";
+    case 0x0020: return "pmm-pwviol";
+    case 0x0024: return "fll-unlock";
+    default:     return "unknown";
+    }
+}
+
+static int
+boot_reason_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", reset_cause_str(boot_reset_cause));
+}
+
+static uint32_t boot_count_value;
+
+static int
+boot_count_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n", (unsigned long)boot_count_value);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/sched/idle                                                           */
+/*---------------------------------------------------------------------------*/
+
+static int
+sched_idle_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", tiku_sched_idle_count());
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/timer/list/<n> — per-timer detail                                    */
+/*---------------------------------------------------------------------------*/
+
+static int
+timer_detail_read(uint8_t idx, char *buf, size_t max)
+{
+    struct tiku_timer *t = tiku_timer_get(idx);
+    if (t == NULL) {
+        return snprintf(buf, max, "(none)\n");
+    }
+    return snprintf(buf, max, "%s rem=%u int=%u%s\n",
+                    t->mode == TIKU_TIMER_MODE_EVENT ? "evt" : "cb",
+                    (unsigned)tiku_timer_remaining(t),
+                    (unsigned)t->interval,
+                    t->p ? "" : " (no target)");
+}
+
+#define TIMER_DETAIL(idx)                                                   \
+    static int timer_detail_##idx(char *buf, size_t max) {                  \
+        return timer_detail_read(idx, buf, max);                            \
+    }
+
+TIMER_DETAIL(0) TIMER_DETAIL(1) TIMER_DETAIL(2) TIMER_DETAIL(3)
+
+/*---------------------------------------------------------------------------*/
 /* /sys/power/mode                                                           */
 /*---------------------------------------------------------------------------*/
 
@@ -211,6 +344,45 @@ timer_next_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/clock/ticks                                                          */
+/*---------------------------------------------------------------------------*/
+
+static int
+clock_ticks_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    (unsigned)tiku_clock_time());
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/watchdog/mode                                                        */
+/*---------------------------------------------------------------------------*/
+
+static int
+watchdog_mode_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", tiku_watchdog_mode_str());
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/htimer/now, /sys/htimer/scheduled                                    */
+/*---------------------------------------------------------------------------*/
+
+static int
+htimer_now_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    (unsigned)tiku_htimer_arch_now());
+}
+
+static int
+htimer_scheduled_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    tiku_htimer_is_scheduled() ? 1u : 0u);
+}
+
+/*---------------------------------------------------------------------------*/
 /* /sys/version                                                              */
 /*---------------------------------------------------------------------------*/
 
@@ -238,6 +410,141 @@ static int
 cpu_freq_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n", (unsigned long)TIKU_MAIN_CPU_HZ);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /dev/uart/overruns                                                        */
+/*---------------------------------------------------------------------------*/
+
+static int
+uart_overruns_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    (unsigned)tiku_uart_overrun_count());
+}
+
+static int
+uart_baud_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)TIKU_BOARD_UART_BAUD);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /dev/spi/config                                                           */
+/*---------------------------------------------------------------------------*/
+
+static int
+spi_config_read(char *buf, size_t max)
+{
+#if TIKU_SPI_ENABLE
+    const tiku_spi_config_t *cfg = tiku_spi_get_config();
+    if (cfg == NULL) {
+        return snprintf(buf, max, "off\n");
+    }
+    return snprintf(buf, max, "mode=%u order=%s pre=%u\n",
+                    (unsigned)cfg->mode,
+                    cfg->bit_order == 0 ? "msb" : "lsb",
+                    (unsigned)cfg->prescaler);
+#else
+    return snprintf(buf, max, "n/a\n");
+#endif
+}
+
+/*---------------------------------------------------------------------------*/
+/* /dev/gpio/dir — per-port direction summary                                */
+/*---------------------------------------------------------------------------*/
+
+static int
+gpio_dir_read(uint8_t port, char *buf, size_t max)
+{
+    int pos = 0;
+    uint8_t pin;
+    for (pin = 0; pin < 8 && pos < (int)max - 4; pin++) {
+        int8_t d = tiku_gpio_arch_get_dir(port, pin);
+        pos += snprintf(buf + pos, max - pos, "%c",
+                        d == 1 ? 'O' : (d == 0 ? 'I' : '?'));
+    }
+    if (pos < (int)max - 1) {
+        buf[pos++] = '\n';
+        buf[pos] = '\0';
+    }
+    return pos;
+}
+
+#define GPIO_DIR(p)                                                         \
+    static int gpio_dir_##p(char *buf, size_t max) {                        \
+        return gpio_dir_read(p, buf, max);                                  \
+    }
+
+#if TIKU_DEVICE_HAS_PORT1
+GPIO_DIR(1)
+#endif
+#if TIKU_DEVICE_HAS_PORT2
+GPIO_DIR(2)
+#endif
+#if TIKU_DEVICE_HAS_PORT3
+GPIO_DIR(3)
+#endif
+#if TIKU_DEVICE_HAS_PORT4
+GPIO_DIR(4)
+#endif
+
+/*---------------------------------------------------------------------------*/
+/* /dev/adc/temp, /dev/adc/battery                                           */
+/*---------------------------------------------------------------------------*/
+
+static int
+adc_temp_read(char *buf, size_t max)
+{
+    uint16_t val;
+    int rc = tiku_adc_read(TIKU_ADC_CH_TEMP, &val);
+    if (rc != TIKU_ADC_OK) {
+        return snprintf(buf, max, "err\n");
+    }
+    return snprintf(buf, max, "%u\n", (unsigned)val);
+}
+
+static int
+adc_battery_read(char *buf, size_t max)
+{
+    uint16_t val;
+    int rc = tiku_adc_read(TIKU_ADC_CH_BATTERY, &val);
+    if (rc != TIKU_ADC_OK) {
+        return snprintf(buf, max, "err\n");
+    }
+    return snprintf(buf, max, "%u\n", (unsigned)val);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /dev/i2c/scan                                                             */
+/*---------------------------------------------------------------------------*/
+
+static int
+i2c_scan_read(char *buf, size_t max)
+{
+    int pos = 0;
+    uint8_t addr;
+    uint8_t found = 0;
+    uint8_t dummy = 0;
+
+    for (addr = 0x08; addr <= 0x77 && pos < (int)max - 6; addr++) {
+        if (tiku_i2c_write(addr, &dummy, 0) == TIKU_I2C_OK) {
+            pos += snprintf(buf + pos, max - pos, "0x%02x ", addr);
+            found++;
+        }
+    }
+
+    if (found == 0) {
+        pos += snprintf(buf + pos, max - pos, "none");
+    }
+
+    if (pos < (int)max - 1) {
+        buf[pos++] = '\n';
+        buf[pos] = '\0';
+    }
+
+    return pos;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -381,8 +688,10 @@ static const tiku_vfs_node_t gpio_children[] = {
  */
 
 static const tiku_vfs_node_t sys_mem_children[] = {
-    { "sram", TIKU_VFS_FILE, sram_read, NULL, NULL, 0 },
-    { "nvm",  TIKU_VFS_FILE, nvm_read,  NULL, NULL, 0 },
+    { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0 },
+    { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0 },
+    { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0 },
+    { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0 },
 };
 
 static const tiku_vfs_node_t sys_cpu_children[] = {
@@ -394,36 +703,109 @@ static const tiku_vfs_node_t sys_power_children[] = {
     { "wake", TIKU_VFS_FILE, power_wake_read, NULL, NULL, 0 },
 };
 
+static const tiku_vfs_node_t sys_timer_list_children[] = {
+    { "0", TIKU_VFS_FILE, timer_detail_0, NULL, NULL, 0 },
+    { "1", TIKU_VFS_FILE, timer_detail_1, NULL, NULL, 0 },
+    { "2", TIKU_VFS_FILE, timer_detail_2, NULL, NULL, 0 },
+    { "3", TIKU_VFS_FILE, timer_detail_3, NULL, NULL, 0 },
+};
+
 static const tiku_vfs_node_t sys_timer_children[] = {
     { "count", TIKU_VFS_FILE, timer_count_read, NULL, NULL, 0 },
     { "next",  TIKU_VFS_FILE, timer_next_read,  NULL, NULL, 0 },
     { "fired", TIKU_VFS_FILE, timer_fired_read, NULL, NULL, 0 },
+    { "list",  TIKU_VFS_DIR,  NULL, NULL, sys_timer_list_children, 4 },
+};
+
+static const tiku_vfs_node_t sys_clock_children[] = {
+    { "ticks", TIKU_VFS_FILE, clock_ticks_read, NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t sys_watchdog_children[] = {
+    { "mode", TIKU_VFS_FILE, watchdog_mode_read, NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t sys_htimer_children[] = {
+    { "now",       TIKU_VFS_FILE, htimer_now_read,       NULL, NULL, 0 },
+    { "scheduled", TIKU_VFS_FILE, htimer_scheduled_read, NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t sys_boot_children[] = {
+    { "reason", TIKU_VFS_FILE, boot_reason_read, NULL, NULL, 0 },
+    { "count",  TIKU_VFS_FILE, boot_count_read,  NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t sys_sched_children[] = {
+    { "idle", TIKU_VFS_FILE, sched_idle_read, NULL, NULL, 0 },
+};
+
+/* GPIO direction nodes — one file per port */
+static const tiku_vfs_node_t gpio_dir_children[] = {
+#if TIKU_DEVICE_HAS_PORT1
+    { "1", TIKU_VFS_FILE, gpio_dir_1, NULL, NULL, 0 },
+#endif
+#if TIKU_DEVICE_HAS_PORT2
+    { "2", TIKU_VFS_FILE, gpio_dir_2, NULL, NULL, 0 },
+#endif
+#if TIKU_DEVICE_HAS_PORT3
+    { "3", TIKU_VFS_FILE, gpio_dir_3, NULL, NULL, 0 },
+#endif
+#if TIKU_DEVICE_HAS_PORT4
+    { "4", TIKU_VFS_FILE, gpio_dir_4, NULL, NULL, 0 },
+#endif
+};
+
+static const tiku_vfs_node_t dev_spi_children[] = {
+    { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0 },
 };
 
 static const tiku_vfs_node_t sys_children[] = {
-    { "version", TIKU_VFS_FILE, version_read, NULL, NULL, 0 },
-    { "device",  TIKU_VFS_FILE, device_read,  NULL, NULL, 0 },
-    { "uptime",  TIKU_VFS_FILE, uptime_read,  NULL, NULL, 0 },
-    { "mem",     TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 2 },
-    { "cpu",     TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
-    { "power",   TIKU_VFS_DIR,  NULL, NULL, sys_power_children, 2 },
-    { "timer",   TIKU_VFS_DIR,  NULL, NULL, sys_timer_children, 3 },
+    { "version",  TIKU_VFS_FILE, version_read, NULL, NULL, 0 },
+    { "device",   TIKU_VFS_FILE, device_read,  NULL, NULL, 0 },
+    { "uptime",   TIKU_VFS_FILE, uptime_read,  NULL, NULL, 0 },
+    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 4 },
+    { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
+    { "power",    TIKU_VFS_DIR,  NULL, NULL, sys_power_children, 2 },
+    { "timer",    TIKU_VFS_DIR,  NULL, NULL, sys_timer_children, 4 },
+    { "clock",    TIKU_VFS_DIR,  NULL, NULL, sys_clock_children, 1 },
+    { "watchdog", TIKU_VFS_DIR,  NULL, NULL, sys_watchdog_children, 1 },
+    { "htimer",   TIKU_VFS_DIR,  NULL, NULL, sys_htimer_children, 2 },
+    { "boot",     TIKU_VFS_DIR,  NULL, NULL, sys_boot_children, 2 },
+    { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
+};
+
+static const tiku_vfs_node_t dev_uart_children[] = {
+    { "overruns", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0 },
+    { "baud",     TIKU_VFS_FILE, uart_baud_read,     NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t dev_adc_children[] = {
+    { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0 },
+    { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t dev_i2c_children[] = {
+    { "scan", TIKU_VFS_FILE, i2c_scan_read, NULL, NULL, 0 },
 };
 
 static const tiku_vfs_node_t dev_children[] = {
-    { "led0", TIKU_VFS_FILE, led0_read, led0_write, NULL, 0 },
-    { "led1", TIKU_VFS_FILE, led1_read, led1_write, NULL, 0 },
-    { "gpio", TIKU_VFS_DIR,  NULL, NULL, gpio_children, GPIO_PORT_COUNT },
+    { "led0",     TIKU_VFS_FILE, led0_read, led0_write, NULL, 0 },
+    { "led1",     TIKU_VFS_FILE, led1_read, led1_write, NULL, 0 },
+    { "gpio",     TIKU_VFS_DIR,  NULL, NULL, gpio_children, GPIO_PORT_COUNT },
+    { "gpio_dir", TIKU_VFS_DIR,  NULL, NULL, gpio_dir_children, GPIO_PORT_COUNT },
+    { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children, 2 },
+    { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },
+    { "i2c",      TIKU_VFS_DIR,  NULL, NULL, dev_i2c_children, 1 },
+    { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },
 };
 
-static const tiku_vfs_node_t root_children[] = {
-    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 7 },
-    { "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 3 },
-};
+/** Mutable root children: sys + dev + proc (FRAM, written at init) */
+static tiku_vfs_node_t __attribute__((section(".persistent")))
+    root_children[3];
 
-static const tiku_vfs_node_t vfs_root = {
-    "", TIKU_VFS_DIR, NULL, NULL, root_children, 2
-};
+/** Mutable root node (FRAM, written at init) */
+static tiku_vfs_node_t __attribute__((section(".persistent")))
+    vfs_root;
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
@@ -432,6 +814,9 @@ static const tiku_vfs_node_t vfs_root = {
 void
 tiku_vfs_tree_init(void)
 {
+    const tiku_vfs_node_t *proc;
+    uint16_t mpu_saved;
+
     /* Init LED hardware */
     tiku_common_led1_init();
     tiku_common_led2_init();
@@ -439,5 +824,43 @@ tiku_vfs_tree_init(void)
     led0_state = 0;
     led1_state = 0;
 
+    /* Capture reset cause before anything else clears it */
+#ifdef PLATFORM_MSP430
+    boot_reset_cause = SYSRSTIV;
+#endif
+
+    /* Boot count stays 0 unless hibernate module sets it.
+     * tiku_mem_resume() requires a valid FRAM buffer and is called
+     * separately by the application if hibernate is used. */
+    boot_count_value = 0;
+
+    /* Unlock FRAM — root_children, vfs_root, and /proc/ arrays
+     * are in .persistent (FRAM) to conserve SRAM for the stack. */
+    mpu_saved = tiku_mpu_unlock_nvm();
+
+    /* Populate root entries */
+    root_children[0] = (tiku_vfs_node_t){
+        "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 12
+    };
+    root_children[1] = (tiku_vfs_node_t){
+        "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 8
+    };
+
+    /* Build and attach /proc/ (also writes to FRAM arrays) */
+    proc = tiku_proc_vfs_get();
+    root_children[2] = *proc;
+
+    vfs_root = (tiku_vfs_node_t){
+        "", TIKU_VFS_DIR, NULL, NULL, root_children, 3
+    };
+
+    tiku_mpu_lock_nvm(mpu_saved);
+
     tiku_vfs_init(&vfs_root);
+}
+
+void
+tiku_vfs_set_boot_count(uint32_t count)
+{
+    boot_count_value = count;
 }

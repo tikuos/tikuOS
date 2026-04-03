@@ -84,7 +84,18 @@ int main(void) {
 
   MAIN_PRINTF("Boot complete\n");
 
-  /* Initialize the system VFS tree (/sys, /dev/led0, /dev/led1) */
+#if TIKU_SHELL_ENABLE
+  tiku_shell_init();
+#endif
+
+#if TIKU_INIT_ENABLE
+  tiku_fram_map_init();
+  tiku_init_load();
+  tiku_init_run_all();
+#endif
+
+  /* Initialize the VFS tree after processes are registered so /proc/
+   * captures the shell and any init-started processes. */
   tiku_vfs_tree_init();
 
 #if TEST_ENABLE
@@ -97,16 +108,6 @@ int main(void) {
 
 #if TIKU_APPS_ENABLE
   MAIN_PRINTF("App mode active\n");
-#endif
-
-#if TIKU_SHELL_ENABLE
-  tiku_shell_init();
-#endif
-
-#if TIKU_INIT_ENABLE
-  tiku_fram_map_init();
-  tiku_init_load();
-  tiku_init_run_all();
 #endif
 
   /* Step 3: Enter the scheduler loop (dispatches events, runs protothreads) */

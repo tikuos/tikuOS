@@ -122,6 +122,15 @@ void tiku_watchdog_resume_with_kick(void)
 }
 
 /**
+ * @brief Return a human-readable string for the current watchdog mode
+ */
+const char *tiku_watchdog_mode_str(void)
+{
+    return (tiku_watchdog_mode == TIKU_WDT_MODE_WATCHDOG)
+               ? "watchdog" : "interval";
+}
+
+/**
  * @brief Disable the watchdog timer entirely
  */
 void tiku_watchdog_off(void)

@@ -44,6 +44,9 @@ static volatile uint8_t sched_state;
 /** @brief Platform idle hook (called when no work pending) */
 static tiku_sched_idle_hook_t idle_hook;
 
+/** @brief Number of times the scheduler entered idle */
+static volatile uint16_t idle_count;
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -149,6 +152,7 @@ void tiku_sched_loop(void)
         tiku_atomic_enter();
 
         if (!tiku_sched_has_pending()) {
+            idle_count++;
             if (idle_hook != (tiku_sched_idle_hook_t)0) {
                 idle_hook();
             }
@@ -199,6 +203,12 @@ void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook)
 }
 
 /*---------------------------------------------------------------------------*/
+
+/** @brief Return the number of idle entries since boot. */
+uint16_t tiku_sched_idle_count(void)
+{
+    return idle_count;
+}
 
 /** @brief Wake the timer management process to check for expired timers. */
 void tiku_sched_notify(void)

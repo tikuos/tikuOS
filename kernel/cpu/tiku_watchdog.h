@@ -69,6 +69,9 @@ void tiku_watchdog_resume(void);
 /** @brief Resume the watchdog timer with an immediate kick */
 void tiku_watchdog_resume_with_kick(void);
 
+/** @brief Return "watchdog" or "interval" for the current WDT mode */
+const char *tiku_watchdog_mode_str(void);
+
 /** @brief Disable the watchdog timer entirely */
 void tiku_watchdog_off(void);
 

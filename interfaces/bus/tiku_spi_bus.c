@@ -34,8 +34,20 @@
 #include <hal/tiku_spi_hal.h>
 
 /*---------------------------------------------------------------------------*/
+/* PRIVATE STATE                                                             */
+/*---------------------------------------------------------------------------*/
+
+static tiku_spi_config_t spi_active_cfg;
+static uint8_t spi_configured;
+
+/*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
+
+const tiku_spi_config_t *tiku_spi_get_config(void)
+{
+    return spi_configured ? &spi_active_cfg : (const tiku_spi_config_t *)0;
+}
 
 int
 tiku_spi_init(const tiku_spi_config_t *config)
@@ -53,7 +65,14 @@ tiku_spi_init(const tiku_spi_config_t *config)
         return TIKU_SPI_ERR_PARAM;
     }
 
-    return tiku_spi_arch_init(config);
+    {
+        int rc = tiku_spi_arch_init(config);
+        if (rc == TIKU_SPI_OK) {
+            spi_active_cfg = *config;
+            spi_configured = 1;
+        }
+        return rc;
+    }
 }
 
 void

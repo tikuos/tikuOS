@@ -211,25 +211,60 @@ Note: LPM4 disables all clocks.
 
 ### :open_file_folder: Virtual Filesystem
 
-A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths, just like a desktop operating system. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, uptime, memory stats, and everything else.
+A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths, just like a desktop operating system. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, sensors, timers, processes, and everything else.
 
 ```
 /
 ├── sys/
-│   ├── version          "0.01"
-│   ├── device           "MSP430FR5969"
-│   ├── uptime           seconds since boot
+│   ├── version              "0.01"
+│   ├── device               "MSP430FR5969"
+│   ├── uptime               seconds since boot
 │   ├── mem/
-│   │   ├── sram         RAM size in bytes
-│   │   └── nvm          FRAM size in bytes
+│   │   ├── sram             RAM size in bytes
+│   │   └── nvm              FRAM size in bytes
 │   ├── cpu/
-│   │   └── freq         clock Hz (8000000)
-│   └── power/
-│       ├── mode         current LPM (off/LPM0/LPM3/LPM4)
-│       └── wake         active wake sources
-└── dev/
-    ├── led0             read/write
-    └── led1             read/write
+│   │   └── freq             clock Hz (8000000)
+│   ├── power/
+│   │   ├── mode             current LPM (off/LPM0/LPM3/LPM4)
+│   │   └── wake             active wake sources
+│   ├── timer/
+│   │   ├── count            active software timers
+│   │   ├── next             ticks until next expiration
+│   │   └── fired            total expirations since boot
+│   ├── clock/
+│   │   └── ticks            raw tick counter
+│   ├── watchdog/
+│   │   └── mode             "watchdog" or "interval"
+│   └── htimer/
+│       ├── now              hardware timer counter
+│       └── scheduled        1 if pending, 0 if idle
+├── dev/
+│   ├── led0                 read/write (0, 1, t=toggle)
+│   ├── led1                 read/write
+│   ├── gpio/{1..4}/{0..7}   per-pin read/write (0, 1, t, i=input)
+│   ├── uart/
+│   │   └── overruns         UART overrun count since boot
+│   ├── adc/
+│   │   ├── temp             on-chip temperature sensor (raw)
+│   │   └── battery          battery voltage (raw ADC)
+│   └── i2c/
+│       └── scan             list responding I2C addresses
+└── proc/
+    ├── count                number of active processes
+    ├── queue/
+    │   ├── length           pending events in queue
+    │   └── space            free event slots
+    ├── catalog/
+    │   ├── count            available-but-not-started processes
+    │   └── {0,1}/name       catalog entry name
+    └── {0..7}/              per-process directory
+        ├── name             process name
+        ├── state            running/ready/waiting/sleeping/stopped
+        ├── pid              numeric process id
+        ├── sram_used        SRAM bytes allocated
+        ├── fram_used        FRAM bytes allocated
+        ├── uptime           seconds since start
+        └── wake_count       times scheduled
 ```
 
 ```
@@ -242,12 +277,28 @@ MSP430FR5969
 tikuOS> cat /sys/power/mode
 LPM3
 
-tikuOS> cat /sys/power/wake
-timer0:on uart:on wdt:off gpio:off
+tikuOS> cat /sys/timer/fired
+312
+
+tikuOS> cat /sys/watchdog/mode
+watchdog
+
+tikuOS> cat /dev/adc/temp
+1847
+
+tikuOS> cat /proc/queue/length
+2
+
+tikuOS> cat /proc/0/state
+running
 
 tikuOS> ls /dev
   led0
   led1
+  gpio/
+  uart/
+  adc/
+  i2c/
 
 tikuOS> write /dev/led0 1
 

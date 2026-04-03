@@ -159,4 +159,10 @@ int tiku_spi_read(uint8_t *buf, uint16_t len);
 int tiku_spi_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                          uint16_t len);
 
+/**
+ * @brief Get the active SPI configuration.
+ * @return Pointer to config, or NULL if SPI not initialized
+ */
+const tiku_spi_config_t *tiku_spi_get_config(void);
+
 #endif /* TIKU_SPI_BUS_H_ */

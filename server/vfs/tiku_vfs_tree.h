@@ -26,6 +26,8 @@
 #ifndef TIKU_VFS_TREE_H_
 #define TIKU_VFS_TREE_H_
 
+#include <stdint.h>
+
 /**
  * @brief Build and register the system VFS tree.
  *
@@ -33,5 +35,12 @@
  * Call once during boot, after hardware and process init.
  */
 void tiku_vfs_tree_init(void);
+
+/**
+ * @brief Set the boot count value exposed via /sys/boot/count.
+ *
+ * Call from the hibernate resume path after reading the marker.
+ */
+void tiku_vfs_set_boot_count(uint32_t count);
 
 #endif /* TIKU_VFS_TREE_H_ */
