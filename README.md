@@ -214,21 +214,45 @@ Note: LPM4 disables all clocks.
 A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths, just like a desktop operating system. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, uptime, memory stats, and everything else.
 
 ```
-tikuOS> ls /
-  sys/
-  dev/
+/
+├── sys/
+│   ├── version          "0.01"
+│   ├── device           "MSP430FR5969"
+│   ├── uptime           seconds since boot
+│   ├── mem/
+│   │   ├── sram         RAM size in bytes
+│   │   └── nvm          FRAM size in bytes
+│   ├── cpu/
+│   │   └── freq         clock Hz (8000000)
+│   └── power/
+│       ├── mode         current LPM (off/LPM0/LPM3/LPM4)
+│       └── wake         active wake sources
+└── dev/
+    ├── led0             read/write
+    └── led1             read/write
+```
+
+```
+tikuOS> cat /sys/version
+0.01
+
+tikuOS> cat /sys/device
+MSP430FR5969
+
+tikuOS> cat /sys/power/mode
+LPM3
+
+tikuOS> cat /sys/power/wake
+timer0:on uart:on wdt:off gpio:off
 
 tikuOS> ls /dev
   led0
   led1
 
-tikuOS> read /sys/uptime
-42
-
 tikuOS> write /dev/led0 1
 
-tikuOS> cat /sys/mem/sram
-2048
+tikuOS> cat /sys/cpu/freq
+8000000
 ```
 
 ---

@@ -35,6 +35,14 @@
 #include <kernel/cpu/tiku_common.h>
 #include <stdio.h>
 
+#if TIKU_SHELL_ENABLE
+#include <kernel/shell/commands/tiku_shell_cmd_sleep.h>
+#endif
+
+#ifdef PLATFORM_MSP430
+#include <msp430.h>
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* LED STATE TRACKING                                                        */
 /*---------------------------------------------------------------------------*/
@@ -128,6 +136,45 @@ nvm_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/power/mode                                                           */
+/*---------------------------------------------------------------------------*/
+
+static int
+power_mode_read(char *buf, size_t max)
+{
+#if TIKU_SHELL_ENABLE
+    return snprintf(buf, max, "%s\n", tiku_shell_sleep_mode_str());
+#else
+    return snprintf(buf, max, "off\n");
+#endif
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/power/wake                                                           */
+/*---------------------------------------------------------------------------*/
+
+static int
+power_wake_read(char *buf, size_t max)
+{
+    int pos = 0;
+
+#ifdef PLATFORM_MSP430
+    pos += snprintf(buf + pos, max - pos, "timer0:%s ",
+                    (TA0CTL & MC__UP) ? "on" : "off");
+    pos += snprintf(buf + pos, max - pos, "uart:%s ",
+                    (UCA0IE & UCRXIE) ? "on" : "off");
+    pos += snprintf(buf + pos, max - pos, "wdt:%s ",
+                    (SFRIE1 & WDTIE) ? "on" : "off");
+    pos += snprintf(buf + pos, max - pos, "gpio:%s\n",
+                    (P1IE | P2IE | P3IE | P4IE) ? "on" : "off");
+#else
+    pos += snprintf(buf + pos, max - pos, "n/a\n");
+#endif
+
+    return pos;
+}
+
+/*---------------------------------------------------------------------------*/
 /* /sys/version                                                              */
 /*---------------------------------------------------------------------------*/
 
@@ -186,12 +233,18 @@ static const tiku_vfs_node_t sys_cpu_children[] = {
     { "freq", TIKU_VFS_FILE, cpu_freq_read, NULL, NULL, 0 },
 };
 
+static const tiku_vfs_node_t sys_power_children[] = {
+    { "mode", TIKU_VFS_FILE, power_mode_read, NULL, NULL, 0 },
+    { "wake", TIKU_VFS_FILE, power_wake_read, NULL, NULL, 0 },
+};
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version", TIKU_VFS_FILE, version_read, NULL, NULL, 0 },
     { "device",  TIKU_VFS_FILE, device_read,  NULL, NULL, 0 },
     { "uptime",  TIKU_VFS_FILE, uptime_read,  NULL, NULL, 0 },
     { "mem",     TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 2 },
     { "cpu",     TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
+    { "power",   TIKU_VFS_DIR,  NULL, NULL, sys_power_children, 2 },
 };
 
 static const tiku_vfs_node_t dev_children[] = {
@@ -200,7 +253,7 @@ static const tiku_vfs_node_t dev_children[] = {
 };
 
 static const tiku_vfs_node_t root_children[] = {
-    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 5 },
+    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 6 },
     { "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 2 },
 };
 

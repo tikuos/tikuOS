@@ -112,3 +112,14 @@ tiku_shell_cmd_sleep(uint8_t argc, const char *argv[])
         SHELL_PRINTF("Usage: sleep <off|lpm0|lpm3|lpm4>\n");
     }
 }
+
+const char *
+tiku_shell_sleep_mode_str(void)
+{
+    switch (current_lpm) {
+    case 1: return "LPM0";
+    case 3: return "LPM3";
+    case 4: return "LPM4";
+    default: return "off";
+    }
+}
