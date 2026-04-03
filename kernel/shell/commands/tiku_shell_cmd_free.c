@@ -26,6 +26,7 @@
 #include "tiku_shell_cmd_free.h"
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/process/tiku_process.h>
+#include <kernel/memory/tiku_mem.h>
 #include "tiku.h"
 #include <stdint.h>
 
@@ -104,6 +105,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     uint16_t fram_total;
     uint16_t fram_data;
     uint16_t fram_code;
+    uint16_t fram_used;
     uint8_t proc_count = 0;
 
     (void)argc;
@@ -124,6 +126,8 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                     : 0;
     }
 
+    fram_used = fram_data + fram_code;
+
     /* ---- Compile-time (fixed at link) ---- */
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5u total\n", sram_total);
@@ -140,10 +144,33 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
 
     /* ---- Runtime (changes dynamically) ---- */
     SHELL_PRINTF(SH_GREEN "--- Runtime ---" SH_RST "\n");
+
+    /* SRAM: stack + tier allocator */
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "\n");
     SHELL_PRINTF("  stack now   %5u\n", stack_used());
+    {
+        tiku_mem_stats_t sram_tier;
+        if (tiku_tier_stats(TIKU_MEM_SRAM, &sram_tier) == TIKU_MEM_OK) {
+            SHELL_PRINTF("  tier pool   %5u / %u  (peak %u)\n",
+                         sram_tier.used_bytes, sram_tier.total_bytes,
+                         sram_tier.peak_bytes);
+        }
+    }
     SHELL_PRINTF("  free now    " SH_BOLD "%5u" SH_RST "\n",
                  sram_total - sram_static - stack_used());
+
+    /* FRAM: unallocated + tier allocator */
+    SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "\n");
+    {
+        tiku_mem_stats_t nvm_tier;
+        if (tiku_tier_stats(TIKU_MEM_NVM, &nvm_tier) == TIKU_MEM_OK) {
+            SHELL_PRINTF("  tier pool   %5u / %u  (peak %u)\n",
+                         nvm_tier.used_bytes, nvm_tier.total_bytes,
+                         nvm_tier.peak_bytes);
+        }
+    }
+    SHELL_PRINTF("  free now    " SH_BOLD "%5u" SH_RST "\n",
+                 fram_total > fram_used ? fram_total - fram_used : 0);
 
 #if TIKU_INIT_ENABLE
     {
@@ -153,7 +180,6 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                                sizeof(tiku_init_entry_t);
 
         r = tiku_fram_region_get(TIKU_FRAM_REGION_CONFIG);
-        SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "\n");
         if (r != (const tiku_fram_region_t *)0) {
             SHELL_PRINTF("  config rgn  %5u allocated\n", r->size);
             SHELL_PRINTF("  init table  %5u (%u/%u entries)\n",
