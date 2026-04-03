@@ -128,16 +128,50 @@ nvm_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/version                                                              */
+/*---------------------------------------------------------------------------*/
+
+static int
+version_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", TIKU_VERSION);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/device                                                               */
+/*---------------------------------------------------------------------------*/
+
+static int
+device_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", TIKU_DEVICE_NAME);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/cpu/freq                                                             */
+/*---------------------------------------------------------------------------*/
+
+static int
+cpu_freq_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n", (unsigned long)TIKU_MAIN_CPU_HZ);
+}
+
+/*---------------------------------------------------------------------------*/
 /* VFS TREE                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /*
  * /
  * ├── sys/
- * │   ├── uptime   (read-only)
- * │   └── mem/
- * │       ├── sram  (read-only)
- * │       └── nvm   (read-only)
+ * │   ├── version  (read-only)  — OS version string
+ * │   ├── device   (read-only)  — MCU name
+ * │   ├── uptime   (read-only)  — seconds since boot
+ * │   ├── mem/
+ * │   │   ├── sram  (read-only)
+ * │   │   └── nvm   (read-only)
+ * │   └── cpu/
+ * │       └── freq  (read-only) — clock frequency in Hz
  * └── dev/
  *     ├── led0     (read-write)
  *     └── led1     (read-write)
@@ -148,9 +182,16 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "nvm",  TIKU_VFS_FILE, nvm_read,  NULL, NULL, 0 },
 };
 
+static const tiku_vfs_node_t sys_cpu_children[] = {
+    { "freq", TIKU_VFS_FILE, cpu_freq_read, NULL, NULL, 0 },
+};
+
 static const tiku_vfs_node_t sys_children[] = {
-    { "uptime", TIKU_VFS_FILE, uptime_read, NULL, NULL, 0 },
-    { "mem",    TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 2 },
+    { "version", TIKU_VFS_FILE, version_read, NULL, NULL, 0 },
+    { "device",  TIKU_VFS_FILE, device_read,  NULL, NULL, 0 },
+    { "uptime",  TIKU_VFS_FILE, uptime_read,  NULL, NULL, 0 },
+    { "mem",     TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 2 },
+    { "cpu",     TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
 };
 
 static const tiku_vfs_node_t dev_children[] = {
@@ -159,7 +200,7 @@ static const tiku_vfs_node_t dev_children[] = {
 };
 
 static const tiku_vfs_node_t root_children[] = {
-    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 2 },
+    { "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 5 },
     { "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 2 },
 };
 
