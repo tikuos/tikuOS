@@ -83,7 +83,7 @@ typedef struct tiku_vfs_node {
 /**
  * @brief Callback for tiku_vfs_list(), called once per child
  */
-typedef void (*tiku_vfs_list_fn)(const char *name, tiku_vfs_type_t type,
+typedef void (*tiku_vfs_list_fn)(const struct tiku_vfs_node *node,
                                   void *ctx);
 
 /*---------------------------------------------------------------------------*/

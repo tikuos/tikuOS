@@ -206,7 +206,7 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
     }
 
     for (i = 0; i < node->child_count; i++) {
-        callback(node->children[i].name, node->children[i].type, ctx);
+        callback(&node->children[i], ctx);
     }
 
     return 0;

@@ -38,14 +38,18 @@
 /*---------------------------------------------------------------------------*/
 
 static void
-ls_print_entry(const char *name, tiku_vfs_type_t type, void *ctx)
+ls_print_entry(const tiku_vfs_node_t *node, void *ctx)
 {
     (void)ctx;
 
-    if (type == TIKU_VFS_DIR) {
-        SHELL_PRINTF("  d  %s/\n", name);
+    if (node->type == TIKU_VFS_DIR) {
+        SHELL_PRINTF("  d  %s/\n", node->name);
     } else {
-        SHELL_PRINTF("  f  %s\n", name);
+        const char *perm = (node->read && node->write) ? "rw"
+                         : node->read                  ? "r-"
+                         : node->write                 ? "-w"
+                         :                               "--";
+        SHELL_PRINTF("  %s %s\n", perm, node->name);
     }
 }
 
