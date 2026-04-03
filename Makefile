@@ -69,9 +69,15 @@ APP ?=
 #   make APP=cli MCU=msp430fr5969                — legacy alias (also enables shell)
 # ---------------------------------------------------------------------------
 TIKU_SHELL_ENABLE ?= 0
+TIKU_INIT_ENABLE  ?= 0
 
 # Legacy: APP=cli enables the kernel shell
 ifeq ($(APP),cli)
+TIKU_SHELL_ENABLE = 1
+endif
+
+# Init system requires the shell (for parser)
+ifeq ($(TIKU_INIT_ENABLE),1)
 TIKU_SHELL_ENABLE = 1
 endif
 
@@ -172,6 +178,7 @@ SRCS += kernel/process/tiku_process.c
 SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/scheduler/tiku_sched.c
 SRCS += server/vfs/tiku_vfs.c
+SRCS += server/vfs/tiku_vfs_tree.c
 
 # ---------------------------------------------------------------------------
 # Shell (kernel service — compiled when TIKU_SHELL_ENABLE=1)
@@ -189,6 +196,20 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_reboot.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
+SRCS += kernel/shell/tiku_shell_cwd.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
+endif
+
+# ---------------------------------------------------------------------------
+# Init system (FRAM-backed configurable boot — requires shell)
+# ---------------------------------------------------------------------------
+ifeq ($(TIKU_INIT_ENABLE),1)
+CFLAGS += -DTIKU_INIT_ENABLE=1
+SRCS += kernel/memory/tiku_fram_map.c
+SRCS += kernel/init/tiku_init.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_init.c
 endif
 
 # ---------------------------------------------------------------------------

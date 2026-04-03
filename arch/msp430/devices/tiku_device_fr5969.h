@@ -92,8 +92,12 @@
 #define TIKU_DEVICE_FRAM_END        0xFFFFU  /* Last byte of main FRAM */
 
 /*---------------------------------------------------------------------------*/
-/* MPU SEGMENT BOUNDARIES                                                    */
+/* MPU (MEMORY PROTECTION UNIT)                                              */
 /*---------------------------------------------------------------------------*/
+
+#define TIKU_DEVICE_HAS_MPU         1   /**< FR5969 has hardware MPU */
+
+/* MPU SEGMENT BOUNDARIES */
 
 /*
  * Default 3-way partition of main FRAM for MPU protection:
@@ -122,5 +126,20 @@
 
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
 #define TIKU_DEVICE_ADC_CHANNELS    16  /**< External channels A0-A15 */
+
+/*---------------------------------------------------------------------------*/
+/* FRAM REGION BUDGET                                                        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * Per-device sizing for FRAM-backed regions.  The kernel/memory/tiku_fram_map
+ * module reads these to declare storage arrays; the linker places them.
+ * Adjust sizes per device — the rest of the system adapts automatically.
+ */
+#define TIKU_DEVICE_FRAM_CONFIG_SIZE      1024U   /* Init table + credentials */
+
+/* Future: loadable app slots (reserved IDs, not allocated until enabled) */
+#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U   /* 4 KB per app slot */
+#define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   3       /* 3 slots on 64 KB part */
 
 #endif /* TIKU_DEVICE_FR5969_H_ */

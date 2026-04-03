@@ -40,8 +40,15 @@
 #include "examples/kits/example_kits_runner.h"
 #endif
 
+#include "server/vfs/tiku_vfs_tree.h"
+
 #if TIKU_SHELL_ENABLE
 #include "kernel/shell/tiku_shell.h"
+#endif
+
+#if TIKU_INIT_ENABLE
+#include "kernel/memory/tiku_fram_map.h"
+#include "kernel/init/tiku_init.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -77,6 +84,9 @@ int main(void) {
 
   MAIN_PRINTF("Boot complete\n");
 
+  /* Initialize the system VFS tree (/sys, /dev/led0, /dev/led1) */
+  tiku_vfs_tree_init();
+
 #if TEST_ENABLE
   test_run_all();
 #endif
@@ -91,6 +101,12 @@ int main(void) {
 
 #if TIKU_SHELL_ENABLE
   tiku_shell_init();
+#endif
+
+#if TIKU_INIT_ENABLE
+  tiku_fram_map_init();
+  tiku_init_load();
+  tiku_init_run_all();
 #endif
 
   /* Step 3: Enter the scheduler loop (dispatches events, runs protothreads) */

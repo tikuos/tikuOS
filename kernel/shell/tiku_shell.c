@@ -68,6 +68,18 @@
 #if TIKU_SHELL_CMD_HISTORY
 #include "commands/tiku_shell_cmd_history.h"
 #endif
+#if TIKU_SHELL_CMD_INIT
+#include "commands/tiku_shell_cmd_init.h"
+#endif
+#if TIKU_SHELL_CMD_LS
+#include "commands/tiku_shell_cmd_ls.h"
+#endif
+#if TIKU_SHELL_CMD_CD
+#include "commands/tiku_shell_cmd_cd.h"
+#endif
+#if TIKU_SHELL_CMD_TOGGLE
+#include "commands/tiku_shell_cmd_toggle.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* FORWARD DECLARATIONS                                                      */
@@ -117,6 +129,19 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_HISTORY
     {"history", "Last N commands from FRAM", tiku_shell_cmd_history},
+#endif
+#if TIKU_SHELL_CMD_INIT
+    {"init",    "Manage FRAM boot entries",  tiku_shell_cmd_init},
+#endif
+#if TIKU_SHELL_CMD_LS
+    {"ls",      "List VFS directory",        tiku_shell_cmd_ls},
+#endif
+#if TIKU_SHELL_CMD_CD
+    {"cd",      "Change directory",          tiku_shell_cmd_cd},
+    {"pwd",     "Print working directory",   tiku_shell_cmd_pwd},
+#endif
+#if TIKU_SHELL_CMD_TOGGLE
+    {"toggle",  "Flip a binary VFS node",    tiku_shell_cmd_toggle},
 #endif
     {NULL, NULL, NULL}
 };

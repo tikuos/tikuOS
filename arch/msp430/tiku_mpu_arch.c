@@ -36,6 +36,8 @@
 #include "tiku_compiler.h"
 #include <msp430.h>
 
+#if TIKU_DEVICE_HAS_MPU
+
 /*---------------------------------------------------------------------------*/
 /* MPU SEGMENT BOUNDARY SETUP                                                */
 /*---------------------------------------------------------------------------*/
@@ -226,3 +228,26 @@ TIKU_ISR(SYSNMI_VECTOR, tiku_mpu_sysnmi_isr)
     latched_violation_flags |= MPUCTL1;
     (void)SYSSNIV;  /* Acknowledge NMI — clears hardware flags */
 }
+
+#else /* !TIKU_DEVICE_HAS_MPU */
+
+/*---------------------------------------------------------------------------*/
+/* NO-OP STUBS FOR DEVICES WITHOUT MPU                                       */
+/*---------------------------------------------------------------------------*/
+
+void     tiku_mpu_arch_init_segments(void)           { }
+uint16_t tiku_mpu_arch_get_sam(void)                 { return 0; }
+void     tiku_mpu_arch_set_sam(uint16_t sam)          { (void)sam; }
+uint16_t tiku_mpu_arch_get_ctl(void)                 { return 0; }
+void     tiku_mpu_arch_disable_irq(void)             { __disable_interrupt(); }
+void     tiku_mpu_arch_enable_irq(void)              { __enable_interrupt(); }
+void     tiku_mpu_arch_set_default_protection(void)  { }
+void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
+                                                      { (void)seg; (void)perm; }
+uint16_t tiku_mpu_arch_unlock_nvm(void)              { return 0; }
+void     tiku_mpu_arch_lock_nvm(uint16_t s)           { (void)s; }
+uint16_t tiku_mpu_arch_get_violation_flags(void)     { return 0; }
+void     tiku_mpu_arch_clear_violation_flags(void)   { }
+void     tiku_mpu_arch_enable_violation_nmi(void)    { }
+
+#endif /* TIKU_DEVICE_HAS_MPU */

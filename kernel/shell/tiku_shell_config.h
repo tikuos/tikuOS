@@ -49,6 +49,12 @@
 #define TIKU_SHELL_CMD_QUEUE   1  /**< queue   - List pending events */
 #define TIKU_SHELL_CMD_REBOOT  1  /**< reboot  - System reset */
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
+#define TIKU_SHELL_CMD_LS     1  /**< ls     - List VFS directory contents */
+#define TIKU_SHELL_CMD_CD     1  /**< cd/pwd - Change/print working directory */
+#define TIKU_SHELL_CMD_TOGGLE 1  /**< toggle - Binary state flip via VFS */
+#ifndef TIKU_SHELL_CMD_INIT
+#define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - FRAM boot entries */
+#endif
 
 /** @} */
 
