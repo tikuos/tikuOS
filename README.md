@@ -24,63 +24,6 @@
 
 ---
 
-## Why TikuOS
-
-<table>
-<tr>
-<th>Capability</th>
-<th>Traditional RTOS</th>
-<th>TikuOS</th>
-</tr>
-<tr>
-<td><strong>Boot sequence</strong></td>
-<td>Compiled in — change requires reflash</td>
-<td>:green_circle: FRAM table — edit over shell, reboot</td>
-</tr>
-<tr>
-<td><strong>VFS as system namespace</strong></td>
-<td>Not available on MCUs</td>
-<td>:green_circle: Peripherals, OS state, config, processes — all as paths<br><code>read /sys/uptime</code> · <code>write /dev/led0 1</code> · <code>ls /proc</code></td>
-</tr>
-<tr>
-<td><strong>Interactive shell</strong></td>
-<td>Debug UART printf at best</td>
-<td>:green_circle: 22 commands — GPIO, ADC, processes, memory, power, boot config</td>
-</tr>
-<tr>
-<td><strong>Hardware debugging</strong></td>
-<td>Recompile test code, reflash, read UART</td>
-<td>:green_circle: <code>gpio 4 6 t</code> · <code>adc temp</code> · <code>free</code> — live from shell</td>
-</tr>
-<tr>
-<td><strong>Power management</strong></td>
-<td>Hardcoded LPM in idle loop</td>
-<td>:green_circle: <code>sleep lpm3</code> / <code>wake</code> — selectable at runtime</td>
-</tr>
-<tr>
-<td><strong>Memory introspection</strong></td>
-<td>Not available at runtime</td>
-<td>:green_circle: <code>free</code> — linker symbols, stack pointer, tier allocator stats</td>
-</tr>
-<tr>
-<td><strong>Per-device customization</strong></td>
-<td><code>#ifdef</code> variants, separate builds</td>
-<td>:green_circle: Same firmware, different init table per device</td>
-</tr>
-<tr>
-<td><strong>Field reconfiguration</strong></td>
-<td>OTA update or physical access</td>
-<td>:green_circle: Shell over UART or Telnet — no reflash</td>
-</tr>
-<tr>
-<td><strong>ANSI color output</strong></td>
-<td>Plain text only</td>
-<td>:green_circle: Optional — <code>TIKU_SHELL_COLOR=1</code> at build time</td>
-</tr>
-</table>
-
----
-
 ## Supported Boards
 
 | Board | MCU | RAM | FRAM | Status |
@@ -277,7 +220,7 @@ Note: LPM4 disables all clocks.
 
 ### :open_file_folder: Virtual Filesystem
 
-Unix-like VFS for system introspection and device control.
+A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, uptime, memory stats, and future network or sensor nodes.
 
 <table><tr><td>
 <pre>
