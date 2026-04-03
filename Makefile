@@ -209,6 +209,12 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_gpio.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
+SRCS += arch/msp430/tiku_gpio_arch.c
 endif
 
 # ---------------------------------------------------------------------------
@@ -284,6 +290,7 @@ SRCS += tests/server/vfs/test_vfs.c
 SRCS += tests/init/test_catalog.c
 SRCS += tests/init/test_init_table.c
 SRCS += tests/init/test_init_boot.c
+SRCS += tests/init/test_shell_cmds.c
 
 # TikuKits tests (requires both test framework and tikukits library)
 ifeq ($(HAS_TIKUKITS),1)

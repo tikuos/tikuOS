@@ -100,6 +100,9 @@ tiku_shell_parser_execute(char *line)
 
     /* ---- Dispatch ---- */
     for (cmd = cmd_table; cmd->name != NULL; cmd++) {
+        if (cmd->handler == NULL) {
+            continue;   /* Skip category headers */
+        }
         if (cli_strcmp(argv[0], cmd->name) == 0) {
             cmd->handler(argc, argv);
             return;

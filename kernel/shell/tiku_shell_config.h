@@ -55,6 +55,13 @@
 #define TIKU_SHELL_CMD_START  1  /**< start  - Launch/resume process by name */
 #define TIKU_SHELL_CMD_WRITE  1  /**< write  - Write value to VFS node */
 #define TIKU_SHELL_CMD_READ   1  /**< read   - Read value from VFS node */
+#define TIKU_SHELL_CMD_GPIO   1  /**< gpio   - Direct GPIO pin control */
+#define TIKU_SHELL_CMD_ADC    1  /**< adc    - Read analog channels */
+#define TIKU_SHELL_CMD_FREE   1  /**< free   - Memory usage summary */
+#define TIKU_SHELL_CMD_SLEEP  1  /**< sleep  - Enter low-power idle mode */
+#define TIKU_SHELL_CMD_WAKE   1  /**< wake   - Show active wake sources */
+#define TIKU_SHELL_CMD_CAT    1  /**< cat    - Alias for read */
+#define TIKU_SHELL_CMD_ECHO   1  /**< echo   - Alias for write */
 #ifndef TIKU_SHELL_CMD_INIT
 #define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - FRAM boot entries */
 #endif

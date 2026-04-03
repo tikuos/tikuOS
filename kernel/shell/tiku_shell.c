@@ -89,6 +89,21 @@
 #if TIKU_SHELL_CMD_READ
 #include "commands/tiku_shell_cmd_read.h"
 #endif
+#if TIKU_SHELL_CMD_GPIO
+#include "commands/tiku_shell_cmd_gpio.h"
+#endif
+#if TIKU_SHELL_CMD_ADC
+#include "commands/tiku_shell_cmd_adc.h"
+#endif
+#if TIKU_SHELL_CMD_FREE
+#include "commands/tiku_shell_cmd_free.h"
+#endif
+#if TIKU_SHELL_CMD_SLEEP
+#include "commands/tiku_shell_cmd_sleep.h"
+#endif
+#if TIKU_SHELL_CMD_WAKE
+#include "commands/tiku_shell_cmd_wake.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* FORWARD DECLARATIONS                                                      */
@@ -111,56 +126,101 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
  *   3. #include the header above and add an entry here
  *   4. Add the .c to the Makefile (APP=cli section)
  */
+/*
+ * Category headers use handler == NULL.  The "help" command prints
+ * them as section titles; the parser skips them during dispatch.
+ */
+#define CMD_CATEGORY(label)  { label, NULL, NULL }
+
 static const tiku_shell_cmd_t tiku_shell_commands[] = {
+    /* ---- System ---- */
+    CMD_CATEGORY("System"),
 #if TIKU_SHELL_CMD_HELP
-    {"help", "Show available commands",  tiku_shell_cmd_help},
-#endif
-#if TIKU_SHELL_CMD_PS
-    {"ps",   "List active processes",    tiku_shell_cmd_ps},
+    {"help",    "Show available commands",     tiku_shell_cmd_help},
 #endif
 #if TIKU_SHELL_CMD_INFO
-    {"info", "System overview",          tiku_shell_cmd_info},
+    {"info",    "Device, CPU, uptime, clock",  tiku_shell_cmd_info},
 #endif
-#if TIKU_SHELL_CMD_TIMER
-    {"timer", "Software timer status",   tiku_shell_cmd_timer},
-#endif
-#if TIKU_SHELL_CMD_KILL
-    {"kill",   "Stop a process",          tiku_shell_cmd_kill},
-#endif
-#if TIKU_SHELL_CMD_RESUME
-    {"resume", "Resume a stopped process", tiku_shell_cmd_resume},
-#endif
-#if TIKU_SHELL_CMD_QUEUE
-    {"queue",  "List pending events",      tiku_shell_cmd_queue},
+#if TIKU_SHELL_CMD_FREE
+    {"free",    "Memory usage (SRAM/FRAM)",    tiku_shell_cmd_free},
 #endif
 #if TIKU_SHELL_CMD_REBOOT
-    {"reboot", "System reset",             tiku_shell_cmd_reboot},
+    {"reboot",  "System reset",                tiku_shell_cmd_reboot},
 #endif
 #if TIKU_SHELL_CMD_HISTORY
-    {"history", "Last N commands from FRAM", tiku_shell_cmd_history},
+    {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},
 #endif
-#if TIKU_SHELL_CMD_INIT
-    {"init",    "Manage FRAM boot entries",  tiku_shell_cmd_init},
-#endif
-#if TIKU_SHELL_CMD_LS
-    {"ls",      "List VFS directory",        tiku_shell_cmd_ls},
-#endif
-#if TIKU_SHELL_CMD_CD
-    {"cd",      "Change directory",          tiku_shell_cmd_cd},
-    {"pwd",     "Print working directory",   tiku_shell_cmd_pwd},
-#endif
-#if TIKU_SHELL_CMD_TOGGLE
-    {"toggle",  "Flip a binary VFS node",    tiku_shell_cmd_toggle},
+
+    /* ---- Processes ---- */
+    CMD_CATEGORY("Processes"),
+#if TIKU_SHELL_CMD_PS
+    {"ps",      "List active processes",       tiku_shell_cmd_ps},
 #endif
 #if TIKU_SHELL_CMD_START
-    {"start",   "Start/resume a process",    tiku_shell_cmd_start},
+    {"start",   "Start/resume by name",        tiku_shell_cmd_start},
 #endif
-#if TIKU_SHELL_CMD_WRITE
-    {"write",   "Write value to VFS node",   tiku_shell_cmd_write},
+#if TIKU_SHELL_CMD_KILL
+    {"kill",    "Stop a process (by pid)",     tiku_shell_cmd_kill},
+#endif
+#if TIKU_SHELL_CMD_RESUME
+    {"resume",  "Resume a stopped process",    tiku_shell_cmd_resume},
+#endif
+#if TIKU_SHELL_CMD_QUEUE
+    {"queue",   "List pending events",         tiku_shell_cmd_queue},
+#endif
+#if TIKU_SHELL_CMD_TIMER
+    {"timer",   "Software timer status",       tiku_shell_cmd_timer},
+#endif
+
+    /* ---- Filesystem ---- */
+    CMD_CATEGORY("Filesystem"),
+#if TIKU_SHELL_CMD_LS
+    {"ls",      "List directory",              tiku_shell_cmd_ls},
+#endif
+#if TIKU_SHELL_CMD_CD
+    {"cd",      "Change directory",            tiku_shell_cmd_cd},
+    {"pwd",     "Print working directory",     tiku_shell_cmd_pwd},
 #endif
 #if TIKU_SHELL_CMD_READ
-    {"read",    "Read value from VFS node",  tiku_shell_cmd_read},
+    {"read",    "Read a VFS node",             tiku_shell_cmd_read},
 #endif
+#if TIKU_SHELL_CMD_WRITE
+    {"write",   "Write a VFS node",            tiku_shell_cmd_write},
+#endif
+#if TIKU_SHELL_CMD_TOGGLE
+    {"toggle",  "Flip a binary VFS node",      tiku_shell_cmd_toggle},
+#endif
+#if TIKU_SHELL_CMD_CAT && TIKU_SHELL_CMD_READ
+    {"cat",     "Read (alias)",                tiku_shell_cmd_read},
+#endif
+#if TIKU_SHELL_CMD_ECHO && TIKU_SHELL_CMD_WRITE
+    {"echo",    "Write (alias)",               tiku_shell_cmd_write},
+#endif
+
+    /* ---- Hardware ---- */
+    CMD_CATEGORY("Hardware"),
+#if TIKU_SHELL_CMD_GPIO
+    {"gpio",    "Read/write GPIO pins",        tiku_shell_cmd_gpio},
+#endif
+#if TIKU_SHELL_CMD_ADC
+    {"adc",     "Read analog channel",         tiku_shell_cmd_adc},
+#endif
+
+    /* ---- Power ---- */
+    CMD_CATEGORY("Power"),
+#if TIKU_SHELL_CMD_SLEEP
+    {"sleep",   "Set low-power idle mode",     tiku_shell_cmd_sleep},
+#endif
+#if TIKU_SHELL_CMD_WAKE
+    {"wake",    "Show active wake sources",    tiku_shell_cmd_wake},
+#endif
+
+    /* ---- Boot ---- */
+#if TIKU_SHELL_CMD_INIT
+    CMD_CATEGORY("Boot"),
+    {"init",    "Manage FRAM boot entries",    tiku_shell_cmd_init},
+#endif
+
     {NULL, NULL, NULL}
 };
 
@@ -180,7 +240,10 @@ tiku_shell_get_commands(void)
 
 #if TIKU_SHELL_CMD_HELP
 /**
- * @brief "help" — print every registered command and its description.
+ * @brief "help" — print commands grouped by category.
+ *
+ * Category headers are table entries with handler == NULL.
+ * The name field holds the category label.
  */
 static void
 tiku_shell_cmd_help(uint8_t argc, const char *argv[])
@@ -190,9 +253,13 @@ tiku_shell_cmd_help(uint8_t argc, const char *argv[])
     (void)argc;
     (void)argv;
 
-    SHELL_PRINTF("Available commands:\n");
     for (cmd = tiku_shell_commands; cmd->name != NULL; cmd++) {
-        SHELL_PRINTF("  %s - %s\n", cmd->name, cmd->help);
+        if (cmd->handler == NULL) {
+            /* Category header with separator */
+            SHELL_PRINTF(" --- %s ---\n", cmd->name);
+        } else {
+            SHELL_PRINTF("  %-10s %s\n", cmd->name, cmd->help);
+        }
     }
 }
 #endif
@@ -228,8 +295,19 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     /* Banner deferred until a TCP client connects (see loop below) */
 #else
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
-    SHELL_PRINTF("\n--- TikuOS CLI ---\n");
-    SHELL_PRINTF("Type 'help' for available commands.\n");
+    SHELL_PRINTF("\n");
+    SHELL_PRINTF("  ___ _ _         ___  ___\n");
+    SHELL_PRINTF(" |_ _|_) |_ _  _/ _ \\/ __|\n");
+    SHELL_PRINTF("  | || | / / || | (_) \\__ \\\n");
+    SHELL_PRINTF("  |_||_|_\\_\\\\_,_|\\___/|___/  v%s\n",
+                 TIKU_VERSION);
+    SHELL_PRINTF("  %s\n", TIKU_TAGLINE);
+    SHELL_PRINTF("\n");
+    SHELL_PRINTF("  %s  |  SRAM %luB  FRAM %luKB\n",
+                 TIKU_DEVICE_NAME,
+                 (unsigned long)TIKU_DEVICE_RAM_SIZE,
+                 (unsigned long)(TIKU_DEVICE_FRAM_SIZE / 1024));
+    SHELL_PRINTF("  Type 'help' for commands.\n\n");
     SHELL_PRINTF("tikuOS> ");
 #endif
 
@@ -254,8 +332,17 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         if (tiku_shell_io_get_backend() != &tiku_shell_io_tcp) {
             tiku_shell_io_set_backend(&tiku_shell_io_tcp);
             line_pos = 0;
-            SHELL_PRINTF("\n--- TikuOS Telnet Shell ---\n");
-            SHELL_PRINTF("Type 'help' for available commands.\n");
+            SHELL_PRINTF("\n");
+            SHELL_PRINTF("  ___ _ _         ___  ___\n");
+            SHELL_PRINTF(" |_ _|_) |_ _  _/ _ \\/ __|\n");
+            SHELL_PRINTF("  | || | / / || | (_) \\__ \\\n");
+            SHELL_PRINTF("  |_||_|_\\_\\\\_,_|\\___/|___/  v%s\n",
+                         TIKU_VERSION);
+            SHELL_PRINTF("  %s\n", TIKU_TAGLINE);
+            SHELL_PRINTF("\n");
+            SHELL_PRINTF("  %s  |  Telnet Shell\n",
+                         TIKU_DEVICE_NAME);
+            SHELL_PRINTF("  Type 'help' for commands.\n\n");
             SHELL_PRINTF("tikuOS> ");
             tiku_shell_io_tcp_flush();
         }
