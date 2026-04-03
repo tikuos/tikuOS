@@ -220,7 +220,7 @@ Note: LPM4 disables all clocks.
 
 ### :open_file_folder: Virtual Filesystem
 
-A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, uptime, memory stats, and future network or sensor nodes.
+A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths, just like a desktop operating system. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, uptime, memory stats, and everything else.
 
 <table><tr><td>
 <pre>
