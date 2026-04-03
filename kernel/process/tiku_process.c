@@ -532,6 +532,105 @@ uint8_t tiku_process_count(void)
 }
 
 /*---------------------------------------------------------------------------*/
+/* PROCESS CATALOG                                                           */
+/*---------------------------------------------------------------------------*/
+
+/** Catalog of available-but-not-yet-started processes */
+static tiku_process_catalog_entry_t catalog[TIKU_PROCESS_CATALOG_MAX];
+static uint8_t catalog_count;
+
+/** Simple name comparison (avoids pulling in strcmp on small targets) */
+static uint8_t
+name_match(const char *a, const char *b)
+{
+    while (*a && *b) {
+        if (*a != *b) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return (*a == *b);
+}
+
+int8_t
+tiku_process_catalog_add(const char *name, struct tiku_process *proc)
+{
+    uint8_t i;
+
+    if (name == NULL || proc == NULL) {
+        return -1;
+    }
+
+    /* Check for duplicate */
+    for (i = 0; i < catalog_count; i++) {
+        if (name_match(catalog[i].name, name)) {
+            catalog[i].proc = proc;
+            return 0;
+        }
+    }
+
+    if (catalog_count >= TIKU_PROCESS_CATALOG_MAX) {
+        return -1;
+    }
+
+    catalog[catalog_count].name = name;
+    catalog[catalog_count].proc = proc;
+    catalog_count++;
+    return 0;
+}
+
+struct tiku_process *
+tiku_process_catalog_find(const char *name)
+{
+    uint8_t i;
+
+    if (name == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < catalog_count; i++) {
+        if (name_match(catalog[i].name, name)) {
+            return catalog[i].proc;
+        }
+    }
+    return NULL;
+}
+
+uint8_t
+tiku_process_catalog_count(void)
+{
+    return catalog_count;
+}
+
+const tiku_process_catalog_entry_t *
+tiku_process_catalog_get(uint8_t idx)
+{
+    if (idx >= catalog_count) {
+        return NULL;
+    }
+    return &catalog[idx];
+}
+
+struct tiku_process *
+tiku_process_find_by_name(const char *name)
+{
+    uint8_t i;
+
+    if (name == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < TIKU_PROCESS_MAX; i++) {
+        if (registry[i] != NULL && registry[i]->name != NULL &&
+            name_match(registry[i]->name, name)) {
+            return registry[i];
+        }
+    }
+    return NULL;
+}
+
+/*---------------------------------------------------------------------------*/
 /* CHANNEL FUNCTIONS                                                         */
 /*---------------------------------------------------------------------------*/
 

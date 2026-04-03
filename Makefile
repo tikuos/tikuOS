@@ -70,6 +70,12 @@ APP ?=
 # ---------------------------------------------------------------------------
 TIKU_SHELL_ENABLE ?= 0
 TIKU_INIT_ENABLE  ?= 0
+TIKU_INIT_TEST    ?= 0
+
+# Init tests require the init system
+ifeq ($(TIKU_INIT_TEST),1)
+TIKU_INIT_ENABLE = 1
+endif
 
 # Legacy: APP=cli enables the kernel shell
 ifeq ($(APP),cli)
@@ -200,6 +206,9 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
 SRCS += kernel/shell/tiku_shell_cwd.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
 endif
 
 # ---------------------------------------------------------------------------
@@ -272,6 +281,9 @@ SRCS += tests/watchdog/test_watchdog_timeout.c
 SRCS += tests/uart/test_uart_edge.c
 SRCS += tests/watchdog/test_watchdog_edge.c
 SRCS += tests/server/vfs/test_vfs.c
+SRCS += tests/init/test_catalog.c
+SRCS += tests/init/test_init_table.c
+SRCS += tests/init/test_init_boot.c
 
 # TikuKits tests (requires both test framework and tikukits library)
 ifeq ($(HAS_TIKUKITS),1)

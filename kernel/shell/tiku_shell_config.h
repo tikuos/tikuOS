@@ -52,6 +52,9 @@
 #define TIKU_SHELL_CMD_LS     1  /**< ls     - List VFS directory contents */
 #define TIKU_SHELL_CMD_CD     1  /**< cd/pwd - Change/print working directory */
 #define TIKU_SHELL_CMD_TOGGLE 1  /**< toggle - Binary state flip via VFS */
+#define TIKU_SHELL_CMD_START  1  /**< start  - Launch/resume process by name */
+#define TIKU_SHELL_CMD_WRITE  1  /**< write  - Write value to VFS node */
+#define TIKU_SHELL_CMD_READ   1  /**< read   - Read value from VFS node */
 #ifndef TIKU_SHELL_CMD_INIT
 #define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - FRAM boot entries */
 #endif

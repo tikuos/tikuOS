@@ -441,6 +441,68 @@ uint8_t tiku_process_count(void);
 const char *tiku_process_state_str(tiku_process_state_t state);
 
 /*---------------------------------------------------------------------------*/
+/* PROCESS CATALOG                                                           */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Maximum catalog entries (available-but-not-yet-started processes).
+ *
+ * Subsystems call tiku_process_catalog_add() at boot to advertise
+ * processes that can be started later via the shell "start" command
+ * or init system.
+ */
+#define TIKU_PROCESS_CATALOG_MAX  8
+
+/**
+ * @brief Catalog entry: maps a name to a process struct.
+ */
+typedef struct {
+    const char          *name;
+    struct tiku_process *proc;
+} tiku_process_catalog_entry_t;
+
+/**
+ * @brief Add a process to the catalog (does NOT start it).
+ *
+ * @param name  Human-readable name (e.g. "net", "mqtt")
+ * @param proc  Pointer to the process struct
+ * @return 0 on success, -1 if catalog is full
+ */
+int8_t tiku_process_catalog_add(const char *name,
+                                struct tiku_process *proc);
+
+/**
+ * @brief Look up a catalog entry by name.
+ *
+ * @param name  Process name to search for
+ * @return Pointer to the process struct, or NULL if not found
+ */
+struct tiku_process *tiku_process_catalog_find(const char *name);
+
+/**
+ * @brief Return the number of catalog entries.
+ */
+uint8_t tiku_process_catalog_count(void);
+
+/**
+ * @brief Get a catalog entry by index.
+ *
+ * @param idx  Index (0 .. tiku_process_catalog_count()-1)
+ * @return Pointer to catalog entry, or NULL if out of range
+ */
+const tiku_process_catalog_entry_t *tiku_process_catalog_get(uint8_t idx);
+
+/**
+ * @brief Find a registered (active) process by name.
+ *
+ * Searches the process registry, not the catalog.
+ *
+ * @param name  Process name to search for
+ * @return Pointer to the process, or NULL if not found
+ */
+struct tiku_process *tiku_process_find_by_name(const char *name);
+
+/*---------------------------------------------------------------------------*/
 /* QUEUE QUERY PROTOTYPES                                                    */
 /*---------------------------------------------------------------------------*/
 

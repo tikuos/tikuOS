@@ -80,6 +80,15 @@
 #if TIKU_SHELL_CMD_TOGGLE
 #include "commands/tiku_shell_cmd_toggle.h"
 #endif
+#if TIKU_SHELL_CMD_START
+#include "commands/tiku_shell_cmd_start.h"
+#endif
+#if TIKU_SHELL_CMD_WRITE
+#include "commands/tiku_shell_cmd_write.h"
+#endif
+#if TIKU_SHELL_CMD_READ
+#include "commands/tiku_shell_cmd_read.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* FORWARD DECLARATIONS                                                      */
@@ -142,6 +151,15 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_TOGGLE
     {"toggle",  "Flip a binary VFS node",    tiku_shell_cmd_toggle},
+#endif
+#if TIKU_SHELL_CMD_START
+    {"start",   "Start/resume a process",    tiku_shell_cmd_start},
+#endif
+#if TIKU_SHELL_CMD_WRITE
+    {"write",   "Write value to VFS node",   tiku_shell_cmd_write},
+#endif
+#if TIKU_SHELL_CMD_READ
+    {"read",    "Read value from VFS node",  tiku_shell_cmd_read},
 #endif
     {NULL, NULL, NULL}
 };
