@@ -53,50 +53,48 @@ make monitor
 
 TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins, read sensors, manage processes, configure boot sequences, and inspect memory — **all without recompiling**. Build with `TIKU_SHELL_COLOR=1` for ANSI color output.
 
-<table><tr><td>
-<pre>
-<span style="color:#06989a"><b>  ___ _ _         ___  ___
+```ansi
+[36;1m  ___ _ _         ___  ___
  |_ _|_) |_ _  _/ _ \/ __|
   | || | / / || | (_) \__ \
-  |_||_|_\_\\_,_|\___/|___/</b></span>  <span style="color:#888">v0.01</span>
-  <span style="color:#888">Simple. Ubiquitous. Intelligence, Everywhere.</span>
+  |_||_|_\_\\_,_|\___/|___/[0;2m  v0.01
+  Simple. Ubiquitous. Intelligence, Everywhere.[0m
 
-  <b>MSP430FR5969</b>  |  SRAM 2048B  FRAM 64KB
-  <span style="color:#888">Type 'help' for commands.</span>
+  [1mMSP430FR5969[0m  |  SRAM 2048B  FRAM 64KB
+  [2mType 'help' for commands.[0m
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> help
- <span style="color:#06989a">--- System ---</span>
-  <b>help</b>       Show available commands
-  <b>info</b>       Device, CPU, uptime, clock
-  <b>free</b>       Memory usage (SRAM/FRAM)
-  <b>reboot</b>     System reset
-  <b>history</b>    Last N commands from FRAM
- <span style="color:#06989a">--- Processes ---</span>
-  <b>ps</b>         List active processes
-  <b>start</b>      Start/resume by name
-  <b>kill</b>       Stop a process (by pid)
-  <b>resume</b>     Resume a stopped process
-  <b>queue</b>      List pending events
-  <b>timer</b>      Software timer status
- <span style="color:#06989a">--- Filesystem ---</span>
-  <b>ls</b>         List directory
-  <b>cd</b>         Change directory
-  <b>pwd</b>        Print working directory
-  <b>read</b>       Read a VFS node
-  <b>write</b>      Write a VFS node
-  <b>toggle</b>     Flip a binary VFS node
-  <b>cat</b>        Read (alias)
-  <b>echo</b>       Write (alias)
- <span style="color:#06989a">--- Hardware ---</span>
-  <b>gpio</b>       Read/write GPIO pins
-  <b>adc</b>        Read analog channel
- <span style="color:#06989a">--- Power ---</span>
-  <b>sleep</b>      Set low-power idle mode
-  <b>wake</b>       Show active wake sources
- <span style="color:#06989a">--- Boot ---</span>
-  <b>init</b>       Manage FRAM boot entries
-</pre>
-</td></tr></table>
+[32;1mtikuOS>[0m help
+ [36m--- System ---[0m
+  [1mhelp[0m       Show available commands
+  [1minfo[0m       Device, CPU, uptime, clock
+  [1mfree[0m       Memory usage (SRAM/FRAM)
+  [1mreboot[0m     System reset
+  [1mhistory[0m    Last N commands from FRAM
+ [36m--- Processes ---[0m
+  [1mps[0m         List active processes
+  [1mstart[0m      Start/resume by name
+  [1mkill[0m       Stop a process (by pid)
+  [1mresume[0m     Resume a stopped process
+  [1mqueue[0m      List pending events
+  [1mtimer[0m      Software timer status
+ [36m--- Filesystem ---[0m
+  [1mls[0m         List directory
+  [1mcd[0m         Change directory
+  [1mpwd[0m        Print working directory
+  [1mread[0m       Read a VFS node
+  [1mwrite[0m      Write a VFS node
+  [1mtoggle[0m     Flip a binary VFS node
+  [1mcat[0m        Read (alias)
+  [1mecho[0m       Write (alias)
+ [36m--- Hardware ---[0m
+  [1mgpio[0m       Read/write GPIO pins
+  [1madc[0m        Read analog channel
+ [36m--- Power ---[0m
+  [1msleep[0m      Set low-power idle mode
+  [1mwake[0m       Show active wake sources
+ [36m--- Boot ---[0m
+  [1minit[0m       Manage FRAM boot entries
+```
 
 ---
 
@@ -106,37 +104,33 @@ TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins,
 >
 > **TikuOS:** change boot behavior :arrow_right: edit over shell :arrow_right: reboot.
 
-<table><tr><td>
-<pre>
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> init add 05 network start net
+```ansi
+[32;1mtikuOS>[0m init add 05 network start net
 OK: 'network' at seq 05
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> init add 10 mqtt    start mqtt
+[32;1mtikuOS>[0m init add 10 mqtt    start mqtt
 OK: 'mqtt' at seq 10
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> init add 20 leds    write /dev/led0 1
+[32;1mtikuOS>[0m init add 20 leds    write /dev/led0 1
 OK: 'leds' at seq 20
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> init list
+[32;1mtikuOS>[0m init list
  05  network      [on ]  start net
  10  mqtt         [on ]  start mqtt
  20  leds         [on ]  write /dev/led0 1
-</pre>
-</td></tr></table>
+```
 
 Boot entries are stored in **FRAM** — they survive power cycles without flash erase cycles. Same firmware, different boot sequences per device. Disable a service without removing it:
 
-<table><tr><td>
-<pre>
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> init disable mqtt
+```ansi
+[32;1mtikuOS>[0m init disable mqtt
 OK: disabled 'mqtt'
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> init list
+[32;1mtikuOS>[0m init list
  05  network      [on ]  start net
  10  mqtt         [off]  start mqtt
  20  leds         [on ]  write /dev/led0 1
-</pre>
-</td></tr></table>
+```
 
 Reboot. New behavior. No recompile. No reflash.
 
@@ -146,21 +140,19 @@ Reboot. New behavior. No recompile. No reflash.
 
 Toggle GPIO pins, read ADC channels, inspect memory — a live hardware debugging tool on a microcontroller.
 
-<table><tr><td>
-<pre>
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> gpio 4 6 t
-P4.6 -&gt; 1
+```ansi
+[32;1mtikuOS>[0m gpio 4 6 t
+P4.6 -> 1
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> gpio 4 6
+[32;1mtikuOS>[0m gpio 4 6
 P4.6 = 1 (output)
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> adc temp
+[32;1mtikuOS>[0m adc temp
 Atemp = 1847 (0x737)
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> adc bat
+[32;1mtikuOS>[0m adc bat
 Abat = 2048 (0x800)
-</pre>
-</td></tr></table>
+```
 
 ---
 
@@ -168,29 +160,28 @@ Abat = 2048 (0x800)
 
 Real numbers from linker symbols and the stack pointer — not placeholders.
 
-<table><tr><td>
-<pre>
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> free
-<span style="color:#c4a000">--- Compile-time ---</span>
-<b>SRAM</b>   2048 total
+```ansi
+[32;1mtikuOS>[0m free
+[33m--- Compile-time ---[0m
+[1mSRAM[0m   2048 total
   .data+.bss   1058
   reservd        990
-<b>FRAM</b>  65535 total
+[1mFRAM[0m  65535 total
   code        42508
   const/data   5620
   unallocd    17407
-<span style="color:#4e9a06">--- Runtime ---</span>
-<b>SRAM</b>
+[32m--- Runtime ---[0m
+[1mSRAM[0m
   stack now      80
-  free now    <b>  910</b>
-<b>FRAM</b>
+  free now    [1m  910[0m
+[1mFRAM[0m
+  free now    [1m17407[0m
   config rgn   1024 allocated
   init table     70 (1/8 entries)
-<span style="color:#06989a">--- Processes (1/8) ---</span>
+[36m--- Processes (1/8) ---[0m
  pid  name        sram  fram  state
    0  Shell          0     0  running
-</pre>
-</td></tr></table>
+```
 
 ---
 
@@ -198,12 +189,11 @@ Real numbers from linker symbols and the stack pointer — not placeholders.
 
 Enter ultra-low-power modes from the shell. See what will wake you up.
 
-<table><tr><td>
-<pre>
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> sleep lpm3
+```ansi
+[32;1mtikuOS>[0m sleep lpm3
 Idle: LPM3
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> wake
+[32;1mtikuOS>[0m wake
 Wake sources:
   Timer A0 (sys clock)  [on ]  wakes LPM0-3
   Timer A1 (htimer)     [off]  wakes LPM0-3
@@ -213,8 +203,7 @@ Wake sources:
 
 Note: LPM4 disables all clocks.
   Only GPIO IRQ can wake from LPM4.
-</pre>
-</td></tr></table>
+```
 
 ---
 
@@ -222,25 +211,23 @@ Note: LPM4 disables all clocks.
 
 A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths, just like a desktop operating system. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, uptime, memory stats, and everything else.
 
-<table><tr><td>
-<pre>
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> ls /
+```ansi
+[32;1mtikuOS>[0m ls /
   sys/
   dev/
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> ls /dev
+[32;1mtikuOS>[0m ls /dev
   led0
   led1
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> read /sys/uptime
+[32;1mtikuOS>[0m read /sys/uptime
 42
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> write /dev/led0 1
+[32;1mtikuOS>[0m write /dev/led0 1
 
-<span style="color:#4e9a06"><b>tikuOS&gt;</b></span> cat /sys/mem/sram
+[32;1mtikuOS>[0m cat /sys/mem/sram
 2048
-</pre>
-</td></tr></table>
+```
 
 ---
 
