@@ -221,7 +221,9 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 │   ├── uptime               seconds since boot
 │   ├── mem/
 │   │   ├── sram             RAM size in bytes
-│   │   └── nvm              FRAM size in bytes
+│   │   ├── nvm              FRAM size in bytes
+│   │   ├── free             live stack headroom (SP - BSS end)
+│   │   └── used             sum of per-process SRAM allocation
 │   ├── cpu/
 │   │   └── freq             clock Hz (8000000)
 │   ├── power/
@@ -230,25 +232,35 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 │   ├── timer/
 │   │   ├── count            active software timers
 │   │   ├── next             ticks until next expiration
-│   │   └── fired            total expirations since boot
+│   │   ├── fired            total expirations since boot
+│   │   └── list/{0..3}      per-timer mode, remaining, interval
 │   ├── clock/
 │   │   └── ticks            raw tick counter
 │   ├── watchdog/
 │   │   └── mode             "watchdog" or "interval"
-│   └── htimer/
-│       ├── now              hardware timer counter
-│       └── scheduled        1 if pending, 0 if idle
+│   ├── htimer/
+│   │   ├── now              hardware timer counter
+│   │   └── scheduled        1 if pending, 0 if idle
+│   ├── boot/
+│   │   ├── reason           last reset cause (brownout/wdt/rstnmi/...)
+│   │   └── count            hibernate boot counter
+│   └── sched/
+│       └── idle             scheduler idle entry count
 ├── dev/
 │   ├── led0                 read/write (0, 1, t=toggle)
 │   ├── led1                 read/write
 │   ├── gpio/{1..4}/{0..7}   per-pin read/write (0, 1, t, i=input)
+│   ├── gpio_dir/{1..4}      per-port pin direction (I=input, O=output)
 │   ├── uart/
-│   │   └── overruns         UART overrun count since boot
+│   │   ├── overruns         UART overrun count since boot
+│   │   └── baud             configured baud rate
 │   ├── adc/
-│   │   ├── temp             on-chip temperature sensor (raw)
+│   │   ├── temp             on-chip temperature sensor (raw ADC)
 │   │   └── battery          battery voltage (raw ADC)
-│   └── i2c/
-│       └── scan             list responding I2C addresses
+│   ├── i2c/
+│   │   └── scan             list responding I2C addresses
+│   └── spi/
+│       └── config           SPI mode, bit order, prescaler (or "n/a")
 └── proc/
     ├── count                number of active processes
     ├── queue/
@@ -264,7 +276,8 @@ A unified namespace for the entire system — peripherals, OS state, config, and
         ├── sram_used        SRAM bytes allocated
         ├── fram_used        FRAM bytes allocated
         ├── uptime           seconds since start
-        └── wake_count       times scheduled
+        ├── wake_count       times scheduled
+        └── events           pending events for this process
 ```
 
 ```
@@ -274,31 +287,48 @@ tikuOS> cat /sys/version
 tikuOS> cat /sys/device
 MSP430FR5969
 
-tikuOS> cat /sys/power/mode
-LPM3
+tikuOS> cat /sys/mem/free
+752
 
 tikuOS> cat /sys/timer/fired
-312
+1862
+
+tikuOS> cat /sys/timer/list/0
+evt rem=6 int=6
 
 tikuOS> cat /sys/watchdog/mode
 watchdog
 
-tikuOS> cat /dev/adc/temp
-1847
+tikuOS> cat /sys/boot/reason
+rstnmi
 
-tikuOS> cat /proc/queue/length
-2
+tikuOS> cat /sys/sched/idle
+0
 
-tikuOS> cat /proc/0/state
-running
+tikuOS> cat /dev/uart/baud
+115200
+
+tikuOS> cat /dev/gpio_dir/1
+OOOOOOOO
+
+tikuOS> cat /proc/0/name
+Shell
+
+tikuOS> cat /proc/0/wake_count
+2063
+
+tikuOS> cat /proc/queue/space
+31
 
 tikuOS> ls /dev
   led0
   led1
   gpio/
+  gpio_dir/
   uart/
   adc/
   i2c/
+  spi/
 
 tikuOS> write /dev/led0 1
 
