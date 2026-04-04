@@ -44,11 +44,12 @@
 #define TIKU_CS_LOCK()      do { } while(0)
 #endif
 
-// Global variable to store the CPU frequency
-static tiku_clk_freq_t g_cpu_freq;
-
-// Global variable to store the SMCLK divider
-static tiku_clk_div_t g_sfreq_div;
+/* Module-private clock configuration */
+static struct {
+    tiku_clk_freq_t    freq;
+    tiku_clk_div_t     smclk_div;
+    tiku_aclk_source_t aclk_src;
+} clk;
 
 
 /**
@@ -70,9 +71,6 @@ const char* tiku_cpu_freq_to_mhz_str(unsigned int freq_enum)
     }
 
 }
-
-// Global variable to store the ACLK source
-static tiku_aclk_source_t g_aclk_source;
 
 /* Global variables from header file */
 volatile unsigned long g_mclk_hz = 0;         /* MCLK frequency in Hz */
@@ -432,42 +430,42 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
         case TIKU_CLK_FREQ_1MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_0;
             CSCTL2 = FLLD_0 + 30;   /* 32768*(30+1) = 1,015,808 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_1MHZ;
+            clk.freq = TIKU_CLK_FREQ_1MHZ;
             break;
         case TIKU_CLK_FREQ_2_677MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_1;
             CSCTL2 = FLLD_0 + 81;   /* 32768*(81+1) = 2,686,976 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_2_677MHZ;
+            clk.freq = TIKU_CLK_FREQ_2_677MHZ;
             break;
         case TIKU_CLK_FREQ_3_5MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
             CSCTL2 = FLLD_0 + 106;  /* 32768*(106+1) = 3,506,176 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_3_5MHZ;
+            clk.freq = TIKU_CLK_FREQ_3_5MHZ;
             break;
         case TIKU_CLK_FREQ_4MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
             CSCTL2 = FLLD_0 + 121;  /* 32768*(121+1) = 3,997,696 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_4MHZ;
+            clk.freq = TIKU_CLK_FREQ_4MHZ;
             break;
         case TIKU_CLK_FREQ_5_33MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_4;
             CSCTL2 = FLLD_0 + 162;  /* 32768*(162+1) = 5,341,184 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_5_33MHZ;
+            clk.freq = TIKU_CLK_FREQ_5_33MHZ;
             break;
         case TIKU_CLK_FREQ_7MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_5;
             CSCTL2 = FLLD_0 + 213;  /* 32768*(213+1) = 7,012,352 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_7MHZ;
+            clk.freq = TIKU_CLK_FREQ_7MHZ;
             break;
         case TIKU_CLK_FREQ_8MHZ:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_6;
             CSCTL2 = FLLD_0 + 243;  /* 32768*(243+1) = 7,995,392 Hz */
-            g_cpu_freq = TIKU_CLK_FREQ_8MHZ;
+            clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
         default:
             CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_6;
             CSCTL2 = FLLD_0 + 243;
-            g_cpu_freq = TIKU_CLK_FREQ_8MHZ;
+            clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
     }
 
@@ -495,35 +493,35 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
     switch (freq) {
         case TIKU_CLK_FREQ_1MHZ:
             CSCTL1 = DCOFSEL_0;
-            g_cpu_freq = TIKU_CLK_FREQ_1MHZ;
+            clk.freq = TIKU_CLK_FREQ_1MHZ;
             break;
         case TIKU_CLK_FREQ_2_677MHZ:
             CSCTL1 = DCOFSEL_1;
-            g_cpu_freq = TIKU_CLK_FREQ_2_677MHZ;
+            clk.freq = TIKU_CLK_FREQ_2_677MHZ;
             break;
         case TIKU_CLK_FREQ_3_5MHZ:
             CSCTL1 = DCOFSEL_2;
-            g_cpu_freq = TIKU_CLK_FREQ_3_5MHZ;
+            clk.freq = TIKU_CLK_FREQ_3_5MHZ;
             break;
         case TIKU_CLK_FREQ_4MHZ:
             CSCTL1 = DCOFSEL_3;
-            g_cpu_freq = TIKU_CLK_FREQ_4MHZ;
+            clk.freq = TIKU_CLK_FREQ_4MHZ;
             break;
         case TIKU_CLK_FREQ_5_33MHZ:
             CSCTL1 = DCORSEL | DCOFSEL_1;
-            g_cpu_freq = TIKU_CLK_FREQ_5_33MHZ;
+            clk.freq = TIKU_CLK_FREQ_5_33MHZ;
             break;
         case TIKU_CLK_FREQ_7MHZ:
             CSCTL1 = DCORSEL | DCOFSEL_2;
-            g_cpu_freq = TIKU_CLK_FREQ_7MHZ;
+            clk.freq = TIKU_CLK_FREQ_7MHZ;
             break;
         case TIKU_CLK_FREQ_8MHZ:
             CSCTL1 = DCORSEL | DCOFSEL_3;
-            g_cpu_freq = TIKU_CLK_FREQ_8MHZ;
+            clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
         default:
             CSCTL1 = DCORSEL | DCOFSEL_3;
-            g_cpu_freq = TIKU_CLK_FREQ_8MHZ;
+            clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
     }
 #endif /* TIKU_DEVICE_CS_TYPE_FR2X33 */
@@ -568,11 +566,11 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
         unsigned int divs = 0;
 
         switch(sfreq_div) {
-            case 1:   divs = DIVS__1; g_sfreq_div = TIKU_CLK_DIV_1; break;
-            case 2:   divs = DIVS__2; g_sfreq_div = TIKU_CLK_DIV_2; break;
-            case 4:   divs = DIVS__4; g_sfreq_div = TIKU_CLK_DIV_4; break;
-            case 8:   divs = DIVS__8; g_sfreq_div = TIKU_CLK_DIV_8; break;
-            default:  divs = DIVS__1; g_sfreq_div = TIKU_CLK_DIV_1; break;
+            case 1:   divs = DIVS__1; clk.smclk_div = TIKU_CLK_DIV_1; break;
+            case 2:   divs = DIVS__2; clk.smclk_div = TIKU_CLK_DIV_2; break;
+            case 4:   divs = DIVS__4; clk.smclk_div = TIKU_CLK_DIV_4; break;
+            case 8:   divs = DIVS__8; clk.smclk_div = TIKU_CLK_DIV_8; break;
+            default:  divs = DIVS__1; clk.smclk_div = TIKU_CLK_DIV_1; break;
         }
 
         CSCTL5 = divs | DIVM__1;
@@ -618,13 +616,13 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
         unsigned int divs = 0;
 
         switch(sfreq_div) {
-            case 1:   divs = DIVS__1;  g_sfreq_div = TIKU_CLK_DIV_1;  break;
-            case 2:   divs = DIVS__2;  g_sfreq_div = TIKU_CLK_DIV_2;  break;
-            case 4:   divs = DIVS__4;  g_sfreq_div = TIKU_CLK_DIV_4;  break;
-            case 8:   divs = DIVS__8;  g_sfreq_div = TIKU_CLK_DIV_8;  break;
-            case 16:  divs = DIVS__16; g_sfreq_div = TIKU_CLK_DIV_16; break;
-            case 32:  divs = DIVS__32; g_sfreq_div = TIKU_CLK_DIV_32; break;
-            default:  divs = DIVS__1;  g_sfreq_div = TIKU_CLK_DIV_1;  break;
+            case 1:   divs = DIVS__1;  clk.smclk_div = TIKU_CLK_DIV_1;  break;
+            case 2:   divs = DIVS__2;  clk.smclk_div = TIKU_CLK_DIV_2;  break;
+            case 4:   divs = DIVS__4;  clk.smclk_div = TIKU_CLK_DIV_4;  break;
+            case 8:   divs = DIVS__8;  clk.smclk_div = TIKU_CLK_DIV_8;  break;
+            case 16:  divs = DIVS__16; clk.smclk_div = TIKU_CLK_DIV_16; break;
+            case 32:  divs = DIVS__32; clk.smclk_div = TIKU_CLK_DIV_32; break;
+            default:  divs = DIVS__1;  clk.smclk_div = TIKU_CLK_DIV_1;  break;
         }
 
         CPU_FREQ_PRINTF("Clock dividers configured\n");
@@ -641,7 +639,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      /*-----------------------------------------------------------------------*/
 
      /* Update clock frequency cache */
-     switch (g_cpu_freq) {
+     switch (clk.freq) {
          case TIKU_CLK_FREQ_1MHZ:      g_mclk_hz = 1000000UL; break;
          case TIKU_CLK_FREQ_2_677MHZ:  g_mclk_hz = 2670000UL; break;
          case TIKU_CLK_FREQ_3_5MHZ:    g_mclk_hz = 3500000UL; break;
@@ -651,7 +649,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
          case TIKU_CLK_FREQ_8MHZ:      g_mclk_hz = 8000000UL; break;
          default:                       g_mclk_hz = 8000000UL; break;
      }
-     g_smclk_hz = g_mclk_hz / g_sfreq_div;
+     g_smclk_hz = g_mclk_hz / clk.smclk_div;
      switch(aclk_source) {
          case TIKU_ACLK_VLO:  g_aclk_hz = VLO_FREQ_NOMINAL_HZ; break;
          case TIKU_ACLK_REFO: g_aclk_hz = REFO_FREQ_HZ; break;
@@ -729,7 +727,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
 
     } else {
 
-        g_aclk_source = TIKU_ACLK_LFXT;
+        clk.aclk_src = TIKU_ACLK_LFXT;
         CPU_FREQ_PRINTF("LFXT crystal mode\n");
         CSCTL4 &= ~LFXTBYPASS;     // crystal mode
 
@@ -1082,7 +1080,7 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 tiku_clk_freq_t tiku_cpu_msp430_clock_get_freq(void)
  {
 
-    return g_cpu_freq;
+    return clk.freq;
 
 }
 
@@ -1093,7 +1091,7 @@ tiku_clk_freq_t tiku_cpu_msp430_clock_get_freq(void)
  */
 tiku_clk_div_t tiku_cpu_msp430_clock_get_sfreq_div(void)
  {
-    return g_sfreq_div;
+    return clk.smclk_div;
  }
 
 /**
@@ -1103,7 +1101,7 @@ tiku_clk_div_t tiku_cpu_msp430_clock_get_sfreq_div(void)
  */
 tiku_aclk_source_t tiku_cpu_msp430_clock_get_aclk_source(void)
 {
-    return g_aclk_source;
+    return clk.aclk_src;
 }
 
 /**

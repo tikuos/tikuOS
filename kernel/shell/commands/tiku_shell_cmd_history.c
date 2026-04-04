@@ -66,11 +66,12 @@ typedef struct {
 } tiku_shell_hist_entry_t;
 
 /** Ring control block (all fields in FRAM) */
-static HIST_PERSISTENT uint16_t hist_magic = 0;
-static HIST_PERSISTENT uint8_t  hist_head  = 0;  /* next write slot */
-static HIST_PERSISTENT uint8_t  hist_count = 0;  /* entries stored  */
-static HIST_PERSISTENT tiku_shell_hist_entry_t
-    hist_ring[TIKU_SHELL_HISTORY_DEPTH] = {{0}};
+static HIST_PERSISTENT struct {
+    uint16_t                magic;
+    uint8_t                 head;   /* next write slot */
+    uint8_t                 count;  /* entries stored  */
+    tiku_shell_hist_entry_t ring[TIKU_SHELL_HISTORY_DEPTH];
+} hist = {0};
 
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */
@@ -99,14 +100,14 @@ hist_ensure_init(void)
 {
     uint16_t saved;
 
-    if (hist_magic == TIKU_SHELL_HISTORY_MAGIC) {
+    if (hist.magic == TIKU_SHELL_HISTORY_MAGIC) {
         return;
     }
 
     saved = tiku_mpu_unlock_nvm();
 
-    HIST_NVM_WRITE(hist_head, 0);
-    HIST_NVM_WRITE(hist_count, 0);
+    HIST_NVM_WRITE(hist.head, 0);
+    HIST_NVM_WRITE(hist.count, 0);
 
     /* Zero-fill the entire ring buffer in FRAM */
     {
@@ -115,13 +116,13 @@ hist_ensure_init(void)
         memset(zero, 0, sizeof(zero));
         for (i = 0; i < TIKU_SHELL_HISTORY_DEPTH; i++) {
             tiku_mem_arch_nvm_write(
-                (uint8_t *)hist_ring[i].line, zero,
+                (uint8_t *)hist.ring[i].line, zero,
                 TIKU_SHELL_LINE_SIZE);
         }
     }
 
     /* Write magic last — acts as commit marker */
-    HIST_NVM_WRITE(hist_magic, TIKU_SHELL_HISTORY_MAGIC);
+    HIST_NVM_WRITE(hist.magic, TIKU_SHELL_HISTORY_MAGIC);
 
     tiku_mpu_lock_nvm(saved);
 }
@@ -145,11 +146,11 @@ tiku_shell_history_record(const char *line)
     }
 
     /* Suppress duplicate consecutive entries (read only — no MPU needed) */
-    if (hist_count > 0) {
-        uint8_t prev = (hist_head == 0)
+    if (hist.count > 0) {
+        uint8_t prev = (hist.head == 0)
                            ? TIKU_SHELL_HISTORY_DEPTH - 1
-                           : hist_head - 1;
-        if (strncmp(hist_ring[prev].line, line,
+                           : hist.head - 1;
+        if (strncmp(hist.ring[prev].line, line,
                     TIKU_SHELL_LINE_SIZE) == 0) {
             return;
         }
@@ -159,21 +160,21 @@ tiku_shell_history_record(const char *line)
     memset(buf, 0, sizeof(buf));
     strncpy(buf, line, TIKU_SHELL_LINE_SIZE - 1);
 
-    new_head  = (hist_head + 1) % TIKU_SHELL_HISTORY_DEPTH;
-    new_count = (hist_count < TIKU_SHELL_HISTORY_DEPTH)
-                    ? hist_count + 1
-                    : hist_count;
+    new_head  = (hist.head + 1) % TIKU_SHELL_HISTORY_DEPTH;
+    new_count = (hist.count < TIKU_SHELL_HISTORY_DEPTH)
+                    ? hist.count + 1
+                    : hist.count;
 
     /* Single MPU-unlocked window for all FRAM writes */
     saved = tiku_mpu_unlock_nvm();
 
     tiku_mem_arch_nvm_write(
-        (uint8_t *)hist_ring[hist_head].line,
+        (uint8_t *)hist.ring[hist.head].line,
         (const uint8_t *)buf,
         TIKU_SHELL_LINE_SIZE);
 
-    HIST_NVM_WRITE(hist_head, new_head);
-    HIST_NVM_WRITE(hist_count, new_count);
+    HIST_NVM_WRITE(hist.head, new_head);
+    HIST_NVM_WRITE(hist.count, new_count);
 
     tiku_mpu_lock_nvm(saved);
 }
@@ -189,7 +190,7 @@ tiku_shell_cmd_history(uint8_t argc, const char *argv[])
     hist_ensure_init();
 
     /* Default: show all stored entries (reads — no MPU unlock needed) */
-    n = hist_count;
+    n = hist.count;
 
     /* Optional argument: limit to last N */
     if (argc >= 2) {
@@ -213,14 +214,14 @@ tiku_shell_cmd_history(uint8_t argc, const char *argv[])
     }
 
     /* Walk the ring from oldest to newest of the requested window */
-    start = (hist_head + TIKU_SHELL_HISTORY_DEPTH - hist_count)
+    start = (hist.head + TIKU_SHELL_HISTORY_DEPTH - hist.count)
             % TIKU_SHELL_HISTORY_DEPTH;
     /* Skip to show only the last 'n' entries */
-    start = (start + (hist_count - n)) % TIKU_SHELL_HISTORY_DEPTH;
+    start = (start + (hist.count - n)) % TIKU_SHELL_HISTORY_DEPTH;
 
     for (i = 0; i < n; i++) {
         idx = (start + i) % TIKU_SHELL_HISTORY_DEPTH;
         SHELL_PRINTF("  %u  %s\n", (unsigned)(i + 1),
-                     hist_ring[idx].line);
+                     hist.ring[idx].line);
     }
 }

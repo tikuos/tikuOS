@@ -269,12 +269,12 @@ tiku_shell_cmd_help(uint8_t argc, const char *argv[])
 /* CLI PROCESS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/** Line buffer and cursor (static — no dynamic allocation) */
-static char line_buf[TIKU_SHELL_LINE_SIZE];
-static uint8_t line_pos;
-
-/** Periodic timer for I/O polling */
-static struct tiku_timer cli_timer;
+/** CLI process state (static — no dynamic allocation) */
+static struct {
+    char               buf[TIKU_SHELL_LINE_SIZE];
+    uint8_t            pos;
+    struct tiku_timer  timer;    /* periodic I/O poll */
+} cli;
 
 /** The CLI process */
 TIKU_PROCESS(tiku_shell_process, "CLI");
@@ -289,7 +289,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 
     /* ---- One-time init ---- */
     tiku_shell_parser_init(tiku_shell_commands);
-    line_pos = 0;
+    cli.pos = 0;
 
 #if TIKU_SHELL_TCP_ENABLE
     tiku_shell_io_tcp_init();
@@ -313,7 +313,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
 #endif
 
-    tiku_timer_set_event(&cli_timer, TIKU_SHELL_POLL_TICKS);
+    tiku_timer_set_event(&cli.timer, TIKU_SHELL_POLL_TICKS);
 
     /* ---- Main loop ---- */
     while (1) {
@@ -325,15 +325,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             /* Not connected — if we were, clear the backend */
             if (tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
                 tiku_shell_io_set_backend((void *)0);
-                line_pos = 0;
+                cli.pos = 0;
             }
-            tiku_timer_reset(&cli_timer);
+            tiku_timer_reset(&cli.timer);
             continue;
         }
         /* New connection arrived — install backend and show banner */
         if (tiku_shell_io_get_backend() != &tiku_shell_io_tcp) {
             tiku_shell_io_set_backend(&tiku_shell_io_tcp);
-            line_pos = 0;
+            cli.pos = 0;
             SHELL_PRINTF("\n");
             SHELL_PRINTF(SH_CYAN SH_BOLD);
             SHELL_PRINTF("  ___ _ _         ___  ___\n");
@@ -353,7 +353,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 
         /* Re-arm poll timer first so commands that inspect
          * /sys/timer/count see it as active during execution. */
-        tiku_timer_reset(&cli_timer);
+        tiku_timer_reset(&cli.timer);
 
         /* Drain all available characters from the backend */
         while (tiku_shell_io_rx_ready()) {
@@ -365,28 +365,28 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             if (ch == '\r' || ch == '\n') {
                 /* End of line — parse and dispatch */
                 SHELL_PRINTF("\n");
-                line_buf[line_pos] = '\0';
-                if (line_pos > 0) {
+                cli.buf[cli.pos] = '\0';
+                if (cli.pos > 0) {
 #if TIKU_SHELL_CMD_HISTORY
-                    tiku_shell_history_record(line_buf);
+                    tiku_shell_history_record(cli.buf);
 #endif
-                    tiku_shell_parser_execute(line_buf);
+                    tiku_shell_parser_execute(cli.buf);
                 }
-                line_pos = 0;
+                cli.pos = 0;
                 SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
 
             } else if (ch == '\b' || ch == 127) {
                 /* Backspace */
-                if (line_pos > 0) {
-                    line_pos--;
+                if (cli.pos > 0) {
+                    cli.pos--;
                     if (tiku_shell_io_has_echo()) {
                         SHELL_PRINTF("\b \b");
                     }
                 }
 
-            } else if (line_pos < TIKU_SHELL_LINE_SIZE - 1) {
+            } else if (cli.pos < TIKU_SHELL_LINE_SIZE - 1) {
                 /* Printable character — store and optionally echo */
-                line_buf[line_pos++] = (char)ch;
+                cli.buf[cli.pos++] = (char)ch;
                 if (tiku_shell_io_has_echo()) {
                     tiku_shell_io_putc((char)ch);
                 }

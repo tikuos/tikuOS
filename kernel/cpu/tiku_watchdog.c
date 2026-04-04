@@ -38,11 +38,19 @@
 /*---------------------------------------------------------------------------*/
 
 /* Default watchdog configuration — platform HAL provides the types */
-static tiku_wdt_mode_t     tiku_watchdog_mode       = TIKU_WDT_MODE_WATCHDOG;
-static tiku_wdt_clk_t      tiku_watchdog_clk        = TIKU_WDT_SRC_ACLK;
-static tiku_wdt_interval_t tiku_watchdog_interval    = TIKU_WDT_INTERVAL_DEFAULT;
-static int                 tiku_watchdog_start_held  = 0;
-static int                 tiku_watchdog_kick_on_start = 1;
+static struct {
+    tiku_wdt_mode_t     mode;
+    tiku_wdt_clk_t      clk;
+    tiku_wdt_interval_t interval;
+    int                 start_held;
+    int                 kick_on_start;
+} wdt = {
+    .mode          = TIKU_WDT_MODE_WATCHDOG,
+    .clk           = TIKU_WDT_SRC_ACLK,
+    .interval      = TIKU_WDT_INTERVAL_DEFAULT,
+    .start_held    = 0,
+    .kick_on_start = 1,
+};
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
@@ -56,7 +64,7 @@ static int                 tiku_watchdog_kick_on_start = 1;
 void tiku_watchdog_init(void)
 {
     WDT_PRINTF("Init\n");
-    tiku_watchdog_arch_on(tiku_watchdog_clk, tiku_watchdog_interval);
+    tiku_watchdog_arch_on(wdt.clk, wdt.interval);
 }
 
 /**
@@ -76,15 +84,15 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
                           int kick_on_start)
 {
     WDT_PRINTF("Configured: mode=%u clk=%u\n", mode, clk);
-    tiku_watchdog_mode = mode;
-    tiku_watchdog_clk = clk;
-    tiku_watchdog_interval = interval;
-    tiku_watchdog_start_held = start_held;
-    tiku_watchdog_kick_on_start = kick_on_start;
+    wdt.mode = mode;
+    wdt.clk = clk;
+    wdt.interval = interval;
+    wdt.start_held = start_held;
+    wdt.kick_on_start = kick_on_start;
 
     tiku_watchdog_init();
 
-    if (tiku_watchdog_start_held) {
+    if (wdt.start_held) {
         tiku_watchdog_arch_pause();
     }
 }
@@ -126,7 +134,7 @@ void tiku_watchdog_resume_with_kick(void)
  */
 const char *tiku_watchdog_mode_str(void)
 {
-    return (tiku_watchdog_mode == TIKU_WDT_MODE_WATCHDOG)
+    return (wdt.mode == TIKU_WDT_MODE_WATCHDOG)
                ? "watchdog" : "interval";
 }
 
@@ -135,7 +143,7 @@ const char *tiku_watchdog_mode_str(void)
  */
 tiku_wdt_mode_t tiku_watchdog_get_mode(void)
 {
-    return tiku_watchdog_mode;
+    return wdt.mode;
 }
 
 /**
@@ -143,7 +151,7 @@ tiku_wdt_mode_t tiku_watchdog_get_mode(void)
  */
 tiku_wdt_clk_t tiku_watchdog_get_clk(void)
 {
-    return tiku_watchdog_clk;
+    return wdt.clk;
 }
 
 /**
@@ -151,7 +159,7 @@ tiku_wdt_clk_t tiku_watchdog_get_clk(void)
  */
 tiku_wdt_interval_t tiku_watchdog_get_interval(void)
 {
-    return tiku_watchdog_interval;
+    return wdt.interval;
 }
 
 /**

@@ -57,12 +57,13 @@
 
 #define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1)
 
-static volatile uint8_t  uart_rxbuf[TIKU_UART_RXBUF_SIZE];
-static volatile uint8_t  uart_rx_head;   /* ISR writes here */
-static volatile uint8_t  uart_rx_tail;   /* getc reads here */
-
-/** Hardware overrun counter — incremented when eUSCI_A0 reports UCOE. */
-static volatile uint16_t uart_overrun_count;
+/** UART RX state — all volatile for ISR safety */
+static struct {
+    volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE];
+    volatile uint8_t  head;           /* ISR writes here   */
+    volatile uint8_t  tail;           /* getc reads here   */
+    volatile uint16_t overrun_count;  /* UCOE events       */
+} rx;
 
 __attribute__((interrupt(USCI_A0_VECTOR)))
 void
@@ -73,14 +74,14 @@ tiku_uart_isr(void)
          * register before we could read RXBUF).  Reading RXBUF clears
          * UCOE, so sample it first. */
         if (UCA0STATW & UCOE) {
-            uart_overrun_count++;
+            rx.overrun_count++;
         }
 
         uint8_t byte = UCA0RXBUF;  /* read clears UCRXIFG + UCOE */
-        uint8_t next = (uart_rx_head + 1) & TIKU_UART_RXBUF_MASK;
-        if (next != uart_rx_tail) {
-            uart_rxbuf[uart_rx_head] = byte;
-            uart_rx_head = next;
+        uint8_t next = (rx.head + 1) & TIKU_UART_RXBUF_MASK;
+        if (next != rx.tail) {
+            rx.buf[rx.head] = byte;
+            rx.head = next;
         }
     }
 }
@@ -122,9 +123,9 @@ tiku_uart_init(void)
     UCA0CTLW0 &= ~UCSWRST;
 
     /* Reset ring buffer, overrun counter, and enable RX interrupt */
-    uart_rx_head = 0;
-    uart_rx_tail = 0;
-    uart_overrun_count = 0;
+    rx.head = 0;
+    rx.tail = 0;
+    rx.overrun_count = 0;
     UCA0IE |= UCRXIE;
 }
 
@@ -301,7 +302,7 @@ tiku_uart_printf(const char *fmt, ...)
 uint8_t
 tiku_uart_rx_ready(void)
 {
-    return (uart_rx_head != uart_rx_tail) ? 1 : 0;
+    return (rx.head != rx.tail) ? 1 : 0;
 }
 
 /**
@@ -310,11 +311,11 @@ tiku_uart_rx_ready(void)
 int
 tiku_uart_getc(void)
 {
-    if (uart_rx_head == uart_rx_tail) {
+    if (rx.head == rx.tail) {
         return -1;
     }
-    uint8_t c = uart_rxbuf[uart_rx_tail];
-    uart_rx_tail = (uart_rx_tail + 1) & TIKU_UART_RXBUF_MASK;
+    uint8_t c = rx.buf[rx.tail];
+    rx.tail = (rx.tail + 1) & TIKU_UART_RXBUF_MASK;
     return (int)c;
 }
 
@@ -324,7 +325,7 @@ tiku_uart_getc(void)
 uint16_t
 tiku_uart_overrun_count(void)
 {
-    return uart_overrun_count;
+    return rx.overrun_count;
 }
 
 /**
@@ -337,10 +338,10 @@ tiku_uart_overrun_count(void)
 void
 tiku_uart_test_inject(uint8_t byte)
 {
-    uint8_t next = (uart_rx_head + 1) & TIKU_UART_RXBUF_MASK;
-    if (next != uart_rx_tail) {
-        uart_rxbuf[uart_rx_head] = byte;
-        uart_rx_head = next;
+    uint8_t next = (rx.head + 1) & TIKU_UART_RXBUF_MASK;
+    if (next != rx.tail) {
+        rx.buf[rx.head] = byte;
+        rx.head = next;
     }
 }
 #endif
