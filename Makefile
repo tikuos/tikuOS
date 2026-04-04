@@ -238,6 +238,7 @@ endif
 # ---------------------------------------------------------------------------
 ifeq ($(HAS_TESTS),1)
 SRCS += tests/test_runner.c
+SRCS += tests/common/test_common_utils.c
 SRCS += tests/uart/test_uart_init.c
 SRCS += tests/uart/test_uart_tx_binary.c
 SRCS += tests/uart/test_uart_loopback.c

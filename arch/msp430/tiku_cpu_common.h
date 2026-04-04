@@ -87,4 +87,26 @@
  */
 void tiku_cpu_msp430_delay_ms(unsigned int ms);
 
+/**
+ * @brief MSP430-specific microsecond delay
+ * @param us Number of microseconds to delay (max ~65535)
+ */
+void tiku_cpu_msp430_delay_us(unsigned int us);
+
+/**
+ * @brief Read the MSP430 die-record unique ID into a buffer.
+ * @param buf   Destination buffer
+ * @param len   Buffer size (up to 8 bytes returned)
+ * @return Number of bytes written
+ */
+uint8_t tiku_cpu_msp430_unique_id(uint8_t *buf, uint8_t len);
+
+/**
+ * @brief Return the reset-cause register value captured at boot.
+ *
+ * The VFS tree captures SYSRSTIV at init time; this function
+ * returns the same raw value for programmatic use.
+ */
+uint16_t tiku_cpu_msp430_reset_reason(void);
+
 #endif /* TIKU_CPU_COMMON_H_ */

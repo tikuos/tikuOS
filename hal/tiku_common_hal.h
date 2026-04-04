@@ -38,5 +38,8 @@
 /*---------------------------------------------------------------------------*/
 
 #define tiku_common_arch_delay_ms(ms)   tiku_cpu_msp430_delay_ms(ms)
+#define tiku_common_arch_delay_us(us)   tiku_cpu_msp430_delay_us(us)
+#define tiku_common_arch_unique_id(b,l) tiku_cpu_msp430_unique_id((b),(l))
+#define tiku_common_arch_reset_reason() tiku_cpu_msp430_reset_reason()
 
 #endif /* TIKU_COMMON_HAL_H_ */
