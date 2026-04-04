@@ -7,11 +7,16 @@
  *
  * tiku_common.h - Common utility functions
  *
- * Platform-independent utility functions such as delay.
- * All hardware access is delegated to the HAL.
+ * Platform-independent utility functions used throughout TikuOS:
+ * delay (ms/us), bit manipulation (popcount, ctz, clz), byte/word
+ * helpers (min, max, clamp, bswap16), and platform identity
+ * (unique device ID, boot reset-cause).
+ *
+ * All hardware access is delegated to hal/tiku_common_hal.h which
+ * routes to the active architecture backend.
  *
  * LED control has moved to interfaces/led/tiku_led.h.
- * Backward-compatible macros are provided below.
+ * Backward-compatible macros are provided at the end of this file.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -87,21 +92,47 @@ uint8_t tiku_common_clz(uint16_t val);
 /**
  * @brief Return the minimum of two integers.
  *
- * Implemented as a static inline to avoid double-evaluation pitfalls
- * of a macro.
+ * Implemented as a static inline function (not a macro) to avoid
+ * the classic double-evaluation bug where arguments with side
+ * effects are evaluated twice.
+ *
+ * @param a  First value.
+ * @param b  Second value.
+ * @return   The smaller of @p a and @p b.
  */
 static inline int tiku_common_min(int a, int b)
 {
     return (a < b) ? a : b;
 }
 
-/** @brief Return the maximum of two integers. */
+/**
+ * @brief Return the maximum of two integers.
+ *
+ * @param a  First value.
+ * @param b  Second value.
+ * @return   The larger of @p a and @p b.
+ *
+ * @see tiku_common_min()
+ */
 static inline int tiku_common_max(int a, int b)
 {
     return (a > b) ? a : b;
 }
 
-/** @brief Clamp a value to [lo, hi]. */
+/**
+ * @brief Clamp a value to the closed interval [lo, hi].
+ *
+ * Returns @p lo if val < lo, @p hi if val > hi, otherwise @p val.
+ * Useful for bounding ADC readings, PWM duty cycles, or any value
+ * that must stay within hardware-defined limits.
+ *
+ * @param val  Value to clamp.
+ * @param lo   Lower bound (inclusive).
+ * @param hi   Upper bound (inclusive).
+ * @return     Clamped value in [lo, hi].
+ *
+ * @pre lo <= hi (behaviour is undefined if lo > hi).
+ */
 static inline int tiku_common_clamp(int val, int lo, int hi)
 {
     if (val < lo) return lo;
@@ -109,7 +140,19 @@ static inline int tiku_common_clamp(int val, int lo, int hi)
     return val;
 }
 
-/** @brief Byte-swap a 16-bit value (big-endian <-> little-endian). */
+/**
+ * @brief Byte-swap a 16-bit value (big-endian <-> little-endian).
+ *
+ * Swaps the high and low bytes: 0x1234 becomes 0x3412.  Essential
+ * for converting between host byte order (little-endian on MSP430)
+ * and network byte order (big-endian) in protocol stacks (IP, UDP,
+ * TCP, MQTT, etc.).
+ *
+ * A double swap is the identity: bswap16(bswap16(x)) == x.
+ *
+ * @param val  16-bit value to swap.
+ * @return     Byte-swapped value.
+ */
 static inline uint16_t tiku_common_bswap16(uint16_t val)
 {
     return (uint16_t)((val << 8) | (val >> 8));

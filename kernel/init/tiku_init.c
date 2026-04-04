@@ -76,7 +76,15 @@ static uint8_t *cfg_base;
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** Read the magic word from NVM (direct read — no unlock needed) */
+/**
+ * @brief Read the magic word from the NVM config region.
+ *
+ * Uses memcpy to avoid unaligned-access faults on platforms that
+ * require aligned reads.  No MPU unlock is needed — NVM is always
+ * readable.
+ *
+ * @return The 16-bit magic value stored at offset OFF_MAGIC.
+ */
 static uint16_t
 init_read_magic(void)
 {
@@ -85,14 +93,26 @@ init_read_magic(void)
     return val;
 }
 
-/** Read the entry count from NVM */
+/**
+ * @brief Read the entry count byte from the NVM config region.
+ *
+ * @return Number of populated init entries (0 .. TIKU_INIT_MAX_ENTRIES).
+ */
 static uint8_t
 init_read_count(void)
 {
     return *(cfg_base + OFF_COUNT);
 }
 
-/** Get pointer to the idx-th entry in NVM */
+/**
+ * @brief Return a pointer to the idx-th init entry in NVM.
+ *
+ * Calculates the byte offset into the config region for entry @p idx.
+ * The caller is responsible for bounds-checking idx < count.
+ *
+ * @param idx  Zero-based entry index.
+ * @return     Pointer to the entry (inside the NVM config region).
+ */
 static tiku_init_entry_t *
 init_entry_ptr(uint8_t idx)
 {
@@ -100,12 +120,30 @@ init_entry_ptr(uint8_t idx)
            (uint16_t)idx * sizeof(tiku_init_entry_t));
 }
 
-/** Write a value to NVM (caller must hold memory protection unlocked) */
+/**
+ * @brief Write arbitrary bytes to NVM (caller must hold MPU unlocked).
+ *
+ * Thin wrapper around tiku_mem_arch_nvm_write() with casts for
+ * convenience.
+ *
+ * @param fram_ptr  Destination address in NVM.
+ * @param sram_ptr  Source address in SRAM.
+ * @param len       Number of bytes to write.
+ */
 #define INIT_NVM_WRITE(fram_ptr, sram_ptr, len) \
     tiku_mem_arch_nvm_write((uint8_t *)(fram_ptr), \
                             (const uint8_t *)(sram_ptr), (len))
 
-/** Simple strcmp for short strings */
+/**
+ * @brief Compare two NUL-terminated strings for equality.
+ *
+ * Simple byte-by-byte comparison used for entry name matching.
+ * Returns 1 if the strings are identical, 0 otherwise.
+ *
+ * @param a  First string.
+ * @param b  Second string.
+ * @return   1 if equal, 0 if different.
+ */
 static uint8_t
 init_name_match(const char *a, const char *b)
 {
@@ -119,7 +157,16 @@ init_name_match(const char *a, const char *b)
     return (*a == *b);
 }
 
-/** Find entry index by name, or -1 if not found */
+/**
+ * @brief Find the index of an init entry by name.
+ *
+ * Performs a linear scan of all populated entries.  The scan is
+ * bounded by TIKU_INIT_MAX_ENTRIES (typically 8), so the cost is
+ * negligible.
+ *
+ * @param name  Entry name to search for (NUL-terminated).
+ * @return      Index (0 .. count-1) on match, or -1 if not found.
+ */
 static int8_t
 init_find(const char *name)
 {
@@ -135,7 +182,15 @@ init_find(const char *name)
     return -1;
 }
 
-/** Initialise NVM on first boot (zero everything, write magic) */
+/**
+ * @brief Initialise NVM on first boot (zero everything, write magic).
+ *
+ * Called when init_read_magic() does not match TIKU_INIT_MAGIC,
+ * indicating uninitialised NVM (fresh flash or corrupted region).
+ * Zeros the count, reserved byte, and all entry slots, then writes
+ * the magic word last as a commit marker so a power loss during
+ * initialisation leaves the region detectable as uninitialised.
+ */
 static void
 init_first_boot(void)
 {

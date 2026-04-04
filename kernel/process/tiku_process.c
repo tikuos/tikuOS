@@ -373,6 +373,18 @@ uint8_t tiku_process_queue_length(void)
     return q_len;
 }
 
+/**
+ * @brief Peek at an event in the queue without removing it.
+ *
+ * Reads the event and/or target process at position @p index in the
+ * pending event queue.  Index 0 is the head (next to be dispatched).
+ * The queue itself is not modified.
+ *
+ * @param index   Zero-based position in the queue (0 .. queue_length-1).
+ * @param ev      Output: event value at that position (may be NULL).
+ * @param target  Output: target process pointer (may be NULL).
+ * @return 0 on success, -1 if @p index is out of range.
+ */
 int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
                                struct tiku_process **target)
 {

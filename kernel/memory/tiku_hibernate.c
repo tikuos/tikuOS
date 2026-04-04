@@ -122,6 +122,9 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
  *
  * Not needed in production — a real LPMx.5 wake clears SRAM,
  * which naturally resets hibernate_initialized to 0.
+ *
+ * @note Only for test use.  Has no effect on NVM contents beyond
+ *       clearing the SRAM-resident persist-store cache.
  */
 void tiku_mem_hibernate_reset(void)
 {

@@ -228,6 +228,15 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Return a pointer to the shell command table.
+ *
+ * The table is a NULL-terminated array of tiku_shell_cmd_t entries.
+ * Entries with handler == NULL are category headers used by the
+ * "help" command for grouping.
+ *
+ * @return Pointer to the first element of the static command table.
+ */
 const tiku_shell_cmd_t *
 tiku_shell_get_commands(void)
 {
@@ -276,9 +285,27 @@ static struct {
     struct tiku_timer  timer;    /* periodic I/O poll */
 } cli;
 
-/** The CLI process */
+/** The CLI shell process (registered as "CLI" in the process table). */
 TIKU_PROCESS(tiku_shell_process, "CLI");
 
+/**
+ * @brief Shell process protothread — line editor and command dispatcher.
+ *
+ * This protothread runs as a cooperative TikuOS process.  On each
+ * timer tick it drains available characters from the active I/O
+ * backend, performs line editing (echo, backspace), and on CR/LF
+ * dispatches the completed line to tiku_shell_parser_execute().
+ *
+ * Boot sequence:
+ *   1. Initialise the parser with the command table.
+ *   2. Set the I/O backend (UART or TCP).
+ *   3. Print the boot banner and first prompt.
+ *   4. Enter the poll loop — TIKU_PROCESS_WAIT_EVENT_UNTIL(timer).
+ *
+ * The poll timer is set to TIKU_SHELL_POLL_TICKS (typically 1 tick)
+ * and re-armed at the top of every iteration so that commands which
+ * inspect /sys/timer/count see it as active during execution.
+ */
 TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 {
     int ch;
@@ -405,6 +432,16 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 /* SHELL INIT                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise and start the shell kernel service.
+ *
+ * Registers the CLI process (and optionally the network process
+ * when TCP shell is enabled) with the TikuOS scheduler.  Call once
+ * from main() after tiku_vfs_tree_init().
+ *
+ * The shell process prints the boot banner, starts the I/O poll
+ * timer, and begins accepting commands on the next scheduler tick.
+ */
 void tiku_shell_init(void)
 {
     tiku_process_register("Shell", &tiku_shell_process);

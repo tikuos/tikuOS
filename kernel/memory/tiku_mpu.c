@@ -137,13 +137,33 @@ void tiku_mpu_enable_violation_nmi(void)
     tiku_mpu_arch_enable_violation_nmi();
 }
 
-/** @brief Return the latched MPU violation flags from the NMI ISR. */
+/**
+ * @brief Return the latched MPU violation flags from the NMI ISR.
+ *
+ * When the MPU detects a write to a protected region, the NMI ISR
+ * latches the violation flags into a software variable.  This function
+ * returns that latched value for diagnostic use (VFS `/sys/boot/mpu/violations`,
+ * shell, tests).
+ *
+ * @return Bitmask of violated segments (platform-specific encoding).
+ *         Zero means no violations have been recorded since last clear.
+ *
+ * @see tiku_mpu_clear_violation_flags()
+ */
 uint16_t tiku_mpu_get_violation_flags(void)
 {
     return tiku_mpu_arch_get_violation_flags();
 }
 
-/** @brief Clear both the software latch and hardware violation flags. */
+/**
+ * @brief Clear both the software latch and hardware violation flags.
+ *
+ * Resets the NMI-latched violation record so that subsequent calls
+ * to tiku_mpu_get_violation_flags() return zero until a new violation
+ * occurs.
+ *
+ * @see tiku_mpu_get_violation_flags()
+ */
 void tiku_mpu_clear_violation_flags(void)
 {
     tiku_mpu_arch_clear_violation_flags();

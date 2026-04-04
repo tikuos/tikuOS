@@ -371,6 +371,14 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     return &proc_root;
 }
 
+/**
+ * @brief Return the current number of children under /proc.
+ *
+ * The /proc directory contains three fixed nodes (count, queue,
+ * catalog) plus one subdirectory per registered process.
+ *
+ * @return Total child count (3 + number of registered processes).
+ */
 uint8_t tiku_proc_vfs_child_count(void)
 {
     /* count + queue + catalog + one per registered process */

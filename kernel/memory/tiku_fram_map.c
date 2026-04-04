@@ -80,12 +80,32 @@ static const tiku_fram_region_t regions[] = {
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise the NVM region map.
+ *
+ * Call once during early boot, before any subsystem that uses
+ * tiku_fram_region_get().  Currently a placeholder — future
+ * versions may validate region overlap and FRAM magic words.
+ */
 void
 tiku_fram_map_init(void)
 {
     /* Placeholder for future validation (overlap checks, magic words) */
 }
 
+/**
+ * @brief Look up an NVM region by its stable identifier.
+ *
+ * Scans the static region table for an active entry matching @p id.
+ * Returns a read-only pointer to the region descriptor, which
+ * includes the base address and size.
+ *
+ * @param id  Region identifier (e.g. TIKU_FRAM_REGION_CONFIG).
+ * @return    Pointer to the region descriptor, or NULL if @p id is
+ *            not found or the region is inactive.
+ *
+ * @see tiku_fram_region_count()
+ */
 const tiku_fram_region_t *
 tiku_fram_region_get(tiku_fram_region_id_t id)
 {
@@ -100,6 +120,16 @@ tiku_fram_region_get(tiku_fram_region_id_t id)
     return (const tiku_fram_region_t *)0;
 }
 
+/**
+ * @brief Return the number of active NVM regions.
+ *
+ * Counts only regions whose TIKU_FRAM_REGION_ACTIVE flag is set.
+ * Inactive or future-reserved slots are excluded.
+ *
+ * @return Number of active regions (0 .. TIKU_FRAM_REGION_COUNT-1).
+ *
+ * @see tiku_fram_region_get()
+ */
 uint8_t
 tiku_fram_region_count(void)
 {
