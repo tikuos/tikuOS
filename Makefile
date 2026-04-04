@@ -224,11 +224,11 @@ endif
 SRCS += arch/msp430/tiku_gpio_arch.c
 
 # ---------------------------------------------------------------------------
-# Init system (FRAM-backed configurable boot — requires shell)
+# Init system (NVM-backed configurable boot — requires shell)
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_INIT_ENABLE),1)
 CFLAGS += -DTIKU_INIT_ENABLE=1
-SRCS += kernel/memory/tiku_fram_map.c
+SRCS += kernel/memory/tiku_nvm_map.c
 SRCS += kernel/init/tiku_init.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_init.c
 endif

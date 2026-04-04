@@ -47,7 +47,7 @@
 #endif
 
 #if TIKU_INIT_ENABLE
-#include "kernel/memory/tiku_fram_map.h"
+#include "kernel/memory/tiku_nvm_map.h"
 #include "kernel/init/tiku_init.h"
 #endif
 
@@ -89,7 +89,7 @@ int main(void) {
 #endif
 
 #if TIKU_INIT_ENABLE
-  tiku_fram_map_init();
+  tiku_nvm_map_init();
   tiku_init_load();
   tiku_init_run_all();
 #endif

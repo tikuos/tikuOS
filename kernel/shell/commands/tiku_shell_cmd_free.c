@@ -32,7 +32,7 @@
 
 #if TIKU_INIT_ENABLE
 #include <kernel/init/tiku_init.h>
-#include <kernel/memory/tiku_fram_map.h>
+#include <kernel/memory/tiku_nvm_map.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -174,13 +174,13 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
 
 #if TIKU_INIT_ENABLE
     {
-        const tiku_fram_region_t *r;
+        const tiku_nvm_region_t *r;
         uint8_t init_count = tiku_init_count();
         uint16_t entry_bytes = (uint16_t)init_count *
                                sizeof(tiku_init_entry_t);
 
-        r = tiku_fram_region_get(TIKU_FRAM_REGION_CONFIG);
-        if (r != (const tiku_fram_region_t *)0) {
+        r = tiku_nvm_region_get(TIKU_NVM_REGION_CONFIG);
+        if (r != (const tiku_nvm_region_t *)0) {
             SHELL_PRINTF("  config rgn  %5u allocated\n", r->size);
             SHELL_PRINTF("  init table  %5u (%u/%u entries)\n",
                          4 + entry_bytes,

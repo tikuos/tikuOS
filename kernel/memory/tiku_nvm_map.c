@@ -4,11 +4,15 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_fram_map.c - FRAM region table and backing storage
+ * tiku_nvm_map.c - NVM region table and backing storage
  *
- * Declares .persistent arrays sized by device-header constants.
- * The linker places them — no hardcoded addresses.  A static region
- * table provides runtime lookup by ID.
+ * Declares platform-specific persistent arrays sized by device-header
+ * constants.  The linker places them — no hardcoded addresses.
+ * A static region table provides runtime lookup by ID.
+ *
+ * The backing storage attribute is platform-dependent:
+ *   - MSP430: __attribute__((section(".persistent")))  (FRAM)
+ *   - Future: MRAM/RRAM equivalents
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +33,7 @@
 /* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
-#include "tiku_fram_map.h"
+#include "tiku_nvm_map.h"
 #include "tiku.h"
 
 /*---------------------------------------------------------------------------*/
@@ -37,9 +41,9 @@
 /*---------------------------------------------------------------------------*/
 
 #ifdef PLATFORM_MSP430
-#define FRAM_PERSISTENT __attribute__((section(".persistent")))
+#define NVM_PERSISTENT __attribute__((section(".persistent")))
 #else
-#define FRAM_PERSISTENT
+#define NVM_PERSISTENT
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -47,15 +51,15 @@
 /*---------------------------------------------------------------------------*/
 
 /** Config region — used by init table, future credentials, etc. */
-static FRAM_PERSISTENT uint8_t
-    fram_config_buf[TIKU_DEVICE_FRAM_CONFIG_SIZE] = {0};
+static NVM_PERSISTENT uint8_t
+    nvm_config_buf[TIKU_DEVICE_FRAM_CONFIG_SIZE] = {0};
 
 /*
- * Future: app slot arrays go here, guarded by TIKU_FRAM_APP_ENABLE.
+ * Future: app slot arrays go here, guarded by TIKU_NVM_APP_ENABLE.
  *
- * #if TIKU_FRAM_APP_ENABLE
- * static FRAM_PERSISTENT uint8_t
- *     fram_app0[TIKU_DEVICE_FRAM_APP_SLOT_SIZE] = {0};
+ * #if TIKU_NVM_APP_ENABLE
+ * static NVM_PERSISTENT uint8_t
+ *     nvm_app0[TIKU_DEVICE_NVM_APP_SLOT_SIZE] = {0};
  * ...
  * #endif
  */
@@ -64,12 +68,12 @@ static FRAM_PERSISTENT uint8_t
 /* REGION TABLE                                                              */
 /*---------------------------------------------------------------------------*/
 
-static const tiku_fram_region_t regions[] = {
+static const tiku_nvm_region_t regions[] = {
     {
-        .base  = fram_config_buf,
+        .base  = nvm_config_buf,
         .size  = TIKU_DEVICE_FRAM_CONFIG_SIZE,
-        .id    = TIKU_FRAM_REGION_CONFIG,
-        .flags = TIKU_FRAM_REGION_ACTIVE
+        .id    = TIKU_NVM_REGION_CONFIG,
+        .flags = TIKU_NVM_REGION_ACTIVE
     },
     /* Future app slots will be added here */
 };
@@ -84,11 +88,11 @@ static const tiku_fram_region_t regions[] = {
  * @brief Initialise the NVM region map.
  *
  * Call once during early boot, before any subsystem that uses
- * tiku_fram_region_get().  Currently a placeholder — future
- * versions may validate region overlap and FRAM magic words.
+ * tiku_nvm_region_get().  Currently a placeholder — future
+ * versions may validate region overlap and NVM magic words.
  */
 void
-tiku_fram_map_init(void)
+tiku_nvm_map_init(void)
 {
     /* Placeholder for future validation (overlap checks, magic words) */
 }
@@ -100,44 +104,44 @@ tiku_fram_map_init(void)
  * Returns a read-only pointer to the region descriptor, which
  * includes the base address and size.
  *
- * @param id  Region identifier (e.g. TIKU_FRAM_REGION_CONFIG).
+ * @param id  Region identifier (e.g. TIKU_NVM_REGION_CONFIG).
  * @return    Pointer to the region descriptor, or NULL if @p id is
  *            not found or the region is inactive.
  *
- * @see tiku_fram_region_count()
+ * @see tiku_nvm_region_count()
  */
-const tiku_fram_region_t *
-tiku_fram_region_get(tiku_fram_region_id_t id)
+const tiku_nvm_region_t *
+tiku_nvm_region_get(tiku_nvm_region_id_t id)
 {
     uint8_t i;
 
     for (i = 0; i < REGION_COUNT; i++) {
         if (regions[i].id == id &&
-            (regions[i].flags & TIKU_FRAM_REGION_ACTIVE)) {
+            (regions[i].flags & TIKU_NVM_REGION_ACTIVE)) {
             return &regions[i];
         }
     }
-    return (const tiku_fram_region_t *)0;
+    return (const tiku_nvm_region_t *)0;
 }
 
 /**
  * @brief Return the number of active NVM regions.
  *
- * Counts only regions whose TIKU_FRAM_REGION_ACTIVE flag is set.
+ * Counts only regions whose TIKU_NVM_REGION_ACTIVE flag is set.
  * Inactive or future-reserved slots are excluded.
  *
- * @return Number of active regions (0 .. TIKU_FRAM_REGION_COUNT-1).
+ * @return Number of active regions.
  *
- * @see tiku_fram_region_get()
+ * @see tiku_nvm_region_get()
  */
 uint8_t
-tiku_fram_region_count(void)
+tiku_nvm_region_count(void)
 {
     uint8_t i;
     uint8_t count = 0;
 
     for (i = 0; i < REGION_COUNT; i++) {
-        if (regions[i].flags & TIKU_FRAM_REGION_ACTIVE) {
+        if (regions[i].flags & TIKU_NVM_REGION_ACTIVE) {
             count++;
         }
     }

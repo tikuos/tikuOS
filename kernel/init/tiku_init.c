@@ -32,7 +32,7 @@
 
 #include "tiku_init.h"
 #include "tiku.h"
-#include <kernel/memory/tiku_fram_map.h>
+#include <kernel/memory/tiku_nvm_map.h>
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/shell/tiku_shell_parser.h>
 #include <kernel/shell/tiku_shell.h>
@@ -228,10 +228,10 @@ init_first_boot(void)
 void
 tiku_init_load(void)
 {
-    const tiku_fram_region_t *r;
+    const tiku_nvm_region_t *r;
 
-    r = tiku_fram_region_get(TIKU_FRAM_REGION_CONFIG);
-    if (r == (const tiku_fram_region_t *)0) {
+    r = tiku_nvm_region_get(TIKU_NVM_REGION_CONFIG);
+    if (r == (const tiku_nvm_region_t *)0) {
         return;
     }
 
