@@ -39,13 +39,4 @@
 
 #define tiku_common_arch_delay_ms(ms)   tiku_cpu_msp430_delay_ms(ms)
 
-#define tiku_common_arch_led1_init()    TIKU_BOARD_LED1_INIT()
-#define tiku_common_arch_led2_init()    TIKU_BOARD_LED2_INIT()
-#define tiku_common_arch_led1_on()      TIKU_BOARD_LED1_ON()
-#define tiku_common_arch_led2_on()      TIKU_BOARD_LED2_ON()
-#define tiku_common_arch_led1_off()     TIKU_BOARD_LED1_OFF()
-#define tiku_common_arch_led2_off()     TIKU_BOARD_LED2_OFF()
-#define tiku_common_arch_led1_toggle()  TIKU_BOARD_LED1_TOGGLE()
-#define tiku_common_arch_led2_toggle()  TIKU_BOARD_LED2_TOGGLE()
-
 #endif /* TIKU_COMMON_HAL_H_ */

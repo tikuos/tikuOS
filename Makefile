@@ -169,6 +169,7 @@ SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/timers/tiku_clock.c
 SRCS += kernel/timers/tiku_htimer.c
 SRCS += kernel/timers/tiku_timer.c
+SRCS += interfaces/led/tiku_led.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/adc/tiku_adc.c
 SRCS += interfaces/onewire/tiku_onewire.c

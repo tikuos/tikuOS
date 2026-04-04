@@ -7,8 +7,9 @@
  *
  * tiku_common.c - Common utility functions
  *
- * Platform-independent utility functions including LED control and
- * delay functions. All hardware access is delegated to the HAL.
+ * Platform-independent utility functions such as delay.
+ * All hardware access is delegated to the HAL.
+ * LED control has moved to interfaces/led/tiku_led.c.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,72 +46,4 @@
 void tiku_common_delay_ms(unsigned int ms)
 {
     tiku_common_arch_delay_ms(ms);
-}
-
-/**
- * @brief Initialize LED1 hardware
- *
- * Configures LED1 GPIO pin as output via the HAL.
- */
-void tiku_common_led1_init(void)
-{
-    tiku_common_arch_led1_init();
-}
-
-/**
- * @brief Initialize LED2 hardware
- *
- * Configures LED2 GPIO pin as output via the HAL.
- */
-void tiku_common_led2_init(void)
-{
-    tiku_common_arch_led2_init();
-}
-
-/**
- * @brief Turn on LED1
- */
-void tiku_common_led1_on(void)
-{
-    tiku_common_arch_led1_on();
-}
-
-/**
- * @brief Turn on LED2
- */
-void tiku_common_led2_on(void)
-{
-    tiku_common_arch_led2_on();
-}
-
-/**
- * @brief Turn off LED1
- */
-void tiku_common_led1_off(void)
-{
-    tiku_common_arch_led1_off();
-}
-
-/**
- * @brief Turn off LED2
- */
-void tiku_common_led2_off(void)
-{
-    tiku_common_arch_led2_off();
-}
-
-/**
- * @brief Toggle LED1 state
- */
-void tiku_common_led1_toggle(void)
-{
-    tiku_common_arch_led1_toggle();
-}
-
-/**
- * @brief Toggle LED2 state
- */
-void tiku_common_led2_toggle(void)
-{
-    tiku_common_arch_led2_toggle();
 }
