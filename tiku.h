@@ -115,25 +115,16 @@
 #include <arch/msp430/tiku_device_select.h> /* Device + board headers */
 
 /*---------------------------------------------------------------------------*/
-/* COMPILER-AWARE PRINTF                                                     */
+/* PLATFORM-ROUTED PRINTF                                                    */
 /*---------------------------------------------------------------------------*/
 
 /**
- * Under CCS: printf() routes through CIO semihosting (JTAG debugger).
- * Under GCC: tiku_uart_printf() routes through eUSCI_A0 backchannel UART.
+ * TIKU_PRINTF() is routed through hal/tiku_printf_hal.h which selects
+ * the correct output channel for the active platform and compiler
+ * (semihosting, UART, RTT, etc.).  Transport conflicts such as
+ * SLIP-over-UART are handled there as well.
  */
-#if defined(__TI_COMPILER_VERSION__)
-#include <stdio.h>
-#define TIKU_PRINTF(...) printf(__VA_ARGS__)
-#else
-#include <arch/msp430/tiku_uart_arch.h>
-#if defined(TIKU_APP_NET)
-/* UART is dedicated to SLIP — suppress all debug printf */
-#define TIKU_PRINTF(...)
-#else
-#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
-#endif
-#endif
+#include <hal/tiku_printf_hal.h>
 
 /*---------------------------------------------------------------------------*/
 /* TIKU OS INCLUDES                                                         */
