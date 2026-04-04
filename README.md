@@ -237,18 +237,33 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 │   ├── clock/
 │   │   └── ticks            raw tick counter
 │   ├── watchdog/
-│   │   └── mode             "watchdog" or "interval"
+│   │   ├── mode             R/W "watchdog" or "interval"
+│   │   ├── clock            R/W "aclk" or "smclk"
+│   │   ├── interval         R/W divider (64/512/8192/32768)
+│   │   └── kick             W   write to kick the timer
 │   ├── htimer/
 │   │   ├── now              hardware timer counter
 │   │   └── scheduled        1 if pending, 0 if idle
 │   ├── boot/
 │   │   ├── reason           last reset cause (brownout/wdt/rstnmi/...)
-│   │   └── count            hibernate boot counter
+│   │   ├── count            hibernate boot counter
+│   │   ├── stage            boot stage (init/cpu/.../complete)
+│   │   ├── rstiv            raw SYSRSTIV hex (0x0016, ...)
+│   │   ├── clock/
+│   │   │   ├── mclk         live MCLK frequency in Hz
+│   │   │   ├── smclk        live SMCLK frequency in Hz
+│   │   │   ├── aclk         live ACLK frequency in Hz
+│   │   │   └── fault        clock fault flag (0 or 1)
+│   │   └── mpu/
+│   │       └── violations   MPU violation flags (hex bitmask)
 │   └── sched/
 │       └── idle             scheduler idle entry count
 ├── dev/
 │   ├── led0                 read/write (0, 1, t=toggle)
 │   ├── led1                 read/write
+│   ├── console              R/W system console (UART)
+│   ├── null                 R/W data sink (always empty on read)
+│   ├── zero                 R   zero source (fills buffer with NUL)
 │   ├── gpio/{1..4}/{0..7}   per-pin read/write (0, 1, t, i=input)
 │   ├── gpio_dir/{1..4}      per-port pin direction (I=input, O=output)
 │   ├── uart/
@@ -268,7 +283,7 @@ A unified namespace for the entire system — peripherals, OS state, config, and
     │   └── space            free event slots
     ├── catalog/
     │   ├── count            available-but-not-started processes
-    │   └── {0,1}/name       catalog entry name
+    │   └── {0..7}/name      catalog entry name
     └── {0..7}/              per-process directory
         ├── name             process name
         ├── state            running/ready/waiting/sleeping/stopped
@@ -298,9 +313,22 @@ evt rem=6 int=6
 
 tikuOS> cat /sys/watchdog/mode
 watchdog
+tikuOS> write /sys/watchdog/interval 8192
+tikuOS> cat /sys/watchdog/interval
+8192
 
 tikuOS> cat /sys/boot/reason
 rstnmi
+tikuOS> cat /sys/boot/rstiv
+0x0004
+tikuOS> cat /sys/boot/stage
+complete
+tikuOS> cat /sys/boot/clock/mclk
+8000000
+tikuOS> cat /sys/boot/clock/fault
+0
+tikuOS> cat /sys/boot/mpu/violations
+0x00
 
 tikuOS> cat /sys/sched/idle
 0
@@ -310,6 +338,9 @@ tikuOS> cat /dev/uart/baud
 
 tikuOS> cat /dev/gpio_dir/1
 OOOOOOOO
+
+tikuOS> write /dev/console hello
+tikuOS> write /dev/null anything
 
 tikuOS> cat /proc/0/name
 Shell
@@ -323,6 +354,9 @@ tikuOS> cat /proc/queue/space
 tikuOS> ls /dev
   led0
   led1
+  console
+  null
+  zero
   gpio/
   gpio_dir/
   uart/

@@ -47,6 +47,7 @@
 #if TIKU_SPI_ENABLE
 #include <interfaces/bus/tiku_spi_bus.h>
 #endif
+#include <boot/tiku_boot.h>
 #include <stdio.h>
 
 #if TIKU_SHELL_ENABLE
@@ -236,6 +237,75 @@ boot_count_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/boot/stage                                                           */
+/*---------------------------------------------------------------------------*/
+
+static int
+boot_stage_read(char *buf, size_t max)
+{
+    static const char * const stage_names[] = {
+        "init", "cpu", "memory", "peripherals", "services", "complete"
+    };
+    tiku_boot_stage_e s = tiku_boot_get_stage();
+    const char *name = (s <= TIKU_BOOT_STAGE_COMPLETE)
+                           ? stage_names[s] : "unknown";
+    return snprintf(buf, max, "%s\n", name);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/boot/rstiv — raw SYSRSTIV value (hex, for scripting)                 */
+/*---------------------------------------------------------------------------*/
+
+static int
+boot_rstiv_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "0x%04x\n", boot_reset_cause);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/boot/clock/ — live clock frequencies                                 */
+/*---------------------------------------------------------------------------*/
+
+static int
+boot_clock_mclk_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    tiku_cpu_msp430_clock_get_hz());
+}
+
+static int
+boot_clock_smclk_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    tiku_cpu_msp430_smclk_get_hz());
+}
+
+static int
+boot_clock_aclk_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    tiku_cpu_msp430_aclk_get_hz());
+}
+
+static int
+boot_clock_fault_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    tiku_cpu_msp430_clock_has_fault() ? 1u : 0u);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/boot/mpu/violations — MPU segment violation flags (hex)              */
+/*---------------------------------------------------------------------------*/
+
+static int
+boot_mpu_violations_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "0x%02x\n",
+                    tiku_mpu_get_violation_flags());
+}
+
+/*---------------------------------------------------------------------------*/
 /* /sys/sched/idle                                                           */
 /*---------------------------------------------------------------------------*/
 
@@ -362,6 +432,114 @@ static int
 watchdog_mode_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%s\n", tiku_watchdog_mode_str());
+}
+
+static int
+watchdog_mode_write(const char *buf, size_t len)
+{
+    (void)len;
+    tiku_wdt_mode_t mode;
+    if (buf[0] == 'w') {
+        mode = TIKU_WDT_MODE_WATCHDOG;
+    } else if (buf[0] == 'i') {
+        mode = TIKU_WDT_MODE_INTERVAL;
+    } else {
+        return -1;
+    }
+    tiku_watchdog_config(mode, tiku_watchdog_get_clk(),
+                         tiku_watchdog_get_interval(), 0, 1);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/watchdog/clock                                                       */
+/*---------------------------------------------------------------------------*/
+
+static int
+watchdog_clock_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n",
+                    tiku_watchdog_get_clk() == TIKU_WDT_SRC_ACLK
+                        ? "aclk" : "smclk");
+}
+
+static int
+watchdog_clock_write(const char *buf, size_t len)
+{
+    (void)len;
+    tiku_wdt_clk_t clk;
+    if (buf[0] == 'a') {
+        clk = TIKU_WDT_SRC_ACLK;
+    } else if (buf[0] == 's') {
+        clk = TIKU_WDT_SRC_SMCLK;
+    } else {
+        return -1;
+    }
+    tiku_watchdog_config(tiku_watchdog_get_mode(), clk,
+                         tiku_watchdog_get_interval(), 0, 1);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/watchdog/interval                                                    */
+/*---------------------------------------------------------------------------*/
+
+static int
+watchdog_interval_read(char *buf, size_t max)
+{
+    tiku_wdt_interval_t iv = tiku_watchdog_get_interval();
+    const char *s;
+    if (iv == WDTIS__64) {
+        s = "64";
+    } else if (iv == WDTIS__512) {
+        s = "512";
+    } else if (iv == WDTIS__8192) {
+        s = "8192";
+    } else if (iv == WDTIS__32768) {
+        s = "32768";
+    } else {
+        s = "unknown";
+    }
+    return snprintf(buf, max, "%s\n", s);
+}
+
+static int
+watchdog_interval_write(const char *buf, size_t len)
+{
+    uint16_t val = 0;
+    size_t i;
+    tiku_wdt_interval_t iv;
+
+    for (i = 0; i < len && buf[i] >= '0' && buf[i] <= '9'; i++) {
+        val = val * 10 + (uint16_t)(buf[i] - '0');
+    }
+    if (val == 64) {
+        iv = WDTIS__64;
+    } else if (val == 512) {
+        iv = WDTIS__512;
+    } else if (val == 8192) {
+        iv = WDTIS__8192;
+    } else if (val == 32768) {
+        iv = WDTIS__32768;
+    } else {
+        return -1;
+    }
+    tiku_watchdog_config(tiku_watchdog_get_mode(),
+                         tiku_watchdog_get_clk(), iv, 0, 1);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/watchdog/kick                                                        */
+/*---------------------------------------------------------------------------*/
+
+static int
+watchdog_kick_write(const char *buf, size_t len)
+{
+    (void)buf;
+    (void)len;
+    tiku_watchdog_kick();
+    return 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -548,6 +726,84 @@ i2c_scan_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /dev/console — system console (UART)                                      */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Read drains available UART RX bytes into the buffer.
+ *
+ * Non-blocking: returns only the bytes already waiting in the
+ * hardware RX register / ring buffer.  Returns 0 when idle.
+ */
+static int
+console_read(char *buf, size_t max)
+{
+    size_t n = 0;
+    while (n < max && tiku_uart_rx_ready()) {
+        int c = tiku_uart_getc();
+        if (c < 0) {
+            break;
+        }
+        buf[n++] = (char)c;
+    }
+    return (int)n;
+}
+
+/**
+ * @brief Write sends each byte through the UART.
+ */
+static int
+console_write(const char *buf, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        tiku_uart_putc(buf[i]);
+    }
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* /dev/null — data sink                                                     */
+/*---------------------------------------------------------------------------*/
+
+static int
+devnull_read(char *buf, size_t max)
+{
+    (void)buf;
+    (void)max;
+    return 0;
+}
+
+static int
+devnull_write(const char *buf, size_t len)
+{
+    (void)buf;
+    (void)len;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* /dev/zero — zero source                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Read fills the buffer with NUL bytes.
+ *
+ * Returns @p max bytes.  Programmatic consumers use the return
+ * value; shell "read /dev/zero" will display an empty string,
+ * which matches the expected Unix behaviour.
+ */
+static int
+devzero_read(char *buf, size_t max)
+{
+    size_t i;
+    for (i = 0; i < max; i++) {
+        buf[i] = '\0';
+    }
+    return (int)max;
+}
+
+/*---------------------------------------------------------------------------*/
 /* /dev/gpio — per-pin VFS nodes                                             */
 /*---------------------------------------------------------------------------*/
 
@@ -722,7 +978,10 @@ static const tiku_vfs_node_t sys_clock_children[] = {
 };
 
 static const tiku_vfs_node_t sys_watchdog_children[] = {
-    { "mode", TIKU_VFS_FILE, watchdog_mode_read, NULL, NULL, 0 },
+    { "mode",     TIKU_VFS_FILE, watchdog_mode_read,     watchdog_mode_write,     NULL, 0 },
+    { "clock",    TIKU_VFS_FILE, watchdog_clock_read,    watchdog_clock_write,    NULL, 0 },
+    { "interval", TIKU_VFS_FILE, watchdog_interval_read, watchdog_interval_write, NULL, 0 },
+    { "kick",     TIKU_VFS_FILE, NULL,                   watchdog_kick_write,     NULL, 0 },
 };
 
 static const tiku_vfs_node_t sys_htimer_children[] = {
@@ -730,9 +989,24 @@ static const tiku_vfs_node_t sys_htimer_children[] = {
     { "scheduled", TIKU_VFS_FILE, htimer_scheduled_read, NULL, NULL, 0 },
 };
 
+static const tiku_vfs_node_t sys_boot_clock_children[] = {
+    { "mclk",  TIKU_VFS_FILE, boot_clock_mclk_read,  NULL, NULL, 0 },
+    { "smclk", TIKU_VFS_FILE, boot_clock_smclk_read, NULL, NULL, 0 },
+    { "aclk",  TIKU_VFS_FILE, boot_clock_aclk_read,  NULL, NULL, 0 },
+    { "fault", TIKU_VFS_FILE, boot_clock_fault_read,  NULL, NULL, 0 },
+};
+
+static const tiku_vfs_node_t sys_boot_mpu_children[] = {
+    { "violations", TIKU_VFS_FILE, boot_mpu_violations_read, NULL, NULL, 0 },
+};
+
 static const tiku_vfs_node_t sys_boot_children[] = {
     { "reason", TIKU_VFS_FILE, boot_reason_read, NULL, NULL, 0 },
     { "count",  TIKU_VFS_FILE, boot_count_read,  NULL, NULL, 0 },
+    { "stage",  TIKU_VFS_FILE, boot_stage_read,  NULL, NULL, 0 },
+    { "rstiv",  TIKU_VFS_FILE, boot_rstiv_read,  NULL, NULL, 0 },
+    { "clock",  TIKU_VFS_DIR,  NULL, NULL, sys_boot_clock_children, 4 },
+    { "mpu",    TIKU_VFS_DIR,  NULL, NULL, sys_boot_mpu_children, 1 },
 };
 
 static const tiku_vfs_node_t sys_sched_children[] = {
@@ -768,9 +1042,9 @@ static const tiku_vfs_node_t sys_children[] = {
     { "power",    TIKU_VFS_DIR,  NULL, NULL, sys_power_children, 2 },
     { "timer",    TIKU_VFS_DIR,  NULL, NULL, sys_timer_children, 4 },
     { "clock",    TIKU_VFS_DIR,  NULL, NULL, sys_clock_children, 1 },
-    { "watchdog", TIKU_VFS_DIR,  NULL, NULL, sys_watchdog_children, 1 },
+    { "watchdog", TIKU_VFS_DIR,  NULL, NULL, sys_watchdog_children, 4 },
     { "htimer",   TIKU_VFS_DIR,  NULL, NULL, sys_htimer_children, 2 },
-    { "boot",     TIKU_VFS_DIR,  NULL, NULL, sys_boot_children, 2 },
+    { "boot",     TIKU_VFS_DIR,  NULL, NULL, sys_boot_children, 6 },
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
 };
 
@@ -791,6 +1065,9 @@ static const tiku_vfs_node_t dev_i2c_children[] = {
 static const tiku_vfs_node_t dev_children[] = {
     { "led0",     TIKU_VFS_FILE, led0_read, led0_write, NULL, 0 },
     { "led1",     TIKU_VFS_FILE, led1_read, led1_write, NULL, 0 },
+    { "console",  TIKU_VFS_FILE, console_read, console_write, NULL, 0 },
+    { "null",     TIKU_VFS_FILE, devnull_read, devnull_write, NULL, 0 },
+    { "zero",     TIKU_VFS_FILE, devzero_read, NULL, NULL, 0 },
     { "gpio",     TIKU_VFS_DIR,  NULL, NULL, gpio_children, GPIO_PORT_COUNT },
     { "gpio_dir", TIKU_VFS_DIR,  NULL, NULL, gpio_dir_children, GPIO_PORT_COUNT },
     { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children, 2 },
@@ -843,7 +1120,7 @@ tiku_vfs_tree_init(void)
         "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 12
     };
     root_children[1] = (tiku_vfs_node_t){
-        "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 8
+        "dev", TIKU_VFS_DIR, NULL, NULL, dev_children, 11
     };
 
     /* Build and attach /proc/ (also writes to FRAM arrays) */

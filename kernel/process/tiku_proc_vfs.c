@@ -42,8 +42,8 @@
 /** Number of file nodes per process directory */
 #define PROC_FILES_PER_PID  8
 
-/** Maximum catalog entries that get VFS nodes (kept small for SRAM) */
-#define PROC_CATALOG_VFS_MAX  2
+/** Maximum catalog entries that get VFS nodes */
+#define PROC_CATALOG_VFS_MAX  TIKU_PROCESS_CATALOG_MAX
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -260,9 +260,18 @@ static int proc_read_catalog_count(char *buf, size_t max)
 
 PROC_READ_CATALOG_NAME(0)
 PROC_READ_CATALOG_NAME(1)
+PROC_READ_CATALOG_NAME(2)
+PROC_READ_CATALOG_NAME(3)
+PROC_READ_CATALOG_NAME(4)
+PROC_READ_CATALOG_NAME(5)
+PROC_READ_CATALOG_NAME(6)
+PROC_READ_CATALOG_NAME(7)
 
 static const tiku_vfs_read_fn catalog_name_readers[PROC_CATALOG_VFS_MAX] = {
     proc_read_catname_0, proc_read_catname_1,
+    proc_read_catname_2, proc_read_catname_3,
+    proc_read_catname_4, proc_read_catname_5,
+    proc_read_catname_6, proc_read_catname_7,
 };
 
 /** Per-catalog-entry file nodes (FRAM) */

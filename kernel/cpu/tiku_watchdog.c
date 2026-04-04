@@ -131,6 +131,30 @@ const char *tiku_watchdog_mode_str(void)
 }
 
 /**
+ * @brief Return the current watchdog mode
+ */
+tiku_wdt_mode_t tiku_watchdog_get_mode(void)
+{
+    return tiku_watchdog_mode;
+}
+
+/**
+ * @brief Return the current clock source
+ */
+tiku_wdt_clk_t tiku_watchdog_get_clk(void)
+{
+    return tiku_watchdog_clk;
+}
+
+/**
+ * @brief Return the current interval divider
+ */
+tiku_wdt_interval_t tiku_watchdog_get_interval(void)
+{
+    return tiku_watchdog_interval;
+}
+
+/**
  * @brief Disable the watchdog timer entirely
  */
 void tiku_watchdog_off(void)
