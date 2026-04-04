@@ -749,18 +749,33 @@ API (`tiku_vfs_read`, `tiku_vfs_write`).
 │   ├── clock/
 │   │   └── ticks            r-   raw tick counter
 │   ├── watchdog/
-│   │   └── mode             r-   "watchdog" or "interval"
+│   │   ├── mode             rw   "watchdog" or "interval"
+│   │   ├── clock            rw   "aclk" or "smclk"
+│   │   ├── interval         rw   divider: 64, 512, 8192, or 32768
+│   │   └── kick             -w   write any value to kick the timer
 │   ├── htimer/
 │   │   ├── now              r-   hardware timer counter
 │   │   └── scheduled        r-   1 if pending, 0 if idle
 │   ├── boot/
 │   │   ├── reason           r-   last reset cause (brownout/wdt/rstnmi/...)
-│   │   └── count            r-   hibernate boot counter
+│   │   ├── count            r-   hibernate boot counter
+│   │   ├── stage            r-   boot stage (init/cpu/memory/.../complete)
+│   │   ├── rstiv            r-   raw SYSRSTIV hex value (0x0004, ...)
+│   │   ├── clock/
+│   │   │   ├── mclk         r-   live MCLK frequency in Hz
+│   │   │   ├── smclk        r-   live SMCLK frequency in Hz
+│   │   │   ├── aclk         r-   live ACLK frequency in Hz
+│   │   │   └── fault        r-   clock fault flag (0 or 1)
+│   │   └── mpu/
+│   │       └── violations   r-   MPU segment violation flags (hex)
 │   └── sched/
 │       └── idle             r-   scheduler idle entry count
 ├── dev/
 │   ├── led0                 rw   LED1 state (0, 1, t=toggle)
 │   ├── led1                 rw   LED2 state
+│   ├── console              rw   system console (UART); read drains RX buffer
+│   ├── null                 rw   data sink; read returns 0 bytes
+│   ├── zero                 r-   zero source; read fills buffer with NUL bytes
 │   ├── gpio/
 │   │   └── {1..4}/          per-port directory
 │   │       └── {0..7}       rw   pin state (0, 1, t=toggle, i=input)
@@ -783,7 +798,7 @@ API (`tiku_vfs_read`, `tiku_vfs_write`).
     │   └── space            r-   free event slots
     ├── catalog/
     │   ├── count            r-   available-but-not-started processes
-    │   └── {0,1}/
+    │   └── {0..7}/
     │       └── name         r-   catalog entry name
     └── {0..7}/              per-process directory (one per registered process)
         ├── name             r-   process name
@@ -795,6 +810,42 @@ API (`tiku_vfs_read`, `tiku_vfs_write`).
         ├── wake_count       r-   times scheduled
         └── events           r-   pending events for this process
 ```
+
+#### Character Devices
+
+| Path | Read | Write |
+|------|------|-------|
+| `/dev/console` | Drains pending UART RX bytes (non-blocking, returns 0 when idle) | Sends each byte through `tiku_uart_putc()` |
+| `/dev/null` | Always returns 0 bytes (EOF) | Accepts and silently discards all data |
+| `/dev/zero` | Fills buffer with NUL bytes, returns buffer size | Not writable (returns -1) |
+
+#### Watchdog Configuration Nodes
+
+All watchdog writes call `tiku_watchdog_config()` internally, preserving
+unchanged parameters and kicking the timer to avoid immediate timeout.
+
+| Path | Read | Write |
+|------|------|-------|
+| `/sys/watchdog/mode` | `"watchdog"` or `"interval"` | `"watchdog"` or `"interval"` |
+| `/sys/watchdog/clock` | `"aclk"` or `"smclk"` | `"aclk"` or `"smclk"` |
+| `/sys/watchdog/interval` | `"64"`, `"512"`, `"8192"`, or `"32768"` | same values (divider) |
+| `/sys/watchdog/kick` | Not readable (returns -1) | Any write kicks the timer |
+
+Invalid values are rejected (write returns -1, shell shows "cannot write").
+
+#### Boot Diagnostic Nodes
+
+| Path | Value | Source |
+|------|-------|--------|
+| `/sys/boot/reason` | Human-readable reset cause | `reset_cause_str(SYSRSTIV)` |
+| `/sys/boot/count` | Hibernate boot counter | Set via `tiku_vfs_set_boot_count()` |
+| `/sys/boot/stage` | Boot stage name (init/cpu/memory/peripherals/services/complete) | `tiku_boot_get_stage()` |
+| `/sys/boot/rstiv` | Raw SYSRSTIV hex (e.g. `0x0004`) | Captured at boot before anything clears it |
+| `/sys/boot/clock/mclk` | Live MCLK frequency in Hz | `tiku_cpu_msp430_clock_get_hz()` |
+| `/sys/boot/clock/smclk` | Live SMCLK frequency in Hz | `tiku_cpu_msp430_smclk_get_hz()` |
+| `/sys/boot/clock/aclk` | Live ACLK frequency in Hz | `tiku_cpu_msp430_aclk_get_hz()` |
+| `/sys/boot/clock/fault` | Clock fault flag (0 or 1) | `tiku_cpu_msp430_clock_has_fault()` |
+| `/sys/boot/mpu/violations` | MPU violation flags (hex bitmask) | `tiku_mpu_get_violation_flags()` |
 
 ### Adding a New VFS Node
 
@@ -1061,6 +1112,32 @@ MPU protection, and performs platform-specific memory setup.
 | `tiku_watchdog_resume()` | Resume the watchdog |
 | `tiku_watchdog_resume_with_kick()` | Resume with an immediate kick |
 | `tiku_watchdog_off()` | Disable entirely |
+| `tiku_watchdog_mode_str()` | Return `"watchdog"` or `"interval"` |
+| `tiku_watchdog_get_mode()` | Return current `tiku_wdt_mode_t` |
+| `tiku_watchdog_get_clk()` | Return current `tiku_wdt_clk_t` |
+| `tiku_watchdog_get_interval()` | Return current `tiku_wdt_interval_t` |
+
+### Watchdog Types
+
+```c
+typedef enum {
+    TIKU_WDT_MODE_WATCHDOG = 0,      /* Reset on timeout      */
+    TIKU_WDT_MODE_INTERVAL = WDTTMSEL /* Periodic interrupt    */
+} tiku_wdt_mode_t;
+
+typedef enum {
+    TIKU_WDT_SRC_SMCLK = WDTSSEL__SMCLK,
+    TIKU_WDT_SRC_ACLK  = WDTSSEL__ACLK
+} tiku_wdt_clk_t;
+
+typedef uint16_t tiku_wdt_interval_t;
+/* Valid values: WDTIS__64, WDTIS__512, WDTIS__8192, WDTIS__32768 */
+```
+
+The VFS nodes under `/sys/watchdog/` use these getters and
+`tiku_watchdog_config()` to provide read/write access to the watchdog
+configuration at runtime. See [Complete Node Tree](#complete-node-tree)
+for the full path listing.
 
 ---
 
