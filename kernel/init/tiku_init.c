@@ -4,11 +4,12 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_init.c - FRAM-backed configurable boot (init system)
+ * tiku_init.c - NVM-backed configurable boot (init system)
  *
- * The init table is stored inside the FRAM config region obtained
- * from tiku_fram_map.  A magic word detects first-boot and auto-clears.
- * All FRAM writes go through MPU unlock / nvm_write / MPU lock.
+ * The init table is stored inside a non-volatile memory (NVM) config
+ * region obtained from the NVM region map.  A magic word detects
+ * first-boot and auto-clears.  All NVM writes go through the
+ * platform's memory-protection unlock / nvm_write / lock sequence.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,15 +42,15 @@
 /* CONFIGURATION                                                             */
 /*---------------------------------------------------------------------------*/
 
-/** Magic value to detect uninitialised FRAM on first boot */
+/** Magic value to detect uninitialised NVM on first boot */
 #define TIKU_INIT_MAGIC  0x1417U
 
 /*---------------------------------------------------------------------------*/
-/* FRAM LAYOUT                                                               */
+/* NVM LAYOUT                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
- * The config region is laid out as:
+ * The NVM config region is laid out as:
  *
  *   [0..1]   uint16_t magic
  *   [2]      uint8_t  count   (number of populated entries)
@@ -57,7 +58,6 @@
  *   [4..]    tiku_init_entry_t entries[TIKU_INIT_MAX_ENTRIES]
  *
  * Total: 4 + 8 * sizeof(tiku_init_entry_t) = 4 + 8*66 = 532 bytes
- * Fits comfortably in the 1024-byte config region.
  */
 
 /** Offsets into the config region */
@@ -76,7 +76,7 @@ static uint8_t *cfg_base;
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** Read the magic word from FRAM (direct read — no MPU unlock needed) */
+/** Read the magic word from NVM (direct read — no unlock needed) */
 static uint16_t
 init_read_magic(void)
 {
@@ -85,14 +85,14 @@ init_read_magic(void)
     return val;
 }
 
-/** Read the entry count from FRAM */
+/** Read the entry count from NVM */
 static uint8_t
 init_read_count(void)
 {
     return *(cfg_base + OFF_COUNT);
 }
 
-/** Get pointer to the idx-th entry in FRAM */
+/** Get pointer to the idx-th entry in NVM */
 static tiku_init_entry_t *
 init_entry_ptr(uint8_t idx)
 {
@@ -100,7 +100,7 @@ init_entry_ptr(uint8_t idx)
            (uint16_t)idx * sizeof(tiku_init_entry_t));
 }
 
-/** Write a value to FRAM (caller must hold MPU unlocked) */
+/** Write a value to NVM (caller must hold memory protection unlocked) */
 #define INIT_NVM_WRITE(fram_ptr, sram_ptr, len) \
     tiku_mem_arch_nvm_write((uint8_t *)(fram_ptr), \
                             (const uint8_t *)(sram_ptr), (len))
@@ -135,7 +135,7 @@ init_find(const char *name)
     return -1;
 }
 
-/** Initialise FRAM on first boot (zero everything, write magic) */
+/** Initialise NVM on first boot (zero everything, write magic) */
 static void
 init_first_boot(void)
 {

@@ -4,14 +4,16 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_init.h - FRAM-backed configurable boot (init system)
+ * tiku_init.h - NVM-backed configurable boot (init system)
  *
- * Stores an ordered table of shell commands in FRAM.  At boot,
- * tiku_init_run_all() feeds each enabled entry through the shell
- * parser — making the boot sequence configurable without recompiling.
+ * Stores an ordered table of shell commands in non-volatile memory.
+ * At boot, tiku_init_run_all() feeds each enabled entry through the
+ * shell parser — making the boot sequence configurable without
+ * recompiling.
  *
- * The init table lives inside the FRAM config region managed by
- * kernel/memory/tiku_fram_map.
+ * The init table lives inside a NVM config region managed by the
+ * platform's NVM region map (e.g. FRAM on MSP430, MRAM/RRAM on
+ * other targets).
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,9 +59,9 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Single init-table entry stored in FRAM.
+ * @brief Single init-table entry stored in NVM.
  *
- * Layout is fixed so the FRAM image is portable across firmware versions
+ * Layout is fixed so the NVM image is portable across firmware versions
  * (as long as sizes remain the same).
  */
 typedef struct {
@@ -74,10 +76,10 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Load and validate the init table from FRAM.
+ * @brief Load and validate the init table from NVM.
  *
- * Call once during boot, after tiku_fram_map_init().
- * Auto-initialises the table on first boot (blank FRAM).
+ * Call once during boot, after the NVM region map is initialised.
+ * Auto-initialises the table on first boot (blank NVM).
  */
 void tiku_init_load(void);
 
