@@ -262,14 +262,50 @@ uint8_t tiku_process_run(void)
 /**
  * @brief Request a process to be polled
  *
- * Posts a poll event to the target process. If the queue is full, the
- * request is dropped to preserve ISR safety.
+ * Enqueues a TIKU_EVENT_POLL targeted at @p p so the scheduler will
+ * dispatch it on the next pass.  Pending POLL events are coalesced:
+ * if a POLL for the same target is already in the queue, this call
+ * is a no-op.  Without that de-duplication, a hot poll source (for
+ * example a periodic timer ISR or a chatty interrupt-driven driver)
+ * could fill the 32-slot event queue with redundant POLLs and starve
+ * other event posters.
+ *
+ * The scan-and-enqueue runs inside a single atomic section so the
+ * function stays safe to call from interrupt context.  Worst-case
+ * cost is O(TIKU_QUEUE_SIZE) compares per call, which is bounded
+ * (32 by default) and acceptable for poll-rate sources.
  *
  * @param p Process to poll
  */
 void tiku_process_poll(struct tiku_process *p)
 {
-    (void)tiku_process_post(p, TIKU_EVENT_POLL, NULL);
+    uint8_t i;
+    uint8_t idx;
+
+    tiku_atomic_enter();
+
+    /* Coalesce: drop the request if a POLL for this target is
+     * already pending in the queue. */
+    for (i = 0; i < q_len; i++) {
+        idx = (q_head + i) % TIKU_QUEUE_SIZE;
+        if (queue[idx].ev == TIKU_EVENT_POLL && queue[idx].p == p) {
+            tiku_atomic_exit();
+            return;
+        }
+    }
+
+    /* Inline the post so the scan and the enqueue happen under the
+     * same critical section -- otherwise an ISR could slip a duplicate
+     * POLL in between the scan and tiku_process_post(). */
+    if (q_len < TIKU_QUEUE_SIZE) {
+        idx = (q_head + q_len) % TIKU_QUEUE_SIZE;
+        queue[idx].ev   = TIKU_EVENT_POLL;
+        queue[idx].data = NULL;
+        queue[idx].p    = p;
+        q_len++;
+    }
+
+    tiku_atomic_exit();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -279,8 +315,25 @@ void tiku_process_poll(struct tiku_process *p)
 /**
  * @brief Dispatch an event to a single process
  *
- * Runs the process thread and handles automatic exit when the
- * thread returns PT_EXITED, PT_ENDED, or receives TIKU_EVENT_FORCE_EXIT.
+ * Runs the process thread and handles automatic exit when the thread
+ * returns PT_EXITED, PT_ENDED, or receives TIKU_EVENT_FORCE_EXIT.
+ *
+ * The post-dispatch state is classified by the protothread return code
+ * so /proc and `ps` show an accurate picture instead of collapsing
+ * every non-exit return into WAITING:
+ *
+ *   PT_WAITING -> WAITING -- thread is blocked on a PT_WAIT_UNTIL
+ *                            condition or an event it has not yet
+ *                            received; will be re-scheduled when an
+ *                            event for it arrives
+ *   PT_YIELDED -> READY   -- thread voluntarily yielded via PT_YIELD;
+ *                            it is immediately runnable on the next
+ *                            scheduler pass
+ *   PT_EXITED  -> STOPPED -- handled via tiku_process_exit() below
+ *   PT_ENDED   -> STOPPED -- ditto
+ *
+ * SLEEPING is reserved for explicit timer-driven blocking once the
+ * timer subsystem feeds back wake-up state into the process record.
  *
  * @param p    Target process
  * @param ev   Event to deliver
@@ -301,8 +354,14 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
             tiku_current_process = NULL;
             tiku_process_exit(p);
         } else {
-            /* Process yielded — it is waiting for the next event */
-            p->state = TIKU_PROCESS_STATE_WAITING;
+            /* Distinguish a voluntary yield (immediately runnable)
+             * from a blocked wait (parked until an event arrives).
+             * Anything other than PT_YIELDED is treated as waiting --
+             * PT_WAITING is the canonical case, but unknown return
+             * codes also fall through to WAITING as the safer default. */
+            p->state = (ret == PT_YIELDED)
+                       ? TIKU_PROCESS_STATE_READY
+                       : TIKU_PROCESS_STATE_WAITING;
             tiku_current_process = NULL;
         }
     }
