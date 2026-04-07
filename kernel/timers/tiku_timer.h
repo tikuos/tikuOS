@@ -242,4 +242,147 @@ extern struct tiku_process tiku_timer_process;
 /** One minute in timer ticks */
 #define TIKU_TIMER_MINUTE (TIKU_CLOCK_SECOND * 60UL)
 
+/*---------------------------------------------------------------------------*/
+/* TIMEOUT HELPERS                                                           */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Convenience macros that wrap a one-shot tiku_timer_set_event() and
+ * the matching PT_WAIT_UNTIL / PT_YIELD_UNTIL into a single call,
+ * removing the repetitive timer-set-then-wait-then-stop boilerplate
+ * found in many process bodies.
+ *
+ * Caller-side contract:
+ *
+ *   - The caller owns a `struct tiku_timer` (typically a static
+ *     variable in the process file) and passes its address to the
+ *     macro.  One timer per call site is the cleanest mapping.
+ *
+ *   - After the macro returns, re-evaluate the same condition at the
+ *     call site to distinguish "condition met" from "timed out".
+ *     The macro stops the timer on exit so a stray TIKU_EVENT_TIMER
+ *     cannot be posted to the process after the wait completes.
+ *
+ *   - The condition expression is re-evaluated whenever the process
+ *     is re-scheduled, exactly the same as plain PT_WAIT_UNTIL.
+ *
+ * Example -- replaces the four-line set/wait/stop dance:
+ * @code
+ *   static struct tiku_timer t;
+ *
+ *   PT_WAIT_UNTIL_TIMEOUT(pt, &t, sensor_ready(),
+ *                         TIKU_CLOCK_SECOND * 2);
+ *   if (sensor_ready()) {
+ *       // success path
+ *   } else {
+ *       // timeout path
+ *   }
+ * @endcode
+ */
+
+/**
+ * @def PT_WAIT_UNTIL_TIMEOUT(pt, timer, cond, ticks)
+ * @brief Block until @p cond is true or @p ticks have elapsed
+ *
+ * Sets a one-shot event timer for @p ticks clock ticks, blocks the
+ * protothread (returning PT_WAITING -- the process appears as
+ * "waiting" in /proc and ps) until @p cond evaluates true or the
+ * timer fires, then stops the timer.
+ *
+ * @param pt    Pointer to the protothread control block
+ * @param timer Pointer to a caller-owned struct tiku_timer
+ * @param cond  Boolean expression re-evaluated on each schedule
+ * @param ticks Timeout duration in clock ticks (use TIKU_CLOCK_SECOND
+ *              and friends for readability)
+ */
+#define PT_WAIT_UNTIL_TIMEOUT(pt, timer, cond, ticks)                  \
+  do {                                                                  \
+    tiku_timer_set_event((timer), (ticks));                            \
+    PT_WAIT_UNTIL((pt), (cond) || tiku_timer_expired(timer));          \
+    tiku_timer_stop(timer);                                            \
+  } while (0)
+
+/**
+ * @def PT_YIELD_UNTIL_TIMEOUT(pt, timer, cond, ticks)
+ * @brief Yield until @p cond is true or @p ticks have elapsed
+ *
+ * Identical to PT_WAIT_UNTIL_TIMEOUT but uses PT_YIELD_UNTIL semantics
+ * (returning PT_YIELDED -- the process appears as "ready" in /proc
+ * and ps).  Use this when the wait is part of a cooperative polling
+ * loop that the scheduler should consider immediately runnable
+ * between checks rather than parked.
+ *
+ * @param pt    Pointer to the protothread control block
+ * @param timer Pointer to a caller-owned struct tiku_timer
+ * @param cond  Boolean expression re-evaluated on each schedule
+ * @param ticks Timeout duration in clock ticks
+ */
+#define PT_YIELD_UNTIL_TIMEOUT(pt, timer, cond, ticks)                 \
+  do {                                                                  \
+    tiku_timer_set_event((timer), (ticks));                            \
+    PT_YIELD_UNTIL((pt), (cond) || tiku_timer_expired(timer));         \
+    tiku_timer_stop(timer);                                            \
+  } while (0)
+
+#if TIKU_LC_PERSISTENT
+
+/**
+ * @def PT_WAIT_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)
+ * @brief Persistent variant of PT_WAIT_UNTIL_TIMEOUT
+ *
+ * Behaves like PT_WAIT_UNTIL_TIMEOUT but the underlying wait is
+ * PT_WAIT_UNTIL_PERSISTENT, so the continuation point is checkpointed
+ * to NVM via the persist store.
+ *
+ * Post-reboot semantics: the struct tiku_timer lives in RAM and is
+ * lost across power cycles, so when the protothread resumes from the
+ * NVM checkpoint inside the wait, tiku_timer_expired() reports the
+ * (zeroed) timer as already expired and the macro falls through
+ * immediately as if the wait had timed out.  The caller code that
+ * follows the macro should re-check @p cond and treat a false result
+ * as "the wait was interrupted by power loss -- retry".
+ *
+ * Available only when TIKU_LC_PERSISTENT is defined.
+ *
+ * @param pt    Pointer to the protothread control block
+ * @param timer Pointer to a caller-owned struct tiku_timer
+ * @param cond  Boolean expression re-evaluated on each schedule
+ * @param ticks Timeout duration in clock ticks
+ */
+#define PT_WAIT_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)       \
+  do {                                                                  \
+    tiku_timer_set_event((timer), (ticks));                            \
+    PT_WAIT_UNTIL_PERSISTENT((pt),                                     \
+                             (cond) || tiku_timer_expired(timer));     \
+    tiku_timer_stop(timer);                                            \
+  } while (0)
+
+/**
+ * @def PT_YIELD_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)
+ * @brief Persistent variant of PT_YIELD_UNTIL_TIMEOUT
+ *
+ * Behaves like PT_YIELD_UNTIL_TIMEOUT but uses
+ * PT_YIELD_UNTIL_PERSISTENT, so the continuation point is checkpointed
+ * to NVM and the process is reported as "ready" rather than "waiting"
+ * while the wait is in progress.  Same post-reboot semantics as
+ * PT_WAIT_UNTIL_TIMEOUT_PERSISTENT -- the timer is gone after a power
+ * cycle and the macro falls through as if it had timed out.
+ *
+ * Available only when TIKU_LC_PERSISTENT is defined.
+ *
+ * @param pt    Pointer to the protothread control block
+ * @param timer Pointer to a caller-owned struct tiku_timer
+ * @param cond  Boolean expression re-evaluated on each schedule
+ * @param ticks Timeout duration in clock ticks
+ */
+#define PT_YIELD_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)      \
+  do {                                                                  \
+    tiku_timer_set_event((timer), (ticks));                            \
+    PT_YIELD_UNTIL_PERSISTENT((pt),                                    \
+                              (cond) || tiku_timer_expired(timer));    \
+    tiku_timer_stop(timer);                                            \
+  } while (0)
+
+#endif /* TIKU_LC_PERSISTENT */
+
 #endif /* TIKU_TIMER_H_ */

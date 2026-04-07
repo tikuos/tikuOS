@@ -285,6 +285,7 @@ SRCS += tests/timer/test_timer_event.c
 SRCS += tests/timer/test_timer_callback.c
 SRCS += tests/timer/test_timer_periodic.c
 SRCS += tests/timer/test_timer_stop.c
+SRCS += tests/timer/test_timer_timeout.c
 SRCS += tests/timer/test_htimer_basic.c
 SRCS += tests/timer/test_htimer_periodic.c
 SRCS += tests/timer/test_timer_edge.c
