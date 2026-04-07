@@ -324,5 +324,167 @@ struct pt {
     }                                          \
   } while(0)
 
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT PROTOTHREADS (NVM-BACKED)                                      */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @section pt_persistent NVM-Persistent Protothreads
+ *
+ * Persistent variants of the core protothread macros.  Enable with
+ * TIKU_LC_PERSISTENT=1.  A persistent protothread checkpoints its
+ * continuation state to non-volatile memory so it survives power loss
+ * and resumes from the last checkpoint instead of restarting.
+ *
+ * Setup (once at boot, before the protothread runs):
+ * @code
+ *   tiku_lc_persist_init();
+ *   tiku_lc_persist_register("tls");
+ * @endcode
+ *
+ * Usage (drop-in replacement for PT_BEGIN/PT_END):
+ * @code
+ *   PT_THREAD(tls_handshake(struct pt *pt))
+ *   {
+ *     PT_BEGIN_PERSISTENT(pt, "tls");
+ *
+ *     tiku_dns_resolve(host, &ip);
+ *     PT_YIELD_PERSISTENT(pt);       // checkpoint survives power loss
+ *
+ *     tiku_tcp_connect(ip, 443);
+ *     PT_YIELD_PERSISTENT(pt);       // checkpoint survives power loss
+ *
+ *     tiku_tls_send_client_hello();
+ *     PT_WAIT_UNTIL_PERSISTENT(pt, tls_reply_ready());
+ *
+ *     // Power dies and returns -- resumes from last checkpoint,
+ *     // not from the beginning.
+ *
+ *     PT_END_PERSISTENT(pt, "tls");
+ *   }
+ * @endcode
+ *
+ * Mixing persistent and non-persistent macros within the same
+ * protothread is allowed: use PT_YIELD for cheap steps where
+ * replaying is acceptable, and PT_YIELD_PERSISTENT for expensive
+ * steps that must not be repeated.
+ */
+
+#if TIKU_LC_PERSISTENT
+
+/**
+ * @def PT_BEGIN_PERSISTENT(pt, key)
+ * @brief Start a persistent protothread
+ *
+ * Like PT_BEGIN but loads the saved continuation from NVM first.
+ * If a valid checkpoint exists, execution jumps to the last
+ * LC_SET_PERSISTENT / PT_YIELD_PERSISTENT point.
+ */
+#define PT_BEGIN_PERSISTENT(pt, key) {     \
+  char PT_YIELD_FLAG = 1;                  \
+  if(PT_YIELD_FLAG) {;}                    \
+  LC_RESUME_PERSISTENT((pt)->lc, key)
+
+/**
+ * @def PT_END_PERSISTENT(pt, key)
+ * @brief End a persistent protothread
+ *
+ * Like PT_END but also clears the NVM entry so the next boot
+ * starts fresh instead of resuming a completed protothread.
+ */
+#define PT_END_PERSISTENT(pt, key)         \
+  LC_END((pt)->lc);                        \
+  PT_YIELD_FLAG = 0;                       \
+  PT_INIT(pt);                             \
+  LC_CLEAR_PERSISTENT(key);                \
+  return PT_ENDED;                         \
+}
+
+/**
+ * @def PT_YIELD_PERSISTENT(pt)
+ * @brief Yield with an NVM checkpoint
+ *
+ * Like PT_YIELD but the continuation point is written to NVM.
+ * If power is lost before the next checkpoint, the protothread
+ * resumes here instead of restarting.
+ */
+#define PT_YIELD_PERSISTENT(pt)            \
+  do {                                     \
+    PT_YIELD_FLAG = 0;                     \
+    LC_SET_PERSISTENT((pt)->lc);           \
+    if(PT_YIELD_FLAG == 0) {               \
+      return PT_YIELDED;                   \
+    }                                      \
+  } while(0)
+
+/**
+ * @def PT_WAIT_UNTIL_PERSISTENT(pt, condition)
+ * @brief Block until condition with NVM checkpoint
+ *
+ * Like PT_WAIT_UNTIL but the continuation point is written to NVM.
+ */
+#define PT_WAIT_UNTIL_PERSISTENT(pt, condition) \
+  do {                                          \
+    LC_SET_PERSISTENT((pt)->lc);                \
+    if(!(condition)) {                          \
+      return PT_WAITING;                        \
+    }                                           \
+  } while(0)
+
+/**
+ * @def PT_WAIT_WHILE_PERSISTENT(pt, cond)
+ * @brief Block while condition with NVM checkpoint
+ *
+ * Like PT_WAIT_WHILE but the continuation point is written to NVM.
+ */
+#define PT_WAIT_WHILE_PERSISTENT(pt, cond) \
+  PT_WAIT_UNTIL_PERSISTENT((pt), !(cond))
+
+/**
+ * @def PT_YIELD_UNTIL_PERSISTENT(pt, cond)
+ * @brief Yield until condition with NVM checkpoint
+ *
+ * Like PT_YIELD_UNTIL but the continuation point is written to NVM.
+ */
+#define PT_YIELD_UNTIL_PERSISTENT(pt, cond)      \
+  do {                                           \
+    PT_YIELD_FLAG = 0;                           \
+    LC_SET_PERSISTENT((pt)->lc);                 \
+    if((PT_YIELD_FLAG == 0) || !(cond)) {        \
+      return PT_YIELDED;                         \
+    }                                            \
+  } while(0)
+
+/**
+ * @def PT_EXIT_PERSISTENT(pt, key)
+ * @brief Exit persistent protothread early
+ *
+ * Like PT_EXIT but also clears the NVM entry.
+ */
+#define PT_EXIT_PERSISTENT(pt, key)        \
+  do {                                     \
+    PT_INIT(pt);                           \
+    LC_CLEAR_PERSISTENT(key);              \
+    return PT_EXITED;                      \
+  } while(0)
+
+/**
+ * @def PT_RESTART_PERSISTENT(pt, key)
+ * @brief Restart persistent protothread from the beginning
+ *
+ * Like PT_RESTART but also resets the NVM value to 0 so the
+ * restart begins from case 0.  Uses reset (not clear) so the
+ * key stays registered and future PT_YIELD_PERSISTENT calls
+ * can still write checkpoints.
+ */
+#define PT_RESTART_PERSISTENT(pt, key)     \
+  do {                                     \
+    PT_INIT(pt);                           \
+    LC_RESET_PERSISTENT(key);              \
+    return PT_WAITING;                     \
+  } while(0)
+
+#endif /* TIKU_LC_PERSISTENT */
+
 #endif /* TIKU_PROTO_H_ */
 

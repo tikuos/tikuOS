@@ -5,14 +5,46 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lc.h - Local Continuations for lightweight state preservation
+ * tiku_lc.h - Local continuations for lightweight stackless threads
  *
- * Derived from and inspired by the local continuations implementation
+ * Local continuations capture and restore a function's execution state
+ * via case labels embedded in a switch statement.  They form the
+ * foundation for higher-level cooperative concurrency primitives such
+ * as protothreads.  An optional NVM-backed variant lets a continuation
+ * survive a power cycle so that battery-free / intermittent-computing
+ * applications can resume from their last checkpoint instead of
+ * restarting from the beginning.
+ *
+ * Derived from and inspired by the local-continuations implementation
  * in Contiki OS (contiki-os.org) by Adam Dunkels.
  *
- * Local continuations provide a low-level mechanism to capture and restore
- * a function's execution state. They form the foundation for implementing
- * protothreads and other cooperative multitasking primitives.
+ * Typical usage:
+ * @code
+ *   lc_t lc;
+ *   LC_INIT(lc);
+ *
+ *   for (;;) {
+ *       LC_RESUME(lc);
+ *       do_step();
+ *       LC_SET(lc);     // save the line number to resume from
+ *       return;         // yield back to the caller
+ *       LC_END(lc);
+ *   }
+ * @endcode
+ *
+ * Persistent (NVM-backed) variant:
+ * @code
+ *   tiku_lc_persist_init();
+ *   tiku_lc_persist_register("tls");
+ *   ...
+ *   LC_RESUME_PERSISTENT(pt->lc, "tls");
+ *       step_one();
+ *       LC_SET_PERSISTENT(pt->lc);   // checkpoint survives power loss
+ *       return;
+ *       step_two();
+ *   LC_END(pt->lc);
+ *   LC_CLEAR_PERSISTENT("tls");      // done -- clear the NVM entry
+ * @endcode
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,36 +65,48 @@
 #define TIKU_LC_H_
 
 /*---------------------------------------------------------------------------*/
+/* INCLUDES                                                                  */
+/*---------------------------------------------------------------------------*/
+
+#include <stdint.h>
+
+/*---------------------------------------------------------------------------*/
 /* CONFIGURATION                                                             */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @def LC_CONF_INCLUDE
- * @brief Optional configuration to select a specific LC implementation
+ * @brief Optional override for the local-continuation backend
  *
- * Define this before including lc.h to use a custom implementation.
- * Common values:
- * - "lc-switch.h" for switch-based implementation
- * - "lc-addrlabels.h" for GCC address labels implementation
- * - Your custom implementation header
+ * Define before including this header to substitute a custom backend
+ * for the default switch/case implementation.  Common values are
+ * @c "lc-switch.h" (the default) and @c "lc-addrlabels.h" for the
+ * GCC computed-goto variant on toolchains that support it.
  */
 #ifdef LC_CONF_INCLUDE
 #include LC_CONF_INCLUDE
 #else
 
 /*---------------------------------------------------------------------------*/
-/* DEFAULT IMPLEMENTATION: SWITCH-BASED LOCAL CONTINUATIONS */
+/* DEFAULT IMPLEMENTATION: SWITCH-BASED LOCAL CONTINUATIONS                  */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @typedef lc_t
- * @brief Type for storing local continuation state
+ * @brief Storage type for a saved local-continuation point
  *
- * In the switch-based implementation, this stores the line number
- * where execution should resume. The type is unsigned short to
- * minimize memory usage while supporting files up to 65,535 lines.
+ * Holds the source line number where execution should resume on the
+ * next call.  The default width is uint16_t (max 65 535 lines per
+ * protothread function).  Define @c TIKU_LC_COMPACT before including
+ * this header to use uint8_t instead, which saves one byte per
+ * protothread but caps each protothread function at 255 source lines.
  */
-typedef unsigned short lc_t;
+#ifdef TIKU_LC_COMPACT
+typedef uint8_t  lc_t;
+#define TIKU_LC_MAX 255
+#else
+typedef uint16_t lc_t;
+#define TIKU_LC_MAX 65535
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* CORE MACROS                                                               */
@@ -70,89 +114,64 @@ typedef unsigned short lc_t;
 
 /**
  * @def LC_INIT(s)
- * @brief Initialize a local continuation variable
- * @param s The lc_t variable to initialize
+ * @brief Reset a local continuation to its initial state
  *
- * Resets the continuation state to the beginning. Must be called
- * before first use of LC_RESUME.
+ * Must be called before the first LC_RESUME on @p s.  After init the
+ * next LC_RESUME enters at case 0 (the top of the protothread body).
  *
- * Example:
- * @code
- *   lc_t continuation;
- *   LC_INIT(continuation);
- * @endcode
+ * @param s lc_t variable to reset
  */
 #define LC_INIT(s) s = 0
 
 /**
  * @def LC_RESUME(s)
- * @brief Resume execution from a saved continuation point
- * @param s The lc_t variable containing the saved state
+ * @brief Resume execution from a previously saved continuation point
  *
- * Begins a switch statement that will jump to the previously saved
- * position (or case 0 if no position was saved). This macro must be
- * paired with LC_END(s).
+ * Opens a switch statement that jumps to the case label saved by the
+ * most recent LC_SET on @p s, or to case 0 on the first call.  Must
+ * be paired with a matching LC_END(s).
  *
- * Example:
- * @code
- *   LC_RESUME(continuation);
- *     // Code that can be resumed
- *     LC_SET(continuation);  // Save position here
- *     return;  // Exit function
- *     // Next call will resume here
- *   LC_END(continuation);
- * @endcode
+ * @warning Code between LC_RESUME and LC_END lives inside a switch
+ *          statement, so constructs that interfere with case labels
+ *          (nested switches, certain variable declarations) will not
+ *          compile or will behave unexpectedly.
  *
- * @warning The code between LC_RESUME and LC_END becomes part of a
- *          switch statement, so certain C constructs may not work as
- *          expected (e.g., variable declarations need to be in blocks).
+ * @param s lc_t variable holding the saved state
  */
 #define LC_RESUME(s) switch(s) { case 0:
 
 /**
  * @def LC_SET(s)
- * @brief Save the current execution position
- * @param s The lc_t variable to store the position in
+ * @brief Save the current source line as the next resume point
  *
- * Captures the current line number and creates a case label at this
- * position. When LC_RESUME is called with the same variable, execution
- * will jump to this point.
+ * Stores @c __LINE__ into @p s and emits a matching @c case label so
+ * that the next LC_RESUME on the same variable jumps back to this
+ * spot.  A compile-time check rejects line numbers above @c TIKU_LC_MAX
+ * to keep an oversized source file from silently truncating the case
+ * value.
  *
- * Technical details:
- * - Uses __LINE__ preprocessor macro to get the current line number
- * - Creates a case label with the same line number
- * - Stores the line number in the continuation variable
+ * @warning Cannot be used inside a nested switch statement.  Each
+ *          LC_SET in the same function must live on a distinct source
+ *          line so that the generated case labels remain unique.
  *
- * Example:
- * @code
- *   LC_SET(continuation);  // Save position
- *   if (!ready) {
- *     return WAITING;      // Exit and come back later
- *   }
- *   // Execution resumes here when ready
- * @endcode
- *
- * @warning Cannot be used inside another switch statement
- * @warning Line numbers must be unique within the function
+ * @param s lc_t variable that receives the saved line number
  */
-#define LC_SET(s)                 \
-  do {                            \
-    (s) = __LINE__; case __LINE__:; \
+#define LC_SET(s)                                                          \
+  do {                                                                     \
+    typedef char _lc_line_overflow_[(__LINE__ <= TIKU_LC_MAX) ? 1 : -1];   \
+    (void)sizeof(_lc_line_overflow_);                                      \
+    (s) = __LINE__; case __LINE__:;                                        \
   } while(0)
+
 /**
  * @def LC_END(s)
- * @brief End the local continuation block
- * @param s The lc_t variable (included for symmetry, not used)
+ * @brief Close the switch opened by LC_RESUME
  *
- * Closes the switch statement started by LC_RESUME. Every LC_RESUME
- * must have a corresponding LC_END.
+ * Every LC_RESUME must have a matching LC_END at the end of the
+ * protothread body.  The @p s argument is unused but kept for
+ * symmetry with LC_RESUME.
  *
- * Example:
- * @code
- *   LC_RESUME(continuation);
- *     // ... continuation code ...
- *   LC_END(continuation);  // Required closing
- * @endcode
+ * @param s lc_t variable (ignored)
  */
 #define LC_END(s) }
 
@@ -162,95 +181,216 @@ typedef unsigned short lc_t;
 
 /**
  * @def LC_RESET(s)
- * @brief Reset continuation to start from the beginning
- * @param s The lc_t variable to reset
+ * @brief Restart a continuation from the beginning
  *
- * Alias for LC_INIT, provided for semantic clarity when resetting
- * an already-used continuation.
+ * Alias for LC_INIT, provided for semantic clarity when explicitly
+ * resetting an already-used continuation rather than performing a
+ * first-time initialization.
+ *
+ * @param s lc_t variable to reset
  */
 #define LC_RESET(s) LC_INIT(s)
 
 /**
  * @def LC_IS_RESUMED(s)
- * @brief Check if a continuation has been set
- * @param s The lc_t variable to check
- * @return Non-zero if continuation has been set, zero otherwise
+ * @brief Check whether a continuation has been entered before
  *
- * Useful for determining if this is the first call or a resumed call.
+ * Returns non-zero once LC_SET has stored a line number into @p s,
+ * and zero before the first save.  Useful for one-shot init logic
+ * inside a protothread that should run only on the first entry.
  *
- * Example:
- * @code
- *   if (!LC_IS_RESUMED(continuation)) {
- *     // First-time initialization code
- *   }
- * @endcode
+ * @param s lc_t variable to inspect
+ * @return Non-zero if a continuation point has been saved, 0 otherwise
  */
 #define LC_IS_RESUMED(s) ((s) != 0)
 
 #endif /* LC_CONF_INCLUDE */
 
 /*---------------------------------------------------------------------------*/
-/* USAGE NOTES AND LIMITATIONS                                               */
+/* PERSISTENT CONTINUATIONS (NVM-BACKED)                                     */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Enable the persistent variant by defining TIKU_LC_PERSISTENT to 1
+ * before including this header.  When enabled, an additional helper
+ * API (tiku_lc_persist_*) and a parallel set of LC_*_PERSISTENT
+ * macros become available for storing continuation state in
+ * non-volatile memory via the kernel persist store.  The typical use
+ * case is a multi-step protocol on a battery-free / intermittent
+ * device where energy can disappear at any moment.
+ */
+
+#if TIKU_LC_PERSISTENT
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT HELPER FUNCTIONS                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @section lc_usage Usage Guidelines
+ * @brief Initialize the persistent local-continuation store
  *
- * Local continuations are typically used as building blocks for higher-level
- * abstractions like protothreads. Direct use requires careful attention to:
- *
- * 1. **State Preservation**: Local variables are NOT preserved across
- *    continuation points. Use static variables or external storage for
- *    data that must persist.
- *
- * 2. **Nesting Restrictions**: LC_SET cannot be used inside switch statements
- *    or other constructs that interfere with case labels.
- *
- * 3. **Line Number Uniqueness**: Each LC_SET in a function must be on a
- *    different line to ensure unique case labels.
- *
- * 4. **Function Scope**: Continuations only work within a single function.
- *    They cannot be used to jump between functions.
- *
- * @section lc_example Complete Example
- *
- * @code
- * int example_function(lc_t *lc, int *counter) {
- *   LC_RESUME(*lc);
- *
- *   // First execution starts here
- *   *counter = 0;
- *
- *   while (*counter < 10) {
- *     LC_SET(*lc);  // Save position before returning
- *     (*counter)++;
- *     return 0;     // Not done yet
- *   }
- *
- *   LC_END(*lc);
- *   return 1;       // Done
- * }
- *
- * // Usage:
- * lc_t lc;
- * int counter;
- * LC_INIT(lc);
- * while (!example_function(&lc, &counter)) {
- *   // Function will be called 10 times
- * }
- * @endcode
- *
- * @section lc_alternatives Alternative Implementations
- *
- * For platforms with GCC or compatible compilers, the address-labels
- * implementation may provide better performance and fewer restrictions.
- * Define LC_CONF_INCLUDE to use an alternative:
- *
- * @code
- * #define LC_CONF_INCLUDE "lc-addrlabels.h"
- * #include "lc.h"
- * @endcode
+ * Recovers any LC entries that survived a power cycle by validating
+ * their FRAM-backed magic numbers, and restores the internal pool's
+ * next-free-slot index from the recovered entries so that fresh
+ * registrations after a reboot do not collide with slots already
+ * owned by recovered keys.  Safe to call multiple times -- subsequent
+ * invocations are no-ops.  Must be called once at boot before any
+ * tiku_lc_persist_register() call.
  */
+void tiku_lc_persist_init(void);
+
+/**
+ * @brief Register a persistent LC slot under a key
+ *
+ * Allocates the next sizeof(lc_t)-sized chunk from an internal NVM
+ * pool and binds it to @p key in the persist store.  If the key
+ * already has an entry -- duplicate registration in the current boot,
+ * or an entry recovered from FRAM by tiku_lc_persist_init() -- the
+ * existing slot is reused without consuming a fresh pool entry, and
+ * any previously stored value is preserved.
+ *
+ * @param key Null-terminated key string (max 7 chars + NUL)
+ * @return 0 on success,
+ *         -1 if the store has not been initialized,
+ *         -2 if the NVM pool has no free slots,
+ *         -3 if the persist store rejected the registration
+ */
+int tiku_lc_persist_register(const char *key);
+
+/**
+ * @brief Save a continuation value to NVM under @p key
+ *
+ * Writes @p val into the NVM slot bound to @p key.  Unlocks the MPU
+ * internally so the caller does not need to bracket the call with
+ * tiku_mpu_unlock_nvm() / tiku_mpu_lock_nvm().
+ *
+ * @param key Null-terminated key previously registered
+ * @param val Continuation value to persist (typically a line number)
+ * @return 0 on success, negative on persist-store error
+ */
+int tiku_lc_persist_save(const char *key, lc_t val);
+
+/**
+ * @brief Load a continuation value from NVM
+ *
+ * Reads the value stored under @p key.  A stored value of zero is
+ * treated as "not set" and reported as an error so that
+ * LC_RESUME_PERSISTENT falls through to case 0 instead of jumping
+ * into the middle of a protothread body.
+ *
+ * @param key Null-terminated key previously registered
+ * @param val Output pointer for the loaded value (untouched on error)
+ * @return 0 on success,
+ *         negative if the key is unknown or its stored value is zero
+ */
+int tiku_lc_persist_load(const char *key, lc_t *val);
+
+/**
+ * @brief Delete the NVM entry bound to @p key
+ *
+ * Removes @p key from the persist store entirely so the next boot
+ * starts from a clean slate.  Use after a persistent protothread has
+ * completed normally.  Unlocks the MPU internally.
+ *
+ * @param key Null-terminated key to delete
+ * @return 0 on success, negative if the key is unknown
+ */
+int tiku_lc_persist_clear(const char *key);
+
+/**
+ * @brief Reset the NVM value to zero without deleting the entry
+ *
+ * Writes zero to the slot bound to @p key so LC_RESUME_PERSISTENT
+ * sees an empty checkpoint and restarts from case 0, while keeping
+ * the key registered for future save calls.  Unlike
+ * tiku_lc_persist_clear() the slot stays bound, so subsequent
+ * LC_SET_PERSISTENT writes succeed without re-registration.  Unlocks
+ * the MPU internally.
+ *
+ * @param key Null-terminated key to reset
+ * @return 0 on success, negative if the key is unknown
+ */
+int tiku_lc_persist_reset(const char *key);
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT MACROS                                                         */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @def LC_RESUME_PERSISTENT(s, key)
+ * @brief Resume execution from an NVM-backed continuation point
+ *
+ * Loads the saved continuation for @p key and dispatches into the
+ * protothread body.  On the first boot (or after LC_CLEAR_PERSISTENT
+ * / LC_RESET_PERSISTENT) the load fails and (s) is forced to 0 so
+ * execution restarts at case 0.  Without this fallback an in-memory
+ * lc_t left over from a previous run could cause the protothread to
+ * jump to a stale case label.
+ *
+ * Declares a function-scoped variable @c _tiku_lc_pkey that
+ * LC_SET_PERSISTENT references, so the key only has to be specified
+ * once per protothread body.
+ *
+ * @param s   lc_t variable that holds the in-memory continuation
+ * @param key Null-terminated key previously registered
+ */
+#define LC_RESUME_PERSISTENT(s, key)                                       \
+  const char *_tiku_lc_pkey = (key);                                       \
+  {                                                                         \
+    lc_t _nvm_val;                                                         \
+    if (tiku_lc_persist_load(_tiku_lc_pkey, &_nvm_val) == 0) {            \
+      (s) = _nvm_val;                                                      \
+    } else {                                                                \
+      (s) = 0;                                                              \
+    }                                                                       \
+  }                                                                         \
+  switch(s) { case 0:
+
+/**
+ * @def LC_SET_PERSISTENT(s)
+ * @brief Save the current line as a persistent resume point
+ *
+ * Behaves like LC_SET but also writes the new line number to NVM via
+ * tiku_lc_persist_save() so the protothread can resume from this
+ * point after a power loss.  Must follow a LC_RESUME_PERSISTENT in
+ * the same function (which declares the @c _tiku_lc_pkey variable
+ * used here).
+ *
+ * @param s lc_t variable that receives the saved line number
+ */
+#define LC_SET_PERSISTENT(s)                                               \
+  do {                                                                      \
+    typedef char _lc_line_overflow_[(__LINE__ <= TIKU_LC_MAX) ? 1 : -1];   \
+    (void)sizeof(_lc_line_overflow_);                                      \
+    (s) = __LINE__;                                                        \
+    tiku_lc_persist_save(_tiku_lc_pkey, (s));                              \
+    case __LINE__:;                                                        \
+  } while(0)
+
+/**
+ * @def LC_CLEAR_PERSISTENT(key)
+ * @brief Delete a persistent continuation entry
+ *
+ * Wraps tiku_lc_persist_clear() so a persistent protothread can
+ * remove its NVM entry on completion, ensuring the next boot starts
+ * fresh instead of resuming a finished computation.
+ *
+ * @param key Null-terminated key to clear
+ */
+#define LC_CLEAR_PERSISTENT(key) tiku_lc_persist_clear(key)
+
+/**
+ * @def LC_RESET_PERSISTENT(key)
+ * @brief Reset a persistent continuation to zero, keeping the key
+ *
+ * Wraps tiku_lc_persist_reset() so a persistent protothread can
+ * restart from the beginning without unbinding @p key.  Future
+ * LC_SET_PERSISTENT calls on the same key continue to work.
+ *
+ * @param key Null-terminated key to reset
+ */
+#define LC_RESET_PERSISTENT(key) tiku_lc_persist_reset(key)
+
+#endif /* TIKU_LC_PERSISTENT */
 
 #endif /* TIKU_LC_H_ */
-

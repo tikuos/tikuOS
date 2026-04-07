@@ -127,6 +127,18 @@
 #include <hal/tiku_printf_hal.h>
 
 /*---------------------------------------------------------------------------*/
+/* TEST CONFIGURATION                                                       */
+/*---------------------------------------------------------------------------*/
+/* Included early so that feature-gate macros (e.g. TIKU_LC_PERSISTENT)     */
+/* are visible to the kernel headers below.                                  */
+
+#if defined(HAS_TESTS)
+#include <tests/tiku_test_config.h>
+#else
+#define TEST_ENABLE 0
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* TIKU OS INCLUDES                                                         */
 /*---------------------------------------------------------------------------*/
 #include <hal/tiku_cpu.h>
@@ -161,16 +173,6 @@
 
 #ifndef TIKU_INIT_ENABLE
 #define TIKU_INIT_ENABLE 0
-#endif
-
-/*---------------------------------------------------------------------------*/
-/* TEST CONFIGURATION                                                       */
-/*---------------------------------------------------------------------------*/
-
-#if defined(HAS_TESTS)
-#include <tests/tiku_test_config.h>
-#else
-#define TEST_ENABLE 0
 #endif
 
 /*---------------------------------------------------------------------------*/
