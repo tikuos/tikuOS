@@ -68,7 +68,7 @@ APP ?=
 #   make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969   — build with shell
 #   make APP=cli MCU=msp430fr5969                — legacy alias (also enables shell)
 # ---------------------------------------------------------------------------
-TIKU_SHELL_ENABLE ?= 0
+TIKU_SHELL_ENABLE ?= 1
 TIKU_SHELL_COLOR  ?= 0
 TIKU_INIT_ENABLE  ?= 0
 TIKU_INIT_TEST    ?= 0
@@ -89,8 +89,10 @@ TIKU_SHELL_ENABLE = 1
 endif
 
 # ---------------------------------------------------------------------------
-# Optional components (auto-detected; override: make HAS_TESTS=0 etc.)
-# When APP is set, tests and examples are excluded automatically.
+# Optional components (opt-in; override: make HAS_TESTS=1 HAS_EXAMPLES=1)
+# Tests and examples are EXCLUDED by default — plain `make` builds only the
+# core OS (plus any explicitly enabled services like the shell).
+# When APP is set, tests and examples are forced off.
 # ---------------------------------------------------------------------------
 ifneq ($(APP),)
 HAS_APPS         = 1
@@ -98,8 +100,8 @@ HAS_TESTS        = 0
 HAS_EXAMPLES     = 0
 else
 HAS_APPS         = 0
-HAS_TESTS        ?= $(if $(wildcard $(PROJ_DIR)/tests/test_runner.c),1,0)
-HAS_EXAMPLES     ?= $(if $(wildcard $(PROJ_DIR)/examples/tiku_example_config.h),1,0)
+HAS_TESTS        ?= 0
+HAS_EXAMPLES     ?= 0
 endif
 HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
