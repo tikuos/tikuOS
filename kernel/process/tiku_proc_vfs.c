@@ -33,6 +33,7 @@
 #include "tiku_proc_vfs.h"
 #include "tiku_process.h"
 #include <kernel/timers/tiku_clock.h>
+#include <kernel/memory/tiku_mem.h>
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
@@ -323,6 +324,21 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     uint8_t child_idx = 0;
     uint8_t cat_child_idx = 0;
     uint8_t cat_count;
+    uint16_t mpu_state;
+
+    /* All of proc_children[], catalog_children[], catalog_entry_files[],
+     * pid_files[], and proc_root live in the .persistent (FRAM) section.
+     * The default protective MPU configuration write-protects FRAM, so
+     * the rebuild below would silently fail (the static arrays would
+     * keep whatever they held from the previous successful build, or
+     * stay zero-initialized on the very first call).  That manifested
+     * as /proc/0/<file> reads returning -1 because the per-pid
+     * directory entries never made it into proc_children[].
+     *
+     * Unlock NVM for the duration of the rebuild and restore the
+     * previous protection state on exit -- same pattern as the
+     * persistent-LC fixes. */
+    mpu_state = tiku_mpu_unlock_nvm();
 
     /* /proc/count */
     proc_children[child_idx++] = (tiku_vfs_node_t){
@@ -367,6 +383,8 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     proc_root = (tiku_vfs_node_t){
         "proc", TIKU_VFS_DIR, NULL, NULL, proc_children, child_idx
     };
+
+    tiku_mpu_lock_nvm(mpu_state);
 
     return &proc_root;
 }

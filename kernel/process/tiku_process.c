@@ -96,6 +96,20 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
 void tiku_process_init(void)
 {
     uint8_t i;
+    struct tiku_process *p, *next;
+
+    /* Detach every process previously on the list and clear its
+     * is_running flag.  Without this, a re-register after init()
+     * would see the stale is_running=1 and skip tiku_process_start(),
+     * leaving the process stranded in the registry but unlinked from
+     * tiku_process_list_head — its protothread state, wake_count,
+     * start_time, and state field would all carry over from the
+     * previous boot/test, breaking observability and the scheduler. */
+    for (p = tiku_process_list_head; p != NULL; p = next) {
+        next = p->next;
+        p->is_running = 0;
+        p->next = NULL;
+    }
 
     tiku_process_list_head = NULL;
     tiku_current_process = NULL;
