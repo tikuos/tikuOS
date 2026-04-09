@@ -78,14 +78,18 @@ ifeq ($(TIKU_INIT_TEST),1)
 TIKU_INIT_ENABLE = 1
 endif
 
-# Legacy: APP=cli enables the kernel shell
+# Legacy: APP=cli enables the kernel shell.
+# `override` is required so this still wins when callers explicitly pass
+# TIKU_SHELL_ENABLE=0 on the command line (e.g. TikuBench's slim test builds).
 ifeq ($(APP),cli)
-TIKU_SHELL_ENABLE = 1
+override TIKU_SHELL_ENABLE := 1
 endif
 
-# Init system requires the shell (for parser)
+# Init system requires the shell (for parser).
+# `override` ensures TIKU_INIT_TEST=1 categories get the shell even when the
+# caller passes TIKU_SHELL_ENABLE=0 to slim down the default test build.
 ifeq ($(TIKU_INIT_ENABLE),1)
-TIKU_SHELL_ENABLE = 1
+override TIKU_SHELL_ENABLE := 1
 endif
 
 # ---------------------------------------------------------------------------
@@ -188,8 +192,8 @@ SRCS += kernel/process/tiku_process.c
 SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/process/tiku_lc_persist.c
 SRCS += kernel/scheduler/tiku_sched.c
-SRCS += server/vfs/tiku_vfs.c
-SRCS += server/vfs/tiku_vfs_tree.c
+SRCS += kernel/vfs/tiku_vfs.c
+SRCS += kernel/vfs/tiku_vfs_tree.c
 
 # ---------------------------------------------------------------------------
 # Shell (kernel service — compiled when TIKU_SHELL_ENABLE=1)
@@ -298,8 +302,8 @@ SRCS += tests/watchdog/test_watchdog_interval.c
 SRCS += tests/watchdog/test_watchdog_timeout.c
 SRCS += tests/uart/test_uart_edge.c
 SRCS += tests/watchdog/test_watchdog_edge.c
-SRCS += tests/server/vfs/test_vfs.c
-SRCS += tests/server/vfs/test_vfs_tree.c
+SRCS += tests/kernel/vfs/test_vfs.c
+SRCS += tests/kernel/vfs/test_vfs_tree.c
 SRCS += tests/init/test_catalog.c
 SRCS += tests/init/test_init_table.c
 SRCS += tests/init/test_init_boot.c

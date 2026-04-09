@@ -17,7 +17,7 @@ configuration, then include individual module headers as needed.
 - [System Clock](#system-clock) (`kernel/timers/tiku_clock.h`)
 - [Hardware Timer](#hardware-timer) (`kernel/timers/tiku_htimer.h`)
 - [Scheduler](#scheduler) (`kernel/scheduler/tiku_sched.h`)
-- [Virtual Filesystem (VFS)](#virtual-filesystem-vfs) (`server/vfs/tiku_vfs.h`)
+- [Virtual Filesystem (VFS)](#virtual-filesystem-vfs) (`kernel/vfs/tiku_vfs.h`)
 - [Memory Management](#memory-management) (`kernel/memory/tiku_mem.h`)
 - [Watchdog Timer](#watchdog-timer) (`kernel/cpu/tiku_watchdog.h`)
 - [Common Utilities](#common-utilities) (`kernel/cpu/tiku_common.h`)
@@ -616,7 +616,7 @@ process to poll for expired timers.
 
 ## Virtual Filesystem (VFS)
 
-**Headers:** `server/vfs/tiku_vfs.h`, `server/vfs/tiku_vfs_tree.h`, `kernel/process/tiku_proc_vfs.h`
+**Headers:** `kernel/vfs/tiku_vfs.h`, `kernel/vfs/tiku_vfs_tree.h`, `kernel/process/tiku_proc_vfs.h`
 
 A static tree of named nodes that presents the entire system — peripherals,
 OS state, processes, and configuration — as readable/writable paths. No block
@@ -857,7 +857,7 @@ Invalid values are rejected (write returns -1, shell shows "cannot write").
    ```
 
 2. Add a `tiku_vfs_node_t` entry to the appropriate children array in
-   `server/vfs/tiku_vfs_tree.c`:
+   `kernel/vfs/tiku_vfs_tree.c`:
    ```c
    { "my_node", TIKU_VFS_FILE, my_read, NULL, NULL, 0 },
    ```
@@ -881,7 +881,7 @@ Invalid values are rejected (write returns -1, shell shows "cannot write").
 
 ### Testing
 
-**On-device tests** (`tests/server/vfs/test_vfs.c`, `test_vfs_tree.c`):
+**On-device tests** (`tests/kernel/vfs/test_vfs.c`, `test_vfs_tree.c`):
 
 ```bash
 # Stub-based core VFS tests (path resolution, read/write, list, edge cases)

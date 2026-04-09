@@ -40,7 +40,7 @@
 #include "examples/kits/example_kits_runner.h"
 #endif
 
-#include "server/vfs/tiku_vfs_tree.h"
+#include "kernel/vfs/tiku_vfs_tree.h"
 
 #if TIKU_SHELL_ENABLE
 #include "kernel/shell/tiku_shell.h"

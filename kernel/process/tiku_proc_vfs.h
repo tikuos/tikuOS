@@ -34,7 +34,7 @@
 #ifndef TIKU_PROC_VFS_H_
 #define TIKU_PROC_VFS_H_
 
-#include <server/vfs/tiku_vfs.h>
+#include <kernel/vfs/tiku_vfs.h>
 
 /**
  * @brief Get the /proc VFS directory node

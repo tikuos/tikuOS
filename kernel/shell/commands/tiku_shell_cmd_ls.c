@@ -31,7 +31,7 @@
 #include "tiku_shell_cmd_ls.h"
 #include <kernel/shell/tiku_shell.h>        /* SHELL_PRINTF */
 #include <kernel/shell/tiku_shell_cwd.h>
-#include <server/vfs/tiku_vfs.h>
+#include <kernel/vfs/tiku_vfs.h>
 
 /*---------------------------------------------------------------------------*/
 /* LIST CALLBACK                                                             */

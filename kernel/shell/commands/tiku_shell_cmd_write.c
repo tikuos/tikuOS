@@ -31,7 +31,7 @@
 #include "tiku_shell_cmd_write.h"
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/shell/tiku_shell_cwd.h>
-#include <server/vfs/tiku_vfs.h>
+#include <kernel/vfs/tiku_vfs.h>
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
