@@ -166,16 +166,31 @@ void tiku_timer_restart(struct tiku_timer *t);
 void tiku_timer_stop(struct tiku_timer *t);
 
 /**
- * @brief Check if a timer has expired
+ * @brief Check whether a timer is not currently in the active list.
  * @param t Timer structure
- * @return Non-zero if expired (not in active list), zero if pending
+ * @return Non-zero if the timer is inactive, zero if it is pending.
+ *
+ * A timer is "inactive" in two distinct cases:
+ *   1. it has never been set (the struct is zero-initialised), or
+ *   2. it was set, fired, and has been dispatched.
+ *
+ * This call cannot tell those two cases apart — callers that need to
+ * distinguish "fired since I set it" from "never set" must track that
+ * themselves (e.g. set a sentinel before tiku_timer_set_*). The
+ * common pattern of "set then PT_WAIT_UNTIL(tiku_timer_expired(t))"
+ * is unaffected because the caller knows the timer was just set.
  */
 int tiku_timer_expired(struct tiku_timer *t);
 
 /**
- * @brief Get remaining time until expiration
+ * @brief Get remaining time until expiration.
  * @param t Timer structure
- * @return Ticks remaining, 0 if expired
+ * @return Ticks remaining if the timer is active and pending; 0
+ *         otherwise.
+ *
+ * A return of 0 means the timer is not currently pending, which
+ * covers both "already fired" and "never set" — see
+ * tiku_timer_expired() for the same caveat.
  */
 tiku_clock_time_t tiku_timer_remaining(struct tiku_timer *t);
 

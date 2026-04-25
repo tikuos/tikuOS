@@ -175,6 +175,27 @@ SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/timers/tiku_clock.c
 SRCS += kernel/timers/tiku_htimer.c
 SRCS += kernel/timers/tiku_timer.c
+SRCS += kernel/timers/tiku_crit.c
+
+# Bit-bang transmitter (opt-in: backscatter / software-UART / IR).
+# Disabled by default so existing builds carry no extra code.
+# Auto-enabled when example 20 is selected so callers don't have to
+# pass both TIKU_EXAMPLE_BITBANG=1 and TIKU_BITBANG_ENABLE=1.
+TIKU_BITBANG_ENABLE ?= 0
+ifeq ($(TIKU_EXAMPLE_BITBANG),1)
+override TIKU_BITBANG_ENABLE := 1
+endif
+ifeq ($(TIKU_EXAMPLE_CRIT_DEFER),1)
+override TIKU_BITBANG_ENABLE := 1
+endif
+# Bit-bang C tests need the engine compiled in too.
+ifeq ($(TEST_BITBANG),1)
+override TIKU_BITBANG_ENABLE := 1
+endif
+ifeq ($(TIKU_BITBANG_ENABLE),1)
+CFLAGS += -DTIKU_BITBANG_ENABLE=1
+SRCS += kernel/timers/tiku_bitbang.c
+endif
 SRCS += interfaces/led/tiku_led.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/adc/tiku_adc.c
@@ -296,6 +317,10 @@ SRCS += tests/timer/test_htimer_basic.c
 SRCS += tests/timer/test_htimer_periodic.c
 SRCS += tests/timer/test_timer_edge.c
 SRCS += tests/timer/test_htimer_edge.c
+SRCS += tests/timer/test_htimer_no_guard.c
+SRCS += tests/timer/test_clock_fault.c
+SRCS += tests/timer/test_crit.c
+SRCS += tests/timer/test_bitbang.c
 SRCS += tests/watchdog/test_watchdog_basic.c
 SRCS += tests/watchdog/test_watchdog_pause_resume.c
 SRCS += tests/watchdog/test_watchdog_interval.c
@@ -350,6 +375,23 @@ SRCS += examples/16_tcp_echo/tcp_echo.c
 SRCS += examples/17_http_fetch/http_fetch.c
 SRCS += examples/18_http_direct/http_direct.c
 SRCS += examples/19_https_direct/https_direct.c
+
+# New examples (20+): gated by their TIKU_EXAMPLE_<NAME>=1 flag so
+# only the active one is compiled. This avoids stale .o files from
+# previous builds defining duplicate tiku_autostart_processes when
+# the user switches between examples without `make clean`.
+ifeq ($(TIKU_EXAMPLE_BITBANG),1)
+SRCS += examples/20_bitbang/bitbang.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_BITBANG=1
+endif
+ifeq ($(TIKU_EXAMPLE_CRIT_DEFER),1)
+SRCS += examples/21_crit_defer/crit_defer.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_CRIT_DEFER=1
+endif
+ifeq ($(TIKU_EXAMPLE_CLOCK_FAULT),1)
+SRCS += examples/22_clock_fault/clock_fault.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_CLOCK_FAULT=1
+endif
 
 # TikuKits examples (requires both examples/ and tikukits/)
 ifeq ($(HAS_TIKUKITS),1)

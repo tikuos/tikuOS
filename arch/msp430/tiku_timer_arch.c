@@ -36,6 +36,8 @@
 
 #include "tiku_timer_arch.h"
 #include <tiku.h>
+#include <hal/tiku_clock_hal.h>
+#include <kernel/timers/tiku_crit.h>
 #include <arch/msp430/tiku_compiler.h>
 #include <stdio.h>
 
@@ -84,6 +86,7 @@
 static volatile unsigned long tiku_arch_seconds = 0;
 static volatile tiku_clock_arch_time_t tiku_arch_count = 0;
 static volatile unsigned short tiku_arch_last_tar = 0;
+static unsigned char tiku_arch_clock_fault = TIKU_CLOCK_ARCH_FAULT_NONE;
 
 /*---------------------------------------------------------------------------*/
 /* INTERNAL FUNCTIONS                                                        */
@@ -133,6 +136,7 @@ static void tiku_configure_aclk_source(void)
             CSCTL4 |= LFXTOFF;
             CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
             TIKU_CS_LOCK();
+            tiku_arch_clock_fault = TIKU_CLOCK_ARCH_FAULT_LFXT_VLO;
             return;
         }
     } while (CSCTL5 & LFXTOFFG);
@@ -173,7 +177,13 @@ TIKU_ISR(TIMER0_A0_VECTOR, timer0_a0_isr)
         ++tiku_arch_seconds;
     }
 
-    tiku_timer_request_poll();
+    /* During a tiku_crit window, suppress the timer-process poll so
+     * the dispatcher does not run between bit-bang edges. The tick
+     * counter still advances; the catch-up poll fires on
+     * tiku_crit_end(). */
+    if (!tiku_crit_active()) {
+        tiku_timer_request_poll();
+    }
 
     __bic_SR_register_on_exit(LPM3_bits);
 }
@@ -187,6 +197,8 @@ void tiku_clock_arch_init(void)
     unsigned int state;
 
     CLOCK_PRINTF("Initializing system clock architecture\n");
+
+    tiku_arch_clock_fault = TIKU_CLOCK_ARCH_FAULT_NONE;
 
     CLOCK_PRINTF("Configuring ACLK source\n");
     tiku_configure_aclk_source();
@@ -361,6 +373,21 @@ int tiku_clock_arch_fine_max(void)
 tiku_clock_arch_counter_t tiku_clock_arch_counter(void)
 {
     return tiku_arch_read_tar();
+}
+
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Return the active clock-source fault code.
+ *
+ * Set to TIKU_CLOCK_ARCH_FAULT_LFXT_VLO inside tiku_configure_aclk_source()
+ * when XT1 fails to start and ACLK is rerouted to VLOCLK; the system tick
+ * then runs ~3x slower than TIKU_CLOCK_SECOND implies. Cleared on each
+ * tiku_clock_arch_init().
+ */
+unsigned char tiku_clock_arch_fault(void)
+{
+    return tiku_arch_clock_fault;
 }
 
 /*---------------------------------------------------------------------------*/

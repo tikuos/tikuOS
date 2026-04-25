@@ -107,6 +107,32 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 /*---------------------------------------------------------------------------*/
 
 /**
+ * @brief Schedule without the guard-time gate.
+ *
+ * Used by tight rescheduling paths (notably tiku_bitbang) where the
+ * caller knows the bit period and accepts responsibility for staying
+ * ahead of the hardware counter. Same body as tiku_htimer_set minus
+ * the guard check.
+ */
+int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
+                             tiku_htimer_callback_t func, void *ptr) {
+  if (ht == NULL || func == NULL) {
+    return TIKU_HTIMER_ERR_INVALID;
+  }
+
+  ht->time = time;
+  ht->func = func;
+  ht->ptr = ptr;
+
+  pending = ht;
+  tiku_htimer_arch_schedule(time);
+
+  return TIKU_HTIMER_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+
+/**
  * @brief Cancel the pending hardware timer.
  *
  * Clears the pending pointer.  The hardware interrupt is not

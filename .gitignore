@@ -49,6 +49,7 @@ tikukits/
 paper/
 
 # Separate repos
+homepage/
 examples/
 tests/
 presentation/

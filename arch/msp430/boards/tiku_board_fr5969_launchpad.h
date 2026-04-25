@@ -205,4 +205,24 @@
 #define TIKU_BOARD_OW_SEL1          P1SEL1
 #define TIKU_BOARD_OW_BIT           BIT2
 
+/*---------------------------------------------------------------------------*/
+/* Bit-bang test pin (tiku_bitbang demos / backscatter prototyping)          */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * Default pin for tiku_bitbang transmitters on this board: P1.4.
+ *
+ * P1.4 is brought out on BoosterPack header J1.5 (with GND on J1.20)
+ * which makes it a good logic-analyzer probe point. It does not
+ * conflict with the LEDs, buttons, UART, I2C, SPI, or 1-Wire pins
+ * declared above. Override at compile time by passing
+ * -DTIKU_BOARD_BSCAT_PORT=<n> -DTIKU_BOARD_BSCAT_PIN=<n>.
+ */
+#ifndef TIKU_BOARD_BSCAT_PORT
+#define TIKU_BOARD_BSCAT_PORT       1
+#endif
+#ifndef TIKU_BOARD_BSCAT_PIN
+#define TIKU_BOARD_BSCAT_PIN        4
+#endif
+
 #endif /* TIKU_BOARD_FR5969_LAUNCHPAD_H_ */

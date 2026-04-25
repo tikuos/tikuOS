@@ -29,6 +29,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_timer.h"
+#include "tiku_crit.h"
 #include "tiku.h"
 #include <stddef.h>
 
@@ -129,6 +130,18 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
     }
 
     if (ev != TIKU_EVENT_POLL) {
+      continue;
+    }
+
+    /*
+     * If a critical-execution window is held, defer the scan.
+     * The poll re-issued from tiku_crit_end() will pick up any
+     * expirations that came due while the window was held.
+     * (The clock ISR also suppresses poll requests during a
+     * window, but check here too since other code can call
+     * tiku_timer_request_poll directly.)
+     */
+    if (tiku_crit_active()) {
       continue;
     }
 

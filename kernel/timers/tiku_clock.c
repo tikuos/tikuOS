@@ -101,3 +101,10 @@ void tiku_clock_delay_usec(unsigned int dt)
 }
 
 /*---------------------------------------------------------------------------*/
+
+unsigned char tiku_clock_fault(void)
+{
+    return tiku_clock_arch_fault();
+}
+
+/*---------------------------------------------------------------------------*/

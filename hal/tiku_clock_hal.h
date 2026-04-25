@@ -100,4 +100,30 @@ unsigned short tiku_clock_arch_fine(void);
  */
 int tiku_clock_arch_fine_max(void);
 
+/*---------------------------------------------------------------------------*/
+/* CLOCK SOURCE FAULT REPORTING                                              */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Clock source fault codes.
+ *
+ * Reported by tiku_clock_arch_fault() when the platform was unable to
+ * bring up the intended low-frequency clock source and silently fell
+ * back to a less accurate one. The system tick continues to run but
+ * its rate no longer matches TIKU_CLOCK_SECOND, so all software
+ * timers expire at a different wall-clock rate.
+ */
+enum tiku_clock_arch_fault_code {
+  TIKU_CLOCK_ARCH_FAULT_NONE     = 0, /**< Configured source is in use */
+  TIKU_CLOCK_ARCH_FAULT_LFXT_VLO = 1, /**< XT1 failed; fell back to VLO */
+};
+
+/**
+ * @brief Return the current clock-source fault code.
+ *
+ * Set by tiku_clock_arch_init() if the requested source could not be
+ * brought up. Stays sticky until the next init.
+ */
+unsigned char tiku_clock_arch_fault(void);
+
 #endif /* TIKU_CLOCK_HAL_H_ */

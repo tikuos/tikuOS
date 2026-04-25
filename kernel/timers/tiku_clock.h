@@ -118,4 +118,15 @@ void tiku_clock_wait(tiku_clock_time_t t);
  */
 void tiku_clock_delay_usec(unsigned int dt);
 
+/**
+ * @brief Return the active clock-source fault code.
+ *
+ * Non-zero if the platform had to fall back from the configured
+ * low-frequency source (e.g. XT1 crystal -> VLO). When non-zero, the
+ * effective tick rate differs from TIKU_CLOCK_SECOND and every
+ * software timer will expire at a proportionally different wall-clock
+ * rate. See enum tiku_clock_arch_fault_code in tiku_clock_hal.h.
+ */
+unsigned char tiku_clock_fault(void);
+
 #endif /* TIKU_CLOCK_H_ */
