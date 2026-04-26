@@ -38,7 +38,7 @@
 #include <tiku.h>
 #include <hal/tiku_clock_hal.h>
 #include <kernel/timers/tiku_crit.h>
-#include <arch/msp430/tiku_compiler.h>
+#include <hal/tiku_compiler.h>
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/

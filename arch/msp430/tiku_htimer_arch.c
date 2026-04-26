@@ -39,7 +39,7 @@
 
 #include <tiku.h>
 #include "tiku_htimer_arch.h"
-#include <arch/msp430/tiku_compiler.h>
+#include <hal/tiku_compiler.h>
 #include <msp430.h>
 #include <stdio.h>
 

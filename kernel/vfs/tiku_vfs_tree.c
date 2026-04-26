@@ -39,8 +39,7 @@
 #include <kernel/cpu/tiku_watchdog.h>
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/process/tiku_proc_vfs.h>
-#include <arch/msp430/tiku_gpio_arch.h>
-#include <arch/msp430/tiku_uart_arch.h>
+#include <interfaces/gpio/tiku_gpio.h>
 #include <kernel/process/tiku_process.h>
 #include <kernel/scheduler/tiku_sched.h>
 #include <interfaces/adc/tiku_adc.h>
@@ -49,14 +48,11 @@
 #include <interfaces/bus/tiku_spi_bus.h>
 #endif
 #include <boot/tiku_boot.h>
+#include <hal/tiku_wake_hal.h>
 #include <stdio.h>
 
 #if TIKU_SHELL_ENABLE
 #include <kernel/shell/commands/tiku_shell_cmd_sleep.h>
-#endif
-
-#ifdef PLATFORM_MSP430
-#include <msp430.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -253,29 +249,26 @@ boot_rstiv_read(char *buf, size_t max)
 static int
 boot_clock_mclk_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%lu\n",
-                    tiku_cpu_msp430_clock_get_hz());
+    return snprintf(buf, max, "%lu\n", tiku_cpu_mclk_hz());
 }
 
 static int
 boot_clock_smclk_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%lu\n",
-                    tiku_cpu_msp430_smclk_get_hz());
+    return snprintf(buf, max, "%lu\n", tiku_cpu_smclk_hz());
 }
 
 static int
 boot_clock_aclk_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%lu\n",
-                    tiku_cpu_msp430_aclk_get_hz());
+    return snprintf(buf, max, "%lu\n", tiku_cpu_aclk_hz());
 }
 
 static int
 boot_clock_fault_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%u\n",
-                    tiku_cpu_msp430_clock_has_fault() ? 1u : 0u);
+                    tiku_cpu_clock_has_fault() ? 1u : 0u);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -346,19 +339,18 @@ static int
 power_wake_read(char *buf, size_t max)
 {
     int pos = 0;
+    tiku_wake_sources_t w;
 
-#ifdef PLATFORM_MSP430
+    tiku_wake_arch_query(&w);
+
     pos += snprintf(buf + pos, max - pos, "timer0:%s ",
-                    (TA0CTL & MC__UP) ? "on" : "off");
+                    (w.sources & TIKU_WAKE_SYSTICK) ? "on" : "off");
     pos += snprintf(buf + pos, max - pos, "uart:%s ",
-                    (UCA0IE & UCRXIE) ? "on" : "off");
+                    (w.sources & TIKU_WAKE_UART_RX) ? "on" : "off");
     pos += snprintf(buf + pos, max - pos, "wdt:%s ",
-                    (SFRIE1 & WDTIE) ? "on" : "off");
+                    (w.sources & TIKU_WAKE_WDT) ? "on" : "off");
     pos += snprintf(buf + pos, max - pos, "gpio:%s\n",
-                    (P1IE | P2IE | P3IE | P4IE) ? "on" : "off");
-#else
-    pos += snprintf(buf + pos, max - pos, "n/a\n");
-#endif
+                    (w.sources & TIKU_WAKE_GPIO) ? "on" : "off");
 
     return pos;
 }
@@ -623,7 +615,7 @@ gpio_dir_read(uint8_t port, char *buf, size_t max)
     int pos = 0;
     uint8_t pin;
     for (pin = 0; pin < 8 && pos < (int)max - 4; pin++) {
-        int8_t d = tiku_gpio_arch_get_dir(port, pin);
+        int d = tiku_gpio_get_dir(port, pin);
         pos += snprintf(buf + pos, max - pos, "%c",
                         d == 1 ? 'O' : (d == 0 ? 'I' : '?'));
     }
@@ -801,7 +793,7 @@ devzero_read(char *buf, size_t max)
 static int
 gpio_pin_read(uint8_t port, uint8_t pin, char *buf, size_t max)
 {
-    int8_t v = tiku_gpio_arch_read(port, pin);
+    int v = tiku_gpio_read(port, pin);
     if (v < 0) {
         return snprintf(buf, max, "err\n");
     }
@@ -813,13 +805,13 @@ gpio_pin_write(uint8_t port, uint8_t pin, const char *buf, size_t len)
 {
     (void)len;
     if (buf[0] == '1') {
-        tiku_gpio_arch_write(port, pin, 1);
+        tiku_gpio_write(port, pin, 1);
     } else if (buf[0] == '0') {
-        tiku_gpio_arch_write(port, pin, 0);
+        tiku_gpio_write(port, pin, 0);
     } else if (buf[0] == 't') {
-        tiku_gpio_arch_toggle(port, pin);
+        tiku_gpio_toggle(port, pin);
     } else if (buf[0] == 'i') {
-        tiku_gpio_arch_set_input(port, pin);
+        tiku_gpio_dir_in(port, pin);
     }
     return 0;
 }

@@ -31,8 +31,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_io.h"
-#include "tiku.h"                          /* PLATFORM_MSP430 */
-#include <arch/msp430/tiku_uart_arch.h>    /* UART backend functions */
+#include "tiku.h"
 #include <stdarg.h>
 
 /*---------------------------------------------------------------------------*/

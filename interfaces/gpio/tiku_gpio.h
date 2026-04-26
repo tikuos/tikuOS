@@ -108,4 +108,13 @@ static inline int tiku_gpio_read(uint8_t port, uint8_t pin)
     return tiku_gpio_arch_read(port, pin);
 }
 
+/**
+ * @brief Read a pin's configured direction.
+ * @return 1 = output, 0 = input, TIKU_GPIO_ERR_INVALID on bad port/pin
+ */
+static inline int tiku_gpio_get_dir(uint8_t port, uint8_t pin)
+{
+    return tiku_gpio_arch_get_dir(port, pin);
+}
+
 #endif /* TIKU_GPIO_H_ */

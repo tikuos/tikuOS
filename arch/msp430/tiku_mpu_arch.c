@@ -33,7 +33,7 @@
 
 #include "tiku_mpu_arch.h"
 #include "tiku_device_select.h"
-#include "tiku_compiler.h"
+#include <hal/tiku_compiler.h>
 #include <msp430.h>
 
 #if TIKU_DEVICE_HAS_MPU

@@ -132,7 +132,7 @@ void tiku_sched_loop(void)
     /* Enable global interrupts so ISRs (timer tick, UART RX, etc.)
      * can fire.  The scheduler's idle path uses atomic enter/exit
      * which preserves GIE state, so once enabled here it stays on. */
-    __enable_interrupt();
+    tiku_cpu_irq_enable();
 
     while (sched_state == TIKU_SCHED_RUNNING) {
 

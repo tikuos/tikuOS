@@ -7,8 +7,9 @@
  * tiku_shell_cmd_sleep.c - "sleep" command implementation
  *
  * Configures the scheduler's idle hook to enter a low-power mode
- * when no events are pending.  The CPU wakes on any enabled
- * interrupt — Timer A0 (system clock) always wakes from LPM3.
+ * when no events are pending. Modes are abstract (off / lpm0 /
+ * lpm3 / lpm4) and resolved to the platform's real entry function
+ * by the CPU HAL.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,23 +27,13 @@
 #include "tiku_shell_cmd_sleep.h"
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/scheduler/tiku_sched.h>
-
-/*---------------------------------------------------------------------------*/
-/* LPM ENTRY FUNCTIONS (arch layer)                                          */
-/*---------------------------------------------------------------------------*/
-
-extern void tiku_cpu_boot_msp430_power_lpm0_enter(void);
-extern void tiku_cpu_boot_msp430_power_lpm3_enter(void);
-extern void tiku_cpu_boot_msp430_power_lpm4_enter(void);
+#include <hal/tiku_cpu.h>
 
 /*---------------------------------------------------------------------------*/
 /* CURRENT MODE TRACKING                                                     */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Current LPM mode: 0 = off, 1 = LPM0, 3 = LPM3, 4 = LPM4
- */
-static uint8_t current_lpm;
+static tiku_cpu_idle_mode_t current_idle = TIKU_CPU_IDLE_OFF;
 
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
@@ -61,16 +52,23 @@ streq(const char *a, const char *b)
     return (*a == *b);
 }
 
-static const char *
-lpm_name(uint8_t mode)
+/**
+ * Map a user-typed token ("off", "lpm0", "lpm3", "lpm4") to a HAL
+ * idle-mode enum. Returns 0 on match, -1 on unknown token.
+ *
+ * Token names follow the platform-specific short name returned by
+ * tiku_cpu_idle_mode_name(); this keeps the user-facing CLI stable
+ * with the documented MSP430 mode names while letting the HAL
+ * choose the actual entry hook.
+ */
+static int
+parse_mode(const char *tok, tiku_cpu_idle_mode_t *out)
 {
-    switch (mode) {
-    case 0: return "off (busy-wait)";
-    case 1: return "LPM0 (CPU off, SMCLK+ACLK on)";
-    case 3: return "LPM3 (CPU+SMCLK off, ACLK on)";
-    case 4: return "LPM4 (all clocks off)";
-    default: return "unknown";
-    }
+    if (streq(tok, "off"))  { *out = TIKU_CPU_IDLE_OFF;     return 0; }
+    if (streq(tok, "lpm0")) { *out = TIKU_CPU_IDLE_LIGHT;   return 0; }
+    if (streq(tok, "lpm3")) { *out = TIKU_CPU_IDLE_DEEP;    return 0; }
+    if (streq(tok, "lpm4")) { *out = TIKU_CPU_IDLE_DEEPEST; return 0; }
+    return -1;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -80,46 +78,31 @@ lpm_name(uint8_t mode)
 void
 tiku_shell_cmd_sleep(uint8_t argc, const char *argv[])
 {
+    tiku_cpu_idle_mode_t mode;
+
     if (argc < 2) {
-        SHELL_PRINTF("Idle mode: %s\n", lpm_name(current_lpm));
+        SHELL_PRINTF("Idle mode: %s\n",
+                     tiku_cpu_idle_mode_desc(current_idle));
         return;
     }
 
-    if (streq(argv[1], "off")) {
-        tiku_sched_set_idle_hook((tiku_sched_idle_hook_t)0);
-        current_lpm = 0;
-        SHELL_PRINTF("LPM disabled\n");
-
-    } else if (streq(argv[1], "lpm0")) {
-        tiku_sched_set_idle_hook(
-            tiku_cpu_boot_msp430_power_lpm0_enter);
-        current_lpm = 1;
-        SHELL_PRINTF("Idle: LPM0\n");
-
-    } else if (streq(argv[1], "lpm3")) {
-        tiku_sched_set_idle_hook(
-            tiku_cpu_boot_msp430_power_lpm3_enter);
-        current_lpm = 3;
-        SHELL_PRINTF("Idle: LPM3\n");
-
-    } else if (streq(argv[1], "lpm4")) {
-        tiku_sched_set_idle_hook(
-            tiku_cpu_boot_msp430_power_lpm4_enter);
-        current_lpm = 4;
-        SHELL_PRINTF("Idle: LPM4\n");
-
-    } else {
+    if (parse_mode(argv[1], &mode) != 0) {
         SHELL_PRINTF("Usage: sleep <off|lpm0|lpm3|lpm4>\n");
+        return;
+    }
+
+    tiku_sched_set_idle_hook(tiku_cpu_idle_hook(mode));
+    current_idle = mode;
+
+    if (mode == TIKU_CPU_IDLE_OFF) {
+        SHELL_PRINTF("LPM disabled\n");
+    } else {
+        SHELL_PRINTF("Idle: %s\n", tiku_cpu_idle_mode_name(mode));
     }
 }
 
 const char *
 tiku_shell_sleep_mode_str(void)
 {
-    switch (current_lpm) {
-    case 1: return "LPM0";
-    case 3: return "LPM3";
-    case 4: return "LPM4";
-    default: return "off";
-    }
+    return tiku_cpu_idle_mode_name(current_idle);
 }

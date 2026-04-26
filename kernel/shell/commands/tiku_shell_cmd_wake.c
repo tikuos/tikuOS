@@ -7,7 +7,10 @@
  * tiku_shell_cmd_wake.c - "wake" command implementation
  *
  * Shows which interrupt sources can wake the CPU from low-power
- * mode and which LPM levels each source supports.
+ * mode and which LPM levels each source supports. Wake-source
+ * detection goes through the platform-agnostic wake HAL
+ * (hal/tiku_wake_hal.h); the tables below describe how each
+ * MSP430 LPM level interacts with each source.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +27,7 @@
 
 #include "tiku_shell_cmd_wake.h"
 #include <kernel/shell/tiku_shell.h>
-#include "tiku.h"
-#include <msp430.h>
+#include <hal/tiku_wake_hal.h>
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC HANDLER                                                            */
@@ -34,63 +36,38 @@
 void
 tiku_shell_cmd_wake(uint8_t argc, const char *argv[])
 {
+    tiku_wake_sources_t w;
+    uint8_t i;
+
     (void)argc;
     (void)argv;
 
+    tiku_wake_arch_query(&w);
+
     SHELL_PRINTF("Wake sources:\n");
 
-    /* Timer A0 — system clock, always active */
-    {
-        uint8_t active = (TA0CTL & MC__UP) != 0;
-        SHELL_PRINTF("  Timer A0 (sys clock)  %s  wakes LPM0-3\n",
-                     active ? "[on ]" : "[off]");
-    }
+    SHELL_PRINTF("  Timer A0 (sys clock)  %s  wakes LPM0-3\n",
+                 (w.sources & TIKU_WAKE_SYSTICK) ? "[on ]" : "[off]");
 
-    /* Timer A1 — hardware timer (rtimer) */
-    {
-        uint8_t active = (TA1CTL & MC__UP) != 0;
-        SHELL_PRINTF("  Timer A1 (htimer)     %s  wakes LPM0-3\n",
-                     active ? "[on ]" : "[off]");
-    }
+    SHELL_PRINTF("  Timer A1 (htimer)     %s  wakes LPM0-3\n",
+                 (w.sources & TIKU_WAKE_HTIMER) ? "[on ]" : "[off]");
 
-    /* UART RX — eUSCI_A0 */
-    {
-        uint8_t active = (UCA0IE & UCRXIE) != 0;
-        SHELL_PRINTF("  UART RX  (eUSCI_A0)   %s  wakes LPM0\n",
-                     active ? "[on ]" : "[off]");
-    }
+    SHELL_PRINTF("  UART RX  (eUSCI_A0)   %s  wakes LPM0\n",
+                 (w.sources & TIKU_WAKE_UART_RX) ? "[on ]" : "[off]");
 
-    /* Watchdog interval timer */
-    {
-        uint8_t active = (SFRIE1 & WDTIE) != 0;
-        SHELL_PRINTF("  Watchdog (interval)   %s  wakes LPM0-3\n",
-                     active ? "[on ]" : "[off]");
-    }
+    SHELL_PRINTF("  Watchdog (interval)   %s  wakes LPM0-3\n",
+                 (w.sources & TIKU_WAKE_WDT) ? "[on ]" : "[off]");
 
-    /* GPIO port interrupt enable (P1-P4) */
-    {
-        uint8_t p1 = P1IE != 0;
-        uint8_t p2 = P2IE != 0;
-        uint8_t p3 = P3IE != 0;
-        uint8_t p4 = P4IE != 0;
-
-        if (p1 || p2 || p3 || p4) {
-            SHELL_PRINTF("  GPIO IRQ              [on ]  wakes LPM0-4\n");
-            if (p1) {
-                SHELL_PRINTF("    P1IE = 0x%02X\n", P1IE);
+    if (w.sources & TIKU_WAKE_GPIO) {
+        SHELL_PRINTF("  GPIO IRQ              [on ]  wakes LPM0-4\n");
+        for (i = 0; i < TIKU_WAKE_MAX_GPIO_PORTS; i++) {
+            if (w.gpio_ie[i]) {
+                SHELL_PRINTF("    P%uIE = 0x%02X\n",
+                             (unsigned)(i + 1), w.gpio_ie[i]);
             }
-            if (p2) {
-                SHELL_PRINTF("    P2IE = 0x%02X\n", P2IE);
-            }
-            if (p3) {
-                SHELL_PRINTF("    P3IE = 0x%02X\n", P3IE);
-            }
-            if (p4) {
-                SHELL_PRINTF("    P4IE = 0x%02X\n", P4IE);
-            }
-        } else {
-            SHELL_PRINTF("  GPIO IRQ              [off]  wakes LPM0-4\n");
         }
+    } else {
+        SHELL_PRINTF("  GPIO IRQ              [off]  wakes LPM0-4\n");
     }
 
     SHELL_PRINTF("\nNote: LPM4 disables all clocks.\n");

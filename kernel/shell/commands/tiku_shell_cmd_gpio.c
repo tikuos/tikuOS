@@ -24,7 +24,7 @@
 
 #include "tiku_shell_cmd_gpio.h"
 #include <kernel/shell/tiku_shell.h>
-#include <arch/msp430/tiku_gpio_arch.h>
+#include <interfaces/gpio/tiku_gpio.h>
 
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
@@ -69,7 +69,7 @@ tiku_shell_cmd_gpio(uint8_t argc, const char *argv[])
 {
     uint8_t port;
     uint8_t pin;
-    int8_t val;
+    int val;
 
     if (argc < 3) {
         SHELL_PRINTF("Usage: gpio <port> <pin> [0|1|t|in]\n");
@@ -87,14 +87,14 @@ tiku_shell_cmd_gpio(uint8_t argc, const char *argv[])
 
     /* No value argument — read the pin */
     if (argc < 4) {
-        val = tiku_gpio_arch_read(port, pin);
+        val = tiku_gpio_read(port, pin);
         if (val < 0) {
             SHELL_PRINTF("Error: P%c.%u not available\n",
                          port_char(port), pin);
             return;
         }
         {
-            int8_t dir = tiku_gpio_arch_get_dir(port, pin);
+            int dir = tiku_gpio_get_dir(port, pin);
             SHELL_PRINTF("P%c.%u = %u (%s)\n",
                          port_char(port), pin, (uint8_t)val,
                          dir ? "output" : "input");
@@ -104,7 +104,7 @@ tiku_shell_cmd_gpio(uint8_t argc, const char *argv[])
 
     /* Value argument — write, toggle, or set input */
     if (argv[3][0] == '1' && argv[3][1] == '\0') {
-        if (tiku_gpio_arch_write(port, pin, 1) < 0) {
+        if (tiku_gpio_write(port, pin, 1) < 0) {
             SHELL_PRINTF("Error: P%c.%u not available\n",
                          port_char(port), pin);
             return;
@@ -112,7 +112,7 @@ tiku_shell_cmd_gpio(uint8_t argc, const char *argv[])
         SHELL_PRINTF("P%c.%u -> 1\n", port_char(port), pin);
 
     } else if (argv[3][0] == '0' && argv[3][1] == '\0') {
-        if (tiku_gpio_arch_write(port, pin, 0) < 0) {
+        if (tiku_gpio_write(port, pin, 0) < 0) {
             SHELL_PRINTF("Error: P%c.%u not available\n",
                          port_char(port), pin);
             return;
@@ -120,17 +120,17 @@ tiku_shell_cmd_gpio(uint8_t argc, const char *argv[])
         SHELL_PRINTF("P%c.%u -> 0\n", port_char(port), pin);
 
     } else if (argv[3][0] == 't' && argv[3][1] == '\0') {
-        if (tiku_gpio_arch_toggle(port, pin) < 0) {
+        if (tiku_gpio_toggle(port, pin) < 0) {
             SHELL_PRINTF("Error: P%c.%u not available\n",
                          port_char(port), pin);
             return;
         }
-        val = tiku_gpio_arch_read(port, pin);
+        val = tiku_gpio_read(port, pin);
         SHELL_PRINTF("P%c.%u -> %u\n", port_char(port), pin,
                      (uint8_t)val);
 
     } else if (argv[3][0] == 'i' && argv[3][1] == 'n') {
-        if (tiku_gpio_arch_set_input(port, pin) < 0) {
+        if (tiku_gpio_dir_in(port, pin) < 0) {
             SHELL_PRINTF("Error: P%c.%u not available\n",
                          port_char(port), pin);
             return;
