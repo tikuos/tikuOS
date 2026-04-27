@@ -93,66 +93,6 @@ override TIKU_SHELL_ENABLE := 1
 endif
 
 # ---------------------------------------------------------------------------
-# Shell tier presets  (override individual flags via EXTRA_CFLAGS still works)
-# ---------------------------------------------------------------------------
-# SHELL_TIER selects a curated bundle of TIKU_SHELL_CMD_* flags so the
-# shell footprint can be tuned without listing every flag by hand.
-#
-#   make MCU=msp430fr5969 SHELL_TIER=basic
-#   make MCU=msp430fr5969 SHELL_TIER=moderate     (default)
-#   make MCU=msp430fr5969 SHELL_TIER=full
-#
-#   basic    -- minimum useful shell (~30 KB FRAM).  Keeps process
-#               management, filesystem read/write, GPIO, power, and
-#               aliases.  Drops scripting (jobs/rules/if/calc/repeat),
-#               history, watch/changed, tree/clear/echo, and most
-#               diagnostics.
-#   moderate -- default.  All routinely used commands; the opt-in
-#               debug tools (i2c, peek/poke, repeat, delay) stay
-#               disabled.  Sits ~250 B from the 48 KB FRAM cap.
-#   full     -- everything that fits.  Trades calc, if, and history
-#               (the three largest singletons) for the opt-in debug
-#               tools, so i2c, peek, poke, repeat, and delay are all
-#               on simultaneously.
-#
-# Future roadmap: tier presets evolve into loadable shell modules so
-# the same binary can grow its command set at runtime.  This Makefile
-# machinery is the static-link bridge until then.
-SHELL_TIER ?= moderate
-
-ifeq ($(SHELL_TIER),basic)
-EXTRA_CFLAGS += -DTIKU_SHELL_CMD_HISTORY=0 \
-                -DTIKU_SHELL_CMD_CALC=0 \
-                -DTIKU_SHELL_CMD_IF=0 \
-                -DTIKU_SHELL_CMD_FREE=0 \
-                -DTIKU_SHELL_CMD_NAME=0 \
-                -DTIKU_SHELL_CMD_IRQ=0 \
-                -DTIKU_SHELL_CMD_JOBS=0 \
-                -DTIKU_SHELL_CMD_RULES=0 \
-                -DTIKU_SHELL_CMD_WATCH=0 \
-                -DTIKU_SHELL_CMD_CHANGED=0 \
-                -DTIKU_SHELL_CMD_TREE=0 \
-                -DTIKU_SHELL_CMD_CLEAR=0 \
-                -DTIKU_SHELL_CMD_ECHO=0 \
-                -DTIKU_SHELL_CMD_TIMER=0 \
-                -DTIKU_SHELL_CMD_QUEUE=0 \
-                -DTIKU_SHELL_CMD_START=0 \
-                -DTIKU_SHELL_CMD_TOGGLE=0 \
-                -DTIKU_SHELL_CMD_ADC=0
-endif
-
-ifeq ($(SHELL_TIER),full)
-EXTRA_CFLAGS += -DTIKU_SHELL_CMD_DELAY=1 \
-                -DTIKU_SHELL_CMD_REPEAT=1 \
-                -DTIKU_SHELL_CMD_PEEK=1 \
-                -DTIKU_SHELL_CMD_POKE=1 \
-                -DTIKU_SHELL_CMD_I2C=1 \
-                -DTIKU_SHELL_CMD_HISTORY=0 \
-                -DTIKU_SHELL_CMD_CALC=0 \
-                -DTIKU_SHELL_CMD_IF=0
-endif
-
-# ---------------------------------------------------------------------------
 # Optional components (opt-in; override: make HAS_TESTS=1 HAS_EXAMPLES=1)
 # Tests and examples are EXCLUDED by default — plain `make` builds only the
 # core OS (plus any explicitly enabled services like the shell).
@@ -287,100 +227,54 @@ CFLAGS += -DTIKU_SHELL_ENABLE=1
 ifeq ($(TIKU_SHELL_COLOR),1)
 CFLAGS += -DTIKU_SHELL_COLOR=1
 endif
-# Each `ifeq (,$(findstring TIKU_SHELL_CMD_X=0,$(EXTRA_CFLAGS)))` is the
-# inverse of `ifneq` -- the .c is included only when the user has NOT
-# passed `-DTIKU_SHELL_CMD_X=0`.  This pairs with the `#ifndef` guard in
-# tiku_shell_config.h so a single `=0` on the command line both removes
-# the table entry (compile-time #if) and skips the .c (Makefile gate).
 SRCS += kernel/shell/tiku_shell_io.c
 SRCS += kernel/shell/tiku_shell_parser.c
 SRCS += kernel/shell/tiku_shell.c
-SRCS += kernel/shell/tiku_shell_cwd.c
-
-# --- Always-on core (no flags) --------------------------------------
 SRCS += kernel/shell/commands/tiku_shell_cmd_ps.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_info.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_kill.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_reboot.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_gpio.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
-
-# --- Default-on, disable with `-DTIKU_SHELL_CMD_X=0` -----------------
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
 endif
+SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
+SRCS += kernel/shell/tiku_shell_cwd.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
 endif
-ifeq (,$(findstring TIKU_SHELL_CMD_IF=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_if.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_FREE=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_NAME=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_name.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_IRQ=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_irq.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_WATCH=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_CHANGED=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_changed.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_TREE=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_tree.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_CLEAR=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_clear.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_ECHO=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_echo.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_TIMER=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_QUEUE=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_START=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_TOGGLE=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
-endif
-ifeq (,$(findstring TIKU_SHELL_CMD_ADC=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
-endif
-
-# --- Subsystems with multiple commands -------------------------------
-# JOBS: every/once/jobs share tiku_shell_jobs.c
-ifeq (,$(findstring TIKU_SHELL_CMD_JOBS=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/tiku_shell_jobs.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_every.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_once.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_jobs.c
-endif
-# RULES: on/rules share tiku_shell_rules.c
-ifeq (,$(findstring TIKU_SHELL_CMD_RULES=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/tiku_shell_rules.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_on.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_rules.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_changed.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_gpio.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_name.c
+ifeq (,$(findstring TIKU_SHELL_CMD_IF=0,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_if.c
 endif
-# ALIAS: alias/unalias share tiku_shell_alias.c
-ifeq (,$(findstring TIKU_SHELL_CMD_ALIAS=0,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_irq.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_tree.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_clear.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_echo.c
 SRCS += kernel/shell/tiku_shell_alias.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_alias.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_unalias.c
-endif
 ifneq (,$(findstring TIKU_SHELL_CMD_I2C=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_i2c.c
 endif
