@@ -34,6 +34,12 @@
 #include "tiku_shell_config.h"
 #include "tiku_shell_parser.h"
 #include <kernel/timers/tiku_timer.h>
+#if TIKU_SHELL_CMD_JOBS
+#include "tiku_shell_jobs.h"
+#endif
+#if TIKU_SHELL_CMD_RULES
+#include "tiku_shell_rules.h"
+#endif
 
 #if TIKU_SHELL_TCP_ENABLE
 #include "tiku_shell_io_tcp.h"
@@ -88,6 +94,47 @@
 #endif
 #if TIKU_SHELL_CMD_READ
 #include "commands/tiku_shell_cmd_read.h"
+#endif
+#if TIKU_SHELL_CMD_WATCH
+#include "commands/tiku_shell_cmd_watch.h"
+#endif
+#if TIKU_SHELL_CMD_CALC
+#include "commands/tiku_shell_cmd_calc.h"
+#endif
+#if TIKU_SHELL_CMD_JOBS
+#include "commands/tiku_shell_cmd_every.h"
+#include "commands/tiku_shell_cmd_once.h"
+#include "commands/tiku_shell_cmd_jobs.h"
+#endif
+#if TIKU_SHELL_CMD_RULES
+#include "commands/tiku_shell_cmd_on.h"
+#include "commands/tiku_shell_cmd_rules.h"
+#endif
+#if TIKU_SHELL_CMD_CHANGED
+#include "commands/tiku_shell_cmd_changed.h"
+#endif
+#if TIKU_SHELL_CMD_NAME
+#include "commands/tiku_shell_cmd_name.h"
+#endif
+#if TIKU_SHELL_CMD_IF
+#include "commands/tiku_shell_cmd_if.h"
+#endif
+#if TIKU_SHELL_CMD_IRQ
+#include "commands/tiku_shell_cmd_irq.h"
+#endif
+#if TIKU_SHELL_CMD_I2C
+#include "commands/tiku_shell_cmd_i2c.h"
+#endif
+#if TIKU_SHELL_CMD_TREE
+#include "commands/tiku_shell_cmd_tree.h"
+#endif
+#if TIKU_SHELL_CMD_CLEAR
+#include "commands/tiku_shell_cmd_clear.h"
+#endif
+#if TIKU_SHELL_CMD_ALIAS
+#include "commands/tiku_shell_cmd_alias.h"
+#include "commands/tiku_shell_cmd_unalias.h"
+#include "tiku_shell_alias.h"
 #endif
 #if TIKU_SHELL_CMD_GPIO
 #include "commands/tiku_shell_cmd_gpio.h"
@@ -150,6 +197,12 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_HISTORY
     {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},
 #endif
+#if TIKU_SHELL_CMD_CALC
+    {"calc",    "Integer arithmetic",          tiku_shell_cmd_calc},
+#endif
+#if TIKU_SHELL_CMD_CLEAR
+    {"clear",   "Clear screen (ANSI)",         tiku_shell_cmd_clear},
+#endif
 
     /* ---- Processes ---- */
     CMD_CATEGORY("Processes"),
@@ -171,11 +224,23 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_TIMER
     {"timer",   "Software timer status",       tiku_shell_cmd_timer},
 #endif
+#if TIKU_SHELL_CMD_JOBS
+    {"every",   "Schedule a recurring command", tiku_shell_cmd_every},
+    {"once",    "Schedule a one-shot command", tiku_shell_cmd_once},
+    {"jobs",    "List/delete scheduled jobs",  tiku_shell_cmd_jobs},
+#endif
+#if TIKU_SHELL_CMD_RULES
+    {"on",      "Register a reactive rule",    tiku_shell_cmd_on},
+    {"rules",   "List/delete reactive rules",  tiku_shell_cmd_rules},
+#endif
 
     /* ---- Filesystem ---- */
     CMD_CATEGORY("Filesystem"),
 #if TIKU_SHELL_CMD_LS
     {"ls",      "List directory",              tiku_shell_cmd_ls},
+#endif
+#if TIKU_SHELL_CMD_TREE
+    {"tree",    "Recursive directory listing", tiku_shell_cmd_tree},
 #endif
 #if TIKU_SHELL_CMD_CD
     {"cd",      "Change directory",            tiku_shell_cmd_cd},
@@ -184,8 +249,29 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_READ
     {"read",    "Read a VFS node",             tiku_shell_cmd_read},
 #endif
+#if TIKU_SHELL_CMD_WATCH
+    {"watch",   "Read VFS node every N sec",   tiku_shell_cmd_watch},
+#endif
+#if TIKU_SHELL_CMD_CHANGED
+    {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},
+#endif
 #if TIKU_SHELL_CMD_WRITE
     {"write",   "Write a VFS node",            tiku_shell_cmd_write},
+#endif
+#if TIKU_SHELL_CMD_NAME
+    {"name",    "Read/set device name",        tiku_shell_cmd_name},
+#endif
+#if TIKU_SHELL_CMD_IF
+    {"if",      "Conditional: if <path> <op> <value> <cmd>",
+                                               tiku_shell_cmd_if},
+#endif
+#if TIKU_SHELL_CMD_IRQ
+    {"irq",     "Enable/disable GPIO edge IRQ", tiku_shell_cmd_irq},
+#endif
+#if TIKU_SHELL_CMD_ALIAS
+    {"alias",   "Define/list FRAM-backed aliases",
+                                               tiku_shell_cmd_alias},
+    {"unalias", "Remove an alias",             tiku_shell_cmd_unalias},
 #endif
 #if TIKU_SHELL_CMD_TOGGLE
     {"toggle",  "Flip a binary VFS node",      tiku_shell_cmd_toggle},
@@ -204,6 +290,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_ADC
     {"adc",     "Read analog channel",         tiku_shell_cmd_adc},
+#endif
+#if TIKU_SHELL_CMD_I2C
+    {"i2c",     "I2C scan/read/write",         tiku_shell_cmd_i2c},
 #endif
 
     /* ---- Power ---- */
@@ -316,6 +405,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 
     /* ---- One-time init ---- */
     tiku_shell_parser_init(tiku_shell_commands);
+#if TIKU_SHELL_CMD_ALIAS
+    tiku_shell_alias_init();
+#endif
+#if TIKU_SHELL_CMD_JOBS
+    tiku_shell_jobs_init();
+#endif
+#if TIKU_SHELL_CMD_RULES
+    tiku_shell_rules_init();
+#endif
     cli.pos = 0;
 
 #if TIKU_SHELL_TCP_ENABLE
@@ -419,6 +517,18 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 }
             }
         }
+
+#if TIKU_SHELL_CMD_JOBS
+        /* Fire any due scheduled jobs.  This runs after the input
+         * drain so that user keystrokes get processed first; jobs
+         * dispatch through the same parser as interactive commands. */
+        tiku_shell_jobs_tick();
+#endif
+#if TIKU_SHELL_CMD_RULES
+        /* Re-evaluate reactive rules.  Edge-triggered, so actions
+         * fire only on a false->true transition. */
+        tiku_shell_rules_tick();
+#endif
 
 #if TIKU_SHELL_TCP_ENABLE
         tiku_shell_io_tcp_flush();

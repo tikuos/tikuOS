@@ -60,8 +60,34 @@
 #define TIKU_SHELL_CMD_FREE   1  /**< free   - Memory usage summary */
 #define TIKU_SHELL_CMD_SLEEP  1  /**< sleep  - Enter low-power idle mode */
 #define TIKU_SHELL_CMD_WAKE   1  /**< wake   - Show active wake sources */
+#define TIKU_SHELL_CMD_NAME   1  /**< name   - Read or set device name */
+#define TIKU_SHELL_CMD_IF     1  /**< if     - Conditional VFS-driven action */
+#define TIKU_SHELL_CMD_IRQ    1  /**< irq    - Configure GPIO edge interrupt -> event */
+#define TIKU_SHELL_CMD_ALIAS  1  /**< alias  - User-defined shell shortcuts (FRAM) */
 #define TIKU_SHELL_CMD_CAT    1  /**< cat    - Alias for read */
 #define TIKU_SHELL_CMD_ECHO   1  /**< echo   - Alias for write */
+#define TIKU_SHELL_CMD_WATCH  1  /**< watch  - Periodic VFS read until Ctrl+C */
+#define TIKU_SHELL_CMD_CALC   1  /**< calc   - Integer arithmetic (+ - * / %% min max) */
+#define TIKU_SHELL_CMD_JOBS   1  /**< jobs   - Schedule periodic/one-shot commands (every/once/jobs) */
+#define TIKU_SHELL_CMD_RULES  1  /**< rules  - Reactive rules (on/rules) */
+#define TIKU_SHELL_CMD_CHANGED 1 /**< changed- Block until VFS path value changes */
+/* I2C is opt-in: it pulls in tiku_i2c_bus and arch driver, which
+ * together cost ~1.4 KB of FRAM.  The default FR5969 shell build
+ * already sits at ~44 KB of the 48 KB FRAM cap, so enabling I2C
+ * requires turning off something else of comparable size.  Two
+ * recipes that fit comfortably:
+ *
+ *   make MCU=msp430fr5969 TIKU_SHELL_ENABLE=1 \
+ *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1 -DTIKU_SHELL_CMD_HISTORY=0"
+ *
+ *   make MCU=msp430fr5969 TIKU_SHELL_ENABLE=1 \
+ *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1 -DTIKU_SHELL_CMD_CALC=0"
+ */
+#ifndef TIKU_SHELL_CMD_I2C
+#define TIKU_SHELL_CMD_I2C    0  /**< i2c    - Bus scan / read / write */
+#endif
+#define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
+#define TIKU_SHELL_CMD_CLEAR  1  /**< clear  - ANSI clear screen */
 #ifndef TIKU_SHELL_CMD_INIT
 #define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - FRAM boot entries */
 #endif

@@ -47,11 +47,11 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
 
     /*
      * Configure the watchdog in watchdog mode (reset on expiry) with the
-     * shortest interval (WDTIS__64 = /64 divider on ACLK ~32 kHz -> ~2 ms).
+     * shortest interval (/64 divider on ACLK ~32 kHz -> ~2 ms).
      * start_held=0, kick_on_start=1: counter starts immediately from zero.
      */
     tiku_watchdog_config(TIKU_WDT_MODE_WATCHDOG, TIKU_WDT_SRC_ACLK,
-                         WDTIS__64, 0, 1);
+                         TIKU_WDT_INTERVAL_64, 0, 1);
 
     /* Spin until the watchdog fires the reset */
     for (;;) {

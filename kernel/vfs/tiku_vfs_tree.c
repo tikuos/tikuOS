@@ -107,9 +107,11 @@ LED_VFS_FUNCS(3)
 static int
 uptime_read(char *buf, size_t max)
 {
-    tiku_clock_time_t t = tiku_clock_time();
-    uint16_t secs = (uint16_t)(t / TIKU_CLOCK_SECOND);
-    return snprintf(buf, max, "%u\n", secs);
+    /* tiku_clock_seconds() is the 32-bit running counter. The
+     * tick value tiku_clock_time() is 16 bits and wraps every
+     * ~8.5 minutes at 128 Hz, so we cannot derive seconds from
+     * it directly. */
+    return snprintf(buf, max, "%lu\n", tiku_clock_seconds());
 }
 
 /*---------------------------------------------------------------------------*/
@@ -208,12 +210,100 @@ boot_reason_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", reset_cause_str(boot_reset_cause));
 }
 
+/*
+ * FRAM-backed monotonic boot counter.
+ *
+ * Lives in .persistent so its value survives reset, brownout, and
+ * power loss. Paired with a magic word so we can tell a virgin
+ * (or corrupted) FRAM from a real persisted count. Initialised
+ * and incremented in tiku_vfs_tree_init(); the SRAM mirror
+ * boot_count_value is what the VFS read returns so the inner
+ * loop never has to unlock the MPU.
+ */
+#define BOOT_COUNT_MAGIC  0xB007C001UL
+
+static uint32_t __attribute__((section(".persistent")))
+    boot_count_persist;
+static uint32_t __attribute__((section(".persistent")))
+    boot_count_magic;
+
 static uint32_t boot_count_value;
 
 static int
 boot_count_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n", (unsigned long)boot_count_value);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/last_reset — coarse-bucketed reset cause                              */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Map raw SYSRSTIV to one of four user-facing categories. The
+ * detailed name is still available at /sys/boot/reason; this is
+ * the field a script wants to branch on.
+ */
+static const char *
+last_reset_str(uint16_t iv)
+{
+    switch (iv) {
+    /* Watchdog: counter overflow or password violation */
+    case 0x0016: case 0x0018:
+        return "watchdog";
+    /* Power: brownout, SVS, PMM violation, FRAM power violation */
+    case 0x0002: case 0x000E: case 0x0020: case 0x001A:
+        return "power";
+    /* Software-initiated: BOR, POR, NMI from RST pin */
+    case 0x0004: case 0x0006: case 0x0014:
+        return "reboot";
+    /* Cold start (no reset cause) reported as power-on */
+    case 0x0000:
+        return "power";
+    default:
+        return "other";
+    }
+}
+
+static int
+last_reset_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", last_reset_str(boot_reset_cause));
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/cold_boots — lifetime uptime accumulator                             */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * FRAM-backed sum of uptime across every boot since the chip was
+ * first programmed. Saved lazily on every read: the persisted
+ * cell tracks lifetime within one read interval of accuracy, so a
+ * monitoring loop that polls /sys/cold_boots once a minute loses
+ * at most 60 seconds on a power-loss event between reads.
+ *
+ * Lifetime = lifetime_at_boot (snapshotted at init) + current
+ * uptime in seconds.
+ */
+static uint32_t __attribute__((section(".persistent")))
+    lifetime_seconds_persist;
+static uint32_t lifetime_at_boot;
+
+static int
+cold_boots_read(char *buf, size_t max)
+{
+    uint32_t now = (uint32_t)tiku_clock_seconds();
+    uint32_t lifetime = lifetime_at_boot + now;
+    uint16_t mpu_saved;
+
+    /* Push the freshly-computed lifetime back to FRAM so a
+     * subsequent power loss does not lose the time covered by
+     * this run. The unlock window is two store instructions. */
+    mpu_saved = tiku_mpu_unlock_nvm();
+    lifetime_seconds_persist = lifetime;
+    tiku_mpu_lock_nvm(mpu_saved);
+
+    return snprintf(buf, max, "%lu\n", (unsigned long)lifetime);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -465,13 +555,13 @@ watchdog_interval_read(char *buf, size_t max)
 {
     tiku_wdt_interval_t iv = tiku_watchdog_get_interval();
     const char *s;
-    if (iv == WDTIS__64) {
+    if (iv == TIKU_WDT_INTERVAL_64) {
         s = "64";
-    } else if (iv == WDTIS__512) {
+    } else if (iv == TIKU_WDT_INTERVAL_512) {
         s = "512";
-    } else if (iv == WDTIS__8192) {
+    } else if (iv == TIKU_WDT_INTERVAL_8192) {
         s = "8192";
-    } else if (iv == WDTIS__32768) {
+    } else if (iv == TIKU_WDT_INTERVAL_32768) {
         s = "32768";
     } else {
         s = "unknown";
@@ -490,13 +580,13 @@ watchdog_interval_write(const char *buf, size_t len)
         val = val * 10 + (uint16_t)(buf[i] - '0');
     }
     if (val == 64) {
-        iv = WDTIS__64;
+        iv = TIKU_WDT_INTERVAL_64;
     } else if (val == 512) {
-        iv = WDTIS__512;
+        iv = TIKU_WDT_INTERVAL_512;
     } else if (val == 8192) {
-        iv = WDTIS__8192;
+        iv = TIKU_WDT_INTERVAL_8192;
     } else if (val == 32768) {
-        iv = WDTIS__32768;
+        iv = TIKU_WDT_INTERVAL_32768;
     } else {
         return -1;
     }
@@ -516,6 +606,38 @@ watchdog_kick_write(const char *buf, size_t len)
     (void)len;
     tiku_watchdog_kick();
     return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/watchdog/enabled, /sys/watchdog/kicks                                */
+/*---------------------------------------------------------------------------*/
+
+static int
+watchdog_enabled_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    tiku_watchdog_is_on() ? 1u : 0u);
+}
+
+static int
+watchdog_enabled_write(const char *buf, size_t len)
+{
+    (void)len;
+    if (buf[0] == '1') {
+        tiku_watchdog_on();
+    } else if (buf[0] == '0') {
+        tiku_watchdog_off();
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
+static int
+watchdog_kicks_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)tiku_watchdog_kicks());
 }
 
 /*---------------------------------------------------------------------------*/
@@ -547,13 +669,79 @@ version_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/device                                                               */
+/* /sys/device/{name,id,mcu,version}                                         */
 /*---------------------------------------------------------------------------*/
 
+/*
+ * Device name: FRAM-backed user-set string. Reuses the
+ * BOOT_COUNT_MAGIC gate so the name is reset to its default
+ * "tiku" alongside boot_count and lifetime on a virgin FRAM.
+ * Buffer is sized to fit a typical mDNS hostname plus null.
+ */
+#define DEVICE_NAME_MAX  31
+
+static char __attribute__((section(".persistent")))
+    device_name_persist[DEVICE_NAME_MAX + 1];
+
 static int
-device_read(char *buf, size_t max)
+device_name_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", device_name_persist);
+}
+
+static int
+device_name_write(const char *buf, size_t len)
+{
+    uint16_t mpu_saved;
+    size_t i;
+    size_t copy_len;
+
+    /* Strip a trailing newline (shell typically appends one) */
+    if (len > 0 && buf[len - 1] == '\n') {
+        len--;
+    }
+
+    /* Reject empty writes — clearing the name has no use case
+     * and the read path expects a NUL-terminated string. */
+    if (len == 0) {
+        return -1;
+    }
+
+    copy_len = (len > DEVICE_NAME_MAX) ? DEVICE_NAME_MAX : len;
+
+    mpu_saved = tiku_mpu_unlock_nvm();
+    for (i = 0; i < copy_len; i++) {
+        device_name_persist[i] = buf[i];
+    }
+    device_name_persist[copy_len] = '\0';
+    tiku_mpu_lock_nvm(mpu_saved);
+
+    return 0;
+}
+
+/* Stable per-chip ID derived from the MCU's unique-device-ID
+ * registers. The first two bytes give a 4-hex-character suffix
+ * that is sufficient for distinguishing a handful of devices on
+ * the same network without dragging in a UUID library. */
+static int
+device_id_read(char *buf, size_t max)
+{
+    uint8_t id[2] = {0, 0};
+    (void)tiku_common_unique_id(id, sizeof(id));
+    return snprintf(buf, max, "tiku-%02x%02x\n",
+                    (unsigned)id[0], (unsigned)id[1]);
+}
+
+static int
+device_mcu_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%s\n", TIKU_DEVICE_NAME);
+}
+
+static int
+device_version_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", TIKU_VERSION);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -957,6 +1145,8 @@ static const tiku_vfs_node_t sys_watchdog_children[] = {
     { "clock",    TIKU_VFS_FILE, watchdog_clock_read,    watchdog_clock_write,    NULL, 0 },
     { "interval", TIKU_VFS_FILE, watchdog_interval_read, watchdog_interval_write, NULL, 0 },
     { "kick",     TIKU_VFS_FILE, NULL,                   watchdog_kick_write,     NULL, 0 },
+    { "enabled",  TIKU_VFS_FILE, watchdog_enabled_read,  watchdog_enabled_write,  NULL, 0 },
+    { "kicks",    TIKU_VFS_FILE, watchdog_kicks_read,    NULL,                    NULL, 0 },
 };
 
 static const tiku_vfs_node_t sys_htimer_children[] = {
@@ -1008,16 +1198,26 @@ static const tiku_vfs_node_t dev_spi_children[] = {
     { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0 },
 };
 
+static const tiku_vfs_node_t sys_device_children[] = {
+    { "name",    TIKU_VFS_FILE, device_name_read,    device_name_write, NULL, 0 },
+    { "id",      TIKU_VFS_FILE, device_id_read,      NULL,              NULL, 0 },
+    { "mcu",     TIKU_VFS_FILE, device_mcu_read,     NULL,              NULL, 0 },
+    { "version", TIKU_VFS_FILE, device_version_read, NULL,              NULL, 0 },
+};
+
 static const tiku_vfs_node_t sys_children[] = {
-    { "version",  TIKU_VFS_FILE, version_read, NULL, NULL, 0 },
-    { "device",   TIKU_VFS_FILE, device_read,  NULL, NULL, 0 },
-    { "uptime",   TIKU_VFS_FILE, uptime_read,  NULL, NULL, 0 },
+    { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
+    { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
+    { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0 },
+    { "boot_count", TIKU_VFS_FILE, boot_count_read, NULL, NULL, 0 },
+    { "last_reset", TIKU_VFS_FILE, last_reset_read, NULL, NULL, 0 },
+    { "cold_boots", TIKU_VFS_FILE, cold_boots_read, NULL, NULL, 0 },
     { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 4 },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
     { "power",    TIKU_VFS_DIR,  NULL, NULL, sys_power_children, 2 },
     { "timer",    TIKU_VFS_DIR,  NULL, NULL, sys_timer_children, 4 },
     { "clock",    TIKU_VFS_DIR,  NULL, NULL, sys_clock_children, 1 },
-    { "watchdog", TIKU_VFS_DIR,  NULL, NULL, sys_watchdog_children, 4 },
+    { "watchdog", TIKU_VFS_DIR,  NULL, NULL, sys_watchdog_children, 6 },
     { "htimer",   TIKU_VFS_DIR,  NULL, NULL, sys_htimer_children, 2 },
     { "boot",     TIKU_VFS_DIR,  NULL, NULL, sys_boot_children, 6 },
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
@@ -1096,18 +1296,35 @@ tiku_vfs_tree_init(void)
     boot_reset_cause = SYSRSTIV;
 #endif
 
-    /* Boot count stays 0 unless hibernate module sets it.
-     * tiku_mem_resume() requires a valid FRAM buffer and is called
-     * separately by the application if hibernate is used. */
-    boot_count_value = 0;
-
-    /* Unlock FRAM — root_children, vfs_root, and /proc/ arrays
-     * are in .persistent (FRAM) to conserve SRAM for the stack. */
+    /* Unlock FRAM — root_children, vfs_root, /proc/ arrays, and
+     * the boot-count cell are all in .persistent (FRAM) to
+     * conserve SRAM for the stack. */
     mpu_saved = tiku_mpu_unlock_nvm();
+
+    /* Bump the FRAM-backed monotonic boot counter. The magic
+     * word disambiguates a virgin (all-zero or junk) FRAM from a
+     * persisted count: on first boot we initialise to 1; on every
+     * later boot we just increment. The SRAM mirror is what the
+     * VFS read returns so the read path does not unlock the MPU. */
+    if (boot_count_magic != BOOT_COUNT_MAGIC) {
+        boot_count_persist       = 0;
+        lifetime_seconds_persist = 0;
+        /* Default device name is just "tiku"; the user can
+         * rename via /sys/device/name. */
+        device_name_persist[0] = 't';
+        device_name_persist[1] = 'i';
+        device_name_persist[2] = 'k';
+        device_name_persist[3] = 'u';
+        device_name_persist[4] = '\0';
+        boot_count_magic         = BOOT_COUNT_MAGIC;
+    }
+    boot_count_persist++;
+    boot_count_value = boot_count_persist;
+    lifetime_at_boot = lifetime_seconds_persist;
 
     /* Populate root entries */
     root_children[0] = (tiku_vfs_node_t){
-        "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 12
+        "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 15
     };
     root_children[1] = (tiku_vfs_node_t){
         "dev", TIKU_VFS_DIR, NULL, NULL, dev_children,

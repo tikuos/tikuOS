@@ -52,6 +52,13 @@ static struct {
     .kick_on_start = 1,
 };
 
+/* Observability: armed flag and kick counter. The flag tracks
+ * whether the WDT is currently armed (i.e. tiku_watchdog_off has
+ * not been called since the last init/config/on). Pause/resume do
+ * not flip it because the configuration is still in effect. */
+static volatile uint8_t  wdt_enabled;
+static volatile uint32_t wdt_kick_count;
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -65,6 +72,7 @@ void tiku_watchdog_init(void)
 {
     WDT_PRINTF("Init\n");
     tiku_watchdog_arch_on(wdt.clk, wdt.interval);
+    wdt_enabled = 1;
 }
 
 /**
@@ -103,6 +111,7 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
 void tiku_watchdog_kick(void)
 {
     tiku_watchdog_arch_kick();
+    wdt_kick_count++;
 }
 
 /**
@@ -169,4 +178,26 @@ void tiku_watchdog_off(void)
 {
     WDT_PRINTF("Disabled\n");
     tiku_watchdog_arch_off();
+    wdt_enabled = 0;
+}
+
+/**
+ * @brief Re-enable the watchdog with the most recent configuration.
+ */
+void tiku_watchdog_on(void)
+{
+    if (wdt_enabled) {
+        return;
+    }
+    tiku_watchdog_init();
+}
+
+int tiku_watchdog_is_on(void)
+{
+    return wdt_enabled != 0;
+}
+
+uint32_t tiku_watchdog_kicks(void)
+{
+    return wdt_kick_count;
 }

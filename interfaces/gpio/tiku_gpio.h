@@ -31,6 +31,7 @@
 
 #include <stdint.h>
 #include <arch/msp430/tiku_gpio_arch.h>
+#include <hal/tiku_gpio_irq_hal.h>
 
 /*---------------------------------------------------------------------------*/
 /* RETURN CODES                                                              */
@@ -115,6 +116,25 @@ static inline int tiku_gpio_read(uint8_t port, uint8_t pin)
 static inline int tiku_gpio_get_dir(uint8_t port, uint8_t pin)
 {
     return tiku_gpio_arch_get_dir(port, pin);
+}
+
+/**
+ * @brief Enable an edge interrupt on a pin.
+ *
+ * Subsequent matching edges post a TIKU_EVENT_GPIO broadcast
+ * event with port/pin packed in the data word; use
+ * TIKU_GPIO_IRQ_PORT() / TIKU_GPIO_IRQ_PIN() to decode.
+ */
+static inline int tiku_gpio_irq_enable(uint8_t port, uint8_t pin,
+                                       tiku_gpio_edge_t edge)
+{
+    return tiku_gpio_irq_arch_enable(port, pin, edge);
+}
+
+/** @brief Disable a previously enabled GPIO interrupt. */
+static inline int tiku_gpio_irq_disable(uint8_t port, uint8_t pin)
+{
+    return tiku_gpio_irq_arch_disable(port, pin);
 }
 
 #endif /* TIKU_GPIO_H_ */

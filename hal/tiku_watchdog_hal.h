@@ -34,10 +34,30 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* HAL-to-arch mapping macros                                                */
+/* HAL-NAMED INTERVAL CONSTANTS                                              */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_WDT_INTERVAL_DEFAULT   WDTIS__32768
+/*
+ * Platform-neutral aliases for the watchdog interval divider. Each
+ * resolves to the underlying device register value via the arch
+ * header included above. Kernel code should use these names instead
+ * of WDTIS__* (or any other platform-specific symbol) so that the
+ * tree compiles unchanged when ported.
+ *
+ * Interval semantics: divider applied to the WDT clock source,
+ * giving the time-to-timeout in clock ticks. Divider 32768 with a
+ * 32 768 Hz ACLK source = ~1 s timeout.
+ */
+#define TIKU_WDT_INTERVAL_64        WDTIS__64
+#define TIKU_WDT_INTERVAL_512       WDTIS__512
+#define TIKU_WDT_INTERVAL_8192      WDTIS__8192
+#define TIKU_WDT_INTERVAL_32768     WDTIS__32768
+
+#define TIKU_WDT_INTERVAL_DEFAULT   TIKU_WDT_INTERVAL_32768
+
+/*---------------------------------------------------------------------------*/
+/* HAL-to-arch mapping macros                                                */
+/*---------------------------------------------------------------------------*/
 
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_msp430_watchdog_on_arch((src), (isel))

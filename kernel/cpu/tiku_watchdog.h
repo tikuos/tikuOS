@@ -33,6 +33,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include <hal/tiku_watchdog_hal.h>
+#include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
 /* FUNCTION PROTOTYPES                                                       */
@@ -83,5 +84,28 @@ tiku_wdt_interval_t tiku_watchdog_get_interval(void);
 
 /** @brief Disable the watchdog timer entirely */
 void tiku_watchdog_off(void);
+
+/**
+ * @brief Re-enable the watchdog after tiku_watchdog_off().
+ *
+ * Reapplies the most recent configuration (mode, clock, interval).
+ * No-op if the watchdog is already on.
+ */
+void tiku_watchdog_on(void);
+
+/**
+ * @brief Return non-zero if the watchdog is currently armed.
+ *
+ * "Armed" means tiku_watchdog_off() has not been called since the
+ * last init/config/on. Pause/resume do not affect this flag.
+ */
+int tiku_watchdog_is_on(void);
+
+/**
+ * @brief Return the number of successful kicks since boot.
+ *
+ * Incremented inside tiku_watchdog_kick(). Wraps at 2^32.
+ */
+uint32_t tiku_watchdog_kicks(void);
 
 #endif /* TIKU_WATCHDOG_H_ */
