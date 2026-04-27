@@ -131,6 +131,18 @@
 #if TIKU_SHELL_CMD_CLEAR
 #include "commands/tiku_shell_cmd_clear.h"
 #endif
+#if TIKU_SHELL_CMD_DELAY
+#include "commands/tiku_shell_cmd_delay.h"
+#endif
+#if TIKU_SHELL_CMD_REPEAT
+#include "commands/tiku_shell_cmd_repeat.h"
+#endif
+#if TIKU_SHELL_CMD_PEEK || TIKU_SHELL_CMD_POKE
+#include "commands/tiku_shell_cmd_mem.h"
+#endif
+#if TIKU_SHELL_CMD_ECHO
+#include "commands/tiku_shell_cmd_echo.h"
+#endif
 #if TIKU_SHELL_CMD_ALIAS
 #include "commands/tiku_shell_cmd_alias.h"
 #include "commands/tiku_shell_cmd_unalias.h"
@@ -202,6 +214,12 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_CLEAR
     {"clear",   "Clear screen (ANSI)",         tiku_shell_cmd_clear},
+#endif
+#if TIKU_SHELL_CMD_DELAY
+    {"delay",   "Wait <ms> (no LPM)",          tiku_shell_cmd_delay},
+#endif
+#if TIKU_SHELL_CMD_REPEAT
+    {"repeat",  "Run command N times",         tiku_shell_cmd_repeat},
 #endif
 
     /* ---- Processes ---- */
@@ -279,8 +297,8 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_CAT && TIKU_SHELL_CMD_READ
     {"cat",     "Read (alias)",                tiku_shell_cmd_read},
 #endif
-#if TIKU_SHELL_CMD_ECHO && TIKU_SHELL_CMD_WRITE
-    {"echo",    "Write (alias)",               tiku_shell_cmd_write},
+#if TIKU_SHELL_CMD_ECHO
+    {"echo",    "Print arguments + newline",   tiku_shell_cmd_echo},
 #endif
 
     /* ---- Hardware ---- */
@@ -293,6 +311,12 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_I2C
     {"i2c",     "I2C scan/read/write",         tiku_shell_cmd_i2c},
+#endif
+#if TIKU_SHELL_CMD_PEEK
+    {"peek",    "Read N bytes from address",   tiku_shell_cmd_peek},
+#endif
+#if TIKU_SHELL_CMD_POKE
+    {"poke",    "Write byte to address",       tiku_shell_cmd_poke},
 #endif
 
     /* ---- Power ---- */

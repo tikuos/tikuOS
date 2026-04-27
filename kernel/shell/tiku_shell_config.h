@@ -40,37 +40,104 @@
  * @{
  */
 
-#define TIKU_SHELL_CMD_HELP   1  /**< help   - List available commands */
-#define TIKU_SHELL_CMD_PS     1  /**< ps     - List active processes */
-#define TIKU_SHELL_CMD_INFO   1  /**< info   - System overview */
-#define TIKU_SHELL_CMD_TIMER  1  /**< timer  - Software timer status */
-#define TIKU_SHELL_CMD_KILL   1  /**< kill   - Stop a process */
-#define TIKU_SHELL_CMD_RESUME 1  /**< resume - Resume a stopped process */
+/* Each flag is wrapped in #ifndef so the build system can override
+ * with -DTIKU_SHELL_CMD_X=0 (or =1) on the command line via
+ * EXTRA_CFLAGS.  The Makefile gates the matching .c on findstring
+ * checks against EXTRA_CFLAGS so the disabled command compiles to
+ * zero text. */
+#ifndef TIKU_SHELL_CMD_HELP
+#define TIKU_SHELL_CMD_HELP    1  /**< help    - List available commands */
+#endif
+#ifndef TIKU_SHELL_CMD_PS
+#define TIKU_SHELL_CMD_PS      1  /**< ps      - List active processes */
+#endif
+#ifndef TIKU_SHELL_CMD_INFO
+#define TIKU_SHELL_CMD_INFO    1  /**< info    - System overview */
+#endif
+#ifndef TIKU_SHELL_CMD_TIMER
+#define TIKU_SHELL_CMD_TIMER   1  /**< timer   - Software timer status */
+#endif
+#ifndef TIKU_SHELL_CMD_KILL
+#define TIKU_SHELL_CMD_KILL    1  /**< kill    - Stop a process */
+#endif
+#ifndef TIKU_SHELL_CMD_RESUME
+#define TIKU_SHELL_CMD_RESUME  1  /**< resume  - Resume a stopped process */
+#endif
+#ifndef TIKU_SHELL_CMD_QUEUE
 #define TIKU_SHELL_CMD_QUEUE   1  /**< queue   - List pending events */
+#endif
+#ifndef TIKU_SHELL_CMD_REBOOT
 #define TIKU_SHELL_CMD_REBOOT  1  /**< reboot  - System reset */
+#endif
+#ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
-#define TIKU_SHELL_CMD_LS     1  /**< ls     - List VFS directory contents */
-#define TIKU_SHELL_CMD_CD     1  /**< cd/pwd - Change/print working directory */
-#define TIKU_SHELL_CMD_TOGGLE 1  /**< toggle - Binary state flip via VFS */
-#define TIKU_SHELL_CMD_START  1  /**< start  - Launch/resume process by name */
-#define TIKU_SHELL_CMD_WRITE  1  /**< write  - Write value to VFS node */
-#define TIKU_SHELL_CMD_READ   1  /**< read   - Read value from VFS node */
-#define TIKU_SHELL_CMD_GPIO   1  /**< gpio   - Direct GPIO pin control */
-#define TIKU_SHELL_CMD_ADC    1  /**< adc    - Read analog channels */
-#define TIKU_SHELL_CMD_FREE   1  /**< free   - Memory usage summary */
-#define TIKU_SHELL_CMD_SLEEP  1  /**< sleep  - Enter low-power idle mode */
-#define TIKU_SHELL_CMD_WAKE   1  /**< wake   - Show active wake sources */
-#define TIKU_SHELL_CMD_NAME   1  /**< name   - Read or set device name */
-#define TIKU_SHELL_CMD_IF     1  /**< if     - Conditional VFS-driven action */
-#define TIKU_SHELL_CMD_IRQ    1  /**< irq    - Configure GPIO edge interrupt -> event */
-#define TIKU_SHELL_CMD_ALIAS  1  /**< alias  - User-defined shell shortcuts (FRAM) */
-#define TIKU_SHELL_CMD_CAT    1  /**< cat    - Alias for read */
-#define TIKU_SHELL_CMD_ECHO   1  /**< echo   - Alias for write */
-#define TIKU_SHELL_CMD_WATCH  1  /**< watch  - Periodic VFS read until Ctrl+C */
-#define TIKU_SHELL_CMD_CALC   1  /**< calc   - Integer arithmetic (+ - * / %% min max) */
-#define TIKU_SHELL_CMD_JOBS   1  /**< jobs   - Schedule periodic/one-shot commands (every/once/jobs) */
-#define TIKU_SHELL_CMD_RULES  1  /**< rules  - Reactive rules (on/rules) */
-#define TIKU_SHELL_CMD_CHANGED 1 /**< changed- Block until VFS path value changes */
+#endif
+#ifndef TIKU_SHELL_CMD_LS
+#define TIKU_SHELL_CMD_LS      1  /**< ls      - List VFS directory contents */
+#endif
+#ifndef TIKU_SHELL_CMD_CD
+#define TIKU_SHELL_CMD_CD      1  /**< cd/pwd  - Change/print working directory */
+#endif
+#ifndef TIKU_SHELL_CMD_TOGGLE
+#define TIKU_SHELL_CMD_TOGGLE  1  /**< toggle  - Binary state flip via VFS */
+#endif
+#ifndef TIKU_SHELL_CMD_START
+#define TIKU_SHELL_CMD_START   1  /**< start   - Launch/resume process by name */
+#endif
+#ifndef TIKU_SHELL_CMD_WRITE
+#define TIKU_SHELL_CMD_WRITE   1  /**< write   - Write value to VFS node */
+#endif
+#ifndef TIKU_SHELL_CMD_READ
+#define TIKU_SHELL_CMD_READ    1  /**< read    - Read value from VFS node */
+#endif
+#ifndef TIKU_SHELL_CMD_GPIO
+#define TIKU_SHELL_CMD_GPIO    1  /**< gpio    - Direct GPIO pin control */
+#endif
+#ifndef TIKU_SHELL_CMD_ADC
+#define TIKU_SHELL_CMD_ADC     1  /**< adc     - Read analog channels */
+#endif
+#ifndef TIKU_SHELL_CMD_FREE
+#define TIKU_SHELL_CMD_FREE    1  /**< free    - Memory usage summary */
+#endif
+#ifndef TIKU_SHELL_CMD_SLEEP
+#define TIKU_SHELL_CMD_SLEEP   1  /**< sleep   - Enter low-power idle mode */
+#endif
+#ifndef TIKU_SHELL_CMD_WAKE
+#define TIKU_SHELL_CMD_WAKE    1  /**< wake    - Show active wake sources */
+#endif
+#ifndef TIKU_SHELL_CMD_NAME
+#define TIKU_SHELL_CMD_NAME    1  /**< name    - Read or set device name */
+#endif
+#ifndef TIKU_SHELL_CMD_IF
+#define TIKU_SHELL_CMD_IF      1  /**< if      - Conditional VFS-driven action */
+#endif
+#ifndef TIKU_SHELL_CMD_IRQ
+#define TIKU_SHELL_CMD_IRQ     1  /**< irq     - GPIO edge interrupt -> event */
+#endif
+#ifndef TIKU_SHELL_CMD_ALIAS
+#define TIKU_SHELL_CMD_ALIAS   1  /**< alias   - FRAM-backed shell shortcuts */
+#endif
+#ifndef TIKU_SHELL_CMD_CAT
+#define TIKU_SHELL_CMD_CAT     1  /**< cat     - Alias for read */
+#endif
+#ifndef TIKU_SHELL_CMD_ECHO
+#define TIKU_SHELL_CMD_ECHO    1  /**< echo    - Print arguments + newline */
+#endif
+#ifndef TIKU_SHELL_CMD_WATCH
+#define TIKU_SHELL_CMD_WATCH   1  /**< watch   - Periodic VFS read until Ctrl+C */
+#endif
+#ifndef TIKU_SHELL_CMD_CALC
+#define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
+#endif
+#ifndef TIKU_SHELL_CMD_JOBS
+#define TIKU_SHELL_CMD_JOBS    1  /**< jobs    - every/once/jobs */
+#endif
+#ifndef TIKU_SHELL_CMD_RULES
+#define TIKU_SHELL_CMD_RULES   1  /**< rules   - on/rules */
+#endif
+#ifndef TIKU_SHELL_CMD_CHANGED
+#define TIKU_SHELL_CMD_CHANGED 1  /**< changed - Block until VFS value changes */
+#endif
 /* I2C is opt-in: it pulls in tiku_i2c_bus and arch driver, which
  * together cost ~1.4 KB of FRAM.  The default FR5969 shell build
  * already sits at ~44 KB of the 48 KB FRAM cap, so enabling I2C
@@ -86,8 +153,36 @@
 #ifndef TIKU_SHELL_CMD_I2C
 #define TIKU_SHELL_CMD_I2C    0  /**< i2c    - Bus scan / read / write */
 #endif
+#ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
+#endif
+#ifndef TIKU_SHELL_CMD_CLEAR
 #define TIKU_SHELL_CMD_CLEAR  1  /**< clear  - ANSI clear screen */
+#endif
+
+/* Scripting and debugging extras: enabled per-build via EXTRA_CFLAGS
+ * because the default FR5969 shell already sits ~250 B from the
+ * 48 KB FRAM cap.  Pick the combination you need; multiple flags
+ * are independent.  Example:
+ *   make MCU=msp430fr5969 TIKU_SHELL_ENABLE=1 \
+ *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_DELAY=1 -DTIKU_SHELL_CMD_REPEAT=1"
+ *
+ * To enable the larger ones (peek/poke/i2c), pair them with a
+ * disable of a comparable existing command, e.g.
+ *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_PEEK=1 -DTIKU_SHELL_CMD_POKE=1 -DTIKU_SHELL_CMD_HISTORY=0"
+ */
+#ifndef TIKU_SHELL_CMD_DELAY
+#define TIKU_SHELL_CMD_DELAY  0  /**< delay  - Synchronous ms wait */
+#endif
+#ifndef TIKU_SHELL_CMD_REPEAT
+#define TIKU_SHELL_CMD_REPEAT 0  /**< repeat - Run command N times */
+#endif
+#ifndef TIKU_SHELL_CMD_PEEK
+#define TIKU_SHELL_CMD_PEEK   0  /**< peek   - Read raw memory */
+#endif
+#ifndef TIKU_SHELL_CMD_POKE
+#define TIKU_SHELL_CMD_POKE   0  /**< poke   - Write raw memory */
+#endif
 #ifndef TIKU_SHELL_CMD_INIT
 #define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - FRAM boot entries */
 #endif

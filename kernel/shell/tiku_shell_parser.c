@@ -34,7 +34,10 @@
 
 #include "tiku_shell_parser.h"
 #include "tiku_shell_io.h"       /* SHELL_PRINTF */
+#include "tiku_shell_config.h"
+#if TIKU_SHELL_CMD_ALIAS
 #include "tiku_shell_alias.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -42,10 +45,12 @@
 
 static const tiku_shell_cmd_t *cmd_table = (void *)0;
 
+#if TIKU_SHELL_CMD_ALIAS
 /* Bounds nested alias dispatch (alias-of-alias). Two-deep covers
  * realistic compositions; deeper nests reject cleanly. */
 #define ALIAS_DEPTH_MAX 4
 static uint8_t alias_depth;
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE HELPERS                                                           */
@@ -68,6 +73,7 @@ cli_strcmp(const char *a, const char *b)
 /* Forward decl for mutual recursion in the alias path. */
 static void execute_one(char *line);
 
+#if TIKU_SHELL_CMD_ALIAS
 /* Dispatch an alias body. Splits on ';' and recursively calls
  * the parser for each piece, with a depth guard. The body buffer
  * is mutated in place. */
@@ -114,6 +120,7 @@ dispatch_alias_body(const char *body)
 
     alias_depth--;
 }
+#endif /* TIKU_SHELL_CMD_ALIAS */
 
 /* Tokenise + dispatch one command line (no ';' handling here). */
 static void
@@ -123,7 +130,9 @@ execute_one(char *line)
     uint8_t argc = 0;
     char *p = line;
     const tiku_shell_cmd_t *cmd;
+#if TIKU_SHELL_CMD_ALIAS
     const char *alias_body;
+#endif
 
     if (!cmd_table) {
         return;
@@ -161,12 +170,14 @@ execute_one(char *line)
         }
     }
 
+#if TIKU_SHELL_CMD_ALIAS
     /* ---- Fall through to the alias table ---- */
     alias_body = tiku_shell_alias_lookup(argv[0]);
     if (alias_body != (const char *)0) {
         dispatch_alias_body(alias_body);
         return;
     }
+#endif
 
     SHELL_PRINTF("Unknown command: %s\n", argv[0]);
     SHELL_PRINTF("Type 'help' for a list of commands.\n");
