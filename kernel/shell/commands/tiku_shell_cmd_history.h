@@ -42,6 +42,16 @@
 void tiku_shell_history_record(const char *line);
 
 /**
+ * @brief Look up a command from the history ring by age.
+ *
+ * @param age  0 = most recent command, 1 = next most recent, ...,
+ *             up to (count - 1) = oldest stored command.
+ * @return Pointer to the FRAM-backed NUL-terminated history line, or
+ *         NULL if @p age is out of range.
+ */
+const char *tiku_shell_history_get(uint8_t age);
+
+/**
  * @brief "history" command handler — print the last N commands.
  *
  * Usage: history [N]

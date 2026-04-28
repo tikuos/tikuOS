@@ -133,6 +133,21 @@ tiku_shell_jobs_del(uint8_t id)
     return 0;
 }
 
+uint8_t
+tiku_shell_jobs_clear(void)
+{
+    uint8_t n = 0;
+    uint8_t i;
+
+    for (i = 0; i < TIKU_SHELL_JOBS_MAX; i++) {
+        if (job_table[i].type != TIKU_SHELL_JOB_FREE) {
+            job_table[i].type = TIKU_SHELL_JOB_FREE;
+            n++;
+        }
+    }
+    return n;
+}
+
 int8_t
 tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
                                const char *argv[])

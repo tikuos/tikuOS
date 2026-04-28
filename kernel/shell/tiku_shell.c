@@ -395,8 +395,54 @@ tiku_shell_cmd_help(uint8_t argc, const char *argv[])
 static struct {
     char               buf[TIKU_SHELL_LINE_SIZE];
     uint8_t            pos;
-    struct tiku_timer  timer;    /* periodic I/O poll */
+    uint8_t            esc_state;   /* 0=normal, 1=ESC, 2=ESC[ */
+    int8_t             hist_age;    /* -1 = not recalling */
+    struct tiku_timer  timer;       /* periodic I/O poll */
 } cli;
+
+#if TIKU_SHELL_CMD_HISTORY
+/**
+ * @brief Up/down arrow handler.
+ *
+ * @p up != 0 walks towards older entries; up == 0 walks towards newer.
+ * Past the newest, the line is cleared.  Past the oldest is a no-op.
+ * Uses raw putc to avoid pulling SHELL_PRINTF into the recall path —
+ * the FR5969 default build sits very close to the lower-FRAM cap.
+ */
+static void
+shell_history_arrow(uint8_t up)
+{
+    int8_t      age;
+    const char *line;
+
+    if (up) {
+        age = (cli.hist_age < 0) ? 0 : (int8_t)(cli.hist_age + 1);
+    } else {
+        age = (cli.hist_age <= 0) ? -1 : (int8_t)(cli.hist_age - 1);
+    }
+    line = (age < 0) ? (const char *)0
+                     : tiku_shell_history_get((uint8_t)age);
+    if (up && line == (const char *)0) {
+        return;                          /* no older entry */
+    }
+
+    while (cli.pos > 0) {
+        tiku_shell_io_putc('\b');
+        tiku_shell_io_putc(' ');
+        tiku_shell_io_putc('\b');
+        cli.pos--;
+    }
+    while (line != (const char *)0 && *line != '\0' &&
+           cli.pos < TIKU_SHELL_LINE_SIZE - 1) {
+        cli.buf[cli.pos] = *line;
+        tiku_shell_io_putc(*line);
+        cli.pos++;
+        line++;
+    }
+    cli.buf[cli.pos] = '\0';
+    cli.hist_age     = age;
+}
+#endif /* TIKU_SHELL_CMD_HISTORY */
 
 /** The CLI shell process (registered as "CLI" in the process table). */
 TIKU_PROCESS(tiku_shell_process, "CLI");
@@ -438,7 +484,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #if TIKU_SHELL_CMD_RULES
     tiku_shell_rules_init();
 #endif
-    cli.pos = 0;
+    cli.pos       = 0;
+    cli.esc_state = 0;
+    cli.hist_age  = -1;
 
 #if TIKU_SHELL_TCP_ENABLE
     tiku_shell_io_tcp_init();
@@ -511,6 +559,29 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 break;
             }
 
+            /* ANSI CSI arrow-key sequence: ESC [ A/B/C/D.
+             * State 1 = saw ESC, state 2 = saw ESC[. */
+            if (cli.esc_state == 1) {
+                cli.esc_state = (ch == '[') ? 2 : 0;
+                continue;
+            }
+            if (cli.esc_state == 2) {
+#if TIKU_SHELL_CMD_HISTORY
+                if (ch == 'A') {
+                    shell_history_arrow(1);     /* up */
+                } else if (ch == 'B') {
+                    shell_history_arrow(0);     /* down */
+                }
+                /* Right (C) and left (D) ignored — no in-line cursor. */
+#endif
+                cli.esc_state = 0;
+                continue;
+            }
+            if (ch == 0x1B) {
+                cli.esc_state = 1;
+                continue;
+            }
+
             if (ch == '\r' || ch == '\n') {
                 /* End of line — parse and dispatch */
                 SHELL_PRINTF("\n");
@@ -521,7 +592,8 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
                     tiku_shell_parser_execute(cli.buf);
                 }
-                cli.pos = 0;
+                cli.pos      = 0;
+                cli.hist_age = -1;
                 SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
 
             } else if (ch == '\b' || ch == 127) {
@@ -533,8 +605,24 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                     }
                 }
 
+            } else if (ch == 0x03) {
+                /* Ctrl+C — cancel auto-firing jobs/rules, abort the
+                 * current line, and reprint the prompt.  The escape
+                 * hatch when an `every` job is flooding the shell. */
+#if TIKU_SHELL_CMD_JOBS
+                tiku_shell_jobs_clear();
+#endif
+#if TIKU_SHELL_CMD_RULES
+                tiku_shell_rules_clear();
+#endif
+                cli.pos      = 0;
+                cli.hist_age = -1;
+                SHELL_PRINTF("^C\n" SH_GREEN SH_BOLD "tikuOS> " SH_RST);
+
             } else if (cli.pos < TIKU_SHELL_LINE_SIZE - 1) {
-                /* Printable character — store and optionally echo */
+                /* Printable character — store and optionally echo.
+                 * Typing past a recalled line exits recall mode. */
+                cli.hist_age = -1;
                 cli.buf[cli.pos++] = (char)ch;
                 if (tiku_shell_io_has_echo()) {
                     tiku_shell_io_putc((char)ch);

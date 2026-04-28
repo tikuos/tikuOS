@@ -237,6 +237,21 @@ tiku_shell_rules_del(uint8_t id)
     return 0;
 }
 
+uint8_t
+tiku_shell_rules_clear(void)
+{
+    uint8_t n = 0;
+    uint8_t i;
+
+    for (i = 0; i < TIKU_SHELL_RULES_MAX; i++) {
+        if (rule_table[i].state != TIKU_SHELL_RULE_FREE) {
+            rule_table[i].state = TIKU_SHELL_RULE_FREE;
+            n++;
+        }
+    }
+    return n;
+}
+
 const tiku_shell_rule_t *
 tiku_shell_rules_get(uint8_t id)
 {

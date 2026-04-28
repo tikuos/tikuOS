@@ -203,6 +203,13 @@ tiku_shell_cmd_jobs(uint8_t argc, const char *argv[])
 
     if (argc == 3 && strcmp(argv[1], "del") == 0) {
         uint16_t id;
+
+        if (strcmp(argv[2], "all") == 0) {
+            uint8_t n = tiku_shell_jobs_clear();
+            SHELL_PRINTF("Deleted %u job%s\n",
+                         (unsigned)n, n == 1 ? "" : "s");
+            return;
+        }
         if (!jobs_parse_id(argv[2], &id) || id >= TIKU_SHELL_JOBS_MAX) {
             SHELL_PRINTF("jobs: invalid id '%s'\n", argv[2]);
             return;
@@ -217,4 +224,5 @@ tiku_shell_cmd_jobs(uint8_t argc, const char *argv[])
 
     SHELL_PRINTF("Usage: jobs              List scheduled jobs\n");
     SHELL_PRINTF("       jobs del <id>     Delete job by id\n");
+    SHELL_PRINTF("       jobs del all      Delete every job\n");
 }

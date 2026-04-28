@@ -179,6 +179,20 @@ tiku_shell_history_record(const char *line)
     tiku_mpu_lock_nvm(saved);
 }
 
+const char *
+tiku_shell_history_get(uint8_t age)
+{
+    uint8_t idx;
+
+    hist_ensure_init();
+    if (age >= hist.count) {
+        return NULL;
+    }
+    idx = (hist.head + TIKU_SHELL_HISTORY_DEPTH - 1 - age)
+          % TIKU_SHELL_HISTORY_DEPTH;
+    return hist.ring[idx].line;
+}
+
 void
 tiku_shell_cmd_history(uint8_t argc, const char *argv[])
 {

@@ -115,6 +115,13 @@ int8_t tiku_shell_jobs_add(tiku_shell_job_type_t type,
 int8_t tiku_shell_jobs_del(uint8_t id);
 
 /**
+ * @brief Free every active job slot.
+ *
+ * @return Number of slots that were active and have been freed.
+ */
+uint8_t tiku_shell_jobs_clear(void);
+
+/**
  * @brief Read-only inspection of a job slot.
  * @return Pointer to the job, or NULL if the slot is free or invalid.
  */

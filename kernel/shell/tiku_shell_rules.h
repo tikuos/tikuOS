@@ -135,6 +135,13 @@ int8_t tiku_shell_rules_add(const char *path,
 int8_t tiku_shell_rules_del(uint8_t id);
 
 /**
+ * @brief Free every active rule slot.
+ *
+ * @return Number of slots that were active and have been freed.
+ */
+uint8_t tiku_shell_rules_clear(void);
+
+/**
  * @brief Read-only inspection of a rule slot.
  * @return Pointer to the rule, or NULL if the slot is free or invalid.
  */
