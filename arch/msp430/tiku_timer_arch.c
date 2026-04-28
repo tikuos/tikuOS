@@ -226,13 +226,18 @@ void tiku_clock_arch_init(void)
 
     __set_interrupt_state(state);
 
-    /* Timer counter runs independently of GIE — verify it's ticking */
+    /* Timer counter runs independently of GIE — verify it's ticking.
+     * The reads are kept (not behind DEBUG_RTIMER) because tearing them
+     * out changes the post-init timing window; (void) suppresses the
+     * unused-variable warning when CLOCK_PRINTF expands to nothing. */
     unsigned short tar1 = TA0R;
     __delay_cycles(10000);
     unsigned short tar2 = TA0R;
 
     CLOCK_PRINTF("Timer verification: TAR changed from %d to %d\n",
                  tar1, tar2);
+    (void)tar1;
+    (void)tar2;
 }
 
 /*---------------------------------------------------------------------------*/

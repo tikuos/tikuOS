@@ -48,6 +48,15 @@ make MCU=msp430fr5969 HAS_EXAMPLES=1        # shell + examples
 make clean MCU=msp430fr5969                 # wipe build artifacts
 ```
 
+`MEMORY_MODEL=small` is the default — text and rodata fit in the lower-FRAM
+region (0x4400–0xFF7F, ~48 KB) and ISRs in the 0xFF80 vector table reach
+their handlers via 16-bit pointers. There is an experimental
+`MEMORY_MODEL=large` path (`-mlarge -mcode-region=either -mdata-region=either`)
+that unlocks the chip's full 64 KB FRAM, but it currently requires every
+ISR to carry an explicit `__attribute__((lower))` so the vector table can
+still reach them — without that audit, large mode boots into a non-
+responsive state. Treat as experimental until the ISR pass lands.
+
 Convenience targets defined in the root `Makefile`:
 
 ```bash
@@ -383,9 +392,9 @@ Available only when `TIKU_INIT_ENABLE=1` (off by default).
 
 ## Opt-in Commands
 
-Disabled by default to keep the FR5969 build under the 48 KB FRAM cap.
+Disabled by default to keep the FR5969 build under the 48 KB lower-FRAM cap.
 Enable via `EXTRA_CFLAGS="-DTIKU_SHELL_CMD_<NAME>=1"`. The larger ones
-(`i2c`, `peek`, `poke`) need a paired disable of a comparable command.
+(`i2c`, `peek`, `poke`, `if`) need a paired disable of a comparable command.
 
 | Command  | Flag                        | Usage                                    |
 |----------|-----------------------------|------------------------------------------|
@@ -586,6 +595,14 @@ their 16-bit relocations cannot reach, and the link fails with
 shell turns **`if` off** — its 1 KB of code is replaced for most workflows
 by `on` (rules), which is far more powerful (edge-triggered, persistent
 across the tick).
+
+The chip itself has 64 KB of FRAM (lower 48 KB at 0x4400 + upper 16 KB at
+0x10000). Unlocking the upper region needs `MEMORY_MODEL=large`
+(`-mlarge -mcode-region=either -mdata-region=either`) **plus** an
+`__attribute__((lower))` audit of every ISR — without that, ISRs can be
+linked into HIFRAM where the 0xFF80 vector table's 16-bit pointers
+truncate them and the device boots into a non-responsive state. Treat the
+large-mode build as experimental until that audit lands.
 
 Adjust the recipe with `EXTRA_CFLAGS`:
 

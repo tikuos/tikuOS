@@ -109,9 +109,9 @@
 #define TIKU_SHELL_CMD_NAME    1  /**< name    - Read or set device name */
 #endif
 /* `if` is opt-in: it costs ~1 KB of FRAM, and the default FR5969 build
- * sits within a few hundred bytes of the 48 KB lower-FRAM cap once
- * arrow-key history navigation is included.  `on` (rules) covers most
- * interactive use cases.  Re-enable with
+ * (MEMORY_MODEL=small) sits within a few hundred bytes of the 48 KB
+ * lower-FRAM cap once arrow-key history navigation is included.  `on`
+ * (rules) covers most interactive use cases.  Re-enable with
  *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_IF=1"
  * paired with a comparable disable (e.g. -DTIKU_SHELL_CMD_CALC=0). */
 #ifndef TIKU_SHELL_CMD_IF

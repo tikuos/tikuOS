@@ -111,11 +111,33 @@ HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 
 # ---------------------------------------------------------------------------
+# Memory model
+#
+# Default is the small 16-bit model: code and data live in the lower-FRAM
+# region (0x4400–0xFF7F on FR5969 — about 48 KB).  This is the only safe
+# default today because MSP430 interrupt vectors at 0xFF80 are 16-bit, so
+# any ISR that drifts into HIFRAM via -mcode-region=either gets its address
+# truncated and the vector points to garbage — boot may complete but the
+# timer / UART RX interrupts stop firing.
+#
+# Passing MEMORY_MODEL=large enables -mlarge + -mcode-region=either +
+# -mdata-region=either so the linker can place text/rodata anywhere in
+# the chip's full 64 KB.  Use only after auditing every ISR (TIKU_ISR
+# macro sites) for an explicit `__attribute__((lower))` so the vector
+# table can still reach them.  Until that audit is done, treat large
+# mode as experimental.
+# ---------------------------------------------------------------------------
+MEMORY_MODEL ?= small
+
+# ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -DPLATFORM_MSP430=1
+ifeq ($(MEMORY_MODEL),large)
+CFLAGS += -mlarge -mcode-region=either -mdata-region=either
+endif
 CFLAGS += -I$(TOOLCHAIN_DIR)/include
 ifneq ($(MSP430_SUPPORT_DIR),)
 CFLAGS += -I$(MSP430_SUPPORT_DIR)
@@ -145,6 +167,9 @@ CFLAGS += -DHAS_TIKUKITS=1
 endif
 
 LDFLAGS  = -mmcu=$(MCU)
+ifeq ($(MEMORY_MODEL),large)
+LDFLAGS += -mlarge -mcode-region=either -mdata-region=either
+endif
 LDFLAGS += -L$(TOOLCHAIN_DIR)/include
 ifneq ($(MSP430_SUPPORT_DIR),)
 LDFLAGS += -L$(MSP430_SUPPORT_DIR)
