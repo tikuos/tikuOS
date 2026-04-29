@@ -29,8 +29,6 @@
 | Board | MCU | RAM | FRAM | Status |
 |-------|-----|-----|------|--------|
 | MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | :green_circle: Primary |
-| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB | :yellow_circle: Supported |
-| MSP-EXP430FR2433 LaunchPad | MSP430FR2433 | 4 KB | 16 KB | :yellow_circle: Supported |
 
 ---
 
@@ -406,7 +404,7 @@ tikuOS> cat /sys/cpu/freq
 | `TIKU_INIT_ENABLE=1` | Enable FRAM-backed init system (implies shell) |
 | `TIKU_SHELL_COLOR=1` | Enable ANSI color output (banner, prompt, help, free) |
 | `UART_BAUD=115200` | Set UART baud rate (default 9600) |
-| `MCU=msp430fr5969` | Target MCU (fr5969, fr5994, fr2433) |
+| `MCU=msp430fr5969` | Target MCU |
 
 ```bash
 # Shell with color output
