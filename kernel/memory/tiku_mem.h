@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.02
+ * Tiku Operating System v0.03
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *

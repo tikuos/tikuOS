@@ -159,8 +159,12 @@
 #ifndef TIKU_SHELL_CMD_I2C
 #define TIKU_SHELL_CMD_I2C    0  /**< i2c    - Bus scan / read / write */
 #endif
+#ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
+#endif
+#ifndef TIKU_SHELL_CMD_CLEAR
 #define TIKU_SHELL_CMD_CLEAR  1  /**< clear  - ANSI clear screen */
+#endif
 
 /* Scripting and debugging extras: enabled per-build via EXTRA_CFLAGS
  * because the default FR5969 shell already sits ~250 B from the

@@ -57,7 +57,7 @@ TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins,
   ___ _ _         ___  ___
  |_ _|_) |_ _  _/ _ \/ __|
   | || | / / || | (_) \__ \
-  |_||_|_\_\\_,_|\___/|___/  v0.02
+  |_||_|_\_\\_,_|\___/|___/  v0.03
   Simple. Ubiquitous. Intelligence, Everywhere.
 
   MSP430FR5969  |  SRAM 2048B  FRAM 64KB
