@@ -14,7 +14,7 @@
   <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
   <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430FR-red?style=flat-square" alt="MCU"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
-  <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-22%20commands-orange?style=flat-square" alt="Shell"></a>
+  <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-38%20commands-orange?style=flat-square" alt="Shell"></a>
   <a href="http://tiku-os.org"><img src="https://img.shields.io/badge/web-tiku--os.org-purple?style=flat-square" alt="Website"></a>
 </p>
 
@@ -70,6 +70,8 @@ tikuOS> help
   free       Memory usage (SRAM/FRAM)
   reboot     System reset
   history    Last N commands from FRAM
+  calc       Integer arithmetic
+  clear      Clear screen (ANSI)
  --- Processes ---
   ps         List active processes
   start      Start/resume by name
@@ -77,15 +79,27 @@ tikuOS> help
   resume     Resume a stopped process
   queue      List pending events
   timer      Software timer status
+  every      Schedule a recurring command
+  once       Schedule a one-shot command
+  jobs       List/delete scheduled jobs
+  on         Register a reactive rule
+  rules      List/delete reactive rules
  --- Filesystem ---
   ls         List directory
+  tree       Recursive directory listing
   cd         Change directory
   pwd        Print working directory
   read       Read a VFS node
+  watch      Read VFS node every N sec
+  changed    Block until VFS node changes
   write      Write a VFS node
+  name       Read/set device name
+  irq        Enable/disable GPIO edge IRQ
+  alias      Define/list FRAM-backed aliases
+  unalias    Remove an alias
   toggle     Flip a binary VFS node
   cat        Read (alias)
-  echo       Write (alias)
+  echo       Print arguments + newline
  --- Hardware ---
   gpio       Read/write GPIO pins
   adc        Read analog channel
@@ -95,6 +109,11 @@ tikuOS> help
  --- Boot ---
   init       Manage FRAM boot entries
 ```
+
+> :bulb: Opt-in extras (off by default; enable via `EXTRA_CFLAGS`): `if`
+> (conditional), `i2c` (bus scan/read/write), `delay`, `repeat`, `peek`,
+> `poke`. See `kernel/shell/tiku_shell_config.h` for the full list and
+> rationale (each has a FRAM cost on FR5969).
 
 > :art: Build with `TIKU_SHELL_COLOR=1` for ANSI colored output (cyan logo, green prompt, categorized help). Add a screenshot from picocom here.
 
@@ -216,8 +235,12 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 ```
 /
 ├── sys/
-│   ├── version              "0.02"
-│   ├── device               "MSP430FR5969"
+│   ├── version              "0.03"
+│   ├── device/
+│   │   ├── name             user-set device name (FRAM-backed, R/W)
+│   │   ├── id               unique tiku-XXXX hostname-style ID
+│   │   ├── mcu              silicon part number ("MSP430FR5969")
+│   │   └── version          OS version string
 │   ├── uptime               seconds since boot
 │   ├── mem/
 │   │   ├── sram             RAM size in bytes
@@ -297,10 +320,13 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 
 ```
 tikuOS> cat /sys/version
-0.01
+0.03
 
-tikuOS> cat /sys/device
+tikuOS> cat /sys/device/mcu
 MSP430FR5969
+
+tikuOS> cat /sys/device/name
+tiku
 
 tikuOS> cat /sys/mem/free
 752
