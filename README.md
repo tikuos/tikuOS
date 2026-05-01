@@ -29,7 +29,12 @@
 | Board | MCU | RAM | FRAM | Notable | Status |
 |-------|-----|-----|------|---------|--------|
 | MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | — | :green_circle: Primary |
-| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB | On-board FH-1138P 96-segment LCD | :green_circle: Full |
+| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
+
+Both LaunchPads pass the full TikuBench suite (kernel, regression,
+shell, VFS, LED) with every firmware-side assertion green. See
+[`TikuBench/tikubench/README.md`](TikuBench/tikubench/README.md)
+for the per-platform runbook.
 
 ---
 
