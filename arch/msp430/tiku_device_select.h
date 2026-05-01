@@ -40,6 +40,8 @@
 #define TIKU_DEVICE_MSP430FR5969 1
 #elif defined(__MSP430FR5994__) && !defined(TIKU_DEVICE_MSP430FR5994)
 #define TIKU_DEVICE_MSP430FR5994 1
+#elif defined(__MSP430FR6989__) && !defined(TIKU_DEVICE_MSP430FR6989)
+#define TIKU_DEVICE_MSP430FR6989 1
 #elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
 #define TIKU_DEVICE_MSP430FR2433 1
 #endif
@@ -57,6 +59,11 @@
 
 #include <arch/msp430/devices/tiku_device_fr5994.h>
 #include <arch/msp430/boards/tiku_board_fr5994_launchpad.h>
+
+#elif defined(TIKU_DEVICE_MSP430FR6989)
+
+#include <arch/msp430/devices/tiku_device_fr6989.h>
+#include <arch/msp430/boards/tiku_board_fr6989_launchpad.h>
 
 #elif defined(TIKU_DEVICE_MSP430FR2433)
 

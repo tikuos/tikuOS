@@ -1,6 +1,6 @@
 # TikuOS Core API Reference
 
-**Version 0.01**
+**Version 0.03**
 
 This document covers the core kernel API surface. All declarations live in the
 headers listed below; include `tiku.h` to pull in the full platform
@@ -725,7 +725,11 @@ API (`tiku_vfs_read`, `tiku_vfs_write`).
 /
 ├── sys/
 │   ├── version              r-   OS version string
-│   ├── device               r-   MCU name
+│   ├── device/
+│   │   ├── name             rw   user-set device name (FRAM-backed)
+│   │   ├── id               r-   tiku-XXXX hostname-style unique ID
+│   │   ├── mcu              r-   silicon part number ("MSP430FR5969")
+│   │   └── version          r-   OS version string
 │   ├── uptime               r-   seconds since boot
 │   ├── mem/
 │   │   ├── sram             r-   RAM size in bytes
@@ -875,8 +879,8 @@ Invalid values are rejected (write returns -1, shell shows "cannot write").
 | `cat <path>` | `tiku_vfs_read()` | `cat /sys/uptime` — prints seconds since boot |
 | `read <path>` | `tiku_vfs_read()` | Alias for `cat` |
 | `write <path> <value>` | `tiku_vfs_write()` | `write /dev/led0 1` — turn on LED |
-| `echo <path> <value>` | `tiku_vfs_write()` | Alias for `write` |
 | `toggle <path>` | read, flip, write | `toggle /dev/led0` — toggle a binary node |
+| `echo <args...>` | (no VFS op) | Print arguments + newline (Unix-style; **not** a VFS write) |
 | `cd <path>` | set working directory | `cd /sys/mem` then `cat free` |
 
 ### Testing

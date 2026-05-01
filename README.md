@@ -26,9 +26,10 @@
 
 ## Supported Boards
 
-| Board | MCU | RAM | FRAM | Status |
-|-------|-----|-----|------|--------|
-| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | :green_circle: Primary |
+| Board | MCU | RAM | FRAM | Notable | Status |
+|-------|-----|-----|------|---------|--------|
+| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | — | :green_circle: Primary |
+| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB | On-board FH-1138P 96-segment LCD | :green_circle: Full |
 
 ---
 
@@ -37,9 +38,11 @@
 ```bash
 # Build for a specific target
 make MCU=msp430fr5969
+make MCU=msp430fr6989 MEMORY_MODEL=large   # FR6989 needs large mode for HIFRAM
 
 # Build and flash
 make flash MCU=msp430fr5969
+make flash MCU=msp430fr6989 MEMORY_MODEL=large
 
 # Open serial monitor
 make monitor
@@ -404,7 +407,8 @@ tikuOS> cat /sys/cpu/freq
 | `TIKU_INIT_ENABLE=1` | Enable FRAM-backed init system (implies shell) |
 | `TIKU_SHELL_COLOR=1` | Enable ANSI color output (banner, prompt, help, free) |
 | `UART_BAUD=115200` | Set UART baud rate (default 9600) |
-| `MCU=msp430fr5969` | Target MCU |
+| `MCU=msp430fr5969` | Target MCU (also `msp430fr6989`) |
+| `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement (required on FR6989 for builds with examples + tikukits) |
 
 ```bash
 # Shell with color output

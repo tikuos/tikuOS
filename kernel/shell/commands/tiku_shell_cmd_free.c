@@ -112,9 +112,23 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     (void)argv;
 
     sram_total = (uint16_t)TIKU_DEVICE_RAM_SIZE;
-    fram_total = (uint16_t)(TIKU_DEVICE_FRAM_SIZE > 0xFFFFUL
-                            ? 0xFFFFU
-                            : TIKU_DEVICE_FRAM_SIZE);
+
+    /*
+     * fram_total is the size of the lower-FRAM 16-bit window
+     * (FRAM_START..FRAM_END), not the chip's whole FRAM. The
+     * fram_code / fram_data rows below measure against this same
+     * window — using TIKU_DEVICE_FRAM_SIZE here would over-report
+     * on parts with HIFRAM (FR5994, FR6989) and the rows would
+     * stop reconciling. On those parts the upper bank is reachable
+     * only via TIKU_HIFRAM* + MEMORY_MODEL=large and is reported
+     * as a separate line below when present.
+     *
+     * The "+ 1U" wraps in uint16 (FRAM_END is 0xFFFF on most parts),
+     * so the subtraction is computed modulo 2^16 — which gives the
+     * correct lower-window size as long as FRAM_END == 0xFFFF.
+     */
+    fram_total = (uint16_t)(TIKU_DEVICE_FRAM_END + 1U
+                            - TIKU_DEVICE_FRAM_START);
     sram_static = (uint16_t)((uintptr_t)&_end - (uintptr_t)&__datastart);
 
     {
@@ -132,15 +146,31 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5u total\n", sram_total);
     SHELL_PRINTF("  .data+.bss  %5u\n", sram_static);
-    SHELL_PRINTF("  reservd     %5u\n",
+    /* What's left of SRAM after static data: hosts the stack and any
+     * future heap. Not "reserved" in any protective sense — it's the
+     * available pool. Stack-now / free-now under "Runtime" below
+     * partition this number. */
+    SHELL_PRINTF("  stack+free  %5u\n",
                  sram_total - sram_static);
 
-    SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "  %5u total\n", fram_total);
+    SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "  %5u total (lower window)\n",
+                 fram_total);
     SHELL_PRINTF("  code        %5u\n", fram_code);
     SHELL_PRINTF("  const/data  %5u\n", fram_data);
     SHELL_PRINTF("  unallocd    %5u\n",
                  fram_total > (fram_data + fram_code)
                  ? fram_total - fram_data - fram_code : 0);
+#if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
+    /*
+     * Parts with a separate upper FRAM bank (FR5994, FR6989). The
+     * size is > 64 KB so it must be printed via %lu. The kernel can
+     * only place data here under MEMORY_MODEL=large; under the
+     * default small model this region is reserved but unused.
+     */
+    SHELL_PRINTF("  hifram      %5lu (upper bank, large-model only)\n",
+                 (unsigned long)(TIKU_DEVICE_HIFRAM_END
+                                 - TIKU_DEVICE_HIFRAM_START + 1UL));
+#endif
 
     /* ---- Runtime (changes dynamically) ---- */
     SHELL_PRINTF(SH_GREEN "--- Runtime ---" SH_RST "\n");

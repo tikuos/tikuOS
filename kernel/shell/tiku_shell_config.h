@@ -129,6 +129,9 @@
 #ifndef TIKU_SHELL_CMD_ECHO
 #define TIKU_SHELL_CMD_ECHO    1  /**< echo    - Print arguments + newline */
 #endif
+#ifndef TIKU_SHELL_CMD_LCD
+#define TIKU_SHELL_CMD_LCD     1  /**< lcd     - Drive segment-LCD interface */
+#endif
 #ifndef TIKU_SHELL_CMD_WATCH
 #define TIKU_SHELL_CMD_WATCH   1  /**< watch   - Periodic VFS read until Ctrl+C */
 #endif

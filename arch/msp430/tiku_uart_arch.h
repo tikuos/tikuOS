@@ -102,6 +102,21 @@ int tiku_uart_getc(void);
 uint16_t tiku_uart_overrun_count(void);
 
 /**
+ * @brief Zero the overrun counter without re-initialising the UART.
+ *
+ * Useful for scoping a "no overruns during this phase" assertion to
+ * a specific window. The drain loops in the loopback / ringbuf
+ * tests intentionally swallow a backlog of host-echoed printf bytes
+ * which (on bursty USB-CDC bridges like FT232 with no flow control)
+ * can register one or two UCOE events before the test's binary
+ * phase even starts. Call this immediately after the resync so the
+ * counter only reflects what the binary phase actually does.
+ *
+ * Atomic against the RX ISR.
+ */
+void tiku_uart_overrun_reset(void);
+
+/**
  * @brief Inject one byte into the RX ring buffer (test only).
  *
  * Allows unit tests to feed bytes into the UART receive path

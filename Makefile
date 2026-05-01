@@ -114,18 +114,26 @@ HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 # Memory model
 #
 # Default is the small 16-bit model: code and data live in the lower-FRAM
-# region (0x4400–0xFF7F on FR5969 — about 48 KB).  This is the only safe
-# default today because MSP430 interrupt vectors at 0xFF80 are 16-bit, so
-# any ISR that drifts into HIFRAM via -mcode-region=either gets its address
-# truncated and the vector points to garbage — boot may complete but the
-# timer / UART RX interrupts stop firing.
+# region (0x4400-0xFF7F on FR5969/FR6989 — about 48 KB). This is the
+# only sensible default for FR5969 and FR2433, where there is no HIFRAM
+# bank to gain anything from large model.
 #
 # Passing MEMORY_MODEL=large enables -mlarge + -mcode-region=either +
-# -mdata-region=either so the linker can place text/rodata anywhere in
-# the chip's full 64 KB.  Use only after auditing every ISR (TIKU_ISR
-# macro sites) for an explicit `__attribute__((lower))` so the vector
-# table can still reach them.  Until that audit is done, treat large
-# mode as experimental.
+# -mdata-region=either so the linker can spill text/rodata/bss into
+# HIFRAM (0x10000+) on parts that have it (FR5994, FR6989). This is
+# how you actually unlock the chip's full FRAM beyond ~48 KB.
+#
+# The ISR-vector hazard (vectors at 0xFF80 are 16-bit and cannot reach
+# HIFRAM) is handled centrally: the TIKU_ISR macro in
+# hal/tiku_compiler.h applies __attribute__((lower)) to every handler
+# under GCC, pinning ISR entry points in lower FRAM regardless of
+# -mcode-region. Calls from those entry points into HIFRAM helpers
+# work fine — under -mlarge the compiler emits 20-bit CALLA. Any new
+# ISR site MUST go through TIKU_ISR (not raw __attribute__((interrupt)))
+# so the placement protection is automatic.
+#
+# Caveat: 20-bit pointers and CALLA/MOVA inflate text by ~15-20% and
+# data by ~25%, so prefer small model unless you actually need HIFRAM.
 # ---------------------------------------------------------------------------
 MEMORY_MODEL ?= small
 
@@ -136,6 +144,17 @@ CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -DPLATFORM_MSP430=1
 ifeq ($(MEMORY_MODEL),large)
+# -mlarge:               20-bit pointers, CALLA/MOVA for full FRAM reach
+# -mcode-region=either:  text can spill into HIFRAM (frees lower-FRAM space)
+# -mdata-region=either:  data can also spill into .upper.bss/.upper.data
+#                        in HIFRAM. The kernel MPU is configured to grant
+#                        R+W+X on segment 3 when the device has HIFRAM
+#                        (see TIKU_DEVICE_HAS_HIFRAM in the device header
+#                        and the default-protection logic in
+#                        arch/msp430/tiku_mpu_arch.c) so writes to the
+#                        UART RX ring, process queue, shell tables, etc.
+#                        succeed. Forcing data lower overflows SRAM by
+#                        ~60 bytes once 20-bit pointer inflation kicks in.
 CFLAGS += -mlarge -mcode-region=either -mdata-region=either
 endif
 CFLAGS += -I$(TOOLCHAIN_DIR)/include
@@ -182,6 +201,7 @@ LDFLAGS += -Wl,-u,tiku_autostart_processes
 # ---------------------------------------------------------------------------
 SRCS  = main.c
 SRCS += arch/msp430/tiku_cpu_common.c
+SRCS += arch/msp430/tiku_crt_early.c
 SRCS += arch/msp430/tiku_cpu_freq_boot_arch.c
 SRCS += arch/msp430/tiku_cpu_watchdog_arch.c
 SRCS += arch/msp430/tiku_htimer_arch.c
@@ -228,6 +248,13 @@ SRCS += interfaces/led/tiku_led.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/adc/tiku_adc.c
 SRCS += interfaces/onewire/tiku_onewire.c
+# Segment-LCD interface — generic glue is always compiled (it
+# becomes a set of no-ops when TIKU_BOARD_HAS_LCD == 0). The arch
+# driver self-gates on TIKU_DEVICE_HAS_LCD_C + TIKU_BOARD_HAS_LCD,
+# so it's safe to include unconditionally too: parts/boards
+# without an LCD compile it to an empty translation unit.
+SRCS += interfaces/lcd/tiku_lcd.c
+SRCS += arch/msp430/tiku_lcd_arch.c
 SRCS += kernel/memory/tiku_mem.c
 SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
@@ -297,6 +324,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_irq.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_tree.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_clear.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_echo.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_lcd.c
 SRCS += kernel/shell/tiku_shell_alias.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_alias.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_unalias.c
@@ -354,6 +382,7 @@ SRCS += tests/memory/test_mem_mpu.c
 SRCS += tests/memory/test_mem_pool.c
 SRCS += tests/memory/test_mem_region.c
 SRCS += tests/memory/test_mem_edge.c
+SRCS += tests/memory/test_mem_large.c
 SRCS += tests/memory/test_mem_tier.c
 SRCS += tests/memory/test_mem_cache.c
 SRCS += tests/memory/test_mem_hibernate.c
@@ -456,6 +485,10 @@ endif
 ifeq ($(TIKU_EXAMPLE_CLOCK_FAULT),1)
 SRCS += examples/22_clock_fault/clock_fault.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_CLOCK_FAULT=1
+endif
+ifeq ($(TIKU_EXAMPLE_LCD_DEMO),1)
+SRCS += examples/23_lcd_demo/lcd_demo.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_LCD_DEMO=1
 endif
 
 # TikuKits examples (requires both examples/ and tikukits/)

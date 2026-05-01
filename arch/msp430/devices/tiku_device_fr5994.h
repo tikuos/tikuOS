@@ -105,14 +105,30 @@
 #define TIKU_DEVICE_FRAM_START      0x4000U  /* First byte of main FRAM */
 #define TIKU_DEVICE_FRAM_END        0xFFFFU  /* Last byte of lower 64 KB */
 
+/*
+ * The remaining ~192 KB of FRAM lives at 0x10000+ (HIFRAM). Reach it for
+ * *data* via the TIKU_HIFRAM* macros in <kernel/memory/tiku_mem.h>; code
+ * only goes up there with MEMORY_MODEL=large.
+ */
+#define TIKU_DEVICE_HAS_HIFRAM      1
+#define TIKU_DEVICE_HIFRAM_START    0x10000UL  /* First byte of HIFRAM */
+#define TIKU_DEVICE_HIFRAM_END      0x43FF6UL  /* Last byte of HIFRAM (~208 KB) */
+
 /*---------------------------------------------------------------------------*/
 /* MPU (MEMORY PROTECTION UNIT)                                              */
 /*---------------------------------------------------------------------------*/
 
 #define TIKU_DEVICE_HAS_MPU         1   /**< FR5994 has hardware MPU */
 
+/*
+ * Segment 3 covers HIFRAM only so MEMORY_MODEL=large can place
+ * .upper.bss / .upper.data there with R+W+X while segments 1-2 keep
+ * lower FRAM (code, vectors, persistent data) at R+X. Without this,
+ * granting W on segment 3 to permit large-mode kernel writes would
+ * also grant W on lower-FRAM code at 0xC000-0xFFFF.
+ */
 #define TIKU_DEVICE_MPU_SEG2_START  0x8000U
-#define TIKU_DEVICE_MPU_SEG3_START  0xC000U
+#define TIKU_DEVICE_MPU_SEG3_START  0x10000UL
 
 /*---------------------------------------------------------------------------*/
 /* eUSCI PERIPHERAL AVAILABILITY                                             */

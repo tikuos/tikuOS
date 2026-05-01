@@ -143,6 +143,9 @@
 #if TIKU_SHELL_CMD_ECHO
 #include "commands/tiku_shell_cmd_echo.h"
 #endif
+#if TIKU_SHELL_CMD_LCD
+#include "commands/tiku_shell_cmd_lcd.h"
+#endif
 #if TIKU_SHELL_CMD_ALIAS
 #include "commands/tiku_shell_cmd_alias.h"
 #include "commands/tiku_shell_cmd_unalias.h"
@@ -317,6 +320,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_POKE
     {"poke",    "Write byte to address",       tiku_shell_cmd_poke},
+#endif
+#if TIKU_SHELL_CMD_LCD
+    {"lcd",     "Drive segment LCD",           tiku_shell_cmd_lcd},
 #endif
 
     /* ---- Power ---- */

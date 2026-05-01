@@ -113,22 +113,40 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 #endif
 #endif
 #if TIKU_DEVICE_HAS_PORT4
-    P4DIR = 0xFF; P4OUT = 0x00; P4IE = 0x00;
+    P4DIR = 0xFF; P4OUT = 0x00;
+#ifdef P4IE
+    P4IE = 0x00;
+#endif
 #endif
 #if TIKU_DEVICE_HAS_PORT5
-    P5DIR = 0xFF; P5OUT = 0x00; P5IE = 0x00;
+    P5DIR = 0xFF; P5OUT = 0x00;
+#ifdef P5IE
+    P5IE = 0x00;
+#endif
 #endif
 #if TIKU_DEVICE_HAS_PORT6
-    P6DIR = 0xFF; P6OUT = 0x00; P6IE = 0x00;
+    P6DIR = 0xFF; P6OUT = 0x00;
+#ifdef P6IE
+    P6IE = 0x00;
+#endif
 #endif
 #if TIKU_DEVICE_HAS_PORT7
-    P7DIR = 0xFF; P7OUT = 0x00; P7IE = 0x00;
+    P7DIR = 0xFF; P7OUT = 0x00;
+#ifdef P7IE
+    P7IE = 0x00;
+#endif
 #endif
 #if TIKU_DEVICE_HAS_PORT8
-    P8DIR = 0xFF; P8OUT = 0x00; P8IE = 0x00;
+    P8DIR = 0xFF; P8OUT = 0x00;
+#ifdef P8IE
+    P8IE = 0x00;
+#endif
 #endif
 #if TIKU_DEVICE_HAS_PORT9
     P9DIR = 0xFF; P9OUT = 0x00;
+#ifdef P9IE
+    P9IE = 0x00;
+#endif
 #endif
 #if TIKU_DEVICE_HAS_PORTJ
     PJDIR = 0xFF; PJOUT = 0x00;

@@ -30,6 +30,32 @@
 #define TIKU_MPU_ARCH_H_
 
 #include <stdint.h>
+#include "tiku.h"
+
+/*---------------------------------------------------------------------------*/
+/* DEFAULT SAM AT BOOT                                                        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Expected MPUSAM value after tiku_mpu_init() / tiku_mem_init().
+ *
+ * Parts without HIFRAM (FR5969, FR4133, ...): every segment is R+X
+ * with no W bit set, i.e. 0x0555.
+ *
+ * Parts with HIFRAM (FR6989, FR5994, ...): segment 3 covers HIFRAM
+ * (0x10000+) and must be writable so kernel mutable state placed
+ * there can be updated without an explicit unlock around every
+ * store. Segments 1-2 stay R+X. The resulting SAM is 0x0755.
+ *
+ * Tests and assertions reach for this constant rather than hard-coding
+ * 0x0555 — that hard-coding is correct on FR5969 but wrong on FR6989,
+ * and was the source of the FR6989 mpu / memory-edge regressions.
+ */
+#if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
+#define TIKU_MPU_DEFAULT_SAM    0x0755U
+#else
+#define TIKU_MPU_DEFAULT_SAM    0x0555U
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* LOW-LEVEL REGISTER ACCESS                                                 */

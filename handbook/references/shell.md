@@ -1,6 +1,6 @@
 # TikuOS Shell (`tikushell`) — Definitive Guide
 
-**Version 0.01**
+**Version 0.03**
 
 The TikuOS shell is an interactive command-line service that runs as a kernel
 process. It is transport-agnostic — the same command set works over UART,
@@ -96,8 +96,8 @@ You should see the boot banner followed by the `tikuOS>` prompt:
   ___ _ _         ___  ___
  |_ _|_) |_ _  _/ _ \/ __|
   | || | / / || | (_) \__ \
-  |_||_|_\_\\_,_|\___/|___/  v0.01
-  Tiny kernel for tiny machines.
+  |_||_|_\_\\_,_|\___/|___/  v0.03
+  Simple. Ubiquitous. Intelligence, Everywhere.
 
   MSP430FR5969  |  SRAM 2048B  FRAM 64KB
   Type 'help' for commands.

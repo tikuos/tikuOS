@@ -55,6 +55,65 @@
 #include "hal/tiku_region_hal.h"
 
 /*---------------------------------------------------------------------------*/
+/* HIFRAM PLACEMENT MACROS                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @defgroup TIKU_HIFRAM HIFRAM placement attributes
+ * @brief Place data-only allocations in upper FRAM (HIFRAM) on devices
+ *        that expose a separate upper bank (e.g. FR5994, FR6989).
+ *
+ * The default (small) memory model only reaches the lower-FRAM 16-bit
+ * window (~48 KB on FR59xx/FR69xx). Devices with 128 KB+ FRAM keep the
+ * rest at 0x10000+ (HIFRAM). These macros tag a variable for placement
+ * in the corresponding `.upper.*` linker section.
+ *
+ * Usage:
+ * @code
+ *   TIKU_HIFRAM_BSS uint8_t event_log[16384];        // zero-init
+ *   TIKU_HIFRAM     uint16_t boot_seed[64] = {...};  // initialized
+ *   TIKU_HIFRAM_RO const uint8_t lut[2048] = {...};  // read-only
+ * @endcode
+ *
+ * **Access requires MEMORY_MODEL=large.** msp430-elf-gcc emits 16-bit
+ * moves for symbol references under the default small model, so a
+ * direct read/write of a HIFRAM-placed symbol fails to link with
+ * "relocation truncated to fit: R_MSP430X_ABS16". The linker also
+ * refuses to mix small- and large-model object files in the same image,
+ * so per-file `-mlarge` does not work as an escape hatch — the whole
+ * project has to flip together.
+ *
+ * That makes these macros useful in two scenarios today:
+ *   1. As placement labels on whole-project `MEMORY_MODEL=large` builds
+ *      (after the ISR `__attribute__((lower))` audit described in the
+ *      Makefile), where they keep a specific large allocation out of
+ *      lower FRAM regardless of section-placement defaults.
+ *   2. As intent-marking on portable code: the macros expand to nothing
+ *      on devices without HIFRAM (FR5969, FR2433), so the same code
+ *      compiles everywhere — small parts fail at link time only if the
+ *      allocation is genuinely too large for lower FRAM.
+ *
+ * If you need HIFRAM data under the small model today, the only
+ * working pattern is to keep the data in lower FRAM via the standard
+ * arena/region/persist allocators. A full memory-model flip is the
+ * correct unlock for HIFRAM data — see the Makefile MEMORY_MODEL
+ * comment for the audit checklist.
+ * @{
+ */
+
+#if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
+#define TIKU_HIFRAM      __attribute__((section(".upper.data")))
+#define TIKU_HIFRAM_RO   __attribute__((section(".upper.rodata")))
+#define TIKU_HIFRAM_BSS  __attribute__((section(".upper.bss")))
+#else
+#define TIKU_HIFRAM
+#define TIKU_HIFRAM_RO
+#define TIKU_HIFRAM_BSS
+#endif
+
+/** @} */ /* End of TIKU_HIFRAM group */
+
+/*---------------------------------------------------------------------------*/
 /* ERROR CODES                                                               */
 /*---------------------------------------------------------------------------*/
 

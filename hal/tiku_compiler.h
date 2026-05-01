@@ -47,8 +47,16 @@
  *   __interrupt void timer0_a0_isr(void) { ... }
  *
  * GCC expands to:
- *   __attribute__((interrupt(TIMER0_A0_VECTOR)))
+ *   __attribute__((interrupt(TIMER0_A0_VECTOR), lower))
  *   void timer0_a0_isr(void) { ... }
+ *
+ * The `lower` attribute pins the handler in lower FRAM (0x4400-0xFF7F).
+ * MSP430 interrupt vectors at 0xFF80 are 16-bit, so any ISR that drifts
+ * into HIFRAM under MEMORY_MODEL=large gets its address truncated and
+ * the vector points to garbage — boot may complete but the handler
+ * silently never fires. Under the default small model the attribute is
+ * a no-op (all code already lives in lower FRAM). Keeping it on every
+ * ISR site is what makes the large-model build safe.
  */
 #if defined(__TI_COMPILER_VERSION__)
 #define TIKU_ISR(vec, name) \
@@ -58,7 +66,7 @@
 
 #elif defined(__GNUC__)
 #define TIKU_ISR(vec, name) \
-    __attribute__((interrupt(vec))) \
+    __attribute__((interrupt(vec), lower)) \
     void name(void)
 
 #else

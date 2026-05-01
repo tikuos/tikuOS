@@ -123,13 +123,24 @@ void tiku_mpu_arch_enable_irq(void)
  */
 
 /**
- * @brief Set default NVM protection: R+X (no write) on all 3 segments
+ * @brief Set default NVM protection.
  *
- * SAM value 0x0555: each segment's nybble is 0x5 = R | X (no W).
+ * On parts without HIFRAM all three segments live in lower FRAM and
+ * carry persistent data, vectors, and code; the safe default there is
+ * R+X (no W) on every segment — SAM value 0x0555.
+ *
+ * On parts with HIFRAM (TIKU_DEVICE_HAS_HIFRAM=1) the device header
+ * places segment 3 at the HIFRAM start, so segment 3 covers nothing
+ * but kernel mutable state under MEMORY_MODEL=large. That segment
+ * needs W or every store to .upper.bss / .upper.data MPU-faults
+ * silently — including the UART RX ring, process queue, and shell
+ * command table, which is enough to brick the boot path. SAM value
+ * 0x0755 grants R+W+X to segment 3 while keeping segments 1 and 2
+ * (lower FRAM) at R+X.
  */
 void tiku_mpu_arch_set_default_protection(void)
 {
-    tiku_mpu_arch_set_sam(0x0555);
+    tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
 /**

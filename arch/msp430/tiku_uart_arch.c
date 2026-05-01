@@ -7,9 +7,9 @@
  *
  * tiku_uart_arch.c - Compiler-aware UART backend (MSP430)
  *
- * Under GCC: initializes eUSCI_A0 as a 9600-baud UART on the
- * LaunchPad backchannel pins and provides lightweight printf
- * replacement for debug output.
+ * Under GCC: initializes one of eUSCI_A0 or eUSCI_A1 (selected by
+ * TIKU_BOARD_UART_MODULE) as a 9600-baud UART on the board-specific
+ * pins and provides a lightweight printf replacement for debug output.
  *
  * Under CCS: all functions are empty stubs because CIO semihosting
  * already routes printf() through the JTAG debugger connection.
@@ -35,6 +35,7 @@
 
 #include "tiku_uart_arch.h"
 #include "tiku.h"
+#include "hal/tiku_compiler.h"
 #include <stdarg.h>
 
 /*---------------------------------------------------------------------------*/
@@ -42,6 +43,45 @@
 /*---------------------------------------------------------------------------*/
 
 #if defined(__GNUC__) && !defined(__TI_COMPILER_VERSION__)
+
+/*---------------------------------------------------------------------------*/
+/* USCI MODULE SELECTION                                                     */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Boards default to eUSCI_A0 (matches FR5969/FR5994/FR2433 LaunchPads and
+ * the external FT232 path on FR6989). Board headers may set
+ * TIKU_BOARD_UART_MODULE = 1 to route the kernel UART through eUSCI_A1
+ * instead — used by the FR6989 LaunchPad's on-board eZ-FET backchannel
+ * (P3.4/P3.5).
+ */
+#ifndef TIKU_BOARD_UART_MODULE
+#define TIKU_BOARD_UART_MODULE 0
+#endif
+
+#if TIKU_BOARD_UART_MODULE == 1
+#define TIKU_UART_IE        UCA1IE
+#define TIKU_UART_IFG       UCA1IFG
+#define TIKU_UART_CTLW0     UCA1CTLW0
+#define TIKU_UART_BRW       UCA1BRW
+#define TIKU_UART_MCTLW     UCA1MCTLW
+#define TIKU_UART_STATW     UCA1STATW
+#define TIKU_UART_RXBUF     UCA1RXBUF
+#define TIKU_UART_TXBUF     UCA1TXBUF
+#define TIKU_UART_VECTOR    USCI_A1_VECTOR
+#elif TIKU_BOARD_UART_MODULE == 0
+#define TIKU_UART_IE        UCA0IE
+#define TIKU_UART_IFG       UCA0IFG
+#define TIKU_UART_CTLW0     UCA0CTLW0
+#define TIKU_UART_BRW       UCA0BRW
+#define TIKU_UART_MCTLW     UCA0MCTLW
+#define TIKU_UART_STATW     UCA0STATW
+#define TIKU_UART_RXBUF     UCA0RXBUF
+#define TIKU_UART_TXBUF     UCA0TXBUF
+#define TIKU_UART_VECTOR    USCI_A0_VECTOR
+#else
+#error "TIKU_BOARD_UART_MODULE must be 0 (eUSCI_A0) or 1 (eUSCI_A1)"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* RX RING BUFFER (interrupt-driven)                                         */
@@ -65,19 +105,17 @@ static struct {
     volatile uint16_t overrun_count;  /* UCOE events       */
 } rx;
 
-__attribute__((interrupt(USCI_A0_VECTOR)))
-void
-tiku_uart_isr(void)
+TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 {
-    if (UCA0IFG & UCRXIFG) {
+    if (TIKU_UART_IFG & UCRXIFG) {
         /* Check for hardware overrun (byte lost inside the UART shift
          * register before we could read RXBUF).  Reading RXBUF clears
          * UCOE, so sample it first. */
-        if (UCA0STATW & UCOE) {
+        if (TIKU_UART_STATW & UCOE) {
             rx.overrun_count++;
         }
 
-        uint8_t byte = UCA0RXBUF;  /* read clears UCRXIFG + UCOE */
+        uint8_t byte = TIKU_UART_RXBUF;  /* read clears UCRXIFG + UCOE */
         uint8_t next = (rx.head + 1) & TIKU_UART_RXBUF_MASK;
         if (next != rx.tail) {
             rx.buf[rx.head] = byte;
@@ -91,54 +129,56 @@ tiku_uart_isr(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize eUSCI_A0 UART at 9600 baud, 8N1.
+ * @brief Initialize the kernel UART at 9600 baud, 8N1.
  *
- * Enables the RX interrupt so incoming bytes are buffered in a
- * software ring buffer regardless of when the application polls.
+ * Drives the eUSCI module selected by TIKU_BOARD_UART_MODULE
+ * (0 = eUSCI_A0, default; 1 = eUSCI_A1). Enables the RX interrupt so
+ * incoming bytes are buffered in a software ring buffer regardless of
+ * when the application polls.
  */
 void
 tiku_uart_init(void)
 {
     /* Keep the UART quiescent while retargeting pins and clearing state. */
-    UCA0IE = 0;
-    UCA0CTLW0 = UCSWRST;
+    TIKU_UART_IE = 0;
+    TIKU_UART_CTLW0 = UCSWRST;
 
     /* Select UART function on board-specific pins */
     TIKU_BOARD_UART_PINS_INIT();
 
     /* Board-specific clock source */
-    UCA0CTLW0 |= TIKU_BOARD_UART_CLK_SEL;
+    TIKU_UART_CTLW0 |= TIKU_BOARD_UART_CLK_SEL;
 
     /* Board-specific baud-rate registers (9600 baud) */
-    UCA0BRW = TIKU_BOARD_UART_BRW;
-    UCA0MCTLW = TIKU_BOARD_UART_MCTLW;
+    TIKU_UART_BRW = TIKU_BOARD_UART_BRW;
+    TIKU_UART_MCTLW = TIKU_BOARD_UART_MCTLW;
 
     /* Clear any stale status from boot/flash-tool traffic before enabling RX. */
-    UCA0STATW = 0;
-    while (UCA0IFG & UCRXIFG) {
-        (void)UCA0RXBUF;
+    TIKU_UART_STATW = 0;
+    while (TIKU_UART_IFG & UCRXIFG) {
+        (void)TIKU_UART_RXBUF;
     }
 
     /* Release from reset — UART is now active */
-    UCA0CTLW0 &= ~UCSWRST;
+    TIKU_UART_CTLW0 &= ~UCSWRST;
 
     /* Reset ring buffer, overrun counter, and enable RX interrupt */
     rx.head = 0;
     rx.tail = 0;
     rx.overrun_count = 0;
-    UCA0IE |= UCRXIE;
+    TIKU_UART_IE |= UCRXIE;
 }
 
 /**
- * @brief Blocking transmit of one character via eUSCI_A0.
+ * @brief Blocking transmit of one character via the selected eUSCI.
  */
 void
 tiku_uart_putc(char c)
 {
-    while (!(UCA0IFG & UCTXIFG)) {
+    while (!(TIKU_UART_IFG & UCTXIFG)) {
         /* spin until TX buffer is ready */
     }
-    UCA0TXBUF = (unsigned char)c;
+    TIKU_UART_TXBUF = (unsigned char)c;
 }
 
 /**
@@ -329,6 +369,17 @@ tiku_uart_overrun_count(void)
 }
 
 /**
+ * @brief Zero the overrun counter atomically against the RX ISR.
+ */
+void
+tiku_uart_overrun_reset(void)
+{
+    TIKU_UART_IE &= (uint8_t)~UCRXIE;
+    rx.overrun_count = 0;
+    TIKU_UART_IE |= UCRXIE;
+}
+
+/**
  * @brief Inject a byte into the RX ring buffer without the ISR.
  *
  * Used by unit tests to feed the SLIP decoder when interrupts
@@ -359,6 +410,7 @@ void tiku_uart_printf(const char *fmt, ...) { (void)fmt; }
 uint8_t tiku_uart_rx_ready(void) { return 0; }
 int tiku_uart_getc(void) { return -1; }
 uint16_t tiku_uart_overrun_count(void) { return 0; }
+void tiku_uart_overrun_reset(void) { }
 #ifdef HAS_TESTS
 void tiku_uart_test_inject(uint8_t byte) { (void)byte; }
 #endif
