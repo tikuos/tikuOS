@@ -166,6 +166,11 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
         pmem->nvm_arena.active = 0;
     }
 
+    if (pmem->hifram_arena.active) {
+        tiku_arena_reset(&pmem->hifram_arena);
+        pmem->hifram_arena.active = 0;
+    }
+
     pmem->active = 0;
 
     return TIKU_MEM_OK;
@@ -204,8 +209,28 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
     case TIKU_MEM_NVM:
         return tiku_arena_alloc(&pmem->nvm_arena, size);
 
+    case TIKU_MEM_HIFRAM:
+        /* Caller must have attached a HIFRAM arena first via
+         * tiku_proc_mem_attach_hifram(). NULL on missing/inactive
+         * is the cleanest signal — the alternative (silently
+         * routing to NVM) would mask placement bugs in user code
+         * that legitimately needs HIFRAM (e.g., crossing the
+         * 64 KB barrier for large lookup tables). */
+        if (pmem->hifram_arena.active) {
+            return tiku_arena_alloc(&pmem->hifram_arena, size);
+        }
+        return NULL;
+
     case TIKU_MEM_AUTO:
-        /* Prefer SRAM; fall back to NVM */
+        /* Prefer HIFRAM for large requests if attached, then SRAM,
+         * then NVM. Mirrors the tier-allocator AUTO policy. */
+        if (size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
+            pmem->hifram_arena.active) {
+            ptr = tiku_arena_alloc(&pmem->hifram_arena, size);
+            if (ptr != NULL) {
+                return ptr;
+            }
+        }
         if (pmem->sram_arena.active) {
             ptr = tiku_arena_alloc(&pmem->sram_arena, size);
             if (ptr != NULL) {
@@ -220,6 +245,24 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
     default:
         return NULL;
     }
+}
+
+tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
+                                            tiku_mem_arch_size_t size)
+{
+    if (pmem == NULL || !pmem->active || size == 0) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
+    /* Already attached? Reject rather than silently re-allocate —
+     * the caller almost certainly didn't mean to abandon their
+     * existing HIFRAM arena. */
+    if (pmem->hifram_arena.active) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
+    return tiku_tier_arena_create(&pmem->hifram_arena,
+                                   TIKU_MEM_HIFRAM, size, pmem->pid);
 }
 
 /**
@@ -277,6 +320,11 @@ tiku_mem_err_t tiku_proc_mem_stats(const tiku_proc_mem_t *pmem,
         return tiku_arena_stats(&pmem->sram_arena, stats);
     case TIKU_MEM_NVM:
         return tiku_arena_stats(&pmem->nvm_arena, stats);
+    case TIKU_MEM_HIFRAM:
+        if (!pmem->hifram_arena.active) {
+            return TIKU_MEM_ERR_NOT_FOUND;
+        }
+        return tiku_arena_stats(&pmem->hifram_arena, stats);
     default:
         return TIKU_MEM_ERR_INVALID;
     }

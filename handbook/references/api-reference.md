@@ -930,11 +930,21 @@ typedef enum {
 
 ```c
 typedef enum {
-    TIKU_MEM_SRAM = 0,  /* Fast, volatile                                   */
-    TIKU_MEM_NVM  = 1,  /* Persistent, slower writes (FRAM)                 */
-    TIKU_MEM_AUTO = 2   /* OS selects: prefers SRAM, falls back to NVM      */
+    TIKU_MEM_SRAM   = 0,  /* Fast, volatile                                 */
+    TIKU_MEM_NVM    = 1,  /* Persistent, slower writes (FRAM)               */
+    TIKU_MEM_AUTO   = 2,  /* OS selects: HIFRAM > SRAM > NVM                */
+    TIKU_MEM_HIFRAM = 3   /* Upper FRAM bank (FR5994/FR6989,                */
+                          /* MEMORY_MODEL=large only)                        */
 } tiku_mem_tier_t;
 ```
+
+`TIKU_MEM_HIFRAM` requires `TIKU_DEVICE_HAS_HIFRAM` and a build with
+`MEMORY_MODEL=large`. On other targets, requesting HIFRAM returns
+`TIKU_MEM_ERR_NOMEM` cleanly.
+
+`TIKU_MEM_AUTO` routes requests at or above
+`TIKU_TIER_AUTO_HIFRAM_THRESHOLD` (default 1 KB) to HIFRAM when
+available, falling through to SRAM and then NVM.
 
 ### Arena Allocator
 
@@ -1044,11 +1054,16 @@ Creates arenas and pools backed by a specific memory tier (SRAM or NVM).
 
 | Function | Description |
 |----------|-------------|
-| `tiku_tier_init()` | Initialize tier allocator (after `tiku_mem_init()`) |
-| `tiku_tier_arena_create(arena, tier, size, id)` | Create a tier-backed arena |
+| `tiku_tier_init()` | Initialize tier allocator (after `tiku_mem_init()`); also seeds the HIFRAM tier pool when available |
+| `tiku_tier_arena_create(arena, tier, size, id)` | Create a tier-backed arena. Pass `TIKU_MEM_HIFRAM` to allocate from upper FRAM (FR5994 / FR6989) |
 | `tiku_tier_pool_create(pool, tier, block_size, block_count, id)` | Create a tier-backed pool |
-| `tiku_tier_get(ptr, out_tier)` | Query which tier a pointer belongs to |
+| `tiku_tier_get(ptr, out_tier)` | Query which tier a pointer belongs to (SRAM / NVM / HIFRAM) |
 | `tiku_tier_stats(tier, stats)` | Usage statistics for a tier's backing pool |
+
+Pool sizes are config macros: `TIKU_TIER_SRAM_SIZE` (default 128 B),
+`TIKU_TIER_NVM_SIZE` (default 1024 B), `TIKU_TIER_HIFRAM_SIZE`
+(default 32 KB; gated on `TIKU_DEVICE_HAS_HIFRAM` *and*
+`TIKU_MEMORY_MODEL_LARGE`).
 
 ### Write-Back Cache (SRAM/FRAM)
 
@@ -1078,15 +1093,17 @@ typedef struct {
 
 ### Process Memory Context
 
-Binds SRAM scratch + NVM persistent arenas + cached regions to a process.
+Binds SRAM scratch + NVM persistent arenas + an optional HIFRAM
+arena (lazy, attached on demand) + cached regions to a process.
 
 | Function | Description |
 |----------|-------------|
-| `tiku_proc_mem_create(pmem, pid, tier, sram_size, nvm_size)` | Create isolated memory context |
-| `tiku_proc_mem_destroy(pmem)` | Flush caches, reset arenas, deactivate |
-| `tiku_proc_alloc(pmem, tier, size)` | Allocate within a process context |
+| `tiku_proc_mem_create(pmem, pid, tier, sram_size, nvm_size)` | Create isolated memory context (HIFRAM is opt-in; see `attach_hifram` below) |
+| `tiku_proc_mem_destroy(pmem)` | Flush caches, reset all three arenas, deactivate |
+| `tiku_proc_mem_attach_hifram(pmem, size)` | Lazy attach a HIFRAM arena to an existing context. Returns `TIKU_MEM_ERR_NOMEM` on parts without HIFRAM or in small mode. |
+| `tiku_proc_alloc(pmem, tier, size)` | Allocate within a process context. `TIKU_MEM_HIFRAM` requires a prior `attach_hifram`. `TIKU_MEM_AUTO` prefers HIFRAM (if attached and request is large), then SRAM, then NVM. |
 | `tiku_proc_mem_attach_cache(pmem, region)` | Attach a cached region to the context |
-| `tiku_proc_mem_stats(pmem, tier, stats)` | Stats for a process arena |
+| `tiku_proc_mem_stats(pmem, tier, stats)` | Stats for a process arena (SRAM, NVM, or HIFRAM) |
 
 ### Hibernate / Resume
 

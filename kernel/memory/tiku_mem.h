@@ -143,10 +143,17 @@ typedef enum {
  * arena/pool control blocks for introspection.
  */
 typedef enum {
-    TIKU_MEM_SRAM = 0, /**< Fast, volatile — for hot/temporary data */
-    TIKU_MEM_NVM  = 1, /**< Persistent, slower writes — for cold/stable data */
-    TIKU_MEM_AUTO = 2  /**< OS selects: prefers SRAM, falls back to NVM */
+    TIKU_MEM_SRAM   = 0, /**< Fast, volatile — for hot/temporary data */
+    TIKU_MEM_NVM    = 1, /**< Persistent, slower writes — for cold/stable data */
+    TIKU_MEM_AUTO   = 2, /**< OS selects: prefers SRAM, falls back to NVM/HIFRAM */
+    TIKU_MEM_HIFRAM = 3  /**< Upper FRAM bank (FR5994/FR6989, MEMORY_MODEL=large) */
 } tiku_mem_tier_t;
+
+/* Internal: the highest concrete tier value, used for tier_state[]
+ * sizing. AUTO sits at index 2 but is never used to index — it gets
+ * resolved to a concrete tier first. The 32 B of wasted slot-2 state
+ * is the price of keeping AUTO=2 stable across releases. */
+#define TIKU_MEM_TIER_COUNT  4
 
 /*---------------------------------------------------------------------------*/
 /* STATISTICS                                                                */
@@ -919,6 +926,29 @@ void tiku_mpu_clear_violation_flags(void);
 #endif
 
 /**
+ * Size of the HIFRAM tier backing pool in bytes. Default 32 KB. Only
+ * compiled in when TIKU_DEVICE_HAS_HIFRAM=1 AND
+ * TIKU_MEMORY_MODEL_LARGE=1 (the latter is set by the Makefile when
+ * `MEMORY_MODEL=large`). Capped at uint16_t max because
+ * tiku_mem_arch_size_t is 16-bit on MSP430 — for HIFRAM regions
+ * larger than 64 KB you need to widen the type, which is a separate
+ * change.
+ */
+#ifndef TIKU_TIER_HIFRAM_SIZE
+#define TIKU_TIER_HIFRAM_SIZE  (32U * 1024U)
+#endif
+
+/**
+ * AUTO routing threshold: allocations of this size or larger get
+ * routed to HIFRAM by `TIKU_MEM_AUTO` if HIFRAM is available and has
+ * room. Smaller allocations stay in SRAM (fast, low-energy) per the
+ * existing AUTO policy. Set to 0 to never route AUTO to HIFRAM.
+ */
+#ifndef TIKU_TIER_AUTO_HIFRAM_THRESHOLD
+#define TIKU_TIER_AUTO_HIFRAM_THRESHOLD  1024U
+#endif
+
+/**
  * @brief Initialize the tier allocator
  *
  * Must be called after tiku_mem_init() (which initializes the region
@@ -1197,6 +1227,10 @@ typedef struct {
     uint8_t               pid;          /**< Owning process identifier */
     tiku_arena_t          sram_arena;   /**< Process's SRAM scratch space */
     tiku_arena_t          nvm_arena;    /**< Process's persistent storage */
+    tiku_arena_t          hifram_arena; /**< Process's HIFRAM bulk space
+                                         *   (lazy: arena.active == 0 until
+                                         *   tiku_proc_mem_attach_hifram() is
+                                         *   called) */
     tiku_cached_region_t *caches[TIKU_PROC_MEM_MAX_CACHES];
                                         /**< Process's cached regions */
     uint8_t               cache_count;  /**< Number of attached caches */
@@ -1242,13 +1276,37 @@ tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
 tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem);
 
 /**
+ * @brief Attach a HIFRAM arena to an existing process context
+ *
+ * Lazy opt-in API for processes that need a chunk of HIFRAM (the
+ * upper FRAM bank on FR5994 / FR6989, reachable only under
+ * MEMORY_MODEL=large). After this call, tiku_proc_alloc() with
+ * TIKU_MEM_HIFRAM routes to the new arena instead of returning NULL.
+ *
+ * Kept separate from tiku_proc_mem_create() so that processes that
+ * never need HIFRAM don't pay for an attach attempt that would fail
+ * on parts without HIFRAM, and so the create signature stays stable.
+ *
+ * On parts where the HIFRAM tier isn't available (no HIFRAM, or
+ * MEMORY_MODEL=small), this returns TIKU_MEM_ERR_NOMEM cleanly.
+ *
+ * @param pmem  Active process memory context
+ * @param size  HIFRAM arena capacity in bytes
+ * @return TIKU_MEM_OK on success
+ */
+tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
+                                            tiku_mem_arch_size_t size);
+
+/**
  * @brief Allocate within a process context (bounds-checked)
  *
  * Selects the correct arena based on the requested tier and allocates
- * from it. TIKU_MEM_AUTO prefers SRAM, falling back to NVM.
+ * from it. TIKU_MEM_AUTO prefers HIFRAM (if attached and the request
+ * is large enough), then SRAM, then NVM. TIKU_MEM_HIFRAM requires the
+ * caller to have called tiku_proc_mem_attach_hifram() first.
  *
  * @param pmem  Active process memory context
- * @param tier  Memory tier (SRAM, NVM, or AUTO)
+ * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
  * @param size  Bytes requested (must be > 0)
  * @return Pointer to the allocated memory, or NULL on failure
  */

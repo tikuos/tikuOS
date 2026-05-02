@@ -45,6 +45,9 @@ Thumbs.db
 takenote.md
 tikukits/
 
+# LaTeX stray logs
+texput.log
+
 # Paper drafts (unpublished)
 paper/
 

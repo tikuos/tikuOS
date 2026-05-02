@@ -138,6 +138,23 @@ HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 MEMORY_MODEL ?= small
 
 # ---------------------------------------------------------------------------
+# LEA peripheral on MSP430FR5994
+# ---------------------------------------------------------------------------
+#
+# FR5994 has 8 KB of physical SRAM, but the toolchain's stock linker
+# script reserves the upper 4 KB for the LEA (Low-Energy Accelerator)
+# peripheral as LEARAM (~3.7 KB) + LEASTACK (312 B), leaving only 4 KB
+# of general-purpose RAM for .bss and stack.
+#
+# TikuOS does not use LEA today, so by default we pre-include
+# arch/msp430/devices/msp430fr5994_8k_ram.ld which redefines the
+# RAM region to swallow LEARAM/LEASTACK and gives the kernel the full
+# 8 KB. Set LEA_ENABLE=1 to fall back to the stock 4 KB layout if you
+# bring up an LEA-using driver later.
+# ---------------------------------------------------------------------------
+LEA_ENABLE ?= 0
+
+# ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -156,6 +173,13 @@ ifeq ($(MEMORY_MODEL),large)
 #                        succeed. Forcing data lower overflows SRAM by
 #                        ~60 bytes once 20-bit pointer inflation kicks in.
 CFLAGS += -mlarge -mcode-region=either -mdata-region=either
+# Expose memory-model selection to C source so the kernel can gate
+# HIFRAM-backed sections (e.g., the HIFRAM tier pool in
+# kernel/memory/tiku_tier.c) on both HAS_HIFRAM and large-mode
+# builds. Without this gate, declaring TIKU_HIFRAM_BSS-tagged
+# arrays in small-mode builds links-fails because the .upper.bss
+# output section doesn't exist.
+CFLAGS += -DTIKU_MEMORY_MODEL_LARGE=1
 endif
 CFLAGS += -I$(TOOLCHAIN_DIR)/include
 ifneq ($(MSP430_SUPPORT_DIR),)
@@ -195,6 +219,29 @@ LDFLAGS += -L$(MSP430_SUPPORT_DIR)
 endif
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes
+
+# FR5994: merge LEARAM/LEASTACK into RAM unless LEA is requested.
+# The override LD redeclares the RAM region with LENGTH=0x2000 and
+# zero-sizes LEARAM/LEASTACK; ld(1) takes the last MEMORY declaration
+# of a given name, so this wins over the spec-default script that
+# `-mmcu=msp430fr5994` auto-includes. Also exposes the chosen layout
+# to the C side via TIKU_FR5994_LEA_DISABLED so the device header can
+# report the right TIKU_DEVICE_RAM_SIZE. The same override also adds
+# the .upper_end_marker section so __hifram_end resolves on FR5994.
+ifeq ($(MCU),msp430fr5994)
+ifeq ($(LEA_ENABLE),0)
+LDFLAGS += -Tarch/msp430/devices/msp430fr5994_8k_ram.ld
+CFLAGS  += -DTIKU_FR5994_LEA_DISABLED=1
+endif
+endif
+
+# FR6989: HIFRAM end-marker only (no SRAM merging needed — FR6989
+# has 2 KB of SRAM and no LEA peripheral, so the stock RAM region
+# is already optimal). The override adds .upper_end_marker so
+# __hifram_end resolves and `free` can report HIFRAM in-use bytes.
+ifeq ($(MCU),msp430fr6989)
+LDFLAGS += -Tarch/msp430/devices/msp430fr6989_hifram.ld
+endif
 
 # ---------------------------------------------------------------------------
 # Source files — core OS (always compiled)
@@ -383,6 +430,8 @@ SRCS += tests/memory/test_mem_pool.c
 SRCS += tests/memory/test_mem_region.c
 SRCS += tests/memory/test_mem_edge.c
 SRCS += tests/memory/test_mem_large.c
+SRCS += tests/memory/test_mem_fr5994.c
+SRCS += tests/memory/test_mem_sram_walk.c
 SRCS += tests/memory/test_mem_tier.c
 SRCS += tests/memory/test_mem_cache.c
 SRCS += tests/memory/test_mem_hibernate.c

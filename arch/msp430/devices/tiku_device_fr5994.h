@@ -80,7 +80,25 @@
 /*---------------------------------------------------------------------------*/
 
 #define TIKU_DEVICE_FRAM_SIZE       (256 * 1024UL)  /* 256 KB FRAM */
-#define TIKU_DEVICE_RAM_SIZE        (8 * 1024UL)    /* 8 KB SRAM */
+
+/*
+ * MSP430FR5994 has 8 KB physical SRAM split by the toolchain's stock
+ * linker script into RAM (4 KB) + LEARAM (~3.7 KB) + LEASTACK (312 B).
+ * When LEA is not used (the TikuOS default, controlled by the
+ * `LEA_ENABLE` Makefile flag), the project-local LD override merges
+ * all three into one 8 KB RAM region, doubling general-purpose SRAM.
+ *
+ * TIKU_FR5994_LEA_DISABLED is defined by the Makefile when
+ * LEA_ENABLE=0 so this header can report the actually-available
+ * RAM size to higher layers (`free`, /sys/mem, hibernate budgeting,
+ * etc.). Build with `make MCU=msp430fr5994 LEA_ENABLE=1` to keep
+ * the stock 4 KB layout if you bring up an LEA-using driver.
+ */
+#ifdef TIKU_FR5994_LEA_DISABLED
+#define TIKU_DEVICE_RAM_SIZE        (8 * 1024UL)    /* 8 KB merged (default) */
+#else
+#define TIKU_DEVICE_RAM_SIZE        (4 * 1024UL)    /* 4 KB, LEA gets 4 KB */
+#endif
 #define TIKU_DEVICE_RAM_START       0x1C00U         /* First byte of SRAM */
 
 /*---------------------------------------------------------------------------*/

@@ -85,6 +85,31 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE];
 #endif
 
+/*
+ * HIFRAM tier backing pool — only declared when both:
+ *   1. The device has an upper FRAM bank (FR5994, FR6989), and
+ *   2. The build is using MEMORY_MODEL=large (set by the Makefile
+ *      via -DTIKU_MEMORY_MODEL_LARGE=1).
+ *
+ * Both gates are required: TIKU_HIFRAM_BSS expands to a section
+ * attribute that targets .upper.bss, which only exists as an output
+ * section under -mdata-region=either. Declaring this array in a
+ * small-mode build would link-fail with "no .upper.bss output".
+ *
+ * On host builds and on chip variants without HIFRAM, the array
+ * doesn't exist and TIKU_TIER_HIFRAM_AVAILABLE stays 0; the tier
+ * APIs that touch HIFRAM return TIKU_MEM_ERR_NOMEM gracefully.
+ */
+#if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM && \
+    defined(TIKU_MEMORY_MODEL_LARGE) && TIKU_MEMORY_MODEL_LARGE
+TIKU_HIFRAM_BSS
+static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
+    tier_hifram_buf[TIKU_TIER_HIFRAM_SIZE];
+#define TIKU_TIER_HIFRAM_AVAILABLE 1
+#else
+#define TIKU_TIER_HIFRAM_AVAILABLE 0
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* INTERNAL STATE                                                            */
 /*---------------------------------------------------------------------------*/
@@ -105,8 +130,14 @@ typedef struct {
     uint8_t               initialized; /**< Non-zero after tiku_tier_init */
 } tier_pool_state_t;
 
-/* Indexed by tiku_mem_tier_t: [0] = SRAM, [1] = NVM */
-static tier_pool_state_t tier_state[2];
+/*
+ * Indexed by tiku_mem_tier_t. Slot 2 (AUTO) is unused at runtime —
+ * AUTO is resolved to a concrete tier before any indexing happens —
+ * but we leave the slot in the array so the enum-to-index mapping
+ * stays direct. Slot 3 (HIFRAM) is initialized only when
+ * TIKU_TIER_HIFRAM_AVAILABLE is set.
+ */
+static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
 
 /*---------------------------------------------------------------------------*/
 /* TIER INIT                                                                 */
@@ -128,6 +159,15 @@ tiku_mem_err_t tiku_tier_init(void)
     tier_state[TIKU_MEM_NVM].alloc_count = 0;
     tier_state[TIKU_MEM_NVM].initialized = 1;
 
+#if TIKU_TIER_HIFRAM_AVAILABLE
+    tier_state[TIKU_MEM_HIFRAM].buf         = tier_hifram_buf;
+    tier_state[TIKU_MEM_HIFRAM].capacity    = TIKU_TIER_HIFRAM_SIZE;
+    tier_state[TIKU_MEM_HIFRAM].offset      = 0;
+    tier_state[TIKU_MEM_HIFRAM].peak        = 0;
+    tier_state[TIKU_MEM_HIFRAM].alloc_count = 0;
+    tier_state[TIKU_MEM_HIFRAM].initialized = 1;
+#endif
+
     return TIKU_MEM_OK;
 }
 
@@ -138,8 +178,23 @@ tiku_mem_err_t tiku_tier_init(void)
 /**
  * @brief Resolve TIKU_MEM_AUTO to a concrete tier
  *
- * Prefers SRAM if the requested size fits. Falls back to NVM.
- * SRAM and NVM tiers pass through unchanged.
+ * Routing policy (in order of preference):
+ *
+ *   1. **HIFRAM** if available AND size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD
+ *      AND HIFRAM has room. The threshold avoids paying the 20-bit
+ *      pointer cost on small objects that fit comfortably in SRAM.
+ *
+ *   2. **SRAM** if it has room. Fast and low-energy — preferred for
+ *      small/hot data.
+ *
+ *   3. **NVM** as the last resort. Persists across reboots but writes
+ *      are slower and require MPU unlock bracketing.
+ *
+ * SRAM, NVM, and HIFRAM tiers pass through unchanged. The threshold
+ * defaults to 1 KB; set TIKU_TIER_AUTO_HIFRAM_THRESHOLD=0 to never
+ * route AUTO to HIFRAM. On parts without HIFRAM (TIKU_TIER_HIFRAM_
+ * AVAILABLE = 0) the policy degrades to today's SRAM-or-NVM behavior
+ * with no observable change.
  */
 static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
                                      tiku_mem_arch_size_t size)
@@ -150,8 +205,23 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
         return tier;
     }
 
-    /* Prefer SRAM if it has room; fall back to NVM */
     aligned = align_up(size);
+
+#if TIKU_TIER_HIFRAM_AVAILABLE
+    /* Route bulk allocations to HIFRAM if the threshold is met and
+     * the HIFRAM tier has room. This is the main AUTO win on
+     * FR5994/FR6989: a 16 KB ML feature table no longer competes
+     * with the kernel's 4-8 KB SRAM budget. */
+    if (TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0 &&
+        size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
+        tier_state[TIKU_MEM_HIFRAM].initialized &&
+        aligned <= tier_state[TIKU_MEM_HIFRAM].capacity -
+                   tier_state[TIKU_MEM_HIFRAM].offset) {
+        return TIKU_MEM_HIFRAM;
+    }
+#endif
+
+    /* Prefer SRAM if it has room; fall back to NVM */
     if (tier_state[TIKU_MEM_SRAM].initialized &&
         aligned <= tier_state[TIKU_MEM_SRAM].capacity -
                    tier_state[TIKU_MEM_SRAM].offset) {
@@ -329,8 +399,13 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 
     /* Check the tier allocator's own backing pools first.
      * This works on both host and target — the backing pools may
-     * not be in the platform's region table on host. */
-    for (i = 0; i < 2; i++) {
+     * not be in the platform's region table on host. We iterate
+     * over every concrete tier (SRAM, NVM, HIFRAM) and skip AUTO
+     * since it never has its own backing pool. */
+    for (i = 0; i < TIKU_MEM_TIER_COUNT; i++) {
+        if (i == TIKU_MEM_AUTO) {
+            continue;
+        }
         if (tier_state[i].initialized) {
             uintptr_t pool_start = (uintptr_t)tier_state[i].buf;
 
@@ -379,12 +454,16 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
         return TIKU_MEM_ERR_INVALID;
     }
 
-    if (tier != TIKU_MEM_SRAM && tier != TIKU_MEM_NVM) {
+    if (tier != TIKU_MEM_SRAM &&
+        tier != TIKU_MEM_NVM &&
+        tier != TIKU_MEM_HIFRAM) {
         return TIKU_MEM_ERR_INVALID;
     }
 
     ts = &tier_state[tier];
     if (!ts->initialized) {
+        /* HIFRAM tier on a non-HIFRAM build, or an as-yet-uninited
+         * tier — both report "not available" the same way. */
         return TIKU_MEM_ERR_INVALID;
     }
 
