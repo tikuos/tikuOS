@@ -210,7 +210,7 @@ FRAM
 
 ### :battery: Power Management
 
-Enter ultra-low-power modes from the shell. See what will wake you up.
+Enter low-power modes from the shell. See what will wake you up.
 
 ```
 tikuOS> sleep lpm3
