@@ -29,8 +29,8 @@
 | Board | MCU | RAM | FRAM | Notable | Status |
 |-------|-----|-----|------|---------|--------|
 | MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | — | :green_circle: Primary |
-| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
 | MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
+| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
 
 ---
 
