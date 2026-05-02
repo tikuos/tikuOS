@@ -48,6 +48,9 @@ tikukits/
 # LaTeX stray logs
 texput.log
 
+# Vendored third-party libraries / scratch (not part of the upstream tree)
+temp/
+
 # Paper drafts (unpublished)
 paper/
 

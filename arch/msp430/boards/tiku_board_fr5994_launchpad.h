@@ -81,9 +81,13 @@
 /* Backchannel UART - TXD P2.0, RXD P2.1 (eUSCI_A0)                          */
 /*---------------------------------------------------------------------------*/
 
+/* Backchannel UART on eUSCI_A0: P2.0 = UCA0TXD, P2.1 = UCA0RXD.
+ * On FR5994 the eUSCI_A0 function is the SECONDARY peripheral on
+ * these pins (PSEL = 10: SEL1=1, SEL0=0).  PSEL = 01 selects port
+ * mapping (default = none); PSEL = 11 selects UCA0CLK. The PxSEL
+ * encoding here is per-pin, not uniform across the device. */
 #define TIKU_BOARD_UART_PINS_INIT()                                            \
     do {                                                                       \
-        /* Backchannel UART on eUSCI_A0: P2.0 = TXD, P2.1 = RXD. */           \
         P2DIR |= BIT0;                                                         \
         P2DIR &= (uint8_t)~BIT1;                                               \
         P2REN &= (uint8_t)~(BIT0 | BIT1);                                      \
@@ -153,7 +157,12 @@
 /* I2C on eUSCI_B0: P1.6 = SDA, P1.7 = SCL                                   */
 /*---------------------------------------------------------------------------*/
 
-/** Configure P1.6 and P1.7 for eUSCI_B0 I2C function (SEL1=1, SEL0=0). */
+/** Configure P1.6 and P1.7 for eUSCI_B0 I2C function.
+ *  On FR5994 the PxSEL -> peripheral mapping is per-pin (see datasheet
+ *  SLASE54 pinmux table); for P1.6/P1.7 the eUSCI_B0 I2C is the
+ *  SECONDARY function (PSEL = 10: SEL1=1, SEL0=0).  The primary
+ *  (PSEL=01) on these pins is TA0.1/TA1.0 -- choosing it would
+ *  silently route SDA/SCL into a timer module. */
 #define TIKU_BOARD_I2C_PINS_INIT() \
     do { P1SEL1 |= BIT6 | BIT7; P1SEL0 &= ~(BIT6 | BIT7); } while(0)
 
@@ -164,13 +173,34 @@
 #define TIKU_BOARD_I2C_BRW_400K     20
 
 /*---------------------------------------------------------------------------*/
-/* SPI on eUSCI_A1: P2.5 = CLK, P2.6 = SIMO, P2.7 = SOMI                    */
+/* SPI on eUSCI_B1: P5.0 = SIMO, P5.1 = SOMI, P5.2 = CLK                    */
 /*---------------------------------------------------------------------------*/
 
-/** Configure P2.5/P2.6/P2.7 for eUSCI_A1 SPI function (SEL1=1, SEL0=0). */
+/*
+ * MSP-EXP430FR5994 LaunchPad routes the BoosterPack-standard SPI
+ * pins to eUSCI_B1 on P5.0 / P5.1 / P5.2 (these are physically
+ * exposed on the J2 BoosterPack header). The FR5969 LaunchPad uses
+ * eUSCI_A1 on P2.5 / P2.6 / P2.7 instead — those pins exist in the
+ * MSP430FR5994 silicon but are NOT broken out on the FR5994
+ * LaunchPad PCB, so wiring an external SPI peripheral to them is
+ * physically impossible on this board.
+ *
+ * TIKU_BOARD_SPI_MODULE selects which eUSCI module the SPI driver
+ * (arch/msp430/tiku_spi_arch.c) drives. Value 1 = eUSCI_B1; the
+ * default (0 = eUSCI_A1, used by FR5969) would not work here
+ * because UCA1's primary pins aren't on the BoosterPack headers.
+ */
+
+#define TIKU_BOARD_SPI_MODULE       1
+
+/** Configure P5.0/P5.1/P5.2 for eUSCI_B1 SPI function.
+ *  UCB1SIMO/UCB1SOMI/UCB1CLK are the PRIMARY function on these pins
+ *  (PxSEL = 01: SEL0=1, SEL1=0). The secondary function (PxSEL=10)
+ *  is Timer B0 capture/output -- selecting that instead silently
+ *  routes SPI traffic into TB0 registers and the bus never clocks. */
 #define TIKU_BOARD_SPI_PINS_INIT() \
-    do { P2SEL1 |= BIT5 | BIT6 | BIT7; \
-         P2SEL0 &= ~(BIT5 | BIT6 | BIT7); } while(0)
+    do { P5SEL0 |=  (BIT0 | BIT1 | BIT2); \
+         P5SEL1 &= ~(BIT0 | BIT1 | BIT2); } while(0)
 
 /** SPI prescaler for 4 MHz from 8 MHz SMCLK: 8000000/4000000 = 2. */
 #define TIKU_BOARD_SPI_BRW_4MHZ     2

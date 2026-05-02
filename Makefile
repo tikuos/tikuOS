@@ -293,6 +293,8 @@ SRCS += kernel/timers/tiku_bitbang.c
 endif
 SRCS += interfaces/led/tiku_led.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
+SRCS += interfaces/bus/tiku_spi_bus.c
+SRCS += arch/msp430/tiku_spi_arch.c
 SRCS += interfaces/adc/tiku_adc.c
 SRCS += interfaces/onewire/tiku_onewire.c
 # Segment-LCD interface — generic glue is always compiled (it
@@ -539,6 +541,14 @@ ifeq ($(TIKU_EXAMPLE_LCD_DEMO),1)
 SRCS += examples/23_lcd_demo/lcd_demo.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_LCD_DEMO=1
 endif
+ifeq ($(TIKU_EXAMPLE_EPAPER),1)
+SRCS += examples/24_epaper_demo/epaper_demo.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_EPAPER=1
+endif
+ifeq ($(TIKU_EXAMPLE_EPAPER_KIT),1)
+SRCS += examples/25_epaper_kit/epaper_kit.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_EPAPER_KIT=1
+endif
 
 # TikuKits examples (requires both examples/ and tikukits/)
 ifeq ($(HAS_TIKUKITS),1)
@@ -580,6 +590,8 @@ SRCS += $(wildcard tikukits/maths/linear_algebra/*.c)
 SRCS += $(wildcard tikukits/maths/statistics/*.c)
 SRCS += $(wildcard tikukits/maths/distance/*.c)
 SRCS += $(wildcard tikukits/sensors/temperature/*.c)
+SRCS += $(wildcard tikukits/epaper/*.c)
+SRCS += $(wildcard tikukits/epaper/pervasive_itc/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/peak/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/zcr/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/histogram/*.c)
