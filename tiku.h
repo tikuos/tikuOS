@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.03
+ * Tiku Operating System v0.04
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -32,7 +32,7 @@
 /* VERSION                                                                   */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_VERSION        "0.03"
+#define TIKU_VERSION        "0.04"
 #define TIKU_TAGLINE        "Simple. Ubiquitous. Intelligence, Everywhere."
 
 /*---------------------------------------------------------------------------*/

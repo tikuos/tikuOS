@@ -1,6 +1,6 @@
 # TikuOS Core API Reference
 
-**Version 0.03**
+**Version 0.04**
 
 This document covers the core kernel API surface. All declarations live in the
 headers listed below; include `tiku.h` to pull in the full platform

@@ -59,7 +59,7 @@ TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins,
   ___ _ _         ___  ___
  |_ _|_) |_ _  _/ _ \/ __|
   | || | / / || | (_) \__ \
-  |_||_|_\_\\_,_|\___/|___/  v0.03
+  |_||_|_\_\\_,_|\___/|___/  v0.04
   Simple. Ubiquitous. Intelligence, Everywhere.
 
   MSP430FR5969  |  SRAM 2048B  FRAM 64KB
@@ -237,7 +237,7 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 ```
 /
 ├── sys/
-│   ├── version              "0.03"
+│   ├── version              "0.04"
 │   ├── device/
 │   │   ├── name             user-set device name (FRAM-backed, R/W)
 │   │   ├── id               unique tiku-XXXX hostname-style ID
@@ -322,7 +322,7 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 
 ```
 tikuOS> cat /sys/version
-0.03
+0.04
 
 tikuOS> cat /sys/device/mcu
 MSP430FR5969
