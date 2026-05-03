@@ -497,6 +497,16 @@ endif
 endif
 endif
 
+# tikukits/gfx visual test runner
+# An on-target autostart process that owns UART, listens for single-
+# character commands, and renders gfx scenes on the e-paper panel.
+# Driven from the host by TikuBench/tikubench/gfx_test.py. Opt-in
+# only -- conflicts with the shell because both want UART input.
+ifeq ($(TEST_KITS_GFX_VISUAL),1)
+SRCS   += tests/kits/gfx/test_kits_gfx_visual.c
+CFLAGS += -DTEST_KITS_GFX_VISUAL=1
+endif
+
 # ---------------------------------------------------------------------------
 # Examples (only if examples/ is present)
 # ---------------------------------------------------------------------------
@@ -549,6 +559,14 @@ ifeq ($(TIKU_EXAMPLE_EPAPER_KIT),1)
 SRCS += examples/25_epaper_kit/epaper_kit.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_EPAPER_KIT=1
 endif
+ifeq ($(TIKU_EXAMPLE_GFX_DEMO),1)
+SRCS += examples/26_gfx_demo/gfx_demo.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_GFX_DEMO=1
+endif
+ifeq ($(TIKU_EXAMPLE_UI_DEMO),1)
+SRCS += examples/28_ui_demo/ui_demo.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_DEMO=1
+endif
 
 # TikuKits examples (requires both examples/ and tikukits/)
 ifeq ($(HAS_TIKUKITS),1)
@@ -592,6 +610,10 @@ SRCS += $(wildcard tikukits/maths/distance/*.c)
 SRCS += $(wildcard tikukits/sensors/temperature/*.c)
 SRCS += $(wildcard tikukits/epaper/*.c)
 SRCS += $(wildcard tikukits/epaper/pervasive_itc/*.c)
+SRCS += $(wildcard tikukits/gfx/*.c)
+SRCS += $(wildcard tikukits/gfx/fonts/*.c)
+SRCS += $(wildcard tikukits/ui/*.c)
+SRCS += $(wildcard tikukits/ui/widgets/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/peak/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/zcr/*.c)
 SRCS += $(wildcard tikukits/sigfeatures/histogram/*.c)
