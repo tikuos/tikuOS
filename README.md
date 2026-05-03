@@ -45,7 +45,11 @@ make MCU=msp430fr6989 MEMORY_MODEL=large   # FR6989 needs large mode for HIFRAM
 make flash MCU=msp430fr5969
 make flash MCU=msp430fr6989 MEMORY_MODEL=large
 
-# Open serial monitor
+# Build with the Tiku BASIC interpreter (FR5994 / FR6989 only)
+make flash MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
+           TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
+
+# Open serial monitor (default UART baud is 9600)
 make monitor
 ```
 
@@ -116,6 +120,9 @@ tikuOS> help
 > (conditional), `i2c` (bus scan/read/write), `delay`, `repeat`, `peek`,
 > `poke`. See `kernel/shell/tiku_shell_config.h` for the full list and
 > rationale (each has a FRAM cost on FR5969).
+>
+> :bulb: `basic` (Tiku BASIC interpreter REPL) is its own opt-in via
+> `TIKU_SHELL_BASIC_ENABLE=1` — see [Tiku BASIC](#tiku-basic) below.
 
 > :art: Build with `TIKU_SHELL_COLOR=1` for ANSI colored output (cyan logo, green prompt, categorized help). Add a screenshot from picocom here.
 
@@ -400,16 +407,73 @@ tikuOS> cat /sys/cpu/freq
 
 ---
 
+### :keyboard: Tiku BASIC
+
+An opt-in BASIC interpreter that runs as a shell command. Useful for
+quick experiments, teaching, and storing small programs in FRAM that
+survive power cycles. The interpreter adds ~25 KB of code plus a
+~3 KB arena at full feature set; see the
+[Tiku BASIC Definitive Guide](handbook/references/basic.md) for the
+complete reference.
+
+```
+tikuOS> basic
+Tiku BASIC ready. HELP / BYE.
+ok> 10 FOR I = 1 TO 5
+ok> 20 PRINT I, I*I
+ok> 30 NEXT I
+ok> RUN
+1 1
+2 4
+3 9
+4 16
+5 25
+ok> SAVE
+saved 41 bytes
+ok> BYE
+bye.
+```
+
+**Supported:** integer (32-bit signed) variables `A..Z`, `LET`,
+`PRINT`, `IF/THEN/ELSE`, `GOTO`, `GOSUB`/`RETURN`, `FOR/TO/STEP`/`NEXT`,
+`INPUT`, `END`, `STOP`, `REM`, `CLS`, `DELAY`, `SLEEP`, `POKE`;
+functions `RND ABS INT SGN MIN MAX MOD SHL SHR PEEK`; constants
+`TRUE FALSE PI`; bitwise `AND OR XOR NOT`; multi-statement lines via
+`:`. `SAVE`/`LOAD` persist programs across reboots in FRAM via the
+kernel's persist API; `basic run` autoruns the saved program (use
+with `init add` to autostart at boot).
+
+**Hardware constraints.** BASIC requires `MEMORY_MODEL=large`, which
+in turn requires HIFRAM. Concretely:
+
+| MCU | BASIC supported |
+|---|---|
+| MSP430FR2433 | :red_circle: no — no HIFRAM |
+| MSP430FR5969 | :red_circle: no — no HIFRAM |
+| MSP430FR5994 | :green_circle: yes (with `MEMORY_MODEL=large`) |
+| MSP430FR6989 | :green_circle: yes (with `MEMORY_MODEL=large`) |
+
+The Makefile rejects unsupported combinations at parse time with an
+actionable error.
+
+```bash
+make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
+     TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
+```
+
+---
+
 ### Build Options
 
 | Flag | Effect |
 |------|--------|
 | `TIKU_SHELL_ENABLE=1` | Enable interactive shell (UART) |
+| `TIKU_SHELL_BASIC_ENABLE=1` | Enable the [Tiku BASIC](#tiku-basic) interpreter (FR5994 / FR6989 only; requires `MEMORY_MODEL=large`) |
 | `TIKU_INIT_ENABLE=1` | Enable FRAM-backed init system (implies shell) |
 | `TIKU_SHELL_COLOR=1` | Enable ANSI color output (banner, prompt, help, free) |
 | `UART_BAUD=115200` | Set UART baud rate (default 9600) |
-| `MCU=msp430fr5969` | Target MCU (also `msp430fr6989`) |
-| `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement (required on FR6989 for builds with examples + tikukits) |
+| `MCU=msp430fr5969` | Target MCU (also `msp430fr5994`, `msp430fr6989`, `msp430fr2433`) |
+| `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement. Only valid on parts with HIFRAM (FR5994, FR6989); rejected at parse time on FR5969 / FR2433. |
 
 ```bash
 # Shell with color output
@@ -463,6 +527,8 @@ TIKU_AUTOSTART_PROCESSES(&blink_process);
 
 - **API References**
   - [Core Kernel API Reference](handbook/references/api-reference.md)
+  - [TikuShell Definitive Guide](handbook/references/shell.md)
+  - [Tiku BASIC Definitive Guide](handbook/references/basic.md)
 
 ---
 

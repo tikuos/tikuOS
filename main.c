@@ -51,6 +51,11 @@
 #include "kernel/init/tiku_init.h"
 #endif
 
+#ifdef TIKU_BASIC_EMBEDDED
+#include "kernel/shell/basic/tiku_basic.h"
+extern const char tiku_basic_embedded_src[];
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -86,6 +91,14 @@ int main(void) {
 
 #if TIKU_SHELL_ENABLE
   tiku_shell_init();
+#endif
+
+#ifdef TIKU_BASIC_EMBEDDED
+  /* Build-time-embedded BASIC program: parse + RUN before anything
+   * else. Returns when the program ends (END / STOP / fall-off);
+   * the scheduler then takes over and -- if the shell is enabled
+   * -- the user gets a regular shell prompt. */
+  tiku_basic_run_source(tiku_basic_embedded_src);
 #endif
 
 #if TIKU_INIT_ENABLE

@@ -50,6 +50,18 @@ MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 DEVICE_UPPER = $(shell echo $(MCU) | tr '[:lower:]' '[:upper:]')
 DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 
+# Whether this MCU has HIFRAM (FRAM > 64 KB).  Only parts whose device
+# headers set TIKU_DEVICE_HAS_HIFRAM = 1 should be accepted with
+# MEMORY_MODEL=large -- on smaller parts large model just inflates
+# code/data by 20-25 % with no upper-FRAM region to spill into.
+ifeq ($(MCU),msp430fr5994)
+DEVICE_HAS_HIFRAM := 1
+else ifeq ($(MCU),msp430fr6989)
+DEVICE_HAS_HIFRAM := 1
+else
+DEVICE_HAS_HIFRAM := 0
+endif
+
 # ---------------------------------------------------------------------------
 # Directories
 # ---------------------------------------------------------------------------
@@ -67,9 +79,15 @@ APP ?=
 # Shell service (kernel service — orthogonal to APP/tests/examples)
 #   make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969   — build with shell
 #   make APP=cli MCU=msp430fr5969                — legacy alias (also enables shell)
+#
+# Optional shell add-ons (off by default; opt in alongside the shell):
+#   TIKU_SHELL_BASIC_ENABLE=1   — Tiku BASIC interpreter REPL
+#                                 (~3.5 KB code + ~1.3 KB arena)
+#   TIKU_SHELL_COLOR=1          — ANSI color output
 # ---------------------------------------------------------------------------
 TIKU_SHELL_ENABLE ?= 1
 TIKU_SHELL_COLOR  ?= 0
+TIKU_SHELL_BASIC_ENABLE ?= 0
 TIKU_INIT_ENABLE  ?= 0
 TIKU_INIT_TEST    ?= 0
 
@@ -111,6 +129,161 @@ HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 
 # ---------------------------------------------------------------------------
+# Per-kit enable flags
+#
+# Each kit under tikukits/ is opt-in: its sources are compiled only
+# when its TIKU_KIT_<NAME>_ENABLE flag is 1. Default is 0, so a
+# kernel-only build (e.g. `make APP=cli` or just `make` with no
+# example flags) does not compile any kit code at all.
+#
+# Three ways the flags get set:
+#   1. The user passes them on the command line, e.g.
+#        make TIKU_KIT_DS_ENABLE=1
+#   2. An app or example block below auto-enables them when its own
+#      TIKU_EXAMPLE_* or APP= flag is set.
+#   3. TIKU_KITS_ALL=1 enables every kit at once (compatibility
+#      shim for the old "compile everything" behaviour).
+# ---------------------------------------------------------------------------
+TIKU_KIT_GFX_ENABLE              ?= 0
+TIKU_KIT_UI_ENABLE               ?= 0
+TIKU_KIT_EPAPER_ENABLE           ?= 0
+TIKU_KIT_NET_ENABLE              ?= 0
+TIKU_KIT_CRYPTO_ENABLE           ?= 0
+TIKU_KIT_TIME_ENABLE             ?= 0
+TIKU_KIT_CODEC_ENABLE            ?= 0
+TIKU_KIT_MATHS_ENABLE            ?= 0
+TIKU_KIT_DS_ENABLE               ?= 0
+TIKU_KIT_ML_ENABLE               ?= 0
+TIKU_KIT_SENSORS_ENABLE          ?= 0
+TIKU_KIT_SIGFEATURES_ENABLE      ?= 0
+TIKU_KIT_TEXTCOMPRESSION_ENABLE  ?= 0
+
+ifeq ($(TIKU_KITS_ALL),1)
+TIKU_KIT_GFX_ENABLE              := 1
+TIKU_KIT_UI_ENABLE               := 1
+TIKU_KIT_EPAPER_ENABLE           := 1
+TIKU_KIT_NET_ENABLE              := 1
+TIKU_KIT_CRYPTO_ENABLE           := 1
+TIKU_KIT_TIME_ENABLE             := 1
+TIKU_KIT_CODEC_ENABLE            := 1
+TIKU_KIT_MATHS_ENABLE            := 1
+TIKU_KIT_DS_ENABLE               := 1
+TIKU_KIT_ML_ENABLE               := 1
+TIKU_KIT_SENSORS_ENABLE          := 1
+TIKU_KIT_SIGFEATURES_ENABLE      := 1
+TIKU_KIT_TEXTCOMPRESSION_ENABLE  := 1
+endif
+
+# UI depends on GFX -- enabling UI implies GFX.
+ifeq ($(TIKU_KIT_UI_ENABLE),1)
+TIKU_KIT_GFX_ENABLE              := 1
+endif
+
+# ---------------------------------------------------------------------------
+# Auto-enable kits based on which example or app is active.
+#
+# Each example only pulls in the kits it actually uses, so a build
+# of `make TIKU_EXAMPLE_GFX_DEMO=1` does NOT compile tikukits/ui,
+# tikukits/net, etc.
+# ---------------------------------------------------------------------------
+
+# Sensors-only examples.
+ifeq ($(TIKU_EXAMPLE_I2C_TEMP),1)
+TIKU_KIT_SENSORS_ENABLE := 1
+endif
+ifeq ($(TIKU_EXAMPLE_DS18B20_TEMP),1)
+TIKU_KIT_SENSORS_ENABLE := 1
+endif
+
+# Networking examples (12..18) all need NET; HTTPS also needs CRYPTO.
+ifneq ($(filter 1, $(TIKU_EXAMPLE_UDP_SEND) $(TIKU_EXAMPLE_TCP_SEND) \
+                  $(TIKU_EXAMPLE_DNS_RESOLVE) $(TIKU_EXAMPLE_HTTP_GET) \
+                  $(TIKU_EXAMPLE_TCP_ECHO) $(TIKU_EXAMPLE_HTTP_FETCH) \
+                  $(TIKU_EXAMPLE_HTTP_DIRECT)),)
+TIKU_KIT_NET_ENABLE     := 1
+endif
+ifeq ($(TIKU_EXAMPLE_HTTPS_DIRECT),1)
+TIKU_KIT_NET_ENABLE     := 1
+TIKU_KIT_CRYPTO_ENABLE  := 1
+endif
+
+# Display-stack demos (24..28 + new kits_examples gfx/ui demos).
+ifneq ($(filter 1, $(TIKU_EXAMPLE_EPAPER) $(TIKU_EXAMPLE_EPAPER_KIT)),)
+TIKU_KIT_EPAPER_ENABLE  := 1
+endif
+ifneq ($(filter 1, $(TIKU_EXAMPLE_GFX_DEMO) $(TIKU_EXAMPLE_GFX_CURVES) \
+                  $(TIKU_EXAMPLE_GFX_IMAGE) $(TIKU_EXAMPLE_GFX_PHASE0)),)
+TIKU_KIT_GFX_ENABLE     := 1
+TIKU_KIT_EPAPER_ENABLE  := 1
+endif
+ifneq ($(filter 1, $(TIKU_EXAMPLE_UI_DEMO) $(TIKU_EXAMPLE_UI_WIDGET_ZOO) \
+                  $(TIKU_EXAMPLE_UI_DASHBOARD) $(TIKU_EXAMPLE_UI_MENU) \
+                  $(TIKU_EXAMPLE_UI_LAYOUT) $(TIKU_EXAMPLE_UI_SETTINGS)),)
+TIKU_KIT_UI_ENABLE      := 1
+TIKU_KIT_GFX_ENABLE     := 1
+TIKU_KIT_EPAPER_ENABLE  := 1
+endif
+
+# tikukits-library exercise demos (examples/kits/...).
+ifneq ($(filter 1, $(TIKU_EXAMPLE_KITS_MATRIX) \
+                  $(TIKU_EXAMPLE_KITS_STATISTICS) \
+                  $(TIKU_EXAMPLE_KITS_DISTANCE)),)
+TIKU_KIT_MATHS_ENABLE   := 1
+endif
+ifneq ($(filter 1, $(TIKU_EXAMPLE_KITS_DS_ARRAY) \
+                  $(TIKU_EXAMPLE_KITS_DS_BITMAP) $(TIKU_EXAMPLE_KITS_DS_BTREE) \
+                  $(TIKU_EXAMPLE_KITS_DS_HTABLE) $(TIKU_EXAMPLE_KITS_DS_LIST) \
+                  $(TIKU_EXAMPLE_KITS_DS_PQUEUE) $(TIKU_EXAMPLE_KITS_DS_QUEUE) \
+                  $(TIKU_EXAMPLE_KITS_DS_RINGBUF) $(TIKU_EXAMPLE_KITS_DS_SM) \
+                  $(TIKU_EXAMPLE_KITS_DS_SORTARRAY) \
+                  $(TIKU_EXAMPLE_KITS_DS_STACK)),)
+TIKU_KIT_DS_ENABLE      := 1
+endif
+ifneq ($(filter 1, $(TIKU_EXAMPLE_KITS_ML_DTREE) $(TIKU_EXAMPLE_KITS_ML_KNN) \
+                  $(TIKU_EXAMPLE_KITS_ML_LINREG) \
+                  $(TIKU_EXAMPLE_KITS_ML_LINSVM) \
+                  $(TIKU_EXAMPLE_KITS_ML_LOGREG) \
+                  $(TIKU_EXAMPLE_KITS_ML_NBAYES) \
+                  $(TIKU_EXAMPLE_KITS_ML_TNN)),)
+TIKU_KIT_ML_ENABLE      := 1
+TIKU_KIT_MATHS_ENABLE   := 1
+endif
+ifeq ($(TIKU_EXAMPLE_KITS_SENSORS),1)
+TIKU_KIT_SENSORS_ENABLE := 1
+endif
+ifeq ($(TIKU_EXAMPLE_KITS_SIGFEATURES),1)
+TIKU_KIT_SIGFEATURES_ENABLE := 1
+TIKU_KIT_MATHS_ENABLE       := 1
+endif
+ifeq ($(TIKU_EXAMPLE_KITS_TEXTCOMPRESSION),1)
+TIKU_KIT_TEXTCOMPRESSION_ENABLE := 1
+endif
+ifneq ($(filter 1, $(TIKU_EXAMPLE_KITS_NET_IPV4) \
+                  $(TIKU_EXAMPLE_KITS_NET_UDP) \
+                  $(TIKU_EXAMPLE_KITS_NET_TFTP) \
+                  $(TIKU_EXAMPLE_KITS_NET_TCP) \
+                  $(TIKU_EXAMPLE_KITS_NET_DNS) \
+                  $(TIKU_EXAMPLE_KITS_NET_HTTP)),)
+TIKU_KIT_NET_ENABLE     := 1
+endif
+ifeq ($(TIKU_EXAMPLE_KITS_NET_TLS),1)
+TIKU_KIT_NET_ENABLE     := 1
+TIKU_KIT_CRYPTO_ENABLE  := 1
+endif
+
+# Apps that pull in kits.
+ifeq ($(APP),net)
+TIKU_KIT_NET_ENABLE     := 1
+TIKU_KIT_CRYPTO_ENABLE  := 1
+endif
+
+# After all the cascade rules above settle, recompute the
+# UI -> GFX implication (auto-enables may have flipped UI on).
+ifeq ($(TIKU_KIT_UI_ENABLE),1)
+TIKU_KIT_GFX_ENABLE     := 1
+endif
+
+# ---------------------------------------------------------------------------
 # Memory model
 #
 # Default is the small 16-bit model: code and data live in the lower-FRAM
@@ -136,6 +309,52 @@ HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 # data by ~25%, so prefer small model unless you actually need HIFRAM.
 # ---------------------------------------------------------------------------
 MEMORY_MODEL ?= small
+
+# ---------------------------------------------------------------------------
+# Build-time consistency guards
+# ---------------------------------------------------------------------------
+# 1. MEMORY_MODEL=large is only meaningful on parts with HIFRAM (FRAM >
+#    64 KB).  On FR5969 / FR2433 the large model inflates code/data by
+#    ~20-25 % with no upper-FRAM region to spill into.  Refuse the build
+#    rather than silently producing a fatter binary that fits worse.
+ifeq ($(MEMORY_MODEL),large)
+ifneq ($(DEVICE_HAS_HIFRAM),1)
+$(error MEMORY_MODEL=large is only supported on MCUs with HIFRAM \
+(FR5994, FR6989). $(MCU) has only a single 64-KB-or-smaller FRAM \
+region, so large model just inflates code by ~20% with nowhere to \
+spill. Use MEMORY_MODEL=small (the default) on this part)
+endif
+endif
+
+# 2. BASIC adds ~3.5 KB of code, which pushes most shell-enabled builds
+#    past the 48 KB lower-FRAM cap.  Refusing the build up front avoids
+#    a confusing "region `FRAM' overflowed by N bytes" link error.  If
+#    you have a part with enough lower-FRAM headroom and want to
+#    override, pass TIKU_SHELL_BASIC_ALLOW_SMALL=1.  Combined with
+#    guard (1), this also implies BASIC is unavailable on FR5969 /
+#    FR2433 -- which is correct: they don't have the room.
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+ifneq ($(MEMORY_MODEL),large)
+ifneq ($(TIKU_SHELL_BASIC_ALLOW_SMALL),1)
+$(error TIKU_SHELL_BASIC_ENABLE=1 requires MEMORY_MODEL=large \
+(only available on FR5994 / FR6989).  BASIC adds ~3.5 KB of code \
+which overflows the 48 KB lower-FRAM cap in small-model builds. \
+Re-run with: 'make ... MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
+TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large'. To override (only if \
+you know your part has lower-FRAM headroom), pass \
+TIKU_SHELL_BASIC_ALLOW_SMALL=1)
+endif
+endif
+endif
+
+# 3. BASIC_PROGRAM=foo.bas embeds a BASIC source file directly into
+#    the firmware and runs it on boot. Implies TIKU_SHELL_BASIC_ENABLE=1
+#    and (transitively) MEMORY_MODEL=large. The .bas file is converted
+#    to a C string literal at build time via tools/bas_to_c.py.
+ifneq ($(BASIC_PROGRAM),)
+override TIKU_SHELL_BASIC_ENABLE := 1
+override MEMORY_MODEL := large
+endif
 
 # ---------------------------------------------------------------------------
 # LEA peripheral on MSP430FR5994
@@ -352,6 +571,26 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
 endif
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+CFLAGS += -DTIKU_SHELL_CMD_BASIC=1
+SRCS += kernel/shell/basic/tiku_basic.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_basic.c
+endif
+
+# Embedded BASIC: BASIC_PROGRAM=foo.bas turns into a C string literal
+# baked into the firmware. main.c picks it up at boot when
+# TIKU_BASIC_EMBEDDED is set.
+#
+# The generated .c lives inside $(BUILD_DIR), which the standard
+# pattern rule `$(BUILD_DIR)/%.o: %.c` can't reach (the stem would
+# end up referring back into $(BUILD_DIR)). So we ship explicit
+# generation + compile rules for it and append directly to OBJS
+# below (after OBJS is normally derived from SRCS).
+ifneq ($(BASIC_PROGRAM),)
+TIKU_BASIC_EMBEDDED_C := $(BUILD_DIR)/embedded_bas.c
+TIKU_BASIC_EMBEDDED_O := $(BUILD_DIR)/embedded_bas.o
+CFLAGS += -DTIKU_BASIC_EMBEDDED=1
+endif
 SRCS += kernel/shell/tiku_shell_jobs.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_every.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_once.c
@@ -505,6 +744,20 @@ endif
 ifeq ($(TEST_KITS_GFX_VISUAL),1)
 SRCS   += tests/kits/gfx/test_kits_gfx_visual.c
 CFLAGS += -DTEST_KITS_GFX_VISUAL=1
+TIKU_KIT_GFX_ENABLE    := 1
+TIKU_KIT_EPAPER_ENABLE := 1
+endif
+
+# tikukits/ui visual test runner: same UART-command pattern as the gfx
+# variant but renders UI widget compositions. Driven by
+# TikuBench/tikubench/ui_test.py. Conflicts with the shell -- both
+# want UART input -- so set TIKU_SHELL_ENABLE=0.
+ifeq ($(TEST_KITS_UI_VISUAL),1)
+SRCS   += tests/kits/ui/test_kits_ui_visual.c
+CFLAGS += -DTEST_KITS_UI_VISUAL=1
+TIKU_KIT_UI_ENABLE     := 1
+TIKU_KIT_GFX_ENABLE    := 1
+TIKU_KIT_EPAPER_ENABLE := 1
 endif
 
 # ---------------------------------------------------------------------------
@@ -552,38 +805,103 @@ SRCS += examples/23_lcd_demo/lcd_demo.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_LCD_DEMO=1
 endif
 ifeq ($(TIKU_EXAMPLE_EPAPER),1)
-SRCS += examples/24_epaper_demo/epaper_demo.c
+SRCS += examples/kits_examples/epaper_demo/epaper_demo.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_EPAPER=1
 endif
 ifeq ($(TIKU_EXAMPLE_EPAPER_KIT),1)
-SRCS += examples/25_epaper_kit/epaper_kit.c
+SRCS += examples/kits_examples/epaper_kit/epaper_kit.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_EPAPER_KIT=1
 endif
 ifeq ($(TIKU_EXAMPLE_GFX_DEMO),1)
-SRCS += examples/26_gfx_demo/gfx_demo.c
+SRCS += examples/kits_examples/gfx_demo/gfx_demo.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_GFX_DEMO=1
 endif
 ifeq ($(TIKU_EXAMPLE_UI_DEMO),1)
-SRCS += examples/28_ui_demo/ui_demo.c
+SRCS += examples/kits_examples/ui_demo/ui_demo.c
 CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_DEMO=1
 endif
 
-# TikuKits examples (requires both examples/ and tikukits/)
+# kits_examples: new gfx + ui demos that exercise the expanded
+# tikukits/gfx and tikukits/ui kits.
+ifeq ($(TIKU_EXAMPLE_GFX_CURVES),1)
+SRCS += examples/kits_examples/gfx_curves/gfx_curves.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_GFX_CURVES=1
+endif
+ifeq ($(TIKU_EXAMPLE_GFX_IMAGE),1)
+SRCS += examples/kits_examples/gfx_image/gfx_image.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_GFX_IMAGE=1
+endif
+ifeq ($(TIKU_EXAMPLE_UI_WIDGET_ZOO),1)
+SRCS += examples/kits_examples/ui_widget_zoo/ui_widget_zoo.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_WIDGET_ZOO=1
+endif
+ifeq ($(TIKU_EXAMPLE_UI_DASHBOARD),1)
+SRCS += examples/kits_examples/ui_dashboard/ui_dashboard.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_DASHBOARD=1
+endif
+ifeq ($(TIKU_EXAMPLE_UI_MENU),1)
+SRCS += examples/kits_examples/ui_menu/ui_menu.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_MENU=1
+endif
+
+# Phase 0 + Phase 3 demos.
+ifeq ($(TIKU_EXAMPLE_GFX_PHASE0),1)
+SRCS += examples/kits_examples/gfx_phase0/gfx_phase0.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_GFX_PHASE0=1
+endif
+ifeq ($(TIKU_EXAMPLE_UI_LAYOUT),1)
+SRCS += examples/kits_examples/ui_layout/ui_layout.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_LAYOUT=1
+endif
+ifeq ($(TIKU_EXAMPLE_UI_SETTINGS),1)
+SRCS += examples/kits_examples/ui_settings/ui_settings.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_UI_SETTINGS=1
+endif
+
+# TikuKits examples (requires examples/ + tikukits/). Each per-domain
+# example folder is gated on its corresponding kit-enable flag, so a
+# build of (say) `make HAS_EXAMPLES=1 TIKU_EXAMPLE_KITS_MATRIX=1`
+# compiles ONLY examples/kits/maths/*.c -- nothing from ds/ ml/
+# sensors/ etc. The `*_runner.c` dispatcher is always compiled when
+# any kits-example is in scope; its body is #if'd out when none of
+# the per-example flags are set.
 ifeq ($(HAS_TIKUKITS),1)
+
+# Always compile the dispatcher when HAS_TIKUKITS + HAS_EXAMPLES are
+# both set. Its body is gated per-demo via TIKU_EXAMPLE_KITS_* flags
+# inside the .c file, so an empty config compiles to a small no-op
+# stub. This keeps main.c's call to example_kits_run() resolvable
+# without forcing every kit-using app to manually enable a kit.
 SRCS += examples/kits/example_kits_runner.c
+
+ifeq ($(TIKU_KIT_MATHS_ENABLE),1)
 SRCS += $(wildcard examples/kits/maths/*.c)
+endif
+ifeq ($(TIKU_KIT_DS_ENABLE),1)
 SRCS += $(wildcard examples/kits/ds/*.c)
+endif
+ifeq ($(TIKU_KIT_ML_ENABLE),1)
 SRCS += $(wildcard examples/kits/ml/*.c)
+endif
+ifeq ($(TIKU_KIT_SENSORS_ENABLE),1)
 SRCS += $(wildcard examples/kits/sensors/*.c)
+endif
+ifeq ($(TIKU_KIT_SIGFEATURES_ENABLE),1)
 SRCS += $(wildcard examples/kits/sigfeatures/*.c)
+endif
+ifeq ($(TIKU_KIT_TEXTCOMPRESSION_ENABLE),1)
 SRCS += $(wildcard examples/kits/textcompression/*.c)
+endif
+ifeq ($(TIKU_KIT_NET_ENABLE),1)
 SRCS += $(filter-out examples/kits/net/example_net_tls.c, \
           $(wildcard examples/kits/net/*.c))
 ifeq ($(HAS_TLS),1)
 SRCS += examples/kits/net/example_net_tls.c
 endif
 endif
-endif
+
+endif # HAS_TIKUKITS (examples)
+endif # HAS_EXAMPLES
 
 # ---------------------------------------------------------------------------
 # Apps (only when APP=<name> is specified)
@@ -601,76 +919,140 @@ SRCS += labs/coap/tiku_kits_net_coap_process.c
 endif
 
 # ---------------------------------------------------------------------------
-# TikuKits (only if tikukits/ is present)
+# TikuKits (per-kit gated; default 0 unless an app/example needs it)
+#
+# Only enabled kits compile their sources. A kernel-only build
+# (no apps, no examples) compiles ZERO files from tikukits/.
 # ---------------------------------------------------------------------------
 ifeq ($(HAS_TIKUKITS),1)
-SRCS += $(wildcard tikukits/maths/linear_algebra/*.c)
-SRCS += $(wildcard tikukits/maths/statistics/*.c)
-SRCS += $(wildcard tikukits/maths/distance/*.c)
-SRCS += $(wildcard tikukits/sensors/temperature/*.c)
-SRCS += $(wildcard tikukits/epaper/*.c)
-SRCS += $(wildcard tikukits/epaper/pervasive_itc/*.c)
-SRCS += $(wildcard tikukits/gfx/*.c)
-SRCS += $(wildcard tikukits/gfx/fonts/*.c)
-SRCS += $(wildcard tikukits/ui/*.c)
-SRCS += $(wildcard tikukits/ui/widgets/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/peak/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/zcr/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/histogram/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/delta/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/goertzel/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/zscore/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/scale/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/ema/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/median/*.c)
-SRCS += $(wildcard tikukits/sigfeatures/skip/*.c)
-SRCS += $(wildcard tikukits/textcompression/rle/*.c)
-SRCS += $(wildcard tikukits/textcompression/bpe/*.c)
-SRCS += $(wildcard tikukits/textcompression/heatshrink/*.c)
-SRCS += $(wildcard tikukits/ml/regression/*.c)
-SRCS += $(wildcard tikukits/ml/classification/*.c)
-SRCS += $(wildcard tikukits/ds/array/*.c)
-SRCS += $(wildcard tikukits/ds/queue/*.c)
-SRCS += $(wildcard tikukits/ds/pqueue/*.c)
-SRCS += $(wildcard tikukits/ds/stack/*.c)
-SRCS += $(wildcard tikukits/ds/ringbuf/*.c)
-SRCS += $(wildcard tikukits/ds/bitmap/*.c)
-SRCS += $(wildcard tikukits/ds/list/*.c)
-SRCS += $(wildcard tikukits/ds/btree/*.c)
-SRCS += $(wildcard tikukits/ds/sortarray/*.c)
-SRCS += $(wildcard tikukits/ds/htable/*.c)
-SRCS += $(wildcard tikukits/ds/sm/*.c)
-SRCS += $(wildcard tikukits/ds/bloom/*.c)
-SRCS += $(wildcard tikukits/ds/circlog/*.c)
-SRCS += $(wildcard tikukits/ds/deque/*.c)
-SRCS += $(wildcard tikukits/ds/trie/*.c)
-SRCS += $(wildcard tikukits/ds/timerwheel/*.c)
-SRCS += $(wildcard tikukits/net/slip/*.c)
-SRCS += $(wildcard tikukits/net/ipv4/*.c)
-SRCS += $(wildcard tikukits/net/http/*.c)
-SRCS += $(wildcard tikukits/net/mqtt/*.c)
-SRCS += $(wildcard tikukits/time/*.c)
-SRCS += $(wildcard tikukits/time/ntp/*.c)
-SRCS += $(wildcard tikukits/codec/cbor/*.c)
-SRCS += $(wildcard tikukits/codec/json/*.c)
-SRCS += $(wildcard tikukits/codec/protobuf/*.c)
-SRCS += $(wildcard tikukits/codec/hex/*.c)
-SRCS += $(wildcard tikukits/crypto/aes128/*.c)
-SRCS += $(wildcard tikukits/crypto/sha256/*.c)
-SRCS += $(wildcard tikukits/crypto/hmac/*.c)
-SRCS += $(wildcard tikukits/crypto/crc/*.c)
-SRCS += $(wildcard tikukits/crypto/base64/*.c)
-SRCS += $(wildcard tikukits/crypto/hkdf/*.c)
-SRCS += $(wildcard tikukits/crypto/gcm/*.c)
-# TLS requires TIKU_KITS_CRYPTO_TLS_RNG_FILL; compile only with HAS_TLS=1
-ifeq ($(HAS_TLS),1)
-SRCS += $(wildcard tikukits/crypto/tls/*.c)
+
+ifeq ($(TIKU_KIT_GFX_ENABLE),1)
+CFLAGS += -DTIKU_KIT_GFX_ENABLE=1
+SRCS   += $(wildcard tikukits/gfx/*.c)
+SRCS   += $(wildcard tikukits/gfx/fonts/*.c)
+SRCS   += $(wildcard tikukits/gfx/icons/*.c)
 endif
 
+ifeq ($(TIKU_KIT_UI_ENABLE),1)
+CFLAGS += -DTIKU_KIT_UI_ENABLE=1
+SRCS   += $(wildcard tikukits/ui/*.c)
+SRCS   += $(wildcard tikukits/ui/widgets/*.c)
 endif
+
+ifeq ($(TIKU_KIT_EPAPER_ENABLE),1)
+CFLAGS += -DTIKU_KIT_EPAPER_ENABLE=1
+SRCS   += $(wildcard tikukits/epaper/*.c)
+SRCS   += $(wildcard tikukits/epaper/pervasive_itc/*.c)
+endif
+
+ifeq ($(TIKU_KIT_NET_ENABLE),1)
+CFLAGS += -DTIKU_KIT_NET_ENABLE=1
+SRCS   += $(wildcard tikukits/net/slip/*.c)
+SRCS   += $(wildcard tikukits/net/ipv4/*.c)
+SRCS   += $(wildcard tikukits/net/http/*.c)
+SRCS   += $(wildcard tikukits/net/mqtt/*.c)
+endif
+
+ifeq ($(TIKU_KIT_CRYPTO_ENABLE),1)
+CFLAGS += -DTIKU_KIT_CRYPTO_ENABLE=1
+SRCS   += $(wildcard tikukits/crypto/sha256/*.c)
+SRCS   += $(wildcard tikukits/crypto/base64/*.c)
+SRCS   += $(wildcard tikukits/crypto/crc/*.c)
+SRCS   += $(wildcard tikukits/crypto/gcm/*.c)
+SRCS   += $(wildcard tikukits/crypto/aes128/*.c)
+SRCS   += $(wildcard tikukits/crypto/hkdf/*.c)
+SRCS   += $(wildcard tikukits/crypto/hmac/*.c)
+# TLS pulls in additional code; gated separately on HAS_TLS=1
+# because tiku_kits_crypto_tls requires the platform to provide
+# TIKU_KITS_CRYPTO_TLS_RNG_FILL.
+ifeq ($(HAS_TLS),1)
+SRCS   += $(wildcard tikukits/crypto/tls/*.c)
+endif
+endif
+
+ifeq ($(TIKU_KIT_TIME_ENABLE),1)
+CFLAGS += -DTIKU_KIT_TIME_ENABLE=1
+SRCS   += tikukits/time/tiku_kits_time.c
+SRCS   += $(wildcard tikukits/time/ntp/*.c)
+endif
+
+ifeq ($(TIKU_KIT_CODEC_ENABLE),1)
+CFLAGS += -DTIKU_KIT_CODEC_ENABLE=1
+SRCS   += $(wildcard tikukits/codec/cbor/*.c)
+SRCS   += $(wildcard tikukits/codec/json/*.c)
+SRCS   += $(wildcard tikukits/codec/protobuf/*.c)
+SRCS   += $(wildcard tikukits/codec/hex/*.c)
+endif
+
+ifeq ($(TIKU_KIT_MATHS_ENABLE),1)
+CFLAGS += -DTIKU_KIT_MATHS_ENABLE=1
+SRCS   += $(wildcard tikukits/maths/linear_algebra/*.c)
+SRCS   += $(wildcard tikukits/maths/statistics/*.c)
+SRCS   += $(wildcard tikukits/maths/distance/*.c)
+endif
+
+ifeq ($(TIKU_KIT_DS_ENABLE),1)
+CFLAGS += -DTIKU_KIT_DS_ENABLE=1
+SRCS   += $(wildcard tikukits/ds/array/*.c)
+SRCS   += $(wildcard tikukits/ds/queue/*.c)
+SRCS   += $(wildcard tikukits/ds/pqueue/*.c)
+SRCS   += $(wildcard tikukits/ds/stack/*.c)
+SRCS   += $(wildcard tikukits/ds/ringbuf/*.c)
+SRCS   += $(wildcard tikukits/ds/bitmap/*.c)
+SRCS   += $(wildcard tikukits/ds/list/*.c)
+SRCS   += $(wildcard tikukits/ds/btree/*.c)
+SRCS   += $(wildcard tikukits/ds/sortarray/*.c)
+SRCS   += $(wildcard tikukits/ds/htable/*.c)
+SRCS   += $(wildcard tikukits/ds/sm/*.c)
+SRCS   += $(wildcard tikukits/ds/bloom/*.c)
+SRCS   += $(wildcard tikukits/ds/circlog/*.c)
+SRCS   += $(wildcard tikukits/ds/deque/*.c)
+SRCS   += $(wildcard tikukits/ds/trie/*.c)
+SRCS   += $(wildcard tikukits/ds/timerwheel/*.c)
+endif
+
+ifeq ($(TIKU_KIT_ML_ENABLE),1)
+CFLAGS += -DTIKU_KIT_ML_ENABLE=1
+SRCS   += $(wildcard tikukits/ml/regression/*.c)
+SRCS   += $(wildcard tikukits/ml/classification/*.c)
+endif
+
+ifeq ($(TIKU_KIT_SENSORS_ENABLE),1)
+CFLAGS += -DTIKU_KIT_SENSORS_ENABLE=1
+SRCS   += $(wildcard tikukits/sensors/temperature/*.c)
+endif
+
+ifeq ($(TIKU_KIT_SIGFEATURES_ENABLE),1)
+CFLAGS += -DTIKU_KIT_SIGFEATURES_ENABLE=1
+SRCS   += $(wildcard tikukits/sigfeatures/peak/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/zcr/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/histogram/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/delta/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/goertzel/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/zscore/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/scale/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/ema/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/median/*.c)
+SRCS   += $(wildcard tikukits/sigfeatures/skip/*.c)
+endif
+
+ifeq ($(TIKU_KIT_TEXTCOMPRESSION_ENABLE),1)
+CFLAGS += -DTIKU_KIT_TEXTCOMPRESSION_ENABLE=1
+SRCS   += $(wildcard tikukits/textcompression/rle/*.c)
+SRCS   += $(wildcard tikukits/textcompression/bpe/*.c)
+SRCS   += $(wildcard tikukits/textcompression/heatshrink/*.c)
+endif
+
+endif # HAS_TIKUKITS
 
 # Object files in build directory
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
+
+ifneq ($(BASIC_PROGRAM),)
+# Append the embedded-BASIC object directly (the recipe lives below
+# `all:` so it doesn't accidentally become the default goal).
+OBJS += $(TIKU_BASIC_EMBEDDED_O)
+endif
 
 # ---------------------------------------------------------------------------
 # Output
@@ -691,6 +1073,22 @@ $(TARGET): $(OBJS)
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Embedded BASIC: the generated .c lives inside $(BUILD_DIR), so the
+# pattern rule above can't reach it (it would loop on the prefix).
+# Use explicit rules for both generation and compilation. These are
+# defined AFTER `all:` so the embedded .c file does not steal the
+# default goal.
+ifneq ($(BASIC_PROGRAM),)
+$(TIKU_BASIC_EMBEDDED_C): $(BASIC_PROGRAM) tools/bas_to_c.py
+	@mkdir -p $(dir $@)
+	@echo "  [bas]   $< -> $@"
+	@python3 tools/bas_to_c.py $< $@
+
+$(TIKU_BASIC_EMBEDDED_O): $(TIKU_BASIC_EMBEDDED_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+endif
 
 size: $(TARGET)
 	@echo ""

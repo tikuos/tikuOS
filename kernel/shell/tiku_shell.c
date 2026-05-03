@@ -101,6 +101,9 @@
 #if TIKU_SHELL_CMD_CALC
 #include "commands/tiku_shell_cmd_calc.h"
 #endif
+#if TIKU_SHELL_CMD_BASIC
+#include "commands/tiku_shell_cmd_basic.h"
+#endif
 #if TIKU_SHELL_CMD_JOBS
 #include "commands/tiku_shell_cmd_every.h"
 #include "commands/tiku_shell_cmd_once.h"
@@ -214,6 +217,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_CALC
     {"calc",    "Integer arithmetic",          tiku_shell_cmd_calc},
+#endif
+#if TIKU_SHELL_CMD_BASIC
+    {"basic",   "Tiku BASIC interpreter",      tiku_shell_cmd_basic},
 #endif
 #if TIKU_SHELL_CMD_CLEAR
     {"clear",   "Clear screen (ANSI)",         tiku_shell_cmd_clear},

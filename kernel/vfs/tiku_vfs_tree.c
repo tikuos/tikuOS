@@ -1205,6 +1205,100 @@ static const tiku_vfs_node_t sys_device_children[] = {
     { "version", TIKU_VFS_FILE, device_version_read, NULL,              NULL, 0 },
 };
 
+/*---------------------------------------------------------------------------*/
+/* /sys/init -- per-slot init-table entries                                  */
+/*---------------------------------------------------------------------------*/
+/*
+ * Mirror the FRAM-backed init table at /sys/init/<idx>/{seq,name,
+ * cmd,enable}. Reading is always available; writing `enable` is the
+ * single mutating path so a BASIC program (or any VFS client) can
+ * enable / disable a boot entry without going through the shell.
+ *
+ * Add / remove of entries is intentionally NOT exposed here -- those
+ * are multi-field operations that don't fit single-node writes.
+ * Use the `init` shell command (or its parser API) for those.
+ *
+ * Slot count is fixed at TIKU_INIT_MAX_ENTRIES (default 8); empty
+ * slots return placeholder text so a passive `tree /sys/init` works
+ * regardless of the table's fill level.
+ */
+#if TIKU_INIT_ENABLE
+#include <kernel/init/tiku_init.h>
+
+static int
+init_count_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", (unsigned)tiku_init_count());
+}
+
+#define INIT_VFS_FUNCS(N)                                                     \
+static int init_seq_##N##_read(char *buf, size_t max)                         \
+{                                                                             \
+    const tiku_init_entry_t *e = tiku_init_get(N);                            \
+    if (!e) return snprintf(buf, max, "(none)\n");                            \
+    return snprintf(buf, max, "%u\n", (unsigned)e->seq);                      \
+}                                                                             \
+static int init_name_##N##_read(char *buf, size_t max)                        \
+{                                                                             \
+    const tiku_init_entry_t *e = tiku_init_get(N);                            \
+    if (!e) return snprintf(buf, max, "\n");                                  \
+    return snprintf(buf, max, "%s\n", e->name);                               \
+}                                                                             \
+static int init_cmd_##N##_read(char *buf, size_t max)                         \
+{                                                                             \
+    const tiku_init_entry_t *e = tiku_init_get(N);                            \
+    if (!e) return snprintf(buf, max, "\n");                                  \
+    return snprintf(buf, max, "%s\n", e->cmd);                                \
+}                                                                             \
+static int init_enable_##N##_read(char *buf, size_t max)                      \
+{                                                                             \
+    const tiku_init_entry_t *e = tiku_init_get(N);                            \
+    if (!e) return snprintf(buf, max, "0\n");                                 \
+    return snprintf(buf, max, "%u\n", (unsigned)e->enabled);                  \
+}                                                                             \
+static int init_enable_##N##_write(const char *buf, size_t len)               \
+{                                                                             \
+    const tiku_init_entry_t *e = tiku_init_get(N);                            \
+    (void)len;                                                                \
+    if (!e) return -1;                                                        \
+    return tiku_init_enable(e->name, (uint8_t)(buf[0] != '0'));               \
+}                                                                             \
+static const tiku_vfs_node_t init_##N##_children[] = {                        \
+    { "seq",    TIKU_VFS_FILE, init_seq_##N##_read,    NULL,                  \
+      NULL, 0 },                                                              \
+    { "name",   TIKU_VFS_FILE, init_name_##N##_read,   NULL,                  \
+      NULL, 0 },                                                              \
+    { "cmd",    TIKU_VFS_FILE, init_cmd_##N##_read,    NULL,                  \
+      NULL, 0 },                                                              \
+    { "enable", TIKU_VFS_FILE, init_enable_##N##_read,                        \
+                                init_enable_##N##_write, NULL, 0 },           \
+}
+
+INIT_VFS_FUNCS(0);
+INIT_VFS_FUNCS(1);
+INIT_VFS_FUNCS(2);
+INIT_VFS_FUNCS(3);
+INIT_VFS_FUNCS(4);
+INIT_VFS_FUNCS(5);
+INIT_VFS_FUNCS(6);
+INIT_VFS_FUNCS(7);
+#if TIKU_INIT_MAX_ENTRIES != 8
+#  error "INIT_VFS_FUNCS expansions assume TIKU_INIT_MAX_ENTRIES == 8"
+#endif
+
+static const tiku_vfs_node_t sys_init_children[] = {
+    { "count", TIKU_VFS_FILE, init_count_read, NULL,  NULL, 0 },
+    { "0", TIKU_VFS_DIR, NULL, NULL, init_0_children, 4 },
+    { "1", TIKU_VFS_DIR, NULL, NULL, init_1_children, 4 },
+    { "2", TIKU_VFS_DIR, NULL, NULL, init_2_children, 4 },
+    { "3", TIKU_VFS_DIR, NULL, NULL, init_3_children, 4 },
+    { "4", TIKU_VFS_DIR, NULL, NULL, init_4_children, 4 },
+    { "5", TIKU_VFS_DIR, NULL, NULL, init_5_children, 4 },
+    { "6", TIKU_VFS_DIR, NULL, NULL, init_6_children, 4 },
+    { "7", TIKU_VFS_DIR, NULL, NULL, init_7_children, 4 },
+};
+#endif /* TIKU_INIT_ENABLE */
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
@@ -1221,6 +1315,10 @@ static const tiku_vfs_node_t sys_children[] = {
     { "htimer",   TIKU_VFS_DIR,  NULL, NULL, sys_htimer_children, 2 },
     { "boot",     TIKU_VFS_DIR,  NULL, NULL, sys_boot_children, 6 },
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
+#if TIKU_INIT_ENABLE
+    { "init",     TIKU_VFS_DIR,  NULL, NULL, sys_init_children,
+      sizeof(sys_init_children) / sizeof(sys_init_children[0]) },
+#endif
 };
 
 static const tiku_vfs_node_t dev_uart_children[] = {
@@ -1261,9 +1359,37 @@ static const tiku_vfs_node_t dev_children[] = {
     { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },
 };
 
-/** Mutable root children: sys + dev + proc (FRAM, written at init) */
+/*---------------------------------------------------------------------------*/
+/* /data — user-data / persisted-state file nodes                            */
+/*---------------------------------------------------------------------------*/
+#if defined(TIKU_SHELL_ENABLE) && TIKU_SHELL_CMD_BASIC
+#include "kernel/shell/basic/tiku_basic.h"
+
+/* Wrap the BASIC bridge in tiku_vfs handler signatures (size_t vs
+ * unsigned int — same type on every TikuOS target but spelled
+ * differently in the two headers). */
+static int
+data_basic_read(char *buf, size_t max)
+{
+    return tiku_basic_vfs_read(buf, (unsigned int)max);
+}
+
+static int
+data_basic_write(const char *buf, size_t len)
+{
+    return tiku_basic_vfs_write(buf, (unsigned int)len);
+}
+
+static const tiku_vfs_node_t data_children[] = {
+    { "basic", TIKU_VFS_FILE, data_basic_read, data_basic_write, NULL, 0 },
+};
+#endif  /* TIKU_SHELL_CMD_BASIC */
+
+/** Mutable root children: sys + dev + proc (+ optionally data).
+ *  Sized for the maximum possible set; `vfs_root.child_count`
+ *  records the actual count populated at init time. */
 static tiku_vfs_node_t __attribute__((section(".persistent")))
-    root_children[3];
+    root_children[4];
 
 /** Mutable root node (FRAM, written at init) */
 static tiku_vfs_node_t __attribute__((section(".persistent")))
@@ -1324,7 +1450,8 @@ tiku_vfs_tree_init(void)
 
     /* Populate root entries */
     root_children[0] = (tiku_vfs_node_t){
-        "sys", TIKU_VFS_DIR, NULL, NULL, sys_children, 15
+        "sys", TIKU_VFS_DIR, NULL, NULL, sys_children,
+        sizeof(sys_children) / sizeof(sys_children[0])
     };
     root_children[1] = (tiku_vfs_node_t){
         "dev", TIKU_VFS_DIR, NULL, NULL, dev_children,
@@ -1335,9 +1462,20 @@ tiku_vfs_tree_init(void)
     proc = tiku_proc_vfs_get();
     root_children[2] = *proc;
 
-    vfs_root = (tiku_vfs_node_t){
-        "", TIKU_VFS_DIR, NULL, NULL, root_children, 3
-    };
+    {
+        uint8_t n_root = 3;
+#if defined(TIKU_SHELL_ENABLE) && TIKU_SHELL_CMD_BASIC
+        root_children[3] = (tiku_vfs_node_t){
+            "data", TIKU_VFS_DIR, NULL, NULL,
+            data_children,
+            sizeof(data_children) / sizeof(data_children[0])
+        };
+        n_root = 4;
+#endif
+        vfs_root = (tiku_vfs_node_t){
+            "", TIKU_VFS_DIR, NULL, NULL, root_children, n_root
+        };
+    }
 
     tiku_mpu_lock_nvm(mpu_saved);
 

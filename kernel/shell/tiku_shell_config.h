@@ -129,14 +129,39 @@
 #ifndef TIKU_SHELL_CMD_ECHO
 #define TIKU_SHELL_CMD_ECHO    1  /**< echo    - Print arguments + newline */
 #endif
+/* `lcd` is only useful on boards that physically wire an LCD panel
+ * to the LCD_C peripheral (currently FR6989 LaunchPad). Default it
+ * on / off based on the board header's TIKU_BOARD_HAS_LCD; user
+ * override via -DTIKU_SHELL_CMD_LCD still wins. */
 #ifndef TIKU_SHELL_CMD_LCD
-#define TIKU_SHELL_CMD_LCD     1  /**< lcd     - Drive segment-LCD interface */
+#  if defined(TIKU_BOARD_HAS_LCD) && TIKU_BOARD_HAS_LCD
+#    define TIKU_SHELL_CMD_LCD 1  /**< lcd     - Drive segment-LCD interface */
+#  else
+#    define TIKU_SHELL_CMD_LCD 0
+#  endif
 #endif
 #ifndef TIKU_SHELL_CMD_WATCH
 #define TIKU_SHELL_CMD_WATCH   1  /**< watch   - Periodic VFS read until Ctrl+C */
 #endif
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
+#endif
+/* `basic` is opt-in: the interpreter is ~3.5 KB of code plus an
+ * arena allocation (~1.3 KB at default sizing).  The 3.5 KB push
+ * most shell-enabled builds past the 48 KB lower-FRAM cap, so the
+ * Makefile *requires* MEMORY_MODEL=large alongside BASIC and
+ * refuses the build otherwise (override with
+ * TIKU_SHELL_BASIC_ALLOW_SMALL=1 only if you know your part has
+ * lower-FRAM headroom).  Recommended invocation:
+ *
+ *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
+ *        TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
+ *
+ * On larger parts (FR5994 / FR6989) you can pair this with bumped
+ * arena sizing via EXTRA_CFLAGS, e.g.
+ *   EXTRA_CFLAGS="-DTIKU_BASIC_PROGRAM_LINES=64"  */
+#ifndef TIKU_SHELL_CMD_BASIC
+#define TIKU_SHELL_CMD_BASIC   0  /**< basic   - Tiku BASIC interpreter REPL */
 #endif
 #ifndef TIKU_SHELL_CMD_JOBS
 #define TIKU_SHELL_CMD_JOBS    1  /**< jobs    - every/once/jobs */
