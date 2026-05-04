@@ -175,23 +175,12 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
-    /* Variable A$..Z$. */
-    if (is_alpha(**p) && *(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
-        uint8_t idx = (uint8_t)(to_upper(**p) - 'A');
-        const char *v = basic_strvars[idx];
-        if (v == NULL) v = "";
-        if (strlen(v) + 1u > cap) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
-            return -1;
-        }
-        strcpy(out, v);
-        (*p) += 2;
-        return 0;
-    }
-
     /* String functions: LEFT$(s, n)  RIGHT$(s, n)  MID$(s, i [, n])
-     *                   CHR$(n)      STR$(n) */
+     *                   CHR$(n)      STR$(n)
+     *
+     * These match before the bare variable lookup so an identifier
+     * that happens to match a function name is dispatched to the
+     * function rather than treated as a variable. */
     if (match_kw(p, "LEFT$")) {
         char src[TIKU_BASIC_STR_BUF_CAP];
         long n;
@@ -439,6 +428,178 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
+
+    /* UCASE$(s) / LCASE$(s) -- ASCII case conversion. */
+    {
+        int  upper = 0;
+        int  matched = 0;
+        if (match_kw(p, "UCASE$"))      { upper = 1; matched = 1; }
+        else if (match_kw(p, "LCASE$")) { upper = 0; matched = 1; }
+        if (matched) {
+            char tmp[TIKU_BASIC_STR_BUF_CAP];
+            int  i;
+            skip_ws(p);
+            if (**p != '(') goto fn_paren_err;
+            (*p)++;
+            if (parse_strexpr(p, tmp, sizeof(tmp)) != 0) return -1;
+            skip_ws(p);
+            if (**p != ')') goto fn_paren_err;
+            (*p)++;
+            for (i = 0; tmp[i] != '\0' && (size_t)i + 1u < cap; i++) {
+                char c = tmp[i];
+                if (upper && c >= 'a' && c <= 'z') {
+                    c = (char)(c - 32);
+                } else if (!upper && c >= 'A' && c <= 'Z') {
+                    c = (char)(c + 32);
+                }
+                out[i] = c;
+            }
+            if ((size_t)i >= cap) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                return -1;
+            }
+            out[i] = '\0';
+            return 0;
+        }
+    }
+    /* LTRIM$(s) / RTRIM$(s) -- strip leading / trailing whitespace
+     * (space / tab / CR / LF).  Whitespace inside the string is
+     * preserved. */
+    {
+        int  leading = 0;
+        int  matched = 0;
+        if (match_kw(p, "LTRIM$"))      { leading = 1; matched = 1; }
+        else if (match_kw(p, "RTRIM$")) { leading = 0; matched = 1; }
+        if (matched) {
+            char tmp[TIKU_BASIC_STR_BUF_CAP];
+            int  i, n;
+            skip_ws(p);
+            if (**p != '(') goto fn_paren_err;
+            (*p)++;
+            if (parse_strexpr(p, tmp, sizeof(tmp)) != 0) return -1;
+            skip_ws(p);
+            if (**p != ')') goto fn_paren_err;
+            (*p)++;
+            n = (int)strlen(tmp);
+            if (leading) {
+                int s = 0;
+                while (tmp[s] == ' ' || tmp[s] == '\t' ||
+                       tmp[s] == '\r' || tmp[s] == '\n') s++;
+                if ((size_t)(n - s) + 1u > cap) {
+                    basic_error = 1;
+                    SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                    return -1;
+                }
+                for (i = 0; i < n - s; i++) out[i] = tmp[s + i];
+                out[i] = '\0';
+            } else {
+                int e = n;
+                while (e > 0 &&
+                       (tmp[e - 1] == ' '  || tmp[e - 1] == '\t' ||
+                        tmp[e - 1] == '\r' || tmp[e - 1] == '\n')) {
+                    e--;
+                }
+                if ((size_t)e + 1u > cap) {
+                    basic_error = 1;
+                    SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                    return -1;
+                }
+                for (i = 0; i < e; i++) out[i] = tmp[i];
+                out[i] = '\0';
+            }
+            return 0;
+        }
+    }
+    /* SPACE$(n) -- a string of n space characters. */
+    if (match_kw(p, "SPACE$")) {
+        long n;
+        long i;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        n = parse_expr(p);
+        if (basic_error) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (n < 0) n = 0;
+        if ((size_t)n + 1u > cap) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        for (i = 0; i < n; i++) out[i] = ' ';
+        out[n] = '\0';
+        return 0;
+    }
+    /* STRING$(n, ch)   -- repeat ch n times. ch may be a number
+     *                     (ASCII code) or a single-character string. */
+    if (match_kw(p, "STRING$")) {
+        long n;
+        char fill = ' ';
+        long i;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        n = parse_expr(p);
+        if (basic_error) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST);
+            return -1;
+        }
+        (*p)++;
+        skip_ws(p);
+        if (peek_string_expr(*p)) {
+            char tmp[TIKU_BASIC_STR_BUF_CAP];
+            if (parse_strexpr(p, tmp, sizeof(tmp)) != 0) return -1;
+            fill = tmp[0];
+        } else {
+            long v = parse_expr(p);
+            if (basic_error) return -1;
+            fill = (char)(v & 0xFF);
+        }
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (n < 0) n = 0;
+        if ((size_t)n + 1u > cap) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        for (i = 0; i < n; i++) out[i] = fill;
+        out[n] = '\0';
+        return 0;
+    }
+
+    /* Bare string variable: A$ / NAME$ / etc.  Must come AFTER the
+     * function-name matchers above so that LEFT$(...) and friends
+     * aren't mis-tokenised as a variable named LEFT followed by a
+     * stray `$` and `(`.
+     *
+     * For arrays of named string variables we'd need
+     * `NAME$(idx)` -- not supported (string arrays are still
+     * single-letter; see DIM). */
+    {
+        const char *save = *p;
+        int idx;
+        int is_str;
+        if (parse_var_full(p, &idx, &is_str) && is_str) {
+            const char *v = basic_strvars[idx];
+            if (v == NULL) v = "";
+            if (strlen(v) + 1u > cap) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                return -1;
+            }
+            strcpy(out, v);
+            return 0;
+        }
+        *p = save;
+    }
 
     basic_error = 1;
     SHELL_PRINTF(SH_RED "? string expected\n" SH_RST);

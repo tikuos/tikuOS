@@ -325,10 +325,19 @@ The maximum length of any single string-expression result is
 |---|---|---|---|
 | Numeric variables (26) | `A`..`Z` | 0 | `RUN` start |
 | String variables (26) | `A$`..`Z$` | empty (NULL) | `RUN` start |
+| Multi-letter numeric (16) | `NAME`, `COUNT`, `X1`, ... | 0 | `RUN` start |
+| Multi-letter string (16) | `NAME$`, `BUF$`, ... | empty (NULL) | `RUN` start |
 | Integer arrays (up to 26) | `DIM A(10)` then `A(i)` | 0 | `RUN` start |
 | 2D integer arrays | `DIM A(m, n)` then `A(i, j)` | 0 | `RUN` start |
 | String arrays (up to 26) | `DIM A$(10)` then `A$(i)` | empty | `RUN` start |
 | 2D string arrays | `DIM A$(m, n)` then `A$(i, j)` | empty | `RUN` start |
+
+Multi-letter names are 1..7 characters of ASCII letters / digits /
+underscore.  They share the same value space as the single-letter
+slots (`A` and `A1` are independent), are case-insensitive, and the
+named pool is bounded by `TIKU_BASIC_NAMEDVAR_MAX` (default 16) for
+each of numeric and string.  Slots are allocated lazily on first
+mention in a program.  Arrays remain single-letter only.
 
 `DIM` allocates from the BASIC arena. Numeric `A` and string `A$`
 are independent slots — you can DIM both with the same letter.
@@ -391,6 +400,7 @@ Operators in **decreasing** precedence:
 |---|---|---|
 | Function call / array | `name(...)`, `A(i)` | tightest |
 | Primary | literal, paren, var | |
+| Exponent | `^` | right-associative; `-2^2` = `-4` |
 | Unary | `-`, `+`, `NOT` | bitwise NOT |
 | Multiplicative | `*`, `/` | integer division truncates |
 | Additive | `+`, `-` | |
@@ -412,7 +422,8 @@ expr_and    := expr_rel (AND expr_rel)*
 expr_rel    := expr_sum [relop expr_sum]
 expr_sum    := expr_term ((+|-) expr_term)*
 expr_term   := expr_unary ((*|/) expr_unary)*
-expr_unary  := (-|+|NOT)? expr_prim
+expr_unary  := (-|+|NOT)? expr_pow
+expr_pow    := expr_prim (^ expr_pow)?
 expr_prim   := number | TRUE | FALSE | PI | call | array | var | (expr)
 ```
 
@@ -1566,37 +1577,48 @@ cd tests/host && make test_basic_smoke && ./test_basic_smoke
 ## Keyword index
 
 ```
-Statements    DATA       FOR       LET       POKE      SLEEP
-              DEF        GOSUB     LIST      PRINT     STEP
-              DELAY      GOTO      LOAD      READ      STOP
-              DIGWRITE   I2CWRITE  NEXT      REBOOT    SWAP
-              DIM        IF        NEW       REM       THEN
-              ELSE       INPUT     ON        RESTORE   TO
-              END        LED       PIN       RESUME    TRACE
-              END IF     ENDIF     ELSE      RETURN    UNTIL
-              EVERY      WEND      WHILE     REPEAT    USING
-              SAVE       VFSWRITE
+Statements    CASE       DATA       FOR       LET       POKE
+              CONTINUE   DEF        GOSUB     LIST      PRINT
+              DELAY      GOTO       LOAD      READ      STOP
+              DIGWRITE   I2CWRITE   NEXT      REBOOT    SWAP
+              DIM        IF         NEW       REM       THEN
+              ELSE       INPUT      ON        RESTORE   TO
+              END        LED        PIN       RESUME    TRACE
+              END IF     ENDIF      ELSE      RETURN    UNTIL
+              END SELECT EVERY      WEND      WHILE     REPEAT
+              EXIT       SAVE       SELECT    SLEEP     USING
+              VFSWRITE
                          (ON ERROR / ON CHANGE / ON GOTO / ON GOSUB
                           all dispatch via the ON keyword)
 
+LHS slice     LEFT$(...) = expr$
+              RIGHT$(...) = expr$
+              MID$(...) = expr$
+
 Functions     ABS    ASC    BIN$    CHR$    COS     DIGREAD
-              FDIV   FMUL   FSTR$   HEX$    I2CREAD INT
-              LEFT$  LEN    MAX     MID$    MILLIS  MIN
-              MOD    PEEK   RIGHT$  RND     SECS    SGN
-              SHL    SHR    SIN     SQR     STR$    TAN
-              VAL    VFSREAD
+              FDIV   FMUL   FSTR$   HEX$    I2CREAD INSTR
+              INT    LCASE$ LEFT$   LEN     LTRIM$  MAX
+              MID$   MILLIS MIN     MOD     PEEK    RIGHT$
+              RND    RTRIM$ SECS    SGN     SHL     SHR
+              SIN    SPACE$ SQR     STR$    STRING$ TAN
+              UCASE$ VAL    VFSREAD VFSREAD$
+
+Print pseudo  TAB(n)   SPC(n)
+                       (only valid inside PRINT)
 
 Direct        AUTO   BYE    DIR     EXIT    HELP    LIST
               LOAD   NEW    QUIT    RENUM   RUN     SAVE
 
-Operators     +  -  *  /        =  <  >  <=  >=  <>
+Operators     +  -  *  /  ^      =  <  >  <=  >=  <>
               AND  OR  XOR  NOT
               :   (multi-stmt)
 
 Constants     TRUE  FALSE  PI
 
-Variables     A..Z              numeric scalars
-              A$..Z$            string scalars
+Variables     A..Z              single-letter numeric
+              A$..Z$            single-letter string
+              <ident>           multi-letter numeric (1..7 chars)
+              <ident>$          multi-letter string  (1..7 chars)
               DIM A(n)          1D integer array
               DIM A(m, n)       2D integer array
               DIM A$(n)         1D string array

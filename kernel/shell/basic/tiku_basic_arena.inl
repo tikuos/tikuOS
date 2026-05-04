@@ -35,14 +35,23 @@
 /* ARENA SIZING                                                              */
 /*---------------------------------------------------------------------------*/
 
+/* Total var-table width = 26 single-letter A..Z slots + named pool.
+ * Used when sizing the arena and when walking var arrays. */
+#define BASIC_VAR_TABLE_LEN  (26u + (unsigned)TIKU_BASIC_NAMEDVAR_MAX)
+
 /* Compute the arena size we need for the configured limits, with a
  * small slack for word alignment between sub-allocations. */
 #if TIKU_BASIC_STRVARS_ENABLE
 #define BASIC_ARENA_STR_BYTES                                               \
-    (sizeof(char *) * 26u + (size_t)TIKU_BASIC_STR_HEAP_BYTES)
+    (sizeof(char *) * BASIC_VAR_TABLE_LEN +                                 \
+     (size_t)TIKU_BASIC_STR_HEAP_BYTES +                                    \
+     TIKU_BASIC_NAMEDVAR_LEN * (size_t)TIKU_BASIC_NAMEDVAR_MAX)
 #else
 #define BASIC_ARENA_STR_BYTES 0u
 #endif
+
+#define BASIC_ARENA_NAMEDVAR_BYTES \
+    (TIKU_BASIC_NAMEDVAR_LEN * (size_t)TIKU_BASIC_NAMEDVAR_MAX)
 #if TIKU_BASIC_DEFN_ENABLE
 #define BASIC_ARENA_DEFN_BYTES \
     (sizeof(basic_defn_t) * TIKU_BASIC_DEFN_MAX)
@@ -75,12 +84,13 @@
 #define BASIC_ARENA_BYTES                                                   \
     ((tiku_mem_arch_size_t)(                                                \
         sizeof(basic_line_t)       * TIKU_BASIC_PROGRAM_LINES +             \
-        sizeof(long)               * 26u +                                  \
+        sizeof(long)               * BASIC_VAR_TABLE_LEN +                  \
         sizeof(uint16_t)           * TIKU_BASIC_GOSUB_DEPTH +               \
         sizeof(basic_for_frame_t)  * TIKU_BASIC_FOR_DEPTH +                 \
         sizeof(basic_loop_frame_t) * TIKU_BASIC_LOOP_DEPTH +                \
         sizeof(basic_every_t)      * TIKU_BASIC_EVERY_MAX +                 \
         sizeof(basic_onchg_t)      * TIKU_BASIC_ONCHG_MAX +                 \
+        BASIC_ARENA_NAMEDVAR_BYTES +                                        \
         BASIC_ARENA_STR_BYTES +                                             \
         BASIC_ARENA_DEFN_BYTES +                                            \
         BASIC_ARENA_ARRAYS_BYTES +                                          \
@@ -121,7 +131,10 @@ basic_alloc_state(void)
     prog = (basic_line_t *)tiku_arena_alloc(&basic_arena,
         (tiku_mem_arch_size_t)(sizeof(basic_line_t) * TIKU_BASIC_PROGRAM_LINES));
     basic_vars = (long *)tiku_arena_alloc(&basic_arena,
-        (tiku_mem_arch_size_t)(sizeof(long) * 26u));
+        (tiku_mem_arch_size_t)(sizeof(long) * BASIC_VAR_TABLE_LEN));
+    basic_namedvar_names = (char (*)[TIKU_BASIC_NAMEDVAR_LEN])
+        tiku_arena_alloc(&basic_arena,
+        (tiku_mem_arch_size_t)BASIC_ARENA_NAMEDVAR_BYTES);
     gosub_stack = (uint16_t *)tiku_arena_alloc(&basic_arena,
         (tiku_mem_arch_size_t)(sizeof(uint16_t) * TIKU_BASIC_GOSUB_DEPTH));
     for_stack = (basic_for_frame_t *)tiku_arena_alloc(&basic_arena,
@@ -138,7 +151,10 @@ basic_alloc_state(void)
                                 TIKU_BASIC_ONCHG_MAX));
 #if TIKU_BASIC_STRVARS_ENABLE
     basic_strvars = (char **)tiku_arena_alloc(&basic_arena,
-        (tiku_mem_arch_size_t)(sizeof(char *) * 26u));
+        (tiku_mem_arch_size_t)(sizeof(char *) * BASIC_VAR_TABLE_LEN));
+    basic_namedstrvar_names = (char (*)[TIKU_BASIC_NAMEDVAR_LEN])
+        tiku_arena_alloc(&basic_arena,
+        (tiku_mem_arch_size_t)BASIC_ARENA_NAMEDVAR_BYTES);
     basic_str_heap = (char *)tiku_arena_alloc(&basic_arena,
         (tiku_mem_arch_size_t)TIKU_BASIC_STR_HEAP_BYTES);
 #endif
@@ -157,9 +173,11 @@ basic_alloc_state(void)
 
     if (prog == NULL || basic_vars == NULL || gosub_stack == NULL ||
         for_stack == NULL || loop_stack == NULL ||
-        basic_everys == NULL || basic_onchgs == NULL
+        basic_everys == NULL || basic_onchgs == NULL ||
+        basic_namedvar_names == NULL
 #if TIKU_BASIC_STRVARS_ENABLE
-        || basic_strvars == NULL || basic_str_heap == NULL
+        || basic_strvars == NULL || basic_str_heap == NULL ||
+        basic_namedstrvar_names == NULL
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
         || basic_defns == NULL
@@ -176,9 +194,15 @@ basic_alloc_state(void)
 
     /* Arena reset doesn't zero memory, so initialise explicitly. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
-    for (i = 0; i < 26u; i++) basic_vars[i] = 0;
+    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_vars[i] = 0;
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        basic_namedvar_names[i][0] = '\0';
+    }
 #if TIKU_BASIC_STRVARS_ENABLE
-    for (i = 0; i < 26u; i++) basic_strvars[i] = NULL;
+    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_strvars[i] = NULL;
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        basic_namedstrvar_names[i][0] = '\0';
+    }
     basic_str_heap_pos = 0;
 #endif
 #if TIKU_BASIC_DEFN_ENABLE

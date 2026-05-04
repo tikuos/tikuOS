@@ -43,66 +43,127 @@
 static void exec_stmt(const char **p);
 static void exec_stmts(const char **p);
 
+/**
+ * @brief PRINT statement.
+ *
+ * Each item is a numeric or string expression.  Items can be
+ * separated by `,` (which emits a single space between them) or
+ * `;` (no separator).  A trailing `;` suppresses the final newline.
+ *
+ * Two pseudo-functions tap directly into the print stream and so
+ * are recognised here rather than in the expression parser:
+ *   - `TAB(n)` advances output to column `n` (1-based) by emitting
+ *     spaces; if the cursor is already past column `n` it does
+ *     nothing.
+ *   - `SPC(n)` emits `n` spaces unconditionally.
+ *
+ * The print column is tracked locally for this PRINT statement
+ * only -- no global cursor state is maintained, and TAB() acts on
+ * the position relative to the current PRINT, which matches the
+ * common BASIC convention.
+ */
 static void
 exec_print(const char **p)
 {
-    int first = 1;
+    int  col = 0;
+    int  trailing = 0;
     skip_ws(p);
-    while (**p != '\0') {
+    while (**p != '\0' && **p != ':') {
+        /* TAB(n) and SPC(n) -- print-stream-tap pseudo-fns. */
+        if (match_kw(p, "TAB")) {
+            long target;
+            skip_ws(p);
+            if (**p != '(') {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST);
+                return;
+            }
+            (*p)++;
+            target = parse_expr(p);
+            if (basic_error) return;
+            skip_ws(p);
+            if (**p != ')') {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST);
+                return;
+            }
+            (*p)++;
+            while (col < target - 1) {
+                SHELL_PRINTF(" ");
+                col++;
+            }
+            trailing = 0;
+            goto sep;
+        }
+        if (match_kw(p, "SPC")) {
+            long n;
+            skip_ws(p);
+            if (**p != '(') {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST);
+                return;
+            }
+            (*p)++;
+            n = parse_expr(p);
+            if (basic_error) return;
+            skip_ws(p);
+            if (**p != ')') {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST);
+                return;
+            }
+            (*p)++;
+            while (n-- > 0) {
+                SHELL_PRINTF(" ");
+                col++;
+            }
+            trailing = 0;
+            goto sep;
+        }
 #if TIKU_BASIC_STRVARS_ENABLE
         if (peek_string_expr(*p)) {
             char buf[TIKU_BASIC_STR_BUF_CAP];
+            int  i;
             if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
             SHELL_PRINTF("%s", buf);
+            for (i = 0; buf[i] != '\0'; i++) col++;
         } else
 #endif
         {
             long v = parse_expr(p);
+            char nbuf[16];
+            int  n;
             if (basic_error) return;
-            SHELL_PRINTF("%ld", v);
+            n = snprintf(nbuf, sizeof(nbuf), "%ld", v);
+            SHELL_PRINTF("%s", nbuf);
+            if (n > 0) col += n;
         }
-        first = 0;
+        trailing = 0;
+sep:
         skip_ws(p);
-        if (**p == ',') { SHELL_PRINTF(" "); (*p)++; skip_ws(p); continue; }
-        if (**p == ';') { (*p)++;             skip_ws(p); continue; }
+        if (**p == ',') { SHELL_PRINTF(" "); col++; (*p)++; trailing = 1; skip_ws(p); continue; }
+        if (**p == ';') { (*p)++;                       trailing = 1; skip_ws(p); continue; }
         break;
     }
-    (void)first;
-    SHELL_PRINTF("\n");
+    if (!trailing) {
+        SHELL_PRINTF("\n");
+    }
 }
 
 static void
 exec_let(const char **p, int already_consumed_var)
 {
     int   idx;
-    long  v;
-    char  c;
     int   is_string = 0;
+    long  v;
     (void)already_consumed_var;
     skip_ws(p);
-    c = to_upper(**p);
-    if (c < 'A' || c > 'Z') {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST);
-        return;
-    }
-    idx = c - 'A';
-#if TIKU_BASIC_STRVARS_ENABLE
-    /* String var: "A$ = expr". The single letter is followed by `$`,
-     * then by a non-word char (so we don't accidentally swallow
-     * something like `A$X`). */
-    if (*(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
-        is_string = 1;
-        (*p) += 2;
-    } else
-#endif
-    {
-        if (is_word_cont(*(*p + 1))) {
+    if (!parse_var_full(p, &idx, &is_string)) {
+        if (!basic_error) {
             basic_error = 1;
-            SHELL_PRINTF(SH_RED "? bad variable\n" SH_RST);
-            return;
+            SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST);
         }
-        (*p)++;
+        return;
     }
     skip_ws(p);
     if (**p != '=') {
@@ -129,12 +190,149 @@ exec_let(const char **p, int already_consumed_var)
     basic_vars[idx] = v;
 }
 
+#if TIKU_BASIC_STRVARS_ENABLE
+/**
+ * @brief LHS string-slice assignment.
+ *
+ * Three statement forms:
+ *   MID$(A$, start [, n]) = expr$   -- overwrite n chars of A$ at
+ *                                      position `start` (1-based)
+ *                                      with expr$.  If n is omitted,
+ *                                      uses LEN(expr$).
+ *   LEFT$(A$, n)  = expr$           -- overwrite first n chars.
+ *   RIGHT$(A$, n) = expr$           -- overwrite last n chars.
+ *
+ * Length of A$ is NOT changed -- excess source bytes are dropped,
+ * missing source bytes leave the original characters in place
+ * (matching QuickBASIC semantics).  A$ being NULL (unbound) treats
+ * it as an empty string and yields an empty-after-assignment value.
+ *
+ * @param p     Cursor; on entry points at the keyword, on success
+ *              advanced past the RHS expression.
+ * @param kind  Which slice form: 'L' = LEFT$, 'R' = RIGHT$,
+ *              'M' = MID$.
+ */
+static void
+exec_strslice_assign(const char **p, char kind)
+{
+    char      buf[TIKU_BASIC_STR_BUF_CAP];
+    char      rhs[TIKU_BASIC_STR_BUF_CAP];
+    const char *src;
+    size_t    src_len;
+    long      start;          /* 1-based */
+    long      take;
+    int       sidx;
+    char      svar;
+    size_t    rlen;
+    size_t    i;
+
+    skip_ws(p);
+    if (**p != '(') {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST);
+        return;
+    }
+    (*p)++;
+    skip_ws(p);
+    /* Target var: A$..Z$ */
+    svar = to_upper(**p);
+    if (svar < 'A' || svar > 'Z' ||
+        *(*p + 1) != '$' || is_word_cont(*(*p + 2))) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? string var expected\n" SH_RST);
+        return;
+    }
+    sidx = svar - 'A';
+    (*p) += 2;
+    skip_ws(p);
+    if (**p != ',') {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST);
+        return;
+    }
+    (*p)++;
+    take = -1;
+    if (kind == 'M') {
+        start = parse_expr(p);
+        if (basic_error) return;
+        skip_ws(p);
+        if (**p == ',') {
+            (*p)++;
+            take = parse_expr(p);
+            if (basic_error) return;
+        }
+    } else {
+        /* LEFT$ / RIGHT$: only one count argument. */
+        take = parse_expr(p);
+        if (basic_error) return;
+        if (take < 0) take = 0;
+        start = (kind == 'L') ? 1L : -1L;        /* see fixup below */
+    }
+    skip_ws(p);
+    if (**p != ')') {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST);
+        return;
+    }
+    (*p)++;
+    skip_ws(p);
+    if (**p != '=') {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
+        return;
+    }
+    (*p)++;
+    if (parse_strexpr(p, rhs, sizeof(rhs)) != 0) return;
+
+    src = basic_strvars[sidx] ? basic_strvars[sidx] : "";
+    src_len = strlen(src);
+    if (src_len + 1u > sizeof(buf)) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+        return;
+    }
+    memcpy(buf, src, src_len);
+    buf[src_len] = '\0';
+    rlen = strlen(rhs);
+
+    if (kind == 'R') {
+        /* RIGHT$(A$, n) = expr$ -- overwrite the trailing n chars. */
+        if ((size_t)take > src_len) take = (long)src_len;
+        start = (long)src_len - take + 1;        /* 1-based */
+        if (start < 1) start = 1;
+    }
+    if (start < 1 || (size_t)start > src_len) {
+        /* Out-of-range start is a no-op (matches QuickBASIC). */
+        basic_strvars[sidx] = basic_str_alloc(buf, src_len);
+        if (basic_strvars[sidx] == NULL) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? out of string heap\n" SH_RST);
+        }
+        return;
+    }
+    /* For LEFT$ and MID$ without an explicit n, take = -1 means
+     * "use the RHS length" (capped by what's left in the dest). */
+    if (take < 0) take = (long)rlen;
+    if ((size_t)(start - 1 + take) > src_len) {
+        take = (long)src_len - (start - 1);
+    }
+    if ((size_t)take > rlen) take = (long)rlen;
+    for (i = 0; i < (size_t)take; i++) {
+        buf[start - 1 + i] = rhs[i];
+    }
+    basic_strvars[sidx] = basic_str_alloc(buf, src_len);
+    if (basic_strvars[sidx] == NULL) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? out of string heap\n" SH_RST);
+    }
+}
+#endif /* TIKU_BASIC_STRVARS_ENABLE */
+
 static void
 exec_input(const char **p)
 {
     int  idx;
     char buf[TIKU_BASIC_LINE_MAX];
-    char c;
     int  is_string = 0;
     long v;
     const char *q;
@@ -156,26 +354,12 @@ exec_input(const char **p)
         if (**p == ';' || **p == ',') { (*p)++; skip_ws(p); }
     }
 
-    c = to_upper(**p);
-    if (c < 'A' || c > 'Z') {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST);
-        return;
-    }
-    idx = c - 'A';
-#if TIKU_BASIC_STRVARS_ENABLE
-    if (*(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
-        is_string = 1;
-        (*p) += 2;
-    } else
-#endif
-    {
-        if (is_word_cont(*(*p + 1))) {
+    if (!parse_var_full(p, &idx, &is_string)) {
+        if (!basic_error) {
             basic_error = 1;
-            SHELL_PRINTF(SH_RED "? bad variable\n" SH_RST);
-            return;
+            SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST);
         }
-        (*p)++;
+        return;
     }
 
     SHELL_PRINTF("? ");
@@ -348,6 +532,229 @@ exec_return(void)
  *   - Re-entering an active FOR (e.g. `FOR I = 1 TO 5` while a frame
  *     for I already exists) starts a fresh frame on top -- it does
  *     not reuse or close the prior one. */
+
+/*---------------------------------------------------------------------------*/
+/* LOOP-MATCHING SCANNERS                                                    */
+/*---------------------------------------------------------------------------*/
+
+/* Forward decl: find_matching_wend lives further down with the
+ * WHILE / WEND machinery; EXIT WHILE (below) needs it here. */
+static int find_matching_wend(uint16_t start_line);
+
+/**
+ * @brief Scan forward for the NEXT that matches the FOR at
+ *        @p start_line, tracking nested FOR / NEXT depth.
+ *
+ * @return prog[] index of the matching NEXT, or -1 if not found.
+ */
+static int
+find_matching_next(uint16_t start_line)
+{
+    int depth = 1;
+    int idx = prog_next_index((uint16_t)(start_line + 1));
+    while (idx >= 0) {
+        const char *t = prog[idx].text;
+        skip_ws(&t);
+        if      (match_kw(&t, "FOR"))  { depth++; }
+        else if (match_kw(&t, "NEXT")) {
+            depth--;
+            if (depth == 0) return idx;
+        }
+        if (prog[idx].number == 0xFFFFu) break;
+        idx = prog_next_index((uint16_t)(prog[idx].number + 1));
+    }
+    return -1;
+}
+
+/**
+ * @brief Scan forward for the UNTIL that matches the REPEAT at
+ *        @p start_line, tracking nested REPEAT / UNTIL depth.
+ *
+ * @return prog[] index of the matching UNTIL, or -1 if not found.
+ */
+static int
+find_matching_until(uint16_t start_line)
+{
+    int depth = 1;
+    int idx = prog_next_index((uint16_t)(start_line + 1));
+    while (idx >= 0) {
+        const char *t = prog[idx].text;
+        skip_ws(&t);
+        if      (match_kw(&t, "REPEAT")) { depth++; }
+        else if (match_kw(&t, "UNTIL"))  {
+            depth--;
+            if (depth == 0) return idx;
+        }
+        if (prog[idx].number == 0xFFFFu) break;
+        idx = prog_next_index((uint16_t)(prog[idx].number + 1));
+    }
+    return -1;
+}
+
+/*---------------------------------------------------------------------------*/
+/* EXIT / CONTINUE                                                           */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Helper: jump basic_pc to the line AFTER @p idx in prog[].
+ *
+ * If @p idx is the last line, the run ends.
+ */
+static void
+basic_jump_after(int idx)
+{
+    int n = prog_next_index((uint16_t)(prog[idx].number + 1));
+    if (n < 0) {
+        basic_running = 0;
+        basic_pc      = 0;
+        return;
+    }
+    basic_pc     = prog[n].number;
+    basic_pc_set = 1;
+}
+
+/**
+ * @brief EXIT FOR | EXIT WHILE | EXIT REPEAT  -- early exit from the
+ *        innermost matching loop.
+ *
+ * Pops the corresponding frame and advances basic_pc to the line
+ * after the matching NEXT / WEND / UNTIL.  Exits in immediate mode
+ * are rejected because there's no run to terminate.
+ */
+static void
+exec_exit(const char **p)
+{
+    if (!basic_running) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? EXIT outside RUN\n" SH_RST);
+        return;
+    }
+    skip_ws(p);
+    if (match_kw(p, "FOR")) {
+        int idx;
+        if (for_sp == 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? EXIT FOR without FOR\n" SH_RST);
+            return;
+        }
+        idx = find_matching_next(basic_pc);
+        if (idx < 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? FOR without NEXT\n" SH_RST);
+            return;
+        }
+        for_sp--;
+        basic_jump_after(idx);
+        return;
+    }
+    if (match_kw(p, "WHILE")) {
+        int idx;
+        if (loop_sp == 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? EXIT WHILE without WHILE\n" SH_RST);
+            return;
+        }
+        idx = find_matching_wend(loop_stack[loop_sp - 1].back_line);
+        if (idx < 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? WHILE without WEND\n" SH_RST);
+            return;
+        }
+        loop_sp--;
+        basic_jump_after(idx);
+        return;
+    }
+    if (match_kw(p, "REPEAT")) {
+        int idx;
+        if (loop_sp == 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? EXIT REPEAT without REPEAT\n" SH_RST);
+            return;
+        }
+        idx = find_matching_until(loop_stack[loop_sp - 1].back_line);
+        if (idx < 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? REPEAT without UNTIL\n" SH_RST);
+            return;
+        }
+        loop_sp--;
+        basic_jump_after(idx);
+        return;
+    }
+    basic_error = 1;
+    SHELL_PRINTF(SH_RED "? EXIT FOR | WHILE | REPEAT\n" SH_RST);
+}
+
+/**
+ * @brief CONTINUE FOR | CONTINUE WHILE | CONTINUE REPEAT  -- jump to
+ *        the loop's continuation point so it can re-evaluate.
+ *
+ * For FOR, jumps to the NEXT line so the step/compare runs.
+ * For WHILE, jumps to the WHILE line so the condition re-checks.
+ * For REPEAT, jumps to the UNTIL line so the condition runs.
+ */
+static void
+exec_continue(const char **p)
+{
+    if (!basic_running) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? CONTINUE outside RUN\n" SH_RST);
+        return;
+    }
+    skip_ws(p);
+    if (match_kw(p, "FOR")) {
+        int idx;
+        if (for_sp == 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? CONTINUE FOR without FOR\n" SH_RST);
+            return;
+        }
+        idx = find_matching_next(
+            (uint16_t)(for_stack[for_sp - 1].loop_line - 1u));
+        if (idx < 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? FOR without NEXT\n" SH_RST);
+            return;
+        }
+        basic_pc     = prog[idx].number;
+        basic_pc_set = 1;
+        return;
+    }
+    if (match_kw(p, "WHILE")) {
+        if (loop_sp == 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? CONTINUE WHILE without WHILE\n" SH_RST);
+            return;
+        }
+        basic_pc     = loop_stack[loop_sp - 1].back_line;
+        basic_pc_set = 1;
+        return;
+    }
+    if (match_kw(p, "REPEAT")) {
+        int idx;
+        if (loop_sp == 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? CONTINUE REPEAT without REPEAT\n" SH_RST);
+            return;
+        }
+        idx = find_matching_until(loop_stack[loop_sp - 1].back_line);
+        if (idx < 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? REPEAT without UNTIL\n" SH_RST);
+            return;
+        }
+        basic_pc     = prog[idx].number;
+        basic_pc_set = 1;
+        return;
+    }
+    basic_error = 1;
+    SHELL_PRINTF(SH_RED "? CONTINUE FOR | WHILE | REPEAT\n" SH_RST);
+}
+
+/*---------------------------------------------------------------------------*/
+/* FOR / NEXT                                                                */
+/*---------------------------------------------------------------------------*/
+
 static void
 exec_for(const char **p)
 {
@@ -397,7 +804,7 @@ exec_for(const char **p)
         }
     }
     basic_vars[idx]            = e1;
-    for_stack[for_sp].var_idx  = (uint8_t)idx;
+    for_stack[for_sp].var_idx  = (uint16_t)idx;
     for_stack[for_sp].target   = e2;
     for_stack[for_sp].step     = e3;
     /* Loop body starts at the line AFTER the current FOR line. */
@@ -436,7 +843,7 @@ exec_next(const char **p)
     skip_ws(p);
     has_var = parse_var(p, &idx);
     f = &for_stack[for_sp - 1];
-    if (has_var && (uint8_t)idx != f->var_idx) {
+    if (has_var && (uint16_t)idx != f->var_idx) {
         basic_error = 1;
         SHELL_PRINTF(SH_RED "? NEXT mismatch\n" SH_RST);
         return;
@@ -1736,94 +2143,84 @@ exec_until(const char **p)
 }
 
 
-/* SWAP a, b  -- exchange two scalar variables. Both must be the same
- * type (numeric or both string). Avoids the three-line A=tmp, ...
- * idiom and is one of the few statements that's genuinely atomic. */
+/**
+ * @brief SWAP a, b  -- exchange two scalar variables.
+ *
+ * Both operands must be the same type (numeric or both string).
+ * Multi-letter names work for either operand.  Atomic in the
+ * sense that nothing observes the partial state.
+ */
 static void
 exec_swap(const char **p)
 {
-    char c1, c2;
-    int  idx1, idx2;
-    int  is_str = 0;
-    skip_ws(p);
-    c1 = to_upper(**p);
-    if (c1 < 'A' || c1 > 'Z') {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST); return;
-    }
-    idx1 = c1 - 'A';
-#if TIKU_BASIC_STRVARS_ENABLE
-    if (*(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
-        is_str = 1;
-        (*p) += 2;
-    } else
-#endif
-    {
-        if (is_word_cont(*(*p + 1))) {
-            basic_error = 1; SHELL_PRINTF(SH_RED "? bad variable\n" SH_RST); return;
-        }
-        (*p)++;
-    }
-    skip_ws(p);
-    if (**p != ',') {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return;
-    }
-    (*p)++;
-    skip_ws(p);
-    c2 = to_upper(**p);
-    if (c2 < 'A' || c2 > 'Z') {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST); return;
-    }
-    idx2 = c2 - 'A';
-#if TIKU_BASIC_STRVARS_ENABLE
-    if (is_str) {
-        if (*(*p + 1) != '$' || is_word_cont(*(*p + 2))) {
+    int idx1, idx2;
+    int is_str1 = 0, is_str2 = 0;
+
+    if (!parse_var_full(p, &idx1, &is_str1)) {
+        if (!basic_error) {
             basic_error = 1;
-            SHELL_PRINTF(SH_RED "? SWAP type mismatch\n" SH_RST);
-            return;
-        }
-        (*p) += 2;
-        {
-            char *tmp = basic_strvars[idx1];
-            basic_strvars[idx1] = basic_strvars[idx2];
-            basic_strvars[idx2] = tmp;
+            SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST);
         }
         return;
     }
-#endif
-    if (is_word_cont(*(*p + 1))) {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? bad variable\n" SH_RST); return;
+    skip_ws(p);
+    if (**p != ',') {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST);
+        return;
     }
-#if TIKU_BASIC_STRVARS_ENABLE
-    if (*(*p + 1) == '$') {
+    (*p)++;
+    if (!parse_var_full(p, &idx2, &is_str2)) {
+        if (!basic_error) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? variable expected\n" SH_RST);
+        }
+        return;
+    }
+    if (is_str1 != is_str2) {
         basic_error = 1;
         SHELL_PRINTF(SH_RED "? SWAP type mismatch\n" SH_RST);
         return;
     }
+#if TIKU_BASIC_STRVARS_ENABLE
+    if (is_str1) {
+        char *tmp = basic_strvars[idx1];
+        basic_strvars[idx1] = basic_strvars[idx2];
+        basic_strvars[idx2] = tmp;
+        return;
+    }
 #endif
-    (*p)++;
     {
         long tmp = basic_vars[idx1];
         basic_vars[idx1] = basic_vars[idx2];
         basic_vars[idx2] = tmp;
     }
-    (void)idx2;
 }
 
-/* PRINT USING "fmt"; expr  -- formatted output. Only `#` placeholders
- * are interpreted (right-aligned digit positions, space-padded);
- * everything else (digits, `.`, `,`, alpha) is taken literally.
- * Overflow renders the digit positions as `*`. Negatives print with
- * a leading `-` consuming one digit position. */
+/**
+ * @brief PRINT USING -- formatted output.
+ *
+ * Format-string placeholders:
+ *   `#`  -- digit position (right-aligned, space-padded).  A run of
+ *           N `#`s consumes one numeric argument; overflow renders
+ *           the run as `*` characters.  Negatives consume one digit
+ *           position for the leading `-`.
+ *   `&`  -- whole-string field (no truncation, no padding).
+ *           Consumes one string argument.
+ *
+ * Any other character in the format string is emitted literally.
+ *
+ * Multiple arguments may be supplied after the format, separated by
+ * `,` or `;`; placeholders are filled in left-to-right.  When the
+ * format has no `#` and no `&`, the format is printed literally
+ * with no argument required.
+ */
 static void
 exec_print_using(const char **p)
 {
     char fmt[32];
-    char digits[16];
-    long v;
     int  flen = 0;
-    int  digit_count = 0;
-    int  i, dpos = 0, neg = 0;
-    int  pad;
+    int  i;
 
     skip_ws(p);
     if (**p != '"') {
@@ -1845,47 +2242,110 @@ exec_print_using(const char **p)
         return;
     }
     (*p)++;
-    v = parse_expr(p);
-    if (basic_error) return;
-    for (i = 0; i < flen; i++) {
-        if (fmt[i] == '#') digit_count++;
-    }
-    if (digit_count == 0) {
-        SHELL_PRINTF("%s\n", fmt);
-        return;
-    }
-    if (v < 0) { neg = 1; v = -v; }
-    {
-        int n = snprintf(digits, sizeof(digits), "%ld", v);
-        int needed = (neg ? n + 1 : n);
-        if (needed > digit_count) {
-            /* Overflow -- replace digit positions with '*'. */
-            for (i = 0; i < flen; i++) {
-                char e[2];
-                e[0] = (fmt[i] == '#') ? '*' : fmt[i]; e[1] = '\0';
+
+    /* Walk the format left-to-right.  Two kinds of placeholder:
+     *
+     *   `#...#` is a numeric field; the run of `#`s defines the
+     *   width and embedded `.` / `,` are kept as literal characters
+     *   within the field (so `##.##` is one numeric field with a
+     *   decimal point, not a width-2 field followed by a width-2
+     *   field).  Consumes one numeric argument; overflow renders
+     *   the digit positions as `*`.
+     *
+     *   `&` is a string field; the whole string argument is emitted
+     *   verbatim (no padding, no truncation).  Consumes one string
+     *   argument.
+     *
+     * Any other character outside a `#` run is emitted literally.
+     */
+    i = 0;
+    while (i < flen) {
+        if (fmt[i] == '#') {
+            /* Find end of this numeric field.  `.` and `,` inside
+             * the run stay part of the field (literal characters
+             * within it) so we keep a separate digit_count for the
+             * `#` slots only. */
+            int  start = i;
+            int  end;
+            int  digit_count = 0;
+            char digits[16];
+            long v;
+            int  dpos = 0;
+            int  neg = 0;
+            int  pad;
+            int  j;
+            end = i;
+            while (end < flen &&
+                   (fmt[end] == '#' || fmt[end] == '.' ||
+                    fmt[end] == ',')) {
+                if (fmt[end] == '#') digit_count++;
+                end++;
+            }
+            v = parse_expr(p);
+            if (basic_error) return;
+            if (v < 0) { neg = 1; v = -v; }
+            {
+                int n = snprintf(digits, sizeof(digits), "%ld", v);
+                int needed = (neg ? n + 1 : n);
+                if (needed > digit_count) {
+                    for (j = start; j < end; j++) {
+                        char e[2];
+                        e[0] = (fmt[j] == '#') ? '*' : fmt[j];
+                        e[1] = '\0';
+                        SHELL_PRINTF("%s", e);
+                    }
+                    i = end;
+                    goto sep_using;
+                }
+                pad = digit_count - needed;
+            }
+            for (j = start; j < end; j++) {
+                char e[2]; e[1] = '\0';
+                if (fmt[j] != '#') {
+                    e[0] = fmt[j];
+                } else if (pad > 0) {
+                    e[0] = ' '; pad--;
+                } else if (neg) {
+                    e[0] = '-'; neg = 0;
+                } else {
+                    e[0] = digits[dpos++];
+                }
                 SHELL_PRINTF("%s", e);
             }
-            SHELL_PRINTF("\n");
-            return;
+            i = end;
+            goto sep_using;
         }
-        pad = digit_count - needed;
-    }
-    for (i = 0; i < flen; i++) {
-        if (fmt[i] == '#') {
-            char e[2]; e[1] = '\0';
-            if (pad > 0) {
-                e[0] = ' ';
-                pad--;
-            } else if (neg) {
-                e[0] = '-';
-                neg = 0;
-            } else {
-                e[0] = digits[dpos++];
+        if (fmt[i] == '&') {
+#if TIKU_BASIC_STRVARS_ENABLE
+            char buf[TIKU_BASIC_STR_BUF_CAP];
+            if (!peek_string_expr(*p)) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? string expected\n" SH_RST);
+                return;
             }
-            SHELL_PRINTF("%s", e);
-        } else {
+            if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
+            SHELL_PRINTF("%s", buf);
+#else
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? & needs string support\n" SH_RST);
+            return;
+#endif
+            i++;
+            goto sep_using;
+        }
+        /* Literal character. */
+        {
             char e[2]; e[0] = fmt[i]; e[1] = '\0';
             SHELL_PRINTF("%s", e);
+        }
+        i++;
+        continue;
+
+sep_using:
+        skip_ws(p);
+        if (**p == ',' || **p == ';') {
+            (*p)++;
+            skip_ws(p);
         }
     }
     SHELL_PRINTF("\n");

@@ -90,6 +90,73 @@ expr_prim(const char **p)
     return 0;
 }
 
+/*---------------------------------------------------------------------------*/
+/* EXPONENT (^) -- right-associative, binds tighter than unary               */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Right-associative power operator: base ^ exp.
+ *
+ * For TIKU_BASIC_FIXED_ENABLE builds, the base may be Q.3 fixed
+ * point and the exponent must be an integer (fractional exponents
+ * are not supported).  Negative exponents truncate toward 0.
+ * `x ^ 0` is 1 (or 1000 in Q.3); `0 ^ 0` is 1 (BASIC convention).
+ *
+ * Precedence is higher than unary minus so `-2^2 == -(2^2) == -4`,
+ * matching Microsoft BASIC.
+ */
+static long
+expr_pow(const char **p)
+{
+    long base = expr_prim(p);
+    skip_ws(p);
+    if (**p == '^') {
+        long exp;
+        long result;
+        long n;
+        (*p)++;
+        skip_ws(p);
+        /* Right-associative: recurse into expr_pow for the RHS. */
+        exp = expr_pow(p);
+        if (basic_error) return 0;
+#if TIKU_BASIC_FIXED_ENABLE
+        /* Caller passed us either a pure integer or a Q.3 value.
+         * We can't tell which from the value alone, so we treat the
+         * exponent as integer-only (Q.3 exponents make no sense for
+         * a power op in this dialect).  The exponent is rounded
+         * toward zero to recover the integer count. */
+        if (exp >= (long)TIKU_BASIC_FIXED_SCALE ||
+            exp <= -(long)TIKU_BASIC_FIXED_SCALE) {
+            exp /= (long)TIKU_BASIC_FIXED_SCALE;
+        }
+#endif
+        if (exp < 0) {
+            return 0;          /* integer base, negative exp -> 0 */
+        }
+        result = 1;
+#if TIKU_BASIC_FIXED_ENABLE
+        /* If the base looks like a fixed-point value (large
+         * magnitude relative to typical integer counts) and the
+         * exponent is small, multiply Q.3-style.  Otherwise plain
+         * integer multiply. */
+        if (base >= (long)TIKU_BASIC_FIXED_SCALE ||
+            base <= -(long)TIKU_BASIC_FIXED_SCALE) {
+            result = (long)TIKU_BASIC_FIXED_SCALE;   /* 1.0 in Q.3 */
+            for (n = 0; n < exp; n++) {
+                long long t = (long long)result * (long long)base;
+                result = (long)(t / (long long)TIKU_BASIC_FIXED_SCALE);
+            }
+            return result;
+        }
+#endif
+        for (n = 0; n < exp; n++) {
+            result *= base;
+        }
+        return result;
+    }
+    return base;
+}
+
 static long
 expr_unary(const char **p)
 {
@@ -100,7 +167,7 @@ expr_unary(const char **p)
      * integer dialect). Bound at unary-precedence so `NOT a + 1`
      * parses as `(NOT a) + 1`; use parens for `NOT (a + 1)`. */
     if (match_kw(p, "NOT")) return ~expr_unary(p);
-    return expr_prim(p);
+    return expr_pow(p);
 }
 
 static long

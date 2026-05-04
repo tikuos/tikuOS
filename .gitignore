@@ -65,3 +65,6 @@ TikuBench/
 labs/
 kintsugi/
 docs/
+
+# Host-side tools that will move to their own repo
+tools/tiku_ide/

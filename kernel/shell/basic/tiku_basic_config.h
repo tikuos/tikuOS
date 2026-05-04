@@ -87,6 +87,23 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
+/* MULTI-LETTER VARIABLE NAMES                                               */
+/*---------------------------------------------------------------------------*/
+
+/* Beyond the 26 single-letter A..Z slots, BASIC supports a small
+ * pool of named variables (e.g. NAME, COUNT, X1).  Each slot
+ * stores a name up to TIKU_BASIC_NAMEDVAR_LEN-1 chars (NUL-
+ * terminated) plus the value cell, allocated lazily on first use.
+ * Numeric and string named vars share the same maximum count but
+ * occupy independent name tables, so MYVAR and MYVAR$ can coexist. */
+#ifndef TIKU_BASIC_NAMEDVAR_MAX
+#define TIKU_BASIC_NAMEDVAR_MAX     16
+#endif
+#ifndef TIKU_BASIC_NAMEDVAR_LEN
+#define TIKU_BASIC_NAMEDVAR_LEN     8       /* 7 chars + NUL */
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* STRING / DEF FN / ARRAY / SLOT / FIXED-POINT TUNABLES                     */
 /*---------------------------------------------------------------------------*/
 

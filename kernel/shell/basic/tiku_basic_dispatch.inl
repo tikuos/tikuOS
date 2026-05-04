@@ -204,15 +204,37 @@ exec_stmt(const char **p)
         return;
     }
     if (match_kw(p, "?"))      { exec_print(p);  return; }   /* alias */
+#if TIKU_BASIC_STRVARS_ENABLE
+    /* MID$ / LEFT$ / RIGHT$ as LHS: detect the keyword followed by
+     * `(` to disambiguate from a numeric expression that just
+     * happens to start with a similar token. */
+    {
+        const char *save = *p;
+        char        kind = 0;
+        if      (match_kw(p, "MID$"))   { kind = 'M'; }
+        else if (match_kw(p, "LEFT$"))  { kind = 'L'; }
+        else if (match_kw(p, "RIGHT$")) { kind = 'R'; }
+        if (kind != 0) {
+            skip_ws(p);
+            if (**p == '(') {
+                exec_strslice_assign(p, kind);
+                return;
+            }
+            /* Wasn't a slice-assign; rewind so something else can
+             * try (e.g. it's actually an expression starting with
+             * MID$, though there's no such legal statement form). */
+            *p = save;
+        }
+    }
+#endif
     if (match_kw(p, "LET"))    { exec_let(p, 0); return; }
     if (match_kw(p, "INPUT"))  { exec_input(p);  return; }
     if (match_kw(p, "GOTO"))   { exec_goto(p);   return; }
     if (match_kw(p, "GOSUB"))  { exec_gosub(p);  return; }
     if (match_kw(p, "RETURN")) { exec_return();  return; }
     if (match_kw(p, "END")) {
-        /* `END IF` / `END SUB`-style two-word terminators take
-         * precedence over plain END (= terminate program). For now
-         * only END IF is recognised. */
+        /* `END IF` / `END SELECT`-style two-word terminators take
+         * precedence over plain END (= terminate program). */
         const char *peek = *p;
         skip_ws(&peek);
         if (match_kw(&peek, "IF")) {
@@ -220,14 +242,32 @@ exec_stmt(const char **p)
             exec_endif(p);
             return;
         }
+        if (match_kw(&peek, "SELECT")) {
+            *p = peek;
+            exec_end_select(p);
+            return;
+        }
         basic_running = 0; basic_pc = 0; return;
     }
     if (match_kw(p, "ENDIF"))  { exec_endif(p);    return; }
     if (match_kw(p, "ELSE"))   { exec_else_kw(p);  return; }
+    if (match_kw(p, "SELECT")) {
+        skip_ws(p);
+        if (!match_kw(p, "CASE")) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? SELECT CASE expected\n" SH_RST);
+            return;
+        }
+        exec_select_case(p);
+        return;
+    }
+    if (match_kw(p, "CASE"))   { exec_case(p);     return; }
     if (match_kw(p, "STOP"))   { basic_running = 0; basic_pc = 0; return; }
     if (match_kw(p, "IF"))     { exec_if(p);     return; }
-    if (match_kw(p, "FOR"))    { exec_for(p);    return; }
-    if (match_kw(p, "NEXT"))   { exec_next(p);   return; }
+    if (match_kw(p, "FOR"))      { exec_for(p);      return; }
+    if (match_kw(p, "NEXT"))     { exec_next(p);     return; }
+    if (match_kw(p, "EXIT"))     { exec_exit(p);     return; }
+    if (match_kw(p, "CONTINUE")) { exec_continue(p); return; }
     if (match_kw(p, "CLS"))    { exec_cls();     return; }
     if (match_kw(p, "DELAY"))  { exec_delay(p);  return; }
     if (match_kw(p, "SLEEP"))  { exec_sleep(p);  return; }
@@ -276,65 +316,71 @@ exec_stmt(const char **p)
     {
         const char *save = *p;
         char  c = to_upper(**p);
-        int   idx = -1;
+        int   idx;
         long  v;
-        if (c >= 'A' && c <= 'Z') {
-            idx = c - 'A';
-            /* Array LHS forms first: A(...) and A$(...) take priority
-             * over scalar matches because they're more specific. */
+        int   is_str;
+
+        /* Array LHS forms (single-letter only): A(...) = and A$(...) =
+         * are checked first because they share the leading letter
+         * with the scalar LET form. */
 #if TIKU_BASIC_ARRAYS_ENABLE
-            if (*(*p + 1) == '(') {
-                long off;
-                *p += 2;
-                off = parse_array_index(p, &basic_arrays[idx], c);
-                if (basic_error) return;
-                skip_ws(p);
-                if (**p != '=') {
-                    basic_error = 1;
-                    SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
-                    return;
-                }
-                (*p)++;
-                v = parse_expr(p);
-                if (basic_error) return;
-                ((long *)basic_arrays[idx].data)[off] = v;
+        if (c >= 'A' && c <= 'Z' && *(*p + 1) == '(') {
+            long off;
+            idx = c - 'A';
+            *p += 2;
+            off = parse_array_index(p, &basic_arrays[idx], c);
+            if (basic_error) return;
+            skip_ws(p);
+            if (**p != '=') {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
                 return;
             }
+            (*p)++;
+            v = parse_expr(p);
+            if (basic_error) return;
+            ((long *)basic_arrays[idx].data)[off] = v;
+            return;
+        }
 #if TIKU_BASIC_STRVARS_ENABLE
-            if (*(*p + 1) == '$' && *(*p + 2) == '(') {
-                long off;
-                char buf[TIKU_BASIC_STR_BUF_CAP];
-                char *copy;
-                *p += 3;     /* past 'A', '$', '(' */
-                off = parse_array_index(p, &basic_str_arrays[idx], c);
-                if (basic_error) return;
-                skip_ws(p);
-                if (**p != '=') {
-                    basic_error = 1;
-                    SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
-                    return;
-                }
-                (*p)++;
-                if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
-                copy = basic_str_alloc(buf, strlen(buf));
-                if (copy == NULL) {
-                    basic_error = 1;
-                    SHELL_PRINTF(SH_RED "? out of string heap\n" SH_RST);
-                    return;
-                }
-                ((char **)basic_str_arrays[idx].data)[off] = copy;
+        if (c >= 'A' && c <= 'Z' &&
+            *(*p + 1) == '$' && *(*p + 2) == '(') {
+            long  off;
+            char  buf[TIKU_BASIC_STR_BUF_CAP];
+            char *copy;
+            idx = c - 'A';
+            *p += 3;     /* past 'A', '$', '(' */
+            off = parse_array_index(p, &basic_str_arrays[idx], c);
+            if (basic_error) return;
+            skip_ws(p);
+            if (**p != '=') {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
                 return;
             }
+            (*p)++;
+            if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
+            copy = basic_str_alloc(buf, strlen(buf));
+            if (copy == NULL) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? out of string heap\n" SH_RST);
+                return;
+            }
+            ((char **)basic_str_arrays[idx].data)[off] = copy;
+            return;
+        }
 #endif
 #endif
-            /* Scalar LHS forms: A$ = ... or A = ... */
+        /* Scalar LHS: NAME = expr  or  NAME$ = expr$.  Multi-letter
+         * names are routed through the named-var slot table. */
+        if (parse_var_full(p, &idx, &is_str)) {
+            const char *q = *p;
+            skip_ws(&q);
+            if (*q == '=') {
+                *p = q + 1;
 #if TIKU_BASIC_STRVARS_ENABLE
-            if (*(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
-                const char *q = *p + 2;
-                skip_ws(&q);
-                if (*q == '=') {
+                if (is_str) {
                     char buf[TIKU_BASIC_STR_BUF_CAP];
-                    *p = q + 1;
                     if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
                     basic_strvars[idx] = basic_str_alloc(buf, strlen(buf));
                     if (basic_strvars[idx] == NULL) {
@@ -343,22 +389,18 @@ exec_stmt(const char **p)
                     }
                     return;
                 }
-                *p = save;
-            }
-            else
 #endif
-            if (!is_word_cont(*(*p + 1))) {
-                const char *q = *p + 1;
-                skip_ws(&q);
-                if (*q == '=') {
-                    *p = q + 1;
-                    v = parse_expr(p);
-                    if (basic_error) return;
-                    basic_vars[idx] = v;
-                    return;
-                }
-                *p = save;
+                (void)is_str;
+                v = parse_expr(p);
+                if (basic_error) return;
+                basic_vars[idx] = v;
+                return;
             }
+            /* Not an assignment after all -- restore and fall through
+             * to the syntax-error path. */
+            *p = save;
+        } else if (basic_error) {
+            return;
         }
     }
 

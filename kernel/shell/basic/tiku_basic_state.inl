@@ -48,7 +48,7 @@ typedef struct {
  * NEXT we step the index var, compare against `target`, and either
  * jump back to `loop_line` or pop. */
 typedef struct {
-    uint8_t  var_idx;       /* 0..25, the loop variable */
+    uint16_t var_idx;       /* index into basic_vars[] (0..) */
     long     target;        /* TO value */
     long     step;          /* STEP value (default 1) */
     uint16_t loop_line;     /* line to jump back to on continuation */
@@ -97,6 +97,16 @@ static uint8_t       loop_sp;
 static char        **basic_strvars;
 static char         *basic_str_heap;
 static uint16_t      basic_str_heap_pos;
+#endif
+
+/* Multi-letter variable names: index space [26, 26+N) backed by
+ * the same basic_vars / basic_strvars arrays as A..Z, with parallel
+ * name tables that hold the identifier text per slot.  An empty
+ * name[0] == '\0' marks an unallocated slot.  Names are stored
+ * upper-case (case is normalised at parse time). */
+static char (*basic_namedvar_names)[TIKU_BASIC_NAMEDVAR_LEN];
+#if TIKU_BASIC_STRVARS_ENABLE
+static char (*basic_namedstrvar_names)[TIKU_BASIC_NAMEDVAR_LEN];
 #endif
 
 #if TIKU_BASIC_DEFN_ENABLE

@@ -192,16 +192,157 @@ parse_unum(const char **p, long *out)
     return 1;
 }
 
+/**
+ * @brief Read a multi-character identifier into @p buf.
+ *
+ * The identifier must start with an alpha character; subsequent
+ * characters can be alpha / digit / underscore.  Letters are
+ * folded to upper case.  Identifiers longer than @p cap-1 are
+ * truncated (the cursor still advances past the rest of the
+ * identifier so the caller doesn't re-read those bytes).
+ *
+ * @param p    Cursor (advanced past the identifier on return).
+ * @param buf  Destination, NUL-terminated on return.
+ * @param cap  Capacity of @p buf in bytes.
+ *
+ * @return Number of characters captured into @p buf, or 0 if the
+ *         cursor doesn't point at an alpha character.
+ */
+static int
+parse_ident(const char **p, char *buf, size_t cap)
+{
+    size_t n = 0;
+    skip_ws(p);
+    if (!is_alpha(**p)) return 0;
+    while (is_word_cont(**p) && n + 1u < cap) {
+        buf[n++] = (char)to_upper(**p);
+        (*p)++;
+    }
+    buf[n] = '\0';
+    while (is_word_cont(**p)) (*p)++;        /* drop overflow */
+    return (int)n;
+}
+
+/**
+ * @brief Look up (or allocate) a slot in one of the named-var
+ *        tables.
+ *
+ * Single-letter names short-circuit to the A..Z fast slots
+ * (returns 0..25); multi-letter names land in the named-var
+ * region (returns 26..(26+TIKU_BASIC_NAMEDVAR_MAX-1)) of the
+ * corresponding table (numeric or string).
+ *
+ * @param name       Upper-cased identifier (1..NAMEDVAR_LEN-1).
+ * @param is_string  Pick the string-var or numeric-var name table.
+ *
+ * @return Slot index, or -1 if the named-var table is full.
+ */
+static int
+basic_named_lookup(const char *name, int is_string)
+{
+    int n = (int)strlen(name);
+    int i;
+    char (*tbl)[TIKU_BASIC_NAMEDVAR_LEN];
+    (void)is_string;
+    if (n == 0) return -1;
+    if (n == 1) {
+        return name[0] - 'A';                /* fast slot 0..25 */
+    }
+#if TIKU_BASIC_STRVARS_ENABLE
+    tbl = is_string ? basic_namedstrvar_names : basic_namedvar_names;
+#else
+    tbl = basic_namedvar_names;
+#endif
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        if (tbl[i][0] != '\0' && strcmp(tbl[i], name) == 0) {
+            return 26 + i;
+        }
+    }
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        if (tbl[i][0] == '\0') {
+            strncpy(tbl[i], name, TIKU_BASIC_NAMEDVAR_LEN - 1);
+            tbl[i][TIKU_BASIC_NAMEDVAR_LEN - 1] = '\0';
+            return 26 + i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * @brief Parse a numeric variable name (single letter or
+ *        multi-letter), returning its slot index.
+ *
+ * A trailing `$` is rejected here because the caller wanted a
+ * numeric variable.  Use parse_var_full() when the type sigil is
+ * to be detected dynamically.
+ */
 static int
 parse_var(const char **p, int *idx)
 {
-    char c, next;
+    const char *save = *p;
+    char        buf[TIKU_BASIC_NAMEDVAR_LEN];
+    int         n;
     skip_ws(p);
-    c = to_upper(**p);
-    if (c < 'A' || c > 'Z') return 0;
-    next = *(*p + 1);
-    if (is_word_cont(next)) return 0;     /* multi-char id, not a var */
-    *idx = c - 'A';
-    (*p)++;
+    n = parse_ident(p, buf, sizeof(buf));
+    if (n == 0) {
+        *p = save;
+        return 0;
+    }
+    if (**p == '$') {
+        /* String variable; numeric-context call rejects it. */
+        *p = save;
+        return 0;
+    }
+    {
+        int slot = basic_named_lookup(buf, 0);
+        if (slot < 0) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? too many named vars\n" SH_RST);
+            *p = save;
+            return 0;
+        }
+        *idx = slot;
+    }
+    return 1;
+}
+
+/**
+ * @brief Parse any variable name (numeric or string, single or
+ *        multi-letter).
+ *
+ * On success, @p out_idx receives the slot index (0..25 for
+ * single-letter, 26+ for named) and @p out_is_str receives 1 iff
+ * the identifier was suffixed with `$`.
+ *
+ * @return 1 on match (cursor advanced), 0 if the cursor doesn't
+ *         point at an identifier.
+ */
+static int
+parse_var_full(const char **p, int *out_idx, int *out_is_str)
+{
+    const char *save = *p;
+    char        buf[TIKU_BASIC_NAMEDVAR_LEN];
+    int         n;
+    int         is_str = 0;
+    int         slot;
+    skip_ws(p);
+    n = parse_ident(p, buf, sizeof(buf));
+    if (n == 0) {
+        *p = save;
+        return 0;
+    }
+    if (**p == '$') {
+        is_str = 1;
+        (*p)++;
+    }
+    slot = basic_named_lookup(buf, is_str);
+    if (slot < 0) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? too many named vars\n" SH_RST);
+        *p = save;
+        return 0;
+    }
+    *out_idx    = slot;
+    *out_is_str = is_str;
     return 1;
 }

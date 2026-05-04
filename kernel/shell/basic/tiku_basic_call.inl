@@ -369,6 +369,58 @@ expr_call(const char **p, long *out_v)
         *out_v = strtol(buf, &end, 0);     /* base 0 -> auto hex/dec */
         return 1;
     }
+    /* INSTR(haystack, needle)        -- 1-based position or 0
+     * INSTR(start, haystack, needle) -- search from `start` (1-based)
+     */
+    if (match_kw(p, "INSTR")) {
+        char haystack[TIKU_BASIC_STR_BUF_CAP];
+        char needle[TIKU_BASIC_STR_BUF_CAP];
+        long start = 1;
+        const char *match;
+        skip_ws(p);
+        if (**p != '(') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        skip_ws(p);
+        if (peek_string_expr(*p)) {
+            /* 2-arg form */
+            if (parse_strexpr(p, haystack, sizeof(haystack)) != 0) return 1;
+        } else {
+            /* 3-arg form: leading numeric start */
+            start = parse_expr(p);
+            if (basic_error) return 1;
+            if (start < 1) start = 1;
+            skip_ws(p);
+            if (**p != ',') {
+                basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return 1;
+            }
+            (*p)++;
+            if (parse_strexpr(p, haystack, sizeof(haystack)) != 0) return 1;
+        }
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, needle, sizeof(needle)) != 0) return 1;
+        skip_ws(p);
+        if (**p != ')') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        if (needle[0] == '\0') {
+            *out_v = start;     /* empty needle matches at start */
+            return 1;
+        }
+        if ((size_t)(start - 1) > strlen(haystack)) {
+            *out_v = 0;
+            return 1;
+        }
+        match = strstr(haystack + (start - 1), needle);
+        *out_v = match ? (long)(match - haystack + 1) : 0;
+        return 1;
+    }
 #endif
 #if TIKU_BASIC_VFS_ENABLE
     if (match_kw(p, "VFSREAD")) {
