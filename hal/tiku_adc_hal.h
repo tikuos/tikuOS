@@ -29,8 +29,10 @@
 #ifndef TIKU_ADC_HAL_H_
 #define TIKU_ADC_HAL_H_
 
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430)
 #include <arch/msp430/tiku_adc_arch.h>
+#elif defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_adc_arch.h>
 #endif
 
 #endif /* TIKU_ADC_HAL_H_ */

@@ -64,9 +64,20 @@
     __interrupt void name(void)
 #define TIKU_ISR_STRINGIFY_(x) #x
 
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && defined(PLATFORM_MSP430)
+/* msp430-elf-gcc: interrupt + lower attributes pin the handler in
+ * lower FRAM (see comment above). */
 #define TIKU_ISR(vec, name) \
     __attribute__((interrupt(vec), lower)) \
+    void name(void)
+
+#elif defined(__GNUC__)
+/* arm-none-eabi-gcc and other Cortex-M toolchains: ISRs are plain
+ * C functions. The vector-table entry in arch/<platform>/tiku_crt_early.c
+ * (or equivalent startup file) takes the function's address at link
+ * time. The vector argument here is informational only — kept to
+ * preserve the call-site syntax with MSP430 ports. */
+#define TIKU_ISR(vec, name) \
     void name(void)
 
 #else

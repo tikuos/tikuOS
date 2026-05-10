@@ -142,19 +142,31 @@ extern char __stack;
 static int
 mem_free_read(char *buf, size_t max)
 {
+#if defined(PLATFORM_MSP430)
+    /* MSP430: 16-bit SP via R1. */
     uint16_t sp;
     uint16_t end_addr = (uint16_t)(uintptr_t)&_end;
-
-#ifdef PLATFORM_MSP430
     __asm__ volatile ("mov r1, %0" : "=r"(sp));
-#else
-    sp = (uint16_t)(uintptr_t)&__stack;
-#endif
-
     if (sp > end_addr) {
         return snprintf(buf, max, "%u\n", sp - end_addr);
     }
     return snprintf(buf, max, "0\n");
+#elif defined(PLATFORM_RP2350)
+    /* Cortex-M: 32-bit SP. The stack grows down from __stack toward
+     * _end; live free space is (SP - _end). */
+    uintptr_t sp;
+    uintptr_t end_addr = (uintptr_t)&_end;
+    __asm__ volatile ("mov %0, sp" : "=r"(sp));
+    if (sp > end_addr) {
+        return snprintf(buf, max, "%lu\n",
+                        (unsigned long)(sp - end_addr));
+    }
+    return snprintf(buf, max, "0\n");
+#else
+    /* Host fallback: report 0. */
+    (void)max;
+    return snprintf(buf, max, "0\n");
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
