@@ -58,7 +58,17 @@
 /* NVM BACKING STORAGE                                                       */
 /*---------------------------------------------------------------------------*/
 
-#ifdef PLATFORM_MSP430
+/* The persist store and NVM pool must live in a region the kernel
+ * recognizes as NVM, otherwise tiku_persist_register() rejects the
+ * buffer at registration time. On both supported platforms the
+ * `.persistent` section is the right placement:
+ *   - MSP430: placed in FRAM by the linker script.
+ *   - RP2350: linker collapses `.persistent*` into the `.uninit`
+ *     SRAM section, which the region table reports as NVM
+ *     (see arch/arm-rp2350/tiku_region_arch.c).
+ * Without the attribute on RP2350, the variables fall back to .bss
+ * and lc_persist register hands an unrecognised pointer to persist. */
+#if defined(PLATFORM_MSP430) || defined(PLATFORM_RP2350)
 #define LC_NVM_PERSISTENT __attribute__((section(".persistent")))
 #else
 #define LC_NVM_PERSISTENT

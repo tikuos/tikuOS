@@ -103,8 +103,15 @@
 #define TIKU_DEVICE_FRAM_END        0x103FFFFFUL
 
 /* Init-table backing region. RAM-resident on this port (volatile) —
- * a future revision can move it to a dedicated flash sector. */
-#define TIKU_DEVICE_FRAM_CONFIG_SIZE      512U
+ * a future revision can move it to a dedicated flash sector.
+ *
+ * Sized for the kernel init-table layout: 4-byte header + 8 entries
+ * of sizeof(tiku_init_entry_t) (66 bytes each) = 532 bytes. Round up
+ * to 64-byte alignment for headroom. The previous value (512) was
+ * 20 bytes short of slot 7's tail; init_first_boot() then clobbered
+ * neighbouring .bss state — surfaced as cascading failures across
+ * init-table / init-boot / init-shell-cmds on the RP2350 port. */
+#define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U
 
 #define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U
 #define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4

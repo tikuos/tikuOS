@@ -422,8 +422,12 @@ CFLAGS += -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -DTIKU_BOARD_RPI_PICO2_W=1
 CFLAGS += -DPLATFORM_RP2350=1
-# Optional: nano newlib for tiny printf when we ever pull in libc.
-CFLAGS += --specs=nosys.specs
+# Use newlib-nano (smaller integer-only printf, lightweight reentrancy)
+# layered on top of the nosys syscall stubs. The full newlib stdio path
+# hangs on bare-metal RP2350 because its global_stdio_init walks file
+# structures that nosys can't satisfy; nano sidesteps that entirely and
+# is also what the Pico SDK uses by default.
+CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
@@ -486,7 +490,10 @@ endif
 ifeq ($(TIKU_PLATFORM),rp2350)
 
 LDFLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=softfp -mfpu=fpv5-sp-d16
-LDFLAGS += --specs=nosys.specs -nostartfiles
+# nano.specs swaps in libc_nano (small integer-only printf without the
+# heavy stdio init that hangs on bare metal). Order: nano first, nosys
+# second so libnosys still provides the syscall stubs.
+LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
 LDFLAGS += -Tarch/arm-rp2350/devices/rp2350.ld
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes

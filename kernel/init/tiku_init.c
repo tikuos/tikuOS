@@ -65,6 +65,20 @@
 #define OFF_COUNT    2
 #define OFF_ENTRIES  4
 
+/** Bytes needed by the layout above. Kept as a real expression so a
+ *  build that under-sizes the CONFIG region trips here instead of
+ *  silently overflowing into adjacent .bss at first-boot. */
+#define TIKU_INIT_REGION_BYTES_NEEDED \
+    (OFF_ENTRIES + (TIKU_INIT_MAX_ENTRIES * sizeof(tiku_init_entry_t)))
+
+#if defined(TIKU_DEVICE_FRAM_CONFIG_SIZE)
+_Static_assert(TIKU_DEVICE_FRAM_CONFIG_SIZE >= TIKU_INIT_REGION_BYTES_NEEDED,
+    "TIKU_DEVICE_FRAM_CONFIG_SIZE is too small for the init table; "
+    "init_first_boot will overflow into adjacent memory. "
+    "Bump the device's TIKU_DEVICE_FRAM_CONFIG_SIZE to >= "
+    "(4 + TIKU_INIT_MAX_ENTRIES * sizeof(tiku_init_entry_t)).");
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* INTERNAL STATE                                                            */
 /*---------------------------------------------------------------------------*/

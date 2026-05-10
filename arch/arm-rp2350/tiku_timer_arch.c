@@ -32,6 +32,14 @@ static volatile unsigned long          g_seconds  = 0UL;
 /*---------------------------------------------------------------------------*/
 
 void tiku_clock_arch_init(void) {
+    /* Reset the software tick / seconds accumulators. The MSP430 port
+     * gets this for free because Timer A0 starts at zero, but here the
+     * SysTick HW counter is independent of g_ticks — failing to reset
+     * means tiku_clock_init() leaves the elapsed time intact across
+     * re-init, which the test_clock_init_idempotent test fails on. */
+    g_ticks   = 0UL;
+    g_seconds = 0UL;
+
     /* SysTick reload value: CPU clock cycles per tick - 1. */
     uint32_t reload = (TIKU_CLOCK_ARCH_INTERVAL) - 1U;
     /* Clamp to the 24-bit reload register width. */
