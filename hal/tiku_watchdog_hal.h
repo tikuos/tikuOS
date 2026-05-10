@@ -29,8 +29,10 @@
 #ifndef TIKU_WATCHDOG_HAL_H_
 #define TIKU_WATCHDOG_HAL_H_
 
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_cpu_watchdog_arch.h"
+#elif defined(PLATFORM_RP2350)
+#include "arch/arm-rp2350/tiku_cpu_watchdog_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -38,20 +40,31 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Platform-neutral aliases for the watchdog interval divider. Each
- * resolves to the underlying device register value via the arch
- * header included above. Kernel code should use these names instead
- * of WDTIS__* (or any other platform-specific symbol) so that the
- * tree compiles unchanged when ported.
- *
- * Interval semantics: divider applied to the WDT clock source,
- * giving the time-to-timeout in clock ticks. Divider 32768 with a
- * 32 768 Hz ACLK source = ~1 s timeout.
+ * Platform-neutral aliases for the watchdog interval divider. On MSP430
+ * the value plugs straight into WDTCTL. On other platforms the arch
+ * converts the divider to a microsecond timeout (e.g. 32768 / 32 kHz
+ * ≈ 1 s on MSP430; the RP2350 arch reproduces the same wall-clock
+ * effect against the 1 us tick clock).
  */
+#if defined(PLATFORM_MSP430)
 #define TIKU_WDT_INTERVAL_64        WDTIS__64
 #define TIKU_WDT_INTERVAL_512       WDTIS__512
 #define TIKU_WDT_INTERVAL_8192      WDTIS__8192
 #define TIKU_WDT_INTERVAL_32768     WDTIS__32768
+#else
+#ifndef TIKU_WDT_INTERVAL_64
+#define TIKU_WDT_INTERVAL_64        64U
+#endif
+#ifndef TIKU_WDT_INTERVAL_512
+#define TIKU_WDT_INTERVAL_512       512U
+#endif
+#ifndef TIKU_WDT_INTERVAL_8192
+#define TIKU_WDT_INTERVAL_8192      8192U
+#endif
+#ifndef TIKU_WDT_INTERVAL_32768
+#define TIKU_WDT_INTERVAL_32768     32768U
+#endif
+#endif
 
 #define TIKU_WDT_INTERVAL_DEFAULT   TIKU_WDT_INTERVAL_32768
 
@@ -59,6 +72,7 @@
 /* HAL-to-arch mapping macros                                                */
 /*---------------------------------------------------------------------------*/
 
+#if defined(PLATFORM_MSP430)
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_msp430_watchdog_on_arch((src), (isel))
 #define tiku_watchdog_arch_off() \
@@ -69,5 +83,17 @@
     tiku_cpu_msp430_watchdog_pause_arch()
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_msp430_watchdog_resume_arch(kick)
+#elif defined(PLATFORM_RP2350)
+#define tiku_watchdog_arch_on(src, isel) \
+    tiku_cpu_rp2350_watchdog_on_arch((src), (isel))
+#define tiku_watchdog_arch_off() \
+    tiku_cpu_rp2350_watchdog_off_arch()
+#define tiku_watchdog_arch_kick() \
+    tiku_cpu_rp2350_watchdog_kick_arch()
+#define tiku_watchdog_arch_pause() \
+    tiku_cpu_rp2350_watchdog_pause_arch()
+#define tiku_watchdog_arch_resume(kick) \
+    tiku_cpu_rp2350_watchdog_resume_arch(kick)
+#endif
 
 #endif /* TIKU_WATCHDOG_HAL_H_ */

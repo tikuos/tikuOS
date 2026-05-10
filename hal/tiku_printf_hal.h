@@ -61,16 +61,21 @@
 #endif /* __TI_COMPILER_VERSION__ */
 
 /*---------------------------------------------------------------------------*/
+/* Raspberry Pi RP2350 (Pico 2 / Pico 2 W)                                   */
+/*---------------------------------------------------------------------------*/
+
+#elif defined(PLATFORM_RP2350)
+
+#include <arch/arm-rp2350/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+
+/*---------------------------------------------------------------------------*/
 /* Future platforms: Ambiq, Nordic, RISC-V, etc.                             */
 /*---------------------------------------------------------------------------*/
 
 /*
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_uart_arch.h>
-#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
-
-#elif defined(PLATFORM_NRF)
-#include <arch/nrf/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 */
 

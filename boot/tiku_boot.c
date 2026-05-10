@@ -34,7 +34,11 @@
 #include "kernel/memory/tiku_mem.h"
 #include "kernel/timers/tiku_clock.h"
 #include "kernel/scheduler/tiku_sched.h"
+#if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_uart_arch.h"
+#elif defined(PLATFORM_RP2350)
+#include "arch/arm-rp2350/tiku_uart_arch.h"
+#endif
 
 
 /*---------------------------------------------------------------------------*/
@@ -166,10 +170,11 @@ tiku_boot_init_cpu(unsigned int cpu_freq)
     tiku_cpu_boot_init();
     tiku_cpu_freq_init(cpu_freq);
 
-    /* Unlock I/O pins from LPM5 state.
-     * On MSP430FR devices all GPIO is locked after reset until
-     * LOCKLPM5 is cleared.  Must happen before any GPIO access. */
-#ifdef PLATFORM_MSP430
+    /* Unlock I/O pins from LPM5 state on MSP430FR devices: all GPIO
+     * is locked after reset until LOCKLPM5 is cleared. The Cortex-M
+     * RP2350 has no equivalent — pads are usable immediately after
+     * the bank's reset is released, which the arch boot does. */
+#if defined(PLATFORM_MSP430)
     PM5CTL0 &= ~LOCKLPM5;
 #endif
 

@@ -29,17 +29,21 @@
 #ifndef TIKU_COMMON_HAL_H_
 #define TIKU_COMMON_HAL_H_
 
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_cpu_common.h"
-#endif
-
-/*---------------------------------------------------------------------------*/
-/* HAL-to-arch mapping macros                                                */
-/*---------------------------------------------------------------------------*/
 
 #define tiku_common_arch_delay_ms(ms)   tiku_cpu_msp430_delay_ms(ms)
 #define tiku_common_arch_delay_us(us)   tiku_cpu_msp430_delay_us(us)
 #define tiku_common_arch_unique_id(b,l) tiku_cpu_msp430_unique_id((b),(l))
 #define tiku_common_arch_reset_reason() tiku_cpu_msp430_reset_reason()
+
+#elif defined(PLATFORM_RP2350)
+#include "arch/arm-rp2350/tiku_cpu_common.h"
+
+#define tiku_common_arch_delay_ms(ms)   tiku_cpu_rp2350_delay_ms(ms)
+#define tiku_common_arch_delay_us(us)   tiku_cpu_rp2350_delay_us(us)
+#define tiku_common_arch_unique_id(b,l) tiku_cpu_rp2350_unique_id((b),(l))
+#define tiku_common_arch_reset_reason() tiku_cpu_rp2350_reset_reason()
+#endif
 
 #endif /* TIKU_COMMON_HAL_H_ */

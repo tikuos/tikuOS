@@ -1,0 +1,255 @@
+/*
+ * Tiku Operating System v0.04
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_cpu_freq_boot_arch.c - RP2350 CPU bring-up
+ *
+ * Brings CLK_SYS to 150 MHz from a 12 MHz XOSC via PLL_SYS:
+ *
+ *   XOSC (12 MHz)
+ *     -> REFDIV=1
+ *     -> VCO target 1500 MHz (FBDIV = 125)
+ *     -> POSTDIV1 = 5, POSTDIV2 = 2  -> 1500 / 10 = 150 MHz
+ *     -> CLK_SYS = PLL_SYS / 1
+ *     -> CLK_PERI = CLK_SYS / 1 (peripheral clock = 150 MHz)
+ *
+ * Then releases the peripherals we use from reset and prepares the
+ * NVIC for use.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_rp2350_regs.h"
+#include <stdint.h>
+
+/*---------------------------------------------------------------------------*/
+/* Cached clock rates                                                        */
+/*---------------------------------------------------------------------------*/
+
+static volatile unsigned long g_clk_sys_hz  = 0UL;
+static volatile unsigned long g_clk_peri_hz = 0UL;
+static volatile uint8_t       g_clock_fault = 0U;
+
+/*---------------------------------------------------------------------------*/
+/* Internal helpers                                                          */
+/*---------------------------------------------------------------------------*/
+
+/* Bounded spin: returns 1 on success, 0 if the loop body never matched
+ * within ~1 M iterations (~10 ms at any reasonable boot clock). The
+ * caller decides what to do on timeout — typically: silently fall back
+ * and keep going so the rest of the system still tries to come up. */
+#define RP2350_SPIN_TIMEOUT 1000000U
+
+static int rp2350_spin_until(volatile uint32_t *reg, uint32_t mask) {
+    uint32_t i = RP2350_SPIN_TIMEOUT;
+    while (i--) {
+        if ((*reg) & mask) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int rp2350_xosc_init(void) {
+    /* Set start-up delay (~1 ms at 12 MHz, multiplied by 256 internally). */
+    _RP2350_REG(RP2350_XOSC_STARTUP) = 47U;
+
+    /* Enable XOSC in 1-15 MHz range. */
+    _RP2350_REG(RP2350_XOSC_CTRL) =
+        RP2350_XOSC_CTRL_ENABLE | RP2350_XOSC_CTRL_FREQ_1_15;
+
+    return rp2350_spin_until((volatile uint32_t *)RP2350_XOSC_STATUS,
+                             RP2350_XOSC_STATUS_STABLE);
+}
+
+static int rp2350_pll_sys_init(void) {
+    /* Take PLL_SYS out of reset. */
+    rp2350_unreset(RP2350_RESETS_PLL_SYS);
+
+    /* REFDIV = 1: PLL ref = 12 MHz. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_CS) = 1U;
+
+    /* FBDIV = 125 -> VCO = 12 * 125 = 1500 MHz. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_FBDIV_INT) = 125U;
+
+    /* Power up VCO + PLL main. Leave POSTDIV powered down for now. */
+    _RP2350_REG_CLR(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR,
+                    RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD);
+
+    if (!rp2350_spin_until(
+            (volatile uint32_t *)(RP2350_PLL_SYS_BASE + RP2350_PLL_CS),
+            RP2350_PLL_CS_LOCK)) {
+        return 0;
+    }
+
+    /* POSTDIV1 = 5, POSTDIV2 = 2 -> 1500 / 10 = 150 MHz. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_PRIM) =
+        (5U << RP2350_PLL_PRIM_POSTDIV1_S)
+        | (2U << RP2350_PLL_PRIM_POSTDIV2_S);
+
+    /* Power up POSTDIV. */
+    _RP2350_REG_CLR(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR,
+                    RP2350_PLL_PWR_POSTDIVPD);
+    return 1;
+}
+
+static int rp2350_clock_switch(void) {
+    /* CLK_REF -> XOSC (so the rest of the system has a known reference). */
+    _RP2350_REG(RP2350_CLK_REF_CTRL) = RP2350_CLK_REF_SRC_XOSC;
+    if (!rp2350_spin_until((volatile uint32_t *)RP2350_CLK_REF_SELECTED,
+                           0x4U)) {
+        return 0;
+    }
+
+    /* CLK_SYS: glitch-free aux switch per RP2350 datasheet §5.5.4 —
+     *   1. SRC = REF (forces glitch-free deselect of any prior AUX)
+     *   2. AUXSRC = PLL_SYS
+     *   3. SRC = AUX
+     */
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
+    if (!rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
+                           0x1U)) {
+        return 0;
+    }
+
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) =
+        RP2350_CLK_SYS_SRC_REF | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
+
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) =
+        RP2350_CLK_SYS_SRC_AUX | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
+
+    if (!rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
+                           0x2U)) {
+        return 0;
+    }
+
+    /* CLK_SYS divider = 1.0 (RP2350 CLK_SYS_DIV is 8.16 fixed-point). */
+    _RP2350_REG(RP2350_CLK_SYS_DIV) = 0x00010000U;
+
+    /* CLK_PERI: source = CLK_SYS, enabled. */
+    _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+        RP2350_CLK_PERI_AUXSRC_CLK_SYS | RP2350_CLK_PERI_ENABLE;
+    return 1;
+}
+
+/* Fallback when the PLL bring-up fails: leave CLK_SYS sourced from
+ * CLK_REF (which we already pointed at the 12 MHz XOSC) and reflect
+ * the actual rate so baud-divisor calculation in the UART driver
+ * matches. */
+static void rp2350_clock_fallback_xosc(void) {
+    /* CLK_SYS = CLK_REF (i.e. XOSC at 12 MHz). */
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
+    _RP2350_REG(RP2350_CLK_SYS_DIV)  = 0x00010000U;
+
+    /* CLK_PERI = XOSC directly (skip the CLK_SYS path so we still
+     * have a working clock even if the SYS mux is in an odd state). */
+    _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+        RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
+}
+
+static void rp2350_unreset_peripherals(void) {
+    /* Bring up the peripherals the kernel uses. SPI/I2C are touched
+     * by the stub arch files but not actually used; bring them out
+     * anyway so register reads in the bus probe code don't bus-fault. */
+    rp2350_unreset(RP2350_RESETS_IO_BANK0
+                 | RP2350_RESETS_PADS_BANK0
+                 | RP2350_RESETS_UART0
+                 | RP2350_RESETS_TIMER0
+                 | RP2350_RESETS_TIMER1
+                 | RP2350_RESETS_PLL_SYS);
+}
+
+static void rp2350_setup_1us_tick(void) {
+    /* TIMER0 needs a 1 MHz tick from the TICKS block (datasheet §10.6).
+     * Pick CYCLES = CLK_REF_HZ / 1_000_000 so the same code works
+     * whether we ended up at 150 MHz CLK_SYS (CLK_REF=12 MHz here too,
+     * since both are XOSC-derived) or fell back to 12 MHz directly. */
+    uint32_t cycles = 12U;       /* XOSC = 12 MHz -> 1 us per 12 cycles */
+
+    _RP2350_REG(RP2350_TICKS_TIMER0_CYCLES) = cycles;
+    _RP2350_REG(RP2350_TICKS_TIMER0_CTRL)   = RP2350_TICK_ENABLE;
+    (void)rp2350_spin_until((volatile uint32_t *)RP2350_TICKS_TIMER0_CTRL,
+                            RP2350_TICK_RUNNING);
+
+    _RP2350_REG(RP2350_TICKS_WATCHDOG_CYCLES) = cycles;
+    _RP2350_REG(RP2350_TICKS_WATCHDOG_CTRL)   = RP2350_TICK_ENABLE;
+    (void)rp2350_spin_until((volatile uint32_t *)RP2350_TICKS_WATCHDOG_CTRL,
+                            RP2350_TICK_RUNNING);
+
+    /* Ensure TIMER0 is actually counting by clearing PAUSE. */
+    _RP2350_REG(RP2350_TIMER0_PAUSE) = 0U;
+}
+
+/*---------------------------------------------------------------------------*/
+/* Public HAL entry points                                                   */
+/*---------------------------------------------------------------------------*/
+
+void tiku_cpu_boot_rp2350_init(void) {
+    /* Order matters: XOSC up before PLL, PLL locked before CLK_SYS
+     * switch, CLK_SYS running before peripherals see their clocks.
+     * If anything along the way times out we silently fall back to
+     * running CLK_PERI directly off XOSC at 12 MHz so the UART
+     * driver still gets a deterministic peripheral clock — much
+     * better than infinite-spinning before we can even print.
+     *
+     * On a fresh ROM hand-off CLK_REF and CLK_SYS are already
+     * sourced from ROSC (~12 MHz nominal) so the spin loops start
+     * with a working clock either way. */
+    int xosc_ok  = rp2350_xosc_init();
+    int pll_ok   = xosc_ok && rp2350_pll_sys_init();
+    int sys_ok   = pll_ok  && rp2350_clock_switch();
+
+    if (sys_ok) {
+        g_clk_sys_hz  = 150000000UL;
+        g_clk_peri_hz = 150000000UL;
+        g_clock_fault = 0U;
+    } else {
+        rp2350_clock_fallback_xosc();
+        g_clk_sys_hz  = 12000000UL;
+        g_clk_peri_hz = 12000000UL;
+        g_clock_fault = 1U;
+    }
+
+    rp2350_unreset_peripherals();
+    rp2350_setup_1us_tick();
+}
+
+void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
+    /* The first port supports exactly one frequency: 150 MHz. Higher
+     * speeds would need different PLL divisors and -possibly- voltage
+     * scaling which is intentionally out of scope. We accept the
+     * argument for HAL compatibility but ignore it. */
+    (void)target_mhz;
+
+    /* Already initialised in tiku_cpu_boot_rp2350_init(). Nothing to
+     * do here — but recompute the cached values defensively. */
+    if (g_clk_sys_hz == 0UL) {
+        g_clk_sys_hz  = 150000000UL;
+        g_clk_peri_hz = 150000000UL;
+    }
+}
+
+void tiku_cpu_boot_rp2350_power_wfi_enter(void) {
+    __asm__ volatile ("wfi" ::: "memory");
+}
+
+unsigned long tiku_cpu_rp2350_clock_get_hz(void) {
+    return g_clk_sys_hz;
+}
+
+unsigned long tiku_cpu_rp2350_smclk_get_hz(void) {
+    return g_clk_peri_hz;
+}
+
+unsigned long tiku_cpu_rp2350_aclk_get_hz(void) {
+    /* No always-on low-frequency clock on RP2350. */
+    return 0UL;
+}
+
+int tiku_cpu_rp2350_clock_has_fault(void) {
+    return g_clock_fault ? 1 : 0;
+}

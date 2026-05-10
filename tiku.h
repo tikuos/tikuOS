@@ -39,7 +39,12 @@
 /* PLATFORM CONFIGURATION                                                   */
 /*---------------------------------------------------------------------------*/
 
-#ifndef PLATFORM_MSP430
+/*
+ * The Makefile sets exactly one PLATFORM_* define on the command line.
+ * If nothing is set we fall back to MSP430 to keep the historical
+ * default working out-of-the-box for legacy targets.
+ */
+#if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350)
 #define PLATFORM_MSP430 1
 #endif
 
@@ -48,10 +53,13 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * Device selection: passed via -DTIKU_DEVICE_MSP430FRxxxx=1 from the Makefile.
- * CCS passes -D__MSP430FRxxxx__ instead, so map those automatically.
- * Default to FR2433 if nothing is defined.
+ * Device selection: passed via -DTIKU_DEVICE_<PART>=1 from the Makefile.
+ * CCS passes -D__MSP430FRxxxx__ for MSP430 parts, so map those automatically.
+ * Default to FR2433 (MSP430) if no MSP430 device is defined and we're on
+ * the MSP430 platform.
  */
+#if defined(PLATFORM_MSP430)
+
 #if defined(__MSP430FR5969__) && !defined(TIKU_DEVICE_MSP430FR5969)
 #define TIKU_DEVICE_MSP430FR5969 1
 #elif defined(__MSP430FR5994__) && !defined(TIKU_DEVICE_MSP430FR5994)
@@ -69,6 +77,19 @@
 #define TIKU_DEVICE_MSP430FR2433 1
 #endif
 
+#elif defined(PLATFORM_RP2350)
+
+/*
+ * Raspberry Pi RP2350 (used on Pico 2, Pico 2 W, etc.). Only one
+ * silicon variant for now; a board define (TIKU_BOARD_RPI_PICO2_W)
+ * comes from the Makefile and selects the matching board header.
+ */
+#ifndef TIKU_DEVICE_RP2350
+#define TIKU_DEVICE_RP2350 1
+#endif
+
+#endif /* PLATFORM_* */
+
 /*---------------------------------------------------------------------------*/
 /* SYSTEM CONFIGURATION (before includes to avoid circular dependencies)    */
 /*---------------------------------------------------------------------------*/
@@ -76,19 +97,30 @@
 /** Clock time type definition */
 #define TIKU_CLOCK_CONF_TIME_T unsigned short
 
-/** Target CPU frequency setting (enum value, not MHz):
- * 1=1MHz, 2=2.67MHz, 3=3.5MHz, 4=4MHz, 5=5.33MHz, 6=7MHz, 7=8MHz (max)
- * NOTE: 16MHz (value 8) is currently DISABLED due to stability issues.
- * Maximum supported frequency is 8MHz for MSP430FR5969.
+/** Target CPU frequency setting.
+ *
+ *  On MSP430 this is an enum index into a small table of DCO presets
+ *  (1=1MHz ... 7=8MHz). On RP2350 there is only one shipped configuration
+ *  (PLL_SYS = 150 MHz) so the value is ignored at the arch level — it
+ *  is kept here only to satisfy callers of tiku_cpu_full_init().
+ *
+ *  MSP430 enum:
+ *    1=1MHz, 2=2.67MHz, 3=3.5MHz, 4=4MHz, 5=5.33MHz, 6=7MHz, 7=8MHz (max)
+ *    NOTE: 16MHz (value 8) is currently DISABLED due to stability issues.
  */
-#define MAIN_CPU_FREQ 7 /* 8 MHz (maximum supported) */
+#if defined(PLATFORM_RP2350)
+#define MAIN_CPU_FREQ 150  /* RP2350: PLL_SYS target in MHz; arch ignores */
+#else
+#define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
+#endif
 
-/** Compile-time mapping from MAIN_CPU_FREQ enum to actual Hz.
- * Used by htimer and other subsystems that need the clock frequency
- * as a compile-time constant.  SMCLK divider is 1 (see
- * tiku_cpu_freq_msp430_init), so SMCLK = MCLK = DCO.
+/** Compile-time mapping from MAIN_CPU_FREQ to actual Hz, used by htimer
+ *  and other subsystems that need the clock frequency as a compile-time
+ *  constant.
  */
-#if   MAIN_CPU_FREQ == 1
+#if defined(PLATFORM_RP2350)
+#define TIKU_MAIN_CPU_HZ  150000000UL
+#elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
 #elif MAIN_CPU_FREQ == 2
 #define TIKU_MAIN_CPU_HZ  2670000UL
@@ -112,10 +144,14 @@
 /* SYSTEM INCLUDES                                                          */
 /*---------------------------------------------------------------------------*/
 
-#include <msp430.h>   /* MSP430 specific header file */
 #include <stddef.h>   /* NULL */
 
-#include <arch/msp430/tiku_device_select.h> /* Device + board headers */
+#if defined(PLATFORM_MSP430)
+#include <msp430.h>                            /* MSP430-specific header */
+#include <arch/msp430/tiku_device_select.h>    /* Device + board headers */
+#elif defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_device_select.h>
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PLATFORM-ROUTED PRINTF                                                    */
@@ -149,7 +185,11 @@
 #include <kernel/cpu/tiku_watchdog.h>
 #include <kernel/process/tiku_process.h>
 #include <kernel/process/tiku_proto.h>
-#include <arch/msp430/tiku_timer_arch.h> /* TIKU_CLOCK_ARCH_SECOND et al. */
+#if defined(PLATFORM_MSP430)
+#include <arch/msp430/tiku_timer_arch.h>     /* TIKU_CLOCK_ARCH_SECOND et al. */
+#elif defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_timer_arch.h>
+#endif
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>
 #include <kernel/timers/tiku_timer.h>

@@ -108,19 +108,28 @@ extern char __hifram_end __attribute__((weak));
 static uint16_t
 stack_used(void)
 {
+#if defined(PLATFORM_MSP430)
     uint16_t sp;
     uint16_t top = (uint16_t)(uintptr_t)&__stack;
-
-#ifdef PLATFORM_MSP430
     __asm__ volatile ("mov r1, %0" : "=r"(sp));
-#else
-    sp = top;   /* fallback for host builds */
-#endif
-
     if (sp < top) {
         return top - sp;
     }
     return 0;
+#elif defined(PLATFORM_RP2350)
+    /* Cortex-M: 32-bit SP. Truncate to uint16_t (the max usage we
+     * realistically report on a microcontroller fits comfortably). */
+    uintptr_t sp;
+    uintptr_t top = (uintptr_t)&__stack;
+    __asm__ volatile ("mov %0, sp" : "=r"(sp));
+    if (sp < top) {
+        uintptr_t used = top - sp;
+        return (used > 0xFFFFU) ? 0xFFFFU : (uint16_t)used;
+    }
+    return 0;
+#else
+    return 0;   /* host fallback */
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
