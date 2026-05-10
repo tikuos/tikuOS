@@ -26,22 +26,21 @@
 
 ## Supported Boards
 
-| Board | MCU | RAM | FRAM | Notable | Status |
+| Board | MCU | RAM | FRAM/Flash | Notable | Status |
 |-------|-----|-----|------|---------|--------|
-| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB | — | :green_circle: Primary |
-| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
-| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
+| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB FRAM | — | :green_circle: Primary |
+| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB FRAM | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
+| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB FRAM | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
+| Raspberry Pi Pico 2 W | RP2350 (Cortex-M33 @ 150 MHz) | 520 KB SRAM | 4 MB QSPI flash | Bare-metal port, UART shell, GPIO, no Pico SDK dep. CYW43 Wi-Fi stubbed. | :yellow_circle: Beta |
 
 ---
 
 ## Quick Start
 
 ```bash
-# Build for a specific target
+# --- MSP430 builds ---------------------------------------------------------
 make MCU=msp430fr5969
-make MCU=msp430fr6989 MEMORY_MODEL=large   # FR6989 needs large mode for HIFRAM
-
-# Build and flash
+make MCU=msp430fr6989 MEMORY_MODEL=large    # FR6989 needs large mode for HIFRAM
 make flash MCU=msp430fr5969
 make flash MCU=msp430fr6989 MEMORY_MODEL=large
 
@@ -49,8 +48,13 @@ make flash MCU=msp430fr6989 MEMORY_MODEL=large
 make flash MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
            TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
 
-# Open serial monitor (default UART baud is 9600)
-make monitor
+# --- Raspberry Pi Pico 2 W (RP2350) ----------------------------------------
+# Requires: arm-none-eabi-gcc + python3 (and optionally picotool).
+make MCU=rp2350                              # builds main.elf, main.bin, main.uf2
+make flash MCU=rp2350                        # picotool, or copies UF2 to RPI-RP2
+
+# Open serial monitor (RP2350 default baud is 115200; MSP430 is 9600)
+make monitor MCU=rp2350
 ```
 
 ---

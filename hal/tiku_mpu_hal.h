@@ -35,8 +35,10 @@
 /* PLATFORM ROUTING                                                          */
 /*---------------------------------------------------------------------------*/
 
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_mpu_arch.h"
+#elif defined(PLATFORM_RP2350)
+#include "arch/arm-rp2350/tiku_mpu_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

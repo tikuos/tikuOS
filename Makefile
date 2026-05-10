@@ -14,8 +14,51 @@
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Toolchain  (auto-detected from PATH; override with TOOLCHAIN_DIR=…)
+# Target MCU  (override on command line: make MCU=msp430fr5969 / MCU=rp2350)
+# Accepts uppercase (MSP430FR5969 / RP2350) or lowercase MCU names.
 # ---------------------------------------------------------------------------
+MCU ?= $(mcu)
+ifeq ($(MCU),)
+MCU = msp430fr2433
+endif
+MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
+
+# Derive PLATFORM from MCU prefix.
+#   msp430* -> PLATFORM_MSP430 (default historical target)
+#   rp2350  -> PLATFORM_RP2350 (Raspberry Pi Pico 2 / Pico 2 W)
+ifeq ($(MCU),rp2350)
+TIKU_PLATFORM := rp2350
+else
+TIKU_PLATFORM := msp430
+endif
+
+# Derive device define from MCU: msp430fr2433 -> TIKU_DEVICE_MSP430FR2433,
+# rp2350 -> TIKU_DEVICE_RP2350. The RP2350 board (Pico 2 W) is hard-wired
+# for now; later boards can switch via TIKU_BOARD_*.
+DEVICE_UPPER = $(shell echo $(MCU) | tr '[:lower:]' '[:upper:]')
+DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
+
+# ---------------------------------------------------------------------------
+# Toolchain
+#
+# msp430:  msp430-elf-gcc auto-detected from PATH (or $(HOME)/tigcc)
+# rp2350:  arm-none-eabi-gcc auto-detected from PATH
+# ---------------------------------------------------------------------------
+ifeq ($(TIKU_PLATFORM),rp2350)
+
+# ARM Embedded toolchain (apt: gcc-arm-none-eabi).
+TOOLCHAIN_PREFIX ?= arm-none-eabi-
+TOOLCHAIN_DIR    ?= $(shell \
+	p=$$(command -v $(TOOLCHAIN_PREFIX)gcc 2>/dev/null) && dirname $$(dirname "$$p") \
+	|| echo "/usr")
+CC      = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gcc
+OBJCOPY = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)objcopy
+SIZE    = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)size
+GDB     = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gdb
+MSP430_SUPPORT_DIR :=
+
+else
+
 TOOLCHAIN_DIR ?= $(shell \
 	p=$$(command -v msp430-elf-gcc 2>/dev/null) && dirname $$(dirname "$$p") \
 	|| echo "$(HOME)/tigcc")
@@ -30,30 +73,21 @@ MSP430_SUPPORT_DIR ?= $(shell \
 	find $(TOOLCHAIN_DIR)/include -type f -name "msp430.h" 2>/dev/null \
 	| head -1 | xargs -r dirname)
 
+endif
+
 # ---------------------------------------------------------------------------
 # Debug / Flash tools  (auto-detected from PATH; override with MSPDEBUG=…)
 # ---------------------------------------------------------------------------
 MSPDEBUG ?= $(shell command -v mspdebug 2>/dev/null || echo mspdebug)
 DEBUGGER  = tilib
 
-# ---------------------------------------------------------------------------
-# Target MCU  (override on command line: make MCU=msp430fr5969 or mcu=msp430fr5969)
-# Accepts uppercase (MSP430FR5969) or lowercase (msp430fr5969) MCU names.
-# ---------------------------------------------------------------------------
-MCU ?= $(mcu)
-ifeq ($(MCU),)
-MCU = msp430fr2433
-endif
-MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
+# picotool / openocd for the RP2350 path. picotool is preferred when
+# available because it can use BOOTSEL or an installed Debug Probe; we
+# fall back to "drag-and-drop the UF2 onto the RPI-RP2 mass storage".
+PICOTOOL ?= $(shell command -v picotool 2>/dev/null || echo picotool)
 
-# Derive device define from MCU: msp430fr2433 -> TIKU_DEVICE_MSP430FR2433
-DEVICE_UPPER = $(shell echo $(MCU) | tr '[:lower:]' '[:upper:]')
-DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
-
-# Whether this MCU has HIFRAM (FRAM > 64 KB).  Only parts whose device
-# headers set TIKU_DEVICE_HAS_HIFRAM = 1 should be accepted with
-# MEMORY_MODEL=large -- on smaller parts large model just inflates
-# code/data by 20-25 % with no upper-FRAM region to spill into.
+# Whether this MCU has HIFRAM (FRAM > 64 KB).  MSP430-only concept;
+# for the RP2350 it is meaningless.
 ifeq ($(MCU),msp430fr5994)
 DEVICE_HAS_HIFRAM := 1
 else ifeq ($(MCU),msp430fr6989)
@@ -311,8 +345,10 @@ endif
 MEMORY_MODEL ?= small
 
 # ---------------------------------------------------------------------------
-# Build-time consistency guards
+# Build-time consistency guards (MSP430 only — RP2350 has no HIFRAM
+# concept and the BASIC interpreter is platform-neutral C).
 # ---------------------------------------------------------------------------
+ifeq ($(TIKU_PLATFORM),msp430)
 # 1. MEMORY_MODEL=large is only meaningful on parts with HIFRAM (FRAM >
 #    64 KB).  On FR5969 / FR2433 the large model inflates code/data by
 #    ~20-25 % with no upper-FRAM region to spill into.  Refuse the build
@@ -325,14 +361,12 @@ region, so large model just inflates code by ~20% with nowhere to \
 spill. Use MEMORY_MODEL=small (the default) on this part)
 endif
 endif
+endif
 
-# 2. BASIC adds ~3.5 KB of code, which pushes most shell-enabled builds
-#    past the 48 KB lower-FRAM cap.  Refusing the build up front avoids
-#    a confusing "region `FRAM' overflowed by N bytes" link error.  If
-#    you have a part with enough lower-FRAM headroom and want to
-#    override, pass TIKU_SHELL_BASIC_ALLOW_SMALL=1.  Combined with
-#    guard (1), this also implies BASIC is unavailable on FR5969 /
-#    FR2433 -- which is correct: they don't have the room.
+# 2. BASIC adds ~3.5 KB of code, which pushes most shell-enabled
+#    MSP430 builds past the 48 KB lower-FRAM cap. The RP2350 has 4 MB
+#    of XIP flash so this guard does not apply there.
+ifeq ($(TIKU_PLATFORM),msp430)
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq ($(MEMORY_MODEL),large)
 ifneq ($(TIKU_SHELL_BASIC_ALLOW_SMALL),1)
@@ -343,6 +377,7 @@ Re-run with: 'make ... MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
 TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large'. To override (only if \
 you know your part has lower-FRAM headroom), pass \
 TIKU_SHELL_BASIC_ALLOW_SMALL=1)
+endif
 endif
 endif
 endif
@@ -376,6 +411,24 @@ LEA_ENABLE ?= 0
 # ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
+ifeq ($(TIKU_PLATFORM),rp2350)
+
+# Cortex-M33 (mainline ARM core on Raspberry Pi RP2350). Single-precision
+# FPU is present but tikuOS uses softfp ABI to keep the toolchain
+# selection simple — none of the kernel code uses floats.
+CFLAGS  = -mcpu=cortex-m33 -mthumb
+CFLAGS += -mfloat-abi=softfp -mfpu=fpv5-sp-d16
+CFLAGS += -Os -Wall -Wextra
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -DTIKU_BOARD_RPI_PICO2_W=1
+CFLAGS += -DPLATFORM_RP2350=1
+# Optional: nano newlib for tiny printf when we ever pull in libc.
+CFLAGS += --specs=nosys.specs
+CFLAGS += -I$(PROJ_DIR)
+CFLAGS += -ffunction-sections -fdata-sections -fno-common
+
+else
+
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -DPLATFORM_MSP430=1
@@ -407,6 +460,8 @@ endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
 
+endif
+
 # UART baud rate (default 9600; override: make UART_BAUD=115200)
 UART_BAUD ?=
 ifneq ($(UART_BAUD),)
@@ -428,6 +483,20 @@ ifeq ($(HAS_TIKUKITS),1)
 CFLAGS += -DHAS_TIKUKITS=1
 endif
 
+ifeq ($(TIKU_PLATFORM),rp2350)
+
+LDFLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=softfp -mfpu=fpv5-sp-d16
+LDFLAGS += --specs=nosys.specs -nostartfiles
+LDFLAGS += -Tarch/arm-rp2350/devices/rp2350.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+LDFLAGS += -Wl,-u,tiku_rp2350_vectors
+LDFLAGS += -Wl,-u,tiku_rp2350_image_def
+LDFLAGS += -Wl,-u,tiku_rp2350_boot2_marker
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+
+else
+
 LDFLAGS  = -mmcu=$(MCU)
 ifeq ($(MEMORY_MODEL),large)
 LDFLAGS += -mlarge -mcode-region=either -mdata-region=either
@@ -438,6 +507,10 @@ LDFLAGS += -L$(MSP430_SUPPORT_DIR)
 endif
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes
+
+endif
+
+ifeq ($(TIKU_PLATFORM),msp430)
 
 # FR5994: merge LEARAM/LEASTACK into RAM unless LEA is requested.
 # The override LD redeclares the RAM region with LENGTH=0x2000 and
@@ -462,10 +535,63 @@ ifeq ($(MCU),msp430fr6989)
 LDFLAGS += -Tarch/msp430/devices/msp430fr6989_hifram.ld
 endif
 
+endif # TIKU_PLATFORM == msp430
+
 # ---------------------------------------------------------------------------
 # Source files — core OS (always compiled)
+#
+# MINIMAL=1 (RP2350 only): build a bare-metal smoke test that prints
+# "TikuOS minimal: hello #N" forever on UART0 + toggles GP25. No
+# kernel, scheduler, processes, VFS, or shell — useful for isolating
+# whether bring-up failures are in the boot/clock/UART layer or
+# higher up the stack.
 # ---------------------------------------------------------------------------
+MINIMAL ?= 0
+
+ifeq ($(MINIMAL),1)
+ifneq ($(TIKU_PLATFORM),rp2350)
+$(error MINIMAL=1 is only supported on MCU=rp2350)
+endif
+
+# Use the minimal entry point and exactly the arch files it needs.
+SRCS  = main_minimal.c
+SRCS += arch/arm-rp2350/tiku_crt_early.c
+SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
+SRCS += arch/arm-rp2350/tiku_cpu_common.c
+SRCS += arch/arm-rp2350/tiku_uart_arch.c
+SRCS += arch/arm-rp2350/tiku_gpio_arch.c
+CFLAGS += -DTIKU_MINIMAL=1
+
+else
+
 SRCS  = main.c
+
+ifeq ($(TIKU_PLATFORM),rp2350)
+
+# RP2350 arch
+SRCS += arch/arm-rp2350/tiku_cpu_common.c
+SRCS += arch/arm-rp2350/tiku_crt_early.c
+SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
+SRCS += arch/arm-rp2350/tiku_cpu_watchdog_arch.c
+SRCS += arch/arm-rp2350/tiku_htimer_arch.c
+SRCS += arch/arm-rp2350/tiku_i2c_arch.c
+SRCS += arch/arm-rp2350/tiku_adc_arch.c
+SRCS += arch/arm-rp2350/tiku_onewire_arch.c
+SRCS += arch/arm-rp2350/tiku_timer_arch.c
+SRCS += arch/arm-rp2350/tiku_crit_arch.c
+SRCS += arch/arm-rp2350/tiku_wake_arch.c
+SRCS += arch/arm-rp2350/tiku_gpio_irq_arch.c
+SRCS += arch/arm-rp2350/tiku_uart_arch.c
+SRCS += arch/arm-rp2350/tiku_mem_arch.c
+SRCS += arch/arm-rp2350/tiku_mpu_arch.c
+SRCS += arch/arm-rp2350/tiku_region_arch.c
+SRCS += arch/arm-rp2350/tiku_gpio_arch.c
+SRCS += arch/arm-rp2350/tiku_spi_arch.c
+SRCS += arch/arm-rp2350/tiku_lcd_arch.c
+
+else
+
+# MSP430 arch (default)
 SRCS += arch/msp430/tiku_cpu_common.c
 SRCS += arch/msp430/tiku_crt_early.c
 SRCS += arch/msp430/tiku_cpu_freq_boot_arch.c
@@ -482,6 +608,8 @@ SRCS += arch/msp430/tiku_uart_arch.c
 SRCS += arch/msp430/tiku_mem_arch.c
 SRCS += arch/msp430/tiku_mpu_arch.c
 SRCS += arch/msp430/tiku_region_arch.c
+
+endif
 SRCS += boot/tiku_boot.c
 SRCS += hal/tiku_cpu.c
 SRCS += kernel/cpu/tiku_common.c
@@ -513,7 +641,9 @@ endif
 SRCS += interfaces/led/tiku_led.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/bus/tiku_spi_bus.c
+ifeq ($(TIKU_PLATFORM),msp430)
 SRCS += arch/msp430/tiku_spi_arch.c
+endif
 SRCS += interfaces/adc/tiku_adc.c
 SRCS += interfaces/onewire/tiku_onewire.c
 # Segment-LCD interface — generic glue is always compiled (it
@@ -522,7 +652,9 @@ SRCS += interfaces/onewire/tiku_onewire.c
 # so it's safe to include unconditionally too: parts/boards
 # without an LCD compile it to an empty translation unit.
 SRCS += interfaces/lcd/tiku_lcd.c
+ifeq ($(TIKU_PLATFORM),msp430)
 SRCS += arch/msp430/tiku_lcd_arch.c
+endif
 SRCS += kernel/memory/tiku_mem.c
 SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
@@ -629,8 +761,12 @@ ifneq (,$(findstring TIKU_SHELL_CMD_PEEK=1,$(EXTRA_CFLAGS))$(findstring TIKU_SHE
 SRCS += kernel/shell/commands/tiku_shell_cmd_mem.c
 endif
 endif
-# GPIO arch is always needed (VFS tree references GPIO read/write/dir)
+# GPIO arch is always needed (VFS tree references GPIO read/write/dir).
+# RP2350 GPIO is bundled with the rp2350 arch sources at the top of the
+# SRCS block so it doesn't get added a second time here.
+ifeq ($(TIKU_PLATFORM),msp430)
 SRCS += arch/msp430/tiku_gpio_arch.c
+endif
 
 # ---------------------------------------------------------------------------
 # Init system (NVM-backed configurable boot — requires shell)
@@ -1045,6 +1181,8 @@ endif
 
 endif # HAS_TIKUKITS
 
+endif # MINIMAL=1 / else
+
 # Object files in build directory
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
@@ -1063,16 +1201,51 @@ TARGET = main.elf
 # Targets
 # ---------------------------------------------------------------------------
 .SUFFIXES:
-.PHONY: all clean flash run debug erase size monitor deploy docs docs-clean
+.PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2
 
+# UF2 is the RP2350 deliverable; ELF is enough on MSP430.
+ifeq ($(TIKU_PLATFORM),rp2350)
+TARGET_BIN = main.bin
+TARGET_UF2 = main.uf2
+all: $(TARGET) $(TARGET_BIN) $(TARGET_UF2) size
+else
 all: $(TARGET) size
+endif
 
-$(TARGET): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $^
+# main.elf in the project root is shared between MSP430 and RP2350
+# builds. The .platform-stamp file (kept under build/, NOT
+# build/$(MCU)/, so both platforms see the same one) is rewritten
+# whenever the previous build was for a different platform — its
+# timestamp advances and forces a relink.
+PLATFORM_STAMP = build/.platform-stamp
+
+ifneq ($(TIKU_PLATFORM),$(shell cat $(PLATFORM_STAMP) 2>/dev/null))
+$(shell mkdir -p build && echo $(TIKU_PLATFORM) > $(PLATFORM_STAMP))
+endif
+
+$(PLATFORM_STAMP):
+	@mkdir -p build
+	@echo $(TIKU_PLATFORM) > $@
+
+$(TARGET): $(OBJS) $(PLATFORM_STAMP)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS)
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# RP2350 outputs: .elf -> .bin -> .uf2 (the .uf2 is what the BOOTSEL
+# mass-storage device wants).
+ifeq ($(TIKU_PLATFORM),rp2350)
+$(TARGET_BIN): $(TARGET)
+	$(OBJCOPY) -O binary $< $@
+
+$(TARGET_UF2): $(TARGET_BIN) tools/elf2uf2.py
+	@python3 tools/elf2uf2.py $(TARGET_BIN) $(TARGET_UF2)
+	@echo "  [uf2]   $(TARGET) -> $(TARGET_UF2)"
+
+uf2: $(TARGET_UF2)
+endif
 
 # Embedded BASIC: the generated .c lives inside $(BUILD_DIR), so the
 # pattern rule above can't reach it (it would loop on the prefix).
@@ -1119,6 +1292,48 @@ endif
 # ---------------------------------------------------------------------------
 # Flash / Debug / Erase
 # ---------------------------------------------------------------------------
+ifeq ($(TIKU_PLATFORM),rp2350)
+
+# Pi Pico 2 W has two reasonable flash paths:
+#   1. picotool load -fx <uf2>     — works over BOOTSEL or Debug Probe
+#   2. cp <uf2> /media/$USER/RPI-RP2  — drag-and-drop on Linux/macOS
+# We try picotool first, then look for the mass-storage mountpoint.
+PICO_MOUNT_GUESS = $(shell \
+	for d in /run/media/$(USER)/RP2350 \
+	         /run/media/$(USER)/RP2  \
+	         /media/$(USER)/RP2350    \
+	         /media/$(USER)/RP2  \
+	         /Volumes/RP2350 \
+	         /Volumes/RP2; do \
+		[ -d $$d ] && echo $$d && break; \
+	done)
+
+flash: all
+	@if command -v $(PICOTOOL) >/dev/null 2>&1; then \
+		echo "Flashing via picotool..."; \
+		$(PICOTOOL) load -fx $(TARGET_UF2); \
+	elif [ -n "$(PICO_MOUNT_GUESS)" ]; then \
+		echo "Copying $(TARGET_UF2) to $(PICO_MOUNT_GUESS)/"; \
+		cp $(TARGET_UF2) $(PICO_MOUNT_GUESS)/; \
+	else \
+		echo "Error: no picotool and no RP2 mass-storage mountpoint."; \
+		echo "  - Install picotool, OR"; \
+		echo "  - Hold BOOTSEL while plugging in the Pico 2 W, then re-run."; \
+		exit 1; \
+	fi
+
+run: flash
+
+debug:
+	@echo "Debug: connect a Debug Probe and run e.g.:"
+	@echo "  openocd -s tcl -f interface/cmsis-dap.cfg -c 'adapter speed 5000' \\"
+	@echo "    -f target/rp2350.cfg -c 'program $(TARGET) verify reset exit'"
+
+erase:
+	@echo "Erase: hold BOOTSEL, mount RPI-RP2, copy a flash_nuke.uf2 image."
+
+else
+
 flash: all
 	$(MSPDEBUG) $(DEBUGGER) "prog $(TARGET)"
 
@@ -1130,12 +1345,18 @@ debug: all
 erase:
 	$(MSPDEBUG) $(DEBUGGER) "erase"
 
+endif
+
 deploy: clean flash monitor
 
 # ---------------------------------------------------------------------------
 # Serial Monitor  (auto-detects TI LaunchPad, picks picocom or screen)
 # ---------------------------------------------------------------------------
+ifeq ($(TIKU_PLATFORM),rp2350)
+BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),115200)
+else
 BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),9600)
+endif
 
 # Auto-detect serial port.
 # Prefer /dev/ttyUSB* (FTDI/CP2102 external adapter) over ttyACM*
