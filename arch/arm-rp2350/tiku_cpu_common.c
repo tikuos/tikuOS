@@ -12,6 +12,7 @@
 
 #include "tiku_cpu_common.h"
 #include "tiku_rp2350_regs.h"
+#include "tiku_uart_arch.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -94,4 +95,110 @@ uint16_t tiku_cpu_rp2350_reset_reason(void) {
      * directly so callers see a 16-bit value compatible with MSP430
      * SYSRSTIV. 0 means cold boot. */
     return (uint16_t)(_RP2350_REG(RP2350_WD_REASON) & 0xFFU);
+}
+
+/*---------------------------------------------------------------------------*/
+/* Reboot to USB BOOTSEL                                                     */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * RP2350 has no portable watchdog-scratch BOOTSEL trick (the 0xB007C0D3
+ * scratch[4] magic that ships in pico-sdk's watchdog_reboot() is for
+ * "reboot to specific PC", NOT BOOTSEL).  The supported path is the
+ * boot ROM's reboot() / reset_usb_boot() function looked up via the
+ * ROM table at offset 0x16 (per pico-sdk
+ * boot_bootrom_headers/include/boot/bootrom_constants.h).
+ *
+ * Lookup signature on RP2350 ARM:
+ *   void *rom_table_lookup(uint32_t code, uint32_t mask);
+ *
+ * Function codes:
+ *   'U'|('B'<<8) = 0x4255  -- reset_usb_boot(gpio_pin_mask, disable_iface)
+ *   'R'|('B'<<8) = 0x4252  -- reboot(flags, delay_ms, p0, p1)
+ *
+ * Lookup masks (RT_FLAG_FUNC_*):
+ *   0x0004  ARM_SEC      (Cortex-M33 secure mode, what TikuOS runs)
+ *   0x0010  ARM_NONSEC   (fallback in case the function lives only here)
+ *
+ * reboot() flags:
+ *   0x002  REBOOT2_FLAG_REBOOT_TYPE_BOOTSEL
+ *   0x100  REBOOT2_FLAG_NO_RETURN_ON_SUCCESS
+ *
+ * Strategy: drain UART, disable IRQs, walk every (function, mask) pair
+ * until one of the bootrom calls succeeds and reboots us into the
+ * 2e8a:000f mass-storage boot mode.  If every lookup misses, fall
+ * through to a plain watchdog reset (the device reboots back into
+ * TikuOS and the host has to BOOTSEL manually).
+ */
+void tiku_cpu_rp2350_reboot_to_bootsel(void) {
+    typedef void *(*lookup_fn_t)(uint32_t code, uint32_t mask);
+    typedef void (*reset_usb_boot_fn_t)(uint32_t pin_mask,
+                                        uint32_t iface_mask);
+    typedef int  (*reboot_fn_t)(uint32_t flags, uint32_t delay_ms,
+                                uint32_t p0, uint32_t p1);
+
+    static const uint32_t MASKS[] = { 0x0004U, 0x0010U };
+    volatile uint32_t i;
+    uint16_t lookup_addr;
+    lookup_fn_t lookup;
+    void *func;
+    uint8_t k;
+
+    /* Drain the PL011 transmitter so [TS:END] reaches the host before
+     * the chip's USB endpoint disappears or the UART RX is silenced. */
+    while (_RP2350_REG(RP2350_UART_FR) & RP2350_UART_FR_BUSY) {
+        /* spin */
+    }
+
+    /* Belt-and-braces settle (~1 ms at 150 MHz). */
+    for (i = 0; i < 200000U; i++) {
+        __asm__ volatile ("nop");
+    }
+
+    /* Mask all interrupts. */
+    __asm__ volatile ("cpsid i" ::: "memory");
+
+    /* RP2350 ARM: bootrom lookup function pointer is at fixed ROM
+     * offset 0x16 (see BOOTROM_TABLE_LOOKUP_OFFSET in pico-sdk). */
+    lookup_addr = *(volatile uint16_t *)(uintptr_t)0x16U;
+    lookup = (lookup_fn_t)(uintptr_t)lookup_addr;
+
+    if (lookup != (lookup_fn_t)0) {
+        /* Try reset_usb_boot() ('U','B') first under each mask. */
+        for (k = 0; k < (uint8_t)(sizeof(MASKS) / sizeof(MASKS[0])); k++) {
+            func = lookup(0x4255U, MASKS[k]);
+            if (func != (void *)0) {
+                ((reset_usb_boot_fn_t)func)(0U, 0U);
+                /* must not return; if it does, fall through */
+            }
+        }
+
+        /* Then try reboot() ('R','B') with BOOTSEL flag under each mask. */
+        for (k = 0; k < (uint8_t)(sizeof(MASKS) / sizeof(MASKS[0])); k++) {
+            func = lookup(0x4252U, MASKS[k]);
+            if (func != (void *)0) {
+                ((reboot_fn_t)func)(0x102U, /* BOOTSEL | NO_RETURN */
+                                    10U,    /* delay_ms (matches pico-sdk) */
+                                    0U, 0U);
+                /* must not return on success */
+            }
+        }
+    }
+
+    /* Bootrom paths all failed.  Plain watchdog reset (no BOOTSEL).
+     * Print a marker so the host sees we tried but missed, then
+     * reset.  After the reset TikuOS will boot again; the user
+     * can BOOTSEL manually. */
+    tiku_uart_puts("[BOOTSEL: rom lookup failed; resetting]\n");
+    while (_RP2350_REG(RP2350_UART_FR) & RP2350_UART_FR_BUSY) {
+        /* drain */
+    }
+    _RP2350_REG(RP2350_WD_CTRL) = 0U;
+    _RP2350_REG(RP2350_WD_LOAD) = 0U;
+    _RP2350_REG(RP2350_WD_CTRL) = RP2350_WD_CTRL_TRIGGER
+                                 | RP2350_WD_CTRL_ENABLE;
+
+    for (;;) {
+        __asm__ volatile ("wfe");
+    }
 }

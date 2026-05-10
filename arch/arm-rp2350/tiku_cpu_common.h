@@ -31,4 +31,16 @@ uint8_t  tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len);
  * /sys/boot/reason. */
 uint16_t tiku_cpu_rp2350_reset_reason(void);
 
+/* Drain UART, disable interrupts, and ask the RP2350 boot ROM to
+ * reboot into USB BOOTSEL mode (mass-storage). On success the call
+ * does not return; on failure (boot ROM lookup miss, signature
+ * mismatch) the function falls through to a watchdog reset, which
+ * reboots the chip but does NOT enter BOOTSEL — the host will then
+ * need a manual BOOTSEL hold + replug to flash again.
+ *
+ * Used by the test harness when TIKU_TEST_AUTO_BOOTSEL is defined,
+ * so the Python loop runner can chain test categories without a
+ * physical button press between cycles. */
+void tiku_cpu_rp2350_reboot_to_bootsel(void) __attribute__((noreturn));
+
 #endif /* TIKU_RP2350_CPU_COMMON_H_ */
