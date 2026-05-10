@@ -120,9 +120,12 @@
 /* MPU                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/* RP2350's Cortex-M33 has the ARMv8-M MPU. We don't program it on
- * the first port — kernel MPU calls become no-ops. */
-#define TIKU_DEVICE_HAS_MPU         0
+/* RP2350's Cortex-M33 has the ARMv8-M MPU.  tiku_mpu_arch.c programs
+ * region 0 to cover the .uninit (NVM) range and enforces RO-by-default
+ * / RW-while-unlocked via the unlock_nvm/lock_nvm pair.  MemManage
+ * exception is wired to bump a violation counter and trigger a system
+ * reset, so a buggy write to NVM without unlocking actually faults. */
+#define TIKU_DEVICE_HAS_MPU         1
 
 /*---------------------------------------------------------------------------*/
 /* PERIPHERAL DEFAULTS                                                       */

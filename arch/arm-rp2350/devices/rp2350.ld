@@ -124,16 +124,39 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
+    /* MPU diagnostic state — lives just before .uninit so it
+     * survives warm reset (NOLOAD) but sits OUTSIDE the MPU-protected
+     * range. The MemManage handler needs to write to its own
+     * persistent state across the reset it triggers; if that state
+     * lived in .uninit it would itself fault.
+     *
+     * IMPORTANT: pad to a 32-byte boundary at the end so the next
+     * section (.uninit) starts naturally 32-byte aligned. ARMv8-M MPU
+     * regions snap to 32-byte boundaries; if .uninit started on a
+     * non-32-aligned address, mpu_rbar_uninit() would round the BASE
+     * down and inadvertently include the last bytes of .mpu_diag in
+     * the protected region — which would fault the very write the
+     * handler tries to make to record the violation. */
+    .mpu_diag (NOLOAD) : ALIGN(32)
+    {
+        __mpu_diag_start = .;
+        *(.mpu_diag*)
+        . = ALIGN(32);
+        __mpu_diag_end = .;
+    } > SRAM
+
     /* "Persistent across reboot but skipped by zero-init" region.
      * The kernel uses this for /sys/boot/count etc. on platforms that
      * have FRAM. On RP2350 the contents survive only warm resets; a
-     * power cycle reseeds them as zero. */
-    .uninit (NOLOAD) : ALIGN(4)
+     * power cycle reseeds them as zero. The MPU protects this exact
+     * range — see tiku_mpu_arch.c. ALIGN(32) so the MPU region BASE
+     * snaps cleanly without rounding into .mpu_diag. */
+    .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
         *(.uninit*)
         *(.persistent*)
-        . = ALIGN(4);
+        . = ALIGN(32);
         __uninit_end = .;
     } > SRAM
 

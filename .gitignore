@@ -28,6 +28,7 @@ build/
 *.hex
 *.bin
 *.lst
+*.uf2
 
 # Linker scripts (CCS-generated)
 lnk_*.cmd

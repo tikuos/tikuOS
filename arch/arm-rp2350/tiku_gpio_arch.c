@@ -49,9 +49,14 @@ void tiku_rp2350_gpio_init_output(uint8_t pin) {
         RP2350_PADS_IE | RP2350_PADS_DRIVE_4MA;
     _RP2350_REG(RP2350_IO_BANK0_GPIO_CTRL(pin)) =
         RP2350_IO_FUNC_SIO;
-    /* Output low, then enable output drive. */
-    _RP2350_REG_CLR(RP2350_SIO_GPIO_OUT, (1U << pin));
-    _RP2350_REG_SET(RP2350_SIO_GPIO_OE,  (1U << pin));
+    /* Output low, then enable output drive. SIO does NOT use the
+     * generic +0x2000/+0x3000 atomic SET/CLR aliases — those address
+     * unmapped SoC space and are silently dropped. SIO has its own
+     * adjacent *_SET / *_CLR / *_XOR registers (offset +8 / +16 / +24
+     * from each base register) which are the only correct way to do
+     * an atomic set/clear here. */
+    _RP2350_REG(RP2350_SIO_GPIO_OUT_CLR) = (1U << pin);
+    _RP2350_REG(RP2350_SIO_GPIO_OE_SET)  = (1U << pin);
 }
 
 void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value) {
@@ -96,8 +101,10 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
         RP2350_PADS_PUE | RP2350_PADS_SCHMITT;
     _RP2350_REG(RP2350_IO_BANK0_GPIO_CTRL((uint8_t)gp)) =
         RP2350_IO_FUNC_SIO;
-    /* Output disable. */
-    _RP2350_REG_CLR(RP2350_SIO_GPIO_OE, (1U << gp));
+    /* Output disable. SIO uses its dedicated CLR register (see
+     * tiku_rp2350_gpio_init_output for why the generic CLR alias
+     * doesn't work for SIO). */
+    _RP2350_REG(RP2350_SIO_GPIO_OE_CLR) = (1U << gp);
     return 0;
 }
 

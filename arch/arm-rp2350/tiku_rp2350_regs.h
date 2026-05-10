@@ -64,6 +64,11 @@
 #define RP2350_TIMER0_BASE          0x400B0000UL
 #define RP2350_TIMER1_BASE          0x400B8000UL
 #define RP2350_WATCHDOG_BASE        0x400D8000UL
+#define RP2350_ADC_BASE             0x400A0000UL
+#define RP2350_I2C0_BASE            0x40090000UL
+#define RP2350_I2C1_BASE            0x40098000UL
+#define RP2350_SPI0_BASE            0x40080000UL
+#define RP2350_SPI1_BASE            0x40088000UL
 #define RP2350_TICKS_BASE           0x40108000UL
 
 /* Cortex-M33 SCS / NVIC / SysTick / SCB live at the standard
@@ -71,6 +76,8 @@
 #define RP2350_PPB_BASE             0xE0000000UL
 #define RP2350_SYST_BASE            (RP2350_PPB_BASE + 0xE010UL)
 #define RP2350_NVIC_BASE            (RP2350_PPB_BASE + 0xE100UL)
+#define RP2350_SCB_BASE             (RP2350_PPB_BASE + 0xED00UL)
+#define RP2350_MPU_BASE             (RP2350_PPB_BASE + 0xED90UL)
 #define RP2350_SCB_BASE             (RP2350_PPB_BASE + 0xED00UL)
 
 /*---------------------------------------------------------------------------*/
@@ -130,6 +137,22 @@
 #define RP2350_CLK_PERI_CTRL        (RP2350_CLOCKS_BASE + 0x48U)
 #define RP2350_CLK_PERI_DIV         (RP2350_CLOCKS_BASE + 0x4CU)
 #define RP2350_CLK_PERI_SELECTED    (RP2350_CLOCKS_BASE + 0x50U)
+#define RP2350_CLK_HSTX_CTRL        (RP2350_CLOCKS_BASE + 0x54U)
+#define RP2350_CLK_HSTX_DIV         (RP2350_CLOCKS_BASE + 0x58U)
+#define RP2350_CLK_HSTX_SELECTED    (RP2350_CLOCKS_BASE + 0x5CU)
+#define RP2350_CLK_USB_CTRL         (RP2350_CLOCKS_BASE + 0x60U)
+#define RP2350_CLK_USB_DIV          (RP2350_CLOCKS_BASE + 0x64U)
+#define RP2350_CLK_USB_SELECTED     (RP2350_CLOCKS_BASE + 0x68U)
+#define RP2350_CLK_ADC_CTRL         (RP2350_CLOCKS_BASE + 0x6CU)
+#define RP2350_CLK_ADC_DIV          (RP2350_CLOCKS_BASE + 0x70U)
+#define RP2350_CLK_ADC_SELECTED     (RP2350_CLOCKS_BASE + 0x74U)
+
+/* CLK_ADC_CTRL fields (mirrors CLK_PERI_CTRL layout) */
+#define RP2350_CLK_ADC_ENABLE           (1U << 11)
+#define RP2350_CLK_ADC_AUXSRC_PLL_USB   (0U << 5)
+#define RP2350_CLK_ADC_AUXSRC_PLL_SYS   (1U << 5)
+#define RP2350_CLK_ADC_AUXSRC_ROSC      (2U << 5)
+#define RP2350_CLK_ADC_AUXSRC_XOSC      (3U << 5)
 
 /* CLK_SYS_CTRL fields */
 #define RP2350_CLK_SYS_AUXSRC_PLL_SYS   (0U << 5)
@@ -348,6 +371,117 @@
 #define RP2350_TIMER0_INTS          (RP2350_TIMER0_BASE + 0x48U)
 
 /*---------------------------------------------------------------------------*/
+/* ADC (single 12-bit SAR — datasheet §12.4)                                 */
+/*---------------------------------------------------------------------------*/
+
+#define RP2350_ADC_CS               (RP2350_ADC_BASE + 0x00U)
+#define RP2350_ADC_RESULT           (RP2350_ADC_BASE + 0x04U)
+#define RP2350_ADC_FCS              (RP2350_ADC_BASE + 0x08U)
+#define RP2350_ADC_FIFO             (RP2350_ADC_BASE + 0x0CU)
+#define RP2350_ADC_DIV              (RP2350_ADC_BASE + 0x10U)
+#define RP2350_ADC_INTR             (RP2350_ADC_BASE + 0x14U)
+#define RP2350_ADC_INTE             (RP2350_ADC_BASE + 0x18U)
+#define RP2350_ADC_INTF             (RP2350_ADC_BASE + 0x1CU)
+#define RP2350_ADC_INTS             (RP2350_ADC_BASE + 0x20U)
+
+/* CS bits */
+#define RP2350_ADC_CS_EN            (1U << 0)   /* ADC enable */
+#define RP2350_ADC_CS_TS_EN         (1U << 1)   /* Temperature sensor enable */
+#define RP2350_ADC_CS_START_ONCE    (1U << 2)   /* Trigger one conversion */
+#define RP2350_ADC_CS_START_MANY    (1U << 3)   /* Free-running mode */
+#define RP2350_ADC_CS_READY         (1U << 8)   /* 1 = idle (conversion done) */
+#define RP2350_ADC_CS_ERR           (1U << 9)   /* Conversion error */
+#define RP2350_ADC_CS_ERR_STICKY    (1U << 10)  /* Sticky error */
+#define RP2350_ADC_CS_AINSEL_SHIFT  12          /* Channel select 0..7 */
+#define RP2350_ADC_CS_AINSEL_MASK   (0xFU << RP2350_ADC_CS_AINSEL_SHIFT)
+
+/* The temperature sensor is wired to AINSEL channel 4. ADC channels
+ * 0..3 are AIN0..AIN3 (GPIO26..GPIO29 on the standard package). */
+#define RP2350_ADC_CHANNEL_TEMP     4U
+
+/* GPIO offset for ADC pin n: AIN0..AIN3 → GP26..GP29. */
+#define RP2350_ADC_GPIO_BASE        26U
+
+/*---------------------------------------------------------------------------*/
+/* I2C (DW_apb_i2c — datasheet §12.3, plus the DesignWare IP databook)       */
+/*---------------------------------------------------------------------------*/
+
+#define RP2350_I2C_IC_CON              0x00U
+#define RP2350_I2C_IC_TAR              0x04U
+#define RP2350_I2C_IC_DATA_CMD         0x10U
+#define RP2350_I2C_IC_SS_SCL_HCNT      0x14U
+#define RP2350_I2C_IC_SS_SCL_LCNT      0x18U
+#define RP2350_I2C_IC_FS_SCL_HCNT      0x1CU
+#define RP2350_I2C_IC_FS_SCL_LCNT      0x20U
+#define RP2350_I2C_IC_INTR_STAT        0x2CU
+#define RP2350_I2C_IC_RAW_INTR_STAT    0x34U
+#define RP2350_I2C_IC_CLR_INTR         0x40U
+#define RP2350_I2C_IC_CLR_TX_ABRT      0x54U
+#define RP2350_I2C_IC_ENABLE           0x6CU
+#define RP2350_I2C_IC_STATUS           0x70U
+#define RP2350_I2C_IC_TXFLR            0x74U
+#define RP2350_I2C_IC_RXFLR            0x78U
+#define RP2350_I2C_IC_SDA_HOLD         0x7CU
+#define RP2350_I2C_IC_TX_ABRT_SOURCE   0x80U
+#define RP2350_I2C_IC_ENABLE_STATUS    0x9CU
+#define RP2350_I2C_IC_FS_SPKLEN        0xA8U
+
+/* IC_CON bits */
+#define RP2350_I2C_CON_MASTER          (1U << 0)
+#define RP2350_I2C_CON_SPEED_SS        (1U << 1)   /* standard mode */
+#define RP2350_I2C_CON_SPEED_FS        (2U << 1)   /* fast mode */
+#define RP2350_I2C_CON_SLAVE_DISABLE   (1U << 6)
+#define RP2350_I2C_CON_RESTART_EN      (1U << 5)
+#define RP2350_I2C_CON_TX_EMPTY_CTRL   (1U << 8)
+
+/* IC_DATA_CMD bits */
+#define RP2350_I2C_DATA_CMD_READ       (1U << 8)
+#define RP2350_I2C_DATA_CMD_STOP       (1U << 9)
+#define RP2350_I2C_DATA_CMD_RESTART    (1U << 10)
+
+/* IC_STATUS bits */
+#define RP2350_I2C_STATUS_ACTIVITY     (1U << 0)
+#define RP2350_I2C_STATUS_TFNF         (1U << 1)   /* TX FIFO not full */
+#define RP2350_I2C_STATUS_TFE          (1U << 2)   /* TX FIFO empty */
+#define RP2350_I2C_STATUS_RFNE         (1U << 3)   /* RX FIFO not empty */
+
+/* IC_RAW_INTR_STAT bits used by the driver */
+#define RP2350_I2C_INTR_TX_ABRT        (1U << 6)
+#define RP2350_I2C_INTR_STOP_DET       (1U << 9)
+
+/* IC_TX_ABRT_SOURCE bits commonly observed (NACK on address / data). */
+#define RP2350_I2C_ABRT_7B_ADDR_NOACK  (1U << 0)
+#define RP2350_I2C_ABRT_TXDATA_NOACK   (1U << 3)
+
+/*---------------------------------------------------------------------------*/
+/* SPI (PL022 — datasheet §12.5)                                             */
+/*---------------------------------------------------------------------------*/
+
+#define RP2350_SPI_SSPCR0              0x00U
+#define RP2350_SPI_SSPCR1              0x04U
+#define RP2350_SPI_SSPDR               0x08U
+#define RP2350_SPI_SSPSR               0x0CU
+#define RP2350_SPI_SSPCPSR             0x10U
+
+/* SSPCR0 fields */
+#define RP2350_SPI_CR0_DSS_8BIT        0x07U                /* bits[3:0] */
+#define RP2350_SPI_CR0_FRF_MOTOROLA    (0U << 4)
+#define RP2350_SPI_CR0_SPO             (1U << 6)            /* CPOL */
+#define RP2350_SPI_CR0_SPH             (1U << 7)            /* CPHA */
+#define RP2350_SPI_CR0_SCR_SHIFT       8                    /* serial clock rate, bits[15:8] */
+
+/* SSPCR1 fields */
+#define RP2350_SPI_CR1_SSE             (1U << 1)            /* enable */
+#define RP2350_SPI_CR1_MS              (1U << 2)            /* 0 = master */
+
+/* SSPSR (status) */
+#define RP2350_SPI_SR_TFE              (1U << 0)            /* TX FIFO empty */
+#define RP2350_SPI_SR_TNF              (1U << 1)            /* TX FIFO not full */
+#define RP2350_SPI_SR_RNE              (1U << 2)            /* RX FIFO not empty */
+#define RP2350_SPI_SR_RFF              (1U << 3)            /* RX FIFO full */
+#define RP2350_SPI_SR_BSY              (1U << 4)            /* busy */
+
+/*---------------------------------------------------------------------------*/
 /* WATCHDOG                                                                  */
 /*---------------------------------------------------------------------------*/
 
@@ -409,6 +543,66 @@
 #define RP2350_NVIC_ISPR0           (RP2350_NVIC_BASE + 0x100U)
 #define RP2350_NVIC_ICPR0           (RP2350_NVIC_BASE + 0x180U)
 #define RP2350_NVIC_IPR0            (RP2350_NVIC_BASE + 0x300U)
+
+/*---------------------------------------------------------------------------*/
+/* SCB (System Control Block) — Cortex-M33                                   */
+/*---------------------------------------------------------------------------*/
+
+#define RP2350_SCB_AIRCR            (RP2350_SCB_BASE + 0x0CU)  /* App IRQ + reset control */
+#define RP2350_SCB_SHCSR            (RP2350_SCB_BASE + 0x24U)  /* System Handler CSR */
+#define RP2350_SCB_CFSR             (RP2350_SCB_BASE + 0x28U)  /* Configurable Fault Status */
+#define RP2350_SCB_HFSR             (RP2350_SCB_BASE + 0x2CU)  /* HardFault Status */
+#define RP2350_SCB_MMFAR            (RP2350_SCB_BASE + 0x34U)  /* MemManage Fault Address */
+
+#define RP2350_SCB_AIRCR_VECTKEY    (0x05FAUL << 16)
+#define RP2350_SCB_AIRCR_SYSRESET   (1U << 2)
+#define RP2350_SCB_SHCSR_MEMFAULTENA (1U << 16)
+
+/* CFSR.MMFSR (low byte) — write 1 to clear */
+#define RP2350_SCB_MMFSR_IACCVIOL   (1U << 0)
+#define RP2350_SCB_MMFSR_DACCVIOL   (1U << 1)
+#define RP2350_SCB_MMFSR_MUNSTKERR  (1U << 3)
+#define RP2350_SCB_MMFSR_MSTKERR    (1U << 4)
+#define RP2350_SCB_MMFSR_MMARVALID  (1U << 7)
+
+/*---------------------------------------------------------------------------*/
+/* MPU — ARMv8-M (Cortex-M33)                                                */
+/*---------------------------------------------------------------------------*/
+
+#define RP2350_MPU_TYPE             (RP2350_MPU_BASE + 0x00U)  /* read DREGION count */
+#define RP2350_MPU_CTRL             (RP2350_MPU_BASE + 0x04U)
+#define RP2350_MPU_RNR              (RP2350_MPU_BASE + 0x08U)
+#define RP2350_MPU_RBAR             (RP2350_MPU_BASE + 0x0CU)
+#define RP2350_MPU_RLAR             (RP2350_MPU_BASE + 0x10U)
+#define RP2350_MPU_MAIR0            (RP2350_MPU_BASE + 0x30U)
+#define RP2350_MPU_MAIR1            (RP2350_MPU_BASE + 0x34U)
+
+/* MPU_CTRL */
+#define RP2350_MPU_CTRL_ENABLE      (1U << 0)
+#define RP2350_MPU_CTRL_HFNMIENA    (1U << 1)
+#define RP2350_MPU_CTRL_PRIVDEFENA  (1U << 2)
+
+/* RBAR fields (ARMv8-M):
+ *   bits[31:5]  BASE          (32-byte aligned)
+ *   bits[ 4:3]  SH            (sharability — 00 = Non-shareable for normal mem)
+ *   bits[ 2:1]  AP            (00 RW priv-only, 01 RW any, 10 RO priv-only, 11 RO any)
+ *   bit       0  XN            (1 = Execute Never)
+ *
+ * RLAR fields:
+ *   bits[31:5]  LIMIT         (32-byte aligned, inclusive)
+ *   bits[ 4:1]  AttrIndx      (index into MPU_MAIR{0,1})
+ *   bit       0  EN            (region enable) */
+#define RP2350_MPU_RBAR_AP_RW_ANY   (0x1U << 1)
+#define RP2350_MPU_RBAR_AP_RO_ANY   (0x3U << 1)
+#define RP2350_MPU_RBAR_XN          (1U << 0)
+#define RP2350_MPU_RBAR_AP_MASK     (0x3U << 1)
+#define RP2350_MPU_RLAR_EN          (1U << 0)
+
+/* MPU_MAIR memory attribute encodings (one byte per attr index 0..3 in MAIR0,
+ * 4..7 in MAIR1). 0x44 = Normal, Inner & Outer Non-cacheable — fine for
+ * SRAM where we don't need cache coherence guarantees beyond the Cortex-M33
+ * default MPU semantics. */
+#define RP2350_MPU_MAIR_NORMAL_NC   0x44U
 
 /*
  * Common IRQ numbers we use (RP2350 datasheet §3.6.1 IRQ mapping +

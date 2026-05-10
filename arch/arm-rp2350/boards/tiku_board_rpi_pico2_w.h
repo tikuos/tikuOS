@@ -120,4 +120,24 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_I2C_BRW_100K     1   /* unused on RP2350 — symbolic */
 #define TIKU_BOARD_OW_AVAILABLE     1
 
+/* 1-Wire data pin. GP15 is a free header pin with no peripheral
+ * default function on Pico 2 W (clear of UART0 GP0/1, I2C0 GP4/5,
+ * SPI0 GP16-19, ADC GP26-29, CYW43 GP23-25). External 4.7 kohm
+ * pull-up to 3V3 is required on the data line. */
+#define TIKU_BOARD_OW_PIN           15U
+
+/* I2C0 pin assignment. RP2350 IO_BANK0 maps function 3 = I2C; on the
+ * Pico 2 W header GP4/GP5 are the conventional pair (matches Pico SDK
+ * default and the Adafruit/SparkFun breakouts). External pull-ups
+ * required on both lines. */
+#define TIKU_BOARD_I2C0_SDA_PIN     4U
+#define TIKU_BOARD_I2C0_SCL_PIN     5U
+
+/* SPI0 pin assignment. Function 1 = SPI on RP2350 IO_BANK0. Standard
+ * Pico/Pico 2 mapping: GP16=MISO, GP18=SCK, GP19=MOSI. CS (SS) is
+ * left to the application — drive any free GPIO from user code. */
+#define TIKU_BOARD_SPI0_MISO_PIN    16U
+#define TIKU_BOARD_SPI0_SCK_PIN     18U
+#define TIKU_BOARD_SPI0_MOSI_PIN    19U
+
 #endif /* TIKU_BOARD_RPI_PICO2_W_H_ */
