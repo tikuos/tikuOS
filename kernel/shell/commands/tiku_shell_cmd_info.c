@@ -31,14 +31,8 @@
 /* DEVICE NAME (compile-time)                                                */
 /*---------------------------------------------------------------------------*/
 
-#if defined(TIKU_DEVICE_MSP430FR5969)
-#define CLI_DEVICE_NAME "MSP430FR5969"
-#elif defined(TIKU_DEVICE_MSP430FR5994)
-#define CLI_DEVICE_NAME "MSP430FR5994"
-#elif defined(TIKU_DEVICE_MSP430FR6989)
-#define CLI_DEVICE_NAME "MSP430FR6989"
-#elif defined(TIKU_DEVICE_MSP430FR2433)
-#define CLI_DEVICE_NAME "MSP430FR2433"
+#if defined(TIKU_DEVICE_NAME)
+#define CLI_DEVICE_NAME TIKU_DEVICE_NAME
 #else
 #define CLI_DEVICE_NAME "Unknown"
 #endif
