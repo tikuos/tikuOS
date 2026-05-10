@@ -40,9 +40,13 @@ void tiku_rp2350_gpio_init_output(uint8_t pin) {
     if (pin > MAX_GP_PIN) {
         return;
     }
-    /* Function = SIO, no input enable, no pulls. */
+    /* Function = SIO. Keep input-enable on so SIO_GPIO_IN reflects
+     * the level being driven (the GPIO API contract is "you can read
+     * back what you wrote to an output pin", which MSP430 satisfies
+     * for free; on RP2350 SIO_GPIO_IN reads 0 if the pad input
+     * buffer is disabled, even when the pin is electrically high). */
     _RP2350_REG(RP2350_PADS_BANK0_GPIO(pin)) =
-        RP2350_PADS_DRIVE_4MA;
+        RP2350_PADS_IE | RP2350_PADS_DRIVE_4MA;
     _RP2350_REG(RP2350_IO_BANK0_GPIO_CTRL(pin)) =
         RP2350_IO_FUNC_SIO;
     /* Output low, then enable output drive. */

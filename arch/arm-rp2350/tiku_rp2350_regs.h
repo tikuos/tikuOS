@@ -333,10 +333,19 @@
 #define RP2350_TIMER0_TIMERAWL      (RP2350_TIMER0_BASE + 0x28U)
 #define RP2350_TIMER0_DBGPAUSE      (RP2350_TIMER0_BASE + 0x2CU)
 #define RP2350_TIMER0_PAUSE         (RP2350_TIMER0_BASE + 0x30U)
-#define RP2350_TIMER0_INTR          (RP2350_TIMER0_BASE + 0x38U)
-#define RP2350_TIMER0_INTE          (RP2350_TIMER0_BASE + 0x3CU)
-#define RP2350_TIMER0_INTF          (RP2350_TIMER0_BASE + 0x40U)
-#define RP2350_TIMER0_INTS          (RP2350_TIMER0_BASE + 0x44U)
+/* RP2350 inserts two new registers (LOCKED, SOURCE) at 0x34 and 0x38
+ * relative to the RP2040 layout. INTR/INTE/INTF/INTS are pushed
+ * forward by 8 bytes. The previous offsets here matched the RP2040
+ * map only and silently mis-addressed every interrupt-related write
+ * (e.g. "INTE" landed on the real INTR, "INTS" landed on INTF) —
+ * symptom: ALARM0 fires and INTR latches, but the IRQ never reaches
+ * the NVIC because real INTE was never enabled. Datasheet §12.7.2. */
+#define RP2350_TIMER0_LOCKED        (RP2350_TIMER0_BASE + 0x34U)
+#define RP2350_TIMER0_SOURCE        (RP2350_TIMER0_BASE + 0x38U)
+#define RP2350_TIMER0_INTR          (RP2350_TIMER0_BASE + 0x3CU)
+#define RP2350_TIMER0_INTE          (RP2350_TIMER0_BASE + 0x40U)
+#define RP2350_TIMER0_INTF          (RP2350_TIMER0_BASE + 0x44U)
+#define RP2350_TIMER0_INTS          (RP2350_TIMER0_BASE + 0x48U)
 
 /*---------------------------------------------------------------------------*/
 /* WATCHDOG                                                                  */
