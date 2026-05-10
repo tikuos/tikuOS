@@ -918,6 +918,12 @@ SRCS += labs/coap/tiku_kits_net_coap.c
 SRCS += labs/coap/tiku_kits_net_coap_process.c
 endif
 
+# Optional out-of-tree overlay hook.  Silently included if present
+# (the file lives outside the source tree and is not part of the
+# public repo).  Lets local builds add extra sources / build rules
+# without touching this Makefile.
+-include prop/Makefile.inc
+
 # ---------------------------------------------------------------------------
 # TikuKits (per-kit gated; default 0 unless an app/example needs it)
 #
