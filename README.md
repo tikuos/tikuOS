@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  TikuOS is an operating system for <strong>microwatt to milliwatt computers</strong>: tiny, ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
+  TikuOS is an operating system for <strong>microwatt to milliwatt computers</strong>: ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
 </p>
 
 ---
