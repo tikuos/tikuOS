@@ -38,6 +38,7 @@
 #define IRQ_BIT_HTIMER  BIT(RP2350_IRQ_TIMER0_0)
 #define IRQ_BIT_UART    BIT(RP2350_IRQ_UART0)
 #define IRQ_BIT_GPIO    BIT(RP2350_IRQ_IO_BANK0)
+#define IRQ_BIT_PIO     BIT(RP2350_IRQ_PIO0_0)
 
 static struct {
     uint32_t iser0_saved;
@@ -52,6 +53,7 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) keep |= IRQ_BIT_HTIMER;
     if (preserve_mask & TIKU_CRIT_PRESERVE_UART)   keep |= IRQ_BIT_UART;
     if (preserve_mask & TIKU_CRIT_PRESERVE_GPIO)   keep |= IRQ_BIT_GPIO;
+    if (preserve_mask & TIKU_CRIT_PRESERVE_PIO)    keep |= IRQ_BIT_PIO;
     /* TICK / I2C / ADC / WDT not represented yet — kept across the
      * window unconditionally because the SysTick is not in the
      * NVIC and the I2C/ADC drivers are stubs. */

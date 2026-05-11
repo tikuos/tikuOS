@@ -125,9 +125,18 @@
  *  edge across the window. */
 #define TIKU_CRIT_PRESERVE_GPIO    (1u << 6)
 
-/** Convenience: keep bit-clock alive (typical for any bit-bang
- *  caller). Equivalent to TIKU_CRIT_PRESERVE_HTIMER. */
+/** Preserve PIO0 IRQ 0 -- the RP2350 bitbang backend's completion
+ *  signal. No-op on MSP430. */
+#define TIKU_CRIT_PRESERVE_PIO     (1u << 7)
+
+/** Convenience: keep the bit-clock alive (typical for any bit-bang
+ *  caller). Maps to the bitbang backend's actual IRQ source: htimer
+ *  on MSP430, PIO0_IRQ_0 on RP2350. */
+#if defined(PLATFORM_RP2350)
+#define TIKU_CRIT_PRESERVE_BITBANG TIKU_CRIT_PRESERVE_PIO
+#else
 #define TIKU_CRIT_PRESERVE_BITBANG TIKU_CRIT_PRESERVE_HTIMER
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* INTERNAL STATE (read-only outside this module)                            */

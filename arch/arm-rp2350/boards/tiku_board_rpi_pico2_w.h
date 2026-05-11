@@ -103,6 +103,22 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_BTN2_PRESSED()   (0)
 
 /*---------------------------------------------------------------------------*/
+/* Bit-bang pin (tiku_bitbang demos / PIO backend / backscatter dev)         */
+/*---------------------------------------------------------------------------*/
+
+/* GP14 is exposed on the header (physical pin 19) and not claimed
+ * by UART / SPI / I2C / LED / 1-Wire on this port, so a scope probe
+ * can verify the test_bitbang output pattern. RP2350 has a single
+ * GPIO bank so port is unused -- 0 by convention. Override at
+ * compile time via -DTIKU_BOARD_BSCAT_PIN=<n>. */
+#ifndef TIKU_BOARD_BSCAT_PORT
+#define TIKU_BOARD_BSCAT_PORT       0U
+#endif
+#ifndef TIKU_BOARD_BSCAT_PIN
+#define TIKU_BOARD_BSCAT_PIN        14U
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* Bus-availability gates                                                    */
 /*---------------------------------------------------------------------------*/
 

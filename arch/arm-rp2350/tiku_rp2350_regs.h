@@ -70,6 +70,9 @@
 #define RP2350_SPI0_BASE            0x40080000UL
 #define RP2350_SPI1_BASE            0x40088000UL
 #define RP2350_TICKS_BASE           0x40108000UL
+#define RP2350_PIO0_BASE            0x50200000UL
+#define RP2350_PIO1_BASE            0x50300000UL
+#define RP2350_PIO2_BASE            0x50400000UL
 
 /* Cortex-M33 SCS / NVIC / SysTick / SCB live at the standard
  * private peripheral bus addresses. */
@@ -623,6 +626,68 @@
  * default MPU semantics. */
 #define RP2350_MPU_MAIR_NORMAL_NC   0x44U
 
+/*---------------------------------------------------------------------------*/
+/* PIO (Programmable I/O) — RP2350 datasheet §11                             */
+/*---------------------------------------------------------------------------*/
+
+/* PIO has three identical blocks (PIO0/1/2). Each block has four state
+ * machines that share 32 instruction memory slots and 4-deep TX/RX FIFOs.
+ * Register addresses below are relative to a PIO block base
+ * (RP2350_PIO0_BASE, etc.). */
+
+#define RP2350_PIO_CTRL              0x000U   /* SM enable, restart */
+#define RP2350_PIO_FSTAT             0x004U   /* FIFO status         */
+#define RP2350_PIO_FDEBUG            0x008U   /* FIFO underflow / oflow */
+#define RP2350_PIO_FLEVEL            0x00CU   /* FIFO fill levels    */
+#define RP2350_PIO_TXF(sm)           (0x010U + 4U * (sm))   /* TX FIFO */
+#define RP2350_PIO_RXF(sm)           (0x020U + 4U * (sm))   /* RX FIFO */
+#define RP2350_PIO_IRQ               0x030U   /* PIO IRQ status (W1C) */
+#define RP2350_PIO_INSTR_MEM(i)      (0x048U + 4U * (i))    /* program slot */
+#define RP2350_PIO_SM_CLKDIV(sm)     (0x0C8U + 0x18U * (sm))
+#define RP2350_PIO_SM_EXECCTRL(sm)   (0x0CCU + 0x18U * (sm))
+#define RP2350_PIO_SM_SHIFTCTRL(sm)  (0x0D0U + 0x18U * (sm))
+#define RP2350_PIO_SM_ADDR(sm)       (0x0D4U + 0x18U * (sm))   /* RO */
+#define RP2350_PIO_SM_INSTR(sm)      (0x0D8U + 0x18U * (sm))   /* WO: exec */
+#define RP2350_PIO_SM_PINCTRL(sm)    (0x0DCU + 0x18U * (sm))
+
+/* PIO interrupt subsystem (two outputs per block, IRQ0 and IRQ1). */
+#define RP2350_PIO_IRQ0_INTE         0x12CU   /* enable               */
+#define RP2350_PIO_IRQ0_INTF         0x130U   /* force                */
+#define RP2350_PIO_IRQ0_INTS         0x134U   /* status (after enable) */
+#define RP2350_PIO_IRQ1_INTE         0x138U
+#define RP2350_PIO_IRQ1_INTF         0x13CU
+#define RP2350_PIO_IRQ1_INTS         0x140U
+
+/* CTRL register fields */
+#define RP2350_PIO_CTRL_SM_ENABLE(sm)   (1U << (sm))
+#define RP2350_PIO_CTRL_SM_RESTART(sm)  (1U << (4U + (sm)))
+#define RP2350_PIO_CTRL_CLKDIV_RESTART(sm)  (1U << (8U + (sm)))
+
+/* SHIFTCTRL register fields */
+#define RP2350_PIO_SHIFTCTRL_AUTOPULL    (1U << 17)
+#define RP2350_PIO_SHIFTCTRL_AUTOPUSH    (1U << 16)
+#define RP2350_PIO_SHIFTCTRL_OUT_SHIFTDIR_RIGHT  (1U << 19)  /* 1=LSB */
+#define RP2350_PIO_SHIFTCTRL_OUT_SHIFTDIR_LEFT   (0U)        /* 0=MSB */
+#define RP2350_PIO_SHIFTCTRL_PULL_THRESH_SHIFT   25
+#define RP2350_PIO_SHIFTCTRL_FJOIN_TX            (1U << 30)  /* 8-deep TX */
+#define RP2350_PIO_SHIFTCTRL_FJOIN_RX            (1U << 31)
+
+/* PINCTRL register fields */
+#define RP2350_PIO_PINCTRL_OUT_BASE_SHIFT     0
+#define RP2350_PIO_PINCTRL_SET_BASE_SHIFT     5
+#define RP2350_PIO_PINCTRL_SIDESET_BASE_SHIFT 10
+#define RP2350_PIO_PINCTRL_IN_BASE_SHIFT      15
+#define RP2350_PIO_PINCTRL_OUT_COUNT_SHIFT    20
+#define RP2350_PIO_PINCTRL_SET_COUNT_SHIFT    26
+#define RP2350_PIO_PINCTRL_SIDESET_COUNT_SHIFT 29
+
+/* IRQ0_INTE / INTS bit positions: SM[0..3] IRQ bits at [11..8],
+ * plus per-SM TXNFULL[7..4] and RXNEMPTY[3..0] interrupts. */
+#define RP2350_PIO_INT_SM0_IRQ       (1U << 8)
+#define RP2350_PIO_INT_SM1_IRQ       (1U << 9)
+#define RP2350_PIO_INT_SM2_IRQ       (1U << 10)
+#define RP2350_PIO_INT_SM3_IRQ       (1U << 11)
+
 /*
  * Common IRQ numbers we use (RP2350 datasheet §3.6.1 IRQ mapping +
  * pico-sdk hardware/regs/intctrl.h):
@@ -635,6 +700,12 @@
  */
 #define RP2350_IRQ_TIMER0_0         0
 #define RP2350_IRQ_TIMER0_1         1
+#define RP2350_IRQ_PIO0_0           15
+#define RP2350_IRQ_PIO0_1           16
+#define RP2350_IRQ_PIO1_0           17
+#define RP2350_IRQ_PIO1_1           18
+#define RP2350_IRQ_PIO2_0           19
+#define RP2350_IRQ_PIO2_1           20
 #define RP2350_IRQ_IO_BANK0         21
 #define RP2350_IRQ_UART0            33
 #define RP2350_IRQ_UART1            34

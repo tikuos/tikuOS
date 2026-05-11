@@ -595,6 +595,7 @@ SRCS += arch/arm-rp2350/tiku_region_arch.c
 SRCS += arch/arm-rp2350/tiku_gpio_arch.c
 SRCS += arch/arm-rp2350/tiku_spi_arch.c
 SRCS += arch/arm-rp2350/tiku_lcd_arch.c
+SRCS += arch/arm-rp2350/tiku_pio_arch.c
 
 else
 

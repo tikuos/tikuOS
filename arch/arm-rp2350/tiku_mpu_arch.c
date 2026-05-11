@@ -129,6 +129,19 @@ struct tiku_mpu_diag {
      * next-in-sequence sub-test. Cleared explicitly by the test
      * scaffold when the user wants to re-run from scratch. */
     uint32_t test_done_mask;
+    /* HFNMI-distinguish test scaffold:
+     *   hfnmi_phase     0 = idle / fresh; 1 = armed (waiting for fault);
+     *                    2 = "post-reset, verify" sentinel.
+     *   handler_misbehave  When 1, the HardFault handler does a
+     *                      deliberate write to a flash address BEFORE
+     *                      issuing AIRCR. Under HFNMIENA=0 the write is
+     *                      a silent no-op (XIP read-only); under
+     *                      HFNMIENA=1 it MPU-faults inside HardFault →
+     *                      Cortex-M Lockup → watchdog rescues. The
+     *                      test reads WD_REASON on the verify boot to
+     *                      tell the two modes apart. */
+    uint32_t hfnmi_phase;
+    uint32_t handler_misbehave;
 };
 
 #define TIKU_MPU_TEST_DONE_SEG3   (1U << 0)
@@ -348,12 +361,14 @@ void tiku_mpu_arch_init_segments(void) {
      * is preserved and we keep the existing counters — that's how the
      * violation-detect test sees "yes the previous boot faulted". */
     if (mpu_diag.magic != TIKU_MPU_DIAG_MAGIC) {
-        mpu_diag.magic            = TIKU_MPU_DIAG_MAGIC;
-        mpu_diag.violation_count  = 0U;
-        mpu_diag.last_fault_addr  = 0U;
-        mpu_diag.last_fault_mmfsr = 0U;
-        mpu_diag.expect_fault     = 0U;
-        mpu_diag.test_done_mask   = 0U;
+        mpu_diag.magic             = TIKU_MPU_DIAG_MAGIC;
+        mpu_diag.violation_count   = 0U;
+        mpu_diag.last_fault_addr   = 0U;
+        mpu_diag.last_fault_mmfsr  = 0U;
+        mpu_diag.expect_fault      = 0U;
+        mpu_diag.test_done_mask    = 0U;
+        mpu_diag.hfnmi_phase       = 0U;
+        mpu_diag.handler_misbehave = 0U;
     }
 
     /* Mirror the MSP430 host stub layout so any code that reads SEGB
@@ -399,11 +414,72 @@ void tiku_mpu_arch_init_segments(void) {
     /* Enable MPU + PRIVDEFENA so unmapped memory (peripherals at
      * 0x40000000+, SCS/MPU at 0xE0000000+, XIP cache control,
      * boot ROM) keeps using default privileged access without
-     * burning more regions. HFNMIENA stays off — we don't want the
-     * MPU to apply during HardFault/NMI (would risk a fault loop
-     * in the panic path). */
-    _RP2350_REG(RP2350_MPU_CTRL) = RP2350_MPU_CTRL_ENABLE
-                                 | RP2350_MPU_CTRL_PRIVDEFENA;
+     * burning more regions.
+     *
+     * ------------------------------------------------------------
+     * HFNMIENA -- MPU during HardFault / NMI / FaultMask priorities
+     * ------------------------------------------------------------
+     *
+     * Setting HFNMIENA = 1 makes the MPU active inside HardFault,
+     * NMI, and any handler running at faultmask-priority. Leaving it
+     * 0 (the TikuOS default) disables MPU enforcement in those
+     * contexts. The choice is a deliberate trade between two
+     * different failure modes:
+     *
+     *   HFNMIENA = 0 (default, this build):
+     *       A bug in the HardFault/NMI handler that writes to a
+     *       wrong address silently corrupts memory. The panic path
+     *       never re-faults; it just trashes data and continues to
+     *       the AIRCR reset. Easy to debug "why does my chip reset
+     *       cleanly?"; hard to debug "why did this byte change?".
+     *
+     *   HFNMIENA = 1 (opt-in via TIKU_MPU_HFNMI_ENFORCE=1):
+     *       A bug in the HardFault/NMI handler that does a
+     *       MPU-faulting access escalates to Cortex-M LOCKUP.
+     *       Lockup is unrecoverable except by external reset (the
+     *       CPU literally stops fetching instructions). The MPU
+     *       caught the bug; the cost is that you brick the chip
+     *       until somebody power-cycles it.
+     *
+     * Why the default is OFF:
+     *
+     *   The current TikuOS HardFault/MemManage handlers do nothing
+     *   that would MPU-fault under enforcement (audit in the block
+     *   comment above tiku_rp2350_mem_fault_handler). But a future
+     *   handler that adds, say, a stack-allocated buffer that grows
+     *   past the stack guard, or a write to a debug log that lives
+     *   in .uninit without the mpu_unlock_nvm bracket, would lock
+     *   the chip up. Locking up is much harder to recover from in
+     *   the field than a silent corruption + reset.
+     *
+     *   We pay the lower-protection price to keep the panic path
+     *   survivable. Production hardening for security-critical
+     *   builds (where lockup-on-fault is preferable to silent
+     *   corruption) can flip this by passing
+     *   -DTIKU_MPU_HFNMI_ENFORCE=1 at build time.
+     *
+     * When to revisit the default:
+     *
+     *   1. After running automated coverage on the fault path.
+     *   2. After auditing every handler -- mem_fault, hard_fault,
+     *      and any new arch-specific handler -- to confirm no
+     *      MPU-protected access happens.
+     *   3. When the build is shipping to a customer who'd rather
+     *      a single bricked unit than a silently-corrupted fleet.
+     * ------------------------------------------------------------
+     */
+#ifndef TIKU_MPU_HFNMI_ENFORCE
+#define TIKU_MPU_HFNMI_ENFORCE 0
+#endif
+
+    {
+        uint32_t ctrl_val = RP2350_MPU_CTRL_ENABLE
+                          | RP2350_MPU_CTRL_PRIVDEFENA;
+#if TIKU_MPU_HFNMI_ENFORCE
+        ctrl_val |= RP2350_MPU_CTRL_HFNMIENA;
+#endif
+        _RP2350_REG(RP2350_MPU_CTRL) = ctrl_val;
+    }
     mpu_dsb_isb();
 
     /* Set MemManage exception priority to 0 (highest configurable)
@@ -483,6 +559,20 @@ void tiku_mpu_arch_test_clear_done_mask(void) {
     mpu_diag.test_done_mask = 0U;
 }
 
+uint32_t tiku_mpu_arch_test_hfnmi_phase(void) {
+    return mpu_diag.hfnmi_phase;
+}
+
+void tiku_mpu_arch_test_hfnmi_arm(void) {
+    mpu_diag.hfnmi_phase       = 1U;
+    mpu_diag.handler_misbehave = 1U;
+}
+
+void tiku_mpu_arch_test_hfnmi_clear(void) {
+    mpu_diag.hfnmi_phase       = 0U;
+    mpu_diag.handler_misbehave = 0U;
+}
+
 void tiku_mpu_arch_set_default_protection(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
@@ -533,6 +623,22 @@ void tiku_mpu_arch_enable_violation_nmi(void) {
 /*---------------------------------------------------------------------------*/
 /* MemManage handler — provides the strong definition that overrides         */
 /* the weak alias in tiku_crt_early.c.                                       */
+/*                                                                            */
+/* MPU-safety audit (re-run this every time the handler body changes).       */
+/* Every load/store below must land in a region whose AP/XN would NOT        */
+/* fault if HFNMIENA were ever enabled. Today:                                */
+/*                                                                            */
+/*   _RP2350_REG(SCB_*)     SCS at 0xE000E000+ -- PRIVDEFENA RW              */
+/*   mpu_diag.*             .mpu_diag in SRAM -- Region 2 RW + XN            */
+/*   stub_mpuctl1           .bss in SRAM      -- Region 2 RW + XN            */
+/*   mpu_diag.expect_fault  same .mpu_diag    -- Region 2 RW + XN            */
+/*   instruction fetch      .text in flash    -- Region 1 RX                  */
+/*                                                                            */
+/* If you add anything to this handler -- a UART log, a debug breadcrumb,    */
+/* a write to .uninit without the unlock bracket -- update the audit and    */
+/* verify the new access is still allowed by whichever region claims it.    */
+/* Otherwise enabling TIKU_MPU_HFNMI_ENFORCE will lock up the chip on        */
+/* every fault.                                                              */
 /*---------------------------------------------------------------------------*/
 
 void tiku_rp2350_mem_fault_handler(void) {
@@ -583,7 +689,30 @@ void tiku_rp2350_mem_fault_handler(void) {
  * debugger or the test fleet can see why HardFault was taken
  * instead of the more specific configurable handler. The test
  * scaffold uses expect_fault=3 (vs MemManage's expect_fault=2) to
- * tell the two paths apart on the post-reset boot. */
+ * tell the two paths apart on the post-reset boot.
+ *
+ * MPU-safety audit (same checklist as MemManage handler above):
+ *   _RP2350_REG(SCB_*)    SCS at 0xE000E000+ -- PRIVDEFENA RW
+ *   mpu_diag.*            .mpu_diag in SRAM  -- Region 2 RW + XN
+ *   instruction fetch     .text in flash    -- Region 1 RX
+ *
+ * If TIKU_MPU_HFNMI_ENFORCE is ever turned on, any new access in
+ * this handler that doesn't fit one of the three categories will
+ * lock up the chip on every fault. Update the audit when you
+ * extend the handler.
+ *
+ * EXCEPTION (test scaffold only, gated by mpu_diag.handler_misbehave):
+ *   When the HFNMI-distinguish test arms the scaffold, the handler
+ *   deliberately writes to a flash address inside Region 1 (RO) just
+ *   before its AIRCR reset. This is the entire point of the test:
+ *   under HFNMIENA=0 the MPU is disabled here so the write is a
+ *   silent no-op (XIP rejects stores physically anyway) and the
+ *   handler proceeds to AIRCR; under HFNMIENA=1 the MPU enforces and
+ *   the write faults inside the HF handler -> Cortex-M Lockup ->
+ *   watchdog rescues. WD_REASON on the next boot tells the test
+ *   which path fired. Production builds never set
+ *   handler_misbehave, so the audit's invariants still hold in
+ *   normal operation. */
 void tiku_rp2350_hard_fault_handler(void) {
     uint32_t cfsr  = _RP2350_REG(RP2350_SCB_CFSR);
     uint32_t hfsr  = _RP2350_REG(RP2350_SCB_HFSR);
@@ -600,6 +729,24 @@ void tiku_rp2350_hard_fault_handler(void) {
         mpu_diag.expect_fault = 3U;   /* HardFault path observed */
     }
     mpu_diag.violation_count++;
+
+    /* HFNMI-distinguish scaffold: when armed, deliberately violate
+     * Region 1 (write to .text) so HFNMIENA=0 vs HFNMIENA=1 produce
+     * different reset causes. See the audit comment above. */
+    if (mpu_diag.handler_misbehave != 0U) {
+        /* Mark phase=2 ("about to attempt bogus write") so a chip
+         * that locks up here still has a record of how far it got. */
+        mpu_diag.hfnmi_phase = 2U;
+        /* Address inside Region 1 (.text), well past our image. Write
+         * never actually mutates XIP either way; the differentiator
+         * is whether the MPU faults on the store cycle. */
+        volatile uint32_t *p = (volatile uint32_t *)0x10100000UL;
+        *p = 0xDEADBEEFU;
+        /* Reaching here means HFNMIENA=0 (the write was a silent
+         * no-op, MPU did not fire). Mark phase=3 ("write completed,
+         * about to AIRCR"). */
+        mpu_diag.hfnmi_phase = 3U;
+    }
 
     _RP2350_REG(RP2350_SCB_AIRCR) =
         RP2350_SCB_AIRCR_VECTKEY | RP2350_SCB_AIRCR_SYSRESET;
