@@ -5,12 +5,31 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.h - RP2350 MPU stub interface
+ * tiku_mpu_arch.h - RP2350 MPU driver interface
  *
- * The Cortex-M33 has an ARMv8-M MPU but tikuOS does not program it
- * on the first port — kernel MPU calls become no-ops. The header
- * exists for API parity with the MSP430 port; functions return
- * benign defaults.
+ * Programs the ARMv8-M MPU on the Cortex-M33 with six non-
+ * overlapping regions:
+ *   0: SEG3   .uninit (NVM stand-in)        -- RO/RW + XN
+ *   1: SEG1   flash 0x10000000..end         -- RX
+ *   2: SEG2a  SRAM 0x20000000..uninit_start -- RW + XN
+ *   3: SEG2b  SRAM uninit_end..guard_base   -- RW + XN
+ *   4: SG     32-byte stack-overflow guard  -- RO + XN
+ *   5: SEG2c  SRAM above guard..sram_end    -- RW + XN
+ * Together they give W^X across the whole address space and a
+ * stack-overflow detector at the bottom of the descending stack.
+ *
+ * The kernel-level SAM bookkeeping API (set_permissions on
+ * SEG1/2/3) is preserved for parity with MSP430 -- SAM bits track
+ * in software so tests pass unchanged -- but only SEG3 actually
+ * flows through to hardware permission changes (the
+ * unlock/lock-NVM handshake). SEG1/SEG2 hardware permissions are
+ * pinned: making flash writable or SRAM executable would brick
+ * the kernel on this architecture.
+ *
+ * Persistent diagnostic state lives in a .mpu_diag NOLOAD section
+ * that survives the AIRCR.SYSRESET this driver triggers on every
+ * MemManage violation. See arch/arm-rp2350/tiku_mpu_arch.c for the
+ * fault handler, the test scaffold, and the W^X violation tests.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,11 +5,14 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.h - RP2350 ADC stub
+ * tiku_adc_arch.h - RP2350 ADC driver interface
  *
- * The RP2350 ADC is not implemented in this first port. The functions
- * exist so the platform-independent ADC layer links cleanly; every
- * call returns TIKU_ADC_ERR_NOT_INIT-style sentinels.
+ * Drives the on-die 12-bit SAR ADC (RP2350 datasheet §12.4).
+ * Four external channels are wired to GPIO 26..29; channel 4 is
+ * the internal temperature sensor. The driver supports one-shot
+ * conversions through tiku_adc_arch_read(); free-running and DMA
+ * paths are not implemented because no current kernel subsystem
+ * needs them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
