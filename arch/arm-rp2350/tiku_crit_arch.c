@@ -61,9 +61,17 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     uint32_t to_mask = crit_state.iser0_saved & ~keep;
     if (to_mask != 0U) {
         *(volatile uint32_t *)RP2350_NVIC_ICER0 = to_mask;
+        /* DSB+ISB so the NVIC disable takes architectural effect
+         * before any caller code runs. Without this the NVIC write
+         * may not be visible to the CPU's interrupt-acceptance
+         * logic until the next memory barrier or pipeline flush. */
+        __asm__ volatile ("dsb" ::: "memory");
+        __asm__ volatile ("isb" ::: "memory");
     }
 }
 
 void tiku_crit_arch_unmask_irqs(void) {
     *(volatile uint32_t *)RP2350_NVIC_ISER0 = crit_state.iser0_saved;
+    __asm__ volatile ("dsb" ::: "memory");
+    __asm__ volatile ("isb" ::: "memory");
 }

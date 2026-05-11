@@ -37,28 +37,48 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Instruction encoding (RP2350 datasheet §11.4.4):
+ * Instruction encoding (RP2350 datasheet §11.4.4).
  *
- *   OUT pins, 1        opcode=011 dst=pins(000) count=00001
- *                      = 0b011 00000 000 00001 = 0x6001
+ * The program bakes its own setup in (set pindirs, pull) rather than
+ * relying on multiple SMx_INSTR force-execs from the driver: SMx_INSTR
+ * is a single-slot queue, so back-to-back driver writes overwrite each
+ * other and only the LAST one survives. With setup inside the program,
+ * the driver only force-execs ONE instruction (set x, bit_count-1) and
+ * the rest of the sequence runs naturally as the SM advances its PC.
  *
- *   JMP x-- 0          opcode=000 cond=010 addr=00000
- *                      = 0b000 00000 010 00000 = 0x0040
+ *   SET pindirs, 1     opcode=111 dst=100 imm=00001 = 0xE081
+ *                      Put the OUT pin into output mode.
  *
- *   IRQ nowait 0       opcode=110 idx=000 wait=0 clr=0
- *                      = 0b110 00000 00 0 0 0 000 = 0xC000
+ *   PULL block         opcode=100 push=0 ifempty=0 block=1 = 0x80A0
+ *                      Wait for a TX-FIFO word, copy it into OSR.
+ *                      Blocking is what makes the SM safe to enable
+ *                      *before* the CPU has written to TXF.
  *
- *   JMP 3              opcode=000 cond=000(always) addr=00011
- *                      = 0b000 00000 000 00011 = 0x0003
+ *   OUT pins, 1        opcode=011 dst=pins(000) count=00001 = 0x6001
+ *                      Shift one bit out of OSR onto the pin.
  *
- * SM completion = SM stops fetching new instructions because address
- * 3 self-jumps; CPU sees the FIFO drained and the SM IRQ raised.
+ *   JMP x-- 2          opcode=000 cond=010(x--) addr=00010 = 0x0042
+ *                      Loop while X != 0 (jump target = OUT slot).
+ *
+ *   IRQ nowait 0       opcode=110 ...           = 0xC000
+ *                      Raise PIO IRQ flag 0 -> NVIC via INTE.
+ *
+ *   JMP 5              opcode=000 cond=000 addr=00101 = 0x0005
+ *                      Self-jump halt; SM stops doing useful work
+ *                      but stays "running" until the CPU disables it
+ *                      from the IRQ handler.
+ *
+ * Completion = SM reaches the `irq nowait 0` instruction, which sets
+ * PIO_IRQ flag 0; with PIO0_IRQ0_INTE.SM0_IRQ enabled, NVIC IRQ 15
+ * (PIO0_IRQ_0) fires -> tiku_rp2350_pio0_irq0_handler runs.
  */
 static const uint16_t bitbang_program[] = {
-    0x6001U,   /* 0: out pins, 1     -- shift one bit out */
-    0x0040U,   /* 1: jmp x-- 0       -- loop while X != 0 */
-    0xC000U,   /* 2: irq nowait 0    -- signal CPU */
-    0x0003U,   /* 3: jmp 3           -- halt SM here */
+    0xE081U,   /* 0: set pindirs, 1 -- pin to output mode */
+    0x80A0U,   /* 1: pull block     -- wait for TXF word -> OSR */
+    0x6001U,   /* 2: out pins, 1    -- shift one bit out */
+    0x0042U,   /* 3: jmp x-- 2      -- loop while X != 0 */
+    0xC000U,   /* 4: irq nowait 0   -- signal CPU */
+    0x0005U,   /* 5: jmp 5          -- halt SM here */
 };
 #define BITBANG_PROG_LEN \
     (sizeof(bitbang_program) / sizeof(bitbang_program[0]))
@@ -257,28 +277,30 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
               (1U << RP2350_PIO_PINCTRL_SET_COUNT_SHIFT);
     PIO0(RP2350_PIO_SM_PINCTRL(BITBANG_SM)) = pinctrl;
 
-    /* 6. Force `set pindirs, 1` to put the pin in output mode. The
-     * SM's normal program doesn't touch pindirs, so we set it here
-     * via the EXEC trapdoor. Encoding: SET dst=pindirs(100) v=00001
-     *   = 0b111 00000 100 00001 = 0xE081 */
-    pio_sm_exec(BITBANG_SM, 0xE081U);
-
-    /* 7. EXEC `jmp 0` to put the PC at instruction 0 (the
-     * `out pins, 1`). Restart left it at the wrap-target which is
-     * also 0, but be explicit so the SM is always in a known state.
-     * Encoding: JMP cond=000 addr=00000 = 0x0000. */
-    pio_sm_exec(BITBANG_SM, 0x0000U);
-
-    /* 8. Pre-load X with bit_count - 1. The SET instruction's
-     * 5-bit immediate covers our 1..32 range (bit_count of 32 wraps
-     * to a SET imm of 31, which is exactly what we want for the loop:
-     * 32 iterations of "out, jmp x--"). */
+    /* 6. Pre-load X with bit_count - 1 via SMx_INSTR. The SM is
+     * currently disabled; the write parks the instruction in the
+     * 1-slot SMx_INSTR queue. On the FIRST tick after we enable
+     * the SM below, this is the very first instruction that runs
+     * (force-execs take priority over the program-counter fetch),
+     * so X holds the right value before the program ever advances
+     * to its own JMP x-- check.
+     *
+     * Critical: only ONE SMx_INSTR write between disable/enable.
+     * SMx_INSTR is a single-element queue; back-to-back writes
+     * overwrite each other and only the last one survives. The
+     * earlier version of this driver did three writes (set
+     * pindirs, jmp 0, set x) and lost the first two — the pin
+     * stayed in input mode and the data was never PULL'd from
+     * TXF into the OSR. set pindirs and pull are now inside the
+     * PIO program (slots 0 and 1), so there is nothing to race. */
     set_x = pio_instr_set_x((uint8_t)(bit_count - 1U));
     pio_sm_exec(BITBANG_SM, set_x);
 
-    /* 9. Push the data word. For MSB-first, the SM shifts the
+    /* 7. Push the data word. For MSB-first, the SM shifts the
      * top-most bit of the OSR first; we left-align our data into the
-     * 32-bit word so the first bit on the wire is bit[31] of `data`. */
+     * 32-bit word so the first bit on the wire is bit[31] of `data`.
+     * The PULL inside the program will block on this FIFO entry until
+     * we enable the SM, then copy it into OSR. */
     if (msb_first) {
         shifted_data = data << (32U - bit_count);
     } else {
@@ -286,12 +308,25 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     }
     PIO0(RP2350_PIO_TXF(BITBANG_SM)) = shifted_data;
 
-    /* 10. Enable the SM0 IRQ to fire PIO0_IRQ_0 when the program
-     * reaches the `irq 0` instruction. */
+    /* 8. Enable the SM0 IRQ to fire PIO0_IRQ_0 when the program
+     * reaches the `irq nowait 0` instruction. Defensive: also
+     * clear-pending and re-enable NVIC IRQ 15 here. The PIO arch
+     * init only does this once at lazy first-tx; if any test path
+     * disabled the NVIC entry (e.g. an aborted prior tx that the
+     * crit-section mask didn't anticipate), this revives it. The
+     * memory barriers ensure the NVIC + PIO state is visible
+     * before the SM starts ticking. */
     PIO0(RP2350_PIO_IRQ) = 0xFFU;  /* clear any stale IRQ flags */
     PIO0(RP2350_PIO_IRQ0_INTE) = RP2350_PIO_INT_SM0_IRQ;
+    rp2350_nvic_clear_pending(RP2350_IRQ_PIO0_0);
+    rp2350_nvic_enable(RP2350_IRQ_PIO0_0);
+    __asm__ volatile ("dsb" ::: "memory");
+    __asm__ volatile ("isb" ::: "memory");
 
-    /* 11. Go. SM starts executing at address 0. */
+    /* 9. Go. SM tick 1 executes the queued set_x; tick 2 starts
+     * the program at PC=0 (set pindirs, 1); tick 3 hits the PULL
+     * which copies the TXF word into the OSR; ticks 4..N+3 shift
+     * bits; tick N+4 fires the IRQ. */
     pio_sm_enable(BITBANG_SM);
 
     return TIKU_PIO_OK;

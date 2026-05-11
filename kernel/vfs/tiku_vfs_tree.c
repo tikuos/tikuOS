@@ -1255,7 +1255,8 @@ static const tiku_vfs_node_t sys_boot_children[] = {
     { "stage",  TIKU_VFS_FILE, boot_stage_read,  NULL, NULL, 0 },
     { "rstiv",  TIKU_VFS_FILE, boot_rstiv_read,  NULL, NULL, 0 },
     { "clock",  TIKU_VFS_DIR,  NULL, NULL, sys_boot_clock_children, 4 },
-    { "mpu",    TIKU_VFS_DIR,  NULL, NULL, sys_boot_mpu_children, 1 },
+    { "mpu",    TIKU_VFS_DIR,  NULL, NULL, sys_boot_mpu_children,
+      sizeof(sys_boot_mpu_children) / sizeof(sys_boot_mpu_children[0]) },
 };
 
 static const tiku_vfs_node_t sys_sched_children[] = {

@@ -158,6 +158,23 @@ void tiku_cpu_rp2350_reboot_to_bootsel(void) {
     /* Mask all interrupts. */
     __asm__ volatile ("cpsid i" ::: "memory");
 
+    /* Disable the watchdog before calling the ROM. Some tests leave
+     * the watchdog enabled with a tight timeout; the ROM's BOOTSEL
+     * sequence asks for ~10 ms of work, and a mid-flight watchdog
+     * timeout demotes the planned BOOTSEL into a plain CPU reset.
+     * The host then sees TikuOS coming back up instead of the
+     * USB MSD device, and the auto-bootsel loop times out. */
+    _RP2350_REG(RP2350_WD_CTRL) = 0U;
+
+    /* Disable the MPU. PRIVDEFENA covers unmapped memory (the ROM
+     * lives at 0x00000000-ish and isn't covered by any region), but
+     * during the ROM's USB-reconfig path it touches address ranges
+     * we'd rather not assume anything about. Lifting all protection
+     * here costs nothing: we're about to reset the chip anyway. */
+    _RP2350_REG(RP2350_MPU_CTRL) = 0U;
+    __asm__ volatile ("dsb" ::: "memory");
+    __asm__ volatile ("isb" ::: "memory");
+
     /* RP2350 ARM: bootrom lookup function pointer is at fixed ROM
      * offset 0x16 (see BOOTROM_TABLE_LOOKUP_OFFSET in pico-sdk). */
     lookup_addr = *(volatile uint16_t *)(uintptr_t)0x16U;

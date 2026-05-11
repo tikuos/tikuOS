@@ -742,13 +742,23 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_PIO_SM_INSTR(sm)      (0x0D8U + 0x18U * (sm))   /* WO: exec */
 #define RP2350_PIO_SM_PINCTRL(sm)    (0x0DCU + 0x18U * (sm))
 
-/* PIO interrupt subsystem (two outputs per block, IRQ0 and IRQ1). */
-#define RP2350_PIO_IRQ0_INTE         0x12CU   /* enable               */
-#define RP2350_PIO_IRQ0_INTF         0x130U   /* force                */
-#define RP2350_PIO_IRQ0_INTS         0x134U   /* status (after enable) */
-#define RP2350_PIO_IRQ1_INTE         0x138U
-#define RP2350_PIO_IRQ1_INTF         0x13CU
-#define RP2350_PIO_IRQ1_INTS         0x140U
+/* PIO interrupt subsystem (two outputs per block, IRQ0 and IRQ1).
+ *
+ * RP2350 inserts new SM4..SM7 control blocks between RP2040's last
+ * SM3_PINCTRL (0x128) and the IRQ subsystem; the IRQ0/IRQ1 offsets
+ * therefore sit 0x44 bytes higher than RP2040. Authoritative source:
+ * pico-sdk/src/rp2350/hardware_regs/include/hardware/regs/pio.h
+ * (PIO_IRQ0_INTE_OFFSET = 0x170 etc.). Using the RP2040 offsets here
+ * silently wrote the IRQ-enable bit to an unrelated reserved register;
+ * the PIO state machine ran its program but no interrupt ever
+ * reached the CPU and the bitbang completion path stalled. */
+#define RP2350_PIO_INTR              0x16CU   /* raw IRQ source bits  */
+#define RP2350_PIO_IRQ0_INTE         0x170U   /* enable               */
+#define RP2350_PIO_IRQ0_INTF         0x174U   /* force                */
+#define RP2350_PIO_IRQ0_INTS         0x178U   /* status (after enable) */
+#define RP2350_PIO_IRQ1_INTE         0x17CU
+#define RP2350_PIO_IRQ1_INTF         0x180U
+#define RP2350_PIO_IRQ1_INTS         0x184U
 
 /* CTRL register fields */
 #define RP2350_PIO_CTRL_SM_ENABLE(sm)   (1U << (sm))
