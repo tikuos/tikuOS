@@ -35,6 +35,7 @@
 #include <kernel/timers/tiku_timer.h>
 #include <kernel/timers/tiku_htimer.h>
 #include <kernel/cpu/tiku_common.h>
+#include <kernel/cpu/tiku_rtc.h>
 #include <interfaces/led/tiku_led.h>
 #include <kernel/cpu/tiku_watchdog.h>
 #include <kernel/memory/tiku_mem.h>
@@ -112,6 +113,52 @@ uptime_read(char *buf, size_t max)
      * ~8.5 minutes at 128 Hz, so we cannot derive seconds from
      * it directly. */
     return snprintf(buf, max, "%lu\n", tiku_clock_seconds());
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/time — wall-clock seconds since epoch                                */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Read returns the current wall-clock seconds. Write accepts a
+ * decimal seconds-since-epoch value and rebases the offset so that
+ * subsequent reads are consistent. Both sit on top of
+ * tiku_rtc_*(), which keeps the persistent epoch offset and the
+ * MPU-unlock handshake out of the VFS handler.
+ *
+ * Format choice: plain decimal. Easy to parse from a shell script,
+ * easy to feed back in (`write /sys/time $(date +%s)`).
+ */
+static int
+time_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)tiku_rtc_get_seconds());
+}
+
+static int
+time_write(const char *buf, size_t len)
+{
+    uint32_t v = 0;
+    size_t   i;
+    int      seen_digit = 0;
+
+    for (i = 0; i < len; i++) {
+        char c = buf[i];
+        if (c == '\n' || c == '\r' || c == '\0') {
+            break;
+        }
+        if (c < '0' || c > '9') {
+            return -1;
+        }
+        v = v * 10U + (uint32_t)(c - '0');
+        seen_digit = 1;
+    }
+    if (!seen_digit) {
+        return -1;
+    }
+    tiku_rtc_set_seconds(v);
+    return 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1340,6 +1387,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
     { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0 },
+    { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0 },
     { "boot_count", TIKU_VFS_FILE, boot_count_read, NULL, NULL, 0 },
     { "last_reset", TIKU_VFS_FILE, last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE, cold_boots_read, NULL, NULL, 0 },
@@ -1444,6 +1492,10 @@ tiku_vfs_tree_init(void)
 
     /* Init LED hardware */
     tiku_led_init_all();
+
+    /* Validate (and on first boot, prime) the persistent wall-clock
+     * epoch offset. Idempotent — short-circuits when magic is set. */
+    tiku_rtc_init();
 
 #if TIKU_BOARD_LED_COUNT > 0
     {

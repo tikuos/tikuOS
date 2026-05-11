@@ -75,6 +75,7 @@
 #define RP2350_PIO0_BASE            0x50200000UL
 #define RP2350_PIO1_BASE            0x50300000UL
 #define RP2350_PIO2_BASE            0x50400000UL
+#define RP2350_TRNG_BASE            0x400F0000UL
 
 /* Cortex-M33 SCS / NVIC / SysTick / SCB live at the standard
  * private peripheral bus addresses. */
@@ -820,6 +821,52 @@ static inline void rp2350_nvic_clear_pending(uint32_t irq) {
     *(volatile uint32_t *)(RP2350_NVIC_ICPR0 + (irq / 32U) * 4U)
         = (1U << (irq & 31U));
 }
+
+/*---------------------------------------------------------------------------*/
+/* TRNG (True Random Number Generator) — RP2350 datasheet §12.13             */
+/*---------------------------------------------------------------------------*/
+/*
+ * RP2350's TRNG block is a derivative of the ARM CryptoCell-312 TRNG.
+ * Reference: pico-sdk-2.x hardware/regs/trng.h. Field names and
+ * offsets match that header so a reader can cross-check.
+ *
+ * Sequence to fill EHR_DATA0..5 (192 random bits):
+ *
+ *   1. Unreset TRNG  (RESETS bit 25)
+ *   2. RND_SOURCE_ENABLE = 0       (stop, in case it was running)
+ *   3. ICR = 0x3F                  (clear all source-interrupt bits)
+ *   4. TRNG_CONFIG = 0             (fastest ROSC chain — lowest entropy
+ *                                   per bit, but enough for a first
+ *                                   cut; raise to 1..3 if FIPS sees
+ *                                   correlated output)
+ *   5. SAMPLE_CNT1 = a few hundred (rosc cycles per sample)
+ *   6. RND_SOURCE_ENABLE = 1       (start)
+ *   7. spin while (TRNG_VALID & 1) == 0
+ *   8. read EHR_DATA0..5           (six 32-bit words, side-effect: clears
+ *                                   the VALID flag)
+ *   9. RND_SOURCE_ENABLE = 0       (idle)
+ *   loop from 5 if more bits wanted.
+ */
+#define RP2350_TRNG_RNG_IMR            (RP2350_TRNG_BASE + 0x100U)
+#define RP2350_TRNG_TRNG_ISR           (RP2350_TRNG_BASE + 0x104U)
+#define RP2350_TRNG_TRNG_ICR           (RP2350_TRNG_BASE + 0x108U)
+#define RP2350_TRNG_CONFIG             (RP2350_TRNG_BASE + 0x10CU)
+#define RP2350_TRNG_VALID              (RP2350_TRNG_BASE + 0x110U)
+#define RP2350_TRNG_EHR_DATA0          (RP2350_TRNG_BASE + 0x114U)
+#define RP2350_TRNG_EHR_DATA1          (RP2350_TRNG_BASE + 0x118U)
+#define RP2350_TRNG_EHR_DATA2          (RP2350_TRNG_BASE + 0x11CU)
+#define RP2350_TRNG_EHR_DATA3          (RP2350_TRNG_BASE + 0x120U)
+#define RP2350_TRNG_EHR_DATA4          (RP2350_TRNG_BASE + 0x124U)
+#define RP2350_TRNG_EHR_DATA5          (RP2350_TRNG_BASE + 0x128U)
+#define RP2350_TRNG_RND_SOURCE_ENABLE  (RP2350_TRNG_BASE + 0x12CU)
+#define RP2350_TRNG_SAMPLE_CNT1        (RP2350_TRNG_BASE + 0x130U)
+#define RP2350_TRNG_AUTOCORR_STATISTIC (RP2350_TRNG_BASE + 0x134U)
+#define RP2350_TRNG_DEBUG_CONTROL      (RP2350_TRNG_BASE + 0x138U)
+#define RP2350_TRNG_SW_RESET           (RP2350_TRNG_BASE + 0x140U)
+#define RP2350_TRNG_BUSY               (RP2350_TRNG_BASE + 0x1B8U)
+#define RP2350_TRNG_RST_BITS_COUNTER   (RP2350_TRNG_BASE + 0x1BCU)
+
+#define RP2350_TRNG_VALID_EHR_BIT      (1U << 0)
 
 /*---------------------------------------------------------------------------*/
 /* RESETS helpers                                                            */
