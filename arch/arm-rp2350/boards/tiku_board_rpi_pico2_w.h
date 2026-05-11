@@ -156,4 +156,25 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_SPI0_SCK_PIN     18U
 #define TIKU_BOARD_SPI0_MOSI_PIN    19U
 
+/*---------------------------------------------------------------------------*/
+/* CYW43439 (WiFi/BT module) pinout                                          */
+/*---------------------------------------------------------------------------*/
+/*
+ * Fixed by Raspberry Pi's Pico 2 W board design — not configurable.
+ * The gSPI bus uses a single bidirectional DATA line (WL_DATA),
+ * which is a Pico-W-family quirk. PIO is required because the
+ * RP2350 SPI peripheral assumes separate MOSI/MISO pins.
+ *
+ * GP29 is shared with ADC channel 3 (VSYS-divide battery sense).
+ * Activating the radio makes that ADC read unavailable.
+ *
+ * Used by tikudrivers/wifi/cyw43/ when
+ * TIKU_DRV_WIFI_CYW43_ENABLE=1. Without that flag these defines
+ * cost nothing — they're not referenced by core kernel code.
+ */
+#define TIKU_BOARD_CYW43_WL_REG_ON_PIN  23U  /* power-on enable */
+#define TIKU_BOARD_CYW43_WL_DATA_PIN    24U  /* bidirectional DATA */
+#define TIKU_BOARD_CYW43_WL_CS_PIN      25U  /* chip select */
+#define TIKU_BOARD_CYW43_WL_CLOCK_PIN   29U  /* gSPI clock */
+
 #endif /* TIKU_BOARD_RPI_PICO2_W_H_ */

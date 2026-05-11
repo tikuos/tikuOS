@@ -46,6 +46,10 @@ Thumbs.db
 takenote.md
 tikukits/
 
+# Driver repo — cloned alongside as a sibling tree, never tracked
+# by the core kernel repo. See drivers.md.
+tikudrivers/
+
 # LaTeX stray logs
 texput.log
 

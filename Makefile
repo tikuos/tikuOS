@@ -160,6 +160,7 @@ HAS_TESTS        ?= 0
 HAS_EXAMPLES     ?= 0
 endif
 HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
+HAS_TIKUDRIVERS  ?= $(if $(wildcard $(PROJ_DIR)/tikudrivers),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 
 # ---------------------------------------------------------------------------
@@ -486,6 +487,9 @@ endif
 ifeq ($(HAS_TIKUKITS),1)
 CFLAGS += -DHAS_TIKUKITS=1
 endif
+ifeq ($(HAS_TIKUDRIVERS),1)
+CFLAGS += -DHAS_TIKUDRIVERS=1
+endif
 
 ifeq ($(TIKU_PLATFORM),rp2350)
 
@@ -626,6 +630,22 @@ SRCS += hal/tiku_cpu.c
 SRCS += kernel/cpu/tiku_common.c
 SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/cpu/tiku_rtc.c
+
+# Driver-registry layer. Always built so the kernel exposes
+# tiku_drv_init_all(); the descriptor table itself comes from
+# tikudrivers/ when that repo is present, else from the empty
+# fallback below. See drivers.md.
+SRCS += kernel/drivers/tiku_drv_registry.c
+ifeq ($(HAS_TIKUDRIVERS),1)
+SRCS    += tikudrivers/tiku_drv_table.c
+# Each driver self-includes via its own build.mk fragment. The
+# globbing covers 2- and 3-level driver paths (wifi/cyw43/build.mk
+# AND sensors/temperature/mcp9808/build.mk).
+include $(wildcard $(PROJ_DIR)/tikudrivers/*/*/build.mk)
+include $(wildcard $(PROJ_DIR)/tikudrivers/*/*/*/build.mk)
+else
+SRCS    += kernel/drivers/tiku_drv_empty_table.c
+endif
 SRCS += kernel/timers/tiku_clock.c
 SRCS += kernel/timers/tiku_htimer.c
 SRCS += kernel/timers/tiku_timer.c
