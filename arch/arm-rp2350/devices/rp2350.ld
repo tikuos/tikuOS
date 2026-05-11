@@ -53,6 +53,21 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 __flash_start = ORIGIN(FLASH);
 __flash_end   = ORIGIN(FLASH) + LENGTH(FLASH);
 
+/* NVM backup sector: the last 4 KB of QSPI flash is reserved for
+ * tiku_mem_arch_nvm_write() to mirror the SRAM .uninit region.  This
+ * gives "persistent" state real power-cycle durability instead of
+ * relying on .uninit's warm-reset-only survival.  The boot-ROM flash
+ * helpers use the flash OFFSET (from start of QSPI), not the absolute
+ * XIP address; __tiku_nvm_flash_offset is that offset for convenience.
+ *
+ * Size matches one QSPI erase granule (4 KB).  The current .uninit
+ * region is ~3 KB; growing past 4 KB will require multi-sector
+ * backup which the arch driver does NOT support today. */
+__tiku_nvm_flash_size   = 0x1000;             /* 4 KB = one sector */
+__tiku_nvm_flash_offset = LENGTH(FLASH) - __tiku_nvm_flash_size;
+__tiku_nvm_flash_start  = ORIGIN(FLASH) + __tiku_nvm_flash_offset;
+__tiku_nvm_flash_end    = ORIGIN(FLASH) + LENGTH(FLASH);
+
 /* The Cortex-M loads the initial SP from the first vector entry.
  * Place it at the very top of SRAM and let the stack grow downward. */
 __stack       = __sram_end;
@@ -176,6 +191,13 @@ SECTIONS
      * leave at least 4 KB headroom between them. */
     ASSERT((__stack - _end) >= 0x1000,
            "ERROR: SRAM exhausted — less than 4 KB free for stack")
+
+    /* Sanity check: .uninit (the SRAM region that the NVM backup
+     * sector mirrors) must fit in one flash erase granule. Growing
+     * past 4 KB will need multi-sector backup logic in the arch
+     * driver. */
+    ASSERT((__uninit_end - __uninit_start) <= __tiku_nvm_flash_size,
+           "ERROR: .uninit region exceeds 4 KB flash backup sector")
 
     /DISCARD/ :
     {

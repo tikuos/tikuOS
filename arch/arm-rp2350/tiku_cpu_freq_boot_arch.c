@@ -24,6 +24,7 @@
 
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_rp2350_regs.h"
+#include <stddef.h>
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -218,19 +219,179 @@ void tiku_cpu_boot_rp2350_init(void) {
     rp2350_setup_1us_tick();
 }
 
-void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
-    /* The first port supports exactly one frequency: 150 MHz. Higher
-     * speeds would need different PLL divisors and -possibly- voltage
-     * scaling which is intentionally out of scope. We accept the
-     * argument for HAL compatibility but ignore it. */
-    (void)target_mhz;
+/*---------------------------------------------------------------------------*/
+/* Frequency scaling                                                         */
+/*                                                                            */
+/* tiku_cpu_boot_rp2350_init() always brings clk_sys up to 150 MHz so the    */
+/* rest of the boot sequence has a deterministic clock. tiku_cpu_freq_init  */
+/* then optionally retunes PLL_SYS to a different target.                    */
+/*                                                                            */
+/* Constraints (RP2350 datasheet §8.6.4 PLL_SYS):                            */
+/*   VCO in [750, 1600] MHz                                                  */
+/*   POSTDIV1, POSTDIV2 each in [1, 7]; recommend POSTDIV1 >= POSTDIV2       */
+/*   FBDIV in [16, 320]; with REFDIV=1, ref = XOSC = 12 MHz                  */
+/*                                                                            */
+/* The default core voltage (1.10 V) supports clk_sys up to ~150 MHz.        */
+/* Higher frequencies would need a voltage-regulator bump that is out of     */
+/* scope for this port -- the table refuses anything above 150 MHz.          */
+/*---------------------------------------------------------------------------*/
 
-    /* Already initialised in tiku_cpu_boot_rp2350_init(). Nothing to
-     * do here — but recompute the cached values defensively. */
-    if (g_clk_sys_hz == 0UL) {
-        g_clk_sys_hz  = 150000000UL;
-        g_clk_peri_hz = 150000000UL;
+struct rp2350_pll_params {
+    unsigned int target_mhz;
+    uint16_t     fbdiv;     /* 0 = special: bypass PLL, use XOSC directly */
+    uint8_t      postdiv1;
+    uint8_t      postdiv2;
+};
+
+/* Six supported clk_sys frequencies; 150 MHz is the default. The 12 MHz
+ * entry marks "bypass PLL" via fbdiv == 0 -- there's no useful PLL setting
+ * that produces 12 MHz output and the chip is happiest sourcing clk_sys
+ * directly from clk_ref/XOSC at low frequencies. */
+static const struct rp2350_pll_params rp2350_freq_table[] = {
+    /* MHz    FBDIV  POSTDIV1  POSTDIV2  -- VCO = 12 * FBDIV */
+    {  12,      0,    0,    0  },   /* bypass PLL, clk_sys = XOSC */
+    {  48,    100,    5,    5  },   /* VCO 1200, /25 */
+    { 100,    100,    4,    3  },   /* VCO 1200, /12 */
+    { 125,    125,    4,    3  },   /* VCO 1500, /12 */
+    { 133,    133,    6,    2  },   /* VCO 1596, /12 */
+    { 150,    125,    5,    2  },   /* VCO 1500, /10 -- default */
+};
+#define RP2350_FREQ_TABLE_LEN \
+    (sizeof(rp2350_freq_table) / sizeof(rp2350_freq_table[0]))
+
+static const struct rp2350_pll_params *
+rp2350_lookup_freq(unsigned int target_mhz) {
+    unsigned int i;
+    for (i = 0; i < RP2350_FREQ_TABLE_LEN; i++) {
+        if (rp2350_freq_table[i].target_mhz == target_mhz) {
+            return &rp2350_freq_table[i];
+        }
     }
+    return NULL;
+}
+
+/* Park clk_sys on clk_ref (XOSC) so PLL_SYS can be safely reconfigured.
+ * Sequence per datasheet §5.5.4: clear AUX selection (CLK_SYS_SRC=REF),
+ * wait for SELECTED to confirm. */
+static void rp2350_park_clk_sys_on_ref(void) {
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
+    (void)rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
+                            0x1U);
+}
+
+/* Reprogram PLL_SYS for the new VCO + POSTDIV values. Caller must have
+ * already parked clk_sys on clk_ref so the in-flight clk_sys consumers
+ * (CPU, peripherals) ride on XOSC during the retune window. */
+static int rp2350_pll_sys_retune(uint16_t fbdiv,
+                                 uint8_t postdiv1, uint8_t postdiv2) {
+    /* Power down the whole PLL so we can reprogram safely. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR) =
+        RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD |
+        RP2350_PLL_PWR_POSTDIVPD | RP2350_PLL_PWR_DSMPD;
+
+    /* REFDIV = 1: PLL ref = 12 MHz. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_CS) = 1U;
+
+    /* New FBDIV. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_FBDIV_INT) = fbdiv;
+
+    /* Power up VCO + main, leave postdiv off until VCO locks. */
+    _RP2350_REG_CLR(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR,
+                    RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD);
+
+    if (!rp2350_spin_until(
+            (volatile uint32_t *)(RP2350_PLL_SYS_BASE + RP2350_PLL_CS),
+            RP2350_PLL_CS_LOCK)) {
+        return 0;
+    }
+
+    /* New POSTDIV1/POSTDIV2. */
+    _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_PRIM) =
+        ((uint32_t)postdiv1 << RP2350_PLL_PRIM_POSTDIV1_S) |
+        ((uint32_t)postdiv2 << RP2350_PLL_PRIM_POSTDIV2_S);
+
+    /* Power up the post-divider so the configured output is generated. */
+    _RP2350_REG_CLR(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR,
+                    RP2350_PLL_PWR_POSTDIVPD);
+    return 1;
+}
+
+/* Switch clk_sys back to PLL_SYS via the glitch-free aux mux sequence. */
+static int rp2350_clk_sys_back_on_pll(void) {
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) =
+        RP2350_CLK_SYS_SRC_REF | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
+    _RP2350_REG(RP2350_CLK_SYS_CTRL) =
+        RP2350_CLK_SYS_SRC_AUX | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
+    return rp2350_spin_until(
+        (volatile uint32_t *)RP2350_CLK_SYS_SELECTED, 0x2U);
+}
+
+void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
+    const struct rp2350_pll_params *p = rp2350_lookup_freq(target_mhz);
+
+    if (p == NULL) {
+        /* Unsupported target -- leave the boot default in place and
+         * mark the clock-fault flag so /sys/clock observers can see
+         * that the requested rate wasn't honoured. */
+        g_clock_fault = 1U;
+        return;
+    }
+
+    /* No-op if the boot init already produced this frequency. The
+     * boot path always brings clk_sys up to 150 MHz, so a 150 MHz
+     * target hits this fast path; other targets actually retune. */
+    if (g_clk_sys_hz == (unsigned long)target_mhz * 1000000UL) {
+        g_clock_fault = 0U;
+        return;
+    }
+
+    if (p->fbdiv == 0U) {
+        /* Bypass PLL: clk_sys = clk_ref = XOSC = 12 MHz. */
+        rp2350_park_clk_sys_on_ref();
+
+        /* Power the PLL down to save the ~few-mW it would otherwise
+         * burn idle. clk_peri retargets to XOSC directly so it doesn't
+         * silently fall to whatever clk_sys was before. */
+        _RP2350_REG(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR) =
+            RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD |
+            RP2350_PLL_PWR_POSTDIVPD | RP2350_PLL_PWR_DSMPD;
+        _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+            RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
+
+        g_clk_sys_hz  = 12000000UL;
+        g_clk_peri_hz = 12000000UL;
+        return;
+    }
+
+    /* Re-tune path. Park clk_sys on XOSC so the CPU keeps running off a
+     * known-good clock while we touch PLL_SYS. */
+    rp2350_park_clk_sys_on_ref();
+
+    if (!rp2350_pll_sys_retune(p->fbdiv, p->postdiv1, p->postdiv2)) {
+        /* PLL didn't lock at the new params. Leave clk_sys parked on
+         * XOSC and flag the fault. clk_peri stays on clk_sys (= XOSC). */
+        _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+            RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
+        g_clk_sys_hz  = 12000000UL;
+        g_clk_peri_hz = 12000000UL;
+        g_clock_fault = 1U;
+        return;
+    }
+
+    if (!rp2350_clk_sys_back_on_pll()) {
+        g_clk_sys_hz  = 12000000UL;
+        g_clk_peri_hz = 12000000UL;
+        g_clock_fault = 1U;
+        return;
+    }
+
+    /* clk_peri stays sourced from clk_sys (the boot init configured it
+     * that way) so it tracks the new clk_sys automatically. Just refresh
+     * the cached values so UART baud + SPI baud + clock-rate VFS reads
+     * see the new frequency. */
+    g_clk_sys_hz  = (unsigned long)target_mhz * 1000000UL;
+    g_clk_peri_hz = (unsigned long)target_mhz * 1000000UL;
+    g_clock_fault = 0U;
 }
 
 void tiku_cpu_boot_rp2350_power_wfi_enter(void) {

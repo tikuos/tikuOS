@@ -109,7 +109,13 @@
  *    NOTE: 16MHz (value 8) is currently DISABLED due to stability issues.
  */
 #if defined(PLATFORM_RP2350)
-#define MAIN_CPU_FREQ 150  /* RP2350: PLL_SYS target in MHz; arch ignores */
+/* RP2350 PLL_SYS target in MHz. Supported values (see
+ * arch/arm-rp2350/tiku_cpu_freq_boot_arch.c rp2350_freq_table[]):
+ *   12, 48, 100, 125, 133, 150
+ * Anything else falls back to 12 MHz with the clock-fault flag set. */
+#ifndef MAIN_CPU_FREQ
+#define MAIN_CPU_FREQ 150
+#endif
 #else
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
 #endif
@@ -119,7 +125,7 @@
  *  constant.
  */
 #if defined(PLATFORM_RP2350)
-#define TIKU_MAIN_CPU_HZ  150000000UL
+#define TIKU_MAIN_CPU_HZ  ((unsigned long)MAIN_CPU_FREQ * 1000000UL)
 #elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
 #elif MAIN_CPU_FREQ == 2

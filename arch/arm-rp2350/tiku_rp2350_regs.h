@@ -128,6 +128,8 @@
 /*---------------------------------------------------------------------------*/
 
 #define RP2350_CLK_GPOUT0_CTRL      (RP2350_CLOCKS_BASE + 0x00U)
+#define RP2350_CLK_GPOUT0_DIV       (RP2350_CLOCKS_BASE + 0x04U)
+#define RP2350_CLK_GPOUT0_SELECTED  (RP2350_CLOCKS_BASE + 0x08U)
 #define RP2350_CLK_REF_CTRL         (RP2350_CLOCKS_BASE + 0x30U)
 #define RP2350_CLK_REF_DIV          (RP2350_CLOCKS_BASE + 0x34U)
 #define RP2350_CLK_REF_SELECTED     (RP2350_CLOCKS_BASE + 0x38U)
@@ -161,6 +163,23 @@
 #define RP2350_CLK_SYS_AUXSRC_XOSC      (3U << 5)
 #define RP2350_CLK_SYS_SRC_REF          (0U)
 #define RP2350_CLK_SYS_SRC_AUX          (1U)
+
+/* CLK_GPOUT0 AUXSRC values (which clock to route out the pin) */
+#define RP2350_CLK_GPOUT_AUXSRC_PLL_SYS  (0U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_GPIN0    (1U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_GPIN1    (2U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_PLL_USB  (3U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_ROSC     (4U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_XOSC     (5U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_SYS  (6U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_USB  (7U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_ADC  (8U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_REF  (9U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_PERI (10U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_HSTX (11U << 5)
+#define RP2350_CLK_GPOUT_DC50            (1U << 12)  /* duty-cycle correction */
+#define RP2350_CLK_GPOUT_KILL            (1U << 10)
+#define RP2350_CLK_GPOUT_ENABLE          (1U << 11)
 
 /* CLK_REF_CTRL fields */
 #define RP2350_CLK_REF_SRC_ROSC         (0U)

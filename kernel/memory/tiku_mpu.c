@@ -86,9 +86,19 @@ uint16_t tiku_mpu_unlock_nvm(void)
 
 /**
  * @brief Restore MPU to a previously saved state
+ *
+ * Before re-locking, flush any in-RAM .persistent modifications to
+ * non-volatile storage.  On MSP430 this is a no-op (FRAM is already
+ * durable); on RP2350 it triggers the flash-sector commit so the
+ * unlock window's writes survive a full power cycle, not just a warm
+ * reset.  Placing the flush HERE -- at the natural transaction
+ * boundary -- catches both writes via tiku_mem_arch_nvm_write() and
+ * direct stores into .persistent variables (memset, struct
+ * assignments) inside the unlock window.
  */
 void tiku_mpu_lock_nvm(uint16_t saved_state)
 {
+    tiku_mem_arch_nvm_flush();
     tiku_mpu_arch_lock_nvm(saved_state);
 }
 

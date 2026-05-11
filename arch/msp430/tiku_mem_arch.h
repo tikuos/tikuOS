@@ -110,4 +110,14 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len);
 
+/**
+ * @brief Flush in-RAM NVM modifications to non-volatile storage.
+ *
+ * No-op on MSP430: FRAM writes are already durable as soon as the bus
+ * cycle completes.  Exists for API parity with the RP2350 port, where
+ * .persistent state is mirrored to a 4 KB flash sector that needs an
+ * explicit erase+program at the end of each unlock window.
+ */
+static inline void tiku_mem_arch_nvm_flush(void) { /* no-op */ }
+
 #endif /* TIKU_MEM_ARCH_H_ */

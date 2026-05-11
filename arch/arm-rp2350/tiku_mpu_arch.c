@@ -20,15 +20,20 @@
  * unlocked treatment, enforced by the Cortex-M33's ARMv8-M MPU.
  *
  * Implementation:
- *   - Four MPU regions for full W^X (Write-XOR-Execute) coverage:
- *       Region 0  SEG3   .uninit                    — RO (locked) /
- *                                                     RW (unlocked), XN
- *       Region 1  SEG1   flash 0x10000000..end      — RX (RO + exec)
- *       Region 2  SEG2a  SRAM 0x20000000..mpu_diag  — RW + XN
- *       Region 3  SEG2b  SRAM uninit_end..sram_end  — RW + XN
- *     The two SRAM regions sandwich the .uninit hole so .text writes
- *     fault, SRAM-execute faults, and the existing NVM lock/unlock
- *     handshake on .uninit still works exactly as before.
+ *   - Six MPU regions for full W^X (Write-XOR-Execute) coverage
+ *     plus a stack-overflow guard:
+ *       Region 0  SEG3      .uninit                       — RO (locked)
+ *                                                           / RW (unlocked), XN
+ *       Region 1  SEG1      flash 0x10000000..end         — RX
+ *       Region 2  SEG2a     SRAM 0x20000000..uninit_start — RW + XN
+ *       Region 3  SEG2b     SRAM uninit_end..guard_base   — RW + XN
+ *       Region 4  STACK_GD  32-byte guard just below the stack — RO + XN
+ *       Region 5  SEG2c     SRAM above the guard..sram_end — RW + XN
+ *     All six are non-overlapping (M33 overlap behaviour is
+ *     implementation-defined and unsafe). The guard sits
+ *     MPU_STACK_RESERVED_BYTES below __sram_end; a descending stack
+ *     that walks past that budget faults on the next push instead of
+ *     silently corrupting .data / .bss / .uninit.
  *   - MPU_CTRL.PRIVDEFENA is set so other memory (peripherals at
  *     0x40000000+, SCS at 0xE0000000+, XIP cache control, boot ROM)
  *     keeps using the default privileged R/W policy without consuming
@@ -129,6 +134,7 @@ struct tiku_mpu_diag {
 #define TIKU_MPU_TEST_DONE_SEG3   (1U << 0)
 #define TIKU_MPU_TEST_DONE_SEG1   (1U << 1)
 #define TIKU_MPU_TEST_DONE_SEG2   (1U << 2)
+#define TIKU_MPU_TEST_DONE_SG     (1U << 3)   /* stack-guard sub-test */
 
 __attribute__((section(".mpu_diag")))
 static volatile struct tiku_mpu_diag mpu_diag;
@@ -139,12 +145,30 @@ static volatile struct tiku_mpu_diag mpu_diag;
 
 /* Region assignment — one MPU region per protection class.  NOT
  * overlapping (ARMv8-M overlap behaviour is implementation-defined
- * on M33 and the spec strongly recommends against it). The two
- * SRAM regions sandwich the .uninit hole. */
-#define MPU_REGION_NVM       0U   /* SEG3 = .uninit (RO/RW + XN) */
-#define MPU_REGION_TEXT      1U   /* SEG1 = flash (.text + .rodata, RX) */
-#define MPU_REGION_SRAM_LO   2U   /* SEG2a = SRAM below mpu_diag (RW + XN) */
-#define MPU_REGION_SRAM_HI   3U   /* SEG2b = SRAM above .uninit (RW + XN) */
+ * on M33 and the spec strongly recommends against it). The SRAM
+ * region post-.uninit splits into three pieces so a small RO+XN
+ * "guard" sits at the bottom of the descending stack. */
+#define MPU_REGION_NVM         0U   /* SEG3 = .uninit (RO/RW + XN) */
+#define MPU_REGION_TEXT        1U   /* SEG1 = flash (.text + .rodata, RX) */
+#define MPU_REGION_SRAM_LO     2U   /* SEG2a = SRAM below uninit (RW + XN) */
+#define MPU_REGION_SRAM_MID    3U   /* SEG2b = SRAM above uninit, below
+                                       stack guard (RW + XN) */
+#define MPU_REGION_STACK_GUARD 4U   /* SG: 32-byte RO+XN guard at the
+                                       bottom of the descending stack;
+                                       a stack-frame STR that walks past
+                                       this address faults via MemManage
+                                       instead of silently corrupting
+                                       .bss / .data / .uninit */
+#define MPU_REGION_SRAM_TOP    5U   /* SEG2c = SRAM above the guard, up
+                                       to __sram_end (RW + XN); this is
+                                       the live stack region */
+
+/* Stack budget. The guard sits 32 bytes BELOW this offset from the top
+ * of SRAM. Cortex-M33 in TikuOS configurations runs every process on
+ * the main stack (no PSP); 8 KB is generous. Enlarge if a real workload
+ * needs more headroom. */
+#define MPU_STACK_RESERVED_BYTES   8192U
+#define MPU_STACK_GUARD_BYTES      32U
 
 static inline void mpu_dsb_isb(void) {
     __asm__ volatile ("dsb 0xF" ::: "memory");
@@ -244,18 +268,53 @@ static void mpu_program_seg2_sram_lo(void) {
                        RP2350_MPU_RBAR_XN);
 }
 
-/* Region 3: high half of SEG2 — SRAM from end of .uninit up to the
- * top of SRAM (covers heap and the descending stack). RW + XN.
- *
- * Why split into _lo and _hi rather than one big region with a hole?
- * ARMv8-M MPU regions are contiguous; there's no "exclude" mask. The
- * .uninit slice lives in the middle of SRAM and needs different
- * permissions (RO when locked) so we leave it as a separate region 0
- * and bracket it with these two RW+XN regions. */
-static void mpu_program_seg2_sram_hi(void) {
+/* Compute the stack guard's base address. The guard is 32 bytes wide
+ * sitting MPU_STACK_RESERVED_BYTES below the top of SRAM. This address
+ * is the boundary between the SRAM_MID region (RW+XN; covers anything
+ * the kernel might place between .uninit and the live stack region)
+ * and the SRAM_TOP region (RW+XN; the live stack). When the descending
+ * stack pointer dips below MPU_STACK_RESERVED_BYTES of usage, the next
+ * STR/PUSH lands inside the guard and the MPU faults. */
+static inline uint32_t mpu_stack_guard_base(void) {
+    return (uint32_t)&__sram_end -
+           MPU_STACK_RESERVED_BYTES -
+           MPU_STACK_GUARD_BYTES;
+}
+
+/* Region 3 (SRAM mid): from end of .uninit up to the bottom of the
+ * stack guard. RW + XN. This is where the kernel's static data
+ * doesn't reach and where the heap WOULD live if TikuOS used a
+ * heap (it doesn't -- static allocation only -- so this region is
+ * usually unused at runtime). */
+static void mpu_program_seg2_sram_mid(void) {
     uint32_t base = (uint32_t)&__uninit_end;
+    uint32_t end  = mpu_stack_guard_base() - 1U;
+    mpu_program_region(MPU_REGION_SRAM_MID, base, end,
+                       RP2350_MPU_RBAR_AP_RW_ANY,
+                       RP2350_MPU_RBAR_XN);
+}
+
+/* Region 4 (stack guard): a 32-byte RO+XN slot at exactly
+ * `mpu_stack_guard_base()`. The kernel's stack starts at __sram_end
+ * and grows down; once it has consumed MPU_STACK_RESERVED_BYTES bytes
+ * the next push lands here and faults. RO so writes fault, XN so a
+ * write-then-jump can't smuggle code in either. */
+static void mpu_program_stack_guard(void) {
+    uint32_t base = mpu_stack_guard_base();
+    uint32_t end  = base + MPU_STACK_GUARD_BYTES - 1U;
+    mpu_program_region(MPU_REGION_STACK_GUARD, base, end,
+                       RP2350_MPU_RBAR_AP_RO_ANY,
+                       RP2350_MPU_RBAR_XN);
+}
+
+/* Region 5 (SRAM top): the live stack region from just above the
+ * guard up to __sram_end. RW + XN. Stack pushes succeed here; the
+ * XN bit prevents stack-buffer-overflow shellcode from being
+ * executed. */
+static void mpu_program_seg2_sram_top(void) {
+    uint32_t base = mpu_stack_guard_base() + MPU_STACK_GUARD_BYTES;
     uint32_t end  = (uint32_t)&__sram_end - 1U;
-    mpu_program_region(MPU_REGION_SRAM_HI, base, end,
+    mpu_program_region(MPU_REGION_SRAM_TOP, base, end,
                        RP2350_MPU_RBAR_AP_RW_ANY,
                        RP2350_MPU_RBAR_XN);
 }
@@ -321,12 +380,21 @@ void tiku_mpu_arch_init_segments(void) {
     /* Region 1 = flash (.text + .rodata): RX. */
     mpu_program_seg1_text();
 
-    /* Regions 2 + 3 = SRAM bracketing the .uninit hole: RW + XN.
-     * These bound the writable working set on either side of the
-     * NVM slice so SRAM-resident shellcode (write+jump) faults on
-     * the jump even if an attacker controls the destination. */
+    /* Regions 2/3/4/5 = SRAM split into four pieces:
+     *   2: low SRAM up to .uninit (data + bss + mpu_diag, RW + XN)
+     *   3: mid SRAM after .uninit, up to the stack guard (RW + XN)
+     *   4: 32-byte stack guard at the bottom of the descending
+     *      stack (RO + XN) -- a stack push that walks past
+     *      MPU_STACK_RESERVED_BYTES of usage faults here
+     *   5: live stack region above the guard (RW + XN)
+     * The non-overlapping split means we don't depend on the
+     * implementation-defined ARMv8-M behaviour for overlapping
+     * regions. SRAM-resident shellcode (write+jump) still faults on
+     * the jump anywhere in regions 2/3/5 because all carry XN. */
     mpu_program_seg2_sram_lo();
-    mpu_program_seg2_sram_hi();
+    mpu_program_seg2_sram_mid();
+    mpu_program_stack_guard();
+    mpu_program_seg2_sram_top();
 
     /* Enable MPU + PRIVDEFENA so unmapped memory (peripherals at
      * 0x40000000+, SCS/MPU at 0xE0000000+, XIP cache control,

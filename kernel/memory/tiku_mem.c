@@ -313,8 +313,16 @@ void tiku_mem_init(void)
     /* Region registry must be available before any other subsystem */
     tiku_region_init(tiku_region_arch_get_table(&count), count);
 
-    /* Activate NVM write-protection before anything else */
-    tiku_mpu_init();
-
+    /* arch_init runs FIRST so any port that mirrors .uninit out to
+     * non-volatile storage (e.g. RP2350's flash backup sector) can
+     * restore the SRAM working copy via plain memcpy.  Activating the
+     * MPU first would write-protect .uninit before that restore could
+     * land its bytes -- the MemManage handler would then reset the
+     * chip on the very first persist read. */
     tiku_mem_arch_init();
+
+    /* Activate NVM write-protection now that the working copy is in
+     * place.  Subsequent persist / lc-persist / init writes go through
+     * tiku_mpu_unlock_nvm() / lock_nvm() to bracket their changes. */
+    tiku_mpu_init();
 }

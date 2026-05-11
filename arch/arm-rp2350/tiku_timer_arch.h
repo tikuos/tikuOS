@@ -40,7 +40,11 @@ typedef unsigned int tiku_clock_arch_counter_t;
 #endif
 
 #define TIKU_CLOCK_ARCH_SECOND  TIKU_CLOCK_ARCH_CONF_SECOND
-#define TIKU_CLOCK_ARCH_INTERVAL  (150000000UL / TIKU_CLOCK_ARCH_SECOND)
+/* SysTick uses CPU clock; reload = clk_sys / TICK_HZ. TIKU_MAIN_CPU_HZ
+ * tracks MAIN_CPU_FREQ so the system tick stays at TIKU_CLOCK_ARCH_SECOND
+ * Hz across all supported clk_sys frequencies (12 / 48 / 100 / 125 /
+ * 133 / 150 MHz). */
+#define TIKU_CLOCK_ARCH_INTERVAL  (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND)
 
 /*---------------------------------------------------------------------------*/
 /* HAL ENTRY POINTS                                                          */
