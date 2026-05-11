@@ -374,7 +374,16 @@ boot_clock_fault_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/boot/mpu/violations — MPU segment violation flags (hex)              */
+/* /sys/boot/mpu/{violations,count,last_addr}                                */
+/*                                                                            */
+/*   violations — MPU segment violation flags from the current boot, as a    */
+/*                hex bitmask. Cleared on every fresh boot (.bss-backed).    */
+/*   count      — Persistent counter incremented on every violation,         */
+/*                surviving the fault-triggered reset on platforms with a    */
+/*                NOLOAD diagnostic region (RP2350 .mpu_diag). Decimal.      */
+/*   last_addr  — MMFAR snapshot of the most recent violation, hex. Lets a   */
+/*                postmortem boot answer "which pointer killed me last       */
+/*                time?" via `cat /sys/boot/mpu/last_addr`.                  */
 /*---------------------------------------------------------------------------*/
 
 static int
@@ -382,6 +391,20 @@ boot_mpu_violations_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "0x%02x\n",
                     tiku_mpu_get_violation_flags());
+}
+
+static int
+boot_mpu_count_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)tiku_mpu_get_violation_count());
+}
+
+static int
+boot_mpu_last_addr_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "0x%08lx\n",
+                    (unsigned long)tiku_mpu_get_last_fault_addr());
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1175,6 +1198,8 @@ static const tiku_vfs_node_t sys_boot_clock_children[] = {
 
 static const tiku_vfs_node_t sys_boot_mpu_children[] = {
     { "violations", TIKU_VFS_FILE, boot_mpu_violations_read, NULL, NULL, 0 },
+    { "count",      TIKU_VFS_FILE, boot_mpu_count_read,      NULL, NULL, 0 },
+    { "last_addr",  TIKU_VFS_FILE, boot_mpu_last_addr_read,  NULL, NULL, 0 },
 };
 
 static const tiku_vfs_node_t sys_boot_children[] = {

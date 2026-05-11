@@ -168,3 +168,38 @@ void tiku_mpu_clear_violation_flags(void)
 {
     tiku_mpu_arch_clear_violation_flags();
 }
+
+/**
+ * @brief Total MPU violations across warm boots.
+ *
+ * Delegates to the arch layer which returns the persistent counter
+ * (in a NOLOAD section that survives a fault-triggered reset on
+ * platforms that have one).  Returns 0 on platforms without
+ * persistent diagnostic state.
+ */
+uint32_t tiku_mpu_get_violation_count(void)
+{
+#if defined(PLATFORM_RP2350)
+    extern uint32_t tiku_mpu_arch_violation_count(void);
+    return tiku_mpu_arch_violation_count();
+#else
+    return 0U;
+#endif
+}
+
+/**
+ * @brief Address that triggered the most recent MPU violation.
+ *
+ * Snapshot of MMFAR on Cortex-M (or equivalent on other arches),
+ * preserved across the post-fault reset. Returns 0 on platforms
+ * without persistent diagnostic state or before any fault.
+ */
+uint32_t tiku_mpu_get_last_fault_addr(void)
+{
+#if defined(PLATFORM_RP2350)
+    extern uint32_t tiku_mpu_arch_last_fault_addr(void);
+    return tiku_mpu_arch_last_fault_addr();
+#else
+    return 0U;
+#endif
+}

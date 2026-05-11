@@ -891,6 +891,31 @@ uint16_t tiku_mpu_get_violation_flags(void);
  */
 void tiku_mpu_clear_violation_flags(void);
 
+/**
+ * @brief Persistent count of MPU violations across warm reset.
+ *
+ * On platforms that survive a fault-triggered reset (RP2350 keeps
+ * this in a NOLOAD .mpu_diag section), this value is monotonic
+ * across all boots since the last cold-power-up. On platforms with
+ * no persistent diagnostic state, returns 0.
+ *
+ * @return Total MPU violations observed since the last cold boot.
+ */
+uint32_t tiku_mpu_get_violation_count(void);
+
+/**
+ * @brief Address that triggered the most recent MPU violation.
+ *
+ * On Cortex-M platforms with a real MPU, this is the MMFAR snapshot
+ * captured by the MemManage / HardFault handler. Surviving across
+ * warm reset (NOLOAD section) lets the post-crash boot inspect what
+ * pointer killed the chip. Returns 0 on platforms without
+ * persistent diagnostic state.
+ *
+ * @return Last faulting address, or 0 if no fault has been recorded.
+ */
+uint32_t tiku_mpu_get_last_fault_addr(void);
+
 /*---------------------------------------------------------------------------*/
 /* TIER ALLOCATOR                                                            */
 /*---------------------------------------------------------------------------*/
