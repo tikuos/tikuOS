@@ -19,9 +19,18 @@
  * max timeout of ~16.7 s. Map the MSP430-style "interval" divider
  * to a microsecond timeout chosen to match the wall-clock effect on
  * a 32 kHz ACLK:
- *   interval / 32768 ≈ seconds  ->  *1e6 / 32768 ≈ us */
+ *   interval / 32768 ~ seconds  ->  *1e6 / 32768 ~ us
+ *
+ * The arithmetic must use 64-bit math: for isel=32768
+ * (TIKU_WDT_TIMEOUT_1000MS), the product 32768 * 1000000 =
+ * 32,768,000,000 overflows uint32_t (max ~4.29 billion) and wraps
+ * to 2,703,228,928 -- which then divides down to ~82 ms instead
+ * of the intended 1 s. The wrapped value is small enough that the
+ * watchdog bites well inside the kick interval and the chip enters
+ * a reboot loop. Cast one operand to uint64_t so the multiply
+ * produces the full product before the division. */
 static uint32_t interval_to_us(tiku_wdt_interval_t isel) {
-    uint32_t us = ((uint32_t)isel * 1000000UL) / 32768UL;
+    uint32_t us = (uint32_t)(((uint64_t)isel * 1000000ULL) / 32768ULL);
     if (us == 0U) {
         us = 1000U;          /* clamp to 1 ms minimum */
     }

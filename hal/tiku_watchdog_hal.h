@@ -68,6 +68,25 @@
 
 #define TIKU_WDT_INTERVAL_DEFAULT   TIKU_WDT_INTERVAL_32768
 
+/*
+ * Semantic timeout aliases. The MSP430 divider model only naturally
+ * yields four time points when paired with a 32 kHz ACLK, so we
+ * surface those four with names that read like wall-clock timeouts:
+ *
+ *   TIKU_WDT_TIMEOUT_2MS    ~  1.95 ms  (divider /64)
+ *   TIKU_WDT_TIMEOUT_16MS   ~ 15.6  ms  (divider /512)
+ *   TIKU_WDT_TIMEOUT_250MS  ~ 250   ms  (divider /8192)
+ *   TIKU_WDT_TIMEOUT_1000MS ~ 1000  ms  (divider /32768)
+ *
+ * Use these in portable code; reach for the underlying
+ * TIKU_WDT_INTERVAL_* only if you genuinely care about the divider
+ * (e.g. MSP430-specific tests asserting WDTCTL bit patterns).
+ */
+#define TIKU_WDT_TIMEOUT_2MS        TIKU_WDT_INTERVAL_64
+#define TIKU_WDT_TIMEOUT_16MS       TIKU_WDT_INTERVAL_512
+#define TIKU_WDT_TIMEOUT_250MS      TIKU_WDT_INTERVAL_8192
+#define TIKU_WDT_TIMEOUT_1000MS     TIKU_WDT_INTERVAL_32768
+
 /*---------------------------------------------------------------------------*/
 /* HAL-to-arch mapping macros                                                */
 /*---------------------------------------------------------------------------*/
