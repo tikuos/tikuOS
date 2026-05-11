@@ -70,6 +70,8 @@
 #define RP2350_SPI0_BASE            0x40080000UL
 #define RP2350_SPI1_BASE            0x40088000UL
 #define RP2350_TICKS_BASE           0x40108000UL
+#define RP2350_PWM_BASE             0x400A8000UL
+#define RP2350_DMA_BASE             0x50000000UL
 #define RP2350_PIO0_BASE            0x50200000UL
 #define RP2350_PIO1_BASE            0x50300000UL
 #define RP2350_PIO2_BASE            0x50400000UL
@@ -627,6 +629,95 @@
 #define RP2350_MPU_MAIR_NORMAL_NC   0x44U
 
 /*---------------------------------------------------------------------------*/
+/* PWM (Pulse Width Modulator) — RP2350 datasheet §12.7                      */
+/*---------------------------------------------------------------------------*/
+
+/* 12 slices, each with 2 channels (A and B). Per-slice registers live at
+ * a 0x14-byte stride starting at PWM_BASE. Slice for GPIO n is
+ * (n / 2) % 12; channel is n % 2 (A or B). Channel A occupies the low
+ * 16 bits of CC, channel B the high 16. */
+
+#define RP2350_PWM_NUM_SLICES        12U
+#define RP2350_PWM_SLICE(s)          (RP2350_PWM_BASE + 0x14U * (s))
+#define RP2350_PWM_SLICE_CSR(s)      (RP2350_PWM_SLICE(s) + 0x00U)
+#define RP2350_PWM_SLICE_DIV(s)      (RP2350_PWM_SLICE(s) + 0x04U)
+#define RP2350_PWM_SLICE_CTR(s)      (RP2350_PWM_SLICE(s) + 0x08U)
+#define RP2350_PWM_SLICE_CC(s)       (RP2350_PWM_SLICE(s) + 0x0CU)
+#define RP2350_PWM_SLICE_TOP(s)      (RP2350_PWM_SLICE(s) + 0x10U)
+
+#define RP2350_PWM_EN                (RP2350_PWM_BASE + 0xF0U)  /* global SM enable */
+#define RP2350_PWM_INTR              (RP2350_PWM_BASE + 0xF4U)  /* raw wrap IRQs */
+#define RP2350_PWM_INTE              (RP2350_PWM_BASE + 0xF8U)  /* enable */
+#define RP2350_PWM_INTF              (RP2350_PWM_BASE + 0xFCU)  /* force */
+#define RP2350_PWM_INTS              (RP2350_PWM_BASE + 0x100U) /* status */
+
+/* CSR bit fields */
+#define RP2350_PWM_CSR_EN            (1U << 0)
+#define RP2350_PWM_CSR_PH_CORRECT    (1U << 1)
+#define RP2350_PWM_CSR_A_INV         (1U << 2)
+#define RP2350_PWM_CSR_B_INV         (1U << 3)
+#define RP2350_PWM_CSR_DIVMODE_FREE  (0U << 4)   /* free-running (default) */
+#define RP2350_PWM_CSR_PH_ADV        (1U << 6)
+#define RP2350_PWM_CSR_PH_RET        (1U << 7)
+
+static inline uint8_t rp2350_pwm_pin_to_slice(uint8_t gpio) {
+    return (uint8_t)((gpio / 2U) % RP2350_PWM_NUM_SLICES);
+}
+
+static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
+    return (uint8_t)(gpio & 1U);
+}
+
+/*---------------------------------------------------------------------------*/
+/* DMA — RP2350 datasheet §12.6                                              */
+/*---------------------------------------------------------------------------*/
+
+/* 16 channels, each with READ_ADDR, WRITE_ADDR, TRANS_COUNT, CTRL_TRIG at
+ * 0x40-byte stride. Two trigger flavours: CTRL_TRIG starts the transfer
+ * on write (the standard "go" register), CTRL is the same field without
+ * the start side-effect. */
+
+#define RP2350_DMA_NUM_CHANNELS      16U
+#define RP2350_DMA_CHAN(c)           (RP2350_DMA_BASE + 0x40U * (c))
+#define RP2350_DMA_CHAN_READ_ADDR(c)    (RP2350_DMA_CHAN(c) + 0x00U)
+#define RP2350_DMA_CHAN_WRITE_ADDR(c)   (RP2350_DMA_CHAN(c) + 0x04U)
+#define RP2350_DMA_CHAN_TRANS_COUNT(c)  (RP2350_DMA_CHAN(c) + 0x08U)
+#define RP2350_DMA_CHAN_CTRL_TRIG(c)    (RP2350_DMA_CHAN(c) + 0x0CU)
+
+#define RP2350_DMA_INTR              (RP2350_DMA_BASE + 0x400U) /* raw */
+#define RP2350_DMA_INTE0             (RP2350_DMA_BASE + 0x404U) /* enable for IRQ0 */
+#define RP2350_DMA_INTF0             (RP2350_DMA_BASE + 0x408U)
+#define RP2350_DMA_INTS0             (RP2350_DMA_BASE + 0x40CU) /* status post-enable */
+
+/* CTRL_TRIG fields (datasheet §12.6.7.4). RP2350 inserts
+ * INCR_READ_REV (bit 5) and INCR_WRITE_REV (bit 7) compared to
+ * the RP2040 layout, shifting every following field by one or two
+ * bits. Do NOT copy these positions from RP2040 reference code --
+ * I did exactly that on the first cut and the channel sat in an
+ * unsatisfiable DREQ wait forever. */
+#define RP2350_DMA_CTRL_EN              (1U << 0)
+#define RP2350_DMA_CTRL_HIGH_PRIO       (1U << 1)
+#define RP2350_DMA_CTRL_DATA_SIZE_BYTE  (0U << 2)
+#define RP2350_DMA_CTRL_DATA_SIZE_HALF  (1U << 2)
+#define RP2350_DMA_CTRL_DATA_SIZE_WORD  (2U << 2)
+#define RP2350_DMA_CTRL_INCR_READ       (1U << 4)
+#define RP2350_DMA_CTRL_INCR_READ_REV   (1U << 5)
+#define RP2350_DMA_CTRL_INCR_WRITE      (1U << 6)
+#define RP2350_DMA_CTRL_INCR_WRITE_REV  (1U << 7)
+#define RP2350_DMA_CTRL_RING_SHIFT       8           /* RING_SIZE field [11:8] */
+#define RP2350_DMA_CTRL_RING_SEL_WR     (1U << 12)
+#define RP2350_DMA_CTRL_CHAIN_TO_SHIFT  13           /* CHAIN_TO field [16:13] */
+#define RP2350_DMA_CTRL_TREQ_SEL_SHIFT  17           /* TREQ_SEL field [22:17] */
+#define RP2350_DMA_CTRL_TREQ_PERMANENT  0x3FU        /* unpaced (m2m) */
+#define RP2350_DMA_CTRL_IRQ_QUIET       (1U << 23)
+#define RP2350_DMA_CTRL_BSWAP           (1U << 24)
+#define RP2350_DMA_CTRL_SNIFF_EN        (1U << 25)
+#define RP2350_DMA_CTRL_WRITE_ERROR     (1U << 28)
+#define RP2350_DMA_CTRL_READ_ERROR      (1U << 29)
+#define RP2350_DMA_CTRL_BUSY            (1U << 30)   /* RO */
+#define RP2350_DMA_CTRL_AHB_ERR         (1U << 31)   /* RO */
+
+/*---------------------------------------------------------------------------*/
 /* PIO (Programmable I/O) — RP2350 datasheet §11                             */
 /*---------------------------------------------------------------------------*/
 
@@ -700,6 +791,11 @@
  */
 #define RP2350_IRQ_TIMER0_0         0
 #define RP2350_IRQ_TIMER0_1         1
+#define RP2350_IRQ_DMA_IRQ_0        10
+#define RP2350_IRQ_DMA_IRQ_1        11
+#define RP2350_IRQ_DMA_IRQ_2        12
+#define RP2350_IRQ_DMA_IRQ_3        13
+#define RP2350_IRQ_PWM_IRQ_WRAP_0   14
 #define RP2350_IRQ_PIO0_0           15
 #define RP2350_IRQ_PIO0_1           16
 #define RP2350_IRQ_PIO1_0           17

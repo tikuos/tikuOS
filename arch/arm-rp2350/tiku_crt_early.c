@@ -78,11 +78,12 @@ void tiku_rp2350_pendsv_handler(void)     __attribute__((weak, alias("rp2350_def
 void tiku_rp2350_systick_handler(void) __attribute__((weak, alias("rp2350_default_handler")));
 
 /* External IRQ stubs we wire up: TIMER0 alarm 0, UART0, IO_BANK0,
- * PIO0 IRQ 0 (bit-bang completion). */
+ * PIO0 IRQ 0 (bit-bang completion), DMA IRQ 0 (memcpy completion). */
 void tiku_rp2350_timer0_alarm0_isr(void) __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_uart0_isr(void)         __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_io_bank0_isr(void)      __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_pio0_irq0_handler(void) __attribute__((weak, alias("rp2350_default_handler")));
+void tiku_rp2350_dma_irq0_handler(void)  __attribute__((weak, alias("rp2350_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Reset handler                                                             */
@@ -184,6 +185,7 @@ __attribute__((section(".vectors"), used)) = {
     [16 +  2] = rp2350_default_handler,        /* IRQ  2  TIMER0_IRQ_2 */
     [16 +  3] = rp2350_default_handler,        /* IRQ  3  TIMER0_IRQ_3 */
     [16 +  4] = rp2350_default_handler,        /* IRQ  4  TIMER1_IRQ_0 */
+    [16 + 10] = tiku_rp2350_dma_irq0_handler,  /* IRQ 10  DMA_IRQ_0    */
     [16 + 15] = tiku_rp2350_pio0_irq0_handler, /* IRQ 15  PIO0_IRQ_0   */
     [16 + 21] = tiku_rp2350_io_bank0_isr,      /* IRQ 21  IO_IRQ_BANK0 */
     [16 + 33] = tiku_rp2350_uart0_isr,         /* IRQ 33  UART0_IRQ    */
@@ -192,7 +194,8 @@ __attribute__((section(".vectors"), used)) = {
      * designated-init zero, which the linker fills with NULL — but
      * NULL is a valid pointer here that would cause a hard fault
      * if dispatched. Replace nulls explicitly. */
-    [16 +  5 ... 16 + 14] = rp2350_default_handler,
+    [16 +  5 ... 16 +  9] = rp2350_default_handler,
+    [16 + 11 ... 16 + 14] = rp2350_default_handler,
     [16 + 16 ... 16 + 20] = rp2350_default_handler,
     [16 + 22 ... 16 + 32] = rp2350_default_handler,
     [16 + 34 ... 16 + 63] = rp2350_default_handler,

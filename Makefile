@@ -596,6 +596,8 @@ SRCS += arch/arm-rp2350/tiku_gpio_arch.c
 SRCS += arch/arm-rp2350/tiku_spi_arch.c
 SRCS += arch/arm-rp2350/tiku_lcd_arch.c
 SRCS += arch/arm-rp2350/tiku_pio_arch.c
+SRCS += arch/arm-rp2350/tiku_pwm_arch.c
+SRCS += arch/arm-rp2350/tiku_dma_arch.c
 
 else
 
@@ -855,6 +857,8 @@ SRCS += tests/watchdog/test_watchdog_interval.c
 SRCS += tests/watchdog/test_watchdog_timeout.c
 SRCS += tests/uart/test_uart_edge.c
 SRCS += tests/watchdog/test_watchdog_edge.c
+SRCS += tests/peripherals/test_pwm.c
+SRCS += tests/peripherals/test_dma.c
 SRCS += tests/kernel/vfs/test_vfs.c
 SRCS += tests/kernel/vfs/test_vfs_tree.c
 SRCS += tests/init/test_catalog.c
