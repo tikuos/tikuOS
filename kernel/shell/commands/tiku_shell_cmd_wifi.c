@@ -14,15 +14,16 @@
  *   wifi help             — usage
  *
  * Implementation just glues to drivers/wifi/cyw43/whd.h's public
- * API: cyw43_wifi_status(), cyw43_wifi_scan_start(),
- * cyw43_wifi_scan_results(). No driver state lives in shell code.
+ * API: tiku_wireless_status(), tiku_wireless_scan_start(),
+ * tiku_wireless_scan_results(). No driver state lives in shell code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_shell_cmd_wifi.h"
 #include <kernel/shell/tiku_shell.h>
-#include <drivers/wifi/cyw43/whd.h>
+#include <kernel/timers/tiku_clock.h>
+#include <interfaces/wireless/tiku_wireless.h>
 
 /*---------------------------------------------------------------------------*/
 
@@ -62,8 +63,8 @@ static void wifi_help(void)
 
 static void wifi_status(void)
 {
-    cyw43_wifi_status_t st;
-    if (cyw43_wifi_status(&st) != 0) {
+    tiku_wireless_status_t st;
+    if (tiku_wireless_status(&st) != 0) {
         SHELL_PRINTF("wifi: status query failed\n");
         return;
     }
@@ -71,16 +72,24 @@ static void wifi_status(void)
     SHELL_PRINTF("MAC:         ");
     put_bssid(st.mac);
     tiku_shell_io_putc('\n');
-    SHELL_PRINTF("Last scan:   %u AP%s found\n",
-                 (unsigned)st.scan_aps_found,
-                 st.scan_aps_found == 1U ? "" : "s");
+    if (st.last_scan_ticks == 0UL) {
+        SHELL_PRINTF("Last scan:   %u AP%s found\n",
+                     (unsigned)st.scan_aps_found,
+                     st.scan_aps_found == 1U ? "" : "s");
+    } else {
+        SHELL_PRINTF("Last scan:   %u AP%s in %lu ms\n",
+                     (unsigned)st.scan_aps_found,
+                     st.scan_aps_found == 1U ? "" : "s",
+                     (unsigned long)((st.last_scan_ticks * 1000UL)
+                                     / TIKU_CLOCK_SECOND));
+    }
     SHELL_PRINTF("Scan busy:   %s\n",
                  st.scan_in_progress ? "yes" : "no");
 }
 
 static void wifi_scan(void)
 {
-    int rc = cyw43_wifi_scan_start();
+    int rc = tiku_wireless_scan_start();
     if (rc != 0) {
         SHELL_PRINTF("wifi: scan_start rejected (rc=%d) — "
                      "is the radio up + idle?\n", rc);
@@ -92,8 +101,8 @@ static void wifi_scan(void)
 
 static void wifi_list(void)
 {
-    cyw43_ap_t aps[CYW43_MAX_SCAN_RESULTS];
-    uint8_t    n = cyw43_wifi_scan_results(aps, CYW43_MAX_SCAN_RESULTS);
+    tiku_wireless_ap_t aps[TIKU_WIRELESS_MAX_SCAN_RESULTS];
+    uint8_t    n = tiku_wireless_scan_results(aps, TIKU_WIRELESS_MAX_SCAN_RESULTS);
     uint8_t    i, k;
 
     if (n == 0U) {
