@@ -55,10 +55,23 @@ static void put_bssid(const uint8_t bssid[6])
 
 static void wifi_help(void)
 {
-    SHELL_PRINTF("wifi status         Driver state + MAC\n");
-    SHELL_PRINTF("wifi scan           Trigger active scan (results print as found)\n");
-    SHELL_PRINTF("wifi list           Show cached results from last scan\n");
-    SHELL_PRINTF("wifi help           This help\n");
+    SHELL_PRINTF("wifi status              Driver state + MAC + link\n");
+    SHELL_PRINTF("wifi scan                Trigger active scan\n");
+    SHELL_PRINTF("wifi list                Show cached scan results\n");
+    SHELL_PRINTF("wifi connect SSID PSK    Join WPA2-PSK network\n");
+    SHELL_PRINTF("wifi disconnect          Leave the current network\n");
+    SHELL_PRINTF("wifi help                This help\n");
+}
+
+static const char *link_str(uint8_t link_state)
+{
+    switch (link_state) {
+    case TIKU_WIRELESS_LINK_IDLE:       return "idle";
+    case TIKU_WIRELESS_LINK_CONNECTING: return "connecting";
+    case TIKU_WIRELESS_LINK_JOINED:     return "joined";
+    case TIKU_WIRELESS_LINK_FAILED:     return "failed";
+    default:                            return "unknown";
+    }
 }
 
 static void wifi_status(void)
@@ -86,6 +99,44 @@ static void wifi_status(void)
     SHELL_PRINTF("Scan busy:   %s\n",
                  st.scan_in_progress ? "yes" : "no");
     SHELL_PRINTF("IRQ count:   %lu\n", (unsigned long)st.irq_count);
+    SHELL_PRINTF("Link:        %s", link_str(st.link_state));
+    if (st.link_state == TIKU_WIRELESS_LINK_JOINED && st.joined_ssid_len) {
+        uint8_t k;
+        SHELL_PRINTF(" -> ");
+        for (k = 0U; k < st.joined_ssid_len && k < 32U; ++k) {
+            char c = (char)st.joined_ssid[k];
+            if (c >= 0x20 && c < 0x7F) tiku_shell_io_putc(c);
+            else                       tiku_shell_io_putc('.');
+        }
+    }
+    if (st.link_state == TIKU_WIRELESS_LINK_FAILED) {
+        SHELL_PRINTF(" (raw=0x%lx)", (unsigned long)st.link_status_raw);
+    }
+    tiku_shell_io_putc('\n');
+}
+
+static void wifi_connect(uint8_t argc, const char *argv[])
+{
+    int rc;
+    if (argc < 4U) {
+        SHELL_PRINTF("usage: wifi connect <ssid> <psk>\n");
+        return;
+    }
+    rc = tiku_wireless_connect(argv[2], argv[3]);
+    if (rc == 0) {
+        SHELL_PRINTF("wifi: join requested (ssid=\"%s\"); "
+                     "watch 'wifi status' for result.\n", argv[2]);
+    } else {
+        SHELL_PRINTF("wifi: connect rejected (rc=%d) — radio not up, "
+                     "join already in flight, or bad creds\n", rc);
+    }
+}
+
+static void wifi_disconnect(void)
+{
+    int rc = tiku_wireless_disconnect();
+    if (rc == 0) SHELL_PRINTF("wifi: disconnect queued\n");
+    else         SHELL_PRINTF("wifi: disconnect failed rc=%d\n", rc);
 }
 
 static void wifi_scan(void)
@@ -132,10 +183,12 @@ tiku_shell_cmd_wifi(uint8_t argc, const char *argv[])
 {
     if (argc < 2U) { wifi_help(); return; }
 
-    if      (str_eq(argv[1], "status")) wifi_status();
-    else if (str_eq(argv[1], "scan"))   wifi_scan();
-    else if (str_eq(argv[1], "list"))   wifi_list();
-    else if (str_eq(argv[1], "help"))   wifi_help();
+    if      (str_eq(argv[1], "status"))     wifi_status();
+    else if (str_eq(argv[1], "scan"))       wifi_scan();
+    else if (str_eq(argv[1], "list"))       wifi_list();
+    else if (str_eq(argv[1], "connect"))    wifi_connect(argc, argv);
+    else if (str_eq(argv[1], "disconnect")) wifi_disconnect();
+    else if (str_eq(argv[1], "help"))       wifi_help();
     else {
         SHELL_PRINTF("wifi: unknown subcommand '%s'\n", argv[1]);
         wifi_help();

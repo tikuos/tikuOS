@@ -63,6 +63,14 @@ typedef struct {
     uint8_t  _pad;            /* explicit pad, keep size predictable */
 } tiku_wireless_ap_t;
 
+/** Link state. */
+typedef enum {
+    TIKU_WIRELESS_LINK_IDLE       = 0,
+    TIKU_WIRELESS_LINK_CONNECTING = 1,
+    TIKU_WIRELESS_LINK_JOINED     = 2,
+    TIKU_WIRELESS_LINK_FAILED     = 3,
+} tiku_wireless_link_t;
+
 /** Snapshot of the wireless interface's state. */
 typedef struct {
     uint8_t  up;              /* 1 after the radio is reachable */
@@ -74,6 +82,14 @@ typedef struct {
     uint32_t irq_count;       /* total GPIO IRQ deliveries on the
                                * chip's wake line (instrumentation
                                * for R.6 — proof IRQ wiring is live) */
+
+    /* Phase 4.B — station-mode join state. */
+    uint8_t  link_state;      /* tiku_wireless_link_t */
+    uint8_t  joined_ssid_len;
+    uint8_t  joined_ssid[32]; /* not null-terminated; len in joined_ssid_len */
+    uint8_t  joined_bssid[6];
+    uint32_t link_status_raw; /* last raw status code from the chip's
+                               * WLC_E_LINK event (debugging) */
 } tiku_wireless_status_t;
 
 /*---------------------------------------------------------------------------*/
@@ -85,6 +101,8 @@ typedef struct {
 #define TIKU_WIRELESS_EVT_AP_FOUND       (TIKU_EVENT_USER + 2U)
 #define TIKU_WIRELESS_EVT_LINK_UP        (TIKU_EVENT_USER + 3U)
 #define TIKU_WIRELESS_EVT_LINK_DOWN      (TIKU_EVENT_USER + 4U)
+#define TIKU_WIRELESS_EVT_JOIN_START     (TIKU_EVENT_USER + 5U)
+#define TIKU_WIRELESS_EVT_DISCONNECT     (TIKU_EVENT_USER + 6U)
 
 /*---------------------------------------------------------------------------*/
 /* Public API                                                                */
@@ -117,6 +135,25 @@ uint8_t tiku_wireless_scan_results(tiku_wireless_ap_t *out,
  * @brief Snapshot interface state. Synchronous, no side effects.
  */
 int tiku_wireless_status(tiku_wireless_status_t *out);
+
+/**
+ * @brief Join a WPA2-PSK network. Non-blocking — the runner does
+ *        the IOCTL sequence on its next dispatch and waits for the
+ *        chip's WLC_E_LINK event before transitioning state to
+ *        JOINED (or FAILED). Caller observes via tiku_wireless_status.
+ *
+ * @param ssid  Network SSID (1..32 chars, null-terminated)
+ * @param psk   WPA2 passphrase (8..63 chars, null-terminated)
+ * @return TIKU_DRV_OK on enqueue; TIKU_DRV_ERR_INVALID on bad args
+ *         or radio-not-up; TIKU_DRV_ERR_TIMEOUT if a join is already
+ *         in flight.
+ */
+int tiku_wireless_connect(const char *ssid, const char *psk);
+
+/**
+ * @brief Tear down the current association. Non-blocking.
+ */
+int tiku_wireless_disconnect(void);
 
 #ifdef __cplusplus
 }

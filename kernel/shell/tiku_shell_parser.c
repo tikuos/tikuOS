@@ -129,7 +129,7 @@ execute_one(char *line)
         return;
     }
 
-    /* ---- Tokenize by spaces ---- */
+    /* ---- Tokenize by spaces; "..." and '...' group spaces. ---- */
     while (*p && argc < TIKU_SHELL_MAX_ARGS) {
         while (*p == ' ') {
             p++;
@@ -137,12 +137,23 @@ execute_one(char *line)
         if (*p == '\0') {
             break;
         }
-        argv[argc++] = p;
-        while (*p && *p != ' ') {
-            p++;
-        }
-        if (*p) {
-            *p++ = '\0';
+        if (*p == '"' || *p == '\'') {
+            char q = *p++;
+            argv[argc++] = p;
+            while (*p && *p != q) {
+                p++;
+            }
+            if (*p) {
+                *p++ = '\0';
+            }
+        } else {
+            argv[argc++] = p;
+            while (*p && *p != ' ') {
+                p++;
+            }
+            if (*p) {
+                *p++ = '\0';
+            }
         }
     }
 
