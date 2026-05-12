@@ -111,8 +111,8 @@ int main(void) {
    * captures the shell and any init-started processes. */
   tiku_vfs_tree_init();
 
-  /* Hand off to the driver registry. With HAS_TIKUDRIVERS=0 the table
-   * is empty and this is a no-op; with a populated tikudrivers/ tree
+  /* Hand off to the driver registry. With HAS_DRIVERS=0 the table
+   * is empty and this is a no-op; with a populated drivers/ tree
    * each enabled driver's init() runs here. See drivers.md. */
   {
     extern void tiku_drv_init_all(void);

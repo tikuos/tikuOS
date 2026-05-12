@@ -8,12 +8,12 @@ pure-software libraries, drivers touch silicon.
 
 - Keep core kernel small and Apache-2.0 clean. Drivers (which may
   carry vendor firmware blobs or non-permissive licences) live in a
-  separate, optional sibling repo `tikudrivers/`.
+  separate, optional sibling repo `drivers/`.
 - Each driver self-describes via a single descriptor struct so the
   kernel can iterate registered drivers without knowing their
   specifics.
 - Each driver opts in via a single make flag; the kernel builds
-  cleanly with the whole `tikudrivers/` repo absent.
+  cleanly with the whole `drivers/` repo absent.
 - VFS contributions (e.g. `/dev/wifi/wifi0/rssi`) are declared in
   the descriptor so a driver gains observability for free.
 
@@ -26,7 +26,7 @@ tikuos/                            (this repo, Apache-2.0)
 │   ├── tiku_drv_registry.h        (public API: init_all / iterate)
 │   ├── tiku_drv_registry.c        (dispatch implementation)
 │   └── tiku_drv_empty_table.c     (zero-driver fallback)
-└── tikudrivers/                   (separate repo, gitignored here)
+└── drivers/                   (separate repo, gitignored here)
     ├── README.md
     ├── tiku_drv_table.c           (the per-build descriptor list)
     ├── skeleton/                  (copy-paste template for new drivers)
@@ -37,10 +37,10 @@ tikuos/                            (this repo, Apache-2.0)
     └── storage/ sdcard/ ...
 ```
 
-`tikudrivers/` is listed in this repo's `.gitignore` so the user
+`drivers/` is listed in this repo's `.gitignore` so the user
 can clone or `git init` it in place without polluting tikuOS's
 history. The kernel detects its presence via Makefile probe
-(`HAS_TIKUDRIVERS=1`).
+(`HAS_DRIVERS=1`).
 
 ## Descriptor
 
@@ -76,7 +76,7 @@ across categories.
 
 ## Registration mechanism (Option A: hand-edited table)
 
-A single file in the driver repo, `tikudrivers/tiku_drv_table.c`,
+A single file in the driver repo, `drivers/tiku_drv_table.c`,
 lists every available driver behind a per-driver `#if`:
 
 ```c
@@ -105,7 +105,7 @@ Enabling a driver therefore means exactly two things:
 `-DTIKU_DRV_<X>_ENABLE=1` on the make command line (via that
 driver's `build.mk`), and a guarded entry in `tiku_drv_table.c`.
 
-When `tikudrivers/` is absent, the kernel links against
+When `drivers/` is absent, the kernel links against
 `kernel/drivers/tiku_drv_empty_table.c` which provides a
 zero-length table with weak-equivalent semantics — the kernel
 boots, no drivers init, no link errors.
@@ -116,14 +116,14 @@ Top-level Makefile probes for the directory, exactly like
 `tikukits`:
 
 ```make
-HAS_TIKUDRIVERS ?= $(if $(wildcard $(PROJ_DIR)/tikudrivers),1,0)
+HAS_DRIVERS ?= $(if $(wildcard $(PROJ_DIR)/drivers),1,0)
 
 SRCS += kernel/drivers/tiku_drv_registry.c
-ifeq ($(HAS_TIKUDRIVERS),1)
-CFLAGS += -DHAS_TIKUDRIVERS=1
-SRCS   += tikudrivers/tiku_drv_table.c
-include $(wildcard tikudrivers/*/*/build.mk)
-include $(wildcard tikudrivers/*/*/*/build.mk)
+ifeq ($(HAS_DRIVERS),1)
+CFLAGS += -DHAS_DRIVERS=1
+SRCS   += drivers/tiku_drv_table.c
+include $(wildcard drivers/*/*/build.mk)
+include $(wildcard drivers/*/*/*/build.mk)
 else
 SRCS   += kernel/drivers/tiku_drv_empty_table.c
 endif
@@ -134,9 +134,9 @@ defines its enable flag when the user passes it on the command
 line:
 
 ```make
-# tikudrivers/wifi/cyw43/build.mk
+# drivers/wifi/cyw43/build.mk
 ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
-SRCS   += $(wildcard tikudrivers/wifi/cyw43/*.c)
+SRCS   += $(wildcard drivers/wifi/cyw43/*.c)
 CFLAGS += -DTIKU_DRV_WIFI_CYW43_ENABLE=1
 endif
 ```
@@ -185,12 +185,12 @@ contract will start enforcing once a node-mount helper lands.
 
 ## Adding a new driver — checklist
 
-1. `cp -r tikudrivers/skeleton tikudrivers/<class>/<name>` and
+1. `cp -r drivers/skeleton drivers/<class>/<name>` and
    rename the files.
 2. Rename `tiku_drv_skeleton` → `tiku_drv_<class>_<name>` in the
    header, source, and `build.mk`.
 3. Implement `init()` and any VFS read/write handlers.
-4. Edit `tikudrivers/tiku_drv_table.c`: add the `extern` and the
+4. Edit `drivers/tiku_drv_table.c`: add the `extern` and the
    guarded `&tiku_drv_<class>_<name>` entry.
 5. Build with `make TIKU_DRV_<CLASS>_<NAME>_ENABLE=1 …`.
 
@@ -200,7 +200,7 @@ contract will start enforcing once a node-mount helper lands.
 (maths, data structures, codecs, ML, crypto). They have no
 hardware dependency and ship under Apache-2.0.
 
-`tikudrivers/` exists for code that:
+`drivers/` exists for code that:
 
 - Talks to a specific silicon block via the arch HAL.
 - May carry vendor firmware blobs (CYW43, BLE softdevice, e-paper
@@ -211,4 +211,4 @@ hardware dependency and ship under Apache-2.0.
   that doesn't make sense for pure libraries.
 
 Existing tikukits/sensors/ and tikukits/epaper/ are
-driver-shaped and will migrate to tikudrivers/ over time.
+driver-shaped and will migrate to drivers/ over time.

@@ -6,12 +6,12 @@
  *
  * tiku_drv_empty_table.c - Zero-length driver table
  *
- * Linked when HAS_TIKUDRIVERS is NOT set (the tikudrivers/ repo
+ * Linked when HAS_DRIVERS is NOT set (the drivers/ repo
  * is absent from the tree). Provides the symbols the kernel
  * registry expects so a clean Apache-2.0 core kernel build links
  * without requiring any external driver code.
  *
- * When tikudrivers/ IS present, tikudrivers/tiku_drv_table.c
+ * When drivers/ IS present, drivers/tiku_drv_table.c
  * provides non-empty definitions of the same symbols and this
  * file is excluded from the build by the Makefile.
  *

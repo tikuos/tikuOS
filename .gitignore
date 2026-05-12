@@ -46,9 +46,8 @@ Thumbs.db
 takenote.md
 tikukits/
 
-# Driver repo — cloned alongside as a sibling tree, never tracked
-# by the core kernel repo. See drivers.md.
-tikudrivers/
+# drivers/ is registered as a git submodule pointing at
+# https://github.com/tikuos/drivers.git — no gitignore entry needed.
 
 # LaTeX stray logs
 texput.log

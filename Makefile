@@ -160,7 +160,7 @@ HAS_TESTS        ?= 0
 HAS_EXAMPLES     ?= 0
 endif
 HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
-HAS_TIKUDRIVERS  ?= $(if $(wildcard $(PROJ_DIR)/tikudrivers),1,0)
+HAS_DRIVERS      ?= $(if $(wildcard $(PROJ_DIR)/drivers),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
 
 # ---------------------------------------------------------------------------
@@ -487,8 +487,8 @@ endif
 ifeq ($(HAS_TIKUKITS),1)
 CFLAGS += -DHAS_TIKUKITS=1
 endif
-ifeq ($(HAS_TIKUDRIVERS),1)
-CFLAGS += -DHAS_TIKUDRIVERS=1
+ifeq ($(HAS_DRIVERS),1)
+CFLAGS += -DHAS_DRIVERS=1
 endif
 
 ifeq ($(TIKU_PLATFORM),rp2350)
@@ -633,16 +633,16 @@ SRCS += kernel/cpu/tiku_rtc.c
 
 # Driver-registry layer. Always built so the kernel exposes
 # tiku_drv_init_all(); the descriptor table itself comes from
-# tikudrivers/ when that repo is present, else from the empty
-# fallback below. See drivers.md.
+# drivers/ submodule when present, else from the empty fallback
+# below. See drivers.md.
 SRCS += kernel/drivers/tiku_drv_registry.c
-ifeq ($(HAS_TIKUDRIVERS),1)
-SRCS    += tikudrivers/tiku_drv_table.c
+ifeq ($(HAS_DRIVERS),1)
+SRCS    += drivers/tiku_drv_table.c
 # Each driver self-includes via its own build.mk fragment. The
 # globbing covers 2- and 3-level driver paths (wifi/cyw43/build.mk
 # AND sensors/temperature/mcp9808/build.mk).
-include $(wildcard $(PROJ_DIR)/tikudrivers/*/*/build.mk)
-include $(wildcard $(PROJ_DIR)/tikudrivers/*/*/*/build.mk)
+include $(wildcard $(PROJ_DIR)/drivers/*/*/build.mk)
+include $(wildcard $(PROJ_DIR)/drivers/*/*/*/build.mk)
 else
 SRCS    += kernel/drivers/tiku_drv_empty_table.c
 endif
@@ -1225,8 +1225,12 @@ endif # HAS_TIKUKITS
 
 endif # MINIMAL=1 / else
 
-# Object files in build directory
-OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
+# Object files in build directory. ASM_SRCS is for .S files pulled in
+# by build.mk fragments (e.g. firmware-blob .incbin wrappers); same
+# CFLAGS as C, since the toolchain treats .S as preprocessed-and-then-
+# assembled and we only need the include-path / -D macros.
+OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS)) \
+       $(patsubst %.S,$(BUILD_DIR)/%.o,$(ASM_SRCS))
 
 ifneq ($(BASIC_PROGRAM),)
 # Append the embedded-BASIC object directly (the recipe lives below
@@ -1273,6 +1277,12 @@ $(TARGET): $(OBJS) $(PLATFORM_STAMP)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS)
 
 $(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Assembly-source rule. Used by firmware-blob wrappers that pull in
+# binary data via .incbin (see drivers/wifi/cyw43/firmware.S).
+$(BUILD_DIR)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 

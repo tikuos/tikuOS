@@ -7,7 +7,7 @@
  * tiku_drv.h - Common driver-descriptor type
  *
  * The descriptor is the single contract between core kernel and
- * the optional `tikudrivers/` repo. The kernel iterates a static
+ * the optional `drivers/` repo. The kernel iterates a static
  * table of pointers to descriptors at boot, calls each driver's
  * init(), and (eventually) splices its VFS nodes under
  * /dev/<class>/<mount>/. Drivers know nothing about the kernel

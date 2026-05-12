@@ -8,7 +8,7 @@
  *
  * The kernel sees a flat array of (const tiku_drv_t *) pointers,
  * one per enabled driver. The table itself is populated by the
- * `tikudrivers/` repo's tiku_drv_table.c when present, or by
+ * `drivers/` repo's tiku_drv_table.c when present, or by
  * tiku_drv_empty_table.c (zero length) otherwise.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -25,8 +25,8 @@ extern "C" {
 
 /**
  * @brief Driver table — array of pointers to per-driver
- *        descriptors. Defined in tikudrivers/tiku_drv_table.c when
- *        HAS_TIKUDRIVERS=1, else in tiku_drv_empty_table.c.
+ *        descriptors. Defined in drivers/tiku_drv_table.c when
+ *        HAS_DRIVERS=1, else in tiku_drv_empty_table.c.
  */
 extern const tiku_drv_t *const tiku_drv_table[];
 extern const uint8_t           tiku_drv_table_count;

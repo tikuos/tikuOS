@@ -7,10 +7,10 @@
  * tiku_drv_registry.c - Driver-table dispatch
  *
  * Iterates tiku_drv_table[] at boot and calls each driver's
- * init(). The table itself is populated by tikudrivers/
+ * init(). The table itself is populated by drivers/
  * tiku_drv_table.c when that repo is cloned alongside this one;
  * an empty fallback in tiku_drv_empty_table.c keeps the link
- * working when tikudrivers/ is absent. See drivers.md.
+ * working when drivers/ is absent. See drivers.md.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
