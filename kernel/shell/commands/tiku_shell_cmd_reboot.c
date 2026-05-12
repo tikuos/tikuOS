@@ -32,6 +32,9 @@
 #include "tiku_shell_cmd_reboot.h"
 #include <kernel/shell/tiku_shell.h>             /* SHELL_PRINTF */
 #include <kernel/cpu/tiku_watchdog.h>
+#if defined(PLATFORM_RP2350)
+extern void tiku_cpu_rp2350_reboot_to_bootsel(void);
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* COMMAND IMPLEMENTATION                                                    */
@@ -40,6 +43,16 @@
 void
 tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
 {
+#if defined(PLATFORM_RP2350)
+    if (argc >= 2 && argv[1] != (const char *)0 &&
+        argv[1][0] == 'b' && argv[1][1] == 'o' && argv[1][2] == 'o' &&
+        argv[1][3] == 't') {
+        SHELL_PRINTF("Rebooting to BOOTSEL...\n");
+        tiku_cpu_rp2350_reboot_to_bootsel();
+        /* If we return, the bootrom call failed; fall through to plain
+         * watchdog reset below so the device at least reboots. */
+    }
+#endif
     (void)argc;
     (void)argv;
 

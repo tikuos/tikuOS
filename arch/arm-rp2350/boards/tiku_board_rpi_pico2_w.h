@@ -41,7 +41,11 @@
 /* LED COUNT                                                                 */
 /*---------------------------------------------------------------------------*/
 
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+#define TIKU_BOARD_LED_COUNT        1
+#else
 #define TIKU_BOARD_LED_COUNT        2
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* GPIO LED helpers                                                          */
@@ -56,21 +60,24 @@ void tiku_rp2350_gpio_init_output(uint8_t pin);
 void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value);
 void tiku_rp2350_gpio_toggle(uint8_t pin);
 
-/* User LED: GP25 — shared with the LED on the plain Pico 2; on the
- * Pico 2 W board this pin is physically wired to the CYW43 module's
- * SPI clock (WL_CLK). Driving it from CPU code while the wireless
- * chip is held in reset (the default for this build) is harmless —
- * the LED on the radio module's WL_GPIO0 will not light, but the
- * shell's `gpio` command, the toggle VFS node, and the blink example
- * all still demonstrate the GPIO HAL. */
+/* User LED:
+ *   normal Pico-2-W bring-up builds: GP25 is kept as a compatibility
+ *   "LED" GPIO because the actual board LED lives behind the CYW43.
+ *   WiFi-driver builds: GP25 is CYW43 WL_CS, so LED1 moves to GP15
+ *   and the VFS LED init path must not drive GP25 low before the
+ *   radio reset strap is sampled. */
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+#define TIKU_BOARD_LED1_PIN         15U
+#else
 #define TIKU_BOARD_LED1_PIN         25U
+#endif
 #define TIKU_BOARD_LED1_INIT()      tiku_rp2350_gpio_init_output(TIKU_BOARD_LED1_PIN)
 #define TIKU_BOARD_LED1_ON()        tiku_rp2350_gpio_set(TIKU_BOARD_LED1_PIN, 1)
 #define TIKU_BOARD_LED1_OFF()       tiku_rp2350_gpio_set(TIKU_BOARD_LED1_PIN, 0)
 #define TIKU_BOARD_LED1_TOGGLE()    tiku_rp2350_gpio_toggle(TIKU_BOARD_LED1_PIN)
 
-/* Second user LED: GP15 (broken out on the header — convenient for an
- * external LED in tutorials). */
+/* Second user LED: GP15 in non-WiFi builds. In WiFi builds GP15 is
+ * already LED1, so TIKU_BOARD_LED_COUNT hides LED2 from callers. */
 #define TIKU_BOARD_LED2_PIN         15U
 #define TIKU_BOARD_LED2_INIT()      tiku_rp2350_gpio_init_output(TIKU_BOARD_LED2_PIN)
 #define TIKU_BOARD_LED2_ON()        tiku_rp2350_gpio_set(TIKU_BOARD_LED2_PIN, 1)

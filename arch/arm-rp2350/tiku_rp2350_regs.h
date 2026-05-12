@@ -734,6 +734,7 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_PIO_TXF(sm)           (0x010U + 4U * (sm))   /* TX FIFO */
 #define RP2350_PIO_RXF(sm)           (0x020U + 4U * (sm))   /* RX FIFO */
 #define RP2350_PIO_IRQ               0x030U   /* PIO IRQ status (W1C) */
+#define RP2350_PIO_INPUT_SYNC_BYPASS 0x038U   /* bypass input sync per GPIO */
 #define RP2350_PIO_INSTR_MEM(i)      (0x048U + 4U * (i))    /* program slot */
 #define RP2350_PIO_SM_CLKDIV(sm)     (0x0C8U + 0x18U * (sm))
 #define RP2350_PIO_SM_EXECCTRL(sm)   (0x0CCU + 0x18U * (sm))
