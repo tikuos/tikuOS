@@ -85,6 +85,7 @@ static void wifi_status(void)
     }
     SHELL_PRINTF("Scan busy:   %s\n",
                  st.scan_in_progress ? "yes" : "no");
+    SHELL_PRINTF("IRQ count:   %lu\n", (unsigned long)st.irq_count);
 }
 
 static void wifi_scan(void)

@@ -71,6 +71,9 @@ typedef struct {
     uint8_t  mac[6];          /* MAC address of the local radio */
     uint32_t last_scan_ticks; /* duration of last completed scan
                                * in TIKU_CLOCK_SECOND-aligned ticks */
+    uint32_t irq_count;       /* total GPIO IRQ deliveries on the
+                               * chip's wake line (instrumentation
+                               * for R.6 — proof IRQ wiring is live) */
 } tiku_wireless_status_t;
 
 /*---------------------------------------------------------------------------*/
