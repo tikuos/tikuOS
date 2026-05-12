@@ -724,6 +724,12 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_reboot.c
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
 endif
+# The wifi shell command needs the CYW43 driver — only compile it
+# when the driver is enabled. (The shell config gates the table
+# entry the same way.)
+ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
+endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
 SRCS += kernel/shell/tiku_shell_cwd.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c

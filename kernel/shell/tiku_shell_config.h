@@ -72,6 +72,15 @@
 #ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
 #endif
+#ifndef TIKU_SHELL_CMD_WIFI
+/* Auto-on when the CYW43 driver is enabled; otherwise off. Override
+ * with -DTIKU_SHELL_CMD_WIFI=0 to drop the command from the table. */
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && (TIKU_DRV_WIFI_CYW43_ENABLE == 1)
+#define TIKU_SHELL_CMD_WIFI    1
+#else
+#define TIKU_SHELL_CMD_WIFI    0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_LS
 #define TIKU_SHELL_CMD_LS      1  /**< ls      - List VFS directory contents */
 #endif

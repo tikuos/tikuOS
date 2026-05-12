@@ -74,6 +74,9 @@
 #if TIKU_SHELL_CMD_HISTORY
 #include "commands/tiku_shell_cmd_history.h"
 #endif
+#if TIKU_SHELL_CMD_WIFI
+#include "commands/tiku_shell_cmd_wifi.h"
+#endif
 #if TIKU_SHELL_CMD_INIT
 #include "commands/tiku_shell_cmd_init.h"
 #endif
@@ -214,6 +217,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_HISTORY
     {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},
+#endif
+#if TIKU_SHELL_CMD_WIFI
+    {"wifi",    "CYW43 WiFi: status|scan|list", tiku_shell_cmd_wifi},
 #endif
 #if TIKU_SHELL_CMD_CALC
     {"calc",    "Integer arithmetic",          tiku_shell_cmd_calc},
