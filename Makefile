@@ -32,6 +32,29 @@ else
 TIKU_PLATFORM := msp430
 endif
 
+# ---------------------------------------------------------------------------
+# Driver-vs-MCU compatibility gates
+#
+# Some drivers are bound to a specific silicon family because they use
+# platform-specific peripherals at the C level (e.g. RP2350 PIO + SIO
+# atomic aliases). Compiling them against the wrong MCU produces a
+# confusing wall of compiler errors several minutes in; better to
+# reject up-front with a clear message.
+#
+# Whenever a new driver gets a platform binding, add its check here.
+# ---------------------------------------------------------------------------
+
+# CYW43439 (Pi Pico 2 W) — driver uses PIO1 + RP2350 SIO atomic aliases
+# + RP2350-specific register layouts. Only meaningful on rp2350.
+ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+ifneq ($(TIKU_PLATFORM),rp2350)
+$(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires MCU=rp2350 \
+(currently MCU=$(MCU)). The CYW43439 driver depends on \
+RP2350-specific PIO + SIO peripherals and only runs on Pi Pico \
+2 W hardware. For other MCUs, omit TIKU_DRV_WIFI_CYW43_ENABLE.)
+endif
+endif
+
 # Derive device define from MCU: msp430fr2433 -> TIKU_DEVICE_MSP430FR2433,
 # rp2350 -> TIKU_DEVICE_RP2350. The RP2350 board (Pico 2 W) is hard-wired
 # for now; later boards can switch via TIKU_BOARD_*.
