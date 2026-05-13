@@ -1135,6 +1135,14 @@ SRCS   += $(wildcard tikukits/net/slip/*.c)
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
 SRCS   += $(wildcard tikukits/net/http/*.c)
 SRCS   += $(wildcard tikukits/net/mqtt/*.c)
+# WiFi link backend: requires both the CYW43 driver and the net kit.
+# Compiled only when the build wires both submodules together.
+ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+ifeq ($(TIKU_KITS_NET_WIFI_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_WIFI_ENABLE=1
+SRCS   += $(wildcard tikukits/net/wifi/*.c)
+endif
+endif
 endif
 
 ifeq ($(TIKU_KIT_CRYPTO_ENABLE),1)
