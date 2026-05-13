@@ -55,6 +55,10 @@ texput.log
 # Vendored third-party libraries / scratch (not part of the upstream tree)
 temp/
 
+# Scratch demos — not yet promoted into examples/. Will move once
+# stable and the dependencies (ARP cache, DHCP wire-up) are public.
+demos/
+
 # Closed-source overlay (proprietary drivers, captures, prop demos).
 # Anything under prop/ stays out of the public repo.
 prop/

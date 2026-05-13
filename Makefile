@@ -145,19 +145,34 @@ override TIKU_SHELL_ENABLE := 1
 endif
 
 # ---------------------------------------------------------------------------
+# Scratch demos (mutually exclusive with apps/tests/examples)
+#   make DEMO=ping_a_host_to_pico MCU=rp2350 ...
+# `demos/` is in .gitignore and excluded from public builds; this block
+# is a no-op when the directory doesn't exist.
+# ---------------------------------------------------------------------------
+DEMO ?=
+
+# ---------------------------------------------------------------------------
 # Optional components (opt-in; override: make HAS_TESTS=1 HAS_EXAMPLES=1)
 # Tests and examples are EXCLUDED by default — plain `make` builds only the
 # core OS (plus any explicitly enabled services like the shell).
-# When APP is set, tests and examples are forced off.
+# When APP or DEMO is set, tests and examples are forced off.
 # ---------------------------------------------------------------------------
 ifneq ($(APP),)
 HAS_APPS         = 1
 HAS_TESTS        = 0
 HAS_EXAMPLES     = 0
+HAS_DEMOS        = 0
+else ifneq ($(DEMO),)
+HAS_APPS         = 0
+HAS_TESTS        = 0
+HAS_EXAMPLES     = 0
+HAS_DEMOS        = 1
 else
 HAS_APPS         = 0
 HAS_TESTS        ?= 0
 HAS_EXAMPLES     ?= 0
+HAS_DEMOS        = 0
 endif
 HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
 HAS_DRIVERS      ?= $(if $(wildcard $(PROJ_DIR)/drivers),1,0)
@@ -483,6 +498,11 @@ CFLAGS += -DHAS_TESTS=1
 endif
 ifeq ($(HAS_EXAMPLES),1)
 CFLAGS += -DHAS_EXAMPLES=1
+endif
+ifeq ($(HAS_DEMOS),1)
+CFLAGS += -DHAS_DEMOS=1
+# Note: actual SRCS += for demos/$(DEMO)/*.c is below, after the
+# SRCS=main.c reset.
 endif
 ifeq ($(HAS_TIKUKITS),1)
 CFLAGS += -DHAS_TIKUKITS=1
@@ -1132,9 +1152,20 @@ endif
 ifeq ($(TIKU_KIT_NET_ENABLE),1)
 CFLAGS += -DTIKU_KIT_NET_ENABLE=1
 SRCS   += $(wildcard tikukits/net/slip/*.c)
+# IPv4 base set. Drops the heavy protocol modules when their per-flag
+# is off — each declares static buffers via __attribute__((section(
+# ".persistent"))) regardless of compile-time gates, and the RP2350
+# .persistent backup sector is 4 KB hard cap. Most demos need only
+# ipv4 + icmp + udp.
+ifeq ($(TIKU_KIT_NET_MIN),1)
+SRCS   += tikukits/net/ipv4/tiku_kits_net_ipv4.c
+SRCS   += tikukits/net/ipv4/tiku_kits_net_icmp.c
+SRCS   += tikukits/net/ipv4/tiku_kits_net_udp.c
+else
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
 SRCS   += $(wildcard tikukits/net/http/*.c)
 SRCS   += $(wildcard tikukits/net/mqtt/*.c)
+endif
 # WiFi link backend: requires both the CYW43 driver and the net kit.
 # Compiled only when the build wires both submodules together.
 ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
@@ -1143,6 +1174,12 @@ CFLAGS += -DTIKU_KITS_NET_WIFI_ENABLE=1
 SRCS   += $(wildcard tikukits/net/wifi/*.c)
 endif
 endif
+endif
+
+# Scratch demos: pulled in only when DEMO=<dir> is on the make line.
+# Located after the SRCS=main.c reset above so it actually sticks.
+ifeq ($(HAS_DEMOS),1)
+SRCS   += $(wildcard demos/$(DEMO)/*.c)
 endif
 
 ifeq ($(TIKU_KIT_CRYPTO_ENABLE),1)
