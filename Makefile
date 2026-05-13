@@ -1161,6 +1161,13 @@ ifeq ($(TIKU_KIT_NET_MIN),1)
 SRCS   += tikukits/net/ipv4/tiku_kits_net_ipv4.c
 SRCS   += tikukits/net/ipv4/tiku_kits_net_icmp.c
 SRCS   += tikukits/net/ipv4/tiku_kits_net_udp.c
+# Opt-in DHCP for MIN builds. dhcp.c has no .persistent buffers so
+# it fits under the 4 KB cap. Demo A (host-pings-Pico) uses it to
+# acquire an IP automatically instead of hardcoding.
+ifeq ($(TIKU_KITS_NET_DHCP_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_DHCP_ENABLE=1
+SRCS   += tikukits/net/ipv4/tiku_kits_net_dhcp.c
+endif
 else
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
 SRCS   += $(wildcard tikukits/net/http/*.c)
