@@ -909,6 +909,7 @@ SRCS += tests/peripherals/test_pwm.c
 SRCS += tests/peripherals/test_dma.c
 SRCS += tests/peripherals/test_rtc.c
 SRCS += tests/peripherals/test_trng.c
+SRCS += tests/drivers/test_wifi.c
 SRCS += tests/kernel/vfs/test_vfs.c
 SRCS += tests/kernel/vfs/test_vfs_tree.c
 SRCS += tests/init/test_catalog.c
