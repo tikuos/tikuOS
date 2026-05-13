@@ -59,6 +59,7 @@ static void wifi_help(void)
     SHELL_PRINTF("wifi scan                Trigger active scan\n");
     SHELL_PRINTF("wifi list                Show cached scan results\n");
     SHELL_PRINTF("wifi connect SSID PSK    Join WPA2-PSK network\n");
+    SHELL_PRINTF("wifi connect3 SSID PSK   Join WPA3-SAE network\n");
     SHELL_PRINTF("wifi disconnect          Leave the current network\n");
     SHELL_PRINTF("wifi help                This help\n");
 }
@@ -113,19 +114,28 @@ static void wifi_status(void)
         SHELL_PRINTF(" (raw=0x%lx)", (unsigned long)st.link_status_raw);
     }
     tiku_shell_io_putc('\n');
+    if (st.link_state == TIKU_WIRELESS_LINK_JOINED && st.rssi_dbm != 0) {
+        SHELL_PRINTF("RSSI:        %d dBm\n", (int)st.rssi_dbm);
+    }
 }
 
-static void wifi_connect(uint8_t argc, const char *argv[])
+static void wifi_connect(uint8_t argc, const char *argv[],
+                         tiku_wireless_auth_t auth)
 {
     int rc;
     if (argc < 4U) {
-        SHELL_PRINTF("usage: wifi connect <ssid> <psk>\n");
+        SHELL_PRINTF("usage: wifi %s <ssid> <psk>\n",
+                     (auth == TIKU_WIRELESS_AUTH_WPA3_SAE)
+                         ? "connect3" : "connect");
         return;
     }
-    rc = tiku_wireless_connect(argv[2], argv[3]);
+    rc = tiku_wireless_connect_auth(argv[2], argv[3], auth);
     if (rc == 0) {
-        SHELL_PRINTF("wifi: join requested (ssid=\"%s\"); "
-                     "watch 'wifi status' for result.\n", argv[2]);
+        SHELL_PRINTF("wifi: %s join requested (ssid=\"%s\"); "
+                     "watch 'wifi status' for result.\n",
+                     (auth == TIKU_WIRELESS_AUTH_WPA3_SAE)
+                         ? "WPA3-SAE" : "WPA2-PSK",
+                     argv[2]);
     } else {
         SHELL_PRINTF("wifi: connect rejected (rc=%d) — radio not up, "
                      "join already in flight, or bad creds\n", rc);
@@ -186,7 +196,10 @@ tiku_shell_cmd_wifi(uint8_t argc, const char *argv[])
     if      (str_eq(argv[1], "status"))     wifi_status();
     else if (str_eq(argv[1], "scan"))       wifi_scan();
     else if (str_eq(argv[1], "list"))       wifi_list();
-    else if (str_eq(argv[1], "connect"))    wifi_connect(argc, argv);
+    else if (str_eq(argv[1], "connect"))    wifi_connect(argc, argv,
+                                                TIKU_WIRELESS_AUTH_WPA2_PSK);
+    else if (str_eq(argv[1], "connect3"))   wifi_connect(argc, argv,
+                                                TIKU_WIRELESS_AUTH_WPA3_SAE);
     else if (str_eq(argv[1], "disconnect")) wifi_disconnect();
     else if (str_eq(argv[1], "help"))       wifi_help();
     else {

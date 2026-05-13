@@ -90,6 +90,10 @@ typedef struct {
     uint8_t  joined_bssid[6];
     uint32_t link_status_raw; /* last raw status code from the chip's
                                * WLC_E_LINK event (debugging) */
+
+    /* RSSI of the joined AP in dBm, polled from the chip when the
+     * link is up. 0 = not yet polled or link down. */
+    int16_t  rssi_dbm;
 } tiku_wireless_status_t;
 
 /*---------------------------------------------------------------------------*/
@@ -136,6 +140,12 @@ uint8_t tiku_wireless_scan_results(tiku_wireless_ap_t *out,
  */
 int tiku_wireless_status(tiku_wireless_status_t *out);
 
+/** Auth flavors for tiku_wireless_connect_auth. */
+typedef enum {
+    TIKU_WIRELESS_AUTH_WPA2_PSK = 0,   /* default — IEEE 802.11i RSN  */
+    TIKU_WIRELESS_AUTH_WPA3_SAE = 1,   /* simultaneous authentication */
+} tiku_wireless_auth_t;
+
 /**
  * @brief Join a WPA2-PSK network. Non-blocking — the runner does
  *        the IOCTL sequence on its next dispatch and waits for the
@@ -149,6 +159,17 @@ int tiku_wireless_status(tiku_wireless_status_t *out);
  *         in flight.
  */
 int tiku_wireless_connect(const char *ssid, const char *psk);
+
+/**
+ * @brief Join a WPA2-PSK or WPA3-SAE network. Same semantics as
+ *        tiku_wireless_connect with explicit auth flavor.
+ *
+ * @param ssid Network SSID (1..32 chars, null-terminated)
+ * @param psk  Passphrase (WPA2: 8..63; WPA3: 1..127 chars)
+ * @param auth TIKU_WIRELESS_AUTH_WPA2_PSK or _WPA3_SAE
+ */
+int tiku_wireless_connect_auth(const char *ssid, const char *psk,
+                               tiku_wireless_auth_t auth);
 
 /**
  * @brief Tear down the current association. Non-blocking.
