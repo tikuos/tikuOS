@@ -61,6 +61,8 @@ static void wifi_help(void)
     SHELL_PRINTF("wifi connect SSID PSK    Join WPA2-PSK network\n");
     SHELL_PRINTF("wifi connect3 SSID PSK   Join WPA3-SAE network\n");
     SHELL_PRINTF("wifi disconnect          Leave the current network\n");
+    SHELL_PRINTF("wifi forget              Clear stored credentials "
+                 "(disable cold-boot rejoin)\n");
     SHELL_PRINTF("wifi help                This help\n");
 }
 
@@ -149,6 +151,17 @@ static void wifi_disconnect(void)
     else         SHELL_PRINTF("wifi: disconnect failed rc=%d\n", rc);
 }
 
+static void wifi_forget(void)
+{
+    int rc = tiku_wireless_forget();
+    if (rc == 0) {
+        SHELL_PRINTF("wifi: stored credentials cleared "
+                     "(no cold-boot rejoin on next reset)\n");
+    } else {
+        SHELL_PRINTF("wifi: forget failed rc=%d\n", rc);
+    }
+}
+
 static void wifi_scan(void)
 {
     int rc = tiku_wireless_scan_start();
@@ -201,6 +214,7 @@ tiku_shell_cmd_wifi(uint8_t argc, const char *argv[])
     else if (str_eq(argv[1], "connect3"))   wifi_connect(argc, argv,
                                                 TIKU_WIRELESS_AUTH_WPA3_SAE);
     else if (str_eq(argv[1], "disconnect")) wifi_disconnect();
+    else if (str_eq(argv[1], "forget"))     wifi_forget();
     else if (str_eq(argv[1], "help"))       wifi_help();
     else {
         SHELL_PRINTF("wifi: unknown subcommand '%s'\n", argv[1]);

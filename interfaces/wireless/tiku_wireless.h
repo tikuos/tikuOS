@@ -176,9 +176,28 @@ int tiku_wireless_connect_auth(const char *ssid, const char *psk,
                                tiku_wireless_auth_t auth);
 
 /**
- * @brief Tear down the current association. Non-blocking.
+ * @brief Tear down the current association. Non-blocking. Stored
+ *        credentials (if any) are preserved — a subsequent reboot
+ *        will still cold-boot-rejoin. Use tiku_wireless_forget()
+ *        to also wipe the saved SSID/PSK.
  */
 int tiku_wireless_disconnect(void);
+
+/**
+ * @brief Forget the persistent WPA credentials cached after the
+ *        last successful join. After this call:
+ *
+ *          - the current association (if any) is torn down
+ *          - the FRAM-backed SSID/PSK record is cleared
+ *          - cold-boot rejoin will NOT trigger on the next reboot
+ *
+ * Useful for "factory reset" flows or before handing a device to
+ * someone else. Idempotent — calling on a device with no stored
+ * credentials is a no-op.
+ *
+ * @return TIKU_DRV_OK on success.
+ */
+int tiku_wireless_forget(void);
 
 #ifdef __cplusplus
 }
