@@ -94,6 +94,10 @@ typedef struct {
     /* RSSI of the joined AP in dBm, polled from the chip when the
      * link is up. 0 = not yet polled or link down. */
     int16_t  rssi_dbm;
+
+    /* Duration of the last completed join attempt, in
+     * TIKU_CLOCK_SECOND-aligned ticks. Mirrors last_scan_ticks. */
+    uint32_t last_join_ticks;
 } tiku_wireless_status_t;
 
 /*---------------------------------------------------------------------------*/

@@ -36,6 +36,17 @@
 #include <kernel/memory/tiku_mem.h>
 #include <stdio.h>
 
+/* /proc/wifi/* is only compiled when a wireless driver is present.
+ * The interface lives in interfaces/wireless/ regardless, but the
+ * readers below call tiku_wireless_status() which only links when
+ * a driver provides the implementation. */
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+#define PROC_WIFI_ENABLED 1
+#include <interfaces/wireless/tiku_wireless.h>
+#else
+#define PROC_WIFI_ENABLED 0
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
@@ -66,9 +77,15 @@
 static tiku_vfs_node_t __attribute__((section(".persistent")))
     pid_files[TIKU_PROCESS_MAX][PROC_FILES_PER_PID];
 
-/** Per-pid directory nodes + count + queue dir + catalog dir (FRAM) */
+/** Per-pid directory nodes + count + queue dir + catalog dir +
+ *  optional wifi dir (FRAM). */
+#if PROC_WIFI_ENABLED
+#  define PROC_FIXED_KIDS 4   /* count + queue + catalog + wifi */
+#else
+#  define PROC_FIXED_KIDS 3   /* count + queue + catalog */
+#endif
 static tiku_vfs_node_t __attribute__((section(".persistent")))
-    proc_children[TIKU_PROCESS_MAX + 3];
+    proc_children[TIKU_PROCESS_MAX + PROC_FIXED_KIDS];
 
 /** Directory names: "0", "1", ... "7" */
 static const char * const pid_names[] = {
@@ -242,6 +259,102 @@ static const tiku_vfs_node_t proc_queue_children[] = {
 };
 
 /*---------------------------------------------------------------------------*/
+/* /proc/wifi READERS                                                        */
+/*---------------------------------------------------------------------------*/
+/*
+ * Snapshot tiku_wireless_status() on each read and project a single
+ * field into a text representation. Status is cheap (memcpy from
+ * the driver's cyw43_state) so reading several wifi files in a row
+ * is fine. When the radio's down, every reader prints "down" / "0"
+ * / empty so callers don't need to special-case.
+ */
+#if PROC_WIFI_ENABLED
+
+static int proc_wifi_read_mac(char *buf, size_t max)
+{
+    tiku_wireless_status_t st;
+    if (tiku_wireless_status(&st) != 0) return snprintf(buf, max, "down\n");
+    return snprintf(buf, max, "%02x:%02x:%02x:%02x:%02x:%02x\n",
+                    st.mac[0], st.mac[1], st.mac[2],
+                    st.mac[3], st.mac[4], st.mac[5]);
+}
+
+static int proc_wifi_read_link(char *buf, size_t max)
+{
+    tiku_wireless_status_t st;
+    const char *s = "down";
+    if (tiku_wireless_status(&st) == 0) {
+        switch (st.link_state) {
+        case TIKU_WIRELESS_LINK_IDLE:       s = st.up ? "idle" : "down"; break;
+        case TIKU_WIRELESS_LINK_CONNECTING: s = "connecting";            break;
+        case TIKU_WIRELESS_LINK_JOINED:     s = "joined";                break;
+        case TIKU_WIRELESS_LINK_FAILED:     s = "failed";                break;
+        default:                            s = "unknown";               break;
+        }
+    }
+    return snprintf(buf, max, "%s\n", s);
+}
+
+static int proc_wifi_read_ssid(char *buf, size_t max)
+{
+    tiku_wireless_status_t st;
+    char ssid[33];
+    uint8_t i, n;
+    if (tiku_wireless_status(&st) != 0
+        || st.link_state != TIKU_WIRELESS_LINK_JOINED
+        || st.joined_ssid_len == 0U) {
+        return snprintf(buf, max, "\n");
+    }
+    n = st.joined_ssid_len;
+    if (n > 32U) n = 32U;
+    for (i = 0U; i < n; ++i) {
+        char c = (char)st.joined_ssid[i];
+        ssid[i] = (c >= 0x20 && c < 0x7F) ? c : '.';
+    }
+    ssid[n] = '\0';
+    return snprintf(buf, max, "%s\n", ssid);
+}
+
+static int proc_wifi_read_rssi(char *buf, size_t max)
+{
+    tiku_wireless_status_t st;
+    if (tiku_wireless_status(&st) != 0
+        || st.link_state != TIKU_WIRELESS_LINK_JOINED) {
+        return snprintf(buf, max, "0\n");
+    }
+    return snprintf(buf, max, "%d\n", (int)st.rssi_dbm);
+}
+
+static int proc_wifi_read_last_scan_ms(char *buf, size_t max)
+{
+    tiku_wireless_status_t st;
+    unsigned long ms;
+    if (tiku_wireless_status(&st) != 0) return snprintf(buf, max, "0\n");
+    ms = (unsigned long)((st.last_scan_ticks * 1000UL) / TIKU_CLOCK_SECOND);
+    return snprintf(buf, max, "%lu\n", ms);
+}
+
+static int proc_wifi_read_last_join_ms(char *buf, size_t max)
+{
+    tiku_wireless_status_t st;
+    unsigned long ms;
+    if (tiku_wireless_status(&st) != 0) return snprintf(buf, max, "0\n");
+    ms = (unsigned long)((st.last_join_ticks * 1000UL) / TIKU_CLOCK_SECOND);
+    return snprintf(buf, max, "%lu\n", ms);
+}
+
+static const tiku_vfs_node_t proc_wifi_children[] = {
+    { "mac",          TIKU_VFS_FILE, proc_wifi_read_mac,          NULL, NULL, 0 },
+    { "link",         TIKU_VFS_FILE, proc_wifi_read_link,         NULL, NULL, 0 },
+    { "ssid",         TIKU_VFS_FILE, proc_wifi_read_ssid,         NULL, NULL, 0 },
+    { "rssi",         TIKU_VFS_FILE, proc_wifi_read_rssi,         NULL, NULL, 0 },
+    { "last_scan_ms", TIKU_VFS_FILE, proc_wifi_read_last_scan_ms, NULL, NULL, 0 },
+    { "last_join_ms", TIKU_VFS_FILE, proc_wifi_read_last_join_ms, NULL, NULL, 0 },
+};
+
+#endif /* PROC_WIFI_ENABLED */
+
+/*---------------------------------------------------------------------------*/
 /* /proc/catalog READERS                                                     */
 /*---------------------------------------------------------------------------*/
 
@@ -369,6 +482,16 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
         catalog_children, cat_child_idx
     };
 
+#if PROC_WIFI_ENABLED
+    /* /proc/wifi/{mac,link,ssid,rssi,last_scan_ms,last_join_ms}.
+     * Snapshot-style files: each read calls tiku_wireless_status()
+     * and projects one field. */
+    proc_children[child_idx++] = (tiku_vfs_node_t){
+        "wifi", TIKU_VFS_DIR, NULL, NULL, proc_wifi_children,
+        sizeof(proc_wifi_children) / sizeof(proc_wifi_children[0])
+    };
+#endif
+
     /* One directory per registered process */
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {
         if (tiku_process_get((int8_t)i) != NULL) {
@@ -392,13 +515,13 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
 /**
  * @brief Return the current number of children under /proc.
  *
- * The /proc directory contains three fixed nodes (count, queue,
- * catalog) plus one subdirectory per registered process.
+ * The /proc directory contains fixed nodes (count, queue, catalog,
+ * plus wifi when a wireless driver is built) plus one subdirectory
+ * per registered process.
  *
- * @return Total child count (3 + number of registered processes).
+ * @return Total child count (PROC_FIXED_KIDS + registered processes).
  */
 uint8_t tiku_proc_vfs_child_count(void)
 {
-    /* count + queue + catalog + one per registered process */
-    return 3 + tiku_process_count();
+    return PROC_FIXED_KIDS + tiku_process_count();
 }
