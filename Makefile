@@ -33,6 +33,40 @@ TIKU_PLATFORM := msp430
 endif
 
 # ---------------------------------------------------------------------------
+# Board selection (RP2350 only — MSP430 boards are 1:1 with MCU=)
+#
+# BOARD picks which board header arch/arm-rp2350/boards/tiku_board_*.h
+# is pulled in by the device selector. The two RP2350 boards differ
+# in:
+#   - Pi Pico 2     (BOARD=pico2)   plain board, LED on GP25, no
+#                                   CYW43 module — TIKU_DRV_WIFI_*
+#                                   not available.
+#   - Pi Pico 2 W   (BOARD=pico2w)  default — adds the CYW43439
+#                                   wireless module on GP23..25 +
+#                                   GP29; LED is behind the chip so
+#                                   the board header reroutes LED1
+#                                   to GP15 when the WiFi driver is
+#                                   compiled in.
+#
+# Override on the make line, e.g.:  make MCU=rp2350 BOARD=pico2
+# ---------------------------------------------------------------------------
+BOARD ?= $(board)
+ifeq ($(BOARD),)
+BOARD = pico2w
+endif
+BOARD := $(shell echo $(BOARD) | tr '[:upper:]' '[:lower:]')
+
+ifeq ($(TIKU_PLATFORM),rp2350)
+ifeq ($(BOARD),pico2w)
+TIKU_BOARD_DEFINE := TIKU_BOARD_RPI_PICO2_W
+else ifeq ($(BOARD),pico2)
+TIKU_BOARD_DEFINE := TIKU_BOARD_RPI_PICO2
+else
+$(error Unknown BOARD=$(BOARD) for MCU=rp2350. Valid: pico2, pico2w)
+endif
+endif
+
+# ---------------------------------------------------------------------------
 # Driver-vs-MCU compatibility gates
 #
 # Some drivers are bound to a specific silicon family because they use
@@ -45,13 +79,21 @@ endif
 # ---------------------------------------------------------------------------
 
 # CYW43439 (Pi Pico 2 W) — driver uses PIO1 + RP2350 SIO atomic aliases
-# + RP2350-specific register layouts. Only meaningful on rp2350.
+# + RP2350-specific register layouts AND the CYW43 module's pinout
+# (GP23..25 + GP29). The plain Pi Pico 2 doesn't carry the module, so
+# the driver requires BOTH the right silicon and the right PCB.
 ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
 ifneq ($(TIKU_PLATFORM),rp2350)
 $(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires MCU=rp2350 \
 (currently MCU=$(MCU)). The CYW43439 driver depends on \
 RP2350-specific PIO + SIO peripherals and only runs on Pi Pico \
 2 W hardware. For other MCUs, omit TIKU_DRV_WIFI_CYW43_ENABLE.)
+endif
+ifneq ($(BOARD),pico2w)
+$(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires BOARD=pico2w \
+(currently BOARD=$(BOARD)). The CYW43439 module is only present on \
+the Pi Pico 2 W; the plain Pi Pico 2 has no WiFi hardware. Either \
+build with BOARD=pico2w, or drop TIKU_DRV_WIFI_CYW43_ENABLE.)
 endif
 endif
 
@@ -459,7 +501,7 @@ CFLAGS  = -mcpu=cortex-m33 -mthumb
 CFLAGS += -mfloat-abi=softfp -mfpu=fpv5-sp-d16
 CFLAGS += -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
-CFLAGS += -DTIKU_BOARD_RPI_PICO2_W=1
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_RP2350=1
 # Use newlib-nano (smaller integer-only printf, lightweight reentrancy)
 # layered on top of the nosys syscall stubs. The full newlib stdio path
