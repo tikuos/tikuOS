@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  TikuOS is an operating system for <strong>microwatt to milliwatt computers</strong>: ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
+  TikuOS is an operating system for <strong>microwatt computers</strong>: ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
 </p>
 
 ---
@@ -31,7 +31,7 @@
 | MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB FRAM | — | :green_circle: Primary |
 | MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB FRAM | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
 | MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB FRAM | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
-| Raspberry Pi Pico 2 W | RP2350 (Cortex-M33 @ 150 MHz) | 520 KB SRAM | 4 MB QSPI flash | Bare-metal port, UART shell, GPIO, no Pico SDK dep. CYW43 Wi-Fi stubbed. | :yellow_circle: Beta |
+| Raspberry Pi Pico 2 W | RP2350 (Cortex-M33 @ 150 MHz) | 520 KB SRAM | 4 MB QSPI flash | Bare-metal port, UART shell, GPIO, no Pico SDK dep. CYW43 Wi-Fi stubbed. | :yellow_circle: Compatible |
 
 ---
 
