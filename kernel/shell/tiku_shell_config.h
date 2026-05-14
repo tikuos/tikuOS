@@ -81,6 +81,14 @@
 #define TIKU_SHELL_CMD_WIFI    0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_BT
+/* Auto-on when the CYW43 BT extension is enabled; otherwise off. */
+#if defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && (TIKU_DRV_WIFI_CYW43_BT_ENABLE == 1)
+#define TIKU_SHELL_CMD_BT      1
+#else
+#define TIKU_SHELL_CMD_BT      0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_LS
 #define TIKU_SHELL_CMD_LS      1  /**< ls      - List VFS directory contents */
 #endif

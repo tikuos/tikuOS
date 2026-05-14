@@ -77,6 +77,9 @@
 #if TIKU_SHELL_CMD_WIFI
 #include "commands/tiku_shell_cmd_wifi.h"
 #endif
+#if TIKU_SHELL_CMD_BT
+#include "commands/tiku_shell_cmd_bt.h"
+#endif
 #if TIKU_SHELL_CMD_INIT
 #include "commands/tiku_shell_cmd_init.h"
 #endif
@@ -220,6 +223,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_WIFI
     {"wifi",    "CYW43 WiFi: status|scan|list", tiku_shell_cmd_wifi},
+#endif
+#if TIKU_SHELL_CMD_BT
+    {"bt",      "CYW43 BT: status",             tiku_shell_cmd_bt},
 #endif
 #if TIKU_SHELL_CMD_CALC
     {"calc",    "Integer arithmetic",          tiku_shell_cmd_calc},

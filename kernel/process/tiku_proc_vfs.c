@@ -47,6 +47,16 @@
 #define PROC_WIFI_ENABLED 0
 #endif
 
+/* /proc/bt/* mirrors /proc/wifi/* but pulls from the CYW43 BT
+ * driver. Gated on the BT extension flag so non-BT builds get no
+ * /proc/bt directory at all. */
+#if defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && TIKU_DRV_WIFI_CYW43_BT_ENABLE
+#define PROC_BT_ENABLED 1
+#include <interfaces/bluetooth/tiku_bt.h>
+#else
+#define PROC_BT_ENABLED 0
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
@@ -351,8 +361,80 @@ static const tiku_vfs_node_t proc_wifi_children[] = {
     { "last_scan_ms", TIKU_VFS_FILE, proc_wifi_read_last_scan_ms, NULL, NULL, 0 },
     { "last_join_ms", TIKU_VFS_FILE, proc_wifi_read_last_join_ms, NULL, NULL, 0 },
 };
-
 #endif /* PROC_WIFI_ENABLED */
+
+/*---------------------------------------------------------------------------*/
+/* /proc/bt READERS (phase 11.x)                                             */
+/*---------------------------------------------------------------------------*/
+
+#if PROC_BT_ENABLED
+
+/** /proc/bt/bd_addr — Bluetooth MAC, "xx:xx:xx:xx:xx:xx\n". */
+static int proc_bt_read_bd_addr(char *buf, size_t max)
+{
+    uint8_t mac[6];
+    if (tiku_bt_addr(mac) != 0) return snprintf(buf, max, "?\n");
+    return snprintf(buf, max,
+                    "%02x:%02x:%02x:%02x:%02x:%02x\n",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+/** /proc/bt/ready — "1" once BT bring-up finished, else "0". */
+static int proc_bt_read_ready(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    tiku_bt_is_ready() ? 1U : 0U);
+}
+
+/** /proc/bt/advertising — "1" / "0". */
+static int proc_bt_read_advertising(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    tiku_bt_is_advertising() ? 1U : 0U);
+}
+
+/** /proc/bt/scanning — "1" / "0". */
+static int proc_bt_read_scanning(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    tiku_bt_is_scanning() ? 1U : 0U);
+}
+
+/** /proc/bt/scan_count — number of devices in the scan cache. */
+static int proc_bt_read_scan_count(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    (unsigned)tiku_bt_scan_count());
+}
+
+/** /proc/bt/connections — count of active LE links. */
+static int proc_bt_read_connections(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    (unsigned)tiku_bt_connection_count());
+}
+
+/** /proc/bt/version — controller HCI version code or "?\n". */
+static int proc_bt_read_version(char *buf, size_t max)
+{
+    tiku_bt_version_t v;
+    if (tiku_bt_local_version(&v) != 0) {
+        return snprintf(buf, max, "?\n");
+    }
+    return snprintf(buf, max, "HCI=%u LMP=%u mfr=0x%04x\n",
+                    v.hci_version, v.lmp_version, v.manufacturer);
+}
+
+static const tiku_vfs_node_t proc_bt_children[] = {
+    { "bd_addr",     TIKU_VFS_FILE, proc_bt_read_bd_addr,     NULL, NULL, 0 },
+    { "ready",       TIKU_VFS_FILE, proc_bt_read_ready,       NULL, NULL, 0 },
+    { "advertising", TIKU_VFS_FILE, proc_bt_read_advertising, NULL, NULL, 0 },
+    { "scanning",    TIKU_VFS_FILE, proc_bt_read_scanning,    NULL, NULL, 0 },
+    { "scan_count",  TIKU_VFS_FILE, proc_bt_read_scan_count,  NULL, NULL, 0 },
+    { "connections", TIKU_VFS_FILE, proc_bt_read_connections, NULL, NULL, 0 },
+    { "version",     TIKU_VFS_FILE, proc_bt_read_version,     NULL, NULL, 0 },
+};
+#endif /* PROC_BT_ENABLED */
 
 /*---------------------------------------------------------------------------*/
 /* /proc/catalog READERS                                                     */
@@ -489,6 +571,16 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     proc_children[child_idx++] = (tiku_vfs_node_t){
         "wifi", TIKU_VFS_DIR, NULL, NULL, proc_wifi_children,
         sizeof(proc_wifi_children) / sizeof(proc_wifi_children[0])
+    };
+#endif
+
+#if PROC_BT_ENABLED
+    /* /proc/bt/{bd_addr,ready,advertising,scanning,scan_count,
+     *           connections,version}. Each read calls a getter on
+     * the BT driver and renders one field. */
+    proc_children[child_idx++] = (tiku_vfs_node_t){
+        "bt", TIKU_VFS_DIR, NULL, NULL, proc_bt_children,
+        sizeof(proc_bt_children) / sizeof(proc_bt_children[0])
     };
 #endif
 

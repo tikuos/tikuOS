@@ -97,6 +97,22 @@ build with BOARD=pico2w, or drop TIKU_DRV_WIFI_CYW43_ENABLE.)
 endif
 endif
 
+# CYW43439 BT extension — same chip + module, so it inherits the
+# rp2350/pico2w platform requirements implicitly through
+# TIKU_DRV_WIFI_CYW43_ENABLE, which it requires. Surfaced as its own
+# flag so a user can opt into WiFi without paying for the BT
+# bring-up + transport code path (~1-2 KB of program code; the BT
+# firmware blob itself ships in firmware.S unconditionally).
+ifeq ($(TIKU_DRV_WIFI_CYW43_BT_ENABLE),1)
+ifneq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+$(error TIKU_DRV_WIFI_CYW43_BT_ENABLE=1 requires \
+TIKU_DRV_WIFI_CYW43_ENABLE=1. BT bring-up reuses the WiFi driver's \
+gSPI transport + backplane primitives, and the WLAN firmware must \
+be running before the BT side can be powered up. Add \
+TIKU_DRV_WIFI_CYW43_ENABLE=1 too, or drop TIKU_DRV_WIFI_CYW43_BT_ENABLE.)
+endif
+endif
+
 # Derive device define from MCU: msp430fr2433 -> TIKU_DEVICE_MSP430FR2433,
 # rp2350 -> TIKU_DEVICE_RP2350. The RP2350 board (Pico 2 W) is hard-wired
 # for now; later boards can switch via TIKU_BOARD_*.
@@ -815,6 +831,9 @@ endif
 ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
 endif
+ifeq ($(TIKU_DRV_WIFI_CYW43_BT_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_bt.c
+endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
 SRCS += kernel/shell/tiku_shell_cwd.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c
@@ -975,6 +994,7 @@ SRCS += tests/peripherals/test_dma.c
 SRCS += tests/peripherals/test_rtc.c
 SRCS += tests/peripherals/test_trng.c
 SRCS += tests/drivers/test_wifi.c
+SRCS += tests/drivers/test_bt.c
 SRCS += tests/kernel/vfs/test_vfs.c
 SRCS += tests/kernel/vfs/test_vfs_tree.c
 SRCS += tests/init/test_catalog.c
@@ -1247,6 +1267,15 @@ CFLAGS += -DTIKU_KITS_NET_WIFI_ENABLE=1
 SRCS   += $(wildcard tikukits/net/wifi/*.c)
 endif
 endif
+endif
+
+# Bluetooth Low Energy protocol stack: driver-agnostic. Pulled in
+# whenever a Bluetooth-capable driver is enabled. Today that's only
+# TIKU_DRV_WIFI_CYW43_BT_ENABLE (CYW43439 BTSDIO transport); a future
+# UART-HCI driver for Nordic / ESP32 / TI parts would set its own
+# enable flag and we'd OR it in here.
+ifeq ($(TIKU_DRV_WIFI_CYW43_BT_ENABLE),1)
+include $(wildcard $(PROJ_DIR)/tikukits/net/bluetooth/build.mk)
 endif
 
 # Scratch demos: pulled in only when DEMO=<dir> is on the make line.
