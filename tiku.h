@@ -44,7 +44,8 @@
  * If nothing is set we fall back to MSP430 to keep the historical
  * default working out-of-the-box for legacy targets.
  */
-#if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350)
+#if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
+    !defined(PLATFORM_STM32F411)
 #define PLATFORM_MSP430 1
 #endif
 
@@ -88,6 +89,12 @@
 #define TIKU_DEVICE_RP2350 1
 #endif
 
+#elif defined(PLATFORM_STM32F411)
+
+#ifndef TIKU_DEVICE_STM32F411RE
+#define TIKU_DEVICE_STM32F411RE 1
+#endif
+
 #endif /* PLATFORM_* */
 
 /*---------------------------------------------------------------------------*/
@@ -116,6 +123,14 @@
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 150
 #endif
+#elif defined(PLATFORM_STM32F411)
+/* STM32F411 SYSCLK/HCLK target in MHz. Supported values:
+ *   16, 48, 84, 100
+ * Unsupported values request the safe default, 100 MHz, and set the
+ * clock-fault flag. PLL failures fall back to HSI at 16 MHz. */
+#ifndef MAIN_CPU_FREQ
+#define MAIN_CPU_FREQ 100
+#endif
 #else
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
 #endif
@@ -124,7 +139,7 @@
  *  and other subsystems that need the clock frequency as a compile-time
  *  constant.
  */
-#if defined(PLATFORM_RP2350)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32F411)
 #define TIKU_MAIN_CPU_HZ  ((unsigned long)MAIN_CPU_FREQ * 1000000UL)
 #elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
@@ -195,6 +210,8 @@
 #include <arch/msp430/tiku_timer_arch.h>     /* TIKU_CLOCK_ARCH_SECOND et al. */
 #elif defined(PLATFORM_RP2350)
 #include <arch/arm-rp2350/tiku_timer_arch.h>
+#elif defined(PLATFORM_STM32F411)
+#include <arch/stm32f411re/tiku_timer_arch.h>
 #endif
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>

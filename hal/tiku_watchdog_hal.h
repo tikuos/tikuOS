@@ -33,6 +33,8 @@
 #include "arch/msp430/tiku_cpu_watchdog_arch.h"
 #elif defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_cpu_watchdog_arch.h"
+#elif defined(PLATFORM_STM32F411)
+#include "arch/stm32f411re/tiku_cpu_watchdog_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -113,6 +115,17 @@
     tiku_cpu_rp2350_watchdog_pause_arch()
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_rp2350_watchdog_resume_arch(kick)
+#elif defined(PLATFORM_STM32F411)
+#define tiku_watchdog_arch_on(src, isel) \
+    tiku_cpu_stm32f411_watchdog_on_arch((src), (isel))
+#define tiku_watchdog_arch_off() \
+    tiku_cpu_stm32f411_watchdog_off_arch()
+#define tiku_watchdog_arch_kick() \
+    tiku_cpu_stm32f411_watchdog_kick_arch()
+#define tiku_watchdog_arch_pause() \
+    tiku_cpu_stm32f411_watchdog_pause_arch()
+#define tiku_watchdog_arch_resume(kick) \
+    tiku_cpu_stm32f411_watchdog_resume_arch(kick)
 #endif
 
 #endif /* TIKU_WATCHDOG_HAL_H_ */
