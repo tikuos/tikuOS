@@ -51,6 +51,9 @@
 #include <boot/tiku_boot.h>
 #include <hal/tiku_wake_hal.h>
 #include <stdio.h>
+#if defined(PLATFORM_STM32F411)
+#include <arch/stm32f411re/tiku_stm32f411_regs.h>
+#endif
 
 #if TIKU_SHELL_ENABLE
 #include <kernel/shell/commands/tiku_shell_cmd_sleep.h>
@@ -198,7 +201,7 @@ mem_free_read(char *buf, size_t max)
         return snprintf(buf, max, "%u\n", sp - end_addr);
     }
     return snprintf(buf, max, "0\n");
-#elif defined(PLATFORM_RP2350)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_STM32F411)
     /* Cortex-M: 32-bit SP. The stack grows down from __stack toward
      * _end; live free space is (SP - _end). */
     uintptr_t sp;
@@ -243,6 +246,16 @@ static uint16_t boot_reset_cause;
 static const char *
 reset_cause_str(uint16_t iv)
 {
+#if defined(PLATFORM_STM32F411)
+    if (iv & (STM32F411_RCC_CSR_BORRSTF >> 16))  return "brownout";
+    if (iv & (STM32F411_RCC_CSR_IWDGRSTF >> 16)) return "iwdg";
+    if (iv & (STM32F411_RCC_CSR_WWDGRSTF >> 16)) return "wwdg";
+    if (iv & (STM32F411_RCC_CSR_SFTRSTF >> 16))  return "software";
+    if (iv & (STM32F411_RCC_CSR_PINRSTF >> 16))  return "pin";
+    if (iv & (STM32F411_RCC_CSR_PORRSTF >> 16))  return "power-on";
+    if (iv & (STM32F411_RCC_CSR_LPWRRSTF >> 16)) return "low-power";
+    return "none";
+#else
     switch (iv) {
     case 0x0000: return "none";
     case 0x0002: return "brownout";
@@ -261,6 +274,7 @@ reset_cause_str(uint16_t iv)
     case 0x0024: return "fll-unlock";
     default:     return "unknown";
     }
+#endif
 }
 
 static int
@@ -306,6 +320,19 @@ boot_count_read(char *buf, size_t max)
 static const char *
 last_reset_str(uint16_t iv)
 {
+#if defined(PLATFORM_STM32F411)
+    if (iv & ((STM32F411_RCC_CSR_IWDGRSTF | STM32F411_RCC_CSR_WWDGRSTF) >> 16)) {
+        return "watchdog";
+    }
+    if (iv & ((STM32F411_RCC_CSR_BORRSTF | STM32F411_RCC_CSR_PORRSTF |
+               STM32F411_RCC_CSR_LPWRRSTF) >> 16)) {
+        return "power";
+    }
+    if (iv & ((STM32F411_RCC_CSR_SFTRSTF | STM32F411_RCC_CSR_PINRSTF) >> 16)) {
+        return "reboot";
+    }
+    return "other";
+#else
     switch (iv) {
     /* Watchdog: counter overflow or password violation */
     case 0x0016: case 0x0018:
@@ -322,6 +349,7 @@ last_reset_str(uint16_t iv)
     default:
         return "other";
     }
+#endif
 }
 
 static int
@@ -1507,10 +1535,8 @@ tiku_vfs_tree_init(void)
     }
 #endif
 
-    /* Capture reset cause before anything else clears it */
-#ifdef PLATFORM_MSP430
-    boot_reset_cause = SYSRSTIV;
-#endif
+    /* Capture reset cause before anything else clears it. */
+    boot_reset_cause = tiku_common_reset_reason();
 
     /* Unlock FRAM — root_children, vfs_root, /proc/ arrays, and
      * the boot-count cell are all in .persistent (FRAM) to

@@ -172,6 +172,8 @@
 #include <arch/msp430/tiku_device_select.h>    /* Device + board headers */
 #elif defined(PLATFORM_RP2350)
 #include <arch/arm-rp2350/tiku_device_select.h>
+#elif defined(PLATFORM_STM32F411)
+#include <arch/stm32f411re/tiku_device_select.h>
 #endif
 
 /*---------------------------------------------------------------------------*/

@@ -39,6 +39,8 @@
 #include "arch/msp430/tiku_mpu_arch.h"
 #elif defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_mpu_arch.h"
+#elif defined(PLATFORM_STM32F411)
+#include "arch/stm32f411re/tiku_mpu_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

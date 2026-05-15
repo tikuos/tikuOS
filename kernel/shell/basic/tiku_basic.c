@@ -64,14 +64,18 @@
  * I2C) doesn't drag in unused HAL code. */
 #if TIKU_BASIC_GPIO_ENABLE && defined(PLATFORM_MSP430)
 #include <arch/msp430/tiku_gpio_arch.h>
+#elif TIKU_BASIC_GPIO_ENABLE && defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_gpio_arch.h>
+#elif TIKU_BASIC_GPIO_ENABLE && defined(PLATFORM_STM32F411)
+#include <arch/stm32f411re/tiku_gpio_arch.h>
 #endif
-#if TIKU_BASIC_ADC_ENABLE && defined(PLATFORM_MSP430)
+#if TIKU_BASIC_ADC_ENABLE
 #include <interfaces/adc/tiku_adc.h>
 #endif
-#if TIKU_BASIC_I2C_ENABLE && defined(PLATFORM_MSP430)
+#if TIKU_BASIC_I2C_ENABLE
 #include <interfaces/bus/tiku_i2c_bus.h>
 #endif
-#if TIKU_BASIC_REBOOT_ENABLE && defined(PLATFORM_MSP430)
+#if TIKU_BASIC_REBOOT_ENABLE
 #include <kernel/cpu/tiku_watchdog.h>
 #endif
 #if TIKU_BASIC_LED_ENABLE

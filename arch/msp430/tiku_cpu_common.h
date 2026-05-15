@@ -25,8 +25,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef TIKU_CPU_COMMON_H_
-#define TIKU_CPU_COMMON_H_
+#ifndef TIKU_MSP430_CPU_COMMON_H_
+#define TIKU_MSP430_CPU_COMMON_H_
 
 /*---------------------------------------------------------------------------*/
 /* INCLUDES                                                                  */
@@ -109,4 +109,4 @@ uint8_t tiku_cpu_msp430_unique_id(uint8_t *buf, uint8_t len);
  */
 uint16_t tiku_cpu_msp430_reset_reason(void);
 
-#endif /* TIKU_CPU_COMMON_H_ */
+#endif /* TIKU_MSP430_CPU_COMMON_H_ */

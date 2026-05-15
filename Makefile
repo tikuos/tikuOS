@@ -28,6 +28,8 @@ MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 #   rp2350  -> PLATFORM_RP2350 (Raspberry Pi Pico 2 / Pico 2 W)
 ifeq ($(MCU),rp2350)
 TIKU_PLATFORM := rp2350
+else ifeq ($(MCU),stm32f411re)
+TIKU_PLATFORM := stm32f411
 else
 TIKU_PLATFORM := msp430
 endif
@@ -126,6 +128,19 @@ DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 # rp2350:  arm-none-eabi-gcc auto-detected from PATH
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_PLATFORM),rp2350)
+
+# ARM Embedded toolchain (apt: gcc-arm-none-eabi).
+TOOLCHAIN_PREFIX ?= arm-none-eabi-
+TOOLCHAIN_DIR    ?= $(shell \
+	p=$$(command -v $(TOOLCHAIN_PREFIX)gcc 2>/dev/null) && dirname $$(dirname "$$p") \
+	|| echo "/usr")
+CC      = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gcc
+OBJCOPY = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)objcopy
+SIZE    = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)size
+GDB     = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gdb
+MSP430_SUPPORT_DIR :=
+
+else ifeq ($(TIKU_PLATFORM),stm32f411)
 
 # ARM Embedded toolchain (apt: gcc-arm-none-eabi).
 TOOLCHAIN_PREFIX ?= arm-none-eabi-
@@ -528,6 +543,18 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
+else ifeq ($(TIKU_PLATFORM),stm32f411)
+
+# Cortex-M4 (STM32F411RE). Use softfp ABI with single-precision FPU.
+CFLAGS  = -mcpu=cortex-m4 -mthumb
+CFLAGS += -mfloat-abi=softfp -mfpu=fpv4-sp-d16
+CFLAGS += -Os -Wall -Wextra
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -DPLATFORM_STM32F411=1
+CFLAGS += --specs=nano.specs --specs=nosys.specs
+CFLAGS += -I$(PROJ_DIR)
+CFLAGS += -ffunction-sections -fdata-sections -fno-common
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -605,6 +632,16 @@ LDFLAGS += -Wl,-u,tiku_autostart_processes
 LDFLAGS += -Wl,-u,tiku_rp2350_vectors
 LDFLAGS += -Wl,-u,tiku_rp2350_image_def
 LDFLAGS += -Wl,-u,tiku_rp2350_boot2_marker
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+
+else ifeq ($(TIKU_PLATFORM),stm32f411)
+
+LDFLAGS  = -mcpu=cortex-m4 -mthumb -mfloat-abi=softfp -mfpu=fpv4-sp-d16
+LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
+LDFLAGS += -Tarch/stm32f411re/devices/stm32f411re.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+LDFLAGS += -Wl,-u,tiku_stm32f411_vectors
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 
 else
@@ -704,6 +741,29 @@ SRCS += arch/arm-rp2350/tiku_pio_arch.c
 SRCS += arch/arm-rp2350/tiku_pwm_arch.c
 SRCS += arch/arm-rp2350/tiku_dma_arch.c
 SRCS += arch/arm-rp2350/tiku_trng_arch.c
+
+else ifeq ($(TIKU_PLATFORM),stm32f411)
+
+# STM32F411RE arch
+SRCS += arch/stm32f411re/tiku_cpu_common.c
+SRCS += arch/stm32f411re/tiku_crt_vector.c
+SRCS += arch/stm32f411re/tiku_crt_early.c
+SRCS += arch/stm32f411re/tiku_cpu_freq_boot_arch.c
+SRCS += arch/stm32f411re/tiku_cpu_watchdog_arch.c
+SRCS += arch/stm32f411re/tiku_htimer_arch.c
+SRCS += arch/stm32f411re/tiku_i2c_arch.c
+SRCS += arch/stm32f411re/tiku_adc_arch.c
+SRCS += arch/stm32f411re/tiku_onewire_arch.c
+SRCS += arch/stm32f411re/tiku_timer_arch.c
+SRCS += arch/stm32f411re/tiku_crit_arch.c
+SRCS += arch/stm32f411re/tiku_wake_arch.c
+SRCS += arch/stm32f411re/tiku_gpio_irq_arch.c
+SRCS += arch/stm32f411re/tiku_uart_arch.c
+SRCS += arch/stm32f411re/tiku_mem_arch.c
+SRCS += arch/stm32f411re/tiku_mpu_arch.c
+SRCS += arch/stm32f411re/tiku_region_arch.c
+SRCS += arch/stm32f411re/tiku_gpio_arch.c
+SRCS += arch/stm32f411re/tiku_spi_arch.c
 
 else
 

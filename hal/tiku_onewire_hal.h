@@ -32,6 +32,8 @@
 #include <arch/msp430/tiku_onewire_arch.h>
 #elif defined(PLATFORM_RP2350)
 #include <arch/arm-rp2350/tiku_onewire_arch.h>
+#elif defined(PLATFORM_STM32F411)
+#include <arch/stm32f411re/tiku_onewire_arch.h>
 #endif
 
 #endif /* TIKU_ONEWIRE_HAL_H_ */
