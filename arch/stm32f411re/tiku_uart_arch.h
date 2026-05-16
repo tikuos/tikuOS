@@ -24,4 +24,8 @@ int      tiku_uart_getc(void);
 uint16_t tiku_uart_overrun_count(void);
 void     tiku_uart_overrun_reset(void);
 
+#ifdef HAS_TESTS
+void tiku_uart_test_inject(uint8_t byte);
+#endif
+
 #endif /* TIKU_STM32F411_UART_ARCH_H_ */
