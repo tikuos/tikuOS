@@ -44,6 +44,10 @@ static int stm32f411_gpio_resolve(uint8_t port, uint8_t pin,
     }
 }
 
+/*---------------------------------------------------------------------------*/
+/* Per-pin direct helpers                                                    */
+/*---------------------------------------------------------------------------*/
+
 static void stm32f411_gpio_mode_write(uint32_t gpio_base, uint8_t pin,
                                       uint32_t mode, uint32_t pupd)
 {
@@ -67,6 +71,10 @@ static void stm32f411_gpio_mode_write(uint32_t gpio_base, uint8_t pin,
     pull |= STM32F411_GPIO_PUPD(pin, pupd);
     _STM32F411_REG(STM32F411_GPIO_PUPDR(gpio_base)) = pull;
 }
+
+/*---------------------------------------------------------------------------*/
+/* HAL entry points                                                          */
+/*---------------------------------------------------------------------------*/
 
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin)
 {

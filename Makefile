@@ -182,8 +182,17 @@ DEBUGGER  = tilib
 # fall back to "drag-and-drop the UF2 onto the RPI-RP2 mass storage".
 PICOTOOL ?= $(shell command -v picotool 2>/dev/null || echo picotool)
 
+# OpenOCD for the STM32F411RE / NUCLEO-F411RE path. The default board
+# config targets the Nucleo's on-board ST-LINK probe; override
+# OPENOCD_ARGS if you need a different interface/target combination.
+OPENOCD ?= $(shell command -v openocd 2>/dev/null || echo openocd)
+OPENOCD_ARGS ?= -f board/st_nucleo_f4.cfg
+OPENOCD_GDB_PORT ?= 3333
+STM32F411_FLASH_BASE ?= 0x08000000
+STM32F411_FLASH_SIZE ?= 0x80000
+
 # Whether this MCU has HIFRAM (FRAM > 64 KB).  MSP430-only concept;
-# for the RP2350 it is meaningless.
+# for other MCUs it is meaningless.
 ifeq ($(MCU),msp430fr5994)
 DEVICE_HAS_HIFRAM := 1
 else ifeq ($(MCU),msp430fr6989)
@@ -550,6 +559,7 @@ CFLAGS  = -mcpu=cortex-m4 -mthumb
 CFLAGS += -mfloat-abi=softfp -mfpu=fpv4-sp-d16
 CFLAGS += -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -DTIKU_BOARD_NUCLEO_F411RE=1
 CFLAGS += -DPLATFORM_STM32F411=1
 CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
@@ -1460,9 +1470,9 @@ TARGET = main.elf
 # Targets
 # ---------------------------------------------------------------------------
 .SUFFIXES:
-.PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2
+.PHONY: all clean flash run debug debug-server erase size monitor deploy docs docs-clean uf2
 
-# UF2 is the RP2350 deliverable; ELF is enough on MSP430.
+# UF2 is the RP2350 deliverable; ELF is enough on MSP430 and STM32F411.
 ifeq ($(TIKU_PLATFORM),rp2350)
 TARGET_BIN = main.bin
 TARGET_UF2 = main.uf2
@@ -1597,6 +1607,28 @@ debug:
 erase:
 	@echo "Erase: hold BOOTSEL, mount RPI-RP2, copy a flash_nuke.uf2 image."
 
+else ifeq ($(TIKU_PLATFORM),stm32f411)
+
+flash: all
+	$(OPENOCD) $(OPENOCD_ARGS) \
+		-c "init; reset halt; program $(TARGET) verify reset exit"
+
+run: flash
+
+debug-server: all
+	$(OPENOCD) $(OPENOCD_ARGS) \
+		-c "gdb_port $(OPENOCD_GDB_PORT)" \
+		-c "init; reset halt"
+
+debug: all
+	$(GDB) $(TARGET) \
+		-ex "target extended-remote localhost:$(OPENOCD_GDB_PORT)" \
+		-ex "monitor reset halt"
+
+erase:
+	$(OPENOCD) $(OPENOCD_ARGS) \
+		-c "init; reset halt; flash erase_address $(STM32F411_FLASH_BASE) $(STM32F411_FLASH_SIZE); reset run; exit"
+
 else
 
 flash: all
@@ -1618,6 +1650,8 @@ deploy: clean flash monitor
 # Serial Monitor  (auto-detects TI LaunchPad, picks picocom or screen)
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_PLATFORM),rp2350)
+BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),115200)
+else ifeq ($(TIKU_PLATFORM),stm32f411)
 BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),115200)
 else
 BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),9600)
