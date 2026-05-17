@@ -72,6 +72,76 @@ static void stm32f411_gpio_mode_write(uint32_t gpio_base, uint8_t pin,
     _STM32F411_REG(STM32F411_GPIO_PUPDR(gpio_base)) = pull;
 }
 
+static uint32_t stm32f411_gpio_is_output(uint32_t gpio_base, uint8_t pin)
+{
+    uint32_t moder = _STM32F411_REG(STM32F411_GPIO_MODER(gpio_base));
+    return (((moder >> (pin * 2U)) & 0x3U) == STM32F411_GPIO_MODE_OUTPUT);
+}
+
+static void stm32f411_gpio_init_output_raw(uint32_t gpio_base, uint8_t pin)
+{
+    stm32f411_gpio_mode_write(gpio_base, pin, STM32F411_GPIO_MODE_OUTPUT,
+                              STM32F411_GPIO_PUPD_NONE);
+}
+
+static void stm32f411_gpio_set_raw(uint32_t gpio_base, uint8_t pin,
+                                   uint8_t value)
+{
+    _STM32F411_REG(STM32F411_GPIO_BSRR(gpio_base)) =
+        value ? STM32F411_GPIO_BSRR_SET(pin) : STM32F411_GPIO_BSRR_CLR(pin);
+}
+
+static void stm32f411_gpio_toggle_raw(uint32_t gpio_base, uint8_t pin)
+{
+    uint32_t odr = _STM32F411_REG(STM32F411_GPIO_ODR(gpio_base));
+    _STM32F411_REG(STM32F411_GPIO_BSRR(gpio_base)) =
+        (odr & STM32F411_BIT(pin))
+            ? STM32F411_GPIO_BSRR_CLR(pin)
+            : STM32F411_GPIO_BSRR_SET(pin);
+}
+
+void tiku_stm32f411_gpio_init_output(uint8_t port, uint8_t pin)
+{
+    uint32_t gpio_base;
+    uint32_t rcc_bit;
+
+    if (stm32f411_gpio_resolve(port, pin, &gpio_base, &rcc_bit) != 0) {
+        return;
+    }
+    stm32f411_rcc_enable_ahb1(rcc_bit);
+    stm32f411_gpio_init_output_raw(gpio_base, pin);
+}
+
+void tiku_stm32f411_gpio_set(uint8_t port, uint8_t pin, uint8_t value)
+{
+    uint32_t gpio_base;
+    uint32_t rcc_bit;
+
+    if (stm32f411_gpio_resolve(port, pin, &gpio_base, &rcc_bit) != 0) {
+        return;
+    }
+    stm32f411_rcc_enable_ahb1(rcc_bit);
+    if (!stm32f411_gpio_is_output(gpio_base, pin)) {
+        stm32f411_gpio_init_output_raw(gpio_base, pin);
+    }
+    stm32f411_gpio_set_raw(gpio_base, pin, value);
+}
+
+void tiku_stm32f411_gpio_toggle(uint8_t port, uint8_t pin)
+{
+    uint32_t gpio_base;
+    uint32_t rcc_bit;
+
+    if (stm32f411_gpio_resolve(port, pin, &gpio_base, &rcc_bit) != 0) {
+        return;
+    }
+    stm32f411_rcc_enable_ahb1(rcc_bit);
+    if (!stm32f411_gpio_is_output(gpio_base, pin)) {
+        stm32f411_gpio_init_output_raw(gpio_base, pin);
+    }
+    stm32f411_gpio_toggle_raw(gpio_base, pin);
+}
+
 /*---------------------------------------------------------------------------*/
 /* HAL entry points                                                          */
 /*---------------------------------------------------------------------------*/
@@ -85,8 +155,7 @@ int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin)
         return -1;
     }
     stm32f411_rcc_enable_ahb1(rcc_bit);
-    stm32f411_gpio_mode_write(gpio_base, pin, STM32F411_GPIO_MODE_OUTPUT,
-                              STM32F411_GPIO_PUPD_NONE);
+    stm32f411_gpio_init_output_raw(gpio_base, pin);
     return 0;
 }
 
@@ -113,10 +182,10 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val)
         return -1;
     }
     stm32f411_rcc_enable_ahb1(rcc_bit);
-    stm32f411_gpio_mode_write(gpio_base, pin, STM32F411_GPIO_MODE_OUTPUT,
-                              STM32F411_GPIO_PUPD_NONE);
-    _STM32F411_REG(STM32F411_GPIO_BSRR(gpio_base)) =
-        val ? STM32F411_GPIO_BSRR_SET(pin) : STM32F411_GPIO_BSRR_CLR(pin);
+    if (!stm32f411_gpio_is_output(gpio_base, pin)) {
+        stm32f411_gpio_init_output_raw(gpio_base, pin);
+    }
+    stm32f411_gpio_set_raw(gpio_base, pin, val);
     return 0;
 }
 
@@ -124,19 +193,15 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin)
 {
     uint32_t gpio_base;
     uint32_t rcc_bit;
-    uint32_t odr;
 
     if (stm32f411_gpio_resolve(port, pin, &gpio_base, &rcc_bit) != 0) {
         return -1;
     }
     stm32f411_rcc_enable_ahb1(rcc_bit);
-    stm32f411_gpio_mode_write(gpio_base, pin, STM32F411_GPIO_MODE_OUTPUT,
-                              STM32F411_GPIO_PUPD_NONE);
-    odr = _STM32F411_REG(STM32F411_GPIO_ODR(gpio_base));
-    _STM32F411_REG(STM32F411_GPIO_BSRR(gpio_base)) =
-        (odr & STM32F411_BIT(pin))
-            ? STM32F411_GPIO_BSRR_CLR(pin)
-            : STM32F411_GPIO_BSRR_SET(pin);
+    if (!stm32f411_gpio_is_output(gpio_base, pin)) {
+        stm32f411_gpio_init_output_raw(gpio_base, pin);
+    }
+    stm32f411_gpio_toggle_raw(gpio_base, pin);
     return 0;
 }
 
@@ -166,19 +231,4 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin)
     moder = _STM32F411_REG(STM32F411_GPIO_MODER(gpio_base));
     return (((moder >> (pin * 2U)) & 0x3U) == STM32F411_GPIO_MODE_OUTPUT)
         ? 1 : 0;
-}
-
-void tiku_stm32f411_gpio_init_output(uint8_t port, uint8_t pin)
-{
-    (void)tiku_gpio_arch_set_output(port, pin);
-}
-
-void tiku_stm32f411_gpio_set(uint8_t port, uint8_t pin, uint8_t value)
-{
-    (void)tiku_gpio_arch_write(port, pin, value);
-}
-
-void tiku_stm32f411_gpio_toggle(uint8_t port, uint8_t pin)
-{
-    (void)tiku_gpio_arch_toggle(port, pin);
 }

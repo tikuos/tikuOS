@@ -23,14 +23,6 @@
 #define TIKU_BOARD_NAME             "NUCLEO-F411RE"
 
 /*
-* GPIO function forward declarations, so the LED macros below don't pull the rest 
-* of the kernel's GPIO header into the include chain.
-*/
-void tiku_stm32f411_gpio_init_output(uint8_t port, uint8_t pin);
-void tiku_stm32f411_gpio_set(uint8_t port, uint8_t pin, uint8_t value);
-void tiku_stm32f411_gpio_toggle(uint8_t port, uint8_t pin);
-
-/*
 * User LED: The Nucleo-F411RE has a single user LED (LD2) connected to PA5.
 * The other LEDs on the board (LD1 and LD3) cannot be controlled by the user.
 */
