@@ -772,6 +772,7 @@ SRCS += arch/stm32f411re/tiku_uart_arch.c
 SRCS += arch/stm32f411re/tiku_mem_arch.c
 SRCS += arch/stm32f411re/tiku_mpu_arch.c
 SRCS += arch/stm32f411re/tiku_region_arch.c
+SRCS += arch/stm32f411re/tiku_pinmux_arch.c
 SRCS += arch/stm32f411re/tiku_gpio_arch.c
 SRCS += arch/stm32f411re/tiku_spi_arch.c
 

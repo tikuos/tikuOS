@@ -13,7 +13,7 @@
  * (blocking). Chip select (CS) is managed by the application via GPIO.
  *
  * The underlying hardware is accessed through the architecture-specific
- * layer (arch/msp430/tiku_spi_arch.c).
+ * layer selected by hal/tiku_spi_hal.h.
  *
  * Typical usage:
  *   tiku_spi_config_t cfg = {
@@ -87,7 +87,7 @@
 typedef struct tiku_spi_config {
     uint8_t  mode;       /**< TIKU_SPI_MODE_0 .. TIKU_SPI_MODE_3 */
     uint8_t  bit_order;  /**< TIKU_SPI_MSB_FIRST or TIKU_SPI_LSB_FIRST */
-    uint16_t prescaler;  /**< Clock divider: SPI_CLK = SMCLK / prescaler */
+    uint16_t prescaler;  /**< Requested SPI clock divider (backend-mapped) */
 } tiku_spi_config_t;
 
 /*---------------------------------------------------------------------------*/
@@ -97,9 +97,9 @@ typedef struct tiku_spi_config {
 /**
  * @brief Initialize the SPI bus in master mode.
  *
- * Configures the underlying hardware peripheral (eUSCI_A on MSP430)
- * for 3-pin SPI master operation. Chip select is not managed by the
- * driver; the application must assert/deassert CS via GPIO.
+ * Configures the underlying hardware peripheral for 3-pin SPI master
+ * operation. Chip select is not managed by the driver; the application
+ * must assert/deassert CS via GPIO.
  *
  * @param config  Pointer to configuration structure
  * @return TIKU_SPI_OK on success, negative error code on failure
@@ -109,7 +109,7 @@ int tiku_spi_init(const tiku_spi_config_t *config);
 /**
  * @brief Shut down the SPI bus.
  *
- * Places the peripheral in reset.
+ * Disables the underlying SPI peripheral.
  */
 void tiku_spi_close(void);
 

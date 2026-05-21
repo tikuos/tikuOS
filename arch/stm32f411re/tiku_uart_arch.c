@@ -12,6 +12,7 @@
 
 #include "tiku_uart_arch.h"
 #include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_pinmux_arch.h"
 #include "tiku_stm32f411_regs.h"
 #include "tiku.h"
 #include <stdarg.h>
@@ -57,34 +58,18 @@ static inline void uart_write(uint32_t off, uint32_t val)
 
 static void stm32f411_uart_gpio_init(void)
 {
-    uint32_t moder;
-    uint32_t speed;
-    uint32_t pupd;
-
-    stm32f411_rcc_enable_ahb1(STM32F411_RCC_AHB1_GPIOA);
-
-    moder = _STM32F411_REG(STM32F411_GPIO_MODER(STM32F411_GPIOA_BASE));
-    moder &= ~(STM32F411_GPIO_MODE(TIKU_BOARD_UART_TX_PIN, 3U)
-            |  STM32F411_GPIO_MODE(TIKU_BOARD_UART_RX_PIN, 3U));
-    moder |=  STM32F411_GPIO_MODE(TIKU_BOARD_UART_TX_PIN, STM32F411_GPIO_MODE_AF)
-           |  STM32F411_GPIO_MODE(TIKU_BOARD_UART_RX_PIN, STM32F411_GPIO_MODE_AF);
-    _STM32F411_REG(STM32F411_GPIO_MODER(STM32F411_GPIOA_BASE)) = moder;
-
-    speed = _STM32F411_REG(STM32F411_GPIO_OSPEEDR(STM32F411_GPIOA_BASE));
-    speed |= STM32F411_GPIO_SPEED(TIKU_BOARD_UART_TX_PIN, STM32F411_GPIO_SPEED_HIGH)
-          |  STM32F411_GPIO_SPEED(TIKU_BOARD_UART_RX_PIN, STM32F411_GPIO_SPEED_HIGH);
-    _STM32F411_REG(STM32F411_GPIO_OSPEEDR(STM32F411_GPIOA_BASE)) = speed;
-
-    pupd = _STM32F411_REG(STM32F411_GPIO_PUPDR(STM32F411_GPIOA_BASE));
-    pupd &= ~(STM32F411_GPIO_PUPD(TIKU_BOARD_UART_TX_PIN, 3U)
-           |  STM32F411_GPIO_PUPD(TIKU_BOARD_UART_RX_PIN, 3U));
-    pupd |= STM32F411_GPIO_PUPD(TIKU_BOARD_UART_RX_PIN, STM32F411_GPIO_PUPD_UP);
-    _STM32F411_REG(STM32F411_GPIO_PUPDR(STM32F411_GPIOA_BASE)) = pupd;
-
-    stm32f411_gpio_set_af(STM32F411_GPIOA_BASE, TIKU_BOARD_UART_TX_PIN,
-                          STM32F411_GPIO_AF_USART1_2);
-    stm32f411_gpio_set_af(STM32F411_GPIOA_BASE, TIKU_BOARD_UART_RX_PIN,
-                          STM32F411_GPIO_AF_USART1_2);
+    (void)tiku_stm32f411_pinmux_config(TIKU_BOARD_UART_TX_PORT,
+                                       TIKU_BOARD_UART_TX_PIN,
+                                       STM32F411_GPIO_MODE_AF,
+                                       STM32F411_GPIO_PUPD_NONE,
+                                       STM32F411_GPIO_SPEED_HIGH,
+                                       STM32F411_GPIO_AF_USART1_2);
+    (void)tiku_stm32f411_pinmux_config(TIKU_BOARD_UART_RX_PORT,
+                                       TIKU_BOARD_UART_RX_PIN,
+                                       STM32F411_GPIO_MODE_AF,
+                                       STM32F411_GPIO_PUPD_UP,
+                                       STM32F411_GPIO_SPEED_HIGH,
+                                       STM32F411_GPIO_AF_USART1_2);
 }
 
 static uint32_t stm32f411_uart_brr(unsigned long pclk, unsigned long baud)

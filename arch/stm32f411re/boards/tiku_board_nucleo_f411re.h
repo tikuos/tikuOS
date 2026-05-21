@@ -14,6 +14,7 @@
 #define TIKU_BOARD_NUCLEO_F411RE_H_
 
 #include <stdint.h>
+#include <arch/stm32f411re/tiku_pinmux_arch.h>
 #include <arch/stm32f411re/tiku_gpio_arch.h>
 
 /*---------------------------------------------------------------------------*/
@@ -29,7 +30,7 @@
 #define TIKU_BOARD_LED_COUNT        1
 #define TIKU_BOARD_LED1_PORT        1U
 #define TIKU_BOARD_LED1_PIN         5U
-#define TIKU_BOARD_LED1_INIT()      tiku_stm32f411_gpio_init_output(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN)
+#define TIKU_BOARD_LED1_INIT()      tiku_stm32f411_pinmux_init_output(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN)
 #define TIKU_BOARD_LED1_ON()        tiku_stm32f411_gpio_set(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN, 1U)
 #define TIKU_BOARD_LED1_OFF()       tiku_stm32f411_gpio_set(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN, 0U)
 #define TIKU_BOARD_LED1_TOGGLE()    tiku_stm32f411_gpio_toggle(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN)
@@ -65,12 +66,12 @@
 #define TIKU_BOARD_I2C0_SCL_PORT    2U
 #define TIKU_BOARD_I2C0_SCL_PIN     8U
 
-#define TIKU_BOARD_SPI0_MISO_PORT   1U
-#define TIKU_BOARD_SPI0_MISO_PIN    6U
-#define TIKU_BOARD_SPI0_SCK_PORT    1U
-#define TIKU_BOARD_SPI0_SCK_PIN     5U
-#define TIKU_BOARD_SPI0_MOSI_PORT   1U
-#define TIKU_BOARD_SPI0_MOSI_PIN    7U
+#define TIKU_BOARD_SPI1_MISO_PORT   2U
+#define TIKU_BOARD_SPI1_MISO_PIN    4U
+#define TIKU_BOARD_SPI1_SCK_PORT    2U
+#define TIKU_BOARD_SPI1_SCK_PIN     3U
+#define TIKU_BOARD_SPI1_MOSI_PORT   2U
+#define TIKU_BOARD_SPI1_MOSI_PIN    5U
 
 #define TIKU_BOARD_SPI_BRW_4MHZ     4U
 #define TIKU_BOARD_SPI_BRW_2MHZ     8U

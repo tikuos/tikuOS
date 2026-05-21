@@ -5,7 +5,7 @@
  *
  * Authors: Jeremy Goh
  *
- * tiku_gpio_arch.h - STM32F411RE GPIO port access
+ * tiku_gpio_arch.h - STM32F411RE GPIO data access
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,16 +16,9 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* Board-facing GPIO helpers                                                 */
+/* Board-facing GPIO write helpers                                           */
 /*---------------------------------------------------------------------------*/
 
-/*
- * These helpers let board headers wire LEDs and similar fixed pins
- * directly to the STM32 GPIO backend without pulling in the generic
- * GPIO wrapper layer. They operate on the same numbered port/pin ABI
- * as the platform-agnostic GPIO interface.
- */
-void tiku_stm32f411_gpio_init_output(uint8_t port, uint8_t pin);
 void tiku_stm32f411_gpio_set(uint8_t port, uint8_t pin, uint8_t value);
 void tiku_stm32f411_gpio_toggle(uint8_t port, uint8_t pin);
 
