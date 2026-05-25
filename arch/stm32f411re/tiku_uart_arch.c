@@ -62,13 +62,23 @@ static void stm32f411_uart_gpio_init(void)
                                        TIKU_BOARD_UART_TX_PIN,
                                        STM32F411_GPIO_MODE_AF,
                                        STM32F411_GPIO_PUPD_NONE,
-                                       STM32F411_GPIO_SPEED_HIGH,
+                                       STM32F411_GPIO_SPEED_HIGH);
+    (void)tiku_stm32f411_pinmux_set_drive(TIKU_BOARD_UART_TX_PORT,
+                                          TIKU_BOARD_UART_TX_PIN,
+                                          0U);
+    (void)tiku_stm32f411_pinmux_set_af(TIKU_BOARD_UART_TX_PORT,
+                                       TIKU_BOARD_UART_TX_PIN,
                                        STM32F411_GPIO_AF_USART1_2);
     (void)tiku_stm32f411_pinmux_config(TIKU_BOARD_UART_RX_PORT,
                                        TIKU_BOARD_UART_RX_PIN,
                                        STM32F411_GPIO_MODE_AF,
                                        STM32F411_GPIO_PUPD_UP,
-                                       STM32F411_GPIO_SPEED_HIGH,
+                                       STM32F411_GPIO_SPEED_HIGH);
+    (void)tiku_stm32f411_pinmux_set_drive(TIKU_BOARD_UART_RX_PORT,
+                                          TIKU_BOARD_UART_RX_PIN,
+                                          0U);
+    (void)tiku_stm32f411_pinmux_set_af(TIKU_BOARD_UART_RX_PORT,
+                                       TIKU_BOARD_UART_RX_PIN,
                                        STM32F411_GPIO_AF_USART1_2);
 }
 

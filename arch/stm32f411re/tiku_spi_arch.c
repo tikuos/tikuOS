@@ -198,19 +198,34 @@ tiku_spi_arch_init(const tiku_spi_config_t *config)
                                      TIKU_BOARD_SPI1_SCK_PIN,
                                      STM32F411_GPIO_MODE_AF,
                                      STM32F411_GPIO_PUPD_NONE,
-                                     STM32F411_GPIO_SPEED_HIGH,
-                                     STM32F411_GPIO_AF_SPI1_2_4_5) != 0
+                                     STM32F411_GPIO_SPEED_HIGH) != 0
+        || tiku_stm32f411_pinmux_set_drive(TIKU_BOARD_SPI1_SCK_PORT,
+                                           TIKU_BOARD_SPI1_SCK_PIN,
+                                           0U) != 0
+        || tiku_stm32f411_pinmux_set_af(TIKU_BOARD_SPI1_SCK_PORT,
+                                        TIKU_BOARD_SPI1_SCK_PIN,
+                                        STM32F411_GPIO_AF_SPI1_2_4_5) != 0
         || tiku_stm32f411_pinmux_config(TIKU_BOARD_SPI1_MISO_PORT,
                                         TIKU_BOARD_SPI1_MISO_PIN,
                                         STM32F411_GPIO_MODE_AF,
                                         STM32F411_GPIO_PUPD_NONE,
-                                        STM32F411_GPIO_SPEED_HIGH,
+                                        STM32F411_GPIO_SPEED_HIGH) != 0
+        || tiku_stm32f411_pinmux_set_drive(TIKU_BOARD_SPI1_MISO_PORT,
+                                           TIKU_BOARD_SPI1_MISO_PIN,
+                                           0U) != 0
+        || tiku_stm32f411_pinmux_set_af(TIKU_BOARD_SPI1_MISO_PORT,
+                                        TIKU_BOARD_SPI1_MISO_PIN,
                                         STM32F411_GPIO_AF_SPI1_2_4_5) != 0
         || tiku_stm32f411_pinmux_config(TIKU_BOARD_SPI1_MOSI_PORT,
                                         TIKU_BOARD_SPI1_MOSI_PIN,
                                         STM32F411_GPIO_MODE_AF,
                                         STM32F411_GPIO_PUPD_NONE,
-                                        STM32F411_GPIO_SPEED_HIGH,
+                                        STM32F411_GPIO_SPEED_HIGH) != 0
+        || tiku_stm32f411_pinmux_set_drive(TIKU_BOARD_SPI1_MOSI_PORT,
+                                           TIKU_BOARD_SPI1_MOSI_PIN,
+                                           0U) != 0
+        || tiku_stm32f411_pinmux_set_af(TIKU_BOARD_SPI1_MOSI_PORT,
+                                        TIKU_BOARD_SPI1_MOSI_PIN,
                                         STM32F411_GPIO_AF_SPI1_2_4_5) != 0) {
         return TIKU_SPI_ERR_PARAM;
     }
