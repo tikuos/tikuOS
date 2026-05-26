@@ -300,8 +300,8 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 │   ├── console              R/W system console (UART)
 │   ├── null                 R/W data sink (always empty on read)
 │   ├── zero                 R   zero source (fills buffer with NUL)
-│   ├── gpio/{1..4}/{0..7}   per-pin read/write (0, 1, t, i=input)
-│   ├── gpio_dir/{1..4}      per-port pin direction (I=input, O=output)
+│   ├── gpio/<port>/{0..7}   per-pin read/write (0, 1, t, i=input)
+│   ├── gpio_dir/<port>      per-port pin direction (I=input, O=output)
 │   ├── uart/
 │   │   ├── overruns         UART overrun count since boot
 │   │   └── baud             configured baud rate

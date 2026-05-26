@@ -73,7 +73,7 @@ tiku_shell_cmd_gpio(uint8_t argc, const char *argv[])
 
     if (argc < 3) {
         SHELL_PRINTF("Usage: gpio <port> <pin> [0|1|t|in]\n");
-        SHELL_PRINTF("  port: 1-4 or J    pin: 0-7\n");
+        SHELL_PRINTF("  port: 1-9 or J    pin: 0-7\n");
         return;
     }
 

@@ -781,10 +781,10 @@ API (`tiku_vfs_read`, `tiku_vfs_write`).
 │   ├── null                 rw   data sink; read returns 0 bytes
 │   ├── zero                 r-   zero source; read fills buffer with NUL bytes
 │   ├── gpio/
-│   │   └── {1..4}/          per-port directory
+│   │   └── <port>/          per-port directory
 │   │       └── {0..7}       rw   pin state (0, 1, t=toggle, i=input)
 │   ├── gpio_dir/
-│   │   └── {1..4}           r-   pin directions (I=input, O=output)
+│   │   └── <port>           r-   pin directions (I=input, O=output)
 │   ├── uart/
 │   │   ├── overruns         r-   UART overrun count since boot
 │   │   └── baud             r-   configured baud rate

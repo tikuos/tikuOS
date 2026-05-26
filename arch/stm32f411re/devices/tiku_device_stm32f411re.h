@@ -28,18 +28,23 @@
 
 /*
  * The STM32F411RE has five GPIO banks (Ports A..E) with up to 16 pins each.
- * To conform with the existing MSP430-based implementation, the port letters
- * are mapped to numbers: Port A = 1, Port B = 2, Port C = 3, Port D = 4,
- * Port E = 5.
+ * The shell/VFS GPIO model is fixed at 8 pins per port, so the STM32 port
+ * exposes A..D as eight virtual ports:
+ *   P1 = PA0..PA7    P2 = PA8..PA15
+ *   P3 = PB0..PB7    P4 = PB8..PB15
+ *   P5 = PC0..PC7    P6 = PC8..PC15
+ *   P7 = PD0..PD7    P8 = PD8..PD15
+ *
+ * Port E is not currently surfaced through the shell/VFS view.
  */
 #define TIKU_DEVICE_HAS_PORT1       1
 #define TIKU_DEVICE_HAS_PORT2       1
 #define TIKU_DEVICE_HAS_PORT3       1
 #define TIKU_DEVICE_HAS_PORT4       1
-#define TIKU_DEVICE_HAS_PORT5       0
-#define TIKU_DEVICE_HAS_PORT6       0
-#define TIKU_DEVICE_HAS_PORT7       0
-#define TIKU_DEVICE_HAS_PORT8       0
+#define TIKU_DEVICE_HAS_PORT5       1
+#define TIKU_DEVICE_HAS_PORT6       1
+#define TIKU_DEVICE_HAS_PORT7       1
+#define TIKU_DEVICE_HAS_PORT8       1
 #define TIKU_DEVICE_HAS_PORT9       0
 #define TIKU_DEVICE_HAS_PORTJ       0
 

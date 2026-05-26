@@ -645,7 +645,8 @@ stm32f411_i2c_read_phase(uint8_t addr, uint8_t *buf, uint16_t len)
     return TIKU_I2C_OK;
 }
 
-int tiku_i2c_arch_init(const tiku_i2c_config_t *config)
+int
+tiku_i2c_arch_init(const tiku_i2c_config_t *config)
 {
     if (config == (const tiku_i2c_config_t *)0) {
         return TIKU_I2C_ERR_PARAM;
@@ -668,13 +669,15 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config)
     return TIKU_I2C_OK;
 }
 
-void tiku_i2c_arch_close(void)
+void
+tiku_i2c_arch_close(void)
 {
     _STM32F411_REG(STM32F411_I2C_CR1(TIKU_STM32F411_I2C_BASE)) = 0U;
     g_i2c_ready = 0U;
 }
 
-int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
+int
+tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
 {
     if (g_i2c_ready == 0U) {
         return TIKU_I2C_ERR_BUSY;
@@ -691,7 +694,8 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
     return stm32f411_i2c_write_phase(addr, buf, len, 1U);
 }
 
-int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
+int
+tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
 {
     if (g_i2c_ready == 0U) {
         return TIKU_I2C_ERR_BUSY;
@@ -708,9 +712,10 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
     return stm32f411_i2c_read_phase(addr, buf, len);
 }
 
-int tiku_i2c_arch_write_read(uint8_t addr,
-                             const uint8_t *tx_buf, uint16_t tx_len,
-                             uint8_t *rx_buf, uint16_t rx_len)
+int
+tiku_i2c_arch_write_read(uint8_t addr,
+                         const uint8_t *tx_buf, uint16_t tx_len,
+                         uint8_t *rx_buf, uint16_t rx_len)
 {
     int rc;
 

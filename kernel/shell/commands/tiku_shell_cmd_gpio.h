@@ -30,7 +30,7 @@
  *   gpio <port> <pin> t            — toggle
  *   gpio <port> <pin> in           — set as input (pull-up)
  *
- * Port is 1-4 (or J).  Pin is 0-7.
+ * Port is a device-specific numeric index (1-9) or J. Pin is 0-7.
  *
  * Examples:
  *   gpio 1 0 1       — set P1.0 high
