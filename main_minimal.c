@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.04 — RP2350 minimal smoke test
+ * Tiku Operating System v0.05 — RP2350 minimal smoke test
  *
  * No kernel, no scheduler, no shell. Just brings up clocks + UART
  * and prints a heartbeat in a loop. Intended as a debugging aid:

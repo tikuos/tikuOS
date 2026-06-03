@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.04 — RP2350 (Pico 2 / Pico 2 W) linker script
+ * Tiku Operating System v0.05 — RP2350 (Pico 2 / Pico 2 W) linker script
  *
  * Memory map (RP2350 datasheet §2.2):
  *   FLASH (XIP)  : 4 MB external QSPI at 0x10000000

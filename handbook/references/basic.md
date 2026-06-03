@@ -1,6 +1,6 @@
 # Tiku BASIC — Definitive Guide
 
-**Version 0.04**
+**Version 0.05**
 
 Tiku BASIC is an opt-in interactive interpreter that runs as a single
 shell command (`basic`) on TikuOS. It is intentionally tiny — small
