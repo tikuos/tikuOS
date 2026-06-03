@@ -87,9 +87,11 @@ const tiku_shell_io_t *tiku_shell_io_get_backend(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Write one raw byte through the active backend.
+ * @brief Write one character through the active backend.
  *
- * No CRLF conversion — use tiku_shell_io_puts/printf for that.
+ * Expands a bare '\n' to "\r\n" when the backend sets
+ * TIKU_SHELL_IO_CRLF; all other bytes pass through unchanged.  This
+ * is the single output primitive that puts()/printf() route through.
  */
 void tiku_shell_io_putc(char c);
 

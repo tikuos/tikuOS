@@ -59,27 +59,20 @@ tiku_shell_io_get_backend(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* OUTPUT — raw putc (no CRLF)                                               */
-/*---------------------------------------------------------------------------*/
-
-/** @brief Write one raw character through the active backend. */
-void
-tiku_shell_io_putc(char c)
-{
-    if (active_io && active_io->putc) {
-        active_io->putc(c);
-    }
-}
-
-/*---------------------------------------------------------------------------*/
-/* OUTPUT — puts / printf helpers (CRLF-aware)                               */
+/* OUTPUT — putc (CRLF-aware when the backend requests it)                   */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Internal: write one character with optional CRLF expansion.
+ * @brief Write one character through the active backend.
+ *
+ * When the backend sets TIKU_SHELL_IO_CRLF, a bare '\n' is expanded to
+ * "\r\n" so serial terminals return to column 0; every other byte passes
+ * through untouched.  This is the single output primitive — puts() and
+ * the printf helpers below all route through it, so command code may emit
+ * a trailing '\n' with putc() and still get a correct line break.
  */
-static void
-io_emit(char c)
+void
+tiku_shell_io_putc(char c)
 {
     if (!active_io || !active_io->putc) {
         return;
@@ -88,6 +81,19 @@ io_emit(char c)
         active_io->putc('\r');
     }
     active_io->putc(c);
+}
+
+/*---------------------------------------------------------------------------*/
+/* OUTPUT — puts / printf helpers                                            */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Internal: write one character (CRLF expansion handled by putc).
+ */
+static void
+io_emit(char c)
+{
+    tiku_shell_io_putc(c);
 }
 
 /** @brief Write a string with optional CRLF expansion on '\\n'. */
