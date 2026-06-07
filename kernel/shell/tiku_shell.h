@@ -1,5 +1,6 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
@@ -8,6 +9,14 @@
  *
  * The CLI is transport-agnostic: all I/O flows through the pluggable
  * backend in tiku_shell_io.h (UART today, network / LLM channel later).
+ *
+ * This header declares the pieces other translation units need: the
+ * command-handler signature and command-table entry type
+ * (tiku_shell_cmd_t), the line/argument sizing macros, the accessor
+ * that hands out the static command table, and the one-call service
+ * entry point tiku_shell_init().  The table itself, the line editor,
+ * and the individual command handlers live in tiku_shell.c and the
+ * commands/ directory.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,13 +49,32 @@
 /* CONFIGURATION                                                             */
 /*---------------------------------------------------------------------------*/
 
-/** Maximum characters in a single input line */
+/**
+ * @brief Maximum characters in a single input line (including the
+ *        NUL terminator).
+ *
+ * Sizes the line editor's cli.buf; typed input is capped at
+ * TIKU_SHELL_LINE_SIZE - 1 characters so room is always left for the
+ * terminating NUL the parser expects.
+ */
 #define TIKU_SHELL_LINE_SIZE  64
 
-/** Maximum number of space-separated arguments per command */
+/**
+ * @brief Maximum number of space-separated arguments per command.
+ *
+ * Bounds the argv array the parser fills (argv[0] is the command
+ * name).  Tokens beyond this count are not parsed.
+ */
 #define TIKU_SHELL_MAX_ARGS   8
 
-/** I/O poll interval (ticks). TIKU_CLOCK_SECOND/20 ~ 50 ms */
+/**
+ * @brief I/O poll interval in clock ticks.
+ *
+ * Period of the shell process's poll timer: the protothread wakes
+ * this often to drain input and service jobs/rules.  TIKU_CLOCK_SECOND
+ * / 20 is roughly 50 ms — responsive to typing yet rare enough to
+ * keep the CPU mostly idle.
+ */
 #define TIKU_SHELL_POLL_TICKS (TIKU_CLOCK_SECOND / 20)
 
 /*---------------------------------------------------------------------------*/
@@ -80,11 +108,20 @@ typedef struct {
  * @brief Return the NULL-terminated command table.
  *
  * Useful for commands (like "help") that need to enumerate all
- * registered commands.
+ * registered commands.  The returned array includes category-header
+ * entries whose handler is NULL; callers that walk it must skip those
+ * and stop at the sentinel whose name is NULL.
+ *
+ * @return Pointer to the first element of the static command table.
  */
 const tiku_shell_cmd_t *tiku_shell_get_commands(void);
 
-/** The shell process */
+/**
+ * @brief The shell process control block.
+ *
+ * Defined in tiku_shell.c via TIKU_PROCESS().  Exposed so callers
+ * (and tiku_shell_init()) can register it with the scheduler.
+ */
 extern struct tiku_process tiku_shell_process;
 
 /**

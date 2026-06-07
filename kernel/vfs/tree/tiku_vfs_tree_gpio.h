@@ -1,0 +1,67 @@
+/*
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_vfs_tree_gpio.h - /dev/gpio and /dev/gpio_dir VFS nodes
+ *
+ * Linkage contract for the GPIO subtrees: both children tables are
+ * exported together with the port count, consumed by the /dev
+ * assembly in tiku_vfs_tree_dev.c.  Unlike the fixed-size NCHILD
+ * macros of other modules, the count here is derived from the
+ * device header's TIKU_DEVICE_HAS_PORTn flags so it tracks the
+ * selected silicon automatically.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef TIKU_VFS_TREE_GPIO_H_
+#define TIKU_VFS_TREE_GPIO_H_
+
+#include "tiku.h"
+#include <kernel/vfs/tiku_vfs.h>
+
+/**
+ * @brief Number of GPIO ports exposed under /dev/gpio and
+ *        /dev/gpio_dir.
+ *
+ * Computed from the per-device TIKU_DEVICE_HAS_PORTn macros (each
+ * 0 or 1), so selecting a different MSP430 variant resizes both
+ * tables without touching this module.  Every device header must
+ * define all four flags.
+ */
+#define TIKU_VFS_TREE_GPIO_NPORTS ( \
+    TIKU_DEVICE_HAS_PORT1 + TIKU_DEVICE_HAS_PORT2 + \
+    TIKU_DEVICE_HAS_PORT3 + TIKU_DEVICE_HAS_PORT4)
+
+/**
+ * @brief /dev/gpio children: one "1".."4" directory per available
+ *        port, each holding eight pin files "0".."7".
+ *
+ * Referenced by the /dev directory table in tiku_vfs_tree_dev.c.
+ */
+extern const tiku_vfs_node_t tiku_vfs_tree_gpio_children[];
+
+/**
+ * @brief /dev/gpio_dir children: one direction-summary file per
+ *        available port ("IIOOIIII\n" style).
+ *
+ * Referenced by the /dev directory table in tiku_vfs_tree_dev.c.
+ */
+extern const tiku_vfs_node_t tiku_vfs_tree_gpio_dir_children[];
+
+#endif /* TIKU_VFS_TREE_GPIO_H_ */

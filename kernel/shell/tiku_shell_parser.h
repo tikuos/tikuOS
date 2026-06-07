@@ -1,5 +1,6 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
@@ -10,6 +11,13 @@
  * token in the registered command table, and dispatches to the
  * matching handler.  Transport-agnostic — uses SHELL_PRINTF for any
  * output (unknown-command message, etc.).
+ *
+ * The interface is two calls: tiku_shell_parser_init() latches the
+ * command table once at startup, and tiku_shell_parser_execute()
+ * processes one assembled line.  Built-in commands are matched before
+ * the FRAM-backed alias table, and alias bodies may chain commands
+ * with ';'; both of those behaviours live in the implementation.  All
+ * tokenisation is done in place in the caller's buffer.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.

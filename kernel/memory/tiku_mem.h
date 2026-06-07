@@ -765,6 +765,171 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
                              uint32_t *write_count);
 
 /*---------------------------------------------------------------------------*/
+/* PERSISTENT CELLS — declared magic-gated NVM values                        */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The static counterpart to the key-value store above.  A cell is a
+ * single value in the `.persistent` section paired with a magic-word
+ * gate, declared at compile time and validated once at boot.  This
+ * codifies the idiom that boot_count, cold_boots, the device name and
+ * the RTC epoch each used to hand-roll:
+ *
+ *   1. magic gate    — a sentinel beside the data distinguishes real
+ *                      persisted state from virgin/corrupted NVM
+ *   2. MPU window    — every store is bracketed by
+ *                      tiku_mpu_unlock_nvm()/tiku_mpu_lock_nvm()
+ *   3. commit order  — data is written before the gate, so a power
+ *                      cut mid-prime leaves "virgin", never
+ *                      "valid-looking garbage"
+ *
+ * Atomicity: the unit of power-cut atomicity is the architecture
+ * word (16 bits on MSP430, 32 bits on ARM).  A multi-word update
+ * (uint32_t on MSP430, blobs anywhere) can tear if power is lost
+ * between the word stores; cell_commit() bounds the damage to the
+ * value (the gate is stamped last), cell_write() assumes the gate is
+ * already valid and leaves it untouched.
+ *
+ * Reads are plain variable reads — cells are memory-mapped, so the
+ * read path never unlocks the MPU and costs nothing.
+ *
+ * Unlike the key-value store, cells have no runtime registry, no
+ * string keys, and no lookup: the descriptor is `static const`
+ * (zero SRAM) and resolution happens at link time.
+ */
+
+/** @brief Descriptor for one magic-gated persistent cell */
+typedef struct {
+    void        *data;     /**< NVM-resident value storage            */
+    uint32_t    *gate;     /**< NVM-resident magic-word gate          */
+    const void  *def;      /**< default primed on first boot
+                                (NULL = zero-fill)                    */
+    uint16_t     size;     /**< value size in bytes                   */
+    uint16_t     def_size; /**< bytes of @ref def to copy (<= size)   */
+    uint32_t     key;      /**< gate value that marks the cell valid  */
+} tiku_persist_cell_t;
+
+/**
+ * @brief Declare the gate and descriptor for an existing
+ *        `.persistent` variable.
+ *
+ * The caller declares the value variable itself (so it stays
+ * readable by name); this macro adds the FRAM gate cell and a
+ * link-time-resolved `static const` descriptor:
+ *
+ *   static uint32_t __attribute__((section(".persistent")))
+ *       boot_count_persist;
+ *   TIKU_PERSIST_CELL(boot_count_cell, boot_count_persist,
+ *                     0xB007C001UL, NULL, 0);
+ *
+ * @param cell     Descriptor identifier to define
+ * @param var      The `.persistent` value variable (size taken by
+ *                 sizeof)
+ * @param key_val  Magic value gating this cell — unique per cell;
+ *                 bump it when the cell's meaning/layout changes
+ * @param def_ptr  Default value primed on first boot (NULL = zeros)
+ * @param def_len  Bytes of @p def_ptr to copy (0 with NULL)
+ */
+#define TIKU_PERSIST_CELL(cell, var, key_val, def_ptr, def_len)        \
+    static uint32_t __attribute__((section(".persistent")))            \
+        cell##_gate;                                                   \
+    static const tiku_persist_cell_t cell = {                          \
+        &(var), &cell##_gate, (def_ptr),                               \
+        (uint16_t)sizeof(var), (def_len), (key_val)                    \
+    }
+
+/**
+ * @brief Validate a cell's gate; prime defaults on a virgin NVM.
+ *
+ * Call once at boot per cell, before the first read.  When the gate
+ * already holds the key the persisted value is real and untouched.
+ * Otherwise the cell is zero-filled, the default copied in, and the
+ * gate stamped LAST (the commit point).
+ *
+ * @param c  Cell descriptor
+ * @return 1 when the cell was primed this boot (virgin or corrupted
+ *         NVM, or a layout change moved the gate), 0 when the
+ *         persisted value was kept
+ */
+uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c);
+
+/**
+ * @brief Report whether a cell's gate currently validates.
+ *
+ * Lock-free single compare.  After cell_init() this is always true;
+ * it exists for read paths that may run before init or want to
+ * detect in-field corruption (see tiku_rtc_get_seconds()).
+ *
+ * @param c  Cell descriptor
+ * @return Non-zero when the gate holds the key
+ */
+uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c);
+
+/**
+ * @brief Update a cell's value (gate untouched).
+ *
+ * Copies min(@p len, cell size) bytes under one MPU unlock window.
+ * Use after cell_init() has validated the gate; for a self-
+ * validating write use tiku_persist_cell_commit().
+ *
+ * @param c    Cell descriptor
+ * @param src  New value bytes
+ * @param len  Bytes to copy (clamped to the cell size)
+ */
+void tiku_persist_cell_write(const tiku_persist_cell_t *c,
+                             const void *src, uint16_t len);
+
+/**
+ * @brief Update a cell's value, then stamp the gate (in that order).
+ *
+ * The self-validating write: data stores complete before the gate
+ * store, so a power cut inside the window leaves either the old
+ * state or a fully-written value — never a stamped gate over torn
+ * defaults.  Use when the write itself establishes validity (e.g.
+ * setting the RTC on a never-initialised device).
+ *
+ * @param c    Cell descriptor
+ * @param src  New value bytes
+ * @param len  Bytes to copy (clamped to the cell size)
+ */
+void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
+                              const void *src, uint16_t len);
+
+/**
+ * @brief Convenience word write for uint32_t cells.
+ *
+ * Equivalent to tiku_persist_cell_write(c, &v, 4).  Single store on
+ * 32-bit targets; two word stores on MSP430 (see the atomicity note
+ * above).
+ *
+ * @param c  Cell descriptor (size must be 4)
+ * @param v  New value
+ */
+void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
+                                 uint32_t v);
+
+/**
+ * @brief Number of cells validated by cell_init() this boot.
+ *
+ * Exposed at /sys/persist/cells.
+ *
+ * @return Count of cell_init() calls since reset
+ */
+uint8_t tiku_persist_cell_count(void);
+
+/**
+ * @brief Number of cells that had to be primed this boot.
+ *
+ * Exposed at /sys/persist/primed.  On an established device this is
+ * normally 0; non-zero after the first boot following a reflash that
+ * moved the `.persistent` layout, an NVM wipe — or in-field
+ * corruption, which makes it a cheap forensic signal.
+ *
+ * @return Count of cell_init() calls that returned 1 since reset
+ */
+uint8_t tiku_persist_cell_primed(void);
+
+/*---------------------------------------------------------------------------*/
 /* MPU (MEMORY PROTECTION UNIT)                                              */
 /*---------------------------------------------------------------------------*/
 

@@ -1,5 +1,6 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
@@ -10,6 +11,23 @@
  * one per enabled driver. The table itself is populated by the
  * `drivers/` repo's tiku_drv_table.c when present, or by
  * tiku_drv_empty_table.c (zero length) otherwise.
+ *
+ * This header exposes just the two table symbols and the two entry
+ * points (init-all, find-by-name); the descriptor type itself lives
+ * in tiku_drv.h.  Keeping the surface this small is what lets the
+ * optional drivers/ repo drop in without touching core kernel code.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

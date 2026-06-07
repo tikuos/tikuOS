@@ -1,25 +1,49 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_shell_jobs.c - Periodic and one-shot job scheduler
  *
- * Implements a minimal in-process scheduler for `every`, `once`, and
- * `jobs` commands.  The job table is a small static SRAM array.
- * tiku_shell_jobs_tick() is called from the shell's main loop after
- * input drain; it walks the table, fires any due job by re-running
- * its stored command line through tiku_shell_parser_execute(), then
- * either re-arms the slot (every) or frees it (once).
+ * Implements a minimal in-process scheduler for the `every`, `once`,
+ * and `jobs` shell commands.  The job table is a small static SRAM
+ * array of TIKU_SHELL_JOBS_MAX slots; each slot stores a job type, an
+ * interval in seconds, a wall-clock deadline, and the command line to
+ * re-dispatch.  A slot is free exactly when its type field equals
+ * TIKU_SHELL_JOB_FREE (== 0), which is the value the BSS zero-fill
+ * leaves at boot, so no explicit init pass is required.
  *
- * Re-entrancy: dispatch happens after the slot's deadline has been
- * advanced (or the slot freed), so a command that mutates the job
- * table (e.g. `jobs del`, `every`, `once`) leaves a coherent state
- * for the rest of the tick loop.  Long-running shell commands run
- * synchronously, so a job that calls e.g. `watch` blocks all other
- * jobs and the shell prompt -- by design, since this is a cooperative
- * scheduler.
+ * Job lifecycle: tiku_shell_jobs_add() (directly or via the argv
+ * helper) claims the first free slot, copies the command body, and
+ * arms the deadline at tiku_clock_seconds() + interval_sec for both
+ * job types.  tiku_shell_jobs_tick() is called from the shell's main
+ * loop after input drain; it walks the table and, for every slot whose
+ * deadline has been reached, re-runs the stored command line through
+ * tiku_shell_parser_execute().  An EVERY job is then re-armed to fire
+ * again interval_sec later; a ONCE job frees its slot.  Slots can also
+ * be released explicitly via tiku_shell_jobs_del() or in bulk via
+ * tiku_shell_jobs_clear().
+ *
+ * Time model: all deadlines are absolute "seconds since system start"
+ * from tiku_clock_seconds() (see tiku_clock.h) -- not an epoch wall
+ * clock.  This means re-arm is drift-free relative to the firing tick
+ * (next = now + interval) but a stalled tick loop can let several
+ * fires collapse into a single catch-up fire.
+ *
+ * Persistence: none.  The table lives in SRAM, so all jobs are lost
+ * across reset, brownout, and power loss.  tiku_shell_jobs_init() is a
+ * placeholder hook reserved for a future FRAM-backed variant.
+ *
+ * Re-entrancy: within a single firing, the command line is copied to a
+ * local buffer and the slot is advanced (re-armed) or freed *before*
+ * the command is dispatched.  So a command that mutates the job table
+ * (e.g. `jobs del`, `every`, `once`) observes a coherent table and the
+ * current slot cannot double-fire in the same tick.  Long-running shell
+ * commands run synchronously, so a job that calls e.g. `watch` blocks
+ * all other jobs and the shell prompt -- by design, since this is a
+ * cooperative scheduler.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +73,15 @@
 /* PRIVATE STATE                                                             */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * Fixed-size table of scheduled jobs (SRAM, not persistent).
+ *
+ * Indexed by slot id; the id returned by tiku_shell_jobs_add() is the
+ * index into this array.  A slot is free exactly when its .type field
+ * is TIKU_SHELL_JOB_FREE (== 0); the BSS zero-fill therefore leaves
+ * every slot free at boot with no explicit init.  Capacity is
+ * TIKU_SHELL_JOBS_MAX (see tiku_shell_jobs.h, default 4).
+ */
 static tiku_shell_job_t job_table[TIKU_SHELL_JOBS_MAX];
 
 /*---------------------------------------------------------------------------*/
@@ -56,7 +89,18 @@ static tiku_shell_job_t job_table[TIKU_SHELL_JOBS_MAX];
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Copy a NUL-terminated string with length cap.
+ * @brief Copy a NUL-terminated command line into a slot buffer.
+ *
+ * Copies at most @p cap - 1 characters from @p src into @p dst and
+ * always NUL-terminates on success.  The copy fails (and @p dst is
+ * left partially written) only when @p src is longer than will fit,
+ * i.e. its NUL is not reached within the first @p cap - 1 bytes.  Used
+ * to populate tiku_shell_job_t::cmd, so @p cap is normally
+ * TIKU_SHELL_JOBS_CMD_MAX.
+ *
+ * @param dst  Destination buffer (at least @p cap bytes)
+ * @param cap  Capacity of @p dst in bytes, including the NUL
+ * @param src  NUL-terminated source string
  * @return 1 on success, 0 if @p src does not fit in @p cap bytes
  *         (including the NUL).
  */
@@ -82,6 +126,15 @@ job_copy_cmd(char *dst, uint8_t cap, const char *src)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise the jobs subsystem.  Call once at shell startup.
+ *
+ * Intentionally a no-op today: job_table lives in BSS, which the C
+ * runtime zeros before main(), and TIKU_SHELL_JOB_FREE == 0, so every
+ * slot is already free.  The entry point is kept for symmetry with the
+ * other shell subsystems and as the hook where FRAM-backed restore
+ * would live if jobs ever become persistent.
+ */
 void
 tiku_shell_jobs_init(void)
 {
@@ -91,6 +144,24 @@ tiku_shell_jobs_init(void)
      * a hook for future FRAM-backed persistence. */
 }
 
+/**
+ * @brief Register a new job in the first free slot.
+ *
+ * Scans job_table for the lowest-index free slot, copies @p cmd into
+ * it, and arms the first fire at tiku_clock_seconds() + interval_sec
+ * for both EVERY and ONCE jobs.  The slot's .type field is written
+ * last ("publish last"): until it is set the slot still reads as free,
+ * so a tick that races this call never sees a half-built job.
+ *
+ * @param type          TIKU_SHELL_JOB_EVERY or TIKU_SHELL_JOB_ONCE;
+ *                      any other value is rejected
+ * @param interval_sec  Seconds between fires (EVERY) or delay before
+ *                      the single fire (ONCE); must be >= 1
+ * @param cmd           NUL-terminated command line, copied into the
+ *                      slot (must fit TIKU_SHELL_JOBS_CMD_MAX)
+ * @return Slot id (0..TIKU_SHELL_JOBS_MAX-1) on success; -1 on bad
+ *         arguments, a command too long for the slot, or a full table.
+ */
 int8_t
 tiku_shell_jobs_add(tiku_shell_job_type_t type, uint16_t interval_sec,
                      const char *cmd)
@@ -120,6 +191,15 @@ tiku_shell_jobs_add(tiku_shell_job_type_t type, uint16_t interval_sec,
     return -1;
 }
 
+/**
+ * @brief Free a single job slot by id.
+ *
+ * Marks the slot free by setting .type back to TIKU_SHELL_JOB_FREE;
+ * the command body is left in place but is no longer reachable.
+ *
+ * @param id  Slot id (0..TIKU_SHELL_JOBS_MAX-1)
+ * @return 0 on success; -1 if @p id is out of range or already free.
+ */
 int8_t
 tiku_shell_jobs_del(uint8_t id)
 {
@@ -133,6 +213,14 @@ tiku_shell_jobs_del(uint8_t id)
     return 0;
 }
 
+/**
+ * @brief Free every active job slot in one pass.
+ *
+ * Marks all non-free slots as TIKU_SHELL_JOB_FREE, cancelling every
+ * pending and recurring job at once.
+ *
+ * @return Number of slots that were active and have now been freed.
+ */
 uint8_t
 tiku_shell_jobs_clear(void)
 {
@@ -148,6 +236,28 @@ tiku_shell_jobs_clear(void)
     return n;
 }
 
+/**
+ * @brief Parse an interval + command out of a shell argv and schedule.
+ *
+ * Convenience wrapper for the `every` and `once` command handlers.
+ * Expected layout: argv[0] = command name (used only in messages),
+ * argv[1] = decimal interval in seconds, argv[2..argc-1] = the command
+ * tokens to run when the job fires.  The interval is parsed digit by
+ * digit with an overflow guard against the uint16_t range (max 65535
+ * seconds) and must be >= 1.  The trailing tokens are joined with
+ * single spaces into one command line, which must fit
+ * TIKU_SHELL_JOBS_CMD_MAX (truncation is rejected, not silently cut).
+ * The assembled job is then handed to tiku_shell_jobs_add().
+ *
+ * Side effects: prints a single-line diagnostic via SHELL_PRINTF on
+ * any failure (usage, bad/out-of-range interval, command too long, no
+ * free slot).  Success is silent -- the user runs `jobs` to confirm.
+ *
+ * @param type  TIKU_SHELL_JOB_EVERY or TIKU_SHELL_JOB_ONCE
+ * @param argc  Argument count as received by the command handler
+ * @param argv  Argument vector; see the layout above
+ * @return Slot id (>= 0) on success, -1 on any error (message printed).
+ */
 int8_t
 tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
                                const char *argv[])
@@ -221,6 +331,18 @@ tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
     return id;
 }
 
+/**
+ * @brief Read-only inspection of a job slot (for the `jobs` listing).
+ *
+ * Returns a pointer into job_table so the caller can render the job's
+ * type, interval, deadline, and command without copying.  The pointer
+ * is valid only until the slot is freed or overwritten; callers must
+ * not modify the slot through it.
+ *
+ * @param id  Slot id (0..TIKU_SHELL_JOBS_MAX-1)
+ * @return Pointer to the job, or NULL if @p id is out of range or the
+ *         slot is free.
+ */
 const tiku_shell_job_t *
 tiku_shell_jobs_get(uint8_t id)
 {
@@ -233,6 +355,26 @@ tiku_shell_jobs_get(uint8_t id)
     return &job_table[id];
 }
 
+/**
+ * @brief Periodic dispatcher; called from the shell main loop.
+ *
+ * Snapshots the current second once, then walks every slot.  For each
+ * active slot whose deadline (next_fire_sec) is at or before now, it:
+ *   1. copies the command line into a local writable buffer (the
+ *      parser tokenises in place, so the FRAM-free SRAM slot must not
+ *      be tokenised directly);
+ *   2. re-arms the slot for EVERY jobs (next_fire_sec = now + interval)
+ *      or frees it for ONCE jobs -- done before dispatch so a command
+ *      that edits the table sees a coherent state and this slot cannot
+ *      double-fire in the same pass;
+ *   3. dispatches the copy via tiku_shell_parser_execute().
+ *
+ * A missed deadline collapses to a single catch-up fire: re-arming
+ * from now (not from the old deadline) means a stalled tick loop does
+ * not replay every interval it slept through.  Dispatch is synchronous,
+ * so a long-running scheduled command stalls the rest of this pass and
+ * the shell prompt.
+ */
 void
 tiku_shell_jobs_tick(void)
 {

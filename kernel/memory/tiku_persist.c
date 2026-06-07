@@ -340,3 +340,222 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 
     return (entry->write_count >= TIKU_PERSIST_WEAR_THRESHOLD) ? 1 : 0;
 }
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT CELLS — declared magic-gated NVM values                        */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * See the design discussion in tiku_mem.h.  The functions below are
+ * the single implementation of the magic-gate / MPU-window / commit-
+ * ordering idiom that the boot counter, lifetime accumulator, device
+ * name and RTC epoch previously each hand-rolled.
+ *
+ * NVM access routing: variable-length data copies go through the
+ * tiku_mem_arch_nvm_write() HAL so platforms with per-range write
+ * hooks (ECC scrub, cache maintenance) see every cell write; the
+ * opaque cross-TU call also acts as a compiler barrier that pins
+ * the data-before-gate store order.  The two word-sized stores
+ * (gate stamp, write_u32 fast path) stay direct ON PURPOSE: they
+ * are the atomicity-critical stores, and a single aligned word
+ * store is power-cut-atomic where the HAL's byte loop is not.
+ * Durability is platform-owned either way — tiku_mpu_lock_nvm()
+ * calls tiku_mem_arch_nvm_flush(), which commits everything written
+ * inside the window (no-op on FRAM, flash-sector snapshot on
+ * RP2350); direct stores and HAL writes are equally covered.
+ */
+
+/** Zero source for chunked default-fill through the NVM HAL */
+static const uint8_t cell_zeros[16];
+
+/**
+ * @brief Zero-fill a cell's data through the NVM write HAL.
+ *
+ * @param c  Cell descriptor
+ */
+static void cell_zero_fill(const tiku_persist_cell_t *c)
+{
+    uint16_t off = 0;
+
+    while (off < c->size) {
+        uint16_t n = (uint16_t)(c->size - off);
+        if (n > (uint16_t)sizeof(cell_zeros)) {
+            n = (uint16_t)sizeof(cell_zeros);
+        }
+        tiku_mem_arch_nvm_write((uint8_t *)c->data + off,
+                                cell_zeros, n);
+        off = (uint16_t)(off + n);
+    }
+}
+
+/**
+ * Cells validated by tiku_persist_cell_init() since reset.  SRAM
+ * (per-boot statistic); served by /sys/persist/cells.
+ */
+static uint8_t cell_count;
+
+/**
+ * Of those, cells that had to be primed (gate mismatch).  SRAM;
+ * served by /sys/persist/primed.  Non-zero on an established device
+ * signals a layout change, an NVM wipe, or in-field corruption.
+ */
+static uint8_t cell_primed;
+
+/**
+ * @brief Validate a cell's gate; prime defaults on a virgin NVM.
+ *
+ * The commit-ordering discipline lives here, once: the value bytes
+ * (zero-fill, then the default) are fully written BEFORE the gate is
+ * stamped, so a power cut anywhere inside the window leaves the gate
+ * invalid and the next boot simply re-primes.  A stamped gate over
+ * half-written defaults cannot occur.
+ *
+ * @param c  Cell descriptor (from TIKU_PERSIST_CELL)
+ * @return 1 when the cell was primed this boot, 0 when the persisted
+ *         value was kept
+ */
+uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
+{
+    uint16_t saved;
+    uint16_t n;
+
+    if (c == NULL) {
+        return 0;
+    }
+
+    cell_count++;
+
+    if (*c->gate == c->key) {
+        return 0;               /* persisted value is real — keep it */
+    }
+
+    /* Virgin (or corrupted) NVM: prime defaults, gate stamped last.
+     * Data flows through the NVM HAL; the gate is one direct word
+     * store (power-cut-atomic — see the routing note above). */
+    saved = tiku_mpu_unlock_nvm();
+    cell_zero_fill(c);
+    if (c->def != NULL && c->def_size > 0) {
+        n = (c->def_size > c->size) ? c->size : c->def_size;
+        tiku_mem_arch_nvm_write((uint8_t *)c->data,
+                                (const uint8_t *)c->def, n);
+    }
+    *c->gate = c->key;          /* commit point */
+    tiku_mpu_lock_nvm(saved);
+
+    cell_primed++;
+    return 1;
+}
+
+/**
+ * @brief Report whether a cell's gate currently validates.
+ *
+ * @param c  Cell descriptor
+ * @return Non-zero when the gate holds the key
+ */
+uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c)
+{
+    return (c != NULL && *c->gate == c->key) ? 1u : 0u;
+}
+
+/**
+ * @brief Update a cell's value (gate untouched).
+ *
+ * @param c    Cell descriptor
+ * @param src  New value bytes
+ * @param len  Bytes to copy (clamped to the cell size)
+ */
+void tiku_persist_cell_write(const tiku_persist_cell_t *c,
+                             const void *src, uint16_t len)
+{
+    uint16_t saved;
+
+    if (c == NULL || src == NULL) {
+        return;
+    }
+    if (len > c->size) {
+        len = c->size;
+    }
+
+    saved = tiku_mpu_unlock_nvm();
+    tiku_mem_arch_nvm_write((uint8_t *)c->data,
+                            (const uint8_t *)src, len);
+    tiku_mpu_lock_nvm(saved);
+}
+
+/**
+ * @brief Update a cell's value, then stamp the gate (in that order).
+ *
+ * @param c    Cell descriptor
+ * @param src  New value bytes
+ * @param len  Bytes to copy (clamped to the cell size)
+ */
+void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
+                              const void *src, uint16_t len)
+{
+    uint16_t saved;
+
+    if (c == NULL || src == NULL) {
+        return;
+    }
+    if (len > c->size) {
+        len = c->size;
+    }
+
+    saved = tiku_mpu_unlock_nvm();
+    tiku_mem_arch_nvm_write((uint8_t *)c->data,
+                            (const uint8_t *)src, len);
+    *c->gate = c->key;          /* commit point — after the data */
+    tiku_mpu_lock_nvm(saved);
+}
+
+/**
+ * @brief Convenience word write for uint32_t cells.
+ *
+ * When the cell is exactly a uint32_t (the macro guarantees natural
+ * alignment, since the caller declared the variable), this compiles
+ * to direct stores — one on ARM, two 16-bit words on MSP430.
+ *
+ * @param c  Cell descriptor (size must be 4)
+ * @param v  New value
+ */
+void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
+                                 uint32_t v)
+{
+    uint16_t saved;
+
+    if (c == NULL) {
+        return;
+    }
+
+    saved = tiku_mpu_unlock_nvm();
+    if (c->size == sizeof(uint32_t)) {
+        /* Direct aligned store on purpose: power-cut-atomic at
+         * word granularity, where the HAL's byte loop is not. */
+        *(uint32_t *)c->data = v;
+    } else {
+        tiku_mem_arch_nvm_write((uint8_t *)c->data, (const uint8_t *)&v,
+                                (c->size < sizeof(uint32_t))
+                                    ? c->size : (uint16_t)sizeof(uint32_t));
+    }
+    tiku_mpu_lock_nvm(saved);
+}
+
+/**
+ * @brief Number of cells validated by cell_init() this boot.
+ *
+ * @return Count of cell_init() calls since reset
+ */
+uint8_t tiku_persist_cell_count(void)
+{
+    return cell_count;
+}
+
+/**
+ * @brief Number of cells that had to be primed this boot.
+ *
+ * @return Count of cell_init() calls that returned 1 since reset
+ */
+uint8_t tiku_persist_cell_primed(void)
+{
+    return cell_primed;
+}

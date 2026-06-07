@@ -7,16 +7,40 @@
  *
  * tiku_shell_alias.c - FRAM-backed shell alias table
  *
- * Storage layout: a fixed-size array in .persistent, paired
- * with a magic word for first-boot detection. Each slot holds
- * a NUL-terminated name and a NUL-terminated body; an empty
- * name (name[0] == '\0') means the slot is free.
+ * Implements the user-defined command shortcuts the shell parser
+ * consults after a built-in command lookup misses.  An alias maps a
+ * short name to a body string (which may itself chain commands with
+ * ';'); the parser substitutes the body and re-dispatches it.
+ *
+ * Storage layout: a fixed-size array of TIKU_SHELL_ALIAS_MAX slots in
+ * the .persistent (FRAM) section, paired with a 32-bit magic word for
+ * first-boot detection.  Each slot holds a NUL-terminated name
+ * (up to TIKU_SHELL_ALIAS_NAME_MAX chars) and a NUL-terminated body
+ * (up to TIKU_SHELL_ALIAS_BODY_MAX chars); a slot is free exactly when
+ * its name is empty (name[0] == '\0').  Lookup is a linear scan with
+ * strcmp() name matching; there is no ordering or hashing.
+ *
+ * Persistence model: because the table lives in FRAM, aliases survive
+ * reset, brownout, and power loss.  Every mutator (init prime, set,
+ * clear) brackets its FRAM writes with tiku_mpu_unlock_nvm() /
+ * tiku_mpu_lock_nvm() so the MPU keeps NVM write-protected the rest of
+ * the time; read paths (lookup, get, count) touch FRAM directly but
+ * never write, so they need no unlock.  The magic word distinguishes a
+ * virgin or reflashed FRAM from a real persisted table: when it does
+ * not match at init, every slot is emptied and the magic is stamped so
+ * the prime runs exactly once per FRAM lifetime.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,16 +53,47 @@
 /* FRAM STORAGE                                                              */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * Magic word guarding the persistent alias table.
+ *
+ * An arbitrary fixed 32-bit constant (the hex spells "ALIAS-EP").  The
+ * odds of uninitialised FRAM matching it are 1 in 2^32, so a mismatch
+ * at init reliably means a virgin or reflashed FRAM.  Bump this value
+ * if the slot layout ever changes incompatibly, which forces a clean
+ * re-prime on the next boot.
+ */
 #define ALIAS_MAGIC  0xA11A5E50UL   /* "ALIAS-EP", arbitrary fixed value */
 
+/**
+ * One alias table slot: a name and its expansion body.
+ *
+ * Each array is sized one byte larger than its MAX so a maximum-length
+ * string still has room for the terminating NUL.  A slot is considered
+ * free when name[0] == '\0'.
+ */
 typedef struct {
     char name[TIKU_SHELL_ALIAS_NAME_MAX + 1];
     char body[TIKU_SHELL_ALIAS_BODY_MAX + 1];
 } alias_slot_t;
 
+/**
+ * FRAM-resident alias table (.persistent), TIKU_SHELL_ALIAS_MAX slots.
+ *
+ * Survives reset, brownout, and power loss.  Indexed by slot number;
+ * the index passed to tiku_shell_alias_get() addresses this array
+ * directly.  Mutated only under a tiku_mpu_unlock_nvm()/lock_nvm()
+ * bracket; read directly without unlocking.
+ */
 static alias_slot_t __attribute__((section(".persistent")))
     alias_table[TIKU_SHELL_ALIAS_MAX];
 
+/**
+ * FRAM cell (.persistent): validity gate for alias_table.
+ *
+ * Holds ALIAS_MAGIC once the table has been primed.  Any other value
+ * (including the all-ones / all-zeros of a fresh FRAM) triggers a
+ * one-time re-init in tiku_shell_alias_init().
+ */
 static uint32_t __attribute__((section(".persistent")))
     alias_magic;
 
@@ -46,7 +101,15 @@ static uint32_t __attribute__((section(".persistent")))
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/* Find slot index for an exact name match. Returns -1 if absent. */
+/**
+ * @brief Find the table index of an alias by exact name.
+ *
+ * Linear scan over occupied slots (name[0] != '\0') using strcmp() for
+ * an exact, case-sensitive match.
+ *
+ * @param name  NUL-terminated alias name to look for
+ * @return Slot index [0, TIKU_SHELL_ALIAS_MAX) on a hit, -1 if absent.
+ */
 static int
 find_slot(const char *name)
 {
@@ -60,7 +123,13 @@ find_slot(const char *name)
     return -1;
 }
 
-/* Find first empty slot. Returns -1 if all are occupied. */
+/**
+ * @brief Find the lowest-index free slot in the table.
+ *
+ * A slot is free when its name is empty (name[0] == '\0').
+ *
+ * @return Index of the first free slot, or -1 if all are occupied.
+ */
 static int
 find_free_slot(void)
 {
@@ -77,6 +146,17 @@ find_free_slot(void)
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Validate the FRAM magic word; prime the table on first boot.
+ *
+ * If alias_magic already equals ALIAS_MAGIC the table is a valid
+ * persisted one and the call returns immediately -- so this is
+ * idempotent and cheap to call on every boot.  Otherwise the FRAM is
+ * virgin or was reflashed with a different magic: under a single
+ * tiku_mpu_unlock_nvm()/lock_nvm() bracket, every slot's name and body
+ * are emptied and the magic is stamped, so the prime runs at most once
+ * per FRAM lifetime.  Call once during shell startup.
+ */
 void
 tiku_shell_alias_init(void)
 {
@@ -99,6 +179,27 @@ tiku_shell_alias_init(void)
     tiku_mpu_lock_nvm(mpu_saved);
 }
 
+/**
+ * @brief Define a new alias or overwrite an existing one.
+ *
+ * If @p name already exists its slot is reused (body replaced);
+ * otherwise the first free slot is claimed.  Both name and body are
+ * copied byte by byte into the FRAM slot and NUL-terminated, under a
+ * single tiku_mpu_unlock_nvm()/lock_nvm() bracket.  The change is
+ * persistent immediately.
+ *
+ * Validation precedes any FRAM write: a NULL pointer or empty name is
+ * rejected, and name/body are length-checked against
+ * TIKU_SHELL_ALIAS_NAME_MAX / TIKU_SHELL_ALIAS_BODY_MAX (the trailing
+ * NUL does not count toward those limits).
+ *
+ * @param name  Alias name (non-empty, <= TIKU_SHELL_ALIAS_NAME_MAX)
+ * @param body  Expansion text (<= TIKU_SHELL_ALIAS_BODY_MAX)
+ * @return TIKU_SHELL_ALIAS_OK on success;
+ *         TIKU_SHELL_ALIAS_ERR_INVALID for a NULL/empty name or NULL
+ *         body; TIKU_SHELL_ALIAS_ERR_TOOBIG if either string exceeds
+ *         its limit; TIKU_SHELL_ALIAS_ERR_FULL if no slot is available.
+ */
 int
 tiku_shell_alias_set(const char *name, const char *body)
 {
@@ -138,6 +239,18 @@ tiku_shell_alias_set(const char *name, const char *body)
     return TIKU_SHELL_ALIAS_OK;
 }
 
+/**
+ * @brief Remove an alias by name.
+ *
+ * Locates the slot via find_slot() and frees it by emptying both its
+ * name and body, under a tiku_mpu_unlock_nvm()/lock_nvm() bracket so
+ * the removal persists.
+ *
+ * @param name  Alias name to remove
+ * @return TIKU_SHELL_ALIAS_OK on success;
+ *         TIKU_SHELL_ALIAS_ERR_INVALID if @p name is NULL;
+ *         TIKU_SHELL_ALIAS_ERR_NOTFOUND if no such alias exists.
+ */
 int
 tiku_shell_alias_clear(const char *name)
 {
@@ -160,6 +273,16 @@ tiku_shell_alias_clear(const char *name)
     return TIKU_SHELL_ALIAS_OK;
 }
 
+/**
+ * @brief Look up an alias body by name (the parser's hot path).
+ *
+ * Read-only: returns a pointer to the FRAM-resident body string, so no
+ * MPU unlock is needed.  A NULL @p name is treated as "not found".
+ *
+ * @param name  Alias name to resolve
+ * @return Pointer to the body string, or NULL if @p name is NULL or
+ *         undefined.  The caller must not modify the returned string.
+ */
 const char *
 tiku_shell_alias_lookup(const char *name)
 {
@@ -167,6 +290,21 @@ tiku_shell_alias_lookup(const char *name)
     return (slot < 0) ? (const char *)0 : alias_table[slot].body;
 }
 
+/**
+ * @brief Fetch the name and body of the alias at a given slot index.
+ *
+ * Enumeration helper for listing aliases.  On a populated slot it sets
+ * *@p name and *@p body to the FRAM-resident strings (each output is
+ * optional -- pass NULL to skip it) and returns 1.  Read-only; no MPU
+ * unlock.  Note this addresses slots by raw index, so empty slots in
+ * the middle of the table return 0 and must be skipped by the caller.
+ *
+ * @param idx   Slot index in [0, TIKU_SHELL_ALIAS_MAX)
+ * @param name  Out: receives the name pointer (may be NULL to skip)
+ * @param body  Out: receives the body pointer (may be NULL to skip)
+ * @return 1 if the slot is populated; 0 if @p idx is out of range or
+ *         the slot is empty.  Caller must not modify the strings.
+ */
 int
 tiku_shell_alias_get(uint8_t idx, const char **name, const char **body)
 {
@@ -185,6 +323,13 @@ tiku_shell_alias_get(uint8_t idx, const char **name, const char **body)
     return 1;
 }
 
+/**
+ * @brief Count the currently-defined aliases.
+ *
+ * Linear scan counting occupied slots (name[0] != '\0').  Read-only.
+ *
+ * @return Number of defined aliases, 0..TIKU_SHELL_ALIAS_MAX.
+ */
 uint8_t
 tiku_shell_alias_count(void)
 {

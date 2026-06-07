@@ -53,6 +53,19 @@
 
 /**
  * @brief Round a size up to the platform's required alignment
+ *
+ * Uses TIKU_MEM_ARCH_ALIGNMENT (provided by the memory HAL) so the
+ * same code works across 16-bit, 32-bit, and 64-bit targets. Every
+ * sub-buffer carved from a tier pool is sized through this helper so
+ * that each returned bump pointer lands on a natural boundary.
+ *
+ * The standard power-of-two round-up formula:
+ *   (size + (align - 1)) & ~(align - 1)
+ *
+ * Example (alignment = 4): 3 -> 4, 4 -> 4, 5 -> 8, 0 -> 0
+ *
+ * @param size  Raw size in bytes
+ * @return Size rounded up to TIKU_MEM_ARCH_ALIGNMENT boundary
  */
 static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
@@ -71,11 +84,29 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  *
  * The caller controls pool sizes via TIKU_TIER_SRAM_SIZE and
  * TIKU_TIER_NVM_SIZE defines (set before including tiku_mem.h).
+ * Both arrays are aligned to TIKU_MEM_ARCH_ALIGNMENT so the very
+ * first byte handed out by tier_bump_alloc() is already aligned.
  */
 
+/**
+ * @brief Backing store for the SRAM tier
+ *
+ * Resides in regular .bss (volatile SRAM). Sized by
+ * TIKU_TIER_SRAM_SIZE (default 128 bytes). tiku_tier_init() points
+ * tier_state[TIKU_MEM_SRAM].buf at this array.
+ */
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_sram_buf[TIKU_TIER_SRAM_SIZE];
 
+/**
+ * @brief Backing store for the NVM tier
+ *
+ * On MSP430 this is forced into the non-volatile .persistent (FRAM)
+ * section and zero-initialized, so its contents survive reset. On host
+ * builds (no PLATFORM_MSP430) it falls back to ordinary .bss, which is
+ * sufficient for tests that exercise the tier-routing logic. Sized by
+ * TIKU_TIER_NVM_SIZE (default 1024 bytes).
+ */
 #ifdef PLATFORM_MSP430
 static uint8_t __attribute__((section(".persistent"),
                               aligned(TIKU_MEM_ARCH_ALIGNMENT)))
@@ -85,7 +116,9 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE];
 #endif
 
-/*
+/**
+ * @brief Backing store for the HIFRAM (upper FRAM bank) tier
+ *
  * HIFRAM tier backing pool — only declared when both:
  *   1. The device has an upper FRAM bank (FR5994, FR6989), and
  *   2. The build is using MEMORY_MODEL=large (set by the Makefile
@@ -99,12 +132,24 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
  * On host builds and on chip variants without HIFRAM, the array
  * doesn't exist and TIKU_TIER_HIFRAM_AVAILABLE stays 0; the tier
  * APIs that touch HIFRAM return TIKU_MEM_ERR_NOMEM gracefully.
+ *
+ * Sized by TIKU_TIER_HIFRAM_SIZE (default 32 KB). The size type is
+ * 16-bit on MSP430, so this pool cannot exceed 64 KB without widening
+ * tiku_mem_arch_size_t.
  */
 #if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM && \
     defined(TIKU_MEMORY_MODEL_LARGE) && TIKU_MEMORY_MODEL_LARGE
 TIKU_HIFRAM_BSS
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_hifram_buf[TIKU_TIER_HIFRAM_SIZE];
+/**
+ * @brief Compile-time flag: 1 when the HIFRAM tier pool exists
+ *
+ * Set to 1 on the HIFRAM + large-model path above, 0 everywhere else.
+ * Guards every site that names tier_hifram_buf or initializes the
+ * TIKU_MEM_HIFRAM slot of tier_state[], so a build without HIFRAM
+ * never references the (absent) array.
+ */
 #define TIKU_TIER_HIFRAM_AVAILABLE 1
 #else
 #define TIKU_TIER_HIFRAM_AVAILABLE 0
@@ -130,12 +175,19 @@ typedef struct {
     uint8_t               initialized; /**< Non-zero after tiku_tier_init */
 } tier_pool_state_t;
 
-/*
+/**
+ * @brief Per-tier bump-allocator state, indexed by tiku_mem_tier_t
+ *
  * Indexed by tiku_mem_tier_t. Slot 2 (AUTO) is unused at runtime —
  * AUTO is resolved to a concrete tier before any indexing happens —
  * but we leave the slot in the array so the enum-to-index mapping
  * stays direct. Slot 3 (HIFRAM) is initialized only when
  * TIKU_TIER_HIFRAM_AVAILABLE is set.
+ *
+ * Sized to TIKU_MEM_TIER_COUNT (4: SRAM, NVM, AUTO, HIFRAM). Module
+ * scope so every tier_* function shares one allocator state. Lives in
+ * .bss, so all fields (including the per-slot initialized flag) start
+ * at zero before tiku_tier_init() runs.
  */
 static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
 
@@ -143,6 +195,27 @@ static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
 /* TIER INIT                                                                 */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialize the tier allocator's backing pools
+ *
+ * Points each tier's bump-allocator state at its static backing array
+ * and resets the offset, peak, and allocation counters to zero. Must
+ * be called once after tiku_mem_init() (which sets up the region
+ * registry and MPU) and before any tiku_tier_* allocation call.
+ *
+ * The SRAM and NVM tiers are always initialized. The HIFRAM tier slot
+ * is only wired up when TIKU_TIER_HIFRAM_AVAILABLE is set (device has an
+ * upper FRAM bank AND the build is MEMORY_MODEL=large); otherwise its
+ * initialized flag stays zero and every HIFRAM path degrades to a clean
+ * "not available". The AUTO slot is deliberately left untouched — AUTO
+ * is resolved to a concrete tier before tier_state[] is ever indexed.
+ *
+ * Idempotent in effect but destructive: calling it again rewinds all
+ * bump pointers, orphaning any sub-buffers already handed out. It does
+ * not zero the NVM backing array, so persistent FRAM contents survive.
+ *
+ * @return TIKU_MEM_OK (always succeeds)
+ */
 tiku_mem_err_t tiku_tier_init(void)
 {
     tier_state[TIKU_MEM_SRAM].buf         = tier_sram_buf;
@@ -275,6 +348,30 @@ static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
 /* TIER ARENA CREATE                                                         */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Create an arena backed by the specified memory tier
+ *
+ * Resolves the requested tier (AUTO is mapped to a concrete tier by
+ * resolve_tier()), carves an aligned sub-buffer from that tier's
+ * backing pool via tier_bump_alloc(), and initializes the arena
+ * control block over it. The resulting arena behaves identically to
+ * one made with tiku_arena_create() — only the buffer source differs.
+ *
+ * The arena struct is populated directly rather than by delegating to
+ * tiku_arena_create(); see the inline comment for the two reasons (the
+ * tier pool already holds the region claim, and tier_bump_alloc()
+ * already returns an aligned base). The recorded tier is the resolved
+ * tier, so later introspection (arena->tier, tiku_tier_get()) reflects
+ * the physical placement, not the AUTO hint.
+ *
+ * @param arena  Arena control block to initialize
+ * @param tier   Memory tier hint (SRAM, NVM, HIFRAM, or AUTO)
+ * @param size   Desired arena capacity in bytes (must be > 0)
+ * @param id     User-assigned identifier for debugging (0-255)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad
+ *         arguments, TIKU_MEM_ERR_NOMEM if the resolved tier lacks
+ *         room (or is not initialized, e.g. HIFRAM on a small build)
+ */
 tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
                                        tiku_mem_tier_t tier,
                                        tiku_mem_arch_size_t size,
@@ -325,6 +422,31 @@ tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
 /* TIER POOL CREATE                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Create a fixed-size block pool backed by the specified tier
+ *
+ * Computes the exact total buffer size the pool will need — mirroring
+ * the per-block alignment and minimum-block-size logic in
+ * tiku_pool_create() so the tier carve is neither short nor wasteful —
+ * resolves the tier, carves the buffer, then hands it to
+ * tiku_pool_create() to lay out the embedded freelist.
+ *
+ * Side effect (NVM tier): tiku_pool_create() writes next-pointers into
+ * every block while building the freelist. When the resolved tier is
+ * NVM (FRAM), those writes would fault against MPU NVM write-protection,
+ * so this function brackets the create call with
+ * tiku_mpu_unlock_nvm() / tiku_mpu_lock_nvm(). On host and for non-NVM
+ * tiers the MPU helpers are no-ops, so the unbracketed path is taken.
+ * The resolved tier is stamped onto pool->tier on success.
+ *
+ * @param pool         Pool control block to initialize
+ * @param tier         Memory tier hint (SRAM, NVM, HIFRAM, or AUTO)
+ * @param block_size   Requested size of each block in bytes (must be > 0)
+ * @param block_count  Number of blocks (must be > 0)
+ * @param id           User-assigned identifier for debugging (0-255)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad
+ *         arguments, TIKU_MEM_ERR_NOMEM if the resolved tier lacks room
+ */
 tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
                                       tiku_mem_tier_t tier,
                                       tiku_mem_arch_size_t block_size,
@@ -385,6 +507,30 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
 /* TIER QUERY                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Query which memory tier a pointer belongs to
+ *
+ * Two-stage lookup. First it scans the tier allocator's own backing
+ * pools (SRAM, NVM, HIFRAM), skipping the AUTO slot which never owns a
+ * pool. This stage works on host as well as target, because the static
+ * backing arrays may not appear in the platform's region table on host.
+ * If the address is not inside any tier pool, it falls back to the
+ * region registry (tiku_region_get_type()) and maps the region type to
+ * a tier so that non-tier-managed memory (plain static buffers) still
+ * classifies.
+ *
+ * Containment is tested with uintptr_t arithmetic (addr - pool_start
+ * compared against capacity) to avoid pointer-comparison UB across
+ * distinct objects. The region-registry fallback only resolves SRAM
+ * and NVM region types; PERIPHERAL and FLASH regions have no tier and
+ * are reported as not found.
+ *
+ * @param ptr       Address to query (must be non-NULL)
+ * @param out_tier  Output: tier of the containing pool/region
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on NULL
+ *         arguments, TIKU_MEM_ERR_NOT_FOUND if the address is not in
+ *         any tier pool or tier-mappable region
+ */
 tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
                               tiku_mem_tier_t *out_tier)
 {
@@ -445,6 +591,25 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 /* TIER STATS                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Fill a stats struct with a tier backing pool's current state
+ *
+ * Reports the whole-tier high-level usage (not a single arena): total
+ * pool capacity, bytes handed out so far, the lifetime high-water mark,
+ * and the number of sub-allocations carved from the pool. This is the
+ * data the shell and /proc surface for overall tier occupancy.
+ *
+ * Rejects AUTO (it has no backing pool of its own) and any value that
+ * is not one of the three concrete tiers. A concrete tier whose
+ * initialized flag is clear — e.g. HIFRAM on a non-HIFRAM or
+ * small-model build — is reported as TIKU_MEM_ERR_INVALID, the same
+ * "not available" signal used for an as-yet-uninitialized tier.
+ *
+ * @param tier   Memory tier to query (SRAM, NVM, or HIFRAM; not AUTO)
+ * @param stats  Output statistics (must be non-NULL)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if stats is
+ *         NULL, tier is AUTO/out of range, or the tier is uninitialized
+ */
 tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
                                 tiku_mem_stats_t *stats)
 {
