@@ -40,6 +40,7 @@
 #define TIKU_SHELL_RULES_H_
 
 #include <stdint.h>
+#include <kernel/vfs/tiku_vfs.h>
 
 /*---------------------------------------------------------------------------*/
 /* CONFIGURATION                                                             */
@@ -99,6 +100,13 @@ typedef struct {
     tiku_shell_rule_op_t    op;
     uint8_t                 last_match;
     uint8_t                 _reserved;
+    /** Resolved node, cached at (re-)arm time.  Non-NULL with a
+     *  write handler means the rule is event-armed (evaluated on
+     *  TIKU_EVENT_VFS, skipped by the poll tick); non-NULL without
+     *  a write handler means a sensor-side rule that stays on the
+     *  poll path; NULL means the path did not resolve at arm time
+     *  (the poll path retries it, matching pre-watch behaviour). */
+    const tiku_vfs_node_t  *node;
     char                    path[TIKU_SHELL_RULES_PATH_MAX];
     char                    value[TIKU_SHELL_RULES_VALUE_MAX];
     char                    action[TIKU_SHELL_RULES_ACTION_MAX];
@@ -172,11 +180,31 @@ int8_t tiku_shell_rules_add_argv(uint8_t argc, const char *argv[]);
 /**
  * @brief Periodic dispatcher; called from the shell main loop.
  *
- * Walks every active rule, reads its VFS path, evaluates the relation,
- * and dispatches the action when the result transitions from false to
- * true (edge-triggered).  A rule whose VFS read fails is treated as
- * non-matching; transitions back to non-match are silent.
+ * Walks every active rule on the POLL path — sensor-side rules whose
+ * nodes change without writes, plus rules whose path did not resolve
+ * at arm time.  Rules on writable nodes are event-armed via
+ * tiku_vfs_watch() and are skipped here; they evaluate in
+ * tiku_shell_rules_on_vfs() the moment the node is written instead
+ * of up to a poll period later.  Evaluation semantics are identical
+ * on both paths: read the path, evaluate the relation, dispatch the
+ * action on a false->true edge.  A rule whose VFS read fails is
+ * treated as non-matching; transitions back to non-match are silent.
  */
 void tiku_shell_rules_tick(void);
+
+/**
+ * @brief Event-path evaluator; called from the shell protothread on
+ *        TIKU_EVENT_VFS.
+ *
+ * Evaluates exactly the active rules whose cached node matches
+ * @p node_ptr (the event's data payload), using the same
+ * edge-triggered semantics as the poll tick.  Write-to-reaction
+ * latency on this path is one event dispatch instead of up to a
+ * full shell poll period, and rules on written nodes cost nothing
+ * between events.
+ *
+ * @param node_ptr  The changed node, as delivered in the event data
+ */
+void tiku_shell_rules_on_vfs(const void *node_ptr);
 
 #endif /* TIKU_SHELL_RULES_H_ */

@@ -64,6 +64,9 @@
 #define TIKU_EVENT_USER         0x10
 #define TIKU_EVENT_TIMER        0x88
 #define TIKU_EVENT_GPIO         0x89  /**< GPIO pin edge — data carries port/pin */
+#define TIKU_EVENT_VFS          0x8A  /**< Watched VFS node changed — data
+                                           carries the const tiku_vfs_node_t*
+                                           (see tiku_vfs_watch()) */
 
 /** @brief Return code for successful process operations */
 #define TIKU_PROCESS_ERR_OK     0

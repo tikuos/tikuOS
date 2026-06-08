@@ -96,6 +96,15 @@
  */
 static tiku_shell_rule_t rule_table[TIKU_SHELL_RULES_MAX];
 
+/**
+ * The shell process owns rule evaluation: actions dispatch through
+ * the parser in shell context, and TIKU_EVENT_VFS notifications for
+ * event-armed rules are delivered to it.  Defined by TIKU_PROCESS()
+ * in tiku_shell.c; an extern object declaration against the
+ * forward-declared struct is all the watch API needs.
+ */
+extern struct tiku_process tiku_shell_process;
+
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -303,12 +312,58 @@ rules_evaluate(const char *lhs, tiku_shell_rule_op_t op, const char *rhs)
  * natural place to wire in FRAM-backed rule recovery should storage
  * move off SRAM later.
  */
+/**
+ * @brief Re-derive every rule's trigger path from current state.
+ *
+ * The watch-subscription strategy is wholesale: drop every watch the
+ * shell process holds, then walk the table and re-subscribe each
+ * ACTIVE rule whose path resolves to a writable node.  Because
+ * tiku_vfs_watch() is idempotent and unwatch_all() is one call, this
+ * is simpler and safer than tracking which subscription belonged to
+ * which (possibly just-deleted) rule — and at TIKU_SHELL_RULES_MAX
+ * of 4 the wholesale walk is a handful of path resolutions.
+ *
+ * Side effect on every ACTIVE rule: r->node is (re)cached.
+ *   - node with a write handler  -> event-armed: watched, and the
+ *     poll tick skips it (tiku_shell_rules_on_vfs() evaluates it)
+ *   - node without write handler -> sensor-side: stays on the poll
+ *     tick (its value changes without writes, so no event fires)
+ *   - unresolvable path          -> node = NULL: stays on the poll
+ *     tick, which retries the read each pass (pre-watch behaviour
+ *     for paths that appear later)
+ *
+ * Called from init, and after every successful add / del / clear.
+ */
+static void
+rules_rearm(void)
+{
+    uint8_t i;
+
+    tiku_vfs_unwatch_all(&tiku_shell_process);
+
+    for (i = 0; i < TIKU_SHELL_RULES_MAX; i++) {
+        tiku_shell_rule_t *r = &rule_table[i];
+
+        if (r->state != TIKU_SHELL_RULE_ACTIVE) {
+            r->node = (const tiku_vfs_node_t *)0;
+            continue;
+        }
+        r->node = tiku_vfs_resolve(r->path);
+        if (r->node != (const tiku_vfs_node_t *)0 &&
+            r->node->write != (tiku_vfs_write_fn)0) {
+            (void)tiku_vfs_watch(r->path, &tiku_shell_process);
+        }
+    }
+}
+
 void
 tiku_shell_rules_init(void)
 {
     /* rule_table is zero-initialised in BSS (TIKU_SHELL_RULE_FREE == 0).
-     * Hook kept for symmetry with other shell subsystems and as a place
-     * to plug FRAM recovery in future. */
+     * The re-arm is a no-op on an empty table but establishes the
+     * invariant that node caches and watch subscriptions always
+     * reflect the table from here on. */
+    rules_rearm();
 }
 
 /**
@@ -371,6 +426,7 @@ tiku_shell_rules_add(const char *path, tiku_shell_rule_op_t op,
             slot->op         = op;
             slot->last_match = 0;
             slot->state      = TIKU_SHELL_RULE_ACTIVE;   /* publish last */
+            rules_rearm();   /* cache the node; watch it if writable */
             return (int8_t)i;
         }
     }
@@ -399,6 +455,7 @@ tiku_shell_rules_del(uint8_t id)
         return -1;
     }
     rule_table[id].state = TIKU_SHELL_RULE_FREE;
+    rules_rearm();   /* drop the watch unless another rule shares it */
     return 0;
 }
 
@@ -425,6 +482,7 @@ tiku_shell_rules_clear(void)
             n++;
         }
     }
+    rules_rearm();   /* releases every watch subscription */
     return n;
 }
 
@@ -653,51 +711,133 @@ rules_copy_action(char *actionbuf, const tiku_shell_rule_t *r)
 }
 
 /**
- * @brief Periodic evaluator; called once per shell tick.
+ * @brief Trigger paths: poll tick vs. watch event.
  *
- * Walks rule_table and processes every ACTIVE slot; free slots are
- * skipped.  For each rule it reads the configured VFS path via
- * tiku_vfs_read() into a stack buffer, then strips a single trailing
- * run of '\n', '\r', and ' ' so the comparison sees just the value
- * (VFS read handlers typically append a newline — see the /sys node
- * handlers in tiku_vfs_tree_boot.c for the convention).
+ * Since the watch conversion there are two ways a rule gets
+ * evaluated, sharing one evaluator (rules_eval_one) so semantics
+ * are identical:
  *
- * Read failure (path missing or VFS error, n < 0) is not itself a
- * trigger: the rule's remembered state (last_match) is reset to 0 so
- * that when the path reappears a comparison rule re-arms its edge and
- * a CHANGED rule re-establishes its baseline, rather than spuriously
- * firing on the first good read after an outage.
+ *   - POLL (tiku_shell_rules_tick, once per shell tick): carries
+ *     sensor-side rules — nodes without a write handler, whose
+ *     values change in the world rather than through
+ *     tiku_vfs_write() — plus rules whose path did not resolve at
+ *     arm time (retried each pass, matching pre-watch behaviour).
+ *     Event-armed rules are skipped here entirely: their per-tick
+ *     cost, including side-effectful reads like ADC conversions,
+ *     is gone.
  *
- * Two evaluation paths:
- *   - OP_CHANGED: the value field holds the last-seen reading and
- *     last_match is the "baseline set" flag.  The first tick after add
- *     (or after a read failure cleared the flag) records the reading
- *     and fires nothing.  Later ticks compare the new reading against
- *     the stored one with strcmp; on any difference the action fires
- *     and the stored reading is updated, otherwise nothing happens.
- *   - Comparison ops: rules_evaluate() yields the current boolean; the
- *     action fires only on a false->true edge (fire && !last_match),
- *     and last_match is updated to the current result every tick so a
- *     sustained-true condition does not re-fire and a return to false
- *     re-arms the edge.
+ *   - EVENT (tiku_shell_rules_on_vfs, on TIKU_EVENT_VFS): carries
+ *     rules whose node is writable.  rules_rearm() subscribed them
+ *     via tiku_vfs_watch(); every successful write to the node
+ *     posts the event and the matching rules evaluate immediately
+ *     — write-to-reaction latency is one event dispatch instead of
+ *     up to a full poll period, and a value that pulses between
+ *     ticks can no longer be missed.
  *
- * Side effect: a firing rule dispatches its action synchronously
- * through tiku_shell_parser_execute() (after copying it into a scratch
- * buffer via rules_copy_action(), since the parser tokenises in
- * place).  The action therefore runs exactly as if typed at the
- * prompt, in the shell process context, before this function returns.
- * All rules are evaluated every call; there is no rate limiting beyond
- * the shell tick period.
+ * Evaluation semantics (both paths, in rules_eval_one): read the
+ * path into a stack buffer; strip the trailing '\n'/'\r'/' ' run
+ * (VFS handlers append a newline by convention); read failure
+ * clears last_match so the rule re-baselines/re-edges when the
+ * path returns.  OP_CHANGED baselines on first evaluation and then
+ * fires on any difference, updating the baseline; comparison ops
+ * fire only on a false->true edge.  A firing rule dispatches its
+ * action synchronously through tiku_shell_parser_execute() via a
+ * scratch copy (the parser tokenises in place), exactly as if
+ * typed at the prompt.
+ *
+ * Loop note: an action that writes its own watched node re-enters
+ * evaluation via a fresh event rather than waiting a tick.  The
+ * edge semantics still bound it — a sustained-true comparison does
+ * not re-fire, and a CHANGED rule whose action rewrites the same
+ * value reads back equal to its baseline — but an action that
+ * alternates its own trigger value now oscillates at event speed
+ * instead of tick speed.  Same user error as before, faster.
  */
-void
-tiku_shell_rules_tick(void)
+/**
+ * @brief Evaluate one rule, exactly as the original tick did.
+ *
+ * Shared by the poll tick and the event path so both trigger paths
+ * have byte-identical semantics: read the path, strip the trailing
+ * newline run, baseline-or-compare for CHANGED, edge-detect for
+ * comparison ops, dispatch the action through a scratch copy.  The
+ * ~96 bytes of read/action buffers live on the caller's stack only
+ * for the duration of the call.
+ *
+ * @param r  An ACTIVE rule slot
+ */
+static void
+rules_eval_one(tiku_shell_rule_t *r)
 {
     char readbuf[TIKU_SHELL_RULES_VALUE_MAX];
     char actionbuf[TIKU_SHELL_RULES_ACTION_MAX];
-    uint8_t i;
     uint8_t k;
     int n;
     uint8_t fire;
+
+    n = tiku_vfs_read(r->path, readbuf, sizeof(readbuf) - 1);
+    if (n < 0) {
+        /* Path missing or read failed: clear the per-rule
+         * "remembered" state so the rule re-baselines (CHANGED) /
+         * re-edges (comparison) the next time the path returns. */
+        r->last_match = 0;
+        return;
+    }
+    readbuf[n] = '\0';
+    while (n > 0 && (readbuf[n - 1] == '\n' ||
+                     readbuf[n - 1] == '\r' ||
+                     readbuf[n - 1] == ' ')) {
+        readbuf[--n] = '\0';
+    }
+
+    if (r->op == TIKU_SHELL_RULE_OP_CHANGED) {
+        /* CHANGED: value[] holds the last-seen reading.  First
+         * evaluation after add (or after a read failure) just
+         * baselines without firing; subsequent evaluations fire
+         * whenever the reading differs from the stored baseline,
+         * then update the baseline. */
+        if (r->last_match == 0) {
+            for (k = 0; k < TIKU_SHELL_RULES_VALUE_MAX - 1; k++) {
+                r->value[k] = readbuf[k];
+                if (readbuf[k] == '\0') {
+                    break;
+                }
+            }
+            r->value[TIKU_SHELL_RULES_VALUE_MAX - 1] = '\0';
+            r->last_match = 1;
+            return;
+        }
+        if (strcmp(r->value, readbuf) == 0) {
+            return;
+        }
+        for (k = 0; k < TIKU_SHELL_RULES_VALUE_MAX - 1; k++) {
+            r->value[k] = readbuf[k];
+            if (readbuf[k] == '\0') {
+                break;
+            }
+        }
+        r->value[TIKU_SHELL_RULES_VALUE_MAX - 1] = '\0';
+
+        rules_copy_action(actionbuf, r);
+        tiku_shell_parser_execute(actionbuf);
+        return;
+    }
+
+    /* Comparison ops: edge-triggered (false -> true). */
+    fire = rules_evaluate(readbuf, r->op, r->value);
+
+    if (fire && !r->last_match) {
+        rules_copy_action(actionbuf, r);
+        r->last_match = 1;
+        tiku_shell_parser_execute(actionbuf);
+    } else {
+        r->last_match = fire;
+    }
+}
+
+void
+tiku_shell_rules_tick(void)
+{
+    uint8_t i;
 
     for (i = 0; i < TIKU_SHELL_RULES_MAX; i++) {
         tiku_shell_rule_t *r = &rule_table[i];
@@ -706,63 +846,37 @@ tiku_shell_rules_tick(void)
             continue;
         }
 
-        n = tiku_vfs_read(r->path, readbuf, sizeof(readbuf) - 1);
-        if (n < 0) {
-            /* Path missing or read failed: clear the per-rule
-             * "remembered" state so the rule re-baselines (CHANGED) /
-             * re-edges (comparison) the next time the path returns. */
-            r->last_match = 0;
-            continue;
-        }
-        readbuf[n] = '\0';
-        while (n > 0 && (readbuf[n - 1] == '\n' ||
-                         readbuf[n - 1] == '\r' ||
-                         readbuf[n - 1] == ' ')) {
-            readbuf[--n] = '\0';
-        }
-
-        if (r->op == TIKU_SHELL_RULE_OP_CHANGED) {
-            /* CHANGED: value[] holds the last-seen reading.  First
-             * tick after add (or after a read failure) just baselines
-             * without firing; subsequent ticks fire whenever the
-             * reading differs from the stored baseline, then update
-             * the baseline. */
-            if (r->last_match == 0) {
-                for (k = 0; k < TIKU_SHELL_RULES_VALUE_MAX - 1; k++) {
-                    r->value[k] = readbuf[k];
-                    if (readbuf[k] == '\0') {
-                        break;
-                    }
-                }
-                r->value[TIKU_SHELL_RULES_VALUE_MAX - 1] = '\0';
-                r->last_match = 1;
-                continue;
-            }
-            if (strcmp(r->value, readbuf) == 0) {
-                continue;
-            }
-            for (k = 0; k < TIKU_SHELL_RULES_VALUE_MAX - 1; k++) {
-                r->value[k] = readbuf[k];
-                if (readbuf[k] == '\0') {
-                    break;
-                }
-            }
-            r->value[TIKU_SHELL_RULES_VALUE_MAX - 1] = '\0';
-
-            rules_copy_action(actionbuf, r);
-            tiku_shell_parser_execute(actionbuf);
+        /* Event-armed rules (writable node, watched) are evaluated
+         * by tiku_shell_rules_on_vfs() the moment a write lands;
+         * the poll path carries only sensor-side rules and paths
+         * that did not resolve at arm time. */
+        if (r->node != (const tiku_vfs_node_t *)0 &&
+            r->node->write != (tiku_vfs_write_fn)0) {
             continue;
         }
 
-        /* Comparison ops: edge-triggered (false -> true). */
-        fire = rules_evaluate(readbuf, r->op, r->value);
+        rules_eval_one(r);
+    }
+}
 
-        if (fire && !r->last_match) {
-            rules_copy_action(actionbuf, r);
-            r->last_match = 1;
-            tiku_shell_parser_execute(actionbuf);
-        } else {
-            r->last_match = fire;
+void
+tiku_shell_rules_on_vfs(const void *node_ptr)
+{
+    uint8_t i;
+
+    if (node_ptr == (const void *)0) {
+        return;
+    }
+
+    for (i = 0; i < TIKU_SHELL_RULES_MAX; i++) {
+        tiku_shell_rule_t *r = &rule_table[i];
+
+        if (r->state != TIKU_SHELL_RULE_ACTIVE) {
+            continue;
         }
+        if ((const void *)r->node != node_ptr) {
+            continue;
+        }
+        rules_eval_one(r);
     }
 }

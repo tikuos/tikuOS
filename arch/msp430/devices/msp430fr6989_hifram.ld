@@ -40,6 +40,20 @@
 
 INCLUDE msp430fr6989.ld
 
+/*
+ * Stock-script bug fix (same as msp430fr5994_8k_ram.ld, see the
+ * detailed note there): SIZEOF(.upper.bss) counts the leading
+ * ALIGN pad while __high_bssstart excludes it, so an odd-started
+ * .upper.bss makes the crt clear loop stomp the first byte(s) of
+ * .upper.text.  Reassigning after the INCLUDE wins and keeps the
+ * size consistent with the markers.  Applied here as
+ * defence-in-depth; not independently reproduced on fr6989, and
+ * DISTINCT from the historical fr6989 large-bss boot-loop (a WDT
+ * timeout during the clear, fixed separately in
+ * tiku_crt_early.c).
+ */
+__high_bsssize = __high_bssend - __high_bssstart;
+
 SECTIONS {
   .upper_end_marker (NOLOAD) :
   {

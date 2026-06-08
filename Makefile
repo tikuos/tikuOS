@@ -1007,6 +1007,7 @@ SRCS += tests/drivers/test_wifi.c
 SRCS += tests/drivers/test_bt.c
 SRCS += tests/kernel/vfs/test_vfs.c
 SRCS += tests/kernel/vfs/test_vfs_tree.c
+SRCS += tests/kernel/vfs/test_vfs_watch.c
 SRCS += tests/init/test_catalog.c
 SRCS += tests/init/test_init_table.c
 SRCS += tests/init/test_init_boot.c

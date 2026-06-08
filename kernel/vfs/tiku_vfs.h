@@ -130,4 +130,93 @@ int tiku_vfs_write(const char *path, const char *data, size_t len);
  */
 int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx);
 
+/*---------------------------------------------------------------------------*/
+/* WATCH — change notification on nodes                                      */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The namespace as event bus: a process subscribes to a FILE node
+ * and receives TIKU_EVENT_VFS (data = the node pointer) whenever the
+ * node changes.  Two trigger paths feed the same subscription:
+ *
+ *   1. Every successful tiku_vfs_write() notifies watchers of the
+ *      written node automatically — shell writes, BASIC writes and
+ *      network writes all ring for free.
+ *   2. Drivers whose values change without a write (a GPIO edge, a
+ *      sensor threshold) call tiku_vfs_notify() explicitly.
+ *
+ * Node-pointer identity is the subscription key: the tree is static,
+ * so node addresses are stable for the life of the system, and the
+ * event's data field carries the same pointer back to the receiver
+ * for dispatch.  The watch table is a fixed array of slots in SRAM
+ * (subscriptions are per-boot; processes re-subscribe at init).
+ *
+ * Delivery semantics: one event per trigger, no coalescing — the
+ * event means "this node was touched", and the receiver reads the
+ * node for the current value.  Several queued events for one node
+ * are harmless re-reads.  An event is posted even when a write
+ * stored the same value as before (writes are not compared against
+ * prior content).
+ *
+ * Context rules: tiku_vfs_notify() is ISR-safe (it only scans the
+ * table and posts events; tiku_process_post() is ISR-safe, and
+ * table mutation is interrupt-masked).  watch/unwatch are
+ * process-context calls.
+ */
+
+/** Forward declaration — receivers are kernel processes */
+struct tiku_process;
+
+/** @brief Watch-table capacity (subscription slots) */
+#ifndef TIKU_VFS_WATCH_MAX
+#define TIKU_VFS_WATCH_MAX  8
+#endif
+
+/**
+ * @brief Subscribe a process to changes of a FILE node.
+ *
+ * Resolves @p path now and stores the (node, process) pair in a
+ * free watch slot.  Subscribing the same pair twice is idempotent
+ * and returns the existing slot.  From then on, every successful
+ * write to the node — and every explicit tiku_vfs_notify() on it —
+ * posts TIKU_EVENT_VFS to @p p with the node pointer as event data.
+ *
+ * @param path  Absolute path to a FILE node
+ * @param p     Receiving process
+ * @return Slot index (>= 0), or -1 on bad path, non-FILE node,
+ *         NULL process, or full table
+ */
+int8_t tiku_vfs_watch(const char *path, struct tiku_process *p);
+
+/**
+ * @brief Remove one (path, process) subscription.
+ *
+ * @param path  The watched path
+ * @param p     The subscribed process
+ * @return 0 when a subscription was removed, -1 when none matched
+ */
+int8_t tiku_vfs_unwatch(const char *path, struct tiku_process *p);
+
+/**
+ * @brief Remove every subscription held by @p p.
+ *
+ * The bulk form used on re-arm (drop everything, re-subscribe from
+ * scratch) and on process teardown.
+ *
+ * @param p  The subscribed process
+ */
+void tiku_vfs_unwatch_all(struct tiku_process *p);
+
+/**
+ * @brief Ring the watchers of @p node.
+ *
+ * Called automatically by tiku_vfs_write() on success; called
+ * explicitly by drivers whose node values change without a write.
+ * ISR-safe.  No-op when nobody watches the node.
+ *
+ * @param node  The node that changed (as returned by
+ *              tiku_vfs_resolve())
+ */
+void tiku_vfs_notify(const tiku_vfs_node_t *node);
+
 #endif /* TIKU_VFS_H_ */

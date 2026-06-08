@@ -61,6 +61,29 @@ MEMORY {
 }
 
 /*
+ * Stock-script bug fix: msp430fr5994.ld computes
+ *   __high_bsssize = SIZEOF(.upper.bss);
+ * but SIZEOF() counts the leading ALIGN(2) pad byte that is emitted
+ * when the section happens to start on an ODD address, while
+ * __high_bssstart is taken AFTER that pad.  With an empty (or
+ * odd-padded) .upper.bss the crt's high-bss clear loop is then told
+ * to zero size>0 bytes at the start marker — which is the first
+ * byte of .upper.text, i.e. it stomps the first instruction of
+ * whichever function the linker placed there (observed in the
+ * field: `rules` PUC-crashing with pmm-pwviol because
+ * tiku_shell_cmd_rules led .upper.text, with its first opcode
+ * zeroed at every boot).  Whether the bug bites depends purely on
+ * the PARITY of the preceding upper-section end — adding/removing
+ * a single byte of upper code can arm or disarm it.
+ *
+ * Symbol assignments are evaluated in order and the LAST one wins,
+ * so reassigning here — after the INCLUDE — overrides the stock
+ * value with the marker-consistent size (end - start), which never
+ * includes the pad.
+ */
+__high_bsssize = __high_bssend - __high_bssstart;
+
+/*
  * Expose the end-of-HIFRAM address as a linker symbol so the `free`
  * shell command can report HIFRAM usage. The stock LD provides
  * __high_bssstart / __high_bssend for .upper.bss but no end markers

@@ -703,7 +703,26 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 
     /* ---- Main loop ---- */
     while (1) {
-        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER
+                                      || ev == TIKU_EVENT_VFS);
+
+#if TIKU_SHELL_CMD_RULES || TIKU_SHELL_CMD_WATCH
+        /* A watched VFS node changed: dispatch to the event-side
+         * consumers (rules armed on that node, and the live watch
+         * view if it matches), then go straight back to waiting.
+         * The poll timer is periodic and keeps running untouched,
+         * so input draining, jobs, and sensor-side rules stay on
+         * their tick cadence. */
+        if (ev == TIKU_EVENT_VFS) {
+#if TIKU_SHELL_CMD_RULES
+            tiku_shell_rules_on_vfs(data);
+#endif
+#if TIKU_SHELL_CMD_WATCH
+            tiku_shell_cmd_watch_on_vfs(data);
+#endif
+            continue;
+        }
+#endif
 
 #if TIKU_SHELL_TCP_ENABLE
         /* --- TCP connection lifecycle --- */
@@ -747,6 +766,22 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             if (ch < 0) {
                 break;
             }
+
+#if TIKU_SHELL_CMD_WATCH
+            /* A live watch is streaming: keystrokes are routed to
+             * the mode — Ctrl+C cancels it, everything else is
+             * discarded.  This preserves the modal feel of the
+             * original blocking watch while the shell loop (and
+             * the watch itself) stays event-driven underneath. */
+            if (tiku_shell_cmd_watch_active()) {
+                if (ch == 0x03) {
+                    tiku_shell_cmd_watch_cancel();
+                    SHELL_PRINTF("^C\n" SH_GREEN SH_BOLD
+                                 "tikuOS> " SH_RST);
+                }
+                continue;
+            }
+#endif
 
             /* ANSI CSI arrow-key sequence: ESC [ A/B/C/D.
              * State 1 = saw ESC, state 2 = saw ESC[. */
@@ -829,6 +864,12 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         /* Re-evaluate reactive rules.  Edge-triggered, so actions
          * fire only on a false->true transition. */
         tiku_shell_rules_tick();
+#endif
+#if TIKU_SHELL_CMD_WATCH
+        /* Service the live watch: interval re-reads in sensor
+         * mode, idempotent re-subscribe (self-heal) in event
+         * mode. */
+        tiku_shell_cmd_watch_tick();
 #endif
 
 #if TIKU_SHELL_TCP_ENABLE
