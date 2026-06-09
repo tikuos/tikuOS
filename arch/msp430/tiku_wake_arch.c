@@ -9,8 +9,16 @@
  *
  * Maps each TIKU_WAKE_* role flag to whichever MSP430 IE register
  * covers it on the current device. Each register access is guarded
- * by #if defined() so the file compiles unchanged across FR5969,
- * FR5994, FR2433, etc.
+ * by #if defined(OFS_<reg>) so the file compiles unchanged across
+ * FR5969, FR5994, FR2433, etc.
+ *
+ * NB: the guard tests OFS_<reg>, NOT <reg>.  PxIE / UCxIE / SFRIE1
+ * are declared with sfr_b()/sfr_w() — extern symbols, not macros —
+ * so `#if defined(OFS_P1IE)` is FALSE under the msp430-elf-gcc headers
+ * even when the register exists, which would silently drop that
+ * source from the query (reporting only the ungated timers).
+ * OFS_<reg> is the real macro defined exactly when the register is
+ * present on the selected MCU.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,14 +53,14 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
     }
 
     /* UART RX (eUSCI_A0) -- only family the shell currently exposes */
-#if defined(UCA0IE) && defined(UCRXIE)
+#if defined(OFS_UCA0IE) && defined(UCRXIE)
     if ((UCA0IE & UCRXIE) != 0) {
         out->sources |= TIKU_WAKE_UART_RX;
     }
 #endif
 
     /* Watchdog interval-mode interrupt */
-#if defined(SFRIE1) && defined(WDTIE)
+#if defined(OFS_SFRIE1) && defined(WDTIE)
     if ((SFRIE1 & WDTIE) != 0) {
         out->sources |= TIKU_WAKE_WDT;
     }
@@ -61,16 +69,16 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
     /* GPIO edge IRQs across P1..P4. The HAL caps the per-port array
      * at TIKU_WAKE_MAX_GPIO_PORTS = 4, which covers every supported
      * MSP430 variant. */
-#if defined(P1IE)
+#if defined(OFS_P1IE)
     out->gpio_ie[0] = P1IE;
 #endif
-#if defined(P2IE)
+#if defined(OFS_P2IE)
     out->gpio_ie[1] = P2IE;
 #endif
-#if defined(P3IE)
+#if defined(OFS_P3IE)
     out->gpio_ie[2] = P3IE;
 #endif
-#if defined(P4IE)
+#if defined(OFS_P4IE)
     out->gpio_ie[3] = P4IE;
 #endif
 

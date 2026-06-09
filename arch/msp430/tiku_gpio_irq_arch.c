@@ -31,6 +31,7 @@
 #include <hal/tiku_compiler.h>
 #include <interfaces/gpio/tiku_gpio.h>
 #include <kernel/process/tiku_process.h>
+#include <kernel/vfs/tree/tiku_vfs_tree_gpio.h>
 #include <msp430.h>
 
 /*---------------------------------------------------------------------------*/
@@ -52,24 +53,36 @@ typedef struct {
 
 #define GPIO_IRQ_MAX_PORT 4
 
+/*
+ * Gate each entry on PORTn_VECTOR, NOT on PxIE.  The PxIE/PxIES/...
+ * registers are declared with sfr_b() — i.e. as extern symbols, not
+ * preprocessor macros — so `#if defined(P1IE)` is FALSE under the
+ * msp430-elf-gcc headers even though P1 plainly has interrupts.  That
+ * silently zeroed every entry, making tiku_gpio_irq_arch_enable()
+ * return ERR_UNSUP ("port has no IRQ") for ALL pins.  PORTn_VECTOR is
+ * a real macro (and is exactly what the ISRs below gate on), so a
+ * port is IRQ-capable here precisely when it has a vector.  Taking
+ * &P1IE inside the branch is fine: the symbol exists regardless —
+ * only the defined() test needed a macro.
+ */
 static const gpio_irq_port_t gpio_irq_ports[GPIO_IRQ_MAX_PORT + 1] = {
     [0] = { 0, 0, 0, 0 },        /* port 0 not used */
-#if defined(P1IE)
+#if defined(PORT1_VECTOR)
     [1] = { &P1IE, &P1IES, &P1IFG, &P1IV },
 #else
     [1] = { 0, 0, 0, 0 },
 #endif
-#if defined(P2IE)
+#if defined(PORT2_VECTOR)
     [2] = { &P2IE, &P2IES, &P2IFG, &P2IV },
 #else
     [2] = { 0, 0, 0, 0 },
 #endif
-#if defined(P3IE)
+#if defined(PORT3_VECTOR)
     [3] = { &P3IE, &P3IES, &P3IFG, &P3IV },
 #else
     [3] = { 0, 0, 0, 0 },
 #endif
-#if defined(P4IE)
+#if defined(PORT4_VECTOR)
     [4] = { &P4IE, &P4IES, &P4IFG, &P4IV },
 #else
     [4] = { 0, 0, 0, 0 },
@@ -187,6 +200,12 @@ gpio_irq_dispatch(uint8_t port)
                           TIKU_EVENT_GPIO,
                           (tiku_event_data_t)
                               TIKU_GPIO_IRQ_PACK(port, pin));
+
+        /* Same edge, second consumer: ring the watchers of this
+         * pin's /dev/gpio/<port>/<pin> node so a rule or `watch` on
+         * it reacts to the physical edge — the VFS watch layer's
+         * first driver-originated event source. */
+        tiku_vfs_tree_gpio_notify(port, pin);
     }
 }
 

@@ -113,6 +113,21 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path);
 int tiku_vfs_read(const char *path, char *buf, size_t max);
 
 /**
+ * @brief Read directly from a resolved node, skipping the path walk.
+ *
+ * For callers that already hold a node pointer (a watch event
+ * delivers one as its payload; the rules engine and `watch` cache
+ * one at arm time).  Same readable-FILE validation and error
+ * contract as tiku_vfs_read(); a NULL @p node returns -1.
+ *
+ * @param node  Node to read (NULL tolerated → -1)
+ * @param buf   Output buffer
+ * @param max   Buffer capacity
+ * @return Bytes written to buf, or -1 on error
+ */
+int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max);
+
+/**
  * @brief Write to a path
  * @param path  Absolute path to a writable FILE node
  * @param data  Data to write
@@ -218,5 +233,62 @@ void tiku_vfs_unwatch_all(struct tiku_process *p);
  *              tiku_vfs_resolve())
  */
 void tiku_vfs_notify(const tiku_vfs_node_t *node);
+
+/*---------------------------------------------------------------------------*/
+/* INTROSPECTION — read-only views of VFS state                              */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Suggested buffer size for tiku_vfs_path_of().
+ *
+ * Comfortably exceeds the deepest path in the stock tree; sizes a
+ * caller's scratch buffer without hard-coding a magic number.
+ */
+#ifndef TIKU_VFS_PATH_MAX
+#define TIKU_VFS_PATH_MAX  64
+#endif
+
+/**
+ * @brief Number of watch slots currently in use.
+ * @return Used slots in [0, TIKU_VFS_WATCH_MAX]; free = MAX - used.
+ */
+uint8_t tiku_vfs_watch_used(void);
+
+/**
+ * @brief Read one watch slot's (node, process) pair.
+ *
+ * @param i     Slot index in [0, TIKU_VFS_WATCH_MAX)
+ * @param node  Out: watched node (NULL to ignore)
+ * @param proc  Out: subscribed process (NULL to ignore)
+ * @return 0 if the slot is in use, -1 if free or out of range
+ */
+int8_t tiku_vfs_watch_get(uint8_t i, const tiku_vfs_node_t **node,
+                          struct tiku_process **proc);
+
+/**
+ * @brief Reverse-resolve a node pointer to its absolute path.
+ *
+ * DFS from the root (the tree has no parent links); O(tree size),
+ * for cold observability reads, not a hot path.  The root resolves
+ * to "/".
+ *
+ * @param node  Node to name (must be in the tree)
+ * @param buf   Output buffer (size >= TIKU_VFS_PATH_MAX recommended)
+ * @param max   Buffer capacity
+ * @return Path length, or -1 if not found / bad args
+ */
+int tiku_vfs_path_of(const tiku_vfs_node_t *node, char *buf, size_t max);
+
+/**
+ * @brief Total nodes in the tree (dirs + files), counted live.
+ * @return Node count, or 0 before tiku_vfs_init()
+ */
+uint16_t tiku_vfs_count(void);
+
+/**
+ * @brief Deepest path in the tree, in components (root alone = 1).
+ * @return Max depth, or 0 before tiku_vfs_init()
+ */
+uint8_t tiku_vfs_depth(void);
 
 #endif /* TIKU_VFS_H_ */

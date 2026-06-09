@@ -41,38 +41,48 @@
  *
  * Single static instance is fine because tiku_crit windows do not
  * nest (the kernel rejects re-entry with TIKU_CRIT_ERR_BUSY).
+ *
+ * NB: the per-register guards below test defined(OFS_<reg>), NOT
+ * defined(<reg>).  PxIE / UCxIE / ADC12IER0 / SFRIE1 are declared
+ * with sfr_b()/sfr_w() — extern symbols, not preprocessor macros —
+ * so `#if defined(OFS_UCA0IE)` is FALSE under the msp430-elf-gcc headers
+ * even when the peripheral exists.  That silently compiled out every
+ * mask in this file, leaving tiku_crit masking only the (ungated)
+ * timers.  OFS_<reg> is a real macro defined exactly for the
+ * registers the selected device has, so it is the correct "does this
+ * register exist on this MCU" test.
  */
 static struct {
     uint16_t ta0_ccie;
     uint16_t ta1_ccie;
-#if defined(UCA0IE)
+#if defined(OFS_UCA0IE)
     uint16_t uca0_ie;
 #endif
-#if defined(UCA1IE)
+#if defined(OFS_UCA1IE)
     uint16_t uca1_ie;
 #endif
-#if defined(UCB0IE)
+#if defined(OFS_UCB0IE)
     uint16_t ucb0_ie;
 #endif
-#if defined(UCB1IE)
+#if defined(OFS_UCB1IE)
     uint16_t ucb1_ie;
 #endif
-#if defined(ADC12IER0)
+#if defined(OFS_ADC12IER0)
     uint16_t adc12_ier0;
 #endif
-#if defined(SFRIE1)
+#if defined(OFS_SFRIE1)
     uint8_t  sfrie1_wdtie;
 #endif
-#if defined(P1IE)
+#if defined(OFS_P1IE)
     uint8_t  p1_ie;
 #endif
-#if defined(P2IE)
+#if defined(OFS_P2IE)
     uint8_t  p2_ie;
 #endif
-#if defined(P3IE)
+#if defined(OFS_P3IE)
     uint8_t  p3_ie;
 #endif
-#if defined(P4IE)
+#if defined(OFS_P4IE)
     uint8_t  p4_ie;
 #endif
 } crit_ie_saved;
@@ -101,43 +111,43 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
         TA1CCTL0 &= ~CCIE;
     }
 
-#if defined(UCA0IE) || defined(UCA1IE)
+#if defined(OFS_UCA0IE) || defined(OFS_UCA1IE)
     /* eUSCI_A: UART (and SPI when configured as such) */
-#if defined(UCA0IE)
+#if defined(OFS_UCA0IE)
     crit_ie_saved.uca0_ie = UCA0IE;
 #endif
-#if defined(UCA1IE)
+#if defined(OFS_UCA1IE)
     crit_ie_saved.uca1_ie = UCA1IE;
 #endif
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_UART)) {
-#if defined(UCA0IE)
+#if defined(OFS_UCA0IE)
         UCA0IE = 0;
 #endif
-#if defined(UCA1IE)
+#if defined(OFS_UCA1IE)
         UCA1IE = 0;
 #endif
     }
 #endif
 
-#if defined(UCB0IE) || defined(UCB1IE)
+#if defined(OFS_UCB0IE) || defined(OFS_UCB1IE)
     /* eUSCI_B: I2C and SPI */
-#if defined(UCB0IE)
+#if defined(OFS_UCB0IE)
     crit_ie_saved.ucb0_ie = UCB0IE;
 #endif
-#if defined(UCB1IE)
+#if defined(OFS_UCB1IE)
     crit_ie_saved.ucb1_ie = UCB1IE;
 #endif
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_I2C)) {
-#if defined(UCB0IE)
+#if defined(OFS_UCB0IE)
         UCB0IE = 0;
 #endif
-#if defined(UCB1IE)
+#if defined(OFS_UCB1IE)
         UCB1IE = 0;
 #endif
     }
 #endif
 
-#if defined(ADC12IER0)
+#if defined(OFS_ADC12IER0)
     /* ADC12 done */
     crit_ie_saved.adc12_ier0 = ADC12IER0;
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_ADC)) {
@@ -145,7 +155,7 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
     }
 #endif
 
-#if defined(SFRIE1) && defined(WDTIE)
+#if defined(OFS_SFRIE1) && defined(WDTIE)
     /* Watchdog interval-mode IRQ. The watchdog *reset* is
      * independent and hardware -- not maskable from here. */
     crit_ie_saved.sfrie1_wdtie = SFRIE1 & WDTIE;
@@ -155,29 +165,29 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 #endif
 
     /* External GPIO edge ISRs */
-#if defined(P1IE)
+#if defined(OFS_P1IE)
     crit_ie_saved.p1_ie = P1IE;
 #endif
-#if defined(P2IE)
+#if defined(OFS_P2IE)
     crit_ie_saved.p2_ie = P2IE;
 #endif
-#if defined(P3IE)
+#if defined(OFS_P3IE)
     crit_ie_saved.p3_ie = P3IE;
 #endif
-#if defined(P4IE)
+#if defined(OFS_P4IE)
     crit_ie_saved.p4_ie = P4IE;
 #endif
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_GPIO)) {
-#if defined(P1IE)
+#if defined(OFS_P1IE)
         P1IE = 0;
 #endif
-#if defined(P2IE)
+#if defined(OFS_P2IE)
         P2IE = 0;
 #endif
-#if defined(P3IE)
+#if defined(OFS_P3IE)
         P3IE = 0;
 #endif
-#if defined(P4IE)
+#if defined(OFS_P4IE)
         P4IE = 0;
 #endif
     }
@@ -204,38 +214,38 @@ tiku_crit_arch_unmask_irqs(void)
     TA0CCTL0 = (TA0CCTL0 & ~CCIE) | crit_ie_saved.ta0_ccie;
     TA1CCTL0 = (TA1CCTL0 & ~CCIE) | crit_ie_saved.ta1_ccie;
 
-#if defined(UCA0IE)
+#if defined(OFS_UCA0IE)
     UCA0IE = crit_ie_saved.uca0_ie;
 #endif
-#if defined(UCA1IE)
+#if defined(OFS_UCA1IE)
     UCA1IE = crit_ie_saved.uca1_ie;
 #endif
 
-#if defined(UCB0IE)
+#if defined(OFS_UCB0IE)
     UCB0IE = crit_ie_saved.ucb0_ie;
 #endif
-#if defined(UCB1IE)
+#if defined(OFS_UCB1IE)
     UCB1IE = crit_ie_saved.ucb1_ie;
 #endif
 
-#if defined(ADC12IER0)
+#if defined(OFS_ADC12IER0)
     ADC12IER0 = crit_ie_saved.adc12_ier0;
 #endif
 
-#if defined(SFRIE1) && defined(WDTIE)
+#if defined(OFS_SFRIE1) && defined(WDTIE)
     SFRIE1 = (SFRIE1 & ~WDTIE) | crit_ie_saved.sfrie1_wdtie;
 #endif
 
-#if defined(P1IE)
+#if defined(OFS_P1IE)
     P1IE = crit_ie_saved.p1_ie;
 #endif
-#if defined(P2IE)
+#if defined(OFS_P2IE)
     P2IE = crit_ie_saved.p2_ie;
 #endif
-#if defined(P3IE)
+#if defined(OFS_P3IE)
     P3IE = crit_ie_saved.p3_ie;
 #endif
-#if defined(P4IE)
+#if defined(OFS_P4IE)
     P4IE = crit_ie_saved.p4_ie;
 #endif
 }

@@ -141,7 +141,10 @@ watch_print_value(void)
     char buf[64];
     int n;
 
-    n = tiku_vfs_read(watch_path, buf, sizeof(buf) - 1);
+    /* Read by the node cached at arm time, not the path: no tree
+     * walk per event (EVENT mode) or per interval (INTERVAL mode).
+     * watch_node is set before watch_active, so it is valid here. */
+    n = tiku_vfs_read_node(watch_node, buf, sizeof(buf) - 1);
     if (n < 0) {
         SHELL_PRINTF("watch: cannot read '%s'\n", watch_path);
         tiku_shell_cmd_watch_cancel();

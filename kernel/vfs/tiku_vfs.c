@@ -185,20 +185,43 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Resolve a path and invoke the file's read handler.
+ * @brief Invoke a resolved node's read handler directly.
  *
- * Returns -1 if the path does not resolve to a readable file.
+ * The by-node read path.  Callers that already hold a node pointer
+ * skip the tree walk entirely: a watch event delivers the changed
+ * node as its payload, and the rules engine and the `watch` command
+ * cache the node at arm time.  On the reactive hot path — a read per
+ * delivered event — this removes a full path resolution each time.
+ *
+ * Validation is identical to tiku_vfs_read() (the node must be a
+ * readable FILE), so both entry points share one error contract; a
+ * NULL @p node (e.g. from a failed resolve) yields -1, which lets
+ * tiku_vfs_read() forward an unresolved path through unchanged.
+ *
+ * @param node  Node to read (NULL tolerated → -1)
+ * @param buf   Output buffer
+ * @param max   Buffer capacity
+ * @return Bytes written, or -1 if @p node is not a readable file
  */
-int tiku_vfs_read(const char *path, char *buf, size_t max)
+int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
 {
-    const tiku_vfs_node_t *node;
-
-    node = tiku_vfs_resolve(path);
     if (node == NULL || node->type != TIKU_VFS_FILE || node->read == NULL) {
         return -1;
     }
 
     return node->read(buf, max);
+}
+
+/**
+ * @brief Resolve a path and invoke the file's read handler.
+ *
+ * Thin wrapper over tiku_vfs_read_node(): resolve once, then
+ * dispatch.  Returns -1 if the path does not resolve to a readable
+ * file.
+ */
+int tiku_vfs_read(const char *path, char *buf, size_t max)
+{
+    return tiku_vfs_read_node(tiku_vfs_resolve(path), buf, max);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -407,4 +430,195 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node)
                               (tiku_event_data_t)(uintptr_t)node);
         }
     }
+}
+
+/*---------------------------------------------------------------------------*/
+/* INTROSPECTION — the namespace observes itself                             */
+/*---------------------------------------------------------------------------*/
+/*
+ * Read-only views over the two pieces of private VFS state — the
+ * watch table and the static tree — so a /sys node can render them
+ * (see kernel/vfs/tree/tiku_vfs_tree_watch.c).  All run in process
+ * context on a cold path (a human cats a file); none lock, matching
+ * the notify-scan reasoning: the cooperative scheduler gives a
+ * handler a yield-free run, and tree-node pointers are stable for
+ * the life of the system, so a snapshot cannot tear under it.
+ */
+
+/**
+ * @brief Count the watch slots currently in use.
+ *
+ * @return Used slots in [0, TIKU_VFS_WATCH_MAX]; free = MAX - used.
+ */
+uint8_t tiku_vfs_watch_used(void)
+{
+    uint8_t i, used = 0;
+
+    for (i = 0; i < TIKU_VFS_WATCH_MAX; i++) {
+        if (watch_table[i].node != NULL) {
+            used++;
+        }
+    }
+
+    return used;
+}
+
+/**
+ * @brief Fetch the contents of one watch slot.
+ *
+ * Lets an observability node show who watches what without exposing
+ * the table type.  The returned node pointer is stable (static
+ * tree); the process pointer is valid for the caller's yield-free
+ * run.
+ *
+ * @param i     Slot index in [0, TIKU_VFS_WATCH_MAX)
+ * @param node  Out: the watched node (may be NULL to ignore)
+ * @param proc  Out: the subscribed process (may be NULL to ignore)
+ * @return 0 if slot @p i is in use (outputs written), -1 if the
+ *         slot is free or @p i is out of range
+ */
+int8_t tiku_vfs_watch_get(uint8_t i, const tiku_vfs_node_t **node,
+                          struct tiku_process **proc)
+{
+    if (i >= TIKU_VFS_WATCH_MAX || watch_table[i].node == NULL) {
+        return -1;
+    }
+    if (node != NULL) {
+        *node = watch_table[i].node;
+    }
+    if (proc != NULL) {
+        *proc = watch_table[i].proc;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Depth-first search for @p target, building its path.
+ *
+ * Appends "/<child-name>" at each level into @p buf; on reaching
+ * @p target, NUL-terminates and returns the length.  Length is
+ * computed even past @p max (snprintf-style), but writes are
+ * bounds-clamped so the buffer never overflows.
+ *
+ * @return Path length on success, -1 if @p target is not under @p dir
+ */
+static int path_find(const tiku_vfs_node_t *dir,
+                     const tiku_vfs_node_t *target,
+                     char *buf, size_t max, int pos)
+{
+    uint8_t i;
+
+    for (i = 0; i < dir->child_count; i++) {
+        const tiku_vfs_node_t *c = &dir->children[i];
+        const char *n = c->name;
+        int p = pos;
+
+        if ((size_t)p < max) {
+            buf[p] = '/';
+        }
+        p++;
+        while (*n != '\0') {
+            if ((size_t)p < max) {
+                buf[p] = *n;
+            }
+            p++;
+            n++;
+        }
+
+        if (c == target) {
+            buf[((size_t)p < max) ? (size_t)p : (max - 1)] = '\0';
+            return p;
+        }
+        if (c->type == TIKU_VFS_DIR && c->children != NULL) {
+            int r = path_find(c, target, buf, max, p);
+            if (r >= 0) {
+                return r;
+            }
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * @brief Reverse-resolve a node pointer to its absolute path.
+ *
+ * The inverse of tiku_vfs_resolve(): the tree has no parent links,
+ * so this DFS-searches from the root for the node's address and
+ * reconstructs the path on the way down.  O(tree size), intended
+ * for cold observability reads (e.g. /sys/watch), not a hot path.
+ *
+ * @param node  Node to name (must be in the tree)
+ * @param buf   Output buffer (>= TIKU_VFS_PATH_MAX recommended)
+ * @param max   Buffer capacity
+ * @return Path length, or -1 if not found / bad args.  The root
+ *         resolves to "/".
+ */
+int tiku_vfs_path_of(const tiku_vfs_node_t *node, char *buf, size_t max)
+{
+    if (node == NULL || vfs_root == NULL || buf == NULL || max == 0) {
+        return -1;
+    }
+    if (node == vfs_root) {
+        if (max < 2) {
+            buf[0] = '\0';
+            return -1;
+        }
+        buf[0] = '/';
+        buf[1] = '\0';
+        return 1;
+    }
+
+    return path_find(vfs_root, node, buf, max, 0);
+}
+
+/** @brief Recursive node counter (this node + all descendants). */
+static uint16_t count_rec(const tiku_vfs_node_t *n)
+{
+    uint16_t total = 1;
+    uint8_t i;
+
+    if (n->type == TIKU_VFS_DIR && n->children != NULL) {
+        for (i = 0; i < n->child_count; i++) {
+            total = (uint16_t)(total + count_rec(&n->children[i]));
+        }
+    }
+
+    return total;
+}
+
+/**
+ * @brief Total nodes in the tree (dirs + files), counted live.
+ * @return Node count, or 0 before tiku_vfs_init().
+ */
+uint16_t tiku_vfs_count(void)
+{
+    return (vfs_root != NULL) ? count_rec(vfs_root) : 0;
+}
+
+/** @brief Recursive max-depth (a leaf is depth 1). */
+static uint8_t depth_rec(const tiku_vfs_node_t *n)
+{
+    uint8_t i, d, deepest = 0;
+
+    if (n->type == TIKU_VFS_DIR && n->children != NULL) {
+        for (i = 0; i < n->child_count; i++) {
+            d = depth_rec(&n->children[i]);
+            if (d > deepest) {
+                deepest = d;
+            }
+        }
+    }
+
+    return (uint8_t)(1 + deepest);
+}
+
+/**
+ * @brief Deepest path in the tree, in components (root alone = 1).
+ * @return Max depth, or 0 before tiku_vfs_init().
+ */
+uint8_t tiku_vfs_depth(void)
+{
+    return (vfs_root != NULL) ? depth_rec(vfs_root) : 0;
 }

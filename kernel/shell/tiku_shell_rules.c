@@ -774,7 +774,17 @@ rules_eval_one(tiku_shell_rule_t *r)
     int n;
     uint8_t fire;
 
-    n = tiku_vfs_read(r->path, readbuf, sizeof(readbuf) - 1);
+    /* By-node read whenever the path resolved at arm time — every
+     * event-armed rule, and every resolvable sensor rule — which
+     * skips the tree walk on the reactive hot path.  r->node == NULL
+     * means the path did not resolve at arm: fall back to a by-path
+     * read so the resolution is retried, the pre-watch behaviour for
+     * paths that only appear later. */
+    if (r->node != NULL) {
+        n = tiku_vfs_read_node(r->node, readbuf, sizeof(readbuf) - 1);
+    } else {
+        n = tiku_vfs_read(r->path, readbuf, sizeof(readbuf) - 1);
+    }
     if (n < 0) {
         /* Path missing or read failed: clear the per-rule
          * "remembered" state so the rule re-baselines (CHANGED) /

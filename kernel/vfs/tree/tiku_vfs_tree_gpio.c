@@ -303,3 +303,58 @@ _Static_assert(sizeof(tiku_vfs_tree_gpio_dir_children) /
                sizeof(tiku_vfs_tree_gpio_dir_children[0])
                == TIKU_VFS_TREE_GPIO_NPORTS,
                "TIKU_VFS_TREE_GPIO_NPORTS out of sync");
+
+/*---------------------------------------------------------------------------*/
+/* DRIVER NOTIFY — ring /dev/gpio watchers on a hardware edge                 */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Ring the watchers of /dev/gpio/<port>/<pin> after a pin edge.
+ *
+ * The bridge from the GPIO edge interrupt to the VFS watch layer:
+ * the port ISR (arch/msp430/tiku_gpio_irq_arch.c) calls this with the
+ * pin that just fired, and it rings that pin node's watchers via
+ * tiku_vfs_notify().  A rule or `watch` on the pin then reacts to the
+ * physical edge exactly as it would to a write — the value comes from
+ * re-reading the node (the live PxIN level).
+ *
+ * GPIO pin nodes are read/write (a pin is dual-direction), so a rule
+ * on one is already event-armed; before this hook a hardware edge had
+ * no event source — only an explicit `write` rang it.  This supplies
+ * the missing source, turning "act when the pin changes" from a poll
+ * into an interrupt-driven path.
+ *
+ * ISR-safe: a bounds check, a constant-time table index, and the
+ * (itself ISR-safe) tiku_vfs_notify() scan.  Out-of-range port/pin
+ * and ports absent on this device fall through to a NULL node, which
+ * tiku_vfs_notify() treats as a no-op.
+ *
+ * @param port  Port number (1-based, P1..P4)
+ * @param pin   Pin number (0..7)
+ */
+void
+tiku_vfs_tree_gpio_notify(uint8_t port, uint8_t pin)
+{
+    const tiku_vfs_node_t *node = NULL;
+
+    if (pin > 7) {
+        return;
+    }
+    switch (port) {
+#if TIKU_DEVICE_HAS_PORT1
+    case 1: node = &gpio_p1[pin]; break;
+#endif
+#if TIKU_DEVICE_HAS_PORT2
+    case 2: node = &gpio_p2[pin]; break;
+#endif
+#if TIKU_DEVICE_HAS_PORT3
+    case 3: node = &gpio_p3[pin]; break;
+#endif
+#if TIKU_DEVICE_HAS_PORT4
+    case 4: node = &gpio_p4[pin]; break;
+#endif
+    default: break;
+    }
+
+    tiku_vfs_notify(node);   /* NULL -> no-op */
+}

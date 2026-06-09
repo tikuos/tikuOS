@@ -56,6 +56,7 @@
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
 #include "tiku_vfs_tree_persist.h"
+#include "tiku_vfs_tree_watch.h"
 #include "tiku_vfs_tree_inittab.h"
 #include "tiku.h"
 #include <kernel/timers/tiku_clock.h>
@@ -582,6 +583,10 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_children,     TIKU_VFS_TREE_BOOT_NCHILD },
     { "persist",  TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_persist_children,  TIKU_VFS_TREE_PERSIST_NCHILD },
+    { "watch",    TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_watch_children,    TIKU_VFS_TREE_WATCH_NCHILD },
+    { "vfs",      TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_vfs_children,      TIKU_VFS_TREE_VFS_NCHILD },
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,
