@@ -5,45 +5,54 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.c - Apollo 510 GPIO access
+ * tiku_gpio_arch.c - Apollo 510 GPIO access (bare-metal)
  *
- * Hybrid bring-up: pad configuration goes through am_hal_gpio_pinconfig
- * and the am_hal_gpio_output_* register macros (tagged @ambiq-sdk). The
- * pin-config struct is built explicitly from its bitfields, so the
- * de-SDK pass only has to replace am_hal_gpio_pinconfig with a direct
- * write to the pad's GPIOCFG register.
+ * Direct register access via the CMSIS device header (GPIO_Type) — no
+ * am_hal calls, so the GPIO path no longer pulls libam_hal (de-SDK stage).
+ *
+ *   - pad config:  PADKEY unlock -> GPIO->PINCFG[pad] -> PADKEY relock
+ *     (FNCSEL[3:0]=3 GPIO, INPEN[4], OUTCFG[9:8]=1 push-pull)
+ *   - output:      GPIO->WTS0/WTC0/WT0 (set / clear / toggle), pad/32 indexed
+ *   - input:       GPIO->RD0
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "am_mcu_apollo.h"   /* @ambiq-sdk: am_hal_gpio_* */
 #include "tiku_gpio_arch.h"
+#include "am_mcu_apollo.h"   /* CMSIS register defs (GPIO_Type/GPIO, AM_HAL_GPIO_MAX_PADS) — header only */
 
-#include <string.h>
+/* GPIO_PINCFGn fields (apollo510.h). */
+#define TIKU_GPIO_FNCSEL_GPIO      3u           /* FNCSEL[3:0] = GPIO       */
+#define TIKU_GPIO_INPEN            (1u << 4)    /* INPEN[4]                 */
+#define TIKU_GPIO_OUTCFG_PUSHPULL  (1u << 8)    /* OUTCFG[9:8] = 1 push-pull*/
+#define TIKU_GPIO_OUTCFG_MSK       (3u << 8)
+#define TIKU_GPIO_PADKEY_UNLOCK    0x73u        /* GPIO_PADKEY_PADKEY_Key   */
+
+static inline void pad_config(uint32_t pad, uint32_t cfg) {
+    GPIO->PADKEY = TIKU_GPIO_PADKEY_UNLOCK;
+    (&GPIO->PINCFG0)[pad] = cfg;
+    GPIO->PADKEY = 0u;
+}
 
 /*---------------------------------------------------------------------------*/
 /* Raw-pad helpers (used by the board LED macros)                            */
 /*---------------------------------------------------------------------------*/
 
 void tiku_ambiq_gpio_init_output(uint32_t pad) {
-    am_hal_gpio_pincfg_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.GP.cfg_b.uFuncSel  = 3;                                /* GPIO function */
-    cfg.GP.cfg_b.eGPInput  = AM_HAL_GPIO_PIN_INPUT_NONE;
-    cfg.GP.cfg_b.eGPOutCfg = AM_HAL_GPIO_PIN_OUTCFG_PUSHPULL;
-    am_hal_gpio_pinconfig(pad, cfg);                          /* @ambiq-sdk */
+    pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_OUTCFG_PUSHPULL);
 }
 
 void tiku_ambiq_gpio_set(uint32_t pad, uint8_t value) {
+    uint32_t mask = (1u << (pad & 31u));
     if (value) {
-        am_hal_gpio_output_set(pad);     /* @ambiq-sdk */
+        (&GPIO->WTS0)[pad >> 5] = mask;
     } else {
-        am_hal_gpio_output_clear(pad);   /* @ambiq-sdk */
+        (&GPIO->WTC0)[pad >> 5] = mask;
     }
 }
 
 void tiku_ambiq_gpio_toggle(uint32_t pad) {
-    am_hal_gpio_output_toggle(pad);      /* @ambiq-sdk */
+    (&GPIO->WT0)[pad >> 5] ^= (1u << (pad & 31u));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -63,15 +72,6 @@ static int ambiq_pad_of(uint8_t port, uint8_t pin, uint32_t *pad) {
     return 0;
 }
 
-static void ambiq_pincfg_input(uint32_t pad) {
-    am_hal_gpio_pincfg_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.GP.cfg_b.uFuncSel  = 3;                               /* GPIO function */
-    cfg.GP.cfg_b.eGPInput  = AM_HAL_GPIO_PIN_INPUT_ENABLE;
-    cfg.GP.cfg_b.eGPOutCfg = AM_HAL_GPIO_PIN_OUTCFG_DISABLE;
-    am_hal_gpio_pinconfig(pad, cfg);                          /* @ambiq-sdk */
-}
-
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
@@ -82,7 +82,7 @@ int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin) {
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
-    ambiq_pincfg_input(pad);
+    pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_INPEN);
     return 0;
 }
 
@@ -103,12 +103,12 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
-    return (int8_t)(am_hal_gpio_input_read(pad) ? 1 : 0);    /* @ambiq-sdk */
+    return (int8_t)(((&GPIO->RD0)[pad >> 5] >> (pad & 31u)) & 1u);
 }
 
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
-    /* TODO(de-sdk): read the pad's output-enable state. Stub: input. */
-    return 0;
+    /* Output if the OUTCFG field is non-zero (push-pull / open-drain). */
+    return (int8_t)(((&GPIO->PINCFG0)[pad] & TIKU_GPIO_OUTCFG_MSK) ? 1 : 0);
 }

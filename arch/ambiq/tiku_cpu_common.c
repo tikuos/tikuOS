@@ -7,9 +7,12 @@
  *
  * tiku_cpu_common.c - Apollo 510 common CPU helpers (delays, IDs)
  *
- * Hybrid bring-up: delays use AmbiqSuite's am_util_delay_* (tagged
- * @ambiq-sdk). The unique-id / reset-reason paths are stubbed for now
- * and will be backed by MCUCTRL/OTP and RSTGEN reads in a later pass.
+ * Delays use AmbiqSuite's am_util_delay_* (tagged @ambiq-sdk). NOTE: a
+ * bare-metal delay was tried via the DWT cycle counter but Apollo5's DWT
+ * doesn't track the core clock cleanly, so it ran long. A correct
+ * bare-metal delay needs the real cycle rate (or a 32.768 kHz-XTAL
+ * self-calibration) and is therefore deferred to the clock/timing de-SDK
+ * stage. The unique-id / reset-reason paths are still stubs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,8 +30,7 @@ void tiku_cpu_ambiq_delay_us(unsigned int us) {
 }
 
 uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
-    /* TODO(de-sdk): read the device unique ID from MCUCTRL/OTP. Bring-up
-     * stub returns a deterministic zero fill so callers behave. */
+    /* TODO: read the device unique ID from MCUCTRL/OTP. */
     uint8_t i;
     if (buf == 0 || len == 0) {
         return 0;
@@ -40,6 +42,6 @@ uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
 }
 
 uint16_t tiku_cpu_ambiq_reset_reason(void) {
-    /* TODO(de-sdk): decode RSTGEN->STAT into the tikuOS reset-reason bits. */
+    /* TODO: decode RSTGEN->STAT into the tikuOS reset-reason bits. */
     return 0U;
 }
