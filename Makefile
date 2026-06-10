@@ -1718,10 +1718,11 @@ deploy: clean flash monitor
 # ---------------------------------------------------------------------------
 # Serial Monitor  (auto-detects TI LaunchPad, picks picocom or screen)
 # ---------------------------------------------------------------------------
-ifeq ($(TIKU_PLATFORM),rp2350)
-BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),115200)
-else
+# RP2350 + Apollo510 default to 115200; MSP430 to 9600.
+ifeq ($(TIKU_PLATFORM),msp430)
 BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),9600)
+else
+BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),115200)
 endif
 
 # Auto-detect serial port.
@@ -1729,6 +1730,7 @@ endif
 # (eZ-FET backchannel) since external adapters are used for SLIP
 # networking and avoid the eZ-FET DTR-reset bug.
 PORT ?= $(shell \
+	ls /dev/tty.usbmodem* /dev/tty.usbserial* 2>/dev/null | head -1 || \
 	ls /dev/ttyUSB* 2>/dev/null | head -1 || \
 	(for dev in /dev/ttyACM*; do \
 		[ -e "$$dev" ] || continue; \
