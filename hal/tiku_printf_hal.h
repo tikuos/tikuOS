@@ -70,14 +70,12 @@
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
-/* Future platforms: Ambiq, Nordic, RISC-V, etc.                             */
+/* Ambiq Apollo 510 (Cortex-M55) — console over SWO/ITM                       */
 /*---------------------------------------------------------------------------*/
 
-/*
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
-*/
 
 /*---------------------------------------------------------------------------*/
 /* Fallback: no platform defined — suppress output                           */

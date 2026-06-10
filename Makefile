@@ -28,6 +28,8 @@ MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 #   rp2350  -> PLATFORM_RP2350 (Raspberry Pi Pico 2 / Pico 2 W)
 ifeq ($(MCU),rp2350)
 TIKU_PLATFORM := rp2350
+else ifeq ($(MCU),apollo510)
+TIKU_PLATFORM := ambiq
 else
 TIKU_PLATFORM := msp430
 endif
@@ -65,6 +67,18 @@ else
 $(error Unknown BOARD=$(BOARD) for MCU=rp2350. Valid: pico2, pico2w)
 endif
 endif
+
+ifeq ($(TIKU_PLATFORM),ambiq)
+# Apollo510 EVB is the only board for now.
+TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510_EVB
+endif
+
+# ---------------------------------------------------------------------------
+# AmbiqSuite SDK location (Apollo510 hybrid bring-up). Reference-only:
+# headers + the prebuilt libam_hal.a / libam_bsp.a archives. Override with
+#   make MCU=apollo510 AMBIQ_SDK_DIR=/path/to/AmbiqSuite
+# ---------------------------------------------------------------------------
+AMBIQ_SDK_DIR ?= temp/AmbiqSuite
 
 # ---------------------------------------------------------------------------
 # Driver-vs-MCU compatibility gates
@@ -124,8 +138,9 @@ DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 #
 # msp430:  msp430-elf-gcc auto-detected from PATH (or $(HOME)/tigcc)
 # rp2350:  arm-none-eabi-gcc auto-detected from PATH
+# apollo510: arm-none-eabi-gcc auto-detected from PATH
 # ---------------------------------------------------------------------------
-ifeq ($(TIKU_PLATFORM),rp2350)
+ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq))
 
 # ARM Embedded toolchain (apt: gcc-arm-none-eabi).
 TOOLCHAIN_PREFIX ?= arm-none-eabi-
@@ -166,6 +181,16 @@ DEBUGGER  = tilib
 # available because it can use BOOTSEL or an installed Debug Probe; we
 # fall back to "drag-and-drop the UF2 onto the RPI-RP2 mass storage".
 PICOTOOL ?= $(shell command -v picotool 2>/dev/null || echo picotool)
+
+# Apollo510 (Ambiq) SEGGER J-Link settings. Defaults match the AmbiqSuite
+# hello_world flash.jlink: device AP510NFA-CBR, SWD @4 MHz, image loaded to
+# MRAM 0x00410000. Override any of these on the make command line.
+JLINK           ?= JLinkExe
+JLINK_GDB       ?= JLinkGDBServer
+JLINK_DEVICE    ?= AP510NFA-CBR
+JLINK_IF        ?= SWD
+JLINK_SPEED     ?= 4000
+AMBIQ_LOAD_ADDR ?= 0x00410000
 
 # Whether this MCU has HIFRAM (FRAM > 64 KB).  MSP430-only concept;
 # for the RP2350 it is meaningless.
@@ -528,6 +553,29 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
+else ifeq ($(TIKU_PLATFORM),ambiq)
+
+# Cortex-M55 (Apollo510). Hard-float + Helium are derived from -mcpu and
+# must match the prebuilt libam_hal.a / libam_bsp.a ABI.
+CFLAGS  = -mcpu=cortex-m55 -mthumb
+CFLAGS += -mfpu=auto -mfloat-abi=hard
+CFLAGS += -Os -Wall -Wextra -Wno-psabi
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
+CFLAGS += -DPLATFORM_AMBIQ=1
+# AmbiqSuite part/package selectors (same as the hello_world example).
+CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
+CFLAGS += -I$(PROJ_DIR)
+# AmbiqSuite SDK headers — reference-only, same include set as the example.
+CFLAGS += -I$(AMBIQ_SDK_DIR)
+CFLAGS += -I$(AMBIQ_SDK_DIR)/CMSIS/ARM/Include
+CFLAGS += -I$(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Include
+CFLAGS += -I$(AMBIQ_SDK_DIR)/devices
+CFLAGS += -I$(AMBIQ_SDK_DIR)/mcu/apollo510
+CFLAGS += -I$(AMBIQ_SDK_DIR)/utils
+CFLAGS += -I$(AMBIQ_SDK_DIR)/boards/apollo510_evb/bsp
+CFLAGS += -ffunction-sections -fdata-sections -fno-common
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -607,6 +655,24 @@ LDFLAGS += -Wl,-u,tiku_rp2350_image_def
 LDFLAGS += -Wl,-u,tiku_rp2350_boot2_marker
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 
+else ifeq ($(TIKU_PLATFORM),ambiq)
+
+LDFLAGS  = -mcpu=cortex-m55 -mthumb -mfpu=auto -mfloat-abi=hard
+LDFLAGS += -nostartfiles -static
+LDFLAGS += -Tarch/ambiq/devices/apollo510.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+LDFLAGS += -Wl,-u,tiku_ambiq_vectors
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+# Prebuilt AmbiqSuite HAL + BSP archives. Placed in LDLIBS (linked AFTER
+# the objects, grouped with libc/libm/libgcc) so cross-references resolve.
+# @ambiq-sdk
+LDLIBS  = -Wl,--start-group
+LDLIBS += -lm -lc -lgcc
+LDLIBS += $(AMBIQ_SDK_DIR)/mcu/apollo510/hal/mcu/gcc/bin/libam_hal.a
+LDLIBS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/bsp/gcc/bin/libam_bsp.a
+LDLIBS += -Wl,--end-group
+
 else
 
 LDFLAGS  = -mmcu=$(MCU)
@@ -661,17 +727,31 @@ endif # TIKU_PLATFORM == msp430
 MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
-ifneq ($(TIKU_PLATFORM),rp2350)
-$(error MINIMAL=1 is only supported on MCU=rp2350)
+ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq),)
+$(error MINIMAL=1 is only supported on MCU=rp2350 or MCU=apollo510)
 endif
 
 # Use the minimal entry point and exactly the arch files it needs.
 SRCS  = main_minimal.c
+ifeq ($(TIKU_PLATFORM),ambiq)
+SRCS += arch/ambiq/tiku_crt_early.c
+SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
+SRCS += arch/ambiq/tiku_cpu_common.c
+SRCS += arch/ambiq/tiku_uart_arch.c
+SRCS += arch/ambiq/tiku_gpio_arch.c
+# AmbiqSuite sources compiled in (not in the archives): CMSIS SystemInit,
+# am_util stdio/delay, HAL resource tables. @ambiq-sdk
+SRCS += $(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Source/system_apollo510.c
+SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_delay.c
+SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_stdio.c
+SRCS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/examples/peripherals/hello_world/src/am_resources.c
+else
 SRCS += arch/arm-rp2350/tiku_crt_early.c
 SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
 SRCS += arch/arm-rp2350/tiku_cpu_common.c
 SRCS += arch/arm-rp2350/tiku_uart_arch.c
 SRCS += arch/arm-rp2350/tiku_gpio_arch.c
+endif
 CFLAGS += -DTIKU_MINIMAL=1
 
 else
@@ -704,6 +784,35 @@ SRCS += arch/arm-rp2350/tiku_pio_arch.c
 SRCS += arch/arm-rp2350/tiku_pwm_arch.c
 SRCS += arch/arm-rp2350/tiku_dma_arch.c
 SRCS += arch/arm-rp2350/tiku_trng_arch.c
+
+else ifeq ($(TIKU_PLATFORM),ambiq)
+
+# Apollo510 arch (Cortex-M55). GPIO/SPI/LCD are bundled here (like RP2350)
+# so they aren't double-added by the MSP430-guarded blocks further down.
+SRCS += arch/ambiq/tiku_cpu_common.c
+SRCS += arch/ambiq/tiku_crt_early.c
+SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
+SRCS += arch/ambiq/tiku_cpu_watchdog_arch.c
+SRCS += arch/ambiq/tiku_htimer_arch.c
+SRCS += arch/ambiq/tiku_i2c_arch.c
+SRCS += arch/ambiq/tiku_adc_arch.c
+SRCS += arch/ambiq/tiku_onewire_arch.c
+SRCS += arch/ambiq/tiku_timer_arch.c
+SRCS += arch/ambiq/tiku_crit_arch.c
+SRCS += arch/ambiq/tiku_wake_arch.c
+SRCS += arch/ambiq/tiku_gpio_irq_arch.c
+SRCS += arch/ambiq/tiku_uart_arch.c
+SRCS += arch/ambiq/tiku_mem_arch.c
+SRCS += arch/ambiq/tiku_mpu_arch.c
+SRCS += arch/ambiq/tiku_region_arch.c
+SRCS += arch/ambiq/tiku_gpio_arch.c
+SRCS += arch/ambiq/tiku_spi_arch.c
+SRCS += arch/ambiq/tiku_lcd_arch.c
+# AmbiqSuite sources compiled in (not in the prebuilt archives). @ambiq-sdk
+SRCS += $(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Source/system_apollo510.c
+SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_delay.c
+SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_stdio.c
+SRCS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/examples/peripherals/hello_world/src/am_resources.c
 
 else
 
@@ -1421,6 +1530,9 @@ ifeq ($(TIKU_PLATFORM),rp2350)
 TARGET_BIN = main.bin
 TARGET_UF2 = main.uf2
 all: $(TARGET) $(TARGET_BIN) $(TARGET_UF2) size
+else ifeq ($(TIKU_PLATFORM),ambiq)
+TARGET_BIN = main.bin
+all: $(TARGET) $(TARGET_BIN) size
 else
 all: $(TARGET) size
 endif
@@ -1441,7 +1553,7 @@ $(PLATFORM_STAMP):
 	@echo $(TIKU_PLATFORM) > $@
 
 $(TARGET): $(OBJS) $(PLATFORM_STAMP)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -1464,6 +1576,12 @@ $(TARGET_UF2): $(TARGET_BIN) tools/elf2uf2.py
 	@echo "  [uf2]   $(TARGET) -> $(TARGET_UF2)"
 
 uf2: $(TARGET_UF2)
+endif
+
+# Apollo510: raw binary for J-Link load to MRAM 0x410000.
+ifeq ($(TIKU_PLATFORM),ambiq)
+$(TARGET_BIN): $(TARGET)
+	$(OBJCOPY) -O binary $< $@
 endif
 
 # Embedded BASIC: the generated .c lives inside $(BUILD_DIR), so the
@@ -1550,6 +1668,35 @@ debug:
 
 erase:
 	@echo "Erase: hold BOOTSEL, mount RPI-RP2, copy a flash_nuke.uf2 image."
+
+else ifeq ($(TIKU_PLATFORM),ambiq)
+
+# Apollo510 EVB via SEGGER J-Link — same recipe as the AmbiqSuite example:
+# generate a Commander script that loads the raw binary to MRAM, resets, and
+# runs. Override JLINK_DEVICE / JLINK_SPEED / JLINK_IF on the make line if
+# your probe or part differs.
+JLINK_FLASH_SCRIPT = $(BUILD_DIR)/flash.jlink
+JLINK_ERASE_SCRIPT = $(BUILD_DIR)/erase.jlink
+
+flash: all
+	@mkdir -p $(BUILD_DIR)
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nloadbin %s %s\nr\ng\nq\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
+	@echo "Flashing $(TARGET_BIN) -> MRAM $(AMBIQ_LOAD_ADDR) via $(JLINK) ($(JLINK_DEVICE))..."
+	$(JLINK) -CommanderScript $(JLINK_FLASH_SCRIPT)
+
+run: flash
+
+debug: all
+	@echo "Apollo510 debug — start the GDB server in one terminal:"
+	@echo "  $(JLINK_GDB) -device $(JLINK_DEVICE) -if $(JLINK_IF) -speed $(JLINK_SPEED)"
+	@echo "then connect from another:"
+	@echo "  $(GDB) main.elf -ex 'target remote :2331' -ex load -ex 'monitor reset' -ex continue"
+
+erase:
+	@mkdir -p $(BUILD_DIR)
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nerase\nr\nq\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" > $(JLINK_ERASE_SCRIPT)
+	@echo "Erasing MRAM via $(JLINK) ($(JLINK_DEVICE))..."
+	$(JLINK) -CommanderScript $(JLINK_ERASE_SCRIPT)
 
 else
 

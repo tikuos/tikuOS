@@ -38,6 +38,8 @@
 #include "arch/msp430/tiku_uart_arch.h"
 #elif defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_uart_arch.h"
+#elif defined(PLATFORM_AMBIQ)
+#include "arch/ambiq/tiku_uart_arch.h"
 #endif
 
 
