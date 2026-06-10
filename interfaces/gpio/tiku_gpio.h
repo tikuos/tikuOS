@@ -30,7 +30,13 @@
 #define TIKU_GPIO_H_
 
 #include <stdint.h>
+#if defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_gpio_arch.h>
+#elif defined(PLATFORM_AMBIQ)
+#include <arch/ambiq/tiku_gpio_arch.h>
+#else
 #include <arch/msp430/tiku_gpio_arch.h>
+#endif
 #include <hal/tiku_gpio_irq_hal.h>
 
 /*---------------------------------------------------------------------------*/

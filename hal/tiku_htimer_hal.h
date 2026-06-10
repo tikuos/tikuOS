@@ -41,6 +41,8 @@
 #include "arch/msp430/tiku_htimer_config.h"
 #elif defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_htimer_config.h"
+#elif defined(PLATFORM_AMBIQ)
+#include "arch/ambiq/tiku_htimer_config.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
