@@ -25,7 +25,7 @@
 
 #include "tiku_uart_arch.h"
 #include "tiku.h"
-#include "am_mcu_apollo.h"   /* CMSIS register map (apollo510.h: UART0/PWRCTRL/GPIO) — kept */
+#include "apollo510.h"       /* CMSIS register map (UART0/PWRCTRL/GPIO) -- register header only */
 
 #include <stdarg.h>
 #include <stddef.h>

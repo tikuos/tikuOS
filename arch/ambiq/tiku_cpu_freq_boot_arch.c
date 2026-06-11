@@ -8,33 +8,33 @@
  * tiku_cpu_freq_boot_arch.c - Apollo 510 CPU/SoC bring-up + clocks
  *
  * Clock facts (Apollo510, hardware-confirmed):
- *   - CPU core: 96 MHz in Low-Power mode (am_hal_pwrctrl_low_power_init),
+ *   - CPU core: 96 MHz in Low-Power mode (the SBL default),
  *     250 MHz in High-Performance "turbo" mode. The DWT cycle counter (which
  *     counts core cycles) reads 96 MHz, confirming the LP core clock.
  *   - SysTick timer clock: 48 MHz = core/2 on this Cortex-M55. That is the OS
  *     tick + busy-delay timebase (see TIKU_MAIN_CPU_HZ in tiku.h, and the
  *     SysTick delay in tiku_cpu_common.c) — NOT the core clock.
- *   - The HFRC "free-run ~48 MHz" the BSP configures is a peripheral reference
- *     oscillator, unrelated to the core clock.
+ *   - The HFRC "free-run ~48 MHz" the SBL leaves running is a peripheral
+ *     reference oscillator, unrelated to the core clock.
  * s_core_hz below reports the TRUE core clock (read from the perf-mode reg).
  *
- * The one-time SoC bring-up inlines am_bsp_low_power_init()'s essential am_hal
- * init (pwrctrl + I/D cache + clkmgr) but DROPS its gratuitous
- * am_util_delay_ms(2000) at the top (~2 s of boot, gone). Still @ambiq-sdk:
- * those am_hal pwrctrl/cachectrl/clkmgr calls (the core), bare-metal later.
+ * SoC bring-up is fully bare-metal now (direct CMSIS register access, no
+ * AmbiqSuite SDK): it enables the I/D caches + M55 prefetch unit and otherwise
+ * inherits the power rails and clock tree exactly as the secure bootloader
+ * (SBL) left them. Each dropped am_hal_* call is documented inline below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "am_mcu_apollo.h"   /* @ambiq-sdk: am_hal_pwrctrl/clkmgr; PWRCTRL/CLKGEN regs */
+#include "apollo510.h"       /* CMSIS register defs (PWRCTRL/CLKGEN/MEMSYSCTL) -- register header only */
 #include "tiku_cpu_freq_boot_arch.h"
 
 static unsigned long s_core_hz = 96000000UL;  /* true CPU core; set from perf mode */
 
 /*
- * Faithful inline of am_bsp_low_power_init() MINUS the am_util_delay_ms(2000)
- * (and the OEM-recovery SCRATCH check + USB-PHY tuning, both irrelevant to a
- * normal non-USB boot). Same am_hal bring-up, so the SoC comes up identically.
+ * Bare-metal SoC bring-up. Caches + prefetch are configured here via CMSIS;
+ * power and clocks are inherited from the SBL (the per-step notes below record
+ * which am_hal_* call each was found to make redundant).
  */
 static void tiku_ambiq_soc_init(void) {
     /* De-SDK step 3 (TEST): skip am_hal_pwrctrl_low_power_init. The SBL leaves
@@ -78,14 +78,14 @@ static void tiku_ambiq_soc_init(void) {
  * High-Performance ("turbo") = 250 MHz. (Independent of the 48 MHz SysTick clock.) */
 static unsigned long tiku_ambiq_core_hz(void) {
     if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS ==
-            AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE) {
+            PWRCTRL_MCUPERFREQ_MCUPERFSTATUS_HP) {
         return 250000000UL;
     }
     return 96000000UL;
 }
 
 void tiku_cpu_boot_ambiq_init(void) {
-    tiku_ambiq_soc_init();          /* = am_bsp_low_power_init() minus the 2 s delay */
+    tiku_ambiq_soc_init();          /* caches + prefetch; power/clocks from SBL */
     s_core_hz = tiku_ambiq_core_hz();
 }
 

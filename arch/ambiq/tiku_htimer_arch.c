@@ -30,7 +30,7 @@
 #include "tiku.h"
 #include "tiku_htimer_config.h"
 #include "kernel/timers/tiku_htimer.h"
-#include "am_mcu_apollo.h"   /* CMSIS register map (apollo510.h: STIMER, MCUCTRL) — kept */
+#include "apollo510.h"       /* CMSIS register map (STIMER, MCUCTRL) -- register header only */
 
 #define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
 #define AMBIQ_IRQ_STIMER_CMPR0  32

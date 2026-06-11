@@ -570,14 +570,12 @@ CFLAGS += -DPLATFORM_AMBIQ=1
 # AmbiqSuite part/package selectors (same as the hello_world example).
 CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
 CFLAGS += -I$(PROJ_DIR)
-# AmbiqSuite SDK headers — reference-only, same include set as the example.
-CFLAGS += -I$(AMBIQ_SDK_DIR)
+# AmbiqSuite CMSIS register headers ONLY: apollo510.h (device) pulls core_cm55.h
+# + system_apollo510.h, all from these two CMSIS dirs. The HAL / BSP / utils /
+# devices / mcu include paths are dropped -- the de-SDK'd arch includes just the
+# bare CMSIS device header, no am_hal / am_bsp / am_util headers.
 CFLAGS += -I$(AMBIQ_SDK_DIR)/CMSIS/ARM/Include
 CFLAGS += -I$(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Include
-CFLAGS += -I$(AMBIQ_SDK_DIR)/devices
-CFLAGS += -I$(AMBIQ_SDK_DIR)/mcu/apollo510
-CFLAGS += -I$(AMBIQ_SDK_DIR)/utils
-CFLAGS += -I$(AMBIQ_SDK_DIR)/boards/apollo510_evb/bsp
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
 else
@@ -680,13 +678,11 @@ LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes
 LDFLAGS += -Wl,-u,tiku_ambiq_vectors
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
-# Prebuilt AmbiqSuite HAL + BSP archives. Placed in LDLIBS (linked AFTER
-# the objects, grouped with libc/libm/libgcc) so cross-references resolve.
-# @ambiq-sdk
+# System libraries only. The AmbiqSuite HAL/BSP archives (libam_hal.a /
+# libam_bsp.a) are gone -- de-SDK complete, zero am_hal/am_bsp calls remain --
+# and libnosys (via nosys.specs above) provides the syscall stubs.
 LDLIBS  = -Wl,--start-group
 LDLIBS += -lm -lc -lgcc
-# libam_hal.a + libam_bsp.a dropped (de-SDK complete): zero am_hal/am_bsp calls
-# remain, so nothing is pulled from the AmbiqSuite archives.
 LDLIBS += -Wl,--end-group
 
 else

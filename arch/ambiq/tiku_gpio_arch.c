@@ -19,7 +19,10 @@
  */
 
 #include "tiku_gpio_arch.h"
-#include "am_mcu_apollo.h"   /* CMSIS register defs (GPIO_Type/GPIO, AM_HAL_GPIO_MAX_PADS) — header only */
+#include "apollo510.h"       /* CMSIS register defs (GPIO_Type/GPIO) -- register header only */
+
+/* Apollo510 total GPIO pads (was AM_HAL_GPIO_MAX_PADS == AM_HAL_PIN_TOTAL_GPIOS). */
+#define TIKU_AMBIQ_GPIO_NUM_PADS  224u
 
 /* GPIO_PINCFGn fields (apollo510.h). */
 #define TIKU_GPIO_FNCSEL_GPIO      3u           /* FNCSEL[3:0] = GPIO       */
@@ -65,7 +68,7 @@ static int ambiq_pad_of(uint8_t port, uint8_t pin, uint32_t *pad) {
         return -1;
     }
     p = (uint32_t)(port - 1) * 8u + pin;
-    if (p >= AM_HAL_GPIO_MAX_PADS) {
+    if (p >= TIKU_AMBIQ_GPIO_NUM_PADS) {
         return -1;
     }
     *pad = p;

@@ -14,8 +14,8 @@
  *     lives above the SBL at 0x00410000.
  *   - 100+ GPIO pads; standard ARM peripherals (NVIC, SysTick, MPU).
  *
- * Pure constants — no SDK/CMSIS include. The arch .c files pull in the
- * AmbiqSuite headers behind the @ambiq-sdk seam.
+ * Pure constants — no SDK/CMSIS include. The arch .c files pull in only the
+ * bare CMSIS register header (apollo510.h); no AmbiqSuite HAL/BSP remains.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

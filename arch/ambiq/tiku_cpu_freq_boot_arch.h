@@ -10,10 +10,9 @@
  * Mirrors arch/arm-rp2350/tiku_cpu_freq_boot_arch.h. These are the
  * arch backends dispatched by hal/tiku_cpu.c under PLATFORM_AMBIQ.
  *
- * NOTE (de-SDK): the implementation currently leans on AmbiqSuite
- * (am_bsp_low_power_init / am_hal_clkmgr / am_hal_pwrctrl / cache).
- * Every such call is tagged @ambiq-sdk in the .c and will be replaced
- * with direct register sequences transcribed from the Ambiq HAL source.
+ * NOTE (de-SDK): fully bare-metal. The implementation uses only direct
+ * CMSIS register access (apollo510.h); no AmbiqSuite HAL/BSP calls remain.
+ * Power and clocks are inherited from the secure bootloader (SBL).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
