@@ -52,15 +52,12 @@ static void tiku_ambiq_soc_init(void) {
     SCB_EnableDCache();
     SCB_CleanDCache();
 
-#if AM_BSP_ENABLE_SIMOBUCK
-    am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_SIMOBUCK_INIT, NULL); /* @ambiq-sdk */
-#endif
-#if AM_BSP_SET_ROOM_TEMPS
-    {
-        am_hal_pwrctrl_temp_thresh_t dummy;
-        am_hal_pwrctrl_temp_update(25.0f, &dummy);   /* @ambiq-sdk: spotmgr temp */
-    }
-#endif
+    /* De-SDK step 1: dropped the optional power-OPTIMISATION calls
+     * am_hal_pwrctrl_control(SIMOBUCK_INIT) and am_hal_pwrctrl_temp_update(25C).
+     * The core already runs on the LDO that am_hal_pwrctrl_low_power_init set up
+     * (boot reached here on it); SIMOBUCK is only a buck-vs-LDO efficiency
+     * upgrade, and the spotmgr temperature defaults to a safe value. A wrong
+     * drop here would brown the chip out and fail loudly at boot. */
 
     {
         am_hal_clkmgr_board_info_t info = {
