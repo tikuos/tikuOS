@@ -74,11 +74,10 @@ TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510_EVB
 endif
 
 # ---------------------------------------------------------------------------
-# AmbiqSuite SDK location (Apollo510 hybrid bring-up). Reference-only:
-# headers + the prebuilt libam_hal.a / libam_bsp.a archives. Override with
-#   make MCU=apollo510 AMBIQ_SDK_DIR=/path/to/AmbiqSuite
+# Apollo510 register headers are VENDORED in-tree at arch/ambiq/cmsis/ (CMSIS
+# device map + ARM CMSIS-Core). The build references no external AmbiqSuite
+# tree -- only the MRAM bootrom blob. See arch/ambiq/cmsis/PROVENANCE.md.
 # ---------------------------------------------------------------------------
-AMBIQ_SDK_DIR ?= temp/AmbiqSuite
 
 # ---------------------------------------------------------------------------
 # Driver-vs-MCU compatibility gates
@@ -567,15 +566,15 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_AMBIQ=1
-# AmbiqSuite part/package selectors (same as the hello_world example).
+# Part/package selectors that configure the vendored apollo510.h register map.
 CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
 CFLAGS += -I$(PROJ_DIR)
-# AmbiqSuite CMSIS register headers ONLY: apollo510.h (device) pulls core_cm55.h
-# + system_apollo510.h, all from these two CMSIS dirs. The HAL / BSP / utils /
-# devices / mcu include paths are dropped -- the de-SDK'd arch includes just the
-# bare CMSIS device header, no am_hal / am_bsp / am_util headers.
-CFLAGS += -I$(AMBIQ_SDK_DIR)/CMSIS/ARM/Include
-CFLAGS += -I$(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Include
+# CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
+# fully self-contained: it references nothing in temp/AmbiqSuite, only the MRAM
+# bootrom blob. apollo510.h (the complete Apollo510 register map -- all 30
+# peripherals) pulls core_cm55.h + system_apollo510.h from that same dir.
+# Provenance + licenses: arch/ambiq/cmsis/PROVENANCE.md.
+CFLAGS += -I$(PROJ_DIR)/arch/ambiq/cmsis
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
 else
