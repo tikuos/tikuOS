@@ -60,11 +60,13 @@ static void tiku_ambiq_soc_init(void) {
 
     /* De-SDK step 2a: dropped am_hal_clkmgr_board_info_set (clkmgr XTAL
      * bookkeeping -- tikuOS enables the 32 kHz crystal directly in the htimer,
-     * not via the clkmgr) and the HFRC2 (250 MHz) config (nothing in tikuOS
-     * uses HFRC2). Kept the HFRC (48 MHz) config -- the UART's clock source. */
-    am_hal_clkmgr_clock_config(AM_HAL_CLKMGR_CLK_ID_HFRC,
-                               AM_HAL_CLKMGR_HFRC_FREQ_FREE_RUN_APPROX_48MHZ,
-                               NULL);            /* @ambiq-sdk: HFRC ref ~48 MHz */
+     * not via the clkmgr) and the HFRC2 (250 MHz) config (nothing uses HFRC2).
+     *
+     * De-SDK step 2b (TEST): also drop am_hal_clkmgr_clock_config(HFRC) -- the
+     * reset/SBL HFRC already free-runs near 48 MHz, so re-configuring it may be
+     * redundant. The UART (HFRC/2 = 24 MHz tap) is the canary: clean UART means
+     * the config was redundant; a garbled UART means the HFRC needs explicit
+     * setup and this returns (bare-metal via CLKGEN). */
 }
 
 /* True CPU core clock from the MCU performance-mode register: Low-Power = 96 MHz,
