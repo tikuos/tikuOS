@@ -679,7 +679,7 @@ LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 LDLIBS  = -Wl,--start-group
 LDLIBS += -lm -lc -lgcc
 LDLIBS += $(AMBIQ_SDK_DIR)/mcu/apollo510/hal/mcu/gcc/bin/libam_hal.a
-LDLIBS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/bsp/gcc/bin/libam_bsp.a
+# libam_bsp.a dropped (de-SDK): the bare-metal UART was its last user.
 LDLIBS += -Wl,--end-group
 
 else

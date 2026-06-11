@@ -7,24 +7,25 @@
  *
  * tiku_uart_arch.c - Apollo 510 console (COM UART, interactive)
  *
- * Drives UART0 (the EVB COM UART, AM_BSP_UART_PRINT_INST) on TX=pad 30 /
- * RX=pad 55 at TIKU_BOARD_UART_BAUD (default 115200, 8N1) via am_hal_uart.
- * RX is interrupt-driven into a ring buffer so the shell can read typed
- * input; TX polls the hardware FIFO. The printf is the same self-contained
- * formatter the RP2350/MSP430 drivers use (no am_util_stdio / newlib).
- *
- * This replaces the earlier SWO/ITM (TX-only) console so the shell is
- * interactive on a normal serial terminal. @ambiq-sdk marks the am_hal_uart
- * calls for the eventual bare-metal de-SDK pass; the bring-up sequence
- * mirrors the BSP's am_bsp_uart_printf_enable().
+ * Bare-metal driver for UART0 (the EVB COM UART) on TX=pad 30 / RX=pad 55 at
+ * TIKU_BOARD_UART_BAUD (default 115200, 8N1). The Apollo5 UART is PL011-based;
+ * this talks straight to the UART0 registers (DR/FR/IBRD/FBRD/LCRH/CR/IFLS/
+ * IER/MIS/IEC) via the CMSIS register map — no AmbiqSuite. Bring-up:
+ *   - power: PWRCTRL.DEVPWREN.PWRENUART0 + wait DEVPWRSTATUS (the functional
+ *     core of am_hal_pwrctrl_periph_enable, minus the spotmgr optimisation);
+ *   - clock: CR.CLKSEL = HFRC/24 MHz tap + CR.CLKEN (HFRC is already running,
+ *     no clock-manager request needed);
+ *   - pins:  GPIO PINCFG funcsel = 4 (UART0 TX/RX) on pads 30/55.
+ * RX is interrupt-driven (RX + RX-timeout) into a ring buffer; TX polls the
+ * hardware FIFO. The printf is the same self-contained formatter the
+ * RP2350/MSP430 drivers use (no am_util_stdio / newlib).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_uart_arch.h"
 #include "tiku.h"
-#include "am_mcu_apollo.h"   /* @ambiq-sdk: am_hal_uart_*, am_hal_gpio_pinconfig */
-#include "am_bsp.h"          /* @ambiq-sdk: AM_BSP_* COM-UART pins + configs    */
+#include "am_mcu_apollo.h"   /* CMSIS register map (apollo510.h: UART0/PWRCTRL/GPIO) — kept */
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -51,46 +52,77 @@ static struct {
     volatile uint16_t overrun_count;
 } rx;
 
-/* am_hal_uart handle for UART0 (the COM UART). */
-static void *g_uart = NULL;
+/* The EVB COM UART: UART0, TX=pad 30, RX=pad 55, both pad funcsel = 4. */
+#define TIKU_UART_TX_PAD       30u
+#define TIKU_UART_RX_PAD       55u
+#define TIKU_UART_PIN_FUNCSEL  4u
+#define TIKU_GPIO_PADKEY_UNLOCK 0x73u
 
 #define AMBIQ_IRQ_UART0   15
 #define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
 #define NVIC_ICPR ((volatile uint32_t *)0xE000E280UL)
+
+/* Route a pad to a peripheral function (FNCSEL[3:0]); all other PINCFG fields
+ * stay 0 — the UART drives TX / reads RX through the function mux, not the
+ * GPIO in/out path (mirrors the BSP's COM-UART pincfg). PADKEY gates writes. */
+static void uart_pad_funcsel(uint32_t pad, uint32_t funcsel) {
+    GPIO->PADKEY = TIKU_GPIO_PADKEY_UNLOCK;
+    (&GPIO->PINCFG0)[pad] = funcsel;
+    GPIO->PADKEY = 0u;
+}
 
 /*---------------------------------------------------------------------------*/
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
 
 void tiku_uart_init(void) {
-    static const am_hal_uart_config_t cfg = {
-        .ui32BaudRate = TIKU_BOARD_UART_BAUD,
-        .eDataBits    = AM_HAL_UART_DATA_BITS_8,
-        .eParity      = AM_HAL_UART_PARITY_NONE,
-        .eStopBits    = AM_HAL_UART_ONE_STOP_BIT,
-        .eFlowControl = AM_HAL_UART_FLOW_CTRL_NONE,
-        .eTXFifoLevel = AM_HAL_UART_FIFO_LEVEL_16,
-        .eRXFifoLevel = AM_HAL_UART_FIFO_LEVEL_4,   /* prompt RX */
-        .eClockSrc    = AM_HAL_UART_CLOCK_SRC_HFRC,
-    };
+    /* 1. Power up the UART0 peripheral domain (functional core of
+     *    am_hal_pwrctrl_periph_enable: DEVPWREN bit + wait for DEVPWRSTATUS). */
+    PWRCTRL->DEVPWREN_b.PWRENUART0 = 1u;
+    while (PWRCTRL->DEVPWRSTATUS_b.PWRSTUART0 == 0u) {
+        /* wait for the power domain to come up */
+    }
 
-    /* Same bring-up as am_bsp_uart_printf_enable(), but we keep the handle
-     * so we can service RX as well as TX. @ambiq-sdk */
-    am_hal_uart_initialize(AM_BSP_UART_PRINT_INST, &g_uart);
-    am_hal_uart_power_control(g_uart, AM_HAL_SYSCTRL_WAKE, false);
-    am_hal_uart_configure(g_uart, &cfg);
-    am_hal_gpio_pinconfig(AM_BSP_GPIO_COM_UART_TX, g_AM_BSP_GPIO_COM_UART_TX);
-    am_hal_gpio_pinconfig(AM_BSP_GPIO_COM_UART_RX, g_AM_BSP_GPIO_COM_UART_RX);
+    /* 2. Route the COM-UART pins to UART0 TX/RX. */
+    uart_pad_funcsel(TIKU_UART_TX_PAD, TIKU_UART_PIN_FUNCSEL);
+    uart_pad_funcsel(TIKU_UART_RX_PAD, TIKU_UART_PIN_FUNCSEL);
+
+    /* 3. Configure: disable, select the 24 MHz HFRC tap, program the baud
+     *    divisors + line control, then enable (PL011 ordering — LCRH latches
+     *    IBRD/FBRD). */
+    UART0->CR = 0u;
+    UART0->CR_b.CLKSEL = UART0_CR_CLKSEL_HFRC_24MHZ;   /* 24 MHz from HFRC */
+    UART0->CR_b.CLKEN  = 1u;
+
+    {
+        /* IBRD = clk/(16*baud); FBRD = round(frac*64). 24 MHz / 115200. */
+        uint32_t uartclk = 24000000u;
+        uint32_t baudclk = 16u * (uint32_t)TIKU_BOARD_UART_BAUD;
+        UART0->IBRD = uartclk / baudclk;
+        UART0->FBRD = (((uartclk % baudclk) * 64u) + (baudclk / 2u)) / baudclk;
+    }
+
+    /* 8 data bits (WLEN=3), FIFOs enabled, no parity, 1 stop. */
+    UART0->LCRH = (3u << UART0_LCRH_WLEN_Pos) | (1u << UART0_LCRH_FEN_Pos);
+
+    /* RX FIFO trigger 1/8 (lowest); the RX-timeout interrupt delivers single
+     * keystrokes promptly. */
+    UART0->IFLS_b.RXIFLSEL = 0u;
 
     rx.head = 0U;
     rx.tail = 0U;
     rx.overrun_count = 0U;
 
-    /* RX + RX-timeout so single keystrokes arrive promptly (the timeout
-     * fires when the FIFO holds fewer than the trigger level). @ambiq-sdk */
-    am_hal_uart_interrupt_clear(g_uart, AM_HAL_UART_INT_ALL);
-    am_hal_uart_interrupt_enable(g_uart,
-        AM_HAL_UART_INT_RX | AM_HAL_UART_INT_RX_TMOUT | AM_HAL_UART_INT_OVER_RUN);
+    /* Clear, then enable RX + RX-timeout + overrun interrupts. */
+    UART0->IEC = 0xFFFFFFFFu;
+    UART0->IER = (1u << UART0_IER_RXIM_Pos) |
+                 (1u << UART0_IER_RTIM_Pos) |
+                 (1u << UART0_IER_OEIM_Pos);
+
+    /* Enable the UART, transmitter and receiver. */
+    UART0->CR_b.UARTEN = 1u;
+    UART0->CR_b.TXE    = 1u;
+    UART0->CR_b.RXE    = 1u;
 
     /* Enable UART0 in the NVIC (IRQ 15). */
     NVIC_ICPR[AMBIQ_IRQ_UART0 >> 5] = (1u << (AMBIQ_IRQ_UART0 & 31u));
@@ -98,11 +130,10 @@ void tiku_uart_init(void) {
 }
 
 void tiku_uart_putc(char c) {
-    uint8_t  b = (uint8_t)c;
-    uint32_t written = 0U;
-    do {
-        am_hal_uart_fifo_write(g_uart, &b, 1U, &written);   /* @ambiq-sdk */
-    } while (written == 0U);
+    while (UART0->FR_b.TXFF) {
+        /* spin while the TX FIFO is full */
+    }
+    UART0->DR = (uint32_t)(uint8_t)c;
 }
 
 void tiku_uart_puts(const char *s) {
@@ -150,30 +181,21 @@ void tiku_uart_test_inject(uint8_t byte) {
 /* UART0 ISR (vector slot 16+15 in tiku_crt_early.c; non-weak so it
  * overrides the default trap). */
 void tiku_ambiq_uart0_isr(void) {
-    uint32_t status = 0U;
-    am_hal_uart_interrupt_status_get(g_uart, &status, true);   /* @ambiq-sdk */
+    uint32_t mis = UART0->MIS;   /* masked interrupt status */
 
-    if (status & (AM_HAL_UART_INT_RX | AM_HAL_UART_INT_RX_TMOUT |
-                  AM_HAL_UART_INT_OVER_RUN)) {
-        uint8_t  b;
-        uint32_t n;
-        for (;;) {
-            n = 0U;
-            am_hal_uart_fifo_read(g_uart, &b, 1U, &n);   /* @ambiq-sdk */
-            if (n == 0U) {
-                break;
-            }
-            uint16_t next = (uint16_t)((rx.head + 1U) & TIKU_UART_RXBUF_MASK);
-            if (next != rx.tail) {
-                rx.buf[rx.head] = b;
-                rx.head = next;
-            } else {
-                rx.overrun_count++;   /* software overrun: drain faster */
-            }
+    /* Drain the RX FIFO regardless of which RX-class interrupt fired. */
+    while (UART0->FR_b.RXFE == 0u) {
+        uint8_t  b    = (uint8_t)(UART0->DR & 0xFFu);
+        uint16_t next = (uint16_t)((rx.head + 1U) & TIKU_UART_RXBUF_MASK);
+        if (next != rx.tail) {
+            rx.buf[rx.head] = b;
+            rx.head = next;
+        } else {
+            rx.overrun_count++;   /* software overrun: drain faster */
         }
     }
 
-    am_hal_uart_interrupt_clear(g_uart, status);   /* @ambiq-sdk */
+    UART0->IEC = mis;   /* clear the serviced interrupts */
 }
 
 /*---------------------------------------------------------------------------*/
