@@ -560,6 +560,10 @@ else ifeq ($(TIKU_PLATFORM),ambiq)
 CFLAGS  = -mcpu=cortex-m55 -mthumb
 CFLAGS += -mfpu=auto -mfloat-abi=hard
 CFLAGS += -Os -Wall -Wextra -Wno-psabi
+# newlib-nano (small integer printf) + nosys syscall stubs. AmbiqSuite used to
+# supply _sbrk/_write/_read/etc; with the SDK gone, libnosys provides them.
+# Same config as the rp2350 block above; nano also avoids the heavy stdio init.
+CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_AMBIQ=1
@@ -667,6 +671,9 @@ LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 else ifeq ($(TIKU_PLATFORM),ambiq)
 
 LDFLAGS  = -mcpu=cortex-m55 -mthumb -mfpu=auto -mfloat-abi=hard
+# nano.specs -> libc_nano (small printf, no heavy stdio init); nosys.specs ->
+# libnosys syscall stubs (_sbrk/_write/...), formerly supplied by AmbiqSuite.
+LDFLAGS += --specs=nano.specs --specs=nosys.specs
 LDFLAGS += -nostartfiles -static
 LDFLAGS += -Tarch/ambiq/devices/apollo510.ld
 LDFLAGS += -Wl,--gc-sections
@@ -678,8 +685,8 @@ LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 # @ambiq-sdk
 LDLIBS  = -Wl,--start-group
 LDLIBS += -lm -lc -lgcc
-LDLIBS += $(AMBIQ_SDK_DIR)/mcu/apollo510/hal/mcu/gcc/bin/libam_hal.a
-# libam_bsp.a dropped (de-SDK): the bare-metal UART was its last user.
+# libam_hal.a + libam_bsp.a dropped (de-SDK complete): zero am_hal/am_bsp calls
+# remain, so nothing is pulled from the AmbiqSuite archives.
 LDLIBS += -Wl,--end-group
 
 else
@@ -748,11 +755,9 @@ SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_uart_arch.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
-# AmbiqSuite sources compiled in (not in the archives). @ambiq-sdk
-#  - system_apollo510.c (SystemInit) dropped: folded into tiku_crt_early.c
-#  - am_util_delay.c dropped: delays are bare-metal SysTick (tiku_cpu_common.c)
-SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_stdio.c
-SRCS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/examples/peripherals/hello_world/src/am_resources.c
+# No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
+# am_util_delay.c, am_util_stdio.c and am_resources.c are all dropped -- tikuOS
+# uses its own printf and never references the HAL resource tables.
 else
 SRCS += arch/arm-rp2350/tiku_crt_early.c
 SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
@@ -816,10 +821,8 @@ SRCS += arch/ambiq/tiku_region_arch.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
 SRCS += arch/ambiq/tiku_lcd_arch.c
-# AmbiqSuite sources compiled in (not in the prebuilt archives). @ambiq-sdk
-# system_apollo510.c (SystemInit) + am_util_delay.c dropped (de-SDK).
-SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_stdio.c
-SRCS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/examples/peripherals/hello_world/src/am_resources.c
+# No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
+# am_util_delay.c, am_util_stdio.c, am_resources.c all dropped.
 
 else
 
