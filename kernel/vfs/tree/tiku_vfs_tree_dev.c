@@ -49,6 +49,7 @@
 #include "tiku_vfs_tree_gpio.h"
 #include "tiku.h"
 #include <kernel/cpu/tiku_common.h>
+#include <kernel/timers/tiku_clock.h>   /* TIKU_CLOCK_SECOND for cache windows */
 #include <interfaces/led/tiku_led.h>
 #include <interfaces/adc/tiku_adc.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
@@ -430,6 +431,25 @@ devzero_read(char *buf, size_t max)
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
+/* Type descriptors (const, FRAM) for the typed /dev nodes below. */
+/* 12-bit raw conversions, sampled live (each read wakes the ADC), so
+ * both carry a read-coalescing window: repeated reads inside the window
+ * share one conversion.  Temperature drifts slowly -> ~100 ms; supply
+ * voltage slower still -> ~1 s. */
+static const tiku_vfs_desc_t desc_adc_temp =
+    TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
+                     TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
+                     TIKU_CLOCK_SECOND / 10);
+static const tiku_vfs_desc_t desc_adc_batt =
+    TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
+                     TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
+                     TIKU_CLOCK_SECOND);
+#if TIKU_BOARD_LED_COUNT >= 1
+static const tiku_vfs_desc_t desc_led =
+    TIKU_VFS_DESC(TIKU_VFS_T_BOOL, TIKU_VFS_U_BOOL,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+#endif
+
 /** /dev/uart directory table — RX health + configured baud */
 static const tiku_vfs_node_t dev_uart_children[] = {
     { "overruns", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0 },
@@ -438,8 +458,8 @@ static const tiku_vfs_node_t dev_uart_children[] = {
 
 /** /dev/adc directory table — raw conversions, no calibration */
 static const tiku_vfs_node_t dev_adc_children[] = {
-    { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0 },
-    { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0 },
+    { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0, &desc_adc_temp },
+    { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0, &desc_adc_batt },
 };
 
 /** /dev/i2c directory table — the live bus scanner */
@@ -463,7 +483,7 @@ static const tiku_vfs_node_t dev_spi_children[] = {
  */
 static const tiku_vfs_node_t dev_children[] = {
 #if TIKU_BOARD_LED_COUNT >= 1
-    { "led0",     TIKU_VFS_FILE, led0_read, led0_write, NULL, 0 },
+    { "led0",     TIKU_VFS_FILE, led0_read, led0_write, NULL, 0, &desc_led },
 #endif
 #if TIKU_BOARD_LED_COUNT >= 2
     { "led1",     TIKU_VFS_FILE, led1_read, led1_write, NULL, 0 },

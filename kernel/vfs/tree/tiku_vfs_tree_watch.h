@@ -61,10 +61,10 @@ extern const tiku_vfs_node_t tiku_vfs_tree_watch_children[];
  * Must equal the number of initialisers in
  * tiku_vfs_tree_vfs_children — bump it when adding a node there.
  */
-#define TIKU_VFS_TREE_VFS_NCHILD  2
+#define TIKU_VFS_TREE_VFS_NCHILD  3
 
 /**
- * @brief /sys/vfs children: nodes, depth.
+ * @brief /sys/vfs children: nodes, depth, cache/.
  *
  * Referenced by the /sys directory table in tiku_vfs_tree_sys.c.
  */

@@ -611,6 +611,15 @@ CFLAGS += -ffunction-sections -fdata-sections
 
 endif
 
+# VFS node tables (and other growable static tables) use positional
+# initializers that intentionally leave optional trailing fields
+# (e.g. tiku_vfs_node_t.desc) zero/NULL -- the zero-default IS the
+# back-compat contract.  -Wmissing-field-initializers (pulled in by
+# -Wextra) flags every such entry; disable just this one sub-warning
+# across all platforms rather than churn ~150 initializers on each
+# future field addition.  -Wextra otherwise stays on.
+CFLAGS += -Wno-missing-field-initializers
+
 # UART baud rate (default 9600; override: make UART_BAUD=115200)
 UART_BAUD ?=
 ifneq ($(UART_BAUD),)
@@ -911,6 +920,7 @@ SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/process/tiku_lc_persist.c
 SRCS += kernel/scheduler/tiku_sched.c
 SRCS += kernel/vfs/tiku_vfs.c
+SRCS += kernel/vfs/tiku_vfs_cache.c
 SRCS += kernel/vfs/tiku_vfs_tree.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_sys.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_boot.c
@@ -1120,6 +1130,8 @@ SRCS += tests/kernel/vfs/test_vfs_tree.c
 SRCS += tests/kernel/vfs/test_vfs_watch.c
 SRCS += tests/kernel/vfs/test_vfs_introspect.c
 SRCS += tests/kernel/vfs/test_vfs_gpio_notify.c
+SRCS += tests/kernel/vfs/test_vfs_desc.c
+SRCS += tests/kernel/vfs/test_vfs_cache.c
 SRCS += tests/init/test_catalog.c
 SRCS += tests/init/test_init_table.c
 SRCS += tests/init/test_init_boot.c

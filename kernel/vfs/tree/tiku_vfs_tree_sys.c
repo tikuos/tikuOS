@@ -514,22 +514,39 @@ cpu_freq_read(char *buf, size_t max)
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
+/* Type descriptors (const, FRAM) for the typed /sys nodes below. */
+static const tiku_vfs_desc_t desc_mem_static =     /* sram, nvm: fixed sizes */
+    TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_BYTES,
+                  TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_mem_live =       /* free, used: vary, cheap */
+    TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_BYTES,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_freq =
+    TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_HERTZ,
+                  TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_idle =
+    TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_COUNT,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_uptime =
+    TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_SECONDS,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+
 /** /sys/mem directory table — sizes (sram, nvm) + live (free, used) */
 static const tiku_vfs_node_t sys_mem_children[] = {
-    { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0 },
-    { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0 },
-    { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0 },
-    { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0 },
+    { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
+    { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
+    { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
+    { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },
 };
 
 /** /sys/cpu directory table */
 static const tiku_vfs_node_t sys_cpu_children[] = {
-    { "freq", TIKU_VFS_FILE, cpu_freq_read, NULL, NULL, 0 },
+    { "freq", TIKU_VFS_FILE, cpu_freq_read, NULL, NULL, 0, &desc_freq },
 };
 
 /** /sys/sched directory table */
 static const tiku_vfs_node_t sys_sched_children[] = {
-    { "idle", TIKU_VFS_FILE, sched_idle_read, NULL, NULL, 0 },
+    { "idle", TIKU_VFS_FILE, sched_idle_read, NULL, NULL, 0, &desc_idle },
 };
 
 /** /sys/device directory table — name is the only writable node */
@@ -559,7 +576,8 @@ static const tiku_vfs_node_t sys_device_children[] = {
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
-    { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0 },
+    { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0,
+      &desc_uptime },
     { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0 },
     { "boot_count", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_count_read,      NULL, NULL, 0 },

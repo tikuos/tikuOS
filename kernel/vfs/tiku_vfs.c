@@ -37,8 +37,10 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_vfs.h"
+#include "tiku_vfs_cache.h"
 #include <kernel/process/tiku_process.h>
 #include <hal/tiku_cpu.h>
+#include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -209,6 +211,19 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
         return -1;
     }
 
+#if TIKU_VFS_CACHE_ENABLE
+    /* Cacheable nodes (a freshness window in the descriptor) route through
+     * the read-coalescing cache: a fresh hit skips the handler entirely;
+     * a miss samples the handler and stores the rendering. */
+    if (node->desc != NULL && node->desc->fresh_ticks > 0u) {
+        int hit = tiku_vfs_cache_get(node, buf, max);
+        if (hit >= 0) {
+            return hit;
+        }
+        return tiku_vfs_cache_sample(node, buf, max);
+    }
+#endif
+
     return node->read(buf, max);
 }
 
@@ -222,6 +237,245 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
 int tiku_vfs_read(const char *path, char *buf, size_t max)
 {
     return tiku_vfs_read_node(tiku_vfs_resolve(path), buf, max);
+}
+
+/*---------------------------------------------------------------------------*/
+/* TYPED ACCESS — descriptor-driven, machine-facing reads                    */
+/*---------------------------------------------------------------------------*/
+/*
+ * The typed layer never touches the text handlers' contract: a typed
+ * read either calls the descriptor's native producer or renders the
+ * existing text handler once and decodes the digits.  Untyped nodes
+ * are untouched.  All decoding is hand-rolled (no strtol pulled in)
+ * so the parse is deterministic and free of libc/locale surprises on
+ * the 16-bit target.
+ */
+
+/* Short tokens for tiku_vfs_desc_str(); indexed by the matching enum. */
+static const char *const vfs_vtype_names[] = {
+    "none", "u32", "i32", "bool", "fixed", "str"
+};
+static const char *const vfs_unit_names[] = {
+    "", "bool", "count", "bytes", "s", "ms", "ticks", "Hz",
+    "mV", "mA", "C", "mC", "%", "adc", "uJ"
+};
+static const char *const vfs_fresh_names[] = { "static", "cached", "live" };
+static const char *const vfs_ecost_names[] = { "free", "cheap", "periph", "bus" };
+
+#define VFS_NAME_OF(tbl, i)                                                 \
+    (((unsigned)(i) < (sizeof(tbl) / sizeof((tbl)[0]))) ? (tbl)[(i)] : "?")
+
+/**
+ * @brief Parse a leading integer (optional sign, decimal or 0x hex).
+ *
+ * Skips leading blanks, reads one signed/unsigned integer, and stops
+ * at the first non-digit (e.g. the trailing '\n', or "err").
+ *
+ * @return 0 and sets the magnitude and sign on success; -1 if no
+ *         digits were seen.
+ */
+static int vfs_parse_num(const char *s, uint32_t *mag, int *neg)
+{
+    uint32_t acc = 0;
+    int any = 0;
+
+    *neg = 0;
+    while (*s == ' ' || *s == '\t') {
+        s++;
+    }
+    if (*s == '-') {
+        *neg = 1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+        for (;;) {
+            char c = *s;
+            int d;
+            if (c >= '0' && c <= '9') {
+                d = c - '0';
+            } else if (c >= 'a' && c <= 'f') {
+                d = c - 'a' + 10;
+            } else if (c >= 'A' && c <= 'F') {
+                d = c - 'A' + 10;
+            } else {
+                break;
+            }
+            acc = acc * 16u + (uint32_t)d;
+            any = 1;
+            s++;
+        }
+    } else {
+        while (*s >= '0' && *s <= '9') {
+            acc = acc * 10u + (uint32_t)(*s - '0');
+            any = 1;
+            s++;
+        }
+    }
+
+    if (!any) {
+        return -1;
+    }
+    *mag = acc;
+    return 0;
+}
+
+/** @brief Decode rendered text into @p out per the descriptor's type. */
+static int vfs_decode_text(const char *s, const tiku_vfs_desc_t *d,
+                           tiku_vfs_val_t *out)
+{
+    uint32_t mag;
+    int neg;
+
+    switch (d->vtype) {
+    case TIKU_VFS_T_U32:
+    case TIKU_VFS_T_FIXED:
+        if (vfs_parse_num(s, &mag, &neg) != 0) {
+            return -1;
+        }
+        out->vtype = d->vtype;
+        out->as.u = mag;
+        return 0;
+
+    case TIKU_VFS_T_I32:
+        if (vfs_parse_num(s, &mag, &neg) != 0) {
+            return -1;
+        }
+        out->vtype = TIKU_VFS_T_I32;
+        out->as.i = neg ? -(int32_t)mag : (int32_t)mag;
+        return 0;
+
+    case TIKU_VFS_T_BOOL:
+        if (vfs_parse_num(s, &mag, &neg) == 0) {
+            out->vtype = TIKU_VFS_T_BOOL;
+            out->as.u = (mag != 0u) ? 1u : 0u;
+            return 0;
+        }
+        /* Accept on/off, true/false as well as 0/1. */
+        if (*s == 'o' || *s == 'O') {
+            out->vtype = TIKU_VFS_T_BOOL;
+            out->as.u = (s[1] == 'n' || s[1] == 'N') ? 1u : 0u;
+            return 0;
+        }
+        if (*s == 't' || *s == 'T') {
+            out->vtype = TIKU_VFS_T_BOOL;
+            out->as.u = 1u;
+            return 0;
+        }
+        if (*s == 'f' || *s == 'F') {
+            out->vtype = TIKU_VFS_T_BOOL;
+            out->as.u = 0u;
+            return 0;
+        }
+        return -1;
+
+    default:
+        return -1;   /* STR / NONE: caller uses the text path */
+    }
+}
+
+/**
+ * @brief Read a held node as a decoded typed value.
+ *
+ * Native producer wins; otherwise render the text handler into a
+ * small scratch buffer and decode.  @p out is always zeroed first so
+ * a failed read leaves a clean NONE value rather than stale bytes.
+ */
+int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out)
+{
+    const tiku_vfs_desc_t *d;
+    char tmp[24];
+    int n;
+
+    if (out == NULL) {
+        return -1;
+    }
+    out->vtype = TIKU_VFS_T_NONE;
+    out->unit = TIKU_VFS_U_NONE;
+    out->scale = 0;
+    out->as.u = 0;
+
+    if (node == NULL || node->type != TIKU_VFS_FILE || node->desc == NULL) {
+        return -1;
+    }
+    d = node->desc;
+    out->unit = d->unit;
+    out->scale = d->scale;
+
+    if (d->read_val != NULL) {
+        return d->read_val(out);
+    }
+    if (node->read == NULL) {
+        return -1;
+    }
+
+    /* Render via the by-node read path so a typed read shares the
+     * freshness cache (and decodes the cached text on a hit). */
+    n = tiku_vfs_read_node(node, tmp, sizeof(tmp));
+    if (n <= 0) {
+        return -1;
+    }
+    /* snprintf-style handlers return the would-be length; clamp so the
+     * scratch buffer is always a valid, NUL-terminated C string. */
+    if ((size_t)n >= sizeof(tmp)) {
+        n = (int)sizeof(tmp) - 1;
+    }
+    tmp[n] = '\0';
+
+    return vfs_decode_text(tmp, d, out);
+}
+
+/** @brief Resolve a path, then read it as a decoded typed value. */
+int tiku_vfs_read_val(const char *path, tiku_vfs_val_t *out)
+{
+    return tiku_vfs_read_val_node(tiku_vfs_resolve(path), out);
+}
+
+/** @brief Return a node's descriptor (NULL if untyped / node NULL). */
+const tiku_vfs_desc_t *tiku_vfs_desc_of(const tiku_vfs_node_t *node)
+{
+    return (node != NULL) ? node->desc : NULL;
+}
+
+/** @brief Render a descriptor as a one-line human/manifest string. */
+int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max)
+{
+    const tiku_vfs_desc_t *d;
+    int n;
+
+    if (node == NULL || buf == NULL || max == 0) {
+        return -1;
+    }
+    d = node->desc;
+    if (d == NULL) {
+        return snprintf(buf, max, "untyped\n");
+    }
+
+    n = snprintf(buf, max, "%s %s cost=%s fresh=%s",
+                 VFS_NAME_OF(vfs_vtype_names, d->vtype),
+                 VFS_NAME_OF(vfs_unit_names, d->unit),
+                 VFS_NAME_OF(vfs_ecost_names, d->ecost),
+                 VFS_NAME_OF(vfs_fresh_names, d->fresh));
+    if (n < 0) {
+        return -1;
+    }
+    if ((d->flags & TIKU_VFS_DF_RANGE) && (size_t)n < max) {
+        int m = snprintf(buf + n, max - (size_t)n, " [%ld..%ld]",
+                         (long)d->vmin, (long)d->vmax);
+        if (m > 0) {
+            n += m;
+        }
+    }
+    if ((size_t)n < max) {
+        int m = snprintf(buf + n, max - (size_t)n, "\n");
+        if (m > 0) {
+            n += m;
+        }
+    }
+    return n;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -423,6 +677,12 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node)
     if (node == NULL) {
         return;
     }
+
+#if TIKU_VFS_CACHE_ENABLE
+    /* A change means any cached rendering is stale -- drop it before
+     * waking watchers, so the re-read they do sees the new value. */
+    tiku_vfs_cache_invalidate(node);
+#endif
 
     for (i = 0; i < TIKU_VFS_WATCH_MAX; i++) {
         if (watch_table[i].node == node) {

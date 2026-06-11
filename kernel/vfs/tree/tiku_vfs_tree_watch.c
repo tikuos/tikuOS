@@ -47,6 +47,7 @@
 #include "tiku_vfs_tree_watch.h"
 #include "tiku.h"
 #include <kernel/process/tiku_process.h>
+#include <kernel/vfs/tiku_vfs_cache.h>
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
@@ -189,8 +190,48 @@ vfs_depth_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/vfs/cache/{used,hits,misses} — freshness-cache observability         */
+/*---------------------------------------------------------------------------*/
+/*
+ * The read-coalescing cache (kernel/vfs/tiku_vfs_cache.c) renders its
+ * effectiveness here: a rising hit:miss ratio is the energy win made
+ * visible (each hit is one ADC/bus access avoided).
+ */
+
+static int
+vfs_cache_used_read(char *buf, size_t max)
+{
+    uint8_t used = 0;
+    tiku_vfs_cache_stats(NULL, NULL, &used);
+    return snprintf(buf, max, "%u\n", (unsigned)used);
+}
+
+static int
+vfs_cache_hits_read(char *buf, size_t max)
+{
+    uint32_t hits = 0;
+    tiku_vfs_cache_stats(&hits, NULL, NULL);
+    return snprintf(buf, max, "%lu\n", (unsigned long)hits);
+}
+
+static int
+vfs_cache_misses_read(char *buf, size_t max)
+{
+    uint32_t misses = 0;
+    tiku_vfs_cache_stats(NULL, &misses, NULL);
+    return snprintf(buf, max, "%lu\n", (unsigned long)misses);
+}
+
+/*---------------------------------------------------------------------------*/
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
+
+/** /sys/vfs/cache directory table — read-coalescing counters. */
+static const tiku_vfs_node_t vfs_cache_children[] = {
+    { "used",   TIKU_VFS_FILE, vfs_cache_used_read,   NULL, NULL, 0 },
+    { "hits",   TIKU_VFS_FILE, vfs_cache_hits_read,   NULL, NULL, 0 },
+    { "misses", TIKU_VFS_FILE, vfs_cache_misses_read, NULL, NULL, 0 },
+};
 
 /**
  * /sys/watch directory table: two summary counters plus one node
@@ -222,6 +263,8 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
 const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
     { "nodes", TIKU_VFS_FILE, vfs_nodes_read, NULL, NULL, 0 },
     { "depth", TIKU_VFS_FILE, vfs_depth_read, NULL, NULL, 0 },
+    { "cache", TIKU_VFS_DIR,  NULL, NULL, vfs_cache_children,
+      sizeof(vfs_cache_children) / sizeof(vfs_cache_children[0]) },
 };
 
 _Static_assert(sizeof(tiku_vfs_tree_vfs_children) /

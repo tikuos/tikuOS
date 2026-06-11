@@ -63,6 +63,135 @@ typedef int (*tiku_vfs_read_fn)(char *buf, size_t max);
 typedef int (*tiku_vfs_write_fn)(const char *buf, size_t len);
 
 /*---------------------------------------------------------------------------*/
+/* TYPE DESCRIPTORS — machine-readable node metadata                         */
+/*---------------------------------------------------------------------------*/
+/*
+ * The node struct stays minimal: handlers render and accept human
+ * text.  A node may ALSO carry one const pointer to a descriptor —
+ * a sidecar of machine-readable metadata (value type, unit, range,
+ * freshness, energy cost) that lives in rodata/FRAM and costs zero
+ * SRAM.  desc == NULL means "untyped": every existing node keeps
+ * working unchanged, and only nodes that opt in pay the (shared,
+ * const) descriptor.
+ *
+ * Descriptors are the substrate for the machine-facing layers built
+ * on top of the namespace: a binary read path (tiku_vfs_read_val), a
+ * freshness/energy-aware read cache (desc.fresh + desc.fresh_ticks),
+ * write validation (desc.vmin/vmax), a self-describing manifest for
+ * remote/agent consumers (tiku_vfs_desc_str), and per-node energy
+ * accounting (desc.ecost).
+ */
+
+/** @brief How to interpret a node's value. */
+typedef enum {
+    TIKU_VFS_T_NONE = 0,   /**< Untyped / opaque text (default) */
+    TIKU_VFS_T_U32,        /**< Unsigned integer */
+    TIKU_VFS_T_I32,        /**< Signed integer */
+    TIKU_VFS_T_BOOL,       /**< Boolean (0/1) */
+    TIKU_VFS_T_FIXED,      /**< Fixed-point integer; see desc.scale */
+    TIKU_VFS_T_STR         /**< Free text (machine path falls back to read) */
+} tiku_vfs_vtype_t;
+
+/** @brief Physical unit of a value (the integer IS expressed in this unit). */
+typedef enum {
+    TIKU_VFS_U_NONE = 0,
+    TIKU_VFS_U_BOOL,
+    TIKU_VFS_U_COUNT,
+    TIKU_VFS_U_BYTES,
+    TIKU_VFS_U_SECONDS,
+    TIKU_VFS_U_MILLIS,
+    TIKU_VFS_U_TICKS,
+    TIKU_VFS_U_HERTZ,
+    TIKU_VFS_U_MILLIVOLTS,
+    TIKU_VFS_U_MILLIAMPS,
+    TIKU_VFS_U_CELSIUS,
+    TIKU_VFS_U_MILLICELSIUS,
+    TIKU_VFS_U_PERCENT,
+    TIKU_VFS_U_ADC_RAW,
+    TIKU_VFS_U_MICROJOULES
+} tiku_vfs_unit_t;
+
+/** @brief How live a value is — what a read actually does. */
+typedef enum {
+    TIKU_VFS_FRESH_STATIC = 0, /**< Never changes after boot */
+    TIKU_VFS_FRESH_CACHED,     /**< Changes, but a read is cheap (counter/reg) */
+    TIKU_VFS_FRESH_LIVE        /**< Sampled on read; costs energy (ADC/I2C) */
+} tiku_vfs_fresh_t;
+
+/** @brief What producing a value costs — the seed of energy accounting. */
+typedef enum {
+    TIKU_VFS_E_FREE = 0,   /**< Register / SRAM read, ~free */
+    TIKU_VFS_E_CHEAP,      /**< A few cycles, no peripheral wake */
+    TIKU_VFS_E_PERIPH,     /**< Wakes a peripheral (ADC + reference) */
+    TIKU_VFS_E_BUS         /**< Off-chip bus transaction (I2C/SPI) */
+} tiku_vfs_ecost_t;
+
+/** @brief Descriptor flag bits. */
+#define TIKU_VFS_DF_NONE    0x0000u
+#define TIKU_VFS_DF_RANGE   0x0001u  /**< vmin/vmax are meaningful */
+#define TIKU_VFS_DF_HEX     0x0002u  /**< Natural rendering is hex */
+#define TIKU_VFS_DF_SECRET  0x0004u  /**< Hide on remote/agent channels */
+
+/**
+ * @brief A decoded, machine-usable node value.
+ *
+ * Produced by tiku_vfs_read_val(); the union member to read is
+ * selected by @ref vtype.  STR values are not decoded here — use the
+ * text read path for those.
+ */
+typedef struct {
+    uint8_t  vtype;   /**< tiku_vfs_vtype_t; NONE if undecodable */
+    uint8_t  unit;    /**< tiku_vfs_unit_t (copied from the descriptor) */
+    int16_t  scale;   /**< Decimal exponent for FIXED (value = raw*10^scale) */
+    union {
+        uint32_t u;   /**< U32 / FIXED / BOOL magnitude */
+        int32_t  i;   /**< I32 */
+    } as;
+} tiku_vfs_val_t;
+
+/**
+ * @brief Sidecar metadata for a typed node (const; rodata/FRAM).
+ *
+ * Optional native producer @ref read_val short-circuits the text path
+ * for hot machine-to-machine reads; when NULL, tiku_vfs_read_val()
+ * renders the node's text handler and decodes it per @ref vtype.
+ */
+typedef struct tiku_vfs_desc {
+    uint8_t  vtype;       /**< tiku_vfs_vtype_t */
+    uint8_t  unit;        /**< tiku_vfs_unit_t */
+    uint8_t  fresh;       /**< tiku_vfs_fresh_t */
+    uint8_t  ecost;       /**< tiku_vfs_ecost_t */
+    uint16_t flags;       /**< TIKU_VFS_DF_* */
+    uint16_t fresh_ticks; /**< Cache window in system ticks; 0 = always live */
+    int16_t  scale;       /**< Decimal exponent for FIXED; else 0 */
+    int32_t  vmin;        /**< Range low  (valid iff DF_RANGE) */
+    int32_t  vmax;        /**< Range high (valid iff DF_RANGE) */
+    int (*read_val)(tiku_vfs_val_t *out); /**< Native producer, or NULL */
+} tiku_vfs_desc_t;
+
+/** @brief Build a plain descriptor (no range, no caching, text-decoded). */
+#define TIKU_VFS_DESC(vt, un, fr, ec)                                       \
+    { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
+      TIKU_VFS_DF_NONE, 0u, 0, 0, 0, 0 }
+
+/** @brief Build a ranged descriptor (DF_RANGE set; vmin..vmax meaningful). */
+#define TIKU_VFS_DESC_R(vt, un, fr, ec, lo, hi)                             \
+    { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
+      TIKU_VFS_DF_RANGE, 0u, 0, (int32_t)(lo), (int32_t)(hi), 0 }
+
+/**
+ * @brief Build a ranged descriptor with a freshness/cache window.
+ *
+ * @p ticks is the read-coalescing window in system ticks (the freshness
+ * cache serves a cached value for up to this long); see
+ * kernel/vfs/tiku_vfs_cache.h.  Keep it well under a few seconds so the
+ * cache's wrap guard never false-expires it.
+ */
+#define TIKU_VFS_DESC_RF(vt, un, fr, ec, lo, hi, ticks)                     \
+    { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
+      TIKU_VFS_DF_RANGE, (uint16_t)(ticks), 0, (int32_t)(lo), (int32_t)(hi), 0 }
+
+/*---------------------------------------------------------------------------*/
 /* VFS NODE                                                                  */
 /*---------------------------------------------------------------------------*/
 
@@ -74,6 +203,8 @@ typedef struct tiku_vfs_node {
     tiku_vfs_write_fn            write;        /**< NULL if not writable */
     const struct tiku_vfs_node  *children;     /**< For DIR: child array */
     uint8_t                      child_count;  /**< For DIR: child count */
+    const tiku_vfs_desc_t       *desc;         /**< Type descriptor; NULL =
+                                                    untyped (back-compat) */
 } tiku_vfs_node_t;
 
 /*---------------------------------------------------------------------------*/
@@ -126,6 +257,44 @@ int tiku_vfs_read(const char *path, char *buf, size_t max);
  * @return Bytes written to buf, or -1 on error
  */
 int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max);
+
+/*---------------------------------------------------------------------------*/
+/* TYPED ACCESS — descriptor-driven, machine-facing reads                    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Return a node's type descriptor.
+ * @return The descriptor, or NULL if the node is untyped / NULL.
+ */
+const tiku_vfs_desc_t *tiku_vfs_desc_of(const tiku_vfs_node_t *node);
+
+/**
+ * @brief Read a node as a decoded, typed value.
+ *
+ * Requires a descriptor: a native producer (desc.read_val) is used
+ * when present, otherwise the text handler is rendered once and
+ * decoded per the declared type.  Untyped nodes — and STR types —
+ * return -1; use the text path (tiku_vfs_read) for those.
+ *
+ * @param path  Absolute path to a typed FILE node
+ * @param out   Decoded value (always zeroed first; vtype=NONE on failure)
+ * @return 0 on success, -1 otherwise
+ */
+int tiku_vfs_read_val(const char *path, tiku_vfs_val_t *out);
+
+/** @brief By-node form of tiku_vfs_read_val() (skips the path walk). */
+int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out);
+
+/**
+ * @brief Render a node's descriptor as a one-line human/manifest string.
+ *
+ * e.g. "u32 Hz cost=free fresh=static\n", or "i32 mC [-40000..125000]
+ * cost=periph fresh=live\n".  "untyped\n" when the node has no
+ * descriptor.  Newline-terminated, snprintf-style return.
+ *
+ * @return Bytes that would be written (>=0), or -1 on bad args.
+ */
+int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max);
 
 /**
  * @brief Write to a path
