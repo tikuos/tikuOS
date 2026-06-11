@@ -21,7 +21,25 @@ description `pack/SVD/apollo510.svd` in that same SDK. It defines **all 30
 Apollo510 peripherals** (PWRCTRL, GPIO, STIMER, UART0, IOM0, MSPI0, ADC, TIMER,
 …), so new drivers need no header edits. It is kept vendored — rather than
 regenerated — so it is byte-identical to the file the arch code was validated
-against; it can be regenerated from the SVD with `svdconv` if ever desired.
+against; it can be regenerated from the SVD with `svdconv` — see below.
+
+## Register-map source — `apollo510.svd.gz` (© Ambiq Micro)
+
+`apollo510.svd.gz` is the gzipped CMSIS-SVD that `apollo510.h` was generated
+from — the formal, machine-readable description of every Apollo510 register. The
+build never reads it; it is kept as the upstream "blueprint" so the header can be
+regenerated from primary source rather than trusted as a copy.
+
+    AmbiqSuite release_sdk5p1p0 -> pack/SVD/apollo510.svd  (10.5 MB raw, 356 KB gz)
+
+To regenerate the header (needs `svdconv` from the Open-CMSIS-Pack cmsis-toolbox):
+
+    gunzip -k arch/ambiq/cmsis/apollo510.svd.gz      # -> apollo510.svd
+    svdconv  apollo510.svd --generate=header         # -> apollo510.h
+
+Byte-exact reproduction depends on Ambiq's original generator options, but the
+register / struct / bit-field definitions are equivalent. The checked-in
+`apollo510.h` remains the canonical, hardware-validated copy.
 
 ## ARM CMSIS-Core for Cortex-M55 — © ARM Limited, Apache-2.0
 
