@@ -17,12 +17,14 @@
  *   2. Set SP and VTOR explicitly.
  *   3. Enable the FPU (CPACR) — the build uses the hard-float ABI.
  *   4. Copy .data (MRAM->DTCM), zero .bss.
- *   5. SystemInit() (CMSIS: TrustZone SAU + SystemCoreClock).  @ambiq-sdk
+ *   5. M55 finishing touches (the functional bits of CMSIS SystemInit):
+ *      EPU (FP/MVE) power state + Low-Overhead-Branch enable.
  *   6. main().
  *
- * The only AmbiqSuite dependency here is SystemInit() (a single source
- * file, CMSIS/AmbiqMicro/Source/system_apollo510.c); everything else is
- * bare-metal register access. @ambiq-sdk marks it for the de-SDK pass.
+ * Fully bare-metal: no AmbiqSuite dependency. CMSIS SystemInit() is gone —
+ * its VTOR/FPU were already done here, its TrustZone SAU setup is compiled
+ * out in our non-cmse build, its SystemCoreClock stub is unused (we read the
+ * perf-mode register), and the remaining two register writes are in step 5.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -45,7 +47,6 @@ extern uint32_t __stack;
 /*---------------------------------------------------------------------------*/
 
 extern int  main(void);
-extern void SystemInit(void);   /* @ambiq-sdk: CMSIS system_apollo510.c */
 
 /* Forward decl of the vector table (defined below). Apollo510 has 135
  * external IRQs (0..134, see AmbiqSuite startup_gcc.c). */
@@ -110,6 +111,17 @@ void tiku_ambiq_reset_handler(void) {
      * because the build uses -mfloat-abi=hard and libam_hal is built the
      * same way. */
     *(volatile uint32_t *)0xE000ED88U |= (0xFU << 20);
+
+    /* The two functional bits CMSIS SystemInit() set that the steps above do
+     * not: the M55 EPU (FP/MVE unit) power state = ON, clock-off (best FP/MVE
+     * performance, avoids power-up stalls) via PWRMODCTL.CPDLPSTATE
+     * ELPSTATE[5:4] = 0b01; and the ARMv8.1-M Low-Overhead-Branch extension
+     * via SCB.CCR.LOB (bit 19), used by -mcpu=cortex-m55 loop instructions. */
+    {
+        volatile uint32_t *cpdlpstate = (volatile uint32_t *)0xE001E300U; /* PWRMODCTL */
+        *cpdlpstate = (*cpdlpstate & ~(0x3U << 4)) | (0x1U << 4);
+    }
+    *(volatile uint32_t *)0xE000ED14U |= (1U << 19);   /* SCB->CCR, LOB */
     __asm__ volatile ("dsb");
     __asm__ volatile ("isb");
 
@@ -125,9 +137,6 @@ void tiku_ambiq_reset_handler(void) {
     while (dst < &__bss_end) {
         *dst++ = 0U;
     }
-
-    /* CMSIS system init: TrustZone SAU setup + SystemCoreClock. */
-    SystemInit();   /* @ambiq-sdk */
 
     (void)main();
 

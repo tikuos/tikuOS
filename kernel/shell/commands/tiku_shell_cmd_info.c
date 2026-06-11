@@ -26,6 +26,7 @@
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/process/tiku_process.h>
 #include <kernel/timers/tiku_clock.h>
+#include <hal/tiku_cpu.h>
 
 /*---------------------------------------------------------------------------*/
 /* DEVICE NAME (compile-time)                                                */
@@ -53,7 +54,7 @@ tiku_shell_cmd_info(uint8_t argc, const char *argv[])
     (void)argv;
 
     SHELL_PRINTF("Device:    %s\n", CLI_DEVICE_NAME);
-    SHELL_PRINTF("CPU:       %lu MHz\n", TIKU_MAIN_CPU_HZ / 1000000UL);
+    SHELL_PRINTF("CPU:       %lu MHz\n", tiku_cpu_mclk_hz() / 1000000UL);
     SHELL_PRINTF("Uptime:    %luh %lum %lus (%lu s)\n",
                 hours, mins, s, secs);
     SHELL_PRINTF("Clock:     %u ticks/sec (now %u)\n",

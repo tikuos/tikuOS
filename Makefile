@@ -748,10 +748,9 @@ SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_uart_arch.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
-# AmbiqSuite sources compiled in (not in the archives): CMSIS SystemInit,
-# am_util stdio/delay, HAL resource tables. @ambiq-sdk
-SRCS += $(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Source/system_apollo510.c
-SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_delay.c
+# AmbiqSuite sources compiled in (not in the archives). @ambiq-sdk
+#  - system_apollo510.c (SystemInit) dropped: folded into tiku_crt_early.c
+#  - am_util_delay.c dropped: delays are bare-metal SysTick (tiku_cpu_common.c)
 SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_stdio.c
 SRCS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/examples/peripherals/hello_world/src/am_resources.c
 else
@@ -818,8 +817,7 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
 SRCS += arch/ambiq/tiku_lcd_arch.c
 # AmbiqSuite sources compiled in (not in the prebuilt archives). @ambiq-sdk
-SRCS += $(AMBIQ_SDK_DIR)/CMSIS/AmbiqMicro/Source/system_apollo510.c
-SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_delay.c
+# system_apollo510.c (SystemInit) + am_util_delay.c dropped (de-SDK).
 SRCS += $(AMBIQ_SDK_DIR)/utils/am_util_stdio.c
 SRCS += $(AMBIQ_SDK_DIR)/boards/apollo510_evb/examples/peripherals/hello_world/src/am_resources.c
 
