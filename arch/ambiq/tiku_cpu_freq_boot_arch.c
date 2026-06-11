@@ -38,9 +38,19 @@ static unsigned long s_core_hz = 96000000UL;  /* true CPU core; set from perf mo
  * normal non-USB boot). Same am_hal bring-up, so the SoC comes up identically.
  */
 static void tiku_ambiq_soc_init(void) {
-    am_hal_pwrctrl_low_power_init();             /* @ambiq-sdk: power (LP/96 MHz) */
-    am_hal_cachectrl_icache_enable();            /* @ambiq-sdk: I-cache */
-    am_hal_cachectrl_dcache_enable(true);        /* @ambiq-sdk: D-cache */
+    am_hal_pwrctrl_low_power_init();             /* @ambiq-sdk: power (LP/96 MHz; LA stage) */
+
+    /* Enable the Cortex-M55 I/D caches bare-metal (CMSIS), replacing
+     * am_hal_cachectrl_icache/dcache_enable(). The HAL versions are just the
+     * CMSIS SCB_Enable*Cache() calls plus the M55 prefetch-unit tuning below
+     * (Apollo RevB defaults: MAX_OS=6, MAX_LA=6, MIN_LA=4). */
+    SCB_EnableICache();
+    MEMSYSCTL->PFCR = (6u << MEMSYSCTL_PFCR_MAX_OS_Pos) |
+                      (6u << MEMSYSCTL_PFCR_MAX_LA_Pos) |
+                      (4u << MEMSYSCTL_PFCR_MIN_LA_Pos) |
+                      (1u << MEMSYSCTL_PFCR_ENABLE_Pos);
+    SCB_EnableDCache();
+    SCB_CleanDCache();
 
 #if AM_BSP_ENABLE_SIMOBUCK
     am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_SIMOBUCK_INIT, NULL); /* @ambiq-sdk */
