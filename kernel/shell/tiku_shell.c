@@ -60,6 +60,8 @@
 #include "tiku_shell_config.h"
 #include "tiku_shell_parser.h"
 #include <kernel/timers/tiku_timer.h>
+#include <kernel/timers/tiku_htimer.h>   /* htimer self-test command */
+#include <kernel/timers/tiku_clock.h>
 #if TIKU_SHELL_CMD_JOBS
 #include "tiku_shell_jobs.h"
 #endif
@@ -269,6 +271,66 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
  */
 #define CMD_CATEGORY(label)  { label, NULL, NULL }
 
+#if TIKU_SHELL_CMD_HTIMER
+/*
+ * Self-test the hardware one-shot timer (htimer): schedule a ~100 ms compare
+ * and confirm it fires, timed against the system tick. Run it after boot so a
+ * crystal-clocked htimer (e.g. Apollo510's 32 kHz STIMER) has settled. This
+ * validates the arch htimer end-to-end (schedule -> compare -> ISR ->
+ * callback) without a logic analyzer; nothing else in the shell exercises it.
+ */
+static volatile uint8_t s_htimer_selftest_fired;
+
+static void htimer_selftest_cb(struct tiku_htimer *t, void *ptr) {
+    (void)t;
+    (void)ptr;
+    s_htimer_selftest_fired = 1u;
+}
+
+static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
+    static struct tiku_htimer ht;   /* static: the ISR references it after we return */
+    tiku_htimer_clock_t now;
+    tiku_clock_time_t   t0;
+    unsigned long       elapsed;
+    (void)argc;
+    (void)argv;
+
+    /* Ground truth: measure the raw STIMER count rate against the (validated)
+     * 128 Hz system tick -- independent of TIKU_HTIMER_ARCH_SECOND. */
+    {
+        tiku_htimer_clock_t rc0 = tiku_htimer_arch_now();
+        tiku_clock_time_t   rm0 = tiku_clock_time();
+        while ((unsigned long)(tiku_clock_time() - rm0) < (unsigned long)TIKU_CLOCK_SECOND) {
+            /* wait ~1 real second */
+        }
+        SHELL_PRINTF("htimer: STIMER measured ~%u Hz (configured %lu)\n",
+                     (unsigned)(uint16_t)(tiku_htimer_arch_now() - rc0),
+                     (unsigned long)TIKU_HTIMER_SECOND);
+    }
+
+    s_htimer_selftest_fired = 0u;
+    now = tiku_htimer_arch_now();
+    (void)tiku_htimer_set(&ht,
+                          (tiku_htimer_clock_t)(now + (TIKU_HTIMER_SECOND / 10u)),
+                          htimer_selftest_cb, NULL);   /* ~100 ms from now */
+
+    /* Wait up to ~1 s (measured on the system tick) for the compare to fire. */
+    t0 = tiku_clock_time();
+    while (!s_htimer_selftest_fired &&
+           ((unsigned long)(tiku_clock_time() - t0) < (unsigned long)TIKU_CLOCK_SECOND)) {
+        /* spin */
+    }
+    elapsed = (unsigned long)(tiku_clock_time() - t0);
+
+    if (s_htimer_selftest_fired) {
+        SHELL_PRINTF("htimer: fired in ~%lu ms (target 100) -- OK\n",
+                     (elapsed * 1000UL) / (unsigned long)TIKU_CLOCK_SECOND);
+    } else {
+        SHELL_PRINTF("htimer: TIMEOUT (~1 s) -- compare not firing\n");
+    }
+}
+#endif /* TIKU_SHELL_CMD_HTIMER */
+
 static const tiku_shell_cmd_t tiku_shell_commands[] = {
     /* ---- System ---- */
     CMD_CATEGORY("System"),
@@ -392,6 +454,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     CMD_CATEGORY("Hardware"),
 #if TIKU_SHELL_CMD_GPIO
     {"gpio",    "Read/write GPIO pins",        tiku_shell_cmd_gpio},
+#endif
+#if TIKU_SHELL_CMD_HTIMER
+    {"htimer",  "Self-test the hardware timer", tiku_shell_cmd_htimer},
 #endif
 #if TIKU_SHELL_CMD_ADC
     {"adc",     "Read analog channel",         tiku_shell_cmd_adc},

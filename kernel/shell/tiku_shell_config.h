@@ -54,6 +54,9 @@
 #ifndef TIKU_SHELL_CMD_INFO
 #define TIKU_SHELL_CMD_INFO    1  /**< info    - System overview */
 #endif
+#ifndef TIKU_SHELL_CMD_HTIMER
+#define TIKU_SHELL_CMD_HTIMER  1  /**< htimer  - Hardware-timer self-test */
+#endif
 #ifndef TIKU_SHELL_CMD_TIMER
 #define TIKU_SHELL_CMD_TIMER   1  /**< timer   - Software timer status */
 #endif
