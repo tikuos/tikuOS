@@ -26,8 +26,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "am_mcu_apollo.h"   /* @ambiq-sdk: am_hal_pwrctrl/cachectrl/clkmgr; PWRCTRL */
-#include "am_bsp.h"          /* AM_BSP_* board constants/config (header only) */
+#include "am_mcu_apollo.h"   /* @ambiq-sdk: am_hal_pwrctrl/clkmgr; PWRCTRL/CLKGEN regs */
 #include "tiku_cpu_freq_boot_arch.h"
 
 static unsigned long s_core_hz = 96000000UL;  /* true CPU core; set from perf mode */
@@ -59,22 +58,13 @@ static void tiku_ambiq_soc_init(void) {
      * upgrade, and the spotmgr temperature defaults to a safe value. A wrong
      * drop here would brown the chip out and fail loudly at boot. */
 
-    {
-        am_hal_clkmgr_board_info_t info = {
-            .sXtalHs.eXtalHsMode    = AM_BSP_XTAL_HS_MODE,
-            .sXtalHs.ui32XtalHsFreq = AM_BSP_XTAL_HS_FREQ_HZ,
-            .sXtalLs.eXtalLsMode    = AM_BSP_XTAL_LS_MODE,
-            .sXtalLs.ui32XtalLsFreq = AM_BSP_XTAL_LS_FREQ_HZ,
-            .ui32ExtRefClkFreq      = AM_BSP_EXTREF_CLK_FREQ_HZ
-        };
-        am_hal_clkmgr_board_info_set(&info);     /* @ambiq-sdk: clock board info */
-    }
+    /* De-SDK step 2a: dropped am_hal_clkmgr_board_info_set (clkmgr XTAL
+     * bookkeeping -- tikuOS enables the 32 kHz crystal directly in the htimer,
+     * not via the clkmgr) and the HFRC2 (250 MHz) config (nothing in tikuOS
+     * uses HFRC2). Kept the HFRC (48 MHz) config -- the UART's clock source. */
     am_hal_clkmgr_clock_config(AM_HAL_CLKMGR_CLK_ID_HFRC,
                                AM_HAL_CLKMGR_HFRC_FREQ_FREE_RUN_APPROX_48MHZ,
                                NULL);            /* @ambiq-sdk: HFRC ref ~48 MHz */
-    am_hal_clkmgr_clock_config(AM_HAL_CLKMGR_CLK_ID_HFRC2,
-                               AM_HAL_CLKMGR_HFRC2_FREQ_FREE_RUN_APPROX_250MHZ,
-                               NULL);            /* @ambiq-sdk: HFRC2 ref ~250 MHz */
 }
 
 /* True CPU core clock from the MCU performance-mode register: Low-Power = 96 MHz,
