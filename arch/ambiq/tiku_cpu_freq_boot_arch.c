@@ -37,7 +37,12 @@ static unsigned long s_core_hz = 96000000UL;  /* true CPU core; set from perf mo
  * normal non-USB boot). Same am_hal bring-up, so the SoC comes up identically.
  */
 static void tiku_ambiq_soc_init(void) {
-    am_hal_pwrctrl_low_power_init();             /* @ambiq-sdk: power (LP/96 MHz; LA stage) */
+    /* De-SDK step 3 (TEST): skip am_hal_pwrctrl_low_power_init. The SBL leaves
+     * the chip in a usable power state -- our reset handler and all early boot
+     * already ran on it before this call ever executed. If the system boots and
+     * runs stably with a steady VDD_MCU, the SBL power suffices and we reach
+     * ZERO am_hal calls; if it browns out (no boot / hang / instability), the
+     * LDO/voltage config is load-bearing and we transcribe the essentials. */
 
     /* Enable the Cortex-M55 I/D caches bare-metal (CMSIS), replacing
      * am_hal_cachectrl_icache/dcache_enable(). The HAL versions are just the
