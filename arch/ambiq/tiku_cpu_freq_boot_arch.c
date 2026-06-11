@@ -7,41 +7,85 @@
  *
  * tiku_cpu_freq_boot_arch.c - Apollo 510 CPU/SoC bring-up + clocks
  *
- * Hybrid bring-up: the one-time SoC bring-up (clock manager, power
- * domains, I/D cache) reuses AmbiqSuite's am_bsp_low_power_init() — the
- * same call the hello_world example makes — so we inherit Ambiq's
- * known-good HFRC/HFRC2/XTAL/SIMOBUCK sequencing. All SDK calls are
- * tagged @ambiq-sdk; the de-SDK pass replaces them with the register
- * sequences transcribed from am_hal_clkmgr.c / am_hal_pwrctrl.c /
- * am_hal_cachectrl.c.
+ * Clock facts (Apollo510, hardware-confirmed):
+ *   - CPU core: 96 MHz in Low-Power mode (am_hal_pwrctrl_low_power_init),
+ *     250 MHz in High-Performance "turbo" mode. The DWT cycle counter (which
+ *     counts core cycles) reads 96 MHz, confirming the LP core clock.
+ *   - SysTick timer clock: 48 MHz = core/2 on this Cortex-M55. That is the OS
+ *     tick + busy-delay timebase (see TIKU_MAIN_CPU_HZ in tiku.h, and the
+ *     SysTick delay in tiku_cpu_common.c) — NOT the core clock.
+ *   - The HFRC "free-run ~48 MHz" the BSP configures is a peripheral reference
+ *     oscillator, unrelated to the core clock.
+ * s_core_hz below reports the TRUE core clock (read from the perf-mode reg).
+ *
+ * The one-time SoC bring-up inlines am_bsp_low_power_init()'s essential am_hal
+ * init (pwrctrl + I/D cache + clkmgr) but DROPS its gratuitous
+ * am_util_delay_ms(2000) at the top (~2 s of boot, gone). Still @ambiq-sdk:
+ * those am_hal pwrctrl/cachectrl/clkmgr calls (the core), bare-metal later.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "am_mcu_apollo.h"   /* @ambiq-sdk: SystemCoreClock, am_hal_* */
-#include "am_bsp.h"          /* @ambiq-sdk: am_bsp_low_power_init */
+#include "am_mcu_apollo.h"   /* @ambiq-sdk: am_hal_pwrctrl/cachectrl/clkmgr; PWRCTRL */
+#include "am_bsp.h"          /* AM_BSP_* board constants/config (header only) */
 #include "tiku_cpu_freq_boot_arch.h"
 
-/* Core clock in Hz, refreshed from CMSIS SystemCoreClock after bring-up.
- * Apollo510 free-runs HFRC ~96 MHz by default. */
-static unsigned long s_core_hz = 96000000UL;
+static unsigned long s_core_hz = 96000000UL;  /* true CPU core; set from perf mode */
+
+/*
+ * Faithful inline of am_bsp_low_power_init() MINUS the am_util_delay_ms(2000)
+ * (and the OEM-recovery SCRATCH check + USB-PHY tuning, both irrelevant to a
+ * normal non-USB boot). Same am_hal bring-up, so the SoC comes up identically.
+ */
+static void tiku_ambiq_soc_init(void) {
+    am_hal_pwrctrl_low_power_init();             /* @ambiq-sdk: power (LP/96 MHz) */
+    am_hal_cachectrl_icache_enable();            /* @ambiq-sdk: I-cache */
+    am_hal_cachectrl_dcache_enable(true);        /* @ambiq-sdk: D-cache */
+
+#if AM_BSP_ENABLE_SIMOBUCK
+    am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_SIMOBUCK_INIT, NULL); /* @ambiq-sdk */
+#endif
+#if AM_BSP_SET_ROOM_TEMPS
+    {
+        am_hal_pwrctrl_temp_thresh_t dummy;
+        am_hal_pwrctrl_temp_update(25.0f, &dummy);   /* @ambiq-sdk: spotmgr temp */
+    }
+#endif
+
+    {
+        am_hal_clkmgr_board_info_t info = {
+            .sXtalHs.eXtalHsMode    = AM_BSP_XTAL_HS_MODE,
+            .sXtalHs.ui32XtalHsFreq = AM_BSP_XTAL_HS_FREQ_HZ,
+            .sXtalLs.eXtalLsMode    = AM_BSP_XTAL_LS_MODE,
+            .sXtalLs.ui32XtalLsFreq = AM_BSP_XTAL_LS_FREQ_HZ,
+            .ui32ExtRefClkFreq      = AM_BSP_EXTREF_CLK_FREQ_HZ
+        };
+        am_hal_clkmgr_board_info_set(&info);     /* @ambiq-sdk: clock board info */
+    }
+    am_hal_clkmgr_clock_config(AM_HAL_CLKMGR_CLK_ID_HFRC,
+                               AM_HAL_CLKMGR_HFRC_FREQ_FREE_RUN_APPROX_48MHZ,
+                               NULL);            /* @ambiq-sdk: HFRC ref ~48 MHz */
+    am_hal_clkmgr_clock_config(AM_HAL_CLKMGR_CLK_ID_HFRC2,
+                               AM_HAL_CLKMGR_HFRC2_FREQ_FREE_RUN_APPROX_250MHZ,
+                               NULL);            /* @ambiq-sdk: HFRC2 ref ~250 MHz */
+}
+
+/* True CPU core clock from the MCU performance-mode register: Low-Power = 96 MHz,
+ * High-Performance ("turbo") = 250 MHz. (Independent of the 48 MHz SysTick clock.) */
+static unsigned long tiku_ambiq_core_hz(void) {
+    if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS ==
+            AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE) {
+        return 250000000UL;
+    }
+    return 96000000UL;
+}
 
 void tiku_cpu_boot_ambiq_init(void) {
-    /* Full low-power SoC bring-up: power control, the clock manager
-     * (HFRC/HFRC2/XTAL), SIMOBUCK, and I/D cache enable. NOTE: this call
-     * includes Ambiq's ~2 s silicon-settle delay, so first output appears
-     * a couple of seconds after reset. @ambiq-sdk */
-    am_bsp_low_power_init();
-
-    /* CMSIS keeps the live core frequency here (updated by SystemInit /
-     * the clock manager). Mirror it for the HAL clock-rate queries. */
-    s_core_hz = (unsigned long)SystemCoreClock;   /* @ambiq-sdk */
+    tiku_ambiq_soc_init();          /* = am_bsp_low_power_init() minus the 2 s delay */
+    s_core_hz = tiku_ambiq_core_hz();
 }
 
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
-    /* Apollo510's operating frequency is owned by the clock manager set
-     * up in tiku_cpu_boot_ambiq_init(); the MHz hint is accepted only for
-     * API compatibility with the boot sequencer. */
     (void)cpu_freq;
 }
 
@@ -50,12 +94,6 @@ void tiku_cpu_boot_ambiq_power_wfi_enter(void) {
 }
 
 unsigned long tiku_cpu_ambiq_clock_get_hz(void) { return s_core_hz; }
-
-/* No separate peripheral-clock concept is modelled yet; report the core
- * rate. Refined when the clkmgr is brought up bare-metal. */
 unsigned long tiku_cpu_ambiq_smclk_get_hz(void) { return s_core_hz; }
-
-/* Low-frequency domain (LFRC / 32.768 kHz XTAL). */
 unsigned long tiku_cpu_ambiq_aclk_get_hz(void)  { return 32768UL; }
-
-int tiku_cpu_ambiq_clock_has_fault(void) { return 0; }
+int           tiku_cpu_ambiq_clock_has_fault(void) { return 0; }

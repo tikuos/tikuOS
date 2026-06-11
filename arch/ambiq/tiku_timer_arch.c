@@ -17,8 +17,8 @@
 
 #include "tiku.h"
 #include "tiku_timer_arch.h"
+#include "tiku_cpu_common.h"   /* tiku_cpu_ambiq_delay_us (bare-metal, calibrated) */
 #include "kernel/scheduler/tiku_sched.h"
-#include "am_util.h"   /* @ambiq-sdk: am_util_delay_us for the coarse delay */
 
 /* Cortex-M SysTick (System Control Space). */
 #define SYST_CSR  (*(volatile uint32_t *)0xE000E010UL)
@@ -63,7 +63,7 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
 }
 
 void tiku_clock_arch_delay(unsigned int us) {
-    am_util_delay_us(us);   /* @ambiq-sdk */
+    tiku_cpu_ambiq_delay_us(us);   /* bare-metal (calibrated DWT) */
 }
 
 /* Sub-tick resolution not modelled yet (coarse). Safe non-zero max. */

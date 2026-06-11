@@ -21,6 +21,8 @@
 #ifndef TIKU_AMBIQ_CPU_FREQ_BOOT_ARCH_H_
 #define TIKU_AMBIQ_CPU_FREQ_BOOT_ARCH_H_
 
+#include <stdint.h>
+
 /* One-time CPU/SoC bring-up: power, clock tree, caches. */
 void tiku_cpu_boot_ambiq_init(void);
 

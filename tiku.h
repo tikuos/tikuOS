@@ -127,10 +127,16 @@
 #define MAIN_CPU_FREQ 150
 #endif
 #elif defined(PLATFORM_AMBIQ)
-/* Apollo510 core clock is managed by the AmbiqSuite clock manager
- * (HFRC ~96 MHz default); the value is informational at the arch level. */
+/* Apollo510: the CPU core runs at 96 MHz (Low-Power mode; 250 MHz in the
+ * High-Performance "turbo" mode). The Cortex-M55 SysTick, however, is clocked
+ * at 48 MHz (= core/2) on this part — and this value feeds the SysTick reload
+ * (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND) AND the SysTick-based busy
+ * delays, so it is set to the 48 MHz TIMER clock, NOT the 96 MHz core (a 96
+ * here would run the tick/delays at half speed). The TRUE core clock (for
+ * /sys + info) is read from the MCU perf-mode register at runtime — see
+ * tiku_cpu_ambiq_clock_get_hz(). */
 #ifndef MAIN_CPU_FREQ
-#define MAIN_CPU_FREQ 96
+#define MAIN_CPU_FREQ 48
 #endif
 #else
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
