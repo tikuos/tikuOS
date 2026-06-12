@@ -1058,111 +1058,15 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_init.c
 endif
 
 # ---------------------------------------------------------------------------
-# Tests (only if tests/ is present)
+# Tests (firmware test sources live in the TikuBench repo)
 # ---------------------------------------------------------------------------
-ifeq ($(HAS_TESTS),1)
-SRCS += tests/test_runner.c
-SRCS += tests/common/test_common_utils.c
-SRCS += tests/uart/test_uart_init.c
-SRCS += tests/uart/test_uart_tx_binary.c
-SRCS += tests/uart/test_uart_loopback.c
-SRCS += tests/uart/test_uart_ringbuf.c
-SRCS += tests/uart/test_uart_overrun.c
-SRCS += tests/uart/test_uart_slip_bytes.c
-SRCS += tests/uart/test_uart_stress.c
-SRCS += tests/uart/test_uart_capacity.c
-SRCS += tests/uart/test_uart_overrun_provoke.c
-SRCS += tests/uart/test_uart_slip_frame.c
-SRCS += tests/uart/test_uart_duplex.c
-SRCS += tests/uart/test_uart_isr_contention.c
-SRCS += tests/uart/test_uart_ezfet_challenge.c
-SRCS += tests/cpuclock/test_cpuclock_basic.c
-SRCS += tests/cpuclock/test_clock_edge.c
-SRCS += tests/memory/test_mem_common.c
-SRCS += tests/memory/test_mem_arena.c
-SRCS += tests/memory/test_mem_persist.c
-SRCS += tests/memory/test_mem_mpu.c
-SRCS += tests/memory/test_mem_pool.c
-SRCS += tests/memory/test_mem_region.c
-SRCS += tests/memory/test_mem_edge.c
-SRCS += tests/memory/test_mem_large.c
-SRCS += tests/memory/test_mem_fr5994.c
-SRCS += tests/memory/test_mem_sram_walk.c
-SRCS += tests/memory/test_mem_tier.c
-SRCS += tests/memory/test_mem_cache.c
-SRCS += tests/memory/test_mem_hibernate.c
-SRCS += tests/memory/test_mem_proc_mem.c
-SRCS += tests/process/test_process_lifecycle.c
-SRCS += tests/process/test_process_events.c
-SRCS += tests/process/test_process_yield.c
-SRCS += tests/process/test_process_broadcast.c
-SRCS += tests/process/test_process_poll.c
-SRCS += tests/process/test_process_queue.c
-SRCS += tests/process/test_process_local.c
-SRCS += tests/process/test_process_broadcast_exit.c
-SRCS += tests/process/test_process_graceful_exit.c
-SRCS += tests/process/test_process_current_cleared.c
-SRCS += tests/process/test_process_edge.c
-SRCS += tests/process/test_process_channel.c
-SRCS += tests/process/test_process_observe.c
-SRCS += tests/process/test_lc_persist.c
-SRCS += tests/scheduler/test_sched.c
-SRCS += tests/power/test_power.c
-SRCS += tests/timer/test_timer_event.c
-SRCS += tests/timer/test_timer_callback.c
-SRCS += tests/timer/test_timer_periodic.c
-SRCS += tests/timer/test_timer_stop.c
-SRCS += tests/timer/test_timer_timeout.c
-SRCS += tests/timer/test_htimer_basic.c
-SRCS += tests/timer/test_htimer_periodic.c
-SRCS += tests/timer/test_timer_edge.c
-SRCS += tests/timer/test_htimer_edge.c
-SRCS += tests/timer/test_htimer_no_guard.c
-SRCS += tests/timer/test_clock_fault.c
-SRCS += tests/timer/test_crit.c
-SRCS += tests/timer/test_timer_wrap.c
-SRCS += tests/timer/test_bitbang.c
-SRCS += tests/watchdog/test_watchdog_basic.c
-SRCS += tests/watchdog/test_watchdog_pause_resume.c
-SRCS += tests/watchdog/test_watchdog_interval.c
-SRCS += tests/watchdog/test_watchdog_timeout.c
-SRCS += tests/uart/test_uart_edge.c
-SRCS += tests/watchdog/test_watchdog_edge.c
-SRCS += tests/peripherals/test_pwm.c
-SRCS += tests/peripherals/test_dma.c
-SRCS += tests/peripherals/test_rtc.c
-SRCS += tests/peripherals/test_trng.c
-SRCS += tests/drivers/test_wifi.c
-SRCS += tests/drivers/test_bt.c
-SRCS += tests/kernel/vfs/test_vfs.c
-SRCS += tests/kernel/vfs/test_vfs_tree.c
-SRCS += tests/kernel/vfs/test_vfs_watch.c
-SRCS += tests/kernel/vfs/test_vfs_introspect.c
-SRCS += tests/kernel/vfs/test_vfs_gpio_notify.c
-SRCS += tests/kernel/vfs/test_vfs_desc.c
-SRCS += tests/kernel/vfs/test_vfs_cache.c
-SRCS += tests/init/test_catalog.c
-SRCS += tests/init/test_init_table.c
-SRCS += tests/init/test_init_boot.c
-SRCS += tests/init/test_shell_cmds.c
-
-# TikuKits tests (requires both test framework and tikukits library)
-ifeq ($(HAS_TIKUKITS),1)
-SRCS += $(wildcard tests/kits/maths/*.c)
-SRCS += $(wildcard tests/kits/sensors/*.c)
-SRCS += $(wildcard tests/kits/sigfeatures/*.c)
-SRCS += $(wildcard tests/kits/textcompression/*.c)
-SRCS += $(wildcard tests/kits/ml/*.c)
-SRCS += $(wildcard tests/kits/ds/*.c)
-SRCS += $(wildcard tests/kits/net/*.c)
-SRCS += $(wildcard tests/kits/codec/*.c)
-SRCS += $(filter-out tests/kits/crypto/test_kits_crypto_tls.c, \
-          $(wildcard tests/kits/crypto/*.c))
-ifeq ($(HAS_TLS),1)
-SRCS += tests/kits/crypto/test_kits_crypto_tls.c
-endif
-endif
-endif
+# The TikuOS test tree was moved to TikuBench/tests/ so the test system
+# (host harness + firmware sources + the marker/flag contract) is
+# self-contained in one repo.  This fragment lists the test SRCS and adds
+# the -I so <tests/...> includes resolve.  Pulled in only for the test
+# build; the leading-dash -include means a tikuOS checkout WITHOUT
+# TikuBench still builds (production: HAS_TESTS=0, nothing here triggers).
+-include $(PROJ_DIR)/TikuBench/tests/tests.mk
 
 # tikukits/gfx visual test runner
 # An on-target autostart process that owns UART, listens for single-
@@ -1170,7 +1074,7 @@ endif
 # Driven from the host by TikuBench/tikubench/gfx_test.py. Opt-in
 # only -- conflicts with the shell because both want UART input.
 ifeq ($(TEST_KITS_GFX_VISUAL),1)
-SRCS   += tests/kits/gfx/test_kits_gfx_visual.c
+SRCS   += TikuBench/tests/kits/gfx/test_kits_gfx_visual.c
 CFLAGS += -DTEST_KITS_GFX_VISUAL=1
 TIKU_KIT_GFX_ENABLE    := 1
 TIKU_KIT_EPAPER_ENABLE := 1
@@ -1181,7 +1085,7 @@ endif
 # TikuBench/tikubench/ui_test.py. Conflicts with the shell -- both
 # want UART input -- so set TIKU_SHELL_ENABLE=0.
 ifeq ($(TEST_KITS_UI_VISUAL),1)
-SRCS   += tests/kits/ui/test_kits_ui_visual.c
+SRCS   += TikuBench/tests/kits/ui/test_kits_ui_visual.c
 CFLAGS += -DTEST_KITS_UI_VISUAL=1
 TIKU_KIT_UI_ENABLE     := 1
 TIKU_KIT_GFX_ENABLE    := 1

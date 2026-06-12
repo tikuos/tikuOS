@@ -69,7 +69,6 @@ paper/
 # Separate repos
 homepage/
 examples/
-tests/
 presentation/
 apps/
 academic/
