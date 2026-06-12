@@ -108,6 +108,12 @@ SECTIONS
         KEEP(*(.fini))
     } > FLASH
 
+    /* End of .text. tikuOS's `free`/ /sys/mem/free use _etext to size the
+     * FRAM-resident (here flash-resident) code region. Standard newlib name;
+     * `etext` aliased for code that uses the historic spelling. */
+    _etext = .;
+    etext  = .;
+
     .rodata : ALIGN(4)
     {
         *(.rodata*)

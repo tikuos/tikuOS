@@ -93,7 +93,11 @@ extern char __hifram_end __attribute__((weak));
  * each device's .ld file; we subtract it here so "unallocd" reports
  * the truly empty lower-FRAM space, not "empty space + 128 B IVT".
  */
+#if defined(PLATFORM_MSP430)
 #define TIKU_FREE_IVT_BYTES 128U
+#else
+#define TIKU_FREE_IVT_BYTES 0U   /* Cortex-M: vector table is part of .text (counted in _etext), no separate IVT */
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* STACK HIGH-WATER MARK                                                     */
@@ -116,7 +120,7 @@ stack_used(void)
         return top - sp;
     }
     return 0;
-#elif defined(PLATFORM_RP2350)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
     /* Cortex-M: 32-bit SP. Truncate to uint16_t (the max usage we
      * realistically report on a microcontroller fits comfortably). */
     uintptr_t sp;
@@ -140,16 +144,16 @@ void
 tiku_shell_cmd_free(uint8_t argc, const char *argv[])
 {
     uint8_t i;
-    uint16_t sram_total;
-    uint16_t sram_static;
-    uint16_t fram_total;
-    uint16_t fram_used;
+    unsigned long sram_total;
+    unsigned long sram_static;
+    unsigned long fram_total;
+    unsigned long fram_used;
     uint8_t proc_count = 0;
 
     (void)argc;
     (void)argv;
 
-    sram_total = (uint16_t)TIKU_DEVICE_RAM_SIZE;
+    sram_total = (unsigned long)TIKU_DEVICE_RAM_SIZE;
 
     /*
      * fram_total is the size of the lower-FRAM 16-bit window
@@ -165,9 +169,9 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
      * so the subtraction is computed modulo 2^16 — which gives the
      * correct lower-window size as long as FRAM_END == 0xFFFF.
      */
-    fram_total = (uint16_t)(TIKU_DEVICE_FRAM_END + 1U
+    fram_total = (unsigned long)(TIKU_DEVICE_FRAM_END + 1UL
                             - TIKU_DEVICE_FRAM_START);
-    sram_static = (uint16_t)((uintptr_t)&_end - (uintptr_t)&__datastart);
+    sram_static = (unsigned long)((uintptr_t)&_end - (uintptr_t)&__datastart);
 
     /*
      * Lower-FRAM in-use byte count = _etext - FRAM_START.
@@ -193,35 +197,36 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
      *   one number that's correct across both modes.
      */
     {
-        uint16_t text_end = (uint16_t)(uintptr_t)&_etext;
+        unsigned long text_end = (unsigned long)(uintptr_t)&_etext;
         fram_used = text_end > TIKU_DEVICE_FRAM_START
-                    ? (uint16_t)(text_end + TIKU_FREE_IVT_BYTES
+                    ? (unsigned long)(text_end + TIKU_FREE_IVT_BYTES
                                  - TIKU_DEVICE_FRAM_START)
                     : TIKU_FREE_IVT_BYTES;
     }
 
     /* ---- Compile-time (fixed at link) ---- */
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
-    SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5u total\n", sram_total);
-    SHELL_PRINTF("  .data+.bss  %5u\n", sram_static);
+    SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5lu total\n",
+                 (unsigned long)sram_total);
+    SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
     /* What's left of SRAM after static data: hosts the stack and any
      * future heap. Not "reserved" in any protective sense — it's the
      * available pool. Stack-now / free-now under "Runtime" below
      * partition this number. */
-    SHELL_PRINTF("  stack+free  %5u\n",
-                 sram_total - sram_static);
+    SHELL_PRINTF("  stack+free  %5lu\n",
+                 (unsigned long)(sram_total - sram_static));
 
-    SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "  %5u total (lower window)\n",
-                 fram_total);
+    SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "  %5lu total (lower window)\n",
+                 (unsigned long)fram_total);
     /* in-use = code+rodata+persistent+data-init+(.lower.text under
      * large mode), reported as one number because the breakdown
      * differs between memory models. See _etext rationale above. */
-    SHELL_PRINTF("  in use      %5u\n",
-                 fram_used > TIKU_FREE_IVT_BYTES
-                 ? (uint16_t)(fram_used - TIKU_FREE_IVT_BYTES) : 0);
+    SHELL_PRINTF("  in use      %5lu\n",
+                 (unsigned long)(fram_used > TIKU_FREE_IVT_BYTES
+                 ? (fram_used - TIKU_FREE_IVT_BYTES) : 0));
     SHELL_PRINTF("  ivt         %5u\n", (unsigned)TIKU_FREE_IVT_BYTES);
-    SHELL_PRINTF("  unallocd    %5u\n",
-                 fram_total > fram_used ? fram_total - fram_used : 0);
+    SHELL_PRINTF("  unallocd    %5lu\n",
+                 (unsigned long)(fram_total > fram_used ? fram_total - fram_used : 0));
 #if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
     /*
      * Parts with a separate upper FRAM bank (FR5994, FR6989). Sizes
@@ -269,8 +274,8 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                          sram_tier.peak_bytes);
         }
     }
-    SHELL_PRINTF("  free now    " SH_BOLD "%5u" SH_RST "\n",
-                 sram_total - sram_static - stack_used());
+    SHELL_PRINTF("  free now    " SH_BOLD "%5lu" SH_RST "\n",
+                 (unsigned long)(sram_total - sram_static - stack_used()));
 
     /* FRAM: unallocated + tier allocator */
     SHELL_PRINTF(SH_BOLD "FRAM" SH_RST "\n");
@@ -282,8 +287,8 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                          nvm_tier.peak_bytes);
         }
     }
-    SHELL_PRINTF("  free now    " SH_BOLD "%5u" SH_RST "\n",
-                 fram_total > fram_used ? fram_total - fram_used : 0);
+    SHELL_PRINTF("  free now    " SH_BOLD "%5lu" SH_RST "\n",
+                 (unsigned long)(fram_total > fram_used ? fram_total - fram_used : 0));
 
 #if TIKU_INIT_ENABLE
     {
