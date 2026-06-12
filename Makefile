@@ -226,7 +226,10 @@ APP ?=
 # ---------------------------------------------------------------------------
 TIKU_SHELL_ENABLE ?= 1
 TIKU_SHELL_COLOR  ?= 0
-TIKU_SHELL_BASIC_ENABLE ?= 0
+# BASIC defaults ON for Apollo510 (ample DTCM; its memory tiers are sized for it
+# in the ambiq CFLAGS block), OFF elsewhere (MSP430 needs MEMORY_MODEL=large;
+# RP2350 stays opt-in). Override on the make line as usual.
+TIKU_SHELL_BASIC_ENABLE ?= $(if $(filter ambiq,$(TIKU_PLATFORM)),1,0)
 TIKU_INIT_ENABLE  ?= 0
 TIKU_INIT_TEST    ?= 0
 
@@ -566,6 +569,14 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_AMBIQ=1
+# Memory tiers sized for Apollo510's 512 KB DTCM. The tiku_mem.h defaults are
+# MSP430-era (128 B SRAM / 1 KB NVM) and assume large allocations spill to HIFRAM
+# (FRAM > 64 KB), which this part lacks -- so AUTO allocations land in the 128 B
+# SRAM tier and OOM on a half-MB-of-RAM MCU (e.g. BASIC's ~4 KB arena). The mem
+# size type is 32-bit here (arch/ambiq/tiku_mem_arch.h), so >64 KB tiers are
+# fine. NVM tier is volatile-RAM-backed until MRAM persistence lands.
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072   # 128 KB fast volatile tier in DTCM
+CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
 # Part/package selectors that configure the vendored apollo510.h register map.
 CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
 CFLAGS += -I$(PROJ_DIR)
