@@ -8,10 +8,11 @@
  * tiku_mpu_arch.h - Apollo 510 MPU driver interface
  *
  * Cortex-M55 has the ARMv8-M MPU (same RBAR/RLAR/MAIR/CTRL as the M33).
- * At this milestone the implementation is a pass-through shim: the
- * unlock/lock-NVM handshake succeeds so persistent writes flow, but no
- * regions are programmed yet. The full W^X driver (ported from RP2350,
- * re-pinned to the Apollo memory map) lands later.
+ * tiku_mpu_arch.c programs a real W^X layout (code RX, every data region XN,
+ * plus a stack-overflow guard), re-pinned to the Apollo memory map. The NVM
+ * region (.uninit) stays RW+XN because the NVM tier pool shares it, so the
+ * SEG3 unlock/lock are SAM bookkeeping that still drive the mem-port-C MRAM
+ * flush through the generic layer. See the .c file's header for the rationale.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

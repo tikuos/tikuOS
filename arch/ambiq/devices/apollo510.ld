@@ -110,6 +110,19 @@ SECTIONS
         __bss_end = .;
     } > TCM
 
+    /* -------- 4b. MPU diagnostics (NOLOAD, warm-reset durable) -------- */
+    /* The MemManage/HardFault handler records the violation here. After .bss
+     * (the crt zero-loop stops at __bss_end, so this survives) and before
+     * .uninit (so it lands in the SRAM_LO RW region, not the RO NVM region);
+     * outside .uninit so it is NOT mirrored to MRAM. */
+    .mpu_diag (NOLOAD) : ALIGN(32)
+    {
+        __mpu_diag_start = .;
+        *(.mpu_diag*)
+        . = ALIGN(32);
+        __mpu_diag_end = .;
+    } > TCM
+
     /* -------- 5. Persistent (skipped by zero-init) ------------------- */
     /* Mirrors the RP2350 .uninit model: survives warm reset, reseeded
      * on power cycle. ALIGN(32) for the ARMv8-M MPU region base.
