@@ -10,14 +10,14 @@
  * Bare-metal delays spin on the Cortex-M SysTick counter — reliable (unlike
  * the Apollo5 DWT, which ticks at 2x the core and broke a DWT-based delay) and
  * sharing the exact clock basis as the system tick, so a delay and a tick can
- * never disagree. Scaled by the SysTick clock (= TIKU_MAIN_CPU_HZ, 48 MHz =
- * core/2 on this M55 — NOT the 96 MHz core). No AmbiqSuite dependency.
+ * never disagree. Scaled by the SysTick clock = TIKU_MAIN_CPU_HZ = 96 MHz, the
+ * full M55 core (SysTick CLKSOURCE=processor). No AmbiqSuite dependency.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <stdint.h>
-#include "tiku.h"              /* TIKU_MAIN_CPU_HZ = 48 MHz SysTick clock */
+#include "tiku.h"              /* TIKU_MAIN_CPU_HZ = 96 MHz SysTick clock */
 #include "tiku_cpu_common.h"
 
 /* Cortex-M SysTick (System Control Space) — 24-bit down-counter, auto-reload. */
@@ -27,12 +27,12 @@
 
 void tiku_cpu_ambiq_delay_us(unsigned int us) {
     uint32_t reload = (SYST_RVR & SYST_MASK) + 1u;
-    uint32_t per_us = (uint32_t)(TIKU_MAIN_CPU_HZ / 1000000UL);  /* SysTick clock (48) */
+    uint32_t per_us = (uint32_t)(TIKU_MAIN_CPU_HZ / 1000000UL);  /* SysTick clock (96) */
     uint32_t last, now, step;
     uint64_t need;
 
     if (per_us == 0u) {
-        per_us = 48u;
+        per_us = 96u;
     }
     need = (uint64_t)us * per_us;
 

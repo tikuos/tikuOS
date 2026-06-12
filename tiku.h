@@ -128,15 +128,16 @@
 #endif
 #elif defined(PLATFORM_AMBIQ)
 /* Apollo510: the CPU core runs at 96 MHz (Low-Power mode; 250 MHz in the
- * High-Performance "turbo" mode). The Cortex-M55 SysTick, however, is clocked
- * at 48 MHz (= core/2) on this part — and this value feeds the SysTick reload
- * (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND) AND the SysTick-based busy
- * delays, so it is set to the 48 MHz TIMER clock, NOT the 96 MHz core (a 96
- * here would run the tick/delays at half speed). The TRUE core clock (for
- * /sys + info) is read from the MCU perf-mode register at runtime — see
- * tiku_cpu_ambiq_clock_get_hz(). */
+ * High-Performance "turbo" mode). The Cortex-M55 SysTick is driven from the
+ * processor clock (SYST_CSR.CLKSOURCE=1 in tiku_timer_arch.c) -- i.e. the full
+ * 96 MHz core -- so this value, which feeds the SysTick reload (TIKU_MAIN_CPU_HZ
+ * / TIKU_CLOCK_ARCH_SECOND) AND the SysTick busy-delays, must be 96. (An earlier
+ * 48 here -- a wrong "SysTick = core/2" assumption -- ran the tick at 256 Hz,
+ * 2x fast; caught by a TikuBench `every` timing measurement, 2026-06-12.) The
+ * runtime core clock for /sys + info is read from the MCU perf-mode register --
+ * see tiku_cpu_ambiq_clock_get_hz(). */
 #ifndef MAIN_CPU_FREQ
-#define MAIN_CPU_FREQ 48
+#define MAIN_CPU_FREQ 96
 #endif
 #else
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
