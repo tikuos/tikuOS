@@ -28,13 +28,20 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 4128768   /* ~3.94 MB user MRAM above the SBL */
+    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 4128768 - 0x8000  /* ~3.9 MB; top 32 KB reserved below for the NVM mirror (mem port C) */
     TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM: .data/.bss/heap/stack    */
     SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM (unused at bring-up) */
 }
 
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
+
+/* NVM mirror page (mem port C): 32 KB reserved just above the shrunk MRAM
+ * region (0x7F8000..0x800000), where tiku_mem_arch_nvm_flush() programs the
+ * .uninit snapshot for power-cycle durability. Far above the firmware code; the
+ * SBL (0x400000) is never touched. */
+__tiku_nvm_mram_start = ORIGIN(MRAM) + LENGTH(MRAM);   /* 0x7F8000 */
+__tiku_nvm_mram_size  = 0x8000;                        /* 32 KB */
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 
@@ -147,6 +154,10 @@ SECTIONS
     /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
     ASSERT((__stack - _end) >= 0x1000,
            "ERROR: DTCM exhausted — less than 4 KB free for stack")
+
+    /* The NVM mirror page must hold the magic word + the whole .uninit image. */
+    ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 4),
+           "ERROR: .uninit too large for the 32 KB NVM mirror page (mem port C)")
 
     /DISCARD/ :
     {

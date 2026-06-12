@@ -16,9 +16,11 @@
  *     (they reject any buffer not contained in an NVM region). Without this
  *     the persist + hibernate APIs silently fail on Apollo510.
  *
- * Power-cycle durability (mirroring .uninit to an MRAM page via the bootrom)
- * is a later step; MRAM is reported FLASH (code) for now. The .uninit area is
- * warm-reset-durable only until then.
+ * Power-cycle durability is provided by tiku_mem_arch.c: it mirrors .uninit to
+ * a reserved MRAM page via the bootrom and restores it on boot. The .uninit
+ * area is the live working copy (warm-reset durable); the MRAM mirror carries
+ * it across power loss. MRAM is still reported FLASH here -- the mirror is a
+ * small reserved slice at the top of MRAM, not a separate region.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
