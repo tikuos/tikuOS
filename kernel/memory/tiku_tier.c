@@ -230,14 +230,21 @@ static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
  * "not available". The AUTO slot is deliberately left untouched — AUTO
  * is resolved to a concrete tier before tier_state[] is ever indexed.
  *
- * Idempotent in effect but destructive: calling it again rewinds all
- * bump pointers, orphaning any sub-buffers already handed out. It does
- * not zero the NVM backing array, so persistent FRAM contents survive.
+ * Idempotent: the first call wires the tier pools to their backing arrays;
+ * a later call returns immediately (the per-tier `initialized` flag guards
+ * the rewind), so a boot-time init followed by a lazy caller such as BASIC
+ * does not orphan live allocations. Does not zero the NVM backing array, so
+ * persistent FRAM contents survive.
  *
  * @return TIKU_MEM_OK (always succeeds)
  */
 tiku_mem_err_t tiku_tier_init(void)
 {
+    /* Idempotent guard: skip the (destructive) rewind if already set up. */
+    if (tier_state[TIKU_MEM_SRAM].initialized) {
+        return TIKU_MEM_OK;
+    }
+
     tier_state[TIKU_MEM_SRAM].buf         = tier_sram_buf;
     tier_state[TIKU_MEM_SRAM].capacity    = TIKU_TIER_SRAM_SIZE;
     tier_state[TIKU_MEM_SRAM].offset      = 0;

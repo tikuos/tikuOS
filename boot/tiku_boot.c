@@ -193,6 +193,14 @@ tiku_boot_init_memory(void)
     /* Initialize memory subsystem (arch-specific setup + module state) */
     tiku_mem_init();
 
+#if defined(PLATFORM_AMBIQ)
+    /* Bring up the tier allocator at boot so tier-backed allocations (per-
+     * process memory, etc.) work without relying on a lazy first-touch init.
+     * tiku_tier_init is idempotent, so BASIC's later lazy call is a no-op.
+     * (MSP430 / RP2350 keep their existing lazy init until validated there.) */
+    (void)tiku_tier_init();
+#endif
+
     return TIKU_BOOT_SUCCESS;
 }
 
