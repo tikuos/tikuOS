@@ -30,6 +30,7 @@
  */
 
 #include <stdint.h>
+#include "apollo510.h"   /* PWRCTRL (shared-SRAM power-enable) */
 
 /*---------------------------------------------------------------------------*/
 /* Linker-script symbols                                                     */
@@ -40,6 +41,8 @@ extern uint32_t __data_start;
 extern uint32_t __data_end;
 extern uint32_t __bss_start;
 extern uint32_t __bss_end;
+extern uint32_t __ssram_start;
+extern uint32_t __ssram_end;
 extern uint32_t __stack;
 
 /*---------------------------------------------------------------------------*/
@@ -125,6 +128,17 @@ void tiku_ambiq_reset_handler(void) {
     __asm__ volatile ("dsb");
     __asm__ volatile ("isb");
 
+    /* Power up the 3 MB shared SRAM (three 1 MB groups). The SBL leaves it
+     * off; the large volatile tier buffers (.ssram) live there. Bounded wait so
+     * a stuck power FSM can't hang the boot. The cache is still off here, so
+     * this and the later .ssram zero-init reach the SSRAM directly. */
+    PWRCTRL->SSRAMPWREN_b.PWRENSSRAM = 0x7u;
+    {
+        uint32_t guard = 1000000u;
+        while ((PWRCTRL->SSRAMPWRST_b.SSRAMPWRST != 0x7u) && --guard) {
+        }
+    }
+
     /* Copy .data from its MRAM load address to DTCM. */
     uint32_t *src = &__data_load;
     uint32_t *dst = &__data_start;
@@ -135,6 +149,13 @@ void tiku_ambiq_reset_handler(void) {
     /* Zero .bss. (.uninit is intentionally left untouched.) */
     dst = &__bss_start;
     while (dst < &__bss_end) {
+        *dst++ = 0U;
+    }
+
+    /* Zero the SSRAM-resident static buffers (.ssram). Separate loop because
+     * they live in the just-powered SSRAM bank, not in DTCM .bss. */
+    dst = &__ssram_start;
+    while (dst < &__ssram_end) {
         *dst++ = 0U;
     }
 

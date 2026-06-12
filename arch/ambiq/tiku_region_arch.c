@@ -31,7 +31,7 @@
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 
-static tiku_mem_region_t       s_regions[4];
+static tiku_mem_region_t       s_regions[5];
 static tiku_mem_arch_size_t    s_region_count;
 
 const struct tiku_mem_region *
@@ -63,6 +63,14 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
             s_regions[idx].type = TIKU_MEM_REGION_NVM;
             idx++;
         }
+
+        /* Shared SRAM (3 MB at 0x20080000), powered in tiku_crt_early.c. Hosts
+         * the large SRAM tier; classified SRAM so tier sub-arenas (which
+         * region-check their backing buffer) validate against it. */
+        s_regions[idx].base = (const uint8_t *)0x20080000UL;
+        s_regions[idx].size = (tiku_mem_arch_size_t)(3UL * 1024UL * 1024UL);
+        s_regions[idx].type = TIKU_MEM_REGION_SRAM;
+        idx++;
 
         /* MRAM internal flash (code / rodata above the SBL; introspection). */
         s_regions[idx].base = (const uint8_t *)TIKU_DEVICE_FRAM_START;

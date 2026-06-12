@@ -95,8 +95,18 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  * TIKU_TIER_SRAM_SIZE (default 128 bytes). tiku_tier_init() points
  * tier_state[TIKU_MEM_SRAM].buf at this array.
  */
+#if defined(PLATFORM_AMBIQ)
+/* Apollo510: the SRAM tier (large, volatile) lives in the 3 MB shared SRAM
+ * (.ssram, powered + zeroed in tiku_crt_early.c), keeping the 512 KB DTCM for
+ * hot data + stack. SSRAM is cacheable so access is fast in the common case;
+ * the region table classifies it SRAM so the tier's sub-arenas validate. */
+static uint8_t __attribute__((section(".ssram"),
+                              aligned(TIKU_MEM_ARCH_ALIGNMENT)))
+    tier_sram_buf[TIKU_TIER_SRAM_SIZE];
+#else
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_sram_buf[TIKU_TIER_SRAM_SIZE];
+#endif
 
 /**
  * @brief Backing store for the NVM tier

@@ -124,8 +124,20 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
-    /* Shared SRAM: unused at bring-up. NOLOAD catch so any Ambiq HAL
-     * .shared / .resource_table symbols resolve cleanly. */
+    /* Shared SRAM (3 MB at 0x20080000), powered in tiku_crt_early.c. Holds the
+     * large volatile tier backing buffers (.ssram), zero-initialised by the
+     * reset handler after the SSRAM is powered. ALIGN(32) for an MPU region
+     * base (mem port D). */
+    .ssram (NOLOAD) : ALIGN(32)
+    {
+        __ssram_start = .;
+        *(.ssram*)
+        . = ALIGN(32);
+        __ssram_end = .;
+    } > SSRAM
+
+    /* NOLOAD catch so any Ambiq HAL .shared / .resource_table symbols
+     * resolve cleanly. */
     .shared (NOLOAD) :
     {
         KEEP(*(.resource_table))
