@@ -111,6 +111,16 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 static uint8_t __attribute__((section(".persistent"),
                               aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
+#elif defined(PLATFORM_AMBIQ)
+/* Apollo510: the NVM tier lives in the NOLOAD .uninit area (DTCM) so its pool
+ * survives a warm reset and the buffer sits inside the NVM region the region
+ * table overlays on .uninit (mem port A). NOLOAD -> no boot zero-init (the
+ * area is reseeded only on a power cycle); the persist layer is magic-gated,
+ * so cold-boot garbage is rejected. Power-cycle durability via an MRAM mirror
+ * is mem port C. */
+static uint8_t __attribute__((section(".uninit"),
+                              aligned(TIKU_MEM_ARCH_ALIGNMENT)))
+    tier_nvm_buf[TIKU_TIER_NVM_SIZE];
 #else
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE];
