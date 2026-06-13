@@ -1142,12 +1142,27 @@ uint32_t tiku_mpu_get_last_fault_addr(void);
  * @brief Initialize the tier allocator
  *
  * Must be called after tiku_mem_init() (which initializes the region
- * registry and MPU). Resets the bump pointers for both tier backing
- * pools.
+ * registry and MPU). Idempotent: the first call wires the tier backing
+ * pools and rewinds their bump pointers; later calls return immediately
+ * (so a boot-time init does not orphan allocations a lazy caller made
+ * since). Use tiku_tier_reset() for an explicit clean slate.
  *
  * @return TIKU_MEM_OK on success
  */
 tiku_mem_err_t tiku_tier_init(void);
+
+/**
+ * @brief Reset every tier pool to empty (destructive rewind)
+ *
+ * Re-wires each tier to its backing array and rewinds the bump pointer,
+ * peak, and allocation counters to zero UNCONDITIONALLY, bypassing the
+ * idempotent guard in tiku_tier_init(). Orphans any sub-arena previously
+ * handed out, so this is for teardown / test isolation, not steady-state
+ * use. The NVM backing array is not zeroed, so FRAM contents survive.
+ *
+ * @return TIKU_MEM_OK (always succeeds)
+ */
+tiku_mem_err_t tiku_tier_reset(void);
 
 /**
  * @brief Create an arena backed by the specified memory tier
