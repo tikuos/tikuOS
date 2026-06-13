@@ -293,6 +293,14 @@ void tiku_uart_test_inject(uint8_t byte) {
 void tiku_ambiq_uart0_isr(void) {
     uint32_t mis = UART0->MIS;   /* masked interrupt status */
 
+    /* Hardware FIFO overrun: a received byte was lost because the RX FIFO
+     * filled (e.g. while RX IRQs were masked). The OE interrupt (OEIM, enabled
+     * in init) latches it in MIS even though the ISR wasn't running to drain.
+     * Count it separately from the software ring overrun below. */
+    if (mis & UART0_MIS_OEMIS_Msk) {
+        rx.overrun_count++;
+    }
+
     /* Drain the RX FIFO regardless of which RX-class interrupt fired. */
     while (UART0->FR_b.RXFE == 0u) {
         uint8_t  b    = (uint8_t)(UART0->DR & 0xFFu);
