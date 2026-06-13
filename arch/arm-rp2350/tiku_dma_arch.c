@@ -24,8 +24,32 @@
 #include "tiku_rp2350_regs.h"
 #include <stddef.h>
 
+/** @brief DMA channel reserved for memory-to-memory copy transfers
+ *
+ * Channel 0 is dedicated to the memcpy lane for the lifetime of the
+ * driver.  No other subsystem may claim or reprogram this channel while
+ * tiku_dma_arch is in use.
+ */
 #define DMA_CHAN_MEMCPY  0U     /* channel 0 owns the memcpy lane */
 
+/**
+ * @brief Module-level state for the RP2350 DMA driver
+ *
+ * @var g_dma_initialised
+ *   Non-zero after tiku_dma_arch_init() has completed.  Guards against
+ *   issuing transfers before the DMA block is out of reset and the IRQ
+ *   line is enabled.
+ * @var g_dma_busy
+ *   Volatile flag set to 1 when a DMA transfer is in flight and cleared
+ *   to 0 by the IRQ handler (or by tiku_dma_arch_abort()).  Volatile
+ *   because it is written in interrupt context and read in thread context.
+ * @var g_dma_done_cb
+ *   Completion callback supplied by the most recent memcpy caller.  NULL
+ *   when no transfer is in flight or when the caller passed NULL.
+ * @var g_dma_done_ctx
+ *   Opaque context pointer forwarded verbatim to g_dma_done_cb on
+ *   completion.  NULL-safe: the ISR checks the callback before calling.
+ */
 static uint8_t            g_dma_initialised;
 static volatile uint8_t   g_dma_busy;
 static tiku_dma_done_cb_t g_dma_done_cb;
@@ -35,6 +59,14 @@ static void              *g_dma_done_ctx;
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise the RP2350 DMA block and enable DMA_IRQ_0
+ *
+ * Releases the DMA peripheral from reset, enables the channel-0 IRQ
+ * source in the DMA interrupt-enable register, and unmasks DMA_IRQ_0 in
+ * the NVIC.  Idempotent: subsequent calls return immediately without
+ * re-programming hardware.  Must be called once before any memcpy.
+ */
 void tiku_dma_arch_init(void) {
     if (g_dma_initialised) {
         return;
@@ -49,6 +81,28 @@ void tiku_dma_arch_init(void) {
     g_dma_initialised = 1U;
 }
 
+/**
+ * @brief Start a word-aligned DMA memory-to-memory copy on channel 0
+ *
+ * Programs DMA channel 0 for an unpaced (TREQ_PERMANENT) 32-bit-wide
+ * transfer from @p src to @p dst, then kicks the channel by writing
+ * CTRL_TRIG.  Returns immediately; completion is signalled through the
+ * DMA_IRQ_0 handler which invokes @p on_done (if non-NULL).
+ *
+ * Both @p dst and @p src must be 4-byte aligned.  @p word_cnt is the
+ * number of 32-bit words to transfer, not the byte count.
+ *
+ * @param dst       Destination address (must be 4-byte aligned, non-NULL)
+ * @param src       Source address (must be 4-byte aligned, non-NULL)
+ * @param word_cnt  Number of 32-bit words to transfer (must be > 0)
+ * @param on_done   Completion callback invoked from DMA_IRQ_0 context,
+ *                  or NULL if no notification is required
+ * @param ctx       Opaque pointer forwarded verbatim to @p on_done
+ * @return TIKU_DMA_OK on success; TIKU_DMA_ERR_NOT_READY if the driver
+ *         has not been initialised; TIKU_DMA_ERR_BUSY if a transfer is
+ *         already in flight; TIKU_DMA_ERR_INVALID for NULL or unaligned
+ *         pointers, or zero word count
+ */
 int tiku_dma_arch_memcpy(void   *dst,
                          const void *src,
                          uint32_t word_cnt,
@@ -101,10 +155,31 @@ int tiku_dma_arch_memcpy(void   *dst,
     return TIKU_DMA_OK;
 }
 
+/**
+ * @brief Query whether a DMA transfer is currently in flight
+ *
+ * Reads the volatile g_dma_busy flag set by tiku_dma_arch_memcpy() and
+ * cleared by the IRQ handler or tiku_dma_arch_abort().  Safe to call
+ * from both thread and interrupt context.
+ *
+ * @return Non-zero if a transfer is in progress, zero if the channel
+ *         is idle
+ */
 int tiku_dma_arch_busy(void) {
     return g_dma_busy != 0U;
 }
 
+/**
+ * @brief Abort an in-flight DMA transfer and reset driver state
+ *
+ * Halts the channel by clearing the EN bit in CTRL (without strobing
+ * TRIG), acknowledges any latched IRQ in INTS0, and resets the busy
+ * flag and callback pointers.  The partial destination contents after
+ * an abort are undefined.
+ *
+ * @return TIKU_DMA_OK if the transfer was successfully aborted;
+ *         TIKU_DMA_ERR_NOT_READY if no transfer was in flight
+ */
 int tiku_dma_arch_abort(void) {
     if (!g_dma_busy) {
         return TIKU_DMA_ERR_NOT_READY;
@@ -123,6 +198,15 @@ int tiku_dma_arch_abort(void) {
     return TIKU_DMA_OK;
 }
 
+/**
+ * @brief DMA_IRQ_0 interrupt handler — transfer completion ISR
+ *
+ * Invoked by the Cortex-M33 NVIC when channel 0 finishes its transfer.
+ * Clears the channel's IRQ flag (W1C in INTS0), snapshots and nulls the
+ * callback and context, marks the driver idle, then calls the snapshot
+ * callback if non-NULL.  Snapshotting before the call allows the callback
+ * to immediately launch a new memcpy without corrupting state.
+ */
 void tiku_rp2350_dma_irq0_handler(void) {
     /* W1C the channel's IRQ flag in INTS0 (the post-enable status
      * register; writing 1 clears the corresponding IRQ source). */

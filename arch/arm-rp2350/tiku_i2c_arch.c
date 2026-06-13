@@ -33,6 +33,14 @@
 #include "tiku_cpu_freq_boot_arch.h"
 #include <stdint.h>
 
+/**
+ * @defgroup i2c_reg I2C register access macros and pin defaults
+ * @brief I2C_REG maps a register offset to the absolute address within
+ *        the RP2350 I2C0 peripheral block.  TIKU_BOARD_I2C0_SDA_PIN and
+ *        TIKU_BOARD_I2C0_SCL_PIN provide fallback GPIO assignments when
+ *        the board header does not define them.
+ * @{
+ */
 #ifndef TIKU_BOARD_I2C0_SDA_PIN
 #define TIKU_BOARD_I2C0_SDA_PIN  4U
 #endif
@@ -41,15 +49,25 @@
 #endif
 
 #define I2C_REG(off)   (RP2350_I2C0_BASE + (off))
+/** @} */
 
-/* Bound every wait so a wedged bus can't lock the kernel. ~1 ms per
- * byte at 100 kHz is plenty of margin. */
+/** @brief Maximum spin iterations for bus-wait loops.  Bounds every
+ *         poll so a wedged bus cannot lock the kernel indefinitely.
+ *         At 100 kHz, ~1 ms per byte provides ample margin. */
 #define I2C_SPIN_LIMIT  100000UL
 
+/** @brief Non-zero once tiku_i2c_arch_init() has completed successfully. */
 static uint8_t i2c_initialised;
 
-/* Wait for `mask` bits in IC_STATUS to become non-zero. Returns 0 on
- * success, -1 on timeout. */
+/**
+ * @brief Wait until the specified IC_STATUS bits become non-zero.
+ *
+ *        Spins up to I2C_SPIN_LIMIT iterations, returning early if a
+ *        TX_ABRT interrupt fires.
+ *
+ * @param mask  Bitmask of IC_STATUS bits to wait for (any bit set = ready).
+ * @return      0 on success, -1 on timeout or abort.
+ */
 static int wait_status(uint32_t mask) {
     uint32_t spin;
     for (spin = 0U; spin < I2C_SPIN_LIMIT; spin++) {
@@ -64,7 +82,15 @@ static int wait_status(uint32_t mask) {
     return -1;
 }
 
-/* Wait for IC_STATUS bit to be 0 (negated mask). */
+/**
+ * @brief Wait until the specified IC_STATUS bits are all zero.
+ *
+ *        Spins up to I2C_SPIN_LIMIT iterations, returning early if a
+ *        TX_ABRT interrupt fires.
+ *
+ * @param mask  Bitmask of IC_STATUS bits that must clear.
+ * @return      0 on success, -1 on timeout or abort.
+ */
 static int wait_status_clear(uint32_t mask) {
     uint32_t spin;
     for (spin = 0U; spin < I2C_SPIN_LIMIT; spin++) {
@@ -79,8 +105,16 @@ static int wait_status_clear(uint32_t mask) {
     return -1;
 }
 
-/* If TX_ABRT fired, drain abort source + clear it and return ERR_NACK.
- * Otherwise return OK. */
+/**
+ * @brief Check for a TX_ABRT condition and clear it if present.
+ *
+ *        Reads IC_RAW_INTR_STAT; if TX_ABRT is set, reads and discards
+ *        IC_TX_ABRT_SOURCE (latching diagnostics) then clears the flag
+ *        via IC_CLR_TX_ABRT.
+ *
+ * @return  TIKU_I2C_OK if no abort was pending, TIKU_I2C_ERR_NACK if
+ *          TX_ABRT was set and has been cleared.
+ */
 static int check_abort(void) {
     uint32_t raw = _RP2350_REG(I2C_REG(RP2350_I2C_IC_RAW_INTR_STAT));
     if ((raw & RP2350_I2C_INTR_TX_ABRT) == 0U) {
@@ -94,14 +128,35 @@ static int check_abort(void) {
     return TIKU_I2C_ERR_NACK;
 }
 
-/* Reconfigure the slave address. The DW IP requires the controller to
- * be disabled before writing IC_TAR. */
+/**
+ * @brief Set the I2C target (slave) address in IC_TAR.
+ *
+ *        The Synopsys DW_apb_i2c requires the controller to be disabled
+ *        (IC_ENABLE = 0) before IC_TAR is written; this function handles
+ *        that sequence and re-enables the controller afterwards.
+ *
+ * @param addr  7-bit slave address (bits [6:0] used; bit 7 ignored).
+ */
 static void set_target(uint8_t addr) {
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_ENABLE)) = 0U;
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_TAR)) = (uint32_t)(addr & 0x7FU);
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_ENABLE)) = 1U;
 }
 
+/**
+ * @brief Initialise the RP2350 I2C0 peripheral.
+ *
+ *        Brings I2C0 out of reset, configures GPIO pins for I2C function,
+ *        programs IC_CON for master mode and the requested speed, computes
+ *        SCL high/low counts from the live clk_peri frequency, and enables
+ *        the controller.  Safe to call once; re-initialisation requires
+ *        tiku_i2c_arch_close() first.
+ *
+ * @param config  Pointer to a tiku_i2c_config_t describing the desired
+ *                bus speed (TIKU_I2C_SPEED_STANDARD or _FAST).
+ * @return        TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if config
+ *                is NULL.
+ */
 int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     if (config == (const tiku_i2c_config_t *)0) {
         return TIKU_I2C_ERR_PARAM;
@@ -180,11 +235,32 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     return TIKU_I2C_OK;
 }
 
+/**
+ * @brief Disable the I2C0 peripheral and mark it as uninitialised.
+ *
+ *        Clears IC_ENABLE and resets i2c_initialised so subsequent API
+ *        calls return TIKU_I2C_ERR_PARAM until re-initialised.
+ */
 void tiku_i2c_arch_close(void) {
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_ENABLE)) = 0U;
     i2c_initialised = 0U;
 }
 
+/**
+ * @brief Write bytes to an I2C slave device.
+ *
+ *        Sets the target address, drains any stale abort state, pushes
+ *        each byte into the TX FIFO (with STOP on the last byte), then
+ *        waits for the FIFO to drain and the bus to go idle.
+ *
+ * @param addr  7-bit slave address.
+ * @param buf   Pointer to the byte array to transmit.
+ * @param len   Number of bytes to write; 0 returns TIKU_I2C_OK immediately.
+ * @return      TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if the driver
+ *              is uninitialised or buf is NULL with len > 0,
+ *              TIKU_I2C_ERR_NACK on slave NACK, TIKU_I2C_ERR_TIMEOUT on
+ *              bus stall.
+ */
 int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     if (i2c_initialised == 0U || (buf == (const uint8_t *)0 && len > 0U)) {
         return TIKU_I2C_ERR_PARAM;
@@ -216,6 +292,20 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     return check_abort();
 }
 
+/**
+ * @brief Read bytes from an I2C slave device.
+ *
+ *        Sets the target address, issues one READ command per byte into
+ *        the TX FIFO (with STOP on the last), then drains the RX FIFO
+ *        into buf as bytes arrive.
+ *
+ * @param addr  7-bit slave address.
+ * @param buf   Pointer to the buffer that receives the read bytes.
+ * @param len   Number of bytes to read; 0 returns TIKU_I2C_OK immediately.
+ * @return      TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if the driver
+ *              is uninitialised or buf is NULL, TIKU_I2C_ERR_NACK on
+ *              slave NACK, TIKU_I2C_ERR_TIMEOUT on bus stall.
+ */
 int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     if (i2c_initialised == 0U || buf == (uint8_t *)0) {
         return TIKU_I2C_ERR_PARAM;
@@ -251,6 +341,25 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     return check_abort();
 }
 
+/**
+ * @brief Perform a combined I2C write followed by a repeated-start read.
+ *
+ *        Transmits tx_len bytes then issues a Sr (repeated START) and
+ *        reads rx_len bytes in a single bus transaction.  If either
+ *        length is zero the operation degrades to a pure write or pure
+ *        read, delegating to tiku_i2c_arch_write() or
+ *        tiku_i2c_arch_read() respectively.
+ *
+ * @param addr    7-bit slave address.
+ * @param tx_buf  Pointer to bytes to write in the first phase.
+ * @param tx_len  Number of bytes to write; may be 0.
+ * @param rx_buf  Pointer to the buffer that receives the read bytes.
+ * @param rx_len  Number of bytes to read; may be 0.
+ * @return        TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if the
+ *                driver is uninitialised or a non-zero length has a NULL
+ *                buffer, TIKU_I2C_ERR_NACK on slave NACK,
+ *                TIKU_I2C_ERR_TIMEOUT on bus stall.
+ */
 int tiku_i2c_arch_write_read(uint8_t addr,
                              const uint8_t *tx_buf, uint16_t tx_len,
                              uint8_t *rx_buf,       uint16_t rx_len) {

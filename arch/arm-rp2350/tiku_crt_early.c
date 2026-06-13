@@ -46,7 +46,7 @@ extern uint32_t __uninit_end;
 
 extern int main(void);
 
-/* Forward decl of the vector table; the array is defined further down. */
+/** @brief ISR function-pointer type used throughout the vector table. */
 typedef void (*rp2350_isr_t)(void);
 #define RP2350_NUM_EXT_IRQS  64
 extern const rp2350_isr_t tiku_rp2350_vectors[16 + RP2350_NUM_EXT_IRQS];
@@ -55,14 +55,31 @@ extern const rp2350_isr_t tiku_rp2350_vectors[16 + RP2350_NUM_EXT_IRQS];
 /* Default handlers (override with own functions of the same name)           */
 /*---------------------------------------------------------------------------*/
 
-/* Spin in an obvious loop on an unhandled fault so a JTAG halt lands
- * on something recognisable. */
+/**
+ * @brief Default ISR handler — spin forever on an unhandled exception.
+ *
+ * Alias target for all weak exception/IRQ stubs. Spinning on WFE keeps
+ * the core in a low-power state so a debugger halt lands on a recognisable
+ * PC rather than a random instruction stream.
+ */
 static void rp2350_default_handler(void) {
     while (1) {
         __asm__ volatile ("wfe");
     }
 }
 
+/**
+ * @defgroup rp2350_exception_stubs Cortex-M33 weak exception/IRQ stubs
+ * @brief Weak aliases that default to rp2350_default_handler.
+ *
+ * Each stub can be overridden by a non-weak definition of the same name
+ * in any driver or kernel file. The vector table below references these
+ * symbols so the linker prefers the real implementation when present.
+ * SysTick is included here so the vector table can be populated before
+ * the timer arch driver installs its own non-weak handler.
+ *
+ * External IRQs wired: TIMER0_ALARM0, UART0, IO_BANK0, PIO0_IRQ0, DMA_IRQ0.
+ */
 void tiku_rp2350_nmi_handler(void)        __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_hard_fault_handler(void) __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_mem_fault_handler(void)  __attribute__((weak, alias("rp2350_default_handler")));
@@ -91,12 +108,16 @@ void tiku_rp2350_dma_irq0_handler(void)  __attribute__((weak, alias("rp2350_defa
 
 void tiku_rp2350_reset_handler(void) __attribute__((naked, section(".text"), used));
 
-/*
- * The reset handler runs with SP set by the ROM's trampoline (which
- * loaded the SP from vectors[0]). We copy .data, zero .bss, then jump
- * to main. Marked naked so the compiler doesn't generate a prologue
- * that would touch the (still-uninitialised) call-saved register
- * conventions.
+/**
+ * @brief RP2350 reset handler: C runtime init and entry to main().
+ *
+ * Runs with SP already set by the boot ROM (loaded from vectors[0]).
+ * Immediately masks all maskable IRQs to prevent SysTick or any other
+ * early-programmed IRQ source from firing before the scheduler is ready.
+ * Then explicitly writes VTOR, copies .data from flash to SRAM, zeros
+ * .bss, and calls main(). The .uninit region is left untouched so
+ * warm-reset state survives. Marked naked so the compiler emits no
+ * prologue that would touch uninitialised call-saved registers.
  */
 void tiku_rp2350_reset_handler(void) {
     /* Mask all maskable IRQs *immediately*. Cortex-M resets with
@@ -145,20 +166,24 @@ void tiku_rp2350_reset_handler(void) {
 /* Vector table                                                              */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The Cortex-M33 vector table is loaded from the address stored in
- * SCB.VTOR. The boot ROM sets VTOR to the start of our .vectors
- * section after the IMAGE_DEF check, then loads SP from entry 0 and
- * jumps to entry 1 (reset).
+/**
+ * @brief Cortex-M33 vector table for RP2350.
  *
- * RP2350 has IRQs 0..51 (datasheet §3.6.1). We size the array to 16
- * (system) + 64 (external) = 80 entries which covers everything we
- * use plus margin.
+ * Placed in the .vectors section so the linker script aligns it to the
+ * VTOR.TBLOFF requirement (512-byte boundary in the linker script). The
+ * boot ROM reads SCB.VTOR from the IMAGE_DEF VECTOR_TABLE item and loads
+ * SP from entry 0 before jumping to entry 1 (reset handler).
+ *
+ * RP2350 exposes IRQs 0..51 (datasheet §3.6.1). The array is sized to
+ * 16 (system exceptions) + 64 (external IRQs) = 80 entries to cover all
+ * used IRQs with margin. Unused slots are filled with rp2350_default_handler
+ * so an unexpected IRQ ends up in a debuggable spin loop rather than
+ * executing a NULL pointer.
+ *
+ * Typedef rp2350_isr_t and RP2350_NUM_EXT_IRQS are declared near the
+ * top of this file so the reset handler can reference the array before
+ * it is defined textually.
  */
-/* Note: typedef rp2350_isr_t and RP2350_NUM_EXT_IRQS are declared
- * near the top of this file so the reset handler can take the array's
- * address before it appears textually. */
-
 const rp2350_isr_t tiku_rp2350_vectors[16 + RP2350_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {
     /* System exceptions ------------------------------------------------ */
@@ -250,24 +275,44 @@ __attribute__((section(".vectors"), used)) = {
  *   word 6  marker_end = 0xab123579
  */
 
+/**
+ * @brief RP2350 IMAGE_DEF block layout as a C struct.
+ *
+ * The boot ROM scans the first 4 KB of flash for a block starting with
+ * marker_start (0xFFFFDED3) and ending with marker_end (0xAB123579).
+ * We emit the minimal "executable, ARM, secure" descriptor with a
+ * VECTOR_TABLE item so the ROM points VTOR at our vector table. See
+ * pico-sdk picobin.h for the authoritative field encoding.
+ */
 struct rp2350_image_def {
-    uint32_t marker_start;
-    uint32_t image_type_word;        /* type+size+value packed */
-    uint32_t vector_table_hdr;
-    uint32_t vector_table_addr;
-    uint32_t last_word;
-    uint32_t next_block_offset;
-    uint32_t marker_end;
+    uint32_t marker_start;     /**< Block start magic: 0xFFFFDED3 */
+    uint32_t image_type_word;  /**< IMAGE_TYPE item: type+size+flags packed */
+    uint32_t vector_table_hdr; /**< VECTOR_TABLE item header */
+    uint32_t vector_table_addr;/**< Address of tiku_rp2350_vectors */
+    uint32_t last_word;        /**< LAST item with item-word count */
+    uint32_t next_block_offset;/**< 0 for a single-block IMAGE_DEF */
+    uint32_t marker_end;       /**< Block end magic: 0xAB123579 */
 };
 
-/* IMAGE_TYPE flags, per picobin.h LSB definitions:
- *   IMAGE_TYPE_EXE       = 1, LSB  0
- *   EXE_SECURITY_S       = 2, LSB  4
- *   EXE_CPU_ARM          = 0, LSB  8
- *   EXE_CHIP_RP2350      = 1, LSB 12
+/**
+ * @brief Combined IMAGE_TYPE flags for "ARM secure executable on RP2350".
+ *
+ * Per picobin.h LSB layout:
+ *   bits [3:0]  IMAGE_TYPE = 1 (EXE)
+ *   bits [5:4]  SECURITY   = 2 (SECURE)
+ *   bits [10:8] CPU        = 0 (ARM)
+ *   bits [14:12] CHIP      = 1 (RP2350)
+ * Produces 0x1021, matching the SDK's default for a standard flash crt0.
  */
 #define TIKU_IMAGE_TYPE_FLAGS  ((1U << 0) | (2U << 4) | (0U << 8) | (1U << 12))
 
+/**
+ * @brief RP2350 IMAGE_DEF descriptor placed in the .image_def flash section.
+ *
+ * Consumed by the boot ROM to identify the image type and locate the
+ * Cortex-M33 vector table. Must remain in the .image_def section (defined
+ * in the linker script at a fixed offset within the first 4 KB of flash).
+ */
 const struct rp2350_image_def tiku_rp2350_image_def
 __attribute__((section(".image_def"), used)) = {
     .marker_start      = 0xFFFFDED3U,
@@ -300,6 +345,15 @@ __attribute__((section(".image_def"), used)) = {
  * a custom CS/CLK ratio or different read command, replace this stub
  * with a hand-tuned routine in arch/arm-rp2350/devices/boot2_*.S
  * (see the RP2350 SDK for reference implementations).
+ */
+/**
+ * @brief Minimal .boot2 placeholder for RP2350 (boot ROM already enables XIP).
+ *
+ * On RP2350 the boot ROM handles XIP setup before jumping to the reset
+ * handler, so .boot2 need not contain a real second-stage payload. This
+ * 32-bit constant keeps the .boot2 section non-empty so the linker layout
+ * is well-defined. Replace with a hand-tuned routine if a non-default
+ * flash chip requires a custom CS/CLK ratio or read command.
  */
 const uint32_t tiku_rp2350_boot2_marker
 __attribute__((section(".boot2"), used)) = 0xDEADBE2FU;

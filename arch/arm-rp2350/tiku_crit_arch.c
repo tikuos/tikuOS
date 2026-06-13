@@ -27,8 +27,15 @@
 #include "tiku_rp2350_regs.h"
 #include <stdint.h>
 
-/* Per-source preserve mask: list which NVIC bits stay enabled when
- * the matching TIKU_CRIT_PRESERVE_* flag is set. */
+/**
+ * @defgroup rp2350_crit_bits RP2350 NVIC bit-position aliases for crit section
+ * @brief Maps TikuOS TIKU_CRIT_PRESERVE_* flags to NVIC ISER0 bit positions.
+ *
+ * SysTick is a system exception (not an NVIC source) so it is left alone;
+ * its bit position is defined as 0 (no NVIC bit) to avoid accidental
+ * disable. All other sources are direct NVIC IRQ lines.
+ */
+/** @brief Helper to form a single-bit mask. */
 #define BIT(n) (1U << (n))
 
 #define IRQ_BIT_TICK    0U   /* SysTick is a system exception, not NVIC,
@@ -40,10 +47,27 @@
 #define IRQ_BIT_GPIO    BIT(RP2350_IRQ_IO_BANK0)
 #define IRQ_BIT_PIO     BIT(RP2350_IRQ_PIO0_0)
 
+/**
+ * @brief Critical-section state saved across mask/unmask pairs.
+ *
+ * Only ISER0 (IRQs 0..31) is saved; RP2350 uses far fewer than 32
+ * external IRQs so one register is sufficient.
+ */
 static struct {
-    uint32_t iser0_saved;
+    uint32_t iser0_saved; /**< NVIC ISER0 snapshot taken at mask time */
 } crit_state;
 
+/**
+ * @brief Mask NVIC IRQs, keeping only those listed in @p preserve_mask.
+ *
+ * Snapshots NVIC ISER0, builds a keep-set from the TIKU_CRIT_PRESERVE_*
+ * bits, and writes the difference to NVIC ICER0. A DSB+ISB pair ensures
+ * the disable is architecturally visible before the critical section body
+ * runs. SysTick is not in the NVIC so it is always left enabled.
+ *
+ * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags for sources to
+ *                       keep enabled (HTIMER, UART, GPIO, PIO)
+ */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     /* Snapshot what's enabled today. */
     crit_state.iser0_saved = *(volatile uint32_t *)RP2350_NVIC_ISER0;
@@ -70,6 +94,13 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     }
 }
 
+/**
+ * @brief Restore NVIC IRQs to the state saved by tiku_crit_arch_mask_irqs().
+ *
+ * Writes the saved ISER0 back to NVIC ISER0, then issues DSB+ISB to
+ * ensure the re-enable is architecturally visible before any subsequent
+ * code runs.
+ */
 void tiku_crit_arch_unmask_irqs(void) {
     *(volatile uint32_t *)RP2350_NVIC_ISER0 = crit_state.iser0_saved;
     __asm__ volatile ("dsb" ::: "memory");

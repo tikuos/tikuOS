@@ -61,37 +61,79 @@ extern const ambiq_isr_t tiku_ambiq_vectors[16 + AMBIQ_NUM_EXT_IRQS];
 /* Default + weak handlers (override with a same-named non-weak symbol)       */
 /*---------------------------------------------------------------------------*/
 
-/* Spin on WFE so a debugger halt lands on something recognisable. */
+/**
+ * @brief Default (catch-all) exception and IRQ handler
+ *
+ * Spins on WFE so a debugger halt lands on something recognisable
+ * rather than hard-faulting into an unknown location. All vector
+ * table slots that tikuOS has not claimed are aliased to this via
+ * weak attributes; override by providing a non-weak definition of
+ * the corresponding named handler symbol.
+ */
 static void ambiq_default_handler(void) {
     while (1) {
         __asm__ volatile ("wfe");
     }
 }
 
+/** @brief NMI handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_nmi_handler(void)          __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief HardFault handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_hard_fault_handler(void)   __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief MemManage fault handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_mem_fault_handler(void)    __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief BusFault handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_bus_fault_handler(void)    __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief UsageFault handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_usage_fault_handler(void)  __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief SecureFault (ARMv8-M) handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_secure_fault_handler(void) __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief SVC handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_svc_handler(void)          __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief PendSV handler — weak alias to ambiq_default_handler */
 void tiku_ambiq_pendsv_handler(void)       __attribute__((weak, alias("ambiq_default_handler")));
 
-/* SysTick is the system tick; tiku_timer_arch.c provides the real one. */
+/** @brief SysTick handler — weak; tiku_timer_arch.c provides the real one */
 void tiku_ambiq_systick_handler(void)      __attribute__((weak, alias("ambiq_default_handler")));
 
-/* Peripheral IRQs tikuOS drivers may claim later (UART console, STIMER /
- * TIMER for the htimer, GPIO0 for edge IRQs). Weak now; the arch driver
- * that handles each one provides a strong definition of the same symbol. */
+/**
+ * @brief UART0 ISR — weak alias to ambiq_default_handler
+ *
+ * Peripheral IRQs tikuOS drivers may claim later (UART console, STIMER /
+ * TIMER for the htimer, GPIO0 for edge IRQs). The arch driver that handles
+ * each one provides a strong definition of the same symbol.
+ */
 void tiku_ambiq_uart0_isr(void)            __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief STIMER Compare0 ISR (htimer source) — weak alias */
 void tiku_ambiq_stimer_cmpr0_isr(void)     __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief GPIO N0 ISR (pins 0-31) — weak alias */
 void tiku_ambiq_gpio0_isr(void)            __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief TIMER0 ISR — weak alias */
 void tiku_ambiq_timer0_isr(void)           __attribute__((weak, alias("ambiq_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Reset handler                                                             */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Apollo510 (Cortex-M55) reset handler — bare-metal startup entry
+ *
+ * Executed immediately after the SBL transfers control. Performs:
+ *   1. Mask maskable IRQs (CPSID i) — prevents spurious interrupts
+ *      during kernel init before the scheduler queue is built.
+ *   2. Set SP from __stack linker symbol — robust to alternate entries.
+ *   3. Set VTOR to tiku_ambiq_vectors (1024-aligned at MRAM 0x410000).
+ *   4. Enable FPU (CPACR CP10/CP11) — required by -mfloat-abi=hard.
+ *   5. Set M55 EPU power state = ON/clock-off (PWRMODCTL.CPDLPSTATE
+ *      ELPSTATE[5:4] = 0b01) and enable ARMv8.1-M LOB (SCB.CCR bit 19).
+ *   6. Power up the 3 MB shared SRAM (PWRCTRL.SSRAMPWREN, three groups)
+ *      with a bounded wait — .ssram tier buffers live there.
+ *   7. Copy .data MRAM->DTCM, zero .bss, zero .ssram.
+ *   8. Call main(); hang on WFE if main() returns.
+ *
+ * Fully bare-metal: no AmbiqSuite dependency. CMSIS SystemInit() is
+ * not called (its work is done inline above).
+ */
 void tiku_ambiq_reset_handler(void) __attribute__((naked, section(".text"), used));
 
 void tiku_ambiq_reset_handler(void) {
@@ -171,12 +213,15 @@ void tiku_ambiq_reset_handler(void) {
 /* Vector table                                                              */
 /*---------------------------------------------------------------------------*/
 
-/*
- * 16 system exceptions + 135 external IRQs = 151 entries. Lives in the
- * .vectors section, which the linker places at MRAM origin (0x410000),
- * naturally satisfying the M55 VTOR alignment requirement. Peripheral
- * slots default to ambiq_default_handler; the four named slots point at
- * weak symbols that tikuOS arch drivers override.
+/**
+ * @brief Apollo510 interrupt vector table
+ *
+ * 16 system exceptions + 135 external IRQs = 151 entries. Placed in
+ * .vectors by the linker at MRAM origin (0x410000), naturally satisfying
+ * the M55 VTOR 1024-byte alignment requirement. Peripheral slots
+ * default to ambiq_default_handler; the four named driver slots point
+ * at weak symbols that tikuOS arch drivers override with strong
+ * definitions.
  */
 const ambiq_isr_t tiku_ambiq_vectors[16 + AMBIQ_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {

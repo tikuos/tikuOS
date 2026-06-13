@@ -22,8 +22,20 @@
 #include <kernel/process/tiku_proto.h>
 #include <stdint.h>
 
+/** Maximum zero-based GP index on the RP2350 (GP0–GP29). */
 #define MAX_GP_PIN  29U
 
+/**
+ * @brief Convert a platform-agnostic edge selector to RP2350 INTE nibble bits.
+ *
+ * Maps @c TIKU_GPIO_EDGE_RISING, @c TIKU_GPIO_EDGE_FALLING, and
+ * @c TIKU_GPIO_EDGE_BOTH to the corresponding @c RP2350_IO_INT_EDGE_*
+ * bit masks that are written into an IO_BANK0 INTE register nibble.
+ *
+ * @param edge  Edge polarity selector (@c tiku_gpio_edge_t).
+ * @return      Four-bit INTE mask for the requested edge(s), or 0 for an
+ *              unrecognised value.
+ */
 static uint8_t edge_to_inte_bits(tiku_gpio_edge_t edge) {
     switch (edge) {
     case TIKU_GPIO_EDGE_RISING:  return RP2350_IO_INT_EDGE_HIGH;
@@ -33,6 +45,18 @@ static uint8_t edge_to_inte_bits(tiku_gpio_edge_t edge) {
     }
 }
 
+/**
+ * @brief Compute the flat GP index from a virtual (port, pin) pair.
+ *
+ * TikuOS addresses GPIO through a (port 1–4, pin 0–7) abstraction.
+ * This function converts that pair to the RP2350 zero-based GP number
+ * (GP0–GP29) used by the IO_BANK0 register arrays.
+ *
+ * @param port  Virtual port number (1–4).
+ * @param pin   Pin index within the port (0–7).
+ * @return      Zero-based GP index (0–29) on success, or -1 when the
+ *              (port, pin) combination is out of range.
+ */
 static int8_t gp_index(uint8_t port, uint8_t pin) {
     if (port < 1U || port > 4U || pin > 7U) {
         return -1;
@@ -44,6 +68,22 @@ static int8_t gp_index(uint8_t port, uint8_t pin) {
     return (int8_t)idx;
 }
 
+/**
+ * @brief Enable a GPIO edge interrupt for the given (port, pin, edge).
+ *
+ * Translates the virtual (port, pin) pair to a GP index, configures the
+ * corresponding nibble in the IO_BANK0 PROC0_INTE register, clears any
+ * stale pending edge in INTR, and unmasks IO_BANK0 in the NVIC.  The pin
+ * is also reconfigured as an SIO input with pull-up.
+ *
+ * @param port  Virtual port number (1–4).
+ * @param pin   Pin index within the port (0–7).
+ * @param edge  Edge polarity to arm (@c TIKU_GPIO_EDGE_RISING,
+ *              @c TIKU_GPIO_EDGE_FALLING, or @c TIKU_GPIO_EDGE_BOTH).
+ * @return      @c TIKU_GPIO_IRQ_OK on success, or
+ *              @c TIKU_GPIO_IRQ_ERR_INVALID when the arguments are
+ *              out of range or @p edge is unrecognised.
+ */
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
                               tiku_gpio_edge_t edge) {
     int8_t gp = gp_index(port, pin);
@@ -76,6 +116,19 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     return TIKU_GPIO_IRQ_OK;
 }
 
+/**
+ * @brief Disable the GPIO edge interrupt for the given (port, pin).
+ *
+ * Clears all four edge/level bits for the pin's nibble in the IO_BANK0
+ * PROC0_INTE register and then clears any latched pending edge in INTR.
+ * The NVIC mask for IO_BANK0 is left unchanged; use the HAL-level disable
+ * if no other pins on the bank require interrupts.
+ *
+ * @param port  Virtual port number (1–4).
+ * @param pin   Pin index within the port (0–7).
+ * @return      @c TIKU_GPIO_IRQ_OK on success, or
+ *              @c TIKU_GPIO_IRQ_ERR_INVALID when (port, pin) is out of range.
+ */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -95,6 +148,15 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
 /* IRQ handler                                                               */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief IO_BANK0 interrupt service routine (ISR context).
+ *
+ * Called by the NVIC when at least one IO_BANK0 edge has fired.  Walks
+ * all four PROC0_INTS words, decodes every armed nibble into a virtual
+ * (port, pin) pair, broadcasts @c TIKU_EVENT_GPIO (data packed by
+ * @c TIKU_GPIO_IRQ_PACK) to all registered processes, and clears the
+ * latched edge in INTR before returning.
+ */
 void tiku_rp2350_io_bank0_isr(void) {
     /* Walk the four INTS words. Each set 4-bit nibble identifies a
      * pin that has fired; compose the (port, pin) tuple per the

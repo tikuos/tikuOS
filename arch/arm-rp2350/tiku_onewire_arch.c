@@ -32,6 +32,12 @@
 /* Pin selection                                                             */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Pin selection macros for the 1-Wire GPIO line.
+ *
+ *  TIKU_BOARD_OW_PIN is the SIO pin index (0-29).  Override it in the
+ *  board header; the default of GP15 matches the Pico 2 W reference
+ *  layout.  OW_PIN_MASK is the corresponding single-bit SIO bitmask.
+ */
 #ifndef TIKU_BOARD_OW_PIN
 #define TIKU_BOARD_OW_PIN  15U   /* sane default if no board override */
 #endif
@@ -42,19 +48,24 @@
 /* GPIO helpers                                                              */
 /*---------------------------------------------------------------------------*/
 
-/* Drive the line low: clear OUT, set OE (drive 0). */
+/** @brief Drive the 1-Wire line low (clear OUT, then assert OE). */
 static inline void ow_drive_low(void) {
     _RP2350_REG(RP2350_SIO_GPIO_OUT_CLR) = OW_PIN_MASK;
     _RP2350_REG(RP2350_SIO_GPIO_OE_SET)  = OW_PIN_MASK;
 }
 
-/* Release the line: clear OE so the pad is high-impedance, external
- * pull-up brings it high. */
+/** @brief Release the 1-Wire line to high-impedance (clear OE).
+ *
+ *  The external 4.7 kohm pull-up restores the bus to logic-high.
+ */
 static inline void ow_release(void) {
     _RP2350_REG(RP2350_SIO_GPIO_OE_CLR) = OW_PIN_MASK;
 }
 
-/* Sample the line. Returns 1 if high, 0 if low. */
+/** @brief Sample the 1-Wire line level.
+ *
+ *  @return 1 if the bus is high, 0 if low.
+ */
 static inline uint8_t ow_read(void) {
     return (_RP2350_REG(RP2350_SIO_GPIO_IN) & OW_PIN_MASK) ? 1U : 0U;
 }
@@ -63,6 +74,15 @@ static inline uint8_t ow_read(void) {
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Configure the GPIO pin for 1-Wire operation and release the bus.
+ *
+ *  Sets the pad to SIO function with input-enable on and no internal
+ *  pulls (the external 4.7 kohm pull-up provides the idle-high level).
+ *  Leaves the pin released (high-impedance) on return.
+ *
+ * @return TIKU_OW_OK always.
+ */
 int tiku_onewire_arch_init(void) {
     /* Pad config: function = SIO, input enable on (so OW_GPIO_IN reads
      * the actual pin level), no pulls (external 4.7k provides the rail).
@@ -77,6 +97,12 @@ int tiku_onewire_arch_init(void) {
     return TIKU_OW_OK;
 }
 
+/**
+ * @brief Release the 1-Wire pin and disable its input buffer.
+ *
+ *  Floats the pin and clears the pad input-enable bit to eliminate the
+ *  few microamps drawn by the analogue input stage when the bus is idle.
+ */
 void tiku_onewire_arch_close(void) {
     /* Float the pin and turn the pad input buffer back off to save
      * the few uA the analog input draws. */
@@ -85,12 +111,17 @@ void tiku_onewire_arch_close(void) {
         RP2350_PADS_OD;
 }
 
-/*
- * Reset:
- *   master pulls low for 480 us, then releases.
- *   external pull-up brings the line high in <15 us.
- *   any present device pulls low between 60 and 240 us after release.
- *   total reset window is 480 us low + 480 us recovery.
+/**
+ * @brief Issue a 1-Wire reset pulse and detect a presence response.
+ *
+ *  Master pulls the bus low for 480 us then releases.  The external
+ *  pull-up restores the line in <15 us; any attached device pulls it low
+ *  for 60-240 us within that recovery window.  The full reset cycle
+ *  occupies 480 us low + 480 us recovery.  IRQs are masked throughout
+ *  to preserve timing accuracy.
+ *
+ * @return TIKU_OW_OK if a device presence pulse was detected,
+ *         TIKU_OW_ERR_NO_DEVICE if the bus stayed high.
  */
 int tiku_onewire_arch_reset(void) {
     uint8_t presence;
@@ -115,10 +146,15 @@ int tiku_onewire_arch_reset(void) {
     return (presence == 0U) ? TIKU_OW_OK : TIKU_OW_ERR_NO_DEVICE;
 }
 
-/*
- * Write-1: pull low 6 us, release, idle 64 us.
- * Write-0: pull low 60 us, release, idle 10 us.
- * Total slot >= 70 us in either case.
+/**
+ * @brief Write one bit onto the 1-Wire bus.
+ *
+ *  Write-1: pull low 6 us, release, idle 64 us.
+ *  Write-0: pull low 60 us, release, idle 10 us.
+ *  Total slot is >= 70 us in either case.  IRQs are masked across the
+ *  slot to prevent timing violations.
+ *
+ * @param bit  Value to write; only the LSB is used (0 or non-zero).
  */
 void tiku_onewire_arch_write_bit(uint8_t bit) {
     tiku_cpu_irq_disable();
@@ -136,8 +172,14 @@ void tiku_onewire_arch_write_bit(uint8_t bit) {
     tiku_cpu_irq_enable();
 }
 
-/*
- * Read slot: pull low 6 us, release, wait 9 us, sample, then pad to 70 us.
+/**
+ * @brief Read one bit from the 1-Wire bus.
+ *
+ *  Initiates a read slot: pull low 6 us, release, wait 9 us, sample the
+ *  line, then pad the slot to 70 us total.  IRQs are masked across the
+ *  slot.
+ *
+ * @return The sampled bit value: 1 if the bus was high, 0 if low.
  */
 uint8_t tiku_onewire_arch_read_bit(void) {
     uint8_t bit;
@@ -154,6 +196,11 @@ uint8_t tiku_onewire_arch_read_bit(void) {
     return bit;
 }
 
+/**
+ * @brief Write one byte onto the 1-Wire bus, LSB first.
+ *
+ * @param byte  Byte value to transmit.
+ */
 void tiku_onewire_arch_write_byte(uint8_t byte) {
     uint8_t i;
     for (i = 0U; i < 8U; i++) {
@@ -162,6 +209,11 @@ void tiku_onewire_arch_write_byte(uint8_t byte) {
     }
 }
 
+/**
+ * @brief Read one byte from the 1-Wire bus, LSB first.
+ *
+ * @return The received byte, assembled from eight consecutive read slots.
+ */
 uint8_t tiku_onewire_arch_read_byte(void) {
     uint8_t byte = 0U;
     uint8_t i;

@@ -30,9 +30,27 @@
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 
+/** @brief Lazy-initialised region table and its entry count.
+ *
+ *  Populated on the first call to tiku_region_arch_get_table(); entries
+ *  are filled in ascending address order (SRAM, .uninit NVM overlay,
+ *  XIP flash NVM).  rp2350_region_count == 0 means uninitialised.
+ */
 static tiku_mem_region_t rp2350_region_table[3];
 static tiku_mem_arch_size_t rp2350_region_count;
 
+/**
+ * @brief Return the RP2350 memory region table, building it on first call.
+ *
+ *  Describes up to three regions: general-purpose SRAM (volatile), the
+ *  .uninit SRAM overlay tagged as NVM so the persist API can accept
+ *  .persistent buffers, and the 4 MB XIP flash tagged NVM for
+ *  introspection.  The .uninit NVM entry is omitted when .uninit is
+ *  empty in the current build.  The table is built once and cached.
+ *
+ * @param count  Output pointer; set to the number of valid table entries.
+ * @return Pointer to the internal region table array.
+ */
 const struct tiku_mem_region *tiku_region_arch_get_table(
     tiku_mem_arch_size_t *count) {
     if (rp2350_region_count == 0) {

@@ -21,17 +21,23 @@
 #include "tiku_rp2350_regs.h"
 #include <stdint.h>
 
-/* The htimer kernel header typedef'd tiku_htimer_clock_t as
- * unsigned short (16-bit). Reproduce that here for clarity. */
+/** @brief Convenience alias for the kernel's 16-bit hardware-timer clock
+ *         type.  The htimer kernel header typedef'd tiku_htimer_clock_t as
+ *         unsigned short (16-bit); reproducing it here avoids a long name
+ *         throughout the driver. */
 typedef tiku_htimer_clock_t htimer_t;
 
-/* ISR-fire counter, exposed for diagnostics. The htimer test fleet
- * was failing every "callback fired" assertion on this port; having
- * a live counter the test can read tells us whether the ISR is even
- * running, instead of guessing. Also useful for any future "did the
- * ISR storm during this op?" check. */
+/** @brief ISR-fire counter, exposed for diagnostics.  The htimer test
+ *         fleet was failing every "callback fired" assertion on this
+ *         port; having a live counter the test can read tells us whether
+ *         the ISR is even running, instead of guessing.  Also useful for
+ *         any future "did the ISR storm during this op?" check. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
+/** @brief Initialise the RP2350 TIMER0 alarm-0 hardware for single-shot
+ *         use.  Disarms any pre-existing alarm, masks the interrupt,
+ *         clears any latched IRQ, and enables the NVIC line so that
+ *         subsequent tiku_htimer_arch_schedule() calls can fire. */
 void tiku_htimer_arch_init(void) {
     /* Disarm any pre-existing ALARM0 by writing to ARMED bit 0
      * (write-1-to-disarm, per RP2350 datasheet 12.7.2). */
@@ -49,10 +55,18 @@ void tiku_htimer_arch_init(void) {
     rp2350_nvic_enable(RP2350_IRQ_TIMER0_0);
 }
 
+/** @brief Read the current 16-bit hardware-timer value from TIMER0
+ *         TIMERAWL (lower 32 bits of the 64-bit free-running counter).
+ * @return Current 16-bit timer tick (wraps every ~65.5 ms at 1 MHz). */
 htimer_t tiku_htimer_arch_now(void) {
     return (htimer_t)_RP2350_REG(RP2350_TIMER0_TIMERAWL);
 }
 
+/** @brief Arm TIMER0 alarm-0 to fire at the 16-bit absolute tick @p t.
+ *         The 16-bit target is sign-extended against the live 32-bit
+ *         counter to form the full absolute compare value, then the IRQ
+ *         is unmasked.  Any previously latched alarm IRQ is cleared first.
+ * @param  t  Target 16-bit tick value (kernel htimer_clock_t domain). */
 void tiku_htimer_arch_schedule(htimer_t t) {
     /* Compose absolute 32-bit target from the kernel's 16-bit time
      * by adding the signed 16-bit delta to the current 32-bit reading. */
@@ -74,6 +88,10 @@ void tiku_htimer_arch_schedule(htimer_t t) {
 /* IRQ handler                                                               */
 /*---------------------------------------------------------------------------*/
 
+/** @brief TIMER0 alarm-0 IRQ handler (ISR context).  Increments the
+ *         diagnostic fire counter, masks and clears the alarm interrupt,
+ *         then dispatches the pending htimer callback via
+ *         tiku_htimer_run_next(). */
 void tiku_rp2350_timer0_alarm0_isr(void) {
     tiku_htimer_arch_isr_count++;
 
@@ -93,30 +111,52 @@ void tiku_rp2350_timer0_alarm0_isr(void) {
 /* to a specific link in the chain (counter / comparator / NVIC / vector).  */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Diagnostic: read the raw 32-bit lower word of the TIMER0
+ *         free-running counter (TIMERAWL).
+ * @return Current TIMERAWL register value. */
 uint32_t tiku_htimer_arch_diag_timerawl(void) {
     return _RP2350_REG(RP2350_TIMER0_TIMERAWL);
 }
 
+/** @brief Diagnostic: read the TIMER0 raw interrupt status for alarm 0
+ *         (INTR bit 0).
+ * @return Non-zero if the alarm-0 raw interrupt is latched. */
 uint32_t tiku_htimer_arch_diag_intr(void) {
     return _RP2350_REG(RP2350_TIMER0_INTR) & 0x1U;
 }
 
+/** @brief Diagnostic: read the TIMER0 interrupt-enable register for
+ *         alarm 0 (INTE bit 0).
+ * @return Non-zero if the alarm-0 interrupt is currently unmasked. */
 uint32_t tiku_htimer_arch_diag_inte(void) {
     return _RP2350_REG(RP2350_TIMER0_INTE) & 0x1U;
 }
 
+/** @brief Diagnostic: check whether TIMER0_IRQ_0 is pending in the NVIC
+ *         interrupt set-pending register (ISPR0).
+ * @return Non-zero if the IRQ is pending in the NVIC. */
 uint32_t tiku_htimer_arch_diag_nvic_pending(void) {
     return *(volatile uint32_t *)RP2350_NVIC_ISPR0 & (1U << RP2350_IRQ_TIMER0_0);
 }
 
+/** @brief Diagnostic: check whether TIMER0_IRQ_0 is enabled in the NVIC
+ *         interrupt set-enable register (ISER0).
+ * @return Non-zero if the IRQ line is enabled in the NVIC. */
 uint32_t tiku_htimer_arch_diag_nvic_enabled(void) {
     return *(volatile uint32_t *)RP2350_NVIC_ISER0 & (1U << RP2350_IRQ_TIMER0_0);
 }
 
+/** @brief Diagnostic: read the TIMER0 masked interrupt status for alarm 0
+ *         (INTS bit 0 — INTR AND INTE, after force).
+ * @return Non-zero if the masked alarm-0 interrupt status is asserted. */
 uint32_t tiku_htimer_arch_diag_ints(void) {
     return _RP2350_REG(RP2350_TIMER0_INTS) & 0x1U;
 }
 
+/** @brief Diagnostic: force-assert the TIMER0 alarm-0 IRQ via the INTF
+ *         register, bypassing the INTR/INTE path.  If the ISR fires after
+ *         this call the NVIC routing and vector table entry are correct;
+ *         the fault lies upstream in the timer comparator chain. */
 void tiku_htimer_arch_diag_force_irq(void) {
     /* INTF is "interrupt force" — writing 1 to a bit asserts the IRQ
      * regardless of INTR/INTE. If forcing this makes the ISR fire,
@@ -125,6 +165,9 @@ void tiku_htimer_arch_diag_force_irq(void) {
     _RP2350_REG_SET(RP2350_TIMER0_INTF, 0x1U);
 }
 
+/** @brief Diagnostic: de-assert the TIMER0 alarm-0 force bit in INTF,
+ *         cancelling any IRQ that was asserted by
+ *         tiku_htimer_arch_diag_force_irq(). */
 void tiku_htimer_arch_diag_clear_force(void) {
     _RP2350_REG_CLR(RP2350_TIMER0_INTF, 0x1U);
 }

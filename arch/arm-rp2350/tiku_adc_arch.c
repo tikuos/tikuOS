@@ -41,13 +41,34 @@
 #include "tiku_rp2350_regs.h"
 #include <stdint.h>
 
-/* Cached config: shifts the 12-bit raw result down to the requested
- * resolution. 0 = 12-bit (no shift), 2 = 10-bit, 4 = 8-bit. */
+/**
+ * @brief Right-shift applied to the 12-bit raw ADC result.
+ *
+ * 0 = 12-bit (no shift), 2 = 10-bit, 4 = 8-bit.
+ * Set once during tiku_adc_arch_init() from config->resolution.
+ */
 static uint8_t adc_result_shift;
+
+/**
+ * @brief Non-zero when the ADC has been successfully initialised.
+ *
+ * Guards tiku_adc_arch_read() so reads before init return an error
+ * instead of accessing uninitialised hardware registers.
+ */
 static uint8_t adc_initialised;
 
-/* Map the kernel's channel ID (0..15 external, 30 = temp, 31 = battery)
- * to the RP2350 AINSEL value. Returns 0xFF for unsupported channels. */
+/**
+ * @brief Map a kernel channel ID to the RP2350 AINSEL selector value.
+ *
+ * Translates the MSP430-style channel constants used by the kernel ADC
+ * interface to the 3-bit AINSEL field written to the ADC CS register:
+ *   - channels 0..3  -> AINSEL 0..3 (external AIN0..AIN3 / GPIO26..GPIO29)
+ *   - channel 30 (TIKU_ADC_CH_TEMP)    -> AINSEL 4 (internal temp sensor)
+ *   - channel 31 (TIKU_ADC_CH_BATTERY) -> AINSEL 3 (GP29 / VSYS / 3 divider)
+ *
+ * @param channel  Kernel ADC channel ID (0..3, 30, or 31)
+ * @return AINSEL value (0..4), or 0xFF for unsupported channels
+ */
 static uint8_t map_channel(uint8_t channel) {
     if (channel <= 3U) {
         return channel;                          /* AIN0..AIN3 */
@@ -61,6 +82,21 @@ static uint8_t map_channel(uint8_t channel) {
     return 0xFFU;
 }
 
+/**
+ * @brief Initialise the RP2350 ADC peripheral.
+ *
+ * Decodes the requested resolution into a result-shift amount, brings
+ * the ADC block out of reset, points clk_adc at the 12 MHz XOSC (the
+ * PLL_USB source is not available yet at the point this is called), and
+ * waits for the READY bit with a bounded spin. The reference voltage is
+ * hardware-fixed to ADC_AVDD; any reference selector in @p config is
+ * accepted but silently ignored.
+ *
+ * @param config  ADC configuration (resolution, reference); must be non-NULL.
+ * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config
+ *         or unrecognised resolution, TIKU_ADC_ERR_TIMEOUT if the READY
+ *         bit does not assert within ~100 000 iterations.
+ */
 int tiku_adc_arch_init(const tiku_adc_config_t *config) {
     if (config == (const tiku_adc_config_t *)0) {
         return TIKU_ADC_ERR_PARAM;
@@ -116,6 +152,13 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config) {
     return TIKU_ADC_OK;
 }
 
+/**
+ * @brief Disable the RP2350 ADC peripheral.
+ *
+ * Clears the CS.EN bit to stop conversions. The ADC is NOT put back
+ * into reset so that the temperature-sensor bias is preserved across
+ * close/re-init cycles. The disabled ADC draws negligible current.
+ */
 void tiku_adc_arch_close(void) {
     /* Disable the ADC. We do not put it back in reset -- that would
      * also drop the temperature-sensor bias and cost a longer warm-up
@@ -124,6 +167,18 @@ void tiku_adc_arch_close(void) {
     adc_initialised = 0U;
 }
 
+/**
+ * @brief Configure the GPIO pin for an ADC channel.
+ *
+ * For external channels 0..3 and the battery channel (31), programmes the
+ * matching GPIO (GPIO26..GPIO29) as a high-impedance analog input by setting
+ * the output-disable bit and clearing all pull resistors. The internal
+ * temperature channel (30) requires no GPIO configuration and returns
+ * TIKU_ADC_OK immediately.
+ *
+ * @param channel  Kernel ADC channel ID (0..3, 30, or 31)
+ * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for unsupported channels
+ */
 int tiku_adc_arch_channel_init(uint8_t channel) {
     /* Only external pins need GPIO config. The internal temp channel
      * is enabled lazily in read(). */
@@ -145,6 +200,20 @@ int tiku_adc_arch_channel_init(uint8_t channel) {
     return TIKU_ADC_ERR_PARAM;
 }
 
+/**
+ * @brief Trigger a single ADC conversion and return the result.
+ *
+ * Selects the channel via AINSEL, enables the temperature-sensor bias when
+ * needed, clears any sticky error, fires START_ONCE, and waits for READY
+ * with a bounded spin. The 12-bit raw result is right-shifted by
+ * adc_result_shift to match the resolution requested at init time.
+ *
+ * @param channel  Kernel ADC channel ID (0..3, 30, or 31)
+ * @param value    Output pointer for the conversion result; must be non-NULL
+ * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for NULL value pointer,
+ *         uninitialised ADC, or unsupported channel,
+ *         TIKU_ADC_ERR_TIMEOUT if READY does not assert or ERR is set
+ */
 int tiku_adc_arch_read(uint8_t channel, uint16_t *value) {
     if (value == (uint16_t *)0 || adc_initialised == 0U) {
         return TIKU_ADC_ERR_PARAM;

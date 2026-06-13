@@ -25,6 +25,15 @@
 
 #include <stdint.h>
 
+/**
+ * @brief Return codes for the PWM driver.
+ *
+ * TIKU_PWM_OK           — operation succeeded.
+ * TIKU_PWM_ERR_INVALID  — gpio_pin is out of range (> 47).
+ * TIKU_PWM_ERR_FREQ     — freq_hz is zero or outside the range
+ *                         representable by the 8.4-bit DIV field at
+ *                         the current clk_sys frequency.
+ */
 #define TIKU_PWM_OK             0
 #define TIKU_PWM_ERR_INVALID   -1
 #define TIKU_PWM_ERR_FREQ      -2   /* frequency out of representable range */
@@ -50,31 +59,52 @@ int tiku_pwm_arch_init(uint8_t  gpio_pin,
 /**
  * @brief Update only the duty cycle of an already-initialised pin.
  *
- * Cheap: writes one CC half-word. Does not stop or restart the
- * slice -- the new duty applies on the next compare-match.
+ * Cheap: writes one CC half-word.  Does not stop or restart the
+ * slice — the new duty applies on the next compare-match.
+ *
+ * @param gpio_pin  GPIO pin whose PWM channel to update (0..47).
+ * @param duty_u16  New compare value (0 = fully low, 65535 = fully high).
+ * @return TIKU_PWM_OK or TIKU_PWM_ERR_INVALID.
  */
 int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16);
 
 /**
- * @brief Disable the PWM channel for @p gpio_pin (drives the pin
- *        low and stops the slice if both channels are now off).
+ * @brief Disable the PWM channel for @p gpio_pin.
+ *
+ * Drives the pin low and stops the slice if both channels are now off.
+ *
+ * @param gpio_pin  GPIO pin to disable (0..47).
+ * @return TIKU_PWM_OK or TIKU_PWM_ERR_INVALID.
  */
 int tiku_pwm_arch_close(uint8_t gpio_pin);
 
 /**
- * @brief Read back the current compare value (for tests / diag).
+ * @brief Read back the current compare (duty) value for a pin.
+ *
+ * Used by tests and diagnostics to verify the CC register was
+ * written correctly by tiku_pwm_arch_init() / set_duty().
+ *
+ * @param gpio_pin  GPIO pin to query (0..47).
+ * @return Current CC compare value for that pin's channel.
  */
 uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin);
 
 /**
- * @brief Read back the current TOP value for the slice owning
- *        @p gpio_pin. Tests use this to verify init computed the
- *        right wrap period.
+ * @brief Read back the TOP (wrap) value for the slice owning a pin.
+ *
+ * Tests use this to verify that tiku_pwm_arch_init() computed the
+ * correct wrap period for the requested frequency.
+ *
+ * @param gpio_pin  GPIO pin whose slice to query (0..47).
+ * @return Current TOP register value for that slice.
  */
 uint16_t tiku_pwm_arch_get_top(uint8_t gpio_pin);
 
 /**
- * @brief Read back the slice's CSR.EN bit.
+ * @brief Query whether the PWM slice owning a pin is running.
+ *
+ * @param gpio_pin  GPIO pin to check (0..47).
+ * @return Non-zero if CSR.EN is set, 0 if the slice is stopped.
  */
 int tiku_pwm_arch_is_enabled(uint8_t gpio_pin);
 

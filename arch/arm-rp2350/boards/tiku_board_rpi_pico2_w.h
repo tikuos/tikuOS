@@ -35,12 +35,20 @@
 /* BOARD IDENTIFICATION                                                      */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Human-readable board name string. */
 #define TIKU_BOARD_NAME             "Raspberry Pi Pico 2 W"
 
 /*---------------------------------------------------------------------------*/
 /* LED COUNT                                                                 */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Number of on-board user LEDs visible to the kernel.
+ *
+ * WiFi-driver builds (TIKU_DRV_WIFI_CYW43_ENABLE=1): GP25 is WL_CS and
+ * cannot be used as LED; only LED1 (GP15) is exposed. Non-WiFi builds:
+ * GP25 and GP15 are both free, so two LEDs are reported.
+ */
 #if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
 #define TIKU_BOARD_LED_COUNT        1
 #else
@@ -51,21 +59,25 @@
 /* GPIO LED helpers                                                          */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Forward-declare the GPIO arch helpers (defined in
- * arch/arm-rp2350/tiku_gpio_arch.c) so the LED macros below don't
- * pull the rest of the kernel's GPIO header into the include chain.
+/**
+ * @brief Forward declarations for GPIO arch helpers.
+ *
+ * Defined in arch/arm-rp2350/tiku_gpio_arch.c. Declared here so the
+ * LED macros below do not pull the full GPIO header into the include chain.
  */
 void tiku_rp2350_gpio_init_output(uint8_t pin);
 void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value);
 void tiku_rp2350_gpio_toggle(uint8_t pin);
 
-/* User LED:
- *   normal Pico-2-W bring-up builds: GP25 is kept as a compatibility
- *   "LED" GPIO because the actual board LED lives behind the CYW43.
- *   WiFi-driver builds: GP25 is CYW43 WL_CS, so LED1 moves to GP15
- *   and the VFS LED init path must not drive GP25 low before the
- *   radio reset strap is sampled. */
+/**
+ * @brief LED 1 pin assignment and control macros.
+ *
+ * In WiFi-driver builds GP25 is CYW43 WL_CS, so LED1 moves to GP15
+ * and the VFS LED init path must not drive GP25 low before the radio
+ * reset strap is sampled. In non-WiFi (plain bring-up) builds GP25 is
+ * kept as a compatibility GPIO because the actual board LED lives behind
+ * the CYW43.
+ */
 #if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
 #define TIKU_BOARD_LED1_PIN         15U
 #else
@@ -76,8 +88,12 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_LED1_OFF()       tiku_rp2350_gpio_set(TIKU_BOARD_LED1_PIN, 0)
 #define TIKU_BOARD_LED1_TOGGLE()    tiku_rp2350_gpio_toggle(TIKU_BOARD_LED1_PIN)
 
-/* Second user LED: GP15 in non-WiFi builds. In WiFi builds GP15 is
- * already LED1, so TIKU_BOARD_LED_COUNT hides LED2 from callers. */
+/**
+ * @brief LED 2 pin assignment and control macros (GP15, non-WiFi builds).
+ *
+ * In WiFi builds GP15 is already LED1, so TIKU_BOARD_LED_COUNT hides
+ * LED2 from callers and these macros are never referenced.
+ */
 #define TIKU_BOARD_LED2_PIN         15U
 #define TIKU_BOARD_LED2_INIT()      tiku_rp2350_gpio_init_output(TIKU_BOARD_LED2_PIN)
 #define TIKU_BOARD_LED2_ON()        tiku_rp2350_gpio_set(TIKU_BOARD_LED2_PIN, 1)
@@ -88,10 +104,13 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /* Backchannel UART - TX=GP0, RX=GP1 (UART0)                                 */
 /*---------------------------------------------------------------------------*/
 
-/* Pin mux for UART0 on the RP2350: function-2 on GP0 (TX) and GP1
- * (RX). The IO_BANK0 / PADS_BANK0 setup is done inline in
- * tiku_uart_arch.c; these macros are kept only for symmetry with the
- * MSP430 boards. */
+/**
+ * @brief UART0 backchannel pin assignments.
+ *
+ * Pin mux for UART0 on the RP2350: function-2 on GP0 (TX) and GP1 (RX).
+ * The IO_BANK0 / PADS_BANK0 setup is done inline in tiku_uart_arch.c;
+ * these macros are kept only for symmetry with the MSP430 boards.
+ */
 #define TIKU_BOARD_UART_TX_PIN      0U
 #define TIKU_BOARD_UART_RX_PIN      1U
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
@@ -100,10 +119,14 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /* Buttons                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/* The Pico 2 W only exposes one button (BOOTSEL) and it is on the
- * QSPI bank, not bank 0 — using it as a runtime input requires
- * temporarily disabling XIP and is not safe to expose as a generic
- * GPIO. For this port both button macros are no-ops. */
+/**
+ * @brief Button macros (no-ops — BOOTSEL is on the QSPI bank).
+ *
+ * The Pico 2 W only exposes one button (BOOTSEL) and it is on the QSPI
+ * bank, not bank 0. Using it as a runtime input requires temporarily
+ * disabling XIP and is not safe to expose as a generic GPIO. Both
+ * button macros are no-ops.
+ */
 #define TIKU_BOARD_BTN1_INIT()      do { } while (0)
 #define TIKU_BOARD_BTN1_PRESSED()   (0)
 #define TIKU_BOARD_BTN2_INIT()      do { } while (0)
@@ -113,11 +136,15 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /* Bit-bang pin (tiku_bitbang demos / PIO backend / backscatter dev)         */
 /*---------------------------------------------------------------------------*/
 
-/* GP14 is exposed on the header (physical pin 19) and not claimed
- * by UART / SPI / I2C / LED / 1-Wire on this port, so a scope probe
- * can verify the test_bitbang output pattern. RP2350 has a single
- * GPIO bank so port is unused -- 0 by convention. Override at
- * compile time via -DTIKU_BOARD_BSCAT_PIN=<n>. */
+/**
+ * @brief Bit-bang / backscatter output pin assignment.
+ *
+ * GP14 is exposed on the header (physical pin 19) and not claimed by
+ * UART / SPI / I2C / LED / 1-Wire on this port, so a scope probe can
+ * verify the test_bitbang output pattern. RP2350 has a single GPIO bank
+ * so port is 0 by convention. Override at compile time via
+ * -DTIKU_BOARD_BSCAT_PIN=<n>.
+ */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       0U
 #endif
@@ -129,36 +156,49 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /* Bus-availability gates                                                    */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The platform-independent bus drivers (interfaces/adc/, interfaces/bus/,
- * interfaces/onewire/) self-gate to empty translation units when these
- * macros are not defined. We declare them so the wrappers compile —
- * the underlying RP2350 arch implementations are stubs that return
- * "not supported" sentinels (see arch/arm-rp2350/tiku_*_arch.c).
+/**
+ * @brief Bus and peripheral availability flags.
  *
- * When the real ADC/I2C/SPI drivers are written, these gates already
- * pull the platform-independent layer in.
+ * Platform-independent bus drivers (interfaces/adc/, interfaces/bus/,
+ * interfaces/onewire/) self-gate to empty translation units when these
+ * macros are absent. Declaring them here ensures the wrappers compile.
+ * The underlying RP2350 arch implementations are stubs that return
+ * "not supported" sentinels until the real drivers are written. When
+ * the real ADC/I2C/SPI drivers are implemented, these gates already
+ * pull the platform-independent layer in. I2C_BRW_100K is symbolic
+ * on RP2350 — speed is configured in tiku_i2c_arch.c.
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
 #define TIKU_BOARD_I2C_BRW_100K     1   /* unused on RP2350 — symbolic */
 #define TIKU_BOARD_OW_AVAILABLE     1
 
-/* 1-Wire data pin. GP15 is a free header pin with no peripheral
- * default function on Pico 2 W (clear of UART0 GP0/1, I2C0 GP4/5,
- * SPI0 GP16-19, ADC GP26-29, CYW43 GP23-25). External 4.7 kohm
- * pull-up to 3V3 is required on the data line. */
+/**
+ * @brief 1-Wire data pin assignment (GP15).
+ *
+ * GP15 is a free header pin with no peripheral default function on
+ * Pico 2 W (clear of UART0 GP0/1, I2C0 GP4/5, SPI0 GP16-19, ADC
+ * GP26-29, CYW43 GP23-25). External 4.7 kohm pull-up to 3V3 is
+ * required on the data line.
+ */
 #define TIKU_BOARD_OW_PIN           15U
 
-/* I2C0 pin assignment. RP2350 IO_BANK0 maps function 3 = I2C; on the
- * Pico 2 W header GP4/GP5 are the conventional pair (matches Pico SDK
- * default and the Adafruit/SparkFun breakouts). External pull-ups
- * required on both lines. */
+/**
+ * @brief I2C0 pin assignment (GP4=SDA, GP5=SCL).
+ *
+ * RP2350 IO_BANK0 maps function 3 = I2C. GP4/GP5 are the conventional
+ * pair (matches Pico SDK default and the Adafruit/SparkFun breakouts).
+ * External pull-ups required on both lines.
+ */
 #define TIKU_BOARD_I2C0_SDA_PIN     4U
 #define TIKU_BOARD_I2C0_SCL_PIN     5U
 
-/* SPI0 pin assignment. Function 1 = SPI on RP2350 IO_BANK0. Standard
- * Pico/Pico 2 mapping: GP16=MISO, GP18=SCK, GP19=MOSI. CS (SS) is
- * left to the application — drive any free GPIO from user code. */
+/**
+ * @brief SPI0 pin assignment (GP16=MISO, GP18=SCK, GP19=MOSI).
+ *
+ * Function 1 = SPI on RP2350 IO_BANK0. Standard Pico/Pico 2 mapping.
+ * CS (SS) is left to the application — drive any free GPIO from user
+ * code.
+ */
 #define TIKU_BOARD_SPI0_MISO_PIN    16U
 #define TIKU_BOARD_SPI0_SCK_PIN     18U
 #define TIKU_BOARD_SPI0_MOSI_PIN    19U
@@ -166,22 +206,25 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /*---------------------------------------------------------------------------*/
 /* CYW43439 (WiFi/BT module) pinout                                          */
 /*---------------------------------------------------------------------------*/
-/*
+
+/**
+ * @brief CYW43439 gSPI bus pin assignments.
+ *
  * Fixed by Raspberry Pi's Pico 2 W board design — not configurable.
- * The gSPI bus uses a single bidirectional DATA line (WL_DATA),
- * which is a Pico-W-family quirk. PIO is required because the
- * RP2350 SPI peripheral assumes separate MOSI/MISO pins.
+ * The gSPI bus uses a single bidirectional DATA line (WL_DATA), which
+ * is a Pico-W-family quirk; PIO is required because the RP2350 SPI
+ * peripheral assumes separate MOSI/MISO pins.
  *
  * GP29 is shared with ADC channel 3 (VSYS-divide battery sense).
  * Activating the radio makes that ADC read unavailable.
  *
- * Used by tikudrivers/wifi/cyw43/ when
- * TIKU_DRV_WIFI_CYW43_ENABLE=1. Without that flag these defines
- * cost nothing — they're not referenced by core kernel code.
+ * Used by tikudrivers/wifi/cyw43/ when TIKU_DRV_WIFI_CYW43_ENABLE=1.
+ * Without that flag these defines cost nothing — they are not referenced
+ * by core kernel code.
  */
-#define TIKU_BOARD_CYW43_WL_REG_ON_PIN  23U  /* power-on enable */
-#define TIKU_BOARD_CYW43_WL_DATA_PIN    24U  /* bidirectional DATA */
-#define TIKU_BOARD_CYW43_WL_CS_PIN      25U  /* chip select */
-#define TIKU_BOARD_CYW43_WL_CLOCK_PIN   29U  /* gSPI clock */
+#define TIKU_BOARD_CYW43_WL_REG_ON_PIN  23U  /**< Power-on enable */
+#define TIKU_BOARD_CYW43_WL_DATA_PIN    24U  /**< Bidirectional gSPI DATA */
+#define TIKU_BOARD_CYW43_WL_CS_PIN      25U  /**< Chip select */
+#define TIKU_BOARD_CYW43_WL_CLOCK_PIN   29U  /**< gSPI clock */
 
 #endif /* TIKU_BOARD_RPI_PICO2_W_H_ */

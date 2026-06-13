@@ -19,8 +19,19 @@
 #include "tiku_rp2350_regs.h"
 #include <stdint.h>
 
-#define MAX_GP_PIN  29U   /* GP0..GP29 are exposed on the Pico 2 W header */
+/** @brief Highest GP index exposed on the Pico 2 W header (GP0..GP29). */
+#define MAX_GP_PIN  29U
 
+/**
+ * @brief Map a (port, pin) tuple to a flat SIO GP index (0..MAX_GP_PIN).
+ *
+ * Ports 1-4, pins 0-7 yield GP indices 0-31.  Indices above MAX_GP_PIN
+ * and invalid port/pin values are rejected.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      Flat GP index on success, -1 on out-of-range input.
+ */
 static inline int8_t gp_index(uint8_t port, uint8_t pin) {
     if (port < 1U || port > 4U || pin > 7U) {
         return -1;
@@ -36,6 +47,16 @@ static inline int8_t gp_index(uint8_t port, uint8_t pin) {
 /* Per-pin direct helpers                                                    */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise a GP pin as a push-pull SIO output, driven low.
+ *
+ * Configures PADS_BANK0 (4 mA, input-enable kept on so SIO_GPIO_IN
+ * reflects the driven level), routes IO_BANK0 to SIO, clears the
+ * output latch, then enables the output-enable bit via the SIO
+ * dedicated SET register.  Silently ignores pins above MAX_GP_PIN.
+ *
+ * @param pin  GP pin number (0..MAX_GP_PIN).
+ */
 void tiku_rp2350_gpio_init_output(uint8_t pin) {
     if (pin > MAX_GP_PIN) {
         return;
@@ -59,6 +80,16 @@ void tiku_rp2350_gpio_init_output(uint8_t pin) {
     _RP2350_REG(RP2350_SIO_GPIO_OE_SET)  = (1U << pin);
 }
 
+/**
+ * @brief Drive a GP output pin high or low via the SIO atomic registers.
+ *
+ * Uses SIO_GPIO_OUT_SET / SIO_GPIO_OUT_CLR so the operation is
+ * atomic and does not disturb other pins.  Silently ignores pins
+ * above MAX_GP_PIN.
+ *
+ * @param pin    GP pin number (0..MAX_GP_PIN).
+ * @param value  Non-zero drives the pin high; zero drives it low.
+ */
 void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value) {
     if (pin > MAX_GP_PIN) {
         return;
@@ -70,6 +101,14 @@ void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value) {
     }
 }
 
+/**
+ * @brief Toggle a GP output pin using the SIO XOR register.
+ *
+ * The SIO_GPIO_OUT_XOR write is atomic and does not disturb other
+ * pins.  Silently ignores pins above MAX_GP_PIN.
+ *
+ * @param pin  GP pin number (0..MAX_GP_PIN).
+ */
 void tiku_rp2350_gpio_toggle(uint8_t pin) {
     if (pin > MAX_GP_PIN) {
         return;
@@ -81,6 +120,16 @@ void tiku_rp2350_gpio_toggle(uint8_t pin) {
 /* HAL entry points                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief HAL: configure a (port, pin) as a push-pull output.
+ *
+ * Translates the port/pin tuple to a flat GP index and calls
+ * tiku_rp2350_gpio_init_output().
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      0 on success, -1 if the port/pin is out of range.
+ */
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -90,6 +139,16 @@ int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin) {
     return 0;
 }
 
+/**
+ * @brief HAL: configure a (port, pin) as a Schmitt-triggered input.
+ *
+ * Routes the pad to SIO with input-enable, pull-up, and Schmitt
+ * trigger active.  Clears the output-enable bit via SIO_GPIO_OE_CLR.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      0 on success, -1 if the port/pin is out of range.
+ */
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -108,6 +167,18 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
     return 0;
 }
 
+/**
+ * @brief HAL: write a logic level to a (port, pin), claiming it as an
+ *        output first if necessary.
+ *
+ * Calls tiku_rp2350_gpio_init_output() to ensure output mode, then
+ * drives the pin to the requested level.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @param val   Non-zero drives the pin high; zero drives it low.
+ * @return      0 on success, -1 if the port/pin is out of range.
+ */
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -118,6 +189,17 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     return 0;
 }
 
+/**
+ * @brief HAL: toggle a (port, pin), claiming it as an output if needed.
+ *
+ * If the GP pin's output-enable bit is not already set it is
+ * initialised as an output first (matching MSP430 driver behaviour),
+ * then toggled via SIO_GPIO_OUT_XOR.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      0 on success, -1 if the port/pin is out of range.
+ */
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -132,6 +214,17 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
     return 0;
 }
 
+/**
+ * @brief HAL: sample the current logic level of a (port, pin).
+ *
+ * Reads SIO_GPIO_IN.  For output pins, the pad input buffer is kept
+ * enabled by tiku_rp2350_gpio_init_output() so the driven level is
+ * reflected correctly.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      1 if the pin is high, 0 if low, -1 on out-of-range input.
+ */
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -140,6 +233,15 @@ int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin) {
     return (_RP2350_REG(RP2350_SIO_GPIO_IN) & (1U << gp)) ? 1 : 0;
 }
 
+/**
+ * @brief HAL: query the direction of a (port, pin).
+ *
+ * Checks the corresponding bit in SIO_GPIO_OE.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      1 if configured as output, 0 if input, -1 on out-of-range.
+ */
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {

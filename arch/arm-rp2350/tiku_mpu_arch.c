@@ -89,6 +89,15 @@ extern uint32_t __flash_end;
 /* programmed in lock-step for the segment we actually enforce (SEG3 = NVM). */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Software mirror of the MSP430-model MPU register file.
+ *
+ *  These variables shadow the four MSP430 MPU hardware registers so the
+ *  kernel API (get_sam / set_sam / get_ctl / get_violation_flags) behaves
+ *  identically to the real MSP430 driver. The hardware ARMv8-M MPU is
+ *  programmed in lock-step only for the region that the RP2350 port
+ *  actually enforces (SEG3 / .uninit); SEG1 and SEG2 bookkeeping is
+ *  purely in software.
+ */
 static uint16_t stub_mpuctl0;
 static uint16_t stub_mpuctl1;     /* violation flags */
 static uint16_t stub_mpusam = TIKU_MPU_DEFAULT_SAM;
@@ -110,18 +119,32 @@ static uint16_t stub_mpusegb2;
 /* segments() zeroes the struct + writes magic on first boot.                */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Magic sentinel for cold-boot detection in .mpu_diag ('MPUP'). */
 #define TIKU_MPU_DIAG_MAGIC  0x4D505550U   /* 'M''P''U''P' */
 
+/** @brief Persistent MPU diagnostic state that survives warm reset.
+ *
+ *  Placed in the .mpu_diag NOLOAD section, which sits outside the
+ *  MPU-protected .uninit range. This lets the MemManage handler write
+ *  diagnostics even though it is executing in an MPU-fault context and
+ *  cannot safely touch .uninit. On cold boot the magic word is used to
+ *  detect uninitialized SRAM; tiku_mpu_arch_init_segments() zeroes the
+ *  struct and stamps magic on first power-up.
+ */
 struct tiku_mpu_diag {
-    uint32_t magic;
-    uint32_t violation_count;     /* total faults across all warm boots */
-    uint32_t last_fault_addr;     /* MMFAR snapshot from most recent fault */
-    uint32_t last_fault_mmfsr;    /* MMFSR cause bits from most recent fault */
-    uint32_t expect_fault;        /* test scaffold: 1 = test armed for fault */
-    uint32_t last_fault_cfsr;     /* full CFSR — MMFSR/BFSR/UFSR */
-    uint32_t last_fault_hfsr;     /* HFSR — bit 30 (FORCED) means escalated */
-    uint32_t last_fault_ipsr;     /* exception number that handled the fault */
-    /* Bitmask: which W^X-survival sub-tests have already passed across
+    uint32_t magic;             /**< Sentinel — TIKU_MPU_DIAG_MAGIC if valid. */
+    uint32_t violation_count;   /**< Total MPU faults across all warm boots. */
+    uint32_t last_fault_addr;   /**< MMFAR snapshot from the most recent fault. */
+    uint32_t last_fault_mmfsr;  /**< MMFSR cause bits from the most recent
+                                     fault (byte 0 of CFSR). */
+    uint32_t expect_fault;      /**< Test scaffold: 1 = fault armed, 2 = fault
+                                     observed via MemManage, 3 = via HardFault. */
+    uint32_t last_fault_cfsr;   /**< Full CFSR (MMFSR/BFSR/UFSR) snapshot. */
+    uint32_t last_fault_hfsr;   /**< HFSR snapshot; bit 30 (FORCED) means the
+                                     fault was escalated from a lower handler. */
+    uint32_t last_fault_ipsr;   /**< Exception number active when the fault
+                                     was handled (4 = MemManage, 3 = HardFault). */
+    /** Bitmask: which W^X-survival sub-tests have already passed across
      * the current test-suite run. Bit 0 = SEG3 write, bit 1 = SEG1
      * write, bit 2 = SEG2 exec. Lets the SEG1/SEG2 tests sequence
      * across multiple chip resets — once a sub-test verifies, it
@@ -129,26 +152,34 @@ struct tiku_mpu_diag {
      * next-in-sequence sub-test. Cleared explicitly by the test
      * scaffold when the user wants to re-run from scratch. */
     uint32_t test_done_mask;
-    /* HFNMI-distinguish test scaffold:
-     *   hfnmi_phase     0 = idle / fresh; 1 = armed (waiting for fault);
-     *                    2 = "post-reset, verify" sentinel.
-     *   handler_misbehave  When 1, the HardFault handler does a
-     *                      deliberate write to a flash address BEFORE
-     *                      issuing AIRCR. Under HFNMIENA=0 the write is
-     *                      a silent no-op (XIP read-only); under
-     *                      HFNMIENA=1 it MPU-faults inside HardFault →
-     *                      Cortex-M Lockup → watchdog rescues. The
-     *                      test reads WD_REASON on the verify boot to
-     *                      tell the two modes apart. */
+    /** HFNMI-distinguish test phase counter.
+     *  0 = idle / fresh; 1 = armed (waiting for fault);
+     *  2 = "bogus write attempted"; 3 = "write completed, AIRCR pending". */
     uint32_t hfnmi_phase;
+    /** Test scaffold flag: when 1, the HardFault handler writes to a
+     *  flash address before issuing AIRCR to distinguish HFNMIENA=0
+     *  (silent no-op) from HFNMIENA=1 (lockup). Always 0 in production. */
     uint32_t handler_misbehave;
 };
 
+/** @brief Bit assignments for mpu_diag.test_done_mask.
+ *
+ *  Each bit records that a W^X sub-test has already been verified on a
+ *  previous boot, so the test runner can skip forward to the next
+ *  sub-test without re-inducing a fault.
+ */
 #define TIKU_MPU_TEST_DONE_SEG3   (1U << 0)
 #define TIKU_MPU_TEST_DONE_SEG1   (1U << 1)
 #define TIKU_MPU_TEST_DONE_SEG2   (1U << 2)
 #define TIKU_MPU_TEST_DONE_SG     (1U << 3)   /* stack-guard sub-test */
 
+/** @brief The single mpu_diag instance placed in the .mpu_diag NOLOAD section.
+ *
+ *  Sits outside the ARMv8-M MPU-protected .uninit range so the MemManage
+ *  and HardFault handlers can write to it unconditionally.  volatile because
+ *  handlers running at exception priority modify it without going through
+ *  normal call paths.
+ */
 __attribute__((section(".mpu_diag")))
 static volatile struct tiku_mpu_diag mpu_diag;
 
@@ -156,11 +187,13 @@ static volatile struct tiku_mpu_diag mpu_diag;
 /* Hardware MPU helpers                                                      */
 /*---------------------------------------------------------------------------*/
 
-/* Region assignment — one MPU region per protection class.  NOT
- * overlapping (ARMv8-M overlap behaviour is implementation-defined
- * on M33 and the spec strongly recommends against it). The SRAM
- * region post-.uninit splits into three pieces so a small RO+XN
- * "guard" sits at the bottom of the descending stack. */
+/** @brief ARMv8-M MPU region index assignments.
+ *
+ *  Regions are non-overlapping; ARMv8-M overlap behaviour is
+ *  implementation-defined on Cortex-M33 and the spec discourages it.
+ *  The SRAM range above .uninit is split into three pieces so a small
+ *  RO+XN "guard" can sit at the bottom of the descending stack.
+ */
 #define MPU_REGION_NVM         0U   /* SEG3 = .uninit (RO/RW + XN) */
 #define MPU_REGION_TEXT        1U   /* SEG1 = flash (.text + .rodata, RX) */
 #define MPU_REGION_SRAM_LO     2U   /* SEG2a = SRAM below uninit (RW + XN) */
@@ -176,20 +209,40 @@ static volatile struct tiku_mpu_diag mpu_diag;
                                        to __sram_end (RW + XN); this is
                                        the live stack region */
 
-/* Stack budget. The guard sits 32 bytes BELOW this offset from the top
- * of SRAM. Cortex-M33 in TikuOS configurations runs every process on
- * the main stack (no PSP); 8 KB is generous. Enlarge if a real workload
- * needs more headroom. */
+/** @brief Stack-guard sizing constants.
+ *
+ *  The guard is MPU_STACK_GUARD_BYTES wide and sits MPU_STACK_RESERVED_BYTES
+ *  below the top of SRAM.  TikuOS runs all processes on the single main
+ *  stack (no PSP); 8 KB headroom is generous for the current workloads.
+ *  Enlarge MPU_STACK_RESERVED_BYTES if a profiling run shows the guard is
+ *  being approached.
+ */
 #define MPU_STACK_RESERVED_BYTES   8192U
 #define MPU_STACK_GUARD_BYTES      32U
 
+/**
+ * @brief Issue a full DSB + ISB memory barrier pair.
+ *
+ *  Required after every MPU register write to guarantee the new
+ *  permissions are visible before the next instruction fetch or data
+ *  access.
+ */
 static inline void mpu_dsb_isb(void) {
     __asm__ volatile ("dsb 0xF" ::: "memory");
     __asm__ volatile ("isb 0xF" ::: "memory");
 }
 
-/* Compute the RBAR value for the .uninit region with the given AP bits.
- * Aligns the base down to the 32-byte MPU granule. */
+/**
+ * @brief Compute the RBAR value for the .uninit region.
+ *
+ *  Base is aligned down to the 32-byte ARMv8-M MPU granule.  SH is
+ *  forced to Non-shareable and XN is always set — .uninit is never
+ *  executable regardless of the AP setting.
+ *
+ * @param ap_bits  AP field bits (e.g. RP2350_MPU_RBAR_AP_RW_ANY or
+ *                 RP2350_MPU_RBAR_AP_RO_ANY).
+ * @return         Value ready to write to MPU_RBAR.
+ */
 static uint32_t mpu_rbar_uninit(uint32_t ap_bits) {
     uint32_t base = (uint32_t)&__uninit_start & ~0x1FU;
     return base
@@ -198,6 +251,15 @@ static uint32_t mpu_rbar_uninit(uint32_t ap_bits) {
          | RP2350_MPU_RBAR_XN;      /* never execute from NVM */
 }
 
+/**
+ * @brief Compute the RLAR value for the .uninit region.
+ *
+ *  Sets AttrIndx=0 (MAIR0[7:0] = Normal Non-cacheable) and enables the
+ *  region.  The LIMIT field is derived from __uninit_end with the low 5
+ *  bits cleared per the ARMv8-M ARM B11.2.10 encoding.
+ *
+ * @return Value ready to write to MPU_RLAR.
+ */
 static uint32_t mpu_rlar_uninit(void) {
     /* RLAR layout per ARMv8-M ARM B11.2.10:
      *   bits[31:5]  LIMIT       - high bits of the inclusive limit
@@ -219,9 +281,16 @@ static uint32_t mpu_rlar_uninit(void) {
          | RP2350_MPU_RLAR_EN;
 }
 
-/* Reprogram region 0 with the given AP bits. Caller is responsible
- * for any necessary IRQ masking — these reads/writes are not atomic
- * w.r.t. an interrupt that also touches the MPU. */
+/**
+ * @brief Reprogram MPU region 0 (.uninit / SEG3) with new AP bits.
+ *
+ *  Caller is responsible for any necessary IRQ masking — the sequence of
+ *  RNR / RBAR / RLAR writes is not atomic with respect to an interrupt
+ *  that also touches the MPU.
+ *
+ * @param ap_bits  AP field to apply (RP2350_MPU_RBAR_AP_RW_ANY or
+ *                 RP2350_MPU_RBAR_AP_RO_ANY).
+ */
 static void mpu_set_nvm_ap(uint32_t ap_bits) {
     _RP2350_REG(RP2350_MPU_RNR)  = MPU_REGION_NVM;
     _RP2350_REG(RP2350_MPU_RBAR) = mpu_rbar_uninit(ap_bits);
@@ -229,11 +298,19 @@ static void mpu_set_nvm_ap(uint32_t ap_bits) {
     mpu_dsb_isb();
 }
 
-/* Generic region programmer for the static SEG1/SEG2 regions. The
- * caller passes already-aligned base and inclusive end addresses; we
- * apply the standard AttrIndx=0 (Normal Non-cacheable) MAIR slot.
- * SH=Non-shareable is the right choice for the single-core view that
- * the kernel and its drivers operate against. */
+/**
+ * @brief Program one ARMv8-M MPU region with the given protection attributes.
+ *
+ *  Applies AttrIndx=0 (Normal Non-cacheable, as configured in MAIR0 byte 0)
+ *  and SH=Non-shareable.  The caller passes addresses that are already
+ *  aligned to the 32-byte MPU granule; low 5 bits are cleared defensively.
+ *
+ * @param region        Region index (0–7) to program.
+ * @param base          Inclusive base address of the region.
+ * @param end_inclusive Inclusive end address (last byte covered).
+ * @param ap_bits       AP field for the RBAR (read/write access policy).
+ * @param xn_bit        RP2350_MPU_RBAR_XN to block execution, or 0.
+ */
 static void mpu_program_region(uint32_t region, uint32_t base,
                                uint32_t end_inclusive,
                                uint32_t ap_bits, uint32_t xn_bit) {
@@ -251,10 +328,13 @@ static void mpu_program_region(uint32_t region, uint32_t base,
     mpu_dsb_isb();
 }
 
-/* Region 1: SEG1 = flash (.text + .rodata + .vectors). RX only.
- * Stores into flash via normal CPU writes are physically rejected by
- * XIP anyway, but having the MPU also reject them surfaces the bad
- * pointer immediately as a MemManage instead of a silent no-op. */
+/**
+ * @brief Program MPU region 1 — SEG1 (flash .text + .rodata + .vectors).
+ *
+ *  Flash is mapped read-execute only.  XIP hardware already rejects CPU
+ *  stores, but the MPU rejection surfaces a bad write pointer as a
+ *  MemManage fault immediately rather than a silent no-op.
+ */
 static void mpu_program_seg1_text(void) {
     uint32_t base = (uint32_t)&__flash_start;
     uint32_t end  = (uint32_t)&__flash_end - 1U;
@@ -262,17 +342,15 @@ static void mpu_program_seg1_text(void) {
                        RP2350_MPU_RBAR_AP_RO_ANY, 0U /* exec OK */);
 }
 
-/* Region 2: low half of SEG2 — SRAM from base up to (but not
- * including) .uninit. Covers .data, .bss, .mpu_diag, and any free
- * SRAM that a compiler-emitted constructor table might land in.
- * RW + XN.
+/**
+ * @brief Program MPU region 2 — SEG2a (SRAM from base up to .uninit).
  *
- * .mpu_diag sits inside this region by design — the MemManage
- * handler still gets RW access (region is RW), and code cannot
- * execute from .mpu_diag bytes (XN bit). The alternative of
- * leaving .mpu_diag uncovered would let it inherit PRIVDEFENA's
- * RW+EXEC default; not actively dangerous (no kernel path branches
- * there) but loses defence-in-depth. */
+ *  Covers .data, .bss, .mpu_diag, and any free SRAM below .uninit.
+ *  RW+XN: the MemManage handler can write mpu_diag fields here, but no
+ *  code can be executed from this range.  Keeping .mpu_diag inside an
+ *  explicit RW region (rather than relying on PRIVDEFENA's RW+EXEC
+ *  default) preserves defence-in-depth.
+ */
 static void mpu_program_seg2_sram_lo(void) {
     uint32_t base = (uint32_t)&__sram_start;
     uint32_t end  = (uint32_t)&__uninit_start - 1U;
@@ -281,24 +359,29 @@ static void mpu_program_seg2_sram_lo(void) {
                        RP2350_MPU_RBAR_XN);
 }
 
-/* Compute the stack guard's base address. The guard is 32 bytes wide
- * sitting MPU_STACK_RESERVED_BYTES below the top of SRAM. This address
- * is the boundary between the SRAM_MID region (RW+XN; covers anything
- * the kernel might place between .uninit and the live stack region)
- * and the SRAM_TOP region (RW+XN; the live stack). When the descending
- * stack pointer dips below MPU_STACK_RESERVED_BYTES of usage, the next
- * STR/PUSH lands inside the guard and the MPU faults. */
+/**
+ * @brief Compute the base address of the 32-byte stack-overflow guard.
+ *
+ *  The guard sits MPU_STACK_RESERVED_BYTES + MPU_STACK_GUARD_BYTES below
+ *  __sram_end.  It is the boundary between SRAM_MID (RW+XN, kernel data)
+ *  and SRAM_TOP (RW+XN, live stack).  A descending stack that exhausts its
+ *  MPU_STACK_RESERVED_BYTES budget faults on the next push into the guard.
+ *
+ * @return Base address of the guard region.
+ */
 static inline uint32_t mpu_stack_guard_base(void) {
     return (uint32_t)&__sram_end -
            MPU_STACK_RESERVED_BYTES -
            MPU_STACK_GUARD_BYTES;
 }
 
-/* Region 3 (SRAM mid): from end of .uninit up to the bottom of the
- * stack guard. RW + XN. This is where the kernel's static data
- * doesn't reach and where the heap WOULD live if TikuOS used a
- * heap (it doesn't -- static allocation only -- so this region is
- * usually unused at runtime). */
+/**
+ * @brief Program MPU region 3 — SEG2b (SRAM from .uninit end to guard base).
+ *
+ *  RW+XN.  In the current TikuOS configuration (static allocation only) this
+ *  range is unused at runtime, but the region is still programmed so the W^X
+ *  invariant holds for any future dynamic allocator.
+ */
 static void mpu_program_seg2_sram_mid(void) {
     uint32_t base = (uint32_t)&__uninit_end;
     uint32_t end  = mpu_stack_guard_base() - 1U;
@@ -307,11 +390,13 @@ static void mpu_program_seg2_sram_mid(void) {
                        RP2350_MPU_RBAR_XN);
 }
 
-/* Region 4 (stack guard): a 32-byte RO+XN slot at exactly
- * `mpu_stack_guard_base()`. The kernel's stack starts at __sram_end
- * and grows down; once it has consumed MPU_STACK_RESERVED_BYTES bytes
- * the next push lands here and faults. RO so writes fault, XN so a
- * write-then-jump can't smuggle code in either. */
+/**
+ * @brief Program MPU region 4 — the 32-byte stack-overflow guard (RO+XN).
+ *
+ *  A descending stack that walks past MPU_STACK_RESERVED_BYTES of usage
+ *  faults here via MemManage.  RO prevents silent stack-data corruption;
+ *  XN prevents a write-then-branch from smuggling shellcode.
+ */
 static void mpu_program_stack_guard(void) {
     uint32_t base = mpu_stack_guard_base();
     uint32_t end  = base + MPU_STACK_GUARD_BYTES - 1U;
@@ -320,10 +405,13 @@ static void mpu_program_stack_guard(void) {
                        RP2350_MPU_RBAR_XN);
 }
 
-/* Region 5 (SRAM top): the live stack region from just above the
- * guard up to __sram_end. RW + XN. Stack pushes succeed here; the
- * XN bit prevents stack-buffer-overflow shellcode from being
- * executed. */
+/**
+ * @brief Program MPU region 5 — SEG2c (live stack region, RW+XN).
+ *
+ *  Covers from just above the guard to __sram_end.  Stack pushes succeed
+ *  here; XN prevents a stack-buffer overflow from being turned into a
+ *  code-injection exploit.
+ */
 static void mpu_program_seg2_sram_top(void) {
     uint32_t base = mpu_stack_guard_base() + MPU_STACK_GUARD_BYTES;
     uint32_t end  = (uint32_t)&__sram_end - 1U;
@@ -336,7 +424,22 @@ static void mpu_program_seg2_sram_top(void) {
 /* HAL implementation                                                        */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Return the current software-bookkept SAM register value.
+ *
+ * @return 16-bit SAM word (SEG1/SEG2/SEG3 R/W/X bit fields).
+ */
 uint16_t tiku_mpu_arch_get_sam(void)   { return stub_mpusam; }
+
+/**
+ * @brief Write the SAM register and update hardware MPU protection.
+ *
+ *  Mirrors the MSP430 password-write sequence in the software register
+ *  file.  Only the SEG3 W bit (bit 9) is forwarded to the ARMv8-M MPU
+ *  hardware; SEG1 and SEG2 bits are bookkeeping only (see file header).
+ *
+ * @param sam  16-bit SAM value to apply.
+ */
 void     tiku_mpu_arch_set_sam(uint16_t sam) {
     stub_mpuctl0 = 0xA500U;             /* mirror MSP430 password write */
     stub_mpusam  = sam;
@@ -349,11 +452,32 @@ void     tiku_mpu_arch_set_sam(uint16_t sam) {
     mpu_set_nvm_ap(ap);
 }
 
+/**
+ * @brief Return the software-bookkept MPUCTL0 control register value.
+ *
+ * @return 16-bit MPUCTL0 mirror (password | enable | SEGIE bits).
+ */
 uint16_t tiku_mpu_arch_get_ctl(void)   { return stub_mpuctl0; }
 
+/**
+ * @brief Disable all interrupts (PRIMASK on Cortex-M33).
+ */
 void tiku_mpu_arch_disable_irq(void) { tiku_cpu_irq_disable(); }
+
+/**
+ * @brief Re-enable all interrupts (clear PRIMASK on Cortex-M33).
+ */
 void tiku_mpu_arch_enable_irq(void)  { tiku_cpu_irq_enable(); }
 
+/**
+ * @brief Initialize all six MPU regions and enable the ARMv8-M MPU.
+ *
+ *  Detects cold boot via the mpu_diag magic sentinel and zeroes the
+ *  diagnostic struct on first power-up.  Programs the six non-overlapping
+ *  W^X regions (NVM, text, SRAM-lo, SRAM-mid, stack guard, SRAM-top),
+ *  sets PRIVDEFENA so peripheral memory stays accessible, enables the
+ *  MemManage exception at priority 0, and issues a final DSB+ISB.
+ */
 void tiku_mpu_arch_init_segments(void) {
     /* Cold-boot detection: if the magic word is missing the .mpu_diag
      * region is whatever random bytes were in SRAM at power-up. Zero
@@ -509,30 +633,75 @@ void tiku_mpu_arch_init_segments(void) {
 /* arch file because mpu_diag is file-scope. */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Return the cumulative MPU violation count across all warm boots.
+ *
+ * @return Number of MemManage or HardFault events recorded in mpu_diag.
+ */
 uint32_t tiku_mpu_arch_violation_count(void) {
     return mpu_diag.violation_count;
 }
 
+/**
+ * @brief Return the MMFAR address captured during the most recent fault.
+ *
+ * @return Faulting address, or 0 if MMARVALID was not set.
+ */
 uint32_t tiku_mpu_arch_last_fault_addr(void) {
     return mpu_diag.last_fault_addr;
 }
 
+/**
+ * @brief Return the full CFSR (MMFSR/BFSR/UFSR) from the most recent fault.
+ *
+ * @return 32-bit CFSR snapshot.
+ */
 uint32_t tiku_mpu_arch_last_fault_cfsr(void) {
     return mpu_diag.last_fault_cfsr;
 }
 
+/**
+ * @brief Return the HFSR from the most recent fault.
+ *
+ *  Bit 30 (FORCED) set means the fault was escalated from a lower-priority
+ *  configurable handler.
+ *
+ * @return 32-bit HFSR snapshot.
+ */
 uint32_t tiku_mpu_arch_last_fault_hfsr(void) {
     return mpu_diag.last_fault_hfsr;
 }
 
+/**
+ * @brief Return the exception number active when the most recent fault fired.
+ *
+ *  3 = HardFault path, 4 = MemManage path (see ARMv8-M IPSR encoding).
+ *
+ * @return IPSR value captured inside the fault handler.
+ */
 uint32_t tiku_mpu_arch_last_fault_ipsr(void) {
     return mpu_diag.last_fault_ipsr;
 }
 
+/**
+ * @brief Return the current expect_fault sentinel value.
+ *
+ *  0 = no fault expected; 1 = test armed; 2 = MemManage observed;
+ *  3 = HardFault observed.
+ *
+ * @return Value of mpu_diag.expect_fault.
+ */
 uint32_t tiku_mpu_arch_test_expect_fault(void) {
     return mpu_diag.expect_fault;
 }
 
+/**
+ * @brief Arm the test scaffold to expect an imminent MPU fault.
+ *
+ *  Sets expect_fault to 1.  The MemManage handler transitions it to 2
+ *  (or HardFault handler to 3) so the post-reset boot can confirm that
+ *  enforcement fired on the intended access.
+ */
 void tiku_mpu_arch_test_arm_fault(void) {
     /* Arm the test scaffold: the upcoming MPU fault is expected;
      * the MemManage handler will set this flag back to a "fault
@@ -540,6 +709,13 @@ void tiku_mpu_arch_test_arm_fault(void) {
     mpu_diag.expect_fault = 1U;
 }
 
+/**
+ * @brief Clear the violation counter and reset all fault diagnostic fields.
+ *
+ *  Zeroes violation_count, last_fault_addr, last_fault_mmfsr, and
+ *  expect_fault.  Useful before a fresh test run to avoid carrying over
+ *  state from a previous boot cycle.
+ */
 void tiku_mpu_arch_test_clear_violation(void) {
     mpu_diag.violation_count  = 0U;
     mpu_diag.last_fault_addr  = 0U;
@@ -547,36 +723,85 @@ void tiku_mpu_arch_test_clear_violation(void) {
     mpu_diag.expect_fault     = 0U;
 }
 
+/**
+ * @brief Return the bitmask of W^X sub-tests that have already passed.
+ *
+ * @return test_done_mask (see TIKU_MPU_TEST_DONE_* bit definitions).
+ */
 uint32_t tiku_mpu_arch_test_done_mask(void) {
     return mpu_diag.test_done_mask;
 }
 
+/**
+ * @brief Mark one W^X sub-test as done in the persistent bitmask.
+ *
+ * @param bit  One of the TIKU_MPU_TEST_DONE_* bit constants.
+ */
 void tiku_mpu_arch_test_mark_done(uint32_t bit) {
     mpu_diag.test_done_mask |= bit;
 }
 
+/**
+ * @brief Clear the test_done_mask so all W^X sub-tests run again from scratch.
+ */
 void tiku_mpu_arch_test_clear_done_mask(void) {
     mpu_diag.test_done_mask = 0U;
 }
 
+/**
+ * @brief Return the HFNMI-distinguish test phase counter.
+ *
+ *  0 = idle; 1 = armed (handler_misbehave set); 2 = bogus write attempted;
+ *  3 = write completed without lockup (HFNMIENA=0 confirmed).
+ *
+ * @return Value of mpu_diag.hfnmi_phase.
+ */
 uint32_t tiku_mpu_arch_test_hfnmi_phase(void) {
     return mpu_diag.hfnmi_phase;
 }
 
+/**
+ * @brief Arm the HFNMI-distinguish test scaffold.
+ *
+ *  Sets hfnmi_phase=1 and handler_misbehave=1.  On the next HardFault the
+ *  handler will deliberately write to Region 1 (RO flash) to probe whether
+ *  HFNMIENA=0 or =1 is in effect.
+ */
 void tiku_mpu_arch_test_hfnmi_arm(void) {
     mpu_diag.hfnmi_phase       = 1U;
     mpu_diag.handler_misbehave = 1U;
 }
 
+/**
+ * @brief Clear the HFNMI-distinguish test scaffold state.
+ *
+ *  Resets hfnmi_phase and handler_misbehave to 0 so the handler returns to
+ *  normal operation.
+ */
 void tiku_mpu_arch_test_hfnmi_clear(void) {
     mpu_diag.hfnmi_phase       = 0U;
     mpu_diag.handler_misbehave = 0U;
 }
 
+/**
+ * @brief Restore the default W^X protection policy for all segments.
+ *
+ *  Equivalent to calling tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM).
+ */
 void tiku_mpu_arch_set_default_protection(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
+/**
+ * @brief Set the permission bits for one segment in the SAM register.
+ *
+ *  Updates the three-bit field for the given segment index inside the
+ *  16-bit SAM word and calls tiku_mpu_arch_set_sam() to propagate the
+ *  change to both the software mirror and (for SEG3) the hardware MPU.
+ *
+ * @param seg   Segment index (0 = SEG1, 1 = SEG2, 2 = SEG3).
+ * @param perm  Three-bit permission value (R=bit0, W=bit1, X=bit2).
+ */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     uint16_t shift = (uint16_t)seg * 4U;
     uint16_t mask  = (uint16_t)0x07U << shift;
@@ -587,6 +812,16 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     tiku_mpu_arch_set_sam(sam);
 }
 
+/**
+ * @brief Open an NVM write window by making the .uninit region writable.
+ *
+ *  Snapshots the current SAM word, ORs in the W bits for all three segments
+ *  (matching MSP430 driver semantics), and reprograms the hardware MPU to
+ *  RW for Region 0 (.uninit / SEG3).  The caller must pass the returned
+ *  value to tiku_mpu_arch_lock_nvm() to restore protection.
+ *
+ * @return Previous SAM value to pass back to tiku_mpu_arch_lock_nvm().
+ */
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
     /* Snapshot current SAM so caller can restore exactly via lock_nvm.
      * Then OR in the W bits across all three segments (matches MSP430
@@ -597,20 +832,47 @@ uint16_t tiku_mpu_arch_unlock_nvm(void) {
     return saved;
 }
 
+/**
+ * @brief Close the NVM write window and restore previous protection.
+ *
+ *  Restores the SAM word saved by tiku_mpu_arch_unlock_nvm() and
+ *  reprograms the hardware MPU for Region 0 to the AP implied by the
+ *  restored SEG3 W bit.
+ *
+ * @param saved_state  Value previously returned by tiku_mpu_arch_unlock_nvm().
+ */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
     /* Restore the SAM word the caller stashed, and program the
      * hardware NVM region to whatever AP that implies for SEG3. */
     tiku_mpu_arch_set_sam(saved_state);
 }
 
+/**
+ * @brief Return the software-bookkept MPUCTL1 violation flag register.
+ *
+ *  Bits mirror the MMFSR cause bits ORed in by the MemManage handler on
+ *  each fault.
+ *
+ * @return 16-bit violation flag word (MPUCTL1 mirror).
+ */
 uint16_t tiku_mpu_arch_get_violation_flags(void) {
     return stub_mpuctl1;
 }
 
+/**
+ * @brief Clear the software-bookkept violation flag register to zero.
+ */
 void tiku_mpu_arch_clear_violation_flags(void) {
     stub_mpuctl1 = 0U;
 }
 
+/**
+ * @brief Enable the MemManage exception so MPU faults do not escalate.
+ *
+ *  On Cortex-M33 this sets SCB_SHCSR.MEMFAULTENA.  Without this, an MPU
+ *  fault from Thread mode escalates to HardFault.  Also mirrors the
+ *  MSP430 MPU_SEGIE bit in stub_mpuctl0.
+ */
 void tiku_mpu_arch_enable_violation_nmi(void) {
     /* On Cortex-M the closest equivalent to the MSP430 "violation
      * NMI" is enabling the MemManage exception so MPU faults vector
@@ -621,26 +883,27 @@ void tiku_mpu_arch_enable_violation_nmi(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* MemManage handler — provides the strong definition that overrides         */
-/* the weak alias in tiku_crt_early.c.                                       */
-/*                                                                            */
-/* MPU-safety audit (re-run this every time the handler body changes).       */
-/* Every load/store below must land in a region whose AP/XN would NOT        */
-/* fault if HFNMIENA were ever enabled. Today:                                */
-/*                                                                            */
-/*   _RP2350_REG(SCB_*)     SCS at 0xE000E000+ -- PRIVDEFENA RW              */
-/*   mpu_diag.*             .mpu_diag in SRAM -- Region 2 RW + XN            */
-/*   stub_mpuctl1           .bss in SRAM      -- Region 2 RW + XN            */
-/*   mpu_diag.expect_fault  same .mpu_diag    -- Region 2 RW + XN            */
-/*   instruction fetch      .text in flash    -- Region 1 RX                  */
-/*                                                                            */
-/* If you add anything to this handler -- a UART log, a debug breadcrumb,    */
-/* a write to .uninit without the unlock bracket -- update the audit and    */
-/* verify the new access is still allowed by whichever region claims it.    */
-/* Otherwise enabling TIKU_MPU_HFNMI_ENFORCE will lock up the chip on        */
-/* every fault.                                                              */
+/* MemManage handler — fault handler section                                 */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief MemManage fault handler — strong override of the weak CRT alias.
+ *
+ *  Captures CFSR/HFSR/MMFAR and IPSR into mpu_diag (in .mpu_diag SRAM,
+ *  accessible even under HFNMIENA=1), bumps the persistent violation counter,
+ *  ORs MMFSR cause bits into the MSP430-style violation flag, and triggers a
+ *  system reset via AIRCR.
+ *
+ *  MPU-safety audit (re-run whenever the handler body changes).  Every
+ *  load/store must land in a region that would NOT fault if HFNMIENA=1:
+ *    _RP2350_REG(SCB_*)      SCS 0xE000E000+  -- PRIVDEFENA RW
+ *    mpu_diag.*              .mpu_diag SRAM   -- Region 2 RW + XN
+ *    stub_mpuctl1            .bss SRAM        -- Region 2 RW + XN
+ *    instruction fetch       .text flash      -- Region 1 RX
+ *  If you add a UART log, debug breadcrumb, or .uninit write without the
+ *  unlock bracket, update this audit and verify the new access is covered
+ *  before enabling TIKU_MPU_HFNMI_ENFORCE.
+ */
 void tiku_rp2350_mem_fault_handler(void) {
     uint32_t cfsr = _RP2350_REG(RP2350_SCB_CFSR);
     uint32_t mmfsr = cfsr & 0xFFU;
@@ -684,35 +947,29 @@ void tiku_rp2350_mem_fault_handler(void) {
     for (;;) { /* spin until reset asserts */ }
 }
 
-/* HardFault handler — strong override of the weak alias in
- * tiku_crt_early.c. Captures CFSR/HFSR/MMFAR into mpu_diag so a
- * debugger or the test fleet can see why HardFault was taken
- * instead of the more specific configurable handler. The test
- * scaffold uses expect_fault=3 (vs MemManage's expect_fault=2) to
- * tell the two paths apart on the post-reset boot.
+/**
+ * @brief HardFault handler — strong override of the weak CRT alias.
  *
- * MPU-safety audit (same checklist as MemManage handler above):
- *   _RP2350_REG(SCB_*)    SCS at 0xE000E000+ -- PRIVDEFENA RW
- *   mpu_diag.*            .mpu_diag in SRAM  -- Region 2 RW + XN
- *   instruction fetch     .text in flash    -- Region 1 RX
+ *  Captures CFSR/HFSR/MMFAR and IPSR into mpu_diag and triggers a system
+ *  reset via AIRCR.  The test scaffold uses expect_fault=3 (vs MemManage's
+ *  =2) to tell the two fault paths apart on the post-reset boot.
  *
- * If TIKU_MPU_HFNMI_ENFORCE is ever turned on, any new access in
- * this handler that doesn't fit one of the three categories will
- * lock up the chip on every fault. Update the audit when you
- * extend the handler.
+ *  MPU-safety audit (same checklist as MemManage handler):
+ *    _RP2350_REG(SCB_*)   SCS 0xE000E000+  -- PRIVDEFENA RW
+ *    mpu_diag.*           .mpu_diag SRAM   -- Region 2 RW + XN
+ *    instruction fetch    .text flash      -- Region 1 RX
+ *  If TIKU_MPU_HFNMI_ENFORCE is enabled, any new access that does not fit
+ *  one of the three categories above will lock up the chip on every fault.
+ *  Update this audit whenever the handler body is extended.
  *
- * EXCEPTION (test scaffold only, gated by mpu_diag.handler_misbehave):
- *   When the HFNMI-distinguish test arms the scaffold, the handler
- *   deliberately writes to a flash address inside Region 1 (RO) just
- *   before its AIRCR reset. This is the entire point of the test:
- *   under HFNMIENA=0 the MPU is disabled here so the write is a
- *   silent no-op (XIP rejects stores physically anyway) and the
- *   handler proceeds to AIRCR; under HFNMIENA=1 the MPU enforces and
- *   the write faults inside the HF handler -> Cortex-M Lockup ->
- *   watchdog rescues. WD_REASON on the next boot tells the test
- *   which path fired. Production builds never set
- *   handler_misbehave, so the audit's invariants still hold in
- *   normal operation. */
+ *  Exception (test scaffold only, gated by mpu_diag.handler_misbehave):
+ *  When the HFNMI-distinguish test is armed, the handler deliberately
+ *  writes to Region 1 (RO flash) before the AIRCR reset.  Under HFNMIENA=0
+ *  the write is a silent no-op (XIP rejects stores physically); under
+ *  HFNMIENA=1 the MPU enforces and the write faults inside the HF handler,
+ *  escalating to Cortex-M Lockup.  WD_REASON on the next boot tells the
+ *  test which path fired.  Production builds never set handler_misbehave.
+ */
 void tiku_rp2350_hard_fault_handler(void) {
     uint32_t cfsr  = _RP2350_REG(RP2350_SCB_CFSR);
     uint32_t hfsr  = _RP2350_REG(RP2350_SCB_HFSR);

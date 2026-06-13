@@ -32,19 +32,33 @@
 #include "kernel/timers/tiku_htimer.h"
 #include "apollo510.h"       /* CMSIS register map (STIMER, MCUCTRL) -- register header only */
 
+/**
+ * @defgroup HTIMER_REGS STIMER and NVIC register accessors
+ * @brief Direct register addresses used by the bare-metal STIMER driver.
+ * @{
+ */
 #define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
 #define AMBIQ_IRQ_STIMER_CMPR0  32
 
-/* STIMER STCFG (apollo510.h): CLKSEL=3 selects XTAL_32KHZ; COMPAREAEN=bit 8. */
+/** STIMER STCFG (apollo510.h): CLKSEL=3 selects XTAL_32KHZ; COMPAREAEN=bit 8 */
 #define STIMER_CLKSEL_XTAL_32KHZ  3u
 #define STIMER_COMPAREAEN         (1u << 8)
 #define STIMER_INT_COMPAREA       (1u << 0)   /* STMINT{EN,STAT,CLR}.COMPAREA */
+/** @} */
 
-/* Counter snapshot at the last COMPARE write, to space the next write. */
+/** @brief Counter snapshot at the last COMPARE write, to space the next write */
 static uint32_t s_last_cmpr;
 
-/* Triple-read the async 32 kHz counter and vote (am_hal_stimer_counter_get):
- * if the first two reads agree neither was caught mid-ripple. */
+/**
+ * @brief Triple-read the async 32 kHz STIMER counter and vote
+ *
+ * Mirrors am_hal_stimer_counter_get: if the first two reads agree,
+ * neither was caught mid-ripple across the clock-domain boundary.
+ * Otherwise the third read (taken after the ripple has settled) is
+ * returned.
+ *
+ * @return Current 32-bit STIMER counter value
+ */
 static uint32_t stimer_counter(void) {
     uint32_t v0 = STIMER->STTMR;
     uint32_t v1 = STIMER->STTMR;
@@ -52,9 +66,14 @@ static uint32_t stimer_counter(void) {
     return (v0 == v1) ? v0 : v2;
 }
 
-/* Power up the 32.768 kHz crystal in XTAL mode — the functional core of
- * am_hal_mcuctrl_control(EXTCLK32K_ENABLE): power up the oscillator core +
- * comparator, use (not bypass) the comparator, software-override enable. */
+/**
+ * @brief Power up the 32.768 kHz crystal oscillator via MCUCTRL
+ *
+ * Implements the functional core of
+ * am_hal_mcuctrl_control(EXTCLK32K_ENABLE): powers up the oscillator
+ * core and comparator, routes through (not bypasses) the comparator,
+ * and asserts the software-override enable bit.
+ */
 static void stimer_xtal_enable(void) {
     MCUCTRL->XTALCTRL_b.XTALPDNB       = 1u;  /* power up XTAL core       */
     MCUCTRL->XTALCTRL_b.XTALCOMPPDNB   = 1u;  /* power up the comparator  */
@@ -63,6 +82,17 @@ static void stimer_xtal_enable(void) {
     MCUCTRL->XTALCTRL_b.XTALSWE        = 1u;  /* software override enable */
 }
 
+/**
+ * @brief Initialize the STIMER and enable the NVIC compare-0 interrupt
+ *
+ * Powers up the 32.768 kHz crystal, free-runs the STIMER from it with
+ * compare-A enabled, clears any stale COMPAREA flag, and enables IRQ 32
+ * in the NVIC. The STMINTEN interrupt source is left masked here; it is
+ * armed per-schedule in tiku_htimer_arch_schedule() so a stale SCMPR0
+ * match cannot fire before the first real compare. The crystal has a
+ * slow (ms to ~1 s) start-up; the kernel SysTick runs off the core
+ * clock and is therefore unaffected while the STIMER settles.
+ */
 void tiku_htimer_arch_init(void) {
     stimer_xtal_enable();
 
@@ -78,6 +108,21 @@ void tiku_htimer_arch_init(void) {
     NVIC_ISER[AMBIQ_IRQ_STIMER_CMPR0 >> 5] = (1u << (AMBIQ_IRQ_STIMER_CMPR0 & 31u));
 }
 
+/**
+ * @brief Schedule an STIMER compare-A interrupt at the given clock tick
+ *
+ * Converts the absolute 16-bit target tick @p t into the DELTA value the
+ * STIMER hardware requires (it adds the current counter internally, NOT
+ * an absolute). Adjusts for the 2-cycle COMPARE write latency, the 1-
+ * cycle interrupt delay, and elapsed time since the snapshot. Floors the
+ * delta to 1 to avoid a zero-delta schedule. Guards against back-to-back
+ * COMPARE writes by spin-waiting until the counter moves past the
+ * previous write (bounded to prevent hang on a not-yet-stable crystal).
+ * Runs inside a PRIMASK critical section to exclude the COMPAREA ISR
+ * from firing mid-update.
+ *
+ * @param t  Target 16-bit STIMER tick (absolute, wrapping)
+ */
 void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
     uint32_t snap0 = stimer_counter();
     uint32_t delta = (uint32_t)(uint16_t)((uint16_t)t - (uint16_t)snap0);
@@ -117,11 +162,25 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
     }
 }
 
+/**
+ * @brief Return the current 16-bit STIMER tick
+ *
+ * Reads the 32-bit STIMER counter via the triple-read vote and
+ * returns the low 16 bits, matching the kernel htimer's clock_t width.
+ *
+ * @return Current 16-bit STIMER counter value
+ */
 tiku_htimer_clock_t tiku_htimer_arch_now(void) {
     return (tiku_htimer_clock_t)(stimer_counter() & 0xFFFFu);
 }
 
-/* STIMER compare-0 ISR (vector slot 16+32 in tiku_crt_early.c). */
+/**
+ * @brief STIMER compare-0 ISR (vector slot 16+32 in tiku_crt_early.c)
+ *
+ * Clears the COMPAREA pending flag and calls tiku_htimer_run_next() to
+ * fire the next pending one-shot callback registered with the kernel
+ * htimer layer.
+ */
 void tiku_ambiq_stimer_cmpr0_isr(void) {
     STIMER->STMINTCLR = STIMER_INT_COMPAREA;
     tiku_htimer_run_next();

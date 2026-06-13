@@ -27,8 +27,15 @@
 
 #include <stdint.h>
 
-/** Hardware timer ticks per second — MEASURED STIMER rate (the XTAL_32KHZ tap
- *  counts at crystal/2 = 16384 Hz on this board; see the note above). */
+/**
+ * @brief Hardware timer tick rate in ticks per second.
+ *
+ * Set to the MEASURED STIMER rate: the XTAL_32KHZ tap (STCFG.CLKSEL=3)
+ * counts at crystal/2 = 16384 Hz on this board, confirmed by the htimer
+ * shell self-test. Using 16384 rather than the nominal 32768 keeps
+ * htimer intervals time-accurate (~61 us/tick). See the file header for
+ * the full rationale.
+ */
 #define TIKU_HTIMER_ARCH_SECOND  16384UL
 
 #endif /* TIKU_AMBIQ_HTIMER_CONFIG_H_ */

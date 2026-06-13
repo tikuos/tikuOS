@@ -29,89 +29,132 @@
 /* DEVICE IDENTIFICATION                                                     */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Human-readable device name string exposed via /sys/device. */
 #define TIKU_DEVICE_NAME            "Apollo510"
 
 /*---------------------------------------------------------------------------*/
 /* GPIO PORT AVAILABILITY                                                    */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Apollo510 has 100+ pads. We expose the low four virtual "ports" of 8
- * pins each (pads 0..31) through the /dev/gpio/{1..4}/{0..7} VFS view, to
- * match the MSP430/RP2350 layout. Board LEDs (pads 89/92/165) sit above
- * this range and are driven by raw pad number (see the board header).
+/**
+ * @brief Virtual GPIO port availability flags.
+ *
+ * Apollo510 has 100+ pads. Four virtual ports of 8 pins each (pads 0..31)
+ * are exposed through the /dev/gpio/{1..4}/{0..7} VFS view to match the
+ * MSP430/RP2350 layout. Board LEDs (pads 89/92/165) sit above this range
+ * and are driven by raw pad number via the board header macros.
  */
-#define TIKU_DEVICE_HAS_PORT1       1
-#define TIKU_DEVICE_HAS_PORT2       1
-#define TIKU_DEVICE_HAS_PORT3       1
-#define TIKU_DEVICE_HAS_PORT4       1
-#define TIKU_DEVICE_HAS_PORT5       0
-#define TIKU_DEVICE_HAS_PORT6       0
-#define TIKU_DEVICE_HAS_PORT7       0
-#define TIKU_DEVICE_HAS_PORT8       0
-#define TIKU_DEVICE_HAS_PORT9       0
-#define TIKU_DEVICE_HAS_PORTJ       0
+#define TIKU_DEVICE_HAS_PORT1       1  /**< Virtual port 1 (pads 0..7). */
+#define TIKU_DEVICE_HAS_PORT2       1  /**< Virtual port 2 (pads 8..15). */
+#define TIKU_DEVICE_HAS_PORT3       1  /**< Virtual port 3 (pads 16..23). */
+#define TIKU_DEVICE_HAS_PORT4       1  /**< Virtual port 4 (pads 24..31). */
+#define TIKU_DEVICE_HAS_PORT5       0  /**< Not exposed in VFS view. */
+#define TIKU_DEVICE_HAS_PORT6       0  /**< Not exposed in VFS view. */
+#define TIKU_DEVICE_HAS_PORT7       0  /**< Not exposed in VFS view. */
+#define TIKU_DEVICE_HAS_PORT8       0  /**< Not exposed in VFS view. */
+#define TIKU_DEVICE_HAS_PORT9       0  /**< Not exposed in VFS view. */
+#define TIKU_DEVICE_HAS_PORTJ       0  /**< Not exposed in VFS view. */
 
 /*---------------------------------------------------------------------------*/
 /* CRYSTAL OSCILLATOR                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* The EVB carries a 32.768 kHz crystal (LFXT). The high-frequency clock is
- * the internal HFRC — there is no external HF crystal. */
-#define TIKU_DEVICE_HAS_LFXT        1
-#define TIKU_DEVICE_HAS_HFXT        0
-#define TIKU_DEVICE_XOSC_HZ         32768UL
+/**
+ * @brief Oscillator configuration for the Apollo510 EVB.
+ *
+ * The EVB carries a 32.768 kHz crystal (LFXT) used as the low-frequency
+ * reference for STIMER and the RTC. The high-frequency clock is the
+ * internal HFRC; there is no external HF crystal.
+ */
+#define TIKU_DEVICE_HAS_LFXT        1        /**< 32.768 kHz LFXT present. */
+#define TIKU_DEVICE_HAS_HFXT        0        /**< No external HF crystal. */
+#define TIKU_DEVICE_XOSC_HZ         32768UL  /**< LFXT frequency in Hz. */
 
 /*---------------------------------------------------------------------------*/
 /* CLOCK SYSTEM TYPE                                                         */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_DEVICE_CS_HAS_KEY        0
-#define TIKU_DEVICE_CS_TYPE_APOLLO510 1
+/**
+ * @brief Clock system type selectors.
+ *
+ * Used by the portable clock HAL to dispatch to the correct arch
+ * implementation at compile time. Apollo510 uses its own clock tree
+ * (HFRC/HFRC2/LFRC/XTAL) — there is no MSP430-style CS key.
+ */
+#define TIKU_DEVICE_CS_HAS_KEY        0  /**< No CS unlock key required. */
+#define TIKU_DEVICE_CS_TYPE_APOLLO510 1  /**< Select Apollo510 clock driver. */
 
 /*---------------------------------------------------------------------------*/
 /* CLOCK CAPABILITIES                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* HFRC2 can boost to ~250 MHz; HFRC free-runs ~96 MHz (the default). */
+/**
+ * @brief Maximum stable core frequency in MHz.
+ *
+ * HFRC2 can boost to ~250 MHz; HFRC free-runs at ~96 MHz (the default
+ * after SBL hand-off). Override TIKU_MAIN_CPU_FREQ at build time to run
+ * at a lower frequency for power savings.
+ */
 #define TIKU_DEVICE_MAX_STABLE_MHZ  250
 
 /*---------------------------------------------------------------------------*/
 /* MEMORY SIZES                                                              */
 /*---------------------------------------------------------------------------*/
 
-/* DTCM is the primary RAM pool (.data/.bss/heap/stack). */
-#define TIKU_DEVICE_RAM_SIZE        (512UL * 1024UL)
-#define TIKU_DEVICE_RAM_START       0x20000000UL
-
-/*
- * "FRAM" names map to internal MRAM (flash). The usable region starts at
- * 0x00410000 (the low 64 KB of MRAM is reserved for the SBL). Persistent
- * storage uses an MRAM page via the NVM HAL (see tiku_mem_arch.c).
+/**
+ * @brief Primary RAM (DTCM) base address and size.
+ *
+ * DTCM is the primary RAM pool holding .data, .bss, the heap, and the
+ * main stack. It is the lowest-latency SRAM bank on the Cortex-M55.
  */
-#define TIKU_DEVICE_FRAM_SIZE       (4128768UL)      /* ~3.94 MB usable    */
-#define TIKU_DEVICE_FRAM_START      0x00410000UL
-#define TIKU_DEVICE_FRAM_END        0x007FFFFFUL
+#define TIKU_DEVICE_RAM_SIZE        (512UL * 1024UL) /**< 512 KB DTCM. */
+#define TIKU_DEVICE_RAM_START       0x20000000UL     /**< DTCM base address. */
 
-/* Init-table backing region (RAM-resident at this milestone). Sized as on
- * RP2350: 4-byte header + 8 entries; rounded up for headroom. */
-#define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U
+/**
+ * @brief Non-volatile memory (MRAM) map.
+ *
+ * The "FRAM" naming follows the portable TikuOS convention. On Apollo510
+ * the NVM is internal MRAM (flash). The usable region starts at 0x00410000
+ * because the low 64 KB of MRAM is reserved for the Secure Bootloader (SBL).
+ * Persistent storage uses an MRAM page via the NVM HAL (tiku_mem_arch.c).
+ */
+#define TIKU_DEVICE_FRAM_SIZE       (4128768UL)   /**< ~3.94 MB usable MRAM. */
+#define TIKU_DEVICE_FRAM_START      0x00410000UL  /**< First usable MRAM addr. */
+#define TIKU_DEVICE_FRAM_END        0x007FFFFFUL  /**< Last MRAM address. */
 
-#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U
-#define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4
+/**
+ * @brief Init-table and app-slot sizing constants.
+ *
+ * Init-table backing region is RAM-resident at this milestone. Sized as
+ * on RP2350 (4-byte header + 8 entries) with headroom rounding.
+ * App slots are 4 KB pages reserved in MRAM for dynamic module storage.
+ */
+#define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U   /**< Init-table region (bytes). */
+#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U  /**< One app slot size (bytes). */
+#define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4      /**< Number of app slots. */
 
 /*---------------------------------------------------------------------------*/
 /* MPU                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/* Cortex-M55 has the ARMv8-M MPU. (Full driver lands in Milestone 2/3; the
- * initial tiku_mpu_arch.c is a pass-through shim.) */
+/**
+ * @brief ARMv8-M MPU availability flag.
+ *
+ * The Cortex-M55 includes the ARMv8-M MPU. The full W^X driver lands in
+ * Milestone 2/3; the initial tiku_mpu_arch.c is a pass-through shim.
+ */
 #define TIKU_DEVICE_HAS_MPU         1
 
 /*---------------------------------------------------------------------------*/
 /* PERIPHERAL DEFAULTS                                                       */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Default UART baud rate.
+ *
+ * Applied when the board header does not override TIKU_BOARD_UART_BAUD.
+ * 115200 bps is the standard rate for SWO and wire-UART on Apollo510.
+ */
 #ifndef TIKU_BOARD_UART_BAUD
 #define TIKU_BOARD_UART_BAUD        115200U
 #endif

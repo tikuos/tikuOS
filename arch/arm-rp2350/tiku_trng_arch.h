@@ -26,6 +26,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/**
+ * @brief Return codes for the TRNG driver.
+ *
+ * TIKU_TRNG_OK            — success.
+ * TIKU_TRNG_ERR_INVALID   — NULL pointer or zero-length buffer.
+ * TIKU_TRNG_ERR_TIMEOUT   — hardware did not assert VALID within the
+ *                           spin budget (~thousands of cycles); the
+ *                           output buffer is not modified.
+ * TIKU_TRNG_ERR_NOT_READY — tiku_trng_arch_init() was not called.
+ */
 #define TIKU_TRNG_OK            0
 #define TIKU_TRNG_ERR_INVALID  -1
 #define TIKU_TRNG_ERR_TIMEOUT  -2

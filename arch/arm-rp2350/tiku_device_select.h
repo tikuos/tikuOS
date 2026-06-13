@@ -25,6 +25,13 @@
 /* DEVICE                                                                    */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Route the silicon-level device header.
+ *
+ * The Makefile must define TIKU_DEVICE_RP2350. Any other RP2350
+ * silicon variant would add an @c #elif here and a matching device
+ * header under devices/.
+ */
 #if defined(TIKU_DEVICE_RP2350)
 #include <arch/arm-rp2350/devices/tiku_device_rp2350.h>
 #else
@@ -35,6 +42,14 @@
 /* BOARD                                                                     */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Route the board-level pin-assignment header.
+ *
+ * TIKU_BOARD_RPI_PICO2_W selects the Pico 2 W (with CYW43439 footprint);
+ * TIKU_BOARD_RPI_PICO2 selects the plain Pico 2 (direct GP25 LED, no
+ * wireless). When neither is defined the Pico 2 W is used as the default
+ * primary supported board.
+ */
 #if defined(TIKU_BOARD_RPI_PICO2_W)
 #include <arch/arm-rp2350/boards/tiku_board_rpi_pico2_w.h>
 #elif defined(TIKU_BOARD_RPI_PICO2)

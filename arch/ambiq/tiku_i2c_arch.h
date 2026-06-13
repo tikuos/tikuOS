@@ -18,10 +18,64 @@
 
 #include <interfaces/bus/tiku_i2c_bus.h>
 
+/**
+ * @brief Initialize the I2C peripheral with the given configuration.
+ *
+ * Stub — returns a not-supported error code. A real am_hal_iom
+ * (I/O Master) backend will replace this in the peripheral pass.
+ *
+ * @param config  Pointer to the I2C configuration structure.
+ * @return 0 on success, negative error code on failure.
+ */
 int  tiku_i2c_arch_init(const tiku_i2c_config_t *config);
+
+/**
+ * @brief Release the I2C peripheral and power it down.
+ *
+ * Stub — no-op at this milestone.
+ */
 void tiku_i2c_arch_close(void);
+
+/**
+ * @brief Perform a blocking I2C write transaction.
+ *
+ * Stub — returns a not-supported error code.
+ *
+ * @param addr  7-bit I2C target address (unshifted).
+ * @param buf   Data buffer to transmit.
+ * @param len   Number of bytes to write.
+ * @return 0 on success, negative error code on failure.
+ */
 int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
-int  tiku_i2c_arch_read (uint8_t addr, uint8_t *buf, uint16_t len);
+
+/**
+ * @brief Perform a blocking I2C read transaction.
+ *
+ * Stub — returns a not-supported error code.
+ *
+ * @param addr  7-bit I2C target address (unshifted).
+ * @param buf   Destination buffer for received bytes.
+ * @param len   Number of bytes to read.
+ * @return 0 on success, negative error code on failure.
+ */
+int  tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
+
+/**
+ * @brief Perform a combined I2C write-then-read transaction.
+ *
+ * Issues a write followed immediately by a repeated-START and read
+ * to the same device address. Commonly used for register reads on
+ * I2C sensors and EEPROMs.
+ *
+ * Stub — returns a not-supported error code.
+ *
+ * @param addr    7-bit I2C target address (unshifted).
+ * @param tx_buf  Data buffer to transmit in the write phase.
+ * @param tx_len  Number of bytes to write.
+ * @param rx_buf  Destination buffer for the read phase.
+ * @param rx_len  Number of bytes to read.
+ * @return 0 on success, negative error code on failure.
+ */
 int  tiku_i2c_arch_write_read(uint8_t addr,
                               const uint8_t *tx_buf, uint16_t tx_len,
                               uint8_t *rx_buf,       uint16_t rx_len);

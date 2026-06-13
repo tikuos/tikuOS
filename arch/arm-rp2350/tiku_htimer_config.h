@@ -21,7 +21,13 @@
 
 #include <stdint.h>
 
-/** Hardware timer ticks per second. */
+/**
+ * @brief Hardware timer tick rate: number of ticks per second.
+ *
+ * TIMER0 is driven at 1 MHz by the TICKS divider block (CLK_SYS /
+ * 150 at the default 150 MHz). Each htimer deadline is expressed in
+ * ticks; divide by TIKU_HTIMER_ARCH_SECOND to convert to seconds.
+ */
 #define TIKU_HTIMER_ARCH_SECOND  1000000UL
 
 #endif /* TIKU_RP2350_HTIMER_CONFIG_H_ */

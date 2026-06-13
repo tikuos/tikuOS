@@ -27,19 +27,28 @@
 
 extern unsigned long tiku_cpu_rp2350_clock_get_hz(void);
 
+/** @brief Default TOP register value; sets 16-bit duty resolution. */
 #define PWM_TOP_DEFAULT   0xFFFFU   /* 16-bit duty resolution */
 
+/** @brief Tracks whether the PWM block has been taken out of reset. */
 static uint8_t g_pwm_reset_done;
 
 /*---------------------------------------------------------------------------*/
 /* Helpers                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/* Compute the 16.8 fixed-point divider for the requested wrap frequency.
+/**
+ * @brief Compute the 16.8 fixed-point divider for the requested wrap frequency.
+ *
+ * Derives DIV from:
  *   wrap_hz = clk_sys / (DIV * (TOP + 1))
  *   DIV     = clk_sys / (wrap_hz * (TOP + 1))
- * Returned divider is shifted into the SLICE_DIV register layout
- * (integer in bits [19:8] -- wait, actually let me re-check). */
+ * Returned divider is formatted for the SLICE_DIV register layout.
+ *
+ * @param freq_hz  Target PWM wrap frequency in Hz.
+ * @return 12.4 fixed-point divider value (multiply of 16), or 0 if
+ *         freq_hz is 0 or the requested frequency is out of range.
+ */
 static uint32_t pwm_compute_div(uint32_t freq_hz) {
     /* SLICE_DIV layout (datasheet §12.7.4.1): bits [11:4] integer
      * part, bits [3:0] fractional part — so 12.4 fixed-point in a
@@ -69,6 +78,12 @@ static uint32_t pwm_compute_div(uint32_t freq_hz) {
     return (uint32_t)div_x16;
 }
 
+/**
+ * @brief Take the PWM block out of reset exactly once per boot.
+ *
+ * Subsequent calls are no-ops; the guard is checked before issuing
+ * the unreset to avoid redundant register writes.
+ */
 static void pwm_block_reset_once(void) {
     if (g_pwm_reset_done) {
         return;
@@ -77,6 +92,14 @@ static void pwm_block_reset_once(void) {
     g_pwm_reset_done = 1U;
 }
 
+/**
+ * @brief Route a GPIO pin to its associated PWM slice output.
+ *
+ * Configures the pad for 4 mA drive with input enable, then sets the
+ * IO_BANK0 function select to PWM.
+ *
+ * @param gpio  GPIO pin number to mux to PWM.
+ */
 static void pwm_pin_route_to_slice(uint8_t gpio) {
     _RP2350_REG(RP2350_PADS_BANK0_GPIO(gpio)) =
         RP2350_PADS_DRIVE_4MA | RP2350_PADS_IE;
@@ -87,6 +110,21 @@ static void pwm_pin_route_to_slice(uint8_t gpio) {
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise a PWM output on the given GPIO pin.
+ *
+ * Takes the PWM block out of reset if needed, computes the clock
+ * divider for freq_hz, programs TOP/DIV/CC, resets the counter, and
+ * enables the slice.  Calling init again on the same pin reconfigures
+ * the channel without disturbing the other channel in the slice.
+ *
+ * @param gpio_pin  GPIO pin to configure as a PWM output (0-based).
+ * @param freq_hz   Desired PWM wrap frequency in Hz; must be non-zero.
+ * @param duty_u16  Initial duty cycle as a 16-bit fraction of TOP
+ *                  (0 = 0 %, 0xFFFF = ~100 %).
+ * @return TIKU_PWM_OK on success, TIKU_PWM_ERR_INVALID if freq_hz is
+ *         zero, or TIKU_PWM_ERR_FREQ if the frequency is out of range.
+ */
 int tiku_pwm_arch_init(uint8_t  gpio_pin,
                        uint32_t freq_hz,
                        uint16_t duty_u16) {
@@ -137,6 +175,18 @@ int tiku_pwm_arch_init(uint8_t  gpio_pin,
     return TIKU_PWM_OK;
 }
 
+/**
+ * @brief Update the duty cycle of a running PWM channel.
+ *
+ * Performs a read-modify-write on the shared CC register so the other
+ * channel in the same slice is not disturbed.  The change takes effect
+ * at the next counter wrap.
+ *
+ * @param gpio_pin  GPIO pin identifying the PWM channel to update.
+ * @param duty_u16  New duty cycle as a 16-bit fraction of TOP
+ *                  (0 = 0 %, 0xFFFF = ~100 %).
+ * @return TIKU_PWM_OK always.
+ */
 int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16) {
     uint8_t  slice   = rp2350_pwm_pin_to_slice(gpio_pin);
     uint8_t  channel = rp2350_pwm_pin_to_channel(gpio_pin);
@@ -151,6 +201,16 @@ int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16) {
     return TIKU_PWM_OK;
 }
 
+/**
+ * @brief Stop PWM output on a pin and return it to SIO control.
+ *
+ * Sets the channel's compare value to 0 (level low).  Disables the
+ * slice only when both channels are zero, so the sibling channel is
+ * not disrupted.  Re-muxes the GPIO to SIO so the pin goes low.
+ *
+ * @param gpio_pin  GPIO pin identifying the PWM channel to close.
+ * @return TIKU_PWM_OK always.
+ */
 int tiku_pwm_arch_close(uint8_t gpio_pin) {
     uint8_t  slice   = rp2350_pwm_pin_to_slice(gpio_pin);
     uint8_t  channel = rp2350_pwm_pin_to_channel(gpio_pin);
@@ -178,6 +238,15 @@ int tiku_pwm_arch_close(uint8_t gpio_pin) {
     return TIKU_PWM_OK;
 }
 
+/**
+ * @brief Read the current compare value for a PWM channel.
+ *
+ * Extracts the correct 16-bit half of the shared CC register based on
+ * whether the pin maps to channel A (bits 15:0) or B (bits 31:16).
+ *
+ * @param gpio_pin  GPIO pin identifying the PWM channel to query.
+ * @return Current duty-cycle compare value (0 – 0xFFFF).
+ */
 uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin) {
     uint8_t  slice   = rp2350_pwm_pin_to_slice(gpio_pin);
     uint8_t  channel = rp2350_pwm_pin_to_channel(gpio_pin);
@@ -188,11 +257,23 @@ uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin) {
     return (uint16_t)((cc >> 16) & 0xFFFFU);
 }
 
+/**
+ * @brief Read the TOP (wrap) register for the slice owning a pin.
+ *
+ * @param gpio_pin  GPIO pin identifying the PWM slice to query.
+ * @return Current TOP value (typically PWM_TOP_DEFAULT = 0xFFFF).
+ */
 uint16_t tiku_pwm_arch_get_top(uint8_t gpio_pin) {
     uint8_t slice = rp2350_pwm_pin_to_slice(gpio_pin);
     return (uint16_t)(_RP2350_REG(RP2350_PWM_SLICE_TOP(slice)) & 0xFFFFU);
 }
 
+/**
+ * @brief Report whether the PWM slice for a pin is currently running.
+ *
+ * @param gpio_pin  GPIO pin identifying the PWM slice to check.
+ * @return 1 if the slice CSR EN bit is set, 0 otherwise.
+ */
 int tiku_pwm_arch_is_enabled(uint8_t gpio_pin) {
     uint8_t slice = rp2350_pwm_pin_to_slice(gpio_pin);
     return (_RP2350_REG(RP2350_PWM_SLICE_CSR(slice)) & RP2350_PWM_CSR_EN)

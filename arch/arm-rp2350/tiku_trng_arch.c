@@ -35,28 +35,51 @@
 #include "tiku_trng_arch.h"
 #include "tiku_rp2350_regs.h"
 
-/*
- * Number of ROSC clocks per sample. Higher = better whitening,
- * slower. pico-sdk uses ~0x4E20 (20 000) which gives the EHR fill
- * in ~120 ms; we drop to a more responsive value because TikuOS
- * callers tend to want one word now, not 192 bits a moment from now.
- * Tunable if AUTOCORR_STATISTIC trips for downstream users.
+/**
+ * @defgroup trng_config TRNG private configuration
+ * @brief Tuning constants for the RP2350 TRNG driver.
+ *
+ * TRNG_SAMPLE_COUNT controls ROSC clocks per sample: higher values
+ * improve whitening at the cost of latency.  pico-sdk uses ~0x4E20
+ * (120 ms EHR fill); TikuOS uses 100 for responsiveness.  Raise if
+ * AUTOCORR_STATISTIC trips downstream.
+ *
+ * TRNG_FILL_SPIN_LIMIT is the maximum spin cycles waiting for VALID
+ * after arming the random source.  ~10 ms headroom at 150 MHz is well
+ * above the worst-case EHR fill at SAMPLE_COUNT=100.
+ *
+ * TRNG_CACHE_WORDS is the number of 32-bit EHR data registers (0..5).
+ * @{
  */
-#define TRNG_SAMPLE_COUNT       0x0064U   /* 100 ROSC cycles/sample */
+#define TRNG_SAMPLE_COUNT       0x0064U   /**< ROSC cycles per sample */
+#define TRNG_FILL_SPIN_LIMIT    1500000UL /**< Spin budget for EHR fill */
+#define TRNG_CACHE_WORDS        6U        /**< EHR_DATA[0..5] word count */
+/** @} */
 
-/*
- * Maximum spin cycles waiting for VALID after enabling the random
- * source. ~10 ms of headroom at 150 MHz — well over the worst-case
- * EHR fill at SAMPLE_COUNT=100.
- */
-#define TRNG_FILL_SPIN_LIMIT    1500000UL
-
-#define TRNG_CACHE_WORDS        6U  /* size of EHR_DATA[0..5] */
-
+/** @brief Cached EHR words, drained from hardware on each refill. */
 static uint32_t trng_cache[TRNG_CACHE_WORDS];
-static uint8_t  trng_cache_used = TRNG_CACHE_WORDS; /* "empty" sentinel */
+/** @brief Next unread index into trng_cache; TRNG_CACHE_WORDS = empty. */
+static uint8_t  trng_cache_used = TRNG_CACHE_WORDS;
+/** @brief Non-zero once tiku_trng_arch_init() has succeeded. */
 static uint8_t  trng_initialised;
 
+/**
+ * @brief Refill the EHR cache from the TRNG hardware.
+ *
+ * Stops the random source, clears pending IRQ status, programs
+ * SAMPLE_CNT1, and re-arms the source.  Spins on EHR_VALID up to
+ * TRNG_FILL_SPIN_LIMIT cycles, then drains all six EHR_DATA registers
+ * into trng_cache and disables the source.
+ *
+ * As a defence-in-depth sanity check the function rejects an all-zero
+ * or all-ones 192-bit fill and returns TIKU_TRNG_ERR_NOT_READY, leaving
+ * trng_cache_used at TRNG_CACHE_WORDS so the next call retries from
+ * scratch.
+ *
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_TIMEOUT if EHR_VALID
+ *         never asserted within the spin budget, TIKU_TRNG_ERR_NOT_READY
+ *         if the fill was all-zero or all-ones.
+ */
 static int
 trng_refill(void)
 {
@@ -122,6 +145,14 @@ trng_refill(void)
     return TIKU_TRNG_OK;
 }
 
+/**
+ * @brief Initialize the RP2350 TRNG peripheral.
+ *
+ * Brings the TRNG out of reset and marks the cache empty.  The EHR
+ * is not prefilled here: boot-time entropy budget is tight and a
+ * refill takes milliseconds.  The first tiku_trng_arch_read_u32()
+ * caller pays the cost.  Idempotent: subsequent calls return early.
+ */
 void
 tiku_trng_arch_init(void)
 {
@@ -139,6 +170,17 @@ tiku_trng_arch_init(void)
     trng_initialised  = 1;
 }
 
+/**
+ * @brief Read one 32-bit random word from the TRNG.
+ *
+ * Returns the next word from the EHR cache, triggering a hardware
+ * refill (trng_refill()) when the cache is exhausted.  Calls
+ * tiku_trng_arch_init() lazily if not already initialized.
+ *
+ * @param out  Destination for the random word (must be non-NULL).
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if out is
+ *         NULL, or a trng_refill() error code on hardware failure.
+ */
 int
 tiku_trng_arch_read_u32(uint32_t *out)
 {
@@ -161,6 +203,19 @@ tiku_trng_arch_read_u32(uint32_t *out)
     return TIKU_TRNG_OK;
 }
 
+/**
+ * @brief Fill a byte buffer with random data from the TRNG.
+ *
+ * Consumes the EHR cache word-by-word, extracting bytes in
+ * little-endian order.  A partial final word is used up to the
+ * requested length and then discarded.  Calls tiku_trng_arch_init()
+ * lazily if not already initialized.
+ *
+ * @param buf  Destination buffer (must be non-NULL).
+ * @param len  Number of random bytes to produce.
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if buf is
+ *         NULL, or a tiku_trng_arch_read_u32() error code on failure.
+ */
 int
 tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
 {

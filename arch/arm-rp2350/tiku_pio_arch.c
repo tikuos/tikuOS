@@ -72,6 +72,12 @@
  * PIO_IRQ flag 0; with PIO0_IRQ0_INTE.SM0_IRQ enabled, NVIC IRQ 15
  * (PIO0_IRQ_0) fires -> tiku_rp2350_pio0_irq0_handler runs.
  */
+/**
+ * @brief Six-instruction PIO bitbang program loaded into PIO0 at slot 0.
+ *
+ * Encodes: set pindirs/pull/out pins/jmp x--/irq nowait/jmp self.
+ * See the encoding commentary above for full opcode derivations.
+ */
 static const uint16_t bitbang_program[] = {
     0xE081U,   /* 0: set pindirs, 1 -- pin to output mode */
     0x80A0U,   /* 1: pull block     -- wait for TXF word -> OSR */
@@ -80,6 +86,9 @@ static const uint16_t bitbang_program[] = {
     0xC000U,   /* 4: irq nowait 0   -- signal CPU */
     0x0005U,   /* 5: jmp 5          -- halt SM here */
 };
+/** @brief Program length, load offset, and owning SM index for the bitbang
+ *         program. BITBANG_PROG_BASE is the first PIO instruction-memory slot
+ *         used; BITBANG_SM is the state machine that executes the program. */
 #define BITBANG_PROG_LEN \
     (sizeof(bitbang_program) / sizeof(bitbang_program[0]))
 
@@ -90,16 +99,26 @@ static const uint16_t bitbang_program[] = {
 /* PIO instruction builders (for runtime-exec via SM_INSTR)                  */
 /*---------------------------------------------------------------------------*/
 
-/* "set x, value" -- opcode=111 dst=001 (x) imm=value */
+/**
+ * @brief Build a "set x, value" PIO instruction (opcode=111 dst=001 imm=value).
+ *
+ * @param value  5-bit immediate to load into the X scratch register (0-31).
+ * @return       Encoded 16-bit PIO instruction word.
+ */
 static inline uint16_t pio_instr_set_x(uint8_t value) {
     /* 111 00000 001 vvvvv */
     return (uint16_t)(0xE020U | (uint16_t)(value & 0x1FU));
 }
 
-/* "out x, 32" -- shift 32 bits from OSR into X. Used when bit_count
- * needs more than 5 bits (set takes a 5-bit immediate; X needs 32).
- * Not used here because we cap bit_count at 32 anyway, but kept for
- * future longer-burst support. */
+/**
+ * @brief Build an "out x, 32" PIO instruction (shift 32 bits from OSR into X).
+ *
+ * Not used in the current driver (bit_count is capped at 32 and handled via
+ * set x), but retained for future longer-burst support where a 5-bit immediate
+ * is insufficient.
+ *
+ * @return  Encoded 16-bit PIO instruction word.
+ */
 static inline uint16_t pio_instr_out_x_32(void) {
     /* 011 00000 011 (dst=x) 00000 (count=32) */
     return 0x6020U;
@@ -109,6 +128,7 @@ static inline uint16_t pio_instr_out_x_32(void) {
 /* State                                                                     */
 /*---------------------------------------------------------------------------*/
 
+/** @brief PIO driver state. */
 static uint8_t g_pio_initialised;
 static volatile uint8_t g_pio_busy;
 static tiku_pio_done_cb_t g_pio_done_cb;
@@ -120,11 +140,17 @@ static uint8_t            g_pio_idle_level;  /* not used yet; future */
 /* Helpers                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Read/write a PIO0 MMIO register at byte offset @p off. */
 #define PIO0(off)   _RP2350_REG(RP2350_PIO0_BASE + (off))
 
-/* Disable + restart SM. The SM IS now at the jmp-to-self instruction
- * after a completed transmission; we explicitly clear it before
- * setting up the next tx. */
+/**
+ * @brief Disable and restart a PIO state machine, clearing its internal state.
+ *
+ * After a completed transmission the SM sits at the jmp-to-self halt; this
+ * resets it to the wrap-target so it is ready for the next transmission.
+ *
+ * @param sm  State machine index (0-3).
+ */
 static void pio_sm_disable_restart(uint8_t sm) {
     /* Clear SM_ENABLE in CTRL. */
     PIO0(RP2350_PIO_CTRL) &= ~RP2350_PIO_CTRL_SM_ENABLE(sm);
@@ -134,34 +160,54 @@ static void pio_sm_disable_restart(uint8_t sm) {
                           |  RP2350_PIO_CTRL_CLKDIV_RESTART(sm);
 }
 
+/**
+ * @brief Enable a PIO state machine so it begins executing instructions.
+ *
+ * @param sm  State machine index (0-3).
+ */
 static void pio_sm_enable(uint8_t sm) {
     PIO0(RP2350_PIO_CTRL) |= RP2350_PIO_CTRL_SM_ENABLE(sm);
 }
 
-/* Drain TX FIFO by writing the SHIFTCTRL.FJOIN bit twice (a TikuOS-
- * style trick the pico-sdk does: toggling FJOIN_TX clears the FIFO).
- * Alternative is to disable the SM and re-init shift state. */
+/**
+ * @brief Drain the TX FIFO of a PIO state machine.
+ *
+ * Achieves the drain by toggling SHIFTCTRL.FJOIN_RX twice — the same
+ * technique used by the pico-sdk. The alternative of disabling and
+ * re-initialising shift state is heavier and not needed here.
+ *
+ * @param sm  State machine index (0-3).
+ */
 static void pio_sm_drain_tx_fifo(uint8_t sm) {
     uint32_t sc = PIO0(RP2350_PIO_SM_SHIFTCTRL(sm));
     PIO0(RP2350_PIO_SM_SHIFTCTRL(sm)) = sc ^ RP2350_PIO_SHIFTCTRL_FJOIN_RX;
     PIO0(RP2350_PIO_SM_SHIFTCTRL(sm)) = sc;
 }
 
-/* Force the SM to execute one instruction immediately (out-of-band
- * w.r.t. the program counter). Used to preload X with bit_count-1
- * before enabling the SM. */
+/**
+ * @brief Force a PIO state machine to execute one instruction immediately.
+ *
+ * The instruction runs out-of-band with respect to the program counter.
+ * Used to preload the X scratch register with bit_count-1 before the SM
+ * is enabled.
+ *
+ * @param sm     State machine index (0-3).
+ * @param instr  Encoded 16-bit PIO instruction to execute.
+ */
 static void pio_sm_exec(uint8_t sm, uint16_t instr) {
     PIO0(RP2350_PIO_SM_INSTR(sm)) = instr;
 }
 
-/* Set SM clkdiv from a microseconds-per-bit value.
+/**
+ * @brief Convert a microseconds-per-bit period to the SM_CLKDIV register value.
  *
- *   bit_period_us  =  divider * (1 / clk_sys)  ; per OUT pins, 1 instr
- *   divider        =  bit_period_us * clk_sys_hz / 1e6
+ * Derivation: divider = bit_period_us * clk_sys_hz / 1e6.
+ * SM_CLKDIV is 16.8 fixed point ([31:16] integer, [15:8] fractional).
+ * Example: clk_sys = 150 MHz, bit_period_us = 200 ->
+ *   divider = 30000 -> 0x7530_0000.
  *
- * SM_CLKDIV is 16.8 fixed point: [31:16] integer, [15:8] fractional.
- * For clk_sys = 150 MHz and bit_period_us = 200 (the test value),
- *   divider = 200 * 150e6 / 1e6 = 30000  -> 0x7530_0000.
+ * @param bit_period_us  Desired bit period in microseconds.
+ * @return               SM_CLKDIV register value in 16.8 fixed-point format.
  */
 static uint32_t bitperiod_us_to_clkdiv(uint16_t bit_period_us) {
     extern unsigned long tiku_cpu_rp2350_clock_get_hz(void);
@@ -178,6 +224,13 @@ static uint32_t bitperiod_us_to_clkdiv(uint16_t bit_period_us) {
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Initialise the PIO0 bitbang driver (idempotent).
+ *
+ * Brings PIO0 out of reset, loads the bitbang program into instruction
+ * memory slots 0-5, and enables NVIC IRQ 15 (PIO0_IRQ_0).  Safe to call
+ * multiple times; subsequent calls return immediately.
+ */
 void tiku_pio_arch_init(void) {
     uint8_t i;
 
@@ -205,6 +258,30 @@ void tiku_pio_arch_init(void) {
     g_pio_initialised = 1U;
 }
 
+/**
+ * @brief Start a non-blocking PIO bitbang transmission on a GPIO pin.
+ *
+ * Configures SM0 on PIO0 for the requested pin, bit-order, and bit period,
+ * then starts the SM.  The SM runs to completion autonomously; when the
+ * `irq nowait 0` instruction fires, the ISR clears the busy flag and
+ * invokes @p on_done (if non-NULL) from interrupt context.
+ *
+ * Only one transmission may be in progress at a time.  Poll completion
+ * with tiku_pio_arch_bitbang_busy() or cancel with
+ * tiku_pio_arch_bitbang_abort().
+ *
+ * @param gpio_pin      GPIO pin number to drive (0-based, RP2350 bank 0).
+ * @param data          Data word to shift out (up to 32 bits).
+ * @param bit_count     Number of bits to transmit (1-32).
+ * @param msb_first     Non-zero for MSB-first shift order; 0 for LSB-first.
+ * @param bit_period_us Desired bit period in microseconds (must be > 0).
+ * @param on_done       Completion callback invoked from ISR context, or NULL.
+ * @param ctx           Opaque pointer forwarded to @p on_done.
+ * @return              TIKU_PIO_OK on success; TIKU_PIO_ERR_NOT_READY if the
+ *                      driver is uninitialised; TIKU_PIO_ERR_BUSY if a
+ *                      transmission is already in progress;
+ *                      TIKU_PIO_ERR_INVALID for out-of-range parameters.
+ */
 int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
                              uint32_t data,
                              uint8_t  bit_count,
@@ -332,10 +409,24 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     return TIKU_PIO_OK;
 }
 
+/**
+ * @brief Query whether a PIO bitbang transmission is currently in progress.
+ *
+ * @return  Non-zero if a transmission is in progress; 0 if idle.
+ */
 int tiku_pio_arch_bitbang_busy(void) {
     return g_pio_busy != 0U;
 }
 
+/**
+ * @brief Abort an in-progress PIO bitbang transmission immediately.
+ *
+ * Disables the PIO IRQ source, stops and drains SM0, and clears the busy
+ * flag.  The registered completion callback is NOT invoked.
+ *
+ * @return  TIKU_PIO_OK on success; TIKU_PIO_ERR_NOT_READY if no
+ *          transmission was in progress.
+ */
 int tiku_pio_arch_bitbang_abort(void) {
     if (!g_pio_busy) {
         return TIKU_PIO_ERR_NOT_READY;
@@ -358,6 +449,14 @@ int tiku_pio_arch_bitbang_abort(void) {
     return TIKU_PIO_OK;
 }
 
+/**
+ * @brief ISR for NVIC IRQ 15 (PIO0_IRQ_0) — bitbang transmission complete.
+ *
+ * Clears the SM0 IRQ flag, disables the PIO IRQ source, stops SM0, clears
+ * the busy state, and invokes the registered completion callback (if any).
+ * The callback is called with the driver already marked idle, so a
+ * re-entrant tiku_pio_arch_bitbang_tx() from inside the callback is safe.
+ */
 void tiku_rp2350_pio0_irq0_handler(void) {
     /* Clear the SM0 IRQ flag (W1C). */
     PIO0(RP2350_PIO_IRQ) = 0x01U;

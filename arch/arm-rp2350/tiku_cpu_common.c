@@ -20,13 +20,27 @@
 /* Delays via TIMER0's 1 us tick                                             */
 /*---------------------------------------------------------------------------*/
 
-/* Read the lower 32 bits of TIMER0 atomically. The full 64-bit read
- * needs paired TIMELR/TIMEHR access; for delays the 32-bit lower
- * counter is more than enough — it wraps every ~71 minutes. */
+/**
+ * @brief Read the lower 32 bits of TIMER0's free-running 1 us counter.
+ *
+ * The full 64-bit read would need a paired TIMELR/TIMEHR latching
+ * sequence. For short spin-based delays the 32-bit lower word is
+ * sufficient — it wraps every ~71 minutes.
+ *
+ * @return Current TIMER0 lower word value (microseconds since last reset)
+ */
 static inline uint32_t rp2350_us_now(void) {
     return _RP2350_REG(RP2350_TIMER0_TIMERAWL);
 }
 
+/**
+ * @brief Busy-wait for at least @p us microseconds.
+ *
+ * Spins on TIMER0's 1 us free-running counter. Handles timer wrap
+ * via unsigned subtraction. Returns immediately for a zero argument.
+ *
+ * @param us  Delay duration in microseconds
+ */
 void tiku_cpu_rp2350_delay_us(unsigned int us) {
     if (us == 0U) {
         return;
@@ -37,6 +51,14 @@ void tiku_cpu_rp2350_delay_us(unsigned int us) {
     }
 }
 
+/**
+ * @brief Busy-wait for at least @p ms milliseconds.
+ *
+ * Delegates to tiku_cpu_rp2350_delay_us() in 1000 ms chunks to keep
+ * each call within the 32-bit microsecond counter's ~71-minute range.
+ *
+ * @param ms  Delay duration in milliseconds
+ */
 void tiku_cpu_rp2350_delay_ms(unsigned int ms) {
     /* Decompose to keep within the 32-bit microsecond window per
      * call (max ~71 minutes; 1000 * 65535 = ~65 s comfortably fits). */
@@ -64,6 +86,21 @@ extern char __sram_start;
 extern char __flash_start;
 extern char __vectors_start;
 
+/**
+ * @brief Fill @p buf with a stable 8-byte pseudo-unique device identifier.
+ *
+ * Reading the flash chip's true 8-byte UID requires disabling XIP and
+ * issuing a 0x4B QSPI command — not implemented in this port. Instead,
+ * a stable identifier is synthesised by XOR-mixing a build-time magic
+ * constant with low bits of three linker-symbol addresses. The result is
+ * deterministic across reboots of the same image but differs between
+ * builds, which is sufficient for most TikuOS use-cases. Programs
+ * requiring a true silicon ID should add a flash-readback driver later.
+ *
+ * @param buf  Output buffer; must be non-NULL and at least @p len bytes
+ * @param len  Number of ID bytes to write (clamped to 8)
+ * @return Number of bytes written (0 if buf is NULL or len is 0)
+ */
 uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len) {
     if (buf == NULL || len == 0U) {
         return 0U;
@@ -89,6 +126,15 @@ uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len) {
 /* Reset reason                                                              */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Return the reset reason as a 16-bit MSP430-compatible code.
+ *
+ * Reads WD_REASON: bit 0 = watchdog timeout, bit 1 = watchdog force.
+ * Only the low byte is used; 0 means cold boot. The value is compatible
+ * with the MSP430 SYSRSTIV encoding that the rest of the kernel uses.
+ *
+ * @return 16-bit reset reason code; 0 on cold boot
+ */
 uint16_t tiku_cpu_rp2350_reset_reason(void) {
     /* WD_REASON: bit 0 = TIMEOUT, bit 1 = FORCE. Higher bits report
      * other reset sources on a future revision. We map the low byte
@@ -101,13 +147,14 @@ uint16_t tiku_cpu_rp2350_reset_reason(void) {
 /* Reboot to USB BOOTSEL                                                     */
 /*---------------------------------------------------------------------------*/
 
-/*
+/**
+ * @brief Reboot the RP2350 into USB BOOTSEL (mass-storage) mode.
+ *
  * RP2350 has no portable watchdog-scratch BOOTSEL trick (the 0xB007C0D3
- * scratch[4] magic that ships in pico-sdk's watchdog_reboot() is for
- * "reboot to specific PC", NOT BOOTSEL).  The supported path is the
- * boot ROM's reboot() / reset_usb_boot() function looked up via the
- * ROM table at offset 0x16 (per pico-sdk
- * boot_bootrom_headers/include/boot/bootrom_constants.h).
+ * scratch[4] magic in pico-sdk's watchdog_reboot() redirects to an
+ * arbitrary PC, NOT BOOTSEL). The correct path is via the boot ROM's
+ * reset_usb_boot() / reboot() functions, looked up from the ROM table at
+ * fixed offset 0x16 (bootrom_constants.h: BOOTROM_TABLE_LOOKUP_OFFSET).
  *
  * Lookup signature on RP2350 ARM:
  *   void *rom_table_lookup(uint32_t code, uint32_t mask);
@@ -117,18 +164,18 @@ uint16_t tiku_cpu_rp2350_reset_reason(void) {
  *   'R'|('B'<<8) = 0x4252  -- reboot(flags, delay_ms, p0, p1)
  *
  * Lookup masks (RT_FLAG_FUNC_*):
- *   0x0004  ARM_SEC      (Cortex-M33 secure mode, what TikuOS runs)
- *   0x0010  ARM_NONSEC   (fallback in case the function lives only here)
+ *   0x0004  ARM_SEC    (Cortex-M33 secure mode, what TikuOS runs)
+ *   0x0010  ARM_NONSEC (fallback in case the function lives only here)
  *
- * reboot() flags:
+ * reboot() flags used:
  *   0x002  REBOOT2_FLAG_REBOOT_TYPE_BOOTSEL
  *   0x100  REBOOT2_FLAG_NO_RETURN_ON_SUCCESS
  *
- * Strategy: drain UART, disable IRQs, walk every (function, mask) pair
- * until one of the bootrom calls succeeds and reboots us into the
- * 2e8a:000f mass-storage boot mode.  If every lookup misses, fall
- * through to a plain watchdog reset (the device reboots back into
- * TikuOS and the host has to BOOTSEL manually).
+ * Strategy: drain the UART TX FIFO, disable all IRQs, disable the
+ * watchdog, disable the MPU, then walk every (function, mask) pair
+ * until a bootrom call succeeds. If every lookup misses, falls back
+ * to a plain watchdog reset so the chip restarts (back into TikuOS;
+ * the user must BOOTSEL manually).
  */
 void tiku_cpu_rp2350_reboot_to_bootsel(void) {
     typedef void *(*lookup_fn_t)(uint32_t code, uint32_t mask);

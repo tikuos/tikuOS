@@ -21,6 +21,13 @@
 /* DEVICE                                                                    */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Pull in silicon-level constants for the selected Ambiq device.
+ *
+ * The Makefile defines exactly one TIKU_DEVICE_* symbol. This block maps
+ * that symbol to the corresponding device header. Add a new @c elif branch
+ * here when porting to a new Ambiq silicon variant.
+ */
 #if defined(TIKU_DEVICE_APOLLO510)
 #include <arch/ambiq/devices/tiku_device_apollo510.h>
 #else
@@ -31,6 +38,13 @@
 /* BOARD                                                                     */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Pull in board-level GPIO pin assignments for the selected board.
+ *
+ * The Makefile may define TIKU_BOARD_APOLLO510_EVB. If no board is
+ * specified the Apollo510 EVB is assumed — it is the only supported
+ * board for this silicon at this milestone.
+ */
 #if defined(TIKU_BOARD_APOLLO510_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo510_evb.h>
 #else

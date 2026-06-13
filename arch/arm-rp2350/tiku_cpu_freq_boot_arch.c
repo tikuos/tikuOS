@@ -31,20 +31,40 @@
 /* Cached clock rates                                                        */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Cached CLK_SYS frequency in Hz; updated by init/retune. */
 static volatile unsigned long g_clk_sys_hz  = 0UL;
+/** @brief Cached CLK_PERI frequency in Hz; tracks CLK_SYS on RP2350. */
 static volatile unsigned long g_clk_peri_hz = 0UL;
+/** @brief Non-zero when the last clock init or retune hit a fault. */
 static volatile uint8_t       g_clock_fault = 0U;
 
 /*---------------------------------------------------------------------------*/
 /* Internal helpers                                                          */
 /*---------------------------------------------------------------------------*/
 
-/* Bounded spin: returns 1 on success, 0 if the loop body never matched
- * within ~1 M iterations (~10 ms at any reasonable boot clock). The
- * caller decides what to do on timeout — typically: silently fall back
- * and keep going so the rest of the system still tries to come up. */
+/**
+ * @defgroup rp2350_clock_helpers RP2350 internal clock bring-up helpers
+ * @brief Bounded spin and step functions used during PLL bring-up.
+ *
+ * None of these are part of the public HAL; they are called only from
+ * tiku_cpu_boot_rp2350_init() and tiku_cpu_freq_rp2350_init().
+ */
+
+/** @brief Maximum spin iterations before declaring a timeout (~10 ms). */
 #define RP2350_SPIN_TIMEOUT 1000000U
 
+/**
+ * @brief Spin until a register bit-mask is set, with a bounded iteration cap.
+ *
+ * Polls @p reg until (@p *reg & @p mask) is non-zero, or until
+ * RP2350_SPIN_TIMEOUT iterations have elapsed. The caller decides how to
+ * handle a timeout — typically by falling back to a safe clock source
+ * rather than spinning indefinitely.
+ *
+ * @param reg   Volatile register address to poll
+ * @param mask  Bit mask to test
+ * @return 1 when the mask matches, 0 on timeout
+ */
 static int rp2350_spin_until(volatile uint32_t *reg, uint32_t mask) {
     uint32_t i = RP2350_SPIN_TIMEOUT;
     while (i--) {
@@ -55,6 +75,13 @@ static int rp2350_spin_until(volatile uint32_t *reg, uint32_t mask) {
     return 0;
 }
 
+/**
+ * @brief Start the 12 MHz crystal oscillator and wait for it to stabilise.
+ *
+ * Configures XOSC for the 1–15 MHz range and waits for STATUS.STABLE.
+ *
+ * @return 1 when stable, 0 on timeout
+ */
 static int rp2350_xosc_init(void) {
     /* Set start-up delay (~1 ms at 12 MHz, multiplied by 256 internally). */
     _RP2350_REG(RP2350_XOSC_STARTUP) = 47U;
@@ -67,6 +94,15 @@ static int rp2350_xosc_init(void) {
                              RP2350_XOSC_STATUS_STABLE);
 }
 
+/**
+ * @brief Initialise PLL_SYS for 150 MHz (XOSC * 125 / 5 / 2).
+ *
+ * Takes PLL_SYS out of reset, programs REFDIV=1, FBDIV=125, then
+ * powers up the VCO and waits for PLL lock. On success, sets
+ * POSTDIV1=5 / POSTDIV2=2 to produce 1500 / 10 = 150 MHz.
+ *
+ * @return 1 when the PLL locks, 0 on timeout
+ */
 static int rp2350_pll_sys_init(void) {
     /* Take PLL_SYS out of reset. */
     rp2350_unreset(RP2350_RESETS_PLL_SYS);
@@ -98,6 +134,15 @@ static int rp2350_pll_sys_init(void) {
     return 1;
 }
 
+/**
+ * @brief Switch CLK_REF to XOSC and CLK_SYS to PLL_SYS via glitch-free mux.
+ *
+ * Performs the three-step CLK_SYS switch described in RP2350 datasheet
+ * §5.5.4: SRC=REF, set AUXSRC=PLL_SYS, then SRC=AUX. Also configures
+ * CLK_PERI to follow CLK_SYS and sets the CLK_SYS divider to 1.0.
+ *
+ * @return 1 on success, 0 if any poll times out
+ */
 static int rp2350_clock_switch(void) {
     /* CLK_REF -> XOSC (so the rest of the system has a known reference). */
     _RP2350_REG(RP2350_CLK_REF_CTRL) = RP2350_CLK_REF_SRC_XOSC;
@@ -137,10 +182,15 @@ static int rp2350_clock_switch(void) {
     return 1;
 }
 
-/* Fallback when the PLL bring-up fails: leave CLK_SYS sourced from
- * CLK_REF (which we already pointed at the 12 MHz XOSC) and reflect
- * the actual rate so baud-divisor calculation in the UART driver
- * matches. */
+/**
+ * @brief Fall back to 12 MHz XOSC when PLL bring-up fails.
+ *
+ * Parks CLK_SYS on CLK_REF (already pointing at XOSC) and routes
+ * CLK_PERI directly to XOSC so the UART baud-divisor calculation
+ * produces a correct result regardless of the CLK_SYS mux state.
+ * Called only when rp2350_pll_sys_init() or rp2350_clock_switch()
+ * returns 0.
+ */
 static void rp2350_clock_fallback_xosc(void) {
     /* CLK_SYS = CLK_REF (i.e. XOSC at 12 MHz). */
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
@@ -152,6 +202,13 @@ static void rp2350_clock_fallback_xosc(void) {
         RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
 }
 
+/**
+ * @brief Release all kernel-used peripherals from reset.
+ *
+ * Brings IO_BANK0, PADS_BANK0, UART0, TIMER0, TIMER1, and PLL_SYS
+ * out of reset in one call. SPI and I2C are released here too so that
+ * bus-probe register reads in the stub arch files do not bus-fault.
+ */
 static void rp2350_unreset_peripherals(void) {
     /* Bring up the peripherals the kernel uses. SPI/I2C are touched
      * by the stub arch files but not actually used; bring them out
@@ -164,6 +221,13 @@ static void rp2350_unreset_peripherals(void) {
                  | RP2350_RESETS_PLL_SYS);
 }
 
+/**
+ * @brief Configure TIMER0 and the watchdog tick generator for 1 us resolution.
+ *
+ * Programs the TICKS block with CYCLES = 12 (XOSC at 12 MHz = 1 us per
+ * 12 cycles), enabling both the TIMER0 tick and the watchdog tick. Also
+ * clears TIMER0_PAUSE so the counter starts running immediately.
+ */
 static void rp2350_setup_1us_tick(void) {
     /* TIMER0 needs a 1 MHz tick from the TICKS block (datasheet §10.6).
      * Pick CYCLES = CLK_REF_HZ / 1_000_000 so the same code works
@@ -189,6 +253,16 @@ static void rp2350_setup_1us_tick(void) {
 /* Public HAL entry points                                                   */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Perform RP2350 hardware bring-up: XOSC, PLL_SYS, clocks, peripherals.
+ *
+ * Called once from the reset handler before main(). Attempts to bring
+ * CLK_SYS to 150 MHz via XOSC -> PLL_SYS. If any step times out the
+ * system falls back to 12 MHz XOSC so the UART still comes up with a
+ * deterministic peripheral clock. Releases all kernel peripherals from
+ * reset and starts the 1 us TIMER0 tick. Updates the cached
+ * g_clk_sys_hz / g_clk_peri_hz so later callers see the actual rate.
+ */
 void tiku_cpu_boot_rp2350_init(void) {
     /* Order matters: XOSC up before PLL, PLL locked before CLK_SYS
      * switch, CLK_SYS running before peripherals see their clocks.
@@ -236,17 +310,28 @@ void tiku_cpu_boot_rp2350_init(void) {
 /* scope for this port -- the table refuses anything above 150 MHz.          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief PLL configuration parameters for one supported CLK_SYS frequency.
+ *
+ * Used by the rp2350_freq_table look-up. A @c fbdiv of 0 is a sentinel
+ * meaning "bypass PLL — use XOSC directly at 12 MHz".
+ */
 struct rp2350_pll_params {
-    unsigned int target_mhz;
-    uint16_t     fbdiv;     /* 0 = special: bypass PLL, use XOSC directly */
-    uint8_t      postdiv1;
-    uint8_t      postdiv2;
+    unsigned int target_mhz; /**< Target CLK_SYS frequency in MHz */
+    uint16_t     fbdiv;      /**< PLL feedback divider; 0 = XOSC bypass */
+    uint8_t      postdiv1;   /**< PLL post-divider 1 (1..7) */
+    uint8_t      postdiv2;   /**< PLL post-divider 2 (1..7) */
 };
 
-/* Six supported clk_sys frequencies; 150 MHz is the default. The 12 MHz
- * entry marks "bypass PLL" via fbdiv == 0 -- there's no useful PLL setting
- * that produces 12 MHz output and the chip is happiest sourcing clk_sys
- * directly from clk_ref/XOSC at low frequencies. */
+/**
+ * @brief Lookup table of supported CLK_SYS frequencies.
+ *
+ * Six entries covering 12, 48, 100, 125, 133, and 150 MHz. 150 MHz is
+ * the boot default. The 12 MHz entry (fbdiv == 0) bypasses the PLL and
+ * sources CLK_SYS directly from CLK_REF / XOSC; no PLL setting produces
+ * a useful 12 MHz output, and the chip is most efficient on XOSC at low
+ * frequencies. All other entries use PLL_SYS with REFDIV = 1.
+ */
 static const struct rp2350_pll_params rp2350_freq_table[] = {
     /* MHz    FBDIV  POSTDIV1  POSTDIV2  -- VCO = 12 * FBDIV */
     {  12,      0,    0,    0  },   /* bypass PLL, clk_sys = XOSC */
@@ -259,6 +344,12 @@ static const struct rp2350_pll_params rp2350_freq_table[] = {
 #define RP2350_FREQ_TABLE_LEN \
     (sizeof(rp2350_freq_table) / sizeof(rp2350_freq_table[0]))
 
+/**
+ * @brief Look up PLL parameters for a requested CLK_SYS frequency.
+ *
+ * @param target_mhz  Desired CLK_SYS in MHz (must match a table entry)
+ * @return Pointer to the matching rp2350_pll_params, or NULL if not found
+ */
 static const struct rp2350_pll_params *
 rp2350_lookup_freq(unsigned int target_mhz) {
     unsigned int i;
@@ -270,18 +361,32 @@ rp2350_lookup_freq(unsigned int target_mhz) {
     return NULL;
 }
 
-/* Park clk_sys on clk_ref (XOSC) so PLL_SYS can be safely reconfigured.
- * Sequence per datasheet §5.5.4: clear AUX selection (CLK_SYS_SRC=REF),
- * wait for SELECTED to confirm. */
+/**
+ * @brief Park CLK_SYS on CLK_REF so PLL_SYS can be safely reconfigured.
+ *
+ * Per RP2350 datasheet §5.5.4: set CLK_SYS_SRC = REF and wait for
+ * CLK_SYS_SELECTED to confirm. The CPU continues to run off XOSC
+ * (~12 MHz) while PLL_SYS is being reprogrammed.
+ */
 static void rp2350_park_clk_sys_on_ref(void) {
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
     (void)rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
                             0x1U);
 }
 
-/* Reprogram PLL_SYS for the new VCO + POSTDIV values. Caller must have
- * already parked clk_sys on clk_ref so the in-flight clk_sys consumers
- * (CPU, peripherals) ride on XOSC during the retune window. */
+/**
+ * @brief Reprogram PLL_SYS to a new FBDIV and POSTDIV configuration.
+ *
+ * Powers down the full PLL, programs the new dividers, powers up the VCO,
+ * waits for lock, then powers up the post-divider to produce the output
+ * frequency. The caller must park CLK_SYS on CLK_REF before calling this
+ * so that the CPU keeps running off XOSC during the retune window.
+ *
+ * @param fbdiv    PLL feedback divider (new target; REFDIV = 1)
+ * @param postdiv1 PLL post-divider 1 (1..7)
+ * @param postdiv2 PLL post-divider 2 (1..7)
+ * @return 1 when PLL locks, 0 on timeout
+ */
 static int rp2350_pll_sys_retune(uint16_t fbdiv,
                                  uint8_t postdiv1, uint8_t postdiv2) {
     /* Power down the whole PLL so we can reprogram safely. */
@@ -316,7 +421,14 @@ static int rp2350_pll_sys_retune(uint16_t fbdiv,
     return 1;
 }
 
-/* Switch clk_sys back to PLL_SYS via the glitch-free aux mux sequence. */
+/**
+ * @brief Switch CLK_SYS back to PLL_SYS via the glitch-free aux mux.
+ *
+ * Completes the three-step sequence: AUX source = PLL_SYS, then SRC = AUX,
+ * then poll CLK_SYS_SELECTED bit 1.
+ *
+ * @return 1 when the switch is confirmed, 0 on timeout
+ */
 static int rp2350_clk_sys_back_on_pll(void) {
     _RP2350_REG(RP2350_CLK_SYS_CTRL) =
         RP2350_CLK_SYS_SRC_REF | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
@@ -326,6 +438,22 @@ static int rp2350_clk_sys_back_on_pll(void) {
         (volatile uint32_t *)RP2350_CLK_SYS_SELECTED, 0x2U);
 }
 
+/**
+ * @brief Scale CLK_SYS to @p target_mhz at runtime.
+ *
+ * Looks up the requested frequency in rp2350_freq_table. If found,
+ * parks CLK_SYS on XOSC, reprograms PLL_SYS (or bypasses it for 12 MHz),
+ * then switches CLK_SYS back to PLL_SYS. Updates the cached clock rates
+ * and clears g_clock_fault on success. On any failure the system is left
+ * on XOSC at 12 MHz and g_clock_fault is set.
+ *
+ * Maximum supported frequency is 150 MHz (limited by the default 1.10 V
+ * core voltage). An unsupported target leaves the boot clock in place
+ * and sets g_clock_fault without retrying.
+ *
+ * @param target_mhz  Desired CLK_SYS frequency in MHz (12, 48, 100, 125,
+ *                    133, or 150)
+ */
 void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
     const struct rp2350_pll_params *p = rp2350_lookup_freq(target_mhz);
 
@@ -394,23 +522,63 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
     g_clock_fault = 0U;
 }
 
+/**
+ * @brief Enter low-power sleep via WFI (Wait For Interrupt).
+ *
+ * Issues a single Cortex-M33 WFI instruction. The CPU resumes
+ * on the next unmasked interrupt. Used by the TikuOS idle path.
+ */
 void tiku_cpu_boot_rp2350_power_wfi_enter(void) {
     __asm__ volatile ("wfi" ::: "memory");
 }
 
+/**
+ * @brief Return the current CLK_SYS frequency in Hz.
+ *
+ * Returns the cached value set by the most recent clock init or retune.
+ * 150 000 000 after a successful PLL bring-up; 12 000 000 on fallback.
+ *
+ * @return CLK_SYS frequency in Hz
+ */
 unsigned long tiku_cpu_rp2350_clock_get_hz(void) {
     return g_clk_sys_hz;
 }
 
+/**
+ * @brief Return the current CLK_PERI (peripheral clock) frequency in Hz.
+ *
+ * On RP2350 CLK_PERI tracks CLK_SYS; both caches are updated together.
+ * Maps to the MSP430 SMCLK abstraction used by the UART baud driver.
+ *
+ * @return CLK_PERI frequency in Hz
+ */
 unsigned long tiku_cpu_rp2350_smclk_get_hz(void) {
     return g_clk_peri_hz;
 }
 
+/**
+ * @brief Return the ACLK-equivalent frequency in Hz.
+ *
+ * RP2350 has no always-on low-frequency auxiliary clock analogous to
+ * MSP430 ACLK. Returns 0 to signal "not available" to callers that
+ * query it via the clock HAL.
+ *
+ * @return 0 (no ACLK on RP2350)
+ */
 unsigned long tiku_cpu_rp2350_aclk_get_hz(void) {
     /* No always-on low-frequency clock on RP2350. */
     return 0UL;
 }
 
+/**
+ * @brief Report whether the last clock init or retune encountered a fault.
+ *
+ * Set when an unsupported frequency was requested, or when any PLL or
+ * mux step timed out and the system fell back to XOSC. Cleared on
+ * a successful init or retune.
+ *
+ * @return 1 if a clock fault is recorded, 0 otherwise
+ */
 int tiku_cpu_rp2350_clock_has_fault(void) {
     return g_clock_fault ? 1 : 0;
 }
