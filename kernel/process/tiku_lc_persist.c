@@ -68,7 +68,11 @@
  *     (see arch/arm-rp2350/tiku_region_arch.c).
  * Without the attribute on RP2350, the variables fall back to .bss
  * and lc_persist register hands an unrecognised pointer to persist. */
-#if defined(PLATFORM_MSP430) || defined(PLATFORM_RP2350)
+#if defined(PLATFORM_MSP430) || defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+/* On Apollo510 the .persistent input maps into the NOLOAD .uninit section,
+ * which tiku_region_arch.c reports as an NVM region -- same effect as the
+ * RP2350 SRAM mirror. Without this the pool falls to .bss and persist rejects
+ * the pointer (see the failure note above). */
 #define LC_NVM_PERSISTENT __attribute__((section(".persistent")))
 #else
 #define LC_NVM_PERSISTENT
