@@ -645,6 +645,15 @@ CFLAGS += -DHAS_APPS=1
 endif
 ifeq ($(HAS_TESTS),1)
 CFLAGS += -DHAS_TESTS=1
+# Apollo510's arm-none-eabi-gcc 15 promotes -Wimplicit-function-declaration to a
+# hard error. The shared TikuBench test tree was authored against MSP430's older,
+# lenient gcc and has a few category dispatchers (e.g. tier) that call test fns
+# whose prototype header sits behind a different TEST_* gate. Downgrade it to a
+# warning for the Apollo510 TEST build only -- matches the MSP430/RP2350
+# toolchains, and every such fn is a void(void) so the call is safe.
+ifeq ($(TIKU_PLATFORM),ambiq)
+CFLAGS += -Wno-error=implicit-function-declaration
+endif
 endif
 ifeq ($(HAS_EXAMPLES),1)
 CFLAGS += -DHAS_EXAMPLES=1
