@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include "tiku.h"              /* TIKU_MAIN_CPU_HZ = 96 MHz SysTick clock */
 #include "tiku_cpu_common.h"
+#include "apollo510.h"         /* CMSIS register map (MCUCTRL CHIPID) -- register header only */
 
 /**
  * @defgroup SYST_REGS SysTick register accessors
@@ -97,24 +98,27 @@ void tiku_cpu_ambiq_delay_ms(unsigned int ms) {
 /**
  * @brief Read the device unique ID into a caller-provided buffer
  *
- * Fills buf with len zero bytes (stub). The real implementation reads
- * the device unique ID from the MCUCTRL/OTP registers; that path is
- * gated on the TODO below.
+ * Reads the per-die unique chip ID from MCUCTRL CHIPID0/CHIPID1 (8 bytes
+ * total) and packs the requested count, little-endian. Buffers shorter than
+ * 8 bytes get a prefix; requests longer than 8 cap at 8.
  *
  * @param buf  Destination buffer for the unique ID
  * @param len  Number of bytes to fill (must be > 0; buf must be non-NULL)
- * @return Number of bytes written, or 0 if buf is NULL or len is 0
+ * @return Number of bytes written (<= 8), or 0 if buf is NULL or len is 0
  */
 uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
-    /* TODO: read the device unique ID from MCUCTRL/OTP. */
-    uint8_t i;
+    uint32_t id[2];
+    uint8_t i, n;
     if (buf == 0 || len == 0) {
         return 0;
     }
-    for (i = 0; i < len; i++) {
-        buf[i] = 0u;
+    id[0] = MCUCTRL->CHIPID0;
+    id[1] = MCUCTRL->CHIPID1;
+    n = (len > 8u) ? 8u : len;
+    for (i = 0; i < n; i++) {
+        buf[i] = (uint8_t)(id[i >> 2] >> ((i & 3u) * 8u));
     }
-    return len;
+    return n;
 }
 
 /**
