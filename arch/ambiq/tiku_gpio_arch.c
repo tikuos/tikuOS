@@ -66,7 +66,10 @@ static inline void pad_config(uint32_t pad, uint32_t cfg) {
  * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1)
  */
 void tiku_ambiq_gpio_init_output(uint32_t pad) {
-    pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_OUTCFG_PUSHPULL);
+    /* INPEN alongside OUTCFG so the driven level is read-backable via RD
+     * (tiku_gpio_arch_read); Ambiq pads allow a simultaneous input buffer. */
+    pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_OUTCFG_PUSHPULL |
+                    TIKU_GPIO_INPEN);
 }
 
 /**
@@ -168,6 +171,10 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
+    /* Match the MSP430 contract: a write ensures the pad is an output (the
+     * shell `gpio` command / tiku_gpio_write rely on this rather than a
+     * separate dir_out). Idempotent if the pad is already an output. */
+    tiku_ambiq_gpio_init_output(pad);
     tiku_ambiq_gpio_set(pad, val);
     return 0;
 }
@@ -182,6 +189,7 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
+    tiku_ambiq_gpio_init_output(pad);   /* ensure output, like write */
     tiku_ambiq_gpio_toggle(pad);
     return 0;
 }
