@@ -36,12 +36,12 @@
 /**
  * @brief LED definitions for the Apollo510 EVB.
  *
- * One primary LED is mapped (LED0, pad 165). LED1 (pad 89) and LED2
- * (pad 92) are also present on the board and can be promoted to
- * TIKU_BOARD_LED2/LED3 in a later pass. All EVB LEDs are active-low,
- * so ON drives the pad low and OFF drives it high.
+ * All three EVB user LEDs are mapped: LED0 = pad 165, LED1 = pad 89,
+ * LED2 = pad 92 (the TIKU_BOARD_LED1/LED2/LED3 macros are 1-indexed and
+ * surface as /dev/led0, /dev/led1, /dev/led2). All EVB LEDs are
+ * active-low, so ON drives the pad low and OFF drives it high.
  */
-#define TIKU_BOARD_LED_COUNT        1
+#define TIKU_BOARD_LED_COUNT        3
 
 /** @brief GPIO pad number for LED 1 (active-low, pad 165). */
 #define TIKU_BOARD_LED1_PIN         165U
@@ -53,6 +53,20 @@
 #define TIKU_BOARD_LED1_OFF()       tiku_ambiq_gpio_set(TIKU_BOARD_LED1_PIN, 1)
 /** @brief Toggle LED 1 output state. */
 #define TIKU_BOARD_LED1_TOGGLE()    tiku_ambiq_gpio_toggle(TIKU_BOARD_LED1_PIN)
+
+/** @brief LED 2 (-> /dev/led1): active-low, pad 89. */
+#define TIKU_BOARD_LED2_PIN         89U
+#define TIKU_BOARD_LED2_INIT()      tiku_ambiq_gpio_init_output(TIKU_BOARD_LED2_PIN)
+#define TIKU_BOARD_LED2_ON()        tiku_ambiq_gpio_set(TIKU_BOARD_LED2_PIN, 0)
+#define TIKU_BOARD_LED2_OFF()       tiku_ambiq_gpio_set(TIKU_BOARD_LED2_PIN, 1)
+#define TIKU_BOARD_LED2_TOGGLE()    tiku_ambiq_gpio_toggle(TIKU_BOARD_LED2_PIN)
+
+/** @brief LED 3 (-> /dev/led2): active-low, pad 92. */
+#define TIKU_BOARD_LED3_PIN         92U
+#define TIKU_BOARD_LED3_INIT()      tiku_ambiq_gpio_init_output(TIKU_BOARD_LED3_PIN)
+#define TIKU_BOARD_LED3_ON()        tiku_ambiq_gpio_set(TIKU_BOARD_LED3_PIN, 0)
+#define TIKU_BOARD_LED3_OFF()       tiku_ambiq_gpio_set(TIKU_BOARD_LED3_PIN, 1)
+#define TIKU_BOARD_LED3_TOGGLE()    tiku_ambiq_gpio_toggle(TIKU_BOARD_LED3_PIN)
 
 /*---------------------------------------------------------------------------*/
 /* Console UART pins (TX=30, RX=55)                                          */
