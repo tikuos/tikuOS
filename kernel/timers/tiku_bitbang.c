@@ -44,7 +44,16 @@
 #include <interfaces/gpio/tiku_gpio.h>
 #include <stddef.h>
 
-#if defined(PLATFORM_MSP430)
+/*
+ * The htimer + GPIO software bit-bang backend is shared by any target without
+ * a dedicated PIO/hardware engine (MSP430 and Apollo510 today): it toggles the
+ * pin from an htimer ISR using only the generic tiku_gpio / tiku_htimer APIs.
+ */
+#if defined(PLATFORM_MSP430) || defined(PLATFORM_AMBIQ)
+#define TIKU_BITBANG_SOFT 1
+#endif
+
+#if defined(TIKU_BITBANG_SOFT)
 #include "tiku_htimer.h"
 #elif defined(PLATFORM_RP2350)
 #include <arch/arm-rp2350/tiku_pio_arch.h>
@@ -57,7 +66,7 @@
 static struct {
     tiku_bitbang_t   cfg;
     volatile uint8_t busy;
-#if defined(PLATFORM_MSP430)
+#if defined(TIKU_BITBANG_SOFT)
     tiku_htimer_clock_t next_edge;
     uint16_t            bit_idx;
 #endif
@@ -65,15 +74,15 @@ static struct {
 
 static uint16_t bb_tx_count;
 
-#if defined(PLATFORM_MSP430)
+#if defined(TIKU_BITBANG_SOFT)
 static struct tiku_htimer bb_htimer;
 #endif
 
 /*===========================================================================*/
-/* MSP430 BACKEND -- htimer ISR per bit                                       */
+/* SOFTWARE BACKEND -- htimer ISR per bit (MSP430, Apollo510)                  */
 /*===========================================================================*/
 
-#if defined(PLATFORM_MSP430)
+#if defined(TIKU_BITBANG_SOFT)
 
 static inline uint8_t bb_get_bit(uint16_t bit_idx) {
     uint8_t byte = bb.cfg.data[bit_idx >> 3];
@@ -109,7 +118,7 @@ static void bb_isr(struct tiku_htimer *t, void *ptr) {
     }
 }
 
-static int bb_msp430_tx(const tiku_bitbang_t *cfg) {
+static int bb_soft_tx(const tiku_bitbang_t *cfg) {
     int rc;
     tiku_htimer_clock_t now;
 
@@ -132,13 +141,13 @@ static int bb_msp430_tx(const tiku_bitbang_t *cfg) {
     return TIKU_BITBANG_OK;
 }
 
-static int bb_msp430_abort(void) {
+static int bb_soft_abort(void) {
     tiku_htimer_cancel();
     tiku_gpio_write(bb.cfg.port, bb.cfg.pin, bb.cfg.idle_level);
     return TIKU_BITBANG_OK;
 }
 
-#endif /* PLATFORM_MSP430 */
+#endif /* TIKU_BITBANG_SOFT */
 
 /*===========================================================================*/
 /* RP2350 BACKEND -- PIO state machine                                        */
@@ -245,8 +254,8 @@ int tiku_bitbang_tx(const tiku_bitbang_t *cfg) {
     bb.cfg  = *cfg;
     bb.busy = 1;
 
-#if defined(PLATFORM_MSP430)
-    rc = bb_msp430_tx(cfg);
+#if defined(TIKU_BITBANG_SOFT)
+    rc = bb_soft_tx(cfg);
 #elif defined(PLATFORM_RP2350)
     rc = bb_rp2350_tx(cfg);
 #else
@@ -268,8 +277,8 @@ int tiku_bitbang_abort(void) {
         return TIKU_BITBANG_ERR_NOT_BUSY;
     }
     bb.busy = 0;
-#if defined(PLATFORM_MSP430)
-    return bb_msp430_abort();
+#if defined(TIKU_BITBANG_SOFT)
+    return bb_soft_abort();
 #elif defined(PLATFORM_RP2350)
     return bb_rp2350_abort();
 #else

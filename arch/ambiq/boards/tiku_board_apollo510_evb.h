@@ -109,15 +109,19 @@
 /**
  * @brief Bit-bang / backscatter port and pin defaults.
  *
- * Placeholder values used by tiku_bitbang demos. Override with
- * TIKU_BOARD_BSCAT_PORT / TIKU_BOARD_BSCAT_PIN in the build system
- * to select a real pad.
+ * The tiku_gpio (port,pin) API encodes an Apollo510 pad as (port-1)*8 + pin,
+ * with port >= 1 and pin in 0..7 (see ambiq_pad_of in tiku_gpio_arch.c). The
+ * pair below therefore selects pad 13 -- a plain GPIO, clear of the SWO (pad
+ * 28) and console UART (pads 30/55) lines, so the bit-bang self-test has a
+ * valid, harmless pin to toggle. (A bare pad number like 0/13 is NOT a valid
+ * encoding here: port 0 and pin 13 are both rejected.) Override in the build
+ * system to point at a real backscatter pad.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
-#define TIKU_BOARD_BSCAT_PORT       0U   /**< Virtual port for bit-bang pin. */
+#define TIKU_BOARD_BSCAT_PORT       2U   /**< Port 2 -> pad base 8. */
 #endif
 #ifndef TIKU_BOARD_BSCAT_PIN
-#define TIKU_BOARD_BSCAT_PIN        13U  /**< Bit-bang GPIO pad (placeholder). */
+#define TIKU_BOARD_BSCAT_PIN        5U   /**< pin 5 -> pad 13. */
 #endif
 
 /*---------------------------------------------------------------------------*/
