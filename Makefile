@@ -13,6 +13,12 @@
 #   make clean                                 — clean build artifacts
 # ===========================================================================
 
+# Pin the default goal to `all`. Some prerequisite rules (e.g. the msp430
+# debug-stripped libnosys) are defined before the `all:` target; without this
+# the first such rule would silently become the default goal, so a bare `make`
+# would build only that helper and leave main.elf to the flash step.
+.DEFAULT_GOAL := all
+
 # ---------------------------------------------------------------------------
 # Target MCU  (override on command line: make MCU=msp430fr5969 / MCU=rp2350)
 # Accepts uppercase (MSP430FR5969 / RP2350) or lowercase MCU names.
@@ -715,7 +721,28 @@ ifneq ($(MSP430_SUPPORT_DIR),)
 LDFLAGS += -L$(MSP430_SUPPORT_DIR)
 endif
 LDFLAGS += -Wl,--gc-sections
+# --- msp430-elf ld DWARF workaround -------------------------------------
+# libnosys.a (pulled in by --specs=nosys.specs) ships a malformed
+# .debug_line unit that ld 9.3.1 mis-handles under --gc-sections on larger
+# images, failing the link with "line info data is bigger than the space
+# remaining in the section" (e.g. the init-boot / init-fram test builds
+# that drag in the shell + init system). TikuOS compiles with no -g, so we
+# link a debug-stripped copy of libnosys -- lossless, we flash no debug
+# info. -print-file-name with the build's multilib flags picks the correct
+# libnosys variant (small vs -mlarge).
+NOSYS_FIXED := $(BUILD_DIR)/libnosys.a
+# Select the SAME multilib the link picks: small uses lib/libnosys.a; large
+# (-mlarge -mcode-region=either -mdata-region=either) uses
+# large/full-memory-range/libnosys.a. Mismatched models fail the link with
+# "assumes data is exclusively in lower memory".
+NOSYS_ORIG  := $(shell $(CC) -mmcu=$(MCU) $(if $(filter large,$(MEMORY_MODEL)),-mlarge -mcode-region=either -mdata-region=either) -print-file-name=libnosys.a)
+LDFLAGS    += -L$(BUILD_DIR)
 LDFLAGS += -Wl,-u,tiku_autostart_processes
+
+# Build the debug-stripped libnosys (defined only in this msp430 branch).
+$(NOSYS_FIXED): $(NOSYS_ORIG)
+	@mkdir -p $(BUILD_DIR)
+	@cp $(NOSYS_ORIG) $@ && $(OBJCOPY) --strip-debug $@
 
 endif
 
@@ -1486,7 +1513,7 @@ $(PLATFORM_STAMP):
 	@mkdir -p build
 	@echo $(TIKU_PLATFORM) > $@
 
-$(TARGET): $(OBJS) $(PLATFORM_STAMP)
+$(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 $(BUILD_DIR)/%.o: %.c
