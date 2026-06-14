@@ -41,6 +41,24 @@ TIKU_PLATFORM := msp430
 endif
 
 # ---------------------------------------------------------------------------
+# Console channel (RP2350 only): uart (default; debug/console over UART0 to an
+# external FT232) | usb (native USB CDC-ACM on the programming connector) |
+# both (mirror to UART + USB). The selection is consumed by hal/tiku_printf_hal.h,
+# the shell I/O backend, and boot.  usb/both compile arch/arm-rp2350/
+# tiku_usb_cdc_arch.c and define TIKU_CONSOLE_USB (+ TIKU_CONSOLE_BOTH).
+# ---------------------------------------------------------------------------
+TIKU_CONSOLE ?= uart
+ifeq ($(filter uart usb both,$(TIKU_CONSOLE)),)
+$(error TIKU_CONSOLE must be uart, usb, or both (got '$(TIKU_CONSOLE)'))
+endif
+ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
+ifneq ($(TIKU_PLATFORM),rp2350)
+$(error TIKU_CONSOLE=$(TIKU_CONSOLE) (USB CDC console) is only supported on \
+rp2350; this build is $(TIKU_PLATFORM). Use TIKU_CONSOLE=uart, or MCU=rp2350)
+endif
+endif
+
+# ---------------------------------------------------------------------------
 # Board selection (RP2350 only — MSP430 boards are 1:1 with MCU=)
 #
 # BOARD picks which board header arch/arm-rp2350/boards/tiku_board_*.h
@@ -839,6 +857,15 @@ SRCS += arch/arm-rp2350/tiku_pio_arch.c
 SRCS += arch/arm-rp2350/tiku_pwm_arch.c
 SRCS += arch/arm-rp2350/tiku_dma_arch.c
 SRCS += arch/arm-rp2350/tiku_trng_arch.c
+
+# Console backend: add the native USB CDC stack for TIKU_CONSOLE=usb|both.
+ifeq ($(TIKU_CONSOLE),usb)
+SRCS   += arch/arm-rp2350/tiku_usb_cdc_arch.c
+CFLAGS += -DTIKU_CONSOLE_USB=1
+else ifeq ($(TIKU_CONSOLE),both)
+SRCS   += arch/arm-rp2350/tiku_usb_cdc_arch.c
+CFLAGS += -DTIKU_CONSOLE_USB=1 -DTIKU_CONSOLE_BOTH=1
+endif
 
 else ifeq ($(TIKU_PLATFORM),ambiq)
 

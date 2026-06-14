@@ -38,6 +38,9 @@
 #include "arch/msp430/tiku_uart_arch.h"
 #elif defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_uart_arch.h"
+#if defined(TIKU_CONSOLE_USB)
+#include "arch/arm-rp2350/tiku_usb_cdc_arch.h"
+#endif
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_uart_arch.h"
 #endif
@@ -214,6 +217,13 @@ tiku_boot_init_peripherals(void)
     /* UART must be initialized before clock so printf is available
      * as early as possible (GPIO is already unlocked by init_cpu). */
     tiku_uart_init();
+
+#if defined(TIKU_CONSOLE_USB)
+    /* Native USB CDC-ACM console (TIKU_CONSOLE=usb/both). Polled: serviced
+     * whenever the scheduler is idle, and also nudged from putc/getc. */
+    tiku_usb_cdc_init();
+    tiku_sched_set_idle_hook(tiku_usb_cdc_poll);
+#endif
 
     /* System clock must be up before timers or scheduler */
     tiku_clock_init();

@@ -746,7 +746,14 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     tiku_shell_io_tcp_init();
     /* Banner deferred until a TCP client connects (see loop below) */
 #else
+#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
+    /* usb: the interactive shell is the RP2350 USB CDC-ACM port. */
+    tiku_shell_io_set_backend(&tiku_shell_io_usbcdc);
+#else
+    /* uart, or both (UART is the reliable full-duplex control channel; in
+     * `both` mode USB just mirrors TIKU_PRINTF output). */
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
+#endif
     SHELL_PRINTF("\n");
     SHELL_PRINTF(SH_CYAN SH_BOLD);
     SHELL_PRINTF("  ___ _ _         ___  ___\n");

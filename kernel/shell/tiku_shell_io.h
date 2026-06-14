@@ -158,4 +158,10 @@ uint8_t tiku_shell_io_has_crlf(void);
 /** UART backend (serial terminal, echo + CRLF). Defined in tiku_shell_io.c. */
 extern const tiku_shell_io_t tiku_shell_io_uart;
 
+#if defined(TIKU_CONSOLE_USB)
+/** RP2350 USB CDC-ACM backend. Defined in arch/arm-rp2350/tiku_usb_cdc_arch.c.
+ *  Selected at boot when TIKU_CONSOLE=usb (see the printf HAL + Makefile). */
+extern const tiku_shell_io_t tiku_shell_io_usbcdc;
+#endif
+
 #endif /* TIKU_SHELL_IO_H_ */
