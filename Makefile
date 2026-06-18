@@ -592,10 +592,15 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
 else ifeq ($(TIKU_PLATFORM),ambiq)
 
-# Cortex-M55 (Apollo510). Hard-float + Helium are derived from -mcpu and
-# must match the prebuilt libam_hal.a / libam_bsp.a ABI.
+# CPU/FPU per Ambiq part: Cortex-M55 + Helium (Apollo510) or Cortex-M4F with a
+# single-precision FPU (Apollo4 Lite). Derived from -mcpu; -Wno-psabi below.
+ifeq ($(MCU),apollo4l)
+CFLAGS  = -mcpu=cortex-m4 -mthumb
+CFLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+else
 CFLAGS  = -mcpu=cortex-m55 -mthumb
 CFLAGS += -mfpu=auto -mfloat-abi=hard
+endif
 CFLAGS += -Os -Wall -Wextra -Wno-psabi
 # newlib-nano (small integer printf) + nosys syscall stubs. AmbiqSuite used to
 # supply _sbrk/_write/_read/etc; with the SDK gone, libnosys provides them.
@@ -612,8 +617,12 @@ CFLAGS += -DPLATFORM_AMBIQ=1
 # fine. NVM tier is volatile-RAM-backed until MRAM persistence lands.
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072   # 128 KB fast volatile tier in DTCM
 CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
-# Part/package selectors that configure the vendored apollo510.h register map.
+# Part selectors that configure the vendored register map (apollo4l.h / apollo510.h).
+ifeq ($(MCU),apollo4l)
+CFLAGS += -DPART_apollo4l -DAM_PART_APOLLO4L -Dgcc
+else
 CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
+endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
 # fully self-contained: it references nothing in temp/AmbiqSuite, only the MRAM
@@ -722,12 +731,20 @@ LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 
 else ifeq ($(TIKU_PLATFORM),ambiq)
 
+ifeq ($(MCU),apollo4l)
+LDFLAGS  = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+else
 LDFLAGS  = -mcpu=cortex-m55 -mthumb -mfpu=auto -mfloat-abi=hard
+endif
 # nano.specs -> libc_nano (small printf, no heavy stdio init); nosys.specs ->
 # libnosys syscall stubs (_sbrk/_write/...), formerly supplied by AmbiqSuite.
 LDFLAGS += --specs=nano.specs --specs=nosys.specs
 LDFLAGS += -nostartfiles -static
+ifeq ($(MCU),apollo4l)
+LDFLAGS += -Tarch/ambiq/devices/apollo4l.ld
+else
 LDFLAGS += -Tarch/ambiq/devices/apollo510.ld
+endif
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes
 LDFLAGS += -Wl,-u,tiku_ambiq_vectors
@@ -821,11 +838,19 @@ endif
 # Use the minimal entry point and exactly the arch files it needs.
 SRCS  = main_minimal.c
 ifeq ($(TIKU_PLATFORM),ambiq)
+ifeq ($(MCU),apollo4l)
+SRCS += arch/ambiq/tiku_crt_early_apollo4l.c
+SRCS += arch/ambiq/tiku_cpu_freq_boot_apollo4l.c
+SRCS += arch/ambiq/tiku_cpu_common_apollo4l.c
+SRCS += arch/ambiq/tiku_uart_apollo4l.c
+SRCS += arch/ambiq/tiku_gpio_apollo4l.c
+else
 SRCS += arch/ambiq/tiku_crt_early.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_uart_arch.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
+endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
 # am_util_delay.c, am_util_stdio.c and am_resources.c are all dropped -- tikuOS
 # uses its own printf and never references the HAL resource tables.
@@ -882,25 +907,43 @@ else ifeq ($(TIKU_PLATFORM),ambiq)
 
 # Apollo510 arch (Cortex-M55). GPIO/SPI/LCD are bundled here (like RP2350)
 # so they aren't double-added by the MSP430-guarded blocks further down.
+# Device-agnostic ambiq backends (stubs + WFI) -- shared by both Ambiq parts.
+SRCS += arch/ambiq/tiku_i2c_arch.c
+SRCS += arch/ambiq/tiku_adc_arch.c
+SRCS += arch/ambiq/tiku_onewire_arch.c
+SRCS += arch/ambiq/tiku_timer_arch.c
+SRCS += arch/ambiq/tiku_wake_arch.c
+SRCS += arch/ambiq/tiku_spi_arch.c
+SRCS += arch/ambiq/tiku_lcd_arch.c
+ifeq ($(MCU),apollo4l)
+# Apollo4 Lite (Cortex-M4F) device/CPU backends.
+SRCS += arch/ambiq/tiku_cpu_common_apollo4l.c
+SRCS += arch/ambiq/tiku_crt_early_apollo4l.c
+SRCS += arch/ambiq/tiku_cpu_freq_boot_apollo4l.c
+SRCS += arch/ambiq/tiku_cpu_watchdog_apollo4l.c
+SRCS += arch/ambiq/tiku_htimer_apollo4l.c
+SRCS += arch/ambiq/tiku_crit_apollo4l.c
+SRCS += arch/ambiq/tiku_gpio_irq_apollo4l.c
+SRCS += arch/ambiq/tiku_uart_apollo4l.c
+SRCS += arch/ambiq/tiku_mem_apollo4l.c
+SRCS += arch/ambiq/tiku_mpu_apollo4l.c
+SRCS += arch/ambiq/tiku_region_apollo4l.c
+SRCS += arch/ambiq/tiku_gpio_apollo4l.c
+else
+# Apollo510 (Cortex-M55) device/CPU backends.
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_crt_early.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ambiq/tiku_cpu_watchdog_arch.c
 SRCS += arch/ambiq/tiku_htimer_arch.c
-SRCS += arch/ambiq/tiku_i2c_arch.c
-SRCS += arch/ambiq/tiku_adc_arch.c
-SRCS += arch/ambiq/tiku_onewire_arch.c
-SRCS += arch/ambiq/tiku_timer_arch.c
 SRCS += arch/ambiq/tiku_crit_arch.c
-SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_gpio_irq_arch.c
 SRCS += arch/ambiq/tiku_uart_arch.c
 SRCS += arch/ambiq/tiku_mem_arch.c
 SRCS += arch/ambiq/tiku_mpu_arch.c
 SRCS += arch/ambiq/tiku_region_arch.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
-SRCS += arch/ambiq/tiku_spi_arch.c
-SRCS += arch/ambiq/tiku_lcd_arch.c
+endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
 # am_util_delay.c, am_util_stdio.c, am_resources.c all dropped.
 
