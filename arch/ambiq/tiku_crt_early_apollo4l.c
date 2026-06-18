@@ -83,6 +83,15 @@ void tiku_ambiq_pendsv_handler(void)       __attribute__((weak, alias("ambiq_def
 /** @brief SysTick handler -- weak; the timer arch provides the real one */
 void tiku_ambiq_systick_handler(void)      __attribute__((weak, alias("ambiq_default_handler")));
 
+/* Peripheral IRQs the arch drivers claim (apollo4l IRQ map). The driver that
+ * handles each one provides a strong definition of the same symbol. */
+/** @brief UART2 console ISR (IRQ 17) -- weak alias */
+void tiku_ambiq_uart2_isr(void)            __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief STIMER Compare0 ISR (IRQ 32, htimer source) -- weak alias */
+void tiku_ambiq_stimer_cmpr0_isr(void)     __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief GPIO0 pins0-31 ISR (IRQ 56) -- weak alias */
+void tiku_ambiq_gpio0_isr(void)            __attribute__((weak, alias("ambiq_default_handler")));
+
 /*---------------------------------------------------------------------------*/
 /* Reset handler                                                             */
 /*---------------------------------------------------------------------------*/
@@ -175,6 +184,14 @@ __attribute__((section(".vectors"), used)) = {
     tiku_ambiq_pendsv_handler,          /* 14  PendSV            */
     tiku_ambiq_systick_handler,         /* 15  SysTick           */
 
-    /* External interrupts: all default at this milestone. */
-    [16 ... 16 + AMBIQ_NUM_EXT_IRQS - 1] = ambiq_default_handler,
+    /* External interrupts (apollo4l IRQn numbering) -------------------- */
+    [16 + 17] = tiku_ambiq_uart2_isr,        /* IRQ 17  UART2            */
+    [16 + 32] = tiku_ambiq_stimer_cmpr0_isr, /* IRQ 32  STIMER Compare0  */
+    [16 + 56] = tiku_ambiq_gpio0_isr,        /* IRQ 56  GPIO0 pins0-31   */
+
+    /* Everything else spins in the default handler; ranges skip the named slots. */
+    [16 +  0 ... 16 + 16] = ambiq_default_handler,
+    [16 + 18 ... 16 + 31] = ambiq_default_handler,
+    [16 + 33 ... 16 + 55] = ambiq_default_handler,
+    [16 + 57 ... 16 + AMBIQ_NUM_EXT_IRQS - 1] = ambiq_default_handler,
 };
