@@ -91,10 +91,14 @@
 #elif defined(PLATFORM_AMBIQ)
 
 /*
- * Ambiq Apollo 510 (Cortex-M55). One silicon variant for now; the board
- * define (TIKU_BOARD_APOLLO510_EVB) comes from the Makefile.
+ * Ambiq silicon. The Makefile passes the specific device define via
+ * DEVICE_DEFINE -- TIKU_DEVICE_APOLLO510 (Cortex-M55) or TIKU_DEVICE_APOLLO4L
+ * (Cortex-M4 Apollo4 Lite) -- with the matching board define alongside it.
+ * Default to Apollo510 ONLY when no device was selected: the device-select
+ * router checks APOLLO510 first, so an unconditional default here would mask an
+ * explicit -DTIKU_DEVICE_APOLLO4L and silently build the wrong device.
  */
-#ifndef TIKU_DEVICE_APOLLO510
+#if !defined(TIKU_DEVICE_APOLLO510) && !defined(TIKU_DEVICE_APOLLO4L)
 #define TIKU_DEVICE_APOLLO510 1
 #endif
 

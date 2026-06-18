@@ -221,9 +221,16 @@ JLINK_SPEED     ?= 4000
 ifeq ($(MCU),apollo4l)
 JLINK_DEVICE    ?= AMAP42KL-KBR
 AMBIQ_LOAD_ADDR ?= 0x00018000
+# The Apollo4 Lite secure SBL parks (PC stays inside the SBL) while a debugger
+# is attached at reset. Detaching with the target left running (qc) drops the
+# debugger so the SBL hands off to the app at 0x18000; the Sleep lets the SBL
+# reach that debug-wait before we detach. (q halts, so the app never starts.)
+JLINK_RUN_SEQ   ?= r\ng\nSleep 600\nqc
 else
 JLINK_DEVICE    ?= AP510NFA-CBR
 AMBIQ_LOAD_ADDR ?= 0x00410000
+# Apollo510 hands off cleanly: reset, go, quit.
+JLINK_RUN_SEQ   ?= r\ng\nq
 endif
 
 # Whether this MCU has HIFRAM (FRAM > 64 KB).  MSP430-only concept;
@@ -1722,7 +1729,7 @@ JLINK_ERASE_SCRIPT = $(BUILD_DIR)/erase.jlink
 
 flash: all
 	@mkdir -p $(BUILD_DIR)
-	@printf 'device %s\nif %s\nspeed %s\nconnect\nloadbin %s %s\nr\ng\nq\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nloadbin %s %s\n$(JLINK_RUN_SEQ)\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
 	@echo "Flashing $(TARGET_BIN) -> MRAM $(AMBIQ_LOAD_ADDR) via $(JLINK) ($(JLINK_DEVICE))..."
 	$(JLINK) -CommanderScript $(JLINK_FLASH_SCRIPT)
 
