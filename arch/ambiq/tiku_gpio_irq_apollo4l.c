@@ -24,6 +24,7 @@
 #include "apollo4l.h"            /* GPIO struct, NVIC, GPIO0_001F_IRQn */
 #include <kernel/process/tiku_process.h>
 #include <kernel/process/tiku_proto.h>
+#include <kernel/vfs/tree/tiku_vfs_tree_gpio.h>   /* ISR->VFS edge-notify bridge */
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -159,6 +160,9 @@ void tiku_ambiq_gpio0_isr(void) {
             tiku_event_data_t data =
                 (tiku_event_data_t)TIKU_GPIO_IRQ_PACK(port, pin);
             tiku_process_post(TIKU_PROCESS_BROADCAST, TIKU_EVENT_GPIO, data);
+            /* Bridge to the VFS watch layer so `watch`/`on`/`changed` on
+             * /dev/gpio/<port>/<pin> react to the physical edge (ISR-safe). */
+            tiku_vfs_tree_gpio_notify(port, pin);
         }
     }
 }
