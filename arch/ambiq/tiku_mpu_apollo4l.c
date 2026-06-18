@@ -13,14 +13,15 @@
  * keeps the same HAL surface and fault-diagnostic behaviour but uses the vendored
  * mpu_armv7.h helpers.
  *
- * Coarse W^X map (refine to per-region granularity later -- the apollo510 driver
- * has a stack guard + split SRAM regions; this brings up the core guarantee):
- *   0  CODE  MRAM 0x0 + 2 MB              RO + exec   (code + rodata; SBL is RO too)
- *   1  RAM   TCM/SRAM 0x10000000 + 2 MB   RW + XN     (.data/.bss/stack/.ssram/tier)
+ * W^X map (PMSAv7 -- the highest-numbered overlapping region wins):
+ *   0  CODE   MRAM 0x0 + 2 MB              RO + exec   (code + rodata; SBL is RO too)
+ *   1  RAM    TCM/SRAM 0x10000000 + 2 MB   RW + XN     (.data/.bss/stack/.ssram/tier)
+ *   2  GUARD  32 B, 32 KB below the stack  no access   (stack-overflow trip)
  * PRIVDEFENA covers peripherals (0x40000000+), the SCS (0xE0000000+) and the
  * bootrom with the default privileged policy. MemManage is enabled at priority 0;
- * a violation records into the warm-durable .mpu_diag and resets. The W^X
- * guarantee that matters (code is RO+X, all data is execute-never) is enforced.
+ * a violation records into the warm-durable .mpu_diag and resets. Code is RO+X,
+ * all data is execute-never, and a stack overflow trips the guard before it can
+ * corrupt .data/.bss/.uninit (which end far below the guard).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,13 +35,22 @@
 /* Region constants (apollo4l memory map)                                    */
 /*---------------------------------------------------------------------------*/
 
-#define MPU_REGION_CODE   0U
-#define MPU_REGION_RAM    1U
+#define MPU_REGION_CODE         0U
+#define MPU_REGION_RAM          1U
+#define MPU_REGION_STACK_GUARD  2U
 
 /** MRAM (code) base + a 2 MB region covering the whole 2 MB MRAM. */
 #define MPU_CODE_BASE     0x00000000UL
 /** TCM(0x10000000,384K) + shared SRAM(0x10060000,1M); a 2 MB region spans both. */
 #define MPU_RAM_BASE      0x10000000UL
+
+/** Stack guard: 32 bytes placed this far below the stack top (mirrors the
+ *  apollo510 budget). The kernel's stack stays well within 32 KB. */
+#define MPU_STACK_RESERVED_BYTES  32768U
+#define MPU_STACK_GUARD_BYTES     32U
+
+/** Top of TCM = stack base (apollo4l.ld); the guard sits below it. */
+extern uint32_t __sram_end;
 
 /*---------------------------------------------------------------------------*/
 /* Software-bookkept MSP430-style register file (parity for portable tests)  */
@@ -134,7 +144,21 @@ void tiku_mpu_arch_init_segments(void) {
         ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_FULL, 1U, 0U, 0U, 0U, 0U,
                      ARM_MPU_REGION_SIZE_2MB));
 
-    for (r = 2U; r < 8U; r++) {
+    /* Region 2: 32-byte stack guard, MPU_STACK_RESERVED_BYTES below the stack
+     * top -- no access, execute-never. PMSAv7 gives the highest-numbered region
+     * precedence on overlap, so this overrides region 1's RW for its 32 bytes:
+     * a stack that overflows past its budget faults here before it can reach
+     * .data/.bss/.uninit far below. */
+    {
+        uint32_t guard = (uint32_t)(uintptr_t)&__sram_end
+                         - MPU_STACK_RESERVED_BYTES - MPU_STACK_GUARD_BYTES;
+        ARM_MPU_SetRegion(
+            ARM_MPU_RBAR(MPU_REGION_STACK_GUARD, guard),
+            ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_NONE, 1U, 0U, 0U, 0U, 0U,
+                         ARM_MPU_REGION_SIZE_32B));
+    }
+
+    for (r = 3U; r < 8U; r++) {
         ARM_MPU_ClrRegion(r);
     }
 
