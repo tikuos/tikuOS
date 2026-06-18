@@ -39,6 +39,36 @@
 /** PADKEY unlock value required before writing any PINCFG register. */
 #define TIKU_GPIO_PADKEY_UNLOCK 0x73u
 
+/* Interrupt-driven RX ring buffer (UART2, NVIC IRQ 17). Power-of-two size so
+ * the head/tail index mask works; override with -DTIKU_UART_RXBUF_SIZE=<N>. */
+#ifndef TIKU_UART_RXBUF_SIZE
+#define TIKU_UART_RXBUF_SIZE  256
+#endif
+#if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0
+#error "TIKU_UART_RXBUF_SIZE must be a power of two"
+#endif
+#define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1)
+
+/** UART2 IRQ number in the NVIC (Apollo4 Lite interrupt table). */
+#define AMBIQ_IRQ_UART2   17
+/** NVIC Interrupt Set-Enable register base. */
+#define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
+/** NVIC Interrupt Clear-Pending register base. */
+#define NVIC_ICPR ((volatile uint32_t *)0xE000E280UL)
+
+/**
+ * @brief Interrupt-driven RX ring buffer.
+ *
+ * head is written only by tiku_ambiq_uart2_isr, tail only by the consumer, so
+ * no critical section is needed on single-core Cortex-M.
+ */
+static struct {
+    volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE];
+    volatile uint16_t head;
+    volatile uint16_t tail;
+    volatile uint16_t overrun_count;
+} rx;
+
 /**
  * @brief Route a GPIO pad to a peripheral function under the PADKEY lock.
  *
@@ -90,10 +120,28 @@ void tiku_uart_init(void) {
     /* 8 data bits (WLEN=3), FIFOs enabled, no parity, 1 stop. */
     UART2->LCRH = (3u << UART0_LCRH_WLEN_Pos) | (1u << UART0_LCRH_FEN_Pos);
 
+    /* RX FIFO trigger 1/8 (lowest); the RX-timeout interrupt delivers single
+     * keystrokes promptly. */
+    UART2->IFLS_b.RXIFLSEL = 0u;
+
+    rx.head = 0U;
+    rx.tail = 0U;
+    rx.overrun_count = 0U;
+
+    /* Clear, then enable RX + RX-timeout + overrun interrupts. */
+    UART2->IEC = 0xFFFFFFFFu;
+    UART2->IER = (1u << UART0_IER_RXIM_Pos) |
+                 (1u << UART0_IER_RTIM_Pos) |
+                 (1u << UART0_IER_OEIM_Pos);
+
     /* Enable the UART, transmitter and receiver. */
     UART2->CR_b.UARTEN = 1u;
     UART2->CR_b.TXE    = 1u;
     UART2->CR_b.RXE    = 1u;
+
+    /* Enable UART2 in the NVIC (IRQ 17). */
+    NVIC_ICPR[AMBIQ_IRQ_UART2 >> 5] = (1u << (AMBIQ_IRQ_UART2 & 31u));
+    NVIC_ISER[AMBIQ_IRQ_UART2 >> 5] = (1u << (AMBIQ_IRQ_UART2 & 31u));
 }
 
 /** @brief Transmit one character over UART2, blocking until the FIFO has room. */
@@ -117,22 +165,69 @@ void tiku_uart_puts(const char *s) {
     }
 }
 
-/** @brief Non-blocking RX readiness (no RX ring yet -- always empty). */
-uint8_t tiku_uart_rx_ready(void) { return 0U; }
+/** @brief Test whether received data is waiting in the ring buffer. */
+uint8_t tiku_uart_rx_ready(void) {
+    return (rx.head != rx.tail) ? 1U : 0U;
+}
 
-/** @brief Read one character (no RX ring yet -- always -1). */
-int tiku_uart_getc(void) { return -1; }
+/** @brief Read one character from the RX ring (non-blocking; -1 if empty). */
+int tiku_uart_getc(void) {
+    if (rx.head == rx.tail) {
+        return -1;
+    }
+    uint8_t c = rx.buf[rx.tail];
+    rx.tail = (uint16_t)((rx.tail + 1U) & TIKU_UART_RXBUF_MASK);
+    return (int)c;
+}
 
-/** @brief Software RX overrun counter (RX path not yet implemented). */
-uint16_t tiku_uart_overrun_count(void) { return 0U; }
+/** @brief Return the software RX overrun counter. */
+uint16_t tiku_uart_overrun_count(void) { return rx.overrun_count; }
 
-/** @brief Clear the software RX overrun counter (no-op). */
-void     tiku_uart_overrun_reset(void) { }
+/** @brief Clear the software RX overrun counter. */
+void     tiku_uart_overrun_reset(void) { rx.overrun_count = 0U; }
 
 #ifdef HAS_TESTS
-/** @brief Inject a byte into the RX path (test-only; no-op until RX lands). */
-void tiku_uart_test_inject(uint8_t byte) { (void)byte; }
+/** @brief Inject a byte into the RX ring buffer (test-only). */
+void tiku_uart_test_inject(uint8_t byte) {
+    uint16_t next = (uint16_t)((rx.head + 1U) & TIKU_UART_RXBUF_MASK);
+    if (next != rx.tail) {
+        rx.buf[rx.head] = byte;
+        rx.head = next;
+    }
+}
 #endif
+
+/*---------------------------------------------------------------------------*/
+/* IRQ handler -- drains the RX FIFO into the ring buffer                     */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief UART2 interrupt service routine -- drains the RX FIFO.
+ *
+ * Non-weak, so it overrides the default trap in tiku_crt_early_apollo4l.c
+ * (vector slot 16 + IRQ 17). Reads all available bytes into the ring on every
+ * RX or RX-timeout interrupt; counts overruns rather than silently dropping.
+ */
+void tiku_ambiq_uart2_isr(void) {
+    uint32_t mis = UART2->MIS;   /* masked interrupt status */
+
+    if (mis & UART0_MIS_OEMIS_Msk) {
+        rx.overrun_count++;
+    }
+
+    while (UART2->FR_b.RXFE == 0u) {
+        uint8_t  b    = (uint8_t)(UART2->DR & 0xFFu);
+        uint16_t next = (uint16_t)((rx.head + 1U) & TIKU_UART_RXBUF_MASK);
+        if (next != rx.tail) {
+            rx.buf[rx.head] = b;
+            rx.head = next;
+        } else {
+            rx.overrun_count++;
+        }
+    }
+
+    UART2->IEC = mis;   /* clear the serviced interrupts */
+}
 
 /*---------------------------------------------------------------------------*/
 /* Lightweight printf (same minimal subset as the other arch drivers)        */
