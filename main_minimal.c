@@ -33,9 +33,14 @@
 #include "arch/ambiq/tiku_uart_arch.h"
 #include "arch/ambiq/tiku_gpio_arch.h"
 
-/* EVB LED0 (open-drain, active-low in the BSP). The SWO heartbeat is the
- * primary signal; the LED toggle is a secondary scope-visible indicator. */
+/* EVB LED0: Apollo510 pad 165, Apollo4 Lite pad 12 (active-low in the BSP).
+ * The console heartbeat is the primary signal; the LED toggle is a secondary
+ * scope-visible indicator. */
+#if defined(TIKU_DEVICE_APOLLO4L)
+#define TIKU_MIN_LED_PAD   12u
+#else
 #define TIKU_MIN_LED_PAD   165u
+#endif
 
 int main(void)
 {
@@ -49,7 +54,11 @@ int main(void)
     tiku_uart_init();
 
     tiku_cpu_ambiq_delay_ms(100);
+#if defined(TIKU_DEVICE_APOLLO4L)
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Apollo4 Lite EVB) ---\n");
+#else
     tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Apollo510 EVB) ---\n");
+#endif
 
     unsigned long clk = tiku_cpu_ambiq_smclk_get_hz();
     int           fault = tiku_cpu_ambiq_clock_has_fault();

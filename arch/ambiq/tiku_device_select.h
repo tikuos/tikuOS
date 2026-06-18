@@ -30,8 +30,10 @@
  */
 #if defined(TIKU_DEVICE_APOLLO510)
 #include <arch/ambiq/devices/tiku_device_apollo510.h>
+#elif defined(TIKU_DEVICE_APOLLO4L)
+#include <arch/ambiq/devices/tiku_device_apollo4l.h>
 #else
-#error "No TikuOS Ambiq device selected. Define TIKU_DEVICE_APOLLO510."
+#error "No TikuOS Ambiq device selected. Define TIKU_DEVICE_APOLLO510 or TIKU_DEVICE_APOLLO4L."
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -45,10 +47,12 @@
  * specified the Apollo510 EVB is assumed — it is the only supported
  * board for this silicon at this milestone.
  */
-#if defined(TIKU_BOARD_APOLLO510_EVB)
+#if defined(TIKU_BOARD_APOLLO4L_EVB)
+#include <arch/ambiq/boards/tiku_board_apollo4l_evb.h>
+#elif defined(TIKU_BOARD_APOLLO510_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo510_evb.h>
 #else
-/* Default to the Apollo510 EVB — the only supported board for now. */
+/* Default to the Apollo510 EVB. */
 #define TIKU_BOARD_APOLLO510_EVB 1
 #include <arch/ambiq/boards/tiku_board_apollo510_evb.h>
 #endif
