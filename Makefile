@@ -36,6 +36,8 @@ ifeq ($(MCU),rp2350)
 TIKU_PLATFORM := rp2350
 else ifeq ($(MCU),apollo510)
 TIKU_PLATFORM := ambiq
+else ifeq ($(MCU),apollo4l)
+TIKU_PLATFORM := ambiq
 else
 TIKU_PLATFORM := msp430
 endif
@@ -93,8 +95,11 @@ endif
 endif
 
 ifeq ($(TIKU_PLATFORM),ambiq)
-# Apollo510 EVB is the only board for now.
+ifeq ($(MCU),apollo4l)
+TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO4L_EVB
+else
 TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510_EVB
+endif
 endif
 
 # ---------------------------------------------------------------------------
@@ -210,10 +215,16 @@ PICOTOOL ?= $(shell command -v picotool 2>/dev/null || echo picotool)
 # MRAM 0x00410000. Override any of these on the make command line.
 JLINK           ?= JLinkExe
 JLINK_GDB       ?= JLinkGDBServer
-JLINK_DEVICE    ?= AP510NFA-CBR
 JLINK_IF        ?= SWD
 JLINK_SPEED     ?= 4000
+# J-Link device + MRAM load address differ per Ambiq part.
+ifeq ($(MCU),apollo4l)
+JLINK_DEVICE    ?= AMAP42KL-KBR
+AMBIQ_LOAD_ADDR ?= 0x00018000
+else
+JLINK_DEVICE    ?= AP510NFA-CBR
 AMBIQ_LOAD_ADDR ?= 0x00410000
+endif
 
 # Whether this MCU has HIFRAM (FRAM > 64 KB).  MSP430-only concept;
 # for the RP2350 it is meaningless.

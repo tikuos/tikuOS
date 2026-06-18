@@ -1,7 +1,8 @@
 # arch/ambiq/cmsis — vendored register headers
 
-These are **register-definition headers only** — the Apollo510 peripheral
-register map plus the ARM Cortex-M55 core peripherals. They contain **no
+These are **register-definition headers only** — the Apollo510 and Apollo4 Lite
+peripheral register maps plus the ARM Cortex-M55 and Cortex-M4 core peripherals.
+They contain **no
 AmbiqSuite HAL/BSP logic**, only `struct`/bitfield/address definitions, which are
 hardware facts. They are vendored here so `arch/ambiq` is fully self-contained:
 the build references only in-tree files plus the MRAM bootrom blob, never an
@@ -55,6 +56,24 @@ Cortex-M55 core header — it is **not** SVD-derived, so it is vendored as-is.
 | `mpu_armv8.h`       | ARMv8-M MPU helpers (pulled by core_cm55.h) |
 | `pmu_armv8.h`       | ARMv8-M PMU helpers (pulled by core_cm55.h) |
 | `cachel1_armv7.h`   | L1 cache maintenance helpers (pulled by core_cm55.h) |
+
+## Apollo4 Lite (apollo4l) device + Cortex-M4 core — second Ambiq device
+
+The same directory also carries the Apollo4 Lite register map and the ARM
+Cortex-M4 core headers, vendored from **AmbiqSuite R4.5.0** (Apollo4 lives in the
+R4.x SDK line; R5.x dropped it). Filenames are distinct from the apollo510 set so
+both coexist; the device selector pulls `apollo4l.h` for `MCU=apollo4l` and
+`apollo510.h` for `MCU=apollo510`.
+
+| file                | upstream source (AmbiqSuite R4.5.0) | license |
+|---------------------|-------------------------------------|---------|
+| `apollo4l.h`        | `CMSIS/AmbiqMicro/Include/apollo4l.h` (SVD-generated; pulls `core_cm4.h` + `system_apollo4l.h`) | © Ambiq Micro, BSD-3-Clause |
+| `system_apollo4l.h` | `CMSIS/AmbiqMicro/Include/system_apollo4l.h` | © Ambiq Micro, BSD-3-Clause |
+| `core_cm4.h`        | `CMSIS/ARM/Include/core_cm4.h` (ARM Cortex-M4 core) | © ARM, Apache-2.0 |
+| `mpu_armv7.h`       | `CMSIS/ARM/Include/mpu_armv7.h` (ARMv7-M PMSAv7 MPU helpers, pulled by `core_cm4.h`) | © ARM, Apache-2.0 |
+
+The shared `cmsis_gcc.h` / `cmsis_compiler.h` / `cmsis_version.h` (already present
+from the apollo510 set) are reused by `core_cm4.h`.
 
 ## Updating
 
