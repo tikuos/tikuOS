@@ -1145,6 +1145,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_freq.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_name.c
 ifeq (,$(findstring TIKU_SHELL_CMD_IF=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_if.c

@@ -91,16 +91,16 @@ static void tiku_ambiq_soc_init(void) {
 /**
  * @brief Read the true CPU core clock from the MCU performance-mode register
  *
- * Returns 96 MHz for Low-Power mode or 250 MHz for High-Performance
- * ("turbo") mode. This is independent of the 48 MHz SysTick clock used
- * by the OS tick and busy-delay routines.
+ * Returns 96 MHz for Low-Power mode or 192 MHz for High-Performance
+ * ("turbo") mode -- per the apollo510.h MCUPERFSTATUS_HP definition (HFRC2 is
+ * 250 MHz but the M55 runs at 192 MHz in HP; an earlier 250 here was wrong).
  *
- * @return Core clock frequency in Hz (96000000 or 250000000)
+ * @return Core clock frequency in Hz (96000000 or 192000000)
  */
 static unsigned long tiku_ambiq_core_hz(void) {
     if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS ==
             PWRCTRL_MCUPERFREQ_MCUPERFSTATUS_HP) {
-        return 250000000UL;
+        return 192000000UL;
     }
     return 96000000UL;
 }
@@ -118,15 +118,38 @@ void tiku_cpu_boot_ambiq_init(void) {
 }
 
 /**
- * @brief Set the CPU operating frequency (stub)
+ * @brief Select the CPU operating frequency (perf mode).
  *
- * Frequency switching is not yet implemented for Apollo510. The
- * argument is ignored; the clock stays at whatever the SBL configured.
+ * Apollo510 has Low-Power (96 MHz) and High-Performance "turbo" (192 MHz)
+ * modes via the PWRCTRL performance-mode request. LP is honoured here. HP
+ * additionally requires raising the core voltage from the per-chip INFO1/OTP
+ * trims (the SPOT path) before the switch -- NOT yet ported -- so an HP request
+ * is declined and the core stays in LP rather than run 192 MHz on the LP
+ * voltage rail (which would brown out). The OS tick is on the STIMER and the
+ * busy-delay re-reads the live core clock, so a mode change doesn't disturb
+ * timekeeping.
  *
- * @param cpu_freq  Requested frequency in Hz (ignored)
+ * @param cpu_freq  Requested core frequency in MHz.
  */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
-    (void)cpu_freq;
+    uint32_t spin;
+
+    if (cpu_freq > 96u) {
+        /* HP turbo needs the INFO1/OTP voltage step (not yet ported) -- decline
+         * so the M55 never runs at 192 MHz on the LP voltage rail. */
+        return;
+    }
+
+    /* LP request: ensure Low-Power mode (the SBL default, so usually a no-op),
+     * then refresh the reported core clock. */
+    if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS != PWRCTRL_MCUPERFREQ_MCUPERFSTATUS_LP) {
+        PWRCTRL->MCUPERFREQ_b.MCUPERFREQ = PWRCTRL_MCUPERFREQ_MCUPERFREQ_LP;
+        spin = 100000u;
+        while (PWRCTRL->MCUPERFREQ_b.MCUPERFACK == 0u) {
+            if (spin-- == 0u) break;
+        }
+    }
+    s_core_hz = tiku_ambiq_core_hz();
 }
 
 /**

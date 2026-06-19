@@ -125,6 +125,9 @@
 #ifndef TIKU_SHELL_CMD_WAKE
 #define TIKU_SHELL_CMD_WAKE    1  /**< wake    - Show active wake sources */
 #endif
+#ifndef TIKU_SHELL_CMD_FREQ
+#define TIKU_SHELL_CMD_FREQ    1  /**< freq    - Show/set CPU core frequency */
+#endif
 #ifndef TIKU_SHELL_CMD_NAME
 #define TIKU_SHELL_CMD_NAME    1  /**< name    - Read or set device name */
 #endif

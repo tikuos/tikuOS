@@ -203,6 +203,9 @@
 #if TIKU_SHELL_CMD_WAKE
 #include "commands/tiku_shell_cmd_wake.h"
 #endif
+#if TIKU_SHELL_CMD_FREQ
+#include "commands/tiku_shell_cmd_freq.h"
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* FORWARD DECLARATIONS                                                      */
@@ -481,6 +484,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_WAKE
     {"wake",    "Show active wake sources",    tiku_shell_cmd_wake},
+#endif
+#if TIKU_SHELL_CMD_FREQ
+    {"freq",    "Show/set CPU core frequency", tiku_shell_cmd_freq},
 #endif
 
     /* ---- Boot ---- */

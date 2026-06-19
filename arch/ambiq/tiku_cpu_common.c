@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include "tiku.h"              /* TIKU_MAIN_CPU_HZ = 96 MHz SysTick clock */
 #include "tiku_cpu_common.h"
+#include "tiku_cpu_freq_boot_arch.h"  /* tiku_cpu_ambiq_clock_get_hz (live core clock) */
 #include "apollo510.h"         /* CMSIS register map (MCUCTRL CHIPID) -- register header only */
 
 /**
@@ -44,14 +45,15 @@
  * Falls back to a NOP spin loop when SysTick is not yet configured
  * (pre-clock-init). Does not depend on AmbiqSuite.
  *
- * SysTick CLKSOURCE=processor, so the counter runs at the full M55
- * core frequency (96 MHz LP / 250 MHz HP), matching TIKU_MAIN_CPU_HZ.
+ * SysTick CLKSOURCE=processor, so the counter runs at the full M55 core
+ * frequency (96 MHz LP / 192 MHz HP). Scale by the LIVE core clock so the
+ * delay stays correct across an LP<->HP perf-mode switch.
  *
  * @param us  Delay in microseconds
  */
 void tiku_cpu_ambiq_delay_us(unsigned int us) {
     uint32_t reload = (SYST_RVR & SYST_MASK) + 1u;
-    uint32_t per_us = (uint32_t)(TIKU_MAIN_CPU_HZ / 1000000UL);  /* SysTick clock (96) */
+    uint32_t per_us = (uint32_t)(tiku_cpu_ambiq_clock_get_hz() / 1000000UL);
     uint32_t last, now, step;
     uint64_t need;
 

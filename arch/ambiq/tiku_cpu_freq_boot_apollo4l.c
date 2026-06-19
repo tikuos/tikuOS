@@ -24,6 +24,22 @@
 static unsigned long s_core_hz = 96000000UL;
 
 /**
+ * @brief Read the true CPU core clock from the MCU performance-mode register.
+ *
+ * Apollo4 Lite runs the Cortex-M4F at 96 MHz in Low-Power mode or 192 MHz in
+ * High-Performance "turbo" mode.
+ *
+ * @return Core clock frequency in Hz (96000000 or 192000000).
+ */
+static unsigned long tiku_ambiq_core_hz(void) {
+    if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS ==
+            PWRCTRL_MCUPERFREQ_MCUPERFSTATUS_HP) {
+        return 192000000UL;
+    }
+    return 96000000UL;
+}
+
+/**
  * @brief Bare-metal Apollo4 Lite SoC bring-up.
  *
  * The Cortex-M4 core has no SCB I/D cache to enable (unlike the M55), and the
@@ -43,16 +59,42 @@ static void tiku_ambiq_soc_init(void) {
  */
 void tiku_cpu_boot_ambiq_init(void) {
     tiku_ambiq_soc_init();
-    s_core_hz = 96000000UL;
+    s_core_hz = tiku_ambiq_core_hz();
 }
 
 /**
- * @brief Set the CPU operating frequency (stub -- clock stays as the boot ROM left it).
+ * @brief Select the CPU operating frequency (perf mode).
  *
- * @param cpu_freq  Requested frequency in Hz (ignored)
+ * Apollo4 Lite supports Low-Power (96 MHz) and High-Performance "turbo"
+ * (192 MHz), selected via the PWRCTRL performance-mode request. Unlike
+ * Apollo510 this part needs no manual core-voltage step, so the switch is just
+ * the request + an ACK poll -- HP only requires the SIMOBUCK regulator active.
+ * The OS tick is on the STIMER and the busy-delay re-reads the live core clock,
+ * so a mode change doesn't disturb timekeeping.
+ *
+ * @param cpu_freq  Requested core frequency in MHz.
  */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
-    (void)cpu_freq;
+    unsigned int want = (cpu_freq > 96u)
+        ? PWRCTRL_MCUPERFREQ_MCUPERFREQ_HP
+        : PWRCTRL_MCUPERFREQ_MCUPERFREQ_LP;
+    uint32_t spin;
+
+    /* HP turbo requires the SIMOBUCK regulator active -- decline if it isn't,
+     * leaving the core in its current mode. */
+    if (want == PWRCTRL_MCUPERFREQ_MCUPERFREQ_HP &&
+        PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
+        return;
+    }
+
+    if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS != want) {
+        PWRCTRL->MCUPERFREQ_b.MCUPERFREQ = want;
+        spin = 100000u;
+        while (PWRCTRL->MCUPERFREQ_b.MCUPERFACK == 0u) {
+            if (spin-- == 0u) break;
+        }
+    }
+    s_core_hz = tiku_ambiq_core_hz();
 }
 
 /** @brief Enter CPU idle using WFI (used by the scheduler when idle). */

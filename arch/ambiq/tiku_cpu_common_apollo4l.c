@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include "tiku.h"              /* TIKU_MAIN_CPU_HZ SysTick clock */
 #include "tiku_cpu_common.h"
+#include "tiku_cpu_freq_boot_arch.h"  /* tiku_cpu_ambiq_clock_get_hz (live core clock) */
 #include "apollo4l.h"          /* CMSIS register map (MCUCTRL CHIPID) -- register header only */
 
 /** Reload Value Register (24-bit) */
@@ -30,14 +31,16 @@
 /**
  * @brief Spin-delay for a given number of microseconds.
  *
- * Uses the Cortex-M SysTick down-counter scaled by TIKU_MAIN_CPU_HZ. Falls
- * back to a NOP spin loop when SysTick is not yet configured.
+ * Uses the Cortex-M SysTick down-counter (clocked by the core) scaled by the
+ * LIVE core clock, so the delay stays correct across an LP<->HP perf-mode
+ * switch (96 vs 192 MHz). Falls back to a NOP spin loop when SysTick is not
+ * yet configured.
  *
  * @param us  Delay in microseconds
  */
 void tiku_cpu_ambiq_delay_us(unsigned int us) {
     uint32_t reload = (SYST_RVR & SYST_MASK) + 1u;
-    uint32_t per_us = (uint32_t)(TIKU_MAIN_CPU_HZ / 1000000UL);
+    uint32_t per_us = (uint32_t)(tiku_cpu_ambiq_clock_get_hz() / 1000000UL);
     uint32_t last, now, step;
     uint64_t need;
 
