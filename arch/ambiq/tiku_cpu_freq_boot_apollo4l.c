@@ -19,6 +19,7 @@
 
 #include "apollo4l.h"       /* CMSIS register defs -- register header only */
 #include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_cpu_common.h"  /* tiku_cpu_ambiq_delay_us */
 
 /** True CPU core frequency in Hz (Apollo4 Lite HFRC, low-power default). */
 static unsigned long s_core_hz = 96000000UL;
@@ -63,6 +64,85 @@ void tiku_cpu_boot_ambiq_init(void) {
 }
 
 /**
+ * @brief Bring up the SIMO buck regulator (LDO -> buck) so the core can enter
+ *        High-Performance mode.
+ *
+ * The SBL boots Apollo4 Lite on the LDO; HP (192 MHz) requires the buck active.
+ * This mirrors the AmbiqSuite SIMOBUCK_INIT post-PCM / post-A0 path: set the
+ * buck LP-TON trims, short VDDF to VDDS (mandatory on this part -- doubles the
+ * VDDF load cap so the buck can regulate), enable RX compensation, turn the
+ * buck on, then force it active with the CORE + MEM LDOs in parallel, and wait
+ * for ACT. The SBL already loaded the per-chip voltage (VREF) trims, so the
+ * regulated voltages are unchanged -- this only flips the buck on (no over-volt
+ * risk).
+ *
+ * @return 0 once VRSTATUS.SIMOBUCKST == ACT, -1 on timeout.
+ */
+static int tiku_ambiq_simobuck_enable(void) {
+    uint32_t spin;
+
+    if (PWRCTRL->VRSTATUS_b.SIMOBUCKST == PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
+        return 0;
+    }
+
+    /* This part is post-PCM (INFO1 trim rev >= 2) and post-A0, so the pre-PCM
+     * active-TON-trim block is skipped -- this mirrors the AmbiqSuite
+     * SIMOBUCK_INIT GT_A0 path. */
+
+    /* Low-power-mode buck switching (TON) trims. */
+    MCUCTRL->SIMOBUCK3_b.VDDCLPLOWTONTRIM  = 0xAu;
+    MCUCTRL->SIMOBUCK3_b.VDDCLPHIGHTONTRIM = 0xAu;
+    MCUCTRL->SIMOBUCK8_b.VDDFLPLOWTONTRIM  = 0xFu;
+    MCUCTRL->SIMOBUCK8_b.VDDFLPHIGHTONTRIM = 0xFu;
+
+    /* MANDATORY on Apollo4 Lite: short VDDF to VDDS to double the VDDF load
+     * capacitance (2.2uF + 2.2uF). Without this the buck cannot regulate and
+     * VRSTATUS.SIMOBUCKST never reaches ACT. */
+    MCUCTRL->PWRSW1_b.SHORTVDDFVDDSORVAL = 1u;
+    MCUCTRL->PWRSW1_b.SHORTVDDFVDDSOREN  = 1u;
+    MCUCTRL->SIMOBUCK13_b.ACTTRIMVDDS    = 0u;  /* VDDS trim -> 0 (now shorted) */
+
+    /* RX compensation on the VDDC / VDDS / VDDF rails. */
+    MCUCTRL->SIMOBUCK0 = MCUCTRL_SIMOBUCK0_VDDCRXCOMPEN_Msk |
+                         MCUCTRL_SIMOBUCK0_VDDSRXCOMPEN_Msk |
+                         MCUCTRL_SIMOBUCK0_VDDFRXCOMPEN_Msk;
+
+    /* Enable the buck (post-A0: just the enable here; the active/override bits
+     * and the parallel LDOs follow), then allow dynamic trim latching. */
+    PWRCTRL->VRCTRL_b.SIMOBUCKEN        = 1u;
+    MCUCTRL->SIMOBUCK15_b.TRIMLATCHOVER = 1u;
+
+    /* Force the buck active and run the CORE + MEM LDOs in parallel with SIMO
+     * (Apollo4 Lite requires this); set each *OVER override bit last. */
+    MCUCTRL->VRCTRL_b.SIMOBUCKPDNB   = 1u;
+    MCUCTRL->VRCTRL_b.SIMOBUCKRSTB   = 1u;
+    MCUCTRL->VRCTRL_b.SIMOBUCKACTIVE = 1u;
+    MCUCTRL->VRCTRL_b.SIMOBUCKOVER   = 1u;
+
+    MCUCTRL->VRCTRL_b.CORELDOCOLDSTARTEN = 0u;
+    MCUCTRL->VRCTRL |= MCUCTRL_VRCTRL_CORELDOACTIVE_Msk |
+                       MCUCTRL_VRCTRL_CORELDOACTIVEEARLY_Msk |
+                       MCUCTRL_VRCTRL_CORELDOPDNB_Msk;
+    MCUCTRL->VRCTRL_b.CORELDOOVER = 1u;
+
+    MCUCTRL->VRCTRL_b.MEMLDOCOLDSTARTEN = 0u;
+    MCUCTRL->VRCTRL |= MCUCTRL_VRCTRL_MEMLDOACTIVE_Msk |
+                       MCUCTRL_VRCTRL_MEMLDOACTIVEEARLY_Msk |
+                       MCUCTRL_VRCTRL_MEMLDOPDNB_Msk;
+    MCUCTRL->VRCTRL_b.MEMLDOOVER = 1u;
+
+    /* Wait for the buck to report active. */
+    spin = 1000u;
+    while (PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
+        tiku_cpu_ambiq_delay_us(1u);
+        if (spin-- == 0u) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
  * @brief Select the CPU operating frequency (perf mode).
  *
  * Apollo4 Lite supports Low-Power (96 MHz) and High-Performance "turbo"
@@ -80,11 +160,14 @@ void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
         : PWRCTRL_MCUPERFREQ_MCUPERFREQ_LP;
     uint32_t spin;
 
-    /* HP turbo requires the SIMOBUCK regulator active -- decline if it isn't,
-     * leaving the core in its current mode. */
+    /* HP turbo needs the SIMOBUCK regulator active. The SBL boots on the LDO,
+     * so bring the buck up on demand; if it won't reach active, decline HP and
+     * stay in the current mode rather than run 192 MHz undervolted. */
     if (want == PWRCTRL_MCUPERFREQ_MCUPERFREQ_HP &&
         PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
-        return;
+        if (tiku_ambiq_simobuck_enable() != 0) {
+            return;
+        }
     }
 
     if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS != want) {
