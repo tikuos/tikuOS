@@ -27,9 +27,9 @@
  *
  * To add a new command:
  *   1. Add a TIKU_SHELL_CMD_xxx flag here (set to 1)
- *   2. Create apps/cli/commands/tiku_shell_cmd_xxx.h and .c
- *   3. Add #include and table entry in tiku_cli.c
- *   4. Add the .c file to the Makefile APP=cli section
+ *   2. Create kernel/shell/commands/tiku_shell_cmd_xxx.h and .c
+ *   3. Add #include and table entry in tiku_shell.c
+ *   4. Add the .c file to the Makefile TIKU_SHELL_ENABLE section
  */
 
 #ifndef TIKU_SHELL_CONFIG_H_
