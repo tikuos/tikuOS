@@ -89,6 +89,8 @@ void tiku_ambiq_systick_handler(void)      __attribute__((weak, alias("ambiq_def
 void tiku_ambiq_uart2_isr(void)            __attribute__((weak, alias("ambiq_default_handler")));
 /** @brief STIMER Compare0 ISR (IRQ 32, htimer source) -- weak alias */
 void tiku_ambiq_stimer_cmpr0_isr(void)     __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief STIMER Compare1 ISR (IRQ 33, kernel tick) -- weak alias */
+void tiku_ambiq_stimer_cmpr1_isr(void)     __attribute__((weak, alias("ambiq_default_handler")));
 /** @brief GPIO0 pins0-31 ISR (IRQ 56) -- weak alias */
 void tiku_ambiq_gpio0_isr(void)            __attribute__((weak, alias("ambiq_default_handler")));
 
@@ -187,11 +189,12 @@ __attribute__((section(".vectors"), used)) = {
     /* External interrupts (apollo4l IRQn numbering) -------------------- */
     [16 + 17] = tiku_ambiq_uart2_isr,        /* IRQ 17  UART2            */
     [16 + 32] = tiku_ambiq_stimer_cmpr0_isr, /* IRQ 32  STIMER Compare0  */
+    [16 + 33] = tiku_ambiq_stimer_cmpr1_isr, /* IRQ 33  STIMER Compare1 (tick) */
     [16 + 56] = tiku_ambiq_gpio0_isr,        /* IRQ 56  GPIO0 pins0-31   */
 
     /* Everything else spins in the default handler; ranges skip the named slots. */
     [16 +  0 ... 16 + 16] = ambiq_default_handler,
     [16 + 18 ... 16 + 31] = ambiq_default_handler,
-    [16 + 33 ... 16 + 55] = ambiq_default_handler,
+    [16 + 34 ... 16 + 55] = ambiq_default_handler,
     [16 + 57 ... 16 + AMBIQ_NUM_EXT_IRQS - 1] = ambiq_default_handler,
 };

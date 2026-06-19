@@ -918,12 +918,14 @@ else ifeq ($(TIKU_PLATFORM),ambiq)
 SRCS += arch/ambiq/tiku_i2c_arch.c
 SRCS += arch/ambiq/tiku_adc_arch.c
 SRCS += arch/ambiq/tiku_onewire_arch.c
-SRCS += arch/ambiq/tiku_timer_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
 SRCS += arch/ambiq/tiku_lcd_arch.c
 ifeq ($(MCU),apollo4l)
 # Apollo4 Lite (Cortex-M4F) device/CPU backends.
+# Apollo4 Lite drives the kernel tick from the always-on STIMER (not SysTick,
+# which freezes in WFI sleep); apollo510 keeps the shared SysTick timer below.
+SRCS += arch/ambiq/tiku_timer_apollo4l.c
 SRCS += arch/ambiq/tiku_cpu_common_apollo4l.c
 SRCS += arch/ambiq/tiku_crt_early_apollo4l.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_apollo4l.c
@@ -938,6 +940,7 @@ SRCS += arch/ambiq/tiku_region_apollo4l.c
 SRCS += arch/ambiq/tiku_gpio_apollo4l.c
 else
 # Apollo510 (Cortex-M55) device/CPU backends.
+SRCS += arch/ambiq/tiku_timer_arch.c
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_crt_early.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c

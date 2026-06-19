@@ -8,10 +8,12 @@
  * tiku_wake_arch.c - Ambiq (Apollo510 / Apollo4 Lite) wake-source query
  *
  * Reports the interrupt sources currently armed to bring the core out of a WFI
- * sleep: the SysTick (system tick) via SYST_CSR.TICKINT, plus the NVIC
- * set-enable state of the STIMER (htimer), the console UART RX and GPIO0 lines.
- * The console UART IRQ differs per part (UART0=15 on apollo510, UART2=17 on
- * apollo4l); STIMER and the GPIO0 range match. Pure Cortex-M register reads --
+ * sleep: the system tick, plus the NVIC set-enable state of the STIMER (htimer),
+ * the console UART RX and GPIO0 lines. Two things differ per part: the console
+ * UART IRQ (UART0=15 on apollo510, UART2=17 on apollo4l), and the system-tick
+ * source -- apollo510 ticks off SysTick (SYST_CSR.TICKINT), while apollo4l ticks
+ * off the always-on STIMER compare-B (IRQ 33), since SysTick freezes in sleep
+ * there. STIMER-htimer and the GPIO0 range match. Pure Cortex-M register reads --
  * no AmbiqSuite dependency.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -34,6 +36,7 @@
 #define AMBIQ_IRQ_UART           15   /**< UART0 console RX IRQ (apollo510) */
 #endif
 #define AMBIQ_IRQ_STIMER_CMPR0   32   /**< STIMER Compare0 (htimer)  */
+#define AMBIQ_IRQ_STIMER_CMPR1   33   /**< STIMER Compare1 (apollo4l kernel tick) */
 #define AMBIQ_IRQ_GPIO0_FIRST    56   /**< First GPIO N0 IRQ line    */
 #define AMBIQ_IRQ_GPIO0_LAST     63   /**< Last GPIO N0 IRQ line     */
 
@@ -63,9 +66,18 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     }
     memset(out, 0, sizeof(*out));
 
+#if defined(TIKU_DEVICE_APOLLO4L)
+    /* Apollo4 Lite drives the kernel tick from STIMER compare-B (IRQ 33), not
+     * SysTick -- SysTick freezes in WFI sleep there, so it carries no TICKINT and
+     * the tick wake source is that NVIC line (tiku_timer_apollo4l.c). */
+    if (irq_enabled(AMBIQ_IRQ_STIMER_CMPR1)) {
+        out->sources |= TIKU_WAKE_SYSTICK;
+    }
+#else
     if (SYST_CSR & SYST_CSR_TICKINT) {
         out->sources |= TIKU_WAKE_SYSTICK;
     }
+#endif
     if (irq_enabled(AMBIQ_IRQ_STIMER_CMPR0)) {
         out->sources |= TIKU_WAKE_HTIMER;
     }
