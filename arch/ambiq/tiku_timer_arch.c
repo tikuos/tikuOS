@@ -5,12 +5,17 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.c - Apollo 510 system tick (Cortex-M SysTick)
+ * tiku_timer_arch.c - Apollo 510 system tick (always-on STIMER)
  *
- * Drives the system clock at TIKU_CLOCK_ARCH_SECOND Hz from the core
- * clock. SysTick is a Cortex-M core peripheral (same SCS registers on
- * M55 as M33), so this is bare-metal — no AmbiqSuite dependency except
- * the coarse busy-delay helper.
+ * On Ambiq the Cortex-M SysTick freezes during WFI sleep -- its clock is gated --
+ * so a WFI idle with only SysTick armed never wakes, and the tick does not
+ * advance while the core is parked (verified on hardware on Apollo4 Lite, the
+ * same trait on this M55 part). The system tick therefore runs from the always-on
+ * 32.768 kHz STIMER (compare-B / NVIC IRQ 33), which keeps running through sleep
+ * and wakes the core every tick -- see tiku_htimer_arch.c, which owns the STIMER
+ * and delivers the periodic interrupt into tiku_ambiq_tick_advance() below.
+ * SysTick is left configured as a free-running down-counter (no TICKINT) purely so
+ * the calibrated SYST_CVR micro-delay in tiku_cpu_common.c still works.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,48 +42,63 @@
 #define SYST_CSR_CLKSOURCE  (1u << 2)   /* processor clock */
 /** @} */
 
-/** @brief Monotonic tick counter incremented by each SysTick interrupt. */
+/** @brief STIMER crystal frequency (Hz) -- the periodic-tick time base. */
+#define STIMER_XTAL_HZ      32768u
+
+/** @brief Start the periodic STIMER tick; provided by tiku_htimer_arch.c. */
+extern void tiku_ambiq_stimer_tick_start(uint32_t period_counts);
+
+/** @brief Monotonic tick counter incremented by each STIMER tick interrupt. */
 static volatile unsigned long  s_ticks   = 0;
 
 /** @brief Whole-second counter derived from the sub-second divider. */
 static volatile unsigned long  s_seconds = 0;
 
-/**
- * @brief Sub-second tick accumulator; wraps at TIKU_CLOCK_ARCH_SECOND.
- */
+/** @brief Sub-second tick accumulator; wraps at TIKU_CLOCK_ARCH_SECOND. */
 static volatile unsigned int   s_subsec  = 0;
 
 /**
- * @brief Initialize the SysTick peripheral for the system clock
+ * @brief Initialize the system tick.
  *
- * Programs SysTick to fire every TIKU_CLOCK_ARCH_INTERVAL processor
- * clock cycles (derived from TIKU_CLOCK_ARCH_SECOND), using the core
- * clock source (no external reference). Enables the SysTick interrupt
- * so tiku_ambiq_systick_handler() is invoked on each reload.
+ * Leaves SysTick free-running (ENABLE | CLKSOURCE, no TICKINT) so the SYST_CVR
+ * micro-delay keeps working, then starts the always-on STIMER periodic tick at
+ * TIKU_CLOCK_ARCH_SECOND Hz (STIMER_XTAL_HZ / rate counts per tick). The STIMER
+ * survives WFI sleep, so the kernel clock advances and the core wakes every tick
+ * even while idle-parked.
  */
 void tiku_clock_arch_init(void) {
     SYST_RVR = (uint32_t)(TIKU_CLOCK_ARCH_INTERVAL - 1u);
     SYST_CVR = 0u;
-    SYST_CSR = SYST_CSR_CLKSOURCE | SYST_CSR_TICKINT | SYST_CSR_ENABLE;
+    SYST_CSR = SYST_CSR_CLKSOURCE | SYST_CSR_ENABLE;   /* free-run, no interrupt */
+
+    tiku_ambiq_stimer_tick_start((uint32_t)(STIMER_XTAL_HZ / TIKU_CLOCK_ARCH_SECOND));
 }
 
 /**
- * @brief SysTick exception handler — advances the system clock
+ * @brief Advance the system clock by one tick.
  *
- * Increments the tick counter and the sub-second accumulator on every
- * reload. When the accumulator reaches TIKU_CLOCK_ARCH_SECOND it rolls
- * over and bumps the whole-second counter. Calls tiku_sched_notify()
- * to wake the scheduler after each tick.
- *
- * Installed at vector slot 15 in tiku_crt_early.c.
+ * Called from the STIMER compare-B ISR (tiku_htimer_arch.c) every tick.
+ * Increments the tick + sub-second accumulators, rolls the whole-second counter,
+ * and wakes the scheduler.
  */
-void tiku_ambiq_systick_handler(void) {
+void tiku_ambiq_tick_advance(void) {
     s_ticks++;
     if (++s_subsec >= TIKU_CLOCK_ARCH_SECOND) {
         s_subsec = 0;
         s_seconds++;
     }
     tiku_sched_notify();
+}
+
+/**
+ * @brief SysTick exception handler (vector slot 15).
+ *
+ * Unused on Ambiq -- the tick runs off the STIMER and SysTick has no TICKINT --
+ * but kept as a defensive strong override of the weak vector alias: were SysTick
+ * ever armed, it advances the same clock rather than spinning.
+ */
+void tiku_ambiq_systick_handler(void) {
+    tiku_ambiq_tick_advance();
 }
 
 /**
@@ -115,7 +135,7 @@ void          tiku_clock_arch_set_seconds(unsigned long sec) { s_seconds = sec; 
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
     tiku_clock_arch_time_t target = (tiku_clock_arch_time_t)s_ticks + t;
     while ((long)(target - (tiku_clock_arch_time_t)s_ticks) > 0) {
-        /* spin — relies on SysTick advancing s_ticks */
+        /* spin -- relies on the STIMER tick advancing s_ticks */
     }
 }
 
@@ -132,9 +152,6 @@ void tiku_clock_arch_delay(unsigned int us) {
 
 /**
  * @brief Return the sub-tick fine counter (not yet modelled)
- *
- * Sub-tick resolution is not implemented on this port. Returns 0;
- * the maximum is reported as 1 to avoid division by zero in callers.
  *
  * @return 0 (coarse placeholder)
  */
