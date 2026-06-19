@@ -102,6 +102,62 @@
 /*---------------------------------------------------------------------------*/
 
 /**
+ * @brief Reset the BASIC variable namespace to its just-entered state.
+ *
+ * Clears every user-visible binding -- scalar vars (A..Z + the named pool),
+ * string vars and their heap, numeric and string arrays, and DEF FN
+ * definitions -- and rewinds the arena to basic_arena_mark so the element
+ * storage of any DIMmed arrays is reclaimed (the array counterpart of the
+ * per-RUN string-heap reset). The program line table is deliberately left
+ * untouched: RUN clears the variables but keeps the program, while NEW / LOAD
+ * clear the program separately via prog_clear().
+ *
+ * Shared by basic_alloc_state() (initial entry), NEW, RUN, and LOAD so all
+ * four agree on exactly what "fresh variables" means -- and so re-DIMming an
+ * array across runs no longer trips "array already DIMmed".
+ */
+static void
+basic_clear_vars(void)
+{
+    uint16_t i;
+
+    /* Reclaim DIMmed array element storage: it is the only thing allocated
+     * from the arena past the mark, so this rewind frees all of it at once. */
+    basic_arena.offset = basic_arena_mark;
+
+    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_vars[i] = 0;
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        basic_namedvar_names[i][0] = '\0';
+    }
+#if TIKU_BASIC_STRVARS_ENABLE
+    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_strvars[i] = NULL;
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        basic_namedstrvar_names[i][0] = '\0';
+    }
+    basic_str_heap_pos = 0;
+#endif
+#if TIKU_BASIC_DEFN_ENABLE
+    for (i = 0; i < TIKU_BASIC_DEFN_MAX; i++) basic_defns[i].name[0] = '\0';
+#endif
+#if TIKU_BASIC_ARRAYS_ENABLE
+    for (i = 0; i < 26u; i++) {
+        basic_arrays[i].data = NULL;
+        basic_arrays[i].dim1 = 0;
+        basic_arrays[i].dim2 = 0;
+        basic_arrays[i].is_string = 0;
+    }
+#if TIKU_BASIC_STRVARS_ENABLE
+    for (i = 0; i < 26u; i++) {
+        basic_str_arrays[i].data = NULL;
+        basic_str_arrays[i].dim1 = 0;
+        basic_str_arrays[i].dim2 = 0;
+        basic_str_arrays[i].is_string = 1;
+    }
+#endif
+#endif
+}
+
+/**
  * @brief Allocate (or reset) the BASIC working-set arena and bind
  *        each sub-region to its global pointer.
  *
@@ -192,37 +248,15 @@ basic_alloc_state(void)
         return -1;
     }
 
-    /* Arena reset doesn't zero memory, so initialise explicitly. */
+    /* Capture the arena high-water mark just past the fixed working set, so
+     * basic_clear_vars() can reclaim DIMmed array element storage by rewinding
+     * to here on NEW / RUN / LOAD. */
+    basic_arena_mark = basic_arena.offset;
+
+    /* Arena reset doesn't zero memory, so initialise explicitly: clear the
+     * line table here, then reset every variable via the shared helper (which
+     * also rewinds to the mark just captured -- a no-op on this first pass). */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
-    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_vars[i] = 0;
-    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
-        basic_namedvar_names[i][0] = '\0';
-    }
-#if TIKU_BASIC_STRVARS_ENABLE
-    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_strvars[i] = NULL;
-    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
-        basic_namedstrvar_names[i][0] = '\0';
-    }
-    basic_str_heap_pos = 0;
-#endif
-#if TIKU_BASIC_DEFN_ENABLE
-    for (i = 0; i < TIKU_BASIC_DEFN_MAX; i++) basic_defns[i].name[0] = '\0';
-#endif
-#if TIKU_BASIC_ARRAYS_ENABLE
-    for (i = 0; i < 26u; i++) {
-        basic_arrays[i].data = NULL;
-        basic_arrays[i].dim1 = 0;
-        basic_arrays[i].dim2 = 0;
-        basic_arrays[i].is_string = 0;
-    }
-#if TIKU_BASIC_STRVARS_ENABLE
-    for (i = 0; i < 26u; i++) {
-        basic_str_arrays[i].data = NULL;
-        basic_str_arrays[i].dim1 = 0;
-        basic_str_arrays[i].dim2 = 0;
-        basic_str_arrays[i].is_string = 1;
-    }
-#endif
-#endif
+    basic_clear_vars();
     return 0;
 }

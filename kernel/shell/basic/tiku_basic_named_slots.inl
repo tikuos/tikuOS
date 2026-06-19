@@ -121,6 +121,7 @@ basic_load_from_named(const char *name)
     memcpy(tmp, basic_named_slots[slot].data, n);
     tmp[n] = '\0';
     prog_clear();
+    basic_clear_vars();
     line = tmp;
     for (p = tmp; *p; p++) {
         if (*p == '\n' || *p == '\r') {

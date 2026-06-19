@@ -166,9 +166,11 @@ basic_load_from_persist(void)
     }
     tmp[n_read] = '\0';
 
-    /* Wipe the in-memory program before loading so the saved version
-     * is what the user actually gets (not merged onto stale lines). */
+    /* Wipe the in-memory program AND variables before loading, so the saved
+     * version is what the user actually gets: not merged onto stale lines, and
+     * not tripping "array already DIMmed" against a prior session's arrays. */
     prog_clear();
+    basic_clear_vars();
 
     /* Walk the buffer one line at a time, dispatching through
      * process_line.  Each line is a numbered statement, so each

@@ -72,6 +72,14 @@ typedef struct {
  * the bytes stay free for other features. */
 static tiku_arena_t  basic_arena;
 static int           basic_arena_ready;
+/* Arena offset just past the fixed working-set allocations (the line table,
+ * variable tables, stacks, string heap, and array descriptor tables). Array
+ * *element* storage is the only thing bump-allocated from the arena after this
+ * point -- lazily, on DIM -- so rewinding the arena to this mark reclaims
+ * exactly that storage without disturbing the fixed set: the array analogue of
+ * the per-RUN basic_str_heap_pos reset. Captured at the end of
+ * basic_alloc_state(); used by basic_clear_vars(). */
+static tiku_mem_arch_size_t basic_arena_mark;
 static basic_line_t *prog;
 static long         *basic_vars;
 static uint16_t     *gosub_stack;

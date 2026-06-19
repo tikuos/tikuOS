@@ -65,15 +65,13 @@ exec_run(void)
     basic_data_off    = 0;
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) basic_everys[i].active = 0;
     for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++) basic_onchgs[i].active = 0;
-    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_vars[i] = 0;
-#if TIKU_BASIC_STRVARS_ENABLE
-    /* Reset the string heap and unbind all string vars so each RUN
-     * starts with a fresh heap. The bump allocator never reclaims
-     * within a single run; this RUN-boundary reset is what keeps
-     * the budget bounded across many invocations. */
-    basic_str_heap_pos = 0;
-    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_strvars[i] = NULL;
-#endif
+    /* Each RUN starts with a fresh variable namespace: clear scalars, string
+     * vars + heap, named vars, arrays, and DEF FN, and reclaim DIMmed array
+     * storage. The bump allocator never reclaims within a single run; this
+     * RUN-boundary reset is what keeps the arena budget bounded across many
+     * invocations -- and lets a program that DIMs an array be RUN more than
+     * once without tripping "array already DIMmed". */
+    basic_clear_vars();
     basic_pc      = prog[idx].number;
     guard         = 100000UL;     /* hard cap on iterations */
 

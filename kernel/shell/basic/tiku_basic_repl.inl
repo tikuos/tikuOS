@@ -77,7 +77,7 @@ process_line(const char *raw)
         q = p;
         if (match_kw(&q, "LIST"))  { prog_list();   return; }
         q = p;
-        if (match_kw(&q, "NEW"))   { prog_clear();  SHELL_PRINTF("ok\n"); return; }
+        if (match_kw(&q, "NEW"))   { prog_clear(); basic_clear_vars(); SHELL_PRINTF("ok\n"); return; }
         q = p;
         if (match_kw(&q, "RUN"))   { exec_run();    return; }
         q = p;
