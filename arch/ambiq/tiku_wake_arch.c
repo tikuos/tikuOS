@@ -5,12 +5,14 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_wake_arch.c - Apollo 510 wake-source query
+ * tiku_wake_arch.c - Ambiq (Apollo510 / Apollo4 Lite) wake-source query
  *
- * Reports the interrupt sources currently armed to bring the M55 out of a WFI
+ * Reports the interrupt sources currently armed to bring the core out of a WFI
  * sleep: the SysTick (system tick) via SYST_CSR.TICKINT, plus the NVIC
- * set-enable state of the STIMER (htimer), UART0 (console RX) and GPIO0 lines.
- * Pure Cortex-M register reads -- no AmbiqSuite dependency.
+ * set-enable state of the STIMER (htimer), the console UART RX and GPIO0 lines.
+ * The console UART IRQ differs per part (UART0=15 on apollo510, UART2=17 on
+ * apollo4l); STIMER and the GPIO0 range match. Pure Cortex-M register reads --
+ * no AmbiqSuite dependency.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,8 +26,13 @@
 /** NVIC Interrupt Set-Enable Registers (ISER[0..4] cover the 135 IRQs). */
 #define NVIC_ISER         ((volatile uint32_t *)0xE000E100UL)
 
-/* Apollo510 IRQ numbers for the lines tikuOS maps to wake sources. */
-#define AMBIQ_IRQ_UART0          15   /**< UART0 console RX IRQ      */
+/* IRQ numbers for the lines tikuOS maps to wake sources. The console UART
+ * differs per Ambiq part; STIMER and the GPIO0 range are identical. */
+#if defined(TIKU_DEVICE_APOLLO4L)
+#define AMBIQ_IRQ_UART           17   /**< UART2 console RX IRQ (apollo4l) */
+#else
+#define AMBIQ_IRQ_UART           15   /**< UART0 console RX IRQ (apollo510) */
+#endif
 #define AMBIQ_IRQ_STIMER_CMPR0   32   /**< STIMER Compare0 (htimer)  */
 #define AMBIQ_IRQ_GPIO0_FIRST    56   /**< First GPIO N0 IRQ line    */
 #define AMBIQ_IRQ_GPIO0_LAST     63   /**< Last GPIO N0 IRQ line     */
@@ -62,7 +69,7 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     if (irq_enabled(AMBIQ_IRQ_STIMER_CMPR0)) {
         out->sources |= TIKU_WAKE_HTIMER;
     }
-    if (irq_enabled(AMBIQ_IRQ_UART0)) {
+    if (irq_enabled(AMBIQ_IRQ_UART)) {
         out->sources |= TIKU_WAKE_UART_RX;
     }
     for (g = AMBIQ_IRQ_GPIO0_FIRST; g <= AMBIQ_IRQ_GPIO0_LAST; g++) {
