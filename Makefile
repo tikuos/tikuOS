@@ -915,8 +915,9 @@ else ifeq ($(TIKU_PLATFORM),ambiq)
 # Apollo510 arch (Cortex-M55). GPIO/SPI/LCD are bundled here (like RP2350)
 # so they aren't double-added by the MSP430-guarded blocks further down.
 # Device-agnostic ambiq backends (stubs + WFI) -- shared by both Ambiq parts.
+# (ADC is part-specific: apollo4l has a real SAR-ADC backend, apollo510 keeps
+# the stub for now -- so it is added per-part in the split below, not here.)
 SRCS += arch/ambiq/tiku_i2c_arch.c
-SRCS += arch/ambiq/tiku_adc_arch.c
 SRCS += arch/ambiq/tiku_onewire_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
@@ -938,8 +939,10 @@ SRCS += arch/ambiq/tiku_mem_apollo4l.c
 SRCS += arch/ambiq/tiku_mpu_apollo4l.c
 SRCS += arch/ambiq/tiku_region_apollo4l.c
 SRCS += arch/ambiq/tiku_gpio_apollo4l.c
+SRCS += arch/ambiq/tiku_adc_apollo4l.c
 else
 # Apollo510 (Cortex-M55) device/CPU backends.
+SRCS += arch/ambiq/tiku_adc_arch.c
 SRCS += arch/ambiq/tiku_timer_arch.c
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_crt_early.c
