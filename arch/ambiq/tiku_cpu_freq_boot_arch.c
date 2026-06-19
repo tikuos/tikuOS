@@ -8,9 +8,11 @@
  * tiku_cpu_freq_boot_arch.c - Apollo 510 CPU/SoC bring-up + clocks
  *
  * Clock facts (Apollo510, hardware-confirmed):
- *   - CPU core: 96 MHz in Low-Power mode (the SBL default),
- *     250 MHz in High-Performance "turbo" mode. The DWT cycle counter (which
- *     counts core cycles) reads 96 MHz, confirming the LP core clock.
+ *   - CPU core: 96 MHz in Low-Power mode (the SBL default), 192 MHz in
+ *     High-Performance "turbo" mode (HFRC2 is 250 MHz, but the M55 runs 192 in
+ *     HP). The DWT cycle counter (which counts core cycles) reads 96 MHz,
+ *     confirming the LP core clock. HP/turbo is intentionally NOT enabled yet
+ *     -- it is kept as a future addition; see tiku_cpu_freq_ambiq_init().
  *   - SysTick timer clock: 48 MHz = core/2 on this Cortex-M55. That is the OS
  *     tick + busy-delay timebase (see TIKU_MAIN_CPU_HZ in tiku.h, and the
  *     SysTick delay in tiku_cpu_common.c) — NOT the core clock.
@@ -121,13 +123,21 @@ void tiku_cpu_boot_ambiq_init(void) {
  * @brief Select the CPU operating frequency (perf mode).
  *
  * Apollo510 has Low-Power (96 MHz) and High-Performance "turbo" (192 MHz)
- * modes via the PWRCTRL performance-mode request. LP is honoured here. HP
- * additionally requires raising the core voltage from the per-chip INFO1/OTP
- * trims (the SPOT path) before the switch -- NOT yet ported -- so an HP request
- * is declined and the core stays in LP rather than run 192 MHz on the LP
- * voltage rail (which would brown out). The OS tick is on the STIMER and the
- * busy-delay re-reads the live core clock, so a mode change doesn't disturb
- * timekeeping.
+ * modes via the PWRCTRL performance-mode request. Only LP is honoured here.
+ *
+ * HP/turbo is INTENTIONALLY DEFERRED -- kept as a future addition. Unlike
+ * Apollo4 Lite, where HP just needs the SIMO buck enabled with the voltages
+ * unchanged (see tiku_ambiq_simobuck_enable() in tiku_cpu_freq_boot_apollo4l.c),
+ * Apollo5 HP requires actively RAISING the core voltage (VDDC/VDDF) before the
+ * switch. The targets are per-chip factory trims in INFO1/OTP, selected by a
+ * temperature + CPU/GPU-state matrix (the AmbiqSuite "SPOT manager"), applied
+ * via a timed double-boost with HFRC2 forced on and an ICACHE-gated PWRSW
+ * supply override. A wrong trim/index risks an over-voltage, so this must be
+ * brought up HW-in-the-loop on a connected apollo510 EVB, never blind. Until
+ * then an HP request is declined and the core stays in LP rather than run
+ * 192 MHz on the LP voltage rail (which would brown out). The OS tick is on the
+ * STIMER and the busy-delay re-reads the live core clock, so a mode change
+ * doesn't disturb timekeeping.
  *
  * @param cpu_freq  Requested core frequency in MHz.
  */
@@ -135,8 +145,10 @@ void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
     uint32_t spin;
 
     if (cpu_freq > 96u) {
-        /* HP turbo needs the INFO1/OTP voltage step (not yet ported) -- decline
-         * so the M55 never runs at 192 MHz on the LP voltage rail. */
+        /* HP/turbo is a future addition: the per-chip SPOT voltage raise
+         * described above is not yet ported, so decline -- the M55 never runs
+         * at 192 MHz on the LP voltage rail. `freq 192` therefore reports
+         * "not applied" on apollo510 by design. */
         return;
     }
 
@@ -166,7 +178,7 @@ void tiku_cpu_boot_ambiq_power_wfi_enter(void) {
  * @brief Return the main CPU core clock frequency
  *
  * @return Core frequency in Hz as captured at boot from the perf-mode
- *         register (96 MHz LP or 250 MHz HP)
+ *         register (96 MHz LP or 192 MHz HP)
  */
 unsigned long tiku_cpu_ambiq_clock_get_hz(void) { return s_core_hz; }
 
