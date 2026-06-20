@@ -49,7 +49,23 @@ static unsigned long tiku_ambiq_core_hz(void) {
  * power tuning are added with the full-kernel backends.
  */
 static void tiku_ambiq_soc_init(void) {
-    /* Intentionally empty: inherit the boot ROM clock/power/cache state. */
+    /* Enable the Apollo4 instruction cache. The SBL configures CACHECFG but
+     * leaves it disabled (ENABLE=0); without it every instruction is fetched
+     * from MRAM and the core stalls -- badly so at 192 MHz, where the fixed
+     * MRAM latency costs twice as many core cycles, so HP turbo gives far less
+     * than its 2x on fetch-bound code. Enable the I-cache only: it caches
+     * read-only code, so there is no coherency concern with the MRAM
+     * persistence writes (mem-port-C, via the bootrom) -- the D-cache stays
+     * OFF for exactly that reason. Mirrors the AmbiqSuite cachectrl config
+     * (1-way, 128-bit line, 4096 entries) + enable + invalidate. */
+    CPU->CACHECFG = (1u << CPU_CACHECFG_CLKGATE_Pos)
+                  | (1u << CPU_CACHECFG_DATACLKGATE_Pos)
+                  | (1u << CPU_CACHECFG_LRU_Pos)
+                  | ((uint32_t)CPU_CACHECFG_CONFIG_W1_128B_4096E
+                        << CPU_CACHECFG_CONFIG_Pos)
+                  | (1u << CPU_CACHECFG_IENABLE_Pos);   /* I-cache; D-cache off */
+    CPU->CACHECFG_b.ENABLE      = 1u;
+    CPU->CACHECTRL_b.INVALIDATE = 1u;
 }
 
 /**
