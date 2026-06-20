@@ -1799,20 +1799,32 @@ endif
 # Prefer /dev/ttyUSB* (FTDI/CP2102 external adapter) over ttyACM*
 # (eZ-FET backchannel) since external adapters are used for SLIP
 # networking and avoid the eZ-FET DTR-reset bug.
+# NOTE: do NOT use "ls GLOB | head -1" here -- a pipeline's exit status is
+# head's, which is 0 even when the glob matched nothing, so a "|| fallback"
+# chain short-circuits on the first (empty) clause and never reaches the
+# Linux device names.  Loop with [ -e ] instead: a non-matching glob stays
+# literal and fails the test, so it is skipped cleanly (works on Linux +
+# macOS).  Priority: external USB-serial -> TI/2047 ACM backchannel ->
+# any ACM (incl. the SEGGER J-Link VCOM, VID 1366) / macOS usbmodem.
 PORT ?= $(shell \
-	ls /dev/tty.usbmodem* /dev/tty.usbserial* 2>/dev/null | head -1 || \
-	ls /dev/ttyUSB* 2>/dev/null | head -1 || \
-	(for dev in /dev/ttyACM*; do \
+	for p in /dev/ttyUSB* /dev/tty.usbserial*; do \
+		[ -e "$$p" ] && { echo "$$p"; exit 0; }; \
+	done; \
+	for dev in /dev/ttyACM*; do \
 		[ -e "$$dev" ] || continue; \
 		vid=$$(cat "/sys/class/tty/$$(basename $$dev)/device/../idVendor" 2>/dev/null); \
 		if [ "$$vid" = "0451" ] || [ "$$vid" = "2047" ]; then echo "$$dev"; exit 0; fi; \
 	done; \
-	ls /dev/ttyACM* 2>/dev/null | head -1))
+	for p in /dev/ttyACM* /dev/tty.usbmodem*; do \
+		[ -e "$$p" ] && { echo "$$p"; exit 0; }; \
+	done)
 
 monitor:
 	@if [ -z "$(PORT)" ]; then \
 		echo "Error: No serial port found (/dev/ttyUSB* or /dev/ttyACM*)"; \
-		echo "  Is the FTDI adapter or LaunchPad plugged in?"; \
+		echo "  Plug in the USB-serial adapter / LaunchPad, or the board's"; \
+		echo "  J-Link VCOM (shows up as /dev/ttyACM*)."; \
+		echo "  Or point it at a specific port: make monitor PORT=/dev/ttyACM0"; \
 		exit 1; \
 	fi; \
 	if command -v picocom >/dev/null 2>&1; then \
