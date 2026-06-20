@@ -17,7 +17,8 @@
  *   1. Mask IRQs (the scheduler re-enables them in tiku_sched_loop()).
  *   2. Set SP and VTOR explicitly.
  *   3. Enable the FPU (CPACR CP10/CP11) -- the build uses the hard-float ABI.
- *   4. Copy .data (MRAM->TCM), zero .bss, zero .ssram.
+ *   4. Power shared SRAM (when .ssram is used); copy .data (MRAM->TCM),
+ *      zero .bss, zero .ssram.
  *   5. main().
  *
  * Fully bare-metal: no AmbiqSuite dependency.
@@ -26,6 +27,7 @@
  */
 
 #include <stdint.h>
+#include "apollo4l.h"   /* PWRCTRL (shared-SRAM power-enable) -- register header only */
 
 /*---------------------------------------------------------------------------*/
 /* Linker-script symbols                                                     */
@@ -103,8 +105,9 @@ void tiku_ambiq_gpio0_isr(void)            __attribute__((weak, alias("ambiq_def
  *
  * Executed immediately after the boot ROM transfers control. Unlike the
  * Cortex-M55 startup, there is no EPU power-state, no Low-Overhead-Branch, and
- * no SecureFault. The shared SRAM is left untouched (the minimal/smoke build
- * keeps .ssram empty; the full-kernel build powers it when the tier needs it).
+ * no SecureFault. The shared SRAM banks are powered on here when the build
+ * places statics in .ssram (the SRAM tier's backing pool); the minimal/smoke
+ * build keeps .ssram empty and leaves SSRAM unpowered.
  */
 void tiku_ambiq_reset_handler(void) __attribute__((naked, section(".text"), used));
 
@@ -138,8 +141,25 @@ void tiku_ambiq_reset_handler(void) {
         *dst++ = 0U;
     }
 
+    /* Power up the shared SRAM before touching .ssram. Apollo4 Lite has two
+     * 1 MB SSRAM groups; the SBL may leave them off, so enable both
+     * (PWRENSSRAM = ALL = 0x3) and bound-wait on SSRAMPWRST so a stuck power
+     * FSM can't hang the boot. Done only when the build actually places statics
+     * in .ssram (the SRAM tier's backing pool) -- the minimal/smoke build keeps
+     * .ssram empty and stays low-power. The cache is still off here, so this
+     * write and the zero-init below reach SSRAM directly. Mirrors the apollo510
+     * sequence (tiku_crt_early.c), which powers three groups. */
+    if (&__ssram_start < &__ssram_end) {
+        PWRCTRL->SSRAMPWREN_b.PWRENSSRAM = 0x3u;   /* both 1 MB groups */
+        {
+            uint32_t guard = 1000000u;
+            while ((PWRCTRL->SSRAMPWRST_b.SSRAMPWRST != 0x3u) && --guard) {
+            }
+        }
+    }
+
     /* Zero the SSRAM-resident static buffers (.ssram). Empty in the minimal
-     * build (loop is a no-op); the full-kernel build powers the SRAM first. */
+     * build (loop is a no-op); powered just above in the full build. */
     dst = &__ssram_start;
     while (dst < &__ssram_end) {
         *dst++ = 0U;
