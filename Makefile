@@ -1393,6 +1393,20 @@ endif
 # Only enabled kits compile their sources. A kernel-only build
 # (no apps, no examples) compiles ZERO files from tikukits/.
 # ---------------------------------------------------------------------------
+
+# Turbo benchmark (TIKU_TURBO_BENCH=1): an app-layer firmware that runs heavy
+# TikuKits workloads at 96 MHz (LP) and 192 MHz (HP) and emits serial markers
+# so the host times the wall-clock speedup. Enable the crypto/maths/ml kits and
+# add the benchmark source (after the SRCS=main.c reset, so it sticks); main.c
+# calls turbo_bench_run() then halts. kernel/ is untouched.
+ifeq ($(TIKU_TURBO_BENCH),1)
+CFLAGS += -DTIKU_TURBO_BENCH=1
+TIKU_KIT_CRYPTO_ENABLE := 1
+TIKU_KIT_MATHS_ENABLE  := 1
+TIKU_KIT_ML_ENABLE     := 1
+SRCS   += apps/turbo_bench/turbo_bench.c
+endif
+
 ifeq ($(HAS_TIKUKITS),1)
 
 ifeq ($(TIKU_KIT_GFX_ENABLE),1)

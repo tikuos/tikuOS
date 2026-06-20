@@ -89,6 +89,17 @@ int main(void) {
 
   MAIN_PRINTF("Boot complete\n");
 
+#if TIKU_TURBO_BENCH
+  /* Frequency-scaling benchmark firmware: run heavy TikuKits workloads at
+   * 96 MHz (LP) and 192 MHz (HP), emit serial markers for host-side timing,
+   * then halt (never reaches the shell/scheduler). */
+  {
+    extern void turbo_bench_run(void);
+    turbo_bench_run();
+  }
+  for (;;) { /* benchmark complete -- halt */ }
+#endif
+
 #if TIKU_SHELL_ENABLE
   tiku_shell_init();
 #endif
