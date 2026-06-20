@@ -49,23 +49,45 @@ static unsigned long tiku_ambiq_core_hz(void) {
  * power tuning are added with the full-kernel backends.
  */
 static void tiku_ambiq_soc_init(void) {
-    /* Enable the Apollo4 instruction cache. The SBL configures CACHECFG but
-     * leaves it disabled (ENABLE=0); without it every instruction is fetched
-     * from MRAM and the core stalls -- badly so at 192 MHz, where the fixed
-     * MRAM latency costs twice as many core cycles, so HP turbo gives far less
-     * than its 2x on fetch-bound code. Enable the I-cache only: it caches
-     * read-only code, so there is no coherency concern with the MRAM
-     * persistence writes (mem-port-C, via the bootrom) -- the D-cache stays
-     * OFF for exactly that reason. Mirrors the AmbiqSuite cachectrl config
+    /* Enable the Apollo4 CPU cache. The SBL configures CACHECFG but leaves it
+     * disabled (ENABLE=0); without it every fetch from MRAM stalls the core --
+     * worse at 192 MHz, where the fixed MRAM latency costs twice the core
+     * cycles, so HP turbo gave far less than its 2x on fetch-bound code. Enable
+     * BOTH the I-cache (code) and the D-cache (read-only MRAM data). The CPU
+     * never writes MRAM through the cache -- the persistence path programs it
+     * out-of-band via the bootrom -- and tiku_mem_arch_nvm_flush() calls
+     * tiku_cpu_dcache_invalidate() after each program, so the D-cache stays
+     * coherent with the persist layer. Mirrors the AmbiqSuite cachectrl config
      * (1-way, 128-bit line, 4096 entries) + enable + invalidate. */
     CPU->CACHECFG = (1u << CPU_CACHECFG_CLKGATE_Pos)
                   | (1u << CPU_CACHECFG_DATACLKGATE_Pos)
                   | (1u << CPU_CACHECFG_LRU_Pos)
                   | ((uint32_t)CPU_CACHECFG_CONFIG_W1_128B_4096E
                         << CPU_CACHECFG_CONFIG_Pos)
-                  | (1u << CPU_CACHECFG_IENABLE_Pos);   /* I-cache; D-cache off */
+                  | (1u << CPU_CACHECFG_IENABLE_Pos)
+                  | (1u << CPU_CACHECFG_DENABLE_Pos);   /* I-cache + D-cache */
     CPU->CACHECFG_b.ENABLE      = 1u;
     CPU->CACHECTRL_b.INVALIDATE = 1u;
+}
+
+/**
+ * @brief Apollo4 Lite data-cache maintenance (routed from tiku_cpu_dcache_*).
+ *
+ * Clean is a no-op: the CACHECTRL D-cache only ever holds read-only MRAM data
+ * (the CPU never writes MRAM through it). Invalidate flushes the whole cache --
+ * the Apollo4 CACHECTRL has no by-range op -- which is coarse but correct, and
+ * NVM flushes are rare. The barrier pair lets the invalidate take effect before
+ * the next fetch/load.
+ */
+void tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len) {
+    (void)addr; (void)len;   /* nothing dirty to write back */
+}
+
+void tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len) {
+    (void)addr; (void)len;
+    CPU->CACHECTRL_b.INVALIDATE = 1u;
+    __DSB();
+    __ISB();
 }
 
 /**

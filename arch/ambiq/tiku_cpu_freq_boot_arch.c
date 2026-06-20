@@ -211,3 +211,18 @@ unsigned long tiku_cpu_ambiq_aclk_get_hz(void)  { return 32768UL; }
  * @return 0 (no fault)
  */
 int           tiku_cpu_ambiq_clock_has_fault(void) { return 0; }
+
+/**
+ * @brief Apollo510 (M55) data-cache maintenance (routed from tiku_cpu_dcache_*).
+ *
+ * The M55 has architectural L1 I/D caches (enabled in soc_init), so coherency
+ * with out-of-band MRAM writes needs by-address SCB ops: clean the staging
+ * buffer before the bootrom reads it, invalidate the programmed page after.
+ */
+void tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len) {
+    SCB_CleanDCache_by_Addr((void *)(uintptr_t)addr, (int32_t)len);
+}
+
+void tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len) {
+    SCB_InvalidateDCache_by_Addr((void *)(uintptr_t)addr, (int32_t)len);
+}

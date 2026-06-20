@@ -94,4 +94,15 @@ unsigned long tiku_cpu_ambiq_aclk_get_hz(void);
  */
 int           tiku_cpu_ambiq_clock_has_fault(void);
 
+/**
+ * @brief Clean / invalidate the data cache over [addr, addr+len).
+ *
+ * Per-part: Apollo510 (M55) uses the SCB by-address ops; Apollo4 Lite uses
+ * the CACHECTRL (clean is a no-op -- its MRAM data cache is read-only from the
+ * CPU; invalidate flushes the whole cache, lacking a by-range op). Routed from
+ * the portable tiku_cpu_dcache_* HAL.
+ */
+void          tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len);
+void          tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len);
+
 #endif /* TIKU_AMBIQ_CPU_FREQ_BOOT_ARCH_H_ */

@@ -35,6 +35,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "tiku_mem_arch.h"
+#include <hal/tiku_cpu.h>   /* tiku_cpu_dcache_invalidate (D-cache coherency) */
 
 /* Live .uninit working copy + the reserved MRAM mirror page (apollo4l.ld). */
 extern uint8_t  __uninit_start;
@@ -162,5 +163,10 @@ void tiku_mem_arch_nvm_flush(void) {
                            (uint32_t)(uintptr_t)g_nvm_snap, dst_word_off,
                            (uint32_t)(prog_bytes / 4U));
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
-    /* No cache maintenance: the Cortex-M4 has no SCB L1 cache. */
+
+    /* The bootrom wrote MRAM out-of-band; drop any cached copies of the page so
+     * same-session reads of the mirror see the new data. With the D-cache
+     * enabled (soc_init) this is required for coherency; the Apollo4 CACHECTRL
+     * has no by-range op so it invalidates the whole cache. */
+    tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
 }

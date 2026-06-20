@@ -27,7 +27,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "tiku_mem_arch.h"
-#include "apollo510.h"   /* SCB_{Clean,Invalidate}DCache_by_Addr (core_cm55.h) */
+#include <hal/tiku_cpu.h>   /* tiku_cpu_dcache_{clean,invalidate} (D-cache coherency) */
 
 /* Live .uninit working copy + the reserved MRAM mirror page (apollo510.ld). */
 extern uint8_t  __uninit_start;
@@ -198,7 +198,7 @@ void tiku_mem_arch_nvm_flush(void) {
     }
 
     /* Write the snapshot back to SSRAM so the MRAM programmer reads it there. */
-    SCB_CleanDCache_by_Addr((void *)g_nvm_snap, (int32_t)prog_bytes);
+    tiku_cpu_dcache_clean((const void *)g_nvm_snap, prog_bytes);
 
     dst_word_off =
         ((uint32_t)(uintptr_t)&__tiku_nvm_mram_start - AMBIQ_MRAM_BASE) >> 2;
@@ -213,5 +213,5 @@ void tiku_mem_arch_nvm_flush(void) {
 
     /* Drop any cached copies of the freshly-programmed page so same-session
      * reads of the mirror see the new data. */
-    SCB_InvalidateDCache_by_Addr((void *)&__tiku_nvm_mram_start, (int32_t)prog_bytes);
+    tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
 }

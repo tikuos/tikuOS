@@ -160,6 +160,26 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
 #endif
 }
 
+void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
+#if defined(PLATFORM_MSP430)
+    (void)addr; (void)len;            /* no data cache */
+#elif defined(PLATFORM_RP2350)
+    (void)addr; (void)len;            /* XIP cache: no D-side coherency op needed */
+#elif defined(PLATFORM_AMBIQ)
+    tiku_cpu_ambiq_dcache_clean(addr, len);
+#endif
+}
+
+void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
+#if defined(PLATFORM_MSP430)
+    (void)addr; (void)len;
+#elif defined(PLATFORM_RP2350)
+    (void)addr; (void)len;
+#elif defined(PLATFORM_AMBIQ)
+    tiku_cpu_ambiq_dcache_invalidate(addr, len);
+#endif
+}
+
 /*---------------------------------------------------------------------------*/
 /* CLOCK RATE QUERIES                                                        */
 /*---------------------------------------------------------------------------*/

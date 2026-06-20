@@ -90,6 +90,32 @@ unsigned long tiku_cpu_aclk_hz(void);
 int tiku_cpu_clock_has_fault(void);
 
 /*---------------------------------------------------------------------------*/
+/* CPU DATA-CACHE MAINTENANCE                                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Clean (write back) the data cache over an address range.
+ *
+ * Ensures dirty cache lines covering [addr, addr+len) reach memory so an
+ * out-of-band reader (a ROM/DMA agent) sees them. The memory module calls
+ * this before handing a staging buffer to the NVM programmer. A no-op where
+ * there is no data cache (MSP430) or the region is not cached.
+ */
+void tiku_cpu_dcache_clean(const void *addr, unsigned long len);
+
+/**
+ * @brief Invalidate the data cache over an address range.
+ *
+ * Drops cached copies of [addr, addr+len) so the next read fetches fresh data
+ * after an out-of-band writer (the bootrom NVM programmer) changed memory
+ * underneath the cache -- the key to keeping the D-cache coherent with the
+ * persist layer. A no-op without a data cache; on parts whose controller has
+ * no by-range op (Apollo4 CACHECTRL) the whole cache is invalidated (coarser
+ * but correct).
+ */
+void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len);
+
+/*---------------------------------------------------------------------------*/
 /* IDLE / LOW-POWER MODES                                                    */
 /*---------------------------------------------------------------------------*/
 
