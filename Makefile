@@ -1109,6 +1109,13 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
+# slip command: only when the net stack is compiled in (it starts the net
+# process). Keeps one OS image: interactive shell by default, SLIP/IP on
+# demand via the `slip` command.
+ifeq ($(TIKU_KIT_NET_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_slip.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_ping.c
+endif
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
 endif

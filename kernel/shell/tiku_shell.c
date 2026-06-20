@@ -133,6 +133,12 @@
 #if TIKU_SHELL_CMD_WATCH
 #include "commands/tiku_shell_cmd_watch.h"
 #endif
+#if TIKU_SHELL_CMD_SLIP
+#include "commands/tiku_shell_cmd_slip.h"
+#endif
+#if TIKU_SHELL_CMD_PING
+#include "commands/tiku_shell_cmd_ping.h"
+#endif
 #if TIKU_SHELL_CMD_CALC
 #include "commands/tiku_shell_cmd_calc.h"
 #endif
@@ -434,6 +440,12 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_WATCH
     {"watch",   "Read VFS node every N sec",   tiku_shell_cmd_watch},
+#endif
+#if TIKU_SHELL_CMD_SLIP
+    {"slip",    "Hand the UART to SLIP/IP net", tiku_shell_cmd_slip},
+#endif
+#if TIKU_SHELL_CMD_PING
+    {"ping",    "ICMP echo a host over SLIP",   tiku_shell_cmd_ping},
 #endif
 #if TIKU_SHELL_CMD_CHANGED
     {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},
@@ -858,8 +870,17 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
          * /sys/timer/count see it as active during execution. */
         tiku_timer_reset(&cli.timer);
 
-        /* Drain all available characters from the backend */
-        while (tiku_shell_io_rx_ready()) {
+        /* Drain all available characters from the backend -- unless SLIP or
+         * ping mode has handed the UART to the net engine (binary SLIP
+         * framing), in which case the shell yields all input to it. */
+        while (
+#if TIKU_SHELL_CMD_SLIP
+               !tiku_shell_cmd_slip_active() &&
+#endif
+#if TIKU_SHELL_CMD_PING
+               !tiku_shell_cmd_ping_active() &&
+#endif
+               tiku_shell_io_rx_ready()) {
             ch = tiku_shell_io_getc();
             if (ch < 0) {
                 break;
@@ -916,6 +937,11 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 }
                 cli.pos      = 0;
                 cli.hist_age = -1;
+#if TIKU_SHELL_CMD_PING
+                /* ping streams its replies below and restores the prompt when
+                 * the run ends -- don't print a stray one over its output. */
+                if (!tiku_shell_cmd_ping_active())
+#endif
                 shell_print_prompt();
 
             } else if (ch == '\b' || ch == 127) {
@@ -969,6 +995,16 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
          * mode, idempotent re-subscribe (self-heal) in event
          * mode. */
         tiku_shell_cmd_watch_tick();
+#endif
+#if TIKU_SHELL_CMD_PING
+        /* Service an active ping run: send/await probes across ticks.  When
+         * the run completes the mode clears and we restore the prompt. */
+        if (tiku_shell_cmd_ping_active()) {
+            tiku_shell_cmd_ping_tick();
+            if (!tiku_shell_cmd_ping_active()) {
+                shell_print_prompt();
+            }
+        }
 #endif
 
 #if TIKU_SHELL_TCP_ENABLE

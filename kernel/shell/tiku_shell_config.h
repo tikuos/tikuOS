@@ -166,6 +166,24 @@
 #ifndef TIKU_SHELL_CMD_WATCH
 #define TIKU_SHELL_CMD_WATCH   1  /**< watch   - Periodic VFS read until Ctrl+C */
 #endif
+/* slip: hand the console UART to SLIP/IP networking.  Auto-on only when the
+ * net stack is compiled in (TIKU_KIT_NET_ENABLE=1) -- the command starts the
+ * net process, which does not exist otherwise. */
+#ifndef TIKU_SHELL_CMD_SLIP
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#define TIKU_SHELL_CMD_SLIP    1  /**< slip    - Hand the UART to SLIP/IP net */
+#else
+#define TIKU_SHELL_CMD_SLIP    0
+#endif
+#endif
+/* ping: ICMP echo over SLIP.  Same gating as slip (needs the net stack). */
+#ifndef TIKU_SHELL_CMD_PING
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#define TIKU_SHELL_CMD_PING    1  /**< ping    - ICMP echo a host over SLIP */
+#else
+#define TIKU_SHELL_CMD_PING    0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
 #endif
