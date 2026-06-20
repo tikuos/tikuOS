@@ -122,6 +122,7 @@
 #define TIKU_DEVICE_FRAM_SIZE       (1998848UL)   /**< ~1.9 MB usable MRAM. */
 #define TIKU_DEVICE_FRAM_START      0x00018000UL  /**< First usable MRAM addr. */
 #define TIKU_DEVICE_FRAM_END        0x001FFFFFUL  /**< Last MRAM address (2 MB). */
+#define TIKU_DEVICE_NVM_LABEL       "MRAM"        /**< NVM technology (UI label). */
 
 /**
  * @brief Init-table and app-slot sizing constants (same as Apollo510).

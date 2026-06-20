@@ -121,6 +121,7 @@
 #define TIKU_DEVICE_FRAM_SIZE       (4128768UL)   /**< ~3.94 MB usable MRAM. */
 #define TIKU_DEVICE_FRAM_START      0x00410000UL  /**< First usable MRAM addr. */
 #define TIKU_DEVICE_FRAM_END        0x007FFFFFUL  /**< Last MRAM address. */
+#define TIKU_DEVICE_NVM_LABEL       "MRAM"        /**< NVM technology (UI label). */
 
 /**
  * @brief Init-table and app-slot sizing constants.

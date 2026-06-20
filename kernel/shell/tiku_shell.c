@@ -59,6 +59,7 @@
 #include "tiku_shell.h"
 #include "tiku_shell_config.h"
 #include "tiku_shell_parser.h"
+#include "tiku_shell_cwd.h"          /* working directory for the path-aware prompt */
 #include <kernel/timers/tiku_timer.h>
 #include <kernel/timers/tiku_htimer.h>   /* htimer self-test command */
 #include <kernel/timers/tiku_clock.h>
@@ -273,6 +274,18 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
  * @param label  Static string shown as the section heading.
  */
 #define CMD_CATEGORY(label)  { label, NULL, NULL }
+
+/*
+ * Print the interactive prompt.  Single definition so every reprint
+ * (banner, after-command, Ctrl+C, watch-cancel, TCP reconnect) stays
+ * identical, and so the prompt can show the shell's current working
+ * directory -- the user always sees where they are, e.g.
+ * "tikuOS:/sys/device> ".  The cwd string (tiku_shell_cwd_get()) always
+ * starts with '/' and is at most TIKU_SHELL_CWD_SIZE bytes.
+ */
+static void shell_print_prompt(void) {
+    SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS:%s> " SH_RST, tiku_shell_cwd_get());
+}
 
 #if TIKU_SHELL_CMD_HTIMER
 /*
@@ -769,12 +782,19 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     SHELL_PRINTF(SH_RST SH_DIM "  v%s\n", TIKU_VERSION);
     SHELL_PRINTF("  %s" SH_RST "\n", TIKU_TAGLINE);
     SHELL_PRINTF("\n");
-    SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "  |  SRAM %luB  FRAM %luKB\n",
+    /* NVM technology label is per-device: MRAM on Apollo, Flash on RP2350,
+     * FRAM on MSP430.  Fall back to the MSP430-era "FRAM" if a device header
+     * has not declared one. */
+#ifndef TIKU_DEVICE_NVM_LABEL
+#define TIKU_DEVICE_NVM_LABEL "FRAM"
+#endif
+    SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "  |  SRAM %luB  %s %luKB\n",
                  TIKU_DEVICE_NAME,
                  (unsigned long)TIKU_DEVICE_RAM_SIZE,
+                 TIKU_DEVICE_NVM_LABEL,
                  (unsigned long)(TIKU_DEVICE_FRAM_SIZE / 1024));
     SHELL_PRINTF(SH_DIM "  Type 'help' for commands." SH_RST "\n\n");
-    SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
+    shell_print_prompt();
 #endif
 
     tiku_timer_set_event(&cli.timer, TIKU_SHELL_POLL_TICKS);
@@ -829,7 +849,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "  |  Telnet Shell\n",
                          TIKU_DEVICE_NAME);
             SHELL_PRINTF(SH_DIM "  Type 'help' for commands." SH_RST "\n\n");
-            SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
+            shell_print_prompt();
             tiku_shell_io_tcp_flush();
         }
 #endif
@@ -854,8 +874,8 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             if (tiku_shell_cmd_watch_active()) {
                 if (ch == 0x03) {
                     tiku_shell_cmd_watch_cancel();
-                    SHELL_PRINTF("^C\n" SH_GREEN SH_BOLD
-                                 "tikuOS> " SH_RST);
+                    SHELL_PRINTF("^C\n");
+                    shell_print_prompt();
                 }
                 continue;
             }
@@ -896,7 +916,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 }
                 cli.pos      = 0;
                 cli.hist_age = -1;
-                SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS> " SH_RST);
+                shell_print_prompt();
 
             } else if (ch == '\b' || ch == 127) {
                 /* Backspace */
@@ -919,7 +939,8 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
                 cli.pos      = 0;
                 cli.hist_age = -1;
-                SHELL_PRINTF("^C\n" SH_GREEN SH_BOLD "tikuOS> " SH_RST);
+                SHELL_PRINTF("^C\n");
+                shell_print_prompt();
 
             } else if (cli.pos < TIKU_SHELL_LINE_SIZE - 1) {
                 /* Printable character — store and optionally echo.

@@ -125,6 +125,7 @@
 #define TIKU_DEVICE_FRAM_SIZE       (4UL * 1024UL * 1024UL)
 #define TIKU_DEVICE_FRAM_START      0x10000000UL
 #define TIKU_DEVICE_FRAM_END        0x103FFFFFUL
+#define TIKU_DEVICE_NVM_LABEL       "Flash"   /**< NVM technology (UI label). */
 
 /**
  * @brief Init-table backing region size in bytes.
