@@ -61,17 +61,22 @@ tiku_shell_cmd_slip_enable(void)
 void
 tiku_shell_cmd_slip(uint8_t argc, const char *argv[])
 {
-    (void)argc;
-    (void)argv;
+    uint8_t want;
 
-    if (slip_on) {
-        slip_on = 0;
-        SHELL_PRINTF("SLIP off -- console-only on the UART.\n");
-        return;
+    if (argc >= 2 && argv[1][0] == 'o' && argv[1][1] == 'n') {
+        want = 1u;                          /* "slip on"  -> enable */
+    } else if (argc >= 2 && argv[1][0] == 'o' && argv[1][1] == 'f') {
+        want = 0u;                          /* "slip off" -> disable */
+    } else {
+        want = slip_on ? 0u : 1u;           /* "slip"     -> toggle */
     }
 
-    tiku_shell_cmd_slip_enable();
-    SHELL_PRINTF("SLIP on. UART now carries SLIP/IP frames + the console;\n");
-    SHELL_PRINTF("drive it with the slmux host tool. 'ping <ip>' works too.\n");
-    SHELL_PRINTF("Run 'slip' again to return to console-only (no reset).\n");
+    if (want) {
+        tiku_shell_cmd_slip_enable();
+        SHELL_PRINTF("SLIP on. UART carries SLIP/IP + console; drive it with"
+                     " the slmux host tool ('ping <ip>' works too).\n");
+    } else {
+        slip_on = 0;
+        SHELL_PRINTF("SLIP off -- console-only on the UART.\n");
+    }
 }
