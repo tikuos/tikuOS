@@ -1011,7 +1011,16 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 break;
             }
 #if TIKU_SHELL_CMD_SLIP
-            if (tiku_shell_cmd_slip_active() && shell_net_demux(ch)) {
+            if (tiku_shell_cmd_slip_active()
+#if TIKU_SHELL_TCP_ENABLE
+                /* When a telnet client owns the line editor, getc() returns
+                 * its TCP bytes -- those are NOT SLIP frames, so must not go
+                 * to the demux (which is mid-frame for the UART transport and
+                 * would swallow them).  The UART SLIP transport is drained
+                 * separately above. */
+                && tiku_shell_io_get_backend() != &tiku_shell_io_tcp
+#endif
+                && shell_net_demux(ch)) {
                 continue;
             }
 #endif
