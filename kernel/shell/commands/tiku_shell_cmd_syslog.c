@@ -1,0 +1,93 @@
+/*
+ * Tiku Operating System
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_shell_cmd_syslog.c - "syslog" command implementation (remote log line)
+ *
+ * Sends one RFC 3164 syslog datagram (UDP port 514) over SLIP to the SLIP
+ * host, at severity INFO / facility LOCAL0 (the library defaults: hostname
+ * "tikuOS", tag "os").  Syslog is fire-and-forget -- there is no reply -- so
+ * the command sends synchronously and returns; no per-tick driver is needed.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*---------------------------------------------------------------------------*/
+/* INCLUDES                                                                  */
+/*---------------------------------------------------------------------------*/
+
+#include "tiku_shell_cmd_syslog.h"
+#include "tiku_shell_cmd_slip.h"                     /* tiku_shell_cmd_slip_enable */
+#include <kernel/shell/tiku_shell.h>                 /* SHELL_PRINTF */
+#include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_IP_ADDR */
+#include <tikukits/net/ipv4/tiku_kits_net_udp.h>     /* udp_init */
+#include <tikukits/net/ipv4/tiku_kits_net_syslog.h>
+
+/* Bound on the assembled message; the device's UDP payload is capped well
+ * below this by the syslog library anyway. */
+#define SYSLOG_MSG_MAX  96u
+
+void
+tiku_shell_cmd_syslog(uint8_t argc, const char *argv[])
+{
+    static uint8_t udp_ready;
+    static const uint8_t self[4] = TIKU_KITS_NET_IP_ADDR;
+    uint8_t  server[4];
+    char     msg[SYSLOG_MSG_MAX];
+    uint8_t  i;
+    uint8_t  pos = 0;
+
+    if (argc < 2) {
+        SHELL_PRINTF("usage: syslog <message>\n");
+        return;
+    }
+
+    /* Re-join the tokenised message with single spaces. */
+    for (i = 1; i < argc; i++) {
+        const char *a = argv[i];
+
+        if (i > 1u && pos < (uint8_t)(SYSLOG_MSG_MAX - 1u)) {
+            msg[pos++] = ' ';
+        }
+        while (*a != '\0' && pos < (uint8_t)(SYSLOG_MSG_MAX - 1u)) {
+            msg[pos++] = *a++;
+        }
+    }
+    msg[pos] = '\0';
+
+    /* Log to the SLIP host (the device subnet's .1 address). */
+    server[0] = self[0];
+    server[1] = self[1];
+    server[2] = self[2];
+    server[3] = 1u;
+
+    tiku_shell_cmd_slip_enable();
+    if (!udp_ready) {
+        tiku_kits_net_udp_init();
+        udp_ready = 1;
+    }
+
+    tiku_kits_net_syslog_init();
+    tiku_kits_net_syslog_set_server(server);
+    if (tiku_kits_net_syslog_send(TIKU_KITS_NET_SYSLOG_SEV_INFO, msg)
+            != TIKU_KITS_NET_OK) {
+        SHELL_PRINTF("syslog: send failed\n");
+        return;
+    }
+    SHELL_PRINTF("syslog -> %u.%u.%u.%u: %s\n",
+                 server[0], server[1], server[2], server[3], msg);
+}

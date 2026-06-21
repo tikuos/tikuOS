@@ -210,6 +210,15 @@
 #define TIKU_SHELL_CMD_DNS     0
 #endif
 #endif
+/* syslog: send a remote log line (UDP 514) over SLIP.  Same gating as
+ * slip/ping/ip; the syslog client is already compiled with the net kit. */
+#ifndef TIKU_SHELL_CMD_SYSLOG
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#define TIKU_SHELL_CMD_SYSLOG  1  /**< syslog  - Send a remote log line (514) */
+#else
+#define TIKU_SHELL_CMD_SYSLOG  0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
 #endif

@@ -156,6 +156,9 @@
 #if TIKU_SHELL_CMD_DNS
 #include "commands/tiku_shell_cmd_dns.h"
 #endif
+#if TIKU_SHELL_CMD_SYSLOG
+#include "commands/tiku_shell_cmd_syslog.h"
+#endif
 #if TIKU_SHELL_CMD_CALC
 #include "commands/tiku_shell_cmd_calc.h"
 #endif
@@ -520,6 +523,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_DNS
     {"dns",     "Resolve a hostname (A record)", tiku_shell_cmd_dns},
+#endif
+#if TIKU_SHELL_CMD_SYSLOG
+    {"syslog",  "Send a remote log line (514)", tiku_shell_cmd_syslog},
 #endif
 #if TIKU_SHELL_CMD_CHANGED
     {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},

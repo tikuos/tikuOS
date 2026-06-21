@@ -1135,6 +1135,11 @@ endif
 ifeq (,$(findstring TIKU_SHELL_CMD_DNS=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_dns.c
 endif
+# syslog command (RFC 3164 remote log): on by default with net.  The syslog
+# client is already compiled via the net-kit wildcard.
+ifeq (,$(findstring TIKU_SHELL_CMD_SYSLOG=0,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_syslog.c
+endif
 endif
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
