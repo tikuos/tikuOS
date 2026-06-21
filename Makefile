@@ -1418,9 +1418,11 @@ endif
 ifeq ($(TIKU_SHELL_NET_TEST),1)
 CFLAGS += -DTIKU_SHELL_NET_TEST=1 -DTIKU_KITS_NET_TCP_ENABLE=1
 CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
+CFLAGS += -DTIKU_SHELL_TCP_ENABLE=1
 SRCS += labs/coap/tiku_kits_net_coap.c
 SRCS += labs/coap/tiku_kits_net_coap_process.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_mqtt.c
+SRCS += kernel/shell/tiku_shell_io_tcp.c
 endif
 
 # Optional out-of-tree overlay hook.  Silently included if present

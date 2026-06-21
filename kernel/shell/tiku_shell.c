@@ -861,7 +861,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 
 #if TIKU_SHELL_TCP_ENABLE
     tiku_shell_io_tcp_init();
-    /* Banner deferred until a TCP client connects (see loop below) */
+#if TIKU_SHELL_NET_TEST
+    /* Net-test: the UART is BOTH the local console and the SLIP transport, so
+     * keep it as the default backend now; the telnet backend is installed on
+     * connect (loop below) and reverts to UART on disconnect. */
+    tiku_shell_io_set_backend(&tiku_shell_io_uart);
+#else
+    /* APP=cli telnet-only: no local console; banner deferred until a TCP
+     * client connects (see loop below). */
+#endif
 #else
 #if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
     /* usb: the interactive shell is the RP2350 USB CDC-ACM port. */
@@ -871,6 +879,18 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
      * `both` mode USB just mirrors TIKU_PRINTF output). */
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
 #endif
+#endif
+
+    /* NVM technology label is per-device: MRAM on Apollo, Flash on RP2350,
+     * FRAM on MSP430.  Fall back to the MSP430-era "FRAM" if a device header
+     * has not declared one. */
+#ifndef TIKU_DEVICE_NVM_LABEL
+#define TIKU_DEVICE_NVM_LABEL "FRAM"
+#endif
+
+#if !TIKU_SHELL_TCP_ENABLE || TIKU_SHELL_NET_TEST
+    /* Boot banner: shown whenever there is a local console at boot -- every
+     * non-telnet build, plus net-test (which keeps the UART console). */
     SHELL_PRINTF("\n");
     SHELL_PRINTF(SH_CYAN SH_BOLD);
     SHELL_PRINTF("  ___ _ _         ___  ___\n");
@@ -880,12 +900,6 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     SHELL_PRINTF(SH_RST SH_DIM "  v%s\n", TIKU_VERSION);
     SHELL_PRINTF("  %s" SH_RST "\n", TIKU_TAGLINE);
     SHELL_PRINTF("\n");
-    /* NVM technology label is per-device: MRAM on Apollo, Flash on RP2350,
-     * FRAM on MSP430.  Fall back to the MSP430-era "FRAM" if a device header
-     * has not declared one. */
-#ifndef TIKU_DEVICE_NVM_LABEL
-#define TIKU_DEVICE_NVM_LABEL "FRAM"
-#endif
     SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "  |  SRAM %luB  %s %luKB\n",
                  TIKU_DEVICE_NAME,
                  (unsigned long)TIKU_DEVICE_RAM_SIZE,
@@ -923,16 +937,29 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #if TIKU_SHELL_TCP_ENABLE
         /* --- TCP connection lifecycle --- */
         if (!tiku_shell_io_tcp_is_connected()) {
-            /* Not connected — if we were, clear the backend */
+            /* No telnet client connected. */
             if (tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
+#if TIKU_SHELL_NET_TEST
+                /* Net-test: the shell still owns the UART (console + SLIP
+                 * transport), so revert to UART rather than going dark. */
+                tiku_shell_io_set_backend(&tiku_shell_io_uart);
+#else
                 tiku_shell_io_set_backend((void *)0);
+#endif
                 cli.pos = 0;
             }
+#if !TIKU_SHELL_NET_TEST
+            /* APP=cli telnet-only: idle until a client connects (a dedicated
+             * net process services the SLIP transport meanwhile). */
             tiku_timer_reset(&cli.timer);
             continue;
+#endif
+            /* Net-test falls through: the input drain below keeps pumping the
+             * UART SLIP demux -- the transport for ping/udp/tcp/telnet. */
         }
         /* New connection arrived — install backend and show banner */
-        if (tiku_shell_io_get_backend() != &tiku_shell_io_tcp) {
+        if (tiku_shell_io_tcp_is_connected() &&
+            tiku_shell_io_get_backend() != &tiku_shell_io_tcp) {
             tiku_shell_io_set_backend(&tiku_shell_io_tcp);
             cli.pos = 0;
             SHELL_PRINTF("\n");
@@ -955,6 +982,25 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         /* Re-arm poll timer first so commands that inspect
          * /sys/timer/count see it as active during execution. */
         tiku_timer_reset(&cli.timer);
+
+#if TIKU_SHELL_TCP_ENABLE && TIKU_SHELL_NET_TEST && TIKU_SHELL_CMD_SLIP
+        /* Net-test telnet: the UART is the SLIP transport carrying the telnet
+         * TCP, but a connected client makes the TCP backend active -- so the
+         * per-backend drain below stops reading the UART, which would starve
+         * telnet RX.  Pump the UART through the SLIP demux here so the telnet
+         * transport keeps flowing; console keystrokes are dropped while the
+         * remote client owns the line editor. */
+        if (tiku_shell_cmd_slip_active() &&
+            tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
+            while (tiku_shell_io_uart.rx_ready()) {
+                int uch = tiku_shell_io_uart.getc();
+                if (uch < 0) {
+                    break;
+                }
+                (void)shell_net_demux(uch);
+            }
+        }
+#endif
 
         /* Drain all available characters from the backend.  In SLIP mode the
          * shell shares the UART: complete 0xC0 frames are routed to the IP
@@ -1170,7 +1216,10 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 void tiku_shell_init(void)
 {
     tiku_process_register("Shell", &tiku_shell_process);
-#if TIKU_SHELL_TCP_ENABLE
+#if TIKU_SHELL_TCP_ENABLE && !TIKU_SHELL_NET_TEST
+    /* APP=cli telnet model: a dedicated net process owns the UART RX + SLIP.
+     * In net-test mode the shell owns RX via its demux (and the net process is
+     * not even compiled), so skip this -- see the net-test block below. */
     extern struct tiku_process tiku_kits_net_process;
     tiku_process_register("Net", &tiku_kits_net_process);
 #endif
@@ -1182,6 +1231,9 @@ void tiku_shell_init(void)
      * tests over SLIP.  No net process (the shell owns UART RX). */
     tiku_kits_net_udp_init();
 #if TIKU_KITS_NET_TCP_ENABLE
+    /* The telnet listener (port 23, when TIKU_SHELL_TCP_ENABLE) is started by
+     * the shell process itself once the stack is up -- see the process body
+     * above.  RX reaches it through the slip demux -> ipv4_input -> tcp_input. */
     tiku_kits_net_tcp_init();
 #endif
     {
