@@ -184,6 +184,14 @@
 #define TIKU_SHELL_CMD_PING    0
 #endif
 #endif
+/* ip: print the device's IPv4 address.  Same gating as slip/ping. */
+#ifndef TIKU_SHELL_CMD_IP
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#define TIKU_SHELL_CMD_IP      1  /**< ip      - Print the device IPv4 address */
+#else
+#define TIKU_SHELL_CMD_IP      0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
 #endif

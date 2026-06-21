@@ -1115,6 +1115,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
 ifeq ($(TIKU_KIT_NET_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_slip.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_ping.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_ip.c
 endif
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
@@ -1437,6 +1438,15 @@ endif
 
 ifeq ($(TIKU_KIT_NET_ENABLE),1)
 CFLAGS += -DTIKU_KIT_NET_ENABLE=1
+# Override the device IPv4 address at build time, e.g. `make ... IP=10.0.0.5`.
+# tiku_kits_net.h defaults TIKU_KITS_NET_IP_ADDR to {172,16,7,2} behind an
+# #ifndef; turn a dotted quad into that brace-list (quoted so the shell does
+# not brace-expand it).  NOTE: CFLAGS changes are not dependency-tracked, so
+# `make clean` when you change IP.
+ifdef IP
+comma := ,
+CFLAGS += -DTIKU_KITS_NET_IP_ADDR="{$(subst .,$(comma),$(IP))}"
+endif
 SRCS   += $(wildcard tikukits/net/slip/*.c)
 # IPv4 base set. Drops the heavy protocol modules when their per-flag
 # is off — each declares static buffers via __attribute__((section(

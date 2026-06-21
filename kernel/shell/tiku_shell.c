@@ -142,6 +142,7 @@
 #endif
 #if TIKU_SHELL_CMD_PING
 #include "commands/tiku_shell_cmd_ping.h"
+#include "commands/tiku_shell_cmd_ip.h"
 #endif
 #if TIKU_SHELL_CMD_CALC
 #include "commands/tiku_shell_cmd_calc.h"
@@ -498,6 +499,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_PING
     {"ping",    "ICMP echo a host over SLIP",   tiku_shell_cmd_ping},
+#endif
+#if TIKU_SHELL_CMD_IP
+    {"ip",      "Print the device IPv4 address", tiku_shell_cmd_ip},
 #endif
 #if TIKU_SHELL_CMD_CHANGED
     {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},
