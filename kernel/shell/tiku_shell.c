@@ -150,6 +150,12 @@
 #include "commands/tiku_shell_cmd_ping.h"
 #include "commands/tiku_shell_cmd_ip.h"
 #endif
+#if TIKU_SHELL_CMD_NTP
+#include "commands/tiku_shell_cmd_ntp.h"
+#endif
+#if TIKU_SHELL_CMD_DNS
+#include "commands/tiku_shell_cmd_dns.h"
+#endif
 #if TIKU_SHELL_CMD_CALC
 #include "commands/tiku_shell_cmd_calc.h"
 #endif
@@ -508,6 +514,12 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_IP
     {"ip",      "Print the device IPv4 address", tiku_shell_cmd_ip},
+#endif
+#if TIKU_SHELL_CMD_NTP
+    {"ntp",     "Fetch network time (SNTP)",   tiku_shell_cmd_ntp},
+#endif
+#if TIKU_SHELL_CMD_DNS
+    {"dns",     "Resolve a hostname (A record)", tiku_shell_cmd_dns},
 #endif
 #if TIKU_SHELL_CMD_CHANGED
     {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},
@@ -997,12 +1009,29 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 }
                 cli.pos      = 0;
                 cli.hist_age = -1;
+                /* Async net commands (ping/ntp) stream output and restore the
+                 * prompt when they finish -- don't print a stray one now. */
+                {
+                    uint8_t streaming = 0;
 #if TIKU_SHELL_CMD_PING
-                /* ping streams its replies below and restores the prompt when
-                 * the run ends -- don't print a stray one over its output. */
-                if (!tiku_shell_cmd_ping_active())
+                    if (tiku_shell_cmd_ping_active()) {
+                        streaming = 1;
+                    }
 #endif
-                shell_print_prompt();
+#if TIKU_SHELL_CMD_NTP
+                    if (tiku_shell_cmd_ntp_active()) {
+                        streaming = 1;
+                    }
+#endif
+#if TIKU_SHELL_CMD_DNS
+                    if (tiku_shell_cmd_dns_active()) {
+                        streaming = 1;
+                    }
+#endif
+                    if (!streaming) {
+                        shell_print_prompt();
+                    }
+                }
 
             } else if (ch == '\b' || ch == 127) {
                 /* Backspace */
@@ -1062,6 +1091,24 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         if (tiku_shell_cmd_ping_active()) {
             tiku_shell_cmd_ping_tick();
             if (!tiku_shell_cmd_ping_active()) {
+                shell_print_prompt();
+            }
+        }
+#endif
+#if TIKU_SHELL_CMD_NTP
+        /* Service an active NTP query: poll for the reply across ticks. */
+        if (tiku_shell_cmd_ntp_active()) {
+            tiku_shell_cmd_ntp_tick();
+            if (!tiku_shell_cmd_ntp_active()) {
+                shell_print_prompt();
+            }
+        }
+#endif
+#if TIKU_SHELL_CMD_DNS
+        /* Service an active DNS query: poll for the reply across ticks. */
+        if (tiku_shell_cmd_dns_active()) {
+            tiku_shell_cmd_dns_tick();
+            if (!tiku_shell_cmd_dns_active()) {
                 shell_print_prompt();
             }
         }

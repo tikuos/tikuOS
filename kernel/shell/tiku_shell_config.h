@@ -192,6 +192,24 @@
 #define TIKU_SHELL_CMD_IP      0
 #endif
 #endif
+/* ntp: fetch wall-clock time over SLIP (SNTP).  Same gating as slip/ping/ip;
+ * the Makefile pulls in the time kit (TIKU_KIT_TIME_ENABLE) when it compiles. */
+#ifndef TIKU_SHELL_CMD_NTP
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#define TIKU_SHELL_CMD_NTP     1  /**< ntp     - Fetch network time (SNTP) */
+#else
+#define TIKU_SHELL_CMD_NTP     0
+#endif
+#endif
+/* dns: resolve a hostname (A record) over SLIP.  Same gating as slip/ping/ip;
+ * the DNS stub resolver is already compiled with the net kit. */
+#ifndef TIKU_SHELL_CMD_DNS
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#define TIKU_SHELL_CMD_DNS     1  /**< dns     - Resolve a hostname (A record) */
+#else
+#define TIKU_SHELL_CMD_DNS     0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
 #endif

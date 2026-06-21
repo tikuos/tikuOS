@@ -1123,6 +1123,18 @@ ifeq ($(TIKU_KIT_NET_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_slip.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_ping.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_ip.c
+# ntp command (SNTP client): on by default with net.  It needs the time kit,
+# so enabling it flips TIKU_KIT_TIME_ENABLE (see the time-kit block below).
+# Drop both with EXTRA_CFLAGS="-DTIKU_SHELL_CMD_NTP=0".
+ifeq (,$(findstring TIKU_SHELL_CMD_NTP=0,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_ntp.c
+TIKU_KIT_TIME_ENABLE := 1
+endif
+# dns command (A-record lookup): on by default with net.  The DNS stub
+# resolver is already compiled via the net-kit wildcard, so no extra kit.
+ifeq (,$(findstring TIKU_SHELL_CMD_DNS=0,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_dns.c
+endif
 endif
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
