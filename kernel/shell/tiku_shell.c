@@ -78,6 +78,12 @@
 #include <tikukits/net/slip/tiku_kits_net_slip.h>   /* SLIP framing constants */
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>   /* tiku_kits_net_ipv4_input */
 #endif
+#if TIKU_SHELL_NET_TEST
+#include <tikukits/net/ipv4/tiku_kits_net_udp.h>     /* udp_init (+ echo port 7) */
+#if TIKU_KITS_NET_TCP_ENABLE
+#include <tikukits/net/ipv4/tiku_kits_net_tcp.h>     /* tcp_init/periodic */
+#endif
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* COMMAND HEADERS                                                           */
@@ -1061,6 +1067,11 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         }
 #endif
 
+#if TIKU_SHELL_NET_TEST && TIKU_KITS_NET_TCP_ENABLE
+        /* Drive TCP timers/retransmits for the net-test server (the shell's
+         * slip demux delivers RX; this handles the time-based side). */
+        tiku_kits_net_tcp_periodic();
+#endif
 #if TIKU_SHELL_TCP_ENABLE
         tiku_shell_io_tcp_flush();
 #endif
@@ -1089,5 +1100,20 @@ void tiku_shell_init(void)
 #if TIKU_SHELL_TCP_ENABLE
     extern struct tiku_process tiku_kits_net_process;
     tiku_process_register("Net", &tiku_kits_net_process);
+#endif
+#if TIKU_SHELL_NET_TEST
+    /* Net test servers for the TikuBench net suite (Ambiq has no APP=net):
+     * init UDP (built-in echo on port 7) + TCP, and register the CoAP server.
+     * The shell's `slip` demux feeds tiku_kits_net_ipv4_input(), which then
+     * dispatches to these -- so the device answers the suite's UDP/TCP/CoAP
+     * tests over SLIP.  No net process (the shell owns UART RX). */
+    tiku_kits_net_udp_init();
+#if TIKU_KITS_NET_TCP_ENABLE
+    tiku_kits_net_tcp_init();
+#endif
+    {
+        extern struct tiku_process tiku_kits_net_coap_process;
+        tiku_process_register("CoAP", &tiku_kits_net_coap_process);
+    }
 #endif
 }

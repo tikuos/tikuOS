@@ -477,6 +477,13 @@ TIKU_KIT_NET_ENABLE     := 1
 TIKU_KIT_CRYPTO_ENABLE  := 1
 endif
 
+# Shell net-test mode (TikuBench net suite where there is no working APP=net,
+# e.g. Ambiq): pull the net stack into the shell firmware so it hosts the
+# UDP/TCP/CoAP test servers. Gated -- normal shell builds are unaffected.
+ifeq ($(TIKU_SHELL_NET_TEST),1)
+TIKU_KIT_NET_ENABLE     := 1
+endif
+
 # After all the cascade rules above settle, recompute the
 # UI -> GFX implication (auto-enables may have flipped UI on).
 ifeq ($(TIKU_KIT_UI_ENABLE),1)
@@ -1385,6 +1392,14 @@ endif
 ifeq ($(APP),net)
 CFLAGS += -DTIKU_APP_NET=1
 SRCS += apps/net/tiku_app_net.c
+SRCS += labs/coap/tiku_kits_net_coap.c
+SRCS += labs/coap/tiku_kits_net_coap_process.c
+endif
+
+# Shell net-test mode: activate TCP and pull in the CoAP server so the shell
+# firmware can answer the TikuBench net suite (gated; see TIKU_SHELL_NET_TEST).
+ifeq ($(TIKU_SHELL_NET_TEST),1)
+CFLAGS += -DTIKU_SHELL_NET_TEST=1 -DTIKU_KITS_NET_TCP_ENABLE=1
 SRCS += labs/coap/tiku_kits_net_coap.c
 SRCS += labs/coap/tiku_kits_net_coap_process.c
 endif

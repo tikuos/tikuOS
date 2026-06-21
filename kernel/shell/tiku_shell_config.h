@@ -335,6 +335,20 @@
 #define TIKU_SHELL_TCP_ENABLE 0
 #endif
 
+/**
+ * @brief Bring the net test servers (UDP echo + TCP + CoAP) up inside the shell.
+ *
+ * Off by default so the normal shell stays lean.  When set -- TikuBench's net
+ * suite enables it on boards without a working APP=net (Ambiq) -- the shell
+ * inits UDP/TCP and registers the CoAP server; the existing `slip` RX demux
+ * feeds tiku_kits_net_ipv4_input(), which then dispatches to them, so the
+ * device answers the suite's UDP/TCP/CoAP tests over SLIP.  No net process is
+ * started (the shell owns the UART RX, so a second reader would conflict).
+ */
+#ifndef TIKU_SHELL_NET_TEST
+#define TIKU_SHELL_NET_TEST 0
+#endif
+
 /** @} */
 
 #endif /* TIKU_SHELL_CONFIG_H_ */
