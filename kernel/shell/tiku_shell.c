@@ -74,6 +74,10 @@
 #include "tiku_shell_io_tcp.h"
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* tiku_kits_net_process */
 #endif
+#if TIKU_SHELL_CMD_SLIP
+#include <tikukits/net/slip/tiku_kits_net_slip.h>   /* SLIP framing constants */
+#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>   /* tiku_kits_net_ipv4_input */
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* COMMAND HEADERS                                                           */
@@ -292,6 +296,54 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
 static void shell_print_prompt(void) {
     SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS:%s> " SH_RST, tiku_shell_cwd_get());
 }
+
+#if TIKU_SHELL_CMD_SLIP
+/*
+ * SLIP RX demultiplexer.  While SLIP mode is on the shell shares the UART
+ * with the IP stack: a 0xC0-delimited frame is reassembled (with SLIP
+ * un-escaping) and handed to tiku_kits_net_ipv4_input(); any byte outside a
+ * frame is an ordinary keystroke.  Returns 1 if the byte was consumed as part
+ * of a SLIP frame, 0 if it should fall through to the line editor.
+ */
+static uint8_t shell_net_demux(int ch) {
+    static uint8_t  in_frame;
+    static uint8_t  esc;
+    static uint16_t flen;
+    static uint8_t  fbuf[TIKU_KITS_NET_MTU];
+    uint8_t b;
+
+    if (ch == TIKU_KITS_NET_SLIP_END) {        /* 0xC0 frame boundary */
+        if (in_frame) {
+            if (flen > 0) {
+                tiku_kits_net_ipv4_input(fbuf, flen);
+            }
+            in_frame = 0;
+        } else {
+            in_frame = 1;
+        }
+        flen = 0;
+        esc  = 0;
+        return 1;
+    }
+    if (!in_frame) {
+        return 0;                              /* keystroke -> line editor */
+    }
+    b = (uint8_t)ch;
+    if (esc) {
+        esc = 0;
+        if (b == TIKU_KITS_NET_SLIP_ESC_END)      b = TIKU_KITS_NET_SLIP_END;
+        else if (b == TIKU_KITS_NET_SLIP_ESC_ESC) b = TIKU_KITS_NET_SLIP_ESC;
+        else if (b == TIKU_KITS_NET_SLIP_ESC_NUL) b = 0x00u;
+    } else if (b == TIKU_KITS_NET_SLIP_ESC) {  /* 0xDB */
+        esc = 1;
+        return 1;
+    }
+    if (flen < (uint16_t)sizeof fbuf) {
+        fbuf[flen++] = b;
+    }
+    return 1;
+}
+#endif
 
 #if TIKU_SHELL_CMD_HTIMER
 /*
@@ -870,21 +922,19 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
          * /sys/timer/count see it as active during execution. */
         tiku_timer_reset(&cli.timer);
 
-        /* Drain all available characters from the backend -- unless SLIP or
-         * ping mode has handed the UART to the net engine (binary SLIP
-         * framing), in which case the shell yields all input to it. */
-        while (
-#if TIKU_SHELL_CMD_SLIP
-               !tiku_shell_cmd_slip_active() &&
-#endif
-#if TIKU_SHELL_CMD_PING
-               !tiku_shell_cmd_ping_active() &&
-#endif
-               tiku_shell_io_rx_ready()) {
+        /* Drain all available characters from the backend.  In SLIP mode the
+         * shell shares the UART: complete 0xC0 frames are routed to the IP
+         * stack, while ordinary keystrokes still reach the line editor below. */
+        while (tiku_shell_io_rx_ready()) {
             ch = tiku_shell_io_getc();
             if (ch < 0) {
                 break;
             }
+#if TIKU_SHELL_CMD_SLIP
+            if (tiku_shell_cmd_slip_active() && shell_net_demux(ch)) {
+                continue;
+            }
+#endif
 
 #if TIKU_SHELL_CMD_WATCH
             /* A live watch is streaming: keystrokes are routed to

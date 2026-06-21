@@ -4,14 +4,16 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_slip.c - "slip" command implementation
+ * tiku_shell_cmd_slip.c - "slip" command: toggle SLIP/IP networking on the
+ *                         shared console UART
  *
- * Hands the console UART to the net process for SLIP/IP networking.  Net is
- * a compile-time choice (TIKU_KIT_NET_ENABLE=1 pulls in the stack); this
- * command is the runtime switch that activates it on the one shared UART,
- * so the same OS image is an interactive shell by default and a SLIP network
- * endpoint on demand.  The UART then carries binary SLIP framing, so the
- * shell can no longer read commands -- reset the board to return.
+ * Net is a compile-time choice (TIKU_KIT_NET_ENABLE=1).  `slip` toggles a
+ * runtime mode in which the shell's RX loop demultiplexes the single UART:
+ * SLIP frames (0xC0-delimited) are routed to the IP stack while ordinary
+ * keystrokes still reach the line editor, so the shell stays interactive AND
+ * the device is an IP node at the same time (use the slmux host tool to drive
+ * both over one wire).  Running `slip` again turns it back to console-only --
+ * no reset needed.  `ping` enables this mode automatically.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,30 +30,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/*---------------------------------------------------------------------------*/
-/* INCLUDES                                                                  */
-/*---------------------------------------------------------------------------*/
-
 #include "tiku_shell_cmd_slip.h"
 #include <kernel/shell/tiku_shell.h>                 /* SHELL_PRINTF */
-#include <kernel/process/tiku_process.h>             /* tiku_process_start */
-#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* tiku_kits_net_process */
+#include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_IP_ADDR */
+#include <tikukits/net/slip/tiku_kits_net_slip.h>    /* slip_init, slip_link */
+#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* set_link, set_addr */
 
-/*---------------------------------------------------------------------------*/
-/* STATE                                                                     */
-/*---------------------------------------------------------------------------*/
-
-/* Once set, the shell loop yields all UART input to the net process. */
-static uint8_t slip_mode;
-
-/*---------------------------------------------------------------------------*/
-/* COMMAND IMPLEMENTATION                                                    */
-/*---------------------------------------------------------------------------*/
+static uint8_t slip_on;       /* demux active: UART carries SLIP/IP + console */
+static uint8_t link_ready;    /* SLIP link registered with the IP layer once */
 
 uint8_t
 tiku_shell_cmd_slip_active(void)
 {
-    return slip_mode;
+    return slip_on;
+}
+
+void
+tiku_shell_cmd_slip_enable(void)
+{
+    if (!link_ready) {
+        static const uint8_t self[4] = TIKU_KITS_NET_IP_ADDR;
+        tiku_kits_net_slip_init();
+        tiku_kits_net_ipv4_set_link(&tiku_kits_net_slip_link);
+        tiku_kits_net_ipv4_set_addr(self);
+        link_ready = 1;
+    }
+    slip_on = 1;
 }
 
 void
@@ -60,20 +64,14 @@ tiku_shell_cmd_slip(uint8_t argc, const char *argv[])
     (void)argc;
     (void)argv;
 
-    if (slip_mode) {
-        SHELL_PRINTF("Already in SLIP mode.\n");
+    if (slip_on) {
+        slip_on = 0;
+        SHELL_PRINTF("SLIP off -- console-only on the UART.\n");
         return;
     }
 
-    SHELL_PRINTF("Handing the console UART to SLIP/IP.\n");
-    SHELL_PRINTF("The shell is suspended; reset the board to return.\n");
-
-    /*
-     * Start the net process.  It initialises SLIP, registers the link
-     * backend, and polls the UART for IP frames.  From here the UART carries
-     * binary SLIP, so the shell loop yields all input to the net process via
-     * tiku_shell_cmd_slip_active().
-     */
-    tiku_process_start(&tiku_kits_net_process, (tiku_event_data_t)0);
-    slip_mode = 1;
+    tiku_shell_cmd_slip_enable();
+    SHELL_PRINTF("SLIP on. UART now carries SLIP/IP frames + the console;\n");
+    SHELL_PRINTF("drive it with the slmux host tool. 'ping <ip>' works too.\n");
+    SHELL_PRINTF("Run 'slip' again to return to console-only (no reset).\n");
 }

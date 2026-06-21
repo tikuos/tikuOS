@@ -52,4 +52,12 @@ void tiku_shell_cmd_slip(uint8_t argc, const char *argv[]);
  */
 uint8_t tiku_shell_cmd_slip_active(void);
 
+/**
+ * @brief Turn SLIP/IP mode on (idempotent), bringing up the link.
+ *
+ * Used by other net commands (e.g. ping) to ensure the shared RX demux is
+ * routing SLIP frames to the IP stack before they send traffic.
+ */
+void tiku_shell_cmd_slip_enable(void);
+
 #endif /* TIKU_SHELL_CMD_SLIP_H_ */
