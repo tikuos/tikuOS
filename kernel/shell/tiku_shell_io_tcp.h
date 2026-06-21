@@ -43,9 +43,19 @@
 #define TIKU_SHELL_TCP_PORT   23
 #endif
 
-/** Outgoing byte buffer — flushed on newline or when full */
+/*
+ * Outgoing byte buffer.  tcp_putc() accumulates here; the CLI poll loop
+ * drains it one MSS segment per cycle (tiku_shell_io_tcp_flush()), yielding
+ * between segments so incoming ACKs are processed and the send window/TX pool
+ * drain.  This buffer must therefore hold the *largest single command output*:
+ * a command (e.g. `help`, ~1.5 KB across the full command table) emits all of
+ * its bytes synchronously without yielding, so anything that does not fit is
+ * dropped (the help loop cannot pause to let the window open).  Sized to clear
+ * `help` with margin; only allocated on the Cortex-M parts that build the
+ * telnet backend, where the SRAM is ample.
+ */
 #ifndef TIKU_SHELL_TCP_TX_BUF_SIZE
-#define TIKU_SHELL_TCP_TX_BUF_SIZE  256
+#define TIKU_SHELL_TCP_TX_BUF_SIZE  2048
 #endif
 
 /*---------------------------------------------------------------------------*/
