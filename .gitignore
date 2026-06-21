@@ -75,3 +75,7 @@ TikuBench/
 labs/
 kintsugi/
 docs/
+tikuConsole/
+
+# Python bytecode cache
+__pycache__/
