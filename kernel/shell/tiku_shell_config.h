@@ -219,6 +219,16 @@
 #define TIKU_SHELL_CMD_SYSLOG  0
 #endif
 #endif
+/* mqtt: connect/publish to an MQTT broker over SLIP+TCP.  Opt-in -- it needs
+ * the heavier MQTT kit + TCP, so it tracks TIKU_KITS_NET_MQTT_ENABLE rather
+ * than auto-on with net.  TikuBench's net-test build turns the kit on. */
+#ifndef TIKU_SHELL_CMD_MQTT
+#if defined(TIKU_KITS_NET_MQTT_ENABLE) && TIKU_KITS_NET_MQTT_ENABLE
+#define TIKU_SHELL_CMD_MQTT    1  /**< mqtt    - Connect/publish to an MQTT broker */
+#else
+#define TIKU_SHELL_CMD_MQTT    0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
 #endif

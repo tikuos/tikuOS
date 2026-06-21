@@ -159,6 +159,9 @@
 #if TIKU_SHELL_CMD_SYSLOG
 #include "commands/tiku_shell_cmd_syslog.h"
 #endif
+#if TIKU_SHELL_CMD_MQTT
+#include "commands/tiku_shell_cmd_mqtt.h"
+#endif
 #if TIKU_SHELL_CMD_CALC
 #include "commands/tiku_shell_cmd_calc.h"
 #endif
@@ -526,6 +529,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_SYSLOG
     {"syslog",  "Send a remote log line (514)", tiku_shell_cmd_syslog},
+#endif
+#if TIKU_SHELL_CMD_MQTT
+    {"mqtt",    "Connect/publish to an MQTT broker", tiku_shell_cmd_mqtt},
 #endif
 #if TIKU_SHELL_CMD_CHANGED
     {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},
@@ -1034,6 +1040,11 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                         streaming = 1;
                     }
 #endif
+#if TIKU_SHELL_CMD_MQTT
+                    if (tiku_shell_cmd_mqtt_active()) {
+                        streaming = 1;
+                    }
+#endif
                     if (!streaming) {
                         shell_print_prompt();
                     }
@@ -1115,6 +1126,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         if (tiku_shell_cmd_dns_active()) {
             tiku_shell_cmd_dns_tick();
             if (!tiku_shell_cmd_dns_active()) {
+                shell_print_prompt();
+            }
+        }
+#endif
+#if TIKU_SHELL_CMD_MQTT
+        /* Service an active MQTT op: pace mqtt_periodic + act on the event. */
+        if (tiku_shell_cmd_mqtt_active()) {
+            tiku_shell_cmd_mqtt_tick();
+            if (!tiku_shell_cmd_mqtt_active()) {
                 shell_print_prompt();
             }
         }
