@@ -1260,9 +1260,11 @@ void tiku_shell_init(void)
      * above.  RX reaches it through the slip demux -> ipv4_input -> tcp_input. */
     tiku_kits_net_tcp_init();
 #endif
+#if defined(TIKU_KITS_NET_COAP)
     {
         extern struct tiku_process tiku_kits_net_coap_process;
         tiku_process_register("CoAP", &tiku_kits_net_coap_process);
     }
+#endif
 #endif
 }

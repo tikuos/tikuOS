@@ -28,21 +28,28 @@
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
 #include <tikukits/net/ipv4/tiku_kits_net_syslog.h>
 #include <tikukits/time/ntp/tiku_kits_time_ntp.h>
-#include <labs/coap/tiku_kits_net_coap.h>
+#if defined(TIKU_KITS_NET_COAP)
+#include <labs/coap/tiku_kits_net_coap.h>   /* gitignored labs/ -- optional */
+#endif
 
 #if TIKU_KITS_NET_DHCP_ENABLE
 #include <tikukits/net/ipv4/tiku_kits_net_dhcp.h>
 #endif
 
+#if defined(TIKU_KITS_NET_COAP)
 /* Declared in labs/coap/tiku_kits_net_coap_process.c */
 extern struct tiku_process tiku_kits_net_coap_process;
+#endif
 
 #if TIKU_KITS_NET_DHCP_ENABLE
 TIKU_AUTOSTART_PROCESSES(&tiku_kits_net_process,
                           &tiku_kits_net_dhcp_process,
                           &tiku_kits_time_ntp_process,
-                          &tiku_kits_net_syslog_process,
-                          &tiku_kits_net_coap_process);
+                          &tiku_kits_net_syslog_process
+#if defined(TIKU_KITS_NET_COAP)
+                          , &tiku_kits_net_coap_process
+#endif
+                          );
 #else
 TIKU_AUTOSTART_PROCESSES(&tiku_kits_net_process);
 #endif
