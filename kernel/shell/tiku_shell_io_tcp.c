@@ -137,7 +137,7 @@ static uint8_t last_was_cr;
 void
 tiku_shell_io_tcp_flush(void)
 {
-    uint8_t chunk;
+    uint16_t chunk;
     uint16_t mss;
 
     if (!telnet_conn || tx_pos == 0) {
@@ -154,8 +154,13 @@ tiku_shell_io_tcp_flush(void)
     mss = telnet_conn->snd_mss;
     chunk = tx_pos;
     if (chunk > mss) {
-        chunk = (uint8_t)mss;
+        chunk = mss;
     }
+    /* chunk and tx_pos are both uint16_t: a command's output can exceed 255
+     * bytes (e.g. `help` is ~1.9 KB), so a uint8_t here would wrap -- once
+     * tx_pos passed 0xFF the low byte could land on 0 and tcp_send(len=0)
+     * returns an error every poll, wedging the drain a couple of segments in
+     * (the banner, <256 B, slipped under it).  Keep the full 16-bit length. */
 
     if (tiku_kits_net_tcp_send(telnet_conn,
                                tx_buf, chunk) != TIKU_KITS_NET_OK) {
