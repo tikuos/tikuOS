@@ -9,7 +9,9 @@
  * Fetches wall-clock time from an SNTP server over SLIP.  Accepts either a
  * dotted IPv4 address or a hostname; a hostname is resolved first via the DNS
  * stub resolver (a public resolver reached through the SLIP host's relay/NAT),
- * then the SNTP query is sent to the resolved address.  Both the DNS and NTP
+ * then the SNTP query is sent to the resolved address.  With no argument it
+ * queries a default public server (TIKU_SHELL_NTP_SERVER, time.google.com) so
+ * a bare `ntp` works over a real internet bridge.  Both the DNS and NTP
  * libraries are poll-based and treat each no-reply poll() as one retry toward
  * a 3-strike timeout, so this command paces polling at ~1 Hz (the cadence the
  * libraries document) rather than once per shell tick.  All I/O flows through
@@ -38,7 +40,7 @@
 #include "tiku_shell_cmd_slip.h"                  /* tiku_shell_cmd_slip_enable */
 #include <kernel/shell/tiku_shell.h>              /* SHELL_PRINTF */
 #include <kernel/timers/tiku_clock.h>             /* tiku_clock_time */
-#include <tikukits/net/tiku_kits_net.h>           /* TIKU_KITS_NET_IP_ADDR */
+#include <tikukits/net/tiku_kits_net.h>           /* TIKU_KITS_NET_OK, etc. */
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>  /* udp_init */
 #include <tikukits/net/ipv4/tiku_kits_net_dns.h>  /* DNS stub resolver */
 #include <tikukits/time/ntp/tiku_kits_time_ntp.h>
@@ -60,6 +62,15 @@
  * host's relay/NAT.  Override at build time if needed. */
 #ifndef TIKU_SHELL_NTP_DNS_SERVER
 #define TIKU_SHELL_NTP_DNS_SERVER  {8, 8, 8, 8}
+#endif
+
+/* Default NTP server for a bare `ntp` (no argument).  The SLIP host (.1) only
+ * answers NTP under the TikuBench test harness; for interactive use over a
+ * real internet bridge, default to a public server instead.  time.google.com
+ * anycast answers SNTP directly (no DNS needed) and is the very address the
+ * SNTP client header documents as its example.  Override at build time. */
+#ifndef TIKU_SHELL_NTP_SERVER
+#define TIKU_SHELL_NTP_SERVER  {216, 239, 35, 0}
 #endif
 
 typedef enum {
@@ -182,13 +193,14 @@ tiku_shell_cmd_ntp(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* No argument: query the SLIP host (the device subnet's .1 address). */
+    /* No argument: query the default public NTP server.  Override the target
+     * with `ntp <ip|host>`, or query the SLIP host with `ntp 172.16.7.1`. */
     {
-        static const uint8_t self[4] = TIKU_KITS_NET_IP_ADDR;
-        ntp_srv[0] = self[0];
-        ntp_srv[1] = self[1];
-        ntp_srv[2] = self[2];
-        ntp_srv[3] = 1u;
+        static const uint8_t def[4] = TIKU_SHELL_NTP_SERVER;
+        ntp_srv[0] = def[0];
+        ntp_srv[1] = def[1];
+        ntp_srv[2] = def[2];
+        ntp_srv[3] = def[3];
     }
     ntp_begin_query();
 }
