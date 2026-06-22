@@ -325,29 +325,44 @@ static void shell_print_prompt(void) {
  * of a SLIP frame, 0 if it should fall through to the line editor.
  */
 static uint8_t shell_net_demux(int ch) {
-    static uint8_t  in_frame;
+    /* END (0xC0) is a frame delimiter, never an open/close parity toggle, and
+     * the byte *after* an END decides frame-vs-console: an IPv4 packet always
+     * begins 0x4N, so a post-END byte that is not 0x4N is console text. This
+     * makes the decoder self-synchronising -- a stray or duplicated END (line
+     * garbage, or the multiple ENDs a port reopen emits) can neither strand the
+     * parser mid-frame nor divert a typed command into the frame buffer.
+     * Returns 1 if the byte was consumed as SLIP, 0 to pass to the line editor. */
+    static uint8_t  armed;     /* saw an END; next byte decides frame vs console */
+    static uint8_t  in_frame;  /* collecting a frame */
     static uint8_t  esc;
     static uint16_t flen;
     static uint8_t  fbuf[TIKU_KITS_NET_MTU];
     uint8_t b;
 
-    if (ch == TIKU_KITS_NET_SLIP_END) {        /* 0xC0 frame boundary */
-        if (in_frame) {
-            if (flen > 0) {
-                tiku_kits_net_ipv4_input(fbuf, flen);
-            }
-            in_frame = 0;
-        } else {
-            in_frame = 1;
+    if (ch == TIKU_KITS_NET_SLIP_END) {        /* 0xC0 frame delimiter */
+        if (in_frame && flen > 0) {
+            tiku_kits_net_ipv4_input(fbuf, flen);
         }
-        flen = 0;
-        esc  = 0;
+        in_frame = 0;
+        armed    = 1;          /* a frame *may* follow; the next byte decides */
+        flen     = 0;
+        esc      = 0;
         return 1;
+    }
+
+    b = (uint8_t)ch;
+
+    if (armed) {               /* first byte after an END */
+        armed = 0;
+        if ((b & 0xF0u) == 0x40u) {            /* IPv4 version nibble -> frame */
+            in_frame = 1;
+        } else {
+            return 0;                          /* stray END -> keystroke */
+        }
     }
     if (!in_frame) {
         return 0;                              /* keystroke -> line editor */
     }
-    b = (uint8_t)ch;
     if (esc) {
         esc = 0;
         if (b == TIKU_KITS_NET_SLIP_ESC_END)      b = TIKU_KITS_NET_SLIP_END;
