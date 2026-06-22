@@ -369,8 +369,18 @@ telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
         tx_pos = 0;
     } else if (event == TIKU_KITS_NET_TCP_EVT_CLOSED ||
                event == TIKU_KITS_NET_TCP_EVT_ABORTED) {
-        telnet_conn = (void *)0;
-        tx_pos = 0;
+        /* Only forget the connection if the one that closed is the one we
+         * currently track.  There are several TCP slots, so a just-RST'd
+         * PREVIOUS client's CLOSED/ABORTED event can arrive AFTER the next
+         * client has already connected (telnet_conn = new): nulling
+         * unconditionally would drop the live session, and its first command
+         * would land on a NULL telnet_conn and produce no output (the banner,
+         * sent before the late event, still gets through -- exactly the
+         * "connects, banner ok, first command frozen" reconnect flake). */
+        if (c == telnet_conn) {
+            telnet_conn = (void *)0;
+            tx_pos = 0;
+        }
     }
 }
 
