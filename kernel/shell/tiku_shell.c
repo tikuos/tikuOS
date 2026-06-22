@@ -527,27 +527,6 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_WATCH
     {"watch",   "Read VFS node every N sec",   tiku_shell_cmd_watch},
 #endif
-#if TIKU_SHELL_CMD_SLIP
-    {"slip",    "Hand the UART to SLIP/IP net", tiku_shell_cmd_slip},
-#endif
-#if TIKU_SHELL_CMD_PING
-    {"ping",    "ICMP echo a host over SLIP",   tiku_shell_cmd_ping},
-#endif
-#if TIKU_SHELL_CMD_IP
-    {"ip",      "Print the device IPv4 address", tiku_shell_cmd_ip},
-#endif
-#if TIKU_SHELL_CMD_NTP
-    {"ntp",     "Fetch network time (SNTP)",   tiku_shell_cmd_ntp},
-#endif
-#if TIKU_SHELL_CMD_DNS
-    {"dns",     "Resolve a hostname (A record)", tiku_shell_cmd_dns},
-#endif
-#if TIKU_SHELL_CMD_SYSLOG
-    {"syslog",  "Send a remote log line (514)", tiku_shell_cmd_syslog},
-#endif
-#if TIKU_SHELL_CMD_MQTT
-    {"mqtt",    "Connect/publish to an MQTT broker", tiku_shell_cmd_mqtt},
-#endif
 #if TIKU_SHELL_CMD_CHANGED
     {"changed", "Block until VFS node changes", tiku_shell_cmd_changed},
 #endif
@@ -577,6 +556,34 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_ECHO
     {"echo",    "Print arguments + newline",   tiku_shell_cmd_echo},
+#endif
+
+    /* ---- Networking ---- */
+#if TIKU_SHELL_CMD_SLIP || TIKU_SHELL_CMD_PING || TIKU_SHELL_CMD_IP ||      \
+    TIKU_SHELL_CMD_NTP || TIKU_SHELL_CMD_DNS || TIKU_SHELL_CMD_SYSLOG ||    \
+    TIKU_SHELL_CMD_MQTT
+    CMD_CATEGORY("Networking"),
+#endif
+#if TIKU_SHELL_CMD_SLIP
+    {"slip",    "Hand the UART to SLIP/IP net", tiku_shell_cmd_slip},
+#endif
+#if TIKU_SHELL_CMD_PING
+    {"ping",    "ICMP echo a host over SLIP",   tiku_shell_cmd_ping},
+#endif
+#if TIKU_SHELL_CMD_IP
+    {"ip",      "Print the device IPv4 address", tiku_shell_cmd_ip},
+#endif
+#if TIKU_SHELL_CMD_NTP
+    {"ntp",     "Fetch network time (SNTP)",   tiku_shell_cmd_ntp},
+#endif
+#if TIKU_SHELL_CMD_DNS
+    {"dns",     "Resolve a hostname (A record)", tiku_shell_cmd_dns},
+#endif
+#if TIKU_SHELL_CMD_SYSLOG
+    {"syslog",  "Send a remote log line (514)", tiku_shell_cmd_syslog},
+#endif
+#if TIKU_SHELL_CMD_MQTT
+    {"mqtt",    "Connect/publish to an MQTT broker", tiku_shell_cmd_mqtt},
 #endif
 
     /* ---- Hardware ---- */
@@ -776,6 +783,246 @@ shell_history_arrow(uint8_t up)
     cli.hist_age     = age;
 }
 #endif /* TIKU_SHELL_CMD_HISTORY */
+
+/*---------------------------------------------------------------------------*/
+/* TAB COMPLETION                                                            */
+/*---------------------------------------------------------------------------*/
+
+/* VFS path completion is available whenever a path-consuming command (and
+ * therefore the VFS + cwd resolver) is linked in.  Without it, Tab still
+ * completes command names against the table. */
+#if TIKU_SHELL_CMD_READ || TIKU_SHELL_CMD_LS || TIKU_SHELL_CMD_CD ||         \
+    TIKU_SHELL_CMD_WRITE || TIKU_SHELL_CMD_WATCH
+#define SHELL_TAB_VFS 1
+#include <kernel/vfs/tiku_vfs.h>
+#include "tiku_shell_cwd.h"
+#endif
+
+/** @brief Length of a NUL-terminated string (libc-free, byte-bounded). */
+static uint8_t
+tab_strlen(const char *s)
+{
+    uint8_t n = 0;
+    while (s[n] != '\0') {
+        n++;
+    }
+    return n;
+}
+
+/** @brief 1 if @p s begins with the first @p n bytes of @p pfx. */
+static uint8_t
+tab_has_prefix(const char *s, const char *pfx, uint8_t n)
+{
+    uint8_t i;
+
+    for (i = 0; i < n; i++) {
+        if (s[i] != pfx[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * @brief Append up to @p n bytes of @p s to the live line and echo them.
+ *
+ * Mirrors the printable-key path: stores into the line buffer (bounded by
+ * TIKU_SHELL_LINE_SIZE) and echoes when the backend wants local echo.
+ */
+static void
+tab_emit(const char *s, uint8_t n)
+{
+    uint8_t k;
+
+    for (k = 0; k < n && cli.pos < TIKU_SHELL_LINE_SIZE - 1; k++) {
+        cli.buf[cli.pos++] = s[k];
+        if (tiku_shell_io_has_echo()) {
+            tiku_shell_io_putc(s[k]);
+        }
+    }
+    cli.buf[cli.pos] = '\0';
+}
+
+/**
+ * @brief Fold one candidate into the running match (count + common prefix).
+ *
+ * Streaming, so completion needs no candidate array: the first match seeds
+ * @p first / @p lcp; each later match shrinks @p lcp to the longest prefix
+ * still shared with the first.
+ */
+static void
+tab_accum(const char *nm, uint8_t is_dir, const char **first,
+          uint8_t *first_dir, uint8_t *count, uint8_t *lcp)
+{
+    if (*count == 0u) {
+        *first     = nm;
+        *first_dir = is_dir;
+        *lcp       = tab_strlen(nm);
+    } else {
+        uint8_t k = 0;
+        while (k < *lcp && nm[k] != '\0' && nm[k] == (*first)[k]) {
+            k++;
+        }
+        *lcp = k;
+    }
+    (*count)++;
+}
+
+/**
+ * @brief Tab-complete the token at the end of the current line.
+ *
+ * The first token (no leading space) completes against the command table;
+ * later tokens complete against the VFS namespace -- the token is split into
+ * a directory part (resolved against the cwd) and a leaf prefix, and the
+ * directory's children supply the candidates.  A unique match is filled in
+ * (with a trailing '/' for a directory, ' ' otherwise); an ambiguous one is
+ * extended to the longest common prefix, and a second Tab (no further
+ * progress) lists the matches and redraws the line.
+ */
+static void
+shell_tab_complete(void)
+{
+    uint8_t     tok_start, tok_len, i;
+    const char *pfx;
+    uint8_t     pfx_len;
+    uint8_t     is_cmd;
+    const char *first     = (const char *)0;
+    uint8_t     first_dir = 0;
+    uint8_t     count     = 0;
+    uint8_t     lcp       = 0;
+#if SHELL_TAB_VFS
+    const tiku_vfs_node_t *dir = (const tiku_vfs_node_t *)0;
+    char                   dirbuf[TIKU_SHELL_CWD_SIZE];
+#endif
+
+    cli.buf[cli.pos] = '\0';
+
+    /* The token under the cursor is the trailing run of non-space bytes
+     * (editing is append-only, so the cursor is always at the end). */
+    tok_start = cli.pos;
+    while (tok_start > 0 && cli.buf[tok_start - 1] != ' ') {
+        tok_start--;
+    }
+    tok_len = (uint8_t)(cli.pos - tok_start);
+    is_cmd  = (uint8_t)(tok_start == 0);
+
+    if (is_cmd) {
+        pfx     = cli.buf + tok_start;
+        pfx_len = tok_len;
+    }
+#if SHELL_TAB_VFS
+    else {
+        const char *tok = cli.buf + tok_start;
+        uint8_t     have_slash = 0, slash_at = 0, j;
+
+        for (i = 0; i < tok_len; i++) {
+            if (tok[i] == '/') {
+                slash_at   = i;
+                have_slash = 1;
+            }
+        }
+        if (!have_slash) {
+            tiku_shell_cwd_resolve(".", dirbuf, sizeof(dirbuf));
+            pfx     = tok;
+            pfx_len = tok_len;
+        } else {
+            char    raw[TIKU_SHELL_CWD_SIZE];
+            uint8_t dlen = (slash_at == 0) ? 1u : slash_at;  /* "/x" -> "/" */
+
+            for (j = 0; j < dlen && j < sizeof(raw) - 1u; j++) {
+                raw[j] = tok[j];
+            }
+            raw[j]  = '\0';
+            tiku_shell_cwd_resolve(raw, dirbuf, sizeof(dirbuf));
+            pfx     = tok + slash_at + 1;
+            pfx_len = (uint8_t)(tok_len - slash_at - 1u);
+        }
+        dir = tiku_vfs_resolve(dirbuf);
+        if (dir == (const tiku_vfs_node_t *)0 || dir->type != TIKU_VFS_DIR) {
+            return;
+        }
+    }
+#else
+    else {
+        return;   /* no VFS in this build: only command names complete */
+    }
+#endif
+
+    /* Pass 1: count matches, remember the first, shrink the common prefix. */
+    if (is_cmd) {
+        const tiku_shell_cmd_t *c;
+
+        for (c = tiku_shell_commands; c->name != (const char *)0; c++) {
+            if (c->handler != (tiku_shell_handler_t)0 &&
+                tab_has_prefix(c->name, pfx, pfx_len)) {
+                tab_accum(c->name, 0, &first, &first_dir, &count, &lcp);
+            }
+        }
+    }
+#if SHELL_TAB_VFS
+    else {
+        uint8_t j;
+
+        for (j = 0; j < dir->child_count; j++) {
+            const tiku_vfs_node_t *ch = &dir->children[j];
+
+            if (tab_has_prefix(ch->name, pfx, pfx_len)) {
+                tab_accum(ch->name,
+                          (uint8_t)(ch->type == TIKU_VFS_DIR),
+                          &first, &first_dir, &count, &lcp);
+            }
+        }
+    }
+#endif
+
+    if (count == 0) {
+        return;                         /* nothing matches */
+    }
+    if (lcp > pfx_len) {
+        tab_emit(first + pfx_len, (uint8_t)(lcp - pfx_len));
+    }
+    if (count == 1) {
+        tab_emit(first_dir ? "/" : " ", 1u);   /* unique: finish the token */
+        return;
+    }
+    if (lcp != pfx_len) {
+        return;                         /* extended; Tab again to list */
+    }
+
+    /* Pass 2: ambiguous with no further common prefix -> list, then redraw. */
+    SHELL_PRINTF("\n");
+    if (is_cmd) {
+        const tiku_shell_cmd_t *c;
+
+        for (c = tiku_shell_commands; c->name != (const char *)0; c++) {
+            if (c->handler != (tiku_shell_handler_t)0 &&
+                tab_has_prefix(c->name, pfx, pfx_len)) {
+                SHELL_PRINTF("  %s", c->name);
+            }
+        }
+    }
+#if SHELL_TAB_VFS
+    else {
+        uint8_t j;
+
+        for (j = 0; j < dir->child_count; j++) {
+            const tiku_vfs_node_t *ch = &dir->children[j];
+
+            if (tab_has_prefix(ch->name, pfx, pfx_len)) {
+                SHELL_PRINTF("  %s%s", ch->name,
+                             (ch->type == TIKU_VFS_DIR) ? "/" : "");
+            }
+        }
+    }
+#endif
+    SHELL_PRINTF("\n");
+    shell_print_prompt();
+    if (tiku_shell_io_has_echo()) {
+        for (i = 0; i < cli.pos; i++) {
+            tiku_shell_io_putc(cli.buf[i]);
+        }
+    }
+}
 
 /**
  * @brief Define the shell process control block.
@@ -1143,6 +1390,11 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 cli.hist_age = -1;
                 SHELL_PRINTF("^C\n");
                 shell_print_prompt();
+
+            } else if (ch == '\t') {
+                /* Tab: complete the command name (first token) or a VFS
+                 * path (later tokens) against the table / namespace. */
+                shell_tab_complete();
 
             } else if (cli.pos < TIKU_SHELL_LINE_SIZE - 1) {
                 /* Printable character — store and optionally echo.
