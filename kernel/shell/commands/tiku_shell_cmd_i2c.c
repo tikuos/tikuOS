@@ -10,7 +10,7 @@
  * sensor bring-up and bus debugging.  The handler dispatches on
  * argv[1] to one of three operations:
  *
- *   - scan : probe 0x08..0x77 with zero-length writes
+ *   - scan : probe 0x08..0x77 for responders (tiku_i2c_probe, address-only ACK)
  *   - read : tiku_i2c_read into a small stack buffer, print hex
  *   - write: parse remaining argv tokens as bytes, tiku_i2c_write
  *
@@ -128,21 +128,22 @@ i2c_ensure_init(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Probe the standard 7-bit address range with zero-length
- *        writes; print the list of responders.
+ * @brief Probe the standard 7-bit address range with tiku_i2c_probe();
+ *        print the list of responders.
  *
- * Addresses 0x00..0x07 and 0x78..0x7F are reserved and skipped.
+ * Uses the dedicated address-probe primitive (an address-only ACK check) --
+ * NOT a zero-length write, which the bus layer rejects (write requires
+ * len >= 1).  Addresses 0x00..0x07 and 0x78..0x7F are reserved and skipped.
  */
 static void
 i2c_scan(void)
 {
     uint8_t addr;
     uint8_t found = 0;
-    uint8_t dummy = 0;
 
     SHELL_PRINTF("Scanning 0x08..0x77...\n");
     for (addr = 0x08; addr <= 0x77; addr++) {
-        if (tiku_i2c_write(addr, &dummy, 0) == TIKU_I2C_OK) {
+        if (tiku_i2c_probe(addr) == TIKU_I2C_OK) {
             SHELL_PRINTF("  0x%02x\n", (unsigned)addr);
             found++;
         }

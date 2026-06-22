@@ -78,6 +78,19 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
 int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
 
 /**
+ * @brief Architecture-specific address probe (bus-scan presence check).
+ *
+ * Reports whether a device acknowledges @p addr without transferring data.
+ * The `i2c scan` command uses this instead of a zero-length write (which the
+ * bus layer rejects).
+ *
+ * @param addr  7-bit slave address (unshifted)
+ * @return TIKU_I2C_OK if acknowledged, TIKU_I2C_ERR_NACK if not, or another
+ *         negative error code.
+ */
+int tiku_i2c_arch_probe(uint8_t addr);
+
+/**
  * @brief Architecture-specific combined write-then-read.
  *
  * Uses a repeated START between write and read phases.

@@ -69,6 +69,21 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
 }
 
 /**
+ * @brief Probe an I2C address (stub)
+ *
+ * Not yet implemented.  Lands with the am_hal_iom backend (task #31), which
+ * will issue an address-only (or 1-byte) transaction and report the ACK so
+ * the `i2c scan` shell command can detect devices on Apollo.
+ *
+ * @param addr  7-bit I2C device address
+ * @return -1 always (not supported yet)
+ */
+int tiku_i2c_arch_probe(uint8_t addr) {
+    (void)addr;
+    return -1;
+}
+
+/**
  * @brief Write then read an I2C device in a single transaction (stub)
  *
  * Not yet implemented. A real backend performs a combined write/read

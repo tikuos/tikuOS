@@ -342,6 +342,24 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
 }
 
 /**
+ * @brief Probe a slave address (presence check for a bus scan).
+ *
+ *        The DW_apb_i2c cannot issue a zero-byte transaction — the address is
+ *        only clocked out alongside a queued data/read command — so a probe
+ *        is a single 1-byte read.  A missing device NACKs the address, which
+ *        surfaces as TX_ABRT (ABRT_7B_ADDR_NOACK); an ACK means the device is
+ *        present and the one byte read back is discarded.
+ *
+ * @param addr  7-bit slave address.
+ * @return      TIKU_I2C_OK if the device acknowledged, TIKU_I2C_ERR_NACK if
+ *              not, or TIKU_I2C_ERR_PARAM / TIKU_I2C_ERR_TIMEOUT.
+ */
+int tiku_i2c_arch_probe(uint8_t addr) {
+    uint8_t dummy;
+    return tiku_i2c_arch_read(addr, &dummy, 1);
+}
+
+/**
  * @brief Perform a combined I2C write followed by a repeated-start read.
  *
  *        Transmits tx_len bytes then issues a Sr (repeated START) and

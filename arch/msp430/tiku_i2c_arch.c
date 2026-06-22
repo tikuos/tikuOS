@@ -257,6 +257,43 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
 }
 
 /**
+ * @brief Probe a slave address (presence check, no data transferred).
+ *
+ * Sequence: START → addr+W → sample ACK → STOP.  The address phase
+ * completes with UCTXIFG0 when the slave ACKs; if nobody answers,
+ * i2c_wait_flag() observes UCNACKIFG, issues STOP and returns
+ * TIKU_I2C_ERR_NACK.  No data byte is loaded, so this is a true
+ * zero-byte bus-scan probe (the eUSCI_B supports it natively).
+ */
+int
+tiku_i2c_arch_probe(uint8_t addr)
+{
+    int rc;
+
+    /* Clear stale interrupt flags from any previous transaction */
+    UCB0IFG = 0;
+
+    /* Set slave address */
+    UCB0I2CSA = addr;
+
+    /* Transmitter mode, generate START + address (no data follows) */
+    UCB0CTLW0 |= UCTR | UCTXSTT;
+
+    /* Address phase: UCTXIFG0 means the slave ACKed; the helper turns a
+     * missing device (UCNACKIFG) into STOP + TIKU_I2C_ERR_NACK. */
+    rc = i2c_wait_flag(UCTXIFG0);
+    if (rc != TIKU_I2C_OK) {
+        return rc;
+    }
+
+    /* ACKed — device present.  Release the bus without sending data. */
+    UCB0CTLW0 |= UCTXSTP;
+    (void)i2c_wait_stop();
+
+    return TIKU_I2C_OK;
+}
+
+/**
  * @brief Combined write-then-read with repeated START.
  *
  * Sequence: START → addr+W → tx_data → rSTART → addr+R → rx_data → STOP
