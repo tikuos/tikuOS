@@ -1409,14 +1409,11 @@ endif
 ifeq ($(APP),net)
 CFLAGS += -DTIKU_APP_NET=1
 SRCS += apps/net/tiku_app_net.c
-# CoAP server lives in the gitignored labs/ (local-only on some machines);
-# compile it + define TIKU_KITS_NET_COAP only when present, so a checkout
-# without it still builds (the CoAP server is just absent). The C side #if's
-# its use on the same flag.
-ifneq ($(wildcard labs/coap/*.c),)
-SRCS   += $(wildcard labs/coap/*.c)
+# CoAP client/server (library + demo process) lives in tikukits/net/coap/.
+# Pull it in and define TIKU_KITS_NET_COAP so the net app starts the CoAP
+# server process; the C side #if's its use on the same flag.
+SRCS   += $(wildcard tikukits/net/coap/*.c)
 CFLAGS += -DTIKU_KITS_NET_COAP=1
-endif
 endif
 
 # Shell net-test mode: activate TCP and pull in the CoAP server so the shell
@@ -1425,10 +1422,8 @@ ifeq ($(TIKU_SHELL_NET_TEST),1)
 CFLAGS += -DTIKU_SHELL_NET_TEST=1 -DTIKU_KITS_NET_TCP_ENABLE=1
 CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
 CFLAGS += -DTIKU_SHELL_TCP_ENABLE=1
-ifneq ($(wildcard labs/coap/*.c),)
-SRCS   += $(wildcard labs/coap/*.c)
+SRCS   += $(wildcard tikukits/net/coap/*.c)
 CFLAGS += -DTIKU_KITS_NET_COAP=1
-endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_mqtt.c
 SRCS += kernel/shell/tiku_shell_io_tcp.c
 endif

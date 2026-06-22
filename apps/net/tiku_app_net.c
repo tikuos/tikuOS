@@ -29,7 +29,7 @@
 #include <tikukits/net/ipv4/tiku_kits_net_syslog.h>
 #include <tikukits/time/ntp/tiku_kits_time_ntp.h>
 #if defined(TIKU_KITS_NET_COAP)
-#include <labs/coap/tiku_kits_net_coap.h>   /* gitignored labs/ -- optional */
+#include <tikukits/net/coap/tiku_kits_net_coap.h>
 #endif
 
 #if TIKU_KITS_NET_DHCP_ENABLE
@@ -37,7 +37,7 @@
 #endif
 
 #if defined(TIKU_KITS_NET_COAP)
-/* Declared in labs/coap/tiku_kits_net_coap_process.c */
+/* Declared in tikukits/net/coap/tiku_kits_net_coap_process.c */
 extern struct tiku_process tiku_kits_net_coap_process;
 #endif
 
