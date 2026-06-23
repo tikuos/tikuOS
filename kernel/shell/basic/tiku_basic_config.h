@@ -32,23 +32,103 @@
 #define TIKU_BASIC_CONFIG_H_
 
 /*---------------------------------------------------------------------------*/
+/* MEMORY TIER -- drives the default limits below                            */
+/*---------------------------------------------------------------------------*/
+
+/* The interpreter's entire working set (line table, variables, control-flow
+ * stacks, string heap, arrays) is allocated from ONE kernel arena, sized from
+ * the limits below (see tiku_basic_arena.inl) and drawn from the AUTO memory
+ * tier.  So a bigger limit just asks the arena for more -- it does NOT cost
+ * static BSS (only ~50 bytes of pointers are fixed).  The only static cost that
+ * scales is the FRAM/MRAM/flash save buffer (= PROGRAM_LINES * (LINE_MAX + 8)).
+ *
+ * The sensible default therefore depends on how much that tier can give, which
+ * is a property of the board.  Three tiers:
+ *
+ *   BIG  - Apollo (3 MB / 384 KB SSRAM) and RP2350 (520 KB SRAM): generous.
+ *   FRAM - MSP430 FR5994/FR6989 with MEMORY_MODEL=large: the arena routes to
+ *          HIFRAM (256 KB FRAM), so the 8 KB SRAM is not the bound -> roomy.
+ *   else - FR5969 (2 KB SRAM) and the host test harness: the original lean
+ *          limits, left EXACTLY as they were.
+ *
+ * Every macro stays -D-overridable; these branches only choose the default. */
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+#define TIKU_BASIC_TIER_BIG  1
+#elif defined(TIKU_MEMORY_MODEL_LARGE)
+#define TIKU_BASIC_TIER_FRAM 1
+#endif
+
+/* Apollo510 (Apollo5) has the most RAM of the BIG-class parts -- 512 KB TCM
+ * plus 3 MB SSRAM -- so it gets the largest PROGRAM_LINES.  It is also
+ * PLATFORM_AMBIQ, so it already inherits every BIG secondary limit above; only
+ * the program size differs from Apollo4 Lite / RP2350. */
+#if defined(AM_PART_APOLLO510)
+#define TIKU_BASIC_TIER_HUGE 1
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* CORE LIMITS                                                               */
 /*---------------------------------------------------------------------------*/
 
 #ifndef TIKU_BASIC_LINE_MAX
-#define TIKU_BASIC_LINE_MAX        48
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_LINE_MAX     80
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_LINE_MAX     64
+#  else
+#    define TIKU_BASIC_LINE_MAX     48
+#  endif
 #endif
+
+/* PROGRAM_LINES is the one limit with a static cost that scales: the save
+ * buffer (basic_save_buf) is PROGRAM_LINES * (LINE_MAX + 8) bytes, and on
+ * non-MSP430 parts it is plain .bss (the .persistent attribute is MSP430-only),
+ * so at LINE_MAX=80 that is ~88 bytes of always-on RAM per line:
+ *   HUGE  2048 -> ~180 KB .bss (Apollo510: 512 KB TCM + 3 MB SSRAM)
+ *   BIG   1024 ->  ~90 KB .bss (Apollo4 Lite 1 MB SSRAM / RP2350 520 KB)
+ *   FRAM   256 -> ~18 KB FRAM .persistent (FR5994/6989, 256 KB FRAM)
+ *   else    50 ->  ~3 KB (host harness / small)
+ * Line numbers are uint16_t, so the hard ceiling is 65533 lines. */
 #ifndef TIKU_BASIC_PROGRAM_LINES
-#define TIKU_BASIC_PROGRAM_LINES   24
+#  if defined(TIKU_BASIC_TIER_HUGE)
+#    define TIKU_BASIC_PROGRAM_LINES 2048
+#  elif defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_PROGRAM_LINES 1024
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_PROGRAM_LINES 256
+#  else
+#    define TIKU_BASIC_PROGRAM_LINES 50
+#  endif
 #endif
-#ifndef TIKU_BASIC_GOSUB_DEPTH
-#define TIKU_BASIC_GOSUB_DEPTH      8
+
+#ifndef TIKU_BASIC_GOSUB_DEPTH       /* sp is uint8_t -> hard max 255 */
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_GOSUB_DEPTH   32
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_GOSUB_DEPTH   16
+#  else
+#    define TIKU_BASIC_GOSUB_DEPTH    8
+#  endif
 #endif
+
 #ifndef TIKU_BASIC_FOR_DEPTH
-#define TIKU_BASIC_FOR_DEPTH        4
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_FOR_DEPTH     16
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_FOR_DEPTH      8
+#  else
+#    define TIKU_BASIC_FOR_DEPTH      4
+#  endif
 #endif
+
 #ifndef TIKU_BASIC_LOOP_DEPTH
-#define TIKU_BASIC_LOOP_DEPTH       4
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_LOOP_DEPTH    16
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_LOOP_DEPTH     8
+#  else
+#    define TIKU_BASIC_LOOP_DEPTH     4
+#  endif
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -97,7 +177,13 @@
  * Numeric and string named vars share the same maximum count but
  * occupy independent name tables, so MYVAR and MYVAR$ can coexist. */
 #ifndef TIKU_BASIC_NAMEDVAR_MAX
-#define TIKU_BASIC_NAMEDVAR_MAX     16
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_NAMEDVAR_MAX  64
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_NAMEDVAR_MAX  32
+#  else
+#    define TIKU_BASIC_NAMEDVAR_MAX  16
+#  endif
 #endif
 #ifndef TIKU_BASIC_NAMEDVAR_LEN
 #define TIKU_BASIC_NAMEDVAR_LEN     8       /* 7 chars + NUL */
@@ -117,10 +203,22 @@
 #define TIKU_BASIC_STRVARS_ENABLE   1
 #endif
 #ifndef TIKU_BASIC_STR_HEAP_BYTES
-#define TIKU_BASIC_STR_HEAP_BYTES   512
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_STR_HEAP_BYTES 4096
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_STR_HEAP_BYTES 2048
+#  else
+#    define TIKU_BASIC_STR_HEAP_BYTES 512
+#  endif
 #endif
 #ifndef TIKU_BASIC_STR_BUF_CAP
-#define TIKU_BASIC_STR_BUF_CAP      64
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_STR_BUF_CAP  256
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_STR_BUF_CAP  128
+#  else
+#    define TIKU_BASIC_STR_BUF_CAP  64
+#  endif
 #endif
 
 /* DEF FN single-line user functions. Each entry stores a name (up
@@ -131,10 +229,20 @@
 #define TIKU_BASIC_DEFN_ENABLE      1
 #endif
 #ifndef TIKU_BASIC_DEFN_MAX
-#define TIKU_BASIC_DEFN_MAX         4
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_DEFN_MAX     16
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_DEFN_MAX      8
+#  else
+#    define TIKU_BASIC_DEFN_MAX      4
+#  endif
 #endif
 #ifndef TIKU_BASIC_DEFN_BODY
-#define TIKU_BASIC_DEFN_BODY        40
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_DEFN_BODY    64
+#  else
+#    define TIKU_BASIC_DEFN_BODY    40
+#  endif
 #endif
 
 /* DIM A(n) integer arrays. 26 slots (one per A..Z); each starts
@@ -144,8 +252,28 @@
 #ifndef TIKU_BASIC_ARRAYS_ENABLE
 #define TIKU_BASIC_ARRAYS_ENABLE    1
 #endif
+/* ARRAY_MAX caps each DIM's per-dimension and total element count;
+ * ARRAY_TOTAL_LONGS is the shared arena pool that backs every array's element
+ * storage (must be >= one ARRAY_MAX array, more for several).  They scale
+ * together.  ARRAY_TOTAL_LONGS is consumed in tiku_basic_arena.inl, which is
+ * included after this header, so defining it here wins. */
 #ifndef TIKU_BASIC_ARRAY_MAX
-#define TIKU_BASIC_ARRAY_MAX        128
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_ARRAY_MAX    4096
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_ARRAY_MAX    1024
+#  else
+#    define TIKU_BASIC_ARRAY_MAX    128
+#  endif
+#endif
+#ifndef TIKU_BASIC_ARRAY_TOTAL_LONGS
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_ARRAY_TOTAL_LONGS 4096u
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_ARRAY_TOTAL_LONGS 1024u
+#  else
+#    define TIKU_BASIC_ARRAY_TOTAL_LONGS 128u
+#  endif
 #endif
 
 /* Multi-slot SAVE / LOAD. The default unnamed SAVE / LOAD continue
@@ -154,8 +282,16 @@
 #ifndef TIKU_BASIC_NAMED_SLOTS
 #define TIKU_BASIC_NAMED_SLOTS      3
 #endif
+/* Each named slot must hold a serialized program, so it scales with the
+ * program size (these are static .persistent bytes, like the main save buf). */
 #ifndef TIKU_BASIC_NAMED_SLOT_BYTES
-#define TIKU_BASIC_NAMED_SLOT_BYTES 192
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_NAMED_SLOT_BYTES 2048
+#  elif defined(TIKU_BASIC_TIER_FRAM)
+#    define TIKU_BASIC_NAMED_SLOT_BYTES 1024
+#  else
+#    define TIKU_BASIC_NAMED_SLOT_BYTES 192
+#  endif
 #endif
 
 /* Fixed-point math.  Numbers with a decimal point in source (`1.5`,

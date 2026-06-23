@@ -623,13 +623,21 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_AMBIQ=1
-# Memory tiers sized for Apollo510's 512 KB DTCM. The tiku_mem.h defaults are
-# MSP430-era (128 B SRAM / 1 KB NVM) and assume large allocations spill to HIFRAM
-# (FRAM > 64 KB), which this part lacks -- so AUTO allocations land in the 128 B
-# SRAM tier and OOM on a half-MB-of-RAM MCU (e.g. BASIC's ~4 KB arena). The mem
-# size type is 32-bit here (arch/ambiq/tiku_mem_arch.h), so >64 KB tiers are
-# fine. NVM tier is volatile-RAM-backed until MRAM persistence lands.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072   # 128 KB fast volatile tier in DTCM
+# Memory tiers. The tiku_mem.h defaults are MSP430-era (128 B SRAM / 1 KB NVM)
+# and assume large allocations spill to HIFRAM (FRAM > 64 KB), which these parts
+# lack -- so without an override AUTO allocations land in the tiny SRAM tier and
+# OOM. The SRAM (AUTO) tier lives in the multi-MB SSRAM (.ssram, powered + zeroed
+# in tiku_crt_early.c -- mem port B), NOT the 512 KB DTCM, so size it to the
+# part's SSRAM rather than the old DTCM-era 128 KB cap (which was left stale when
+# the tier moved out of DTCM). This is the ceiling on every AUTO-tier arena,
+# including BASIC's program arena (a 2048-line program needs ~195 KB). The mem
+# size type is 32-bit here (arch/ambiq/tiku_mem_arch.h), so multi-hundred-KB
+# tiers are fine.
+ifeq ($(MCU),apollo4l)
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=524288    # 512 KB of the 1 MB SSRAM
+else
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=1048576   # 1 MB of the 3 MB SSRAM (Apollo510)
+endif
 CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
 # Part selectors that configure the vendored register map (apollo4l.h / apollo510.h).
 ifeq ($(MCU),apollo4l)
