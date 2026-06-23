@@ -31,18 +31,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/* The prog_* helpers below scan prog[] with a uint16_t loop counter, so the
+ * configured line-table size must fit in 16 bits.  A narrower (uint8_t)
+ * counter silently looped forever once the per-tier PROGRAM_LINES limits were
+ * raised above 255 (1024 on Apollo4 Lite/RP2350, 2048 on Apollo510, 256 on
+ * FRAM): `i < TIKU_BASIC_PROGRAM_LINES` stayed perpetually true and prog_store
+ * spun on the first stored line. */
+_Static_assert(TIKU_BASIC_PROGRAM_LINES <= 0xFFFFu,
+               "PROGRAM_LINES must fit the uint16_t prog[] scan counter");
+
 /** @brief Mark every line slot empty. */
 static void
 prog_clear(void)
 {
-    uint8_t i;
+    uint16_t i;
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
 }
 
 static int
 prog_store(uint16_t lineno, const char *body)
 {
-    uint8_t i;
+    uint16_t i;
     const char *t = body;
     skip_ws(&t);
     /* Empty body -> delete the line if present. */
@@ -79,7 +88,7 @@ prog_next_index(uint16_t lineno)
 {
     int      best     = -1;
     uint16_t best_num = 0xFFFF;
-    uint8_t  i;
+    uint16_t i;
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == 0)        continue;
         if (prog[i].number < lineno)    continue;
@@ -94,7 +103,7 @@ prog_next_index(uint16_t lineno)
 static int
 prog_find_exact(uint16_t lineno)
 {
-    uint8_t i;
+    uint16_t i;
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == lineno) return (int)i;
     }

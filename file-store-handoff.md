@@ -21,7 +21,7 @@ file store is **not yet HW-tested on apollo4l** — that's the first thing to do
 | `/data` dynamic dir + `write`/`cat`/`ls` | ✅ HW | ⬜ build-only | ⚠️ | ✅ build (`.bss`, volatile) |
 | `rm` / `touch` / `rw` flags | ✅ HW | ⬜ build-only | ⚠️ | ✅ build |
 | **Durable across power loss** | ✅ HW (reset-survival) | ⬜ **expected, verify** | ⚠️ FRAM (unbuilt) | ❌ no backend yet |
-| `basic load/save/run <path>` | ❌ **blocked** (see Bug #1) | ❌ likely blocked | ⚠️ should work | ❌ BASIC not default |
+| BASIC stored-program / RUN | ✅ fixed (code) | ✅ **fixed + HW** (Bug #1) | ✅ fixed (code) | ✅ fixed (code) |
 
 ✅ = HW-verified · ⬜ = builds, not HW-tested · ⚠️ = can't build on this Mac (no msp430 toolchain) · ❌ = doesn't work
 
@@ -100,40 +100,38 @@ a24ab4f  fs/vfs: wire the file store to a dynamic /data directory (M3)
 
 ## 5. Known bugs / what doesn't work
 
-### 🐞 Bug #1 (HIGH — the headline blocker): BASIC `RUN` / `exec_run` hangs on Ambiq
-**Pre-existing, NOT caused by the file store.** On apollo510 the BASIC interpreter cannot
-execute a *stored program*: the REPL's own `RUN` hangs the board (needs a reflash to recover).
-Direct commands work (`basic` → `PRINT 2+3` → `5`). Reproduce:
+### ✅ Bug #1 (RESOLVED 2026-06-24): BASIC stored-program store/RUN hung — `uint8_t` loop counter
+**Root cause was a `uint8_t` loop counter, NOT a fault / cache / RUN-engine issue.** The `prog_*`
+line-table helpers scanned `for (uint8_t i; i < TIKU_BASIC_PROGRAM_LINES; i++)`. A `uint8_t` caps
+at 255, so once `0411cac` raised PROGRAM_LINES per tier (apollo4l/rp2350=1024, apollo510=2048,
+**msp430-large=256**), `i < N` was permanently true → infinite loop. It fires when the FIRST
+numbered line is stored (`prog_store`'s scan never returns); the `ok>` prompt never comes back,
+so the *next*-typed `RUN` looked like the culprit. Affects apollo4l, apollo510 AND msp430-large —
+only the host build (PROGRAM_LINES=50) was safe, which is why "works on msp430" held (immediate
+mode only, never a stored line). Original (misleading) repro — now passes, printing `42`:
 ```
 basic            → "Tiku BASIC ready. ok>"
-10 PRINT 6*7     → stored
-RUN              → HANGS (board unresponsive; reflash to recover)
+10 PRINT 6*7     → ok>          (was: prompt never returned — store hung here)
+RUN              → 42           (was: looked like the hang)
 ```
-Because of this, `basic run/load/save <path>` (M4) cannot execute on Apollo. The M4 wiring is
-written to fail **gracefully** (it routes through load+`tiku_basic_autorun`, never the
-`run_source` path that *also* hangs) — on Apollo the load errors first and never reaches the
-hang. The `.bas` file *storage* works fine; only running it via BASIC is blocked.
+**Fixed:** widened the five scan counters to `uint16_t` + a `_Static_assert`
+(`tiku_basic_program.inl` prog_clear/store/next_index/find_exact; `tiku_basic_stmt.inl`
+prog_find_label). With the store/RUN engine working, `basic run <path>` (load into `prog[]` +
+run) works too; `basic save/load` to the persist store is still blocked separately (see below).
 
-**Where to look (start here):**
-- `kernel/shell/basic/tiku_basic_run.inl::exec_run()` (~line 47) — the program-step loop:
-  `idx = prog_find_exact(basic_pc)` → run `prog[idx].text` → advance `basic_pc`.
-- `kernel/shell/basic/tiku_basic_program.inl` — `prog[]` line table, `prog_find_exact`,
-  `prog_next_index`. (`prog[].number` is `uint16_t`.)
-- **Hypotheses** (it works on msp430, BASIC's home, so it's Apollo-specific):
-  (a) `basic_pc` not advancing after a statement → infinite loop (check the normal-flow
-      advance vs `prog_next_index` returning -1 → possible `prog[-1]` OOB);
-  (b) the BASIC **arena lives in cached `.ssram`** on Apollo (the AUTO tier, from `0411cac`) →
-      a D-cache coherency issue on the `prog[]`/arena reads could corrupt iteration (apollo4l +
-      apollo510 both have D-cache; see `c6d958d`/`cache` work);
-  (c) a 16- vs 32-bit assumption in the line iteration on the M55/M4F.
-- Also note BASIC *persistence* can't fit Apollo: its save buffer is `PROGRAM_LINES*(LINE_MAX+8)`
-  = ~180 KB for 2048 lines vs the 32 KB mirror → `persist init failed`
-  (`tiku_basic_persist.inl::basic_persist_ensure`). Even if Bug #1 is fixed, `basic save/load`
-  needs either fewer lines on Apollo or the direct-MRAM backend.
+**What it actually was** (the original hypotheses below were all wrong, kept for the record):
+not `basic_pc`, not D-cache (apollo4l SSRAM is non-cacheable yet still hung), not a 16/32-bit
+fault. JLink attach-halt on apollo4l showed `IPSR=NoException` with the PC pinned in `prog_store`
+= a plain busy loop (the `uint8_t` scan). For the record, the wrong guesses were:
+  (a) `basic_pc` not advancing → infinite loop;
+  (b) BASIC arena in cached `.ssram` → D-cache coherency corrupting iteration;
+  (c) a 16- vs 32-bit assumption on the M55/M4F.
 
-> **Verify Bug #1 on apollo4l first.** Same Ambiq BASIC engine + cached `.ssram` arena → almost
-> certainly hangs there too, but confirm. If apollo4l reproduces, it's the cleanest board to
-> debug on (M4F, simpler than M55).
+**Still open (separate issue):** BASIC *persistence* can't fit Apollo — the save buffer is
+`PROGRAM_LINES*(LINE_MAX+8)` (~88 KB at 1024 lines, ~180 KB at 2048) vs the 32 KB MRAM mirror →
+`persist init failed` (`tiku_basic_persist.inl::basic_persist_ensure`). `basic save/load` to the
+persist store still needs fewer lines on Apollo or the direct-MRAM backend. This is unrelated to
+the store/RUN hang above (now fixed).
 
 ### Bug #2 (MEDIUM): rp2350 + net (`TIKU_SHELL_NET_TEST=1`) fails to link
 `ERROR: .uninit region exceeds 4 KB flash backup sector`. **Pre-existing** — the net stack's
@@ -212,11 +210,10 @@ On Ambiq, `reboot`/SystemReset **halts** the SBL → recover with `make flash`.
 
 ## 8. Roadmap (suggested order)
 
-1. **Verify on apollo4l** — flash the build, confirm `/data` write/cat/ls/rm/touch + reset-survival,
-   and check whether Bug #1 (BASIC RUN hang) reproduces. (Low effort, high value.)
-2. **Fix Bug #1** (BASIC `exec_run` hang on Ambiq) — unblocks `basic run <path>`, the headline use
-   case. Start at `tiku_basic_run.inl::exec_run`; suspect the `basic_pc` advance and/or the cached
-   `.ssram` arena. This is a self-contained interpreter bug, independent of the file store.
+1. **Fix Bug #1** — ✅ DONE (2026-06-24): `uint8_t` loop-counter overflow in the BASIC `prog_*`
+   helpers (infinite loop for PROGRAM_LINES>255), widened to `uint16_t`; HW-verified on apollo4l.
+2. **Verify `/data` on apollo4l** — flash + confirm `write`/`cat`/`ls`/`rm`/`touch` + reset-
+   survival. This session only chased Bug #1; the `/data` HW pass on apollo4l is still TODO.
 3. **Direct-MRAM backend** (the "megabytes" the file store was for) — a new
    `tiku_nvm_backend_t` whose `write()` calls the bootrom `nv_program_main2`
    (`arch/ambiq/tiku_mem_arch.c` already uses it; signature `(key, op, src, dst_word_off,
@@ -233,8 +230,9 @@ On Ambiq, `reboot`/SystemReset **halts** the SBL → recover with `make flash`.
 ## 9. Gotchas
 - The Ambiq `.uninit` mirror is ~25/32 KB full *before* the store — keep the Ambiq store small,
   or the `.ld` ASSERT fails the build (that's by design; it's better than silent MRAM truncation).
-- `basic run <path>` deliberately uses **load+autorun, not `run_source`** — `run_source` hangs the
-  board on Ambiq (Bug #1). Don't "simplify" it back to `run_source`.
+- `basic run <path>` uses **load+autorun, not `run_source`**. Its original rationale (`run_source`
+  hangs on Ambiq) was Bug #1 — now FIXED (the `prog_*` `uint8_t` loop), so re-test before assuming
+  the detour is still required.
 - Don't `git add -A`; stage only intended files. The tracked `tests/tiku_test_config.h` drifts if
   you run TikuBench kernel categories — `git checkout` it before committing.
 - A code reflash does NOT erase the MRAM mirror page (`0x7F8000+` on apollo510) — that's *why*

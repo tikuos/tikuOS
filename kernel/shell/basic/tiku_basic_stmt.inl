@@ -394,7 +394,7 @@ exec_input(const char **p)
 static int
 prog_find_label(const char *name, size_t name_len)
 {
-    uint8_t i;
+    uint16_t i;
     size_t  k;
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         const char *t;
