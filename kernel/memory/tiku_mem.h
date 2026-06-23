@@ -1227,6 +1227,23 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
                                 tiku_mem_stats_t *stats);
 
+/**
+ * @brief Write into NVM-tier memory through the correct backing path.
+ *
+ * NVM-tier memory is read by a plain pointer dereference everywhere, but the
+ * write differs: a directly-mapped NVM region (Ambiq MRAM) is programmed by the
+ * bootrom backend, not by CPU stores, while FRAM / host .bss is byte-writable
+ * in place. Use this for any mutation of memory handed out by the NVM tier; it
+ * brackets the NVM unlock window itself.
+ *
+ * @param dst  Destination inside NVM-tier memory.
+ * @param src  Source bytes.
+ * @param len  Byte count.
+ * @return TIKU_MEM_OK, or TIKU_MEM_ERR_INVALID on a NULL/out-of-range write.
+ */
+tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
+                                   tiku_mem_arch_size_t len);
+
 /*---------------------------------------------------------------------------*/
 /* WRITE-BACK CACHE (SRAM/FRAM)                                              */
 /*---------------------------------------------------------------------------*/

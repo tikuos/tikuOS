@@ -953,6 +953,7 @@ SRCS += arch/ambiq/tiku_uart_apollo4l.c
 SRCS += arch/ambiq/tiku_mem_apollo4l.c
 SRCS += arch/ambiq/tiku_mpu_apollo4l.c
 SRCS += arch/ambiq/tiku_region_apollo4l.c
+SRCS += arch/ambiq/tiku_nvm_region_apollo4l.c
 SRCS += arch/ambiq/tiku_gpio_apollo4l.c
 SRCS += arch/ambiq/tiku_adc_apollo4l.c
 else
@@ -970,6 +971,7 @@ SRCS += arch/ambiq/tiku_uart_arch.c
 SRCS += arch/ambiq/tiku_mem_arch.c
 SRCS += arch/ambiq/tiku_mpu_arch.c
 SRCS += arch/ambiq/tiku_region_arch.c
+SRCS += arch/ambiq/tiku_nvm_region_apollo510.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
 endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
@@ -994,6 +996,7 @@ SRCS += arch/msp430/tiku_uart_arch.c
 SRCS += arch/msp430/tiku_mem_arch.c
 SRCS += arch/msp430/tiku_mpu_arch.c
 SRCS += arch/msp430/tiku_region_arch.c
+SRCS += arch/msp430/tiku_nvm_region_msp430.c
 
 endif
 SRCS += boot/tiku_boot.c
@@ -1064,6 +1067,7 @@ SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/memory/tiku_tier.c
+SRCS += kernel/memory/tiku_nvm_region.c
 SRCS += kernel/memory/tiku_cache.c
 SRCS += kernel/memory/tiku_hibernate.c
 SRCS += kernel/memory/tiku_proc_mem.c
@@ -1214,6 +1218,9 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_repeat.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_PEEK=1,$(EXTRA_CFLAGS))$(findstring TIKU_SHELL_CMD_POKE=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_mem.c
+endif
+ifneq (,$(findstring TIKU_SHELL_CMD_NVMPROBE=1,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 endif
 # GPIO arch is always needed (VFS tree references GPIO read/write/dir).

@@ -352,6 +352,12 @@
 
 #ifdef PLATFORM_MSP430
 #define BASIC_NVM_PERSISTENT __attribute__((section(".persistent")))
+#elif defined(PLATFORM_AMBIQ)
+/* Apollo: the BASIC save buffer is volatile today (the durable MRAM-region
+ * relocation is the NVM-tier milestone). Keep it OUT of the 512 KB DTCM -- at
+ * 2048 lines it is ~176 KB and would overflow it -- by placing it in the
+ * multi-MB .ssram pool (zeroed at boot, like .bss). */
+#define BASIC_NVM_PERSISTENT __attribute__((section(".ssram")))
 #else
 #define BASIC_NVM_PERSISTENT
 #endif

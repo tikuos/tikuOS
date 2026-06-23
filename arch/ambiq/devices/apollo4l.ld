@@ -26,7 +26,11 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 1998848 - 0x8000  /* ~1.9 MB; top 32 KB reserved below for the NVM mirror */
+    /* Code window: a fixed ~512 KB budget for code/rodata. Everything between
+     * the code window and the 32 KB mirror becomes the carved NVM region, so
+     * the NVM store/tier gets the bulk of MRAM. A region overflow here means
+     * code outgrew its 512 KB budget. */
+    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x80000
     TCM   (rwx) : ORIGIN = 0x10000000, LENGTH = 384K      /* .data/.bss/heap/stack          */
     SSRAM (rwx) : ORIGIN = 0x10060000, LENGTH = 1M        /* shared SRAM (unused at bring-up) */
 }
@@ -34,11 +38,19 @@ MEMORY
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 
-/* NVM mirror page: 32 KB reserved just above the shrunk MRAM region
- * (0x1F8000..0x200000), where tiku_mem_arch_nvm_flush() programs the .uninit
- * snapshot for power-cycle durability (full-kernel milestone). */
-__tiku_nvm_mram_start = ORIGIN(MRAM) + LENGTH(MRAM);   /* 0x1F8000 */
-__tiku_nvm_mram_size  = 0x8000;                        /* 32 KB */
+/* Carved NVM store/tier region (substrate B): ALL MRAM between the 512 KB code
+ * window and the 32 KB mirror -- ~1.375 MB on this part. Read in place by
+ * pointer (MPU region 0 maps all MRAM RO); written via the bootrom backend
+ * (kernel/memory/tiku_nvm_region). The NVM memory tier and the file store ride
+ * this. */
+__tiku_nvmfs_base  = ORIGIN(MRAM) + LENGTH(MRAM);   /* 0x98000: just above code */
+
+/* NVM mirror page: 32 KB at the top of MRAM (0x1F8000..0x200000), where
+ * tiku_mem_arch_nvm_flush() programs the .uninit snapshot (Proposal A, small
+ * hot state). */
+__tiku_nvm_mram_start = 0x001F8000;                             /* top - 32 KB */
+__tiku_nvm_mram_size  = 0x8000;                                 /* 32 KB */
+__tiku_nvmfs_size     = __tiku_nvm_mram_start - __tiku_nvmfs_base;  /* ~1.375 MB */
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 

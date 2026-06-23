@@ -110,6 +110,9 @@
 #ifndef TIKU_SHELL_CMD_FS
 #define TIKU_SHELL_CMD_FS      1  /**< rm/touch- Remove / create /data files */
 #endif
+#ifndef TIKU_SHELL_CMD_NVMPROBE
+#define TIKU_SHELL_CMD_NVMPROBE 0 /**< nvmprobe- Carved NVM region diagnostic (opt-in) */
+#endif
 #ifndef TIKU_SHELL_CMD_READ
 #define TIKU_SHELL_CMD_READ    1  /**< read    - Read value from VFS node */
 #endif

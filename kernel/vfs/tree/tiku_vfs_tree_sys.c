@@ -204,6 +204,28 @@ nvm_read(char *buf, size_t max)
                     (unsigned long)TIKU_DEVICE_FRAM_SIZE);
 }
 
+/**
+ * @brief Read handler for /sys/mem/nvmfree.
+ *
+ * Free bytes in the NVM memory tier (capacity - used). On Ambiq this is the
+ * carved, memory-mapped MRAM region; on MSP430 the FRAM NVM pool. Reports 0 if
+ * the tier is unavailable (e.g. no region backend on the board yet).
+ *
+ * @param buf  Output buffer for the rendered text
+ * @param max  Capacity of @p buf in bytes
+ * @return Bytes written, or -1 on error
+ */
+static int
+nvmfree_read(char *buf, size_t max)
+{
+    tiku_mem_stats_t st;
+    if (tiku_tier_stats(TIKU_MEM_NVM, &st) != TIKU_MEM_OK) {
+        return snprintf(buf, max, "0\n");
+    }
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)(st.total_bytes - st.used_bytes));
+}
+
 /*---------------------------------------------------------------------------*/
 /* /sys/mem/free — live stack headroom                                        */
 /*---------------------------------------------------------------------------*/
@@ -537,6 +559,7 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },
+    { "nvmfree", TIKU_VFS_FILE, nvmfree_read, NULL, NULL, 0, &desc_mem_live },
 };
 
 /** /sys/cpu directory table */
@@ -585,7 +608,7 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
-    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 4 },
+    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 5 },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_power_children,    TIKU_VFS_TREE_POWER_NCHILD },
