@@ -1127,6 +1127,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_fs.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
 # slip command: only when the net stack is compiled in (it starts the net
 # process). Keeps one OS image: interactive shell by default, SLIP/IP on

@@ -107,6 +107,9 @@
 #ifndef TIKU_SHELL_CMD_WRITE
 #define TIKU_SHELL_CMD_WRITE   1  /**< write   - Write value to VFS node */
 #endif
+#ifndef TIKU_SHELL_CMD_FS
+#define TIKU_SHELL_CMD_FS      1  /**< rm/touch- Remove / create /data files */
+#endif
 #ifndef TIKU_SHELL_CMD_READ
 #define TIKU_SHELL_CMD_READ    1  /**< read    - Read value from VFS node */
 #endif

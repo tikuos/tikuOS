@@ -332,6 +332,19 @@ int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max);
 int tiku_vfs_write(const char *path, const char *data, size_t len);
 
 /**
+ * @brief Delete a file at @p path.
+ *
+ * Only dynamic directories (a file store mounted via dynops) support
+ * removal; a static node — or a directory without an unlink op —
+ * returns -1.  On success the parent directory's watchers are rung,
+ * exactly like a write.
+ *
+ * @param path  Absolute path to a dynamic FILE node
+ * @return 0 on success, -1 on error (not found / not removable)
+ */
+int tiku_vfs_unlink(const char *path);
+
+/**
  * @brief List directory contents
  * @param path      Absolute path to a DIR node
  * @param callback  Called once per child

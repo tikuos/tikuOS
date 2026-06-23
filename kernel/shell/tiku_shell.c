@@ -137,6 +137,9 @@
 #if TIKU_SHELL_CMD_WRITE
 #include "commands/tiku_shell_cmd_write.h"
 #endif
+#if TIKU_SHELL_CMD_FS
+#include "commands/tiku_shell_cmd_fs.h"
+#endif
 #if TIKU_SHELL_CMD_READ
 #include "commands/tiku_shell_cmd_read.h"
 #endif
@@ -532,6 +535,10 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_WRITE
     {"write",   "Write a VFS node",            tiku_shell_cmd_write},
+#endif
+#if TIKU_SHELL_CMD_FS
+    {"rm",      "Delete a /data file",         tiku_shell_cmd_rm},
+    {"touch",   "Create an empty /data file",  tiku_shell_cmd_touch},
 #endif
 #if TIKU_SHELL_CMD_NAME
     {"name",    "Read/set device name",        tiku_shell_cmd_name},

@@ -250,6 +250,30 @@ static int vfs_dyn_write(const char *path, const char *data, size_t len)
     return rc;
 }
 
+/* Delete a dynamic child; rings the parent dir's watchers on success. */
+static int vfs_dyn_unlink(const char *path)
+{
+    const char *name = NULL;
+    const tiku_vfs_node_t *par = vfs_parent_of(path, &name);
+    int rc;
+    if (par == NULL || par->dyn == NULL || par->dyn->unlink == NULL) {
+        return -1;
+    }
+    rc = par->dyn->unlink(name);
+    if (rc == 0) {
+        tiku_vfs_notify(par);   /* watchers on the directory see the change */
+    }
+    return rc;
+}
+
+/* Flag-only sentinels: a dynamic child IS read/write (through its parent's dyn
+ * ops), but the const node handlers carry no file identity, so a synthesised
+ * list node has no handler to point at.  These mark it read+write so `ls`
+ * renders "rw"; they are never invoked — resolve() never returns a synthesised
+ * node, so reads/writes take the dyn fallback path, not these. */
+static int vfs_dyn_file_rd(char *b, size_t m)        { (void)b; (void)m; return -1; }
+static int vfs_dyn_file_wr(const char *b, size_t l)  { (void)b; (void)l; return -1; }
+
 /* Adapter: present each dynamic child to a tiku_vfs_list_fn as a transient
  * FILE node (valid only during the callback). */
 typedef struct { tiku_vfs_list_fn cb; void *ctx; } vfs_dyn_list_adapter_t;
@@ -258,9 +282,18 @@ static void vfs_dyn_list_thunk(const char *name, void *vad)
     vfs_dyn_list_adapter_t *ad = (vfs_dyn_list_adapter_t *)vad;
     tiku_vfs_node_t tmp;
     memset(&tmp, 0, sizeof tmp);
-    tmp.name = name;
-    tmp.type = TIKU_VFS_FILE;
+    tmp.name  = name;
+    tmp.type  = TIKU_VFS_FILE;
+    tmp.read  = vfs_dyn_file_rd;   /* flag only: ls shows "rw" (see above) */
+    tmp.write = vfs_dyn_file_wr;
     ad->cb(&tmp, ad->ctx);
+}
+
+/* Delete a file (or other dynamic child) at @p path.  Static nodes have no
+ * unlink and return -1; the write path's notify contract applies here too. */
+int tiku_vfs_unlink(const char *path)
+{
+    return vfs_dyn_unlink(path);
 }
 
 /*---------------------------------------------------------------------------*/
