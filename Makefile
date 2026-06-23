@@ -1086,6 +1086,10 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_gpio.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_inittab.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_data.c
 
+# File store backing the dynamic /data directory (self-gated; the data tree
+# module above references it only when the shell is built).
+SRCS += kernel/fs/tiku_tfs.c
+
 # ---------------------------------------------------------------------------
 # Shell (kernel service — compiled when TIKU_SHELL_ENABLE=1)
 # ---------------------------------------------------------------------------

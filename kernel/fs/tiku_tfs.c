@@ -40,6 +40,10 @@
 #define TFS_DATA_OFF    (TFS_DIR_OFF + TFS_DIR_BYTES)
 #define TFS_REGION      (TFS_DATA_OFF + TFS_SLOT_BYTES * TIKU_TFS_NSLOTS)
 
+/* The public TIKU_TFS_REGION_BYTES (tiku_tfs.h) must match this internal
+ * layout -- C89-portable static assertion (the lib also builds under -std=c89). */
+typedef char tfs_region_size_check[(TFS_REGION == TIKU_TFS_REGION_BYTES) ? 1 : -1];
+
 /* field offsets within a dirent / a slot */
 #define TFS_DE_GATE  0u
 #define TFS_DE_SLOT  4u

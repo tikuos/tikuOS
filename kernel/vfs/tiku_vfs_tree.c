@@ -138,7 +138,8 @@ tiku_vfs_tree_init(void)
     root_children[2] = *tiku_proc_vfs_get();
     n_root = 3;
 
-#if defined(TIKU_SHELL_ENABLE) && TIKU_SHELL_CMD_BASIC
+#if defined(TIKU_SHELL_ENABLE)
+    /* /data: the dynamic file store (plus /data/basic when BASIC is built). */
     root_children[3] = *tiku_vfs_tree_data_get();
     n_root = 4;
 #endif

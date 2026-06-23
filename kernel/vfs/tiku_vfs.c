@@ -41,6 +41,7 @@
 #include <kernel/process/tiku_process.h>
 #include <hal/tiku_cpu.h>
 #include <stdio.h>
+#include <string.h>   /* memcpy/memset for the dynamic-directory helpers */
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -185,6 +186,84 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 }
 
 /*---------------------------------------------------------------------------*/
+/* DYNAMIC DIRECTORY SUPPORT — runtime children (e.g. the /data file store)  */
+/*---------------------------------------------------------------------------*/
+
+/* Resolve the PARENT directory of @p path, returning the final component in
+ * @p name_out.  Used only on the dynamic fallback path (a path that does not
+ * resolve to a static node), so the common case pays nothing for it. */
+static const tiku_vfs_node_t *vfs_parent_of(const char *path,
+                                            const char **name_out)
+{
+    const char *p, *slash = NULL;
+    char pbuf[80];
+    size_t plen;
+
+    if (path == NULL || path[0] != '/') {
+        return NULL;
+    }
+    for (p = path; *p != '\0'; p++) {
+        if (*p == '/') {
+            slash = p;
+        }
+    }
+    if (slash == NULL || slash[1] == '\0') {   /* no name / trailing slash */
+        return NULL;
+    }
+    *name_out = slash + 1;
+    if (slash == path) {                       /* "/foo" -> parent is root */
+        return vfs_root;
+    }
+    plen = (size_t)(slash - path);
+    if (plen >= sizeof pbuf) {
+        return NULL;
+    }
+    memcpy(pbuf, path, plen);
+    pbuf[plen] = '\0';
+    return tiku_vfs_resolve(pbuf);
+}
+
+/* Read a dynamic child via the parent dir's dyn ops.  -1 if not dynamic. */
+static int vfs_dyn_read(const char *path, char *buf, size_t max)
+{
+    const char *name = NULL;
+    const tiku_vfs_node_t *par = vfs_parent_of(path, &name);
+    if (par == NULL || par->dyn == NULL || par->dyn->read == NULL) {
+        return -1;
+    }
+    return par->dyn->read(name, buf, max);
+}
+
+/* Write/create a dynamic child; rings the parent dir's watchers on success. */
+static int vfs_dyn_write(const char *path, const char *data, size_t len)
+{
+    const char *name = NULL;
+    const tiku_vfs_node_t *par = vfs_parent_of(path, &name);
+    int rc;
+    if (par == NULL || par->dyn == NULL || par->dyn->write == NULL) {
+        return -1;
+    }
+    rc = par->dyn->write(name, data, len);
+    if (rc == 0) {
+        tiku_vfs_notify(par);   /* watchers on the directory see the change */
+    }
+    return rc;
+}
+
+/* Adapter: present each dynamic child to a tiku_vfs_list_fn as a transient
+ * FILE node (valid only during the callback). */
+typedef struct { tiku_vfs_list_fn cb; void *ctx; } vfs_dyn_list_adapter_t;
+static void vfs_dyn_list_thunk(const char *name, void *vad)
+{
+    vfs_dyn_list_adapter_t *ad = (vfs_dyn_list_adapter_t *)vad;
+    tiku_vfs_node_t tmp;
+    memset(&tmp, 0, sizeof tmp);
+    tmp.name = name;
+    tmp.type = TIKU_VFS_FILE;
+    ad->cb(&tmp, ad->ctx);
+}
+
+/*---------------------------------------------------------------------------*/
 
 /**
  * @brief Invoke a resolved node's read handler directly.
@@ -236,7 +315,11 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
  */
 int tiku_vfs_read(const char *path, char *buf, size_t max)
 {
-    return tiku_vfs_read_node(tiku_vfs_resolve(path), buf, max);
+    const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
+    if (node != NULL) {
+        return tiku_vfs_read_node(node, buf, max);   /* static node (unchanged) */
+    }
+    return vfs_dyn_read(path, buf, max);             /* dynamic /data/<file> */
 }
 
 /*---------------------------------------------------------------------------*/
@@ -497,7 +580,10 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
     int rc;
 
     node = tiku_vfs_resolve(path);
-    if (node == NULL || node->type != TIKU_VFS_FILE || node->write == NULL) {
+    if (node == NULL) {
+        return vfs_dyn_write(path, data, len);   /* dynamic child (create-on-write) */
+    }
+    if (node->type != TIKU_VFS_FILE || node->write == NULL) {
         return -1;
     }
 
@@ -529,6 +615,14 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
 
     for (i = 0; i < node->child_count; i++) {
         callback(&node->children[i], ctx);
+    }
+
+    /* A dynamic directory (e.g. /data) also enumerates its runtime children. */
+    if (node->dyn != NULL && node->dyn->list != NULL) {
+        vfs_dyn_list_adapter_t ad;
+        ad.cb = callback;
+        ad.ctx = ctx;
+        node->dyn->list(vfs_dyn_list_thunk, &ad);
     }
 
     return 0;

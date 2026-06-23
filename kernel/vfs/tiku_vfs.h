@@ -192,6 +192,30 @@ typedef struct tiku_vfs_desc {
       TIKU_VFS_DF_RANGE, (uint16_t)(ticks), 0, (int32_t)(lo), (int32_t)(hi), 0 }
 
 /*---------------------------------------------------------------------------*/
+/* DYNAMIC DIRECTORIES — runtime-populated children (e.g. a file store)      */
+/*---------------------------------------------------------------------------*/
+/*
+ * A DIR node may carry an optional `dyn` ops pointer.  When set, the directory
+ * has children that are NOT in the static children[] array but are resolved at
+ * run time -- the file store mounts /data this way.  The static tree is
+ * unchanged: read/write fall back to the dyn ops ONLY when a path fails to
+ * resolve statically, and list() enumerates the static children and then the
+ * dynamic ones.  A dynamic child is addressed BY NAME (the const node handlers
+ * carry no file identity), so the ops take the name.
+ */
+
+/** @brief Per-name callback for tiku_vfs_dynops.list(). */
+typedef void (*tiku_vfs_dyn_list_cb)(const char *name, void *ctx);
+
+/** @brief Runtime child operations for a dynamic directory. */
+typedef struct tiku_vfs_dynops {
+    void (*list)  (tiku_vfs_dyn_list_cb cb, void *ctx);           /**< enumerate  */
+    int  (*read)  (const char *name, char *buf, size_t max);      /**< read child */
+    int  (*write) (const char *name, const char *buf, size_t len);/**< write/create */
+    int  (*unlink)(const char *name);                            /**< delete child */
+} tiku_vfs_dynops_t;
+
+/*---------------------------------------------------------------------------*/
 /* VFS NODE                                                                  */
 /*---------------------------------------------------------------------------*/
 
@@ -205,6 +229,8 @@ typedef struct tiku_vfs_node {
     uint8_t                      child_count;  /**< For DIR: child count */
     const tiku_vfs_desc_t       *desc;         /**< Type descriptor; NULL =
                                                     untyped (back-compat) */
+    const struct tiku_vfs_dynops *dyn;         /**< Dynamic children; NULL =
+                                                    static dir (back-compat) */
 } tiku_vfs_node_t;
 
 /*---------------------------------------------------------------------------*/

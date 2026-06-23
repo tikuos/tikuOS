@@ -52,6 +52,15 @@
 #define TIKU_TFS_SLOT_DATA  512     /**< max bytes per file */
 #endif
 
+/** @brief Bytes of NVM the store occupies; size a backing region >= this.
+ *  Mirrors the on-NVM layout in tiku_tfs.c (a _Static_assert keeps them in
+ *  sync): superblock + directory[MAX_FILES] + data[MAX_FILES+1]. */
+#define TIKU_TFS_REGION_BYTES                                                   \
+    (8u                                                                        \
+     + ((((8u + TIKU_TFS_NAME_MAX + 3u) & ~3u)) * (unsigned)TIKU_TFS_MAX_FILES) \
+     + ((((4u + TIKU_TFS_SLOT_DATA + 3u) & ~3u))                               \
+        * (unsigned)(TIKU_TFS_MAX_FILES + 1u)))
+
 /*---------------------------------------------------------------------------*/
 /* STATUS CODES                                                              */
 /*---------------------------------------------------------------------------*/
