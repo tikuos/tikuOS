@@ -15,11 +15,18 @@
  *   ls /data                                    # list files
  *   cat /data/blink.bas                         # read
  *
- * The file store sits on a reserved NVM region: `.persistent` FRAM on MSP430
- * (durable now); plain `.bss` elsewhere until the direct-MRAM / Flash backend
- * lands (the backend interface makes that a drop-in swap, so the namespace and
- * shell already work everywhere).  When BASIC is built, the legacy /data/basic
- * bridge to the interpreter's program store is kept as a static child.
+ * The file store sits on a reserved NVM region and is durable today on both
+ * NVM families:
+ *   - MSP430: `.persistent` FRAM, written in place.
+ *   - Ambiq : `.uninit`, which the kernel mirrors to MRAM on every NVM relock
+ *             (tiku_mem_arch_nvm_flush) and restores at boot — so files survive
+ *             a power cut.  The mirror page is ~32 KB, so the store is kept
+ *             small there (see TIKU_TFS_MAX_FILES); the big direct-MRAM backend
+ *             (megabytes, word-granular) is a separate milestone, and the
+ *             backend interface makes it a drop-in swap.
+ *   - else  : plain `.bss` (functional but volatile) until a backend lands.
+ * When BASIC is built, the legacy /data/basic bridge to the interpreter's
+ * program store is kept as a static child.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,11 +65,14 @@
 /* NVM-BACKED FILE STORE FOR /data                                           */
 /*---------------------------------------------------------------------------*/
 
-/* The store's NVM region.  On MSP430 it is `.persistent` (FRAM, durable now);
- * elsewhere it is `.bss` (functional but volatile until the direct-MRAM /
- * Flash backend lands). */
+/* The store's NVM region.  MSP430: `.persistent` (FRAM, in place).  Ambiq:
+ * `.uninit`, mirrored to MRAM on every NVM relock and restored at boot, so the
+ * data_be_write() unlock/lock bracket below also commits it durably.  Other
+ * parts: `.bss` (volatile) until a backend lands. */
 #if defined(PLATFORM_MSP430)
 #define DATA_TFS_SECTION __attribute__((section(".persistent")))
+#elif defined(PLATFORM_AMBIQ)
+#define DATA_TFS_SECTION __attribute__((section(".uninit")))
 #else
 #define DATA_TFS_SECTION
 #endif
