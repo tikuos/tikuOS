@@ -61,6 +61,17 @@ void tiku_shell_cmd_touch(uint8_t argc, const char *argv[]);
 void tiku_shell_cmd_mkdir(uint8_t argc, const char *argv[]);
 
 /**
+ * @brief "rmdir" command handler — remove an empty folder's marker.
+ *
+ * Usage:
+ *   rmdir <path>         e.g.  rmdir /data/logs
+ *
+ * Clears the "<path>/" marker that mkdir wrote.  A folder still holding files
+ * stays until those files are removed; this only deletes the empty marker.
+ */
+void tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[]);
+
+/**
  * @brief "recv" command handler — receive a file from the host.
  *
  * Usage:

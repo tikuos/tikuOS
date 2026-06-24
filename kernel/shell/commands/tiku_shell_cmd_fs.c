@@ -110,6 +110,38 @@ tiku_shell_cmd_mkdir(uint8_t argc, const char *argv[])
     }
 }
 
+void
+tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[])
+{
+    char   resolved[TIKU_SHELL_CWD_SIZE];
+    char   marker[TIKU_SHELL_CWD_SIZE];
+    size_t n;
+
+    if (argc < 2u) {
+        SHELL_PRINTF("Usage: rmdir <path>\n");
+        return;
+    }
+    tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
+
+    /* Re-append the '/' the resolver strips, so unlink targets the "<path>/"
+     * marker (mkdir's empty-folder entry).  A folder kept alive by files inside
+     * it stays until those are deleted -- this only clears the empty marker. */
+    n = strlen(resolved);
+    while (n > 1u && resolved[n - 1] == '/') {
+        resolved[--n] = '\0';
+    }
+    if (n + 2u > sizeof marker) {
+        SHELL_PRINTF("rmdir: path too long\n");
+        return;
+    }
+    memcpy(marker, resolved, n);
+    marker[n]     = '/';
+    marker[n + 1] = '\0';
+    if (tiku_vfs_unlink(marker) < 0) {
+        SHELL_PRINTF("rmdir: cannot remove '%s'\n", resolved);
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 /* BINARY FILE TRANSFER (recv / send)                                        */
 /*                                                                            */
