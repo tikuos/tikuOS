@@ -189,38 +189,54 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 /* DYNAMIC DIRECTORY SUPPORT — runtime children (e.g. the /data file store)  */
 /*---------------------------------------------------------------------------*/
 
-/* Resolve the PARENT directory of @p path, returning the final component in
- * @p name_out.  Used only on the dynamic fallback path (a path that does not
- * resolve to a static node), so the common case pays nothing for it. */
+/* Resolve the dynamic-directory MOUNT for @p path, returning everything after
+ * it in @p name_out.  Used only on the dynamic fallback path (a path that does
+ * not resolve to a static node), so the common case pays nothing for it.
+ *
+ * The parent is the DEEPEST ancestor that is a dynamic directory; the remainder
+ * after that slash becomes the child name and MAY itself contain slashes.  The
+ * file store treats those as part of one flat name, which the shell/VFS present
+ * as virtual sub-folders (path-as-name) -- so /data/logs/jan.txt resolves to the
+ * /data mount with child name "logs/jan.txt", while the flat /data/cfg.json
+ * still resolves to /data with child "cfg.json" exactly as before. */
 static const tiku_vfs_node_t *vfs_parent_of(const char *path,
                                             const char **name_out)
 {
-    const char *p, *slash = NULL;
+    const char *p, *end;
     char pbuf[80];
     size_t plen;
+    const tiku_vfs_node_t *par;
 
     if (path == NULL || path[0] != '/') {
         return NULL;
     }
-    for (p = path; *p != '\0'; p++) {
-        if (*p == '/') {
-            slash = p;
+    for (end = path; *end != '\0'; end++) {
+        ;                                      /* find the terminator */
+    }
+    /* Walk back over each '/': the first (deepest) whose prefix resolves to a
+     * dynamic dir wins.  (A dynamic child directly at root is not a thing --
+     * the root is a static dir -- so stopping above the leading slash is fine;
+     * it yields the same -1 the old immediate-parent form did for that case.) */
+    for (p = end; p > path; p--) {
+        if (*p != '/' || p[1] == '\0') {       /* not a slash / trailing slash */
+            continue;
+        }
+        plen = (size_t)(p - path);
+        if (plen == 0) {
+            par = vfs_root;
+        } else if (plen < sizeof pbuf) {
+            memcpy(pbuf, path, plen);
+            pbuf[plen] = '\0';
+            par = tiku_vfs_resolve(pbuf);
+        } else {
+            continue;                          /* prefix too long for scratch */
+        }
+        if (par != NULL && par->dyn != NULL) {
+            *name_out = p + 1;
+            return par;
         }
     }
-    if (slash == NULL || slash[1] == '\0') {   /* no name / trailing slash */
-        return NULL;
-    }
-    *name_out = slash + 1;
-    if (slash == path) {                       /* "/foo" -> parent is root */
-        return vfs_root;
-    }
-    plen = (size_t)(slash - path);
-    if (plen >= sizeof pbuf) {
-        return NULL;
-    }
-    memcpy(pbuf, path, plen);
-    pbuf[plen] = '\0';
-    return tiku_vfs_resolve(pbuf);
+    return NULL;
 }
 
 /* Read a dynamic child via the parent dir's dyn ops.  -1 if not dynamic. */
