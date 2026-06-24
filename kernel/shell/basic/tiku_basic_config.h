@@ -353,13 +353,23 @@
 #ifdef PLATFORM_MSP430
 #define BASIC_NVM_PERSISTENT __attribute__((section(".persistent")))
 #elif defined(PLATFORM_AMBIQ)
-/* Apollo: the BASIC save buffer is volatile today (the durable MRAM-region
- * relocation is the NVM-tier milestone). Keep it OUT of the 512 KB DTCM -- at
- * 2048 lines it is ~176 KB and would overflow it -- by placing it in the
- * multi-MB .ssram pool (zeroed at boot, like .bss). */
+/* On Ambiq the persist-backed save buffer is not built: the saved program is
+ * durable in the carved NVM region (see basic_prog_store/fetch). This attribute
+ * is unused there, kept defined for symmetry. */
 #define BASIC_NVM_PERSISTENT __attribute__((section(".ssram")))
 #else
 #define BASIC_NVM_PERSISTENT
+#endif
+
+/* Transient SAVE/LOAD serialization scratch (a worst-case whole-program image:
+ * ~90 KB at 1024 lines, ~176 KB at 2048). The two buffers are never live at the
+ * same time, but together they would dominate the scarce DTCM (384-512 KB), so
+ * on Ambiq they ride the multi-MB .ssram pool (zeroed at boot, like .bss); the
+ * durable copy lives in the NVM region. Elsewhere the scratch stays in .bss. */
+#if defined(PLATFORM_AMBIQ)
+#define BASIC_SCRATCH __attribute__((section(".ssram")))
+#else
+#define BASIC_SCRATCH
 #endif
 
 #endif /* TIKU_BASIC_CONFIG_H_ */

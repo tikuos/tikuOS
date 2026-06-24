@@ -161,9 +161,14 @@ static long parse_array_index(const char **p,
  * persist-store metadata both live in the .persistent section so
  * they survive power cycles. tiku_persist_init() validates entries
  * via the magic number on every boot. */
+/* Default-slot persist store (non-Ambiq). On Ambiq the saved program lives in
+ * the carved NVM region instead (durable MRAM; see basic_prog_store/fetch in
+ * tiku_basic_persist.inl), so these are not built there. */
+#if !defined(PLATFORM_AMBIQ)
 static BASIC_NVM_PERSISTENT uint8_t basic_save_buf[TIKU_BASIC_SAVE_BUF_BYTES];
 static BASIC_NVM_PERSISTENT tiku_persist_store_t basic_store;
 static uint8_t       basic_persist_ready;
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* INTERPRETER STATUS FLAGS                                                  */

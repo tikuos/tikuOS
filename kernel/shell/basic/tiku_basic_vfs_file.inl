@@ -47,26 +47,15 @@
 int
 tiku_basic_vfs_read(char *buf, unsigned int max)
 {
-    tiku_mem_arch_size_t n_read = 0;
-    tiku_mem_err_t       rc;
+    size_t n_read = 0;
 
     if (buf == NULL || max == 0u) {
         return -1;
     }
-    if (basic_persist_ensure() != 0) {
-        return -1;
-    }
-
-    rc = tiku_persist_read(&basic_store, BASIC_PERSIST_KEY,
-            (uint8_t *)buf, (tiku_mem_arch_size_t)max, &n_read);
-    if (rc == TIKU_MEM_ERR_NOT_FOUND) {
-        if (max > 0u) {
-            buf[0] = '\0';
-        }
+    /* Same default-slot storage as SAVE/LOAD (NVM region on Ambiq). */
+    if (basic_prog_fetch(buf, (size_t)max, &n_read) != 0) {
+        buf[0] = '\0';      /* no saved program */
         return 0;
-    }
-    if (rc != TIKU_MEM_OK) {
-        return -1;
     }
     return (int)n_read;
 }
@@ -87,22 +76,9 @@ tiku_basic_vfs_read(char *buf, unsigned int max)
 int
 tiku_basic_vfs_write(const char *buf, unsigned int len)
 {
-    uint16_t       mpu;
-    tiku_mem_err_t rc;
-
-    if (buf == NULL) {
+    if (buf == NULL || len > TIKU_BASIC_SAVE_BUF_BYTES) {
         return -1;
     }
-    if (basic_persist_ensure() != 0) {
-        return -1;
-    }
-    if (len > TIKU_BASIC_SAVE_BUF_BYTES) {
-        return -1;
-    }
-
-    mpu = tiku_mpu_unlock_nvm();
-    rc = tiku_persist_write(&basic_store, BASIC_PERSIST_KEY,
-            (const uint8_t *)buf, (tiku_mem_arch_size_t)len);
-    tiku_mpu_lock_nvm(mpu);
-    return (rc == TIKU_MEM_OK) ? 0 : -1;
+    /* Same default-slot storage as SAVE/LOAD (NVM region on Ambiq). */
+    return basic_prog_store(buf, (size_t)len);
 }
