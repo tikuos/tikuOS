@@ -213,6 +213,10 @@ typedef struct tiku_vfs_dynops {
     int  (*read)  (const char *name, char *buf, size_t max);      /**< read child */
     int  (*write) (const char *name, const char *buf, size_t len);/**< write/create */
     int  (*unlink)(const char *name);                            /**< delete child */
+    /** Optional: enumerate the immediate children under @p prefix ("" = root,
+     *  "logs/" = a sub-folder), reporting virtual folders with a trailing '/'.
+     *  NULL on a purely flat store -- the VFS then falls back to list(). */
+    void (*list_dir)(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx);
 } tiku_vfs_dynops_t;
 
 /*---------------------------------------------------------------------------*/
@@ -352,6 +356,17 @@ int tiku_vfs_unlink(const char *path);
  * @return 0 on success, -1 on error (not found or not a directory)
  */
 int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx);
+
+/**
+ * @brief Is @p path a directory?
+ *
+ * True for a static DIR node and for a virtual sub-folder of a dynamic store
+ * (path-as-name): a path with at least one child under it, or an mkdir marker.
+ * False for a file or a non-existent path.  Used by `cd`.
+ *
+ * @return 1 if @p path is a directory, 0 otherwise.
+ */
+int tiku_vfs_is_dir(const char *path);
 
 /*---------------------------------------------------------------------------*/
 /* WATCH — change notification on nodes                                      */

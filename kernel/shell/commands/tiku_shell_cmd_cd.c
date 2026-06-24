@@ -48,17 +48,11 @@ tiku_shell_cmd_cd(uint8_t argc, const char *argv[])
     target = argv[1];
     tiku_shell_cwd_resolve(target, resolved, sizeof(resolved));
 
-    /* Verify the target is a valid VFS directory */
-    {
-        const tiku_vfs_node_t *n = tiku_vfs_resolve(resolved);
-        if (n == (const tiku_vfs_node_t *)0) {
-            SHELL_PRINTF("cd: no such directory '%s'\n", target);
-            return;
-        }
-        if (n->type != TIKU_VFS_DIR) {
-            SHELL_PRINTF("cd: not a directory '%s'\n", target);
-            return;
-        }
+    /* Verify the target is a directory -- static, or a virtual sub-folder of a
+     * dynamic store (e.g. /data/logs), which does not resolve to a node. */
+    if (!tiku_vfs_is_dir(resolved)) {
+        SHELL_PRINTF("cd: no such directory '%s'\n", target);
+        return;
     }
 
     tiku_shell_cwd_set(resolved);

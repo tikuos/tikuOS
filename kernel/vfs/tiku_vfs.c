@@ -291,18 +291,33 @@ static int vfs_dyn_file_rd(char *b, size_t m)        { (void)b; (void)m; return 
 static int vfs_dyn_file_wr(const char *b, size_t l)  { (void)b; (void)l; return -1; }
 
 /* Adapter: present each dynamic child to a tiku_vfs_list_fn as a transient
- * FILE node (valid only during the callback). */
+ * node (valid only during the callback).  A name ending in '/' is a virtual
+ * sub-folder (path-as-name) and becomes a DIR node; anything else is a FILE. */
 typedef struct { tiku_vfs_list_fn cb; void *ctx; } vfs_dyn_list_adapter_t;
 static void vfs_dyn_list_thunk(const char *name, void *vad)
 {
     vfs_dyn_list_adapter_t *ad = (vfs_dyn_list_adapter_t *)vad;
     tiku_vfs_node_t tmp;
+    size_t len = (name != NULL) ? strlen(name) : 0;
     memset(&tmp, 0, sizeof tmp);
-    tmp.name  = name;
-    tmp.type  = TIKU_VFS_FILE;
-    tmp.read  = vfs_dyn_file_rd;   /* flag only: ls shows "rw" (see above) */
-    tmp.write = vfs_dyn_file_wr;
-    ad->cb(&tmp, ad->ctx);
+    if (len > 0 && name[len - 1] == '/') {
+        char dbuf[64];                 /* name without the trailing slash */
+        if (len - 1 < sizeof dbuf) {
+            memcpy(dbuf, name, len - 1);
+            dbuf[len - 1] = '\0';
+            tmp.name = dbuf;
+        } else {
+            tmp.name = name;
+        }
+        tmp.type = TIKU_VFS_DIR;       /* `ls` re-appends the '/' */
+        ad->cb(&tmp, ad->ctx);
+    } else {
+        tmp.name  = name;
+        tmp.type  = TIKU_VFS_FILE;
+        tmp.read  = vfs_dyn_file_rd;   /* flag only: ls shows "rw" (see above) */
+        tmp.write = vfs_dyn_file_wr;
+        ad->cb(&tmp, ad->ctx);
+    }
 }
 
 /* Delete a file (or other dynamic child) at @p path.  Static nodes have no
@@ -652,29 +667,116 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
  * @p callback for each child with name, type, and the caller's
  * context pointer.  Returns -1 if the path is not a directory.
  */
+/* List a dynamic directory's children at sub-path @p prefix ("" = the mount
+ * root).  Prefers the folder-aware list_dir (virtual sub-folders, path-as-name)
+ * and falls back to the flat list at the root of a store that has none. */
+static void vfs_list_dynamic(const tiku_vfs_node_t *node, const char *prefix,
+                             tiku_vfs_list_fn callback, void *ctx)
+{
+    vfs_dyn_list_adapter_t ad;
+    ad.cb = callback;
+    ad.ctx = ctx;
+    if (node->dyn->list_dir != NULL) {
+        node->dyn->list_dir(prefix, vfs_dyn_list_thunk, &ad);
+    } else if (prefix[0] == '\0' && node->dyn->list != NULL) {
+        node->dyn->list(vfs_dyn_list_thunk, &ad);
+    }
+}
+
 int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
 {
     const tiku_vfs_node_t *node;
+    const tiku_vfs_node_t *mount;
+    const char *sub = NULL;
+    char pbuf[80];
+    size_t sl;
     uint8_t i;
 
     node = tiku_vfs_resolve(path);
-    if (node == NULL || node->type != TIKU_VFS_DIR) {
+    if (node != NULL) {
+        if (node->type != TIKU_VFS_DIR) {
+            return -1;
+        }
+        for (i = 0; i < node->child_count; i++) {
+            callback(&node->children[i], ctx);
+        }
+        /* A dynamic dir (e.g. /data) also enumerates its runtime children. */
+        if (node->dyn != NULL) {
+            vfs_list_dynamic(node, "", callback, ctx);
+        }
+        return 0;
+    }
+
+    /* Not a static node: maybe a virtual sub-folder of a dynamic store, where
+     * the path components after the mount are part of a flat name (path-as-
+     * name).  List the mount with that sub-path as the prefix. */
+    mount = vfs_parent_of(path, &sub);
+    if (mount == NULL || mount->dyn == NULL || mount->dyn->list_dir == NULL) {
         return -1;
     }
-
-    for (i = 0; i < node->child_count; i++) {
-        callback(&node->children[i], ctx);
+    sl = strlen(sub);
+    if (sl + 2 > sizeof pbuf) {
+        return -1;
     }
-
-    /* A dynamic directory (e.g. /data) also enumerates its runtime children. */
-    if (node->dyn != NULL && node->dyn->list != NULL) {
-        vfs_dyn_list_adapter_t ad;
-        ad.cb = callback;
-        ad.ctx = ctx;
-        node->dyn->list(vfs_dyn_list_thunk, &ad);
-    }
-
+    memcpy(pbuf, sub, sl);
+    pbuf[sl]     = '/';                  /* prefix = "<sub-path>/" */
+    pbuf[sl + 1] = '\0';
+    vfs_list_dynamic(mount, pbuf, callback, ctx);
     return 0;
+}
+
+/* Probe callback for tiku_vfs_is_dir(): any child flips the flag. */
+static void vfs_isdir_probe(const tiku_vfs_node_t *node, void *ctx)
+{
+    (void)node;
+    *(int *)ctx = 1;
+}
+
+int tiku_vfs_is_dir(const char *path)
+{
+    const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
+    const tiku_vfs_node_t *mount;
+    const char *sub = NULL;
+    char pbuf[80];
+    size_t sl;
+    int found = 0;
+
+    if (node != NULL) {
+        return (node->type == TIKU_VFS_DIR) ? 1 : 0;
+    }
+    mount = vfs_parent_of(path, &sub);
+    if (mount == NULL || mount->dyn == NULL) {
+        return 0;
+    }
+    sl = strlen(sub);
+    if (sl + 2 > sizeof pbuf) {
+        return 0;
+    }
+    /* An exact file at this path -> a file, not a directory. */
+    if (mount->dyn->read != NULL) {
+        char probe[1];
+        if (mount->dyn->read(sub, probe, sizeof probe) >= 0) {
+            return 0;
+        }
+    }
+    memcpy(pbuf, sub, sl);
+    pbuf[sl]     = '/';                  /* "<sub-path>/" */
+    pbuf[sl + 1] = '\0';
+    /* A directory if a mkdir marker exists, or if any child lives under it. */
+    if (mount->dyn->read != NULL) {
+        char probe[1];
+        if (mount->dyn->read(pbuf, probe, sizeof probe) >= 0) {
+            return 1;
+        }
+    }
+    if (mount->dyn->list_dir != NULL) {
+        vfs_dyn_list_adapter_t ad;
+        ad.cb = vfs_isdir_probe;
+        ad.ctx = &found;
+        /* The thunk forwards each child to vfs_isdir_probe via the adapter. */
+        mount->dyn->list_dir(pbuf, vfs_dyn_list_thunk, &ad);
+    }
+    return found;
 }
 
 /*---------------------------------------------------------------------------*/

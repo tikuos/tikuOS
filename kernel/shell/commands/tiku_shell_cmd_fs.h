@@ -49,6 +49,18 @@ void tiku_shell_cmd_rm(uint8_t argc, const char *argv[]);
 void tiku_shell_cmd_touch(uint8_t argc, const char *argv[]);
 
 /**
+ * @brief "mkdir" command handler — create an empty folder (path-as-name).
+ *
+ * Usage:
+ *   mkdir <path>         e.g.  mkdir /data/logs
+ *
+ * The store is flat; a folder is a name ending in '/'.  This writes an empty
+ * "<path>/" marker so an empty folder persists and shows in `ls`.  Folders also
+ * appear implicitly once a file is written under the path (write /data/logs/x).
+ */
+void tiku_shell_cmd_mkdir(uint8_t argc, const char *argv[]);
+
+/**
  * @brief "recv" command handler — receive a file from the host.
  *
  * Usage:

@@ -35,6 +35,7 @@
 #include <kernel/shell/tiku_shell_io.h>   /* raw getc/putc for recv/send */
 #include <kernel/vfs/tiku_vfs.h>
 #include <kernel/fs/tiku_tfs.h>           /* TIKU_TFS_SLOT_DATA (transfer cap) */
+#include <string.h>                       /* strlen/memcpy for mkdir */
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC HANDLERS                                                           */
@@ -73,6 +74,39 @@ tiku_shell_cmd_touch(uint8_t argc, const char *argv[])
     }
     if (tiku_vfs_write(resolved, "", 0) < 0) {
         SHELL_PRINTF("touch: cannot create '%s'\n", resolved);
+    }
+}
+
+void
+tiku_shell_cmd_mkdir(uint8_t argc, const char *argv[])
+{
+    char   resolved[TIKU_SHELL_CWD_SIZE];
+    char   marker[TIKU_SHELL_CWD_SIZE];
+    size_t n;
+
+    if (argc < 2u) {
+        SHELL_PRINTF("Usage: mkdir <path>\n");
+        return;
+    }
+    tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
+
+    /* Folders are path-as-name: a directory is a flat name ending in '/'.  An
+     * empty "<path>/" marker makes an empty folder persist and show in ls;
+     * placing a file under the path implies the folder too, so the marker only
+     * matters for empty ones (and is hidden inside the folder). */
+    n = strlen(resolved);
+    while (n > 1u && resolved[n - 1] == '/') {       /* drop trailing slashes */
+        resolved[--n] = '\0';
+    }
+    if (n + 2u > sizeof marker) {
+        SHELL_PRINTF("mkdir: path too long\n");
+        return;
+    }
+    memcpy(marker, resolved, n);
+    marker[n]     = '/';
+    marker[n + 1] = '\0';
+    if (tiku_vfs_write(marker, "", 0) < 0) {
+        SHELL_PRINTF("mkdir: cannot create '%s'\n", resolved);
     }
 }
 

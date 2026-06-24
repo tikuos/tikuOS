@@ -380,6 +380,72 @@ int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx)
     return n;
 }
 
+/* List the IMMEDIATE children under @p prefix, presenting the flat store as a
+ * tree (path-as-name): a file directly in the directory is reported by its leaf
+ * name; a deeper path contributes its first segment ONCE, with a trailing '/'
+ * so the caller can tell folders from files.  prefix is "" for the store root
+ * or "logs/" for a sub-folder; the empty marker entry "<dir>/" (mkdir) is
+ * skipped here but still surfaces the folder one level up. */
+int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
+                      tiku_tfs_iter_cb cb, void *ctx)
+{
+    unsigned i, j;
+    size_t   plen;
+    int      n = 0;
+
+    if (fs == NULL || !fs->mounted || prefix == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    plen = strlen(prefix);
+
+    for (i = 0; i < TIKU_TFS_MAX_FILES; i++) {
+        const char *name, *rest, *slash;
+        if (de_gate(fs, i) != TFS_GATE) {
+            continue;
+        }
+        name = de_name(fs, i);
+        if (strncmp(name, prefix, plen) != 0) {
+            continue;                          /* not under this directory */
+        }
+        rest = name + plen;
+        if (*rest == '\0') {
+            continue;                          /* the directory's own marker */
+        }
+        slash = strchr(rest, '/');
+        if (slash == NULL) {                   /* a file in this directory */
+            if (cb) {
+                cb(rest, sl_len(fs, de_slot(fs, i)), ctx);
+            }
+            n++;
+        } else {                               /* a sub-folder: first segment */
+            size_t seglen = (size_t)(slash - rest) + 1;   /* include the '/' */
+            int    dup = 0;
+            for (j = 0; j < i; j++) {           /* emit once: dedup vs earlier */
+                const char *nm2;
+                if (de_gate(fs, j) != TFS_GATE) {
+                    continue;
+                }
+                nm2 = de_name(fs, j);
+                if (strncmp(nm2, prefix, plen) == 0 &&
+                    strncmp(nm2 + plen, rest, seglen) == 0) {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (!dup && cb) {
+                char fbuf[TIKU_TFS_NAME_MAX + 1];
+                if (seglen < sizeof fbuf) {
+                    memcpy(fbuf, rest, seglen);          /* "<segment>/" */
+                    fbuf[seglen] = '\0';
+                    cb(fbuf, 0, ctx);
+                    n++;
+                }
+            }
+        }
+    }
+    return n;
+}
+
 size_t tiku_tfs_free_files(tiku_tfs_t *fs)
 {
     unsigned i;

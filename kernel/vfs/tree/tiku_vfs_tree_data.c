@@ -214,8 +214,22 @@ data_dyn_unlink(const char *name)
     return (tiku_tfs_delete(&data_fs, name) == TFS_OK) ? 0 : -1;
 }
 
+/* Folder-aware listing: present the flat store as a tree under @p prefix. */
+static void
+data_dyn_list_dir(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx)
+{
+    data_list_w_t w;
+    if (data_tfs_ensure() != 0) {
+        return;
+    }
+    w.cb = cb;
+    w.ctx = ctx;
+    (void)tiku_tfs_list_dir(&data_fs, prefix, data_list_thunk, &w);
+}
+
 static const tiku_vfs_dynops_t data_dynops = {
-    data_dyn_list, data_dyn_read, data_dyn_write, data_dyn_unlink
+    data_dyn_list, data_dyn_read, data_dyn_write, data_dyn_unlink,
+    data_dyn_list_dir
 };
 
 /*---------------------------------------------------------------------------*/

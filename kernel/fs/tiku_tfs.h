@@ -146,6 +146,17 @@ typedef void (*tiku_tfs_iter_cb)(const char *name, size_t len, void *ctx);
 /** @brief Enumerate live files. @return the count, or a negative tfs_err_t. */
 int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx);
 
+/**
+ * @brief Enumerate the immediate children under @p prefix, presenting the flat
+ *        store as a directory tree (path-as-name).
+ *
+ * Files in the directory come back by leaf name; deeper paths contribute their
+ * first path segment once, suffixed with '/' so folders are distinguishable.
+ * @p prefix is "" (store root) or e.g. "logs/".  @return the child count.
+ */
+int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
+                      tiku_tfs_iter_cb cb, void *ctx);
+
 /** @brief Number of free directory slots. */
 size_t tiku_tfs_free_files(tiku_tfs_t *fs);
 

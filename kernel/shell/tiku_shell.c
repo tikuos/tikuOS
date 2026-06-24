@@ -545,6 +545,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_FS
     {"rm",      "Delete a /data file",         tiku_shell_cmd_rm},
     {"touch",   "Create an empty /data file",  tiku_shell_cmd_touch},
+    {"mkdir",   "Create a /data folder",       tiku_shell_cmd_mkdir},
     {"recv",    "Receive a file: recv <p> <n>", tiku_shell_cmd_recv},
     {"send",    "Send a file: send <p>",       tiku_shell_cmd_send},
 #endif
