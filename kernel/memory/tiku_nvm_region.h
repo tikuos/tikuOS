@@ -53,6 +53,8 @@
 #define TIKU_NVMFS_FS_BYTES  (1536u * 1024u)   /* 1.5 MB */
 #elif defined(PLATFORM_AMBIQ)
 #define TIKU_NVMFS_FS_BYTES  (512u * 1024u)    /* 512 KB (apollo4l) */
+#elif defined(PLATFORM_RP2350)
+#define TIKU_NVMFS_FS_BYTES  (256u * 1024u)    /* 256 KB (rp2350 Flash FS) */
 #else
 #define TIKU_NVMFS_FS_BYTES  0u
 #endif

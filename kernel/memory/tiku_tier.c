@@ -739,7 +739,9 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
     if (dst == NULL || src == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
-#if defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+    /* Region-backed NVM (Ambiq MRAM, RP2350 Flash): the medium is NOT
+     * plain-store-writable, so route through the backend's program path. */
     {
         const tiku_nvm_backend_t *rgn = tiku_nvm_region_get();
         if (rgn != NULL && rgn->base != NULL && rgn->write != NULL) {

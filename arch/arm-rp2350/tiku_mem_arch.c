@@ -276,6 +276,22 @@ static void flash_commit_sector(uint32_t flash_offset,
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
 }
 
+/**
+ * @brief Public: erase + program one flash sector via the boot-ROM helpers.
+ *
+ * Thin export of flash_commit_sector() so the carved NVM region backend
+ * (tiku_nvm_region_rp2350.c) shares this one proven, interrupt-masked
+ * XIP-suspended path instead of duplicating the boot-ROM dance.
+ *
+ * @param flash_offset  Sector-aligned byte offset from the start of flash.
+ * @param src           Replacement sector contents (SRAM).
+ * @param len           Bytes to program (typically one whole sector).
+ */
+void tiku_rp2350_flash_commit_sector(uint32_t flash_offset,
+                                     const uint8_t *src, size_t len) {
+    flash_commit_sector(flash_offset, src, len);
+}
+
 /*---------------------------------------------------------------------------*/
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/

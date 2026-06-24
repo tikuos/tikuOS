@@ -68,6 +68,18 @@ __tiku_nvm_flash_offset = LENGTH(FLASH) - __tiku_nvm_flash_size;
 __tiku_nvm_flash_start  = ORIGIN(FLASH) + __tiku_nvm_flash_offset;
 __tiku_nvm_flash_end    = ORIGIN(FLASH) + LENGTH(FLASH);
 
+/* Carved NVM region (substrate B): a 512 KB slice of QSPI flash just below the
+ * 4 KB .uninit backup sector, owned by the /data file store via the Flash
+ * region backend (arch/arm-rp2350/tiku_nvm_region_rp2350.c).  4 KB-sector
+ * aligned (the flash erase granule).  Code grows up from ORIGIN(FLASH); an
+ * ASSERT in SECTIONS guards the flash image against overrunning it.
+ *   __tiku_nvmfs_base   : XIP address (read in place by pointer)
+ *   __tiku_nvmfs_offset : byte offset from flash start (for the boot-ROM)
+ *   __tiku_nvmfs_size   : ABSOLUTE symbol -- its ADDRESS is the size */
+__tiku_nvmfs_size   = 512K;
+__tiku_nvmfs_offset = __tiku_nvm_flash_offset - __tiku_nvmfs_size;
+__tiku_nvmfs_base   = ORIGIN(FLASH) + __tiku_nvmfs_offset;
+
 /* The Cortex-M loads the initial SP from the first vector entry.
  * Place it at the very top of SRAM and let the stack grow downward. */
 __stack       = __sram_end;
@@ -204,6 +216,11 @@ SECTIONS
      * driver. */
     ASSERT((__uninit_end - __uninit_start) <= __tiku_nvm_flash_size,
            "ERROR: .uninit region exceeds 4 KB flash backup sector")
+
+    /* The flash image (code + rodata + the .data load copy) must not grow up
+     * into the carved NVM region below the backup sector. */
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvmfs_base,
+           "ERROR: flash image overruns the carved NVM region")
 
     /DISCARD/ :
     {

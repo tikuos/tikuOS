@@ -52,12 +52,16 @@
 #    define TIKU_TFS_MAX_FILES  300
 #  elif defined(PLATFORM_AMBIQ)
 #    define TIKU_TFS_MAX_FILES  100
+#  elif defined(PLATFORM_RP2350)
+#    define TIKU_TFS_MAX_FILES  32     /**< 256 KB Flash FS extent */
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif
 #endif
 #ifndef TIKU_TFS_SLOT_DATA
-#  if defined(PLATFORM_AMBIQ)
+/* Region-backed parts use a full erase/program granule per file; byte-writable
+ * NVM (FRAM / host) uses the smaller default. */
+#  if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
 #    define TIKU_TFS_SLOT_DATA  4096   /**< max bytes per file (region FS) */
 #  else
 #    define TIKU_TFS_SLOT_DATA  512    /**< max bytes per file */
