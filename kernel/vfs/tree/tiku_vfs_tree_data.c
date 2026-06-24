@@ -256,6 +256,47 @@ static const tiku_vfs_node_t data_node = {
 #endif
 
 /*---------------------------------------------------------------------------*/
+/* df SUPPORT — file-store usage stats                                       */
+/*---------------------------------------------------------------------------*/
+
+typedef struct { uint16_t files; uint32_t bytes; } data_df_acc_t;
+
+static void
+data_df_thunk(const char *name, size_t len, void *vacc)
+{
+    data_df_acc_t *a = (data_df_acc_t *)vacc;
+    (void)name;
+    a->files++;
+    a->bytes += (uint32_t)len;
+}
+
+int
+tiku_vfs_tree_data_df(tiku_data_df_t *out)
+{
+    data_df_acc_t acc;
+
+    acc.files = 0u;
+    acc.bytes = 0u;
+    if (out == NULL || data_tfs_ensure() != 0) {
+        return -1;
+    }
+    (void)tiku_tfs_list(&data_fs, data_df_thunk, &acc);
+    out->used_files = acc.files;
+    out->used_bytes = acc.bytes;
+    out->max_files  = (uint16_t)TIKU_TFS_MAX_FILES;
+    out->slot_bytes = (uint16_t)TIKU_TFS_SLOT_DATA;
+    out->cap_bytes  = (uint32_t)TIKU_TFS_MAX_FILES * (uint32_t)TIKU_TFS_SLOT_DATA;
+#if defined(PLATFORM_AMBIQ)
+    out->backing = "MRAM";
+#elif defined(PLATFORM_MSP430)
+    out->backing = "FRAM";
+#else
+    out->backing = "RAM*";   /* volatile until a backend lands */
+#endif
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
 /* PUBLIC                                                                     */
 /*---------------------------------------------------------------------------*/
 

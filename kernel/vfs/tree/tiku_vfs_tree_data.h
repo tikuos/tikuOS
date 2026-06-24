@@ -33,6 +33,7 @@
 #ifndef TIKU_VFS_TREE_DATA_H_
 #define TIKU_VFS_TREE_DATA_H_
 
+#include <stdint.h>
 #include <kernel/vfs/tiku_vfs.h>
 
 /**
@@ -48,5 +49,25 @@
  * @return Pointer to the static /data directory node
  */
 const tiku_vfs_node_t *tiku_vfs_tree_data_get(void);
+
+/**
+ * @brief /data file-store usage snapshot, for the `df` command.
+ */
+typedef struct {
+    uint32_t    used_bytes;  /**< sum of live file content lengths    */
+    uint32_t    cap_bytes;   /**< capacity = max_files * slot_bytes   */
+    uint16_t    used_files;  /**< live file count                     */
+    uint16_t    max_files;   /**< directory slot count                */
+    uint16_t    slot_bytes;  /**< per-file content slot size          */
+    const char *backing;     /**< "MRAM" / "FRAM" / "RAM*" (volatile) */
+} tiku_data_df_t;
+
+/**
+ * @brief Fill @p out with /data file-store usage (mounts on first use).
+ *
+ * @param out Destination snapshot (must be non-NULL).
+ * @return 0 on success, -1 if the store is unavailable.
+ */
+int tiku_vfs_tree_data_df(tiku_data_df_t *out);
 
 #endif /* TIKU_VFS_TREE_DATA_H_ */

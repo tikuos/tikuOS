@@ -125,6 +125,9 @@
 #ifndef TIKU_SHELL_CMD_FREE
 #define TIKU_SHELL_CMD_FREE    1  /**< free    - Memory usage summary */
 #endif
+#ifndef TIKU_SHELL_CMD_DF
+#define TIKU_SHELL_CMD_DF      1  /**< df      - /data file-store usage */
+#endif
 #ifndef TIKU_SHELL_CMD_SLEEP
 #define TIKU_SHELL_CMD_SLEEP   1  /**< sleep   - Enter low-power idle mode */
 #endif

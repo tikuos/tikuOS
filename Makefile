@@ -1192,6 +1192,9 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_changed.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_gpio.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
+ifeq (,$(findstring TIKU_SHELL_CMD_DF=0,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_df.c
+endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_freq.c

@@ -140,6 +140,9 @@
 #if TIKU_SHELL_CMD_FS
 #include "commands/tiku_shell_cmd_fs.h"
 #endif
+#if TIKU_SHELL_CMD_DF
+#include "commands/tiku_shell_cmd_df.h"
+#endif
 #if TIKU_SHELL_CMD_NVMPROBE
 #include "commands/tiku_shell_cmd_nvmprobe.h"
 #endif
@@ -542,6 +545,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_FS
     {"rm",      "Delete a /data file",         tiku_shell_cmd_rm},
     {"touch",   "Create an empty /data file",  tiku_shell_cmd_touch},
+#endif
+#if TIKU_SHELL_CMD_DF
+    {"df",      "/data file-store usage",      tiku_shell_cmd_df},
 #endif
 #if TIKU_SHELL_CMD_NVMPROBE
     {"nvmprobe","Carved NVM region diagnostic", tiku_shell_cmd_nvmprobe},
