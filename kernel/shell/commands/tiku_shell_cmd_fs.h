@@ -48,4 +48,26 @@ void tiku_shell_cmd_rm(uint8_t argc, const char *argv[]);
  */
 void tiku_shell_cmd_touch(uint8_t argc, const char *argv[]);
 
+/**
+ * @brief "recv" command handler — receive a file from the host.
+ *
+ * Usage:
+ *   recv <path> <bytes>   e.g.  recv /data/blink.bas 312
+ *
+ * Prints "recv: ready N", then reads exactly N raw bytes from the console and
+ * writes them to <path>.  Length-prefixed and binary-safe (no escaping), so
+ * multi-line / arbitrary files up to one slot transfer where `write` cannot.
+ */
+void tiku_shell_cmd_recv(uint8_t argc, const char *argv[]);
+
+/**
+ * @brief "send" command handler — send a file to the host.
+ *
+ * Usage:
+ *   send <path>           e.g.  send /data/blink.bas
+ *
+ * Prints "send: N", then streams N raw bytes of <path> out (binary-safe).
+ */
+void tiku_shell_cmd_send(uint8_t argc, const char *argv[]);
+
 #endif /* TIKU_SHELL_CMD_FS_H_ */
