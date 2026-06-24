@@ -45,12 +45,12 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
  * this. */
 __tiku_nvmfs_base  = ORIGIN(MRAM) + LENGTH(MRAM);   /* 0x98000: just above code */
 
-/* NVM mirror page: 32 KB at the top of MRAM (0x1F8000..0x200000), where
- * tiku_mem_arch_nvm_flush() programs the .uninit snapshot (Proposal A, small
- * hot state). */
-__tiku_nvm_mram_start = 0x001F8000;                             /* top - 32 KB */
-__tiku_nvm_mram_size  = 0x8000;                                 /* 32 KB */
-__tiku_nvmfs_size     = __tiku_nvm_mram_start - __tiku_nvmfs_base;  /* ~1.375 MB */
+/* NVM mirror page (Proposal A, small hot state): 64 KB at the top of MRAM
+ * (0x1F0000..0x200000), where tiku_mem_arch_nvm_flush() programs the .uninit
+ * snapshot. Grown from 32 KB for more durable cells/aliases headroom. */
+__tiku_nvm_mram_start = 0x001F0000;                             /* top - 64 KB */
+__tiku_nvm_mram_size  = 0x10000;                                /* 64 KB */
+__tiku_nvmfs_size     = __tiku_nvm_mram_start - __tiku_nvmfs_base;  /* ~1.34 MB */
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 

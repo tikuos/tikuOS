@@ -43,7 +43,7 @@ extern uint32_t __tiku_nvm_mram_start;   /* base address of the mirror page */
 #define AMBIQ_MRAM_PROGRAM_KEY  0x12344321UL  /* AM_HAL_MRAM_PROGRAM_KEY */
 #define AMBIQ_MRAM_OP_PROGRAM   1U            /* AM_HAL_MRAM_PROGRAM */
 #define TIKU_NVM_MAGIC          0x4E564D54U   /* 'NVMT' little-endian */
-#define TIKU_NVM_MRAM_BYTES     0x8000U       /* MUST match __tiku_nvm_mram_size */
+#define TIKU_NVM_MRAM_BYTES     0x10000U      /* 64 KB; MUST match __tiku_nvm_mram_size */
 /** @} */
 
 /**
