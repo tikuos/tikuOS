@@ -74,6 +74,7 @@ academic/
 TikuBench/
 kintsugi/
 docs/
+ignored/
 tikuConsole/
 
 # Python bytecode cache
