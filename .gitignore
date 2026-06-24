@@ -79,3 +79,4 @@ tikuConsole/
 
 # Python bytecode cache
 __pycache__/
+insight/
