@@ -15,15 +15,14 @@
  *   ls /data                                    # list files
  *   cat /data/blink.bas                         # read
  *
- * The file store sits on a reserved NVM region and is durable today on both
- * NVM families:
- *   - MSP430: `.persistent` FRAM, written in place.
- *   - Ambiq : `.uninit`, which the kernel mirrors to MRAM on every NVM relock
- *             (tiku_mem_arch_nvm_flush) and restores at boot — so files survive
- *             a power cut.  The mirror page is ~32 KB, so the store is kept
- *             small there (see TIKU_TFS_MAX_FILES); the big direct-MRAM backend
- *             (megabytes, word-granular) is a separate milestone, and the
- *             backend interface makes it a drop-in swap.
+ * The file store sits on the carved NVM region's filesystem extent and is
+ * durable on both NVM families:
+ *   - MSP430: a `.persistent` FRAM array, written in place.
+ *   - Ambiq : the FS extent of the memory-mapped NVM region -- read in place
+ *             (no SRAM shadow), written via the region backend (MRAM bootrom),
+ *             so files survive a power cut.  Sized in megabytes (see
+ *             TIKU_NVMFS_FS_BYTES / TIKU_TFS_MAX_FILES), between the NVM tier's
+ *             bump extent (front) and the reserved durable tail.
  *   - else  : plain `.bss` (functional but volatile) until a backend lands.
  * When BASIC is built, the legacy /data/basic bridge to the interpreter's
  * program store is kept as a static child.
@@ -55,7 +54,8 @@
 #include <string.h>
 
 #include "kernel/fs/tiku_tfs.h"
-#include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm */
+#include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm, tiku_tier_nvm_write */
+#include "kernel/memory/tiku_nvm_region.h"
 
 #if TIKU_SHELL_CMD_BASIC
 #include "kernel/shell/basic/tiku_basic.h"
@@ -65,14 +65,59 @@
 /* NVM-BACKED FILE STORE FOR /data                                           */
 /*---------------------------------------------------------------------------*/
 
-/* The store's NVM region.  MSP430: `.persistent` (FRAM, in place).  Ambiq:
- * `.uninit`, mirrored to MRAM on every NVM relock and restored at boot, so the
- * data_be_write() unlock/lock bracket below also commits it durably.  Other
- * parts: `.bss` (volatile) until a backend lands. */
+/* The store's NVM home.  Ambiq: the FS extent of the carved NVM region (durable
+ * MRAM, read in place, written via the region backend) -- no SRAM array.
+ * MSP430: a `.persistent` FRAM array (in place).  Other parts: plain `.bss`
+ * (volatile) until a backend lands. */
+#if defined(PLATFORM_AMBIQ)
+
+_Static_assert(TIKU_TFS_REGION_BYTES <= TIKU_NVMFS_FS_BYTES,
+               "TFS store larger than the region FS extent");
+
+static tiku_tfs_t          data_fs;
+static tiku_nvm_backend_t  data_be;
+static uint8_t             data_fs_ready;
+
+/* Program through the region backend (MRAM bootrom); it brackets its own NVM
+ * window, so reads stay plain pointer derefs into the FS extent. */
+static int
+data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
+{
+    return (tiku_tier_nvm_write((uint8_t *)be->base + off, src, len)
+            == TIKU_MEM_OK) ? 0 : -1;
+}
+
+static int
+data_tfs_ensure(void)
+{
+    const tiku_nvm_backend_t *rgn;
+
+    if (data_fs_ready) {
+        return 0;
+    }
+    rgn = tiku_nvm_region_get();
+    if (rgn == NULL || rgn->base == NULL ||
+        rgn->size < (size_t)TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
+        return -1;
+    }
+    /* FS extent: between the tier extent (front) and the reserved tail. */
+    data_be.base  = rgn->base +
+        (rgn->size - TIKU_NVMFS_FS_BYTES - TIKU_NVM_RESERVED_BYTES);
+    data_be.size  = TIKU_NVMFS_FS_BYTES;
+    data_be.write = data_be_write;
+    data_be.erase = NULL;
+    data_be.ctx   = NULL;
+    if (tiku_tfs_mount(&data_fs, &data_be) != TFS_OK) {
+        return -1;
+    }
+    data_fs_ready = 1;
+    return 0;
+}
+
+#else  /* MSP430 FRAM / host: a static backing array */
+
 #if defined(PLATFORM_MSP430)
 #define DATA_TFS_SECTION __attribute__((section(".persistent")))
-#elif defined(PLATFORM_AMBIQ)
-#define DATA_TFS_SECTION __attribute__((section(".uninit")))
 #else
 #define DATA_TFS_SECTION
 #endif
@@ -82,9 +127,6 @@ static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
 static uint8_t             data_fs_ready;
 
-/* Byte-writable region backend: each write brackets the NVM protection window
- * (which gates FRAM on MSP430; on the other parts it is a no-op today and the
- * data is plain RAM). */
 static int
 data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 {
@@ -111,6 +153,8 @@ data_tfs_ensure(void)
     data_fs_ready = 1;
     return 0;
 }
+
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* DYNAMIC-DIRECTORY OPS — bridge /data to the file store                     */

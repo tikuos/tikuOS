@@ -259,9 +259,18 @@ static void tier_wire_all(void)
          * backend (tiku_tier_nvm_write). NULL until the board's region backend
          * exists (e.g. before the apollo510 backend lands). */
         const tiku_nvm_backend_t *rgn = tiku_nvm_region_get();
-        tier_state[TIKU_MEM_NVM].buf      = (rgn != NULL) ? rgn->base : NULL;
-        tier_state[TIKU_MEM_NVM].capacity =
-            (rgn != NULL) ? (tiku_mem_arch_size_t)rgn->size : 0u;
+        /* The tier bump-allocates from the front; the top
+         * TIKU_NVM_RESERVED_BYTES is reserved for durable named data (BASIC
+         * save, FS) and never handed out. */
+        if (rgn != NULL && rgn->base != NULL &&
+            rgn->size > (size_t)TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
+            tier_state[TIKU_MEM_NVM].buf      = rgn->base;
+            tier_state[TIKU_MEM_NVM].capacity = (tiku_mem_arch_size_t)
+                (rgn->size - TIKU_NVMFS_FS_BYTES - TIKU_NVM_RESERVED_BYTES);
+        } else {
+            tier_state[TIKU_MEM_NVM].buf      = NULL;
+            tier_state[TIKU_MEM_NVM].capacity = 0u;
+        }
     }
 #else
     tier_state[TIKU_MEM_NVM].buf         = tier_nvm_buf;

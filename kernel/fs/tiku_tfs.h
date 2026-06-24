@@ -46,18 +46,22 @@
 #define TIKU_TFS_NAME_MAX   24      /**< max filename length incl. NUL */
 #endif
 #ifndef TIKU_TFS_MAX_FILES
-/* On Ambiq the durable region rides the existing ~32 KB MRAM `.uninit` mirror
- * (which is already ~25 KB full), so keep the store small there; the big
- * direct-MRAM backend (megabytes) is a separate milestone.  Elsewhere (MSP430
- * FRAM, the host harness) the default is roomier. */
-#  if defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_MAX_FILES  6
+/* Ambiq backs /data with the carved NVM region's FS extent (megabytes), so the
+ * store is roomy there. MSP430 FRAM / host: the smaller default. */
+#  if defined(AM_PART_APOLLO510)
+#    define TIKU_TFS_MAX_FILES  300
+#  elif defined(PLATFORM_AMBIQ)
+#    define TIKU_TFS_MAX_FILES  100
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif
 #endif
 #ifndef TIKU_TFS_SLOT_DATA
-#define TIKU_TFS_SLOT_DATA  512     /**< max bytes per file */
+#  if defined(PLATFORM_AMBIQ)
+#    define TIKU_TFS_SLOT_DATA  4096   /**< max bytes per file (region FS) */
+#  else
+#    define TIKU_TFS_SLOT_DATA  512    /**< max bytes per file */
+#  endif
 #endif
 
 /** @brief Bytes of NVM the store occupies; size a backing region >= this.

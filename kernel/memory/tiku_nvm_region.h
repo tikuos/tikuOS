@@ -30,6 +30,33 @@
 
 #include "kernel/fs/tiku_nvm_backend.h"
 
+/*
+ * Region layout. The NVM memory tier bump-allocates from the FRONT of the
+ * region; the top TIKU_NVM_RESERVED_BYTES is held back for durable NAMED data
+ * that needs a STABLE location across boots (the BASIC saved program today, the
+ * file store later) -- the tier never hands this tail out, so a named consumer
+ * can own a fixed offset in [size - reserved, size). 0 where the tier owns the
+ * whole region (no carved tail).
+ */
+#if defined(PLATFORM_AMBIQ)
+#define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)
+#else
+#define TIKU_NVM_RESERVED_BYTES  0u
+#endif
+
+/*
+ * Filesystem (TFS) extent: a fixed slice of the region the /data file store
+ * owns, sitting between the tier extent (front) and the reserved tail. Balanced
+ * split. 0 where the file store rides its own backing (msp430 FRAM / host).
+ */
+#if defined(AM_PART_APOLLO510)
+#define TIKU_NVMFS_FS_BYTES  (1536u * 1024u)   /* 1.5 MB */
+#elif defined(PLATFORM_AMBIQ)
+#define TIKU_NVMFS_FS_BYTES  (512u * 1024u)    /* 512 KB (apollo4l) */
+#else
+#define TIKU_NVMFS_FS_BYTES  0u
+#endif
+
 /**
  * @brief Return the board's carved NVM region backend, or NULL if none.
  *
