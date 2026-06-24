@@ -59,4 +59,12 @@ tiku_shell_cmd_read(uint8_t argc, const char *argv[])
 
     buf[n] = '\0';
     SHELL_PRINTF("%s", buf);
+
+    /* Finish on a newline so the next prompt starts on its own line.  Files
+     * often have no trailing newline and /sys values never do, so without this
+     * the value glues to the prompt ("aatikuOS:/>").  Skip it when the content
+     * already ends in '\n' to avoid a blank line. */
+    if (n == 0 || buf[n - 1] != '\n') {
+        SHELL_PRINTF("\n");
+    }
 }
