@@ -643,8 +643,10 @@ CFLAGS += -DPLATFORM_AMBIQ=1
 # including BASIC's program arena (a 2048-line program needs ~195 KB). The mem
 # size type is 32-bit here (arch/ambiq/tiku_mem_arch.h), so multi-hundred-KB
 # tiers are fine.
-ifneq (,$(filter apollo4l apollo4p,$(MCU)))
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=524288    # 512 KB of SSRAM (4l: 1 MB; 4p: 2.75 MB, grown later)
+ifeq ($(MCU),apollo4p)
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=1703936   # 1.625 MB tier in the Plus's 2 MB SSRAM (4 MB MPU window; +~182 KB other .ssram still fits, ~206 KB spare)
+else ifeq ($(MCU),apollo4l)
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=524288    # 512 KB of the Lite's 1 MB mapped SSRAM
 else
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=1048576   # 1 MB of the 3 MB SSRAM (Apollo510)
 endif
@@ -780,9 +782,13 @@ endif
 # libnosys syscall stubs (_sbrk/_write/...), formerly supplied by AmbiqSuite.
 LDFLAGS += --specs=nano.specs --specs=nosys.specs
 LDFLAGS += -nostartfiles -static
-ifneq (,$(filter apollo4l apollo4p,$(MCU)))
-# apollo4p boots on the apollo4l map (2 MB MRAM matches; 1 MB SSRAM is a safe
-# subset of the Plus's 2.75 MB). A dedicated apollo4p.ld grows SSRAM later.
+ifeq ($(MCU),apollo4p)
+# Apollo4 Plus: same map as the Lite but the shared-SRAM window grows from 1 MB
+# to the full 2 MB the two SSRAM banks expose (both already powered in the crt),
+# backing a larger SRAM tier. (The Plus's remaining ~0.75 MB needs its own bank
+# definitions -- see apollo4p.ld.)
+LDFLAGS += -Tarch/ambiq/devices/apollo4p.ld
+else ifeq ($(MCU),apollo4l)
 LDFLAGS += -Tarch/ambiq/devices/apollo4l.ld
 else
 LDFLAGS += -Tarch/ambiq/devices/apollo510.ld

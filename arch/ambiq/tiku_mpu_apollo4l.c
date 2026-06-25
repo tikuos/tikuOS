@@ -41,8 +41,16 @@
 
 /** MRAM (code) base + a 2 MB region covering the whole 2 MB MRAM. */
 #define MPU_CODE_BASE     0x00000000UL
-/** TCM(0x10000000,384K) + shared SRAM(0x10060000,1M); a 2 MB region spans both. */
+/** TCM(0x10000000,384K) + shared SRAM(0x10060000). The Lite maps 1 MB SSRAM, so
+ *  a 2 MB region spans both; the Plus maps the full 2 MB SSRAM (ends 0x10260000)
+ *  and needs the next PMSAv7 power-of-2 -- a 4 MB region (0x10000000..0x10400000,
+ *  4 MB-aligned). The slack above physical SSRAM is never accessed. */
 #define MPU_RAM_BASE      0x10000000UL
+#if defined(TIKU_DEVICE_APOLLO4P)
+#define MPU_RAM_SIZE      ARM_MPU_REGION_SIZE_4MB
+#else
+#define MPU_RAM_SIZE      ARM_MPU_REGION_SIZE_2MB
+#endif
 
 /** Stack guard: 32 bytes placed this far below the stack top (mirrors the
  *  apollo510 budget). The kernel's stack stays well within 32 KB. */
@@ -137,12 +145,13 @@ void tiku_mpu_arch_init_segments(void) {
         ARM_MPU_RASR(0U /* exec */, ARM_MPU_AP_RO, 1U, 0U, 0U, 0U, 0U,
                      ARM_MPU_REGION_SIZE_2MB));
 
-    /* Region 1: 2 MB at 0x10000000 -- RW + execute-never (TCM + shared SRAM:
-     * .data/.bss/stack/.ssram/tier buffers). */
+    /* Region 1: RW + execute-never at 0x10000000 (TCM + shared SRAM:
+     * .data/.bss/stack/.ssram/tier buffers). 2 MB on the Lite (1 MB SSRAM),
+     * 4 MB on the Plus (full 2 MB SSRAM) -- see MPU_RAM_SIZE. */
     ARM_MPU_SetRegion(
         ARM_MPU_RBAR(MPU_REGION_RAM, MPU_RAM_BASE),
         ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_FULL, 1U, 0U, 0U, 0U, 0U,
-                     ARM_MPU_REGION_SIZE_2MB));
+                     MPU_RAM_SIZE));
 
     /* Region 2: 32-byte stack guard, MPU_STACK_RESERVED_BYTES below the stack
      * top -- no access, execute-never. PMSAv7 gives the highest-numbered region
