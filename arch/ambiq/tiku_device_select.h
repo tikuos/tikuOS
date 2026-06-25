@@ -28,7 +28,15 @@
  * that symbol to the corresponding device header. Add a new @c elif branch
  * here when porting to a new Ambiq silicon variant.
  */
-#if defined(TIKU_DEVICE_APOLLO510)
+#if defined(TIKU_DEVICE_APOLLO4P)
+/* Apollo4 Plus (AMAP42KP) reuses the register-compatible Apollo4 Lite silicon
+ * header (same Cortex-M4F Apollo4 peripheral map); only the human-facing name
+ * and the memory sizes (2 MB MRAM / 2.75 MB SRAM) differ.  Listed first so it
+ * wins even if a generic device fallback is also set. */
+#include <arch/ambiq/devices/tiku_device_apollo4l.h>
+#undef  TIKU_DEVICE_NAME
+#define TIKU_DEVICE_NAME "Apollo4 Plus"
+#elif defined(TIKU_DEVICE_APOLLO510)
 #include <arch/ambiq/devices/tiku_device_apollo510.h>
 #elif defined(TIKU_DEVICE_APOLLO4L)
 #include <arch/ambiq/devices/tiku_device_apollo4l.h>

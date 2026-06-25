@@ -38,6 +38,8 @@ else ifeq ($(MCU),apollo510)
 TIKU_PLATFORM := ambiq
 else ifeq ($(MCU),apollo4l)
 TIKU_PLATFORM := ambiq
+else ifeq ($(MCU),apollo4p)
+TIKU_PLATFORM := ambiq
 else
 TIKU_PLATFORM := msp430
 endif
@@ -95,10 +97,12 @@ endif
 endif
 
 ifeq ($(TIKU_PLATFORM),ambiq)
-ifeq ($(MCU),apollo4l)
-TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO4L_EVB
-else
+ifeq ($(MCU),apollo510)
 TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510_EVB
+else
+# Apollo4 Lite and Apollo4 Plus EVBs share the M4F board pinout (console UART,
+# LEDs, buttons); apollo4p reuses the apollo4l board config for bring-up.
+TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO4L_EVB
 endif
 endif
 
@@ -225,6 +229,12 @@ AMBIQ_LOAD_ADDR ?= 0x00018000
 # is attached at reset. Detaching with the target left running (qc) drops the
 # debugger so the SBL hands off to the app at 0x18000; the Sleep lets the SBL
 # reach that debug-wait before we detach. (q halts, so the app never starts.)
+JLINK_RUN_SEQ   ?= r\ng\nSleep 600\nqc
+else ifeq ($(MCU),apollo4p)
+# Apollo4 Plus (AMAP42KP-KBR): same M4F family + SBL hand-off as the Lite, just
+# a different J-Link flash device (2 MB MRAM vs 1 MB).
+JLINK_DEVICE    ?= AMAP42KP-KBR
+AMBIQ_LOAD_ADDR ?= 0x00018000
 JLINK_RUN_SEQ   ?= r\ng\nSleep 600\nqc
 else
 JLINK_DEVICE    ?= AP510NFA-CBR
@@ -608,7 +618,7 @@ else ifeq ($(TIKU_PLATFORM),ambiq)
 
 # CPU/FPU per Ambiq part: Cortex-M55 + Helium (Apollo510) or Cortex-M4F with a
 # single-precision FPU (Apollo4 Lite). Derived from -mcpu; -Wno-psabi below.
-ifeq ($(MCU),apollo4l)
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
 CFLAGS  = -mcpu=cortex-m4 -mthumb
 CFLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 else
@@ -633,17 +643,25 @@ CFLAGS += -DPLATFORM_AMBIQ=1
 # including BASIC's program arena (a 2048-line program needs ~195 KB). The mem
 # size type is 32-bit here (arch/ambiq/tiku_mem_arch.h), so multi-hundred-KB
 # tiers are fine.
-ifeq ($(MCU),apollo4l)
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=524288    # 512 KB of the 1 MB SSRAM
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=524288    # 512 KB of SSRAM (4l: 1 MB; 4p: 2.75 MB, grown later)
 else
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=1048576   # 1 MB of the 3 MB SSRAM (Apollo510)
 endif
 CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
 # Part selectors that configure the vendored register map (apollo4l.h / apollo510.h).
-ifeq ($(MCU),apollo4l)
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
+# apollo4p reuses the apollo4l register map (apollo4l.h) -- the Apollo4 family is
+# register-compatible for the peripherals tikuOS uses (UART2/GPIO/PWRCTRL/STIMER/
+# MRAM), so the M4F arch backends are shared.
 CFLAGS += -DPART_apollo4l -DAM_PART_APOLLO4L -Dgcc
 else
 CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
+endif
+# The Apollo4 Plus EVB routes its J-Link VCOM to UART0 (pads 60/47); the Lite
+# uses UART2 (pads 54/11). The shared UART driver + crt vector key off this.
+ifeq ($(MCU),apollo4p)
+CFLAGS += -DTIKU_CONSOLE_UART0
 endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
@@ -753,7 +771,7 @@ LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 
 else ifeq ($(TIKU_PLATFORM),ambiq)
 
-ifeq ($(MCU),apollo4l)
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
 LDFLAGS  = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 else
 LDFLAGS  = -mcpu=cortex-m55 -mthumb -mfpu=auto -mfloat-abi=hard
@@ -762,7 +780,9 @@ endif
 # libnosys syscall stubs (_sbrk/_write/...), formerly supplied by AmbiqSuite.
 LDFLAGS += --specs=nano.specs --specs=nosys.specs
 LDFLAGS += -nostartfiles -static
-ifeq ($(MCU),apollo4l)
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
+# apollo4p boots on the apollo4l map (2 MB MRAM matches; 1 MB SSRAM is a safe
+# subset of the Plus's 2.75 MB). A dedicated apollo4p.ld grows SSRAM later.
 LDFLAGS += -Tarch/ambiq/devices/apollo4l.ld
 else
 LDFLAGS += -Tarch/ambiq/devices/apollo510.ld
@@ -860,7 +880,7 @@ endif
 # Use the minimal entry point and exactly the arch files it needs.
 SRCS  = main_minimal.c
 ifeq ($(TIKU_PLATFORM),ambiq)
-ifeq ($(MCU),apollo4l)
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
 SRCS += arch/ambiq/tiku_crt_early_apollo4l.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_apollo4l.c
 SRCS += arch/ambiq/tiku_cpu_common_apollo4l.c
@@ -938,7 +958,7 @@ SRCS += arch/ambiq/tiku_onewire_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
 SRCS += arch/ambiq/tiku_lcd_arch.c
-ifeq ($(MCU),apollo4l)
+ifneq (,$(filter apollo4l apollo4p,$(MCU)))
 # Apollo4 Lite (Cortex-M4F) device/CPU backends.
 # Apollo4 Lite drives the kernel tick from the always-on STIMER (not SysTick,
 # which freezes in WFI sleep); apollo510 keeps the shared SysTick timer below.

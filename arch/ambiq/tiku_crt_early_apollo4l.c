@@ -207,14 +207,24 @@ __attribute__((section(".vectors"), used)) = {
     tiku_ambiq_systick_handler,         /* 15  SysTick           */
 
     /* External interrupts (apollo4l IRQn numbering) -------------------- */
-    [16 + 17] = tiku_ambiq_uart2_isr,        /* IRQ 17  UART2            */
     [16 + 32] = tiku_ambiq_stimer_cmpr0_isr, /* IRQ 32  STIMER Compare0  */
     [16 + 33] = tiku_ambiq_stimer_cmpr1_isr, /* IRQ 33  STIMER Compare1 (tick) */
     [16 + 56] = tiku_ambiq_gpio0_isr,        /* IRQ 56  GPIO0 pins0-31   */
 
-    /* Everything else spins in the default handler; ranges skip the named slots. */
+    /* Everything else spins in the default handler. */
     [16 +  0 ... 16 + 16] = ambiq_default_handler,
     [16 + 18 ... 16 + 31] = ambiq_default_handler,
     [16 + 34 ... 16 + 55] = ambiq_default_handler,
     [16 + 57 ... 16 + AMBIQ_NUM_EXT_IRQS - 1] = ambiq_default_handler,
+
+    /* Console UART ISR LAST so it overrides the default-fill ranges above: the
+     * UART0 slot (IRQ15, Apollo4 Plus) falls INSIDE [16+0..16+16], and in a
+     * designated initializer the later entry wins.  (apollo4l's IRQ17 is outside
+     * the ranges, so its position did not matter.)  Binding the slot to the real
+     * ISR also keeps it from --gc-sections. */
+#if defined(TIKU_CONSOLE_UART0)
+    [16 + 15] = tiku_ambiq_uart2_isr,        /* IRQ 15  UART0 (Apollo4 Plus EVB) */
+#else
+    [16 + 17] = tiku_ambiq_uart2_isr,        /* IRQ 17  UART2 (Apollo4 Lite EVB) */
+#endif
 };
