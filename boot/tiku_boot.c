@@ -196,11 +196,14 @@ tiku_boot_init_memory(void)
     /* Initialize memory subsystem (arch-specific setup + module state) */
     tiku_mem_init();
 
-#if defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
     /* Bring up the tier allocator at boot so tier-backed allocations (per-
      * process memory, etc.) work without relying on a lazy first-touch init.
      * tiku_tier_init is idempotent, so BASIC's later lazy call is a no-op.
-     * (MSP430 / RP2350 keep their existing lazy init until validated there.) */
+     * RP2350 needs this explicitly: its carved-Flash region backs the durable
+     * NVM tier, but nothing calls the lazy init (no BASIC in its build), so the
+     * tier would stay uninitialized (TIKU_MEM_NVM unavailable, nvmfree == 0).
+     * (MSP430 keeps its existing lazy init until validated there.) */
     (void)tiku_tier_init();
 #endif
 
