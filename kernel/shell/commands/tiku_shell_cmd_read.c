@@ -34,15 +34,32 @@
 #include <kernel/vfs/tiku_vfs.h>
 
 /*---------------------------------------------------------------------------*/
+/* CONFIG                                                                    */
+/*---------------------------------------------------------------------------*/
+
+/* Largest node value `read`/`cat` prints in one shot.  The old 64-byte buffer
+ * silently truncated /data files at 63 bytes (a newcomer's first surprise);
+ * size it to a full file-store slot so whole files display.  The buffer is
+ * static, not on the (small) shell-task stack, so the larger size is safe.
+ * Override TIKU_SHELL_READ_MAX in the build to trade RAM for capacity. */
+#ifndef TIKU_SHELL_READ_MAX
+#  if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+#    define TIKU_SHELL_READ_MAX 4096    /* = one carved-NVM file-store slot */
+#  else
+#    define TIKU_SHELL_READ_MAX 512     /* = one MSP430 FRAM slot            */
+#  endif
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
 
 void
 tiku_shell_cmd_read(uint8_t argc, const char *argv[])
 {
-    char resolved[TIKU_SHELL_CWD_SIZE];
-    char buf[64];
-    int n;
+    char         resolved[TIKU_SHELL_CWD_SIZE];
+    static char  buf[TIKU_SHELL_READ_MAX + 1];   /* +1 for the NUL terminator */
+    int          n;
 
     if (argc < 2) {
         SHELL_PRINTF("Usage: read <path>\n");
