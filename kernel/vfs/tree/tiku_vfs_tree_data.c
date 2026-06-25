@@ -305,6 +305,8 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     out->backing = "MRAM";
 #elif defined(PLATFORM_MSP430)
     out->backing = "FRAM";
+#elif defined(PLATFORM_RP2350)
+    out->backing = "Flash";  /* carved QSPI region, erase+program backend */
 #else
     out->backing = "RAM*";   /* volatile until a backend lands */
 #endif
