@@ -53,7 +53,7 @@
 #  elif defined(PLATFORM_AMBIQ)
 #    define TIKU_TFS_MAX_FILES  100
 #  elif defined(PLATFORM_RP2350)
-#    define TIKU_TFS_MAX_FILES  32     /**< 256 KB Flash FS extent */
+#    define TIKU_TFS_MAX_FILES  512    /**< 2.75 MB Flash FS extent */
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif

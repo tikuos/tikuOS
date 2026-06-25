@@ -40,6 +40,8 @@
  */
 #if defined(PLATFORM_AMBIQ)
 #define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)
+#elif defined(PLATFORM_RP2350)
+#define TIKU_NVM_RESERVED_BYTES  (128u * 1024u)   /* durable named-data tail */
 #else
 #define TIKU_NVM_RESERVED_BYTES  0u
 #endif
@@ -54,7 +56,7 @@
 #elif defined(PLATFORM_AMBIQ)
 #define TIKU_NVMFS_FS_BYTES  (512u * 1024u)    /* 512 KB (apollo4l) */
 #elif defined(PLATFORM_RP2350)
-#define TIKU_NVMFS_FS_BYTES  (256u * 1024u)    /* 256 KB (rp2350 Flash FS) */
+#define TIKU_NVMFS_FS_BYTES  (2816u * 1024u)   /* 2.75 MB (rp2350 Flash FS) */
 #else
 #define TIKU_NVMFS_FS_BYTES  0u
 #endif

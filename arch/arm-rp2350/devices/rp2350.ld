@@ -68,15 +68,18 @@ __tiku_nvm_flash_offset = LENGTH(FLASH) - __tiku_nvm_flash_size;
 __tiku_nvm_flash_start  = ORIGIN(FLASH) + __tiku_nvm_flash_offset;
 __tiku_nvm_flash_end    = ORIGIN(FLASH) + LENGTH(FLASH);
 
-/* Carved NVM region (substrate B): a 512 KB slice of QSPI flash just below the
- * 4 KB .uninit backup sector, owned by the /data file store via the Flash
- * region backend (arch/arm-rp2350/tiku_nvm_region_rp2350.c).  4 KB-sector
- * aligned (the flash erase granule).  Code grows up from ORIGIN(FLASH); an
- * ASSERT in SECTIONS guards the flash image against overrunning it.
- *   __tiku_nvmfs_base   : XIP address (read in place by pointer)
+/* Carved NVM region (substrate B): a ~3 MB slice of QSPI flash just below the
+ * 4 KB .uninit backup sector, owned by the /data file store + NVM tier via the
+ * Flash region backend (arch/arm-rp2350/tiku_nvm_region_rp2350.c).  Sub-layout
+ * (front->top): NVM tier extent (~124 KB, durable TIKU_MEM_NVM) | /data FS
+ * extent (TIKU_NVMFS_FS_BYTES, 2.75 MB) | reserved tail (TIKU_NVM_RESERVED_BYTES,
+ * 128 KB durable named data).  4 KB-sector aligned (the flash erase granule).
+ * Code grows up from ORIGIN(FLASH) into the remaining 1 MB; an ASSERT in
+ * SECTIONS guards the flash image against overrunning it.
+ *   __tiku_nvmfs_base   : XIP address (read in place by pointer); == 0x10100000
  *   __tiku_nvmfs_offset : byte offset from flash start (for the boot-ROM)
  *   __tiku_nvmfs_size   : ABSOLUTE symbol -- its ADDRESS is the size */
-__tiku_nvmfs_size   = 512K;
+__tiku_nvmfs_size   = 0x2FF000;     /* 3068 KB; leaves a 1 MB code budget */
 __tiku_nvmfs_offset = __tiku_nvm_flash_offset - __tiku_nvmfs_size;
 __tiku_nvmfs_base   = ORIGIN(FLASH) + __tiku_nvmfs_offset;
 

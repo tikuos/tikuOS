@@ -123,12 +123,12 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 static uint8_t __attribute__((section(".persistent"),
                               aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
-#elif defined(PLATFORM_AMBIQ)
-/* Ambiq: the NVM tier is backed by the carved, memory-mapped MRAM region
- * (tiku_nvm_region) -- read in place, written via the bootrom backend -- so
- * there is no static .uninit pool here. tier_wire_all() points the tier at the
- * region and tiku_tier_nvm_write() routes writes through its backend. This also
- * returns the 16 KB the old .uninit pool cost the 32 KB MRAM mirror. */
+#elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+/* Ambiq (MRAM) / RP2350 (QSPI Flash): the NVM tier is backed by the carved,
+ * memory-mapped region (tiku_nvm_region) -- read in place, written via the
+ * region backend -- so there is no static pool here. tier_wire_all() points the
+ * tier at the region's front extent and tiku_tier_nvm_write() routes writes
+ * through its backend (MRAM bootrom program / Flash erase+program). */
 #else
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE];
@@ -253,11 +253,11 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_SRAM].alloc_count = 0;
     tier_state[TIKU_MEM_SRAM].initialized = 1;
 
-#if defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
     {
-        /* NVM tier = the carved MRAM region: read in place, written via the
-         * backend (tiku_tier_nvm_write). NULL until the board's region backend
-         * exists (e.g. before the apollo510 backend lands). */
+        /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash): read in
+         * place, written via the backend (tiku_tier_nvm_write). NULL until the
+         * board's region backend exists. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_region_get();
         /* The tier bump-allocates from the front; the top
          * TIKU_NVM_RESERVED_BYTES is reserved for durable named data (BASIC
