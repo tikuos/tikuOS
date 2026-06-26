@@ -7,7 +7,7 @@
  *
  * tiku_nvm_region_apollo4l.c - Apollo4 Lite carved-MRAM region backend (B).
  *
- * Implements tiku_nvm_region_get() over the linker-carved MRAM span
+ * Implements tiku_nvm_backend_get() over the linker-carved MRAM span
  * (__tiku_nvmfs_base / __tiku_nvmfs_size in apollo4l.ld), reserved between the
  * code window and the 32 KB .uninit mirror.  This is the "direct MRAM" backend
  * the file store and the NVM tier were designed for -- megabytes of NVM read in
@@ -143,7 +143,7 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 
 static tiku_nvm_backend_t the_region;
 
-const tiku_nvm_backend_t *tiku_nvm_region_get(void)
+const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
     if (the_region.write == NULL) {
         the_region.base  = &__tiku_nvmfs_base;

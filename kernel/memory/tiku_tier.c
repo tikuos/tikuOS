@@ -258,7 +258,7 @@ static void tier_wire_all(void)
         /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash): read in
          * place, written via the backend (tiku_tier_nvm_write). NULL until the
          * board's region backend exists. */
-        const tiku_nvm_backend_t *rgn = tiku_nvm_region_get();
+        const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
         /* The tier bump-allocates from the front; the top
          * TIKU_NVM_RESERVED_BYTES is reserved for durable named data (BASIC
          * save, FS) and never handed out. */
@@ -743,7 +743,7 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
     /* Region-backed NVM (Ambiq MRAM, RP2350 Flash): the medium is NOT
      * plain-store-writable, so route through the backend's program path. */
     {
-        const tiku_nvm_backend_t *rgn = tiku_nvm_region_get();
+        const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
         if (rgn != NULL && rgn->base != NULL && rgn->write != NULL) {
             uintptr_t d = (uintptr_t)dst;
             uintptr_t b = (uintptr_t)rgn->base;

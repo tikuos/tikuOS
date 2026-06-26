@@ -63,7 +63,7 @@ _Static_assert(TIKU_BASIC_SAVE_BUF_BYTES + 8u <= TIKU_NVM_RESERVED_BYTES,
 static uint8_t *
 basic_region_slot(void)
 {
-    const tiku_nvm_backend_t *rgn = tiku_nvm_region_get();
+    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
     if (rgn == NULL || rgn->base == NULL ||
         rgn->size < TIKU_NVM_RESERVED_BYTES) {
         return NULL;

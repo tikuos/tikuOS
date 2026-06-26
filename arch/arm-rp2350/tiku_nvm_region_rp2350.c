@@ -6,7 +6,7 @@
  *
  * tiku_nvm_region_rp2350.c - RP2350 carved-Flash region backend (substrate B).
  *
- * Implements tiku_nvm_region_get() over the linker-carved QSPI-flash span
+ * Implements tiku_nvm_backend_get() over the linker-carved QSPI-flash span
  * (__tiku_nvmfs_base / __tiku_nvmfs_size in rp2350.ld), reserved between the
  * code image and the 4 KB .uninit backup sector.  This is the Flash analogue of
  * the Ambiq direct-MRAM backend: the /data file store and the NVM tier read the
@@ -130,7 +130,7 @@ static tiku_nvm_backend_t g_region;
  * address is the byte count), so it cannot be a static initializer -- the
  * struct is populated here on first use.
  */
-const tiku_nvm_backend_t *tiku_nvm_region_get(void)
+const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
     g_region.base  = &__tiku_nvmfs_base;
     g_region.size  = (size_t)(uintptr_t)&__tiku_nvmfs_size;

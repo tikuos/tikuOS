@@ -96,7 +96,7 @@ data_tfs_ensure(void)
     if (data_fs_ready) {
         return 0;
     }
-    rgn = tiku_nvm_region_get();
+    rgn = tiku_nvm_backend_get();
     if (rgn == NULL || rgn->base == NULL ||
         rgn->size < (size_t)TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
         return -1;

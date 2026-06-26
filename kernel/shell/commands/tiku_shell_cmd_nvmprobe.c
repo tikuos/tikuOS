@@ -45,7 +45,7 @@ nvmprobe_hex(unsigned v)
 void
 tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
 {
-    const tiku_nvm_backend_t *be = tiku_nvm_region_get();
+    const tiku_nvm_backend_t *be = tiku_nvm_backend_get();
     const char *sub = (argc > 1u) ? argv[1] : "info";
 
     if (be == NULL || be->base == NULL || be->size == 0u) {

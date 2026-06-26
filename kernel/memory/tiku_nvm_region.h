@@ -69,6 +69,6 @@
  *
  * @return Pointer to the region backend, or NULL on parts without one.
  */
-const tiku_nvm_backend_t *tiku_nvm_region_get(void);
+const tiku_nvm_backend_t *tiku_nvm_backend_get(void);
 
 #endif /* TIKU_NVM_REGION_H_ */

@@ -44,7 +44,7 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 
 static tiku_nvm_backend_t the_region;
 
-const tiku_nvm_backend_t *tiku_nvm_region_get(void)
+const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
     if (the_region.write == NULL) {
         the_region.base  = nvmfs_region;
