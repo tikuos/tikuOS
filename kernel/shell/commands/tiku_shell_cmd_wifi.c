@@ -32,6 +32,7 @@
 #include <kernel/process/tiku_process.h>
 #include <tikukits/net/wifi/tiku_kits_net_wifi.h>
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
+#include <tikukits/net/ipv4/tiku_kits_net_udp.h>
 #include <tikukits/net/ipv4/tiku_kits_net_dhcp.h>
 extern struct tiku_process tiku_kits_net_dhcp_process;
 #endif
@@ -230,6 +231,9 @@ static void wifi_up(void)
         SHELL_PRINTF("wifi: could not install the WiFi link backend\n");
         return;
     }
+    /* Self-contained: ensure UDP is up (DHCP binds port 68). Harmless if the
+     * net-test path already did it; lets a lean net build (no NET_TEST) work. */
+    tiku_kits_net_udp_init();
     tiku_kits_net_dhcp_init();
     tiku_process_start(&tiku_kits_net_dhcp_process, (tiku_event_data_t)0);
     if (tiku_kits_net_dhcp_start(st.mac) != TIKU_KITS_NET_OK) {
