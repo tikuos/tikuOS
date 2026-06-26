@@ -49,10 +49,20 @@ void
 tiku_shell_cmd_slip_enable(void)
 {
     if (!link_ready) {
-        static const uint8_t self[4] = TIKU_KITS_NET_IP_ADDR;
-        tiku_kits_net_slip_init();
-        tiku_kits_net_ipv4_set_link(&tiku_kits_net_slip_link);
-        tiku_kits_net_ipv4_set_addr(self);
+        /* Only claim the IP link for SLIP when nothing else already owns it.
+         * On a WiFi board, `wifi up` installs the WiFi link backend and a
+         * DHCP-acquired address first; forcing SLIP here would drop the radio
+         * link and reset the address to the compile-time default -- breaking
+         * net client commands (ping/ntp/dns) that call this to ensure the RX
+         * path is live.  Over WiFi those commands need nothing from us: the
+         * link is up and RX is pushed from the radio callback.  With no link
+         * set (the usual SLIP-over-UART build) we install SLIP as before. */
+        if (tiku_kits_net_ipv4_get_link() == (const tiku_kits_net_link_t *)0) {
+            static const uint8_t self[4] = TIKU_KITS_NET_IP_ADDR;
+            tiku_kits_net_slip_init();
+            tiku_kits_net_ipv4_set_link(&tiku_kits_net_slip_link);
+            tiku_kits_net_ipv4_set_addr(self);
+        }
         link_ready = 1;
     }
     slip_on = 1;

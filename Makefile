@@ -1553,6 +1553,15 @@ ifeq ($(TIKU_KITS_NET_DHCP_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_DHCP_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dhcp.c
 endif
+# Opt-in DNS stub resolver for MIN builds.  The non-MIN path already pulls
+# the whole ipv4/ directory; MIN omits it, but the ntp/dns shell commands
+# reference the resolver symbols, so opt it in when those are wanted.  dns.c
+# is a tiku_kits_net_*.o so its working buffer is relocated out of the .uninit
+# backup window by the linker script -- no 4 KB-cap impact.
+ifeq ($(TIKU_KITS_NET_DNS_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_DNS_ENABLE=1
+SRCS   += tikukits/net/ipv4/tiku_kits_net_dns.c
+endif
 else
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
 SRCS   += $(wildcard tikukits/net/http/*.c)

@@ -235,11 +235,16 @@ static void wifi_up(void)
      * net-test path already did it; lets a lean net build (no NET_TEST) work. */
     tiku_kits_net_udp_init();
     tiku_kits_net_dhcp_init();
-    tiku_process_start(&tiku_kits_net_dhcp_process, (tiku_event_data_t)0);
+    /* Kick off the exchange (real station MAC) BEFORE starting the poller
+     * process, so the process sees an in-flight DISCOVER and just polls it
+     * rather than self-starting a second exchange with the default MAC.  Order
+     * matters: tiku_process_start() runs the process body synchronously if the
+     * event queue is full, so the exchange must already be armed by then. */
     if (tiku_kits_net_dhcp_start(st.mac) != TIKU_KITS_NET_OK) {
         SHELL_PRINTF("wifi: DHCP start failed (radio up? already bound?)\n");
         return;
     }
+    tiku_process_start(&tiku_kits_net_dhcp_process, (tiku_event_data_t)0);
     SHELL_PRINTF("wifi: IP stack now rides WiFi; DHCP requested -- "
                  "run 'ip' shortly for the lease.\n");
 }
