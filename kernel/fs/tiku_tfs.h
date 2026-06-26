@@ -60,22 +60,41 @@
 #endif
 #ifndef TIKU_TFS_SLOT_DATA
 /* Region-backed parts use a full erase/program granule per file; byte-writable
- * NVM (FRAM / host) uses the smaller default. */
-#  if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
-#    define TIKU_TFS_SLOT_DATA  4096   /**< max bytes per file (region FS) */
+ * NVM (FRAM / host) uses the smaller default. On RP2350 the slot is sized so
+ * that length+content == one 4 KB flash erase sector (see TIKU_TFS_SECT), so a
+ * power cut during one file's write cannot reach a neighbor file's sector. */
+#  if defined(PLATFORM_RP2350)
+#    define TIKU_TFS_SLOT_DATA  4092   /**< 4 B length + 4092 = 4096 (one sector) */
+#  elif defined(PLATFORM_AMBIQ)
+#    define TIKU_TFS_SLOT_DATA  4096   /**< MRAM: 16 B program granule, no erase */
 #  else
 #    define TIKU_TFS_SLOT_DATA  512    /**< max bytes per file */
 #  endif
 #endif
 
+/* On-NVM layout alignment = the medium's erase granule, so each data slot owns
+ * whole erase sectors and the directory/data boundary is sector-aligned; a power
+ * cut during one file's write then cannot corrupt a neighbor file. Byte/word-
+ * writable NVM (FRAM/MRAM, no erase) uses plain 4-byte alignment. */
+#ifndef TIKU_TFS_SECT
+#  if defined(PLATFORM_RP2350)
+#    define TIKU_TFS_SECT  4096u
+#  else
+#    define TIKU_TFS_SECT  4u
+#  endif
+#endif
+#define TIKU_TFS_ALIGN(n, a)   (((n) + (a) - 1u) & ~((a) - 1u))
+
 /** @brief Bytes of NVM the store occupies; size a backing region >= this.
- *  Mirrors the on-NVM layout in tiku_tfs.c (a _Static_assert keeps them in
- *  sync): superblock + directory[MAX_FILES] + data[MAX_FILES+1]. */
+ *  Mirrors the on-NVM layout in tiku_tfs.c (a static assertion keeps them in
+ *  sync): superblock + directory[MAX_FILES] + (sector-aligned) data[MAX_FILES+1]. */
+#define TIKU_TFS_DE_BYTES    (((8u + TIKU_TFS_NAME_MAX + 3u) & ~3u))
+#define TIKU_TFS_SLOT_BYTES  TIKU_TFS_ALIGN(4u + TIKU_TFS_SLOT_DATA, TIKU_TFS_SECT)
+#define TIKU_TFS_DATA_OFF                                                       \
+    TIKU_TFS_ALIGN(8u + TIKU_TFS_DE_BYTES * (unsigned)TIKU_TFS_MAX_FILES,       \
+                   TIKU_TFS_SECT)
 #define TIKU_TFS_REGION_BYTES                                                   \
-    (8u                                                                        \
-     + ((((8u + TIKU_TFS_NAME_MAX + 3u) & ~3u)) * (unsigned)TIKU_TFS_MAX_FILES) \
-     + ((((4u + TIKU_TFS_SLOT_DATA + 3u) & ~3u))                               \
-        * (unsigned)(TIKU_TFS_MAX_FILES + 1u)))
+    (TIKU_TFS_DATA_OFF + TIKU_TFS_SLOT_BYTES * (unsigned)(TIKU_TFS_MAX_FILES + 1u))
 
 /*---------------------------------------------------------------------------*/
 /* STATUS CODES                                                              */

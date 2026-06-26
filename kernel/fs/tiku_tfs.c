@@ -27,7 +27,15 @@
 /*---------------------------------------------------------------------------*/
 
 #define TFS_MAGIC    0x54465331u   /* "TFS1" -- store is formatted */
+/* Store-format version: bump when the on-NVM layout changes so mount() reformats
+ * stale stores. RP2350 = v2 (sector-isolated 4 KB data slots, aligned data
+ * region); the unchanged byte/word-writable layout stays v1, so only RP2350
+ * reformats on upgrade. */
+#if defined(PLATFORM_RP2350)
+#define TFS_VERSION  2u
+#else
 #define TFS_VERSION  1u
+#endif
 #define TFS_GATE     0x4C495645u   /* "LIVE" -- directory entry is in use */
 
 #define TFS_ALIGN4(n)   (((n) + 3u) & ~3u)
@@ -36,8 +44,10 @@
 #define TFS_DE_BYTES    TFS_ALIGN4(8u + TIKU_TFS_NAME_MAX)  /* gate+slot+name  */
 #define TFS_DIR_OFF     TFS_SB_BYTES
 #define TFS_DIR_BYTES   (TFS_DE_BYTES * TIKU_TFS_MAX_FILES)
-#define TFS_SLOT_BYTES  TFS_ALIGN4(4u + TIKU_TFS_SLOT_DATA) /* length+content  */
-#define TFS_DATA_OFF    (TFS_DIR_OFF + TFS_DIR_BYTES)
+/* Slot size and data-region base are sector-aligned in the header (TIKU_TFS_SECT)
+ * so each file's data slot owns whole erase sectors; single-sourced here. */
+#define TFS_SLOT_BYTES  TIKU_TFS_SLOT_BYTES
+#define TFS_DATA_OFF    TIKU_TFS_DATA_OFF
 #define TFS_REGION      (TFS_DATA_OFF + TFS_SLOT_BYTES * TIKU_TFS_NSLOTS)
 
 /* The public TIKU_TFS_REGION_BYTES (tiku_tfs.h) must match this internal
@@ -169,7 +179,7 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (be->size < TFS_REGION) {
         return TFS_ERR_NOSPACE;
     }
-    if (rd32(fs, 0) != TFS_MAGIC) {
+    if (rd32(fs, 0) != TFS_MAGIC || rd32(fs, 4) != TFS_VERSION) {
         return tiku_tfs_format(fs);            /* virgin / wrong-version NVM */
     }
     /* Rebuild the data-slot allocation map from the live directory. */
