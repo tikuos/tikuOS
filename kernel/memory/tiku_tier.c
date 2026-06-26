@@ -191,6 +191,10 @@ typedef struct {
     tiku_mem_arch_size_t  peak;        /**< Lifetime high-water mark */
     tiku_mem_arch_size_t  alloc_count; /**< Number of sub-allocations */
     uint8_t               initialized; /**< Non-zero after tiku_tier_init */
+    uint8_t               program_op;  /**< Backing is program-op-only NVM
+                                            (carved MRAM / Flash): direct CPU
+                                            stores bus-fault, so writable pools
+                                            are refused. 0 = directly writable. */
 } tier_pool_state_t;
 
 /**
@@ -267,14 +271,21 @@ static void tier_wire_all(void)
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
             tier_state[TIKU_MEM_NVM].capacity = (tiku_mem_arch_size_t)
                 (rgn->size - TIKU_NVMFS_FS_BYTES - TIKU_NVM_RESERVED_BYTES);
+            /* Carved MRAM (Ambiq) / Flash (RP2350): writable only through the
+             * region's program op (bootrom / flash program).  A raw CPU store
+             * bus-faults, so flag the tier program-op-only -- writable pools are
+             * refused (tiku_tier_pool_create) rather than faulting on use. */
+            tier_state[TIKU_MEM_NVM].program_op = 1u;
         } else {
             tier_state[TIKU_MEM_NVM].buf      = NULL;
             tier_state[TIKU_MEM_NVM].capacity = 0u;
+            tier_state[TIKU_MEM_NVM].program_op = 0u;
         }
     }
 #else
     tier_state[TIKU_MEM_NVM].buf         = tier_nvm_buf;
     tier_state[TIKU_MEM_NVM].capacity    = TIKU_TIER_NVM_SIZE;
+    tier_state[TIKU_MEM_NVM].program_op  = 0u;  /* FRAM/.bss: directly CPU-writable */
 #endif
     tier_state[TIKU_MEM_NVM].offset      = 0;
     tier_state[TIKU_MEM_NVM].peak        = 0;
@@ -554,6 +565,20 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
     total = aligned_blk * block_count;
 
     resolved = resolve_tier(tier, total);
+
+    /* Program-op NVM (carved MRAM / Flash): tiku_pool_create() lays out the
+     * freelist with direct CPU stores into the block buffer.  On memory that is
+     * writable only through the region's program op those stores bus-fault
+     * (verified on Apollo HW: a raw CPU store into carved MRAM resets the chip
+     * even with the MPU region opened RW -- the MRAM controller rejects it).
+     * Refuse cleanly instead of handing back a pool whose first write resets the
+     * chip.  Durable structured
+     * data on these parts uses the file store (the region write backend), not a
+     * CPU-written pool. */
+    if (resolved == TIKU_MEM_NVM && tier_state[TIKU_MEM_NVM].program_op) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
     buf = tier_bump_alloc(resolved, total);
 
     if (buf == NULL) {
