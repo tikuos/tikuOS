@@ -495,6 +495,11 @@ typedef struct {
     tiku_mem_arch_size_t  peak_count;  /**< Lifetime high-water mark */
     uint8_t               id;          /**< Pool identifier for debugging */
     uint8_t               active;      /**< Non-zero if initialized */
+    uint8_t               nvm;         /**< Non-zero: backing is NVM-tier memory,
+                                            so freelist writes route through
+                                            tiku_tier_nvm_write() (program op on
+                                            MRAM/Flash, in-place store on FRAM)
+                                            rather than a direct CPU store. */
     tiku_mem_tier_t       tier;        /**< Memory tier (SRAM or NVM) */
 } tiku_pool_t;
 
@@ -527,6 +532,29 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
                                  tiku_mem_arch_size_t block_size,
                                  tiku_mem_arch_size_t block_count,
                                  uint8_t id);
+
+/**
+ * @brief Initialize a pool over an NVM-tier buffer
+ *
+ * Identical to tiku_pool_create() but marks the pool NVM-backed, so the
+ * embedded freelist is built and maintained through tiku_tier_nvm_write()
+ * -- the program op on MRAM/Flash, an in-place store on FRAM -- instead of
+ * direct CPU stores that would fault on program-op NVM. The tier allocator
+ * (tiku_tier_pool_create) uses this for TIKU_MEM_NVM pools; callers wiring a
+ * raw NVM buffer can use it directly. Allocated blocks are likewise written
+ * via tiku_tier_nvm_write() and read by plain pointer.
+ *
+ * @param pool         Pool control block to initialize
+ * @param buf          NVM-tier backing buffer
+ * @param block_size   Requested size of each block in bytes
+ * @param block_count  Number of blocks
+ * @param id           User-assigned identifier
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
+ */
+tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
+                                     tiku_mem_arch_size_t block_size,
+                                     tiku_mem_arch_size_t block_count,
+                                     uint8_t id);
 
 /**
  * @brief Initialize a pool without region-registry validation

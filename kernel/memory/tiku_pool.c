@@ -107,22 +107,36 @@ static tiku_mem_arch_size_t min_block_size(void)
  *
  * @param pool   Pool whose freelist to build
  */
+/*
+ * Write one freelist "next" pointer into a block, honouring the backing.
+ * An NVM-tier pool (pool->nvm) routes the word through tiku_tier_nvm_write()
+ * -- the bootrom program op on MRAM, the flash program on RP2350, an in-place
+ * store on FRAM -- because a direct CPU store would bus-fault on program-op
+ * NVM. An SRAM pool stores directly (the hot path, unchanged).
+ */
+static void pool_write_next(const tiku_pool_t *pool, void *block, void *next)
+{
+    if (pool->nvm) {
+        (void)tiku_tier_nvm_write(block, &next,
+                                  (tiku_mem_arch_size_t)sizeof(next));
+    } else {
+        *(void **)(void *)block = next;
+    }
+}
+
 static void build_freelist(tiku_pool_t *pool)
 {
     tiku_mem_arch_size_t i;
     uint8_t *block;
-    void **next_ptr;
 
     for (i = 0; i < pool->block_count - 1U; i++) {
-        block    = pool->buf + (i * pool->block_size);
-        next_ptr = (void **)(void *)block;
-        *next_ptr = block + pool->block_size;
+        block = pool->buf + (i * pool->block_size);
+        pool_write_next(pool, block, block + pool->block_size);
     }
 
     /* Last block terminates the list */
-    block    = pool->buf + ((pool->block_count - 1U) * pool->block_size);
-    next_ptr = (void **)(void *)block;
-    *next_ptr = NULL;
+    block = pool->buf + ((pool->block_count - 1U) * pool->block_size);
+    pool_write_next(pool, block, NULL);
 
     pool->free_head = pool->buf;
 }
@@ -173,6 +187,7 @@ tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
     pool->peak_count  = 0;
     pool->id          = 0;
     pool->active      = 1;
+    pool->nvm         = 0;
     pool->tier        = TIKU_MEM_SRAM;
 
     build_freelist(pool);
@@ -238,9 +253,51 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
     pool->peak_count  = 0;
     pool->id          = id;
     pool->active      = 1;
+    pool->nvm         = 0;
     pool->tier        = TIKU_MEM_SRAM; /* Default; tier allocator overrides */
 
     build_freelist(pool);
+
+    return TIKU_MEM_OK;
+}
+
+/*
+ * NVM-backed pool init. Mirrors tiku_pool_create() but marks pool->nvm so the
+ * embedded freelist is laid out (and later push/pop maintained) through
+ * tiku_tier_nvm_write() -- the bootrom program op on MRAM, the flash program on
+ * RP2350, an in-place store on FRAM. A direct CPU store into program-op NVM
+ * bus-faults, so this is the only correct path there. The tier allocator
+ * (tiku_tier_pool_create) calls this for TIKU_MEM_NVM pools.
+ */
+tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
+                                     tiku_mem_arch_size_t block_size,
+                                     tiku_mem_arch_size_t block_count,
+                                     uint8_t id)
+{
+    tiku_mem_arch_size_t aligned_size;
+    tiku_mem_arch_size_t min_size;
+
+    if (pool == NULL || buf == NULL || block_count == 0) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
+    aligned_size = align_up(block_size);
+    min_size     = min_block_size();
+    if (aligned_size < min_size) {
+        aligned_size = min_size;
+    }
+
+    pool->buf         = buf;
+    pool->block_size  = aligned_size;
+    pool->block_count = block_count;
+    pool->used_count  = 0;
+    pool->peak_count  = 0;
+    pool->id          = id;
+    pool->active      = 1;
+    pool->nvm         = 1;
+    pool->tier        = TIKU_MEM_NVM;
+
+    build_freelist(pool);   /* writes route through tiku_tier_nvm_write() */
 
     return TIKU_MEM_OK;
 }
@@ -306,7 +363,6 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 {
     uint8_t *block;
     tiku_mem_arch_size_t offset;
-    void **next_ptr;
 
     if (pool == NULL || !pool->active || ptr == NULL) {
         return TIKU_MEM_ERR_INVALID;
@@ -344,9 +400,8 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
     }
 #endif
 
-    /* Push onto freelist head */
-    next_ptr  = (void **)(void *)block;
-    *next_ptr = pool->free_head;
+    /* Push onto freelist head (NVM-aware: program op on MRAM/Flash) */
+    pool_write_next(pool, block, pool->free_head);
     pool->free_head = block;
 
     pool->used_count--;
