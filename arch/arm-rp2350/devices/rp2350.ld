@@ -191,9 +191,18 @@ SECTIONS
     {
         __uninit_start = .;
         *(.uninit*)
-        *(.persistent*)
+        /* Durable cells (boot counter, aliases, persist cells) -- backed up to
+         * the 4 KB flash sector and MPU-protected. EXCLUDE the net stack: its
+         * TCP/MQTT/DNS/HTTP pools are tagged .persistent only for NOLOAD (skip
+         * zero-init), but they are transient, write-heavy working buffers -- they
+         * must be neither mirrored nor MPU-read-only. */
+        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent*)
         . = ALIGN(32);
         __uninit_end = .;
+        /* Net working buffers: still NOLOAD SRAM, but AFTER __uninit_end so they
+         * sit outside the backed-up + MPU-protected window (they need ~5 KB,
+         * which alone overflows the 4 KB backup on RP2350). */
+        *tiku_kits_net_*.o(.persistent*)
     } > SRAM
 
     /* End of static allocations (heap-style growth would start here).
