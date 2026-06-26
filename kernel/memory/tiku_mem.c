@@ -54,6 +54,11 @@
 static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
     const tiku_mem_arch_size_t mask = TIKU_MEM_ARCH_ALIGNMENT - 1U;
+    /* Saturate instead of wrapping to 0 on a near-max request (16-bit on
+     * MSP430), so the caller's capacity check rejects it cleanly. */
+    if (size > (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 - mask)) {
+        return (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 & ~mask);
+    }
     return (size + mask) & ~mask;
 }
 
@@ -92,6 +97,9 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
         uintptr_t aligned = (raw + mask) & ~mask;
         tiku_mem_arch_size_t adj = (tiku_mem_arch_size_t)(aligned - raw);
 
+        if (size <= adj) {       /* misaligned base leaves no usable span */
+            return TIKU_MEM_ERR_INVALID;
+        }
         arena->buf      = (uint8_t *)aligned;
         arena->capacity = size - adj;
     }
@@ -148,6 +156,9 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
         uintptr_t aligned = (raw + mask) & ~mask;
         tiku_mem_arch_size_t adj = (tiku_mem_arch_size_t)(aligned - raw);
 
+        if (size <= adj) {       /* misaligned base leaves no usable span */
+            return TIKU_MEM_ERR_INVALID;
+        }
         arena->buf      = (uint8_t *)aligned;
         arena->capacity = size - adj;
     }

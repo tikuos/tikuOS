@@ -91,7 +91,16 @@ static const char *de_name(tiku_tfs_t *fs, unsigned i)
 {
     return (const char *)(fs->be->base + dirent_off(i) + TFS_DE_NAME);
 }
-static uint32_t sl_len(tiku_tfs_t *fs, unsigned s) { return rd32(fs, slot_off(s) + TFS_SL_LEN); }
+static uint32_t sl_len(tiku_tfs_t *fs, unsigned s)
+{
+    /* Defensive: stat/list/list_dir pass de_slot() straight in, so a corrupt
+     * dirent could index past the data region -- clamp out-of-range to 0. The
+     * bounds-checked callers (read/map/mount) pass an already-validated index. */
+    if (s >= TIKU_TFS_NSLOTS) {
+        return 0u;
+    }
+    return rd32(fs, slot_off(s) + TFS_SL_LEN);
+}
 static const uint8_t *sl_data(tiku_tfs_t *fs, unsigned s)
 {
     return fs->be->base + slot_off(s) + TFS_SL_DATA;

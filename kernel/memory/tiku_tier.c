@@ -72,6 +72,11 @@
 static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
     const tiku_mem_arch_size_t mask = TIKU_MEM_ARCH_ALIGNMENT - 1U;
+    /* Saturate instead of wrapping to 0 on a near-max request (16-bit on
+     * MSP430), so the caller's capacity check rejects it cleanly. */
+    if (size > (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 - mask)) {
+        return (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 & ~mask);
+    }
     return (size + mask) & ~mask;
 }
 
@@ -551,6 +556,17 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
     if (aligned_blk < min_blk) {
         aligned_blk = min_blk;
     }
+    /* Reject before the product wraps (tiku_mem_arch_size_t is 16-bit on
+     * MSP430): a wrapped 'total' reserves ~0 bytes while build_freelist writes
+     * the full block_size*block_count span, corrupting the tier pool. Cast to
+     * the unsigned type BEFORE dividing so the bound is unsigned, not -1/N. */
+    {
+        const tiku_mem_arch_size_t size_max =
+            (tiku_mem_arch_size_t)~(tiku_mem_arch_size_t)0;
+        if (block_count != 0u && aligned_blk > size_max / block_count) {
+            return TIKU_MEM_ERR_NOMEM;
+        }
+    }
     total = aligned_blk * block_count;
 
     resolved = resolve_tier(tier, total);
@@ -761,6 +777,10 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
                 return (rc == 0) ? TIKU_MEM_OK : TIKU_MEM_ERR_INVALID;
             }
         }
+        /* Region-backed platform but no usable backend: a direct CPU store would
+         * bus-fault on program-op NVM, so fail rather than fall through to the
+         * in-place memcpy below. */
+        return TIKU_MEM_ERR_INVALID;
     }
 #endif
     /* Byte-writable NVM tier (FRAM / host .bss): store in place. */

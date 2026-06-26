@@ -66,6 +66,11 @@
 static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
     const tiku_mem_arch_size_t mask = TIKU_MEM_ARCH_ALIGNMENT - 1U;
+    /* Saturate instead of wrapping to 0 on a near-max request (16-bit on
+     * MSP430), so the caller's capacity check rejects it cleanly. */
+    if (size > (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 - mask)) {
+        return (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 & ~mask);
+    }
     return (size + mask) & ~mask;
 }
 

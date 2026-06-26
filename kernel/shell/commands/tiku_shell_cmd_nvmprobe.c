@@ -7,7 +7,7 @@
  * tiku_shell_cmd_nvmprobe.c - "nvmprobe" diagnostic for the carved NVM region.
  *
  * A thin, opt-in affordance to exercise the memory-mapped NVM region backend
- * (substrate B, tiku_nvm_region_get) from the shell and the TikuBench suite:
+ * (substrate B, tiku_nvm_backend_get) from the shell and the TikuBench suite:
  *
  *   nvmprobe [info]             region base + size
  *   nvmprobe read   <off> <len> dump <len> bytes at <off> (text + hex)
