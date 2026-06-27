@@ -92,7 +92,11 @@
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* IPADDR$ / NETUP */
 #include <kernel/cpu/tiku_watchdog.h>              /* pump kicks the WDT */
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
+#include <tikukits/net/ipv4/tiku_kits_net_tcp.h>   /* tcp_periodic in pump */
 #include <tikukits/net/mqtt/tiku_kits_net_mqtt.h>  /* MQTTPUB */
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+#include <drivers/wifi/cyw43/whd.h>                /* whd_drain_rx in pump */
+#endif
 #endif
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
 #include <tikukits/net/http/tiku_kits_net_http.h>  /* HTTPGET$ / HTTPSTATUS */

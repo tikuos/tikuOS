@@ -219,10 +219,13 @@
 #define TIKU_SHELL_CMD_DNS     0
 #endif
 #endif
-/* syslog: send a remote log line (UDP 514) over SLIP.  Same gating as
- * slip/ping/ip; the syslog client is already compiled with the net kit. */
+/* syslog: send a remote log line (UDP 514) over SLIP.  Tracks the net kit,
+ * but only in non-MIN builds: the syslog client (tiku_kits_net_syslog.c)
+ * ships in the non-MIN ipv4 wildcard, so a MIN build (lean WiFi/SLIP) omits
+ * it -- auto-drop the command there to avoid an undefined-reference link. */
 #ifndef TIKU_SHELL_CMD_SYSLOG
-#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
+#if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE && \
+    !(defined(TIKU_KIT_NET_MIN) && TIKU_KIT_NET_MIN)
 #define TIKU_SHELL_CMD_SYSLOG  1  /**< syslog  - Send a remote log line (514) */
 #else
 #define TIKU_SHELL_CMD_SYSLOG  0

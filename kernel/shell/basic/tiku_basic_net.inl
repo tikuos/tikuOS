@@ -97,9 +97,20 @@ basic_net_mqtt_pump(void)
     static tiku_clock_time_t last;
     tiku_clock_time_t now = tiku_clock_time();
     tiku_watchdog_kick();
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+    /* Drive the WiFi RX drain ourselves, every iteration: the
+     * cyw43_runner process is starved while we busy-wait here, so
+     * without this the chip's F2 FIFO fills and the SYN-ACK / CONNACK
+     * never reach the TCP/MQTT stack -- connect would always time out. */
+    (void)whd_drain_rx();
+#endif
     if ((tiku_clock_time_t)(now - last) >=
         (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
         last = now;
+        /* TCP first (advances the connect handshake / retransmits / ACKs),
+         * then MQTT reacts to the resulting connection events. The shell's
+         * async tick normally drives tcp_periodic(); we own the loop here. */
+        tiku_kits_net_tcp_periodic();
         tiku_kits_net_mqtt_periodic();
     }
     if (tiku_shell_io_rx_ready()) {
@@ -131,6 +142,13 @@ exec_mqttpub(const char **p)
     (*p)++;
     if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
 
+    /* Initialise the TCP connection table. On a lean WiFi profile nothing
+     * else does: the NET_TEST init and the SLIP net process (the two normal
+     * tcp_init sites) are both absent here, so without this mqtt_connect()'s
+     * tcp_connect() allocates from an uninitialised table and never
+     * establishes. Idempotent for BASIC -- each MQTTPUB is a fresh
+     * connect/publish/disconnect with no persistent connections. */
+    tiku_kits_net_tcp_init();
     tiku_kits_net_mqtt_init();
     tiku_kits_net_mqtt_set_server(ip, 1883);
     tiku_kits_net_mqtt_set_credentials("tikubasic", (const char *)0,

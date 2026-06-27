@@ -1554,6 +1554,9 @@ SRCS   += $(wildcard tikukits/net/slip/*.c)
 # .persistent backup sector is 4 KB hard cap. Most demos need only
 # ipv4 + icmp + udp.
 ifeq ($(TIKU_KIT_NET_MIN),1)
+# Expose MIN to the C preprocessor so shell commands whose kits live only
+# in the non-MIN wildcard (e.g. syslog) can gate themselves off.
+CFLAGS += -DTIKU_KIT_NET_MIN=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_ipv4.c
 SRCS   += tikukits/net/ipv4/tiku_kits_net_icmp.c
 SRCS   += tikukits/net/ipv4/tiku_kits_net_udp.c
@@ -1572,6 +1575,15 @@ endif
 ifeq ($(TIKU_KITS_NET_DNS_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_DNS_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dns.c
+endif
+# Opt-in TCP + MQTT for MIN builds (e.g. BASIC MQTTPUB on a lean WiFi
+# profile).  tcp.c/mqtt.c keep their working buffers in tiku_kits_net_*.o
+# sections, relocated out of the .uninit backup window -- no 4 KB-cap
+# impact.  Enabling MQTT implies TCP (its transport).
+ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_KITS_NET_MQTT_ENABLE=1
+SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
+SRCS   += tikukits/net/mqtt/tiku_kits_net_mqtt.c
 endif
 else
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
