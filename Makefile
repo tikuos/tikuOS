@@ -614,6 +614,17 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
+# Memory tiers. tiku_mem.h defaults to the MSP430-era 128 B SRAM (AUTO) tier,
+# which can't hold a real allocation. BASIC's program arena (~98 KB for the
+# 1024-line BIG tier RP2350 selects) then fails to fit SRAM and resolve_tier()
+# falls back to the 1 KB NVM tier -- which on RP2350 is QSPI flash (program-op,
+# not byte-writable), so the first arena store faults and `basic` wedged the
+# board at entry. Size the SRAM (AUTO) tier to hold the arena in the part's
+# 520 KB SRAM. Gated on BASIC so non-BASIC builds keep the lean default.
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 1024-line BASIC arena
+endif
+
 else ifeq ($(TIKU_PLATFORM),ambiq)
 
 # CPU/FPU per Ambiq part: Cortex-M55 + Helium (Apollo510) or Cortex-M4F with a
