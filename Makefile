@@ -1576,14 +1576,24 @@ ifeq ($(TIKU_KITS_NET_DNS_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_DNS_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dns.c
 endif
-# Opt-in TCP + MQTT for MIN builds (e.g. BASIC MQTTPUB on a lean WiFi
-# profile).  tcp.c/mqtt.c keep their working buffers in tiku_kits_net_*.o
-# sections, relocated out of the .uninit backup window -- no 4 KB-cap
-# impact.  Enabling MQTT implies TCP (its transport).
-ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
-CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_KITS_NET_MQTT_ENABLE=1
+# Opt-in TCP + MQTT/HTTP for MIN builds (e.g. BASIC MQTTPUB / HTTPGET$ on a
+# lean WiFi profile).  TCP is the shared transport; MQTT and HTTP each add
+# their kit on top.  These keep their working buffers in tiku_kits_net_*.o
+# sections, relocated out of the .uninit backup window -- no 4 KB-cap impact.
+# http is HTTPS-only, so pair TIKU_KITS_NET_HTTP_ENABLE=1 with
+# TIKU_KIT_CRYPTO_ENABLE=1 HAS_TLS=1 (+ a TRNG-backed RNG_FILL, which the TLS
+# config header defaults for PLATFORM_RP2350).
+ifneq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE)),)
+CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
+endif
+ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
 SRCS   += tikukits/net/mqtt/tiku_kits_net_mqtt.c
+endif
+ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_HTTP_ENABLE=1
+SRCS   += $(wildcard tikukits/net/http/*.c)
 endif
 else
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
