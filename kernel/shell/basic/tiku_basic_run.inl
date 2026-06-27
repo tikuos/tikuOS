@@ -59,6 +59,10 @@ exec_run(void)
     gosub_sp          = 0;
     for_sp            = 0;
     loop_sp           = 0;
+#if TIKU_BASIC_SUBS_ENABLE
+    basic_call_sp     = 0;
+    basic_scope_sp    = 0;
+#endif
     basic_err_handler = 0;
     basic_err_pc      = 0;
     basic_data_idx    = -1;      /* RESTORE-equivalent at every RUN */

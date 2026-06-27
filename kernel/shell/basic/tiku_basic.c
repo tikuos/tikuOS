@@ -120,6 +120,7 @@
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"
 #include "tiku_basic_net.inl"
+#include "tiku_basic_subs.inl"
 #include "tiku_basic_multi_if.inl"
 #include "tiku_basic_select.inl"
 #include "tiku_basic_renum.inl"

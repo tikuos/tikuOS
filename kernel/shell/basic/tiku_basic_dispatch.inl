@@ -300,6 +300,12 @@ exec_stmt(const char **p)
 #if TIKU_BASIC_NET_ENABLE
     if (match_kw(p, "UDPSEND"))  { exec_udpsend(p);  return; }
 #endif
+#if TIKU_BASIC_SUBS_ENABLE
+    if (match_kw(p, "ENDSUB"))   { exec_endsub();    return; }
+    if (match_kw(p, "SUB"))      { exec_sub(p);      return; }
+    if (match_kw(p, "CALL"))     { exec_call(p);     return; }
+    if (match_kw(p, "LOCAL"))    { exec_local(p);    return; }
+#endif
     if (match_kw(p, "ON"))       { exec_on(p);        return; }
     if (match_kw(p, "RESUME"))   { exec_resume(p);    return; }
     if (match_kw(p, "EVERY"))    { exec_every(p);     return; }
