@@ -348,6 +348,22 @@ expr_call(const char **p, long *out_v)
         return 1;
     }
 #endif
+#if TIKU_BASIC_NET_ENABLE
+    /* NETUP() -- 1 if the IP link is installed (after `wifi up` / a link
+     * backend brought it up), else 0. Parens optional so `IF NETUP THEN`
+     * reads naturally. Guards UDPSEND / MQTTPUB / HTTPGET$. */
+    if (match_kw(p, "NETUP")) {
+        skip_ws(p);
+        if (**p == '(') {
+            (*p)++; skip_ws(p);
+            if (**p == ')') (*p)++;
+            else { basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); return 1; }
+        }
+        *out_v = (tiku_kits_net_ipv4_get_link() != (const tiku_kits_net_link_t *)0)
+                 ? 1L : 0L;
+        return 1;
+    }
+#endif
     if (match_kw(p, "SECS")) {
         skip_ws(p);
         if (**p != '(') {

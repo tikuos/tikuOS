@@ -87,6 +87,17 @@
 #include <tikukits/time/tiku_kits_time.h> /* DATE$ / TIME$ calendar breakdown */
 #endif
 #endif
+#if TIKU_BASIC_NET_ENABLE
+#include <tikukits/net/ipv4/tiku_kits_net_udp.h>   /* UDPSEND */
+#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* IPADDR$ / NETUP */
+#include <kernel/cpu/tiku_watchdog.h>              /* pump kicks the WDT */
+#if (TIKU_KITS_NET_MQTT_ENABLE + 0)
+#include <tikukits/net/mqtt/tiku_kits_net_mqtt.h>  /* MQTTPUB */
+#endif
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+#include <tikukits/net/http/tiku_kits_net_http.h>  /* HTTPGET$ / HTTPSTATUS */
+#endif
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* AMALGAMATION                                                              */
@@ -108,6 +119,7 @@
 #include "tiku_basic_expr.inl"
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"
+#include "tiku_basic_net.inl"
 #include "tiku_basic_multi_if.inl"
 #include "tiku_basic_select.inl"
 #include "tiku_basic_renum.inl"

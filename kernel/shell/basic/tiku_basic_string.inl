@@ -494,6 +494,29 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
+#if TIKU_BASIC_NET_ENABLE
+    /* IPADDR$() -- the device's current IPv4 as "a.b.c.d" (empty if no
+     * link/lease). 0-arg-with-parens. */
+    if (match_kw(p, "IPADDR$")) {
+        const uint8_t *a;
+        int n;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++; skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        a = tiku_kits_net_ipv4_get_addr();
+        if (a == (const uint8_t *)0) { out[0] = '\0'; return 0; }
+        n = snprintf(out, cap, "%u.%u.%u.%u",
+                     (unsigned)a[0], (unsigned)a[1], (unsigned)a[2], (unsigned)a[3]);
+        if (n < 0 || (size_t)n >= cap) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        return 0;
+    }
+#endif
 
     /* UCASE$(s) / LCASE$(s) -- ASCII case conversion. */
     {
