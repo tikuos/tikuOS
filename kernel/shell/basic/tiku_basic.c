@@ -99,7 +99,16 @@
 #endif
 #endif
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-#include <tikukits/net/http/tiku_kits_net_http.h>  /* HTTPGET$ / HTTPSTATUS */
+/* HTTPGET$ runs over the certificate-based TLS 1.3 client (not the PSK-only
+ * http kit): TCP transport + DNS + X.509 trust store + the tls13 client. */
+#include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
+#include <tikukits/net/ipv4/tiku_kits_net_dns.h>
+#include <tikukits/crypto/x509/tiku_kits_crypto_x509.h>
+#include <tikukits/crypto/tls13/tiku_kits_crypto_tls13.h>
+#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+#include <drivers/wifi/cyw43/whd.h>                /* whd_drain_rx in pump */
+#include <arch/arm-rp2350/tiku_trng_arch.h>        /* TLS entropy          */
+#endif
 #endif
 #endif
 
@@ -118,6 +127,7 @@
 #include "tiku_basic_mathx.inl"
 #include "tiku_basic_lex.inl"
 #include "tiku_basic_io.inl"
+#include "tiku_basic_https.inl"
 #include "tiku_basic_string.inl"
 #include "tiku_basic_call.inl"
 #include "tiku_basic_expr.inl"

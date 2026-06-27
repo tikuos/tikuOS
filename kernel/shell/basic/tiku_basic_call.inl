@@ -368,7 +368,7 @@ expr_call(const char **p, long *out_v)
     if (match_kw(p, "HTTPSTATUS")) {
         skip_ws(p);
         if (**p == '(') { (*p)++; skip_ws(p); if (**p == ')') (*p)++; }
-        *out_v = (long)tiku_kits_net_http_get_status_code();
+        *out_v = (long)basic_http_status;   /* set by basic_https_get() */
         return 1;
     }
 #endif

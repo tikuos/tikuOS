@@ -622,7 +622,14 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # board at entry. Size the SRAM (AUTO) tier to hold the arena in the part's
 # 520 KB SRAM. Gated on BASIC so non-BASIC builds keep the lean default.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+ifeq ($(HAS_TLS),1)
+# HTTPS (HAS_TLS) adds the cert-TLS client's static buffers to .bss; trim the
+# BASIC tier to 128 KB so the cyw43 bring-up + stack keep their SRAM (the
+# ~98 KB 1024-line arena still fits).
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072    # 128 KB: arena + TLS .bss + radio
+else
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 1024-line BASIC arena
+endif
 endif
 
 else ifeq ($(TIKU_PLATFORM),ambiq)

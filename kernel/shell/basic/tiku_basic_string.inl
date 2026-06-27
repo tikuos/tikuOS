@@ -517,14 +517,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-    /* HTTPGET$("host", "path") -- blocking HTTP GET; returns the response body
-     * (capped at the string buffer). The client drives DNS+TCP to completion
-     * (self-pumps the net stack, bounded timeout); HTTPSTATUS() has the code.
-     * The console stalls for the fetch's duration -- the program is blocked
-     * anyway -- but it returns rather than wedging. */
+    /* HTTPGET$("host", "path") -- HTTPS GET over the certificate-based TLS 1.3
+     * client (basic_https_get): DNS + TCP + cert-validated TLS to a real https
+     * server, returning the response body capped at the string buffer.  The
+     * call drives the net stack itself (WiFi RX drain + TCP timers) so the
+     * console stays alive; HTTPSTATUS() exposes the parsed status code. */
     if (match_kw(p, "HTTPGET$")) {
-        char     host[64], path[80];
-        uint16_t rlen = 0;
+        char host[64], path[80];
         skip_ws(p);
         if (**p != '(') goto fn_paren_err;
         (*p)++;
@@ -538,10 +537,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         skip_ws(p);
         if (**p != ')') goto fn_paren_err;
         (*p)++;
-        (void)tiku_kits_net_http_get(host, path, (const char *)0,
-                                     (uint8_t *)out, (uint16_t)(cap - 1u), &rlen);
-        if ((size_t)rlen >= cap) rlen = (uint16_t)(cap - 1u);
-        out[rlen] = '\0';
+        (void)basic_https_get(host, path, out, cap);
         return 0;
     }
 #endif
