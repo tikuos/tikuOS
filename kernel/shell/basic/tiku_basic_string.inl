@@ -516,6 +516,35 @@ parse_strprim(const char **p, char *out, size_t cap)
         }
         return 0;
     }
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+    /* HTTPGET$("host", "path") -- blocking HTTP GET; returns the response body
+     * (capped at the string buffer). The client drives DNS+TCP to completion
+     * (self-pumps the net stack, bounded timeout); HTTPSTATUS() has the code.
+     * The console stalls for the fetch's duration -- the program is blocked
+     * anyway -- but it returns rather than wedging. */
+    if (match_kw(p, "HTTPGET$")) {
+        char     host[64], path[80];
+        uint16_t rlen = 0;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_path_literal(p, host, sizeof(host)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        (void)tiku_kits_net_http_get(host, path, (const char *)0,
+                                     (uint8_t *)out, (uint16_t)(cap - 1u), &rlen);
+        if ((size_t)rlen >= cap) rlen = (uint16_t)(cap - 1u);
+        out[rlen] = '\0';
+        return 0;
+    }
+#endif
 #endif
 
     /* UCASE$(s) / LCASE$(s) -- ASCII case conversion. */

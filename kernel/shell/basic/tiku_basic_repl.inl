@@ -297,6 +297,12 @@ process_line(const char *raw)
 #endif
 #if TIKU_BASIC_NET_ENABLE
                 " UDPSEND IPADDR$ NETUP"
+#if (TIKU_KITS_NET_MQTT_ENABLE + 0)
+                " MQTTPUB"
+#endif
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+                " HTTPGET$ HTTPSTATUS"
+#endif
 #endif
                 "\n");
 #endif

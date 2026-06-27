@@ -363,6 +363,15 @@ expr_call(const char **p, long *out_v)
                  ? 1L : 0L;
         return 1;
     }
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+    /* HTTPSTATUS() -- the HTTP status code from the last HTTPGET$ (0-arg). */
+    if (match_kw(p, "HTTPSTATUS")) {
+        skip_ws(p);
+        if (**p == '(') { (*p)++; skip_ws(p); if (**p == ')') (*p)++; }
+        *out_v = (long)tiku_kits_net_http_get_status_code();
+        return 1;
+    }
+#endif
 #endif
     if (match_kw(p, "SECS")) {
         skip_ws(p);

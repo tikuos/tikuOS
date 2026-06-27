@@ -299,6 +299,9 @@ exec_stmt(const char **p)
 #endif
 #if TIKU_BASIC_NET_ENABLE
     if (match_kw(p, "UDPSEND"))  { exec_udpsend(p);  return; }
+#if (TIKU_KITS_NET_MQTT_ENABLE + 0)
+    if (match_kw(p, "MQTTPUB"))  { exec_mqttpub(p);  return; }
+#endif
 #endif
 #if TIKU_BASIC_SUBS_ENABLE
     if (match_kw(p, "ENDSUB"))   { exec_endsub();    return; }

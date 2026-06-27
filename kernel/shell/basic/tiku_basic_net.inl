@@ -78,4 +78,93 @@ exec_udpsend(const char **p)
     }
 }
 
+#if (TIKU_KITS_NET_MQTT_ENABLE + 0)
+/* MQTT publish (QoS 0). The broker exchange is poll-based, so we drive it
+ * across a bounded deadline, pumping the console between polls so the board
+ * never hard-hangs (the ADC-hang class). */
+static volatile uint8_t basic_mqtt_evt;
+static void basic_mqtt_event_cb(uint8_t e) { basic_mqtt_evt = e; }
+static void basic_mqtt_msg_cb(const char *t, uint16_t tl, const uint8_t *d,
+                              uint16_t dl, uint8_t q, uint8_t r)
+{ (void)t; (void)tl; (void)d; (void)dl; (void)q; (void)r; }
+
+/* One pump step: drive MQTT keepalive/state (paced ~8 Hz), service the console
+ * transport (tiku_shell_io_rx_ready() also services the USB-CDC poll), kick the
+ * watchdog. Returns 1 on Ctrl-C. */
+static int
+basic_net_mqtt_pump(void)
+{
+    static tiku_clock_time_t last;
+    tiku_clock_time_t now = tiku_clock_time();
+    tiku_watchdog_kick();
+    if ((tiku_clock_time_t)(now - last) >=
+        (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
+        last = now;
+        tiku_kits_net_mqtt_periodic();
+    }
+    if (tiku_shell_io_rx_ready()) {
+        if (tiku_shell_io_getc() == BASIC_CTRL_C) return 1;
+    }
+    return 0;
+}
+
+/* MQTTPUB "broker_ip", "topic", expr$ -- connect, publish QoS0, disconnect. */
+static void
+exec_mqttpub(const char **p)
+{
+    char    ipstr[20];
+    char    topic[48];
+    char    payload[TIKU_BASIC_STR_BUF_CAP];
+    uint8_t ip[4];
+    tiku_clock_time_t deadline;
+
+    if (parse_path_literal(p, ipstr, sizeof(ipstr)) != 0) return;
+    if (basic_net_parse_ip(ipstr, ip) != 0) {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? bad broker IP '%s'\n" SH_RST, ipstr); return;
+    }
+    skip_ws(p);
+    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    (*p)++;
+    if (parse_path_literal(p, topic, sizeof(topic)) != 0) return;
+    skip_ws(p);
+    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    (*p)++;
+    if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
+
+    tiku_kits_net_mqtt_init();
+    tiku_kits_net_mqtt_set_server(ip, 1883);
+    tiku_kits_net_mqtt_set_credentials("tikubasic", (const char *)0,
+                                       (const char *)0);
+    basic_mqtt_evt = 0xFFu;
+    if (tiku_kits_net_mqtt_connect(basic_mqtt_msg_cb, basic_mqtt_event_cb)
+        != TIKU_KITS_NET_OK) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? MQTT connect rejected (IP link up? 'wifi up')\n" SH_RST);
+        return;
+    }
+    deadline = (tiku_clock_time_t)(tiku_clock_time() + 8u * TIKU_CLOCK_SECOND);
+    while (!tiku_kits_net_mqtt_is_connected() &&
+           TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
+        if (basic_net_mqtt_pump()) {
+            tiku_kits_net_mqtt_disconnect();
+            basic_error = 1; SHELL_PRINTF(SH_YELLOW "^C\n" SH_RST); return;
+        }
+    }
+    if (!tiku_kits_net_mqtt_is_connected()) {
+        tiku_kits_net_mqtt_disconnect();
+        basic_error = 1; SHELL_PRINTF(SH_RED "? MQTT connect timeout\n" SH_RST); return;
+    }
+    tiku_kits_net_mqtt_publish(topic, (const uint8_t *)payload,
+                               (uint16_t)strlen(payload), 0, 0);
+    /* let the publish flush, then close cleanly */
+    deadline = (tiku_clock_time_t)(tiku_clock_time() + 2u * TIKU_CLOCK_SECOND);
+    while (TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
+        if (basic_net_mqtt_pump()) break;
+    }
+    tiku_kits_net_mqtt_disconnect();
+    deadline = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND / 2);
+    while (TIKU_CLOCK_LT(tiku_clock_time(), deadline)) (void)basic_net_mqtt_pump();
+}
+#endif /* TIKU_KITS_NET_MQTT_ENABLE */
+
 #endif /* TIKU_BASIC_NET_ENABLE */
