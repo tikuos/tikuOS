@@ -277,6 +277,29 @@ process_line(const char *raw)
                 "  Run `basic run` from the shell (or via `init add`)\n"
                 "    to autorun the saved program at boot.\n"
                 "  Ctrl-C interrupts a running program.\n");
+#if TIKU_BASIC_SUBS_ENABLE || TIKU_BASIC_RTC_ENABLE ||                        \
+    TIKU_BASIC_MATHX_ENABLE || TIKU_BASIC_FILE_ENABLE || TIKU_BASIC_NET_ENABLE
+            /* Full-profile words (RP2350 / Apollo). Each clause is gated, so
+             * the line lists exactly what was built in. */
+            SHELL_PRINTF(
+                "  " SH_CYAN "Full:      " SH_RST
+#if TIKU_BASIC_SUBS_ENABLE
+                " SUB(p) LOCAL CALL ENDSUB"
+#endif
+#if TIKU_BASIC_RTC_ENABLE
+                " NOW DATE$ TIME$ SETTIME"
+#endif
+#if TIKU_BASIC_MATHX_ENABLE
+                " LOG EXP POW ATAN"
+#endif
+#if TIKU_BASIC_FILE_ENABLE
+                " APPEND FWRITE FREAD$"
+#endif
+#if TIKU_BASIC_NET_ENABLE
+                " UDPSEND IPADDR$ NETUP"
+#endif
+                "\n");
+#endif
 #undef BASIC_HELP_POKE_STMT
 #undef BASIC_HELP_PEEK_FN
 #undef BASIC_HELP_GPIO_STMT
