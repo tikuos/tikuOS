@@ -324,6 +324,30 @@ expr_call(const char **p, long *out_v)
         return 1;
     }
 #endif
+#if TIKU_BASIC_MATHX_ENABLE
+    /* Extended fixed-point math (Q.3). LOG is natural log; POW(b,e)=b^e
+     * (also reachable via the '^' operator). See tiku_basic_mathx.inl. */
+    if (match_kw(p, "LOG")) {
+        if (!parse_call_1arg(p, &a)) return 1;
+        *out_v = basic_log_q3(a);
+        return 1;
+    }
+    if (match_kw(p, "EXP")) {
+        if (!parse_call_1arg(p, &a)) return 1;
+        *out_v = basic_exp_q3(a);
+        return 1;
+    }
+    if (match_kw(p, "POW")) {
+        if (!parse_call_2arg(p, &a, &b)) return 1;
+        *out_v = basic_pow_q3(a, b);
+        return 1;
+    }
+    if (match_kw(p, "ATAN")) {
+        if (!parse_call_1arg(p, &a)) return 1;
+        *out_v = basic_atan_q3(a);
+        return 1;
+    }
+#endif
     if (match_kw(p, "SECS")) {
         skip_ws(p);
         if (**p != '(') {

@@ -100,6 +100,7 @@
 #include "tiku_basic_hw.inl"
 #include "tiku_basic_prng.inl"
 #include "tiku_basic_trig.inl"
+#include "tiku_basic_mathx.inl"
 #include "tiku_basic_lex.inl"
 #include "tiku_basic_io.inl"
 #include "tiku_basic_string.inl"
