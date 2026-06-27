@@ -467,7 +467,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},
 #endif
 #if TIKU_SHELL_CMD_WIFI
-    {"wifi",    "CYW43 WiFi: status|scan|list", tiku_shell_cmd_wifi},
+    {"wifi",    "CYW43 WiFi: scan/connect/up/status", tiku_shell_cmd_wifi},
 #endif
 #if TIKU_SHELL_CMD_BT
     {"bt",      "CYW43 BT: status",             tiku_shell_cmd_bt},
