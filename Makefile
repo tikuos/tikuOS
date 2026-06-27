@@ -1643,6 +1643,7 @@ SRCS   += $(wildcard tikukits/crypto/x509/*.c)
 # TIKU_KITS_CRYPTO_TLS_RNG_FILL.
 ifeq ($(HAS_TLS),1)
 SRCS   += $(wildcard tikukits/crypto/tls/*.c)
+SRCS   += $(wildcard tikukits/crypto/tls13/*.c)
 endif
 endif
 
