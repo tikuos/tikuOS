@@ -1165,6 +1165,73 @@ exec_settime(const char **p)
 }
 #endif
 
+#if TIKU_BASIC_FILE_ENABLE
+/* Whole-file logging to /data (or any writable VFS path). TFS has no append
+ * primitive, so APPEND is read-modify-write bounded by this scratch buffer,
+ * which also caps a file at the TFS slot size on the target. */
+#ifndef TIKU_BASIC_FILE_BUF
+#define TIKU_BASIC_FILE_BUF 2048
+#endif
+static char basic_file_scratch[TIKU_BASIC_FILE_BUF];
+
+/* APPEND "path", expr$ -- append the string plus a newline, preserving the
+ * existing contents. Errors (never silently truncates) if the result would
+ * exceed the scratch buffer / slot. */
+static void
+exec_append(const char **p)
+{
+    char path[48];
+    char val[TIKU_BASIC_STR_BUF_CAP];
+    int  have, vlen, total;
+
+    if (parse_path_literal(p, path, sizeof(path)) != 0) return;
+    skip_ws(p);
+    if (**p != ',') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return;
+    }
+    (*p)++;
+    if (parse_strexpr(p, val, sizeof(val)) != 0) return;
+
+    have = tiku_vfs_read(path, basic_file_scratch,
+                         (size_t)(TIKU_BASIC_FILE_BUF - 2));
+    if (have < 0) have = 0;                       /* file doesn't exist yet */
+    vlen  = (int)strlen(val);
+    total = have + vlen + 1;                       /* +1 for the newline */
+    if (total > TIKU_BASIC_FILE_BUF) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? file full (max %d bytes)\n" SH_RST,
+                     (int)TIKU_BASIC_FILE_BUF);
+        return;
+    }
+    memcpy(basic_file_scratch + have, val, (size_t)vlen);
+    basic_file_scratch[have + vlen] = '\n';
+    if (tiku_vfs_write(path, basic_file_scratch, (size_t)total) < 0) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? write failed: %s\n" SH_RST, path);
+    }
+}
+
+/* FWRITE "path", expr$ -- truncating whole-file write (no trailing newline). */
+static void
+exec_fwrite(const char **p)
+{
+    char path[48];
+    char val[TIKU_BASIC_STR_BUF_CAP];
+
+    if (parse_path_literal(p, path, sizeof(path)) != 0) return;
+    skip_ws(p);
+    if (**p != ',') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return;
+    }
+    (*p)++;
+    if (parse_strexpr(p, val, sizeof(val)) != 0) return;
+    if (tiku_vfs_write(path, val, strlen(val)) < 0) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? write failed: %s\n" SH_RST, path);
+    }
+}
+#endif
+
 #if TIKU_BASIC_PEEK_POKE_ENABLE
 static void
 exec_poke(const char **p)

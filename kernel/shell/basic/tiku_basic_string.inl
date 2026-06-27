@@ -473,6 +473,27 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
+#if TIKU_BASIC_FILE_ENABLE
+    /* FREAD$("path") -- read a whole file/VFS node into a string, capped at
+     * the string buffer (a longer file truncates to cap-1). Unlike VFSREAD$ it
+     * keeps the content verbatim, newlines included -- it's for log files. */
+    if (match_kw(p, "FREAD$")) {
+        char path[48];
+        int  n;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        n = tiku_vfs_read(path, out, cap - 1u);
+        if (n < 0) n = 0;                       /* missing file -> "" */
+        if ((size_t)n >= cap) n = (int)cap - 1;
+        out[n] = '\0';
+        return 0;
+    }
+#endif
 
     /* UCASE$(s) / LCASE$(s) -- ASCII case conversion. */
     {
