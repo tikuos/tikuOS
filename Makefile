@@ -1636,6 +1636,7 @@ SRCS   += $(wildcard tikukits/crypto/hkdf/*.c)
 SRCS   += $(wildcard tikukits/crypto/hmac/*.c)
 SRCS   += $(wildcard tikukits/crypto/x25519/*.c)
 SRCS   += $(wildcard tikukits/crypto/p256/*.c)
+SRCS   += $(wildcard tikukits/crypto/rsa/*.c)
 # TLS pulls in additional code; gated separately on HAS_TLS=1
 # because tiku_kits_crypto_tls requires the platform to provide
 # TIKU_KITS_CRYPTO_TLS_RNG_FILL.
