@@ -235,6 +235,25 @@ expr_call(const char **p, long *out_v)
         *out_v = (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND;
         return 1;
     }
+#if TIKU_BASIC_RTC_ENABLE
+    /* NOW() -- wall-clock seconds since the Unix epoch (0 until the RTC is
+     * set via SETTIME or NTP). 0-arg-with-parens like MILLIS so the lexer
+     * treats it as a function. Fits a signed 32-bit long until 2038. */
+    if (match_kw(p, "NOW")) {
+        skip_ws(p);
+        if (**p != '(') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        skip_ws(p);
+        if (**p != ')') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        *out_v = (long)tiku_rtc_get_seconds();
+        return 1;
+    }
+#endif
 #if TIKU_BASIC_FIXED_ENABLE
     if (match_kw(p, "FMUL")) {
         if (!parse_call_2arg(p, &a, &b)) return 1;

@@ -81,6 +81,12 @@
 #include <kernel/vfs/tiku_vfs.h>
 #include <stdlib.h>     /* strtol for VFSREAD value parsing */
 #endif
+#if TIKU_BASIC_RTC_ENABLE
+#include <kernel/cpu/tiku_rtc.h>          /* NOW / SETTIME wall-clock seconds */
+#if (TIKU_KIT_TIME_ENABLE + 0)
+#include <tikukits/time/tiku_kits_time.h> /* DATE$ / TIME$ calendar breakdown */
+#endif
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* AMALGAMATION                                                              */

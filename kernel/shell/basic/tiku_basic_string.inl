@@ -334,6 +334,51 @@ parse_strprim(const char **p, char *out, size_t cap)
         }
         return 0;
     }
+#if TIKU_BASIC_RTC_ENABLE && (TIKU_KIT_TIME_ENABLE + 0)
+    /* DATE$() -- "YYYY-MM-DD" (UTC) from the wall clock; 0-arg-with-parens.
+     * Reads 1970-01-01 until the RTC is set (via SETTIME or NTP). */
+    if (match_kw(p, "DATE$")) {
+        tiku_kits_time_tm_t tm;
+        int n;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        (void)tiku_kits_time_to_tm(
+            (tiku_kits_time_unix_t)tiku_rtc_get_seconds(), &tm);
+        n = snprintf(out, cap, "%04u-%02u-%02u",
+                     (unsigned)tm.year, (unsigned)tm.month, (unsigned)tm.day);
+        if (n < 0 || (size_t)n >= cap) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        return 0;
+    }
+    /* TIME$() -- "HH:MM:SS" (UTC) from the wall clock. */
+    if (match_kw(p, "TIME$")) {
+        tiku_kits_time_tm_t tm;
+        int n;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        (void)tiku_kits_time_to_tm(
+            (tiku_kits_time_unix_t)tiku_rtc_get_seconds(), &tm);
+        n = snprintf(out, cap, "%02u:%02u:%02u",
+                     (unsigned)tm.hour, (unsigned)tm.minute, (unsigned)tm.second);
+        if (n < 0 || (size_t)n >= cap) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        return 0;
+    }
+#endif
     /* BIN$(n) -- 32-bit binary, leading zeros stripped (but at least
      * one digit). Examples: BIN$(10) = "1010", BIN$(0) = "0",
      * BIN$(-1) = "11111111111111111111111111111111". */

@@ -1147,6 +1147,24 @@ basic_vfsread(const char *path)
 }
 #endif
 
+#if TIKU_BASIC_RTC_ENABLE
+/* SETTIME <epoch> -- set the wall clock to an absolute Unix timestamp
+ * (seconds). Persisted by the RTC layer, so DATE$/TIME$/NOW read it back
+ * across reboots. Typically fed from an `ntp` fetch or a known constant. */
+static void
+exec_settime(const char **p)
+{
+    long secs = parse_expr(p);
+    if (basic_error) return;
+    if (secs < 0) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? SETTIME needs a non-negative epoch\n" SH_RST);
+        return;
+    }
+    tiku_rtc_set_seconds((uint32_t)secs);
+}
+#endif
+
 #if TIKU_BASIC_PEEK_POKE_ENABLE
 static void
 exec_poke(const char **p)

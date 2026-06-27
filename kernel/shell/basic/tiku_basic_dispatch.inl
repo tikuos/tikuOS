@@ -290,6 +290,9 @@ exec_stmt(const char **p)
 #if TIKU_BASIC_VFS_ENABLE
     if (match_kw(p, "VFSWRITE")) { exec_vfswrite(p); return; }
 #endif
+#if TIKU_BASIC_RTC_ENABLE
+    if (match_kw(p, "SETTIME"))  { exec_settime(p);  return; }
+#endif
     if (match_kw(p, "ON"))       { exec_on(p);        return; }
     if (match_kw(p, "RESUME"))   { exec_resume(p);    return; }
     if (match_kw(p, "EVERY"))    { exec_every(p);     return; }

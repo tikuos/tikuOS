@@ -167,6 +167,58 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
+/* FULL-PROFILE FEATURE GATES                                                */
+/*---------------------------------------------------------------------------*/
+
+/* These default ON for the resource-rich Cortex-M parts (RP2350 / Apollo4 /
+ * Apollo510 -- all TIER_BIG) and OFF for the FRAM/small parts (MSP430), giving
+ * a "lite" BASIC on MSP430 and a "full" BASIC on the bigger controllers. Each
+ * is still -D-overridable. Several also need their kit compiled in (the gate
+ * encodes that dependency) so an enabled feature can never dangle at link.
+ *
+ *   RTC   : NOW / DATE$ / TIME$ / SETTIME wall-clock (DATE$/TIME$ also need
+ *           TIKU_KIT_TIME_ENABLE for the calendar breakdown -- gated in-file).
+ *   MATHX : LOG / EXP / POW / ATAN + the '^' operator (fixed-point).
+ *   FILE  : APPEND / FWRITE / FREAD$ logging to /data (via the VFS).
+ *   NET   : UDPSEND / MQTTPUB / HTTPGET$ -- requires the net kit.
+ *   SUBS  : multi-line SUB / FUNCTION / LOCAL / CALL with call frames. */
+#ifndef TIKU_BASIC_RTC_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_RTC_ENABLE    1
+#  else
+#    define TIKU_BASIC_RTC_ENABLE    0
+#  endif
+#endif
+#ifndef TIKU_BASIC_MATHX_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_MATHX_ENABLE  1
+#  else
+#    define TIKU_BASIC_MATHX_ENABLE  0
+#  endif
+#endif
+#ifndef TIKU_BASIC_FILE_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_FILE_ENABLE   1
+#  else
+#    define TIKU_BASIC_FILE_ENABLE   0
+#  endif
+#endif
+#ifndef TIKU_BASIC_NET_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG) && (TIKU_KIT_NET_ENABLE + 0)
+#    define TIKU_BASIC_NET_ENABLE    1
+#  else
+#    define TIKU_BASIC_NET_ENABLE    0
+#  endif
+#endif
+#ifndef TIKU_BASIC_SUBS_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_SUBS_ENABLE   1
+#  else
+#    define TIKU_BASIC_SUBS_ENABLE   0
+#  endif
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* MULTI-LETTER VARIABLE NAMES                                               */
 /*---------------------------------------------------------------------------*/
 
