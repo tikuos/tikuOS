@@ -14,12 +14,11 @@
 
 #if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_HTTP_ENABLE + 0)
 
-#include "tiku_basic_https_roots.inl"        /* tiku_basic_root_isrgx1[] */
+#include "tiku_basic_https_roots.inl"  /* tiku_https_roots[] + TIKU_HTTPS_NROOTS */
 
 static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_net.inl */
 
-static int                      basic_http_status;   /* last HTTPGET$ status */
-static tiku_kits_crypto_x509_t  basic_https_roots[1];
+static int basic_http_status;          /* last HTTPGET$ status */
 
 static void
 basic_https_rng(uint8_t *b, size_t n)
@@ -120,12 +119,6 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     tiku_clock_time_t dl;
 
     basic_http_status = 0;
-    if (tiku_kits_crypto_x509_parse(tiku_basic_root_isrgx1,
-                                    sizeof tiku_basic_root_isrgx1,
-                                    &basic_https_roots[0]) != 0) {
-        SHELL_PRINTF("[https] root parse FAIL\n");
-        return -1;
-    }
 
     /* Initialise the TCP table: on a lean WiFi build nothing else does (the
      * NET_TEST init + SLIP net process are absent), so tcp_connect() would
@@ -181,8 +174,11 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
      * unrecoverable). */
     io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
     tiku_kits_crypto_tls13_dbg = basic_tls13_dbg;
-    if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host,
-                                       basic_https_roots, 1, 0, &tls) != 0) {
+    /* now_unix from the RTC: enforces cert validity windows once a clock is
+     * set (NTP/SETTIME); 0 until then, which skips the date check. */
+    if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host, tiku_https_roots,
+                                       TIKU_HTTPS_NROOTS,
+                                       (uint64_t)tiku_rtc_get_seconds(), &tls) != 0) {
         SHELL_PRINTF(SH_RED "? HTTPGET: TLS handshake/cert validation failed\n" SH_RST);
         tiku_kits_net_tcp_close(tcp);
         return -1;
