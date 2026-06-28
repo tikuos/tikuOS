@@ -15,7 +15,7 @@
 #if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_HTTP_ENABLE + 0)
 
 #include "tiku_basic_https_roots.inl"  /* tiku_https_roots[] + TIKU_HTTPS_NROOTS */
-#include <tikukits/crypto/tls12/tiku_kits_crypto_tls12.h>  /* TLS 1.2 fallback */
+#include <tikukits/net/tls/tls12/tiku_kits_crypto_tls12.h>  /* TLS 1.2 fallback */
 
 static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_net.inl */
 

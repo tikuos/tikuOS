@@ -1653,14 +1653,14 @@ SRCS   += $(wildcard tikukits/crypto/x25519/*.c)
 SRCS   += $(wildcard tikukits/crypto/p256/*.c)
 SRCS   += $(wildcard tikukits/crypto/p384/*.c)
 SRCS   += $(wildcard tikukits/crypto/rsa/*.c)
-SRCS   += $(wildcard tikukits/crypto/x509/*.c)
+SRCS   += $(wildcard tikukits/net/tls/x509/*.c)
 # TLS pulls in additional code; gated separately on HAS_TLS=1
 # because tiku_kits_crypto_tls requires the platform to provide
 # TIKU_KITS_CRYPTO_TLS_RNG_FILL.
 ifeq ($(HAS_TLS),1)
-SRCS   += $(wildcard tikukits/crypto/tls/*.c)
-SRCS   += $(wildcard tikukits/crypto/tls13/*.c)
-SRCS   += $(wildcard tikukits/crypto/tls12/*.c)
+SRCS   += $(wildcard tikukits/net/tls/psk/*.c)
+SRCS   += $(wildcard tikukits/net/tls/tls13/*.c)
+SRCS   += $(wildcard tikukits/net/tls/tls12/*.c)
 endif
 endif
 
