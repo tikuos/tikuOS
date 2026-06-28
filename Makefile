@@ -1635,6 +1635,7 @@ endif
 ifeq ($(TIKU_KIT_CRYPTO_ENABLE),1)
 CFLAGS += -DTIKU_KIT_CRYPTO_ENABLE=1
 SRCS   += $(wildcard tikukits/crypto/sha256/*.c)
+SRCS   += $(wildcard tikukits/crypto/sha384/*.c)
 SRCS   += $(wildcard tikukits/crypto/base64/*.c)
 SRCS   += $(wildcard tikukits/crypto/crc/*.c)
 SRCS   += $(wildcard tikukits/crypto/gcm/*.c)
@@ -1643,6 +1644,7 @@ SRCS   += $(wildcard tikukits/crypto/hkdf/*.c)
 SRCS   += $(wildcard tikukits/crypto/hmac/*.c)
 SRCS   += $(wildcard tikukits/crypto/x25519/*.c)
 SRCS   += $(wildcard tikukits/crypto/p256/*.c)
+SRCS   += $(wildcard tikukits/crypto/p384/*.c)
 SRCS   += $(wildcard tikukits/crypto/rsa/*.c)
 SRCS   += $(wildcard tikukits/crypto/x509/*.c)
 # TLS pulls in additional code; gated separately on HAS_TLS=1
