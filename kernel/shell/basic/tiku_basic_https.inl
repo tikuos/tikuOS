@@ -15,6 +15,7 @@
 #if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_HTTP_ENABLE + 0)
 
 #include "tiku_basic_https_roots.inl"  /* tiku_https_roots[] + TIKU_HTTPS_NROOTS */
+#include <tikukits/crypto/tls12/tiku_kits_crypto_tls12.h>  /* TLS 1.2 fallback */
 
 static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_net.inl */
 
@@ -106,16 +107,37 @@ basic_https_recv(void *ctx, uint8_t *b, size_t n)
  * HTTPGET$ backend.  Returns body length (>= 0) into out[0..cap-1] (NUL-
  * terminated) and sets basic_http_status, or -1 on any failure.
  */
+/* Open a TCP connection to ip:443 and block (pumping) until CONNECTED.
+ * Returns the conn or NULL; reused for the initial attempt and the 1.2 retry. */
+static tiku_kits_net_tcp_conn_t *
+basic_https_open(const uint8_t ip[4], uint16_t src_port)
+{
+    tiku_kits_net_tcp_conn_t *tcp;
+    tiku_clock_time_t dl;
+    basic_https_evt = 0;
+    tcp = tiku_kits_net_tcp_connect(ip, 443, src_port,
+                                    basic_https_on_rx, basic_https_on_evt);
+    if (tcp == NULL) return NULL;
+    dl = BASIC_HTTPS_DEADLINE();
+    while (basic_https_evt != TIKU_KITS_NET_TCP_EVT_CONNECTED) {
+        if (basic_https_evt == TIKU_KITS_NET_TCP_EVT_ABORTED) return NULL;
+        basic_https_pump();
+        if (BASIC_HTTPS_EXPIRED(dl)) { tiku_kits_net_tcp_abort(tcp); return NULL; }
+    }
+    return tcp;
+}
+
 static int
 basic_https_get(const char *host, const char *path, char *out, size_t cap)
 {
     static tiku_kits_crypto_tls13_conn_t tls;       /* ~16 KB: keep off-stack */
+    static tiku_kits_crypto_tls12_conn_t tls12;     /* TLS 1.2 fallback state */
     tiku_kits_crypto_tls13_io_t io;
     tiku_kits_net_tcp_conn_t   *tcp;
     uint8_t  ip[4];
     char     req[256];
     size_t   total = 0, rl;
-    int      n;
+    int      n, use12 = 0;
     tiku_clock_time_t dl;
 
     basic_http_status = 0;
@@ -157,15 +179,9 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     }
 
     /* TCP connect :443 */
-    basic_https_evt = 0;
-    tcp = tiku_kits_net_tcp_connect(ip, 443, 49152, basic_https_on_rx, basic_https_on_evt);
-    if (tcp == NULL) { SHELL_PRINTF("[https] tcp_connect NULL\n"); return -1; }
-    dl = BASIC_HTTPS_DEADLINE();
-    while (basic_https_evt != TIKU_KITS_NET_TCP_EVT_CONNECTED) {
-        if (basic_https_evt == TIKU_KITS_NET_TCP_EVT_ABORTED) { SHELL_PRINTF("[https] tcp aborted\n"); return -1; }
-        basic_https_pump();
-        if (BASIC_HTTPS_EXPIRED(dl)) { tiku_kits_net_tcp_abort(tcp); SHELL_PRINTF(SH_RED "? HTTPGET: TCP timeout\n" SH_RST); return -1; }
-    }
+    tcp = basic_https_open(ip, 49152);
+    if (tcp == NULL) { SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST); return -1; }
+    (void)dl;
 
     /* TLS 1.3 cert handshake (validity skipped until NTP/RTC wired).  The
      * milestone hook (basic_tls13_dbg) kicks the watchdog at each step so a
@@ -175,13 +191,31 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
     tiku_kits_crypto_tls13_dbg = basic_tls13_dbg;
     /* now_unix from the RTC: enforces cert validity windows once a clock is
-     * set (NTP/SETTIME); 0 until then, which skips the date check. */
-    if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host, tiku_https_roots,
-                                       TIKU_HTTPS_NROOTS,
-                                       (uint64_t)tiku_rtc_get_seconds(), &tls) != 0) {
-        SHELL_PRINTF(SH_RED "? HTTPGET: TLS handshake/cert validation failed\n" SH_RST);
-        tiku_kits_net_tcp_close(tcp);
-        return -1;
+     * set (NTP/SETTIME); 0 until then, which skips the date check.  Try TLS 1.3
+     * first; on failure fall back to TLS 1.2 (the 1.2-only tail) on a fresh
+     * connection, since the ServerHello has already been consumed. */
+    {
+        uint64_t now = (uint64_t)tiku_rtc_get_seconds();
+        if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host,
+                                           tiku_https_roots, TIKU_HTTPS_NROOTS,
+                                           now, &tls) != 0) {
+            tiku_kits_net_tcp_close(tcp);
+            tcp = basic_https_open(ip, 49153);
+            if (tcp == NULL) {
+                SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST);
+                return -1;
+            }
+            io.ctx = tcp;
+            if (tiku_kits_crypto_tls12_connect(&io, basic_https_rng, host,
+                                               tiku_https_roots, TIKU_HTTPS_NROOTS,
+                                               now, &tls12) != 0) {
+                SHELL_PRINTF(SH_RED
+                    "? HTTPGET: TLS handshake/cert validation failed\n" SH_RST);
+                tiku_kits_net_tcp_close(tcp);
+                return -1;
+            }
+            use12 = 1;
+        }
     }
 
     /* GET <path> HTTP/1.0 */
@@ -190,7 +224,9 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     strcat(req, " HTTP/1.0\r\nHost: "); strcat(req, host);
     strcat(req, "\r\nConnection: close\r\n\r\n");
     rl = strlen(req);
-    if (tiku_kits_crypto_tls13_write(&tls, (const uint8_t *)req, rl) < 0) {
+    n = use12 ? tiku_kits_crypto_tls12_write(&tls12, (const uint8_t *)req, rl)
+              : tiku_kits_crypto_tls13_write(&tls,  (const uint8_t *)req, rl);
+    if (n < 0) {
         tiku_kits_net_tcp_close(tcp);
         return -1;
     }
@@ -198,7 +234,9 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     /* read the response body into out[] */
     for (;;) {
         if (total + 1 >= cap) break;
-        n = tiku_kits_crypto_tls13_read(&tls, (uint8_t *)out + total, cap - 1 - total);
+        n = use12
+            ? tiku_kits_crypto_tls12_read(&tls12, (uint8_t *)out + total, cap - 1 - total)
+            : tiku_kits_crypto_tls13_read(&tls,   (uint8_t *)out + total, cap - 1 - total);
         if (n <= 0) break;
         total += (size_t)n;
     }
