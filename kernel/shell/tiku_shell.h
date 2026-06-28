@@ -133,4 +133,17 @@ extern struct tiku_process tiku_shell_process;
  */
 void tiku_shell_init(void);
 
+#if TIKU_SHELL_CMD_SLIP
+/**
+ * @brief Drain the shared UART through the SLIP demux from a blocking builtin.
+ *
+ * For use by a long-running builtin (e.g. BASIC HTTPGET$) that busy-waits and
+ * thereby starves the shell's main loop: call this in the wait loop so SLIP
+ * frames keep reaching the IP stack.  Reuses the main loop's demux (and its
+ * persistent frame buffer), so frames arriving across many calls reassemble
+ * correctly.  No-op-safe to call when no bytes are pending.
+ */
+void tiku_shell_net_pump(void);
+#endif
+
 #endif /* TIKU_SHELL_H_ */

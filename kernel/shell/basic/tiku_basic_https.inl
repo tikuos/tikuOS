@@ -21,6 +21,7 @@ static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_n
 
 static int basic_http_status;          /* last HTTPGET$ status */
 
+
 #if defined(PLATFORM_RP2350)
 #include <arch/arm-rp2350/tiku_trng_arch.h>
 #elif defined(PLATFORM_AMBIQ)
@@ -46,10 +47,23 @@ static void basic_tls13_dbg(const char *m)
     tiku_watchdog_kick();
 }
 
-/* One pump step: drain the WiFi RX every call (fast, no timers), but pace
+/* One pump step: deliver inbound packets every call (fast, no timers), but pace
  * tcp_periodic to ~8 Hz -- it advances connect/retransmit timeouts per call,
  * so a tight loop calling it every iteration would blow through them (the
- * same trap as dns_poll). */
+ * same trap as dns_poll).
+ *
+ * RX delivery is transport-specific. On WiFi the radio RX is a separate channel
+ * (cyw43 SPI), drained via whd_drain_rx(); the console UART is unrelated, so we
+ * also drop a stray keystroke that would otherwise pile up. On a SLIP build the
+ * console UART *is* the IP transport, and the shell loop that normally runs the
+ * shared RX demux is blocked inside this builtin -- so we drive that same demux
+ * here via tiku_shell_net_pump().  It must be the shell's demux (not a private
+ * slip_poll_rx loop): a SLIP frame trickles in at the line rate over several ms,
+ * far slower than this is polled, so a caller-local accumulator gets reset
+ * between calls and shreds the frame into 1-byte garbage.  The shell demux keeps
+ * its frame buffer in static state, so it reassembles correctly.  We also must
+ * NOT read via the console getc, which would discard the SLIP bytes.  Without
+ * this, HTTPGET$ over SLIP never sees a single reply (DNS / SYN-ACK / TLS). */
 static void
 basic_https_pump(void)
 {
@@ -58,12 +72,14 @@ basic_https_pump(void)
     tiku_watchdog_kick();
 #if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
     (void)whd_drain_rx();
+    if (tiku_shell_io_rx_ready()) (void)tiku_shell_io_getc();
+#elif TIKU_SHELL_CMD_SLIP
+    tiku_shell_net_pump();          /* shell's persistent SLIP demux -> ipv4_input */
 #endif
     if ((tiku_clock_time_t)(now - last_tcp) >= (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
         last_tcp = now;
         tiku_kits_net_tcp_periodic();
     }
-    if (tiku_shell_io_rx_ready()) (void)tiku_shell_io_getc();
 }
 
 static volatile uint8_t basic_https_evt;
@@ -81,7 +97,14 @@ basic_https_send(void *ctx, const uint8_t *b, size_t n)
     size_t off = 0;
     tiku_clock_time_t dl = BASIC_HTTPS_DEADLINE();
     while (off < n) {
-        size_t chunk = n - off; if (chunk > 512) chunk = 512;
+        /* tcp_send transmits exactly ONE segment and rejects data_len >
+         * snd_mss; chunk by the negotiated MSS (88 over SLIP, larger on WiFi),
+         * never a fixed 512 -- otherwise on a small-MTU link every chunk
+         * exceeds snd_mss, tcp_send returns OVERFLOW forever, and only sub-MSS
+         * writes (e.g. the 5-byte TLS record header) ever go out while the
+         * record body is silently dropped until the deadline. */
+        uint16_t mss = c->snd_mss ? c->snd_mss : TIKU_KITS_NET_TCP_MSS;
+        size_t chunk = n - off; if (chunk > mss) chunk = mss;
         if (tiku_kits_net_tcp_send(c, b + off, (uint16_t)chunk) == TIKU_KITS_NET_OK)
             off += chunk;
         basic_https_pump();

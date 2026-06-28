@@ -389,6 +389,29 @@ static uint8_t shell_net_demux(int ch) {
     }
     return 1;
 }
+
+/*
+ * Drain the shared UART through the SLIP demux on behalf of a blocking
+ * builtin (e.g. BASIC HTTPGET$) that has taken over the shell loop.  While
+ * such a builtin busy-waits, the main loop's demux is not running, so without
+ * this incoming SLIP frames (DNS reply, TCP/TLS data) are never delivered to
+ * the IP stack.  Crucially it reuses shell_net_demux, whose frame buffer is
+ * static: a frame that arrives across many calls (the bytes trickle in at the
+ * line rate, far slower than this is polled) is reassembled correctly, rather
+ * than being shredded the way a caller-local accumulator would.
+ */
+void
+tiku_shell_net_pump(void)
+{
+    int ch;
+    while (tiku_shell_io_rx_ready()) {
+        ch = tiku_shell_io_getc();
+        if (ch < 0) {
+            break;
+        }
+        (void)shell_net_demux(ch);
+    }
+}
 #endif
 
 #if TIKU_SHELL_CMD_HTIMER
