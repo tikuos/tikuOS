@@ -627,6 +627,13 @@ ifeq ($(HAS_TLS),1)
 # BASIC tier to 128 KB so the cyw43 bring-up + stack keep their SRAM (the
 # ~98 KB 1024-line arena still fits).
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072    # 128 KB: arena + TLS .bss + radio
+# TLS server flights are multi-KB; the lean 512 B TCP receive window turns
+# each one into fragile 512-byte stop-and-wait (a lost window-update ACK
+# stalls the handshake).  Widen the window so a flight streams in a couple of
+# round-trips.  HTTPGET$ uses a single connection, so 2 conns is ample and
+# keeps the SRAM bump small (4 KB x 2 = 8 KB vs 512 B x 4).
+CFLAGS += -DTIKU_KITS_NET_TCP_RX_BUF_SIZE=4096
+CFLAGS += -DTIKU_KITS_NET_TCP_MAX_CONNS=2
 else
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 1024-line BASIC arena
 endif
