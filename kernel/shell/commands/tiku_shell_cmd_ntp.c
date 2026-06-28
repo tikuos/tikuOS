@@ -6,7 +6,9 @@
  *
  * tiku_shell_cmd_ntp.c - "ntp" command implementation (async SNTP query)
  *
- * Fetches wall-clock time from an SNTP server over SLIP.  Accepts either a
+ * Fetches wall-clock time from an SNTP server over SLIP and sets the system
+ * RTC (tiku_rtc_set_seconds) so date-dependent consumers -- TLS certificate
+ * validity, /sys/time, BASIC DATE$/NOW -- get a real clock.  Accepts either a
  * dotted IPv4 address or a hostname; a hostname is resolved first via the DNS
  * stub resolver (a public resolver reached through the SLIP host's relay/NAT),
  * then the SNTP query is sent to the resolved address.  With no argument it
@@ -45,6 +47,7 @@
 #include <tikukits/net/ipv4/tiku_kits_net_dns.h>  /* DNS stub resolver */
 #include <tikukits/time/ntp/tiku_kits_time_ntp.h>
 #include <tikukits/time/tiku_kits_time.h>         /* tiku_kits_time_tm_t */
+#include <kernel/cpu/tiku_rtc.h>                  /* tiku_rtc_set_seconds */
 
 /*---------------------------------------------------------------------------*/
 /* CONFIG + STATE                                                            */
@@ -260,9 +263,15 @@ tiku_shell_cmd_ntp_tick(void)
         st = tiku_kits_time_ntp_get_state();
 
         if (st == TIKU_KITS_TIME_NTP_STATE_DONE) {
-            tiku_kits_time_tm_t tm;
+            tiku_kits_time_tm_t   tm;
+            tiku_kits_time_unix_t ts;
 
-            if (tiku_kits_time_ntp_get_tm(&tm) == TIKU_KITS_TIME_OK) {
+            if (tiku_kits_time_ntp_get_tm(&tm) == TIKU_KITS_TIME_OK &&
+                tiku_kits_time_ntp_get_time(&ts) == TIKU_KITS_TIME_OK) {
+                /* Set the system wall clock so date-dependent consumers (TLS
+                 * certificate validity, /sys/time, BASIC DATE$/NOW) have a real
+                 * time without a separate `write /sys/time`. */
+                tiku_rtc_set_seconds((uint32_t)ts);
                 SHELL_PRINTF("ntp: %u-", (unsigned)tm.year);
                 ntp_put2(tm.month);
                 SHELL_PRINTF("-");
@@ -273,7 +282,7 @@ tiku_shell_cmd_ntp_tick(void)
                 ntp_put2(tm.minute);
                 SHELL_PRINTF(":");
                 ntp_put2(tm.second);
-                SHELL_PRINTF(" UTC  stratum %u\n",
+                SHELL_PRINTF(" UTC  stratum %u  (clock set)\n",
                              (unsigned)tiku_kits_time_ntp_get_stratum());
             } else {
                 SHELL_PRINTF("ntp: reply parse error\n");
