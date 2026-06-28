@@ -110,6 +110,9 @@
 #if TIKU_SHELL_CMD_REBOOT
 #include "commands/tiku_shell_cmd_reboot.h"
 #endif
+#if TIKU_SHELL_CMD_TRNG
+#include "commands/tiku_shell_cmd_trng.h"
+#endif
 #if TIKU_SHELL_CMD_HISTORY
 #include "commands/tiku_shell_cmd_history.h"
 #endif
@@ -462,6 +465,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_REBOOT
     {"reboot",  "System reset",                tiku_shell_cmd_reboot},
+#endif
+#if TIKU_SHELL_CMD_TRNG
+    {"trng",    "Dump hardware TRNG bytes",    tiku_shell_cmd_trng},
 #endif
 #if TIKU_SHELL_CMD_HISTORY
     {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},

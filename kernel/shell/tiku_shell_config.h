@@ -72,6 +72,9 @@
 #ifndef TIKU_SHELL_CMD_REBOOT
 #define TIKU_SHELL_CMD_REBOOT  1  /**< reboot  - System reset */
 #endif
+#ifndef TIKU_SHELL_CMD_TRNG
+#define TIKU_SHELL_CMD_TRNG    1  /**< trng    - Dump hardware TRNG bytes */
+#endif
 #ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
 #endif

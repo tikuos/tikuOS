@@ -989,6 +989,9 @@ SRCS += arch/ambiq/tiku_onewire_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
 SRCS += arch/ambiq/tiku_lcd_arch.c
+# CryptoCell-312 TRNG (shared across apollo4l/4p/510) -- backs the cert-TLS
+# handshake RNG (TIKU_KITS_CRYPTO_TLS_RNG_FILL).
+SRCS += arch/ambiq/tiku_trng_arch.c
 ifneq (,$(filter apollo4l apollo4p,$(MCU)))
 # Apollo4 Lite (Cortex-M4F) device/CPU backends.
 # Apollo4 Lite drives the kernel tick from the always-on STIMER (not SysTick,
@@ -1164,6 +1167,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_kill.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_reboot.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_trng.c
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
 endif

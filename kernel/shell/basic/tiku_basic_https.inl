@@ -21,13 +21,19 @@ static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_n
 
 static int basic_http_status;          /* last HTTPGET$ status */
 
+#if defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_trng_arch.h>
+#elif defined(PLATFORM_AMBIQ)
+#include <arch/ambiq/tiku_trng_arch.h>
+#endif
+
 static void
 basic_https_rng(uint8_t *b, size_t n)
 {
-#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
-    (void)tiku_trng_arch_read_bytes(b, n);
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+    (void)tiku_trng_arch_read_bytes(b, n);   /* on-die hardware TRNG */
 #else
-    size_t i;                                /* non-RP2350 fallback (weak) */
+    size_t i;                          /* no HW TRNG (weak -- dev builds only) */
     for (i = 0; i < n; i++) b[i] = (uint8_t)(tiku_clock_time() >> (i & 7));
 #endif
 }
