@@ -39,12 +39,18 @@
  * @defgroup UART_RXBUF RX ring buffer configuration
  * @brief Size and mask for the interrupt-driven receive ring buffer.
  *
- * Must be a power of two so the index mask trick works. Default 256 B.
+ * Must be a power of two so the index mask trick works. Default 8 KB so
+ * SLIP/IP at high baud survives long stretches where the CPU stops draining
+ * the UART (chiefly TLS cert verification, which can stall the main loop tens
+ * to ~100+ ms): at 460800 a 256 B ring buffers only ~5.5 ms and overflows on
+ * nearly every crypto pause, dropping bytes and forcing TCP retransmits that
+ * make HTTPS slower than at 115200. TCP flow control caps in-flight data at the
+ * board's window (<=4 KB), so >=2x can't be overrun. Apollo SRAM is MB-class.
  * Override at compile time with -DTIKU_UART_RXBUF_SIZE=<N>.
  * @{
  */
 #ifndef TIKU_UART_RXBUF_SIZE
-#define TIKU_UART_RXBUF_SIZE  256
+#define TIKU_UART_RXBUF_SIZE  8192
 #endif
 
 #if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0

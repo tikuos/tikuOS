@@ -52,9 +52,18 @@
 #define TIKU_GPIO_PADKEY_UNLOCK 0x73u
 
 /* Interrupt-driven RX ring buffer (UART2, NVIC IRQ 17). Power-of-two size so
- * the head/tail index mask works; override with -DTIKU_UART_RXBUF_SIZE=<N>. */
+ * the head/tail index mask works; override with -DTIKU_UART_RXBUF_SIZE=<N>.
+ *
+ * Sized at 8 KB (not a token 256 B) so SLIP/IP at high baud survives the long
+ * stretches where the CPU stops draining the UART -- chiefly TLS cert
+ * verification (RSA/ECDSA can stall the main loop tens to ~100+ ms). At 460800
+ * a 256 B ring buffers only ~5.5 ms and overflows on nearly every crypto pause,
+ * dropping bytes and forcing TCP retransmits that make HTTPS *slower* than at
+ * 115200. TCP flow control caps in-flight data at the board's window (<=4 KB),
+ * so >=2x that can't be overrun however long the pause lasts. Apollo SRAM is
+ * MB-class, so 8 KB is free. */
 #ifndef TIKU_UART_RXBUF_SIZE
-#define TIKU_UART_RXBUF_SIZE  256
+#define TIKU_UART_RXBUF_SIZE  8192
 #endif
 #if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0
 #error "TIKU_UART_RXBUF_SIZE must be a power of two"
