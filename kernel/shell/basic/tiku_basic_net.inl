@@ -78,6 +78,45 @@ exec_udpsend(const char **p)
     }
 }
 
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+/* BROWSE "host[/path]" -- fetch a page over cert-TLS and render it to the
+ * console as plain text (the BASIC web browser). Unlike STRIP$(HTTPGET$(...)),
+ * which is bounded by the BASIC string scratch, this fetches into a dedicated
+ * buffer so it shows a whole simple page. basic_https_get self-pumps the net
+ * stack, so no separate pump loop is needed here. */
+#ifndef TIKU_BASIC_BROWSE_BUF
+#define TIKU_BASIC_BROWSE_BUF  16384
+#endif
+static char basic_browse_buf[TIKU_BASIC_BROWSE_BUF];
+static void
+exec_browse(const char **p)
+{
+    char        url[160];
+    char        host[100];
+    const char *u, *path;
+    int         i;
+
+    if (parse_strexpr(p, url, sizeof url) != 0) return;
+    u = url;
+    if      (basic_ci_starts(u, "https://")) u += 8;
+    else if (basic_ci_starts(u, "http://"))  u += 7;
+    for (i = 0; u[i] && u[i] != '/' && i < (int)sizeof host - 1; i++) {
+        host[i] = u[i];
+    }
+    host[i] = '\0';
+    path = (u[i] == '/') ? (u + i) : "/";
+    if (host[0] == '\0') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? BROWSE: empty URL\n" SH_RST); return;
+    }
+    if (basic_https_get(host, path, basic_browse_buf,
+                        sizeof basic_browse_buf) < 0) {
+        basic_error = 1;          /* basic_https_get already printed the reason */
+        return;
+    }
+    basic_html_render(basic_browse_buf, (char *)0, 0);   /* NULL out = print */
+}
+#endif /* TIKU_KITS_NET_HTTP_ENABLE */
+
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
 /* MQTT publish (QoS 0). The broker exchange is poll-based, so we drive it
  * across a bounded deadline, pumping the console between polls so the board

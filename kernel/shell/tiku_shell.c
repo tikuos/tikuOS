@@ -412,6 +412,33 @@ tiku_shell_net_pump(void)
         (void)shell_net_demux(ch);
     }
 }
+
+/*
+ * SLIP-aware non-blocking getc -- see the header.  A blocking builtin that
+ * reads the keyboard while a SLIP link is up (the BASIC REPL / INPUT after a
+ * BROWSE) calls this instead of tiku_shell_io_getc(): it routes SLIP frame
+ * bytes (a closed connection's lingering teardown / retransmits) into the IP
+ * stack, where they are consumed and ACKed, rather than letting them land in
+ * the line editor as garbage and wedge the console.  Only bytes the demux
+ * classifies as console (return 0) are handed back; if SLIP is not currently
+ * active every byte is a keystroke, so it behaves like a plain getc.
+ */
+int
+tiku_shell_net_getc(void)
+{
+    int ch;
+    while (tiku_shell_io_rx_ready()) {
+        ch = tiku_shell_io_getc();
+        if (ch < 0) {
+            break;
+        }
+        if (tiku_shell_cmd_slip_active() && shell_net_demux(ch)) {
+            continue;          /* consumed as a SLIP frame byte, not input */
+        }
+        return ch;             /* genuine console keystroke */
+    }
+    return -1;
+}
 #endif
 
 #if TIKU_SHELL_CMD_HTIMER

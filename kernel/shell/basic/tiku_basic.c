@@ -128,6 +128,7 @@
 #include "tiku_basic_lex.inl"
 #include "tiku_basic_io.inl"
 #include "tiku_basic_https.inl"
+#include "tiku_basic_browse.inl"
 #include "tiku_basic_string.inl"
 #include "tiku_basic_call.inl"
 #include "tiku_basic_expr.inl"

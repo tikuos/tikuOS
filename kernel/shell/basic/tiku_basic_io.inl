@@ -47,9 +47,18 @@ read_line(char *buf, uint16_t cap)
     uint16_t pos = 0;
     while (1) {
         int ch;
+#if TIKU_SHELL_CMD_SLIP
+        /* SLIP-aware read: route any frame bytes still trickling in from a
+         * prior BROWSE / HTTPGET$ TCP teardown into the IP stack instead of
+         * letting them land in the line editor as garbage and wedge the
+         * console; take only genuine keystrokes. */
+        ch = tiku_shell_net_getc();
+        if (ch < 0) continue;
+#else
         if (!tiku_shell_io_rx_ready()) continue;
         ch = tiku_shell_io_getc();
         if (ch < 0) continue;
+#endif
         if (ch == BASIC_CTRL_C) {
             buf[0] = '\0';
             SHELL_PRINTF(SH_YELLOW "^C\n" SH_RST);

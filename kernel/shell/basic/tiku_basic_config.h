@@ -265,7 +265,12 @@
 #endif
 #ifndef TIKU_BASIC_STR_BUF_CAP
 #  if defined(TIKU_BASIC_TIER_BIG)
-#    define TIKU_BASIC_STR_BUF_CAP  256
+/* 1 KB on the big-RAM parts (Apollo/RP2350): each string-expression temporary
+ * is a stack buffer of this size, and the stacks here are huge, so this lets
+ * STRIP$()/HTTPGET$ clear the HTTP header block and show a chunk of the body
+ * without risking deep-nesting overflow. BROWSE uses its own 16 KB buffer for
+ * whole pages, so this only bounds the in-BASIC-string path. */
+#    define TIKU_BASIC_STR_BUF_CAP  1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
 #    define TIKU_BASIC_STR_BUF_CAP  128
 #  else

@@ -144,6 +144,19 @@ void tiku_shell_init(void);
  * correctly.  No-op-safe to call when no bytes are pending.
  */
 void tiku_shell_net_pump(void);
+
+/**
+ * @brief SLIP-aware non-blocking getc for a blocking builtin that needs input.
+ *
+ * Like tiku_shell_net_pump(), but for a builtin that ALSO reads the keyboard
+ * while a SLIP link is up (e.g. the BASIC REPL / INPUT after a BROWSE).  It
+ * services the shared UART, routes any SLIP frame bytes to the IP stack -- so a
+ * connection's teardown and late/retransmitted packets drain to the stack
+ * instead of being mistaken for keystrokes and wedging the line editor -- and
+ * returns the next genuine console byte, or -1 if none is pending.  Degenerates
+ * to a plain non-blocking getc when SLIP is inactive.
+ */
+int tiku_shell_net_getc(void);
 #endif
 
 #endif /* TIKU_SHELL_H_ */

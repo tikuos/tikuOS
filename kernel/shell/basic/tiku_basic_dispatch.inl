@@ -302,6 +302,9 @@ exec_stmt(const char **p)
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
     if (match_kw(p, "MQTTPUB"))  { exec_mqttpub(p);  return; }
 #endif
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+    if (match_kw(p, "BROWSE"))   { exec_browse(p);   return; }
+#endif
 #endif
 #if TIKU_BASIC_SUBS_ENABLE
     if (match_kw(p, "ENDSUB"))   { exec_endsub();    return; }

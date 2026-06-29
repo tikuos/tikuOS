@@ -275,6 +275,20 @@ parse_strprim(const char **p, char *out, size_t cap)
         out[take] = '\0';
         return 0;
     }
+    if (match_kw(p, "STRIP$")) {
+        /* STRIP$(html$) -- render HTML to plain text (tags/scripts removed,
+         * entities decoded). Bounded by the string scratch (STR_BUF_CAP). */
+        char src[TIKU_BASIC_STR_BUF_CAP];
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        basic_html_render(src, out, cap);
+        return 0;
+    }
     if (match_kw(p, "CHR$")) {
         long v;
         skip_ws(p);
