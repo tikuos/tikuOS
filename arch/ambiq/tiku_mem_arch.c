@@ -180,6 +180,7 @@ void tiku_mem_arch_nvm_flush(void) {
     size_t   n = uninit_bytes();
     size_t   snap_bytes, prog_bytes;
     uint32_t dst_word_off, primask;
+    int      changed;
 
     if (n > (TIKU_NVM_MRAM_BYTES - 4U)) {
         n = TIKU_NVM_MRAM_BYTES - 4U;
@@ -197,6 +198,20 @@ void tiku_mem_arch_nvm_flush(void) {
         memset((uint8_t *)g_nvm_snap + snap_bytes, 0xFFu, prog_bytes - snap_bytes);
     }
 
+    /* Dirty check: skip the MRAM program when the composed image already
+     * matches the mirror byte-for-byte -- i.e. nothing in .uninit changed since
+     * the last commit.  High-frequency callers (notably the TCP per-packet NVM
+     * relock, whose RX/TX buffers are in .bss, NOT .uninit) thus stop
+     * re-programming the mirror on every call: no MRAM wear, no program
+     * latency.  Persist-cell writes DO change .uninit, so they still commit.
+     * The mirror stays cache-coherent via the post-program invalidate below
+     * (and is cold-cache-fresh after reset), so the compare reads current data.
+     * The dcache-clean and the brief IRQ-off window below are kept on EVERY
+     * call -- only the program (and its mirror invalidate) is conditional -- so
+     * any ordering/timing side-effect a per-packet relock relies on is intact. */
+    changed = (memcmp((const void *)g_nvm_snap,
+                      (const void *)&__tiku_nvm_mram_start, prog_bytes) != 0);
+
     /* Write the snapshot back to SSRAM so the MRAM programmer reads it there. */
     tiku_cpu_dcache_clean((const void *)g_nvm_snap, prog_bytes);
 
@@ -206,12 +221,16 @@ void tiku_mem_arch_nvm_flush(void) {
     /* MRAM program is uninterruptible (an ISR fetch could fault mid-program). */
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
     __asm__ volatile ("cpsid i" ::: "memory");
-    (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
-                           (uint32_t)(uintptr_t)g_nvm_snap, dst_word_off,
-                           (uint32_t)(prog_bytes / 4U));
+    if (changed) {
+        (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
+                               (uint32_t)(uintptr_t)g_nvm_snap, dst_word_off,
+                               (uint32_t)(prog_bytes / 4U));
+    }
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
 
     /* Drop any cached copies of the freshly-programmed page so same-session
      * reads of the mirror see the new data. */
-    tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
+    if (changed) {
+        tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
+    }
 }
