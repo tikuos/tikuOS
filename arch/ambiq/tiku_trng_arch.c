@@ -49,9 +49,13 @@
  *
  * TRNG_ROSC_SEL selects the ring-oscillator length (TRNGCONFIG.RNDSRCSEL,
  * 0..3 = fastest..slowest).  The longer oscillators are better whitened and
- * pass the autocorrelation test more reliably at the cost of fill latency;
- * 3 (slowest) is the conservative choice for a security RNG that is read
- * only a few times per TLS handshake.
+ * pass the autocorrelation test more reliably at the cost of fill latency.
+ * The slowest (3) + 1000-cycle sampling took ~10 s to gather a ClientHello's
+ * worth of entropy on Apollo510 -- long enough to stall the TLS handshake
+ * mid-flight -- so use the 2nd-slowest ROSC (2, still well-whitened) at half
+ * the sample count (~4x faster fill).  The von Neumann debiaser + the
+ * autocorr/CRNGT/VN health tests (re-arm on failure, below) are the quality
+ * guarantee at any ROSC/sample setting, so this trades only margin, not bias.
  *
  * TRNG_SAMPLE_COUNT is the rng_clk cycle count between bit samples
  * (SAMPLECNT1) -- higher = more decorrelation per bit.
@@ -60,8 +64,8 @@
  * TRNG_SPIN_LIMIT bounds the wait for EHRVALID; TRNG_MAX_RETRIES bounds the
  * health-test re-arm loop.
  */
-#define TRNG_ROSC_SEL        3u          /* TRNGCONFIG.RNDSRCSEL: slowest ROSC */
-#define TRNG_SAMPLE_COUNT    1000u       /* SAMPLECNT1 rng_clk cycles/sample   */
+#define TRNG_ROSC_SEL        2u          /* RNDSRCSEL: 2nd-slowest, well-whitened */
+#define TRNG_SAMPLE_COUNT    500u        /* SAMPLECNT1 rng_clk cycles/sample   */
 #define TRNG_CACHE_WORDS     6u          /* EHR_DATA[0..5]                     */
 #define TRNG_SPIN_LIMIT      4000000ul   /* ~tens of ms headroom at 96 MHz     */
 #define TRNG_MAX_RETRIES     16u         /* health-test re-arm attempts        */
