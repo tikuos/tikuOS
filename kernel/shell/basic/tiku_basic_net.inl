@@ -88,30 +88,95 @@ exec_udpsend(const char **p)
 #define TIKU_BASIC_BROWSE_BUF  16384
 #endif
 static char basic_browse_buf[TIKU_BASIC_BROWSE_BUF];
+/* If resp is an HTTP 3xx redirect carrying a Location header, copy the target
+ * URL into out[outcap] and return 1; otherwise return 0.  Only the header
+ * region (before the blank line) is scanned. */
+static int
+basic_http_redirect(const char *resp, char *out, size_t outcap)
+{
+    const char *body = strstr(resp, "\r\n\r\n");
+    const char *sp   = strchr(resp, ' ');
+    const char *line, *d;
+    int code;
+
+    if (sp == (const char *)0) return 0;
+    for (d = sp + 1; *d == ' '; d++) { }
+    if (d[0] < '0' || d[0] > '9' || d[1] < '0' || d[1] > '9' ||
+        d[2] < '0' || d[2] > '9') return 0;
+    code = (d[0] - '0') * 100 + (d[1] - '0') * 10 + (d[2] - '0');
+    if (code < 300 || code >= 400) return 0;
+
+    for (line = resp; line && (!body || line <= body); ) {
+        if (basic_ci_starts(line, "location:")) {
+            const char *h = line + 9, *e;
+            size_t n;
+            while (*h == ' ' || *h == '\t') h++;
+            for (e = h; *e && *e != '\r' && *e != '\n'; e++) { }
+            n = (size_t)(e - h);
+            if (n == 0 || n >= outcap) return 0;
+            memcpy(out, h, n);
+            out[n] = '\0';
+            return 1;
+        }
+        line = strchr(line, '\n');
+        if (line) line++;
+    }
+    return 0;
+}
+
+/* BROWSE "host[/path]" -- fetch a page over cert-TLS and render it to the
+ * console as plain text (the BASIC web browser).  Follows up to 3 HTTP
+ * redirects (so e.g. google.com -> www.google.com lands on the real page),
+ * handling absolute and same-host relative Location targets. basic_https_get
+ * self-pumps the net stack, so no separate pump loop is needed here. */
 static void
 exec_browse(const char **p)
 {
-    char        url[160];
+    char        url[200];
     char        host[100];
     const char *u, *path;
-    int         i;
+    int         i, hop;
 
     if (parse_strexpr(p, url, sizeof url) != 0) return;
-    u = url;
-    if      (basic_ci_starts(u, "https://")) u += 8;
-    else if (basic_ci_starts(u, "http://"))  u += 7;
-    for (i = 0; u[i] && u[i] != '/' && i < (int)sizeof host - 1; i++) {
-        host[i] = u[i];
+    host[0] = '\0';
+    for (hop = 0; hop < 4; hop++) {
+        u = url;
+        if      (basic_ci_starts(u, "https://")) u += 8;
+        else if (basic_ci_starts(u, "http://"))  u += 7;
+        if (u[0] == '/') {
+            path = u;                       /* relative redirect: keep host */
+        } else {
+            for (i = 0; u[i] && u[i] != '/' && i < (int)sizeof host - 1; i++) {
+                host[i] = u[i];
+            }
+            host[i] = '\0';
+            path = (u[i] == '/') ? (u + i) : "/";
+        }
+        if (host[0] == '\0') {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? BROWSE: empty URL\n" SH_RST);
+            return;
+        }
+        if (basic_https_get(host, path, basic_browse_buf,
+                            sizeof basic_browse_buf) < 0) {
+            basic_error = 1;      /* basic_https_get already printed the reason */
+            return;
+        }
+        if (hop < 3 && basic_http_redirect(basic_browse_buf, url, sizeof url)) {
+            SHELL_PRINTF("  -> %s\n", url);
+            continue;
+        }
+        break;
     }
-    host[i] = '\0';
-    path = (u[i] == '/') ? (u + i) : "/";
-    if (host[0] == '\0') {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? BROWSE: empty URL\n" SH_RST); return;
-    }
-    if (basic_https_get(host, path, basic_browse_buf,
-                        sizeof basic_browse_buf) < 0) {
-        basic_error = 1;          /* basic_https_get already printed the reason */
-        return;
+    /* Compact status line: HTTP code + body size, so an empty or all-markup
+     * page (which renders to nothing) is explained rather than just blank. */
+    {
+        const char *sp = strchr(basic_browse_buf, ' ');
+        const char *bd = strstr(basic_browse_buf, "\r\n\r\n");
+        int code = (sp && sp[1] >= '0' && sp[1] <= '9')
+                 ? (sp[1] - '0') * 100 + (sp[2] - '0') * 10 + (sp[3] - '0') : 0;
+        SHELL_PRINTF("[%s: HTTP %d, %u B]\n", host, code,
+                     (unsigned)(bd ? strlen(bd + 4) : 0));
     }
     basic_html_render(basic_browse_buf, (char *)0, 0);   /* NULL out = print */
 }

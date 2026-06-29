@@ -156,6 +156,26 @@ basic_https_open(const uint8_t ip[4], uint16_t src_port)
     return tcp;
 }
 
+/* Human label for a tiku_kits_crypto_tls13_last_stage code (see the header). */
+static const char *
+basic_tls_stage_str(int s)
+{
+    switch (s) {
+    case -2:  return "ServerHello read";
+    case -3:  return "ServerHello bad";
+    case -5:  return "server-flight read (transport)";
+    case -6:  return "unexpected record";
+    case -7:  return "decrypt (corrupt flight)";
+    case -9:  return "cert parse";
+    case -10: return "cert-verify";
+    case -11: return "chain untrusted";
+    case -12: return "Finished";
+    case -13: return "flight buffer overflow";
+    case -14: return "client Finished send";
+    default:  return s >= 1 ? "got past cert checks" : "unknown";
+    }
+}
+
 static int
 basic_https_get(const char *host, const char *path, char *out, size_t cap)
 {
@@ -168,8 +188,14 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     size_t   total = 0, rl;
     int      n, use12 = 0;
     tiku_clock_time_t dl;
+    static uint16_t src_seq = 49150;     /* fresh ephemeral port pair per call */
 
     basic_http_status = 0;
+    /* Advance the source port every call so a redirect refetch to the SAME
+     * server IP (e.g. host -> www.host sharing one Cloudflare anycast IP)
+     * doesn't reuse the just-closed connection's 4-tuple (TIME_WAIT) and get
+     * its SYN dropped -- which showed as "TCP connect failed". */
+    src_seq = (src_seq >= 60000u) ? 49152u : (uint16_t)(src_seq + 2);
 
     /* Initialise the TCP table: on a lean WiFi build nothing else does (the
      * NET_TEST init + SLIP net process are absent), so tcp_connect() would
@@ -208,7 +234,7 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     }
 
     /* TCP connect :443 */
-    tcp = basic_https_open(ip, 49152);
+    tcp = basic_https_open(ip, src_seq);
     if (tcp == NULL) { SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST); return -1; }
     (void)dl;
 
@@ -228,8 +254,11 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
         if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host,
                                            tiku_https_roots, TIKU_HTTPS_NROOTS,
                                            now, &tls) != 0) {
+            int      t13_stage = tiku_kits_crypto_tls13_last_stage;
+            uint32_t t13_rx    = tiku_kits_crypto_tls13_last_rx;
+            int      t13_evt   = basic_https_evt;   /* RST? closed? or silent? */
             tiku_kits_net_tcp_close(tcp);
-            tcp = basic_https_open(ip, 49153);
+            tcp = basic_https_open(ip, (uint16_t)(src_seq + 1));
             if (tcp == NULL) {
                 SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST);
                 return -1;
@@ -239,7 +268,12 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
                                                tiku_https_roots, TIKU_HTTPS_NROOTS,
                                                now, &tls12) != 0) {
                 SHELL_PRINTF(SH_RED
-                    "? HTTPGET: TLS handshake/cert validation failed\n" SH_RST);
+                    "? HTTPGET: TLS failed -- tls1.3 stage %d (%s), %u B in, "
+                    "link=%s; tls1.2 fallback also failed\n" SH_RST,
+                    t13_stage, basic_tls_stage_str(t13_stage), (unsigned)t13_rx,
+                    (t13_evt == TIKU_KITS_NET_TCP_EVT_ABORTED ? "RST" :
+                     t13_evt == TIKU_KITS_NET_TCP_EVT_CLOSED  ? "closed" :
+                     "silent"));
                 tiku_kits_net_tcp_close(tcp);
                 return -1;
             }
