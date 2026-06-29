@@ -677,12 +677,12 @@ CFLAGS += -DTIKU_TIER_SRAM_SIZE=1048576   # 1 MB of the 3 MB SSRAM (Apollo510)
 endif
 CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
 # HTTPS over TCP on Ambiq -- two coupled fixes:
-# (1) RX_PERSIST=0: put only the RX *ring* in regular ZERO-INITIALISED .bss --
-#     NOT the NOLOAD/skipped-by-zero-init .persistent SRAM, where a large
-#     uninitialised ring behaved non-deterministically (varying RST/stall/
-#     empty-body across identical Apollo510 builds). The TX pool STAYS in
-#     .persistent (the default): it has the opposite hazard -- a raw-.bss layout
-#     fault corrupts the TX pool (telnet breaks). Hence the split knob.
+# (1) BUF_PERSIST=0: put the RX ring + TX pool in regular ZERO-INITIALISED .bss,
+#     not .persistent. On Cortex-M ".persistent" is plain SRAM (lost on a power
+#     cycle, so the persistence is moot) and the linker marks it NOLOAD/skipped
+#     by zero-init -- a large *uninitialised* RX ring there behaved
+#     non-deterministically (varying RST/stall/empty-body across identical
+#     builds on Apollo510). Zeroed .bss is deterministic.
 # (2) RX_BUF=4096: a TLS-1.3 server's post-handshake NewSessionTickets (google's
 #     GFE sends ~1 KB right after the handshake) sit UNREAD in the ring
 #     (read_record stops at the server Finished), so a small ring fills with
@@ -691,7 +691,7 @@ CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
 #     tickets + response together. DTCM has ~410 KB free, so 4 KB x 2 in .bss is
 #     trivial.
 ifeq ($(HAS_TLS),1)
-CFLAGS += -DTIKU_KITS_NET_TCP_RX_PERSIST=0
+CFLAGS += -DTIKU_KITS_NET_TCP_BUF_PERSIST=0
 CFLAGS += -DTIKU_KITS_NET_TCP_RX_BUF_SIZE=4096
 CFLAGS += -DTIKU_KITS_NET_TCP_MAX_CONNS=2
 endif
