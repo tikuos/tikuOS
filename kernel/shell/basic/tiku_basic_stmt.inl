@@ -1277,6 +1277,20 @@ exec_delay_ms(long ms)
     ticks = TIKU_CLOCK_MS_TO_TICKS((unsigned long)ms);
     if (ticks == 0u) return;
     while ((tiku_clock_time_t)(tiku_clock_time() - start) < ticks) {
+#if TIKU_SHELL_CMD_SLIP
+        /* SLIP-aware break check: demux IP frames away so a 0x03 byte inside
+         * network traffic on the shared console UART (e.g. a connection's
+         * teardown after a BROWSE) is not misread as Ctrl-C, and the net stack
+         * is pumped so that teardown completes during the wait. */
+        {
+            int ch = tiku_shell_net_getc();
+            if (ch == BASIC_CTRL_C) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_YELLOW "^C\n" SH_RST);
+                return;
+            }
+        }
+#else
         if (tiku_shell_io_rx_ready()) {
             int ch = tiku_shell_io_getc();
             if (ch == BASIC_CTRL_C) {
@@ -1285,6 +1299,7 @@ exec_delay_ms(long ms)
                 return;
             }
         }
+#endif
     }
 }
 
