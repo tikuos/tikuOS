@@ -28,16 +28,121 @@ static int basic_http_status;          /* last HTTPGET$ status */
 #include <arch/ambiq/tiku_trng_arch.h>
 #endif
 
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#include <tikukits/crypto/hmac/tiku_kits_crypto_hmac.h>
+
+/*
+ * RNG for the TLS handshake: an HMAC-DRBG (NIST SP 800-90A) seeded ONCE from
+ * the on-die hardware TRNG, then expanded in software.
+ *
+ * Why not read the TRNG directly per handshake (what this replaced): the
+ * CryptoCell-312 / RP2350 ring-oscillator TRNG is slow -- a ClientHello's worth
+ * of entropy (32-byte client random + the 32-byte P-256 ECDHE private key)
+ * drains the 24-byte EHR cache several times, and each refill is a blocking
+ * ring-oscillator fill with health-test re-arms. Measured at 2.5-16 s on
+ * Apollo510. Because the builtin pumps the net cooperatively, that block also
+ * stalls TCP ACKs, so the handshake overran the server's ~10 s timeout and the
+ * peer RST it -- about half of back-to-back fetches failed purely on timing
+ * luck (tun0 pcap: handshake completes, then 5-16 s of silence before the
+ * ClientHello, peer FIN/RST with ack=1 = it received zero bytes).
+ *
+ * Fix: pay the slow TRNG once to seed the DRBG (basic_https_rng_prepare(),
+ * called before the TCP connect so nothing is waiting on the handshake), then
+ * every ClientHello pulls from the DRBG in microseconds. Reseed only every
+ * DRBG_RESEED_INTERVAL generates (also pre-connect) for forward secrecy -- in
+ * practice never within a browsing session.
+ */
+#define DRBG_SEED_BYTES       48u     /* >=256-bit entropy + nonce margin */
+#define DRBG_RESEED_INTERVAL  4096u   /* generates between reseeds (rare) */
+
+static uint8_t  drbg_K[32];
+static uint8_t  drbg_V[32];
+static uint8_t  drbg_ready;
+static uint32_t drbg_reseed_ctr;
+
+/* HMAC-SHA256 into an aliasing-safe temp, so `out` may equal `key` or `data`. */
+static void drbg_hmac(const uint8_t *key, const uint8_t *data, uint16_t dlen,
+                      uint8_t out[32])
+{
+    uint8_t tmp[32];
+    (void)tiku_kits_crypto_hmac_sha256(key, 32u, data, dlen, tmp);
+    memcpy(out, tmp, 32u);
+}
+
+/* HMAC_DRBG Update (SP 800-90A 10.1.2.2). pd may be NULL when pd_len == 0. */
+static void drbg_update(const uint8_t *pd, uint16_t pd_len)
+{
+    uint8_t buf[32u + 1u + DRBG_SEED_BYTES];      /* V || tag || provided_data */
+    memcpy(buf, drbg_V, 32u);
+    buf[32] = 0x00u;
+    if (pd_len) memcpy(buf + 33, pd, pd_len);
+    drbg_hmac(drbg_K, buf, (uint16_t)(33u + pd_len), drbg_K);   /* K */
+    drbg_hmac(drbg_K, drbg_V, 32u, drbg_V);                     /* V */
+    if (pd_len) {
+        memcpy(buf, drbg_V, 32u);
+        buf[32] = 0x01u;
+        memcpy(buf + 33, pd, pd_len);
+        drbg_hmac(drbg_K, buf, (uint16_t)(33u + pd_len), drbg_K);
+        drbg_hmac(drbg_K, drbg_V, 32u, drbg_V);
+    }
+}
+
+/* The only place the slow hardware TRNG is read: gather a fresh seed and
+ * (re)key the DRBG, then wipe the transient entropy from the stack. */
+static void drbg_reseed(void)
+{
+    uint8_t seed[DRBG_SEED_BYTES];
+    size_t  i;
+    if (tiku_trng_arch_read_bytes(seed, sizeof seed) != TIKU_TRNG_OK) {
+        /* Healthy hardware never lands here; if the TRNG faults, mix the clock
+         * so we at least don't reuse a fixed state rather than hanging. */
+        for (i = 0; i < sizeof seed; i++)
+            seed[i] ^= (uint8_t)(tiku_clock_time() >> ((i & 3u) * 8u));
+    }
+    drbg_update(seed, (uint16_t)sizeof seed);
+    for (i = 0; i < sizeof seed; i++) seed[i] = 0u;   /* wipe raw entropy */
+    drbg_reseed_ctr = 0u;
+}
+
+/* Seed-if-needed; call before opening the connection. Slow only the first time
+ * and on the rare reseed boundary -- both with no server waiting. */
+static void basic_https_rng_prepare(void)
+{
+    if (!drbg_ready) {
+        size_t i;
+        for (i = 0; i < 32u; i++) { drbg_K[i] = 0x00u; drbg_V[i] = 0x01u; }
+        drbg_ready = 1u;
+        drbg_reseed();
+    } else if (drbg_reseed_ctr >= DRBG_RESEED_INTERVAL) {
+        drbg_reseed();
+    }
+}
+
+/* The TLS RNG callback: HMAC-DRBG generate. Never touches the TRNG, so it is
+ * always microseconds and never stalls a live handshake. */
+static void basic_https_rng(uint8_t *b, size_t n)
+{
+    size_t off = 0u;
+    if (!drbg_ready) basic_https_rng_prepare();   /* defensive */
+    while (off < n) {
+        size_t take = (n - off < 32u) ? (n - off) : 32u;
+        drbg_hmac(drbg_K, drbg_V, 32u, drbg_V);   /* V = HMAC(K, V) */
+        memcpy(b + off, drbg_V, take);
+        off += take;
+    }
+    drbg_update((const uint8_t *)0, 0u);          /* post-generate update */
+    drbg_reseed_ctr++;
+}
+#else
+static void basic_https_rng_prepare(void) { /* no HW TRNG: nothing to seed */ }
+
 static void
 basic_https_rng(uint8_t *b, size_t n)
 {
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
-    (void)tiku_trng_arch_read_bytes(b, n);   /* on-die hardware TRNG */
-#else
     size_t i;                          /* no HW TRNG (weak -- dev builds only) */
     for (i = 0; i < n; i++) b[i] = (uint8_t)(tiku_clock_time() >> (i & 7));
-#endif
 }
+#endif
 
 /* Milestone hook: kick the watchdog at each handshake step so a legitimately
  * slow handshake survives while a genuine hang still trips the WDT. */
@@ -232,6 +337,12 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
         }
         tiku_kits_net_dns_get_addr(ip);
     }
+
+    /* Seed the TLS RNG (HMAC-DRBG) before opening the connection: the one-time
+     * hardware-TRNG gather is slow (seconds), and doing it here means no peer
+     * is waiting on the handshake while it runs.  After this, every ClientHello
+     * draws randomness from the DRBG in microseconds. */
+    basic_https_rng_prepare();
 
     /* TCP connect :443 */
     tcp = basic_https_open(ip, src_seq);
