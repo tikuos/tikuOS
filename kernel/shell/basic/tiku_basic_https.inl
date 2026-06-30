@@ -357,11 +357,21 @@ basic_https_get(const char *host, const char *path, char *out, size_t cap)
     io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
     tiku_kits_crypto_tls13_dbg = basic_tls13_dbg;
     /* now_unix from the RTC: enforces cert validity windows once a clock is
-     * set (NTP/SETTIME); 0 until then, which skips the date check.  Try TLS 1.3
-     * first; on failure fall back to TLS 1.2 (the 1.2-only tail) on a fresh
-     * connection, since the ServerHello has already been consumed. */
+     * set (NTP/SETTIME); 0 until then, which skips the date check.  Gate on
+     * tiku_rtc_is_set(), NOT a bare tiku_rtc_get_seconds(): once tiku_rtc_init()
+     * has stamped the soft-RTC persist-cell gate (any prior boot does, and on
+     * Ambiq the gate survives in MRAM across reflashes), get_seconds() returns
+     * offset(0) + uptime -- a small *non-zero* value (~seconds since boot, i.e.
+     * ~Jan 1970).  Handed to the X.509 validator as if it were a real clock,
+     * that makes every live cert (notBefore 2024+) "not yet valid", so the chain
+     * is rejected with stage -11 (chain untrusted) for every site.  is_set() is
+     * true only after an explicit SETTIME/NTP, so an unset clock now correctly
+     * passes 0 and the validity window is skipped (signature + trust anchor +
+     * hostname are still enforced).  Try TLS 1.3 first; on failure fall back to
+     * TLS 1.2 (the 1.2-only tail) on a fresh connection, since the ServerHello
+     * has already been consumed. */
     {
-        uint64_t now = (uint64_t)tiku_rtc_get_seconds();
+        uint64_t now = tiku_rtc_is_set() ? (uint64_t)tiku_rtc_get_seconds() : 0;
         if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host,
                                            tiku_https_roots, TIKU_HTTPS_NROOTS,
                                            now, &tls) != 0) {
