@@ -175,8 +175,20 @@ exec_browse(const char **p)
         const char *bd = strstr(basic_browse_buf, "\r\n\r\n");
         int code = (sp && sp[1] >= '0' && sp[1] <= '9')
                  ? (sp[1] - '0') * 100 + (sp[2] - '0') * 10 + (sp[3] - '0') : 0;
-        SHELL_PRINTF("[%s: HTTP %d, %u B]\n", host, code,
-                     (unsigned)(bd ? strlen(bd + 4) : 0));
+        if (code == 0) {
+            /* Nothing parsed -- surface WHY the TLS read broke.  The red stage
+             * print is lost in the shared console/SLIP mux, so report the
+             * post-handshake read break here instead: rdfail 1 no-record /
+             * 2 wire-type / 3 decrypt-fail / 4 alert, with the wire record type
+             * and the server app read-seq (which post-handshake record broke). */
+            SHELL_PRINTF("[%s: HTTP 0, 0 B  rdfail=%d type=%u seq=%u]\n", host,
+                         tiku_kits_crypto_tls13_last_read_fail,
+                         (unsigned)tiku_kits_crypto_tls13_last_read_type,
+                         (unsigned)tiku_kits_crypto_tls13_last_read_seq);
+        } else {
+            SHELL_PRINTF("[%s: HTTP %d, %u B]\n", host, code,
+                         (unsigned)(bd ? strlen(bd + 4) : 0));
+        }
     }
     basic_html_render(basic_browse_buf, (char *)0, 0);   /* NULL out = print */
 }
