@@ -489,6 +489,45 @@ expr_call(const char **p, long *out_v)
         *out_v = match ? (long)(match - haystack + 1) : 0;
         return 1;
     }
+    /* COUNT(haystack, needle) -- number of non-overlapping occurrences (0 if the
+     * needle is empty or absent). Count list items, lines COUNT(s$,CHR$(10)),
+     * delimiters, keyword hits in LLM/API text. */
+    if (match_kw(p, "COUNT")) {
+        char haystack[TIKU_BASIC_STR_BUF_CAP];
+        char needle[TIKU_BASIC_STR_BUF_CAP];
+        const char *hp;
+        long cnt = 0;
+        size_t nl;
+        skip_ws(p);
+        if (**p != '(') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, haystack, sizeof(haystack)) != 0) return 1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, needle, sizeof(needle)) != 0) return 1;
+        skip_ws(p);
+        if (**p != ')') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); return 1;
+        }
+        (*p)++;
+        nl = strlen(needle);
+        if (nl > 0) {
+            hp = haystack;
+            for (;;) {
+                const char *m = strstr(hp, needle);
+                if (m == NULL) break;
+                cnt++;
+                hp = m + nl;
+            }
+        }
+        *out_v = cnt;
+        return 1;
+    }
 #endif
 #if TIKU_BASIC_VFS_ENABLE
     if (match_kw(p, "VFSREAD")) {

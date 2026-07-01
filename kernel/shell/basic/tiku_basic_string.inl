@@ -538,6 +538,94 @@ parse_strprim(const char **p, char *out, size_t cap)
         out[o] = '\0';
         return 0;
     }
+    if (match_kw(p, "LINE$")) {
+        /* LINE$(s$, n) -- the nth 1-based line (split on \n; a trailing \r is
+         * dropped so CRLF text works). Empty lines are counted (unlike WORD$);
+         * out of range -> "". Walks multi-line LLM/API output. */
+        char src[TIKU_BASIC_STR_BUF_CAP];
+        long idx, ln = 1;
+        size_t i, srclen, lstart = 0, llen = 0;
+        int found = 0;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        idx = parse_expr(p);
+        if (basic_error) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        srclen = strlen(src);
+        for (i = 0; ; i++) {
+            if (i == srclen || src[i] == '\n') {
+                if (ln == idx) { found = 1; llen = i - lstart; break; }
+                if (i == srclen) break;
+                ln++;
+                lstart = i + 1;
+            }
+        }
+        if (!found) { out[0] = '\0'; return 0; }
+        if (llen > 0 && src[lstart + llen - 1] == '\r') llen--;
+        if (llen + 1u > cap) {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? string too long\n" SH_RST); return -1;
+        }
+        memcpy(out, src + lstart, llen);
+        out[llen] = '\0';
+        return 0;
+    }
+    if (match_kw(p, "BETWEEN$")) {
+        /* BETWEEN$(s$, a$, b$) -- text between the first a$ and the next b$ after
+         * it (empty a$ = from start, empty b$ = to end). Either marker absent
+         * -> "". Extracts fenced code, quoted values, tag/bracket contents. */
+        char src[TIKU_BASIC_STR_BUF_CAP], am[128], bm[128];
+        const char *sa, *sb;
+        size_t alen, blen, rlen;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, am, sizeof(am)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, bm, sizeof(bm)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        alen = strlen(am); blen = strlen(bm);
+        if (alen == 0) {
+            sa = src;
+        } else {
+            sa = strstr(src, am);
+            if (sa == NULL) { out[0] = '\0'; return 0; }
+            sa += alen;
+        }
+        if (blen == 0) {
+            sb = sa + strlen(sa);
+        } else {
+            sb = strstr(sa, bm);
+            if (sb == NULL) { out[0] = '\0'; return 0; }
+        }
+        rlen = (size_t)(sb - sa);
+        if (rlen + 1u > cap) {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? string too long\n" SH_RST); return -1;
+        }
+        memcpy(out, sa, rlen);
+        out[rlen] = '\0';
+        return 0;
+    }
 #if TIKU_BASIC_JSON_ENABLE
     if (match_kw(p, "JSON$")) {
         /* JSON$(json$, path$) -- extract a scalar by dotted path (object keys +

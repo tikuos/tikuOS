@@ -217,6 +217,8 @@ process_line(const char *raw)
     "  " SH_CYAN "Strings:   " SH_RST \
         " A$..Z$  +  LEN ASC VAL  LEFT$ RIGHT$ MID$\n" \
     "              CHR$ STR$ HEX$ BIN$\n" \
+    "              WORD$ REPLACE$ LINE$ BETWEEN$ TRIM$\n" \
+    "              INSTR COUNT UPPER$ LOWER$\n" \
     "              comparisons (= <> < > <= >=) in IF only\n"
 #else
 #define BASIC_HELP_STR_LINE ""
