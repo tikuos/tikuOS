@@ -52,9 +52,17 @@
 #define TIKU_SHELL_JOBS_MAX      4
 #endif
 
-/** Maximum command length (matches TIKU_SHELL_LINE_SIZE) */
+/** Maximum stored length of a scheduled-job command.  Tier-gated in step with
+ *  TIKU_SHELL_LINE_SIZE so a periodic job (e.g. poll an API every N s) can hold
+ *  a long command: 64 on MSP430-class, 255 on big-RAM parts.  Capped at 255 --
+ *  the job copy length is a uint8_t -- which still holds any realistic command
+ *  (a line-editor line is <= 255 chars). */
 #ifndef TIKU_SHELL_JOBS_CMD_MAX
-#define TIKU_SHELL_JOBS_CMD_MAX  64
+#  ifdef PLATFORM_MSP430
+#    define TIKU_SHELL_JOBS_CMD_MAX  64
+#  else
+#    define TIKU_SHELL_JOBS_CMD_MAX  255
+#  endif
 #endif
 
 /*---------------------------------------------------------------------------*/

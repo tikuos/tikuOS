@@ -802,6 +802,12 @@ static struct {
                                      *   TIKU_EVENT_TIMER to this process. */
 } cli;
 
+/* cli.pos is uint8_t, so the line buffer must index within 0..255.  Raising
+ * TIKU_SHELL_LINE_SIZE past 256 would let a full line overflow pos (and the
+ * uint8_t history head/count) -- widen those fields first. */
+_Static_assert(TIKU_SHELL_LINE_SIZE <= 256,
+               "cli.pos is uint8_t; widen it before TIKU_SHELL_LINE_SIZE > 256");
+
 #if TIKU_SHELL_CMD_HISTORY
 /**
  * @brief Replace the current input line with a recalled history entry.

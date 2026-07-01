@@ -56,8 +56,21 @@
  * Sizes the line editor's cli.buf; typed input is capped at
  * TIKU_SHELL_LINE_SIZE - 1 characters so room is always left for the
  * terminating NUL the parser expects.
+ *
+ * Tier-gated: MSP430-class parts keep the lean 64 (small SRAM, and the history
+ * ring is FRAM-backed there).  Big-RAM parts (Apollo / RP2350) get 256 so a
+ * whole command fits inline -- e.g. an HTTPPOST$ with a small JSON body, or a
+ * LET J$="{...}" literal for JSON$ -- instead of being clipped at the line
+ * editor.  Must stay <= 256: cli.pos (and the history indices) are uint8_t; a
+ * _Static_assert in tiku_shell.c enforces it.  #ifndef so a build can override.
  */
-#define TIKU_SHELL_LINE_SIZE  64
+#ifndef TIKU_SHELL_LINE_SIZE
+#  ifdef PLATFORM_MSP430
+#    define TIKU_SHELL_LINE_SIZE  64
+#  else
+#    define TIKU_SHELL_LINE_SIZE  256
+#  endif
+#endif
 
 /**
  * @brief Maximum number of space-separated arguments per command.
