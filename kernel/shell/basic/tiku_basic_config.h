@@ -70,32 +70,38 @@
 /* CORE LIMITS                                                               */
 /*---------------------------------------------------------------------------*/
 
+/* Uniform across every platform: a BASIC line -- and each stored program line
+ * -- can be this long everywhere, so a command that fits on Apollo also fits on
+ * RP2350/MSP430 (portable, no silent per-part truncation of e.g. an HTTPPOST$
+ * with a JSON body).  RAM is scaled instead via TIKU_BASIC_PROGRAM_LINES (how
+ * MANY lines fit) per tier below.  The interactive reader is line_buf[LINE_MAX +
+ * 16]; keeping LINE_MAX <= 255 keeps every byte index within a uint8_t. */
 #ifndef TIKU_BASIC_LINE_MAX
-#  if defined(TIKU_BASIC_TIER_BIG)
-#    define TIKU_BASIC_LINE_MAX     80
-#  elif defined(TIKU_BASIC_TIER_FRAM)
-#    define TIKU_BASIC_LINE_MAX     64
-#  else
-#    define TIKU_BASIC_LINE_MAX     48
-#  endif
+#define TIKU_BASIC_LINE_MAX        144
 #endif
 
-/* PROGRAM_LINES is the one limit with a static cost that scales: the save
- * buffer (basic_save_buf) is PROGRAM_LINES * (LINE_MAX + 8) bytes, and on
- * non-MSP430 parts it is plain .bss (the .persistent attribute is MSP430-only),
- * so at LINE_MAX=80 that is ~88 bytes of always-on RAM per line:
- *   HUGE  2048 -> ~180 KB .bss (Apollo510: 512 KB TCM + 3 MB SSRAM)
- *   BIG   1024 ->  ~90 KB .bss (Apollo4 Lite 1 MB SSRAM / RP2350 520 KB)
- *   FRAM   256 -> ~18 KB FRAM .persistent (FR5994/6989, 256 KB FRAM)
- *   else    50 ->  ~3 KB (host harness / small)
- * Line numbers are uint16_t, so the hard ceiling is 65533 lines. */
+/* PROGRAM_LINES scales program CAPACITY (line count) to the arena/RAM -- the
+ * knob that varies per platform now that LINE_MAX is uniform.  It sizes the
+ * prog[] arena block (PROGRAM_LINES * LINE_MAX) and the SAVE buffer
+ * (PROGRAM_LINES * (LINE_MAX + 8); .ssram on Ambiq / .persistent FRAM on MSP430
+ * / .bss elsewhere).  At LINE_MAX=144 that is ~152 bytes/line:
+ *   HUGE (Apollo510)  2048 -> ~295 KB prog + ~311 KB save   (3 MB SSRAM)
+ *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB save   (1.6 MB SSRAM)
+ *   RP2350             512 ->  ~74 KB prog +  ~78 KB .bss   (~160 KB arena / 520 KB SRAM)
+ *   FRAM (MSP430)       96 ->  ~14 KB prog +  ~15 KB FRAM   (FR5994/6989, 256 KB FRAM)
+ *   else (host/small)   50 ->   ~7 KB
+ * RP2350 is split out from Apollo (both TIER_BIG) because its arena is an order
+ * of magnitude smaller, so it can't afford 1024 x 144.  Line numbers are
+ * uint16_t, so the hard ceiling is 65533 lines. */
 #ifndef TIKU_BASIC_PROGRAM_LINES
-#  if defined(TIKU_BASIC_TIER_HUGE)
+#  if defined(PLATFORM_RP2350)
+#    define TIKU_BASIC_PROGRAM_LINES 512
+#  elif defined(TIKU_BASIC_TIER_HUGE)
 #    define TIKU_BASIC_PROGRAM_LINES 2048
 #  elif defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_PROGRAM_LINES 1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
-#    define TIKU_BASIC_PROGRAM_LINES 256
+#    define TIKU_BASIC_PROGRAM_LINES 96
 #  else
 #    define TIKU_BASIC_PROGRAM_LINES 50
 #  endif
