@@ -305,6 +305,9 @@ exec_stmt(const char **p)
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
     if (match_kw(p, "BROWSE"))   { exec_browse(p);   return; }
     if (match_kw(p, "HTTPHEADER")) { exec_httpheader(p); return; }
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+    if (match_kw(p, "FETCH"))    { exec_fetch(p);    return; }
+#endif
 #endif
 #endif
 #if TIKU_BASIC_SUBS_ENABLE

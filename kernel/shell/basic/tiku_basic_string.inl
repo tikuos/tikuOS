@@ -118,6 +118,39 @@ peek_string_expr(const char *p)
 
 static int parse_strexpr(const char **p, char *out, size_t cap);
 
+/* Resolve a reader's SOURCE argument to a (ptr, len) pair. A big-buffer
+ * reference `#n` (a FETCH target) yields the arena buffer IN PLACE -- no copy,
+ * so a whole multi-KB reply is readable past STR_BUF_CAP. Anything else is a
+ * normal string expression parsed into the caller's stack buffer. Readers that
+ * scan a large source (JSON$, LINE$, BETWEEN$) use this instead of
+ * parse_strexpr; their small results still go through the 1 KB out buffer. */
+static int
+parse_str_ref(const char **p, const char **op, size_t *olen,
+              char *stackbuf, size_t cap)
+{
+    skip_ws(p);
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+    if (**p == '#') {
+        long n;
+        (*p)++;
+        n = parse_expr(p);
+        if (basic_error) return -1;
+        if (n < 0 || n >= TIKU_BASIC_BIGBUF_COUNT || basic_bigbuf[n] == NULL) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? bad #buffer\n" SH_RST);
+            return -1;
+        }
+        *op = basic_bigbuf[n];
+        *olen = basic_biglen[n];
+        return 0;
+    }
+#endif
+    if (parse_strexpr(p, stackbuf, cap) != 0) return -1;
+    *op = stackbuf;
+    *olen = strlen(stackbuf);
+    return 0;
+}
+
 #if TIKU_BASIC_JSON_ENABLE
 /* JSON$ core: navigate `json` (jlen bytes) by a dotted `path` -- object keys and
  * array indices (e.g. "choices.0.message.content") -- and render the target
@@ -543,13 +576,14 @@ parse_strprim(const char **p, char *out, size_t cap)
          * dropped so CRLF text works). Empty lines are counted (unlike WORD$);
          * out of range -> "". Walks multi-line LLM/API output. */
         char src[TIKU_BASIC_STR_BUF_CAP];
+        const char *S; size_t SL;
         long idx, ln = 1;
         size_t i, srclen, lstart = 0, llen = 0;
         int found = 0;
         skip_ws(p);
         if (**p != '(') goto fn_paren_err;
         (*p)++;
-        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        if (parse_str_ref(p, &S, &SL, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
         if (**p != ',') {
             basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
@@ -560,9 +594,9 @@ parse_strprim(const char **p, char *out, size_t cap)
         skip_ws(p);
         if (**p != ')') goto fn_paren_err;
         (*p)++;
-        srclen = strlen(src);
+        srclen = SL;
         for (i = 0; ; i++) {
-            if (i == srclen || src[i] == '\n') {
+            if (i == srclen || S[i] == '\n') {
                 if (ln == idx) { found = 1; llen = i - lstart; break; }
                 if (i == srclen) break;
                 ln++;
@@ -570,11 +604,11 @@ parse_strprim(const char **p, char *out, size_t cap)
             }
         }
         if (!found) { out[0] = '\0'; return 0; }
-        if (llen > 0 && src[lstart + llen - 1] == '\r') llen--;
+        if (llen > 0 && S[lstart + llen - 1] == '\r') llen--;
         if (llen + 1u > cap) {
             basic_error = 1; SHELL_PRINTF(SH_RED "? string too long\n" SH_RST); return -1;
         }
-        memcpy(out, src + lstart, llen);
+        memcpy(out, S + lstart, llen);
         out[llen] = '\0';
         return 0;
     }
@@ -583,12 +617,13 @@ parse_strprim(const char **p, char *out, size_t cap)
          * it (empty a$ = from start, empty b$ = to end). Either marker absent
          * -> "". Extracts fenced code, quoted values, tag/bracket contents. */
         char src[TIKU_BASIC_STR_BUF_CAP], am[128], bm[128];
-        const char *sa, *sb;
-        size_t alen, blen, rlen;
+        const char *sa, *sb, *S;
+        size_t alen, blen, rlen, SL;
         skip_ws(p);
         if (**p != '(') goto fn_paren_err;
         (*p)++;
-        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        if (parse_str_ref(p, &S, &SL, src, sizeof(src)) != 0) return -1;
+        (void)SL;
         skip_ws(p);
         if (**p != ',') {
             basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
@@ -606,9 +641,9 @@ parse_strprim(const char **p, char *out, size_t cap)
         (*p)++;
         alen = strlen(am); blen = strlen(bm);
         if (alen == 0) {
-            sa = src;
+            sa = S;
         } else {
-            sa = strstr(src, am);
+            sa = strstr(S, am);
             if (sa == NULL) { out[0] = '\0'; return 0; }
             sa += alen;
         }
@@ -632,10 +667,11 @@ parse_strprim(const char **p, char *out, size_t cap)
          * array indices), e.g. JSON$(R$, "choices.0.message.content"). Missing
          * key / out-of-range index / non-scalar target -> "". */
         char src[TIKU_BASIC_STR_BUF_CAP], jpath[TIKU_BASIC_STR_BUF_CAP];
+        const char *jsrc; size_t jslen;
         skip_ws(p);
         if (**p != '(') goto fn_paren_err;
         (*p)++;
-        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        if (parse_str_ref(p, &jsrc, &jslen, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
         if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1; }
         (*p)++;
@@ -643,7 +679,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         skip_ws(p);
         if (**p != ')') goto fn_paren_err;
         (*p)++;
-        (void)basic_json_extract(src, (uint16_t)strlen(src), jpath, out, cap);
+        (void)basic_json_extract(jsrc, (uint16_t)jslen, jpath, out, cap);
         return 0;
     }
 #endif

@@ -74,6 +74,47 @@ exec_httpheader(const char **p)
     basic_http_hdrs[cur++] = '\r'; basic_http_hdrs[cur++] = '\n';
     basic_http_hdrs[cur] = '\0';
 }
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+/* FETCH #n, "host", "path" [, body$] -- GET (or POST when body$ is given)
+ * straight into big-buffer #n, past the STR_BUF_CAP limit, so a whole multi-KB
+ * reply is retained. Read it with JSON$(#n,...), LINE$(#n,i), BETWEEN$(#n,a$,b$)
+ * and LEN(#n); HTTPSTATUS() reports the code. Any HTTPHEADER lines apply. */
+static void
+exec_fetch(const char **p)
+{
+    long n;
+    char host[64], path[80], body[TIKU_BASIC_STR_BUF_CAP];
+    int  have_body = 0, rc;
+    skip_ws(p);
+    if (**p != '#') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? '#buffer' expected\n" SH_RST); return;
+    }
+    (*p)++;
+    n = parse_expr(p);
+    if (basic_error) return;
+    if (n < 0 || n >= TIKU_BASIC_BIGBUF_COUNT || basic_bigbuf[n] == NULL) {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? bad #buffer\n" SH_RST); return;
+    }
+    skip_ws(p);
+    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    (*p)++;
+    if (parse_path_literal(p, host, sizeof(host)) != 0) return;
+    skip_ws(p);
+    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    (*p)++;
+    if (parse_path_literal(p, path, sizeof(path)) != 0) return;
+    skip_ws(p);
+    if (**p == ',') {                       /* optional body -> POST */
+        (*p)++;
+        if (parse_strexpr(p, body, sizeof(body)) != 0) return;
+        have_body = 1;
+    }
+    rc = basic_https_get(have_body ? "POST" : "GET", host, path,
+                         have_body ? body : NULL, NULL,
+                         basic_bigbuf[n], (size_t)TIKU_BASIC_BIGBUF_SIZE);
+    basic_biglen[n] = (rc > 0) ? (size_t)rc : 0;
+}
+#endif
 #endif
 
 /* UDPSEND "a.b.c.d", port, expr$ -- fire-and-forget a datagram. Instant

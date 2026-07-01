@@ -81,6 +81,13 @@
 #define BASIC_ARENA_ARRAY_DATA_BYTES 0u
 #endif
 
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+#define BASIC_ARENA_BIGBUF_BYTES \
+    ((size_t)TIKU_BASIC_BIGBUF_COUNT * (size_t)TIKU_BASIC_BIGBUF_SIZE)
+#else
+#define BASIC_ARENA_BIGBUF_BYTES 0u
+#endif
+
 #define BASIC_ARENA_BYTES                                                   \
     ((tiku_mem_arch_size_t)(                                                \
         sizeof(basic_line_t)       * TIKU_BASIC_PROGRAM_LINES +             \
@@ -95,6 +102,7 @@
         BASIC_ARENA_DEFN_BYTES +                                            \
         BASIC_ARENA_ARRAYS_BYTES +                                          \
         BASIC_ARENA_ARRAY_DATA_BYTES +                                      \
+        BASIC_ARENA_BIGBUF_BYTES +                                          \
         128u))   /* alignment headroom */
 
 /*---------------------------------------------------------------------------*/
@@ -135,6 +143,9 @@ basic_clear_vars(void)
         basic_namedstrvar_names[i][0] = '\0';
     }
     basic_str_heap_pos = 0;
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+    for (i = 0; i < TIKU_BASIC_BIGBUF_COUNT; i++) basic_biglen[i] = 0;
+#endif
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
     for (i = 0; i < TIKU_BASIC_DEFN_MAX; i++) basic_defns[i].name[0] = '\0';
@@ -224,6 +235,14 @@ basic_alloc_state(void)
         (tiku_mem_arch_size_t)BASIC_ARENA_NAMEDVAR_BYTES);
     basic_str_heap = (char *)tiku_arena_alloc(&basic_arena,
         (tiku_mem_arch_size_t)TIKU_BASIC_STR_HEAP_BYTES);
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+    {
+        int bi;
+        for (bi = 0; bi < TIKU_BASIC_BIGBUF_COUNT; bi++)
+            basic_bigbuf[bi] = (char *)tiku_arena_alloc(&basic_arena,
+                (tiku_mem_arch_size_t)TIKU_BASIC_BIGBUF_SIZE);
+    }
+#endif
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
     basic_defns = (basic_defn_t *)tiku_arena_alloc(&basic_arena,
@@ -245,6 +264,9 @@ basic_alloc_state(void)
 #if TIKU_BASIC_STRVARS_ENABLE
         || basic_strvars == NULL || basic_str_heap == NULL ||
         basic_namedstrvar_names == NULL
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+        || basic_bigbuf[TIKU_BASIC_BIGBUF_COUNT - 1] == NULL
+#endif
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
         || basic_defns == NULL

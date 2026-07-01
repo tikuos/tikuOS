@@ -105,6 +105,12 @@ static uint8_t       loop_sp;
 static char        **basic_strvars;
 static char         *basic_str_heap;
 static uint16_t      basic_str_heap_pos;
+#if TIKU_BASIC_BIGBUF_COUNT > 0
+/* Big response buffers (#0..): arena-backed, filled by FETCH, read in place by
+ * the extractors. basic_biglen[n] is the current byte length (0 = empty). */
+static char         *basic_bigbuf[TIKU_BASIC_BIGBUF_COUNT];
+static size_t        basic_biglen[TIKU_BASIC_BIGBUF_COUNT];
+#endif
 #endif
 
 /* Multi-letter variable names: index space [26, 26+N) backed by

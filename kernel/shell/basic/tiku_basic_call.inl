@@ -390,18 +390,20 @@ expr_call(const char **p, long *out_v)
 #if TIKU_BASIC_STRVARS_ENABLE
     if (match_kw(p, "LEN")) {
         char buf[TIKU_BASIC_STR_BUF_CAP];
+        const char *S; size_t SL;
         skip_ws(p);
         if (**p != '(') {
             basic_error = 1; SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST); return 1;
         }
         (*p)++;
-        if (parse_strexpr(p, buf, sizeof(buf)) != 0) return 1;
+        if (parse_str_ref(p, &S, &SL, buf, sizeof(buf)) != 0) return 1;  /* LEN(#n) too */
+        (void)S;
         skip_ws(p);
         if (**p != ')') {
             basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); return 1;
         }
         (*p)++;
-        *out_v = (long)strlen(buf);
+        *out_v = (long)SL;
         return 1;
     }
     if (match_kw(p, "ASC")) {

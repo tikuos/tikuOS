@@ -289,6 +289,22 @@
 #  endif
 #endif
 
+/* Big response buffers (referenced as #0, #1, ...): arena-backed, filled by the
+ * FETCH statement, read in place by the extractors (JSON$/LINE$/BETWEEN$ with a
+ * #n source, LEN(#n)). They hold a whole HTTP/LLM reply past the STR_BUF_CAP
+ * scratch limit -- FETCH writes straight into the arena, bypassing the 1 KB
+ * stack buffer. BIG-tier only (each buffer is real arena RAM). */
+#ifndef TIKU_BASIC_BIGBUF_COUNT
+#  if defined(TIKU_BASIC_TIER_BIG)
+#    define TIKU_BASIC_BIGBUF_COUNT 2
+#  else
+#    define TIKU_BASIC_BIGBUF_COUNT 0
+#  endif
+#endif
+#ifndef TIKU_BASIC_BIGBUF_SIZE
+#  define TIKU_BASIC_BIGBUF_SIZE    8192
+#endif
+
 /* DEF FN single-line user functions. Each entry stores a name (up
  * to 7 chars), the argument-letter index, and an expression body
  * up to TIKU_BASIC_DEFN_BODY chars long. Calls evaluate the body
