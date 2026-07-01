@@ -368,6 +368,15 @@ TIKU_KIT_SENSORS_ENABLE          ?= 0
 TIKU_KIT_SIGFEATURES_ENABLE      ?= 0
 TIKU_KIT_TEXTCOMPRESSION_ENABLE  ?= 0
 
+# BASIC JSON$ wraps the json codec, so a BIG (Cortex-M) BASIC build pulls it in
+# automatically -- offline JSON parsing plus API/LLM replies from HTTPGET$.
+# MSP430/FRAM BASIC gates JSON$ off (config), so it stays codec-free there.
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+ifneq ($(filter ambiq rp2350,$(TIKU_PLATFORM)),)
+TIKU_KIT_CODEC_ENABLE            := 1
+endif
+endif
+
 ifeq ($(TIKU_KITS_ALL),1)
 TIKU_KIT_GFX_ENABLE              := 1
 TIKU_KIT_UI_ENABLE               := 1

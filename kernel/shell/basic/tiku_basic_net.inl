@@ -43,6 +43,39 @@ basic_net_parse_ip(const char *s, uint8_t out[4])
     return (*s == '\0') ? 0 : -1;
 }
 
+#if (TIKU_KITS_NET_HTTP_ENABLE + 0)
+/* HTTPHEADER "Name", value$ -- append a request header sent by the next
+ * HTTPGET$/HTTPPOST$ (e.g. HTTPHEADER "Authorization", "Bearer " + K$).  Bare
+ * HTTPHEADER (no args) clears them; headers otherwise accumulate. */
+static void
+exec_httpheader(const char **p)
+{
+    char   name[48], val[TIKU_BASIC_STR_BUF_CAP];
+    size_t nl, vl, cur;
+    skip_ws(p);
+    if (**p == '\0' || **p == ':') {        /* bare HTTPHEADER -> clear */
+        basic_http_hdrs[0] = '\0';
+        return;
+    }
+    if (parse_strexpr(p, name, sizeof(name)) != 0) return;
+    skip_ws(p);
+    if (**p != ',') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return;
+    }
+    (*p)++;
+    if (parse_strexpr(p, val, sizeof(val)) != 0) return;
+    nl = strlen(name); vl = strlen(val); cur = strlen(basic_http_hdrs);
+    if (cur + nl + vl + 4u >= sizeof(basic_http_hdrs)) {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? too many headers\n" SH_RST); return;
+    }
+    memcpy(basic_http_hdrs + cur, name, nl); cur += nl;
+    basic_http_hdrs[cur++] = ':'; basic_http_hdrs[cur++] = ' ';
+    memcpy(basic_http_hdrs + cur, val, vl); cur += vl;
+    basic_http_hdrs[cur++] = '\r'; basic_http_hdrs[cur++] = '\n';
+    basic_http_hdrs[cur] = '\0';
+}
+#endif
+
 /* UDPSEND "a.b.c.d", port, expr$ -- fire-and-forget a datagram. Instant
  * (the stack queues + transmits synchronously), so no pump needed. */
 static void
@@ -157,7 +190,7 @@ exec_browse(const char **p)
             SHELL_PRINTF(SH_RED "? BROWSE: empty URL\n" SH_RST);
             return;
         }
-        if (basic_https_get(host, path, basic_browse_buf,
+        if (basic_https_get("GET", host, path, NULL, NULL, basic_browse_buf,
                             sizeof basic_browse_buf) < 0) {
             basic_error = 1;      /* basic_https_get already printed the reason */
             return;

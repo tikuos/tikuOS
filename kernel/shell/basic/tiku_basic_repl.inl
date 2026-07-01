@@ -301,7 +301,7 @@ process_line(const char *raw)
                 " MQTTPUB"
 #endif
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-                " HTTPGET$ HTTPSTATUS"
+                " HTTPGET$ HTTPPOST$ HTTPHEADER HTTPSTATUS"
 #endif
 #endif
                 "\n");

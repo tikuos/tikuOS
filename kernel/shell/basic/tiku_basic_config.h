@@ -210,6 +210,17 @@
 #    define TIKU_BASIC_NET_ENABLE    0
 #  endif
 #endif
+/* JSON$ -- extract a value by dotted path (keys + array indices) from a JSON
+ * string; the agent primitive for parsing API/LLM replies. Wraps the
+ * codec/json pull-parser, so it needs TIKU_KIT_CODEC_ENABLE (which compiles
+ * tikukits/codec/json). BIG-only. */
+#ifndef TIKU_BASIC_JSON_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG) && (TIKU_KIT_CODEC_ENABLE + 0)
+#    define TIKU_BASIC_JSON_ENABLE   1
+#  else
+#    define TIKU_BASIC_JSON_ENABLE   0
+#  endif
+#endif
 #ifndef TIKU_BASIC_SUBS_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_SUBS_ENABLE   1

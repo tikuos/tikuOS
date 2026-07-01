@@ -87,6 +87,9 @@
 #include <tikukits/time/tiku_kits_time.h> /* DATE$ / TIME$ calendar breakdown */
 #endif
 #endif
+#if TIKU_BASIC_JSON_ENABLE
+#include <tikukits/codec/json/tiku_kits_codec_json.h>  /* JSON$ path extractor */
+#endif
 #if TIKU_BASIC_NET_ENABLE
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>   /* UDPSEND */
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* IPADDR$ / NETUP */

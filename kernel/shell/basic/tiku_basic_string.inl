@@ -118,6 +118,112 @@ peek_string_expr(const char *p)
 
 static int parse_strexpr(const char **p, char *out, size_t cap);
 
+#if TIKU_BASIC_JSON_ENABLE
+/* JSON$ core: navigate `json` (jlen bytes) by a dotted `path` -- object keys and
+ * array indices (e.g. "choices.0.message.content") -- and render the target
+ * SCALAR into out[cap]: strings are un-escaped, numbers/bools become text, and
+ * null / not-found / a non-scalar target yield "".  Wraps the codec/json
+ * pull-parser (validated against real LLM-response shapes on host).  The agent
+ * primitive for reading an API reply. */
+static int
+basic_json_extract(const char *json, uint16_t jlen, const char *path,
+                   char *out, size_t cap)
+{
+    tiku_kits_codec_json_reader_t r;
+    tiku_kits_codec_json_tok_t t, vt = TIKU_KITS_CODEC_JSON_TOK_END;
+    const char *seg = path;
+    out[0] = '\0';
+    tiku_kits_codec_json_reader_init(&r, (const uint8_t *)json, jlen);
+    for (;;) {
+        size_t sl = 0, k;
+        int is_idx, last;
+        while (seg[sl] && seg[sl] != '.') sl++;
+        is_idx = (sl > 0);
+        for (k = 0; k < sl; k++) if (seg[k] < '0' || seg[k] > '9') { is_idx = 0; break; }
+        last = (seg[sl] == '\0');
+        if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
+        if (t == TIKU_KITS_CODEC_JSON_TOK_LBRACE) {
+            for (;;) {                          /* object: find key == seg */
+                const char *ks; uint16_t kl;
+                if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
+                if (t != TIKU_KITS_CODEC_JSON_TOK_STRING) return -1;   /* RBRACE/malformed */
+                tiku_kits_codec_json_token_string(&r, &ks, &kl);
+                if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK ||
+                    t != TIKU_KITS_CODEC_JSON_TOK_COLON) return -1;
+                if ((size_t)kl == sl && memcmp(ks, seg, sl) == 0) break;   /* found */
+                if (tiku_kits_codec_json_skip_value(&r) != TIKU_KITS_CODEC_OK) return -1;
+                if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
+                if (t != TIKU_KITS_CODEC_JSON_TOK_COMMA) return -1;   /* end of object */
+            }
+        } else if (t == TIKU_KITS_CODEC_JSON_TOK_LBRACKET) {
+            long idx = 0, i;                     /* array: index seg */
+            if (!is_idx) return -1;
+            for (k = 0; k < sl; k++) idx = idx * 10 + (seg[k] - '0');
+            for (i = 0; i < idx; i++) {
+                if (tiku_kits_codec_json_skip_value(&r) != TIKU_KITS_CODEC_OK) return -1;
+                if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
+                if (t != TIKU_KITS_CODEC_JSON_TOK_COMMA) return -1;   /* out of range */
+            }
+        } else {
+            return -1;                           /* path descends into a scalar */
+        }
+        if (last) {
+            if (tiku_kits_codec_json_next_token(&r, &vt) != TIKU_KITS_CODEC_OK) return -1;
+            break;
+        }
+        seg += sl + 1;
+    }
+    if (vt == TIKU_KITS_CODEC_JSON_TOK_STRING) {
+        const char *s; uint16_t slen; size_t o = 0, i = 0;
+        tiku_kits_codec_json_token_string(&r, &s, &slen);
+        while (i < slen && o + 1u < cap) {       /* un-escape */
+            char c = s[i++];
+            if (c == '\\' && i < slen) {
+                char e = s[i++];
+                switch (e) {
+                case 'n': c = '\n'; break;  case 'r': c = '\r'; break;
+                case 't': c = '\t'; break;  case 'b': c = '\b'; break;
+                case 'f': c = '\f'; break;  case '/': c = '/';  break;
+                case '"': c = '"';  break;  case '\\': c = '\\'; break;
+                case 'u': {
+                    unsigned v = 0; int kk;
+                    if (i + 4u <= slen) {
+                        for (kk = 0; kk < 4; kk++) {
+                            char h = s[i + kk];
+                            unsigned d = (h <= '9') ? (unsigned)(h - '0')
+                                                    : (unsigned)((h | 0x20) - 'a' + 10);
+                            v = v * 16u + d;
+                        }
+                        i += 4;
+                        c = (v < 128u) ? (char)v : '?';
+                    } else c = '?';
+                    break;
+                }
+                default: c = e; break;
+                }
+            }
+            out[o++] = c;
+        }
+        out[o] = '\0';
+        return 0;
+    }
+    if (vt == TIKU_KITS_CODEC_JSON_TOK_NUMBER) {
+        int32_t iv; char tmp[16]; int ti = 0; size_t oo = 0; long v;
+        tiku_kits_codec_json_token_int(&r, &iv);
+        v = (long)iv;
+        if (v < 0) { if (oo + 1u < cap) out[oo++] = '-'; v = -v; }
+        do { tmp[ti++] = (char)('0' + (int)(v % 10)); v /= 10; } while (v && ti < 15);
+        while (ti > 0 && oo + 1u < cap) out[oo++] = tmp[--ti];
+        out[oo] = '\0';
+        return 0;
+    }
+    if (vt == TIKU_KITS_CODEC_JSON_TOK_TRUE  && cap > 4u) { memcpy(out, "true", 5);  return 0; }
+    if (vt == TIKU_KITS_CODEC_JSON_TOK_FALSE && cap > 5u) { memcpy(out, "false", 6); return 0; }
+    out[0] = '\0';                               /* null / object / array -> "" */
+    return 0;
+}
+#endif /* TIKU_BASIC_JSON_ENABLE */
+
 /* parse_strprim: a single string atom -- literal, variable, or a
  * string-returning function call. Stores the resulting NUL-terminated
  * string in @out (cap bytes). Returns 0 on success, -1 on error. */
@@ -275,6 +381,184 @@ parse_strprim(const char **p, char *out, size_t cap)
         out[take] = '\0';
         return 0;
     }
+    /* UPPER$(s$) / LOWER$(s$) -- ASCII case fold (leaves non-letters, incl.
+     * UTF-8 multibyte bytes, untouched). Table stakes for case-insensitive
+     * matching in agent/text programs. */
+    {
+        int case_up = 0;                    /* 1 = upper, 2 = lower */
+        if (match_kw(p, "UPPER$")) case_up = 1;
+        else if (match_kw(p, "LOWER$")) case_up = 2;
+        if (case_up) {
+            char src[TIKU_BASIC_STR_BUF_CAP];
+            size_t i, n;
+            skip_ws(p);
+            if (**p != '(') goto fn_paren_err;
+            (*p)++;
+            if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+            skip_ws(p);
+            if (**p != ')') goto fn_paren_err;
+            (*p)++;
+            n = strlen(src);
+            if (n + 1u > cap) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                return -1;
+            }
+            for (i = 0; i < n; i++) {
+                char c = src[i];
+                if (case_up == 1 && c >= 'a' && c <= 'z') c = (char)(c - ('a' - 'A'));
+                else if (case_up == 2 && c >= 'A' && c <= 'Z') c = (char)(c + ('a' - 'A'));
+                out[i] = c;
+            }
+            out[n] = '\0';
+            return 0;
+        }
+    }
+    if (match_kw(p, "TRIM$")) {
+        /* TRIM$(s$) -- strip leading + trailing ASCII whitespace. */
+        char src[TIKU_BASIC_STR_BUF_CAP];
+        size_t a, b, n;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        n = strlen(src);
+        a = 0;
+        while (a < n && (src[a] == ' ' || src[a] == '\t' ||
+                         src[a] == '\r' || src[a] == '\n')) a++;
+        b = n;
+        while (b > a && (src[b - 1] == ' ' || src[b - 1] == '\t' ||
+                         src[b - 1] == '\r' || src[b - 1] == '\n')) b--;
+        if ((b - a) + 1u > cap) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        memcpy(out, src + a, b - a);
+        out[b - a] = '\0';
+        return 0;
+    }
+    if (match_kw(p, "WORD$")) {
+        /* WORD$(s$, n [, delim$]) -- the nth field (1-based) of s$, split on
+         * any char in delim$ (default: whitespace). Empty runs are skipped, so
+         * "a,,b" with delim "," yields WORD$=... 1:"a" 2:"b". Out of range -> "".
+         * The tokenizer for "parse text, extract words". */
+        char src[TIKU_BASIC_STR_BUF_CAP], delim[TIKU_BASIC_STR_BUF_CAP];
+        long idx;
+        const char *dl;
+        size_t i, srclen, tstart = 0, tlen = 0;
+        long w = 0;
+        int in_tok = 0, found = 0, dgiven = 0;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1; }
+        (*p)++;
+        idx = parse_expr(p);
+        if (basic_error) return -1;
+        skip_ws(p);
+        if (**p == ',') {
+            (*p)++;
+            if (parse_strexpr(p, delim, sizeof(delim)) != 0) return -1;
+            dgiven = 1;
+            skip_ws(p);
+        }
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        dl = (dgiven && delim[0]) ? delim : " \t\r\n";
+        srclen = strlen(src);
+        for (i = 0; i <= srclen && !found; i++) {
+            int is_delim = (i == srclen) ? 1 : (strchr(dl, src[i]) != NULL);
+            if (!is_delim) {
+                if (!in_tok) { in_tok = 1; tstart = i; tlen = 0; }
+                tlen++;
+            } else if (in_tok) {
+                in_tok = 0;
+                w++;
+                if (w == idx) found = 1;
+            }
+        }
+        if (found && idx >= 1) {
+            if (tlen + 1u > cap) {
+                basic_error = 1;
+                SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                return -1;
+            }
+            memcpy(out, src + tstart, tlen);
+            out[tlen] = '\0';
+        } else {
+            out[0] = '\0';
+        }
+        return 0;
+    }
+    if (match_kw(p, "REPLACE$")) {
+        /* REPLACE$(s$, from$, to$) -- replace every occurrence of from$ with
+         * to$. Empty from$ returns s$ unchanged (no infinite loop). */
+        char src[TIKU_BASIC_STR_BUF_CAP];
+        char from[TIKU_BASIC_STR_BUF_CAP], to[TIKU_BASIC_STR_BUF_CAP];
+        size_t fl, tl, srclen, i = 0, o = 0;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1; }
+        (*p)++;
+        if (parse_strexpr(p, from, sizeof(from)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1; }
+        (*p)++;
+        if (parse_strexpr(p, to, sizeof(to)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        fl = strlen(from); tl = strlen(to); srclen = strlen(src);
+        while (i < srclen) {
+            if (fl > 0 && i + fl <= srclen && memcmp(src + i, from, fl) == 0) {
+                if (o + tl + 1u > cap) {
+                    basic_error = 1;
+                    SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                    return -1;
+                }
+                memcpy(out + o, to, tl); o += tl; i += fl;
+            } else {
+                if (o + 2u > cap) {
+                    basic_error = 1;
+                    SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+                    return -1;
+                }
+                out[o++] = src[i++];
+            }
+        }
+        out[o] = '\0';
+        return 0;
+    }
+#if TIKU_BASIC_JSON_ENABLE
+    if (match_kw(p, "JSON$")) {
+        /* JSON$(json$, path$) -- extract a scalar by dotted path (object keys +
+         * array indices), e.g. JSON$(R$, "choices.0.message.content"). Missing
+         * key / out-of-range index / non-scalar target -> "". */
+        char src[TIKU_BASIC_STR_BUF_CAP], jpath[TIKU_BASIC_STR_BUF_CAP];
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1; }
+        (*p)++;
+        if (parse_strexpr(p, jpath, sizeof(jpath)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        (void)basic_json_extract(src, (uint16_t)strlen(src), jpath, out, cap);
+        return 0;
+    }
+#endif
     if (match_kw(p, "STRIP$")) {
         /* STRIP$(html$) -- render HTML to plain text (tags/scripts removed,
          * entities decoded). Bounded by the string scratch (STR_BUF_CAP). */
@@ -551,7 +835,44 @@ parse_strprim(const char **p, char *out, size_t cap)
         skip_ws(p);
         if (**p != ')') goto fn_paren_err;
         (*p)++;
-        (void)basic_https_get(host, path, out, cap);
+        (void)basic_https_get("GET", host, path, NULL, NULL, out, cap);
+        return 0;
+    }
+    /* HTTPPOST$("host","path", body$ [, ctype$]) -- HTTPS POST body$ (default
+     * Content-Type application/json) over the same cert-TLS client, returning
+     * the response body.  Set Authorization/other headers first with HTTPHEADER.
+     * The agent write path: pair with JSON$ to read the reply. */
+    if (match_kw(p, "HTTPPOST$")) {
+        char host[64], path[80], ctype[48];
+        char body[TIKU_BASIC_STR_BUF_CAP];
+        int have_ct = 0;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_path_literal(p, host, sizeof(host)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, body, sizeof(body)) != 0) return -1;
+        skip_ws(p);
+        if (**p == ',') {                       /* optional content-type */
+            (*p)++;
+            if (parse_strexpr(p, ctype, sizeof(ctype)) != 0) return -1;
+            have_ct = 1;
+            skip_ws(p);
+        }
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        (void)basic_https_get("POST", host, path, body,
+                              have_ct ? ctype : NULL, out, cap);
         return 0;
     }
 #endif

@@ -304,6 +304,7 @@ exec_stmt(const char **p)
 #endif
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
     if (match_kw(p, "BROWSE"))   { exec_browse(p);   return; }
+    if (match_kw(p, "HTTPHEADER")) { exec_httpheader(p); return; }
 #endif
 #endif
 #if TIKU_BASIC_SUBS_ENABLE
