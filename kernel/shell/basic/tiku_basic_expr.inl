@@ -44,6 +44,10 @@
 /* PRIMARY / UNARY                                                           */
 /*---------------------------------------------------------------------------*/
 
+#if TIKU_BASIC_STRVARS_ENABLE
+static long parse_cond(const char **p);   /* fwd: lets (A$ = B$) be a value */
+#endif
+
 static long
 expr_prim(const char **p)
 {
@@ -52,7 +56,11 @@ expr_prim(const char **p)
     skip_ws(p);
     if (**p == '(') {
         (*p)++;
+#if TIKU_BASIC_STRVARS_ENABLE
+        v = parse_cond(p);      /* a numeric expr OR a string comparison */
+#else
         v = parse_expr(p);
+#endif
         skip_ws(p);
         if (**p == ')') (*p)++;
         else { basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); }
@@ -276,11 +284,11 @@ static long
 parse_expr(const char **p) { return expr_or(p); }
 
 #if TIKU_BASIC_STRVARS_ENABLE
-/* parse_cond: a numeric expression OR a top-level string comparison.
- * String comparisons are accepted only at the IF-condition top level
- * -- you can write `IF A$ = "hi" THEN ...` but not
- * `LET X = (A$ = "hi")`. The mixed-type machinery for the latter
- * isn't worth its weight in code yet. Supported relops: = <> < > <= >=. */
+/* parse_cond: a numeric expression OR a string comparison, yielding 0/1.
+ * Reached both as an IF condition (`IF A$ = "hi" THEN ...`) and, via
+ * expr_prim's parenthesized primary, as a value anywhere an expression is
+ * allowed (`LET X = (A$ = "hi")`, `PRINT (A$ < B$)`). Supported relops:
+ * = <> < > <= >=. */
 static long
 parse_cond(const char **p)
 {
