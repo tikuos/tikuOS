@@ -230,6 +230,33 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
+/* HTTP REQUEST ASSEMBLY BUDGET (HTTPGET$ / HTTPPOST$)                        */
+/*---------------------------------------------------------------------------*/
+
+/* Single source of truth for the bounded inputs basic_https_get() concatenates
+ * into its request buffer.  The caller (tiku_basic_string.inl) sizes its
+ * host/path/content-type buffers from these; HTTPHEADER bounds its block to
+ * TIKU_BASIC_HTTP_HDRS_MAX; and a _Static_assert in tiku_basic_https.inl proves
+ * the worst-case assembled request still fits TIKU_BASIC_HTTP_REQ_MAX.  So the
+ * req[] budget is enforced at compile time across all three files -- bumping any
+ * cap without growing REQ_MAX breaks the build instead of overflowing req[]. */
+#ifndef TIKU_BASIC_HTTP_HOST_MAX
+#define TIKU_BASIC_HTTP_HOST_MAX    64
+#endif
+#ifndef TIKU_BASIC_HTTP_PATH_MAX
+#define TIKU_BASIC_HTTP_PATH_MAX    80
+#endif
+#ifndef TIKU_BASIC_HTTP_CTYPE_MAX
+#define TIKU_BASIC_HTTP_CTYPE_MAX   48
+#endif
+#ifndef TIKU_BASIC_HTTP_HDRS_MAX
+#define TIKU_BASIC_HTTP_HDRS_MAX    192
+#endif
+#ifndef TIKU_BASIC_HTTP_REQ_MAX
+#define TIKU_BASIC_HTTP_REQ_MAX     576
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* MULTI-LETTER VARIABLE NAMES                                               */
 /*---------------------------------------------------------------------------*/
 

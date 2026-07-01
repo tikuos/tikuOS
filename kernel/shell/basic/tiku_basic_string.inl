@@ -945,7 +945,7 @@ parse_strprim(const char **p, char *out, size_t cap)
      * call drives the net stack itself (WiFi RX drain + TCP timers) so the
      * console stays alive; HTTPSTATUS() exposes the parsed status code. */
     if (match_kw(p, "HTTPGET$")) {
-        char host[64], path[80];
+        char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX];
         skip_ws(p);
         if (**p != '(') goto fn_paren_err;
         (*p)++;
@@ -967,7 +967,8 @@ parse_strprim(const char **p, char *out, size_t cap)
      * the response body.  Set Authorization/other headers first with HTTPHEADER.
      * The agent write path: pair with JSON$ to read the reply. */
     if (match_kw(p, "HTTPPOST$")) {
-        char host[64], path[80], ctype[48];
+        char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX],
+             ctype[TIKU_BASIC_HTTP_CTYPE_MAX];
         char body[TIKU_BASIC_STR_BUF_CAP];
         int have_ct = 0;
         skip_ws(p);

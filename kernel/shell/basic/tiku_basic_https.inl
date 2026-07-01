@@ -20,8 +20,18 @@
 static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_net.inl */
 
 static int basic_http_status;          /* last HTTPGET$/HTTPPOST$ status */
-static char basic_http_hdrs[192];      /* extra request headers set by HTTPHEADER
-                                        * ("Name: value\r\n"...); "" = none */
+static char basic_http_hdrs[TIKU_BASIC_HTTP_HDRS_MAX];  /* extra request headers
+                                        * set by HTTPHEADER ("Name: value\r\n"...); "" = none */
+
+/* Compile-time budget for req[] in basic_https_get(): the four bounded inputs
+ * (host + path + HTTPHEADER block + content-type) plus a generous fixed
+ * allowance (128) for the method, the HTTP/Host/Connection/Content-* tokens, the
+ * decimal Content-Length and the CRLFs.  Bumping any cap in tiku_basic_config.h
+ * without growing REQ_MAX breaks the build here instead of overflowing req[]. */
+_Static_assert(TIKU_BASIC_HTTP_HOST_MAX + TIKU_BASIC_HTTP_PATH_MAX +
+               TIKU_BASIC_HTTP_HDRS_MAX + TIKU_BASIC_HTTP_CTYPE_MAX + 128u
+               <= TIKU_BASIC_HTTP_REQ_MAX,
+               "BASIC HTTP request buffer too small for its bounded inputs");
 
 
 #if defined(PLATFORM_RP2350)
@@ -292,7 +302,7 @@ basic_https_get(const char *method, const char *host, const char *path,
     tiku_kits_crypto_tls13_io_t io;
     tiku_kits_net_tcp_conn_t   *tcp;
     uint8_t  ip[4];
-    char     req[576];   /* method + path + host + HTTPHEADER lines + POST hdrs */
+    char     req[TIKU_BASIC_HTTP_REQ_MAX];  /* method+path+host+HTTPHEADER+POST hdrs; budget _Static_assert'd above */
     size_t   total = 0, rl;
     int      n, use12 = 0;
     tiku_clock_time_t dl;
