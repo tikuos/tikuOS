@@ -83,10 +83,13 @@
 /* PROGRAM_LINES scales program CAPACITY (line count) to the arena/RAM -- the
  * knob that varies per platform now that LINE_MAX is uniform.  It sizes the
  * prog[] arena block (PROGRAM_LINES * LINE_MAX) and the SAVE buffer
- * (PROGRAM_LINES * (LINE_MAX + 8); .ssram on Ambiq / .persistent FRAM on MSP430
- * / .bss elsewhere).  At LINE_MAX=144 that is ~152 bytes/line:
- *   HUGE (Apollo510)  2048 -> ~295 KB prog + ~311 KB save   (3 MB SSRAM)
- *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB save   (1.6 MB SSRAM)
+ * (PROGRAM_LINES * (LINE_MAX + 8)).  The SAVE buffer is DURABLE: on Ambiq it
+ * lives in the carved NVM-region tail, so it must fit TIKU_NVM_RESERVED_BYTES
+ * (256 KB) -- that tail, NOT SSRAM, is what caps HUGE (a _Static_assert in
+ * tiku_basic_persist.inl enforces it).  .persistent FRAM on MSP430 / .bss
+ * elsewhere.  At LINE_MAX=144 that is ~152 bytes/line:
+ *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB save   (fits 256 KB NVM tail)
+ *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB save   (fits; 1.6 MB SSRAM)
  *   RP2350             512 ->  ~74 KB prog +  ~78 KB .bss   (~160 KB arena / 520 KB SRAM)
  *   FRAM (MSP430)       96 ->  ~14 KB prog +  ~15 KB FRAM   (FR5994/6989, 256 KB FRAM)
  *   else (host/small)   50 ->   ~7 KB
@@ -97,7 +100,7 @@
 #  if defined(PLATFORM_RP2350)
 #    define TIKU_BASIC_PROGRAM_LINES 512
 #  elif defined(TIKU_BASIC_TIER_HUGE)
-#    define TIKU_BASIC_PROGRAM_LINES 2048
+#    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 256 KB NVM save tail */
 #  elif defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_PROGRAM_LINES 1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
