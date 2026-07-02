@@ -112,7 +112,30 @@ exec_fetch(const char **p)
     rc = basic_https_get(have_body ? "POST" : "GET", host, path,
                          have_body ? body : NULL, NULL,
                          basic_bigbuf[n], (size_t)TIKU_BASIC_BIGBUF_SIZE);
-    basic_biglen[n] = (rc > 0) ? (size_t)rc : 0;
+    /* basic_https_get stores the whole reply (status line + headers + body).
+     * The #n extractors (JSON$/LINE$/BETWEEN$) want the reply BODY -- a JSON$
+     * parse from byte 0 would choke on "HTTP/1.1 ..." -- so drop the header
+     * block here: keep everything past the first blank line (CRLF CRLF).
+     * HTTPSTATUS() still reports the code.  A reply with no header terminator
+     * (odd or truncated) is kept whole rather than discarded. */
+    if (rc > 0) {
+        char  *buf = basic_bigbuf[n];
+        size_t total = (size_t)rc, i, hdr = 0;
+        for (i = 0; i + 3u < total; i++) {
+            if (buf[i] == '\r' && buf[i + 1] == '\n' &&
+                buf[i + 2] == '\r' && buf[i + 3] == '\n') { hdr = i + 4u; break; }
+        }
+        if (hdr > 0) {                  /* shift the body down over the headers */
+            size_t blen = total - hdr, j;
+            for (j = 0; j < blen; j++) buf[j] = buf[hdr + j];
+            buf[blen] = '\0';
+            basic_biglen[n] = blen;
+        } else {
+            basic_biglen[n] = total;
+        }
+    } else {
+        basic_biglen[n] = 0;
+    }
 }
 #endif
 #endif
