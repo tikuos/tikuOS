@@ -1196,6 +1196,11 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_reboot.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_trng.c
+# The mrambench command benches the Ambiq bootrom MRAM programmer — only
+# compile it on Ambiq (the shell config gates the table entry the same way).
+ifeq ($(TIKU_PLATFORM),ambiq)
+SRCS += kernel/shell/commands/tiku_shell_cmd_mrambench.c
+endif
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
 endif

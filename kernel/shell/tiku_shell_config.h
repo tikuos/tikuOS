@@ -78,6 +78,15 @@
 #ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
 #endif
+#ifndef TIKU_SHELL_CMD_MRAMBENCH
+/* Auto-on on Ambiq (benches the Ambiq bootrom MRAM programmer); off
+ * elsewhere. The .c is only compiled on Ambiq (Makefile-gated). */
+#if defined(PLATFORM_AMBIQ)
+#define TIKU_SHELL_CMD_MRAMBENCH 1  /**< mrambench - Time the MRAM programmer */
+#else
+#define TIKU_SHELL_CMD_MRAMBENCH 0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_WIFI
 /* Auto-on when the CYW43 driver is enabled; otherwise off. Override
  * with -DTIKU_SHELL_CMD_WIFI=0 to drop the command from the table. */
