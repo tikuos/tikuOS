@@ -170,6 +170,7 @@ exec_udpsend(const char **p)
                                (const uint8_t *)payload,
                                (uint16_t)strlen(payload)) != TIKU_KITS_NET_OK) {
         basic_error = 1;
+        basic_errcat = TIKU_BASIC_ERR_NET;
         SHELL_PRINTF(SH_RED "? UDP send failed (is the IP link up? 'wifi up')\n"
                      SH_RST);
     }
@@ -257,6 +258,7 @@ exec_browse(const char **p)
         if (basic_https_get("GET", host, path, NULL, NULL, basic_browse_buf,
                             sizeof basic_browse_buf) < 0) {
             basic_error = 1;      /* basic_https_get already printed the reason */
+            basic_errcat = TIKU_BASIC_ERR_NET;
             return;
         }
         if (hop < 3 && basic_http_redirect(basic_browse_buf, url, sizeof url)) {
@@ -297,9 +299,29 @@ exec_browse(const char **p)
  * never hard-hangs (the ADC-hang class). */
 static volatile uint8_t basic_mqtt_evt;
 static void basic_mqtt_event_cb(uint8_t e) { basic_mqtt_evt = e; }
+
+/* Inbound capture for MQTTWAIT$: the last PUBLISH the broker delivered,
+ * copied out of the transient callback buffers (which are only valid for
+ * the callback's duration) into bounded static storage.  `rx_pending`
+ * latches until the waiter consumes it. */
+static volatile uint8_t basic_mqtt_rx_pending;
+static char basic_mqtt_rx_topic[48];
+static char basic_mqtt_rx_msg[TIKU_BASIC_MQTT_RX_CAP];
 static void basic_mqtt_msg_cb(const char *t, uint16_t tl, const uint8_t *d,
                               uint16_t dl, uint8_t q, uint8_t r)
-{ (void)t; (void)tl; (void)d; (void)dl; (void)q; (void)r; }
+{
+    uint16_t n;
+    (void)q; (void)r;
+    n = (tl < sizeof(basic_mqtt_rx_topic) - 1u)
+        ? tl : (uint16_t)(sizeof(basic_mqtt_rx_topic) - 1u);
+    memcpy(basic_mqtt_rx_topic, t, n);
+    basic_mqtt_rx_topic[n] = '\0';
+    n = (dl < sizeof(basic_mqtt_rx_msg) - 1u)
+        ? dl : (uint16_t)(sizeof(basic_mqtt_rx_msg) - 1u);
+    memcpy(basic_mqtt_rx_msg, d, n);
+    basic_mqtt_rx_msg[n] = '\0';
+    basic_mqtt_rx_pending = 1;
+}
 
 /* One pump step: drive MQTT keepalive/state (paced ~8 Hz), service the console
  * transport (tiku_shell_io_rx_ready() also services the USB-CDC poll), kick the
@@ -326,9 +348,19 @@ basic_net_mqtt_pump(void)
         tiku_kits_net_tcp_periodic();
         tiku_kits_net_mqtt_periodic();
     }
+    /* Ctrl-C break.  On a SLIP build the console and the IP link share one
+     * UART, so read through the SLIP-aware demux (as exec_delay_ms does):
+     * it routes IP frames to the stack and returns only genuine console
+     * bytes.  The raw getc would misread a payload byte 0x03 as Ctrl-C --
+     * aborting a connect early with an uncategorised error -- and would
+     * also steal bytes meant for the TCP/MQTT stack. */
+#if TIKU_SHELL_CMD_SLIP
+    if (tiku_shell_net_getc() == BASIC_CTRL_C) return 1;
+#else
     if (tiku_shell_io_rx_ready()) {
         if (tiku_shell_io_getc() == BASIC_CTRL_C) return 1;
     }
+#endif
     return 0;
 }
 
@@ -370,6 +402,7 @@ exec_mqttpub(const char **p)
     if (tiku_kits_net_mqtt_connect(basic_mqtt_msg_cb, basic_mqtt_event_cb)
         != TIKU_KITS_NET_OK) {
         basic_error = 1;
+        basic_errcat = TIKU_BASIC_ERR_NET;
         SHELL_PRINTF(SH_RED "? MQTT connect rejected (IP link up? 'wifi up')\n" SH_RST);
         return;
     }
@@ -383,7 +416,8 @@ exec_mqttpub(const char **p)
     }
     if (!tiku_kits_net_mqtt_is_connected()) {
         tiku_kits_net_mqtt_disconnect();
-        basic_error = 1; SHELL_PRINTF(SH_RED "? MQTT connect timeout\n" SH_RST); return;
+        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
+        SHELL_PRINTF(SH_RED "? MQTT connect timeout\n" SH_RST); return;
     }
     tiku_kits_net_mqtt_publish(topic, (const uint8_t *)payload,
                                (uint16_t)strlen(payload), 0, 0);
@@ -395,6 +429,84 @@ exec_mqttpub(const char **p)
     tiku_kits_net_mqtt_disconnect();
     deadline = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND / 2);
     while (TIKU_CLOCK_LT(tiku_clock_time(), deadline)) (void)basic_net_mqtt_pump();
+}
+
+/* MQTTWAIT$("broker_ip", "topic", secs) helper -- the inbound dual of
+ * MQTTPUB.  Connect, SUBSCRIBE to `topic`, pump until one PUBLISH lands
+ * or `secs` elapses, then disconnect; the payload is written to out[cap]
+ * ("" on timeout).  Returns 0 if a message arrived, -1 on timeout, and
+ * sets basic_error (category NET) on a hard failure (bad IP / connect).
+ * Reuses the exact connect/pump/disconnect lifecycle MQTTPUB is proven
+ * on -- no persistent connection is held across statements. */
+static int
+basic_net_mqtt_wait(const char *ipstr, const char *topic, long secs,
+                    char *out, size_t cap)
+{
+    uint8_t ip[4];
+    tiku_clock_time_t deadline;
+
+    if (cap) out[0] = '\0';
+    if (basic_net_parse_ip(ipstr, ip) != 0) {
+        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
+        SHELL_PRINTF(SH_RED "? bad broker IP '%s'\n" SH_RST, ipstr);
+        return -1;
+    }
+    if (secs <= 0)    secs = 1;
+    if (secs > 3600L) secs = 3600L;
+
+    tiku_kits_net_tcp_init();
+    tiku_kits_net_mqtt_init();
+    tiku_kits_net_mqtt_set_server(ip, 1883);
+    tiku_kits_net_mqtt_set_credentials("tikubasic", (const char *)0,
+                                       (const char *)0);
+    basic_mqtt_evt        = 0xFFu;
+    basic_mqtt_rx_pending = 0;
+    if (tiku_kits_net_mqtt_connect(basic_mqtt_msg_cb, basic_mqtt_event_cb)
+        != TIKU_KITS_NET_OK) {
+        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
+        SHELL_PRINTF(SH_RED "? MQTT connect rejected (IP link up? 'wifi up')\n" SH_RST);
+        return -1;
+    }
+    deadline = (tiku_clock_time_t)(tiku_clock_time() + 8u * TIKU_CLOCK_SECOND);
+    while (!tiku_kits_net_mqtt_is_connected() &&
+           TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
+        if (basic_net_mqtt_pump()) {
+            tiku_kits_net_mqtt_disconnect();
+            basic_error = 1; SHELL_PRINTF(SH_YELLOW "^C\n" SH_RST); return -1;
+        }
+    }
+    if (!tiku_kits_net_mqtt_is_connected()) {
+        tiku_kits_net_mqtt_disconnect();
+        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
+        SHELL_PRINTF(SH_RED "? MQTT connect timeout\n" SH_RST); return -1;
+    }
+    tiku_kits_net_mqtt_subscribe(topic, 0);
+    /* Pump until a PUBLISH lands (msg_cb latches rx_pending) or the
+     * caller's timeout expires.  Ctrl-C aborts early. */
+    deadline = (tiku_clock_time_t)(tiku_clock_time()
+                   + (tiku_clock_time_t)((tiku_clock_time_t)secs
+                                         * TIKU_CLOCK_SECOND));
+    while (!basic_mqtt_rx_pending &&
+           TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
+        if (basic_net_mqtt_pump()) break;
+    }
+    tiku_kits_net_mqtt_disconnect();
+    {   /* flush the DISCONNECT before returning */
+        tiku_clock_time_t d2 =
+            (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND / 2);
+        while (TIKU_CLOCK_LT(tiku_clock_time(), d2))
+            (void)basic_net_mqtt_pump();
+    }
+    if (basic_mqtt_rx_pending) {
+        size_t n = strlen(basic_mqtt_rx_msg);
+        if (cap == 0) return 0;
+        if (n + 1u > cap) n = cap - 1u;
+        memcpy(out, basic_mqtt_rx_msg, n);
+        out[n] = '\0';
+        basic_mqtt_rx_pending = 0;
+        return 0;
+    }
+    return -1;   /* timeout: out already "" */
 }
 #endif /* TIKU_KITS_NET_MQTT_ENABLE */
 

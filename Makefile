@@ -1701,6 +1701,22 @@ SRCS   += $(wildcard tikukits/net/tls/tls12/*.c)
 endif
 endif
 
+# BASE64$/SHA256$/HMAC$ BASIC builtins.  On by default whenever BASIC is
+# built; TIKU_BASIC_CRYPTO=0 drops them (~3 KB) on the tightest parts.
+# When the full crypto kit is already compiled the sources come from the
+# block above, so we only add the -D and skip the (duplicate) source lines.
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+TIKU_BASIC_CRYPTO ?= 1
+ifeq ($(TIKU_BASIC_CRYPTO),1)
+CFLAGS += -DTIKU_BASIC_CRYPTO_ENABLE=1
+ifneq ($(TIKU_KIT_CRYPTO_ENABLE),1)
+SRCS   += tikukits/crypto/sha256/tiku_kits_crypto_sha256.c
+SRCS   += tikukits/crypto/base64/tiku_kits_crypto_base64.c
+SRCS   += tikukits/crypto/hmac/tiku_kits_crypto_hmac.c
+endif
+endif
+endif
+
 ifeq ($(TIKU_KIT_TIME_ENABLE),1)
 CFLAGS += -DTIKU_KIT_TIME_ENABLE=1
 SRCS   += tikukits/time/tiku_kits_time.c

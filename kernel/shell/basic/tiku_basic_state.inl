@@ -206,6 +206,17 @@ static int          basic_auto_active;
 static uint16_t     basic_err_handler;
 static uint16_t     basic_err_pc;
 
+/* ERR / ERL introspection for ON ERROR handlers.  `basic_errcat` is a
+ * transient per-statement category hint: throw sites that can classify
+ * (range, divide-by-zero, net, I/O, ...) set it, and it is cleared
+ * before each statement.  When an error is trapped it is frozen into
+ * the sticky `basic_err` (returned by ERR) together with the erroring
+ * line in `basic_erl` (returned by ERL), so both survive into the
+ * handler.  Uncategorised errors surface as TIKU_BASIC_ERR_GENERAL. */
+static int          basic_errcat;
+static int          basic_err;
+static uint16_t     basic_erl;
+
 /* EVERY ms : stmt -- recurring scheduled statement. Polled by the
  * RUN loop between program lines. Up to TIKU_BASIC_EVERY_MAX active
  * registrations; the entire table resets at every RUN start so a

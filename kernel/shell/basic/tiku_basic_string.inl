@@ -63,6 +63,12 @@ static long parse_cond(const char **p);
 static int  parse_path_literal(const char **p, char *buf, size_t cap);
 static long basic_vfsread(const char *path);
 #endif
+#if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_MQTT_ENABLE + 0)
+/* MQTTWAIT$ is dispatched here but implemented in tiku_basic_net.inl,
+ * which is included after this file -- forward-declare it. */
+static int basic_net_mqtt_wait(const char *ipstr, const char *topic,
+                               long secs, char *out, size_t cap);
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* STRING HEAP + STRING-EXPRESSION PARSER                                    */
@@ -260,6 +266,24 @@ basic_json_extract(const char *json, uint16_t jlen, const char *path,
 /* parse_strprim: a single string atom -- literal, variable, or a
  * string-returning function call. Stores the resulting NUL-terminated
  * string in @out (cap bytes). Returns 0 on success, -1 on error. */
+#if TIKU_BASIC_CRYPTO_ENABLE
+/* Encode n raw bytes as 2n lowercase hex chars + NUL into out. The
+ * caller guarantees out holds 2n+1 bytes.  Used by SHA256$ / HMAC$,
+ * which return their digests as hex text (raw bytes cannot survive a
+ * NUL-terminated string interpreter). */
+static void
+basic_hex_encode(const uint8_t *src, size_t n, char *out)
+{
+    static const char hexd[] = "0123456789abcdef";
+    size_t i;
+    for (i = 0; i < n; i++) {
+        out[2 * i]     = hexd[(src[i] >> 4) & 0x0F];
+        out[2 * i + 1] = hexd[src[i] & 0x0F];
+    }
+    out[2 * n] = '\0';
+}
+#endif
+
 static int
 parse_strprim(const char **p, char *out, size_t cap)
 {
@@ -1001,6 +1025,39 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
+#if (TIKU_KITS_NET_MQTT_ENABLE + 0)
+    /* MQTTWAIT$("broker_ip", "topic", secs) -- the inbound dual of
+     * MQTTPUB: subscribe and block up to `secs` for one PUBLISH, then
+     * return its payload ("" on timeout).  This is how a device is
+     * commanded: LET C$ = MQTTWAIT$(B$, "cmd/dev1", 30).  Pairs with
+     * ON ERROR (ERR()=6 on link failure) for a robust wait loop. */
+    if (match_kw(p, "MQTTWAIT$")) {
+        char host[20], topic[48];
+        long secs;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_path_literal(p, host, sizeof(host)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_path_literal(p, topic, sizeof(topic)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        secs = parse_expr(p);
+        if (basic_error) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        (void)basic_net_mqtt_wait(host, topic, secs, out, cap);
+        return 0;
+    }
+#endif
 #endif
 
     /* UCASE$(s) / LCASE$(s) -- ASCII case conversion. */
@@ -1148,6 +1205,81 @@ parse_strprim(const char **p, char *out, size_t cap)
         out[n] = '\0';
         return 0;
     }
+
+#if TIKU_BASIC_CRYPTO_ENABLE
+    /* BASE64$(s$) -- RFC 4648 Base64 of the bytes of s$.  The reverse
+     * (decode) is intentionally omitted: it would yield raw bytes that
+     * a NUL-terminated string cannot hold. */
+    if (match_kw(p, "BASE64$")) {
+        char src[TIKU_BASIC_STR_BUF_CAP];
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (tiku_kits_crypto_base64_encode((const uint8_t *)src,
+                (uint16_t)strlen(src), out, (uint16_t)cap, NULL)
+            != TIKU_KITS_CRYPTO_OK) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        return 0;
+    }
+    /* SHA256$(s$) -- SHA-256 of s$, returned as 64-char lowercase hex. */
+    if (match_kw(p, "SHA256$")) {
+        char    src[TIKU_BASIC_STR_BUF_CAP];
+        uint8_t dig[TIKU_KITS_CRYPTO_SHA256_DIGEST_SIZE];
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (cap < 2u * sizeof(dig) + 1u) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        (void)tiku_kits_crypto_sha256_hash((const uint8_t *)src,
+                                           strlen(src), dig);
+        basic_hex_encode(dig, sizeof(dig), out);
+        return 0;
+    }
+    /* HMAC$(key$, msg$) -- HMAC-SHA256(key, msg), 64-char lowercase hex.
+     * The on-device request-signing primitive: pair with HTTPHEADER to
+     * build an Authorization header for an API call. */
+    if (match_kw(p, "HMAC$")) {
+        char    key[TIKU_BASIC_STR_BUF_CAP], msg[TIKU_BASIC_STR_BUF_CAP];
+        uint8_t mac[TIKU_KITS_CRYPTO_HMAC_SHA256_SIZE];
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        if (parse_strexpr(p, key, sizeof(key)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ',') {
+            basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return -1;
+        }
+        (*p)++;
+        if (parse_strexpr(p, msg, sizeof(msg)) != 0) return -1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (cap < 2u * sizeof(mac) + 1u) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_RED "? string too long\n" SH_RST);
+            return -1;
+        }
+        (void)tiku_kits_crypto_hmac_sha256(
+                (const uint8_t *)key, (uint16_t)strlen(key),
+                (const uint8_t *)msg, (uint16_t)strlen(msg), mac);
+        basic_hex_encode(mac, sizeof(mac), out);
+        return 0;
+    }
+#endif
 
     /* Bare string variable: A$ / NAME$ / etc.  Must come AFTER the
      * function-name matchers above so that LEFT$(...) and friends

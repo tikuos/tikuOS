@@ -1311,16 +1311,62 @@ exec_delay(const char **p)
     exec_delay_ms(ms);
 }
 
+/* Low-power wait for `ticks` kernel ticks.  Unlike exec_delay_ms (a busy
+ * spin, kept for DELAY's short precise waits), this enters the platform's
+ * DEEP idle between wakes, so the CPU actually goes low-power for the
+ * duration -- the point of SLEEP on a microwatt part.  DEEP keeps the
+ * kernel tick alive on every supported target (MSP430 LPM3 wakes on the
+ * Timer_A ISR; the Ambiq/RP2350 tick survives WFI), so the core wakes at
+ * least once per tick to re-check the deadline and poll Ctrl-C; DEEPEST
+ * would gate the tick and never wake, so it is deliberately not used.
+ * `ticks` must stay below half the tick counter's range for the
+ * wrap-safe compare -- exec_sleep chunks large sleeps to guarantee this.
+ * If the platform offers no DEEP hook the loop degrades to a spin that
+ * still honours the deadline. */
+static void
+basic_lp_wait_ticks(tiku_clock_time_t ticks)
+{
+    tiku_clock_time_t     start = tiku_clock_time();
+    tiku_cpu_idle_enter_t idle  = tiku_cpu_idle_hook(TIKU_CPU_IDLE_DEEP);
+    if (ticks == 0u) return;
+    while ((tiku_clock_time_t)(tiku_clock_time() - start) < ticks) {
+#if TIKU_SHELL_CMD_SLIP
+        if (tiku_shell_net_getc() == BASIC_CTRL_C) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_YELLOW "^C\n" SH_RST);
+            return;
+        }
+#else
+        if (tiku_shell_io_rx_ready() &&
+            tiku_shell_io_getc() == BASIC_CTRL_C) {
+            basic_error = 1;
+            SHELL_PRINTF(SH_YELLOW "^C\n" SH_RST);
+            return;
+        }
+#endif
+        if (idle) idle();     /* WFI/LPM until the next interrupt (>=1/tick) */
+    }
+}
+
 static void
 exec_sleep(const char **p)
 {
     long s = parse_expr(p);
     if (basic_error) return;
     if (s <= 0) return;
-    /* Cap to avoid 32-bit overflow when computing ms; at 1000 ms/s
-     * the cap is well above the 16-bit-tick wraparound limit anyway. */
-    if (s > 60L) s = 60L;
-    exec_delay_ms(s * 1000L);
+    /* SLEEP N -- go low-power for N seconds.  Chunked into <=10 s waits
+     * so each stays well under the tick counter's wrap regardless of the
+     * platform tick rate (10 s is <32k ticks up to ~3.2 kHz).  Unlike
+     * DELAY, this enters DEEP idle: the microwatt-part use case is
+     * "go dark for a while", not a precise busy pause.  Ctrl-C aborts;
+     * the 24 h cap is a sanity bound, not a hardware limit. */
+    if (s > 86400L) s = 86400L;
+    while (s > 0L && !basic_error) {
+        long chunk = (s > 10L) ? 10L : s;
+        basic_lp_wait_ticks(
+            (tiku_clock_time_t)((tiku_clock_time_t)chunk * TIKU_CLOCK_SECOND));
+        s -= chunk;
+    }
 }
 
 /* EVERY ms : stmt  -- register a recurring statement. The RUN loop
@@ -1962,6 +2008,7 @@ parse_array_index(const char **p, basic_array_t *slot, char letter)
         }
         if (i < 0 || i >= (long)slot->dim1) {
             basic_error = 1;
+            basic_errcat = TIKU_BASIC_ERR_RANGE;
             SHELL_PRINTF(SH_RED "? array index %ld out of range\n" SH_RST, i);
             return -1;
         }
@@ -1975,6 +2022,7 @@ parse_array_index(const char **p, basic_array_t *slot, char letter)
         if (i < 0 || i >= (long)slot->dim1 ||
             j < 0 || j >= (long)slot->dim2) {
             basic_error = 1;
+            basic_errcat = TIKU_BASIC_ERR_RANGE;
             SHELL_PRINTF(SH_RED "? array index out of range\n" SH_RST);
             return -1;
         }

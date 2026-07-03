@@ -230,6 +230,41 @@
 #    define TIKU_BASIC_JSON_ENABLE   0
 #  endif
 #endif
+/* BASE64$ / SHA256$ / HMAC$ -- expose the crypto kit (base64, SHA-256,
+ * HMAC-SHA256) as string builtins so programs can sign API requests
+ * (Authorization headers) and hash data on-device.  Wraps
+ * tikukits/crypto/{base64,sha256,hmac}; hashes return lowercase hex.
+ * BIG-only.  Auto-on when the full crypto kit is compiled; the Makefile
+ * otherwise forces -DTIKU_BASIC_CRYPTO_ENABLE=1 and pulls just those
+ * three sources whenever BASIC is built (TIKU_BASIC_CRYPTO=0 drops it). */
+#ifndef TIKU_BASIC_CRYPTO_ENABLE
+#  if defined(TIKU_BASIC_TIER_BIG) && (TIKU_KIT_CRYPTO_ENABLE + 0)
+#    define TIKU_BASIC_CRYPTO_ENABLE 1
+#  else
+#    define TIKU_BASIC_CRYPTO_ENABLE 0
+#  endif
+#endif
+
+/* ERR category codes returned by the ERR() builtin inside an ON ERROR
+ * handler.  The classification is deliberately coarse: it exists so a
+ * handler can branch on "is this worth retrying?" (NET) versus "is my
+ * program wrong?" (RANGE/DIVZERO/TYPE).  Sites that cannot cheaply
+ * classify leave the error as GENERAL.  ERL() returns the line number. */
+#define TIKU_BASIC_ERR_GENERAL  1   /* uncategorised */
+#define TIKU_BASIC_ERR_SYNTAX   2   /* malformed statement/expression */
+#define TIKU_BASIC_ERR_TYPE     3   /* string/number type mismatch */
+#define TIKU_BASIC_ERR_RANGE    4   /* array subscript / bounds */
+#define TIKU_BASIC_ERR_DIVZERO  5   /* divide (or MOD) by zero */
+#define TIKU_BASIC_ERR_NET      6   /* HTTP / MQTT / socket failure */
+#define TIKU_BASIC_ERR_IO       7   /* VFS / file access */
+#define TIKU_BASIC_ERR_NOMEM    8   /* string heap / arena exhausted */
+
+/* MQTTWAIT$ inbound payload cap.  Received PUBLISH bodies longer than
+ * this are truncated.  Kept small (commands are short) so the static
+ * capture buffer costs little SRAM. */
+#ifndef TIKU_BASIC_MQTT_RX_CAP
+#  define TIKU_BASIC_MQTT_RX_CAP  256
+#endif
 #ifndef TIKU_BASIC_SUBS_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_SUBS_ENABLE   1

@@ -82,6 +82,25 @@ parse_call_2arg(const char **p, long *a, long *b)
     return 1;
 }
 
+/* Zero-arg call: consume an empty `()`.  Used by ERR()/ERL() and any
+ * other stateful builtin that takes no argument but keeps the parens
+ * so the lexer treats it as a function rather than an identifier. */
+static int
+parse_call_0arg(const char **p)
+{
+    skip_ws(p);
+    if (**p != '(') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? '(' expected\n" SH_RST); return 0;
+    }
+    (*p)++;
+    skip_ws(p);
+    if (**p != ')') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); return 0;
+    }
+    (*p)++;
+    return 1;
+}
+
 /* Detect and dispatch a built-in function call. Returns 1 if the
  * cursor sat on a function call (advanced past the closing paren,
  * @p out_v filled), 0 otherwise. Each branch must consume `(`...`)`
@@ -129,6 +148,7 @@ expr_call(const char **p, long *out_v)
         if (!parse_call_2arg(p, &a, &b)) return 1;
         if (b == 0) {
             basic_error = 1;
+            basic_errcat = TIKU_BASIC_ERR_DIVZERO;
             SHELL_PRINTF(SH_RED "? MOD by zero\n" SH_RST);
             return 1;
         }
@@ -215,6 +235,25 @@ expr_call(const char **p, long *out_v)
         return 1;
     }
 #endif
+    /* ERR() / ERL() -- error introspection for ON ERROR handlers.
+     * ERR is the category code (see TIKU_BASIC_ERR_* in the config;
+     * GENERAL=1 for anything the throw site could not classify), ERL
+     * the line that errored.  Both are 0 until the first error of the
+     * run.  Empty-paren form like the time builtins so the lexer knows
+     * they are functions, not variables.  The typical handler:
+     *   ON ERROR GOTO 900
+     *   ...
+     *   900 IF ERR() = 6 THEN PRINT "net down @"; ERL() : RESUME NEXT */
+    if (match_kw(p, "ERR")) {
+        if (!parse_call_0arg(p)) return 1;
+        *out_v = (long)basic_err;
+        return 1;
+    }
+    if (match_kw(p, "ERL")) {
+        if (!parse_call_0arg(p)) return 1;
+        *out_v = (long)basic_erl;
+        return 1;
+    }
     /* Time builtins. Both take a () with no arg so the parser knows
      * they're functions (otherwise MILLIS would parse as a multi-char
      * identifier with nothing to do). */
@@ -267,6 +306,7 @@ expr_call(const char **p, long *out_v)
         if (!parse_call_2arg(p, &a, &b)) return 1;
         if (b == 0) {
             basic_error = 1;
+            basic_errcat = TIKU_BASIC_ERR_DIVZERO;
             SHELL_PRINTF(SH_RED "? FDIV by zero" SH_RST "\n");
             return 1;
         }

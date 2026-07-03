@@ -56,6 +56,7 @@
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/timers/tiku_clock.h>
+#include <hal/tiku_cpu.h>                /* SLEEP -> real low-power idle */
 #include <stdio.h>
 #include <string.h>
 
@@ -89,6 +90,11 @@
 #endif
 #if TIKU_BASIC_JSON_ENABLE
 #include <tikukits/codec/json/tiku_kits_codec_json.h>  /* JSON$ path extractor */
+#endif
+#if TIKU_BASIC_CRYPTO_ENABLE
+#include <tikukits/crypto/base64/tiku_kits_crypto_base64.h>  /* BASE64$ */
+#include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>  /* SHA256$ */
+#include <tikukits/crypto/hmac/tiku_kits_crypto_hmac.h>      /* HMAC$   */
 #endif
 #if TIKU_BASIC_NET_ENABLE
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>   /* UDPSEND */

@@ -193,6 +193,7 @@ expr_term(const char **p)
         } else {
             if (rhs == 0) {
                 basic_error = 1;
+                basic_errcat = TIKU_BASIC_ERR_DIVZERO;
                 SHELL_PRINTF(SH_RED "? division by zero\n" SH_RST);
                 return 0;
             }

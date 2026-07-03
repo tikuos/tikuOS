@@ -65,6 +65,9 @@ exec_run(void)
 #endif
     basic_err_handler = 0;
     basic_err_pc      = 0;
+    basic_errcat      = 0;
+    basic_err         = 0;
+    basic_erl         = 0;
     basic_data_idx    = -1;      /* RESTORE-equivalent at every RUN */
     basic_data_off    = 0;
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) basic_everys[i].active = 0;
@@ -112,9 +115,15 @@ exec_run(void)
                 while (is_word_cont(*r)) r++;
                 if (*r == ':') p = r + 1;
             }
+            basic_errcat = 0;      /* fresh category hint per statement */
             exec_stmts(&p);
         }
         if (basic_error) {
+            /* Freeze ERR/ERL for the handler: the erroring line and the
+             * category the throw site set (GENERAL if it could not
+             * classify). */
+            basic_erl = prev_pc;
+            basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
             /* If an ON ERROR handler is registered, the error message
              * has already printed. Clear the error and jump to the
              * handler. RESUME (or RESUME NEXT / line) continues from
@@ -145,8 +154,11 @@ exec_run(void)
          * may run its stmt (and bubble up errors); ON CHANGE may
          * jump or push a GOSUB return. Either way the next loop
          * iteration picks up at the new basic_pc. */
+        basic_errcat = 0;      /* fresh category hint for reactive stmts */
         basic_poll_reactive();
         if (basic_error) {
+            basic_erl = prev_pc;
+            basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
             /* fall through to the existing error trap above next iter
              * by re-running the loop body... actually simpler: emulate
              * the trap inline. */
