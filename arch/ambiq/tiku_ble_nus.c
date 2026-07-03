@@ -1,0 +1,810 @@
+/*
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_ble_nus.c - Minimal connectable GATT peripheral (Nordic UART Service)
+ *
+ * A tiny hand-rolled BLE host on top of the EM9305 SPI-HCI transport
+ * (tiku_em9305): connectable advertising, a polled HCI event/ACL pump, LE
+ * connection handling, an L2CAP-LE + ATT server, and the Nordic UART Service.
+ * This is the wireless-shell transport (M3). No Cordio, no AmbiqSuite.
+ *
+ * Bring-up is staged so each layer has its own HW gate:
+ *   M3.1  connectable adv + connection/disconnection detection   <-- this file
+ *   M3.2  ATT server + NUS discovery
+ *   M3.3  NUS RX/TX wired to the shell io-backend
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "tiku_ble_nus.h"
+
+#include <arch/ambiq/tiku_em9305.h>
+#include <string.h>
+
+/* ------------------------------------------------------------------ *
+ *  HCI constants
+ * ------------------------------------------------------------------ */
+
+/* Command opcodes (mirrors the private set in tiku_em9305.c). */
+#define HCI_OP_RESET               0x0C03u
+#define HCI_OP_LE_SET_EVENT_MASK   0x2001u
+#define HCI_OP_LE_SET_ADV_PARAM    0x2006u
+#define HCI_OP_LE_SET_ADV_DATA     0x2008u
+#define HCI_OP_LE_SET_ADV_ENABLE   0x200Au
+#define HCI_OP_DISCONNECT          0x0406u
+
+/* HCI packet type bytes (first byte of every framed packet). */
+#define HCI_PKT_ACL                0x02u
+#define HCI_PKT_EVENT              0x04u
+
+/* HCI event codes. */
+#define HCI_EVT_DISCONN_COMPLETE   0x05u
+#define HCI_EVT_LE_META            0x3Eu
+
+/* LE Meta subevent codes. A controller reports a new link as either the legacy
+ * Connection Complete (0x01) or the Enhanced Connection Complete (0x0A); the two
+ * share identical leading fields (status, handle, role, peer address), so the
+ * same parse handles both -- we just have to accept both subevent codes. */
+#define HCI_LE_CONN_COMPLETE       0x01u
+#define HCI_LE_ENH_CONN_COMPLETE   0x0Au
+
+/* Advertising types. */
+#define ADV_IND                    0x00u   /* connectable undirected           */
+
+#define CONN_HANDLE_NONE           0xFFFFu
+
+/* ---- L2CAP / ATT / GATT (Nordic UART Service) ---- */
+
+#define L2CAP_CID_ATT              0x0004u
+
+/* GATT declaration UUIDs (16-bit). */
+#define GATT_PRIMARY_SVC           0x2800u
+#define GATT_CHARACTERISTIC        0x2803u
+#define GATT_CCCD                  0x2902u
+
+/* ATT opcodes. */
+#define ATT_ERROR_RSP              0x01u
+#define ATT_EXCHANGE_MTU_REQ       0x02u
+#define ATT_EXCHANGE_MTU_RSP       0x03u
+#define ATT_FIND_INFO_REQ          0x04u
+#define ATT_FIND_INFO_RSP          0x05u
+#define ATT_READ_BY_TYPE_REQ       0x08u
+#define ATT_READ_BY_TYPE_RSP       0x09u
+#define ATT_READ_REQ               0x0Au
+#define ATT_READ_RSP               0x0Bu
+#define ATT_READ_BY_GRP_REQ        0x10u
+#define ATT_READ_BY_GRP_RSP        0x11u
+#define ATT_WRITE_REQ              0x12u
+#define ATT_WRITE_RSP              0x13u
+#define ATT_HANDLE_VALUE_NTF       0x1Bu
+#define ATT_WRITE_CMD              0x52u
+
+/* ATT error codes. */
+#define ATT_ERR_INVALID_HANDLE     0x01u
+#define ATT_ERR_READ_NOT_PERM      0x02u
+#define ATT_ERR_WRITE_NOT_PERM     0x03u
+#define ATT_ERR_REQ_NOT_SUPP       0x06u
+#define ATT_ERR_ATTR_NOT_FOUND     0x0Au
+
+/* NUS attribute handles (fixed layout). */
+#define ATT_H_SVC                  0x0001u   /* primary service declaration     */
+#define ATT_H_RX_DECL              0x0002u   /* RX characteristic declaration   */
+#define ATT_H_RX_VAL               0x0003u   /* RX value (phone -> device write) */
+#define ATT_H_TX_DECL              0x0004u   /* TX characteristic declaration   */
+#define ATT_H_TX_VAL               0x0005u   /* TX value (device -> phone notify) */
+#define ATT_H_TX_CCCD              0x0006u   /* TX client config descriptor     */
+#define ATT_H_LAST                 0x0006u   /* last handle in the service      */
+
+/* Characteristic properties. */
+#define CHAR_PROP_WRITE_NR         0x04u     /* write without response          */
+#define CHAR_PROP_WRITE            0x08u     /* write                           */
+#define CHAR_PROP_NOTIFY           0x10u     /* notify                          */
+
+/* ATT MTU we offer. Notifications carry up to MTU-3 bytes of shell output. */
+#define NUS_SERVER_MTU             247u
+
+/* ------------------------------------------------------------------ *
+ *  State
+ * ------------------------------------------------------------------ */
+
+static tiku_ble_nus_conn_t s_conn = { CONN_HANDLE_NONE, 0u, 0u, {0,0,0,0,0,0} };
+static uint8_t             s_started;
+
+/* ATT connection state. */
+static uint16_t            s_att_mtu = 23u;   /* negotiated ATT MTU (23 default) */
+static uint16_t            s_tx_cccd;         /* TX CCCD value (bit0 = notify on) */
+
+/* NUS RX ring: bytes the phone wrote to the RX characteristic, drained by the
+ * shell as console input. TX buffer: shell output, flushed as TX notifications. */
+#define NUS_RX_RING        256u
+#define NUS_TX_BUF         1024u
+static uint8_t             s_rx_ring[NUS_RX_RING];
+static uint16_t            s_rx_head, s_rx_tail;
+static uint8_t             s_tx_buf[NUS_TX_BUF];
+static uint16_t            s_tx_len;
+
+static void nus_rx_push(const uint8_t *d, uint16_t n) {
+    uint16_t i;
+    for (i = 0u; i < n; i++) {
+        uint16_t nxt = (uint16_t)((s_rx_head + 1u) % NUS_RX_RING);
+        if (nxt == s_rx_tail) {
+            break;                          /* ring full -- drop the rest       */
+        }
+        s_rx_ring[s_rx_head] = d[i];
+        s_rx_head = nxt;
+    }
+}
+
+/* NUS 128-bit base UUID 6E400001-B5A3-F393-E0A9-E50E24DCCA9E in little-endian
+ * wire order. Byte [12] selects the member: 01 = service, 02 = RX, 03 = TX. */
+static const uint8_t       NUS_UUID_BASE[16] = {
+    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu
+};
+
+/* Raw bytes of the most recent LE Meta event, kept for bring-up diagnostics
+ * (lets the shell confirm which connection-complete subevent the radio sends). */
+static uint8_t             s_last_meta[24];
+static uint8_t             s_last_meta_len;
+
+/* Trace ring of the last few raw packets the pump read (type + head bytes),
+ * so a session dump shows exactly what the controller delivered. */
+#define NUS_TRACE_N        8u
+#define NUS_TRACE_CAP      18u
+static struct { uint8_t len; uint8_t b[NUS_TRACE_CAP]; } s_trace[NUS_TRACE_N];
+static uint8_t             s_trace_head;   /* next slot to write */
+static uint8_t             s_trace_count;  /* valid entries (<= NUS_TRACE_N) */
+
+static void nus_trace(const uint8_t *p, uint16_t len) {
+    uint8_t n = (len < NUS_TRACE_CAP) ? (uint8_t)len : (uint8_t)NUS_TRACE_CAP;
+    memcpy(s_trace[s_trace_head].b, p, n);
+    s_trace[s_trace_head].len = n;
+    s_trace_head = (uint8_t)((s_trace_head + 1u) % NUS_TRACE_N);
+    if (s_trace_count < NUS_TRACE_N) {
+        s_trace_count++;
+    }
+}
+
+/* Scratch buffer for one framed HCI packet (event or ACL). The EM9305 hands
+ * back whole packets bounded by its STS2 space byte; 255 covers HCI events and
+ * a single ATT MTU worth of ACL. */
+static uint8_t             s_pkt[260];
+
+/* Per-step diagnostics for the last tiku_ble_nus_start(): result code + status
+ * byte of each setup HCI command. Exposed for the shell so a failed bring-up
+ * says exactly which command timed out. */
+#define NUS_MAX_STEPS      6u
+static int8_t              s_dbg_rc[NUS_MAX_STEPS];
+static uint8_t             s_dbg_st[NUS_MAX_STEPS];
+static uint8_t             s_dbg_nsteps;
+
+/*
+ * Drain any HCI packets the controller already has waiting (RDY asserted).
+ *
+ * The EM9305 signals "I have something to send" by raising RDY; if we start a
+ * host *write* while a *read* is pending the framed transaction collides and
+ * the command is lost. An HCI host must service events between commands, so
+ * clear the pipe (non-blocking: timeout 0 reads only if RDY is already high)
+ * before issuing the next command.
+ */
+static void nus_drain(void) {
+    uint8_t  tmp[64];
+    uint16_t l;
+    int      guard = 8;
+    while (guard-- > 0 &&
+           tiku_em9305_recv(tmp, sizeof(tmp), &l, 0u) == TIKU_EM9305_OK) {
+        /* discard */
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Advertising setup
+ * ------------------------------------------------------------------ */
+
+/* Service pending events, issue one setup command, and record diagnostics.
+ * @p i is the step index (0..3). Returns the hci_cmd result. */
+static int nus_step(uint8_t i, uint16_t op, const uint8_t *p, uint8_t plen,
+                    uint8_t *bad) {
+    uint8_t st = 0xFFu;
+    int     rc;
+
+    nus_drain();
+    rc = tiku_em9305_hci_cmd(op, p, plen, &st);
+    if (i < NUS_MAX_STEPS) {
+        s_dbg_rc[i] = (int8_t)rc;
+        s_dbg_st[i] = st;
+        if ((uint8_t)(i + 1u) > s_dbg_nsteps) {
+            s_dbg_nsteps = (uint8_t)(i + 1u);
+        }
+    }
+    if (rc == TIKU_EM9305_OK) {
+        *bad |= st;
+    }
+    return rc;
+}
+
+/*
+ * Build + program the LE advertising set as a CONNECTABLE peripheral named
+ * @p name, then enable advertising. Mirrors tiku_em9305_beacon() but with
+ * ADV_IND (0x00) so a central may connect. Statuses OR'd into *bad (0 = ok).
+ */
+static int nus_advertise(const char *name, uint8_t *bad) {
+    static const uint8_t adv_params[15] = {
+        0xA0u, 0x00u,          /* min interval 160 * 0.625ms = 100 ms          */
+        0xA0u, 0x00u,          /* max interval 100 ms                          */
+        ADV_IND,               /* connectable undirected                       */
+        0x00u,                 /* own address type: public                     */
+        0x00u,                 /* peer address type                            */
+        0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,  /* peer address (unused)    */
+        0x07u,                 /* channel map 37/38/39                         */
+        0x00u                  /* filter policy: allow any                     */
+    };
+    static uint8_t adv_data[32];
+    uint8_t nlen, idx, en;
+
+    /* Enable the LE meta events we depend on. The controller gates LE events
+     * (Connection Complete, etc.) behind this mask; on the EM9305 a bare HCI
+     * Reset leaves them off, so without this the host never learns a central
+     * connected even though the link (and ATT) is live. Enable bits 0..15. */
+    static const uint8_t le_evt_mask[8] = {
+        0xFFu, 0xFFu, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
+    };
+
+    if (name == NULL) {
+        name = "tikuOS";
+    }
+    *bad = 0u;
+    s_dbg_nsteps = 0u;
+
+    /* HCI Reset -> known state. */
+    if (nus_step(0u, HCI_OP_RESET, NULL, 0u, bad) != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+
+    /* LE Set Event Mask -> deliver Connection Complete & friends. */
+    if (nus_step(1u, HCI_OP_LE_SET_EVENT_MASK, le_evt_mask,
+                 (uint8_t)sizeof(le_evt_mask), bad) != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+
+    /* Advertising parameters (connectable). */
+    if (nus_step(2u, HCI_OP_LE_SET_ADV_PARAM, adv_params,
+                 (uint8_t)sizeof(adv_params), bad) != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+
+    /* Advertising data: [sig-len][Flags AD][Complete Local Name AD]. */
+    memset(adv_data, 0, sizeof(adv_data));
+    idx = 1u;
+    adv_data[idx++] = 0x02u;               /* Flags AD: len                    */
+    adv_data[idx++] = 0x01u;               /*           type = Flags           */
+    adv_data[idx++] = 0x06u;               /* LE General Disc + no BR/EDR      */
+    nlen = (uint8_t)strlen(name);
+    if (nlen > 26u) {
+        nlen = 26u;                        /* keep within the 31-byte AD budget */
+    }
+    adv_data[idx++] = (uint8_t)(nlen + 1u);/* Name AD: len                     */
+    adv_data[idx++] = 0x09u;               /*          type = Complete Local Name */
+    memcpy(adv_data + idx, name, nlen);
+    idx = (uint8_t)(idx + nlen);
+    adv_data[0] = (uint8_t)(idx - 1u);     /* significant byte count           */
+    if (nus_step(3u, HCI_OP_LE_SET_ADV_DATA, adv_data,
+                 (uint8_t)sizeof(adv_data), bad) != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+
+    /* Enable advertising. */
+    en = 0x01u;
+    if (nus_step(4u, HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, bad)
+        != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+
+    return TIKU_EM9305_OK;
+}
+
+/* Toggle advertising on/off. The adv set (params + data) persists in the
+ * controller across connections, so re-advertising after a disconnect is just
+ * a re-enable. */
+static int nus_adv_enable(uint8_t on) {
+    uint8_t st;
+    return tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &on, 1u, &st);
+}
+
+int tiku_ble_nus_start(const char *name) {
+    uint8_t  bad = 0u;
+    uint8_t  bev[16];
+    uint16_t bl = 0u;
+    int      rc;
+
+    s_conn.handle = CONN_HANDLE_NONE;
+    s_started = 0u;
+    s_att_mtu = 23u;
+    s_tx_cccd = 0u;
+    s_rx_head = s_rx_tail = 0u;
+    s_tx_len = 0u;
+
+    /* Bring the radio up (EN pulse + boot event), then drain the boot event. */
+    rc = tiku_em9305_reset();
+    if (rc != TIKU_EM9305_OK) {
+        return rc;
+    }
+    (void)tiku_em9305_recv(bev, sizeof(bev), &bl, 500u);   /* {04 FF 01 01} */
+
+    rc = nus_advertise(name, &bad);
+    if (rc != TIKU_EM9305_OK) {
+        return rc;
+    }
+    if (bad != 0u) {
+        return TIKU_EM9305_ERR_NOTREADY;
+    }
+    s_started = 1u;
+    return TIKU_EM9305_OK;
+}
+
+/* ------------------------------------------------------------------ *
+ *  L2CAP-LE + ATT server (Nordic UART Service)
+ * ------------------------------------------------------------------ */
+
+/* Write a NUS member UUID (01 = service, 02 = RX, 03 = TX) into @p out[16]. */
+static void nus_uuid(uint8_t *out, uint8_t member) {
+    memcpy(out, NUS_UUID_BASE, 16);
+    out[12] = member;
+}
+
+/* Send one ATT PDU to the peer over L2CAP CID 0x0004 as an HCI ACL packet. */
+static void nus_att_send(const uint8_t *att, uint16_t att_len) {
+    static uint8_t out[9u + NUS_SERVER_MTU];
+    uint16_t l2, acl;
+
+    if (s_conn.handle == CONN_HANDLE_NONE) {
+        return;
+    }
+    if (att_len > NUS_SERVER_MTU) {
+        att_len = NUS_SERVER_MTU;
+    }
+    l2  = att_len;                         /* L2CAP payload = ATT PDU          */
+    acl = (uint16_t)(4u + att_len);        /* + 4-byte L2CAP header            */
+    out[0] = HCI_PKT_ACL;
+    out[1] = (uint8_t)(s_conn.handle & 0xFFu);
+    out[2] = (uint8_t)((s_conn.handle >> 8) & 0x0Fu);  /* PB=00 (start) BC=00  */
+    out[3] = (uint8_t)(acl & 0xFFu);
+    out[4] = (uint8_t)(acl >> 8);
+    out[5] = (uint8_t)(l2 & 0xFFu);
+    out[6] = (uint8_t)(l2 >> 8);
+    out[7] = (uint8_t)(L2CAP_CID_ATT & 0xFFu);
+    out[8] = (uint8_t)(L2CAP_CID_ATT >> 8);
+    memcpy(out + 9, att, att_len);
+    (void)tiku_em9305_send(out, (uint16_t)(9u + att_len));
+}
+
+/* Send an ATT Error Response for @p req_op on @p handle with code @p err. */
+static void nus_att_error(uint8_t req_op, uint16_t handle, uint8_t err) {
+    uint8_t r[5];
+    r[0] = ATT_ERROR_RSP;
+    r[1] = req_op;
+    r[2] = (uint8_t)(handle & 0xFFu);
+    r[3] = (uint8_t)(handle >> 8);
+    r[4] = err;
+    nus_att_send(r, 5u);
+}
+
+/* Little read helpers for request fields. */
+static uint16_t rd16(const uint8_t *p) {
+    return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+/*
+ * Dispatch one ATT request (@p att[0..att_len-1], opcode at att[0]) and send the
+ * matching response. Implements just enough of the ATT server for a phone to
+ * discover the Nordic UART Service and enable notifications.
+ *
+ * @return TIKU_BLE_EVT_RX if RX data arrived (Stage 3), else TIKU_BLE_EVT_ATT.
+ */
+static int nus_att_handle(const uint8_t *att, uint16_t len) {
+    uint8_t op;
+
+    if (len < 1u) {
+        return TIKU_BLE_EVT_NONE;
+    }
+    op = att[0];
+
+    switch (op) {
+    case ATT_EXCHANGE_MTU_REQ: {
+        uint16_t cli = (len >= 3u) ? rd16(att + 1) : 23u;
+        uint8_t  r[3];
+        s_att_mtu = (cli < NUS_SERVER_MTU) ? cli : NUS_SERVER_MTU;
+        if (s_att_mtu < 23u) {
+            s_att_mtu = 23u;
+        }
+        r[0] = ATT_EXCHANGE_MTU_RSP;
+        r[1] = (uint8_t)(NUS_SERVER_MTU & 0xFFu);
+        r[2] = (uint8_t)(NUS_SERVER_MTU >> 8);
+        nus_att_send(r, 3u);
+        break;
+    }
+
+    case ATT_READ_BY_GRP_REQ: {           /* primary service discovery */
+        uint16_t start, end;
+        if (len < 7u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        start = rd16(att + 1);
+        end   = rd16(att + 3);
+        /* Group type must be Primary Service (0x2800), and our service in range. */
+        if (att[5] == (uint8_t)(GATT_PRIMARY_SVC & 0xFFu) &&
+            att[6] == (uint8_t)(GATT_PRIMARY_SVC >> 8) &&
+            start <= ATT_H_SVC && end >= ATT_H_SVC) {
+            uint8_t r[2u + 4u + 16u];
+            r[0] = ATT_READ_BY_GRP_RSP;
+            r[1] = 4u + 16u;              /* each entry: handles(4) + UUID(16)   */
+            r[2] = (uint8_t)(ATT_H_SVC & 0xFFu);  r[3] = (uint8_t)(ATT_H_SVC >> 8);
+            r[4] = (uint8_t)(ATT_H_LAST & 0xFFu); r[5] = (uint8_t)(ATT_H_LAST >> 8);
+            nus_uuid(r + 6, 0x01u);
+            nus_att_send(r, (uint16_t)sizeof(r));
+        } else {
+            nus_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
+        }
+        break;
+    }
+
+    case ATT_READ_BY_TYPE_REQ: {          /* characteristic discovery */
+        uint16_t start, end;
+        if (len < 7u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        start = rd16(att + 1);
+        end   = rd16(att + 3);
+        if (att[5] == (uint8_t)(GATT_CHARACTERISTIC & 0xFFu) &&
+            att[6] == (uint8_t)(GATT_CHARACTERISTIC >> 8)) {
+            uint8_t  r[2u + 2u * (2u + 1u + 2u + 16u)];
+            uint8_t *p = r + 2;
+            uint8_t  n = 0u;
+            r[0] = ATT_READ_BY_TYPE_RSP;
+            r[1] = 2u + 1u + 2u + 16u;    /* handle + props + val handle + UUID */
+            if (start <= ATT_H_RX_DECL && ATT_H_RX_DECL <= end) {
+                p[0] = (uint8_t)(ATT_H_RX_DECL & 0xFFu);
+                p[1] = (uint8_t)(ATT_H_RX_DECL >> 8);
+                p[2] = (uint8_t)(CHAR_PROP_WRITE | CHAR_PROP_WRITE_NR);
+                p[3] = (uint8_t)(ATT_H_RX_VAL & 0xFFu);
+                p[4] = (uint8_t)(ATT_H_RX_VAL >> 8);
+                nus_uuid(p + 5, 0x02u);
+                p += 21; n++;
+            }
+            if (start <= ATT_H_TX_DECL && ATT_H_TX_DECL <= end) {
+                p[0] = (uint8_t)(ATT_H_TX_DECL & 0xFFu);
+                p[1] = (uint8_t)(ATT_H_TX_DECL >> 8);
+                p[2] = CHAR_PROP_NOTIFY;
+                p[3] = (uint8_t)(ATT_H_TX_VAL & 0xFFu);
+                p[4] = (uint8_t)(ATT_H_TX_VAL >> 8);
+                nus_uuid(p + 5, 0x03u);
+                p += 21; n++;
+            }
+            if (n > 0u) {
+                nus_att_send(r, (uint16_t)(2u + (uint16_t)n * 21u));
+            } else {
+                nus_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
+            }
+        } else {
+            nus_att_error(op, (len >= 3u) ? rd16(att + 1) : 0u,
+                          ATT_ERR_ATTR_NOT_FOUND);
+        }
+        break;
+    }
+
+    case ATT_FIND_INFO_REQ: {             /* descriptor discovery (CCCD) */
+        uint16_t start, end;
+        if (len < 5u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        start = rd16(att + 1);
+        end   = rd16(att + 3);
+        if (start <= ATT_H_TX_CCCD && ATT_H_TX_CCCD <= end) {
+            uint8_t r[6];
+            r[0] = ATT_FIND_INFO_RSP;
+            r[1] = 0x01u;                 /* handles + 16-bit UUIDs             */
+            r[2] = (uint8_t)(ATT_H_TX_CCCD & 0xFFu);
+            r[3] = (uint8_t)(ATT_H_TX_CCCD >> 8);
+            r[4] = (uint8_t)(GATT_CCCD & 0xFFu);
+            r[5] = (uint8_t)(GATT_CCCD >> 8);
+            nus_att_send(r, 6u);
+        } else {
+            nus_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
+        }
+        break;
+    }
+
+    case ATT_READ_REQ: {                  /* read the CCCD */
+        uint16_t h;
+        if (len < 3u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        h = rd16(att + 1);
+        if (h == ATT_H_TX_CCCD) {
+            uint8_t r[3];
+            r[0] = ATT_READ_RSP;
+            r[1] = (uint8_t)(s_tx_cccd & 0xFFu);
+            r[2] = (uint8_t)(s_tx_cccd >> 8);
+            nus_att_send(r, 3u);
+        } else {
+            nus_att_error(op, h, ATT_ERR_READ_NOT_PERM);
+        }
+        break;
+    }
+
+    case ATT_WRITE_REQ:
+    case ATT_WRITE_CMD: {
+        uint16_t h;
+        int rxed = 0;
+        if (len < 3u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        h = rd16(att + 1);
+        if (h == ATT_H_TX_CCCD) {
+            s_tx_cccd = (len >= 4u) ? rd16(att + 3)
+                                    : (uint16_t)(len >= 3u ? att[3] : 0u);
+        } else if (h == ATT_H_RX_VAL) {
+            if (len > 3u) {
+                nus_rx_push(att + 3, (uint16_t)(len - 3u));   /* -> shell input */
+            }
+            rxed = 1;
+        } else if (op == ATT_WRITE_REQ) {
+            nus_att_error(op, h, ATT_ERR_WRITE_NOT_PERM);
+            break;
+        }
+        if (op == ATT_WRITE_REQ) {
+            uint8_t r = ATT_WRITE_RSP;
+            nus_att_send(&r, 1u);
+        }
+        if (rxed) {
+            return TIKU_BLE_EVT_RX;
+        }
+        break;
+    }
+
+    default:
+        nus_att_error(op, 0u, ATT_ERR_REQ_NOT_SUPP);
+        break;
+    }
+
+    return TIKU_BLE_EVT_ATT;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Event / ACL pump
+ * ------------------------------------------------------------------ */
+
+/* Handle one HCI *event* packet (s_pkt[0] == 0x04). */
+static int nus_on_event(const uint8_t *ev, uint16_t len) {
+    if (len < 2u) {
+        return TIKU_BLE_EVT_NONE;
+    }
+
+    /* Disconnection Complete: 04 05 04 status handle_lo handle_hi reason.
+     * The controller stops advertising when a link forms, so re-enable it here
+     * to stay connectable for the next central. */
+    if (ev[1] == HCI_EVT_DISCONN_COMPLETE && len >= 6u) {
+        s_conn.handle = CONN_HANDLE_NONE;
+        s_att_mtu = 23u;
+        s_tx_cccd = 0u;
+        s_rx_head = s_rx_tail = 0u;
+        s_tx_len = 0u;
+        if (s_started) {
+            (void)nus_adv_enable(1u);
+        }
+        return TIKU_BLE_EVT_DISCONNECTED;
+    }
+
+    /* LE Meta -> (Enhanced) Connection Complete:
+     * 04 3E len <sub> status hh_lo hh_hi role peer_type peer[6] ... */
+    if (ev[1] == HCI_EVT_LE_META && len >= 4u) {
+        uint8_t n = (len < (uint16_t)sizeof(s_last_meta))
+                        ? (uint8_t)len : (uint8_t)sizeof(s_last_meta);
+        memcpy(s_last_meta, ev, n);      /* snapshot for diagnostics */
+        s_last_meta_len = n;
+
+        if ((ev[3] == HCI_LE_CONN_COMPLETE ||
+             ev[3] == HCI_LE_ENH_CONN_COMPLETE) &&
+            len >= 15u && ev[4] == 0x00u) {          /* status 0 = success */
+            s_conn.handle    = (uint16_t)(ev[5] | ((uint16_t)ev[6] << 8));
+            s_conn.handle   &= 0x0FFFu;
+            s_conn.role      = ev[7];
+            s_conn.peer_type = ev[8];
+            memcpy(s_conn.peer, ev + 9, 6);
+            return TIKU_BLE_EVT_CONNECTED;
+        }
+    }
+
+    return TIKU_BLE_EVT_NONE;
+}
+
+uint8_t tiku_ble_nus_trace(uint8_t i, uint8_t *buf, uint8_t cap) {
+    uint8_t start, idx, n;
+    if (i >= s_trace_count) {
+        return 0u;
+    }
+    /* oldest-first: entries live at (head - count + i) mod N */
+    start = (uint8_t)((s_trace_head + NUS_TRACE_N - s_trace_count) % NUS_TRACE_N);
+    idx = (uint8_t)((start + i) % NUS_TRACE_N);
+    n = (s_trace[idx].len < cap) ? s_trace[idx].len : cap;
+    if (buf && n) {
+        memcpy(buf, s_trace[idx].b, n);
+    }
+    return n;
+}
+
+uint8_t tiku_ble_nus_trace_count(void) {
+    return s_trace_count;
+}
+
+uint8_t tiku_ble_nus_last_meta(uint8_t *buf, uint8_t cap) {
+    uint8_t n = (s_last_meta_len < cap) ? s_last_meta_len : cap;
+    if (buf && n) {
+        memcpy(buf, s_last_meta, n);
+    }
+    return n;
+}
+
+/*
+ * Handle one HCI ACL data packet (s_pkt[0] == 0x02): unwrap L2CAP and, for the
+ * ATT fixed channel (CID 0x0004), dispatch the ATT request.
+ *
+ * Layout: [0]=type [1..2]=handle|flags [3..4]=ACL len [5..6]=L2CAP len
+ *         [7..8]=CID [9..]=ATT PDU.
+ *
+ * Also serves as the connection fallback: if ATT data is flowing but we never
+ * saw a Connection Complete event, adopt the link from the ACL handle.
+ */
+static int nus_on_acl(const uint8_t *acl, uint16_t len) {
+    uint16_t cid, l2len, attlen;
+    int      adopted = TIKU_BLE_EVT_NONE;
+
+    if (len < 5u) {
+        return TIKU_BLE_EVT_NONE;
+    }
+    if (s_conn.handle == CONN_HANDLE_NONE) {
+        s_conn.handle = (uint16_t)(acl[1] | ((uint16_t)acl[2] << 8)) & 0x0FFFu;
+        adopted = TIKU_BLE_EVT_CONNECTED;
+    }
+    if (len < 9u) {
+        return adopted;
+    }
+    l2len = (uint16_t)(acl[5] | ((uint16_t)acl[6] << 8));
+    cid   = (uint16_t)(acl[7] | ((uint16_t)acl[8] << 8));
+    if (cid != L2CAP_CID_ATT) {
+        return adopted;                    /* not ATT -- ignore (signalling etc.) */
+    }
+    attlen = (uint16_t)(len - 9u);
+    if (l2len < attlen) {
+        attlen = l2len;                    /* trust the L2CAP length field       */
+    }
+    {
+        int r = nus_att_handle(acl + 9, attlen);
+        /* A freshly adopted link reports CONNECTED even though we also just
+         * served (e.g.) the MTU request in the same packet. */
+        return (adopted == TIKU_BLE_EVT_CONNECTED) ? TIKU_BLE_EVT_CONNECTED : r;
+    }
+}
+
+int tiku_ble_nus_poll(void) {
+    uint16_t len = 0u;
+
+    /* Non-blocking: read a packet only if the radio is already asserting RDY. */
+    if (tiku_em9305_recv(s_pkt, sizeof(s_pkt), &len, 0u) != TIKU_EM9305_OK) {
+        return TIKU_BLE_EVT_NONE;
+    }
+    if (len == 0u) {
+        return TIKU_BLE_EVT_NONE;
+    }
+    nus_trace(s_pkt, len);
+
+    switch (s_pkt[0]) {
+    case HCI_PKT_EVENT:
+        return nus_on_event(s_pkt, len);
+    case HCI_PKT_ACL:
+        return nus_on_acl(s_pkt, len);
+    default:
+        return TIKU_BLE_EVT_NONE;
+    }
+}
+
+uint8_t tiku_ble_nus_start_steps(int8_t *rc, uint8_t *st, uint8_t cap) {
+    uint8_t i;
+    uint8_t n = (s_dbg_nsteps < cap) ? s_dbg_nsteps : cap;
+    for (i = 0u; i < n; i++) {
+        rc[i] = s_dbg_rc[i];
+        st[i] = s_dbg_st[i];
+    }
+    return s_dbg_nsteps;
+}
+
+int tiku_ble_nus_connected(void) {
+    return (s_conn.handle != CONN_HANDLE_NONE);
+}
+
+int tiku_ble_nus_notify_enabled(void) {
+    return (s_tx_cccd & 0x0001u) != 0u;
+}
+
+/* --- shell io-backend hooks: NUS RX -> console in, console out -> NUS TX --- */
+
+int tiku_ble_nus_getc(void) {
+    int c;
+    if (s_rx_tail == s_rx_head) {
+        return -1;
+    }
+    c = (int)s_rx_ring[s_rx_tail];
+    s_rx_tail = (uint16_t)((s_rx_tail + 1u) % NUS_RX_RING);
+    return c;
+}
+
+uint8_t tiku_ble_nus_rx_ready(void) {
+    return (uint8_t)(s_rx_head != s_rx_tail);
+}
+
+void tiku_ble_nus_flush(void) {
+    static uint8_t att[3u + NUS_SERVER_MTU];
+    uint16_t n;
+
+    if (s_tx_len == 0u) {
+        return;
+    }
+    if (s_conn.handle == CONN_HANDLE_NONE || !(s_tx_cccd & 0x0001u)) {
+        s_tx_len = 0u;                      /* no subscriber -- drop            */
+        return;
+    }
+    n = s_tx_len;
+    if (n > (uint16_t)(s_att_mtu - 3u)) {
+        n = (uint16_t)(s_att_mtu - 3u);     /* one notification is <= MTU-3     */
+    }
+    att[0] = ATT_HANDLE_VALUE_NTF;
+    att[1] = (uint8_t)(ATT_H_TX_VAL & 0xFFu);
+    att[2] = (uint8_t)(ATT_H_TX_VAL >> 8);
+    memcpy(att + 3, s_tx_buf, n);
+    nus_att_send(att, (uint16_t)(3u + n));
+    if (n < s_tx_len) {
+        memmove(s_tx_buf, s_tx_buf + n, (uint16_t)(s_tx_len - n));
+        s_tx_len = (uint16_t)(s_tx_len - n);
+    } else {
+        s_tx_len = 0u;
+    }
+}
+
+void tiku_ble_nus_putc(char c) {
+    if (s_tx_len < (uint16_t)sizeof(s_tx_buf)) {
+        s_tx_buf[s_tx_len++] = (uint8_t)c;
+    }
+    /* Only auto-flush when nearly full; the shell paces the normal drain so the
+     * controller's ACL buffers are not overrun by a burst of notifications. */
+    if (s_tx_len >= (uint16_t)(sizeof(s_tx_buf) - 1u)) {
+        tiku_ble_nus_flush();
+    }
+}
+
+uint16_t tiku_ble_nus_tx_pending(void) {
+    return s_tx_len;
+}
+
+const tiku_ble_nus_conn_t *tiku_ble_nus_conn_info(void) {
+    return &s_conn;
+}
+
+void tiku_ble_nus_stop(void) {
+    uint8_t st;
+
+    /* Drop the link if one is up. Disconnect returns a Command *Status* event,
+     * not Command Complete, so fire it raw (fire-and-forget) rather than via
+     * tiku_em9305_hci_cmd(), which would stall waiting for a 0x0E it never gets.
+     * The controller closes the link and reports a Disconnection Complete. */
+    if (s_conn.handle != CONN_HANDLE_NONE) {
+        uint8_t p[7];
+        p[0] = 0x01u;                       /* HCI command packet             */
+        p[1] = (uint8_t)(HCI_OP_DISCONNECT & 0xFFu);
+        p[2] = (uint8_t)(HCI_OP_DISCONNECT >> 8);
+        p[3] = 0x03u;                       /* parameter length               */
+        p[4] = (uint8_t)(s_conn.handle & 0xFFu);
+        p[5] = (uint8_t)(s_conn.handle >> 8);
+        p[6] = 0x13u;                       /* reason: remote user terminated */
+        (void)tiku_em9305_send(p, sizeof(p));
+        s_conn.handle = CONN_HANDLE_NONE;
+    }
+    if (s_started) {
+        uint8_t en = 0x00u;
+        (void)tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, &st);
+        s_started = 0u;
+    }
+}
