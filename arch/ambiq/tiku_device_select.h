@@ -28,7 +28,16 @@
  * that symbol to the corresponding device header. Add a new @c elif branch
  * here when porting to a new Ambiq silicon variant.
  */
-#if defined(TIKU_DEVICE_APOLLO4P)
+#if defined(TIKU_DEVICE_APOLLO510B)
+/* Apollo510 Blue (the "B"/lni EVB) is the SAME Apollo510 (AMAP510) Cortex-M55
+ * silicon -- identical register map, memory sizes and peripherals -- with an
+ * on-board EM9305 BLE radio the base EVB lacks.  Reuse the Apollo510 device
+ * header and just override the human-facing name.  Listed first so it wins
+ * even though tiku.h's fallback also defines TIKU_DEVICE_APOLLO510. */
+#include <arch/ambiq/devices/tiku_device_apollo510.h>
+#undef  TIKU_DEVICE_NAME
+#define TIKU_DEVICE_NAME "Apollo510 Blue"
+#elif defined(TIKU_DEVICE_APOLLO4P)
 /* Apollo4 Plus (AMAP42KP) reuses the register-compatible Apollo4 Lite silicon
  * header (same Cortex-M4F Apollo4 peripheral map); only the human-facing name
  * and the memory sizes (2 MB MRAM / 2.75 MB SRAM) differ.  Listed first so it
@@ -55,7 +64,9 @@
  * specified the Apollo510 EVB is assumed — it is the only supported
  * board for this silicon at this milestone.
  */
-#if defined(TIKU_BOARD_APOLLO4L_EVB)
+#if defined(TIKU_BOARD_APOLLO510B_EVB)
+#include <arch/ambiq/boards/tiku_board_apollo510b_evb.h>
+#elif defined(TIKU_BOARD_APOLLO4L_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo4l_evb.h>
 #elif defined(TIKU_BOARD_APOLLO510_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo510_evb.h>

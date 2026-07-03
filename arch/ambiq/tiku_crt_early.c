@@ -246,16 +246,30 @@ __attribute__((section(".vectors"), used)) = {
     tiku_ambiq_systick_handler,         /* 15  SysTick           */
 
     /* External interrupts (AmbiqSuite startup_gcc.c numbering) --------- */
+    /* Console UART: UART0 (IRQ 15) on the base Apollo510 EVB, or UART1 (IRQ 16)
+     * on the Apollo510 Blue EVB (apollo510b) -- gated on TIKU_CONSOLE_UART1. */
+#if defined(TIKU_CONSOLE_UART1)
+    [16 + 16] = tiku_ambiq_uart0_isr,        /* IRQ 16  UART1 (Blue EVB) */
+#else
     [16 + 15] = tiku_ambiq_uart0_isr,        /* IRQ 15  UART0            */
+#endif
     [16 + 32] = tiku_ambiq_stimer_cmpr0_isr, /* IRQ 32  STIMER Compare0  */
     [16 + 33] = tiku_ambiq_stimer_cmpr1_isr, /* IRQ 33  STIMER Compare1 (tick) */
     [16 + 56] = tiku_ambiq_gpio0_isr,        /* IRQ 56  GPIO N0 pins0-31 */
     [16 + 67] = tiku_ambiq_timer0_isr,       /* IRQ 67  TIMER0           */
 
     /* Everything else spins in the default handler (NULL would hard-fault
-     * if dispatched). Ranges chosen to skip the four named slots above. */
-    [16 +  0 ... 16 + 14] = ambiq_default_handler,
+     * if dispatched). Ranges chosen to skip the named slots above -- including
+     * the console UART, whose slot moves with TIKU_CONSOLE_UART1 (IRQ 16 on the
+     * Blue EVB, IRQ 15 otherwise). The range MUST skip whichever slot the UART
+     * override set, or (being a later initializer) it would clobber it. */
+#if defined(TIKU_CONSOLE_UART1)
+    [16 +  0 ... 16 + 15] = ambiq_default_handler,   /* skip IRQ 16 (UART1) */
+    [16 + 17 ... 16 + 31] = ambiq_default_handler,
+#else
+    [16 +  0 ... 16 + 14] = ambiq_default_handler,   /* skip IRQ 15 (UART0) */
     [16 + 16 ... 16 + 31] = ambiq_default_handler,
+#endif
     [16 + 34 ... 16 + 55] = ambiq_default_handler,
     [16 + 57 ... 16 + 66] = ambiq_default_handler,
     [16 + 68 ... 16 + 134] = ambiq_default_handler,

@@ -5,19 +5,24 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_apollo510_evb.h - Ambiq Apollo 510 EVB board definitions
+ * tiku_board_apollo510b_evb.h - Ambiq Apollo510 Blue EVB board definitions
  *
- * Pin assignments from the AmbiqSuite apollo510_evb BSP:
- *   - User LEDs: LED0 = pad 165, LED1 = pad 89, LED2 = pad 92
- *     (open-drain / active-low in the BSP).
- *   - Console UART (COM): TX = pad 30, RX = pad 55.
- *   - SWO (default console transport): pad 28.
+ * The Apollo510 Blue EVB carries the SAME Apollo510 (Cortex-M55) silicon as
+ * the base apollo510_evb (so it shares the whole arch backend, linker and
+ * register map) but a DIFFERENT board pinout, plus an on-board EM9305 BLE
+ * radio the base EVB lacks. Pin assignments from the AmbiqSuite apollo510b_evb
+ * BSP:
+ *   - User LEDs: LED0 = pad 11, LED1 = pad 19, LED2 = pad 83 (active-low).
+ *   - Console UART (COM): TX = pad 12, RX = pad 14 -- on UART1 (funcsel 5),
+ *     NOT UART0/30/55 like the base EVB. The Makefile selects the instance via
+ *     -DTIKU_CONSOLE_UART1 (see tiku_uart_arch.c).
+ *   - Buttons: BTN0 = pad 46, BTN1 = pad 29 (recorded; wired as stubs for now).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef TIKU_BOARD_APOLLO510_EVB_H_
-#define TIKU_BOARD_APOLLO510_EVB_H_
+#ifndef TIKU_BOARD_APOLLO510B_EVB_H_
+#define TIKU_BOARD_APOLLO510B_EVB_H_
 
 #include <stdint.h>
 #include <arch/ambiq/tiku_gpio_arch.h>
@@ -27,24 +32,24 @@
 /*---------------------------------------------------------------------------*/
 
 /** @brief Human-readable board name string exposed via /sys/device. */
-#define TIKU_BOARD_NAME             "Apollo510 EVB"
+#define TIKU_BOARD_NAME             "Apollo510 Blue EVB"
 
 /*---------------------------------------------------------------------------*/
 /* LEDs                                                                      */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief LED definitions for the Apollo510 EVB.
+ * @brief LED definitions for the Apollo510 Blue EVB.
  *
- * All three EVB user LEDs are mapped: LED0 = pad 165, LED1 = pad 89,
- * LED2 = pad 92 (the TIKU_BOARD_LED1/LED2/LED3 macros are 1-indexed and
- * surface as /dev/led0, /dev/led1, /dev/led2). All EVB LEDs are
+ * The three user LEDs sit on different pads than the base EVB: LED0 = pad 11,
+ * LED1 = pad 19, LED2 = pad 83 (the TIKU_BOARD_LED1/LED2/LED3 macros are
+ * 1-indexed and surface as /dev/led0, /dev/led1, /dev/led2). All EVB LEDs are
  * active-low, so ON drives the pad low and OFF drives it high.
  */
 #define TIKU_BOARD_LED_COUNT        3
 
-/** @brief GPIO pad number for LED 1 (active-low, pad 165). */
-#define TIKU_BOARD_LED1_PIN         165U
+/** @brief GPIO pad number for LED 1 (active-low, pad 11). */
+#define TIKU_BOARD_LED1_PIN         11U
 /** @brief Configure LED 1 pad as a push-pull output. */
 #define TIKU_BOARD_LED1_INIT()      tiku_ambiq_gpio_init_output(TIKU_BOARD_LED1_PIN)
 /** @brief Drive LED 1 on (output low — active-low LED). */
@@ -54,53 +59,53 @@
 /** @brief Toggle LED 1 output state. */
 #define TIKU_BOARD_LED1_TOGGLE()    tiku_ambiq_gpio_toggle(TIKU_BOARD_LED1_PIN)
 
-/** @brief LED 2 (-> /dev/led1): active-low, pad 89. */
-#define TIKU_BOARD_LED2_PIN         89U
+/** @brief LED 2 (-> /dev/led1): active-low, pad 19. */
+#define TIKU_BOARD_LED2_PIN         19U
 #define TIKU_BOARD_LED2_INIT()      tiku_ambiq_gpio_init_output(TIKU_BOARD_LED2_PIN)
 #define TIKU_BOARD_LED2_ON()        tiku_ambiq_gpio_set(TIKU_BOARD_LED2_PIN, 0)
 #define TIKU_BOARD_LED2_OFF()       tiku_ambiq_gpio_set(TIKU_BOARD_LED2_PIN, 1)
 #define TIKU_BOARD_LED2_TOGGLE()    tiku_ambiq_gpio_toggle(TIKU_BOARD_LED2_PIN)
 
-/** @brief LED 3 (-> /dev/led2): active-low, pad 92. */
-#define TIKU_BOARD_LED3_PIN         92U
+/** @brief LED 3 (-> /dev/led2): active-low, pad 83. */
+#define TIKU_BOARD_LED3_PIN         83U
 #define TIKU_BOARD_LED3_INIT()      tiku_ambiq_gpio_init_output(TIKU_BOARD_LED3_PIN)
 #define TIKU_BOARD_LED3_ON()        tiku_ambiq_gpio_set(TIKU_BOARD_LED3_PIN, 0)
 #define TIKU_BOARD_LED3_OFF()       tiku_ambiq_gpio_set(TIKU_BOARD_LED3_PIN, 1)
 #define TIKU_BOARD_LED3_TOGGLE()    tiku_ambiq_gpio_toggle(TIKU_BOARD_LED3_PIN)
 
 /*---------------------------------------------------------------------------*/
-/* Console UART pins (TX=30, RX=55)                                          */
+/* Console UART pins (TX=12, RX=14 on UART1, funcsel 5)                       */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Console UART pin assignments.
  *
- * The default console transport is SWO/ITM (pad 28). The COM-UART
- * pins (TX=30, RX=55) are recorded here for use when a wire-UART
- * backend is selected. Pin mux is performed by am_hal at init time,
- * so the board-level init macro is a no-op.
+ * The Blue EVB routes its J-Link VCOM to UART1 on pads 12 (TX) / 14 (RX),
+ * funcsel 5 -- unlike the base EVB's UART0 on 30/55 funcsel 4. The UART
+ * instance itself is chosen in the build (-DTIKU_CONSOLE_UART1); these macros
+ * carry the pads + funcsel that tiku_uart_arch.c programs into the pin mux.
  */
-#define TIKU_BOARD_UART_TX_PIN      30U     /**< UART TX pad number. */
-#define TIKU_BOARD_UART_RX_PIN      55U     /**< UART RX pad number. */
-#define TIKU_BOARD_UART_PIN_FUNCSEL 4U      /**< FUNCSEL for pads 30/55 -> UART0. */
-/** @brief Board-level UART pin mux init (no-op; handled by am_hal). */
+#define TIKU_BOARD_UART_TX_PIN      12U     /**< UART1 TX pad number. */
+#define TIKU_BOARD_UART_RX_PIN      14U     /**< UART1 RX pad number. */
+#define TIKU_BOARD_UART_PIN_FUNCSEL 5U      /**< FUNCSEL for pads 12/14 -> UART1. */
+/** @brief Board-level UART pin mux init (no-op; done in the UART driver). */
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
 
 /*---------------------------------------------------------------------------*/
-/* Buttons (none wired as plain GPIO yet)                                    */
+/* Buttons (recorded from the BSP; wired as stubs for now)                   */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Button stubs — no buttons are wired as plain GPIO on this EVB.
+ * @brief Button stubs — BTN0 = pad 46, BTN1 = pad 29 on this EVB.
  *
- * Both BTN macros are no-ops / always-not-pressed placeholders. Wire
- * real pads and update these macros when button input is needed.
+ * Kept as no-op / not-pressed placeholders (as on the base EVB) so the console
+ * bring-up stays focused; wire the real pads here when button input is needed.
  */
 #define TIKU_BOARD_BTN1_INIT()      do { } while (0)
-/** @brief Read button 1 state (always 0 — no button wired). */
+/** @brief Read button 1 state (always 0 — stubbed). */
 #define TIKU_BOARD_BTN1_PRESSED()   (0)
 #define TIKU_BOARD_BTN2_INIT()      do { } while (0)
-/** @brief Read button 2 state (always 0 — no button wired). */
+/** @brief Read button 2 state (always 0 — stubbed). */
 #define TIKU_BOARD_BTN2_PRESSED()   (0)
 
 /*---------------------------------------------------------------------------*/
@@ -110,13 +115,10 @@
 /**
  * @brief Bit-bang / backscatter port and pin defaults.
  *
- * The tiku_gpio (port,pin) API encodes an Apollo510 pad as (port-1)*8 + pin,
- * with port >= 1 and pin in 0..7 (see ambiq_pad_of in tiku_gpio_arch.c). The
- * pair below therefore selects pad 13 -- a plain GPIO, clear of the SWO (pad
- * 28) and console UART (pads 30/55) lines, so the bit-bang self-test has a
- * valid, harmless pin to toggle. (A bare pad number like 0/13 is NOT a valid
- * encoding here: port 0 and pin 13 are both rejected.) Override in the build
- * system to point at a real backscatter pad.
+ * Same (port,pin) encoding as the base EVB: (port-1)*8 + pin selects pad 13 --
+ * a plain GPIO clear of the console UART (pads 12/14) and the LEDs
+ * (11/19/83), so the bit-bang self-test has a valid, harmless pin to toggle.
+ * Override in the build system to point at a real backscatter pad.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       2U   /**< Port 2 -> pad base 8. */
@@ -132,10 +134,9 @@
 /**
  * @brief Peripheral bus availability flags and pin assignments.
  *
- * ADC and 1-Wire drivers are stubs at this milestone and are marked
- * unavailable. I2C and SPI pin macros are placeholders (TODO: assign
- * real IOM pads) — they are defined so the interface layer compiles
- * without errors on this target.
+ * Identical to the base EVB at this milestone: ADC/1-Wire are stubs, and the
+ * I2C/SPI pad macros are placeholders so the interface layer compiles. (The
+ * EM9305 BLE radio's SPI pads will be assigned here when BLE bring-up starts.)
  */
 /** @brief ADC not available at this milestone (stub driver). */
 #define TIKU_BOARD_ADC_AVAILABLE    0
@@ -158,4 +159,4 @@
 /** @brief SPI0 MOSI pad (placeholder — real IOM pad TBD). */
 #define TIKU_BOARD_SPI0_MOSI_PIN    4U
 
-#endif /* TIKU_BOARD_APOLLO510_EVB_H_ */
+#endif /* TIKU_BOARD_APOLLO510B_EVB_H_ */

@@ -40,6 +40,12 @@ else ifeq ($(MCU),apollo4l)
 TIKU_PLATFORM := ambiq
 else ifeq ($(MCU),apollo4p)
 TIKU_PLATFORM := ambiq
+else ifeq ($(MCU),apollo510b)
+# Apollo510 Blue EVB: the SAME Apollo510 (Cortex-M55) silicon as apollo510 --
+# same register map, linker, J-Link device and arch backends (it inherits them
+# all via the apollo510 `else` branches below). The board just adds an EM9305
+# BLE radio (a later, SPI-gated effort); bring-up is identical to apollo510.
+TIKU_PLATFORM := ambiq
 else
 TIKU_PLATFORM := msp430
 endif
@@ -99,6 +105,11 @@ endif
 ifeq ($(TIKU_PLATFORM),ambiq)
 ifeq ($(MCU),apollo510)
 TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510_EVB
+else ifeq ($(MCU),apollo510b)
+# Same Apollo510 silicon as apollo510, but the Blue EVB has its own pinout:
+# console on UART1 (pads 12/14, funcsel 5), LEDs 11/19/83, buttons 46/29 --
+# see tiku_board_apollo510b_evb.h + the TIKU_CONSOLE_UART1 gate below.
+TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510B_EVB
 else
 # Apollo4 Lite and Apollo4 Plus EVBs share the M4F board pinout (console UART,
 # LEDs, buttons); apollo4p reuses the apollo4l board config for bring-up.
@@ -717,6 +728,12 @@ endif
 # uses UART2 (pads 54/11). The shared UART driver + crt vector key off this.
 ifeq ($(MCU),apollo4p)
 CFLAGS += -DTIKU_CONSOLE_UART0
+endif
+# The Apollo510 Blue EVB routes its J-Link VCOM to UART1 (pads 12/14, funcsel 5);
+# the base Apollo510 EVB uses UART0 (pads 30/55). The shared M55 UART driver, the
+# crt vector table and the wake source all key off TIKU_CONSOLE_UART1.
+ifeq ($(MCU),apollo510b)
+CFLAGS += -DTIKU_CONSOLE_UART1
 endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is

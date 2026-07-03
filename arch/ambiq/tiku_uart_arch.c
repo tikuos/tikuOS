@@ -77,22 +77,40 @@ static struct {
 } rx;
 
 /**
- * @defgroup UART_HW UART0 hardware constants
- * @brief Pin assignments, FUNCSEL, PADKEY, and NVIC numbers for the
- *        EVB COM UART (UART0 on the Apollo510 EV board).
+ * @defgroup UART_HW Console UART hardware constants
+ * @brief Instance, pin assignments, FUNCSEL, PADKEY, and NVIC number for the
+ *        EVB COM UART.
+ *
+ * The base Apollo510 EVB wires its J-Link VCOM to UART0 (pads 30/55, funcsel 4,
+ * IRQ 15). The Apollo510 Blue EVB (apollo510b) routes it to UART1 (pads 12/14,
+ * funcsel 5, IRQ 16) instead -- selected by the build via -DTIKU_CONSOLE_UART1.
+ * Only the instance pointer, the PWRCTRL enable/status bits and the NVIC line
+ * differ: UART1 is a UART0_Type* at UART1_BASE, so the PL011 register layout and
+ * every UART0_* bitfield macro below apply to it unchanged. The pads + funcsel
+ * come from the selected board header (tiku_board_apollo510[b]_evb.h).
  * @{
  */
-/** UART0 TX pad on the EVB COM UART. */
-#define TIKU_UART_TX_PAD       30u
-/** UART0 RX pad on the EVB COM UART. */
-#define TIKU_UART_RX_PAD       55u
-/** GPIO PINCFG FUNCSEL value that routes pads 30/55 to UART0 TX/RX. */
-#define TIKU_UART_PIN_FUNCSEL  4u
+#if defined(TIKU_CONSOLE_UART1)
+#define CON_UART              UART1
+#define CON_PWREN()           do { PWRCTRL->DEVPWREN_b.PWRENUART1 = 1u; } while (0)
+#define CON_PWRST()           (PWRCTRL->DEVPWRSTATUS_b.PWRSTUART1)
+#define AMBIQ_IRQ_CON_UART    16
+#else
+#define CON_UART              UART0
+#define CON_PWREN()           do { PWRCTRL->DEVPWREN_b.PWRENUART0 = 1u; } while (0)
+#define CON_PWRST()           (PWRCTRL->DEVPWRSTATUS_b.PWRSTUART0)
+#define AMBIQ_IRQ_CON_UART    15
+#endif
+
+/** Console UART TX pad (from the board header). */
+#define TIKU_UART_TX_PAD       TIKU_BOARD_UART_TX_PIN
+/** Console UART RX pad (from the board header). */
+#define TIKU_UART_RX_PAD       TIKU_BOARD_UART_RX_PIN
+/** GPIO PINCFG FUNCSEL that routes the TX/RX pads to the console UART. */
+#define TIKU_UART_PIN_FUNCSEL  TIKU_BOARD_UART_PIN_FUNCSEL
 /** PADKEY unlock value required before writing any PINCFG register. */
 #define TIKU_GPIO_PADKEY_UNLOCK 0x73u
 
-/** UART0 IRQ number in the NVIC (Apollo510 interrupt table). */
-#define AMBIQ_IRQ_UART0   15
 /** NVIC Interrupt Set-Enable register base. */
 #define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
 /** NVIC Interrupt Clear-Pending register base. */
@@ -141,8 +159,8 @@ static void uart_pad_funcsel(uint32_t pad, uint32_t funcsel) {
 void tiku_uart_init(void) {
     /* 1. Power up the UART0 peripheral domain (functional core of
      *    am_hal_pwrctrl_periph_enable: DEVPWREN bit + wait for DEVPWRSTATUS). */
-    PWRCTRL->DEVPWREN_b.PWRENUART0 = 1u;
-    while (PWRCTRL->DEVPWRSTATUS_b.PWRSTUART0 == 0u) {
+    CON_PWREN();
+    while (CON_PWRST() == 0u) {
         /* wait for the power domain to come up */
     }
 
@@ -153,43 +171,43 @@ void tiku_uart_init(void) {
     /* 3. Configure: disable, select the 24 MHz HFRC tap, program the baud
      *    divisors + line control, then enable (PL011 ordering — LCRH latches
      *    IBRD/FBRD). */
-    UART0->CR = 0u;
-    UART0->CR_b.CLKSEL = UART0_CR_CLKSEL_HFRC_24MHZ;   /* 24 MHz from HFRC */
-    UART0->CR_b.CLKEN  = 1u;
+    CON_UART->CR = 0u;
+    CON_UART->CR_b.CLKSEL = UART0_CR_CLKSEL_HFRC_24MHZ;   /* 24 MHz from HFRC */
+    CON_UART->CR_b.CLKEN  = 1u;
 
     {
         /* IBRD = clk/(16*baud); FBRD = round(frac*64). 24 MHz / 115200. */
         uint32_t uartclk = 24000000u;
         uint32_t baudclk = 16u * (uint32_t)TIKU_BOARD_UART_BAUD;
-        UART0->IBRD = uartclk / baudclk;
-        UART0->FBRD = (((uartclk % baudclk) * 64u) + (baudclk / 2u)) / baudclk;
+        CON_UART->IBRD = uartclk / baudclk;
+        CON_UART->FBRD = (((uartclk % baudclk) * 64u) + (baudclk / 2u)) / baudclk;
     }
 
     /* 8 data bits (WLEN=3), FIFOs enabled, no parity, 1 stop. */
-    UART0->LCRH = (3u << UART0_LCRH_WLEN_Pos) | (1u << UART0_LCRH_FEN_Pos);
+    CON_UART->LCRH = (3u << UART0_LCRH_WLEN_Pos) | (1u << UART0_LCRH_FEN_Pos);
 
     /* RX FIFO trigger 1/8 (lowest); the RX-timeout interrupt delivers single
      * keystrokes promptly. */
-    UART0->IFLS_b.RXIFLSEL = 0u;
+    CON_UART->IFLS_b.RXIFLSEL = 0u;
 
     rx.head = 0U;
     rx.tail = 0U;
     rx.overrun_count = 0U;
 
     /* Clear, then enable RX + RX-timeout + overrun interrupts. */
-    UART0->IEC = 0xFFFFFFFFu;
-    UART0->IER = (1u << UART0_IER_RXIM_Pos) |
+    CON_UART->IEC = 0xFFFFFFFFu;
+    CON_UART->IER = (1u << UART0_IER_RXIM_Pos) |
                  (1u << UART0_IER_RTIM_Pos) |
                  (1u << UART0_IER_OEIM_Pos);
 
     /* Enable the UART, transmitter and receiver. */
-    UART0->CR_b.UARTEN = 1u;
-    UART0->CR_b.TXE    = 1u;
-    UART0->CR_b.RXE    = 1u;
+    CON_UART->CR_b.UARTEN = 1u;
+    CON_UART->CR_b.TXE    = 1u;
+    CON_UART->CR_b.RXE    = 1u;
 
-    /* Enable UART0 in the NVIC (IRQ 15). */
-    NVIC_ICPR[AMBIQ_IRQ_UART0 >> 5] = (1u << (AMBIQ_IRQ_UART0 & 31u));
-    NVIC_ISER[AMBIQ_IRQ_UART0 >> 5] = (1u << (AMBIQ_IRQ_UART0 & 31u));
+    /* Enable the console UART in the NVIC (IRQ 15 for UART0 / 16 for UART1). */
+    NVIC_ICPR[AMBIQ_IRQ_CON_UART >> 5] = (1u << (AMBIQ_IRQ_CON_UART & 31u));
+    NVIC_ISER[AMBIQ_IRQ_CON_UART >> 5] = (1u << (AMBIQ_IRQ_CON_UART & 31u));
 }
 
 /**
@@ -199,10 +217,10 @@ void tiku_uart_init(void) {
  * @param c  Character to send
  */
 void tiku_uart_putc(char c) {
-    while (UART0->FR_b.TXFF) {
+    while (CON_UART->FR_b.TXFF) {
         /* spin while the TX FIFO is full */
     }
-    UART0->DR = (uint32_t)(uint8_t)c;
+    CON_UART->DR = (uint32_t)(uint8_t)c;
 }
 
 /**
@@ -293,11 +311,13 @@ void tiku_uart_test_inject(uint8_t byte) {
  * software ring is full instead of silently discarding. Clears only the
  * interrupts that were active at entry (mis snapshot).
  *
- * Non-weak so it overrides the default trap in tiku_crt_early.c
- * (vector slot 16 + IRQ 15 = slot 31).
+ * Non-weak so it overrides the default trap in tiku_crt_early.c, which places
+ * this handler at the console UART's vector slot (IRQ 15 for UART0, IRQ 16 for
+ * UART1 -- both gated on TIKU_CONSOLE_UART1). Drains whichever instance
+ * CON_UART resolves to.
  */
 void tiku_ambiq_uart0_isr(void) {
-    uint32_t mis = UART0->MIS;   /* masked interrupt status */
+    uint32_t mis = CON_UART->MIS;   /* masked interrupt status */
 
     /* Hardware FIFO overrun: a received byte was lost because the RX FIFO
      * filled (e.g. while RX IRQs were masked). The OE interrupt (OEIM, enabled
@@ -308,8 +328,8 @@ void tiku_ambiq_uart0_isr(void) {
     }
 
     /* Drain the RX FIFO regardless of which RX-class interrupt fired. */
-    while (UART0->FR_b.RXFE == 0u) {
-        uint8_t  b    = (uint8_t)(UART0->DR & 0xFFu);
+    while (CON_UART->FR_b.RXFE == 0u) {
+        uint8_t  b    = (uint8_t)(CON_UART->DR & 0xFFu);
         uint16_t next = (uint16_t)((rx.head + 1U) & TIKU_UART_RXBUF_MASK);
         if (next != rx.tail) {
             rx.buf[rx.head] = b;
@@ -319,7 +339,7 @@ void tiku_ambiq_uart0_isr(void) {
         }
     }
 
-    UART0->IEC = mis;   /* clear the serviced interrupts */
+    CON_UART->IEC = mis;   /* clear the serviced interrupts */
 }
 
 /*---------------------------------------------------------------------------*/

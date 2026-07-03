@@ -28,6 +28,8 @@
  * differs per Ambiq part; STIMER and the GPIO0 range are identical. */
 #if defined(TIKU_DEVICE_APOLLO4L)
 #define AMBIQ_IRQ_UART           17   /**< UART2 console RX IRQ (apollo4l) */
+#elif defined(TIKU_CONSOLE_UART1)
+#define AMBIQ_IRQ_UART           16   /**< UART1 console RX IRQ (apollo510b Blue) */
 #else
 #define AMBIQ_IRQ_UART           15   /**< UART0 console RX IRQ (apollo510) */
 #endif
