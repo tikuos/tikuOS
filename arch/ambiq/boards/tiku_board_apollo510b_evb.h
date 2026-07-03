@@ -159,4 +159,42 @@
 /** @brief SPI0 MOSI pad (placeholder — real IOM pad TBD). */
 #define TIKU_BOARD_SPI0_MOSI_PIN    4U
 
+/*---------------------------------------------------------------------------*/
+/* BLE radio (EM9305) + its IOM6 SPI bus                                     */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief EM9305 BLE controller wiring on the Apollo510 Blue EVB.
+ *
+ * The radio is an EM9305 companion chip on IOM6 SPI (mode 0, up to 16 MHz).
+ * Chip-select is a plain GPIO the driver toggles (the IOM's own nCE is not
+ * used). RDY (a.k.a. INT) is the data-ready / handshake line. Values verified
+ * from the AmbiqSuite apollo510b_evb BSP + am_devices_em9305.c. The IOM SPI
+ * master (tiku_spi_arch.c) and the EM9305 transport (tiku_em9305.c) are gated
+ * on TIKU_DRV_BLE_EM9305_ENABLE; the base Apollo510 EVB has no radio.
+ */
+/** @brief IOM instance the radio hangs off (I/O Master 6). */
+#define TIKU_BOARD_SPI_IOM_MODULE   6U
+/** @brief IOM6 SCK pad + its GPIO funcsel. */
+#define TIKU_BOARD_SPI_SCK_PIN      61U
+#define TIKU_BOARD_SPI_SCK_FUNCSEL  1U
+/** @brief IOM6 MOSI pad + funcsel. */
+#define TIKU_BOARD_SPI_MOSI_PIN     62U
+#define TIKU_BOARD_SPI_MOSI_FUNCSEL 1U
+/** @brief IOM6 MISO pad + funcsel (peripheral input; no GPIO in-enable needed). */
+#define TIKU_BOARD_SPI_MISO_PIN     63U
+#define TIKU_BOARD_SPI_MISO_FUNCSEL 0U
+
+/** @brief EM9305 chip-select (driven as a plain GPIO, active low). */
+#define TIKU_BOARD_EM9305_CS_PIN    149U
+/** @brief EM9305 RDY/INT: data-ready + SPI handshake (GPIO input). */
+#define TIKU_BOARD_EM9305_RDY_PIN   117U
+/** @brief EM9305 enable/reset strap (GPIO output). */
+#define TIKU_BOARD_EM9305_EN_PIN    93U
+/** @brief EM9305 12 MHz clock-request line (GPIO output). */
+#define TIKU_BOARD_EM9305_CLKREQ_PIN 136U
+/** @brief EM9305 32 kHz sleep-clock export pad + its funcsel (clock output). */
+#define TIKU_BOARD_EM9305_CLK32K_PIN 138U
+#define TIKU_BOARD_EM9305_CLK32K_FUNCSEL 3U
+
 #endif /* TIKU_BOARD_APOLLO510B_EVB_H_ */

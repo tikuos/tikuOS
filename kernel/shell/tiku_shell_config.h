@@ -87,6 +87,16 @@
 #define TIKU_SHELL_CMD_MRAMBENCH 0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_BLE
+/* Auto-on for the EM9305 BLE build (apollo510b); the "ble" command runs the
+ * radio first-contact self-test. The .c + the driver are only compiled when
+ * TIKU_DRV_BLE_EM9305_ENABLE is set (Makefile-gated). */
+#if defined(TIKU_DRV_BLE_EM9305_ENABLE)
+#define TIKU_SHELL_CMD_BLE 1  /**< ble - EM9305 radio first-contact probe */
+#else
+#define TIKU_SHELL_CMD_BLE 0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_WIFI
 /* Auto-on when the CYW43 driver is enabled; otherwise off. Override
  * with -DTIKU_SHELL_CMD_WIFI=0 to drop the command from the table. */

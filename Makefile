@@ -735,6 +735,20 @@ endif
 ifeq ($(MCU),apollo510b)
 CFLAGS += -DTIKU_CONSOLE_UART1
 endif
+# BLE radio (EM9305 on IOM6 SPI) -- opt-in, apollo510b only. Building it turns
+# the IOM SPI master on (TIKU_SPI_IOM_ENABLE flips tiku_spi_arch.c from stub to
+# the real driver) and compiles the bare-metal EM9305 SPI-HCI transport. The
+# pinout lives in the apollo510b board header, so reject the flag elsewhere up
+# front rather than fail deep in the compile. The `ble` shell command that
+# drives the first-contact probe are added in the arch + shell source blocks
+# below (SRCS is (re)initialised further down, so it cannot be extended here).
+ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+ifneq ($(MCU),apollo510b)
+$(error TIKU_DRV_BLE_EM9305_ENABLE=1 requires MCU=apollo510b (the only board \
+with the EM9305 radio); currently MCU=$(MCU))
+endif
+CFLAGS += -DTIKU_DRV_BLE_EM9305_ENABLE=1 -DTIKU_SPI_IOM_ENABLE=1
+endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
 # fully self-contained: it references nothing in temp/AmbiqSuite, only the MRAM
@@ -1033,6 +1047,10 @@ SRCS += arch/ambiq/tiku_i2c_arch.c
 SRCS += arch/ambiq/tiku_onewire_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
+# EM9305 BLE radio transport rides the IOM SPI master above (apollo510b only).
+ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+SRCS += arch/ambiq/tiku_em9305.c
+endif
 SRCS += arch/ambiq/tiku_lcd_arch.c
 # CryptoCell-312 TRNG (shared across apollo4l/4p/510) -- backs the cert-TLS
 # handshake RNG (TIKU_KITS_CRYPTO_TLS_RNG_FILL).
@@ -1217,6 +1235,12 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_trng.c
 # compile it on Ambiq (the shell config gates the table entry the same way).
 ifeq ($(TIKU_PLATFORM),ambiq)
 SRCS += kernel/shell/commands/tiku_shell_cmd_mrambench.c
+endif
+# The ble command runs the EM9305 radio first-contact probe; only compiled with
+# the BLE driver (apollo510b). The driver + -D flags live in the BLE block near
+# the Ambiq part selectors.
+ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_ble.c
 endif
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
