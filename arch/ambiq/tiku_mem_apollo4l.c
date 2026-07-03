@@ -22,8 +22,11 @@
  *     Apollo5's 0x0200ff20. The value is already Thumb-encoded (bit 0 set).
  *   - MRAM array origin is 0x0 (so the destination word offset is addr >> 2),
  *     vs Apollo5's 0x00400000.
- *   - the Cortex-M4 has NO SCB L1 cache, so there is no clean/invalidate around
- *     the snapshot or the programmed page.
+ *   - the Cortex-M4 has NO SCB L1 D-cache, so the TCM staging buffer needs no
+ *     clean before the bootrom reads it (unlike the M55/SSRAM path on 510).
+ *     The Apollo4 CACHECTRL does, however, cache MRAM reads, so the mirror
+ *     page is invalidated after a real program -- and the flush dirty-check
+ *     relies on that invalidate to keep its compare coherent.
  *   - the staging buffer lives in the always-on TCM (.bss), not a separately
  *     powered SSRAM bank; 0x10000000 is a valid bootrom source (SRAM_BASEADDR).
  * MRAM is direct-write (no erase, unlike NOR flash). The reserved page is far
@@ -35,6 +38,8 @@
 #include <string.h>
 #include <stdint.h>
 #include "tiku_mem_arch.h"
+#include "tiku_cpu_common.h"  /* tiku_cpu_ambiq_delay_us (bench DWT calibration) */
+#include "tiku_mram_bench.h"  /* tiku_mem_nvm_bench_row_t */
 #include <hal/tiku_cpu.h>   /* tiku_cpu_dcache_invalidate (D-cache coherency) */
 
 /* Live .uninit working copy + the reserved MRAM mirror page (apollo4l.ld). */
@@ -75,6 +80,13 @@ typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32
  */
 static uint32_t g_nvm_snap[TIKU_NVM_MRAM_BYTES / 4U]
     __attribute__((aligned(16)));
+
+/* Count of real mirror programs the flush has performed (i.e. flushes where
+ * the dirty-check found a change).  Observability + the mrambench dirty-check
+ * self-test: an idle flush must leave this unchanged. */
+static uint32_t g_nvm_flush_programs;
+
+uint32_t tiku_mem_arch_nvm_program_count(void) { return g_nvm_flush_programs; }
 
 /** @brief Return the size of the .uninit region in bytes. */
 static size_t uninit_bytes(void) {
@@ -135,6 +147,7 @@ void tiku_mem_arch_nvm_flush(void) {
     size_t   n = uninit_bytes();
     size_t   snap_bytes, prog_bytes;
     uint32_t dst_word_off, primask;
+    int      changed;
 
     if (n > (TIKU_NVM_MRAM_BYTES - 4U)) {
         n = TIKU_NVM_MRAM_BYTES - 4U;
@@ -152,6 +165,27 @@ void tiku_mem_arch_nvm_flush(void) {
         memset((uint8_t *)g_nvm_snap + snap_bytes, 0xFFu, prog_bytes - snap_bytes);
     }
 
+    /* Dirty check: skip the MRAM program when the composed image already
+     * matches the mirror byte-for-byte -- i.e. nothing in .uninit changed
+     * since the last commit.  This is the same optimization the Apollo510
+     * flush already carries (arch/ambiq/tiku_mem_arch.c); it was never
+     * ported here, so this part re-programmed the full 64 KB mirror on EVERY
+     * tiku_mpu_lock_nvm().  The dominant caller is the TCP per-packet NVM
+     * relock, whose RX/TX buffers live in .bss, NOT .uninit -- so with this
+     * check those relocks touch MRAM zero times: no wear, no program latency,
+     * no long IRQ-off program window.  Persist-cell writes DO change .uninit,
+     * so they still commit.
+     *
+     * Coherency: the only out-of-band writer of the mirror page is the
+     * bootrom program below, and every such program is followed by the
+     * CACHECTRL invalidate, so this compare always sees current mirror data
+     * (cold after reset, freshly invalidated after a program).  The compose
+     * above and the IRQ-off window below are kept on EVERY call so any
+     * ordering/timing side-effect a per-packet relock relies on is unchanged;
+     * only the program itself and its mirror invalidate are conditional. */
+    changed = (memcmp((const void *)g_nvm_snap,
+                      (const void *)&__tiku_nvm_mram_start, prog_bytes) != 0);
+
     /* Destination word offset from the MRAM origin (0x0). */
     dst_word_off =
         ((uint32_t)(uintptr_t)&__tiku_nvm_mram_start - AMBIQ_MRAM_BASE) >> 2;
@@ -159,14 +193,101 @@ void tiku_mem_arch_nvm_flush(void) {
     /* MRAM program is uninterruptible (an ISR fetch could fault mid-program). */
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
     __asm__ volatile ("cpsid i" ::: "memory");
-    (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
-                           (uint32_t)(uintptr_t)g_nvm_snap, dst_word_off,
-                           (uint32_t)(prog_bytes / 4U));
+    if (changed) {
+        (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
+                               (uint32_t)(uintptr_t)g_nvm_snap, dst_word_off,
+                               (uint32_t)(prog_bytes / 4U));
+    }
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
 
-    /* The bootrom wrote MRAM out-of-band; drop any cached copies of the page so
-     * same-session reads of the mirror see the new data. With the D-cache
-     * enabled (soc_init) this is required for coherency; the Apollo4 CACHECTRL
-     * has no by-range op so it invalidates the whole cache. */
-    tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
+    /* Only a real program disturbs the mirror; drop the CACHECTRL copies of
+     * the page so same-session reads see the new data.  The Cortex-M4 has no
+     * SCB L1 D-cache, but the Apollo4 CACHECTRL caches MRAM reads and has no
+     * by-range op, so this invalidates the whole cache.  Skipped when nothing
+     * changed, so an idle relock costs nothing -- and this is exactly the
+     * invariant the dirty-check compare above relies on for coherency. */
+    if (changed) {
+        tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
+        g_nvm_flush_programs++;
+    }
+}
+
+/*---------------------------------------------------------------------------*/
+/* MRAM program-timing benchmark (mrambench command)                         */
+/*---------------------------------------------------------------------------*/
+
+/* Raw DWT cycle counter (Cortex-M4), addressed directly to match the raw
+ * SysTick idiom in tiku_cpu_common.c and avoid a core_cm4.h dependency.
+ * The 24-bit SysTick used for delays wraps in ~175 us at 96 MHz -- too short
+ * to single-shot a possibly-millisecond MRAM program -- so the bench uses the
+ * 32-bit DWT cycle counter (no wrap for ~44 s) and calibrates its rate. */
+#define TIKU_DWT_CTRL    (*(volatile uint32_t *)0xE0001000UL)
+#define TIKU_DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004UL)
+#define TIKU_SCB_DEMCR   (*(volatile uint32_t *)0xE000EDFCUL)
+
+uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
+                                unsigned long *dwt_hz_out)
+{
+    static const uint16_t sizes[] = { 16U, 256U, 4096U, 32768U };
+    const uint8_t   nsizes    = (uint8_t)(sizeof(sizes) / sizeof(sizes[0]));
+    const uintptr_t mirror    = (uintptr_t)&__tiku_nvm_mram_start;
+    const size_t    bench_off = TIKU_NVM_MRAM_BYTES / 2U;  /* upper half = scratch */
+    uint32_t primask, c0, c1;
+    uint8_t  i, r, count = 0U;
+
+    if (dwt_hz_out) { *dwt_hz_out = 0UL; }
+    if (rows == NULL || max == 0U) { return 0U; }
+    /* The live image sits in [0, 4 + uninit) at the bottom; refuse if it would
+     * reach into the upper-half scratch window (keeps the bench non-destructive
+     * to durable state and power-cut-safe -- the magic+data stay intact). */
+    if ((4U + uninit_bytes()) > bench_off) { return 0U; }
+
+    /* Enable + zero the DWT cycle counter. */
+    TIKU_SCB_DEMCR |= (1UL << 24);     /* TRCENA */
+    TIKU_DWT_CYCCNT = 0U;
+    TIKU_DWT_CTRL  |= 1UL;             /* CYCCNTENA */
+
+    /* Calibrate DWT ticks/second against the trusted SysTick us-delay, so the
+     * us conversion is right regardless of the part's DWT:core ratio (1x on the
+     * M4, 2x on the M55).  Raw cycles below are rate-independent for shape. */
+    c0 = TIKU_DWT_CYCCNT;
+    tiku_cpu_ambiq_delay_us(5000u);    /* 5 ms */
+    c1 = TIKU_DWT_CYCCNT;
+    if (dwt_hz_out) { *dwt_hz_out = (unsigned long)(c1 - c0) * 200UL; }
+
+    for (i = 0U; i < nsizes && count < max; i++) {
+        uint32_t words = (uint32_t)sizes[i] / 4U;
+        uint32_t best  = 0xFFFFFFFFUL;
+        uint32_t dst_word_off =
+            (uint32_t)(((mirror + bench_off) - AMBIQ_MRAM_BASE) >> 2);
+        uint32_t w;
+
+        /* Varied source pattern (bit transitions) so we don't measure an
+         * all-identical fast path. Clobbers the staging buffer; the closing
+         * lock_nvm flush recomposes it. */
+        for (w = 0U; w < words; w++) {
+            g_nvm_snap[w] = 0xA5A50000UL ^ (uint32_t)(w * 2654435761UL);
+        }
+
+        for (r = 0U; r < 4U; r++) {    /* best-of-4 discards outliers */
+            __asm__ volatile ("mrs %0, primask" : "=r"(primask));
+            __asm__ volatile ("cpsid i" ::: "memory");
+            c0 = TIKU_DWT_CYCCNT;
+            (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
+                                   (uint32_t)(uintptr_t)g_nvm_snap,
+                                   dst_word_off, words);
+            c1 = TIKU_DWT_CYCCNT;
+            __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+            if ((c1 - c0) < best) { best = c1 - c0; }
+        }
+        rows[count].bytes  = sizes[i];
+        rows[count].cycles = best;
+        count++;
+    }
+
+    /* Drop CACHECTRL copies of the clobbered scratch; the live image (bottom
+     * half) was never touched, so no flush/restore of durable state is needed. */
+    tiku_cpu_dcache_invalidate((const void *)(mirror + bench_off),
+                               TIKU_NVM_MRAM_BYTES - bench_off);
+    return count;
 }

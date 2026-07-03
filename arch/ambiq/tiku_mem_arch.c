@@ -27,6 +27,8 @@
 #include <string.h>
 #include <stdint.h>
 #include "tiku_mem_arch.h"
+#include "tiku_cpu_common.h"  /* tiku_cpu_ambiq_delay_us (bench DWT calibration) */
+#include "tiku_mram_bench.h"  /* tiku_mem_nvm_bench_row_t */
 #include <hal/tiku_cpu.h>   /* tiku_cpu_dcache_{clean,invalidate} (D-cache coherency) */
 
 /* Live .uninit working copy + the reserved MRAM mirror page (apollo510.ld). */
@@ -66,6 +68,13 @@ typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32
  */
 static uint32_t g_nvm_snap[TIKU_NVM_MRAM_BYTES / 4U]
     __attribute__((section(".ssram"), aligned(16)));
+
+/* Count of real mirror programs the flush has performed (i.e. flushes where
+ * the dirty-check found a change).  Observability + the mrambench dirty-check
+ * self-test: an idle flush must leave this unchanged. */
+static uint32_t g_nvm_flush_programs;
+
+uint32_t tiku_mem_arch_nvm_program_count(void) { return g_nvm_flush_programs; }
 
 /**
  * @brief Return the size of the .uninit region in bytes
@@ -232,5 +241,79 @@ void tiku_mem_arch_nvm_flush(void) {
      * reads of the mirror see the new data. */
     if (changed) {
         tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
+        g_nvm_flush_programs++;
     }
+}
+
+/*---------------------------------------------------------------------------*/
+/* MRAM program-timing benchmark (mrambench command)                         */
+/*---------------------------------------------------------------------------*/
+
+/* Raw DWT cycle counter (Cortex-M55), addressed directly to match the raw
+ * SysTick idiom in tiku_cpu_common.c.  The 24-bit SysTick used for delays
+ * wraps too fast (~87 us at 192 MHz) to single-shot a possibly-millisecond
+ * MRAM program, so the bench uses the 32-bit DWT counter and calibrates its
+ * rate (the M55 DWT ticks at 2x the core, which the calibration absorbs). */
+#define TIKU_DWT_CTRL    (*(volatile uint32_t *)0xE0001000UL)
+#define TIKU_DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004UL)
+#define TIKU_SCB_DEMCR   (*(volatile uint32_t *)0xE000EDFCUL)
+
+uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
+                                unsigned long *dwt_hz_out)
+{
+    static const uint16_t sizes[] = { 16U, 256U, 4096U, 32768U };
+    const uint8_t   nsizes    = (uint8_t)(sizeof(sizes) / sizeof(sizes[0]));
+    const uintptr_t mirror    = (uintptr_t)&__tiku_nvm_mram_start;
+    const size_t    bench_off = TIKU_NVM_MRAM_BYTES / 2U;  /* upper half = scratch */
+    uint32_t primask, c0, c1;
+    uint8_t  i, r, count = 0U;
+
+    if (dwt_hz_out) { *dwt_hz_out = 0UL; }
+    if (rows == NULL || max == 0U) { return 0U; }
+    if ((4U + uninit_bytes()) > bench_off) { return 0U; }   /* image too large */
+
+    TIKU_SCB_DEMCR |= (1UL << 24);     /* TRCENA */
+    TIKU_DWT_CYCCNT = 0U;
+    TIKU_DWT_CTRL  |= 1UL;             /* CYCCNTENA */
+
+    c0 = TIKU_DWT_CYCCNT;
+    tiku_cpu_ambiq_delay_us(5000u);    /* 5 ms */
+    c1 = TIKU_DWT_CYCCNT;
+    if (dwt_hz_out) { *dwt_hz_out = (unsigned long)(c1 - c0) * 200UL; }
+
+    for (i = 0U; i < nsizes && count < max; i++) {
+        uint32_t words = (uint32_t)sizes[i] / 4U;
+        uint32_t best  = 0xFFFFFFFFUL;
+        uint32_t dst_word_off =
+            (uint32_t)(((mirror + bench_off) - AMBIQ_MRAM_BASE) >> 2);
+        uint32_t w;
+
+        for (w = 0U; w < words; w++) {
+            g_nvm_snap[w] = 0xA5A50000UL ^ (uint32_t)(w * 2654435761UL);
+        }
+        /* g_nvm_snap is cached SSRAM on the M55: clean the source lines so the
+         * bootrom reads the just-written pattern, not a stale cache image. */
+        tiku_cpu_dcache_clean((const void *)g_nvm_snap, (size_t)sizes[i]);
+
+        for (r = 0U; r < 4U; r++) {    /* best-of-4 discards outliers */
+            __asm__ volatile ("mrs %0, primask" : "=r"(primask));
+            __asm__ volatile ("cpsid i" ::: "memory");
+            c0 = TIKU_DWT_CYCCNT;
+            (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
+                                   (uint32_t)(uintptr_t)g_nvm_snap,
+                                   dst_word_off, words);
+            c1 = TIKU_DWT_CYCCNT;
+            __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+            if ((c1 - c0) < best) { best = c1 - c0; }
+        }
+        rows[count].bytes  = sizes[i];
+        rows[count].cycles = best;
+        count++;
+    }
+
+    /* Drop cached copies of the clobbered scratch; the live image (bottom
+     * half) was never touched, so no flush/restore of durable state is needed. */
+    tiku_cpu_dcache_invalidate((const void *)(mirror + bench_off),
+                               TIKU_NVM_MRAM_BYTES - bench_off);
+    return count;
 }
