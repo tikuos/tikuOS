@@ -14,6 +14,7 @@
 
 #include <kernel/shell/tiku_shell.h>          /* SHELL_PRINTF */
 #include <arch/ambiq/tiku_em9305.h>
+#include <string.h>
 
 /**
  * @brief Run the EM9305 M0/M1 self-test and print the results.
@@ -26,9 +27,39 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
     int rc;
     uint16_t i;
 
-    (void)argc;
-    (void)argv;
+    /* "ble beacon [name]" -- reset, configure LE advertising, enable it. */
+    if (argc >= 2u && strcmp(argv[1], "beacon") == 0) {
+        const char *name = (argc >= 3u) ? argv[2] : "tikuOS";
+        tiku_em9305_beacon_t b;
+        int brc = tiku_em9305_beacon(name, &b);
+        SHELL_PRINTF("EM9305 beacon setup (reset + LE advertising)...\n");
+        if (b.init_rc != TIKU_EM9305_OK) {
+            SHELL_PRINTF("  reset FAIL (rc=%d)\n", b.init_rc);
+            return;
+        }
+        SHELL_PRINTF("  HCI status: Reset=0x%02x AdvParams=0x%02x "
+                     "AdvData=0x%02x AdvEnable=0x%02x\n",
+                     (unsigned)b.st_reset, (unsigned)b.st_params,
+                     (unsigned)b.st_data, (unsigned)b.st_enable);
+        SHELL_PRINTF("%s\n", (brc == TIKU_EM9305_OK)
+                     ? "ble: ADVERTISING -- scan for the name with nRF Connect"
+                     : "ble: beacon setup failed -- see statuses above");
+        if (brc == TIKU_EM9305_OK) {
+            SHELL_PRINTF("      advertising as \"%s\" (non-connectable, 100ms)\n",
+                         name);
+        }
+        return;
+    }
 
+    /* "ble stop" -- disable advertising. */
+    if (argc >= 2u && strcmp(argv[1], "stop") == 0) {
+        int src = tiku_em9305_beacon_stop();
+        SHELL_PRINTF("ble: advertising %s\n",
+                     (src == TIKU_EM9305_OK) ? "stopped" : "stop FAILED");
+        return;
+    }
+
+    /* default: M0/M1 first-contact probe. */
     SHELL_PRINTF("EM9305 first-contact probe (IOM6 SPI @16MHz)...\n");
     rc = tiku_em9305_probe(&p);
 

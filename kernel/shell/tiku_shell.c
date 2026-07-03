@@ -529,7 +529,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"mrambench","Time the MRAM programmer",   tiku_shell_cmd_mrambench},
 #endif
 #if TIKU_SHELL_CMD_BLE
-    {"ble",     "EM9305 radio first-contact probe", tiku_shell_cmd_ble},
+    {"ble",     "EM9305 BLE radio: probe | beacon [name] | stop", tiku_shell_cmd_ble},
 #endif
 #if TIKU_SHELL_CMD_HISTORY
     {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},

@@ -307,4 +307,134 @@ int tiku_em9305_probe(tiku_em9305_probe_t *out) {
     return p.cc_seen ? TIKU_EM9305_OK : TIKU_EM9305_ERR_TIMEOUT;
 }
 
+/*---------------------------------------------------------------------------*/
+/* HCI command helper + LE beacon (M2)                                       */
+/*---------------------------------------------------------------------------*/
+
+#define HCI_OP_RESET             0x0C03u
+#define HCI_OP_LE_SET_ADV_PARAM  0x2006u
+#define HCI_OP_LE_SET_ADV_DATA   0x2008u
+#define HCI_OP_LE_SET_ADV_ENABLE 0x200Au
+
+int tiku_em9305_hci_cmd(uint16_t opcode, const uint8_t *params, uint8_t plen,
+                        uint8_t *status) {
+    uint8_t  buf[4u + 32u];
+    uint8_t  ev[32];
+    uint16_t evlen = 0u;
+
+    if (plen > 32u) {
+        return TIKU_EM9305_ERR_PARAM;
+    }
+    buf[0] = 0x01u;                        /* HCI command packet type */
+    buf[1] = (uint8_t)(opcode & 0xFFu);
+    buf[2] = (uint8_t)(opcode >> 8);
+    buf[3] = plen;
+    if (plen && params) {
+        memcpy(buf + 4, params, plen);
+    }
+    if (tiku_em9305_send(buf, (uint16_t)(4u + plen)) != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+    if (tiku_em9305_recv(ev, sizeof(ev), &evlen, 1000u) != TIKU_EM9305_OK) {
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+    /* Command Complete for this opcode: 04 0E len 01 op_lo op_hi status ... */
+    if (evlen >= 7u && ev[0] == 0x04u && ev[1] == 0x0Eu &&
+        ev[4] == buf[1] && ev[5] == buf[2]) {
+        if (status) { *status = ev[6]; }
+        return TIKU_EM9305_OK;
+    }
+    if (status) { *status = 0xFFu; }
+    return TIKU_EM9305_ERR_NOTREADY;
+}
+
+int tiku_em9305_beacon(const char *name, tiku_em9305_beacon_t *out) {
+    /* LE Set Advertising Parameters: 100 ms interval, non-connectable
+     * undirected, public own address, all 3 channels, no filtering. */
+    static const uint8_t adv_params[15] = {
+        0xA0u, 0x00u,                       /* min interval 160*0.625ms=100ms */
+        0xA0u, 0x00u,                       /* max interval 100 ms            */
+        0x03u,                              /* ADV_NONCONN_IND (beacon)       */
+        0x00u,                              /* own address type: public       */
+        0x00u,                              /* peer address type              */
+        0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,  /* peer address (unused)   */
+        0x07u,                              /* channel map 37/38/39           */
+        0x00u                               /* filter policy: allow all       */
+    };
+    static uint8_t adv_data[32];
+    tiku_em9305_beacon_t r;
+    uint8_t nlen, idx, en;
+
+    memset(&r, 0, sizeof(r));
+    if (name == NULL) {
+        name = "tiku";
+    }
+
+    /* Bring the radio up (EN pulse + boot event), then drain the boot event. */
+    r.init_rc = tiku_em9305_reset();
+    if (r.init_rc != TIKU_EM9305_OK) {
+        if (out) { *out = r; }
+        return r.init_rc;
+    }
+    {
+        uint8_t  bev[16];
+        uint16_t bl = 0u;
+        (void)tiku_em9305_recv(bev, sizeof(bev), &bl, 500u);   /* {04 FF 01 01} */
+    }
+
+    /* 1. HCI Reset -> known state. */
+    if (tiku_em9305_hci_cmd(HCI_OP_RESET, NULL, 0u, &r.st_reset)
+        != TIKU_EM9305_OK) {
+        if (out) { *out = r; }
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+    /* 2. Advertising parameters. */
+    if (tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_PARAM, adv_params,
+                            (uint8_t)sizeof(adv_params), &r.st_params)
+        != TIKU_EM9305_OK) {
+        if (out) { *out = r; }
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+    /* 3. Advertising data: [sig-len][Flags AD][Complete Local Name AD], padded
+     *    into a fixed 31-byte field (the command carries len + 31 data bytes). */
+    memset(adv_data, 0, sizeof(adv_data));
+    idx = 1u;
+    adv_data[idx++] = 0x02u;                /* Flags AD: len */
+    adv_data[idx++] = 0x01u;                /*           type = Flags */
+    adv_data[idx++] = 0x06u;                /*           LE General Disc + no BR/EDR */
+    nlen = (uint8_t)strlen(name);
+    if (nlen > 26u) {
+        nlen = 26u;                         /* keep within the 31-byte AD budget */
+    }
+    adv_data[idx++] = (uint8_t)(nlen + 1u); /* Name AD: len */
+    adv_data[idx++] = 0x09u;                /*          type = Complete Local Name */
+    memcpy(adv_data + idx, name, nlen);
+    idx = (uint8_t)(idx + nlen);
+    adv_data[0] = (uint8_t)(idx - 1u);      /* significant byte count */
+    if (tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_DATA, adv_data,
+                            (uint8_t)sizeof(adv_data), &r.st_data)
+        != TIKU_EM9305_OK) {
+        if (out) { *out = r; }
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+    /* 4. Enable advertising -- the controller broadcasts autonomously now. */
+    en = 0x01u;
+    if (tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, &r.st_enable)
+        != TIKU_EM9305_OK) {
+        if (out) { *out = r; }
+        return TIKU_EM9305_ERR_TIMEOUT;
+    }
+
+    r.ok = (uint8_t)(r.st_reset == 0u && r.st_params == 0u &&
+                     r.st_data == 0u && r.st_enable == 0u);
+    if (out) { *out = r; }
+    return r.ok ? TIKU_EM9305_OK : TIKU_EM9305_ERR_NOTREADY;
+}
+
+int tiku_em9305_beacon_stop(void) {
+    uint8_t en = 0x00u;
+    uint8_t st = 0u;
+    return tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, &st);
+}
+
 #endif /* TIKU_DRV_BLE_EM9305_ENABLE */
