@@ -753,6 +753,25 @@ CFLAGS += -DTIKU_DRV_BLE_EM9305_ENABLE=1 -DTIKU_SPI_IOM_ENABLE=1
 # chip -- a future BLE backend just sets this too.
 CFLAGS += -DTIKU_HAS_BLE=1
 endif
+# Preemptive worker threads -- opt-in, Cortex-M only. Thread 0 is the whole
+# existing cooperative kernel; workers are stackful compute threads confined
+# to the ISR-safe primitives (see kernel/threads/tiku_thread.h). Per-thread
+# stacks are impossible on a 2 KB MSP430, which stays cooperative AND
+# byte-identical (flag off = none of this compiles). The Ambiq backend is
+# device-proven first; the RP2350 port is the same Cortex-M switcher, gated
+# until it is bench-proven.
+ifeq ($(TIKU_THREADS_ENABLE),1)
+ifeq ($(TIKU_PLATFORM),msp430)
+$(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part (Ambiq); MSP430 \
+stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
+endif
+ifeq ($(filter apollo510 apollo510b,$(MCU)),)
+$(error TIKU_THREADS_ENABLE=1 is bench-proven on apollo510/apollo510b only \
+so far; the switcher is generic Cortex-M asm -- porting = compiling \
+arch/ambiq/tiku_thread_arch.c for the target and proving the torture suite)
+endif
+CFLAGS += -DTIKU_THREADS_ENABLE=1
+endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
 # fully self-contained: it references nothing in temp/AmbiqSuite, only the MRAM
@@ -1087,6 +1106,10 @@ else
 # Apollo510 (Cortex-M55) device/CPU backends.
 SRCS += arch/ambiq/tiku_adc_arch.c
 SRCS += arch/ambiq/tiku_timer_arch.c
+ifeq ($(TIKU_THREADS_ENABLE),1)
+SRCS += kernel/threads/tiku_thread.c
+SRCS += arch/ambiq/tiku_thread_arch.c
+endif
 SRCS += arch/ambiq/tiku_cpu_common.c
 SRCS += arch/ambiq/tiku_crt_early.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c

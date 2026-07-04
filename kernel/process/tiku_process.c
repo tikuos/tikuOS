@@ -35,6 +35,9 @@
 #include <hal/tiku_cpu.h>
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_timer.h>  /* tiku_timer_owner_armed (SLEEPING) */
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+#include <kernel/threads/tiku_thread.h> /* kernel_wake on every post */
+#endif
 #include <stddef.h>
 #include <string.h>
 
@@ -378,6 +381,14 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
 
     tiku_atomic_exit();
 
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    /* New work exists: the kernel thread (absolute priority) preempts
+     * any running worker at the next unmasked instant. */
+    if (ret) {
+        tiku_thread_kernel_wake();
+    }
+#endif
+
     return ret;
 }
 
@@ -465,11 +476,18 @@ void tiku_process_poll(struct tiku_process *p)
     tiku_atomic_enter();
 
     /* Coalesce: drop the request if a POLL for this target is
-     * already pending in the queue. */
+     * already pending in the queue.  The coalesced return must STILL
+     * wake the kernel thread (below): the pending POLL may have been
+     * enqueued while the kernel was awake (wake was a no-op) and the
+     * kernel blocked afterwards — without the wake here, a queued
+     * event could sleep forever behind never-yielding workers. */
     for (i = 0; i < q_len; i++) {
         idx = (q_head + i) % TIKU_QUEUE_SIZE;
         if (queue[idx].ev == TIKU_EVENT_POLL && queue[idx].p == p) {
             tiku_atomic_exit();
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+            tiku_thread_kernel_wake();
+#endif
             return;
         }
     }
@@ -489,6 +507,12 @@ void tiku_process_poll(struct tiku_process *p)
     }
 
     tiku_atomic_exit();
+
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    /* Same wake as tiku_process_post: a pending (possibly coalesced)
+     * POLL is kernel work, so preempt any running worker. */
+    tiku_thread_kernel_wake();
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
