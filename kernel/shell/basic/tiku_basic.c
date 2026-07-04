@@ -120,6 +120,9 @@
 #endif
 #endif
 #endif
+#if TIKU_BASIC_BLE_ENABLE
+#include <interfaces/bluetooth/tiku_ble_serial.h>  /* BLEADV/BLESEND/BLEUP/BLEGET$ */
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* AMALGAMATION                                                              */
@@ -144,6 +147,7 @@
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"
 #include "tiku_basic_net.inl"
+#include "tiku_basic_ble.inl"
 #include "tiku_basic_subs.inl"
 #include "tiku_basic_multi_if.inl"
 #include "tiku_basic_select.inl"

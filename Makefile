@@ -748,6 +748,10 @@ $(error TIKU_DRV_BLE_EM9305_ENABLE=1 requires MCU=apollo510b (the only board \
 with the EM9305 radio); currently MCU=$(MCU))
 endif
 CFLAGS += -DTIKU_DRV_BLE_EM9305_ENABLE=1 -DTIKU_SPI_IOM_ENABLE=1
+# Map the concrete radio driver to the GENERIC BLE capability. Consumers (the
+# BLE-serial facade, the BASIC BLE words) gate on TIKU_HAS_BLE, not on any one
+# chip -- a future BLE backend just sets this too.
+CFLAGS += -DTIKU_HAS_BLE=1
 endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
@@ -1052,6 +1056,9 @@ SRCS += arch/ambiq/tiku_spi_arch.c
 ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
 SRCS += arch/ambiq/tiku_em9305.c
 SRCS += arch/ambiq/tiku_ble_uart.c
+# Portable "serial over BLE" facade on top of the host stack -- backs the BASIC
+# BLE words and any app; EM9305 is just its first backend.
+SRCS += interfaces/bluetooth/tiku_ble_serial.c
 endif
 SRCS += arch/ambiq/tiku_lcd_arch.c
 # CryptoCell-312 TRNG (shared across apollo4l/4p/510) -- backs the cert-TLS

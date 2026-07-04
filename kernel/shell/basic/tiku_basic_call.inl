@@ -254,6 +254,24 @@ expr_call(const char **p, long *out_v)
         *out_v = (long)basic_erl;
         return 1;
     }
+#if TIKU_BASIC_BLE_ENABLE
+    /* BLEUP() -- 1 when a central is connected AND subscribed (ready to send),
+     * else 0.  Empty-paren form.  Polls the BLE stack as a side effect, so a
+     * `IF BLEUP()=0 THEN ...` wait loop keeps the link serviced. */
+    if (match_kw(p, "BLEUP")) {
+        if (!parse_call_0arg(p)) return 1;
+        *out_v = (long)(tiku_ble_serial_ready() ? 1 : 0);
+        return 1;
+    }
+    /* BLEAVAIL() -- 1 when received bytes are waiting to be read, else 0.  The
+     * allocation-free predicate to gate a read loop: `IF BLEAVAIL() THEN
+     * A$=BLEGET$()` avoids churning the string heap on empty polls. */
+    if (match_kw(p, "BLEAVAIL")) {
+        if (!parse_call_0arg(p)) return 1;
+        *out_v = (long)(tiku_ble_serial_rx_ready() ? 1 : 0);
+        return 1;
+    }
+#endif
     /* Time builtins. Both take a () with no arg so the parser knows
      * they're functions (otherwise MILLIS would parse as a multi-char
      * identifier with nothing to do). */

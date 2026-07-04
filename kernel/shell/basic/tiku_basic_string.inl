@@ -940,6 +940,23 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
+#if TIKU_BASIC_BLE_ENABLE
+    /* BLEGET$() -- pop any bytes a connected central has written to us (up to
+     * the string buffer), "" if none.  Polls the BLE stack, so a BLEGET$() poll
+     * loop keeps the link serviced.  0-arg-with-parens. */
+    if (match_kw(p, "BLEGET$")) {
+        int n;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++; skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        n = tiku_ble_serial_recv((uint8_t *)out, (uint16_t)(cap - 1u));
+        if (n < 0) n = 0;
+        out[n] = '\0';
+        return 0;
+    }
+#endif
 #if TIKU_BASIC_NET_ENABLE
     /* IPADDR$() -- the device's current IPv4 as "a.b.c.d" (empty if no
      * link/lease). 0-arg-with-parens. */

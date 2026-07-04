@@ -280,7 +280,8 @@ process_line(const char *raw)
                 "    to autorun the saved program at boot.\n"
                 "  Ctrl-C interrupts a running program.\n");
 #if TIKU_BASIC_SUBS_ENABLE || TIKU_BASIC_RTC_ENABLE ||                        \
-    TIKU_BASIC_MATHX_ENABLE || TIKU_BASIC_FILE_ENABLE || TIKU_BASIC_NET_ENABLE
+    TIKU_BASIC_MATHX_ENABLE || TIKU_BASIC_FILE_ENABLE ||                      \
+    TIKU_BASIC_NET_ENABLE || TIKU_BASIC_BLE_ENABLE
             /* Full-profile words (RP2350 / Apollo). Each clause is gated, so
              * the line lists exactly what was built in. */
             SHELL_PRINTF(
@@ -305,6 +306,9 @@ process_line(const char *raw)
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
                 " HTTPGET$ HTTPPOST$ HTTPHEADER HTTPSTATUS"
 #endif
+#endif
+#if TIKU_BASIC_BLE_ENABLE
+                " BLEADV BLEOFF BLESEND BLEBEACON BLEUP BLEAVAIL BLEGET$"
 #endif
                 "\n");
 #endif

@@ -219,6 +219,19 @@
 #    define TIKU_BASIC_NET_ENABLE    0
 #  endif
 #endif
+/* BLE : BLEADV / BLEOFF / BLESEND / BLEBEACON + BLEUP / BLEGET$ -- a "serial
+ *       over BLE" vocabulary on the driver-agnostic facade
+ *       (interfaces/bluetooth/tiku_ble_serial).  GENERAL, not chip-specific:
+ *       on whenever the build has a BLE radio backend, which the Makefile
+ *       signals via the generic TIKU_HAS_BLE capability (set today by the
+ *       EM9305 driver on apollo510b).  -D-overridable like the rest. */
+#ifndef TIKU_BASIC_BLE_ENABLE
+#  if (TIKU_HAS_BLE + 0)
+#    define TIKU_BASIC_BLE_ENABLE    1
+#  else
+#    define TIKU_BASIC_BLE_ENABLE    0
+#  endif
+#endif
 /* JSON$ -- extract a value by dotted path (keys + array indices) from a JSON
  * string; the agent primitive for parsing API/LLM replies. Wraps the
  * codec/json pull-parser, so it needs TIKU_KIT_CODEC_ENABLE (which compiles
