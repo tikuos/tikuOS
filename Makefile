@@ -1232,6 +1232,7 @@ endif
 SRCS += kernel/shell/tiku_shell_io.c
 SRCS += kernel/shell/tiku_shell_parser.c
 SRCS += kernel/shell/tiku_shell.c
+SRCS += kernel/shell/tiku_shell_pump.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_ps.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_info.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
@@ -1690,6 +1691,11 @@ SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
 endif
 ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
+# Same guard as the full-net branch below: the kit flag auto-enables the
+# shell `mqtt` command, whose .c (+ SLIP command + TCP shell-io backend)
+# only the TIKU_SHELL_NET_TEST block compiles. Keep it off here too, or
+# any lean shell+MQTT build dies with undefined references.
+CFLAGS += -DTIKU_SHELL_CMD_MQTT=0
 SRCS   += tikukits/net/mqtt/tiku_kits_net_mqtt.c
 endif
 ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)

@@ -323,45 +323,16 @@ static void basic_mqtt_msg_cb(const char *t, uint16_t tl, const uint8_t *d,
     basic_mqtt_rx_pending = 1;
 }
 
-/* One pump step: drive MQTT keepalive/state (paced ~8 Hz), service the console
- * transport (tiku_shell_io_rx_ready() also services the USB-CDC poll), kick the
- * watchdog. Returns 1 on Ctrl-C. */
+/* One pump step: the shared shell pump (watchdog + WiFi drain + paced
+ * tcp_periodic + SLIP-aware Ctrl-C — every ingredient device-proven,
+ * see kernel/shell/tiku_shell_pump.c) with MQTT housekeeping hooked
+ * at the paced net service point: TCP first (advances the connect
+ * handshake / retransmits / ACKs), then MQTT reacts to the resulting
+ * connection events. Returns 1 on Ctrl-C. */
 static int
 basic_net_mqtt_pump(void)
 {
-    static tiku_clock_time_t last;
-    tiku_clock_time_t now = tiku_clock_time();
-    tiku_watchdog_kick();
-#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
-    /* Drive the WiFi RX drain ourselves, every iteration: the
-     * cyw43_runner process is starved while we busy-wait here, so
-     * without this the chip's F2 FIFO fills and the SYN-ACK / CONNACK
-     * never reach the TCP/MQTT stack -- connect would always time out. */
-    (void)whd_drain_rx();
-#endif
-    if ((tiku_clock_time_t)(now - last) >=
-        (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
-        last = now;
-        /* TCP first (advances the connect handshake / retransmits / ACKs),
-         * then MQTT reacts to the resulting connection events. The shell's
-         * async tick normally drives tcp_periodic(); we own the loop here. */
-        tiku_kits_net_tcp_periodic();
-        tiku_kits_net_mqtt_periodic();
-    }
-    /* Ctrl-C break.  On a SLIP build the console and the IP link share one
-     * UART, so read through the SLIP-aware demux (as exec_delay_ms does):
-     * it routes IP frames to the stack and returns only genuine console
-     * bytes.  The raw getc would misread a payload byte 0x03 as Ctrl-C --
-     * aborting a connect early with an uncategorised error -- and would
-     * also steal bytes meant for the TCP/MQTT stack. */
-#if TIKU_SHELL_CMD_SLIP
-    if (tiku_shell_net_getc() == BASIC_CTRL_C) return 1;
-#else
-    if (tiku_shell_io_rx_ready()) {
-        if (tiku_shell_io_getc() == BASIC_CTRL_C) return 1;
-    }
-#endif
-    return 0;
+    return tiku_shell_pump_net(tiku_kits_net_mqtt_periodic);
 }
 
 /* MQTTPUB "broker_ip", "topic", expr$ -- connect, publish QoS0, disconnect. */
