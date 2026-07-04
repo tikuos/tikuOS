@@ -17,6 +17,7 @@
 #include <kernel/shell/tiku_shell_parser.h>   /* tiku_shell_parser_execute      */
 #include <kernel/shell/tiku_shell_cwd.h>      /* tiku_shell_cwd_get (prompt)    */
 #include <kernel/timers/tiku_clock.h>         /* tiku_clock_time (heartbeat)   */
+#include <hal/tiku_cpu.h>                      /* tiku_cpu_idle_hook (pump sleep) */
 #include <arch/ambiq/tiku_em9305.h>
 #include <arch/ambiq/tiku_ble_nus.h>
 #include <string.h>
@@ -103,6 +104,10 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
     uint8_t  greeted = 0u;
     uint8_t  sub_armed = 0u;
     tiku_clock_time_t beat, greet_at = 0;
+    /* DEEP idle between passes: the EM9305 keeps the link autonomously (its own
+     * link layer + the 32 kHz the Apollo exports on pad 138), so the pump can
+     * sleep the core and just poll each tick instead of spinning at 100% CPU. */
+    tiku_cpu_idle_enter_t idle = tiku_cpu_idle_hook(TIKU_CPU_IDLE_DEEP);
     int rc;
 
     rc = tiku_ble_nus_start(name);
@@ -194,6 +199,14 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
                 SHELL_PRINTF(".");
             }
             beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
+        }
+
+        /* Nothing happened this pass -> sleep the core until the next interrupt
+         * (STIMER tick ~8 ms, or UART RX). Wakes in time to poll the radio; the
+         * ~1-tick added RX latency is invisible at human/shell speed. */
+        if (idle != (tiku_cpu_idle_enter_t)0 && ev == TIKU_BLE_EVT_NONE &&
+            !tiku_ble_nus_rx_ready() && tiku_ble_nus_tx_pending() == 0u) {
+            idle();
         }
     }
 
