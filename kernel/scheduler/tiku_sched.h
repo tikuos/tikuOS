@@ -116,7 +116,10 @@ void tiku_sched_stop(void);
  * @brief Check if there is pending work
  *
  * Returns non-zero if the event queue is non-empty or any software
- * timer is due. Useful for deciding whether to enter low-power mode.
+ * timer is DUE (expired but not yet dispatched). A timer armed for
+ * a future deadline is not pending work: the tick ISR wakes the CPU
+ * when it comes due. Useful for deciding whether to enter low-power
+ * mode.
  *
  * @return Non-zero if work is pending
  */
@@ -132,6 +135,21 @@ uint8_t tiku_sched_has_pending(void);
  * @param hook Function to call when idle (NULL to clear)
  */
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook);
+
+/**
+ * @brief Declare whether the current idle mode is woken by the tick
+ *
+ * When non-zero (the default), the scheduler will idle even while
+ * software timers are armed: the tick interrupt wakes the CPU and
+ * the due timer is dispatched on the next pass. Set to zero when
+ * registering an idle mode whose wake sources do not include the
+ * system tick (e.g. MSP430 LPM4) — the scheduler then refuses to
+ * idle while any timer is armed, since sleeping would miss the
+ * deadline forever. Pair with tiku_cpu_idle_mode_wakes_on_tick().
+ *
+ * @param wakes Non-zero if the tick wakes the registered idle mode
+ */
+void tiku_sched_set_idle_tick_wakes(uint8_t wakes);
 
 /**
  * @brief Return the number of times the scheduler entered idle.

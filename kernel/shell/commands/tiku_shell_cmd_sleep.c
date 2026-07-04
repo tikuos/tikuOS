@@ -92,6 +92,12 @@ tiku_shell_cmd_sleep(uint8_t argc, const char *argv[])
     }
 
     tiku_sched_set_idle_hook(tiku_cpu_idle_hook(mode));
+    /* Tell the scheduler whether this mode is tick-woken: tick-woken
+     * modes may idle with timers armed (the tick dispatches them);
+     * tick-killing modes (MSP430 LPM4) must stay awake while any
+     * timer is armed or its deadline would never fire. */
+    tiku_sched_set_idle_tick_wakes(
+        (uint8_t)tiku_cpu_idle_mode_wakes_on_tick(mode));
     current_idle = mode;
 
     if (mode == TIKU_CPU_IDLE_OFF) {

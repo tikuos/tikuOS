@@ -212,6 +212,33 @@ tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t);
 int tiku_timer_any_pending(void);
 
 /**
+ * @brief Check if any software timer is due RIGHT NOW.
+ *
+ * Distinct from tiku_timer_any_pending(): "armed for later" is not
+ * work.  A timer whose deadline has not arrived contributes nothing
+ * to this predicate, so the scheduler can enter a tick-woken idle
+ * state instead of busy-spinning until the expiry (the tick ISR
+ * wakes the CPU and posts the poll that dispatches the timer).
+ *
+ * @return Non-zero if at least one active timer has expired but has
+ *         not yet been dispatched
+ */
+int tiku_timer_work_pending(void);
+
+/**
+ * @brief Check whether a process owns at least one armed timer.
+ *
+ * Used by the dispatcher to classify a blocked process as SLEEPING
+ * (parked on a timer deadline) rather than WAITING (parked on an
+ * event with no scheduled wake-up) for /proc and `ps`.
+ *
+ * @param p Process to look up (NULL matches timers set outside any
+ *          process context)
+ * @return Non-zero if an active timer's owner is @p p
+ */
+int tiku_timer_owner_armed(const struct tiku_process *p);
+
+/**
  * @brief Return the number of active software timers.
  */
 uint8_t tiku_timer_count(void);

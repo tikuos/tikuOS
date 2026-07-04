@@ -282,6 +282,23 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
 #endif
 }
 
+int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode) {
+#if defined(PLATFORM_MSP430)
+    /* Timer A0 runs from ACLK, which survives LPM0-LPM3; its ISR
+     * clears the LPM bits on exit.  LPM4 stops every clock, so the
+     * tick can never fire, let alone wake us. */
+    return mode != TIKU_CPU_IDLE_DEEPEST;
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+    /* Every supported mode is a WFI variant; any enabled interrupt
+     * (SysTick / STIMER tick included) wakes the core. */
+    (void)mode;
+    return 1;
+#else
+    (void)mode;
+    return 1;
+#endif
+}
+
 const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode) {
 #if defined(PLATFORM_MSP430)
     switch (mode) {

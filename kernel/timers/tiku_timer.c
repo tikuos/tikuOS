@@ -283,6 +283,33 @@ int tiku_timer_any_pending(void) { return timer_list != NULL; }
 
 /*---------------------------------------------------------------------------*/
 
+int tiku_timer_work_pending(void) {
+  struct tiku_timer *t;
+  tiku_clock_time_t now = tiku_clock_time();
+
+  for (t = timer_list; t != NULL; t = t->next) {
+    if (timer_is_due(t, now)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+
+int tiku_timer_owner_armed(const struct tiku_process *p) {
+  struct tiku_timer *t;
+
+  for (t = timer_list; t != NULL; t = t->next) {
+    if (t->p == p) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+
 uint8_t tiku_timer_count(void) {
     struct tiku_timer *t;
     uint8_t n = 0;

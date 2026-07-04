@@ -146,6 +146,20 @@ typedef void (*tiku_cpu_idle_enter_t)(void);
 tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode);
 
 /**
+ * @brief Does the system tick interrupt wake this idle mode?
+ *
+ * The scheduler's deadline-aware idle sleeps while software timers
+ * are armed ONLY if the tick can wake the CPU to dispatch them.
+ * MSP430: true for LPM0-LPM3 (Timer A0 runs from ACLK and its ISR
+ * clears the LPM bits on exit), false for LPM4 (all clocks off).
+ * RP2350 / Ambiq: every supported mode is a WFI variant, which any
+ * enabled interrupt — including the tick — wakes, so always true.
+ *
+ * @return Non-zero if the tick wakes the CPU out of @p mode
+ */
+int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode);
+
+/**
  * @brief Short, platform-specific name for the mode.
  *        e.g. on MSP430: "off", "LPM0", "LPM3", "LPM4".
  */

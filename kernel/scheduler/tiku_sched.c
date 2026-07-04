@@ -47,6 +47,25 @@ static tiku_sched_idle_hook_t idle_hook;
 /** @brief Number of times the scheduler entered idle */
 static volatile uint16_t idle_count;
 
+/**
+ * @brief Whether the registered idle mode is woken by the system tick.
+ *
+ * Gates idling while software timers are ARMED (not yet due): in a
+ * tick-woken mode (MSP430 LPM0-3, any WFI mode on the Cortex-M
+ * parts) the tick ISR wakes the CPU and posts the timer poll, so
+ * sleeping with armed timers is safe -- and is the whole point of
+ * deadline-aware idle.  In a mode whose wake set does not include
+ * the tick (MSP430 LPM4: all clocks off) an armed timer would sleep
+ * past its deadline forever, so the scheduler falls back to the old
+ * conservative behavior and stays awake until the timer fires.
+ *
+ * Defaults to 1: a NULL hook makes the gate moot, and the only
+ * boot-time hook (the RP2350 USB-CDC poll) is not a sleep at all.
+ * The `sleep` command updates it per mode via
+ * tiku_cpu_idle_mode_wakes_on_tick().
+ */
+static uint8_t idle_tick_wakes = 1;
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -148,10 +167,20 @@ void tiku_sched_loop(void)
          * our check and the idle hook, the resulting event will be
          * processed on the next iteration rather than being missed
          * while we sleep.
+         *
+         * An ARMED (not yet due) timer does not block idle when the
+         * registered idle mode is tick-woken: the tick ISR wakes the
+         * CPU, posts the timer poll, and the next loop pass
+         * dispatches it (the MSP430 tick ISR clears the LPM bits on
+         * exit; the Cortex-M modes are plain WFI).  Only when the
+         * idle mode's wake set excludes the tick (idle_tick_wakes
+         * == 0, e.g. MSP430 LPM4) do armed timers keep the CPU
+         * awake — sleeping would miss the deadline forever.
          */
         tiku_atomic_enter();
 
-        if (!tiku_sched_has_pending()) {
+        if (!tiku_sched_has_pending() &&
+            (idle_tick_wakes || !tiku_timer_any_pending())) {
             idle_count++;
             if (idle_hook != (tiku_sched_idle_hook_t)0) {
                 idle_hook();
@@ -174,20 +203,25 @@ void tiku_sched_stop(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Check if the scheduler has any pending work.
+ * @brief Check if the scheduler has dispatchable work RIGHT NOW.
  *
- * Returns non-zero if the process event queue is non-empty or
- * if any software timer is active.
+ * Returns non-zero if the process event queue is non-empty or any
+ * software timer is due (expired but not yet dispatched).  A timer
+ * that is merely ARMED for a future deadline is not pending work —
+ * the tick ISR will wake the CPU and post its poll when the
+ * deadline arrives.  (Before deadline-aware idle this predicate
+ * treated any armed timer as pending, which made the scheduler
+ * busy-spin between ticks for as long as any timer existed.)
  */
 uint8_t tiku_sched_has_pending(void)
 {
     /* Work is pending if the process event queue is non-empty
-     * or if any software timer is active. */
+     * or if any software timer is DUE (not merely armed). */
     if (!tiku_process_queue_empty()) {
         return 1;
     }
 
-    if (tiku_timer_any_pending()) {
+    if (tiku_timer_work_pending()) {
         return 1;
     }
 
@@ -200,6 +234,12 @@ uint8_t tiku_sched_has_pending(void)
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook)
 {
     idle_hook = hook;
+}
+
+/** @brief Declare whether the registered idle mode wakes on the tick. */
+void tiku_sched_set_idle_tick_wakes(uint8_t wakes)
+{
+    idle_tick_wakes = wakes ? 1u : 0u;
 }
 
 /*---------------------------------------------------------------------------*/
