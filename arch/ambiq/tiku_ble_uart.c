@@ -5,22 +5,22 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_nus.c - Minimal connectable GATT peripheral (Nordic UART Service)
+ * tiku_ble_uart.c - Minimal connectable GATT peripheral (BLE UART service)
  *
  * A tiny hand-rolled BLE host on top of the EM9305 SPI-HCI transport
  * (tiku_em9305): connectable advertising, a polled HCI event/ACL pump, LE
- * connection handling, an L2CAP-LE + ATT server, and the Nordic UART Service.
+ * connection handling, an L2CAP-LE + ATT server, and the BLE UART service.
  * This is the wireless-shell transport (M3). No Cordio, no AmbiqSuite.
  *
  * Bring-up is staged so each layer has its own HW gate:
  *   M3.1  connectable adv + connection/disconnection detection   <-- this file
- *   M3.2  ATT server + NUS discovery
- *   M3.3  NUS RX/TX wired to the shell io-backend
+ *   M3.2  ATT server + BLE UART discovery
+ *   M3.3  RX/TX wired to the shell io-backend
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "tiku_ble_nus.h"
+#include "tiku_ble_uart.h"
 
 #include <arch/ambiq/tiku_em9305.h>
 #include <string.h>
@@ -58,7 +58,7 @@
 
 #define CONN_HANDLE_NONE           0xFFFFu
 
-/* ---- L2CAP / ATT / GATT (Nordic UART Service) ---- */
+/* ---- L2CAP / ATT / GATT (BLE UART service) ---- */
 
 #define L2CAP_CID_ATT              0x0004u
 #define L2CAP_CID_LE_SIG           0x0005u   /* LE signaling channel           */
@@ -92,7 +92,7 @@
 #define ATT_ERR_REQ_NOT_SUPP       0x06u
 #define ATT_ERR_ATTR_NOT_FOUND     0x0Au
 
-/* NUS attribute handles (fixed layout). */
+/* BLE UART attribute handles (fixed layout). */
 #define ATT_H_SVC                  0x0001u   /* primary service declaration     */
 #define ATT_H_RX_DECL              0x0002u   /* RX characteristic declaration   */
 #define ATT_H_RX_VAL               0x0003u   /* RX value (phone -> device write) */
@@ -107,13 +107,13 @@
 #define CHAR_PROP_NOTIFY           0x10u     /* notify                          */
 
 /* ATT MTU we offer. Notifications carry up to MTU-3 bytes of shell output. */
-#define NUS_SERVER_MTU             247u
+#define BLEUART_SERVER_MTU             247u
 
 /* ------------------------------------------------------------------ *
  *  State
  * ------------------------------------------------------------------ */
 
-static tiku_ble_nus_conn_t s_conn = { CONN_HANDLE_NONE, 0u, 0u, {0,0,0,0,0,0} };
+static tiku_ble_uart_conn_t s_conn = { CONN_HANDLE_NONE, 0u, 0u, {0,0,0,0,0,0} };
 static uint8_t             s_started;
 
 /* ATT connection state. */
@@ -143,21 +143,21 @@ static uint8_t             s_stream[560];
 static uint16_t            s_stream_len;
 
 /* Defined with the ATT server below; used by the connection-setup path too. */
-static int nus_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len);
+static int bleuart_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len);
 
-/* NUS RX ring: bytes the phone wrote to the RX characteristic, drained by the
+/* RX ring: bytes the phone wrote to the RX characteristic, drained by the
  * shell as console input. TX buffer: shell output, flushed as TX notifications. */
-#define NUS_RX_RING        256u
-#define NUS_TX_BUF         1024u
-static uint8_t             s_rx_ring[NUS_RX_RING];
+#define BLEUART_RX_RING        256u
+#define BLEUART_TX_BUF         1024u
+static uint8_t             s_rx_ring[BLEUART_RX_RING];
 static uint16_t            s_rx_head, s_rx_tail;
-static uint8_t             s_tx_buf[NUS_TX_BUF];
+static uint8_t             s_tx_buf[BLEUART_TX_BUF];
 static uint16_t            s_tx_len;
 
-static void nus_rx_push(const uint8_t *d, uint16_t n) {
+static void bleuart_rx_push(const uint8_t *d, uint16_t n) {
     uint16_t i;
     for (i = 0u; i < n; i++) {
-        uint16_t nxt = (uint16_t)((s_rx_head + 1u) % NUS_RX_RING);
+        uint16_t nxt = (uint16_t)((s_rx_head + 1u) % BLEUART_RX_RING);
         if (nxt == s_rx_tail) {
             break;                          /* ring full -- drop the rest       */
         }
@@ -166,9 +166,12 @@ static void nus_rx_push(const uint8_t *d, uint16_t n) {
     }
 }
 
-/* NUS 128-bit base UUID 6E400001-B5A3-F393-E0A9-E50E24DCCA9E in little-endian
- * wire order. Byte [12] selects the member: 01 = service, 02 = RX, 03 = TX. */
-static const uint8_t       NUS_UUID_BASE[16] = {
+/* 128-bit base UUID 6E400001-B5A3-F393-E0A9-E50E24DCCA9E in little-endian wire
+ * order. Byte [12] selects the member: 01 = service, 02 = RX, 03 = TX. These
+ * are deliberately the well-known Nordic UART Service UUIDs: keeping them lets
+ * stock BLE-serial apps (nRF Connect, etc.) and generic clients interoperate
+ * with this hand-rolled server unchanged -- no vendor code, only the UUIDs. */
+static const uint8_t       BLEUART_UUID_BASE[16] = {
     0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
     0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu
 };
@@ -180,18 +183,18 @@ static uint8_t             s_last_meta_len;
 
 /* Trace ring of the last few raw packets the pump read (type + head bytes),
  * so a session dump shows exactly what the controller delivered. */
-#define NUS_TRACE_N        8u
-#define NUS_TRACE_CAP      18u
-static struct { uint8_t len; uint8_t b[NUS_TRACE_CAP]; } s_trace[NUS_TRACE_N];
+#define BLEUART_TRACE_N        8u
+#define BLEUART_TRACE_CAP      18u
+static struct { uint8_t len; uint8_t b[BLEUART_TRACE_CAP]; } s_trace[BLEUART_TRACE_N];
 static uint8_t             s_trace_head;   /* next slot to write */
-static uint8_t             s_trace_count;  /* valid entries (<= NUS_TRACE_N) */
+static uint8_t             s_trace_count;  /* valid entries (<= BLEUART_TRACE_N) */
 
-static void nus_trace(const uint8_t *p, uint16_t len) {
-    uint8_t n = (len < NUS_TRACE_CAP) ? (uint8_t)len : (uint8_t)NUS_TRACE_CAP;
+static void bleuart_trace(const uint8_t *p, uint16_t len) {
+    uint8_t n = (len < BLEUART_TRACE_CAP) ? (uint8_t)len : (uint8_t)BLEUART_TRACE_CAP;
     memcpy(s_trace[s_trace_head].b, p, n);
     s_trace[s_trace_head].len = n;
-    s_trace_head = (uint8_t)((s_trace_head + 1u) % NUS_TRACE_N);
-    if (s_trace_count < NUS_TRACE_N) {
+    s_trace_head = (uint8_t)((s_trace_head + 1u) % BLEUART_TRACE_N);
+    if (s_trace_count < BLEUART_TRACE_N) {
         s_trace_count++;
     }
 }
@@ -201,12 +204,12 @@ static void nus_trace(const uint8_t *p, uint16_t len) {
  * a single ATT MTU worth of ACL. */
 static uint8_t             s_pkt[260];
 
-/* Per-step diagnostics for the last tiku_ble_nus_start(): result code + status
+/* Per-step diagnostics for the last tiku_ble_uart_start(): result code + status
  * byte of each setup HCI command. Exposed for the shell so a failed bring-up
  * says exactly which command timed out. */
-#define NUS_MAX_STEPS      6u
-static int8_t              s_dbg_rc[NUS_MAX_STEPS];
-static uint8_t             s_dbg_st[NUS_MAX_STEPS];
+#define BLEUART_MAX_STEPS      6u
+static int8_t              s_dbg_rc[BLEUART_MAX_STEPS];
+static uint8_t             s_dbg_st[BLEUART_MAX_STEPS];
 static uint8_t             s_dbg_nsteps;
 
 /*
@@ -218,7 +221,7 @@ static uint8_t             s_dbg_nsteps;
  * clear the pipe (non-blocking: timeout 0 reads only if RDY is already high)
  * before issuing the next command.
  */
-static void nus_drain(void) {
+static void bleuart_drain(void) {
     uint8_t  tmp[64];
     uint16_t l;
     int      guard = 8;
@@ -231,7 +234,7 @@ static void nus_drain(void) {
 /* Pull every SPI frame the radio has pending (RDY high) into the reassembly
  * stream. Bounded, non-blocking. Also called before each host WRITE so a
  * pending inbound frame can never collide with (and lose) the write. */
-static void nus_slurp(void) {
+static void bleuart_slurp(void) {
     int guard = 16;
     while (guard-- > 0) {
         uint16_t room = (uint16_t)(sizeof(s_stream) - s_stream_len);
@@ -253,7 +256,7 @@ static void nus_slurp(void) {
  * 16-bit data length. Returns the packet length, or 0 if the stream holds
  * only a partial packet (more frames needed).
  */
-static uint16_t nus_stream_extract(uint8_t *out, uint16_t cap) {
+static uint16_t bleuart_stream_extract(uint8_t *out, uint16_t cap) {
     for (;;) {
         uint16_t need;
 
@@ -308,14 +311,14 @@ static uint16_t nus_stream_extract(uint8_t *out, uint16_t cap) {
 
 /* Service pending events, issue one setup command, and record diagnostics.
  * @p i is the step index (0..3). Returns the hci_cmd result. */
-static int nus_step(uint8_t i, uint16_t op, const uint8_t *p, uint8_t plen,
+static int bleuart_step(uint8_t i, uint16_t op, const uint8_t *p, uint8_t plen,
                     uint8_t *bad) {
     uint8_t st = 0xFFu;
     int     rc;
 
-    nus_drain();
+    bleuart_drain();
     rc = tiku_em9305_hci_cmd(op, p, plen, &st);
-    if (i < NUS_MAX_STEPS) {
+    if (i < BLEUART_MAX_STEPS) {
         s_dbg_rc[i] = (int8_t)rc;
         s_dbg_st[i] = st;
         if ((uint8_t)(i + 1u) > s_dbg_nsteps) {
@@ -333,7 +336,7 @@ static int nus_step(uint8_t i, uint16_t op, const uint8_t *p, uint8_t plen,
  * @p name, then enable advertising. Mirrors tiku_em9305_beacon() but with
  * ADV_IND (0x00) so a central may connect. Statuses OR'd into *bad (0 = ok).
  */
-static int nus_advertise(const char *name, uint8_t *bad) {
+static int bleuart_advertise(const char *name, uint8_t *bad) {
     static const uint8_t adv_params[15] = {
         0xA0u, 0x00u,          /* min interval 160 * 0.625ms = 100 ms          */
         0xA0u, 0x00u,          /* max interval 100 ms                          */
@@ -362,18 +365,18 @@ static int nus_advertise(const char *name, uint8_t *bad) {
     s_dbg_nsteps = 0u;
 
     /* HCI Reset -> known state. */
-    if (nus_step(0u, HCI_OP_RESET, NULL, 0u, bad) != TIKU_EM9305_OK) {
+    if (bleuart_step(0u, HCI_OP_RESET, NULL, 0u, bad) != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
 
     /* LE Set Event Mask -> deliver Connection Complete & friends. */
-    if (nus_step(1u, HCI_OP_LE_SET_EVENT_MASK, le_evt_mask,
+    if (bleuart_step(1u, HCI_OP_LE_SET_EVENT_MASK, le_evt_mask,
                  (uint8_t)sizeof(le_evt_mask), bad) != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
 
     /* Advertising parameters (connectable). */
-    if (nus_step(2u, HCI_OP_LE_SET_ADV_PARAM, adv_params,
+    if (bleuart_step(2u, HCI_OP_LE_SET_ADV_PARAM, adv_params,
                  (uint8_t)sizeof(adv_params), bad) != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
@@ -393,14 +396,14 @@ static int nus_advertise(const char *name, uint8_t *bad) {
     memcpy(adv_data + idx, name, nlen);
     idx = (uint8_t)(idx + nlen);
     adv_data[0] = (uint8_t)(idx - 1u);     /* significant byte count           */
-    if (nus_step(3u, HCI_OP_LE_SET_ADV_DATA, adv_data,
+    if (bleuart_step(3u, HCI_OP_LE_SET_ADV_DATA, adv_data,
                  (uint8_t)sizeof(adv_data), bad) != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
 
     /* Enable advertising. */
     en = 0x01u;
-    if (nus_step(4u, HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, bad)
+    if (bleuart_step(4u, HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, bad)
         != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
@@ -411,7 +414,7 @@ static int nus_advertise(const char *name, uint8_t *bad) {
 /* Toggle advertising on/off. The adv set (params + data) persists in the
  * controller across connections, so re-advertising after a disconnect is just
  * a re-enable. */
-static int nus_adv_enable(uint8_t on) {
+static int bleuart_adv_enable(uint8_t on) {
     uint8_t st;
     return tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &on, 1u, &st);
 }
@@ -422,12 +425,12 @@ static int nus_adv_enable(uint8_t on) {
  * the TX flow control (credits) and the notification chunk size; the defaults
  * (27/2) are the spec minimums and stay if the query fails.
  */
-static void nus_read_buffer_size(void) {
+static void bleuart_read_buffer_size(void) {
     static const uint8_t cmd[4] = { 0x01u, 0x02u, 0x20u, 0x00u };
     uint8_t  ev[16];
     uint16_t el = 0u;
 
-    nus_drain();
+    bleuart_drain();
     if (tiku_em9305_send(cmd, (uint16_t)sizeof(cmd)) != TIKU_EM9305_OK) {
         return;
     }
@@ -447,7 +450,7 @@ static void nus_read_buffer_size(void) {
     }
 }
 
-int tiku_ble_nus_start(const char *name) {
+int tiku_ble_uart_start(const char *name) {
     uint8_t  bad = 0u;
     uint8_t  bev[16];
     uint16_t bl = 0u;
@@ -470,41 +473,41 @@ int tiku_ble_nus_start(const char *name) {
     }
     (void)tiku_em9305_recv(bev, sizeof(bev), &bl, 500u);   /* {04 FF 01 01} */
 
-    rc = nus_advertise(name, &bad);
+    rc = bleuart_advertise(name, &bad);
     if (rc != TIKU_EM9305_OK) {
         return rc;
     }
     if (bad != 0u) {
         return TIKU_EM9305_ERR_NOTREADY;
     }
-    nus_read_buffer_size();       /* ACL packet size + credit budget for TX */
+    bleuart_read_buffer_size();       /* ACL packet size + credit budget for TX */
     s_started = 1u;
     return TIKU_EM9305_OK;
 }
 
 /* ------------------------------------------------------------------ *
- *  L2CAP-LE + ATT server (Nordic UART Service)
+ *  L2CAP-LE + ATT server (BLE UART service)
  * ------------------------------------------------------------------ */
 
-/* Write a NUS member UUID (01 = service, 02 = RX, 03 = TX) into @p out[16]. */
-static void nus_uuid(uint8_t *out, uint8_t member) {
-    memcpy(out, NUS_UUID_BASE, 16);
+/* Write a BLE UART member UUID (01 = service, 02 = RX, 03 = TX) into @p out[16]. */
+static void bleuart_uuid(uint8_t *out, uint8_t member) {
+    memcpy(out, BLEUART_UUID_BASE, 16);
     out[12] = member;
 }
 
 /* Send one L2CAP PDU on @p cid to the peer as an HCI ACL packet. Returns 0 on
  * success (the controller accepted it -- one TX credit consumed), negative if
  * the write could not be delivered. */
-static int nus_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
-    static uint8_t out[9u + NUS_SERVER_MTU];
+static int bleuart_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
+    static uint8_t out[9u + BLEUART_SERVER_MTU];
     uint16_t acl;
     int rc;
 
     if (s_conn.handle == CONN_HANDLE_NONE) {
         return -1;
     }
-    if (len > NUS_SERVER_MTU) {
-        len = NUS_SERVER_MTU;
+    if (len > BLEUART_SERVER_MTU) {
+        len = BLEUART_SERVER_MTU;
     }
     acl = (uint16_t)(4u + len);            /* L2CAP header + payload           */
     out[0] = HCI_PKT_ACL;
@@ -517,7 +520,7 @@ static int nus_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
     out[7] = (uint8_t)(cid & 0xFFu);
     out[8] = (uint8_t)(cid >> 8);
     memcpy(out + 9, pdu, len);
-    nus_slurp();                        /* pending inbound frame must not
+    bleuart_slurp();                        /* pending inbound frame must not
                                          * collide with (and lose) this write */
     rc = tiku_em9305_send(out, (uint16_t)(9u + len));
     if (rc != TIKU_EM9305_OK) {
@@ -528,19 +531,19 @@ static int nus_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
 }
 
 /* Send one ATT PDU over the ATT fixed channel. */
-static int nus_att_send(const uint8_t *att, uint16_t att_len) {
-    return nus_l2cap_send(L2CAP_CID_ATT, att, att_len);
+static int bleuart_att_send(const uint8_t *att, uint16_t att_len) {
+    return bleuart_l2cap_send(L2CAP_CID_ATT, att, att_len);
 }
 
 /* Send an ATT Error Response for @p req_op on @p handle with code @p err. */
-static void nus_att_error(uint8_t req_op, uint16_t handle, uint8_t err) {
+static void bleuart_att_error(uint8_t req_op, uint16_t handle, uint8_t err) {
     uint8_t r[5];
     r[0] = ATT_ERROR_RSP;
     r[1] = req_op;
     r[2] = (uint8_t)(handle & 0xFFu);
     r[3] = (uint8_t)(handle >> 8);
     r[4] = err;
-    nus_att_send(r, 5u);
+    bleuart_att_send(r, 5u);
 }
 
 /* Little read helpers for request fields. */
@@ -551,11 +554,11 @@ static uint16_t rd16(const uint8_t *p) {
 /*
  * Dispatch one ATT request (@p att[0..att_len-1], opcode at att[0]) and send the
  * matching response. Implements just enough of the ATT server for a phone to
- * discover the Nordic UART Service and enable notifications.
+ * discover the BLE UART service and enable notifications.
  *
  * @return TIKU_BLE_EVT_RX if RX data arrived (Stage 3), else TIKU_BLE_EVT_ATT.
  */
-static int nus_att_handle(const uint8_t *att, uint16_t len) {
+static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
     uint8_t op;
 
     if (len < 1u) {
@@ -567,20 +570,20 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
     case ATT_EXCHANGE_MTU_REQ: {
         uint16_t cli = (len >= 3u) ? rd16(att + 1) : 23u;
         uint8_t  r[3];
-        s_att_mtu = (cli < NUS_SERVER_MTU) ? cli : NUS_SERVER_MTU;
+        s_att_mtu = (cli < BLEUART_SERVER_MTU) ? cli : BLEUART_SERVER_MTU;
         if (s_att_mtu < 23u) {
             s_att_mtu = 23u;
         }
         r[0] = ATT_EXCHANGE_MTU_RSP;
-        r[1] = (uint8_t)(NUS_SERVER_MTU & 0xFFu);
-        r[2] = (uint8_t)(NUS_SERVER_MTU >> 8);
-        nus_att_send(r, 3u);
+        r[1] = (uint8_t)(BLEUART_SERVER_MTU & 0xFFu);
+        r[2] = (uint8_t)(BLEUART_SERVER_MTU >> 8);
+        bleuart_att_send(r, 3u);
         break;
     }
 
     case ATT_READ_BY_GRP_REQ: {           /* primary service discovery */
         uint16_t start, end;
-        if (len < 7u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        if (len < 7u) { bleuart_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
         start = rd16(att + 1);
         end   = rd16(att + 3);
         /* Group type must be Primary Service (0x2800), and our service in range. */
@@ -592,17 +595,17 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
             r[1] = 4u + 16u;              /* each entry: handles(4) + UUID(16)   */
             r[2] = (uint8_t)(ATT_H_SVC & 0xFFu);  r[3] = (uint8_t)(ATT_H_SVC >> 8);
             r[4] = (uint8_t)(ATT_H_LAST & 0xFFu); r[5] = (uint8_t)(ATT_H_LAST >> 8);
-            nus_uuid(r + 6, 0x01u);
-            nus_att_send(r, (uint16_t)sizeof(r));
+            bleuart_uuid(r + 6, 0x01u);
+            bleuart_att_send(r, (uint16_t)sizeof(r));
         } else {
-            nus_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
+            bleuart_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
         }
         break;
     }
 
     case ATT_READ_BY_TYPE_REQ: {          /* characteristic discovery */
         uint16_t start, end;
-        if (len < 7u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        if (len < 7u) { bleuart_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
         start = rd16(att + 1);
         end   = rd16(att + 3);
         if (att[5] == (uint8_t)(GATT_CHARACTERISTIC & 0xFFu) &&
@@ -618,7 +621,7 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
                 p[2] = (uint8_t)(CHAR_PROP_WRITE | CHAR_PROP_WRITE_NR);
                 p[3] = (uint8_t)(ATT_H_RX_VAL & 0xFFu);
                 p[4] = (uint8_t)(ATT_H_RX_VAL >> 8);
-                nus_uuid(p + 5, 0x02u);
+                bleuart_uuid(p + 5, 0x02u);
                 p += 21; n++;
             }
             if (start <= ATT_H_TX_DECL && ATT_H_TX_DECL <= end) {
@@ -627,16 +630,16 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
                 p[2] = CHAR_PROP_NOTIFY;
                 p[3] = (uint8_t)(ATT_H_TX_VAL & 0xFFu);
                 p[4] = (uint8_t)(ATT_H_TX_VAL >> 8);
-                nus_uuid(p + 5, 0x03u);
+                bleuart_uuid(p + 5, 0x03u);
                 p += 21; n++;
             }
             if (n > 0u) {
-                nus_att_send(r, (uint16_t)(2u + (uint16_t)n * 21u));
+                bleuart_att_send(r, (uint16_t)(2u + (uint16_t)n * 21u));
             } else {
-                nus_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
+                bleuart_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
             }
         } else {
-            nus_att_error(op, (len >= 3u) ? rd16(att + 1) : 0u,
+            bleuart_att_error(op, (len >= 3u) ? rd16(att + 1) : 0u,
                           ATT_ERR_ATTR_NOT_FOUND);
         }
         break;
@@ -644,7 +647,7 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
 
     case ATT_FIND_INFO_REQ: {             /* descriptor discovery (CCCD) */
         uint16_t start, end;
-        if (len < 5u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        if (len < 5u) { bleuart_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
         start = rd16(att + 1);
         end   = rd16(att + 3);
         if (start <= ATT_H_TX_CCCD && ATT_H_TX_CCCD <= end) {
@@ -655,25 +658,25 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
             r[3] = (uint8_t)(ATT_H_TX_CCCD >> 8);
             r[4] = (uint8_t)(GATT_CCCD & 0xFFu);
             r[5] = (uint8_t)(GATT_CCCD >> 8);
-            nus_att_send(r, 6u);
+            bleuart_att_send(r, 6u);
         } else {
-            nus_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
+            bleuart_att_error(op, start, ATT_ERR_ATTR_NOT_FOUND);
         }
         break;
     }
 
     case ATT_READ_REQ: {                  /* read the CCCD */
         uint16_t h;
-        if (len < 3u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        if (len < 3u) { bleuart_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
         h = rd16(att + 1);
         if (h == ATT_H_TX_CCCD) {
             uint8_t r[3];
             r[0] = ATT_READ_RSP;
             r[1] = (uint8_t)(s_tx_cccd & 0xFFu);
             r[2] = (uint8_t)(s_tx_cccd >> 8);
-            nus_att_send(r, 3u);
+            bleuart_att_send(r, 3u);
         } else {
-            nus_att_error(op, h, ATT_ERR_READ_NOT_PERM);
+            bleuart_att_error(op, h, ATT_ERR_READ_NOT_PERM);
         }
         break;
     }
@@ -682,23 +685,23 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
     case ATT_WRITE_CMD: {
         uint16_t h;
         int rxed = 0;
-        if (len < 3u) { nus_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
+        if (len < 3u) { bleuart_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
         h = rd16(att + 1);
         if (h == ATT_H_TX_CCCD) {
             s_tx_cccd = (len >= 4u) ? rd16(att + 3)
                                     : (uint16_t)(len >= 3u ? att[3] : 0u);
         } else if (h == ATT_H_RX_VAL) {
             if (len > 3u) {
-                nus_rx_push(att + 3, (uint16_t)(len - 3u));   /* -> shell input */
+                bleuart_rx_push(att + 3, (uint16_t)(len - 3u));   /* -> shell input */
             }
             rxed = 1;
         } else if (op == ATT_WRITE_REQ) {
-            nus_att_error(op, h, ATT_ERR_WRITE_NOT_PERM);
+            bleuart_att_error(op, h, ATT_ERR_WRITE_NOT_PERM);
             break;
         }
         if (op == ATT_WRITE_REQ) {
             uint8_t r = ATT_WRITE_RSP;
-            nus_att_send(&r, 1u);
+            bleuart_att_send(&r, 1u);
         }
         if (rxed) {
             return TIKU_BLE_EVT_RX;
@@ -707,7 +710,7 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
     }
 
     default:
-        nus_att_error(op, 0u, ATT_ERR_REQ_NOT_SUPP);
+        bleuart_att_error(op, 0u, ATT_ERR_REQ_NOT_SUPP);
         break;
     }
 
@@ -719,7 +722,7 @@ static int nus_att_handle(const uint8_t *att, uint16_t len) {
  * ------------------------------------------------------------------ */
 
 /* Handle one HCI *event* packet (s_pkt[0] == 0x04). */
-static int nus_on_event(const uint8_t *ev, uint16_t len) {
+static int bleuart_on_event(const uint8_t *ev, uint16_t len) {
     if (len < 2u) {
         return TIKU_BLE_EVT_NONE;
     }
@@ -756,7 +759,7 @@ static int nus_on_event(const uint8_t *ev, uint16_t len) {
         s_stream_len = 0u;
         s_ll_tx_octets = 27u;
         if (s_started) {
-            (void)nus_adv_enable(1u);
+            (void)bleuart_adv_enable(1u);
         }
         return TIKU_BLE_EVT_DISCONNECTED;
     }
@@ -794,14 +797,14 @@ static int nus_on_event(const uint8_t *ev, uint16_t len) {
     return TIKU_BLE_EVT_NONE;
 }
 
-uint8_t tiku_ble_nus_trace(uint8_t i, uint8_t *buf, uint8_t cap) {
+uint8_t tiku_ble_uart_trace(uint8_t i, uint8_t *buf, uint8_t cap) {
     uint8_t start, idx, n;
     if (i >= s_trace_count) {
         return 0u;
     }
     /* oldest-first: entries live at (head - count + i) mod N */
-    start = (uint8_t)((s_trace_head + NUS_TRACE_N - s_trace_count) % NUS_TRACE_N);
-    idx = (uint8_t)((start + i) % NUS_TRACE_N);
+    start = (uint8_t)((s_trace_head + BLEUART_TRACE_N - s_trace_count) % BLEUART_TRACE_N);
+    idx = (uint8_t)((start + i) % BLEUART_TRACE_N);
     n = (s_trace[idx].len < cap) ? s_trace[idx].len : cap;
     if (buf && n) {
         memcpy(buf, s_trace[idx].b, n);
@@ -809,11 +812,11 @@ uint8_t tiku_ble_nus_trace(uint8_t i, uint8_t *buf, uint8_t cap) {
     return n;
 }
 
-uint8_t tiku_ble_nus_trace_count(void) {
+uint8_t tiku_ble_uart_trace_count(void) {
     return s_trace_count;
 }
 
-uint8_t tiku_ble_nus_last_meta(uint8_t *buf, uint8_t cap) {
+uint8_t tiku_ble_uart_last_meta(uint8_t *buf, uint8_t cap) {
     uint8_t n = (s_last_meta_len < cap) ? s_last_meta_len : cap;
     if (buf && n) {
         memcpy(buf, s_last_meta, n);
@@ -831,7 +834,7 @@ uint8_t tiku_ble_nus_last_meta(uint8_t *buf, uint8_t cap) {
  * Also serves as the connection fallback: if ATT data is flowing but we never
  * saw a Connection Complete event, adopt the link from the ACL handle.
  */
-static int nus_on_acl(const uint8_t *acl, uint16_t len) {
+static int bleuart_on_acl(const uint8_t *acl, uint16_t len) {
     uint16_t cid, l2len, attlen;
     int      adopted = TIKU_BLE_EVT_NONE;
 
@@ -855,37 +858,37 @@ static int nus_on_acl(const uint8_t *acl, uint16_t len) {
         attlen = l2len;                    /* trust the L2CAP length field       */
     }
     {
-        int r = nus_att_handle(acl + 9, attlen);
+        int r = bleuart_att_handle(acl + 9, attlen);
         /* A freshly adopted link reports CONNECTED even though we also just
          * served (e.g.) the MTU request in the same packet. */
         return (adopted == TIKU_BLE_EVT_CONNECTED) ? TIKU_BLE_EVT_CONNECTED : r;
     }
 }
 
-int tiku_ble_nus_poll(void) {
+int tiku_ble_uart_poll(void) {
     uint16_t len;
 
     /* Non-blocking: append whatever frames the radio has pending, then peel
      * exactly one complete HCI packet off the stream and dispatch it. Partial
      * packets stay buffered; extra coalesced packets are served next poll. */
-    nus_slurp();
-    len = nus_stream_extract(s_pkt, (uint16_t)sizeof(s_pkt));
+    bleuart_slurp();
+    len = bleuart_stream_extract(s_pkt, (uint16_t)sizeof(s_pkt));
     if (len == 0u) {
         return TIKU_BLE_EVT_NONE;
     }
-    nus_trace(s_pkt, len);
+    bleuart_trace(s_pkt, len);
 
     switch (s_pkt[0]) {
     case HCI_PKT_EVENT:
-        return nus_on_event(s_pkt, len);
+        return bleuart_on_event(s_pkt, len);
     case HCI_PKT_ACL:
-        return nus_on_acl(s_pkt, len);
+        return bleuart_on_acl(s_pkt, len);
     default:
         return TIKU_BLE_EVT_NONE;
     }
 }
 
-uint8_t tiku_ble_nus_start_steps(int8_t *rc, uint8_t *st, uint8_t cap) {
+uint8_t tiku_ble_uart_start_steps(int8_t *rc, uint8_t *st, uint8_t cap) {
     uint8_t i;
     uint8_t n = (s_dbg_nsteps < cap) ? s_dbg_nsteps : cap;
     for (i = 0u; i < n; i++) {
@@ -895,32 +898,32 @@ uint8_t tiku_ble_nus_start_steps(int8_t *rc, uint8_t *st, uint8_t cap) {
     return s_dbg_nsteps;
 }
 
-int tiku_ble_nus_connected(void) {
+int tiku_ble_uart_connected(void) {
     return (s_conn.handle != CONN_HANDLE_NONE);
 }
 
-int tiku_ble_nus_notify_enabled(void) {
+int tiku_ble_uart_notify_enabled(void) {
     return (s_tx_cccd & 0x0001u) != 0u;
 }
 
-/* --- shell io-backend hooks: NUS RX -> console in, console out -> NUS TX --- */
+/* --- shell io-backend hooks: RX -> console in, console out -> TX --- */
 
-int tiku_ble_nus_getc(void) {
+int tiku_ble_uart_getc(void) {
     int c;
     if (s_rx_tail == s_rx_head) {
         return -1;
     }
     c = (int)s_rx_ring[s_rx_tail];
-    s_rx_tail = (uint16_t)((s_rx_tail + 1u) % NUS_RX_RING);
+    s_rx_tail = (uint16_t)((s_rx_tail + 1u) % BLEUART_RX_RING);
     return c;
 }
 
-uint8_t tiku_ble_nus_rx_ready(void) {
+uint8_t tiku_ble_uart_rx_ready(void) {
     return (uint8_t)(s_rx_head != s_rx_tail);
 }
 
-void tiku_ble_nus_flush(void) {
-    static uint8_t att[3u + NUS_SERVER_MTU];
+void tiku_ble_uart_flush(void) {
+    static uint8_t att[3u + BLEUART_SERVER_MTU];
     uint16_t n, lim;
 
     if (s_tx_len == 0u) {
@@ -950,7 +953,7 @@ void tiku_ble_nus_flush(void) {
     att[1] = (uint8_t)(ATT_H_TX_VAL & 0xFFu);
     att[2] = (uint8_t)(ATT_H_TX_VAL >> 8);
     memcpy(att + 3, s_tx_buf, n);
-    if (nus_att_send(att, (uint16_t)(3u + n)) != 0) {
+    if (bleuart_att_send(att, (uint16_t)(3u + n)) != 0) {
         return;                             /* keep the bytes; retry later      */
     }
     if (n < s_tx_len) {
@@ -961,15 +964,15 @@ void tiku_ble_nus_flush(void) {
     }
 }
 
-void tiku_ble_nus_putc(char c) {
+void tiku_ble_uart_putc(char c) {
     /* A full buffer self-drains: pump the stack (acks return TX credits) and
      * flush until space opens. Bounded so a dead link cannot wedge the shell;
      * on timeout the byte is dropped rather than blocking forever. */
     if (s_tx_len >= (uint16_t)sizeof(s_tx_buf)) {
         uint32_t spins = 2000000u;
         while (s_tx_len >= (uint16_t)sizeof(s_tx_buf) && spins-- > 0u) {
-            (void)tiku_ble_nus_poll();
-            tiku_ble_nus_flush();
+            (void)tiku_ble_uart_poll();
+            tiku_ble_uart_flush();
         }
         if (s_tx_len >= (uint16_t)sizeof(s_tx_buf)) {
             return;
@@ -978,35 +981,35 @@ void tiku_ble_nus_putc(char c) {
     s_tx_buf[s_tx_len++] = (uint8_t)c;
 }
 
-uint16_t tiku_ble_nus_tx_pending(void) {
+uint16_t tiku_ble_uart_tx_pending(void) {
     return s_tx_len;
 }
 
-uint16_t tiku_ble_nus_att_mtu(void) {
+uint16_t tiku_ble_uart_att_mtu(void) {
     return s_att_mtu;
 }
 
-int tiku_ble_nus_tx_inflight(void) {
+int tiku_ble_uart_tx_inflight(void) {
     return s_acl_inflight;
 }
 
-uint16_t tiku_ble_nus_acl_pkt_len(void) {
+uint16_t tiku_ble_uart_acl_pkt_len(void) {
     return s_acl_pkt_len;
 }
 
-int tiku_ble_nus_acl_credits(void) {
+int tiku_ble_uart_acl_credits(void) {
     return s_acl_credits;
 }
 
-void tiku_ble_nus_tx_credit_reset(void) {
+void tiku_ble_uart_tx_credit_reset(void) {
     s_acl_inflight = 0;
 }
 
-const tiku_ble_nus_conn_t *tiku_ble_nus_conn_info(void) {
+const tiku_ble_uart_conn_t *tiku_ble_uart_conn_info(void) {
     return &s_conn;
 }
 
-void tiku_ble_nus_stop(void) {
+void tiku_ble_uart_stop(void) {
     uint8_t st;
 
     /* Drop the link if one is up. Disconnect returns a Command *Status* event,

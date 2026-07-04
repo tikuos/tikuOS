@@ -1048,10 +1048,10 @@ SRCS += arch/ambiq/tiku_onewire_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
 # EM9305 BLE radio transport rides the IOM SPI master above (apollo510b only).
-# tiku_ble_nus.c layers the connectable GATT/NUS host stack on that transport.
+# tiku_ble_uart.c layers the connectable GATT/NUS host stack on that transport.
 ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
 SRCS += arch/ambiq/tiku_em9305.c
-SRCS += arch/ambiq/tiku_ble_nus.c
+SRCS += arch/ambiq/tiku_ble_uart.c
 endif
 SRCS += arch/ambiq/tiku_lcd_arch.c
 # CryptoCell-312 TRNG (shared across apollo4l/4p/510) -- backs the cert-TLS
