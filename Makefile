@@ -1693,6 +1693,25 @@ else
 SRCS   += $(wildcard tikukits/net/ipv4/*.c)
 SRCS   += $(wildcard tikukits/net/http/*.c)
 SRCS   += $(wildcard tikukits/net/mqtt/*.c)
+# The wildcards above compile the MQTT/HTTP clients, but the enable -D that
+# the BASIC/shell builtins gate on -- MQTTPUB / MQTTWAIT$ via
+# `#if (TIKU_KITS_NET_MQTT_ENABLE + 0)`, HTTPGET$ via TIKU_KITS_NET_HTTP_ENABLE
+# -- is only set in the MIN branch above. Without it those words compile out
+# even though their client is linked in (dead code). Propagate the flags into
+# the full-net profile too, opt-in, so requesting the client actually exposes
+# the language/shell surface for it.
+ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
+# The kit flag auto-enables the shell `mqtt` command (tiku_shell_config.h),
+# but that command pulls in the SLIP command + TCP shell-io backend which the
+# NET_TEST block compiles alongside it and this full-net profile does not. The
+# BASIC MQTT words (MQTTWAIT$/MQTTPUB) are gated on the kit flag alone, so keep
+# the shell command off here to avoid an undefined-reference link error.
+CFLAGS += -DTIKU_SHELL_CMD_MQTT=0
+endif
+ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_HTTP_ENABLE=1
+endif
 endif
 # WiFi link backend: requires both the CYW43 driver and the net kit.
 # Compiled only when the build wires both submodules together.
