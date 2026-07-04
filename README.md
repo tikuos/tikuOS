@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
-  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430FR-red?style=flat-square" alt="MCU"></a>
+  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350-red?style=flat-square" alt="MCU"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
   <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-38%20commands-orange?style=flat-square" alt="Shell"></a>
   <a href="http://tiku-os.org"><img src="https://img.shields.io/badge/web-tiku--os.org-purple?style=flat-square" alt="Website"></a>
@@ -26,12 +26,18 @@
 
 ## Supported Boards
 
-| Board | MCU | RAM | FRAM/Flash | Notable | Status |
-|-------|-----|-----|------|---------|--------|
-| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 | 2 KB | 64 KB FRAM | — | :green_circle: Primary |
-| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 | 2 KB | 128 KB FRAM | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
-| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 | 8 KB | 256 KB FRAM | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
-| Raspberry Pi Pico 2 W | RP2350 (Cortex-M33 @ 150 MHz) | 520 KB SRAM | 4 MB QSPI flash | Bare-metal port, UART shell, GPIO, no Pico SDK dep. CYW43 Wi-Fi stubbed. | :yellow_circle: Compatible |
+| Board | MCU / Core | RAM | NVM | Notable | Status |
+|-------|-----------|-----|-----|---------|--------|
+| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 · 16-bit | 2 KB | 64 KB FRAM | The reference part | :green_circle: Primary |
+| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 · 16-bit | 8 KB | 256 KB FRAM | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
+| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 · 16-bit | 2 KB | 128 KB FRAM | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
+| Ambiq Apollo510 EVB | Apollo510 · Cortex-M55 @ 96-192 MHz | 512 KB | 4 MB MRAM | TLS 1.3/1.2 to the live web, Tiku BASIC, IP-over-SLIP | :green_circle: Primary |
+| Ambiq Apollo4 Lite EVB | Apollo4 Lite · Cortex-M4F @ 96 MHz | 384 KB | 2 MB MRAM | IP-over-SLIP, durable MRAM object store | :green_circle: Primary |
+| Ambiq Apollo510 Blue EVB | Apollo510 + EM9305 · Cortex-M55 | 512 KB | 4 MB MRAM | Console on UART1; experimental BLE (beacon + GATT / Nordic UART Service) | :yellow_circle: Experimental |
+| Raspberry Pi Pico 2 W | RP2350 · Cortex-M33 @ 150 MHz | 520 KB | 4 MB flash | Bare-metal (no Pico SDK dep); experimental Wi-Fi (from-scratch CYW43 driver) | :yellow_circle: Compatible |
+| Raspberry Pi Pico 2 | RP2350 · Cortex-M33 @ 150 MHz | 520 KB | 4 MB flash | Bare-metal; UART shell, GPIO | :yellow_circle: Compatible |
+
+<sub>Apollo4 Plus (`MCU=apollo4p`) builds on the Apollo4 Lite backend. All Ambiq targets flash over J-Link (SEGGER).</sub>
 
 ---
 
@@ -44,7 +50,8 @@ make MCU=msp430fr6989 MEMORY_MODEL=large    # FR6989 needs large mode for HIFRAM
 make flash MCU=msp430fr5969
 make flash MCU=msp430fr6989 MEMORY_MODEL=large
 
-# Build with the Tiku BASIC interpreter (FR5994 / FR6989 only)
+# Build with the Tiku BASIC interpreter (MSP430 needs large mode;
+# the Cortex-M parts, e.g. MCU=apollo510 / rp2350, do not)
 make flash MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
            TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
 
@@ -52,6 +59,11 @@ make flash MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
 # Requires: arm-none-eabi-gcc + python3 (and optionally picotool).
 make MCU=rp2350                              # builds main.elf, main.bin, main.uf2
 make flash MCU=rp2350                        # picotool, or copies UF2 to RPI-RP2
+
+# --- Ambiq Apollo (Cortex-M) -----------------------------------------------
+# Requires: arm-none-eabi-gcc; flashing uses J-Link (SEGGER JLinkExe).
+make MCU=apollo510                           # also apollo4l / apollo4p / apollo510b
+make flash MCU=apollo510                     # J-Link
 
 # Open serial monitor (RP2350 default baud is 115200; MSP430 is 9600)
 make monitor MCU=rp2350
@@ -447,15 +459,15 @@ functions `RND ABS INT SGN MIN MAX MOD SHL SHR PEEK`; constants
 kernel's persist API; `basic run` autoruns the saved program (use
 with `init add` to autostart at boot).
 
-**Hardware constraints.** BASIC requires `MEMORY_MODEL=large`, which
-in turn requires HIFRAM. Concretely:
+**Hardware constraints.** BASIC needs writable RAM for its arena. On
+MSP430 that means `MEMORY_MODEL=large` (hence HIFRAM); the flat-memory
+Cortex-M parts (RP2350, Apollo) need neither. Concretely:
 
 | MCU | BASIC supported |
 |---|---|
-| MSP430FR2433 | :red_circle: no — no HIFRAM |
-| MSP430FR5969 | :red_circle: no — no HIFRAM |
-| MSP430FR5994 | :green_circle: yes (with `MEMORY_MODEL=large`) |
-| MSP430FR6989 | :green_circle: yes (with `MEMORY_MODEL=large`) |
+| MSP430FR2433 / FR5969 | :red_circle: no — too little RAM, no HIFRAM |
+| MSP430FR5994 / FR6989 | :green_circle: yes (with `MEMORY_MODEL=large`) |
+| RP2350 · Apollo4 Lite · Apollo510 | :green_circle: yes (flat memory; no `MEMORY_MODEL`) |
 
 The Makefile rejects unsupported combinations at parse time with an
 actionable error.
@@ -472,11 +484,11 @@ make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
 | Flag | Effect |
 |------|--------|
 | `TIKU_SHELL_ENABLE=1` | Enable interactive shell (UART) |
-| `TIKU_SHELL_BASIC_ENABLE=1` | Enable the [Tiku BASIC](#tiku-basic) interpreter (FR5994 / FR6989 only; requires `MEMORY_MODEL=large`) |
+| `TIKU_SHELL_BASIC_ENABLE=1` | Enable the [Tiku BASIC](#tiku-basic) interpreter (MSP430: FR5994 / FR6989 with `MEMORY_MODEL=large`; RP2350 / Apollo need no memory model) |
 | `TIKU_INIT_ENABLE=1` | Enable FRAM-backed init system (implies shell) |
 | `TIKU_SHELL_COLOR=1` | Enable ANSI color output (banner, prompt, help, free) |
 | `UART_BAUD=115200` | Set UART baud rate (default 9600) |
-| `MCU=msp430fr5969` | Target MCU (also `msp430fr5994`, `msp430fr6989`, `msp430fr2433`) |
+| `MCU=msp430fr5969` | Target MCU. Also `msp430fr5994` · `msp430fr6989` · `rp2350` · `apollo510` · `apollo4l` · `apollo4p` · `apollo510b` |
 | `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement. Only valid on parts with HIFRAM (FR5994, FR6989); rejected at parse time on FR5969 / FR2433. |
 
 ```bash
