@@ -147,9 +147,12 @@ static int frame_begin(uint8_t header, uint8_t *sts2) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
 
+    /* Poll the two status bytes with CS held asserted throughout (the SDK
+     * does the same): toggling CS between retries can make the radio
+     * mis-latch the frame and wedge its buffer accounting. */
     for (i = 0u; i < EM_STS_CHK_MAX; i++) {
-        cs_assert();
         if (tiku_spi_write_read(tx, rx, 2u) != 0) {
+            busy_us(50);
             cs_release();
             return TIKU_EM9305_ERR_TIMEOUT;
         }
@@ -159,9 +162,10 @@ static int frame_begin(uint8_t header, uint8_t *sts2) {
             if (sts2) { *sts2 = rx[1]; }
             return TIKU_EM9305_OK;         /* CS stays asserted */
         }
-        cs_release();
         busy_us(50);
     }
+    busy_us(50);
+    cs_release();
     return TIKU_EM9305_ERR_NOTREADY;
 }
 
@@ -223,6 +227,8 @@ int tiku_em9305_send(const uint8_t *data, uint16_t len) {
         }
         chunk = (uint16_t)((len - sent) < sts2 ? (len - sent) : sts2);
         rc = tiku_spi_write(data + sent, chunk);
+        busy_us(50);                       /* let the radio latch the frame
+                                            * before CS rises (SDK tx_ends)    */
         cs_release();
         if (rc != 0) {
             return TIKU_EM9305_ERR_TIMEOUT;
@@ -248,8 +254,17 @@ int tiku_em9305_recv(uint8_t *buf, uint16_t cap, uint16_t *out_len,
     if (rc != TIKU_EM9305_OK) {
         return rc;
     }
+
+    /*
+     * One framed read: STS2 bounds this frame's bytes. NOTE the radio treats
+     * its side as a byte STREAM -- one frame may carry a partial HCI packet
+     * (large packets span frames) or SEVERAL back-to-back small packets
+     * (e.g. coalesced Number-Of-Completed-Packets events). Callers that need
+     * packet boundaries must reassemble across calls (tiku_ble_nus does).
+     */
     n = (uint16_t)(sts2 < cap ? sts2 : cap);
     rc = tiku_spi_read(buf, n);
+    busy_us(50);                           /* frame-end settle before CS rises */
     cs_release();
     if (rc != 0) {
         return TIKU_EM9305_ERR_TIMEOUT;

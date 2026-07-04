@@ -98,6 +98,27 @@ void tiku_ble_nus_flush(void);
 /** @brief Number of TX bytes still buffered (for paced draining). */
 uint16_t tiku_ble_nus_tx_pending(void);
 
+/** @brief Negotiated ATT MTU (23 until an Exchange MTU completes). */
+uint16_t tiku_ble_nus_att_mtu(void);
+
+/** @brief ACL packets sent to the controller but not yet acked (TX credit). */
+int tiku_ble_nus_tx_inflight(void);
+
+/** @brief Controller-reported max ACL data bytes per packet (27 if unknown). */
+uint16_t tiku_ble_nus_acl_pkt_len(void);
+
+/** @brief Controller-reported ACL buffer count = TX credit budget. */
+int tiku_ble_nus_acl_credits(void);
+
+/**
+ * @brief Reclaim TX credits after an ack-wait timed out.
+ *
+ * A packet the controller dropped (e.g. sized over the LL TX budget) never
+ * produces a Number-Of-Completed-Packets ack; without reclaiming, each such
+ * drop permanently leaks a credit until TX stalls entirely.
+ */
+void tiku_ble_nus_tx_credit_reset(void);
+
 /** @brief Snapshot of the current (or most recent) LE connection. */
 typedef struct {
     uint16_t handle;       /**< HCI connection handle (0xFFFF if none)      */

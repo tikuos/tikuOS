@@ -34,22 +34,40 @@ static const tiku_shell_io_t s_ble_io = {
     TIKU_SHELL_IO_CRLF        /* flags    */
 };
 
-/* Busy-wait @p ticks system ticks, pumping the BLE stack so the controller's
- * completed-packet acks (and any RX) are serviced while we wait. */
-static void ble_uart_settle(uint8_t ticks) {
-    tiku_clock_time_t t = (tiku_clock_time_t)(tiku_clock_time() + ticks);
-    while (TIKU_CLOCK_LT(tiku_clock_time(), t)) {
+/* Push buffered shell output to the phone as flow-controlled TX notifications.
+ * flush() itself refuses to send without a free controller credit, so this
+ * simply pumps the stack (acks return credits) and retries until the buffer is
+ * empty. A stall detector bounds it: one second with zero progress (link died,
+ * subscriber gone) abandons the remainder instead of wedging the shell. */
+static void ble_uart_drain_tx(void) {
+    uint16_t prev = tiku_ble_nus_tx_pending();
+    tiku_clock_time_t deadline =
+        (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
+
+    while (tiku_ble_nus_tx_pending() > 0u) {
+        uint16_t now;
+        (void)tiku_ble_nus_poll();      /* services completed-packet acks     */
+        tiku_ble_nus_flush();
+        now = tiku_ble_nus_tx_pending();
+        if (now < prev) {               /* progress -> reset the stall clock  */
+            prev = now;
+            deadline = (tiku_clock_time_t)(tiku_clock_time() +
+                                           TIKU_CLOCK_SECOND);
+        } else if (!TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
+            break;                      /* one second without progress        */
+        }
+    }
+
+    /* Let the tail packets finish transmitting (bounded). If a packet never
+     * acks (the controller dropped it), reclaim its credit so a drop cannot
+     * permanently shrink the TX budget. */
+    deadline = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
+    while (tiku_ble_nus_tx_inflight() > 0 &&
+           TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
         (void)tiku_ble_nus_poll();
     }
-}
-
-/* Push buffered shell output to the phone as paced TX notifications so a burst
- * (e.g. `ps`) does not overrun the controller's ACL buffers. */
-static void ble_uart_drain_tx(void) {
-    int guard = 128;
-    while (tiku_ble_nus_tx_pending() > 0u && guard-- > 0) {
-        tiku_ble_nus_flush();
-        ble_uart_settle(2u);      /* ~16 ms between notifications */
+    if (tiku_ble_nus_tx_inflight() > 0) {
+        tiku_ble_nus_tx_credit_reset();
     }
 }
 
@@ -83,7 +101,8 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
     static char line[128];
     uint16_t lpos = 0u;
     uint8_t  greeted = 0u;
-    tiku_clock_time_t beat;
+    uint8_t  sub_armed = 0u;
+    tiku_clock_time_t beat, greet_at = 0;
     int rc;
 
     rc = tiku_ble_nus_start(name);
@@ -113,19 +132,32 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
         if (ev == TIKU_BLE_EVT_CONNECTED) {
             SHELL_PRINTF("\nble: CONNECTED\n");
             greeted = 0u;
+            sub_armed = 0u;
             lpos = 0u;
         } else if (ev == TIKU_BLE_EVT_DISCONNECTED) {
             SHELL_PRINTF("\nble: DISCONNECTED -- re-advertising\n");
             greeted = 0u;
+            sub_armed = 0u;
             lpos = 0u;
         }
 
-        /* Greet once the peer subscribes to TX notifications (CCCD enabled). */
-        if (!greeted && tiku_ble_nus_connected() && tiku_ble_nus_notify_enabled()) {
-            ble_uart_to_ble(uart_be,
-                            "\r\ntikuOS wireless shell -- type 'help'\r\n", 0);
-            greeted = 1u;
-            SHELL_PRINTF("ble: wireless shell active (subscriber attached)\n");
+        /* Greet once the peer subscribes to TX notifications -- but ~0.6 s
+         * later: notifications sent while the central is still arming its
+         * subscription (and settling the fresh link) are silently discarded. */
+        if (!greeted && tiku_ble_nus_connected() &&
+            tiku_ble_nus_notify_enabled()) {
+            if (!sub_armed) {
+                sub_armed = 1u;
+                greet_at = (tiku_clock_time_t)(tiku_clock_time() +
+                                               (TIKU_CLOCK_SECOND * 5u) / 8u);
+            } else if (TIKU_CLOCK_LT(greet_at, tiku_clock_time())) {
+                ble_uart_to_ble(uart_be,
+                                "\r\ntikuOS wireless shell -- type 'help'\r\n",
+                                0);
+                greeted = 1u;
+                SHELL_PRINTF("ble: wireless shell active "
+                             "(subscriber attached)\n");
+            }
         }
 
         /* Feed NUS RX into the line buffer; execute on newline. */

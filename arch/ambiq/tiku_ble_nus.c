@@ -43,6 +43,7 @@
 
 /* HCI event codes. */
 #define HCI_EVT_DISCONN_COMPLETE   0x05u
+#define HCI_EVT_NUM_COMPLETE       0x13u   /* Number Of Completed Packets      */
 #define HCI_EVT_LE_META            0x3Eu
 
 /* LE Meta subevent codes. A controller reports a new link as either the legacy
@@ -60,6 +61,7 @@
 /* ---- L2CAP / ATT / GATT (Nordic UART Service) ---- */
 
 #define L2CAP_CID_ATT              0x0004u
+#define L2CAP_CID_LE_SIG           0x0005u   /* LE signaling channel           */
 
 /* GATT declaration UUIDs (16-bit). */
 #define GATT_PRIMARY_SVC           0x2800u
@@ -117,6 +119,31 @@ static uint8_t             s_started;
 /* ATT connection state. */
 static uint16_t            s_att_mtu = 23u;   /* negotiated ATT MTU (23 default) */
 static uint16_t            s_tx_cccd;         /* TX CCCD value (bit0 = notify on) */
+
+/* Controller TX flow control: the EM9305 holds a handful of ACL buffers and
+ * SILENTLY DROPS a packet sent with none free. Track packets in flight against
+ * the controller-reported budget (HCI LE Read Buffer Size) and gate every
+ * notification on a free credit; Number-Of-Completed-Packets returns them. */
+static int                 s_acl_inflight;    /* ACL packets sent, not yet acked */
+static int                 s_acl_credits = 2; /* controller ACL buffer count     */
+static uint16_t            s_acl_pkt_len = 27u; /* controller max ACL data bytes */
+
+/* Live LL TX payload limit, from the LE Data Length Change event. A link opens
+ * at the 27-octet LL default, and the EM9305 DROPS (rather than fragments) an
+ * ACL bigger than this -- so every outbound packet is sized to it. The central
+ * typically raises it to ~251 moments after connecting. */
+static uint16_t            s_ll_tx_octets = 27u;
+
+/* Inbound HCI reassembly stream. The radio's SPI side is a byte STREAM: one
+ * framed read may carry a partial packet (large ACL writes span frames) or
+ * several whole packets back-to-back (coalesced completed-packet events --
+ * losing one of those permanently leaks a TX credit). Frames append here and
+ * complete packets are peeled off by their HCI header length. */
+static uint8_t             s_stream[560];
+static uint16_t            s_stream_len;
+
+/* Defined with the ATT server below; used by the connection-setup path too. */
+static int nus_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len);
 
 /* NUS RX ring: bytes the phone wrote to the RX characteristic, drained by the
  * shell as console input. TX buffer: shell output, flushed as TX notifications. */
@@ -198,6 +225,80 @@ static void nus_drain(void) {
     while (guard-- > 0 &&
            tiku_em9305_recv(tmp, sizeof(tmp), &l, 0u) == TIKU_EM9305_OK) {
         /* discard */
+    }
+}
+
+/* Pull every SPI frame the radio has pending (RDY high) into the reassembly
+ * stream. Bounded, non-blocking. Also called before each host WRITE so a
+ * pending inbound frame can never collide with (and lose) the write. */
+static void nus_slurp(void) {
+    int guard = 16;
+    while (guard-- > 0) {
+        uint16_t room = (uint16_t)(sizeof(s_stream) - s_stream_len);
+        uint16_t l = 0u;
+        if (room == 0u) {
+            break;                          /* stream full -- extract first    */
+        }
+        if (tiku_em9305_recv(s_stream + s_stream_len, room, &l, 0u)
+            != TIKU_EM9305_OK) {
+            break;                          /* nothing (more) pending          */
+        }
+        s_stream_len = (uint16_t)(s_stream_len + l);
+    }
+}
+
+/*
+ * Peel one complete HCI packet off the front of the stream into @p out.
+ * Packet length comes from the HCI header: event = 3 + len byte, ACL = 5 +
+ * 16-bit data length. Returns the packet length, or 0 if the stream holds
+ * only a partial packet (more frames needed).
+ */
+static uint16_t nus_stream_extract(uint8_t *out, uint16_t cap) {
+    for (;;) {
+        uint16_t need;
+
+        if (s_stream_len == 0u) {
+            return 0u;
+        }
+        /* Resync guard: a stream must start with an event (0x04) or ACL
+         * (0x02) type byte; anything else is desync -- shed a byte and retry. */
+        if (s_stream[0] != 0x04u && s_stream[0] != 0x02u) {
+            memmove(s_stream, s_stream + 1, (uint16_t)(s_stream_len - 1u));
+            s_stream_len--;
+            continue;
+        }
+        if (s_stream[0] == 0x04u) {
+            if (s_stream_len < 3u) {
+                return 0u;                  /* header incomplete               */
+            }
+            need = (uint16_t)(3u + s_stream[2]);
+        } else {
+            if (s_stream_len < 5u) {
+                return 0u;
+            }
+            need = (uint16_t)(5u + (s_stream[3] | ((uint16_t)s_stream[4] << 8)));
+        }
+        if (need > (uint16_t)sizeof(s_stream)) {
+            s_stream_len = 0u;              /* impossible length: hard resync  */
+            return 0u;
+        }
+        if (s_stream_len < need) {
+            return 0u;                      /* wait for the rest               */
+        }
+        if (need > cap) {
+            need = cap;                     /* truncate into caller's buffer   */
+        }
+        memcpy(out, s_stream, need);
+        {
+            uint16_t full = (s_stream[0] == 0x04u)
+                                ? (uint16_t)(3u + s_stream[2])
+                                : (uint16_t)(5u + (s_stream[3] |
+                                                   ((uint16_t)s_stream[4] << 8)));
+            memmove(s_stream, s_stream + full,
+                    (uint16_t)(s_stream_len - full));
+            s_stream_len = (uint16_t)(s_stream_len - full);
+        }
+        return need;
     }
 }
 
@@ -315,6 +416,37 @@ static int nus_adv_enable(uint8_t on) {
     return tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &on, 1u, &st);
 }
 
+/*
+ * HCI LE Read Buffer Size (0x2002): learn the controller's ACL data budget --
+ * max bytes per ACL packet and how many it can hold. Those two numbers drive
+ * the TX flow control (credits) and the notification chunk size; the defaults
+ * (27/2) are the spec minimums and stay if the query fails.
+ */
+static void nus_read_buffer_size(void) {
+    static const uint8_t cmd[4] = { 0x01u, 0x02u, 0x20u, 0x00u };
+    uint8_t  ev[16];
+    uint16_t el = 0u;
+
+    nus_drain();
+    if (tiku_em9305_send(cmd, (uint16_t)sizeof(cmd)) != TIKU_EM9305_OK) {
+        return;
+    }
+    if (tiku_em9305_recv(ev, sizeof(ev), &el, 500u) != TIKU_EM9305_OK) {
+        return;
+    }
+    /* Command Complete: 04 0E len 01 02 20 status pkt_len_lo pkt_len_hi num */
+    if (el >= 10u && ev[0] == 0x04u && ev[1] == 0x0Eu &&
+        ev[4] == 0x02u && ev[5] == 0x20u && ev[6] == 0x00u) {
+        uint16_t l = (uint16_t)(ev[7] | ((uint16_t)ev[8] << 8));
+        if (l >= 27u) {
+            s_acl_pkt_len = l;
+        }
+        if (ev[9] > 0u) {
+            s_acl_credits = (int)ev[9];
+        }
+    }
+}
+
 int tiku_ble_nus_start(const char *name) {
     uint8_t  bad = 0u;
     uint8_t  bev[16];
@@ -327,6 +459,9 @@ int tiku_ble_nus_start(const char *name) {
     s_tx_cccd = 0u;
     s_rx_head = s_rx_tail = 0u;
     s_tx_len = 0u;
+    s_acl_inflight = 0;
+    s_stream_len = 0u;
+    s_ll_tx_octets = 27u;
 
     /* Bring the radio up (EN pulse + boot event), then drain the boot event. */
     rc = tiku_em9305_reset();
@@ -342,6 +477,7 @@ int tiku_ble_nus_start(const char *name) {
     if (bad != 0u) {
         return TIKU_EM9305_ERR_NOTREADY;
     }
+    nus_read_buffer_size();       /* ACL packet size + credit budget for TX */
     s_started = 1u;
     return TIKU_EM9305_OK;
 }
@@ -356,30 +492,44 @@ static void nus_uuid(uint8_t *out, uint8_t member) {
     out[12] = member;
 }
 
-/* Send one ATT PDU to the peer over L2CAP CID 0x0004 as an HCI ACL packet. */
-static void nus_att_send(const uint8_t *att, uint16_t att_len) {
+/* Send one L2CAP PDU on @p cid to the peer as an HCI ACL packet. Returns 0 on
+ * success (the controller accepted it -- one TX credit consumed), negative if
+ * the write could not be delivered. */
+static int nus_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
     static uint8_t out[9u + NUS_SERVER_MTU];
-    uint16_t l2, acl;
+    uint16_t acl;
+    int rc;
 
     if (s_conn.handle == CONN_HANDLE_NONE) {
-        return;
+        return -1;
     }
-    if (att_len > NUS_SERVER_MTU) {
-        att_len = NUS_SERVER_MTU;
+    if (len > NUS_SERVER_MTU) {
+        len = NUS_SERVER_MTU;
     }
-    l2  = att_len;                         /* L2CAP payload = ATT PDU          */
-    acl = (uint16_t)(4u + att_len);        /* + 4-byte L2CAP header            */
+    acl = (uint16_t)(4u + len);            /* L2CAP header + payload           */
     out[0] = HCI_PKT_ACL;
     out[1] = (uint8_t)(s_conn.handle & 0xFFu);
     out[2] = (uint8_t)((s_conn.handle >> 8) & 0x0Fu);  /* PB=00 (start) BC=00  */
     out[3] = (uint8_t)(acl & 0xFFu);
     out[4] = (uint8_t)(acl >> 8);
-    out[5] = (uint8_t)(l2 & 0xFFu);
-    out[6] = (uint8_t)(l2 >> 8);
-    out[7] = (uint8_t)(L2CAP_CID_ATT & 0xFFu);
-    out[8] = (uint8_t)(L2CAP_CID_ATT >> 8);
-    memcpy(out + 9, att, att_len);
-    (void)tiku_em9305_send(out, (uint16_t)(9u + att_len));
+    out[5] = (uint8_t)(len & 0xFFu);
+    out[6] = (uint8_t)(len >> 8);
+    out[7] = (uint8_t)(cid & 0xFFu);
+    out[8] = (uint8_t)(cid >> 8);
+    memcpy(out + 9, pdu, len);
+    nus_slurp();                        /* pending inbound frame must not
+                                         * collide with (and lose) this write */
+    rc = tiku_em9305_send(out, (uint16_t)(9u + len));
+    if (rc != TIKU_EM9305_OK) {
+        return -1;
+    }
+    s_acl_inflight++;                   /* controller now holds one more packet */
+    return 0;
+}
+
+/* Send one ATT PDU over the ATT fixed channel. */
+static int nus_att_send(const uint8_t *att, uint16_t att_len) {
+    return nus_l2cap_send(L2CAP_CID_ATT, att, att_len);
 }
 
 /* Send an ATT Error Response for @p req_op on @p handle with code @p err. */
@@ -574,6 +724,25 @@ static int nus_on_event(const uint8_t *ev, uint16_t len) {
         return TIKU_BLE_EVT_NONE;
     }
 
+    /* Number Of Completed Packets: 04 13 len num_h [handle:2 count:2]*.
+     * Each acks packets the controller finished transmitting, freeing its ACL
+     * buffers -- the credit our TX flow control waits on. */
+    if (ev[1] == HCI_EVT_NUM_COMPLETE && len >= 4u) {
+        uint8_t nh = ev[3];
+        uint8_t i;
+        for (i = 0u; i < nh; i++) {
+            uint16_t off = (uint16_t)(4u + (uint16_t)i * 4u + 2u);   /* count */
+            if ((uint16_t)(off + 1u) < len) {
+                int cnt = (int)(ev[off] | ((uint16_t)ev[off + 1u] << 8));
+                s_acl_inflight -= cnt;
+                if (s_acl_inflight < 0) {
+                    s_acl_inflight = 0;
+                }
+            }
+        }
+        return TIKU_BLE_EVT_NONE;
+    }
+
     /* Disconnection Complete: 04 05 04 status handle_lo handle_hi reason.
      * The controller stops advertising when a link forms, so re-enable it here
      * to stay connectable for the next central. */
@@ -583,6 +752,9 @@ static int nus_on_event(const uint8_t *ev, uint16_t len) {
         s_tx_cccd = 0u;
         s_rx_head = s_rx_tail = 0u;
         s_tx_len = 0u;
+        s_acl_inflight = 0;
+        s_stream_len = 0u;
+        s_ll_tx_octets = 27u;
         if (s_started) {
             (void)nus_adv_enable(1u);
         }
@@ -596,6 +768,16 @@ static int nus_on_event(const uint8_t *ev, uint16_t len) {
                         ? (uint8_t)len : (uint8_t)sizeof(s_last_meta);
         memcpy(s_last_meta, ev, n);      /* snapshot for diagnostics */
         s_last_meta_len = n;
+
+        /* Data Length Change: 04 3E len 07 hh hh tx_octets(2) tx_time(2)...
+         * -- the new LL TX payload budget every outbound ACL must fit. */
+        if (ev[3] == 0x07u && len >= 8u) {
+            uint16_t tx = (uint16_t)(ev[6] | ((uint16_t)ev[7] << 8));
+            if (tx >= 27u) {
+                s_ll_tx_octets = tx;
+            }
+            return TIKU_BLE_EVT_NONE;
+        }
 
         if ((ev[3] == HCI_LE_CONN_COMPLETE ||
              ev[3] == HCI_LE_ENH_CONN_COMPLETE) &&
@@ -681,12 +863,13 @@ static int nus_on_acl(const uint8_t *acl, uint16_t len) {
 }
 
 int tiku_ble_nus_poll(void) {
-    uint16_t len = 0u;
+    uint16_t len;
 
-    /* Non-blocking: read a packet only if the radio is already asserting RDY. */
-    if (tiku_em9305_recv(s_pkt, sizeof(s_pkt), &len, 0u) != TIKU_EM9305_OK) {
-        return TIKU_BLE_EVT_NONE;
-    }
+    /* Non-blocking: append whatever frames the radio has pending, then peel
+     * exactly one complete HCI packet off the stream and dispatch it. Partial
+     * packets stay buffered; extra coalesced packets are served next poll. */
+    nus_slurp();
+    len = nus_stream_extract(s_pkt, (uint16_t)sizeof(s_pkt));
     if (len == 0u) {
         return TIKU_BLE_EVT_NONE;
     }
@@ -738,7 +921,7 @@ uint8_t tiku_ble_nus_rx_ready(void) {
 
 void tiku_ble_nus_flush(void) {
     static uint8_t att[3u + NUS_SERVER_MTU];
-    uint16_t n;
+    uint16_t n, lim;
 
     if (s_tx_len == 0u) {
         return;
@@ -747,15 +930,29 @@ void tiku_ble_nus_flush(void) {
         s_tx_len = 0u;                      /* no subscriber -- drop            */
         return;
     }
-    n = s_tx_len;
-    if (n > (uint16_t)(s_att_mtu - 3u)) {
-        n = (uint16_t)(s_att_mtu - 3u);     /* one notification is <= MTU-3     */
+    if (s_acl_inflight >= s_acl_credits) {
+        return;                             /* no TX credit -- caller retries   */
     }
+
+    /* One notification: bounded by the ATT MTU, the controller's ACL buffer,
+     * and (hardest) the LIVE LL TX payload -- the EM9305 drops, not fragments,
+     * an ACL bigger than that (7 = 4 L2CAP + 3 notification header). */
+    lim = (uint16_t)(s_att_mtu - 3u);
+    if (s_acl_pkt_len > 7u && lim > (uint16_t)(s_acl_pkt_len - 7u)) {
+        lim = (uint16_t)(s_acl_pkt_len - 7u);
+    }
+    if (s_ll_tx_octets > 7u && lim > (uint16_t)(s_ll_tx_octets - 7u)) {
+        lim = (uint16_t)(s_ll_tx_octets - 7u);
+    }
+    n = (s_tx_len < lim) ? s_tx_len : lim;
+
     att[0] = ATT_HANDLE_VALUE_NTF;
     att[1] = (uint8_t)(ATT_H_TX_VAL & 0xFFu);
     att[2] = (uint8_t)(ATT_H_TX_VAL >> 8);
     memcpy(att + 3, s_tx_buf, n);
-    nus_att_send(att, (uint16_t)(3u + n));
+    if (nus_att_send(att, (uint16_t)(3u + n)) != 0) {
+        return;                             /* keep the bytes; retry later      */
+    }
     if (n < s_tx_len) {
         memmove(s_tx_buf, s_tx_buf + n, (uint16_t)(s_tx_len - n));
         s_tx_len = (uint16_t)(s_tx_len - n);
@@ -765,18 +962,44 @@ void tiku_ble_nus_flush(void) {
 }
 
 void tiku_ble_nus_putc(char c) {
-    if (s_tx_len < (uint16_t)sizeof(s_tx_buf)) {
-        s_tx_buf[s_tx_len++] = (uint8_t)c;
+    /* A full buffer self-drains: pump the stack (acks return TX credits) and
+     * flush until space opens. Bounded so a dead link cannot wedge the shell;
+     * on timeout the byte is dropped rather than blocking forever. */
+    if (s_tx_len >= (uint16_t)sizeof(s_tx_buf)) {
+        uint32_t spins = 2000000u;
+        while (s_tx_len >= (uint16_t)sizeof(s_tx_buf) && spins-- > 0u) {
+            (void)tiku_ble_nus_poll();
+            tiku_ble_nus_flush();
+        }
+        if (s_tx_len >= (uint16_t)sizeof(s_tx_buf)) {
+            return;
+        }
     }
-    /* Only auto-flush when nearly full; the shell paces the normal drain so the
-     * controller's ACL buffers are not overrun by a burst of notifications. */
-    if (s_tx_len >= (uint16_t)(sizeof(s_tx_buf) - 1u)) {
-        tiku_ble_nus_flush();
-    }
+    s_tx_buf[s_tx_len++] = (uint8_t)c;
 }
 
 uint16_t tiku_ble_nus_tx_pending(void) {
     return s_tx_len;
+}
+
+uint16_t tiku_ble_nus_att_mtu(void) {
+    return s_att_mtu;
+}
+
+int tiku_ble_nus_tx_inflight(void) {
+    return s_acl_inflight;
+}
+
+uint16_t tiku_ble_nus_acl_pkt_len(void) {
+    return s_acl_pkt_len;
+}
+
+int tiku_ble_nus_acl_credits(void) {
+    return s_acl_credits;
+}
+
+void tiku_ble_nus_tx_credit_reset(void) {
+    s_acl_inflight = 0;
 }
 
 const tiku_ble_nus_conn_t *tiku_ble_nus_conn_info(void) {
