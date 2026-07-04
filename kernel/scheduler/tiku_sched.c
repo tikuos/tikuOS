@@ -181,9 +181,33 @@ void tiku_sched_loop(void)
 
         if (!tiku_sched_has_pending() &&
             (idle_tick_wakes || !tiku_timer_any_pending())) {
+            uint8_t stretched = 0u;
+
+            /* Tickless: with timers armed (none due — has_pending
+             * said so) and a tick-woken sleep registered, ask the
+             * arch to stretch the next tick interrupt straight to
+             * the earliest deadline instead of waking every tick to
+             * do nothing.  IRQs are masked, so the deadline cannot
+             * move under us.  The weak default never stretches, and
+             * with NO timers armed the per-tick cadence is kept (it
+             * is what paces uptime and the counted-idle tests). */
+            if (idle_tick_wakes &&
+                idle_hook != (tiku_sched_idle_hook_t)0 &&
+                tiku_timer_any_pending()) {
+                tiku_clock_time_t ahead = (tiku_clock_time_t)
+                    (tiku_timer_next_expiration() - tiku_clock_time());
+                if (ahead > 1u) {
+                    stretched =
+                        (uint8_t)tiku_clock_tickless_begin(ahead);
+                }
+            }
+
             idle_count++;
             if (idle_hook != (tiku_sched_idle_hook_t)0) {
                 idle_hook();
+            }
+            if (stretched) {
+                tiku_clock_tickless_end();
             }
         }
 

@@ -30,6 +30,7 @@
 
 #include "tiku_clock.h"
 #include <tiku.h>
+#include <hal/tiku_compiler.h>   /* TIKU_WEAK (tickless defaults) */
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC API                                                                */
@@ -105,6 +106,36 @@ void tiku_clock_delay_usec(unsigned int dt)
 unsigned char tiku_clock_fault(void)
 {
     return tiku_clock_arch_fault();
+}
+
+/*---------------------------------------------------------------------------*/
+/* TICKLESS IDLE — weak defaults (no backend)                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Weak default: no tickless backend, never stretches.
+ *
+ * Platforms with an always-on free-running time base override all
+ * three symbols (arch/ambiq/tiku_htimer_arch.c for Apollo510).  With
+ * the defaults the scheduler keeps per-tick wake-ups — exactly the
+ * deadline-aware-idle behavior — so MSP430 / RP2350 / Apollo4 Lite
+ * are unchanged until their backends are written and bench-proven.
+ */
+TIKU_WEAK int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
+{
+    (void)ticks_ahead;
+    return 0;
+}
+
+/** @brief Weak default: nothing to close. */
+TIKU_WEAK void tiku_clock_tickless_end(void)
+{
+}
+
+/** @brief Weak default: no backend present. */
+TIKU_WEAK int tiku_clock_tickless_available(void)
+{
+    return 0;
 }
 
 /*---------------------------------------------------------------------------*/

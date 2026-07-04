@@ -48,6 +48,9 @@
 /** @brief Start the periodic STIMER tick; provided by tiku_htimer_arch.c. */
 extern void tiku_ambiq_stimer_tick_start(uint32_t period_counts);
 
+/** @brief Multi-tick clock advance (defined below; used by _advance). */
+void tiku_ambiq_tick_advance_n(unsigned long n);
+
 /** @brief Monotonic tick counter incremented by each STIMER tick interrupt. */
 static volatile unsigned long  s_ticks   = 0;
 
@@ -78,14 +81,29 @@ void tiku_clock_arch_init(void) {
  * @brief Advance the system clock by one tick.
  *
  * Called from the STIMER compare-B ISR (tiku_htimer_arch.c) every tick.
- * Increments the tick + sub-second accumulators, rolls the whole-second counter,
- * and wakes the scheduler.
  */
 void tiku_ambiq_tick_advance(void) {
-    s_ticks++;
-    if (++s_subsec >= TIKU_CLOCK_ARCH_SECOND) {
-        s_subsec = 0;
-        s_seconds++;
+    tiku_ambiq_tick_advance_n(1u);
+}
+
+/**
+ * @brief Advance the system clock by @p n ticks at once.
+ *
+ * The tickless-idle resync path (tiku_htimer_arch.c): after a
+ * stretched sleep the STIMER counter says how many whole ticks really
+ * elapsed, and they are credited in one call so the kernel clock is
+ * exact regardless of how far the tick interrupt was stretched.
+ * n == 1 is the normal per-tick cadence.  Rolls the sub-second
+ * accumulator with a divide so a long stretch costs O(1).
+ *
+ * @param n  Whole ticks to credit (>= 1)
+ */
+void tiku_ambiq_tick_advance_n(unsigned long n) {
+    s_ticks  += n;
+    s_subsec += (unsigned int)n;
+    if (s_subsec >= TIKU_CLOCK_ARCH_SECOND) {
+        s_seconds += s_subsec / TIKU_CLOCK_ARCH_SECOND;
+        s_subsec   = s_subsec % TIKU_CLOCK_ARCH_SECOND;
     }
     tiku_sched_notify();
 }
