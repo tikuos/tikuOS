@@ -34,6 +34,7 @@
 #include <hal/tiku_compiler.h>
 #include <hal/tiku_cpu.h>
 #include <kernel/timers/tiku_clock.h>
+#include <kernel/timers/tiku_timer.h>  /* tiku_timer_owner_armed (SLEEPING) */
 #include <stddef.h>
 #include <string.h>
 
@@ -95,6 +96,30 @@ static volatile uint8_t q_head = 0;
  * the same ISR-vs-process reason as q_head.
  */
 static volatile uint8_t q_len = 0;
+
+/**
+ * @brief Lifetime count of dropped events (queue full at post time)
+ *
+ * Bumped inside the same atomic section as the failed enqueue, so it
+ * is exact.  Never reset except by tiku_process_init(); wraps at
+ * 65535.  Surfaced at /proc/queue/dropped — the observability for a
+ * failure mode that used to be completely silent.
+ */
+static volatile uint16_t q_dropped = 0;
+
+/**
+ * @brief Is @p ev a kernel/system event (vs an application event)?
+ *
+ * System events occupy the low control range (INIT..FORCE_EXIT,
+ * below TIKU_EVENT_USER) and the high kernel range (TIMER and up).
+ * Application events live in [TIKU_EVENT_USER, TIKU_EVENT_TIMER).
+ * The distinction feeds the TIKU_QUEUE_RESERVE admission check in
+ * tiku_process_post().
+ */
+static inline uint8_t event_is_system(tiku_event_t ev)
+{
+    return (ev < TIKU_EVENT_USER) || (ev >= TIKU_EVENT_TIMER);
+}
 
 /**
  * @brief Process registry — fixed array indexed by pid
@@ -186,6 +211,7 @@ void tiku_process_init(void)
     tiku_current_process = NULL;
     q_head = 0;
     q_len = 0;
+    q_dropped = 0;
 
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {
         registry[i] = NULL;
@@ -329,16 +355,25 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
                           tiku_event_data_t data)
 {
     uint8_t ret = 0;
+    uint8_t limit;
 
     tiku_atomic_enter();
 
-    if (q_len < TIKU_QUEUE_SIZE) {
+    /* System events may use every slot; user-range events stop
+     * TIKU_QUEUE_RESERVE short so an application flood can never
+     * drop a kernel event (see TIKU_QUEUE_RESERVE). */
+    limit = event_is_system(ev) ? TIKU_QUEUE_SIZE
+                                : (TIKU_QUEUE_SIZE - TIKU_QUEUE_RESERVE);
+
+    if (q_len < limit) {
         uint8_t idx = (q_head + q_len) % TIKU_QUEUE_SIZE;
         queue[idx].ev = ev;
         queue[idx].data = data;
         queue[idx].p = p;
         q_len++;
         ret = 1;
+    } else {
+        q_dropped++;
     }
 
     tiku_atomic_exit();
@@ -441,13 +476,16 @@ void tiku_process_poll(struct tiku_process *p)
 
     /* Inline the post so the scan and the enqueue happen under the
      * same critical section -- otherwise an ISR could slip a duplicate
-     * POLL in between the scan and tiku_process_post(). */
+     * POLL in between the scan and tiku_process_post().  POLL is a
+     * system event, so it may use the reserved slots too. */
     if (q_len < TIKU_QUEUE_SIZE) {
         idx = (q_head + q_len) % TIKU_QUEUE_SIZE;
         queue[idx].ev   = TIKU_EVENT_POLL;
         queue[idx].data = NULL;
         queue[idx].p    = p;
         q_len++;
+    } else {
+        q_dropped++;
     }
 
     tiku_atomic_exit();
@@ -501,12 +539,19 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
         } else {
             /* Distinguish a voluntary yield (immediately runnable)
              * from a blocked wait (parked until an event arrives).
-             * Anything other than PT_YIELDED is treated as waiting --
-             * PT_WAITING is the canonical case, but unknown return
-             * codes also fall through to WAITING as the safer default. */
-            p->state = (ret == PT_YIELDED)
-                       ? TIKU_PROCESS_STATE_READY
-                       : TIKU_PROCESS_STATE_WAITING;
+             * A blocked process that owns an armed timer is SLEEPING
+             * (it has a scheduled wake-up); one with no timer is
+             * WAITING (nothing will wake it but an external event).
+             * PT_WAITING is the canonical blocked case, but unknown
+             * return codes also fall through to the blocked branch
+             * as the safer default. */
+            if (ret == PT_YIELDED) {
+                p->state = TIKU_PROCESS_STATE_READY;
+            } else {
+                p->state = tiku_timer_owner_armed(p)
+                           ? TIKU_PROCESS_STATE_SLEEPING
+                           : TIKU_PROCESS_STATE_WAITING;
+            }
             tiku_current_process = NULL;
         }
     }
@@ -575,6 +620,17 @@ uint8_t tiku_process_queue_empty(void)
 uint8_t tiku_process_queue_length(void)
 {
     return q_len;
+}
+
+/**
+ * @brief Return the lifetime dropped-event count
+ *
+ * @return Events refused since boot because the queue (or the
+ *         user-event budget) was full; wraps at 65535
+ */
+uint16_t tiku_process_queue_dropped(void)
+{
+    return q_dropped;
 }
 
 /**

@@ -45,6 +45,18 @@
 /** @brief Event queue size (power of 2 for fast modulo) */
 #define TIKU_QUEUE_SIZE         32
 
+/**
+ * @brief Queue slots reserved for system events.
+ *
+ * User-range events (TIKU_EVENT_USER .. TIKU_EVENT_TIMER-1) may fill
+ * the queue only up to TIKU_QUEUE_SIZE - TIKU_QUEUE_RESERVE; the
+ * last slots are held back so a flood of application posts can never
+ * drop kernel events (TIMER, EXITED, INIT, VFS, GPIO).  Dropping a
+ * TIMER event stalls its owner until some other event arrives —
+ * the reserve makes that failure mode structurally impossible.
+ */
+#define TIKU_QUEUE_RESERVE      4
+
 /** @brief Maximum number of processes in the registry */
 #define TIKU_PROCESS_MAX        8
 
@@ -521,6 +533,18 @@ uint8_t tiku_process_queue_empty(void);
 
 /** @brief Return the number of pending events in the queue */
 uint8_t tiku_process_queue_length(void);
+
+/**
+ * @brief Lifetime count of events dropped because the queue was full.
+ *
+ * Increments every time tiku_process_post() (or an internal poll
+ * enqueue) fails for lack of space — including user posts refused by
+ * the TIKU_QUEUE_RESERVE guard.  A nonzero, growing value is the
+ * tell for queue-overflow bugs that were previously silent (the
+ * failed post returns 0 and most callers ignore it).  Wraps at
+ * 65535; exported at /proc/queue/dropped.
+ */
+uint16_t tiku_process_queue_dropped(void);
 
 /**
  * @brief Peek at a queue entry by index (0 = head).

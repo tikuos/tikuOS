@@ -501,14 +501,33 @@ static int proc_read_queue_space(char *buf, size_t max)
 }
 
 /**
+ * @brief Read handler for /proc/queue/dropped.
+ *
+ * Renders the lifetime count of events refused because the queue
+ * (or the user-event budget, see TIKU_QUEUE_RESERVE) was full.  A
+ * growing value is the tell for queue-overflow bugs that are
+ * otherwise silent — the failed post returns 0 and most callers
+ * ignore it.  Wraps at 65535.
+ *
+ * @param buf  Output buffer for the rendered text
+ * @param max  Capacity of @p buf in bytes
+ * @return Bytes written, or -1 on error
+ */
+static int proc_read_queue_dropped(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", tiku_process_queue_dropped());
+}
+
+/**
  * /proc/queue directory table — event-queue depth views.
  *
  * const, flash-resident, referenced from proc_children[] as the
  * "queue" directory's children in tiku_proc_vfs_get().
  */
 static const tiku_vfs_node_t proc_queue_children[] = {
-    { "length", TIKU_VFS_FILE, proc_read_queue_length, NULL, NULL, 0 },
-    { "space",  TIKU_VFS_FILE, proc_read_queue_space,  NULL, NULL, 0 },
+    { "length",  TIKU_VFS_FILE, proc_read_queue_length,  NULL, NULL, 0 },
+    { "space",   TIKU_VFS_FILE, proc_read_queue_space,   NULL, NULL, 0 },
+    { "dropped", TIKU_VFS_FILE, proc_read_queue_dropped, NULL, NULL, 0 },
 };
 
 /*---------------------------------------------------------------------------*/
@@ -1031,7 +1050,7 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
 
     /* /proc/queue/ */
     proc_children[child_idx++] = (tiku_vfs_node_t){
-        "queue", TIKU_VFS_DIR, NULL, NULL, proc_queue_children, 2
+        "queue", TIKU_VFS_DIR, NULL, NULL, proc_queue_children, 3
     };
 
     /* /proc/catalog/ — build entries for each catalog slot */
