@@ -53,10 +53,11 @@ tiku_shell_cmd_ps(uint8_t argc, const char *argv[])
         if (p == NULL) {
             continue;
         }
-        SHELL_PRINTF("%3u  %-8s %5u %5u  %s\n",
+        SHELL_PRINTF("%3u  %-8s %6lu %6lu  %s\n",
                    i,
                    tiku_process_state_str(p->state),
-                   p->sram_used, p->fram_used,
+                   (unsigned long)tiku_process_sram_used(p),
+                   (unsigned long)tiku_process_fram_used(p),
                    p->name ? p->name : "(null)");
     }
 

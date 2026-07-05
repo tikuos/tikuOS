@@ -195,6 +195,16 @@ basic_alloc_state(void)
         basic_arena_ready = 1;
     }
 
+    /* Attach the arena to the owning (shell) process so ps and
+     * /proc/<pid>/sram_used report BASIC's real footprint -- measured
+     * from the bump pointer, not self-declared.  Idempotent. */
+    {
+        struct tiku_process *self = TIKU_THIS();
+        if (self != NULL) {
+            tiku_process_attach_mem_arena(self, &basic_arena);
+        }
+    }
+
     /* The arena is BASIC's hot working set -- the line table, variables and
      * stacks are written on every statement.  It MUST be byte-writable RAM.
      * If AUTO fell back to the NVM tier (because the SRAM tier was too small

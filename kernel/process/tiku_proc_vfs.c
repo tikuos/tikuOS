@@ -287,7 +287,8 @@ static tiku_vfs_node_t __attribute__((section(".persistent")))
     {                                                                       \
         struct tiku_process *p = tiku_process_get(idx);                     \
         if (p == NULL) { return snprintf(buf, max, "0\n"); }               \
-        return snprintf(buf, max, "%u\n", p->sram_used);                   \
+        return snprintf(buf, max, "%lu\n",                                 \
+                        (unsigned long)tiku_process_sram_used(p));          \
     }
 
 /**
@@ -301,7 +302,8 @@ static tiku_vfs_node_t __attribute__((section(".persistent")))
     {                                                                       \
         struct tiku_process *p = tiku_process_get(idx);                     \
         if (p == NULL) { return snprintf(buf, max, "0\n"); }               \
-        return snprintf(buf, max, "%u\n", p->fram_used);                   \
+        return snprintf(buf, max, "%lu\n",\
+                        (unsigned long)tiku_process_fram_used(p));                   \
     }
 
 /**

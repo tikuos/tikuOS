@@ -128,10 +128,17 @@ typedef struct tiku_process {
     /* --- Observability fields --- */
     tiku_process_state_t state;     /**< Current process state */
     int8_t pid;                     /**< Registry index (-1 = unregistered) */
-    uint16_t sram_used;             /**< SRAM bytes allocated for this process */
-    uint16_t fram_used;             /**< FRAM bytes allocated for this process */
+    uint16_t sram_used;             /**< Self-DECLARED SRAM bytes (advisory) */
+    uint16_t fram_used;             /**< Self-DECLARED FRAM bytes (advisory) */
     tiku_clock_time_t start_time;   /**< Tick count when process started */
     uint16_t wake_count;            /**< Number of times scheduled */
+    const void *mem_arena;          /**< Attached tiku_arena_t (or NULL): the
+                                         MEASURED memory source.  Set via
+                                         tiku_process_attach_mem_arena(); read
+                                         through tiku_process_sram/fram_used(),
+                                         which report measured + declared.  A
+                                         bump allocator cannot misreport, so
+                                         attached beats advertised. */
 } tiku_process_t;
 
 /*---------------------------------------------------------------------------*/
@@ -414,6 +421,28 @@ void tiku_process_poll(struct tiku_process *p);
  * @return pid (0..TIKU_PROCESS_MAX-1) on success, -1 if registry full
  */
 int8_t tiku_process_register(const char *name, struct tiku_process *p);
+
+/**
+ * @brief Attach a memory arena to a process for MEASURED accounting.
+ *
+ * ps, /proc/<pid>/sram_used|fram_used and /sys/mem/used then report the
+ * arena's real bump-pointer state (which cannot drift) on top of the
+ * advisory self-declared fields.  Pass the process's dominant arena
+ * (e.g. BASIC's working arena for the shell process); NULL detaches.
+ *
+ * @param p      Process (no-op when NULL)
+ * @param arena  const tiku_arena_t* (typed void to keep this header
+ *               free of the memory-module include)
+ */
+void tiku_process_attach_mem_arena(struct tiku_process *p,
+                                   const void *arena);
+
+/** @brief SRAM bytes: measured (attached SRAM-tier arena) + declared. */
+uint32_t tiku_process_sram_used(const struct tiku_process *p);
+
+/** @brief FRAM/NVM/HIFRAM bytes: measured (attached non-SRAM-tier
+ *         arena) + declared. */
+uint32_t tiku_process_fram_used(const struct tiku_process *p);
 
 /**
  * @brief Get a registered process by pid

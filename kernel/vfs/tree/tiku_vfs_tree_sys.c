@@ -381,10 +381,10 @@ mem_used_read(char *buf, size_t max)
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {
         struct tiku_process *p = tiku_process_get((int8_t)i);
         if (p != NULL) {
-            total += p->sram_used;
+            total += tiku_process_sram_used(p);
         }
     }
-    return snprintf(buf, max, "%u\n", total);
+    return snprintf(buf, max, "%lu\n", (unsigned long)total);
 }
 
 /*---------------------------------------------------------------------------*/

@@ -31,6 +31,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_process.h"
+#include <kernel/memory/tiku_mem.h> /* measured accounting (attached arena) */
 #include <hal/tiku_compiler.h>
 #include <hal/tiku_cpu.h>
 #include <kernel/timers/tiku_clock.h>
@@ -791,6 +792,52 @@ int8_t tiku_process_register(const char *name, struct tiku_process *p)
     }
 
     return -1;  /* registry full */
+}
+
+void tiku_process_attach_mem_arena(struct tiku_process *p,
+                                   const void *arena)
+{
+    if (p != NULL) {
+        p->mem_arena = arena;
+    }
+}
+
+/** Measured bytes from the attached arena when its tier matches. */
+static uint32_t process_measured(const struct tiku_process *p,
+                                 int want_sram)
+{
+    const tiku_arena_t *a;
+    tiku_mem_stats_t st;
+    int is_sram;
+
+    if (p == NULL || p->mem_arena == NULL) {
+        return 0;
+    }
+    a = (const tiku_arena_t *)p->mem_arena;
+    if (tiku_arena_stats(a, &st) != TIKU_MEM_OK) {
+        return 0;
+    }
+    is_sram = (a->tier == TIKU_MEM_SRAM);
+    if ((want_sram && is_sram) || (!want_sram && !is_sram)) {
+        return (uint32_t)st.used_bytes;
+    }
+    return 0;
+}
+
+uint32_t tiku_process_sram_used(const struct tiku_process *p)
+{
+    if (p == NULL) {
+        return 0;
+    }
+    return (uint32_t)p->sram_used + process_measured(p, 1);
+}
+
+uint32_t tiku_process_fram_used(const struct tiku_process *p)
+{
+    if (p == NULL) {
+        return 0;
+    }
+    return (uint32_t)p->fram_used + process_measured(p, 0);
 }
 
 /**
