@@ -236,7 +236,7 @@ static uint8_t hp_tvrgf_clamp(uint32_t code) {
  */
 static int hp_trims_load(void) {
     uint8_t  in_otp, otp_was_on = 0u;
-    uint32_t ps0, ps5, ps13, ps19, ltrim, etrim, pgm;
+    uint32_t ps0, ps5, ps13, ps19, ltrim, etrim, pgm, trimrev, rev;
     uint32_t tmp1, tmp2, boost = 0u, spin;
     float    mv;
 
@@ -265,12 +265,26 @@ static int hp_trims_load(void) {
     ltrim = ambiq_info1_word(AMBIQ_INFO1_L_TRIMCODE_O, in_otp);
     etrim = ambiq_info1_word(AMBIQ_INFO1_E_TRIMCODE_O, in_otp);
     pgm   = ambiq_info1_word(AMBIQ_INFO1_PGM_INFO_O, in_otp);
+    trimrev = ambiq_info1_word(AMBIQ_INFO1_TRIM_REV_O, in_otp);
     s_hp.defaultton = ambiq_info1_word(AMBIQ_INFO1_DEFAULTTON_O, in_otp);
     s_hp.vddclvadj  = ambiq_info1_word(AMBIQ_INFO1_VDDCLVADJ_O,  in_otp);
     s_hp.memldocfg  = ambiq_info1_word(AMBIQ_INFO1_MEMLDOCFG_O,  in_otp);
 
     if (in_otp && !otp_was_on) {
         PWRCTRL->DEVPWREN_b.PWRENOTP = 0u;
+    }
+
+    /* Trim-scheme gate, mirroring the SDK's spotmgr dispatch: this port
+     * transcribes the PCM2.2 handler, selected there for "B2 silicon with
+     * TRIM_REV >= 2, or silicon newer than B2" (g_bIsPCM2p2OrNewer). An older
+     * chip (e.g. a first-batch apollo510 EVB on B1 or B2/PCM2.0-2.1) uses a
+     * DIFFERENT sequence (boost timers, patch conditionals), so refuse HP
+     * there rather than run the wrong one -- `freq probe` still identifies
+     * the part so the right slice can be ported HW-in-the-loop later. */
+    rev = MCUCTRL->CHIPREV & 0xFFu;     /* [7:4] REVMAJ (2='B'), [3:0] REVMIN */
+    if (!((rev == 0x23u && trimrev >= 2u && trimrev != 0xFFFFFFFFu) ||
+          (rev > 0x23u && rev < 0xF0u))) {
+        return -1;
     }
 
     /* Unprogrammed INFO1 (erased or zero) => this chip cannot do HP safely. */
