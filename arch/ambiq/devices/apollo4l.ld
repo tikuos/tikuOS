@@ -127,7 +127,11 @@ SECTIONS
     } > TCM
 
     /* -------- 5. Persistent (skipped by zero-init) ------------------- */
-    .uninit (NOLOAD) : ALIGN(32)
+    /* ALIGN(8192) + the 8 KB pad below give the region a PMSAv7-legal
+     * power-of-2 envelope: base 8K-aligned, size exactly 8 KB, so MPU
+     * region 3 can hold it read-only outside NVM unlock windows (real
+     * cell protection -- see tiku_mpu_apollo4l.c). */
+    .uninit (NOLOAD) : ALIGN(8192)
     {
         __uninit_start = .;
         *(.uninit*)
@@ -144,9 +148,15 @@ SECTIONS
          * longer dirties the mirror (needless MRAM programs at every
          * relock), and the un-windowed MQTT buffer writers stop being
          * a MemManage source when the window is read-only. */
+        /* Pad to the full 8 KB MPU envelope FIRST: the WARM grade
+         * below must sit outside the read-only region. */
+        . = __uninit_start + 8192;
         *(.persistent.warm*)
         *tiku_kits_net_*.o(.persistent*)
     } > TCM
+
+    ASSERT((__uninit_end - __uninit_start) <= 8192,
+           "ERROR: .uninit exceeds the 8 KB PMSAv7 MPU envelope (grow the region size in apollo4l.ld AND tiku_mpu_apollo4l.c together)")
 
     _end = .;
     end = .;

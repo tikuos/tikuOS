@@ -38,6 +38,7 @@
 #define MPU_REGION_CODE         0U
 #define MPU_REGION_RAM          1U
 #define MPU_REGION_STACK_GUARD  2U
+#define MPU_REGION_NVM          3U   /* .uninit: RO outside NVM windows */
 
 /** MRAM (code) base + a 2 MB region covering the whole 2 MB MRAM. */
 #define MPU_CODE_BASE     0x00000000UL
@@ -111,6 +112,29 @@ uint16_t tiku_mpu_arch_get_ctl(void) { return stub_mpuctl0; }
 void tiku_mpu_arch_disable_irq(void) { tiku_cpu_irq_disable(); }
 void tiku_mpu_arch_enable_irq(void)  { tiku_cpu_irq_enable(); }
 
+
+/** Linker symbol: base of the 8 KB .uninit MPU envelope (8K-aligned). */
+extern uint32_t __uninit_start[];
+
+/**
+ * @brief Program region 3 (.uninit, 8 KB) as RO or RW + XN.
+ *
+ * REAL write protection for the persist cells on the M4 (PMSAv7):
+ * region 3 outranks region 1's blanket RW (higher number wins), is
+ * read-only by default, and flips RW only inside tiku_mpu_unlock_nvm()
+ * / lock_nvm() windows -- the same contract as apollo510 and RP2350.
+ * The linker guarantees the power-of-2 base/size (see apollo4l.ld).
+ *
+ * @param ro  1 = locked (default), 0 = inside an unlock window
+ */
+static void mpu_set_nvm_ap(uint32_t ro) {
+    ARM_MPU_SetRegion(
+        ARM_MPU_RBAR(MPU_REGION_NVM, (uint32_t)__uninit_start),
+        ARM_MPU_RASR(1U /* XN */, ro ? ARM_MPU_AP_RO : ARM_MPU_AP_FULL,
+                     1U, 0U, 0U, 0U, 0U, ARM_MPU_REGION_SIZE_8KB));
+    __DSB();
+    __ISB();
+}
 /**
  * @brief Initialize the PMSAv7 MPU (coarse W^X) and enable it.
  *
@@ -140,6 +164,8 @@ void tiku_mpu_arch_init_segments(void) {
     /* Region 0: 2 MB of MRAM at 0x0 -- read-only + executable (code/rodata).
      * Normal, non-cacheable (TEX=1,C=0,B=0); the core has no L1 cache and the
      * system cache is left off at bring-up. */
+    mpu_set_nvm_ap(1U /* RO: locked by default */);
+
     ARM_MPU_SetRegion(
         ARM_MPU_RBAR(MPU_REGION_CODE, MPU_CODE_BASE),
         ARM_MPU_RASR(0U /* exec */, ARM_MPU_AP_RO, 1U, 0U, 0U, 0U, 0U,
@@ -202,11 +228,30 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
     uint16_t saved = stub_mpusam;
     stub_mpusam = (uint16_t)(saved | 0x0222U);
+    mpu_set_nvm_ap(0U /* RW for the window */);
     return saved;
 }
 
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
     tiku_mpu_arch_set_sam(saved_state);
+    /* Nest-safe: restore the AP the SAVED state implies (an inner
+     * lock inside a still-open outer window keeps the region RW). */
+    mpu_set_nvm_ap(((saved_state & 0x0222U) == 0U) ? 1U : 0U);
+}
+
+/**
+ * @brief Read back whether MPU region 3 (.uninit) is currently RO.
+ *
+ * Decodes the live RASR.AP field so the write-protection flip is
+ * positively assertable on hardware (PMSAv7 twin of the apollo510
+ * getter).
+ */
+uint8_t tiku_mpu_arch_nvm_region_ro(void) {
+    uint32_t ap;
+    MPU->RNR = MPU_REGION_NVM;
+    __DSB();
+    ap = (MPU->RASR >> MPU_RASR_AP_Pos) & 0x7U;
+    return (ap == ARM_MPU_AP_FULL) ? 0u : 1u;
 }
 
 uint16_t tiku_mpu_arch_get_violation_flags(void)   { return stub_mpuctl1; }
@@ -240,6 +285,32 @@ void tiku_mpu_arch_test_clear_violation(void) {
 /* The ARMv7-M SCB fault registers (CFSR/MMFAR/HFSR/SHCSR) match the M55.     */
 /*---------------------------------------------------------------------------*/
 
+
+/* Fault-time console dump (twin of the apollo510 one): the warm-
+ * durable record has not been proven to survive the post-fault reset,
+ * so the UART line emitted right here is the reliable diagnostic. */
+extern void tiku_uart_putc(char c);
+
+static void fault_puthex(uint32_t v) {
+    static const char hx[] = "0123456789abcdef";
+    int i;
+    for (i = 28; i >= 0; i -= 4) {
+        tiku_uart_putc(hx[(v >> i) & 0xFU]);
+    }
+}
+
+static void fault_dump(const char *tag, uint32_t cfsr, uint32_t addr) {
+    const char *p;
+    for (p = "\r\n[TM:FAULT] "; *p; p++) { tiku_uart_putc(*p); }
+    for (p = tag; *p; p++)                { tiku_uart_putc(*p); }
+    for (p = " cfsr=0x"; *p; p++)         { tiku_uart_putc(*p); }
+    fault_puthex(cfsr);
+    for (p = " addr=0x"; *p; p++)         { tiku_uart_putc(*p); }
+    fault_puthex(addr);
+    tiku_uart_putc('\r');
+    tiku_uart_putc('\n');
+}
+
 void tiku_ambiq_mem_fault_handler(void) {
     uint32_t cfsr  = SCB->CFSR;
     uint32_t mmfsr = cfsr & 0xFFU;
@@ -260,6 +331,8 @@ void tiku_ambiq_mem_fault_handler(void) {
 
     SCB->CFSR = cfsr;                   /* W1C */
 
+    fault_dump("memmanage", cfsr, mpu_diag.last_fault_addr);
+
     __DSB();
     NVIC_SystemReset();
     for (;;) { }
@@ -278,6 +351,8 @@ void tiku_ambiq_hard_fault_handler(void) {
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 3U;     /* HardFault path observed */
     }
+
+    fault_dump("hardfault", cfsr, mpu_diag.last_fault_addr);
 
     __DSB();
     NVIC_SystemReset();
