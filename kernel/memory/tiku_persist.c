@@ -98,16 +98,33 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
         return TIKU_MEM_ERR_INVALID;
     }
 
-    count = 0;
-    for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
-        if (store->entries[i].magic == TIKU_PERSIST_MAGIC &&
-            store->entries[i].valid) {
-            count++;
-        } else {
-            memset(&store->entries[i], 0, sizeof(tiku_persist_entry_t));
+    /* The store API owns its MPU windows (same doctrine as the cell
+     * API): the store struct and value buffers commonly live in the
+     * protected .persistent/.uninit region, and with real write
+     * protection an un-windowed store op is a MemManage fault --
+     * found exactly that way (test_nvm_pool, hardfault @0x2000433c).
+     * Nest-safe under callers holding their own window. */
+    {
+        uint16_t mpu_saved;
+
+        tiku_atomic_enter();
+        mpu_saved = tiku_mpu_unlock_nvm();
+
+        count = 0;
+        for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
+            if (store->entries[i].magic == TIKU_PERSIST_MAGIC &&
+                store->entries[i].valid) {
+                count++;
+            } else {
+                memset(&store->entries[i], 0,
+                       sizeof(tiku_persist_entry_t));
+            }
         }
+        store->count = count;
+
+        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_atomic_exit();
     }
-    store->count = count;
 
     return TIKU_MEM_OK;
 }
@@ -150,35 +167,49 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* If key already exists, update pointer but preserve data */
-    entry = persist_find(store, key);
-    if (entry != NULL) {
-        entry->fram_ptr = fram_buf;
-        entry->capacity = capacity;
-        return TIKU_MEM_OK;
-    }
+    /* Self-windowed (see tiku_persist_init): the entry slots may live
+     * in the protected region. */
+    {
+        uint16_t mpu_saved;
+        tiku_mem_err_t err = TIKU_MEM_ERR_FULL;
 
-    /* Find first empty slot */
-    for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
-        if (!store->entries[i].valid) {
-            entry = &store->entries[i];
+        tiku_atomic_enter();
+        mpu_saved = tiku_mpu_unlock_nvm();
 
-            memset(entry, 0, sizeof(tiku_persist_entry_t));
-            strncpy(entry->key, key, TIKU_PERSIST_MAX_KEY_LEN - 1);
-            entry->key[TIKU_PERSIST_MAX_KEY_LEN - 1] = '\0';
-            entry->fram_ptr    = fram_buf;
-            entry->capacity    = capacity;
-            entry->value_len   = 0;
-            entry->write_count = 0;
-            entry->magic       = TIKU_PERSIST_MAGIC;
-            entry->valid       = 1;
+        /* If key already exists, update pointer but preserve data */
+        entry = persist_find(store, key);
+        if (entry != NULL) {
+            entry->fram_ptr = fram_buf;
+            entry->capacity = capacity;
+            err = TIKU_MEM_OK;
+        } else {
+            /* Find first empty slot */
+            for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
+                if (!store->entries[i].valid) {
+                    entry = &store->entries[i];
 
-            store->count++;
-            return TIKU_MEM_OK;
+                    memset(entry, 0, sizeof(tiku_persist_entry_t));
+                    strncpy(entry->key, key,
+                            TIKU_PERSIST_MAX_KEY_LEN - 1);
+                    entry->key[TIKU_PERSIST_MAX_KEY_LEN - 1] = '\0';
+                    entry->fram_ptr    = fram_buf;
+                    entry->capacity    = capacity;
+                    entry->value_len   = 0;
+                    entry->write_count = 0;
+                    entry->magic       = TIKU_PERSIST_MAGIC;
+                    entry->valid       = 1;
+
+                    store->count++;
+                    err = TIKU_MEM_OK;
+                    break;
+                }
+            }
         }
-    }
 
-    return TIKU_MEM_ERR_FULL;
+        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_atomic_exit();
+        return err;
+    }
 }
 
 /**
@@ -274,9 +305,21 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
         return TIKU_MEM_ERR_NOMEM;
     }
 
-    tiku_mem_arch_nvm_write(entry->fram_ptr, data, data_len);
-    entry->value_len = data_len;
-    entry->write_count++;
+    /* Self-windowed (see tiku_persist_init): the value buffer and the
+     * store metadata may live in the protected region. */
+    {
+        uint16_t mpu_saved;
+
+        tiku_atomic_enter();
+        mpu_saved = tiku_mpu_unlock_nvm();
+
+        tiku_mem_arch_nvm_write(entry->fram_ptr, data, data_len);
+        entry->value_len = data_len;
+        entry->write_count++;
+
+        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_atomic_exit();
+    }
 
     return TIKU_MEM_OK;
 }
@@ -305,8 +348,19 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
         return TIKU_MEM_ERR_NOT_FOUND;
     }
 
-    memset(entry, 0, sizeof(tiku_persist_entry_t));
-    store->count--;
+    /* Self-windowed (see tiku_persist_init). */
+    {
+        uint16_t mpu_saved;
+
+        tiku_atomic_enter();
+        mpu_saved = tiku_mpu_unlock_nvm();
+
+        memset(entry, 0, sizeof(tiku_persist_entry_t));
+        store->count--;
+
+        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_atomic_exit();
+    }
 
     return TIKU_MEM_OK;
 }

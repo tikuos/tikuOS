@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "tiku_mem_arch.h"
+#include "tiku_mpu_arch.h"  /* arch NVM window around the mirror restore */
 #include "tiku_cpu_common.h"  /* tiku_cpu_ambiq_delay_us (bench DWT calibration) */
 #include "tiku_mram_bench.h"  /* tiku_mem_nvm_bench_row_t */
 #include <hal/tiku_cpu.h>   /* tiku_cpu_dcache_{clean,invalidate} (D-cache coherency) */
@@ -122,6 +123,16 @@ void tiku_mem_arch_init(void) {
      * restored); V1 mirrors are accepted once for seamless upgrade. */
     const uint32_t *mirror = (const uint32_t *)__tiku_nvm_mram_start;
     size_t n = uninit_bytes();
+    uint16_t mpu_saved;
+
+    /* The restore memcpys write .uninit.  At FIRST boot the MPU is not
+     * armed yet (mpu_init runs after arch_init), but tiku_mem_init() is
+     * legitimately re-callable (tests, recovery paths) -- and by then
+     * region 0 is genuinely read-only, so an unbracketed restore is a
+     * MemManage fault.  Found exactly that way: the enforcement flip
+     * turned the memory-edge re-init test into a reset loop.  Bracket
+     * with the ARCH window (no flush side-effects; nest-safe). */
+    mpu_saved = tiku_mpu_arch_unlock_nvm();
 
     if (mirror[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2) {
         size_t len = (size_t)mirror[TIKU_NVM_MIRROR_W_LEN];
@@ -154,6 +165,8 @@ void tiku_mem_arch_init(void) {
     } else {
         g_nvm_restore = TIKU_NVM_RESTORE_VIRGIN;
     }
+
+    tiku_mpu_arch_lock_nvm(mpu_saved);
 }
 
 /**

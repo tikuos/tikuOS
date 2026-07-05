@@ -191,17 +191,29 @@ static void mpu_region(uint32_t rnr, uint32_t base, uint32_t limit_incl,
 }
 
 /**
- * @brief Apply region 0: .uninit (DTCM) as RW + XN
+ * @brief Apply region 0: .uninit (DTCM), read-only by default + XN
  *
- * See the NVM region note in the file header: .uninit holds the writable
- * NVM tier pool, so it must remain RW rather than RO-locked. The W^X
- * guarantee is preserved because XN prevents execution from .uninit.
+ * REAL write protection for the persist cells (parity with RP2350 and
+ * the MSP430 SAM): the region is RO outside tiku_mpu_unlock_nvm()/
+ * lock_nvm() windows and flipped RW only inside them (see
+ * tiku_mpu_arch_unlock_nvm / _lock_nvm below).  Every legitimate
+ * writer already holds the window -- audited across the tree; the
+ * net kits' un-windowed buffers were re-homed to the WARM grade
+ * outside this region by the linker scripts.  The NVM tier pool's
+ * writes route through tiku_tier_nvm_write(), which brackets its own
+ * window.  XN preserved throughout (W^X).
+ *
+ * @param ro  1 = locked (default), 0 = inside an unlock window
  */
-static void mpu_set_nvm(void) {
+static void mpu_set_nvm_ap(uint32_t ro) {
     mpu_region(MPU_REGION_NVM,
                (uint32_t)(uintptr_t)&__uninit_start,
                (uint32_t)(uintptr_t)&__uninit_end - 1U,
-               0U /* RW */, 1U /* XN */);
+               ro, 1U /* XN */);
+}
+
+static void mpu_set_nvm(void) {
+    mpu_set_nvm_ap(1U /* RO: locked by default */);
 }
 
 /**
@@ -385,12 +397,13 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
  * @return Saved SAM value to pass to tiku_mpu_arch_lock_nvm()
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
-    /* .uninit is already RW (see mpu_set_nvm), so this is bookkeeping: OR in
-     * the W bits for SAM parity and hand back the prior word. The matching
-     * generic tiku_mpu_lock_nvm() still drives tiku_mem_arch_nvm_flush(), so
-     * the MRAM mirror (mem port C) commits exactly as before. */
+    /* Open the window: SAM bookkeeping for MSP430 parity PLUS the real
+     * hardware flip -- region 0 (.uninit) goes RW for the duration.
+     * The matching generic tiku_mpu_lock_nvm() still drives
+     * tiku_mem_arch_nvm_flush(), so the MRAM mirror commits as before. */
     uint16_t saved = stub_mpusam;
     stub_mpusam = (uint16_t)(saved | 0x0222U);
+    mpu_set_nvm_ap(0U /* RW */);
     return saved;
 }
 
@@ -406,6 +419,42 @@ uint16_t tiku_mpu_arch_unlock_nvm(void) {
  */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
     tiku_mpu_arch_set_sam(saved_state);
+    /* Nest-safe: restore the AP the SAVED state implies.  An inner
+     * lock inside a still-open outer window restores "unlocked" SAM
+     * (write bits set) and must leave the region RW; the outermost
+     * lock restores a no-write SAM and re-arms RO. */
+    mpu_set_nvm_ap(((saved_state & 0x0222U) == 0U) ? 1U : 0U);
+}
+
+/**
+ * @brief Read back whether MPU region 0 (.uninit) is currently RO.
+ *
+ * Test/diagnostic hook: decodes the live RBAR.AP field so the
+ * write-protection flip is positively assertable on hardware rather
+ * than inferred from the absence of faults.
+ *
+ * @return 1 when the region is read-only, 0 when writable
+ */
+/**
+ * @brief Read the warm-durable fault record (count, MMFAR, CFSR).
+ *
+ * Diagnostic hook: the MemManage handler records into .mpu_diag and
+ * resets, so the FIRST print of the next boot is the only place the
+ * previous fault's address is visible.  Any output pointer may be
+ * NULL.
+ */
+void tiku_mpu_arch_diag_read(uint32_t *count, uint32_t *addr,
+                             uint32_t *cfsr) {
+    if (count != (void *)0) { *count = mpu_diag.violation_count; }
+    if (addr  != (void *)0) { *addr  = mpu_diag.last_fault_addr; }
+    if (cfsr  != (void *)0) { *cfsr  = mpu_diag.last_fault_cfsr; }
+}
+
+uint8_t tiku_mpu_arch_nvm_region_ro(void) {
+    MPU->RNR = MPU_REGION_NVM;
+    __DSB();
+    /* ARMv8-M RBAR.AP[2:1]: bit2 set = read-only (either privilege). */
+    return ((MPU->RBAR & (2U << 1)) != 0U) ? 1u : 0u;
 }
 
 /**
@@ -498,6 +547,33 @@ void tiku_mpu_arch_test_clear_violation(void) {
 /*   instruction      .text  (MRAM)    -- Region 1 RX                          */
 /*---------------------------------------------------------------------------*/
 
+/* Fault-time console dump: the .mpu_diag record is only readable on
+ * the NEXT boot -- and on this part the post-SystemReset boot path has
+ * not been proven to preserve DTCM, so the one place the fault address
+ * is GUARANTEED visible is the UART, right now, from the handler.
+ * Polled putc only; no printf machinery. */
+extern void tiku_uart_putc(char c);
+
+static void fault_puthex(uint32_t v) {
+    static const char hx[] = "0123456789abcdef";
+    int i;
+    for (i = 28; i >= 0; i -= 4) {
+        tiku_uart_putc(hx[(v >> i) & 0xFU]);
+    }
+}
+
+static void fault_dump(const char *tag, uint32_t cfsr, uint32_t addr) {
+    const char *p;
+    for (p = "\r\n[TM:FAULT] "; *p; p++) { tiku_uart_putc(*p); }
+    for (p = tag; *p; p++)                { tiku_uart_putc(*p); }
+    for (p = " cfsr=0x"; *p; p++)         { tiku_uart_putc(*p); }
+    fault_puthex(cfsr);
+    for (p = " addr=0x"; *p; p++)         { tiku_uart_putc(*p); }
+    fault_puthex(addr);
+    tiku_uart_putc('\r');
+    tiku_uart_putc('\n');
+}
+
 /**
  * @brief MemManage fault handler (strong override of the weak crt_early alias)
  *
@@ -535,6 +611,8 @@ void tiku_ambiq_mem_fault_handler(void) {
 
     SCB->CFSR = cfsr;                   /* W1C */
 
+    fault_dump("memmanage", cfsr, mpu_diag.last_fault_addr);
+
     /* A synchronous access violation can't be stepped over; letting the store
      * proceed defeats the MPU. Reset — the post-reset boot (or J-Link) sees
      * the incremented .mpu_diag counter. */
@@ -566,6 +644,8 @@ void tiku_ambiq_hard_fault_handler(void) {
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 3U;     /* HardFault path observed */
     }
+
+    fault_dump("hardfault", cfsr, mpu_diag.last_fault_addr);
 
     __DSB();
     NVIC_SystemReset();

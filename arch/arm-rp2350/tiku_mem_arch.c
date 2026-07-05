@@ -47,6 +47,7 @@
  */
 
 #include "tiku_mem_arch.h"
+#include "tiku_mpu_arch.h"  /* arch NVM window around the mirror restore */
 #include "tiku_rp2350_regs.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -348,7 +349,17 @@ void tiku_mem_arch_init(void) {
      * on NOR: erase, then program) flush leaves an image that fails the
      * check and is NOT restored -- .uninit keeps its NOLOAD value and
      * per-subsystem first-boot priming runs.  V1 (pre-CRC) mirrors are
-     * accepted once for seamless upgrade; the first flush rewrites V2. */
+     * accepted once for seamless upgrade; the first flush rewrites V2.
+     *
+     * The restore memcpys write .uninit.  At FIRST boot the MPU is not
+     * armed yet, but tiku_mem_init() is legitimately re-callable
+     * (tests, recovery) -- and by then region 0 is read-only, so an
+     * unbracketed restore is a MemManage fault (found exactly that way
+     * on apollo510 when its region went RO-by-default).  Bracket with
+     * the ARCH window: no flush side-effects, nest-safe. */
+    {
+        uint16_t mpu_saved = tiku_mpu_arch_unlock_nvm();
+
     if (flash[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2) {
         size_t len = (size_t)flash[TIKU_NVM_MIRROR_W_LEN];
         const uint8_t *img =
@@ -372,6 +383,9 @@ void tiku_mem_arch_init(void) {
         g_nvm_restore = TIKU_NVM_RESTORE_V1;
     } else {
         g_nvm_restore = TIKU_NVM_RESTORE_VIRGIN;
+    }
+
+        tiku_mpu_arch_lock_nvm(mpu_saved);
     }
 }
 

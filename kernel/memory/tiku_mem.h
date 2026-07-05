@@ -130,12 +130,13 @@
  *   TIKU_PERSIST_WARM  survives warm resets only; never mirrored,
  *                      never MPU-protected, costs zero NVM
  *
- * On platforms where everything persistent is cheap and in-place
- * (MSP430 FRAM) or fully mirrored (Ambiq), WARM degrades to plain
- * `.persistent` — strictly stronger than promised, which the contract
- * allows.  Only RP2350 physically separates the grades today.
+ * On MSP430 (FRAM in place, everything cheap and durable) WARM
+ * degrades to plain `.persistent` — strictly stronger than promised,
+ * which the contract allows.  RP2350 and Ambiq physically separate
+ * the grades: warm data sits outside the NVM mirror, so its churn
+ * costs no NVM programs and it stays writable outside MPU windows.
  */
-#if defined(PLATFORM_RP2350)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
 #define TIKU_PERSIST_WARM  __attribute__((section(".persistent.warm")))
 #else
 #define TIKU_PERSIST_WARM  __attribute__((section(".persistent")))

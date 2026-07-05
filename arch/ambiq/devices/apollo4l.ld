@@ -131,9 +131,21 @@ SECTIONS
     {
         __uninit_start = .;
         *(.uninit*)
-        *(.persistent*)
+        /* DURABLE grade: exact-match .persistent with the net kits
+         * excluded -- this window is MRAM-mirrored (and on apollo510
+         * MPU-read-only outside unlock windows).  Exact match so the
+         * WARM grade below cannot be wildcard-swallowed into it. */
+        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
         . = ALIGN(32);
         __uninit_end = .;
+        /* WARM grade (TIKU_PERSIST_WARM + the net kits' legacy plain
+         * .persistent): survives warm resets, but sits OUTSIDE the
+         * mirror and the MPU-RO window.  Net TX/RX/credential churn no
+         * longer dirties the mirror (needless MRAM programs at every
+         * relock), and the un-windowed MQTT buffer writers stop being
+         * a MemManage source when the window is read-only. */
+        *(.persistent.warm*)
+        *tiku_kits_net_*.o(.persistent*)
     } > TCM
 
     _end = .;
