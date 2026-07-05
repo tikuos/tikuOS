@@ -114,6 +114,34 @@
 /** @} */ /* End of TIKU_HIFRAM group */
 
 /*---------------------------------------------------------------------------*/
+/* DURABILITY GRADES                                                         */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * `.persistent` promises power-cycle durability — FRAM in place on
+ * MSP430, NVM-mirrored SRAM on Ambiq/RP2350.  But some state only
+ * WANTS the weaker half of that deal: skip zero-init so it survives a
+ * warm reset, without earning a slot in the (small, wear-limited)
+ * NVM mirror.  On RP2350 the net stack held exactly that shape via a
+ * linker carve-out, which left one attribute meaning two different
+ * things.  TIKU_PERSIST_WARM names the weaker grade explicitly:
+ *
+ *   .persistent        survives power cycles (durable, mirrored/FRAM)
+ *   TIKU_PERSIST_WARM  survives warm resets only; never mirrored,
+ *                      never MPU-protected, costs zero NVM
+ *
+ * On platforms where everything persistent is cheap and in-place
+ * (MSP430 FRAM) or fully mirrored (Ambiq), WARM degrades to plain
+ * `.persistent` — strictly stronger than promised, which the contract
+ * allows.  Only RP2350 physically separates the grades today.
+ */
+#if defined(PLATFORM_RP2350)
+#define TIKU_PERSIST_WARM  __attribute__((section(".persistent.warm")))
+#else
+#define TIKU_PERSIST_WARM  __attribute__((section(".persistent")))
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* ERROR CODES                                                               */
 /*---------------------------------------------------------------------------*/
 
@@ -1676,6 +1704,11 @@ typedef struct {
     uint32_t magic;       /**< TIKU_HIBERNATE_MAGIC if valid */
     uint32_t boot_count;  /**< Monotonic hibernate cycle counter */
     uint32_t timestamp;   /**< Caller-supplied timestamp */
+    uint32_t crc;         /**< CRC-32 over boot_count+timestamp: a torn
+                               marker write is rejected at resume instead
+                               of yielding a wrong boot_count behind an
+                               intact magic (magic alone proved nothing
+                               about the payload) */
 } tiku_hibernate_marker_t;
 
 /**

@@ -34,7 +34,9 @@
 /* Live .uninit working copy + the reserved MRAM mirror page (apollo510.ld). */
 extern uint8_t  __uninit_start;
 extern uint8_t  __uninit_end;
-extern uint32_t __tiku_nvm_mram_start;   /* base address of the mirror page */
+extern uint32_t __tiku_nvm_mram_start[]; /* base of the mirror page (linker
+                                            * symbol: incomplete array so the
+                                            * compiler cannot assume a size) */
 
 /**
  * @defgroup MEM_ARCH_CONSTS Apollo510 MRAM driver constants
@@ -44,7 +46,7 @@ extern uint32_t __tiku_nvm_mram_start;   /* base address of the mirror page */
 #define AMBIQ_MRAM_BASE         0x00400000UL  /* AM_HAL_MRAM_ADDR (word-offset origin) */
 #define AMBIQ_MRAM_PROGRAM_KEY  0x12344321UL  /* AM_HAL_MRAM_PROGRAM_KEY */
 #define AMBIQ_MRAM_OP_PROGRAM   1U            /* AM_HAL_MRAM_PROGRAM */
-#define TIKU_NVM_MAGIC          0x4E564D54U   /* 'NVMT' little-endian */
+#include "kernel/memory/tiku_nvm_mirror.h"
 #define TIKU_NVM_MRAM_BYTES     0x10000U      /* 64 KB; MUST match __tiku_nvm_mram_size */
 /** @} */
 
@@ -76,6 +78,21 @@ static uint32_t g_nvm_flush_programs;
 
 uint32_t tiku_mem_arch_nvm_program_count(void) { return g_nvm_flush_programs; }
 
+/** Boot-time mirror-restore outcome (see tiku_nvm_restore_t). */
+static tiku_nvm_restore_t g_nvm_restore;
+
+tiku_nvm_restore_t tiku_mem_arch_nvm_restore_status(void)
+{
+    return g_nvm_restore;
+}
+
+/** Base of the NVM mirror (header + image), for tests/diagnostics. */
+const uint8_t *tiku_mem_arch_nvm_mirror(void)
+{
+    return (const uint8_t *)__tiku_nvm_mram_start;
+}
+
+
 /**
  * @brief Return the size of the .uninit region in bytes
  *
@@ -99,16 +116,43 @@ static size_t uninit_bytes(void) {
  * MRAM read reflects current MRAM contents.
  */
 void tiku_mem_arch_init(void) {
-    /* Restore .uninit from the MRAM mirror if it carries our magic. On a fresh
-     * boot the cache is empty (or off) here, so reading the page sees the
-     * current MRAM contents. */
-    const uint32_t *mirror = (const uint32_t *)&__tiku_nvm_mram_start;
-    if (mirror[0] == TIKU_NVM_MAGIC) {
-        size_t n = uninit_bytes();
+    /* Restore .uninit from the MRAM mirror. On a fresh boot the cache is
+     * empty (or off) here, so reading the page sees current MRAM contents.
+     * V2 mirrors are CRC-validated (a torn flush is detected and NOT
+     * restored); V1 mirrors are accepted once for seamless upgrade. */
+    const uint32_t *mirror = (const uint32_t *)__tiku_nvm_mram_start;
+    size_t n = uninit_bytes();
+
+    if (mirror[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2) {
+        size_t len = (size_t)mirror[TIKU_NVM_MIRROR_W_LEN];
+        const uint8_t *img =
+            (const uint8_t *)__tiku_nvm_mram_start + TIKU_NVM_MIRROR_HDR_BYTES;
+        if (len <= (TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES) &&
+            tiku_nvm_crc32(img, len) == mirror[TIKU_NVM_MIRROR_W_CRC]) {
+            if (n > len) {
+                n = len;
+            }
+            memcpy(&__uninit_start, img, n);
+            g_nvm_restore = TIKU_NVM_RESTORE_V2_OK;
+        } else {
+            /* Torn program (power cut mid-flush) or rot: the magic word
+             * survived but the image does not check out.  DO NOT restore
+             * — .uninit keeps its NOLOAD value and every subsystem's
+             * "gate invalid -> prime default" path runs.  Crash-
+             * consistent by construction, never silently corrupt. */
+            g_nvm_restore = TIKU_NVM_RESTORE_CRC_FAIL;
+        }
+    } else if (mirror[0] == TIKU_NVM_MIRROR_MAGIC_V1) {
+        /* Legacy pre-CRC mirror: accept it once (best effort, exactly
+         * the old behavior) so an upgrade keeps boot_count/RTC/aliases;
+         * the first flush after this boot rewrites the mirror as V2. */
         if (n > (TIKU_NVM_MRAM_BYTES - 4U)) {
             n = TIKU_NVM_MRAM_BYTES - 4U;
         }
         memcpy(&__uninit_start, (const uint8_t *)&mirror[1], n);
+        g_nvm_restore = TIKU_NVM_RESTORE_V1;
+    } else {
+        g_nvm_restore = TIKU_NVM_RESTORE_VIRGIN;
     }
 }
 
@@ -191,14 +235,14 @@ void tiku_mem_arch_nvm_flush(void) {
     uint32_t dst_word_off, primask;
     int      changed;
 
-    if (n > (TIKU_NVM_MRAM_BYTES - 4U)) {
-        n = TIKU_NVM_MRAM_BYTES - 4U;
+    if (n > (TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES)) {
+        n = TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES;
     }
 
-    /* Compose: magic word, then the .uninit image, padded to a 16-byte unit. */
-    g_nvm_snap[0] = TIKU_NVM_MAGIC;
-    memcpy((uint8_t *)&g_nvm_snap[1], &__uninit_start, n);
-    snap_bytes = 4U + n;
+    /* Compose the IMAGE first (header words filled only if we program:
+     * the CRC is the expensive part and a clean relock must stay free). */
+    memcpy((uint8_t *)&g_nvm_snap[4], &__uninit_start, n);
+    snap_bytes = TIKU_NVM_MIRROR_HDR_BYTES + n;
     prog_bytes = (snap_bytes + 15U) & ~((size_t)15U);
     if (prog_bytes > TIKU_NVM_MRAM_BYTES) {
         prog_bytes = TIKU_NVM_MRAM_BYTES;
@@ -218,14 +262,33 @@ void tiku_mem_arch_nvm_flush(void) {
      * The dcache-clean and the brief IRQ-off window below are kept on EVERY
      * call -- only the program (and its mirror invalidate) is conditional -- so
      * any ordering/timing side-effect a per-packet relock relies on is intact. */
-    changed = (memcmp((const void *)g_nvm_snap,
-                      (const void *)&__tiku_nvm_mram_start, prog_bytes) != 0);
+    {
+        const uint32_t *mirror = (const uint32_t *)__tiku_nvm_mram_start;
+        changed = (mirror[TIKU_NVM_MIRROR_W_MAGIC] != TIKU_NVM_MIRROR_MAGIC_V2 ||
+                   mirror[TIKU_NVM_MIRROR_W_LEN]   != (uint32_t)n ||
+                   memcmp((const uint8_t *)&g_nvm_snap[4],
+                          (const uint8_t *)__tiku_nvm_mram_start +
+                              TIKU_NVM_MIRROR_HDR_BYTES,
+                          prog_bytes - TIKU_NVM_MIRROR_HDR_BYTES) != 0);
+    }
+
+    /* Fill the header only when programming: magic, CRC over the image,
+     * image length, reserved-erased.  On an unchanged image the mirror's
+     * existing header is necessarily the header of THIS image, so the
+     * skip needs no CRC work at all. */
+    if (changed) {
+        g_nvm_snap[TIKU_NVM_MIRROR_W_MAGIC] = TIKU_NVM_MIRROR_MAGIC_V2;
+        g_nvm_snap[TIKU_NVM_MIRROR_W_CRC]   =
+            tiku_nvm_crc32((const uint8_t *)&g_nvm_snap[4], n);
+        g_nvm_snap[TIKU_NVM_MIRROR_W_LEN]   = (uint32_t)n;
+        g_nvm_snap[TIKU_NVM_MIRROR_W_RSVD]  = 0xFFFFFFFFu;
+    }
 
     /* Write the snapshot back to SSRAM so the MRAM programmer reads it there. */
     tiku_cpu_dcache_clean((const void *)g_nvm_snap, prog_bytes);
 
     dst_word_off =
-        ((uint32_t)(uintptr_t)&__tiku_nvm_mram_start - AMBIQ_MRAM_BASE) >> 2;
+        ((uint32_t)(uintptr_t)__tiku_nvm_mram_start - AMBIQ_MRAM_BASE) >> 2;
 
     /* MRAM program is uninterruptible (an ISR fetch could fault mid-program). */
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
@@ -240,7 +303,7 @@ void tiku_mem_arch_nvm_flush(void) {
     /* Drop any cached copies of the freshly-programmed page so same-session
      * reads of the mirror see the new data. */
     if (changed) {
-        tiku_cpu_dcache_invalidate((const void *)&__tiku_nvm_mram_start, prog_bytes);
+        tiku_cpu_dcache_invalidate((const void *)__tiku_nvm_mram_start, prog_bytes);
         g_nvm_flush_programs++;
     }
 }
@@ -263,7 +326,7 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
 {
     static const uint16_t sizes[] = { 16U, 256U, 4096U, 32768U };
     const uint8_t   nsizes    = (uint8_t)(sizeof(sizes) / sizeof(sizes[0]));
-    const uintptr_t mirror    = (uintptr_t)&__tiku_nvm_mram_start;
+    const uintptr_t mirror    = (uintptr_t)__tiku_nvm_mram_start;
     const size_t    bench_off = TIKU_NVM_MRAM_BYTES / 2U;  /* upper half = scratch */
     uint32_t primask, c0, c1;
     uint8_t  i, r, count = 0U;

@@ -196,12 +196,18 @@ SECTIONS
          * TCP/MQTT/DNS/HTTP pools are tagged .persistent only for NOLOAD (skip
          * zero-init), but they are transient, write-heavy working buffers -- they
          * must be neither mirrored nor MPU-read-only. */
-        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent*)
+        /* DURABLE grade: exact-match `.persistent` only, so the WARM
+         * grade below (`.persistent.warm`) cannot be swallowed by a
+         * wildcard into the mirrored window. */
+        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* Net working buffers: still NOLOAD SRAM, but AFTER __uninit_end so they
-         * sit outside the backed-up + MPU-protected window (they need ~5 KB,
-         * which alone overflows the 4 KB backup on RP2350). */
+        /* WARM grade (TIKU_PERSIST_WARM + the net stack's legacy plain
+         * `.persistent`): NOLOAD SRAM after __uninit_end — survives warm
+         * resets, but sits outside the backed-up + MPU-protected window.
+         * The net pools need ~5 KB, which alone overflows the 4 KB
+         * backup sector; anything else here chose the grade on purpose. */
+        *(.persistent.warm*)
         *tiku_kits_net_*.o(.persistent*)
     } > SRAM
 
@@ -226,8 +232,8 @@ SECTIONS
      * sector mirrors) must fit in one flash erase granule. Growing
      * past 4 KB will need multi-sector backup logic in the arch
      * driver. */
-    ASSERT((__uninit_end - __uninit_start) <= __tiku_nvm_flash_size,
-           "ERROR: .uninit region exceeds 4 KB flash backup sector")
+    ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_flash_size - 16),
+           "ERROR: .uninit region exceeds the 4 KB flash backup sector minus its 16-byte V2 header")
 
     /* The flash image (code + rodata + the .data load copy) must not grow up
      * into the carved NVM region below the backup sector. */

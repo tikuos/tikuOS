@@ -48,6 +48,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_mem.h"
+#include "tiku_nvm_mirror.h"
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
@@ -171,7 +172,9 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
     if (tiku_persist_read(&hibernate_store, TIKU_HIBERNATE_KEY,
                            (uint8_t *)&existing, sizeof(existing),
                            &out_len) == TIKU_MEM_OK &&
-        existing.magic == TIKU_HIBERNATE_MAGIC) {
+        existing.magic == TIKU_HIBERNATE_MAGIC &&
+        existing.crc == tiku_nvm_crc32(&existing.boot_count,
+                                       2 * sizeof(uint32_t))) {
         marker.boot_count = existing.boot_count + 1;
     } else {
         marker.boot_count = 1;
@@ -179,6 +182,8 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
 
     marker.magic     = TIKU_HIBERNATE_MAGIC;
     marker.timestamp = timestamp;
+    marker.crc       = tiku_nvm_crc32(&marker.boot_count,
+                                      2 * sizeof(uint32_t));
 
     /* Single MPU-unlocked section for cache flush + marker write */
     mpu_state = tiku_mpu_unlock_nvm();
@@ -240,8 +245,11 @@ tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
         return TIKU_MEM_ERR_NOT_FOUND;
     }
 
-    /* Validate the marker */
-    if (marker.magic != TIKU_HIBERNATE_MAGIC) {
+    /* Validate the marker: magic AND payload CRC.  Magic-only let a
+     * torn marker write masquerade as a valid warm-resume record. */
+    if (marker.magic != TIKU_HIBERNATE_MAGIC ||
+        marker.crc != tiku_nvm_crc32(&marker.boot_count,
+                                     2 * sizeof(uint32_t))) {
         return TIKU_MEM_ERR_NOT_FOUND;
     }
 
