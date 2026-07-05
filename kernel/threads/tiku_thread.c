@@ -109,6 +109,22 @@ static volatile uint16_t s_canary_faults;
  * @param old_sp  Outgoing stack pointer (past the software frame)
  * @return Incoming stack pointer
  */
+/**
+ * @brief Non-zero when the caller runs in kernel-thread (or pre-thread
+ *        boot) context; zero inside a preemptive worker.
+ *
+ * The confinement predicate for TIKU_MEM_KERNEL_ONLY (kernel/memory):
+ * memory mutators refuse worker-context calls instead of racing the
+ * cooperative kernel's lock-free structures.  A single aligned pointer
+ * read of s_current (already volatile) — safe from any context; an ISR
+ * that interrupted a worker reads "not kernel", which is the correct
+ * conservative answer for allocators there too.
+ */
+int tiku_thread_in_kernel(void)
+{
+    return !s_started || s_current == (tiku_thread_t *)0;
+}
+
 uint32_t *tiku_thread_switch(uint32_t *old_sp)
 {
     uint32_t now = tiku_thread_arch_cycles();

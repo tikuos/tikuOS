@@ -170,7 +170,48 @@ typedef struct {
     tiku_mem_arch_size_t used_bytes;   /**< Currently allocated bytes */
     tiku_mem_arch_size_t peak_bytes;   /**< High-water mark (lifetime maximum) */
     tiku_mem_arch_size_t alloc_count;  /**< Number of successful allocations */
+    tiku_mem_arch_size_t fail_count;   /**< Allocations refused for lack of room */
 } tiku_mem_stats_t;
+
+/*---------------------------------------------------------------------------*/
+/* WORKER-THREAD CONFINEMENT GUARD                                           */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Nothing in kernel/memory/ takes an atomic bracket: the cooperative
+ * kernel serializes every caller, so locks would be pure cost.  The
+ * preemptive worker threads (TIKU_THREADS_ENABLE) break that premise —
+ * a worker preempted mid-bump could double-hand-out memory, corrupt a
+ * pool freelist, or be parked while holding the NVM MPU window open.
+ * Workers are therefore confined to pure computation by POLICY; this
+ * guard makes the policy ENFORCED: under TIKU_THREADS_ENABLE every
+ * memory mutator refuses calls from worker context (error/NULL return,
+ * violation counted) instead of corrupting silently.  Flag-off builds
+ * compile the guard to nothing — byte-identical binaries.
+ */
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+int tiku_thread_in_kernel(void);           /* kernel/threads/tiku_thread.c */
+void     tiku_mem_guard_note_violation(void);
+uint32_t tiku_mem_guard_violations(void);
+
+#define TIKU_MEM_KERNEL_ONLY(retval)              \
+    do {                                          \
+        if (!tiku_thread_in_kernel()) {           \
+            tiku_mem_guard_note_violation();      \
+            return retval;                        \
+        }                                         \
+    } while (0)
+#define TIKU_MEM_KERNEL_ONLY_VOID()               \
+    do {                                          \
+        if (!tiku_thread_in_kernel()) {           \
+            tiku_mem_guard_note_violation();      \
+            return;                               \
+        }                                         \
+    } while (0)
+#else
+#define TIKU_MEM_KERNEL_ONLY(retval)      do { } while (0)
+#define TIKU_MEM_KERNEL_ONLY_VOID()       do { } while (0)
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* MEMORY REGION REGISTRY                                                    */
@@ -337,6 +378,7 @@ typedef struct {
     tiku_mem_arch_size_t  offset;    /**< Current bump-pointer position */
     tiku_mem_arch_size_t  peak;      /**< Lifetime high-water mark */
     tiku_mem_arch_size_t  count;     /**< Allocations since last reset */
+    tiku_mem_arch_size_t  fail;      /**< Refused allocations (no room) */
     uint8_t               id;        /**< Arena identifier for debugging */
     uint8_t               active;    /**< Non-zero if initialized */
     tiku_mem_tier_t       tier;      /**< Memory tier (SRAM or NVM) */
@@ -501,6 +543,7 @@ typedef struct {
                                             MRAM/Flash, in-place store on FRAM)
                                             rather than a direct CPU store. */
     tiku_mem_tier_t       tier;        /**< Memory tier (SRAM or NVM) */
+    tiku_mem_arch_size_t  fail;        /**< Refused allocations (exhausted) */
 } tiku_pool_t;
 
 /*---------------------------------------------------------------------------*/

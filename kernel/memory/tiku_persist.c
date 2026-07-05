@@ -89,6 +89,7 @@ static tiku_persist_entry_t *persist_find(tiku_persist_store_t *store,
  */
 tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t i;
     tiku_mem_arch_size_t count;
 
@@ -135,6 +136,7 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
                                      uint8_t *fram_buf,
                                      tiku_mem_arch_size_t capacity)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_persist_entry_t *entry;
     tiku_mem_arch_size_t i;
 
@@ -255,6 +257,7 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
                                    const uint8_t *data,
                                    tiku_mem_arch_size_t data_len)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_persist_entry_t *entry;
 
     if (store == NULL || key == NULL || data == NULL) {
@@ -289,6 +292,7 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
 tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
                                     const char *key)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_persist_entry_t *entry;
 
     if (store == NULL || key == NULL) {
@@ -416,6 +420,7 @@ static uint8_t cell_primed;
  */
 uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
 {
+    TIKU_MEM_KERNEL_ONLY(0);
     uint16_t saved;
     uint16_t n;
 
@@ -467,6 +472,7 @@ uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c)
 void tiku_persist_cell_write(const tiku_persist_cell_t *c,
                              const void *src, uint16_t len)
 {
+    TIKU_MEM_KERNEL_ONLY_VOID();
     uint16_t saved;
 
     if (c == NULL || src == NULL) {
@@ -492,6 +498,7 @@ void tiku_persist_cell_write(const tiku_persist_cell_t *c,
 void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
                               const void *src, uint16_t len)
 {
+    TIKU_MEM_KERNEL_ONLY_VOID();
     uint16_t saved;
 
     if (c == NULL || src == NULL) {
@@ -521,6 +528,7 @@ void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
 void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
                                  uint32_t v)
 {
+    TIKU_MEM_KERNEL_ONLY_VOID();
     uint16_t saved;
 
     if (c == NULL) {

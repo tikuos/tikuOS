@@ -130,6 +130,7 @@ tiku_mem_err_t tiku_cache_create(tiku_cached_region_t *region,
                                   uint8_t *sram_buf,
                                   tiku_mem_arch_size_t size)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_err_t err;
 
     if (region == NULL || fram_addr == NULL ||
@@ -178,6 +179,7 @@ void *tiku_cache_get(tiku_cached_region_t *region)
  */
 tiku_mem_err_t tiku_cache_mark_dirty(tiku_cached_region_t *region)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (region == NULL || !region->active) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -195,6 +197,7 @@ tiku_mem_err_t tiku_cache_mark_dirty(tiku_cached_region_t *region)
  */
 tiku_mem_err_t tiku_cache_flush(tiku_cached_region_t *region)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     uint16_t saved;
 
     if (region == NULL || !region->active) {
@@ -226,6 +229,7 @@ tiku_mem_err_t tiku_cache_flush(tiku_cached_region_t *region)
  */
 tiku_mem_err_t tiku_cache_flush_all(void)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t i;
     uint16_t saved;
     uint8_t any_dirty = 0;
@@ -270,6 +274,7 @@ tiku_mem_err_t tiku_cache_flush_all(void)
  */
 tiku_mem_err_t tiku_cache_reload(tiku_cached_region_t *region)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (region == NULL || !region->active) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -318,6 +323,7 @@ tiku_cached_region_t *tiku_cache_get_region(tiku_mem_arch_size_t index)
  */
 tiku_mem_err_t tiku_cache_destroy(tiku_cached_region_t *region)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (region == NULL || !region->active) {
         return TIKU_MEM_ERR_INVALID;
     }

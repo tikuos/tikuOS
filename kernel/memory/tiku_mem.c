@@ -86,6 +86,7 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
                                       tiku_mem_arch_size_t size)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (arena == NULL || buf == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -105,6 +106,7 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
     }
     arena->offset   = 0;
     arena->peak     = 0;
+    arena->fail     = 0;
     arena->count    = 0;
     arena->id       = 0;
     arena->active   = 1;
@@ -131,6 +133,7 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
 tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
                                  tiku_mem_arch_size_t size, uint8_t id)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (arena == NULL || buf == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -164,6 +167,7 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
     }
     arena->offset   = 0;
     arena->peak     = 0;
+    arena->fail     = 0;
     arena->count    = 0;
     arena->id       = id;
     arena->active   = 1;
@@ -194,6 +198,7 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
  */
 void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 {
+    TIKU_MEM_KERNEL_ONLY(NULL);
     tiku_mem_arch_size_t aligned;
     void *ptr;
 
@@ -205,6 +210,7 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 
     /* Check for overflow: would the new offset exceed capacity? */
     if (aligned > arena->capacity - arena->offset) {
+        arena->fail++;
         return NULL;
     }
 
@@ -241,6 +247,7 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
  */
 tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (arena == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -268,6 +275,7 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
  */
 tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (arena == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -299,6 +307,7 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
     stats->used_bytes  = arena->offset;
     stats->peak_bytes  = arena->peak;
     stats->alloc_count = arena->count;
+    stats->fail_count  = arena->fail;
 
     return TIKU_MEM_OK;
 }
@@ -317,6 +326,21 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
  * finally performs platform-specific memory hardware setup via
  * the HAL.
  */
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+/** Worker-context calls refused by TIKU_MEM_KERNEL_ONLY since boot. */
+static uint32_t mem_guard_violations;
+
+void tiku_mem_guard_note_violation(void)
+{
+    mem_guard_violations++;
+}
+
+uint32_t tiku_mem_guard_violations(void)
+{
+    return mem_guard_violations;
+}
+#endif /* TIKU_THREADS_ENABLE */
+
 void tiku_mem_init(void)
 {
     tiku_mem_arch_size_t count;

@@ -195,6 +195,7 @@ typedef struct {
     tiku_mem_arch_size_t  offset;      /**< Current bump position */
     tiku_mem_arch_size_t  peak;        /**< Lifetime high-water mark */
     tiku_mem_arch_size_t  alloc_count; /**< Number of sub-allocations */
+    tiku_mem_arch_size_t  fail_count;  /**< Carves refused for lack of room */
     uint8_t               initialized; /**< Non-zero after tiku_tier_init */
 } tier_pool_state_t;
 
@@ -298,6 +299,7 @@ static void tier_wire_all(void)
 
 tiku_mem_err_t tiku_tier_init(void)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     /* Idempotent guard: skip the (destructive) rewind if already set up, so
      * a boot-time init followed by a lazy caller (e.g. BASIC) does not
      * orphan live allocations.  tiku_tier_reset() is the explicit rewind. */
@@ -322,6 +324,7 @@ tiku_mem_err_t tiku_tier_init(void)
  */
 tiku_mem_err_t tiku_tier_reset(void)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tier_wire_all();
     return TIKU_MEM_OK;
 }
@@ -383,6 +386,21 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
         return TIKU_MEM_SRAM;
     }
 
+#if TIKU_TIER_HIFRAM_AVAILABLE
+    /* Last-resort capacity check: NVM full but HIFRAM has room (a
+     * sub-threshold size that no longer fits anywhere else).  AUTO
+     * used to return NVM unconditionally here and fail the carve
+     * even with HIFRAM capacity sitting idle. */
+    if (tier_state[TIKU_MEM_NVM].initialized &&
+        aligned > tier_state[TIKU_MEM_NVM].capacity -
+                  tier_state[TIKU_MEM_NVM].offset &&
+        tier_state[TIKU_MEM_HIFRAM].initialized &&
+        aligned <= tier_state[TIKU_MEM_HIFRAM].capacity -
+                   tier_state[TIKU_MEM_HIFRAM].offset) {
+        return TIKU_MEM_HIFRAM;
+    }
+#endif
+
     return TIKU_MEM_NVM;
 }
 
@@ -408,10 +426,12 @@ static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
     uint8_t *ptr;
 
     if (!ts->initialized) {
+        ts->fail_count++;
         return NULL;
     }
 
     if (aligned > ts->capacity - ts->offset) {
+        ts->fail_count++;
         return NULL;
     }
 
@@ -459,6 +479,7 @@ tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
                                        tiku_mem_arch_size_t size,
                                        uint8_t id)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_tier_t resolved;
     tiku_mem_arch_size_t aligned;
     uint8_t *buf;
@@ -535,6 +556,7 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
                                       tiku_mem_arch_size_t block_count,
                                       uint8_t id)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_tier_t resolved;
     tiku_mem_arch_size_t aligned_blk;
     tiku_mem_arch_size_t min_blk;
@@ -731,6 +753,7 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
     stats->used_bytes  = ts->offset;
     stats->peak_bytes  = ts->peak;
     stats->alloc_count = ts->alloc_count;
+    stats->fail_count  = ts->fail_count;
 
     return TIKU_MEM_OK;
 }
@@ -754,6 +777,7 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
 tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
                                    tiku_mem_arch_size_t len)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (dst == NULL || src == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }

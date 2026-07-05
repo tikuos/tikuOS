@@ -245,6 +245,7 @@ tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
                                      tiku_mem_arch_size_t block_size,
                                      tiku_mem_arch_size_t block_count)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t aligned_size;
     tiku_mem_arch_size_t min_size;
 
@@ -264,6 +265,7 @@ tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
     pool->block_count = block_count;
     pool->used_count  = 0;
     pool->peak_count  = 0;
+    pool->fail        = 0;
     pool->id          = 0;
     pool->active      = 1;
     pool->nvm         = 0;
@@ -305,6 +307,7 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
                                  tiku_mem_arch_size_t block_count,
                                  uint8_t id)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t aligned_size;
     tiku_mem_arch_size_t min_size;
 
@@ -330,6 +333,7 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
     pool->block_count = block_count;
     pool->used_count  = 0;
     pool->peak_count  = 0;
+    pool->fail        = 0;
     pool->id          = id;
     pool->active      = 1;
     pool->nvm         = 0;
@@ -353,6 +357,7 @@ tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
                                      tiku_mem_arch_size_t block_count,
                                      uint8_t id)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t aligned_size;
     tiku_mem_arch_size_t min_size;
 
@@ -371,6 +376,7 @@ tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
     pool->block_count = block_count;
     pool->used_count  = 0;
     pool->peak_count  = 0;
+    pool->fail        = 0;
     pool->id          = id;
     pool->active      = 1;
     pool->nvm         = 1;
@@ -397,10 +403,15 @@ tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
  */
 void *tiku_pool_alloc(tiku_pool_t *pool)
 {
+    TIKU_MEM_KERNEL_ONLY(NULL);
     void *block;
     void **next_ptr;
 
-    if (pool == NULL || !pool->active || pool->free_head == NULL) {
+    if (pool == NULL || !pool->active) {
+        return NULL;
+    }
+    if (pool->free_head == NULL) {
+        pool->fail++;                    /* exhausted, not misused */
         return NULL;
     }
 
@@ -440,6 +451,7 @@ void *tiku_pool_alloc(tiku_pool_t *pool)
  */
 tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     uint8_t *block;
     tiku_mem_arch_size_t offset;
 
@@ -515,6 +527,7 @@ tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
     stats->used_bytes  = pool->block_size * pool->used_count;
     stats->peak_bytes  = pool->block_size * pool->peak_count;
     stats->alloc_count = pool->used_count;
+    stats->fail_count  = pool->fail;
 
     return TIKU_MEM_OK;
 }
@@ -537,6 +550,7 @@ tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
  */
 tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (pool == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }

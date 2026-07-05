@@ -171,6 +171,9 @@ int tiku_thread_worker_ready(void);
 /** @brief Count of stack-canary violations detected at switch time. */
 uint16_t tiku_thread_canary_faults(void);
 
+/** Non-zero in kernel/boot context, zero inside a worker (any context). */
+int tiku_thread_in_kernel(void);
+
 /*---------------------------------------------------------------------------*/
 /* KERNEL-INTERNAL (scheduler / event-queue hooks)                           */
 /*---------------------------------------------------------------------------*/

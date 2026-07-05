@@ -303,6 +303,7 @@ tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
                                   tiku_mem_arch_size_t size,
                                   uint8_t owner_id)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t i;
 
     if (ptr == NULL || size == 0) {
@@ -350,6 +351,7 @@ tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
  */
 tiku_mem_err_t tiku_region_unclaim(const uint8_t *ptr)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t i;
 
     if (ptr == NULL) {

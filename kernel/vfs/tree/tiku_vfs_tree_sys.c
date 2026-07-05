@@ -227,6 +227,77 @@ nvmfree_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/mem/tiers + /sys/mem/failed — measured tier-allocator truth           */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Read handler for /sys/mem/tiers.
+ *
+ * One line per available tier with MEASURED bump-allocator state
+ * (capacity, used, lifetime peak, carve count, refused carves) straight
+ * from tiku_tier_stats().  Unlike /sys/mem/used — which sums what
+ * processes self-declare — these numbers cannot drift from reality.
+ * Unavailable tiers (e.g. HIFRAM on parts without one) are omitted.
+ */
+static int
+mem_tiers_read(char *buf, size_t max)
+{
+    static const struct { tiku_mem_tier_t t; const char *name; } tiers[] = {
+        { TIKU_MEM_SRAM,   "sram"   },
+        { TIKU_MEM_NVM,    "nvm"    },
+        { TIKU_MEM_HIFRAM, "hifram" },
+    };
+    tiku_mem_stats_t st;
+    size_t off = 0;
+    uint8_t i;
+    int n;
+
+    for (i = 0; i < (uint8_t)(sizeof(tiers) / sizeof(tiers[0])); i++) {
+        if (tiku_tier_stats(tiers[i].t, &st) != TIKU_MEM_OK) {
+            continue;
+        }
+        n = snprintf(buf + off, (off < max) ? max - off : 0,
+                     "%s total=%lu used=%lu peak=%lu allocs=%lu fail=%lu\n",
+                     tiers[i].name,
+                     (unsigned long)st.total_bytes,
+                     (unsigned long)st.used_bytes,
+                     (unsigned long)st.peak_bytes,
+                     (unsigned long)st.alloc_count,
+                     (unsigned long)st.fail_count);
+        if (n < 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return (int)off;
+}
+
+/**
+ * @brief Read handler for /sys/mem/failed.
+ *
+ * Total refused carve requests across all tiers since boot.  Non-zero
+ * means something asked for memory it did not get — OOM pressure that
+ * was previously invisible (the caller saw only a NULL).
+ */
+static int
+mem_failed_read(char *buf, size_t max)
+{
+    static const tiku_mem_tier_t all[] = {
+        TIKU_MEM_SRAM, TIKU_MEM_NVM, TIKU_MEM_HIFRAM
+    };
+    tiku_mem_stats_t st;
+    unsigned long total = 0;
+    uint8_t i;
+
+    for (i = 0; i < (uint8_t)(sizeof(all) / sizeof(all[0])); i++) {
+        if (tiku_tier_stats(all[i], &st) == TIKU_MEM_OK) {
+            total += (unsigned long)st.fail_count;
+        }
+    }
+    return snprintf(buf, max, "%lu\n", total);
+}
+
+/*---------------------------------------------------------------------------*/
 /* /sys/mem/free — live stack headroom                                        */
 /*---------------------------------------------------------------------------*/
 
@@ -560,6 +631,8 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },
     { "nvmfree", TIKU_VFS_FILE, nvmfree_read, NULL, NULL, 0, &desc_mem_live },
+    { "tiers",   TIKU_VFS_FILE, mem_tiers_read,  NULL, NULL, 0, &desc_mem_live },
+    { "failed",  TIKU_VFS_FILE, mem_failed_read, NULL, NULL, 0, &desc_mem_live },
 };
 
 /** /sys/cpu directory table */
@@ -608,7 +681,7 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
-    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 5 },
+    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 7 },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_power_children,    TIKU_VFS_TREE_POWER_NCHILD },
