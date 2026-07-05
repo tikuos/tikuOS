@@ -211,6 +211,16 @@ static int rom_flash_ready(void) {
 static uint8_t g_flush_buf[RP2350_NVM_SECTOR_SIZE]
     __attribute__((aligned(4)));
 
+/** Sectors actually erased+programmed (dirty flushes), for observability
+ *  and the TikuBench dirty-check assertion.  Same accessor name as the
+ *  Ambiq backends. */
+static uint32_t g_nvm_flush_programs;
+
+uint32_t tiku_mem_arch_nvm_program_count(void)
+{
+    return g_nvm_flush_programs;
+}
+
 /**
  * @brief Compose the NVM snapshot into g_flush_buf from the live .uninit region.
  *
@@ -414,6 +424,23 @@ void tiku_mem_arch_nvm_flush(void) {
      * every kernel write to .persistent / .uninit eventually flows
      * through this on its way to surviving a power cycle. */
     compose_snapshot();
+
+    /* Dirty check (same policy as the Ambiq backends): skip the erase+
+     * program when the composed image already matches the mirror byte-
+     * for-byte.  The mirror is XIP-mapped and cache-coherent here — the
+     * boot-ROM sequence ends with flush_cache after every program, and
+     * a cold boot starts with a cold cache — so a plain memcmp reads
+     * current flash contents.  On NOR this matters far more than on
+     * MRAM: a skipped flush saves a ~20 ms IRQs-off erase+program AND a
+     * sector endurance cycle (~100 K lifetime), so relocks whose window
+     * touched nothing in .uninit (e.g. TCP paths writing .bss buffers)
+     * become free instead of costing flash wear per packet. */
+    if (memcmp(g_flush_buf, (const void *)&__tiku_nvm_flash_start,
+               RP2350_NVM_SECTOR_SIZE) == 0) {
+        return;
+    }
+
     flash_commit_sector((uint32_t)(uintptr_t)&__tiku_nvm_flash_offset,
                         g_flush_buf, RP2350_NVM_SECTOR_SIZE);
+    g_nvm_flush_programs++;
 }
