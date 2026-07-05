@@ -105,4 +105,47 @@ int           tiku_cpu_ambiq_clock_has_fault(void);
 void          tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len);
 void          tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len);
 
+/**
+ * @brief Raw identity + power snapshot for the HP-turbo bring-up (`freq probe`).
+ *
+ * Everything the Apollo5 High-Performance mode decision needs, read live:
+ * silicon revision, INFO1 residency, the factory trim revision words, the
+ * SIMOBUCK/perf-mode state, and the SPOT-manager POWERSTATE trim table. The
+ * shell formats it; keeping the raw words here lets the HP port (and a bug
+ * report) see exactly what the chip carries.
+ */
+typedef struct {
+    uint32_t chiprev;          /**< MCUCTRL->CHIPREV (REVMAJ/REVMIN)          */
+    uint32_t shadowvalid;      /**< MCUCTRL->SHADOWVALID (bit3 = INFO1SELOTP) */
+    uint32_t vrstatus;         /**< PWRCTRL->VRSTATUS (SIMOBUCKST bits [5:4]) */
+    uint32_t mcuperfreq;       /**< PWRCTRL->MCUPERFREQ (perf mode + status)  */
+    uint32_t devpwrstatus;     /**< PWRCTRL->DEVPWRSTATUS (bit27 = OTP power) */
+    uint32_t trim_rev;         /**< INFO1 TRIM_REV -- the PCM trim version    */
+    uint32_t pgm_info;         /**< INFO1 PGM_INFO (bits [7:0] = TrimSubRev)  */
+    uint32_t patch_tracker0;   /**< INFO1 PATCH_TRACKER0 (bit0 = UCRG patch)  */
+    uint32_t powerstate[20];   /**< INFO1 SPOT-manager POWERSTATE trim table  */
+    uint8_t  info1_in_otp;     /**< 1 = INFO1 read from OTP, 0 = MRAM shadow  */
+    uint8_t  info1_ok;         /**< 1 = the INFO1 words above are valid reads */
+} tiku_ambiq_hp_probe_t;
+
+/**
+ * @brief Fill @p out with the live HP-mode identity/power snapshot.
+ *
+ * Reads the MRAM INFO1 shadow directly when it is the current INFO1; if INFO1
+ * is OTP-resident, powers the OTP block on for the read and restores its
+ * previous power state after. Never changes the perf mode or any voltage.
+ */
+void tiku_cpu_freq_ambiq_hp_probe(tiku_ambiq_hp_probe_t *out);
+
+/**
+ * @brief Measure the true core clock against the 32.768 kHz STIMER crystal.
+ *
+ * Counts SysTick (CLKSOURCE = processor) decrements over a 125 ms STIMER
+ * window; independent of what the perf-mode register claims, so it is the
+ * ground truth for verifying an LP<->HP switch. Blocks for 125 ms.
+ *
+ * @return Measured core clock in Hz (0 if SysTick is not configured).
+ */
+unsigned long tiku_cpu_freq_ambiq_measured_hz(void);
+
 #endif /* TIKU_AMBIQ_CPU_FREQ_BOOT_ARCH_H_ */
