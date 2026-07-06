@@ -223,10 +223,19 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
-    /* Sanity check: stack must not collide with .bss + .uninit. We
-     * leave at least 4 KB headroom between them. */
-    ASSERT((__stack - _end) >= 0x1000,
-           "ERROR: SRAM exhausted — less than 4 KB free for stack")
+    /* Sanity check: static data must clear the MPU's stack + guard reservation.
+     * The ARMv8-M MPU (arch/arm-rp2350/tiku_mpu_arch.c) carves the top
+     * MPU_STACK_RESERVED_BYTES (32 KB) for the descending stack plus a
+     * MPU_STACK_GUARD_BYTES (4 KB) overflow guard just below it, and programs
+     * SEG2b (SRAM_MID) as [__uninit_end, guard_base). If _end reached within
+     * 36 KB of __stack, guard_base would fall at/below the top of live data:
+     * the guard would sit INSIDE .persistent/.bss (a write there MemManage-
+     * faults) and SRAM_MID would invert (base > limit). Require the full
+     * budget free so that can never link. 0x9000 = 32768 + 4096 -- keep in
+     * lockstep with the two C constants (and their copies in TikuBench
+     * tests/memory/test_mem_mpu.c). */
+    ASSERT((__stack - _end) >= 0x9000,
+           "ERROR: SRAM exhausted — need >= 36 KB free for the MPU stack + guard region")
 
     /* Sanity check: .uninit (the SRAM region that the NVM backup
      * sector mirrors) must fit in one flash erase granule. Growing

@@ -397,6 +397,16 @@ static inline uint32_t mpu_stack_guard_base(void) {
 static void mpu_program_seg2_sram_mid(void) {
     uint32_t base = (uint32_t)&__uninit_end;
     uint32_t end  = mpu_stack_guard_base() - 1U;
+    /* Defensive: if static data ever reached the guard base, base > end would
+     * program an INVERTED region (RLAR limit below RBAR base) -- undefined on
+     * ARMv8-M. The link-time ASSERT in rp2350.ld ((__stack - _end) >= 36 KB)
+     * makes this impossible; this guards only the exact-granule boundary and
+     * any future symbol drift. The range is empty when base > end, so leaving
+     * region 3 disabled is correct -- the guard + SRAM_TOP still cover the
+     * stack, and .uninit stays protected by region 0. */
+    if (base > end) {
+        return;
+    }
     mpu_program_region(MPU_REGION_SRAM_MID, base, end,
                        RP2350_MPU_RBAR_AP_RW_ANY,
                        RP2350_MPU_RBAR_XN);
