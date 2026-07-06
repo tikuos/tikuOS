@@ -1948,6 +1948,14 @@ ifneq ($(BASIC_PROGRAM),)
 OBJS += $(TIKU_BASIC_EMBEDDED_O)
 endif
 
+# Header-dependency tracking.  Each compile emits a .d next to its .o (via
+# -MMD -MP in the rules above) listing every header it pulled in; pull those
+# back in so editing a header rebuilds exactly the objects that include it --
+# no more stale objects (and no more `make clean` after a header edit).  -MP
+# adds phony targets for each header so a later-deleted header can't break the
+# build.  Silently absent on the first build, which is fine.
+-include $(OBJS:.o=.d)
+
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
@@ -1991,13 +1999,13 @@ $(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED)
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 # Assembly-source rule. Used by firmware-blob wrappers that pull in
 # binary data via .incbin (see drivers/wifi/cyw43/firmware.S).
 $(BUILD_DIR)/%.o: %.S
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 # RP2350 outputs: .elf -> .bin -> .uf2 (the .uf2 is what the BOOTSEL
 # mass-storage device wants).
@@ -2031,7 +2039,7 @@ $(TIKU_BASIC_EMBEDDED_C): $(BASIC_PROGRAM) tools/bas_to_c.py
 
 $(TIKU_BASIC_EMBEDDED_O): $(TIKU_BASIC_EMBEDDED_C)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 endif
 
 size: $(TARGET)
