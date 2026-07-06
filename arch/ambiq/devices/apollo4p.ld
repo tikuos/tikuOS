@@ -137,14 +137,41 @@ SECTIONS
     } > TCM
 
     /* -------- 5. Persistent (skipped by zero-init) ------------------- */
-    .uninit (NOLOAD) : ALIGN(32)
+    /* ALIGN(8192) + the 8 KB pad below give the region a PMSAv7-legal
+     * power-of-2 envelope: base 8K-aligned, size exactly 8 KB, so MPU
+     * region 3 can hold it read-only outside NVM unlock windows (real
+     * cell protection -- the shared M4F backend tiku_mpu_apollo4l.c
+     * arms this on the Plus too).  Without the alignment the hardware
+     * window covered base & ~0x1FFF instead: the last few hundred bytes
+     * of .bss (newlib's __malloc_free_list/errno) plus the heap start
+     * landed inside the read-only region, and the first un-windowed
+     * libc/heap write -- the threads TLS test tripped it -- hardfaulted. */
+    .uninit (NOLOAD) : ALIGN(8192)
     {
         __uninit_start = .;
         *(.uninit*)
-        *(.persistent*)
+        /* DURABLE grade: exact-match .persistent with the net kits
+         * excluded -- this window is MRAM-mirrored and MPU-read-only
+         * outside unlock windows.  Exact match so the WARM grade below
+         * cannot be wildcard-swallowed into it. */
+        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
         . = ALIGN(32);
         __uninit_end = .;
+        /* WARM grade (TIKU_PERSIST_WARM + the net kits' legacy plain
+         * .persistent): survives warm resets, but sits OUTSIDE the
+         * mirror and the MPU-RO window.  Net TX/RX/credential churn no
+         * longer dirties the mirror (needless MRAM programs at every
+         * relock), and un-windowed net-buffer writers cannot trip the
+         * read-only window. */
+        /* Pad to the full 8 KB MPU envelope FIRST: the WARM grade
+         * below must sit outside the read-only region. */
+        . = __uninit_start + 8192;
+        *(.persistent.warm*)
+        *tiku_kits_net_*.o(.persistent*)
     } > TCM
+
+    ASSERT((__uninit_end - __uninit_start) <= 8192,
+           "ERROR: .uninit exceeds the 8 KB PMSAv7 MPU envelope (grow the region size in apollo4p.ld AND tiku_mpu_apollo4l.c together)")
 
     _end = .;
     end = .;
