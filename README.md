@@ -28,14 +28,14 @@
 
 | Family | Board · core | RAM | NVM | Status |
 |--------|--------------|-----|-----|--------|
-| **MSP430**<br><sub>16-bit · FRAM</sub> | FR5969 LaunchPad | 2 KB | 64 KB | :green_circle: Primary |
+| **MSP430**<br><sub>16-bit · FRAM</sub> | FR5969 LaunchPad | 2 KB | 64 KB | :green_circle: |
 | | FR5994 LaunchPad | 8 KB | 256 KB | :green_circle: |
 | | FR6989 LaunchPad | 2 KB | 128 KB | :green_circle: |
-| **Ambiq Apollo**<br><sub>Cortex-M</sub> | Apollo510 EVB · M55 96/250 MHz | 512 KB | 4 MB MRAM | :green_circle: Primary |
+| **Ambiq Apollo**<br><sub>Cortex-M</sub> | Apollo510 EVB · M55 96/250 MHz | 512 KB | 4 MB MRAM | :green_circle: |
 | | Apollo4 Lite EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | :green_circle: |
 | | Apollo4 Plus EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | :green_circle: |
 | | Apollo510 Blue EVB · M55 + EM9305 | 512 KB | 4 MB MRAM | :green_circle: |
-| **Raspberry Pi**<br><sub>RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash | :yellow_circle: Compatible |
+| **Raspberry Pi**<br><sub>RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash | :green_circle: |
 
 ---
 
