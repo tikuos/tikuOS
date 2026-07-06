@@ -51,9 +51,6 @@ make flash MCU=rp2350                        # picotool, or copies UF2 to RPI-RP
 # Requires: arm-none-eabi-gcc; flashing uses J-Link (SEGGER JLinkExe).
 make MCU=apollo510                           # also apollo4l / apollo4p / apollo510b
 make flash MCU=apollo510                     # J-Link
-
-# Open serial monitor (default baud 115200)
-make monitor MCU=rp2350
 ```
 
 ---
@@ -230,15 +227,6 @@ tikuOS> write /dev/led0 1
 tikuOS> cat /proc/0/name
 Shell
 ```
-
----
-
-## Handbook
-
-- **API References**
-  - [Core Kernel API Reference](handbook/references/api-reference.md)
-  - [TikuShell Definitive Guide](handbook/references/shell.md)
-  - [Tiku BASIC Definitive Guide](handbook/references/basic.md)
 
 ---
 
