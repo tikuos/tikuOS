@@ -276,11 +276,11 @@
 /* APP CONFIGURATION                                                        */
 /*---------------------------------------------------------------------------*/
 
-#if defined(HAS_APPS)
-#include <apps/tiku_app_config.h>
-#else
+/* The application firmware layer (formerly the in-tree apps/ dir with its
+ * tiku_app_config.h) now lives out-of-tree in the TikuBench harness.  The old
+ * config header only ever defined this master switch off, so core defines it
+ * directly — no app selection is compiled into the kernel itself. */
 #define TIKU_APPS_ENABLE 0
-#endif
 
 /*---------------------------------------------------------------------------*/
 /* MUTUAL EXCLUSION: only one of tests, examples, apps may be active         */

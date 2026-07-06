@@ -277,6 +277,15 @@ BUILD_DIR = build/$(MCU)
 # ---------------------------------------------------------------------------
 APP ?=
 
+# App firmware sources (formerly the in-tree apps/ dir) now live OUT of core
+# tikuOS, in the TikuBench harness.  The build that drives `make APP=net` or
+# `TIKU_TURBO_BENCH=1` passes their location in via TIKU_APP_DIR (TikuBench
+# exports it from tikubench/__init__.py; it may also be given on the make
+# line).  Empty by default, so a bare `make APP=net` with no harness fails
+# loudly (see the guard in the Apps section) instead of silently missing the
+# source file.
+TIKU_APP_DIR ?=
+
 # ---------------------------------------------------------------------------
 # Shell service (kernel service — orthogonal to APP/tests/examples)
 #   make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969   — build with shell
@@ -1613,8 +1622,16 @@ CFLAGS += -DTIKU_APP_CLI=1
 endif
 
 ifeq ($(APP),net)
+# The net app source lives in the TikuBench harness (see TIKU_APP_DIR above).
+# Guard against a missing path so the failure is legible; exempt `clean`,
+# which parses this block but compiles nothing.
+ifeq ($(strip $(TIKU_APP_DIR)),)
+ifeq ($(filter clean,$(MAKECMDGOALS)),)
+$(error APP=net needs TIKU_APP_DIR=<dir containing net/tiku_app_net.c>; the app firmware lives in the TikuBench harness now, not core tikuOS)
+endif
+endif
 CFLAGS += -DTIKU_APP_NET=1
-SRCS += apps/net/tiku_app_net.c
+SRCS += $(TIKU_APP_DIR)/net/tiku_app_net.c
 # CoAP client/server (library + demo process) lives in tikukits/net/coap/.
 # Pull it in and define TIKU_KITS_NET_COAP so the net app starts the CoAP
 # server process; the C side #if's its use on the same flag.
@@ -1653,11 +1670,17 @@ endif
 # add the benchmark source (after the SRCS=main.c reset, so it sticks); main.c
 # calls turbo_bench_run() then halts. kernel/ is untouched.
 ifeq ($(TIKU_TURBO_BENCH),1)
+# The benchmark firmware source lives in the TikuBench harness (TIKU_APP_DIR).
+ifeq ($(strip $(TIKU_APP_DIR)),)
+ifeq ($(filter clean,$(MAKECMDGOALS)),)
+$(error TIKU_TURBO_BENCH=1 needs TIKU_APP_DIR=<dir containing turbo_bench/turbo_bench.c>; the benchmark firmware lives in the TikuBench harness now)
+endif
+endif
 CFLAGS += -DTIKU_TURBO_BENCH=1
 TIKU_KIT_CRYPTO_ENABLE := 1
 TIKU_KIT_MATHS_ENABLE  := 1
 TIKU_KIT_ML_ENABLE     := 1
-SRCS   += apps/turbo_bench/turbo_bench.c
+SRCS   += $(TIKU_APP_DIR)/turbo_bench/turbo_bench.c
 endif
 
 ifeq ($(HAS_TIKUKITS),1)
