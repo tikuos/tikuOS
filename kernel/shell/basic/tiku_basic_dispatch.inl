@@ -288,7 +288,8 @@ exec_stmt(const char **p)
     if (match_kw(p, "LED"))      { exec_led(p);      return; }
 #endif
 #if TIKU_BASIC_VFS_ENABLE
-    if (match_kw(p, "VFSWRITE")) { exec_vfswrite(p); return; }
+    if (match_kw(p, "VFSWRITE$")) { exec_vfswrite_str(p); return; }
+    if (match_kw(p, "VFSWRITE"))  { exec_vfswrite(p);     return; }
 #endif
 #if TIKU_BASIC_RTC_ENABLE
     if (match_kw(p, "SETTIME"))  { exec_settime(p);  return; }

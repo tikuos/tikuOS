@@ -904,7 +904,8 @@ parse_strprim(const char **p, char *out, size_t cap)
         n = tiku_vfs_read(path, out, cap - 1u);
         if (n < 0) {
             basic_error = 1;
-            SHELL_PRINTF(SH_RED "? VFS read failed: %s\n" SH_RST, path);
+            SHELL_PRINTF(SH_RED "? VFS read failed: %s (%s)\n" SH_RST,
+                         path, tiku_vfs_strerror(n));
             return -1;
         }
         if ((size_t)n >= cap) n = (int)cap - 1;

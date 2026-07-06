@@ -206,7 +206,7 @@ process_line(const char *raw)
 #define BASIC_HELP_LED        ""
 #endif
 #if TIKU_BASIC_VFS_ENABLE
-#define BASIC_HELP_VFS_STMT   " VFSWRITE"
+#define BASIC_HELP_VFS_STMT   " VFSWRITE VFSWRITE$"
 #define BASIC_HELP_VFS_FN     " VFSREAD VFSREAD$"
 #else
 #define BASIC_HELP_VFS_STMT   ""

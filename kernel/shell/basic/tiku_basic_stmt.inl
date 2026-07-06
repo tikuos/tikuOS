@@ -1114,6 +1114,31 @@ exec_vfswrite(const char **p)
     }
 }
 
+/* VFSWRITE$ "path", str$ -- write a STRING value to a VFS node.  Pairs with
+ * VFSREAD$ for text nodes (/sys/device/name, /data files, ...); unlike
+ * VFSWRITE (which renders an integer) the string is written verbatim. */
+static void
+exec_vfswrite_str(const char **p)
+{
+    char path[48];
+    char val[TIKU_BASIC_STR_BUF_CAP];
+    int  rc;
+
+    if (parse_path_literal(p, path, sizeof(path)) != 0) return;
+    skip_ws(p);
+    if (**p != ',') {
+        basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return;
+    }
+    (*p)++;
+    if (parse_strexpr(p, val, sizeof(val)) != 0) return;
+    rc = tiku_vfs_write(path, val, strlen(val));
+    if (rc < 0) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? VFS write failed: %s (%s)\n" SH_RST,
+                     path, tiku_vfs_strerror(rc));
+    }
+}
+
 /* VFSREAD("path") -- read the node, parse the leading integer (decimal
  * or 0x-prefixed hex via strtol base 0), return as long. Trims trailing
  * whitespace so paths whose values include a newline don't trip the
