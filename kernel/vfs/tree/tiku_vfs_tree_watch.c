@@ -189,6 +189,23 @@ vfs_depth_read(char *buf, size_t max)
     return snprintf(buf, max, "%u\n", (unsigned)tiku_vfs_depth());
 }
 
+/**
+ * @brief Read handler for /sys/vfs/manifest.
+ *
+ * Dumps the whole static namespace as a machine-readable, tab-separated table
+ * (see tiku_vfs_manifest()) so an agent discovers every node -- path, type,
+ * perms, and type descriptor -- in a single read.
+ *
+ * @param buf  Output buffer
+ * @param max  Buffer capacity
+ * @return Total manifest length (snprintf-style; >= max means truncated)
+ */
+static int
+vfs_manifest_read(char *buf, size_t max)
+{
+    return tiku_vfs_manifest(buf, max);
+}
+
 /*---------------------------------------------------------------------------*/
 /* /sys/vfs/cache/{used,hits,misses} — freshness-cache observability         */
 /*---------------------------------------------------------------------------*/
@@ -261,9 +278,10 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
  * entry count travels as TIKU_VFS_TREE_VFS_NCHILD.
  */
 const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
-    { "nodes", TIKU_VFS_FILE, vfs_nodes_read, NULL, NULL, 0 },
-    { "depth", TIKU_VFS_FILE, vfs_depth_read, NULL, NULL, 0 },
-    { "cache", TIKU_VFS_DIR,  NULL, NULL, vfs_cache_children,
+    { "nodes",    TIKU_VFS_FILE, vfs_nodes_read,    NULL, NULL, 0 },
+    { "depth",    TIKU_VFS_FILE, vfs_depth_read,    NULL, NULL, 0 },
+    { "manifest", TIKU_VFS_FILE, vfs_manifest_read, NULL, NULL, 0 },
+    { "cache",    TIKU_VFS_DIR,  NULL, NULL, vfs_cache_children,
       sizeof(vfs_cache_children) / sizeof(vfs_cache_children[0]) },
 };
 

@@ -565,4 +565,19 @@ uint16_t tiku_vfs_count(void);
  */
 uint8_t tiku_vfs_depth(void);
 
+/**
+ * @brief Render the whole static namespace as a machine-readable manifest.
+ *
+ * One tab-separated line per node so an agent learns the device in a single
+ * read: `path  type  perms  vtype  unit  fresh  cost  range` (preceded by a
+ * `#`-prefixed header row).  Dynamic-directory children (e.g. /data files) are
+ * not walked -- capability metadata only.  snprintf-style: returns the FULL
+ * length, so a return >= @p max means the manifest was truncated.
+ *
+ * @param buf  Output buffer
+ * @param max  Buffer capacity
+ * @return Total manifest length in bytes (may exceed @p max on truncation)
+ */
+int tiku_vfs_manifest(char *buf, size_t max);
+
 #endif /* TIKU_VFS_H_ */

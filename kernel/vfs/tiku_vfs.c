@@ -1155,3 +1155,119 @@ uint8_t tiku_vfs_depth(void)
 {
     return (vfs_root != NULL) ? depth_rec(vfs_root) : 0;
 }
+
+/*---------------------------------------------------------------------------*/
+/* MANIFEST — one-read, machine-readable dump of the static namespace        */
+/*---------------------------------------------------------------------------*/
+/*
+ * Render every static node as one tab-separated line so an external agent can
+ * learn the device's capabilities in a single read instead of walking it with
+ * ls/cat.  Four tab-separated columns:  path  type  perms  meta
+ * (type = d|f; perms = rw|r-|-w|--; meta is "-" for an untyped node, else the
+ * packed descriptor "vtype,unit,fresh,cost[,lo..hi]").  Dynamic directories
+ * (/data) are
+ * listed but their runtime children are NOT walked -- those are data, not
+ * capability metadata (use `ls` for them).  Only node metadata is touched, so
+ * a manifest read costs nothing and never samples a live sensor.
+ */
+typedef struct {
+    char  *out;
+    size_t max;
+    size_t off;   /* running length; may exceed max (snprintf-style truncation) */
+} vfs_manifest_sink_t;
+
+static void manifest_line(vfs_manifest_sink_t *s, const char *path,
+                          const tiku_vfs_node_t *n)
+{
+    const tiku_vfs_desc_t *d = n->desc;
+    const char *perm = (n->read && n->write) ? "rw"
+                     : n->read               ? "r-"
+                     : n->write              ? "-w"
+                     :                         "--";
+    char   meta[48];   /* packed descriptor: "vtype,unit,fresh,cost[,lo..hi]" */
+    size_t room = (s->off < s->max) ? (s->max - s->off) : 0u;
+    char  *dst  = s->out + ((s->off < s->max) ? s->off : s->max);
+    int    m;
+
+    /* Pack the descriptor into one field so untyped nodes (the majority) cost
+     * a single "-" instead of five columns -- keeps the whole manifest inside a
+     * typical read buffer. */
+    if (d == NULL) {
+        meta[0] = '-';
+        meta[1] = '\0';
+    } else if (d->flags & TIKU_VFS_DF_RANGE) {
+        (void)snprintf(meta, sizeof meta, "%s,%s,%s,%s,%ld..%ld",
+                       VFS_NAME_OF(vfs_vtype_names, d->vtype),
+                       VFS_NAME_OF(vfs_unit_names,  d->unit),
+                       VFS_NAME_OF(vfs_fresh_names, d->fresh),
+                       VFS_NAME_OF(vfs_ecost_names, d->ecost),
+                       (long)d->vmin, (long)d->vmax);
+    } else {
+        (void)snprintf(meta, sizeof meta, "%s,%s,%s,%s",
+                       VFS_NAME_OF(vfs_vtype_names, d->vtype),
+                       VFS_NAME_OF(vfs_unit_names,  d->unit),
+                       VFS_NAME_OF(vfs_fresh_names, d->fresh),
+                       VFS_NAME_OF(vfs_ecost_names, d->ecost));
+    }
+
+    m = snprintf(dst, room, "%s\t%c\t%s\t%s\n",
+                 path, (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm, meta);
+    if (m > 0) {
+        s->off += (size_t)m;
+    }
+}
+
+static void manifest_rec(vfs_manifest_sink_t *s, const tiku_vfs_node_t *node,
+                         char *path, size_t pathcap, size_t pathlen)
+{
+    uint8_t i;
+
+    if (node->children == NULL) {
+        return;   /* leaf, or a dynamic dir: nothing static to descend */
+    }
+    for (i = 0; i < node->child_count; i++) {
+        const tiku_vfs_node_t *c = &node->children[i];
+        size_t nlen = strlen(c->name);
+        size_t clen = pathlen;
+
+        if (pathlen + 1u + nlen < pathcap) {           /* append "/name" */
+            path[pathlen] = '/';
+            memcpy(path + pathlen + 1u, c->name, nlen);
+            clen = pathlen + 1u + nlen;
+            path[clen] = '\0';
+        }
+        manifest_line(s, path, c);
+        if (c->type == TIKU_VFS_DIR && c->children != NULL) {
+            manifest_rec(s, c, path, pathcap, clen);
+        }
+        path[pathlen] = '\0';                          /* pop back */
+    }
+}
+
+int tiku_vfs_manifest(char *buf, size_t max)
+{
+    vfs_manifest_sink_t s;
+    char path[TIKU_VFS_PATH_MAX];
+    int  m;
+
+    s.out = buf;
+    s.max = max;
+    s.off = 0;
+    if (buf != NULL && max > 0u) {
+        buf[0] = '\0';
+    }
+    if (vfs_root == NULL) {
+        return 0;
+    }
+
+    /* Self-describing header row. */
+    m = snprintf(buf, max,
+                 "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])\n");
+    if (m > 0) {
+        s.off += (size_t)m;
+    }
+
+    path[0] = '\0';
+    manifest_rec(&s, vfs_root, path, sizeof path, 0u);
+    return (int)s.off;
+}
