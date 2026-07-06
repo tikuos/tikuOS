@@ -97,8 +97,15 @@
  * Default to Apollo510 ONLY when no device was selected: the device-select
  * router checks APOLLO510 first, so an unconditional default here would mask an
  * explicit -DTIKU_DEVICE_APOLLO4L and silently build the wrong device.
+ *
+ * The exclusion list must name every explicitly-selectable device, or the
+ * fallback fires alongside it and defines APOLLO510 too.  That is benign for
+ * Apollo510B (same M55 silicon -- it WANTS the APOLLO510 code paths) but wrong
+ * for the M4F Apollo4 Plus: it would pull Cortex-M55-only code (e.g. the
+ * ARMv8-M MPU diag) into an M4F build and fail to link.
  */
-#if !defined(TIKU_DEVICE_APOLLO510) && !defined(TIKU_DEVICE_APOLLO4L)
+#if !defined(TIKU_DEVICE_APOLLO510) && !defined(TIKU_DEVICE_APOLLO4L) && \
+    !defined(TIKU_DEVICE_APOLLO4P)
 #define TIKU_DEVICE_APOLLO510 1
 #endif
 
