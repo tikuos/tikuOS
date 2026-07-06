@@ -80,54 +80,17 @@ TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins,
   |_||_|_\_\\_,_|\___/|___/  v0.05
   Simple. Ubiquitous. Intelligence, Everywhere.
 
-  MSP430FR5969  |  SRAM 2048B  FRAM 64KB
+  Apollo510  |  SRAM 512KB  MRAM 4MB
   Type 'help' for commands.
 
 tikuOS> help
- --- System ---
-  help       Show available commands
-  info       Device, CPU, uptime, clock
-  free       Memory usage (SRAM/FRAM)
-  reboot     System reset
-  history    Last N commands from FRAM
-  calc       Integer arithmetic
-  clear      Clear screen (ANSI)
- --- Processes ---
-  ps         List active processes
-  start      Start/resume by name
-  kill       Stop a process (by pid)
-  resume     Resume a stopped process
-  queue      List pending events
-  timer      Software timer status
-  every      Schedule a recurring command
-  once       Schedule a one-shot command
-  jobs       List/delete scheduled jobs
-  on         Register a reactive rule
-  rules      List/delete reactive rules
- --- Filesystem ---
-  ls         List directory
-  tree       Recursive directory listing
-  cd         Change directory
-  pwd        Print working directory
-  read       Read a VFS node
-  watch      Read VFS node every N sec
-  changed    Block until VFS node changes
-  write      Write a VFS node
-  name       Read/set device name
-  irq        Enable/disable GPIO edge IRQ
-  alias      Define/list FRAM-backed aliases
-  unalias    Remove an alias
-  toggle     Flip a binary VFS node
-  cat        Read (alias)
-  echo       Print arguments + newline
- --- Hardware ---
-  gpio       Read/write GPIO pins
-  adc        Read analog channel
- --- Power ---
-  sleep      Set low-power idle mode
-  wake       Show active wake sources
- --- Boot ---
-  init       Manage FRAM boot entries
+ System     help  info  free  reboot  history  clear
+ Processes  ps  start  kill  every  once  on  rules
+ Files      ls  tree  cd  read  write  watch  name  alias
+ Hardware   gpio  adc
+ Power      sleep  wake
+ Boot       init
+ (38 commands total — run 'help' on the device for the full list)
 ```
 
 > :bulb: Opt-in extras (off by default; enable via `EXTRA_CFLAGS`): `if`
@@ -282,111 +245,13 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 ```
 
 ```
-tikuOS> cat /sys/version
-0.05
-
 tikuOS> cat /sys/device/mcu
-MSP430FR5969
-
-tikuOS> cat /sys/device/name
-tiku
-
-tikuOS> cat /sys/mem/free
-752
-
-tikuOS> cat /sys/timer/fired
-1862
-
-tikuOS> cat /sys/timer/list/0
-evt rem=6 int=6
-
-tikuOS> cat /sys/watchdog/mode
-watchdog
-tikuOS> write /sys/watchdog/interval 8192
-tikuOS> cat /sys/watchdog/interval
-8192
-
-tikuOS> cat /sys/boot/reason
-rstnmi
-tikuOS> cat /sys/boot/rstiv
-0x0004
-tikuOS> cat /sys/boot/stage
-complete
-tikuOS> cat /sys/boot/clock/mclk
-8000000
-tikuOS> cat /sys/boot/clock/fault
-0
-tikuOS> cat /sys/boot/mpu/violations
-0x00
-
-tikuOS> cat /sys/sched/idle
-0
-
-tikuOS> cat /dev/uart/baud
-115200
-
-tikuOS> cat /dev/gpio_dir/1
-OOOOOOOO
-
-tikuOS> write /dev/console hello
-tikuOS> write /dev/null anything
-
-tikuOS> cat /proc/0/name
-Shell
-
-tikuOS> cat /proc/0/wake_count
-2063
-
-tikuOS> cat /proc/queue/space
-31
-
-tikuOS> ls /dev
-  led0
-  led1
-  console
-  null
-  zero
-  gpio/
-  gpio_dir/
-  uart/
-  adc/
-  i2c/
-  spi/
+Apollo510
 
 tikuOS> write /dev/led0 1
 
-tikuOS> cat /sys/cpu/freq
-8000000
-```
-
----
-
-## Minimal Example
-
-```c
-#include "tiku.h"
-
-TIKU_PROCESS(blink_process, "Blink");
-
-static struct tiku_timer timer;
-
-TIKU_PROCESS_THREAD(blink_process, ev, data)
-{
-    TIKU_PROCESS_BEGIN();
-
-    tiku_common_led1_init();
-    tiku_timer_set_event(&timer, TIKU_CLOCK_SECOND);
-
-    while (1) {
-        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
-        tiku_common_led1_toggle();
-        tiku_timer_reset(&timer);
-    }
-
-    TIKU_PROCESS_END();
-}
-
-TIKU_AUTOSTART_PROCESSES(&blink_process);
+tikuOS> cat /proc/0/name
+Shell
 ```
 
 ---
