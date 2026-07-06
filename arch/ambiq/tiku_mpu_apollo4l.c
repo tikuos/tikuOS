@@ -164,8 +164,6 @@ void tiku_mpu_arch_init_segments(void) {
     /* Region 0: 2 MB of MRAM at 0x0 -- read-only + executable (code/rodata).
      * Normal, non-cacheable (TEX=1,C=0,B=0); the core has no L1 cache and the
      * system cache is left off at bring-up. */
-    mpu_set_nvm_ap(1U /* RO: locked by default */);
-
     ARM_MPU_SetRegion(
         ARM_MPU_RBAR(MPU_REGION_CODE, MPU_CODE_BASE),
         ARM_MPU_RASR(0U /* exec */, ARM_MPU_AP_RO, 1U, 0U, 0U, 0U, 0U,
@@ -193,7 +191,16 @@ void tiku_mpu_arch_init_segments(void) {
                          ARM_MPU_REGION_SIZE_32B));
     }
 
-    for (r = 3U; r < 8U; r++) {
+    /* Region 3: .uninit (8 KB) read-only by default -- the persist cells' real
+     * W^X protection; flips RW only inside unlock_nvm()/lock_nvm() windows.
+     * Armed AFTER regions 0-2 so the clear loop below cannot wipe it. */
+    mpu_set_nvm_ap(1U /* RO: locked by default */);
+
+    /* Clear the unused region slots 4-7 ONLY. Region 3 is the .uninit envelope
+     * just armed; the old loop started at r=3 and disabled it one line later,
+     * leaving cells writable from MPU-enable until the first NVM window happened
+     * to re-arm region 3 -- a boot-window W^X gap. Start at 4 to keep it. */
+    for (r = 4U; r < 8U; r++) {
         ARM_MPU_ClrRegion(r);
     }
 
@@ -247,10 +254,18 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
  * getter).
  */
 uint8_t tiku_mpu_arch_nvm_region_ro(void) {
-    uint32_t ap;
+    uint32_t rasr, ap;
     MPU->RNR = MPU_REGION_NVM;
     __DSB();
-    ap = (MPU->RASR >> MPU_RASR_AP_Pos) & 0x7U;
+    rasr = MPU->RASR;
+    /* A disabled region protects nothing -- report not-RO, so a wiped region 3
+     * (RASR=0 => AP=0, which is NOT AP_FULL) cannot masquerade as read-only.
+     * This is what lets the "RO immediately after init" test catch a clear that
+     * disables the .uninit envelope. */
+    if ((rasr & MPU_RASR_ENABLE_Msk) == 0U) {
+        return 0u;
+    }
+    ap = (rasr >> MPU_RASR_AP_Pos) & 0x7U;
     return (ap == ARM_MPU_AP_FULL) ? 0u : 1u;
 }
 

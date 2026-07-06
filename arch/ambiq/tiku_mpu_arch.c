@@ -453,7 +453,12 @@ void tiku_mpu_arch_diag_read(uint32_t *count, uint32_t *addr,
 uint8_t tiku_mpu_arch_nvm_region_ro(void) {
     MPU->RNR = MPU_REGION_NVM;
     __DSB();
-    /* ARMv8-M RBAR.AP[2:1]: bit2 set = read-only (either privilege). */
+    /* A disabled region protects nothing (RLAR.EN, bit 0) -- so a cleared
+     * region can't masquerade as read-only, mirroring the M4F reader. Then
+     * RBAR.AP[2:1] bit2 set = read-only (either privilege). */
+    if ((MPU->RLAR & MPU_RLAR_EN_Msk) == 0U) {
+        return 0u;
+    }
     return ((MPU->RBAR & (2U << 1)) != 0U) ? 1u : 0u;
 }
 
