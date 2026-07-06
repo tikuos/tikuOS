@@ -362,12 +362,15 @@ mem_free_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/used.
  *
- * Renders the sum of every registered process's sram_used
- * accounting field as a decimal line.  This measures what
- * processes *declared* through the proc-mem API, not actual SRAM
- * consumption — kernel statics and the stack are not included.
- * Walks the registry by pid; empty slots return NULL from
- * tiku_process_get() and are skipped.
+ * Renders the sum of every registered process's SRAM use as a decimal
+ * line: each process's declared proc-mem footprint plus its measured
+ * live allocation (e.g. the BASIC arena), via tiku_process_sram_used().
+ * Kernel statics and the stack are not included.  Walks the registry by
+ * pid; empty slots return NULL from tiku_process_get() and are skipped.
+ *
+ * The accumulator is 32-bit: tiku_process_sram_used() returns a uint32_t
+ * (a BASIC arena alone is hundreds of KB on the big-RAM parts), so a
+ * 16-bit sum here would wrap modulo 65536 and under-report.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -376,7 +379,7 @@ mem_free_read(char *buf, size_t max)
 static int
 mem_used_read(char *buf, size_t max)
 {
-    uint16_t total = 0;
+    uint32_t total = 0;
     uint8_t i;
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {
         struct tiku_process *p = tiku_process_get((int8_t)i);

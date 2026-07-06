@@ -320,17 +320,21 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
 
     SHELL_PRINTF(SH_CYAN "--- Processes (%u/%u) ---" SH_RST "\n",
                  proc_count, TIKU_PROCESS_MAX);
-    SHELL_PRINTF(" pid  %-10s  sram  fram  state\n", "name");
+    SHELL_PRINTF(" pid  %-10s    sram    fram  state\n", "name");
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {
         struct tiku_process *p = tiku_process_get((int8_t)i);
         if (p == NULL) {
             continue;
         }
-        SHELL_PRINTF(" %3d  %-10s  %4u  %4u  %s\n",
+        /* Declared proc-mem footprint PLUS measured live allocation (e.g. the
+         * BASIC arena), via the same helpers ps / /proc use -- so `free` no
+         * longer shows a process as ~0 while ps reports its real footprint.
+         * uint32_t values (a BASIC arena is hundreds of KB), hence %6lu. */
+        SHELL_PRINTF(" %3d  %-10s  %6lu  %6lu  %s\n",
                      p->pid,
                      p->name ? p->name : "?",
-                     p->sram_used,
-                     p->fram_used,
+                     (unsigned long)tiku_process_sram_used(p),
+                     (unsigned long)tiku_process_fram_used(p),
                      tiku_process_state_str(p->state));
     }
 }
