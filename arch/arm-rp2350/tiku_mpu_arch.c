@@ -217,8 +217,20 @@ static volatile struct tiku_mpu_diag mpu_diag;
  *  Enlarge MPU_STACK_RESERVED_BYTES if a profiling run shows the guard is
  *  being approached.
  */
-#define MPU_STACK_RESERVED_BYTES   8192U
-#define MPU_STACK_GUARD_BYTES      32U
+/* Stack budget + guard sizing.  8 KB + a 32-byte guard proved wrong on
+ * two counts (found by Tiku BASIC's string parser, July 2026): the
+ * parser's KB-sized frames (1 KB string buffers, two recursion levels)
+ * legitimately reach ~10 KB of stack, and a 32-byte guard is LEAPT by
+ * KB-sized frame allocations -- SP lands below the guard without ever
+ * touching it, execution continues in SRAM_MID, and only a stray local
+ * that happens to fall inside the 32-byte window faults (BASIC's
+ * PRINT LEFT$(A$,3) stored is_str at 0x2007fff8 -> MemManage -> reset
+ * loop).  32 KB covers the deepest realistic BASIC nesting (~24 KB)
+ * with margin; a 4 KB guard cannot be jumped by any frame smaller than
+ * 4 KB, which bounds every frame in the tree today.  Update the copies
+ * in TikuBench tests/memory/test_mem_mpu.c in lockstep. */
+#define MPU_STACK_RESERVED_BYTES   32768U
+#define MPU_STACK_GUARD_BYTES      4096U
 
 /**
  * @brief Issue a full DSB + ISB memory barrier pair.
