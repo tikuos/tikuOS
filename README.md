@@ -93,16 +93,6 @@ tikuOS> help
  (38 commands total — run 'help' on the device for the full list)
 ```
 
-> :bulb: Opt-in extras (off by default; enable via `EXTRA_CFLAGS`): `if`
-> (conditional), `i2c` (bus scan/read/write), `delay`, `repeat`, `peek`,
-> `poke`. See `kernel/shell/tiku_shell_config.h` for the full list and
-> rationale (each has a FRAM cost on FR5969).
->
-> :bulb: `basic` (Tiku BASIC interpreter REPL) is its own opt-in via
-> `TIKU_SHELL_BASIC_ENABLE=1`.
-
-> :art: Build with `TIKU_SHELL_COLOR=1` for ANSI colored output (cyan logo, green prompt, categorized help). Add a screenshot from picocom here.
-
 ---
 
 ### :wrench: Hardware Debugging from the Shell
