@@ -397,6 +397,19 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
 uint8_t tiku_process_run(void);
 
 /**
+ * @brief Run the scheduler, but never re-enter @p skip.
+ *
+ * Like tiku_process_run() but events for @p skip are consumed without
+ * dispatch — for a long synchronous op running inside @p skip's own dispatch
+ * that wants to keep the rest of the kernel live without recursing into its
+ * own protothread.  @p skip == NULL behaves like tiku_process_run().
+ *
+ * @param skip Process not to dispatch (typically TIKU_THIS())
+ * @return 1 if an event was dequeued, 0 if idle
+ */
+uint8_t tiku_process_run_except(const struct tiku_process *skip);
+
+/**
  * @brief Request a process to be polled
  *
  * Marks a process for polling. The process will receive a

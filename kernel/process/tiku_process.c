@@ -451,6 +451,63 @@ uint8_t tiku_process_run(void)
     return 1;
 }
 
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Dispatch one queued event, but never re-enter @p skip.
+ *
+ * Identical to tiku_process_run() except events destined for @p skip are
+ * consumed without dispatch (and @p skip is left out of a broadcast fan-out).
+ * The one use is a synchronous, long-running op running INSIDE @p skip's own
+ * dispatch (e.g. BASIC's blocking HTTPGET$ while it drives a crypto worker):
+ * it may pump the rest of the kernel's processes so timers and rules keep
+ * firing, but must not recursively re-enter its own protothread, whose saved
+ * PT state points at the last yield, not the deep C call it is parked in.
+ * Directed events to @p skip during that window are dropped (a POLL
+ * regenerates; the caller is by definition already awake and running).
+ *
+ * @param skip Process not to dispatch (typically TIKU_THIS()); NULL == plain run
+ * @return 1 if an event was dequeued (dispatched or skipped), 0 if queue empty
+ */
+uint8_t tiku_process_run_except(const struct tiku_process *skip)
+{
+    tiku_event_t ev;
+    tiku_event_data_t data;
+    struct tiku_process *receiver;
+
+    tiku_atomic_enter();
+
+    if (q_len == 0) {
+        tiku_atomic_exit();
+        return 0;
+    }
+
+    ev = queue[q_head].ev;
+    data = queue[q_head].data;
+    receiver = queue[q_head].p;
+    q_head = (q_head + 1) % TIKU_QUEUE_SIZE;
+    q_len--;
+
+    tiku_atomic_exit();
+
+    if (receiver == skip) {
+        return 1;                        /* consume without re-entering skip */
+    }
+    if (receiver == TIKU_PROCESS_BROADCAST) {
+        struct tiku_process *p, *next;
+        for (p = tiku_process_list_head; p != NULL; p = next) {
+            next = p->next;
+            if (p != skip) {
+                call_process(p, ev, data);
+            }
+        }
+    } else {
+        call_process(receiver, ev, data);
+    }
+
+    return 1;
+}
+
 /**
  * @brief Request a process to be polled
  *

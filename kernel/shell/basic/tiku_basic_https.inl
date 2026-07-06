@@ -293,6 +293,98 @@ basic_tls_stage_str(int s)
     }
 }
 
+/* --------------------------------------------------------------------------
+ * Heavy-crypto offload onto a worker thread (threads phase-1).
+ *
+ * The handshake's CPU-bound public-key ops (ECDHE, CertVerify, cert-chain
+ * verify) used to run inline on the shell thread -- tens to hundreds of ms
+ * each during which NOTHING pumped the net (the peer could RST -- the
+ * apollo510 half-fail class) and no kernel timer or rule was serviced.  When
+ * worker threads are available we install io.offload: the handshake runs each
+ * of those ops on ONE dedicated worker while this drive loop keeps the net
+ * pumped and dispatches the rest of the kernel's processes.  With threads off
+ * (or the knob cleared) io.offload stays NULL and the handshake is exactly as
+ * before -- the tikukits change is additive.
+ * ------------------------------------------------------------------------- */
+#ifndef TIKU_BASIC_HTTPS_OFFLOAD
+#  if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+#    define TIKU_BASIC_HTTPS_OFFLOAD 1
+#  else
+#    define TIKU_BASIC_HTTPS_OFFLOAD 0
+#  endif
+#endif
+
+#if TIKU_BASIC_HTTPS_OFFLOAD
+#include <kernel/threads/tiku_thread.h>
+#include <kernel/process/tiku_process.h>
+#include <hal/tiku_cpu.h>
+
+/* One dedicated crypto worker.  8 KB carries the cert-chain DER parse + the
+ * RSA/ECDSA verify call chain; the bignums live in the primitives' own static
+ * scratch, not on this stack. */
+TIKU_THREAD(basic_crypto_worker, 8192);
+
+static int  (* volatile basic_crypto_fn)(void *);
+static void *  volatile basic_crypto_arg;
+static volatile int      basic_crypto_rc;
+static volatile uint8_t  basic_crypto_busy;   /* crypto in flight -> no nesting */
+
+static void basic_crypto_worker_body(void *arg)
+{
+    (void)arg;
+    basic_crypto_rc = basic_crypto_fn(basic_crypto_arg);
+}
+
+/*
+ * io.offload: run @p fn (a pure handshake-crypto closure over connect()'s
+ * still-live stack) on the worker while keeping the kernel alive.  The drive
+ * loop mirrors the scheduler idle branch -- pump the net, dispatch every ready
+ * process EXCEPT our own (tiku_process_run_except so a queued shell event can't
+ * recursively re-enter this very command), then hand the CPU to the worker
+ * until an event wakes us.  tiku_current_process, which call_process() clears
+ * as it fans out, is restored before returning to the handshake.  Any failure
+ * to start the worker falls back to running @p fn inline -- byte-identical to
+ * the no-offload path -- so correctness never depends on the worker.
+ */
+static int basic_https_offload(int (*fn)(void *), void *arg)
+{
+    struct tiku_process *owner = tiku_current_process;
+    tiku_clock_time_t dl;
+
+    if (basic_crypto_busy) {         /* non-reentrant primitives: never overlap */
+        return fn(arg);
+    }
+    basic_crypto_fn  = fn;
+    basic_crypto_arg = arg;
+    basic_crypto_rc  = 0;
+    basic_crypto_busy = 1;
+
+    if (tiku_thread_start(&basic_crypto_worker,
+                          basic_crypto_worker_body, 0) != 0) {
+        basic_crypto_busy = 0;
+        return fn(arg);              /* worker unavailable -> inline, identical */
+    }
+
+    dl = BASIC_HTTPS_DEADLINE();
+    while (basic_crypto_worker.state != TIKU_THREAD_DONE) {
+        basic_https_pump();                          /* net + WDT stay alive  */
+        while (tiku_process_run_except(owner)) { }   /* others' timers/rules  */
+        tiku_atomic_enter();
+        if (tiku_process_queue_empty() && tiku_thread_worker_ready()) {
+            tiku_thread_kernel_block();               /* CPU -> the crypto     */
+        }
+        tiku_atomic_exit();
+        if (BASIC_HTTPS_EXPIRED(dl)) {                /* safety: never wedge   */
+            break;
+        }
+    }
+
+    tiku_current_process = owner;    /* the drain cleared it via call_process  */
+    basic_crypto_busy = 0;
+    return basic_crypto_rc;
+}
+#endif /* TIKU_BASIC_HTTPS_OFFLOAD */
+
 static int
 basic_https_get(const char *method, const char *host, const char *path,
                 const char *body, const char *ctype, char *out, size_t cap)
@@ -309,6 +401,16 @@ basic_https_get(const char *method, const char *host, const char *path,
     static uint16_t src_seq = 49150;     /* fresh ephemeral port pair per call */
 
     basic_http_status = 0;
+#if TIKU_BASIC_HTTPS_OFFLOAD
+    /* Refuse a fetch triggered from a process the crypto drive loop dispatched
+     * (a rule/timer that fetches while another fetch's crypto is in flight):
+     * the crypto primitives are non-reentrant, so a nested handshake would
+     * corrupt the worker's in-flight state.  Serial fetches only. */
+    if (basic_crypto_busy) {
+        SHELL_PRINTF(SH_RED "? HTTPGET: busy (crypto in flight)\n" SH_RST);
+        return -1;
+    }
+#endif
     /* Advance the source port every call so a redirect refetch to the SAME
      * server IP (e.g. host -> www.host sharing one Cloudflare anycast IP)
      * doesn't reuse the just-closed connection's 4-tuple (TIME_WAIT) and get
@@ -368,6 +470,11 @@ basic_https_get(const char *method, const char *host, const char *path,
      * the WDT for recovery -- do NOT pause the WDT here (that makes a hang
      * unrecoverable). */
     io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
+#if TIKU_BASIC_HTTPS_OFFLOAD
+    io.offload = basic_https_offload;   /* run heavy crypto on the worker */
+#else
+    io.offload = NULL;                  /* inline (default portable path)  */
+#endif
     tiku_kits_crypto_tls13_dbg = basic_tls13_dbg;
     /* now_unix from the RTC: enforces cert validity windows once a clock is
      * set (NTP/SETTIME); 0 until then, which skips the date check.  Gate on
