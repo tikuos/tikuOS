@@ -753,25 +753,6 @@ CFLAGS += -DTIKU_DRV_BLE_EM9305_ENABLE=1 -DTIKU_SPI_IOM_ENABLE=1
 # chip -- a future BLE backend just sets this too.
 CFLAGS += -DTIKU_HAS_BLE=1
 endif
-# Preemptive worker threads -- opt-in, Cortex-M only. Thread 0 is the whole
-# existing cooperative kernel; workers are stackful compute threads confined
-# to the ISR-safe primitives (see kernel/threads/tiku_thread.h). Per-thread
-# stacks are impossible on a 2 KB MSP430, which stays cooperative AND
-# byte-identical (flag off = none of this compiles). The Ambiq backend is
-# device-proven first; the RP2350 port is the same Cortex-M switcher, gated
-# until it is bench-proven.
-ifeq ($(TIKU_THREADS_ENABLE),1)
-ifeq ($(TIKU_PLATFORM),msp430)
-$(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part (Ambiq); MSP430 \
-stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
-endif
-ifeq ($(filter apollo510 apollo510b,$(MCU)),)
-$(error TIKU_THREADS_ENABLE=1 is bench-proven on apollo510/apollo510b only \
-so far; the switcher is generic Cortex-M asm -- porting = compiling \
-arch/ambiq/tiku_thread_arch.c for the target and proving the torture suite)
-endif
-CFLAGS += -DTIKU_THREADS_ENABLE=1
-endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, VENDORED in-tree (arch/ambiq/cmsis/) so the build is
 # fully self-contained: it references nothing in temp/AmbiqSuite, only the MRAM
@@ -824,6 +805,33 @@ endif
 # across all platforms rather than churn ~150 initializers on each
 # future field addition.  -Wextra otherwise stays on.
 CFLAGS += -Wno-missing-field-initializers
+
+# Preemptive worker threads -- opt-in, Cortex-M only. Thread 0 is the whole
+# existing cooperative kernel; workers are stackful compute threads confined
+# to the ISR-safe primitives (see kernel/threads/tiku_thread.h). Per-thread
+# stacks are impossible on a 2 KB MSP430, which stays cooperative AND
+# byte-identical (flag off = none of this compiles). One generic Cortex-M
+# switcher (kernel/threads/tiku_thread_cortexm.inl) serves every part via a
+# per-platform PendSV shim.
+# COMMON SCOPE on purpose: this must sit AFTER the per-platform CFLAGS
+# blocks above (each starts with `CFLAGS = ...`), or the define only
+# reaches whichever branch hosts it -- it lived inside the Ambiq branch
+# once, and RP2350 builds silently compiled threads (and their tests)
+# to empty stubs: firmware booted, reported total=0, nothing ran.
+ifeq ($(TIKU_THREADS_ENABLE),1)
+ifeq ($(TIKU_PLATFORM),msp430)
+$(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part; MSP430 \
+stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
+endif
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350,$(MCU)),)
+$(error TIKU_THREADS_ENABLE=1 needs a supported Cortex-M part -- \
+apollo510/apollo510b (M55), apollo4l/apollo4p (M4F) or rp2350 (M33); \
+$(MCU) has no thread backend. The switcher is generic Cortex-M asm \
+(kernel/threads/tiku_thread_cortexm.inl); adding a part = a two-line shim \
+that names its PendSV vector symbol, plus proving the torture suite)
+endif
+CFLAGS += -DTIKU_THREADS_ENABLE=1
+endif
 
 # UART baud rate (default 9600; override: make UART_BAUD=115200)
 UART_BAUD ?=
@@ -1049,6 +1057,12 @@ SRCS += arch/arm-rp2350/tiku_pio_arch.c
 SRCS += arch/arm-rp2350/tiku_pwm_arch.c
 SRCS += arch/arm-rp2350/tiku_dma_arch.c
 SRCS += arch/arm-rp2350/tiku_trng_arch.c
+ifeq ($(TIKU_THREADS_ENABLE),1)
+# Cortex-M33 workers (core 0): the generic switcher via the RP2350 shim
+# (its strong tiku_rp2350_pendsv_handler overrides the crt weak alias).
+SRCS += kernel/threads/tiku_thread.c
+SRCS += arch/arm-rp2350/tiku_thread_arch.c
+endif
 
 # Console backend: add the native USB CDC stack for TIKU_CONSOLE=usb|both.
 ifeq ($(TIKU_CONSOLE),usb)
@@ -1102,6 +1116,12 @@ SRCS += arch/ambiq/tiku_region_apollo4l.c
 SRCS += arch/ambiq/tiku_nvm_region_apollo4l.c
 SRCS += arch/ambiq/tiku_gpio_apollo4l.c
 SRCS += arch/ambiq/tiku_adc_apollo4l.c
+ifeq ($(TIKU_THREADS_ENABLE),1)
+# Cortex-M4F workers: the generic switcher via the shared Ambiq shim
+# (its strong tiku_ambiq_pendsv_handler overrides the crt weak alias).
+SRCS += kernel/threads/tiku_thread.c
+SRCS += arch/ambiq/tiku_thread_arch.c
+endif
 else
 # Apollo510 (Cortex-M55) device/CPU backends.
 SRCS += arch/ambiq/tiku_adc_arch.c
