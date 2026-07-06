@@ -42,17 +42,6 @@
 ## Quick Start
 
 ```bash
-# --- MSP430 builds ---------------------------------------------------------
-make MCU=msp430fr5969
-make MCU=msp430fr6989 MEMORY_MODEL=large    # FR6989 needs large mode for HIFRAM
-make flash MCU=msp430fr5969
-make flash MCU=msp430fr6989 MEMORY_MODEL=large
-
-# Build with the Tiku BASIC interpreter (MSP430 needs large mode;
-# the Cortex-M parts, e.g. MCU=apollo510 / rp2350, do not)
-make flash MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
-           TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
-
 # --- Raspberry Pi Pico 2 W (RP2350) ----------------------------------------
 # Requires: arm-none-eabi-gcc + python3 (and optionally picotool).
 make MCU=rp2350                              # builds main.elf, main.bin, main.uf2
@@ -63,7 +52,7 @@ make flash MCU=rp2350                        # picotool, or copies UF2 to RPI-RP
 make MCU=apollo510                           # also apollo4l / apollo4p / apollo510b
 make flash MCU=apollo510                     # J-Link
 
-# Open serial monitor (RP2350 default baud is 115200; MSP430 is 9600)
+# Open serial monitor (default baud 115200)
 make monitor MCU=rp2350
 ```
 
@@ -71,7 +60,7 @@ make monitor MCU=rp2350
 
 ## :computer: Interactive Shell
 
-TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins, read sensors, manage processes, configure boot sequences, and inspect memory — **all without recompiling**. Build with `TIKU_SHELL_COLOR=1` for ANSI color output.
+TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins, read sensors, manage processes, configure boot sequences, and inspect memory — **all without recompiling**.
 
 ```
   ___ _ _         ___  ___
