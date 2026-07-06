@@ -27,8 +27,8 @@
  *   1  TEXT  MRAM __flash_start..end      RX            (code + rodata)
  *   2  SRAM  DTCM start..uninit_start     RW + XN       (.data/.bss/.mpu_diag)
  *   3  SRAM  uninit_end..stack_guard      RW + XN       (free middle)
- *   4  GUARD 32 B below the stack budget  RO + XN       (stack-overflow trip)
- *   5  SRAM  guard+32..__sram_end         RW + XN       (live stack)
+ *   4  GUARD 4 KB below the stack budget  RO + XN       (stack-overflow trip)
+ *   5  SRAM  guard+4K..__sram_end         RW + XN       (live stack)
  *   6  SSRAM 0x20080000 + 3 MB            RW + XN       (tier buffers, snapshot)
  * MAIR0[0] = Normal Write-Back R/W-allocate so the M55 L1 caches keep working
  * (RP2350 used Non-cacheable — it has no cache). PRIVDEFENA lets peripherals
@@ -150,7 +150,11 @@ static volatile struct tiku_mpu_diag mpu_diag;
  * @{
  */
 #define MPU_STACK_RESERVED_BYTES   32768U
-#define MPU_STACK_GUARD_BYTES      32U
+/* 4 KB, not 32 B: a stack-overflow frame is KB-sized (BASIC), so a narrow
+ * guard is LEAPT -- the descending SP skips the 32-byte hole and lands in
+ * .bss below without ever touching a guarded address (the RP2350 reset-loop
+ * class).  A guard at least as wide as the largest frame cannot be jumped. */
+#define MPU_STACK_GUARD_BYTES      4096U
 /** @} */
 
 /** @brief CFSR/MMFSR bit 7: MMFAR holds a valid fault address */
@@ -217,7 +221,7 @@ static void mpu_set_nvm(void) {
 }
 
 /**
- * @brief Compute the base address of the 32-byte stack-guard region
+ * @brief Compute the base address of the 4 KB stack-guard region
  *
  * Returns __sram_end minus the reserved stack budget minus the guard
  * size. The result is the base of the read-only trip region (MPU region
