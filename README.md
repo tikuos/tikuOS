@@ -106,8 +106,6 @@ Abat = 2048 (0x800)
 
 ### :bar_chart: Memory Introspection
 
-Real numbers from linker symbols and the stack pointer — not placeholders.
-
 ```
 tikuOS> free
 --- Compile-time ---
@@ -135,7 +133,7 @@ FRAM
 
 ### :open_file_folder: Virtual Filesystem
 
-A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths, just like a desktop operating system. No other MCU RTOS does this. The same `read`/`write` interface works for LEDs, sensors, timers, processes, and everything else.
+A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths. The same `read`/`write` interface works for LEDs, sensors, timers, processes, and everything else.
 
 ```
 /
