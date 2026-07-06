@@ -92,6 +92,24 @@ static uint32_t s_tenure_start;
 /** @brief Stack-canary violations seen at switch time. */
 static volatile uint16_t s_canary_faults;
 
+/**
+ * @brief Is worker @p t eligible for the CPU right now?
+ *
+ * READY and within its energy budget.  budget == 0 is unlimited (the
+ * default — every worker that never set a budget behaves exactly as
+ * before); otherwise the worker is eligible only while its accounted
+ * cycles stay below the ceiling.  This is the single enforcement point:
+ * both the switcher's pick loop and tiku_thread_worker_ready() consult
+ * it, so the switch and the scheduler always agree on who may run, and
+ * an over-budget worker is invisible to both until it is refilled.
+ */
+static int worker_runnable(const tiku_thread_t *t)
+{
+    return t != (const tiku_thread_t *)0 &&
+           t->state == TIKU_THREAD_READY &&
+           (t->budget == 0ull || t->cycles < t->budget);
+}
+
 /*---------------------------------------------------------------------------*/
 /* THE SWITCH (called from the PendSV switcher with IRQs implicitly          */
 /* serialised — PendSV is the lowest-priority exception)                     */
@@ -147,12 +165,13 @@ uint32_t *tiku_thread_switch(uint32_t *old_sp)
         }
     }
 
-    /* Pick the incoming context. */
+    /* Pick the incoming context: the next READY, in-budget worker from
+     * the round-robin cursor.  An exhausted worker is skipped here, so it
+     * silently loses its turn until a refill lifts it back over budget. */
     if (!s_kernel_ready) {
         for (i = 0; i < TIKU_THREADS_MAX; i++) {
             uint8_t idx = (uint8_t)((s_rr + i) % TIKU_THREADS_MAX);
-            if (s_threads[idx] != (tiku_thread_t *)0 &&
-                s_threads[idx]->state == TIKU_THREAD_READY) {
+            if (worker_runnable(s_threads[idx])) {
                 next = s_threads[idx];
                 break;
             }
@@ -283,12 +302,87 @@ int tiku_thread_worker_ready(void)
 {
     uint8_t i;
     for (i = 0; i < TIKU_THREADS_MAX; i++) {
-        if (s_threads[i] != (tiku_thread_t *)0 &&
-            s_threads[i]->state == TIKU_THREAD_READY) {
+        if (worker_runnable(s_threads[i])) {
             return 1;
         }
     }
     return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* ENERGY BUDGET                                                             */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * budget is a 64-bit field the PendSV switcher reads while picking the
+ * next worker; a two-store update could be torn by the switch, so every
+ * mutation runs under the PRIMASK atomic section (PendSV is an interrupt
+ * and cannot fire while it is masked).  cycles is written only by the
+ * switch itself, so the comparisons never race it.
+ */
+
+void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles)
+{
+    if (t == (tiku_thread_t *)0) {
+        return;
+    }
+    tiku_atomic_enter();
+    /* Ceiling = already-consumed + allowance.  Guard the one aliasing
+     * corner: a never-run worker (cycles == 0) granted 0 would land on
+     * budget == 0 and read as "unlimited" — force it to the parked side. */
+    t->budget = t->cycles + cycles;
+    if (t->budget == 0ull) {
+        t->budget = 1ull;
+    }
+    tiku_atomic_exit();
+}
+
+void tiku_thread_budget_refill(tiku_thread_t *t, unsigned long long cycles)
+{
+    if (t == (tiku_thread_t *)0) {
+        return;
+    }
+    tiku_atomic_enter();
+    if (t->budget != 0ull) {          /* only extend an already-enforced budget */
+        t->budget += cycles;
+    }
+    tiku_atomic_exit();
+}
+
+void tiku_thread_budget_unlimited(tiku_thread_t *t)
+{
+    if (t == (tiku_thread_t *)0) {
+        return;
+    }
+    tiku_atomic_enter();
+    t->budget = 0ull;
+    tiku_atomic_exit();
+}
+
+unsigned long long tiku_thread_budget_remaining(const tiku_thread_t *t)
+{
+    unsigned long long rem;
+    if (t == (const tiku_thread_t *)0) {
+        return ~0ull;
+    }
+    tiku_atomic_enter();
+    rem = (t->budget == 0ull)
+        ? ~0ull
+        : ((t->cycles < t->budget) ? (t->budget - t->cycles) : 0ull);
+    tiku_atomic_exit();
+    return rem;
+}
+
+int tiku_thread_budget_exhausted(const tiku_thread_t *t)
+{
+    int ex;
+    if (t == (const tiku_thread_t *)0) {
+        return 0;
+    }
+    tiku_atomic_enter();
+    ex = (t->budget != 0ull && t->cycles >= t->budget);
+    tiku_atomic_exit();
+    return ex;
 }
 
 uint16_t tiku_thread_canary_faults(void)

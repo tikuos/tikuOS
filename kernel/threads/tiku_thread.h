@@ -26,8 +26,8 @@
  *
  * The context switch accounts per-thread CPU cycles from the DWT
  * cycle counter at every switch — the substrate for energy-budgeted
- * scheduling (the budget field exists now; enforcement lands with the
- * energy work).
+ * scheduling: a worker given a non-zero cycle budget is parked once it
+ * spends it and stays parked until refilled (tiku_thread_budget_*).
  *
  * Opt-in via TIKU_THREADS_ENABLE=1 (Makefile; Cortex-M parts only —
  * per-thread stacks are noise on 384-520 KB parts and impossible on a
@@ -81,7 +81,7 @@ typedef enum {
  * stack pointer while the thread is off the CPU (the arch switcher's
  * software frame lives at *sp).  cycles accumulates DWT CPU cycles
  * across every occupancy — the energy-accounting substrate; budget is
- * carried now, enforced by the energy scheduler later.
+ * the cumulative-cycle ceiling the scheduler enforces (0 = unlimited).
  */
 typedef struct tiku_thread {
     uint32_t            *sp;          /**< Saved PSP (off-CPU)            */
@@ -92,7 +92,7 @@ typedef struct tiku_thread {
     volatile tiku_thread_state_t state;
     const char          *name;
     unsigned long long   cycles;      /**< DWT cycles consumed (total)    */
-    unsigned long long   budget;      /**< Energy budget hook (unenforced)*/
+    unsigned long long   budget;      /**< Cycle ceiling; 0 = unlimited   */
     uint16_t             switches;    /**< Times scheduled onto the CPU   */
 } tiku_thread_t;
 
@@ -173,6 +173,40 @@ uint16_t tiku_thread_canary_faults(void);
 
 /** Non-zero in kernel/boot context, zero inside a worker (any context). */
 int tiku_thread_in_kernel(void);
+
+/*---------------------------------------------------------------------------*/
+/* ENERGY BUDGET (cycle-quota enforcement)                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Grant @p t @p cycles of CPU run-time starting now.
+ *
+ * Sets a cumulative-cycle ceiling at (already-consumed + @p cycles): the
+ * worker is scheduled until its accounted cycles reach the ceiling, then
+ * parked until refilled or cleared.  Enforcement is at context-switch
+ * boundaries, so a worker overruns its grant by at most one tenure (one
+ * tick's worth of cycles) before it is parked.  A grant of 0 parks the
+ * worker at once.
+ */
+void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles);
+
+/**
+ * @brief Add @p cycles to @p t's ceiling (refill / periodic top-up).
+ *
+ * Extends the runway; if the worker was exhausted this re-enables it for
+ * @p cycles more.  Deliberately a no-op on an unlimited (budget == 0)
+ * worker — grant a budget first to begin enforcing.
+ */
+void tiku_thread_budget_refill(tiku_thread_t *t, unsigned long long cycles);
+
+/** @brief Clear @p t's budget: unlimited, never parked for cycles (default). */
+void tiku_thread_budget_unlimited(tiku_thread_t *t);
+
+/** @brief Cycles @p t may still run before exhaustion (~0 if unlimited). */
+unsigned long long tiku_thread_budget_remaining(const tiku_thread_t *t);
+
+/** @brief Non-zero if @p t is budgeted and has spent its allowance. */
+int tiku_thread_budget_exhausted(const tiku_thread_t *t);
 
 /*---------------------------------------------------------------------------*/
 /* KERNEL-INTERNAL (scheduler / event-queue hooks)                           */
