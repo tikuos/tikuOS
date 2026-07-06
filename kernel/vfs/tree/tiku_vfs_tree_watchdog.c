@@ -83,17 +83,36 @@ watchdog_mode_read(char *buf, size_t max)
  * @param len  Input length in bytes (unused — first byte decides)
  * @return 0 on success, -1 on unrecognised input
  */
+/* True iff the leading token of @buf (up to len, a NUL, or whitespace) is
+ * exactly @tok.  Lets the mode/clock writes accept a full word ("watchdog",
+ * "aclk") or its one-letter shorthand ("w", "a") while rejecting anything
+ * else -- so a stray "watermelon" no longer silently arms watchdog mode. */
+static int
+wdt_token_is(const char *buf, size_t len, const char *tok)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        char c = buf[i];
+        if (c == '\0' || c == '\n' || c == '\r' || c == ' ' || c == '\t') {
+            break;                 /* end of the input token */
+        }
+        if (tok[i] == '\0' || c != tok[i]) {
+            return 0;              /* diverged, or input longer than tok */
+        }
+    }
+    return tok[i] == '\0';         /* matched iff all of tok was consumed */
+}
+
 static int
 watchdog_mode_write(const char *buf, size_t len)
 {
-    (void)len;
     tiku_wdt_mode_t mode;
-    if (buf[0] == 'w') {
+    if (wdt_token_is(buf, len, "watchdog") || wdt_token_is(buf, len, "w")) {
         mode = TIKU_WDT_MODE_WATCHDOG;
-    } else if (buf[0] == 'i') {
+    } else if (wdt_token_is(buf, len, "interval") || wdt_token_is(buf, len, "i")) {
         mode = TIKU_WDT_MODE_INTERVAL;
     } else {
-        return -1;
+        return TIKU_VFS_EINVAL;
     }
     tiku_watchdog_config(mode, tiku_watchdog_get_clk(),
                          tiku_watchdog_get_interval(), 0, 1);
@@ -139,14 +158,13 @@ watchdog_clock_read(char *buf, size_t max)
 static int
 watchdog_clock_write(const char *buf, size_t len)
 {
-    (void)len;
     tiku_wdt_clk_t clk;
-    if (buf[0] == 'a') {
+    if (wdt_token_is(buf, len, "aclk") || wdt_token_is(buf, len, "a")) {
         clk = TIKU_WDT_SRC_ACLK;
-    } else if (buf[0] == 's') {
+    } else if (wdt_token_is(buf, len, "smclk") || wdt_token_is(buf, len, "s")) {
         clk = TIKU_WDT_SRC_SMCLK;
     } else {
-        return -1;
+        return TIKU_VFS_EINVAL;
     }
     tiku_watchdog_config(tiku_watchdog_get_mode(), clk,
                          tiku_watchdog_get_interval(), 0, 1);
@@ -210,7 +228,12 @@ watchdog_interval_write(const char *buf, size_t len)
     tiku_wdt_interval_t iv;
 
     for (i = 0; i < len && buf[i] >= '0' && buf[i] <= '9'; i++) {
-        val = val * 10 + (uint16_t)(buf[i] - '0');
+        /* Guard the uint16 accumulator: without this, "65600" wraps to 64 and
+         * would silently arm the 64-cycle step instead of failing. */
+        if (val > (uint16_t)((65535u - (uint16_t)(buf[i] - '0')) / 10u)) {
+            return TIKU_VFS_ERANGE;
+        }
+        val = (uint16_t)(val * 10u + (uint16_t)(buf[i] - '0'));
     }
     if (val == 64) {
         iv = TIKU_WDT_INTERVAL_64;
@@ -221,7 +244,7 @@ watchdog_interval_write(const char *buf, size_t len)
     } else if (val == 32768) {
         iv = TIKU_WDT_INTERVAL_32768;
     } else {
-        return -1;
+        return TIKU_VFS_EINVAL;   /* a number, but not one of the 4 hardware steps */
     }
     tiku_watchdog_config(tiku_watchdog_get_mode(),
                          tiku_watchdog_get_clk(), iv, 0, 1);

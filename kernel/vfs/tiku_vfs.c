@@ -203,7 +203,7 @@ static const tiku_vfs_node_t *vfs_parent_of(const char *path,
                                             const char **name_out)
 {
     const char *p, *end;
-    char pbuf[80];
+    char pbuf[TIKU_VFS_PATHBUF];
     size_t plen;
     const tiku_vfs_node_t *par;
 
@@ -350,8 +350,11 @@ int tiku_vfs_unlink(const char *path)
  */
 int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
 {
-    if (node == NULL || node->type != TIKU_VFS_FILE || node->read == NULL) {
-        return -1;
+    if (node == NULL) {
+        return TIKU_VFS_ENOENT;
+    }
+    if (node->type != TIKU_VFS_FILE || node->read == NULL) {
+        return TIKU_VFS_EACCES;   /* exists, but not a readable file */
     }
 
 #if TIKU_VFS_CACHE_ENABLE
@@ -380,10 +383,12 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
 int tiku_vfs_read(const char *path, char *buf, size_t max)
 {
     const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
+    int rc;
     if (node != NULL) {
-        return tiku_vfs_read_node(node, buf, max);   /* static node (unchanged) */
+        return tiku_vfs_read_node(node, buf, max);   /* static node */
     }
-    return vfs_dyn_read(path, buf, max);             /* dynamic /data/<file> */
+    rc = vfs_dyn_read(path, buf, max);               /* dynamic /data/<file> */
+    return (rc < 0) ? TIKU_VFS_ENOENT : rc;          /* neither static nor dynamic → not found */
 }
 
 /*---------------------------------------------------------------------------*/
@@ -538,15 +543,21 @@ int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out)
     int n;
 
     if (out == NULL) {
-        return -1;
+        return TIKU_VFS_EINVAL;
     }
     out->vtype = TIKU_VFS_T_NONE;
     out->unit = TIKU_VFS_U_NONE;
     out->scale = 0;
     out->as.u = 0;
 
-    if (node == NULL || node->type != TIKU_VFS_FILE || node->desc == NULL) {
-        return -1;
+    if (node == NULL) {
+        return TIKU_VFS_ENOENT;
+    }
+    if (node->type != TIKU_VFS_FILE) {
+        return TIKU_VFS_EACCES;
+    }
+    if (node->desc == NULL) {
+        return TIKU_VFS_ERR;         /* readable, but carries no typed view */
     }
     d = node->desc;
     out->unit = d->unit;
@@ -556,14 +567,14 @@ int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out)
         return d->read_val(out);
     }
     if (node->read == NULL) {
-        return -1;
+        return TIKU_VFS_EACCES;
     }
 
     /* Render via the by-node read path so a typed read shares the
      * freshness cache (and decodes the cached text on a hit). */
     n = tiku_vfs_read_node(node, tmp, sizeof(tmp));
     if (n <= 0) {
-        return -1;
+        return (n < 0) ? n : TIKU_VFS_ERR;   /* propagate a classified code; 0 → generic */
     }
     /* snprintf-style handlers return the would-be length; clamp so the
      * scratch buffer is always a valid, NUL-terminated C string. */
@@ -625,6 +636,22 @@ int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max)
     return n;
 }
 
+/** @brief Short, stable name for a status code (see tiku_vfs.h). */
+const char *tiku_vfs_strerror(int status)
+{
+    switch (status) {
+    case TIKU_VFS_OK:     return "OK";
+    case TIKU_VFS_ERR:    return "ERR";
+    case TIKU_VFS_ENOENT: return "ENOENT";
+    case TIKU_VFS_EACCES: return "EACCES";
+    case TIKU_VFS_EINVAL: return "EINVAL";
+    case TIKU_VFS_ERANGE: return "ERANGE";
+    case TIKU_VFS_E2BIG:  return "E2BIG";
+    case TIKU_VFS_EIO:    return "EIO";
+    default:              return "E?";
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -645,10 +672,11 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
 
     node = tiku_vfs_resolve(path);
     if (node == NULL) {
-        return vfs_dyn_write(path, data, len);   /* dynamic child (create-on-write) */
+        rc = vfs_dyn_write(path, data, len);     /* dynamic child (create-on-write) */
+        return (rc < 0) ? TIKU_VFS_ENOENT : rc;  /* no static node, no dynamic store here */
     }
     if (node->type != TIKU_VFS_FILE || node->write == NULL) {
-        return -1;
+        return TIKU_VFS_EACCES;                  /* exists, but not writable */
     }
 
     rc = node->write(data, len);
@@ -688,7 +716,7 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
     const tiku_vfs_node_t *node;
     const tiku_vfs_node_t *mount;
     const char *sub = NULL;
-    char pbuf[80];
+    char pbuf[TIKU_VFS_PATHBUF];
     size_t sl;
     uint8_t i;
 
@@ -737,7 +765,7 @@ int tiku_vfs_is_dir(const char *path)
     const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
     const tiku_vfs_node_t *mount;
     const char *sub = NULL;
-    char pbuf[80];
+    char pbuf[TIKU_VFS_PATHBUF];
     size_t sl;
     int found = 0;
 

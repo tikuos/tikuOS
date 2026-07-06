@@ -70,7 +70,10 @@ tiku_shell_cmd_read(uint8_t argc, const char *argv[])
 
     n = tiku_vfs_read(resolved, buf, sizeof(buf) - 1);
     if (n < 0) {
-        SHELL_PRINTF("read: cannot read '%s'\n", resolved);
+        /* Keep the "cannot read" phrasing (host tooling matches it) and append
+         * the machine-readable status so an agent can tell ENOENT from EACCES. */
+        SHELL_PRINTF("read: cannot read '%s' (%s)\n", resolved,
+                     tiku_vfs_strerror(n));
         return;
     }
 

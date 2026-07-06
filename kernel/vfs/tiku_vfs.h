@@ -37,6 +37,47 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
+/* STATUS CODES                                                              */
+/*---------------------------------------------------------------------------*/
+/*
+ * Distinguishable VFS status codes.  Every error is < 0, so `rc < 0` remains a
+ * valid "did it fail?" test for every existing caller; the specific value lets
+ * a consumer -- the shell, BASIC, or an external agent driving the namespace --
+ * tell "no such node" from "read-only" from "bad value" and react accordingly
+ * (retry with a different value vs. pick another path vs. give up).
+ *
+ * A read returns a byte count >= 0 on success; it is snprintf-style, so the
+ * value is the FULL length of the rendering and a return >= the buffer size
+ * means the text was truncated (the agent's truncation signal).  Writes and
+ * typed reads return TIKU_VFS_OK (0) on success.
+ *
+ * E2BIG and EIO are reserved: the core does not yet produce them (truncation is
+ * signalled by the snprintf-style length, not an error), but they are named so
+ * handlers and consumers share one stable vocabulary as producers are added.
+ */
+enum {
+    TIKU_VFS_OK      =  0,   /**< success                                    */
+    TIKU_VFS_ERR     = -1,   /**< unspecified failure (legacy default)       */
+    TIKU_VFS_ENOENT  = -2,   /**< no such path / node                        */
+    TIKU_VFS_EACCES  = -3,   /**< not readable / not writable / wrong type   */
+    TIKU_VFS_EINVAL  = -4,   /**< malformed input or bad argument            */
+    TIKU_VFS_ERANGE  = -5,   /**< value out of range / numeric overflow      */
+    TIKU_VFS_E2BIG   = -6,   /**< (reserved) buffer too small to hold value  */
+    TIKU_VFS_EIO     = -7    /**< (reserved) backend / hardware error        */
+};
+
+/**
+ * @brief Short, stable, machine-greppable name for a status code.
+ *
+ * For surfacing a failure legibly (shell "(ENOENT)", BASIC, agent parsing).
+ *
+ * @param status  A value returned by a tiku_vfs_* call.
+ * @return e.g. "ENOENT", "ERANGE"; "OK" for 0; "E?" for any unknown value.
+ *         Never NULL.
+ */
+const char *tiku_vfs_strerror(int status);
+
+/*---------------------------------------------------------------------------*/
 /* NODE TYPES                                                                */
 /*---------------------------------------------------------------------------*/
 
@@ -52,13 +93,17 @@ typedef enum {
 
 /**
  * @brief Read handler: write human-readable value into buf
- * @return bytes written, or -1 on error
+ * @return bytes written (snprintf-style: the full length), or a negative
+ *         TIKU_VFS_* status on error
  */
 typedef int (*tiku_vfs_read_fn)(char *buf, size_t max);
 
 /**
  * @brief Write handler: receive string value
- * @return 0 on success, -1 on error
+ * @return TIKU_VFS_OK (0) on success, or a negative TIKU_VFS_* status on error
+ *         (e.g. TIKU_VFS_EINVAL for malformed input, TIKU_VFS_ERANGE for an
+ *         out-of-range value).  A legacy handler may still return -1
+ *         (TIKU_VFS_ERR) to mean "failed" without classifying.
  */
 typedef int (*tiku_vfs_write_fn)(const char *buf, size_t len);
 
@@ -470,6 +515,12 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node);
 #ifndef TIKU_VFS_PATH_MAX
 #define TIKU_VFS_PATH_MAX  64
 #endif
+
+/* Scratch-buffer size for the core's internal path-prefix reconstruction
+ * (parent-of / list / is-dir).  Holds a full path plus a little slack; kept in
+ * one place so those buffers stay in lockstep with TIKU_VFS_PATH_MAX instead of
+ * each hard-coding a magic 80. */
+#define TIKU_VFS_PATHBUF   (TIKU_VFS_PATH_MAX + 16)
 
 /**
  * @brief Number of watch slots currently in use.

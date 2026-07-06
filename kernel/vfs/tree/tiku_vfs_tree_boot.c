@@ -53,6 +53,7 @@
 #include <kernel/vfs/tiku_vfs_tree.h>
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/memory/tiku_mem.h>
+#include <kernel/cpu/tiku_common.h>   /* tiku_common_reset_reason() — per-arch */
 #include <boot/tiku_boot.h>
 #include <stdio.h>
 
@@ -61,13 +62,15 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * SYSRSTIV snapshot taken once in tiku_vfs_tree_boot_init().
+ * Reset-cause snapshot taken once in tiku_vfs_tree_boot_init() via the
+ * per-arch tiku_common_reset_reason() HAL (an MSP430-SYSRSTIV-compatible
+ * code on every platform).
  *
- * Reading the live register pops the highest pending interrupt
- * vector value (hardware walks toward 0 on each read), so the
- * cause must be latched exactly once at boot and served from this
- * copy ever after.  Zero on platforms without SYSRSTIV (RP2350),
- * which decodes as "none"/"power".
+ * On MSP430 reading the live SYSRSTIV register pops the highest pending
+ * vector (hardware walks toward 0 on each read), so the cause must be
+ * latched exactly once at boot and served from this copy ever after; the
+ * HAL does that latching.  RP2350 maps WD_REASON; Ambiq is 0 ("none")
+ * until its RSTGEN->STAT decode is implemented in the arch layer.
  */
 static uint16_t boot_reset_cause;
 
@@ -569,10 +572,13 @@ _Static_assert(sizeof(tiku_vfs_tree_boot_children) /
 void
 tiku_vfs_tree_boot_init(void)
 {
-    /* Capture reset cause before anything else clears it */
-#ifdef PLATFORM_MSP430
-    boot_reset_cause = SYSRSTIV;
-#endif
+    /* Capture the reset cause before anything else clears it, via the
+     * per-arch HAL rather than a raw MSP430 register: it returns an
+     * MSP430-SYSRSTIV-compatible code on every platform (MSP430 latches
+     * SYSRSTIV, RP2350 maps WD_REASON, Ambiq is 0 until its RSTGEN decode
+     * lands).  So /sys/boot/{rstiv,reason,last} are meaningful cross-platform
+     * instead of the VFS layer reading a chip-specific register directly. */
+    boot_reset_cause = tiku_common_reset_reason();
 
     /* Validate/prime the cells, then bump the boot counter. The
      * SRAM mirror is what the VFS read returns so the read path

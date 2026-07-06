@@ -1106,9 +1106,11 @@ exec_vfswrite(const char **p)
         SHELL_PRINTF(SH_RED "? value render failed\n" SH_RST);
         return;
     }
-    if (tiku_vfs_write(path, render, (size_t)n) < 0) {
+    n = tiku_vfs_write(path, render, (size_t)n);
+    if (n < 0) {
         basic_error = 1;
-        SHELL_PRINTF(SH_RED "? VFS write failed: %s\n" SH_RST, path);
+        SHELL_PRINTF(SH_RED "? VFS write failed: %s (%s)\n" SH_RST,
+                     path, tiku_vfs_strerror(n));
     }
 }
 
@@ -1127,7 +1129,8 @@ basic_vfsread(const char *path)
     n = tiku_vfs_read(path, buf, sizeof(buf) - 1);
     if (n < 0) {
         basic_error = 1;
-        SHELL_PRINTF(SH_RED "? VFS read failed: %s\n" SH_RST, path);
+        SHELL_PRINTF(SH_RED "? VFS read failed: %s (%s)\n" SH_RST,
+                     path, tiku_vfs_strerror(n));
         return 0;
     }
     if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;

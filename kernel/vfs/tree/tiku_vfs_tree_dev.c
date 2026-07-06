@@ -486,13 +486,13 @@ static const tiku_vfs_node_t dev_children[] = {
     { "led0",     TIKU_VFS_FILE, led0_read, led0_write, NULL, 0, &desc_led },
 #endif
 #if TIKU_BOARD_LED_COUNT >= 2
-    { "led1",     TIKU_VFS_FILE, led1_read, led1_write, NULL, 0 },
+    { "led1",     TIKU_VFS_FILE, led1_read, led1_write, NULL, 0, &desc_led },
 #endif
 #if TIKU_BOARD_LED_COUNT >= 3
-    { "led2",     TIKU_VFS_FILE, led2_read, led2_write, NULL, 0 },
+    { "led2",     TIKU_VFS_FILE, led2_read, led2_write, NULL, 0, &desc_led },
 #endif
 #if TIKU_BOARD_LED_COUNT >= 4
-    { "led3",     TIKU_VFS_FILE, led3_read, led3_write, NULL, 0 },
+    { "led3",     TIKU_VFS_FILE, led3_read, led3_write, NULL, 0, &desc_led },
 #endif
     { "console",  TIKU_VFS_FILE, console_read, console_write, NULL, 0 },
     { "null",     TIKU_VFS_FILE, devnull_read, devnull_write, NULL, 0 },

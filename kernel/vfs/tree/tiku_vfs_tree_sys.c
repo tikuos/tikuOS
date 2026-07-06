@@ -152,13 +152,16 @@ time_write(const char *buf, size_t len)
             break;
         }
         if (c < '0' || c > '9') {
-            return -1;
+            return TIKU_VFS_EINVAL;
+        }
+        if (v > (UINT32_MAX - (uint32_t)(c - '0')) / 10u) {
+            return TIKU_VFS_ERANGE;   /* would overflow the 32-bit seconds field */
         }
         v = v * 10U + (uint32_t)(c - '0');
         seen_digit = 1;
     }
     if (!seen_digit) {
-        return -1;
+        return TIKU_VFS_EINVAL;
     }
     tiku_rtc_set_seconds(v);
     return 0;

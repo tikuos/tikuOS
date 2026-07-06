@@ -44,6 +44,7 @@ tiku_shell_cmd_write(uint8_t argc, const char *argv[])
     char resolved[TIKU_SHELL_CWD_SIZE];
     const char *value;
     uint8_t len;
+    int rc;
 
     if (argc < 3) {
         SHELL_PRINTF("Usage: write <path> <value>\n");
@@ -54,7 +55,10 @@ tiku_shell_cmd_write(uint8_t argc, const char *argv[])
     value = argv[2];
     len = (uint8_t)strlen(value);
 
-    if (tiku_vfs_write(resolved, value, len) < 0) {
-        SHELL_PRINTF("write: cannot write '%s'\n", resolved);
+    rc = tiku_vfs_write(resolved, value, len);
+    if (rc < 0) {
+        /* "cannot write" kept for host matchers; append the status code. */
+        SHELL_PRINTF("write: cannot write '%s' (%s)\n", resolved,
+                     tiku_vfs_strerror(rc));
     }
 }

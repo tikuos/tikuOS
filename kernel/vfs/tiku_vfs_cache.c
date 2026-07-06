@@ -164,6 +164,9 @@ int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max)
             cache[slot].node = node;
             cache[slot].stamp_s = (uint32_t)tiku_clock_seconds();
             cache[slot].stamp_t = tiku_clock_time();
+            /* (uint8_t) is safe: the enclosing guard already required
+             * n < TIKU_VFS_CACHE_TEXTLEN, which is < 256, so no truncation.
+             * Keep TEXTLEN < 256 if you widen it, or widen `len` too. */
             cache[slot].len = (uint8_t)n;
             memcpy(cache[slot].text, buf, (size_t)n);
         }
