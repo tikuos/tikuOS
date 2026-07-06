@@ -36,11 +36,8 @@ tikuOS runs bare-metal across three MCU families — the MSP430 FRAM parts it wa
 | **Ambiq Apollo**<br><sub>Cortex-M</sub> | Apollo510 EVB · M55 96/250 MHz | 512 KB | 4 MB MRAM | TLS 1.3/1.2 to the live web · Tiku BASIC · IP-over-SLIP | :green_circle: Primary |
 | | Apollo4 Lite EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | IP-over-SLIP · durable MRAM object store | :green_circle: |
 | | Apollo4 Plus EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | reuses the Apollo4 Lite backend · full 2 MB SSRAM | :green_circle: |
-| | Apollo510 Blue EVB · M55 + EM9305 | 512 KB | 4 MB MRAM | BLE — beacon + a wireless shell over the BLE UART service | :yellow_circle: Experimental |
-| **Raspberry Pi**<br><sub>RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 | 520 KB | 4 MB flash | bare-metal (no Pico SDK) · UART shell · GPIO | :yellow_circle: Compatible |
-| | Pico 2 W | 520 KB | 4 MB flash | adds experimental Wi-Fi (from-scratch CYW43 driver) | :yellow_circle: |
-
-<sub>Flashing: MSP430 via the on-board eZ-FET · Ambiq via J-Link (SEGGER) · RP2350 via UF2 (BOOTSEL).</sub>
+| | Apollo510 Blue EVB · M55 + EM9305 | 512 KB | 4 MB MRAM | BLE — beacon + a wireless shell over the BLE UART service | :green_circle: |
+| **Raspberry Pi**<br><sub>RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash |  | :yellow_circle: Compatible |
 
 ---
 
