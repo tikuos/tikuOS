@@ -26,18 +26,21 @@
 
 ## Supported Boards
 
-| Board | MCU / Core | RAM | NVM | Notable | Status |
-|-------|-----------|-----|-----|---------|--------|
-| MSP-EXP430FR5969 LaunchPad | MSP430FR5969 · 16-bit | 2 KB | 64 KB FRAM | The reference part | :green_circle: Primary |
-| MSP-EXP430FR5994 LaunchPad | MSP430FR5994 · 16-bit | 8 KB | 256 KB FRAM | 208 KB HIFRAM, 8 KB merged SRAM (`LEA_ENABLE=0` default) | :green_circle: Primary |
-| MSP-EXP430FR6989 LaunchPad | MSP430FR6989 · 16-bit | 2 KB | 128 KB FRAM | On-board FH-1138P 96-segment LCD, HIFRAM/large mode | :green_circle: Primary |
-| Ambiq Apollo510 EVB | Apollo510 · Cortex-M55 @ 96-192 MHz | 512 KB | 4 MB MRAM | TLS 1.3/1.2 to the live web, Tiku BASIC, IP-over-SLIP | :green_circle: Primary |
-| Ambiq Apollo4 Lite EVB | Apollo4 Lite · Cortex-M4F @ 96 MHz | 384 KB | 2 MB MRAM | IP-over-SLIP, durable MRAM object store | :green_circle: Primary |
-| Ambiq Apollo510 Blue EVB | Apollo510 + EM9305 · Cortex-M55 | 512 KB | 4 MB MRAM | Console on UART1; experimental BLE (beacon + GATT / Nordic UART Service) | :yellow_circle: Experimental |
-| Raspberry Pi Pico 2 W | RP2350 · Cortex-M33 @ 150 MHz | 520 KB | 4 MB flash | Bare-metal (no Pico SDK dep); experimental Wi-Fi (from-scratch CYW43 driver) | :yellow_circle: Compatible |
-| Raspberry Pi Pico 2 | RP2350 · Cortex-M33 @ 150 MHz | 520 KB | 4 MB flash | Bare-metal; UART shell, GPIO | :yellow_circle: Compatible |
+tikuOS runs bare-metal across three MCU families — the MSP430 FRAM parts it was designed around, and two Cortex-M families it has been ported to.
 
-<sub>Apollo4 Plus (`MCU=apollo4p`) builds on the Apollo4 Lite backend. All Ambiq targets flash over J-Link (SEGGER).</sub>
+| Family | Board · core | RAM | NVM | Notable | Status |
+|--------|--------------|-----|-----|---------|--------|
+| **MSP430**<br><sub>16-bit · FRAM</sub> | FR5969 LaunchPad | 2 KB | 64 KB | the reference part | :green_circle: Primary |
+| | FR5994 LaunchPad | 8 KB | 256 KB | 208 KB HIFRAM · LEA (`LEA_ENABLE=0` default) | :green_circle: |
+| | FR6989 LaunchPad | 2 KB | 128 KB | on-board FH-1138P 96-segment LCD | :green_circle: |
+| **Ambiq Apollo**<br><sub>Cortex-M</sub> | Apollo510 EVB · M55 96/250 MHz | 512 KB | 4 MB MRAM | TLS 1.3/1.2 to the live web · Tiku BASIC · IP-over-SLIP | :green_circle: Primary |
+| | Apollo4 Lite EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | IP-over-SLIP · durable MRAM object store | :green_circle: |
+| | Apollo4 Plus EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | reuses the Apollo4 Lite backend · full 2 MB SSRAM | :green_circle: |
+| | Apollo510 Blue EVB · M55 + EM9305 | 512 KB | 4 MB MRAM | BLE — beacon + a wireless shell over the BLE UART service | :yellow_circle: Experimental |
+| **Raspberry Pi**<br><sub>RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 | 520 KB | 4 MB flash | bare-metal (no Pico SDK) · UART shell · GPIO | :yellow_circle: Compatible |
+| | Pico 2 W | 520 KB | 4 MB flash | adds experimental Wi-Fi (from-scratch CYW43 driver) | :yellow_circle: |
+
+<sub>Flashing: MSP430 via the on-board eZ-FET · Ambiq via J-Link (SEGGER) · RP2350 via UF2 (BOOTSEL).</sub>
 
 ---
 
