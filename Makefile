@@ -554,7 +554,18 @@ endif
 # Caveat: 20-bit pointers and CALLA/MOVA inflate text by ~15-20% and
 # data by ~25%, so prefer small model unless you actually need HIFRAM.
 # ---------------------------------------------------------------------------
+# Memory model.  On MSP430 the part decides: large where there is HIFRAM to
+# spill into (FR5994 / FR6989), small on the 64-KB-or-smaller parts (FR5969 /
+# FR2433).  This removes the old footgun where `make MCU=msp430fr5994` silently
+# defaulted to the SMALL model -- the very one that overflows -- so the big
+# parts only linked if you remembered MEMORY_MODEL=large.  Now they just build.
+# (ambiq / rp2350 keep the plain small default; they force large where needed,
+# e.g. BASIC.)  An explicit MEMORY_MODEL=... on the make line still wins.
+ifeq ($(TIKU_PLATFORM),msp430)
+MEMORY_MODEL ?= $(if $(filter 1,$(DEVICE_HAS_HIFRAM)),large,small)
+else
 MEMORY_MODEL ?= small
+endif
 
 # ---------------------------------------------------------------------------
 # Build-time consistency guards (MSP430 only — RP2350 has no HIFRAM
