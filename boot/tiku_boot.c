@@ -30,6 +30,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_boot.h"
+#include <kernel/cpu/tiku_stack.h>   /* stack-paint for /sys/mem/stack_free */
 #include "kernel/cpu/tiku_common.h"
 #include "kernel/memory/tiku_mem.h"
 #include "kernel/timers/tiku_clock.h"
@@ -92,6 +93,12 @@ tiku_cpu_full_init(unsigned int cpu_freq)
     current_boot_stage = TIKU_BOOT_STAGE_INIT;
 
     boot_complete = 0;
+
+    /* Paint the unused stack now, at the shallowest call depth, so
+     * /sys/mem/stack_free can report worst-case headroom.  Bounded by the
+     * arch stack bottom (above the MPU guard + heap); a no-op on an arch
+     * that has not declared its bounds. */
+    tiku_stack_paint();
 
     /* CPU initialization stage */
     current_boot_stage = TIKU_BOOT_STAGE_CPU;

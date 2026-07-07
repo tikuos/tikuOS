@@ -1207,6 +1207,7 @@ SRCS += hal/tiku_cpu.c
 SRCS += kernel/cpu/tiku_common.c
 SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/cpu/tiku_hang.c
+SRCS += kernel/cpu/tiku_stack.c
 SRCS += kernel/cpu/tiku_rtc.c
 
 # Driver-registry layer. Always built so the kernel exposes

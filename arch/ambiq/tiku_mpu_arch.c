@@ -234,6 +234,16 @@ static inline uint32_t mpu_stack_guard_base(void) {
            MPU_STACK_RESERVED_BYTES - MPU_STACK_GUARD_BYTES;
 }
 
+/**
+ * Stack-paint floor for /sys/mem/stack_free (kernel/cpu/tiku_stack): the
+ * first byte ABOVE the guard region, from the same base the guard is armed
+ * with -- painting from here up to the SP stays strictly inside the
+ * live-stack window (guard below faults; heap/.uninit far below corrupt).
+ */
+uint32_t tiku_stack_arch_bottom(void) {
+    return mpu_stack_guard_base() + MPU_STACK_GUARD_BYTES;
+}
+
 /*---------------------------------------------------------------------------*/
 /* SAM/CTL bookkeeping + HAL surface                                         */
 /*---------------------------------------------------------------------------*/

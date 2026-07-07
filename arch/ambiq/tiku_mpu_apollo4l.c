@@ -64,6 +64,27 @@
 /** Top of TCM = stack base (apollo4l.ld); the guard sits below it. */
 extern uint32_t __sram_end;
 
+/** Base of the stack-guard region.  ONE expression shared by the region
+ *  arming below and tiku_stack_arch_bottom() (the stack-paint floor), so the
+ *  guard placement and the paint bound can never diverge.  PMSAv7 needs a
+ *  4 KB region 4 KB-aligned; RESERVED and GUARD are 4 KB multiples, so the
+ *  align-down keeps the reserved stack budget >= 32 KB on any __sram_end. */
+#define MPU_STACK_GUARD_BASE()                                              \
+    (((uint32_t)(uintptr_t)&__sram_end                                      \
+      - MPU_STACK_RESERVED_BYTES - MPU_STACK_GUARD_BYTES)                   \
+     & ~(MPU_STACK_GUARD_BYTES - 1U))
+
+/**
+ * Stack-paint floor for /sys/mem/stack_free (kernel/cpu/tiku_stack): the
+ * first byte ABOVE the no-access guard region.  Painting from here up to the
+ * SP stays strictly inside the live-stack window -- it can never touch the
+ * guard (fault) or the heap/.uninit far below (corruption).
+ */
+uint32_t tiku_stack_arch_bottom(void)
+{
+    return MPU_STACK_GUARD_BASE() + MPU_STACK_GUARD_BYTES;
+}
+
 /*---------------------------------------------------------------------------*/
 /* Software-bookkept MSP430-style register file (parity for portable tests)  */
 /*---------------------------------------------------------------------------*/
@@ -186,12 +207,9 @@ void tiku_mpu_arch_init_segments(void) {
      * a stack that overflows past its budget faults here before it can reach
      * .data/.bss/.uninit far below. */
     {
-        /* PMSAv7 needs a 4 KB region to be 4 KB-aligned; RESERVED and GUARD
-         * are both 4 KB-multiples, so align the base down to stay valid on any
-         * __sram_end (keeps the reserved stack budget >= 32 KB). */
-        uint32_t guard = ((uint32_t)(uintptr_t)&__sram_end
-                          - MPU_STACK_RESERVED_BYTES - MPU_STACK_GUARD_BYTES)
-                         & ~(MPU_STACK_GUARD_BYTES - 1U);
+        /* Base from the shared macro (also the stack-paint floor's anchor)
+         * -- see MPU_STACK_GUARD_BASE() above for the alignment rationale. */
+        uint32_t guard = MPU_STACK_GUARD_BASE();
         ARM_MPU_SetRegion(
             ARM_MPU_RBAR(MPU_REGION_STACK_GUARD, guard),
             ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_NONE, 1U, 0U, 0U, 0U, 0U,

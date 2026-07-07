@@ -52,6 +52,7 @@
 
 #include "tiku_vfs_tree_sys.h"
 #include "tiku_vfs_tree_boot.h"
+#include <kernel/cpu/tiku_stack.h>   /* stack high-water for /sys/mem/stack_free */
 #include "tiku_vfs_tree_timer.h"
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
@@ -634,6 +635,18 @@ static const tiku_vfs_desc_t desc_uptime =
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_SECONDS,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 
+/*
+ * /sys/mem/stack_free -- worst-case stack headroom since boot (bytes): the
+ * intact painted cushion above the MPU stack guard.  Unlike /sys/mem/free
+ * (the live gap at this instant) this is the closest the stack has EVER come
+ * to the guard -- the number to snapshot under load when sizing the stack.
+ * "0" on an arch that has not declared its stack bounds (feature dormant).
+ */
+static int stack_free_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n", (unsigned long)tiku_stack_free());
+}
+
 /** /sys/mem directory table — sizes (sram, nvm) + live (free, used) */
 static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
@@ -643,6 +656,8 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "nvmfree", TIKU_VFS_FILE, nvmfree_read, NULL, NULL, 0, &desc_mem_live },
     { "tiers",   TIKU_VFS_FILE, mem_tiers_read,  NULL, NULL, 0, &desc_mem_live },
     { "failed",  TIKU_VFS_FILE, mem_failed_read, NULL, NULL, 0, &desc_mem_live },
+    { "stack_free", TIKU_VFS_FILE, stack_free_read, NULL, NULL, 0,
+      &desc_mem_live },
 };
 
 /** /sys/cpu directory table */
@@ -786,7 +801,7 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
-    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 7 },
+    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 8 },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_power_children,    TIKU_VFS_TREE_POWER_NCHILD },
