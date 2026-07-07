@@ -32,6 +32,7 @@
 
 #include "tiku_shell_io.h"
 #include "tiku.h"
+#include "kernel/vfs/tiku_vfs.h"    /* caller-capability sync on backend swap */
 #include <stdarg.h>
 
 /*---------------------------------------------------------------------------*/
@@ -49,6 +50,12 @@ void
 tiku_shell_io_set_backend(const tiku_shell_io_t *backend)
 {
     active_io = backend;
+    /* The active channel defines the ambient trust for VFS writes: a local
+     * console is CAP_ALL, a remote backend is restricted.  Clearing the
+     * backend (NULL) falls back to full authority (kernel/init path). */
+    tiku_vfs_caller_cap_set(backend != (void *)0
+                                ? (tiku_vfs_cap_t)backend->cap
+                                : TIKU_VFS_CAP_ALL);
 }
 
 /** @brief Return the currently active I/O backend, or NULL. */
@@ -338,5 +345,6 @@ const tiku_shell_io_t tiku_shell_io_uart = {
     tiku_uart_putc,                         /* putc */
     tiku_uart_rx_ready,                     /* rx_ready */
     tiku_uart_getc,                         /* getc */
-    TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO    /* flags */
+    TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,   /* flags */
+    TIKU_VFS_CAP_ALL                        /* physical console = full authority */
 };

@@ -14,6 +14,7 @@
 
 #include <kernel/shell/tiku_shell.h>          /* SHELL_PRINTF */
 #include <kernel/shell/tiku_shell_io.h>       /* io-backend swap, rx_ready/getc */
+#include <kernel/vfs/tiku_vfs.h>              /* TIKU_VFS_CAP_* channel cap     */
 #include <kernel/shell/tiku_shell_parser.h>   /* tiku_shell_parser_execute      */
 #include <kernel/shell/tiku_shell_cwd.h>      /* tiku_shell_cwd_get (prompt)    */
 #include <kernel/timers/tiku_clock.h>         /* tiku_clock_time (heartbeat)   */
@@ -32,7 +33,8 @@ static const tiku_shell_io_t s_ble_io = {
     tiku_ble_uart_putc,        /* putc     */
     tiku_ble_uart_rx_ready,    /* rx_ready */
     tiku_ble_uart_getc,        /* getc     */
-    TIKU_SHELL_IO_CRLF        /* flags    */
+    TIKU_SHELL_IO_CRLF,       /* flags    */
+    TIKU_VFS_CAP_NONE          /* remote channel: restricted, like TCP */
 };
 
 /* Push buffered shell output to the phone as flow-controlled TX notifications.

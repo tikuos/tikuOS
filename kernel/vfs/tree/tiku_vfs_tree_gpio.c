@@ -224,7 +224,8 @@ GPIO_PIN(4,4) GPIO_PIN(4,5) GPIO_PIN(4,6) GPIO_PIN(4,7)
  * @brief Build one pin-file node entry for a port table.
  */
 #define GPIO_NODE(p, b) \
-    { pn##b, TIKU_VFS_FILE, gpio_r_##p##_##b, gpio_w_##p##_##b, NULL, 0 }
+    { pn##b, TIKU_VFS_FILE, gpio_r_##p##_##b, gpio_w_##p##_##b, NULL, 0,        \
+      NULL, NULL, TIKU_VFS_CAP_HW }   /* actuating a pin needs CAP_HW */
 
 /** Per-port pin tables: /dev/gpio/<port>/0../7 (eight files each) */
 #if TIKU_DEVICE_HAS_PORT1

@@ -63,6 +63,7 @@
 
 #include "tiku_shell_io_tcp.h"
 #include "tiku.h"
+#include <kernel/vfs/tiku_vfs.h>    /* TIKU_VFS_CAP_* for the channel cap */
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
 
 /*---------------------------------------------------------------------------*/
@@ -459,5 +460,10 @@ const tiku_shell_io_t tiku_shell_io_tcp = {
     tcp_putc,
     tcp_rx_ready,
     tcp_getc,
-    TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO
+    TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,
+    /* Remote channel: no capability by default -- a telnet session may read
+     * the whole namespace and write open nodes, but may NOT actuate hardware
+     * (CAP_HW), touch safety/system state (CAP_SYS), or mutate the store
+     * (CAP_FS).  Raise deliberately if remote control is wanted. */
+    TIKU_VFS_CAP_NONE
 };

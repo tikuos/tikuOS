@@ -63,8 +63,37 @@ enum {
     TIKU_VFS_EINVAL  = -4,   /**< malformed input or bad argument            */
     TIKU_VFS_ERANGE  = -5,   /**< value out of range / numeric overflow      */
     TIKU_VFS_E2BIG   = -6,   /**< (reserved) buffer too small to hold value  */
-    TIKU_VFS_EIO     = -7    /**< (reserved) backend / hardware error        */
+    TIKU_VFS_EIO     = -7,   /**< (reserved) backend / hardware error        */
+    TIKU_VFS_EPERM   = -8    /**< denied by policy: caller lacks the node's
+                                  required capability (see tiku_vfs_cap_t)    */
 };
+
+/*---------------------------------------------------------------------------*/
+/* CAPABILITIES — who may write a node                                       */
+/*---------------------------------------------------------------------------*/
+/*
+ * The namespace is complete mediation for the whole OS, so mediation must be
+ * able to say NO.  Every writable node may declare a REQUIRED capability
+ * (tiku_vfs_node_t.req_cap); every write happens under a CALLER capability
+ * (the ambient trust of the channel driving the VFS — see
+ * tiku_vfs_caller_cap_set()).  tiku_vfs_write() grants iff the caller holds
+ * every bit the node requires:  (req_cap & ~caller_cap) == 0.
+ *
+ * req_cap defaults to 0 (NONE = open to anyone) so every existing node is
+ * unchanged, and the caller cap defaults to ALL (the trusted console / kernel
+ * / init path is unaffected).  The teeth appear only when an UNTRUSTED
+ * channel — a net/telnet backend, an agent link, a sandboxed BASIC program —
+ * lowers the caller cap: it is then refused the nodes that actuate hardware
+ * or touch system/safety state, while open nodes still work.
+ */
+typedef uint8_t tiku_vfs_cap_t;
+
+#define TIKU_VFS_CAP_NONE  0x00u  /**< no capability required / granted        */
+#define TIKU_VFS_CAP_HW    0x01u  /**< actuate hardware: gpio, led, i2c, pins  */
+#define TIKU_VFS_CAP_SYS   0x02u  /**< system/safety control: watchdog, clock  */
+#define TIKU_VFS_CAP_FS    0x04u  /**< mutate persistent store: /data, tier    */
+#define TIKU_VFS_CAP_NET   0x08u  /**< network config / credentials (reserved) */
+#define TIKU_VFS_CAP_ALL   0xFFu  /**< full authority: console, kernel, init   */
 
 /**
  * @brief Short, stable, machine-greppable name for a status code.
@@ -280,6 +309,12 @@ typedef struct tiku_vfs_node {
                                                     untyped (back-compat) */
     const struct tiku_vfs_dynops *dyn;         /**< Dynamic children; NULL =
                                                     static dir (back-compat) */
+    tiku_vfs_cap_t               req_cap;       /**< Capability a writer must
+                                                    hold; 0 (NONE) = open.
+                                                    Trailing + zero-init, so
+                                                    untagged nodes are open and
+                                                    every existing table is
+                                                    unchanged. */
 } tiku_vfs_node_t;
 
 /*---------------------------------------------------------------------------*/
@@ -379,6 +414,28 @@ int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max);
  * @return 0 on success, -1 on error
  */
 int tiku_vfs_write(const char *path, const char *data, size_t len);
+
+/*---------------------------------------------------------------------------*/
+/* CALLER CAPABILITY — the ambient trust of the channel driving the VFS      */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Set the ambient caller capability; returns the previous value.
+ *
+ * A single control plane (the shell process) drives every VFS write, so the
+ * caller cap is one ambient word rather than a per-call argument.  The active
+ * shell backend sets it (a console backend = ALL; a net/agent backend = a
+ * restricted mask), and an untrusted sub-context (e.g. running a fetched
+ * BASIC program) may lower it further and restore it after.  Defaults to
+ * TIKU_VFS_CAP_ALL so any path that never sets it keeps full authority.
+ *
+ * @param cap  New ambient capability
+ * @return     Previous value (save it to restore on the way out)
+ */
+tiku_vfs_cap_t tiku_vfs_caller_cap_set(tiku_vfs_cap_t cap);
+
+/** @brief Current ambient caller capability. */
+tiku_vfs_cap_t tiku_vfs_caller_cap_get(void);
 
 /**
  * @brief Delete a file at @p path.

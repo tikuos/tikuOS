@@ -778,7 +778,8 @@ static const tiku_vfs_node_t sys_children[] = {
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
     { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0,
       &desc_uptime },
-    { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0 },
+    { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_SYS },   /* clock skew breaks TLS cert validity */
     { "boot_count", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_count_read,      NULL, NULL, 0 },
     { "last_reset", TIKU_VFS_FILE,

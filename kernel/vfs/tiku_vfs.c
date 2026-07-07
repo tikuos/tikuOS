@@ -648,6 +648,7 @@ const char *tiku_vfs_strerror(int status)
     case TIKU_VFS_ERANGE: return "ERANGE";
     case TIKU_VFS_E2BIG:  return "E2BIG";
     case TIKU_VFS_EIO:    return "EIO";
+    case TIKU_VFS_EPERM:  return "EPERM";
     default:              return "E?";
     }
 }
@@ -665,6 +666,33 @@ const char *tiku_vfs_strerror(int status)
  * writer knowing watchers exist.  Failed writes (handler returned
  * -1) do not notify: the node did not change.
  */
+/*---------------------------------------------------------------------------*/
+/* CALLER CAPABILITY                                                          */
+/*---------------------------------------------------------------------------*/
+
+/* Ambient trust of the channel currently driving the VFS.  ALL by default, so
+ * the trusted console / kernel / init path is unaffected; an untrusted channel
+ * lowers it via tiku_vfs_caller_cap_set(). */
+static tiku_vfs_cap_t vfs_caller_cap = TIKU_VFS_CAP_ALL;
+
+tiku_vfs_cap_t tiku_vfs_caller_cap_set(tiku_vfs_cap_t cap)
+{
+    tiku_vfs_cap_t prev = vfs_caller_cap;
+    vfs_caller_cap = cap;
+    return prev;
+}
+
+tiku_vfs_cap_t tiku_vfs_caller_cap_get(void)
+{
+    return vfs_caller_cap;
+}
+
+/* True iff the current caller holds every capability bit @p req demands. */
+static uint8_t vfs_cap_permitted(tiku_vfs_cap_t req)
+{
+    return (uint8_t)((req & (tiku_vfs_cap_t)~vfs_caller_cap) == 0u);
+}
+
 int tiku_vfs_write(const char *path, const char *data, size_t len)
 {
     const tiku_vfs_node_t *node;
@@ -672,11 +700,18 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
 
     node = tiku_vfs_resolve(path);
     if (node == NULL) {
-        rc = vfs_dyn_write(path, data, len);     /* dynamic child (create-on-write) */
+        /* Dynamic child (create-on-write): mutating the file store needs FS. */
+        if (!vfs_cap_permitted(TIKU_VFS_CAP_FS)) {
+            return TIKU_VFS_EPERM;
+        }
+        rc = vfs_dyn_write(path, data, len);
         return (rc < 0) ? TIKU_VFS_ENOENT : rc;  /* no static node, no dynamic store here */
     }
     if (node->type != TIKU_VFS_FILE || node->write == NULL) {
         return TIKU_VFS_EACCES;                  /* exists, but not writable */
+    }
+    if (!vfs_cap_permitted(node->req_cap)) {
+        return TIKU_VFS_EPERM;                    /* mediated: caller lacks capability */
     }
 
     rc = node->write(data, len);
@@ -1162,9 +1197,11 @@ uint8_t tiku_vfs_depth(void)
 /*
  * Render every static node as one tab-separated line so an external agent can
  * learn the device's capabilities in a single read instead of walking it with
- * ls/cat.  Four tab-separated columns:  path  type  perms  meta
+ * ls/cat.  Five tab-separated columns:  path  type  perms  meta  cap
  * (type = d|f; perms = rw|r-|-w|--; meta is "-" for an untyped node, else the
- * packed descriptor "vtype,unit,fresh,cost[,lo..hi]").  Dynamic directories
+ * packed descriptor "vtype,unit,fresh,cost[,lo..hi]"; cap is the capability a
+ * writer must hold -- "-" (open), "hw", "sys", "fs", "net" -- so the whole
+ * write-access policy is enumerable in one read).  Dynamic directories
  * (/data) are
  * listed but their runtime children are NOT walked -- those are data, not
  * capability metadata (use `ls` for them).  Only node metadata is touched, so
@@ -1175,6 +1212,21 @@ typedef struct {
     size_t max;
     size_t off;   /* running length; may exceed max (snprintf-style truncation) */
 } vfs_manifest_sink_t;
+
+/* Short token for a node's required write capability (the manifest's 5th
+ * column), so the whole access-control policy is enumerable from the same
+ * namespace it governs: `cat /sys/vfs/manifest` shows who may write what. */
+static const char *vfs_cap_name(tiku_vfs_cap_t c)
+{
+    switch (c) {
+    case TIKU_VFS_CAP_NONE: return "-";
+    case TIKU_VFS_CAP_HW:   return "hw";
+    case TIKU_VFS_CAP_SYS:  return "sys";
+    case TIKU_VFS_CAP_FS:   return "fs";
+    case TIKU_VFS_CAP_NET:  return "net";
+    default:                return "cap";   /* combined / other mask */
+    }
+}
 
 static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                           const tiku_vfs_node_t *n)
@@ -1210,8 +1262,9 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                        VFS_NAME_OF(vfs_ecost_names, d->ecost));
     }
 
-    m = snprintf(dst, room, "%s\t%c\t%s\t%s\n",
-                 path, (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm, meta);
+    m = snprintf(dst, room, "%s\t%c\t%s\t%s\t%s\n",
+                 path, (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm, meta,
+                 vfs_cap_name(n->req_cap));
     if (m > 0) {
         s->off += (size_t)m;
     }

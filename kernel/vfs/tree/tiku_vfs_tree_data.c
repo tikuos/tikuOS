@@ -251,7 +251,8 @@ data_basic_write(const char *buf, size_t len)
 }
 
 static const tiku_vfs_node_t data_children[] = {
-    { "basic", TIKU_VFS_FILE, data_basic_read, data_basic_write, NULL, 0, NULL, NULL },
+    { "basic", TIKU_VFS_FILE, data_basic_read, data_basic_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_FS },
 };
 
 static const tiku_vfs_node_t data_node = {

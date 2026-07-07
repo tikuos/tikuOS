@@ -357,11 +357,13 @@ watchdog_kicks_read(char *buf, size_t max)
  * write-only node in this table.
  */
 const tiku_vfs_node_t tiku_vfs_tree_watchdog_children[] = {
-    { "mode",     TIKU_VFS_FILE, watchdog_mode_read,     watchdog_mode_write,     NULL, 0 },
-    { "clock",    TIKU_VFS_FILE, watchdog_clock_read,    watchdog_clock_write,    NULL, 0 },
-    { "interval", TIKU_VFS_FILE, watchdog_interval_read, watchdog_interval_write, NULL, 0 },
-    { "kick",     TIKU_VFS_FILE, NULL,                   watchdog_kick_write,     NULL, 0 },
-    { "enabled",  TIKU_VFS_FILE, watchdog_enabled_read,  watchdog_enabled_write,  NULL, 0 },
+    /* Writable watchdog controls gate on CAP_SYS -- disabling or retiming the
+     * watchdog is safety-critical, not something an untrusted channel may do. */
+    { "mode",     TIKU_VFS_FILE, watchdog_mode_read,     watchdog_mode_write,     NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
+    { "clock",    TIKU_VFS_FILE, watchdog_clock_read,    watchdog_clock_write,    NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
+    { "interval", TIKU_VFS_FILE, watchdog_interval_read, watchdog_interval_write, NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
+    { "kick",     TIKU_VFS_FILE, NULL,                   watchdog_kick_write,     NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
+    { "enabled",  TIKU_VFS_FILE, watchdog_enabled_read,  watchdog_enabled_write,  NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
     { "kicks",    TIKU_VFS_FILE, watchdog_kicks_read,    NULL,                    NULL, 0 },
 };
 
