@@ -201,6 +201,10 @@ static const uint8_t str_serial[] = { 10, 0x03, '0',0,'0',0,'0',0,'1',0 };
 #define RX_RING_SIZE   256U   /* power of two */
 #define TX_RING_MASK   (TX_RING_SIZE - 1U)
 #define RX_RING_MASK   (RX_RING_SIZE - 1U)
+/* Bounded wait for a free TX slot when the ring is full: ~2 USB full-speed
+ * frames, long enough for a reading host to drain a bulk-IN packet, short
+ * enough that a not-reading host only stalls once (then drop-fast latches). */
+#define TX_FULL_WAIT_US  2000U
 
 /* EP0 control-transfer phase. A control transfer is SETUP, then an optional
  * DATA stage (IN for reads / OUT for writes), then an opposite-direction
@@ -222,6 +226,9 @@ static struct {
     /* TX (device->host) and RX (host->device) byte rings */
     volatile uint8_t  tx[TX_RING_SIZE];
     volatile uint16_t tx_head, tx_tail;
+    volatile uint8_t  tx_stalled;  /* full-ring wait timed out: host isn't
+                                    * reading -> drop-fast (no per-byte wait)
+                                    * until it drains again (see putc)       */
     volatile uint8_t  rx[RX_RING_SIZE];
     volatile uint16_t rx_head, rx_tail;
     volatile uint16_t overrun;
@@ -548,9 +555,27 @@ uint8_t tiku_usb_cdc_connected(void) {
 
 void tiku_usb_cdc_putc(char c) {
     uint16_t nxt = (uint16_t)((u.tx_head + 1U) & TX_RING_MASK);
+
+    if (nxt == u.tx_tail && !u.tx_stalled) {
+        /* Ring full and the host has been keeping up: give the bus a bounded
+         * window to drain a slot rather than silently dropping the byte (the
+         * host reads a bulk-IN packet ~once per 1 ms USB frame).  If it stays
+         * full to the deadline the host isn't reading -- latch tx_stalled so
+         * the rest of a burst drops fast instead of paying the wait per byte
+         * and freezing the console. */
+        uint32_t t0 = _RP2350_REG(RP2350_TIMER0_TIMERAWL);
+        do {
+            tiku_usb_cdc_poll();
+        } while (nxt == u.tx_tail &&
+                 (uint32_t)(_RP2350_REG(RP2350_TIMER0_TIMERAWL) - t0)
+                     < TX_FULL_WAIT_US);
+        u.tx_stalled = (uint8_t)(nxt == u.tx_tail);
+    }
+
     if (nxt != u.tx_tail) {
         u.tx[u.tx_head] = (uint8_t)c;
         u.tx_head = nxt;
+        u.tx_stalled = 0U;   /* took a slot cleanly: the host is draining */
     }
     /* Service the bus so the byte actually leaves and the ring drains. */
     tiku_usb_cdc_poll();
