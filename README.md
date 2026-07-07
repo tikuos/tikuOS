@@ -28,8 +28,7 @@
 
 | Family | Board · core | RAM | NVM | Status |
 |--------|--------------|-----|-----|--------|
-| **MSP430**<br><sub>16-bit · FRAM</sub> | FR5969 LaunchPad | 2 KB | 64 KB | :green_circle: |
-| | FR5994 LaunchPad | 8 KB | 256 KB | :green_circle: |
+| **MSP430**<br><sub>16-bit · FRAM</sub> | FR5994 LaunchPad | 8 KB | 256 KB | :green_circle: |
 | | FR6989 LaunchPad | 2 KB | 128 KB | :green_circle: |
 | **Ambiq Apollo**<br><sub>32-bit · Cortex-M</sub> | Apollo510 EVB · M55 96/250 MHz | 512 KB | 4 MB MRAM | :green_circle: |
 | | Apollo4 Lite EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | :green_circle: |

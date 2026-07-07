@@ -2,12 +2,12 @@
 # TikuOS Makefile
 #
 # Usage:
-#   make MCU=msp430fr5969                      — build for FR5969
-#   make flash MCU=msp430fr5969                — compile + flash
-#   make flash MCU=msp430fr5969 DEBUGGER=tilib — explicit debugger
-#   make debug MCU=msp430fr5969                — compile + start GDB server
-#   make run MCU=msp430fr5969                  — alias for flash
-#   make erase MCU=msp430fr5969                — erase chip
+#   make MCU=msp430fr5994                      — build for FR5994
+#   make flash MCU=msp430fr5994                — compile + flash
+#   make flash MCU=msp430fr5994 DEBUGGER=tilib — explicit debugger
+#   make debug MCU=msp430fr5994                — compile + start GDB server
+#   make run MCU=msp430fr5994                  — alias for flash
+#   make erase MCU=msp430fr5994                — erase chip
 #   make monitor                               — open serial console (auto-detect)
 #   make monitor PORT=/dev/ttyACM1 BAUD=9600   — explicit port/baud
 #   make clean                                 — clean build artifacts
@@ -20,7 +20,7 @@
 .DEFAULT_GOAL := all
 
 # ---------------------------------------------------------------------------
-# Target MCU  (override on command line: make MCU=msp430fr5969 / MCU=rp2350)
+# Target MCU  (override on command line: make MCU=msp430fr5994 / MCU=rp2350)
 # Accepts uppercase (MSP430FR5969 / RP2350) or lowercase MCU names.
 # ---------------------------------------------------------------------------
 MCU ?= $(mcu)
@@ -272,8 +272,8 @@ BUILD_DIR = build/$(MCU)
 
 # ---------------------------------------------------------------------------
 # App selection (mutually exclusive with tests and examples)
-#   make APP=cli MCU=msp430fr5969   — build with CLI app
-#   make MCU=msp430fr5969           — default (tests/examples as before)
+#   make APP=cli MCU=msp430fr5994   — build with CLI app
+#   make MCU=msp430fr5994           — default (tests/examples as before)
 # ---------------------------------------------------------------------------
 APP ?=
 
@@ -288,8 +288,8 @@ TIKU_APP_DIR ?=
 
 # ---------------------------------------------------------------------------
 # Shell service (kernel service — orthogonal to APP/tests/examples)
-#   make TIKU_SHELL_ENABLE=1 MCU=msp430fr5969   — build with shell
-#   make APP=cli MCU=msp430fr5969                — legacy alias (also enables shell)
+#   make TIKU_SHELL_ENABLE=1 MCU=msp430fr5994   — build with shell
+#   make APP=cli MCU=msp430fr5994                — legacy alias (also enables shell)
 #
 # Optional shell add-ons (off by default; opt in alongside the shell):
 #   TIKU_SHELL_BASIC_ENABLE=1   — Tiku BASIC interpreter REPL
@@ -572,6 +572,19 @@ endif
 # concept and the BASIC interpreter is platform-neutral C).
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_PLATFORM),msp430)
+# 0. Parts without HIFRAM (FR5969 64 KB, FR2433 16 KB, and smaller) are no
+#    longer supported build targets.  TikuOS core is the kernel PLUS the VFS
+#    namespace -- the VFS *is* TikuOS, not an add-on -- and that overruns the
+#    ~48 KB a small-model image can address (a bare `make MCU=msp430fr5994`
+#    overflows FRAM by ~25 KB).  Their arch code (device/board headers, linker
+#    scripts) is kept in the tree for reference, but the build refuses them.
+ifneq ($(DEVICE_HAS_HIFRAM),1)
+$(error MCU=$(MCU) is not a supported TikuOS target: the core (kernel + VFS) \
+does not fit a 64-KB-or-smaller MSP430.  Supported MSP430 parts are \
+msp430fr5994 (256 KB) and msp430fr6989 (128 KB).  The FR5969/FR2433 arch code \
+remains in-tree for reference)
+endif
+
 # 1. MEMORY_MODEL=large is only meaningful on parts with HIFRAM (FRAM >
 #    64 KB).  On FR5969 / FR2433 the large model inflates code/data by
 #    ~20-25 % with no upper-FRAM region to spill into.  Refuse the build
