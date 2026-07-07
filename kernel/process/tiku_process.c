@@ -40,6 +40,7 @@
 #include <kernel/threads/tiku_thread.h> /* kernel_wake on every post */
 #endif
 #include <stddef.h>
+#include <stdint.h>   /* uintptr_t for the typed-event payload accessors */
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
@@ -344,9 +345,7 @@ void tiku_process_exit(struct tiku_process *p)
     /* Notify other processes (e.g. timer process) so they can
      * clean up resources belonging to the exited process.  The
      * data pointer carries the exited process's identity. */
-    tiku_process_post(TIKU_PROCESS_BROADCAST,
-                      TIKU_EVENT_EXITED,
-                      (tiku_event_data_t)p);
+    tiku_process_post_proc(TIKU_PROCESS_BROADCAST, TIKU_EVENT_EXITED, p);
 
     /* Supervision: per the process's restart policy, bring it straight back
      * as a fresh instance (same pid) instead of leaving recovery to a human
@@ -492,6 +491,75 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
 #endif
 
     return ret;
+}
+
+/*---------------------------------------------------------------------------*/
+/* TYPED EVENT PAYLOADS                                                       */
+/*---------------------------------------------------------------------------*/
+
+tiku_event_payload_kind_t tiku_event_payload_kind(tiku_event_t ev)
+{
+    switch (ev) {
+    case TIKU_EVENT_EXITED: return TIKU_EVENT_PAYLOAD_PROC;
+    case TIKU_EVENT_VFS:    return TIKU_EVENT_PAYLOAD_NODE;
+    case TIKU_EVENT_TIMER:  return TIKU_EVENT_PAYLOAD_TIMER;
+    case TIKU_EVENT_GPIO:   return TIKU_EVENT_PAYLOAD_U32;
+    case TIKU_EVENT_INIT:   return TIKU_EVENT_PAYLOAD_PTR;
+    default:
+        /* USER-range events carry an app pointer; the system control events
+         * (EXIT/CONTINUE/POLL/FORCE_EXIT) carry nothing. */
+        return (ev >= TIKU_EVENT_USER && ev < TIKU_EVENT_TIMER)
+                   ? TIKU_EVENT_PAYLOAD_PTR
+                   : TIKU_EVENT_PAYLOAD_NONE;
+    }
+}
+
+struct tiku_process *tiku_event_proc(tiku_event_t ev, tiku_event_data_t data)
+{
+    return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_PROC)
+               ? (struct tiku_process *)data
+               : NULL;
+}
+
+const struct tiku_vfs_node *tiku_event_node(tiku_event_t ev,
+                                            tiku_event_data_t data)
+{
+    return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_NODE)
+               ? (const struct tiku_vfs_node *)data
+               : NULL;
+}
+
+struct tiku_timer *tiku_event_timer(tiku_event_t ev, tiku_event_data_t data)
+{
+    return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_TIMER)
+               ? (struct tiku_timer *)data
+               : NULL;
+}
+
+uint32_t tiku_event_u32(tiku_event_t ev, tiku_event_data_t data)
+{
+    return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_U32)
+               ? (uint32_t)(uintptr_t)data
+               : 0u;
+}
+
+void *tiku_event_ptr(tiku_event_t ev, tiku_event_data_t data)
+{
+    return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_PTR) ? data : NULL;
+}
+
+uint8_t tiku_process_post_proc(struct tiku_process *dest, tiku_event_t ev,
+                               struct tiku_process *arg)
+{
+    return tiku_process_post(dest, ev, (tiku_event_data_t)arg);
+}
+
+uint8_t tiku_process_post_node(struct tiku_process *dest, tiku_event_t ev,
+                               const struct tiku_vfs_node *node)
+{
+    /* Payload is read-only to consumers (tiku_event_node returns const); the
+     * wire is a bare void*, so strip const through uintptr_t. */
+    return tiku_process_post(dest, ev, (tiku_event_data_t)(uintptr_t)node);
 }
 
 /**

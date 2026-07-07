@@ -90,6 +90,64 @@
 typedef uint8_t tiku_event_t;
 typedef void *tiku_event_data_t;
 
+/*---------------------------------------------------------------------------*/
+/* TYPED EVENT PAYLOADS                                                       */
+/*---------------------------------------------------------------------------*/
+/*
+ * The event data is a bare void* on the wire, but every event id carries a
+ * FIXED payload type -- EXITED a process, VFS a node, TIMER a timer, GPIO a
+ * packed pin, INIT/USER an opaque app pointer.  That contract used to live
+ * only in comments, and every consumer reconstructed the type with a blind
+ * void*->T* conversion (e.g. `struct tiku_process *p = data;`).  A mis-tagged
+ * event silently misread the payload.
+ *
+ * The id already sits in the queue slot, so it IS the type tag.  We make the
+ * id->payload contract explicit in one place (tiku_event_payload_kind) and
+ * route reads through CHECKED accessors that return the payload only when the
+ * id matches -- so a wrong id yields NULL/0, not a misinterpreted object.  The
+ * wire format is unchanged (no queue growth: matters on 2-8 KB MSP430 parts).
+ *
+ * Payloads owned by higher layers are forward-declared here and never
+ * dereferenced in the process layer -- only cast through -- so the layering
+ * (vfs/timer depend on process, not the reverse) is preserved.
+ */
+struct tiku_vfs_node;
+struct tiku_timer;
+
+/** @brief Payload type an event id carries. */
+typedef enum {
+    TIKU_EVENT_PAYLOAD_NONE = 0,  /**< EXIT/CONTINUE/POLL/FORCE_EXIT: no data */
+    TIKU_EVENT_PAYLOAD_PROC,      /**< struct tiku_process*   (EXITED)        */
+    TIKU_EVENT_PAYLOAD_NODE,      /**< const tiku_vfs_node_t* (VFS)           */
+    TIKU_EVENT_PAYLOAD_TIMER,     /**< struct tiku_timer*     (TIMER)         */
+    TIKU_EVENT_PAYLOAD_U32,       /**< packed small integer   (GPIO)          */
+    TIKU_EVENT_PAYLOAD_PTR        /**< opaque app pointer     (INIT, USER)    */
+} tiku_event_payload_kind_t;
+
+/** @brief The contract: what payload does event @p ev carry? */
+tiku_event_payload_kind_t tiku_event_payload_kind(tiku_event_t ev);
+
+/*
+ * Checked payload accessors.  Each returns the payload ONLY if @p ev actually
+ * carries that kind, else a safe default (NULL / 0).  These replace the blind
+ * void*->T* conversions at every consumer.
+ */
+struct tiku_process        *tiku_event_proc (tiku_event_t ev, tiku_event_data_t data);
+const struct tiku_vfs_node *tiku_event_node (tiku_event_t ev, tiku_event_data_t data);
+struct tiku_timer          *tiku_event_timer(tiku_event_t ev, tiku_event_data_t data);
+uint32_t                    tiku_event_u32  (tiku_event_t ev, tiku_event_data_t data);
+void                       *tiku_event_ptr  (tiku_event_t ev, tiku_event_data_t data);
+
+/*
+ * Typed post helpers: pack the payload in ONE place (the inverse of the
+ * accessors), so the id<->payload contract is enforced on the way in too.
+ * The generic tiku_process_post() still serves NONE / PTR / user events.
+ */
+uint8_t tiku_process_post_proc(struct tiku_process *dest, tiku_event_t ev,
+                               struct tiku_process *arg);
+uint8_t tiku_process_post_node(struct tiku_process *dest, tiku_event_t ev,
+                               const struct tiku_vfs_node *node);
+
 /**
  * @brief Process state for observability
  */

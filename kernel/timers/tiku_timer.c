@@ -112,7 +112,7 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
      * the exited process.
      */
     if (ev == TIKU_EVENT_EXITED) {
-      struct tiku_process *dead = data;
+      struct tiku_process *dead = tiku_event_proc(ev, data);
       struct tiku_timer **pp = &timer_list;
 
       while (*pp != NULL) {

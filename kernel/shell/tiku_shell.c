@@ -1283,11 +1283,12 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
          * so input draining, jobs, and sensor-side rules stay on
          * their tick cadence. */
         if (ev == TIKU_EVENT_VFS) {
+            const tiku_vfs_node_t *changed = tiku_event_node(ev, data);
 #if TIKU_SHELL_CMD_RULES
-            tiku_shell_rules_on_vfs(data);
+            tiku_shell_rules_on_vfs(changed);
 #endif
 #if TIKU_SHELL_CMD_WATCH
-            tiku_shell_cmd_watch_on_vfs(data);
+            tiku_shell_cmd_watch_on_vfs(changed);
 #endif
             continue;
         }

@@ -994,8 +994,7 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node)
 
     for (i = 0; i < TIKU_VFS_WATCH_MAX; i++) {
         if (watch_table[i].node == node) {
-            tiku_process_post(watch_table[i].proc, TIKU_EVENT_VFS,
-                              (tiku_event_data_t)(uintptr_t)node);
+            tiku_process_post_node(watch_table[i].proc, TIKU_EVENT_VFS, node);
         }
     }
 }
