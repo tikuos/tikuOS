@@ -264,6 +264,8 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     p->state = TIKU_PROCESS_STATE_READY;
     p->start_time = tiku_clock_time();
     p->wake_count = 0;
+    p->exit_reason = (uint8_t)TIKU_EXIT_NONE;   /* fresh instance */
+    p->init_data = data;                        /* replayed if supervised */
 
     tiku_atomic_exit();
 
@@ -295,6 +297,21 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
  *
  * @param p Process to exit
  */
+/* Supervision (definitions below tiku_process_exit, which calls this). */
+static void supervisor_on_exit(struct tiku_process *p);
+
+/** Restart-storm cap: at most this many restarts within the window before
+ *  the supervisor gives up (falls back to NEVER) rather than looping. */
+#ifndef TIKU_SUPERVISOR_MAX_BURST
+#define TIKU_SUPERVISOR_MAX_BURST   5u
+#endif
+/** Window (ticks) over which restarts are counted toward the burst cap.
+ *  Restarts spaced further apart than this reset the count -- only a genuine
+ *  storm trips it. */
+#ifndef TIKU_SUPERVISOR_WINDOW_TICKS
+#define TIKU_SUPERVISOR_WINDOW_TICKS  (5u * TIKU_CLOCK_SECOND)
+#endif
+
 void tiku_process_exit(struct tiku_process *p)
 {
     struct tiku_process *q;
@@ -330,6 +347,90 @@ void tiku_process_exit(struct tiku_process *p)
     tiku_process_post(TIKU_PROCESS_BROADCAST,
                       TIKU_EVENT_EXITED,
                       (tiku_event_data_t)p);
+
+    /* Supervision: per the process's restart policy, bring it straight back
+     * as a fresh instance (same pid) instead of leaving recovery to a human
+     * or a whole-board reboot.  NEVER (the default) makes this a no-op, so
+     * unsupervised processes are unaffected. */
+    supervisor_on_exit(p);
+}
+
+/*---------------------------------------------------------------------------*/
+/* SUPERVISION                                                                */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Restart @p p per its policy.  ALWAYS restarts on any exit; ON_FAILURE only
+ * when it ended FAILED.  A restart is a fresh tiku_process_start() -- the pid
+ * + registry slot survived tiku_process_exit(), so the new instance keeps the
+ * same identity and stays observable, and only this process is touched (the
+ * rest of the system keeps running).  A storm -- too many restarts inside the
+ * window -- trips the burst cap: the policy is forced to NEVER so the run loop
+ * can't spin on a process that fails immediately on every restart.
+ */
+static void supervisor_on_exit(struct tiku_process *p)
+{
+    tiku_clock_time_t now;
+
+    if (p->restart == (uint8_t)TIKU_RESTART_NEVER) {
+        return;
+    }
+    if (p->restart == (uint8_t)TIKU_RESTART_ON_FAILURE &&
+        p->exit_reason != (uint8_t)TIKU_EXIT_FAILED) {
+        return;                     /* clean exit + ON_FAILURE -> leave stopped */
+    }
+
+    now = tiku_clock_time();
+    /* A restart spaced further than the window from the last one starts a
+     * fresh burst -- only a genuine storm accumulates toward the cap. */
+    if ((tiku_clock_time_t)(now - p->restart_at) >
+        (tiku_clock_time_t)TIKU_SUPERVISOR_WINDOW_TICKS) {
+        p->restart_burst = 0;
+    }
+    if (p->restart_burst >= (uint8_t)TIKU_SUPERVISOR_MAX_BURST) {
+        /* Give up rather than loop: leave STOPPED and disarm supervision
+         * until something re-arms it. */
+        p->restart = (uint8_t)TIKU_RESTART_NEVER;
+        return;
+    }
+
+    p->restart_burst++;
+    if (p->restart_total != 0xFFFFu) {
+        p->restart_total++;
+    }
+    p->restart_at = now;
+
+    tiku_process_start(p, p->init_data);        /* fresh instance, same pid */
+}
+
+void tiku_process_set_restart(struct tiku_process *p,
+                              tiku_restart_policy_t policy)
+{
+    if (p != NULL) {
+        p->restart = (uint8_t)policy;
+    }
+}
+
+void tiku_process_fail(struct tiku_process *p)
+{
+    if (p != NULL) {
+        p->exit_reason = (uint8_t)TIKU_EXIT_FAILED;
+    }
+}
+
+tiku_restart_policy_t tiku_process_get_restart(const struct tiku_process *p)
+{
+    return (p != NULL) ? (tiku_restart_policy_t)p->restart : TIKU_RESTART_NEVER;
+}
+
+tiku_exit_reason_t tiku_process_exit_reason(const struct tiku_process *p)
+{
+    return (p != NULL) ? (tiku_exit_reason_t)p->exit_reason : TIKU_EXIT_NONE;
+}
+
+uint16_t tiku_process_restarts(const struct tiku_process *p)
+{
+    return (p != NULL) ? p->restart_total : 0u;
 }
 
 /**
@@ -616,6 +717,12 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
         ret = p->thread(&p->pt, ev, data);
         if (ret == PT_EXITED || ret == PT_ENDED ||
             ev == TIKU_EVENT_FORCE_EXIT) {
+            /* Record how it ended: a clean protothread end is DONE unless the
+             * process flagged itself FAILED (tiku_process_fail).  This is the
+             * signal ON_FAILURE supervision keys on in tiku_process_exit(). */
+            if (p->exit_reason != (uint8_t)TIKU_EXIT_FAILED) {
+                p->exit_reason = (uint8_t)TIKU_EXIT_DONE;
+            }
             tiku_current_process = NULL;
             tiku_process_exit(p);
         } else {

@@ -101,6 +101,32 @@ typedef enum {
     TIKU_PROCESS_STATE_STOPPED  = 4
 } tiku_process_state_t;
 
+/**
+ * @brief Per-process restart policy (supervision).
+ *
+ * When a process exits, the supervisor (tiku_process_exit) consults this
+ * to decide whether to bring it straight back -- a fresh instance, same
+ * pid -- instead of the recovery being manual (or a whole-board reboot).
+ * NEVER is the default, so unset processes behave exactly as before.
+ */
+typedef enum {
+    TIKU_RESTART_NEVER      = 0,  /**< one-shot; never auto-restarted (default) */
+    TIKU_RESTART_ON_FAILURE = 1,  /**< restarted only if it FAILED, not on clean end */
+    TIKU_RESTART_ALWAYS     = 2   /**< restarted on any exit (a service) */
+} tiku_restart_policy_t;
+
+/**
+ * @brief How a process ended -- the signal ON_FAILURE supervision keys on.
+ *
+ * A clean protothread end (PROCESS_END / return) is DONE; a process marks
+ * itself FAILED via tiku_process_fail() before it ends.  NONE while running.
+ */
+typedef enum {
+    TIKU_EXIT_NONE   = 0,  /**< running / never exited */
+    TIKU_EXIT_DONE   = 1,  /**< finished cleanly */
+    TIKU_EXIT_FAILED = 2   /**< failed (tiku_process_fail) */
+} tiku_exit_reason_t;
+
 /*---------------------------------------------------------------------------*/
 /* PROCESS STRUCTURE                                                         */
 /*---------------------------------------------------------------------------*/
@@ -139,6 +165,13 @@ typedef struct tiku_process {
                                          which report measured + declared.  A
                                          bump allocator cannot misreport, so
                                          attached beats advertised. */
+    /* --- Supervision (per-process restart policy) --- */
+    uint8_t  restart;               /**< tiku_restart_policy_t; 0 = NEVER      */
+    uint8_t  exit_reason;           /**< tiku_exit_reason_t; set at exit        */
+    uint8_t  restart_burst;         /**< restarts inside the current backoff window */
+    uint16_t restart_total;         /**< lifetime restarts (observability)      */
+    tiku_clock_time_t restart_at;   /**< tick of the last restart (window base) */
+    tiku_event_data_t init_data;    /**< INIT payload, replayed on restart      */
 } tiku_process_t;
 
 /*---------------------------------------------------------------------------*/
@@ -371,6 +404,42 @@ void tiku_process_start(struct tiku_process *p,
  * @param p Process to exit
  */
 void tiku_process_exit(struct tiku_process *p);
+
+/*---------------------------------------------------------------------------*/
+/* SUPERVISION (per-process restart policy)                                  */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Set a process's restart policy.
+ *
+ * With NEVER (the default) a process that exits stays stopped -- recovery
+ * is manual, exactly as before.  ON_FAILURE brings it back only if it
+ * FAILED; ALWAYS brings it back on any exit.  A restart is a FRESH instance
+ * (protothread re-initialised, INIT replayed) reusing the same pid, and
+ * only the exited process is touched -- the rest of the system runs on.
+ * A restart storm (too many restarts too fast) trips a cap: the policy
+ * falls back to NEVER and the process is left stopped rather than looping.
+ */
+void tiku_process_set_restart(struct tiku_process *p,
+                              tiku_restart_policy_t policy);
+
+/**
+ * @brief Mark @p p as FAILED so ON_FAILURE / ALWAYS supervision restarts it.
+ *
+ * Call from inside the process (typically `tiku_process_fail(TIKU_THIS())`)
+ * on an unrecoverable error, then end the protothread (PROCESS_END / return).
+ * Without this a normal end counts as a clean exit (ON_FAILURE won't restart).
+ */
+void tiku_process_fail(struct tiku_process *p);
+
+/** @brief Current restart policy of @p p. */
+tiku_restart_policy_t tiku_process_get_restart(const struct tiku_process *p);
+
+/** @brief How @p p last exited (NONE while running). */
+tiku_exit_reason_t tiku_process_exit_reason(const struct tiku_process *p);
+
+/** @brief Lifetime count of supervisor restarts of @p p. */
+uint16_t tiku_process_restarts(const struct tiku_process *p);
 
 /**
  * @brief Post an event to a process
