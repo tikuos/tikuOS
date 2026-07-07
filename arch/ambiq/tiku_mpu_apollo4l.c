@@ -201,9 +201,9 @@ void tiku_mpu_arch_init_segments(void) {
         ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_FULL, 1U, 0U, 0U, 0U, 0U,
                      MPU_RAM_SIZE));
 
-    /* Region 2: 32-byte stack guard, MPU_STACK_RESERVED_BYTES below the stack
+    /* Region 2: 4 KB stack guard, MPU_STACK_RESERVED_BYTES below the stack
      * top -- no access, execute-never. PMSAv7 gives the highest-numbered region
-     * precedence on overlap, so this overrides region 1's RW for its 32 bytes:
+     * precedence on overlap, so this overrides region 1's RW for its 4 KB:
      * a stack that overflows past its budget faults here before it can reach
      * .data/.bss/.uninit far below. */
     {

@@ -672,7 +672,8 @@ static const tiku_vfs_node_t sys_sched_children[] = {
 
 /** /sys/device directory table — name is the only writable node */
 static const tiku_vfs_node_t sys_device_children[] = {
-    { "name",    TIKU_VFS_FILE, device_name_read,    device_name_write, NULL, 0 },
+    { "name",    TIKU_VFS_FILE, device_name_read,    device_name_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_FS },   /* writes commit to the persistent store */
     { "id",      TIKU_VFS_FILE, device_id_read,      NULL,              NULL, 0 },
     { "mcu",     TIKU_VFS_FILE, device_mcu_read,     NULL,              NULL, 0 },
     { "version", TIKU_VFS_FILE, device_version_read, NULL,              NULL, 0 },

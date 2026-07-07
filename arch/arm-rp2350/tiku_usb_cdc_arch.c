@@ -38,6 +38,7 @@
 
 #include <arch/arm-rp2350/tiku_usb_cdc_arch.h>
 #include <arch/arm-rp2350/tiku_rp2350_regs.h>
+#include <kernel/vfs/tiku_vfs.h>   /* TIKU_VFS_CAP_ALL for the console backend */
 #include <stdarg.h>
 #include <stddef.h>
 
@@ -691,5 +692,8 @@ const tiku_shell_io_t tiku_shell_io_usbcdc = {
     tiku_usb_cdc_putc,
     tiku_usb_cdc_rx_ready,
     tiku_usb_cdc_getc,
-    TIKU_SHELL_IO_ECHO | TIKU_SHELL_IO_CRLF
+    TIKU_SHELL_IO_ECHO | TIKU_SHELL_IO_CRLF,
+    TIKU_VFS_CAP_ALL   /* native-USB console = full authority (like UART); without
+                        * this the fail-closed default (CAP_NONE) would EPERM every
+                        * HW/SYS/FS write from the local console */
 };

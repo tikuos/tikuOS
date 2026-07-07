@@ -25,7 +25,7 @@
 # ---------------------------------------------------------------------------
 MCU ?= $(mcu)
 ifeq ($(MCU),)
-MCU = msp430fr2433
+MCU = msp430fr5994          # a bare `make` builds a supported target (FR2433 no longer fits)
 endif
 MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 
