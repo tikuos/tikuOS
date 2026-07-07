@@ -309,6 +309,29 @@ int tiku_thread_worker_ready(void)
     return 0;
 }
 
+uint8_t tiku_thread_count(void)
+{
+    /* The slot capacity to iterate; tiku_thread_get() returns NULL for an
+     * empty slot, so callers skip those. */
+    return (uint8_t)TIKU_THREADS_MAX;
+}
+
+tiku_thread_t *tiku_thread_get(uint8_t i)
+{
+    return (i < (uint8_t)TIKU_THREADS_MAX) ? s_threads[i] : (tiku_thread_t *)0;
+}
+
+tiku_thread_state_t tiku_thread_state(const tiku_thread_t *t)
+{
+    return (t != (const tiku_thread_t *)0) ? t->state : TIKU_THREAD_DONE;
+}
+
+int tiku_thread_is_done(const tiku_thread_t *t)
+{
+    /* A NULL/never-started worker reads as done so an await can't hang. */
+    return (t == (const tiku_thread_t *)0) || (t->state == TIKU_THREAD_DONE);
+}
+
 /*---------------------------------------------------------------------------*/
 /* ENERGY BUDGET                                                             */
 /*---------------------------------------------------------------------------*/

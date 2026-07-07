@@ -277,11 +277,25 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
  * /sys/vfs directory table.  Exported for tiku_vfs_tree_sys.c; the
  * entry count travels as TIKU_VFS_TREE_VFS_NCHILD.
  */
+/*
+ * Manifest schema version -- bump when the manifest LINE FORMAT changes so an
+ * external agent consuming /sys/vfs/manifest can pin or adapt instead of
+ * silently mis-parsing.  rev 2 = the five-column form (path type perms meta
+ * cap); rev 1 was the pre-capability four-column form.
+ */
+#define TIKU_VFS_MANIFEST_REV  2u
+
+static int vfs_manifest_rev_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", (unsigned)TIKU_VFS_MANIFEST_REV);
+}
+
 const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
-    { "nodes",    TIKU_VFS_FILE, vfs_nodes_read,    NULL, NULL, 0 },
-    { "depth",    TIKU_VFS_FILE, vfs_depth_read,    NULL, NULL, 0 },
-    { "manifest", TIKU_VFS_FILE, vfs_manifest_read, NULL, NULL, 0 },
-    { "cache",    TIKU_VFS_DIR,  NULL, NULL, vfs_cache_children,
+    { "nodes",        TIKU_VFS_FILE, vfs_nodes_read,        NULL, NULL, 0 },
+    { "depth",        TIKU_VFS_FILE, vfs_depth_read,        NULL, NULL, 0 },
+    { "manifest",     TIKU_VFS_FILE, vfs_manifest_read,     NULL, NULL, 0 },
+    { "manifest_rev", TIKU_VFS_FILE, vfs_manifest_rev_read, NULL, NULL, 0 },
+    { "cache",        TIKU_VFS_DIR,  NULL, NULL, vfs_cache_children,
       sizeof(vfs_cache_children) / sizeof(vfs_cache_children[0]) },
 };
 

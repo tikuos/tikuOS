@@ -174,6 +174,30 @@ uint16_t tiku_thread_canary_faults(void);
 /** Non-zero in kernel/boot context, zero inside a worker (any context). */
 int tiku_thread_in_kernel(void);
 
+/** @brief Number of registered worker slots (live or done). */
+uint8_t tiku_thread_count(void);
+
+/** @brief The i-th registered worker (0..count-1), or NULL. */
+tiku_thread_t *tiku_thread_get(uint8_t i);
+
+/** @brief Current state of @p t (READY / RUNNING / DONE / ...). */
+tiku_thread_state_t tiku_thread_state(const tiku_thread_t *t);
+
+/** @brief Non-zero once @p t has finished (joinable). */
+int tiku_thread_is_done(const tiku_thread_t *t);
+
+/**
+ * @brief Park the calling PROCESS until worker @p t finishes.
+ *
+ * A protothread-level await: the process YIELDS to the scheduler each pass
+ * (so the kernel keeps running) and resumes when @p t is DONE -- instead of
+ * busy-driving the pump from a nested call.  Use inside a
+ * TIKU_PROCESS_THREAD.  (The FETCH/TLS offload can't use this: it runs mid
+ * C-callstack where a protothread cannot yield -- that path stays a driven
+ * pump until the tikukits handshake is restructured.)
+ */
+#define TIKU_WAIT_WORKER(t)  PT_YIELD_UNTIL(process_pt, tiku_thread_is_done(t))
+
 /*---------------------------------------------------------------------------*/
 /* ENERGY BUDGET (cycle-quota enforcement)                                   */
 /*---------------------------------------------------------------------------*/
