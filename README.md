@@ -138,7 +138,7 @@ A unified namespace for the entire system — peripherals, OS state, config, and
 │   ├── device/
 │   │   ├── name             user-set device name (FRAM-backed, R/W)
 │   │   ├── id               unique tiku-XXXX hostname-style ID
-│   │   ├── mcu              silicon part number ("MSP430FR5969")
+│   │   ├── mcu              silicon part number ("MSP430FR5994")
 │   │   └── version          OS version string
 │   ├── uptime               seconds since boot
 │   ├── mem/
