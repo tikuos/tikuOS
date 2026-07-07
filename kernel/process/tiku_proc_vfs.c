@@ -148,9 +148,16 @@
  * Static storage for the /proc VFS tree.  Every array here is
  * rebuilt from scratch by tiku_proc_vfs_get() on each call so the
  * tree reflects the current registry state.  Because the contents
- * change at runtime, the tables cannot be const; they live in the
- * .persistent (FRAM) section and are written only inside the
- * MPU-unlock window of tiku_proc_vfs_get().
+ * change at runtime, the tables cannot be const; they carry the
+ * TIKU_PERSIST_WARM grade and are written only inside the MPU-unlock
+ * window of tiku_proc_vfs_get().
+ *
+ * WARM, not durable `.persistent`: these tables are REBUILT on every
+ * tiku_proc_vfs_get() call, so power-cycle durability buys nothing.
+ * On MSP430 WARM is FRAM anyway (big tables stay off the tiny SRAM,
+ * and the FRAM writes still need the MPU unlock).  On RP2350/Ambiq
+ * WARM sits outside the NVM mirror — ~3.6 KB of rebuilt scratch was
+ * overflowing RP2350's 4 KB flash backup sector as durable state.
  *
  * Layout (a fully populated example):
  *   proc_root ("proc", DIR)
@@ -165,10 +172,10 @@
  *
  * pid_files[pid][0..PROC_FILES_PER_PID-1] holds the name/state/pid/
  * ... file nodes for process slot pid; build_pid_files() fills one
- * row.  In the .persistent (FRAM) section, so writes require the MPU
- * unlock held during the rebuild.
+ * row.  WARM grade (see the section comment above), so writes require
+ * the MPU unlock held during the rebuild on MSP430 only.
  */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
+static TIKU_PERSIST_WARM tiku_vfs_node_t
     pid_files[TIKU_PROCESS_MAX][PROC_FILES_PER_PID];
 
 /**
@@ -192,10 +199,10 @@ static tiku_vfs_node_t __attribute__((section(".persistent")))
  *
  * Holds the fixed entries (count, queue, catalog, optional wifi/bt)
  * followed by up to one directory per registered process.  Sized for
- * the worst case (all pid slots used plus every fixed entry).  FRAM
- * (.persistent); rewritten on each tiku_proc_vfs_get() call.
+ * the worst case (all pid slots used plus every fixed entry).  WARM
+ * grade; rewritten on each tiku_proc_vfs_get() call.
  */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
+static TIKU_PERSIST_WARM tiku_vfs_node_t
     proc_children[TIKU_PROCESS_MAX + PROC_FIXED_KIDS];
 
 /**
@@ -214,9 +221,9 @@ static const char * const pid_names[] = {
  *
  * Stamped at the end of tiku_proc_vfs_get() to point at
  * proc_children[] with the freshly computed child count; its address
- * is what the caller receives.  FRAM (.persistent).
+ * is what the caller receives.  WARM grade.
  */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
+static TIKU_PERSIST_WARM tiku_vfs_node_t
     proc_root;
 
 /*---------------------------------------------------------------------------*/
@@ -953,20 +960,20 @@ static const tiku_vfs_read_fn catalog_name_readers[PROC_CATALOG_VFS_MAX] = {
  *
  * catalog_entry_files[i][0] is the "name" node for catalog directory
  * i; the inner dimension is 1 because each catalog entry currently
- * exposes only its name.  FRAM (.persistent); written inside the
+ * exposes only its name.  WARM grade; written inside the
  * tiku_proc_vfs_get() unlock window.
  */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
+static TIKU_PERSIST_WARM tiku_vfs_node_t
     catalog_entry_files[PROC_CATALOG_VFS_MAX][1];
 
 /**
  * Child-node table for the /proc/catalog directory.
  *
  * Slot 0 is the "count" file; the remaining slots hold one directory
- * per populated catalog entry.  FRAM (.persistent); rebuilt on each
+ * per populated catalog entry.  WARM grade; rebuilt on each
  * tiku_proc_vfs_get() call.
  */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
+static TIKU_PERSIST_WARM tiku_vfs_node_t
     catalog_children[1 + PROC_CATALOG_VFS_MAX];
 
 /* Catalog entry directory names are reused from pid_names[] above. */
