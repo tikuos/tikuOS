@@ -40,3 +40,17 @@ void tiku_cpu_ambiq_watchdog_resume_arch(int kick_on_resume) {
 /** @brief Kick (pet) the watchdog (placeholder). */
 void tiku_cpu_ambiq_watchdog_kick_arch(void) {
 }
+
+/*
+ * Reset for the check-in hang watchdog (tiku_hang).  The Ambiq hardware
+ * watchdog is still a placeholder, so the software detector drives the reset
+ * directly through the Cortex-M core: NVIC_SystemReset() is a warm reset, so
+ * the .persistent.warm culprit record survives to the recovery boot.
+ */
+#include "apollo4l.h"                 /* CMSIS: NVIC_SystemReset */
+#include "kernel/cpu/tiku_hang.h"
+
+void tiku_hang_arch_reset(void) {
+    NVIC_SystemReset();
+    for (;;) { }                      /* unreachable */
+}

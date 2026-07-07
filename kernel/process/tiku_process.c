@@ -39,6 +39,7 @@
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 #include <kernel/threads/tiku_thread.h> /* kernel_wake on every post */
 #endif
+#include <kernel/cpu/tiku_hang.h>    /* one-shot quarantine of a hung process */
 #include <stddef.h>
 #include <stdint.h>   /* uintptr_t for the typed-event payload accessors */
 #include <string.h>
@@ -830,6 +831,15 @@ void tiku_autostart_start(struct tiku_process * const processes[])
     int i;
 
     for (i = 0; processes[i] != NULL; i++) {
+        if (tiku_hang_is_culprit(processes[i])) {
+            /* One-shot quarantine: this process wedged the scheduler before
+             * the last reset, so skip it on the recovery boot -- it can't
+             * hang the board again from autostart.  The record is cleared for
+             * the next boot, which starts it normally. */
+            PROCESS_PRINTF("Quarantine: skipping %s (hung last boot)\n",
+                           processes[i]->name);
+            continue;
+        }
         PROCESS_PRINTF("Autostart: %s\n", processes[i]->name);
         tiku_process_start(processes[i], NULL);
     }

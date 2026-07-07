@@ -43,7 +43,7 @@
  * tiku_vfs_tree_boot_children — bump it when adding a node there
  * (a _Static_assert in the .c catches a forgotten update).
  */
-#define TIKU_VFS_TREE_BOOT_NCHILD  6
+#define TIKU_VFS_TREE_BOOT_NCHILD  7
 
 /**
  * @brief /sys/boot children: reason, count, stage, rstiv, clock/,

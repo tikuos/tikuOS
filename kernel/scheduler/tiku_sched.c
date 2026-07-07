@@ -33,6 +33,7 @@
 #include "tiku_sched.h"
 #include "../timers/tiku_htimer.h"
 #include <hal/tiku_cpu.h>
+#include <kernel/cpu/tiku_hang.h>          /* check-in watchdog heartbeat */
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 #include <kernel/threads/tiku_thread.h>   /* worker handoff in idle */
 #endif
@@ -156,11 +157,18 @@ void tiku_sched_loop(void)
      * which preserves GIE state, so once enabled here it stays on. */
     tiku_cpu_irq_enable();
 
+    /* Arm the check-in hang watchdog: from here the tick ISR watches for a
+     * process that wedges this loop.  (Only here -- a test harness that never
+     * enters this loop leaves the detector dormant.) */
+    tiku_hang_arm();
+
     while (sched_state == TIKU_SCHED_RUNNING) {
 
-        /* Drain all pending work */
+        /* Drain all pending work.  The heartbeat advances once per dispatched
+         * event; a process that wedges inside run_once() never lets it turn,
+         * which is exactly what the tick-ISR hang detector watches for. */
         while (tiku_sched_run_once()) {
-            /* keep dispatching */
+            tiku_hang_checkin();
         }
 
         /*

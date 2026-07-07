@@ -27,6 +27,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_cpu_common.h"   /* tiku_cpu_ambiq_delay_us (bare-metal, calibrated) */
 #include "kernel/scheduler/tiku_sched.h"
+#include "kernel/cpu/tiku_hang.h"   /* per-tick live-hang detector */
 
 /**
  * @defgroup SYST Cortex-M SysTick registers (System Control Space)
@@ -107,6 +108,12 @@ void tiku_ambiq_tick_advance_n(unsigned long n) {
         s_subsec   = s_subsec % TIKU_CLOCK_ARCH_SECOND;
     }
     tiku_sched_notify();
+
+    /* Watch for a process that has wedged the cooperative loop.  This ISR
+     * preempts even a never-yielding thread, so it fires at the full tick
+     * rate during a hang (a busy loop is never idle -> tickless never
+     * stretches it).  On a confirmed hang it records the culprit and resets. */
+    tiku_hang_tick();
 }
 
 /**
