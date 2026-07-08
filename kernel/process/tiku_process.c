@@ -62,6 +62,7 @@
 struct event_item {
     tiku_event_data_t data;     /**< Opaque payload passed to the thread */
     struct tiku_process *p;     /**< Target process, or BROADCAST (NULL) */
+    uint8_t generation;         /**< Target generation when event was posted */
     tiku_event_t ev;            /**< Event identifier (TIKU_EVENT_*) */
 };
 
@@ -125,6 +126,54 @@ static volatile uint16_t q_dropped = 0;
 static inline uint8_t event_is_system(tiku_event_t ev)
 {
     return (ev < TIKU_EVENT_USER) || (ev >= TIKU_EVENT_TIMER);
+}
+
+/**
+ * @brief Return the event generation for a target process
+ *
+ * Broadcast events are expanded at dispatch time and do not name one
+ * process lifetime, so they carry generation 0.  Unicast events carry the
+ * target's current generation so a stale event posted for an old lifetime
+ * can be dropped after supervision restarts the same process structure.
+ */
+static inline uint8_t event_generation(const struct tiku_process *p)
+{
+    return (p != TIKU_PROCESS_BROADCAST) ? p->generation : 0u;
+}
+
+/**
+ * @brief Drop queued unicast events for @p p
+ *
+ * Must be called with the process queue atomic section already held.
+ * Broadcasts are kept because they are not private wakeups for @p p; the
+ * existing dispatch semantics deliver them to whichever processes are
+ * running when the broadcast reaches the head of the queue.
+ */
+static void queue_purge_process_locked(const struct tiku_process *p)
+{
+    uint8_t i;
+    uint8_t new_len = 0;
+    uint8_t old_len = q_len;
+
+    for (i = 0; i < old_len; i++) {
+        uint8_t old_idx = (uint8_t)((q_head + i) % TIKU_QUEUE_SIZE);
+
+        if (queue[old_idx].p != p) {
+            uint8_t new_idx = (uint8_t)((q_head + new_len) % TIKU_QUEUE_SIZE);
+            if (new_idx != old_idx) {
+                queue[new_idx] = queue[old_idx];
+            }
+            new_len++;
+        }
+    }
+
+    q_len = new_len;
+}
+
+static inline uint8_t event_is_stale(const struct tiku_process *p,
+                                     uint8_t generation)
+{
+    return p != TIKU_PROCESS_BROADCAST && generation != p->generation;
 }
 
 /**
@@ -259,6 +308,10 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     tiku_atomic_enter();
 
     PT_INIT(&p->pt);
+    p->generation++;
+    if (p->generation == 0u) {
+        p->generation = 1u;
+    }
 
     p->next = tiku_process_list_head;
     tiku_process_list_head = p;
@@ -340,6 +393,7 @@ void tiku_process_exit(struct tiku_process *p)
             }
         }
     }
+    queue_purge_process_locked(p);
 
     tiku_atomic_exit();
 
@@ -475,6 +529,7 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
         queue[idx].ev = ev;
         queue[idx].data = data;
         queue[idx].p = p;
+        queue[idx].generation = event_generation(p);
         q_len++;
         ret = 1;
     } else {
@@ -591,6 +646,7 @@ uint8_t tiku_process_run(void)
     tiku_event_t ev;
     tiku_event_data_t data;
     struct tiku_process *receiver;
+    uint8_t generation;
 
     tiku_atomic_enter();
 
@@ -602,12 +658,16 @@ uint8_t tiku_process_run(void)
     ev = queue[q_head].ev;
     data = queue[q_head].data;
     receiver = queue[q_head].p;
+    generation = queue[q_head].generation;
     q_head = (q_head + 1) % TIKU_QUEUE_SIZE;
     q_len--;
 
     tiku_atomic_exit();
 
     /* Dispatch outside atomic section to avoid long interrupt latency */
+    if (event_is_stale(receiver, generation)) {
+        return 1;
+    }
     if (receiver == TIKU_PROCESS_BROADCAST) {
         struct tiku_process *p, *next;
         for (p = tiku_process_list_head; p != NULL; p = next) {
@@ -644,6 +704,7 @@ uint8_t tiku_process_run_except(const struct tiku_process *skip)
     tiku_event_t ev;
     tiku_event_data_t data;
     struct tiku_process *receiver;
+    uint8_t generation;
 
     tiku_atomic_enter();
 
@@ -655,11 +716,15 @@ uint8_t tiku_process_run_except(const struct tiku_process *skip)
     ev = queue[q_head].ev;
     data = queue[q_head].data;
     receiver = queue[q_head].p;
+    generation = queue[q_head].generation;
     q_head = (q_head + 1) % TIKU_QUEUE_SIZE;
     q_len--;
 
     tiku_atomic_exit();
 
+    if (event_is_stale(receiver, generation)) {
+        return 1;
+    }
     if (receiver == skip) {
         return 1;                        /* consume without re-entering skip */
     }
@@ -729,6 +794,7 @@ void tiku_process_poll(struct tiku_process *p)
         queue[idx].ev   = TIKU_EVENT_POLL;
         queue[idx].data = NULL;
         queue[idx].p    = p;
+        queue[idx].generation = event_generation(p);
         q_len++;
     } else {
         q_dropped++;

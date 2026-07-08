@@ -205,6 +205,7 @@ typedef struct tiku_process {
         tiku_event_data_t));        /**< Process thread function */
     struct pt pt;                   /**< Protothread control state */
     uint8_t is_running;             /**< Non-zero if process is active */
+    uint8_t generation;             /**< Fresh-instance tag for queued events */
     void *local;                    /**< Per-process local storage pointer.
                                          NULL if no local state.
                                          Points to a user-defined static
@@ -264,22 +265,28 @@ struct tiku_msg {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @def TIKU_PROCESS(name, strname)
+ * @def TIKU_PROCESS(proc, strname)
  * @brief Declare and define a process (no local storage)
  *
  * For processes that do not need persistent local state across yields.
  * The local pointer is initialized to NULL.
  */
-#define TIKU_PROCESS(name, strname)                                         \
-    TIKU_PROCESS_THREAD(name, ev, data);                                    \
-    struct tiku_process name = {                                             \
-        NULL, strname, tiku_process_thread_##name, {0}, 0,                   \
-        NULL, /* local = NULL */                                             \
-        TIKU_PROCESS_STATE_STOPPED, -1, 0, 0, 0, 0                          \
+#define TIKU_PROCESS(proc, strname)                                         \
+    TIKU_PROCESS_THREAD(proc, ev, data);                                    \
+    struct tiku_process proc = {                                             \
+        .next = NULL,                                                        \
+        .name = strname,                                                     \
+        .thread = tiku_process_thread_##proc,                                \
+        .pt = {0},                                                           \
+        .is_running = 0,                                                     \
+        .generation = 0,                                                     \
+        .local = NULL,                                                       \
+        .state = TIKU_PROCESS_STATE_STOPPED,                                 \
+        .pid = -1,                                                           \
     }
 
 /**
- * @def TIKU_PROCESS_WITH_LOCAL(name, strname, local_type)
+ * @def TIKU_PROCESS_WITH_LOCAL(proc, strname, local_type)
  * @brief Declare and define a process with typed local storage
  *
  * Allocates a static instance of local_type and wires the pointer
@@ -289,7 +296,7 @@ struct tiku_msg {
  * If the process is restarted, the storage retains its previous values.
  * Initialize explicitly in the thread body if clean-slate is needed.
  *
- * @param name       Process variable name
+ * @param proc       Process variable name
  * @param strname    Human-readable name string
  * @param local_type The struct type for local storage
  *
@@ -299,13 +306,19 @@ struct tiku_msg {
  *   TIKU_PROCESS_WITH_LOCAL(my_proc, "my process", struct my_state);
  * @endcode
  */
-#define TIKU_PROCESS_WITH_LOCAL(name, strname, local_type)                  \
-    TIKU_PROCESS_THREAD(name, ev, data);                                    \
-    static local_type tiku_local_##name;                                    \
-    struct tiku_process name = {                                             \
-        NULL, strname, tiku_process_thread_##name, {0}, 0,                   \
-        &tiku_local_##name, /* local wired at compile time */                \
-        TIKU_PROCESS_STATE_STOPPED, -1, 0, 0, 0, 0                          \
+#define TIKU_PROCESS_WITH_LOCAL(proc, strname, local_type)                  \
+    TIKU_PROCESS_THREAD(proc, ev, data);                                    \
+    static local_type tiku_local_##proc;                                    \
+    struct tiku_process proc = {                                             \
+        .next = NULL,                                                        \
+        .name = strname,                                                     \
+        .thread = tiku_process_thread_##proc,                                \
+        .pt = {0},                                                           \
+        .is_running = 0,                                                     \
+        .generation = 0,                                                     \
+        .local = &tiku_local_##proc,                                         \
+        .state = TIKU_PROCESS_STATE_STOPPED,                                 \
+        .pid = -1,                                                           \
     }
 
 /**
