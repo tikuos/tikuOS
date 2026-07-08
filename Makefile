@@ -232,6 +232,13 @@ JLINK           ?= JLinkExe
 JLINK_GDB       ?= JLinkGDBServer
 JLINK_IF        ?= SWD
 JLINK_SPEED     ?= 4000
+# Select a specific J-Link probe by its serial number.  Every SEGGER J-Link
+# reports the same USB VID (0x1366), so on a rig with several Ambiq EVBs the
+# probe serial is the only thing that tells them apart -- pass
+# `make flash MCU=apollo4l JLINK_SN=001160001290` to flash exactly that board.
+# Empty (the default) lets JLinkExe pick the sole connected probe.
+JLINK_SN        ?=
+JLINK_SN_ARG    := $(if $(strip $(JLINK_SN)),-SelectEmuBySN $(strip $(JLINK_SN)),)
 # J-Link device + MRAM load address differ per Ambiq part.
 ifeq ($(MCU),apollo4l)
 JLINK_DEVICE    ?= AMAP42KL-KBR
@@ -2150,7 +2157,7 @@ flash: all
 	@mkdir -p $(BUILD_DIR)
 	@printf 'device %s\nif %s\nspeed %s\nconnect\nloadbin %s %s\n$(JLINK_RUN_SEQ)\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
 	@echo "Flashing $(TARGET_BIN) -> MRAM $(AMBIQ_LOAD_ADDR) via $(JLINK) ($(JLINK_DEVICE))..."
-	$(JLINK) -CommanderScript $(JLINK_FLASH_SCRIPT)
+	$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(JLINK_FLASH_SCRIPT)
 
 run: flash
 
@@ -2164,7 +2171,7 @@ erase:
 	@mkdir -p $(BUILD_DIR)
 	@printf 'device %s\nif %s\nspeed %s\nconnect\nerase\nr\nq\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" > $(JLINK_ERASE_SCRIPT)
 	@echo "Erasing MRAM via $(JLINK) ($(JLINK_DEVICE))..."
-	$(JLINK) -CommanderScript $(JLINK_ERASE_SCRIPT)
+	$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(JLINK_ERASE_SCRIPT)
 
 else
 
