@@ -63,6 +63,7 @@
 #include <kernel/timers/tiku_timer.h>
 #include <kernel/timers/tiku_htimer.h>   /* htimer self-test command */
 #include <kernel/timers/tiku_clock.h>
+#include <kernel/cpu/tiku_watchdog.h>    /* liveness kick in net_getc waits */
 #if TIKU_SHELL_CMD_JOBS
 #include "tiku_shell_jobs.h"
 #endif
@@ -433,6 +434,14 @@ int
 tiku_shell_net_getc(void)
 {
     int ch;
+    /* A blocking builtin's input wait is liveness, not a hang: the BASIC
+     * REPL prompt, INPUT, DELAY and the RUN loop's Ctrl-C poll all spin on
+     * this call for unbounded time INSIDE one dispatch of the shell process,
+     * so the scheduler heartbeat is frozen for the whole session.  Kick here
+     * (which also feeds the check-in hang detector) exactly like the net
+     * pumps do, or the detector blames the shell and warm-resets ~2 s into
+     * any quiet BASIC prompt. */
+    tiku_watchdog_kick();
     while (tiku_shell_io_rx_ready()) {
         ch = tiku_shell_io_getc();
         if (ch < 0) {

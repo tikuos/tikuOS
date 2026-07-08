@@ -34,12 +34,18 @@ struct tiku_process;
 
 /*
  * Consecutive stalled ticks before a non-yielding process is declared hung.
- * Must EXCEED the longest legitimate non-yielding slice: long compute belongs
- * on a worker thread and kernel protothreads yield frequently, so ~2 s at the
- * default 128 Hz tick is comfortably safe.  Override per build.
+ * Must EXCEED the longest legitimate non-yielding slice.  2 s (256 ticks)
+ * proved too tight on device: an inline TLS certificate-chain verify (an
+ * RSA chain, no worker offload) legitimately holds the CPU past 2 s between
+ * its milestone kicks, and the web sweep's first fetch warm-reset mid-
+ * handshake with the shell named in /sys/boot/hang.  8 s clears every
+ * measured slice with margin while still catching a real wedge fast.
+ * Unbounded waits (a REPL prompt, DELAY, INPUT) must still check in --
+ * tiku_watchdog_kick() feeds the heartbeat -- no threshold covers those.
+ * Override per build.
  */
 #ifndef TIKU_HANG_THRESHOLD_TICKS
-#define TIKU_HANG_THRESHOLD_TICKS  256u
+#define TIKU_HANG_THRESHOLD_TICKS  1024u
 #endif
 
 /*---------------------------------------------------------------------------*/

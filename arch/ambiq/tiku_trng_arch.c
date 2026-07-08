@@ -36,6 +36,7 @@
  */
 
 #include "tiku_trng_arch.h"
+#include <kernel/cpu/tiku_watchdog.h>   /* liveness kick during the gather */
 
 #if defined(TIKU_DEVICE_APOLLO510)
 #include "apollo510.h"
@@ -119,6 +120,15 @@ static int trng_collect(void)
         CRYPTO->RNDSOURCEENABLE = 1u;            /* start sampling    */
 
         for (spin = 0u; spin < TRNG_SPIN_LIMIT; spin++) {
+            /* The ring-oscillator gather blocks here for up to seconds per
+             * re-arm (measured 2.5-16 s total on Apollo510 for a DRBG seed).
+             * That is liveness, not a hang: kick periodically so neither the
+             * hardware watchdog nor the check-in hang detector (which the
+             * kick also feeds) resets the board mid-gather.  Masked to every
+             * 64Ki spins -- ~100+ kicks/s, negligible poll-rate cost. */
+            if ((spin & 0xFFFFul) == 0ul) {
+                tiku_watchdog_kick();
+            }
             isr = CRYPTO->RNGISR;
             if (isr & RNG_ISR_EHR_VALID) {
                 trng_cache[0] = CRYPTO->EHRDATA0;

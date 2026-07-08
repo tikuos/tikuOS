@@ -32,6 +32,7 @@
 
 #include <tiku.h>
 #include "tiku_watchdog.h"
+#include "tiku_hang.h"   /* a kick is also a check-in (liveness assertion) */
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE VARIABLES                                                         */
@@ -112,6 +113,18 @@ void tiku_watchdog_kick(void)
 {
     tiku_watchdog_arch_kick();
     wdt_kick_count++;
+
+    /* A kick is a liveness assertion, so honour it in BOTH watchdog channels:
+     * feed the check-in hang detector's heartbeat too.  The long cooperative-
+     * blocking builtins (HTTPGET$'s TLS fetch over SLIP, the MQTT waits) hold
+     * the CPU inside one dispatch for tens of seconds while kicking from
+     * their net pumps; without this the hang detector -- which otherwise only
+     * hears scheduler dispatches -- declared them wedged at
+     * TIKU_HANG_THRESHOLD_TICKS (~2 s) and warm-reset mid-fetch.  A loop that
+     * kicks while truly wedged evades the hang detector exactly as it already
+     * evades the hardware watchdog -- no recoverability is lost; the common
+     * wedge (an accidental loop that kicks nothing) is still caught. */
+    tiku_hang_checkin();
 }
 
 /**
