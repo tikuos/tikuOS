@@ -539,15 +539,31 @@ uint8_t tiku_process_run(void);
 /**
  * @brief Run the scheduler, but never re-enter @p skip.
  *
- * Like tiku_process_run() but events for @p skip are consumed without
- * dispatch — for a long synchronous op running inside @p skip's own dispatch
- * that wants to keep the rest of the kernel live without recursing into its
- * own protothread.  @p skip == NULL behaves like tiku_process_run().
+ * Like tiku_process_run() but it does not dispatch unicast events for @p skip.
+ * Non-POLL events for @p skip stay queued for the normal scheduler; skipped
+ * POLL events are coalesced because @p skip is already awake and running.
+ * Broadcast events still run for every process except @p skip.
+ *
+ * This is for a long synchronous op running inside @p skip's own dispatch that
+ * wants to keep the rest of the kernel live without recursing into its own
+ * protothread.  @p skip == NULL behaves like tiku_process_run().
  *
  * @param skip Process not to dispatch (typically TIKU_THIS())
- * @return 1 if an event was dequeued, 0 if idle
+ * @return 1 if an event was dispatched or discarded, 0 if no eligible work exists
  */
 uint8_t tiku_process_run_except(const struct tiku_process *skip);
+
+/**
+ * @brief Test whether run_except(@p skip) has work it can process.
+ *
+ * Safe to call inside or outside an existing tiku_atomic_enter()/exit() pair.
+ * Used by long synchronous offload loops to decide whether a non-empty queue
+ * contains useful work or only deferred events for the currently-running owner.
+ *
+ * @param skip Process excluded from dispatch; NULL means any queued event
+ * @return 1 if tiku_process_run_except(skip) could make progress, else 0
+ */
+uint8_t tiku_process_queue_dispatchable_except(const struct tiku_process *skip);
 
 /**
  * @brief Request a process to be polled

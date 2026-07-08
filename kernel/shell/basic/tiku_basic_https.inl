@@ -371,7 +371,8 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
         basic_https_pump();                          /* net + WDT stay alive  */
         while (tiku_process_run_except(owner)) { }   /* others' timers/rules  */
         tiku_atomic_enter();
-        if (tiku_process_queue_empty() && tiku_thread_worker_ready()) {
+        if (!tiku_process_queue_dispatchable_except(owner) &&
+            tiku_thread_worker_ready()) {
             tiku_thread_kernel_block();               /* CPU -> the crypto     */
         }
         tiku_atomic_exit();
