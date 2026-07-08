@@ -16,6 +16,7 @@
 
 #include "tiku_basic_https_roots.inl"  /* tiku_https_roots[] + TIKU_HTTPS_NROOTS */
 #include <tikukits/net/tls/tls12/tiku_kits_crypto_tls12.h>  /* TLS 1.2 fallback */
+#include <tikukits/net/http/tiku_kits_net_http.h>  /* shared cert HTTPS engine */
 
 static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_net.inl */
 
@@ -385,18 +386,48 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
 }
 #endif /* TIKU_BASIC_HTTPS_OFFLOAD */
 
+/* --------------------------------------------------------------------------
+ * Adapters that let basic_https_get() drive the shared kit HTTPS engine
+ * (tiku_kits_net_http_cert_exchange) over BASIC's own proven transport: a
+ * reconnect for the TLS 1.2 fallback and a sink that collects the response.
+ * ------------------------------------------------------------------------- */
+
+/* Reconnect: close the spent socket and reopen a fresh 4-tuple (src+1) -- the
+ * same reopen the old inline fallback did. */
+struct basic_https_rc_ctx { const uint8_t *ip; uint16_t src; };
+static void *
+basic_https_reconnect(void *c, void *old)
+{
+    struct basic_https_rc_ctx *x = c;
+    tiku_kits_net_tcp_close((tiku_kits_net_tcp_conn_t *)old);
+    return basic_https_open(x->ip, (uint16_t)(x->src + 1));
+}
+
+/* Sink: append decrypted bytes into out[] up to cap-1, mirroring the old inline
+ * read loop's "stop when the buffer is full" behaviour. */
+struct basic_https_sink_ctx { char *out; size_t cap; size_t total; };
+static uint8_t
+basic_https_sink(void *c, const uint8_t *d, uint16_t len)
+{
+    struct basic_https_sink_ctx *s = c;
+    uint16_t i;
+    for (i = 0; i < len && s->total + 1 < s->cap; i++) {
+        s->out[s->total++] = (char)d[i];
+    }
+    return (uint8_t)(s->total + 1 < s->cap);   /* 0 = full -> stop reading */
+}
+
 static int
 basic_https_get(const char *method, const char *host, const char *path,
                 const char *body, const char *ctype, char *out, size_t cap)
 {
-    static tiku_kits_crypto_tls13_conn_t tls;       /* ~16 KB: keep off-stack */
-    static tiku_kits_crypto_tls12_conn_t tls12;     /* TLS 1.2 fallback state */
+    /* TLS connection state now lives inside the shared kit engine
+     * (tiku_kits_net_http_cert_exchange), not here. */
     tiku_kits_crypto_tls13_io_t io;
     tiku_kits_net_tcp_conn_t   *tcp;
     uint8_t  ip[4];
     char     req[TIKU_BASIC_HTTP_REQ_MAX];  /* method+path+host+HTTPHEADER+POST hdrs; budget _Static_assert'd above */
     size_t   total = 0, rl;
-    int      n, use12 = 0;
     tiku_clock_time_t dl;
     static uint16_t src_seq = 49150;     /* fresh ephemeral port pair per call */
 
@@ -464,67 +495,10 @@ basic_https_get(const char *method, const char *host, const char *path,
     if (tcp == NULL) { SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST); return -1; }
     (void)dl;
 
-    /* TLS 1.3 cert handshake (validity skipped until NTP/RTC wired).  The
-     * milestone hook (basic_tls13_dbg) kicks the watchdog at each step so a
-     * legitimately slow handshake survives while a genuine hang still trips
-     * the WDT for recovery -- do NOT pause the WDT here (that makes a hang
-     * unrecoverable). */
-    io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
-#if TIKU_BASIC_HTTPS_OFFLOAD
-    io.offload = basic_https_offload;   /* run heavy crypto on the worker */
-#else
-    io.offload = NULL;                  /* inline (default portable path)  */
-#endif
-    tiku_kits_crypto_tls13_dbg = basic_tls13_dbg;
-    /* now_unix from the RTC: enforces cert validity windows once a clock is
-     * set (NTP/SETTIME); 0 until then, which skips the date check.  Gate on
-     * tiku_rtc_is_set(), NOT a bare tiku_rtc_get_seconds(): once tiku_rtc_init()
-     * has stamped the soft-RTC persist-cell gate (any prior boot does, and on
-     * Ambiq the gate survives in MRAM across reflashes), get_seconds() returns
-     * offset(0) + uptime -- a small *non-zero* value (~seconds since boot, i.e.
-     * ~Jan 1970).  Handed to the X.509 validator as if it were a real clock,
-     * that makes every live cert (notBefore 2024+) "not yet valid", so the chain
-     * is rejected with stage -11 (chain untrusted) for every site.  is_set() is
-     * true only after an explicit SETTIME/NTP, so an unset clock now correctly
-     * passes 0 and the validity window is skipped (signature + trust anchor +
-     * hostname are still enforced).  Try TLS 1.3 first; on failure fall back to
-     * TLS 1.2 (the 1.2-only tail) on a fresh connection, since the ServerHello
-     * has already been consumed. */
-    {
-        uint64_t now = tiku_rtc_is_set() ? (uint64_t)tiku_rtc_get_seconds() : 0;
-        if (tiku_kits_crypto_tls13_connect(&io, basic_https_rng, host,
-                                           tiku_https_roots, TIKU_HTTPS_NROOTS,
-                                           now, &tls) != 0) {
-            int      t13_stage = tiku_kits_crypto_tls13_last_stage;
-            uint32_t t13_rx    = tiku_kits_crypto_tls13_last_rx;
-            int      t13_evt   = basic_https_evt;   /* RST? closed? or silent? */
-            tiku_kits_net_tcp_close(tcp);
-            tcp = basic_https_open(ip, (uint16_t)(src_seq + 1));
-            if (tcp == NULL) {
-                SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST);
-                return -1;
-            }
-            io.ctx = tcp;
-            if (tiku_kits_crypto_tls12_connect(&io, basic_https_rng, host,
-                                               tiku_https_roots, TIKU_HTTPS_NROOTS,
-                                               now, &tls12) != 0) {
-                SHELL_PRINTF(SH_RED
-                    "? HTTPGET: TLS failed -- tls1.3 stage %d (%s), %u B in, "
-                    "link=%s; tls1.2 fallback also failed\n" SH_RST,
-                    t13_stage, basic_tls_stage_str(t13_stage), (unsigned)t13_rx,
-                    (t13_evt == TIKU_KITS_NET_TCP_EVT_ABORTED ? "RST" :
-                     t13_evt == TIKU_KITS_NET_TCP_EVT_CLOSED  ? "closed" :
-                     "silent"));
-                tiku_kits_net_tcp_close(tcp);
-                return -1;
-            }
-            use12 = 1;
-        }
-    }
-
-    /* <METHOD> <path> HTTP/1.0 + Host + any HTTPHEADER lines, and -- for a body
-     * (POST) -- Content-Type + Content-Length.  Headers go out first; the body
-     * follows as a second TLS record so it need not fit in req[]. */
+    /* Build the request up front (independent of the negotiated TLS version):
+     * <METHOD> <path> HTTP/1.0 + Host + any HTTPHEADER lines, and -- for a body
+     * (POST) -- Content-Type + Content-Length.  The body follows as a second
+     * TLS record so it need not fit in req[]. */
     req[0] = '\0';
     strcat(req, method); strcat(req, " "); strcat(req, path);
     strcat(req, " HTTP/1.0\r\nHost: "); strcat(req, host);
@@ -544,26 +518,72 @@ basic_https_get(const char *method, const char *host, const char *path,
     }
     strcat(req, "\r\n");                                     /* end of headers */
     rl = strlen(req);
-    n = use12 ? tiku_kits_crypto_tls12_write(&tls12, (const uint8_t *)req, rl)
-              : tiku_kits_crypto_tls13_write(&tls,  (const uint8_t *)req, rl);
-    if (n >= 0 && body && body[0]) {                        /* POST body record */
-        size_t blen = strlen(body);
-        n = use12 ? tiku_kits_crypto_tls12_write(&tls12, (const uint8_t *)body, blen)
-                  : tiku_kits_crypto_tls13_write(&tls,  (const uint8_t *)body, blen);
-    }
-    if (n < 0) {
-        tiku_kits_net_tcp_close(tcp);
-        return -1;
-    }
 
-    /* read the response body into out[] */
-    for (;;) {
-        if (total + 1 >= cap) break;
-        n = use12
-            ? tiku_kits_crypto_tls12_read(&tls12, (uint8_t *)out + total, cap - 1 - total)
-            : tiku_kits_crypto_tls13_read(&tls,   (uint8_t *)out + total, cap - 1 - total);
-        if (n <= 0) break;
-        total += (size_t)n;
+    /* Hand the connected socket to the shared kit engine: it runs the TLS 1.3
+     * cert handshake over our transport (basic_https_send/recv), falls back to
+     * TLS 1.2 on a fresh connection via basic_https_reconnect (the ServerHello
+     * is consumed on a 1.3 failure), sends the request + body, and streams the
+     * response into out[] through basic_https_sink.
+     *
+     * now_unix gates cert validity: set only after an explicit SETTIME/NTP
+     * (tiku_rtc_is_set), else 0 to skip the date window -- signature + trust
+     * anchor + hostname stay enforced.  Gate on is_set(), NOT a bare
+     * get_seconds(): once tiku_rtc_init() has stamped the soft-RTC gate (any
+     * prior boot; on Ambiq it survives in MRAM across reflashes), get_seconds()
+     * returns a small non-zero boot-uptime value that would make every live
+     * cert "not yet valid" (stage -11) for every site.
+     *
+     * Do NOT pause the WDT: basic_tls13_dbg kicks it per handshake step so a
+     * legitimately slow handshake survives while a genuine hang still trips the
+     * WDT for recovery. */
+    io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
+#if TIKU_BASIC_HTTPS_OFFLOAD
+    io.offload = basic_https_offload;   /* run heavy crypto on the worker */
+#else
+    io.offload = NULL;                  /* inline (default portable path)  */
+#endif
+    tiku_kits_crypto_tls13_dbg = basic_tls13_dbg;
+    {
+        struct basic_https_rc_ctx   rcx = { ip, src_seq };
+        struct basic_https_sink_ctx scx = { out, cap, 0 };
+        tiku_kits_net_http_tls_t    tconf;
+        int8_t erc;
+
+        tconf.trust    = TIKU_KITS_NET_HTTP_CERT;
+        tconf.roots    = tiku_https_roots;
+        tconf.nroots   = TIKU_HTTPS_NROOTS;
+        tconf.rng      = basic_https_rng;
+        tconf.now_unix = tiku_rtc_is_set() ? (uint64_t)tiku_rtc_get_seconds() : 0;
+        tconf.offload  = NULL;              /* offload rides on io.offload */
+
+        erc = tiku_kits_net_http_cert_exchange(
+            &io, basic_https_reconnect, &rcx, &tconf, host,
+            (const uint8_t *)req, (uint16_t)rl,
+            (const uint8_t *)body, (uint16_t)(body ? strlen(body) : 0),
+            basic_https_sink, &scx);
+
+        tcp   = io.ctx;                     /* engine may have reconnected */
+        total = scx.total;
+
+        if (erc != TIKU_KITS_NET_OK) {
+            if (erc == TIKU_KITS_NET_ERR_HTTP_TCP) {
+                SHELL_PRINTF(SH_RED
+                    "? HTTPGET: TCP connect failed\n" SH_RST);
+            } else {
+                int      st = tiku_kits_crypto_tls13_last_stage;
+                uint32_t rx = tiku_kits_crypto_tls13_last_rx;
+                int      ev = basic_https_evt;   /* RST? closed? silent? */
+                SHELL_PRINTF(SH_RED
+                    "? HTTPGET: TLS failed -- tls1.3 stage %d (%s), %u B in, "
+                    "link=%s\n" SH_RST,
+                    st, basic_tls_stage_str(st), (unsigned)rx,
+                    (ev == TIKU_KITS_NET_TCP_EVT_ABORTED ? "RST" :
+                     ev == TIKU_KITS_NET_TCP_EVT_CLOSED  ? "closed" :
+                     "silent"));
+            }
+            if (tcp) tiku_kits_net_tcp_close(tcp);
+            return -1;
+        }
     }
     out[total] = '\0';
 

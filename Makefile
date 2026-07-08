@@ -1872,6 +1872,13 @@ ifeq ($(HAS_TLS),1)
 SRCS   += $(wildcard tikukits/net/tls/psk/*.c)
 SRCS   += $(wildcard tikukits/net/tls/tls13/*.c)
 SRCS   += $(wildcard tikukits/net/tls/tls12/*.c)
+# The cert clients are now linked, so let the http kit route http_get()/
+# http_post() over them (TIKU_KITS_NET_HTTP_CERT trust model) as well as the
+# PSK client.  Off when HAS_TLS is unset -> the kit stays PSK-only and doesn't
+# reference tls13/tls12.
+ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_HTTP_CERT_ENABLE=1
+endif
 endif
 endif
 
