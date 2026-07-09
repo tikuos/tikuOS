@@ -41,18 +41,22 @@
 INCLUDE msp430fr6989.ld
 
 /*
- * Stock-script bug fix (same as msp430fr5994_8k_ram.ld, see the
- * detailed note there): SIZEOF(.upper.bss) counts the leading
- * ALIGN pad while __high_bssstart excludes it, so an odd-started
- * .upper.bss makes the crt clear loop stomp the first byte(s) of
- * .upper.text.  Reassigning after the INCLUDE wins and keeps the
- * size consistent with the markers.  Applied here as
- * defence-in-depth; not independently reproduced on fr6989, and
- * DISTINCT from the historical fr6989 large-bss boot-loop (a WDT
- * timeout during the clear, fixed separately in
- * tiku_crt_early.c).
+ * Corrected high-bss clear size -- see the detailed note in
+ * msp430fr5994_8k_ram.ld.  The crt clears __high_bsssize bytes from
+ * __high_bssstart, which must be the exact byte count to the end of
+ * .upper.bss content: too large stomps the first opcode of the
+ * following .upper.text function (the odd-start ALIGN-pad overshoot);
+ * too small leaves live kernel .bss (process list, event queue, tick
+ * counters) as stale FRAM garbage and wedges boot (what
+ * __high_bssend - __high_bssstart does once .upper.bss is large --
+ * the linker appends orphan .upper.bss input past the __high_bssend
+ * marker, so end-start covers only part of the section; confirmed on
+ * fr5994 with BASIC's ~64 KB arena).  (__high_bsssize) below is
+ * robust against both.  This is DISTINCT from the historical fr6989
+ * large-bss boot-loop -- a WDT timeout during the clear, fixed in
+ * tiku_crt_early.c.
  */
-__high_bsssize = __high_bssend - __high_bssstart;
+__high_bsssize = ADDR(.upper.bss) + SIZEOF(.upper.bss) - __high_bssstart;
 
 SECTIONS {
   .upper_end_marker (NOLOAD) :

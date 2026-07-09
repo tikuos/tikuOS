@@ -61,27 +61,40 @@ MEMORY {
 }
 
 /*
- * Stock-script bug fix: msp430fr5994.ld computes
- *   __high_bsssize = SIZEOF(.upper.bss);
- * but SIZEOF() counts the leading ALIGN(2) pad byte that is emitted
- * when the section happens to start on an ODD address, while
- * __high_bssstart is taken AFTER that pad.  With an empty (or
- * odd-padded) .upper.bss the crt's high-bss clear loop is then told
- * to zero size>0 bytes at the start marker — which is the first
- * byte of .upper.text, i.e. it stomps the first instruction of
- * whichever function the linker placed there (observed in the
- * field: `rules` PUC-crashing with pmm-pwviol because
- * tiku_shell_cmd_rules led .upper.text, with its first opcode
- * zeroed at every boot).  Whether the bug bites depends purely on
- * the PARITY of the preceding upper-section end — adding/removing
- * a single byte of upper code can arm or disarm it.
+ * Stock-script high-bss clear size, corrected.  The crt zero-inits
+ * .upper.bss by clearing __high_bsssize bytes starting at
+ * __high_bssstart, so __high_bsssize must be EXACTLY the number of
+ * bytes from the start marker to the end of the section's content --
+ * no more (or it stomps the first opcode of the .upper.text function
+ * placed immediately after), no less (or it leaves live kernel .bss
+ * as stale FRAM garbage).
  *
- * Symbol assignments are evaluated in order and the LAST one wins,
- * so reassigning here — after the INCLUDE — overrides the stock
- * value with the marker-consistent size (end - start), which never
- * includes the pad.
+ * Two ways to get it wrong, both observed here:
+ *   1. SIZEOF(.upper.bss) (the stock value, msp430fr5994.ld:345)
+ *      counts the leading ALIGN(2) pad emitted when the section
+ *      starts odd, while __high_bssstart is taken AFTER the pad -->
+ *      overshoot by one byte into .upper.text (field report:
+ *      tiku_shell_cmd_rules PUC-crashing with pmm-pwviol, its first
+ *      opcode zeroed at boot).
+ *   2. __high_bssend - __high_bssstart (a previous fix for #1) UNDER-
+ *      clears: with a large .upper.bss (e.g. BASIC's ~64 KB arena)
+ *      the linker appends orphan .upper.bss input to the output
+ *      section AFTER the __high_bssend marker, so end-start covers
+ *      only part of the section.  The tail -- holding
+ *      tiku_process_list_head, the event queue, the tick counters --
+ *      boots uninitialised and the scheduler/timer machinery wedges
+ *      (symptom: shell hangs at the first prompt on large/BASIC
+ *      builds; the Timer A0 tick never advances).
+ *
+ * The robust size is (true section end) - (start marker):
+ *   ADDR(.upper.bss) + SIZEOF(.upper.bss)  = the true content end
+ *   minus __high_bssstart                  = start after any pad
+ * which excludes the leading pad (it sits below the marker) and
+ * includes every byte the linker actually placed in the section.
+ * Symbol assignments are order-sensitive and the LAST wins, so this
+ * post-INCLUDE reassignment overrides the stock SIZEOF value.
  */
-__high_bsssize = __high_bssend - __high_bssstart;
+__high_bsssize = ADDR(.upper.bss) + SIZEOF(.upper.bss) - __high_bssstart;
 
 /*
  * Expose the end-of-HIFRAM address as a linker symbol so the `free`
