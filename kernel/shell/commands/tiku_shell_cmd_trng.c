@@ -21,6 +21,11 @@
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_trng_arch.h>
 #define TIKU_SHELL_TRNG_HAVE 1
+#elif defined(PLATFORM_MSP430) && TIKU_KIT_CRYPTO_ENABLE
+/* Software entropy source; only linked when the crypto kit (SHA-256
+ * conditioner) is compiled in. */
+#include <arch/msp430/tiku_trng_arch.h>
+#define TIKU_SHELL_TRNG_HAVE 1
 #else
 #define TIKU_SHELL_TRNG_HAVE 0
 #endif

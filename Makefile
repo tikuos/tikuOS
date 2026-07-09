@@ -1864,6 +1864,11 @@ SRCS   += $(wildcard tikukits/crypto/x25519/*.c)
 SRCS   += $(wildcard tikukits/crypto/p256/*.c)
 SRCS   += $(wildcard tikukits/crypto/p384/*.c)
 SRCS   += $(wildcard tikukits/crypto/rsa/*.c)
+# MSP430 has no hardware TRNG: its SHA-256-conditioned software entropy
+# source lives in the arch layer and is only linkable with the crypto kit.
+ifeq ($(TIKU_PLATFORM),msp430)
+SRCS   += arch/msp430/tiku_trng_arch.c
+endif
 SRCS   += $(wildcard tikukits/net/tls/x509/*.c)
 # TLS pulls in additional code; gated separately on HAS_TLS=1
 # because tiku_kits_crypto_tls requires the platform to provide

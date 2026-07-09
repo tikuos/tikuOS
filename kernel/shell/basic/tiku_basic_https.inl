@@ -39,9 +39,11 @@ _Static_assert(TIKU_BASIC_HTTP_HOST_MAX + TIKU_BASIC_HTTP_PATH_MAX +
 #include <arch/arm-rp2350/tiku_trng_arch.h>
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_trng_arch.h>
+#elif defined(PLATFORM_MSP430)
+#include <arch/msp430/tiku_trng_arch.h>
 #endif
 
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_MSP430)
 #include <tikukits/crypto/hmac/tiku_kits_crypto_hmac.h>
 
 /*
