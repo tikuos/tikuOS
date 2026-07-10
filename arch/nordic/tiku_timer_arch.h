@@ -5,15 +5,20 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.h - nRF54L system-tick (TIMER10 compare)
+ * tiku_timer_arch.h - nRF54L system-tick (GRTC by default; TIMER10 fallback)
  *
- * The system clock runs at TIKU_CLOCK_ARCH_SECOND ticks per second, driven by
- * a 32-bit TIMER peripheral (TIMER10) at 16 MHz with a COMPARE0->CLEAR short:
- * CC0 = 16 MHz / 128 = 125000 gives an EXACT 128 Hz tick (~7.8 ms), unlike a
- * SysTick tick (SysTick is reserved here for busy-delays, since the DWT cycle
- * counter freezes without a debugger).  A low-power GRTC-based tick is a
- * planned follow-up; TIMER10 stops in deep sleep, so it is a bring-up choice,
- * not the final low-power tick.
+ * The system clock runs at TIKU_CLOCK_ARCH_SECOND ticks per second.  Default
+ * source is the GRTC (Global RTC): its 1 MHz SYSCOUNTER is already running
+ * (started by the boot ROM) and lives in the always-on low-frequency domain,
+ * so the tick keeps firing through deep sleep -- the low-power foundation.  A
+ * compare channel (CC0) is armed each tick by an alternating 7812/7813-count
+ * step, averaging exactly 7812.5 = 128 Hz with no drift, and re-armed relative
+ * to the previous compare so ISR latency never accumulates.  SysTick stays
+ * free for busy-delays (the DWT cycle counter freezes without a debugger).
+ *
+ * Build with -DTIKU_NORDIC_TICK_TIMER10 to fall back to the bring-up tick: a
+ * 32-bit TIMER10 at 16 MHz, CC0=125000, COMPARE0->CLEAR short (exact 128 Hz
+ * but stops when HFCLK gates in deep sleep).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -53,16 +58,13 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /** @brief Resolved tick frequency — use this in code. */
 #define TIKU_CLOCK_ARCH_SECOND  TIKU_CLOCK_ARCH_CONF_SECOND
 
-/**
- * @brief TIMER10 source clock in Hz.
- *
- * PRESCALER = 0 selects the 16 MHz peripheral clock.  16 MHz / 128 = 125000
- * fits the 32-bit TIMER comfortably and divides evenly, so the tick is exact.
+/*
+ * Tick source: GRTC (default) or TIMER10 (fallback, -DTIKU_NORDIC_TICK_TIMER10).
+ * The source-specific clock rate + per-tick interval live in tiku_timer_arch.c
+ * (arch-internal; the kernel only speaks TIKU_CLOCK_ARCH_SECOND).  GRTC counts
+ * at 1 MHz (7812.5 counts/tick -> exact 128 Hz via an alternating interval);
+ * TIMER10 at 16 MHz (125000 counts/tick, exact).
  */
-#define TIKU_NORDIC_TIMER_HZ    16000000UL
-
-/** @brief TIMER CC0 value for one tick period (exact at 16 MHz / 128 Hz). */
-#define TIKU_CLOCK_ARCH_INTERVAL  (TIKU_NORDIC_TIMER_HZ / TIKU_CLOCK_ARCH_SECOND)
 
 /*---------------------------------------------------------------------------*/
 /* HAL ENTRY POINTS                                                          */
