@@ -1,0 +1,23 @@
+# Release packaging.
+#
+# `git archive` produces the core-kernel source drop.  The entries below
+# are kept out of it: repo-internal metadata, and the separately-versioned
+# `drivers` submodule (its contents live in github.com/tikuos/drivers).
+# With drivers/ absent the Makefile's HAS_DRIVERS auto-detect resolves the
+# driver table to the in-tree empty fallback
+# (kernel/drivers/tiku_drv_empty_table.c), so the drop builds standalone.
+#
+# Build a release tarball with:
+#   git archive --format=tar.gz --prefix=tikuos-0.05/ \
+#       -o tikuos-0.05.tar.gz HEAD
+#
+# The larger sibling repositories (tikukits, TikuBench, examples, the
+# host tooling) and all build artifacts are untracked here (.gitignore),
+# so they are already excluded from the archive.
+
+# Leading slash anchors to the repo root: `/drivers` excludes the
+# top-level submodule only, NOT kernel/drivers (in-tree kernel code).
+/.gitignore      export-ignore
+/.gitattributes  export-ignore
+/.gitmodules     export-ignore
+/drivers         export-ignore

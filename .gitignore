@@ -23,6 +23,7 @@ targetConfigs/
 
 # GCC / Makefile build artifacts
 build/
+build_rootowned_bak*/
 *.o
 *.elf
 *.hex
