@@ -1319,6 +1319,7 @@ exec_delay_ms(long ms)
             }
         }
 #else
+        tiku_watchdog_kick();   /* feed the hang detector; see read_line */
         if (tiku_shell_io_rx_ready()) {
             int ch = tiku_shell_io_getc();
             if (ch == BASIC_CTRL_C) {
@@ -1365,6 +1366,7 @@ basic_lp_wait_ticks(tiku_clock_time_t ticks)
             return;
         }
 #else
+        tiku_watchdog_kick();   /* feed the hang detector; see read_line */
         if (tiku_shell_io_rx_ready() &&
             tiku_shell_io_getc() == BASIC_CTRL_C) {
             basic_error = 1;

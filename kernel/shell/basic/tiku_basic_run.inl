@@ -187,6 +187,7 @@ exec_run(void)
             }
         }
 #else
+        tiku_watchdog_kick();   /* feed the hang detector; see read_line */
         if (tiku_shell_io_rx_ready()) {
             int ch = tiku_shell_io_getc();
             if (ch == BASIC_CTRL_C) {

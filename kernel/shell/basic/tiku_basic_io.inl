@@ -55,6 +55,11 @@ read_line(char *buf, uint16_t cap)
         ch = tiku_shell_net_getc();
         if (ch < 0) continue;
 #else
+        /* Non-SLIP builds have no net_getc to feed the check-in hang
+         * detector, so kick it here: a quiet REPL prompt / INPUT wait is
+         * liveness, not a wedge.  Without this an idle prompt warm-resets
+         * at TIKU_HANG_THRESHOLD_TICKS (~8 s at 128 Hz). */
+        tiku_watchdog_kick();
         if (!tiku_shell_io_rx_ready()) continue;
         ch = tiku_shell_io_getc();
         if (ch < 0) continue;
