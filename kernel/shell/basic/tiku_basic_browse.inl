@@ -1,5 +1,6 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
@@ -13,12 +14,6 @@
  * into line breaks.  Deliberately tiny -- a lynx-style text view of a simple
  * page, not a real HTML parser: unknown tags are dropped, attributes ignored,
  * no CSS/JS/layout.  Included before tiku_basic_string.inl so STRIP$ can use it.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at:
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * SPDX-License-Identifier: Apache-2.0
  */

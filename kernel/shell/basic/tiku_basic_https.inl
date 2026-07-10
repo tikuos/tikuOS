@@ -1,4 +1,10 @@
 /*
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_basic_https.inl - HTTPS GET backend for BASIC HTTPGET$.
  *
  * Drives the certificate-based TLS 1.3 client (tikukits/crypto/tls13) over
@@ -10,6 +16,8 @@
  * Trust anchor: ISRG Root X1 (Let's Encrypt), baked in below.  Certificate
  * validity dates are currently skipped (now=0) until a wall clock (NTP/RTC)
  * feeds the verifier.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_HTTP_ENABLE + 0)
