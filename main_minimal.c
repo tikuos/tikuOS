@@ -79,6 +79,73 @@ int main(void)
     return 0;
 }
 
+#elif defined(PLATFORM_NORDIC)
+
+#include "arch/nordic/tiku_cpu_freq_boot_arch.h"
+#include "arch/nordic/tiku_cpu_common.h"
+#include "arch/nordic/tiku_uart_arch.h"
+#include "arch/nordic/tiku_gpio_arch.h"
+
+/* nRF54L15-DK LEDs (active-low: drive low = lit).  Two LEDs so the smoke test
+ * is a boot beacon independent of the console UART:
+ *   LED1 (P2.09) solid-on  = reached main() + GPIO works
+ *   LED2 (P1.10) blinking  = reached the loop (delays work) */
+#define TIKU_MIN_LED1_PORT  2u
+#define TIKU_MIN_LED1_PIN   9u
+#define TIKU_MIN_LED2_PORT  1u
+#define TIKU_MIN_LED2_PIN   10u
+
+/* Fixed RAM progress markers, readable over the debugger (nrfutil device read
+ * <symbol addr>) so boot/loop progress can be confirmed without eyeballing an
+ * LED or relying on the console UART.  Volatile so the writes are not elided. */
+volatile uint32_t g_nordic_main_reached;
+volatile uint32_t g_nordic_loop_count;
+
+int main(void)
+{
+    /* Marker: proves execution reached main() (read this RAM word back). */
+    g_nordic_main_reached = 0xB007B007u;
+
+    /* FIRST thing: light LED1 (active-low -> level 0) so a solid LED proves
+     * the reset handler ran, the C runtime came up, and GPIO works -- before
+     * any clock/delay/UART code that could hang. */
+    tiku_nordic_gpio_init_output(TIKU_MIN_LED1_PORT, TIKU_MIN_LED1_PIN, 0u);
+
+    /* Start the HFXO (UARTE reference). Delays use SysTick (no setup). */
+    tiku_cpu_boot_nordic_init();
+
+    /* LED2 off initially (active-low -> drive high = off). */
+    tiku_nordic_gpio_init_output(TIKU_MIN_LED2_PORT, TIKU_MIN_LED2_PIN, 1u);
+
+    /* Console UARTE at TIKU_BOARD_UART_BAUD on the board-selected pins. */
+    tiku_uart_init();
+
+    /* Let any stale bytes from the J-Link VCOM reset settle. */
+    tiku_cpu_nordic_delay_ms(100);
+
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (nRF54L15-DK) ---\n");
+
+    unsigned long clk = tiku_cpu_nordic_smclk_get_hz();
+    int fault         = tiku_cpu_nordic_clock_has_fault();
+
+    uint32_t i = 0;
+    while (1) {
+        tiku_uart_printf(
+            "TikuOS minimal: hello #%u  clk=%u Hz  fault=%d\n",
+            (unsigned int)i,
+            (unsigned int)clk,
+            fault);
+
+        /* LED2 blinks = the loop (and the delay path) is alive. */
+        tiku_nordic_gpio_toggle(TIKU_MIN_LED2_PORT, TIKU_MIN_LED2_PIN);
+        tiku_cpu_nordic_delay_ms(500u);
+        g_nordic_loop_count++;      /* progress marker (read over debugger) */
+        i++;
+    }
+
+    return 0;
+}
+
 #else /* PLATFORM_RP2350 */
 
 #include "arch/arm-rp2350/tiku_cpu_freq_boot_arch.h"

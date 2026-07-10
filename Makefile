@@ -46,6 +46,8 @@ else ifeq ($(MCU),apollo510b)
 # all via the apollo510 `else` branches below). The board just adds an EM9305
 # BLE radio (a later, SPI-gated effort); bring-up is identical to apollo510.
 TIKU_PLATFORM := ambiq
+else ifeq ($(MCU),nrf54l15)
+TIKU_PLATFORM := nordic
 else
 TIKU_PLATFORM := msp430
 endif
@@ -117,6 +119,11 @@ TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO4L_EVB
 endif
 endif
 
+ifeq ($(TIKU_PLATFORM),nordic)
+# Only board for now: the nRF54L15-DK (PCA10156).
+TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54L15_DK
+endif
+
 # ---------------------------------------------------------------------------
 # Apollo510 register headers are VENDORED in-tree at arch/ambiq/cmsis/ (CMSIS
 # device map + ARM CMSIS-Core). The build references no external AmbiqSuite
@@ -182,8 +189,9 @@ DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 # msp430:  msp430-elf-gcc auto-detected from PATH (or $(HOME)/tigcc)
 # rp2350:  arm-none-eabi-gcc auto-detected from PATH
 # apollo510: arm-none-eabi-gcc auto-detected from PATH
+# nrf54l15:  arm-none-eabi-gcc auto-detected from PATH (Cortex-M33)
 # ---------------------------------------------------------------------------
-ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq))
+ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq nordic))
 
 # ARM Embedded toolchain (apt: gcc-arm-none-eabi).
 TOOLCHAIN_PREFIX ?= arm-none-eabi-
@@ -802,6 +810,22 @@ CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -I$(PROJ_DIR)/arch/ambiq/cmsis
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
+else ifeq ($(TIKU_PLATFORM),nordic)
+
+# Cortex-M33 (Nordic nRF54L15). Single-precision FPU is present but tikuOS
+# uses the softfp ABI (no float in the kernel), matching the rp2350 M33 config.
+CFLAGS  = -mcpu=cortex-m33 -mthumb
+CFLAGS += -mfloat-abi=softfp -mfpu=fpv5-sp-d16
+CFLAGS += -Os -Wall -Wextra
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
+CFLAGS += -DPLATFORM_NORDIC=1
+# newlib-nano (small integer printf) + nosys syscall stubs -- same self-
+# contained libc config as the rp2350 / ambiq ARM ports.
+CFLAGS += --specs=nano.specs --specs=nosys.specs
+CFLAGS += -I$(PROJ_DIR)
+CFLAGS += -ffunction-sections -fdata-sections -fno-common
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -959,6 +983,19 @@ LDLIBS  = -Wl,--start-group
 LDLIBS += -lm -lc -lgcc
 LDLIBS += -Wl,--end-group
 
+else ifeq ($(TIKU_PLATFORM),nordic)
+
+LDFLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=softfp -mfpu=fpv5-sp-d16
+LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
+LDFLAGS += -Tarch/nordic/devices/nrf54l15.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+LDFLAGS += -Wl,-u,tiku_nordic_vectors
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+LDLIBS  = -Wl,--start-group
+LDLIBS += -lm -lc -lgcc
+LDLIBS += -Wl,--end-group
+
 else
 
 LDFLAGS  = -mmcu=$(MCU)
@@ -1034,8 +1071,8 @@ endif # TIKU_PLATFORM == msp430
 MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
-ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq),)
-$(error MINIMAL=1 is only supported on MCU=rp2350 or MCU=apollo510)
+ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic),)
+$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, or MCU=nrf54l15)
 endif
 
 # Use the minimal entry point and exactly the arch files it needs.
@@ -1057,6 +1094,12 @@ endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
 # am_util_delay.c, am_util_stdio.c and am_resources.c are all dropped -- tikuOS
 # uses its own printf and never references the HAL resource tables.
+else ifeq ($(TIKU_PLATFORM),nordic)
+SRCS += arch/nordic/tiku_crt_early.c
+SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
+SRCS += arch/nordic/tiku_cpu_common.c
+SRCS += arch/nordic/tiku_uart_arch.c
+SRCS += arch/nordic/tiku_gpio_arch.c
 else
 SRCS += arch/arm-rp2350/tiku_crt_early.c
 SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c

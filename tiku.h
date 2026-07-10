@@ -32,7 +32,8 @@
  * If nothing is set we fall back to MSP430 to keep the historical
  * default working out-of-the-box for legacy targets.
  */
-#if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && !defined(PLATFORM_AMBIQ)
+#if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
+    !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC)
 #define PLATFORM_MSP430 1
 #endif
 
@@ -97,6 +98,17 @@
 #define TIKU_DEVICE_APOLLO510 1
 #endif
 
+#elif defined(PLATFORM_NORDIC)
+
+/*
+ * Nordic nRF54L silicon. Only one silicon variant for now; a board define
+ * (TIKU_BOARD_NRF54L15_DK) comes from the Makefile and selects the matching
+ * board header.
+ */
+#ifndef TIKU_DEVICE_NRF54L15
+#define TIKU_DEVICE_NRF54L15 1
+#endif
+
 #endif /* PLATFORM_* */
 
 /*---------------------------------------------------------------------------*/
@@ -138,6 +150,14 @@
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 96
 #endif
+#elif defined(PLATFORM_NORDIC)
+/* nRF54L15-DK runs the core at 128 MHz (OSCILLATORS.PLL.CURRENTFREQ reads
+ * CK128M on hardware). The kernel tick is driven from GRTC/LFCLK (independent
+ * of the core clock); this value feeds the SysTick busy-delays, which must
+ * match the real core clock or delays run at the wrong rate. */
+#ifndef MAIN_CPU_FREQ
+#define MAIN_CPU_FREQ 128
+#endif
 #else
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
 #endif
@@ -146,7 +166,7 @@
  *  and other subsystems that need the clock frequency as a compile-time
  *  constant.
  */
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
 #define TIKU_MAIN_CPU_HZ  ((unsigned long)MAIN_CPU_FREQ * 1000000UL)
 #elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
@@ -181,6 +201,8 @@
 #include <arch/arm-rp2350/tiku_device_select.h>
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_device_select.h>
+#elif defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_device_select.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -221,6 +243,8 @@
 #include <arch/arm-rp2350/tiku_timer_arch.h>
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_timer_arch.h>
+#elif defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_timer_arch.h>
 #endif
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>
