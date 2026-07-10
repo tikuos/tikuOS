@@ -18,12 +18,6 @@
  * only P1/P2/P3; FR5969 has P1/P2/PJ; vector availability is
  * device-specific and gated below by #ifdef PORTn_VECTOR.)
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at:
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
  * SPDX-License-Identifier: Apache-2.0
  */
 

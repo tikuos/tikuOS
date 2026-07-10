@@ -17,12 +17,6 @@
  * is platform-agnostic: held flag, mode, accounting, htimer-based
  * duration measurement, and the post-window timer-process drain.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at:
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
  * SPDX-License-Identifier: Apache-2.0
  */
 

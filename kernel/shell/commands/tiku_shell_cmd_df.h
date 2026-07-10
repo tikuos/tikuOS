@@ -12,12 +12,6 @@
  * medium.  Companion to "free" (which reports memory tiers): df is the
  * storage/filesystem view, free is the RAM/tier view.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at:
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
  * SPDX-License-Identifier: Apache-2.0
  */
 
