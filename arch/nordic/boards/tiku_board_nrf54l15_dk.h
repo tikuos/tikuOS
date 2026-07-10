@@ -143,4 +143,20 @@
 /** @brief UART pin mux is programmed by the UARTE driver (PSEL regs). */
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
 
+/*---------------------------------------------------------------------------*/
+/* PERIPHERAL CAPABILITIES                                                   */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The nRF54L15 silicon has SAADC, TWIM (I2C), SPIM, and GPIO the 1-Wire glue
+ * can bit-bang, so the interface layers (interfaces/adc, interfaces/bus,
+ * interfaces/onewire) are compiled in.  The arch backends are honest stubs for
+ * now (tiku_{adc,i2c,spi,onewire}_arch.c return "not implemented"), so the
+ * /dev nodes and shell commands exist and report a clear error rather than
+ * fabricating data -- real drivers are a later phase.
+ */
+#define TIKU_BOARD_ADC_AVAILABLE    1
+#define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic (arch stub) */
+#define TIKU_BOARD_OW_AVAILABLE     1
+
 #endif /* TIKU_BOARD_NRF54L15_DK_H_ */

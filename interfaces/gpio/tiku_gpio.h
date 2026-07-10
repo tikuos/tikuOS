@@ -28,6 +28,8 @@
 #include <arch/arm-rp2350/tiku_gpio_arch.h>
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_gpio_arch.h>
+#elif defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_gpio_arch.h>
 #else
 #include <arch/msp430/tiku_gpio_arch.h>
 #endif

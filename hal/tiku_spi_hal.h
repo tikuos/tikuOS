@@ -23,6 +23,8 @@
 #include <arch/arm-rp2350/tiku_spi_arch.h>
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_spi_arch.h>
+#elif defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_spi_arch.h>
 #endif
 
 #endif /* TIKU_SPI_HAL_H_ */

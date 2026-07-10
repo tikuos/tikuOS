@@ -23,6 +23,8 @@
 #include <arch/arm-rp2350/tiku_i2c_arch.h>
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_i2c_arch.h>
+#elif defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_i2c_arch.h>
 #endif
 
 #endif /* TIKU_I2C_HAL_H_ */

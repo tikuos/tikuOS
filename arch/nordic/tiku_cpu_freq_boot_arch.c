@@ -56,3 +56,31 @@ int tiku_cpu_nordic_clock_has_fault(void)
 {
     return tiku_nordic_clock_fault;
 }
+
+/*---------------------------------------------------------------------------*/
+/* Additional clock queries + frequency init (for the shared CPU HAL)        */
+/*---------------------------------------------------------------------------*/
+
+void tiku_cpu_freq_nordic_init(unsigned int cpu_freq)
+{
+    /* The core PLL is fixed at 128 MHz by the boot configuration; TikuOS does
+     * not reprogram it (a runtime 64/128 MHz switch is a later refinement), so
+     * this is a no-op accepted for HAL symmetry. */
+    (void)cpu_freq;
+}
+
+unsigned long tiku_cpu_nordic_clock_get_hz(void)
+{
+    return TIKU_NORDIC_CPU_HZ;      /* MCLK == core clock (128 MHz) */
+}
+
+unsigned long tiku_cpu_nordic_aclk_get_hz(void)
+{
+    return 32768UL;                 /* ACLK == 32.768 kHz LFCLK */
+}
+
+void tiku_cpu_boot_nordic_power_wfi_enter(void)
+{
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    __asm__ volatile ("wfi" ::: "memory");
+}

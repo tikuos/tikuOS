@@ -79,8 +79,10 @@ void tiku_nordic_svc_handler(void)         __attribute__((weak, alias("nordic_de
 void tiku_nordic_pendsv_handler(void)      __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_systick_handler(void)     __attribute__((weak, alias("nordic_default_handler")));
 
-/* External IRQ handlers wired as the port grows.  GRTC (IRQn 227) drives
- * the kernel tick; the rest default until their subsystem lands. */
+/* External IRQ handlers wired as the port grows.  TIMER10 (IRQn 133) drives
+ * the kernel tick; GRTC_0 (IRQn 226) is reserved for the low-power tick
+ * follow-up.  The rest default until their subsystem lands. */
+void tiku_nordic_timer10_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_grtc_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
@@ -196,11 +198,14 @@ __attribute__((section(".vectors"), used)) = {
     tiku_nordic_pendsv_handler,                /* 14  PendSV            */
     tiku_nordic_systick_handler,               /* 15  SysTick           */
 
-    /* External interrupts (nrf54l15_application_vectors.h) ------------- */
-    [16 + 227] = tiku_nordic_grtc_isr,         /* IRQ 227  GRTC_0       */
+    /* External interrupts -- IRQ numbers are the MDK IRQn enum values
+     * (nrf54l15_application.h), NOT the vector-array position. */
+    [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn = 133    */
+    [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn  = 226    */
 
     /* Fill every remaining external slot with the default handler so no
      * slot dispatches through a NULL pointer. */
-    [16 +   0 ... 16 + 226] = nordic_default_handler,
-    [16 + 228 ... 16 + 271] = nordic_default_handler,
+    [16 +   0 ... 16 + 132] = nordic_default_handler,
+    [16 + 134 ... 16 + 225] = nordic_default_handler,
+    [16 + 227 ... 16 + 271] = nordic_default_handler,
 };

@@ -20,6 +20,8 @@
 
 #include <arch/nordic/tiku_cpu_common.h>
 #include <arch/nordic/tiku_nordic_core.h>
+#include <arch/nordic/mdk/nrf54l15.h>
+#include <stddef.h>
 
 /* The nRF54L15-DK boots with the PLL at 128 MHz (OSCILLATORS.PLL.CURRENTFREQ
  * reads CK128M on hardware -- the CK64M register reset value is overridden by
@@ -73,4 +75,63 @@ void tiku_cpu_nordic_delay_ms(uint32_t ms)
 void tiku_cpu_nordic_reset(void)
 {
     tiku_nordic_system_reset();   /* SCB AIRCR SYSRESETREQ; does not return */
+}
+
+/*---------------------------------------------------------------------------*/
+/* Unique ID (real FICR device ID)                                           */
+/*---------------------------------------------------------------------------*/
+
+uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len)
+{
+    uint32_t id[2];
+    uint8_t  n, i;
+
+    if (buf == NULL || len == 0u) {
+        return 0u;
+    }
+    /* Genuine per-die 64-bit identifier from FICR (no synthesis needed). */
+    id[0] = NRF_FICR_NS->INFO.DEVICEID[0];
+    id[1] = NRF_FICR_NS->INFO.DEVICEID[1];
+
+    n = (len > 8u) ? 8u : len;
+    for (i = 0u; i < n; i++) {
+        buf[i] = (uint8_t)(id[i >> 2] >> ((i & 3u) * 8u));
+    }
+    return n;
+}
+
+/*---------------------------------------------------------------------------*/
+/* Reset reason (RESETREAS -> MSP430-compatible code)                        */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_NORDIC_RESETREAS   (*(volatile uint32_t *)0x5010E600UL)
+#define TIKU_RESETREAS_RESETPIN (1UL << 0)
+#define TIKU_RESETREAS_DOG0     (1UL << 1)
+#define TIKU_RESETREAS_DOG1     (1UL << 2)
+#define TIKU_RESETREAS_SREQ     (1UL << 6)
+#define TIKU_RESETREAS_OFF      (1UL << 8)
+
+uint16_t tiku_cpu_nordic_reset_reason(void)
+{
+    uint32_t r = TIKU_NORDIC_RESETREAS;
+
+    /* RESETREAS is write-1-to-clear: latch the set bits away so the NEXT boot
+     * sees a clean cause (otherwise reasons accumulate across resets). */
+    TIKU_NORDIC_RESETREAS = r;
+
+    /* Map to the MSP430 SYSRSTIV-style codes the kernel already speaks
+     * (matching the ambiq reset-reason decode). */
+    if (r & (TIKU_RESETREAS_DOG0 | TIKU_RESETREAS_DOG1)) {
+        return 0x16u;   /* watchdog timeout */
+    }
+    if (r & TIKU_RESETREAS_SREQ) {
+        return 0x06u;   /* software reset (SCB SYSRESETREQ / reboot) */
+    }
+    if (r & TIKU_RESETREAS_RESETPIN) {
+        return 0x14u;   /* external reset pin */
+    }
+    if (r & TIKU_RESETREAS_OFF) {
+        return 0x02u;   /* wake from System OFF (treat as power-domain event) */
+    }
+    return 0x00u;       /* cold / power-on reset */
 }

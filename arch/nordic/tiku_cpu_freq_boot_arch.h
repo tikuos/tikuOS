@@ -22,10 +22,22 @@
  */
 void tiku_cpu_boot_nordic_init(void);
 
-/** @brief Current core clock in Hz (128 MHz on this port). */
+/** @brief Sub-main clock in Hz (== core clock, 128 MHz on this port). */
 unsigned long tiku_cpu_nordic_smclk_get_hz(void);
 
 /** @brief Non-zero if a clock source failed to start during boot. */
 int tiku_cpu_nordic_clock_has_fault(void);
+
+/** @brief Frequency init (no-op: the PLL is fixed at 128 MHz). */
+void tiku_cpu_freq_nordic_init(unsigned int cpu_freq);
+
+/** @brief Main clock (MCLK) in Hz == core clock (128 MHz). */
+unsigned long tiku_cpu_nordic_clock_get_hz(void);
+
+/** @brief Auxiliary clock (ACLK) in Hz == 32.768 kHz LFCLK. */
+unsigned long tiku_cpu_nordic_aclk_get_hz(void);
+
+/** @brief Idle-mode hook: enter wait-for-interrupt (WFI). */
+void tiku_cpu_boot_nordic_power_wfi_enter(void);
 
 #endif /* TIKU_NORDIC_CPU_FREQ_BOOT_ARCH_H_ */

@@ -79,6 +79,12 @@
 #include <arch/ambiq/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
+#elif defined(PLATFORM_NORDIC)
+/* nRF54L: console over UARTE (polled EasyDMA). No SLIP transport yet, so
+ * debug printf routes straight to the UARTE backend. */
+#include <arch/nordic/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+
 /*---------------------------------------------------------------------------*/
 /* Fallback: no platform defined — suppress output                           */
 /*---------------------------------------------------------------------------*/

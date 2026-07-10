@@ -23,6 +23,8 @@
 #include "arch/arm-rp2350/tiku_cpu_watchdog_arch.h"
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_cpu_watchdog_arch.h"
+#elif defined(PLATFORM_NORDIC)
+#include "arch/nordic/tiku_cpu_watchdog_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -114,6 +116,17 @@
     tiku_cpu_ambiq_watchdog_pause_arch()
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_ambiq_watchdog_resume_arch(kick)
+#elif defined(PLATFORM_NORDIC)
+#define tiku_watchdog_arch_on(src, isel) \
+    tiku_cpu_nordic_watchdog_on_arch((src), (isel))
+#define tiku_watchdog_arch_off() \
+    tiku_cpu_nordic_watchdog_off_arch()
+#define tiku_watchdog_arch_kick() \
+    tiku_cpu_nordic_watchdog_kick_arch()
+#define tiku_watchdog_arch_pause() \
+    tiku_cpu_nordic_watchdog_pause_arch()
+#define tiku_watchdog_arch_resume(kick) \
+    tiku_cpu_nordic_watchdog_resume_arch(kick)
 #endif
 
 #endif /* TIKU_WATCHDOG_HAL_H_ */

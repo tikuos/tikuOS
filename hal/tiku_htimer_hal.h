@@ -31,6 +31,8 @@
 #include "arch/arm-rp2350/tiku_htimer_config.h"
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_htimer_config.h"
+#elif defined(PLATFORM_NORDIC)
+#include "arch/nordic/tiku_htimer_config.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

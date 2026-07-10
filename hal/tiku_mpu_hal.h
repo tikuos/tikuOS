@@ -29,6 +29,8 @@
 #include "arch/arm-rp2350/tiku_mpu_arch.h"
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_mpu_arch.h"
+#elif defined(PLATFORM_NORDIC)
+#include "arch/nordic/tiku_mpu_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

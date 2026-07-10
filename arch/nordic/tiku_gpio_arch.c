@@ -114,3 +114,88 @@ uint8_t tiku_nordic_gpio_read(uint8_t port, uint8_t pin)
     }
     return (uint8_t)((g->IN >> (pin & 0x1Fu)) & 0x1u);
 }
+
+/*---------------------------------------------------------------------------*/
+/* Generic GPIO HAL (port/pin, used by the VFS /dev/gpio tree + shell)       */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The VFS/shell layer uses 1-based virtual ports (port 1 = P0, 2 = P1, 3 = P2)
+ * matching TIKU_DEVICE_HAS_PORT1..3.  These wrappers translate to the physical
+ * (0-based) port the helpers above take, validate the range, and return the
+ * int8_t status the HAL expects (0 = ok, -1 = out of range).
+ */
+
+/** @brief Valid virtual port (1..3) and pin (0..31)? */
+static int tiku_nordic_gpio_valid(uint8_t port, uint8_t pin)
+{
+    return (port >= 1u && port <= 3u && pin <= 31u);
+}
+
+int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin)
+{
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    tiku_nordic_gpio_init_output((uint8_t)(port - 1u), pin, 0u);
+    return 0;
+}
+
+int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin)
+{
+    NRF_GPIO_Type *g;
+
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    g = tiku_nordic_gpio_base((uint8_t)(port - 1u));
+    if (g == (NRF_GPIO_Type *)0) {
+        return -1;
+    }
+    g->DIRCLR = (1UL << pin);
+    /* DIR=input, input buffer connected, no pull (PIN_CNF all-zero fields). */
+    g->PIN_CNF[pin] = 0UL;
+    return 0;
+}
+
+int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val)
+{
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    /* Claim as output and drive the requested level. */
+    tiku_nordic_gpio_init_output((uint8_t)(port - 1u), pin, (uint8_t)(val ? 1u : 0u));
+    return 0;
+}
+
+int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin)
+{
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    tiku_nordic_gpio_toggle((uint8_t)(port - 1u), pin);
+    return 0;
+}
+
+int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin)
+{
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    return (int8_t)tiku_nordic_gpio_read((uint8_t)(port - 1u), pin);
+}
+
+int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin)
+{
+    NRF_GPIO_Type *g;
+
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    g = tiku_nordic_gpio_base((uint8_t)(port - 1u));
+    if (g == (NRF_GPIO_Type *)0) {
+        return -1;
+    }
+    /* 1 = output, 0 = input. */
+    return (int8_t)((g->DIR >> pin) & 0x1u);
+}

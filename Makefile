@@ -1156,6 +1156,31 @@ SRCS   += arch/arm-rp2350/tiku_usb_cdc_arch.c
 CFLAGS += -DTIKU_CONSOLE_USB=1 -DTIKU_CONSOLE_BOTH=1
 endif
 
+else ifeq ($(TIKU_PLATFORM),nordic)
+
+# Nordic nRF54L arch (Cortex-M33). Boot + tick + console are proven; the
+# remaining HAL files (crit/wake/mem/mpu/region/watchdog + driver stubs) are
+# added below as the kernel needs them.
+SRCS += arch/nordic/tiku_cpu_common.c
+SRCS += arch/nordic/tiku_crt_early.c
+SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
+SRCS += arch/nordic/tiku_timer_arch.c
+SRCS += arch/nordic/tiku_gpio_arch.c
+SRCS += arch/nordic/tiku_uart_arch.c
+SRCS += arch/nordic/tiku_crit_arch.c
+SRCS += arch/nordic/tiku_wake_arch.c
+SRCS += arch/nordic/tiku_mem_arch.c
+SRCS += arch/nordic/tiku_mpu_arch.c
+SRCS += arch/nordic/tiku_region_arch.c
+SRCS += arch/nordic/tiku_cpu_watchdog_arch.c
+SRCS += arch/nordic/tiku_htimer_arch.c
+SRCS += arch/nordic/tiku_gpio_irq_arch.c
+SRCS += arch/nordic/tiku_adc_arch.c
+SRCS += arch/nordic/tiku_i2c_arch.c
+SRCS += arch/nordic/tiku_spi_arch.c
+SRCS += arch/nordic/tiku_onewire_arch.c
+SRCS += arch/nordic/tiku_trng_arch.c
+
 else ifeq ($(TIKU_PLATFORM),ambiq)
 
 # Apollo510 arch (Cortex-M55). GPIO/SPI/LCD are bundled here (like RP2350)

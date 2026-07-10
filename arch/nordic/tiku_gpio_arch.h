@@ -64,4 +64,21 @@ void tiku_nordic_gpio_toggle(uint8_t port, uint8_t pin);
  */
 uint8_t tiku_nordic_gpio_read(uint8_t port, uint8_t pin);
 
+/*---------------------------------------------------------------------------*/
+/* Generic GPIO HAL (used by interfaces/gpio + the VFS /dev/gpio tree)       */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * These wrap the physical helpers above.  Ports are 1-based virtual ports
+ * (1 = P0, 2 = P1, 3 = P2, matching TIKU_DEVICE_HAS_PORT1..3); pins are 0..31.
+ * Return 0 on success, -1 if the port/pin is out of range; read/get_dir return
+ * the pin level / direction (0 or 1), or -1 on range error.
+ */
+int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
+int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
+int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);
+int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
+int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
+int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
+
 #endif /* TIKU_GPIO_ARCH_H_ */
