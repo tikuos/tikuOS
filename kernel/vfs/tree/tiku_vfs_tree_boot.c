@@ -58,8 +58,8 @@
  * On MSP430 reading the live SYSRSTIV register pops the highest pending
  * vector (hardware walks toward 0 on each read), so the cause must be
  * latched exactly once at boot and served from this copy ever after; the
- * HAL does that latching.  RP2350 maps WD_REASON; Ambiq is 0 ("none")
- * until its RSTGEN->STAT decode is implemented in the arch layer.
+ * HAL does that latching.  RP2350 maps WD_REASON; Ambiq decodes
+ * RSTGEN->STAT (watchdog / reboot / power) in the arch layer.
  */
 static uint16_t boot_reset_cause;
 
