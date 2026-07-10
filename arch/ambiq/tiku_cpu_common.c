@@ -124,14 +124,40 @@ uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
 }
 
 /**
- * @brief Return the encoded reset reason for the last system reset
+ * @brief Return the encoded reason for the last system reset.
  *
- * Stub — always returns 0. The real implementation decodes
- * RSTGEN->STAT into the TikuOS reset-reason bit field.
+ * Reads the Apollo reset generator's status latch (RSTGEN->STAT) and
+ * maps it to an MSP430-SYSRSTIV-compatible code, which is the contract
+ * the /sys reset consumers expect (tiku_vfs_tree_boot.c buckets it into
+ * watchdog / power / reboot / other).  Multiple causes can latch across
+ * a chain of resets; the most specific / most recent is reported first.
  *
- * @return Reset-reason bitmask; 0 until the TODO is implemented
+ * Read-only: the STAT latch is left intact (the boot path samples it
+ * once), so this never perturbs the reset generator.
+ *
+ * @return SYSRSTIV-compatible reset-reason code (0 = clean power-on).
  */
 uint16_t tiku_cpu_ambiq_reset_reason(void) {
-    /* TODO: decode RSTGEN->STAT into the tikuOS reset-reason bits. */
-    return 0u;
+    uint32_t s = RSTGEN->STAT;
+
+    /* RSTGEN->STAT bit positions are stable across the Apollo4/5 families,
+     * but the CMSIS name for bit 1 is not (PORSTAT on Apollo4, POASTAT on
+     * Apollo5), so decode by numeric mask rather than by macro name. */
+    if (s & (1UL << 6)) {               /* WDRSTAT  watchdog reset        */
+        return 0x0016u;                 /*                 -> "watchdog"  */
+    }
+    if (s & (1UL << 3)) {               /* SWRSTAT  software reset        */
+        return 0x0006u;                 /*                 -> "reboot"    */
+    }
+    if (s & (1UL << 0)) {               /* EXRSTAT  external RST pin      */
+        return 0x0014u;                 /*                 -> "reboot"    */
+    }
+    if (s & ((1UL << 2) | (1UL << 7) | (1UL << 8) |
+             (1UL << 9) | (1UL << 10))) { /* BORSTAT / brown-out variants */
+        return 0x0002u;                 /*                 -> "power"     */
+    }
+    if (s & (1UL << 1)) {               /* PORSTAT/POASTAT power-on       */
+        return 0x0000u;                 /*                 -> "power"     */
+    }
+    return 0u;                          /* nothing latched -> power-on    */
 }
