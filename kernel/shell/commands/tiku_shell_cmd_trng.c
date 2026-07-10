@@ -1,5 +1,8 @@
 /*
- * Tiku Operating System  -  http://tiku-os.org
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_shell_cmd_trng.c - "trng" command implementation
