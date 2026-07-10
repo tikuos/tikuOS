@@ -158,6 +158,17 @@ static void queue_purge_process_locked(const struct tiku_process *p)
     q_len = new_len;
 }
 
+/**
+ * @brief Remove the queued event at ring position @p pos, compacting the queue.
+ *
+ * Must run inside the atomic section (hence "_locked"): the caller brackets it
+ * with tiku_atomic_enter()/exit().  If @p out is non-NULL the removed slot is
+ * copied there first; the remaining tail entries are then shifted down by one
+ * and q_len is decremented.
+ *
+ * @param pos  Offset from q_head of the entry to remove (0 = oldest pending).
+ * @param out  Optional destination for the removed event (may be NULL).
+ */
 static void queue_remove_locked(uint8_t pos, struct event_item *out)
 {
     uint8_t i;
@@ -623,6 +634,13 @@ struct tiku_timer *tiku_event_timer(tiku_event_t ev, tiku_event_data_t data)
                : NULL;
 }
 
+/**
+ * @brief Extract the packed 32-bit integer payload carried by an event.
+ *
+ * @param ev    Event identifier.
+ * @param data  Raw event payload word.
+ * @return The u32 value, or 0 if @p ev does not carry a U32 payload.
+ */
 uint32_t tiku_event_u32(tiku_event_t ev, tiku_event_data_t data)
 {
     return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_U32)
@@ -630,6 +648,13 @@ uint32_t tiku_event_u32(tiku_event_t ev, tiku_event_data_t data)
                : 0u;
 }
 
+/**
+ * @brief Extract the opaque application pointer carried by an event.
+ *
+ * @param ev    Event identifier.
+ * @param data  Raw event payload word.
+ * @return The pointer, or NULL if @p ev does not carry a PTR payload.
+ */
 void *tiku_event_ptr(tiku_event_t ev, tiku_event_data_t data)
 {
     return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_PTR) ? data : NULL;

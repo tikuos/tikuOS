@@ -137,6 +137,18 @@ static tiku_mem_err_t pool_write_next(const tiku_pool_t *pool,
 #endif
 static uint8_t pool_nvm_stage[TIKU_POOL_NVM_STAGE_BYTES];
 
+/**
+ * @brief Thread a pool's free-list through NVM-backed block storage.
+ *
+ * The NVM path (Ambiq / RP2350) cannot rewrite a block in place without an
+ * erase per pointer, so blocks at least one stage wide get a direct per-block
+ * next-pointer write, while small blocks that share a sector are coalesced and
+ * written a staged run at a time.
+ *
+ * @param pool  Pool whose block_count / block_size / buf describe the region.
+ * @return TIKU_MEM_OK, or an NVM-tier error on write failure (leaving a
+ *         half-built free-list the caller must reject).
+ */
 static tiku_mem_err_t build_freelist_nvm(tiku_pool_t *pool)
 {
     const tiku_mem_arch_size_t bs = pool->block_size;

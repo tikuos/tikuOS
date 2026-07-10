@@ -34,6 +34,9 @@ static tiku_cpu_idle_mode_t current_idle = TIKU_CPU_IDLE_OFF;
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Compare two NUL-terminated strings for equality.
+ */
 static uint8_t
 streq(const char *a, const char *b)
 {

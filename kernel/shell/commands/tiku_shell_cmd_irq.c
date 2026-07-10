@@ -17,6 +17,9 @@
 #include <kernel/shell/tiku_shell.h>
 #include <interfaces/gpio/tiku_gpio.h>
 
+/**
+ * @brief Compare two NUL-terminated strings for equality.
+ */
 static uint8_t
 streq(const char *a, const char *b)
 {

@@ -19,6 +19,9 @@
 /* EVENT NAME LOOKUP                                                         */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Map a process event id to a short display name.
+ */
 static const char *
 event_name(tiku_event_t ev)
 {

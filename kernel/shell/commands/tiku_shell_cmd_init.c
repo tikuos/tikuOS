@@ -93,6 +93,12 @@ cmd_join_args(char *buf, uint8_t bufsz,
 /* SUBCOMMAND: list                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief List all init-table entries to the shell.
+ *
+ * Prints each entry's sequence number, name, enabled/disabled flag, and
+ * command string; notes when the table is empty.
+ */
 static void
 cmd_init_list(void)
 {
@@ -199,6 +205,12 @@ cmd_init_set_enable(uint8_t argc, const char *argv[], uint8_t en)
 /* SUBCOMMAND: run                                                           */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Execute every enabled init-table entry now.
+ *
+ * Runs the inittab via tiku_init_run_all() and reports how many entries
+ * were executed.
+ */
 static void
 cmd_init_run(void)
 {

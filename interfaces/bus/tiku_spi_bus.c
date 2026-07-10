@@ -95,6 +95,16 @@ tiku_spi_read(uint8_t *buf, uint16_t len)
     return tiku_spi_arch_read(buf, len);
 }
 
+/**
+ * @brief Full-duplex SPI transfer: clock out @p tx_buf while clocking in
+ *        @p rx_buf.
+ *
+ * @param tx_buf  Bytes to transmit (must be non-NULL).
+ * @param rx_buf  Buffer receiving the simultaneously-clocked-in bytes.
+ * @param len     Number of bytes to exchange (must be > 0).
+ * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM on a NULL buffer or zero
+ *         length, else an arch error code.
+ */
 int
 tiku_spi_write_read(const uint8_t *tx_buf, uint8_t *rx_buf, uint16_t len)
 {

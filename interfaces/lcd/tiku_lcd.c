@@ -170,6 +170,13 @@ fmt_uint_into(char *buf, uint8_t width, uint32_t value)
     return digits;
 }
 
+/**
+ * @brief Push a full character framebuffer to the LCD hardware.
+ *
+ * Writes every cell of @p buf to its LCD position via the arch putchar.
+ *
+ * @param buf  Array of TIKU_BOARD_LCD_NUM_CHARS characters, one per cell.
+ */
 static void
 flush_buf(const char *buf)
 {
@@ -179,6 +186,12 @@ flush_buf(const char *buf)
     }
 }
 
+/**
+ * @brief Fill a character framebuffer with a single character.
+ *
+ * @param buf  Destination framebuffer (TIKU_BOARD_LCD_NUM_CHARS cells).
+ * @param ch   Character written to every cell.
+ */
 static void
 fill_buf(char *buf, char ch)
 {
@@ -264,6 +277,14 @@ clear_all_dots(void)
     }
 }
 
+/**
+ * @brief Turn on one inter-digit decimal-point icon.
+ *
+ * Ignores out-of-range positions and boards where the dot maps to no
+ * physical icon (id 0xFF).
+ *
+ * @param n  1-based dot position (1..TIKU_BOARD_LCD_DOT_COUNT).
+ */
 static void
 light_dot(uint8_t n)
 {

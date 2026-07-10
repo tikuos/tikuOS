@@ -35,6 +35,13 @@ static volatile uint32_t __attribute__((section(".uninit"))) s_mram_test_scratch
 /* mrambench verify -- dirty-check regression guard                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Regression-check that the NVM flush dirty-check works.
+ *
+ * Runs three flushes -- idle, a real .uninit change, idle again -- and
+ * PASSes only if the program count skips both idle flushes and commits
+ * exactly once for the change.
+ */
 static void
 mrambench_verify(void)
 {
@@ -79,6 +86,12 @@ mrambench_verify(void)
 /* mrambench (no arg) -- program-timing benchmark                            */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Benchmark MRAM program timing and report a cost model.
+ *
+ * Times bootrom programming across several block sizes, prints per-run
+ * cycles/microseconds, and fits fixed overhead plus per-word cost.
+ */
 static void
 mrambench_time(void)
 {

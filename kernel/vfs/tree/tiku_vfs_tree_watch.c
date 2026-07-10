@@ -211,6 +211,16 @@ vfs_cache_used_read(char *buf, size_t max)
     return snprintf(buf, max, "%u\n", (unsigned)used);
 }
 
+/**
+ * @brief Read handler for /sys/vfs/cache/hits.
+ *
+ * Renders the read-coalescing cache's cumulative hit count (each hit is
+ * one sensor/bus access avoided).
+ *
+ * @param buf  Output buffer
+ * @param max  Capacity of @p buf
+ * @return Bytes written (snprintf-style)
+ */
 static int
 vfs_cache_hits_read(char *buf, size_t max)
 {
@@ -219,6 +229,16 @@ vfs_cache_hits_read(char *buf, size_t max)
     return snprintf(buf, max, "%lu\n", (unsigned long)hits);
 }
 
+/**
+ * @brief Read handler for /sys/vfs/cache/misses.
+ *
+ * Renders the read-coalescing cache's cumulative miss count (each miss
+ * is a fresh sensor/bus access).
+ *
+ * @param buf  Output buffer
+ * @param max  Capacity of @p buf
+ * @return Bytes written (snprintf-style)
+ */
 static int
 vfs_cache_misses_read(char *buf, size_t max)
 {
@@ -273,6 +293,16 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
  */
 #define TIKU_VFS_MANIFEST_REV  2u
 
+/**
+ * @brief Read handler for /sys/vfs/manifest_rev.
+ *
+ * Renders the manifest schema version (TIKU_VFS_MANIFEST_REV) so an
+ * agent consuming /sys/vfs/manifest can pin or adapt to the line format.
+ *
+ * @param buf  Output buffer
+ * @param max  Capacity of @p buf
+ * @return Bytes written (snprintf-style)
+ */
 static int vfs_manifest_rev_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%u\n", (unsigned)TIKU_VFS_MANIFEST_REV);

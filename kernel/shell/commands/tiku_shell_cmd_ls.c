@@ -26,6 +26,15 @@
 /* LIST CALLBACK                                                             */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief VFS list callback that prints one directory entry.
+ *
+ * Renders directories as "d name/" and files with a two-char permission
+ * field ("rw"/"r-"/"-w"/"--") derived from the node's read/write handlers.
+ *
+ * @param node  Entry to print.
+ * @param ctx   Unused callback context.
+ */
 static void
 ls_print_entry(const tiku_vfs_node_t *node, void *ctx)
 {

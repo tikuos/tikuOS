@@ -83,6 +83,9 @@ ping_parse_ip(const char *s, uint8_t out[4])
     return (*s == '\0') ? 1u : 0u;
 }
 
+/**
+ * @brief Parse a decimal string into a uint16_t (no error checking).
+ */
 static uint16_t
 ping_parse_u16(const char *s)
 {
@@ -107,6 +110,12 @@ ping_on_reply(const uint8_t *src_ip, uint16_t id, uint16_t seq)
     }
 }
 
+/**
+ * @brief Build and transmit one ICMP echo request to the ping target.
+ *
+ * Advances the sequence number, stamps the send time, and marks the
+ * probe as awaiting a reply for the tick handler.
+ */
 static void
 ping_send_probe(void)
 {

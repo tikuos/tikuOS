@@ -35,6 +35,9 @@
 #define TIKU_SHELL_TREE_MAX_DEPTH 8
 #endif
 
+/**
+ * @brief Print the leading indentation guides for a tree level.
+ */
 static void
 tree_print_indent(uint8_t depth, uint8_t is_last_chain)
 {
@@ -50,6 +53,15 @@ tree_print_indent(uint8_t depth, uint8_t is_last_chain)
     }
 }
 
+/**
+ * @brief Recursively print a VFS directory subtree, one node per line.
+ *
+ * Draws "|-- " / "`-- " connectors for each child, recursing into
+ * subdirectories until TIKU_SHELL_TREE_MAX_DEPTH, where it prints "...".
+ *
+ * @param node   Directory node to walk (non-directories produce nothing).
+ * @param depth  Current nesting level, used for indentation.
+ */
 static void
 tree_walk(const tiku_vfs_node_t *node, uint8_t depth)
 {

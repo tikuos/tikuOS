@@ -54,6 +54,15 @@ static char              mqtt_payload[MQTT_PAYLOAD_MAX];
 /* HELPERS / CALLBACKS                                                       */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief MQTT event callback: latch the last event for the tick to act on.
+ *
+ * Invoked by the MQTT client on connection-state changes (CONNECTED,
+ * ERROR, DISCONNECTED); stores the code in mqtt_evt so the shell tick
+ * can act on it outside callback context.
+ *
+ * @param event  The TIKU_KITS_NET_MQTT_EVT_* code being reported.
+ */
 static void
 mqtt_event_cb(uint8_t event)
 {
@@ -99,6 +108,14 @@ mqtt_parse_ip(const char *s, uint8_t out[4])
     return (*s == '\0') ? 1u : 0u;
 }
 
+/**
+ * @brief Parse a decimal string into a uint16_t.
+ *
+ * Consumes leading decimal digits and stops at the first non-digit.
+ *
+ * @param s  Decimal digit string.
+ * @return   Parsed value (0 if no digits; wraps silently on overflow).
+ */
 static uint16_t
 mqtt_parse_u16(const char *s)
 {
@@ -111,6 +128,16 @@ mqtt_parse_u16(const char *s)
     return v;
 }
 
+/**
+ * @brief Copy a C string into a fixed buffer, always NUL-terminating.
+ *
+ * Copies at most max-1 bytes from src, then writes a terminating NUL,
+ * truncating if src is longer.
+ *
+ * @param dst  Destination buffer of at least max bytes.
+ * @param src  Source C string.
+ * @param max  Size of the destination buffer in bytes.
+ */
 static void
 mqtt_copy(char *dst, const char *src, uint8_t max)
 {

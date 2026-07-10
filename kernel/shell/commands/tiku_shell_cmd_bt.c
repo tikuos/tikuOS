@@ -23,6 +23,9 @@
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Compare two C strings for exact equality (1 if equal, else 0).
+ */
 static int str_eq(const char *a, const char *b)
 {
     while (*a && *a == *b) { ++a; ++b; }
@@ -38,6 +41,9 @@ static void put_hex2(uint8_t b)
     tiku_shell_io_putc(digits[b & 0xFU]);
 }
 
+/**
+ * @brief Print a 16-bit value as four zero-padded hex nibbles.
+ */
 static void put_hex4(uint16_t w)
 {
     put_hex2((uint8_t)((w >> 8) & 0xFFU));
@@ -46,6 +52,9 @@ static void put_hex4(uint16_t w)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Print the "bt" command usage summary.
+ */
 static void bt_help(void)
 {
     SHELL_PRINTF("bt status               CYW43 BT subsystem: MAC + version\n");
@@ -88,6 +97,12 @@ static const char *hci_version_name(uint8_t v)
     }
 }
 
+/**
+ * @brief Print n bytes, rendering non-printable characters as '.'.
+ *
+ * @param s  Character buffer (not necessarily NUL-terminated).
+ * @param n  Number of bytes to render.
+ */
 static void put_name(const char *s, uint8_t n)
 {
     uint8_t i;
@@ -100,6 +115,13 @@ static void put_name(const char *s, uint8_t n)
     }
 }
 
+/**
+ * @brief Handle "bt status": print the CYW43 BT subsystem information.
+ *
+ * When the controller is ready, prints the BD_ADDR, HCI and LMP versions
+ * (with Core Spec names), manufacturer, firmware string, and current
+ * advertising/scanning state.
+ */
 static void bt_status(void)
 {
     if (tiku_bt_is_ready() == 0) {
@@ -206,6 +228,9 @@ static const char *evt_type_name(uint8_t e)
     }
 }
 
+/**
+ * @brief Map a BLE address-type code to "public"/"random"/"?".
+ */
 static const char *bt_addr_type_name(uint8_t t)
 {
     switch (t) {
@@ -215,6 +240,13 @@ static const char *bt_addr_type_name(uint8_t t)
     }
 }
 
+/**
+ * @brief Handle "bt connections": list active LE links in a table.
+ *
+ * Fetches up to TIKU_BT_CONN_MAX connections via tiku_bt_connections()
+ * and prints peer address, address type, role, connection handle, and
+ * connection interval for each; notes when none are active.
+ */
 static void bt_connections(void)
 {
     tiku_bt_connection_t conns[TIKU_BT_CONN_MAX];
@@ -522,6 +554,13 @@ static void bt_unpair_cmd(uint8_t argc, const char *argv[])
     }
 }
 
+/**
+ * @brief Handle "bt list": print the cached LE scan results.
+ *
+ * Fetches up to TIKU_BT_SCAN_MAX entries via tiku_bt_scan_results() and
+ * prints a table of address, RSSI, advertising event type, and device
+ * name; notes when no devices have been found.
+ */
 static void bt_list(void)
 {
     tiku_bt_scan_entry_t entries[TIKU_BT_SCAN_MAX];

@@ -129,6 +129,12 @@ void tiku_hang_boot_init(void)
     tiku_hang_warm.magic = 0u;                /* one-shot: next boot is clean */
 }
 
+/**
+ * @brief Whether a valid hang record survived into this boot.
+ *
+ * @return Non-zero if the warm-boot record captured at boot carries the
+ *         expected magic (the previous boot recorded a hang culprit).
+ */
 static uint8_t tiku_hang_have(void)
 {
     return (uint8_t)(tiku_hang_boot.magic == TIKU_HANG_MAGIC);

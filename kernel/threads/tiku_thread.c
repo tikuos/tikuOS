@@ -138,6 +138,20 @@ int tiku_thread_in_kernel(void)
     return !s_started || s_current == (tiku_thread_t *)0;
 }
 
+/**
+ * @brief Cooperative context-switch core: park the outgoing context and pick
+ *        the next worker to run.
+ *
+ * Invoked from the arch switch trampoline with the outgoing stack pointer.
+ * Charges the elapsed cycles to whoever was running (a worker or the kernel),
+ * saves its @p old_sp, checks the outgoing stack canary, then selects the next
+ * READY, in-budget worker from the round-robin cursor (an over-budget worker
+ * is skipped until a refill lifts it back over budget).  With no runnable
+ * worker it returns to the kernel context.
+ *
+ * @param old_sp  Stack pointer of the context being switched out.
+ * @return The stack pointer of the context to switch in.
+ */
 uint32_t *tiku_thread_switch(uint32_t *old_sp)
 {
     uint32_t now = tiku_thread_arch_cycles();

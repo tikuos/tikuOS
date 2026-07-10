@@ -116,6 +116,9 @@ parse_uint(const char *s, uint32_t *out)
     return 1;
 }
 
+/**
+ * @brief Parse an optionally-signed decimal integer string.
+ */
 static uint8_t
 parse_int(const char *s, int32_t *out)
 {
@@ -142,6 +145,12 @@ parse_int(const char *s, int32_t *out)
 /* Sub-commands                                                               */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Print the "lcd info" summary to the shell.
+ *
+ * Reports whether an LCD is present, its character count, and (when the
+ * board exposes named icons) the icon count.
+ */
 static void
 do_info(void)
 {
@@ -292,6 +301,9 @@ do_icons(uint8_t argc, const char *argv[])
 #endif
 }
 
+/**
+ * @brief Print the "lcd" command usage / subcommand list.
+ */
 static void
 print_help(void)
 {

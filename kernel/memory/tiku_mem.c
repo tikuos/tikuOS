@@ -323,6 +323,11 @@ void tiku_mem_guard_note_violation(void)
     mem_guard_violations++;
 }
 
+/**
+ * @brief Number of worker-context allocator calls refused since boot.
+ *
+ * @return The running count of TIKU_MEM_KERNEL_ONLY guard violations.
+ */
 uint32_t tiku_mem_guard_violations(void)
 {
     return mem_guard_violations;

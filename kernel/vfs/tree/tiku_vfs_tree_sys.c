@@ -729,6 +729,16 @@ rules_list_read(char *buf, size_t max)
     return off;   /* 0 = no rules armed (empty read) */
 }
 
+/**
+ * @brief Read handler for /sys/jobs/count.
+ *
+ * Renders the number of currently occupied scheduler job slots by
+ * scanning the job table for armed (non-NULL) entries.
+ *
+ * @param buf  Output buffer
+ * @param max  Capacity of @p buf
+ * @return Bytes written (snprintf-style)
+ */
 static int
 jobs_count_read(char *buf, size_t max)
 {
