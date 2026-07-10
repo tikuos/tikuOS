@@ -84,6 +84,9 @@ void tiku_nordic_systick_handler(void)     __attribute__((weak, alias("nordic_de
  * follow-up.  The rest default until their subsystem lands. */
 void tiku_nordic_timer10_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_grtc_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
+/* Console UARTE RX -- SERIAL20 (198, UARTE20) or SERIAL30 (260, UARTE30); the
+ * table wires both, only the selected console's line is NVIC-enabled. */
+void tiku_nordic_uart_console_isr(void)    __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Factory trim application (minimal SystemInit)                             */
@@ -200,12 +203,16 @@ __attribute__((section(".vectors"), used)) = {
 
     /* External interrupts -- IRQ numbers are the MDK IRQn enum values
      * (nrf54l15_application.h), NOT the vector-array position. */
-    [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn = 133    */
-    [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn  = 226    */
+    [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn  = 133   */
+    [16 + 198] = tiku_nordic_uart_console_isr, /* SERIAL20_IRQn = 198   */
+    [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn   = 226   */
+    [16 + 260] = tiku_nordic_uart_console_isr, /* SERIAL30_IRQn = 260   */
 
     /* Fill every remaining external slot with the default handler so no
      * slot dispatches through a NULL pointer. */
     [16 +   0 ... 16 + 132] = nordic_default_handler,
-    [16 + 134 ... 16 + 225] = nordic_default_handler,
-    [16 + 227 ... 16 + 271] = nordic_default_handler,
+    [16 + 134 ... 16 + 197] = nordic_default_handler,
+    [16 + 199 ... 16 + 225] = nordic_default_handler,
+    [16 + 227 ... 16 + 259] = nordic_default_handler,
+    [16 + 261 ... 16 + 271] = nordic_default_handler,
 };

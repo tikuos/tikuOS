@@ -25,6 +25,7 @@
 
 #include <arch/nordic/tiku_uart_arch.h>
 #include <arch/nordic/tiku_device_select.h>   /* board macros + MDK register types */
+#include <arch/nordic/tiku_nordic_core.h>     /* NVIC helpers for the RX IRQ  */
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -55,9 +56,18 @@
 /*---------------------------------------------------------------------------*/
 
 static volatile uint8_t tiku_uart_txb __attribute__((aligned(4)));
-static volatile uint8_t tiku_uart_rxb __attribute__((aligned(4)));
-static uint8_t          tiku_uart_rx_armed;
-static uint16_t         tiku_uart_overruns;
+
+/* IRQ-driven RX: the EasyDMA drops each received byte into a 1-byte bounce
+ * buffer and hardware auto-restarts (DMA_RX_END -> DMA_RX_START short), so the
+ * CPU can sleep and wake per byte; the DMARXEND ISR copies the byte into a
+ * software ring the shell drains at its own pace -- no bytes lost in the gap
+ * between shell getc() calls (the old polled single-byte RX could drop them). */
+#define TIKU_UART_RX_RING  128u
+static volatile uint8_t  tiku_uart_rxb __attribute__((aligned(4)));
+static volatile uint8_t  tiku_uart_rxring[TIKU_UART_RX_RING];
+static volatile uint16_t tiku_uart_rx_head;
+static volatile uint16_t tiku_uart_rx_tail;
+static volatile uint16_t tiku_uart_overruns;
 
 /*---------------------------------------------------------------------------*/
 /* Init                                                                      */
@@ -80,7 +90,23 @@ void tiku_uart_init(void)
     TIKU_UARTE->CONFIG   = 0UL;                 /* 8N1, no parity, no flow    */
     TIKU_UARTE->ENABLE   = TIKU_UARTE_ENABLE_VAL;
 
-    tiku_uart_rx_armed = 0u;
+    /* IRQ-driven RX: 1-byte EasyDMA + the DMA_RX_END -> DMA_RX_START short
+     * (hardware re-arms with no software gap); the DMARXEND interrupt drains
+     * each byte into the ring.  Priority 2 (above the tick at 3) so console
+     * input is not starved. */
+    tiku_uart_rx_head = 0u;
+    tiku_uart_rx_tail = 0u;
+    TIKU_UARTE->SHORTS = (1UL << 5);            /* DMA_RX_END -> DMA_RX_START  */
+    TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
+    TIKU_UARTE->DMA.RX.MAXCNT = 1UL;
+    TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
+    TIKU_UARTE->INTENSET = (1UL << 19);         /* DMARXEND                    */
+
+    tiku_nordic_nvic_clear_pending(TIKU_BOARD_CONSOLE_UARTE_IRQN);
+    tiku_nordic_nvic_set_priority(TIKU_BOARD_CONSOLE_UARTE_IRQN, 2u);
+    tiku_nordic_nvic_enable(TIKU_BOARD_CONSOLE_UARTE_IRQN);
+
+    TIKU_UARTE->TASKS_DMA.RX.START = 1UL;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -124,39 +150,50 @@ void tiku_uart_printf(const char *fmt, ...)
 }
 
 /*---------------------------------------------------------------------------*/
-/* RX (single-byte re-armed EasyDMA)                                         */
+/* RX (IRQ-driven EasyDMA + software ring)                                   */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Arm a one-byte RX DMA transfer into the bounce buffer. */
-static void tiku_uart_rx_arm(void)
+/**
+ * @brief Console UARTE ISR: drain each DMA'd byte into the software ring.
+ *
+ * Overrides the weak alias installed by the crt vector table (SERIAL20 IRQn
+ * 198 for UARTE20, SERIAL30 260 for UARTE30 -- the crt wires both to here,
+ * only the console's is NVIC-enabled).  The DMA_RX_END->DMA_RX_START short
+ * has already re-armed the DMA in hardware, so the only job is to copy the
+ * byte before the next overwrites the 1-byte bounce buffer.
+ */
+void tiku_nordic_uart_console_isr(void)
 {
-    TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
-    TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
-    TIKU_UARTE->DMA.RX.MAXCNT = 1UL;
-    TIKU_UARTE->TASKS_DMA.RX.START = 1UL;
-    tiku_uart_rx_armed = 1u;
+    if (TIKU_UARTE->EVENTS_DMA.RX.END != 0UL) {
+        uint16_t next;
+
+        TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
+        (void)TIKU_UARTE->EVENTS_DMA.RX.END;      /* flush the clear */
+
+        next = (uint16_t)((tiku_uart_rx_head + 1u) % TIKU_UART_RX_RING);
+        if (next != tiku_uart_rx_tail) {
+            tiku_uart_rxring[tiku_uart_rx_head] = tiku_uart_rxb;
+            tiku_uart_rx_head = next;
+        } else if (tiku_uart_overruns != 0xFFFFu) {
+            tiku_uart_overruns++;                 /* ring full: drop + count  */
+        }
+    }
 }
 
 uint8_t tiku_uart_rx_ready(void)
 {
-    if (tiku_uart_rx_armed == 0u) {
-        tiku_uart_rx_arm();
-    }
-    return (uint8_t)(TIKU_UARTE->EVENTS_DMA.RX.END != 0UL);
+    return (uint8_t)(tiku_uart_rx_head != tiku_uart_rx_tail);
 }
 
 int tiku_uart_getc(void)
 {
     uint8_t c;
 
-    if (tiku_uart_rx_armed == 0u) {
-        tiku_uart_rx_arm();
+    if (tiku_uart_rx_head == tiku_uart_rx_tail) {
+        return -1;                                /* ring empty (non-blocking)*/
     }
-    while (TIKU_UARTE->EVENTS_DMA.RX.END == 0UL) {
-        /* block until a byte arrives */
-    }
-    c = tiku_uart_rxb;
-    tiku_uart_rx_arm();          /* re-arm for the next byte */
+    c = tiku_uart_rxring[tiku_uart_rx_tail];
+    tiku_uart_rx_tail = (uint16_t)((tiku_uart_rx_tail + 1u) % TIKU_UART_RX_RING);
     return (int)c;
 }
 
