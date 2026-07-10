@@ -62,7 +62,7 @@ static volatile uint8_t tiku_uart_txb __attribute__((aligned(4)));
  * CPU can sleep and wake per byte; the DMARXEND ISR copies the byte into a
  * software ring the shell drains at its own pace -- no bytes lost in the gap
  * between shell getc() calls (the old polled single-byte RX could drop them). */
-#define TIKU_UART_RX_RING  128u
+#define TIKU_UART_RX_RING  256u
 static volatile uint8_t  tiku_uart_rxb __attribute__((aligned(4)));
 static volatile uint8_t  tiku_uart_rxring[TIKU_UART_RX_RING];
 static volatile uint16_t tiku_uart_rx_head;

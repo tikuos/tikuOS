@@ -2088,6 +2088,9 @@ all: $(TARGET) $(TARGET_BIN) $(TARGET_UF2) size
 else ifeq ($(TIKU_PLATFORM),ambiq)
 TARGET_BIN = main.bin
 all: $(TARGET) $(TARGET_BIN) size
+else ifeq ($(TIKU_PLATFORM),nordic)
+TARGET_HEX = main.hex
+all: $(TARGET) $(TARGET_HEX) size
 else
 all: $(TARGET) size
 endif
@@ -2139,6 +2142,15 @@ $(TARGET_BIN): $(TARGET)
 	$(OBJCOPY) -O binary $< $@
 endif
 
+# nRF54L15: Intel HEX for nrfutil to program into RRAM.
+ifeq ($(TIKU_PLATFORM),nordic)
+$(TARGET_HEX): $(TARGET)
+	$(OBJCOPY) -O ihex $< $@
+	@echo "  [hex]   $(TARGET) -> $(TARGET_HEX)"
+
+hex: $(TARGET_HEX)
+endif
+
 # Embedded BASIC: the generated .c lives inside $(BUILD_DIR), so the
 # pattern rule above can't reach it (it would loop on the prefix).
 # Use explicit rules for both generation and compilation. These are
@@ -2184,6 +2196,14 @@ endif
 # ---------------------------------------------------------------------------
 # Flash / Debug / Erase
 # ---------------------------------------------------------------------------
+
+# nRF54L15-DK flashing tool (Nordic's nrfutil): prefer a PATH `nrfutil`, else
+# the vendored ./temp/nrfutil.  NRF_SN selects one J-Link probe by serial on a
+# multi-DK rig (TikuBench passes it per board via NRF_SN=<serial>).
+NRFUTIL ?= $(shell command -v nrfutil 2>/dev/null || echo $(CURDIR)/temp/nrfutil)
+NRF_SN  ?=
+NRF_SN_ARG = $(if $(strip $(NRF_SN)),--serial-number $(strip $(NRF_SN)),)
+
 ifeq ($(TIKU_PLATFORM),rp2350)
 
 # Pi Pico 2 W has two reasonable flash paths:
@@ -2252,6 +2272,27 @@ erase:
 	@printf 'device %s\nif %s\nspeed %s\nconnect\nerase\nr\nq\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" > $(JLINK_ERASE_SCRIPT)
 	@echo "Erasing MRAM via $(JLINK) ($(JLINK_DEVICE))..."
 	$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(JLINK_ERASE_SCRIPT)
+
+else ifeq ($(TIKU_PLATFORM),nordic)
+
+# nRF54L15-DK via the on-board SEGGER J-Link + Nordic's nrfutil.  The build
+# emits main.hex (objcopy -O ihex); nrfutil erases and programs RRAM, then
+# resets the system so the freshly-flashed image runs.  Set NRF_SN=<serial>
+# to target a specific DK when more than one is attached.
+flash: all
+	@echo "Flashing $(TARGET_HEX) via nrfutil ($(NRFUTIL))..."
+	$(NRFUTIL) device program --firmware $(TARGET_HEX) --core Application \
+		--options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG)
+
+run: flash
+
+debug: all
+	@echo "nRF54L15 debug via nrfutil, e.g.:"
+	@echo "  $(NRFUTIL) device cpu-register-read --register PC $(NRF_SN_ARG)"
+	@echo "  $(NRFUTIL) device reset --reset-kind RESET_SYSTEM $(NRF_SN_ARG)"
+
+erase:
+	$(NRFUTIL) device erase --core Application $(NRF_SN_ARG)
 
 else
 
