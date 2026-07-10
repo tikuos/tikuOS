@@ -14,13 +14,16 @@
   <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
   <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350-red?style=flat-square" alt="MCU"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
-  <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-38%20commands-orange?style=flat-square" alt="Shell"></a>
+  <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-58%20commands-orange?style=flat-square" alt="Shell"></a>
+  <a href="#networking"><img src="https://img.shields.io/badge/net-Wi--Fi%20%7C%20TLS%20%7C%20MQTT-brightgreen?style=flat-square" alt="Networking"></a>
   <a href="http://tiku-os.org"><img src="https://img.shields.io/badge/web-tiku--os.org-purple?style=flat-square" alt="Website"></a>
 </p>
 
 <p align="center">
   TikuOS is an operating system for <strong>microwatt computers</strong>: ubiquitous devices that run for years on a coin cell or indefinitely on harvested energy. It is the first OS designed for sub-milliwatt communication primitives, including backscatter and tunnel diode based beyond-backscatter transceivers, with IP networking and machine intelligence as integral parts of the operating system.
 </p>
+
+<p align="center"><sub>Event-driven protothreads · static allocation, no heap · one source tree, three CPU architectures.</sub></p>
 
 ---
 
@@ -41,22 +44,28 @@
 ## Quick Start
 
 ```bash
-# --- Raspberry Pi Pico 2 W (RP2350) ----------------------------------------
-# Requires: arm-none-eabi-gcc + python3 (and optionally picotool).
-make MCU=rp2350                              # builds main.elf, main.bin, main.uf2
-make flash MCU=rp2350                        # picotool, or copies UF2 to RPI-RP2
+# --- MSP430 (msp430-gcc + mspdebug) ----------------------------------------
+make flash MCU=msp430fr5994 MEMORY_MODEL=large TIKU_SHELL_ENABLE=1
 
-# --- Ambiq Apollo (Cortex-M) -----------------------------------------------
-# Requires: arm-none-eabi-gcc; flashing uses J-Link (SEGGER JLinkExe).
-make MCU=apollo510                           # also apollo4l / apollo4p / apollo510b
-make flash MCU=apollo510                     # J-Link
+# --- Ambiq Apollo (arm-none-eabi-gcc + SEGGER J-Link) ----------------------
+make flash MCU=apollo510 TIKU_SHELL_ENABLE=1   # also apollo4l / apollo4p / apollo510b
+
+# --- Raspberry Pi Pico 2 / 2 W (arm-none-eabi-gcc + picotool) ---------------
+make MCU=rp2350                                # builds main.elf, main.bin, main.uf2
+make flash MCU=rp2350                          # picotool, or copy the UF2 to RPI-RP2
 ```
+
+The kernel, shell, VFS, BASIC, and networking are architecture-neutral — the
+same source tree targets all three families through a device/board header
+abstraction.
 
 ---
 
 ## :computer: Interactive Shell
 
-TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins, read sensors, manage processes, configure boot sequences, and inspect memory — **all without recompiling**.
+A full interactive shell over UART, USB-CDC, or Telnet. Manage processes, drive
+GPIO and sensors, join Wi-Fi, run BASIC, and inspect memory — **all without
+recompiling**.
 
 ```
   ___ _ _         ___  ___
@@ -69,20 +78,79 @@ TikuOS includes a full interactive shell over UART or Telnet. Control GPIO pins,
   Type 'help' for commands.
 
 tikuOS> help
- System     help  info  free  reboot  history  clear
- Processes  ps  start  kill  every  once  on  rules
- Files      ls  tree  cd  read  write  watch  name  alias
- Hardware   gpio  adc
+ System     help  info  free  mem  reboot  history  clear  echo  syslog
+ Processes  ps  start  kill  resume  queue  timer  every  once  jobs  on  rules
+ Files      ls  tree  cd  read  write  watch  name  alias  toggle  fs  df
+ Network    wifi  ip  slip  ping  dns  ntp  mqtt  bt
+ Language   basic
+ Hardware   gpio  adc  i2c  lcd  irq  freq  trng  nvmprobe  mrambench
  Power      sleep  wake
  Boot       init
- (38 commands total — run 'help' on the device for the full list)
+ (58 commands total — run 'help' on the device for the full list)
+```
+
+> :bulb: The same shell and VFS are byte-identical on every port. Opt-in extras
+> (off by default, enabled via `EXTRA_CFLAGS`): `if`, `delay`, `repeat`,
+> `peek`, `poke`, `i2c`. See `kernel/shell/tiku_shell_config.h`.
+
+---
+
+## :satellite: Networking
+
+TikuOS 0.05 speaks IP. The stack is event-driven and statically allocated,
+sized for these parts, and reachable from the shell, from BASIC, and from C.
+
+- **Link / transport** — IPv4, TCP, UDP, ARP, SLIP over the console UART, and a
+  clean-room Wi-Fi driver for the **CYW43439** (Pico 2 W): gSPI, WHD/SDPCM,
+  firmware upload, scan/join, proven over the air.
+- **Security** — **TLS 1.3 and 1.2** with RSA, P-256 and P-384 ECDHE, and
+  AES-256-GCM; PSK *and* X.509 certificate-chain verification against a
+  built-in CA trust store.
+- **Applications** — an **MQTT 3.1.1** client (QoS 0/1, optional TLS), **HTTPS**
+  GET, DNS, an NTP client, ping, remote syslog, and a **Telnet** server that
+  hands the shell over TCP.
+
+```
+tikuOS> wifi join <ssid> <pass>
+tikuOS> ntp pool.ntp.org
+tikuOS> mqtt connect test.mosquitto.org 8883 tls
+tikuOS> ping tiku-os.org
+```
+
+> The IP stack, Wi-Fi driver, TLS engine, and MQTT client live in the companion
+> **tikukits** library (`TIKU_KIT_NET_ENABLE=1`); the shell and BASIC commands
+> that drive them ship in the core kernel.
+
+---
+
+## :abc: Tiku BASIC
+
+A complete on-device BASIC interpreter — write a program over the shell, `RUN`
+it, `SAVE` it to non-volatile storage, and `LOAD` it back after a power cycle.
+No host toolchain required.
+
+```basic
+10 PRINT "reading temperature..."
+20 T = VAL(HTTPGET$("http://api.example.com/temp"))
+30 IF T > 30 THEN MQTTPUB "alerts/hot", STR$(T)
+40 EVERY 60 GOSUB 20
+```
+
+Numeric and string variables, arrays, `DEF FN` user functions, `ON ERROR`,
+reactive `EVERY` / `ON … CHANGE` statements, an HTML-to-text renderer, plus
+builtins for HTTP(S), MQTT, JSON, SHA-256/HMAC/Base64, and a `NOW`/`SETTIME`
+clock. Programs persist to NVM.
+
+```bash
+make ... TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
 ```
 
 ---
 
-### :wrench: Hardware Debugging from the Shell
+## :wrench: Hardware Debugging from the Shell
 
-Toggle GPIO pins, read ADC channels, inspect memory — a live hardware debugging tool on a microcontroller.
+Toggle GPIO pins, read ADC channels — a live hardware debugging tool on a
+microcontroller.
 
 ```
 tikuOS> gpio 4 6 t
@@ -93,138 +161,120 @@ P4.6 = 1 (output)
 
 tikuOS> adc temp
 Atemp = 1847 (0x737)
-
-tikuOS> adc bat
-Abat = 2048 (0x800)
 ```
 
 ---
 
-### :bar_chart: Memory Introspection
+## :floppy_disk: Durable Storage
+
+Storage is a hierarchy, not a flat `.persistent` section — configuration, BASIC
+programs, and files survive reboots and power loss:
+
+- **Memory tiers** — one API places allocations in SRAM, HIFRAM, or NVM by
+  policy, with a bump allocator per tier.
+- **NVM region allocator** — carves on-chip MRAM/flash into a tier extent, a
+  file-store extent, and a reserved tail.
+- **Persist cells** — self-validating, magic-gated non-volatile variables with
+  a torn-write-safe commit.
+- **`/data` file store** — a small durable filesystem, exposed at `/data` and
+  used by BASIC `SAVE`/`LOAD` and the shell's `df` / `ls` / `write`.
+
+Boot behavior itself is FRAM/NVM-backed: change the startup sequence over the
+shell and reboot — no recompile, no reflash.
 
 ```
-tikuOS> free
---- Compile-time ---
-SRAM   2048 total
-  .data+.bss   1058
-  reservd        990
-FRAM  65535 total
-  code        42508
-  const/data   5620
-  unallocd    17407
---- Runtime ---
-SRAM
-  stack now      80
-  free now      910
-FRAM
-  free now    17407
-  config rgn   1024 allocated
-  init table     70 (1/8 entries)
---- Processes (1/8) ---
- pid  name        sram  fram  state
-   0  Shell          0     0  running
+tikuOS> init add 10 net    start net
+tikuOS> init add 20 mqtt   start mqtt
+tikuOS> init list
+ 10  net          [on ]  start net
+ 20  mqtt         [on ]  start mqtt
 ```
 
 ---
 
-### :open_file_folder: Virtual Filesystem
+## :open_file_folder: Virtual Filesystem
 
-A unified namespace for the entire system — peripherals, OS state, config, and processes are all paths. The same `read`/`write` interface works for LEDs, sensors, timers, processes, and everything else.
+A unified namespace for the entire system — peripherals, OS state, config, and
+processes are all paths. The same `read`/`write` interface works for LEDs,
+sensors, timers, processes, and everything else. The namespace is also an event
+bus: `watch` monitors a node and reports each change, `changed` blocks until the
+next one, and `on` / `rules` register reactive rules that fire on a change.
 
 ```
 /
-├── sys/
-│   ├── version              "0.05"
-│   ├── device/
-│   │   ├── name             user-set device name (FRAM-backed, R/W)
-│   │   ├── id               unique tiku-XXXX hostname-style ID
-│   │   ├── mcu              silicon part number ("MSP430FR5994")
-│   │   └── version          OS version string
-│   ├── uptime               seconds since boot
-│   ├── mem/
-│   │   ├── sram             RAM size in bytes
-│   │   ├── nvm              FRAM size in bytes
-│   │   ├── free             live stack headroom (SP - BSS end)
-│   │   └── used             sum of per-process SRAM allocation
-│   ├── cpu/
-│   │   └── freq             clock Hz (8000000)
-│   ├── power/
-│   │   ├── mode             current LPM (off/LPM0/LPM3/LPM4)
-│   │   └── wake             active wake sources
-│   ├── timer/
-│   │   ├── count            active software timers
-│   │   ├── next             ticks until next expiration
-│   │   ├── fired            total expirations since boot
-│   │   └── list/{0..3}      per-timer mode, remaining, interval
-│   ├── clock/
-│   │   └── ticks            raw tick counter
-│   ├── watchdog/
-│   │   ├── mode             R/W "watchdog" or "interval"
-│   │   ├── clock            R/W "aclk" or "smclk"
-│   │   ├── interval         R/W divider (64/512/8192/32768)
-│   │   └── kick             W   write to kick the timer
-│   ├── htimer/
-│   │   ├── now              hardware timer counter
-│   │   └── scheduled        1 if pending, 0 if idle
-│   ├── boot/
-│   │   ├── reason           last reset cause (brownout/wdt/rstnmi/...)
-│   │   ├── count            hibernate boot counter
-│   │   ├── stage            boot stage (init/cpu/.../complete)
-│   │   ├── rstiv            raw SYSRSTIV hex (0x0016, ...)
-│   │   ├── clock/
-│   │   │   ├── mclk         live MCLK frequency in Hz
-│   │   │   ├── smclk        live SMCLK frequency in Hz
-│   │   │   ├── aclk         live ACLK frequency in Hz
-│   │   │   └── fault        clock fault flag (0 or 1)
-│   │   └── mpu/
-│   │       └── violations   MPU violation flags (hex bitmask)
-│   └── sched/
-│       └── idle             scheduler idle entry count
-├── dev/
-│   ├── led0                 read/write (0, 1, t=toggle)
-│   ├── led1                 read/write
-│   ├── console              R/W system console (UART)
-│   ├── null                 R/W data sink (always empty on read)
-│   ├── zero                 R   zero source (fills buffer with NUL)
-│   ├── gpio/{1..4}/{0..7}   per-pin read/write (0, 1, t, i=input)
-│   ├── gpio_dir/{1..4}      per-port pin direction (I=input, O=output)
-│   ├── uart/
-│   │   ├── overruns         UART overrun count since boot
-│   │   └── baud             configured baud rate
-│   ├── adc/
-│   │   ├── temp             on-chip temperature sensor (raw ADC)
-│   │   └── battery          battery voltage (raw ADC)
-│   ├── i2c/
-│   │   └── scan             list responding I2C addresses
-│   └── spi/
-│       └── config           SPI mode, bit order, prescaler (or "n/a")
-└── proc/
-    ├── count                number of active processes
-    ├── queue/
-    │   ├── length           pending events in queue
-    │   └── space            free event slots
-    ├── catalog/
-    │   ├── count            available-but-not-started processes
-    │   └── {0..7}/name      catalog entry name
-    └── {0..7}/              per-process directory
-        ├── name             process name
-        ├── state            running/ready/waiting/sleeping/stopped
-        ├── pid              numeric process id
-        ├── sram_used        SRAM bytes allocated
-        ├── fram_used        FRAM bytes allocated
-        ├── uptime           seconds since start
-        ├── wake_count       times scheduled
-        └── events           pending events for this process
+├── sys/           version, uptime, device/, mem/, cpu/, power/, timer/,
+│                  clock/, watchdog/, htimer/, boot/, sched/, last_reset
+├── dev/           led0..N, console, null, zero, gpio/, gpio_dir/, uart/,
+│                  adc/, i2c/, spi/
+├── data/          durable file store (df, ls, read, write)
+└── proc/          per-process state: name, state, pid, sram/fram_used,
+                   uptime, wake_count, events
 ```
 
 ```
 tikuOS> cat /sys/device/mcu
 Apollo510
 
+tikuOS> cat /sys/last_reset
+watchdog
+
 tikuOS> write /dev/led0 1
 
-tikuOS> cat /proc/0/name
-Shell
+tikuOS> changed /dev/gpio/1/3      # block until P1.3 changes
+```
+
+---
+
+## :zap: Reliability
+
+- **Check-in hang watchdog** — a process that stops making progress is named as
+  the culprit, warm-reset, and quarantined on the recovery boot, so one wedged
+  service can't take down the console.
+- **Process supervision** — failed processes restart under a configurable
+  policy, with stale events dropped across the restart.
+- **Hardware watchdog + reset-reason** — real register-level implementations on
+  the platforms that have them, surfaced at `/sys/last_reset`.
+- **Preemptive worker threads** (Cortex-M) run compute under a cycle/energy
+  budget and offload multi-second TLS crypto without freezing the console.
+
+---
+
+## Build Options
+
+| Flag | Effect |
+|------|--------|
+| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350` |
+| `TIKU_SHELL_ENABLE=1` | Interactive shell (UART / USB-CDC / Telnet) |
+| `TIKU_SHELL_BASIC_ENABLE=1` | Tiku BASIC interpreter (needs `MEMORY_MODEL=large`) |
+| `TIKU_INIT_ENABLE=1` | FRAM/NVM-backed boot sequence (implies shell) |
+| `TIKU_KIT_NET_ENABLE=1` | IP / Wi-Fi / TLS / MQTT (companion tikukits) |
+| `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement (MSP430 large working sets) |
+| `UART_BAUD=…` | UART baud (default 9600 on MSP430, 115200 on Cortex-M) |
+
+---
+
+## Minimal Example
+
+```c
+#include "tiku.h"
+
+TIKU_PROCESS(blink_process, "Blink");
+static struct tiku_timer timer;
+
+TIKU_PROCESS_THREAD(blink_process, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+    tiku_led_init(0);
+    tiku_timer_set_event(&timer, TIKU_CLOCK_SECOND);
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+        tiku_led_toggle(0);
+        tiku_timer_reset(&timer);
+    }
+    TIKU_PROCESS_END();
+}
+
+TIKU_AUTOSTART_PROCESSES(&blink_process);
 ```
 
 ---
