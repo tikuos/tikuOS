@@ -7,10 +7,11 @@
  *
  * tiku_shell_cmd_trng.c - "trng" command implementation
  *
- * Reads bytes from the on-die hardware TRNG and prints them as hex, so the
- * entropy source behind the cert-TLS handshake can be sanity-checked on the
+ * Reads bytes from the platform entropy source and prints them as hex, so
+ * the randomness behind the cert-TLS handshake can be sanity-checked on the
  * bench (non-zero, varying across reads).  Platform-gated: RP2350 and Ambiq
- * Apollo expose a TRNG HAL; other parts print an "unsupported" line.
+ * Apollo expose a hardware-TRNG HAL, and MSP430 a software entropy source
+ * (when the crypto kit is built); other builds print an "unsupported" line.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -57,7 +58,7 @@ tiku_shell_cmd_trng(uint8_t argc, const char *argv[])
 
     rc = tiku_trng_arch_read_bytes(buf, (size_t)n);
     if (rc != TIKU_TRNG_OK) {
-        SHELL_PRINTF("trng: hardware error %d\n", rc);
+        SHELL_PRINTF("trng: entropy source error %d\n", rc);
         return;
     }
     for (i = 0; i < n; i++) {
@@ -71,6 +72,6 @@ tiku_shell_cmd_trng(uint8_t argc, const char *argv[])
 #else
     (void)argc;
     (void)argv;
-    SHELL_PRINTF("trng: no hardware TRNG on this platform\n");
+    SHELL_PRINTF("trng: no entropy source available in this build\n");
 #endif
 }
