@@ -113,24 +113,15 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
-    /* -------- 5. Reboot-survivor state (SRAM) ----------------------- */
-    /* Both persist grades live in SRAM for now: `.uninit` + exact `.persistent`
-     * (DURABLE grade) + `.persistent.warm` (WARM grade).  NOLOAD -> skipped by
-     * zero-init, survive a WARM reset, reseeded on a power cycle.
-     *
-     * NOTE: an attempt to move the DURABLE `.persistent` grade into RRAM (for
-     * true power-cycle durability -- the distinctive nRF54L angle) hit a precise
-     * bus fault on the first runtime RRAM store, even at a valid address with
-     * the RRAMC WEN gate open (matches the nrfx write path).  nRF54L has no
-     * instruction cache, so the leading hypothesis is write-while-executing-
-     * from-RRAM; the fix is likely a RAM-resident persist-write routine.  A
-     * focused follow-up owns that; persist stays SRAM-backed here so the board
-     * boots.  The reserved RRAM region + __tiku_nvm_rram_* symbols are kept. */
+    /* -------- 5. Warm-reset survivor state (SRAM) ------------------- */
+    /* The WARM grade (`.persistent.warm` + the net stack's transient pools)
+     * plus `.uninit` live in SRAM: skipped by zero-init, survive a warm reset,
+     * reseeded on a power cycle.  The DURABLE grade (exact `.persistent`) is
+     * NOT here -- it lives in RRAM below and survives power loss too. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
         *(.uninit*)
-        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
         . = ALIGN(32);
         __uninit_end = .;
         *(.persistent.warm*)
@@ -150,11 +141,36 @@ SECTIONS
     ASSERT((__stack - _end) >= 0x2000,
            "ERROR: SRAM exhausted — need >= 8 KB free below the stack")
 
+    /* -------- 6. DURABLE persist (RRAM, byte-writable NVM) ---------- */
+    /* Exact `.persistent` lives at the reserved top of RRAM, written behind the
+     * RRAMC WEN gate (tiku_mpu_unlock_nvm/lock_nvm).  Unlike the SRAM-backed
+     * .persistent on rp2350/ambiq, this survives a POWER CYCLE, not just a warm
+     * reset -- the distinctive nRF54L durability (RRAM is byte-writable NVM).
+     * NOLOAD: not in the flash image, so an ERASE_ALL leaves it virgin and the
+     * persist-cell magic gates prime defaults on first boot; a reset or power
+     * cycle preserves it.
+     *
+     * CONTRACT (enforced in hardware here): every store into `.persistent`
+     * MUST be bracketed by tiku_mpu_unlock_nvm()/lock_nvm().  On MSP430 an
+     * unbracketed store is silently dropped by the FRAM MPU; on nRF54L it is
+     * a PRECISE BUS FAULT (RRAMC WEN closed) -- this port is the loud canary
+     * for the rule in kernel/memory/tiku_mem.h. */
+    .persistent __tiku_nvm_rram_start (NOLOAD) : ALIGN(4)
+    {
+        __persistent_start = .;
+        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
+        . = ALIGN(4);
+        __persistent_end = .;
+    } > RRAM
+
     /* The RRAM code image (code + rodata + .data load copy) must not grow up
-     * into the reserved durable-persist region at the top of RRAM (reserved
-     * now, wired to a RAM-resident RRAM writer in a follow-up). */
+     * into the durable-persist region at the top of RRAM. */
     ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvm_rram_start,
            "ERROR: RRAM image overruns the reserved durable-persist region")
+
+    /* The durable persist data must fit inside the reserved region. */
+    ASSERT(__persistent_end <= __tiku_nvm_rram_end,
+           "ERROR: durable .persistent overruns the reserved RRAM region")
 
     /DISCARD/ :
     {

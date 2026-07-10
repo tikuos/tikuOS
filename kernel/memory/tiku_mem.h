@@ -123,8 +123,16 @@
  * which the contract allows.  RP2350 and Ambiq physically separate
  * the grades: warm data sits outside the NVM mirror, so its churn
  * costs no NVM programs and it stays writable outside MPU windows.
+ *
+ * nRF54L (nordic) MUST separate them too, and harder than the others:
+ * the DURABLE grade physically lives in RRAM behind the RRAMC WEN
+ * write gate, and warm data (e.g. the hang detector's cross-reset
+ * record) is written WITHOUT the NVM window by design — mapping WARM
+ * to plain `.persistent` there puts it in RRAM and the first store
+ * takes a precise bus fault (found on-device: tiku_hang_boot_init's
+ * one-shot clear was the first boot-time write to hit the closed gate).
  */
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
 #define TIKU_PERSIST_WARM  __attribute__((section(".persistent.warm")))
 #else
 #define TIKU_PERSIST_WARM  __attribute__((section(".persistent")))

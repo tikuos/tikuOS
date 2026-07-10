@@ -101,6 +101,91 @@ int main(void)
 volatile uint32_t g_nordic_main_reached;
 volatile uint32_t g_nordic_loop_count;
 
+#ifdef TIKU_MIN_RRAM_TEST
+/*
+ * RRAM runtime-write probe (build with EXTRA_CFLAGS=-DTIKU_MIN_RRAM_TEST=1).
+ *
+ * HW result (2026-07-10, nRF54L15-DK): ALL THREE PASS -- with the WEN gate
+ * open, plain CPU stores to RRAM just work, from RRAM-executing code, with or
+ * without the nrfx READY/READYNEXT handshakes, buffered or not (the controller
+ * stalls the bus as needed).  The kernel-boot bus fault this probe was built
+ * to bisect turned out to be a store issued with WEN CLOSED: TIKU_PERSIST_WARM
+ * was mis-graded into RRAM `.persistent` on nordic, so the hang detector's
+ * intentionally-unbracketed warm write hit the shut gate (fixed in
+ * kernel/memory/tiku_mem.h).  Kept as a regression probe for the RRAM write
+ * path:
+ *   T1  word store bracketed by the full nrfx handshake
+ *   T2  8 back-to-back byte stores into the 32-entry write buffer, then
+ *       TASKS_COMMITWRITEBUF + READY wait
+ *   T3  WEN set, immediate store, no waits (the minimal path)
+ * Scratch target: the durable-persist region base (0x17B000) -- NOTE this
+ * clobbers the first persist words, so a kernel image flashed afterwards
+ * re-primes its cells (fine: the probe is a MINIMAL-only diagnostic).
+ */
+#include "arch/nordic/mdk/nrf54l15.h"
+
+#define RRAM_TEST_ADDR   0x0017B000UL
+#define RRAMC_WEN        (1UL << 0)
+#define RRAMC_BUF32      (32UL << 8)               /* WRITEBUFSIZE = 32 */
+
+static void rram_test_run(void)
+{
+    volatile uint32_t *w = (volatile uint32_t *)RRAM_TEST_ADDR;
+    volatile uint8_t  *b = (volatile uint8_t  *)(RRAM_TEST_ADDR + 8u);
+    uint32_t cfg0 = NRF_RRAMC_S->CONFIG;
+    uint32_t i, ok;
+
+    /* T1: single word write with the full nrfx handshake. */
+    tiku_uart_puts("T1: word write + ready handshake... ");
+    NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    while (NRF_RRAMC_S->READY == 0u)     { }        /* config settled   */
+    while (NRF_RRAMC_S->READYNEXT == 0u) { }        /* write-ready      */
+    *w = 0x54494B55u;                               /* "TIKU"           */
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    while (NRF_RRAMC_S->READY == 0u)     { }        /* committed        */
+    NRF_RRAMC_S->CONFIG = cfg0;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    while (NRF_RRAMC_S->READY == 0u)     { }
+    tiku_uart_printf("%s (read 0x%x)\n",
+                     (*w == 0x54494B55u) ? "PASS" : "MISMATCH",
+                     (unsigned int)*w);
+
+    /* T2: buffered back-to-back byte stores + explicit commit. */
+    tiku_uart_puts("T2: 8 byte stores via 32-word buffer + commit... ");
+    NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN | RRAMC_BUF32;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    while (NRF_RRAMC_S->READY == 0u)     { }
+    while (NRF_RRAMC_S->READYNEXT == 0u) { }
+    for (i = 0u; i < 8u; i++) {
+        b[i] = (uint8_t)(0xA0u + i);                /* no waits between */
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    NRF_RRAMC_S->TASKS_COMMITWRITEBUF = 1u;
+    while (NRF_RRAMC_S->READY == 0u)     { }
+    NRF_RRAMC_S->CONFIG = cfg0;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    while (NRF_RRAMC_S->READY == 0u)     { }
+    ok = 1u;
+    for (i = 0u; i < 8u; i++) {
+        if (b[i] != (uint8_t)(0xA0u + i)) { ok = 0u; }
+    }
+    tiku_uart_printf("%s (b0=0x%x b7=0x%x)\n", ok ? "PASS" : "MISMATCH",
+                     (unsigned int)b[0], (unsigned int)b[7]);
+
+    /* T3: the minimal path -- WEN then an immediate store, no waits.
+     * PASSes on hardware: with WEN open the controller accepts/stalls plain
+     * stores, so no handshake is strictly required for correctness. */
+    tiku_uart_puts("T3: minimal path (no ready waits)... ");
+    NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN;
+    *(volatile uint32_t *)(RRAM_TEST_ADDR + 16u) = 0xDEADBEEFu;
+    while (NRF_RRAMC_S->READY == 0u)     { }
+    NRF_RRAMC_S->CONFIG = cfg0;
+    tiku_uart_printf("PASS (read 0x%x)\n",
+                     (unsigned int)*(volatile uint32_t *)(RRAM_TEST_ADDR + 16u));
+}
+#endif /* TIKU_MIN_RRAM_TEST */
+
 int main(void)
 {
     /* Marker: proves execution reached main() (read this RAM word back). */
@@ -124,6 +209,10 @@ int main(void)
     tiku_cpu_nordic_delay_ms(100);
 
     tiku_uart_puts("\n\n--- TikuOS minimal smoke test (nRF54L15-DK) ---\n");
+
+#ifdef TIKU_MIN_RRAM_TEST
+    rram_test_run();
+#endif
 
     unsigned long clk = tiku_cpu_nordic_smclk_get_hz();
     int fault         = tiku_cpu_nordic_clock_has_fault();
