@@ -5,12 +5,12 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.h - nRF54L ADC (SAADC) arch header (stub port)
+ * tiku_adc_arch.h - nRF54L ADC (SAADC) arch header
  *
- * The ADC backend is a stub on this port (see tiku_adc_arch.c); a real SAADC
- * driver is a later phase.  These prototypes mirror the RP2350 arch header so
- * the interface layer (interfaces/adc/tiku_adc.c) and the ADC HAL routing
- * (hal/tiku_adc_hal.h) resolve without implicit declarations on Nordic.
+ * One-shot single-ended SAADC backend for the nRF54L (see tiku_adc_arch.c).
+ * These prototypes mirror the RP2350 arch header so the interface layer
+ * (interfaces/adc/tiku_adc.c) and the ADC HAL routing (hal/tiku_adc_hal.h)
+ * resolve without implicit declarations on Nordic.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

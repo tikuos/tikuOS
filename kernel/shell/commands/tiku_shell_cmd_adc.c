@@ -151,5 +151,5 @@ tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
         return;
     }
 
-    SHELL_PRINTF("A%s = %u (0x%03X)\n", ch_label, value, value);
+    SHELL_PRINTF("A%s = %u (0x%x)\n", ch_label, value, value);
 }

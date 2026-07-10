@@ -79,14 +79,20 @@ void tiku_nordic_svc_handler(void)         __attribute__((weak, alias("nordic_de
 void tiku_nordic_pendsv_handler(void)      __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_systick_handler(void)     __attribute__((weak, alias("nordic_default_handler")));
 
-/* External IRQ handlers wired as the port grows.  TIMER10 (IRQn 133) drives
- * the kernel tick; GRTC_0 (IRQn 226) is reserved for the low-power tick
- * follow-up.  The rest default until their subsystem lands. */
+/* External IRQ handlers wired as the port grows.  GRTC_0 (IRQn 226) drives
+ * the low-power kernel tick; TIMER10 (IRQn 133) is the tick fallback.  The
+ * rest default until their subsystem lands. */
 void tiku_nordic_timer10_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_grtc_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
 /* Console UARTE RX -- SERIAL20 (198, UARTE20) or SERIAL30 (260, UARTE30); the
  * table wires both, only the selected console's line is NVIC-enabled. */
 void tiku_nordic_uart_console_isr(void)    __attribute__((weak, alias("nordic_default_handler")));
+/* Hardware one-shot htimer -- TIMER20 COMPARE (IRQn 202). */
+void tiku_nordic_timer20_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
+/* GPIO edge interrupts -- GPIOTE20 line 0 (218, P1/P2), GPIOTE30 line 0
+ * (268, P0); each posts TIKU_EVENT_GPIO for the pin that fired. */
+void tiku_nordic_gpiote20_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
+void tiku_nordic_gpiote30_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Factory trim application (minimal SystemInit)                             */
@@ -203,16 +209,23 @@ __attribute__((section(".vectors"), used)) = {
 
     /* External interrupts -- IRQ numbers are the MDK IRQn enum values
      * (nrf54l15_application.h), NOT the vector-array position. */
-    [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn  = 133   */
-    [16 + 198] = tiku_nordic_uart_console_isr, /* SERIAL20_IRQn = 198   */
-    [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn   = 226   */
-    [16 + 260] = tiku_nordic_uart_console_isr, /* SERIAL30_IRQn = 260   */
+    [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn    = 133 */
+    [16 + 198] = tiku_nordic_uart_console_isr, /* SERIAL20_IRQn   = 198 */
+    [16 + 202] = tiku_nordic_timer20_isr,      /* TIMER20_IRQn    = 202 (htimer)  */
+    [16 + 218] = tiku_nordic_gpiote20_isr,     /* GPIOTE20_0_IRQn = 218 (P1/P2)   */
+    [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn     = 226 */
+    [16 + 260] = tiku_nordic_uart_console_isr, /* SERIAL30_IRQn   = 260 */
+    [16 + 268] = tiku_nordic_gpiote30_isr,     /* GPIOTE30_0_IRQn = 268 (P0)      */
 
     /* Fill every remaining external slot with the default handler so no
-     * slot dispatches through a NULL pointer. */
+     * slot dispatches through a NULL pointer.  Ranges are split around the
+     * explicitly-wired IRQs above (no overlapping designated initializers). */
     [16 +   0 ... 16 + 132] = nordic_default_handler,
     [16 + 134 ... 16 + 197] = nordic_default_handler,
-    [16 + 199 ... 16 + 225] = nordic_default_handler,
+    [16 + 199 ... 16 + 201] = nordic_default_handler,
+    [16 + 203 ... 16 + 217] = nordic_default_handler,
+    [16 + 219 ... 16 + 225] = nordic_default_handler,
     [16 + 227 ... 16 + 259] = nordic_default_handler,
-    [16 + 261 ... 16 + 271] = nordic_default_handler,
+    [16 + 261 ... 16 + 267] = nordic_default_handler,
+    [16 + 269 ... 16 + 271] = nordic_default_handler,
 };

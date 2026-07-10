@@ -465,6 +465,9 @@ static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
     tiku_htimer_clock_t now;
     tiku_clock_time_t   t0;
     unsigned long       elapsed;
+    unsigned long       delay_ticks;
+    unsigned long       target_ms;
+    int                 rc_set;
     (void)argc;
     (void)argv;
 
@@ -482,10 +485,28 @@ static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
     }
 
     s_htimer_selftest_fired = 0u;
+
+    /* The htimer clock is 16-bit, so a deadline can be at most ~2^15 ticks
+     * ahead (the kernel's signed CLOCK_DIFF guard must stay positive).  A
+     * fixed 100 ms target only fits a slow (kHz-class) htimer: at 1 MHz it is
+     * 100000 ticks, which wraps to a negative diff and is rejected as "in the
+     * past".  Cap the delay to a safe sub-range value so the test works at any
+     * TIKU_HTIMER_SECOND (30 ms at 1 MHz, a full 100 ms at 16 kHz). */
+    delay_ticks = (unsigned long)TIKU_HTIMER_SECOND / 10UL;
+    if (delay_ticks > 30000UL) {
+        delay_ticks = 30000UL;
+    }
+    target_ms = (delay_ticks * 1000UL) / (unsigned long)TIKU_HTIMER_SECOND;
+
     now = tiku_htimer_arch_now();
-    (void)tiku_htimer_set(&ht,
-                          (tiku_htimer_clock_t)(now + (TIKU_HTIMER_SECOND / 10u)),
-                          htimer_selftest_cb, NULL);   /* ~100 ms from now */
+    rc_set = tiku_htimer_set(&ht,
+                             (tiku_htimer_clock_t)(now +
+                                 (tiku_htimer_clock_t)delay_ticks),
+                             htimer_selftest_cb, NULL);
+    if (rc_set != TIKU_HTIMER_OK) {
+        SHELL_PRINTF("htimer: schedule rejected (%d)\n", rc_set);
+        return;
+    }
 
     /* Wait up to ~1 s (measured on the system tick) for the compare to fire. */
     t0 = tiku_clock_time();
@@ -496,8 +517,9 @@ static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
     elapsed = (unsigned long)(tiku_clock_time() - t0);
 
     if (s_htimer_selftest_fired) {
-        SHELL_PRINTF("htimer: fired in ~%lu ms (target 100) -- OK\n",
-                     (elapsed * 1000UL) / (unsigned long)TIKU_CLOCK_SECOND);
+        SHELL_PRINTF("htimer: fired in ~%lu ms (target ~%lu) -- OK\n",
+                     (elapsed * 1000UL) / (unsigned long)TIKU_CLOCK_SECOND,
+                     target_ms);
     } else {
         SHELL_PRINTF("htimer: TIMEOUT (~1 s) -- compare not firing\n");
     }

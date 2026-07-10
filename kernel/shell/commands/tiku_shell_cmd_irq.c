@@ -34,10 +34,14 @@ streq(const char *a, const char *b)
 }
 
 /* Parse "P<port>.<pin>" -> port and pin. Returns 0 on success,
- * -1 on syntax error. Accepts uppercase or lowercase 'p'. */
+ * -1 on syntax error. Accepts uppercase or lowercase 'p'.  The pin field
+ * is one or two decimal digits (0..31) so wide ports such as the nRF54L's
+ * P1 (up to P1.15) are addressable, not just the 0..7 of narrow parts. */
 static int
 parse_pin_spec(const char *s, uint8_t *port, uint8_t *pin)
 {
+    unsigned v;
+
     if (s == NULL) {
         return -1;
     }
@@ -54,10 +58,19 @@ parse_pin_spec(const char *s, uint8_t *port, uint8_t *pin)
         return -1;
     }
     s++;
-    if (*s < '0' || *s > '7' || s[1] != '\0') {
+    if (*s < '0' || *s > '9') {
         return -1;
     }
-    *pin = (uint8_t)(*s - '0');
+    v = (unsigned)(*s - '0');
+    s++;
+    if (*s >= '0' && *s <= '9') {
+        v = (v * 10u) + (unsigned)(*s - '0');
+        s++;
+    }
+    if (*s != '\0' || v > 31u) {
+        return -1;
+    }
+    *pin = (uint8_t)v;
     return 0;
 }
 

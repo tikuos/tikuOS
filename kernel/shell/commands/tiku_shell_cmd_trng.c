@@ -10,7 +10,8 @@
  * Reads bytes from the platform entropy source and prints them as hex, so
  * the randomness behind the cert-TLS handshake can be sanity-checked on the
  * bench (non-zero, varying across reads).  Platform-gated: RP2350 and Ambiq
- * Apollo expose a hardware-TRNG HAL, and MSP430 a software entropy source
+ * Apollo, and Nordic nRF54L (CRACEN) expose a hardware-TRNG HAL, and MSP430 a
+ * software entropy source
  * (when the crypto kit is built); other builds print an "unsupported" line.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -24,6 +25,10 @@
 #define TIKU_SHELL_TRNG_HAVE 1
 #elif defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_trng_arch.h>
+#define TIKU_SHELL_TRNG_HAVE 1
+#elif defined(PLATFORM_NORDIC)
+/* nRF54L CRACEN ring-oscillator TRNG (AES-conditioned). */
+#include <arch/nordic/tiku_trng_arch.h>
 #define TIKU_SHELL_TRNG_HAVE 1
 #elif defined(PLATFORM_MSP430) && TIKU_KIT_CRYPTO_ENABLE
 /* Software entropy source; only linked when the crypto kit (SHA-256

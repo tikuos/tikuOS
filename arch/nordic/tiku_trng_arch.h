@@ -5,13 +5,14 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.h - nRF54L True Random Number Generator (stub — not yet wired)
+ * tiku_trng_arch.h - nRF54L15 True Random Number Generator (CRACEN RNG)
  *
  * Mirrors the RP2350 TRNG arch API (return codes plus init /
- * read_u32 / read_bytes) so shared callers link unchanged. The nRF54L
- * has a hardware entropy source (CRACEN RNG), but no backend is wired
- * yet; the current implementation returns TIKU_TRNG_ERR_NOT_READY and
- * never fabricates random bytes. A real backend is a later phase.
+ * read_u32 / read_bytes) so shared callers link unchanged. The backend
+ * drives the ring-oscillator TRNG inside CRACEN with AES conditioning
+ * (see tiku_trng_arch.c); it blocks-polls the entropy FIFO and never
+ * fabricates random bytes -- on a hardware stall it returns
+ * TIKU_TRNG_ERR_TIMEOUT rather than substituting pseudo-random data.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,8 +28,8 @@
  *
  * TIKU_TRNG_OK            — success.
  * TIKU_TRNG_ERR_INVALID   — NULL pointer.
- * TIKU_TRNG_ERR_TIMEOUT   — hardware did not assert VALID in time.
- * TIKU_TRNG_ERR_NOT_READY — no entropy backend available (stub state).
+ * TIKU_TRNG_ERR_TIMEOUT   — the RNG FIFO did not deliver in time.
+ * TIKU_TRNG_ERR_NOT_READY — reserved (kept for cross-port API parity).
  */
 #define TIKU_TRNG_OK             0
 #define TIKU_TRNG_ERR_INVALID   -1
@@ -36,28 +37,28 @@
 #define TIKU_TRNG_ERR_NOT_READY -3
 
 /**
- * @brief One-time init (stub — no-op). Idempotent.
+ * @brief One-time init. Idempotent; the RNG is powered per request.
  */
 void tiku_trng_arch_init(void);
 
 /**
- * @brief Fetch a 32-bit random word.
+ * @brief Fetch a 32-bit random word (little-endian byte packing).
  *
  * @param out  Where to store the word. Must not be NULL.
- * @return TIKU_TRNG_ERR_INVALID if @p out is NULL, otherwise
- *         TIKU_TRNG_ERR_NOT_READY (no entropy source wired yet);
- *         *out is left untouched.
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if @p out is
+ *         NULL, or TIKU_TRNG_ERR_TIMEOUT if the RNG did not deliver;
+ *         *out is left untouched on error.
  */
 int tiku_trng_arch_read_u32(uint32_t *out);
 
 /**
- * @brief Fill a byte buffer with `len` random bytes.
+ * @brief Fill a byte buffer with `len` hardware random bytes.
  *
  * @param buf  Destination buffer. Must not be NULL.
  * @param len  Number of bytes requested.
- * @return TIKU_TRNG_ERR_INVALID if @p buf is NULL, otherwise
- *         TIKU_TRNG_ERR_NOT_READY (no entropy source wired yet);
- *         @p buf is left untouched.
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if @p buf is
+ *         NULL, or TIKU_TRNG_ERR_TIMEOUT if the RNG stalled (@p buf may
+ *         be partially written; no pseudo-random data is substituted).
  */
 int tiku_trng_arch_read_bytes(uint8_t *buf, size_t len);
 
