@@ -123,9 +123,11 @@
  * introspection and NVM region table share one vocabulary; RRAM is
  * write-in-place (no erase) behind the RRAMC WEN gate.
  */
-#define TIKU_DEVICE_FRAM_SIZE       (1536UL * 1024UL)
+/* Usable application RRAM is 0x17D000 (1524 KB); the top 12 KB of the nominal
+ * 1.5 MB is reserved (MDK NRF_MEMORY_FLASH_SIZE) and bus-faults if addressed. */
+#define TIKU_DEVICE_FRAM_SIZE       0x0017D000UL
 #define TIKU_DEVICE_FRAM_START      0x00000000UL
-#define TIKU_DEVICE_FRAM_END        0x0017FFFFUL
+#define TIKU_DEVICE_FRAM_END        0x0017CFFFUL
 #define TIKU_DEVICE_NVM_LABEL       "RRAM"   /**< NVM technology (UI label). */
 
 /**

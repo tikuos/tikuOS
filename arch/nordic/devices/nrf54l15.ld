@@ -37,7 +37,10 @@ ENTRY(tiku_nordic_reset_handler)
 
 MEMORY
 {
-    RRAM (rx)  : ORIGIN = 0x00000000, LENGTH = 1536K
+    /* Usable application RRAM is 0x17D000 (1524 KB), NOT the full 1536 KB --
+     * the top 12 KB is reserved (per the MDK NRF_MEMORY_FLASH_SIZE and nrfx's
+     * own linker script).  Addressing past 0x17CFFF bus-faults. */
+    RRAM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x17D000
     SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 256K
 }
 
@@ -110,12 +113,19 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
-    /* -------- 5. Warm-reset survivor state --------------------------- */
-    /* "Persistent across reboot but skipped by zero-init".  Today this
-     * survives only warm resets on nRF54L (a power cycle reseeds it); the
-     * RRAMC-backed durable mirror is a later phase.  Split into the DURABLE
-     * grade (exact `.persistent`, the future mirror window) and the WARM
-     * grade (`.persistent.warm`, always plain SRAM) exactly like rp2350.ld. */
+    /* -------- 5. Reboot-survivor state (SRAM) ----------------------- */
+    /* Both persist grades live in SRAM for now: `.uninit` + exact `.persistent`
+     * (DURABLE grade) + `.persistent.warm` (WARM grade).  NOLOAD -> skipped by
+     * zero-init, survive a WARM reset, reseeded on a power cycle.
+     *
+     * NOTE: an attempt to move the DURABLE `.persistent` grade into RRAM (for
+     * true power-cycle durability -- the distinctive nRF54L angle) hit a precise
+     * bus fault on the first runtime RRAM store, even at a valid address with
+     * the RRAMC WEN gate open (matches the nrfx write path).  nRF54L has no
+     * instruction cache, so the leading hypothesis is write-while-executing-
+     * from-RRAM; the fix is likely a RAM-resident persist-write routine.  A
+     * focused follow-up owns that; persist stays SRAM-backed here so the board
+     * boots.  The reserved RRAM region + __tiku_nvm_rram_* symbols are kept. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
@@ -141,7 +151,8 @@ SECTIONS
            "ERROR: SRAM exhausted — need >= 8 KB free below the stack")
 
     /* The RRAM code image (code + rodata + .data load copy) must not grow up
-     * into the reserved durable-persist region at the top of RRAM. */
+     * into the reserved durable-persist region at the top of RRAM (reserved
+     * now, wired to a RAM-resident RRAM writer in a follow-up). */
     ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvm_rram_start,
            "ERROR: RRAM image overruns the reserved durable-persist region")
 
