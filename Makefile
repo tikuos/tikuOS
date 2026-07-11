@@ -826,6 +826,15 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
+# BASIC needs a real SRAM (AUTO) tier for its program arena (~98 KB for the
+# 1024-line BIG tier); the tiku_mem.h default is 128 B, so `basic` OOMs at
+# entry without this.  The nRF54L15 has 256 KB SRAM, so a 160 KB tier fits the
+# arena with ample room for .bss + stack.  Gated on BASIC so non-BASIC builds
+# keep the lean default.  (Same fix the rp2350 block applies for its part.)
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 1024-line BASIC arena
+endif
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra

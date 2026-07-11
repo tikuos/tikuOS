@@ -43,7 +43,14 @@
  * Every macro stays -D-overridable; these branches only choose the default. */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
 #define TIKU_BASIC_TIER_BIG  1
-#elif defined(TIKU_MEMORY_MODEL_LARGE)
+#elif defined(TIKU_MEMORY_MODEL_LARGE) || defined(PLATFORM_NORDIC)
+/* The nRF54L15 sits between the SMALL parts and the 512 KB BIG parts: 256 KB
+ * SRAM.  The BIG tier's arena-backed FETCH buffers (sized for 512 KB) overflow
+ * that, but the SMALL 64-byte defaults are too tight -- a 64-hex SHA256$ digest
+ * (let alone its 88-char BASE64$) and the 60-line mem-stress program don't fit.
+ * The FRAM (middle) tier is exactly the right size: 128-byte string scratch,
+ * 2 KB string heap, 96 program lines.  It is pure sizing (no FRAM-specific
+ * behaviour), so it fits the nRF54L15's RRAM/SRAM split cleanly. */
 #define TIKU_BASIC_TIER_FRAM 1
 #endif
 

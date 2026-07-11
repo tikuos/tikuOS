@@ -108,11 +108,21 @@ void tiku_nordic_gpio_toggle(uint8_t port, uint8_t pin)
 uint8_t tiku_nordic_gpio_read(uint8_t port, uint8_t pin)
 {
     NRF_GPIO_Type *g = tiku_nordic_gpio_base(port);
+    uint32_t sh;
 
     if (g == (NRF_GPIO_Type *)0) {
         return 0u;
     }
-    return (uint8_t)((g->IN >> (pin & 0x1Fu)) & 0x1u);
+    sh = (uint32_t)(pin & 0x1Fu);
+    /* Return the pin's LOGICAL level.  For an output pin the input buffer is
+     * disconnected (see init_output), so IN reads 0 no matter what is driven --
+     * read the driven level from OUT instead.  Input pins read the sensed level
+     * from IN.  This matches the read-back-what-you-drive semantics of the
+     * msp430/rp2350/ambiq ports. */
+    if ((g->DIR >> sh) & 0x1u) {
+        return (uint8_t)((g->OUT >> sh) & 0x1u);
+    }
+    return (uint8_t)((g->IN >> sh) & 0x1u);
 }
 
 /*---------------------------------------------------------------------------*/
