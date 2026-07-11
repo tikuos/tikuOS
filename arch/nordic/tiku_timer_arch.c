@@ -364,3 +364,14 @@ int tiku_clock_arch_fine_max(void)
 {
     return 0xFFFF;
 }
+
+unsigned char tiku_clock_arch_fault(void)
+{
+    /* The tick source (GRTC SYSCOUNTER / TIMER10) has no fallback path on
+     * this part -- there is no LFXT->VLO style substitution that would make
+     * timers run at a different wall-clock rate, so there is never a clock-
+     * source fault to report.  (HFXO/PLL bring-up faults affect the UART's
+     * reference accuracy, not the tick; they are surfaced separately via
+     * the /sys clock view.) */
+    return 0;
+}

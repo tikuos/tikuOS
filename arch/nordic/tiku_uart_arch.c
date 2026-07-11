@@ -11,11 +11,17 @@
  * EasyDMA against a RAM buffer.  For a console this means:
  *   TX -- copy one byte into a RAM bounce buffer, point DMA.TX at it, trigger
  *         TASKS_DMA.TX.START, spin on EVENTS_DMA.TX.END.
- *   RX -- arm a single-byte DMA into a RAM byte; EVENTS_DMA.RX.END marks a
- *         byte received; re-arm on each read.  (A single-byte re-armed RX can
- *         drop bytes typed in the gap between END and re-arm; the shell's
- *         human-paced input tolerates this.  A DMA ring RX is a Phase-1
- *         hardening item.)
+ *   RX -- a single-byte DMA into a RAM bounce byte; the DMARXEND ISR copies
+ *         the byte into a software ring and re-arms the DMA itself (software
+ *         re-arm, NOT the DMA_RX_END->DMA_RX_START hardware short).  The
+ *         deliberate tradeoff: the short's zero-gap re-arm keeps receiving
+ *         during an IRQ blackout but silently overwrites the bounce byte --
+ *         loss with no trace.  With software re-arm, blackout bytes back up
+ *         into the UARTE's internal RX buffer and a genuine hardware overrun
+ *         raises ERRORSRC.OVERRUN, which the ISR counts -- loss is DETECTED
+ *         (the uart overrun-provocation C-unit verifies exactly this).  The
+ *         re-arm gap is ISR-latency-sized (~us) against 86 us/byte at 115200,
+ *         so no bytes are lost on the normal path.
  *
  * EasyDMA can only reach RAM (0x2000_0000), so the bounce buffers are static
  * .bss and word-aligned.
@@ -90,13 +96,15 @@ void tiku_uart_init(void)
     TIKU_UARTE->CONFIG   = 0UL;                 /* 8N1, no parity, no flow    */
     TIKU_UARTE->ENABLE   = TIKU_UARTE_ENABLE_VAL;
 
-    /* IRQ-driven RX: 1-byte EasyDMA + the DMA_RX_END -> DMA_RX_START short
-     * (hardware re-arms with no software gap); the DMARXEND interrupt drains
-     * each byte into the ring.  Priority 2 (above the tick at 3) so console
-     * input is not starved. */
+    /* IRQ-driven RX: 1-byte EasyDMA, software re-arm from the DMARXEND ISR
+     * (no hardware short -- see the file header: this is what makes a real
+     * hardware overrun visible in ERRORSRC instead of silently overwriting
+     * the bounce byte).  Priority 2 (above the tick at 3) so console input
+     * is not starved. */
     tiku_uart_rx_head = 0u;
     tiku_uart_rx_tail = 0u;
-    TIKU_UARTE->SHORTS = (1UL << 5);            /* DMA_RX_END -> DMA_RX_START  */
+    TIKU_UARTE->SHORTS = 0UL;
+    TIKU_UARTE->ERRORSRC = TIKU_UARTE->ERRORSRC;  /* W1C: clear stale errors  */
     TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
     TIKU_UARTE->DMA.RX.MAXCNT = 1UL;
     TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
@@ -154,18 +162,20 @@ void tiku_uart_printf(const char *fmt, ...)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Console UARTE ISR: drain each DMA'd byte into the software ring.
+ * @brief Console UARTE ISR: drain the DMA'd byte into the ring, re-arm.
  *
  * Overrides the weak alias installed by the crt vector table (SERIAL20 IRQn
  * 198 for UARTE20, SERIAL30 260 for UARTE30 -- the crt wires both to here,
- * only the console's is NVIC-enabled).  The DMA_RX_END->DMA_RX_START short
- * has already re-armed the DMA in hardware, so the only job is to copy the
- * byte before the next overwrites the 1-byte bounce buffer.
+ * only the console's is NVIC-enabled).  Copies the bounce byte into the
+ * software ring, re-arms the 1-byte DMA (software re-arm -- the gap is what
+ * lets a genuine blackout overrun surface in ERRORSRC), then folds any
+ * latched hardware overrun into the same overrun counter the ring uses.
  */
 void tiku_nordic_uart_console_isr(void)
 {
     if (TIKU_UARTE->EVENTS_DMA.RX.END != 0UL) {
         uint16_t next;
+        uint32_t err;
 
         TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
         (void)TIKU_UARTE->EVENTS_DMA.RX.END;      /* flush the clear */
@@ -176,6 +186,20 @@ void tiku_nordic_uart_console_isr(void)
             tiku_uart_rx_head = next;
         } else if (tiku_uart_overruns != 0xFFFFu) {
             tiku_uart_overruns++;                 /* ring full: drop + count  */
+        }
+
+        /* Re-arm as early as possible (the byte is safely in the ring). */
+        TIKU_UARTE->TASKS_DMA.RX.START = 1UL;
+
+        /* Hardware overrun (bytes arrived faster than the re-arm, e.g. an
+         * IRQ blackout): latched in ERRORSRC; count and clear (W1C). */
+        err = TIKU_UARTE->ERRORSRC;
+        if (err != 0UL) {
+            TIKU_UARTE->ERRORSRC = err;           /* W1C */
+            if ((err & 1UL) != 0UL &&             /* OVERRUN */
+                tiku_uart_overruns != 0xFFFFu) {
+                tiku_uart_overruns++;
+            }
         }
     }
 }
