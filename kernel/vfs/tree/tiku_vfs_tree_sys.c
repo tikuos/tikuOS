@@ -834,9 +834,24 @@ crypto_ops_read(char *buf, size_t max)
                     (unsigned)hw, (unsigned)sw, (unsigned)errs);
 }
 
+static int
+crypto_pk_read(char *buf, size_t max)
+{
+#if defined(TIKU_CRACEN_PK_ENABLE)
+    uint16_t ops, errs;
+    tiku_crypto_arch_pk_counters(&ops, &errs);
+    return snprintf(buf, max, "hw-capable ops=%u errs=%u\n",
+                    (unsigned)ops, (unsigned)errs);
+#else
+    (void)buf; (void)max;
+    return snprintf(buf, max, "sw\n");
+#endif
+}
+
 static const tiku_vfs_node_t sys_crypto_children[] = {
     { "mode", TIKU_VFS_FILE, crypto_mode_read, crypto_mode_write, NULL, 0 },
     { "ops",  TIKU_VFS_FILE, crypto_ops_read,  NULL,              NULL, 0 },
+    { "pk",   TIKU_VFS_FILE, crypto_pk_read,   NULL,              NULL, 0 },
 };
 #endif /* PLATFORM_NORDIC */
 
@@ -879,7 +894,7 @@ static const tiku_vfs_node_t sys_children[] = {
 #endif
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
 #if defined(PLATFORM_NORDIC)
-    { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 2 },
+    { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 3 },
 #endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,

@@ -1940,6 +1940,17 @@ ifeq ($(HAS_DEMOS),1)
 SRCS   += $(wildcard demos/$(DEMO)/*.c)
 endif
 
+# CRACEN hardware public-key offload (nRF54L15 only, opt-in).  Enables the
+# BA414EP ECDSA-verify path (481x over software) behind the runtime mode knob,
+# but the engine is microcoded and TikuOS ships NO microcode (Nordic-
+# proprietary): a build must ALSO drop its own licensed cracen_pk_microcode.h
+# next to arch/nordic/tiku_crypto_arch.c.  Without it, every hardware verify
+# fails safe to software.  Default off; the SHA/AES-GCM CryptoMaster offload
+# needs none of this and is always on for nordic.
+ifeq ($(TIKU_CRACEN_PK_ENABLE),1)
+CFLAGS += -DTIKU_CRACEN_PK_ENABLE=1
+endif
+
 ifeq ($(TIKU_KIT_CRYPTO_ENABLE),1)
 CFLAGS += -DTIKU_KIT_CRYPTO_ENABLE=1
 SRCS   += $(wildcard tikukits/crypto/sha256/*.c)

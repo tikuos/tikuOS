@@ -582,6 +582,23 @@ static int s_pk_unavailable;
  * on every RNG power-down -- and our TRNG driver powers RNG down after each
  * read -- wedging the IKG that shares the PKE domain), then run one
  * CLEAR_MEMORY command as the microcode's boot op. */
+/*
+ * User-supplied microcode: TikuOS ships NONE.  To opt into hardware PK, drop
+ * a `cracen_pk_microcode.h` next to this file (gitignored) that defines
+ *   static const uint32_t TIKU_CRACEN_PK_UCODE[] = { ... };
+ *   #define TIKU_CRACEN_PK_UCODE_WORDS <count>
+ * with YOUR licensed BA414EP microcode image.  It is then auto-loaded on the
+ * first PK use.  Absent, PK compiles but every verify fails-safe to software.
+ */
+#if defined(__has_include)
+#  if __has_include("cracen_pk_microcode.h")
+#    include "cracen_pk_microcode.h"
+#    define TIKU_HAVE_PK_UCODE 1
+#  endif
+#endif
+
+static uint8_t s_pk_ucode_loaded;
+
 static int pk_engine_prepare(void)
 {
     uint32_t spin;
@@ -592,6 +609,19 @@ static int pk_engine_prepare(void)
     NRF_CRACENCORE_S->RNGCONTROL.REPEATTHRESHOLD = 21u;
     NRF_CRACENCORE_S->RNGCONTROL.PROPTHRESHOLD   = 311u;
 
+#if defined(TIKU_HAVE_PK_UCODE)
+    if (!s_pk_ucode_loaded) {
+        volatile uint32_t *uc =
+            (volatile uint32_t *)((uint8_t *)NRF_CRACENCORE_S + 0xC000u);
+        size_t k;
+        for (k = 0; k < (size_t)TIKU_CRACEN_PK_UCODE_WORDS; k++) {
+            uc[k] = TIKU_CRACEN_PK_UCODE[k];
+        }
+        __asm__ volatile ("dmb" ::: "memory");
+        s_pk_ucode_loaded = 1u;
+    }
+#endif
+
     PK_REG(PK_REG_COMMAND) = PK_CMD_CLEAR_MEMORY | (63u << 8);
     PK_REG(PK_REG_CONTROL) = PK_CONTROL_START;
     for (spin = 0; spin < 500000u; spin++) {
@@ -599,7 +629,7 @@ static int pk_engine_prepare(void)
             return 0;
         }
     }
-    return -1;                            /* still no microcode: give up */
+    return -1;                            /* no microcode provided: give up */
 }
 
 static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
@@ -609,7 +639,8 @@ static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
 {
     uint32_t slot_sz = pk_slot_sz();
     uint32_t cmd, spin, code;
-    uint32_t en0 = NRF_CRACEN_S->ENABLE;   /* restore on every exit */
+    int      result = -1;
+    uint32_t en0   = NRF_CRACEN_S->ENABLE;   /* restore module gating on exit */
 
     if (s_pk_unavailable) {
         return -1;                       /* no microcode: straight to sw */
@@ -619,10 +650,7 @@ static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
     }
     if (pk_engine_prepare() != 0) {
         s_pk_unavailable = 1;
-        NRF_CRACEN_S->ENABLE = en0;
-        s_mask_loaded = 0u;
-        NRF_CRACEN_S->SEEDVALID = 0u;
-        return -1;
+        goto teardown;                   /* prepare may have half-changed it */
     }
 
     pk_wr_slot(8u,  slot_sz, op_size, qx);
@@ -631,7 +659,7 @@ static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
     pk_wr_slot(11u, slot_sz, op_size, s);
     pk_wr_slot(12u, slot_sz, op_size, h);
 
-    cmd = PK_CMD_ECDSA_VER | /*no BE*/
+    cmd = PK_CMD_ECDSA_VER | /* operands loaded little-endian; no BE flag */
           ((op_size - 1u) << 8) | selcur;
     __asm__ volatile ("dmb" ::: "memory");
     PK_REG(PK_REG_COMMAND) = cmd;
@@ -644,28 +672,36 @@ static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
             break;
         }
     }
-    if ((PK_REG(PK_REG_STATUS) & PK_STATUS_BUSY) != 0u) {
-        s_pk_unavailable = 1;
-    }
     s_pk_dbg_cmd    = cmd;
     s_pk_dbg_spin   = spin;
     s_pk_dbg_status = PK_REG(PK_REG_STATUS);
-    code = PK_REG(PK_REG_STATUS) & PK_STATUS_CODE;
+    code            = PK_REG(PK_REG_STATUS) & PK_STATUS_CODE;
 
-    NRF_CRACEN_S->ENABLE = en0;          /* restore CryptoMaster/RNG gating  */
-    s_mask_loaded = 0u;                  /* PK perturbed shared masking:     */
-    NRF_CRACEN_S->SEEDVALID = 0u;        /* re-seed + re-mask on next CM use  */
+    if ((PK_REG(PK_REG_STATUS) & PK_STATUS_BUSY) != 0u) {
+        s_pk_unavailable = 1;            /* wedged: no microcode */
+        result = -1;
+    } else if (code == 0u) {
+        result = 0;                      /* valid */
+        if (s_pk_ops != 0xFFFFu) { s_pk_ops++; }
+    } else if (code == (1u << 9)) {
+        result = 1;                      /* cryptographically invalid */
+        if (s_pk_ops != 0xFFFFu) { s_pk_ops++; }
+    } else {
+        result = -1;                     /* engine/param error */
+        if (s_pk_errs != 0xFFFFu) { s_pk_errs++; }
+    }
 
-    if (code == 0u) {
-        if (s_pk_ops != 0xFFFFu) { s_pk_ops++; }
-        return 0;                        /* valid */
-    }
-    if (code == (1u << 9)) {
-        if (s_pk_ops != 0xFFFFu) { s_pk_ops++; }
-        return 1;                        /* cryptographically invalid */
-    }
-    if (s_pk_errs != 0xFFFFu) { s_pk_errs++; }
-    return -1;                           /* engine/param error (e.g. busy)   */
+teardown:
+    /* Restore the module gating and force the CryptoMaster to re-seed +
+     * re-mask on its next use.  NOTE: this does NOT fully decouple the PK
+     * engine from the shared CRACEN RNG state -- interleaving hardware PK
+     * with CryptoMaster (SHA/AES-GCM) in the same session is NOT reliable,
+     * which is why the kit's TLS-path verify stays software and this engine
+     * is exposed only as a standalone, opt-in capability. */
+    NRF_CRACEN_S->ENABLE    = en0;
+    NRF_CRACEN_S->SEEDVALID = 0u;
+    s_mask_loaded           = 0u;
+    return result;
 }
 
 int tiku_crypto_arch_p256_ecdsa_verify(const uint8_t qx[32], const uint8_t qy[32],

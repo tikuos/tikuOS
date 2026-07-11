@@ -82,3 +82,8 @@ tikuConsole/
 # Python bytecode cache
 __pycache__/
 insight/
+
+# nRF54L15 CRACEN PK hardware ECDSA: the user's LICENSED BA414EP microcode
+# (Nordic-proprietary). TikuOS ships none; drop your own here to opt into
+# hardware PK (TIKU_CRACEN_PK_ENABLE=1). Never committed.
+arch/nordic/cracen_pk_microcode.h

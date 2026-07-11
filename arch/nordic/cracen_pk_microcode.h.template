@@ -1,0 +1,32 @@
+/*
+ * cracen_pk_microcode.h  —  TEMPLATE (copy to cracen_pk_microcode.h, gitignored)
+ *
+ * TikuOS ships NO BA414EP microcode: it is Nordic-proprietary firmware
+ * (LicenseRef-Nordic-5-Clause), so hardware public-key crypto (ECDSA verify,
+ * the 481x path) is a deliberate OPT-IN you enable with your OWN licensed
+ * image.  To turn hardware PK on:
+ *
+ *   1. Obtain the BA414EP microcode you are licensed to use (e.g. the
+ *      ba414ep_ucode[] array shipped in Nordic's nRF Connect SDK under
+ *      subsys/nrf_security/.../hardware/microcode_binary.h), subject to ITS
+ *      license terms — this is your compliance decision, not TikuOS's.
+ *   2. Copy this file to  arch/nordic/cracen_pk_microcode.h  (that name is
+ *      .gitignored, so the proprietary blob never enters the TikuOS tree).
+ *   3. Paste the microcode words below and set the count.
+ *   4. Build with  TIKU_CRACEN_PK_ENABLE=1  (make knob, tikuConsole "HW PK"
+ *      checkbox, or TikuBench --make-var).  It is auto-loaded on first PK use.
+ *
+ * Without this file the PK code still compiles under TIKU_CRACEN_PK_ENABLE=1
+ * but every hardware verify fails safe to the software P-256/P-384 path.
+ *
+ * NOTE: hardware PK is currently a STANDALONE capability (arch API +
+ * `cryptoprobe pk`); it is NOT auto-wired into the TLS handshake, because the
+ * PK engine shares CRACEN RNG state with the CryptoMaster (SHA/AES-GCM) and
+ * interleaving them in one session is not yet reliable.  See the C3 notes in
+ * kintsugi/nrf54l15_phase6_coproc_radio_cracen.md.
+ */
+static const uint32_t TIKU_CRACEN_PK_UCODE[] = {
+    /* 0x........u, 0x........u, ... your licensed microcode words ... */
+};
+#define TIKU_CRACEN_PK_UCODE_WORDS \
+    (sizeof(TIKU_CRACEN_PK_UCODE) / sizeof(TIKU_CRACEN_PK_UCODE[0]))
