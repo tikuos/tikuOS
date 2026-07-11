@@ -18,6 +18,14 @@
  */
 
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>
+#include <arch/nordic/mdk/nrf54l15.h>   /* plain-C register structs: the
+                                         * same MDK headers the M33 uses
+                                         * compile unchanged for RISC-V.
+                                         * This core is a NON-SECURE bus
+                                         * master, so all access is via the
+                                         * _NS aliases -- and only works on
+                                         * peripherals the app core flipped
+                                         * to NonSecure first (SPU). */
 
 /* Outward doorbell: EVENTS_TRIGGERED[n] cannot be set from the bus (MMIO
  * writes are ignored -- measured); the VPR raises them through its VEVIF
@@ -68,6 +76,60 @@ static void flpr_pulse(const tiku_flpr_pulse_t *p)
         }
     }
     __asm__ volatile ("csrc 0xBC0, %0" :: "r"(mask));   /* park low       */
+}
+
+/* Beacon offload (F4): one 3-channel BLE advertising burst per interval,
+ * paced by the calibrated down-count, with the app core fully asleep.
+ *
+ * Division of labour: the M33 configured every link-config register
+ * (MODE/PCNF/CRC/access-address/TXPOWER/SHORTS, erratum-49 S1 layout)
+ * while the RADIO was still secure, holds CONSTLAT for the session
+ * (erratum 20), and flipped RADIO+UARTE21 to NonSecure so this core can
+ * reach them.  Per burst this firmware only replays the proven per-burst
+ * sequence: the burst-spanning UARTE21 clock kick, then per channel
+ * FREQUENCY/DATAWHITE/PACKETPTR + TXEN + poll DISABLED.  The PDU lives in
+ * this core's own .bss (the NS carve), which the radio's now-non-secure
+ * EasyDMA can read. */
+static const uint8_t beacon_freq[3] = { 2u, 26u, 80u };
+static const uint8_t beacon_widx[3] = { 37u, 38u, 39u };
+static uint8_t beacon_pdu[48] __attribute__((aligned(4)));
+static uint8_t beacon_kick[16];
+static uint32_t beacon_pace_iters;      /* interval in pace iterations     */
+static uint32_t beacon_on;
+
+static void flpr_hfclk_kick(void)
+{
+    NRF_UARTE_Type *u = NRF_UARTE21_NS;
+
+    if (u->ENABLE == 0u) {
+        u->BAUDRATE = 0x01D60000u;             /* 115200: ~1.4 ms / 16 B   */
+        u->ENABLE   = 8u;
+    }
+    u->EVENTS_DMA.TX.END  = 0u;
+    u->DMA.TX.PTR         = (uint32_t)beacon_kick;
+    u->DMA.TX.MAXCNT      = sizeof(beacon_kick);
+    u->TASKS_DMA.TX.START = 1u;                /* concurrent, spans burst  */
+}
+
+static void flpr_beacon_burst(void)
+{
+    NRF_RADIO_Type *r = NRF_RADIO_NS;
+    uint32_t c, spin;
+
+    flpr_hfclk_kick();
+    for (c = 0u; c < 3u; c++) {
+        r->FREQUENCY = beacon_freq[c];
+        r->DATAWHITE = 0x00890000u | (0x40u | beacon_widx[c]);
+        r->PACKETPTR = (uint32_t)beacon_pdu;
+        r->EVENTS_DISABLED = 0u;
+        r->EVENTS_READY    = 0u;
+        r->TASKS_TXEN = 1u;
+        for (spin = 0u; spin < 1000000u; spin++) {
+            if (r->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+    }
 }
 
 /* Echo service: consume an app->flpr message, mirror it back, ring. */
@@ -140,6 +202,44 @@ void tiku_flpr_main(void)
             sh->cmd = 0u;
             flpr_pulse(&p);                    /* blocking, bounded        */
             sh->rsp = TIKU_FLPR_RSP_PULSE_DONE;
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_BEACON) {
+            const volatile tiku_flpr_beacon_t *b =
+                (const volatile tiku_flpr_beacon_t *)sh->a2f_buf;
+            uint32_t i, n = b->pdu_len;
+            if (n > sizeof(beacon_pdu)) {
+                n = sizeof(beacon_pdu);
+            }
+            for (i = 0u; i < n; i++) {
+                beacon_pdu[i] = b->pdu[i];
+            }
+            /* interval_ms -> pace iterations: 128000 cycles/ms / DIV. */
+            beacon_pace_iters = b->interval_ms * (128000u / FLPR_PACE_DIV);
+            sh->beacon_bursts = 0u;
+            beacon_on = 1u;
+            sh->cmd = 0u;
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_BEACON_STOP) {
+            beacon_on = 0u;
+            sh->cmd = 0u;
+            sh->rsp = TIKU_FLPR_RSP_BEACON_STOPPED;
+        }
+        if (beacon_on) {
+            volatile uint32_t w;
+            flpr_beacon_burst();
+            sh->beacon_bursts = sh->beacon_bursts + 1u;
+            sh->heartbeat = sh->heartbeat + 1u;
+            /* Interval pacing; broken into slices so STOP/PARK commands
+             * are honoured within ~a millisecond. */
+            for (w = 0u; w < beacon_pace_iters; w += 12800u) {
+                volatile uint32_t s;
+                for (s = 0u; s < 12800u; s++) {
+                }
+                if (sh->cmd != 0u) {
+                    break;
+                }
+            }
+            continue;
         }
         flpr_echo_pump(sh, &last_seq);
         sh->heartbeat = sh->heartbeat + 1u;

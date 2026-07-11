@@ -299,4 +299,71 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
     return (spin < 20000000u) ? 0 : -2;       /* -2: firmware never DONE  */
 }
 
+/*---------------------------------------------------------------------------*/
+/* Beacon offload (F4)                                                       */
+/*---------------------------------------------------------------------------*/
+
+/* RADIO (SPU10 slot 10) and UARTE21 (SPU20 slot 7) are both
+ * SECUREMAPPING=UserSelectable.  For the offload window they are flipped
+ * NonSecure -- SECATTR (bit 4) and the separate DMA attribute (bit 5) --
+ * so the non-secure FLPR master can drive them and the radio's EasyDMA
+ * can read the PDU from the NS carve.  The M33 configures all radio
+ * link-config registers BEFORE the flip and does not touch either
+ * peripheral while flipped (the facade blocks scans during offload);
+ * stop() flips them back to Secure. */
+static void flpr_radio_ns(int on)
+{
+    if (on) {
+        NRF_SPU10_S->PERIPH[10].PERM &= ~((1u << 4) | (1u << 5));
+        NRF_SPU20_S->PERIPH[7].PERM  &= ~((1u << 4) | (1u << 5));
+    } else {
+        NRF_SPU10_S->PERIPH[10].PERM |= (1u << 4) | (1u << 5);
+        NRF_SPU20_S->PERIPH[7].PERM  |= (1u << 4) | (1u << 5);
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+}
+
+int tiku_flpr_arch_beacon(const uint8_t *pdu, uint32_t len,
+                          uint32_t interval_ms)
+{
+    volatile tiku_flpr_beacon_t *b =
+        (volatile tiku_flpr_beacon_t *)TIKU_FLPR_SHARED->a2f_buf;
+    uint32_t i;
+
+    if (!tiku_flpr_arch_running() || len > sizeof(b->pdu) ||
+        interval_ms == 0u) {
+        return -1;
+    }
+    flpr_radio_ns(1);
+    for (i = 0u; i < len; i++) {
+        b->pdu[i] = pdu[i];
+    }
+    b->pdu_len = len;
+    b->interval_ms = interval_ms;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_BEACON;
+    return 0;
+}
+
+void tiku_flpr_arch_beacon_stop(void)
+{
+    uint32_t spin;
+
+    TIKU_FLPR_SHARED->rsp = 0u;
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_BEACON_STOP;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    for (spin = 0u; spin < 2000000u; spin++) {
+        if (TIKU_FLPR_SHARED->rsp == TIKU_FLPR_RSP_BEACON_STOPPED) {
+            break;
+        }
+    }
+    TIKU_FLPR_SHARED->rsp = 0u;
+    flpr_radio_ns(0);
+}
+
+uint32_t tiku_flpr_arch_beacon_bursts(void)
+{
+    return TIKU_FLPR_SHARED->beacon_bursts;
+}
+
 #endif /* TIKU_FLPR_ENABLE */

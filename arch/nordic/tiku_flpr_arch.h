@@ -75,4 +75,26 @@ uint32_t tiku_flpr_arch_reply(void *out, uint32_t cap);
 int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
                          uint32_t *measured, uint32_t *ms);
 
+/**
+ * @brief Offload duty-cycled BLE beaconing to the coprocessor.
+ *
+ * Caller contract: radio link-config registers already programmed
+ * (tiku_radio_arch_init) and the session CONSTLAT hold taken.  While
+ * offloaded, the M33 must not touch RADIO/UARTE21 (they are flipped to
+ * NonSecure for the FLPR).
+ *
+ * @param pdu          RAM-format PDU ([S0][LEN][S1][payload...]).
+ * @param len          Buffer bytes (<= 48).
+ * @param interval_ms  Burst interval.
+ * @return 0 on success, negative if not running / bad args.
+ */
+int tiku_flpr_arch_beacon(const uint8_t *pdu, uint32_t len,
+                          uint32_t interval_ms);
+
+/** @brief Stop the offloaded beacon and restore peripheral security. */
+void tiku_flpr_arch_beacon_stop(void);
+
+/** @brief Bursts transmitted by the coprocessor since beacon start. */
+uint32_t tiku_flpr_arch_beacon_bursts(void);
+
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

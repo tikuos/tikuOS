@@ -25,6 +25,9 @@
 #if TIKU_BLE_ADV_PRESENT
 
 #include <arch/nordic/tiku_radio_arch.h>
+#if (TIKU_FLPR_ENABLE + 0)
+#include <arch/nordic/tiku_flpr_arch.h>    /* F4: beacon offload           */
+#endif
 #include <arch/nordic/tiku_timer_arch.h>   /* TIKU_CLOCK_ARCH_SECOND        */
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_timer.h>
@@ -48,6 +51,7 @@ static uint16_t adv_interval_ms;
 static uint8_t  adv_on;
 static uint32_t adv_burst_count;
 static uint8_t  radio_inited;
+static uint8_t  adv_offloaded;      /* beacon runs on the FLPR (F4)        */
 
 /* Last-scan summary for /sys/radio observability. */
 static uint8_t               scan_last_count;
@@ -138,6 +142,20 @@ int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
      * burst HF clock kick in the arch send path.) */
     tiku_radio_arch_constlat_hold(1);
 
+#if (TIKU_FLPR_ENABLE + 0)
+    /* F4: when the coprocessor firmware is alive, the whole beacon runs
+     * THERE -- no kernel timer is armed, so the M33 never wakes for a
+     * burst.  The link config was just programmed by init (radio still
+     * secure at that point); the arch call flips RADIO+UARTE21 to the
+     * FLPR and ships the PDU. */
+    if (tiku_flpr_arch_alive() &&
+        tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len, interval_ms) == 0) {
+        adv_offloaded = 1u;
+        adv_on = 1u;
+        return 0;
+    }
+#endif
+
     /* First burst now (a beacon should be instantly visible), then the
      * timer paces the rest; set_callback re-sets an already-active timer. */
     tiku_radio_arch_adv_send(adv_pdu, adv_pdu_len);
@@ -150,6 +168,12 @@ int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
 void tiku_ble_adv_stop(void)
 {
     if (adv_on) {
+#if (TIKU_FLPR_ENABLE + 0)
+        if (adv_offloaded) {
+            tiku_flpr_arch_beacon_stop();
+            adv_offloaded = 0u;
+        }
+#endif
         tiku_timer_stop(&adv_timer);
         tiku_radio_arch_constlat_hold(0);
         adv_on = 0u;
@@ -175,6 +199,11 @@ uint16_t tiku_ble_adv_interval_ms(void)
 
 uint32_t tiku_ble_adv_bursts(void)
 {
+#if (TIKU_FLPR_ENABLE + 0)
+    if (adv_offloaded) {
+        return adv_burst_count + tiku_flpr_arch_beacon_bursts();
+    }
+#endif
     return adv_burst_count;
 }
 
@@ -268,6 +297,11 @@ int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms)
     ctx.max = max;
     ctx.count = 0u;
 
+#if (TIKU_FLPR_ENABLE + 0)
+    if (adv_offloaded) {
+        return -1;                  /* radio owned by the coprocessor      */
+    }
+#endif
     adv_radio_init_once();
     tiku_radio_arch_scan(scan_cb, &ctx, ms, (uint32_t *)0, (uint32_t *)0);
 

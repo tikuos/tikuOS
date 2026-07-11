@@ -63,6 +63,9 @@ typedef struct {
     volatile uint32_t f2a_seq;
     volatile uint32_t f2a_len;
     volatile uint8_t  f2a_buf[TIKU_FLPR_MSG_CAP];
+
+    /* Beacon-offload telemetry (F4). */
+    volatile uint32_t beacon_bursts;
 } tiku_flpr_shared_t;
 
 /* Cooperative park/resume protocol.  Hardware truths this encodes:
@@ -80,13 +83,29 @@ typedef struct {
  * `half_cycles` FLPR cycles between them, then raises RSP_PULSE_DONE.
  * 50 % duty by construction (every edge is a toggle). */
 #define TIKU_FLPR_CMD_PULSE   3u
+/* Beacon offload (F4): parameters in a2f_buf as tiku_flpr_beacon_t.  The
+ * firmware enters beacon mode -- one 3-channel BLE burst per interval,
+ * including the UARTE21 HF-clock kick -- until CMD_BEACON_STOP.  The app
+ * core prepares everything the firmware must not: radio link-config
+ * registers (while the RADIO is still secure), the SPU flips that make
+ * RADIO+UARTE21 reachable by this non-secure master, and the session
+ * CONSTLAT hold.  Burst count is published in .beacon_bursts. */
+#define TIKU_FLPR_CMD_BEACON      4u
+#define TIKU_FLPR_CMD_BEACON_STOP 5u
 #define TIKU_FLPR_RSP_PARKED  1u
 #define TIKU_FLPR_RSP_PULSE_DONE 2u
+#define TIKU_FLPR_RSP_BEACON_STOPPED 3u
 
 typedef struct {
     uint32_t half_cycles;           /* FLPR cycles per half-period (128/us) */
     uint32_t edges;                 /* number of transitions to emit        */
 } tiku_flpr_pulse_t;
+
+typedef struct {
+    uint32_t interval_ms;
+    uint32_t pdu_len;
+    uint8_t  pdu[48];               /* [S0][LEN][S1][payload...] layout     */
+} tiku_flpr_beacon_t;
 
 #define TIKU_FLPR_VIO_BIT     7u    /* VIO bit 7 == P2.07 == DK LED3       */
 
