@@ -297,7 +297,13 @@ process_line(const char *raw)
 #endif
 #endif
 #if TIKU_BASIC_BLE_ENABLE
-                " BLEADV BLEOFF BLESEND BLEBEACON BLEUP BLEAVAIL BLEGET$"
+#if TIKU_BLE_SERIAL_PRESENT
+                " BLEADV BLESEND BLEUP BLEAVAIL BLEGET$"
+#endif
+#if TIKU_BLE_ADV_PRESENT
+                " BLESCAN$"
+#endif
+                " BLEOFF BLEBEACON"
 #endif
                 "\n");
 #endif

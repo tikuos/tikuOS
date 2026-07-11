@@ -13,10 +13,11 @@
 #ifndef TIKU_SHELL_CMD_BLEADV_H_
 #define TIKU_SHELL_CMD_BLEADV_H_
 
+#include <stdint.h>
 #include <kernel/shell/tiku_shell_config.h>
 
 #if TIKU_SHELL_CMD_BLEADV
-void tiku_shell_cmd_bleadv(int argc, char **argv);
+void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[]);
 #endif
 
 #endif /* TIKU_SHELL_CMD_BLEADV_H_ */

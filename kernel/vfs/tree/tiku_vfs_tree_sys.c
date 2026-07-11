@@ -42,6 +42,9 @@
 #if defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_crypto_arch.h>   /* /sys/crypto mode + counters */
 #endif
+#if (TIKU_HAS_BLE_ADV + 0)
+#include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
+#endif
 #include "tiku_vfs_tree_boot.h"
 #include <kernel/cpu/tiku_stack.h>   /* stack high-water for /sys/mem/stack_free */
 #include "tiku_vfs_tree_timer.h"
@@ -62,6 +65,10 @@
 #include <kernel/process/tiku_process.h>
 #include <kernel/scheduler/tiku_sched.h>
 #include <stdio.h>
+#if (TIKU_HAS_BLE_ADV + 0)
+#include <stdlib.h>                  /* strtoul: /sys/radio/beacon interval */
+#include <string.h>                  /* strchr/strcmp: beacon write parse   */
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* /sys/uptime                                                               */
@@ -855,6 +862,99 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
 };
 #endif /* PLATFORM_NORDIC */
 
+#if (TIKU_HAS_BLE_ADV + 0)
+/*---------------------------------------------------------------------------*/
+/* /sys/radio — BLE broadcaster/observer control + observability             */
+/*---------------------------------------------------------------------------*/
+/*
+ * Control surface over the tiku_ble_adv facade: `beacon` is the writable
+ * knob ("NAME[,interval_ms]" starts, "off"/"0" stops), which also makes
+ * beaconing available to the rules engine and `watch`; the rest report
+ * state so a bench can assert "the radio really transmitted".
+ */
+
+static int
+radio_beacon_read(char *buf, size_t max)
+{
+    if (!tiku_ble_adv_active()) {
+        return snprintf(buf, max, "off\n");
+    }
+    return snprintf(buf, max, "%s,%u\n", tiku_ble_adv_name(),
+                    (unsigned)tiku_ble_adv_interval_ms());
+}
+
+static int
+radio_beacon_write(const char *buf, size_t len)
+{
+    char tmp[40];
+    char *comma;
+    unsigned long ms = 0ul;
+
+    if (len == 0u || len >= sizeof(tmp)) {
+        return TIKU_VFS_EINVAL;
+    }
+    memcpy(tmp, buf, len);
+    tmp[len] = '\0';
+    /* Trim a trailing newline from `write /sys/radio/beacon ...`. */
+    while (len > 0u && (tmp[len - 1u] == '\n' || tmp[len - 1u] == '\r')) {
+        tmp[--len] = '\0';
+    }
+    if (len == 0u) {
+        return TIKU_VFS_EINVAL;
+    }
+    if (strcmp(tmp, "off") == 0 || strcmp(tmp, "0") == 0) {
+        tiku_ble_adv_stop();
+        return 0;
+    }
+    comma = strchr(tmp, ',');
+    if (comma != NULL) {
+        *comma = '\0';
+        ms = strtoul(comma + 1, NULL, 10);
+    }
+    return (tiku_ble_adv_beacon(tmp, (uint16_t)ms) == 0)
+               ? 0 : TIKU_VFS_EINVAL;
+}
+
+static int
+radio_bursts_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)tiku_ble_adv_bursts());
+}
+
+static int
+radio_state_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n",
+                    tiku_ble_adv_active() ? "beacon" : "idle");
+}
+
+static int
+radio_scan_read(char *buf, size_t max)
+{
+    const tiku_ble_adv_report_t *b = tiku_ble_adv_last_scan_best();
+    if (b == NULL) {
+        return snprintf(buf, max, "devices=%u\n",
+                        (unsigned)tiku_ble_adv_last_scan_count());
+    }
+    return snprintf(buf, max,
+                    "devices=%u best=%02X:%02X:%02X:%02X:%02X:%02X "
+                    "rssi=%d name=%s\n",
+                    (unsigned)tiku_ble_adv_last_scan_count(),
+                    b->addr[5], b->addr[4], b->addr[3],
+                    b->addr[2], b->addr[1], b->addr[0],
+                    (int)b->rssi, b->name);
+}
+
+static const tiku_vfs_node_t sys_radio_children[] = {
+    { "beacon", TIKU_VFS_FILE, radio_beacon_read, radio_beacon_write,
+      NULL, 0 },
+    { "bursts", TIKU_VFS_FILE, radio_bursts_read, NULL, NULL, 0 },
+    { "state",  TIKU_VFS_FILE, radio_state_read,  NULL, NULL, 0 },
+    { "scan",   TIKU_VFS_FILE, radio_scan_read,   NULL, NULL, 0 },
+};
+#endif /* TIKU_HAS_BLE_ADV */
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
@@ -895,6 +995,9 @@ static const tiku_vfs_node_t sys_children[] = {
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
 #if defined(PLATFORM_NORDIC)
     { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 3 },
+#endif
+#if (TIKU_HAS_BLE_ADV + 0)
+    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  4 },
 #endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,

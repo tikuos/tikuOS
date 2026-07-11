@@ -61,7 +61,9 @@
 
 #include <arch/nordic/tiku_radio_arch.h>
 #include <arch/nordic/tiku_device_select.h>   /* MDK register types + NRF_RADIO_S */
-#include <kernel/cpu/tiku_watchdog.h>          /* kick during the long RX probe */
+#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
+#include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
+#include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
 #include <string.h>
 
 #define RADIO  NRF_RADIO_S
@@ -82,7 +84,17 @@ static const uint8_t adv_freq[3] = { 2u, 26u, 80u };   /* ch37/38/39 = 2402/2426
 static const uint8_t adv_index[3] = { 37u, 38u, 39u };
 
 /* Erratum-20 bracket: hold the MCU domain in Constant Latency for the
- * duration of any radio operation, then release to Low Power. */
+ * duration of any radio operation, then release to Low Power.
+ *
+ * For a duty-cycled beacon the facade additionally holds Constant Latency
+ * across the whole session (tiku_radio_arch_constlat_hold): the sleeps
+ * BETWEEN bursts then happen in constant-latency mode, per the erratum's
+ * intent.  Note the hold alone is NOT what makes post-sleep bursts
+ * decodable -- that is radio_hfclk_kick() below -- but it is the
+ * documented erratum-20 discipline and stays.  While held, the per-burst
+ * exit is a no-op. */
+static uint8_t radio_constlat_held;
+
 static void radio_constlat_enter(void)
 {
     NRF_POWER_S->TASKS_CONSTLAT = 1u;
@@ -90,7 +102,47 @@ static void radio_constlat_enter(void)
 
 static void radio_constlat_exit(void)
 {
-    NRF_POWER_S->TASKS_LOWPWR = 1u;
+    if (!radio_constlat_held) {
+        NRF_POWER_S->TASKS_LOWPWR = 1u;
+    }
+}
+
+void tiku_radio_arch_constlat_hold(int on)
+{
+    radio_constlat_held = (uint8_t)(on != 0);
+    if (on) {
+        NRF_POWER_S->TASKS_CONSTLAT = 1u;
+    } else {
+        NRF_POWER_S->TASKS_LOWPWR = 1u;
+    }
+}
+
+/* XO/PLL observability only -- deliberately NO runtime clock manipulation.
+ *
+ * Post-mortem of the bring-up detours (all hardware-measured, kept here so
+ * nobody re-walks them): runtime TASKS_XOSTART without PLLSTART wedges the
+ * device (erratum 39); per-burst TASKS_PLLSTART opens a relock transient
+ * the burst then flies inside (host silence); session-start
+ * PLLSTART+XOTUNE made later sessions unreliable.  EVENTS_XOSTARTED never
+ * re-fires across tickless sleeps (the XO does not park), XO.STAT stays
+ * Running, and the radio's own READY fires in every failing case -- there
+ * is no PASSIVE signal for the missing prerequisite.  The active fix that
+ * finally proved out is the per-burst HF clock REQUEST in
+ * radio_hfclk_kick() below (found via a UARTE-TX-byte discriminator:
+ * one putc before each burst healed TX, because UARTE requests its
+ * HFXO-derived reference; busy-waiting up to 11 ms did not).  This
+ * observer only feeds the dbg counters. */
+uint32_t tiku_radio_arch_dbg_xo_stat, tiku_radio_arch_dbg_xo_wait;
+uint32_t tiku_radio_arch_dbg_xo_restarts;
+
+static void radio_xo_observe(void)
+{
+    uint32_t stat = NRF_CLOCK_S->XO.STAT;
+
+    tiku_radio_arch_dbg_xo_stat = stat;
+    if (NRF_CLOCK_S->EVENTS_XOSTARTED != 0u || (stat & (1ul << 16)) == 0u) {
+        tiku_radio_arch_dbg_xo_restarts++;     /* would be a NEW hardware fact */
+    }
 }
 
 void tiku_radio_arch_init(void)
@@ -172,11 +224,47 @@ uint32_t tiku_radio_arch_dbg_ready, tiku_radio_arch_dbg_disabled;
 uint32_t tiku_radio_arch_dbg_state, tiku_radio_arch_dbg_spin;
 uint32_t tiku_radio_arch_dbg_ru_iters, tiku_radio_arch_dbg_tx_iters;
 
+/* Per-burst HF clock kick (the productized form of a hardware finding):
+ * a burst fired after tickless sleep is undecodable unless a PERIPHERAL
+ * clock request precedes it.  One console-UARTE TX byte before each burst
+ * healed TX on hardware; CPU busy-waits up to 11 ms and every CLOCK-task
+ * combination (PLLSTART/XOSTART/XOTUNE, per-burst and per-session) did
+ * NOT.  Whatever the UARTE transaction requests from the clock arbiter is
+ * the radio's missing prerequisite, so reproduce exactly that -- minus the
+ * console pollution: a 1-byte TX DMA through the unused UARTE21 with its
+ * pins left disconnected (PSEL reset = 0xFFFFFFFF, nothing is driven).
+ * At 1 MBd the transaction is ~10 us; the bounded wait covers a stuck
+ * ENDTX (then dbg_xo_wait pins at the bound and the burst proceeds --
+ * degraded, not wedged). */
+static void radio_hfclk_kick(void)
+{
+    static uint8_t kick_bytes[16];
+    NRF_UARTE_Type *u = NRF_UARTE21_S;
+
+    if (u->ENABLE == 0u) {
+        u->BAUDRATE = 0x01D60000u;             /* 115200                   */
+        u->ENABLE   = 8u;                      /* UARTE enable code        */
+    }
+    /* The request must be HELD ACROSS THE BURST, not just pulsed: a 1-byte
+     * kick at 1 MBd (~10 us, released before the radio even finishes its
+     * ramp) measurably does NOT heal TX, while the console putc's ~87 us
+     * byte partially did.  16 bytes at 115200 spans ~1.6 ms -- longer than
+     * the whole 3-channel burst -- and runs CONCURRENTLY (no wait); the
+     * transfer self-completes after the burst and the next kick re-arms. */
+    u->EVENTS_DMA.TX.END   = 0u;
+    u->DMA.TX.PTR          = (uint32_t)kick_bytes;
+    u->DMA.TX.MAXCNT       = sizeof(kick_bytes);
+    u->TASKS_DMA.TX.START  = 1u;
+    tiku_radio_arch_dbg_xo_wait = 0u;
+}
+
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 {
     uint8_t c;
     (void)pdu_len;                             /* length is byte[1] of the PDU */
     radio_constlat_enter();                    /* erratum 20: before any TXEN  */
+    radio_xo_observe();                        /* clock-tree dbg counters only */
+    radio_hfclk_kick();                        /* peripheral clock request     */
     for (c = 0; c < 3u; c++) {
         adv_tx_one(c, pdu);
     }
@@ -184,52 +272,65 @@ void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 }
 
 /**
- * @brief Diagnostic RX probe: listen on the advertising channels with the
- *        exact same link config as TX and report what the PHY locks onto.
+ * @brief Observer scan: listen on the advertising channels with the exact
+ *        same link config as TX, invoking @p cb per CRC-OK packet.
  *
- * A real BLE advertiser in range makes EVENTS_ADDRESS fire (access-address +
- * preamble config correct) and EVENTS_CRCOK fire (whitening + CRC correct).
- * This isolates a "transmits but nobody decodes" failure: if RX hears the
- * room, the shared link config is proven and the bug is TX-only -- exactly
- * how erratum 49 was cornered during bring-up.
+ * The engine round-robins 37/38/39 in bounded listen windows until @p ms
+ * milliseconds of wall clock have elapsed (tiku_clock based).  RSSI is
+ * latched per packet via the ADDRESS->RSSISTART short and reported in dBm.
+ * Besides being the BLESCAN$/`bleadv scan` backend, this doubles as the
+ * link-config oracle that cornered erratum 49 during bring-up: if it hears
+ * the room, everything shared with TX (frequency, access address,
+ * whitening, CRC) is proven, and a TX failure is TX-only.
  *
- * @param out_adva   6-byte buffer; receives the AdvA of the first CRC-OK PDU
- * @param addr_evts  incremented per access-address match seen
- * @param crcok_evts incremented per CRC-OK packet seen
- * @return 1 if at least one CRC-OK packet was captured, else 0
+ * @param cb          Called per CRC-OK packet with the raw RAM buffer
+ *                    ([S0][LEN][S1 slot][payload...] -- the erratum-49
+ *                    S1INCL slot shifts payload to byte 3), total payload
+ *                    length (the LEN byte), and RSSI in dBm.  May be NULL.
+ * @param ud          Opaque context for @p cb.
+ * @param ms          Scan duration in milliseconds (wall clock).
+ * @param addr_evts   Optional: incremented per access-address match.
+ * @param crcok_evts  Optional: incremented per CRC-OK packet.
  */
-int tiku_radio_arch_rx_probe(uint8_t *out_adva, uint32_t *addr_evts,
-                             uint32_t *crcok_evts, uint32_t rounds)
+void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
+                          uint32_t *addr_evts, uint32_t *crcok_evts)
 {
-    static uint8_t rxbuf[40] __attribute__((aligned(4)));
-    uint32_t r, got = 0u;
-    uint8_t chan = 0u;
+    static uint8_t rxbuf[48] __attribute__((aligned(4)));
+    tiku_clock_time_t t0 = tiku_clock_time();
+    tiku_clock_time_t span =
+        (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
+    uint32_t r = 0u;
+    uint8_t chan;
+
+    if (span == 0u) {
+        span = 1u;
+    }
 
     radio_constlat_enter();                    /* erratum 20: before any RXEN  */
+    radio_xo_observe();                        /* clock-tree dbg counters only */
 
-    /* RX ramps via RXREADY (distinct from TX's READY); PHYEND is end-of-packet
-     * for BLE.  Cover both ready events, then disable at PHYEND. */
-    RADIO->SHORTS = (1u << 0) | (1u << 18) | (1u << 19);
+    /* RX ramps via RXREADY (distinct from TX's READY); PHYEND is
+     * end-of-packet for BLE; ADDRESS latches an RSSI sample. */
+    RADIO->SHORTS = (1u << 0) | (1u << 4) | (1u << 18) | (1u << 19);
 
-    for (r = 0; r < rounds; r++) {
+    while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span) {
         uint32_t spin;
         if ((r & 0x0Fu) == 0u) {
-            tiku_watchdog_kick();              /* probe blocks for seconds     */
+            tiku_watchdog_kick();              /* scan blocks for seconds      */
         }
         chan = (uint8_t)(r % 3u);
+        r++;
         RADIO->FREQUENCY = adv_freq[chan];
         RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
         RADIO->PACKETPTR = (uint32_t)rxbuf;
 
         RADIO->EVENTS_DISABLED = 0u;
-        RADIO->EVENTS_END      = 0u;
         RADIO->EVENTS_ADDRESS  = 0u;
         RADIO->EVENTS_CRCOK    = 0u;
         (void)RADIO->EVENTS_DISABLED;
         RADIO->TASKS_RXEN = 1u;
 
-        /* Bounded listen window per round; the whole probe stays well under
-         * the WDT with the periodic kicks above. */
+        /* Bounded listen window (~10-20 ms), then rotate channels. */
         for (spin = 0; spin < 120000u; spin++) {
             if (RADIO->EVENTS_DISABLED != 0u) {
                 break;
@@ -243,18 +344,18 @@ int tiku_radio_arch_rx_probe(uint8_t *out_adva, uint32_t *addr_evts,
                 }
             }
         }
-        if (RADIO->EVENTS_ADDRESS != 0u) {
+        if (RADIO->EVENTS_ADDRESS != 0u && addr_evts != (uint32_t *)0) {
             (*addr_evts)++;
         }
         if (RADIO->EVENTS_CRCOK != 0u) {
-            (*crcok_evts)++;
-            if (!got) {
-                /* rxbuf = [S0][LEN][S1 slot][AdvA0..5][...] -- the S1INCL
-                 * erratum-49 slot shifts received payload to byte 3. */
-                out_adva[0] = rxbuf[3]; out_adva[1] = rxbuf[4];
-                out_adva[2] = rxbuf[5]; out_adva[3] = rxbuf[6];
-                out_adva[4] = rxbuf[7]; out_adva[5] = rxbuf[8];
-                got = 1u;
+            if (crcok_evts != (uint32_t *)0) {
+                (*crcok_evts)++;
+            }
+            if (cb != (tiku_radio_arch_scan_cb_t)0) {
+                /* RSSISAMPLE is the magnitude in -dBm (7-bit). */
+                int8_t rssi =
+                    (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
+                cb(rxbuf, rxbuf[1], rssi, ud);
             }
         }
     }
@@ -268,7 +369,6 @@ int tiku_radio_arch_rx_probe(uint8_t *out_adva, uint32_t *addr_evts,
     }
     RADIO->SHORTS = (1u << 0) | (1u << 19);
     radio_constlat_exit();
-    return (int)got;
 }
 
 uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,

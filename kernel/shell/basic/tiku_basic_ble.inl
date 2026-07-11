@@ -7,19 +7,25 @@
  *
  * tiku_basic_ble.inl - Bluetooth Low Energy words for BASIC.
  *
- * A tiny "serial over BLE" vocabulary built on the driver-agnostic facade in
- * interfaces/bluetooth/tiku_ble_serial.h -- so these are GENERAL words, not
- * tied to any one radio.  Today the only backend is the EM9305 on the Apollo510
- * Blue, but nothing here knows that; a future BLE platform lights the same
- * words up automatically via TIKU_HAS_BLE.
+ * A tiny BLE vocabulary built on the driver-agnostic facades in
+ * interfaces/bluetooth/ -- so these are GENERAL words, not tied to any one
+ * radio.  Two independent capabilities light up their own words:
  *
+ * TIKU_HAS_BLE (connection-capable: tiku_ble_serial, EM9305 today):
  *   BLEADV name$      start connectable advertising as a BLE serial peripheral
- *   BLEOFF            stop advertising / drop the link
  *   BLESEND s$        send a string to the connected central (flow-controlled)
- *   BLEBEACON name$   start a non-connectable beacon
  *   BLEUP             function (call.inl): 1 when a central is connected+subscribed
  *   BLEAVAIL          function (call.inl): 1 when received bytes are waiting
  *   BLEGET$           function (string.inl): pop bytes the central sent, "" if none
+ *
+ * TIKU_HAS_BLE_ADV (broadcast: tiku_ble_adv, nRF54L15 on-die radio today):
+ *   BLEBEACON name$[,ms]  BACKGROUND non-connectable beacon (kernel timer;
+ *                         survives RUN ending; board beacons while sleeping)
+ *   BLESCAN$(secs)    function (string.inl): passive scan -> "addr,rssi,name;"
+ *
+ * Both:
+ *   BLEOFF            stop advertising / beaconing / drop the link
+ *   BLEBEACON on a serial-only build maps to its connectionless beacon.
  *
  * Idiomatic loop (run at the UART/USB console; BLE is the data channel):
  *   10 BLEADV "tikuOS"
@@ -55,8 +61,9 @@
  * so anything past ~26 chars would be truncated by the radio anyway. */
 #define BASIC_BLE_NAME_CAP  24
 
+#if TIKU_BLE_SERIAL_PRESENT
 /* BLEADV ["name"] -- advertise connectably as a BLE serial peripheral.  A bare
- * BLEADV (or "") uses the default name. */
+ * BLEADV (or "") uses the default name.  Connection-capable backends only. */
 static void
 exec_bleadv(const char **p)
 {
@@ -75,14 +82,6 @@ exec_bleadv(const char **p)
     }
 }
 
-/* BLEOFF -- stop advertising and drop any link. */
-static void
-exec_bleoff(const char **p)
-{
-    (void)p;
-    tiku_ble_serial_stop();
-}
-
 /* BLESEND expr$ -- send a string to the connected central. */
 static void
 exec_blesend(const char **p)
@@ -97,24 +96,63 @@ exec_blesend(const char **p)
             "? BLE not connected (check BLEUP() before BLESEND)\n" SH_RST);
     }
 }
+#endif /* TIKU_BLE_SERIAL_PRESENT */
 
-/* BLEBEACON ["name"] -- start a non-connectable beacon. */
+/* BLEOFF -- stop advertising / beaconing and drop any link. */
+static void
+exec_bleoff(const char **p)
+{
+    (void)p;
+#if TIKU_BLE_SERIAL_PRESENT
+    tiku_ble_serial_stop();
+#endif
+#if TIKU_BLE_ADV_PRESENT
+    tiku_ble_adv_stop();
+#endif
+}
+
+/* BLEBEACON ["name"][,interval_ms] -- start a non-connectable beacon.
+ *
+ * On a broadcast backend (tiku_ble_adv) the beacon is a BACKGROUND kernel
+ * timer: RUN can end and the board keeps advertising while it sleeps
+ * (tickless), until BLEOFF.  The optional interval (default 1000 ms,
+ * clamped to the BLE legal range) is the microwatt knob: energy scales
+ * linearly with burst rate. */
 static void
 exec_blebeacon(const char **p)
 {
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
+    long        ms = 0;
     skip_ws(p);
     if (**p == '\0' || **p == ':') {
         name[0] = '\0';
+    } else if (**p == ',') {
+        name[0] = '\0';                     /* BLEBEACON ,500 -> default    */
     } else if (parse_strexpr(p, name, sizeof(name)) != 0) {
         return;
     }
+    skip_ws(p);
+    if (**p == ',') {
+        (*p)++;
+        ms = parse_expr(p);
+        if (basic_error) return;
+        if (ms < 0) ms = 0;
+        if (ms > 65535) ms = 65535;
+    }
     nm = (name[0] != '\0') ? name : "tikuOS";
+#if TIKU_BLE_ADV_PRESENT
+    if (tiku_ble_adv_beacon(nm, (uint16_t)ms) != 0) {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? BLE beacon failed (radio present?)\n" SH_RST);
+    }
+#else
+    (void)ms;                               /* serial backends pick their own */
     if (tiku_ble_serial_beacon(nm) != 0) {
         basic_error = 1;
         SHELL_PRINTF(SH_RED "? BLE beacon failed (radio present?)\n" SH_RST);
     }
+#endif
 }
 
 #endif /* TIKU_BASIC_BLE_ENABLE */

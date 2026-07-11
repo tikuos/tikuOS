@@ -37,11 +37,35 @@ uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len);
 
 /**
- * @brief Diagnostic RX probe (listens on 37/38/39 with the TX link config).
- * @return 1 if a CRC-OK advertising PDU was captured (AdvA in @p out_adva).
+ * @brief Session-scoped Constant Latency hold (nRF54L15 erratum 20).
+ *
+ * A duty-cycled radio user (background beacon) must hold Constant Latency
+ * across the SLEEPS between its bursts, not just during each burst --
+ * otherwise the erratum corrupts the on-air payload after a tickless idle.
+ * While held, the per-operation exit to Low Power is suppressed.
  */
-int tiku_radio_arch_rx_probe(uint8_t *out_adva, uint32_t *addr_evts,
-                             uint32_t *crcok_evts, uint32_t rounds);
+void tiku_radio_arch_constlat_hold(int on);
+
+/**
+ * @brief Per-packet observer callback (CRC-OK packets only).
+ *
+ * @param buf   Raw RAM buffer: [S0][LEN][S1 slot][payload...] -- the
+ *              erratum-49 S1INCL slot shifts received payload to byte 3.
+ * @param len   The on-air LENGTH byte (payload byte count).
+ * @param rssi  RSSI of the packet in dBm.
+ * @param ud    Opaque context.
+ */
+typedef void (*tiku_radio_arch_scan_cb_t)(const uint8_t *buf, uint8_t len,
+                                          int8_t rssi, void *ud);
+
+/**
+ * @brief Observer scan on 37/38/39 with the TX link config (blocking).
+ *
+ * Round-robins the advertising channels for @p ms milliseconds, invoking
+ * @p cb per CRC-OK packet with RSSI.  Counters are optional (NULL ok).
+ */
+void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
+                          uint32_t *addr_evts, uint32_t *crcok_evts);
 
 /* Bring-up diagnostics captured on the last transmitted channel: the radio
  * TX path is proven on-die when READY and DISABLED both read 1 (STATE
@@ -50,5 +74,9 @@ int tiku_radio_arch_rx_probe(uint8_t *out_adva, uint32_t *addr_evts,
 extern uint32_t tiku_radio_arch_dbg_ready, tiku_radio_arch_dbg_disabled;
 extern uint32_t tiku_radio_arch_dbg_state, tiku_radio_arch_dbg_spin;
 extern uint32_t tiku_radio_arch_dbg_ru_iters, tiku_radio_arch_dbg_tx_iters;
+/* HFXO gate diagnostics: XO.STAT at the last radio op's entry, and how many
+ * poll iterations the XOTUNED wait took (0-ish = XO was hot). */
+extern uint32_t tiku_radio_arch_dbg_xo_stat, tiku_radio_arch_dbg_xo_wait;
+extern uint32_t tiku_radio_arch_dbg_xo_restarts;
 
 #endif /* TIKU_NORDIC_RADIO_ARCH_H_ */

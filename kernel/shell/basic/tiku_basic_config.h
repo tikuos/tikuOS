@@ -222,12 +222,16 @@
 #endif
 /* BLE : BLEADV / BLEOFF / BLESEND / BLEBEACON + BLEUP / BLEGET$ -- a "serial
  *       over BLE" vocabulary on the driver-agnostic facade
- *       (interfaces/bluetooth/tiku_ble_serial).  GENERAL, not chip-specific:
- *       on whenever the build has a BLE radio backend, which the Makefile
- *       signals via the generic TIKU_HAS_BLE capability (set today by the
- *       EM9305 driver on apollo510b).  -D-overridable like the rest. */
+ *       (interfaces/bluetooth/tiku_ble_serial), plus BLEBEACON / BLESCAN$ on
+ *       the broadcast/observer facade (tiku_ble_adv).  GENERAL, not
+ *       chip-specific: on whenever the build has ANY BLE radio backend,
+ *       which the Makefile signals via the generic capabilities --
+ *       TIKU_HAS_BLE (connection-capable: EM9305 on apollo510b) and/or
+ *       TIKU_HAS_BLE_ADV (broadcast: nRF54L15 on-die RADIO).  Words for an
+ *       absent capability are compiled out individually inside the .inl.
+ *       -D-overridable like the rest. */
 #ifndef TIKU_BASIC_BLE_ENABLE
-#  if (TIKU_HAS_BLE + 0)
+#  if (TIKU_HAS_BLE + 0) || (TIKU_HAS_BLE_ADV + 0)
 #    define TIKU_BASIC_BLE_ENABLE    1
 #  else
 #    define TIKU_BASIC_BLE_ENABLE    0

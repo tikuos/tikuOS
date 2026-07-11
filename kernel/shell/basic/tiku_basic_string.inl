@@ -930,7 +930,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
-#if TIKU_BASIC_BLE_ENABLE
+#if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_SERIAL_PRESENT
     /* BLEGET$() -- pop any bytes a connected central has written to us (up to
      * the string buffer), "" if none.  Polls the BLE stack, so a BLEGET$() poll
      * loop keeps the link serviced.  0-arg-with-parens. */
@@ -944,6 +944,44 @@ parse_strprim(const char **p, char *out, size_t cap)
         n = tiku_ble_serial_recv((uint8_t *)out, (uint16_t)(cap - 1u));
         if (n < 0) n = 0;
         out[n] = '\0';
+        return 0;
+    }
+#endif
+#if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_ADV_PRESENT
+    /* BLESCAN$(secs) -- passive scan of the BLE advertising channels for
+     * `secs` seconds (clamped 1..20); returns "AA:BB:CC:DD:EE:FF,rssi,name;"
+     * per distinct device heard, strongest first not guaranteed -- discovery
+     * order.  Blocking and watchdog-kicked like HTTPGET$ (the cooperative-
+     * blocking rule in tiku_basic_net.inl). */
+    if (match_kw(p, "BLESCAN$")) {
+        tiku_ble_adv_report_t reps[8];
+        long secs;
+        int n, i;
+        size_t o = 0u;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        secs = parse_expr(p);
+        if (basic_error) return 1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (secs < 1) secs = 1;
+        if (secs > 20) secs = 20;
+        n = tiku_ble_adv_scan(reps, 8u, (uint16_t)(secs * 1000L));
+        for (i = 0; i < n; i++) {
+            int w = snprintf(&out[o], cap - o,
+                             "%02X:%02X:%02X:%02X:%02X:%02X,%d,%s;",
+                             reps[i].addr[5], reps[i].addr[4],
+                             reps[i].addr[3], reps[i].addr[2],
+                             reps[i].addr[1], reps[i].addr[0],
+                             (int)reps[i].rssi, reps[i].name);
+            if (w < 0 || (size_t)w >= cap - o) {
+                break;                        /* buffer full -> truncate     */
+            }
+            o += (size_t)w;
+        }
+        out[o] = '\0';
         return 0;
     }
 #endif

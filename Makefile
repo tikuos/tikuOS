@@ -1197,6 +1197,11 @@ SRCS += arch/nordic/tiku_trng_arch.c
 SRCS += arch/nordic/tiku_crypto_arch.c
 SRCS += arch/nordic/tiku_radio_arch.c
 SRCS += arch/nordic/tiku_fault_arch.c
+# On-die 2.4 GHz RADIO backs the GENERIC broadcast-BLE capability: the
+# tiku_ble_adv facade, the BASIC BLEBEACON/BLESCAN$ words and /sys/radio all
+# gate on TIKU_HAS_BLE_ADV, never on the chip (same pattern as TIKU_HAS_BLE).
+SRCS += interfaces/bluetooth/tiku_ble_adv.c
+CFLAGS += -DTIKU_HAS_BLE_ADV=1
 ifeq ($(TIKU_THREADS_ENABLE),1)
 SRCS += kernel/threads/tiku_thread.c
 SRCS += arch/nordic/tiku_thread_arch.c

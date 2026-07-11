@@ -5,18 +5,20 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_bleadv.c - nRF54L15 BLE advertising (beacon) bring-up.
+ * tiku_shell_cmd_bleadv.c - BLE beacon/scan shell command (broadcast facade).
  *
- * Opt-in (TIKU_SHELL_CMD_BLEADV=1 via EXTRA_CFLAGS), nRF54L15 only.  Distinct
- * from the Ambiq EM9305 "ble" command; this drives the on-die 2.4 GHz RADIO
- * directly (tiku_radio_arch).
+ * Opt-in (TIKU_SHELL_CMD_BLEADV=1 via EXTRA_CFLAGS); needs a broadcast-
+ * capable radio (TIKU_HAS_BLE_ADV -- the nRF54L15 on-die RADIO today).
+ * Thin veneer over interfaces/bluetooth/tiku_ble_adv.h; the same facade
+ * backs the BASIC BLEBEACON/BLESCAN$ words and the /sys/radio VFS nodes,
+ * so anything proven here holds for those too.
  *
- *   bleadv <name>   beacon ADV_NONCONN_IND for ~3 s: Flags + Complete Local
- *                   Name + a 2-byte manufacturer marker 'TK', on 37/38/39.
- *                   A host scanner (bluetoothctl) sees <name>; the TikuBench
- *                   ble-adv suite asserts exactly that.
- *   bleadv scan [n] diagnostic RX probe, n rounds (default 120)
- *   bleadv dbg      dump silicon rev + clock/radio state (errata gating)
+ *   bleadv <name> [secs]   demo beacon for ~secs (100 ms bursts, auto-stop)
+ *   bleadv on <name> [ms]  background beacon (kernel timer; system sleeps
+ *                          between bursts) until `bleadv off`
+ *   bleadv off             stop the background beacon
+ *   bleadv scan [secs]     passive scan; lists addr/rssi/type/name
+ *   bleadv dbg             silicon + clock + radio readbacks (bring-up)
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,14 +28,30 @@
 #if TIKU_SHELL_CMD_BLEADV
 
 #include <kernel/shell/tiku_shell_io.h>
-#include <kernel/cpu/tiku_common.h>
-#include <kernel/cpu/tiku_watchdog.h>
 #include <arch/nordic/tiku_timer_arch.h>   /* TIKU_CLOCK_ARCH_SECOND before clock.h */
 #include <kernel/timers/tiku_clock.h>
-#include <arch/nordic/tiku_radio_arch.h>
-#include <arch/nordic/tiku_device_select.h>  /* NRF_CLOCK_S / NRF_RADIO_S readbacks */
+#include <kernel/timers/tiku_timer.h>      /* demo auto-stop callback timer */
+#include <interfaces/bluetooth/tiku_ble_adv.h>
+#include <arch/nordic/tiku_radio_arch.h>     /* per-burst dbg counters (dbg)    */
+#include <arch/nordic/tiku_device_select.h>  /* NRF_CLOCK_S / NRF_RADIO_S (dbg) */
 #include <stdlib.h>
 #include <string.h>
+
+/* SHELL_PRINTF has no %02X, so format an address (host order: MSB first)
+ * into "AA:BB:CC:DD:EE:FF" ourselves. */
+static void bleadv_fmt_addr(char *out, const uint8_t addr[6])
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int i, o = 0;
+    for (i = 5; i >= 0; i--) {
+        out[o++] = hex[addr[i] >> 4];
+        out[o++] = hex[addr[i] & 0x0Fu];
+        if (i) {
+            out[o++] = ':';
+        }
+    }
+    out[o] = '\0';
+}
 
 /* Bring-up visibility: silicon identification words that gate the errata
  * workarounds (see tiku_crt_early.c), clock-tuning state the radio depends
@@ -59,138 +77,11 @@ static void bleadv_dbg(void)
                  (unsigned long)NRF_RADIO_S->MODE,
                  (unsigned long)NRF_RADIO_S->TXPOWER,
                  (unsigned long)NRF_RADIO_S->DATAWHITE);
-    SHELL_PRINTF("       timing=%lx phyendtxdelay=%lx tifs=%lx feconfig=%lx\n",
-                 (unsigned long)NRF_RADIO_S->TIMING,
-                 (unsigned long)NRF_RADIO_S->PHYENDTXDELAY,
-                 (unsigned long)NRF_RADIO_S->TIFS,
-                 (unsigned long)NRF_RADIO_S->FECONFIG);
-    SHELL_PRINTF("       err40[7AC]=%lx\n",
-                 *(volatile unsigned long *)0x5008A7ACul);
-    /* FICR trim census: how many factory trim pairs exist, and how many
-     * target the RADIO block (0x5008Axxx) -- an untrimmed PA would explain
-     * a full-length TX nobody hears. */
-    {
-        unsigned total = 0u, radio = 0u;
-        uint32_t i;
-        for (i = 0u; i < FICR_TRIMCNF_MaxCount; i++) {
-            uint32_t a = NRF_FICR_NS->TRIMCNF[i].ADDR;
-            if (a == 0xFFFFFFFFul || a == 0x00000000ul) {
-                break;
-            }
-            total++;
-            if ((a & 0xFFFFF000ul) == 0x5008A000ul ||
-                (a & 0xFFFFF000ul) == 0x5008B000ul) {
-                radio++;
-            }
-        }
-        SHELL_PRINTF("FICR : trims=%u radio-trims=%u\n", total, radio);
-    }
-}
-
-/* Random static BLE address: top two bits of the MSB = 11 (Core spec); the
- * rest from the FICR device ID so each board is distinct. */
-static void bleadv_random_addr(uint8_t addr[6])
-{
-    tiku_common_unique_id(addr, 6u);
-    addr[5] |= 0xC0u;
-}
-
-/* SHELL_PRINTF has no %02X, so format the address (host order: MSB first)
- * into "AA:BB:CC:DD:EE:FF" ourselves. */
-static void bleadv_fmt_addr(char *out, const uint8_t addr[6])
-{
-    static const char hex[] = "0123456789ABCDEF";
-    int i, o = 0;
-    for (i = 5; i >= 0; i--) {
-        out[o++] = hex[addr[i] >> 4];
-        out[o++] = hex[addr[i] & 0x0Fu];
-        if (i) {
-            out[o++] = ':';
-        }
-    }
-    out[o] = '\0';
-}
-
-void tiku_shell_cmd_bleadv(int argc, char **argv)
-{
-    static uint8_t pdu[40] __attribute__((aligned(4)));   /* radio EasyDMA src */
-    uint8_t addr[6], ad[31];
-    uint8_t nlen, adlen, total;
-    char addrstr[18];
-    const char *name;
-    tiku_clock_time_t t0;
-    unsigned secs = 3u;
-
-    if (argc < 2) {
-        SHELL_PRINTF("usage: bleadv <name> [seconds]  |  bleadv scan [rounds]"
-                     "  |  bleadv dbg\n");
-        return;
-    }
-    if (strcmp(argv[1], "dbg") == 0) {
-        bleadv_dbg();
-        return;
-    }
-    /* Diagnostic RX: prove the shared link config by hearing the room. */
-    if (strcmp(argv[1], "scan") == 0) {
-        uint32_t addr_evts = 0u, crcok = 0u;
-        uint32_t rounds = 120u;
-        int got;
-        if (argc >= 3) {
-            long v = strtol(argv[2], (char **)0, 10);
-            if (v > 0 && v <= 100000) { rounds = (uint32_t)v; }
-        }
-        SHELL_PRINTF("listening on 37/38/39, %u rounds (same link config "
-                     "as TX)...\n", (unsigned)rounds);
-        tiku_radio_arch_init();
-        got = tiku_radio_arch_rx_probe(addr, &addr_evts, &crcok, rounds);
-        tiku_watchdog_kick();
-        SHELL_PRINTF("  addr-match=%u crc-ok=%u\n",
-                     (unsigned)addr_evts, (unsigned)crcok);
-        if (got) {
-            bleadv_fmt_addr(addrstr, addr);
-            SHELL_PRINTF("  heard AdvA %s\n", addrstr);
-        }
-        SHELL_PRINTF(SH_GREEN "done" SH_RST "\n");
-        return;
-    }
-    name = argv[1];
-    if (argc >= 3) {
-        long v = strtol(argv[2], (char **)0, 10);
-        if (v > 0 && v <= 120) { secs = (unsigned)v; }
-    }
-    nlen = (uint8_t)strlen(name);
-    if (nlen > 20u) {
-        nlen = 20u;
-    }
-
-    adlen = 0u;
-    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;   /* Flags */
-    ad[adlen++] = (uint8_t)(1u + nlen);
-    ad[adlen++] = 0x09u;                                            /* name  */
-    memcpy(&ad[adlen], name, nlen); adlen = (uint8_t)(adlen + nlen);
-    ad[adlen++] = 0x03u; ad[adlen++] = 0xFFu; ad[adlen++] = 'T';
-    ad[adlen++] = 'K';                                             /* mfr   */
-
-    bleadv_random_addr(addr);
-    total = tiku_radio_arch_adv_build(pdu, addr, ad, adlen);
-
-    tiku_radio_arch_init();
-    bleadv_fmt_addr(addrstr, addr);
-    SHELL_PRINTF("beaconing '%s' (%u B PDU) as %s on 37/38/39 for ~%u s...\n",
-                 name, (unsigned)total, addrstr, secs);
-
-    t0 = tiku_clock_time();
-    while ((tiku_clock_time_t)(tiku_clock_time() - t0)
-           < (tiku_clock_time_t)(secs * TIKU_CLOCK_SECOND)) {
-        tiku_clock_time_t b = tiku_clock_time();
-        tiku_radio_arch_adv_send(pdu, total);
-        tiku_watchdog_kick();
-        while ((tiku_clock_time_t)(tiku_clock_time() - b)
-               < (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 50u)) {
-            /* pace to ~20 ms between advertising events */
-        }
-    }
-    SHELL_PRINTF("  radio: ready=%lu disabled=%lu state=%lu spin=%lu "
+    SHELL_PRINTF("FACADE: active=%d name=%s interval=%u bursts=%lu\n",
+                 tiku_ble_adv_active(), tiku_ble_adv_name(),
+                 (unsigned)tiku_ble_adv_interval_ms(),
+                 (unsigned long)tiku_ble_adv_bursts());
+    SHELL_PRINTF("BURST : ready=%lu disabled=%lu state=%lu spin=%lu "
                  "ru=%lu tx=%lu\n",
                  (unsigned long)tiku_radio_arch_dbg_ready,
                  (unsigned long)tiku_radio_arch_dbg_disabled,
@@ -198,7 +89,112 @@ void tiku_shell_cmd_bleadv(int argc, char **argv)
                  (unsigned long)tiku_radio_arch_dbg_spin,
                  (unsigned long)tiku_radio_arch_dbg_ru_iters,
                  (unsigned long)tiku_radio_arch_dbg_tx_iters);
-    SHELL_PRINTF(SH_GREEN "done" SH_RST "\n");
+    SHELL_PRINTF("XO    : stat=%lx tune-wait=%lu restarts=%lu\n",
+                 (unsigned long)tiku_radio_arch_dbg_xo_stat,
+                 (unsigned long)tiku_radio_arch_dbg_xo_wait,
+                 (unsigned long)tiku_radio_arch_dbg_xo_restarts);
+}
+
+static void bleadv_scan(unsigned secs)
+{
+    tiku_ble_adv_report_t reps[12];
+    char addrstr[18];
+    int n, i;
+
+    SHELL_PRINTF("scanning 37/38/39 for %u s...\n", secs);
+    n = tiku_ble_adv_scan(reps, 12u, (uint16_t)(secs * 1000u));
+    if (n < 0) {
+        SHELL_PRINTF(SH_RED "no broadcast radio\n" SH_RST);
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        bleadv_fmt_addr(addrstr, reps[i].addr);
+        SHELL_PRINTF("  %s  rssi=%d  type=%u  %s\n", addrstr,
+                     (int)reps[i].rssi, (unsigned)reps[i].adv_type,
+                     reps[i].name);
+    }
+    SHELL_PRINTF("%d device%s\n", n, (n == 1) ? "" : "s");
+}
+
+/* Auto-stop for the `bleadv <name> [secs]` demo form: a one-shot callback
+ * timer; both it and the beacon's burst timer dispatch cooperatively while
+ * the shell idles at the prompt. */
+static struct tiku_timer bleadv_stop_timer;
+
+static void bleadv_autostop_cb(void *ptr)
+{
+    (void)ptr;
+    SHELL_PRINTF("\nbleadv: beacon done (%lu bursts total)\n",
+                 (unsigned long)tiku_ble_adv_bursts());
+    tiku_ble_adv_stop();
+}
+
+void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
+{
+    const char *name;
+    unsigned secs = 3u;
+
+    if (argc < 2) {
+        SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
+                     " | scan [secs] | dbg\n");
+        return;
+    }
+    if (strcmp(argv[1], "dbg") == 0) {
+        bleadv_dbg();
+        return;
+    }
+    if (strcmp(argv[1], "off") == 0) {
+        tiku_ble_adv_stop();
+        SHELL_PRINTF("beacon off\n");
+        return;
+    }
+    if (strcmp(argv[1], "scan") == 0) {
+        unsigned s = 4u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 30) { s = (unsigned)v; }
+        }
+        bleadv_scan(s);
+        return;
+    }
+    if (strcmp(argv[1], "on") == 0) {
+        unsigned long ms = 0ul;
+        if (argc < 3) {
+            SHELL_PRINTF("usage: bleadv on <name> [interval_ms]\n");
+            return;
+        }
+        if (argc >= 4) {
+            ms = strtoul(argv[3], (char **)0, 10);
+        }
+        if (tiku_ble_adv_beacon(argv[2], (uint16_t)ms) != 0) {
+            SHELL_PRINTF(SH_RED "beacon start failed\n" SH_RST);
+            return;
+        }
+        SHELL_PRINTF("beaconing '%s' every %u ms in the background"
+                     " (bleadv off to stop)\n",
+                     tiku_ble_adv_name(),
+                     (unsigned)tiku_ble_adv_interval_ms());
+        return;
+    }
+
+    /* Demo form: fast (100 ms) background beacon that stops itself after
+     * ~secs.  The command returns immediately -- burst and auto-stop are
+     * timer callbacks, dispatched while the shell idles at the prompt (a
+     * blocking wait here would starve them: cooperative scheduling). */
+    name = argv[1];
+    if (argc >= 3) {
+        long v = strtol(argv[2], (char **)0, 10);
+        if (v > 0 && v <= 120) { secs = (unsigned)v; }
+    }
+    if (tiku_ble_adv_beacon(name, 100u) != 0) {
+        SHELL_PRINTF(SH_RED "beacon start failed\n" SH_RST);
+        return;
+    }
+    tiku_timer_set_callback(&bleadv_stop_timer,
+                            (tiku_clock_time_t)secs * TIKU_CLOCK_SECOND,
+                            bleadv_autostop_cb, (void *)0);
+    SHELL_PRINTF("beaconing '%s' on 37/38/39 for ~%u s (background)...\n",
+                 tiku_ble_adv_name(), secs);
 }
 
 #endif /* TIKU_SHELL_CMD_BLEADV */

@@ -301,9 +301,11 @@ exec_stmt(const char **p)
 #endif
 #endif
 #if TIKU_BASIC_BLE_ENABLE
+#if TIKU_BLE_SERIAL_PRESENT
     if (match_kw(p, "BLEADV"))    { exec_bleadv(p);    return; }
-    if (match_kw(p, "BLEOFF"))    { exec_bleoff(p);    return; }
     if (match_kw(p, "BLESEND"))   { exec_blesend(p);   return; }
+#endif
+    if (match_kw(p, "BLEOFF"))    { exec_bleoff(p);    return; }
     if (match_kw(p, "BLEBEACON")) { exec_blebeacon(p); return; }
 #endif
 #if TIKU_BASIC_SUBS_ENABLE

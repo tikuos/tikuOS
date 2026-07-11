@@ -109,6 +109,7 @@
 #endif
 #if TIKU_BASIC_BLE_ENABLE
 #include <interfaces/bluetooth/tiku_ble_serial.h>  /* BLEADV/BLESEND/BLEUP/BLEGET$ */
+#include <interfaces/bluetooth/tiku_ble_adv.h>     /* BLEBEACON/BLESCAN$ (broadcast) */
 #endif
 
 /*---------------------------------------------------------------------------*/

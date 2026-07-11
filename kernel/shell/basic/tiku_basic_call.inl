@@ -243,7 +243,7 @@ expr_call(const char **p, long *out_v)
         *out_v = (long)basic_erl;
         return 1;
     }
-#if TIKU_BASIC_BLE_ENABLE
+#if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_SERIAL_PRESENT
     /* BLEUP() -- 1 when a central is connected AND subscribed (ready to send),
      * else 0.  Empty-paren form.  Polls the BLE stack as a side effect, so a
      * `IF BLEUP()=0 THEN ...` wait loop keeps the link serviced. */
