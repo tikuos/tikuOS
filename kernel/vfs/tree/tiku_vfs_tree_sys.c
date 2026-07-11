@@ -873,16 +873,26 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
 /*---------------------------------------------------------------------------*/
 /*
  * Control surface over the tiku_ble_adv facade: `beacon` is the writable
- * knob ("NAME[,interval_ms]" starts, "off"/"0" stops), which also makes
- * beaconing available to the rules engine and `watch`; the rest report
- * state so a bench can assert "the radio really transmitted".
+ * knob ("NAME[,interval_ms[,data]]" starts, "off"/"0" stops; data is a
+ * telemetry payload carried after the 'TK' manufacturer id), which also
+ * makes beaconing available to the rules engine and `watch`; the rest
+ * report state so a bench can assert "the radio really transmitted".
  */
 
 static int
 radio_beacon_read(char *buf, size_t max)
 {
+    const uint8_t *d;
+    uint8_t dlen;
+
     if (!tiku_ble_adv_active()) {
         return snprintf(buf, max, "off\n");
+    }
+    dlen = tiku_ble_adv_data(&d);
+    if (dlen != 0u) {
+        return snprintf(buf, max, "%s,%u,%.*s\n", tiku_ble_adv_name(),
+                        (unsigned)tiku_ble_adv_interval_ms(), (int)dlen,
+                        (const char *)d);
     }
     return snprintf(buf, max, "%s,%u\n", tiku_ble_adv_name(),
                     (unsigned)tiku_ble_adv_interval_ms());
@@ -891,8 +901,10 @@ radio_beacon_read(char *buf, size_t max)
 static int
 radio_beacon_write(const char *buf, size_t len)
 {
-    char tmp[40];
+    char tmp[64];
     char *comma;
+    const char *data = NULL;
+    uint8_t dlen = 0u;
     unsigned long ms = 0ul;
 
     if (len == 0u || len >= sizeof(tmp)) {
@@ -913,10 +925,19 @@ radio_beacon_write(const char *buf, size_t len)
     }
     comma = strchr(tmp, ',');
     if (comma != NULL) {
+        char *comma2;
         *comma = '\0';
         ms = strtoul(comma + 1, NULL, 10);
+        /* Third field = telemetry payload (raw bytes after the 'TK' id);
+         * everything past the second comma, commas included. */
+        comma2 = strchr(comma + 1, ',');
+        if (comma2 != NULL) {
+            data = comma2 + 1;
+            dlen = (uint8_t)strlen(data);
+        }
     }
-    return (tiku_ble_adv_beacon(tmp, (uint16_t)ms) == 0)
+    return (tiku_ble_adv_beacon_data(tmp, (uint16_t)ms,
+                                     (const uint8_t *)data, dlen) == 0)
                ? 0 : TIKU_VFS_EINVAL;
 }
 

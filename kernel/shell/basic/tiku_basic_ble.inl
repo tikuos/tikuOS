@@ -19,8 +19,10 @@
  *   BLEGET$           function (string.inl): pop bytes the central sent, "" if none
  *
  * TIKU_HAS_BLE_ADV (broadcast: tiku_ble_adv, nRF54L15 on-die radio today):
- *   BLEBEACON name$[,ms]  BACKGROUND non-connectable beacon (kernel timer;
- *                         survives RUN ending; board beacons while sleeping)
+ *   BLEBEACON name$[,ms[,data$]]  BACKGROUND non-connectable beacon (kernel
+ *                         timer; survives RUN ending; board beacons while
+ *                         sleeping).  data$ rides in the manufacturer data
+ *                         ('TK' company id) -- the broadcast-sensor path
  *   BLESCAN$(secs)    function (string.inl): passive scan -> "addr,rssi,name;"
  *
  * Both:
@@ -111,19 +113,29 @@ exec_bleoff(const char **p)
 #endif
 }
 
-/* BLEBEACON ["name"][,interval_ms] -- start a non-connectable beacon.
+/* BLEBEACON ["name"][,interval_ms[,data$]] -- start a non-connectable
+ * beacon.
  *
  * On a broadcast backend (tiku_ble_adv) the beacon is a BACKGROUND kernel
  * timer: RUN can end and the board keeps advertising while it sleeps
  * (tickless), until BLEOFF.  The optional interval (default 1000 ms,
  * clamped to the BLE legal range) is the microwatt knob: energy scales
- * linearly with burst rate. */
+ * linearly with burst rate.
+ *
+ * The optional data$ is a telemetry payload carried in the manufacturer
+ * data after the 'TK' company id -- the broadcast-sensor pattern:
+ *   10 BLEBEACON "TIKU-T", 1000, "T=" + STR$(A)
+ * makes the reading visible to any observer with no connection.  Calling
+ * BLEBEACON again swaps the payload in place (also on the offloaded
+ * coprocessor path). */
 static void
 exec_blebeacon(const char **p)
 {
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
     long        ms = 0;
+    char        data[TIKU_BLE_ADV_DATA_CAP + 1];
+    uint8_t     dlen = 0u;
     skip_ws(p);
     if (**p == '\0' || **p == ':') {
         name[0] = '\0';
@@ -139,14 +151,25 @@ exec_blebeacon(const char **p)
         if (basic_error) return;
         if (ms < 0) ms = 0;
         if (ms > 65535) ms = 65535;
+        skip_ws(p);
+        if (**p == ',') {
+            (*p)++;
+            if (parse_strexpr(p, data, sizeof(data)) != 0) {
+                return;
+            }
+            dlen = (uint8_t)strlen(data);
+        }
     }
     nm = (name[0] != '\0') ? name : "tikuOS";
 #if TIKU_BLE_ADV_PRESENT
-    if (tiku_ble_adv_beacon(nm, (uint16_t)ms) != 0) {
+    if (tiku_ble_adv_beacon_data(nm, (uint16_t)ms,
+                                 dlen ? (const uint8_t *)data
+                                      : (const uint8_t *)0, dlen) != 0) {
         basic_error = 1;
         SHELL_PRINTF(SH_RED "? BLE beacon failed (radio present?)\n" SH_RST);
     }
 #else
+    (void)data; (void)dlen;                 /* no payload slot over serial  */
     (void)ms;                               /* serial backends pick their own */
     if (tiku_ble_serial_beacon(nm) != 0) {
         basic_error = 1;

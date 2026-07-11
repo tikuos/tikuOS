@@ -47,6 +47,8 @@ static uint8_t  adv_pdu[48] __attribute__((aligned(4))); /* radio DMA source */
 static uint8_t  adv_pdu_len;
 static struct tiku_timer adv_timer;
 static char     adv_name[TIKU_BLE_ADV_NAME_CAP + 1];
+static uint8_t  adv_data[TIKU_BLE_ADV_DATA_CAP];
+static uint8_t  adv_data_len;       /* telemetry payload, for readback     */
 static uint16_t adv_interval_ms;
 static uint8_t  adv_on;
 static uint32_t adv_burst_count;
@@ -92,6 +94,13 @@ int tiku_ble_adv_available(void)
 
 int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
 {
+    return tiku_ble_adv_beacon_data(name, interval_ms, (const uint8_t *)0,
+                                    0u);
+}
+
+int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
+                             const uint8_t *data, uint8_t data_len)
+{
     uint8_t ad[31], addr[6];
     uint8_t adlen = 0u, nlen;
     tiku_clock_time_t ticks;
@@ -102,6 +111,17 @@ int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
     nlen = (uint8_t)strlen(name);
     if (nlen > TIKU_BLE_ADV_NAME_CAP) {
         nlen = TIKU_BLE_ADV_NAME_CAP;
+    }
+    if (data == (const uint8_t *)0) {
+        data_len = 0u;
+    }
+    if (data_len > TIKU_BLE_ADV_DATA_CAP) {
+        data_len = TIKU_BLE_ADV_DATA_CAP;
+    }
+    /* The 31-byte AD budget: Flags(3) + Name(2+nlen) + Mfr(4+data_len).
+     * Telemetry has priority -- the name yields when both cannot fit. */
+    if ((uint8_t)(9u + nlen + data_len) > 31u) {
+        nlen = (uint8_t)(31u - 9u - data_len);
     }
     if (interval_ms == 0u) {
         interval_ms = BLE_ADV_INTERVAL_DFLT_MS;
@@ -114,13 +134,19 @@ int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
     }
 
     /* AD: Flags (LE general discoverable, no BR/EDR) + Complete Local Name
-     * + manufacturer marker 'TK' (company id 0x4B54 little-endian). */
+     * + manufacturer data: company id 0x4B54 ('TK' little-endian) followed
+     * by the telemetry payload -- the `ADC -> beacon -> any phone` path. */
     ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
     ad[adlen++] = (uint8_t)(1u + nlen);
     ad[adlen++] = 0x09u;
     memcpy(&ad[adlen], name, nlen); adlen = (uint8_t)(adlen + nlen);
-    ad[adlen++] = 0x03u; ad[adlen++] = 0xFFu; ad[adlen++] = 'T';
+    ad[adlen++] = (uint8_t)(3u + data_len);
+    ad[adlen++] = 0xFFu; ad[adlen++] = 'T';
     ad[adlen++] = 'K';
+    if (data_len) {
+        memcpy(&ad[adlen], data, data_len);
+        adlen = (uint8_t)(adlen + data_len);
+    }
 
     adv_radio_init_once();
     adv_random_addr(addr);
@@ -128,6 +154,10 @@ int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
 
     memcpy(adv_name, name, nlen);
     adv_name[nlen] = '\0';
+    if (data_len) {
+        memcpy(adv_data, data, data_len);
+    }
+    adv_data_len = data_len;
     adv_interval_ms = interval_ms;
 
     ticks = (tiku_clock_time_t)(((uint32_t)interval_ms *
@@ -150,9 +180,22 @@ int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms)
      * FLPR and ships the PDU. */
     if (tiku_flpr_arch_alive() &&
         tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len, interval_ms) == 0) {
+        /* Retune from an M33-timer beacon: the timer MUST die with the
+         * hand-off -- its next burst would touch RADIO/UARTE21 through
+         * the secure alias after the offload flipped them NonSecure
+         * (precise bus fault, BFAR=UARTE21_S; measured). */
+        tiku_timer_stop(&adv_timer);
         adv_offloaded = 1u;
         adv_on = 1u;
         return 0;
+    }
+    /* Retune fell back to the M33 path while offloaded (coprocessor died
+     * or refused): reclaim the peripherals for the secure alias first --
+     * beacon_stop flips RADIO+UARTE21 back even if the FLPR never
+     * answers. */
+    if (adv_offloaded) {
+        tiku_flpr_arch_beacon_stop();
+        adv_offloaded = 0u;
     }
 #endif
 
@@ -178,6 +221,7 @@ void tiku_ble_adv_stop(void)
         tiku_radio_arch_constlat_hold(0);
         adv_on = 0u;
         adv_name[0] = '\0';
+        adv_data_len = 0u;
         adv_interval_ms = 0u;
     }
 }
@@ -195,6 +239,14 @@ const char *tiku_ble_adv_name(void)
 uint16_t tiku_ble_adv_interval_ms(void)
 {
     return adv_interval_ms;
+}
+
+uint8_t tiku_ble_adv_data(const uint8_t **out)
+{
+    if (out != (const uint8_t **)0) {
+        *out = adv_data;
+    }
+    return adv_data_len;
 }
 
 uint32_t tiku_ble_adv_bursts(void)

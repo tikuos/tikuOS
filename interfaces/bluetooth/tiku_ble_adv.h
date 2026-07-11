@@ -57,6 +57,9 @@ extern "C" {
 /** Longest advertised name the 31-byte AD payload can carry here. */
 #define TIKU_BLE_ADV_NAME_CAP  21
 
+/** Longest telemetry payload (manufacturer data after the 'TK' id). */
+#define TIKU_BLE_ADV_DATA_CAP  18
+
 /** One observed advertiser (see tiku_ble_adv_scan()). */
 typedef struct {
     uint8_t addr[6];                    /**< AdvA, little-endian (on-air)   */
@@ -82,6 +85,22 @@ int tiku_ble_adv_available(void);
  */
 int tiku_ble_adv_beacon(const char *name, uint16_t interval_ms);
 
+/**
+ * @brief Start (or retune) the beacon with a telemetry payload.
+ *
+ * Like tiku_ble_adv_beacon(), with @p data appended to the manufacturer
+ * data after the 'TK' company id -- the beacon becomes a broadcast
+ * sensor: any observer reads the payload without a connection.  Calling
+ * again while active swaps the payload (the offloaded coprocessor path
+ * receives the fresh PDU too).  Payload has AD-budget priority; the name
+ * is truncated when both cannot fit.
+ *
+ * @param data      Payload bytes (NULL -> none).
+ * @param data_len  Payload length (capped at TIKU_BLE_ADV_DATA_CAP).
+ */
+int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
+                             const uint8_t *data, uint8_t data_len);
+
 /** @brief Stop the background beacon. Idempotent. */
 void tiku_ble_adv_stop(void);
 
@@ -93,6 +112,13 @@ const char *tiku_ble_adv_name(void);
 
 /** @brief Current beacon interval in ms (0 when off). */
 uint16_t tiku_ble_adv_interval_ms(void);
+
+/**
+ * @brief Current telemetry payload (0 when none/off).
+ * @param out  Receives a pointer to the payload bytes (may be NULL).
+ * @return Payload length.
+ */
+uint8_t tiku_ble_adv_data(const uint8_t **out);
 
 /** @brief Total advertising bursts transmitted since boot. */
 uint32_t tiku_ble_adv_bursts(void);
