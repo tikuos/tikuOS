@@ -2221,11 +2221,14 @@ endif
 #
 # nrfutil resolves its `device` subcommand from $NRFUTIL_HOME (default
 # $HOME/.nrfutil) -- under sudo HOME=/root has no plugins and the flash dies
-# with "Subcommand nrfutil-device not found".  When SUDO_USER is set, point
-# NRFUTIL_HOME back at the invoking user's plugin dir (suites that need root
-# for a TUN gateway, e.g. https/web-sweep, flash through this path).
+# with "Subcommand nrfutil-device not found".  When make itself runs AS ROOT
+# with SUDO_USER set, point NRFUTIL_HOME back at the invoking user's plugin
+# dir.  The euid gate matters: TikuBench's root runs demote make to the user
+# via `sudo -u <user>`, and that inner sudo RE-SETS SUDO_USER=root -- an
+# unconditional prefix would then aim at /root/.nrfutil, unreadable by the
+# user (EACCES).  Demoted make has the right HOME already; leave it alone.
 NRFUTIL ?= $(shell command -v nrfutil 2>/dev/null || echo $(CURDIR)/temp/nrfutil)
-NRFUTIL_ENV = $(if $(SUDO_USER),NRFUTIL_HOME=$(shell getent passwd $(SUDO_USER) | cut -d: -f6)/.nrfutil,)
+NRFUTIL_ENV = $(if $(and $(SUDO_USER),$(filter 0,$(shell id -u))),NRFUTIL_HOME=$(shell getent passwd $(SUDO_USER) | cut -d: -f6)/.nrfutil,)
 NRF_SN  ?=
 NRF_SN_ARG = $(if $(strip $(NRF_SN)),--serial-number $(strip $(NRF_SN)),)
 
