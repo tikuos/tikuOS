@@ -72,11 +72,39 @@
 #define FPCCR_ASPEN         (1UL << 31)
 #define FPCCR_LSPEN         (1UL << 30)
 
+/*---------------------------------------------------------------------------*/
+/* CYCLE SOURCE (default: DWT CYCCNT)                                        */
+/*---------------------------------------------------------------------------*/
+/*
+ * Per-thread accounting needs a free-running CPU-speed counter.  DWT
+ * CYCCNT is the architectural default -- but on parts where the DWT
+ * freezes without a debugger attached (nRF54L15), the shim #defines
+ * TIKU_THREAD_ARCH_CUSTOM_CYCLES and provides, BEFORE including this
+ * file, its own thread_cycles_init() (static) and the public
+ * tiku_thread_arch_cycles() backed by a hardware timer.
+ */
+#ifndef TIKU_THREAD_ARCH_CUSTOM_CYCLES
+
 #define SCB_DEMCR   (*(volatile uint32_t *)0xE000EDFCUL)
 #define DEMCR_TRCENA        (1UL << 24)
 #define DWT_CTRL    (*(volatile uint32_t *)0xE0001000UL)
 #define DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004UL)
 #define DWT_CTRL_CYCCNTENA  (1UL << 0)
+
+/** @brief Start the DWT cycle counter (default cycle source). */
+static void thread_cycles_init(void)
+{
+    SCB_DEMCR |= DEMCR_TRCENA;
+    DWT_CTRL  |= DWT_CTRL_CYCCNTENA;
+}
+
+/** @brief Free-running CPU cycle counter (per-thread accounting). */
+uint32_t tiku_thread_arch_cycles(void)
+{
+    return DWT_CYCCNT;
+}
+
+#endif /* !TIKU_THREAD_ARCH_CUSTOM_CYCLES */
 
 /*---------------------------------------------------------------------------*/
 /* ISR STACK                                                                 */
@@ -139,9 +167,8 @@ void tiku_thread_arch_boot(void)
     /* PendSV at the lowest priority: switches only in thread mode. */
     SHPR3_PENDSV_PRI = 0xFFu;
 
-    /* DWT cycle counter for per-thread accounting. */
-    SCB_DEMCR |= DEMCR_TRCENA;
-    DWT_CTRL  |= DWT_CTRL_CYCCNTENA;
+    /* Cycle counter for per-thread accounting (DWT, or the shim's own). */
+    thread_cycles_init();
 
     thread_migrate_to_psp((uint32_t)&s_isr_stack[512]);
 }
@@ -152,12 +179,6 @@ void tiku_thread_arch_pend(void)
     SCB_ICSR = ICSR_PENDSVSET;
     __asm__ volatile ("dsb" ::: "memory");
     __asm__ volatile ("isb");
-}
-
-/** @brief Free-running CPU cycle counter (per-thread accounting). */
-uint32_t tiku_thread_arch_cycles(void)
-{
-    return DWT_CYCCNT;
 }
 
 /**
