@@ -75,6 +75,33 @@ int tiku_crypto_arch_aes_gcm_kit(int decrypt,
                                  const uint8_t *in, size_t in_sz,
                                  uint8_t *out, uint8_t tag[16]);
 
+#if defined(TIKU_CRACEN_PK_ENABLE)
+/** @brief ECDSA-P256 verify on the BA414EP PK engine. 0=valid 1=invalid <0=err. */
+int tiku_crypto_arch_p256_ecdsa_verify(const uint8_t qx[32], const uint8_t qy[32],
+                                       const uint8_t *h, size_t hlen,
+                                       const uint8_t r[32], const uint8_t s[32]);
+
+/** @brief ECDSA-P384 verify on the BA414EP PK engine. 0=valid 1=invalid <0=err. */
+int tiku_crypto_arch_p384_ecdsa_verify(const uint8_t qx[48], const uint8_t qy[48],
+                                       const uint8_t *h, size_t hlen,
+                                       const uint8_t r[48], const uint8_t s[48]);
+
+/** @brief PK path counters (ops served, engine errors). */
+void tiku_crypto_arch_pk_counters(uint16_t *ops, uint16_t *errs);
+
+void tiku_crypto_arch_pk_dbg(uint32_t *status, uint32_t *cmd, uint32_t *spin,
+                            uint32_t *slotsz);
+
+/** @brief Upload a caller-provided BA414EP microcode image (TikuOS ships none). */
+void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words);
+
+/** @brief First word of the PK microcode RAM (0 => not loaded). */
+uint32_t tiku_crypto_arch_pk_ucode0(void);
+
+/** @brief Raw PK HWCONFIG register (bring-up: max operand size in bits 0..11). */
+uint32_t tiku_crypto_arch_pk_hwconfig(void);
+#endif /* TIKU_CRACEN_PK_ENABLE */
+
 /*---------------------------------------------------------------------------*/
 /* Bring-up probes (cryptoprobe shell command; not part of the kit contract) */
 /*---------------------------------------------------------------------------*/

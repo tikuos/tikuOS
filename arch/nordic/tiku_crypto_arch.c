@@ -480,6 +480,288 @@ int tiku_crypto_arch_aes_gcm_kit(int decrypt,
 }
 
 /*---------------------------------------------------------------------------*/
+/* Public-key engine (BA414EP) — ECDSA verify on P-256 / P-384               */
+/*---------------------------------------------------------------------------*/
+/*
+ * PROVEN on the DK (481x: P-256 verify 1.2 ms hardware vs 582 ms software;
+ * P-256 + P-384 both accept valid / reject tampered signatures) -- but the
+ * BA414EP is a MICROCODED core, and its microcode (CRACENCORE+0xC000) is a
+ * Nordic-proprietary blob (LicenseRef-Nordic-5-Clause).  TikuOS ships NO
+ * microcode, so this whole capability is a COMPILE-TIME OPT-IN, off by
+ * default: a build that chooses to provide the microcode (via
+ * tiku_crypto_arch_pk_load_microcode) enables it with TIKU_CRACEN_PK_ENABLE.
+ * It also perturbs shared CRACEN masking state, so keeping it out of the
+ * default build leaves the (blob-free, clean-room) SHA/AES-GCM engines and
+ * the whole TLS path untouched.
+ *
+ * The register/slot/command model comes from the BSD-licensed nrfx HAL and
+ * the Nordic sxsymcrypt/silexpk register headers; this is our own
+ * from-scratch implementation.  Operands load LITTLE-endian, LSB at the slot
+ * base (determined empirically on-die -- the big-endian-flag path the vendor
+ * documents gave OUT_OF_RANGE here); slots 8..12 = Qx,Qy,r,s,h; the status
+ * result field is 0 = valid, bit 9 = invalid signature.
+ */
+#if defined(TIKU_CRACEN_PK_ENABLE)
+
+#define PK_REG(off)   (*(volatile uint32_t *)((uint8_t *)NRF_CRACENCORE_S \
+                        + 0x2000u + (off)))
+#define PK_RAM        ((volatile uint8_t *)((uint8_t *)NRF_CRACENCORE_S + 0x8000u))
+
+#define PK_REG_CONFIG   0x00u   /* operand pointer slots (unused for verify) */
+#define PK_REG_COMMAND  0x04u
+#define PK_REG_CONTROL  0x08u
+#define PK_REG_STATUS   0x0Cu
+#define PK_REG_HWCONFIG 0x18u
+#define PK_CONTROL_START 0x1u
+#define PK_STATUS_BUSY   0x00010000u   /* bit 16 */
+#define PK_STATUS_CODE   0x0001FFF0u   /* result/error field (convert mask)  */
+
+#define PK_CMD_ECDSA_VER 0x31u
+#define PK_FLAG_BIGENDIAN (1u << 28)
+#define PK_FLAG_SELCUR_P256 0x00100000u
+#define PK_FLAG_SELCUR_P384 0x00200000u
+
+/* CRACEN.ENABLE gate for the public-key / IKG domain. */
+#define CRACEN_EN_PKEIKG  (CRACEN_ENABLE_PKEIKG_Msk)
+
+/** Crypto-RAM slot size: 512 B unless the die is fused for >4096-bit ops. */
+static uint32_t pk_slot_sz(void)
+{
+    static uint32_t sz;
+    if (sz == 0u) {
+        uint32_t maxop;
+        NRF_CRACEN_S->ENABLE |= CRACEN_EN_PKEIKG;
+        maxop = PK_REG(PK_REG_HWCONFIG) & 0xFFFu;
+        NRF_CRACEN_S->ENABLE &= ~CRACEN_EN_PKEIKG;
+        sz = (maxop > 0x200u) ? 0x400u : 0x200u;
+    }
+    return sz;
+}
+
+/** Write @p len bytes (word-granular, verbatim) into a crypto-RAM slot. */
+static void pk_wr_slot(uint32_t slot, uint32_t slot_sz, uint32_t op_size,
+                       const uint8_t *src)
+{
+    /* BENCH: reverse to little-endian words (operand LSB at low address). */
+    volatile uint8_t *dst = PK_RAM + slot * slot_sz;
+    uint32_t i;
+    for (i = 0; i < op_size; i += 4u) {
+        const uint8_t *b = src + (op_size - 4u - i);
+        uint32_t w = (uint32_t)b[3] | ((uint32_t)b[2] << 8) |
+                     ((uint32_t)b[1] << 16) | ((uint32_t)b[0] << 24);
+        *(volatile uint32_t *)(dst + i) = w;
+    }
+}
+
+static uint16_t s_pk_ops, s_pk_errs;
+static uint32_t s_pk_dbg_status, s_pk_dbg_cmd, s_pk_dbg_spin;
+/* Latched once the engine is found to hang on START -- the BA414EP is a
+ * microcoded core and its microcode RAM (CRACENCORE+0xC000) is NOT loaded
+ * on a bare TikuOS boot (the microcode blob is Nordic-proprietary,
+ * LicenseRef-Nordic-5-Clause, and deliberately NOT embedded here -- see the
+ * C3 note in the phase-6 plan).  With no microcode, every PK command sets
+ * BUSY forever; latch that after the first timeout so callers fall straight
+ * back to software instead of eating the timeout on every chain verify. */
+static int s_pk_unavailable;
+
+/**
+ * @brief ECDSA signature verify on a predefined NIST curve.
+ *
+ * @param op_size    curve byte length (32 = P-256, 48 = P-384)
+ * @param selcur     PK_FLAG_SELCUR_P256 / _P384
+ * @param qx,qy      public point (op_size bytes each, big-endian)
+ * @param r,s        signature (op_size bytes each, big-endian)
+ * @param h          message hash (op_size bytes; leftmost bits used)
+ * @return 0 = signature valid; 1 = invalid; -1 = engine/param error
+ */
+#define PK_CMD_CLEAR_MEMORY 0x0Fu
+
+/* Bring the PK engine to a runnable state once per boot: power all three
+ * CRACEN modules (the vendor enables CRYPTOMASTER|RNG|PKEIKG together), apply
+ * the CRACEN-Lite TRNG test-threshold workaround (these reset to bad defaults
+ * on every RNG power-down -- and our TRNG driver powers RNG down after each
+ * read -- wedging the IKG that shares the PKE domain), then run one
+ * CLEAR_MEMORY command as the microcode's boot op. */
+static int pk_engine_prepare(void)
+{
+    uint32_t spin;
+
+    NRF_CRACEN_S->ENABLE |= (CRACEN_ENABLE_CRYPTOMASTER_Msk |
+                             CRACEN_ENABLE_RNG_Msk |
+                             CRACEN_ENABLE_PKEIKG_Msk);
+    NRF_CRACENCORE_S->RNGCONTROL.REPEATTHRESHOLD = 21u;
+    NRF_CRACENCORE_S->RNGCONTROL.PROPTHRESHOLD   = 311u;
+
+    PK_REG(PK_REG_COMMAND) = PK_CMD_CLEAR_MEMORY | (63u << 8);
+    PK_REG(PK_REG_CONTROL) = PK_CONTROL_START;
+    for (spin = 0; spin < 500000u; spin++) {
+        if ((PK_REG(PK_REG_STATUS) & PK_STATUS_BUSY) == 0u) {
+            return 0;
+        }
+    }
+    return -1;                            /* still no microcode: give up */
+}
+
+static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
+                           const uint8_t *qx, const uint8_t *qy,
+                           const uint8_t *r, const uint8_t *s,
+                           const uint8_t *h)
+{
+    uint32_t slot_sz = pk_slot_sz();
+    uint32_t cmd, spin, code;
+    uint32_t en0 = NRF_CRACEN_S->ENABLE;   /* restore on every exit */
+
+    if (s_pk_unavailable) {
+        return -1;                       /* no microcode: straight to sw */
+    }
+    if (cm_ensure_seed() != 0) {         /* shared masker seed (idempotent) */
+        return -1;
+    }
+    if (pk_engine_prepare() != 0) {
+        s_pk_unavailable = 1;
+        NRF_CRACEN_S->ENABLE = en0;
+        s_mask_loaded = 0u;
+        NRF_CRACEN_S->SEEDVALID = 0u;
+        return -1;
+    }
+
+    pk_wr_slot(8u,  slot_sz, op_size, qx);
+    pk_wr_slot(9u,  slot_sz, op_size, qy);
+    pk_wr_slot(10u, slot_sz, op_size, r);
+    pk_wr_slot(11u, slot_sz, op_size, s);
+    pk_wr_slot(12u, slot_sz, op_size, h);
+
+    cmd = PK_CMD_ECDSA_VER | /*no BE*/
+          ((op_size - 1u) << 8) | selcur;
+    __asm__ volatile ("dmb" ::: "memory");
+    PK_REG(PK_REG_COMMAND) = cmd;
+    PK_REG(PK_REG_CONTROL) = PK_CONTROL_START;
+
+    /* Fail-fast: a real (microcoded) verify finishes in ~1-2 ms; ~12 ms of
+     * spin is generous.  A timeout here means no microcode -> latch off. */
+    for (spin = 0; spin < 500000u; spin++) {
+        if ((PK_REG(PK_REG_STATUS) & PK_STATUS_BUSY) == 0u) {
+            break;
+        }
+    }
+    if ((PK_REG(PK_REG_STATUS) & PK_STATUS_BUSY) != 0u) {
+        s_pk_unavailable = 1;
+    }
+    s_pk_dbg_cmd    = cmd;
+    s_pk_dbg_spin   = spin;
+    s_pk_dbg_status = PK_REG(PK_REG_STATUS);
+    code = PK_REG(PK_REG_STATUS) & PK_STATUS_CODE;
+
+    NRF_CRACEN_S->ENABLE = en0;          /* restore CryptoMaster/RNG gating  */
+    s_mask_loaded = 0u;                  /* PK perturbed shared masking:     */
+    NRF_CRACEN_S->SEEDVALID = 0u;        /* re-seed + re-mask on next CM use  */
+
+    if (code == 0u) {
+        if (s_pk_ops != 0xFFFFu) { s_pk_ops++; }
+        return 0;                        /* valid */
+    }
+    if (code == (1u << 9)) {
+        if (s_pk_ops != 0xFFFFu) { s_pk_ops++; }
+        return 1;                        /* cryptographically invalid */
+    }
+    if (s_pk_errs != 0xFFFFu) { s_pk_errs++; }
+    return -1;                           /* engine/param error (e.g. busy)   */
+}
+
+int tiku_crypto_arch_p256_ecdsa_verify(const uint8_t qx[32], const uint8_t qy[32],
+                                       const uint8_t *h, size_t hlen,
+                                       const uint8_t r[32], const uint8_t s[32])
+{
+    uint8_t hb[32];
+    if (hlen >= 32u) {
+        memcpy(hb, h, 32u);
+    } else {
+        memset(hb, 0, 32u);
+        memcpy(hb + (32u - hlen), h, hlen);
+    }
+    return pk_ecdsa_verify(32u, PK_FLAG_SELCUR_P256, qx, qy, r, s, hb);
+}
+
+int tiku_crypto_arch_p384_ecdsa_verify(const uint8_t qx[48], const uint8_t qy[48],
+                                       const uint8_t *h, size_t hlen,
+                                       const uint8_t r[48], const uint8_t s[48])
+{
+    uint8_t hb[48];
+    if (hlen >= 48u) {
+        memcpy(hb, h, 48u);
+    } else {
+        memset(hb, 0, 48u);
+        memcpy(hb + (48u - hlen), h, hlen);
+    }
+    return pk_ecdsa_verify(48u, PK_FLAG_SELCUR_P384, qx, qy, r, s, hb);
+}
+
+void tiku_crypto_arch_pk_counters(uint16_t *ops, uint16_t *errs)
+{
+    if (ops)  { *ops  = s_pk_ops;  }
+    if (errs) { *errs = s_pk_errs; }
+}
+
+void tiku_crypto_arch_pk_dbg(uint32_t *status, uint32_t *cmd, uint32_t *spin,
+                            uint32_t *slotsz)
+{
+    if (status) { *status = s_pk_dbg_status; }
+    if (cmd)    { *cmd    = s_pk_dbg_cmd; }
+    if (spin)   { *spin   = s_pk_dbg_spin; }
+    if (slotsz) { *slotsz = pk_slot_sz(); }
+}
+
+uint32_t tiku_crypto_arch_pk_hwconfig(void)
+{
+    uint32_t v;
+    NRF_CRACEN_S->ENABLE |= CRACEN_EN_PKEIKG;
+    v = PK_REG(PK_REG_HWCONFIG);
+    NRF_CRACEN_S->ENABLE &= ~CRACEN_EN_PKEIKG;
+    return v;
+}
+
+/**
+ * @brief Upload a caller-provided BA414EP microcode image to the PK RAM.
+ *
+ * The PK engine is a microcoded core: its microcode RAM at CRACENCORE+0xC000
+ * must be loaded before any command runs.  This loader is generic -- it takes
+ * whatever image the caller supplies and clears the unavailable latch so the
+ * PK path re-arms.  TikuOS ships NO microcode image (the BA414EP microcode is
+ * Nordic-proprietary, LicenseRef-Nordic-5-Clause); this exists so a build
+ * that chooses to provide one can enable hardware PK.
+ */
+void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words)
+{
+    volatile uint32_t *uc =
+        (volatile uint32_t *)((uint8_t *)NRF_CRACENCORE_S + 0xC000u);
+    size_t i;
+    if (ucode == (const uint32_t *)0 || words == 0u || words > 1280u) {
+        return;
+    }
+    NRF_CRACEN_S->ENABLE |= CRACEN_EN_PKEIKG;
+    for (i = 0; i < words; i++) {
+        uc[i] = ucode[i];
+    }
+    __asm__ volatile ("dmb" ::: "memory");
+    NRF_CRACEN_S->ENABLE &= ~CRACEN_EN_PKEIKG;
+    s_pk_unavailable = 0;
+}
+
+/** @brief First word of the PK microcode RAM (0 => microcode not loaded). */
+uint32_t tiku_crypto_arch_pk_ucode0(void)
+{
+    volatile uint32_t *uc =
+        (volatile uint32_t *)((uint8_t *)NRF_CRACENCORE_S + 0xC000u);
+    uint32_t v;
+    NRF_CRACEN_S->ENABLE |= CRACEN_EN_PKEIKG;
+    v = uc[0];
+    NRF_CRACEN_S->ENABLE &= ~CRACEN_EN_PKEIKG;
+    return v;
+}
+
+#endif /* TIKU_CRACEN_PK_ENABLE */
+
+/*---------------------------------------------------------------------------*/
 /* Bring-up probes                                                           */
 /*---------------------------------------------------------------------------*/
 
