@@ -131,11 +131,13 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
         }
         thw = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0));
 
+        tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_SW);
         t0 = tiku_clock_time();
         for (i = 0; i < n_sw; i++) {
             tiku_kits_crypto_sha256_hash(buf, sizeof buf, sw);
         }
         tsw = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0));
+        tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_AUTO);
 
         SHELL_PRINTF("sha256(4KB): hw %lu us/op (%lu ticks/%lu), "
                      "sw %lu us/op (%lu ticks/%lu), rc=%d %s\n",
@@ -175,6 +177,23 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
                      out[4], out[5], out[6], out[7],
                      (rc == 0 && memcmp(out, "TIKUDRCT", 8) == 0)
                          ? SH_GREEN "MATCH" SH_RST : SH_RED "FAIL" SH_RST);
+        return;
+    }
+
+    if (argc >= 3 && strcmp(argv[1], "mode") == 0) {
+        tiku_crypto_hw_mode_set(
+            (strcmp(argv[2], "sw") == 0) ? TIKU_CRYPTO_HW_MODE_SW
+                                         : TIKU_CRYPTO_HW_MODE_AUTO);
+        SHELL_PRINTF("crypto mode = %s\n",
+                     tiku_crypto_hw_mode() ? "sw" : "auto");
+        return;
+    }
+
+    if (argc >= 2 && strcmp(argv[1], "counters") == 0) {
+        uint16_t h, sc, e;
+        tiku_crypto_hw_counters(&h, &sc, &e);
+        SHELL_PRINTF("hw_ops=%u sw_ops=%u hw_errs=%u mode=%s\n",
+                     h, sc, e, tiku_crypto_hw_mode() ? "sw" : "auto");
         return;
     }
 
