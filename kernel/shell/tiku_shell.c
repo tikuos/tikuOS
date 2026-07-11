@@ -344,6 +344,7 @@ static uint8_t shell_net_demux(int ch) {
     static uint8_t  esc;
     static uint16_t flen;
     static uint8_t  fbuf[TIKU_KITS_NET_MTU];
+    static tiku_clock_time_t frame_t0;  /* when the current frame opened */
     uint8_t b;
 
     if (ch == TIKU_KITS_NET_SLIP_END) {        /* 0xC0 frame delimiter */
@@ -363,12 +364,25 @@ static uint8_t shell_net_demux(int ch) {
         armed = 0;
         if ((b & 0xF0u) == 0x40u) {            /* IPv4 version nibble -> frame */
             in_frame = 1;
+            frame_t0 = tiku_clock_time();
         } else {
             return 0;                          /* stray END -> keystroke */
         }
     }
     if (!in_frame) {
         return 0;                              /* keystroke -> line editor */
+    }
+    /* Phantom-frame guard: a frame whose closing END was lost (observed on
+     * hardware after an RX outage mid-frame) would otherwise swallow every
+     * subsequent keystroke as payload, forever.  A real MTU-sized frame
+     * completes in tens of ms at 115200; one still open after a second is
+     * debris -- drop it and return this byte to the console. */
+    if ((tiku_clock_time_t)(tiku_clock_time() - frame_t0)
+        > (tiku_clock_time_t)TIKU_CLOCK_SECOND) {
+        in_frame = 0;
+        esc      = 0;
+        flen     = 0;
+        return 0;
     }
     if (esc) {
         esc = 0;

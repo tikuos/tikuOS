@@ -45,4 +45,7 @@ uint16_t tiku_uart_overrun_count(void);
 /** @brief Reset the RX overrun counter. */
 void     tiku_uart_overrun_reset(void);
 
+/** @brief RX-engine wedge self-heals performed since boot (diagnostics). */
+uint16_t tiku_uart_rx_recovery_count(void);
+
 #endif /* TIKU_NORDIC_UART_ARCH_H_ */

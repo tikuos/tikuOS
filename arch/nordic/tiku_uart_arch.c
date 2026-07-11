@@ -190,7 +190,12 @@ void tiku_nordic_uart_console_isr(void)
         uint32_t err;
 
         TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
-        (void)TIKU_UARTE->EVENTS_DMA.RX.END;      /* flush the clear */
+        /* RXDRDY latches when the receiver captures a byte into its FIFO --
+         * upstream of the DMA.  Clearing it here (per handled byte) turns it
+         * into a fresh wedge detector: RXDRDY set while the engine sits idle
+         * with no END means a captured byte the DMA never moved. */
+        TIKU_UARTE->EVENTS_RXDRDY    = 0UL;
+        (void)TIKU_UARTE->EVENTS_DMA.RX.END;      /* flush the clears */
 
         next = (uint16_t)((tiku_uart_rx_head + 1u) % TIKU_UART_RX_RING);
         if (next != tiku_uart_rx_tail) {
@@ -216,9 +221,55 @@ void tiku_nordic_uart_console_isr(void)
     }
 }
 
+/*
+ * RX-engine wedge self-heal.  Observed on hardware (heavy bidirectional
+ * SLIP + console traffic during a live-HTTPS session): the 1-byte RX DMA
+ * goes idle with its armed values intact -- PTR/MAXCNT correct, no END, no
+ * pending IRQ, ERRORSRC clean -- i.e. a TASKS_DMA.RX.START was lost or
+ * ignored, and because every re-arm rides the previous byte's END interrupt,
+ * one lost START silences RX forever (console AND net).
+ *
+ * Detection uses EVENTS_RXDRDY, which the receiver front-end latches per
+ * captured byte and the ISR now clears per handled byte: RXDRDY set with no
+ * END and an empty ring means a byte was captured but the engine never moved
+ * it.  A normal in-flight byte shows the same signature for only the sub-ms
+ * FIFO->DMA window, so require the signature on several consecutive polls
+ * (the shell polls at 20 Hz, the net pump far faster) before re-arming.
+ */
+static uint8_t  tiku_uart_rx_wedge_polls;
+static uint16_t tiku_uart_rx_recoveries;
+
+static void tiku_uart_rx_selfheal(void)
+{
+    if (TIKU_UARTE->EVENTS_RXDRDY != 0UL &&
+        TIKU_UARTE->EVENTS_DMA.RX.END == 0UL) {
+        if (++tiku_uart_rx_wedge_polls >= 3u) {
+            tiku_uart_rx_wedge_polls = 0u;
+            TIKU_UARTE->EVENTS_RXDRDY = 0UL;
+            TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
+            TIKU_UARTE->DMA.RX.MAXCNT = 1UL;
+            TIKU_UARTE->TASKS_DMA.RX.START = 1UL;
+            if (tiku_uart_rx_recoveries != 0xFFFFu) {
+                tiku_uart_rx_recoveries++;
+            }
+        }
+    } else {
+        tiku_uart_rx_wedge_polls = 0u;
+    }
+}
+
+uint16_t tiku_uart_rx_recovery_count(void)
+{
+    return tiku_uart_rx_recoveries;
+}
+
 uint8_t tiku_uart_rx_ready(void)
 {
-    return (uint8_t)(tiku_uart_rx_head != tiku_uart_rx_tail);
+    if (tiku_uart_rx_head == tiku_uart_rx_tail) {
+        tiku_uart_rx_selfheal();
+        return 0u;
+    }
+    return 1u;
 }
 
 int tiku_uart_getc(void)

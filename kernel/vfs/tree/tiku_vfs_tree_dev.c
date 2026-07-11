@@ -132,6 +132,24 @@ uart_overruns_read(char *buf, size_t max)
                     (unsigned)tiku_uart_overrun_count());
 }
 
+#if defined(PLATFORM_NORDIC)
+/**
+ * @brief Read handler for /dev/uart/recoveries (nRF54L only).
+ *
+ * Counts the RX-engine wedge self-heals the UART driver performed since
+ * boot (a lost DMA re-arm silences RX until re-started; the driver
+ * detects the captured-but-unmoved-byte signature and repairs it).
+ * Non-zero after a heavy SLIP/TLS session means the wedge recurred and
+ * was healed in place.
+ */
+static int
+uart_recoveries_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n",
+                    (unsigned)tiku_uart_rx_recovery_count());
+}
+#endif
+
 /**
  * @brief Read handler for /dev/uart/baud.
  *
@@ -442,7 +460,12 @@ static const tiku_vfs_desc_t desc_led =
 static const tiku_vfs_node_t dev_uart_children[] = {
     { "overruns", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0 },
     { "baud",     TIKU_VFS_FILE, uart_baud_read,     NULL, NULL, 0 },
+#if defined(PLATFORM_NORDIC)
+    { "recoveries", TIKU_VFS_FILE, uart_recoveries_read, NULL, NULL, 0 },
+#endif
 };
+#define DEV_UART_NCHILD \
+    (sizeof dev_uart_children / sizeof dev_uart_children[0])
 
 /** /dev/adc directory table — raw conversions, no calibration */
 static const tiku_vfs_node_t dev_adc_children[] = {
@@ -489,7 +512,8 @@ static const tiku_vfs_node_t dev_children[] = {
       tiku_vfs_tree_gpio_children,     TIKU_VFS_TREE_GPIO_NPORTS },
     { "gpio_dir", TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_gpio_dir_children, TIKU_VFS_TREE_GPIO_NPORTS },
-    { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children, 2 },
+    { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children,
+      DEV_UART_NCHILD },
     { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },
     { "i2c",      TIKU_VFS_DIR,  NULL, NULL, dev_i2c_children, 1 },
     { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },
