@@ -60,4 +60,19 @@ uint32_t tiku_flpr_arch_reply_seq(void);
 /** @brief Copy the most recent reply into @p out; returns its length. */
 uint32_t tiku_flpr_arch_reply(void *out, uint32_t cap);
 
+/**
+ * @brief Command a waveform from the pulse engine and verify it.
+ *
+ * Blocks while the firmware emits @p edges transitions at 50%% duty with
+ * @p period_us microsecond period on P2.07 (LED3), sampling the same pad
+ * from this core the whole time.
+ *
+ * @param measured  Out: transitions observed by this core's sampler.
+ * @param ms        Out: wall-clock milliseconds the pattern took (pace
+ *                  calibration: expected = period_us * edges / 2000).
+ * @return 0 done, -1 bad args / not running, -2 firmware never finished.
+ */
+int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
+                         uint32_t *measured, uint32_t *ms);
+
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

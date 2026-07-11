@@ -74,7 +74,21 @@ typedef struct {
  * resident-trampoline scheme (F5) and is out of scope here. */
 #define TIKU_FLPR_CMD_PARK    1u
 #define TIKU_FLPR_CMD_RESUME  2u
+/* Pulse engine (F3): parameters in a2f_buf as tiku_flpr_pulse_t; the
+ * firmware drives its VIO pin (bit 7 = P2.07 = LED3, routed by the app
+ * core via GPIO.PIN_CNF.CTRLSEL=VPR) for `edges` transitions with
+ * `half_cycles` FLPR cycles between them, then raises RSP_PULSE_DONE.
+ * 50 % duty by construction (every edge is a toggle). */
+#define TIKU_FLPR_CMD_PULSE   3u
 #define TIKU_FLPR_RSP_PARKED  1u
+#define TIKU_FLPR_RSP_PULSE_DONE 2u
+
+typedef struct {
+    uint32_t half_cycles;           /* FLPR cycles per half-period (128/us) */
+    uint32_t edges;                 /* number of transitions to emit        */
+} tiku_flpr_pulse_t;
+
+#define TIKU_FLPR_VIO_BIT     7u    /* VIO bit 7 == P2.07 == DK LED3       */
 
 #define TIKU_FLPR_SHARED  ((tiku_flpr_shared_t *)TIKU_FLPR_SHARED_ADDR)
 

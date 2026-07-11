@@ -29,6 +29,8 @@
 
 #include <arch/nordic/tiku_device_select.h>   /* NRF_VPR00_NS / NRF_MPC00  */
 #include <arch/nordic/tiku_nordic_core.h>     /* NVIC enable (IRQ 76)      */
+#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND    */
+#include <kernel/timers/tiku_clock.h>          /* pulse wall-clock measure  */
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>
 #include <string.h>
 
@@ -235,6 +237,66 @@ uint32_t tiku_flpr_arch_reply(void *out, uint32_t cap)
     }
     memcpy(out, flpr_reply, len);
     return len;
+}
+
+/*---------------------------------------------------------------------------*/
+/* Pulse engine (F3): command the waveform, verify it on the same pad        */
+/*---------------------------------------------------------------------------*/
+
+int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
+                         uint32_t *measured, uint32_t *ms)
+{
+    volatile tiku_flpr_pulse_t *req =
+        (volatile tiku_flpr_pulse_t *)TIKU_FLPR_SHARED->a2f_buf;
+    uint32_t mask = 1u << TIKU_FLPR_VIO_BIT;
+    uint32_t count = 0u, prev, cur, spin;
+    tiku_clock_time_t t0 = tiku_clock_time();
+
+    if (!tiku_flpr_arch_running() ||
+        period_us < 10u || period_us > 100000u ||
+        edges == 0u || edges > 100000u ||
+        (period_us * edges) > 6000000u) {      /* <= ~3 s of waveform      */
+        return -1;
+    }
+
+    /* Hand P2.07 (LED3) to the VPR's fast I/O and keep OUR input buffer
+     * connected: the pin's pad state stays readable through P2.IN, which
+     * is what makes the soft peripheral independently verifiable without
+     * any external instrument. */
+    NRF_P2_S->PIN_CNF[TIKU_FLPR_VIO_BIT] =
+        (1u << 28) |                           /* CTRLSEL = VPR            */
+        (0u << 1);                             /* INPUT = Connect          */
+
+    req->half_cycles = period_us * 64u;        /* 128 cycles/us, half duty */
+    req->edges = edges;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->rsp = 0u;
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_PULSE;
+
+    /* Sample the pad while the firmware runs the pattern.  The M33 poll
+     * loop runs at multi-MHz sample rates, far above any period this API
+     * accepts, so no transition is missed.  Exit on the firmware's DONE
+     * plus the loop's own generous spin bound. */
+    prev = NRF_P2_S->IN & mask;
+    for (spin = 0u; spin < 20000000u; spin++) {
+        cur = NRF_P2_S->IN & mask;
+        if (cur != prev) {
+            count++;
+            prev = cur;
+        }
+        if (TIKU_FLPR_SHARED->rsp == TIKU_FLPR_RSP_PULSE_DONE) {
+            break;
+        }
+    }
+    TIKU_FLPR_SHARED->rsp = 0u;
+    if (measured != (uint32_t *)0) {
+        *measured = count;
+    }
+    if (ms != (uint32_t *)0) {
+        *ms = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0))
+              * 1000u / (uint32_t)TIKU_CLOCK_SECOND;
+    }
+    return (spin < 20000000u) ? 0 : -2;       /* -2: firmware never DONE  */
 }
 
 #endif /* TIKU_FLPR_ENABLE */

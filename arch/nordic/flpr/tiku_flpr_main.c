@@ -37,6 +37,39 @@ static inline void flpr_doorbell_to_app(void)
     __asm__ volatile ("csrs 0x7E2, %0" :: "r"(1u << FLPR_DOORBELL_CH));
 }
 
+/* Pulse engine (F3): 50%-duty waveform on the VIO pin.
+ *
+ * VIO CSRs give the VPR single-cycle pin access without touching the AHB
+ * GPIO block (which, as a non-secure master, it could not reach anyway):
+ * DIR=0xBC1, OUT=0xBC0.
+ *
+ * Pacing is a calibrated down-count, not mcycle: the VPR's cycle counter
+ * proved unreliable as a timebase (waits stalled even with mcountinhibit
+ * cleared -- first toggle landed, second wait hung).  A busy loop is
+ * fully deterministic here since this core services no interrupts.
+ * FLPR_PACE_DIV converts half-period CYCLES to loop iterations and is
+ * calibrated against the M33's wall clock (see /sys/flpr/pulse ms=). */
+#define FLPR_PACE_DIV  10u
+
+static void flpr_pulse(const tiku_flpr_pulse_t *p)
+{
+    uint32_t mask = 1u << TIKU_FLPR_VIO_BIT;
+    uint32_t i;
+    volatile uint32_t w;
+
+    __asm__ volatile ("csrs 0xBC1, %0" :: "r"(mask));   /* DIR: output    */
+    for (i = 0u; i < p->edges; i++) {
+        if (i & 1u) {
+            __asm__ volatile ("csrc 0xBC0, %0" :: "r"(mask));
+        } else {
+            __asm__ volatile ("csrs 0xBC0, %0" :: "r"(mask));
+        }
+        for (w = 0u; w < p->half_cycles / FLPR_PACE_DIV; w++) {
+        }
+    }
+    __asm__ volatile ("csrc 0xBC0, %0" :: "r"(mask));   /* park low       */
+}
+
 /* Echo service: consume an app->flpr message, mirror it back, ring. */
 static void flpr_echo_pump(tiku_flpr_shared_t *sh, uint32_t *last_seq)
 {
@@ -74,6 +107,12 @@ void tiku_flpr_main(void)
      * regardless. */
     __asm__ volatile ("csrw 0x7C0, %0" :: "r"((0x507Du << 16) | 1u));
 
+    /* Un-inhibit the machine counters (mcountinhibit, 0x320): mcycle is
+     * the pulse engine's timebase and RISC-V cores may reset with the
+     * counters gated -- a constant mcycle turns the pacing wait into an
+     * infinite loop. */
+    __asm__ volatile ("csrw 0x320, zero");
+
     sh->heartbeat = 0u;
     sh->magic = TIKU_FLPR_MAGIC;
 
@@ -91,6 +130,16 @@ void tiku_flpr_main(void)
             }
             sh->cmd = 0u;
             sh->rsp = 0u;
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_PULSE) {
+            tiku_flpr_pulse_t p;
+            p.half_cycles = ((const volatile tiku_flpr_pulse_t *)
+                             sh->a2f_buf)->half_cycles;
+            p.edges = ((const volatile tiku_flpr_pulse_t *)
+                       sh->a2f_buf)->edges;
+            sh->cmd = 0u;
+            flpr_pulse(&p);                    /* blocking, bounded        */
+            sh->rsp = TIKU_FLPR_RSP_PULSE_DONE;
         }
         flpr_echo_pump(sh, &last_seq);
         sh->heartbeat = sh->heartbeat + 1u;

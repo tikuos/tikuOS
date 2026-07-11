@@ -1042,6 +1042,49 @@ flpr_echo_write(const char *buf, size_t len)
                ? 0 : TIKU_VFS_EINVAL;
 }
 
+/* Pulse-engine surface: write "period_us,edges" -> the coprocessor emits
+ * the waveform on P2.07 (LED3) while THIS core samples the pad; read
+ * returns "cmd=<edges> meas=<transitions> rc=<0|err>".  A |cmd-meas|
+ * within tolerance is the whole soft-peripheral story, verified. */
+static uint32_t flpr_pulse_cmd, flpr_pulse_meas, flpr_pulse_ms;
+static int      flpr_pulse_rc = -1;
+
+static int
+flpr_pulse_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "cmd=%lu meas=%lu ms=%lu rc=%d\n",
+                    (unsigned long)flpr_pulse_cmd,
+                    (unsigned long)flpr_pulse_meas,
+                    (unsigned long)flpr_pulse_ms, flpr_pulse_rc);
+}
+
+static int
+flpr_pulse_write(const char *buf, size_t len)
+{
+    char tmp[32];
+    char *comma;
+    unsigned long period_us, edges;
+
+    if (len == 0u || len >= sizeof(tmp)) {
+        return TIKU_VFS_EINVAL;
+    }
+    memcpy(tmp, buf, len);
+    tmp[len] = '\0';
+    comma = strchr(tmp, ',');
+    if (comma == NULL) {
+        return TIKU_VFS_EINVAL;
+    }
+    *comma = '\0';
+    period_us = strtoul(tmp, NULL, 10);
+    edges     = strtoul(comma + 1, NULL, 10);
+
+    flpr_pulse_cmd = (uint32_t)edges;
+    flpr_pulse_rc = tiku_flpr_arch_pulse((uint32_t)period_us,
+                                         (uint32_t)edges, &flpr_pulse_meas,
+                                         &flpr_pulse_ms);
+    return (flpr_pulse_rc == 0) ? 0 : TIKU_VFS_EINVAL;
+}
+
 static const tiku_vfs_node_t sys_flpr_children[] = {
     { "run",       TIKU_VFS_FILE, flpr_run_read,       flpr_run_write,
       NULL, 0 },
@@ -1049,6 +1092,8 @@ static const tiku_vfs_node_t sys_flpr_children[] = {
     { "heartbeat", TIKU_VFS_FILE, flpr_heartbeat_read, NULL, NULL, 0 },
     { "image",     TIKU_VFS_FILE, flpr_image_read,     NULL, NULL, 0 },
     { "echo",      TIKU_VFS_FILE, flpr_echo_read,      flpr_echo_write,
+      NULL, 0 },
+    { "pulse",     TIKU_VFS_FILE, flpr_pulse_read,     flpr_pulse_write,
       NULL, 0 },
 };
 #endif /* TIKU_FLPR_ENABLE */
@@ -1098,7 +1143,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  4 },
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
-    { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   5 },
+    { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   6 },
 #endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,
