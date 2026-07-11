@@ -39,6 +39,9 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_vfs_tree_sys.h"
+#if defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_crypto_arch.h>   /* /sys/crypto mode + counters */
+#endif
 #include "tiku_vfs_tree_boot.h"
 #include <kernel/cpu/tiku_stack.h>   /* stack high-water for /sys/mem/stack_free */
 #include "tiku_vfs_tree_timer.h"
@@ -787,6 +790,56 @@ static const tiku_vfs_node_t sys_jobs_children[] = {
 };
 #endif /* TIKU_SHELL_ENABLE */
 
+#if defined(PLATFORM_NORDIC)
+/*---------------------------------------------------------------------------*/
+/* /sys/crypto — CRACEN offload runtime switch + path counters               */
+/*---------------------------------------------------------------------------*/
+/*
+ * The hardware-crypto backend keeps the kit APIs unchanged; this is the
+ * runtime control surface: `mode` selects auto (hardware with software
+ * fallback) or sw (software only -- the A/B switch and field kill-switch),
+ * and `ops` reports which path actually served the calls, so a test can
+ * assert "hardware really ran" instead of trusting the knob.
+ */
+
+static int
+crypto_mode_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n",
+                    (tiku_crypto_hw_mode() == TIKU_CRYPTO_HW_MODE_SW)
+                        ? "sw" : "auto");
+}
+
+static int
+crypto_mode_write(const char *buf, size_t len)
+{
+    if (len >= 2u && buf[0] == 's' && buf[1] == 'w') {
+        tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_SW);
+        return 0;
+    }
+    if (len >= 4u && buf[0] == 'a' && buf[1] == 'u' &&
+        buf[2] == 't' && buf[3] == 'o') {
+        tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_AUTO);
+        return 0;
+    }
+    return TIKU_VFS_EINVAL;
+}
+
+static int
+crypto_ops_read(char *buf, size_t max)
+{
+    uint16_t hw, sw, errs;
+    tiku_crypto_hw_counters(&hw, &sw, &errs);
+    return snprintf(buf, max, "hw=%u sw=%u err=%u\n",
+                    (unsigned)hw, (unsigned)sw, (unsigned)errs);
+}
+
+static const tiku_vfs_node_t sys_crypto_children[] = {
+    { "mode", TIKU_VFS_FILE, crypto_mode_read, crypto_mode_write, NULL, 0 },
+    { "ops",  TIKU_VFS_FILE, crypto_ops_read,  NULL,              NULL, 0 },
+};
+#endif /* PLATFORM_NORDIC */
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
@@ -825,6 +878,9 @@ static const tiku_vfs_node_t sys_children[] = {
     { "jobs",     TIKU_VFS_DIR,  NULL, NULL, sys_jobs_children,  2 },
 #endif
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
+#if defined(PLATFORM_NORDIC)
+    { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 2 },
+#endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_inittab_children,  TIKU_VFS_TREE_INITTAB_NCHILD },
