@@ -101,8 +101,9 @@ void tiku_uart_init(void)
      * hardware overrun visible in ERRORSRC instead of silently overwriting
      * the bounce byte).  Priority 2 (above the tick at 3) so console input
      * is not starved. */
-    tiku_uart_rx_head = 0u;
-    tiku_uart_rx_tail = 0u;
+    tiku_uart_rx_head  = 0u;
+    tiku_uart_rx_tail  = 0u;
+    tiku_uart_overruns = 0u;      /* re-init zeroes the counter (rp2350 parity) */
     TIKU_UARTE->SHORTS = 0UL;
     TIKU_UARTE->ERRORSRC = TIKU_UARTE->ERRORSRC;  /* W1C: clear stale errors  */
     TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
