@@ -56,9 +56,11 @@
 /* The store's NVM home.  Ambiq: the FS extent of the carved NVM region (durable
  * MRAM, read in place, written via the region backend) -- no SRAM array.
  * RP2350: the FS extent of the carved Flash region (read in place via XIP,
- * written via the Flash region backend).  MSP430: a `.persistent` FRAM array
- * (in place).  Other parts: plain `.bss` (volatile) until a backend lands. */
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+ * written via the Flash region backend).  nRF54L: the FS extent of the carved
+ * RRAM region (byte-writable NVM read in place, written via the region backend
+ * through the RRAMC WEN gate).  MSP430: a `.persistent` FRAM array (in place).
+ * Other parts: plain `.bss` (volatile) until a backend lands. */
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || defined(PLATFORM_NORDIC)
 
 _Static_assert(TIKU_TFS_REGION_BYTES <= TIKU_NVMFS_FS_BYTES,
                "TFS store larger than the region FS extent");
@@ -403,6 +405,8 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     out->backing = "FRAM";
 #elif defined(PLATFORM_RP2350)
     out->backing = "Flash";  /* carved QSPI region, erase+program backend */
+#elif defined(PLATFORM_NORDIC)
+    out->backing = "RRAM";   /* carved byte-writable RRAM region, WEN-gated */
 #else
     out->backing = "RAM*";   /* volatile until a backend lands */
 #endif

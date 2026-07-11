@@ -58,6 +58,10 @@
 #define TIKU_NVMFS_FS_BYTES  (512u * 1024u)    /* 512 KB (apollo4l) */
 #elif defined(PLATFORM_RP2350)
 #define TIKU_NVMFS_FS_BYTES  (2816u * 1024u)   /* 2.75 MB (rp2350 Flash FS) */
+#elif defined(PLATFORM_NORDIC)
+#define TIKU_NVMFS_FS_BYTES  (16u * 1024u)     /* 16 KB: back half of the carved
+                                                * RRAM region; the front stays a
+                                                * raw-probe (nvmprobe) scratch */
 #else
 #define TIKU_NVMFS_FS_BYTES  0u
 #endif

@@ -1181,6 +1181,7 @@ SRCS += arch/nordic/tiku_wake_arch.c
 SRCS += arch/nordic/tiku_mem_arch.c
 SRCS += arch/nordic/tiku_mpu_arch.c
 SRCS += arch/nordic/tiku_region_arch.c
+SRCS += arch/nordic/tiku_nvm_region_nordic.c
 SRCS += arch/nordic/tiku_cpu_watchdog_arch.c
 SRCS += arch/nordic/tiku_htimer_arch.c
 SRCS += arch/nordic/tiku_gpio_irq_arch.c

@@ -13,8 +13,11 @@
  *   0x00000xxx .text/.rodata (code + read-only data)
  *   0x000xxxxx .data (LMA)   (initialised-data image, copied to SRAM at boot)
  *   ...        <free RRAM>    (code budget grows toward the reserved NVM tail)
- *   top-8 KB   reserved      (future durable persist/config region -- symbols
- *                            defined below; RRAMC-backed backend lands later)
+ *   top-40 KB  reserved      (two byte-writable NVM regions written behind the
+ *                            RRAMC WEN gate: a 32 KB filestore -- the
+ *                            tiku_nvm_region backend / TFS /data / nvmprobe --
+ *                            and, at the very top, an 8 KB durable-persist
+ *                            region holding exact `.persistent`; symbols below)
  *
  * Layout in SRAM (stack grows down from the top):
  *   .data              (initialised RAM, copied from its RRAM LMA at boot)
@@ -57,6 +60,16 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 __tiku_nvm_rram_size  = 0x2000;                             /* 8 KB */
 __tiku_nvm_rram_start = ORIGIN(RRAM) + LENGTH(RRAM) - __tiku_nvm_rram_size;
 __tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
+
+/* Carved NVM filestore region (the tiku_nvm_region backend / TFS / nvmprobe).
+ * A byte-writable RRAM span reserved just BELOW the durable-persist region, so
+ * both stay clear of the growing code image below them.  Like the persist
+ * region it is written in place behind the RRAMC WEN gate (no erase), and the
+ * backend hands its base/size to TFS.  __tiku_nvmfs_size is an absolute symbol
+ * whose ADDRESS is the size (matches the rp2350/ambiq backends). */
+__tiku_nvmfs_size = 0x8000;                                 /* 32 KB */
+__tiku_nvmfs_base = __tiku_nvm_rram_start - __tiku_nvmfs_size;
+__tiku_nvmfs_end  = __tiku_nvm_rram_start;
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */
@@ -164,9 +177,11 @@ SECTIONS
     } > RRAM
 
     /* The RRAM code image (code + rodata + .data load copy) must not grow up
-     * into the durable-persist region at the top of RRAM. */
-    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvm_rram_start,
-           "ERROR: RRAM image overruns the reserved durable-persist region")
+     * into the reserved NVM regions at the top of RRAM -- the filestore sits
+     * just below the durable-persist region, so guard against the lower of
+     * the two bases. */
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvmfs_base,
+           "ERROR: RRAM image overruns the reserved NVM/persist regions")
 
     /* The durable persist data must fit inside the reserved region. */
     ASSERT(__persistent_end <= __tiku_nvm_rram_end,
