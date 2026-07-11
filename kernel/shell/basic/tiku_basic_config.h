@@ -209,7 +209,12 @@
 #  endif
 #endif
 #ifndef TIKU_BASIC_NET_ENABLE
-#  if defined(TIKU_BASIC_TIER_BIG) && (TIKU_KIT_NET_ENABLE + 0)
+/* Net words ride the big tier's roomy buffers by default; nRF54L runs the
+ * FRAM tier (BIG's buffers overflow its 256 KB SRAM) but has the full net
+ * kit + CRACEN TRNG, so it opts in too -- HTTPGET$/HTTPPOST$ results are
+ * simply capped at the FRAM-tier string length (status line + head fit). */
+#  if (defined(TIKU_BASIC_TIER_BIG) || defined(PLATFORM_NORDIC)) && \
+      (TIKU_KIT_NET_ENABLE + 0)
 #    define TIKU_BASIC_NET_ENABLE    1
 #  else
 #    define TIKU_BASIC_NET_ENABLE    0

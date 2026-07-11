@@ -831,8 +831,11 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # entry without this.  The nRF54L15 has 256 KB SRAM, so a 160 KB tier fits the
 # arena with ample room for .bss + stack.  Gated on BASIC so non-BASIC builds
 # keep the lean default.  (Same fix the rp2350 block applies for its part.)
+# 32 KB, not rp2350's 160 KB: nordic runs the FRAM BASIC tier (96 lines,
+# 2 KB heap -- observed AUTO-tier demand ~10 KB), and the https build must
+# leave room for BOTH TLS clients' RFC-max record buffers in 256 KB SRAM.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 1024-line BASIC arena
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=32768     # 32 KB: FRAM-tier BASIC arena
 endif
 
 else
@@ -2215,7 +2218,14 @@ endif
 # nRF54L15-DK flashing tool (Nordic's nrfutil): prefer a PATH `nrfutil`, else
 # the vendored ./temp/nrfutil.  NRF_SN selects one J-Link probe by serial on a
 # multi-DK rig (TikuBench passes it per board via NRF_SN=<serial>).
+#
+# nrfutil resolves its `device` subcommand from $NRFUTIL_HOME (default
+# $HOME/.nrfutil) -- under sudo HOME=/root has no plugins and the flash dies
+# with "Subcommand nrfutil-device not found".  When SUDO_USER is set, point
+# NRFUTIL_HOME back at the invoking user's plugin dir (suites that need root
+# for a TUN gateway, e.g. https/web-sweep, flash through this path).
 NRFUTIL ?= $(shell command -v nrfutil 2>/dev/null || echo $(CURDIR)/temp/nrfutil)
+NRFUTIL_ENV = $(if $(SUDO_USER),NRFUTIL_HOME=$(shell getent passwd $(SUDO_USER) | cut -d: -f6)/.nrfutil,)
 NRF_SN  ?=
 NRF_SN_ARG = $(if $(strip $(NRF_SN)),--serial-number $(strip $(NRF_SN)),)
 
@@ -2296,7 +2306,7 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 # to target a specific DK when more than one is attached.
 flash: all
 	@echo "Flashing $(TARGET_HEX) via nrfutil ($(NRFUTIL))..."
-	$(NRFUTIL) device program --firmware $(TARGET_HEX) --core Application \
+	$(NRFUTIL_ENV) $(NRFUTIL) device program --firmware $(TARGET_HEX) --core Application \
 		--options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG)
 
 run: flash
@@ -2307,7 +2317,7 @@ debug: all
 	@echo "  $(NRFUTIL) device reset --reset-kind RESET_SYSTEM $(NRF_SN_ARG)"
 
 erase:
-	$(NRFUTIL) device erase --core Application $(NRF_SN_ARG)
+	$(NRFUTIL_ENV) $(NRFUTIL) device erase --core Application $(NRF_SN_ARG)
 
 else
 
