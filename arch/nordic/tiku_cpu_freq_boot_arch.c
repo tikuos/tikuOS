@@ -7,11 +7,19 @@
  *
  * tiku_cpu_freq_boot_arch.c - nRF54L clock/power boot bring-up
  *
- * The nRF54L core runs at 128 MHz on this DK (OSCILLATORS.PLL.CURRENTFREQ
- * reads CK128M on hardware); this file does not change the core frequency.
- * It starts the 32 MHz HFXO so the UARTE (16 MHz reference) and, later, the
- * radio have an accurate high-frequency source.  A start-timeout latches a
- * clock-fault flag reported through the /sys clock view.
+ * Programs the core PLL to 128 MHz explicitly.  The PLL's reset default is
+ * CK64M, and whether a given boot arrives at 64 or 128 MHz turns out to
+ * depend on the debug session: with nrfutil/J-Link attached CURRENTFREQ
+ * reads CK128M (the Phase-0 observation this file used to trust), but a
+ * STANDALONE boot runs at 64 MHz -- which made every SysTick busy-delay 2x
+ * slow (surfaced by the watchdog C-unit test: 500 ms kick delays stretched
+ * past the 1 s timeout, reset-looping the device).  Setting PLL.FREQ here
+ * removes the ambiguity; the delay layer additionally reads CURRENTFREQ so
+ * its math is correct at either speed.
+ *
+ * Also starts the 32 MHz HFXO so the UARTE (16 MHz reference) and, later,
+ * the radio have an accurate high-frequency source.  A start-timeout
+ * latches a clock-fault flag reported through the /sys clock view.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,6 +30,7 @@
 
 #define TIKU_NORDIC_CPU_HZ       128000000UL
 #define TIKU_NORDIC_XOSTART_SPIN 1000000UL   /* ~loop bound, not wall-clock */
+#define TIKU_PLL_CK128M          0x1UL       /* OSCILLATORS_PLL_FREQ_CK128M */
 
 static volatile int tiku_nordic_clock_fault;
 
@@ -31,6 +40,19 @@ void tiku_cpu_boot_nordic_init(void)
 
     /* SysTick-based delays need no setup; call retained for API symmetry. */
     tiku_nordic_dwt_init();
+
+    /* Core PLL -> 128 MHz (the reset default is CK64M).  Bounded wait for
+     * the switch to be reported; on timeout latch the clock fault (delays
+     * still time correctly -- they read CURRENTFREQ, not this request). */
+    NRF_OSCILLATORS_S->PLL.FREQ = TIKU_PLL_CK128M;
+    spin = TIKU_NORDIC_XOSTART_SPIN;
+    while ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) != TIKU_PLL_CK128M &&
+           spin != 0U) {
+        spin--;
+    }
+    if ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) != TIKU_PLL_CK128M) {
+        tiku_nordic_clock_fault = 1;
+    }
 
     /* Start the HFXO (32 MHz crystal) and wait for it to report started.
      * Bounded spin so a missing/broken crystal degrades to a flagged fault

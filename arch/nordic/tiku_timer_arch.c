@@ -343,8 +343,14 @@ void tiku_clock_arch_set_seconds(unsigned long sec)
 
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 {
-    /* Wraparound-safe: spin while t is still in the future. */
-    while ((long)(t - g_ticks) > 0) {
+    /* DURATION semantics (the kernel contract, same as msp430/rp2350/ambiq):
+     * spin until the tick counter has advanced by @p t from now.  Wraparound-
+     * safe.  (An earlier version treated @p t as an absolute deadline, so any
+     * wait shorter than the current uptime returned instantly -- breaking
+     * every tick-paced test/caller once the system had run for a while.) */
+    tiku_clock_arch_time_t target = g_ticks + t;
+
+    while ((long)(target - g_ticks) > 0) {
         /* busy-wait for the tick ISR to advance g_ticks */
     }
 }

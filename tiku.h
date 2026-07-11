@@ -345,8 +345,10 @@
 /** Enable debug printing for clock architecture */
 #define DEBUG_CLOCK_ARCH 0
 
-/** Enable debug printing for test modules */
+/** Enable debug printing for test modules (#ifndef so -DDEBUG_TESTS=1 wins) */
+#ifndef DEBUG_TESTS
 #define DEBUG_TESTS 0
+#endif
 
 /** Enable debug printing for scheduler */
 #define DEBUG_SCHED 0

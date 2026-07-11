@@ -23,12 +23,24 @@
 #include <arch/nordic/mdk/nrf54l15.h>
 #include <stddef.h>
 
-/* The nRF54L15-DK boots with the PLL at 128 MHz (OSCILLATORS.PLL.CURRENTFREQ
- * reads CK128M on hardware -- the CK64M register reset value is overridden by
- * the boot configuration).  SysTick is clocked from this processor clock, so
- * the delay math must use 128 MHz or delays run 2x fast. */
-#define TIKU_NORDIC_CPU_HZ   128000000UL
+/* SysTick is clocked from the processor clock, whose speed is NOT fixed: the
+ * PLL reset default is 64 MHz, the boot bring-up requests 128 MHz, and an
+ * attached debug session can change what a given boot lands on (Phase-0
+ * measured CK128M only because nrfutil was attached; standalone boots came up
+ * at 64 MHz and every delay ran 2x slow -- the watchdog C-unit test caught it
+ * biting through kicks that were supposed to land at half its timeout).  So
+ * the delay math reads OSCILLATORS.PLL.CURRENTFREQ live instead of trusting
+ * a constant. */
 #define TIKU_SYSTICK_MAX     0x00FFFFFFUL   /* SysTick reload is 24-bit */
+#define TIKU_PLL_CK128M      0x1UL          /* CURRENTFREQ: 128 MHz     */
+
+/** @brief Current core clock in Hz, from the live PLL state (64 or 128 MHz). */
+static uint32_t tiku_nordic_cpu_hz_now(void)
+{
+    return ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) == TIKU_PLL_CK128M)
+               ? 128000000UL
+               : 64000000UL;
+}
 
 void tiku_nordic_dwt_init(void)
 {
@@ -58,7 +70,7 @@ static void tiku_nordic_delay_cycles(uint32_t cycles)
 
 void tiku_cpu_nordic_delay_us(uint32_t us)
 {
-    tiku_nordic_delay_cycles(us * (TIKU_NORDIC_CPU_HZ / 1000000UL));
+    tiku_nordic_delay_cycles(us * (tiku_nordic_cpu_hz_now() / 1000000UL));
 }
 
 void tiku_cpu_nordic_delay_ms(uint32_t ms)
