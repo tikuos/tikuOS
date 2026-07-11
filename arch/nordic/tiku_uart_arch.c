@@ -67,8 +67,19 @@ static volatile uint8_t tiku_uart_txb __attribute__((aligned(4)));
  * buffer and hardware auto-restarts (DMA_RX_END -> DMA_RX_START short), so the
  * CPU can sleep and wake per byte; the DMARXEND ISR copies the byte into a
  * software ring the shell drains at its own pace -- no bytes lost in the gap
- * between shell getc() calls (the old polled single-byte RX could drop them). */
-#define TIKU_UART_RX_RING  256u
+ * between shell getc() calls (the old polled single-byte RX could drop them).
+ *
+ * Sized for SLIP/IP, not just typing: TLS cert verification stalls the pump
+ * for tens to ~100+ ms, and a 256 B ring holds only ~22 ms at 115200 -- it
+ * overflowed on nearly every crypto pause (30 hardware overruns in one HTTPS
+ * run), dropping mid-flight bytes and turning big RSA-chain server flights
+ * into TCP-retransmit crawls until the peer RST us.  4 KB rides out those
+ * pauses with room for SLIP escaping + retransmit duplicates (the ambiq port
+ * documents the same failure and sizes its ring 8 KB).  Power of two;
+ * override with -DTIKU_UART_RX_RING=<N>. */
+#ifndef TIKU_UART_RX_RING
+#define TIKU_UART_RX_RING  4096u
+#endif
 static volatile uint8_t  tiku_uart_rxb __attribute__((aligned(4)));
 static volatile uint8_t  tiku_uart_rxring[TIKU_UART_RX_RING];
 static volatile uint16_t tiku_uart_rx_head;
