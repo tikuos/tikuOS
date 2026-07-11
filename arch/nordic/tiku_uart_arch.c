@@ -32,6 +32,8 @@
 #include <arch/nordic/tiku_uart_arch.h>
 #include <arch/nordic/tiku_device_select.h>   /* board macros + MDK register types */
 #include <arch/nordic/tiku_nordic_core.h>     /* NVIC helpers for the RX IRQ  */
+#include <arch/nordic/tiku_timer_arch.h>      /* TIKU_CLOCK_ARCH_SECOND       */
+#include <kernel/timers/tiku_clock.h>         /* wall-time wedge debounce     */
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -233,18 +235,27 @@ void tiku_nordic_uart_console_isr(void)
  * captured byte and the ISR now clears per handled byte: RXDRDY set with no
  * END and an empty ring means a byte was captured but the engine never moved
  * it.  A normal in-flight byte shows the same signature for only the sub-ms
- * FIFO->DMA window, so require the signature on several consecutive polls
- * (the shell polls at 20 Hz, the net pump far faster) before re-arming.
+ * FIFO->DMA window -- but the net pump polls this in a microsecond-tight
+ * loop, so the debounce must be WALL TIME, not call count (a call-counted
+ * debounce fired inside the in-flight window and pulsed START against a
+ * running engine, corrupting live RX).  The signature must persist for
+ * several ticks (~100 ms; a real wedge persists forever) before re-arming.
  */
-static uint8_t  tiku_uart_rx_wedge_polls;
-static uint16_t tiku_uart_rx_recoveries;
+static uint8_t           tiku_uart_rx_wedge_seen;
+static tiku_clock_time_t tiku_uart_rx_wedge_t0;
+static uint16_t          tiku_uart_rx_recoveries;
 
 static void tiku_uart_rx_selfheal(void)
 {
     if (TIKU_UARTE->EVENTS_RXDRDY != 0UL &&
         TIKU_UARTE->EVENTS_DMA.RX.END == 0UL) {
-        if (++tiku_uart_rx_wedge_polls >= 3u) {
-            tiku_uart_rx_wedge_polls = 0u;
+        tiku_clock_time_t now = tiku_clock_time();
+        if (!tiku_uart_rx_wedge_seen) {
+            tiku_uart_rx_wedge_seen = 1u;
+            tiku_uart_rx_wedge_t0   = now;
+        } else if ((tiku_clock_time_t)(now - tiku_uart_rx_wedge_t0)
+                   > (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
+            tiku_uart_rx_wedge_seen = 0u;
             TIKU_UARTE->EVENTS_RXDRDY = 0UL;
             TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
             TIKU_UARTE->DMA.RX.MAXCNT = 1UL;
@@ -254,7 +265,7 @@ static void tiku_uart_rx_selfheal(void)
             }
         }
     } else {
-        tiku_uart_rx_wedge_polls = 0u;
+        tiku_uart_rx_wedge_seen = 0u;
     }
 }
 

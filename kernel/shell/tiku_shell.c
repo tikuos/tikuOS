@@ -374,11 +374,16 @@ static uint8_t shell_net_demux(int ch) {
     }
     /* Phantom-frame guard: a frame whose closing END was lost (observed on
      * hardware after an RX outage mid-frame) would otherwise swallow every
-     * subsequent keystroke as payload, forever.  A real MTU-sized frame
-     * completes in tens of ms at 115200; one still open after a second is
-     * debris -- drop it and return this byte to the console. */
+     * subsequent keystroke as payload, forever.  The threshold must dwarf a
+     * LEGITIMATE frame's lifetime: frame bytes drain from the RX ring through
+     * this demux, and the draining pump legitimately pauses for seconds
+     * mid-frame during TLS crypto (a 1 s guard dropped live frames and
+     * sprayed their payload into the console).  Nothing legitimate keeps one
+     * frame open for 30 s -- the cert fetch deadline itself is 20 s -- so
+     * this only catches true debris, at the cost of a console that takes up
+     * to 30 s to self-recover after an RX outage. */
     if ((tiku_clock_time_t)(tiku_clock_time() - frame_t0)
-        > (tiku_clock_time_t)TIKU_CLOCK_SECOND) {
+        > (tiku_clock_time_t)(30 * TIKU_CLOCK_SECOND)) {
         in_frame = 0;
         esc      = 0;
         flen     = 0;
