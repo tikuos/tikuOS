@@ -1202,6 +1202,27 @@ SRCS += arch/nordic/tiku_fault_arch.c
 # gate on TIKU_HAS_BLE_ADV, never on the chip (same pattern as TIKU_HAS_BLE).
 SRCS += interfaces/bluetooth/tiku_ble_adv.c
 CFLAGS += -DTIKU_HAS_BLE_ADV=1
+# FLPR (VPR RISC-V coprocessor) -- opt-in.  Builds the tiny RISC-V firmware
+# (arch/nordic/flpr/) with the xPack riscv-none-elf toolchain (unpacked under
+# gitignored temp/toolchains/ -- see kintsugi/flpr_plan.md F0), embeds the
+# flat binary into this image, and compiles the app-side loader + /sys/flpr.
+ifeq ($(TIKU_FLPR_ENABLE),1)
+SRCS += arch/nordic/tiku_flpr_arch.c
+CFLAGS += -DTIKU_FLPR_ENABLE=1
+RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
+RISCV_CC      = $(RISCV_PREFIX)gcc
+FLPR_BUILD    = $(BUILD_DIR)/flpr
+# The FLPR is RV32E (16 GPRs) + M + C; Zicsr for the CLIC CSRs later.
+FLPR_CFLAGS   = -march=rv32emc_zicsr -mabi=ilp32e -Os -Wall -Wextra \
+                -ffreestanding -nostdlib -nostartfiles \
+                -ffunction-sections -fdata-sections -I$(PROJ_DIR) -MMD -MP
+FLPR_OBJS     = $(FLPR_BUILD)/tiku_flpr_crt0.o $(FLPR_BUILD)/tiku_flpr_main.o
+TIKU_FLPR_IMG_O = $(FLPR_BUILD)/tiku_flpr_img.o
+ifeq ($(wildcard $(RISCV_CC)),)
+$(error TIKU_FLPR_ENABLE=1 needs the RISC-V toolchain at $(RISCV_CC) -- \
+kintsugi/flpr_plan.md F0 documents the xPack download)
+endif
+endif
 ifeq ($(TIKU_THREADS_ENABLE),1)
 SRCS += kernel/threads/tiku_thread.c
 SRCS += arch/nordic/tiku_thread_arch.c
@@ -2104,6 +2125,11 @@ ifneq ($(BASIC_PROGRAM),)
 OBJS += $(TIKU_BASIC_EMBEDDED_O)
 endif
 
+ifeq ($(TIKU_FLPR_ENABLE),1)
+# Embedded FLPR coprocessor image (recipes below `all:`, same reason).
+OBJS += $(TIKU_FLPR_IMG_O)
+endif
+
 # Header-dependency tracking.  Each compile emits a .d next to its .o (via
 # -MMD -MP in the rules above) listing every header it pulled in; pull those
 # back in so editing a header rebuilds exactly the objects that include it --
@@ -2208,6 +2234,39 @@ $(TIKU_BASIC_EMBEDDED_C): $(BASIC_PROGRAM) tools/bas_to_c.py
 $(TIKU_BASIC_EMBEDDED_O): $(TIKU_BASIC_EMBEDDED_C)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+endif
+
+# ---------------------------------------------------------------------------
+# FLPR (VPR RISC-V) coprocessor sub-build: compile with the RISC-V
+# toolchain, link against the carve-resident script, flatten to a binary,
+# then wrap that binary as an ARM object (blob in .rodata, RRAM) whose
+# _binary_tiku_flpr_bin_* symbols the app-side loader memcpys from.  The
+# wrap runs objcopy FROM INSIDE the build dir so the symbol names derive
+# from the bare file name, not the build path.
+# ---------------------------------------------------------------------------
+ifeq ($(TIKU_FLPR_ENABLE),1)
+$(FLPR_BUILD)/%.o: arch/nordic/flpr/%.S
+	@mkdir -p $(dir $@)
+	$(RISCV_CC) $(FLPR_CFLAGS) -c -o $@ $<
+
+$(FLPR_BUILD)/%.o: arch/nordic/flpr/%.c
+	@mkdir -p $(dir $@)
+	$(RISCV_CC) $(FLPR_CFLAGS) -c -o $@ $<
+
+$(FLPR_BUILD)/tiku_flpr.elf: $(FLPR_OBJS) arch/nordic/flpr/tiku_flpr.ld
+	$(RISCV_CC) $(FLPR_CFLAGS) -T arch/nordic/flpr/tiku_flpr.ld \
+	    -Wl,--gc-sections -o $@ $(FLPR_OBJS)
+
+$(FLPR_BUILD)/tiku_flpr.bin: $(FLPR_BUILD)/tiku_flpr.elf
+	$(RISCV_PREFIX)objcopy -O binary $< $@
+	@echo "  [flpr]  $$(stat -c%s $@) bytes"
+
+$(TIKU_FLPR_IMG_O): $(FLPR_BUILD)/tiku_flpr.bin
+	cd $(FLPR_BUILD) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm \
+	    --rename-section .data=.rodata,alloc,load,readonly,data,contents \
+	    tiku_flpr.bin tiku_flpr_img.o
+
+-include $(FLPR_OBJS:.o=.d)
 endif
 
 size: $(TARGET)

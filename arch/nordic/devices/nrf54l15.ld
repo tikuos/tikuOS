@@ -44,7 +44,13 @@ MEMORY
      * the top 12 KB is reserved (per the MDK NRF_MEMORY_FLASH_SIZE and nrfx's
      * own linker script).  Addressing past 0x17CFFF bus-faults. */
     RRAM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x17D000
-    SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 256K
+    /* App SRAM is 240 KB of the 256 KB part: the top 16 KB
+     * (0x2003C000..0x2003FFFF) is the FLPR coprocessor carve -- RISC-V
+     * code + stack + the shared IPC page (arch/nordic/flpr/tiku_flpr_ipc.h
+     * is the geometry's single source of truth).  Reserved UNCONDITIONALLY
+     * so image layout does not shift with TIKU_FLPR_ENABLE; the largest
+     * build today (shell+BASIC) uses ~105 KB of .bss, leaving >2x headroom. */
+    SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x3C000
 }
 
 /* "FRAM_*" vocabulary the kernel memory introspection speaks == RRAM here. */

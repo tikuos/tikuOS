@@ -45,6 +45,9 @@
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
 #endif
+#if (TIKU_FLPR_ENABLE + 0)
+#include <arch/nordic/tiku_flpr_arch.h>         /* /sys/flpr coprocessor    */
+#endif
 #include "tiku_vfs_tree_boot.h"
 #include <kernel/cpu/tiku_stack.h>   /* stack high-water for /sys/mem/stack_free */
 #include "tiku_vfs_tree_timer.h"
@@ -955,6 +958,69 @@ static const tiku_vfs_node_t sys_radio_children[] = {
 };
 #endif /* TIKU_HAS_BLE_ADV */
 
+#if (TIKU_FLPR_ENABLE + 0)
+/*---------------------------------------------------------------------------*/
+/* /sys/flpr — the VPR RISC-V coprocessor                                    */
+/*---------------------------------------------------------------------------*/
+/*
+ * Control + liveness for the FLPR: `run` starts (loads the embedded image
+ * first) and stops the core; `state` distinguishes stopped / running-but-
+ * not-yet-in-main / alive; `heartbeat` is the firmware's forever-counter,
+ * the ground truth that RISC-V code is executing right now.
+ */
+
+static int
+flpr_state_read(char *buf, size_t max)
+{
+    const char *s = "stopped";
+    if (tiku_flpr_arch_running()) {
+        s = tiku_flpr_arch_alive() ? "alive" : "started";
+    }
+    return snprintf(buf, max, "%s\n", s);
+}
+
+static int
+flpr_heartbeat_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)tiku_flpr_arch_heartbeat());
+}
+
+static int
+flpr_image_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n",
+                    (unsigned long)tiku_flpr_arch_image_size());
+}
+
+static int
+flpr_run_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%d\n", tiku_flpr_arch_running());
+}
+
+static int
+flpr_run_write(const char *buf, size_t len)
+{
+    if (len >= 1u && buf[0] == '1') {
+        return (tiku_flpr_arch_start() == 0) ? 0 : TIKU_VFS_EINVAL;
+    }
+    if (len >= 1u && buf[0] == '0') {
+        tiku_flpr_arch_stop();
+        return 0;
+    }
+    return TIKU_VFS_EINVAL;
+}
+
+static const tiku_vfs_node_t sys_flpr_children[] = {
+    { "run",       TIKU_VFS_FILE, flpr_run_read,       flpr_run_write,
+      NULL, 0 },
+    { "state",     TIKU_VFS_FILE, flpr_state_read,     NULL, NULL, 0 },
+    { "heartbeat", TIKU_VFS_FILE, flpr_heartbeat_read, NULL, NULL, 0 },
+    { "image",     TIKU_VFS_FILE, flpr_image_read,     NULL, NULL, 0 },
+};
+#endif /* TIKU_FLPR_ENABLE */
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
@@ -998,6 +1064,9 @@ static const tiku_vfs_node_t sys_children[] = {
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
     { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  4 },
+#endif
+#if (TIKU_FLPR_ENABLE + 0)
+    { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   4 },
 #endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,

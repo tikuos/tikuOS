@@ -12,6 +12,11 @@ dependency (the same approach as `arch/ambiq/cmsis/`).
 | `nrf54l15_global.h`       | Base-pointer instances (`NRF_UARTE20_S`, `NRF_GRTC_S`, `NRF_FICR_NS`, …). |
 | `compiler_abstraction.h`  | `__ASM` / `__INLINE` / `__WEAK` / `NRF_STATIC_ASSERT` macros. |
 | `nrf54l15.h`              | TikuOS entry-point wrapper: includes the three above + `<stdint.h>`. |
+| `nrf54l15_flpr.h`         | FLPR (VPR RISC-V coprocessor) device header: CLIC IRQ map + config. |
+| `nrf54l15_flpr_peripherals.h` | FLPR-view peripheral availability/counts. |
+| `nrf54l15_flpr_vectors.h` | FLPR CLIC vector-table description. |
+| `core_vpr.h`              | VPR core CSR numbers (mtvec/mtvt/mclicbase…), from `mdk/common/`. |
+| `riscv_encoding.h`        | RISC-V encoding constants used by `core_vpr.h`, from `mdk/common/`. |
 
 ## Source
 
@@ -23,9 +28,10 @@ dependency (the same approach as `arch/ambiq/cmsis/`).
 ## Local modifications
 
 The **only** change from upstream is the include path: the vendored files
-originally did `#include "../../common/compiler_abstraction.h"`; that was
-flattened to `#include "compiler_abstraction.h"` so the four files form a
-self-contained set. No struct, address, or field definition was altered.
+originally did `#include "../../common/…"`; those were flattened to the bare
+file names so the set is self-contained, and `nrf54l15_flpr.h`'s include of
+`system_nrf.h` was dropped (SystemInit duties live in the TikuOS startup).
+No struct, address, or field definition was altered.
 
 ## Why no CMSIS core?
 
