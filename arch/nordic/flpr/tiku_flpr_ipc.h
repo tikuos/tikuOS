@@ -40,11 +40,29 @@
  * but wedged in the crt".  The heartbeat then proves steady-state life. */
 #define TIKU_FLPR_MAGIC      0x464C5052u                 /* 'FLPR'         */
 
+/* Single-slot message mailboxes, one per direction.  Sender fills buf/len
+ * then bumps seq (release order by construction on this uncached SRAM);
+ * receiver notices the seq change.  A slot is overwritten by the next
+ * message -- flow control is the consumer's job (echo-style protocols are
+ * naturally lock-step).  240 B fits BLE-PDU-class payloads and keeps the
+ * whole page comfortably inside 1 KB. */
+#define TIKU_FLPR_MSG_CAP  240u
+
 typedef struct {
     volatile uint32_t magic;        /* TIKU_FLPR_MAGIC once main() runs   */
     volatile uint32_t heartbeat;    /* increments while un-parked          */
     volatile uint32_t cmd;          /* app -> flpr command word            */
     volatile uint32_t rsp;          /* flpr -> app response word           */
+
+    /* app -> flpr mailbox */
+    volatile uint32_t a2f_seq;
+    volatile uint32_t a2f_len;
+    volatile uint8_t  a2f_buf[TIKU_FLPR_MSG_CAP];
+
+    /* flpr -> app mailbox (doorbell: VPR EVENTS_TRIGGERED[0] -> IRQ 76) */
+    volatile uint32_t f2a_seq;
+    volatile uint32_t f2a_len;
+    volatile uint8_t  f2a_buf[TIKU_FLPR_MSG_CAP];
 } tiku_flpr_shared_t;
 
 /* Cooperative park/resume protocol.  Hardware truths this encodes:

@@ -45,4 +45,19 @@ uint32_t tiku_flpr_arch_heartbeat(void);
 /** @brief Embedded image size in bytes (0 if the build carries none). */
 uint32_t tiku_flpr_arch_image_size(void);
 
+/**
+ * @brief Send one message (<= TIKU_FLPR_MSG_CAP bytes) to the firmware.
+ * @return 0 on success, negative when not running / oversized.
+ */
+int tiku_flpr_arch_send(const void *data, uint32_t len);
+
+/** @brief Pull any pending flpr->app message (doorbell fallback). */
+void tiku_flpr_arch_poll(void);
+
+/** @brief Count of flpr->app messages captured (ISR or pull). */
+uint32_t tiku_flpr_arch_reply_seq(void);
+
+/** @brief Copy the most recent reply into @p out; returns its length. */
+uint32_t tiku_flpr_arch_reply(void *out, uint32_t cap);
+
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

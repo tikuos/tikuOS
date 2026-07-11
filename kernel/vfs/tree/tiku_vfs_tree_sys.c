@@ -47,6 +47,8 @@
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>         /* /sys/flpr coprocessor    */
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* TIKU_FLPR_MSG_CAP        */
+#include <arch/nordic/tiku_device_select.h>     /* NRF_VPR00_NS readbacks   */
 #endif
 #include "tiku_vfs_tree_boot.h"
 #include <kernel/cpu/tiku_stack.h>   /* stack high-water for /sys/mem/stack_free */
@@ -989,8 +991,12 @@ flpr_heartbeat_read(char *buf, size_t max)
 static int
 flpr_image_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%lu\n",
-                    (unsigned long)tiku_flpr_arch_image_size());
+    /* Bring-up: image size + live doorbell-plumbing readbacks. */
+    return snprintf(buf, max, "%lu inten=%lx trig16=%lu intpend=%lx\n",
+                    (unsigned long)tiku_flpr_arch_image_size(),
+                    (unsigned long)NRF_VPR00_NS->INTEN,
+                    (unsigned long)NRF_VPR00_NS->EVENTS_TRIGGERED[16],
+                    (unsigned long)NRF_VPR00_NS->INTPEND);
 }
 
 static int
@@ -1012,12 +1018,38 @@ flpr_run_write(const char *buf, size_t len)
     return TIKU_VFS_EINVAL;
 }
 
+/* Echo surface over the mailbox IPC: writing sends the bytes to the FLPR
+ * (its echo service mirrors them back, doorbell -> ISR capture); reading
+ * returns "<reply_seq> <last reply>".  A seq that advances after a write
+ * proves the ENTIRE cross-core interrupt path, which is exactly what the
+ * TikuBench flpr suite asserts. */
+static int
+flpr_echo_read(char *buf, size_t max)
+{
+    char body[TIKU_FLPR_MSG_CAP + 1];
+    uint32_t n;
+    tiku_flpr_arch_poll();                      /* doorbell fallback: pull */
+    n = tiku_flpr_arch_reply(body, sizeof(body) - 1u);
+    body[n] = '\0';
+    return snprintf(buf, max, "%lu %s\n",
+                    (unsigned long)tiku_flpr_arch_reply_seq(), body);
+}
+
+static int
+flpr_echo_write(const char *buf, size_t len)
+{
+    return (tiku_flpr_arch_send(buf, (uint32_t)len) == 0)
+               ? 0 : TIKU_VFS_EINVAL;
+}
+
 static const tiku_vfs_node_t sys_flpr_children[] = {
     { "run",       TIKU_VFS_FILE, flpr_run_read,       flpr_run_write,
       NULL, 0 },
     { "state",     TIKU_VFS_FILE, flpr_state_read,     NULL, NULL, 0 },
     { "heartbeat", TIKU_VFS_FILE, flpr_heartbeat_read, NULL, NULL, 0 },
     { "image",     TIKU_VFS_FILE, flpr_image_read,     NULL, NULL, 0 },
+    { "echo",      TIKU_VFS_FILE, flpr_echo_read,      flpr_echo_write,
+      NULL, 0 },
 };
 #endif /* TIKU_FLPR_ENABLE */
 
@@ -1066,7 +1098,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  4 },
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
-    { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   4 },
+    { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   5 },
 #endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,

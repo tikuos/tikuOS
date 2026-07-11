@@ -93,6 +93,8 @@ void tiku_nordic_timer20_isr(void)         __attribute__((weak, alias("nordic_de
  * (268, P0); each posts TIKU_EVENT_GPIO for the pin that fired. */
 void tiku_nordic_gpiote20_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_gpiote30_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
+/* FLPR coprocessor doorbell -- VPR00 EVENTS_TRIGGERED (IRQn 76). */
+void tiku_nordic_flpr_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Factory trim application + silicon errata (minimal SystemInit)            */
@@ -266,6 +268,7 @@ __attribute__((section(".vectors"), used)) = {
 
     /* External interrupts -- IRQ numbers are the MDK IRQn enum values
      * (nrf54l15_application.h), NOT the vector-array position. */
+    [16 +  76] = tiku_nordic_flpr_isr,         /* VPR00_IRQn      = 76  */
     [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn    = 133 */
     [16 + 198] = tiku_nordic_uart_console_isr, /* SERIAL20_IRQn   = 198 */
     [16 + 202] = tiku_nordic_timer20_isr,      /* TIMER20_IRQn    = 202 (htimer)  */
@@ -277,7 +280,8 @@ __attribute__((section(".vectors"), used)) = {
     /* Fill every remaining external slot with the default handler so no
      * slot dispatches through a NULL pointer.  Ranges are split around the
      * explicitly-wired IRQs above (no overlapping designated initializers). */
-    [16 +   0 ... 16 + 132] = nordic_default_handler,
+    [16 +   0 ... 16 +  75] = nordic_default_handler,
+    [16 +  77 ... 16 + 132] = nordic_default_handler,
     [16 + 134 ... 16 + 197] = nordic_default_handler,
     [16 + 199 ... 16 + 201] = nordic_default_handler,
     [16 + 203 ... 16 + 217] = nordic_default_handler,
