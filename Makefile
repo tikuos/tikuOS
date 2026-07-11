@@ -1195,6 +1195,8 @@ SRCS += arch/nordic/tiku_spi_arch.c
 SRCS += arch/nordic/tiku_onewire_arch.c
 SRCS += arch/nordic/tiku_trng_arch.c
 SRCS += arch/nordic/tiku_crypto_arch.c
+SRCS += arch/nordic/tiku_radio_arch.c
+SRCS += arch/nordic/tiku_fault_arch.c
 ifeq ($(TIKU_THREADS_ENABLE),1)
 SRCS += kernel/threads/tiku_thread.c
 SRCS += arch/nordic/tiku_thread_arch.c
@@ -1539,6 +1541,9 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_CRYPTOPROBE=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_cryptoprobe.c
+endif
+ifneq (,$(findstring TIKU_SHELL_CMD_BLEADV=1,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_bleadv.c
 endif
 endif
 # GPIO arch is always needed (VFS tree references GPIO read/write/dir).

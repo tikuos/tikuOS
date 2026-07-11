@@ -127,6 +127,9 @@
 #ifndef TIKU_SHELL_CMD_CRYPTOPROBE
 #define TIKU_SHELL_CMD_CRYPTOPROBE 0 /**< cryptoprobe- CRACEN bring-up probe (opt-in) */
 #endif
+#ifndef TIKU_SHELL_CMD_BLEADV
+#define TIKU_SHELL_CMD_BLEADV 0 /**< bleadv- nRF54L15 BLE beacon bring-up (opt-in) */
+#endif
 #ifndef TIKU_SHELL_CMD_READ
 #define TIKU_SHELL_CMD_READ    1  /**< read    - Read value from VFS node */
 #endif

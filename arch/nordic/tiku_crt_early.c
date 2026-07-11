@@ -95,7 +95,7 @@ void tiku_nordic_gpiote20_isr(void)        __attribute__((weak, alias("nordic_de
 void tiku_nordic_gpiote30_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
-/* Factory trim application (minimal SystemInit)                             */
+/* Factory trim application + silicon errata (minimal SystemInit)            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -118,6 +118,61 @@ static void tiku_nordic_apply_trims(void)
         }
         *((volatile uint32_t *)addr) = NRF_FICR_NS->TRIMCNF[i].DATA;
     }
+}
+
+/* FICR silicon-identification words used to gate revision-specific errata
+ * (nRF54L15 errata sheet 4503_401 + the MDK's nrf54l_erratas.h convention):
+ * 0x00FFC340 = part marker (0x1C on nRF54L15), 0x00FFC344 = revision code
+ * (0x01 gates the workarounds MDK applies conditionally), 0x00FFC334 = trim
+ * version (extra gate on erratum 32). */
+#define NORDIC_FICR_PART  (*(volatile uint32_t *)0x00FFC340ul)
+#define NORDIC_FICR_REV   (*(volatile uint32_t *)0x00FFC344ul)
+#define NORDIC_FICR_TRIMV (*(volatile uint32_t *)0x00FFC334ul)
+
+/**
+ * @brief Silicon errata workarounds the stock MDK SystemInit applies and a
+ *        from-scratch startup must reproduce (raw register pokes from the
+ *        public nRF54L15 errata sheet; every Nordic-SDK app gets these).
+ *
+ * Split around the trim loop to preserve the MDK's ordering: erratum 37
+ * (TAD poke, all revisions) runs before trims; the regulator/RADIO pokes
+ * run after.  Miss these and the core boots fine but analog behaviour is
+ * off -- erratum 40 in particular parks a reserved RADIO register at a
+ * value the RF front-end needs.
+ */
+static void tiku_nordic_sysinit_errata_early(void)
+{
+    /* Erratum 37 (all revs): current can stay high after pin reset or power
+     * cycle unless this TAD register is set. */
+    *(volatile uint32_t *)(NRF_TAD_S_BASE + 0x40Cul) = 1ul;
+}
+
+static void tiku_nordic_sysinit_errata(void)
+{
+    /* ES-PDK regulator configuration (MDK SystemInit, all nRF54L15): prime
+     * 0x50120440 when it reads as unprogrammed. */
+    if (*(volatile uint32_t *)0x50120440ul == 0ul) {
+        *(volatile uint32_t *)0x50120440ul = 0xC8ul;
+    }
+
+    if (NORDIC_FICR_PART != 0x1Cul || NORDIC_FICR_REV != 0x01ul) {
+        return;                        /* remaining pokes are rev-1-gated   */
+    }
+
+    /* Erratum 32: regulator trim correction, additionally gated on the
+     * FICR trim version (later lots carry corrected trims). */
+    if (NORDIC_FICR_TRIMV <= 0x180A1D00ul) {
+        *(volatile uint32_t *)0x50120640ul = 0x1EA9E040ul;
+    }
+
+    /* Erratum 40: RADIO band-edge transient power -- reserved RADIO
+     * register (RADIO base + 0x7AC) must hold this value. */
+    *(volatile uint32_t *)0x5008A7ACul = 0x040A0078ul;
+
+    /* Erratum 31: sleep-current regulator configuration (must run at
+     * start-up, before any DC/DC use). */
+    *(volatile uint32_t *)0x50120624ul = (20ul | (1ul << 5));
+    *(volatile uint32_t *)0x5012063Cul &= ~(1ul << 19);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -146,7 +201,9 @@ void tiku_nordic_reset_handler(void)
      * warm reboot lands deterministically. */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_nordic_vectors;
 
+    tiku_nordic_sysinit_errata_early();
     tiku_nordic_apply_trims();
+    tiku_nordic_sysinit_errata();
 
     /* Copy .data (RRAM load image -> SRAM). */
     {

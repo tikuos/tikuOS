@@ -21,6 +21,20 @@
  * the radio have an accurate high-frequency source.  A start-timeout
  * latches a clock-fault flag reported through the /sys clock view.
  *
+ * Erratum 39 ("Device can behave erratically after XOSTART"): if XOSTART
+ * is triggered while the PLLSTART task has never been triggered and the
+ * CPU later sleeps, peripherals OUTSIDE the MCU power domain -- i.e. the
+ * RADIO -- can behave erratically and the device can become unresponsive.
+ * TikuOS idles in WFI constantly (tickless), so the prescribed workaround
+ * is mandatory here: trigger CLOCK.TASKS_PLLSTART (pin the PLL on,
+ * independent of automatic clock requests) BEFORE CLOCK.TASKS_XOSTART.
+ * TikuOS never issues XOSTOP, so the paired PLLSTOP is not needed.
+ *
+ * The HFXO wait also covers EVENTS_XOTUNED: XOSTART kicks an automatic
+ * load-capacitor tuning pass, and only a TUNED crystal is radio-grade
+ * (carrier accuracy).  An untuned-but-running XO is fine for UARTE, so
+ * XOTUNED timeout latches the same non-fatal clock-fault flag.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -54,10 +68,24 @@ void tiku_cpu_boot_nordic_init(void)
         tiku_nordic_clock_fault = 1;
     }
 
+    /* Erratum 39: pin the PLL on via its explicit task BEFORE XOSTART (see
+     * the header comment).  The PLL already clocks the core, so PLLSTARTED
+     * reports quickly; bounded anyway. */
+    NRF_CLOCK_S->EVENTS_PLLSTARTED = 0U;
+    NRF_CLOCK_S->TASKS_PLLSTART    = 1U;
+    spin = TIKU_NORDIC_XOSTART_SPIN;
+    while (NRF_CLOCK_S->EVENTS_PLLSTARTED == 0U && spin != 0U) {
+        spin--;
+    }
+    if (NRF_CLOCK_S->EVENTS_PLLSTARTED == 0U) {
+        tiku_nordic_clock_fault = 1;
+    }
+
     /* Start the HFXO (32 MHz crystal) and wait for it to report started.
      * Bounded spin so a missing/broken crystal degrades to a flagged fault
      * rather than a boot hang -- the internal source still clocks the core. */
     NRF_CLOCK_S->EVENTS_XOSTARTED = 0U;
+    NRF_CLOCK_S->EVENTS_XOTUNED   = 0U;
     NRF_CLOCK_S->TASKS_XOSTART    = 1U;
 
     spin = TIKU_NORDIC_XOSTART_SPIN;
@@ -65,6 +93,15 @@ void tiku_cpu_boot_nordic_init(void)
         spin--;
     }
     if (NRF_CLOCK_S->EVENTS_XOSTARTED == 0U) {
+        tiku_nordic_clock_fault = 1;
+    }
+
+    /* Radio-grade accuracy needs the post-start tuning pass to finish. */
+    spin = TIKU_NORDIC_XOSTART_SPIN;
+    while (NRF_CLOCK_S->EVENTS_XOTUNED == 0U && spin != 0U) {
+        spin--;
+    }
+    if (NRF_CLOCK_S->EVENTS_XOTUNED == 0U) {
         tiku_nordic_clock_fault = 1;
     }
 }

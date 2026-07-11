@@ -147,6 +147,9 @@
 #if TIKU_SHELL_CMD_CRYPTOPROBE
 #include "commands/tiku_shell_cmd_cryptoprobe.h"
 #endif
+#if TIKU_SHELL_CMD_BLEADV
+#include "commands/tiku_shell_cmd_bleadv.h"
+#endif
 #if TIKU_SHELL_CMD_READ
 #include "commands/tiku_shell_cmd_read.h"
 #endif
@@ -667,6 +670,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_CRYPTOPROBE
     {"cryptoprobe","CRACEN bring-up probe",   tiku_shell_cmd_cryptoprobe},
+#endif
+#if TIKU_SHELL_CMD_BLEADV
+    {"bleadv",  "BLE beacon (nRF54L)",        tiku_shell_cmd_bleadv},
 #endif
 #if TIKU_SHELL_CMD_NAME
     {"name",    "Read/set device name",        tiku_shell_cmd_name},
