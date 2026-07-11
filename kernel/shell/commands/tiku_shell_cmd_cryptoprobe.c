@@ -30,6 +30,7 @@
 #include <kernel/timers/tiku_clock.h>
 #include <arch/nordic/tiku_crypto_arch.h>
 #include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
+#include <tikukits/crypto/gcm/tiku_kits_crypto_gcm.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -194,6 +195,62 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
         tiku_crypto_hw_counters(&h, &sc, &e);
         SHELL_PRINTF("hw_ops=%u sw_ops=%u hw_errs=%u mode=%s\n",
                      h, sc, e, tiku_crypto_hw_mode() ? "sw" : "auto");
+        return;
+    }
+
+    if (argc >= 2 && strcmp(argv[1], "gcm") == 0) {
+        /* hw GCM vs the NIST-vector-proven software kit: AES-256, 12-byte
+         * IV, 20-byte AAD, 67-byte payload (odd tail on purpose). */
+        static uint8_t key[32], iv[12], aad[32], pt[80], ct_sw[80], ct_hw[80];
+        static uint8_t tag_sw[16], tag_hw[16], back[80];
+        tiku_kits_crypto_gcm_ctx_t gctx;
+        uint32_t extra = (argc >= 3)
+            ? (uint32_t)strtoul(argv[2], (char **)0, 16) : 0u;
+        size_t i;
+        int rc, rc2;
+        for (i = 0; i < sizeof key; i++) { key[i] = (uint8_t)(i * 7u + 1u); }
+        for (i = 0; i < sizeof iv;  i++) { iv[i]  = (uint8_t)(0xA0u + i); }
+        for (i = 0; i < sizeof aad; i++) { aad[i] = (uint8_t)(0x30u + i); }
+        for (i = 0; i < 67u;        i++) { pt[i]  = (uint8_t)(i ^ 0x5Au); }
+
+        tiku_kits_crypto_gcm_init256(&gctx, key);
+        tiku_kits_crypto_gcm_encrypt(&gctx, iv, aad, 20u, pt, 67u,
+                                     ct_sw, tag_sw);
+        rc = tiku_crypto_arch_aes_gcm(0, extra, key, 32u, iv,
+                                      aad, 20u, pt, 67u, ct_hw, tag_hw);
+        SHELL_PRINTF("gcm enc rc=%d ct %s tag %s\n", rc,
+                     (rc == 0 && memcmp(ct_sw, ct_hw, 67u) == 0)
+                         ? SH_GREEN "MATCH" SH_RST : SH_RED "diff" SH_RST,
+                     (rc == 0 && memcmp(tag_sw, tag_hw, 16u) == 0)
+                         ? SH_GREEN "MATCH" SH_RST : SH_RED "diff" SH_RST);
+        {
+            /* differential: does hw look like AES-128 over key[0..15]? */
+            static uint8_t ct128[80], tag128[16];
+            tiku_kits_crypto_gcm_ctx_t g128;
+            tiku_kits_crypto_gcm_init(&g128, key);
+            tiku_kits_crypto_gcm_encrypt(&g128, iv, aad, 20u, pt, 67u,
+                                         ct128, tag128);
+            SHELL_PRINTF("  hw-vs-sw128: ct %s tag %s\n",
+                         memcmp(ct128, ct_hw, 67u) == 0 ? "MATCH" : "diff",
+                         memcmp(tag128, tag_hw, 16u) == 0 ? "MATCH" : "diff");
+            SHELL_PRINTF("  sw ct: ");
+            print_digest(ct_sw, 8u);
+            SHELL_PRINTF("  hw ct: ");
+            print_digest(ct_hw, 8u);
+            SHELL_PRINTF("\n  sw tag: ");
+            print_digest(tag_sw, 8u);
+            SHELL_PRINTF(" hw tag: ");
+            print_digest(tag_hw, 8u);
+            SHELL_PRINTF("\n");
+        }
+
+        rc2 = tiku_crypto_arch_aes_gcm(1, extra, key, 32u, iv,
+                                       aad, 20u, ct_sw, 67u, back, tag_hw);
+        SHELL_PRINTF("gcm dec rc=%d pt %s tag %s\n", rc2,
+                     (rc2 == 0 && memcmp(back, pt, 67u) == 0)
+                         ? SH_GREEN "MATCH" SH_RST : SH_RED "diff" SH_RST,
+                     (rc2 == 0 && memcmp(tag_hw, tag_sw, 16u) == 0)
+                         ? SH_GREEN "MATCH" SH_RST : SH_RED "diff" SH_RST);
         return;
     }
 

@@ -51,6 +51,30 @@ void    tiku_crypto_hw_count_sw(void);
  */
 int tiku_crypto_arch_sha256(const void *msg, size_t len, uint8_t out[32]);
 
+/**
+ * @brief One-shot AES-GCM through the BA411 engine.
+ *
+ * @param decrypt    0 = encrypt, 1 = decrypt (tag is PRODUCED either way;
+ *                   the caller compares on decrypt)
+ * @param cfg_extra  extra config-word bits (bring-up knob; 0 in production)
+ * @param out        needs align-4 headroom past @p in_sz (FIFO realign)
+ * @return 0 ok; -2 unsupported shape (caller falls back to software)
+ */
+int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
+                             const uint8_t *key, size_t key_sz,
+                             const uint8_t iv[12],
+                             const uint8_t *aad, size_t aad_sz,
+                             const uint8_t *in, size_t in_sz,
+                             uint8_t *out, uint8_t tag[16]);
+
+/** @brief Kit-safe AES-GCM (staged; no caller alignment/RRAM constraints). */
+int tiku_crypto_arch_aes_gcm_kit(int decrypt,
+                                 const uint8_t *key, size_t key_sz,
+                                 const uint8_t iv[12],
+                                 const uint8_t *aad, size_t aad_sz,
+                                 const uint8_t *in, size_t in_sz,
+                                 uint8_t *out, uint8_t tag[16]);
+
 /*---------------------------------------------------------------------------*/
 /* Bring-up probes (cryptoprobe shell command; not part of the kit contract) */
 /*---------------------------------------------------------------------------*/

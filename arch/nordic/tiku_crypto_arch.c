@@ -311,6 +311,175 @@ int tiku_crypto_arch_sha256(const void *msg, size_t len, uint8_t out[32])
 }
 
 /*---------------------------------------------------------------------------*/
+/* AES-GCM (BA411E)                                                          */
+/*---------------------------------------------------------------------------*/
+
+/* BA411 config word: one-hot mode in bits [16:8] (GCM = 0x040 = mode-id 6),
+ * decrypt bit 0; key/IV loaded through the config interface (offsets 0x8 and
+ * 0x28); AAD is engine datatype 1, payload datatype 0; the final input block
+ * is the 16-byte big-endian lenA||lenC pair, then the 16-byte tag follows
+ * the payload on the push side.  Semantics from the vendor driver's
+ * documented flow; verified on-die against the software GCM (NIST-vector
+ * proven) -- see cryptoprobe gcm. */
+#define CM_AES_CFG_GCM      (0x040UL << 8)
+#define CM_AES_CFG_DECRYPT  0x1UL
+#define CM_AES_REG_KEY      0x08u
+#define CM_AES_REG_IV       0x28u
+
+/* True when the DMA can fetch @p p directly (on-die SRAM). */
+static int cm_src_in_ram(const void *p)
+{
+    return ((uintptr_t)p >> 24) == 0x20u;
+}
+
+int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
+                             const uint8_t *key, size_t key_sz,
+                             const uint8_t iv[12],
+                             const uint8_t *aad, size_t aad_sz,
+                             const uint8_t *in, size_t in_sz,
+                             uint8_t *out, uint8_t tag[16])
+{
+    static cm_desc_t fetch[6];
+    static cm_desc_t push[3];
+    static uint32_t  cfg_word;
+    static uint8_t   keybuf[32] __attribute__((aligned(4)));
+    static uint8_t   ivbuf[12]  __attribute__((aligned(4)));
+    static uint8_t   lenblk[16] __attribute__((aligned(4)));
+    uint64_t bits;
+    cm_desc_t *d = fetch;
+    int i;
+
+    if (key_sz != 16u && key_sz != 32u) {
+        return -2;
+    }
+    /* Inputs the DMA cannot reach (RRAM) would need staging; the TLS/kit
+     * callers hand SRAM buffers, so keep the fast path simple. */
+    if ((aad_sz && !cm_src_in_ram(aad)) || (in_sz && !cm_src_in_ram(in))) {
+        return -2;
+    }
+
+    cfg_word = CM_AES_CFG_GCM | cfg_extra | (decrypt ? CM_AES_CFG_DECRYPT : 0);
+    memcpy(keybuf, key, key_sz);
+    memcpy(ivbuf, iv, 12u);
+
+    /* lenA || lenC, both in BITS, big-endian. */
+    bits = (uint64_t)aad_sz * 8u;
+    for (i = 0; i < 8; i++) {
+        lenblk[i]     = (uint8_t)(bits >> (56 - 8 * i));
+    }
+    bits = (uint64_t)in_sz * 8u;
+    for (i = 0; i < 8; i++) {
+        lenblk[8 + i] = (uint8_t)(bits >> (56 - 8 * i));
+    }
+
+    d->addr = (const uint8_t *)&cfg_word;
+    d->length = 4u | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_CONFIG | CM_TAG_CFGREG(0);
+    d->next = d + 1; d++;
+
+    d->addr = keybuf;
+    d->length = (uint32_t)key_sz | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_CONFIG | CM_TAG_CFGREG(CM_AES_REG_KEY);
+    d->next = d + 1; d++;
+
+    d->addr = ivbuf;
+    d->length = 12u | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_CONFIG | CM_TAG_CFGREG(CM_AES_REG_IV);
+    d->next = d + 1; d++;
+
+    /* AEAD data moves in 16-byte blocks: descriptor lengths align to 16
+     * with the tag's invalid-bytes field covering the pad (the vendor flow
+     * uses the same 0xf alignment mask).  Callers guarantee align-16
+     * readable headroom past aad/in. */
+    if (aad_sz) {
+        uint32_t asz = ((uint32_t)aad_sz + 15u) & ~15u;
+        d->addr = aad;
+        d->length = asz | CM_LEN_REALIGN;
+        d->tag = CM_TAG_ENGINE_AES | CM_TAG_DATATYPE(1) |
+                 ((asz - (uint32_t)aad_sz) << 8);
+        d->next = d + 1; d++;
+    }
+    if (in_sz) {
+        uint32_t asz = ((uint32_t)in_sz + 15u) & ~15u;
+        d->addr = in;
+        d->length = asz | CM_LEN_REALIGN;
+        d->tag = CM_TAG_ENGINE_AES | CM_TAG_DATATYPE(0) |
+                 ((asz - (uint32_t)in_sz) << 8);
+        d->next = d + 1; d++;
+    }
+
+    d->addr = lenblk;
+    d->length = 16u | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_DATATYPE(0) | CM_TAG_LAST;
+    d->next = CM_DESC_STOP;
+
+    /* Output stream: the engine EMITS the AAD first (authenticated
+     * passthrough -- observed on-die: the first output bytes were the AAD),
+     * then ciphertext/plaintext, then the 16-byte tag.  The AAD block is
+     * routed to a discard sink; out gets align-16 REALIGN padding (caller
+     * guarantees headroom). */
+    {
+        static uint8_t sink[64] __attribute__((aligned(4)));
+        cm_desc_t *q = push;
+        uint32_t aad_asz = ((uint32_t)aad_sz + 15u) & ~15u;
+
+        if (aad_sz) {
+            if (aad_asz > sizeof sink) {
+                return -2;               /* oversized AAD: software path */
+            }
+            q->addr = sink;
+            q->length = aad_asz | CM_LEN_REALIGN;
+            q->tag = 0;
+            q->next = q + 1; q++;
+        }
+        if (in_sz) {
+            q->addr = out;
+            q->length = (((uint32_t)in_sz + 15u) & ~15u) | CM_LEN_REALIGN;
+            q->tag = 0;
+            q->next = q + 1; q++;
+        }
+        q->addr = tag;
+        q->length = 16u | CM_LEN_REALIGN;
+        q->tag = CM_TAG_LAST;
+        q->next = CM_DESC_STOP;
+    }
+    return cm_run(fetch, push);
+}
+
+/**
+ * @brief Kit-safe AES-GCM: stages in/out through SRAM so the caller's
+ * buffers need no alignment headroom and may live in RRAM.  Encrypt or
+ * decrypt (verify) up to the stage size; larger -> -2 (software path).
+ */
+int tiku_crypto_arch_aes_gcm_kit(int decrypt,
+                                 const uint8_t *key, size_t key_sz,
+                                 const uint8_t iv[12],
+                                 const uint8_t *aad, size_t aad_sz,
+                                 const uint8_t *in, size_t in_sz,
+                                 uint8_t *out, uint8_t tag[16])
+{
+    static uint8_t istage[CM_STAGE_MAX] __attribute__((aligned(16)));
+    static uint8_t ostage[CM_STAGE_MAX] __attribute__((aligned(16)));
+    static uint8_t astage[256]          __attribute__((aligned(16)));
+    int rc;
+
+    if (in_sz > CM_STAGE_MAX || aad_sz > sizeof astage) {
+        return -2;
+    }
+    if (in_sz)  { memcpy(istage, in, in_sz); }
+    if (aad_sz) { memcpy(astage, aad, aad_sz); }
+
+    rc = tiku_crypto_arch_aes_gcm(decrypt, 0u, key, key_sz, iv,
+                                  aad_sz ? astage : (const uint8_t *)0, aad_sz,
+                                  in_sz  ? istage : (const uint8_t *)0, in_sz,
+                                  ostage, tag);
+    if (rc == 0 && in_sz) {
+        memcpy(out, ostage, in_sz);
+    }
+    return rc;
+}
+
+/*---------------------------------------------------------------------------*/
 /* Bring-up probes                                                           */
 /*---------------------------------------------------------------------------*/
 
