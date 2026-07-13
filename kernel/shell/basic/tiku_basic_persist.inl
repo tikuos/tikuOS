@@ -174,6 +174,17 @@ basic_prog_fetch(char *buf, size_t max, size_t *out_len)
 /* SAVE / LOAD                                                               */
 /*---------------------------------------------------------------------------*/
 
+/* Shared SAVE/LOAD serialization scratch. SAVE serializes the program into
+ * it, LOAD deserializes out of it -- the two are single-threaded interpreter
+ * commands that never run concurrently, so one buffer serves both. Sized +1
+ * for LOAD's NUL terminator; SAVE uses the first TIKU_BASIC_SAVE_BUF_BYTES.
+ * Folding the two per-function statics into one matters on RP2350, where
+ * BASIC_SCRATCH is plain .bss (no .ssram section): each copy is
+ * PROGRAM_LINES*(LINE_MAX+8) = ~76 KB on the 1024-line BIG tier, and the
+ * second one tipped the all-features HTTPS+WiFi+BASIC build over the
+ * 520 KB SRAM. */
+static BASIC_SCRATCH char basic_persist_scratch[TIKU_BASIC_SAVE_BUF_BYTES + 1];
+
 /**
  * @brief Serialise the in-memory program in ascending order and
  *        commit it to FRAM under BASIC_PERSIST_KEY.
@@ -183,9 +194,11 @@ basic_prog_fetch(char *buf, size_t max, size_t *out_len)
 static int
 basic_save_to_persist(void)
 {
-    /* Serialize ascending-ordered program lines (the shape LIST prints) into a
-     * buffer, then commit it under the default slot via basic_prog_store(). */
-    static BASIC_SCRATCH char tmp[TIKU_BASIC_SAVE_BUF_BYTES];
+    /* Serialize ascending-ordered program lines (the shape LIST prints) into
+     * the shared scratch, then commit it under the default slot via
+     * basic_prog_store(). Capacity mirrors the old per-function buffer. */
+    char *const  tmp     = basic_persist_scratch;
+    const size_t tmp_cap = TIKU_BASIC_SAVE_BUF_BYTES;
     size_t      pos = 0;
     uint16_t    cur = 0;
 
@@ -195,9 +208,9 @@ basic_save_to_persist(void)
         if (idx < 0) {
             break;
         }
-        n = snprintf(tmp + pos, sizeof(tmp) - pos, "%u %s\n",
+        n = snprintf(tmp + pos, tmp_cap - pos, "%u %s\n",
                      (unsigned)prog[idx].number, prog[idx].text);
-        if (n < 0 || (size_t)n >= sizeof(tmp) - pos) {
+        if (n < 0 || (size_t)n >= tmp_cap - pos) {
             SHELL_PRINTF(SH_RED
                          "? save: program too large for buffer\n" SH_RST);
             return -1;
@@ -227,12 +240,15 @@ basic_save_to_persist(void)
 static int
 basic_load_from_persist(void)
 {
-    static BASIC_SCRATCH char tmp[TIKU_BASIC_SAVE_BUF_BYTES + 1];
+    /* Deserializes from the shared scratch (see basic_persist_scratch
+     * above); full capacity including the +1 for the NUL terminator. */
+    char *const  tmp     = basic_persist_scratch;
+    const size_t tmp_cap = TIKU_BASIC_SAVE_BUF_BYTES + 1u;
     size_t      n_read = 0;
     char       *line_start;
     char       *p;
 
-    if (basic_prog_fetch(tmp, sizeof(tmp) - 1u, &n_read) != 0 ||
+    if (basic_prog_fetch(tmp, tmp_cap - 1u, &n_read) != 0 ||
         n_read == 0u) {
         SHELL_PRINTF(SH_RED "? load: no saved program\n" SH_RST);
         return -1;
