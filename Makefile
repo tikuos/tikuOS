@@ -2398,24 +2398,58 @@ erase:
 
 else ifeq ($(TIKU_PLATFORM),nordic)
 
-# nRF54L15-DK via the on-board SEGGER J-Link + Nordic's nrfutil.  The build
-# emits main.hex (objcopy -O ihex); nrfutil erases and programs RRAM, then
-# resets the system so the freshly-flashed image runs.  Set NRF_SN=<serial>
-# to target a specific DK when more than one is attached.
+# nRF54L15-DK flash: two backends, both driving the on-board SEGGER J-Link.
+#   NRF_FLASH=jlink    JLinkExe `loadfile main.hex` into RRAM -- universal
+#                      (any J-Link; needs J-Link SW >= 8.10f), no extra tooling,
+#                      the same recipe the Ambiq EVBs use.
+#   NRF_FLASH=nrfutil  Nordic's nrfutil -- adds the Nordic-only extras
+#                      (APPROTECT --recover, UICR/FICR, DFU/MCUboot packaging).
+#   NRF_FLASH=auto     [default] nrfutil when it is installed, else J-Link, so
+#                      `make flash MCU=nrf54l15` just works on any host.
+# Probe serial: JLINK_SN or NRF_SN (either) picks one DK on a multi-probe rig.
+JLINK_DEVICE_NORDIC ?= nRF54L15_M33
+JLINK_FLASH_SCRIPT   = $(BUILD_DIR)/flash.jlink
+JLINK_ERASE_SCRIPT   = $(BUILD_DIR)/erase.jlink
+_NRF_SN          := $(strip $(if $(strip $(JLINK_SN)),$(JLINK_SN),$(NRF_SN)))
+NRF_JLINK_SN_ARG := $(if $(_NRF_SN),-SelectEmuBySN $(_NRF_SN),)
+NRF_FLASH ?= auto
+ifeq ($(NRF_FLASH),auto)
+NRF_HAVE_NRFUTIL   := $(shell { command -v nrfutil >/dev/null 2>&1 || [ -x "$(CURDIR)/temp/nrfutil" ]; } && echo 1)
+NRF_FLASH_RESOLVED := $(if $(NRF_HAVE_NRFUTIL),nrfutil,jlink)
+else
+NRF_FLASH_RESOLVED := $(NRF_FLASH)
+endif
+
 flash: all
+	@echo "nRF54L15 flash backend: $(NRF_FLASH_RESOLVED)  (override with NRF_FLASH=jlink|nrfutil)"
+ifeq ($(NRF_FLASH_RESOLVED),jlink)
+	@mkdir -p $(BUILD_DIR)
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nloadfile %s\nr\ng\nqc\n' "$(JLINK_DEVICE_NORDIC)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_HEX)" > $(JLINK_FLASH_SCRIPT)
+	@echo "Flashing $(TARGET_HEX) -> RRAM via $(JLINK) ($(JLINK_DEVICE_NORDIC))..."
+	$(JLINK) $(NRF_JLINK_SN_ARG) -CommanderScript $(JLINK_FLASH_SCRIPT)
+else
 	@echo "Flashing $(TARGET_HEX) via nrfutil ($(NRFUTIL))..."
 	$(NRFUTIL_ENV) $(NRFUTIL) device program --firmware $(TARGET_HEX) --core Application \
 		--options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG)
+endif
 
 run: flash
 
 debug: all
-	@echo "nRF54L15 debug via nrfutil, e.g.:"
-	@echo "  $(NRFUTIL) device cpu-register-read --register PC $(NRF_SN_ARG)"
-	@echo "  $(NRFUTIL) device reset --reset-kind RESET_SYSTEM $(NRF_SN_ARG)"
+	@echo "nRF54L15 debug -- pick a backend:"
+	@echo "  [J-Link]  $(JLINK_GDB) -device $(JLINK_DEVICE_NORDIC) -if $(JLINK_IF) -speed $(JLINK_SPEED)"
+	@echo "            $(GDB) main.elf -ex 'target remote :2331' -ex load -ex 'monitor reset' -ex continue"
+	@echo "  [nrfutil] $(NRFUTIL) device cpu-register-read --register PC $(NRF_SN_ARG)"
 
 erase:
+ifeq ($(NRF_FLASH_RESOLVED),jlink)
+	@mkdir -p $(BUILD_DIR)
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nerase\nr\nqc\n' "$(JLINK_DEVICE_NORDIC)" "$(JLINK_IF)" "$(JLINK_SPEED)" > $(JLINK_ERASE_SCRIPT)
+	@echo "Erasing RRAM via $(JLINK) ($(JLINK_DEVICE_NORDIC))..."
+	$(JLINK) $(NRF_JLINK_SN_ARG) -CommanderScript $(JLINK_ERASE_SCRIPT)
+else
 	$(NRFUTIL_ENV) $(NRFUTIL) device erase --core Application $(NRF_SN_ARG)
+endif
 
 else
 
