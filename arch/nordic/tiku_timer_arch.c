@@ -67,6 +67,7 @@ static volatile unsigned long          g_seconds = 0UL;
 /* Half-counts per tick: 2 * 1 MHz / 128 = 15625 (integer, exact 128 Hz). */
 #define TIKU_GRTC_STEP_HALF   (2UL * TIKU_GRTC_HZ / TIKU_CLOCK_ARCH_SECOND)
 #define TIKU_GRTC_CCEN_ENABLE 1UL
+#define TIKU_GRTC_MODE_AUTOEN   (1UL << 0)   /* active while a CPU is awake   */
 #define TIKU_GRTC_MODE_SYSCNTEN (1UL << 1)   /* MODE.SYSCOUNTEREN              */
 
 /** @brief SYSCOUNTER count (x2) at the last accounted tick boundary. */
@@ -126,15 +127,22 @@ static void grtc_rearm_immediate(void)
 void tiku_clock_arch_init(void)
 {
     uint64_t now;
+    uint32_t old_mode;
 
     g_ticks     = 0UL;
     g_seconds   = 0UL;
     s_stretched = 0u;
 
-    /* The boot ROM normally leaves the 1 MHz SYSCOUNTER running; start it if a
-     * given boot path did not (never disturbs a free-running counter). */
-    if ((TIKU_GRTC->MODE & TIKU_GRTC_MODE_SYSCNTEN) == 0UL) {
-        TIKU_GRTC->MODE |= TIKU_GRTC_MODE_SYSCNTEN;
+    /* Keep SYSCOUNTER active whenever the CPU is awake.  TASKS_CAPTURE is not
+     * functional while SYSCOUNTER is in its automatic low-power sleep state;
+     * without AUTOEN, accounting reads could therefore return the previous
+     * capture even during an awake busy-delay.  AUTOEN still lets GRTC use its
+     * LF-timer sleep path while all CPUs are in WFI, preserving tickless power.
+     * The boot ROM normally enables SYSCOUNTER; start it if this boot did not. */
+    old_mode = TIKU_GRTC->MODE;
+    TIKU_GRTC->MODE = old_mode | TIKU_GRTC_MODE_AUTOEN |
+                      TIKU_GRTC_MODE_SYSCNTEN;
+    if ((old_mode & TIKU_GRTC_MODE_SYSCNTEN) == 0UL) {
         TIKU_GRTC->TASKS_START = 1UL;
     }
 
