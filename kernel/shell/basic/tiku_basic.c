@@ -52,16 +52,19 @@
 /* Hardware-bridge headers.  Each is pulled in only when the matching
  * BASIC bridge is enabled, so a slim BASIC build (e.g. no GPIO, no
  * I2C) doesn't drag in unused HAL code. */
-#if TIKU_BASIC_GPIO_ENABLE && defined(PLATFORM_MSP430)
-#include <arch/msp430/tiku_gpio_arch.h>
+/* The BASIC hardware-bridge code (tiku_basic_*.inl) is platform-agnostic, so
+ * these declarations must be visible on every arch, not just MSP430. The gpio
+ * interface header dispatches to the right per-MCU arch header internally. */
+#if TIKU_BASIC_GPIO_ENABLE
+#include <interfaces/gpio/tiku_gpio.h>
 #endif
-#if TIKU_BASIC_ADC_ENABLE && defined(PLATFORM_MSP430)
+#if TIKU_BASIC_ADC_ENABLE
 #include <interfaces/adc/tiku_adc.h>
 #endif
-#if TIKU_BASIC_I2C_ENABLE && defined(PLATFORM_MSP430)
+#if TIKU_BASIC_I2C_ENABLE
 #include <interfaces/bus/tiku_i2c_bus.h>
 #endif
-#if TIKU_BASIC_REBOOT_ENABLE && defined(PLATFORM_MSP430)
+#if TIKU_BASIC_REBOOT_ENABLE
 #include <kernel/cpu/tiku_watchdog.h>
 #endif
 #if TIKU_BASIC_LED_ENABLE
