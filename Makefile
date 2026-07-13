@@ -835,7 +835,17 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # 2 KB heap -- observed AUTO-tier demand ~10 KB), and the https build must
 # leave room for BOTH TLS clients' RFC-max record buffers in 256 KB SRAM.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+# Threaded HTTPS also carries the worker scheduler state in the same 240 KB
+# application SRAM window.  The Nordic FRAM-tier BASIC profile has measured
+# AUTO-tier demand of only ~10 KB, so keep 20 KB for threaded builds and
+# recover 12 KB of static headroom; non-threaded BASIC retains the original
+# 32 KB arena.  This lets the canonical TikuBench/TikuConsole HTTPS-offload
+# profile link while remaining comfortably above observed BASIC demand.
+ifeq ($(TIKU_THREADS_ENABLE),1)
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=20480     # 20 KB: BASIC + thread headroom
+else
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=32768     # 32 KB: FRAM-tier BASIC arena
+endif
 endif
 
 else
