@@ -63,6 +63,9 @@
 #include "tiku_shell_io_tcp.h"
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* tiku_kits_net_process */
 #endif
+#if defined(TIKU_CONSOLE_USB)
+#include <arch/arm-rp2350/tiku_usb_cdc_arch.h>  /* usbcdc backend + poll pump */
+#endif
 #if TIKU_SHELL_CMD_SLIP
 #include <tikukits/net/slip/tiku_kits_net_slip.h>   /* SLIP framing constants */
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>   /* tiku_kits_net_ipv4_input */
@@ -1271,10 +1274,20 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #if TIKU_SHELL_TCP_ENABLE
     tiku_shell_io_tcp_init();
 #if TIKU_SHELL_NET_TEST
+#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
+    /* Net-test on a native-USB console build (RP2350): the USB CDC port is
+     * the only wired console -- picking the UART here orphans the one port
+     * the host tools connect to (the shell never reads USB, so the console
+     * is dead and a macOS host freezes ~60 s opening it).  The SLIP
+     * transport itself still rides the physical UART (tiku_kits_net_slip
+     * writes via tiku_uart_putc), so net-test over a UART rig is intact. */
+    tiku_shell_io_set_backend(&tiku_shell_io_usbcdc);
+#else
     /* Net-test: the UART is BOTH the local console and the SLIP transport, so
      * keep it as the default backend now; the telnet backend is installed on
      * connect (loop below) and reverts to UART on disconnect. */
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
+#endif
 #else
     /* APP=cli telnet-only: no local console; banner deferred until a TCP
      * client connects (see loop below). */
@@ -1325,6 +1338,19 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER
                                       || ev == TIKU_EVENT_VFS);
 
+#if defined(TIKU_CONSOLE_USB)
+        /* Native-USB builds: pump the polled CDC stack every pass no matter
+         * which backend owns the shell.  The stack has no IRQ, so EP0 class
+         * requests (SET_LINE_CODING / SET_CONTROL_LINE_STATE) are answered
+         * only when someone calls poll() -- leave it unserviced and a macOS
+         * host blocks ~30 s PER REQUEST inside open()/tcsetattr() on
+         * /dev/cu.usbmodem* (Linux's cdc_acm merely times out after 5 s and
+         * carries on, which is why a dead port was only conspicuous on
+         * Macs).  Also flushes mirrored TIKU_PRINTF output and drains host
+         * writes when the backend is UART/TCP (net-test, telnet, `both`). */
+        tiku_usb_cdc_poll();
+#endif
+
 #if TIKU_SHELL_CMD_RULES || TIKU_SHELL_CMD_WATCH
         /* A watched VFS node changed: dispatch to the event-side
          * consumers (rules armed on that node, and the live watch
@@ -1350,9 +1376,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             /* No telnet client connected. */
             if (tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
 #if TIKU_SHELL_NET_TEST
+#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
+                /* Net-test, native-USB console: revert to the USB CDC port
+                 * (the local console this build booted with). */
+                tiku_shell_io_set_backend(&tiku_shell_io_usbcdc);
+#else
                 /* Net-test: the shell still owns the UART (console + SLIP
                  * transport), so revert to UART rather than going dark. */
                 tiku_shell_io_set_backend(&tiku_shell_io_uart);
+#endif
 #else
                 tiku_shell_io_set_backend((void *)0);
 #endif
@@ -1394,16 +1426,24 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         tiku_timer_reset(&cli.timer);
 
 #if TIKU_SHELL_TCP_ENABLE && TIKU_SHELL_NET_TEST && TIKU_SHELL_CMD_SLIP
-        /* Net-test telnet: the UART is the SLIP transport carrying the telnet
-         * TCP, but a connected client makes the TCP backend active -- so the
-         * per-backend drain below stops reading the UART, which would starve
-         * telnet RX.  Pump the UART through the SLIP demux here so the telnet
-         * transport keeps flowing; console keystrokes are dropped while the
-         * remote client owns the line editor. */
+        /* Net-test telnet: the console wire is the SLIP transport carrying
+         * the telnet TCP, but a connected client makes the TCP backend
+         * active -- so the per-backend drain below stops reading the wire,
+         * which would starve telnet RX.  Pump the wire through the SLIP
+         * demux here so the telnet transport keeps flowing; console
+         * keystrokes are dropped while the remote client owns the line
+         * editor.  The wire follows the console: the USB CDC port on an
+         * RP2350 native-USB build, the UART everywhere else (it must match
+         * SLIP_WIRE_* in tiku_kits_net_slip.c, where the TX side lives). */
+#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
+#define SHELL_SLIP_WIRE_IO tiku_shell_io_usbcdc
+#else
+#define SHELL_SLIP_WIRE_IO tiku_shell_io_uart
+#endif
         if (tiku_shell_cmd_slip_active() &&
             tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
-            while (tiku_shell_io_uart.rx_ready()) {
-                int uch = tiku_shell_io_uart.getc();
+            while (SHELL_SLIP_WIRE_IO.rx_ready()) {
+                int uch = SHELL_SLIP_WIRE_IO.getc();
                 if (uch < 0) {
                     break;
                 }
