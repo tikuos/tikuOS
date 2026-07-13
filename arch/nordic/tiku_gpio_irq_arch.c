@@ -155,7 +155,7 @@ static int alloc_channel(gpiote_ctx_t *c)
  * and enables that line in the NVIC.  Subsequent matching edges broadcast
  * TIKU_EVENT_GPIO with data = TIKU_GPIO_IRQ_PACK(port, pin).
  *
- * @param port  Physical port number (0/1/2).
+ * @param port  Virtual port number (1=P0, 2=P1, 3=P2).
  * @param pin   Pin index within the port (0..31).
  * @param edge  Edge polarity to arm.
  * @return TIKU_GPIO_IRQ_OK, TIKU_GPIO_IRQ_ERR_INVALID for a bad
@@ -165,10 +165,19 @@ static int alloc_channel(gpiote_ctx_t *c)
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
                               tiku_gpio_edge_t edge)
 {
-    gpiote_ctx_t *c = ctx_for_port(port);
+    gpiote_ctx_t *c;
+    uint8_t       phys;
     uint32_t      pol;
     int           ch;
 
+    /* The GPIO API is 1-based virtual (1=P0, 2=P1, 3=P2), matching
+     * tiku_gpio_arch.c; translate to the physical (0-based) port here. */
+    if (port < 1u || port > 3u) {
+        return TIKU_GPIO_IRQ_ERR_INVALID;
+    }
+    phys = (uint8_t)(port - 1u);
+
+    c = ctx_for_port(phys);
     if (c == (gpiote_ctx_t *)0 || pin > TIKU_GPIOTE_CFG_PSEL_Msk) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
@@ -178,9 +187,9 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     }
 
     /* Idle-high input so a button (active-low) reads 1 until pressed. */
-    tiku_nordic_gpio_init_input_pullup(port, pin);
+    tiku_nordic_gpio_init_input_pullup(phys, pin);
 
-    ch = find_channel(c, port, pin);      /* re-arm in place if already set */
+    ch = find_channel(c, phys, pin);      /* re-arm in place if already set */
     if (ch < 0) {
         ch = alloc_channel(c);
         if (ch < 0) {
@@ -190,7 +199,7 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
 
     c->reg->CONFIG[ch] = TIKU_GPIOTE_CFG_MODE_EVENT
                        | ((uint32_t)pin  << TIKU_GPIOTE_CFG_PSEL_Pos)
-                       | ((uint32_t)port << TIKU_GPIOTE_CFG_PORT_Pos)
+                       | ((uint32_t)phys << TIKU_GPIOTE_CFG_PORT_Pos)
                        | (pol            << TIKU_GPIOTE_CFG_POL_Pos);
     c->reg->EVENTS_IN[ch] = 0UL;
     (void)c->reg->EVENTS_IN[ch];              /* flush the clear */
@@ -212,19 +221,26 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
  * and pull are left as-is so the app can still read the line afterwards.
  * Disabling a pin that was never armed is a successful no-op.
  *
- * @param port  Physical port number (0/1/2).
+ * @param port  Virtual port number (1=P0, 2=P1, 3=P2).
  * @param pin   Pin index within the port.
  * @return TIKU_GPIO_IRQ_OK, or TIKU_GPIO_IRQ_ERR_INVALID for a bad port.
  */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
 {
-    gpiote_ctx_t *c = ctx_for_port(port);
+    gpiote_ctx_t *c;
+    uint8_t       phys;
     int           ch;
 
+    if (port < 1u || port > 3u) {
+        return TIKU_GPIO_IRQ_ERR_INVALID;
+    }
+    phys = (uint8_t)(port - 1u);
+
+    c = ctx_for_port(phys);
     if (c == (gpiote_ctx_t *)0) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
-    ch = find_channel(c, port, pin);
+    ch = find_channel(c, phys, pin);
     if (ch < 0) {
         return TIKU_GPIO_IRQ_OK;              /* not armed: nothing to do */
     }
@@ -265,10 +281,11 @@ static void gpiote_isr(gpiote_ctx_t *c)
             uint32_t cfg  = c->reg->CONFIG[ch];
             uint8_t  pin  = (uint8_t)((cfg >> TIKU_GPIOTE_CFG_PSEL_Pos)
                                       & TIKU_GPIOTE_CFG_PSEL_Msk);
-            uint8_t  port = (uint8_t)((cfg >> TIKU_GPIOTE_CFG_PORT_Pos)
+            uint8_t  phys = (uint8_t)((cfg >> TIKU_GPIOTE_CFG_PORT_Pos)
                                       & TIKU_GPIOTE_CFG_PORT_Msk);
-            tiku_event_data_t data =
-                (tiku_event_data_t)TIKU_GPIO_IRQ_PACK(port, pin);
+            /* Report the 1-based virtual port the caller armed with. */
+            tiku_event_data_t data = (tiku_event_data_t)
+                TIKU_GPIO_IRQ_PACK((uint8_t)(phys + 1u), pin);
 
             tiku_process_post(TIKU_PROCESS_BROADCAST, TIKU_EVENT_GPIO, data);
         }

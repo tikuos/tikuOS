@@ -187,10 +187,24 @@ void tiku_nordic_grtc_isr(void)
 
 unsigned short tiku_clock_arch_fine(void)
 {
-    uint32_t now  = (uint32_t)grtc_syscounter(TIKU_GRTC_CAP_FINE);
-    uint32_t base = (uint32_t)(s_anchor_half >> 1);   /* current boundary     */
-    uint32_t pos  = now - base;                        /* counts into the tick */
-    uint32_t span = (uint32_t)(TIKU_GRTC_STEP_HALF >> 1) + 1u;  /* ~7813 */
+    uint32_t now, base, pos, span;
+    uint64_t anchor;
+    uint32_t primask;
+
+    /* s_anchor_half is a 64-bit value updated by the GRTC ISR; snapshot it (and
+     * the matching syscounter) with interrupts masked so the two LDRs of the
+     * 64-bit load cannot tear against a mid-read ISR update.  Raw PRIMASK
+     * save/disable/restore -- CMSIS intrinsics aren't included here, and this
+     * matches the crt's inline-asm idiom. */
+    __asm__ volatile ("mrs %0, primask" : "=r" (primask));
+    __asm__ volatile ("cpsid i" ::: "memory");
+    anchor = s_anchor_half;
+    now    = (uint32_t)grtc_syscounter(TIKU_GRTC_CAP_FINE);
+    __asm__ volatile ("msr primask, %0" :: "r" (primask) : "memory");
+
+    base = (uint32_t)(anchor >> 1);                    /* current boundary     */
+    pos  = now - base;                                 /* counts into the tick */
+    span = (uint32_t)(TIKU_GRTC_STEP_HALF >> 1) + 1u;  /* ~7813 */
 
     if (pos >= span) {
         pos = span - 1u;                               /* clamp (best-effort)  */

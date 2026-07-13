@@ -165,10 +165,15 @@ uint16_t tiku_mpu_arch_get_violation_flags(void)  { return 0u; }
 void     tiku_mpu_arch_clear_violation_flags(void) { /* nothing latched */ }
 void     tiku_mpu_arch_enable_violation_nmi(void)  { /* no violation NMI  */ }
 
-/* The linker reserves at least 8 KB below __stack for the descending stack.
- * Keep the paint floor inside that reservation so it cannot touch statics. */
+/* True stack floor = end of statics.  The nordic SRAM map is
+ * [statics .. __end__][free stack space][__stack]: no heap and no MPU stack
+ * guard sit between __end__ and the descending stack, so the whole span is
+ * paintable (the linker ASSERTs >= 8 KB of it stays free).  Returning __end__
+ * -- rather than a fixed top-8 KB floor -- lets tiku_stack_free() measure deep
+ * stacks (e.g. BASIC's 10-24 KB) instead of saturating to 0 past 8 KB. */
 extern uint32_t __sram_end;
+extern uint32_t __end__;
 uint32_t tiku_stack_arch_bottom(void)
 {
-    return (uint32_t)(uintptr_t)&__sram_end - 8192U;
+    return (uint32_t)(uintptr_t)&__end__;
 }

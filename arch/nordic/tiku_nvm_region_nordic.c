@@ -25,6 +25,7 @@
 #include <stddef.h>
 
 #include "kernel/memory/tiku_nvm_region.h"
+#include "arch/nordic/tiku_mem_arch.h"    /* tiku_mem_arch_nvm_flush() */
 
 /* Linker-carved region (nrf54l15.ld).  __tiku_nvmfs_size is an ABSOLUTE symbol
  * whose ADDRESS is the size (same convention as the rp2350 / ambiq backends). */
@@ -45,6 +46,10 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
         return -1;                          /* out of range */
     }
     memcpy(be->base + off, src, len);       /* RRAM in place; caller holds WEN */
+    /* Wait for the RRAMC to finish committing before the caller closes the WEN
+     * gate -- symmetry with tiku_mem_arch_nvm_write(), which spins on READY so
+     * a closing gate can't truncate the tail word of an in-flight commit. */
+    tiku_mem_arch_nvm_flush();
     return 0;
 }
 

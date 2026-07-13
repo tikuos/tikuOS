@@ -203,6 +203,15 @@ void tiku_nordic_reset_handler(void)
      * warm reboot lands deterministically. */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_nordic_vectors;
 
+    /* Enable the FPU (CPACR CP10/CP11 full access) up front: the softfp +
+     * fpv5-sp-d16 build can compile single-precision float ops to VFP
+     * instructions, which fault (NOCP UsageFault -> HardFault) with the FPU
+     * off.  The nRF54L has no bootloader to do this and the crt runs first.
+     * CPACR is at 0xE000ED88; DSB+ISB so it takes effect before any FP op. */
+    *(volatile uint32_t *)0xE000ED88U |= (0xFU << 20);
+    __asm__ volatile ("dsb" ::: "memory");
+    __asm__ volatile ("isb" ::: "memory");
+
     tiku_nordic_sysinit_errata_early();
     tiku_nordic_apply_trims();
     tiku_nordic_sysinit_errata();
