@@ -164,3 +164,11 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
 uint16_t tiku_mpu_arch_get_violation_flags(void)  { return 0u; }
 void     tiku_mpu_arch_clear_violation_flags(void) { /* nothing latched */ }
 void     tiku_mpu_arch_enable_violation_nmi(void)  { /* no violation NMI  */ }
+
+/* The linker reserves at least 8 KB below __stack for the descending stack.
+ * Keep the paint floor inside that reservation so it cannot touch statics. */
+extern uint32_t __sram_end;
+uint32_t tiku_stack_arch_bottom(void)
+{
+    return (uint32_t)(uintptr_t)&__sram_end - 8192U;
+}

@@ -8,8 +8,8 @@
  * tiku_rtc.h - Wall-clock RTC API
  *
  * Soft RTC implemented on top of tiku_clock_seconds() (system uptime)
- * plus a persistent epoch offset. Stored in `.persistent`, so the
- * wall clock survives warm reset on every platform, and survives
+ * plus a persistent epoch baseline. Stored in `.persistent`, so the last
+ * explicitly set epoch survives warm reset on every platform, and survives
  * power cycle wherever `.persistent` is flash- or FRAM-backed
  * (MSP430 FRAM, RP2350 with flash NVM mirror).
  *
@@ -17,7 +17,7 @@
  * the existing tiku_clock_arch_fine() / tiku_htimer_now() APIs.
  *
  * This API backs the /sys/time VFS node; the implementation in
- * tiku_rtc.c keeps the persistent offset and the MPU-unlock
+ * tiku_rtc.c keeps the persistent baseline and the MPU-unlock
  * handshake out of the VFS handlers.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -36,7 +36,7 @@ extern "C" {
  * @brief Initialise the RTC layer. Idempotent.
  *
  * Validates the magic word in `.persistent` storage and zeroes the
- * offset if it has not been seen before (first boot, or virgin
+ * baseline if it has not been seen before (first boot, or virgin
  * NVM). Must be called once during boot, before any rtc_get / rtc_set.
  */
 void tiku_rtc_init(void);
@@ -45,7 +45,7 @@ void tiku_rtc_init(void);
  * @brief Return current wall-clock seconds since the Unix epoch
  *        (or whatever epoch the caller last set).
  *
- * Equivalent to `epoch_offset + tiku_clock_seconds()`. Returns 0 if
+ * Equivalent to `epoch_base + (uptime - uptime_base)`. Returns 0 if
  * the RTC has never been set since first power-on.
  */
 uint32_t tiku_rtc_get_seconds(void);
@@ -53,10 +53,8 @@ uint32_t tiku_rtc_get_seconds(void);
 /**
  * @brief Set the wall clock to `epoch_seconds`.
  *
- * Stores `epoch_offset = epoch_seconds - tiku_clock_seconds()` in
- * persistent NVM. Subsequent reads return values consistent with
- * the just-set time. A short MPU-unlock window is opened around
- * the persistent write.
+ * Stores the epoch baseline in persistent NVM and pairs it with the current
+ * boot's uptime. A short MPU-unlock window is opened around the write.
  */
 void tiku_rtc_set_seconds(uint32_t epoch_seconds);
 
@@ -65,6 +63,11 @@ void tiku_rtc_set_seconds(uint32_t epoch_seconds);
  *        chip was first programmed.
  */
 int tiku_rtc_is_set(void);
+
+#if defined(TIKU_RTC_TEST_HOOKS) && TIKU_RTC_TEST_HOOKS
+void tiku_rtc_test_snapshot(uint32_t *epoch, uint32_t *gate);
+void tiku_rtc_test_restore(uint32_t epoch, uint32_t gate);
+#endif
 
 #ifdef __cplusplus
 }

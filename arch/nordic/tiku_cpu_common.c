@@ -125,7 +125,13 @@ uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len)
 
 uint16_t tiku_cpu_nordic_reset_reason(void)
 {
+    static uint16_t captured;
+    static uint8_t captured_valid;
     uint32_t r = TIKU_NORDIC_RESETREAS;
+
+    if (captured_valid) {
+        return captured;
+    }
 
     /* RESETREAS is write-1-to-clear: latch the set bits away so the NEXT boot
      * sees a clean cause (otherwise reasons accumulate across resets). */
@@ -134,16 +140,16 @@ uint16_t tiku_cpu_nordic_reset_reason(void)
     /* Map to the MSP430 SYSRSTIV-style codes the kernel already speaks
      * (matching the ambiq reset-reason decode). */
     if (r & (TIKU_RESETREAS_DOG0 | TIKU_RESETREAS_DOG1)) {
-        return 0x16u;   /* watchdog timeout */
+        captured = 0x16u;   /* watchdog timeout */
+    } else if (r & TIKU_RESETREAS_SREQ) {
+        captured = 0x06u;   /* software reset (SCB SYSRESETREQ / reboot) */
+    } else if (r & TIKU_RESETREAS_RESETPIN) {
+        captured = 0x14u;   /* external reset pin */
+    } else if (r & TIKU_RESETREAS_OFF) {
+        captured = 0x02u;   /* wake from System OFF */
+    } else {
+        captured = 0x00u;   /* cold / power-on reset */
     }
-    if (r & TIKU_RESETREAS_SREQ) {
-        return 0x06u;   /* software reset (SCB SYSRESETREQ / reboot) */
-    }
-    if (r & TIKU_RESETREAS_RESETPIN) {
-        return 0x14u;   /* external reset pin */
-    }
-    if (r & TIKU_RESETREAS_OFF) {
-        return 0x02u;   /* wake from System OFF (treat as power-domain event) */
-    }
-    return 0x00u;       /* cold / power-on reset */
+    captured_valid = 1u;
+    return captured;
 }

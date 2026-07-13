@@ -102,6 +102,9 @@ watchdog_mode_write(const char *buf, size_t len)
     } else {
         return TIKU_VFS_EINVAL;
     }
+    if (!tiku_watchdog_mode_supported(mode)) {
+        return TIKU_VFS_EINVAL;
+    }
     tiku_watchdog_config(mode, tiku_watchdog_get_clk(),
                          tiku_watchdog_get_interval(), 0, 1);
     return 0;

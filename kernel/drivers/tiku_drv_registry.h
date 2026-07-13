@@ -40,7 +40,8 @@ extern const uint8_t           tiku_drv_table_count;
 /**
  * @brief Walk the driver table and call each driver's init().
  *
- * Called once at boot from main.c after tiku_vfs_tree_init().
+ * Called once at boot from main.c after tiku_vfs_tree_init(). Repeated calls
+ * are safe no-ops; each descriptor is initialized at most once per boot.
  * Init failures are logged but do not abort boot — a single bad
  * driver should not take down the whole system. The kernel
  * continues to the scheduler with whatever drivers initialised
@@ -49,10 +50,11 @@ extern const uint8_t           tiku_drv_table_count;
 void tiku_drv_init_all(void);
 
 /**
- * @brief Look up a driver descriptor by name. NULL if no match.
+ * @brief Look up a driver descriptor by exact, case-sensitive name.
  *
  * For use by application / shell code that wants to query state
- * (e.g. "is the WiFi driver loaded?").
+ * (e.g. "is the WiFi driver loaded?"). If a malformed table contains a
+ * duplicate name, the first declared descriptor wins deterministically.
  */
 const tiku_drv_t *tiku_drv_find(const char *name);
 

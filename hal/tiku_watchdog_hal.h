@@ -84,6 +84,10 @@
 /*---------------------------------------------------------------------------*/
 
 #if defined(PLATFORM_MSP430)
+#define TIKU_WATCHDOG_INTERVAL_SUPPORTED 1
+#define tiku_watchdog_arch_config(mode, src, isel, held, kick) \
+    tiku_cpu_msp430_watchdog_config_arch((mode), (src), (isel), \
+                                         (held), (kick))
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_msp430_watchdog_on_arch((src), (isel))
 #define tiku_watchdog_arch_off() \
@@ -95,6 +99,7 @@
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_msp430_watchdog_resume_arch(kick)
 #elif defined(PLATFORM_RP2350)
+#define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_rp2350_watchdog_on_arch((src), (isel))
 #define tiku_watchdog_arch_off() \
@@ -106,6 +111,7 @@
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_rp2350_watchdog_resume_arch(kick)
 #elif defined(PLATFORM_AMBIQ)
+#define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_ambiq_watchdog_on_arch((src), (isel))
 #define tiku_watchdog_arch_off() \
@@ -117,6 +123,7 @@
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_ambiq_watchdog_resume_arch(kick)
 #elif defined(PLATFORM_NORDIC)
+#define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_nordic_watchdog_on_arch((src), (isel))
 #define tiku_watchdog_arch_off() \

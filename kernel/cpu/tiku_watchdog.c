@@ -60,8 +60,26 @@ static volatile uint32_t wdt_kick_count;
 void tiku_watchdog_init(void)
 {
     WDT_PRINTF("Init\n");
+#if TIKU_WATCHDOG_INTERVAL_SUPPORTED
+    tiku_watchdog_arch_config(wdt.mode, wdt.clk, wdt.interval,
+                              wdt.start_held, wdt.kick_on_start);
+    wdt_enabled = 1;
+#else
+    if (wdt.mode == TIKU_WDT_MODE_INTERVAL) {
+        /* Never silently turn an unsupported interval request into a reset
+         * watchdog.  The caller can query mode_supported() before selecting
+         * it; keeping the hardware off is the only safe fallback for the
+         * legacy void config API. */
+        tiku_watchdog_arch_off();
+        wdt_enabled = 0;
+        return;
+    }
     tiku_watchdog_arch_on(wdt.clk, wdt.interval);
     wdt_enabled = 1;
+    if (wdt.start_held) {
+        tiku_watchdog_arch_pause();
+    }
+#endif
 }
 
 /**
@@ -89,9 +107,6 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
 
     tiku_watchdog_init();
 
-    if (wdt.start_held) {
-        tiku_watchdog_arch_pause();
-    }
 }
 
 /**
@@ -170,6 +185,25 @@ tiku_wdt_clk_t tiku_watchdog_get_clk(void)
 tiku_wdt_interval_t tiku_watchdog_get_interval(void)
 {
     return wdt.interval;
+}
+
+int tiku_watchdog_get_start_held(void)
+{
+    return wdt.start_held != 0;
+}
+
+int tiku_watchdog_get_kick_on_start(void)
+{
+    return wdt.kick_on_start != 0;
+}
+
+int tiku_watchdog_mode_supported(tiku_wdt_mode_t mode)
+{
+    if (mode == TIKU_WDT_MODE_WATCHDOG) {
+        return 1;
+    }
+    return mode == TIKU_WDT_MODE_INTERVAL &&
+           TIKU_WATCHDOG_INTERVAL_SUPPORTED;
 }
 
 /**

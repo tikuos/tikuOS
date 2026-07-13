@@ -98,9 +98,39 @@ static int
 expr_call(const char **p, long *out_v)
 {
     const char *save = *p;
+    const char *call = *p;
     long a, b;
 
     skip_ws(p);
+    /* A builtin name may also be an already-declared named variable.  In
+     * that case, lack of call syntax means variable access (for example
+     * COUNT after `COUNT = 5`).  An undeclared builtin without parentheses
+     * still enters dispatch so it retains the useful "'(' expected" error. */
+    skip_ws(&call);
+    {
+        const char *ident = call;
+        const char *after;
+        int slot;
+        while (is_word_cont(*call)) call++;
+        after = call;
+        skip_ws(&after);
+        if (*after != '(' && call > ident) {
+            for (slot = 0; slot < TIKU_BASIC_NAMEDVAR_MAX; slot++) {
+                const char *name = basic_namedvar_names[slot];
+                const char *src = ident;
+                if (name[0] == '\0') continue;
+                while (src < call && *name != '\0' &&
+                       to_upper(*src) == *name) {
+                    src++;
+                    name++;
+                }
+                if (src == call && *name == '\0') {
+                    *p = save;
+                    return 0;
+                }
+            }
+        }
+    }
     if (match_kw(p, "RND")) {
         if (!parse_call_1arg(p, &a)) return 1;
         *out_v = basic_rnd(a);

@@ -224,7 +224,7 @@ tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
     int      rc;
     uint8_t  word_used = 4; /* 4 bytes pending in `word`; 4 = empty */
 
-    if (buf == 0) {
+    if (buf == 0 || len == 0U) {
         return TIKU_TRNG_ERR_INVALID;
     }
     if (!trng_initialised) {

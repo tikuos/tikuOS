@@ -38,6 +38,7 @@
 | | Apollo4 Plus EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM | :green_circle: |
 | | Apollo510 Blue EVB · M55 + EM9305 | 512 KB | 4 MB MRAM | :green_circle: |
 | **Raspberry Pi**<br><sub>32-bit · RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash | :green_circle: |
+| **Nordic**<br><sub>32-bit · Cortex-M33</sub> | nRF54L15 DK | 256 KB | 1.5 MB RRAM | :green_circle: |
 
 ---
 
@@ -243,13 +244,34 @@ tikuOS> changed /dev/gpio/1/3      # block until P1.3 changes
 
 | Flag | Effect |
 |------|--------|
-| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350` |
+| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15` |
 | `TIKU_SHELL_ENABLE=1` | Interactive shell (UART / USB-CDC / Telnet) |
 | `TIKU_SHELL_BASIC_ENABLE=1` | Tiku BASIC interpreter (needs `MEMORY_MODEL=large`) |
 | `TIKU_INIT_ENABLE=1` | FRAM/NVM-backed boot sequence (implies shell) |
 | `TIKU_KIT_NET_ENABLE=1` | IP / Wi-Fi / TLS / MQTT (companion tikukits) |
 | `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement (MSP430 large working sets) |
 | `UART_BAUD=…` | UART baud (default 9600 on MSP430, 115200 on Cortex-M) |
+
+---
+
+## Testing, benchmarks, and releases
+
+TikuBench is the canonical test runner for every supported board/profile:
+
+```bash
+cd TikuBench
+python -m tikubench run kernel --board <board> --flash
+python -m tikubench bench report
+python -m tikubench coverage
+python -m tikubench release
+```
+
+The [generated kernel matrix](TikuBench/docs/generated/KERNEL_MATRIX.md) is the
+current test inventory. The [runner](TikuBench/docs/RUNNER.md),
+[benchmark](TikuBench/docs/BENCHMARKS.md),
+[fixture](TikuBench/docs/HARDWARE_FIXTURES.md), and
+[release](TikuBench/docs/RELEASE.md) documents define evidence and freshness
+requirements; selected diagnostics never replace a full verdict.
 
 ---
 

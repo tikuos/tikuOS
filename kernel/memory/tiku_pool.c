@@ -243,6 +243,23 @@ static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
     return TIKU_MEM_OK;
 }
 
+/* Bounded freelist membership check used to reject double-free.  Pool free is
+ * normally O(1); the validation walk is O(n), but embedded pools are small and
+ * preventing a used_count underflow / cyclic freelist is worth the bound. */
+static int block_is_already_free(const tiku_pool_t *pool, const void *block)
+{
+    const void *cur = pool->free_head;
+    tiku_mem_arch_size_t seen = 0;
+    while (cur != NULL && seen < pool->block_count) {
+        if (cur == block) {
+            return 1;
+        }
+        cur = *(void * const *)(const void *)cur;
+        seen++;
+    }
+    return 0;
+}
+
 /*---------------------------------------------------------------------------*/
 /* POOL FUNCTIONS                                                            */
 /*---------------------------------------------------------------------------*/
@@ -511,6 +528,9 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
     /* Validate: ptr must be aligned to a block boundary */
     offset = (tiku_mem_arch_size_t)(block - pool->buf);
     if (offset % pool->block_size != 0) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    if (block_is_already_free(pool, block)) {
         return TIKU_MEM_ERR_INVALID;
     }
 

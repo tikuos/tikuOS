@@ -70,6 +70,15 @@ tiku_wdt_clk_t tiku_watchdog_get_clk(void);
 /** @brief Return the current interval divider */
 tiku_wdt_interval_t tiku_watchdog_get_interval(void);
 
+/** @brief Return whether the stored configuration starts held. */
+int tiku_watchdog_get_start_held(void);
+
+/** @brief Return whether the stored configuration kicks when initialized. */
+int tiku_watchdog_get_kick_on_start(void);
+
+/** @brief Return non-zero when @p mode has a real backend on this build. */
+int tiku_watchdog_mode_supported(tiku_wdt_mode_t mode);
+
 /** @brief Disable the watchdog timer entirely */
 void tiku_watchdog_off(void);
 

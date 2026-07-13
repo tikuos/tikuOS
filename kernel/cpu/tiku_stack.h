@@ -31,6 +31,7 @@
 #define TIKU_STACK_H_
 
 #include <stdint.h>
+#include <stddef.h>
 
 /**
  * @brief Lowest paintable stack address (just above the MPU stack guard).
@@ -58,5 +59,10 @@ void tiku_stack_paint(void);
  * stack has already consumed its whole budget.
  */
 uint32_t tiku_stack_free(void);
+
+#if defined(TIKU_STACK_TEST_HOOKS) && TIKU_STACK_TEST_HOOKS
+void tiku_stack_test_paint(uintptr_t bottom, uintptr_t sp, uint32_t margin);
+uint32_t tiku_stack_test_free(uintptr_t bottom, uintptr_t sp);
+#endif
 
 #endif /* TIKU_STACK_H_ */

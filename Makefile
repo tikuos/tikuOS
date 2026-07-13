@@ -1331,6 +1331,7 @@ SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/cpu/tiku_hang.c
 SRCS += kernel/cpu/tiku_stack.c
 SRCS += kernel/cpu/tiku_rtc.c
+SRCS += kernel/cpu/tiku_bench.c
 
 # Driver-registry layer. Always built so the kernel exposes
 # tiku_drv_init_all(); the descriptor table itself comes from

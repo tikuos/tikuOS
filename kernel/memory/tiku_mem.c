@@ -337,9 +337,11 @@ uint32_t tiku_mem_guard_violations(void)
 void tiku_mem_init(void)
 {
     tiku_mem_arch_size_t count;
+    const tiku_mem_region_t *table;
 
     /* Region registry must be available before any other subsystem */
-    tiku_region_init(tiku_region_arch_get_table(&count), count);
+    table = tiku_region_arch_get_table(&count);
+    tiku_region_init(table, count);
 
     /* arch_init runs FIRST so any port that mirrors .uninit out to
      * non-volatile storage (e.g. RP2350's flash backup sector) can

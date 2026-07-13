@@ -250,3 +250,12 @@ void     tiku_mpu_arch_clear_violation_flags(void)   { }
 void     tiku_mpu_arch_enable_violation_nmi(void)    { }
 
 #endif /* TIKU_DEVICE_HAS_MPU */
+
+/* MSP430's linker places all static SRAM before _end and the descending stack
+ * at the top of the selected RAM region.  Painting begins after statics, never
+ * at RAM origin, so globals and fixed tier buffers are excluded. */
+extern char _end;
+uint32_t tiku_stack_arch_bottom(void)
+{
+    return (uint32_t)(uintptr_t)&_end;
+}

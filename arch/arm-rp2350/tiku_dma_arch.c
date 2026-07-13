@@ -31,6 +31,7 @@
  * tiku_dma_arch is in use.
  */
 #define DMA_CHAN_MEMCPY  0U     /* channel 0 owns the memcpy lane */
+#define DMA_MAX_WORDS    1048576U
 
 /**
  * @brief Module-level state for the RP2350 DMA driver
@@ -116,11 +117,20 @@ int tiku_dma_arch_memcpy(void   *dst,
     if (g_dma_busy) {
         return TIKU_DMA_ERR_BUSY;
     }
-    if (dst == NULL || src == NULL || word_cnt == 0U) {
+    if (dst == NULL || src == NULL || word_cnt == 0U ||
+        word_cnt > DMA_MAX_WORDS) {
         return TIKU_DMA_ERR_INVALID;
     }
     if (((uintptr_t)dst & 0x3U) != 0U || ((uintptr_t)src & 0x3U) != 0U) {
         return TIKU_DMA_ERR_INVALID;
+    }
+    {
+        uintptr_t d = (uintptr_t)dst;
+        uintptr_t s = (uintptr_t)src;
+        uintptr_t bytes = (uintptr_t)word_cnt * sizeof(uint32_t);
+        if ((d < s + bytes) && (s < d + bytes)) {
+            return TIKU_DMA_ERR_INVALID; /* memcpy, deliberately not memmove */
+        }
     }
 
     g_dma_busy     = 1U;

@@ -387,6 +387,11 @@ static inline uint32_t mpu_stack_guard_base(void) {
            MPU_STACK_GUARD_BYTES;
 }
 
+uint32_t tiku_stack_arch_bottom(void)
+{
+    return mpu_stack_guard_base() + MPU_STACK_GUARD_BYTES;
+}
+
 /**
  * @brief Program MPU region 3 — SEG2b (SRAM from .uninit end to guard base).
  *

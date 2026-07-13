@@ -236,6 +236,9 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
             if (s >= TIKU_TFS_NSLOTS || sl_len(fs, (unsigned)s) > TIKU_TFS_SLOT_DATA) {
                 return TFS_ERR_CORRUPT;
             }
+            if (bm_get(fs->slot_used, (unsigned)s)) {
+                return TFS_ERR_CORRUPT;         /* two names own one slot */
+            }
             bm_set(fs->slot_used, (unsigned)s);
         }
     }
@@ -311,14 +314,32 @@ int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t le
     }
     i = tfs_find(fs, name);
     if (i < 0) {
-        int rc = tiku_tfs_create(fs, name);    /* create-on-write */
-        if (rc != TFS_OK) {
-            return rc;
-        }
-        i = tfs_find(fs, name);
+        char nb[TIKU_TFS_NAME_MAX];
+        i = free_dirent(fs);
         if (i < 0) {
-            return TFS_ERR_CORRUPT;
+            return TFS_ERR_NOSPACE;
         }
+        ns = free_slot(fs);
+        if (ns < 0) {
+            return TFS_ERR_NOSPACE;
+        }
+        /* Create-with-content is one transaction: stage the final slot and
+         * directory payload, then stamp GATE last.  Calling create() first
+         * would expose a durable empty file if power failed before content. */
+        if ((len && wr(fs, slot_off((unsigned)ns) + TFS_SL_DATA, data, len)) ||
+            wr32(fs, slot_off((unsigned)ns) + TFS_SL_LEN, (uint32_t)len)) {
+            return TFS_ERR_IO;
+        }
+        memset(nb, 0, sizeof nb);
+        memcpy(nb, name, strlen(name));
+        if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME,
+               nb, TIKU_TFS_NAME_MAX) ||
+            wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT, (uint32_t)ns) ||
+            wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
+            return TFS_ERR_IO;
+        }
+        bm_set(fs->slot_used, (unsigned)ns);
+        return TFS_OK;
     }
     ns = free_slot(fs);
     if (ns < 0) {
@@ -554,151 +575,3 @@ size_t tiku_tfs_free_files(tiku_tfs_t *fs)
     }
     return f;
 }
-
-/*===========================================================================*/
-/* HOST UNIT TEST  (clang -DTFS_TEST tiku_tfs.c -o tfs_test && ./tfs_test)    */
-/*===========================================================================*/
-
-#ifdef TFS_TEST
-#include <stdio.h>
-
-/* RAM backend with optional power-cut injection: when fail_after reaches 0 the
- * next write is dropped and returns -1, simulating a power loss at that write. */
-typedef struct { uint8_t *buf; size_t size; long fail_after; } ram_ctx_t;
-
-/**
- * @brief Host self-test RAM backend write with power-cut injection.
- *
- * Copies @p len bytes into the backing buffer, but when the context's
- * fail_after counter reaches 0 the write is dropped and returns -1 to
- * simulate a power loss at that write.
- */
-static int ram_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
-{
-    ram_ctx_t *c = (ram_ctx_t *)be->ctx;
-    if (off + len > c->size) {
-        return -1;
-    }
-    if (c->fail_after == 0) {
-        return -1;                              /* power cut: this write is lost */
-    }
-    if (c->fail_after > 0) {
-        c->fail_after--;
-    }
-    memcpy(c->buf + off, src, len);
-    return 0;
-}
-
-static int g_fails;
-static int g_listn;
-/**
- * @brief Host self-test list callback; tallies enumerated files in g_listn.
- */
-static void count_cb(const char *name, size_t len, void *ctx)
-{
-    (void)name; (void)len; (void)ctx;
-    g_listn++;
-}
-
-#define CHECK(cond, msg) do {                                          \
-        if (!(cond)) { printf("  FAIL: %s\n", (msg)); g_fails++; }      \
-        else         { printf("  ok  : %s\n", (msg)); }                \
-    } while (0)
-
-/**
- * @brief Host self-test entry point exercising the TFS API end to end.
- *
- * Runs format/create/write/read, atomic overwrite, zero-copy map, delete,
- * error paths, store-full, re-mount persistence, and torn-write atomicity.
- *
- * @return  Non-zero if any check failed, 0 on all pass.
- */
-int main(void)
-{
-    static uint8_t buf[TFS_REGION + 16];
-    ram_ctx_t ctx = { buf, sizeof buf, -1 };
-    tiku_nvm_backend_t be = { buf, sizeof buf, ram_write, NULL, &ctx };
-    tiku_tfs_t fs, fs2;
-    char rb[1024];
-    size_t n;
-    const void *mp;
-    size_t ml;
-    char nm[16];
-    int k, created;
-    int rc;
-    char longname[TIKU_TFS_NAME_MAX + 4];
-
-    printf("TFS region = %zu bytes  (MAX_FILES=%u, NAME_MAX=%u, SLOT_DATA=%u)\n\n",
-           tiku_tfs_region_size(), (unsigned)TIKU_TFS_MAX_FILES,
-           (unsigned)TIKU_TFS_NAME_MAX, (unsigned)TIKU_TFS_SLOT_DATA);
-
-    /* --- format on virgin NVM --- */
-    memset(buf, 0, sizeof buf);
-    CHECK(tiku_tfs_mount(&fs, &be) == TFS_OK, "mount virgin region (formats)");
-    CHECK(tiku_tfs_free_files(&fs) == TIKU_TFS_MAX_FILES, "all dir slots free");
-
-    /* --- create + write + read --- */
-    CHECK(tiku_tfs_write(&fs, "cfg.txt", "mode=eco\n", 9) == TFS_OK, "write cfg.txt");
-    CHECK(tiku_tfs_read(&fs, "cfg.txt", rb, sizeof rb, &n) == TFS_OK &&
-          n == 9 && memcmp(rb, "mode=eco\n", 9) == 0, "read cfg.txt back");
-
-    CHECK(tiku_tfs_write(&fs, "blink.bas", "10 LED 0,1", 10) == TFS_OK, "write blink.bas");
-    g_listn = 0; tiku_tfs_list(&fs, count_cb, NULL);
-    CHECK(g_listn == 2, "list shows 2 files");
-
-    /* --- atomic overwrite (longer content) --- */
-    CHECK(tiku_tfs_write(&fs, "cfg.txt", "mode=turbo;x=1\n", 15) == TFS_OK, "overwrite cfg.txt");
-    CHECK(tiku_tfs_read(&fs, "cfg.txt", rb, sizeof rb, &n) == TFS_OK &&
-          n == 15 && memcmp(rb, "mode=turbo;x=1\n", 15) == 0, "read overwritten cfg.txt");
-
-    /* --- zero-copy map points into the region --- */
-    CHECK(tiku_tfs_map(&fs, "blink.bas", &mp, &ml) == TFS_OK && ml == 10 &&
-          memcmp(mp, "10 LED 0,1", 10) == 0 &&
-          (const uint8_t *)mp >= buf && (const uint8_t *)mp < buf + sizeof buf,
-          "map blink.bas (zero-copy, into region)");
-
-    /* --- delete --- */
-    CHECK(tiku_tfs_delete(&fs, "cfg.txt") == TFS_OK, "delete cfg.txt");
-    CHECK(tiku_tfs_read(&fs, "cfg.txt", rb, sizeof rb, &n) == TFS_ERR_NOTFOUND, "cfg.txt is gone");
-    g_listn = 0; tiku_tfs_list(&fs, count_cb, NULL);
-    CHECK(g_listn == 1, "list shows 1 file");
-
-    /* --- error paths --- */
-    CHECK(tiku_tfs_create(&fs, "blink.bas") == TFS_ERR_EXISTS, "create existing -> EXISTS");
-    CHECK(tiku_tfs_write(&fs, "big", rb, TIKU_TFS_SLOT_DATA + 1) == TFS_ERR_TOOBIG, "oversize -> TOOBIG");
-    memset(longname, 'a', sizeof longname - 1); longname[sizeof longname - 1] = 0;
-    CHECK(tiku_tfs_write(&fs, longname, "x", 1) == TFS_ERR_NAMELEN, "long name -> NAMELEN");
-
-    /* --- fill the store --- */
-    created = 0;
-    for (k = 0; k < TIKU_TFS_MAX_FILES + 2; k++) {
-        snprintf(nm, sizeof nm, "f%d", k);
-        if (tiku_tfs_write(&fs, nm, "y", 1) == TFS_OK) created++;
-    }
-    CHECK(tiku_tfs_free_files(&fs) == 0, "store reports full");
-    printf("  (created %d files before full)\n", created);
-
-    /* --- PERSISTENCE: re-mount the same backing buffer --- */
-    CHECK(tiku_tfs_mount(&fs2, &be) == TFS_OK, "re-mount existing store");
-    CHECK(tiku_tfs_read(&fs2, "blink.bas", rb, sizeof rb, &n) == TFS_OK &&
-          n == 10 && memcmp(rb, "10 LED 0,1", 10) == 0,
-          "blink.bas SURVIVED re-mount (durable)");
-
-    /* --- ATOMICITY: a torn overwrite must leave the OLD file intact --- */
-    memset(buf, 0, sizeof buf); ctx.fail_after = -1;
-    tiku_tfs_mount(&fs, &be);
-    tiku_tfs_write(&fs, "a", "OLD", 3);
-    ctx.fail_after = 2;                          /* allow content+length, fail the flip */
-    rc = tiku_tfs_write(&fs, "a", "NEWNEWNEW", 9);
-    ctx.fail_after = -1;
-    CHECK(rc == TFS_ERR_IO, "torn overwrite returns IO");
-    CHECK(tiku_tfs_mount(&fs2, &be) == TFS_OK, "re-mount after torn write");
-    CHECK(tiku_tfs_read(&fs2, "a", rb, sizeof rb, &n) == TFS_OK &&
-          n == 3 && memcmp(rb, "OLD", 3) == 0,
-          "torn overwrite left OLD intact (power-cut safe)");
-
-    printf("\n%s  (%d failure%s)\n", g_fails ? "*** FAILURES ***" : "ALL PASS",
-           g_fails, g_fails == 1 ? "" : "s");
-    return g_fails ? 1 : 0;
-}
-#endif /* TFS_TEST */

@@ -133,7 +133,7 @@ int tiku_pwm_arch_init(uint8_t  gpio_pin,
     uint32_t div;
     uint32_t cc;
 
-    if (freq_hz == 0U) {
+    if (gpio_pin > 47U || freq_hz == 0U) {
         return TIKU_PWM_ERR_INVALID;
     }
 
@@ -188,6 +188,9 @@ int tiku_pwm_arch_init(uint8_t  gpio_pin,
  * @return TIKU_PWM_OK always.
  */
 int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16) {
+    if (gpio_pin > 47U) {
+        return TIKU_PWM_ERR_INVALID;
+    }
     uint8_t  slice   = rp2350_pwm_pin_to_slice(gpio_pin);
     uint8_t  channel = rp2350_pwm_pin_to_channel(gpio_pin);
     uint32_t cc      = _RP2350_REG(RP2350_PWM_SLICE_CC(slice));
@@ -212,6 +215,9 @@ int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16) {
  * @return TIKU_PWM_OK always.
  */
 int tiku_pwm_arch_close(uint8_t gpio_pin) {
+    if (gpio_pin > 47U) {
+        return TIKU_PWM_ERR_INVALID;
+    }
     uint8_t  slice   = rp2350_pwm_pin_to_slice(gpio_pin);
     uint8_t  channel = rp2350_pwm_pin_to_channel(gpio_pin);
     uint32_t cc;
@@ -248,6 +254,9 @@ int tiku_pwm_arch_close(uint8_t gpio_pin) {
  * @return Current duty-cycle compare value (0 – 0xFFFF).
  */
 uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin) {
+    if (gpio_pin > 47U) {
+        return 0U;
+    }
     uint8_t  slice   = rp2350_pwm_pin_to_slice(gpio_pin);
     uint8_t  channel = rp2350_pwm_pin_to_channel(gpio_pin);
     uint32_t cc      = _RP2350_REG(RP2350_PWM_SLICE_CC(slice));
@@ -264,6 +273,9 @@ uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin) {
  * @return Current TOP value (typically PWM_TOP_DEFAULT = 0xFFFF).
  */
 uint16_t tiku_pwm_arch_get_top(uint8_t gpio_pin) {
+    if (gpio_pin > 47U) {
+        return 0U;
+    }
     uint8_t slice = rp2350_pwm_pin_to_slice(gpio_pin);
     return (uint16_t)(_RP2350_REG(RP2350_PWM_SLICE_TOP(slice)) & 0xFFFFU);
 }
@@ -275,6 +287,9 @@ uint16_t tiku_pwm_arch_get_top(uint8_t gpio_pin) {
  * @return 1 if the slice CSR EN bit is set, 0 otherwise.
  */
 int tiku_pwm_arch_is_enabled(uint8_t gpio_pin) {
+    if (gpio_pin > 47U) {
+        return 0;
+    }
     uint8_t slice = rp2350_pwm_pin_to_slice(gpio_pin);
     return (_RP2350_REG(RP2350_PWM_SLICE_CSR(slice)) & RP2350_PWM_CSR_EN)
             ? 1 : 0;

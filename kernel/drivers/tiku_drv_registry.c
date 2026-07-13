@@ -56,6 +56,8 @@
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+static uint8_t registry_initialised;
+
 /**
  * @brief Walk the driver table and initialise every registered driver.
  *
@@ -83,6 +85,11 @@
 void tiku_drv_init_all(void)
 {
     uint8_t i;
+
+    if (registry_initialised) {
+        return;
+    }
+    registry_initialised = 1U;
 
     if (tiku_drv_table_count == 0U) {
         /* No drivers registered. Nothing to do — and zero
