@@ -77,7 +77,7 @@ parse_pin_spec(const char *s, uint8_t *port, uint8_t *pin)
 void
 tiku_shell_cmd_irq(uint8_t argc, const char *argv[])
 {
-    uint8_t port, pin;
+    uint8_t port, pin, vport;
     tiku_gpio_edge_t edge;
     int rc;
 
@@ -92,8 +92,18 @@ tiku_shell_cmd_irq(uint8_t argc, const char *argv[])
         return;
     }
 
+    /* The GPIO-IRQ arch API is 1-based virtual (1 = the device's first port).
+     * The user types the physical port NAME: nRF54L parts are named from P0,
+     * so P0/P1/P2 map to virtual 1/2/3 (matching tiku_gpio_arch.c); parts named
+     * from P1 (MSP430) already have name == virtual port. */
+#if defined(PLATFORM_NORDIC)
+    vport = (uint8_t)(port + 1u);
+#else
+    vport = port;
+#endif
+
     if (streq(argv[2], "off")) {
-        rc = tiku_gpio_irq_disable(port, pin);
+        rc = tiku_gpio_irq_disable(vport, pin);
         if (rc == TIKU_GPIO_IRQ_OK) {
             SHELL_PRINTF("Disabled: P%u.%u\n",
                          (unsigned)port, (unsigned)pin);
@@ -111,7 +121,7 @@ tiku_shell_cmd_irq(uint8_t argc, const char *argv[])
         return;
     }
 
-    rc = tiku_gpio_irq_enable(port, pin, edge);
+    rc = tiku_gpio_irq_enable(vport, pin, edge);
     if (rc == TIKU_GPIO_IRQ_OK) {
         SHELL_PRINTF("Enabled: P%u.%u %s edge -> event\n",
                      (unsigned)port, (unsigned)pin, argv[2]);
