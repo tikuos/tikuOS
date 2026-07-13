@@ -212,3 +212,20 @@ hardware dependency and ship under Apache-2.0.
 
 Existing tikukits/sensors/ and tikukits/epaper/ are
 driver-shaped and will migrate to drivers/ over time.
+
+## Vendor firmware blobs (WiFi/Bluetooth on RP2350)
+
+The CYW43439 radio on the Pico W / Pico 2 W needs Infineon's chip
+firmware uploaded at every boot. Those binaries are **not tracked in
+any tikuOS repository** — they are binary-only vendor software under
+the Infineon **Permissive Binary License 1.0** (redistribution of the
+unmodified binaries is permitted, but the licence is not OSI
+open-source, so the repos ship only Apache-2.0 content plus the licence
+text).
+
+To build with `TIKU_DRV_WIFI_CYW43_ENABLE=1`, download the blobs once
+into `drivers/wifi/cyw43/firmware/` — that directory's `README.md`
+carries the official download commands (embassy-rs mirror of Infineon's
+binaries, the same files pico-sdk/MicroPython/Zephyr ship) and SHA-256
+sums to verify them. The build stops with a pointer to that README if
+the blobs are missing.
