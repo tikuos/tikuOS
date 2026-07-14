@@ -1241,11 +1241,13 @@ CFLAGS += -DTIKU_HAS_BLE_ADV=1
 # gitignored temp/toolchains/ -- see kintsugi/flpr_plan.md F0), embeds the
 # flat binary into this image, and compiles the app-side loader + /sys/flpr.
 ifeq ($(TIKU_FLPR_ENABLE),1)
-ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-$(error TIKU_FLPR_ENABLE=1 is not supported on the LM20 yet -- the FLPR SRAM \
-carve geometry in arch/nordic/flpr/ is nRF54L15-specific (256 KB SRAM top). \
-The LM20A has 512 KB SRAM; the carve must move before FLPR can build here.)
-endif
+# nRF54L15 and nRF54LM20A/B all carry the same VPR00 ("FLPR") RISC-V core at
+# the same base (0x5004C000), IRQ 76, MPC00 (0x50041000) and SPU10/SPU20 slots
+# -- diff-proven identical.  The FLPR carve is the top 16 KB of the LOWER SRAM
+# bank (0x2003C000..0x2003FFFF) on every nordic part, so tiku_flpr_ipc.h and
+# tiku_flpr.ld are shared verbatim; the LM20's RAM2 tier arena is untouched.
+# Only the app linker reserves the carve (per-device .ld, always-on for a
+# stable layout).
 SRCS += arch/nordic/tiku_flpr_arch.c
 CFLAGS += -DTIKU_FLPR_ENABLE=1
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-

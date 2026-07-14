@@ -5,11 +5,11 @@
  *   RRAM  : ~2 MB non-volatile, write-in-place, at 0x00000000
  *   SRAM  : 512 KB at 0x20000000 (RAM 256 KB + RAM2 256 KB, contiguous)
  *
- * Cloned from nrf54l15.ld; the only differences are the two region LENGTHs
- * (larger RRAM + SRAM) and the absence of the FLPR SRAM carve -- the FLPR
- * coprocessor is not yet ported to this part, so the full 512 KB SRAM is the
- * application's.  The reserved-NVM geometry at the top of RRAM (32 KB
- * filestore + 8 KB durable persist) is identical to the L15.
+ * Cloned from nrf54l15.ld; the differences are the two region LENGTHs (larger
+ * RRAM) and the RAM2 upper bank (SRAM2, the tier arena).  The FLPR SRAM carve
+ * (top 16 KB of the LOWER bank) is identical to the L15 -- same VPR core, same
+ * carve address on every nordic part.  The reserved-NVM geometry at the top of
+ * RRAM (32 KB filestore + 8 KB durable persist) is identical to the L15.
  *
  * Layout in RRAM (grows up from 0x0):
  *   0x00000000 .vectors     (Cortex-M33 vector table at the RRAM base, VTOR=0)
@@ -39,10 +39,17 @@ MEMORY
     RRAM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x1FD000
     /* The LM20A has 512 KB SRAM in two banks -- RAM (256 KB @ 0x20000000) and
      * RAM2 (256 KB @ 0x20040000).  The LOWER bank is the primary bank: image
-     * data, .uninit and the stack (at its top, 0x20040000) live here, matching
-     * Nordic's own nrf_common.ld, which sets __stack at the top of the lower
-     * bank and declares the upper bank as a SEPARATE opt-in region. */
-    SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x40000
+     * data, .uninit and the stack (at its top) live here, matching Nordic's own
+     * nrf_common.ld, which sets __stack at the top of the lower bank and
+     * declares the upper bank as a SEPARATE opt-in region.
+     *
+     * App SRAM is 240 KB of the lower bank: the top 16 KB (0x2003C000..
+     * 0x2003FFFF) is the FLPR (VPR RISC-V) coprocessor carve -- code + stack +
+     * the shared IPC page (arch/nordic/flpr/tiku_flpr_ipc.h), identical to the
+     * L15 (same VPR base + carve address on every nordic part).  Reserved
+     * unconditionally so the image layout does not shift with TIKU_FLPR_ENABLE;
+     * the RAM2 tier arena (SRAM2 below) is untouched by it. */
+    SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x3C000
     /* RAM2 holds large buffers (the .ram2 section: SRAM tier arena).  The TOP
      * OF THE BANK IS NOT FULLY BACKED on this silicon: a boot stack placed at
      * 0x20080000 bus-faults on the first push (STKERR, BFAR=0x2007FFF0), and a
