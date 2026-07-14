@@ -40,11 +40,6 @@
 /* Overall backstop in case the state machine wedges. */
 #define DNS_DEADLINE    ((tiku_clock_time_t)(8u * TIKU_CLOCK_SECOND))
 
-/* Default recursive resolver, reached through the SLIP host's relay/NAT. */
-#ifndef TIKU_SHELL_DNS_SERVER
-#define TIKU_SHELL_DNS_SERVER  {8, 8, 8, 8}
-#endif
-
 static uint8_t           dns_on;
 static tiku_clock_time_t dns_t0;
 static tiku_clock_time_t dns_last_poll;
@@ -98,7 +93,12 @@ void
 tiku_shell_cmd_dns(uint8_t argc, const char *argv[])
 {
     static uint8_t udp_ready;
-    uint8_t server[4] = TIKU_SHELL_DNS_SERVER;
+    uint8_t server[4];
+
+    /* Default resolver: the DHCP lease's (option 6) when bound, else
+     * 8.8.8.8 -- campus networks often block external resolvers.  An
+     * explicit [resolver-ip] argument still overrides below. */
+    tiku_kits_net_dns_default_server(server);
 
     if (dns_on) {
         SHELL_PRINTF("dns already running\n");

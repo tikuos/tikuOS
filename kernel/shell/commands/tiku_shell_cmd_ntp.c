@@ -50,12 +50,6 @@
 /* Overall per-phase backstop in case a state machine wedges. */
 #define NTP_DEADLINE    ((tiku_clock_time_t)(12u * TIKU_CLOCK_SECOND))
 
-/* Public DNS resolver used for hostname lookups, reached through the SLIP
- * host's relay/NAT.  Override at build time if needed. */
-#ifndef TIKU_SHELL_NTP_DNS_SERVER
-#define TIKU_SHELL_NTP_DNS_SERVER  {8, 8, 8, 8}
-#endif
-
 /* Default NTP server for a bare `ntp` (no argument).  The SLIP host (.1) only
  * answers NTP under the TikuBench test harness; for interactive use over a
  * real internet bridge, default to a public server instead.  time.google.com
@@ -169,7 +163,8 @@ tiku_shell_cmd_ntp(uint8_t argc, const char *argv[])
             ntp_begin_query();              /* dotted IPv4 -> query directly */
         } else {
             /* Hostname -> resolve via DNS first, then query. */
-            static const uint8_t resolver[4] = TIKU_SHELL_NTP_DNS_SERVER;
+            uint8_t resolver[4];
+            tiku_kits_net_dns_default_server(resolver);  /* DHCP dns, else 8.8.8.8 */
             tiku_kits_net_dns_init();
             tiku_kits_net_dns_set_server(resolver);
             if (tiku_kits_net_dns_resolve(argv[1]) != TIKU_KITS_NET_OK) {
