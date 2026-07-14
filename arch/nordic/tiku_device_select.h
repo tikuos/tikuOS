@@ -35,8 +35,10 @@
 #include <arch/nordic/devices/tiku_device_nrf54l15.h>
 #elif defined(TIKU_DEVICE_NRF54LM20A)
 #include <arch/nordic/devices/tiku_device_nrf54lm20a.h>
+#elif defined(TIKU_DEVICE_NRF54LM20B)
+#include <arch/nordic/devices/tiku_device_nrf54lm20b.h>
 #else
-#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15 or TIKU_DEVICE_NRF54LM20A."
+#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54LM20A or TIKU_DEVICE_NRF54LM20B."
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -54,8 +56,9 @@
 #include <arch/nordic/boards/tiku_board_nrf54l15_dk.h>
 #elif defined(TIKU_BOARD_NRF54LM20_DK)
 #include <arch/nordic/boards/tiku_board_nrf54lm20_dk.h>
-#elif defined(TIKU_DEVICE_NRF54LM20A)
-/* Default board for the nRF54LM20A device: the nRF54LM20-DK. */
+#elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+/* Default board for both LM20 variants: the nRF54LM20-DK (PCA10184 ships
+ * LM20B engineering silicon; the LM20A image runs on it too). */
 #define TIKU_BOARD_NRF54LM20_DK 1
 #include <arch/nordic/boards/tiku_board_nrf54lm20_dk.h>
 #else

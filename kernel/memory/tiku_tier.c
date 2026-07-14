@@ -98,7 +98,7 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 static uint8_t __attribute__((section(".ssram"),
                               aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_sram_buf[TIKU_TIER_SRAM_SIZE];
-#elif defined(TIKU_DEVICE_NRF54LM20A)
+#elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
 /* nRF54LM20A: the SRAM tier lives in RAM2 (the upper 256 KB bank, linker
  * section .ram2 in nrf54lm20a.ld, zeroed by the crt and listed as a second
  * SRAM region so tier sub-arenas validate).  Keeps the primary bank's

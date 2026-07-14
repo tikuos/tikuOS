@@ -107,7 +107,8 @@
  * nRF54L15 (the first-supported / primary part) so a bare PLATFORM_NORDIC
  * build still resolves a device.
  */
-#if !defined(TIKU_DEVICE_NRF54L15) && !defined(TIKU_DEVICE_NRF54LM20A)
+#if !defined(TIKU_DEVICE_NRF54L15) && !defined(TIKU_DEVICE_NRF54LM20A) && \
+    !defined(TIKU_DEVICE_NRF54LM20B)
 #define TIKU_DEVICE_NRF54L15 1
 #endif
 

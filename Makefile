@@ -50,6 +50,8 @@ else ifeq ($(MCU),nrf54l15)
 TIKU_PLATFORM := nordic
 else ifeq ($(MCU),nrf54lm20a)
 TIKU_PLATFORM := nordic
+else ifeq ($(MCU),nrf54lm20b)
+TIKU_PLATFORM := nordic
 else
 TIKU_PLATFORM := msp430
 endif
@@ -123,8 +125,9 @@ endif
 
 ifeq ($(TIKU_PLATFORM),nordic)
 # One board per device: nrf54l15 -> nRF54L15-DK (PCA10156);
-# nrf54lm20a -> nRF54LM20-DK (PCA10184).
-ifeq ($(MCU),nrf54lm20a)
+# nrf54lm20a/nrf54lm20b -> nRF54LM20-DK (PCA10184; the DK ships LM20B silicon,
+# both images run on it).
+ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54LM20_DK
 else
 TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54L15_DK
@@ -848,8 +851,8 @@ ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 # recover 12 KB of static headroom; non-threaded BASIC retains the original
 # 32 KB arena.  This lets the canonical TikuBench/TikuConsole HTTPS-offload
 # profile link while remaining comfortably above observed BASIC demand.
-ifeq ($(MCU),nrf54lm20a)
-# The LM20A's tier arena lives in RAM2 (the upper 256 KB SRAM bank, linker
+ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
+# The LM20's tier arena lives in RAM2 (the upper 256 KB SRAM bank, linker
 # section .ram2) and does not compete with the primary bank's .bss/stack at
 # all -- so give BASIC a roomy arena regardless of threads.  192 KB of the
 # 255 KB usable bank (top 1 KB of RAM2 is unbacked on this silicon).
@@ -922,7 +925,7 @@ ifeq ($(TIKU_PLATFORM),msp430)
 $(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part; MSP430 \
 stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
 endif
-ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a,$(MCU)),)
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b,$(MCU)),)
 $(error TIKU_THREADS_ENABLE=1 needs a supported Cortex-M part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
 nrf54l15/nrf54lm20a (M33); $(MCU) has no thread backend. The switcher is generic \
@@ -1023,7 +1026,8 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 
 LDFLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=softfp -mfpu=fpv5-sp-d16
 LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
-ifeq ($(MCU),nrf54lm20a)
+ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
+# The LM20B's memory map is identical to the A's (diff-proven); one script.
 LDFLAGS += -Tarch/nordic/devices/nrf54lm20a.ld
 else
 LDFLAGS += -Tarch/nordic/devices/nrf54l15.ld
@@ -1033,6 +1037,9 @@ LDFLAGS += -Wl,-u,tiku_autostart_processes
 LDFLAGS += -Wl,-u,tiku_nordic_vectors
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 LDLIBS  = -Wl,--start-group
+# Axon NPU driver core (empty unless TIKU_AXON_ENABLE=1 defines it below;
+# inside the group so its memcpy/memset resolve against libc).
+LDLIBS += $(LDLIBS_AXON)
 LDLIBS += -lm -lc -lgcc
 LDLIBS += -Wl,--end-group
 
@@ -1234,8 +1241,8 @@ CFLAGS += -DTIKU_HAS_BLE_ADV=1
 # gitignored temp/toolchains/ -- see kintsugi/flpr_plan.md F0), embeds the
 # flat binary into this image, and compiles the app-side loader + /sys/flpr.
 ifeq ($(TIKU_FLPR_ENABLE),1)
-ifeq ($(MCU),nrf54lm20a)
-$(error TIKU_FLPR_ENABLE=1 is not supported on nrf54lm20a yet -- the FLPR SRAM \
+ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
+$(error TIKU_FLPR_ENABLE=1 is not supported on the LM20 yet -- the FLPR SRAM \
 carve geometry in arch/nordic/flpr/ is nRF54L15-specific (256 KB SRAM top). \
 The LM20A has 512 KB SRAM; the carve must move before FLPR can build here.)
 endif
@@ -1600,6 +1607,61 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_CRYPTOPROBE=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_cryptoprobe.c
+endif
+ifneq (,$(findstring TIKU_SHELL_CMD_AXONSPROBE=1,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_axonsprobe.c
+endif
+
+# Axon NPU (nRF54LM20B) -- opt-in.  Links Nordic's Axon driver core from the
+# LOCAL, GITIGNORED checkout of github.com/nordicsemi-neuton/
+# nrf54lm20b-axon-audio-models (LicenseRef-Nordic-5-Clause: linked at build
+# time, never vendored -- the CRACEN PK microcode policy).  The TikuOS-side
+# platform layer (arch/nordic/tiku_axon_platform.c) provides the ~11
+# nrf_axon_platform_* functions the blob expects.
+ifeq ($(TIKU_AXON_ENABLE),1)
+ifeq ($(filter nrf54lm20b,$(MCU)),)
+$(error TIKU_AXON_ENABLE=1 needs MCU=nrf54lm20b -- the Axon NPU exists only \
+on the nRF54LM20B (the LM20A lacks the block))
+endif
+AXON_SDK ?= temp/axon-models/lib/axon
+ifeq ($(wildcard $(AXON_SDK)/lib/axon/bin/arm/libnrf-axon-driver-internal.a),)
+$(error TIKU_AXON_ENABLE=1 needs the Axon checkout at $(AXON_SDK) -- \
+git clone https://github.com/nordicsemi-neuton/nrf54lm20b-axon-audio-models \
+temp/axon-models)
+endif
+SRCS   += arch/nordic/tiku_axon_platform.c
+CFLAGS += -DTIKU_AXON_ENABLE=1
+CFLAGS += -I$(AXON_SDK)/include
+LDLIBS_AXON = $(AXON_SDK)/lib/axon/bin/arm/libnrf-axon-driver-internal.a
+
+# Optional compiled-model inference KAT: TIKU_AXON_MODEL=tinyml_kws (or
+# tinyml_vww / tinyml_ic / tinyml_ad).  Compiles Nordic's public nn-infer
+# sources + their portable test app (base_inference_main, invoked via
+# `axonsprobe model`) against the model/test-vector headers shipped in the
+# checkout.  The interlayer working buffer lives in RAM2 (size per model;
+# 140000 covers the shipped tinyml set -- the model init verifies and
+# reports the exact need on mismatch).
+ifneq ($(strip $(TIKU_AXON_MODEL)),)
+SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer.c
+SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer_test.c
+SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_op_extensions.c
+SRCS += $(AXON_SDK)/lib/axon/platform/src/nrf_axon_logging.c
+# newlib-nano's inttypes.h omits the 64-bit PRI macros this toolchain-wide;
+# the vendor logging code uses PRId64/PRIx64 in failure-path vector dumps.
+# Defining them here is conflict-free (the header genuinely lacks them).
+CFLAGS += -DPRId64='"lld"' -DPRIx64='"llx"'
+SRCS += $(AXON_SDK)/lib/axon/platform/src/nrf_axon_vector_compare.c
+SRCS += $(AXON_SDK)/tests/axon/inference/src/nrf_axon_app_test_nn_inference.c
+CFLAGS += -DNRF_AXON_MODEL_NAME=$(TIKU_AXON_MODEL)
+CFLAGS += -DTIKU_AXON_MODEL_TEST=1
+CFLAGS += -I$(AXON_SDK)/tests/axon/compiled_models
+TIKU_AXON_ILB ?= 140000
+CFLAGS += -DNRF_AXON_INTERLAYER_BUFFER_SIZE=$(TIKU_AXON_ILB)
+CFLAGS += -DNRF_AXON_PSUM_BUFFER_SIZE=$(TIKU_AXON_PSUM)
+TIKU_AXON_PSUM ?= 0
+else
+CFLAGS += -DNRF_AXON_INTERLAYER_BUFFER_SIZE=0 -DNRF_AXON_PSUM_BUFFER_SIZE=0
+endif
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_BLEADV=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_bleadv.c
@@ -2433,6 +2495,8 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 # default auto/nrfutil path targets --core Application and needs no device name.
 ifeq ($(MCU),nrf54lm20a)
 JLINK_DEVICE_NORDIC ?= nRF54LM20A_M33
+else ifeq ($(MCU),nrf54lm20b)
+JLINK_DEVICE_NORDIC ?= nRF54LM20B_M33
 else
 JLINK_DEVICE_NORDIC ?= nRF54L15_M33
 endif

@@ -51,7 +51,7 @@ typedef void (*nordic_isr_t)(void);
  * named handlers below sit at identical IRQn indices on both parts (the IRQ
  * enum values match); only the array length and the trailing default-fill
  * range change. */
-#if defined(TIKU_DEVICE_NRF54LM20A)
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
 #define NORDIC_NUM_EXT_IRQS  290
 #else
 #define NORDIC_NUM_EXT_IRQS  272
@@ -104,6 +104,9 @@ void tiku_nordic_gpiote20_isr(void)        __attribute__((weak, alias("nordic_de
 void tiku_nordic_gpiote30_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
 /* FLPR coprocessor doorbell -- VPR00 EVENTS_TRIGGERED (IRQn 76). */
 void tiku_nordic_flpr_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
+/* Axon NPU (nRF54LM20B only; IRQn 86).  The slot is wired on every nordic
+ * device -- it stays the default handler unless a probe/driver overrides. */
+void tiku_nordic_axons_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Factory trim application + silicon errata (minimal SystemInit)            */
@@ -317,7 +320,7 @@ void tiku_nordic_reset_handler(void)
         }
     }
 
-#if defined(TIKU_DEVICE_NRF54LM20A)
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
     /* Zero the RAM2 large-buffer section (upper SRAM bank; holds the tier
      * arena, which expects .bss-like zeroed memory).  Only the used span is
      * cleared -- symbols come from nrf54lm20a.ld. */
@@ -389,7 +392,9 @@ __attribute__((section(".vectors"), used)) = {
      * slot dispatches through a NULL pointer.  Ranges are split around the
      * explicitly-wired IRQs above (no overlapping designated initializers). */
     [16 +   0 ... 16 +  75] = nordic_default_handler,
-    [16 +  77 ... 16 + 132] = nordic_default_handler,
+    [16 +  86] = tiku_nordic_axons_isr,        /* AXONS_IRQn      = 86 (LM20B) */
+    [16 +  77 ... 16 +  85] = nordic_default_handler,
+    [16 +  87 ... 16 + 132] = nordic_default_handler,
     [16 + 134 ... 16 + 197] = nordic_default_handler,
     [16 + 199 ... 16 + 201] = nordic_default_handler,
     [16 + 203 ... 16 + 217] = nordic_default_handler,
