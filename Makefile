@@ -48,6 +48,8 @@ else ifeq ($(MCU),apollo510b)
 TIKU_PLATFORM := ambiq
 else ifeq ($(MCU),nrf54l15)
 TIKU_PLATFORM := nordic
+else ifeq ($(MCU),nrf54lm20a)
+TIKU_PLATFORM := nordic
 else
 TIKU_PLATFORM := msp430
 endif
@@ -120,8 +122,13 @@ endif
 endif
 
 ifeq ($(TIKU_PLATFORM),nordic)
-# Only board for now: the nRF54L15-DK (PCA10156).
+# One board per device: nrf54l15 -> nRF54L15-DK (PCA10156);
+# nrf54lm20a -> nRF54LM20-DK (PCA10184).
+ifeq ($(MCU),nrf54lm20a)
+TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54LM20_DK
+else
 TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54L15_DK
+endif
 endif
 
 # ---------------------------------------------------------------------------
@@ -909,10 +916,10 @@ ifeq ($(TIKU_PLATFORM),msp430)
 $(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part; MSP430 \
 stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
 endif
-ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15,$(MCU)),)
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a,$(MCU)),)
 $(error TIKU_THREADS_ENABLE=1 needs a supported Cortex-M part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
-nrf54l15 (M33); $(MCU) has no thread backend. The switcher is generic \
+nrf54l15/nrf54lm20a (M33); $(MCU) has no thread backend. The switcher is generic \
 Cortex-M asm (kernel/threads/tiku_thread_cortexm.inl); adding a part = a \
 two-line shim that names its PendSV vector symbol (plus a custom cycle \
 source if the part's DWT freezes standalone), and proving the torture suite)
@@ -1010,7 +1017,11 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 
 LDFLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=softfp -mfpu=fpv5-sp-d16
 LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
+ifeq ($(MCU),nrf54lm20a)
+LDFLAGS += -Tarch/nordic/devices/nrf54lm20a.ld
+else
 LDFLAGS += -Tarch/nordic/devices/nrf54l15.ld
+endif
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes
 LDFLAGS += -Wl,-u,tiku_nordic_vectors
@@ -1095,7 +1106,7 @@ MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
 ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic),)
-$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, or MCU=nrf54l15)
+$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, or MCU=nrf54lm20a)
 endif
 
 # Use the minimal entry point and exactly the arch files it needs.
@@ -1217,6 +1228,11 @@ CFLAGS += -DTIKU_HAS_BLE_ADV=1
 # gitignored temp/toolchains/ -- see kintsugi/flpr_plan.md F0), embeds the
 # flat binary into this image, and compiles the app-side loader + /sys/flpr.
 ifeq ($(TIKU_FLPR_ENABLE),1)
+ifeq ($(MCU),nrf54lm20a)
+$(error TIKU_FLPR_ENABLE=1 is not supported on nrf54lm20a yet -- the FLPR SRAM \
+carve geometry in arch/nordic/flpr/ is nRF54L15-specific (256 KB SRAM top). \
+The LM20A has 512 KB SRAM; the carve must move before FLPR can build here.)
+endif
 SRCS += arch/nordic/tiku_flpr_arch.c
 CFLAGS += -DTIKU_FLPR_ENABLE=1
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
@@ -2407,7 +2423,13 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 #   NRF_FLASH=auto     [default] nrfutil when it is installed, else J-Link, so
 #                      `make flash MCU=nrf54l15` just works on any host.
 # Probe serial: JLINK_SN or NRF_SN (either) picks one DK on a multi-probe rig.
+# J-Link device string is only consulted on the NRF_FLASH=jlink path; the
+# default auto/nrfutil path targets --core Application and needs no device name.
+ifeq ($(MCU),nrf54lm20a)
+JLINK_DEVICE_NORDIC ?= nRF54LM20A_M33
+else
 JLINK_DEVICE_NORDIC ?= nRF54L15_M33
+endif
 JLINK_FLASH_SCRIPT   = $(BUILD_DIR)/flash.jlink
 JLINK_ERASE_SCRIPT   = $(BUILD_DIR)/erase.jlink
 _NRF_SN          := $(strip $(if $(strip $(JLINK_SN)),$(JLINK_SN),$(NRF_SN)))

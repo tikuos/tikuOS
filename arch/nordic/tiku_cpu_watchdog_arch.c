@@ -27,7 +27,7 @@
  */
 
 #include "tiku_cpu_watchdog_arch.h"
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 #define TIKU_WDT30                NRF_WDT30_S
 #define TIKU_WDT_RR_RELOAD_KEY    0x6E524635UL   /* WDT_RR_RR_Reload          */

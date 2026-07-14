@@ -8,16 +8,21 @@
  * tiku_region_arch.c - nRF54L physical memory region table
  *
  * Describes the memory map for kernel introspection (/sys/mem, region overlap
- * checks): 256 KB SRAM, 1.5 MB RRAM (byte-writable NVM), and the secure
- * peripheral aliases.  Addresses are compile-time constants, so the table is a
- * plain static const array (no runtime build step needed).
+ * checks): the managed SRAM bank, the app RRAM span (byte-writable NVM), and
+ * the secure peripheral aliases.  Sizes come from the selected device header
+ * (nRF54L15: 256 KB / 1524 KB; nRF54LM20A: 256 KB lower bank / 2036 KB) --
+ * routed via tiku_device_select.h, NEVER a hardcoded device header: a stale
+ * L15 include here once shrank the LM20A's NVM region to 0x17D000, so its
+ * .persistent pool at 0x1FBxxx failed tiku_region_contains() and every
+ * lc-persist registration was rejected (found on HW, 2026-07-14).  Addresses
+ * are compile-time constants, so the table is a plain static const array.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <hal/tiku_region_hal.h>
 #include <kernel/memory/tiku_mem.h>
-#include <arch/nordic/devices/tiku_device_nrf54l15.h>
+#include <arch/nordic/tiku_device_select.h>
 #include <stddef.h>
 
 static const tiku_mem_region_t tiku_nordic_region_table[] = {

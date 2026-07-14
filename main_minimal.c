@@ -85,15 +85,16 @@ int main(void)
 #include "arch/nordic/tiku_cpu_common.h"
 #include "arch/nordic/tiku_uart_arch.h"
 #include "arch/nordic/tiku_gpio_arch.h"
+/* Board header (LED macros + TIKU_BOARD_NAME) via the device/board router, so
+ * the smoke test uses the right pins and polarity on whichever nRF54L board is
+ * selected -- the nRF54L15-DK LEDs are active-low, the nRF54LM20-DK's are
+ * active-high, and the pins differ. */
+#include "arch/nordic/tiku_device_select.h"
 
-/* nRF54L15-DK LEDs (active-low: drive low = lit).  Two LEDs so the smoke test
- * is a boot beacon independent of the console UART:
- *   LED1 (P2.09) solid-on  = reached main() + GPIO works
- *   LED2 (P1.10) blinking  = reached the loop (delays work) */
-#define TIKU_MIN_LED1_PORT  2u
-#define TIKU_MIN_LED1_PIN   9u
-#define TIKU_MIN_LED2_PORT  1u
-#define TIKU_MIN_LED2_PIN   10u
+/* Two on-board LEDs make the smoke test a boot beacon independent of the
+ * console UART (board macros handle pin + active-high/low polarity):
+ *   LED1 solid-on  = reached main() + GPIO works
+ *   LED2 blinking  = reached the loop (delays work) */
 
 /* Fixed RAM progress markers, readable over the debugger (nrfutil device read
  * <symbol addr>) so boot/loop progress can be confirmed without eyeballing an
@@ -122,9 +123,11 @@ volatile uint32_t g_nordic_loop_count;
  * clobbers the first persist words, so a kernel image flashed afterwards
  * re-primes its cells (fine: the probe is a MINIMAL-only diagnostic).
  */
-#include "arch/nordic/mdk/nrf54l15.h"
+#include "arch/nordic/tiku_nordic_mdk.h"   /* per-device MDK router */
 
-#define RRAM_TEST_ADDR   0x0017B000UL
+#define RRAM_TEST_ADDR   0x0017B000UL      /* free RRAM on both devices:
+                                            * L15 persist base; LM20A mid-image
+                                            * free span (persist @0x1FB000) */
 #define RRAMC_WEN        (1UL << 0)
 #define RRAMC_BUF32      (32UL << 8)               /* WRITEBUFSIZE = 32 */
 
@@ -183,6 +186,31 @@ static void rram_test_run(void)
     NRF_RRAMC_S->CONFIG = cfg0;
     tiku_uart_printf("PASS (read 0x%x)\n",
                      (unsigned int)*(volatile uint32_t *)(RRAM_TEST_ADDR + 16u));
+
+    /* T4: the persist-layer sequence -- store, then close the gate
+     * IMMEDIATELY (no READY wait, no commit), then read back with the gate
+     * CLOSED.  This is exactly what tiku_persist_register/write do via
+     * tiku_mpu_arch_lock_nvm().  On the nRF54L15 the read is coherent; on the
+     * nRF54LM20A this is the suspected stale-read window behind the
+     * persist-reset-survival failures (write lands in the RRAMC buffer, the
+     * closed-gate read bypasses it).  Reads again after a READY wait to show
+     * whether the data eventually commits. */
+    tiku_uart_puts("T4: store, close gate w/o commit, read... ");
+    NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    while (NRF_RRAMC_S->READY == 0u)     { }        /* settle from T3    */
+    *(volatile uint32_t *)(RRAM_TEST_ADDR + 24u) = 0xCAFEF00Du;
+    NRF_RRAMC_S->CONFIG = cfg0;                     /* close: NO waits   */
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    {
+        uint32_t first = *(volatile uint32_t *)(RRAM_TEST_ADDR + 24u);
+        while (NRF_RRAMC_S->READY == 0u) { }        /* drain controller  */
+        tiku_uart_printf("%s (imm 0x%x, drained 0x%x)\n",
+                         (first == 0xCAFEF00Du) ? "PASS" : "STALE-READ",
+                         (unsigned int)first,
+                         (unsigned int)*(volatile uint32_t *)
+                             (RRAM_TEST_ADDR + 24u));
+    }
 }
 #endif /* TIKU_MIN_RRAM_TEST */
 
@@ -194,13 +222,14 @@ int main(void)
     /* FIRST thing: light LED1 (active-low -> level 0) so a solid LED proves
      * the reset handler ran, the C runtime came up, and GPIO works -- before
      * any clock/delay/UART code that could hang. */
-    tiku_nordic_gpio_init_output(TIKU_MIN_LED1_PORT, TIKU_MIN_LED1_PIN, 0u);
+    TIKU_BOARD_LED1_INIT();
+    TIKU_BOARD_LED1_ON();               /* solid on = reached main() + GPIO ok */
 
     /* Start the HFXO (UARTE reference). Delays use SysTick (no setup). */
     tiku_cpu_boot_nordic_init();
 
-    /* LED2 off initially (active-low -> drive high = off). */
-    tiku_nordic_gpio_init_output(TIKU_MIN_LED2_PORT, TIKU_MIN_LED2_PIN, 1u);
+    /* LED2 off initially; it blinks in the loop below. */
+    TIKU_BOARD_LED2_INIT();
 
     /* Console UARTE at TIKU_BOARD_UART_BAUD on the board-selected pins. */
     tiku_uart_init();
@@ -208,7 +237,8 @@ int main(void)
     /* Let any stale bytes from the J-Link VCOM reset settle. */
     tiku_cpu_nordic_delay_ms(100);
 
-    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (nRF54L15-DK) ---\n");
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test ("
+                   TIKU_BOARD_NAME ") ---\n");
 
 #ifdef TIKU_MIN_RRAM_TEST
     rram_test_run();
@@ -226,7 +256,7 @@ int main(void)
             fault);
 
         /* LED2 blinks = the loop (and the delay path) is alive. */
-        tiku_nordic_gpio_toggle(TIKU_MIN_LED2_PORT, TIKU_MIN_LED2_PIN);
+        TIKU_BOARD_LED2_TOGGLE();
         tiku_cpu_nordic_delay_ms(500u);
         g_nordic_loop_count++;      /* progress marker (read over debugger) */
         i++;

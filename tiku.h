@@ -101,11 +101,13 @@
 #elif defined(PLATFORM_NORDIC)
 
 /*
- * Nordic nRF54L silicon. Only one silicon variant for now; a board define
- * (TIKU_BOARD_NRF54L15_DK) comes from the Makefile and selects the matching
- * board header.
+ * Nordic nRF54L silicon. The Makefile derives one TIKU_DEVICE_NRF54* macro
+ * from MCU=... and passes it on the command line, along with the matching
+ * board define. When no nordic device is selected we fall back to the
+ * nRF54L15 (the first-supported / primary part) so a bare PLATFORM_NORDIC
+ * build still resolves a device.
  */
-#ifndef TIKU_DEVICE_NRF54L15
+#if !defined(TIKU_DEVICE_NRF54L15) && !defined(TIKU_DEVICE_NRF54LM20A)
 #define TIKU_DEVICE_NRF54L15 1
 #endif
 

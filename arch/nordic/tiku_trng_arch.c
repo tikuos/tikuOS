@@ -44,20 +44,26 @@
  */
 
 #include <arch/nordic/tiku_trng_arch.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 /**
  * @defgroup trng_config CRACEN RNG private configuration
- * @brief Tuning constants for the nRF54L15 CRACEN TRNG driver.
+ * @brief Tuning constants for the CRACEN TRNG driver.
  *
- * The values match Nordic's nrfx_cracen defaults for this silicon.
+ * The values match Nordic's nrfx_cracen defaults.  The nRF54L15 and the
+ * nRF54LM20A carry different CRACEN TRNG core revisions with renamed timing
+ * registers (INITWAITVAL/CLKDIV/SWOFFTMRVAL vs WARMUPPERIOD/SAMPLINGPERIOD,
+ * and the LM20A core drops the idle off-timer).  trng_configure() selects the
+ * right field with the same feature-detection idiom as nrfx's
+ * hal/nrf_cracen_rng.h -- keyed on the field's _ResetValue macro, not a device
+ * name -- so a new nRF54L part works without edits here.
  * @{
  */
-/** @brief SWOFFTMRVAL: switch the rings off immediately when idle. */
+/** @brief Idle off-timer (L15 SWOFFTMRVAL): switch the rings off immediately. */
 #define TRNG_OFF_TIMER_VAL      0U
-/** @brief CLKDIV: sample rate Fs = Fpclk / (CLKDIV + 1) (MDK L15 fixup). */
+/** @brief Sample rate (L15 CLKDIV / LM20A SAMPLINGPERIOD): Fs = Fpclk/(v+1). */
 #define TRNG_CLK_DIV            0U
-/** @brief INITWAITVAL: ring-oscillator start-up warm-up (sample clocks). */
+/** @brief Warm-up (L15 INITWAITVAL / LM20A WARMUPPERIOD): ring start-up wait. */
 #define TRNG_INIT_WAIT_VAL      512U
 /** @brief NB128BITBLOCKS: 128-bit blocks folded by the AES conditioner. */
 #define TRNG_NB_128BIT_BLOCKS   4U
@@ -120,10 +126,25 @@ trng_configure(void)
     NRF_CRACENCORE_S->RNGCONTROL.CONTROL =
         CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Msk;
 
-    /* Tuning counters (written while held in soft reset). */
+    /* Tuning counters (written while held in soft reset).  Field names differ
+     * per CRACEN TRNG core revision; select via the MDK _ResetValue macros,
+     * exactly as nrfx hal/nrf_cracen_rng.h does. */
+#if defined(CRACENCORE_RNGCONTROL_SWOFFTMRVAL_ResetValue)
+    /* nRF54L15-class core: has the idle off-timer. */
     NRF_CRACENCORE_S->RNGCONTROL.SWOFFTMRVAL = TRNG_OFF_TIMER_VAL;
-    NRF_CRACENCORE_S->RNGCONTROL.CLKDIV      = TRNG_CLK_DIV;
-    NRF_CRACENCORE_S->RNGCONTROL.INITWAITVAL = TRNG_INIT_WAIT_VAL;
+#else
+    (void)0; /* LM20A-class core: no idle off-timer field. */
+#endif
+#if defined(CRACENCORE_RNGCONTROL_CLKDIV_ResetValue)
+    NRF_CRACENCORE_S->RNGCONTROL.CLKDIV        = TRNG_CLK_DIV;
+#else
+    NRF_CRACENCORE_S->RNGCONTROL.SAMPLINGPERIOD = TRNG_CLK_DIV;
+#endif
+#if defined(CRACENCORE_RNGCONTROL_INITWAITVAL_ResetValue)
+    NRF_CRACENCORE_S->RNGCONTROL.INITWAITVAL   = TRNG_INIT_WAIT_VAL;
+#else
+    NRF_CRACENCORE_S->RNGCONTROL.WARMUPPERIOD   = TRNG_INIT_WAIT_VAL;
+#endif
 
     /* Enable with AES conditioning; SOFTRST deasserts on this write. */
     NRF_CRACENCORE_S->RNGCONTROL.CONTROL =

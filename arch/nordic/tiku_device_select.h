@@ -8,11 +8,11 @@
  * tiku_device_select.h - Nordic nRF54L device + board include router
  *
  * Mirrors arch/msp430/tiku_device_select.h.  The Makefile sets one of:
- *   TIKU_DEVICE_NRF54L15       (silicon)
- *   TIKU_BOARD_NRF54L15_DK     (board PCB definitions)
+ *   TIKU_DEVICE_NRF54L15   / TIKU_DEVICE_NRF54LM20A     (silicon)
+ *   TIKU_BOARD_NRF54L15_DK / TIKU_BOARD_NRF54LM20_DK    (board PCB definitions)
  *
- * Adding a new nRF54L board requires only a board header under boards/ and
- * an #elif clause below.
+ * Adding a new nRF54L device or board requires only a header under devices/ or
+ * boards/ and an #elif clause below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,14 +27,16 @@
 /**
  * @brief Route the silicon-level device header.
  *
- * The Makefile must define TIKU_DEVICE_NRF54L15.  Other nRF54L silicon
- * variants would add an @c #elif here and a matching device header under
- * devices/.
+ * The Makefile must define one TIKU_DEVICE_NRF54* macro (derived from MCU=...).
+ * Other nRF54L silicon variants add an @c #elif here and a matching device
+ * header under devices/.
  */
 #if defined(TIKU_DEVICE_NRF54L15)
 #include <arch/nordic/devices/tiku_device_nrf54l15.h>
+#elif defined(TIKU_DEVICE_NRF54LM20A)
+#include <arch/nordic/devices/tiku_device_nrf54lm20a.h>
 #else
-#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15."
+#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15 or TIKU_DEVICE_NRF54LM20A."
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -44,11 +46,18 @@
 /**
  * @brief Route the board-level pin-assignment header.
  *
- * TIKU_BOARD_NRF54L15_DK selects the nRF54L15-DK (PCA10156).  When nothing
- * is defined the DK is used as the default primary supported board.
+ * TIKU_BOARD_NRF54L15_DK selects the nRF54L15-DK (PCA10156);
+ * TIKU_BOARD_NRF54LM20_DK selects the nRF54LM20-DK (PCA10184).  When no board
+ * is defined, each device falls back to its own DK as the primary board.
  */
 #if defined(TIKU_BOARD_NRF54L15_DK)
 #include <arch/nordic/boards/tiku_board_nrf54l15_dk.h>
+#elif defined(TIKU_BOARD_NRF54LM20_DK)
+#include <arch/nordic/boards/tiku_board_nrf54lm20_dk.h>
+#elif defined(TIKU_DEVICE_NRF54LM20A)
+/* Default board for the nRF54LM20A device: the nRF54LM20-DK. */
+#define TIKU_BOARD_NRF54LM20_DK 1
+#include <arch/nordic/boards/tiku_board_nrf54lm20_dk.h>
 #else
 /* Default to the nRF54L15-DK board -- the primary supported board. */
 #define TIKU_BOARD_NRF54L15_DK 1

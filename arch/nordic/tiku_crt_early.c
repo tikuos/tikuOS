@@ -26,7 +26,7 @@
  */
 
 #include <stdint.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 /*---------------------------------------------------------------------------*/
 /* Linker-script symbols                                                     */
@@ -44,9 +44,18 @@ extern int main(void);
 /** @brief ISR function-pointer type used throughout the vector table. */
 typedef void (*nordic_isr_t)(void);
 
-/* nRF54L15 exposes external IRQs 0..271 (nrf54l15_application_vectors.h).
- * 16 system exceptions + 272 external = 288 slots (incl. the initial SP). */
+/* External IRQ count differs per device (highest MDK IRQn + 1):
+ *   nRF54L15   : IRQs 0..271 (max = GPIOTE30_1 269)  -> 272 external
+ *   nRF54LM20A : IRQs 0..289 (max = VREGUSB 289)     -> 290 external
+ * 16 system exceptions + N external + the initial SP form the table.  The
+ * named handlers below sit at identical IRQn indices on both parts (the IRQ
+ * enum values match); only the array length and the trailing default-fill
+ * range change. */
+#if defined(TIKU_DEVICE_NRF54LM20A)
+#define NORDIC_NUM_EXT_IRQS  290
+#else
 #define NORDIC_NUM_EXT_IRQS  272
+#endif
 extern const nordic_isr_t tiku_nordic_vectors[16 + NORDIC_NUM_EXT_IRQS];
 
 /*---------------------------------------------------------------------------*/
@@ -123,9 +132,9 @@ static void tiku_nordic_apply_trims(void)
 }
 
 /* FICR silicon-identification words used to gate revision-specific errata
- * (nRF54L15 errata sheet 4503_401 + the MDK's nrf54l_erratas.h convention):
- * 0x00FFC340 = part marker (0x1C on nRF54L15), 0x00FFC344 = revision code
- * (0x01 gates the workarounds MDK applies conditionally), 0x00FFC334 = trim
+ * (nRF54L errata sheet 4503_401 + the MDK's nrf54l_erratas.h convention):
+ * 0x00FFC340 = part marker (0x1C on nRF54L15, 0x29 on nRF54LM20A),
+ * 0x00FFC344 = revision code (0x01/0x02 on nRF54L15), 0x00FFC334 = trim
  * version (extra gate on erratum 32). */
 #define NORDIC_FICR_PART  (*(volatile uint32_t *)0x00FFC340ul)
 #define NORDIC_FICR_REV   (*(volatile uint32_t *)0x00FFC344ul)
@@ -134,25 +143,93 @@ static void tiku_nordic_apply_trims(void)
 /**
  * @brief Silicon errata workarounds the stock MDK SystemInit applies and a
  *        from-scratch startup must reproduce (raw register pokes from the
- *        public nRF54L15 errata sheet; every Nordic-SDK app gets these).
+ *        public nRF54L errata sheet + nrfx system_nrf54l.c; every Nordic-SDK
+ *        app gets these).
  *
- * Split around the trim loop to preserve the MDK's ordering: erratum 37
- * (TAD poke, all revisions) runs before trims; the regulator/RADIO pokes
- * run after.  Miss these and the core boots fine but analog behaviour is
- * off -- erratum 40 in particular parks a reserved RADIO register at a
- * value the RF front-end needs.
+ * Split around the trim loop to preserve the MDK's ordering: erratum 37 (TAD
+ * poke) runs before trims; the regulator/RADIO pokes run after.  Erratum 37
+ * is PRESENT on both the nRF54L15 (part 0x1C) and the nRF54LM20A (part 0x29)
+ * and its TAD base (0x50053000) is identical, so it fires on both.  The
+ * remaining pokes -- the ES-PDK regulator prime and errata 31/32/40 -- are
+ * gated in system_nrf54l.c to the nRF54L05/L10/L15 only (NOT the LM20A), so
+ * they are compiled in for the nRF54L15 build alone.
  */
 static void tiku_nordic_sysinit_errata_early(void)
 {
-    /* Erratum 37 (all revs): current can stay high after pin reset or power
-     * cycle unless this TAD register is set. */
+    /* Erratum 37 (nRF54L15 + nRF54LM20A): current can stay high after pin
+     * reset or power cycle unless this TAD register is set. */
     *(volatile uint32_t *)(NRF_TAD_S_BASE + 0x40Cul) = 1ul;
+}
+
+/*---------------------------------------------------------------------------*/
+/* Debug-access (TAMPC) unlock -- SystemInit parity                          */
+/*---------------------------------------------------------------------------*/
+
+/* TAMPC signal-control words (MDK system_nrf54l_approtect.h vocabulary).
+ * Every CTRL register shares the DBGEN field layout, so one set of
+ * constants serves DBGEN/NIDEN/SPIDEN/SPNIDEN and the AP DBGEN. */
+#define NORDIC_TAMPC_LOCKED \
+    (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_LOCK_Enabled \
+         << TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_LOCK_Pos)
+#define NORDIC_TAMPC_CLEAR_WP \
+    ((TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_WRITEPROTECTION_Clear \
+         << TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_WRITEPROTECTION_Pos) | \
+     (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_KEY \
+         << TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_Pos))
+#define NORDIC_TAMPC_OPEN \
+    ((TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_VALUE_High \
+         << TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_VALUE_Pos) | \
+     (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_LOCK_Disabled \
+         << TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_LOCK_Pos) | \
+     (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_KEY \
+         << TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_Pos))
+
+/**
+ * @brief Drive one TAMPC debug signal open (unless a prior session locked it).
+ *
+ * Mirrors the MDK's nrf54l_handle_approtect_signal() default (APPROTECT
+ * disabled) branch: clear the write protection, then set VALUE=High with
+ * LOCK=Disabled.  A signal locked by hardware/UICR is left alone (no
+ * ENABLE_APPROTECT product config in TikuOS, so the locked-open hard-reset
+ * branch is intentionally not replicated).
+ */
+static void tiku_nordic_tampc_open(volatile uint32_t *sig)
+{
+    if ((*sig & NORDIC_TAMPC_LOCKED) != 0ul) {
+        return;
+    }
+    *sig = NORDIC_TAMPC_CLEAR_WP;
+    *sig = NORDIC_TAMPC_OPEN;
+}
+
+/**
+ * @brief Re-open the debug port at every boot (MDK nrf54l_handle_approtect).
+ *
+ * With UICR.APPROTECT erased ("Unprotected"), the nRF54L leaves the debug
+ * enables under FIRMWARE control: SystemInit must drive the TAMPC DBGEN /
+ * NIDEN / SPIDEN / SPNIDEN domain signals (and the AUX AP DBGEN) high each
+ * boot.  The original from-scratch startup skipped TAMPC entirely; that was
+ * benign on the nRF54L15-DK, but on the nRF54LM20-DK a WATCHDOG reset brings
+ * the signals up low, so the J-Link loses access ("AP-Protect enabled",
+ * NotAvailableBecauseProtection) until a full `nrfutil device recover` chip
+ * erase -- it killed every flash following a watchdog-reset test on HW
+ * (2026-07-14).  Running the vendor sequence at boot keeps the port open on
+ * both devices.
+ */
+static void tiku_nordic_debug_unlock(void)
+{
+    tiku_nordic_tampc_open(&NRF_TAMPC_S->PROTECT.DOMAIN[0].DBGEN.CTRL);
+    tiku_nordic_tampc_open(&NRF_TAMPC_S->PROTECT.DOMAIN[0].NIDEN.CTRL);
+    tiku_nordic_tampc_open(&NRF_TAMPC_S->PROTECT.DOMAIN[0].SPIDEN.CTRL);
+    tiku_nordic_tampc_open(&NRF_TAMPC_S->PROTECT.DOMAIN[0].SPNIDEN.CTRL);
+    tiku_nordic_tampc_open(&NRF_TAMPC_S->PROTECT.AP[0].DBGEN.CTRL);
 }
 
 static void tiku_nordic_sysinit_errata(void)
 {
-    /* ES-PDK regulator configuration (MDK SystemInit, all nRF54L15): prime
-     * 0x50120440 when it reads as unprogrammed. */
+#if defined(TIKU_DEVICE_NRF54L15)
+    /* ES-PDK regulator configuration (MDK SystemInit, nRF54L05/L10/L15 only):
+     * prime 0x50120440 when it reads as unprogrammed. */
     if (*(volatile uint32_t *)0x50120440ul == 0ul) {
         *(volatile uint32_t *)0x50120440ul = 0xC8ul;
     }
@@ -175,6 +252,12 @@ static void tiku_nordic_sysinit_errata(void)
      * start-up, before any DC/DC use). */
     *(volatile uint32_t *)0x50120624ul = (20ul | (1ul << 5));
     *(volatile uint32_t *)0x5012063Cul &= ~(1ul << 19);
+#else
+    /* nRF54LM20A: errata 31/32/40 and the ES-PDK regulator prime are not
+     * PRESENT for part 0x29 (see nrf54l_erratas.h); only erratum 37 (applied
+     * above) and the FICR trims are needed. */
+    (void)NORDIC_FICR_PART; (void)NORDIC_FICR_REV; (void)NORDIC_FICR_TRIMV;
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
@@ -213,6 +296,7 @@ void tiku_nordic_reset_handler(void)
     __asm__ volatile ("isb" ::: "memory");
 
     tiku_nordic_sysinit_errata_early();
+    tiku_nordic_debug_unlock();     /* keep the J-Link port open (TAMPC) */
     tiku_nordic_apply_trims();
     tiku_nordic_sysinit_errata();
 
@@ -251,9 +335,10 @@ void tiku_nordic_reset_handler(void)
  *
  * Placed in .vectors, which the linker locates at the base of RRAM (0x0)
  * aligned to the VTOR requirement.  Index 0 is the initial SP; 1..15 are
- * the ARMv8-M system exceptions; 16.. are the 272 external IRQs.  Unused
- * external slots are filled with nordic_default_handler so a spurious IRQ
- * spins in a debuggable loop rather than dispatching through a NULL slot.
+ * the ARMv8-M system exceptions; 16.. are the NORDIC_NUM_EXT_IRQS external
+ * IRQs (272 on nRF54L15, 290 on nRF54LM20A).  Unused external slots are
+ * filled with nordic_default_handler so a spurious IRQ spins in a debuggable
+ * loop rather than dispatching through a NULL slot.
  */
 const nordic_isr_t tiku_nordic_vectors[16 + NORDIC_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {
@@ -297,5 +382,7 @@ __attribute__((section(".vectors"), used)) = {
     [16 + 219 ... 16 + 225] = nordic_default_handler,
     [16 + 227 ... 16 + 259] = nordic_default_handler,
     [16 + 261 ... 16 + 267] = nordic_default_handler,
-    [16 + 269 ... 16 + 271] = nordic_default_handler,
+    /* Upper bound tracks the device IRQ count (271 on nRF54L15, 289 on the
+     * nRF54LM20A) so every remaining external slot is filled. */
+    [16 + 269 ... 16 + (NORDIC_NUM_EXT_IRQS - 1)] = nordic_default_handler,
 };

@@ -28,7 +28,7 @@
 
 #include <hal/tiku_wake_hal.h>
 #include <arch/nordic/tiku_nordic_core.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 #include <string.h>
 
 /* Live NVIC lines (MDK IRQn enum values). */

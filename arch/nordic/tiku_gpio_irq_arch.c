@@ -69,20 +69,25 @@ typedef struct {
     uint8_t          used[TIKU_GPIOTE_NCH];/**< 1 = channel armed               */
 } gpiote_ctx_t;
 
-static gpiote_ctx_t s_gpiote20 = { NRF_GPIOTE20_S, 218, { 0 } }; /* P1, P2 */
-static gpiote_ctx_t s_gpiote30 = { NRF_GPIOTE30_S, 268, { 0 } }; /* P0     */
+static gpiote_ctx_t s_gpiote20 = { NRF_GPIOTE20_S, 218, { 0 } }; /* P1, P2, P3 */
+static gpiote_ctx_t s_gpiote30 = { NRF_GPIOTE30_S, 268, { 0 } }; /* P0         */
 
 /**
  * @brief Select the GPIOTE instance that services a given physical port.
- * @param port  Physical port number (0/1/2 == P0/P1/P2).
+ * @param port  Physical port number (0/1/2/3 == P0/P1/P2/P3).
  * @return Pointer to the owning instance context, or NULL for an unknown port.
+ *
+ * P0 is in the LP / always-on domain (GPIOTE30); P1/P2/P3 are in the main
+ * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A; verify its
+ * GPIOTE20 reachability on-device via the CONFIG.PORT readback probe, the same
+ * way P1/P2 were confirmed on the nRF54L15.
  */
 static gpiote_ctx_t *ctx_for_port(uint8_t port)
 {
     if (port == 0u) {
         return &s_gpiote30;
     }
-    if (port == 1u || port == 2u) {
+    if (port == 1u || port == 2u || port == 3u) {
         return &s_gpiote20;
     }
     return (gpiote_ctx_t *)0;

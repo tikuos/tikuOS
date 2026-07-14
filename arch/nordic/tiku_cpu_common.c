@@ -20,7 +20,7 @@
 
 #include <arch/nordic/tiku_cpu_common.h>
 #include <arch/nordic/tiku_nordic_core.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 #include <stddef.h>
 
 /* SysTick is clocked from the processor clock, whose speed is NOT fixed: the

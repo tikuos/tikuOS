@@ -29,7 +29,7 @@
 
 #include <hal/tiku_mpu_hal.h>
 #include <arch/nordic/tiku_mpu_arch.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 #define TIKU_RRAMC_WEN   (1UL << 0)   /* RRAMC_CONFIG.WEN: 1 = writes enabled */
 

@@ -40,7 +40,7 @@
 
 #include <arch/nordic/tiku_cpu_freq_boot_arch.h>
 #include <arch/nordic/tiku_cpu_common.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 #define TIKU_NORDIC_CPU_HZ       128000000UL
 #define TIKU_NORDIC_XOSTART_SPIN 1000000UL   /* ~loop bound, not wall-clock */

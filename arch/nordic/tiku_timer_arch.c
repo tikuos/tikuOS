@@ -33,7 +33,7 @@
  */
 
 #include "tiku_timer_arch.h"
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 #include <arch/nordic/tiku_nordic_core.h>
 #include <arch/nordic/tiku_cpu_common.h>
 #include <kernel/scheduler/tiku_sched.h>

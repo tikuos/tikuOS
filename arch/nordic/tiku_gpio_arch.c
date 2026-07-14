@@ -16,7 +16,7 @@
  */
 
 #include <arch/nordic/tiku_gpio_arch.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 /*---------------------------------------------------------------------------*/
 /* Port -> base pointer                                                      */
@@ -25,7 +25,8 @@
 /**
  * @brief Map a physical port number to its GPIO register block.
  *
- * @param port 0 = P0, 1 = P1, 2 = P2.
+ * @param port 0 = P0, 1 = P1, 2 = P2, 3 = P3 (P3 only on devices with a 4th
+ *             GPIO port, e.g. the nRF54LM20A).
  * @return Pointer to the port's NRF_GPIO_Type, or NULL if out of range.
  */
 static NRF_GPIO_Type *tiku_nordic_gpio_base(uint8_t port)
@@ -34,6 +35,9 @@ static NRF_GPIO_Type *tiku_nordic_gpio_base(uint8_t port)
     case 0u:  return NRF_P0_S;
     case 1u:  return NRF_P1_S;
     case 2u:  return NRF_P2_S;
+#if TIKU_DEVICE_HAS_PORT4
+    case 3u:  return NRF_P3_S;
+#endif
     default:  return (NRF_GPIO_Type *)0;
     }
 }

@@ -21,7 +21,7 @@
 
 #include <hal/tiku_mem_hal.h>
 #include <hal/tiku_mpu_hal.h>
-#include <arch/nordic/mdk/nrf54l15.h>
+#include <arch/nordic/tiku_nordic_mdk.h>
 #include <string.h>
 
 #define TIKU_RRAMC_READY_BIT   (1UL << 0)   /* RRAMC.READY: 1 = idle/ready */
