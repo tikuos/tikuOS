@@ -150,6 +150,18 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
         return TIKU_MEM_ERR_INVALID;
     }
 
+    /* Reject keys that do not fit key[TIKU_PERSIST_MAX_KEY_LEN] including
+     * the NUL.  Silent truncation used to store a 7-char prefix that
+     * persist_find (which compares TIKU_PERSIST_MAX_KEY_LEN chars of the
+     * caller's FULL key) could never match again -- the entry registered
+     * fine and then every write/read/delete under the same key returned
+     * NOT_FOUND (bit on nRF54LM20A HW via the persist-reset-survival
+     * test's 9-char "tb.reboot", 2026-07-14).  The persist edge test
+     * documents reject-with-INVALID as sanctioned behavior. */
+    if (strlen(key) >= TIKU_PERSIST_MAX_KEY_LEN) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+
     /* Verify the FRAM buffer resides in NVM */
     if (!tiku_region_contains(fram_buf, capacity, TIKU_MEM_REGION_NVM)) {
         return TIKU_MEM_ERR_INVALID;
