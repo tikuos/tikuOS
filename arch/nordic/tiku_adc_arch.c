@@ -108,7 +108,16 @@ static uint8_t tiku_saadc_ready;
  * @brief GPIO pin index (on P1) for analog inputs AIN0..AIN7.
  *
  * nRF54L15 product-specification pin assignment; all analog inputs are on
- * physical port P1.
+ * physical port P1.  The nRF54LM20A samples the same P1 pins (ch2 = P1.06
+ * verified on the LM20-DK: driven high it reads the full VDD count).
+ *
+ * Absolute scale note (measured 2026-07-14): counts = VDD * (2/8) / 0.9V
+ * * 4096.  The nRF54L15-DK rail is 1.8 V -> `adc bat` ~2060; the
+ * nRF54LM20-DK ships with VDD:nRF at ~3.0 V -> ~3450.  Cross-checked on the
+ * LM20-DK by driving P1.06 high and sampling it: 3456 counts, byte-identical
+ * to the internal-VDD channel -- the difference between the boards is the
+ * PMIC rail setting (Board Configurator), not an SAADC encoding delta (the
+ * GAIN/REFSEL/PSELP values are identical in both MDKs).
  */
 static const uint8_t tiku_saadc_ain_pin[8] = {
     4u, 5u, 6u, 7u, 11u, 12u, 13u, 14u
