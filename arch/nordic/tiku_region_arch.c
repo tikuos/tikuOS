@@ -31,6 +31,15 @@ static const tiku_mem_region_t tiku_nordic_region_table[] = {
         (tiku_mem_arch_size_t)TIKU_DEVICE_RAM_SIZE,
         TIKU_MEM_REGION_SRAM,
     },
+#if defined(TIKU_DEVICE_RAM2_START)
+    {
+        /* Upper SRAM bank (nRF54LM20A RAM2): large buffers / tier arena.
+         * Classified SRAM so tier sub-arenas created inside it validate. */
+        (const uint8_t *)TIKU_DEVICE_RAM2_START,
+        (tiku_mem_arch_size_t)TIKU_DEVICE_RAM2_SIZE,
+        TIKU_MEM_REGION_SRAM,
+    },
+#endif
     {
         (const uint8_t *)TIKU_DEVICE_FRAM_START,
         (tiku_mem_arch_size_t)TIKU_DEVICE_FRAM_SIZE,

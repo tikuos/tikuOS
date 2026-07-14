@@ -38,17 +38,19 @@ MEMORY
      * linker script).  Addressing past 0x1FCFFF bus-faults. */
     RRAM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x1FD000
     /* The LM20A has 512 KB SRAM in two banks -- RAM (256 KB @ 0x20000000) and
-     * RAM2 (256 KB @ 0x20040000).  TikuOS currently uses only the LOWER bank:
-     * the stack lives at its top (0x20040000), matching Nordic's own
-     * nrf_common.ld, which sets __stack = ORIGIN(RAM)+LENGTH(RAM) of the lower
-     * bank and declares the upper bank as a SEPARATE opt-in region.  The very
-     * top of RAM2 is reserved/unbacked -- placing the stack at 0x20080000
-     * bus-faults on the first push (STKERR, BFAR=0x2007FFF0), proven on HW
-     * during bring-up.  Reclaiming RAM2 (as a separate region for large
-     * buffers / the tier arena) is a tracked follow-up; 256 KB already matches
-     * the nRF54L15 and the largest current build's ~105 KB .bss with 2x+
-     * headroom. */
+     * RAM2 (256 KB @ 0x20040000).  The LOWER bank is the primary bank: image
+     * data, .uninit and the stack (at its top, 0x20040000) live here, matching
+     * Nordic's own nrf_common.ld, which sets __stack at the top of the lower
+     * bank and declares the upper bank as a SEPARATE opt-in region. */
     SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x40000
+    /* RAM2 holds large buffers (the .ram2 section: SRAM tier arena).  The TOP
+     * OF THE BANK IS NOT FULLY BACKED on this silicon: a boot stack placed at
+     * 0x20080000 bus-faults on the first push (STKERR, BFAR=0x2007FFF0), and a
+     * 256 B-step CPU write probe faults first at 0x2007FF00 (0x2007FExx ok) --
+     * both measured on the LM20-DK (nRF54LM20B eng sample).  The MDK claims
+     * the full 0x40000; reserve the top 1 KB for margin -> 255 KB usable.
+     * Keep in sync with TIKU_DEVICE_RAM2_SIZE in tiku_device_nrf54lm20a.h. */
+    SRAM2 (rw) : ORIGIN = 0x20040000, LENGTH = 0x3FC00
 }
 
 /* "FRAM_*" vocabulary the kernel memory introspection speaks == RRAM here. */
@@ -145,7 +147,9 @@ SECTIONS
         *tiku_kits_net_*.o(.persistent*)
     } > SRAM
 
-    /* End of static allocations. Aliases for whichever name libc/kernel use. */
+    /* End of static allocations in the PRIMARY bank (the .ram2 section below
+     * lives in SRAM2 and must not disturb these markers -- _end feeds the
+     * stack-headroom ASSERT and libc's notion of the heap). */
     _end = .;
     end = .;
     __end__ = .;
@@ -155,6 +159,18 @@ SECTIONS
      * a deep call chain cannot collide with live static data. */
     ASSERT((__stack - _end) >= 0x2000,
            "ERROR: SRAM exhausted — need >= 8 KB free below the stack")
+
+    /* -------- 5b. RAM2 large buffers (upper SRAM bank) ---------------- */
+    /* NOLOAD: nothing to copy from the image; the crt zeroes exactly
+     * [__ram2_start, __ram2_end) at boot (like .bss -- the tier arena
+     * expects zeroed memory), leaving the rest of the bank untouched. */
+    .ram2 (NOLOAD) : ALIGN(8)
+    {
+        __ram2_start = .;
+        *(.ram2*)
+        . = ALIGN(4);
+        __ram2_end = .;
+    } > SRAM2
 
     /* -------- 6. DURABLE persist (RRAM, byte-writable NVM) ---------- */
     /* Exact `.persistent` lives at the reserved top of RRAM, written behind the

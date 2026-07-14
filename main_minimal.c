@@ -214,6 +214,47 @@ static void rram_test_run(void)
 }
 #endif /* TIKU_MIN_RRAM_TEST */
 
+#ifdef TIKU_MIN_RAM2_TEST
+/*
+ * RAM2 usable-span probe (build with EXTRA_CFLAGS=-DTIKU_MIN_RAM2_TEST=1).
+ *
+ * The nRF54LM20A has a second 256 KB SRAM bank (RAM2 @ 0x20040000) that the
+ * app image does not use yet.  Phase-C bring-up proved its very top is NOT
+ * CPU-writable (stacking into 0x2007FFF0 bus-faulted, CFSR STKERR) and the
+ * debugger faults reading ~0x2007FF00+, so before the linker exposes the bank
+ * this probe maps the exact usable boundary from the CPU side:
+ *   pass 1: coarse write+verify sweep, 16 KB steps, whole bank
+ *   pass 2: fine sweep of the top 8 KB, 256 B steps, printing each address
+ *           BEFORE touching it -- if a write bus-faults, the last printed
+ *           address is the first bad word and the default handler parks in
+ *           WFE (LED2 stops blinking).
+ */
+static void ram2_test_run(void)
+{
+    uint32_t addr;
+    uint32_t bad = 0u;
+
+    tiku_uart_puts("RAM2 coarse sweep 0x20040000..0x2007C000 (16 KB steps): ");
+    for (addr = 0x20040000u; addr < 0x2007C000u; addr += 0x4000u) {
+        volatile uint32_t *p = (volatile uint32_t *)addr;
+        *p = addr ^ 0xA5A5A5A5u;
+        if (*p != (addr ^ 0xA5A5A5A5u)) { bad = addr; break; }
+    }
+    tiku_uart_printf("%s (bad=0x%x)\n", bad ? "MISMATCH" : "PASS",
+                     (unsigned int)bad);
+
+    tiku_uart_puts("RAM2 fine sweep of the top 8 KB (256 B steps):\n");
+    for (addr = 0x2007E000u; addr < 0x20080000u; addr += 0x100u) {
+        volatile uint32_t *p = (volatile uint32_t *)addr;
+        tiku_uart_printf("  probe 0x%x", (unsigned int)addr);
+        *p = addr ^ 0x5A5A5A5Au;                 /* may bus-fault here */
+        tiku_uart_printf(" -> %s\n",
+                         (*p == (addr ^ 0x5A5A5A5Au)) ? "ok" : "MISMATCH");
+    }
+    tiku_uart_puts("RAM2 probe DONE (whole bank writable)\n");
+}
+#endif /* TIKU_MIN_RAM2_TEST */
+
 int main(void)
 {
     /* Marker: proves execution reached main() (read this RAM word back). */
@@ -242,6 +283,9 @@ int main(void)
 
 #ifdef TIKU_MIN_RRAM_TEST
     rram_test_run();
+#endif
+#ifdef TIKU_MIN_RAM2_TEST
+    ram2_test_run();
 #endif
 
     unsigned long clk = tiku_cpu_nordic_smclk_get_hz();

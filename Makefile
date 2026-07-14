@@ -848,7 +848,13 @@ ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 # recover 12 KB of static headroom; non-threaded BASIC retains the original
 # 32 KB arena.  This lets the canonical TikuBench/TikuConsole HTTPS-offload
 # profile link while remaining comfortably above observed BASIC demand.
-ifeq ($(TIKU_THREADS_ENABLE),1)
+ifeq ($(MCU),nrf54lm20a)
+# The LM20A's tier arena lives in RAM2 (the upper 256 KB SRAM bank, linker
+# section .ram2) and does not compete with the primary bank's .bss/stack at
+# all -- so give BASIC a roomy arena regardless of threads.  192 KB of the
+# 255 KB usable bank (top 1 KB of RAM2 is unbacked on this silicon).
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=196608    # 192 KB tier arena in RAM2
+else ifeq ($(TIKU_THREADS_ENABLE),1)
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=20480     # 20 KB: BASIC + thread headroom
 else
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=32768     # 32 KB: FRAM-tier BASIC arena

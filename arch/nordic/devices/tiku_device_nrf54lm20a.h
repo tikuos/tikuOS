@@ -118,14 +118,27 @@
 /** @brief On-chip SRAM size and base address.
  *
  * The LM20A has 512 KB physical SRAM in two banks -- RAM (256 KB @ 0x20000000)
- * + RAM2 (256 KB @ 0x20040000).  TikuOS currently uses only the LOWER bank
- * (256 KB): Nordic's nrf_common.ld places the stack at the top of the lower
- * bank and treats RAM2 as a separate opt-in region, and the very top of RAM2
- * is reserved/unbacked (a stack there bus-faults -- proven on HW).  RAM_SIZE
- * therefore reports the bank TikuOS actually manages; reclaiming RAM2 for
- * large buffers is a tracked follow-up.  See nrf54lm20a.ld. */
+ * + RAM2 (256 KB @ 0x20040000).  The LOWER bank is the primary/managed bank:
+ * image (.data/.bss), .uninit and the stack live there, matching Nordic's own
+ * nrf_common.ld (stack at the top of the lower bank; RAM2 = separate opt-in
+ * region).  RAM_SIZE reports the primary bank. */
 #define TIKU_DEVICE_RAM_SIZE        (256UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL
+
+/**
+ * @brief RAM2: the upper SRAM bank, used for large buffers (the tier arena).
+ *
+ * Exposed as its own linker region (SRAM2 in nrf54lm20a.ld, section .ram2,
+ * zeroed by the crt) and a second SRAM entry in the region table so tier
+ * sub-arenas validate.  The TOP OF THE BANK IS NOT FULLY BACKED on this
+ * silicon: a CPU write to 0x2007FF00 bus-faults (measured on the LM20-DK's
+ * nRF54LM20B eng sample -- a boot-time stack at 0x20080000 dies with STKERR,
+ * BFAR 0x2007FFF0, and a 256 B-step write probe faults first at 0x2007FF00
+ * while 0x2007FExx passes).  The MDK claims the full 0x40000; reserve the top
+ * 1 KB for margin and expose 255 KB.
+ */
+#define TIKU_DEVICE_RAM2_START      0x20040000UL
+#define TIKU_DEVICE_RAM2_SIZE       0x0003FC00UL   /* 255 KB (top 1 KB reserved) */
 
 /**
  * @brief On-chip RRAM range (exposed under the FRAM_* vocabulary).

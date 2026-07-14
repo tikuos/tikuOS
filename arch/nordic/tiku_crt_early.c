@@ -317,6 +317,20 @@ void tiku_nordic_reset_handler(void)
         }
     }
 
+#if defined(TIKU_DEVICE_NRF54LM20A)
+    /* Zero the RAM2 large-buffer section (upper SRAM bank; holds the tier
+     * arena, which expects .bss-like zeroed memory).  Only the used span is
+     * cleared -- symbols come from nrf54lm20a.ld. */
+    {
+        extern uint32_t __ram2_start;
+        extern uint32_t __ram2_end;
+        uint32_t *dst = &__ram2_start;
+        while (dst < &__ram2_end) {
+            *dst++ = 0U;
+        }
+    }
+#endif
+
     /* .uninit is intentionally left untouched (warm-reset survivor state). */
 
     (void)main();
