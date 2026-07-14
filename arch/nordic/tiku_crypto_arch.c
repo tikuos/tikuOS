@@ -133,40 +133,19 @@ static int cm_ensure_seed(void)
     }
 
 #if defined(CRACEN_SEEDVALID_VALID_Disabled)
-    /* nRF54LM20A/B CRACEN core: SEEDVALID and SEEDLOCK are read-only ("Writing
-     * this register has no effect") -- the DRBG seed comes from the internal
-     * RNG, not a manual SEED[] write like the nRF54L15.  Enable the RNG + the
-     * CryptoMaster and let the hardware condition entropy into the seed;
-     * tiku_trng_arch_read_bytes() runs the full RNGCONTROL bring-up (SOFTRST,
-     * warm-up, AES conditioning) so the ring is producing, then we hold the
-     * RNG enabled and spin (bounded) until the core marks the seed valid.
-     * A fast bounded fail here makes the crypto kit fall back to software
-     * rather than burning a full op-timeout per call (which trips the hang
-     * detector). */
-    {
-        /* Latch: once the internal-RNG seed fails to validate on this die,
-         * every later op fails FAST (skip the 500k spin) so the crypto kit's
-         * AUTO mode drops straight to software instead of burning the spin
-         * per call.  A full HW-offload bring-up on this core revision (the
-         * DRBG reseed trigger beyond ENABLE.RNG) is a tracked follow-up. */
-        static uint8_t s_seed_dead;
-        uint32_t spin;
-        (void)i;
-        if (s_seed_dead) {
-            return -1;
-        }
-        (void)tiku_trng_arch_read_bytes((uint8_t *)seed, sizeof seed);
-        memset(seed, 0, sizeof seed);
-        NRF_CRACEN_S->ENABLE |= (CRACEN_ENABLE_RNG_Msk |
-                                 CRACEN_ENABLE_CRYPTOMASTER_Msk);
-        for (spin = 0u; spin < 500000u; spin++) {
-            if ((NRF_CRACEN_S->SEEDVALID & CRACEN_SEEDVALID_VALID_Msk) != 0u) {
-                return 0;
-            }
-        }
-        s_seed_dead = 1u;
-        return -1;                       /* seed never validated -> sw path */
-    }
+    /* nRF54LM20A/B CRACEN core: the CryptoMaster's SYMMETRIC engines (BA413
+     * hash, BA411E AES) do NOT require CRACEN.SEEDVALID here -- proven on-die:
+     * with SEEDVALID reading 0, a BA413 SHA-256 produces the bit-exact FIPS
+     * digest.  The SEED[0..11] block feeds the IKG (Internal Key Generator)
+     * private/symmetric key DRBG, which TikuOS does not use; and SEEDVALID is
+     * read-only on this core ("Writing this register has no effect"), so it
+     * cannot be forced from software anyway.  (On the nRF54L15 the CryptoMaster
+     * DID gate on SEEDVALID -- an instant fetcher error otherwise -- hence the
+     * #else path below.)  Just proceed; the DPA countermeasure mask
+     * (cm_ensure_mask) is the only per-op prerequisite that remains. */
+    (void)seed;
+    (void)i;
+    return 0;
 #else
     /* nRF54L15 CRACEN core: write the seed and mark it valid. */
     if (tiku_trng_arch_read_bytes((uint8_t *)seed, sizeof seed)
