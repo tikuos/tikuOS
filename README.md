@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
-  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350-red?style=flat-square" alt="MCU"></a>
+  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350%20%7C%20nRF54L-red?style=flat-square" alt="MCU"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
   <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-58%20commands-orange?style=flat-square" alt="Shell"></a>
   <a href="#networking"><img src="https://img.shields.io/badge/net-Wi--Fi%20%7C%20TLS%20%7C%20MQTT-brightgreen?style=flat-square" alt="Networking"></a>
@@ -39,6 +39,7 @@
 | | Apollo510 Blue EVB · M55 + EM9305 | 512 KB | 4 MB MRAM | :green_circle: |
 | **Raspberry Pi**<br><sub>32-bit · RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash | :green_circle: |
 | **Nordic**<br><sub>32-bit · Cortex-M33</sub> | nRF54L15 DK | 256 KB | 1.5 MB RRAM | :green_circle: |
+| | nRF54LM20-DK · 128 MHz + Axon NPU | 512 KB | 2 MB RRAM | :green_circle: |
 
 ---
 
@@ -54,10 +55,13 @@ make flash MCU=apollo510 TIKU_SHELL_ENABLE=1   # also apollo4l / apollo4p / apol
 # --- Raspberry Pi Pico 2 / 2 W (arm-none-eabi-gcc + picotool) ---------------
 make MCU=rp2350                                # builds main.elf, main.bin, main.uf2
 make flash MCU=rp2350                          # picotool, or copy the UF2 to RPI-RP2
+
+# --- Nordic nRF54L (arm-none-eabi-gcc + nrfutil / SEGGER J-Link) ------------
+make flash MCU=nrf54lm20b TIKU_SHELL_ENABLE=1  # also nrf54lm20a / nrf54l15
 ```
 
 The kernel, shell, VFS, BASIC, and networking are architecture-neutral — the
-same source tree targets all three families through a device/board header
+same source tree targets all four families through a device/board header
 abstraction.
 
 ---
@@ -244,7 +248,7 @@ tikuOS> changed /dev/gpio/1/3      # block until P1.3 changes
 
 | Flag | Effect |
 |------|--------|
-| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15` |
+| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15`, `nrf54lm20a`, `nrf54lm20b` |
 | `TIKU_SHELL_ENABLE=1` | Interactive shell (UART / USB-CDC / Telnet) |
 | `TIKU_SHELL_BASIC_ENABLE=1` | Tiku BASIC interpreter (needs `MEMORY_MODEL=large`) |
 | `TIKU_INIT_ENABLE=1` | FRAM/NVM-backed boot sequence (implies shell) |
