@@ -469,8 +469,9 @@ basic_https_get(const char *method, const char *host, const char *path,
 
     /* resolve host (literal dotted-quad accepted directly) */
     if (basic_net_parse_ip(host, ip) != 0) {
-        static const uint8_t dnssrv[4] = {8, 8, 8, 8};   /* Google public DNS */
+        uint8_t dnssrv[4];                 /* DHCP lease dns, else 8.8.8.8 */
         int8_t drc;
+        tiku_kits_net_dns_default_server(dnssrv);
         tiku_kits_net_dns_init();
         tiku_kits_net_dns_set_server(dnssrv);
         tiku_clock_time_t np;
