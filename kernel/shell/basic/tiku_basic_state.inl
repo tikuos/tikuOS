@@ -176,6 +176,24 @@ static uint8_t       basic_call_sp;
 static long          basic_sub_result;
 #endif
 
+#if TIKU_BASIC_EXT_MAX > 0
+/* Native builtin registry (tiku_basic_ext.h, Tier 2 of loadable.md).
+ * Boot-registered, deliberately OUTSIDE the arena and the F1 checkpoint --
+ * it is firmware configuration, not program state.  Names are uppercase and
+ * never in the A2 token table, so stored (crunched) lines reach them through
+ * match_kw's raw-text path at the dispatch fallthroughs. */
+typedef struct {
+    char    name[TIKU_BASIC_EXT_NAME_MAX];   /* "" = free slot */
+    uint8_t kind;                            /* 0 = statement, 1 = numeric fn */
+    uint8_t arity;                           /* numeric fns: 0..2 */
+    union {
+        tiku_basic_ext_stmt_fn stmt;
+        tiku_basic_ext_nfn     nfn;
+    } u;
+} basic_ext_entry_t;
+static basic_ext_entry_t basic_ext_tab[TIKU_BASIC_EXT_MAX];
+#endif
+
 #if TIKU_BASIC_ARRAYS_ENABLE
 /* 1D / 2D integer or string arrays. Stored row-major as a flat
  * buffer (long[] for numeric, char*[] for string). For 1D arrays

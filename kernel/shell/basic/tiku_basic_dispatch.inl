@@ -424,6 +424,24 @@ exec_stmt(const char **p)
     if (match_kw(p, "REPEAT"))   { exec_repeat(p);    return; }
     if (match_kw(p, "UNTIL"))    { exec_until(p);     return; }
 
+#if TIKU_BASIC_EXT_MAX > 0
+    /* Registered extension statements (tiku_basic_ext.h): after every
+     * builtin, before variables -- registered names are reserved words.
+     * Names are never in the A2 token table, so match_kw's raw-text path
+     * reaches them from both stored (crunched) lines and immediate input. */
+    {
+        uint8_t i;
+        for (i = 0; i < TIKU_BASIC_EXT_MAX; i++) {
+            if (basic_ext_tab[i].name[0] != '\0' &&
+                basic_ext_tab[i].kind == 0u &&
+                match_kw(p, basic_ext_tab[i].name)) {
+                basic_ext_tab[i].u.stmt(p);
+                return;
+            }
+        }
+    }
+#endif
+
     /* Implicit LET: "A = expr" or "A$ = expr$" or "A(i) = expr".
      * The save / restore dance lets us back out cleanly when the
      * cursor sits on a single letter that isn't actually being

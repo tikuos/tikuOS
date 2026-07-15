@@ -41,6 +41,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_basic.h"
+#include "tiku_basic_ext.h"           /* native builtin registry (Tier 2) */
 #include "tiku_basic_config.h"
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/memory/tiku_mem.h>
@@ -138,6 +139,7 @@
 #include "tiku_basic_string.inl"
 #include "tiku_basic_call.inl"
 #include "tiku_basic_expr.inl"
+#include "tiku_basic_ext.inl"         /* registry impl (needs parse_expr) */
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"
 #include "tiku_basic_net.inl"

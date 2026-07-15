@@ -706,6 +706,43 @@ expr_call(const char **p, long *out_v)
         }
     }
 #endif
+#if TIKU_BASIC_EXT_MAX > 0
+    /* Registered extension functions (tiku_basic_ext.h): tried after every
+     * builtin.  The interpreter parses `(a[, b])` per the registered arity
+     * and hands the values to the handler. */
+    {
+        uint8_t i;
+        for (i = 0; i < TIKU_BASIC_EXT_MAX; i++) {
+            if (basic_ext_tab[i].name[0] == '\0' ||
+                basic_ext_tab[i].kind != 1u ||
+                !match_kw(p, basic_ext_tab[i].name)) {
+                continue;
+            }
+            {
+                long args[2] = { 0, 0 };
+                long out     = 0;
+                switch (basic_ext_tab[i].arity) {
+                case 0u:
+                    if (!parse_call_0arg(p)) return 1;
+                    break;
+                case 1u:
+                    if (!parse_call_1arg(p, &args[0])) return 1;
+                    break;
+                default:
+                    if (!parse_call_2arg(p, &args[0], &args[1])) return 1;
+                    break;
+                }
+                if (basic_ext_tab[i].u.nfn(args,
+                                           (int)basic_ext_tab[i].arity,
+                                           &out) != 0) {
+                    return 1;              /* handler raised via ext_error */
+                }
+                *out_v = out;
+                return 1;
+            }
+        }
+    }
+#endif
     *p = save;
     return 0;
 }

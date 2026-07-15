@@ -337,6 +337,13 @@
 #    define TIKU_BASIC_NAMEDVAR_MAX  16
 #  endif
 #endif
+/* Native builtin registry (tiku_basic_ext.h): boot-time registered
+ * statement/function words from kernel services and tikukits.  Slots are a
+ * few bytes of SRAM each; 0 compiles the whole feature out. */
+#ifndef TIKU_BASIC_EXT_MAX
+#define TIKU_BASIC_EXT_MAX          8
+#endif
+
 #ifndef TIKU_BASIC_NAMEDVAR_LEN
 #define TIKU_BASIC_NAMEDVAR_LEN     8       /* 7 chars + NUL */
 #endif
