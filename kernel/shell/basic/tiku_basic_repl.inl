@@ -51,6 +51,12 @@ process_line(const char *raw)
         if (prog_store((uint16_t)ln, body) < 0) {
             SHELL_PRINTF(SH_RED "? program full (%u lines)" SH_RST "\n",
                          (unsigned)TIKU_BASIC_PROGRAM_LINES);
+        } else {
+            /* Program text changed: a durable run-state checkpoint (if any)
+             * describes the OLD program -- its PC / GOSUB / FOR line numbers no
+             * longer map, so drop it.  Idempotent and a no-op when nothing is
+             * checkpointed, so line editing stays cheap. */
+            basic_ckpt_invalidate();
         }
         return;
     }
@@ -66,7 +72,7 @@ process_line(const char *raw)
         q = p;
         if (match_kw(&q, "LIST"))  { prog_list();   return; }
         q = p;
-        if (match_kw(&q, "NEW"))   { prog_clear(); basic_clear_vars(); SHELL_PRINTF("ok\n"); return; }
+        if (match_kw(&q, "NEW"))   { prog_clear(); basic_clear_vars(); basic_ckpt_invalidate(); SHELL_PRINTF("ok\n"); return; }
         q = p;
         if (match_kw(&q, "RUN")) {
             /* `RUN RESUME` (F1): continue a checkpointed program mid-loop from

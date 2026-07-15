@@ -100,7 +100,7 @@
 /* Distinct from TIKU_PERSIST_MAGIC so a checkpoint slot is never confused with
  * a program-store entry, and from BASIC_REGION_MAGIC ('BASP'). */
 #define BASIC_CKPT_MAGIC    0x424B5054u   /* 'BKPT' */
-#define BASIC_CKPT_VERSION  1u
+#define BASIC_CKPT_VERSION  3u            /* 2: +program id; 3: +SUB/scope/DEF FN */
 #define BASIC_CKPT_HDR      12u           /* [gate u32][version u32][len u32] */
 #define BASIC_CKPT_RGN_HDR  16u           /* [magic][version][len][crc]       */
 
@@ -114,16 +114,32 @@
 #define BASIC_CKPT_STR_MAX 0u
 #endif
 
+#if TIKU_BASIC_SUBS_ENABLE
+#define BASIC_CKPT_SUBS_MAX ( \
+      1u + sizeof(basic_frame_t) * TIKU_BASIC_CALL_DEPTH   /* SUB call frames */ \
+    + 1u + sizeof(basic_scope_t) * TIKU_BASIC_SCOPE_MAX)   /* LOCAL scope     */
+#else
+#define BASIC_CKPT_SUBS_MAX 0u
+#endif
+#if TIKU_BASIC_DEFN_ENABLE
+#define BASIC_CKPT_DEFN_MAX_B (1u + sizeof(basic_defn_t) * TIKU_BASIC_DEFN_MAX)
+#else
+#define BASIC_CKPT_DEFN_MAX_B 0u
+#endif
+
 /* Compile-time upper bound on the serialized payload.  Generous fixed slack
  * absorbs struct padding differences so the buffer is never undersized. */
 #define BASIC_CKPT_PAYLOAD_MAX ( \
-      24u                                                          /* pc + flags */ \
+      sizeof(uint32_t)                                             /* prog identity */ \
+    + 24u                                                          /* pc + flags */ \
     + 1u + sizeof(uint16_t) * TIKU_BASIC_GOSUB_DEPTH               /* gosub */ \
     + 1u + sizeof(basic_for_frame_t) * TIKU_BASIC_FOR_DEPTH        /* for */ \
     + 1u + sizeof(basic_loop_frame_t) * TIKU_BASIC_LOOP_DEPTH      /* loop */ \
     + sizeof(long) * BASIC_VAR_TABLE_LEN                           /* numeric vars */ \
     + (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX    /* numeric names */ \
     + BASIC_CKPT_STR_MAX \
+    + BASIC_CKPT_SUBS_MAX                                          /* SUB frames + scope */ \
+    + BASIC_CKPT_DEFN_MAX_B                                        /* DEF FN table */ \
     + 64u)                                                         /* err/data/prng + slack */
 
 #define TIKU_BASIC_CKPT_BYTES  (BASIC_CKPT_HDR + BASIC_CKPT_PAYLOAD_MAX)
@@ -184,6 +200,65 @@ ckpt_r(basic_ckpt_rd_t *r, void *dst, size_t n)
 }
 
 /*---------------------------------------------------------------------------*/
+/* PROGRAM IDENTITY (binds a checkpoint to the program it was captured from)   */
+/*---------------------------------------------------------------------------*/
+
+/* Incremental CRC-32 (reflected, poly 0xEDB88320): seed with 0xFFFFFFFF and
+ * XOR the result with 0xFFFFFFFF to finalize.  Backs both the program identity
+ * below and the region-slot payload CRC (basic_ckpt_crc32). */
+static uint32_t
+basic_crc32_step(uint32_t c, const uint8_t *p, size_t n)
+{
+    size_t i;
+    int    k;
+
+    for (i = 0; i < n; i++) {
+        c ^= p[i];
+        for (k = 0; k < 8; k++) {
+            c = (c >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(c & 1u)));
+        }
+    }
+    return c;
+}
+
+/**
+ * @brief CRC-32 fingerprint of the in-memory program (each line's number +
+ *        text, in ascending line order -- the shape LIST / SAVE emit).
+ *
+ * The checkpoint stores the fingerprint of the program that was RUNNING when it
+ * was captured; RESUME recomputes it against the program actually loaded and
+ * rejects the slot on mismatch, so a basic_pc / GOSUB / FOR stack full of line
+ * numbers is never replayed against a different or edited program (which would
+ * jump to a line that means something else, or nothing).  Empty program -> 0.
+ */
+static uint32_t
+basic_prog_identity(void)
+{
+    uint32_t c   = 0xFFFFFFFFu;
+    uint16_t cur = 0;
+
+    if (prog == NULL) {
+        return 0u;
+    }
+    while (1) {
+        int      idx = prog_next_index(cur);
+        uint16_t num;
+        if (idx < 0) {
+            break;
+        }
+        num = prog[idx].number;
+        c = basic_crc32_step(c, (const uint8_t *)&num, sizeof num);
+        c = basic_crc32_step(c, (const uint8_t *)prog[idx].text,
+                             strlen(prog[idx].text) + 1u);   /* incl. NUL sep */
+        if (num == 0xFFFFu) {
+            break;
+        }
+        cur = (uint16_t)(num + 1);
+    }
+    return c ^ 0xFFFFFFFFu;
+}
+
+/*---------------------------------------------------------------------------*/
 /* SERIALIZE / DESERIALIZE                                                    */
 /*---------------------------------------------------------------------------*/
 
@@ -199,7 +274,9 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 {
     uint16_t i;
     uint8_t  u8;
+    uint32_t pid = basic_prog_identity();
 
+    ckpt_w(w, &pid, sizeof(pid));            /* program this state belongs to */
     ckpt_w(w, &basic_pc, sizeof(basic_pc));
     u8 = (uint8_t)basic_pc_set; ckpt_w(w, &u8, 1);
     u8 = (uint8_t)basic_trace;  ckpt_w(w, &u8, 1);
@@ -237,6 +314,32 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     ckpt_w(w, &basic_data_off, sizeof(basic_data_off));
     ckpt_w(w, &basic_prng_state, sizeof(basic_prng_state));
     ckpt_w(w, &basic_prng_seeded, sizeof(basic_prng_seeded));
+
+#if TIKU_BASIC_SUBS_ENABLE
+    /* SUB call frames + LOCAL restore stack: a program checkpointed mid-CALL
+     * resumes inside the SUB with its LOCALs intact, instead of the frame
+     * silently vanishing (ENDSUB falling through, LOCALs never restored). */
+    ckpt_w(w, &basic_call_sp, 1);
+    for (i = 0; i < basic_call_sp; i++)
+        ckpt_w(w, &basic_frames[i], sizeof(basic_frame_t));
+    ckpt_w(w, &basic_scope_sp, 1);
+    for (i = 0; i < basic_scope_sp; i++)
+        ckpt_w(w, &basic_scope[i], sizeof(basic_scope_t));
+#endif
+#if TIKU_BASIC_DEFN_ENABLE
+    /* DEF FN table: active definitions only (lookup is by name, so restoring
+     * them compacted into slots 0..n-1 is fine).  Without this, resume clears
+     * basic_defns and every post-resume FN...() errors. */
+    {
+        uint8_t nd = 0, k;
+        for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++)
+            if (basic_defns[k].name[0]) nd++;
+        ckpt_w(w, &nd, 1);
+        for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++)
+            if (basic_defns[k].name[0])
+                ckpt_w(w, &basic_defns[k], sizeof(basic_defn_t));
+    }
+#endif
 }
 
 /**
@@ -255,6 +358,16 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     basic_ckpt_rd_t r = { payload, 0, len, 0 };
     uint16_t i;
     uint8_t  u8, sp;
+    uint32_t pid;
+
+    /* Program-identity gate FIRST, before any state is touched: a checkpoint's
+     * PC and GOSUB/FOR line numbers are only meaningful for the exact program
+     * it was captured from.  If the loaded program differs (edited, or a
+     * different SAVE clobbered the store since), reject cleanly -> fresh RUN. */
+    ckpt_r(&r, &pid, sizeof(pid));
+    if (r.err || pid != basic_prog_identity()) {
+        return -1;
+    }
 
     ckpt_r(&r, &basic_pc, sizeof(basic_pc));
     ckpt_r(&r, &u8, 1); basic_pc_set = u8;
@@ -310,6 +423,29 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     ckpt_r(&r, &basic_prng_state, sizeof(basic_prng_state));
     ckpt_r(&r, &basic_prng_seeded, sizeof(basic_prng_seeded));
 
+#if TIKU_BASIC_SUBS_ENABLE
+    ckpt_r(&r, &sp, 1);
+    if (sp > TIKU_BASIC_CALL_DEPTH) return -1;
+    basic_call_sp = sp;
+    for (i = 0; i < sp; i++)
+        ckpt_r(&r, &basic_frames[i], sizeof(basic_frame_t));
+    ckpt_r(&r, &sp, 1);
+    if (sp > TIKU_BASIC_SCOPE_MAX) return -1;
+    basic_scope_sp = sp;
+    for (i = 0; i < sp; i++)
+        ckpt_r(&r, &basic_scope[i], sizeof(basic_scope_t));
+#endif
+#if TIKU_BASIC_DEFN_ENABLE
+    {
+        uint8_t nd, k;
+        ckpt_r(&r, &nd, 1);
+        if (nd > TIKU_BASIC_DEFN_MAX) return -1;
+        for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++) basic_defns[k].name[0] = '\0';
+        for (k = 0; k < nd; k++)
+            ckpt_r(&r, &basic_defns[k], sizeof(basic_defn_t));
+    }
+#endif
+
     return r.err ? -1 : 0;
 }
 
@@ -323,29 +459,26 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
 static uint32_t
 basic_ckpt_crc32(const uint8_t *p, size_t n)
 {
-    uint32_t c = 0xFFFFFFFFu;
-    size_t   i;
-    int      k;
-
-    for (i = 0; i < n; i++) {
-        c ^= p[i];
-        for (k = 0; k < 8; k++) {
-            c = (c >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(c & 1u)));
-        }
-    }
-    return c ^ 0xFFFFFFFFu;
+    return basic_crc32_step(0xFFFFFFFFu, p, n) ^ 0xFFFFFFFFu;
 }
 
-/** @brief Invalidate the region checkpoint (magic := 0; one word program). */
+/** @brief Invalidate the region checkpoint (magic := 0; one word program).
+ *  Idempotent: skips the NVM write when the slot is already invalid, so
+ *  repeated calls (e.g. per-line edits) cost no flash sector erase. */
 static void
 basic_ckpt_invalidate(void)
 {
     uint8_t *slot = basic_ckpt_region_slot();
-    uint32_t z    = 0u;
+    uint32_t magic, z = 0u;
 
-    if (slot != NULL) {
-        (void)tiku_tier_nvm_write(slot, &z, 4u);
+    if (slot == NULL) {
+        return;
     }
+    memcpy(&magic, slot, 4);
+    if (magic != BASIC_CKPT_MAGIC) {
+        return;                            /* already invalid -- no NVM write */
+    }
+    (void)tiku_tier_nvm_write(slot, &z, 4u);
 }
 
 /**
@@ -411,13 +544,19 @@ basic_ckpt_load(void)
 
 #else  /* byte-writable slot: gate-last multi-store */
 
-/** @brief Invalidate the durable checkpoint (gate := 0). */
+/** @brief Invalidate the durable checkpoint (gate := 0).  Idempotent: skips the
+ *  MPU-unlock + store when the gate is already clear (repeated per-edit calls
+ *  stay free). */
 static void
 basic_ckpt_invalidate(void)
 {
     uint16_t mpu;
-    uint32_t z = 0u;
+    uint32_t gate, z = 0u;
 
+    memcpy(&gate, basic_ckpt_buf, 4);
+    if (gate != BASIC_CKPT_MAGIC) {
+        return;                            /* already invalid */
+    }
     mpu = tiku_mpu_unlock_nvm();
     memcpy(basic_ckpt_buf, &z, 4);
     tiku_mpu_lock_nvm(mpu);

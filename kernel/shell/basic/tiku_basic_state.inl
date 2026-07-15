@@ -125,6 +125,24 @@ typedef struct {
 static basic_defn_t *basic_defns;
 #endif
 
+/* SUB call frames + the LOCAL restore stack.  Declared here -- ahead of
+ * tiku_basic_ckpt.inl -- so the F1 checkpoint can serialize them; the SUB/CALL
+ * logic that drives them lives in tiku_basic_subs.inl (included later). */
+#if TIKU_BASIC_SUBS_ENABLE
+#ifndef TIKU_BASIC_CALL_DEPTH
+#define TIKU_BASIC_CALL_DEPTH  8
+#endif
+#ifndef TIKU_BASIC_SCOPE_MAX
+#define TIKU_BASIC_SCOPE_MAX   32      /* total saved params+locals, all frames */
+#endif
+typedef struct { uint16_t idx; long old; } basic_scope_t;
+typedef struct { uint16_t ret_line; uint8_t scope_base; } basic_frame_t;
+static basic_scope_t basic_scope[TIKU_BASIC_SCOPE_MAX];
+static uint8_t       basic_scope_sp;
+static basic_frame_t basic_frames[TIKU_BASIC_CALL_DEPTH];
+static uint8_t       basic_call_sp;
+#endif
+
 #if TIKU_BASIC_ARRAYS_ENABLE
 /* 1D / 2D integer or string arrays. Stored row-major as a flat
  * buffer (long[] for numeric, char*[] for string). For 1D arrays

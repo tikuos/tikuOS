@@ -29,20 +29,10 @@
 
 #if TIKU_BASIC_SUBS_ENABLE
 
-#ifndef TIKU_BASIC_CALL_DEPTH
-#define TIKU_BASIC_CALL_DEPTH  8
-#endif
-#ifndef TIKU_BASIC_SCOPE_MAX
-#define TIKU_BASIC_SCOPE_MAX   32      /* total saved params+locals, all frames */
-#endif
-
-typedef struct { uint16_t idx; long old; } basic_scope_t;
-typedef struct { uint16_t ret_line; uint8_t scope_base; } basic_frame_t;
-
-static basic_scope_t basic_scope[TIKU_BASIC_SCOPE_MAX];
-static uint8_t       basic_scope_sp;
-static basic_frame_t basic_frames[TIKU_BASIC_CALL_DEPTH];
-static uint8_t       basic_call_sp;
+/* TIKU_BASIC_CALL_DEPTH / TIKU_BASIC_SCOPE_MAX, the basic_frame_t / basic_scope_t
+ * types, and the basic_frames / basic_scope stacks are declared in
+ * tiku_basic_state.inl (ahead of the F1 checkpoint, which serializes them).
+ * This file owns the SUB / CALL / LOCAL logic that operates on them. */
 
 /* Does a (whitespace-stripped) line text start with keyword KW followed by a
  * word boundary? KW must be upper-case. */
