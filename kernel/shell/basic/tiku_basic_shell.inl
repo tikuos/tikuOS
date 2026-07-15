@@ -82,6 +82,14 @@ basic_session_begin(void)
 void
 tiku_basic_autorun(void)
 {
+    /* Refuse re-entry while an interactive BASIC mode session is live.  A
+     * scheduled `basic run <path>` job reaches here (jobs/rules tick before the
+     * BASIC mode tick), and it would otherwise reset interpreter state,
+     * overwrite the in-memory program, and drive a blocking run on top of the
+     * user's session.  Boot-time autorun runs before any mode, so no-op there. */
+    if (basic_mode_on) {
+        return;
+    }
     if (basic_session_begin() != 0) {
         return;
     }

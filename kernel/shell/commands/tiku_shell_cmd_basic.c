@@ -51,6 +51,13 @@ basic_from_file(const char *path, int run)
     char resolved[TIKU_SHELL_CWD_SIZE];
     int  n;
 
+    /* Refuse re-entry into a live interactive BASIC session.  Reachable when a
+     * scheduled `basic run/load <path>` job or rule fires (jobs tick before the
+     * BASIC mode tick); without this it would clobber the user's in-memory
+     * program and block the cooperative scheduler mid-session. */
+    if (tiku_basic_mode_active()) {
+        return;
+    }
     tiku_shell_cwd_resolve(path, resolved, sizeof resolved);
     n = tiku_vfs_read(resolved, basic_file_buf, sizeof basic_file_buf - 1u);
     if (n < 0) {
