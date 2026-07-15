@@ -121,6 +121,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_basic_state.inl"
+#include "tiku_basic_token.inl"       /* A2: keyword crunch (before all users) */
 #include "tiku_basic_arena.inl"
 #include "tiku_basic_persist.inl"
 #include "tiku_basic_ckpt.inl"        /* F1: PERSIST / RUN RESUME (needs arena + persist) */

@@ -124,7 +124,9 @@ exec_if(const char **p)
         /* Step past the ELSE keyword and run the ELSE body. The
          * ELSE body can itself be a bare line number (= GOTO) or a
          * colon-separated stmt list. */
-        const char *q = else_pos + 4;
+        /* Step past the ELSE keyword: one byte crunched, four spelled out. */
+        const char *q = else_pos +
+            (((uint8_t)*else_pos == BASIC_TOK_BYTE(ELSE)) ? 1 : 4);
         skip_ws(&q);
         save = q;
         if (parse_unum(&q, &target)) {
@@ -155,6 +157,112 @@ exec_stmt(const char **p)
 {
     skip_ws(p);
     if (**p == '\0') return;
+
+    /* A2: crunched statement dispatch.  Stored program lines lead with a
+     * token byte, so one switch replaces the keyword-compare chain below.
+     * Each case reproduces exactly what `match_kw(kw) + handler` does
+     * (consume the keyword, skip trailing whitespace, call the handler).
+     * Anything not switched -- rarely-stored statements, the MID$-slice
+     * special form, raw immediate-mode text -- falls through to the chain,
+     * which remains the single source of truth for statement semantics. */
+    {
+        uint8_t b = (uint8_t)**p;
+        if (b >= BASIC_TOK_BASE) {
+            switch (b) {
+            case BASIC_TOK_BYTE(REM):
+                while (**p) (*p)++;
+                return;
+            case BASIC_TOK_BYTE(PRINT): {
+                const char *post_print;
+                (*p)++; skip_ws(p);
+                post_print = *p;
+                if (match_kw(p, "USING")) { exec_print_using(p); return; }
+                *p = post_print;
+                exec_print(p);
+                return;
+            }
+            case BASIC_TOK_BYTE(LET):      (*p)++; skip_ws(p); exec_let(p, 0);  return;
+            case BASIC_TOK_BYTE(CONST):    (*p)++; skip_ws(p); exec_const(p);   return;
+            case BASIC_TOK_BYTE(INPUT):    (*p)++; skip_ws(p); exec_input(p);   return;
+            case BASIC_TOK_BYTE(GOTO):     (*p)++; skip_ws(p); exec_goto(p);    return;
+            case BASIC_TOK_BYTE(GOSUB):    (*p)++; skip_ws(p); exec_gosub(p);   return;
+            case BASIC_TOK_BYTE(RETURN):   (*p)++; skip_ws(p); exec_return();   return;
+            case BASIC_TOK_BYTE(END): {
+                const char *peek;
+                (*p)++; skip_ws(p);
+                peek = *p;
+                if (match_kw(&peek, "IF"))     { *p = peek; exec_endif(p);      return; }
+                if (match_kw(&peek, "SELECT")) { *p = peek; exec_end_select(p); return; }
+                basic_running = 0; basic_pc = 0;
+                return;
+            }
+            case BASIC_TOK_BYTE(ENDIF):    (*p)++; skip_ws(p); exec_endif(p);   return;
+            case BASIC_TOK_BYTE(ELSEIF):   (*p)++; skip_ws(p); exec_elseif(p);  return;
+            case BASIC_TOK_BYTE(ELSE):     (*p)++; skip_ws(p); exec_else_kw(p); return;
+            case BASIC_TOK_BYTE(SELECT):
+                (*p)++; skip_ws(p);
+                if (!match_kw(p, "CASE")) {
+                    basic_throw(TIKU_BASIC_ERR_SYNTAX, "SELECT CASE expected");
+                    return;
+                }
+                exec_select_case(p);
+                return;
+            case BASIC_TOK_BYTE(CASE):     (*p)++; skip_ws(p); exec_case(p);    return;
+            case BASIC_TOK_BYTE(STOP):
+                (*p)++; basic_running = 0; basic_pc = 0;
+                return;
+            case BASIC_TOK_BYTE(IF):       (*p)++; skip_ws(p); exec_if(p);      return;
+            case BASIC_TOK_BYTE(FOR):      (*p)++; skip_ws(p); exec_for(p);     return;
+            case BASIC_TOK_BYTE(NEXT):     (*p)++; skip_ws(p); exec_next(p);    return;
+            case BASIC_TOK_BYTE(EXIT):     (*p)++; skip_ws(p); exec_exit(p);    return;
+            case BASIC_TOK_BYTE(CONTINUE): (*p)++; skip_ws(p); exec_continue(p); return;
+            case BASIC_TOK_BYTE(CLS):      (*p)++; skip_ws(p); exec_cls();      return;
+            case BASIC_TOK_BYTE(DELAY):    (*p)++; skip_ws(p); exec_delay(p);   return;
+            case BASIC_TOK_BYTE(SLEEP):    (*p)++; skip_ws(p); exec_sleep(p);   return;
+#if TIKU_BASIC_PEEK_POKE_ENABLE
+            case BASIC_TOK_BYTE(POKE):     (*p)++; skip_ws(p); exec_poke(p);    return;
+#endif
+#if TIKU_BASIC_GPIO_ENABLE
+            case BASIC_TOK_BYTE(PIN):      (*p)++; skip_ws(p); exec_pin(p);     return;
+            case BASIC_TOK_BYTE(DIGWRITE): (*p)++; skip_ws(p); exec_digwrite(p); return;
+#endif
+#if TIKU_BASIC_LED_ENABLE
+            case BASIC_TOK_BYTE(LED):      (*p)++; skip_ws(p); exec_led(p);     return;
+#endif
+#if TIKU_BASIC_VFS_ENABLE
+            case BASIC_TOK_BYTE(VFSWRITE): (*p)++; skip_ws(p); exec_vfswrite(p); return;
+#endif
+#if TIKU_BASIC_SUBS_ENABLE
+            case BASIC_TOK_BYTE(ENDSUB):   (*p)++; skip_ws(p); exec_endsub();   return;
+            case BASIC_TOK_BYTE(SUB):      (*p)++; skip_ws(p); exec_sub(p);     return;
+            case BASIC_TOK_BYTE(CALL):     (*p)++; skip_ws(p); exec_call(p);    return;
+            case BASIC_TOK_BYTE(LOCAL):    (*p)++; skip_ws(p); exec_local(p);   return;
+            case BASIC_TOK_BYTE(RESULT):   (*p)++; skip_ws(p); exec_result(p);  return;
+#endif
+            case BASIC_TOK_BYTE(ON):       (*p)++; skip_ws(p); exec_on(p);      return;
+            case BASIC_TOK_BYTE(RESUME):   (*p)++; skip_ws(p); exec_resume(p);  return;
+            case BASIC_TOK_BYTE(EVERY):    (*p)++; skip_ws(p); exec_every(p);   return;
+            case BASIC_TOK_BYTE(TRACE):    (*p)++; skip_ws(p); exec_trace(p);   return;
+            case BASIC_TOK_BYTE(PERSIST):  (*p)++; skip_ws(p); exec_persist(p); return;
+            case BASIC_TOK_BYTE(READ):     (*p)++; skip_ws(p); exec_read(p);    return;
+            case BASIC_TOK_BYTE(DATA):     (*p)++; skip_ws(p); exec_data_noop(p); return;
+            case BASIC_TOK_BYTE(RESTORE):  (*p)++; skip_ws(p); exec_restore();  return;
+#if TIKU_BASIC_ARRAYS_ENABLE
+            case BASIC_TOK_BYTE(DIM):      (*p)++; skip_ws(p); exec_dim(p);     return;
+#endif
+#if TIKU_BASIC_DEFN_ENABLE
+            case BASIC_TOK_BYTE(DEF):      (*p)++; skip_ws(p); exec_def(p);     return;
+#endif
+            case BASIC_TOK_BYTE(SWAP):     (*p)++; skip_ws(p); exec_swap(p);    return;
+            case BASIC_TOK_BYTE(WHILE):    (*p)++; skip_ws(p); exec_while(p);   return;
+            case BASIC_TOK_BYTE(WEND):     (*p)++; skip_ws(p); exec_wend(p);    return;
+            case BASIC_TOK_BYTE(REPEAT):   (*p)++; skip_ws(p); exec_repeat(p);  return;
+            case BASIC_TOK_BYTE(UNTIL):    (*p)++; skip_ws(p); exec_until(p);   return;
+            default:
+                break;                     /* not switched: use the chain */
+            }
+        }
+    }
 
     if (match_kw(p, "REM") || **p == '\'') {
         /* Comment: drop the rest of the line, including any colons.

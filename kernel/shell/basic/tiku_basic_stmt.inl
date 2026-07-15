@@ -879,8 +879,16 @@ scan_for_else(const char *src)
     int in_str  = 0;
     int pending = 0;                 /* inner IF...THENs awaiting an ELSE */
     while (*q != '\0') {
-        if (*q == '"') { in_str = !in_str; q++; continue; }
-        if (in_str)    { q++; continue; }
+        uint8_t b = (uint8_t)*q;
+        if (b == '"') { in_str = !in_str; q++; continue; }
+        if (in_str)   { q++; continue; }
+        /* A2: crunched keyword bytes (unambiguous, no boundary checks). */
+        if (b == BASIC_TOK_BYTE(THEN)) { pending++; q++; continue; }
+        if (b == BASIC_TOK_BYTE(ELSE)) {
+            if (pending > 0) { pending--; q++; continue; }
+            return q;
+        }
+        /* Raw text forms (immediate-mode lines are never crunched). */
         if ((to_upper(q[0]) == 'T') && (to_upper(q[1]) == 'H') &&
             (to_upper(q[2]) == 'E') && (to_upper(q[3]) == 'N')) {
             char prev = (q == src) ? ' ' : q[-1];
@@ -1801,11 +1809,11 @@ data_find_next_line(uint16_t from_lineno, int *out_off)
     int n = prog_next_index(from_lineno);
     while (n >= 0) {
         const char *t = prog[n].text;
+        size_t      k;
         skip_ws(&t);
-        if ((to_upper(t[0]) == 'D') && (to_upper(t[1]) == 'A') &&
-            (to_upper(t[2]) == 'T') && (to_upper(t[3]) == 'A') &&
-            !is_word_cont(t[4])) {
-            *out_off = (int)((t + 4) - prog[n].text);
+        k = tok_kw_at(t, "DATA");            /* token byte or raw text (A2) */
+        if (k != 0) {
+            *out_off = (int)((t + k) - prog[n].text);
             return n;
         }
         if (prog[n].number == 0xFFFFu) break;

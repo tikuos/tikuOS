@@ -85,11 +85,22 @@ print_escape(char esc)
 /* KEYWORDS / NUMBERS / VARIABLES                                            */
 /*---------------------------------------------------------------------------*/
 
-/* Case-insensitive keyword match with word-boundary check. */
+/* Case-insensitive keyword match with word-boundary check.  DUAL (A2): a
+ * crunched token byte matches its spelling in one compare, so stored program
+ * lines dispatch on bytes while immediate-mode raw text keeps the char path.
+ * @p kw is always an UPPERCASE literal (matches the table spellings). */
 static int
 match_kw(const char **p, const char *kw)
 {
     const char *q = *p;
+    uint8_t     b = (uint8_t)*q;
+    if (b >= BASIC_TOK_BASE) {
+        if (b >= BASIC_TOK_BASE + BASIC_TOK_N ||
+            strcmp(basic_tok_tab[b - BASIC_TOK_BASE], kw) != 0) return 0;
+        *p = q + 1;
+        skip_ws(p);
+        return 1;
+    }
     while (*kw) {
         if (to_upper(*q) != *kw) return 0;
         q++; kw++;

@@ -35,16 +35,12 @@
  * This file owns the SUB / CALL / LOCAL logic that operates on them. */
 
 /* Does a (whitespace-stripped) line text start with keyword KW followed by a
- * word boundary? KW must be upper-case. */
+ * word boundary? KW must be upper-case.  Accepts crunched token bytes (A2). */
 static int
 subs_line_kw(const char *t, const char *kw)
 {
     while (*t == ' ' || *t == '\t') t++;
-    while (*kw) {
-        if (to_upper(*t) != *kw) return 0;
-        t++; kw++;
-    }
-    return !is_word_cont(*t);
+    return tok_kw_at(t, kw) != 0;
 }
 
 /* Find a `SUB <name>` definition line. Returns its prog index, or -1. */
@@ -56,10 +52,11 @@ prog_find_sub(const char *name, size_t nlen)
         const char *t;
         size_t k;
         if (prog[i].number == 0) continue;
-        if (!subs_line_kw(prog[i].text, "SUB")) continue;
         t = prog[i].text;
         while (*t == ' ' || *t == '\t') t++;
-        t += 3;                                   /* past "SUB" */
+        k = tok_kw_at(t, "SUB");              /* 1 byte crunched, 3 spelled */
+        if (k == 0) continue;
+        t += k;
         while (*t == ' ' || *t == '\t') t++;
         for (k = 0; k < nlen; k++) {
             if (to_upper(t[k]) != to_upper(name[k])) break;
@@ -150,7 +147,7 @@ exec_call(const char **p)
     /* Position sp at the SUB header's parameter list. */
     sp = prog[si].text;
     while (*sp == ' ' || *sp == '\t') sp++;
-    sp += 3;                                       /* past "SUB" */
+    sp += tok_kw_at(sp, "SUB");                    /* past SUB (token or text) */
     while (*sp == ' ' || *sp == '\t') sp++;
     while (is_word_cont(*sp)) sp++;                /* past the name */
     skip_ws(&sp);

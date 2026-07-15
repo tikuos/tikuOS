@@ -190,8 +190,9 @@ basic_run_step(void)
     prev_pc = basic_pc;
     basic_pc_set = 0;
     if (basic_trace) {
-        SHELL_PRINTF(SH_CYAN SH_DIM "[%u] %s" SH_RST "\n",
-                     (unsigned)prog[idx].number, prog[idx].text);
+        SHELL_PRINTF(SH_CYAN SH_DIM "[%u] ", (unsigned)prog[idx].number);
+        basic_detok_print(prog[idx].text);   /* A2: expand token bytes */
+        SHELL_PRINTF(SH_RST "\n");
     }
 
     p = prog[idx].text;

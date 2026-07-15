@@ -205,6 +205,14 @@ peek_string_expr(const char *p)
 {
     while (*p == ' ' || *p == '\t') p++;
     if (*p == '"') return 1;
+    /* A2: a crunched string-function token (spelling ends in '$'). */
+    {
+        uint8_t b = (uint8_t)*p;
+        if (b >= BASIC_TOK_BASE && b < BASIC_TOK_BASE + BASIC_TOK_N) {
+            const char *s = basic_tok_tab[b - BASIC_TOK_BASE];
+            return s[strlen(s) - 1u] == '$';
+        }
+    }
     /* A$..Z$ -- single letter then `$`, then a non-word char. */
     if (is_alpha(*p) && *(p + 1) == '$' && !is_word_cont(*(p + 2))) {
         return 1;

@@ -70,10 +70,11 @@ multi_if_starts_here(const char *t)
             while (*t == ' ' || *t == '\t') t++;
         }
     }
-    if (!(to_upper(t[0]) == 'I' && to_upper(t[1]) == 'F') ||
-        is_word_cont(t[2])) return 0;
+    if (tok_kw_at(t, "IF") == 0) return 0;
     end = (int)strlen(t);
     while (end > 0 && (t[end-1] == ' ' || t[end-1] == '\t')) end--;
+    /* Line must END with THEN: the crunched token byte, or raw text. */
+    if (end >= 1 && (uint8_t)t[end-1] == BASIC_TOK_BYTE(THEN)) return 1;
     if (end < 4) return 0;
     if (to_upper(t[end-4]) != 'T' || to_upper(t[end-3]) != 'H' ||
         to_upper(t[end-2]) != 'E' || to_upper(t[end-1]) != 'N') return 0;
@@ -95,18 +96,17 @@ line_is_else_kw(const char *t)
             while (*t == ' ' || *t == '\t') t++;
         }
     }
-    if (to_upper(t[0]) == 'E' && to_upper(t[1]) == 'L' &&
-        to_upper(t[2]) == 'S' && to_upper(t[3]) == 'E' &&
-        !is_word_cont(t[4])) return 1;
+    if (tok_kw_at(t, "ELSE") != 0) return 1;
     return 0;
 }
 
 /* Is this line `ELSEIF <cond> THEN`?  Returns a pointer to the condition
- * text (just past the ELSEIF keyword) if so, else NULL.  One word only --
- * so a plain `ELSE` never matches here (its t[4] is not 'I'). */
+ * text (just past the ELSEIF keyword) if so, else NULL.  Token-exact --
+ * a plain `ELSE` never matches (distinct token / word boundary). */
 static const char *
 line_is_elseif(const char *t)
 {
+    size_t k;
     while (*t == ' ' || *t == '\t') t++;
     if (is_alpha(*t)) {
         const char *r = t;
@@ -116,13 +116,8 @@ line_is_elseif(const char *t)
             while (*t == ' ' || *t == '\t') t++;
         }
     }
-    if (to_upper(t[0]) == 'E' && to_upper(t[1]) == 'L' &&
-        to_upper(t[2]) == 'S' && to_upper(t[3]) == 'E' &&
-        to_upper(t[4]) == 'I' && to_upper(t[5]) == 'F' &&
-        !is_word_cont(t[6])) {
-        return t + 6;
-    }
-    return NULL;
+    k = tok_kw_at(t, "ELSEIF");
+    return (k != 0) ? t + k : NULL;
 }
 
 /* Is this line `END IF` or `ENDIF`? */
@@ -138,15 +133,14 @@ line_is_endif(const char *t)
             while (*t == ' ' || *t == '\t') t++;
         }
     }
-    if (to_upper(t[0]) == 'E' && to_upper(t[1]) == 'N' &&
-        to_upper(t[2]) == 'D') {
-        const char *q = t + 3;
-        if (*q == 'I' || *q == 'i') {
-            if (to_upper(q[1]) == 'F' && !is_word_cont(q[2])) return 1;
-        } else if (*q == ' ' || *q == '\t') {
+    {
+        size_t k;
+        if (tok_kw_at(t, "ENDIF") != 0) return 1;
+        k = tok_kw_at(t, "END");
+        if (k != 0) {
+            const char *q = t + k;
             while (*q == ' ' || *q == '\t') q++;
-            if (to_upper(q[0]) == 'I' && to_upper(q[1]) == 'F' &&
-                !is_word_cont(q[2])) return 1;
+            if (tok_kw_at(q, "IF") != 0) return 1;
         }
     }
     return 0;

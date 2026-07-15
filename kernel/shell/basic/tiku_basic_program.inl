@@ -45,6 +45,7 @@ static int
 prog_store(uint16_t lineno, const char *body)
 {
     uint16_t i;
+    char        crn[TIKU_BASIC_LINE_MAX];
     const char *t = body;
     skip_ws(&t);
     PROG_INDEX_INVALIDATE();
@@ -55,6 +56,11 @@ prog_store(uint16_t lineno, const char *body)
         }
         return 0;
     }
+    /* A2: crunch keywords to token bytes at store time.  Output is never
+     * longer than the input, and LIST / SAVE detokenize, so the on-media and
+     * on-screen forms stay plain text. */
+    basic_crunch(crn, sizeof(crn), t);
+    t = crn;
     /* Replace existing line. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == lineno) {
@@ -175,7 +181,9 @@ prog_list(void)
     while (1) {
         int idx = prog_next_index(cur);
         if (idx < 0) break;
-        SHELL_PRINTF("%u %s\n", (unsigned)prog[idx].number, prog[idx].text);
+        SHELL_PRINTF("%u ", (unsigned)prog[idx].number);
+        basic_detok_print(prog[idx].text);   /* A2: expand token bytes */
+        SHELL_PRINTF("\n");
         if (prog[idx].number == 0xFFFFu) break;
         cur = (uint16_t)(prog[idx].number + 1);
     }

@@ -212,13 +212,23 @@ basic_save_to_persist(void)
         if (idx < 0) {
             break;
         }
-        n = snprintf(tmp + pos, tmp_cap - pos, "%u %s\n",
-                     (unsigned)prog[idx].number, prog[idx].text);
+        /* Number, then the DETOKENIZED body (A2): the on-media format stays
+         * plain text, so pre-A2 saves load unchanged and LOAD re-crunches. */
+        n = snprintf(tmp + pos, tmp_cap - pos, "%u ",
+                     (unsigned)prog[idx].number);
         if (n < 0 || (size_t)n >= tmp_cap - pos) {
             basic_report(TIKU_BASIC_ERR_IO, "save: program too large for buffer");
             return -1;
         }
         pos += (size_t)n;
+        n = basic_detok(tmp + pos, tmp_cap - pos, prog[idx].text);
+        if (n < 0 || (size_t)n + 2u > tmp_cap - pos) {
+            basic_report(TIKU_BASIC_ERR_IO, "save: program too large for buffer");
+            return -1;
+        }
+        pos += (size_t)n;
+        tmp[pos++] = '\n';
+        tmp[pos]   = '\0';
         if (prog[idx].number == 0xFFFFu) {
             break;
         }

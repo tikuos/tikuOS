@@ -67,13 +67,22 @@ basic_save_to_named(const char *name)
         int idx = prog_next_index(cur);
         int n;
         if (idx < 0) break;
-        n = snprintf(tmp + pos, sizeof(tmp) - pos, "%u %s\n",
-                     (unsigned)prog[idx].number, prog[idx].text);
+        /* Number + detokenized body: slot format stays plain text (A2). */
+        n = snprintf(tmp + pos, sizeof(tmp) - pos, "%u ",
+                     (unsigned)prog[idx].number);
         if (n < 0 || (size_t)n >= sizeof(tmp) - pos) {
             basic_report(TIKU_BASIC_ERR_IO, "slot too small for program");
             return -1;
         }
         pos += (size_t)n;
+        n = basic_detok(tmp + pos, sizeof(tmp) - pos, prog[idx].text);
+        if (n < 0 || (size_t)n + 2u > sizeof(tmp) - pos) {
+            basic_report(TIKU_BASIC_ERR_IO, "slot too small for program");
+            return -1;
+        }
+        pos += (size_t)n;
+        tmp[pos++] = '\n';
+        tmp[pos]   = '\0';
         if (prog[idx].number == 0xFFFFu) break;
         cur = (uint16_t)(prog[idx].number + 1);
     }

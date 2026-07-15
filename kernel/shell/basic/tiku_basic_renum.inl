@@ -40,6 +40,13 @@ static int
 match_kw_no_ws(const char **q, const char *kw)
 {
     const char *r = *q;
+    uint8_t     b = (uint8_t)*r;
+    if (b >= BASIC_TOK_BASE) {               /* A2: crunched keyword byte */
+        if (b >= BASIC_TOK_BASE + BASIC_TOK_N ||
+            strcmp(basic_tok_tab[b - BASIC_TOK_BASE], kw) != 0) return 0;
+        *q = r + 1;
+        return 1;
+    }
     while (*kw) {
         if (to_upper(*r) != *kw) return 0;
         r++; kw++;
