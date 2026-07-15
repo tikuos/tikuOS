@@ -313,40 +313,41 @@ process_line(const char *raw)
     TIKU_BASIC_MATHX_ENABLE || TIKU_BASIC_FILE_ENABLE ||                      \
     TIKU_BASIC_NET_ENABLE || TIKU_BASIC_BLE_ENABLE
             /* Full-profile words (RP2350 / Apollo). Each clause is gated, so
-             * the line lists exactly what was built in. */
-            SHELL_PRINTF(
-                "  " SH_CYAN "Full:      " SH_RST
+             * the line lists exactly what was built in.  Each fragment is its
+             * own SHELL_PRINTF so no #if sits inside a macro-call argument --
+             * that pattern is non-portable (ISO C) and -Wpedantic flags it. */
+            SHELL_PRINTF("  " SH_CYAN "Full:      " SH_RST);
 #if TIKU_BASIC_SUBS_ENABLE
-                " SUB(p) LOCAL CALL ENDSUB"
+            SHELL_PRINTF(" SUB(p) LOCAL CALL ENDSUB");
 #endif
 #if TIKU_BASIC_RTC_ENABLE
-                " NOW DATE$ TIME$ SETTIME"
+            SHELL_PRINTF(" NOW DATE$ TIME$ SETTIME");
 #endif
 #if TIKU_BASIC_MATHX_ENABLE
-                " LOG EXP POW ATAN"
+            SHELL_PRINTF(" LOG EXP POW ATAN");
 #endif
 #if TIKU_BASIC_FILE_ENABLE
-                " APPEND FWRITE FREAD$"
+            SHELL_PRINTF(" APPEND FWRITE FREAD$");
 #endif
 #if TIKU_BASIC_NET_ENABLE
-                " UDPSEND IPADDR$ NETUP"
+            SHELL_PRINTF(" UDPSEND IPADDR$ NETUP");
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
-                " MQTTPUB"
+            SHELL_PRINTF(" MQTTPUB");
 #endif
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-                " HTTPGET$ HTTPPOST$ HTTPHEADER HTTPSTATUS"
+            SHELL_PRINTF(" HTTPGET$ HTTPPOST$ HTTPHEADER HTTPSTATUS");
 #endif
 #endif
 #if TIKU_BASIC_BLE_ENABLE
 #if TIKU_BLE_SERIAL_PRESENT
-                " BLEADV BLESEND BLEUP BLEAVAIL BLEGET$"
+            SHELL_PRINTF(" BLEADV BLESEND BLEUP BLEAVAIL BLEGET$");
 #endif
 #if TIKU_BLE_ADV_PRESENT
-                " BLESCAN$"
+            SHELL_PRINTF(" BLESCAN$");
 #endif
-                " BLEOFF BLEBEACON"
+            SHELL_PRINTF(" BLEOFF BLEBEACON");
 #endif
-                "\n");
+            SHELL_PRINTF("\n");
 #endif
 #undef BASIC_HELP_POKE_STMT
 #undef BASIC_HELP_PEEK_FN

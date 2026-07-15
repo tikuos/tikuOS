@@ -112,6 +112,12 @@ static char (*basic_namedvar_names)[TIKU_BASIC_NAMEDVAR_LEN];
 static char (*basic_namedstrvar_names)[TIKU_BASIC_NAMEDVAR_LEN];
 #endif
 
+/* CONST NAME = expr (F4): 1 marks the numeric named-var slot (index = slot -
+ * 26) as read-only.  Reset each RUN by basic_clear_vars.  Not serialized by
+ * the F1 checkpoint, so a power-cut RESUME loses read-only enforcement until
+ * the CONST line re-executes -- same boundary as arrays/EVERY. */
+static uint8_t basic_namedvar_const[TIKU_BASIC_NAMEDVAR_MAX];
+
 #if TIKU_BASIC_DEFN_ENABLE
 #ifndef TIKU_BASIC_DEFN_ARGS
 #define TIKU_BASIC_DEFN_ARGS 4
@@ -135,12 +141,28 @@ static basic_defn_t *basic_defns;
 #ifndef TIKU_BASIC_SCOPE_MAX
 #define TIKU_BASIC_SCOPE_MAX   32      /* total saved params+locals, all frames */
 #endif
-typedef struct { uint16_t idx; long old; } basic_scope_t;
+/* One saved variable slot for a SUB param / LOCAL.  is_str selects which
+ * array the slot belongs to: numeric slots restore `old` into basic_vars,
+ * string slots restore `old_str` into basic_strvars.  old_str points INTO
+ * basic_str_heap, so it is (a) an A4 compaction root -- a caller's shadowed
+ * string is reachable only through here -- and (b) serialized as a heap
+ * offset by the F1 checkpoint (a raw pointer would not survive a power cut). */
+typedef struct {
+    uint16_t idx;
+    uint8_t  is_str;
+    long     old;         /* numeric saved value   (is_str == 0) */
+    char    *old_str;     /* string saved pointer   (is_str == 1), else NULL */
+} basic_scope_t;
 typedef struct { uint16_t ret_line; uint8_t scope_base; } basic_frame_t;
 static basic_scope_t basic_scope[TIKU_BASIC_SCOPE_MAX];
 static uint8_t       basic_scope_sp;
 static basic_frame_t basic_frames[TIKU_BASIC_CALL_DEPTH];
 static uint8_t       basic_call_sp;
+
+/* SUB return value (F3): a SUB sets it with the `RESULT expr` statement; the
+ * caller reads it as the bare `RESULT` numeric function after CALL.  Gives a
+ * scoped return without leaking through a global.  Reset each RUN. */
+static long          basic_sub_result;
 #endif
 
 #if TIKU_BASIC_ARRAYS_ENABLE
@@ -352,12 +374,36 @@ static basic_every_t *basic_everys;
 #ifndef TIKU_BASIC_ONCHG_MAX
 #define TIKU_BASIC_ONCHG_MAX        4
 #endif
+
+/* F2: make ON CHANGE on WRITABLE nodes event-driven via tiku_vfs_watch instead
+ * of polling VFSREAD every tick -- exact (no missed fast transitions) and
+ * cheaper.  Needs the real kernel VFS watch API + the shell process's event
+ * queue, so it is ON for the real platforms and OFF on the host test harness
+ * (which has neither).  -D-overridable. */
+#ifndef TIKU_BASIC_ONCHG_EVENT
+#  if TIKU_BASIC_ONCHG_MAX > 0 && (defined(PLATFORM_MSP430) ||                 \
+       defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) ||                  \
+       defined(PLATFORM_NORDIC))
+#    define TIKU_BASIC_ONCHG_EVENT   1
+#  else
+#    define TIKU_BASIC_ONCHG_EVENT   0
+#  endif
+#endif
+
 typedef struct {
     char     path[40];
     long     last_value;
     uint16_t handler_line;
     uint8_t  is_gosub;
     uint8_t  active;
+#if TIKU_BASIC_ONCHG_EVENT
+    /* Cached resolved node.  Non-NULL with a write handler => event-armed
+     * (watched; the poll tick only re-checks it when an event marks it
+     * pending).  NULL / read-only => polled every tick as before. */
+    const tiku_vfs_node_t *node;
+    uint8_t                armed;      /* 1 = subscribed via tiku_vfs_watch  */
+    uint8_t                pending;    /* 1 = an event arrived, re-check due  */
+#endif
 } basic_onchg_t;
 static basic_onchg_t *basic_onchgs;
 

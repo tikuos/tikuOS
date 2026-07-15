@@ -61,27 +61,11 @@ exec_if(const char **p)
             while (**p) (*p)++;
             return;
         } else {
-            /* FALSE: scan forward to the matching ELSE or END IF. */
-            int else_idx, endif_idx;
-            int target_idx;
-            if (find_if_else_or_endif(basic_pc, &else_idx, &endif_idx) != 0) {
-                basic_throw(TIKU_BASIC_ERR_GENERAL, "IF without END IF");
-                return;
-            }
-            target_idx = (else_idx >= 0) ? else_idx : endif_idx;
-            {
-                int next = prog_next_index(
-                    (uint16_t)(prog[target_idx].number + 1));
-                if (next < 0) {
-                    basic_running = 0;
-                    basic_pc = 0;
-                    while (**p) (*p)++;
-                    return;
-                }
-                basic_pc = prog[next].number;
-                basic_pc_set = 1;
-            }
-            while (**p) (*p)++;
+            /* FALSE: walk the ELSEIF/ELSE chain -- enter the first ELSEIF
+             * whose condition holds, else the ELSE body, else fall past
+             * END IF.  (find_if_else_or_endif's plain-ELSE-only path is now
+             * subsumed by this chain walker.) */
+            multi_if_take_false(basic_pc, p);
             return;
         }
     }
@@ -213,6 +197,7 @@ exec_stmt(const char **p)
     }
 #endif
     if (match_kw(p, "LET"))    { exec_let(p, 0); return; }
+    if (match_kw(p, "CONST"))  { exec_const(p);  return; }
     if (match_kw(p, "INPUT"))  { exec_input(p);  return; }
     if (match_kw(p, "GOTO"))   { exec_goto(p);   return; }
     if (match_kw(p, "GOSUB"))  { exec_gosub(p);  return; }
@@ -235,6 +220,7 @@ exec_stmt(const char **p)
         basic_running = 0; basic_pc = 0; return;
     }
     if (match_kw(p, "ENDIF"))  { exec_endif(p);    return; }
+    if (match_kw(p, "ELSEIF")) { exec_elseif(p);   return; }
     if (match_kw(p, "ELSE"))   { exec_else_kw(p);  return; }
     if (match_kw(p, "SELECT")) {
         skip_ws(p);
@@ -308,6 +294,7 @@ exec_stmt(const char **p)
     if (match_kw(p, "SUB"))      { exec_sub(p);      return; }
     if (match_kw(p, "CALL"))     { exec_call(p);     return; }
     if (match_kw(p, "LOCAL"))    { exec_local(p);    return; }
+    if (match_kw(p, "RESULT"))   { exec_result(p);   return; }
 #endif
     if (match_kw(p, "ON"))       { exec_on(p);        return; }
     if (match_kw(p, "RESUME"))   { exec_resume(p);    return; }
@@ -409,6 +396,11 @@ exec_stmt(const char **p)
                 (void)is_str;
                 v = parse_expr(p);
                 if (basic_error) return;
+                if (idx >= 26 && basic_namedvar_const[idx - 26]) {
+                    basic_throw(TIKU_BASIC_ERR_GENERAL,
+                                "cannot assign to CONST");
+                    return;
+                }
                 basic_vars[idx] = v;
                 return;
             }

@@ -150,19 +150,33 @@ expr_term(const char **p)
 {
     long v = expr_unary(p);
     skip_ws(p);
-    while (**p == '*' || **p == '/') {
+    for (;;) {
         char op = **p;
         long rhs;
-        (*p)++;
-        rhs = expr_unary(p);
-        if (op == '*') {
-            v = v * rhs;
-        } else {
+        if (op == '*' || op == '/') {
+            (*p)++;
+            rhs = expr_unary(p);
+            if (op == '*') {
+                v = v * rhs;
+            } else {
+                if (rhs == 0) {
+                    basic_throw(TIKU_BASIC_ERR_DIVZERO, "division by zero");
+                    return 0;
+                }
+                v = v / rhs;
+            }
+        } else if (match_kw(p, "MOD")) {
+            /* Infix `a MOD b`, same precedence as * and /.  The MOD(a,b)
+             * builtin still works: expr_call consumes `MOD(` as a primary
+             * before this infix check ever sees it. */
+            rhs = expr_unary(p);
             if (rhs == 0) {
-                basic_throw(TIKU_BASIC_ERR_DIVZERO, "division by zero");
+                basic_throw(TIKU_BASIC_ERR_DIVZERO, "MOD by zero");
                 return 0;
             }
-            v = v / rhs;
+            v = v % rhs;
+        } else {
+            break;
         }
         skip_ws(p);
     }

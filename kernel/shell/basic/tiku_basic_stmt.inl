@@ -169,7 +169,42 @@ exec_let(const char **p, int already_consumed_var)
     (void)is_string;
     v = parse_expr(p);
     if (basic_error) return;
+    /* A CONST-defined named slot (index >= 26) is read-only. */
+    if (idx >= 26 && basic_namedvar_const[idx - 26]) {
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "cannot assign to CONST");
+        return;
+    }
     basic_vars[idx] = v;
+}
+
+/* CONST NAME = expr (F4): evaluate expr once and bind NAME as a read-only
+ * numeric named constant.  Reassigning it afterwards is rejected in exec_let.
+ * (String constants are not supported -- use a plain string var.) */
+static void
+exec_const(const char **p)
+{
+    int  idx, is_string = 0;
+    long v;
+    skip_ws(p);
+    if (!parse_var_full(p, &idx, &is_string) || is_string) {
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "CONST needs a numeric NAME");
+        return;
+    }
+    if (idx < 26) {
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "CONST needs a multi-letter name");
+        return;
+    }
+    skip_ws(p);
+    if (**p != '=') {
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
+        return;
+    }
+    (*p)++;
+    v = parse_expr(p);
+    if (basic_error) return;
+    basic_namedvar_const[idx - 26] = 0;      /* allow this defining write */
+    basic_vars[idx]                = v;
+    basic_namedvar_const[idx - 26] = 1;      /* now read-only */
 }
 
 #if TIKU_BASIC_STRVARS_ENABLE
@@ -580,12 +615,17 @@ basic_jump_after(int idx)
     basic_pc_set = 1;
 }
 
+#if TIKU_BASIC_SUBS_ENABLE
+static void exec_endsub(void);      /* defined later in tiku_basic_subs.inl */
+#endif
+
 /**
- * @brief EXIT FOR | EXIT WHILE | EXIT REPEAT  -- early exit from the
- *        innermost matching loop.
+ * @brief EXIT FOR | EXIT WHILE | EXIT REPEAT | EXIT SUB  -- early exit from
+ *        the innermost matching loop or subroutine.
  *
  * Pops the corresponding frame and advances basic_pc to the line
- * after the matching NEXT / WEND / UNTIL.  Exits in immediate mode
+ * after the matching NEXT / WEND / UNTIL (loops), or to the caller
+ * (EXIT SUB, identical to reaching ENDSUB).  Exits in immediate mode
  * are rejected because there's no run to terminate.
  */
 static void
@@ -596,6 +636,16 @@ exec_exit(const char **p)
         return;
     }
     skip_ws(p);
+#if TIKU_BASIC_SUBS_ENABLE
+    if (match_kw(p, "SUB")) {
+        if (basic_call_sp == 0) {
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "EXIT SUB outside a SUB");
+            return;
+        }
+        exec_endsub();          /* restore params+locals, return to caller */
+        return;
+    }
+#endif
     if (match_kw(p, "FOR")) {
         int idx;
         if (for_sp == 0) {
@@ -641,7 +691,7 @@ exec_exit(const char **p)
         basic_jump_after(idx);
         return;
     }
-    basic_throw(TIKU_BASIC_ERR_GENERAL, "EXIT FOR | WHILE | REPEAT");
+    basic_throw(TIKU_BASIC_ERR_GENERAL, "EXIT FOR | WHILE | REPEAT | SUB");
 }
 
 /**
@@ -1395,11 +1445,31 @@ exec_every(const char **p)
     basic_everys[slot].active = 1;
 }
 
+#if TIKU_BASIC_ONCHG_EVENT
+/* F2: resolve an ON CHANGE slot's node and, if it is WRITABLE, subscribe the
+ * shell process so writes deliver TIKU_EVENT_VFS (event-driven; the poll tick
+ * then skips it).  Sensor/read-only or unresolved nodes stay polled.  This is
+ * idempotent -- tiku_vfs_watch dedups -- so the mode tick re-calls it every
+ * pass to self-heal after the rules engine's wholesale unwatch_all(). */
+static void
+basic_onchg_arm(basic_onchg_t *o)
+{
+    o->node = tiku_vfs_resolve(o->path);
+    if (o->node != NULL && o->node->write != NULL) {
+        (void)tiku_vfs_watch(o->path, &tiku_shell_process);
+        o->armed = 1;
+    } else {
+        o->armed = 0;
+    }
+}
+#endif
+
 /* ON CHANGE "/path" GOTO line   or   ... GOSUB line
- * Registers a reactive watch. The RUN loop polls the path, and on
- * value change either jumps (GOTO) or pushes a return address (GOSUB)
- * to the handler. The "last value" baseline is captured at register
- * time, so a watch never fires on its own first read. */
+ * Registers a reactive watch. Writable nodes are event-armed via
+ * tiku_vfs_watch (F2); sensor/read-only nodes are polled by the RUN loop.
+ * On value change it either jumps (GOTO) or pushes a return address (GOSUB)
+ * to the handler. The "last value" baseline is captured at register time, so
+ * a watch never fires on its own first read. */
 static void
 exec_on_change(const char **p)
 {
@@ -1443,7 +1513,38 @@ exec_on_change(const char **p)
      * if so, undo the registration. */
     if (basic_error) {
         basic_onchgs[slot].active = 0;
+        return;
     }
+#if TIKU_BASIC_ONCHG_EVENT
+    basic_onchg_arm(&basic_onchgs[slot]);   /* event-arm if writable */
+#endif
+}
+
+/* Re-read one ON CHANGE slot's value and, if it changed, fire its handler
+ * (GOTO jump / GOSUB push+jump); return 1 iff it fired.  Called only at a
+ * statement boundary, so the GOSUB return address (line_after(basic_pc)) is
+ * correct.  Shared by the poll tick and the event path (F2). */
+static int
+basic_onchg_check(basic_onchg_t *o)
+{
+    long v = basic_vfsread(o->path);
+    if (basic_error) {                 /* read failure -- silence and skip */
+        basic_error = 0;
+        return 0;
+    }
+    if (v == o->last_value) {
+        return 0;
+    }
+    o->last_value = v;
+    if (o->is_gosub) {
+        if (gosub_sp >= TIKU_BASIC_GOSUB_DEPTH) {
+            return 0;                  /* stack full -- no re-fire */
+        }
+        gosub_stack[gosub_sp++] = line_after(basic_pc);
+    }
+    basic_pc     = o->handler_line;
+    basic_pc_set = 1;
+    return 1;
 }
 
 /* Called from the RUN loop between program statements. Walks the
@@ -1477,25 +1578,17 @@ basic_poll_reactive(void)
 #endif
 #if TIKU_BASIC_ONCHG_MAX > 0
     for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++) {
-        long v;
         if (!basic_onchgs[i].active) continue;
-        v = basic_vfsread(basic_onchgs[i].path);
-        if (basic_error) {
-            /* Path-read failure -- silence and skip. */
-            basic_error = 0;
-            continue;
+#if TIKU_BASIC_ONCHG_EVENT
+        /* Event-armed (writable) node: only re-check when an event has marked
+         * it pending -- no VFSREAD every tick.  Firing still happens here, at
+         * a statement boundary, so the GOSUB return address is correct. */
+        if (basic_onchgs[i].armed) {
+            if (!basic_onchgs[i].pending) continue;
+            basic_onchgs[i].pending = 0;
         }
-        if (v != basic_onchgs[i].last_value) {
-            basic_onchgs[i].last_value = v;
-            if (basic_onchgs[i].is_gosub) {
-                if (gosub_sp >= TIKU_BASIC_GOSUB_DEPTH) {
-                    /* Return to where we were, no re-fire. */
-                    return;
-                }
-                gosub_stack[gosub_sp++] = line_after(basic_pc);
-            }
-            basic_pc     = basic_onchgs[i].handler_line;
-            basic_pc_set = 1;
+#endif
+        if (basic_onchg_check(&basic_onchgs[i])) {
             return;        /* one handler per poll */
         }
     }
@@ -1566,6 +1659,49 @@ exec_on(const char **p)
             return;
         }
         basic_err_handler = (uint16_t)target;     /* 0 = disabled */
+        return;
+    }
+    /* ON TIMER n GOSUB L (or GOTO L) -- sugar for EVERY n : GOSUB L.  Reads
+     * better than EVERY for periodic tasks and reuses the EVERY registry. */
+    if (match_kw(p, "TIMER")) {
+        long ms, ln;
+        int  is_gsub, i, slot = -1;
+        if (!basic_running) {
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "ON outside RUN");
+            return;
+        }
+        ms = parse_expr(p);
+        if (basic_error) return;
+        if (ms <= 0) {
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "EVERY interval must be > 0");
+            return;
+        }
+        skip_ws(p);
+        if      (match_kw(p, "GOSUB")) is_gsub = 1;
+        else if (match_kw(p, "GOTO"))  is_gsub = 0;
+        else {
+            basic_throw(TIKU_BASIC_ERR_SYNTAX, "GOTO or GOSUB expected");
+            return;
+        }
+        ln = parse_expr(p);
+        if (basic_error) return;
+        if (ln < 0 || ln >= 0xFFFE) {
+            basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad handler line");
+            return;
+        }
+        for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) {
+            if (!basic_everys[i].active) { slot = i; break; }
+        }
+        if (slot < 0) {
+            basic_throw(TIKU_BASIC_ERR_NOMEM, "EVERY table full");
+            return;
+        }
+        snprintf(basic_everys[slot].stmt, sizeof(basic_everys[slot].stmt),
+                 "%s %ld", is_gsub ? "GOSUB" : "GOTO", ln);
+        basic_everys[slot].interval_ms = ms;
+        basic_everys[slot].next_due_ms =
+            (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND + ms;
+        basic_everys[slot].active = 1;
         return;
     }
 

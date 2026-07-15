@@ -1358,13 +1358,13 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         tiku_usb_cdc_poll();
 #endif
 
-#if TIKU_SHELL_CMD_RULES || TIKU_SHELL_CMD_WATCH
+#if TIKU_SHELL_CMD_RULES || TIKU_SHELL_CMD_WATCH || TIKU_SHELL_CMD_BASIC
         /* A watched VFS node changed: dispatch to the event-side
-         * consumers (rules armed on that node, and the live watch
-         * view if it matches), then go straight back to waiting.
-         * The poll timer is periodic and keeps running untouched,
-         * so input draining, jobs, and sensor-side rules stay on
-         * their tick cadence. */
+         * consumers (rules armed on that node, the live watch view if
+         * it matches, and BASIC's event-driven ON CHANGE), then go
+         * straight back to waiting.  The poll timer is periodic and
+         * keeps running untouched, so input draining, jobs, and
+         * sensor-side rules stay on their tick cadence. */
         if (ev == TIKU_EVENT_VFS) {
             const tiku_vfs_node_t *changed = tiku_event_node(ev, data);
 #if TIKU_SHELL_CMD_RULES
@@ -1372,6 +1372,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
 #if TIKU_SHELL_CMD_WATCH
             tiku_shell_cmd_watch_on_vfs(changed);
+#endif
+#if TIKU_SHELL_CMD_BASIC
+            tiku_basic_mode_on_vfs(changed);
 #endif
             continue;
         }

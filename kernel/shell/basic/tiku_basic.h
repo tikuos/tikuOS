@@ -79,6 +79,14 @@ void tiku_basic_mode_feed_char(int ch);
 void tiku_basic_mode_tick(void);
 
 /**
+ * @brief Notify BASIC that a watched VFS node changed (F2 event-driven
+ *        ON CHANGE).  Call from the shell's TIKU_EVENT_VFS dispatch with the
+ *        changed node pointer.  Safe to call always (no-op when the feature
+ *        is compiled out or no program is running).
+ */
+void tiku_basic_mode_on_vfs(const void *node);
+
+/**
  * @brief Consume the "BASIC mode just exited" edge (shell poll-loop hook).
  * @return 1 once after the mode leaves (so the shell reprints its prompt), else 0.
  */

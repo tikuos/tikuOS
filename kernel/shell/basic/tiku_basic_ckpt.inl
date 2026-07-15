@@ -100,7 +100,8 @@
 /* Distinct from TIKU_PERSIST_MAGIC so a checkpoint slot is never confused with
  * a program-store entry, and from BASIC_REGION_MAGIC ('BASP'). */
 #define BASIC_CKPT_MAGIC    0x424B5054u   /* 'BKPT' */
-#define BASIC_CKPT_VERSION  3u            /* 2: +program id; 3: +SUB/scope/DEF FN */
+#define BASIC_CKPT_VERSION  4u            /* 2: +program id; 3: +SUB/scope/DEF FN;
+                                           * 4: string scope slots + RESULT (F3) */
 #define BASIC_CKPT_HDR      12u           /* [gate u32][version u32][len u32] */
 #define BASIC_CKPT_RGN_HDR  16u           /* [magic][version][len][crc]       */
 
@@ -117,7 +118,8 @@
 #if TIKU_BASIC_SUBS_ENABLE
 #define BASIC_CKPT_SUBS_MAX ( \
       1u + sizeof(basic_frame_t) * TIKU_BASIC_CALL_DEPTH   /* SUB call frames */ \
-    + 1u + sizeof(basic_scope_t) * TIKU_BASIC_SCOPE_MAX)   /* LOCAL scope     */
+    + 1u + sizeof(basic_scope_t) * TIKU_BASIC_SCOPE_MAX    /* LOCAL scope     */ \
+    + sizeof(long))                                        /* RESULT register */
 #else
 #define BASIC_CKPT_SUBS_MAX 0u
 #endif
@@ -323,8 +325,19 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     for (i = 0; i < basic_call_sp; i++)
         ckpt_w(w, &basic_frames[i], sizeof(basic_frame_t));
     ckpt_w(w, &basic_scope_sp, 1);
-    for (i = 0; i < basic_scope_sp; i++)
-        ckpt_w(w, &basic_scope[i], sizeof(basic_scope_t));
+    for (i = 0; i < basic_scope_sp; i++) {
+        /* Serialize old_str as a heap OFFSET (a raw pointer would not survive
+         * a power cut), mirroring the strvar block above. */
+        basic_scope_t *s = &basic_scope[i];
+        uint16_t soff = (!s->is_str || s->old_str == NULL)
+                      ? 0xFFFFu
+                      : (uint16_t)(s->old_str - basic_str_heap);
+        ckpt_w(w, &s->idx,    sizeof(s->idx));
+        ckpt_w(w, &s->is_str, sizeof(s->is_str));
+        ckpt_w(w, &s->old,    sizeof(s->old));
+        ckpt_w(w, &soff,      sizeof(soff));
+    }
+    ckpt_w(w, &basic_sub_result, sizeof(basic_sub_result));
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
     /* DEF FN table: active definitions only (lookup is by name, so restoring
@@ -432,8 +445,16 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     ckpt_r(&r, &sp, 1);
     if (sp > TIKU_BASIC_SCOPE_MAX) return -1;
     basic_scope_sp = sp;
-    for (i = 0; i < sp; i++)
-        ckpt_r(&r, &basic_scope[i], sizeof(basic_scope_t));
+    for (i = 0; i < sp; i++) {
+        basic_scope_t *s = &basic_scope[i];
+        uint16_t soff;
+        ckpt_r(&r, &s->idx,    sizeof(s->idx));
+        ckpt_r(&r, &s->is_str, sizeof(s->is_str));
+        ckpt_r(&r, &s->old,    sizeof(s->old));
+        ckpt_r(&r, &soff,      sizeof(soff));
+        s->old_str = (soff == 0xFFFFu) ? NULL : basic_str_heap + soff;
+    }
+    ckpt_r(&r, &basic_sub_result, sizeof(basic_sub_result));
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
     {

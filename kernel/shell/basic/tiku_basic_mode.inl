@@ -248,6 +248,34 @@ tiku_basic_mode_feed_char(int ch)
 }
 
 /**
+ * @brief Notify BASIC that a watched VFS node changed (F2).
+ *
+ * Called by the shell process on TIKU_EVENT_VFS with the changed node.  Marks
+ * every event-armed ON CHANGE slot on that node as pending; the mode/RUN poll
+ * then re-reads and fires it at the next statement boundary (so the GOSUB
+ * return address is correct).  Defined even when the feature is off so the
+ * shell's dispatch hook always links.
+ */
+void
+tiku_basic_mode_on_vfs(const void *node)
+{
+#if TIKU_BASIC_ONCHG_EVENT
+    int i;
+    if (!basic_running) {
+        return;
+    }
+    for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++) {
+        if (basic_onchgs[i].active && basic_onchgs[i].armed &&
+            (const void *)basic_onchgs[i].node == node) {
+            basic_onchgs[i].pending = 1;
+        }
+    }
+#else
+    (void)node;
+#endif
+}
+
+/**
  * @brief Advance a running program by up to one batch of steps, then yield.
  *
  * Called once per shell poll tick.  A no-op when idle at the prompt.  When the
@@ -262,6 +290,19 @@ tiku_basic_mode_tick(void)
     if (!basic_mode_on || !basic_running) {
         return;
     }
+#if TIKU_BASIC_ONCHG_EVENT
+    /* F2 self-heal: the shell's rules engine does a wholesale unwatch_all() on
+     * re-arm, dropping our ON CHANGE subscriptions too.  Re-arm each active
+     * event slot idempotently every tick, exactly as the `watch` command does. */
+    {
+        int i;
+        for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++) {
+            if (basic_onchgs[i].active) {
+                basic_onchg_arm(&basic_onchgs[i]);
+            }
+        }
+    }
+#endif
     for (budget = TIKU_BASIC_MODE_BATCH; budget > 0 && basic_running; budget--) {
         if (basic_run_step() != BASIC_STEP_RUNNING) {
             basic_run_end();

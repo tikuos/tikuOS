@@ -265,6 +265,14 @@ expr_call(const char **p, long *out_v)
         *out_v = (long)basic_erl;
         return 1;
     }
+#if TIKU_BASIC_SUBS_ENABLE
+    /* Bare RESULT -- the value a SUB set via its `RESULT expr` statement,
+     * read by the caller after CALL.  No parens (reads like a pseudo-var). */
+    if (match_kw(p, "RESULT")) {
+        *out_v = basic_sub_result;
+        return 1;
+    }
+#endif
 #if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_SERIAL_PRESENT
     /* BLEUP() -- 1 when a central is connected AND subscribed (ready to send),
      * else 0.  Empty-paren form.  Polls the BLE stack as a side effect, so a

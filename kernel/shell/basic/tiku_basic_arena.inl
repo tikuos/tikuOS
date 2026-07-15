@@ -122,9 +122,13 @@ basic_clear_vars(void)
      * from the arena past the mark, so this rewind frees all of it at once. */
     basic_arena.offset = basic_arena_mark;
 
+#if TIKU_BASIC_SUBS_ENABLE
+    basic_sub_result = 0;                    /* SUB return register (F3) */
+#endif
     for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_vars[i] = 0;
     for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
         basic_namedvar_names[i][0] = '\0';
+        basic_namedvar_const[i]    = 0;      /* CONST read-only flags (F4) */
     }
 #if TIKU_BASIC_STRVARS_ENABLE
     for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_strvars[i] = NULL;

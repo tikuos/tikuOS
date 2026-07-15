@@ -127,6 +127,20 @@ basic_str_lowest_root(char *from)
         }
     }
 #endif
+#if TIKU_BASIC_SUBS_ENABLE
+    /* SUB param / LOCAL saved strings (F3): a caller's shadowed string is
+     * reachable only through the scope stack, so it is a live root the
+     * compactor must relocate too. */
+    for (i = 0; i < basic_scope_sp; i++) {
+        if (basic_scope[i].is_str) {
+            char *v = basic_scope[i].old_str;
+            if (v != NULL && v >= from && v < best_addr) {
+                best = &basic_scope[i].old_str;
+                best_addr = v;
+            }
+        }
+    }
+#endif
     return best;
 }
 
@@ -813,6 +827,22 @@ parse_strprim(const char **p, char *out, size_t cap)
         }
         out[0] = (char)(v & 0xFF);
         out[1] = '\0';
+        return 0;
+    }
+    /* INKEY$ -- non-blocking single-key read (no parens).  Returns the
+     * pending input character as a 1-char string, or "" if none is waiting.
+     * The reactive complement to INPUT for event loops / games under A1. */
+    if (match_kw(p, "INKEY$")) {
+        if (cap < 2u) {
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
+            return -1;
+        }
+        if (tiku_shell_io_rx_ready()) {
+            out[0] = (char)tiku_shell_io_getc();
+            out[1] = '\0';
+        } else {
+            out[0] = '\0';
+        }
         return 0;
     }
     if (match_kw(p, "STR$")) {

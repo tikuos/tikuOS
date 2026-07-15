@@ -101,6 +101,30 @@ line_is_else_kw(const char *t)
     return 0;
 }
 
+/* Is this line `ELSEIF <cond> THEN`?  Returns a pointer to the condition
+ * text (just past the ELSEIF keyword) if so, else NULL.  One word only --
+ * so a plain `ELSE` never matches here (its t[4] is not 'I'). */
+static const char *
+line_is_elseif(const char *t)
+{
+    while (*t == ' ' || *t == '\t') t++;
+    if (is_alpha(*t)) {
+        const char *r = t;
+        while (is_word_cont(*r)) r++;
+        if (*r == ':') {
+            t = r + 1;
+            while (*t == ' ' || *t == '\t') t++;
+        }
+    }
+    if (to_upper(t[0]) == 'E' && to_upper(t[1]) == 'L' &&
+        to_upper(t[2]) == 'S' && to_upper(t[3]) == 'E' &&
+        to_upper(t[4]) == 'I' && to_upper(t[5]) == 'F' &&
+        !is_word_cont(t[6])) {
+        return t + 6;
+    }
+    return NULL;
+}
+
 /* Is this line `END IF` or `ENDIF`? */
 static int
 line_is_endif(const char *t)
@@ -172,6 +196,106 @@ find_matching_endif(uint16_t start_line)
         return -1;
     }
     return endif_idx;
+}
+
+/* Branch keywords the false-path chain walker stops on. */
+enum { MIF_NONE = 0, MIF_ELSEIF, MIF_ELSE, MIF_ENDIF };
+
+/* From start_line, find the first depth-0 ELSEIF / ELSE / END IF, returning
+ * its prog index and setting *out_type.  Depth-aware: a nested multi-line IF
+ * bumps depth so its inner branch keywords are skipped.  -1 if none. */
+static int
+find_next_if_branch(uint16_t start_line, int *out_type)
+{
+    int depth = 0;
+    int idx = prog_next_index((uint16_t)(start_line + 1));
+    while (idx >= 0) {
+        const char *t = prog[idx].text;
+        if (multi_if_starts_here(t)) {
+            depth++;
+        } else if (line_is_endif(t)) {
+            if (depth == 0) { *out_type = MIF_ENDIF; return idx; }
+            depth--;
+        } else if (depth == 0 && line_is_elseif(t) != NULL) {
+            *out_type = MIF_ELSEIF; return idx;
+        } else if (depth == 0 && line_is_else_kw(t)) {
+            *out_type = MIF_ELSE; return idx;
+        }
+        if (prog[idx].number == 0xFFFFu) break;
+        idx = prog_next_index((uint16_t)(prog[idx].number + 1));
+    }
+    *out_type = MIF_NONE;
+    return -1;
+}
+
+/* Resume execution at the line AFTER prog index idx (a branch's body, or the
+ * line past END IF).  If idx was the program's last line, end the run. */
+static void
+multi_if_enter_after(int idx)
+{
+    int next = prog_next_index((uint16_t)(prog[idx].number + 1));
+    if (next < 0) {
+        basic_running = 0;
+        basic_pc = 0;
+        return;
+    }
+    basic_pc = prog[next].number;
+    basic_pc_set = 1;
+}
+
+/* A multi-line IF (or a prior ELSEIF) evaluated FALSE at from_line.  Walk the
+ * ELSEIF/ELSE chain: enter the first ELSEIF whose condition is true, else the
+ * ELSE body, else fall past END IF.  This is the whole multi-line branch
+ * selection -- reaching an ELSEIF/ELSE by fall-through always means "skip to
+ * END IF" (a branch already ran), handled by exec_elseif / exec_else_kw. */
+static void
+multi_if_take_false(uint16_t from_line, const char **p)
+{
+    uint16_t scan = from_line;
+    for (;;) {
+        int type;
+        int idx = find_next_if_branch(scan, &type);
+        if (idx < 0) {
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "IF without END IF");
+            while (**p) (*p)++;
+            return;
+        }
+        if (type == MIF_ELSEIF) {
+            const char *c = line_is_elseif(prog[idx].text);
+            long cond = parse_cond(&c);
+            if (basic_error) { while (**p) (*p)++; return; }
+            if (cond) {
+                multi_if_enter_after(idx);   /* run this ELSEIF's body */
+                while (**p) (*p)++;
+                return;
+            }
+            scan = prog[idx].number;         /* condition false: keep walking */
+            continue;
+        }
+        /* ELSE body, or (END IF) past the whole block. */
+        multi_if_enter_after(idx);
+        while (**p) (*p)++;
+        return;
+    }
+}
+
+/* ELSEIF reached as a top-level statement -- like ELSE, it means a taken
+ * branch's body just finished, so skip forward past the matching END IF. */
+static void
+exec_elseif(const char **p)
+{
+    int idx;
+    if (!basic_running) {
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "ELSEIF outside RUN");
+        return;
+    }
+    idx = find_matching_endif(basic_pc);
+    if (idx < 0) {
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "ELSEIF without END IF");
+        return;
+    }
+    multi_if_enter_after(idx);
+    while (**p) (*p)++;
 }
 
 /* ELSE encountered as a top-level statement -- this means a multi-
