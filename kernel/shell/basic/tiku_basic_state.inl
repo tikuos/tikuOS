@@ -70,6 +70,17 @@ static int           basic_arena_ready;
  * basic_alloc_state(); used by basic_clear_vars(). */
 static tiku_mem_arch_size_t basic_arena_mark;
 static basic_line_t *prog;
+
+/* A3: derived line-number index -- prog[] indices sorted ascending by line
+ * number, so prog_find_exact / prog_next_index binary-search instead of
+ * linear-scanning the whole table on every executed line.  prog[] itself is
+ * left UNSORTED (no change to prog_store / RENUM / the empty-slot invariant);
+ * the index is demand-rebuilt after any edit.  Behaviour is identical to the
+ * old linear scans -- purely a speedup. */
+static uint16_t     *basic_line_order;    /* [basic_line_count] valid entries  */
+static uint16_t      basic_line_count;    /* number of active lines            */
+static int           basic_line_index_ok; /* 1 = index reflects current prog[] */
+
 static long         *basic_vars;
 static uint16_t     *gosub_stack;
 static uint8_t       gosub_sp;

@@ -193,6 +193,7 @@ exec_renum(const char **q)
         prog[i].number =
             renum_lookup(old_nos, new_nos, n_lines, prog[i].number);
     }
+    basic_line_index_ok = 0;                  /* A3: RENUM changed line numbers */
     SHELL_PRINTF("renumbered %d lines from %u step %u\n",
                  n_lines, (unsigned)start, (unsigned)step);
 }

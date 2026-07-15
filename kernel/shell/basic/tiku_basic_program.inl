@@ -29,12 +29,16 @@
 _Static_assert(TIKU_BASIC_PROGRAM_LINES <= 0xFFFFu,
                "PROGRAM_LINES must fit the uint16_t prog[] scan counter");
 
+/* A3: any edit invalidates the derived line-number index. */
+#define PROG_INDEX_INVALIDATE()  (basic_line_index_ok = 0)
+
 /** @brief Mark every line slot empty. */
 static void
 prog_clear(void)
 {
     uint16_t i;
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
+    PROG_INDEX_INVALIDATE();
 }
 
 static int
@@ -43,6 +47,7 @@ prog_store(uint16_t lineno, const char *body)
     uint16_t i;
     const char *t = body;
     skip_ws(&t);
+    PROG_INDEX_INVALIDATE();
     /* Empty body -> delete the line if present. */
     if (*t == '\0') {
         for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
@@ -70,10 +75,10 @@ prog_store(uint16_t lineno, const char *body)
     return -1;
 }
 
-/* Index of the lowest-numbered line whose number >= @p lineno;
- * returns -1 if no such line exists. */
+/*--- A3: linear fallbacks (used when the index isn't ready + to build it) ---*/
+
 static int
-prog_next_index(uint16_t lineno)
+prog_next_index_linear(uint16_t lineno)
 {
     int      best     = -1;
     uint16_t best_num = 0xFFFF;
@@ -90,11 +95,75 @@ prog_next_index(uint16_t lineno)
 }
 
 static int
-prog_find_exact(uint16_t lineno)
+prog_find_exact_linear(uint16_t lineno)
 {
     uint16_t i;
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == lineno) return (int)i;
+    }
+    return -1;
+}
+
+/* Build basic_line_order[] = active prog[] indices, ascending by line number.
+ * Collect in physical order (== insertion order, usually already ascending)
+ * then insertion-sort -- O(N) on a program entered in order, O(N^2) worst case
+ * on a reverse-entered one, paid once per edit and amortized over the run. */
+static void
+basic_line_index_build(void)
+{
+    uint16_t i, n = 0;
+    for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
+        if (prog[i].number != 0) basic_line_order[n++] = i;
+    }
+    for (i = 1; i < n; i++) {
+        uint16_t key  = basic_line_order[i];
+        uint16_t knum = prog[key].number;
+        int      j    = (int)i - 1;
+        while (j >= 0 && prog[basic_line_order[j]].number > knum) {
+            basic_line_order[j + 1] = basic_line_order[j];
+            j--;
+        }
+        basic_line_order[j + 1] = key;
+    }
+    basic_line_count    = n;
+    basic_line_index_ok = 1;
+}
+
+/* Index of the lowest-numbered line whose number >= @p lineno; -1 if none.
+ * O(log N) lower-bound over the sorted index (identical result to the linear
+ * scan, which it falls back to before the arena / index is ready). */
+static int
+prog_next_index(uint16_t lineno)
+{
+    uint16_t lo, hi;
+    if (basic_line_order == NULL) return prog_next_index_linear(lineno);
+    if (!basic_line_index_ok)     basic_line_index_build();
+    lo = 0; hi = basic_line_count;
+    while (lo < hi) {
+        uint16_t mid = (uint16_t)(lo + (hi - lo) / 2u);
+        if (prog[basic_line_order[mid]].number < lineno) lo = (uint16_t)(mid + 1);
+        else                                             hi = mid;
+    }
+    return (lo < basic_line_count) ? (int)basic_line_order[lo] : -1;
+}
+
+static int
+prog_find_exact(uint16_t lineno)
+{
+    uint16_t lo, hi;
+    /* Line 0 marks an empty slot, never a real line -- preserve the linear
+     * scan's exact-0 behaviour (returns the first empty slot) for any caller
+     * that relies on it; the index holds only active lines. */
+    if (lineno == 0)              return prog_find_exact_linear(0);
+    if (basic_line_order == NULL) return prog_find_exact_linear(lineno);
+    if (!basic_line_index_ok)     basic_line_index_build();
+    lo = 0; hi = basic_line_count;
+    while (lo < hi) {
+        uint16_t mid = (uint16_t)(lo + (hi - lo) / 2u);
+        uint16_t num = prog[basic_line_order[mid]].number;
+        if      (num < lineno) lo = (uint16_t)(mid + 1);
+        else if (num > lineno) hi = mid;
+        else                   return (int)basic_line_order[mid];
     }
     return -1;
 }

@@ -80,6 +80,7 @@
 #define BASIC_ARENA_BYTES                                                   \
     ((tiku_mem_arch_size_t)(                                                \
         sizeof(basic_line_t)       * TIKU_BASIC_PROGRAM_LINES +             \
+        sizeof(uint16_t)           * TIKU_BASIC_PROGRAM_LINES +   /* A3 line index */ \
         sizeof(long)               * BASIC_VAR_TABLE_LEN +                  \
         sizeof(uint16_t)           * TIKU_BASIC_GOSUB_DEPTH +               \
         sizeof(basic_for_frame_t)  * TIKU_BASIC_FOR_DEPTH +                 \
@@ -211,6 +212,8 @@ basic_alloc_state(void)
 
     prog = (basic_line_t *)tiku_arena_alloc(&basic_arena,
         (tiku_mem_arch_size_t)(sizeof(basic_line_t) * TIKU_BASIC_PROGRAM_LINES));
+    basic_line_order = (uint16_t *)tiku_arena_alloc(&basic_arena,   /* A3 */
+        (tiku_mem_arch_size_t)(sizeof(uint16_t) * TIKU_BASIC_PROGRAM_LINES));
     basic_vars = (long *)tiku_arena_alloc(&basic_arena,
         (tiku_mem_arch_size_t)(sizeof(long) * BASIC_VAR_TABLE_LEN));
     basic_namedvar_names = (char (*)[TIKU_BASIC_NAMEDVAR_LEN])
@@ -260,7 +263,8 @@ basic_alloc_state(void)
 #endif
 #endif
 
-    if (prog == NULL || basic_vars == NULL || gosub_stack == NULL ||
+    if (prog == NULL || basic_line_order == NULL ||
+        basic_vars == NULL || gosub_stack == NULL ||
         for_stack == NULL || loop_stack == NULL ||
         basic_everys == NULL || basic_onchgs == NULL ||
         basic_namedvar_names == NULL
@@ -293,6 +297,7 @@ basic_alloc_state(void)
      * line table here, then reset every variable via the shared helper (which
      * also rewinds to the mark just captured -- a no-op on this first pass). */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
+    basic_line_index_ok = 0;                  /* A3: line index not built yet */
     basic_clear_vars();
     return 0;
 }
