@@ -219,6 +219,14 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
      * tiku_mpu_lock_nvm() relock via tiku_mem_arch_nvm_flush(), so direct
      * stores into .persistent inside the unlock window are captured too. */
     memcpy(dst, src, len);
+    /* WARM-grade destinations live in SSRAM, which the M55 D-caches
+     * (write-back): a reset discards dirty lines, silently losing the
+     * write (hardware-verified 2026-07-15 -- the shell history ring came
+     * back empty after a watchdog reset until this clean).  Push the
+     * bytes to physical memory now.  DURABLE (.persistent) sits in
+     * uncached DTCM and its mirror flush cleans its own staging, so this
+     * by-range clean is cheap there and essential for WARM. */
+    tiku_cpu_dcache_clean(dst, len);
 }
 
 /**

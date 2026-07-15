@@ -159,10 +159,13 @@ SECTIONS
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade (TIKU_PERSIST_WARM): survives warm resets, but
-         * sits OUTSIDE the mirror and the MPU-RO window.  Everything
-         * here chose the grade on purpose at its declaration. */
-        *(.persistent.warm*)
+        /* NOTE: the WARM grade does NOT live here.  DTCM is wiped across
+         * every reset on this part (hardware-verified 2026-07-15: a J-Link
+         * marker in DTCM reads back all-zeros after a reset while an SSRAM
+         * marker survives -- the secure bootloader runs through TCM before
+         * our crt).  DURABLE (.persistent above) only survives because the
+         * MRAM mirror restores it; WARM has no mirror, so it lives in the
+         * retained SSRAM instead -- see .ssram below. */
     } > TCM
 
     /* End of static allocations / start of the _sbrk heap. Aliases for
@@ -182,6 +185,12 @@ SECTIONS
         *(.ssram*)
         . = ALIGN(32);
         __ssram_end = .;
+        /* WARM grade (TIKU_PERSIST_WARM): survives warm resets, reseeded on
+         * power cycle (magic self-primes).  Placed AFTER __ssram_end so the
+         * crt's .ssram zero loop (__ssram_start..__ssram_end) skips it, and
+         * in SSRAM rather than DTCM because DTCM is wiped across every reset
+         * on this part (hardware-verified; see the .uninit note above). */
+        *(.persistent.warm*)
     } > SSRAM
 
     /* NOLOAD catch so any Ambiq HAL .shared / .resource_table symbols

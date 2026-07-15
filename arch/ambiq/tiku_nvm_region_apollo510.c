@@ -43,24 +43,29 @@ typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t,
 static uint32_t nvmr_stage[NVMR_STAGE_BYTES / 4U]
     __attribute__((section(".ssram"), aligned(16)));
 
-static void mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
-                              size_t len)
+static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
+                             size_t len)
 {
     uint32_t primask;
     uint32_t dst_word_off = (uint32_t)((dst_addr - AMBIQ_MRAM_BASE) >> 2);
+    int rc;
 
     /* Make the staging bytes visible to the bootrom's MRAM programmer. */
     tiku_cpu_dcache_clean((const void *)src16, len);
 
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
     __asm__ volatile ("cpsid i" ::: "memory");
-    (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
-                           (uint32_t)(uintptr_t)src16, dst_word_off,
-                           (uint32_t)(len / 4U));
+    rc = NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
+                          (uint32_t)(uintptr_t)src16, dst_word_off,
+                          (uint32_t)(len / 4U));
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
 
     /* Drop any cached copies of the freshly-programmed page. */
     tiku_cpu_dcache_invalidate((const void *)dst_addr, len);
+
+    /* Bootrom status: 0 = programmed.  Propagate failures (previously
+     * discarded) so callers' gate-last / CRC commits fail closed. */
+    return rc;
 }
 
 static int region_write(tiku_nvm_backend_t *be, size_t off,
@@ -94,7 +99,10 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
             memcpy((uint8_t *)nvmr_stage + (ov_start - span),
                    s + (ov_start - off), ov_end - ov_start);
         }
-        mram_program_span((uintptr_t)(be->base + span), nvmr_stage, chunk);
+        if (mram_program_span((uintptr_t)(be->base + span), nvmr_stage,
+                              chunk) != 0) {
+            return -1;
+        }
         span += chunk;
     }
     return 0;
