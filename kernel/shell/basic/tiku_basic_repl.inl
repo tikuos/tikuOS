@@ -48,15 +48,16 @@ process_line(const char *raw)
         }
         body = p;
         skip_ws(&body);
+        /* NOTE: deliberately NO basic_ckpt_invalidate() here.  This branch is
+         * also the LOAD/replay path (basic_load_from_persist and `basic load`
+         * replay every stored line through process_line), so invalidating
+         * per-line would destroy the checkpoint RUN RESUME is about to use --
+         * the exact F1 power-cut recovery flow.  A checkpoint made stale by an
+         * interactive edit is instead rejected at restore time by the
+         * program-identity CRC bound into the slot (basic_ckpt_read). */
         if (prog_store((uint16_t)ln, body) < 0) {
             SHELL_PRINTF(SH_RED "? program full (%u lines)" SH_RST "\n",
                          (unsigned)TIKU_BASIC_PROGRAM_LINES);
-        } else {
-            /* Program text changed: a durable run-state checkpoint (if any)
-             * describes the OLD program -- its PC / GOSUB / FOR line numbers no
-             * longer map, so drop it.  Idempotent and a no-op when nothing is
-             * checkpointed, so line editing stays cheap. */
-            basic_ckpt_invalidate();
         }
         return;
     }
