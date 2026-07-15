@@ -452,7 +452,7 @@ basic_https_get(const char *method, const char *host, const char *path,
      * the crypto primitives are non-reentrant, so a nested handshake would
      * corrupt the worker's in-flight state.  Serial fetches only. */
     if (basic_crypto_busy) {
-        SHELL_PRINTF(SH_RED "? HTTPGET: busy (crypto in flight)\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_NET, "HTTPGET: busy (crypto in flight)");
         return -1;
     }
 #endif
@@ -477,7 +477,7 @@ basic_https_get(const char *method, const char *host, const char *path,
         tiku_clock_time_t np;
         drc = tiku_kits_net_dns_resolve(host);
         if (drc != TIKU_KITS_NET_OK) {
-            SHELL_PRINTF(SH_RED "? HTTPGET: DNS error\n" SH_RST); return -1; }
+            basic_report(TIKU_BASIC_ERR_NET, "HTTPGET: DNS error"); return -1; }
         dl = BASIC_HTTPS_DEADLINE();
         np = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
         for (;;) {
@@ -507,7 +507,7 @@ basic_https_get(const char *method, const char *host, const char *path,
 
     /* TCP connect :443 */
     tcp = basic_https_open(ip, src_seq);
-    if (tcp == NULL) { SHELL_PRINTF(SH_RED "? HTTPGET: TCP connect failed\n" SH_RST); return -1; }
+    if (tcp == NULL) { basic_report(TIKU_BASIC_ERR_NET, "HTTPGET: TCP connect failed"); return -1; }
     (void)dl;
 
     /* Build the request up front (independent of the negotiated TLS version):
@@ -582,8 +582,7 @@ basic_https_get(const char *method, const char *host, const char *path,
 
         if (erc != TIKU_KITS_NET_OK) {
             if (erc == TIKU_KITS_NET_ERR_HTTP_TCP) {
-                SHELL_PRINTF(SH_RED
-                    "? HTTPGET: TCP connect failed\n" SH_RST);
+                basic_report(TIKU_BASIC_ERR_NET, "HTTPGET: TCP connect failed");
             } else {
                 int      st = tiku_kits_crypto_tls13_last_stage;
                 uint32_t rx = tiku_kits_crypto_tls13_last_rx;

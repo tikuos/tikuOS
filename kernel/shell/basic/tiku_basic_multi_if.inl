@@ -182,14 +182,12 @@ exec_else_kw(const char **p)
 {
     int idx;
     if (!basic_running) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? ELSE outside RUN\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "ELSE outside RUN");
         return;
     }
     idx = find_matching_endif(basic_pc);
     if (idx < 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? ELSE without END IF\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "ELSE without END IF");
         return;
     }
     {

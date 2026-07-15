@@ -242,6 +242,92 @@ static int          basic_errcat;
 static int          basic_err;
 static uint16_t     basic_erl;
 
+/*---------------------------------------------------------------------------*/
+/* CENTRALIZED ERROR THROW (A5)                                              */
+/*                                                                           */
+/* Every interpreter error funnels through basic_throw() / basic_throwf():   */
+/* set basic_error + basic_errcat, then emit the message through a swappable  */
+/* sink.  The default sink is the shell console (red "? msg").  An embedder   */
+/* installs its own via tiku_basic_set_error_sink() to capture errors into a  */
+/* buffer and run BASIC completely HEADLESS -- no shell/UART required.  This  */
+/* is the single seam the agent/library direction needs; it also makes ERR /  */
+/* ERL categories consistent, since the category is now supplied at the one   */
+/* throw call instead of being set (or forgotten) ad hoc per site.           */
+/*---------------------------------------------------------------------------*/
+
+/* Sink (tiku_basic_error_sink_t, declared in tiku_basic.h) receives the
+ * category + the bare message (no color, no "? " prefix, no newline).
+ * NULL => the default console sink below. */
+static tiku_basic_error_sink_t basic_error_sink;
+
+void
+tiku_basic_set_error_sink(tiku_basic_error_sink_t sink)
+{
+    basic_error_sink = sink;
+}
+
+static void
+basic_emit_error(int cat, const char *msg)
+{
+    if (basic_error_sink != NULL) {
+        basic_error_sink(cat, msg);
+    } else {
+        SHELL_PRINTF(SH_RED "? %s\n" SH_RST, msg);
+    }
+    (void)cat;
+}
+
+/* Throw with a fixed message. */
+static void
+basic_throw(int cat, const char *msg)
+{
+    basic_error  = 1;
+    basic_errcat = cat;
+    basic_emit_error(cat, msg);
+}
+
+/* Throw with a printf-style message (for the handful of sites that splice in
+ * a name/path/number).  Formats into a transient buffer so the sink still
+ * sees fully-rendered text in headless mode. */
+#if defined(__GNUC__)
+__attribute__((format(printf, 2, 3)))
+#endif
+static void
+basic_throwf(int cat, const char *fmt, ...)
+{
+    char    buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    basic_throw(cat, buf);
+}
+
+/* Emit a message through the same sink WITHOUT flagging a runtime error --
+ * for REPL / command-level notices (bad line number, save failed, "no
+ * program", ...) that are not interpreter throws but must still honor a
+ * headless sink so nothing writes red to the console behind its back.  The
+ * invariant this preserves: basic_emit_error is the ONLY console error writer. */
+static void
+basic_report(int cat, const char *msg)
+{
+    basic_emit_error(cat, msg);
+}
+
+#if defined(__GNUC__)
+__attribute__((format(printf, 2, 3)))
+#endif
+static void
+basic_reportf(int cat, const char *fmt, ...)
+{
+    char    buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    basic_emit_error(cat, buf);
+}
+
 /* EVERY ms : stmt -- recurring scheduled statement. Polled by the
  * RUN loop between program lines. Up to TIKU_BASIC_EVERY_MAX active
  * registrations; the entire table resets at every RUN start so a

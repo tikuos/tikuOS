@@ -70,7 +70,7 @@ basic_save_to_named(const char *name)
         n = snprintf(tmp + pos, sizeof(tmp) - pos, "%u %s\n",
                      (unsigned)prog[idx].number, prog[idx].text);
         if (n < 0 || (size_t)n >= sizeof(tmp) - pos) {
-            SHELL_PRINTF(SH_RED "? slot too small for program\n" SH_RST);
+            basic_report(TIKU_BASIC_ERR_IO, "slot too small for program");
             return -1;
         }
         pos += (size_t)n;
@@ -79,7 +79,7 @@ basic_save_to_named(const char *name)
     }
     slot = basic_slot_alloc(name);
     if (slot < 0) {
-        SHELL_PRINTF(SH_RED "? all slots in use\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_IO, "all slots in use");
         return -1;
     }
     mpu = tiku_mpu_unlock_nvm();
@@ -102,7 +102,7 @@ basic_load_from_named(const char *name)
     size_t n;
     char *line, *p;
     if (slot < 0) {
-        SHELL_PRINTF(SH_RED "? '%s' not found\n" SH_RST, name);
+        basic_reportf(TIKU_BASIC_ERR_SYNTAX, "'%s' not found", name);
         return -1;
     }
     n = basic_named_slots[slot].length;

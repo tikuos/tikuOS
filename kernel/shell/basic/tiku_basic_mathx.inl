@@ -49,8 +49,7 @@ static long basic_log_q3(long x)
     long long m, t, t2, term, sum;
     int i;
     if (x <= 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? LOG domain (x>0)\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "LOG domain (x>0)");
         return 0;
     }
     m = x;
@@ -76,8 +75,7 @@ static long basic_exp_q3(long x)
     n = x / (long)MX_SCALE;
     f = x % (long)MX_SCALE;
     if (n > 14) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? EXP overflow\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "EXP overflow");
         return 0;
     }
     for (i2 = 0; i2 < n; i2++) e_n = (e_n * MX_E) / MX_SCALE;
@@ -95,8 +93,7 @@ static long basic_pow_q3(long b, long e)
 {
     long lb, prod;
     if (b <= 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? POW base must be > 0\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "POW base must be > 0");
         return 0;
     }
     lb = basic_log_q3(b);

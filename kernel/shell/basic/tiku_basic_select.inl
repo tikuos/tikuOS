@@ -203,16 +203,14 @@ exec_select_case(const char **p)
     int  idx;
 
     if (!basic_running) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? SELECT CASE outside RUN\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "SELECT CASE outside RUN");
         return;
     }
     value = parse_expr(p);
     if (basic_error) return;
     idx = find_select_arm(basic_pc, value);
     if (idx < 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? SELECT without END SELECT\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "SELECT without END SELECT");
         return;
     }
     /* Jump to the line AFTER the arm header (or after END SELECT
@@ -242,14 +240,12 @@ exec_case(const char **p)
 {
     int idx;
     if (!basic_running) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? CASE outside RUN\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "CASE outside RUN");
         return;
     }
     idx = find_matching_end_select(basic_pc);
     if (idx < 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? CASE without END SELECT\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "CASE without END SELECT");
         return;
     }
     {

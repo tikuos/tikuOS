@@ -143,4 +143,24 @@ int tiku_basic_vfs_read(char *buf, unsigned int max);
  */
 int tiku_basic_vfs_write(const char *buf, unsigned int len);
 
+/**
+ * @brief Error sink callback: receives every interpreter error (A5).
+ *
+ * @param cat  Error category, one of TIKU_BASIC_ERR_* (tiku_basic_config.h).
+ * @param msg  Bare message text (no color codes, no "? " prefix, no newline).
+ */
+typedef void (*tiku_basic_error_sink_t)(int cat, const char *msg);
+
+/**
+ * @brief Install a custom error sink so BASIC can run headless.
+ *
+ * By default interpreter errors print to the shell console as a red
+ * "? message".  Installing a sink redirects them to a buffer/callback
+ * instead, so BASIC can run with no shell or UART attached (the
+ * agent/library direction).  Pass NULL to restore the console default.
+ *
+ * @param sink  Callback to receive errors, or NULL for the default.
+ */
+void tiku_basic_set_error_sink(tiku_basic_error_sink_t sink);
+
 #endif /* TIKU_BASIC_H_ */

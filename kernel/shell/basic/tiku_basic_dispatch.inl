@@ -44,8 +44,7 @@ exec_if(const char **p)
     if (basic_error) return;
     skip_ws(p);
     if (!match_kw(p, "THEN")) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? THEN expected\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "THEN expected");
         return;
     }
     skip_ws(p);
@@ -66,8 +65,7 @@ exec_if(const char **p)
             int else_idx, endif_idx;
             int target_idx;
             if (find_if_else_or_endif(basic_pc, &else_idx, &endif_idx) != 0) {
-                basic_error = 1;
-                SHELL_PRINTF(SH_RED "? IF without END IF\n" SH_RST);
+                basic_throw(TIKU_BASIC_ERR_GENERAL, "IF without END IF");
                 return;
             }
             target_idx = (else_idx >= 0) ? else_idx : endif_idx;
@@ -108,8 +106,7 @@ exec_if(const char **p)
                     basic_pc = (uint16_t)target;
                     basic_pc_set = 1;
                 } else {
-                    basic_error = 1;
-                    SHELL_PRINTF(SH_RED "? line jump outside RUN\n" SH_RST);
+                    basic_throw(TIKU_BASIC_ERR_GENERAL, "line jump outside RUN");
                 }
                 return;
             }
@@ -153,8 +150,7 @@ exec_if(const char **p)
                     basic_pc = (uint16_t)target;
                     basic_pc_set = 1;
                 } else {
-                    basic_error = 1;
-                    SHELL_PRINTF(SH_RED "? line jump outside RUN\n" SH_RST);
+                    basic_throw(TIKU_BASIC_ERR_GENERAL, "line jump outside RUN");
                 }
                 /* No need to advance *p -- bare-line set
                  * basic_pc_set, which short-circuits the outer
@@ -243,8 +239,7 @@ exec_stmt(const char **p)
     if (match_kw(p, "SELECT")) {
         skip_ws(p);
         if (!match_kw(p, "CASE")) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? SELECT CASE expected\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_SYNTAX, "SELECT CASE expected");
             return;
         }
         exec_select_case(p);
@@ -357,8 +352,7 @@ exec_stmt(const char **p)
             if (basic_error) return;
             skip_ws(p);
             if (**p != '=') {
-                basic_error = 1;
-                SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
+                basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
                 return;
             }
             (*p)++;
@@ -379,16 +373,14 @@ exec_stmt(const char **p)
             if (basic_error) return;
             skip_ws(p);
             if (**p != '=') {
-                basic_error = 1;
-                SHELL_PRINTF(SH_RED "? '=' expected\n" SH_RST);
+                basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
                 return;
             }
             (*p)++;
             if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
             copy = basic_str_alloc(buf, strlen(buf));
             if (copy == NULL) {
-                basic_error = 1;
-                SHELL_PRINTF(SH_RED "? out of string heap\n" SH_RST);
+                basic_throw(TIKU_BASIC_ERR_NOMEM, "out of string heap");
                 return;
             }
             ((char **)basic_str_arrays[idx].data)[off] = copy;
@@ -409,8 +401,7 @@ exec_stmt(const char **p)
                     if (parse_strexpr(p, buf, sizeof(buf)) != 0) return;
                     basic_strvars[idx] = basic_str_alloc(buf, strlen(buf));
                     if (basic_strvars[idx] == NULL) {
-                        basic_error = 1;
-                        SHELL_PRINTF(SH_RED "? out of string heap\n" SH_RST);
+                        basic_throw(TIKU_BASIC_ERR_NOMEM, "out of string heap");
                     }
                     return;
                 }
@@ -429,8 +420,7 @@ exec_stmt(const char **p)
         }
     }
 
-    basic_error = 1;
-    SHELL_PRINTF(SH_RED "? syntax\n" SH_RST);
+    basic_throw(TIKU_BASIC_ERR_SYNTAX, "syntax");
 }
 
 /* Walk a colon-separated list of statements, executing each in turn.
@@ -460,8 +450,7 @@ exec_stmts(const char **p)
         if (**p == '\0') return;
         if (**p == ':') { (*p)++; continue; }
         /* Anything else after a successful stmt is unexpected garbage. */
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? trailing junk\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "trailing junk");
         return;
     }
 }

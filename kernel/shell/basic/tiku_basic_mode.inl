@@ -310,7 +310,7 @@ tiku_basic_mode_enter(void)
      * the parser in the shell tick section, so guard against it clobbering a
      * live session's arena/program. */
     if (basic_mode_on) {
-        SHELL_PRINTF(SH_RED "? BASIC already active\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_GENERAL, "BASIC already active");
         return;
     }
     if (basic_session_begin() != 0) {
@@ -345,7 +345,7 @@ int
 tiku_basic_mode_run_saved(void)
 {
     if (basic_mode_on) {              /* refuse re-entry (see mode_enter) */
-        SHELL_PRINTF(SH_RED "? BASIC already active\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_GENERAL, "BASIC already active");
         return -1;
     }
     if (basic_session_begin() != 0) {
@@ -384,7 +384,7 @@ int
 tiku_basic_mode_resume_saved(void)
 {
     if (basic_mode_on) {              /* refuse re-entry (see mode_enter) */
-        SHELL_PRINTF(SH_RED "? BASIC already active\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_GENERAL, "BASIC already active");
         return -1;
     }
     if (basic_session_begin() != 0) {

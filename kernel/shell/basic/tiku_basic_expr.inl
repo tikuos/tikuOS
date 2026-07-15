@@ -52,7 +52,7 @@ expr_prim(const char **p)
 #endif
         skip_ws(p);
         if (**p == ')') (*p)++;
-        else { basic_error = 1; SHELL_PRINTF(SH_RED "? ')' expected\n" SH_RST); }
+        else { basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); }
         return v;
     }
     if (parse_unum(p, &v))                return v;
@@ -82,8 +82,7 @@ expr_prim(const char **p)
     }
 #endif
     if (parse_var(p, &idx))               return basic_vars[idx];
-    basic_error = 1;
-    SHELL_PRINTF(SH_RED "? expected number or variable\n" SH_RST);
+    basic_throw(TIKU_BASIC_ERR_SYNTAX, "expected number or variable");
     return 0;
 }
 
@@ -92,15 +91,20 @@ expr_prim(const char **p)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Right-associative power operator: base ^ exp.
+ * @brief Right-associative power operator: base ^ exp -- INTEGER only.
  *
- * For TIKU_BASIC_FIXED_ENABLE builds, the base may be Q.3 fixed
- * point and the exponent must be an integer (fractional exponents
- * are not supported).  Negative exponents truncate toward 0.
- * `x ^ 0` is 1 (or 1000 in Q.3); `0 ^ 0` is 1 (BASIC convention).
+ * `^` is integer exponentiation, unconditionally.  It does NOT infer a
+ * value's type from its magnitude, so `2000 ^ 2` is 4000000 (consistent
+ * with `2000 * 2000`), never 4000.  The engine carries no per-value type
+ * bit -- it cannot tell the integer 2000 from the Q.3 value 2.000, which
+ * share a representation -- so guessing from magnitude produced the same
+ * operands yielding incompatible readings (fixed in A6).  For Q.3
+ * fixed-point power, use the explicit FPOW(base, n) builtin instead.
  *
- * Precedence is higher than unary minus so `-2^2 == -(2^2) == -4`,
- * matching Microsoft BASIC.
+ * The exponent is an integer count; a negative exponent yields 0 (no
+ * fractions in the integer domain).  `x ^ 0 == 1` and `0 ^ 0 == 1`
+ * (BASIC convention).  Precedence is higher than unary minus so
+ * `-2^2 == -(2^2) == -4`, matching Microsoft BASIC.
  */
 static long
 expr_pow(const char **p)
@@ -116,36 +120,10 @@ expr_pow(const char **p)
         /* Right-associative: recurse into expr_pow for the RHS. */
         exp = expr_pow(p);
         if (basic_error) return 0;
-#if TIKU_BASIC_FIXED_ENABLE
-        /* Caller passed us either a pure integer or a Q.3 value.
-         * We can't tell which from the value alone, so we treat the
-         * exponent as integer-only (Q.3 exponents make no sense for
-         * a power op in this dialect).  The exponent is rounded
-         * toward zero to recover the integer count. */
-        if (exp >= (long)TIKU_BASIC_FIXED_SCALE ||
-            exp <= -(long)TIKU_BASIC_FIXED_SCALE) {
-            exp /= (long)TIKU_BASIC_FIXED_SCALE;
-        }
-#endif
         if (exp < 0) {
-            return 0;          /* integer base, negative exp -> 0 */
+            return 0;              /* negative exponent -> 0 in integers */
         }
         result = 1;
-#if TIKU_BASIC_FIXED_ENABLE
-        /* If the base looks like a fixed-point value (large
-         * magnitude relative to typical integer counts) and the
-         * exponent is small, multiply Q.3-style.  Otherwise plain
-         * integer multiply. */
-        if (base >= (long)TIKU_BASIC_FIXED_SCALE ||
-            base <= -(long)TIKU_BASIC_FIXED_SCALE) {
-            result = (long)TIKU_BASIC_FIXED_SCALE;   /* 1.0 in Q.3 */
-            for (n = 0; n < exp; n++) {
-                long long t = (long long)result * (long long)base;
-                result = (long)(t / (long long)TIKU_BASIC_FIXED_SCALE);
-            }
-            return result;
-        }
-#endif
         for (n = 0; n < exp; n++) {
             result *= base;
         }
@@ -181,9 +159,7 @@ expr_term(const char **p)
             v = v * rhs;
         } else {
             if (rhs == 0) {
-                basic_error = 1;
-                basic_errcat = TIKU_BASIC_ERR_DIVZERO;
-                SHELL_PRINTF(SH_RED "? division by zero\n" SH_RST);
+                basic_throw(TIKU_BASIC_ERR_DIVZERO, "division by zero");
                 return 0;
             }
             v = v / rhs;
@@ -235,7 +211,7 @@ expr_rel(const char **p)
     else if (op1 == '<' && op2 == '>') result = (lhs != rhs);
     else if (op1 == '<' && op2 == 0)   result = (lhs < rhs);
     else if (op1 == '>' && op2 == 0)   result = (lhs > rhs);
-    else { basic_error = 1; SHELL_PRINTF(SH_RED "? bad relop\n" SH_RST); return 0; }
+    else { basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad relop"); return 0; }
     return result ? 1 : 0;
 }
 
@@ -290,8 +266,7 @@ parse_cond(const char **p)
         if (parse_strexpr(p, a, sizeof(a)) != 0) return 0;
         skip_ws(p);
         if (**p != '=' && **p != '<' && **p != '>') {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? string relop expected\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_TYPE, "string relop expected");
             return 0;
         }
         op1 = **p; (*p)++;
@@ -307,8 +282,7 @@ parse_cond(const char **p)
         if (op1 == '>' && op2 == '=') return cmp >= 0;
         if (op1 == '<' && op2 == 0)   return cmp <  0;
         if (op1 == '>' && op2 == 0)   return cmp >  0;
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? bad string relop\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_TYPE, "bad string relop");
         return 0;
     }
     return parse_expr(p);

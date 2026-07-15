@@ -47,6 +47,7 @@
 #include <kernel/timers/tiku_clock.h>
 #include <hal/tiku_cpu.h>                /* SLEEP -> real low-power idle */
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 /* Hardware-bridge headers.  Each is pulled in only when the matching

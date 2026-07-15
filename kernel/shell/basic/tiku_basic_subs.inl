@@ -80,8 +80,7 @@ exec_sub(const char **p)
     for (;;) {
         int ni = prog_next_index((uint16_t)(ln + 1));
         if (ni < 0) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? SUB without ENDSUB\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "SUB without ENDSUB");
             return;
         }
         ln = prog[ni].number;
@@ -112,19 +111,16 @@ exec_call(const char **p)
     skip_ws(p);
     n = parse_ident(p, name, sizeof(name));
     if (n == 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? CALL needs a SUB name\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "CALL needs a SUB name");
         return;
     }
     si = prog_find_sub(name, (size_t)n);
     if (si < 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? unknown SUB %s\n" SH_RST, name);
+        basic_throwf(TIKU_BASIC_ERR_GENERAL, "unknown SUB %s", name);
         return;
     }
     if (basic_call_sp >= TIKU_BASIC_CALL_DEPTH) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? CALL too deep\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "CALL too deep");
         return;
     }
 
@@ -153,8 +149,7 @@ exec_call(const char **p)
         arg = parse_expr(p);                       /* matching arg */
         if (basic_error) break;
         if (basic_scope_sp >= TIKU_BASIC_SCOPE_MAX) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? scope stack full\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_NOMEM, "scope stack full");
             break;
         }
         basic_scope[basic_scope_sp].idx = (uint16_t)idx;
@@ -185,21 +180,18 @@ static void
 exec_local(const char **p)
 {
     if (basic_call_sp == 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? LOCAL outside a SUB\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "LOCAL outside a SUB");
         return;
     }
     for (;;) {
         int idx;
         skip_ws(p);
         if (!parse_var(p, &idx)) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? LOCAL needs a variable\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "LOCAL needs a variable");
             return;
         }
         if (basic_scope_sp >= TIKU_BASIC_SCOPE_MAX) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? scope stack full\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_NOMEM, "scope stack full");
             return;
         }
         basic_scope[basic_scope_sp].idx = (uint16_t)idx;

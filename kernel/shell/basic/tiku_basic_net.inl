@@ -61,13 +61,13 @@ exec_httpheader(const char **p)
     if (parse_strexpr(p, name, sizeof(name)) != 0) return;
     skip_ws(p);
     if (**p != ',') {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return;
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
     (*p)++;
     if (parse_strexpr(p, val, sizeof(val)) != 0) return;
     nl = strlen(name); vl = strlen(val); cur = strlen(basic_http_hdrs);
     if (cur + nl + vl + 4u >= sizeof(basic_http_hdrs)) {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? too many headers\n" SH_RST); return;
+        basic_throw(TIKU_BASIC_ERR_NOMEM, "too many headers"); return;
     }
     memcpy(basic_http_hdrs + cur, name, nl); cur += nl;
     basic_http_hdrs[cur++] = ':'; basic_http_hdrs[cur++] = ' ';
@@ -88,20 +88,20 @@ exec_fetch(const char **p)
     int  have_body = 0, rc;
     skip_ws(p);
     if (**p != '#') {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? '#buffer' expected\n" SH_RST); return;
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "'#buffer' expected"); return;
     }
     (*p)++;
     n = parse_expr(p);
     if (basic_error) return;
     if (n < 0 || n >= TIKU_BASIC_BIGBUF_COUNT || basic_bigbuf[n] == NULL) {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? bad #buffer\n" SH_RST); return;
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad #buffer"); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
     (*p)++;
     if (parse_path_literal(p, host, sizeof(host)) != 0) return;
     skip_ws(p);
-    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
     (*p)++;
     if (parse_path_literal(p, path, sizeof(path)) != 0) return;
     skip_ws(p);
@@ -153,27 +153,24 @@ exec_udpsend(const char **p)
 
     if (parse_path_literal(p, ipstr, sizeof(ipstr)) != 0) return;
     if (basic_net_parse_ip(ipstr, ip) != 0) {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? bad IP '%s'\n" SH_RST, ipstr); return;
+        basic_throwf(TIKU_BASIC_ERR_SYNTAX, "bad IP '%s'", ipstr); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
     (*p)++;
     port = parse_expr(p);
     if (basic_error) return;
     if (port < 1 || port > 65535) {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? UDP port out of range\n" SH_RST); return;
+        basic_throw(TIKU_BASIC_ERR_NET, "UDP port out of range"); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
     (*p)++;
     if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
     if (tiku_kits_net_udp_send(ip, (uint16_t)port, 5000U,
                                (const uint8_t *)payload,
                                (uint16_t)strlen(payload)) != TIKU_KITS_NET_OK) {
-        basic_error = 1;
-        basic_errcat = TIKU_BASIC_ERR_NET;
-        SHELL_PRINTF(SH_RED "? UDP send failed (is the IP link up? 'wifi up')\n"
-                     SH_RST);
+        basic_throw(TIKU_BASIC_ERR_NET, "UDP send failed (is the IP link up? 'wifi up')");
     }
 }
 
@@ -252,8 +249,7 @@ exec_browse(const char **p)
             path = (u[i] == '/') ? (u + i) : "/";
         }
         if (host[0] == '\0') {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? BROWSE: empty URL\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_GENERAL, "BROWSE: empty URL");
             return;
         }
         if (basic_https_get("GET", host, path, NULL, NULL, basic_browse_buf,
@@ -348,14 +344,14 @@ exec_mqttpub(const char **p)
 
     if (parse_path_literal(p, ipstr, sizeof(ipstr)) != 0) return;
     if (basic_net_parse_ip(ipstr, ip) != 0) {
-        basic_error = 1; SHELL_PRINTF(SH_RED "? bad broker IP '%s'\n" SH_RST, ipstr); return;
+        basic_throwf(TIKU_BASIC_ERR_NET, "bad broker IP '%s'", ipstr); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
     (*p)++;
     if (parse_path_literal(p, topic, sizeof(topic)) != 0) return;
     skip_ws(p);
-    if (**p != ',') { basic_error = 1; SHELL_PRINTF(SH_RED "? ',' expected\n" SH_RST); return; }
+    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
     (*p)++;
     if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
 
@@ -373,9 +369,7 @@ exec_mqttpub(const char **p)
     basic_mqtt_evt = 0xFFu;
     if (tiku_kits_net_mqtt_connect(basic_mqtt_msg_cb, basic_mqtt_event_cb)
         != TIKU_KITS_NET_OK) {
-        basic_error = 1;
-        basic_errcat = TIKU_BASIC_ERR_NET;
-        SHELL_PRINTF(SH_RED "? MQTT connect rejected (IP link up? 'wifi up')\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_NET, "MQTT connect rejected (IP link up? 'wifi up')");
         return;
     }
     deadline = (tiku_clock_time_t)(tiku_clock_time() + 8u * TIKU_CLOCK_SECOND);
@@ -388,8 +382,7 @@ exec_mqttpub(const char **p)
     }
     if (!tiku_kits_net_mqtt_is_connected()) {
         tiku_kits_net_mqtt_disconnect();
-        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
-        SHELL_PRINTF(SH_RED "? MQTT connect timeout\n" SH_RST); return;
+        basic_throw(TIKU_BASIC_ERR_NET, "MQTT connect timeout"); return;
     }
     tiku_kits_net_mqtt_publish(topic, (const uint8_t *)payload,
                                (uint16_t)strlen(payload), 0, 0);
@@ -419,8 +412,7 @@ basic_net_mqtt_wait(const char *ipstr, const char *topic, long secs,
 
     if (cap) out[0] = '\0';
     if (basic_net_parse_ip(ipstr, ip) != 0) {
-        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
-        SHELL_PRINTF(SH_RED "? bad broker IP '%s'\n" SH_RST, ipstr);
+        basic_throwf(TIKU_BASIC_ERR_NET, "bad broker IP '%s'", ipstr);
         return -1;
     }
     if (secs <= 0)    secs = 1;
@@ -435,8 +427,7 @@ basic_net_mqtt_wait(const char *ipstr, const char *topic, long secs,
     basic_mqtt_rx_pending = 0;
     if (tiku_kits_net_mqtt_connect(basic_mqtt_msg_cb, basic_mqtt_event_cb)
         != TIKU_KITS_NET_OK) {
-        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
-        SHELL_PRINTF(SH_RED "? MQTT connect rejected (IP link up? 'wifi up')\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_NET, "MQTT connect rejected (IP link up? 'wifi up')");
         return -1;
     }
     deadline = (tiku_clock_time_t)(tiku_clock_time() + 8u * TIKU_CLOCK_SECOND);
@@ -449,8 +440,7 @@ basic_net_mqtt_wait(const char *ipstr, const char *topic, long secs,
     }
     if (!tiku_kits_net_mqtt_is_connected()) {
         tiku_kits_net_mqtt_disconnect();
-        basic_error = 1; basic_errcat = TIKU_BASIC_ERR_NET;
-        SHELL_PRINTF(SH_RED "? MQTT connect timeout\n" SH_RST); return -1;
+        basic_throw(TIKU_BASIC_ERR_NET, "MQTT connect timeout"); return -1;
     }
     tiku_kits_net_mqtt_subscribe(topic, 0);
     /* Pump until a PUBLISH lands (msg_cb latches rx_pending) or the

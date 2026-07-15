@@ -122,7 +122,7 @@ basic_run_begin(void)
 
     idx = prog_next_index(0);
     if (idx < 0) {
-        SHELL_PRINTF(SH_RED "? no program\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_GENERAL, "no program");
         return -1;
     }
 
@@ -320,7 +320,7 @@ exec_run_drive(void)
 
     while (1) {
         if (basic_run_guard-- == 0) {
-            SHELL_PRINTF(SH_RED "? iteration cap reached\n" SH_RST);
+            basic_report(TIKU_BASIC_ERR_GENERAL, "iteration cap reached");
             break;
         }
         if (basic_run_step() != BASIC_STEP_RUNNING) {

@@ -146,7 +146,7 @@ exec_renum(const char **q)
         }
     }
     if (start <= 0 || step <= 0 || start + (long)TIKU_BASIC_PROGRAM_LINES * step >= 0xFFFEL) {
-        SHELL_PRINTF(SH_RED "? bad RENUM range\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_SYNTAX, "bad RENUM range");
         return;
     }
 
@@ -180,8 +180,7 @@ exec_renum(const char **q)
         if (prog[i].number == 0) continue;
         if (renum_rewrite_body(prog[i].text, tmp, sizeof(tmp),
                                old_nos, new_nos, n_lines) != 0) {
-            SHELL_PRINTF(SH_RED "? RENUM: line too long after rewrite\n"
-                         SH_RST);
+            basic_report(TIKU_BASIC_ERR_GENERAL, "RENUM: line too long after rewrite");
             return;
         }
         strncpy(prog[i].text, tmp, TIKU_BASIC_LINE_MAX - 1);

@@ -215,8 +215,7 @@ basic_save_to_persist(void)
         n = snprintf(tmp + pos, tmp_cap - pos, "%u %s\n",
                      (unsigned)prog[idx].number, prog[idx].text);
         if (n < 0 || (size_t)n >= tmp_cap - pos) {
-            SHELL_PRINTF(SH_RED
-                         "? save: program too large for buffer\n" SH_RST);
+            basic_report(TIKU_BASIC_ERR_IO, "save: program too large for buffer");
             return -1;
         }
         pos += (size_t)n;
@@ -227,7 +226,7 @@ basic_save_to_persist(void)
     }
 
     if (basic_prog_store(tmp, pos) != 0) {
-        SHELL_PRINTF(SH_RED "? save failed\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_IO, "save failed");
         return -1;
     }
     SHELL_PRINTF(SH_GREEN "saved %u bytes" SH_RST "\n", (unsigned)pos);
@@ -254,7 +253,7 @@ basic_load_from_persist(void)
 
     if (basic_prog_fetch(tmp, tmp_cap - 1u, &n_read) != 0 ||
         n_read == 0u) {
-        SHELL_PRINTF(SH_RED "? load: no saved program\n" SH_RST);
+        basic_report(TIKU_BASIC_ERR_IO, "load: no saved program");
         return -1;
     }
     tmp[n_read] = '\0';

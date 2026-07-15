@@ -285,8 +285,7 @@ parse_var(const char **p, int *idx)
     {
         int slot = basic_named_lookup(buf, 0);
         if (slot < 0) {
-            basic_error = 1;
-            SHELL_PRINTF(SH_RED "? too many named vars\n" SH_RST);
+            basic_throw(TIKU_BASIC_ERR_NOMEM, "too many named vars");
             *p = save;
             return 0;
         }
@@ -326,8 +325,7 @@ parse_var_full(const char **p, int *out_idx, int *out_is_str)
     }
     slot = basic_named_lookup(buf, is_str);
     if (slot < 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? too many named vars\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_NOMEM, "too many named vars");
         *p = save;
         return 0;
     }

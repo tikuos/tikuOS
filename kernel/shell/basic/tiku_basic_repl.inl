@@ -43,7 +43,7 @@ process_line(const char *raw)
     if (is_digit(*p)) {
         const char *body;
         if (!parse_unum(&p, &ln) || ln <= 0 || ln >= 0xFFFE) {
-            SHELL_PRINTF(SH_RED "? bad line number\n" SH_RST);
+            basic_report(TIKU_BASIC_ERR_SYNTAX, "bad line number");
             return;
         }
         body = p;
@@ -56,8 +56,8 @@ process_line(const char *raw)
          * interactive edit is instead rejected at restore time by the
          * program-identity CRC bound into the slot (basic_ckpt_read). */
         if (prog_store((uint16_t)ln, body) < 0) {
-            SHELL_PRINTF(SH_RED "? program full (%u lines)" SH_RST "\n",
-                         (unsigned)TIKU_BASIC_PROGRAM_LINES);
+            basic_reportf(TIKU_BASIC_ERR_NOMEM, "program full (%u lines)",
+                          (unsigned)TIKU_BASIC_PROGRAM_LINES);
         }
         return;
     }
@@ -176,11 +176,11 @@ process_line(const char *raw)
                 start = (idx < 0) ? 100L : (long)prog[idx].number + step;
             }
             if (start <= 0 || start >= 0xFFFE) {
-                SHELL_PRINTF(SH_RED "? bad AUTO start\n" SH_RST);
+                basic_report(TIKU_BASIC_ERR_SYNTAX, "bad AUTO start");
                 return;
             }
             if (step <= 0) {
-                SHELL_PRINTF(SH_RED "? bad AUTO step\n" SH_RST);
+                basic_report(TIKU_BASIC_ERR_SYNTAX, "bad AUTO step");
                 return;
             }
             basic_auto_next   = (uint16_t)start;

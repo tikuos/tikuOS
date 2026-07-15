@@ -79,8 +79,7 @@ exec_bleadv(const char **p)
     }
     nm = (name[0] != '\0') ? name : "tikuOS";
     if (tiku_ble_serial_start(nm) != 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? BLE start failed (radio present?)\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "BLE start failed (radio present?)");
     }
 }
 
@@ -93,9 +92,7 @@ exec_blesend(const char **p)
         return;
     }
     if (tiku_ble_serial_send((const uint8_t *)s, (uint16_t)strlen(s)) < 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED
-            "? BLE not connected (check BLEUP() before BLESEND)\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "BLE not connected (check BLEUP() before BLESEND)");
     }
 }
 #endif /* TIKU_BLE_SERIAL_PRESENT */
@@ -165,15 +162,13 @@ exec_blebeacon(const char **p)
     if (tiku_ble_adv_beacon_data(nm, (uint16_t)ms,
                                  dlen ? (const uint8_t *)data
                                       : (const uint8_t *)0, dlen) != 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? BLE beacon failed (radio present?)\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_NET, "BLE beacon failed (radio present?)");
     }
 #else
     (void)data; (void)dlen;                 /* no payload slot over serial  */
     (void)ms;                               /* serial backends pick their own */
     if (tiku_ble_serial_beacon(nm) != 0) {
-        basic_error = 1;
-        SHELL_PRINTF(SH_RED "? BLE beacon failed (radio present?)\n" SH_RST);
+        basic_throw(TIKU_BASIC_ERR_NET, "BLE beacon failed (radio present?)");
     }
 #endif
 }
