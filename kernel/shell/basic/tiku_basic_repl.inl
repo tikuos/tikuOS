@@ -68,7 +68,33 @@ process_line(const char *raw)
         q = p;
         if (match_kw(&q, "NEW"))   { prog_clear(); basic_clear_vars(); SHELL_PRINTF("ok\n"); return; }
         q = p;
-        if (match_kw(&q, "RUN"))   { exec_run();    return; }
+        if (match_kw(&q, "RUN")) {
+            /* `RUN RESUME` (F1): continue a checkpointed program mid-loop from
+             * the durable execution-state slot instead of starting over. Plain
+             * `RUN` starts fresh. In the interactive shell MODE, the step
+             * machine is started and the shell poll loop pumps it (non-blocking:
+             * the scheduler runs between batches); in synchronous contexts
+             * (embedded run_source) it is driven to completion inline. */
+            int resume;
+            skip_ws(&q);
+            resume = match_kw(&q, "RESUME") ? 1 : 0;
+            if (resume) {
+                if (basic_run_resume() != 0) {
+                    SHELL_PRINTF(SH_YELLOW "? no checkpoint to resume\n" SH_RST);
+                    return;
+                }
+                if (!basic_mode_on) {
+                    exec_run_drive();     /* sync: run the restored program */
+                }
+                return;                   /* mode: the poll loop takes over */
+            }
+            if (basic_mode_on) {
+                (void)basic_run_begin();
+            } else {
+                exec_run();
+            }
+            return;
+        }
         q = p;
         if (match_kw(&q, "SAVE")) {
 #if TIKU_BASIC_NAMED_SLOTS > 0
@@ -201,6 +227,13 @@ process_line(const char *raw)
 #define BASIC_HELP_VFS_STMT   ""
 #define BASIC_HELP_VFS_FN     ""
 #endif
+#if TIKU_BASIC_PERSIST_RUN_ENABLE
+#define BASIC_HELP_PERSIST_LINE \
+    "  " SH_CYAN "Persist:   " SH_RST \
+                 " PERSIST ON|OFF   RUN RESUME   (survive a power cut)\n"
+#else
+#define BASIC_HELP_PERSIST_LINE ""
+#endif
 #if TIKU_BASIC_STRVARS_ENABLE
 #define BASIC_HELP_STR_LINE \
     "  " SH_CYAN "Strings:   " SH_RST \
@@ -239,6 +272,7 @@ process_line(const char *raw)
                 "              SAVE [\"name\"]  LOAD [\"name\"]  DIR\n"
                 "              AUTO [start [, step]] | OFF\n"
                 "              RENUM [start [, step]]\n"
+                BASIC_HELP_PERSIST_LINE
                 "  " SH_CYAN "Variables: " SH_RST
                               " A..Z (32-bit signed)\n"
                 "  " SH_CYAN "Constants: " SH_RST
@@ -318,6 +352,7 @@ process_line(const char *raw)
 #undef BASIC_HELP_LED
 #undef BASIC_HELP_VFS_STMT
 #undef BASIC_HELP_VFS_FN
+#undef BASIC_HELP_PERSIST_LINE
 #undef BASIC_HELP_STR_LINE
 #undef BASIC_HELP_FIXED_LINE
             return;

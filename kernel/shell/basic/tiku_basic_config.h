@@ -491,9 +491,14 @@
 
 /* REBOOT triggers the watchdog and spins; only meaningful on real
  * silicon. Defaults off in host builds because the spin would hang
- * the test driver. */
+ * the test driver.  (Was msp430-only -- the same stale single-platform
+ * gate shape as the 2026-07 durability audit's bug class; found live on
+ * the LM20 when the F1 resume proof dispatched REBOOT and got "? syntax".
+ * All real parts have the watchdog path: the shell `reboot` command uses
+ * it everywhere.) */
 #ifndef TIKU_BASIC_REBOOT_ENABLE
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_AMBIQ)  || defined(PLATFORM_NORDIC)
 #define TIKU_BASIC_REBOOT_ENABLE    1
 #else
 #define TIKU_BASIC_REBOOT_ENABLE    0
@@ -523,12 +528,82 @@
 #define BASIC_CTRL_C       0x03
 #define BASIC_PERSIST_KEY  "prog"
 
+/*---------------------------------------------------------------------------*/
+/* F1: POWER-FAILURE-TRANSPARENT RUN (execution-state checkpoint / resume)    */
+/*---------------------------------------------------------------------------*/
+/*
+ * PERSIST ON checkpoints the reified interpreter state (program counter,
+ * control-flow stacks, scalar + string variables, error / DATA / PRNG state)
+ * into durable NVM at yield boundaries; RUN RESUME continues a program mid-loop
+ * after a reset or power cut instead of restarting.  This is distinct from SAVE
+ * / LOAD, which persist the *program text*: PERSIST persists the *running
+ * machine*.  See tiku_basic_ckpt.inl for the slot formats and torn-write
+ * discipline.
+ *
+ * v1 checkpoints the core scalar machine.  Arrays (DIM), big response buffers,
+ * DEF FN, and the EVERY / ON CHANGE timer tables are NOT yet in the checkpoint
+ * -- PERSIST ON warns if any are live so the boundary is never silent.
+ *
+ * Durability by substrate (same envelope as SAVE, see BASIC_NVM_ON_REGION):
+ *   MSP430          .persistent FRAM      -- durable, per-batch checkpoints
+ *   Ambiq / RP2350  carved NVM region     -- durable, interval-gated (below)
+ *   Nordic / host   .bss                  -- session-only (the nRF54 durable
+ *                   .persistent RRAM reserve is 8 KB; BASIC's buffers do not
+ *                   fit -- enlarging it relocates the TFS/persist layout, a
+ *                   deliberate port change deferred to its own pass) */
+#ifndef TIKU_BASIC_PERSIST_RUN_ENABLE
+#define TIKU_BASIC_PERSIST_RUN_ENABLE 1
+#endif
+
+/* Minimum seconds between run-state checkpoints, counted from PERSIST ON.
+ * 0 = checkpoint every yield batch, the finest resume granularity -- right
+ * where NVM writes are cheap byte stores with effectively unlimited endurance
+ * (MSP430 FRAM ~1e15).  Nonzero paces the program-op substrates:
+ *   RP2350 QSPI flash : each checkpoint read-modify-ERASES its 4 KB sectors
+ *                       (~1e5 cycles); 60 s ~= 69 days of continuous armed
+ *                       running before the rated limit.
+ *   Ambiq MRAM        : bootrom word-program, no erase, but each save is a
+ *                       masked-IRQ bootrom call -- 5 s keeps that jitter rare.
+ *   Nordic RRAM       : byte-writable, no erase, but ~1e5-class write
+ *                       endurance -- 5 s paces the wear like Ambiq.
+ * Coarser interval = longer replay window after a power cut (the program
+ * re-runs at most the last interval's worth of lines). */
+#ifndef TIKU_BASIC_CKPT_INTERVAL_S
+#  if defined(PLATFORM_RP2350)
+#    define TIKU_BASIC_CKPT_INTERVAL_S 60
+#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#    define TIKU_BASIC_CKPT_INTERVAL_S 5
+#  else
+#    define TIKU_BASIC_CKPT_INTERVAL_S 0
+#  endif
+#endif
+
+/* Where BASIC's durable slots (saved program + F1 run-state checkpoint) live.
+ * Two backings, ONE decision point, keyed on the REGION LAYOUT rather than a
+ * platform list so a new port with a reserved tail lights up automatically:
+ *
+ *   BASIC_NVM_ON_REGION = 1 -- the carved NVM region's reserved tail
+ *     (TIKU_NVM_RESERVED_BYTES > 0: Ambiq MRAM, RP2350 QSPI flash, Nordic
+ *     RRAM).  The slots are fixed offsets in the tail, written via
+ *     tiku_tier_nvm_write (bootrom / erase+program / memcpy-behind-WEN);
+ *     the _Static_assert in tiku_basic_ckpt.inl proves both slots fit.
+ *
+ *   BASIC_NVM_ON_REGION = 0 -- byte-writable buffers.  On MSP430 they carry
+ *     TIKU_DURABLE (.persistent FRAM).  On host they land in plain .bss
+ *     (volatile test harness). */
+#include <kernel/memory/tiku_nvm_region.h>
+#if TIKU_NVM_RESERVED_BYTES > 0
+#define BASIC_NVM_ON_REGION  1
+#else
+#define BASIC_NVM_ON_REGION  0
+#endif
+
 #ifdef PLATFORM_MSP430
-#define BASIC_NVM_PERSISTENT __attribute__((section(".persistent")))
+#define BASIC_NVM_PERSISTENT TIKU_DURABLE   /* FRAM in place (tiku_mem.h) */
 #elif defined(PLATFORM_AMBIQ)
-/* On Ambiq the persist-backed save buffer is not built: the saved program is
- * durable in the carved NVM region (see basic_prog_store/fetch). This attribute
- * is unused there, kept defined for symmetry. */
+/* On the region-backed parts the persist-store buffers are not built (the
+ * durable slots live in the carved region).  This attribute is unused there,
+ * kept defined for symmetry. */
 #define BASIC_NVM_PERSISTENT __attribute__((section(".ssram")))
 #else
 #define BASIC_NVM_PERSISTENT

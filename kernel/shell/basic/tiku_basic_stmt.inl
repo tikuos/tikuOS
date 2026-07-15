@@ -1682,6 +1682,34 @@ exec_trace(const char **p)
     }
 }
 
+/* PERSIST ON / PERSIST OFF -- F1: arm/disarm execution-state checkpointing so a
+ * running program can survive a reset / power cut and be continued with RUN
+ * RESUME.  Distinct from SAVE (which persists the program text): PERSIST
+ * persists the running machine. */
+static void
+exec_persist(const char **p)
+{
+    skip_ws(p);
+#if TIKU_BASIC_PERSIST_RUN_ENABLE
+    if (match_kw(p, "ON")) {
+        uint8_t was_armed = basic_ckpt_armed;
+        basic_ckpt_arm(1);
+        if (!was_armed) {           /* warn once, on the arming edge, not per loop */
+            basic_ckpt_warn_uncheckpointed();
+        }
+    } else if (match_kw(p, "OFF")) {
+        basic_ckpt_arm(0);
+    } else {
+        basic_error = 1;
+        SHELL_PRINTF(SH_RED "? ON or OFF expected\n" SH_RST);
+    }
+#else
+    (void)p;
+    basic_error = 1;
+    SHELL_PRINTF(SH_RED "? PERSIST unsupported on this build\n" SH_RST);
+#endif
+}
+
 /* RESTORE -- reset the DATA read pointer to the start. Subsequent
  * READs walk the DATA list from the beginning again. */
 static void

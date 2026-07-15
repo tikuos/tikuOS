@@ -43,14 +43,46 @@
 /* INTERPRETER ENTRY POINTS                                                  */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Enter the interactive Tiku BASIC REPL.
+/*
+ * BASIC as a non-blocking shell MODE.
  *
- * Reads input from the active shell I/O backend; prints output via
- * SHELL_PRINTF.  Returns when the user types BYE / EXIT / QUIT, or
- * sends Ctrl-C at the prompt.
+ * The interpreter is a mode of the shell process (like watch / ping /
+ * mqtt), not a blocking takeover: `basic` enters the mode and returns,
+ * and the shell poll loop drives it via these hooks.  The scheduler
+ * therefore stays live for the whole session -- a running program yields
+ * between batches of lines instead of freezing everything.
  */
-void tiku_basic_repl(void);
+
+/** @brief Enter the interactive REPL mode (the `basic` command). */
+void tiku_basic_mode_enter(void);
+
+/**
+ * @brief Run the saved program headlessly as a non-blocking mode
+ *        (the `basic run` command); returns 0 if a program started, else -1.
+ */
+int tiku_basic_mode_run_saved(void);
+
+/**
+ * @brief Resume (or first-boot start) the saved program headlessly as a
+ *        non-blocking mode -- F1's power-failure-transparent autostart
+ *        (the `basic run resume` command); returns 0 if running, else -1.
+ */
+int tiku_basic_mode_resume_saved(void);
+
+/** @brief 1 while the shell is in BASIC mode (shell poll-loop hook). */
+int tiku_basic_mode_active(void);
+
+/** @brief Feed one console byte to the mode's line editor (poll-loop hook). */
+void tiku_basic_mode_feed_char(int ch);
+
+/** @brief Advance a running program by up to one batch of steps (poll-loop hook). */
+void tiku_basic_mode_tick(void);
+
+/**
+ * @brief Consume the "BASIC mode just exited" edge (shell poll-loop hook).
+ * @return 1 once after the mode leaves (so the shell reprints its prompt), else 0.
+ */
+int tiku_basic_mode_take_exit(void);
 
 /**
  * @brief Load the persisted BASIC program from FRAM and RUN it once.

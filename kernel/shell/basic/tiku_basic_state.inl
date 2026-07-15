@@ -152,14 +152,14 @@ static long parse_array_index(const char **p,
 /* FRAM-BACKED PERSISTENT STATE                                              */
 /*---------------------------------------------------------------------------*/
 
-/* FRAM-backed persistent state. The saved-program buffer + the
- * persist-store metadata both live in the .persistent section so
- * they survive power cycles. tiku_persist_init() validates entries
- * via the magic number on every boot. */
-/* Default-slot persist store (non-Ambiq). On Ambiq the saved program lives in
- * the carved NVM region instead (durable MRAM; see basic_prog_store/fetch in
- * tiku_basic_persist.inl), so these are not built there. */
-#if !defined(PLATFORM_AMBIQ)
+/* Durable saved-program state, buffer-backed variant.  The save buffer + the
+ * persist-store metadata carry BASIC_NVM_PERSISTENT (.persistent FRAM on
+ * MSP430 -- durable; plain .bss on Nordic/host -- session-only);
+ * tiku_persist_init() validates entries via the magic number on every boot.
+ * Not built on the region-backed parts (Ambiq MRAM, RP2350 flash): there the
+ * saved program lives at a fixed offset in the carved NVM region's reserved
+ * tail instead -- see basic_prog_store/fetch in tiku_basic_persist.inl. */
+#if !BASIC_NVM_ON_REGION
 static BASIC_NVM_PERSISTENT uint8_t basic_save_buf[TIKU_BASIC_SAVE_BUF_BYTES];
 static BASIC_NVM_PERSISTENT tiku_persist_store_t basic_store;
 static uint8_t       basic_persist_ready;
@@ -180,6 +180,24 @@ static uint16_t     basic_pc;
 static int          basic_pc_set;      /* 1 if exec_stmt explicitly set PC */
 static int          basic_error;
 static int          basic_quit;        /* 1 when BYE is typed */
+
+/* Shell-mode state (tiku_basic_mode.inl).  BASIC is a non-blocking MODE of the
+ * shell process rather than a blocking takeover: basic_mode_on is 1 while the
+ * shell is in BASIC mode, basic_mode_interactive distinguishes the REPL
+ * (`basic`, shows a prompt) from a headless run (`basic run`, no prompt).
+ * Declared here (early) so process_line's RUN handler can test basic_mode_on;
+ * the mode functions themselves live in tiku_basic_mode.inl. */
+static uint8_t      basic_mode_on;
+static uint8_t      basic_mode_interactive;
+
+/* F1 checkpoint arming (tiku_basic_ckpt.inl).  1 while PERSIST is ON: the run
+ * loop checkpoints the reified execution state at each yield boundary so RUN
+ * RESUME can continue mid-loop across a reset / power cut.  Declared here (with
+ * the other run-scope flags) so the dispatcher, the run loop, and the mode
+ * driver can all see it; the checkpoint engine itself is in tiku_basic_ckpt.inl.
+ * A per-boot SRAM flag -- reset on power-up, then re-armed by RUN RESUME (which
+ * restores it from the checkpoint) or a fresh PERSIST ON. */
+static uint8_t      basic_ckpt_armed;
 
 /* AUTO line-numbering at the REPL: when active, the REPL prompt
  * prepends `next` and increments by `step` after each line. Disable

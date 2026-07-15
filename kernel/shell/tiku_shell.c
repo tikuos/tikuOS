@@ -186,6 +186,7 @@
 #endif
 #if TIKU_SHELL_CMD_BASIC
 #include "commands/tiku_shell_cmd_basic.h"
+#include <kernel/shell/basic/tiku_basic.h>   /* non-blocking BASIC mode hooks */
 #endif
 #if TIKU_SHELL_CMD_JOBS
 #include "commands/tiku_shell_cmd_every.h"
@@ -1497,6 +1498,18 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             }
 #endif
 
+#if TIKU_SHELL_CMD_BASIC
+            /* BASIC mode owns the console: route every byte to its own line
+             * editor (printable echo, backspace, CR dispatch, Ctrl-C).  The
+             * shell's line editor and command dispatch are bypassed until the
+             * mode exits.  Mirrors the modal feel of the old blocking REPL
+             * while the shell loop stays event-driven underneath. */
+            if (tiku_basic_mode_active()) {
+                tiku_basic_mode_feed_char(ch);
+                continue;
+            }
+#endif
+
             /* ANSI CSI arrow-key sequence: ESC [ A/B/C/D.
              * State 1 = saw ESC, state 2 = saw ESC[. */
             if (cli.esc_state == 1) {
@@ -1553,6 +1566,13 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
 #if TIKU_SHELL_CMD_MQTT
                     if (tiku_shell_cmd_mqtt_active()) {
+                        streaming = 1;
+                    }
+#endif
+#if TIKU_SHELL_CMD_BASIC
+                    /* `basic` entered its own mode and printed the BASIC prompt;
+                     * don't also print the shell prompt. */
+                    if (tiku_basic_mode_active()) {
                         streaming = 1;
                     }
 #endif
@@ -1617,6 +1637,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
          * mode, idempotent re-subscribe (self-heal) in event
          * mode. */
         tiku_shell_cmd_watch_tick();
+#endif
+#if TIKU_SHELL_CMD_BASIC
+        /* Advance a running BASIC program by one batch of lines (no-op at the
+         * REPL prompt), then -- if the mode just exited (BYE, Ctrl-C, or a
+         * headless `basic run` finishing) -- restore the shell's own prompt. */
+        tiku_basic_mode_tick();
+        if (tiku_basic_mode_take_exit()) {
+            shell_print_prompt();
+        }
 #endif
 #if TIKU_SHELL_CMD_PING
         /* Service an active ping run: send/await probes across ticks.  When

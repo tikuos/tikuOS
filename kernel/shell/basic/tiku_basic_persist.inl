@@ -38,17 +38,21 @@ static void process_line(const char *raw);
 /*---------------------------------------------------------------------------*/
 /*
  * SAVE / LOAD and the /data/basic bridge all go through basic_prog_store() /
- * basic_prog_fetch() so they stay consistent. On Ambiq the program lives in the
- * carved NVM region's reserved tail ([magic][len][text], gate-last on the MRAM
- * backend); elsewhere it rides the tiku_persist FRAM store.
+ * basic_prog_fetch() so they stay consistent. On the region-backed parts
+ * (BASIC_NVM_ON_REGION: Ambiq MRAM, RP2350 flash) the program lives at the
+ * BASE of the carved NVM region's reserved tail ([magic][len][text], gate-last
+ * through the backend's program op); elsewhere it rides the tiku_persist store
+ * over the BASIC_NVM_PERSISTENT save buffer.  The F1 run-state checkpoint is
+ * the tail's second tenant, at the TOP -- see tiku_basic_ckpt.inl, which also
+ * asserts the two slots fit the tail together.
  */
 
-#if defined(PLATFORM_AMBIQ)
+#if BASIC_NVM_ON_REGION
 #define BASIC_REGION_MAGIC  0x42415350u   /* 'BASP' */
 _Static_assert(TIKU_BASIC_SAVE_BUF_BYTES + 8u <= TIKU_NVM_RESERVED_BYTES,
                "BASIC save buffer larger than the reserved NVM region tail");
 
-/* Base of the reserved NVM-region tail this slot owns, or NULL. */
+/* Base of the reserved NVM-region tail (program slot at offset 0), or NULL. */
 static uint8_t *
 basic_region_slot(void)
 {
@@ -93,7 +97,7 @@ basic_persist_ensure(void)
 static int
 basic_prog_store(const char *text, size_t len)
 {
-#if defined(PLATFORM_AMBIQ)
+#if BASIC_NVM_ON_REGION
     uint8_t *slot  = basic_region_slot();
     uint32_t magic = BASIC_REGION_MAGIC;
     uint32_t lenw  = (uint32_t)len;
@@ -138,7 +142,7 @@ basic_prog_store(const char *text, size_t len)
 static int
 basic_prog_fetch(char *buf, size_t max, size_t *out_len)
 {
-#if defined(PLATFORM_AMBIQ)
+#if BASIC_NVM_ON_REGION
     const uint8_t *slot = basic_region_slot();
     uint32_t magic, lenw;
 

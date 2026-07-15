@@ -11,8 +11,10 @@
  * actual interpreter engine lives at kernel/shell/basic/ and is
  * exposed via tiku_basic.h:
  *
- *   `basic`            -> tiku_basic_repl()    (interactive REPL)
- *   `basic run`        -> tiku_basic_autorun() (run the saved program)
+ *   `basic`            -> tiku_basic_mode_enter()        (interactive REPL mode)
+ *   `basic run`        -> tiku_basic_mode_run_saved()    (run saved, non-blocking)
+ *   `basic resume`     -> tiku_basic_mode_resume_saved() (F1: resume-or-start saved)
+ *   `basic run resume` -> same as `basic resume`
  *   `basic run  <path>`-> load a /data file and run it
  *   `basic load <path>`-> load a /data file into the program store
  *   `basic save <path>`-> save the current program to a /data file
@@ -96,11 +98,20 @@ tiku_shell_cmd_basic(uint8_t argc, const char *argv[])
 {
     const char *sub = (argc >= 2u) ? argv[1] : NULL;
 
+    /* `basic resume` / `basic run resume`: F1 power-failure-transparent
+     * autostart -- continue the saved program from its checkpoint, or start it
+     * fresh if there is none. */
+    if (sub != NULL && strcmp(sub, "resume") == 0) {
+        (void)tiku_basic_mode_resume_saved();
+        return;
+    }
     if (sub != NULL && strcmp(sub, "run") == 0) {
-        if (argc >= 3u) {
-            basic_from_file(argv[2], 1);   /* run <path> */
+        if (argc >= 3u && strcmp(argv[2], "resume") == 0) {
+            (void)tiku_basic_mode_resume_saved();
+        } else if (argc >= 3u) {
+            basic_from_file(argv[2], 1);       /* run <path> (blocking) */
         } else {
-            tiku_basic_autorun();          /* run saved  */
+            (void)tiku_basic_mode_run_saved(); /* run saved (non-blocking mode) */
         }
         return;
     }
@@ -112,5 +123,5 @@ tiku_shell_cmd_basic(uint8_t argc, const char *argv[])
         basic_to_file(argv[2]);
         return;
     }
-    tiku_basic_repl();
+    tiku_basic_mode_enter();
 }

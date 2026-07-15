@@ -318,6 +318,7 @@ exec_stmt(const char **p)
     if (match_kw(p, "RESUME"))   { exec_resume(p);    return; }
     if (match_kw(p, "EVERY"))    { exec_every(p);     return; }
     if (match_kw(p, "TRACE"))    { exec_trace(p);     return; }
+    if (match_kw(p, "PERSIST"))  { exec_persist(p);   return; }
     if (match_kw(p, "READ"))     { exec_read(p);      return; }
     if (match_kw(p, "DATA"))     { exec_data_noop(p); return; }
     if (match_kw(p, "RESTORE"))  { exec_restore();    return; }

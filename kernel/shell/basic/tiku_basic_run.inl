@@ -5,43 +5,126 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_run.inl - the RUN loop.
+ * tiku_basic_run.inl - the RUN loop, factored as a resumable step machine.
  *
  * NOT a standalone translation unit.  Included from tiku_basic.c.
  *
- * Walks the program in ascending line-number order, calling
- * exec_stmts on each line.  Between statements it polls the
- * reactive-handler table (basic_poll_reactive in
- * tiku_basic_stmt.inl) so EVERY and ON CHANGE registrations fire
- * on schedule, and checks shell I/O for a Ctrl-C break.  ON ERROR
- * reroutes the PC to the user's handler line; without a handler
- * the error aborts the run with an "at line N" annotation.
+ * The program executes in ascending line-number order.  Historically
+ * this was a single blocking `while` loop (exec_run) that ran to
+ * completion inside one shell-process dispatch -- which froze the
+ * scheduler for the whole run and forced a 100k-iteration cap and
+ * manual watchdog kicks to stay alive.
  *
- * A 100k-iteration guard catches runaway tight loops -- printing
- * "? iteration cap reached" and dropping back to the REPL rather
- * than wedging the shell.
+ * It is now split into three pieces so the same walk can be driven
+ * two ways:
+ *
+ *   basic_run_begin()  - reset run state, allocate nothing, pick the
+ *                        first line.  Returns -1 (with a message) if
+ *                        there is no program.
+ *   basic_run_step()   - advance the program by exactly ONE line:
+ *                        execute its statements, trap errors through
+ *                        ON ERROR, advance the PC, then poll the
+ *                        EVERY / ON CHANGE reactive table.  Returns
+ *                        RUNNING / DONE / BROKEN.  All state lives in
+ *                        file-static globals, so a step is fully
+ *                        resumable across a yield.
+ *   basic_run_end()    - clear basic_running.
+ *
+ * exec_run() drives the step machine synchronously (begin; while step;
+ * end) with the classic iteration guard + inline Ctrl-C poll, so every
+ * existing caller -- the REPL `RUN`, autorun, and embedded run_source --
+ * behaves byte-for-byte as before.  The shell-mode driver
+ * (tiku_basic_mode_*) drives the SAME step function one batch per poll
+ * tick, yielding to the scheduler between batches and routing Ctrl-C
+ * through the shell loop instead of the inline poll (basic_run_shell_mode).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/*---------------------------------------------------------------------------*/
+/* RUN-LOOP STATE                                                            */
+/*---------------------------------------------------------------------------*/
+
+/* Result of a single basic_run_step(). */
+typedef enum {
+    BASIC_STEP_RUNNING = 0,   /* more program to execute */
+    BASIC_STEP_DONE    = 1,   /* program ended (END / STOP / fell off the end) */
+    BASIC_STEP_BROKEN  = 2    /* aborted: unhandled error, Ctrl-C, or cap */
+} basic_step_t;
+
+/* Runaway-loop backstop for the SYNCHRONOUS driver (exec_run) only.  The
+ * shell-mode driver does not use it -- it relies on cooperative yielding plus
+ * the shell-loop Ctrl-C to stay live, so a legitimately infinite reactive
+ * program (10 GOTO 10 with EVERY handlers) runs forever without tripping it. */
+static uint32_t basic_run_guard;
+
+/* 1 while the RUN loop is being driven as a non-blocking shell mode
+ * (tiku_basic_mode_*), 0 for the synchronous exec_run path.  When set,
+ * basic_run_step() skips its inline Ctrl-C poll because the shell poll loop
+ * routes keystrokes (and Ctrl-C) to the mode instead.  Inert (always 0) until
+ * the mode driver is wired in. */
+static uint8_t basic_run_shell_mode;
+
+/*---------------------------------------------------------------------------*/
+/* ERROR TRAP (shared by the statement + reactive error sites)               */
+/*---------------------------------------------------------------------------*/
+
 /**
- * @brief Execute the stored program in ascending line-number order.
+ * @brief Freeze ERR/ERL and route an error to the ON ERROR handler.
  *
- * Each iteration: locate the line with `basic_pc`, run its
- * statements via exec_stmts, advance to the next line, and poll
- * EVERY / ON CHANGE plus a Ctrl-C break.  Returns when the program
- * ends, an error is unhandled, or Ctrl-C arrives.
+ * Records the erroring line in ERL and the classified category in ERR
+ * (GENERAL when the throw site could not classify), then -- if an ON ERROR
+ * handler is registered and we are not already inside it -- clears the error
+ * and redirects the PC to the handler.  RESUME continues from basic_err_pc.
+ *
+ * @param prev_pc  The line that was executing when the error fired.
+ * @return 1 if the error was routed to a handler (keep running), 0 if it is
+ *         fatal (the caller should stop and print the "at line" annotation).
  */
-static void
-exec_run(void)
+static int
+basic_run_trap_error(uint16_t prev_pc)
 {
-    int      idx;
-    uint8_t  i;
-    uint32_t guard;
-    uint16_t prev_pc;
+    basic_erl = prev_pc;
+    basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
+    /* A handler is one-shot in the sense that an error INSIDE the handler is
+     * fatal -- we'd otherwise risk infinite-looping on a buggy handler. */
+    if (basic_err_handler != 0u && basic_pc != basic_err_handler) {
+        basic_err_pc = prev_pc;
+        basic_pc     = basic_err_handler;
+        basic_pc_set = 1;
+        basic_error  = 0;
+        return 1;
+    }
+    SHELL_PRINTF(SH_RED SH_DIM "at line %u" SH_RST "\n", (unsigned)prev_pc);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* STEP MACHINE                                                              */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialise run state and select the first program line.
+ *
+ * Clears the control-flow stacks, the error/handler state, the DATA cursor,
+ * and the reactive registrations, then wipes the variable namespace (each RUN
+ * starts fresh -- this RUN-boundary reset is also what keeps the arena budget
+ * bounded across many invocations).  Does not allocate: the arena is already
+ * bound by basic_session_begin().
+ *
+ * @return 0 on success, -1 if there is no program (message printed).
+ */
+static int
+basic_run_begin(void)
+{
+    int     idx;
+    uint8_t i;
 
     idx = prog_next_index(0);
-    if (idx < 0) { SHELL_PRINTF(SH_RED "? no program\n" SH_RST); return; }
+    if (idx < 0) {
+        SHELL_PRINTF(SH_RED "? no program\n" SH_RST);
+        return -1;
+    }
 
     basic_running     = 1;
     basic_error       = 0;
@@ -68,112 +151,100 @@ exec_run(void)
      * invocations -- and lets a program that DIMs an array be RUN more than
      * once without tripping "array already DIMmed". */
     basic_clear_vars();
-    basic_pc      = prog[idx].number;
-    guard         = 100000UL;     /* hard cap on iterations */
+    basic_pc = prog[idx].number;
+    return 0;
+}
 
-    while (basic_running && !basic_error) {
-        if (guard-- == 0) {
-            SHELL_PRINTF(SH_RED "? iteration cap reached\n" SH_RST);
-            break;
-        }
+/**
+ * @brief Advance the program by exactly one line.
+ *
+ * Locate the line at basic_pc, run its statements via exec_stmts, trap any
+ * error through ON ERROR, advance the PC to the next line, then poll the
+ * EVERY / ON CHANGE reactive table.  All state persists in globals, so the
+ * caller may return to the scheduler between steps.
+ *
+ * @return BASIC_STEP_RUNNING to continue, BASIC_STEP_DONE when the program
+ *         ended, BASIC_STEP_BROKEN on an unhandled error or a Ctrl-C break.
+ */
+static basic_step_t
+basic_run_step(void)
+{
+    int         idx;
+    uint16_t    prev_pc;
+    const char *p;
 
-        idx = prog_find_exact(basic_pc);
-        if (idx < 0) {
-            int n = prog_next_index(basic_pc);
-            if (n < 0) break;       /* PC fell off the end of the program */
-            basic_pc = prog[n].number;
-            continue;
-        }
+    /* Loop-condition equivalent of the old `while (basic_running &&
+     * !basic_error)`: a prior step (or an END/STOP inside exec_stmts) that
+     * cleared basic_running, or a lingering error, terminates the walk. */
+    if (!basic_running) return BASIC_STEP_DONE;
+    if (basic_error)    return BASIC_STEP_BROKEN;
 
-        prev_pc = basic_pc;
-        basic_pc_set = 0;
-        if (basic_trace) {
-            SHELL_PRINTF(SH_CYAN SH_DIM "[%u] %s" SH_RST "\n",
-                         (unsigned)prog[idx].number, prog[idx].text);
-        }
-        {
-            const char *p = prog[idx].text;
-            /* Skip a `label:` prefix at the start of the line so it
-             * isn't parsed as a statement. The label registry is
-             * built lazily by prog_find_label, which scans on each
-             * GOTO label-ref; we just need to step over it here. */
-            const char *q = p;
-            skip_ws(&q);
-            if (is_alpha(*q) && is_word_cont(q[1])) {
-                const char *r = q;
-                while (is_word_cont(*r)) r++;
-                if (*r == ':') p = r + 1;
-            }
-            basic_errcat = 0;      /* fresh category hint per statement */
-            exec_stmts(&p);
-        }
-        if (basic_error) {
-            /* Freeze ERR/ERL for the handler: the erroring line and the
-             * category the throw site set (GENERAL if it could not
-             * classify). */
-            basic_erl = prev_pc;
-            basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
-            /* If an ON ERROR handler is registered, the error message
-             * has already printed. Clear the error and jump to the
-             * handler. RESUME (or RESUME NEXT / line) continues from
-             * basic_err_pc.
-             *
-             * The handler is one-shot in the sense that an error
-             * INSIDE the handler is fatal -- we'd otherwise risk
-             * infinite-looping on a buggy handler. */
-            if (basic_err_handler != 0u && basic_pc != basic_err_handler) {
-                basic_err_pc = prev_pc;
-                basic_pc     = basic_err_handler;
-                basic_pc_set = 1;
-                basic_error  = 0;
-                continue;
-            }
-            SHELL_PRINTF(SH_RED SH_DIM "at line %u" SH_RST "\n",
-                         (unsigned)prev_pc);
-            break;
-        }
+    idx = prog_find_exact(basic_pc);
+    if (idx < 0) {
+        int n = prog_next_index(basic_pc);
+        if (n < 0) return BASIC_STEP_DONE;       /* PC fell off the end */
+        basic_pc = prog[n].number;
+        return BASIC_STEP_RUNNING;               /* == the old `continue` */
+    }
 
-        if (!basic_pc_set) {
-            int n = prog_next_index((uint16_t)(prev_pc + 1));
-            if (n < 0) break;
-            basic_pc = prog[n].number;
-        }
+    prev_pc = basic_pc;
+    basic_pc_set = 0;
+    if (basic_trace) {
+        SHELL_PRINTF(SH_CYAN SH_DIM "[%u] %s" SH_RST "\n",
+                     (unsigned)prog[idx].number, prog[idx].text);
+    }
 
-        /* Poll reactive registrations between statements. EVERY
-         * may run its stmt (and bubble up errors); ON CHANGE may
-         * jump or push a GOSUB return. Either way the next loop
-         * iteration picks up at the new basic_pc. */
-        basic_errcat = 0;      /* fresh category hint for reactive stmts */
-        basic_poll_reactive();
-        if (basic_error) {
-            basic_erl = prev_pc;
-            basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
-            /* fall through to the existing error trap above next iter
-             * by re-running the loop body... actually simpler: emulate
-             * the trap inline. */
-            if (basic_err_handler != 0u && basic_pc != basic_err_handler) {
-                basic_err_pc = prev_pc;
-                basic_pc     = basic_err_handler;
-                basic_pc_set = 1;
-                basic_error  = 0;
-                continue;
-            }
-            SHELL_PRINTF(SH_RED SH_DIM "at line %u" SH_RST "\n",
-                         (unsigned)prev_pc);
-            break;
+    p = prog[idx].text;
+    {
+        /* Skip a `label:` prefix at the start of the line so it isn't parsed
+         * as a statement. The label registry is built lazily by
+         * prog_find_label, which scans on each GOTO label-ref; we just step
+         * over it here. */
+        const char *q = p;
+        skip_ws(&q);
+        if (is_alpha(*q) && is_word_cont(q[1])) {
+            const char *r = q;
+            while (is_word_cont(*r)) r++;
+            if (*r == ':') p = r + 1;
         }
+    }
+    basic_errcat = 0;      /* fresh category hint per statement */
+    exec_stmts(&p);
 
-        /* Cooperative Ctrl-C poll between statements. SLIP-aware: demux IP
-         * frames away so a 0x03 byte in network traffic on the shared console
-         * UART is not misread as a break (same fix as read_line / DELAY). */
+    if (basic_error) {
+        /* Freeze ERR/ERL for the handler and either route to it or abort. */
+        if (basic_run_trap_error(prev_pc)) return BASIC_STEP_RUNNING;
+        return BASIC_STEP_BROKEN;
+    }
+
+    if (!basic_pc_set) {
+        int n = prog_next_index((uint16_t)(prev_pc + 1));
+        if (n < 0) return BASIC_STEP_DONE;
+        basic_pc = prog[n].number;
+    }
+
+    /* Poll reactive registrations between statements. EVERY may run its stmt
+     * (and bubble up errors); ON CHANGE may jump or push a GOSUB return.
+     * Either way the next step picks up at the new basic_pc. */
+    basic_errcat = 0;      /* fresh category hint for reactive stmts */
+    basic_poll_reactive();
+    if (basic_error) {
+        if (basic_run_trap_error(prev_pc)) return BASIC_STEP_RUNNING;
+        return BASIC_STEP_BROKEN;
+    }
+
+    /* Cooperative Ctrl-C poll between statements -- synchronous driver only.
+     * The shell-mode driver routes Ctrl-C through the poll loop, so it sets
+     * basic_run_shell_mode and skips this.  SLIP-aware: demux IP frames away
+     * so a 0x03 byte in network traffic on the shared console UART is not
+     * misread as a break (same fix as read_line / DELAY). */
+    if (!basic_run_shell_mode) {
 #if TIKU_SHELL_CMD_SLIP
-        {
-            int ch = tiku_shell_net_getc();
-            if (ch == BASIC_CTRL_C) {
-                SHELL_PRINTF(SH_YELLOW "^C break at line %u" SH_RST "\n",
-                             (unsigned)basic_pc);
-                break;
-            }
+        int ch = tiku_shell_net_getc();
+        if (ch == BASIC_CTRL_C) {
+            SHELL_PRINTF(SH_YELLOW "^C break at line %u" SH_RST "\n",
+                         (unsigned)basic_pc);
+            return BASIC_STEP_BROKEN;
         }
 #else
         tiku_watchdog_kick();   /* feed the hang detector; see read_line */
@@ -182,10 +253,104 @@ exec_run(void)
             if (ch == BASIC_CTRL_C) {
                 SHELL_PRINTF(SH_YELLOW "^C break at line %u" SH_RST "\n",
                              (unsigned)basic_pc);
-                break;
+                return BASIC_STEP_BROKEN;
             }
         }
 #endif
     }
+    return BASIC_STEP_RUNNING;
+}
+
+/** @brief Terminate the run: clear basic_running (idempotent). */
+static void
+basic_run_end(void)
+{
     basic_running = 0;
+}
+
+/**
+ * @brief Resume a checkpointed run from the durable execution-state slot.
+ *
+ * F1's counterpart to basic_run_begin: instead of the fresh-state reset (which
+ * would wipe the very variables we want back), it restores basic_pc, the
+ * control-flow stacks, the variables, and the error / DATA / PRNG state from the
+ * checkpoint, then marks the machine running so a driver can continue from the
+ * saved PC.  The program must already be in prog[] (RESUME continues an existing
+ * program; it does not load one) and the arena must be allocated.
+ *
+ * Silent on failure -- the caller owns the messaging, which differs between the
+ * interactive `RUN RESUME` ("no checkpoint to resume") and the autostart path
+ * ("no checkpoint; starting fresh").
+ *
+ * @return 0 if a checkpoint was restored (basic_running := 1), -1 if there is no
+ *         program or no valid checkpoint (the caller may fall back to a fresh
+ *         RUN).
+ */
+static int
+basic_run_resume(void)
+{
+    if (prog_next_index(0) < 0) {
+        return -1;                       /* no program to resume into */
+    }
+    if (basic_ckpt_load() != 0) {
+        return -1;                       /* no / stale / corrupt checkpoint */
+    }
+    basic_running = 1;
+    basic_error   = 0;
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* SYNCHRONOUS DRIVER                                                        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Drive the step machine to completion (blocking), state already set up.
+ *
+ * Assumes basic_running is set by a prior basic_run_begin() or
+ * basic_run_resume().  A 100k-step guard catches runaway tight loops -- printing
+ * "? iteration cap reached" and dropping back to the REPL rather than wedging
+ * the shell.
+ */
+static void
+exec_run_drive(void)
+{
+    basic_run_guard      = 100000UL;     /* hard cap on iterations */
+    basic_run_shell_mode = 0;
+
+    while (1) {
+        if (basic_run_guard-- == 0) {
+            SHELL_PRINTF(SH_RED "? iteration cap reached\n" SH_RST);
+            break;
+        }
+        if (basic_run_step() != BASIC_STEP_RUNNING) {
+            break;
+        }
+    }
+    /* Periodic checkpointing is the yielding (mode) driver's job -- this
+     * blocking driver pins the CPU, so F1's "resume the always-on loop" story
+     * lives on tiku_basic_mode_tick().  Here we only drop any stale checkpoint
+     * on orderly completion, so a finished program cannot later RESUME into its
+     * own finished state (a power cut, by contrast, never reaches here, leaving
+     * the last mode-path checkpoint live). */
+    if (basic_ckpt_armed) {
+        basic_ckpt_invalidate();
+    }
+    basic_run_end();
+}
+
+/**
+ * @brief Execute the stored program from the start to completion (blocking).
+ *
+ * Drives the step machine synchronously for the REPL `RUN`, `basic run`
+ * autorun, and the embedded BASIC_PROGRAM autorun.  Behaviour is identical to
+ * the historical single-loop exec_run.
+ */
+static void
+exec_run(void)
+{
+    if (basic_run_begin() != 0) {
+        return;
+    }
+    exec_run_drive();
 }

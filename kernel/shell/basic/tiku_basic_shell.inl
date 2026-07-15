@@ -61,62 +61,13 @@ basic_session_begin(void)
 /* INTERACTIVE REPL                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Enter the interactive Tiku BASIC REPL.
- *
- * Reads one line at a time through the active shell I/O backend,
- * dispatches it via process_line(), and prints results.  Returns
- * when the user types BYE / EXIT / QUIT, or Ctrl-Cs at the prompt.
+/*
+ * The interactive REPL is no longer a blocking loop here.  It is a
+ * non-blocking MODE of the shell process (tiku_basic_mode_enter and the
+ * tiku_basic_mode_* poll-loop hooks in tiku_basic_mode.inl), so the scheduler
+ * stays live for the whole BASIC session -- see that file's header.  The
+ * `basic` command dispatches to tiku_basic_mode_enter().
  */
-void
-tiku_basic_repl(void)
-{
-    char line[TIKU_BASIC_LINE_MAX + 16];
-
-    if (basic_session_begin() != 0) {
-        return;
-    }
-
-    SHELL_PRINTF(SH_CYAN SH_BOLD "Tiku BASIC" SH_RST
-                 " ready. " SH_BOLD "HELP" SH_RST " / "
-                 SH_BOLD "BYE" SH_RST ".\n");
-    basic_quit        = 0;
-    basic_auto_active = 0;
-
-    while (!basic_quit) {
-        if (basic_auto_active) {
-            SHELL_PRINTF(SH_YELLOW SH_BOLD "%u " SH_RST,
-                         (unsigned)basic_auto_next);
-        } else {
-            SHELL_PRINTF(SH_YELLOW SH_BOLD "ok> " SH_RST);
-        }
-        if (read_line(line, sizeof(line)) < 0) {
-            /* Ctrl-C at the prompt -> exit. */
-            break;
-        }
-        if (basic_auto_active) {
-            /* Empty line exits AUTO mode. */
-            const char *t = line;
-            while (*t == ' ' || *t == '\t') t++;
-            if (*t == '\0') {
-                basic_auto_active = 0;
-                continue;
-            }
-            /* Prepend the AUTO line number, then dispatch normally. */
-            {
-                char full[TIKU_BASIC_LINE_MAX + 16];
-                snprintf(full, sizeof(full), "%u %s",
-                         (unsigned)basic_auto_next, line);
-                process_line(full);
-            }
-            basic_auto_next =
-                (uint16_t)(basic_auto_next + basic_auto_step);
-            continue;
-        }
-        process_line(line);
-    }
-    SHELL_PRINTF(SH_DIM "bye." SH_RST "\n");
-}
 
 /*---------------------------------------------------------------------------*/
 /* AUTORUN (saved program from FRAM)                                         */

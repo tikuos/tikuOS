@@ -122,6 +122,7 @@
 #include "tiku_basic_state.inl"
 #include "tiku_basic_arena.inl"
 #include "tiku_basic_persist.inl"
+#include "tiku_basic_ckpt.inl"        /* F1: PERSIST / RUN RESUME (needs arena + persist) */
 #include "tiku_basic_vfs_file.inl"
 #include "tiku_basic_peek_poke.inl"
 #include "tiku_basic_hw.inl"
@@ -148,3 +149,4 @@
 #include "tiku_basic_run.inl"
 #include "tiku_basic_repl.inl"
 #include "tiku_basic_shell.inl"
+#include "tiku_basic_mode.inl"
