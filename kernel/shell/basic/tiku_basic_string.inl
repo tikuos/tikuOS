@@ -65,17 +65,115 @@ static int basic_net_mqtt_wait(const char *ipstr, const char *topic,
 
 #if TIKU_BASIC_STRVARS_ENABLE
 
-/* Bump-allocate a NUL-terminated copy of @src[0..len). Returns NULL
- * on overflow. The heap is reset at every RUN start, so a single
- * program run is bounded by TIKU_BASIC_STR_HEAP_BYTES of cumulative
- * allocation -- no GC, no reclamation of old assignments. */
+/*---------------------------------------------------------------------------*/
+/* STRING-HEAP MARK-COMPACT (A4)                                             */
+/*---------------------------------------------------------------------------*/
+/*
+ * The heap bump-allocates and never frees a string mid-RUN, so the reassigning
+ * idiom -- `10 A$ = STR$(N) : N = N+1 : GOTO 10` -- leaks the old copy on every
+ * pass and dies with `? out of string heap`.  That is exactly the always-on
+ * agent-loop workload F1 exists to keep running across a power cut, so it must
+ * not die on the string heap first.
+ *
+ * A mark-compact fixes it.  The live roots are FULLY ENUMERABLE -- the scalar
+ * string vars A$..Z$ + the named slots (basic_strvars[]) and every string-array
+ * element -- and strings are leaf data (no cycles), so this is the whole story:
+ * no tracing, no marks in the heap.  Assignment always allocates a fresh copy
+ * (RHS is evaluated into a stack buffer first) and SWAP only exchanges two root
+ * pointers, so each live heap string has EXACTLY ONE root -- no aliasing to
+ * dedup.  We slide the live strings down in address order, rewriting each root
+ * to its new home, and reclaim everything in between.
+ */
+
+/**
+ * @brief Lowest-addressed live-string root at or above @p from, or NULL.
+ *
+ * Scans the complete root set (scalar string vars + string-array elements).
+ * Repeated calls with @p from advanced past each moved string walk the live
+ * strings in ascending heap-address order without a temp array (compaction is
+ * a rare heap-full event, so the O(roots) per step is fine).
+ */
+static char **
+basic_str_lowest_root(char *from)
+{
+    char    *hi   = basic_str_heap + TIKU_BASIC_STR_HEAP_BYTES;
+    char   **best = NULL;
+    char    *best_addr = hi;
+    uint16_t i;
+
+    for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) {
+        char *v = basic_strvars[i];
+        if (v != NULL && v >= from && v < best_addr) {
+            best = &basic_strvars[i];
+            best_addr = v;
+        }
+    }
+#if TIKU_BASIC_ARRAYS_ENABLE
+    for (i = 0; i < 26u; i++) {
+        basic_array_t *a = &basic_str_arrays[i];
+        char         **el;
+        size_t         n, k;
+        if (a->data == NULL) {
+            continue;
+        }
+        el = (char **)a->data;
+        n  = (size_t)a->dim1 * (size_t)(a->dim2 ? a->dim2 : 1u);
+        for (k = 0; k < n; k++) {
+            char *v = el[k];
+            if (v != NULL && v >= from && v < best_addr) {
+                best = &el[k];
+                best_addr = v;
+            }
+        }
+    }
+#endif
+    return best;
+}
+
+/**
+ * @brief Reclaim dead strings: slide every live string down to fill the gaps
+ *        left by reassigned/overwritten allocations, rewriting the roots.
+ *
+ * After this, basic_str_heap_pos is the compacted high-water and [0, pos) holds
+ * exactly the live strings, packed.  Strings move only DOWN and are processed
+ * in ascending address order, so a live string never overlaps a not-yet-moved
+ * one (memmove is used regardless).
+ */
+static void
+basic_str_compact(void)
+{
+    uint16_t write_pos = 0;
+    char   **root;
+
+    while ((root = basic_str_lowest_root(basic_str_heap + write_pos)) != NULL) {
+        char  *s   = *root;
+        size_t len = strlen(s) + 1u;             /* incl. NUL */
+        char  *dst = basic_str_heap + write_pos;
+        if (dst != s) {
+            memmove(dst, s, len);
+            *root = dst;
+        }
+        write_pos = (uint16_t)(write_pos + len);
+    }
+    basic_str_heap_pos = write_pos;
+}
+
+/* Bump-allocate a NUL-terminated copy of @src[0..len).  On a full heap it
+ * reclaims dead strings via a mark-compact and retries once; returns NULL only
+ * when the LIVE strings genuinely leave no room.  @src is always a caller stack
+ * buffer (the RHS is evaluated before allocation), never a heap pointer, so a
+ * compaction that relocates heap strings cannot invalidate it. */
 static char *
 basic_str_alloc(const char *src, size_t len)
 {
     char *dst;
     if ((size_t)basic_str_heap_pos + len + 1u >
         (size_t)TIKU_BASIC_STR_HEAP_BYTES) {
-        return NULL;
+        basic_str_compact();                     /* reclaim + retry once */
+        if ((size_t)basic_str_heap_pos + len + 1u >
+            (size_t)TIKU_BASIC_STR_HEAP_BYTES) {
+            return NULL;                          /* live strings fill the heap */
+        }
     }
     dst = basic_str_heap + basic_str_heap_pos;
     if (len > 0u) memcpy(dst, src, len);
