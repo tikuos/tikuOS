@@ -142,8 +142,7 @@ boot_reason_read(char *buf, size_t max)
 #define BOOT_COUNT_MAGIC  0xB007C001UL
 
 /** FRAM cell: boots since first power-up (1 on the very first) */
-static uint32_t __attribute__((section(".persistent")))
-    boot_count_persist;
+static TIKU_DURABLE uint32_t boot_count_persist;
 
 /** Gate + descriptor: defaults to 0, then pre-increments each boot */
 TIKU_PERSIST_CELL(boot_count_cell, boot_count_persist,
@@ -254,8 +253,7 @@ tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max)
 #define LIFETIME_MAGIC  0x4C494645UL /* 'LIFE' */
 
 /** FRAM cell: lifetime seconds persisted up to the last save */
-static uint32_t __attribute__((section(".persistent")))
-    lifetime_seconds_persist;
+static TIKU_DURABLE uint32_t lifetime_seconds_persist;
 
 /** Gate + descriptor: defaults to 0 on a virgin FRAM */
 TIKU_PERSIST_CELL(lifetime_cell, lifetime_seconds_persist,

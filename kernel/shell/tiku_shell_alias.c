@@ -72,8 +72,7 @@ typedef struct {
  * directly.  Mutated only under a tiku_mpu_unlock_nvm()/lock_nvm()
  * bracket; read directly without unlocking.
  */
-static alias_slot_t __attribute__((section(".persistent")))
-    alias_table[TIKU_SHELL_ALIAS_MAX];
+static TIKU_DURABLE alias_slot_t alias_table[TIKU_SHELL_ALIAS_MAX];
 
 /**
  * FRAM cell (.persistent): validity gate for alias_table.
@@ -82,8 +81,7 @@ static alias_slot_t __attribute__((section(".persistent")))
  * (including the all-ones / all-zeros of a fresh FRAM) triggers a
  * one-time re-init in tiku_shell_alias_init().
  */
-static uint32_t __attribute__((section(".persistent")))
-    alias_magic;
+static TIKU_DURABLE uint32_t alias_magic;
 
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */

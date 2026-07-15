@@ -2244,7 +2244,12 @@ TARGET = main.elf
 # Targets
 # ---------------------------------------------------------------------------
 .SUFFIXES:
-.PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2
+.PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2 lint
+
+# Static placement lint: raw section(".persistent") outside the grade macros
+# is the audit's silent-volatile bug class (kintsugi/memoryfix.md Phase A).
+lint:
+	@./tools/check_durable_placement.sh
 
 # UF2 is the RP2350 deliverable; ELF is enough on MSP430.
 ifeq ($(TIKU_PLATFORM),rp2350)

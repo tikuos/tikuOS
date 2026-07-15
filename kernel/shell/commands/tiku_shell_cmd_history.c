@@ -38,15 +38,24 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * History ring stored in the .persistent section so FRAM retains it
- * across reboots.  On non-MSP430 builds the buffer is plain static
- * (useful for host-side testing — history is lost on power cycle).
+ * History ring placement — an EXPLICIT grade split (2026-07 audit C.2):
+ *
+ *   MSP430    TIKU_DURABLE — FRAM in place, survives power cycles (the
+ *             original behavior; FRAM is ample).
+ *   Cortex-M  TIKU_PERSIST_WARM — survives a warm reset, reseeds on a
+ *             power cycle.  The ring is LINE_SIZE-scaled (~2 KB at
+ *             256 B x 8 deep), which would consume half of RP2350's
+ *             entire 4 KB durable-small budget — not worth it for
+ *             command history.  (Before the audit this was a silent
+ *             `.bss` fallback that survived nothing.)
+ *
+ * The magic word self-primes either way, so garbage-on-first-boot is
+ * handled identically at both grades.
  */
 #ifdef PLATFORM_MSP430
-#define HIST_PERSISTENT \
-    __attribute__((section(".persistent")))
+#define HIST_PERSISTENT TIKU_DURABLE
 #else
-#define HIST_PERSISTENT
+#define HIST_PERSISTENT TIKU_PERSIST_WARM
 #endif
 
 /** Ring entry: one stored command line */
@@ -54,13 +63,15 @@ typedef struct {
     char line[TIKU_SHELL_LINE_SIZE];
 } tiku_shell_hist_entry_t;
 
-/** Ring control block (all fields in FRAM) */
+/** Ring control block (durable/warm per the grade split above).  No
+ *  initializer: the sections are NOLOAD on Cortex-M and the magic word
+ *  primes virgin content in hist_ensure_init(). */
 static HIST_PERSISTENT struct {
     uint16_t                magic;
     uint8_t                 head;   /* next write slot */
     uint8_t                 count;  /* entries stored  */
     tiku_shell_hist_entry_t ring[TIKU_SHELL_HISTORY_DEPTH];
-} hist = {0};
+} hist;
 
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */

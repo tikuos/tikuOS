@@ -192,23 +192,22 @@ SECTIONS
         __uninit_start = .;
         *(.uninit*)
         /* Durable cells (boot counter, aliases, persist cells) -- backed up to
-         * the 4 KB flash sector and MPU-protected. EXCLUDE the net stack: its
-         * TCP/MQTT/DNS/HTTP pools are tagged .persistent only for NOLOAD (skip
-         * zero-init), but they are transient, write-heavy working buffers -- they
-         * must be neither mirrored nor MPU-read-only. */
+         * the 4 KB flash sector and MPU-protected. */
         /* DURABLE grade: exact-match `.persistent` only, so the WARM
          * grade below (`.persistent.warm`) cannot be swallowed by a
-         * wildcard into the mirrored window. */
-        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
+         * wildcard into the mirrored window.  (The old
+         * EXCLUDE_FILE(*tiku_kits_net_*.o) object-name routing is
+         * retired: the net kits' transient buffers are now placed
+         * explicitly at their declarations -- MSP430 FRAM spill or
+         * plain .bss -- so no net object emits .persistent here.) */
+        *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade (TIKU_PERSIST_WARM + the net stack's legacy plain
-         * `.persistent`): NOLOAD SRAM after __uninit_end — survives warm
-         * resets, but sits outside the backed-up + MPU-protected window.
-         * The net pools need ~5 KB, which alone overflows the 4 KB
-         * backup sector; anything else here chose the grade on purpose. */
+        /* WARM grade (TIKU_PERSIST_WARM): NOLOAD SRAM after
+         * __uninit_end — survives warm resets, but sits outside the
+         * backed-up + MPU-protected window.  Everything here chose the
+         * grade on purpose at its declaration. */
         *(.persistent.warm*)
-        *tiku_kits_net_*.o(.persistent*)
     } > SRAM
 
     /* End of static allocations (heap-style growth would start here).

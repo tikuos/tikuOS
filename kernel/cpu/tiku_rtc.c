@@ -79,8 +79,7 @@
  * loss.  Read paths add only the uptime elapsed since the baseline was paired
  * on this boot.  Only meaningful while the cell gate validates.
  */
-static uint32_t __attribute__((section(".persistent")))
-    rtc_epoch_base;
+static TIKU_DURABLE uint32_t rtc_epoch_base;
 
 /** Uptime paired with rtc_epoch_base in this boot only. */
 static uint32_t rtc_uptime_base;

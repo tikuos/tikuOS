@@ -467,8 +467,7 @@ version_read(char *buf, size_t max)
 #define DEVICE_NAME_MAGIC  0x4E414D45UL /* 'NAME' */
 
 /** FRAM cell: NUL-terminated user-visible device name */
-static char __attribute__((section(".persistent")))
-    device_name_persist[DEVICE_NAME_MAX + 1];
+static TIKU_DURABLE char device_name_persist[DEVICE_NAME_MAX + 1];
 
 /** Gate + descriptor: primed to the default name "tiku" */
 TIKU_PERSIST_CELL(device_name_cell, device_name_persist,

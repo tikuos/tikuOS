@@ -118,9 +118,9 @@ data_tfs_ensure(void)
 #else  /* MSP430 FRAM / host: a static backing array */
 
 #if defined(PLATFORM_MSP430)
-#define DATA_TFS_SECTION __attribute__((section(".persistent")))
+#define DATA_TFS_SECTION TIKU_DURABLE   /* FRAM-backed file store */
 #else
-#define DATA_TFS_SECTION
+#define DATA_TFS_SECTION                /* host: volatile test backing */
 #endif
 
 static DATA_TFS_SECTION uint8_t data_tfs_region[TIKU_TFS_REGION_BYTES];

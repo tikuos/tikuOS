@@ -150,21 +150,19 @@ SECTIONS
     {
         __uninit_start = .;
         *(.uninit*)
-        /* DURABLE grade: exact-match .persistent with the net kits
-         * excluded -- this window is MRAM-mirrored (and on apollo510
-         * MPU-read-only outside unlock windows).  Exact match so the
-         * WARM grade below cannot be wildcard-swallowed into it. */
-        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
+        /* DURABLE grade: exact-match .persistent -- this window is
+         * MRAM-mirrored (and on apollo510 MPU-read-only outside unlock
+         * windows).  Exact match so the WARM grade below cannot be
+         * wildcard-swallowed into it.  (The old EXCLUDE_FILE net-kit
+         * routing is retired: net buffers are placed explicitly at
+         * their declarations, so no net object emits .persistent.) */
+        *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade (TIKU_PERSIST_WARM + the net kits' legacy plain
-         * .persistent): survives warm resets, but sits OUTSIDE the
-         * mirror and the MPU-RO window.  Net TX/RX/credential churn no
-         * longer dirties the mirror (needless MRAM programs at every
-         * relock), and the un-windowed MQTT buffer writers stop being
-         * a MemManage source when the window is read-only. */
+        /* WARM grade (TIKU_PERSIST_WARM): survives warm resets, but
+         * sits OUTSIDE the mirror and the MPU-RO window.  Everything
+         * here chose the grade on purpose at its declaration. */
         *(.persistent.warm*)
-        *tiku_kits_net_*.o(.persistent*)
     } > TCM
 
     /* End of static allocations / start of the _sbrk heap. Aliases for

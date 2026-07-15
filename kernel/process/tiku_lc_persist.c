@@ -64,8 +64,10 @@
 /* On Apollo510 the .persistent input maps into the NOLOAD .uninit section,
  * which tiku_region_arch.c reports as an NVM region -- same effect as the
  * RP2350 SRAM mirror. Without this the pool falls to .bss and persist rejects
- * the pointer (see the failure note above). */
-#define LC_NVM_PERSISTENT __attribute__((section(".persistent")))
+ * the pointer (see the failure note above). Host stays empty (the region
+ * table there has no NVM class for an arbitrary section, so registration
+ * rejects gracefully either way -- keep the historical behavior exact). */
+#define LC_NVM_PERSISTENT TIKU_DURABLE
 #else
 #define LC_NVM_PERSISTENT
 #endif

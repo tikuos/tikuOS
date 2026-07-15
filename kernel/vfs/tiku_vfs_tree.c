@@ -62,13 +62,11 @@
  * .persistent (FRAM) to conserve SRAM for the stack — writes
  * happen only inside the init-time MPU unlock window below.
  */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
-    root_children[4];
+static TIKU_DURABLE tiku_vfs_node_t root_children[4];
 
 /** Mutable root node (FRAM, written at init): name "" so that
  *  resolving "/" yields it directly. */
-static tiku_vfs_node_t __attribute__((section(".persistent")))
-    vfs_root;
+static TIKU_DURABLE tiku_vfs_node_t vfs_root;
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */

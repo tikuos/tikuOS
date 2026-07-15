@@ -138,6 +138,47 @@
 #define TIKU_PERSIST_WARM  __attribute__((section(".persistent")))
 #endif
 
+/*
+ * TIKU_DURABLE — power-cycle-durable placement (the DURABLE grade).
+ *
+ * Expands to the exact `.persistent` section on every platform; what that
+ * physically means differs but the CONTRACT is uniform: the value survives a
+ * power cycle, within a per-platform budget the linker ASSERTs:
+ *
+ *   MSP430        lower FRAM, in place (ample)     commit: at the store
+ *   nordic        RRAM behind WEN, in place (16 KB) commit: at the store
+ *   RP2350        SRAM, 4 KB flash-mirror sector    commit: at MPU relock
+ *   Ambiq 4l/4p   SRAM, 64 KB MRAM mirror (8 KB MPU envelope) — at relock
+ *   Ambiq 510     SRAM, 64 KB MRAM mirror           commit: at relock
+ *   host          ordinary section (test harness; never durable)
+ *
+ * Anything placed here must fit the SMALLEST compiled target's budget or be
+ * platform-gated — the link ASSERT is the enforcement.  Writes go inside a
+ * tiku_mpu_unlock_nvm()/lock_nvm() window (or use the persist-cell API,
+ * which brackets for you).  This macro is the ONLY sanctioned way to place
+ * durable data outside kernel/memory/ — raw section(".persistent")
+ * attributes elsewhere are rejected by tools/check_durable_placement.sh,
+ * because per-file "#ifdef MSP430 ... #else empty" copies of it are
+ * exactly how state ends up silently volatile on some platforms.
+ */
+#define TIKU_DURABLE  __attribute__((section(".persistent")))
+
+/*
+ * TIKU_FRAM_SPILL — MSP430-only CAPACITY spill, NOT a durability claim.
+ *
+ * Big working buffers (TLS records, TCP pools) cannot fit MSP430's 8 KB SRAM,
+ * so there they spill into FRAM — which happens to be the `.persistent`
+ * section.  On every other platform SRAM is ample and the same buffers must
+ * stay OUT of the durable budget (see TIKU_DURABLE's cost table), so this
+ * expands to nothing.  Use this, never TIKU_DURABLE, for data whose contents
+ * you do not need after a reset.
+ */
+#ifdef PLATFORM_MSP430
+#define TIKU_FRAM_SPILL  __attribute__((section(".persistent")))
+#else
+#define TIKU_FRAM_SPILL
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* ERROR CODES                                                               */
 /*---------------------------------------------------------------------------*/
@@ -815,9 +856,10 @@ tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
  * @brief Write a value from SRAM into the persistent NVM store
  *
  * Copies data into the NVM buffer via the HAL, updates value_len,
- * and increments write_count for wear monitoring. Does not unlock
- * NVM write-protection internally — the caller is expected to batch
- * writes within an unprotected region.
+ * and increments write_count for wear monitoring. Owns its own NVM
+ * unlock window (nest-safe under an outer caller's window), so a
+ * caller needs no bracket of its own for a single write; batching
+ * several writes inside one outer window remains fine.
  *
  * @param store     Store to write into
  * @param key       Key to look up
