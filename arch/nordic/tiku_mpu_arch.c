@@ -30,6 +30,15 @@
 #include <hal/tiku_mpu_hal.h>
 #include <arch/nordic/tiku_mpu_arch.h>
 #include <arch/nordic/tiku_nordic_mdk.h>
+#if defined(TIKU_FLPR_ENABLE) && TIKU_FLPR_ENABLE
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>   /* TIKU_FLPR_RAM_BASE / _SIZE */
+/* FLPR carve MPU region index: after RAM2's R3 on the LM20, else R3. */
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#define NRF_MPU_FLPR_REGION  4U
+#else
+#define NRF_MPU_FLPR_REGION  3U
+#endif
+#endif
 
 #define TIKU_RRAMC_WEN   (1UL << 0)   /* RRAMC_CONFIG.WEN: 1 = writes enabled */
 
@@ -218,6 +227,20 @@ static void nrf_mpu_program_regions(void)
      * govern, so the coprocessor paths are unaffected. */
     nrf_mpu_program_region(3U, (uint32_t)(uintptr_t)&__ram2_start,
                            (uint32_t)(uintptr_t)&__ram2_end - 1U,
+                           NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
+#endif
+
+#if defined(TIKU_FLPR_ENABLE) && TIKU_FLPR_ENABLE
+    /* FLPR (VPR RISC-V) SRAM carve: RW + XN.  It sits ABOVE __sram_end, so
+     * R0-R2 do not reach it; without a region it stays on the PRIVDEFENA
+     * default map (SRAM = Normal, executable), leaving a fixed-address,
+     * shell-writable (/sys/flpr/echo -> tiku_flpr_arch_send) region the M33
+     * could fetch code from -- contradicting this pass's W^X guarantee.  RW so
+     * the M33 still loads the coprocessor image + drives the IPC mailboxes; the
+     * VPR runs the image via its own bus master, which the M33 MPU (and this
+     * XN) does not govern. */
+    nrf_mpu_program_region(NRF_MPU_FLPR_REGION, TIKU_FLPR_RAM_BASE,
+                           TIKU_FLPR_RAM_BASE + TIKU_FLPR_RAM_SIZE - 1U,
                            NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
 #endif
 
