@@ -1524,6 +1524,7 @@ exec_on_change(const char **p)
         return;
     }
 #if TIKU_BASIC_ONCHG_EVENT
+    basic_onchgs[slot].pending = 0;         /* arena memory is not zeroed */
     basic_onchg_arm(&basic_onchgs[slot]);   /* event-arm if writable */
 #endif
 }
