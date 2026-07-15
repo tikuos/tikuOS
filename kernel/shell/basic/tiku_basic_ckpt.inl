@@ -100,8 +100,9 @@
 /* Distinct from TIKU_PERSIST_MAGIC so a checkpoint slot is never confused with
  * a program-store entry, and from BASIC_REGION_MAGIC ('BASP'). */
 #define BASIC_CKPT_MAGIC    0x424B5054u   /* 'BKPT' */
-#define BASIC_CKPT_VERSION  4u            /* 2: +program id; 3: +SUB/scope/DEF FN;
-                                           * 4: string scope slots + RESULT (F3) */
+#define BASIC_CKPT_VERSION  5u            /* 2: +program id; 3: +SUB/scope/DEF FN;
+                                           * 4: string scope slots + RESULT (F3);
+                                           * 5: EVERY + ON CHANGE + arrays (F1 f/u) */
 #define BASIC_CKPT_HDR      12u           /* [gate u32][version u32][len u32] */
 #define BASIC_CKPT_RGN_HDR  16u           /* [magic][version][len][crc]       */
 
@@ -129,6 +130,31 @@
 #define BASIC_CKPT_DEFN_MAX_B 0u
 #endif
 
+/* F1 follow-up budgets: EVERY timers, ON CHANGE regs, and DIMmed arrays. */
+#if TIKU_BASIC_EVERY_MAX > 0
+#define BASIC_CKPT_EVERY_B (1u + (size_t)TIKU_BASIC_EVERY_MAX *                \
+    (sizeof(long) + TIKU_BASIC_EVERY_STMT_LEN))
+#else
+#define BASIC_CKPT_EVERY_B 0u
+#endif
+#if TIKU_BASIC_ONCHG_MAX > 0
+#define BASIC_CKPT_ONCHG_B (1u + (size_t)TIKU_BASIC_ONCHG_MAX *                \
+    (40u + sizeof(long) + sizeof(uint16_t) + 1u))
+#else
+#define BASIC_CKPT_ONCHG_B 0u
+#endif
+#if TIKU_BASIC_ARRAYS_ENABLE
+/* Fixed data budget for the array checkpoint; DIMmed arrays whose serialized
+ * bytes overflow it write present=0 and reset on resume (not corruption).
+ * Plus a present byte + two dims across the 26 numeric + 26 string slots. */
+#define BASIC_CKPT_ARR_BYTES ((size_t)TIKU_BASIC_STR_HEAP_BYTES)
+#define BASIC_CKPT_ARR_B     (52u * (1u + 2u * sizeof(uint16_t)) + \
+                              BASIC_CKPT_ARR_BYTES)
+#else
+#define BASIC_CKPT_ARR_BYTES 0u
+#define BASIC_CKPT_ARR_B     0u
+#endif
+
 /* Compile-time upper bound on the serialized payload.  Generous fixed slack
  * absorbs struct padding differences so the buffer is never undersized. */
 #define BASIC_CKPT_PAYLOAD_MAX ( \
@@ -142,6 +168,9 @@
     + BASIC_CKPT_STR_MAX \
     + BASIC_CKPT_SUBS_MAX                                          /* SUB frames + scope */ \
     + BASIC_CKPT_DEFN_MAX_B                                        /* DEF FN table */ \
+    + BASIC_CKPT_EVERY_B                                           /* EVERY timers */ \
+    + BASIC_CKPT_ONCHG_B                                           /* ON CHANGE regs */ \
+    + BASIC_CKPT_ARR_B                                             /* DIMmed arrays */ \
     + 64u)                                                         /* err/data/prng + slack */
 
 #define TIKU_BASIC_CKPT_BYTES  (BASIC_CKPT_HDR + BASIC_CKPT_PAYLOAD_MAX)
@@ -353,6 +382,83 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
                 ckpt_w(w, &basic_defns[k], sizeof(basic_defn_t));
     }
 #endif
+
+#if TIKU_BASIC_EVERY_MAX > 0
+    /* F1 follow-up: EVERY timer slots.  Only interval + stmt are saved;
+     * next_due is re-armed relative to the current clock on restore (an
+     * absolute deadline is meaningless after the clock resets). */
+    {
+        uint8_t n = 0, k;
+        for (k = 0; k < TIKU_BASIC_EVERY_MAX; k++) if (basic_everys[k].active) n++;
+        ckpt_w(w, &n, 1);
+        for (k = 0; k < TIKU_BASIC_EVERY_MAX; k++) {
+            if (!basic_everys[k].active) continue;
+            ckpt_w(w, &basic_everys[k].interval_ms, sizeof(long));
+            ckpt_w(w, basic_everys[k].stmt, (size_t)TIKU_BASIC_EVERY_STMT_LEN);
+        }
+    }
+#endif
+#if TIKU_BASIC_ONCHG_MAX > 0
+    /* ON CHANGE registrations: path + baseline value + handler.  The runtime
+     * node cache / armed / pending (F2) are re-derived by the mode tick. */
+    {
+        uint8_t n = 0, k;
+        for (k = 0; k < TIKU_BASIC_ONCHG_MAX; k++) if (basic_onchgs[k].active) n++;
+        ckpt_w(w, &n, 1);
+        for (k = 0; k < TIKU_BASIC_ONCHG_MAX; k++) {
+            if (!basic_onchgs[k].active) continue;
+            ckpt_w(w, basic_onchgs[k].path, sizeof(basic_onchgs[k].path));
+            ckpt_w(w, &basic_onchgs[k].last_value, sizeof(long));
+            ckpt_w(w, &basic_onchgs[k].handler_line, sizeof(uint16_t));
+            ckpt_w(w, &basic_onchgs[k].is_gosub, 1);
+        }
+    }
+#endif
+#if TIKU_BASIC_ARRAYS_ENABLE
+    /* DIMmed arrays, budget-capped (BASIC_CKPT_ARR_BYTES).  Each slot writes a
+     * present byte; a DIMmed array that would overflow the budget writes
+     * present=0 and is left to reset on resume (documented limitation, not a
+     * corruption).  Numeric data is verbatim longs; string elements are heap
+     * offsets, mirroring the strvar block. */
+    {
+        uint16_t budget = BASIC_CKPT_ARR_BYTES;
+        uint8_t  which, slot;
+        for (which = 0; which < 2u; which++) {
+            for (slot = 0; slot < 26u; slot++) {
+#if TIKU_BASIC_STRVARS_ENABLE
+                basic_array_t *a = which ? &basic_str_arrays[slot]
+                                         : &basic_arrays[slot];
+#else
+                basic_array_t *a = &basic_arrays[slot];
+                if (which) { uint8_t z = 0; ckpt_w(w, &z, 1); continue; }
+#endif
+                size_t  total = a->data ? (size_t)a->dim1 *
+                                (size_t)(a->dim2 ? a->dim2 : 1u) : 0u;
+                size_t  bytes = total * (which ? sizeof(uint16_t) : sizeof(long));
+                uint8_t present = (a->data != NULL && bytes <= budget) ? 1u : 0u;
+                ckpt_w(w, &present, 1);
+                if (!present) continue;
+                budget = (uint16_t)(budget - bytes);
+                ckpt_w(w, &a->dim1, sizeof(uint16_t));
+                ckpt_w(w, &a->dim2, sizeof(uint16_t));
+#if TIKU_BASIC_STRVARS_ENABLE
+                if (which) {
+                    char **el = (char **)a->data;
+                    size_t j;
+                    for (j = 0; j < total; j++) {
+                        uint16_t off = (el[j] == NULL) ? 0xFFFFu
+                                     : (uint16_t)(el[j] - basic_str_heap);
+                        ckpt_w(w, &off, sizeof(off));
+                    }
+                } else
+#endif
+                {
+                    ckpt_w(w, a->data, total * sizeof(long));
+                }
+            }
+        }
+    }
+#endif
 }
 
 /**
@@ -464,6 +570,86 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
         for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++) basic_defns[k].name[0] = '\0';
         for (k = 0; k < nd; k++)
             ckpt_r(&r, &basic_defns[k], sizeof(basic_defn_t));
+    }
+#endif
+
+#if TIKU_BASIC_EVERY_MAX > 0
+    {
+        uint8_t n, k;
+        long    now_ms = (long)tiku_clock_time() * 1000L /
+                         (long)TIKU_CLOCK_SECOND;
+        ckpt_r(&r, &n, 1);
+        if (n > TIKU_BASIC_EVERY_MAX) return -1;
+        for (k = 0; k < n; k++) {
+            long interval;
+            ckpt_r(&r, &interval, sizeof(long));
+            ckpt_r(&r, basic_everys[k].stmt, (size_t)TIKU_BASIC_EVERY_STMT_LEN);
+            basic_everys[k].interval_ms = interval;
+            basic_everys[k].next_due_ms = now_ms + interval;   /* re-armed */
+            basic_everys[k].active      = 1;
+        }
+    }
+#endif
+#if TIKU_BASIC_ONCHG_MAX > 0
+    {
+        uint8_t n, k;
+        ckpt_r(&r, &n, 1);
+        if (n > TIKU_BASIC_ONCHG_MAX) return -1;
+        for (k = 0; k < n; k++) {
+            ckpt_r(&r, basic_onchgs[k].path, sizeof(basic_onchgs[k].path));
+            ckpt_r(&r, &basic_onchgs[k].last_value, sizeof(long));
+            ckpt_r(&r, &basic_onchgs[k].handler_line, sizeof(uint16_t));
+            ckpt_r(&r, &basic_onchgs[k].is_gosub, 1);
+            basic_onchgs[k].active = 1;
+            /* node/armed/pending (F2) stay zero; the mode tick re-arms. */
+        }
+    }
+#endif
+#if TIKU_BASIC_ARRAYS_ENABLE
+    {
+        uint8_t which, slot;
+        for (which = 0; which < 2u; which++) {
+            for (slot = 0; slot < 26u; slot++) {
+                uint8_t        present;
+                uint16_t       d1, d2;
+                size_t         total;
+                basic_array_t *a;
+                ckpt_r(&r, &present, 1);
+                if (!present) continue;
+#if TIKU_BASIC_STRVARS_ENABLE
+                a = which ? &basic_str_arrays[slot] : &basic_arrays[slot];
+#else
+                a = &basic_arrays[slot];
+#endif
+                ckpt_r(&r, &d1, sizeof(uint16_t));
+                ckpt_r(&r, &d2, sizeof(uint16_t));
+                total       = (size_t)d1 * (size_t)(d2 ? d2 : 1u);
+                a->dim1     = d1;
+                a->dim2     = d2;
+                a->is_string = (uint8_t)which;
+#if TIKU_BASIC_STRVARS_ENABLE
+                if (which) {
+                    char **el = (char **)tiku_arena_alloc(&basic_arena,
+                        (tiku_mem_arch_size_t)(sizeof(char *) * total));
+                    size_t j;
+                    if (el == NULL) return -1;
+                    for (j = 0; j < total; j++) {
+                        uint16_t off;
+                        ckpt_r(&r, &off, sizeof(off));
+                        el[j] = (off == 0xFFFFu) ? NULL : basic_str_heap + off;
+                    }
+                    a->data = el;
+                } else
+#endif
+                {
+                    long *el = (long *)tiku_arena_alloc(&basic_arena,
+                        (tiku_mem_arch_size_t)(sizeof(long) * total));
+                    if (el == NULL) return -1;
+                    ckpt_r(&r, el, total * sizeof(long));
+                    a->data = el;
+                }
+            }
+        }
     }
 #endif
 
