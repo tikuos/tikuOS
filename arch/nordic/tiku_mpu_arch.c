@@ -120,16 +120,122 @@ uint16_t tiku_mpu_arch_get_ctl(void)
 void tiku_mpu_arch_disable_irq(void) { /* no MPU violation IRQ on this port */ }
 void tiku_mpu_arch_enable_irq(void)  { /* no MPU violation IRQ on this port */ }
 
-/**
- * @brief Initialise the MPU model: default SAM, enabled CTL shadow.
+/*---------------------------------------------------------------------------*/
+/* ARMv8-M MPU regions: SRAM W^X + stack guard (hardening, 2026-07 D.1)       */
+/*---------------------------------------------------------------------------*/
+/*
+ * What the MPU adds HERE (and deliberately does not):
  *
- * No ARMv8-M MPU regions are programmed yet (a later hardening step); the
- * real store protection is the RRAMC WEN gate, closed by default.
+ *   - RRAM is NOT re-gated by the MPU.  The RRAMC WEN gate is the durable
+ *     write protection (above), and layering an MPU-RO window on top would
+ *     re-couple the MPU to every NVM write path for no gain.  RRAM rides
+ *     the PRIVDEFENA background map (Normal, RX).
+ *   - SRAM becomes eXecute-Never (W^X): three non-overlapping regions --
+ *     PMSAv8 overlap is UNPREDICTABLE, so the span is split around the
+ *     guard exactly like the rp2350 port.
+ *   - A 4 KB read-only stack guard sits STACK_RESERVED below the stack
+ *     top.  Sizing copies rp2350's post-BASIC lesson (memory: a 32-byte
+ *     guard is LEAPT by KB-sized locals): 32 KB reserve covers BASIC's
+ *     10-24 KB frames with margin, and a 4 KB guard cannot be jumped by
+ *     any frame in the tree.
+ *   - LM20's RAM2 bank (the tier arena) gets RW+XN too.
+ *
+ * Fault policy: MEMFAULTENA is deliberately NOT set -- a guard hit or an
+ * SRAM-execute escalates to HardFault, the SAME observable as a store
+ * through the closed WEN gate.  One loud failure mode per port.
+ */
+
+#define NRF_SCS_MPU_TYPE   (*(volatile uint32_t *)0xE000ED90UL)
+#define NRF_SCS_MPU_CTRL   (*(volatile uint32_t *)0xE000ED94UL)
+#define NRF_SCS_MPU_RNR    (*(volatile uint32_t *)0xE000ED98UL)
+#define NRF_SCS_MPU_RBAR   (*(volatile uint32_t *)0xE000ED9CUL)
+#define NRF_SCS_MPU_RLAR   (*(volatile uint32_t *)0xE000EDA0UL)
+#define NRF_SCS_MPU_MAIR0  (*(volatile uint32_t *)0xE000EDC0UL)
+
+#define NRF_MPU_CTRL_ENABLE      (1UL << 0)
+#define NRF_MPU_CTRL_PRIVDEFENA  (1UL << 2)
+#define NRF_MPU_RBAR_XN          (1UL << 0)
+#define NRF_MPU_RBAR_AP_RW_ANY   (1UL << 1)   /* AP[2:1]=01: RW, any priv  */
+#define NRF_MPU_RBAR_AP_RO_ANY   (3UL << 1)   /* AP[2:1]=11: RO, any priv  */
+#define NRF_MPU_RLAR_EN          (1UL << 0)
+
+/* Stack budget + guard (rp2350-proven values; keep in lockstep with the
+ * TikuBench MPU test constants there). */
+#define NRF_MPU_STACK_RESERVED_BYTES  32768U
+#define NRF_MPU_STACK_GUARD_BYTES     4096U
+
+extern uint32_t __sram_start;
+extern uint32_t __stack;
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+extern uint32_t __ram2_start;
+extern uint32_t __ram2_end;
+#endif
+
+static inline void nrf_mpu_dsb_isb(void)
+{
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    __asm__ volatile ("isb 0xF" ::: "memory");
+}
+
+/** @brief Program one PMSAv8 region (AttrIndx 0, SH=Non-shareable). */
+static void nrf_mpu_program_region(uint32_t region, uint32_t base,
+                                   uint32_t end_inclusive,
+                                   uint32_t ap_bits, uint32_t xn_bit)
+{
+    NRF_SCS_MPU_RNR  = region;
+    NRF_SCS_MPU_RBAR = (base & ~0x1FUL) | (0UL << 3) | ap_bits | xn_bit;
+    /* RLAR LIMIT = high bits of the inclusive limit; AttrIndx=0; EN.
+     * (Clear the low 5 bits -- setting them would select AttrIndx 15,
+     * the rp2350 port's hard-won MAIR footgun.) */
+    NRF_SCS_MPU_RLAR = (end_inclusive & ~0x1FUL) | (0UL << 1)
+                     | NRF_MPU_RLAR_EN;
+}
+
+/** @brief Program the W^X + stack-guard region set and enable the MPU. */
+static void nrf_mpu_program_regions(void)
+{
+    uint32_t sram_base  = (uint32_t)(uintptr_t)&__sram_start;
+    uint32_t stack_top  = (uint32_t)(uintptr_t)&__stack;
+    uint32_t guard_end  = stack_top - NRF_MPU_STACK_RESERVED_BYTES;
+    uint32_t guard_base = guard_end - NRF_MPU_STACK_GUARD_BYTES;
+
+    /* MAIR0 attr 0 = Normal memory, non-cacheable (0x44). */
+    NRF_SCS_MPU_MAIR0 = 0x44UL;
+
+    /* R0: SRAM low span (statics + free space), RW + XN. */
+    nrf_mpu_program_region(0U, sram_base, guard_base - 1U,
+                           NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
+    /* R1: the stack guard, RO + XN -- a descending stack that leaves its
+     * 32 KB reserve faults here instead of silently eating statics. */
+    nrf_mpu_program_region(1U, guard_base, guard_end - 1U,
+                           NRF_MPU_RBAR_AP_RO_ANY, NRF_MPU_RBAR_XN);
+    /* R2: the live stack reserve, RW + XN. */
+    nrf_mpu_program_region(2U, guard_end, stack_top - 1U,
+                           NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+    /* R3: RAM2 upper bank (tier arena), RW + XN.  The M33 only ever
+     * reads/writes it; FLPR and EasyDMA are bus masters the MPU does not
+     * govern, so the coprocessor paths are unaffected. */
+    nrf_mpu_program_region(3U, (uint32_t)(uintptr_t)&__ram2_start,
+                           (uint32_t)(uintptr_t)&__ram2_end - 1U,
+                           NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
+#endif
+
+    /* Enable with the privileged background map (RRAM RX, peripherals,
+     * and any SRAM outside the regions keep default-map access). */
+    NRF_SCS_MPU_CTRL = NRF_MPU_CTRL_ENABLE | NRF_MPU_CTRL_PRIVDEFENA;
+    nrf_mpu_dsb_isb();
+}
+
+/**
+ * @brief Initialise the MPU: default SAM shadow, WEN closed, and the
+ *        ARMv8-M W^X + stack-guard regions (see the block comment above).
  */
 void tiku_mpu_arch_init_segments(void)
 {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
     rramc_wen_set(0UL);
+    nrf_mpu_program_regions();
 }
 
 /** @brief Restore the default (read+exec, no write) SAM policy. */
@@ -165,15 +271,14 @@ uint16_t tiku_mpu_arch_get_violation_flags(void)  { return 0u; }
 void     tiku_mpu_arch_clear_violation_flags(void) { /* nothing latched */ }
 void     tiku_mpu_arch_enable_violation_nmi(void)  { /* no violation NMI  */ }
 
-/* True stack floor = end of statics.  The nordic SRAM map is
- * [statics .. __end__][free stack space][__stack]: no heap and no MPU stack
- * guard sit between __end__ and the descending stack, so the whole span is
- * paintable (the linker ASSERTs >= 8 KB of it stays free).  Returning __end__
- * -- rather than a fixed top-8 KB floor -- lets tiku_stack_free() measure deep
- * stacks (e.g. BASIC's 10-24 KB) instead of saturating to 0 past 8 KB. */
+/* Stack floor = the top of the MPU stack guard.  The SRAM map is now
+ * [statics .. __end__][R0 free space][R1 guard 4K][R2 stack reserve 32K]
+ * [__stack]: the paintable/measurable stack span is exactly the R2
+ * reserve -- painting below guard_end would write into the read-only
+ * guard and HardFault at boot.  The 32 KB reserve still covers BASIC's
+ * deepest frames (10-24 KB) without saturating the measurement. */
 extern uint32_t __sram_end;
-extern uint32_t __end__;
 uint32_t tiku_stack_arch_bottom(void)
 {
-    return (uint32_t)(uintptr_t)&__end__;
+    return (uint32_t)(uintptr_t)&__stack - NRF_MPU_STACK_RESERVED_BYTES;
 }

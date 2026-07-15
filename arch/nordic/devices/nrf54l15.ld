@@ -59,21 +59,25 @@ __flash_end   = ORIGIN(RRAM) + LENGTH(RRAM);
 __sram_start  = ORIGIN(SRAM);
 __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 
-/* Reserved durable-persist region at the top of RRAM.  The RRAMC-backed
- * backend (byte-writable NVM behind the WEN gate) is added in a later phase;
- * the symbols are defined now so the region's addresses stay stable and the
- * code-image ASSERT below can guard against overrunning it. */
-__tiku_nvm_rram_size  = 0x2000;                             /* 8 KB */
+/* Reserved durable-persist region at the top of RRAM (byte-writable NVM
+ * behind the RRAMC WEN gate; exact `.persistent` lands here, durable in
+ * place).  16 KB: persist cells + aliases + lc + inittab + headroom.
+ * NOTE (2026-07-15 Ambiq-parity layout, kintsugi/memoryfix.md B.0): growing
+ * these carves MOVES every cell/TFS address -- established DKs re-prime once
+ * (primed != 0, /data empty).  Expected, one-time. */
+__tiku_nvm_rram_size  = 0x4000;                             /* 16 KB */
 __tiku_nvm_rram_start = ORIGIN(RRAM) + LENGTH(RRAM) - __tiku_nvm_rram_size;
 __tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
 
-/* Carved NVM filestore region (the tiku_nvm_region backend / TFS / nvmprobe).
- * A byte-writable RRAM span reserved just BELOW the durable-persist region, so
- * both stay clear of the growing code image below them.  Like the persist
- * region it is written in place behind the RRAMC WEN gate (no erase), and the
- * backend hands its base/size to TFS.  __tiku_nvmfs_size is an absolute symbol
- * whose ADDRESS is the size (matches the rp2350/ambiq backends). */
-__tiku_nvmfs_size = 0x8000;                                 /* 32 KB */
+/* Carved NVM region (the tiku_nvm_region backend), Ambiq-style layout:
+ * NVM tier at the front | TFS FS extent (256 KB, TIKU_NVMFS_FS_BYTES) |
+ * reserved named-slot tail (64 KB, TIKU_NVM_RESERVED_BYTES: BASIC saved
+ * program + F1 run-state checkpoint).  A byte-writable RRAM span just BELOW
+ * the durable-persist region; written in place behind the WEN gate (no
+ * erase).  740 KB leaves a 768 KB code window below (image today ~110 KB;
+ * the ASSERT at the bottom is the hard cap).  __tiku_nvmfs_size is an
+ * absolute symbol whose ADDRESS is the size (matches rp2350/ambiq). */
+__tiku_nvmfs_size = 0xB9000;                                /* 740 KB */
 __tiku_nvmfs_base = __tiku_nvm_rram_start - __tiku_nvmfs_size;
 __tiku_nvmfs_end  = __tiku_nvm_rram_start;
 
@@ -143,8 +147,9 @@ SECTIONS
         *(.uninit*)
         . = ALIGN(32);
         __uninit_end = .;
+        /* WARM grade only (EXCLUDE_FILE net routing retired: net kits
+         * place their buffers explicitly at the declarations). */
         *(.persistent.warm*)
-        *tiku_kits_net_*.o(.persistent*)
     } > SRAM
 
     /* End of static allocations. Aliases for whichever name libc/kernel use. */
@@ -153,12 +158,11 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
-    /* SRAM headroom: keep at least 8 KB free below the descending stack so
-     * a deep call chain cannot collide with live static data.  (The ARMv8-M
-     * MPU stack-guard budget of the rp2350 port is larger; nordic's MPU
-     * region programming lands in a later phase, so guard conservatively.) */
-    ASSERT((__stack - _end) >= 0x2000,
-           "ERROR: SRAM exhausted — need >= 8 KB free below the stack")
+    /* SRAM headroom: the ARMv8-M MPU stack budget (32 KB reserve + 4 KB
+     * RO guard, programmed in tiku_mpu_arch.c) must fit above the statics
+     * -- rp2350-parity sizing. */
+    ASSERT((__stack - _end) >= 0x9000,
+           "ERROR: SRAM exhausted — need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
 
     /* -------- 6. DURABLE persist (RRAM, byte-writable NVM) ---------- */
     /* Exact `.persistent` lives at the reserved top of RRAM, written behind the
@@ -177,7 +181,7 @@ SECTIONS
     .persistent __tiku_nvm_rram_start (NOLOAD) : ALIGN(4)
     {
         __persistent_start = .;
-        *(EXCLUDE_FILE(*tiku_kits_net_*.o) .persistent)
+        *(.persistent)
         . = ALIGN(4);
         __persistent_end = .;
     } > RRAM

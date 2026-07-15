@@ -122,15 +122,16 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
  * TIKU_TIER_NVM_SIZE (default 1024 bytes).
  */
 #ifdef PLATFORM_MSP430
-static uint8_t __attribute__((section(".persistent"),
-                              aligned(TIKU_MEM_ARCH_ALIGNMENT)))
+static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
-#elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
-/* Ambiq (MRAM) / RP2350 (QSPI Flash): the NVM tier is backed by the carved,
- * memory-mapped region (tiku_nvm_region) -- read in place, written via the
- * region backend -- so there is no static pool here. tier_wire_all() points the
- * tier at the region's front extent and tiku_tier_nvm_write() routes writes
- * through its backend (MRAM bootrom program / Flash erase+program). */
+#elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+      defined(PLATFORM_NORDIC)
+/* Ambiq (MRAM) / RP2350 (QSPI Flash) / Nordic (RRAM): the NVM tier is backed
+ * by the carved, memory-mapped region (tiku_nvm_region) -- read in place,
+ * written via the region backend -- so there is no static pool here.
+ * tier_wire_all() points the tier at the region's front extent and
+ * tiku_tier_nvm_write() routes writes through its backend (MRAM bootrom
+ * program / Flash erase+program / RRAM memcpy behind the WEN gate). */
 #else
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE];
@@ -256,11 +257,12 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_SRAM].alloc_count = 0;
     tier_state[TIKU_MEM_SRAM].initialized = 1;
 
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC)
     {
-        /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash): read in
-         * place, written via the backend (tiku_tier_nvm_write). NULL until the
-         * board's region backend exists. */
+        /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash / Nordic
+         * RRAM): read in place, written via the backend (tiku_tier_nvm_write).
+         * NULL until the board's region backend exists. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
         /* The tier bump-allocates from the front; the top
          * TIKU_NVM_RESERVED_BYTES is reserved for durable named data (BASIC
@@ -778,9 +780,12 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
     if (dst == NULL || src == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
-    /* Region-backed NVM (Ambiq MRAM, RP2350 Flash): the medium is NOT
-     * plain-store-writable, so route through the backend's program path. */
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC)
+    /* Region-backed NVM (Ambiq MRAM, RP2350 Flash, Nordic RRAM): route through
+     * the backend's program path.  On Ambiq/RP2350 the medium is not
+     * plain-store-writable at all; on Nordic it is (behind WEN), but the
+     * backend path adds the same bounds check + READY drain uniformly. */
     {
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
         if (rgn != NULL && rgn->base != NULL && rgn->write != NULL) {
