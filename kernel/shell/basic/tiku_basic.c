@@ -148,6 +148,7 @@
 #include "tiku_basic_multi_if.inl"
 #include "tiku_basic_select.inl"
 #include "tiku_basic_renum.inl"
+#include "tiku_basic_import.inl"      /* IMPORT (needs renum + subs + persist) */
 #include "tiku_basic_named_slots.inl"
 #include "tiku_basic_dispatch.inl"
 #include "tiku_basic_run.inl"

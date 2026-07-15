@@ -139,6 +139,8 @@ process_line(const char *raw)
             (void)basic_load_from_persist();
             return;
         }
+        q = p;
+        if (match_kw(&q, "IMPORT")) { exec_import(&q); return; }
 #if TIKU_BASIC_NAMED_SLOTS > 0
         q = p;
         if (match_kw(&q, "DIR")) {
@@ -306,6 +308,7 @@ process_line(const char *raw)
                               " \\n \\t \\r \\\" \\\\ escapes inside \"...\".\n"
                 "  '?' is a PRINT alias; ' is a REM alias.\n"
                 "  SAVE/LOAD persist across reboots in FRAM.\n"
+                "  IMPORT \"/data/f\" merges a module of SUBs.\n"
                 "  Run `basic run` from the shell (or via `init add`)\n"
                 "    to autorun the saved program at boot.\n"
                 "  Ctrl-C interrupts a running program.\n");
