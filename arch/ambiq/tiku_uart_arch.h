@@ -53,6 +53,24 @@ void     tiku_uart_putc(char c);
 void     tiku_uart_puts(const char *s);
 
 /**
+ * @brief Fault-safe putc: like tiku_uart_putc() but with a bounded wait.
+ *
+ * For use from fault handlers only. Drops the character instead of
+ * spinning forever when the transmitter has stopped draining.
+ *
+ * @param c  Character to transmit.
+ */
+void     tiku_uart_fault_putc(char c);
+
+/**
+ * @brief Wait (bounded) until the TX FIFO is empty and the line is idle.
+ *
+ * For use from fault handlers before a reset, so queued diagnostic
+ * output is not destroyed by the reset.
+ */
+void     tiku_uart_fault_drain(void);
+
+/**
  * @brief Formatted print over the console (printf-style).
  *
  * Implements the TIKU_PRINTF contract required by hal/tiku_printf_hal.h.

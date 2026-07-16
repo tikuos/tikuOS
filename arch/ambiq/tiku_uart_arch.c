@@ -223,6 +223,67 @@ void tiku_uart_putc(char c) {
     CON_UART->DR = (uint32_t)(uint8_t)c;
 }
 
+/*---------------------------------------------------------------------------*/
+/* Fault-path console primitives                                             */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The fault handlers (tiku_mpu_arch.c) dump their diagnostic over the
+ * console from exception context and then reset. Two hazards the normal
+ * putc cannot tolerate there:
+ *   - an unbounded TXFF spin wedges the handler forever if the UART has
+ *     stopped draining (clock/power lost as part of the original fault),
+ *     turning a diagnosable fault into a silent hang;
+ *   - putc returns when the FIFO has ROOM, not when it is EMPTY, so a
+ *     reset issued right after the last putc destroys up to 32 queued
+ *     characters -- the tail of the fault dump never reaches the host.
+ * These bounded variants cap every spin and let the handler drain the
+ * FIFO before it pulls SYSRESETREQ.
+ */
+
+/** Per-character cap: one FIFO slot frees every ~87 us at 115200 baud, so
+ *  ~1e6 iterations (tens of ms) means "the transmitter is dead, move on". */
+#define UART_FAULT_SPIN_MAX   1000000u
+/** Whole-FIFO drain cap: 32 chars x ~87 us is ~2.8 ms; 4e6 iterations of
+ *  headroom keeps the pre-reset delay bounded even if TX wedges mid-drain. */
+#define UART_FAULT_DRAIN_MAX  4000000u
+
+/**
+ * @brief Fault-safe putc: transmit one character with a bounded wait
+ *
+ * Identical to tiku_uart_putc() except the TX-FIFO-full spin is capped;
+ * if the FIFO never frees a slot the character is dropped instead of
+ * wedging the fault handler.
+ *
+ * @param c  Character to send
+ */
+void tiku_uart_fault_putc(char c) {
+    uint32_t spins = 0u;
+    while (CON_UART->FR & UART0_FR_TXFF_Msk) {
+        if (++spins > UART_FAULT_SPIN_MAX) {
+            return;
+        }
+    }
+    CON_UART->DR = (uint32_t)(uint8_t)c;
+}
+
+/**
+ * @brief Fault-safe drain: wait (bounded) until the TX path is idle
+ *
+ * Blocks until the TX FIFO is empty and the shifter has finished the
+ * final stop bit, so a reset issued afterwards cannot destroy queued
+ * output. Gives up after a bounded spin if the transmitter is dead.
+ */
+void tiku_uart_fault_drain(void) {
+    uint32_t spins = 0u;
+    while (!(CON_UART->FR & UART0_FR_TXFE_Msk) ||
+            (CON_UART->FR & UART0_FR_BUSY_Msk)) {
+        if (++spins > UART_FAULT_DRAIN_MAX) {
+            return;
+        }
+    }
+}
+
 /**
  * @brief Transmit a null-terminated string over UART0
  *

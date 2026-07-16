@@ -109,6 +109,8 @@ struct tiku_mpu_diag {
     uint32_t last_fault_hfsr;
     uint32_t last_fault_ipsr;
     uint32_t expect_fault;
+    uint32_t last_fault_pc;    /* stacked PC at the last fault (0 if unknown) */
+    uint32_t last_fault_lr;    /* stacked LR at the last fault (0 if unknown) */
 };
 
 __attribute__((section(".mpu_diag")))
@@ -178,6 +180,8 @@ void tiku_mpu_arch_init_segments(void) {
         mpu_diag.last_fault_hfsr  = 0U;
         mpu_diag.last_fault_ipsr  = 0U;
         mpu_diag.expect_fault     = 0U;
+        mpu_diag.last_fault_pc    = 0U;
+        mpu_diag.last_fault_lr    = 0U;
     }
 
     stub_mpusegb1 = 0x0800U;
@@ -323,47 +327,108 @@ void tiku_mpu_arch_test_clear_violation(void) {
 /*---------------------------------------------------------------------------*/
 /* Fault handlers -- strong overrides of the weak crt_early aliases.         */
 /* The ARMv7-M SCB fault registers (CFSR/MMFAR/HFSR/SHCSR) match the M55.     */
+/*                                                                            */
+/* Each handler is a naked shim that (1) disables the MPU and (2) resolves    */
+/* the stacked exception frame BEFORE any stack is used, then tail-branches   */
+/* into a C body that records + dumps the fault and resets (twin of the       */
+/* apollo510 driver).                                                         */
+/*                                                                            */
+/* Why the MPU must go off first: a stack overflow into the no-access stack-  */
+/* guard region (region 2) faults on the OVERFLOWED stack -- the handler's    */
+/* own prologue pushes then re-fault into the guard, MemManage escalates to  */
+/* HardFault, HardFault's pushes re-fault again, and the core locks up       */
+/* silently. Both handlers end in SystemReset, so dropping protection for    */
+/* their few hundred instructions gives up nothing.                          */
 /*---------------------------------------------------------------------------*/
-
 
 /* Fault-time console dump (twin of the apollo510 one): the warm-
  * durable record has not been proven to survive the post-fault reset,
- * so the UART line emitted right here is the reliable diagnostic. */
-extern void tiku_uart_putc(char c);
+ * so the UART line emitted right here is the reliable diagnostic.
+ * Bounded fault-path putc only (tiku_uart_apollo4l.c); no printf
+ * machinery, no unbounded TX spins that could wedge the handler. */
+extern void tiku_uart_fault_putc(char c);
+extern void tiku_uart_fault_drain(void);
+
+/** CFSR stacking-error bits: MMFSR.MSTKERR (bit 4) | BFSR.STKERR (bit 12).
+ *  When either is set the exception frame push itself failed, so the
+ *  stacked PC/LR words are unreliable and are recorded as 0 instead. */
+#define TIKU_CFSR_STKERR_MASK  ((1UL << 4) | (1UL << 12))
 
 static void fault_puthex(uint32_t v) {
     static const char hx[] = "0123456789abcdef";
     int i;
     for (i = 28; i >= 0; i -= 4) {
-        tiku_uart_putc(hx[(v >> i) & 0xFU]);
+        tiku_uart_fault_putc(hx[(v >> i) & 0xFU]);
     }
 }
 
-static void fault_dump(const char *tag, uint32_t cfsr, uint32_t addr) {
+static void fault_dump(const char *tag, uint32_t cfsr, uint32_t addr,
+                       uint32_t pc, uint32_t lr) {
     const char *p;
-    for (p = "\r\n[TM:FAULT] "; *p; p++) { tiku_uart_putc(*p); }
-    for (p = tag; *p; p++)                { tiku_uart_putc(*p); }
-    for (p = " cfsr=0x"; *p; p++)         { tiku_uart_putc(*p); }
+    for (p = "\r\n[TM:FAULT] "; *p; p++) { tiku_uart_fault_putc(*p); }
+    for (p = tag; *p; p++)                { tiku_uart_fault_putc(*p); }
+    for (p = " cfsr=0x"; *p; p++)         { tiku_uart_fault_putc(*p); }
     fault_puthex(cfsr);
-    for (p = " addr=0x"; *p; p++)         { tiku_uart_putc(*p); }
+    for (p = " addr=0x"; *p; p++)         { tiku_uart_fault_putc(*p); }
     fault_puthex(addr);
-    tiku_uart_putc('\r');
-    tiku_uart_putc('\n');
+    for (p = " pc=0x"; *p; p++)           { tiku_uart_fault_putc(*p); }
+    fault_puthex(pc);
+    for (p = " lr=0x"; *p; p++)           { tiku_uart_fault_putc(*p); }
+    fault_puthex(lr);
+    tiku_uart_fault_putc('\r');
+    tiku_uart_fault_putc('\n');
+    /* putc returns on FIFO ROOM, not FIFO EMPTY: without a drain the
+     * SystemReset that follows destroys up to 32 still-queued characters
+     * and the host sees a truncated (or empty) dump. */
+    tiku_uart_fault_drain();
 }
 
-void tiku_ambiq_mem_fault_handler(void) {
-    uint32_t cfsr  = SCB->CFSR;
-    uint32_t mmfsr = cfsr & 0xFFU;
+/**
+ * @brief Record a fault into mpu_diag, capture the stacked PC/LR, dump, reset
+ *
+ * Shared tail of both fault bodies. @p frame points at the hardware
+ * exception frame ([0..3]=r0-r3, [4]=r12, [5]=lr, [6]=pc, [7]=xpsr) on
+ * whichever stack EXC_RETURN selected; it is trusted only when CFSR
+ * reports no stacking error.
+ */
+static void fault_record_and_reset(const char *tag, uint32_t cfsr,
+                                   const uint32_t *frame) {
     uint32_t ipsr;
     __asm__ volatile ("mrs %0, ipsr" : "=r"(ipsr));
+
+    mpu_diag.last_fault_cfsr = cfsr;
+    mpu_diag.last_fault_hfsr = SCB->HFSR;
+    mpu_diag.last_fault_ipsr = ipsr;
+    if ((cfsr & TIKU_CFSR_STKERR_MASK) == 0U && frame != (const uint32_t *)0) {
+        mpu_diag.last_fault_lr = frame[5];
+        mpu_diag.last_fault_pc = frame[6];
+    } else {
+        mpu_diag.last_fault_lr = 0U;
+        mpu_diag.last_fault_pc = 0U;
+    }
+    mpu_diag.violation_count++;
+
+    fault_dump(tag, cfsr, mpu_diag.last_fault_addr,
+               mpu_diag.last_fault_pc, mpu_diag.last_fault_lr);
+
+    __DSB();
+    NVIC_SystemReset();
+    for (;;) { }
+}
+
+/**
+ * @brief MemManage fault C body (jumped to by the naked shim)
+ *
+ * @param frame  Stacked exception frame (MSP or PSP per EXC_RETURN)
+ */
+__attribute__((used))
+static void ambiq_mem_fault_body(const uint32_t *frame) {
+    uint32_t cfsr  = SCB->CFSR;
+    uint32_t mmfsr = cfsr & 0xFFU;
 
     if (mmfsr & TIKU_MMFSR_MMARVALID) {
         mpu_diag.last_fault_addr = SCB->MMFAR;
     }
-    mpu_diag.last_fault_cfsr = cfsr;
-    mpu_diag.last_fault_hfsr = SCB->HFSR;
-    mpu_diag.last_fault_ipsr = ipsr;
-    mpu_diag.violation_count++;
     stub_mpuctl1 |= (uint16_t)mmfsr;
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 2U;     /* observed */
@@ -371,30 +436,66 @@ void tiku_ambiq_mem_fault_handler(void) {
 
     SCB->CFSR = cfsr;                   /* W1C */
 
-    fault_dump("memmanage", cfsr, mpu_diag.last_fault_addr);
-
-    __DSB();
-    NVIC_SystemReset();
-    for (;;) { }
+    fault_record_and_reset("memmanage", cfsr, frame);
 }
 
-void tiku_ambiq_hard_fault_handler(void) {
+/**
+ * @brief HardFault C body (jumped to by the naked shim)
+ *
+ * @param frame  Stacked exception frame (MSP or PSP per EXC_RETURN)
+ */
+__attribute__((used))
+static void ambiq_hard_fault_body(const uint32_t *frame) {
     uint32_t cfsr = SCB->CFSR;
-    uint32_t ipsr;
-    __asm__ volatile ("mrs %0, ipsr" : "=r"(ipsr));
 
     mpu_diag.last_fault_addr = SCB->MMFAR;
-    mpu_diag.last_fault_cfsr = cfsr;
-    mpu_diag.last_fault_hfsr = SCB->HFSR;
-    mpu_diag.last_fault_ipsr = ipsr;
-    mpu_diag.violation_count++;
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 3U;     /* HardFault path observed */
     }
 
-    fault_dump("hardfault", cfsr, mpu_diag.last_fault_addr);
+    fault_record_and_reset("hardfault", cfsr, frame);
+}
 
-    __DSB();
-    NVIC_SystemReset();
-    for (;;) { }
+/*
+ * Naked entry shims. No C prologue may run before the MPU is off: if the
+ * original fault was a stack overflow into the no-access guard, the first
+ * push would re-fault. movw/movt build the MPU->CTRL address without a
+ * literal pool (a pool load could itself fault if placed oddly by the
+ * compiler). EXC_RETURN bit 2 selects which stack holds the exception frame.
+ */
+
+/** @brief MemManage fault handler (strong override of the weak crt_early alias) */
+__attribute__((naked))
+void tiku_ambiq_mem_fault_handler(void) {
+    __asm__ volatile (
+        "movw  r0, #0xED94            \n\t"   /* MPU->CTRL (0xE000ED94)   */
+        "movt  r0, #0xE000            \n\t"
+        "movs  r1, #0                 \n\t"
+        "str   r1, [r0]               \n\t"   /* MPU off: no re-faults    */
+        "dsb                          \n\t"
+        "isb                          \n\t"
+        "tst   lr, #4                 \n\t"   /* EXC_RETURN.SPSEL         */
+        "ite   eq                     \n\t"
+        "mrseq r0, msp                \n\t"
+        "mrsne r0, psp                \n\t"
+        "b     ambiq_mem_fault_body   \n\t"
+    );
+}
+
+/** @brief HardFault handler (strong override of the weak crt_early alias) */
+__attribute__((naked))
+void tiku_ambiq_hard_fault_handler(void) {
+    __asm__ volatile (
+        "movw  r0, #0xED94            \n\t"   /* MPU->CTRL (0xE000ED94)   */
+        "movt  r0, #0xE000            \n\t"
+        "movs  r1, #0                 \n\t"
+        "str   r1, [r0]               \n\t"   /* MPU off: no re-faults    */
+        "dsb                          \n\t"
+        "isb                          \n\t"
+        "tst   lr, #4                 \n\t"   /* EXC_RETURN.SPSEL         */
+        "ite   eq                     \n\t"
+        "mrseq r0, msp                \n\t"
+        "mrsne r0, psp                \n\t"
+        "b     ambiq_hard_fault_body  \n\t"
+    );
 }
