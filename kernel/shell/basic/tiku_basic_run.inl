@@ -58,12 +58,8 @@ typedef enum {
  * program (10 GOTO 10 with EVERY handlers) runs forever without tripping it. */
 static uint32_t basic_run_guard;
 
-/* 1 while the RUN loop is being driven as a non-blocking shell mode
- * (tiku_basic_mode_*), 0 for the synchronous exec_run path.  When set,
- * basic_run_step() skips its inline Ctrl-C poll because the shell poll loop
- * routes keystrokes (and Ctrl-C) to the mode instead.  Inert (always 0) until
- * the mode driver is wired in. */
-static uint8_t basic_run_shell_mode;
+/* basic_run_shell_mode is declared in tiku_basic_state.inl (the yielding
+ * DELAY/SLEEP path in tiku_basic_stmt.inl consults it before this file). */
 
 /*---------------------------------------------------------------------------*/
 /* ERROR TRAP (shared by the statement + reactive error sites)               */
@@ -128,6 +124,10 @@ basic_run_begin(void)
 
     basic_running     = 1;
     basic_error       = 0;
+    basic_wait_pending = 0;             /* no parked wait from a prior run */
+    basic_wait_sleep_s = 0;
+    basic_stmt_depth   = 0;
+    basic_in_reactive  = 0;
     gosub_sp          = 0;
     for_sp            = 0;
     loop_sp           = 0;
@@ -179,6 +179,37 @@ basic_run_step(void)
     if (!basic_running) return BASIC_STEP_DONE;
     if (basic_error)    return BASIC_STEP_BROKEN;
 
+    if (basic_wait_pending) {
+        /* Parked on a yielding DELAY / SLEEP.  Stay parked until the
+         * deadline (Ctrl-C arrives via the mode feed path); then either
+         * re-arm the next SLEEP chunk or resume the interrupted line's
+         * remainder.  Reactive polls stay suppressed while parked --
+         * parity with the blocking wait; pending ON CHANGE marks fire at
+         * the first statement boundary after the resume. */
+        if ((tiku_clock_time_t)(tiku_clock_time() - basic_wait_start) <
+            basic_wait_ticks) {
+            return BASIC_STEP_RUNNING;
+        }
+        if (basic_wait_sleep_s > 0) {
+            long chunk = (basic_wait_sleep_s > 10L) ? 10L
+                                                    : basic_wait_sleep_s;
+            basic_wait_sleep_s -= chunk;
+            basic_wait_start = tiku_clock_time();
+            basic_wait_ticks = (tiku_clock_time_t)
+                ((tiku_clock_time_t)chunk * TIKU_CLOCK_SECOND);
+            return BASIC_STEP_RUNNING;
+        }
+        basic_wait_pending = 0;
+        idx = prog_find_exact(basic_wait_line);
+        if (idx < 0) {
+            return BASIC_STEP_BROKEN;    /* program vanished under the wait */
+        }
+        prev_pc      = basic_wait_line;
+        basic_pc_set = 0;
+        p = prog[idx].text + basic_wait_off;
+        goto exec_resume;
+    }
+
     idx = prog_find_exact(basic_pc);
     if (idx < 0) {
         int n = prog_next_index(basic_pc);
@@ -209,8 +240,18 @@ basic_run_step(void)
             if (*r == ':') p = r + 1;
         }
     }
+exec_resume:
     basic_errcat = 0;      /* fresh category hint per statement */
     exec_stmts(&p);
+
+    if (basic_wait_pending) {
+        /* A DELAY/SLEEP parked the machine mid-line: remember where to
+         * resume (offset survives across ticks -- prog text is stable
+         * while a program runs). */
+        basic_wait_line = prev_pc;
+        basic_wait_off  = (uint16_t)(p - prog[idx].text);
+        return BASIC_STEP_RUNNING;
+    }
 
     if (basic_error) {
         /* Freeze ERR/ERL for the handler and either route to it or abort. */
@@ -226,9 +267,13 @@ basic_run_step(void)
 
     /* Poll reactive registrations between statements. EVERY may run its stmt
      * (and bubble up errors); ON CHANGE may jump or push a GOSUB return.
-     * Either way the next step picks up at the new basic_pc. */
+     * Either way the next step picks up at the new basic_pc.  The flag makes
+     * a DELAY inside an EVERY body take the blocking path (the poll's
+     * context cannot be parked and resumed across ticks). */
     basic_errcat = 0;      /* fresh category hint for reactive stmts */
+    basic_in_reactive = 1;
     basic_poll_reactive();
+    basic_in_reactive = 0;
     if (basic_error) {
         if (basic_run_trap_error(prev_pc)) return BASIC_STEP_RUNNING;
         return BASIC_STEP_BROKEN;
@@ -266,7 +311,9 @@ basic_run_step(void)
 static void
 basic_run_end(void)
 {
-    basic_running = 0;
+    basic_running      = 0;
+    basic_wait_pending = 0;      /* a Ctrl-C break may land mid-park */
+    basic_wait_sleep_s = 0;
 }
 
 /**
@@ -296,8 +343,13 @@ basic_run_resume(void)
     if (basic_ckpt_load() != 0) {
         return -1;                       /* no / stale / corrupt checkpoint */
     }
-    basic_running = 1;
-    basic_error   = 0;
+    basic_running      = 1;
+    basic_error        = 0;
+    basic_wait_pending = 0;      /* waits are not checkpointed: a power cut
+                                  * mid-park replays the line from its start */
+    basic_wait_sleep_s = 0;
+    basic_stmt_depth   = 0;
+    basic_in_reactive  = 0;
     return 0;
 }
 

@@ -1296,6 +1296,17 @@ exec_cls(void)
  * default 128 Hz). Negative or zero argument returns immediately.
  * Bounded by tiku_clock_time_t's 16-bit width: roughly 256 s safe
  * at 128 Hz; for longer waits, chain DELAYs. */
+/* Can the current wait yield (park the step machine) instead of spinning?
+ * Shell mode only, during RUN, from the MAIN line walker -- nested contexts
+ * (IF-THEN scratch, EVERY bodies via the reactive poll) keep the blocking
+ * path because their transient buffers cannot be resumed across ticks. */
+static int
+basic_wait_can_yield(void)
+{
+    return basic_run_shell_mode && basic_running &&
+           !basic_in_reactive && basic_stmt_depth == 1;
+}
+
 static void
 exec_delay_ms(long ms)
 {
@@ -1305,6 +1316,16 @@ exec_delay_ms(long ms)
     start = tiku_clock_time();
     ticks = TIKU_CLOCK_MS_TO_TICKS((unsigned long)ms);
     if (ticks == 0u) return;
+    if (basic_wait_can_yield()) {
+        /* Park the step machine instead of spinning: the shell loop keeps
+         * pumping (events dispatch, Ctrl-C arrives via feed_char), and the
+         * run resumes this line's remainder after the deadline. */
+        basic_wait_start   = start;
+        basic_wait_ticks   = ticks;
+        basic_wait_sleep_s = 0;
+        basic_wait_pending = 1;
+        return;
+    }
     while ((tiku_clock_time_t)(tiku_clock_time() - start) < ticks) {
 #if TIKU_SHELL_CMD_SLIP
         /* SLIP-aware break check: demux IP frames away so a 0x03 byte inside
@@ -1392,6 +1413,19 @@ exec_sleep(const char **p)
      * "go dark for a while", not a precise busy pause.  Ctrl-C aborts;
      * the 24 h cap is a sanity bound, not a hardware limit. */
     if (s > 86400L) s = 86400L;
+    if (basic_wait_can_yield()) {
+        /* Park (first <=10 s chunk now, the step machine re-arms the rest):
+         * in mode the kernel idles the core between poll ticks, so the
+         * low-power goal is met by yielding rather than by spinning in the
+         * DEEP-idle loop below. */
+        long chunk = (s > 10L) ? 10L : s;
+        basic_wait_start   = tiku_clock_time();
+        basic_wait_ticks   =
+            (tiku_clock_time_t)((tiku_clock_time_t)chunk * TIKU_CLOCK_SECOND);
+        basic_wait_sleep_s = s - chunk;
+        basic_wait_pending = 1;
+        return;
+    }
     while (s > 0L && !basic_error) {
         long chunk = (s > 10L) ? 10L : s;
         basic_lp_wait_ticks(
@@ -1463,7 +1497,12 @@ static void
 basic_onchg_arm(basic_onchg_t *o)
 {
     o->node = tiku_vfs_resolve(o->path);
-    if (o->node != NULL && o->node->write != NULL) {
+    /* Event-arm ONLY in shell mode: the synchronous exec_run driver blocks
+     * the shell loop, so TIKU_EVENT_VFS could never dispatch mid-run there
+     * -- an armed slot would gate on a pending mark that cannot arrive.
+     * The sync driver keeps the per-pass poll instead. */
+    if (basic_run_shell_mode &&
+        o->node != NULL && o->node->write != NULL) {
         (void)tiku_vfs_watch(o->path, &tiku_shell_process);
         o->armed = 1;
     } else {

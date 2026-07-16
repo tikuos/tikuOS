@@ -555,20 +555,30 @@ static void
 exec_stmts(const char **p)
 {
     int was_running = basic_running;
+    basic_stmt_depth++;
     while (1) {
         skip_ws(p);
-        if (**p == '\0') return;
+        if (**p == '\0') break;
         /* Empty statement (e.g. `A=1 : : B=2`) -- skip the colon. */
         if (**p == ':') { (*p)++; continue; }
         exec_stmt(p);
-        if (basic_error)   return;
-        if (basic_pc_set)  return;
-        if (was_running && !basic_running) return;
+        if (basic_error)   break;
+        if (basic_pc_set)  break;
+        if (was_running && !basic_running) break;
+        if (basic_wait_pending) {
+            /* DELAY/SLEEP parked the machine: stop here with *p at the
+             * line's unconsumed remainder so the step machine can resume
+             * it after the deadline. */
+            skip_ws(p);
+            if (**p == ':') (*p)++;      /* resume past the separator */
+            break;
+        }
         skip_ws(p);
-        if (**p == '\0') return;
+        if (**p == '\0') break;
         if (**p == ':') { (*p)++; continue; }
         /* Anything else after a successful stmt is unexpected garbage. */
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "trailing junk");
-        return;
+        break;
     }
+    basic_stmt_depth--;
 }

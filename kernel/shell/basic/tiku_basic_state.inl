@@ -275,6 +275,35 @@ static uint16_t     basic_auto_next;
 static uint16_t     basic_auto_step;
 static int          basic_auto_active;
 
+/* Yielding wait (mode DELAY / SLEEP).  A blocking in-statement spin starves
+ * the entire shell event loop for its duration -- rules, watch, and BASIC's
+ * own event-armed ON CHANGE all stall (found in the LM20 F2 HITL).  In shell
+ * mode, exec_delay/exec_sleep instead record a deadline here and PARK the
+ * step machine: basic_run_step returns RUNNING without executing until the
+ * deadline passes, then resumes the interrupted line at basic_wait_off.
+ * Semantics match the blocking wait exactly (the line's remaining
+ * statements run after the pause; reactive polls stay suppressed during it)
+ * -- but the shell loop breathes, so queued events dispatch and pending
+ * ON CHANGE marks fire at the first post-wait statement boundary.
+ * basic_wait_sleep_s chunks long SLEEPs below the tick counter's wrap.
+ * Only the MAIN line walker yields (basic_stmt_depth == 1): DELAY inside an
+ * IF-THEN scratch or an EVERY body keeps the old blocking behaviour, since
+ * their transient buffers cannot be resumed across ticks. */
+/* 1 while the RUN loop is driven as a non-blocking shell mode
+ * (tiku_basic_mode_*), 0 for the synchronous exec_run path.  When set,
+ * basic_run_step() skips its inline Ctrl-C poll (the shell loop routes
+ * keystrokes) and DELAY/SLEEP park instead of spinning. */
+static uint8_t           basic_run_shell_mode;
+
+static uint8_t           basic_wait_pending;
+static tiku_clock_time_t basic_wait_start;
+static tiku_clock_time_t basic_wait_ticks;
+static uint16_t          basic_wait_line;    /* line to resume             */
+static uint16_t          basic_wait_off;     /* byte offset into its text  */
+static long              basic_wait_sleep_s; /* SLEEP: remaining seconds   */
+static uint8_t           basic_stmt_depth;   /* exec_stmts nesting         */
+static uint8_t           basic_in_reactive;  /* inside basic_poll_reactive */
+
 /* ON ERROR GOTO N: when an error fires during RUN, jump to N
  * instead of aborting. 0 = handler disabled (default behaviour).
  * `basic_err_pc` records the line that errored, so RESUME and
