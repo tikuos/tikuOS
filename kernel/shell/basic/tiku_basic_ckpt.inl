@@ -100,9 +100,10 @@
 /* Distinct from TIKU_PERSIST_MAGIC so a checkpoint slot is never confused with
  * a program-store entry, and from BASIC_REGION_MAGIC ('BASP'). */
 #define BASIC_CKPT_MAGIC    0x424B5054u   /* 'BKPT' */
-#define BASIC_CKPT_VERSION  5u            /* 2: +program id; 3: +SUB/scope/DEF FN;
+#define BASIC_CKPT_VERSION  6u            /* 2: +program id; 3: +SUB/scope/DEF FN;
                                            * 4: string scope slots + RESULT (F3);
-                                           * 5: EVERY + ON CHANGE + arrays (F1 f/u) */
+                                           * 5: EVERY + ON CHANGE + arrays (F1 f/u);
+                                           * 6: CONST read-only flags */
 #define BASIC_CKPT_HDR      12u           /* [gate u32][version u32][len u32] */
 #define BASIC_CKPT_RGN_HDR  16u           /* [magic][version][len][crc]       */
 
@@ -165,6 +166,7 @@
     + 1u + sizeof(basic_loop_frame_t) * TIKU_BASIC_LOOP_DEPTH      /* loop */ \
     + sizeof(long) * BASIC_VAR_TABLE_LEN                           /* numeric vars */ \
     + (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX    /* numeric names */ \
+    + (size_t)TIKU_BASIC_NAMEDVAR_MAX                              /* CONST flags */ \
     + BASIC_CKPT_STR_MAX \
     + BASIC_CKPT_SUBS_MAX                                          /* SUB frames + scope */ \
     + BASIC_CKPT_DEFN_MAX_B                                        /* DEF FN table */ \
@@ -323,6 +325,7 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) ckpt_w(w, &basic_vars[i], sizeof(long));
     ckpt_w(w, basic_namedvar_names,
            (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX);
+    ckpt_w(w, basic_namedvar_const, (size_t)TIKU_BASIC_NAMEDVAR_MAX);
 
 #if TIKU_BASIC_STRVARS_ENABLE
     ckpt_w(w, basic_namedstrvar_names,
@@ -509,6 +512,7 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) ckpt_r(&r, &basic_vars[i], sizeof(long));
     ckpt_r(&r, basic_namedvar_names,
            (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX);
+    ckpt_r(&r, basic_namedvar_const, (size_t)TIKU_BASIC_NAMEDVAR_MAX);
 
 #if TIKU_BASIC_STRVARS_ENABLE
     ckpt_r(&r, basic_namedstrvar_names,
@@ -601,7 +605,13 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
             ckpt_r(&r, &basic_onchgs[k].handler_line, sizeof(uint16_t));
             ckpt_r(&r, &basic_onchgs[k].is_gosub, 1);
             basic_onchgs[k].active = 1;
-            /* node/armed/pending (F2) stay zero; the mode tick re-arms. */
+#if TIKU_BASIC_ONCHG_EVENT
+            /* Arena memory is not zeroed: reset the F2 runtime fields
+             * explicitly; the mode tick re-arms on its next pass. */
+            basic_onchgs[k].node    = NULL;
+            basic_onchgs[k].armed   = 0;
+            basic_onchgs[k].pending = 0;
+#endif
         }
     }
 #endif

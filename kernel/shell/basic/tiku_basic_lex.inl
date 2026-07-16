@@ -242,6 +242,7 @@ basic_named_lookup(const char *name, int is_string)
 {
     int n = (int)strlen(name);
     int i;
+    int t = 0;
     char (*tbl)[TIKU_BASIC_NAMEDVAR_LEN];
     (void)is_string;
     if (n == 0) return -1;
@@ -249,12 +250,20 @@ basic_named_lookup(const char *name, int is_string)
         return name[0] - 'A';                /* fast slot 0..25 */
     }
 #if TIKU_BASIC_STRVARS_ENABLE
+    t   = is_string ? 1 : 0;
     tbl = is_string ? basic_namedstrvar_names : basic_namedvar_names;
 #else
     tbl = basic_namedvar_names;
 #endif
+    /* A3 #3: the hot loop re-references one named variable per statement --
+     * check the most-recent hit before rescanning the table. */
+    i = basic_named_mru[t];
+    if (i >= 0 && tbl[i][0] != '\0' && strcmp(tbl[i], name) == 0) {
+        return 26 + i;
+    }
     for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
         if (tbl[i][0] != '\0' && strcmp(tbl[i], name) == 0) {
+            basic_named_mru[t] = (int8_t)i;
             return 26 + i;
         }
     }
@@ -262,6 +271,7 @@ basic_named_lookup(const char *name, int is_string)
         if (tbl[i][0] == '\0') {
             strncpy(tbl[i], name, TIKU_BASIC_NAMEDVAR_LEN - 1);
             tbl[i][TIKU_BASIC_NAMEDVAR_LEN - 1] = '\0';
+            basic_named_mru[t] = (int8_t)i;
             return 26 + i;
         }
     }

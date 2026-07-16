@@ -398,11 +398,78 @@ exec_input(const char **p)
  * Labels are matched case-insensitively and must be at line start
  * (immediately after any leading whitespace -- not after a number or
  * other statement). */
+/* A3 #2: one walk over prog[] collecting label definitions (`name:` at line
+ * start) and SUB headers into the registries.  Rebuilt after any edit. */
+static void
+basic_symreg_build(void)
+{
+    uint16_t i;
+    basic_label_reg_n   = 0;
+    basic_label_reg_ovf = 0;
+#if TIKU_BASIC_SUBS_ENABLE
+    basic_sub_reg_n     = 0;
+    basic_sub_reg_ovf   = 0;
+#endif
+    for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
+        const char *t;
+        if (prog[i].number == 0) continue;
+        t = prog[i].text;
+        while (*t == ' ' || *t == '\t') t++;
+        if (is_alpha(*t)) {
+            const char *r = t;
+            while (is_word_cont(*r)) r++;
+            if (*r == ':') {
+                if (basic_label_reg_n < BASIC_SYMREG_MAX) {
+                    basic_label_reg[basic_label_reg_n].idx = i;
+                    basic_label_reg[basic_label_reg_n].off =
+                        (uint8_t)(t - prog[i].text);
+                    basic_label_reg_n++;
+                } else {
+                    basic_label_reg_ovf = 1;
+                }
+                continue;               /* a label line is not a SUB header */
+            }
+        }
+#if TIKU_BASIC_SUBS_ENABLE
+        {
+            size_t k = tok_kw_at(t, "SUB");
+            if (k != 0) {
+                const char *nm = t + k;
+                while (*nm == ' ' || *nm == '\t') nm++;
+                if (basic_sub_reg_n < BASIC_SYMREG_MAX) {
+                    basic_sub_reg[basic_sub_reg_n].idx = i;
+                    basic_sub_reg[basic_sub_reg_n].off =
+                        (uint8_t)(nm - prog[i].text);
+                    basic_sub_reg_n++;
+                } else {
+                    basic_sub_reg_ovf = 1;
+                }
+            }
+        }
+#endif
+    }
+    basic_symreg_ok = 1;
+}
+
 static int
 prog_find_label(const char *name, size_t name_len)
 {
     uint16_t i;
     size_t  k;
+    uint8_t r;
+    if (!basic_symreg_ok) basic_symreg_build();
+    for (r = 0; r < basic_label_reg_n; r++) {
+        const char *t = prog[basic_label_reg[r].idx].text +
+                        basic_label_reg[r].off;
+        for (k = 0; k < name_len; k++) {
+            if (to_upper(t[k]) != to_upper(name[k])) break;
+        }
+        if (k == name_len && t[name_len] == ':') {
+            return (int)basic_label_reg[r].idx;
+        }
+    }
+    if (!basic_label_reg_ovf) return -1;
+    /* Registry overflowed: fall back to the full scan. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         const char *t;
         if (prog[i].number == 0) continue;

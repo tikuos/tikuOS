@@ -29,8 +29,9 @@
 _Static_assert(TIKU_BASIC_PROGRAM_LINES <= 0xFFFFu,
                "PROGRAM_LINES must fit the uint16_t prog[] scan counter");
 
-/* A3: any edit invalidates the derived line-number index. */
-#define PROG_INDEX_INVALIDATE()  (basic_line_index_ok = 0)
+/* A3: any edit invalidates the derived line-number index AND the SUB/label
+ * registry (both are rebuilt on their next lookup). */
+#define PROG_INDEX_INVALIDATE()  (basic_line_index_ok = 0, basic_symreg_ok = 0)
 
 /** @brief Mark every line slot empty. */
 static void

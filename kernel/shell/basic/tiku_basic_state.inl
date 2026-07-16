@@ -81,6 +81,31 @@ static uint16_t     *basic_line_order;    /* [basic_line_count] valid entries  *
 static uint16_t      basic_line_count;    /* number of active lines            */
 static int           basic_line_index_ok; /* 1 = index reflects current prog[] */
 
+/* A3 #2: SUB / label registry.  prog[] indices + name offsets, built in one
+ * walk on first lookup and invalidated together with the line index on any
+ * edit (PROG_INDEX_INVALIDATE).  CALL and labelled GOTO/GOSUB then compare
+ * against a handful of registered entries instead of scanning the whole
+ * line table per reference.  On table overflow the lookups fall back to the
+ * original linear scans -- correct, just slow. */
+#ifndef BASIC_SYMREG_MAX
+#define BASIC_SYMREG_MAX 32
+#endif
+typedef struct { uint16_t idx; uint8_t off; } basic_symref_t;
+static basic_symref_t basic_label_reg[BASIC_SYMREG_MAX];
+static uint8_t        basic_label_reg_n;
+static uint8_t        basic_label_reg_ovf;
+#if TIKU_BASIC_SUBS_ENABLE
+static basic_symref_t basic_sub_reg[BASIC_SYMREG_MAX];
+static uint8_t        basic_sub_reg_n;
+static uint8_t        basic_sub_reg_ovf;
+#endif
+static int            basic_symreg_ok;
+
+/* A3 #3: most-recently-used named-variable slot per table (0 = numeric,
+ * 1 = string); -1 = none.  The common hot loop reuses one named variable,
+ * so this one-entry memo removes the linear rescan per reference. */
+static int8_t         basic_named_mru[2];
+
 static long         *basic_vars;
 static uint16_t     *gosub_stack;
 static uint8_t       gosub_sp;

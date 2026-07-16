@@ -43,14 +43,30 @@ subs_line_kw(const char *t, const char *kw)
     return tok_kw_at(t, kw) != 0;
 }
 
-/* Find a `SUB <name>` definition line. Returns its prog index, or -1. */
+/* Find a `SUB <name>` definition line via the A3 registry (built once per
+ * edit-generation; overflow falls back to the full scan).  Returns the prog
+ * index, or -1. */
 static int
 prog_find_sub(const char *name, size_t nlen)
 {
-    int i;
+    int     i;
+    size_t  k;
+    uint8_t r;
+    if (!basic_symreg_ok) basic_symreg_build();
+    for (r = 0; r < basic_sub_reg_n; r++) {
+        const char *t = prog[basic_sub_reg[r].idx].text +
+                        basic_sub_reg[r].off;
+        for (k = 0; k < nlen; k++) {
+            if (to_upper(t[k]) != to_upper(name[k])) break;
+        }
+        if (k == nlen && !is_word_cont(t[nlen])) {
+            return (int)basic_sub_reg[r].idx;
+        }
+    }
+    if (!basic_sub_reg_ovf) return -1;
+    /* Registry overflowed: fall back to the full scan. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         const char *t;
-        size_t k;
         if (prog[i].number == 0) continue;
         t = prog[i].text;
         while (*t == ' ' || *t == '\t') t++;

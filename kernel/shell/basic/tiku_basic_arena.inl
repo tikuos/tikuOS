@@ -126,6 +126,8 @@ basic_clear_vars(void)
 #if TIKU_BASIC_SUBS_ENABLE
     basic_sub_result = 0;                    /* SUB return register (F3) */
 #endif
+    basic_named_mru[0] = -1;                 /* named-slot MRU (A3 #3) */
+    basic_named_mru[1] = -1;
     for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) basic_vars[i] = 0;
     for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
         basic_namedvar_names[i][0] = '\0';
@@ -298,6 +300,7 @@ basic_alloc_state(void)
      * also rewinds to the mark just captured -- a no-op on this first pass). */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
     basic_line_index_ok = 0;                  /* A3: line index not built yet */
+    basic_symreg_ok     = 0;                  /* A3 #2: SUB/label registry too */
     basic_clear_vars();
     return 0;
 }
