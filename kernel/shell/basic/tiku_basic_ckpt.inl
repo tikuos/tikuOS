@@ -50,13 +50,13 @@
  * The durable slot has TWO backings, chosen by BASIC_NVM_ON_REGION (the same
  * split as the saved program -- see tiku_basic_config.h):
  *
- *   Byte-writable (MSP430 .persistent FRAM; Nordic/host .bss = session-only):
+ *   Byte-writable (MSP430 .persistent FRAM; host .bss = session-only):
  *   [u32 gate][u32 version][u32 len][payload].  A save invalidates the gate,
  *   serializes the payload, stamps version + len, then writes the magic gate
  *   LAST -- single-word FRAM stores commit atomically, so a cut mid-write
  *   leaves the gate invalid.
  *
- *   Carved NVM region (Ambiq MRAM, RP2350 flash): a fixed slot at the TOP of
+ *   Carved NVM region (Ambiq MRAM, RP2350 flash, Nordic RRAM): a fixed slot at the TOP of
  *   the region's reserved tail (the saved program owns the base).  These media
  *   are program-op (bootrom / sector erase+program), so multi-call gate-last
  *   ordering would cost one extra sector erase per save on flash -- instead
