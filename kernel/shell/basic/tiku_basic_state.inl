@@ -149,9 +149,8 @@ static char (*basic_namedstrvar_names)[TIKU_BASIC_NAMEDVAR_LEN];
 #endif
 
 /* CONST NAME = expr (F4): 1 marks the numeric named-var slot (index = slot -
- * 26) as read-only.  Reset each RUN by basic_clear_vars.  Not serialized by
- * the F1 checkpoint, so a power-cut RESUME loses read-only enforcement until
- * the CONST line re-executes -- same boundary as arrays/EVERY. */
+ * 26) as read-only.  Reset each RUN by basic_clear_vars; serialized by the
+ * F1 checkpoint since v6, so RESUME restores enforcement. */
 static uint8_t basic_namedvar_const[TIKU_BASIC_NAMEDVAR_MAX];
 
 #if TIKU_BASIC_DEFN_ENABLE

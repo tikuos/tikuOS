@@ -1881,11 +1881,7 @@ exec_persist(const char **p)
     skip_ws(p);
 #if TIKU_BASIC_PERSIST_RUN_ENABLE
     if (match_kw(p, "ON")) {
-        uint8_t was_armed = basic_ckpt_armed;
         basic_ckpt_arm(1);
-        if (!was_armed) {           /* warn once, on the arming edge, not per loop */
-            basic_ckpt_warn_uncheckpointed();
-        }
     } else if (match_kw(p, "OFF")) {
         basic_ckpt_arm(0);
     } else {

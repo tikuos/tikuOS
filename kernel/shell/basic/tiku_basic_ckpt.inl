@@ -68,9 +68,9 @@
  * Either way: losing an in-flight checkpoint (restart instead of resume) is
  * acceptable; resuming garbage is not.  The slot is sized to the compile-time
  * worst case, so serialization can never overflow it and there is no
- * "checkpoint too large" runtime path for the core state.  (v1 core state =
- * scalars; arrays / EVERY / ON CHANGE are not yet captured -- PERSIST ON warns
- * if any are live.)
+ * "checkpoint too large" runtime path for the core state.  (Since v5/v6 the
+ * payload also carries DIMmed arrays, EVERY timers, ON CHANGE registrations,
+ * DEF FNs, SUB frames, and CONST flags -- the full running machine.)
  *
  * --- Checkpoint cadence ------------------------------------------------------
  * TIKU_BASIC_CKPT_INTERVAL_S (config) paces saves: 0 = every yield batch
@@ -883,43 +883,12 @@ basic_ckpt_arm(int on)
     }
 }
 
-/**
- * @brief Warn (once, at PERSIST ON) if state v1 does not yet checkpoint is live.
- *
- * Best-effort: arrays / EVERY / ON CHANGE created AFTER PERSIST ON are not
- * caught here, but the common case (PERSIST ON early in the program) is.  The
- * boundary is documented; this just keeps it from being silent.
- */
-static void
-basic_ckpt_warn_uncheckpointed(void)
-{
-    int warn = 0;
-    uint16_t i;
-
-#if TIKU_BASIC_ARRAYS_ENABLE
-    for (i = 0; i < 26u && !warn; i++) if (basic_arrays[i].data) warn = 1;
-#if TIKU_BASIC_STRVARS_ENABLE
-    for (i = 0; i < 26u && !warn; i++) if (basic_str_arrays[i].data) warn = 1;
-#endif
-#endif
-    for (i = 0; i < TIKU_BASIC_EVERY_MAX && !warn; i++)
-        if (basic_everys[i].active) warn = 1;
-    for (i = 0; i < TIKU_BASIC_ONCHG_MAX && !warn; i++)
-        if (basic_onchgs[i].active) warn = 1;
-
-    if (warn) {
-        SHELL_PRINTF(SH_YELLOW "note: PERSIST checkpoints scalars only; arrays / "
-                     "EVERY / ON CHANGE do not yet resume" SH_RST "\n");
-    }
-}
-
 #else  /* !TIKU_BASIC_PERSIST_RUN_ENABLE */
 
 /* Stubs for the call sites the run loop / mode driver reach unconditionally
- * (basic_ckpt_armed is always 0 here, so these never actually fire).  arm() and
- * warn_uncheckpointed() are omitted: they are reached only from exec_persist's
- * enabled branch, which is compiled out on this build, so defining them would
- * just trip -Wunused-function. */
+ * (basic_ckpt_armed is always 0 here, so these never actually fire).  arm() is
+ * omitted: it is reached only from exec_persist's enabled branch, which is
+ * compiled out on this build, so defining it would trip -Wunused-function. */
 static int  basic_ckpt_save(void)       { return -1; }
 static int  basic_ckpt_load(void)       { return -1; }
 static void basic_ckpt_invalidate(void) { }
