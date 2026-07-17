@@ -82,6 +82,21 @@ static void bleadv_fmt_addr(char *out, const uint8_t addr[6])
     out[o] = '\0';
 }
 
+/* SHELL_PRINTF has no %02X: format @p n bytes of @p b as hex into @p out.
+ * @p msb_first prints b[n-1]..b[0] (display order for little-endian fields
+ * like the access address); else b[0]..b[n-1]. */
+static void bleadv_fmt_hex(char *out, const uint8_t *b, int n, int msb_first)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int i, o = 0;
+    for (i = 0; i < n; i++) {
+        uint8_t v = msb_first ? b[n - 1 - i] : b[i];
+        out[o++] = hex[v >> 4];
+        out[o++] = hex[v & 0x0Fu];
+    }
+    out[o] = '\0';
+}
+
 /* Bring-up visibility: silicon identification words that gate the errata
  * workarounds (see tiku_crt_early.c), clock-tuning state the radio depends
  * on, and RADIO readbacks.  Everything here is a plain register read. */
@@ -287,25 +302,29 @@ static void bleadv_connprobe(unsigned secs)
                  addrstr);
     if (tiku_radio_arch_connadv_probe(addr, ad, adlen, lldata,
                                       secs * 1000u) == 1) {
+        /* LLData layout: AA(4) CRCInit(3) WinSize(1) WinOffset(2)
+         * Interval(2) Latency(2) Timeout(2) ChM(5) Hop:5|SCA:3(1).
+         * SHELL_PRINTF has no %X -> format the multi-byte fields by
+         * hand (bleadv_fmt_hex), and keep hex + decimal in SEPARATE
+         * printf calls so a hex field can never poison a %u vararg. */
+        char aa[9], crc[7], chm[11];
         unsigned interval = (unsigned)lldata[10] |
                             ((unsigned)lldata[11] << 8);
-        unsigned timeout  = (unsigned)lldata[14] |
-                            ((unsigned)lldata[15] << 8);
+        bleadv_fmt_hex(aa, &lldata[0], 4, 1);      /* AA, display MSB-first */
+        bleadv_fmt_hex(crc, &lldata[4], 3, 1);     /* CRCInit               */
+        bleadv_fmt_hex(chm, &lldata[16], 5, 0);    /* ChM, ch0 = LSB byte0  */
         SHELL_PRINTF(SH_GREEN "CONNECT_IND captured!\n" SH_RST);
-        SHELL_PRINTF("  AA=%02X%02X%02X%02X crcinit=%02X%02X%02X"
-                     " winsize=%u winoff=%u\n",
-                     lldata[3], lldata[2], lldata[1], lldata[0],
-                     lldata[6], lldata[5], lldata[4],
+        SHELL_PRINTF("  AA=%s crcinit=%s\n", aa, crc);
+        SHELL_PRINTF("  winsize=%u winoff=%u\n",
                      (unsigned)lldata[7],
                      (unsigned)lldata[8] | ((unsigned)lldata[9] << 8));
-        SHELL_PRINTF("  interval=%u (%u.%02u ms) latency=%u timeout=%u0ms\n",
+        SHELL_PRINTF("  interval=%u (%u.%02u ms) latency=%u timeout=%ums\n",
                      interval, (interval * 125u) / 100u,
                      (interval * 125u) % 100u,
                      (unsigned)lldata[12] | ((unsigned)lldata[13] << 8),
-                     timeout);
-        SHELL_PRINTF("  chmap=%02X%02X%02X%02X%02X hop=%u sca=%u\n",
-                     lldata[20], lldata[19], lldata[18], lldata[17],
-                     lldata[16],
+                     ((unsigned)lldata[14] |
+                      ((unsigned)lldata[15] << 8)) * 10u);
+        SHELL_PRINTF("  chmap=%s hop=%u sca=%u\n", chm,
                      (unsigned)(lldata[21] & 0x1Fu),
                      (unsigned)(lldata[21] >> 5));
     } else {
