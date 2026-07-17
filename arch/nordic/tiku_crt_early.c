@@ -104,6 +104,9 @@ void tiku_nordic_gpiote20_isr(void)        __attribute__((weak, alias("nordic_de
 void tiku_nordic_gpiote30_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
 /* FLPR coprocessor doorbell -- VPR00 EVENTS_TRIGGERED (IRQn 76). */
 void tiku_nordic_flpr_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
+/* 2.4 GHz RADIO -- RADIO_0 (IRQn 138 = peripheral 0x8A at 0x5008A000); the
+ * IRQ-driven observer path (kintsugi/radio.md R6). */
+void tiku_nordic_radio_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
 /* Axon NPU (nRF54LM20B only; IRQn 86).  The slot is wired on every nordic
  * device -- it stays the default handler unless a probe/driver overrides. */
 void tiku_nordic_axons_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
@@ -381,6 +384,7 @@ __attribute__((section(".vectors"), used)) = {
      * (nrf54l15_application.h), NOT the vector-array position. */
     [16 +  76] = tiku_nordic_flpr_isr,         /* VPR00_IRQn      = 76  */
     [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn    = 133 */
+    [16 + 138] = tiku_nordic_radio_isr,        /* RADIO_0_IRQn    = 138 */
     [16 + 198] = tiku_nordic_uart_console_isr, /* SERIAL20_IRQn   = 198 */
     [16 + 202] = tiku_nordic_timer20_isr,      /* TIMER20_IRQn    = 202 (htimer)  */
     [16 + 218] = tiku_nordic_gpiote20_isr,     /* GPIOTE20_0_IRQn = 218 (P1/P2)   */
@@ -395,7 +399,8 @@ __attribute__((section(".vectors"), used)) = {
     [16 +  86] = tiku_nordic_axons_isr,        /* AXONS_IRQn      = 86 (LM20B) */
     [16 +  77 ... 16 +  85] = nordic_default_handler,
     [16 +  87 ... 16 + 132] = nordic_default_handler,
-    [16 + 134 ... 16 + 197] = nordic_default_handler,
+    [16 + 134 ... 16 + 137] = nordic_default_handler,
+    [16 + 139 ... 16 + 197] = nordic_default_handler,
     [16 + 199 ... 16 + 201] = nordic_default_handler,
     [16 + 203 ... 16 + 217] = nordic_default_handler,
     [16 + 219 ... 16 + 225] = nordic_default_handler,

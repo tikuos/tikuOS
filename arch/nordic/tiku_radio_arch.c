@@ -20,7 +20,10 @@
  *     DATAWHITEIV-only register; the reset value 0x00890040 already carries
  *     the BLE polynomial 0x89, so per-channel we only OR the IV = 0x40|index.
  *   - TXPOWER is an ENUMERATED code (+8 dBm = 0x03F), not signed dBm.
- *   - Split interrupt banks (INTENSET00/01/10/11); this path is POLLED.
+ *   - Split interrupt banks (INTENSET00/01/10/11).  TX is POLLED (a 1.3 ms
+ *     fire-and-forget burst needs no interrupt); the observer/scan path is
+ *     IRQ-driven since R6.1 (RADIO_0 = IRQn 138, bank 00, priority 4 --
+ *     below htimer/console/tick so scanning can never cost console bytes).
  *   - PHYEND (not END) is the "last bit on air" event for BLE 1M.
  *   - RXADDRESSES resets to 0: RX matches nothing until logical address 0
  *     is explicitly enabled.
@@ -61,6 +64,7 @@
 
 #include <arch/nordic/tiku_radio_arch.h>
 #include <arch/nordic/tiku_device_select.h>   /* MDK register types + NRF_RADIO_S */
+#include <arch/nordic/tiku_nordic_core.h>      /* NVIC + WFE (IRQ scan, R6.1)   */
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
 #include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
@@ -364,15 +368,112 @@ void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
  * @param addr_evts   Optional: incremented per access-address match.
  * @param crcok_evts  Optional: incremented per CRC-OK packet.
  */
+/*---------------------------------------------------------------------------*/
+/* IRQ-driven observer engine (R6.1)                                         */
+/*---------------------------------------------------------------------------*/
+/*
+ * The polled engine burned the CPU for the whole scan (a multi-second
+ * 100% spin) and its listen windows were spin-count-bounded.  Now the
+ * ISR owns the per-packet work: on DISABLED (the PHYEND->DISABLE short
+ * fires it per received packet) it captures the packet + RSSI into a
+ * small SPSC ring and re-arms RX on the next advertising channel.  The
+ * blocking API is unchanged -- the caller's context drains the ring and
+ * WFEs between packets, waking on any interrupt (radio, tick, console).
+ * Idle channels never fire DISABLED, so the drain loop force-rotates a
+ * silent channel after ~2 ticks (the ISR's hop path handles the rest);
+ * R6.2 replaces that coarse rotation with TIMER-gated windows.
+ *
+ * Coexistence rule (phase-6 risk, now enforced in code): RADIO IRQ
+ * priority is 4 -- strictly below the htimer (1), console UARTE (2) and
+ * tick/GPIOTE (3), so a scan can never cost console bytes; the
+ * /dev/uart/overruns counter is the standing detector.
+ */
+
+#define TIKU_NORDIC_IRQ_RADIO   138    /* RADIO_0 = periph 0x8A @ 0x5008A000 */
+#define RADIO_INTEN00_DISABLED  (1u << 8)
+
+#define RADIO_SCAN_RING  8u
+struct radio_scan_pkt {
+    uint8_t buf[48];                    /* [S0][LEN][S1 slot][payload...]  */
+    int8_t  rssi;
+};
+static struct radio_scan_pkt scan_ring[RADIO_SCAN_RING];
+static volatile uint8_t  scan_head;     /* ISR produces                    */
+static volatile uint8_t  scan_tail;     /* drain loop consumes             */
+static volatile uint8_t  scan_active;   /* ISR may re-arm while set        */
+static volatile uint8_t  scan_chan;
+static volatile uint32_t scan_isr_count;
+static volatile uint32_t scan_addr_evts, scan_crcok_evts;
+static uint8_t scan_rxbuf[48] __attribute__((aligned(4)));
+
+/* Program the current channel and start RX (arm path + ISR hop path). */
+static void radio_scan_arm_channel(void)
+{
+    RADIO->FREQUENCY = adv_freq[scan_chan];
+    RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[scan_chan]);
+    RADIO->PACKETPTR = (uint32_t)scan_rxbuf;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->EVENTS_ADDRESS  = 0u;
+    RADIO->EVENTS_CRCOK    = 0u;
+    (void)RADIO->EVENTS_DISABLED;
+    RADIO->TASKS_RXEN = 1u;
+}
+
+/* RADIO_0 ISR: one DISABLED per packet end (or forced rotation).  Copy
+ * BEFORE re-arming -- EasyDMA would overwrite scan_rxbuf.  RSSISAMPLE
+ * must also be read here (latched per ADDRESS->RSSISTART; the next
+ * packet overwrites it). */
+void tiku_nordic_radio_isr(void)
+{
+    if (RADIO->EVENTS_DISABLED == 0u) {
+        return;                         /* spurious (line shared w/ nothing) */
+    }
+    RADIO->EVENTS_DISABLED = 0u;
+    scan_isr_count++;
+    if (RADIO->EVENTS_ADDRESS != 0u) {
+        scan_addr_evts++;
+    }
+    if (RADIO->EVENTS_CRCOK != 0u) {
+        uint8_t next = (uint8_t)((scan_head + 1u) % RADIO_SCAN_RING);
+        scan_crcok_evts++;
+        if (next != scan_tail) {        /* ring full: drop, keep listening  */
+            uint8_t n = scan_rxbuf[1];
+            if (n > 44u) {
+                n = 44u;                /* bound to the ring entry          */
+            }
+            memcpy(scan_ring[scan_head].buf, scan_rxbuf, (size_t)(3u + n));
+            scan_ring[scan_head].rssi =
+                (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
+            scan_head = next;
+        }
+    }
+    if (scan_active) {
+        scan_chan = (uint8_t)((scan_chan + 1u) % 3u);
+        radio_scan_arm_channel();
+    }
+}
+
+/* Deliver everything the ISR queued.  SPSC: tail is ours, head is the
+ * ISR's; volatile ordering is sufficient on this single core. */
+static void radio_scan_drain(tiku_radio_arch_scan_cb_t cb, void *ud)
+{
+    while (scan_tail != scan_head) {
+        struct radio_scan_pkt *p = &scan_ring[scan_tail];
+        if (cb != (tiku_radio_arch_scan_cb_t)0) {
+            cb(p->buf, p->buf[1], p->rssi, ud);
+        }
+        scan_tail = (uint8_t)((scan_tail + 1u) % RADIO_SCAN_RING);
+    }
+}
+
 void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
                           uint32_t *addr_evts, uint32_t *crcok_evts)
 {
-    static uint8_t rxbuf[48] __attribute__((aligned(4)));
     tiku_clock_time_t t0 = tiku_clock_time();
     tiku_clock_time_t span =
         (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
-    uint32_t r = 0u;
-    uint8_t chan;
+    tiku_clock_time_t wdl;
+    uint32_t seen, spin;
 
     if (span == 0u) {
         span = 1u;
@@ -385,60 +486,60 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
      * end-of-packet for BLE; ADDRESS latches an RSSI sample. */
     RADIO->SHORTS = (1u << 0) | (1u << 4) | (1u << 18) | (1u << 19);
 
+    scan_head = 0u;
+    scan_tail = 0u;
+    scan_addr_evts = 0u;
+    scan_crcok_evts = 0u;
+    scan_isr_count = 0u;
+    scan_chan = 0u;
+    scan_active = 1u;
+    RADIO->INTENSET00 = RADIO_INTEN00_DISABLED;
+    tiku_nordic_nvic_set_priority(TIKU_NORDIC_IRQ_RADIO, 4u);
+    tiku_nordic_nvic_clear_pending(TIKU_NORDIC_IRQ_RADIO);
+    tiku_nordic_nvic_enable(TIKU_NORDIC_IRQ_RADIO);
+    radio_scan_arm_channel();
+
+    seen = 0u;
+    wdl = (tiku_clock_time_t)(t0 + 2u);        /* idle-channel deadline    */
     while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span) {
-        uint32_t spin;
-        if ((r & 0x0Fu) == 0u) {
-            tiku_watchdog_kick();              /* scan blocks for seconds      */
-        }
-        chan = (uint8_t)(r % 3u);
-        r++;
-        RADIO->FREQUENCY = adv_freq[chan];
-        RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
-        RADIO->PACKETPTR = (uint32_t)rxbuf;
+        tiku_clock_time_t now;
 
-        RADIO->EVENTS_DISABLED = 0u;
-        RADIO->EVENTS_ADDRESS  = 0u;
-        RADIO->EVENTS_CRCOK    = 0u;
-        (void)RADIO->EVENTS_DISABLED;
-        RADIO->TASKS_RXEN = 1u;
-
-        /* Bounded listen window (~10-20 ms), then rotate channels. */
-        for (spin = 0; spin < 120000u; spin++) {
-            if (RADIO->EVENTS_DISABLED != 0u) {
-                break;
-            }
+        tiku_watchdog_kick();                  /* scan blocks for seconds  */
+        radio_scan_drain(cb, ud);
+        now = tiku_clock_time();
+        if (scan_isr_count != seen) {          /* traffic: window is alive */
+            seen = scan_isr_count;
+            wdl = (tiku_clock_time_t)(now + 2u);
+        } else if (TIKU_CLOCK_LT(wdl, now)) {
+            RADIO->TASKS_DISABLE = 1u;         /* silent channel: rotate   */
+            wdl = (tiku_clock_time_t)(now + 2u);
         }
-        if (RADIO->EVENTS_DISABLED == 0u) {
-            RADIO->TASKS_DISABLE = 1u;
-            for (spin = 0; spin < 40000u; spin++) {
-                if (RADIO->EVENTS_DISABLED != 0u) {
-                    break;
-                }
-            }
-        }
-        if (RADIO->EVENTS_ADDRESS != 0u && addr_evts != (uint32_t *)0) {
-            (*addr_evts)++;
-        }
-        if (RADIO->EVENTS_CRCOK != 0u) {
-            if (crcok_evts != (uint32_t *)0) {
-                (*crcok_evts)++;
-            }
-            if (cb != (tiku_radio_arch_scan_cb_t)0) {
-                /* RSSISAMPLE is the magnitude in -dBm (7-bit). */
-                int8_t rssi =
-                    (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
-                cb(rxbuf, rxbuf[1], rssi, ud);
-            }
-        }
+        tiku_nordic_wfe();                     /* sleep to the next IRQ    */
     }
-    /* Leave the radio disabled + TX shorts restored for the next user. */
+
+    /* Teardown: stop the ISR re-arming, then take the IRQ path out of the
+     * loop entirely and disable by direct poll (the ISR would otherwise
+     * consume the final DISABLED before we saw it). */
+    scan_active = 0u;
+    RADIO->INTENCLR00 = RADIO_INTEN00_DISABLED;
+    tiku_nordic_nvic_disable(TIKU_NORDIC_IRQ_RADIO);
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
-    for (r = 0; r < 40000u; r++) {
+    for (spin = 0u; spin < 40000u; spin++) {
         if (RADIO->EVENTS_DISABLED != 0u) {
             break;
         }
     }
+    radio_scan_drain(cb, ud);                  /* packets from teardown    */
+
+    if (addr_evts != (uint32_t *)0) {
+        *addr_evts += scan_addr_evts;
+    }
+    if (crcok_evts != (uint32_t *)0) {
+        *crcok_evts += scan_crcok_evts;
+    }
+
+    /* Leave the radio disabled + TX shorts restored for the next user. */
     RADIO->SHORTS = (1u << 0) | (1u << 19);
     radio_constlat_exit();
 }
