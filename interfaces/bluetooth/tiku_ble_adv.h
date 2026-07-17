@@ -188,6 +188,8 @@ typedef enum {
     TIKU_BLE_ADV_OWNER_BEACON_FLPR,     /**< beacon offloaded to the FLPR  */
     TIKU_BLE_ADV_OWNER_SCAN,            /**< blocking scan in flight       */
     TIKU_BLE_ADV_OWNER_OBSERVE,         /**< background observer           */
+    TIKU_BLE_ADV_OWNER_BEACON_OBSERVE,  /**< R7.5: beacon + observer,
+                                         *   time-divided on one radio     */
 } tiku_ble_adv_owner_t;
 
 /** @brief Current radio owner. */

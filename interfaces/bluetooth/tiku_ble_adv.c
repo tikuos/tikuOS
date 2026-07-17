@@ -72,8 +72,9 @@ tiku_ble_adv_owner_t tiku_ble_adv_owner(void)
 
 const char *tiku_ble_adv_owner_str(void)
 {
-    static const char *names[5] = {
+    static const char *names[6] = {
         "idle", "beacon", "beacon-flpr", "scan", "observe",
+        "beacon+observe",
     };
     return names[radio_owner];
 }
@@ -94,14 +95,31 @@ static void adv_random_addr(uint8_t addr[6])
     addr[5] |= 0xC0u;
 }
 
-/* One 3-channel burst; runs as a timer callback in the arming process's
- * context, then re-arms drift-free.  The per-burst HF clock request that
- * makes a post-sleep burst decodable lives in the arch send path. */
+/* One 3-channel burst.  In combined mode (R7.5) the beacon time-divides
+ * the radio with a running observer: borrow it (disarm RX), burst, hand
+ * it back (re-arm RX, ring intact).  The ~1.3 ms RX blackout per beacon
+ * interval is the whole cost -- 0.13% at a 1 s cadence.  Cooperative
+ * dispatch means this callback and the observer's service tick never
+ * overlap, so the borrow needs no locking. */
+static void beacon_burst(void)
+{
+    if (radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE) {
+        tiku_radio_arch_scan_pause();
+        tiku_radio_arch_adv_send(adv_pdu, adv_pdu_len);
+        tiku_radio_arch_scan_resume();
+    } else {
+        tiku_radio_arch_adv_send(adv_pdu, adv_pdu_len);
+    }
+    adv_burst_count++;
+}
+
+/* Timer callback in the arming process's context; re-arms drift-free.
+ * The per-burst HF clock request that makes a post-sleep burst decodable
+ * lives in the arch send path. */
 static void adv_burst_cb(void *ptr)
 {
     (void)ptr;
-    tiku_radio_arch_adv_send(adv_pdu, adv_pdu_len);
-    adv_burst_count++;
+    beacon_burst();
     tiku_timer_reset(&adv_timer);
 }
 
@@ -122,12 +140,17 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
     uint8_t ad[31], addr[6];
     uint8_t adlen = 0u, nlen;
     tiku_clock_time_t ticks;
+    /* Arbiter (R7.5): a beacon and the background observer time-divide
+     * one radio, so starting a beacon while OBSERVE is allowed and
+     * transitions to the combined owner.  obs_active also forces the
+     * M33-timer path below -- the FLPR beacon drives the radio
+     * NonSecure continuously and cannot coexist with an M33 observer. */
+    uint8_t obs_active = (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE ||
+                          radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE);
 
-    /* Arbiter: a beacon's TX bursts would land inside the observer's
-     * live RX windows -- deny, never queue.  (Retune of a running
-     * beacon passes: owner is already BEACON*.) */
-    if (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE ||
-        radio_owner == TIKU_BLE_ADV_OWNER_SCAN) {
+    /* A blocking scan owns the CPU synchronously (nothing else runs), so
+     * SCAN is denied defensively. */
+    if (radio_owner == TIKU_BLE_ADV_OWNER_SCAN) {
         return -1;
     }
 
@@ -199,12 +222,14 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
     tiku_radio_arch_constlat_hold(1);
 
 #if (TIKU_FLPR_ENABLE + 0)
-    /* F4: when the coprocessor firmware is alive, the whole beacon runs
-     * THERE -- no kernel timer is armed, so the M33 never wakes for a
-     * burst.  The link config was just programmed by init (radio still
-     * secure at that point); the arch call flips RADIO+UARTE21 to the
-     * FLPR and ships the PDU. */
-    if (tiku_flpr_arch_alive() &&
+    /* F4: when the coprocessor firmware is alive AND no M33 observer is
+     * running, the whole beacon runs THERE -- no kernel timer is armed,
+     * so the M33 never wakes for a burst.  The link config was just
+     * programmed by init (radio still secure at that point); the arch
+     * call flips RADIO+UARTE21 to the FLPR and ships the PDU.  Skipped
+     * under a live observer: the offload would seize the radio NonSecure
+     * out from under the M33 RX engine. */
+    if (!obs_active && tiku_flpr_arch_alive() &&
         tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len, interval_ms) == 0) {
         /* Retune from an M33-timer beacon: the timer MUST die with the
          * hand-off -- its next burst would touch RADIO/UARTE21 through
@@ -226,19 +251,23 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
     }
 #endif
 
-    /* First burst now (a beacon should be instantly visible), then the
-     * timer paces the rest; set_callback re-sets an already-active timer. */
-    tiku_radio_arch_adv_send(adv_pdu, adv_pdu_len);
-    adv_burst_count++;
+    /* Combined owner FIRST, so beacon_burst() below takes the borrow
+     * path when an observer is live.  First burst now (a beacon should
+     * be instantly visible), then the timer paces the rest; set_callback
+     * re-sets an already-active timer. */
+    radio_owner = obs_active ? TIKU_BLE_ADV_OWNER_BEACON_OBSERVE
+                             : TIKU_BLE_ADV_OWNER_BEACON;
+    beacon_burst();
     tiku_timer_set_callback(&adv_timer, ticks, adv_burst_cb, (void *)0);
     adv_on = 1u;
-    radio_owner = TIKU_BLE_ADV_OWNER_BEACON;
     return 0;
 }
 
 void tiku_ble_adv_stop(void)
 {
     if (adv_on) {
+        uint8_t was_combined =
+            (uint8_t)(radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE);
 #if (TIKU_FLPR_ENABLE + 0)
         if (adv_offloaded) {
             tiku_flpr_arch_beacon_stop();
@@ -246,12 +275,19 @@ void tiku_ble_adv_stop(void)
         }
 #endif
         tiku_timer_stop(&adv_timer);
-        tiku_radio_arch_constlat_hold(0);
         adv_on = 0u;
         adv_name[0] = '\0';
         adv_data_len = 0u;
         adv_interval_ms = 0u;
-        radio_owner = TIKU_BLE_ADV_OWNER_IDLE;
+        if (was_combined) {
+            /* R7.5: hand the radio back to the still-running observer --
+             * its RX is armed (the last burst resumed it) and its timer
+             * is live; keep the CONSTLAT hold, it is still active. */
+            radio_owner = TIKU_BLE_ADV_OWNER_OBSERVE;
+        } else {
+            tiku_radio_arch_constlat_hold(0);
+            radio_owner = TIKU_BLE_ADV_OWNER_IDLE;
+        }
     }
 }
 
@@ -562,7 +598,8 @@ static void observe_tick_cb(void *ptr)
     uint8_t n;
 
     (void)ptr;
-    if (radio_owner != TIKU_BLE_ADV_OWNER_OBSERVE) {
+    if (radio_owner != TIKU_BLE_ADV_OWNER_OBSERVE &&
+        radio_owner != TIKU_BLE_ADV_OWNER_BEACON_OBSERVE) {
         return;                     /* stopped between arm and dispatch    */
     }
     n = tiku_radio_arch_scan_service(scan_cb, &bg_ctx);
@@ -582,9 +619,18 @@ static void observe_tick_cb(void *ptr)
 
 int tiku_ble_adv_observe_start(uint16_t secs)
 {
-    if (radio_owner != TIKU_BLE_ADV_OWNER_IDLE) {
-        return -1;                  /* deny, never queue                   */
+    uint8_t combined;
+
+    /* R7.5: starting the observer while a (non-offloaded) beacon runs
+     * time-divides the radio -> combined owner.  Deny FLPR-offloaded
+     * beacon (radio NonSecure), a blocking scan, or an observer already
+     * running. */
+    if (radio_owner != TIKU_BLE_ADV_OWNER_IDLE &&
+        radio_owner != TIKU_BLE_ADV_OWNER_BEACON) {
+        return -1;
     }
+    combined = (uint8_t)(radio_owner == TIKU_BLE_ADV_OWNER_BEACON);
+
     adv_radio_init_once();
     bg_ctx.out = bg_reports;
     bg_ctx.max = (uint8_t)OBSERVE_MAX_REPORTS;
@@ -593,8 +639,17 @@ int tiku_ble_adv_observe_start(uint16_t secs)
     bg_ctx.plen = 0u;
     scan_last_count = 0u;
     scan_have_best = 0u;
+    /* Unified Constant Latency invariant (R7.5): held while ANY radio
+     * owner is active, released only at IDLE.  A beacon already holds
+     * it; this makes observe hold it too, so the combined session and
+     * either single survivor all stay in CONSTLAT (erratum 20). */
+    tiku_radio_arch_constlat_hold(1);
+    /* Owner BEFORE arming, so a beacon burst dispatched right after
+     * takes the borrow path (cooperative dispatch means it cannot
+     * actually fire until this returns, but keep the states honest). */
+    radio_owner = combined ? TIKU_BLE_ADV_OWNER_BEACON_OBSERVE
+                           : TIKU_BLE_ADV_OWNER_OBSERVE;
     tiku_radio_arch_scan_start();
-    radio_owner = TIKU_BLE_ADV_OWNER_OBSERVE;
     observe_forever = (uint8_t)(secs == 0u);
     observe_deadline = (tiku_clock_time_t)(tiku_clock_time() +
                        (tiku_clock_time_t)secs * TIKU_CLOCK_SECOND);
@@ -604,11 +659,16 @@ int tiku_ble_adv_observe_start(uint16_t secs)
 
 void tiku_ble_adv_observe_stop(void)
 {
-    if (radio_owner != TIKU_BLE_ADV_OWNER_OBSERVE) {
+    uint8_t was_combined;
+
+    if (radio_owner != TIKU_BLE_ADV_OWNER_OBSERVE &&
+        radio_owner != TIKU_BLE_ADV_OWNER_BEACON_OBSERVE) {
         return;
     }
+    was_combined = (uint8_t)(radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE);
     tiku_timer_stop(&observe_timer);
-    tiku_radio_arch_scan_stop();
+    tiku_radio_arch_scan_stop();    /* disarm RX; constlat_exit suppressed
+                                     * while held (below)                  */
     /* Teardown stragglers, then one final summary refresh + ring. */
     if (tiku_radio_arch_scan_service(scan_cb, &bg_ctx) != 0u ||
         bg_ctx.count != scan_last_count) {
@@ -617,12 +677,20 @@ void tiku_ble_adv_observe_stop(void)
             scan_notify_fn();
         }
     }
-    radio_owner = TIKU_BLE_ADV_OWNER_IDLE;
+    if (was_combined) {
+        /* The beacon survives and keeps the CONSTLAT hold; its timer is
+         * still armed and reverts to the plain (non-borrow) burst path. */
+        radio_owner = TIKU_BLE_ADV_OWNER_BEACON;
+    } else {
+        radio_owner = TIKU_BLE_ADV_OWNER_IDLE;
+        tiku_radio_arch_constlat_hold(0);
+    }
 }
 
 int tiku_ble_adv_observing(void)
 {
-    return (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE) ? 1 : 0;
+    return (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE ||
+            radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE) ? 1 : 0;
 }
 
 uint8_t tiku_ble_adv_observe_get(uint8_t idx, tiku_ble_adv_report_t *out)

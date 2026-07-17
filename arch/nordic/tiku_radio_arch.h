@@ -201,6 +201,17 @@ void tiku_radio_arch_scan_start(void);
 uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud);
 void tiku_radio_arch_scan_stop(void);
 
+/*
+ * Time-division radio borrow (R7.5): let a beacon share the radio with a
+ * running observer.  pause() disarms the RX engine and leaves the radio
+ * idle with TX shorts -- ready for tiku_radio_arch_adv_send() -- WITHOUT
+ * resetting the packet ring or dropping Constant Latency (the beacon
+ * session holds it).  resume() re-arms RX, ring intact.  Both are
+ * no-yield and must bracket a single burst from cooperative context.
+ */
+void tiku_radio_arch_scan_pause(void);
+void tiku_radio_arch_scan_resume(void);
+
 /* Bring-up diagnostics captured on the last transmitted channel: the radio
  * TX path is proven on-die when READY and DISABLED both read 1 (STATE
  * returns to 0/DISABLED) AND dbg_tx_iters shows the modulator held the TX

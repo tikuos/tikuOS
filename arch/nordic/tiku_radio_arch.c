@@ -525,21 +525,16 @@ void tiku_nordic_radio_isr(void)
 static tiku_clock_time_t scan_rot_wdl;
 static uint32_t          scan_rot_seen;
 
-void tiku_radio_arch_scan_start(void)
+/* Arm/disarm the RX engine WITHOUT touching Constant Latency or the
+ * packet ring -- the shared core of start/stop AND pause/resume (R7.5).
+ * A beacon sharing the radio (time-division) borrows it by disarm ->
+ * burst -> arm, and the ring MUST survive so packets queued before the
+ * burst are still delivered after it. */
+static void radio_scan_arm(void)
 {
-    radio_constlat_enter();                    /* erratum 20: before any RXEN  */
-    radio_xo_observe();                        /* clock-tree dbg counters only */
-
     /* RX ramps via RXREADY (distinct from TX's READY); PHYEND is
      * end-of-packet for BLE; ADDRESS latches an RSSI sample. */
     RADIO->SHORTS = (1u << 0) | (1u << 4) | (1u << 18) | (1u << 19);
-
-    scan_head = 0u;
-    scan_tail = 0u;
-    scan_addr_evts = 0u;
-    scan_crcok_evts = 0u;
-    scan_isr_count = 0u;
-    scan_chan = 0u;
     scan_active = 1u;
     RADIO->INTENSET00 = RADIO_INTEN00_DISABLED;
     tiku_nordic_nvic_set_priority(TIKU_NORDIC_IRQ_RADIO, 4u);
@@ -549,9 +544,57 @@ void tiku_radio_arch_scan_start(void)
     radio_window_wire();                       /* TIMER10 -> DPPI -> DISABLE */
 #endif
     radio_scan_arm_channel();
-    scan_rot_seen = 0u;
+    scan_rot_seen = scan_isr_count;            /* don't false-rotate on resume */
     scan_rot_wdl = (tiku_clock_time_t)(tiku_clock_time()
                                        + RADIO_SCAN_ROT_TICKS);
+}
+
+static void radio_scan_disarm(void)
+{
+    uint32_t spin;
+
+    scan_active = 0u;
+    RADIO->INTENCLR00 = RADIO_INTEN00_DISABLED;
+    tiku_nordic_nvic_disable(TIKU_NORDIC_IRQ_RADIO);
+#if RADIO_HW_WINDOW
+    radio_window_unwire();
+#endif
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    for (spin = 0u; spin < 40000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    RADIO->SHORTS = (1u << 0) | (1u << 19);     /* TX-only contract restored */
+}
+
+void tiku_radio_arch_scan_start(void)
+{
+    radio_constlat_enter();                    /* erratum 20: before any RXEN  */
+    radio_xo_observe();                        /* clock-tree dbg counters only */
+
+    scan_head = 0u;
+    scan_tail = 0u;
+    scan_addr_evts = 0u;
+    scan_crcok_evts = 0u;
+    scan_isr_count = 0u;
+    scan_chan = 0u;
+    radio_scan_arm();
+}
+
+/* Time-division borrow (R7.5): hand the radio to a TX burst and take it
+ * back, ring intact, Constant Latency untouched (the beacon session
+ * holds it).  pause() leaves the radio idle with TX shorts -- exactly
+ * what tiku_radio_arch_adv_send() expects. */
+void tiku_radio_arch_scan_pause(void)
+{
+    radio_scan_disarm();
+}
+
+void tiku_radio_arch_scan_resume(void)
+{
+    radio_scan_arm();
 }
 
 uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud)
@@ -587,29 +630,11 @@ uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud)
 
 void tiku_radio_arch_scan_stop(void)
 {
-    uint32_t spin;
-
-    /* Stop the ISR re-arming, then take the IRQ path out of the loop
-     * entirely and disable by direct poll (the ISR would otherwise
-     * consume the final DISABLED before we saw it). */
-    scan_active = 0u;
-    RADIO->INTENCLR00 = RADIO_INTEN00_DISABLED;
-    tiku_nordic_nvic_disable(TIKU_NORDIC_IRQ_RADIO);
-#if RADIO_HW_WINDOW
-    radio_window_unwire();                     /* stale window must never
-                                                * be able to kill a TX     */
-#endif
-    RADIO->EVENTS_DISABLED = 0u;
-    RADIO->TASKS_DISABLE = 1u;
-    for (spin = 0u; spin < 40000u; spin++) {
-        if (RADIO->EVENTS_DISABLED != 0u) {
-            break;
-        }
-    }
-
-    /* Leave the radio disabled + TX shorts restored for the next user.
-     * Ring stragglers stay queued -- one more scan_service() drains them. */
-    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    /* Disarm the RX engine (ISR out of the loop, radio idle, TX shorts
+     * restored -- ring stragglers stay queued for one more service),
+     * then release the per-op Constant Latency.  While a beacon session
+     * holds CONSTLAT (combined mode, R7.5) the exit is suppressed. */
+    radio_scan_disarm();
     radio_constlat_exit();
 }
 
