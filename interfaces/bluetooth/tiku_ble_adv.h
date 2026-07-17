@@ -170,6 +170,61 @@ int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms);
 int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
                              uint16_t ms, const char *prefix);
 
+/*---------------------------------------------------------------------------*/
+/* Radio ownership + background observer (R7)                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * One radio, one owner (kintsugi/radio.md R7): the beacon (M33 timer or
+ * FLPR-offloaded), a blocking scan, or the background observer.  Claims
+ * are denied, never queued -- a beacon cannot start while observing and
+ * vice versa (they would interleave TX bursts into live RX windows);
+ * the blocking scan keeps its historical coexistence with an M33-timer
+ * beacon (cooperative scheduling already serialises them).
+ */
+typedef enum {
+    TIKU_BLE_ADV_OWNER_IDLE = 0,
+    TIKU_BLE_ADV_OWNER_BEACON,          /**< M33 timer beacon              */
+    TIKU_BLE_ADV_OWNER_BEACON_FLPR,     /**< beacon offloaded to the FLPR  */
+    TIKU_BLE_ADV_OWNER_SCAN,            /**< blocking scan in flight       */
+    TIKU_BLE_ADV_OWNER_OBSERVE,         /**< background observer           */
+} tiku_ble_adv_owner_t;
+
+/** @brief Current radio owner. */
+tiku_ble_adv_owner_t tiku_ble_adv_owner(void);
+
+/** @brief Owner as a short string ("idle"/"beacon"/"beacon-flpr"/...). */
+const char *tiku_ble_adv_owner_str(void);
+
+/**
+ * @brief Start the background observer (non-blocking scan).
+ *
+ * The IRQ+hardware-window engine runs while the shell stays interactive;
+ * a kernel timer callback drains the packet ring every couple of ticks
+ * into the live results (tiku_ble_adv_last_scan_count/_best and the
+ * /sys/radio/scan node), firing the scan-notify hook whenever new
+ * packets landed -- `watch /sys/radio/scan` and the rules engine see
+ * every update.  Holds Constant Latency for the session (erratum 20).
+ *
+ * @param secs  Auto-stop after this many seconds; 0 = until
+ *              tiku_ble_adv_observe_stop().
+ * @return 0 on success, negative if the radio is owned (beacon active).
+ */
+int tiku_ble_adv_observe_start(uint16_t secs);
+
+/** @brief Stop the background observer.  Idempotent. */
+void tiku_ble_adv_observe_stop(void);
+
+/** @brief 1 while the background observer runs. */
+int tiku_ble_adv_observing(void);
+
+/**
+ * @brief Install the new-scan-data hook (called from timer-callback
+ *        context whenever the observer delivered packets).  The VFS
+ *        tree uses it to tiku_vfs_notify(/sys/radio/scan).
+ */
+void tiku_ble_adv_set_scan_notify(void (*fn)(void));
+
 /** @brief Devices heard by the most recent scan (0 before any scan). */
 uint8_t tiku_ble_adv_last_scan_count(void);
 

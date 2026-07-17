@@ -518,32 +518,15 @@ void tiku_nordic_radio_isr(void)
     }
 }
 
-/* Deliver everything the ISR queued.  SPSC: tail is ours, head is the
- * ISR's; volatile ordering is sufficient on this single core. */
-static void radio_scan_drain(tiku_radio_arch_scan_cb_t cb, void *ud)
+/* Safety-net rotation cadence: primary in fallback-tick builds (2 ticks);
+ * with the hardware window it is a counted anomaly detector only (4 ticks
+ * >> the 16 ms window -- it must never fire). */
+#define RADIO_SCAN_ROT_TICKS  ((tiku_clock_time_t)(RADIO_HW_WINDOW ? 4u : 2u))
+static tiku_clock_time_t scan_rot_wdl;
+static uint32_t          scan_rot_seen;
+
+void tiku_radio_arch_scan_start(void)
 {
-    while (scan_tail != scan_head) {
-        struct radio_scan_pkt *p = &scan_ring[scan_tail];
-        if (cb != (tiku_radio_arch_scan_cb_t)0) {
-            cb(p->buf, p->buf[1], p->rssi, ud);
-        }
-        scan_tail = (uint8_t)((scan_tail + 1u) % RADIO_SCAN_RING);
-    }
-}
-
-void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
-                          uint32_t *addr_evts, uint32_t *crcok_evts)
-{
-    tiku_clock_time_t t0 = tiku_clock_time();
-    tiku_clock_time_t span =
-        (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
-    tiku_clock_time_t wdl;
-    uint32_t seen, spin;
-
-    if (span == 0u) {
-        span = 1u;
-    }
-
     radio_constlat_enter();                    /* erratum 20: before any RXEN  */
     radio_xo_observe();                        /* clock-tree dbg counters only */
 
@@ -566,31 +549,48 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
     radio_window_wire();                       /* TIMER10 -> DPPI -> DISABLE */
 #endif
     radio_scan_arm_channel();
+    scan_rot_seen = 0u;
+    scan_rot_wdl = (tiku_clock_time_t)(tiku_clock_time()
+                                       + RADIO_SCAN_ROT_TICKS);
+}
 
-    /* Safety-net rotation: primary in fallback-tick builds (2 ticks);
-     * with the hardware window it is a counted anomaly detector only
-     * (4 ticks >> the 16 ms window -- it must never fire). */
-    seen = 0u;
-    wdl = (tiku_clock_time_t)(t0 + (RADIO_HW_WINDOW ? 4u : 2u));
-    while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span) {
-        tiku_clock_time_t now;
+uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud)
+{
+    uint8_t delivered = 0u;
 
-        tiku_watchdog_kick();                  /* scan blocks for seconds  */
-        radio_scan_drain(cb, ud);
-        now = tiku_clock_time();
-        if (scan_isr_count != seen) {          /* traffic: window is alive */
-            seen = scan_isr_count;
-            wdl = (tiku_clock_time_t)(now + (RADIO_HW_WINDOW ? 4u : 2u));
-        } else if (TIKU_CLOCK_LT(wdl, now)) {
-            tiku_radio_arch_dbg_win_forced++;
-            RADIO->TASKS_DISABLE = 1u;         /* silent channel: rotate   */
-            wdl = (tiku_clock_time_t)(now + (RADIO_HW_WINDOW ? 4u : 2u));
+    /* Drain everything the ISR queued.  SPSC: tail is ours, head is the
+     * ISR's; volatile ordering is sufficient on this single core. */
+    while (scan_tail != scan_head) {
+        struct radio_scan_pkt *p = &scan_ring[scan_tail];
+        if (cb != (tiku_radio_arch_scan_cb_t)0) {
+            cb(p->buf, p->buf[1], p->rssi, ud);
         }
-        tiku_nordic_wfe();                     /* sleep to the next IRQ    */
+        scan_tail = (uint8_t)((scan_tail + 1u) % RADIO_SCAN_RING);
+        delivered++;
     }
 
-    /* Teardown: stop the ISR re-arming, then take the IRQ path out of the
-     * loop entirely and disable by direct poll (the ISR would otherwise
+    /* Safety-net rotation (skipped once the engine is disarmed -- a
+     * post-stop service call only drains stragglers). */
+    if (scan_active) {
+        tiku_clock_time_t now = tiku_clock_time();
+        if (scan_isr_count != scan_rot_seen) {         /* traffic: alive   */
+            scan_rot_seen = scan_isr_count;
+            scan_rot_wdl = (tiku_clock_time_t)(now + RADIO_SCAN_ROT_TICKS);
+        } else if (TIKU_CLOCK_LT(scan_rot_wdl, now)) {
+            tiku_radio_arch_dbg_win_forced++;
+            RADIO->TASKS_DISABLE = 1u;                 /* silent: rotate   */
+            scan_rot_wdl = (tiku_clock_time_t)(now + RADIO_SCAN_ROT_TICKS);
+        }
+    }
+    return delivered;
+}
+
+void tiku_radio_arch_scan_stop(void)
+{
+    uint32_t spin;
+
+    /* Stop the ISR re-arming, then take the IRQ path out of the loop
+     * entirely and disable by direct poll (the ISR would otherwise
      * consume the final DISABLED before we saw it). */
     scan_active = 0u;
     RADIO->INTENCLR00 = RADIO_INTEN00_DISABLED;
@@ -606,7 +606,32 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
             break;
         }
     }
-    radio_scan_drain(cb, ud);                  /* packets from teardown    */
+
+    /* Leave the radio disabled + TX shorts restored for the next user.
+     * Ring stragglers stay queued -- one more scan_service() drains them. */
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    radio_constlat_exit();
+}
+
+void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
+                          uint32_t *addr_evts, uint32_t *crcok_evts)
+{
+    tiku_clock_time_t t0 = tiku_clock_time();
+    tiku_clock_time_t span =
+        (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
+
+    if (span == 0u) {
+        span = 1u;
+    }
+
+    tiku_radio_arch_scan_start();
+    while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span) {
+        tiku_watchdog_kick();                  /* scan blocks for seconds  */
+        (void)tiku_radio_arch_scan_service(cb, ud);
+        tiku_nordic_wfe();                     /* sleep to the next IRQ    */
+    }
+    tiku_radio_arch_scan_stop();
+    (void)tiku_radio_arch_scan_service(cb, ud);    /* teardown stragglers  */
 
     if (addr_evts != (uint32_t *)0) {
         *addr_evts += scan_addr_evts;
@@ -614,10 +639,6 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
     if (crcok_evts != (uint32_t *)0) {
         *crcok_evts += scan_crcok_evts;
     }
-
-    /* Leave the radio disabled + TX shorts restored for the next user. */
-    RADIO->SHORTS = (1u << 0) | (1u << 19);
-    radio_constlat_exit();
 }
 
 /*---------------------------------------------------------------------------*/

@@ -112,6 +112,20 @@ typedef void (*tiku_radio_arch_scan_cb_t)(const uint8_t *buf, uint8_t len,
 void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
                           uint32_t *addr_evts, uint32_t *crcok_evts);
 
+/*
+ * Non-blocking observer engine (R7): the same IRQ+hardware-window machine
+ * as the blocking scan, split so a background service can own it.
+ * start() arms it (holds Constant Latency until stop -- erratum 20);
+ * scan_service() drains the ISR's packet ring into @p cb and runs the
+ * counted safety rotation -- call it every tick or two from a timer
+ * callback; stop() disarms and releases the radio (one more service()
+ * call afterwards drains teardown stragglers).  The blocking scan is a
+ * start/service+WFE/stop wrapper around exactly these.
+ */
+void tiku_radio_arch_scan_start(void);
+uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud);
+void tiku_radio_arch_scan_stop(void);
+
 /* Bring-up diagnostics captured on the last transmitted channel: the radio
  * TX path is proven on-die when READY and DISABLED both read 1 (STATE
  * returns to 0/DISABLED) AND dbg_tx_iters shows the modulator held the TX

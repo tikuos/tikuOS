@@ -60,6 +60,24 @@ static uint8_t               scan_last_count;
 static tiku_ble_adv_report_t scan_last_best;
 static uint8_t               scan_have_best;
 
+/* Ownership arbiter (R7): one radio, one owner; deny, never queue.
+ * Replaces the scattered adv_offloaded checks as THE gate -- the
+ * adv_offloaded flag survives below purely as FLPR mechanics. */
+static uint8_t radio_owner;             /* tiku_ble_adv_owner_t            */
+
+tiku_ble_adv_owner_t tiku_ble_adv_owner(void)
+{
+    return (tiku_ble_adv_owner_t)radio_owner;
+}
+
+const char *tiku_ble_adv_owner_str(void)
+{
+    static const char *names[5] = {
+        "idle", "beacon", "beacon-flpr", "scan", "observe",
+    };
+    return names[radio_owner];
+}
+
 static void adv_radio_init_once(void)
 {
     if (!radio_inited) {
@@ -104,6 +122,14 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
     uint8_t ad[31], addr[6];
     uint8_t adlen = 0u, nlen;
     tiku_clock_time_t ticks;
+
+    /* Arbiter: a beacon's TX bursts would land inside the observer's
+     * live RX windows -- deny, never queue.  (Retune of a running
+     * beacon passes: owner is already BEACON*.) */
+    if (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE ||
+        radio_owner == TIKU_BLE_ADV_OWNER_SCAN) {
+        return -1;
+    }
 
     if (name == (const char *)0 || name[0] == '\0') {
         name = "tikuOS";
@@ -187,6 +213,7 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
         tiku_timer_stop(&adv_timer);
         adv_offloaded = 1u;
         adv_on = 1u;
+        radio_owner = TIKU_BLE_ADV_OWNER_BEACON_FLPR;
         return 0;
     }
     /* Retune fell back to the M33 path while offloaded (coprocessor died
@@ -205,6 +232,7 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
     adv_burst_count++;
     tiku_timer_set_callback(&adv_timer, ticks, adv_burst_cb, (void *)0);
     adv_on = 1u;
+    radio_owner = TIKU_BLE_ADV_OWNER_BEACON;
     return 0;
 }
 
@@ -223,6 +251,7 @@ void tiku_ble_adv_stop(void)
         adv_name[0] = '\0';
         adv_data_len = 0u;
         adv_interval_ms = 0u;
+        radio_owner = TIKU_BLE_ADV_OWNER_IDLE;
     }
 }
 
@@ -457,13 +486,23 @@ int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
                    ? (uint8_t)(TIKU_BLE_ADV_NAME_CAP + 1u)   /* matches none */
                    : (uint8_t)plen;
 
-#if (TIKU_FLPR_ENABLE + 0)
-    if (adv_offloaded) {
-        return -1;                  /* radio owned by the coprocessor      */
+    /* Arbiter: the engine is busy while observing, and the RADIO answers
+     * only on the NS alias while FLPR-offloaded.  An M33-timer beacon
+     * keeps its historical coexistence (cooperative scheduling: its
+     * bursts queue behind this blocking call), so claim SCAN and restore
+     * the prior owner afterwards. */
+    if (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE ||
+        radio_owner == TIKU_BLE_ADV_OWNER_BEACON_FLPR) {
+        return -1;
     }
-#endif
-    adv_radio_init_once();
-    tiku_radio_arch_scan(scan_cb, &ctx, ms, (uint32_t *)0, (uint32_t *)0);
+    {
+        uint8_t prev_owner = radio_owner;
+        radio_owner = TIKU_BLE_ADV_OWNER_SCAN;
+        adv_radio_init_once();
+        tiku_radio_arch_scan(scan_cb, &ctx, ms, (uint32_t *)0,
+                             (uint32_t *)0);
+        radio_owner = prev_owner;
+    }
 
     scan_last_count = ctx.count;
     scan_have_best = 0u;
@@ -474,6 +513,116 @@ int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
         }
     }
     return (int)ctx.count;
+}
+
+/*---------------------------------------------------------------------------*/
+/* Background observer (R7)                                                  */
+/*---------------------------------------------------------------------------*/
+/*
+ * The non-blocking half of the observer: the arch engine (IRQ + hardware
+ * windows) runs while the shell stays interactive, and a CALLBACK kernel
+ * timer drains the packet ring every 2 ticks into a persistent dedup
+ * table.  Results are live in the last-scan summary (and therefore
+ * `cat /sys/radio/scan`); every service pass that delivered packets
+ * fires the scan-notify hook, which the VFS tree maps to
+ * tiku_vfs_notify(/sys/radio/scan) -- `watch` and the rules engine ride
+ * the namespace event bus from there.
+ */
+
+#define OBSERVE_MAX_REPORTS  12u
+static tiku_ble_adv_report_t bg_reports[OBSERVE_MAX_REPORTS];
+static struct scan_ctx       bg_ctx;
+static struct tiku_timer     observe_timer;
+static tiku_clock_time_t     observe_deadline;
+static uint8_t               observe_forever;
+static void                (*scan_notify_fn)(void);
+
+void tiku_ble_adv_set_scan_notify(void (*fn)(void))
+{
+    scan_notify_fn = fn;
+}
+
+/* Refresh the /sys/radio-visible summary from the observer's table. */
+static void observe_update_summary(void)
+{
+    uint8_t i;
+
+    scan_last_count = bg_ctx.count;
+    scan_have_best = 0u;
+    for (i = 0u; i < bg_ctx.count; i++) {
+        if (!scan_have_best || bg_reports[i].rssi > scan_last_best.rssi) {
+            scan_last_best = bg_reports[i];
+            scan_have_best = 1u;
+        }
+    }
+}
+
+static void observe_tick_cb(void *ptr)
+{
+    uint8_t n;
+
+    (void)ptr;
+    if (radio_owner != TIKU_BLE_ADV_OWNER_OBSERVE) {
+        return;                     /* stopped between arm and dispatch    */
+    }
+    n = tiku_radio_arch_scan_service(scan_cb, &bg_ctx);
+    if (n != 0u) {
+        observe_update_summary();
+        if (scan_notify_fn != (void (*)(void))0) {
+            scan_notify_fn();       /* namespace event: re-read for value  */
+        }
+    }
+    if (!observe_forever &&
+        TIKU_CLOCK_LT(observe_deadline, tiku_clock_time())) {
+        tiku_ble_adv_observe_stop();
+        return;
+    }
+    tiku_timer_reset(&observe_timer);
+}
+
+int tiku_ble_adv_observe_start(uint16_t secs)
+{
+    if (radio_owner != TIKU_BLE_ADV_OWNER_IDLE) {
+        return -1;                  /* deny, never queue                   */
+    }
+    adv_radio_init_once();
+    bg_ctx.out = bg_reports;
+    bg_ctx.max = (uint8_t)OBSERVE_MAX_REPORTS;
+    bg_ctx.count = 0u;
+    bg_ctx.prefix = (const char *)0;
+    bg_ctx.plen = 0u;
+    scan_last_count = 0u;
+    scan_have_best = 0u;
+    tiku_radio_arch_scan_start();
+    radio_owner = TIKU_BLE_ADV_OWNER_OBSERVE;
+    observe_forever = (uint8_t)(secs == 0u);
+    observe_deadline = (tiku_clock_time_t)(tiku_clock_time() +
+                       (tiku_clock_time_t)secs * TIKU_CLOCK_SECOND);
+    tiku_timer_set_callback(&observe_timer, 2u, observe_tick_cb, (void *)0);
+    return 0;
+}
+
+void tiku_ble_adv_observe_stop(void)
+{
+    if (radio_owner != TIKU_BLE_ADV_OWNER_OBSERVE) {
+        return;
+    }
+    tiku_timer_stop(&observe_timer);
+    tiku_radio_arch_scan_stop();
+    /* Teardown stragglers, then one final summary refresh + ring. */
+    if (tiku_radio_arch_scan_service(scan_cb, &bg_ctx) != 0u ||
+        bg_ctx.count != scan_last_count) {
+        observe_update_summary();
+        if (scan_notify_fn != (void (*)(void))0) {
+            scan_notify_fn();
+        }
+    }
+    radio_owner = TIKU_BLE_ADV_OWNER_IDLE;
+}
+
+int tiku_ble_adv_observing(void)
+{
+    return (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE) ? 1 : 0;
 }
 
 uint8_t tiku_ble_adv_last_scan_count(void)

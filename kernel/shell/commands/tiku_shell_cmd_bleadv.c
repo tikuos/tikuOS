@@ -23,6 +23,11 @@
  *                          are kept (insert-time filter, so ambient traffic
  *                          cannot flood the table -- the TikuBench
  *                          reverse-nonce oracle's knob)
+ *   bleadv observe [secs]  BACKGROUND observer: the IRQ+hw-window engine
+ *                          scans while the shell stays interactive; live
+ *                          results in /sys/radio/scan (cat it, watch it,
+ *                          or hang a rule on it).  secs 0/absent = until
+ *                          `bleadv observe off`
  *   bleadv phy             probe all four BLE PHYs (1M/2M/S8/S2) with one
  *                          3-channel burst each; prints TX-window iteration
  *                          counts + ratios vs 1M.  ON-DIE proof only:
@@ -197,7 +202,8 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
 
     if (argc < 2) {
         SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
-                     " | scan [secs] [prefix] | phy | dbg\n");
+                     " | scan [secs] [prefix] | observe [secs|off]"
+                     " | phy | dbg\n");
         return;
     }
     if (strcmp(argv[1], "dbg") == 0) {
@@ -206,6 +212,35 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "phy") == 0) {
         bleadv_phy();
+        return;
+    }
+    if (strcmp(argv[1], "observe") == 0) {
+        if (argc >= 3 && strcmp(argv[2], "off") == 0) {
+            tiku_ble_adv_observe_stop();
+            SHELL_PRINTF("observer off (%u device%s in /sys/radio/scan)\n",
+                         (unsigned)tiku_ble_adv_last_scan_count(),
+                         (tiku_ble_adv_last_scan_count() == 1u) ? "" : "s");
+            return;
+        }
+        {
+            unsigned long s = 0ul;              /* 0 = until observe off */
+            if (argc >= 3) {
+                s = strtoul(argv[2], (char **)0, 10);
+                if (s > 3600ul) { s = 3600ul; }
+            }
+            if (tiku_ble_adv_observe_start((uint16_t)s) != 0) {
+                SHELL_PRINTF(SH_RED "radio busy (%s) -- bleadv off first\n"
+                             SH_RST, tiku_ble_adv_owner_str());
+                return;
+            }
+            if (s != 0ul) {
+                SHELL_PRINTF("observing in the background for %lu s"
+                             " (cat /sys/radio/scan)\n", s);
+            } else {
+                SHELL_PRINTF("observing in the background"
+                             " (cat /sys/radio/scan; bleadv observe off)\n");
+            }
+        }
         return;
     }
     if (strcmp(argv[1], "off") == 0) {

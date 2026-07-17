@@ -951,8 +951,26 @@ radio_bursts_read(char *buf, size_t max)
 static int
 radio_state_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%s\n",
-                    tiku_ble_adv_active() ? "beacon" : "idle");
+    /* The arbiter's owner IS the radio state:
+     * idle / beacon / beacon-flpr / scan / observe. */
+    return snprintf(buf, max, "%s\n", tiku_ble_adv_owner_str());
+}
+
+/* R7: the background observer's new-data hook -> namespace event.  The
+ * facade calls this from timer-callback context (not ISR) whenever the
+ * observer delivered packets; every /sys/radio/scan watcher (the watch
+ * command, the rules engine's subscribers) rings. */
+static void
+radio_scan_notify_hook(void)
+{
+    static const tiku_vfs_node_t *scan_node;
+
+    if (scan_node == NULL) {
+        scan_node = tiku_vfs_resolve("/sys/radio/scan");
+    }
+    if (scan_node != NULL) {
+        tiku_vfs_notify(scan_node);
+    }
 }
 
 static int
@@ -1261,4 +1279,10 @@ tiku_vfs_tree_sys_init(void)
     /* Validate/prime the device name ("tiku" until renamed via
      * /sys/device/name). */
     (void)tiku_persist_cell_init(&device_name_cell);
+
+#if (TIKU_HAS_BLE_ADV + 0)
+    /* R7: background-observer scan data -> /sys/radio/scan namespace
+     * events (watch / rules ride the bus from there). */
+    tiku_ble_adv_set_scan_notify(radio_scan_notify_hook);
+#endif
 }
