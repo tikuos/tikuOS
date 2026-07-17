@@ -104,6 +104,9 @@ static void bleadv_dbg(void)
                  (unsigned long)tiku_radio_arch_dbg_xo_stat,
                  (unsigned long)tiku_radio_arch_dbg_xo_wait,
                  (unsigned long)tiku_radio_arch_dbg_xo_restarts);
+    SHELL_PRINTF("WINDOW: hw=%lu forced=%lu (forced!=0 => DPPI window dead)\n",
+                 (unsigned long)tiku_radio_arch_dbg_win_hw,
+                 (unsigned long)tiku_radio_arch_dbg_win_forced);
 }
 
 static void bleadv_scan(unsigned secs, const char *prefix)

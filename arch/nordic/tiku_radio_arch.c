@@ -392,6 +392,62 @@ void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 #define TIKU_NORDIC_IRQ_RADIO   138    /* RADIO_0 = periph 0x8A @ 0x5008A000 */
 #define RADIO_INTEN00_DISABLED  (1u << 8)
 
+/* R6.2: hardware listen windows.  TIMER10 (free in GRTC-tick builds) +
+ * DPPIC10 channel 0, all inside the radio power domain: COMPARE[0]
+ * publishes to the channel, RADIO TASKS_DISABLE subscribes, so a silent
+ * channel closes after RADIO_SCAN_WINDOW_US with ZERO CPU involvement --
+ * the resulting DISABLED IRQ is the same hop path as a packet end.  The
+ * drain loop keeps a coarse-tick rotation as a COUNTED safety net
+ * (dbg_win_forced): with the hardware window alive it must read 0.
+ * The COMPARE0->STOP short makes each window one-shot; every channel
+ * arm restarts the timer.  In -DTIKU_NORDIC_TICK_TIMER10 builds the
+ * timer IS the kernel tick, so the radio falls back to the coarse
+ * rotation alone. */
+#if defined(TIKU_NORDIC_TICK_TIMER10)
+#define RADIO_HW_WINDOW 0
+#else
+#define RADIO_HW_WINDOW 1
+#define RADIO_SCAN_WINDOW_US  16000u    /* per-channel listen window       */
+#define RADIO_DPPI_CH_WINDOW  0u        /* DPPIC10 channel (no other user) */
+#endif
+
+uint32_t tiku_radio_arch_dbg_win_hw, tiku_radio_arch_dbg_win_forced;
+
+#if RADIO_HW_WINDOW
+static void radio_window_start(void)
+{
+    NRF_TIMER10_S->TASKS_STOP  = 1u;
+    NRF_TIMER10_S->TASKS_CLEAR = 1u;
+    NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+    NRF_TIMER10_S->TASKS_START = 1u;
+}
+
+static void radio_window_wire(void)
+{
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    NRF_TIMER10_S->MODE       = 0u;                    /* timer            */
+    NRF_TIMER10_S->BITMODE    = 3u;                    /* 32-bit           */
+    NRF_TIMER10_S->PRESCALER  = 4u;                    /* 16 MHz/16 = 1 MHz */
+    NRF_TIMER10_S->CC[0]      = RADIO_SCAN_WINDOW_US;
+    NRF_TIMER10_S->SHORTS     = (1u << 8);             /* COMPARE0 -> STOP */
+    NRF_TIMER10_S->PUBLISH_COMPARE[0] =
+        RADIO_DPPI_CH_WINDOW | (1u << 31);
+    RADIO->SUBSCRIBE_DISABLE = RADIO_DPPI_CH_WINDOW | (1u << 31);
+    NRF_DPPIC10_S->CHENSET   = (1u << RADIO_DPPI_CH_WINDOW);
+}
+
+/* MUST run at scan teardown: a live SUBSCRIBE_DISABLE would let a stale
+ * window later kill a TX burst mid-air. */
+static void radio_window_unwire(void)
+{
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    NRF_TIMER10_S->PUBLISH_COMPARE[0] = 0u;
+    RADIO->SUBSCRIBE_DISABLE = 0u;
+    NRF_DPPIC10_S->CHENCLR = (1u << RADIO_DPPI_CH_WINDOW);
+    NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+}
+#endif /* RADIO_HW_WINDOW */
+
 #define RADIO_SCAN_RING  8u
 struct radio_scan_pkt {
     uint8_t buf[48];                    /* [S0][LEN][S1 slot][payload...]  */
@@ -417,6 +473,9 @@ static void radio_scan_arm_channel(void)
     RADIO->EVENTS_CRCOK    = 0u;
     (void)RADIO->EVENTS_DISABLED;
     RADIO->TASKS_RXEN = 1u;
+#if RADIO_HW_WINDOW
+    radio_window_start();               /* fresh one-shot listen window    */
+#endif
 }
 
 /* RADIO_0 ISR: one DISABLED per packet end (or forced rotation).  Copy
@@ -430,6 +489,12 @@ void tiku_nordic_radio_isr(void)
     }
     RADIO->EVENTS_DISABLED = 0u;
     scan_isr_count++;
+#if RADIO_HW_WINDOW
+    if (NRF_TIMER10_S->EVENTS_COMPARE[0] != 0u) {
+        NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+        tiku_radio_arch_dbg_win_hw++;   /* hardware window closed this one */
+    }
+#endif
     if (RADIO->EVENTS_ADDRESS != 0u) {
         scan_addr_evts++;
     }
@@ -497,10 +562,16 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
     tiku_nordic_nvic_set_priority(TIKU_NORDIC_IRQ_RADIO, 4u);
     tiku_nordic_nvic_clear_pending(TIKU_NORDIC_IRQ_RADIO);
     tiku_nordic_nvic_enable(TIKU_NORDIC_IRQ_RADIO);
+#if RADIO_HW_WINDOW
+    radio_window_wire();                       /* TIMER10 -> DPPI -> DISABLE */
+#endif
     radio_scan_arm_channel();
 
+    /* Safety-net rotation: primary in fallback-tick builds (2 ticks);
+     * with the hardware window it is a counted anomaly detector only
+     * (4 ticks >> the 16 ms window -- it must never fire). */
     seen = 0u;
-    wdl = (tiku_clock_time_t)(t0 + 2u);        /* idle-channel deadline    */
+    wdl = (tiku_clock_time_t)(t0 + (RADIO_HW_WINDOW ? 4u : 2u));
     while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span) {
         tiku_clock_time_t now;
 
@@ -509,10 +580,11 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
         now = tiku_clock_time();
         if (scan_isr_count != seen) {          /* traffic: window is alive */
             seen = scan_isr_count;
-            wdl = (tiku_clock_time_t)(now + 2u);
+            wdl = (tiku_clock_time_t)(now + (RADIO_HW_WINDOW ? 4u : 2u));
         } else if (TIKU_CLOCK_LT(wdl, now)) {
+            tiku_radio_arch_dbg_win_forced++;
             RADIO->TASKS_DISABLE = 1u;         /* silent channel: rotate   */
-            wdl = (tiku_clock_time_t)(now + 2u);
+            wdl = (tiku_clock_time_t)(now + (RADIO_HW_WINDOW ? 4u : 2u));
         }
         tiku_nordic_wfe();                     /* sleep to the next IRQ    */
     }
@@ -523,6 +595,10 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
     scan_active = 0u;
     RADIO->INTENCLR00 = RADIO_INTEN00_DISABLED;
     tiku_nordic_nvic_disable(TIKU_NORDIC_IRQ_RADIO);
+#if RADIO_HW_WINDOW
+    radio_window_unwire();                     /* stale window must never
+                                                * be able to kill a TX     */
+#endif
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
     for (spin = 0u; spin < 40000u; spin++) {

@@ -123,5 +123,11 @@ extern uint32_t tiku_radio_arch_dbg_ru_iters, tiku_radio_arch_dbg_tx_iters;
  * poll iterations the XOTUNED wait took (0-ish = XO was hot). */
 extern uint32_t tiku_radio_arch_dbg_xo_stat, tiku_radio_arch_dbg_xo_wait;
 extern uint32_t tiku_radio_arch_dbg_xo_restarts;
+/* Scan-window diagnostics (R6.2): win_hw counts channels closed by the
+ * TIMER10->DPPI hardware window; win_forced counts the drain loop's
+ * coarse safety rotation.  With the hardware window alive, forced MUST
+ * read 0 -- a nonzero value means the DPPI wiring is dead and the scan
+ * is silently limping on the fallback. */
+extern uint32_t tiku_radio_arch_dbg_win_hw, tiku_radio_arch_dbg_win_forced;
 
 #endif /* TIKU_NORDIC_RADIO_ARCH_H_ */
