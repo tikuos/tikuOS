@@ -99,7 +99,24 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
                                   uint32_t ms);
 extern uint32_t tiku_radio_arch_dbg_connadv_tx;
 extern uint32_t tiku_radio_arch_dbg_connadv_scanreq;
+extern uint32_t tiku_radio_arch_dbg_connadv_rsp;   /* SCAN_RSPs (L2)     */
+extern uint32_t tiku_radio_arch_dbg_connadv_tifs;  /* measured T_IFS, us */
 extern uint32_t tiku_radio_arch_dbg_connadv_rxother;
+
+/**
+ * @brief CSA#1 next data channel (L3 groundwork; Core 4.5.8.2).
+ *
+ * @param last_unmapped  Previous UNMAPPED channel (advance with
+ *                       @p unmapped_out, never with the return value --
+ *                       the classic implementation bug).
+ * @param hop            hopIncrement from CONNECT_IND (5..16).
+ * @param chmap          37-bit channel map, LSB-first (5 bytes).
+ * @param unmapped_out   Receives the new unmapped channel.
+ * @return The (possibly remapped) data channel to use.
+ */
+uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
+                                const uint8_t chmap[5],
+                                uint8_t *unmapped_out);
 
 /**
  * @brief One extended advertising event at 1M (R8.3a, blocking ~1.3 ms).

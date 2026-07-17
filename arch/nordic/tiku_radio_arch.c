@@ -733,13 +733,34 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
 
 uint32_t tiku_radio_arch_dbg_connadv_tx;      /* ADV_INDs transmitted     */
 uint32_t tiku_radio_arch_dbg_connadv_scanreq; /* SCAN_REQs heard (for us) */
+uint32_t tiku_radio_arch_dbg_connadv_rsp;     /* SCAN_RSPs launched (L2)  */
+uint32_t tiku_radio_arch_dbg_connadv_tifs;    /* measured RX-end->TX gap  */
 uint32_t tiku_radio_arch_dbg_connadv_rxother; /* CRC-OK, not for us       */
+
+/* L2 additions on the same probe: TIFS=150 makes BOTH turnarounds
+ * hardware-spaced (the radio times ramp-up so RX opens / TX first-bit
+ * lands exactly at T_IFS -- the designed use of the register), and the
+ * RX leg arms the DISABLED_TXEN short so a SCAN_RSP launches with zero
+ * CPU in the timing path.  The CPU's decision window is the ~70 us
+ * before the auto-TX's ramp: SCAN_REQ for us -> swap PACKETPTR to the
+ * SCAN_RSP; anything else -> clear the short FIRST, then disable (the
+ * order matters -- a disable fires DISABLED, and a still-armed short
+ * would chain a garbage TX).  After a launched response, the short is
+ * cleared during the TX (post-READY) so its own DISABLED cannot chain.
+ *
+ * The T_IFS oracle is hardware: TIMER10 free-runs; DPPI ch3 captures
+ * CC[3] on every PHYEND (last one before the response = RX end), ch4
+ * captures CC[4] on every ADDRESS (last one = our TX's access-address
+ * end = T_IFS + 40 us of preamble+AA).  gap = CC4 - CC3 - 40. */
+#define CONNADV_DPPI_CH_PHYEND 3u
+#define CONNADV_DPPI_CH_ADDR   4u
 
 int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
                                   uint8_t ad_len, uint8_t lldata[22],
                                   uint32_t ms)
 {
     static uint8_t adv[48] __attribute__((aligned(4)));
+    static uint8_t rsp[48] __attribute__((aligned(4)));
     static uint8_t rx[48] __attribute__((aligned(4)));
     tiku_clock_time_t t0 = tiku_clock_time();
     tiku_clock_time_t span =
@@ -747,24 +768,45 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
     uint8_t chan = 0u;
     int got = 0;
 
-    /* ADV_IND: same body as ADV_NONCONN_IND, header type 0 + TxAdd. */
+    /* ADV_IND + SCAN_RSP share the body; only the header type differs. */
     (void)tiku_radio_arch_adv_build(adv, addr, ad, ad_len);
-    adv[0] = 0x40u;                            /* type 0, TxAdd=1          */
+    adv[0] = 0x40u;                            /* ADV_IND, TxAdd=1         */
+    (void)tiku_radio_arch_adv_build(rsp, addr, ad, ad_len);
+    rsp[0] = 0x44u;                            /* SCAN_RSP, TxAdd=1        */
 
     tiku_radio_arch_dbg_connadv_tx = 0u;
     tiku_radio_arch_dbg_connadv_scanreq = 0u;
+    tiku_radio_arch_dbg_connadv_rsp = 0u;
+    tiku_radio_arch_dbg_connadv_tifs = 0u;
     tiku_radio_arch_dbg_connadv_rxother = 0u;
 
     radio_constlat_enter();                    /* erratum 20 bracket       */
     radio_xo_observe();
     radio_hfclk_kick();
+    RADIO->TIFS = 150u;                        /* hardware T_IFS spacing   */
+
+    /* T_IFS measurement fabric: free-running 1 MHz TIMER10 + captures. */
+    NRF_TIMER10_S->TASKS_STOP  = 1u;
+    NRF_TIMER10_S->TASKS_CLEAR = 1u;
+    NRF_TIMER10_S->MODE      = 0u;
+    NRF_TIMER10_S->BITMODE   = 3u;
+    NRF_TIMER10_S->PRESCALER = 4u;
+    NRF_TIMER10_S->SHORTS    = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[3] = CONNADV_DPPI_CH_PHYEND | (1u << 31);
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[4] = CONNADV_DPPI_CH_ADDR   | (1u << 31);
+    RADIO->PUBLISH_PHYEND  = CONNADV_DPPI_CH_PHYEND | (1u << 31);
+    RADIO->PUBLISH_ADDRESS = CONNADV_DPPI_CH_ADDR   | (1u << 31);
+    NRF_DPPIC10_S->CHENSET = (1u << CONNADV_DPPI_CH_PHYEND) |
+                             (1u << CONNADV_DPPI_CH_ADDR);
+    NRF_TIMER10_S->TASKS_START = 1u;
 
     while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span && !got) {
         uint32_t spin;
 
         tiku_watchdog_kick();
 
-        /* TX leg: auto TX->RX via the DISABLED_RXEN short. */
+        /* TX leg: auto TX->RX via the DISABLED_RXEN short (RX opens at
+         * T_IFS by hardware). */
         RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 3) | (1u << 4);
         RADIO->FREQUENCY = adv_freq[chan];
         RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
@@ -781,10 +823,10 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
         }
         tiku_radio_arch_dbg_connadv_tx++;
 
-        /* RX leg is already ramping (hardware short).  Kill the short so
-         * the RX's own disable cannot re-arm, and hand the DMA our
-         * buffer -- both inside the ~40 us ramp. */
-        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+        /* RX leg is ramping (hardware short).  Swap to the response
+         * shorts -- the RX's own disable now chains a T_IFS-spaced TXEN
+         * -- and hand the DMA our buffer, inside the ramp. */
+        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 2) | (1u << 4);
         RADIO->PACKETPTR = (uint32_t)rx;
         RADIO->EVENTS_DISABLED = 0u;
         (void)RADIO->EVENTS_DISABLED;
@@ -797,27 +839,82 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
             }
         }
         if (RADIO->EVENTS_DISABLED == 0u) {
-            RADIO->TASKS_DISABLE = 1u;
+            RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+            RADIO->TASKS_DISABLE = 1u;         /* short cleared FIRST      */
             for (spin = 0u; spin < 40000u; spin++) {
                 if (RADIO->EVENTS_DISABLED != 0u) {
                     break;
                 }
             }
-        } else if (RADIO->EVENTS_CRCOK != 0u) {
+        } else {
             uint8_t type = (uint8_t)(rx[0] & 0x0Fu);
-            if (type == 0x05u && rx[1] == 34u &&
-                memcmp(&rx[9], addr, 6u) == 0) {
-                memcpy(lldata, &rx[15], 22u);  /* CONNECT_IND, for us      */
-                got = 1;
-            } else if (type == 0x03u && rx[1] == 12u &&
-                       memcmp(&rx[9], addr, 6u) == 0) {
+            uint8_t forus = (RADIO->EVENTS_CRCOK != 0u &&
+                             memcmp(&rx[9], addr, 6u) == 0) ? 1u : 0u;
+
+            if (forus && type == 0x03u && rx[1] == 12u) {
+                /* SCAN_REQ for us: the T_IFS TX is already counting
+                 * down in hardware -- give it the SCAN_RSP.  Snapshot
+                 * the RX-end capture NOW (the response's own PHYEND
+                 * will overwrite CC[3]), wait for the ramp (READY),
+                 * then clear the DISABLED_TXEN short DURING the TX so
+                 * its end cannot chain another. */
+                uint32_t rx_end = NRF_TIMER10_S->CC[3];
+                RADIO->PACKETPTR = (uint32_t)rsp;
+                RADIO->EVENTS_READY = 0u;
+                RADIO->EVENTS_DISABLED = 0u;
+                (void)RADIO->EVENTS_DISABLED;
                 tiku_radio_arch_dbg_connadv_scanreq++;
+                for (spin = 0u; spin < 100000u; spin++) {
+                    if (RADIO->EVENTS_READY != 0u) {
+                        break;
+                    }
+                }
+                RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+                for (spin = 0u; spin < 400000u; spin++) {
+                    if (RADIO->EVENTS_DISABLED != 0u) {
+                        break;
+                    }
+                }
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    /* CC[4] = our TX's ADDRESS = first bit + 40 us of
+                     * preamble+AA; T_IFS = first bit - RX end. */
+                    uint32_t gap = NRF_TIMER10_S->CC[4] - rx_end;
+                    tiku_radio_arch_dbg_connadv_rsp++;
+                    if (gap > 40u && gap < 1000u) {
+                        tiku_radio_arch_dbg_connadv_tifs = gap - 40u;
+                    }
+                }
             } else {
-                tiku_radio_arch_dbg_connadv_rxother++;
+                /* Not our SCAN_REQ: kill the pending auto-TX.  Clear
+                 * the short BEFORE disabling -- the disable's DISABLED
+                 * event would otherwise chain a garbage TX. */
+                RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+                RADIO->TASKS_DISABLE = 1u;
+                for (spin = 0u; spin < 40000u; spin++) {
+                    if (RADIO->EVENTS_DISABLED != 0u) {
+                        break;
+                    }
+                }
+                if (forus && type == 0x05u && rx[1] == 34u) {
+                    memcpy(lldata, &rx[15], 22u);  /* CONNECT_IND       */
+                    got = 1;
+                } else if (RADIO->EVENTS_CRCOK != 0u) {
+                    tiku_radio_arch_dbg_connadv_rxother++;
+                }
             }
         }
         chan = (uint8_t)((chan + 1u) % 3u);
     }
+
+    /* Unwire the measurement fabric + TIFS. */
+    RADIO->PUBLISH_PHYEND  = 0u;
+    RADIO->PUBLISH_ADDRESS = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[3] = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[4] = 0u;
+    NRF_DPPIC10_S->CHENCLR = (1u << CONNADV_DPPI_CH_PHYEND) |
+                             (1u << CONNADV_DPPI_CH_ADDR);
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    RADIO->TIFS = 0u;
 
     /* Restore the TX-only shorts contract. */
     RADIO->EVENTS_DISABLED = 0u;
@@ -833,6 +930,49 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
     RADIO->SHORTS = (1u << 0) | (1u << 19);
     radio_constlat_exit();
     return got;
+}
+
+/*---------------------------------------------------------------------------*/
+/* CSA#1 channel selection (L3 groundwork)                                   */
+/*---------------------------------------------------------------------------*/
+/*
+ * Channel Selection Algorithm #1 (Core Vol 6 Part B 4.5.8.2), the hop
+ * engine every legacy connection uses:
+ *   unmapped = (lastUnmapped + hopIncrement) mod 37
+ *   used?    -> channel = unmapped
+ *   unused?  -> channel = usedChannels[unmapped mod numUsed] (ascending)
+ * lastUnmapped advances to `unmapped` either way -- the classic
+ * implementation bug is advancing to the REMAPPED channel.
+ * Verified against an independent Python implementation via the baked
+ * vectors in `bleadv csa1` (three maps incl. heavy remapping).
+ */
+
+uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
+                                const uint8_t chmap[5],
+                                uint8_t *unmapped_out)
+{
+    uint8_t un = (uint8_t)((last_unmapped + hop) % 37u);
+    uint8_t n = 0u, idx, c;
+
+    *unmapped_out = un;
+    if (chmap[un >> 3] & (uint8_t)(1u << (un & 7u))) {
+        return un;
+    }
+    for (c = 0u; c < 37u; c++) {               /* numUsed                  */
+        if (chmap[c >> 3] & (uint8_t)(1u << (c & 7u))) {
+            n++;
+        }
+    }
+    idx = (uint8_t)(un % n);
+    for (c = 0u; c < 37u; c++) {               /* idx-th used, ascending   */
+        if (chmap[c >> 3] & (uint8_t)(1u << (c & 7u))) {
+            if (idx == 0u) {
+                return c;
+            }
+            idx--;
+        }
+    }
+    return 0u;                                 /* unreachable (n >= 1)     */
 }
 
 /*---------------------------------------------------------------------------*/
