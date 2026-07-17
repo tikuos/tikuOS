@@ -75,8 +75,51 @@
 #define BLE_ADV_CRC_INIT       0x00555555UL   /* advertising CRC init         */
 #define BLE_WHITE_POLY         0x00890000UL   /* DATAWHITE POLY field (0x89)  */
 
-/* TXPOWER enum code: +8 dBm, the strongest setting (0 dBm = 0x018). */
-#define BLE_TXPOWER_POS8DBM    0x03FUL
+/* TXPOWER is an ENUMERATED code, not signed dBm (+8 dBm = 0x03F, 0 dBm =
+ * 0x018 -- the bring-up lesson).  The MDK's dBm-named codes are the only
+ * legal contract; the table below is identical across L15/LM20A/B.
+ * Discrete steps only: an unlisted dBm request is rejected, never rounded
+ * -- on a microwatt budget an explicit power request that cannot be
+ * honoured exactly should fail loudly. */
+static const struct {
+    int8_t   dbm;
+    uint16_t code;
+} radio_txpower_map[] = {
+    {   8, RADIO_TXPOWER_TXPOWER_Pos8dBm  },
+    {   7, RADIO_TXPOWER_TXPOWER_Pos7dBm  },
+    {   6, RADIO_TXPOWER_TXPOWER_Pos6dBm  },
+    {   5, RADIO_TXPOWER_TXPOWER_Pos5dBm  },
+    {   4, RADIO_TXPOWER_TXPOWER_Pos4dBm  },
+    {   3, RADIO_TXPOWER_TXPOWER_Pos3dBm  },
+    {   2, RADIO_TXPOWER_TXPOWER_Pos2dBm  },
+    {   1, RADIO_TXPOWER_TXPOWER_Pos1dBm  },
+    {   0, RADIO_TXPOWER_TXPOWER_0dBm     },
+    {  -1, RADIO_TXPOWER_TXPOWER_Neg1dBm  },
+    {  -2, RADIO_TXPOWER_TXPOWER_Neg2dBm  },
+    {  -3, RADIO_TXPOWER_TXPOWER_Neg3dBm  },
+    {  -4, RADIO_TXPOWER_TXPOWER_Neg4dBm  },
+    {  -5, RADIO_TXPOWER_TXPOWER_Neg5dBm  },
+    {  -6, RADIO_TXPOWER_TXPOWER_Neg6dBm  },
+    {  -7, RADIO_TXPOWER_TXPOWER_Neg7dBm  },
+    {  -8, RADIO_TXPOWER_TXPOWER_Neg8dBm  },
+    {  -9, RADIO_TXPOWER_TXPOWER_Neg9dBm  },
+    { -10, RADIO_TXPOWER_TXPOWER_Neg10dBm },
+    { -12, RADIO_TXPOWER_TXPOWER_Neg12dBm },
+    { -14, RADIO_TXPOWER_TXPOWER_Neg14dBm },
+    { -16, RADIO_TXPOWER_TXPOWER_Neg16dBm },
+    { -18, RADIO_TXPOWER_TXPOWER_Neg18dBm },
+    { -20, RADIO_TXPOWER_TXPOWER_Neg20dBm },
+    { -22, RADIO_TXPOWER_TXPOWER_Neg22dBm },
+    { -28, RADIO_TXPOWER_TXPOWER_Neg28dBm },
+    { -40, RADIO_TXPOWER_TXPOWER_Neg40dBm },
+    { -46, RADIO_TXPOWER_TXPOWER_Neg46dBm },
+};
+
+/* Current setting: default +8 dBm (the strongest), applied at init and
+ * re-applied on every set_txpower once the radio has been configured. */
+static uint32_t radio_txpower_code = RADIO_TXPOWER_TXPOWER_Pos8dBm;
+static int8_t   radio_txpower_dbm  = 8;
+static uint8_t  radio_arch_inited;
 
 /* The three primary advertising channels: RF frequency offset (2400+f MHz)
  * and the BLE logical channel index used for the whitening IV. */
@@ -174,10 +217,39 @@ void tiku_radio_arch_init(void)
     RADIO->CRCPOLY = BLE_ADV_CRC_POLY;
     RADIO->CRCINIT = BLE_ADV_CRC_INIT;
 
-    RADIO->TXPOWER = BLE_TXPOWER_POS8DBM;       /* +8 dBm (enum, not 0!)       */
+    RADIO->TXPOWER = radio_txpower_code;        /* enum code, not dBm!         */
 
     /* Auto-sequence: ramp-up -> READY -> (start) -> tx -> PHYEND -> (disable). */
     RADIO->SHORTS = (1u << 0) | (1u << 19);     /* READY_START | PHYEND_DISABLE */
+    radio_arch_inited = 1u;
+}
+
+int tiku_radio_arch_set_txpower(int8_t dbm)
+{
+    uint8_t i;
+
+    for (i = 0u; i < sizeof(radio_txpower_map) / sizeof(radio_txpower_map[0]);
+         i++) {
+        if (radio_txpower_map[i].dbm == dbm) {
+            radio_txpower_dbm  = dbm;
+            radio_txpower_code = radio_txpower_map[i].code;
+            if (radio_arch_inited) {
+                /* Applied at the next ramp-up; safe between bursts.  The
+                 * CALLER guarantees the RADIO answers on the secure alias
+                 * -- while the FLPR owns it (beacon offload) this write
+                 * would be a precise bus fault, so the facade reclaims
+                 * the peripheral around it. */
+                RADIO->TXPOWER = radio_txpower_code;
+            }
+            return 0;
+        }
+    }
+    return -1;                                 /* not a silicon-legal step     */
+}
+
+int8_t tiku_radio_arch_txpower(void)
+{
+    return radio_txpower_dbm;
 }
 
 /**

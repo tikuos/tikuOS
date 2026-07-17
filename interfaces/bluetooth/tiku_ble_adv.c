@@ -249,6 +249,46 @@ uint8_t tiku_ble_adv_data(const uint8_t **out)
     return adv_data_len;
 }
 
+int tiku_ble_adv_set_txpower(int8_t dbm)
+{
+#if (TIKU_FLPR_ENABLE + 0)
+    if (adv_offloaded) {
+        /* The RADIO answers only on its NonSecure alias while the FLPR
+         * owns it -- a TXPOWER write through the secure alias is a
+         * precise bus fault (the F4 retune lesson).  Reclaim, set, then
+         * re-arm through beacon_data so the proven offload/fallback
+         * interlocks (timer kill, SPU flip-back on a dead coprocessor)
+         * all apply.  Copies because beacon_data writes the same
+         * statics it reads. */
+        char    nm[TIKU_BLE_ADV_NAME_CAP + 1];
+        uint8_t d[TIKU_BLE_ADV_DATA_CAP];
+        uint8_t dl;
+
+        tiku_flpr_arch_beacon_stop();
+        if (tiku_radio_arch_set_txpower(dbm) != 0) {
+            /* Invalid step: restore the offloaded beacon unchanged. */
+            (void)tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len,
+                                        adv_interval_ms);
+            return -1;
+        }
+        memcpy(nm, adv_name, sizeof(nm));
+        dl = adv_data_len;
+        memcpy(d, adv_data, sizeof(d));
+        return tiku_ble_adv_beacon_data(nm, adv_interval_ms,
+                                        dl ? d : (const uint8_t *)0, dl);
+    }
+#endif
+    /* Idle or M33-timer beacon: the register write lands between bursts
+     * and is latched at the next ramp-up.  Pre-init calls just store the
+     * value; init applies it. */
+    return tiku_radio_arch_set_txpower(dbm);
+}
+
+int8_t tiku_ble_adv_txpower(void)
+{
+    return tiku_radio_arch_txpower();
+}
+
 uint32_t tiku_ble_adv_bursts(void)
 {
 #if (TIKU_FLPR_ENABLE + 0)
@@ -267,6 +307,8 @@ struct scan_ctx {
     tiku_ble_adv_report_t *out;
     uint8_t max;
     uint8_t count;
+    const char *prefix;                 /* insert-time name filter (or NULL) */
+    uint8_t plen;
 };
 
 /* Extract the Local Name (complete 0x09 preferred over shortened 0x08)
@@ -295,13 +337,51 @@ static void scan_parse_name(const uint8_t *ad, uint8_t ad_len, char *out)
     }
 }
 
-/* Per-CRC-OK-packet: dedup by AdvA, keep strongest RSSI + first name. */
+/* 'TK'-manufacturer-data fallback name, used only while a filter is
+ * armed: a BlueZ host CANNOT put its Local Name in a legacy ADV payload
+ * (instances append the name to the SCAN RESPONSE -- kernel
+ * MGMT_ADV_FLAG_LOCAL_NAME semantics; hardware-measured: the host showed
+ * up as a strong nameless ADV_SCAN_IND), so the reverse-nonce oracle
+ * ships its nonce as ASCII after the 'TK' company id (0x4B54, our own
+ * beacon marker) -- manufacturer data DOES ride in the ADV payload.
+ * Restricted to the TK id so ambient vendor blobs (Apple beacons etc.)
+ * can never masquerade as a name. */
+static void scan_parse_mfr_tk(const uint8_t *ad, uint8_t ad_len, char *out)
+{
+    uint8_t i = 0u;
+    while ((uint8_t)(i + 1u) < ad_len) {
+        uint8_t l = ad[i];
+        uint8_t t = ad[i + 1u];
+        if (l == 0u || (uint8_t)(i + 1u + l) > ad_len) {
+            break;
+        }
+        if (t == 0xFFu && l >= 4u &&
+            ad[i + 2u] == (uint8_t)'T' && ad[i + 3u] == (uint8_t)'K') {
+            uint8_t n = (uint8_t)(l - 3u);
+            if (n > TIKU_BLE_ADV_NAME_CAP) {
+                n = TIKU_BLE_ADV_NAME_CAP;
+            }
+            memcpy(out, &ad[i + 4u], n);
+            out[n] = '\0';
+            return;
+        }
+        i = (uint8_t)(i + 1u + l);
+    }
+}
+
+/* Per-CRC-OK-packet: dedup by AdvA, keep strongest RSSI + first name.
+ * With a prefix filter armed, the name gates SLOT ALLOCATION: in a busy
+ * environment the small report table would otherwise fill with ambient
+ * advertisers before the sought device is heard (the reason the TikuBench
+ * reverse-nonce oracle needs this).  Nameless PDUs (incl. ADV_DIRECT_IND,
+ * whose payload carries TargetA, not AD) are dropped while filtering. */
 static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
 {
     struct scan_ctx *ctx = (struct scan_ctx *)ud;
     uint8_t type = (uint8_t)(buf[0] & 0x0Fu);
     const uint8_t *adva = &buf[3];      /* erratum-49 S1 slot at buf[2]     */
     tiku_ble_adv_report_t *slot = (tiku_ble_adv_report_t *)0;
+    char name[TIKU_BLE_ADV_NAME_CAP + 1];
     uint8_t i;
 
     /* Only PDUs whose payload begins with AdvA: ADV_IND(0),
@@ -310,6 +390,23 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
     if (len < 6u ||
         !(type == 0u || type == 1u || type == 2u || type == 4u ||
           type == 6u)) {
+        return;
+    }
+
+    /* Parse the Local Name up front: the insert-time filter needs it, and
+     * a later sighting may fill a name the first packet lacked.  AD
+     * structures follow AdvA except for ADV_DIRECT_IND (TargetA). */
+    name[0] = '\0';
+    if (type != 1u && len > 6u) {
+        scan_parse_name(&buf[9], (uint8_t)(len - 6u), name);
+        /* Filter armed + no Local Name: accept the 'TK' manufacturer
+         * ASCII as the name (see scan_parse_mfr_tk -- the only legacy
+         * ADV slot a BlueZ oracle can actually reach). */
+        if (name[0] == '\0' && ctx->plen != 0u) {
+            scan_parse_mfr_tk(&buf[9], (uint8_t)(len - 6u), name);
+        }
+    }
+    if (ctx->plen != 0u && strncmp(name, ctx->prefix, ctx->plen) != 0) {
         return;
     }
 
@@ -331,15 +428,21 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
     } else if (rssi > slot->rssi) {
         slot->rssi = rssi;
     }
-    /* AD structures follow AdvA except for ADV_DIRECT_IND (TargetA). */
-    if (slot->name[0] == '\0' && type != 1u && len > 6u) {
-        scan_parse_name(&buf[9], (uint8_t)(len - 6u), slot->name);
+    if (slot->name[0] == '\0' && name[0] != '\0') {
+        memcpy(slot->name, name, sizeof(name));
     }
 }
 
 int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms)
 {
+    return tiku_ble_adv_scan_filter(out, max, ms, (const char *)0);
+}
+
+int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
+                             uint16_t ms, const char *prefix)
+{
     struct scan_ctx ctx;
+    size_t plen;
     uint8_t i;
 
     if (out == (tiku_ble_adv_report_t *)0 || max == 0u) {
@@ -348,6 +451,11 @@ int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms)
     ctx.out = out;
     ctx.max = max;
     ctx.count = 0u;
+    ctx.prefix = prefix;
+    plen = (prefix != (const char *)0) ? strlen(prefix) : 0u;
+    ctx.plen = (plen > TIKU_BLE_ADV_NAME_CAP)
+                   ? (uint8_t)(TIKU_BLE_ADV_NAME_CAP + 1u)   /* matches none */
+                   : (uint8_t)plen;
 
 #if (TIKU_FLPR_ENABLE + 0)
     if (adv_offloaded) {

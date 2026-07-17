@@ -124,6 +124,23 @@ uint8_t tiku_ble_adv_data(const uint8_t **out);
 uint32_t tiku_ble_adv_bursts(void);
 
 /**
+ * @brief Set the beacon TX power in dBm (default +8, the strongest).
+ *
+ * Only the silicon's discrete steps are legal (+8..+1, 0..-10, -12..-20
+ * even, -22, -28, -40, -46 on nRF54L); anything else is rejected, never
+ * rounded.  Takes effect from the next burst; safe while a beacon is
+ * active -- on the FLPR-offloaded path the facade transparently reclaims
+ * the radio, applies the power, and re-arms the offload (or falls back to
+ * the M33 timer if the coprocessor died).
+ *
+ * @return 0 on success, negative if @p dbm is not a legal step.
+ */
+int tiku_ble_adv_set_txpower(int8_t dbm);
+
+/** @brief Currently configured TX power in dBm. */
+int8_t tiku_ble_adv_txpower(void);
+
+/**
  * @brief Passive scan of the advertising channels (blocking, watchdog-safe).
  *
  * Deduplicates by address, keeps the strongest RSSI per device and the
@@ -138,6 +155,20 @@ uint32_t tiku_ble_adv_bursts(void);
  *         backend.
  */
 int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms);
+
+/**
+ * @brief Passive scan keeping only advertisers whose Local Name starts
+ *        with @p prefix.
+ *
+ * The filter gates SLOT ALLOCATION, not display: ambient advertisers can
+ * no longer fill the small report table before the sought device is heard
+ * -- what makes a "did the board hear THIS beacon?" oracle deterministic
+ * in a busy office.  Nameless advertisements are dropped while a filter
+ * is armed.  @p prefix NULL or "" behaves exactly like
+ * tiku_ble_adv_scan().
+ */
+int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
+                             uint16_t ms, const char *prefix);
 
 /** @brief Devices heard by the most recent scan (0 before any scan). */
 uint8_t tiku_ble_adv_last_scan_count(void);

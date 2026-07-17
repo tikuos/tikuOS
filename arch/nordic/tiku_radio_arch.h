@@ -37,6 +37,23 @@ uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len);
 
 /**
+ * @brief Set the TX power in dBm (default +8, the strongest).
+ *
+ * TXPOWER is an enumerated register: only the silicon's discrete steps
+ * (+8..+1, 0..-10, -12..-20 even, -22, -28, -40, -46) are legal; any other
+ * value is rejected, never rounded.  Takes effect from the next ramp-up.
+ * Must NOT be called while the RADIO is flipped NonSecure for the FLPR
+ * beacon offload (secure-alias write = precise bus fault) -- the
+ * tiku_ble_adv facade owns that reclaim/re-arm dance.
+ *
+ * @return 0 on success, -1 if @p dbm is not a silicon-legal step.
+ */
+int tiku_radio_arch_set_txpower(int8_t dbm);
+
+/** @brief Currently configured TX power in dBm. */
+int8_t tiku_radio_arch_txpower(void);
+
+/**
  * @brief Session-scoped Constant Latency hold (nRF54L15 erratum 20).
  *
  * A duty-cycled radio user (background beacon) must hold Constant Latency

@@ -873,9 +873,10 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
 /*
  * Control surface over the tiku_ble_adv facade: `beacon` is the writable
  * knob ("NAME[,interval_ms[,data]]" starts, "off"/"0" stops; data is a
- * telemetry payload carried after the 'TK' manufacturer id), which also
- * makes beaconing available to the rules engine and `watch`; the rest
- * report state so a bench can assert "the radio really transmitted".
+ * telemetry payload carried after the 'TK' manufacturer id) and `txpower`
+ * (signed dBm, discrete silicon steps only) is the power knob -- both
+ * rules-engine and `watch` reachable; the rest report state so a bench
+ * can assert "the radio really transmitted".
  */
 
 static int
@@ -971,12 +972,52 @@ radio_scan_read(char *buf, size_t max)
                     (int)b->rssi, b->name);
 }
 
+static int
+radio_txpower_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%d\n", (int)tiku_ble_adv_txpower());
+}
+
+/* dBm, signed; only the silicon's discrete steps are accepted (the facade
+ * rejects everything else, never rounds).  Writable so the rules engine
+ * can turn power into a policy knob -- e.g. drop to -20 dBm when a
+ * voltage/energy node sags. */
+static int
+radio_txpower_write(const char *buf, size_t len)
+{
+    char tmp[16];
+    char *end;
+    long v;
+
+    if (len == 0u || len >= sizeof(tmp)) {
+        return TIKU_VFS_EINVAL;
+    }
+    memcpy(tmp, buf, len);
+    tmp[len] = '\0';
+    v = strtol(tmp, &end, 10);
+    if (end == tmp || v < -128 || v > 127) {
+        return TIKU_VFS_EINVAL;
+    }
+    return (tiku_ble_adv_set_txpower((int8_t)v) == 0) ? 0 : TIKU_VFS_EINVAL;
+}
+
+/* Which PHY the radio is configured for.  Fixed "ble-1m" today; the
+ * 802.15.4 lane (kintsugi/radio.md N-track) makes it meaningful. */
+static int
+radio_mode_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "ble-1m\n");
+}
+
 static const tiku_vfs_node_t sys_radio_children[] = {
-    { "beacon", TIKU_VFS_FILE, radio_beacon_read, radio_beacon_write,
+    { "beacon",  TIKU_VFS_FILE, radio_beacon_read, radio_beacon_write,
       NULL, 0 },
-    { "bursts", TIKU_VFS_FILE, radio_bursts_read, NULL, NULL, 0 },
-    { "state",  TIKU_VFS_FILE, radio_state_read,  NULL, NULL, 0 },
-    { "scan",   TIKU_VFS_FILE, radio_scan_read,   NULL, NULL, 0 },
+    { "bursts",  TIKU_VFS_FILE, radio_bursts_read,  NULL, NULL, 0 },
+    { "mode",    TIKU_VFS_FILE, radio_mode_read,    NULL, NULL, 0 },
+    { "state",   TIKU_VFS_FILE, radio_state_read,   NULL, NULL, 0 },
+    { "scan",    TIKU_VFS_FILE, radio_scan_read,    NULL, NULL, 0 },
+    { "txpower", TIKU_VFS_FILE, radio_txpower_read, radio_txpower_write,
+      NULL, 0 },
 };
 #endif /* TIKU_HAS_BLE_ADV */
 
@@ -1160,7 +1201,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 3 },
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
-    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  4 },
+    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  6 },
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
     { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   6 },

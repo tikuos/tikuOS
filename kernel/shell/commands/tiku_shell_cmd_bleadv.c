@@ -17,7 +17,12 @@
  *   bleadv on <name> [ms]  background beacon (kernel timer; system sleeps
  *                          between bursts) until `bleadv off`
  *   bleadv off             stop the background beacon
- *   bleadv scan [secs]     passive scan; lists addr/rssi/type/name
+ *   bleadv scan [secs] [prefix]
+ *                          passive scan; lists addr/rssi/type/name.  With a
+ *                          prefix only advertisers whose name starts with it
+ *                          are kept (insert-time filter, so ambient traffic
+ *                          cannot flood the table -- the TikuBench
+ *                          reverse-nonce oracle's knob)
  *   bleadv dbg             silicon + clock + radio readbacks (bring-up)
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -95,14 +100,20 @@ static void bleadv_dbg(void)
                  (unsigned long)tiku_radio_arch_dbg_xo_restarts);
 }
 
-static void bleadv_scan(unsigned secs)
+static void bleadv_scan(unsigned secs, const char *prefix)
 {
     tiku_ble_adv_report_t reps[12];
     char addrstr[18];
     int n, i;
 
-    SHELL_PRINTF("scanning 37/38/39 for %u s...\n", secs);
-    n = tiku_ble_adv_scan(reps, 12u, (uint16_t)(secs * 1000u));
+    if (prefix != (const char *)0) {
+        SHELL_PRINTF("scanning 37/38/39 for %u s (filter '%s*')...\n",
+                     secs, prefix);
+    } else {
+        SHELL_PRINTF("scanning 37/38/39 for %u s...\n", secs);
+    }
+    n = tiku_ble_adv_scan_filter(reps, 12u, (uint16_t)(secs * 1000u),
+                                 prefix);
     if (n < 0) {
         SHELL_PRINTF(SH_RED "no broadcast radio\n" SH_RST);
         return;
@@ -136,7 +147,7 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
 
     if (argc < 2) {
         SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
-                     " | scan [secs] | dbg\n");
+                     " | scan [secs] [prefix] | dbg\n");
         return;
     }
     if (strcmp(argv[1], "dbg") == 0) {
@@ -149,12 +160,21 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         return;
     }
     if (strcmp(argv[1], "scan") == 0) {
+        /* Positional-free tail: a numeric arg is the duration, anything
+         * else is the name-prefix filter (order-independent). */
         unsigned s = 4u;
-        if (argc >= 3) {
-            long v = strtol(argv[2], (char **)0, 10);
-            if (v > 0 && v <= 30) { s = (unsigned)v; }
+        const char *pfx = (const char *)0;
+        uint8_t a;
+        for (a = 2u; a < argc; a++) {
+            char *end;
+            long v = strtol(argv[a], &end, 10);
+            if (end != argv[a] && *end == '\0') {
+                if (v > 0 && v <= 30) { s = (unsigned)v; }
+            } else if (pfx == (const char *)0) {
+                pfx = argv[a];
+            }
         }
-        bleadv_scan(s);
+        bleadv_scan(s, pfx);
         return;
     }
     if (strcmp(argv[1], "on") == 0) {
