@@ -443,6 +443,71 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
     radio_constlat_exit();
 }
 
+/*---------------------------------------------------------------------------*/
+/* Multi-PHY probe (R8.1)                                                    */
+/*---------------------------------------------------------------------------*/
+
+/* Per-PHY MODE + PCNF0 preamble/coded fields (MDK encodings, verified in
+ * nrf54l15_types.h -- never pasted from nRF52 folklore): PLEN@24
+ * (8bit=0, 16bit=1, LongRange=3), CILEN@22, TERMLEN@29.  The base PCNF0
+ * bits (LFLEN=8, S0LEN=1, erratum-49 S1INCL) stay identical across PHYs.
+ * The BLE whitening/CRC config is PHY-independent (coded PHY whitens and
+ * CRCs FEC block 2 in hardware). */
+static const struct {
+    uint8_t mode;                       /* RADIO_MODE_MODE_*               */
+    uint8_t plen;                       /* PCNF0.PLEN                      */
+    uint8_t cilen;                      /* PCNF0.CILEN                     */
+    uint8_t termlen;                    /* PCNF0.TERMLEN                   */
+} radio_phy_cfg[4] = {
+    { 3u, 0u, 0u, 0u },                 /* 1M: 8-bit preamble              */
+    { 4u, 1u, 0u, 0u },                 /* 2M: 16-bit preamble             */
+    { 5u, 3u, 2u, 3u },                 /* Coded S=8 (125 kbps)            */
+    { 6u, 3u, 2u, 3u },                 /* Coded S=2 (500 kbps)            */
+};
+
+#define RADIO_PCNF0_BASE  ((8u << 0) | (1u << 8) | (0u << 16) | (1u << 20))
+
+static void radio_apply_phy(tiku_radio_arch_phy_t phy)
+{
+    RADIO->MODE  = radio_phy_cfg[phy].mode;
+    RADIO->PCNF0 = RADIO_PCNF0_BASE |
+                   ((uint32_t)radio_phy_cfg[phy].plen    << 24) |
+                   ((uint32_t)radio_phy_cfg[phy].cilen   << 22) |
+                   ((uint32_t)radio_phy_cfg[phy].termlen << 29);
+}
+
+int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
+                                 uint32_t iters[3])
+{
+    /* Fixed probe PDU: ADV_NONCONN_IND shape, 24-byte payload, erratum-49
+     * S1 slot in place -- identical bits at every PHY so the iteration
+     * ratios compare airtime and nothing else. */
+    static uint8_t pdu[32] __attribute__((aligned(4)));
+    uint8_t c;
+    int rc = 0;
+
+    pdu[0] = 0x42u;
+    pdu[1] = 24u;
+    for (c = 0u; c < 25u; c++) {
+        pdu[2u + c] = (uint8_t)(0xA5u ^ c);    /* [2]=S1 dup of payload[0] */
+    }
+
+    radio_constlat_enter();                    /* erratum 20 bracket       */
+    radio_xo_observe();
+    radio_hfclk_kick();
+    radio_apply_phy(phy);
+    for (c = 0u; c < 3u; c++) {
+        adv_tx_one(c, pdu);
+        iters[c] = tiku_radio_arch_dbg_tx_iters;
+        if (tiku_radio_arch_dbg_disabled == 0u) {
+            rc = -1;                           /* spin cap hit: no PHYEND  */
+        }
+    }
+    radio_apply_phy(TIKU_RADIO_PHY_1M);        /* beacon/scan contract     */
+    radio_constlat_exit();
+    return rc;
+}
+
 uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,
                                   const uint8_t *ad, uint8_t ad_len)
 {

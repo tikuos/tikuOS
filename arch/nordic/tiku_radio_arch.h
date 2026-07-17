@@ -53,6 +53,34 @@ int tiku_radio_arch_set_txpower(int8_t dbm);
 /** @brief Currently configured TX power in dBm. */
 int8_t tiku_radio_arch_txpower(void);
 
+/** BLE PHYs the silicon can modulate (kintsugi/radio.md R8). */
+typedef enum {
+    TIKU_RADIO_PHY_1M = 0,              /**< BLE 1M (legacy adv PHY)      */
+    TIKU_RADIO_PHY_2M,                  /**< BLE 2M (no legacy adv!)      */
+    TIKU_RADIO_PHY_CODED_S8,            /**< Coded S=8, 125 kbps          */
+    TIKU_RADIO_PHY_CODED_S2,            /**< Coded S=2, 500 kbps          */
+} tiku_radio_arch_phy_t;
+
+/**
+ * @brief One 3-channel TX burst at @p phy, reporting per-channel TX-state
+ *        poll-iteration counts (R8.1's single-board PHY oracle).
+ *
+ * Legacy advertising is 1M-ONLY by spec -- a 2M/coded burst on 37/38/39
+ * is inaudible to any compliant scanner, so this is a bring-up probe,
+ * not a beacon: the proof is ON-DIE.  The iteration count of the polled
+ * TX window scales with airtime (verified against host decode during 1M
+ * bring-up), so the same PDU must show ~0.5x iterations at 2M, ~3x at
+ * S=2 and ~8x at S=8 relative to 1M.  If the modulator runs at the new
+ * rate, the ratios cannot lie.  Restores the 1M link config before
+ * returning, so beacon/scan semantics are untouched.
+ *
+ * @param phy    PHY to probe.
+ * @param iters  Out: TX-state poll iterations for ch 37/38/39.
+ * @return 0 on success, -1 if any channel never reached DISABLED.
+ */
+int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
+                                 uint32_t iters[3]);
+
 /**
  * @brief Session-scoped Constant Latency hold (nRF54L15 erratum 20).
  *

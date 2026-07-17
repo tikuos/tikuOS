@@ -23,6 +23,12 @@
  *                          are kept (insert-time filter, so ambient traffic
  *                          cannot flood the table -- the TikuBench
  *                          reverse-nonce oracle's knob)
+ *   bleadv phy             probe all four BLE PHYs (1M/2M/S8/S2) with one
+ *                          3-channel burst each; prints TX-window iteration
+ *                          counts + ratios vs 1M.  ON-DIE proof only:
+ *                          legacy adv is 1M-only by spec, so 2M/coded
+ *                          bursts are inaudible to compliant scanners
+ *                          (kintsugi/radio.md R8.1)
  *   bleadv dbg             silicon + clock + radio readbacks (bring-up)
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -127,6 +133,47 @@ static void bleadv_scan(unsigned secs, const char *prefix)
     SHELL_PRINTF("%d device%s\n", n, (n == 1) ? "" : "s");
 }
 
+/* Multi-PHY airtime probe (R8.1): the iteration count of the polled TX
+ * window scales with airtime, so the same PDU at 2M/S2/S8 must land near
+ * 0.5x/3x/8x of the 1M count -- the modulator's word against physics. */
+static void bleadv_phy(void)
+{
+    static const char *nm[4] = { "1m", "2m", "s8", "s2" };
+    static const tiku_radio_arch_phy_t ph[4] = {
+        TIKU_RADIO_PHY_1M, TIKU_RADIO_PHY_2M,
+        TIKU_RADIO_PHY_CODED_S8, TIKU_RADIO_PHY_CODED_S2,
+    };
+    uint32_t it[4][3];
+    uint32_t avg[4];
+    int i;
+
+    if (tiku_ble_adv_active()) {
+        SHELL_PRINTF(SH_RED "stop the beacon first (bleadv off)\n" SH_RST);
+        return;                 /* offloaded RADIO = NS alias, keep out    */
+    }
+    tiku_radio_arch_init();     /* idempotent; probe needs the link config */
+    SHELL_PRINTF("PHY airtime probe (TX-window iters, ch37/38/39):\n");
+    for (i = 0; i < 4; i++) {
+        if (tiku_radio_arch_phy_tx_probe(ph[i], it[i]) != 0) {
+            SHELL_PRINTF(SH_RED "  %s: burst never disabled\n" SH_RST,
+                         nm[i]);
+            return;
+        }
+        avg[i] = (it[i][0] + it[i][1] + it[i][2]) / 3u;
+        SHELL_PRINTF("  %s: %lu %lu %lu\n", nm[i],
+                     (unsigned long)it[i][0], (unsigned long)it[i][1],
+                     (unsigned long)it[i][2]);
+    }
+    if (avg[0] == 0u) {
+        SHELL_PRINTF(SH_RED "1m probe empty\n" SH_RST);
+        return;
+    }
+    SHELL_PRINTF("ratios vs 1m (x100): 2m=%lu s8=%lu s2=%lu\n",
+                 (unsigned long)((avg[1] * 100u) / avg[0]),
+                 (unsigned long)((avg[2] * 100u) / avg[0]),
+                 (unsigned long)((avg[3] * 100u) / avg[0]));
+}
+
 /* Auto-stop for the `bleadv <name> [secs]` demo form: a one-shot callback
  * timer; both it and the beacon's burst timer dispatch cooperatively while
  * the shell idles at the prompt. */
@@ -147,11 +194,15 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
 
     if (argc < 2) {
         SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
-                     " | scan [secs] [prefix] | dbg\n");
+                     " | scan [secs] [prefix] | phy | dbg\n");
         return;
     }
     if (strcmp(argv[1], "dbg") == 0) {
         bleadv_dbg();
+        return;
+    }
+    if (strcmp(argv[1], "phy") == 0) {
+        bleadv_phy();
         return;
     }
     if (strcmp(argv[1], "off") == 0) {
