@@ -28,6 +28,10 @@
  *                          results in /sys/radio/scan (cat it, watch it,
  *                          or hang a rule on it).  secs 0/absent = until
  *                          `bleadv observe off`
+ *   bleadv ext <name> [secs]
+ *                          extended advertising (R8.3a): ADV_EXT_IND +
+ *                          hardware-timed AUX_ADV_IND carrying >31-byte
+ *                          AdvData; dbg_aux_us proves the AuxPtr timing
  *   bleadv phy             probe all four BLE PHYs (1M/2M/S8/S2) with one
  *                          3-channel burst each; prints TX-window iteration
  *                          counts + ratios vs 1M.  ON-DIE proof only:
@@ -50,6 +54,9 @@
 #include <interfaces/bluetooth/tiku_ble_adv.h>
 #include <arch/nordic/tiku_radio_arch.h>     /* per-burst dbg counters (dbg)    */
 #include <arch/nordic/tiku_device_select.h>  /* NRF_CLOCK_S / NRF_RADIO_S (dbg) */
+#include <arch/nordic/tiku_nordic_core.h>    /* wfe (ext pacing)                */
+#include <kernel/cpu/tiku_common.h>          /* unique id -> AdvA (ext)         */
+#include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
 #include <string.h>
 
@@ -182,6 +189,65 @@ static void bleadv_phy(void)
                  (unsigned long)((avg[3] * 100u) / avg[0]));
 }
 
+/* Extended advertising bring-up (R8.3a): ADV_EXT_IND + hardware-timed
+ * AUX_ADV_IND at ~100 ms intervals for ~secs.  The AdvData is
+ * deliberately >31 bytes (Flags + name + a 47-byte 'TK' payload) --
+ * the whole point of extended advertising.  Blocking with watchdog
+ * kicks; the on-die oracle is dbg_aux_us: the aux packet's captured
+ * start time must sit on the 600 us AuxPtr offset. */
+static void bleadv_ext(const char *name, unsigned secs)
+{
+    static const char blob[] =
+        "EXTENDED-ADV-PAYLOAD-BEYOND-31-BYTES-0123456789";
+    uint8_t ad[80], addr[6];
+    uint8_t adlen = 0u, nlen, plen = (uint8_t)(sizeof(blob) - 1u);
+    unsigned long bursts = 0u, aux_last = 0ul;
+    int rc = 0;
+    tiku_clock_time_t deadline;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    tiku_radio_arch_init();
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;                       /* random static address       */
+
+    nlen = (uint8_t)strlen(name);
+    if (nlen > 20u) { nlen = 20u; }
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
+    ad[adlen++] = (uint8_t)(1u + nlen);
+    ad[adlen++] = 0x09u;
+    memcpy(&ad[adlen], name, nlen); adlen = (uint8_t)(adlen + nlen);
+    ad[adlen++] = (uint8_t)(3u + plen);
+    ad[adlen++] = 0xFFu; ad[adlen++] = 'T'; ad[adlen++] = 'K';
+    memcpy(&ad[adlen], blob, plen); adlen = (uint8_t)(adlen + plen);
+
+    SHELL_PRINTF("ext-adv '%s': %u-byte AdvData (legacy cap is 31),"
+                 " ch37 -> aux ch20 @600us, ~%u s...\n",
+                 name, (unsigned)adlen, secs);
+    deadline = (tiku_clock_time_t)(tiku_clock_time() +
+               (tiku_clock_time_t)secs * TIKU_CLOCK_SECOND);
+    while (TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
+        tiku_clock_time_t next;
+        rc = tiku_radio_arch_extadv_burst(addr, ad, adlen);
+        bursts++;
+        aux_last = tiku_radio_arch_dbg_aux_us;
+        if (rc != 0) {
+            break;
+        }
+        next = (tiku_clock_time_t)(tiku_clock_time() +
+                (TIKU_CLOCK_SECOND / 8u));      /* ~125 ms cadence         */
+        while (TIKU_CLOCK_LT(tiku_clock_time(), next)) {
+            tiku_watchdog_kick();
+            tiku_nordic_wfe();
+        }
+    }
+    SHELL_PRINTF("ext done: %lu bursts rc=%d aux=%luus (target 600)\n",
+                 bursts, rc, aux_last);
+}
+
 /* Auto-stop for the `bleadv <name> [secs]` demo form: a one-shot callback
  * timer; both it and the beacon's burst timer dispatch cooperatively while
  * the shell idles at the prompt. */
@@ -203,7 +269,7 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     if (argc < 2) {
         SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
                      " | scan [secs] [prefix] | observe [secs|off]"
-                     " | phy | dbg\n");
+                     " | ext <name> [secs] | phy | dbg\n");
         return;
     }
     if (strcmp(argv[1], "dbg") == 0) {
@@ -212,6 +278,19 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "phy") == 0) {
         bleadv_phy();
+        return;
+    }
+    if (strcmp(argv[1], "ext") == 0) {
+        unsigned s = 5u;
+        if (argc < 3) {
+            SHELL_PRINTF("usage: bleadv ext <name> [secs]\n");
+            return;
+        }
+        if (argc >= 4) {
+            long v = strtol(argv[3], (char **)0, 10);
+            if (v > 0 && v <= 120) { s = (unsigned)v; }
+        }
+        bleadv_ext(argv[2], s);
         return;
     }
     if (strcmp(argv[1], "observe") == 0) {

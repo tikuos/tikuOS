@@ -706,6 +706,176 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
     return rc;
 }
 
+/*---------------------------------------------------------------------------*/
+/* Extended advertising at 1M (R8.3a)                                        */
+/*---------------------------------------------------------------------------*/
+/*
+ * One complete non-connectable non-scannable extended advertising event:
+ * ADV_EXT_IND on primary channel 37 carrying ADI + AuxPtr, then
+ * AUX_ADV_IND on secondary channel 20 carrying AdvA + ADI + AdvData (the
+ * >31-byte payload legacy advertising cannot).  The aux timing is
+ * HARDWARE-exact -- this is what R6's fabric was built for:
+ *
+ *   DPPI ch1: RADIO PUBLISH_READY -> TIMER10 CLEAR+START+CAPTURE[2]
+ *             (the EXT_IND's READY fires at preamble start = the
+ *             AuxPtr offset's t=0)
+ *   DPPI ch2: TIMER10 COMPARE[0] (aux offset - TX ramp) -> RADIO TXEN
+ *
+ * Between the EXT_IND's DISABLED and the hardware TXEN (~400 us) the CPU
+ * only reprograms FREQUENCY/DATAWHITE/PACKETPTR for the aux channel and
+ * UNSUBSCRIBES the timer's CLEAR/START -- otherwise the aux packet's own
+ * READY would restart the timer and the compare would fire a rogue TXEN
+ * 560 us after the aux started.  CAPTURE[2] stays subscribed on the
+ * free-running timer, so CC[2] records the aux packet's ACTUAL start
+ * time: the on-die proof the AUX flew inside the AuxPtr window
+ * (dbg_aux_us ~= 600).
+ *
+ * Whitening/CRC/access address are channel-formula-identical to legacy
+ * advertising; secondary channel index 20 = 2446 MHz (FREQUENCY=46).
+ * MAXLEN is raised for the burst and restored (the RX scan buffer is
+ * 48 B -- a permanent 255 would let EasyDMA overrun it).
+ */
+
+#define EXTADV_AUX_CH_IDX     20u      /* LE channel index (2446 MHz)     */
+#define EXTADV_AUX_FREQ       46u
+#define EXTADV_AUX_OFFSET_US  600u     /* 20 x 30 us AuxPtr units         */
+/* TXEN->READY ramp, hardware-measured via the CC[2] capture: with a
+ * 40 us assumption the aux preamble started at 640 us -- 10 us outside
+ * the spec window [offset, offset + 1 unit] = [600, 630].  The real
+ * ramp is ~80 us; aim mid-window (615) for symmetric margin. */
+#define EXTADV_TX_RAMP_US     80u
+#define EXTADV_AIM_SLACK_US   15u      /* land mid-window, not on its edge */
+#define EXTADV_ADI_LO         0xBCu    /* DID=0xABC, SID=0                */
+#define EXTADV_ADI_HI         0x0Au
+#define EXTADV_DPPI_CH_READY  1u       /* DPPIC10 channels (0 = window)   */
+#define EXTADV_DPPI_CH_TXEN   2u
+
+uint32_t tiku_radio_arch_dbg_aux_us;   /* CC[2] capture: ~600 when on-air */
+
+int tiku_radio_arch_extadv_burst(const uint8_t *addr,
+                                 const uint8_t *ad, uint8_t ad_len)
+{
+    static uint8_t ext_pdu[16] __attribute__((aligned(4)));
+    static uint8_t aux_pdu[224] __attribute__((aligned(4)));
+    uint32_t pcnf1_saved, spin;
+    int rc = 0;
+
+    if (ad_len > 200u) {
+        ad_len = 200u;
+    }
+
+    /* ADV_EXT_IND: header type 7, payload = [extHdrLen=6|mode=00]
+     * [flags: ADI|AuxPtr] [ADI lo hi] [AuxPtr: ch|CA=0|units=30us,
+     * offset lo, offset hi|PHY=1M].  RAM carries the erratum-49 S1 dup
+     * at [2]. */
+    ext_pdu[0]  = 0x07u;
+    ext_pdu[1]  = 7u;
+    ext_pdu[2]  = 0x06u;                       /* S1 slot = payload[0]    */
+    ext_pdu[3]  = 0x06u;                       /* extHdrLen 6, AdvMode 00 */
+    ext_pdu[4]  = 0x18u;                       /* flags: ADI + AuxPtr     */
+    ext_pdu[5]  = EXTADV_ADI_LO;
+    ext_pdu[6]  = EXTADV_ADI_HI;
+    ext_pdu[7]  = EXTADV_AUX_CH_IDX;           /* CA=0, units=30 us       */
+    ext_pdu[8]  = (uint8_t)(EXTADV_AUX_OFFSET_US / 30u);
+    ext_pdu[9]  = 0x00u;                       /* offset hi=0, PHY=1M     */
+
+    /* AUX_ADV_IND: header type 7 + TxAdd (AdvA is random static),
+     * payload = [extHdrLen=9|mode=00][flags: AdvA|ADI][AdvA 6][ADI 2]
+     * [AdvData...]. */
+    aux_pdu[0] = 0x47u;
+    aux_pdu[1] = (uint8_t)(10u + ad_len);
+    aux_pdu[2] = 0x09u;                        /* S1 slot = payload[0]    */
+    aux_pdu[3] = 0x09u;                        /* extHdrLen 9, AdvMode 00 */
+    aux_pdu[4] = 0x09u;                        /* flags: AdvA + ADI       */
+    memcpy(&aux_pdu[5], addr, 6u);
+    aux_pdu[11] = EXTADV_ADI_LO;
+    aux_pdu[12] = EXTADV_ADI_HI;
+    if (ad_len) {
+        memcpy(&aux_pdu[13], ad, ad_len);
+    }
+
+    radio_constlat_enter();                    /* erratum 20 bracket      */
+    radio_xo_observe();
+    radio_hfclk_kick();
+    pcnf1_saved = RADIO->PCNF1;
+    RADIO->PCNF1 = (pcnf1_saved & ~0xFFul) | 220u;     /* MAXLEN up       */
+
+    /* Wire the aux schedule (TIMER10 free-runs at 1 MHz; no shorts --
+     * with no CLEAR the compare fires exactly once). */
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    NRF_TIMER10_S->TASKS_CLEAR = 1u;
+    NRF_TIMER10_S->MODE      = 0u;
+    NRF_TIMER10_S->BITMODE   = 3u;
+    NRF_TIMER10_S->PRESCALER = 4u;             /* 1 us units              */
+    NRF_TIMER10_S->SHORTS    = 0u;
+    NRF_TIMER10_S->CC[0] = EXTADV_AUX_OFFSET_US + EXTADV_AIM_SLACK_US
+                           - EXTADV_TX_RAMP_US;
+    NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CLEAR      = EXTADV_DPPI_CH_READY | (1u << 31);
+    NRF_TIMER10_S->SUBSCRIBE_START      = EXTADV_DPPI_CH_READY | (1u << 31);
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[2] = EXTADV_DPPI_CH_READY | (1u << 31);
+    RADIO->PUBLISH_READY                = EXTADV_DPPI_CH_READY | (1u << 31);
+    NRF_TIMER10_S->PUBLISH_COMPARE[0]   = EXTADV_DPPI_CH_TXEN  | (1u << 31);
+    RADIO->SUBSCRIBE_TXEN               = EXTADV_DPPI_CH_TXEN  | (1u << 31);
+    NRF_DPPIC10_S->CHENSET = (1u << EXTADV_DPPI_CH_READY) |
+                             (1u << EXTADV_DPPI_CH_TXEN);
+
+    /* ADV_EXT_IND on primary channel 37. */
+    RADIO->FREQUENCY = adv_freq[0];
+    RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[0]);
+    RADIO->PACKETPTR = (uint32_t)ext_pdu;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->EVENTS_READY    = 0u;
+    (void)RADIO->EVENTS_DISABLED;
+    RADIO->TASKS_TXEN = 1u;
+    for (spin = 0u; spin < 400000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    if (RADIO->EVENTS_DISABLED == 0u) {
+        rc = -1;
+    } else {
+        /* ~400 us until the hardware TXEN: break the READY->restart
+         * loop (the aux's own READY must NOT re-clear the timer), then
+         * point the radio at the aux channel/PDU. */
+        NRF_TIMER10_S->SUBSCRIBE_CLEAR = 0u;
+        NRF_TIMER10_S->SUBSCRIBE_START = 0u;
+        RADIO->FREQUENCY = EXTADV_AUX_FREQ;
+        RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | EXTADV_AUX_CH_IDX);
+        RADIO->PACKETPTR = (uint32_t)aux_pdu;
+        RADIO->EVENTS_DISABLED = 0u;
+        RADIO->EVENTS_READY    = 0u;
+        (void)RADIO->EVENTS_DISABLED;
+        /* AUX_ADV_IND flies at COMPARE[0] -- pure hardware from here. */
+        for (spin = 0u; spin < 1000000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_DISABLED == 0u) {
+            rc = -2;                           /* aux never flew          */
+        }
+        tiku_radio_arch_dbg_aux_us = NRF_TIMER10_S->CC[2];
+    }
+
+    /* Teardown: no subscription may outlive the burst (a stale
+     * SUBSCRIBE_TXEN would let any later TIMER10 use fire the radio). */
+    RADIO->PUBLISH_READY  = 0u;
+    RADIO->SUBSCRIBE_TXEN = 0u;
+    NRF_TIMER10_S->PUBLISH_COMPARE[0]   = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CLEAR      = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_START      = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[2] = 0u;
+    NRF_DPPIC10_S->CHENCLR = (1u << EXTADV_DPPI_CH_READY) |
+                             (1u << EXTADV_DPPI_CH_TXEN);
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+    RADIO->PCNF1 = pcnf1_saved;
+    radio_constlat_exit();
+    return rc;
+}
+
 uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,
                                   const uint8_t *ad, uint8_t ad_len)
 {

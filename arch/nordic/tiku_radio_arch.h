@@ -82,6 +82,26 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
                                  uint32_t iters[3]);
 
 /**
+ * @brief One extended advertising event at 1M (R8.3a, blocking ~1.3 ms).
+ *
+ * ADV_EXT_IND (ch 37, ADI + AuxPtr) followed by a HARDWARE-timed
+ * AUX_ADV_IND (secondary ch 20) carrying AdvA + up to 200 bytes of
+ * AdvData -- the >31-byte payloads legacy advertising cannot.  The aux
+ * launch is TIMER10+DPPI-exact; dbg_aux_us captures the aux packet's
+ * actual start relative to the EXT_IND (nominal 600, the AuxPtr
+ * offset).  Requires the radio idle (the facade arbiter's job).
+ * Coded-PHY variant is a MODE/AuxPtr-PHY change once a coded-capable
+ * receiver exists (kintsugi/radio.md R8.3).
+ *
+ * @return 0 on success, -1 EXT_IND never finished, -2 aux never flew.
+ */
+int tiku_radio_arch_extadv_burst(const uint8_t *addr,
+                                 const uint8_t *ad, uint8_t ad_len);
+
+/** On-die aux-timing proof: CC[2] capture of the aux start (us). */
+extern uint32_t tiku_radio_arch_dbg_aux_us;
+
+/**
  * @brief Session-scoped Constant Latency hold (nRF54L15 erratum 20).
  *
  * A duty-cycled radio user (background beacon) must hold Constant Latency
