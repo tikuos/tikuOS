@@ -118,6 +118,24 @@ uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
                                 const uint8_t chmap[5],
                                 uint8_t *unmapped_out);
 
+/** 1-bit SN/NESN acknowledgement window (L3 groundwork; Core 4.5.9). */
+typedef struct {
+    uint8_t sn;                 /**< seq number of the PDU I transmit    */
+    uint8_t nesn;               /**< seq number I expect next from peer  */
+} tiku_radio_ll_ack_t;
+
+#define TIKU_RADIO_LL_NEWDATA  (1u << 0)  /**< rx payload is new, deliver */
+#define TIKU_RADIO_LL_ACKED    (1u << 1)  /**< my TX landed, advance      */
+
+/**
+ * @brief Fold one received Data-PDU header into the ack window.
+ *
+ * Updates @p a and returns TIKU_RADIO_LL_NEWDATA / _ACKED flags (either,
+ * both, or neither -- the flips are independent).
+ */
+uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
+                          uint8_t rx_nesn);
+
 /**
  * @brief One extended advertising event at 1M (R8.3a, blocking ~1.3 ms).
  *

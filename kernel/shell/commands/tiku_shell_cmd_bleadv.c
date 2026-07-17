@@ -32,6 +32,12 @@
  *                          extended advertising (R8.3a): ADV_EXT_IND +
  *                          hardware-timed AUX_ADV_IND carrying >31-byte
  *                          AdvData; dbg_aux_us proves the AuxPtr timing
+ *   bleadv connprobe [secs]
+ *                          L1/L2: connectable ADV_IND, hardware-T_IFS
+ *                          SCAN_RSP to scanners, and capture+decode a
+ *                          central's CONNECT_IND LLData
+ *   bleadv csa1            L3 self-test: CSA#1 hops vs an independent ref
+ *   bleadv ackfsm          L3 self-test: SN/NESN ack window incl. resend
  *   bleadv phy             probe all four BLE PHYs (1M/2M/S8/S2) with one
  *                          3-channel burst each; prints TX-window iteration
  *                          counts + ratios vs 1M.  ON-DIE proof only:
@@ -375,6 +381,7 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     if (argc < 2) {
         SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
                      " | scan [secs] [prefix] | observe [secs|off]"
+                     " | connprobe [secs] | csa1 | ackfsm"
                      " | ext <name> [secs] | phy | dbg\n");
         return;
     }
@@ -388,6 +395,36 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "csa1") == 0) {
         bleadv_csa1();
+        return;
+    }
+    if (strcmp(argv[1], "ackfsm") == 0) {
+        /* Scripted peer sequence incl. a retransmission (step 2): the
+         * hand-computed expected (new,acked,sn,nesn) after each RX. */
+        static const struct {
+            uint8_t rx_sn, rx_nesn, newd, ackd, sn, nesn;
+        } seq[4] = {
+            { 0, 0, 1, 0, 0, 1 },   /* first packet: new, no ack yet     */
+            { 1, 1, 1, 1, 1, 0 },   /* acks us + new data                */
+            { 1, 1, 0, 0, 1, 0 },   /* peer RE-SENDS: not new, not acked */
+            { 0, 0, 1, 1, 0, 1 },   /* acks us + new data                */
+        };
+        tiku_radio_ll_ack_t a = { 0u, 0u };
+        int i, fails = 0;
+        for (i = 0; i < 4; i++) {
+            uint8_t r = tiku_radio_ll_ack(&a, seq[i].rx_sn, seq[i].rx_nesn);
+            uint8_t nd = (r & TIKU_RADIO_LL_NEWDATA) ? 1u : 0u;
+            uint8_t ak = (r & TIKU_RADIO_LL_ACKED) ? 1u : 0u;
+            if (nd != seq[i].newd || ak != seq[i].ackd ||
+                a.sn != seq[i].sn || a.nesn != seq[i].nesn) {
+                SHELL_PRINTF(SH_RED "ackfsm: step%d new=%u ack=%u sn=%u"
+                             " nesn=%u\n" SH_RST, i, nd, ak, a.sn, a.nesn);
+                fails++;
+            }
+        }
+        if (!fails) {
+            SHELL_PRINTF(SH_GREEN "ackfsm: 4/4 incl. retransmission"
+                         " (SN/NESN correct)\n" SH_RST);
+        }
         return;
     }
     if (strcmp(argv[1], "connprobe") == 0) {

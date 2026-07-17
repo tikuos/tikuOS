@@ -976,6 +976,42 @@ uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
 }
 
 /*---------------------------------------------------------------------------*/
+/* Data-PDU acknowledgement / flow control (L3 groundwork)                   */
+/*---------------------------------------------------------------------------*/
+/*
+ * The SN/NESN 1-bit sliding window (Core Vol 6 Part B 4.5.9), the other
+ * classic link-layer bug-nest.  Each side carries in every Data PDU
+ * header its own SN (the seq number of the PDU it is sending) and NESN
+ * (the seq number it expects next = an ack of the peer's last PDU).
+ *
+ * On receiving a CRC-valid Data PDU (rx_sn, rx_nesn):
+ *   - ACK of MY transmission: rx_nesn != my sn  =>  peer moved past my
+ *     SN, so my PDU landed -> flip sn, load the next TX PDU.  Equal =>
+ *     NAK, retransmit the SAME PDU.
+ *   - NEW data from peer: rx_sn == my nesn  =>  not a retransmission ->
+ *     deliver payload, flip nesn.  Unequal => a resend I already have
+ *     -> discard payload (the ack half above still applies).
+ * The subtle correctness point both flips are INDEPENDENT: a single PDU
+ * can simultaneously ack my TX and carry new data.
+ */
+
+uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
+                          uint8_t rx_nesn)
+{
+    uint8_t r = 0u;
+
+    if ((rx_nesn & 1u) != a->sn) {             /* my last PDU acked        */
+        a->sn ^= 1u;
+        r |= TIKU_RADIO_LL_ACKED;
+    }
+    if ((rx_sn & 1u) == a->nesn) {             /* genuinely new payload    */
+        a->nesn ^= 1u;
+        r |= TIKU_RADIO_LL_NEWDATA;
+    }
+    return r;
+}
+
+/*---------------------------------------------------------------------------*/
 /* Extended advertising at 1M (R8.3a)                                        */
 /*---------------------------------------------------------------------------*/
 /*
