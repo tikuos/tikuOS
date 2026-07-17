@@ -82,6 +82,26 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
                                  uint32_t iters[3]);
 
 /**
+ * @brief Connectable advertising + CONNECT_IND capture (L-track L1).
+ *
+ * Transmits ADV_IND and hardware-turns-around (DISABLED_RXEN short)
+ * into an RX window on the same channel, where a central answers
+ * T_IFS=150 us after our packet: SCAN_REQs are counted, a CONNECT_IND
+ * addressed to @p addr has its 22-byte LLData copied out (AA, CRCInit,
+ * WinSize/Offset, Interval, Latency, Timeout, ChM, Hop|SCA).
+ * Deliberately does not respond -- L1's exit is the decoded capture.
+ * Blocking, polled, watchdog-kicked; radio must be idle (arbiter).
+ *
+ * @return 1 = CONNECT_IND captured, 0 = timeout after @p ms.
+ */
+int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
+                                  uint8_t ad_len, uint8_t lldata[22],
+                                  uint32_t ms);
+extern uint32_t tiku_radio_arch_dbg_connadv_tx;
+extern uint32_t tiku_radio_arch_dbg_connadv_scanreq;
+extern uint32_t tiku_radio_arch_dbg_connadv_rxother;
+
+/**
  * @brief One extended advertising event at 1M (R8.3a, blocking ~1.3 ms).
  *
  * ADV_EXT_IND (ch 37, ADI + AuxPtr) followed by a HARDWARE-timed

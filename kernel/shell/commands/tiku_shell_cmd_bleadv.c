@@ -248,6 +248,69 @@ static void bleadv_ext(const char *name, unsigned secs)
                  bursts, rc, aux_last);
 }
 
+/* L1 bring-up: connectable advertising until a central sends us a
+ * CONNECT_IND, then decode its LLData -- the first packet of the
+ * link-layer ladder, captured off the air from a real central
+ * (`bluetoothctl connect <addr>` on the host).  We do not accept the
+ * connection yet; the central will retry and time out. */
+static void bleadv_connprobe(unsigned secs)
+{
+    uint8_t ad[31], addr[6], lldata[22];
+    uint8_t adlen = 0u;
+    char addrstr[18];
+    static const char nm[] = "TIKU-CONN";
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    tiku_radio_arch_init();
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;
+    bleadv_fmt_addr(addrstr, addr);
+
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
+    ad[adlen++] = (uint8_t)(1u + sizeof(nm) - 1u);
+    ad[adlen++] = 0x09u;
+    memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
+    adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
+
+    SHELL_PRINTF("ADV_IND as %s '%s'; connect from a central within %u s"
+                 " (bluetoothctl: connect %s)\n", addrstr, nm, secs,
+                 addrstr);
+    if (tiku_radio_arch_connadv_probe(addr, ad, adlen, lldata,
+                                      secs * 1000u) == 1) {
+        unsigned interval = (unsigned)lldata[10] |
+                            ((unsigned)lldata[11] << 8);
+        unsigned timeout  = (unsigned)lldata[14] |
+                            ((unsigned)lldata[15] << 8);
+        SHELL_PRINTF(SH_GREEN "CONNECT_IND captured!\n" SH_RST);
+        SHELL_PRINTF("  AA=%02X%02X%02X%02X crcinit=%02X%02X%02X"
+                     " winsize=%u winoff=%u\n",
+                     lldata[3], lldata[2], lldata[1], lldata[0],
+                     lldata[6], lldata[5], lldata[4],
+                     (unsigned)lldata[7],
+                     (unsigned)lldata[8] | ((unsigned)lldata[9] << 8));
+        SHELL_PRINTF("  interval=%u (%u.%02u ms) latency=%u timeout=%u0ms\n",
+                     interval, (interval * 125u) / 100u,
+                     (interval * 125u) % 100u,
+                     (unsigned)lldata[12] | ((unsigned)lldata[13] << 8),
+                     timeout);
+        SHELL_PRINTF("  chmap=%02X%02X%02X%02X%02X hop=%u sca=%u\n",
+                     lldata[20], lldata[19], lldata[18], lldata[17],
+                     lldata[16],
+                     (unsigned)(lldata[21] & 0x1Fu),
+                     (unsigned)(lldata[21] >> 5));
+    } else {
+        SHELL_PRINTF("no CONNECT_IND in %u s\n", secs);
+    }
+    SHELL_PRINTF("  adv_tx=%lu scan_req=%lu rx_other=%lu\n",
+                 (unsigned long)tiku_radio_arch_dbg_connadv_tx,
+                 (unsigned long)tiku_radio_arch_dbg_connadv_scanreq,
+                 (unsigned long)tiku_radio_arch_dbg_connadv_rxother);
+}
+
 /* Auto-stop for the `bleadv <name> [secs]` demo form: a one-shot callback
  * timer; both it and the beacon's burst timer dispatch cooperatively while
  * the shell idles at the prompt. */
@@ -278,6 +341,15 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "phy") == 0) {
         bleadv_phy();
+        return;
+    }
+    if (strcmp(argv[1], "connprobe") == 0) {
+        unsigned s = 20u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 120) { s = (unsigned)v; }
+        }
+        bleadv_connprobe(s);
         return;
     }
     if (strcmp(argv[1], "ext") == 0) {

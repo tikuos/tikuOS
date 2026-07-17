@@ -707,6 +707,135 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
 }
 
 /*---------------------------------------------------------------------------*/
+/* Connectable advertising + CONNECT_IND capture (L1)                        */
+/*---------------------------------------------------------------------------*/
+/*
+ * First rung of the link-layer ladder (kintsugi/radio.md L-track):
+ * transmit ADV_IND (connectable) and open an RX window on the SAME
+ * channel immediately after -- a central answers T_IFS=150 us after our
+ * packet ends with SCAN_REQ or CONNECT_IND.  The TX->RX turnaround is
+ * pure hardware: the DISABLED_RXEN short (bit 3) re-arms the receiver
+ * during our post-TX poll's first microseconds, so the radio is
+ * listening long before the central's 150 us mark.  The CPU's only
+ * timing duty is swapping PACKETPTR to the RX buffer inside the ~40 us
+ * ramp -- a couple of register writes after the DISABLED poll hits.
+ *
+ * L1 deliberately does NOT respond (no SCAN_RSP, no connection): the
+ * exit criterion is capturing and decoding a real central's CONNECT_IND
+ * LLData off the air.  Fully polled, like every TX-path bring-up here.
+ *
+ * RAM layout of a captured CONNECT_IND (erratum-49 S1 slot included):
+ *   [S0][LEN=34][S1][InitA 6][AdvA 6][LLData 22]
+ *    0    1      2   3..8     9..14   15..36
+ * LLData: AA(4) CRCInit(3) WinSize(1) WinOffset(2) Interval(2)
+ *         Latency(2) Timeout(2) ChM(5) Hop:5|SCA:3 (1).
+ */
+
+uint32_t tiku_radio_arch_dbg_connadv_tx;      /* ADV_INDs transmitted     */
+uint32_t tiku_radio_arch_dbg_connadv_scanreq; /* SCAN_REQs heard (for us) */
+uint32_t tiku_radio_arch_dbg_connadv_rxother; /* CRC-OK, not for us       */
+
+int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
+                                  uint8_t ad_len, uint8_t lldata[22],
+                                  uint32_t ms)
+{
+    static uint8_t adv[48] __attribute__((aligned(4)));
+    static uint8_t rx[48] __attribute__((aligned(4)));
+    tiku_clock_time_t t0 = tiku_clock_time();
+    tiku_clock_time_t span =
+        (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
+    uint8_t chan = 0u;
+    int got = 0;
+
+    /* ADV_IND: same body as ADV_NONCONN_IND, header type 0 + TxAdd. */
+    (void)tiku_radio_arch_adv_build(adv, addr, ad, ad_len);
+    adv[0] = 0x40u;                            /* type 0, TxAdd=1          */
+
+    tiku_radio_arch_dbg_connadv_tx = 0u;
+    tiku_radio_arch_dbg_connadv_scanreq = 0u;
+    tiku_radio_arch_dbg_connadv_rxother = 0u;
+
+    radio_constlat_enter();                    /* erratum 20 bracket       */
+    radio_xo_observe();
+    radio_hfclk_kick();
+
+    while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span && !got) {
+        uint32_t spin;
+
+        tiku_watchdog_kick();
+
+        /* TX leg: auto TX->RX via the DISABLED_RXEN short. */
+        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 3) | (1u << 4);
+        RADIO->FREQUENCY = adv_freq[chan];
+        RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
+        RADIO->PACKETPTR = (uint32_t)adv;
+        RADIO->EVENTS_DISABLED = 0u;
+        RADIO->EVENTS_ADDRESS  = 0u;
+        RADIO->EVENTS_CRCOK    = 0u;
+        (void)RADIO->EVENTS_DISABLED;
+        RADIO->TASKS_TXEN = 1u;
+        for (spin = 0u; spin < 400000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+        tiku_radio_arch_dbg_connadv_tx++;
+
+        /* RX leg is already ramping (hardware short).  Kill the short so
+         * the RX's own disable cannot re-arm, and hand the DMA our
+         * buffer -- both inside the ~40 us ramp. */
+        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+        RADIO->PACKETPTR = (uint32_t)rx;
+        RADIO->EVENTS_DISABLED = 0u;
+        (void)RADIO->EVENTS_DISABLED;
+
+        /* Listen ~2 ms: a central answers at 150 us; SCAN_REQs from
+         * ambient scanners arrive constantly and prove the window. */
+        for (spin = 0u; spin < 260000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_DISABLED == 0u) {
+            RADIO->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        } else if (RADIO->EVENTS_CRCOK != 0u) {
+            uint8_t type = (uint8_t)(rx[0] & 0x0Fu);
+            if (type == 0x05u && rx[1] == 34u &&
+                memcmp(&rx[9], addr, 6u) == 0) {
+                memcpy(lldata, &rx[15], 22u);  /* CONNECT_IND, for us      */
+                got = 1;
+            } else if (type == 0x03u && rx[1] == 12u &&
+                       memcmp(&rx[9], addr, 6u) == 0) {
+                tiku_radio_arch_dbg_connadv_scanreq++;
+            } else {
+                tiku_radio_arch_dbg_connadv_rxother++;
+            }
+        }
+        chan = (uint8_t)((chan + 1u) % 3u);
+    }
+
+    /* Restore the TX-only shorts contract. */
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    {
+        uint32_t spin;
+        for (spin = 0u; spin < 40000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+    }
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    radio_constlat_exit();
+    return got;
+}
+
+/*---------------------------------------------------------------------------*/
 /* Extended advertising at 1M (R8.3a)                                        */
 /*---------------------------------------------------------------------------*/
 /*
