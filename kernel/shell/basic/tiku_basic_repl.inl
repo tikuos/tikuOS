@@ -346,7 +346,7 @@ process_line(const char *raw)
             SHELL_PRINTF(" BLEADV BLESEND BLEUP BLEAVAIL BLEGET$");
 #endif
 #if TIKU_BLE_ADV_PRESENT
-            SHELL_PRINTF(" BLESCAN$");
+            SHELL_PRINTF(" BLESCAN$ BLEOBSERVE BLESEEN BLESEEN$");
 #endif
             SHELL_PRINTF(" BLEOFF BLEBEACON");
 #endif

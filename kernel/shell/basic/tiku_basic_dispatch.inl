@@ -396,6 +396,9 @@ exec_stmt(const char **p)
 #endif
     if (match_kw(p, "BLEOFF"))    { exec_bleoff(p);    return; }
     if (match_kw(p, "BLEBEACON")) { exec_blebeacon(p); return; }
+#if TIKU_BLE_ADV_PRESENT
+    if (match_kw(p, "BLEOBSERVE")) { exec_bleobserve(p); return; }
+#endif
 #endif
 #if TIKU_BASIC_SUBS_ENABLE
     if (match_kw(p, "ENDSUB"))   { exec_endsub();    return; }

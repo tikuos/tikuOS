@@ -196,4 +196,44 @@ exec_blebeacon(const char **p)
 #endif
 }
 
+#if TIKU_BLE_ADV_PRESENT
+/* BLEOBSERVE [secs] | BLEOBSERVE OFF -- background observer (R7).
+ *
+ * Non-blocking radio awareness: the IRQ+hardware-window engine scans
+ * while the program keeps running (and after RUN ends), filling a
+ * 12-slot dedup table read back with BLESEEN() / BLESEEN$(i).  secs
+ * 0/absent = until BLEOBSERVE OFF (or BLEOFF? no -- BLEOFF is the
+ * beacon's; the observer has its own OFF so the two never surprise
+ * each other).  The ownership arbiter applies: starting while a beacon
+ * runs throws (one radio, one owner).
+ *
+ * The agent loop this enables -- react to the radio environment
+ * without ever blocking:
+ *   10 BLEOBSERVE 0
+ *   20 IF BLESEEN() = 0 THEN DELAY 200 : GOTO 20
+ *   30 PRINT "heard: "; BLESEEN$(0)
+ *   40 BLEOBSERVE OFF
+ */
+static void
+exec_bleobserve(const char **p)
+{
+    long secs = 0;
+    skip_ws(p);
+    if (match_kw(p, "OFF")) {
+        tiku_ble_adv_observe_stop();
+        return;
+    }
+    if (**p != '\0' && **p != ':') {
+        secs = parse_expr(p);
+        if (basic_error) return;
+        if (secs < 0) secs = 0;
+        if (secs > 3600) secs = 3600;
+    }
+    if (tiku_ble_adv_observe_start((uint16_t)secs) != 0) {
+        basic_throw(TIKU_BASIC_ERR_GENERAL,
+                    "radio busy (BLEOFF the beacon first)");
+    }
+}
+#endif /* TIKU_BLE_ADV_PRESENT */
+
 #endif /* TIKU_BASIC_BLE_ENABLE */

@@ -625,6 +625,15 @@ int tiku_ble_adv_observing(void)
     return (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE) ? 1 : 0;
 }
 
+uint8_t tiku_ble_adv_observe_get(uint8_t idx, tiku_ble_adv_report_t *out)
+{
+    if (out == (tiku_ble_adv_report_t *)0 || idx >= bg_ctx.count) {
+        return 0u;
+    }
+    *out = bg_reports[idx];
+    return 1u;
+}
+
 uint8_t tiku_ble_adv_last_scan_count(void)
 {
     return scan_last_count;

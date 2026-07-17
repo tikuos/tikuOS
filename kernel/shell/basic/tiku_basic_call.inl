@@ -291,6 +291,27 @@ expr_call(const char **p, long *out_v)
         return 1;
     }
 #endif
+#if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_ADV_PRESENT
+    /* BLESEEN() -- distinct advertisers in the observer table (live while
+     * BLEOBSERVE runs; the table persists after it stops).  Allocation-
+     * free, so a poll loop `IF BLESEEN() > 0 THEN ...` costs nothing --
+     * the agent-reacts-to-its-radio-environment predicate.
+     * '$' is NOT a word-boundary char (is_word_cont), so a bare keyword
+     * match would swallow the BLESEEN$ string function's prefix --
+     * restore and fall through when '$' follows. */
+    {
+        const char *save = *p;
+        if (match_kw(p, "BLESEEN")) {
+            if (**p == '$') {
+                *p = save;              /* BLESEEN$: the string parser's */
+            } else {
+                if (!parse_call_0arg(p)) return 1;
+                *out_v = (long)tiku_ble_adv_last_scan_count();
+                return 1;
+            }
+        }
+    }
+#endif
     /* Time builtins. Both take a () with no arg so the parser knows
      * they're functions (otherwise MILLIS would parse as a multi-char
      * identifier with nothing to do). */

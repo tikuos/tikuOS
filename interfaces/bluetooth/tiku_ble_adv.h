@@ -219,6 +219,16 @@ void tiku_ble_adv_observe_stop(void);
 int tiku_ble_adv_observing(void);
 
 /**
+ * @brief Copy the observer table's @p idx-th report (0-based).
+ *
+ * Live while observing; the table persists after observe stops, so
+ * results remain queryable (BLESEEN$(i)) until the next observe/scan.
+ *
+ * @return 1 and fills @p out when idx < count; 0 otherwise.
+ */
+uint8_t tiku_ble_adv_observe_get(uint8_t idx, tiku_ble_adv_report_t *out);
+
+/**
  * @brief Install the new-scan-data hook (called from timer-callback
  *        context whenever the observer delivered packets).  The VFS
  *        tree uses it to tiku_vfs_notify(/sys/radio/scan).

@@ -1064,6 +1064,32 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
 #endif
 #if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_ADV_PRESENT
+    /* BLESEEN$(i) -- the observer table's i-th report (0-based) as
+     * "AA:BB:CC:DD:EE:FF,rssi,name"; "" past the end.  Non-blocking:
+     * reads the table BLEOBSERVE fills in the background (it persists
+     * after the observer stops).  Pair with BLESEEN() to iterate. */
+    if (match_kw(p, "BLESEEN$")) {
+        tiku_ble_adv_report_t r;
+        long idx;
+        skip_ws(p);
+        if (**p != '(') goto fn_paren_err;
+        (*p)++;
+        idx = parse_expr(p);
+        if (basic_error) return 1;
+        skip_ws(p);
+        if (**p != ')') goto fn_paren_err;
+        (*p)++;
+        if (idx < 0 || idx > 255 ||
+            !tiku_ble_adv_observe_get((uint8_t)idx, &r)) {
+            out[0] = '\0';
+            return 0;
+        }
+        (void)snprintf(out, cap, "%02X:%02X:%02X:%02X:%02X:%02X,%d,%s",
+                       r.addr[5], r.addr[4], r.addr[3],
+                       r.addr[2], r.addr[1], r.addr[0],
+                       (int)r.rssi, r.name);
+        return 0;
+    }
     /* BLESCAN$(secs) -- passive scan of the BLE advertising channels for
      * `secs` seconds (clamped 1..20); returns "AA:BB:CC:DD:EE:FF,rssi,name;"
      * per distinct device heard, strongest first not guaranteed -- discovery
