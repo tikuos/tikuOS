@@ -1130,19 +1130,35 @@ static uint8_t  ll_want_term;       /* peer sent TERMINATE_IND             */
 static uint8_t  ll_is_central;      /* role: drives ATT client vs server   */
 static uint32_t ll_ctrl_tx, ll_ctrl_rx;
 
-/* ATT/L2CAP (L5): peripheral server holds one value at handle ATT_HANDLE;
- * central client walks MTU -> Write(0x42) -> Read and checks the readback. */
-#define ATT_HANDLE      0x0003u
-static uint8_t  att_val;            /* server: stored characteristic value */
-static uint8_t  att_step;           /* client: 0 idle,1 mtu,2 write,3 read,4 done */
-static uint8_t  att_ok;             /* client: readback matched            */
-static uint8_t  att_readback;       /* client: value read back             */
+/* ATT/L2CAP (L5): a minimal NUS (Nordic UART Service) data path.
+ *   peripheral = server: NUS RX (write target) + NUS TX (readable echo)
+ *                behind a CCCD; a write to NUS RX is mirrored to TX.
+ *   central    = client: MTU -> enable CCCD -> write "TK" to NUS RX ->
+ *                read TX back and verify the echo.
+ * The loopback is verified over the RELIABLE request/response path (each
+ * request is retransmitted until answered): server-PUSHED notifications
+ * on this on-die link are dropped by the peer's SN/NESN dedup and need a
+ * proper LL reliability rework -- deferred (see kintsugi/radio.md L5).
+ * This is the byte-pipe L6's tiku_ble_serial rides on.  Fixed handles
+ * (a phone would discover them; the two-board client hard-codes them). */
+#define GATT_H_NUS_RX    0x0012u    /* write:  client -> server            */
+#define GATT_H_NUS_TX    0x0014u    /* readable echo (notify src, future)  */
+#define GATT_H_NUS_CCCD  0x0015u    /* CCCD for the TX characteristic       */
+static const uint8_t NUS_TEST_MSG[2] = { 'T', 'K' };
+
+static uint8_t  nus_rx[20];         /* server: last bytes written to RX     */
+static uint8_t  nus_rx_len;
+static uint8_t  nus_cccd;           /* server: TX notifications enabled bit */
+static uint8_t  att_step;           /* client: 1 mtu,2 cccd,3 rx,4 read,5 ok */
+static uint8_t  att_ok;             /* client: read-back echo matched       */
+static uint8_t  att_readback;       /* client/server: first data byte seen  */
 
 static void ll_reset(void)
 {
     ll_tx_len = 0u; ll_tx_llid = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
     ll_want_term = 0u; ll_ctrl_tx = 0u; ll_ctrl_rx = 0u;
-    att_val = 0u; att_step = 0u; att_ok = 0u; att_readback = 0u;
+    nus_rx_len = 0u; nus_cccd = 0u;
+    att_step = 0u; att_ok = 0u; att_readback = 0u;
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1220,19 +1236,27 @@ static void ll_on_acked(void)
  * until the response lands.  Every request here is idempotent. */
 static void att_client_send(void)
 {
-    uint8_t b[4];
+    uint8_t b[6];
 
     if (att_step == 1u) {                       /* Exchange MTU Request    */
         b[0] = 0x02u; b[1] = 23u; b[2] = 0u;
         att_queue(b, 3u);
-    } else if (att_step == 2u) {                /* Write Request           */
+    } else if (att_step == 2u) {                /* enable TX notifications  */
+        b[0] = 0x12u;                           /* Write CCCD = 0x0001     */
+        b[1] = (uint8_t)GATT_H_NUS_CCCD;
+        b[2] = (uint8_t)(GATT_H_NUS_CCCD >> 8);
+        b[3] = 0x01u; b[4] = 0x00u;
+        att_queue(b, 5u);
+    } else if (att_step == 3u) {                /* write NUS RX ("TK")     */
         b[0] = 0x12u;
-        b[1] = (uint8_t)ATT_HANDLE; b[2] = (uint8_t)(ATT_HANDLE >> 8);
-        b[3] = 0x42u;
-        att_queue(b, 4u);
-    } else if (att_step == 3u) {                /* Read Request            */
+        b[1] = (uint8_t)GATT_H_NUS_RX;
+        b[2] = (uint8_t)(GATT_H_NUS_RX >> 8);
+        b[3] = NUS_TEST_MSG[0]; b[4] = NUS_TEST_MSG[1];
+        att_queue(b, 5u);
+    } else if (att_step == 4u) {                /* read NUS TX (the echo)  */
         b[0] = 0x0Au;
-        b[1] = (uint8_t)ATT_HANDLE; b[2] = (uint8_t)(ATT_HANDLE >> 8);
+        b[1] = (uint8_t)GATT_H_NUS_TX;
+        b[2] = (uint8_t)(GATT_H_NUS_TX >> 8);
         att_queue(b, 3u);
     }
 }
@@ -1243,36 +1267,54 @@ static void att_handle(const uint8_t *att, uint8_t alen)
     uint8_t op = att[0];
 
     if (ll_is_central) {
-        /* CLIENT: advance the MTU -> Write -> Read sequence on responses. */
+        /* CLIENT: MTU -> CCCD -> write RX -> read TX -> verify echo. */
         if (op == 0x03u && att_step == 1u) {        /* MTU Response        */
             att_step = 2u;
-            att_client_send();                      /* Write Request       */
-        } else if (op == 0x13u && att_step == 2u) { /* Write Response      */
+            att_client_send();                      /* enable CCCD         */
+        } else if (op == 0x13u && att_step == 2u) { /* CCCD Write Response */
             att_step = 3u;
-            att_client_send();                      /* Read Request        */
-        } else if (op == 0x0Bu && att_step == 3u) { /* Read Response       */
-            if (alen >= 2u) {
-                att_readback = att[1];
-                att_ok = (uint8_t)(att[1] == 0x42u);
+            att_client_send();                      /* write NUS RX        */
+        } else if (op == 0x13u && att_step == 3u) { /* RX Write Response   */
+            att_step = 4u;
+            att_client_send();                      /* read TX echo        */
+        } else if (op == 0x0Bu && att_step == 4u) { /* Read Response       */
+            if (alen >= 3u) {
+                att_readback = att[1];              /* echoed first byte   */
+                att_ok = (uint8_t)(att[1] == NUS_TEST_MSG[0] &&
+                                   att[2] == NUS_TEST_MSG[1]);
             }
-            att_step = 4u;                          /* done                */
+            att_step = 5u;                          /* loopback verified   */
         }
     } else {
-        /* SERVER: answer the client's requests. */
+        /* SERVER: MTU; CCCD + RX writes; a RX write mirrors to TX echo. */
         if (op == 0x02u) {                          /* Exchange MTU Req    */
             uint8_t m[3] = { 0x03u, 23u, 0u };      /* MTU Rsp, 23         */
             att_queue(m, 3u);
         } else if (op == 0x12u && alen >= 4u) {     /* Write Request       */
-            att_val = att[3];                       /* store the value     */
-            att_readback = att[3];                  /* mirror for stats    */
+            uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+            if (h == GATT_H_NUS_CCCD) {
+                nus_cccd = att[3];                  /* TX notify enable bit */
+            } else if (h == GATT_H_NUS_RX) {
+                uint8_t n = (uint8_t)(alen - 3u);   /* value byte count    */
+                if (n > sizeof(nus_rx)) {
+                    n = (uint8_t)sizeof(nus_rx);
+                }
+                memcpy(nus_rx, &att[3], n);         /* mirror RX -> TX echo */
+                nus_rx_len = n;
+                att_readback = att[3];              /* stats: first byte   */
+            }
             {
                 uint8_t rsp = 0x13u;                /* Write Response      */
                 att_queue(&rsp, 1u);
             }
-        } else if (op == 0x0Au) {                   /* Read Request        */
-            uint8_t r[2] = { 0x0Bu, 0u };
-            r[1] = att_val;
-            att_queue(r, 2u);
+        } else if (op == 0x0Au && alen >= 3u) {     /* Read Request        */
+            uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+            if (h == GATT_H_NUS_TX) {               /* echo back NUS RX     */
+                uint8_t r[1 + sizeof(nus_rx)];
+                r[0] = 0x0Bu;                       /* Read Response       */
+                memcpy(&r[1], nus_rx, nus_rx_len);
+                att_queue(r, (uint8_t)(1u + nus_rx_len));
+            }
         }
     }
 }
@@ -1423,6 +1465,14 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
      * updated SN/NESN.  The hardware T_IFS TX DMAs it. */
     txn = ll_build_tx(txb, ack);
     (void)txn;
+    /* Drop DISABLED_TXEN now that the RX->TX turnaround has fired: keep
+     * only READY_START + PHYEND_DISABLE for the response.  Otherwise the
+     * response's own DISABLED re-triggers TXEN and the radio spins a
+     * spurious back-to-back TX loop -- benign for a short empty PDU (it
+     * clears before the next RX), but a longer PDU (an ATT notification)
+     * is still churning when the next event's RXEN fires and the RX is
+     * lost, collapsing the link. */
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
     RADIO->EVENTS_PHYEND   = 0u;                  /* next PHYEND = TX end  */
     RADIO->EVENTS_DISABLED = 0u;                  /* next DISABLED = TX    */
     RADIO->PACKETPTR = (uint32_t)txb;
@@ -1965,7 +2015,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         /* L5 transaction retry: if the ATT step has not advanced for a
          * while and nothing is pending, re-send the request (the LL can
          * drop a single data PDU on an SN/NESN offset flip). */
-        if (att_step >= 1u && att_step <= 3u) {
+        if (att_step >= 1u && att_step <= 4u) {
             if (att_step != att_prev) {
                 att_prev = att_step;
                 att_wait = 0u;

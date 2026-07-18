@@ -426,11 +426,11 @@ static void bleadv_central(unsigned secs)
     {
         char rb[3];
         bleadv_fmt_hex(rb, &st.att_readback, 1, 0);
-        if (st.att_step >= 4u && st.att_ok) {
-            SHELL_PRINTF(SH_GREEN "  ATT: MTU/Write(0x42)/Read round-trip OK,"
-                         " readback=0x%s (L5)\n" SH_RST, rb);
+        if (st.att_step >= 5u && st.att_ok) {
+            SHELL_PRINTF(SH_GREEN "  NUS: MTU/CCCD/write->read loopback OK,"
+                         " echo[0]=0x%s (L5)\n" SH_RST, rb);
         } else {
-            SHELL_PRINTF("  ATT: incomplete (step=%u/4 readback=0x%s) (L5)\n",
+            SHELL_PRINTF("  NUS: incomplete (step=%u/5 echo[0]=0x%s) (L5)\n",
                          (unsigned)st.att_step, rb);
         }
     }
@@ -495,8 +495,8 @@ static void bleadv_conn(unsigned secs)
     if (st.att_readback != 0u) {
         char wv[3];
         bleadv_fmt_hex(wv, &st.att_readback, 1, 0);
-        SHELL_PRINTF("  ATT server: last write=0x%s at handle 0x0003 (L5)\n",
-                     wv);
+        SHELL_PRINTF("  NUS server: last RX write[0]=0x%s at handle 0x0012 (L5)"
+                     "\n", wv);
     }
     {
         char fb[11];
