@@ -492,6 +492,27 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
 static uint8_t conn_txb[40]    __attribute__((aligned(4)));
 static uint8_t conn_datrx[48]  __attribute__((aligned(4)));
 
+/* Anchored-RX: cut RADIO-on time without breaking the channel lock.  The
+ * continuous-RX loop stays synced for free -- one catch == one CSA#1 hop ==
+ * one connection event -- so we hold the RADIO OFF for the dead part of
+ * each interval, then fall into that same catch.  The hard part is the
+ * idle length: the FLPR's execution rate is CONTENDED by the (awake) M33
+ * on the shared bus and is neither known nor stable, so any open-loop idle
+ * (mcycle, or the beacon's M33-ASLEEP busy-loop calibration) overshoots by
+ * multiple intervals -> multi-hop channel desync the re-acquire can't
+ * close.  Instead this is CLOSED-LOOP: grow the idle in small steps using
+ * the measured RX-wait (spin-to-ADDRESS) as feedback.  It self-calibrates
+ * to whatever the real rate is, and because every step is tiny, any
+ * overshoot is at most one step (<< one interval) and the wide re-acquire
+ * recovers it.  The RX window tracks the measured wait + slack.  Units are
+ * RX-loop iterations throughout, so idle and wait share a feedback scale. */
+#define ARX_STEP       4000u     /* idle growth/measure step                */
+#define ARX_RX_HI     24000u     /* wait longer than this => grow the idle  */
+#define ARX_RX_LO     12000u     /* wait shorter than this => shrink it     */
+#define ARX_SLACK     35000u     /* RX window margin over the measured wait */
+#define ARX_WIN_MAX  750000u     /* re-acquire / cap window                 */
+#define ARX_WIN_MIN   55000u     /* smallest tracked window                 */
+
 static void flpr_conn_hold(tiku_flpr_shared_t *sh)
 {
     NRF_RADIO_Type *r = NRF_RADIO_NS;
@@ -499,6 +520,8 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     uint8_t  hop = sh->conn_hop, chmap[5];
     uint8_t  last_un = 0u, k, i;
     uint32_t event = 0u, miss_run = 0u, spin;
+    uint32_t idle_iters = 0u, win = ARX_WIN_MAX, rxon = 0u;
+    uint8_t  have_anchor = 0u;
 
     for (i = 0u; i < 5u; i++) {
         chmap[i] = sh->conn_chm[i];
@@ -508,6 +531,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_sn = 0u; fll_nesn = 0u;
     fll_a2f_seen = sh->a2f_seq;
     sh->conn_sub = 0u;
+    sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
 
     r->BASE0   = aa << 8;                        /* BALEN=3: base in top 3 B */
     r->PREFIX0 = (aa >> 24) & 0xFFu;
@@ -519,6 +543,27 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         k = flpr_csa1_next(&last_un, hop, chmap);
         r->FREQUENCY = flpr_data_freq(k);
         r->DATAWHITE = 0x00890000u | (0x40u | k);
+
+        /* Anchored idle: hold the RADIO OFF for the (closed-loop) idle
+         * count, using the RX-loop body (an EVENTS_DISABLED read that stays
+         * 0 while idle) so idle and the RX-wait below share a feedback
+         * scale.  STOP is polled coarsely so it lands within the idle. */
+        if (have_anchor && idle_iters != 0u) {
+            r->EVENTS_DISABLED = 0u;
+            for (spin = 0u; spin < idle_iters; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {  /* never set while idle      */
+                    break;
+                }
+                if ((spin & 0x3FFFu) == 0u &&
+                    sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+                    break;
+                }
+            }
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+            break;
+        }
+
         /* RX with the hardware T_IFS turnaround to TX (DISABLED_TXEN). */
         r->SHORTS = (1u << 0) | (1u << 19) | (1u << 2) | (1u << 4);
         r->PACKETPTR = (uint32_t)conn_datrx;
@@ -529,7 +574,9 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         (void)r->EVENTS_DISABLED;
         r->TASKS_RXEN = 1u;
 
-        for (spin = 0u; spin < 700000u; spin++) {   /* ~one interval window */
+        /* Window tracks the last measured wait + slack when locked; wide on
+         * re-acquire (anchor position unknown). */
+        for (spin = 0u; spin < win; spin++) {
             if (r->EVENTS_ADDRESS != 0u) {
                 got = 1u;
                 break;
@@ -543,7 +590,13 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                     break;
                 }
             }
-            if (++miss_run > 120u) {             /* supervision timeout      */
+            /* Lost lock: back the idle WAY off (the overshoot that caused
+             * this) and re-acquire on the wide window.  Keeping a fraction
+             * of the idle means we don't restart the climb from zero. */
+            have_anchor = 0u;
+            idle_iters  = idle_iters / 2u;
+            win         = ARX_WIN_MAX;
+            if (++miss_run > 200u) {             /* supervision timeout      */
                 break;
             }
             if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
@@ -552,6 +605,22 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             continue;                            /* miss: no serviced event  */
         }
         miss_run = 0u;
+        rxon = spin;                             /* RX-wait iters this event  */
+        /* Closed-loop: creep the idle toward the point where the wait sits
+         * in [RX_LO, RX_HI].  Small steps up (grow while the packet lands
+         * late), a bigger step down (safety) when it lands early.  The
+         * window then just covers the measured wait plus slack. */
+        if (rxon > ARX_RX_HI) {
+            idle_iters += ARX_STEP;
+        } else if (rxon < ARX_RX_LO && idle_iters > 4u * ARX_STEP) {
+            idle_iters -= 4u * ARX_STEP;
+        }
+        win = rxon + ARX_SLACK;
+        if (win > ARX_WIN_MAX) {
+            win = ARX_WIN_MAX;
+        } else if (win < ARX_WIN_MIN) {
+            win = ARX_WIN_MIN;
+        }
         /* CRC verdict lands just after PHYEND; bounded so we stay inside
          * the 150 us T_IFS window before the auto-TX reads conn_txb. */
         for (spin = 0u; spin < 3000u; spin++) {
@@ -603,19 +672,13 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             }
             fll_att_queue(nb, (uint8_t)(3u + n));
         }
+        have_anchor = 1u;                        /* locked: idle next event   */
+        sh->conn_gap  = idle_iters;              /* telemetry: off iters      */
+        sh->conn_rxon = rxon;                    /* telemetry: RX-wait iters  */
         sh->conn_events = ++event;
         if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
             break;
         }
-        /* Anchored-RX (power) DEFERRED: idling the radio for a busy-loop
-         * gap between events would cut RADIO-on duty, but it needs the RX
-         * window shrunk AND the gap calibrated so gap+window ~= connInterval
-         * (both same-core loops for matched rates, re-synced to each packet
-         * so there is no drift).  The busy-loop rate proved far off a first
-         * estimate (a too-long gap collapsed the catch rate to ~2%), so it
-         * needs empirical loop-rate calibration -- and a power meter (not on
-         * the rig) to validate the win.  Kept CONTINUOUS-RX (proven ~90%)
-         * until then; see kintsugi/radio.md L6 refinements. */
     }
     sh->conn_state = 3u;                         /* link ended               */
 }

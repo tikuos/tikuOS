@@ -152,6 +152,20 @@ uint32_t tiku_flpr_arch_conn_events(void);
 void tiku_flpr_arch_conn_stop(void);
 
 /**
+ * @brief Anchored-RX telemetry (power): the FLPR holds the RADIO off for
+ *        the dead part of each interval, its length found by a closed-loop
+ *        creep against the measured RX-wait, then falls into the catch.
+ * @param gap_off_it  out: RADIO-off loop iterations per interval (0 == still
+ *                    continuous / not yet converged).
+ * @param rxon_it     out: measured RX-wait loop iterations (the lead before
+ *                    the anchor once converged).
+ * @return RX-on duty as a percentage of the interval (off+on), or 100 while
+ *         continuous.  Both values are FLPR loop iterations (the core rate
+ *         is contended, so they are a ratio, not a wall-clock time).
+ */
+uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it);
+
+/**
  * @brief Non-blocking advertise+hold (L6 F-L6.3 facade start).
  * @return 0 shipped, -1 not running / bad args.  Poll conn_active().
  */

@@ -726,6 +726,19 @@ static void bleadv_flprnus(void)
                 break;
             }
         }
+        {
+            uint32_t gap = 0u, rx = 0u;
+            uint32_t duty = tiku_flpr_arch_conn_anchor(&gap, &rx);
+            if (gap != 0u) {
+                SHELL_PRINTF("  anchored-RX: RADIO off %lu of %lu loop-iters"
+                             " per interval (~%lu%% RX duty, closed-loop)\n",
+                             (unsigned long)gap,
+                             (unsigned long)(gap + rx),
+                             (unsigned long)duty);
+            } else {
+                SHELL_PRINTF("  anchored-RX: continuous (not yet converged)\n");
+            }
+        }
         tiku_flpr_arch_conn_stop();
         tiku_radio_arch_constlat_hold(0);
         if (total != 0u) {

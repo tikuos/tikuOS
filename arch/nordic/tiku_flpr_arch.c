@@ -486,6 +486,27 @@ uint32_t tiku_flpr_arch_conn_events(void)
     return TIKU_FLPR_SHARED->conn_events;
 }
 
+/* Anchored-RX telemetry: RADIO-off + RX-wait loop iterations, duty %. */
+uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it)
+{
+    uint32_t gap  = TIKU_FLPR_SHARED->conn_gap;
+    uint32_t rxon = TIKU_FLPR_SHARED->conn_rxon;
+    uint32_t period;
+
+    if (gap_off_it != 0) {
+        *gap_off_it = gap;
+    }
+    if (rxon_it != 0) {
+        *rxon_it = rxon;
+    }
+    if (gap == 0u) {
+        return 100u;                             /* continuous RX             */
+    }
+    period = gap + rxon;
+    return (period != 0u) ? (uint32_t)(((uint64_t)rxon * 100u) / period)
+                          : 100u;
+}
+
 /* Ask the FLPR to leave its hold loop, wait for it, then reclaim the
  * RADIO for the secure alias.  Safe if not connected. */
 void tiku_flpr_arch_conn_stop(void)
