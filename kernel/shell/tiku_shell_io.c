@@ -23,6 +23,7 @@
 #include "tiku.h"
 #include "kernel/vfs/tiku_vfs.h"    /* caller-capability sync on backend swap */
 #include <stdarg.h>
+#include <stdint.h>                 /* uintptr_t for %p */
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -105,26 +106,6 @@ tiku_shell_io_puts(const char *s)
 /* OUTPUT — lightweight printf                                               */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Render an unsigned value into buf (reversed) and return
- *        the digit count.
- */
-static int
-io_render_unsigned(char *buf, int bufsz, unsigned long val, int base)
-{
-    int i = 0;
-
-    if (val == 0) {
-        buf[i++] = '0';
-        return i;
-    }
-    while (val > 0 && i < bufsz) {
-        unsigned int d = val % base;
-        buf[i++] = (d < 10) ? ('0' + d) : ('a' + d - 10);
-        val /= base;
-    }
-    return i;
-}
 
 /**
  * @brief Emit `count` copies of character `c`.
@@ -138,11 +119,59 @@ io_pad(char c, int count)
 }
 
 /**
+ * @brief Emit an integer with base/case/width/pad/sign handling.
+ *
+ * @param uval       magnitude (already made positive for a negative @p neg).
+ * @param base       10 or 16.
+ * @param upper      1 for uppercase hex.
+ * @param width      minimum field width.
+ * @param left_align pad on the right.
+ * @param zero_pad   pad with '0' (ignored when left_align); '-' still leads.
+ * @param neg        emit a leading '-'.
+ */
+static void
+io_emit_num(unsigned long uval, int base, int upper, int width,
+            int left_align, int zero_pad, int neg)
+{
+    char buf[20];
+    int i = 0, len, pad;
+
+    if (uval == 0) {
+        buf[i++] = '0';
+    }
+    while (uval > 0 && i < (int)sizeof(buf)) {
+        unsigned int d = (unsigned int)(uval % (unsigned int)base);
+        buf[i++] = (d < 10u) ? (char)('0' + d)
+                             : (char)((upper ? 'A' : 'a') + (int)d - 10);
+        uval /= (unsigned int)base;
+    }
+    len = i;
+    pad = width - len - neg;
+
+    if (!left_align && !zero_pad) {
+        io_pad(' ', pad);
+    }
+    if (neg) {
+        io_emit('-');
+    }
+    if (!left_align && zero_pad) {
+        io_pad('0', pad);
+    }
+    while (i > 0) {
+        io_emit(buf[--i]);
+    }
+    if (left_align) {
+        io_pad(' ', pad);
+    }
+}
+
+/**
  * @brief Lightweight printf through the active backend.
  *
- * Supports %d, %u, %x, %s, %c, %p, and %% with optional width
- * and zero-pad.  CRLF expansion is applied if the backend flag
- * is set.  No heap allocation; all formatting uses the stack.
+ * Supports %d, %u, %x, %X, %p, %s, %c, and %% with the '-' (left)
+ * and '0' (zero-pad) flags, a field width, and the 'l' length
+ * modifier -- so %04X, %-8s, %3u all work.  CRLF expansion is
+ * applied if the backend flag is set.  No heap; stack formatting.
  */
 void
 tiku_shell_io_printf(const char *fmt, ...)
@@ -162,11 +191,18 @@ tiku_shell_io_printf(const char *fmt, ...)
         }
         fmt++;  /* skip '%' */
 
-        /* Optional '-' flag (left-align) */
-        int left_align = 0;
-        if (*fmt == '-') {
-            left_align = 1;
-            fmt++;
+        /* Optional flags: '-' left-align, '0' zero-pad. */
+        int left_align = 0, zero_pad = 0;
+        for (;;) {
+            if (*fmt == '-') {
+                left_align = 1;
+                fmt++;
+            } else if (*fmt == '0') {
+                zero_pad = 1;
+                fmt++;
+            } else {
+                break;
+            }
         }
 
         /* Optional field width */
@@ -209,54 +245,31 @@ tiku_shell_io_printf(const char *fmt, ...)
             unsigned long uval = neg
                 ? (unsigned long)(-(val + 1)) + 1
                 : (unsigned long)val;
-            char buf[12];
-            int len = io_render_unsigned(buf, sizeof(buf), uval, 10);
-            if (!left_align) {
-                io_pad(' ', width - len - neg);
-            }
-            if (neg) {
-                io_emit('-');
-            }
-            while (len > 0) {
-                io_emit(buf[--len]);
-            }
-            if (left_align) {
-                io_pad(' ', width - len - neg);
-            }
+            io_emit_num(uval, 10, 0, width, left_align, zero_pad, neg);
             break;
         }
         case 'u': {
             unsigned long val = is_long
                 ? va_arg(ap, unsigned long)
                 : (unsigned long)va_arg(ap, unsigned int);
-            char buf[12];
-            int len = io_render_unsigned(buf, sizeof(buf), val, 10);
-            if (!left_align) {
-                io_pad(' ', width - len);
-            }
-            while (len > 0) {
-                io_emit(buf[--len]);
-            }
-            if (left_align) {
-                io_pad(' ', width - len);
-            }
+            io_emit_num(val, 10, 0, width, left_align, zero_pad, 0);
             break;
         }
-        case 'x': {
+        case 'x':
+        case 'X': {
             unsigned long val = is_long
                 ? va_arg(ap, unsigned long)
                 : (unsigned long)va_arg(ap, unsigned int);
-            char buf[12];
-            int len = io_render_unsigned(buf, sizeof(buf), val, 16);
-            if (!left_align) {
-                io_pad(' ', width - len);
-            }
-            while (len > 0) {
-                io_emit(buf[--len]);
-            }
-            if (left_align) {
-                io_pad(' ', width - len);
-            }
+            io_emit_num(val, 16, (*fmt == 'X'), width, left_align,
+                        zero_pad, 0);
+            break;
+        }
+        case 'p': {
+            unsigned long val = (unsigned long)(uintptr_t)
+                va_arg(ap, void *);
+            io_emit('0');
+            io_emit('x');
+            io_emit_num(val, 16, 0, width, left_align, zero_pad, 0);
             break;
         }
         case 'c': {

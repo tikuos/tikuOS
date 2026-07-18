@@ -198,7 +198,7 @@ static void r154_ping(uint8_t argc, const char *argv[])
         n = 100;
     }
     tiku_154_init(R154_PAN, R154_PING_A, ch);
-    SHELL_PRINTF("154 PING ch%u 0x%x->0x%x (ACK+CSMA), %ld frames...\n",
+    SHELL_PRINTF("154 PING ch%u 0x%04X->0x%04X (ACK+CSMA), %ld frames...\n",
                  (unsigned)ch, (unsigned)R154_PING_A, (unsigned)R154_PONG_A, n);
     for (i = 0u; i < (uint16_t)n; i++) {
         pl[0] = (uint8_t)i;
@@ -231,7 +231,7 @@ static void r154_pong(uint8_t argc, const char *argv[])
         secs = 15;
     }
     tiku_154_init(R154_PAN, R154_PONG_A, ch);
-    SHELL_PRINTF("154 PONG ch%u 0x%x auto-ACK ~%ld s...\n",
+    SHELL_PRINTF("154 PONG ch%u 0x%04X auto-ACK ~%ld s...\n",
                  (unsigned)ch, (unsigned)R154_PONG_A, secs);
     start = tiku_clock_time();
     while ((tiku_clock_time_t)(tiku_clock_time() - start) <
