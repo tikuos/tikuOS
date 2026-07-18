@@ -1291,6 +1291,10 @@ endif
 # Phase B: the M33-side ATT/GATT host for the FLPR controller (ATT moved off
 # the coprocessor; the FLPR forwards L2CAP frames over the mailbox).
 SRCS += interfaces/bluetooth/tiku_ble_host.c
+# Phase E: LE Secure Connections (SMP) pairing -- AES-CMAC + f4/f5/f6 over the
+# CRACEN AES-ECB, P-256 ECDH from the crypto kit (self-contained).
+SRCS += interfaces/bluetooth/tiku_ble_smp.c
+SRCS += $(wildcard tikukits/crypto/p256/*.c)
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
 RISCV_CC      = $(RISCV_PREFIX)gcc
 FLPR_BUILD    = $(BUILD_DIR)/flpr

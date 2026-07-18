@@ -70,6 +70,7 @@
 #include <arch/nordic/tiku_flpr_arch.h>      /* L6: FLPR-as-controller (F-L6.1) */
 #include <interfaces/bluetooth/tiku_ble_serial.h> /* facade (B3 auto-reconnect) */
 #include <interfaces/bluetooth/tiku_ble_host.h>   /* Phase B: M33 ATT/GATT host */
+#include <interfaces/bluetooth/tiku_ble_smp.h>     /* Phase E: SMP LESC crypto  */
 #endif
 #include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
@@ -769,6 +770,22 @@ static void bleadv_flpradv(void)
  * exercising the tiku_ble_serial recv/send primitives end to end. */
 /* Drain the host's pending TX PDU as data-PDU-sized fragments, each tagged
  * with its LLID (2 start / 1 continuation), flow-controlled by the mailbox. */
+/* Phase E foundation: SMP LESC crypto self-test (AES-CMAC RFC-4493 KAT +
+ * P-256 ECDH round-trip) -- the primitives pairing is built on. */
+static void bleadv_smp(void)
+{
+    int r = tiku_ble_smp_selftest();
+    SHELL_PRINTF("SMP LESC crypto self-test:\n");
+    SHELL_PRINTF("  AES-CMAC (RFC 4493 KAT):   %s\n",
+                 (r & 1) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    SHELL_PRINTF("  P-256 ECDH (round-trip):   %s\n",
+                 (r & 2) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    if (r == 3) {
+        SHELL_PRINTF(SH_GREEN "  crypto foundation OK (CMAC + ECDH) -- SMP"
+                     " pairing buildable\n" SH_RST);
+    }
+}
+
 static void bleadv_flpr_drain_tx(void)
 {
     uint8_t  frag[32], llid;
@@ -994,6 +1011,10 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "flpradv") == 0) {
         bleadv_flpradv();
+        return;
+    }
+    if (strcmp(argv[1], "smp") == 0) {            /* Phase E: SMP crypto test */
+        bleadv_smp();
         return;
     }
     if (strcmp(argv[1], "flprnus") == 0) {
