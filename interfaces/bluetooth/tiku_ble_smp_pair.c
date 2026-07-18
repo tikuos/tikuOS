@@ -91,6 +91,11 @@ static void outq_push(const uint8_t *pdu, uint8_t len)
 static void fail(uint8_t reason)
 {
     uint8_t p[2];
+    /* Success is terminal: once DONE, a corrupted/duplicate late PDU (which
+     * re-runs a handler for retransmit) must never undo an established LTK. */
+    if (sc.state == TIKU_BLE_SMP_STATE_DONE) {
+        return;
+    }
     p[0] = SMP_PAIRING_FAILED;
     p[1] = reason;
     /* Best-effort notify the peer, then latch FAILED. */

@@ -69,8 +69,9 @@
 #include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
 #include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
-#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB: session key (E3)   */
+#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM (E3)      */
 #include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
+#include <interfaces/bluetooth/tiku_ble_enc.h>  /* E3c demo params + nonce     */
 #include <string.h>
 
 #define RADIO  NRF_RADIO_S
@@ -1517,6 +1518,33 @@ static void cen_send_enc_req(void)
     ll_queue(LL_ENC_REQ, req, 22u);
 }
 
+/* Phase E3c: CCM-encrypt the demo payload with the session key and send it as
+ * an ATT Write Command to the peripheral's NUS RX (handle 0x0012).  The peer
+ * decrypts + MIC-verifies it -- our SK encrypting data over the air. */
+static void cen_send_enc_data(void)
+{
+    static const uint8_t pt[TIKU_BLE_ENC_DEMO_PT_LEN] = TIKU_BLE_ENC_DEMO_PT;
+    uint8_t nonce[13], aad = TIKU_BLE_ENC_DEMO_AAD;
+    uint8_t ct[TIKU_BLE_ENC_DEMO_PT_LEN], mic[4];
+    uint8_t att[3u + TIKU_BLE_ENC_DEMO_PT_LEN + 4u];
+    int i;
+
+    tiku_ble_enc_nonce(nonce, 0u, 1u, cen_iv);   /* counter 0, central->periph */
+    if (tiku_crypto_arch_aes_ccm_star(0, cen_sk, 16u, nonce, &aad, 1u,
+                                      pt, TIKU_BLE_ENC_DEMO_PT_LEN, 4u,
+                                      ct, mic) != 0) {
+        return;
+    }
+    att[0] = 0x52u; att[1] = 0x12u; att[2] = 0x00u;   /* Write Cmd, h=0x0012  */
+    for (i = 0; i < (int)TIKU_BLE_ENC_DEMO_PT_LEN; i++) {
+        att[3 + i] = ct[i];
+    }
+    for (i = 0; i < 4; i++) {
+        att[3u + TIKU_BLE_ENC_DEMO_PT_LEN + i] = mic[i];
+    }
+    l2cap_queue(0x04u, att, (uint8_t)(3u + TIKU_BLE_ENC_DEMO_PT_LEN + 4u));
+}
+
 /* L2CAP signalling (CID 0x0005): a peripheral's Connection Parameter Update
  * Request -- reply Accepted, then flag the master to issue the LL update. */
 static void sig_handle(const uint8_t *l2cap, uint8_t len)
@@ -2730,11 +2758,17 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                     cen_send_enc_req();
                     cen_enc_wait = 0u;
                 }
-            } else if (cen_enc_stage == 2u) {       /* SK derived: done      */
-                if (st != (tiku_radio_ll_conn_stats_t *)0) {
-                    st->reason = 0u;
+            } else if (cen_enc_stage == 2u &&
+                       ll_tx_len == 0u && cen_sdu_len == 0u) {
+                cen_send_enc_data();                /* E3c: CCM-encrypted TX */
+                cen_enc_stage = 3u; cen_enc_wait = 0u;
+            } else if (cen_enc_stage == 3u) {       /* linger so peer decrypts*/
+                if (++cen_enc_wait >= 24u) {
+                    if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                        st->reason = 0u;
+                    }
+                    break;
                 }
-                break;
             }
         }
         /* SMP stall recovery: if a reply hasn't come and the TX path is idle,

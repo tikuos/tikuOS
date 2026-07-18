@@ -72,6 +72,8 @@
 #include <interfaces/bluetooth/tiku_ble_serial.h> /* facade (B3 auto-reconnect) */
 #include <interfaces/bluetooth/tiku_ble_host.h>   /* Phase B: M33 ATT/GATT host */
 #include <interfaces/bluetooth/tiku_ble_smp.h>     /* Phase E: SMP LESC crypto  */
+#include <arch/nordic/tiku_crypto_arch.h>          /* E3c: AES-CCM decrypt      */
+#include <interfaces/bluetooth/tiku_ble_enc.h>     /* E3c: demo params + nonce  */
 #endif
 #include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
@@ -585,6 +587,8 @@ static void bleadv_censmp(unsigned secs)
         if (tiku_radio_arch_central_enc(sk)) {   /* E3: LL_ENC -> session key */
             bleadv_fmt_hex(hx, sk, 16, 0);
             SHELL_PRINTF(SH_GREEN "  ENC OK: SK=%s\n" SH_RST, hx);
+            SHELL_PRINTF("  ENC-DATA: sent 1 CCM-encrypted payload"
+                         " (peer decrypts)\n");
         } else {
             SHELL_PRINTF("  ENC: LL encryption did not complete\n");
         }
@@ -1041,8 +1045,8 @@ static void bleadv_flprpair(void)
     }
     {
         uint8_t frame[40], inita[6], adva[6], types;
-        uint8_t ltk[16], sk[16];
-        int paired = 0, enc_done = 0;
+        uint8_t ltk[16], sk[16], iv[8];
+        int paired = 0, enc_done = 0, dec_ok = 0;
         tiku_clock_time_t start = tiku_clock_time();
 
         tiku_ble_host_reset();
@@ -1076,6 +1080,27 @@ static void bleadv_flprpair(void)
             if (paired && !enc_done && tiku_flpr_arch_enc_service(ltk)) {
                 enc_done = 1;
                 tiku_flpr_arch_enc_sk(sk);
+                tiku_flpr_arch_enc_iv(iv);
+            }
+            /* E3c: the central's CCM-encrypted payload lands as a NUS write.
+             * Decrypt with SK + MIC-verify + check it is the known plaintext. */
+            if (enc_done && !dec_ok) {
+                uint8_t cbuf[TIKU_BLE_HOST_MTU];
+                uint16_t m = tiku_ble_host_nus_recv(cbuf, sizeof(cbuf));
+                if (m == (uint16_t)(TIKU_BLE_ENC_DEMO_PT_LEN + 4u)) {
+                    static const uint8_t want[TIKU_BLE_ENC_DEMO_PT_LEN] =
+                        TIKU_BLE_ENC_DEMO_PT;
+                    uint8_t nonce[13], aad = TIKU_BLE_ENC_DEMO_AAD;
+                    uint8_t pt[TIKU_BLE_ENC_DEMO_PT_LEN], rmic[4];
+                    tiku_ble_enc_nonce(nonce, 0u, 1u, iv);   /* central->us    */
+                    if (tiku_crypto_arch_aes_ccm_star(
+                            1, sk, 16u, nonce, &aad, 1u, cbuf,
+                            TIKU_BLE_ENC_DEMO_PT_LEN, 4u, pt, rmic) == 0 &&
+                        memcmp(rmic, &cbuf[TIKU_BLE_ENC_DEMO_PT_LEN], 4) == 0 &&
+                        memcmp(pt, want, TIKU_BLE_ENC_DEMO_PT_LEN) == 0) {
+                        dec_ok = 1;
+                    }
+                }
             }
             tiku_watchdog_kick();
             if (!tiku_flpr_arch_conn_active()) {
@@ -1091,6 +1116,12 @@ static void bleadv_flprpair(void)
             if (enc_done) {
                 bleadv_fmt_hex(hx, sk, 16, 0);
                 SHELL_PRINTF(SH_GREEN "  ENC OK: SK=%s\n" SH_RST, hx);
+                if (dec_ok) {
+                    SHELL_PRINTF(SH_GREEN "  ENC-DATA OK: decrypted+MIC-verified"
+                                 " 'TIKU-LL-CCM-DEMO'\n" SH_RST);
+                } else {
+                    SHELL_PRINTF("  ENC-DATA: no valid ciphertext received\n");
+                }
             } else {
                 SHELL_PRINTF("  ENC: no LL_ENC_REQ from central\n");
             }

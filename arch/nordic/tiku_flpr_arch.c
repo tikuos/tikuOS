@@ -558,6 +558,15 @@ void tiku_flpr_arch_enc_sk(uint8_t sk[16])
     }
 }
 
+/* Copy the session IV = IVm||IVs (valid once enc_service() has returned 1). */
+void tiku_flpr_arch_enc_iv(uint8_t iv[8])
+{
+    int i;
+    for (i = 0; i < 8; i++) {
+        iv[i] = TIKU_FLPR_SHARED->enc_iv[i];
+    }
+}
+
 /* Phase A telemetry: LL updates the FLPR applied this connection. */
 uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
 {
