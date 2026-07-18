@@ -1160,9 +1160,18 @@ static uint8_t  nus_rx_len;
 static uint8_t  nus_cccd;           /* server: TX notifications enabled bit */
 static uint8_t  nus_notify[20];     /* server: pending notification payload */
 static uint8_t  nus_notify_len;     /* server: >0 = queue a TX notification */
-static uint8_t  att_step;           /* client: 1 mtu,2 cccd,3 rx,4 notify,5 ok */
+/* Client steps: 1 mtu, 2 disc-service, 3 disc-chars, 4 disc-cccd,
+ * 5 cccd-write, 6 rx-write, 7 await-notify, 8 done.  Discovery walks the
+ * peer's GATT DB (Read By Group Type / Read By Type / Find Info) and uses
+ * the DISCOVERED handles for the NUS ops (falling back to the well-known
+ * ones if a step returns nothing), so it exercises the same ATT a phone
+ * would -- kintsugi/radio.md L6 GATT discovery. */
+static uint8_t  att_step;
 static uint8_t  att_ok;             /* client: notification echo matched    */
 static uint8_t  att_readback;       /* client/server: first data byte seen  */
+static uint8_t  att_disc_ok;        /* client: discovered handles as expected */
+static uint16_t att_d_rx, att_d_tx, att_d_cccd; /* discovered NUS handles   */
+static uint16_t att_d_next;         /* Read-By-Type iteration cursor         */
 
 static void ll_reset(void)
 {
@@ -1170,6 +1179,8 @@ static void ll_reset(void)
     ll_want_term = 0u; ll_ctrl_tx = 0u; ll_ctrl_rx = 0u;
     nus_rx_len = 0u; nus_cccd = 0u; nus_notify_len = 0u;
     att_step = 0u; att_ok = 0u; att_readback = 0u;
+    att_disc_ok = 0u; att_d_rx = 0u; att_d_tx = 0u; att_d_cccd = 0u;
+    att_d_next = 0u;
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1247,25 +1258,44 @@ static void ll_on_acked(void)
  * until the response lands.  Every request here is idempotent. */
 static void att_client_send(void)
 {
-    uint8_t b[6];
+    uint8_t  b[7];
+    uint16_t h_rx   = att_d_rx   ? att_d_rx   : GATT_H_NUS_RX;
+    uint16_t h_cccd = att_d_cccd ? att_d_cccd : GATT_H_NUS_CCCD;
 
     if (att_step == 1u) {                       /* Exchange MTU Request    */
         b[0] = 0x02u; b[1] = 23u; b[2] = 0u;
         att_queue(b, 3u);
-    } else if (att_step == 2u) {                /* enable TX notifications  */
+    } else if (att_step == 2u) {                /* Read By Group Type      */
+        b[0] = 0x10u;                           /* discover primary svcs   */
+        b[1] = 0x01u; b[2] = 0x00u;             /* start = 0x0001          */
+        b[3] = 0xFFu; b[4] = 0xFFu;             /* end   = 0xFFFF          */
+        b[5] = 0x00u; b[6] = 0x28u;             /* type = 0x2800           */
+        att_queue(b, 7u);
+    } else if (att_step == 3u) {                /* Read By Type (chars)    */
+        uint16_t s = att_d_next ? att_d_next : 0x0001u;
+        b[0] = 0x08u;
+        b[1] = (uint8_t)s; b[2] = (uint8_t)(s >> 8);
+        b[3] = 0xFFu; b[4] = 0xFFu;
+        b[5] = 0x03u; b[6] = 0x28u;             /* type = 0x2803           */
+        att_queue(b, 7u);
+    } else if (att_step == 4u) {                /* Find Information (CCCD) */
+        uint16_t s = att_d_tx ? (uint16_t)(att_d_tx + 1u) : 0x0001u;
+        b[0] = 0x04u;
+        b[1] = (uint8_t)s; b[2] = (uint8_t)(s >> 8);
+        b[3] = 0xFFu; b[4] = 0xFFu;
+        att_queue(b, 5u);
+    } else if (att_step == 5u) {                /* enable TX notifications  */
         b[0] = 0x12u;                           /* Write CCCD = 0x0001     */
-        b[1] = (uint8_t)GATT_H_NUS_CCCD;
-        b[2] = (uint8_t)(GATT_H_NUS_CCCD >> 8);
+        b[1] = (uint8_t)h_cccd; b[2] = (uint8_t)(h_cccd >> 8);
         b[3] = 0x01u; b[4] = 0x00u;
         att_queue(b, 5u);
-    } else if (att_step == 3u) {                /* write NUS RX ("TK")     */
+    } else if (att_step == 6u) {                /* write NUS RX ("TK")     */
         b[0] = 0x12u;
-        b[1] = (uint8_t)GATT_H_NUS_RX;
-        b[2] = (uint8_t)(GATT_H_NUS_RX >> 8);
+        b[1] = (uint8_t)h_rx; b[2] = (uint8_t)(h_rx >> 8);
         b[3] = NUS_TEST_MSG[0]; b[4] = NUS_TEST_MSG[1];
         att_queue(b, 5u);
     }
-    /* step 4 awaits the server's pushed TX notification -- nothing to send */
+    /* step 7 awaits the server's pushed TX notification -- nothing to send */
 }
 
 /* ATT dispatch (L5): buf is the ATT PDU, len its length. */
@@ -1274,22 +1304,64 @@ static void att_handle(const uint8_t *att, uint8_t alen)
     uint8_t op = att[0];
 
     if (ll_is_central) {
-        /* CLIENT: MTU -> CCCD -> write RX -> await TX notification. */
+        /* CLIENT: MTU -> GATT discovery -> CCCD -> write RX -> await notify.
+         * On an ATT Error (0x01) a discovery phase is simply "done", so we
+         * advance; missing handles fall back to the well-known ones. */
+        uint16_t h_tx = att_d_tx ? att_d_tx : GATT_H_NUS_TX;
+
         if (op == 0x03u && att_step == 1u) {        /* MTU Response        */
             att_step = 2u;
-            att_client_send();                      /* enable CCCD         */
-        } else if (op == 0x13u && att_step == 2u) { /* CCCD Write Response */
+            att_client_send();                      /* Read By Group Type  */
+        } else if (op == 0x11u && att_step == 2u) { /* svc discovered      */
+            att_d_next = (uint16_t)(att[2] | ((uint16_t)att[3] << 8));
             att_step = 3u;
+            att_client_send();                      /* Read By Type        */
+        } else if (op == 0x09u && att_step == 3u && alen >= 21u) {
+            /* char decl value = [props][vhandle(2)][UUID(16)]; NUS variant
+             * is UUID byte 12 -> att[7+12] = att[19]. */
+            uint16_t vh = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
+            if (att[19] == 0x02u) {
+                att_d_rx = vh;
+            } else if (att[19] == 0x03u) {
+                att_d_tx = vh;
+            }
+            att_d_next = (uint16_t)((att[2] | ((uint16_t)att[3] << 8)) + 1u);
+            if (att_d_rx != 0u && att_d_tx != 0u) {
+                att_step = 4u;                      /* both chars found    */
+            }
+            att_client_send();                      /* next RdByType / FindInfo */
+        } else if (op == 0x05u && att_step == 4u && alen >= 6u) {
+            if (att[4] == 0x02u && att[5] == 0x29u) {   /* CCCD 0x2902      */
+                att_d_cccd = (uint16_t)(att[2] | ((uint16_t)att[3] << 8));
+            }
+            att_disc_ok = (uint8_t)(att_d_rx == GATT_H_NUS_RX &&
+                                    att_d_tx == GATT_H_NUS_TX &&
+                                    att_d_cccd == GATT_H_NUS_CCCD);
+            att_step = 5u;
+            att_client_send();                      /* enable CCCD         */
+        } else if (op == 0x01u && att_step >= 2u && att_step <= 4u) {
+            /* ATT Error ends a discovery phase; advance best-effort. */
+            if (att_step == 3u) {
+                att_step = 4u;
+            } else {
+                att_disc_ok = (uint8_t)(att_d_rx == GATT_H_NUS_RX &&
+                                        att_d_tx == GATT_H_NUS_TX &&
+                                        att_d_cccd == GATT_H_NUS_CCCD);
+                att_step = 5u;
+            }
+            att_client_send();
+        } else if (op == 0x13u && att_step == 5u) { /* CCCD Write Response */
+            att_step = 6u;
             att_client_send();                      /* write NUS RX        */
-        } else if (op == 0x13u && att_step == 3u) { /* RX Write Response   */
-            att_step = 4u;                          /* now await notify    */
-        } else if (op == 0x1Bu && att_step == 4u) { /* Handle Value Notify */
-            if (alen >= 3u && att[1] == (uint8_t)GATT_H_NUS_TX &&
-                att[2] == (uint8_t)(GATT_H_NUS_TX >> 8) && alen >= 5u) {
+        } else if (op == 0x13u && att_step == 6u) { /* RX Write Response   */
+            att_step = 7u;                          /* now await notify    */
+        } else if (op == 0x1Bu && att_step == 7u) { /* Handle Value Notify */
+            if (alen >= 5u && att[1] == (uint8_t)h_tx &&
+                att[2] == (uint8_t)(h_tx >> 8)) {
                 att_readback = att[3];              /* echoed first byte   */
                 att_ok = (uint8_t)(att[3] == NUS_TEST_MSG[0] &&
                                    att[4] == NUS_TEST_MSG[1]);
-                att_step = 5u;                      /* loopback verified   */
+                att_step = 8u;                      /* loopback verified   */
             }
         }
     } else {
@@ -2044,7 +2116,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).
          * Step 4 awaits the server's pushed notification -- the server's
          * LL retransmits that until acked, so the client just waits. */
-        if (att_step >= 1u && att_step <= 3u) {
+        if (att_step >= 1u && att_step <= 6u) {
             if (att_step != att_prev) {
                 att_prev = att_step;
                 att_wait = 0u;
@@ -2080,6 +2152,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->att_step = att_step;
         st->att_ok = att_ok;
         st->att_readback = att_readback;
+        st->att_disc = att_disc_ok;
     }
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;

@@ -429,13 +429,15 @@ static void bleadv_central(unsigned secs)
     {
         char rb[3];
         bleadv_fmt_hex(rb, &st.att_readback, 1, 0);
-        if (st.att_step >= 5u && st.att_ok) {
-            SHELL_PRINTF(SH_GREEN "  NUS: MTU/CCCD/write->notify loopback OK,"
-                         " echo[0]=0x%s (L5)\n" SH_RST, rb);
+        if (st.att_step >= 8u && st.att_ok) {
+            SHELL_PRINTF(SH_GREEN "  NUS: MTU/discover/CCCD/write->notify"
+                         " loopback OK, echo[0]=0x%s (L5/L6)\n" SH_RST, rb);
         } else {
-            SHELL_PRINTF("  NUS: incomplete (step=%u/5 echo[0]=0x%s) (L5)\n",
+            SHELL_PRINTF("  NUS: incomplete (step=%u/8 echo[0]=0x%s) (L5)\n",
                          (unsigned)st.att_step, rb);
         }
+        SHELL_PRINTF("  GATT discovery: %s (handles RX/TX/CCCD matched)"
+                     " (L6)\n", st.att_disc ? "OK" : "not matched");
     }
     SHELL_PRINTF("  ended: %s\n",
                  st.reason == 0u ? "duration cap" :

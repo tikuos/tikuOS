@@ -142,9 +142,10 @@ typedef struct {
     uint8_t  first_chan;        /**< first CSA#1 data channel (diag)      */
     uint8_t  hop;               /**< hopIncrement (diag)                  */
     uint8_t  reason;            /**< 0 caller-cap, 1 supervision, 2 never */
-    uint8_t  att_step;          /**< ATT client progress 0..5 (L5)       */
+    uint8_t  att_step;          /**< ATT client progress 0..8 (L5/L6)    */
     uint8_t  att_ok;            /**< ATT read-back matched write (L5)    */
     uint8_t  att_readback;      /**< value read back over ATT (L5)       */
+    uint8_t  att_disc;          /**< GATT discovery matched (L6)         */
 } tiku_radio_ll_conn_stats_t;
 
 /**

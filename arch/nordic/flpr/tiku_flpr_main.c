@@ -339,7 +339,42 @@ static uint8_t fll_build_tx(uint8_t *out)
     return 3u;
 }
 
-/* ATT (NUS server): MTU; CCCD write -> subscribe; NUS RX write -> f2a. */
+/* NUS 128-bit UUIDs, little-endian on air (stored reversed).  Base
+ * 6E400001-B5A3-F393-E0A9-E50E24DCCA9E; byte[12] selects 0001/0002/0003
+ * (service / RX / TX).  The GATT DB the FLPR presents to a discovering
+ * client (L6 GATT discovery):
+ *   0x0010 Primary Service (0x2800) = NUS service UUID
+ *   0x0011 Characteristic (0x2803)  = [Write|WriteNoRsp][0x0012][RX UUID]
+ *   0x0012 NUS RX value             (write target)
+ *   0x0013 Characteristic (0x2803)  = [Notify][0x0014][TX UUID]
+ *   0x0014 NUS TX value             (notify source)
+ *   0x0015 CCCD (0x2902)                                                 */
+static const uint8_t nus_uuid_base[16] = {
+    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu
+};
+
+/* ATT Error Response: [0x01][req_op][handle(2)][error_code]. */
+static void fll_att_error(uint8_t req_op, uint16_t h, uint8_t err)
+{
+    uint8_t e[5];
+    e[0] = 0x01u; e[1] = req_op;
+    e[2] = (uint8_t)h; e[3] = (uint8_t)(h >> 8);
+    e[4] = err;
+    fll_att_queue(e, 5u);
+}
+
+/* Emit a 128-bit NUS UUID (variant = byte[12]) into out. */
+static void fll_nus_uuid(uint8_t *out, uint8_t variant)
+{
+    uint8_t i;
+    for (i = 0u; i < 16u; i++) {
+        out[i] = nus_uuid_base[i];
+    }
+    out[12] = variant;
+}
+
+/* ATT (NUS server): MTU; GATT discovery; CCCD write; NUS RX write -> f2a. */
 static void fll_att_handle(const volatile uint8_t *att, uint8_t alen,
                            tiku_flpr_shared_t *sh)
 {
@@ -347,6 +382,52 @@ static void fll_att_handle(const volatile uint8_t *att, uint8_t alen,
     if (op == 0x02u) {                          /* Exchange MTU Req         */
         uint8_t m[3] = { 0x03u, 23u, 0u };
         fll_att_queue(m, 3u);
+    } else if (op == 0x10u && alen >= 7u) {     /* Read By Group Type Req   */
+        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+        uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
+        if (type == 0x2800u && start <= 0x0010u) {  /* Primary Service      */
+            uint8_t r[24];
+            r[0] = 0x11u; r[1] = 20u;           /* opcode, per-entry length  */
+            r[2] = 0x10u; r[3] = 0x00u;         /* group start handle        */
+            r[4] = 0x15u; r[5] = 0x00u;         /* group end handle          */
+            fll_nus_uuid(&r[6], 0x01u);         /* NUS service UUID          */
+            fll_att_queue(r, 22u);
+        } else {
+            fll_att_error(0x10u, start, 0x0Au); /* Attribute Not Found       */
+        }
+    } else if (op == 0x08u && alen >= 7u) {     /* Read By Type Req         */
+        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+        uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
+        if (type == 0x2803u && start <= 0x0011u) {  /* Characteristic (RX)  */
+            uint8_t r[24];
+            r[0] = 0x09u; r[1] = 21u;
+            r[2] = 0x11u; r[3] = 0x00u;         /* declaration handle        */
+            r[4] = 0x0Cu;                       /* props Write|WriteNoRsp    */
+            r[5] = 0x12u; r[6] = 0x00u;         /* value handle              */
+            fll_nus_uuid(&r[7], 0x02u);         /* RX char UUID              */
+            fll_att_queue(r, 23u);
+        } else if (type == 0x2803u && start <= 0x0013u) { /* char TX        */
+            uint8_t r[24];
+            r[0] = 0x09u; r[1] = 21u;
+            r[2] = 0x13u; r[3] = 0x00u;
+            r[4] = 0x10u;                       /* props Notify              */
+            r[5] = 0x14u; r[6] = 0x00u;
+            fll_nus_uuid(&r[7], 0x03u);         /* TX char UUID              */
+            fll_att_queue(r, 23u);
+        } else {
+            fll_att_error(0x08u, start, 0x0Au);
+        }
+    } else if (op == 0x04u && alen >= 5u) {     /* Find Information Req      */
+        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+        if (start <= 0x0015u && start >= 0x0014u) { /* CCCD after TX char   */
+            uint8_t r[6];
+            r[0] = 0x05u; r[1] = 0x01u;         /* Find Info Rsp, 16-bit fmt */
+            r[2] = 0x15u; r[3] = 0x00u;         /* CCCD handle               */
+            r[4] = 0x02u; r[5] = 0x29u;         /* UUID 0x2902               */
+            fll_att_queue(r, 6u);
+        } else {
+            fll_att_error(0x04u, start, 0x0Au);
+        }
     } else if (op == 0x12u && alen >= 4u) {     /* Write Request            */
         uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
         if (h == FNUS_H_CCCD) {
