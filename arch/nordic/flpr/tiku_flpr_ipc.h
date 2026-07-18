@@ -76,7 +76,29 @@ typedef struct {
     volatile uint32_t rx_done;          /* probe finished                  */
     volatile uint8_t  rx_first[16];     /* head of 1st CRC-valid packet    */
     volatile uint32_t rx_first_len;
+
+    /* Connection state (F-L6.1 step 1).  The FLPR advertises connectably,
+     * captures the CONNECT_IND, and (step 1b) holds the link.  conn_state:
+     * 0 idle/advertising, 1 connected, 2 gave up (no central).  The rest
+     * are the parsed CONNECT_IND LLData the M33 reads back to verify. */
+    volatile uint32_t conn_state;
+    volatile uint32_t conn_aa;
+    volatile uint32_t conn_crcinit;
+    volatile uint32_t conn_events;      /* connection events run (step 1b) */
+    volatile uint16_t conn_interval;    /* 1.25 ms units                   */
+    volatile uint16_t conn_timeout;     /* 10 ms units                     */
+    volatile uint16_t conn_winoffset;
+    volatile uint8_t  conn_hop;
+    volatile uint8_t  conn_winsize;
+    volatile uint8_t  conn_chm[5];
 } tiku_flpr_shared_t;
+
+/* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + our AdvA. */
+typedef struct {
+    uint32_t adv_len;                   /* bytes in adv[] ([S0][LEN][S1]..) */
+    uint8_t  addr[6];                   /* AdvA to match in the CONNECT_IND */
+    uint8_t  adv[48];
+} tiku_flpr_conn_t;
 
 /* Cooperative park/resume protocol.  Hardware truths this encodes:
  * clearing CPURUN does not halt a RUNNING VPR (boot-state control only),
@@ -107,6 +129,11 @@ typedef struct {
  * the M33 while RADIO is secure, then RADIO+UARTE21 are flipped NonSecure
  * (same handoff as the beacon). */
 #define TIKU_FLPR_CMD_RXPROBE     6u
+/* Connection controller (L6 F-L6.1 step 1): advertise the connectable PDU
+ * in a2f_buf (tiku_flpr_conn_t), capture the CONNECT_IND, publish it in the
+ * conn_* fields (step 1a); step 1b then holds the link.  Same NS handoff. */
+#define TIKU_FLPR_CMD_CONN_ADV    7u
+#define TIKU_FLPR_CMD_CONN_STOP   8u
 #define TIKU_FLPR_RSP_PARKED  1u
 #define TIKU_FLPR_RSP_PULSE_DONE 2u
 #define TIKU_FLPR_RSP_BEACON_STOPPED 3u

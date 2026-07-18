@@ -575,6 +575,66 @@ static void bleadv_flprrx(void)
         SHELL_PRINTF("  nothing heard (is the peer transmitting on ch37?)\n");
     }
 }
+
+/* L6 F-L6.1 step 1a: the FLPR advertises 'TIKU-CONN' connectably and
+ * captures the CONNECT_IND -- the on-die controller taking its first
+ * connection.  Connect from a central (`bleadv central` on the peer). */
+static void bleadv_flpradv(void)
+{
+    uint8_t addr[6], ad[31], adv[48];
+    uint8_t adlen = 0u, advlen;
+    static const char nm[] = "TIKU-CONN";
+    tiku_flpr_conn_info_t info;
+    int rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
+        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
+    ad[adlen++] = (uint8_t)(1u + sizeof(nm) - 1u);
+    ad[adlen++] = 0x09u;
+    memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
+    adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
+    advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    adv[0] = 0x40u;                              /* ADV_IND (connectable)    */
+
+    SHELL_PRINTF("FLPR advertising 'TIKU-CONN' (connectable) ~8 s -- connect"
+                 " from a central (bleadv central on the peer)...\n");
+    tiku_radio_arch_init();
+    tiku_radio_arch_constlat_hold(1);
+    rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
+    tiku_radio_arch_constlat_hold(0);
+    if (rc == -1) {
+        SHELL_PRINTF("FLPR not running\n");
+        return;
+    }
+    if (rc == -2) {
+        SHELL_PRINTF("no central connected (FLPR gave up advertising)\n");
+        return;
+    }
+    {
+        uint8_t aab[4], cib[3];
+        char aa[9], ci[7];
+        aab[0] = (uint8_t)(info.aa >> 24); aab[1] = (uint8_t)(info.aa >> 16);
+        aab[2] = (uint8_t)(info.aa >> 8);  aab[3] = (uint8_t)info.aa;
+        cib[0] = (uint8_t)(info.crcinit >> 16);
+        cib[1] = (uint8_t)(info.crcinit >> 8); cib[2] = (uint8_t)info.crcinit;
+        bleadv_fmt_hex(aa, aab, 4, 0);
+        bleadv_fmt_hex(ci, cib, 3, 0);
+        SHELL_PRINTF(SH_GREEN "  FLPR captured CONNECT_IND: AA=%s CRCInit=%s"
+                     " interval=%u hop=%u timeout=%u (L6 F-L6.1 step 1a)\n"
+                     SH_RST, aa, ci, (unsigned)info.interval,
+                     (unsigned)info.hop, (unsigned)info.timeout);
+    }
+}
 #endif /* TIKU_FLPR_ENABLE */
 
 void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
@@ -596,6 +656,10 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
 #if (TIKU_FLPR_ENABLE + 0)
     if (strcmp(argv[1], "flprrx") == 0) {
         bleadv_flprrx();
+        return;
+    }
+    if (strcmp(argv[1], "flpradv") == 0) {
+        bleadv_flpradv();
         return;
     }
 #endif

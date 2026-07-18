@@ -115,4 +115,31 @@ uint32_t tiku_flpr_arch_beacon_bursts(void);
 int tiku_flpr_arch_rxprobe(uint32_t *addr_evts, uint32_t *crcok_evts,
                            uint8_t *first, uint32_t cap, uint32_t *flen);
 
+/** Parsed CONNECT_IND the FLPR captured (L6 F-L6.1). */
+typedef struct {
+    uint32_t aa;            /**< data-channel access address        */
+    uint32_t crcinit;       /**< 24-bit CRC init                    */
+    uint16_t interval;      /**< connInterval, 1.25 ms units        */
+    uint16_t timeout;       /**< supervision timeout, 10 ms units   */
+    uint8_t  hop;           /**< hopIncrement                       */
+    uint8_t  winsize;       /**< transmitWindowSize units           */
+} tiku_flpr_conn_info_t;
+
+/**
+ * @brief FLPR advertises connectably and captures the CONNECT_IND (step 1a).
+ *
+ * Same NS handoff as the beacon (caller ran tiku_radio_arch_init + holds
+ * CONSTLAT).  Blocks until a central connects or the FLPR gives up (~8 s of
+ * advertising).  Restores peripheral security on return.
+ *
+ * @param adv      Connectable ADV PDU ([S0=0x40][LEN][S1][AdvA][AD...]).
+ * @param adv_len  Bytes in @p adv (<= 48).
+ * @param addr     AdvA to match in the CONNECT_IND (6 bytes).
+ * @param out      Filled with the parsed CONNECT_IND when connected.
+ * @return 0 connected (out filled), -1 not running / bad args, -2 gave up.
+ */
+int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
+                                const uint8_t *addr,
+                                tiku_flpr_conn_info_t *out);
+
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

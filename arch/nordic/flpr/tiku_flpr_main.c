@@ -204,6 +204,130 @@ static void flpr_rxprobe(tiku_flpr_shared_t *sh)
     sh->rx_done = 1u;
 }
 
+/* Connection controller advertise + capture (L6 F-L6.1 step 1a): the
+ * beacon's TX and the RX probe's RX joined by the hardware TX->RX
+ * turnaround.  Per channel: TX the connectable ADV_IND (DISABLED_RXEN
+ * short auto-opens RX), then listen for a CONNECT_IND addressed to us.
+ * On a match, parse the LLData (the data-channel AA/CRCInit + timing the
+ * link needs) into the conn_* shared fields.  Register sequence mirrors
+ * the M33 advertising phase in tiku_radio_arch_connect; the M33 set the
+ * static packet format + adv-AA/CRC before the NS flip. */
+static uint8_t conn_adv[48] __attribute__((aligned(4)));
+static uint8_t conn_rx[48]  __attribute__((aligned(4)));
+
+static void flpr_conn_adv(tiku_flpr_shared_t *sh)
+{
+    NRF_RADIO_Type *r = NRF_RADIO_NS;
+    const volatile tiku_flpr_conn_t *in =
+        (const volatile tiku_flpr_conn_t *)sh->a2f_buf;
+    uint8_t  addr[6];
+    uint32_t alen = in->adv_len, i, spin, attempt;
+    uint8_t  chan = 0u, connected = 0u;
+
+    if (alen > sizeof(conn_adv)) {
+        alen = sizeof(conn_adv);
+    }
+    for (i = 0u; i < alen; i++) {
+        conn_adv[i] = in->adv[i];
+    }
+    for (i = 0u; i < 6u; i++) {
+        addr[i] = in->addr[i];
+    }
+    sh->conn_state = 0u;
+    sh->conn_events = 0u;
+    flpr_hfclk_kick();
+
+    for (attempt = 0u; attempt < 4000u && !connected; attempt++) {
+        r->FREQUENCY = beacon_freq[chan];
+        r->DATAWHITE = 0x00890000u | (0x40u | beacon_widx[chan]);
+        /* TX ADV_IND, hardware turnaround to RX (DISABLED_RXEN). */
+        r->SHORTS = (1u << 0) | (1u << 19) | (1u << 3) | (1u << 4);
+        r->PACKETPTR = (uint32_t)conn_adv;
+        r->EVENTS_DISABLED = 0u;
+        (void)r->EVENTS_DISABLED;
+        r->TASKS_TXEN = 1u;
+        for (spin = 0u; spin < 40000u; spin++) {
+            if (r->EVENTS_DISABLED != 0u) {
+                break;                          /* TX done, RX ramping      */
+            }
+        }
+        /* Hand the RX leg its buffer; drop the turnaround short. */
+        r->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+        r->PACKETPTR = (uint32_t)conn_rx;
+        r->EVENTS_DISABLED = 0u;
+        r->EVENTS_CRCOK    = 0u;
+        (void)r->EVENTS_DISABLED;
+        for (spin = 0u; spin < 20000u; spin++) {
+            if (r->EVENTS_DISABLED != 0u) {
+                break;                          /* a packet ended           */
+            }
+        }
+        if (r->EVENTS_DISABLED == 0u) {
+            r->TASKS_DISABLE = 1u;              /* window idle: rotate      */
+            for (spin = 0u; spin < 8000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        } else if (r->EVENTS_CRCOK != 0u &&
+                   (conn_rx[0] & 0x0Fu) == 0x05u && conn_rx[1] == 34u) {
+            uint8_t match = 1u;
+            for (spin = 0u; spin < 200u; spin++) {   /* DMA settle         */
+            }
+            for (i = 0u; i < 6u; i++) {
+                if (conn_rx[9u + i] != addr[i]) {     /* AdvA at rx[9..14]  */
+                    match = 0u;
+                    break;
+                }
+            }
+            if (match) {
+                /* LLData at conn_rx[15..36] (payload starts at [3]:
+                 * InitA[6] AdvA[6] then LLData). */
+                sh->conn_aa = (uint32_t)conn_rx[15] |
+                              ((uint32_t)conn_rx[16] << 8) |
+                              ((uint32_t)conn_rx[17] << 16) |
+                              ((uint32_t)conn_rx[18] << 24);
+                sh->conn_crcinit = (uint32_t)conn_rx[19] |
+                                   ((uint32_t)conn_rx[20] << 8) |
+                                   ((uint32_t)conn_rx[21] << 16);
+                sh->conn_winsize = conn_rx[22];
+                sh->conn_winoffset = (uint16_t)(conn_rx[23] |
+                                                ((uint16_t)conn_rx[24] << 8));
+                sh->conn_interval = (uint16_t)(conn_rx[25] |
+                                               ((uint16_t)conn_rx[26] << 8));
+                sh->conn_timeout = (uint16_t)(conn_rx[29] |
+                                              ((uint16_t)conn_rx[30] << 8));
+                for (i = 0u; i < 5u; i++) {
+                    sh->conn_chm[i] = conn_rx[31u + i];
+                }
+                sh->conn_hop = (uint8_t)(conn_rx[36] & 0x1Fu);
+                connected = 1u;
+            } else {
+                r->TASKS_DISABLE = 1u;
+                for (spin = 0u; spin < 8000u; spin++) {
+                    if (r->EVENTS_DISABLED != 0u) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            r->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 8000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        }
+        if (!connected) {
+            chan = (uint8_t)((chan + 1u) % 3u);
+        }
+        if (sh->cmd != 0u) {                     /* honour STOP / new cmd    */
+            break;
+        }
+    }
+    sh->conn_state = connected ? 1u : 2u;        /* 1 connected, 2 gave up   */
+}
+
 /* Echo service: consume an app->flpr message, mirror it back, ring. */
 static void flpr_echo_pump(tiku_flpr_shared_t *sh, uint32_t *last_seq)
 {
@@ -300,6 +424,14 @@ void tiku_flpr_main(void)
             sh->rx_done = 0u;
             sh->cmd = 0u;
             flpr_rxprobe(sh);                    /* blocking, bounded        */
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_CONN_ADV) {
+            sh->cmd = 0u;
+            flpr_conn_adv(sh);                   /* blocking, bounded        */
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+            sh->conn_state = 2u;
+            sh->cmd = 0u;
         }
         if (beacon_on) {
             volatile uint32_t w;

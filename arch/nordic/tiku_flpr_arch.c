@@ -418,4 +418,57 @@ int tiku_flpr_arch_rxprobe(uint32_t *addr_evts, uint32_t *crcok_evts,
     return 0;
 }
 
+/*---------------------------------------------------------------------------*/
+/* Connection controller (L6 F-L6.1 step 1a): FLPR advertises + captures     */
+/*---------------------------------------------------------------------------*/
+
+int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
+                                const uint8_t *addr,
+                                tiku_flpr_conn_info_t *out)
+{
+    volatile tiku_flpr_conn_t *in =
+        (volatile tiku_flpr_conn_t *)TIKU_FLPR_SHARED->a2f_buf;
+    uint32_t i, spin, st;
+
+    if (!tiku_flpr_arch_running() || adv_len > sizeof(in->adv)) {
+        return -1;
+    }
+    TIKU_FLPR_SHARED->conn_state = 0u;
+    flpr_radio_ns(1);                          /* RADIO+UARTE21 -> NonSecure */
+    in->adv_len = adv_len;
+    for (i = 0u; i < 6u; i++) {
+        in->addr[i] = addr[i];
+    }
+    for (i = 0u; i < adv_len; i++) {
+        in->adv[i] = adv[i];
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
+
+    /* Block until the FLPR connects (1) or gives up (2); WDT-kicked. */
+    for (spin = 0u; spin < 400000000u; spin++) {
+        st = TIKU_FLPR_SHARED->conn_state;
+        if (st == 1u || st == 2u) {
+            break;
+        }
+        if ((spin & 0xFFFFFu) == 0u) {
+            tiku_watchdog_kick();
+        }
+    }
+    flpr_radio_ns(0);                          /* reclaim secure alias       */
+
+    if (TIKU_FLPR_SHARED->conn_state != 1u) {
+        return -2;                             /* gave up / timeout          */
+    }
+    if (out != (tiku_flpr_conn_info_t *)0) {
+        out->aa       = TIKU_FLPR_SHARED->conn_aa;
+        out->crcinit  = TIKU_FLPR_SHARED->conn_crcinit;
+        out->interval = TIKU_FLPR_SHARED->conn_interval;
+        out->timeout  = TIKU_FLPR_SHARED->conn_timeout;
+        out->hop      = TIKU_FLPR_SHARED->conn_hop;
+        out->winsize  = TIKU_FLPR_SHARED->conn_winsize;
+    }
+    return 0;
+}
+
 #endif /* TIKU_FLPR_ENABLE */
