@@ -184,9 +184,14 @@ static void r154_ed(uint8_t argc, const char *argv[])
     tiku_ieee154_arch_mode_ble();
 }
 
+/* Shared AES-128 link key for the secured ping/pong demo. */
+static const uint8_t r154_key[16] = {
+    0x54, 0x49, 0x4b, 0x55, 0x2d, 0x31, 0x35, 0x2e,
+    0x34, 0x20, 0x6b, 0x65, 0x79, 0x21, 0x21, 0x21 };
+
 /* MAC-min ping (initiator): addressed unicast + wait for the peer's echo,
- * counting round-trips -- the N2 PER metric. */
-static void r154_ping(uint8_t argc, const char *argv[])
+ * counting round-trips -- the N2 PER metric.  @p secure = AES-CCM* frames. */
+static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
 {
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
     long n = (argc > 3u) ? r154_atoi(argv[3]) : 100;
@@ -198,8 +203,11 @@ static void r154_ping(uint8_t argc, const char *argv[])
         n = 100;
     }
     tiku_154_init(R154_PAN, R154_PING_A, ch);
-    SHELL_PRINTF("154 PING ch%u 0x%04X->0x%04X (ACK+CSMA), %ld frames...\n",
-                 (unsigned)ch, (unsigned)R154_PING_A, (unsigned)R154_PONG_A, n);
+    tiku_154_set_key(secure ? r154_key : (const uint8_t *)0);
+    tiku_154_set_secure(secure);
+    SHELL_PRINTF("154 %s ch%u 0x%04X->0x%04X (ACK+CSMA), %ld frames...\n",
+                 secure ? "SECPING" : "PING", (unsigned)ch,
+                 (unsigned)R154_PING_A, (unsigned)R154_PONG_A, n);
     for (i = 0u; i < (uint16_t)n; i++) {
         pl[0] = (uint8_t)i;
         pl[1] = (uint8_t)(i >> 8);
@@ -210,15 +218,16 @@ static void r154_ping(uint8_t argc, const char *argv[])
             tiku_watchdog_kick();
         }
     }
+    tiku_154_set_secure(0);
     tiku_ieee154_arch_mode_ble();
-    SHELL_PRINTF("154 PING done: %lu/%ld ACKed (%lu%%)\n",
-                 (unsigned long)ok, n,
+    SHELL_PRINTF("154 %s done: %lu/%ld ACKed (%lu%%)\n",
+                 secure ? "SECPING" : "PING", (unsigned long)ok, n,
                  (unsigned long)((ok * 100u) / (uint32_t)n));
 }
 
 /* MAC-min pong (responder): receive frames for us and echo the payload back
  * to the source, for ~secs. */
-static void r154_pong(uint8_t argc, const char *argv[])
+static void r154_pong(uint8_t argc, const char *argv[], uint8_t secure)
 {
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
     long secs = (argc > 3u) ? r154_atoi(argv[3]) : 15;
@@ -231,8 +240,10 @@ static void r154_pong(uint8_t argc, const char *argv[])
         secs = 15;
     }
     tiku_154_init(R154_PAN, R154_PONG_A, ch);
-    SHELL_PRINTF("154 PONG ch%u 0x%04X auto-ACK ~%ld s...\n",
-                 (unsigned)ch, (unsigned)R154_PONG_A, secs);
+    tiku_154_set_key(secure ? r154_key : (const uint8_t *)0);
+    SHELL_PRINTF("154 %s ch%u 0x%04X auto-ACK ~%ld s...\n",
+                 secure ? "SECPONG" : "PONG", (unsigned)ch,
+                 (unsigned)R154_PONG_A, secs);
     start = tiku_clock_time();
     while ((tiku_clock_time_t)(tiku_clock_time() - start) <
            (tiku_clock_time_t)((uint32_t)TIKU_CLOCK_SECOND * (uint32_t)secs)) {
@@ -245,8 +256,10 @@ static void r154_pong(uint8_t argc, const char *argv[])
             }
         }
     }
+    tiku_154_set_key((const uint8_t *)0);
     tiku_ieee154_arch_mode_ble();
-    SHELL_PRINTF("154 PONG done: %lu frames (%lu auto-ACKed)\n",
+    SHELL_PRINTF("154 %s done: %lu frames (%lu auto-ACKed)\n",
+                 secure ? "SECPONG" : "PONG",
                  (unsigned long)recvd, (unsigned long)acked);
 }
 
@@ -254,7 +267,7 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
 {
     if (argc < 2u) {
         SHELL_PRINTF("usage: radio154 tx [ch] [text] | rx [ch] [secs]"
-                     " | ed [ch] | ping [ch] [n] | pong [ch] [secs]\n");
+                     " | ed [ch] | ping|pong|secping|secpong [ch] [n]\n");
         return;
     }
     if (strcmp(argv[1], "tx") == 0) {
@@ -264,12 +277,16 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
     } else if (strcmp(argv[1], "ed") == 0) {
         r154_ed(argc, argv);
     } else if (strcmp(argv[1], "ping") == 0) {
-        r154_ping(argc, argv);
+        r154_ping(argc, argv, 0u);
     } else if (strcmp(argv[1], "pong") == 0) {
-        r154_pong(argc, argv);
+        r154_pong(argc, argv, 0u);
+    } else if (strcmp(argv[1], "secping") == 0) {
+        r154_ping(argc, argv, 1u);
+    } else if (strcmp(argv[1], "secpong") == 0) {
+        r154_pong(argc, argv, 1u);
     } else {
-        SHELL_PRINTF("radio154: unknown '%s' (tx|rx|ed|ping|pong)\n",
-                     argv[1]);
+        SHELL_PRINTF("radio154: unknown '%s'"
+                     " (tx|rx|ed|ping|pong|secping|secpong)\n", argv[1]);
     }
 }
 

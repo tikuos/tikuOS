@@ -49,6 +49,17 @@ void tiku_154_set_channel(uint8_t channel);
 uint16_t tiku_154_addr(void);
 
 /**
+ * @brief Install the 128-bit link key and enable/disable securing outgoing
+ *        frames (IEEE 802.15.4 security level 6 = ENC-MIC-64, AES-CCM*).
+ *        Received secured frames are always decrypted + MIC-verified when a
+ *        key is set.  @p key NULL clears the key.
+ */
+void tiku_154_set_key(const uint8_t *key);
+
+/** @brief Secure outgoing frames (needs a key set); 0 = send in the clear. */
+void tiku_154_set_secure(int on);
+
+/**
  * @brief Send a data frame to @p dst (TIKU_154_ADDR_BCAST for all).
  * @param ack  request an ACK and wait/retry for it (N2.3).
  * @return 0 sent (ACK seen if requested), -1 bad length, -2 channel busy

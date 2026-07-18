@@ -16,9 +16,51 @@
 #include <interfaces/radio/tiku_154_frame.h>
 #include <arch/nordic/tiku_ieee154_arch.h>
 #include <arch/nordic/tiku_radio_arch.h>       /* constlat hold (erratum 20)   */
+#include <arch/nordic/tiku_crypto_arch.h>      /* AES-CCM* link security        */
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND first  */
 #include <kernel/timers/tiku_clock.h>
 #include <string.h>
+
+/* Link security: level 6 (ENC-MIC-64) AES-CCM*, key-id-mode 0 (implicit). */
+#define MAC_SEC_LEVEL   6u
+#define MAC_MIC_LEN     8u
+#define MAC_ASH_LEN     5u                       /* SecControl(1) + FrameCtr(4)*/
+#define FCF_SEC_ENABLED (1u << 3)                /* FCF Security Enabled bit    */
+
+static uint8_t  mac_key[16];
+static uint8_t  mac_have_key;
+static uint8_t  mac_secure;                      /* secure outgoing frames      */
+static uint32_t mac_tx_ctr;                      /* per-frame security counter  */
+
+/* 13-byte CCM* nonce = src ext addr (8, short mapped into the low 2) ||
+ * frame counter (4, BE) || security level (1). */
+static void mac_nonce(uint8_t n[13], uint16_t src, uint32_t ctr)
+{
+    n[0] = n[1] = n[2] = n[3] = n[4] = n[5] = 0u;
+    n[6] = (uint8_t)(src >> 8);
+    n[7] = (uint8_t)src;
+    n[8]  = (uint8_t)(ctr >> 24);
+    n[9]  = (uint8_t)(ctr >> 16);
+    n[10] = (uint8_t)(ctr >> 8);
+    n[11] = (uint8_t)ctr;
+    n[12] = MAC_SEC_LEVEL;
+}
+
+void tiku_154_set_key(const uint8_t *key)
+{
+    if (key == 0) {
+        mac_have_key = 0u;
+        mac_secure = 0u;
+        return;
+    }
+    memcpy(mac_key, key, 16u);
+    mac_have_key = 1u;
+}
+
+void tiku_154_set_secure(int on)
+{
+    mac_secure = (on != 0 && mac_have_key) ? 1u : 0u;
+}
 
 static uint16_t mac_pan  = 0xABCDu;
 static uint16_t mac_addr = 0x0000u;
@@ -118,11 +160,65 @@ static int mac_wait_ack(uint8_t seq)
     return 0;
 }
 
+/* Build a SECURED DATA frame: MHR (Security-Enabled) + Auxiliary Security
+ * Header + AES-CCM*-encrypted payload + MIC.  AAD = MHR||ASH (authenticated,
+ * not encrypted); nonce = our addr || frame counter || sec level. */
+static uint16_t mac_build_secured(uint8_t *frame, uint16_t dst,
+                                  const uint8_t *payload, uint8_t len,
+                                  uint8_t ack)
+{
+    tiku_154_mhr_t h;
+    uint16_t hlen;
+    uint8_t  nonce[13];
+    uint32_t ctr = ++mac_tx_ctr;
+
+    memset(&h, 0, sizeof(h));
+    h.type = TIKU_154_FT_DATA;
+    h.ack_req = (ack != 0u && dst != TIKU_154_ADDR_BCAST) ? 1u : 0u;
+    h.pan_compress = 1u;
+    h.seq = mac_seq++;
+    h.dst_mode = TIKU_154_ADDR_SHORT;
+    h.dst_pan  = mac_pan;
+    h.dst_addr[0] = (uint8_t)dst;
+    h.dst_addr[1] = (uint8_t)(dst >> 8);
+    h.src_mode = TIKU_154_ADDR_SHORT;
+    h.src_pan  = mac_pan;
+    h.src_addr[0] = (uint8_t)mac_addr;
+    h.src_addr[1] = (uint8_t)(mac_addr >> 8);
+
+    hlen = tiku_154_mhr_build(frame, &h);
+    if (hlen == 0u) {
+        return 0u;
+    }
+    if ((uint16_t)(hlen + MAC_ASH_LEN + len + MAC_MIC_LEN) >
+        TIKU_154_MAX_PSDU) {
+        return 0u;
+    }
+    frame[0] |= FCF_SEC_ENABLED;
+    frame[hlen]      = MAC_SEC_LEVEL;             /* SecControl, keyidmode 0    */
+    frame[hlen + 1u] = (uint8_t)ctr;             /* FrameCounter, little-endian*/
+    frame[hlen + 2u] = (uint8_t)(ctr >> 8);
+    frame[hlen + 3u] = (uint8_t)(ctr >> 16);
+    frame[hlen + 4u] = (uint8_t)(ctr >> 24);
+
+    mac_nonce(nonce, mac_addr, ctr);
+    if (tiku_crypto_arch_aes_ccm_star(0, mac_key, 16u, nonce,
+                                      frame, (size_t)(hlen + MAC_ASH_LEN),
+                                      payload, len, MAC_MIC_LEN,
+                                      &frame[hlen + MAC_ASH_LEN],
+                                      &frame[hlen + MAC_ASH_LEN + len]) != 0) {
+        return 0u;
+    }
+    return (uint16_t)(hlen + MAC_ASH_LEN + len + MAC_MIC_LEN);
+}
+
 int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
                   uint8_t ack)
 {
     uint8_t  frame[TIKU_154_MAX_PSDU];
-    uint16_t flen = mac_build(frame, dst, payload, len, ack);
+    uint16_t flen = mac_secure
+        ? mac_build_secured(frame, dst, payload, len, ack)
+        : mac_build(frame, dst, payload, len, ack);
     uint8_t  want_ack = (ack != 0u && dst != TIKU_154_ADDR_BCAST) ? 1u : 0u;
     uint8_t  seq, attempt;
     int rc = -3;
@@ -208,14 +304,49 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
             continue;                            /* addressed to someone else  */
         }
         /* The PHY already sent the hardware-timed ACK (if warranted) in the
-         * turnaround window; just deliver the payload. */
+         * turnaround window.  Decrypt + MIC-verify a secured frame, else
+         * deliver the cleartext payload. */
         {
-            uint8_t plen = (uint8_t)((uint16_t)n - hlen);
-            if (plen > cap) {
-                plen = cap;
-            }
-            if (plen != 0u) {
-                memcpy(buf, frame + hlen, plen);
+            uint8_t plen;
+            if ((frame[0] & FCF_SEC_ENABLED) != 0u) {
+                static uint8_t pt[TIKU_154_MAX_PSDU];
+                uint8_t  nonce[13], rmic[MAC_MIC_LEN];
+                uint16_t need = (uint16_t)(hlen + MAC_ASH_LEN + MAC_MIC_LEN);
+                uint16_t ctlen;
+                uint32_t rctr;
+                if (mac_have_key == 0u || (uint16_t)n < need) {
+                    continue;                    /* can't/won't decrypt: drop  */
+                }
+                rctr = (uint32_t)frame[hlen + 1u] |
+                       ((uint32_t)frame[hlen + 2u] << 8) |
+                       ((uint32_t)frame[hlen + 3u] << 16) |
+                       ((uint32_t)frame[hlen + 4u] << 24);
+                ctlen = (uint16_t)((uint16_t)n - need);
+                mac_nonce(nonce, (uint16_t)(h.src_addr[0] |
+                          ((uint16_t)h.src_addr[1] << 8)), rctr);
+                if (tiku_crypto_arch_aes_ccm_star(
+                        1, mac_key, 16u, nonce, frame,
+                        (size_t)(hlen + MAC_ASH_LEN),
+                        &frame[hlen + MAC_ASH_LEN], ctlen, MAC_MIC_LEN,
+                        pt, rmic) != 0) {
+                    continue;
+                }
+                if (memcmp(rmic, &frame[hlen + MAC_ASH_LEN + ctlen],
+                           MAC_MIC_LEN) != 0) {
+                    continue;                    /* MIC fail: forged/wrong key */
+                }
+                plen = (uint8_t)((ctlen > cap) ? cap : ctlen);
+                if (plen != 0u) {
+                    memcpy(buf, pt, plen);
+                }
+            } else {
+                plen = (uint8_t)((uint16_t)n - hlen);
+                if (plen > cap) {
+                    plen = cap;
+                }
+                if (plen != 0u) {
+                    memcpy(buf, frame + hlen, plen);
+                }
             }
             if (info != 0) {
                 info->src = (uint16_t)(h.src_addr[0] |
