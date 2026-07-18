@@ -97,4 +97,22 @@ void tiku_flpr_arch_beacon_stop(void);
 /** @brief Bursts transmitted by the coprocessor since beacon start. */
 uint32_t tiku_flpr_arch_beacon_bursts(void);
 
+/**
+ * @brief RX probe (L6 F-L6.1 step 0): prove the FLPR can drive RADIO RX.
+ *
+ * Same handoff as the beacon (caller programmed link config via
+ * tiku_radio_arch_init and holds CONSTLAT; RADIO+UARTE21 flipped NonSecure
+ * here).  Blocks ~4-5 s while the coprocessor listens on adv channel 37,
+ * then reports what it heard.  Restores peripheral security on return.
+ *
+ * @param addr_evts   Out: ADDRESS matches (AA matched, CRC unchecked).
+ * @param crcok_evts  Out: CRC-valid packets received.
+ * @param first       Out: head bytes of the first CRC-valid packet.
+ * @param cap         Capacity of @p first.
+ * @param flen        Out: bytes written to @p first.
+ * @return 0 done, -1 not running, -2 firmware never finished.
+ */
+int tiku_flpr_arch_rxprobe(uint32_t *addr_evts, uint32_t *crcok_evts,
+                           uint8_t *first, uint32_t cap, uint32_t *flen);
+
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

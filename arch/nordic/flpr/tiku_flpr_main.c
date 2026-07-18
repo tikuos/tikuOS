@@ -132,6 +132,78 @@ static void flpr_beacon_burst(void)
     }
 }
 
+/* RX probe (L6 F-L6.1 step 0): prove the FLPR can drive RADIO *RX*.  The
+ * beacon path is TX-only; a connection controller needs RX (EasyDMA
+ * WRITING into the NS carve -- unproven on this core).  Listen on adv
+ * channel 37 across many short RX attempts, tally ADDRESS/CRCOK, and
+ * capture the head of the first CRC-valid packet.  RXADDRESSES + BASE0 +
+ * the packet format are already set by the M33 (secure) before the flip;
+ * we only touch FREQUENCY/DATAWHITE/PACKETPTR/SHORTS + the RX task, mirror
+ * of flpr_beacon_burst's per-channel TX. */
+static uint8_t rxprobe_buf[48] __attribute__((aligned(4)));
+
+static void flpr_rxprobe(tiku_flpr_shared_t *sh)
+{
+    NRF_RADIO_Type *r = NRF_RADIO_NS;
+    uint32_t addr_evts = 0u, crcok_evts = 0u, attempt, spin;
+    uint8_t  got_first = 0u;
+
+    flpr_hfclk_kick();                          /* HFCLK up for RX          */
+    r->FREQUENCY = 2u;                          /* ch37 = 2402 MHz          */
+    r->DATAWHITE = 0x00890000u | (0x40u | 37u);
+    /* RX ramps via RXREADY; ADDRESS latches RSSI; PHYEND ends the packet
+     * and disables (observer's proven RX short set).  ~1500 windows of
+     * ~40k MMIO-poll iters each ≈ a few seconds of near-continuous listen. */
+    for (attempt = 0u; attempt < 1500u; attempt++) {
+        r->PACKETPTR = (uint32_t)rxprobe_buf;
+        r->SHORTS = (1u << 0) | (1u << 4) | (1u << 18) | (1u << 19);
+        r->EVENTS_DISABLED = 0u;
+        r->EVENTS_ADDRESS  = 0u;
+        r->EVENTS_CRCOK    = 0u;
+        r->TASKS_RXEN = 1u;
+        for (spin = 0u; spin < 40000u; spin++) {
+            if (r->EVENTS_DISABLED != 0u) {
+                break;                          /* packet ended             */
+            }
+        }
+        if (r->EVENTS_DISABLED == 0u) {         /* window idle: force down   */
+            r->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 8000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        }
+        if (r->EVENTS_ADDRESS != 0u) {
+            addr_evts++;
+        }
+        if (r->EVENTS_CRCOK != 0u) {
+            crcok_evts++;
+            if (!got_first) {
+                /* Copy a FIXED head, not LEN-derived: reading rxprobe_buf[1]
+                 * right at CRCOK can race EasyDMA still landing the payload
+                 * in RAM (LEN reads 0).  A short settle + fixed 15-byte copy
+                 * captures the real head and confirms the DMA fully lands
+                 * (which step 1's CONNECT_IND parse depends on). */
+                uint32_t i;
+                for (i = 0u; i < 200u; i++) {
+                }
+                for (i = 0u; i < 15u; i++) {
+                    sh->rx_first[i] = rxprobe_buf[i];
+                }
+                sh->rx_first_len = 15u;
+                got_first = 1u;
+            }
+        }
+        if (sh->cmd != 0u) {                     /* honour STOP / new cmd     */
+            break;
+        }
+    }
+    sh->rx_addr_evts  = addr_evts;
+    sh->rx_crcok_evts = crcok_evts;
+    sh->rx_done = 1u;
+}
+
 /* Echo service: consume an app->flpr message, mirror it back, ring. */
 static void flpr_echo_pump(tiku_flpr_shared_t *sh, uint32_t *last_seq)
 {
@@ -223,6 +295,11 @@ void tiku_flpr_main(void)
             beacon_on = 0u;
             sh->cmd = 0u;
             sh->rsp = TIKU_FLPR_RSP_BEACON_STOPPED;
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_RXPROBE) {
+            sh->rx_done = 0u;
+            sh->cmd = 0u;
+            flpr_rxprobe(sh);                    /* blocking, bounded        */
         }
         if (beacon_on) {
             volatile uint32_t w;

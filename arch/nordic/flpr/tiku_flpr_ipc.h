@@ -66,6 +66,16 @@ typedef struct {
 
     /* Beacon-offload telemetry (F4). */
     volatile uint32_t beacon_bursts;
+
+    /* Connection controller (L6).  RX-probe (F-L6.1 step 0) proves the
+     * FLPR can drive RADIO *RX* (the beacon is TX-only): listen on the adv
+     * channel and report what address-matched / CRC-passed, plus the head
+     * of the first CRC-valid packet.  rx_done flips 0->1 when finished. */
+    volatile uint32_t rx_addr_evts;     /* ADDRESS matches in the window   */
+    volatile uint32_t rx_crcok_evts;    /* CRC-valid packets               */
+    volatile uint32_t rx_done;          /* probe finished                  */
+    volatile uint8_t  rx_first[16];     /* head of 1st CRC-valid packet    */
+    volatile uint32_t rx_first_len;
 } tiku_flpr_shared_t;
 
 /* Cooperative park/resume protocol.  Hardware truths this encodes:
@@ -92,6 +102,11 @@ typedef struct {
  * CONSTLAT hold.  Burst count is published in .beacon_bursts. */
 #define TIKU_FLPR_CMD_BEACON      4u
 #define TIKU_FLPR_CMD_BEACON_STOP 5u
+/* RX probe (L6 F-L6.1 step 0): listen on the adv channel; results in the
+ * rx_* shared fields.  Link config (MODE/PCNF/adv-AA/CRC) is programmed by
+ * the M33 while RADIO is secure, then RADIO+UARTE21 are flipped NonSecure
+ * (same handoff as the beacon). */
+#define TIKU_FLPR_CMD_RXPROBE     6u
 #define TIKU_FLPR_RSP_PARKED  1u
 #define TIKU_FLPR_RSP_PULSE_DONE 2u
 #define TIKU_FLPR_RSP_BEACON_STOPPED 3u

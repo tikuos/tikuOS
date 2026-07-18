@@ -31,6 +31,7 @@
 #include <arch/nordic/tiku_nordic_core.h>     /* NVIC enable (IRQ 76)      */
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND    */
 #include <kernel/timers/tiku_clock.h>          /* pulse wall-clock measure  */
+#include <kernel/cpu/tiku_watchdog.h>          /* kick during the long probe */
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>
 #include <string.h>
 
@@ -364,6 +365,57 @@ void tiku_flpr_arch_beacon_stop(void)
 uint32_t tiku_flpr_arch_beacon_bursts(void)
 {
     return TIKU_FLPR_SHARED->beacon_bursts;
+}
+
+/*---------------------------------------------------------------------------*/
+/* RX probe (L6 F-L6.1 step 0): does the FLPR's RADIO RX work?                */
+/*---------------------------------------------------------------------------*/
+
+int tiku_flpr_arch_rxprobe(uint32_t *addr_evts, uint32_t *crcok_evts,
+                           uint8_t *first, uint32_t cap, uint32_t *flen)
+{
+    uint32_t spin, n;
+
+    if (!tiku_flpr_arch_running()) {
+        return -1;
+    }
+    TIKU_FLPR_SHARED->rx_done = 0u;
+    flpr_radio_ns(1);                          /* RADIO+UARTE21 -> NonSecure */
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_RXPROBE;
+
+    /* The probe is internally bounded (~4-5 s of listening); block until it
+     * publishes rx_done, kicking the watchdog so the long listen survives. */
+    for (spin = 0u; spin < 400000000u; spin++) {
+        if (TIKU_FLPR_SHARED->rx_done != 0u) {
+            break;
+        }
+        if ((spin & 0xFFFFFu) == 0u) {
+            tiku_watchdog_kick();
+        }
+    }
+    flpr_radio_ns(0);                          /* reclaim secure alias       */
+
+    if (TIKU_FLPR_SHARED->rx_done == 0u) {
+        return -2;
+    }
+    if (addr_evts != (uint32_t *)0) {
+        *addr_evts = TIKU_FLPR_SHARED->rx_addr_evts;
+    }
+    if (crcok_evts != (uint32_t *)0) {
+        *crcok_evts = TIKU_FLPR_SHARED->rx_crcok_evts;
+    }
+    n = TIKU_FLPR_SHARED->rx_first_len;
+    if (n > cap) {
+        n = cap;
+    }
+    if (first != (uint8_t *)0) {
+        memcpy(first, (const void *)TIKU_FLPR_SHARED->rx_first, n);
+    }
+    if (flen != (uint32_t *)0) {
+        *flen = n;
+    }
+    return 0;
 }
 
 #endif /* TIKU_FLPR_ENABLE */

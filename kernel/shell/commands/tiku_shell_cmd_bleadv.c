@@ -66,6 +66,9 @@
 #include <arch/nordic/tiku_device_select.h>  /* NRF_CLOCK_S / NRF_RADIO_S (dbg) */
 #include <arch/nordic/tiku_nordic_core.h>    /* wfe (ext pacing)                */
 #include <kernel/cpu/tiku_common.h>          /* unique id -> AdvA (ext)         */
+#if (TIKU_FLPR_ENABLE + 0)
+#include <arch/nordic/tiku_flpr_arch.h>      /* L6: FLPR-as-controller (F-L6.1) */
+#endif
 #include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
 #include <string.h>
@@ -523,6 +526,57 @@ static void bleadv_autostop_cb(void *ptr)
     tiku_ble_adv_stop();
 }
 
+#if (TIKU_FLPR_ENABLE + 0)
+/* L6 F-L6.1 step 0: prove the FLPR can drive RADIO RX (the foundational
+ * new primitive for the FLPR-as-BLE-controller).  Blocking probe; drive a
+ * transmitter on the peer board first, e.g. `bleadv beacon "TK",20`. */
+static void bleadv_flprrx(void)
+{
+    uint32_t addr_evts = 0u, crcok = 0u, flen = 0u;
+    uint8_t  first[16];
+    int      rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    /* Boot the coprocessor for real: alive() can read a STALE magic left in
+     * SRAM by a prior run across a warm reset, so start() (which scrubs the
+     * shared page and re-boots) is the reliable gate, not alive(). */
+    if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
+        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        return;
+    }
+    SHELL_PRINTF("FLPR RX probe: listening on ch37 ~4-5 s -- transmit adv on"
+                 " the peer (e.g. 'bleadv beacon \"TK\",20')...\n");
+    tiku_radio_arch_init();                 /* static link cfg (radio secure) */
+    tiku_radio_arch_constlat_hold(1);       /* erratum-20 across the listen   */
+    rc = tiku_flpr_arch_rxprobe(&addr_evts, &crcok, first, sizeof(first),
+                                &flen);
+    tiku_radio_arch_constlat_hold(0);
+    if (rc != 0) {
+        SHELL_PRINTF("FLPR RX probe failed (rc=%d)\n", rc);
+        return;
+    }
+    SHELL_PRINTF("  addr_matches=%lu crc_ok=%lu\n",
+                 (unsigned long)addr_evts, (unsigned long)crcok);
+    if (flen != 0u) {
+        char hx[40];
+        bleadv_fmt_hex(hx, first, (int)(flen > 16u ? 16u : flen), 0);
+        SHELL_PRINTF("  first CRC-ok pkt: %s (S0 LEN S1 ...)\n", hx);
+    }
+    if (crcok != 0u) {
+        SHELL_PRINTF(SH_GREEN "  FLPR RADIO RX WORKS (L6 F-L6.1 step 0)\n"
+                     SH_RST);
+    } else if (addr_evts != 0u) {
+        SHELL_PRINTF("  AA matched but 0 CRC-ok (whitening/format?)\n");
+    } else {
+        SHELL_PRINTF("  nothing heard (is the peer transmitting on ch37?)\n");
+    }
+}
+#endif /* TIKU_FLPR_ENABLE */
+
 void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
 {
     const char *name;
@@ -539,6 +593,12 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         bleadv_dbg();
         return;
     }
+#if (TIKU_FLPR_ENABLE + 0)
+    if (strcmp(argv[1], "flprrx") == 0) {
+        bleadv_flprrx();
+        return;
+    }
+#endif
     if (strcmp(argv[1], "phy") == 0) {
         bleadv_phy();
         return;
