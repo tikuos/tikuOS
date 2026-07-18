@@ -778,9 +778,10 @@ static void bleadv_flpr_drain_tx(void)
     }
 }
 
-static void bleadv_flprnus(void)
+static void bleadv_flprnus(uint8_t req_cpu)
 {
     uint8_t addr[6], ad[31], adv[48];
+    uint8_t cpu_sent = 0u;
     uint8_t adlen = 0u, advlen;
     static const char nm[] = "TIKU-CONN";
     tiku_flpr_conn_info_t info;
@@ -848,6 +849,17 @@ static void bleadv_flprnus(void)
                     }
                 }
             }
+            /* Phase C: once subscribed, ask the central (L2CAP signalling) for
+             * a longer interval.  The central obliges + issues an LL update
+             * the FLPR follows (conn_cu below rises) -- peripheral-initiated
+             * reparametrise, the bookend to Phase A. */
+            if (req_cpu && !cpu_sent && tiku_ble_host_subscribed() &&
+                tiku_ble_host_request_conn_param(48u, 48u, 0u, 400u) == 0) {
+                cpu_sent = 1u;
+                bleadv_flpr_drain_tx();
+                SHELL_PRINTF("  -> L2CAP Conn Param Update Req"
+                             " (interval 30->60 ms)\n");
+            }
             tiku_watchdog_kick();
             if (!tiku_flpr_arch_conn_active()) {
                 break;
@@ -878,7 +890,16 @@ static void bleadv_flprnus(void)
                          " connection=%lu\n",
                          (unsigned long)evt, (unsigned long)cm,
                          (unsigned long)cu);
-            if (cm != 0u && cu != 0u) {
+            if (req_cpu) {
+                if (cu != 0u) {
+                    SHELL_PRINTF(SH_GREEN "  Phase C OK: peripheral-requested"
+                                 " reparametrise -- central obliged, FLPR"
+                                 " followed the LL update\n" SH_RST);
+                } else {
+                    SHELL_PRINTF("  Conn Param Update: not followed (central"
+                                 " declined, or no LL update seen)\n");
+                }
+            } else if (cm != 0u && cu != 0u) {
                 SHELL_PRINTF(SH_GREEN "  Phase A OK: link survived a"
                              " mid-connection channel-map + interval change"
                              "\n" SH_RST);
@@ -970,7 +991,11 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         return;
     }
     if (strcmp(argv[1], "flprnus") == 0) {
-        bleadv_flprnus();
+        bleadv_flprnus(0u);
+        return;
+    }
+    if (strcmp(argv[1], "flprcpu") == 0) {        /* Phase C: request CP update*/
+        bleadv_flprnus(1u);
         return;
     }
     if (strcmp(argv[1], "serial") == 0) {

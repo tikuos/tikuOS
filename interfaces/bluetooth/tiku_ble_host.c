@@ -39,6 +39,8 @@ static uint8_t  host_rc[HOST_L2_MAX];             /* RX recombination buffer  */
 static uint16_t host_rc_len, host_rc_expect;
 static uint8_t  host_tx[HOST_L2_MAX];             /* one pending TX L2CAP PDU */
 static uint16_t host_tx_len, host_tx_off;
+static uint8_t  host_sig_id;                      /* L2CAP signalling ident   */
+static uint8_t  host_cpu_resp;                    /* 0 none, 1 accept, 2 reject*/
 
 void tiku_ble_host_reset(void)
 {
@@ -46,6 +48,7 @@ void tiku_ble_host_reset(void)
     host_rx_len = 0u;
     host_rc_len = 0u; host_rc_expect = 0u;
     host_tx_len = 0u; host_tx_off = 0u;
+    host_sig_id = 0u; host_cpu_resp = 0u;
 }
 
 int tiku_ble_host_subscribed(void)
@@ -183,6 +186,21 @@ static void host_att(const uint8_t *l2cap, uint16_t len)
     }
 }
 
+/* L2CAP signalling (CID 0x0005): we sent a Connection Parameter Update
+ * Request; note the central's Response (accepted/rejected). */
+static void host_sig(const uint8_t *l2cap, uint16_t len)
+{
+    const uint8_t *sig;
+    if (len < 6u) {
+        return;
+    }
+    sig = &l2cap[4];                             /* [code][id][len:2][data]   */
+    if (sig[0] == 0x13u) {                       /* Conn Param Update Rsp     */
+        uint16_t result = (uint16_t)(sig[4] | ((uint16_t)sig[5] << 8));
+        host_cpu_resp = (result == 0x0000u) ? 1u : 2u;
+    }
+}
+
 int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid)
 {
     uint16_t i;
@@ -202,7 +220,11 @@ int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid)
         host_rc[host_rc_len++] = frag[i];
     }
     if (host_rc_expect >= 4u && host_rc_len >= host_rc_expect) {
-        host_att(host_rc, host_rc_expect);
+        if (host_rc[2] == 0x05u && host_rc[3] == 0x00u) {
+            host_sig(host_rc, host_rc_expect);   /* L2CAP signalling channel  */
+        } else {
+            host_att(host_rc, host_rc_expect);   /* ATT (CID 0x0004)          */
+        }
         host_rc_len = 0u; host_rc_expect = 0u;
         return 1;
     }
@@ -277,4 +299,31 @@ int tiku_ble_host_nus_notify(const uint8_t *data, uint16_t len)
     }
     host_store_tx(pdu, (uint16_t)(7u + n));
     return 0;
+}
+
+int tiku_ble_host_request_conn_param(uint16_t interval_min,
+                                     uint16_t interval_max,
+                                     uint16_t latency, uint16_t timeout)
+{
+    uint8_t pdu[16];                             /* 4 L2CAP + 4 sig hdr + 8   */
+    if (host_tx_len != 0u) {
+        return -2;                               /* a PDU is still draining   */
+    }
+    host_cpu_resp = 0u;
+    pdu[0] = 12u; pdu[1] = 0u;                   /* L2CAP length              */
+    pdu[2] = 0x05u; pdu[3] = 0x00u;              /* CID = signalling          */
+    pdu[4] = 0x12u;                              /* Conn Param Update Request */
+    pdu[5] = ++host_sig_id;                      /* identifier                */
+    pdu[6] = 0x08u; pdu[7] = 0x00u;              /* signalling data length 8  */
+    pdu[8]  = (uint8_t)interval_min; pdu[9]  = (uint8_t)(interval_min >> 8);
+    pdu[10] = (uint8_t)interval_max; pdu[11] = (uint8_t)(interval_max >> 8);
+    pdu[12] = (uint8_t)latency;      pdu[13] = (uint8_t)(latency >> 8);
+    pdu[14] = (uint8_t)timeout;      pdu[15] = (uint8_t)(timeout >> 8);
+    host_store_tx(pdu, 16u);
+    return 0;
+}
+
+int tiku_ble_host_conn_param_result(void)
+{
+    return (host_cpu_resp == 1u) ? 1 : ((host_cpu_resp == 2u) ? -1 : 0);
 }

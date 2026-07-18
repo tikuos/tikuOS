@@ -72,4 +72,22 @@ int tiku_ble_host_nus_notify(const uint8_t *data, uint16_t len);
 /** @brief 1 once the client enabled TX notifications (wrote the CCCD). */
 int tiku_ble_host_subscribed(void);
 
+/**
+ * @brief Send an L2CAP Connection Parameter Update Request (CID 0x0005).
+ *
+ * The peripheral-initiated way to ask the central for new connection
+ * parameters; the central replies with a Response and (if accepted) issues
+ * an LL_CONNECTION_UPDATE_IND that the FLPR controller follows (Phase A).
+ * Queued for TX like any L2CAP PDU (fits one data PDU).
+ *
+ * @return 0 queued, -2 if a TX PDU is still draining (retry).
+ */
+int tiku_ble_host_request_conn_param(uint16_t interval_min,
+                                     uint16_t interval_max,
+                                     uint16_t latency, uint16_t timeout);
+
+/** @brief 1 once the central's Connection Parameter Update Response arrived
+ *         (accepted); 0 not yet, -1 rejected. */
+int tiku_ble_host_conn_param_result(void);
+
 #endif /* TIKU_BLE_HOST_H_ */

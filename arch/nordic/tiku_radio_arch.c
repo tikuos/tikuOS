@@ -1318,6 +1318,11 @@ static uint8_t  cen_sdu[68];        /* outgoing L2CAP PDU being fragmented  */
 static uint16_t cen_sdu_len, cen_sdu_off;
 static uint8_t  cen_rc[68];         /* incoming recombination buffer        */
 static uint16_t cen_rc_len, cen_rc_expect;
+/* Phase C signalling (CID 0x0005): a peripheral's Connection Parameter Update
+ * Request sets cen_cpu_req; the master obliges by issuing an LL_CONNECTION_
+ * UPDATE_IND with the requested interval (which the FLPR then follows). */
+static uint8_t  cen_cpu_req;
+static uint16_t cen_cpu_interval;
 
 /* ATT/L2CAP (L5): a minimal NUS (Nordic UART Service) data path.
  *   peripheral = server: NUS RX (write target) + NUS TX (readable echo)
@@ -1370,6 +1375,7 @@ static void ll_reset(void)
     att_d_next = 0u;
     cen_sdu_len = 0u; cen_sdu_off = 0u;         /* Phase C frag/recomb        */
     cen_rc_len = 0u; cen_rc_expect = 0u;
+    cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1407,21 +1413,43 @@ static void cen_sdu_frag(void)
     ll_queue_raw(llid, &cen_sdu[cen_sdu_off], (uint8_t)n);
 }
 
-/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and send it, fragmenting
- * across data PDUs when it exceeds one (Phase C). */
-static void att_queue(const uint8_t *att, uint8_t alen)
+/* Queue an L2CAP PDU on CID @p cid_lo and send it, fragmenting across data
+ * PDUs when it exceeds one (Phase C). */
+static void l2cap_queue(uint8_t cid_lo, const uint8_t *payload, uint8_t plen)
 {
-    uint16_t i, len = (uint16_t)(4u + alen);
+    uint16_t i, len = (uint16_t)(4u + plen);
     if (len > (uint16_t)sizeof(cen_sdu)) {
         return;
     }
-    cen_sdu[0] = alen; cen_sdu[1] = 0u;         /* L2CAP length              */
-    cen_sdu[2] = 0x04u; cen_sdu[3] = 0x00u;     /* CID = ATT                 */
-    for (i = 0u; i < alen; i++) {
-        cen_sdu[4u + i] = att[i];
+    cen_sdu[0] = plen; cen_sdu[1] = 0u;         /* L2CAP length              */
+    cen_sdu[2] = cid_lo; cen_sdu[3] = 0x00u;    /* CID                       */
+    for (i = 0u; i < plen; i++) {
+        cen_sdu[4u + i] = payload[i];
     }
     cen_sdu_len = len; cen_sdu_off = 0u;
     cen_sdu_frag();                             /* first fragment            */
+}
+
+/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and send it. */
+static void att_queue(const uint8_t *att, uint8_t alen)
+{
+    l2cap_queue(0x04u, att, alen);
+}
+
+/* L2CAP signalling (CID 0x0005): a peripheral's Connection Parameter Update
+ * Request -- reply Accepted, then flag the master to issue the LL update. */
+static void sig_handle(const uint8_t *l2cap, uint8_t len)
+{
+    const uint8_t *sig = &l2cap[4];             /* [code][id][len:2][data]   */
+    if (len >= 16u && sig[0] == 0x12u) {        /* Conn Param Update Request */
+        uint8_t rsp[6];
+        cen_cpu_interval = (uint16_t)(sig[6] | ((uint16_t)sig[7] << 8)); /*max*/
+        rsp[0] = 0x13u; rsp[1] = sig[1];        /* Response, same identifier */
+        rsp[2] = 0x02u; rsp[3] = 0x00u;         /* signalling data length 2  */
+        rsp[4] = 0x00u; rsp[5] = 0x00u;         /* result 0x0000 = Accepted  */
+        l2cap_queue(0x05u, rsp, 6u);
+        cen_cpu_req = 1u;                        /* main loop issues the IND  */
+    }
 }
 
 static void ll_queue_version(void)
@@ -1672,9 +1700,14 @@ static void ll_handle_rx(const uint8_t *buf)
             cen_rc[cen_rc_len++] = buf[3u + i];
         }
         if (cen_rc_expect >= 4u && cen_rc_len >= cen_rc_expect &&
-            cen_rc[2] == 0x04u && cen_rc[3] == 0x00u) {
-            ll_ctrl_rx++;
-            att_handle(&cen_rc[4], (uint8_t)(cen_rc_expect - 4u));
+            cen_rc[3] == 0x00u) {
+            if (cen_rc[2] == 0x04u) {            /* ATT                       */
+                ll_ctrl_rx++;
+                att_handle(&cen_rc[4], (uint8_t)(cen_rc_expect - 4u));
+            } else if (cen_rc[2] == 0x05u) {     /* L2CAP signalling          */
+                ll_ctrl_rx++;
+                sig_handle(cen_rc, (uint8_t)cen_rc_expect);
+            }
             cen_rc_len = 0u; cen_rc_expect = 0u;
         }
         return;
@@ -2369,6 +2402,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     uint8_t  upd_stage = 0u;               /* 0 idle 1 map-sent 2 map-done   */
                                            /* 3 cu-sent 4 done               */
     uint16_t cm_instant = 0u, cu_instant = 0u, settle = 0u;
+    uint8_t  sig_pend = 0u;                 /* Phase C signalling-CU state    */
+    uint16_t sig_instant = 0u;
     for (;;) {
         uint8_t k;
         int r;
@@ -2389,6 +2424,11 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         } else if (upd_stage == 3u && (uint16_t)(cec - cu_instant) < 0x8000u) {
             cen_interval = cu_new;
             upd_stage = 4u;
+        }
+        /* Phase C: apply a peripheral-requested interval at its Instant. */
+        if (sig_pend == 1u && (uint16_t)(cec - sig_instant) < 0x8000u) {
+            cen_interval = cen_cpu_interval;
+            sig_pend = 2u;
         }
         k = tiku_radio_ll_csa1_next(last_unmapped, CEN_HOP, chmap,
                                     &last_unmapped);
@@ -2438,6 +2478,25 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 ll_queue(LL_CONNECTION_UPDATE, d, 11u);
                 upd_stage = 3u;
             }
+        }
+
+        /* Phase C: a peripheral's L2CAP Connection Parameter Update Request
+         * (parsed in sig_handle) -> issue the LL update it asked for, once our
+         * Response SDU has drained and the control slot is free. */
+        if (cen_cpu_req != 0u && sig_pend == 0u &&
+            ll_tx_len == 0u && cen_sdu_len == 0u) {
+            uint8_t d[11];
+            sig_instant = (uint16_t)(cec + 8u);
+            d[0] = CEN_WINSIZE;
+            d[1] = 0u; d[2] = 0u;                   /* WinOffset = 0         */
+            d[3] = (uint8_t)cen_cpu_interval;
+            d[4] = (uint8_t)(cen_cpu_interval >> 8);
+            d[5] = 0u; d[6] = 0u;                   /* latency 0             */
+            d[7] = (uint8_t)CEN_TIMEOUT; d[8] = (uint8_t)(CEN_TIMEOUT >> 8);
+            d[9] = (uint8_t)sig_instant; d[10] = (uint8_t)(sig_instant >> 8);
+            ll_queue(LL_CONNECTION_UPDATE, d, 11u);
+            sig_pend = 1u;
+            cen_cpu_req = 0u;
         }
 
         /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).
