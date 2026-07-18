@@ -32,6 +32,10 @@
  *                          extended advertising (R8.3a): ADV_EXT_IND +
  *                          hardware-timed AUX_ADV_IND carrying >31-byte
  *                          AdvData; dbg_aux_us proves the AuxPtr timing
+ *   bleadv conn [secs]     L3: advertise connectably, accept a central,
+ *                          and HOLD the link (empty-PDU keepalive, CSA#1
+ *                          hopping, SN/NESN, supervision).  Blocking;
+ *                          connect from nRF Connect.  Reports events/held-ms
  *   bleadv connprobe [secs]
  *                          L1/L2: connectable ADV_IND, hardware-T_IFS
  *                          SCAN_RSP to scanners, and capture+decode a
@@ -379,6 +383,65 @@ static void bleadv_csa1(void)
     }
 }
 
+/* L3: advertise connectably, accept a central, HOLD the link.  Blocking
+ * (parks the shell while connected); a real central (nRF Connect on a
+ * phone) is the oracle.  Exit: link held for many events / minutes. */
+static void bleadv_conn(unsigned secs)
+{
+    uint8_t ad[31], addr[6];
+    uint8_t adlen = 0u;
+    char addrstr[18];
+    tiku_radio_ll_conn_stats_t st;
+    static const char nm[] = "TIKU-CONN";
+    int rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;
+    bleadv_fmt_addr(addrstr, addr);
+
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
+    ad[adlen++] = (uint8_t)(1u + sizeof(nm) - 1u);
+    ad[adlen++] = 0x09u;
+    memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
+    adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
+
+    SHELL_PRINTF("ADV_IND as %s '%s'; CONNECT from a central (nRF Connect),"
+                 " up to %u s...\n", addrstr, nm, secs);
+    rc = tiku_radio_arch_connect(addr, ad, adlen, secs, &st);
+    if (rc != 0) {
+        SHELL_PRINTF("no central connected in %u s\n", secs);
+        return;
+    }
+    SHELL_PRINTF(SH_GREEN "connection held %lu ms\n" SH_RST,
+                 (unsigned long)st.ms);
+    SHELL_PRINTF("  events=%lu rx_ok=%lu addr_only=%lu missed=%lu"
+                 "  (%lu%% received)\n",
+                 (unsigned long)st.events, (unsigned long)st.rx_ok,
+                 (unsigned long)st.addr_seen, (unsigned long)st.missed,
+                 st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
+                           : 0ul);
+    SHELL_PRINTF("  hop=%u first_chan=%u interval=%u winsize=%u winoff=%u\n",
+                 (unsigned)st.hop, (unsigned)st.first_chan,
+                 (unsigned)st.interval, (unsigned)st.winsize,
+                 (unsigned)st.winoff);
+    SHELL_PRINTF("  first_anchor_delta=%ld us (actual - predicted)\n",
+                 (long)st.first_delta);
+    {
+        char fb[11];
+        bleadv_fmt_hex(fb, st.fail_bytes, 5, 0);
+        SHELL_PRINTF("  crc_fail_bytes=%s (S0 LEN S1 pay0 pay1)\n", fb);
+    }
+    SHELL_PRINTF("  ended: %s\n",
+                 st.reason == 0u ? "duration cap" :
+                 st.reason == 1u ? "supervision timeout (central left)" :
+                                   "never connected");
+}
+
 /* Auto-stop for the `bleadv <name> [secs]` demo form: a one-shot callback
  * timer; both it and the beacon's burst timer dispatch cooperatively while
  * the shell idles at the prompt. */
@@ -400,7 +463,7 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     if (argc < 2) {
         SHELL_PRINTF("usage: bleadv <name> [secs] | on <name> [ms] | off"
                      " | scan [secs] [prefix] | observe [secs|off]"
-                     " | connprobe [secs] | csa1 | ackfsm"
+                     " | conn [secs] | connprobe [secs] | csa1 | ackfsm"
                      " | ext <name> [secs] | phy | dbg\n");
         return;
     }
@@ -444,6 +507,15 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             SHELL_PRINTF(SH_GREEN "ackfsm: 4/4 incl. retransmission"
                          " (SN/NESN correct)\n" SH_RST);
         }
+        return;
+    }
+    if (strcmp(argv[1], "conn") == 0) {
+        unsigned s = 60u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        }
+        bleadv_conn(s);
         return;
     }
     if (strcmp(argv[1], "connprobe") == 0) {

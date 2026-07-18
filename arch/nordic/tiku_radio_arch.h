@@ -124,6 +124,40 @@ typedef struct {
     uint8_t nesn;               /**< seq number I expect next from peer  */
 } tiku_radio_ll_ack_t;
 
+/** Connection outcome stats (L3). */
+typedef struct {
+    uint32_t events;            /**< connection events attempted         */
+    uint32_t rx_ok;             /**< events with a CRC-valid central PDU */
+    uint32_t addr_seen;         /**< AA matched but CRC bad (decode diag)*/
+    uint32_t missed;            /**< events that heard nothing           */
+    uint32_t ms;                /**< connection lifetime, ms             */
+    int32_t  first_delta;       /**< (actual - predicted) 1st anchor, us */
+    uint8_t  fail_bytes[5];     /**< first CRC-failed packet's RAM bytes  */
+    uint16_t interval;          /**< connInterval, 1.25ms units (diag)   */
+    uint16_t winoff;            /**< transmitWindowOffset units (diag)   */
+    uint8_t  winsize;           /**< transmitWindowSize units (diag)     */
+    uint8_t  first_chan;        /**< first CSA#1 data channel (diag)      */
+    uint8_t  hop;               /**< hopIncrement (diag)                  */
+    uint8_t  reason;            /**< 0 caller-cap, 1 supervision, 2 never */
+} tiku_radio_ll_conn_stats_t;
+
+/**
+ * @brief Advertise connectably, accept ONE central, and hold the link (L3).
+ *
+ * The peripheral-role connection engine: ADV_IND until a CONNECT_IND for
+ * @p addr arrives, then per connection event RX the central's PDU on the
+ * CSA#1 data channel and hardware-T_IFS respond with an empty PDU (correct
+ * SN/NESN), re-syncing the anchor to each packet until the supervision
+ * timeout or @p max_secs.  Blocking + polled (parks the shell while
+ * connected); empty PDUs only -- enough to keep the link UP.
+ *
+ * @return 0 once a connection was held (see @p st->events / reason), or
+ *         -1 if no central connected within @p max_secs.
+ */
+int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
+                            uint8_t ad_len, uint32_t max_secs,
+                            tiku_radio_ll_conn_stats_t *st);
+
 #define TIKU_RADIO_LL_NEWDATA  (1u << 0)  /**< rx payload is new, deliver */
 #define TIKU_RADIO_LL_ACKED    (1u << 1)  /**< my TX landed, advance      */
 
