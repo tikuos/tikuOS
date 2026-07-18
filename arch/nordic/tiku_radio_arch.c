@@ -342,6 +342,19 @@ void tiku_radio_arch_hfclk_kick(void)
     radio_hfclk_kick();
 }
 
+/* Decode the live RADIO.MODE for /sys/radio/mode -- honest current PHY,
+ * not a compile-time string (reads "ieee802154" while the 15.4 PHY owns
+ * the radio, "ble-1m" at rest). */
+const char *tiku_radio_arch_mode_str(void)
+{
+    switch (RADIO->MODE) {
+    case RADIO_MODE_MODE_Ble_1Mbit:            return "ble-1m";
+    case RADIO_MODE_MODE_Ble_2Mbit:            return "ble-2m";
+    case RADIO_MODE_MODE_Ieee802154_250Kbit:   return "ieee802154";
+    default:                                   return "other";
+    }
+}
+
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 {
     uint8_t c;

@@ -233,6 +233,9 @@ void tiku_radio_arch_constlat_hold(int on);
  */
 void tiku_radio_arch_hfclk_kick(void);
 
+/** @brief Live RADIO.MODE decoded ("ble-1m" / "ieee802154" / ...). */
+const char *tiku_radio_arch_mode_str(void);
+
 /**
  * @brief Per-packet observer callback (CRC-OK packets only).
  *

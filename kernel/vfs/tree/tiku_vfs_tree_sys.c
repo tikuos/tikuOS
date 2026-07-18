@@ -44,6 +44,7 @@
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
+#include <arch/nordic/tiku_radio_arch.h>        /* /sys/radio/mode (live)   */
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>         /* /sys/flpr coprocessor    */
@@ -1019,12 +1020,12 @@ radio_txpower_write(const char *buf, size_t len)
     return (tiku_ble_adv_set_txpower((int8_t)v) == 0) ? 0 : TIKU_VFS_EINVAL;
 }
 
-/* Which PHY the radio is configured for.  Fixed "ble-1m" today; the
- * 802.15.4 lane (kintsugi/radio.md N-track) makes it meaningful. */
+/* Which PHY the radio is in right now -- the live RADIO.MODE, so it reads
+ * "ieee802154" while the 15.4 PHY owns the radio and "ble-1m" at rest. */
 static int
 radio_mode_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "ble-1m\n");
+    return snprintf(buf, max, "%s\n", tiku_radio_arch_mode_str());
 }
 
 static const tiku_vfs_node_t sys_radio_children[] = {
