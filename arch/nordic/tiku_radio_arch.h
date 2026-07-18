@@ -226,6 +226,14 @@ void tiku_radio_arch_central_updates(uint8_t on);
  */
 void tiku_radio_arch_central_smp(uint8_t on);
 
+/**
+ * @brief Phase E3: the session key the central derived after LL encryption
+ *        startup (LL_ENC_REQ/RSP -> SK = e(LTK, SKDm||SKDs)).
+ * @param sk out: 16-byte session key (may be NULL to just query).
+ * @return 1 if SK is ready, else 0.
+ */
+int tiku_radio_arch_central_enc(uint8_t sk[16]);
+
 /** Peripheral T_IFS measured by the central (us), ground truth for L3. */
 extern uint32_t tiku_radio_arch_dbg_cen_tifs;
 

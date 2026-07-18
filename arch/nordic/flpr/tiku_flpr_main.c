@@ -300,6 +300,11 @@ static uint8_t  fll_cu_pending;         /* connection update armed           */
 static uint16_t fll_cu_instant;
 static uint16_t fll_cu_interval;        /* new interval, 1.25 ms (telemetry) */
 static uint16_t fll_cu_timeout;         /* new supervision, 10 ms (telemetry)*/
+/* Phase E3: LL encryption startup.  On LL_ENC_REQ we hand SKDm/IVm to the M33
+ * (it owns the AES), then send LL_ENC_RSP once it returns SKDs/IVs. */
+static uint8_t  fll_enc_pending;        /* LL_ENC_REQ seen, awaiting M33 SKDs */
+static uint8_t  fll_enc_done;           /* LL_ENC_RSP sent (dedup retransmits) */
+static uint32_t fll_enc_seq;            /* enc_req_seq value we published     */
 
 static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
 {
@@ -404,6 +409,32 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             fll_cu_instant  = (uint16_t)(buf[13] | ((uint16_t)buf[14] << 8));
             fll_cu_pending  = 1u;
         }
+    } else if (op == 0x03u) {                   /* LL_ENC_REQ               */
+        /* CtrData: Rand[8] EDIV[2] SKDm[8] IVm[4] -> payload buf[4..25].
+         * We have no AES; hand SKDm/IVm to the M33 (it derives the session
+         * key), then send LL_ENC_RSP once it returns SKDs/IVs. */
+        if (fll_enc_done) {                     /* dup (central lost RSP):  */
+            uint8_t rsp[12], i;                 /* re-send the same SKDs/IVs */
+            for (i = 0u; i < 8u; i++) {
+                rsp[i] = sh->enc_skds[i];
+            }
+            for (i = 0u; i < 4u; i++) {
+                rsp[8u + i] = sh->enc_ivs[i];
+            }
+            fll_queue_ctrl(0x04u, rsp, 12u);
+        } else if (buf[1] >= 23u && !fll_enc_pending) {
+            uint8_t i;
+            for (i = 0u; i < 8u; i++) {
+                sh->enc_skdm[i] = buf[14u + i];
+            }
+            for (i = 0u; i < 4u; i++) {
+                sh->enc_ivm[i] = buf[22u + i];
+            }
+            fll_enc_seq = sh->enc_req_seq + 1u;
+            sh->enc_req_seq = fll_enc_seq;      /* hand off to the M33       */
+            flpr_doorbell_to_app();
+            fll_enc_pending = 1u;
+        }
     } else if (op != 0x09u && op != 0x13u && op != 0x07u) {
         fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
     }
@@ -458,6 +489,8 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_a2f_seen = sh->a2f_seq;
     sh->a2f_ack  = sh->a2f_seq;                  /* Phase B: TX slot free      */
     fll_cm_pending = 0u; fll_cu_pending = 0u;    /* Phase A: no update armed  */
+    fll_enc_pending = 0u; fll_enc_done = 0u;      /* Phase E3: not encrypting  */
+    sh->enc_on = 0u;
     sh->conn_sub = 0u;
     sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
 
@@ -492,6 +525,22 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             win = ARX_WIN_MAX;
             fll_cu_pending = 0u;
             sh->conn_cu = sh->conn_cu + 1u;
+        }
+
+        /* Phase E3: the M33 has returned SKDs/IVs -> send LL_ENC_RSP.  (The
+         * session key it also computed is picked up for CCM00 at START_ENC.) */
+        if (fll_enc_pending && sh->enc_rsp_seq == fll_enc_seq &&
+            fll_tx_len == 0u) {
+            uint8_t rsp[12], i;
+            for (i = 0u; i < 8u; i++) {
+                rsp[i] = sh->enc_skds[i];
+            }
+            for (i = 0u; i < 4u; i++) {
+                rsp[8u + i] = sh->enc_ivs[i];
+            }
+            fll_queue_ctrl(0x04u, rsp, 12u);        /* LL_ENC_RSP            */
+            fll_enc_pending = 0u;
+            fll_enc_done = 1u;                      /* dedup future ENC_REQs */
         }
 
         k = flpr_csa1_next(&last_un, hop, chmap);

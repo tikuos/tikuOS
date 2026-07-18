@@ -577,11 +577,17 @@ static void bleadv_censmp(unsigned secs)
                  st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
                            : 0ul);
     if (tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_DONE) {
-        uint8_t ltk[16];
+        uint8_t ltk[16], sk[16];
         char hx[40];
         (void)tiku_ble_smp_pair_ltk(ltk);
         bleadv_fmt_hex(hx, ltk, 16, 0);
         SHELL_PRINTF(SH_GREEN "  SMP OK: LTK=%s\n" SH_RST, hx);
+        if (tiku_radio_arch_central_enc(sk)) {   /* E3: LL_ENC -> session key */
+            bleadv_fmt_hex(hx, sk, 16, 0);
+            SHELL_PRINTF(SH_GREEN "  ENC OK: SK=%s\n" SH_RST, hx);
+        } else {
+            SHELL_PRINTF("  ENC: LL encryption did not complete\n");
+        }
     } else {
         SHELL_PRINTF(SH_RED "  SMP pairing did not complete (state=%d)\n"
                      SH_RST, (int)tiku_ble_smp_pair_state());
@@ -1035,7 +1041,8 @@ static void bleadv_flprpair(void)
     }
     {
         uint8_t frame[40], inita[6], adva[6], types;
-        int paired = 0;
+        uint8_t ltk[16], sk[16];
+        int paired = 0, enc_done = 0;
         tiku_clock_time_t start = tiku_clock_time();
 
         tiku_ble_host_reset();
@@ -1062,6 +1069,13 @@ static void bleadv_flprpair(void)
              * central tears the link down, not the instant we finish. */
             if (tiku_ble_host_smp_state() >= 2 && !paired) {
                 paired = 1;
+                (void)tiku_ble_host_smp_ltk(ltk);
+            }
+            /* Phase E3: once paired, derive the session key when the central
+             * starts LL encryption (the FLPR forwards SKDm/IVm to us). */
+            if (paired && !enc_done && tiku_flpr_arch_enc_service(ltk)) {
+                enc_done = 1;
+                tiku_flpr_arch_enc_sk(sk);
             }
             tiku_watchdog_kick();
             if (!tiku_flpr_arch_conn_active()) {
@@ -1071,11 +1085,15 @@ static void bleadv_flprpair(void)
         tiku_flpr_arch_conn_stop();
         tiku_radio_arch_constlat_hold(0);
         if (paired && tiku_ble_host_smp_state() == 2) {
-            uint8_t ltk[16];
             char hx[40];
-            (void)tiku_ble_host_smp_ltk(ltk);
             bleadv_fmt_hex(hx, ltk, 16, 0);
             SHELL_PRINTF(SH_GREEN "  SMP OK: LTK=%s\n" SH_RST, hx);
+            if (enc_done) {
+                bleadv_fmt_hex(hx, sk, 16, 0);
+                SHELL_PRINTF(SH_GREEN "  ENC OK: SK=%s\n" SH_RST, hx);
+            } else {
+                SHELL_PRINTF("  ENC: no LL_ENC_REQ from central\n");
+            }
         } else {
             SHELL_PRINTF(SH_RED "  SMP pairing did not complete (state=%d)\n"
                          SH_RST, tiku_ble_host_smp_state());

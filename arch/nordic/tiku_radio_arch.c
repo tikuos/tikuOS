@@ -69,6 +69,8 @@
 #include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
 #include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
+#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB: session key (E3)   */
+#include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
 #include <string.h>
 
 #define RADIO  NRF_RADIO_S
@@ -1295,6 +1297,8 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 #define LL_CONNECTION_UPDATE 0x00u
 #define LL_CHANNEL_MAP_IND   0x01u
 #define LL_TERMINATE_IND     0x02u
+#define LL_ENC_REQ           0x03u
+#define LL_ENC_RSP           0x04u
 #define LL_UNKNOWN_RSP       0x07u
 #define LL_FEATURE_REQ       0x08u
 #define LL_FEATURE_RSP       0x09u
@@ -1333,6 +1337,12 @@ static uint8_t  cen_smp_a[6], cen_smp_b[6];
 static uint8_t  cen_smp_last[TIKU_BLE_SMP_PDU_MAX];
 static uint8_t  cen_smp_last_len;
 static uint16_t cen_smp_wait;
+/* Phase E3: LL encryption startup (central = initiator).  After pairing we
+ * send LL_ENC_REQ and derive SK = e(LTK, SKDm||SKDs) from the LL_ENC_RSP. */
+static uint8_t  cen_enc_stage;      /* 0 idle, 1 ENC_REQ sent, 2 SK derived  */
+static uint16_t cen_enc_wait;       /* stall counter for ENC_REQ retransmit  */
+static uint8_t  cen_skdm[8], cen_ivm[4];
+static uint8_t  cen_sk[16], cen_iv[8];
 /* Phase C signalling (CID 0x0005): a peripheral's Connection Parameter Update
  * Request sets cen_cpu_req; the master obliges by issuing an LL_CONNECTION_
  * UPDATE_IND with the requested interval (which the FLPR then follows). */
@@ -1406,6 +1416,7 @@ static void ll_reset(void)
     cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
     cen_smp_started = 0u;                        /* Phase E: SMP not yet begun */
     cen_smp_last_len = 0u; cen_smp_wait = 0u;
+    cen_enc_stage = 0u;                          /* Phase E3: not encrypting   */
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1486,6 +1497,24 @@ static void cen_smp_rx(const uint8_t *smp, uint16_t len)
     cen_smp_wait = 0u;                           /* progress: reset the stall  */
     (void)tiku_ble_smp_pair_feed(smp, len);
     cen_smp_pump();
+}
+
+/* Build + queue LL_ENC_REQ from the current SKDm/IVm (Rand/EDIV = 0 for
+ * LE SC).  Used for the first send and any stall retransmit (Phase E3). */
+static void cen_send_enc_req(void)
+{
+    uint8_t req[22];
+    int i;
+    for (i = 0; i < 10; i++) {
+        req[i] = 0u;                            /* Rand[8] || EDIV[2] = 0    */
+    }
+    for (i = 0; i < 8; i++) {
+        req[10 + i] = cen_skdm[i];              /* SKDm                      */
+    }
+    for (i = 0; i < 4; i++) {
+        req[18 + i] = cen_ivm[i];               /* IVm                       */
+    }
+    ll_queue(LL_ENC_REQ, req, 22u);
 }
 
 /* L2CAP signalling (CID 0x0005): a peripheral's Connection Parameter Update
@@ -1881,6 +1910,23 @@ static void ll_handle_rx(const uint8_t *buf)
         break;
     case LL_TERMINATE_IND:
         ll_want_term = 1u;
+        break;
+    case LL_ENC_RSP:                /* Phase E3: SKDs/IVs -> session key    */
+        if (buf[1] >= 13u && cen_enc_stage == 1u) {
+            uint8_t skd[16], ltk[16];
+            int i;
+            for (i = 0; i < 8; i++) {
+                skd[i] = cen_skdm[i];            /* SKD = SKDm || SKDs       */
+                skd[8 + i] = buf[4 + i];         /* SKDs at buf[4..11]        */
+            }
+            (void)tiku_ble_smp_pair_ltk(ltk);
+            (void)tiku_crypto_arch_aes_ecb(0, ltk, 16u, skd, cen_sk);
+            for (i = 0; i < 4; i++) {
+                cen_iv[i] = cen_ivm[i];
+                cen_iv[4 + i] = buf[12 + i];     /* IVs at buf[12..15]        */
+            }
+            cen_enc_stage = 2u;                  /* SK ready                 */
+        }
         break;
     case LL_FEATURE_RSP:
     case LL_PING_RSP:
@@ -2286,6 +2332,22 @@ void tiku_radio_arch_central_smp(uint8_t on)
     cen_test_smp = (on != 0u) ? 1u : 0u;
 }
 
+/* Phase E3: the session key the central derived (LL_ENC handshake complete).
+ * @return 1 and fills @p sk when SK is ready, else 0. */
+int tiku_radio_arch_central_enc(uint8_t sk[16])
+{
+    int i;
+    if (cen_enc_stage < 2u) {
+        return 0;
+    }
+    if (sk != (uint8_t *)0) {
+        for (i = 0; i < 16; i++) {
+            sk[i] = cen_sk[i];
+        }
+    }
+    return 1;
+}
+
 /* One central event: TX empty PDU (our SN/NESN) on data channel @p k, then
  * hardware-T_IFS RX the peripheral's response.  Returns 2 = CRC-valid
  * response, 1 = response seen but CRC bad, 0 = no response. */
@@ -2650,15 +2712,30 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             cen_cpu_req = 0u;
         }
 
-        /* Phase E: SMP pairing is reply-driven (each RX -> at most one TX);
-         * once it reaches DONE/FAILED there is nothing left to exchange, so
-         * end the connection early rather than idle out the whole window. */
+        /* Phase E/E3: once pairing reaches DONE, drive LL encryption startup
+         * (send LL_ENC_REQ, derive SK from LL_ENC_RSP), then end the link.
+         * FAILED pairing ends immediately. */
         if (cen_test_smp &&
             tiku_ble_smp_pair_state() >= TIKU_BLE_SMP_STATE_DONE) {
-            if (st != (tiku_radio_ll_conn_stats_t *)0) {
-                st->reason = 0u;                    /* clean local teardown   */
+            if (tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_FAILED) {
+                break;
             }
-            break;
+            if (cen_enc_stage == 0u && ll_tx_len == 0u && cen_sdu_len == 0u) {
+                (void)tiku_trng_arch_read_bytes(cen_skdm, 8);
+                (void)tiku_trng_arch_read_bytes(cen_ivm, 4);
+                cen_send_enc_req();                 /* LL_ENC_REQ            */
+                cen_enc_stage = 1u; cen_enc_wait = 0u;
+            } else if (cen_enc_stage == 1u && ll_tx_len == 0u) {
+                if (++cen_enc_wait >= 8u) {         /* stall: re-send        */
+                    cen_send_enc_req();
+                    cen_enc_wait = 0u;
+                }
+            } else if (cen_enc_stage == 2u) {       /* SK derived: done      */
+                if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                    st->reason = 0u;
+                }
+                break;
+            }
         }
         /* SMP stall recovery: if a reply hasn't come and the TX path is idle,
          * re-send our last PDU to re-prompt it (esp. the final DHKey Check,

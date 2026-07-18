@@ -160,6 +160,21 @@ uint32_t tiku_flpr_arch_conn_events(void);
 uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6]);
 
 /**
+ * @brief Phase E3: service an LL_ENC_REQ forwarded by the FLPR.
+ *
+ * If the FLPR has published a fresh LL_ENC_REQ (SKDm/IVm), generate our
+ * SKDs/IVs, derive the session key SK = e(LTK, SKDm||SKDs) and IV = IVm||IVs
+ * (the FLPR has no AES), publish them, and release the FLPR to send
+ * LL_ENC_RSP.  Call it each poll while connected.
+ * @param ltk the pairing Long Term Key.
+ * @return 1 the call that services a request (SK now readable), else 0.
+ */
+int tiku_flpr_arch_enc_service(const uint8_t ltk[16]);
+
+/** @brief Copy the derived session key (valid after enc_service() returned 1).*/
+void tiku_flpr_arch_enc_sk(uint8_t sk[16]);
+
+/**
  * @brief Phase A telemetry: LL updates applied this connection.
  * @param chan_map  out: LL_CHANNEL_MAP_UPDATE_INDs followed to their Instant.
  * @param conn_upd  out: LL_CONNECTION_UPDATE_INDs followed to their Instant.

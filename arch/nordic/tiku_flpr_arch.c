@@ -33,6 +33,8 @@
 #include <kernel/timers/tiku_clock.h>          /* pulse wall-clock measure  */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long probe */
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>
+#include <arch/nordic/tiku_crypto_arch.h>      /* AES-ECB for the session key */
+#include <arch/nordic/tiku_trng_arch.h>        /* SKDs/IVs entropy            */
 #include <string.h>
 
 #define TIKU_NORDIC_IRQ_VPR00  76             /* MDK IRQn enum value       */
@@ -506,6 +508,54 @@ uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6])
         }
     }
     return TIKU_FLPR_SHARED->conn_addr_types;
+}
+
+/* Phase E3: last enc_req_seq we derived a session key for. */
+static uint32_t flpr_enc_serviced;
+
+/* Service an LL_ENC_REQ the FLPR forwarded: generate our SKDs/IVs, derive
+ * SK = e(LTK, SKDm||SKDs) + IV = IVm||IVs, publish them, and release the FLPR
+ * to send LL_ENC_RSP.  Returns 1 the (first) call that services a request. */
+int tiku_flpr_arch_enc_service(const uint8_t ltk[16])
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+    uint8_t  skd[16], sk[16], ivs[4];
+    uint32_t req = sh->enc_req_seq;
+    int i;
+
+    if (req == flpr_enc_serviced || req == 0u || ltk == (const uint8_t *)0) {
+        return 0;                                /* no new request           */
+    }
+    for (i = 0; i < 8; i++) {                    /* SKD = SKDm || SKDs        */
+        skd[i] = sh->enc_skdm[i];
+    }
+    tiku_trng_arch_init();
+    (void)tiku_trng_arch_read_bytes(&skd[8], 8); /* our SKDs (MSO half)       */
+    (void)tiku_trng_arch_read_bytes(ivs, 4);     /* our IVs                   */
+    (void)tiku_crypto_arch_aes_ecb(0, ltk, 16u, skd, sk);   /* SK = e(LTK,SKD)*/
+    for (i = 0; i < 8; i++) {
+        sh->enc_skds[i] = skd[8 + i];
+    }
+    for (i = 0; i < 16; i++) {
+        sh->enc_sk[i] = sk[i];
+    }
+    for (i = 0; i < 4; i++) {
+        sh->enc_ivs[i] = ivs[i];
+        sh->enc_iv[i] = sh->enc_ivm[i];
+        sh->enc_iv[4 + i] = ivs[i];
+    }
+    sh->enc_rsp_seq = req;                        /* release LL_ENC_RSP        */
+    flpr_enc_serviced = req;
+    return 1;
+}
+
+/* Copy the derived session key (valid once enc_service() has returned 1). */
+void tiku_flpr_arch_enc_sk(uint8_t sk[16])
+{
+    int i;
+    for (i = 0; i < 16; i++) {
+        sk[i] = TIKU_FLPR_SHARED->enc_sk[i];
+    }
 }
 
 /* Phase A telemetry: LL updates the FLPR applied this connection. */

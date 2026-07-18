@@ -99,6 +99,21 @@ typedef struct {
     volatile uint8_t  conn_inita[6];    /* initiator (central) address = A  */
     volatile uint8_t  conn_adva[6];     /* advertiser (our) address     = B  */
     volatile uint8_t  conn_addr_types;  /* bit0 InitA, bit1 AdvA (1=random)  */
+
+    /* LL encryption startup (Phase E3).  The FLPR has no AES, so the session
+     * key is derived on the M33 (SK = e(LTK, SKD) via CRACEN).  On LL_ENC_REQ
+     * the FLPR publishes the central's SKDm/IVm and bumps enc_req_seq; the M33
+     * host generates SKDs/IVs, computes SK+IV, and bumps enc_rsp_seq.  The FLPR
+     * then sends LL_ENC_RSP(SKDs,IVs) and (E3c) programs CCM00 with sk/iv. */
+    volatile uint32_t enc_req_seq;      /* FLPR: LL_ENC_REQ seen (params set) */
+    volatile uint32_t enc_rsp_seq;      /* M33: SKDs/IVs/sk/iv ready          */
+    volatile uint8_t  enc_skdm[8];      /* FLPR->M33: central's SKD (LSO)     */
+    volatile uint8_t  enc_ivm[4];       /* FLPR->M33: central's IV (LSO)      */
+    volatile uint8_t  enc_skds[8];      /* M33->FLPR: our SKD (MSO)           */
+    volatile uint8_t  enc_ivs[4];       /* M33->FLPR: our IV (MSO)            */
+    volatile uint8_t  enc_sk[16];       /* M33->FLPR: session key (CCM00)     */
+    volatile uint8_t  enc_iv[8];        /* M33->FLPR: IV = IVm||IVs (CCM00)   */
+    volatile uint32_t enc_on;           /* FLPR: 1 once encryption is active  */
     volatile uint32_t conn_sub;         /* vestigial (host tracks CCCD, PhaseB)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */
