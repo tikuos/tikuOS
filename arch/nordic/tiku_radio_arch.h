@@ -204,6 +204,16 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                             tiku_radio_ll_conn_stats_t *st);
 
+/**
+ * @brief Arm the Phase A LL-control exercise on the next central() run.
+ *
+ * When on, the master sends LL_CHANNEL_MAP_UPDATE_IND then
+ * LL_CONNECTION_UPDATE_IND mid-connection (after the ATT loopback),
+ * applying each at its Instant.  Used to prove the peripheral follows both
+ * (audit G6); off by default so normal central runs are unaffected.
+ */
+void tiku_radio_arch_central_updates(uint8_t on);
+
 /** Peripheral T_IFS measured by the central (us), ground truth for L3. */
 extern uint32_t tiku_radio_arch_dbg_cen_tifs;
 

@@ -491,6 +491,20 @@ uint32_t tiku_flpr_arch_conn_events(void)
     return TIKU_FLPR_SHARED->conn_events;
 }
 
+/* Phase A telemetry: LL updates the FLPR applied this connection. */
+uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
+{
+    uint32_t cm = TIKU_FLPR_SHARED->conn_cm;
+    uint32_t cu = TIKU_FLPR_SHARED->conn_cu;
+    if (chan_map != (uint32_t *)0) {
+        *chan_map = cm;
+    }
+    if (conn_upd != (uint32_t *)0) {
+        *conn_upd = cu;
+    }
+    return cm + cu;
+}
+
 /* Anchored-RX telemetry: RADIO-off + RX-wait loop iterations, duty %. */
 uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it)
 {

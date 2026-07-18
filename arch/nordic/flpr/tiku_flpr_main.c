@@ -284,6 +284,25 @@ static uint8_t  fll_sent_vers;          /* we queued our VERSION_IND        */
 static uint8_t  fll_sn, fll_nesn;       /* link-layer sequence bits         */
 static uint32_t fll_a2f_seen;           /* last a2f_seq consumed (TX bytes) */
 
+/* Phase A -- LL_CHANNEL_MAP_UPDATE_IND (0x01) / LL_CONNECTION_UPDATE_IND
+ * (0x00) are INDICATIONS: the central commits and switches at the Instant
+ * whether or not we ack them, so declining with LL_UNKNOWN_RSP (the old
+ * fall-through) left us on stale params -> desync -> dropped link (audit
+ * G6, and phones renegotiate the interval within the first second).  We
+ * parse the Instant and apply at that connection event.  The follow-the-
+ * central hold needs no precise timebase for this: swap the channel map
+ * before the event's CSA#1 pick, and for a connection update just drop the
+ * anchor so the wide-window re-acquire re-locks to the central's new
+ * interval + transmit-window offset.  An off-by-one in the event count
+ * costs at most one extra miss, then both sides re-sync. */
+static uint8_t  fll_cm_pending;         /* channel-map update armed          */
+static uint16_t fll_cm_instant;         /* connEventCount to apply it at     */
+static uint8_t  fll_cm_map[5];
+static uint8_t  fll_cu_pending;         /* connection update armed           */
+static uint16_t fll_cu_instant;
+static uint16_t fll_cu_interval;        /* new interval, 1.25 ms (telemetry) */
+static uint16_t fll_cu_timeout;         /* new supervision, 10 ms (telemetry)*/
+
 static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
 {
     uint8_t i;
@@ -479,6 +498,28 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
     } else if (op == 0x08u) {                   /* FEATURE_REQ -> RSP (none)*/
         static const uint8_t none[8] = { 0u };
         fll_queue_ctrl(0x09u, none, 8u);
+    } else if (op == 0x01u) {                   /* LL_CHANNEL_MAP_UPDATE_IND*/
+        /* CtrData (payload[1..]): ChM[5], Instant[2].  payload[n]=buf[3+n].
+         * No control response -- an IND is applied at its Instant, not
+         * answered; the LL ack (NESN) already confirms receipt. */
+        if (buf[1] >= 8u) {
+            uint8_t i;
+            for (i = 0u; i < 5u; i++) {
+                fll_cm_map[i] = buf[4u + i];
+            }
+            fll_cm_instant = (uint16_t)(buf[9] | ((uint16_t)buf[10] << 8));
+            fll_cm_pending = 1u;
+        }
+    } else if (op == 0x00u) {                   /* LL_CONNECTION_UPDATE_IND */
+        /* CtrData: WinSize, WinOffset[2], Interval[2], Latency[2],
+         * Timeout[2], Instant[2].  Interval/Timeout are telemetry; the
+         * re-lock at the Instant absorbs WinOffset/WinSize. */
+        if (buf[1] >= 12u) {
+            fll_cu_interval = (uint16_t)(buf[7] | ((uint16_t)buf[8] << 8));
+            fll_cu_timeout  = (uint16_t)(buf[11] | ((uint16_t)buf[12] << 8));
+            fll_cu_instant  = (uint16_t)(buf[13] | ((uint16_t)buf[14] << 8));
+            fll_cu_pending  = 1u;
+        }
     } else if (op != 0x09u && op != 0x13u && op != 0x07u) {
         fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
     }
@@ -522,6 +563,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     uint32_t event = 0u, miss_run = 0u, spin;
     uint32_t idle_iters = 0u, win = ARX_WIN_MAX, rxon = 0u;
     uint8_t  have_anchor = 0u;
+    uint16_t cec = 0u;                           /* connEventCount (wraps)    */
 
     for (i = 0u; i < 5u; i++) {
         chmap[i] = sh->conn_chm[i];
@@ -530,6 +572,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_tx_len = 0u; fll_tx_llid = 0u; fll_sent_vers = 0u;
     fll_sn = 0u; fll_nesn = 0u;
     fll_a2f_seen = sh->a2f_seq;
+    fll_cm_pending = 0u; fll_cu_pending = 0u;    /* Phase A: no update armed  */
     sh->conn_sub = 0u;
     sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
 
@@ -539,6 +582,32 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
 
     for (;;) {
         uint8_t got = 0u, txn;
+
+        /* Phase A: apply a pending update when cec reaches its Instant (the
+         * wrap-safe >= test also fires if a miss-burst skipped the exact
+         * value).  The map swap must precede this event's CSA#1 pick so we
+         * land on the same channel the central now uses; the connection
+         * update drops the anchor so the wide re-acquire re-locks to the
+         * central's new interval + WinOffset. */
+        if (fll_cm_pending &&
+            (uint16_t)(cec - fll_cm_instant) < 0x8000u) {
+            for (i = 0u; i < 5u; i++) {
+                chmap[i] = fll_cm_map[i];
+                sh->conn_chm[i] = fll_cm_map[i];
+            }
+            fll_cm_pending = 0u;
+            sh->conn_cm = sh->conn_cm + 1u;
+        }
+        if (fll_cu_pending &&
+            (uint16_t)(cec - fll_cu_instant) < 0x8000u) {
+            sh->conn_interval = fll_cu_interval;
+            sh->conn_timeout  = fll_cu_timeout;
+            have_anchor = 0u;                    /* drop lock -> re-acquire   */
+            idle_iters  = 0u;
+            win = ARX_WIN_MAX;
+            fll_cu_pending = 0u;
+            sh->conn_cu = sh->conn_cu + 1u;
+        }
 
         k = flpr_csa1_next(&last_un, hop, chmap);
         r->FREQUENCY = flpr_data_freq(k);
@@ -607,6 +676,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
                 break;
             }
+            cec++;                               /* a miss is still one event */
             continue;                            /* miss: no serviced event  */
         }
         miss_run = 0u;
@@ -681,6 +751,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         sh->conn_gap  = idle_iters;              /* telemetry: off iters      */
         sh->conn_rxon = rxon;                    /* telemetry: RX-wait iters  */
         sh->conn_events = ++event;
+        cec++;                                   /* serviced event advances   */
         if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
             break;
         }
@@ -708,6 +779,8 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
     }
     sh->conn_state = 0u;
     sh->conn_events = 0u;
+    sh->conn_cm = 0u;                            /* Phase A telemetry         */
+    sh->conn_cu = 0u;
     flpr_hfclk_kick();
 
     for (attempt = 0u; attempt < 4000u && !connected; attempt++) {

@@ -480,7 +480,7 @@ static void bleadv_csa1(void)
  * We impose lenient params so the link establishes while timing is tuned;
  * reports events, peripheral responses heard, and the measured peripheral
  * T_IFS (the ground truth the phone could never give). */
-static void bleadv_central(unsigned secs)
+static void bleadv_central(unsigned secs, uint8_t updates)
 {
     uint8_t addr[6];
     tiku_radio_ll_conn_stats_t st;
@@ -495,8 +495,11 @@ static void bleadv_central(unsigned secs)
     tiku_common_unique_id(addr, 6u);
     addr[5] |= 0xC0u;
     bleadv_fmt_addr(addrstr, addr);
-    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-CONN, up to %u s...\n",
-                 addrstr, secs);
+    tiku_radio_arch_central_updates(updates);     /* Phase A: arm LL updates */
+    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-CONN, up to %u s%s...\n",
+                 addrstr, secs,
+                 updates ? " (will send CHANNEL_MAP + CONNECTION updates)"
+                         : "");
     rc = tiku_radio_arch_central(addr, secs, &st);
     if (rc != 0) {
         SHELL_PRINTF("no TIKU-CONN peripheral found in %u s\n", secs);
@@ -828,6 +831,27 @@ static void bleadv_flprnus(void)
                 SHELL_PRINTF("  anchored-RX: continuous (not yet converged)\n");
             }
         }
+        {
+            uint32_t cm = 0u, cu = 0u;
+            uint32_t evt = tiku_flpr_arch_conn_events();
+            (void)tiku_flpr_arch_conn_updates(&cm, &cu);
+            /* events= is the survival proof: the FLPR only advances it while
+             * it keeps catching the central; a mis-applied update desyncs and
+             * it freezes near the Instant (~event 50).  cm/cu are what it
+             * followed to their Instant. */
+            SHELL_PRINTF("  events=%lu  LL-updates: channel-map=%lu"
+                         " connection=%lu\n",
+                         (unsigned long)evt, (unsigned long)cm,
+                         (unsigned long)cu);
+            if (cm != 0u && cu != 0u) {
+                SHELL_PRINTF(SH_GREEN "  Phase A OK: link survived a"
+                             " mid-connection channel-map + interval change"
+                             "\n" SH_RST);
+            } else {
+                SHELL_PRINTF("  LL updates: incomplete (central sent none, or"
+                             " the peer is pre-Phase-A)\n");
+            }
+        }
         tiku_flpr_arch_conn_stop();
         tiku_radio_arch_constlat_hold(0);
         if (total != 0u) {
@@ -973,7 +997,16 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             long v = strtol(argv[2], (char **)0, 10);
             if (v > 0 && v <= 600) { s = (unsigned)v; }
         }
-        bleadv_central(s);
+        bleadv_central(s, 0u);
+        return;
+    }
+    if (strcmp(argv[1], "cenupd") == 0) {         /* Phase A: central + updates*/
+        unsigned s = 30u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        }
+        bleadv_central(s, 1u);
         return;
     }
     if (strcmp(argv[1], "conn") == 0) {

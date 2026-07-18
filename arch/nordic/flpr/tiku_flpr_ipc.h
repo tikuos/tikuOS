@@ -94,6 +94,8 @@ typedef struct {
     volatile uint32_t conn_sub;         /* NUS TX CCCD enabled (step 1b/L6.2)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */
+    volatile uint32_t conn_cm;          /* Phase A: CHANNEL_MAP_UPDATEs applied*/
+    volatile uint32_t conn_cu;          /* Phase A: CONNECTION_UPDATEs applied */
     /* NUS byte pipe (F-L6.2): RX writes -> f2a mailbox (doorbelled),
      * a2f mailbox bytes -> TX notifications.  Reuses a2f/f2a during hold
      * (the advertise input is already consumed). */

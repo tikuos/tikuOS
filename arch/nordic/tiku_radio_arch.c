@@ -2011,6 +2011,20 @@ static uint8_t cen_rxb[48] __attribute__((aligned(4)));
 static uint8_t cen_txb[36] __attribute__((aligned(4)));
 uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
 
+/* Phase A validation hook.  When armed, the master -- once the ATT loopback
+ * has completed -- exercises the peripheral's LL control handling: it sends
+ * LL_CHANNEL_MAP_UPDATE_IND (reduce the map), then LL_CONNECTION_UPDATE_IND
+ * (lengthen the interval), applying each on its OWN side at the Instant.  A
+ * peripheral that declines either (the pre-Phase-A G6 behaviour) computes a
+ * different channel / keeps the old cadence and the link dies within a few
+ * events; one that follows keeps servicing events past both updates. */
+static uint8_t cen_test_updates;
+
+void tiku_radio_arch_central_updates(uint8_t on)
+{
+    cen_test_updates = (on != 0u) ? 1u : 0u;
+}
+
 /* One central event: TX empty PDU (our SN/NESN) on data channel @p k, then
  * hardware-T_IFS RX the peripheral's response.  Returns 2 = CRC-valid
  * response, 1 = response seen but CRC bad, 0 = no response. */
@@ -2254,9 +2268,27 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     ll_queue_version();                           /* initiate: send VERSION_IND */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)CEN_WINOFFSET * 1250u;
     last_valid = t_ci_end;
+    /* Phase A test state: a reduced channel map, a longer interval, and a
+     * small stage machine that sends each update after the loopback and
+     * applies it here at the Instant (mirroring the peripheral). */
+    {
+    /* A full-map update: a valid LL_CHANNEL_MAP_UPDATE_IND (a central sends
+     * this to re-enable channels).  It robustly exercises the peer's parse +
+     * Instant + apply path.  An AGGRESSIVE reduction (dropping channels, which
+     * forces CSA#1 remapping) additionally needs the peer's connEventCount to
+     * be exactly locked -- fragile on the timebase-free FLPR when heavy TX
+     * (loopback notifications) briefly slips it -- so that stays a Tier-A
+     * refinement (kintsugi/radio.md).  The CONNECTION_UPDATE below is the
+     * G6-critical case (phones renegotiate the interval) and re-locks cleanly. */
+    static const uint8_t CM_NEW[5] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x1Fu };
+    uint16_t cec = 0u;                     /* connEventCount (wraps)         */
+    uint16_t cen_interval = CEN_INTERVAL;  /* mutable master cadence         */
+    uint16_t cu_new = 36u;                 /* 45 ms: exercises re-converge   */
+    uint8_t  upd_stage = 0u;               /* 0 idle 1 map-sent 2 map-done   */
+                                           /* 3 cu-sent 4 done               */
+    uint16_t cm_instant = 0u, cu_instant = 0u, settle = 0u;
     for (;;) {
-        uint8_t k = tiku_radio_ll_csa1_next(last_unmapped, CEN_HOP, chmap,
-                                            &last_unmapped);
+        uint8_t k;
         int r;
 
         if (ll_want_term) {
@@ -2265,6 +2297,19 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             }
             break;
         }
+        /* Apply our own pending update when cec reaches the Instant.  Map
+         * swap precedes this event's channel pick; the interval change takes
+         * effect for the next anchor stride. */
+        if (upd_stage == 1u && (uint16_t)(cec - cm_instant) < 0x8000u) {
+            memcpy(chmap, CM_NEW, 5u);
+            upd_stage = 2u;
+            settle = cec;
+        } else if (upd_stage == 3u && (uint16_t)(cec - cu_instant) < 0x8000u) {
+            cen_interval = cu_new;
+            upd_stage = 4u;
+        }
+        k = tiku_radio_ll_csa1_next(last_unmapped, CEN_HOP, chmap,
+                                    &last_unmapped);
         while ((int32_t)(conn_now() - anchor) < 0) {
             /* park to our own anchor */
         }
@@ -2282,7 +2327,36 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         if (r == 2) {
             last_valid = conn_now();
         }
-        anchor += (uint32_t)CEN_INTERVAL * 1250u;  /* master cadence       */
+        anchor += (uint32_t)cen_interval * 1250u;  /* master cadence       */
+
+        /* Phase A: drive the two LL updates once the loopback is done and
+         * the control slot is free.  cec+8 Instant gives >= 6 events of lead
+         * (spec floor) for the IND to be delivered + acked before we switch. */
+        if (cen_test_updates && ll_tx_len == 0u) {
+            if (upd_stage == 0u && att_step >= 8u) {
+                /* Send both updates right after the loopback -- early, before
+                 * the anchored-RX has a chance to overshoot on a long hold. */
+                uint8_t d[7];
+                cm_instant = (uint16_t)(cec + 8u);
+                memcpy(d, CM_NEW, 5u);
+                d[5] = (uint8_t)cm_instant;
+                d[6] = (uint8_t)(cm_instant >> 8);
+                ll_queue(LL_CHANNEL_MAP_IND, d, 7u);
+                upd_stage = 1u;
+            } else if (upd_stage == 2u &&
+                       (uint16_t)(cec - settle) >= 12u) {
+                uint8_t d[11];
+                cu_instant = (uint16_t)(cec + 8u);
+                d[0] = CEN_WINSIZE;
+                d[1] = 0u; d[2] = 0u;               /* WinOffset = 0         */
+                d[3] = (uint8_t)cu_new; d[4] = (uint8_t)(cu_new >> 8);
+                d[5] = 0u; d[6] = 0u;               /* latency 0             */
+                d[7] = (uint8_t)CEN_TIMEOUT; d[8] = (uint8_t)(CEN_TIMEOUT >> 8);
+                d[9] = (uint8_t)cu_instant; d[10] = (uint8_t)(cu_instant >> 8);
+                ll_queue(LL_CONNECTION_UPDATE, d, 11u);
+                upd_stage = 3u;
+            }
+        }
 
         /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).
          * Step 4 awaits the server's pushed notification -- the server's
@@ -2313,7 +2387,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             }
             break;
         }
+        cec++;                                     /* one connection event  */
     }
+    }  /* Phase A test scope */
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         st->ms = (conn_now() - t_ci_end) / 1000u;

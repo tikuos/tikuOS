@@ -151,6 +151,15 @@ uint32_t tiku_flpr_arch_conn_state(void);
 /** @brief Connection events the FLPR has serviced (rising = link alive). */
 uint32_t tiku_flpr_arch_conn_events(void);
 
+/**
+ * @brief Phase A telemetry: LL updates applied this connection.
+ * @param chan_map  out: LL_CHANNEL_MAP_UPDATE_INDs followed to their Instant.
+ * @param conn_upd  out: LL_CONNECTION_UPDATE_INDs followed to their Instant.
+ * @return chan_map + conn_upd (total).  Both nonzero after a Phase A run
+ *         proves the FLPR follows a central's mid-connection reparametrise.
+ */
+uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd);
+
 /** @brief Stop the FLPR's hold loop and reclaim the RADIO (secure). */
 void tiku_flpr_arch_conn_stop(void);
 
