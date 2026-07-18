@@ -296,6 +296,30 @@ PROJ_DIR  = $(CURDIR)
 BUILD_DIR = build/$(MCU)
 
 # ---------------------------------------------------------------------------
+# Flag-change guard.  There is no header/flag dependency tracking, so changing
+# EXTRA_CFLAGS or a make var (e.g. TIKU_SHELL_BASIC_ENABLE, APP, TIKU_FLPR_
+# ENABLE) between builds of the same MCU would otherwise leave objects
+# compiled under the OLD flags -- the classic trap (a command silently
+# missing from the shell table, or `undefined reference to tiku_basic_*` when
+# a BASIC-on object meets a BASIC-off link).  Fingerprint the command-line
+# overrides; if they differ from the last build of this dir, drop its objects
+# so everything recompiles under the new flags.  Runs at parse time.
+# ---------------------------------------------------------------------------
+BUILD_FLAGS_STAMP := $(BUILD_DIR)/.buildflags
+_FLAG_GUARD := $(shell mkdir -p $(BUILD_DIR); \
+    printf '%s' "$(MAKEOVERRIDES)" > $(BUILD_DIR)/.buildflags.new; \
+    if ! cmp -s $(BUILD_DIR)/.buildflags.new $(BUILD_FLAGS_STAMP) 2>/dev/null; \
+    then \
+        find $(BUILD_DIR) -name '*.o' -delete 2>/dev/null; \
+        rm -f main.elf main.hex; \
+        mv $(BUILD_DIR)/.buildflags.new $(BUILD_FLAGS_STAMP); \
+        echo wiped; \
+    else rm -f $(BUILD_DIR)/.buildflags.new; fi)
+ifeq ($(_FLAG_GUARD),wiped)
+$(info [flags changed -> $(BUILD_DIR) objects wiped for a clean rebuild])
+endif
+
+# ---------------------------------------------------------------------------
 # App selection (mutually exclusive with tests and examples)
 #   make APP=cli MCU=msp430fr5994   — build with CLI app
 #   make MCU=msp430fr5994           — default (tests/examples as before)
