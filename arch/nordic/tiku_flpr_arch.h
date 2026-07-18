@@ -161,6 +161,9 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
 /** @brief 1 once the central subscribed to NUS TX notifications. */
 int tiku_flpr_arch_conn_subscribed(void);
 
+/** @brief Are NUS RX bytes waiting? (peek, no consume). */
+int tiku_flpr_arch_conn_rx_ready(void);
+
 /** @brief Pop NUS bytes the central wrote; returns count (0 if none). */
 int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap);
 

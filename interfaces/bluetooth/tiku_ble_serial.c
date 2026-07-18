@@ -171,6 +171,122 @@ tiku_ble_serial_beacon(const char *name)
 }
 
 /*===========================================================================*/
+/* Backend: Nordic on-die FLPR controller (nRF54L, L6)                       */
+/*===========================================================================*/
+#elif (defined(TIKU_FLPR_ENABLE) && (TIKU_FLPR_ENABLE + 0) &&                 \
+       defined(TIKU_HAS_BLE_ADV) && (TIKU_HAS_BLE_ADV + 0))
+
+#include <arch/nordic/tiku_flpr_arch.h>        /* the on-die BLE controller  */
+#include <arch/nordic/tiku_radio_arch.h>       /* adv_build + link cfg + TIFS */
+#include <arch/nordic/tiku_device_select.h>    /* NRF_RADIO_S (TIFS)          */
+#include <kernel/cpu/tiku_common.h>            /* unique id -> AdvA           */
+#include <string.h>
+
+/* The FLPR runs the whole link+NUS on its own core; the M33 just moves
+ * bytes through the mailbox and reads state -- so service() is a no-op and
+ * send/recv/ready are thin mailbox ops.  start() programs the static link
+ * config while RADIO is secure, then hands RADIO+UARTE21 to the FLPR. */
+#define BLE_SERIAL_NAME_CAP  24u
+
+static uint8_t s_started;
+
+int
+tiku_ble_serial_available(void)
+{
+    return 1;
+}
+
+int
+tiku_ble_serial_start(const char *name)
+{
+    uint8_t     addr[6], ad[31], adv[48];
+    uint8_t     adlen = 0u, advlen, nl;
+    const char *nm = (name != (const char *)0 && name[0] != '\0')
+                     ? name : "tikuOS";
+    int         rc;
+
+    if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
+        return -1;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;                          /* random static address       */
+    nl = (uint8_t)strlen(nm);
+    if (nl > BLE_SERIAL_NAME_CAP) {
+        nl = BLE_SERIAL_NAME_CAP;
+    }
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;  /* Flags  */
+    ad[adlen++] = (uint8_t)(1u + nl); ad[adlen++] = 0x09u;          /* Name   */
+    memcpy(&ad[adlen], nm, nl);
+    adlen = (uint8_t)(adlen + nl);
+    advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    adv[0] = 0x40u;                            /* ADV_IND (connectable)       */
+
+    tiku_radio_arch_init();                    /* static link cfg (secure)    */
+    NRF_RADIO_S->TIFS = 150u;                  /* T_IFS turnaround            */
+    tiku_radio_arch_constlat_hold(1);
+    rc = tiku_flpr_arch_conn_start(adv, advlen, addr);   /* non-blocking      */
+    if (rc != 0) {
+        tiku_radio_arch_constlat_hold(0);
+        return -1;
+    }
+    s_started = 1u;
+    return 0;
+}
+
+void
+tiku_ble_serial_stop(void)
+{
+    if (s_started) {
+        tiku_flpr_arch_conn_stop();
+        tiku_radio_arch_constlat_hold(0);
+        s_started = 0u;
+    }
+}
+
+/* The FLPR maintains the link on its own core -- nothing to pump here. */
+void
+tiku_ble_serial_service(void)
+{
+}
+
+int
+tiku_ble_serial_ready(void)
+{
+    return (tiku_flpr_arch_conn_active() &&
+            tiku_flpr_arch_conn_subscribed()) ? 1 : 0;
+}
+
+int
+tiku_ble_serial_send(const uint8_t *data, uint16_t len)
+{
+    if (data == (const uint8_t *)0 || !tiku_flpr_arch_conn_active()) {
+        return -1;
+    }
+    return tiku_flpr_arch_conn_send(data, (uint32_t)len);
+}
+
+int
+tiku_ble_serial_rx_ready(void)
+{
+    return tiku_flpr_arch_conn_rx_ready();
+}
+
+int
+tiku_ble_serial_recv(uint8_t *buf, uint16_t cap)
+{
+    return tiku_flpr_arch_conn_recv(buf, (uint32_t)cap);
+}
+
+/* Non-connectable beacon: the broadcast facade (tiku_ble_adv) owns that on
+ * Nordic, and BASIC's BLEBEACON routes there directly, so this is unused. */
+int
+tiku_ble_serial_beacon(const char *name)
+{
+    (void)name;
+    return -1;
+}
+
+/*===========================================================================*/
 /* No backend: honest stub so a stray enable still links                     */
 /*===========================================================================*/
 #else

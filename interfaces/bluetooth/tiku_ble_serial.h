@@ -41,7 +41,12 @@ extern "C" {
  * concrete-driver fallback keeps this correct even if a caller pulls the header
  * in without the Makefile's -D (e.g. a unit build). */
 #if (defined(TIKU_HAS_BLE) && (TIKU_HAS_BLE + 0)) ||                          \
-    (defined(TIKU_DRV_BLE_EM9305_ENABLE) && (TIKU_DRV_BLE_EM9305_ENABLE + 0))
+    (defined(TIKU_DRV_BLE_EM9305_ENABLE) && (TIKU_DRV_BLE_EM9305_ENABLE + 0)) \
+    || (defined(TIKU_FLPR_ENABLE) && (TIKU_FLPR_ENABLE + 0) &&                \
+        defined(TIKU_HAS_BLE_ADV) && (TIKU_HAS_BLE_ADV + 0))
+/* Nordic: the FLPR (VPR RISC-V coprocessor) is the on-die BLE controller
+ * (kintsugi/radio.md L6); the M33 talks to it over the shared-page mailbox
+ * exactly as it talks HCI to the EM9305 -- same facade, different transport. */
 #define TIKU_BLE_SERIAL_PRESENT 1
 #else
 #define TIKU_BLE_SERIAL_PRESENT 0

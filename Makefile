@@ -1250,6 +1250,13 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 # stable layout).
 SRCS += arch/nordic/tiku_flpr_arch.c
 CFLAGS += -DTIKU_FLPR_ENABLE=1
+# The FLPR is the on-die BLE controller (L6); the driver-agnostic serial
+# facade backs the BASIC BLE words over its mailbox.  Compile it here on
+# nordic (the EM9305 block adds it on apollo) -- guarded against a double
+# add if both were ever set.
+ifneq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+SRCS += interfaces/bluetooth/tiku_ble_serial.c
+endif
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
 RISCV_CC      = $(RISCV_PREFIX)gcc
 FLPR_BUILD    = $(BUILD_DIR)/flpr

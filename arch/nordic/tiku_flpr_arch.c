@@ -546,6 +546,12 @@ int tiku_flpr_arch_conn_subscribed(void)
 /* Pop NUS bytes the central wrote (f2a mailbox); 0 if none new. */
 static uint32_t flpr_nus_rx_seen;
 
+/* Peek: are there NUS RX bytes waiting (no consume)?  BASIC's BLEAVAIL(). */
+int tiku_flpr_arch_conn_rx_ready(void)
+{
+    return (TIKU_FLPR_SHARED->f2a_seq != flpr_nus_rx_seen) ? 1 : 0;
+}
+
 int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap)
 {
     uint32_t seq = TIKU_FLPR_SHARED->f2a_seq;
