@@ -91,14 +91,20 @@ typedef struct {
     volatile uint8_t  conn_hop;
     volatile uint8_t  conn_winsize;
     volatile uint8_t  conn_chm[5];
-    volatile uint32_t conn_sub;         /* NUS TX CCCD enabled (step 1b/L6.2)*/
+    volatile uint32_t conn_sub;         /* vestigial (host tracks CCCD, PhaseB)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */
     volatile uint32_t conn_cm;          /* Phase A: CHANNEL_MAP_UPDATEs applied*/
     volatile uint32_t conn_cu;          /* Phase A: CONNECTION_UPDATEs applied */
-    /* NUS byte pipe (F-L6.2): RX writes -> f2a mailbox (doorbelled),
-     * a2f mailbox bytes -> TX notifications.  Reuses a2f/f2a during hold
-     * (the advertise input is already consumed). */
+    volatile uint32_t a2f_ack;          /* Phase B: last a2f L2CAP frame the  */
+                                        /* controller consumed for TX (== a2f */
+                                        /* _seq means the slot is free again) */
+    /* L2CAP transport (Phase B): while a connection is held the mailbox
+     * carries complete L2CAP frames ([len][CID][payload]), NOT NUS bytes.
+     * RX: a received L2CAP data PDU -> f2a (doorbelled) for the M33 host to
+     * run ATT/GATT.  TX: the host's response/notification L2CAP frame -> a2f,
+     * which the controller wraps in an LLID=2 data PDU (flow-controlled via
+     * a2f_ack).  The FLPR no longer parses ATT -- it is a pure controller. */
 } tiku_flpr_shared_t;
 
 /* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + our AdvA. */

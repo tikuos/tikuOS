@@ -1288,6 +1288,9 @@ CFLAGS += -DTIKU_FLPR_ENABLE=1
 ifneq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
 SRCS += interfaces/bluetooth/tiku_ble_serial.c
 endif
+# Phase B: the M33-side ATT/GATT host for the FLPR controller (ATT moved off
+# the coprocessor; the FLPR forwards L2CAP frames over the mailbox).
+SRCS += interfaces/bluetooth/tiku_ble_host.c
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
 RISCV_CC      = $(RISCV_PREFIX)gcc
 FLPR_BUILD    = $(BUILD_DIR)/flpr

@@ -583,15 +583,18 @@ int tiku_flpr_arch_conn_subscribed(void)
     return (TIKU_FLPR_SHARED->conn_sub != 0u) ? 1 : 0;
 }
 
-/* Pop NUS bytes the central wrote (f2a mailbox); 0 if none new. */
+/* Phase B: the mailbox carries L2CAP frames during a connection.  conn_recv
+ * pops a received frame the controller forwarded; conn_send hands the host's
+ * response/notification frame back for TX. */
 static uint32_t flpr_nus_rx_seen;
 
-/* Peek: are there NUS RX bytes waiting (no consume)?  BASIC's BLEAVAIL(). */
+/* Peek: is a received L2CAP frame waiting (no consume)? */
 int tiku_flpr_arch_conn_rx_ready(void)
 {
     return (TIKU_FLPR_SHARED->f2a_seq != flpr_nus_rx_seen) ? 1 : 0;
 }
 
+/* Pop the L2CAP frame the controller forwarded (f2a); 0 if none new. */
 int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap)
 {
     uint32_t seq = TIKU_FLPR_SHARED->f2a_seq;
@@ -609,23 +612,30 @@ int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap)
     return (int)n;
 }
 
-/* Hand NUS bytes to the FLPR to notify to the central (a2f mailbox). */
+/* Hand one L2CAP frame to the controller for TX (a2f mailbox).  Non-blocking
+ * and flow-controlled: if the previous frame has not been consumed yet
+ * (a2f_ack != a2f_seq) it returns -2 so the caller retries -- a fast host
+ * cannot overwrite an unsent frame.  Returns bytes queued, or -1 bad state. */
 int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len)
 {
+    volatile tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
     uint32_t i;
 
     if (!tiku_flpr_arch_conn_active() || buf == (const uint8_t *)0) {
         return -1;
     }
-    if (len > 20u) {
-        len = 20u;                             /* one NUS notification       */
+    if (sh->a2f_ack != sh->a2f_seq) {
+        return -2;                             /* TX slot busy: retry later  */
+    }
+    if (len > 32u) {
+        len = 32u;                             /* one L2CAP frame / data PDU */
     }
     for (i = 0u; i < len; i++) {
-        TIKU_FLPR_SHARED->a2f_buf[i] = buf[i];
+        sh->a2f_buf[i] = buf[i];
     }
-    TIKU_FLPR_SHARED->a2f_len = len;
+    sh->a2f_len = len;
     __asm__ volatile ("dsb 0xF" ::: "memory");
-    TIKU_FLPR_SHARED->a2f_seq = TIKU_FLPR_SHARED->a2f_seq + 1u;
+    sh->a2f_seq = sh->a2f_seq + 1u;
     return (int)len;
 }
 

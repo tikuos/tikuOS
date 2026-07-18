@@ -269,20 +269,18 @@ static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
     return r;
 }
 
-/* --- LL control + NUS server on the FLPR (L6 F-L6.2), ported from the M33
- * L4/L5.  One pending PDU (LL control OR L2CAP/ATT), retransmitted via
- * SN/NESN until acked.  NUS RX writes go out the f2a mailbox to the M33;
- * a2f mailbox bytes come back as NUS TX notifications. */
-#define FNUS_H_RX    0x0012u    /* NUS RX write target                     */
-#define FNUS_H_TX    0x0014u    /* NUS TX notify source                    */
-#define FNUS_H_CCCD  0x0015u    /* CCCD for TX                             */
-
+/* --- LL control + L2CAP forwarding on the FLPR (Phase B).  The FLPR is a
+ * pure CONTROLLER: one pending PDU (LL control OR an L2CAP frame from the
+ * host), retransmitted via SN/NESN until acked.  A received L2CAP data PDU
+ * is forwarded verbatim to the M33 host over f2a; the host's response frame
+ * comes back over a2f and is queued as an LLID=2 data PDU.  ATT/GATT lives
+ * on the M33 now (tiku_ble_host) -- the coprocessor no longer parses it. */
 static uint8_t  fll_tx[40];             /* pending PDU [hdr][len][S1][pay]  */
 static uint8_t  fll_tx_len;             /* payload len; 0 = none            */
 static uint8_t  fll_tx_llid;            /* 2 L2CAP / 3 control              */
 static uint8_t  fll_sent_vers;          /* we queued our VERSION_IND        */
 static uint8_t  fll_sn, fll_nesn;       /* link-layer sequence bits         */
-static uint32_t fll_a2f_seen;           /* last a2f_seq consumed (TX bytes) */
+static uint32_t fll_a2f_seen;           /* last a2f_seq consumed (TX frame) */
 
 /* Phase A -- LL_CHANNEL_MAP_UPDATE_IND (0x01) / LL_CONNECTION_UPDATE_IND
  * (0x00) are INDICATIONS: the central commits and switches at the Instant
@@ -328,17 +326,6 @@ static void fll_queue_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
     fll_queue_raw(3u, p, (uint8_t)(1u + dl));
 }
 
-static void fll_att_queue(const uint8_t *att, uint8_t alen)
-{
-    uint8_t p[30], i;
-    p[0] = alen; p[1] = 0u;             /* L2CAP length                     */
-    p[2] = 0x04u; p[3] = 0x00u;         /* CID = ATT                        */
-    for (i = 0u; i < alen; i++) {
-        p[4u + i] = att[i];
-    }
-    fll_queue_raw(2u, p, (uint8_t)(4u + alen));
-}
-
 /* Build the outgoing PDU (pending, else empty) with current SN/NESN. */
 static uint8_t fll_build_tx(uint8_t *out)
 {
@@ -358,129 +345,25 @@ static uint8_t fll_build_tx(uint8_t *out)
     return 3u;
 }
 
-/* NUS 128-bit UUIDs, little-endian on air (stored reversed).  Base
- * 6E400001-B5A3-F393-E0A9-E50E24DCCA9E; byte[12] selects 0001/0002/0003
- * (service / RX / TX).  The GATT DB the FLPR presents to a discovering
- * client (L6 GATT discovery):
- *   0x0010 Primary Service (0x2800) = NUS service UUID
- *   0x0011 Characteristic (0x2803)  = [Write|WriteNoRsp][0x0012][RX UUID]
- *   0x0012 NUS RX value             (write target)
- *   0x0013 Characteristic (0x2803)  = [Notify][0x0014][TX UUID]
- *   0x0014 NUS TX value             (notify source)
- *   0x0015 CCCD (0x2902)                                                 */
-static const uint8_t nus_uuid_base[16] = {
-    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
-    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu
-};
-
-/* ATT Error Response: [0x01][req_op][handle(2)][error_code]. */
-static void fll_att_error(uint8_t req_op, uint16_t h, uint8_t err)
-{
-    uint8_t e[5];
-    e[0] = 0x01u; e[1] = req_op;
-    e[2] = (uint8_t)h; e[3] = (uint8_t)(h >> 8);
-    e[4] = err;
-    fll_att_queue(e, 5u);
-}
-
-/* Emit a 128-bit NUS UUID (variant = byte[12]) into out. */
-static void fll_nus_uuid(uint8_t *out, uint8_t variant)
-{
-    uint8_t i;
-    for (i = 0u; i < 16u; i++) {
-        out[i] = nus_uuid_base[i];
-    }
-    out[12] = variant;
-}
-
-/* ATT (NUS server): MTU; GATT discovery; CCCD write; NUS RX write -> f2a. */
-static void fll_att_handle(const volatile uint8_t *att, uint8_t alen,
-                           tiku_flpr_shared_t *sh)
-{
-    uint8_t op = att[0];
-    if (op == 0x02u) {                          /* Exchange MTU Req         */
-        uint8_t m[3] = { 0x03u, 23u, 0u };
-        fll_att_queue(m, 3u);
-    } else if (op == 0x10u && alen >= 7u) {     /* Read By Group Type Req   */
-        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
-        if (type == 0x2800u && start <= 0x0010u) {  /* Primary Service      */
-            uint8_t r[24];
-            r[0] = 0x11u; r[1] = 20u;           /* opcode, per-entry length  */
-            r[2] = 0x10u; r[3] = 0x00u;         /* group start handle        */
-            r[4] = 0x15u; r[5] = 0x00u;         /* group end handle          */
-            fll_nus_uuid(&r[6], 0x01u);         /* NUS service UUID          */
-            fll_att_queue(r, 22u);
-        } else {
-            fll_att_error(0x10u, start, 0x0Au); /* Attribute Not Found       */
-        }
-    } else if (op == 0x08u && alen >= 7u) {     /* Read By Type Req         */
-        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
-        if (type == 0x2803u && start <= 0x0011u) {  /* Characteristic (RX)  */
-            uint8_t r[24];
-            r[0] = 0x09u; r[1] = 21u;
-            r[2] = 0x11u; r[3] = 0x00u;         /* declaration handle        */
-            r[4] = 0x0Cu;                       /* props Write|WriteNoRsp    */
-            r[5] = 0x12u; r[6] = 0x00u;         /* value handle              */
-            fll_nus_uuid(&r[7], 0x02u);         /* RX char UUID              */
-            fll_att_queue(r, 23u);
-        } else if (type == 0x2803u && start <= 0x0013u) { /* char TX        */
-            uint8_t r[24];
-            r[0] = 0x09u; r[1] = 21u;
-            r[2] = 0x13u; r[3] = 0x00u;
-            r[4] = 0x10u;                       /* props Notify              */
-            r[5] = 0x14u; r[6] = 0x00u;
-            fll_nus_uuid(&r[7], 0x03u);         /* TX char UUID              */
-            fll_att_queue(r, 23u);
-        } else {
-            fll_att_error(0x08u, start, 0x0Au);
-        }
-    } else if (op == 0x04u && alen >= 5u) {     /* Find Information Req      */
-        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        if (start <= 0x0015u && start >= 0x0014u) { /* CCCD after TX char   */
-            uint8_t r[6];
-            r[0] = 0x05u; r[1] = 0x01u;         /* Find Info Rsp, 16-bit fmt */
-            r[2] = 0x15u; r[3] = 0x00u;         /* CCCD handle               */
-            r[4] = 0x02u; r[5] = 0x29u;         /* UUID 0x2902               */
-            fll_att_queue(r, 6u);
-        } else {
-            fll_att_error(0x04u, start, 0x0Au);
-        }
-    } else if (op == 0x12u && alen >= 4u) {     /* Write Request            */
-        uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        if (h == FNUS_H_CCCD) {
-            sh->conn_sub = att[3];
-        } else if (h == FNUS_H_RX) {            /* client -> server bytes   */
-            uint8_t n = (uint8_t)(alen - 3u), i;
-            if (n > TIKU_FLPR_MSG_CAP) {
-                n = TIKU_FLPR_MSG_CAP;
-            }
-            for (i = 0u; i < n; i++) {
-                sh->f2a_buf[i] = att[3u + i];
-            }
-            sh->f2a_len = n;
-            sh->f2a_seq = sh->f2a_seq + 1u;     /* hand off to the M33      */
-            flpr_doorbell_to_app();
-        }
-        {
-            uint8_t rsp = 0x13u;                /* Write Response           */
-            fll_att_queue(&rsp, 1u);
-        }
-    }
-}
-
-/* Dispatch a genuinely-new RX PDU: LL control or L2CAP/ATT. */
+/* Dispatch a genuinely-new RX PDU: LL control (handled here) or an L2CAP
+ * frame (forwarded verbatim to the M33 host over f2a -- Phase B). */
 static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
 {
     uint8_t llid = buf[0] & 0x03u, op;
     if (buf[1] == 0u) {
         return;
     }
-    if (llid == 0x02u) {                        /* L2CAP: ATT is CID 0x0004 */
-        if (buf[1] >= 5u && buf[5] == 0x04u && buf[6] == 0x00u) {
-            fll_att_handle(&buf[7], (uint8_t)(buf[1] - 4u), sh);
+    if (llid == 0x02u) {                        /* L2CAP frame -> host       */
+        uint8_t n = buf[1], i;                  /* [len][CID][payload]       */
+        if (n > TIKU_FLPR_MSG_CAP) {
+            n = TIKU_FLPR_MSG_CAP;
         }
+        for (i = 0u; i < n; i++) {
+            sh->f2a_buf[i] = buf[3u + i];       /* payload starts at buf[3]  */
+        }
+        sh->f2a_len = n;
+        sh->f2a_seq = sh->f2a_seq + 1u;         /* hand off to the M33       */
+        flpr_doorbell_to_app();
         return;
     }
     if (llid != 0x03u) {
@@ -568,10 +451,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     for (i = 0u; i < 5u; i++) {
         chmap[i] = sh->conn_chm[i];
     }
-    /* Reset the LL/NUS state for this connection. */
+    /* Reset the LL / L2CAP-transport state for this connection. */
     fll_tx_len = 0u; fll_tx_llid = 0u; fll_sent_vers = 0u;
     fll_sn = 0u; fll_nesn = 0u;
     fll_a2f_seen = sh->a2f_seq;
+    sh->a2f_ack  = sh->a2f_seq;                  /* Phase B: TX slot free      */
     fll_cm_pending = 0u; fll_cu_pending = 0u;    /* Phase A: no update armed  */
     sh->conn_sub = 0u;
     sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
@@ -730,22 +614,21 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 break;
             }
         }
-        /* NUS TX: new bytes from the M33 (a2f) -> Handle Value Notification
-         * once subscribed and the pending slot is free. */
-        if (sh->conn_sub != 0u && fll_tx_len == 0u &&
-            sh->a2f_seq != fll_a2f_seen) {
-            uint8_t n = (uint8_t)sh->a2f_len, nb[3 + 20];
+        /* TX: a new L2CAP frame from the host (a2f) -> queue as an LLID=2
+         * data PDU when the pending slot is free.  The host has already
+         * built the full frame ([len][CID][ATT]); the controller just moves
+         * it on-air.  a2f_ack tells the host the slot is consumed. */
+        if (fll_tx_len == 0u && sh->a2f_seq != fll_a2f_seen) {
+            uint8_t n = (uint8_t)sh->a2f_len, fr[32];
             fll_a2f_seen = sh->a2f_seq;
-            if (n > 20u) {
-                n = 20u;
+            if (n > sizeof(fr)) {
+                n = (uint8_t)sizeof(fr);
             }
-            nb[0] = 0x1Bu;                        /* Handle Value Notify      */
-            nb[1] = (uint8_t)FNUS_H_TX;
-            nb[2] = (uint8_t)(FNUS_H_TX >> 8);
             for (i = 0u; i < n; i++) {
-                nb[3u + i] = sh->a2f_buf[i];
+                fr[i] = sh->a2f_buf[i];
             }
-            fll_att_queue(nb, (uint8_t)(3u + n));
+            fll_queue_raw(2u, fr, n);
+            sh->a2f_ack = sh->a2f_seq;            /* slot free for the host   */
         }
         have_anchor = 1u;                        /* locked: idle next event   */
         sh->conn_gap  = idle_iters;              /* telemetry: off iters      */

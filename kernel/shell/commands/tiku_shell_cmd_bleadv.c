@@ -69,6 +69,7 @@
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>      /* L6: FLPR-as-controller (F-L6.1) */
 #include <interfaces/bluetooth/tiku_ble_serial.h> /* facade (B3 auto-reconnect) */
+#include <interfaces/bluetooth/tiku_ble_host.h>   /* Phase B: M33 ATT/GATT host */
 #endif
 #include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
@@ -798,20 +799,46 @@ static void bleadv_flprnus(void)
         SHELL_PRINTF("no NUS client connected (rc=%d)\n", rc);
         return;
     }
-    SHELL_PRINTF("  connected; FLPR NUS server live, echoing RX->TX ~15 s...\n");
+    SHELL_PRINTF("  connected; M33 NUS host live (ATT on M33), echoing"
+                 " RX->TX ~15 s...\n");
     {
-        uint8_t b[24];
+        uint8_t frame[40], resp[40], nus[24];
         char hx[50];
         uint32_t total = 0u;
         tiku_clock_time_t start = tiku_clock_time();
+        tiku_ble_host_reset();                    /* Phase B: M33 ATT server  */
         while ((tiku_clock_time_t)(tiku_clock_time() - start) <
                (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
-            int n = tiku_flpr_arch_conn_recv(b, sizeof(b));
+            /* Pump: L2CAP frame in (from the controller) -> ATT/GATT on the
+             * M33 -> response frame out.  A NUS RX write surfaces bytes we
+             * echo back as a TX notification. */
+            int n = tiku_flpr_arch_conn_recv(frame, sizeof(frame));
             if (n > 0) {
-                total += (uint32_t)n;
-                bleadv_fmt_hex(hx, b, n > 16 ? 16 : n, 0);
-                SHELL_PRINTF("  NUS RX %d B [%s] -> echoed to TX\n", n, hx);
-                (void)tiku_flpr_arch_conn_send(b, (uint32_t)n);
+                uint16_t rl = tiku_ble_host_rx(frame, (uint16_t)n,
+                                               resp, sizeof(resp));
+                if (rl > 0u) {
+                    while (tiku_flpr_arch_conn_send(resp, rl) == -2 &&
+                           tiku_flpr_arch_conn_active()) {
+                        tiku_watchdog_kick();
+                    }
+                }
+                {
+                    uint16_t m = tiku_ble_host_nus_recv(nus, sizeof(nus));
+                    if (m > 0u) {
+                        uint16_t nl;
+                        total += m;
+                        bleadv_fmt_hex(hx, nus, m > 16u ? 16 : (int)m, 0);
+                        SHELL_PRINTF("  NUS RX %u B [%s] -> echoed to TX\n",
+                                     (unsigned)m, hx);
+                        nl = tiku_ble_host_nus_notify(nus, m,
+                                                      resp, sizeof(resp));
+                        while (nl > 0u &&
+                               tiku_flpr_arch_conn_send(resp, nl) == -2 &&
+                               tiku_flpr_arch_conn_active()) {
+                            tiku_watchdog_kick();
+                        }
+                    }
+                }
             }
             tiku_watchdog_kick();
             if (!tiku_flpr_arch_conn_active()) {
