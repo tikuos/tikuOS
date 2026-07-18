@@ -175,6 +175,7 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         tiku_clock_time_t el = (tiku_clock_time_t)(tiku_clock_time() - start);
         uint32_t left;
         int8_t rssi = 0;
+        uint8_t did_ack = 0u;
         int n;
         tiku_154_mhr_t h;
         uint16_t hlen, dst;
@@ -187,7 +188,11 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         if (left == 0u) {
             left = 1u;
         }
-        n = tiku_ieee154_arch_rx(frame, sizeof(frame), left, &rssi);
+        /* RX + hardware-timed auto-ACK in one shot (the ACK, if any, is sent
+         * by the PHY within the 192 us turnaround for a unicast-to-us,
+         * ack-requesting, CRC-OK data frame). */
+        n = tiku_ieee154_arch_rx_ack(frame, sizeof(frame), left, &rssi,
+                                     mac_pan, mac_addr, &did_ack);
         if (n <= 0) {
             continue;                            /* timeout slice / bad FCS    */
         }
@@ -202,29 +207,10 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         if (dst != mac_addr && dst != TIKU_154_ADDR_BCAST) {
             continue;                            /* addressed to someone else  */
         }
-        /* Auto-ACK: a matching-seq ACK frame straight back (no addressing,
-         * no CSMA -- per spec the ACK is immediate).  Software-timed here,
-         * not the hardware 192 us turnaround; fine TikuOS<->TikuOS where the
-         * sender's ACK wait is equally relaxed.  A real 15.4 peer would want
-         * the hardware-timed ACK -- the remaining honest debt (N2.3). */
+        /* The PHY already sent the hardware-timed ACK (if warranted) in the
+         * turnaround window; just deliver the payload. */
         {
             uint8_t plen = (uint8_t)((uint16_t)n - hlen);
-            uint8_t acked = 0u;
-            if (h.ack_req != 0u) {
-                tiku_154_mhr_t a;
-                uint8_t ackf[4];
-                uint16_t al;
-                memset(&a, 0, sizeof(a));
-                a.type = TIKU_154_FT_ACK;
-                a.seq = h.seq;
-                a.dst_mode = TIKU_154_ADDR_NONE;
-                a.src_mode = TIKU_154_ADDR_NONE;
-                al = tiku_154_mhr_build(ackf, &a);
-                if (al != 0u) {
-                    (void)tiku_ieee154_arch_tx(ackf, (uint8_t)al);
-                    acked = 1u;
-                }
-            }
             if (plen > cap) {
                 plen = cap;
             }
@@ -235,7 +221,7 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                 info->src = (uint16_t)(h.src_addr[0] |
                                        ((uint16_t)h.src_addr[1] << 8));
                 info->seq = h.seq;
-                info->acked = acked;
+                info->acked = did_ack;
                 info->rssi = rssi;
             }
             ret = (int)plen;

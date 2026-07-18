@@ -241,6 +241,122 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm)
     return lvl;
 }
 
+/* ACK frame template in EasyDMA form: [PHR][FCF_lo][FCF_hi][seq].  PHR = 5
+ * (3-byte MHR + 2-byte FCS, counted via CRCINC); FCF 0x0002 = ACK, no
+ * addressing.  Only [3] (seq) changes per frame. */
+static uint8_t ack_tmpl[4] __attribute__((aligned(4))) =
+    { 5u, 0x02u, 0x00u, 0u };
+
+int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
+                             int8_t *rssi, uint16_t my_pan, uint16_t my_addr,
+                             uint8_t *did_ack)
+{
+    tiku_clock_time_t start = tiku_clock_time();
+    tiku_clock_time_t dl =
+        (tiku_clock_time_t)(((uint32_t)TIKU_CLOCK_SECOND * timeout_ms) /
+                            1000u);
+    uint32_t spin = 0u;
+    uint8_t  got = 0u, ack = 0u;
+
+    RADIO->TIFS = 192u;                          /* aTurnaroundTime (12 sym)   */
+    RADIO->PACKETPTR = (uint32_t)rx_frame;
+    /* RX with the turnaround pre-armed; we commit or abort in the window. */
+    RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
+                    ((uint32_t)1u << RADIO_SHORTS_PHYEND_DISABLE_Pos) |
+                    ((uint32_t)1u << 2);         /* DISABLED_TXEN              */
+    RADIO->EVENTS_END      = 0u;
+    RADIO->EVENTS_PHYEND   = 0u;
+    RADIO->EVENTS_CRCOK    = 0u;
+    RADIO->EVENTS_CRCERROR = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+
+    tiku_radio_arch_hfclk_kick();
+    RADIO->TASKS_RXEN = 1u;
+
+    for (;;) {
+        if (RADIO->EVENTS_END != 0u) {
+            got = 1u;
+            break;
+        }
+        spin++;
+        if ((spin & 0x3FFu) == 0u) {
+            RADIO->TASKS_RSSISTART = 1u;
+        }
+        if ((spin & 0xFFFFu) == 0u) {
+            tiku_radio_arch_hfclk_kick();
+            tiku_watchdog_kick();
+            if ((tiku_clock_time_t)(tiku_clock_time() - start) >= dl) {
+                break;
+            }
+        }
+    }
+    if (!got) {                                  /* timeout: cancel the arm    */
+        RADIO->SHORTS = 0u;
+        RADIO->EVENTS_DISABLED = 0u;
+        RADIO->TASKS_DISABLE = 1u;
+        for (spin = 0u; spin < 200000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+        RADIO->TIFS = 0u;
+        return 0;
+    }
+    /* T_IFS window (~192 us): the auto-TXEN is pending.  Commit an ACK only
+     * for a CRC-OK unicast DATA frame addressed to us; otherwise abort. */
+    {
+        uint16_t fcf  = (uint16_t)(rx_frame[1] | ((uint16_t)rx_frame[2] << 8));
+        uint8_t  ftyp = (uint8_t)(fcf & 0x07u);
+        uint8_t  areq = (uint8_t)((fcf >> 5) & 1u);
+        uint16_t dpan = (uint16_t)(rx_frame[4] | ((uint16_t)rx_frame[5] << 8));
+        uint16_t dadr = (uint16_t)(rx_frame[6] | ((uint16_t)rx_frame[7] << 8));
+        uint8_t  crcok = (RADIO->CRCSTATUS == RADIO_CRCSTATUS_CRCSTATUS_CRCOk);
+        uint8_t  forus = (uint8_t)((dpan == my_pan) && (dadr == my_addr));
+        if (crcok && ftyp == 1u && areq && forus) {
+            ack_tmpl[3] = rx_frame[3];           /* echo the seq               */
+            RADIO->PACKETPTR = (uint32_t)ack_tmpl;
+            RADIO->EVENTS_PHYEND = 0u;
+            /* Drop DISABLED_TXEN so the ACK's own DISABLED can't re-trigger a
+             * second TX (the BLE spurious-TX fix, 7b36d3f). */
+            RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
+                            ((uint32_t)1u << RADIO_SHORTS_PHYEND_DISABLE_Pos);
+            ack = 1u;
+        } else {
+            RADIO->SHORTS = 0u;
+            RADIO->TASKS_DISABLE = 1u;           /* cancel the pending TXEN    */
+        }
+    }
+    if (rssi != 0) {
+        *rssi = (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
+    }
+    /* Wait for the radio to settle (ACK TX completes, or the abort disables). */
+    RADIO->EVENTS_DISABLED = 0u;
+    for (spin = 0u; spin < 600000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    RADIO->SHORTS = 0u;
+    RADIO->TIFS = 0u;
+    if (did_ack != 0) {
+        *did_ack = ack;
+    }
+    if (RADIO->CRCSTATUS != RADIO_CRCSTATUS_CRCSTATUS_CRCOk) {
+        return -1;
+    }
+    {
+        uint8_t phr  = rx_frame[0];
+        uint8_t plen = (phr >= 2u) ? (uint8_t)(phr - 2u) : 0u;
+        if (plen > cap) {
+            plen = cap;
+        }
+        if (plen != 0u) {
+            memcpy(buf, &rx_frame[1], plen);
+        }
+        return (int)plen;
+    }
+}
+
 int tiku_ieee154_arch_cca(void)
 {
     uint32_t spin;

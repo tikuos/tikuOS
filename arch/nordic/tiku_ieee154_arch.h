@@ -79,4 +79,17 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm);
  */
 int tiku_ieee154_arch_cca(void);
 
+/**
+ * @brief Receive one frame and, if it is a CRC-OK data frame for us that
+ *        requests an ACK, transmit a spec-timed ACK via the hardware T_IFS
+ *        turnaround (192 us) -- no software in the ack path.
+ * @param my_pan/my_addr  our 16-bit PAN/short address for the in-window
+ *                        filter (0xFFFF dst = broadcast, never ACKed).
+ * @param did_ack  out (optional): 1 if an ACK was launched.
+ * @return >0 payload length (FCS stripped), 0 timeout, -1 bad FCS.
+ */
+int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
+                             int8_t *rssi, uint16_t my_pan, uint16_t my_addr,
+                             uint8_t *did_ack);
+
 #endif /* TIKU_NORDIC_IEEE154_ARCH_H_ */
