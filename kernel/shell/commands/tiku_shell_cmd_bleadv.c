@@ -532,6 +532,12 @@ static void bleadv_central(unsigned secs, uint8_t updates)
         SHELL_PRINTF("  GATT discovery: %s (handles RX/TX/CCCD matched)"
                      " (L6)\n", st.att_disc ? "OK" : "not matched");
     }
+    if (st.att_lread || st.att_lwrite) {
+        SHELL_PRINTF("  GATT long ops: read-blob=%s prep/exec-write=%s"
+                     " (table-driven DB, Phase D)\n",
+                     st.att_lread ? "OK" : "FAIL",
+                     st.att_lwrite ? "OK" : "FAIL");
+    }
     SHELL_PRINTF("  ended: %s\n",
                  st.reason == 0u ? "duration cap" :
                  st.reason == 1u ? "supervision (peripheral silent)" :

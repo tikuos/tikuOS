@@ -1364,6 +1364,18 @@ static uint8_t  att_readback;       /* client/server: first data byte seen  */
 static uint8_t  att_disc_ok;        /* client: discovered handles as expected */
 static uint16_t att_d_rx, att_d_tx, att_d_cccd; /* discovered NUS handles   */
 static uint16_t att_d_next;         /* Read-By-Type iteration cursor         */
+/* Phase D: exercise the table-driven GATT DB's long ops -- a long READ (Read
+ * Blob) of the Model char (handle 0x0022, 72 B), then a long WRITE
+ * (Prepare/Execute) of the scratch char (0x0032, 70 B) verified by readback.
+ * Handles are hard-coded (a phone would discover them). */
+#define ATT_MODEL_H   0x0022u
+#define ATT_MODEL_LEN 72u
+#define ATT_SCR_H     0x0032u
+#define ATT_SCR_LEN   70u
+static uint8_t  att_long[80];       /* long read / readback accumulator      */
+static uint16_t att_long_len;
+static uint8_t  att_lread_ok;       /* Model long read matched (Read Blob)   */
+static uint8_t  att_lwrite_ok;      /* scratch long write matched (readback) */
 
 static void ll_reset(void)
 {
@@ -1373,6 +1385,7 @@ static void ll_reset(void)
     att_step = 0u; att_ok = 0u; att_readback = 0u;
     att_disc_ok = 0u; att_d_rx = 0u; att_d_tx = 0u; att_d_cccd = 0u;
     att_d_next = 0u;
+    att_long_len = 0u; att_lread_ok = 0u; att_lwrite_ok = 0u;  /* Phase D     */
     cen_sdu_len = 0u; cen_sdu_off = 0u;         /* Phase C frag/recomb        */
     cen_rc_len = 0u; cen_rc_expect = 0u;
     cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
@@ -1547,6 +1560,40 @@ static void att_client_send(void)
             w[3u + i] = NUS_TEST_MSG[i];
         }
         att_queue(w, (uint8_t)(3u + NUS_TEST_LEN));
+    } else if (att_step == 8u) {                /* Phase D: Read Model (long)*/
+        att_long_len = 0u;
+        b[0] = 0x0Au;
+        b[1] = (uint8_t)ATT_MODEL_H; b[2] = (uint8_t)(ATT_MODEL_H >> 8);
+        att_queue(b, 3u);
+    } else if (att_step == 9u) {                /* Read Blob Model           */
+        b[0] = 0x0Cu;
+        b[1] = (uint8_t)ATT_MODEL_H; b[2] = (uint8_t)(ATT_MODEL_H >> 8);
+        b[3] = (uint8_t)att_long_len; b[4] = (uint8_t)(att_long_len >> 8);
+        att_queue(b, 5u);
+    } else if (att_step == 10u || att_step == 11u) { /* Prepare Write scratch */
+        uint8_t  w[5 + 45], i;
+        uint16_t off = (att_step == 10u) ? 0u : 45u;
+        uint16_t n   = (att_step == 10u) ? 45u : (uint16_t)(ATT_SCR_LEN - 45u);
+        w[0] = 0x16u;
+        w[1] = (uint8_t)ATT_SCR_H; w[2] = (uint8_t)(ATT_SCR_H >> 8);
+        w[3] = (uint8_t)off; w[4] = (uint8_t)(off >> 8);
+        for (i = 0u; i < n; i++) {
+            w[5u + i] = (uint8_t)('A' + ((off + i) % 26u));
+        }
+        att_queue(w, (uint8_t)(5u + n));
+    } else if (att_step == 12u) {               /* Execute Write (commit)    */
+        b[0] = 0x18u; b[1] = 0x01u;
+        att_queue(b, 2u);
+    } else if (att_step == 13u) {               /* Read scratch back         */
+        att_long_len = 0u;
+        b[0] = 0x0Au;
+        b[1] = (uint8_t)ATT_SCR_H; b[2] = (uint8_t)(ATT_SCR_H >> 8);
+        att_queue(b, 3u);
+    } else if (att_step == 14u) {               /* Read Blob scratch         */
+        b[0] = 0x0Cu;
+        b[1] = (uint8_t)ATT_SCR_H; b[2] = (uint8_t)(ATT_SCR_H >> 8);
+        b[3] = (uint8_t)att_long_len; b[4] = (uint8_t)(att_long_len >> 8);
+        att_queue(b, 5u);
     }
     /* step 7 awaits the server's pushed TX notification -- nothing to send */
 }
@@ -1623,7 +1670,53 @@ static void att_handle(const uint8_t *att, uint8_t alen)
                 }
                 att_ok = ok;                        /* full echo matched   */
                 att_step = 8u;                      /* loopback verified   */
+                att_client_send();                  /* Phase D: long read  */
             }
+        } else if ((op == 0x0Bu || op == 0x0Du) &&
+                   att_step >= 8u && att_step <= 14u) {
+            /* Read / Read Blob Response: accumulate a long value (Model read,
+             * then the scratch readback), verifying the deterministic
+             * pattern once the whole value is in. */
+            uint8_t vn = (uint8_t)(alen - 1u), i;
+            for (i = 0u; i < vn &&
+                 att_long_len < (uint16_t)sizeof(att_long); i++) {
+                att_long[att_long_len++] = att[1u + i];
+            }
+            if (att_step <= 9u) {                   /* Model long read      */
+                if (att_long_len >= ATT_MODEL_LEN) {
+                    uint8_t ok = (uint8_t)(att_long_len == ATT_MODEL_LEN), j;
+                    for (j = 0u; ok != 0u && j < ATT_MODEL_LEN; j++) {
+                        if (att_long[j] != (uint8_t)('0' + (j % 10u))) {
+                            ok = 0u;
+                        }
+                    }
+                    att_lread_ok = ok;
+                    att_step = 10u;                 /* -> long write        */
+                } else {
+                    att_step = 9u;                  /* more Read Blob       */
+                }
+            } else if (att_long_len >= ATT_SCR_LEN) { /* scratch readback   */
+                uint8_t ok = (uint8_t)(att_long_len == ATT_SCR_LEN), j;
+                for (j = 0u; ok != 0u && j < ATT_SCR_LEN; j++) {
+                    if (att_long[j] != (uint8_t)('A' + (j % 26u))) {
+                        ok = 0u;
+                    }
+                }
+                att_lwrite_ok = ok;
+                att_step = 15u;                     /* all done             */
+            } else {
+                att_step = 14u;                     /* more Read Blob       */
+            }
+            if (att_step != 15u) {
+                att_client_send();
+            }
+        } else if (op == 0x17u && (att_step == 10u || att_step == 11u)) {
+            att_step = (att_step == 10u) ? 11u : 12u;  /* Prepare Write Rsp */
+            att_client_send();
+        } else if (op == 0x19u && att_step == 12u) { /* Execute Write Rsp   */
+            att_long_len = 0u;
+            att_step = 13u;                          /* read the value back */
+            att_client_send();
         }
     } else {
         /* SERVER: MTU; CCCD + RX writes; a RX write pushes a TX notify. */
@@ -2502,7 +2595,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).
          * Step 4 awaits the server's pushed notification -- the server's
          * LL retransmits that until acked, so the client just waits. */
-        if (att_step >= 1u && att_step <= 6u) {
+        if (att_step >= 1u && att_step <= 14u && att_step != 7u) {
             if (att_step != att_prev) {
                 att_prev = att_step;
                 att_wait = 0u;
@@ -2541,6 +2634,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->att_ok = att_ok;
         st->att_readback = att_readback;
         st->att_disc = att_disc_ok;
+        st->att_lread = att_lread_ok;            /* Phase D long read/write   */
+        st->att_lwrite = att_lwrite_ok;
     }
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;

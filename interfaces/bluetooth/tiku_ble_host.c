@@ -4,56 +4,142 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_host.c - M33-side L2CAP (frag/recomb) + ATT/GATT (NUS) server.
- * Phase C: recombine incoming L2CAP fragments (by LLID) into whole PDUs
- * before running ATT, and fragment responses/notifications back out, so
- * payloads can exceed one ~27-byte BLE data PDU.
+ * tiku_ble_host.c - M33-side L2CAP (frag/recomb) + a TABLE-DRIVEN ATT/GATT
+ * server.  Phase D: the ATT ops walk a declarative attribute table instead
+ * of a hardcoded NUS if/else, so arbitrary services + characteristics are
+ * served (here NUS + a Device Information service + a scratch service), with
+ * long reads (Read Blob) and long writes (Prepare/Execute Write) past the MTU.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <interfaces/bluetooth/tiku_ble_host.h>
 
-/* NUS GATT DB (fixed handles the client discovers / hard-codes):
- *   0x0010 Primary Service (0x2800) = NUS UUID
- *   0x0011 Char (0x2803) [Write|WriteNoRsp][0x0012][RX UUID]
- *   0x0012 NUS RX value (write target)
- *   0x0013 Char (0x2803) [Notify][0x0014][TX UUID]
- *   0x0014 NUS TX value (notify source)
- *   0x0015 CCCD (0x2902)                                                    */
-#define HOST_H_RX     0x0012u
-#define HOST_H_TX     0x0014u
-#define HOST_H_CCCD   0x0015u
 #define HOST_FRAG_MAX 27u                        /* L2CAP bytes per data PDU  */
 #define HOST_L2_MAX   (TIKU_BLE_HOST_MTU + 4u)   /* max L2CAP PDU (MTU + hdr) */
+#define HOST_H_TX     0x0014u                    /* NUS TX (notify source)    */
+#define HOST_H_RX     0x0012u                    /* NUS RX (write target)     */
+#define HOST_H_CCCD   0x0015u                    /* NUS TX CCCD               */
+#define HOST_MODEL_LEN 72u                       /* > MTU-1 -> needs Read Blob*/
+#define HOST_SCRATCH_CAP 80u                     /* long writable value       */
 
-static const uint8_t host_nus_uuid[16] = {       /* 6E400001-...-24DCCA9E    */
+/* --- GATT attribute table ------------------------------------------------ */
+#define GATT_READ   0x01u
+#define GATT_WRITE  0x02u
+
+typedef struct {
+    uint16_t        handle;
+    uint16_t        type16;      /* attr type as 16-bit UUID (0 => 128-bit)   */
+    const uint8_t  *type128;     /* attr type as 128-bit UUID (NULL => 16-bit)*/
+    uint8_t         perm;        /* GATT_READ | GATT_WRITE                    */
+    uint8_t        *val;         /* value bytes (NULL for notify-only)        */
+    uint16_t        len;         /* current value length                     */
+    uint16_t        cap;         /* buffer capacity (writes clamp to this)   */
+} host_attr_t;
+
+/* NUS 128-bit UUIDs (base 6E400001-B5A3-...; byte[12] = 01 svc / 02 rx /03 tx)*/
+static const uint8_t nus_svc_uuid[16] = {
     0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
-    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu
-};
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu };
+static const uint8_t nus_rx_uuid[16] = {
+    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x02u, 0x00u, 0x40u, 0x6Eu };
+static const uint8_t nus_tx_uuid[16] = {
+    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x03u, 0x00u, 0x40u, 0x6Eu };
+/* Characteristic declaration values: [props][value handle:2][char UUID]. */
+static const uint8_t nus_rx_decl[19] = {
+    0x0Cu, 0x12u, 0x00u,                         /* Write|WriteNoRsp, vh 0x12 */
+    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x02u, 0x00u, 0x40u, 0x6Eu };
+static const uint8_t nus_tx_decl[19] = {
+    0x10u, 0x14u, 0x00u,                         /* Notify, vhandle 0x14      */
+    0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+    0x93u, 0xF3u, 0xA3u, 0xB5u, 0x03u, 0x00u, 0x40u, 0x6Eu };
+static const uint8_t dis_svc[2]     = { 0x0Au, 0x18u };   /* 0x180A           */
+static const uint8_t model_decl[5]  = { 0x02u, 0x22u, 0x00u, 0x24u, 0x2Au };
+static const uint8_t scr_svc[2]     = { 0x01u, 0xFEu };   /* 0xFE01 (custom)  */
+static const uint8_t scr_decl[5]    = { 0x0Au, 0x32u, 0x00u, 0x02u, 0xFEu };
 
+static uint8_t  host_rx[TIKU_BLE_HOST_MTU];      /* NUS RX value + byte pipe  */
+static uint8_t  host_cccd[2];                    /* NUS TX CCCD value         */
+static uint8_t  model_val[HOST_MODEL_LEN];       /* long readable (Read Blob) */
+static uint8_t  scratch_val[HOST_SCRATCH_CAP];   /* long read/write           */
+
+/* Handle-ordered attribute table: NUS, Device Information, scratch. */
+static host_attr_t gatt_db[] = {
+ { 0x0010u, 0x2800u, 0, GATT_READ, (uint8_t *)nus_svc_uuid, 16u, 16u },
+ { 0x0011u, 0x2803u, 0, GATT_READ, (uint8_t *)nus_rx_decl, 19u, 19u },
+ { 0x0012u, 0x0000u, nus_rx_uuid, GATT_WRITE, host_rx, 0u, sizeof(host_rx) },
+ { 0x0013u, 0x2803u, 0, GATT_READ, (uint8_t *)nus_tx_decl, 19u, 19u },
+ { 0x0014u, 0x0000u, nus_tx_uuid, 0u, 0, 0u, 0u },        /* TX: notify-only  */
+ { 0x0015u, 0x2902u, 0, GATT_READ | GATT_WRITE, host_cccd, 2u, 2u },
+ { 0x0020u, 0x2800u, 0, GATT_READ, (uint8_t *)dis_svc, 2u, 2u },
+ { 0x0021u, 0x2803u, 0, GATT_READ, (uint8_t *)model_decl, 5u, 5u },
+ { 0x0022u, 0x2A24u, 0, GATT_READ, model_val, HOST_MODEL_LEN, HOST_MODEL_LEN },
+ { 0x0030u, 0x2800u, 0, GATT_READ, (uint8_t *)scr_svc, 2u, 2u },
+ { 0x0031u, 0x2803u, 0, GATT_READ, (uint8_t *)scr_decl, 5u, 5u },
+ { 0x0032u, 0xFE02u, 0, GATT_READ | GATT_WRITE, scratch_val, 0u,
+   sizeof(scratch_val) },
+};
+#define GATT_N  (sizeof(gatt_db) / sizeof(gatt_db[0]))
+
+/* --- connection state ---------------------------------------------------- */
 static uint8_t  host_sub;                         /* CCCD: notifications on   */
-static uint8_t  host_rx[TIKU_BLE_HOST_MTU];       /* buffered NUS RX bytes    */
-static uint8_t  host_rx_len;
+static uint8_t  host_rx_len;                      /* pending NUS RX bytes     */
 static uint8_t  host_rc[HOST_L2_MAX];             /* RX recombination buffer  */
 static uint16_t host_rc_len, host_rc_expect;
 static uint8_t  host_tx[HOST_L2_MAX];             /* one pending TX L2CAP PDU */
 static uint16_t host_tx_len, host_tx_off;
 static uint8_t  host_sig_id;                      /* L2CAP signalling ident   */
 static uint8_t  host_cpu_resp;                    /* 0 none, 1 accept, 2 reject*/
+static uint16_t host_prep_h;                      /* Prepare-Write handle     */
+static uint8_t  host_prep[HOST_SCRATCH_CAP];      /* accumulated long write   */
+static uint16_t host_prep_len;
 
 void tiku_ble_host_reset(void)
 {
-    host_sub = 0u;
-    host_rx_len = 0u;
+    uint16_t i;
+    host_sub = 0u; host_rx_len = 0u;
     host_rc_len = 0u; host_rc_expect = 0u;
     host_tx_len = 0u; host_tx_off = 0u;
     host_sig_id = 0u; host_cpu_resp = 0u;
+    host_prep_h = 0u; host_prep_len = 0u;
+    host_cccd[0] = 0u; host_cccd[1] = 0u;
+    /* Deterministic long values so a client can verify a long read/write. */
+    for (i = 0u; i < HOST_MODEL_LEN; i++) {
+        model_val[i] = (uint8_t)('0' + (i % 10u));
+    }
+    gatt_db[2].len = 0u;                          /* NUS RX value cleared     */
+    gatt_db[11].len = 0u;                         /* scratch value cleared    */
 }
 
 int tiku_ble_host_subscribed(void)
 {
     return (host_sub != 0u) ? 1 : 0;
+}
+
+static host_attr_t *host_find(uint16_t handle)
+{
+    uint16_t i;
+    for (i = 0u; i < GATT_N; i++) {
+        if (gatt_db[i].handle == handle) {
+            return &gatt_db[i];
+        }
+    }
+    return (host_attr_t *)0;
+}
+
+/* End handle of the service that @p idx starts: one before the next service. */
+static uint16_t host_service_end(uint16_t idx)
+{
+    uint16_t j;
+    for (j = idx + 1u; j < GATT_N; j++) {
+        if (gatt_db[j].type16 == 0x2800u || gatt_db[j].type16 == 0x2801u) {
+            return (uint16_t)(gatt_db[j].handle - 1u);
+        }
+    }
+    return gatt_db[GATT_N - 1u].handle;
 }
 
 /* Queue a whole L2CAP PDU for (possibly fragmented) TX. */
@@ -70,29 +156,20 @@ static void host_store_tx(const uint8_t *pdu, uint16_t len)
     host_tx_off = 0u;
 }
 
-/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and queue it for TX. */
-static void host_reply(const uint8_t *att, uint8_t alen)
+/* Wrap an ATT PDU (<= MTU bytes) in an L2CAP frame (CID 0x0004) and queue it. */
+static void host_reply(const uint8_t *att, uint16_t alen)
 {
-    uint8_t pdu[4 + 24];
-    uint8_t i;
-    if (alen > 24u) {
-        alen = 24u;
+    uint8_t  pdu[HOST_L2_MAX];
+    uint16_t i;
+    if (alen > (uint16_t)TIKU_BLE_HOST_MTU) {
+        alen = (uint16_t)TIKU_BLE_HOST_MTU;
     }
-    pdu[0] = alen; pdu[1] = 0u;                  /* L2CAP length              */
+    pdu[0] = (uint8_t)alen; pdu[1] = 0u;         /* L2CAP length              */
     pdu[2] = 0x04u; pdu[3] = 0x00u;              /* CID = ATT                 */
     for (i = 0u; i < alen; i++) {
         pdu[4u + i] = att[i];
     }
     host_store_tx(pdu, (uint16_t)(4u + alen));
-}
-
-static void host_uuid(uint8_t *out, uint8_t variant)
-{
-    uint8_t i;
-    for (i = 0u; i < 16u; i++) {
-        out[i] = host_nus_uuid[i];
-    }
-    out[12] = variant;
 }
 
 static void host_error(uint8_t req_op, uint16_t h, uint8_t err)
@@ -104,98 +181,257 @@ static void host_error(uint8_t req_op, uint16_t h, uint8_t err)
     host_reply(e, 5u);
 }
 
-/* ATT/GATT (NUS) server on a whole, recombined L2CAP PDU. */
-static void host_att(const uint8_t *l2cap, uint16_t len)
+/* Read By Group Type (0x10): service discovery (type 0x2800/0x2801). */
+static void host_read_by_group(const uint8_t *att)
 {
-    const uint8_t *att;
-    uint8_t alen, op;
-
-    if (len < 5u || l2cap[2] != 0x04u || l2cap[3] != 0x00u) {
-        return;                                  /* not a 1-byte-plus ATT PDU */
+    uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+    uint16_t end   = (uint16_t)(att[3] | ((uint16_t)att[4] << 8));
+    uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
+    uint16_t i;
+    if (type != 0x2800u && type != 0x2801u) {
+        host_error(0x10u, start, 0x0Au);
+        return;
     }
-    att = &l2cap[4];
-    alen = (uint8_t)(len - 4u);
-    op = att[0];
+    for (i = 0u; i < GATT_N; i++) {
+        if (gatt_db[i].type16 == type && gatt_db[i].handle >= start &&
+            gatt_db[i].handle <= end) {
+            uint8_t  r[4 + 2 + 16];
+            uint16_t eh = host_service_end(i), k;
+            r[0] = 0x11u; r[1] = (uint8_t)(4u + gatt_db[i].len);
+            r[2] = (uint8_t)gatt_db[i].handle;
+            r[3] = (uint8_t)(gatt_db[i].handle >> 8);
+            r[4] = (uint8_t)eh; r[5] = (uint8_t)(eh >> 8);
+            for (k = 0u; k < gatt_db[i].len; k++) {
+                r[6u + k] = gatt_db[i].val[k];
+            }
+            host_reply(r, (uint16_t)(6u + gatt_db[i].len));
+            return;
+        }
+    }
+    host_error(0x10u, start, 0x0Au);
+}
 
-    if (op == 0x02u) {                           /* Exchange MTU Req          */
-        uint8_t m[3];
-        m[0] = 0x03u; m[1] = (uint8_t)TIKU_BLE_HOST_MTU; m[2] = 0u;
-        host_reply(m, 3u);
-    } else if (op == 0x10u && alen >= 7u) {      /* Read By Group Type Req    */
-        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
-        if (type == 0x2800u && start <= 0x0010u) {
-            uint8_t r[24];
-            r[0] = 0x11u; r[1] = 20u;
-            r[2] = 0x10u; r[3] = 0x00u;
-            r[4] = 0x15u; r[5] = 0x00u;
-            host_uuid(&r[6], 0x01u);
-            host_reply(r, 22u);
-        } else {
-            host_error(0x10u, start, 0x0Au);
+/* Read By Type (0x08): characteristic discovery (0x2803) or read-by-UUID. */
+static void host_read_by_type(const uint8_t *att)
+{
+    uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+    uint16_t end   = (uint16_t)(att[3] | ((uint16_t)att[4] << 8));
+    uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
+    uint16_t i;
+    for (i = 0u; i < GATT_N; i++) {
+        if (gatt_db[i].type16 == type && gatt_db[i].handle >= start &&
+            gatt_db[i].handle <= end) {
+            uint8_t  r[2 + 2 + 22];
+            uint16_t n = gatt_db[i].len, k;
+            if (n > (uint16_t)(TIKU_BLE_HOST_MTU - 4u)) {
+                n = (uint16_t)(TIKU_BLE_HOST_MTU - 4u);
+            }
+            r[0] = 0x09u; r[1] = (uint8_t)(2u + n);
+            r[2] = (uint8_t)gatt_db[i].handle;
+            r[3] = (uint8_t)(gatt_db[i].handle >> 8);
+            for (k = 0u; k < n; k++) {
+                r[4u + k] = gatt_db[i].val[k];
+            }
+            host_reply(r, (uint16_t)(4u + n));
+            return;
         }
-    } else if (op == 0x08u && alen >= 7u) {      /* Read By Type Req          */
-        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        uint16_t type  = (uint16_t)(att[5] | ((uint16_t)att[6] << 8));
-        if (type == 0x2803u && start <= 0x0011u) {
-            uint8_t r[24];
-            r[0] = 0x09u; r[1] = 21u;
-            r[2] = 0x11u; r[3] = 0x00u;
-            r[4] = 0x0Cu;
-            r[5] = 0x12u; r[6] = 0x00u;
-            host_uuid(&r[7], 0x02u);
-            host_reply(r, 23u);
-        } else if (type == 0x2803u && start <= 0x0013u) {
-            uint8_t r[24];
-            r[0] = 0x09u; r[1] = 21u;
-            r[2] = 0x13u; r[3] = 0x00u;
-            r[4] = 0x10u;
-            r[5] = 0x14u; r[6] = 0x00u;
-            host_uuid(&r[7], 0x03u);
-            host_reply(r, 23u);
-        } else {
-            host_error(0x08u, start, 0x0Au);
+    }
+    host_error(0x08u, start, 0x0Au);
+}
+
+/* Find Information (0x04): descriptor discovery -> [handle, UUID] pairs. */
+static void host_find_info(const uint8_t *att)
+{
+    uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+    uint16_t end   = (uint16_t)(att[3] | ((uint16_t)att[4] << 8));
+    uint16_t i;
+    for (i = 0u; i < GATT_N; i++) {
+        if (gatt_db[i].handle >= start && gatt_db[i].handle <= end) {
+            uint8_t r[2 + 2 + 16], k;
+            r[0] = 0x05u;
+            r[2] = (uint8_t)gatt_db[i].handle;
+            r[3] = (uint8_t)(gatt_db[i].handle >> 8);
+            if (gatt_db[i].type128 != (const uint8_t *)0) {
+                r[1] = 0x02u;                    /* 128-bit format            */
+                for (k = 0u; k < 16u; k++) {
+                    r[4u + k] = gatt_db[i].type128[k];
+                }
+                host_reply(r, 20u);
+            } else {
+                r[1] = 0x01u;                    /* 16-bit format             */
+                r[4] = (uint8_t)gatt_db[i].type16;
+                r[5] = (uint8_t)(gatt_db[i].type16 >> 8);
+                host_reply(r, 6u);
+            }
+            return;
         }
-    } else if (op == 0x04u && alen >= 5u) {      /* Find Information Req       */
-        uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-        if (start <= 0x0015u && start >= 0x0014u) {
-            uint8_t r[6];
-            r[0] = 0x05u; r[1] = 0x01u;
-            r[2] = 0x15u; r[3] = 0x00u;
-            r[4] = 0x02u; r[5] = 0x29u;
-            host_reply(r, 6u);
-        } else {
-            host_error(0x04u, start, 0x0Au);
+    }
+    host_error(0x04u, start, 0x0Au);
+}
+
+/* Read (0x0A) / Read Blob (0x0C): value at @p offset, up to MTU-1 bytes. */
+static void host_read(const uint8_t *att, uint16_t offset, uint8_t is_blob)
+{
+    uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+    host_attr_t *a = host_find(handle);
+    uint8_t  r[1 + (TIKU_BLE_HOST_MTU - 1u)];
+    uint16_t n, k;
+    if (a == (host_attr_t *)0) {
+        host_error(is_blob ? 0x0Cu : 0x0Au, handle, 0x0Au);
+        return;
+    }
+    if ((a->perm & GATT_READ) == 0u || a->val == (uint8_t *)0) {
+        host_error(is_blob ? 0x0Cu : 0x0Au, handle, 0x02u); /* Read Not Perm  */
+        return;
+    }
+    if (offset > a->len) {
+        host_error(0x0Cu, handle, 0x07u);        /* Invalid Offset            */
+        return;
+    }
+    n = (uint16_t)(a->len - offset);
+    if (n > (uint16_t)(TIKU_BLE_HOST_MTU - 1u)) {
+        n = (uint16_t)(TIKU_BLE_HOST_MTU - 1u);
+    }
+    r[0] = is_blob ? 0x0Du : 0x0Bu;              /* Read / Read Blob Response */
+    for (k = 0u; k < n; k++) {
+        r[1u + k] = a->val[offset + k];
+    }
+    host_reply(r, (uint16_t)(1u + n));
+}
+
+/* Apply a value to a writable attribute + fire the NUS byte-pipe hooks. */
+static void host_apply_write(host_attr_t *a, const uint8_t *v, uint16_t n)
+{
+    uint16_t k;
+    if (n > a->cap) {
+        n = a->cap;
+    }
+    for (k = 0u; k < n; k++) {
+        a->val[k] = v[k];
+    }
+    a->len = n;
+    if (a->handle == HOST_H_CCCD) {
+        host_sub = a->val[0];                    /* subscription state        */
+    } else if (a->handle == HOST_H_RX) {
+        host_rx_len = (uint8_t)n;                /* NUS RX byte pipe          */
+    }
+}
+
+/* Write (0x12) / Write Command (0x52). */
+static void host_write(const uint8_t *att, uint16_t alen, uint8_t with_rsp)
+{
+    uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+    host_attr_t *a = host_find(handle);
+    if (a == (host_attr_t *)0) {
+        if (with_rsp) {
+            host_error(0x12u, handle, 0x0Au);
         }
-    } else if (op == 0x12u && alen >= 4u) {      /* Write Request             */
-        uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+        return;
+    }
+    if ((a->perm & GATT_WRITE) == 0u || a->val == (uint8_t *)0) {
+        if (with_rsp) {
+            host_error(0x12u, handle, 0x03u);    /* Write Not Permitted       */
+        }
+        return;
+    }
+    host_apply_write(a, &att[3], (uint16_t)(alen - 3u));
+    if (with_rsp) {
         uint8_t rsp = 0x13u;
-        if (h == HOST_H_CCCD) {
-            host_sub = att[3];
-        } else if (h == HOST_H_RX) {
-            uint8_t n = (uint8_t)(alen - 3u), i;
-            if (n > (uint8_t)sizeof(host_rx)) {
-                n = (uint8_t)sizeof(host_rx);
-            }
-            for (i = 0u; i < n; i++) {
-                host_rx[i] = att[3u + i];
-            }
-            host_rx_len = n;                     /* recombined NUS RX bytes   */
-        }
         host_reply(&rsp, 1u);
     }
 }
 
-/* L2CAP signalling (CID 0x0005): we sent a Connection Parameter Update
- * Request; note the central's Response (accepted/rejected). */
+/* Prepare Write (0x16): accumulate a long-write fragment; echo it back. */
+static void host_prepare_write(const uint8_t *att, uint16_t alen)
+{
+    uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+    uint16_t offset = (uint16_t)(att[3] | ((uint16_t)att[4] << 8));
+    uint16_t n = (uint16_t)(alen - 5u), k;
+    if (handle != host_prep_h) {                 /* new target: restart       */
+        host_prep_h = handle; host_prep_len = 0u;
+    }
+    for (k = 0u; k < n && (offset + k) < (uint16_t)sizeof(host_prep); k++) {
+        host_prep[offset + k] = att[5u + k];
+    }
+    if ((uint16_t)(offset + n) > host_prep_len) {
+        host_prep_len = (uint16_t)(offset + n);
+    }
+    {   /* echo [0x17][handle][offset][value] */
+        uint8_t  r[5 + (TIKU_BLE_HOST_MTU - 5u)];
+        r[0] = 0x17u;
+        r[1] = att[1]; r[2] = att[2];
+        r[3] = att[3]; r[4] = att[4];
+        for (k = 0u; k < n; k++) {
+            r[5u + k] = att[5u + k];
+        }
+        host_reply(r, (uint16_t)(5u + n));
+    }
+}
+
+/* Execute Write (0x18): flags 1 = commit the accumulated write, 0 = cancel. */
+static void host_execute_write(const uint8_t *att)
+{
+    uint8_t rsp = 0x19u;
+    if (att[1] == 0x01u && host_prep_h != 0u) {
+        host_attr_t *a = host_find(host_prep_h);
+        if (a != (host_attr_t *)0 && (a->perm & GATT_WRITE) != 0u) {
+            host_apply_write(a, host_prep, host_prep_len);
+        }
+    }
+    host_prep_h = 0u; host_prep_len = 0u;
+    host_reply(&rsp, 1u);
+}
+
+/* ATT dispatch on a whole, recombined L2CAP PDU (CID 0x0004). */
+static void host_att(const uint8_t *l2cap, uint16_t len)
+{
+    const uint8_t *att;
+    uint16_t alen;
+    uint8_t  op;
+
+    if (len < 5u) {
+        return;
+    }
+    att = &l2cap[4];
+    alen = (uint16_t)(len - 4u);
+    op = att[0];
+
+    if (op == 0x02u) {                           /* Exchange MTU Request      */
+        uint8_t m[3];
+        m[0] = 0x03u; m[1] = (uint8_t)TIKU_BLE_HOST_MTU; m[2] = 0u;
+        host_reply(m, 3u);
+    } else if (op == 0x10u && alen >= 7u) {      /* Read By Group Type        */
+        host_read_by_group(att);
+    } else if (op == 0x08u && alen >= 7u) {      /* Read By Type              */
+        host_read_by_type(att);
+    } else if (op == 0x04u && alen >= 5u) {      /* Find Information          */
+        host_find_info(att);
+    } else if (op == 0x0Au && alen >= 3u) {      /* Read Request              */
+        host_read(att, 0u, 0u);
+    } else if (op == 0x0Cu && alen >= 5u) {      /* Read Blob Request         */
+        host_read(att, (uint16_t)(att[3] | ((uint16_t)att[4] << 8)), 1u);
+    } else if (op == 0x12u && alen >= 3u) {      /* Write Request             */
+        host_write(att, alen, 1u);
+    } else if (op == 0x52u && alen >= 3u) {      /* Write Command             */
+        host_write(att, alen, 0u);
+    } else if (op == 0x16u && alen >= 5u) {      /* Prepare Write Request     */
+        host_prepare_write(att, alen);
+    } else if (op == 0x18u && alen >= 2u) {      /* Execute Write Request     */
+        host_execute_write(att);
+    } else {
+        host_error(op, 0u, 0x06u);               /* Request Not Supported     */
+    }
+}
+
+/* L2CAP signalling (CID 0x0005): note the central's Conn Param Update Rsp. */
 static void host_sig(const uint8_t *l2cap, uint16_t len)
 {
     const uint8_t *sig;
     if (len < 6u) {
         return;
     }
-    sig = &l2cap[4];                             /* [code][id][len:2][data]   */
-    if (sig[0] == 0x13u) {                       /* Conn Param Update Rsp     */
+    sig = &l2cap[4];
+    if (sig[0] == 0x13u) {
         uint16_t result = (uint16_t)(sig[4] | ((uint16_t)sig[5] << 8));
         host_cpu_resp = (result == 0x0000u) ? 1u : 2u;
     }
@@ -287,10 +523,10 @@ int tiku_ble_host_nus_notify(const uint8_t *data, uint16_t len)
     }
     n = len;
     if (n > (uint16_t)(TIKU_BLE_HOST_MTU - 3u)) {
-        n = (uint16_t)(TIKU_BLE_HOST_MTU - 3u);  /* ATT value <= MTU - 3      */
+        n = (uint16_t)(TIKU_BLE_HOST_MTU - 3u);
     }
-    pdu[0] = (uint8_t)(3u + n); pdu[1] = 0u;     /* L2CAP length              */
-    pdu[2] = 0x04u; pdu[3] = 0x00u;              /* CID = ATT                 */
+    pdu[0] = (uint8_t)(3u + n); pdu[1] = 0u;
+    pdu[2] = 0x04u; pdu[3] = 0x00u;
     pdu[4] = 0x1Bu;                              /* Handle Value Notification */
     pdu[5] = (uint8_t)HOST_H_TX;
     pdu[6] = (uint8_t)(HOST_H_TX >> 8);
@@ -305,16 +541,16 @@ int tiku_ble_host_request_conn_param(uint16_t interval_min,
                                      uint16_t interval_max,
                                      uint16_t latency, uint16_t timeout)
 {
-    uint8_t pdu[16];                             /* 4 L2CAP + 4 sig hdr + 8   */
+    uint8_t pdu[16];
     if (host_tx_len != 0u) {
-        return -2;                               /* a PDU is still draining   */
+        return -2;
     }
     host_cpu_resp = 0u;
-    pdu[0] = 12u; pdu[1] = 0u;                   /* L2CAP length              */
+    pdu[0] = 12u; pdu[1] = 0u;
     pdu[2] = 0x05u; pdu[3] = 0x00u;              /* CID = signalling          */
     pdu[4] = 0x12u;                              /* Conn Param Update Request */
-    pdu[5] = ++host_sig_id;                      /* identifier                */
-    pdu[6] = 0x08u; pdu[7] = 0x00u;              /* signalling data length 8  */
+    pdu[5] = ++host_sig_id;
+    pdu[6] = 0x08u; pdu[7] = 0x00u;
     pdu[8]  = (uint8_t)interval_min; pdu[9]  = (uint8_t)(interval_min >> 8);
     pdu[10] = (uint8_t)interval_max; pdu[11] = (uint8_t)(interval_max >> 8);
     pdu[12] = (uint8_t)latency;      pdu[13] = (uint8_t)(latency >> 8);
