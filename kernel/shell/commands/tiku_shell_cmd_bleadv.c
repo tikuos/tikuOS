@@ -609,14 +609,16 @@ static void bleadv_flpradv(void)
     SHELL_PRINTF("FLPR advertising 'TIKU-CONN' (connectable) ~8 s -- connect"
                  " from a central (bleadv central on the peer)...\n");
     tiku_radio_arch_init();
+    NRF_RADIO_S->TIFS = 150u;                    /* T_IFS turnaround (hold)  */
     tiku_radio_arch_constlat_hold(1);
     rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
-    tiku_radio_arch_constlat_hold(0);
     if (rc == -1) {
+        tiku_radio_arch_constlat_hold(0);
         SHELL_PRINTF("FLPR not running\n");
         return;
     }
     if (rc == -2) {
+        tiku_radio_arch_constlat_hold(0);
         SHELL_PRINTF("no central connected (FLPR gave up advertising)\n");
         return;
     }
@@ -634,6 +636,30 @@ static void bleadv_flpradv(void)
                      SH_RST, aa, ci, (unsigned)info.interval,
                      (unsigned)info.hop, (unsigned)info.timeout);
     }
+    /* Step 1b: the FLPR now HOLDS the link autonomously.  Watch conn_events
+     * rise for ~10 s -- the M33 is just polling a shared word while the
+     * coprocessor keeps the connection alive on the other core. */
+    SHELL_PRINTF("  FLPR holding link autonomously (M33 only reads state)...\n");
+    {
+        unsigned t;
+        for (t = 1u; t <= 10u; t++) {
+            tiku_clock_time_t t0 = tiku_clock_time();
+            while ((tiku_clock_time_t)(tiku_clock_time() - t0) <
+                   (tiku_clock_time_t)TIKU_CLOCK_SECOND) {
+                tiku_watchdog_kick();
+            }
+            SHELL_PRINTF("  t=%2us events=%lu %s\n", t,
+                         (unsigned long)tiku_flpr_arch_conn_events(),
+                         tiku_flpr_arch_conn_active() ? "HELD" : "DROPPED");
+            if (!tiku_flpr_arch_conn_active()) {
+                break;
+            }
+        }
+    }
+    tiku_flpr_arch_conn_stop();
+    tiku_radio_arch_constlat_hold(0);
+    SHELL_PRINTF("  stopped (FLPR serviced %lu events, L6 F-L6.1 step 1b)\n",
+                 (unsigned long)tiku_flpr_arch_conn_events());
 }
 #endif /* TIKU_FLPR_ENABLE */
 

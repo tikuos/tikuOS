@@ -455,11 +455,14 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
             tiku_watchdog_kick();
         }
     }
-    flpr_radio_ns(0);                          /* reclaim secure alias       */
 
     if (TIKU_FLPR_SHARED->conn_state != 1u) {
-        return -2;                             /* gave up / timeout          */
+        flpr_radio_ns(0);                      /* gave up: reclaim secure    */
+        return -2;
     }
+    /* Connected: the FLPR is now HOLDING the link (step 1b) and still owns
+     * the NonSecure RADIO -- do NOT flip it back here; conn_stop() does that
+     * once the coprocessor has left its hold loop. */
     if (out != (tiku_flpr_conn_info_t *)0) {
         out->aa       = TIKU_FLPR_SHARED->conn_aa;
         out->crcinit  = TIKU_FLPR_SHARED->conn_crcinit;
@@ -469,6 +472,39 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
         out->winsize  = TIKU_FLPR_SHARED->conn_winsize;
     }
     return 0;
+}
+
+/* 1 while the FLPR is holding a live link (step 1b). */
+int tiku_flpr_arch_conn_active(void)
+{
+    return (TIKU_FLPR_SHARED->conn_state == 1u) ? 1 : 0;
+}
+
+/* Connection events the FLPR has serviced (rising = link alive). */
+uint32_t tiku_flpr_arch_conn_events(void)
+{
+    return TIKU_FLPR_SHARED->conn_events;
+}
+
+/* Ask the FLPR to leave its hold loop, wait for it, then reclaim the
+ * RADIO for the secure alias.  Safe if not connected. */
+void tiku_flpr_arch_conn_stop(void)
+{
+    uint32_t spin;
+
+    if (TIKU_FLPR_SHARED->conn_state == 1u) {
+        TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_STOP;
+        __asm__ volatile ("dsb 0xF" ::: "memory");
+        for (spin = 0u; spin < 400000000u; spin++) {
+            if (TIKU_FLPR_SHARED->conn_state != 1u) {
+                break;                          /* left the hold loop        */
+            }
+            if ((spin & 0xFFFFFu) == 0u) {
+                tiku_watchdog_kick();
+            }
+        }
+    }
+    flpr_radio_ns(0);                          /* reclaim secure alias       */
 }
 
 #endif /* TIKU_FLPR_ENABLE */

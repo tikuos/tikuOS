@@ -215,6 +215,158 @@ static void flpr_rxprobe(tiku_flpr_shared_t *sh)
 static uint8_t conn_adv[48] __attribute__((aligned(4)));
 static uint8_t conn_rx[48]  __attribute__((aligned(4)));
 
+/* --- Link-layer helpers ported from tiku_radio_arch.c (pure logic) --- */
+
+/* BLE data-channel index -> RADIO FREQUENCY register value. */
+static uint8_t flpr_data_freq(uint8_t k)
+{
+    return (k <= 10u) ? (uint8_t)(4u + 2u * k)
+                      : (uint8_t)(28u + 2u * (k - 11u));
+}
+
+/* CSA#1 next data channel (unmapped hop + channel-map remap). */
+static uint8_t flpr_csa1_next(uint8_t *last_unmapped, uint8_t hop,
+                              const uint8_t chmap[5])
+{
+    uint8_t un = (uint8_t)((*last_unmapped + hop) % 37u);
+    uint8_t n = 0u, idx, c;
+
+    *last_unmapped = un;
+    if (chmap[un >> 3] & (uint8_t)(1u << (un & 7u))) {
+        return un;
+    }
+    for (c = 0u; c < 37u; c++) {
+        if (chmap[c >> 3] & (uint8_t)(1u << (c & 7u))) {
+            n++;
+        }
+    }
+    idx = (uint8_t)(un % n);
+    for (c = 0u; c < 37u; c++) {
+        if (chmap[c >> 3] & (uint8_t)(1u << (c & 7u))) {
+            if (idx == 0u) {
+                return c;
+            }
+            idx--;
+        }
+    }
+    return 0u;
+}
+
+/* SN/NESN: advance sn on ack, nesn on genuinely-new PAYLOAD-bearing data
+ * (the has_payload gate = the L5 reliability fix). */
+static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
+                           uint8_t rx_nesn, uint8_t has_payload)
+{
+    uint8_t r = 0u;
+    if ((rx_nesn & 1u) != *sn) {
+        *sn ^= 1u;
+        r |= 2u;                                /* ACKED                    */
+    }
+    if (has_payload && (rx_sn & 1u) == *nesn) {
+        *nesn ^= 1u;
+        r |= 1u;                                /* NEWDATA                  */
+    }
+    return r;
+}
+
+/* Hold the link (L6 F-L6.1 step 1b): continuous-RX connection events.  No
+ * timebase needed -- the central paces at connInterval, so we open RX on
+ * the CSA#1 channel and wait for its packet, hardware-T_IFS respond with
+ * an empty PDU carrying our SN/NESN, and re-arm.  Channels advance per
+ * event in lockstep with the central.  Supervision = a run of misses. */
+static uint8_t conn_txb[8]     __attribute__((aligned(4)));
+static uint8_t conn_datrx[48]  __attribute__((aligned(4)));
+
+static void flpr_conn_hold(tiku_flpr_shared_t *sh)
+{
+    NRF_RADIO_Type *r = NRF_RADIO_NS;
+    uint32_t aa = sh->conn_aa, crcinit = sh->conn_crcinit;
+    uint8_t  hop = sh->conn_hop, chmap[5];
+    uint8_t  sn = 0u, nesn = 0u, last_un = 0u, k, i;
+    uint32_t event = 0u, miss_run = 0u, spin;
+
+    for (i = 0u; i < 5u; i++) {
+        chmap[i] = sh->conn_chm[i];
+    }
+    r->BASE0   = aa << 8;                        /* BALEN=3: base in top 3 B */
+    r->PREFIX0 = (aa >> 24) & 0xFFu;
+    r->CRCINIT = crcinit & 0x00FFFFFFu;
+
+    for (;;) {
+        uint8_t got = 0u;
+
+        k = flpr_csa1_next(&last_un, hop, chmap);
+        r->FREQUENCY = flpr_data_freq(k);
+        r->DATAWHITE = 0x00890000u | (0x40u | k);
+        /* RX with the hardware T_IFS turnaround to TX (DISABLED_TXEN). */
+        r->SHORTS = (1u << 0) | (1u << 19) | (1u << 2) | (1u << 4);
+        r->PACKETPTR = (uint32_t)conn_datrx;
+        r->EVENTS_ADDRESS  = 0u;
+        r->EVENTS_DISABLED = 0u;
+        r->EVENTS_CRCOK    = 0u;
+        r->EVENTS_CRCERROR = 0u;
+        (void)r->EVENTS_DISABLED;
+        r->TASKS_RXEN = 1u;
+
+        for (spin = 0u; spin < 700000u; spin++) {   /* ~one interval window */
+            if (r->EVENTS_ADDRESS != 0u) {
+                got = 1u;
+                break;
+            }
+        }
+        if (!got) {                              /* no packet: cancel + rot  */
+            r->SHORTS = (1u << 0) | (1u << 19);
+            r->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 8000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            if (++miss_run > 120u) {             /* supervision timeout      */
+                break;
+            }
+            if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+                break;
+            }
+            continue;                            /* miss: no serviced event  */
+        }
+        miss_run = 0u;
+        /* CRC verdict lands just after PHYEND; bounded so we stay inside
+         * the 150 us T_IFS window before the auto-TX reads conn_txb. */
+        for (spin = 0u; spin < 3000u; spin++) {
+            if (r->EVENTS_CRCOK != 0u || r->EVENTS_CRCERROR != 0u) {
+                break;
+            }
+        }
+        if (r->EVENTS_CRCOK != 0u) {
+            uint8_t h = conn_datrx[0];
+            (void)flpr_ll_ack(&sn, &nesn, (uint8_t)((h >> 3) & 1u),
+                              (uint8_t)((h >> 2) & 1u),
+                              (uint8_t)(conn_datrx[1] != 0u));
+        }
+        /* Empty PDU response with the updated SN/NESN; drop DISABLED_TXEN
+         * so the response's own DISABLED cannot re-trigger a spurious TX
+         * (the step-0 / M33 conn_event fix). */
+        conn_txb[0] = (uint8_t)(0x01u | (nesn << 2) | (sn << 3));
+        conn_txb[1] = 0u;
+        conn_txb[2] = conn_txb[0];
+        r->SHORTS = (1u << 0) | (1u << 19);
+        r->PACKETPTR = (uint32_t)conn_txb;
+        r->EVENTS_PHYEND   = 0u;
+        r->EVENTS_DISABLED = 0u;
+        for (spin = 0u; spin < 40000u; spin++) { /* T_IFS TX completes       */
+            if (r->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+        sh->conn_events = ++event;
+        if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+            break;
+        }
+    }
+    sh->conn_state = 3u;                         /* link ended               */
+}
+
 static void flpr_conn_adv(tiku_flpr_shared_t *sh)
 {
     NRF_RADIO_Type *r = NRF_RADIO_NS;
@@ -325,7 +477,12 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
             break;
         }
     }
-    sh->conn_state = connected ? 1u : 2u;        /* 1 connected, 2 gave up   */
+    if (connected) {
+        sh->conn_state = 1u;                     /* connected -> M33 sees it */
+        flpr_conn_hold(sh);                      /* then hold autonomously   */
+    } else {
+        sh->conn_state = 2u;                     /* gave up advertising      */
+    }
 }
 
 /* Echo service: consume an app->flpr message, mirror it back, ring. */
