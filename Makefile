@@ -1236,6 +1236,11 @@ SRCS += arch/nordic/tiku_fault_arch.c
 # gate on TIKU_HAS_BLE_ADV, never on the chip (same pattern as TIKU_HAS_BLE).
 SRCS += interfaces/bluetooth/tiku_ble_adv.c
 CFLAGS += -DTIKU_HAS_BLE_ADV=1
+# From-scratch IEEE 802.15.4 PHY on the same on-die RADIO (N-track).  Gated
+# on TIKU_HAS_154 (capability, never the chip); the radio154 shell command
+# and any future 15.4 facade key off it.
+SRCS += arch/nordic/tiku_ieee154_arch.c
+CFLAGS += -DTIKU_HAS_154=1
 # FLPR (VPR RISC-V coprocessor) -- opt-in.  Builds the tiny RISC-V firmware
 # (arch/nordic/flpr/) with the xPack riscv-none-elf toolchain (unpacked under
 # gitignored temp/toolchains/ -- see kintsugi/flpr_plan.md F0), embeds the
@@ -1674,6 +1679,9 @@ endif
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_BLEADV=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_bleadv.c
+endif
+ifneq (,$(findstring TIKU_SHELL_CMD_RADIO154=1,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_radio154.c
 endif
 endif
 # GPIO arch is always needed (VFS tree references GPIO read/write/dir).

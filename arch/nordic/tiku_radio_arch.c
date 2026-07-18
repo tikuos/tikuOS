@@ -334,6 +334,14 @@ static void radio_hfclk_kick(void)
     tiku_radio_arch_dbg_xo_wait = 0u;
 }
 
+/* Public entry to the HFCLK kick, so the 15.4 PHY (a separate arch file
+ * sharing this RADIO) can start the HFXO the same erratum-safe way before
+ * its own TXEN/RXEN and re-arm it across a long listen. */
+void tiku_radio_arch_hfclk_kick(void)
+{
+    radio_hfclk_kick();
+}
+
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 {
     uint8_t c;

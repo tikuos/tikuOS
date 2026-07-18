@@ -130,6 +130,9 @@
 #ifndef TIKU_SHELL_CMD_BLEADV
 #define TIKU_SHELL_CMD_BLEADV 0 /**< bleadv- nRF54L15 BLE beacon bring-up (opt-in) */
 #endif
+#ifndef TIKU_SHELL_CMD_RADIO154
+#define TIKU_SHELL_CMD_RADIO154 0 /**< radio154- 802.15.4 PHY bring-up (opt-in) */
+#endif
 #ifndef TIKU_SHELL_CMD_AXONSPROBE
 #define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe- Axon NPU bring-up probe (opt-in) */
 #endif

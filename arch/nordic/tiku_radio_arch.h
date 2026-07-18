@@ -227,6 +227,13 @@ extern uint32_t tiku_radio_arch_dbg_aux_us;
 void tiku_radio_arch_constlat_hold(int on);
 
 /**
+ * @brief Start (and re-arm) the HFXO the erratum-safe way before a TXEN /
+ *        RXEN, and hold it across a long RX.  Shared with the 15.4 PHY,
+ *        which drives this same RADIO from a separate arch file.
+ */
+void tiku_radio_arch_hfclk_kick(void);
+
+/**
  * @brief Per-packet observer callback (CRC-OK packets only).
  *
  * @param buf   Raw RAM buffer: [S0][LEN][S1 slot][payload...] -- the
