@@ -423,6 +423,17 @@ static void bleadv_central(unsigned secs)
     SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u (L4)\n",
                  (unsigned long)st.ctrl_tx, (unsigned long)st.ctrl_rx,
                  (unsigned)st.peer_vers);
+    {
+        char rb[3];
+        bleadv_fmt_hex(rb, &st.att_readback, 1, 0);
+        if (st.att_step >= 4u && st.att_ok) {
+            SHELL_PRINTF(SH_GREEN "  ATT: MTU/Write(0x42)/Read round-trip OK,"
+                         " readback=0x%s (L5)\n" SH_RST, rb);
+        } else {
+            SHELL_PRINTF("  ATT: incomplete (step=%u/4 readback=0x%s) (L5)\n",
+                         (unsigned)st.att_step, rb);
+        }
+    }
     SHELL_PRINTF("  ended: %s\n",
                  st.reason == 0u ? "duration cap" :
                  st.reason == 1u ? "supervision (peripheral silent)" :
@@ -481,6 +492,12 @@ static void bleadv_conn(unsigned secs)
     SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u (L4)\n",
                  (unsigned long)st.ctrl_tx, (unsigned long)st.ctrl_rx,
                  (unsigned)st.peer_vers);
+    if (st.att_readback != 0u) {
+        char wv[3];
+        bleadv_fmt_hex(wv, &st.att_readback, 1, 0);
+        SHELL_PRINTF("  ATT server: last write=0x%s at handle 0x0003 (L5)\n",
+                     wv);
+    }
     {
         char fb[11];
         bleadv_fmt_hex(fb, st.fail_bytes, 5, 0);

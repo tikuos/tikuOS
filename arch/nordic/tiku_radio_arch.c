@@ -1122,30 +1122,60 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 #define LL_PING_RSP          0x13u
 
 static uint8_t  ll_tx[36];          /* pending PDU RAM [hdr][len][S1][pay] */
-static uint8_t  ll_tx_len;          /* payload len (opcode+data); 0 = none */
+static uint8_t  ll_tx_len;          /* payload len; 0 = none               */
+static uint8_t  ll_tx_llid;         /* 2 = L2CAP data, 3 = LL control      */
 static uint8_t  ll_peer_vers;       /* peer VersNr (0 = not yet heard)     */
 static uint8_t  ll_sent_vers;       /* we have queued our VERSION_IND      */
 static uint8_t  ll_want_term;       /* peer sent TERMINATE_IND             */
+static uint8_t  ll_is_central;      /* role: drives ATT client vs server   */
 static uint32_t ll_ctrl_tx, ll_ctrl_rx;
+
+/* ATT/L2CAP (L5): peripheral server holds one value at handle ATT_HANDLE;
+ * central client walks MTU -> Write(0x42) -> Read and checks the readback. */
+#define ATT_HANDLE      0x0003u
+static uint8_t  att_val;            /* server: stored characteristic value */
+static uint8_t  att_step;           /* client: 0 idle,1 mtu,2 write,3 read,4 done */
+static uint8_t  att_ok;             /* client: readback matched            */
+static uint8_t  att_readback;       /* client: value read back             */
 
 static void ll_reset(void)
 {
-    ll_tx_len = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
+    ll_tx_len = 0u; ll_tx_llid = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
     ll_want_term = 0u; ll_ctrl_tx = 0u; ll_ctrl_rx = 0u;
+    att_val = 0u; att_step = 0u; att_ok = 0u; att_readback = 0u;
+}
+
+/* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
+static void ll_queue_raw(uint8_t llid, const uint8_t *payload, uint8_t plen)
+{
+    if (ll_tx_len != 0u || plen == 0u) {
+        return;                     /* one PDU in flight at a time         */
+    }
+    ll_tx_llid = llid;
+    ll_tx[1] = plen;
+    ll_tx[2] = payload[0];          /* S1 = payload[0] (erratum-49)        */
+    memcpy(&ll_tx[3], payload, plen);
+    ll_tx_len = plen;
 }
 
 static void ll_queue(uint8_t opcode, const uint8_t *data, uint8_t dlen)
 {
-    if (ll_tx_len != 0u) {
-        return;                     /* one control PDU in flight at a time */
-    }
-    ll_tx[1] = (uint8_t)(1u + dlen);
-    ll_tx[2] = opcode;              /* S1 = payload[0] (erratum-49)        */
-    ll_tx[3] = opcode;              /* payload[0] = opcode                 */
+    uint8_t p[34];
+    p[0] = opcode;
     if (dlen) {
-        memcpy(&ll_tx[4], data, dlen);
+        memcpy(&p[1], data, dlen);
     }
-    ll_tx_len = (uint8_t)(1u + dlen);
+    ll_queue_raw(3u, p, (uint8_t)(1u + dlen));
+}
+
+/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and queue as LLID=2. */
+static void att_queue(const uint8_t *att, uint8_t alen)
+{
+    uint8_t p[34];
+    p[0] = alen; p[1] = 0u;         /* L2CAP length                        */
+    p[2] = 0x04u; p[3] = 0x00u;     /* CID = ATT                           */
+    memcpy(&p[4], att, alen);
+    ll_queue_raw(2u, p, (uint8_t)(4u + alen));
 }
 
 static void ll_queue_version(void)
@@ -1162,7 +1192,8 @@ static uint8_t ll_build_tx(uint8_t *out, const tiku_radio_ll_ack_t *ack)
 {
     if (ll_tx_len != 0u) {
         memcpy(out, ll_tx, (size_t)(3u + ll_tx_len));
-        out[0] = (uint8_t)(0x03u | (ack->nesn << 2) | (ack->sn << 3));
+        out[0] = (uint8_t)((ll_tx_llid & 0x03u) |
+                           (ack->nesn << 2) | (ack->sn << 3));
         out[2] = out[3];            /* S1 = payload[0]                     */
         return (uint8_t)(3u + ll_tx_len);
     }
@@ -1182,14 +1213,90 @@ static void ll_on_acked(void)
     }
 }
 
+/* ATT client (L5): queue the request for the current step.  Used for the
+ * initial send, each step advance, AND retransmission -- the link drops a
+ * single-shot data PDU when the SN/NESN offset momentarily disfavours it
+ * (the peer acks-but-ignores a "duplicate" sn), so the client re-sends
+ * until the response lands.  Every request here is idempotent. */
+static void att_client_send(void)
+{
+    uint8_t b[4];
+
+    if (att_step == 1u) {                       /* Exchange MTU Request    */
+        b[0] = 0x02u; b[1] = 23u; b[2] = 0u;
+        att_queue(b, 3u);
+    } else if (att_step == 2u) {                /* Write Request           */
+        b[0] = 0x12u;
+        b[1] = (uint8_t)ATT_HANDLE; b[2] = (uint8_t)(ATT_HANDLE >> 8);
+        b[3] = 0x42u;
+        att_queue(b, 4u);
+    } else if (att_step == 3u) {                /* Read Request            */
+        b[0] = 0x0Au;
+        b[1] = (uint8_t)ATT_HANDLE; b[2] = (uint8_t)(ATT_HANDLE >> 8);
+        att_queue(b, 3u);
+    }
+}
+
+/* ATT dispatch (L5): buf is the ATT PDU, len its length. */
+static void att_handle(const uint8_t *att, uint8_t alen)
+{
+    uint8_t op = att[0];
+
+    if (ll_is_central) {
+        /* CLIENT: advance the MTU -> Write -> Read sequence on responses. */
+        if (op == 0x03u && att_step == 1u) {        /* MTU Response        */
+            att_step = 2u;
+            att_client_send();                      /* Write Request       */
+        } else if (op == 0x13u && att_step == 2u) { /* Write Response      */
+            att_step = 3u;
+            att_client_send();                      /* Read Request        */
+        } else if (op == 0x0Bu && att_step == 3u) { /* Read Response       */
+            if (alen >= 2u) {
+                att_readback = att[1];
+                att_ok = (uint8_t)(att[1] == 0x42u);
+            }
+            att_step = 4u;                          /* done                */
+        }
+    } else {
+        /* SERVER: answer the client's requests. */
+        if (op == 0x02u) {                          /* Exchange MTU Req    */
+            uint8_t m[3] = { 0x03u, 23u, 0u };      /* MTU Rsp, 23         */
+            att_queue(m, 3u);
+        } else if (op == 0x12u && alen >= 4u) {     /* Write Request       */
+            att_val = att[3];                       /* store the value     */
+            att_readback = att[3];                  /* mirror for stats    */
+            {
+                uint8_t rsp = 0x13u;                /* Write Response      */
+                att_queue(&rsp, 1u);
+            }
+        } else if (op == 0x0Au) {                   /* Read Request        */
+            uint8_t r[2] = { 0x0Bu, 0u };
+            r[1] = att_val;
+            att_queue(r, 2u);
+        }
+    }
+}
+
 /* Process a genuinely-new received PDU (RAM [hdr][len][S1][payload], so
  * payload starts at buf[3]); may queue a response. */
 static void ll_handle_rx(const uint8_t *buf)
 {
+    uint8_t llid = buf[0] & 0x03u;
     uint8_t op;
 
-    if ((buf[0] & 0x03u) != 0x03u || buf[1] == 0u) {
-        return;                     /* not an LL control PDU               */
+    if (buf[1] == 0u) {
+        return;                     /* empty PDU                           */
+    }
+    if (llid == 0x02u) {
+        /* L2CAP data: [len(2)][CID(2)][payload].  ATT is CID 0x0004. */
+        if (buf[1] >= 5u && buf[5] == 0x04u && buf[6] == 0x00u) {
+            ll_ctrl_rx++;
+            att_handle(&buf[7], (uint8_t)(buf[1] - 4u));
+        }
+        return;
+    }
+    if (llid != 0x03u) {
+        return;                     /* not control                         */
     }
     op = buf[3];
     ll_ctrl_rx++;
@@ -1200,6 +1307,9 @@ static void ll_handle_rx(const uint8_t *buf)
         }
         if (!ll_sent_vers) {
             ll_queue_version();     /* reply with ours                     */
+        } else if (ll_is_central && att_step == 0u) {
+            att_step = 1u;              /* L5: kick off ATT (MTU Request)  */
+            att_client_send();
         }
         break;
     case LL_FEATURE_REQ: {
@@ -1447,7 +1557,8 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
     }
 
     /* --- Connection loop --- */
-    ll_reset();                                   /* L4: control-PDU state */
+    ll_reset();                                   /* L4/L5: LL state       */
+    ll_is_central = 0u;                           /* peripheral = ATT server */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)winoff * 1250u;
     last_valid = t_ci_end;
     if (interval_us == 0u) {
@@ -1530,6 +1641,9 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
         st->peer_vers = ll_peer_vers;
         st->ctrl_tx = ll_ctrl_tx;
         st->ctrl_rx = ll_ctrl_rx;
+        st->att_step = att_step;
+        st->att_ok = att_ok;
+        st->att_readback = att_readback;
         memcpy(st->fail_bytes, conn_fail_snap, 5u);
     }
 
@@ -1697,6 +1811,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     tiku_radio_ll_ack_t ack = { 0u, 0u };
     int      connected = 0;
     uint8_t *ll;
+    uint8_t  att_prev = 0u, att_wait = 0u;        /* L5 transaction retry  */
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         memset(st, 0, sizeof(*st));
@@ -1812,7 +1927,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     }
 
     /* --- Connection loop: WE are the timing master --- */
-    ll_reset();                                   /* L4: control-PDU state */
+    ll_reset();                                   /* L4/L5: LL state       */
+    ll_is_central = 1u;                           /* central = ATT client  */
     ll_queue_version();                           /* initiate: send VERSION_IND */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)CEN_WINOFFSET * 1250u;
     last_valid = t_ci_end;
@@ -1846,6 +1962,21 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         }
         anchor += (uint32_t)CEN_INTERVAL * 1250u;  /* master cadence       */
 
+        /* L5 transaction retry: if the ATT step has not advanced for a
+         * while and nothing is pending, re-send the request (the LL can
+         * drop a single data PDU on an SN/NESN offset flip). */
+        if (att_step >= 1u && att_step <= 3u) {
+            if (att_step != att_prev) {
+                att_prev = att_step;
+                att_wait = 0u;
+            } else if (++att_wait >= 6u) {
+                if (ll_tx_len == 0u) {
+                    att_client_send();
+                }
+                att_wait = 0u;
+            }
+        }
+
         tiku_watchdog_kick();
         if ((int32_t)(conn_now() - (last_valid +
                       (uint32_t)CEN_TIMEOUT * 10000u)) >= 0) {
@@ -1867,6 +1998,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->peer_vers = ll_peer_vers;
         st->ctrl_tx = ll_ctrl_tx;
         st->ctrl_rx = ll_ctrl_rx;
+        st->att_step = att_step;
+        st->att_ok = att_ok;
+        st->att_readback = att_readback;
     }
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
