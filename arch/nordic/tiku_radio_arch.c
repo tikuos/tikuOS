@@ -1100,6 +1100,129 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
     RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | k);   /* data-channel IV   */
 }
 
+/*---------------------------------------------------------------------------*/
+/* LL control PDUs (L4) -- shared by both roles (own state per board)        */
+/*---------------------------------------------------------------------------*/
+/*
+ * A minimal, conformant LL control layer on top of the empty-PDU link:
+ * one pending control PDU at a time (retransmitted via SN/NESN until the
+ * peer acks), request/response handling for VERSION/FEATURE/PING, and
+ * LL_UNKNOWN_RSP for anything unrecognised (so a peer probing us never
+ * hangs).  PHY-independent; the connection engine calls ll_build_tx()
+ * for what to send and ll_handle_rx() for what arrived.
+ */
+#define LL_CONNECTION_UPDATE 0x00u
+#define LL_CHANNEL_MAP_IND   0x01u
+#define LL_TERMINATE_IND     0x02u
+#define LL_UNKNOWN_RSP       0x07u
+#define LL_FEATURE_REQ       0x08u
+#define LL_FEATURE_RSP       0x09u
+#define LL_VERSION_IND       0x0Cu
+#define LL_PING_REQ          0x12u
+#define LL_PING_RSP          0x13u
+
+static uint8_t  ll_tx[36];          /* pending PDU RAM [hdr][len][S1][pay] */
+static uint8_t  ll_tx_len;          /* payload len (opcode+data); 0 = none */
+static uint8_t  ll_peer_vers;       /* peer VersNr (0 = not yet heard)     */
+static uint8_t  ll_sent_vers;       /* we have queued our VERSION_IND      */
+static uint8_t  ll_want_term;       /* peer sent TERMINATE_IND             */
+static uint32_t ll_ctrl_tx, ll_ctrl_rx;
+
+static void ll_reset(void)
+{
+    ll_tx_len = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
+    ll_want_term = 0u; ll_ctrl_tx = 0u; ll_ctrl_rx = 0u;
+}
+
+static void ll_queue(uint8_t opcode, const uint8_t *data, uint8_t dlen)
+{
+    if (ll_tx_len != 0u) {
+        return;                     /* one control PDU in flight at a time */
+    }
+    ll_tx[1] = (uint8_t)(1u + dlen);
+    ll_tx[2] = opcode;              /* S1 = payload[0] (erratum-49)        */
+    ll_tx[3] = opcode;              /* payload[0] = opcode                 */
+    if (dlen) {
+        memcpy(&ll_tx[4], data, dlen);
+    }
+    ll_tx_len = (uint8_t)(1u + dlen);
+}
+
+static void ll_queue_version(void)
+{
+    /* VersNr 0x0C (5.3), CompId 0x0059 (Nordic), SubVersNr 0x0001. */
+    static const uint8_t v[5] = { 0x0Cu, 0x59u, 0x00u, 0x01u, 0x00u };
+    ll_queue(LL_VERSION_IND, v, 5u);
+    ll_sent_vers = 1u;
+}
+
+/* Build the outgoing PDU (pending control, else empty) with SN/NESN into
+ * @p out; returns total RAM bytes ([hdr][len][S1]+payload). */
+static uint8_t ll_build_tx(uint8_t *out, const tiku_radio_ll_ack_t *ack)
+{
+    if (ll_tx_len != 0u) {
+        memcpy(out, ll_tx, (size_t)(3u + ll_tx_len));
+        out[0] = (uint8_t)(0x03u | (ack->nesn << 2) | (ack->sn << 3));
+        out[2] = out[3];            /* S1 = payload[0]                     */
+        return (uint8_t)(3u + ll_tx_len);
+    }
+    out[0] = (uint8_t)(0x01u | (ack->nesn << 2) | (ack->sn << 3));
+    out[1] = 0u;
+    out[2] = out[0];
+    return 3u;
+}
+
+/* Our last TX was acknowledged (SN advanced): a pending control PDU got
+ * through -- count it and clear the slot. */
+static void ll_on_acked(void)
+{
+    if (ll_tx_len != 0u) {
+        ll_ctrl_tx++;
+        ll_tx_len = 0u;
+    }
+}
+
+/* Process a genuinely-new received PDU (RAM [hdr][len][S1][payload], so
+ * payload starts at buf[3]); may queue a response. */
+static void ll_handle_rx(const uint8_t *buf)
+{
+    uint8_t op;
+
+    if ((buf[0] & 0x03u) != 0x03u || buf[1] == 0u) {
+        return;                     /* not an LL control PDU               */
+    }
+    op = buf[3];
+    ll_ctrl_rx++;
+    switch (op) {
+    case LL_VERSION_IND:
+        if (buf[1] >= 2u) {
+            ll_peer_vers = buf[4];
+        }
+        if (!ll_sent_vers) {
+            ll_queue_version();     /* reply with ours                     */
+        }
+        break;
+    case LL_FEATURE_REQ: {
+        static const uint8_t none[8] = { 0u };
+        ll_queue(LL_FEATURE_RSP, none, 8u);
+        break;
+    }
+    case LL_PING_REQ:
+        ll_queue(LL_PING_RSP, (const uint8_t *)0, 0u);
+        break;
+    case LL_TERMINATE_IND:
+        ll_want_term = 1u;
+        break;
+    case LL_FEATURE_RSP:
+    case LL_PING_RSP:
+    case LL_UNKNOWN_RSP:
+        break;                      /* responses: just counted             */
+    default:
+        ll_queue(LL_UNKNOWN_RSP, &op, 1u);   /* decline gracefully         */
+        break;
+    }
+}
+
 /*
  * One connection event: RX the central's PDU on data channel @p k, then
  * hardware-T_IFS respond with an empty PDU carrying our SN/NESN.  The
@@ -1118,18 +1241,13 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
                       uint32_t *anchor)
 {
     static uint8_t rxb[48] __attribute__((aligned(4)));
-    static uint8_t txb[8]  __attribute__((aligned(4)));
+    static uint8_t txb[36] __attribute__((aligned(4)));
     uint32_t spin;
-    uint8_t  crcok;
+    uint8_t  crcok, txn;
+
     int      got = 0;
 
     radio_cfg_data(aa, crcinit, k);
-
-    /* Empty data PDU (LLID=1, len=0); SN/NESN filled after RX.  RAM
-     * [S0=hdr0][LEN=hdr1][S1 slot] -- the erratum-49 layout init set. */
-    txb[0] = 0x01u;
-    txb[1] = 0x00u;
-    txb[2] = 0x01u;
 
     RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 2) | (1u << 4);
     RADIO->PACKETPTR = (uint32_t)rxb;
@@ -1182,11 +1300,19 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
          * NESN stays put -> the response is an implicit NAK -> the
          * central retransmits. */
         uint8_t h = rxb[0];
-        (void)tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
-                                (uint8_t)((h >> 2) & 1u));
+        uint8_t r = tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
+                                      (uint8_t)((h >> 2) & 1u));
+        if (r & TIKU_RADIO_LL_ACKED) {
+            ll_on_acked();                        /* our last PDU landed   */
+        }
+        if (r & TIKU_RADIO_LL_NEWDATA) {
+            ll_handle_rx(rxb);                    /* L4: control PDUs      */
+        }
     }
-    txb[0] = (uint8_t)(0x01u | (ack->nesn << 2) | (ack->sn << 3));
-    txb[2] = txb[0];
+    /* Build our response (pending LL control PDU, else empty) with the
+     * updated SN/NESN.  The hardware T_IFS TX DMAs it. */
+    txn = ll_build_tx(txb, ack);
+    (void)txn;
     RADIO->EVENTS_PHYEND   = 0u;                  /* next PHYEND = TX end  */
     RADIO->EVENTS_DISABLED = 0u;                  /* next DISABLED = TX    */
     RADIO->PACKETPTR = (uint32_t)txb;
@@ -1321,6 +1447,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
     }
 
     /* --- Connection loop --- */
+    ll_reset();                                   /* L4: control-PDU state */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)winoff * 1250u;
     last_valid = t_ci_end;
     if (interval_us == 0u) {
@@ -1378,6 +1505,12 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 
         tiku_watchdog_kick();
 
+        if (ll_want_term) {                       /* L4: peer terminated   */
+            if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                st->reason = 3u;
+            }
+            break;
+        }
         if ((int32_t)(conn_now() - (last_valid + timeout_us)) >= 0) {
             if (st != (tiku_radio_ll_conn_stats_t *)0) {
                 st->reason = 1u;                  /* supervision timeout   */
@@ -1394,6 +1527,9 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         st->ms = (conn_now() - t_ci_end) / 1000u;
+        st->peer_vers = ll_peer_vers;
+        st->ctrl_tx = ll_ctrl_tx;
+        st->ctrl_rx = ll_ctrl_rx;
         memcpy(st->fail_bytes, conn_fail_snap, 5u);
     }
 
@@ -1443,7 +1579,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 #define CEN_TIMEOUT   400u       /* 10ms units -> 4 s supervision (lenient)*/
 
 static uint8_t cen_rxb[48] __attribute__((aligned(4)));
-static uint8_t cen_txb[8]  __attribute__((aligned(4)));
+static uint8_t cen_txb[36] __attribute__((aligned(4)));
 uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
 
 /* One central event: TX empty PDU (our SN/NESN) on data channel @p k, then
@@ -1458,9 +1594,8 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     uint32_t dl;
 
     radio_cfg_data(aa, crcinit, k);
-    cen_txb[0] = (uint8_t)(0x01u | (ack->nesn << 2) | (ack->sn << 3));
-    cen_txb[1] = 0x00u;
-    cen_txb[2] = cen_txb[0];
+    /* Send our pending LL control PDU (else empty) with current SN/NESN. */
+    (void)ll_build_tx(cen_txb, ack);
 
     /* TX only (no turnaround short): we open the RX MANUALLY and EARLY
      * afterwards, not via the hardware TIFS turnaround.  The turnaround
@@ -1535,8 +1670,14 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     crcok = (RADIO->EVENTS_CRCOK != 0u) ? 1u : 0u;
     if (crcok) {
         uint8_t h = cen_rxb[0];
-        (void)tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
-                                (uint8_t)((h >> 2) & 1u));
+        uint8_t r = tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
+                                      (uint8_t)((h >> 2) & 1u));
+        if (r & TIKU_RADIO_LL_ACKED) {
+            ll_on_acked();
+        }
+        if (r & TIKU_RADIO_LL_NEWDATA) {
+            ll_handle_rx(cen_rxb);               /* L4: control PDUs      */
+        }
     }
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
@@ -1671,6 +1812,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     }
 
     /* --- Connection loop: WE are the timing master --- */
+    ll_reset();                                   /* L4: control-PDU state */
+    ll_queue_version();                           /* initiate: send VERSION_IND */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)CEN_WINOFFSET * 1250u;
     last_valid = t_ci_end;
     for (;;) {
@@ -1678,6 +1821,12 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                                             &last_unmapped);
         int r;
 
+        if (ll_want_term) {
+            if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                st->reason = 3u;
+            }
+            break;
+        }
         while ((int32_t)(conn_now() - anchor) < 0) {
             /* park to our own anchor */
         }
@@ -1715,6 +1864,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         st->ms = (conn_now() - t_ci_end) / 1000u;
+        st->peer_vers = ll_peer_vers;
+        st->ctrl_tx = ll_ctrl_tx;
+        st->ctrl_rx = ll_ctrl_rx;
     }
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;

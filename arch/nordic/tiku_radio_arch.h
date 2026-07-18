@@ -135,6 +135,9 @@ typedef struct {
     uint8_t  fail_bytes[5];     /**< first CRC-failed packet's RAM bytes  */
     uint16_t interval;          /**< connInterval, 1.25ms units (diag)   */
     uint16_t winoff;            /**< transmitWindowOffset units (diag)   */
+    uint32_t ctrl_tx;           /**< LL control PDUs we sent+acked (L4)  */
+    uint32_t ctrl_rx;           /**< LL control PDUs received (L4)        */
+    uint8_t  peer_vers;         /**< peer VersNr from LL_VERSION_IND (L4) */
     uint8_t  winsize;           /**< transmitWindowSize units (diag)     */
     uint8_t  first_chan;        /**< first CSA#1 data channel (diag)      */
     uint8_t  hop;               /**< hopIncrement (diag)                  */

@@ -420,9 +420,13 @@ static void bleadv_central(unsigned secs)
                            : 0ul);
     SHELL_PRINTF("  peripheral T_IFS=%lu us (spec 150)\n",
                  (unsigned long)tiku_radio_arch_dbg_cen_tifs);
+    SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u (L4)\n",
+                 (unsigned long)st.ctrl_tx, (unsigned long)st.ctrl_rx,
+                 (unsigned)st.peer_vers);
     SHELL_PRINTF("  ended: %s\n",
                  st.reason == 0u ? "duration cap" :
                  st.reason == 1u ? "supervision (peripheral silent)" :
+                 st.reason == 3u ? "peer terminated" :
                                    "never connected");
 }
 
@@ -474,6 +478,9 @@ static void bleadv_conn(unsigned secs)
                  (unsigned)st.winoff);
     SHELL_PRINTF("  first_anchor_delta=%ld us (actual - predicted)\n",
                  (long)st.first_delta);
+    SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u (L4)\n",
+                 (unsigned long)st.ctrl_tx, (unsigned long)st.ctrl_rx,
+                 (unsigned)st.peer_vers);
     {
         char fb[11];
         bleadv_fmt_hex(fb, st.fail_bytes, 5, 0);
@@ -482,6 +489,7 @@ static void bleadv_conn(unsigned secs)
     SHELL_PRINTF("  ended: %s\n",
                  st.reason == 0u ? "duration cap" :
                  st.reason == 1u ? "supervision timeout (central left)" :
+                 st.reason == 3u ? "peer terminated" :
                                    "never connected");
 }
 
