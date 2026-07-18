@@ -188,10 +188,12 @@ extern uint32_t tiku_radio_arch_dbg_cen_tifs;
  * @brief Fold one received Data-PDU header into the ack window.
  *
  * Updates @p a and returns TIKU_RADIO_LL_NEWDATA / _ACKED flags (either,
- * both, or neither -- the flips are independent).
+ * both, or neither -- the flips are independent).  @p has_payload must be
+ * nonzero only for PDUs that carry a payload (LEN != 0); NESN advances
+ * solely for those, so empty keepalives never forge a false ACK.
  */
 uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
-                          uint8_t rx_nesn);
+                          uint8_t rx_nesn, uint8_t has_payload);
 
 /**
  * @brief One extended advertising event at 1M (R8.3a, blocking ~1.3 ms).

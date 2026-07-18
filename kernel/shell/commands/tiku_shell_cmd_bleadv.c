@@ -427,7 +427,7 @@ static void bleadv_central(unsigned secs)
         char rb[3];
         bleadv_fmt_hex(rb, &st.att_readback, 1, 0);
         if (st.att_step >= 5u && st.att_ok) {
-            SHELL_PRINTF(SH_GREEN "  NUS: MTU/CCCD/write->read loopback OK,"
+            SHELL_PRINTF(SH_GREEN "  NUS: MTU/CCCD/write->notify loopback OK,"
                          " echo[0]=0x%s (L5)\n" SH_RST, rb);
         } else {
             SHELL_PRINTF("  NUS: incomplete (step=%u/5 echo[0]=0x%s) (L5)\n",
@@ -561,7 +561,8 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         tiku_radio_ll_ack_t a = { 0u, 0u };
         int i, fails = 0;
         for (i = 0; i < 4; i++) {
-            uint8_t r = tiku_radio_ll_ack(&a, seq[i].rx_sn, seq[i].rx_nesn);
+            uint8_t r = tiku_radio_ll_ack(&a, seq[i].rx_sn, seq[i].rx_nesn,
+                                          1u);  /* scripted seq = data PDUs */
             uint8_t nd = (r & TIKU_RADIO_LL_NEWDATA) ? 1u : 0u;
             uint8_t ak = (r & TIKU_RADIO_LL_ACKED) ? 1u : 0u;
             if (nd != seq[i].newd || ak != seq[i].ackd ||

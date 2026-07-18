@@ -1009,19 +1009,28 @@ uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
  * header its own SN (the seq number of the PDU it is sending) and NESN
  * (the seq number it expects next = an ack of the peer's last PDU).
  *
- * On receiving a CRC-valid Data PDU (rx_sn, rx_nesn):
+ * On receiving a CRC-valid Data PDU (rx_sn, rx_nesn, has_payload):
  *   - ACK of MY transmission: rx_nesn != my sn  =>  peer moved past my
  *     SN, so my PDU landed -> flip sn, load the next TX PDU.  Equal =>
  *     NAK, retransmit the SAME PDU.
- *   - NEW data from peer: rx_sn == my nesn  =>  not a retransmission ->
- *     deliver payload, flip nesn.  Unequal => a resend I already have
- *     -> discard payload (the ack half above still applies).
- * The subtle correctness point both flips are INDEPENDENT: a single PDU
- * can simultaneously ack my TX and carry new data.
+ *   - NEW data from peer: rx_sn == my nesn AND the PDU carries payload
+ *     =>  not a retransmission -> deliver, flip nesn.  Unequal/empty =>
+ *     a resend or a keepalive I already have -> discard (ACK half still
+ *     applies).
+ * Both flips are INDEPENDENT: a single PDU can ack my TX and carry new
+ * data.  CRITICAL: NESN advances only for PAYLOAD-bearing PDUs, never for
+ * empty keepalives.  Otherwise a stream of empties walks my NESN past the
+ * peer's SN, and the peer then reads my (advanced) NESN as an ACK of data
+ * it never received -- a false ACK that silently drops the payload.
+ * Gating NESN on payload makes it a trustworthy "I got your data" signal,
+ * so the sender can retransmit until GENUINELY delivered (exactly-once),
+ * which unsolicited notifications rely on (there is no app-level reply to
+ * confirm them).  Empties stay flow-control-neutral except for the ACK
+ * half, which they still legitimately carry.
  */
 
 uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
-                          uint8_t rx_nesn)
+                          uint8_t rx_nesn, uint8_t has_payload)
 {
     uint8_t r = 0u;
 
@@ -1029,7 +1038,7 @@ uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
         a->sn ^= 1u;
         r |= TIKU_RADIO_LL_ACKED;
     }
-    if ((rx_sn & 1u) == a->nesn) {             /* genuinely new payload    */
+    if (has_payload && (rx_sn & 1u) == a->nesn) {  /* genuinely new data   */
         a->nesn ^= 1u;
         r |= TIKU_RADIO_LL_NEWDATA;
     }
@@ -1149,15 +1158,17 @@ static const uint8_t NUS_TEST_MSG[2] = { 'T', 'K' };
 static uint8_t  nus_rx[20];         /* server: last bytes written to RX     */
 static uint8_t  nus_rx_len;
 static uint8_t  nus_cccd;           /* server: TX notifications enabled bit */
-static uint8_t  att_step;           /* client: 1 mtu,2 cccd,3 rx,4 read,5 ok */
-static uint8_t  att_ok;             /* client: read-back echo matched       */
+static uint8_t  nus_notify[20];     /* server: pending notification payload */
+static uint8_t  nus_notify_len;     /* server: >0 = queue a TX notification */
+static uint8_t  att_step;           /* client: 1 mtu,2 cccd,3 rx,4 notify,5 ok */
+static uint8_t  att_ok;             /* client: notification echo matched    */
 static uint8_t  att_readback;       /* client/server: first data byte seen  */
 
 static void ll_reset(void)
 {
     ll_tx_len = 0u; ll_tx_llid = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
     ll_want_term = 0u; ll_ctrl_tx = 0u; ll_ctrl_rx = 0u;
-    nus_rx_len = 0u; nus_cccd = 0u;
+    nus_rx_len = 0u; nus_cccd = 0u; nus_notify_len = 0u;
     att_step = 0u; att_ok = 0u; att_readback = 0u;
 }
 
@@ -1253,12 +1264,8 @@ static void att_client_send(void)
         b[2] = (uint8_t)(GATT_H_NUS_RX >> 8);
         b[3] = NUS_TEST_MSG[0]; b[4] = NUS_TEST_MSG[1];
         att_queue(b, 5u);
-    } else if (att_step == 4u) {                /* read NUS TX (the echo)  */
-        b[0] = 0x0Au;
-        b[1] = (uint8_t)GATT_H_NUS_TX;
-        b[2] = (uint8_t)(GATT_H_NUS_TX >> 8);
-        att_queue(b, 3u);
     }
+    /* step 4 awaits the server's pushed TX notification -- nothing to send */
 }
 
 /* ATT dispatch (L5): buf is the ATT PDU, len its length. */
@@ -1267,7 +1274,7 @@ static void att_handle(const uint8_t *att, uint8_t alen)
     uint8_t op = att[0];
 
     if (ll_is_central) {
-        /* CLIENT: MTU -> CCCD -> write RX -> read TX -> verify echo. */
+        /* CLIENT: MTU -> CCCD -> write RX -> await TX notification. */
         if (op == 0x03u && att_step == 1u) {        /* MTU Response        */
             att_step = 2u;
             att_client_send();                      /* enable CCCD         */
@@ -1275,18 +1282,18 @@ static void att_handle(const uint8_t *att, uint8_t alen)
             att_step = 3u;
             att_client_send();                      /* write NUS RX        */
         } else if (op == 0x13u && att_step == 3u) { /* RX Write Response   */
-            att_step = 4u;
-            att_client_send();                      /* read TX echo        */
-        } else if (op == 0x0Bu && att_step == 4u) { /* Read Response       */
-            if (alen >= 3u) {
-                att_readback = att[1];              /* echoed first byte   */
-                att_ok = (uint8_t)(att[1] == NUS_TEST_MSG[0] &&
-                                   att[2] == NUS_TEST_MSG[1]);
+            att_step = 4u;                          /* now await notify    */
+        } else if (op == 0x1Bu && att_step == 4u) { /* Handle Value Notify */
+            if (alen >= 3u && att[1] == (uint8_t)GATT_H_NUS_TX &&
+                att[2] == (uint8_t)(GATT_H_NUS_TX >> 8) && alen >= 5u) {
+                att_readback = att[3];              /* echoed first byte   */
+                att_ok = (uint8_t)(att[3] == NUS_TEST_MSG[0] &&
+                                   att[4] == NUS_TEST_MSG[1]);
+                att_step = 5u;                      /* loopback verified   */
             }
-            att_step = 5u;                          /* loopback verified   */
         }
     } else {
-        /* SERVER: MTU; CCCD + RX writes; a RX write mirrors to TX echo. */
+        /* SERVER: MTU; CCCD + RX writes; a RX write pushes a TX notify. */
         if (op == 0x02u) {                          /* Exchange MTU Req    */
             uint8_t m[3] = { 0x03u, 23u, 0u };      /* MTU Rsp, 23         */
             att_queue(m, 3u);
@@ -1299,23 +1306,36 @@ static void att_handle(const uint8_t *att, uint8_t alen)
                 if (n > sizeof(nus_rx)) {
                     n = (uint8_t)sizeof(nus_rx);
                 }
-                memcpy(nus_rx, &att[3], n);         /* mirror RX -> TX echo */
+                memcpy(nus_rx, &att[3], n);
                 nus_rx_len = n;
                 att_readback = att[3];              /* stats: first byte   */
+                if (nus_cccd & 0x01u) {             /* loop back to TX      */
+                    memcpy(nus_notify, &att[3], n);
+                    nus_notify_len = n;
+                }
             }
             {
                 uint8_t rsp = 0x13u;                /* Write Response      */
                 att_queue(&rsp, 1u);
             }
-        } else if (op == 0x0Au && alen >= 3u) {     /* Read Request        */
-            uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
-            if (h == GATT_H_NUS_TX) {               /* echo back NUS RX     */
-                uint8_t r[1 + sizeof(nus_rx)];
-                r[0] = 0x0Bu;                       /* Read Response       */
-                memcpy(&r[1], nus_rx, nus_rx_len);
-                att_queue(r, (uint8_t)(1u + nus_rx_len));
-            }
         }
+    }
+}
+
+/* Server (L5): if a NUS TX notification is pending and the slot is free,
+ * queue it as a Handle Value Notification.  Reliable now that NESN only
+ * advances on payload -- the LL retransmits it until genuinely acked.
+ * Called from the peripheral connection loop between events. */
+static void att_server_pump(void)
+{
+    if (nus_notify_len != 0u && ll_tx_len == 0u) {
+        uint8_t nb[3 + sizeof(nus_notify)];
+        nb[0] = 0x1Bu;                              /* Handle Value Notify */
+        nb[1] = (uint8_t)GATT_H_NUS_TX;
+        nb[2] = (uint8_t)(GATT_H_NUS_TX >> 8);
+        memcpy(&nb[3], nus_notify, nus_notify_len);
+        att_queue(nb, (uint8_t)(3u + nus_notify_len));
+        nus_notify_len = 0u;
     }
 }
 
@@ -1453,7 +1473,8 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
          * central retransmits. */
         uint8_t h = rxb[0];
         uint8_t r = tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
-                                      (uint8_t)((h >> 2) & 1u));
+                                      (uint8_t)((h >> 2) & 1u),
+                                      (uint8_t)(rxb[1] != 0u));
         if (r & TIKU_RADIO_LL_ACKED) {
             ll_on_acked();                        /* our last PDU landed   */
         }
@@ -1639,6 +1660,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
             /* park to the anchor; kick occasionally */
         }
         r = conn_event(aa, crcinit, k, &ack, deadline, &t_addr);
+        att_server_pump();                    /* L5: push pending NUS notify */
         if (st != (tiku_radio_ll_conn_stats_t *)0) {
             st->events++;
         }
@@ -1825,7 +1847,13 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
             tiku_radio_arch_dbg_cen_tifs = (t_addr - t_txend) - 40u;
         }
     }
-    dl = conn_now() + 200u;
+    /* Wait for the CRC verdict.  It lands well AFTER PHYEND (the CRC is
+     * validated post-last-bit), and that gap scales with payload length:
+     * a 200 us budget covers empties/short responses but a full-length
+     * data PDU (an ATT notification) times out and is misread as a CRC
+     * failure, so the peer never sees the ack and retransmits forever.
+     * Budget for a max-size PDU. */
+    dl = conn_now() + 700u;
     while ((int32_t)(conn_now() - dl) < 0) {
         if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
             break;
@@ -1835,7 +1863,8 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     if (crcok) {
         uint8_t h = cen_rxb[0];
         uint8_t r = tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
-                                      (uint8_t)((h >> 2) & 1u));
+                                      (uint8_t)((h >> 2) & 1u),
+                                      (uint8_t)(cen_rxb[1] != 0u));
         if (r & TIKU_RADIO_LL_ACKED) {
             ll_on_acked();
         }
@@ -2012,10 +2041,10 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         }
         anchor += (uint32_t)CEN_INTERVAL * 1250u;  /* master cadence       */
 
-        /* L5 transaction retry: if the ATT step has not advanced for a
-         * while and nothing is pending, re-send the request (the LL can
-         * drop a single data PDU on an SN/NESN offset flip). */
-        if (att_step >= 1u && att_step <= 4u) {
+        /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).
+         * Step 4 awaits the server's pushed notification -- the server's
+         * LL retransmits that until acked, so the client just waits. */
+        if (att_step >= 1u && att_step <= 3u) {
             if (att_step != att_prev) {
                 att_prev = att_step;
                 att_wait = 0u;
