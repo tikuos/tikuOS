@@ -778,11 +778,13 @@ static void bleadv_smp(void)
     SHELL_PRINTF("SMP LESC crypto self-test:\n");
     SHELL_PRINTF("  AES-CMAC (RFC 4493 KAT):   %s\n",
                  (r & 1) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    SHELL_PRINTF("  f4/f5/f6 (Core-spec KAT):  %s\n",
+                 (r & 4) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
     SHELL_PRINTF("  P-256 ECDH (round-trip):   %s\n",
                  (r & 2) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
-    if (r == 3) {
-        SHELL_PRINTF(SH_GREEN "  crypto foundation OK (CMAC + ECDH) -- SMP"
-                     " pairing buildable\n" SH_RST);
+    if (r == 7) {
+        SHELL_PRINTF(SH_GREEN "  crypto foundation OK (CMAC + f4/f5/f6 + ECDH)"
+                     " -- SMP pairing buildable\n" SH_RST);
     }
 }
 

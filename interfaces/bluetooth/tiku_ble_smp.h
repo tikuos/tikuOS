@@ -30,6 +30,14 @@
 int tiku_ble_smp_aes_cmac(const uint8_t key[16], const uint8_t *msg,
                           size_t len, uint8_t mac[16]);
 
+/*
+ * All f4/f5/f6 inputs and outputs are in SMP wire order (little-endian), as
+ * they appear on the L2CAP channel.  Internally each function byte-swaps to
+ * the big-endian order the CMAC core operates on and swaps the result back,
+ * so callers never see the endianness flip (Core Spec Vol 3, Part H, 2.2.5-7;
+ * verified byte-exact against the spec sample data -- see the self-test KATs).
+ */
+
 /**
  * @brief SMP f4 confirm-value function: AES-CMAC_X(U || V || Z).
  * @param u,v 32-byte public-key X coordinates; @param x 16-byte nonce;
@@ -40,25 +48,30 @@ void tiku_ble_smp_f4(const uint8_t u[32], const uint8_t v[32],
 
 /**
  * @brief SMP f5: derive MacKey (16) and LTK (16) from the DHKey.
- * @param w 32-byte DHKey; @param n1,n2 16-byte nonces; @param a1,a2 7-byte
- *        addresses (type||addr); @param mackey,ltk 16-byte outputs.
+ * @param w 32-byte DHKey; @param n1,n2 16-byte nonces;
+ * @param a1t,a2t address types (1 = random, 0 = public);
+ * @param a1,a2 6-byte device addresses; @param mackey,ltk 16-byte outputs.
  */
 void tiku_ble_smp_f5(const uint8_t w[32], const uint8_t n1[16],
-                     const uint8_t n2[16], const uint8_t a1[7],
-                     const uint8_t a2[7], uint8_t mackey[16], uint8_t ltk[16]);
+                     const uint8_t n2[16], uint8_t a1t, const uint8_t a1[6],
+                     uint8_t a2t, const uint8_t a2[6],
+                     uint8_t mackey[16], uint8_t ltk[16]);
 
 /**
  * @brief SMP f6 check-value function:
  *        AES-CMAC_W(N1 || N2 || R || IOcap || A1 || A2).
+ * @param iocap 3 bytes in wire order [io_cap, oob, authreq].
  */
 void tiku_ble_smp_f6(const uint8_t w[16], const uint8_t n1[16],
                      const uint8_t n2[16], const uint8_t r[16],
-                     const uint8_t iocap[3], const uint8_t a1[7],
-                     const uint8_t a2[7], uint8_t out[16]);
+                     const uint8_t iocap[3], uint8_t a1t, const uint8_t a1[6],
+                     uint8_t a2t, const uint8_t a2[6], uint8_t out[16]);
 
 /**
- * @brief Crypto self-test: AES-CMAC RFC-4493 KAT + P-256 ECDH round-trip.
- * @return bitmask of passes: bit0 CMAC KAT, bit1 ECDH match (3 == all pass).
+ * @brief Crypto self-test: AES-CMAC RFC-4493 KAT, f4/f5/f6 spec KATs, and a
+ *        P-256 ECDH round-trip.
+ * @return bitmask of passes: bit0 CMAC KAT, bit1 ECDH match, bit2 f4/f5/f6
+ *         Core-spec KATs (7 == all pass).
  */
 int tiku_ble_smp_selftest(void);
 
