@@ -82,6 +82,28 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
                                  uint32_t iters[3]);
 
 /**
+ * @brief Two-board per-PHY link (R8.2): transmit one prepared PDU at @p phy
+ *        on adv channel @p chan (0..2 = 37/38/39).  Neither restores 1M --
+ *        the caller loops (holding Constant Latency) then re-inits.
+ * @return 0 on TX complete, -1 on ramp/PHYEND timeout or bad @p phy.
+ */
+int tiku_radio_arch_phy_tx(tiku_radio_arch_phy_t phy, uint8_t chan,
+                           const uint8_t *pdu);
+
+/**
+ * @brief Continuously receive at @p phy on adv channel @p chan for
+ *        @p window_ms, counting CRC-OK packets whose @p tag_len bytes at
+ *        @p tag_off match @p tag (tag_len 0 = count all CRC-OK).  Stays armed
+ *        (in-place TASKS_START re-arm, no ramp between packets) so it is not
+ *        RX-gap-limited.  Uses the adv access address + CRC (PHY-independent).
+ * @return the match count, or -1 on bad @p phy.  @p rssi = last match's dBm.
+ */
+int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
+                                 uint32_t window_ms, const uint8_t *tag,
+                                 uint8_t tag_off, uint8_t tag_len,
+                                 int8_t *rssi);
+
+/**
  * @brief Connectable advertising + CONNECT_IND capture (L-track L1).
  *
  * Transmits ADV_IND and hardware-turns-around (DISABLED_RXEN short)

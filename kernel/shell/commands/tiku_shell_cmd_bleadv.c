@@ -217,6 +217,94 @@ static void bleadv_phy(void)
                  (unsigned long)((avg[3] * 100u) / avg[0]));
 }
 
+/* Map a PHY name to the enum (default 1M). */
+static tiku_radio_arch_phy_t bleadv_phy_of(const char *s)
+{
+    if (s != (const char *)0) {
+        if (strcmp(s, "2m") == 0) {
+            return TIKU_RADIO_PHY_2M;
+        }
+        if (strcmp(s, "s8") == 0) {
+            return TIKU_RADIO_PHY_CODED_S8;
+        }
+        if (strcmp(s, "s2") == 0) {
+            return TIKU_RADIO_PHY_CODED_S2;
+        }
+    }
+    return TIKU_RADIO_PHY_1M;
+}
+
+/* R8.2 board<->board PER: TX N tagged PDUs at a PHY on ch37, paced so the
+ * peer's single-shot RX can re-arm and catch each on a quiet channel. */
+static void bleadv_phytx(uint8_t argc, const char *argv[])
+{
+    const char *pn = (argc > 2u) ? argv[2] : "1m";
+    tiku_radio_arch_phy_t phy = bleadv_phy_of(pn);
+    long n = (argc > 3u) ? (long)strtoul(argv[3], (char **)0, 10) : 100;
+    uint8_t pdu[8];
+    uint16_t i;
+    uint32_t sent = 0u;
+
+    if (n <= 0 || n > 5000) {
+        n = 100;
+    }
+    if (tiku_ble_adv_active()) {
+        SHELL_PRINTF(SH_RED "stop the beacon first (bleadv off)\n" SH_RST);
+        return;
+    }
+    tiku_radio_arch_init();
+    pdu[0] = 0x42u;                              /* S0: ADV_NONCONN_IND head   */
+    pdu[1] = 4u;                                 /* LEN: 4-byte payload        */
+    pdu[3] = 'P'; pdu[4] = 'H'; pdu[5] = 'Y';    /* magic tag                  */
+    SHELL_PRINTF("PHY TX %s ch37: %ld pkts...\n", pn, n);
+    tiku_radio_arch_constlat_hold(1);            /* erratum 20 across the run  */
+    for (i = 0u; i < (uint16_t)n; i++) {
+        volatile uint32_t d;
+        pdu[6] = (uint8_t)i;                     /* seq                        */
+        pdu[2] = pdu[3];                         /* S1 dup (erratum 49)        */
+        if (tiku_radio_arch_phy_tx(phy, 0u, pdu) == 0) {
+            sent++;
+        }
+        /* Modest inter-packet gap; the peer's RX stays armed in-place, so
+         * this only has to clear the coded-PHY airtime + START re-arm. */
+        for (d = 0u; d < 300000u; d++) {
+        }
+        if ((i & 0x1Fu) == 0u) {
+            tiku_watchdog_kick();
+        }
+    }
+    tiku_radio_arch_constlat_hold(0);
+    tiku_radio_arch_init();                      /* restore 1M beacon/scan     */
+    SHELL_PRINTF("PHY TX %s done: %lu sent\n", pn, (unsigned long)sent);
+}
+
+/* R8.2 RX half: count tagged CRC-OK packets heard at a PHY over ~secs. */
+static void bleadv_phyrx(uint8_t argc, const char *argv[])
+{
+    static const uint8_t tag[3] = { 'P', 'H', 'Y' };
+    const char *pn = (argc > 2u) ? argv[2] : "1m";
+    tiku_radio_arch_phy_t phy = bleadv_phy_of(pn);
+    long secs = (argc > 3u) ? (long)strtoul(argv[3], (char **)0, 10) : 6;
+    int8_t last_rssi = 0;
+    int ours;
+
+    if (secs <= 0 || secs > 60) {
+        secs = 6;
+    }
+    if (tiku_ble_adv_active()) {
+        SHELL_PRINTF(SH_RED "stop the beacon first (bleadv off)\n" SH_RST);
+        return;
+    }
+    tiku_radio_arch_init();
+    SHELL_PRINTF("PHY RX %s ch37 ~%ld s (tag PHY)...\n", pn, secs);
+    tiku_radio_arch_constlat_hold(1);
+    ours = tiku_radio_arch_phy_rx_count(phy, 0u, (uint32_t)secs * 1000u,
+                                        tag, 3u, 3u, &last_rssi);
+    tiku_radio_arch_constlat_hold(0);
+    tiku_radio_arch_init();
+    SHELL_PRINTF("PHY RX %s done: %d ours rssi=%d\n", pn, ours, (int)last_rssi);
+}
+
 /* Extended advertising bring-up (R8.3a): ADV_EXT_IND + hardware-timed
  * AUX_ADV_IND at ~100 ms intervals for ~secs.  The AdvData is
  * deliberately >31 bytes (Flags + name + a 47-byte 'TK' payload) --
@@ -784,6 +872,14 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
 #endif
     if (strcmp(argv[1], "phy") == 0) {
         bleadv_phy();
+        return;
+    }
+    if (strcmp(argv[1], "phytx") == 0) {
+        bleadv_phytx(argc, argv);
+        return;
+    }
+    if (strcmp(argv[1], "phyrx") == 0) {
+        bleadv_phyrx(argc, argv);
         return;
     }
     if (strcmp(argv[1], "csa1") == 0) {

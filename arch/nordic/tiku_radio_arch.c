@@ -753,6 +753,148 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
 }
 
 /*---------------------------------------------------------------------------*/
+/* Two-board per-PHY link (R8.2): TX one prepared PDU / RX one packet at the  */
+/* given PHY on advertising channel `chan` (0..2 = 37/38/39).  Reuses the adv */
+/* access address + CRC (PHY-independent); only MODE/PCNF0 switch.  Neither   */
+/* restores 1M -- the caller loops for a PER run, holds Constant Latency      */
+/* across it (erratum 20), and re-inits afterwards for the beacon/scan        */
+/* contract.  Together they measure link PER at 2M / Coded S8 / Coded S2.     */
+/*---------------------------------------------------------------------------*/
+
+static uint8_t phy_rxbuf[64] __attribute__((aligned(4)));
+
+/* Distinctive access address for the R8.2 link so ambient BLE (all on the
+ * shared adv AA 0x8E89BED6 at 1M) is address-rejected, not received. */
+#define PHY_LINK_AA   0x71764129u
+
+static void radio_phy_link_aa(void)
+{
+    RADIO->BASE0   = (PHY_LINK_AA & 0x00FFFFFFu) << 8;
+    RADIO->PREFIX0 = (PHY_LINK_AA >> 24) & 0xFFu;
+    RADIO->TXADDRESS   = 0u;
+    RADIO->RXADDRESSES = 1u;
+}
+
+/* Force the RADIO to DISABLED so each op starts from a clean state -- a
+ * prior run left mid-ramp/RXIDLE would make the next TXEN/RXEN misfire
+ * (the run-to-run collapse this guards against). */
+static void radio_phy_force_disable(void)
+{
+    uint32_t spin;
+    RADIO->SHORTS = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    for (spin = 0u; spin < 400000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    RADIO->EVENTS_DISABLED = 0u;
+}
+
+int tiku_radio_arch_phy_tx(tiku_radio_arch_phy_t phy, uint8_t chan,
+                           const uint8_t *pdu)
+{
+    uint32_t spin;
+
+    if ((unsigned)phy > 3u) {
+        return -1;
+    }
+    if (chan > 2u) {
+        chan = 0u;
+    }
+    radio_hfclk_kick();
+    radio_phy_force_disable();
+    radio_apply_phy(phy);
+    radio_phy_link_aa();
+    RADIO->FREQUENCY = adv_freq[chan];
+    RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
+    RADIO->PACKETPTR = (uint32_t)pdu;
+    RADIO->SHORTS = (1u << 0) | (1u << 19);      /* READY_START|PHYEND_DISABLE */
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_TXEN = 1u;
+    /* Big cap: coded S=8 airtime is ~8x 1M, far past adv_tx_one's window.
+     * Kick the dog inside the wait so a stuck ramp can't reset the board. */
+    for (spin = 0u; spin < 20000000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+        if ((spin & 0x3FFFFu) == 0u) {
+            tiku_watchdog_kick();
+        }
+    }
+    return (RADIO->EVENTS_DISABLED != 0u) ? 0 : -1;
+}
+
+int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
+                                 uint32_t window_ms, const uint8_t *tag,
+                                 uint8_t tag_off, uint8_t tag_len, int8_t *rssi)
+{
+    tiku_clock_time_t start = tiku_clock_time();
+    tiku_clock_time_t dl =
+        (tiku_clock_time_t)(((uint32_t)TIKU_CLOCK_ARCH_SECOND * window_ms) /
+                            1000u);
+    uint32_t spin = 0u, count = 0u;
+    int8_t   last = 0;
+
+    if ((unsigned)phy > 3u) {
+        return -1;
+    }
+    if (chan > 2u) {
+        chan = 0u;
+    }
+    radio_phy_force_disable();
+    radio_apply_phy(phy);
+    radio_phy_link_aa();
+    RADIO->FREQUENCY = adv_freq[chan];
+    RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
+    RADIO->PACKETPTR = (uint32_t)phy_rxbuf;
+    RADIO->SHORTS = (1u << 0);                   /* READY_START only           */
+    RADIO->EVENTS_END      = 0u;
+    RADIO->EVENTS_CRCOK    = 0u;
+    RADIO->EVENTS_CRCERROR = 0u;
+    RADIO->EVENTS_ADDRESS  = 0u;
+    radio_hfclk_kick();
+    RADIO->TASKS_RXEN = 1u;                      /* ramp once, then stay in RX */
+
+    for (;;) {
+        if (RADIO->EVENTS_END != 0u) {          /* a packet landed            */
+            uint8_t ok = (RADIO->CRCSTATUS == RADIO_CRCSTATUS_CRCSTATUS_CRCOk);
+            RADIO->TASKS_RSSISTART = 1u;
+            if (ok && (tag_len == 0u ||
+                       memcmp(&phy_rxbuf[tag_off], tag, tag_len) == 0)) {
+                count++;
+                last = (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
+            }
+            RADIO->EVENTS_END   = 0u;
+            RADIO->EVENTS_CRCOK = 0u;
+            RADIO->EVENTS_CRCERROR = 0u;
+            RADIO->TASKS_START = 1u;             /* re-RX from RXIDLE (no ramp)*/
+        }
+        spin++;
+        if ((spin & 0xFFFFu) == 0u) {
+            radio_hfclk_kick();
+            tiku_watchdog_kick();
+            if ((tiku_clock_time_t)(tiku_clock_time() - start) >= dl) {
+                break;
+            }
+        }
+    }
+    RADIO->SHORTS = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    for (spin = 0u; spin < 200000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    if (rssi != 0) {
+        *rssi = last;
+    }
+    return (int)count;
+}
+
+/*---------------------------------------------------------------------------*/
 /* Connectable advertising + CONNECT_IND capture (L1)                        */
 /*---------------------------------------------------------------------------*/
 /*
