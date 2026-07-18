@@ -48,6 +48,9 @@ void tiku_154_set_channel(uint8_t channel);
 /** @brief Our configured short address. */
 uint16_t tiku_154_addr(void);
 
+/** @brief Current durable TX security frame counter (survives reboot). */
+uint32_t tiku_154_tx_counter(void);
+
 /**
  * @brief Install the 128-bit link key and enable/disable securing outgoing
  *        frames (IEEE 802.15.4 security level 6 = ENC-MIC-64, AES-CCM*).

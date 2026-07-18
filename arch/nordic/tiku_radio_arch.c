@@ -256,6 +256,14 @@ int8_t tiku_radio_arch_txpower(void)
     return radio_txpower_dbm;
 }
 
+/* The enumerated TXPOWER code for the current setting, so the 15.4 PHY (a
+ * separate arch file) programs the SAME power the BLE path + /sys/radio/
+ * txpower use -- one knob for the shared radio. */
+uint32_t tiku_radio_arch_txpower_code(void)
+{
+    return radio_txpower_code;
+}
+
 /**
  * @brief Transmit one PDU on a single advertising channel (blocking, polled).
  *

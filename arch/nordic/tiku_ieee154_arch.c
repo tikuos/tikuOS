@@ -76,7 +76,7 @@ static void radio_154_linkcfg(uint8_t channel)
     RADIO->CRCINIT = TIKU_154_CRC_INIT;
     RADIO->SFD     = TIKU_154_SFD;
 
-    RADIO->TXPOWER = RADIO_TXPOWER_TXPOWER_0dBm;            /* N1: 0 dBm */
+    RADIO->TXPOWER = tiku_radio_arch_txpower_code();        /* shared knob */
     /* Channel k -> 2405 + 5(k-11) MHz; FREQUENCY register is MHz-2400. */
     RADIO->FREQUENCY = 5u + (5u * (uint32_t)(channel - TIKU_154_CHAN_MIN));
     RADIO->SHORTS = 0u;

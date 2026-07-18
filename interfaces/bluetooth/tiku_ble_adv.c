@@ -72,9 +72,9 @@ tiku_ble_adv_owner_t tiku_ble_adv_owner(void)
 
 const char *tiku_ble_adv_owner_str(void)
 {
-    static const char *names[7] = {
+    static const char *names[8] = {
         "idle", "beacon", "beacon-flpr", "scan", "observe",
-        "beacon+observe", "conn",
+        "beacon+observe", "conn", "154",
     };
     return names[radio_owner];
 }
@@ -95,6 +95,25 @@ int tiku_ble_adv_conn_claim(void)
 void tiku_ble_adv_conn_release(void)
 {
     if (radio_owner == TIKU_BLE_ADV_OWNER_CONN) {
+        radio_owner = (uint8_t)TIKU_BLE_ADV_OWNER_IDLE;
+    }
+}
+
+/* N-track R7: 802.15.4 mode-switches the shared RADIO wholesale, so it takes
+ * the same exclusive claim -- refusing while a beacon/observer/connection
+ * holds it, and blocking them while it runs (same IDLE gate below). */
+int tiku_ble_adv_154_claim(void)
+{
+    if (radio_owner != TIKU_BLE_ADV_OWNER_IDLE) {
+        return -1;
+    }
+    radio_owner = (uint8_t)TIKU_BLE_ADV_OWNER_154;
+    return 0;
+}
+
+void tiku_ble_adv_154_release(void)
+{
+    if (radio_owner == TIKU_BLE_ADV_OWNER_154) {
         radio_owner = (uint8_t)TIKU_BLE_ADV_OWNER_IDLE;
     }
 }
@@ -170,9 +189,11 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
 
     /* A blocking scan owns the CPU synchronously (nothing else runs), so
      * SCAN is denied defensively.  A live serial connection (L6) drives the
-     * radio NonSecure on the FLPR for its whole lifetime -- deny too. */
+     * radio NonSecure on the FLPR for its whole lifetime; 802.15.4 has the
+     * RADIO in a different MODE entirely -- deny both. */
     if (radio_owner == TIKU_BLE_ADV_OWNER_SCAN ||
-        radio_owner == TIKU_BLE_ADV_OWNER_CONN) {
+        radio_owner == TIKU_BLE_ADV_OWNER_CONN ||
+        radio_owner == TIKU_BLE_ADV_OWNER_154) {
         return -1;
     }
 

@@ -53,6 +53,9 @@ int tiku_radio_arch_set_txpower(int8_t dbm);
 /** @brief Currently configured TX power in dBm. */
 int8_t tiku_radio_arch_txpower(void);
 
+/** @brief Enumerated TXPOWER code for the current setting (shared by 15.4). */
+uint32_t tiku_radio_arch_txpower_code(void);
+
 /** BLE PHYs the silicon can modulate (kintsugi/radio.md R8). */
 typedef enum {
     TIKU_RADIO_PHY_1M = 0,              /**< BLE 1M (legacy adv PHY)      */

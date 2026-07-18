@@ -34,6 +34,7 @@
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>
 #include <interfaces/radio/tiku_154.h>         /* MAC-min: ping/pong           */
+#include <interfaces/bluetooth/tiku_ble_adv.h> /* R7 radio arbiter             */
 
 /* Demo MAC addresses for the ping/pong ping-pong (one PAN, two nodes). */
 #define R154_PAN      0xABCDu
@@ -196,7 +197,7 @@ static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
     long n = (argc > 3u) ? r154_atoi(argv[3]) : 100;
     uint16_t i;
-    uint32_t ok = 0u;
+    uint32_t ok = 0u, ctr0;
     uint8_t pl[2];
 
     if (n <= 0 || n > 5000) {
@@ -205,6 +206,11 @@ static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
     tiku_154_init(R154_PAN, R154_PING_A, ch);
     tiku_154_set_key(secure ? r154_key : (const uint8_t *)0);
     tiku_154_set_secure(secure);
+    ctr0 = tiku_154_tx_counter();
+    if (secure) {
+        SHELL_PRINTF("154 SECPING frame-counter starts at %lu (durable)\n",
+                     (unsigned long)ctr0);
+    }
     SHELL_PRINTF("154 %s ch%u 0x%04X->0x%04X (ACK+CSMA), %ld frames...\n",
                  secure ? "SECPING" : "PING", (unsigned)ch,
                  (unsigned)R154_PING_A, (unsigned)R154_PONG_A, n);
@@ -270,6 +276,13 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
                      " | ed [ch] | ping|pong|secping|secpong [ch] [n]\n");
         return;
     }
+    /* Every subcommand mode-switches the shared RADIO to 15.4, so claim it
+     * (R7 arbiter) -- refuse rather than clobber a live beacon/observer/link. */
+    if (tiku_ble_adv_154_claim() != 0) {
+        SHELL_PRINTF("radio busy (%s) -- stop it first\n",
+                     tiku_ble_adv_owner_str());
+        return;
+    }
     if (strcmp(argv[1], "tx") == 0) {
         r154_tx(argc, argv);
     } else if (strcmp(argv[1], "rx") == 0) {
@@ -288,6 +301,7 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
         SHELL_PRINTF("radio154: unknown '%s'"
                      " (tx|rx|ed|ping|pong|secping|secpong)\n", argv[1]);
     }
+    tiku_ble_adv_154_release();
 }
 
 #else /* !TIKU_HAS_154 */

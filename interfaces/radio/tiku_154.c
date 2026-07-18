@@ -19,6 +19,7 @@
 #include <arch/nordic/tiku_crypto_arch.h>      /* AES-CCM* link security        */
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND first  */
 #include <kernel/timers/tiku_clock.h>
+#include <kernel/memory/tiku_mem.h>            /* durable frame-counter cell    */
 #include <string.h>
 
 /* Link security: level 6 (ENC-MIC-64) AES-CCM*, key-id-mode 0 (implicit). */
@@ -46,8 +47,77 @@ static void mac_nonce(uint8_t n[13], uint16_t src, uint32_t ctr)
     n[12] = MAC_SEC_LEVEL;
 }
 
+/* Durable TX frame counter (kill the nonce-reuse-on-reboot bug).  The nonce
+ * is src||counter||level with a fixed key, so a counter that restarts at 0
+ * after a power cycle repeats a keystream -- catastrophic for CTR mode.  We
+ * reserve counters AHEAD in durable storage: persist a high-water mark
+ * WINDOW past what we hand out, so at most one durable write per WINDOW
+ * frames, and on reboot we resume above every counter ever used (unused
+ * reserved counters are simply skipped -- safe). */
+#define MAC_CTR_MAGIC   0x15CC7201u
+#define MAC_CTR_WINDOW  64u
+
+static TIKU_DURABLE uint32_t mac_ctr_hwm_persist;
+TIKU_PERSIST_CELL(mac_ctr_cell, mac_ctr_hwm_persist, MAC_CTR_MAGIC, NULL, 0);
+static uint8_t mac_ctr_ready;
+
+static uint32_t mac_ctr_next(void)
+{
+    uint32_t c;
+    if (mac_ctr_ready == 0u) {
+        (void)tiku_persist_cell_init(&mac_ctr_cell);
+        mac_tx_ctr = mac_ctr_hwm_persist;        /* resume above all reserved  */
+        mac_ctr_ready = 1u;
+    }
+    if (mac_tx_ctr >= mac_ctr_hwm_persist) {      /* window exhausted: reserve  */
+        tiku_persist_cell_write_u32(&mac_ctr_cell,
+                                    mac_tx_ctr + MAC_CTR_WINDOW);
+    }
+    c = mac_tx_ctr;
+    mac_tx_ctr++;
+    return c;
+}
+
+/* RX anti-replay: per-source last-accepted counter; a frame whose counter is
+ * not strictly greater is a replay/stale and dropped.  Small MRU table (the
+ * node<->node case); best-effort under eviction. */
+#define MAC_RX_SEEN 4u
+static struct {
+    uint16_t src;
+    uint32_t ctr;
+    uint8_t  used;
+} mac_rx_seen[MAC_RX_SEEN];
+static uint8_t mac_rx_evict;
+
+static int mac_rx_fresh(uint16_t src, uint32_t ctr)
+{
+    uint8_t i, slot = MAC_RX_SEEN;
+    for (i = 0u; i < MAC_RX_SEEN; i++) {
+        if (mac_rx_seen[i].used != 0u && mac_rx_seen[i].src == src) {
+            if (ctr <= mac_rx_seen[i].ctr) {
+                return 0;                        /* replay / out-of-order      */
+            }
+            mac_rx_seen[i].ctr = ctr;
+            return 1;
+        }
+        if (mac_rx_seen[i].used == 0u) {
+            slot = i;
+        }
+    }
+    if (slot >= MAC_RX_SEEN) {                    /* full: round-robin evict    */
+        slot = mac_rx_evict;
+        mac_rx_evict = (uint8_t)((mac_rx_evict + 1u) % MAC_RX_SEEN);
+    }
+    mac_rx_seen[slot].used = 1u;
+    mac_rx_seen[slot].src  = src;
+    mac_rx_seen[slot].ctr  = ctr;
+    return 1;
+}
+
 void tiku_154_set_key(const uint8_t *key)
 {
+    memset(mac_rx_seen, 0, sizeof(mac_rx_seen));  /* fresh replay window        */
+    mac_rx_evict = 0u;
     if (key == 0) {
         mac_have_key = 0u;
         mac_secure = 0u;
@@ -60,6 +130,16 @@ void tiku_154_set_key(const uint8_t *key)
 void tiku_154_set_secure(int on)
 {
     mac_secure = (on != 0 && mac_have_key) ? 1u : 0u;
+}
+
+uint32_t tiku_154_tx_counter(void)
+{
+    if (mac_ctr_ready == 0u) {
+        (void)tiku_persist_cell_init(&mac_ctr_cell);
+        mac_tx_ctr = mac_ctr_hwm_persist;
+        mac_ctr_ready = 1u;
+    }
+    return mac_tx_ctr;
 }
 
 static uint16_t mac_pan  = 0xABCDu;
@@ -170,7 +250,7 @@ static uint16_t mac_build_secured(uint8_t *frame, uint16_t dst,
     tiku_154_mhr_t h;
     uint16_t hlen;
     uint8_t  nonce[13];
-    uint32_t ctr = ++mac_tx_ctr;
+    uint32_t ctr = mac_ctr_next();               /* durable, no reboot reuse   */
 
     memset(&h, 0, sizeof(h));
     h.type = TIKU_154_FT_DATA;
@@ -334,6 +414,10 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                 if (memcmp(rmic, &frame[hlen + MAC_ASH_LEN + ctlen],
                            MAC_MIC_LEN) != 0) {
                     continue;                    /* MIC fail: forged/wrong key */
+                }
+                if (mac_rx_fresh((uint16_t)(h.src_addr[0] |
+                        ((uint16_t)h.src_addr[1] << 8)), rctr) == 0) {
+                    continue;                    /* replayed/stale frame       */
                 }
                 plen = (uint8_t)((ctlen > cap) ? cap : ctlen);
                 if (plen != 0u) {

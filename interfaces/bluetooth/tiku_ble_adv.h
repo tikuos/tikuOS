@@ -191,6 +191,7 @@ typedef enum {
     TIKU_BLE_ADV_OWNER_BEACON_OBSERVE,  /**< R7.5: beacon + observer,
                                          *   time-divided on one radio     */
     TIKU_BLE_ADV_OWNER_CONN,            /**< L6: FLPR serial connection     */
+    TIKU_BLE_ADV_OWNER_154,             /**< N-track: 802.15.4 owns the RADIO*/
 } tiku_ble_adv_owner_t;
 
 /** @brief Current radio owner. */
@@ -212,6 +213,16 @@ int tiku_ble_adv_conn_claim(void);
 
 /** @brief Release a connection claim (back to IDLE). Idempotent. */
 void tiku_ble_adv_conn_release(void);
+
+/**
+ * @brief Claim the radio for 802.15.4 (mode-switches the shared RADIO, so it
+ * cannot coexist with a BLE beacon/observer/connection).  Claim only from
+ * IDLE.  @return 0 claimed, -1 already owned.
+ */
+int tiku_ble_adv_154_claim(void);
+
+/** @brief Release a 15.4 claim (back to IDLE). Idempotent. */
+void tiku_ble_adv_154_release(void);
 
 /**
  * @brief Start the background observer (non-blocking scan).
