@@ -151,4 +151,20 @@ uint32_t tiku_flpr_arch_conn_events(void);
 /** @brief Stop the FLPR's hold loop and reclaim the RADIO (secure). */
 void tiku_flpr_arch_conn_stop(void);
 
+/**
+ * @brief Non-blocking advertise+hold (L6 F-L6.3 facade start).
+ * @return 0 shipped, -1 not running / bad args.  Poll conn_active().
+ */
+int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
+                              const uint8_t *addr);
+
+/** @brief 1 once the central subscribed to NUS TX notifications. */
+int tiku_flpr_arch_conn_subscribed(void);
+
+/** @brief Pop NUS bytes the central wrote; returns count (0 if none). */
+int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap);
+
+/** @brief Hand NUS bytes to the FLPR to notify the central; returns count. */
+int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len);
+
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

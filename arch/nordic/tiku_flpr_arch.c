@@ -507,4 +507,80 @@ void tiku_flpr_arch_conn_stop(void)
     flpr_radio_ns(0);                          /* reclaim secure alias       */
 }
 
+/*---------------------------------------------------------------------------*/
+/* NUS byte pipe over the mailbox (L6 F-L6.2) -- facade primitives (F-L6.3)  */
+/*---------------------------------------------------------------------------*/
+
+/* Non-blocking advertise+hold: flip NS, ship the ADV PDU, return.  The FLPR
+ * advertises then holds autonomously; poll conn_active() for the link. */
+int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
+                              const uint8_t *addr)
+{
+    volatile tiku_flpr_conn_t *in =
+        (volatile tiku_flpr_conn_t *)TIKU_FLPR_SHARED->a2f_buf;
+    uint32_t i;
+
+    if (!tiku_flpr_arch_running() || adv_len > sizeof(in->adv)) {
+        return -1;
+    }
+    TIKU_FLPR_SHARED->conn_state = 0u;
+    flpr_radio_ns(1);
+    in->adv_len = adv_len;
+    for (i = 0u; i < 6u; i++) {
+        in->addr[i] = addr[i];
+    }
+    for (i = 0u; i < adv_len; i++) {
+        in->adv[i] = adv[i];
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
+    return 0;
+}
+
+/* 1 once the central subscribed to NUS TX notifications (CCCD written). */
+int tiku_flpr_arch_conn_subscribed(void)
+{
+    return (TIKU_FLPR_SHARED->conn_sub != 0u) ? 1 : 0;
+}
+
+/* Pop NUS bytes the central wrote (f2a mailbox); 0 if none new. */
+static uint32_t flpr_nus_rx_seen;
+
+int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap)
+{
+    uint32_t seq = TIKU_FLPR_SHARED->f2a_seq;
+    uint32_t n;
+
+    if (seq == flpr_nus_rx_seen || buf == (uint8_t *)0 || cap == 0u) {
+        return 0;
+    }
+    flpr_nus_rx_seen = seq;
+    n = TIKU_FLPR_SHARED->f2a_len;
+    if (n > cap) {
+        n = cap;
+    }
+    memcpy(buf, (const void *)TIKU_FLPR_SHARED->f2a_buf, n);
+    return (int)n;
+}
+
+/* Hand NUS bytes to the FLPR to notify to the central (a2f mailbox). */
+int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len)
+{
+    uint32_t i;
+
+    if (!tiku_flpr_arch_conn_active() || buf == (const uint8_t *)0) {
+        return -1;
+    }
+    if (len > 20u) {
+        len = 20u;                             /* one NUS notification       */
+    }
+    for (i = 0u; i < len; i++) {
+        TIKU_FLPR_SHARED->a2f_buf[i] = buf[i];
+    }
+    TIKU_FLPR_SHARED->a2f_len = len;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->a2f_seq = TIKU_FLPR_SHARED->a2f_seq + 1u;
+    return (int)len;
+}
+
 #endif /* TIKU_FLPR_ENABLE */

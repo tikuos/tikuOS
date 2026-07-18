@@ -91,6 +91,10 @@ typedef struct {
     volatile uint8_t  conn_hop;
     volatile uint8_t  conn_winsize;
     volatile uint8_t  conn_chm[5];
+    volatile uint32_t conn_sub;         /* NUS TX CCCD enabled (step 1b/L6.2)*/
+    /* NUS byte pipe (F-L6.2): RX writes -> f2a mailbox (doorbelled),
+     * a2f mailbox bytes -> TX notifications.  Reuses a2f/f2a during hold
+     * (the advertise input is already consumed). */
 } tiku_flpr_shared_t;
 
 /* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + our AdvA. */

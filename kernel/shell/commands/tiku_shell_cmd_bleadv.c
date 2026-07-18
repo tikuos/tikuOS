@@ -661,6 +661,80 @@ static void bleadv_flpradv(void)
     SHELL_PRINTF("  stopped (FLPR serviced %lu events, L6 F-L6.1 step 1b)\n",
                  (unsigned long)tiku_flpr_arch_conn_events());
 }
+
+/* L6 F-L6.2: the FLPR carries NUS DATA.  Connect, then echo bytes the
+ * central writes (NUS RX -> f2a mailbox) straight back as notifications
+ * (a2f mailbox -> NUS TX) -- the loopback runs central <-> FLPR <-> M33,
+ * exercising the tiku_ble_serial recv/send primitives end to end. */
+static void bleadv_flprnus(void)
+{
+    uint8_t addr[6], ad[31], adv[48];
+    uint8_t adlen = 0u, advlen;
+    static const char nm[] = "TIKU-CONN";
+    tiku_flpr_conn_info_t info;
+    int rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
+        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
+    ad[adlen++] = (uint8_t)(1u + sizeof(nm) - 1u);
+    ad[adlen++] = 0x09u;
+    memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
+    adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
+    advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    adv[0] = 0x40u;
+
+    SHELL_PRINTF("FLPR NUS pipe: advertising 'TIKU-CONN' -- connect a NUS"
+                 " client (bleadv central on the peer)...\n");
+    tiku_radio_arch_init();
+    NRF_RADIO_S->TIFS = 150u;
+    tiku_radio_arch_constlat_hold(1);
+    rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
+    if (rc != 0) {
+        tiku_radio_arch_constlat_hold(0);
+        SHELL_PRINTF("no NUS client connected (rc=%d)\n", rc);
+        return;
+    }
+    SHELL_PRINTF("  connected; FLPR NUS server live, echoing RX->TX ~15 s...\n");
+    {
+        uint8_t b[24];
+        char hx[50];
+        uint32_t total = 0u;
+        tiku_clock_time_t start = tiku_clock_time();
+        while ((tiku_clock_time_t)(tiku_clock_time() - start) <
+               (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
+            int n = tiku_flpr_arch_conn_recv(b, sizeof(b));
+            if (n > 0) {
+                total += (uint32_t)n;
+                bleadv_fmt_hex(hx, b, n > 16 ? 16 : n, 0);
+                SHELL_PRINTF("  NUS RX %d B [%s] -> echoed to TX\n", n, hx);
+                (void)tiku_flpr_arch_conn_send(b, (uint32_t)n);
+            }
+            tiku_watchdog_kick();
+            if (!tiku_flpr_arch_conn_active()) {
+                break;
+            }
+        }
+        tiku_flpr_arch_conn_stop();
+        tiku_radio_arch_constlat_hold(0);
+        if (total != 0u) {
+            SHELL_PRINTF(SH_GREEN "  NUS pipe OK: %lu bytes RX'd + echoed"
+                         " through the FLPR (L6 F-L6.2)\n" SH_RST,
+                         (unsigned long)total);
+        } else {
+            SHELL_PRINTF("  no NUS bytes received (client didn't write?)\n");
+        }
+    }
+}
 #endif /* TIKU_FLPR_ENABLE */
 
 void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
@@ -686,6 +760,10 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "flpradv") == 0) {
         bleadv_flpradv();
+        return;
+    }
+    if (strcmp(argv[1], "flprnus") == 0) {
+        bleadv_flprnus();
         return;
     }
 #endif

@@ -269,12 +269,146 @@ static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
     return r;
 }
 
+/* --- LL control + NUS server on the FLPR (L6 F-L6.2), ported from the M33
+ * L4/L5.  One pending PDU (LL control OR L2CAP/ATT), retransmitted via
+ * SN/NESN until acked.  NUS RX writes go out the f2a mailbox to the M33;
+ * a2f mailbox bytes come back as NUS TX notifications. */
+#define FNUS_H_RX    0x0012u    /* NUS RX write target                     */
+#define FNUS_H_TX    0x0014u    /* NUS TX notify source                    */
+#define FNUS_H_CCCD  0x0015u    /* CCCD for TX                             */
+
+static uint8_t  fll_tx[40];             /* pending PDU [hdr][len][S1][pay]  */
+static uint8_t  fll_tx_len;             /* payload len; 0 = none            */
+static uint8_t  fll_tx_llid;            /* 2 L2CAP / 3 control              */
+static uint8_t  fll_sent_vers;          /* we queued our VERSION_IND        */
+static uint8_t  fll_sn, fll_nesn;       /* link-layer sequence bits         */
+static uint32_t fll_a2f_seen;           /* last a2f_seq consumed (TX bytes) */
+
+static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
+{
+    uint8_t i;
+    if (fll_tx_len != 0u || plen == 0u) {
+        return;                         /* one PDU in flight                */
+    }
+    fll_tx_llid = llid;
+    fll_tx[1] = plen;
+    fll_tx[2] = p[0];                   /* S1 = payload[0] (erratum-49)     */
+    for (i = 0u; i < plen; i++) {
+        fll_tx[3u + i] = p[i];
+    }
+    fll_tx_len = plen;
+}
+
+static void fll_queue_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
+{
+    uint8_t p[16], i;
+    p[0] = op;
+    for (i = 0u; i < dl; i++) {
+        p[1u + i] = d[i];
+    }
+    fll_queue_raw(3u, p, (uint8_t)(1u + dl));
+}
+
+static void fll_att_queue(const uint8_t *att, uint8_t alen)
+{
+    uint8_t p[30], i;
+    p[0] = alen; p[1] = 0u;             /* L2CAP length                     */
+    p[2] = 0x04u; p[3] = 0x00u;         /* CID = ATT                        */
+    for (i = 0u; i < alen; i++) {
+        p[4u + i] = att[i];
+    }
+    fll_queue_raw(2u, p, (uint8_t)(4u + alen));
+}
+
+/* Build the outgoing PDU (pending, else empty) with current SN/NESN. */
+static uint8_t fll_build_tx(uint8_t *out)
+{
+    uint8_t i;
+    if (fll_tx_len != 0u) {
+        for (i = 0u; i < 3u + fll_tx_len; i++) {
+            out[i] = fll_tx[i];
+        }
+        out[0] = (uint8_t)((fll_tx_llid & 0x03u) |
+                           (fll_nesn << 2) | (fll_sn << 3));
+        out[2] = out[3];
+        return (uint8_t)(3u + fll_tx_len);
+    }
+    out[0] = (uint8_t)(0x01u | (fll_nesn << 2) | (fll_sn << 3));
+    out[1] = 0u;
+    out[2] = out[0];
+    return 3u;
+}
+
+/* ATT (NUS server): MTU; CCCD write -> subscribe; NUS RX write -> f2a. */
+static void fll_att_handle(const volatile uint8_t *att, uint8_t alen,
+                           tiku_flpr_shared_t *sh)
+{
+    uint8_t op = att[0];
+    if (op == 0x02u) {                          /* Exchange MTU Req         */
+        uint8_t m[3] = { 0x03u, 23u, 0u };
+        fll_att_queue(m, 3u);
+    } else if (op == 0x12u && alen >= 4u) {     /* Write Request            */
+        uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
+        if (h == FNUS_H_CCCD) {
+            sh->conn_sub = att[3];
+        } else if (h == FNUS_H_RX) {            /* client -> server bytes   */
+            uint8_t n = (uint8_t)(alen - 3u), i;
+            if (n > TIKU_FLPR_MSG_CAP) {
+                n = TIKU_FLPR_MSG_CAP;
+            }
+            for (i = 0u; i < n; i++) {
+                sh->f2a_buf[i] = att[3u + i];
+            }
+            sh->f2a_len = n;
+            sh->f2a_seq = sh->f2a_seq + 1u;     /* hand off to the M33      */
+            flpr_doorbell_to_app();
+        }
+        {
+            uint8_t rsp = 0x13u;                /* Write Response           */
+            fll_att_queue(&rsp, 1u);
+        }
+    }
+}
+
+/* Dispatch a genuinely-new RX PDU: LL control or L2CAP/ATT. */
+static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
+{
+    uint8_t llid = buf[0] & 0x03u, op;
+    if (buf[1] == 0u) {
+        return;
+    }
+    if (llid == 0x02u) {                        /* L2CAP: ATT is CID 0x0004 */
+        if (buf[1] >= 5u && buf[5] == 0x04u && buf[6] == 0x00u) {
+            fll_att_handle(&buf[7], (uint8_t)(buf[1] - 4u), sh);
+        }
+        return;
+    }
+    if (llid != 0x03u) {
+        return;
+    }
+    op = buf[3];
+    if (op == 0x0Cu) {                          /* VERSION_IND -> reply     */
+        if (!fll_sent_vers) {
+            static const uint8_t v[5] = { 0x0Cu, 0x59u, 0x00u, 0x01u, 0x00u };
+            fll_queue_ctrl(0x0Cu, v, 5u);
+            fll_sent_vers = 1u;
+        }
+    } else if (op == 0x12u) {                   /* LL_PING_REQ -> RSP       */
+        fll_queue_ctrl(0x13u, (const uint8_t *)0, 0u);
+    } else if (op == 0x08u) {                   /* FEATURE_REQ -> RSP (none)*/
+        static const uint8_t none[8] = { 0u };
+        fll_queue_ctrl(0x09u, none, 8u);
+    } else if (op != 0x09u && op != 0x13u && op != 0x07u) {
+        fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
+    }
+}
+
 /* Hold the link (L6 F-L6.1 step 1b): continuous-RX connection events.  No
  * timebase needed -- the central paces at connInterval, so we open RX on
  * the CSA#1 channel and wait for its packet, hardware-T_IFS respond with
  * an empty PDU carrying our SN/NESN, and re-arm.  Channels advance per
  * event in lockstep with the central.  Supervision = a run of misses. */
-static uint8_t conn_txb[8]     __attribute__((aligned(4)));
+static uint8_t conn_txb[40]    __attribute__((aligned(4)));
 static uint8_t conn_datrx[48]  __attribute__((aligned(4)));
 
 static void flpr_conn_hold(tiku_flpr_shared_t *sh)
@@ -282,18 +416,24 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     NRF_RADIO_Type *r = NRF_RADIO_NS;
     uint32_t aa = sh->conn_aa, crcinit = sh->conn_crcinit;
     uint8_t  hop = sh->conn_hop, chmap[5];
-    uint8_t  sn = 0u, nesn = 0u, last_un = 0u, k, i;
+    uint8_t  last_un = 0u, k, i;
     uint32_t event = 0u, miss_run = 0u, spin;
 
     for (i = 0u; i < 5u; i++) {
         chmap[i] = sh->conn_chm[i];
     }
+    /* Reset the LL/NUS state for this connection. */
+    fll_tx_len = 0u; fll_tx_llid = 0u; fll_sent_vers = 0u;
+    fll_sn = 0u; fll_nesn = 0u;
+    fll_a2f_seen = sh->a2f_seq;
+    sh->conn_sub = 0u;
+
     r->BASE0   = aa << 8;                        /* BALEN=3: base in top 3 B */
     r->PREFIX0 = (aa >> 24) & 0xFFu;
     r->CRCINIT = crcinit & 0x00FFFFFFu;
 
     for (;;) {
-        uint8_t got = 0u;
+        uint8_t got = 0u, txn;
 
         k = flpr_csa1_next(&last_un, hop, chmap);
         r->FREQUENCY = flpr_data_freq(k);
@@ -340,16 +480,22 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         }
         if (r->EVENTS_CRCOK != 0u) {
             uint8_t h = conn_datrx[0];
-            (void)flpr_ll_ack(&sn, &nesn, (uint8_t)((h >> 3) & 1u),
-                              (uint8_t)((h >> 2) & 1u),
-                              (uint8_t)(conn_datrx[1] != 0u));
+            uint8_t rc = flpr_ll_ack(&fll_sn, &fll_nesn,
+                                     (uint8_t)((h >> 3) & 1u),
+                                     (uint8_t)((h >> 2) & 1u),
+                                     (uint8_t)(conn_datrx[1] != 0u));
+            if (rc & 2u) {                       /* our last PDU landed      */
+                fll_tx_len = 0u;
+            }
+            if (rc & 1u) {                       /* genuinely-new payload    */
+                fll_handle_rx(conn_datrx, sh);
+            }
         }
-        /* Empty PDU response with the updated SN/NESN; drop DISABLED_TXEN
-         * so the response's own DISABLED cannot re-trigger a spurious TX
-         * (the step-0 / M33 conn_event fix). */
-        conn_txb[0] = (uint8_t)(0x01u | (nesn << 2) | (sn << 3));
-        conn_txb[1] = 0u;
-        conn_txb[2] = conn_txb[0];
+        /* Build our response (pending LL/ATT PDU, else empty) with the
+         * updated SN/NESN.  Drop DISABLED_TXEN so the response's own
+         * DISABLED cannot re-trigger a spurious TX (the step-0 fix). */
+        txn = fll_build_tx(conn_txb);
+        (void)txn;
         r->SHORTS = (1u << 0) | (1u << 19);
         r->PACKETPTR = (uint32_t)conn_txb;
         r->EVENTS_PHYEND   = 0u;
@@ -358,6 +504,23 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             if (r->EVENTS_DISABLED != 0u) {
                 break;
             }
+        }
+        /* NUS TX: new bytes from the M33 (a2f) -> Handle Value Notification
+         * once subscribed and the pending slot is free. */
+        if (sh->conn_sub != 0u && fll_tx_len == 0u &&
+            sh->a2f_seq != fll_a2f_seen) {
+            uint8_t n = (uint8_t)sh->a2f_len, nb[3 + 20];
+            fll_a2f_seen = sh->a2f_seq;
+            if (n > 20u) {
+                n = 20u;
+            }
+            nb[0] = 0x1Bu;                        /* Handle Value Notify      */
+            nb[1] = (uint8_t)FNUS_H_TX;
+            nb[2] = (uint8_t)(FNUS_H_TX >> 8);
+            for (i = 0u; i < n; i++) {
+                nb[3u + i] = sh->a2f_buf[i];
+            }
+            fll_att_queue(nb, (uint8_t)(3u + n));
         }
         sh->conn_events = ++event;
         if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
