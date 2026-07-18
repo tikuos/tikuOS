@@ -145,6 +145,9 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
 /** @brief 1 while the FLPR is holding a live connection (step 1b). */
 int tiku_flpr_arch_conn_active(void);
 
+/** @brief Raw conn_state: 0 advertising, 1 connected, 2 gave up, 3 ended. */
+uint32_t tiku_flpr_arch_conn_state(void);
+
 /** @brief Connection events the FLPR has serviced (rising = link alive). */
 uint32_t tiku_flpr_arch_conn_events(void);
 

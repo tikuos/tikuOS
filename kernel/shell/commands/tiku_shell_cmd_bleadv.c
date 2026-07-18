@@ -68,6 +68,7 @@
 #include <kernel/cpu/tiku_common.h>          /* unique id -> AdvA (ext)         */
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>      /* L6: FLPR-as-controller (F-L6.1) */
+#include <interfaces/bluetooth/tiku_ble_serial.h> /* facade (B3 auto-reconnect) */
 #endif
 #include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
@@ -838,6 +839,50 @@ static void bleadv_flprnus(void)
         }
     }
 }
+
+/* B3: drive the tiku_ble_serial FACADE (not the arch directly) as a
+ * persistent NUS echo service for ~secs, so the auto-reconnect can be
+ * exercised: connect a central, let it drop, and the service re-advertises
+ * for the next one.  "link up (#N)" with N>=2 proves a reconnect. */
+static void bleadv_serial(unsigned secs)
+{
+    tiku_clock_time_t start;
+    uint32_t connects = 0u, echoed = 0u, last_st = 9u;
+    uint8_t  was_ready = 0u, b[24];
+
+    if (tiku_ble_serial_start("TIKU-CONN") != 0) {
+        SHELL_PRINTF("serial start failed (radio busy / FLPR down)\n");
+        return;
+    }
+    SHELL_PRINTF("NUS serial 'TIKU-CONN' ~%u s (facade, auto-reconnect)...\n",
+                 secs);
+    start = tiku_clock_time();
+    while ((tiku_clock_time_t)(tiku_clock_time() - start) <
+           (tiku_clock_time_t)((uint32_t)TIKU_CLOCK_SECOND * secs)) {
+        int r = tiku_ble_serial_ready();       /* also drives auto-reconnect  */
+        uint32_t st = tiku_flpr_arch_conn_state();
+        if (st != last_st) {
+            SHELL_PRINTF("  [conn_state %lu]\n", (unsigned long)st);
+            last_st = st;
+        }
+        if (r != 0 && was_ready == 0u) {
+            connects++;
+            SHELL_PRINTF("  link up (#%lu)\n", (unsigned long)connects);
+        }
+        was_ready = (uint8_t)(r != 0);
+        if (r != 0 && tiku_ble_serial_rx_ready()) {
+            int n = tiku_ble_serial_recv(b, sizeof(b));
+            if (n > 0) {
+                (void)tiku_ble_serial_send(b, (uint16_t)n);
+                echoed++;
+            }
+        }
+        tiku_watchdog_kick();
+    }
+    tiku_ble_serial_stop();
+    SHELL_PRINTF("serial done: %lu link-ups, %lu echoed\n",
+                 (unsigned long)connects, (unsigned long)echoed);
+}
 #endif /* TIKU_FLPR_ENABLE */
 
 void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
@@ -867,6 +912,11 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "flprnus") == 0) {
         bleadv_flprnus();
+        return;
+    }
+    if (strcmp(argv[1], "serial") == 0) {
+        bleadv_serial(argc > 2 ? (unsigned)strtoul(argv[2], (char **)0, 10)
+                               : 30u);
         return;
     }
 #endif

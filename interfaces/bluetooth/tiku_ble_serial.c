@@ -190,6 +190,9 @@ tiku_ble_serial_beacon(const char *name)
 #define BLE_SERIAL_NAME_CAP  24u
 
 static uint8_t s_started;
+static uint8_t s_adv[48];                          /* stored for re-advertise */
+static uint8_t s_addr[6];
+static uint8_t s_advlen;
 
 int
 tiku_ble_serial_available(void)
@@ -234,8 +237,36 @@ tiku_ble_serial_start(const char *name)
         tiku_ble_adv_conn_release();
         return -1;
     }
+    /* Stash the ADV + AdvA so a dropped link can be re-advertised without the
+     * caller restarting the service (auto-reconnect). */
+    if (advlen > (uint8_t)sizeof(s_adv)) {
+        advlen = (uint8_t)sizeof(s_adv);
+    }
+    memcpy(s_adv, adv, advlen);
+    s_advlen = advlen;
+    memcpy(s_addr, addr, 6u);
     s_started = 1u;
     return 0;
+}
+
+/* Auto-reconnect: the FLPR controller drops to conn_state 3 (ended) on
+ * supervision timeout / peer disconnect, or 2 (gave up) if an advertise
+ * window expired with no central.  In either idle state, re-advertise so the
+ * service stays reachable; conn_start resets conn_state to 0 (advertising),
+ * so this fires once per drop, not every poll. */
+static void serial_reconnect(void)
+{
+    uint32_t st;
+    if (s_started == 0u) {
+        return;
+    }
+    st = tiku_flpr_arch_conn_state();
+    if (st != 0u && st != 1u) {                /* not advertising, not connected*/
+        tiku_flpr_arch_conn_stop();            /* reclaim the RADIO to secure   */
+        tiku_radio_arch_init();                /* re-set the ADV link config    */
+        NRF_RADIO_S->TIFS = 150u;
+        (void)tiku_flpr_arch_conn_start(s_adv, s_advlen, s_addr);
+    }
 }
 
 void
@@ -258,6 +289,7 @@ tiku_ble_serial_service(void)
 int
 tiku_ble_serial_ready(void)
 {
+    serial_reconnect();                        /* re-advertise a dropped link */
     return (tiku_flpr_arch_conn_active() &&
             tiku_flpr_arch_conn_subscribed()) ? 1 : 0;
 }

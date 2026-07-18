@@ -596,7 +596,12 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             have_anchor = 0u;
             idle_iters  = idle_iters / 2u;
             win         = ARX_WIN_MAX;
-            if (++miss_run > 200u) {             /* supervision timeout      */
+            /* Supervision: each re-acquire miss is a wide (~ARX_WIN_MAX) RX
+             * window ~200 ms at the contended FLPR rate, so ~30 CONSECUTIVE
+             * misses ~= 6 s of silence -> declare the link dead.  A healthy
+             * link resets miss_run on every catch, so 30-in-a-row means the
+             * peer is genuinely gone (BLE supervision is ~4 s). */
+            if (++miss_run > 30u) {
                 break;
             }
             if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {

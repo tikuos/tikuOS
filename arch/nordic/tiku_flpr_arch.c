@@ -480,6 +480,11 @@ int tiku_flpr_arch_conn_active(void)
     return (TIKU_FLPR_SHARED->conn_state == 1u) ? 1 : 0;
 }
 
+uint32_t tiku_flpr_arch_conn_state(void)
+{
+    return TIKU_FLPR_SHARED->conn_state;
+}
+
 /* Connection events the FLPR has serviced (rising = link alive). */
 uint32_t tiku_flpr_arch_conn_events(void)
 {
