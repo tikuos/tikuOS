@@ -607,6 +607,15 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
             break;
         }
+        /* Anchored-RX (power) DEFERRED: idling the radio for a busy-loop
+         * gap between events would cut RADIO-on duty, but it needs the RX
+         * window shrunk AND the gap calibrated so gap+window ~= connInterval
+         * (both same-core loops for matched rates, re-synced to each packet
+         * so there is no drift).  The busy-loop rate proved far off a first
+         * estimate (a too-long gap collapsed the catch rate to ~2%), so it
+         * needs empirical loop-rate calibration -- and a power meter (not on
+         * the rig) to validate the win.  Kept CONTINUOUS-RX (proven ~90%)
+         * until then; see kintsugi/radio.md L6 refinements. */
     }
     sh->conn_state = 3u;                         /* link ended               */
 }
