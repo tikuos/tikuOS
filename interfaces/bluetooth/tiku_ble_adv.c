@@ -72,11 +72,31 @@ tiku_ble_adv_owner_t tiku_ble_adv_owner(void)
 
 const char *tiku_ble_adv_owner_str(void)
 {
-    static const char *names[6] = {
+    static const char *names[7] = {
         "idle", "beacon", "beacon-flpr", "scan", "observe",
-        "beacon+observe",
+        "beacon+observe", "conn",
     };
     return names[radio_owner];
+}
+
+/* L6 R7: the FLPR serial link claims the whole radio (NonSecure, on the
+ * coprocessor) for the connection's lifetime -- no time-division with a
+ * beacon/observer.  Claim only from IDLE; the beacon/observe starts refuse
+ * while CONN is held (below). */
+int tiku_ble_adv_conn_claim(void)
+{
+    if (radio_owner != TIKU_BLE_ADV_OWNER_IDLE) {
+        return -1;
+    }
+    radio_owner = (uint8_t)TIKU_BLE_ADV_OWNER_CONN;
+    return 0;
+}
+
+void tiku_ble_adv_conn_release(void)
+{
+    if (radio_owner == TIKU_BLE_ADV_OWNER_CONN) {
+        radio_owner = (uint8_t)TIKU_BLE_ADV_OWNER_IDLE;
+    }
 }
 
 static void adv_radio_init_once(void)
@@ -149,8 +169,10 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
                           radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE);
 
     /* A blocking scan owns the CPU synchronously (nothing else runs), so
-     * SCAN is denied defensively. */
-    if (radio_owner == TIKU_BLE_ADV_OWNER_SCAN) {
+     * SCAN is denied defensively.  A live serial connection (L6) drives the
+     * radio NonSecure on the FLPR for its whole lifetime -- deny too. */
+    if (radio_owner == TIKU_BLE_ADV_OWNER_SCAN ||
+        radio_owner == TIKU_BLE_ADV_OWNER_CONN) {
         return -1;
     }
 

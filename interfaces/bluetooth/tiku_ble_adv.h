@@ -190,6 +190,7 @@ typedef enum {
     TIKU_BLE_ADV_OWNER_OBSERVE,         /**< background observer           */
     TIKU_BLE_ADV_OWNER_BEACON_OBSERVE,  /**< R7.5: beacon + observer,
                                          *   time-divided on one radio     */
+    TIKU_BLE_ADV_OWNER_CONN,            /**< L6: FLPR serial connection     */
 } tiku_ble_adv_owner_t;
 
 /** @brief Current radio owner. */
@@ -197,6 +198,20 @@ tiku_ble_adv_owner_t tiku_ble_adv_owner(void);
 
 /** @brief Owner as a short string ("idle"/"beacon"/"beacon-flpr"/...). */
 const char *tiku_ble_adv_owner_str(void);
+
+/**
+ * @brief Claim the radio for a connection (L6 FLPR serial link).
+ *
+ * One radio, one owner (R7): the serial link drives RADIO NonSecure via the
+ * FLPR for the whole connection, so it cannot time-divide with a beacon or
+ * observer.  Claim succeeds only from IDLE.
+ *
+ * @return 0 claimed, -1 the radio is already owned.
+ */
+int tiku_ble_adv_conn_claim(void);
+
+/** @brief Release a connection claim (back to IDLE). Idempotent. */
+void tiku_ble_adv_conn_release(void);
 
 /**
  * @brief Start the background observer (non-blocking scan).

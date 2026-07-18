@@ -179,6 +179,7 @@ tiku_ble_serial_beacon(const char *name)
 #include <arch/nordic/tiku_flpr_arch.h>        /* the on-die BLE controller  */
 #include <arch/nordic/tiku_radio_arch.h>       /* adv_build + link cfg + TIFS */
 #include <arch/nordic/tiku_device_select.h>    /* NRF_RADIO_S (TIFS)          */
+#include <interfaces/bluetooth/tiku_ble_adv.h> /* R7 radio-ownership arbiter  */
 #include <kernel/cpu/tiku_common.h>            /* unique id -> AdvA           */
 #include <string.h>
 
@@ -208,6 +209,9 @@ tiku_ble_serial_start(const char *name)
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
         return -1;
     }
+    if (tiku_ble_adv_conn_claim() != 0) {      /* R7: one radio, one owner    */
+        return -1;                             /* a beacon/observer holds it  */
+    }
     tiku_common_unique_id(addr, 6u);
     addr[5] |= 0xC0u;                          /* random static address       */
     nl = (uint8_t)strlen(nm);
@@ -227,6 +231,7 @@ tiku_ble_serial_start(const char *name)
     rc = tiku_flpr_arch_conn_start(adv, advlen, addr);   /* non-blocking      */
     if (rc != 0) {
         tiku_radio_arch_constlat_hold(0);
+        tiku_ble_adv_conn_release();
         return -1;
     }
     s_started = 1u;
@@ -239,6 +244,7 @@ tiku_ble_serial_stop(void)
     if (s_started) {
         tiku_flpr_arch_conn_stop();
         tiku_radio_arch_constlat_hold(0);
+        tiku_ble_adv_conn_release();           /* R7: free the radio          */
         s_started = 0u;
     }
 }
