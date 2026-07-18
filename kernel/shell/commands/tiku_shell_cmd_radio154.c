@@ -33,6 +33,12 @@
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>
+#include <interfaces/radio/tiku_154.h>         /* MAC-min: ping/pong           */
+
+/* Demo MAC addresses for the ping/pong ping-pong (one PAN, two nodes). */
+#define R154_PAN      0xABCDu
+#define R154_PING_A   0x1111u
+#define R154_PONG_A   0x2222u
 
 /* Payload tag so the peer can tell OUR frames from ambient 15.4 traffic. */
 static const uint8_t tk15_tag[4] = { 'T', 'K', '1', '5' };
@@ -178,11 +184,77 @@ static void r154_ed(uint8_t argc, const char *argv[])
     tiku_ieee154_arch_mode_ble();
 }
 
+/* MAC-min ping (initiator): addressed unicast + wait for the peer's echo,
+ * counting round-trips -- the N2 PER metric. */
+static void r154_ping(uint8_t argc, const char *argv[])
+{
+    uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
+    long n = (argc > 3u) ? r154_atoi(argv[3]) : 100;
+    uint16_t i;
+    uint32_t ok = 0u;
+    uint8_t pl[2];
+
+    if (n <= 0 || n > 5000) {
+        n = 100;
+    }
+    tiku_154_init(R154_PAN, R154_PING_A, ch);
+    SHELL_PRINTF("154 PING ch%u 0x%x->0x%x (ACK+CSMA), %ld frames...\n",
+                 (unsigned)ch, (unsigned)R154_PING_A, (unsigned)R154_PONG_A, n);
+    for (i = 0u; i < (uint16_t)n; i++) {
+        pl[0] = (uint8_t)i;
+        pl[1] = (uint8_t)(i >> 8);
+        if (tiku_154_send(R154_PONG_A, pl, 2u, 1u) == 0) {   /* ACK-confirmed */
+            ok++;
+        }
+        if ((i & 0x3Fu) == 0u) {
+            tiku_watchdog_kick();
+        }
+    }
+    tiku_ieee154_arch_mode_ble();
+    SHELL_PRINTF("154 PING done: %lu/%ld ACKed (%lu%%)\n",
+                 (unsigned long)ok, n,
+                 (unsigned long)((ok * 100u) / (uint32_t)n));
+}
+
+/* MAC-min pong (responder): receive frames for us and echo the payload back
+ * to the source, for ~secs. */
+static void r154_pong(uint8_t argc, const char *argv[])
+{
+    uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
+    long secs = (argc > 3u) ? r154_atoi(argv[3]) : 15;
+    tiku_clock_time_t start;
+    uint32_t recvd = 0u, acked = 0u;
+    uint8_t rb[TIKU_154_MAX_PSDU];
+    tiku_154_rx_t info;
+
+    if (secs <= 0 || secs > 120) {
+        secs = 15;
+    }
+    tiku_154_init(R154_PAN, R154_PONG_A, ch);
+    SHELL_PRINTF("154 PONG ch%u 0x%x auto-ACK ~%ld s...\n",
+                 (unsigned)ch, (unsigned)R154_PONG_A, secs);
+    start = tiku_clock_time();
+    while ((tiku_clock_time_t)(tiku_clock_time() - start) <
+           (tiku_clock_time_t)((uint32_t)TIKU_CLOCK_SECOND * (uint32_t)secs)) {
+        int r = tiku_154_recv(rb, sizeof(rb), 500u, &info);   /* auto-ACKs   */
+        tiku_watchdog_kick();
+        if (r > 0) {
+            recvd++;
+            if (info.acked != 0u) {
+                acked++;
+            }
+        }
+    }
+    tiku_ieee154_arch_mode_ble();
+    SHELL_PRINTF("154 PONG done: %lu frames (%lu auto-ACKed)\n",
+                 (unsigned long)recvd, (unsigned long)acked);
+}
+
 void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
 {
     if (argc < 2u) {
         SHELL_PRINTF("usage: radio154 tx [ch] [text] | rx [ch] [secs]"
-                     " | ed [ch]\n");
+                     " | ed [ch] | ping [ch] [n] | pong [ch] [secs]\n");
         return;
     }
     if (strcmp(argv[1], "tx") == 0) {
@@ -191,8 +263,13 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
         r154_rx(argc, argv);
     } else if (strcmp(argv[1], "ed") == 0) {
         r154_ed(argc, argv);
+    } else if (strcmp(argv[1], "ping") == 0) {
+        r154_ping(argc, argv);
+    } else if (strcmp(argv[1], "pong") == 0) {
+        r154_pong(argc, argv);
     } else {
-        SHELL_PRINTF("radio154: unknown '%s' (tx|rx|ed)\n", argv[1]);
+        SHELL_PRINTF("radio154: unknown '%s' (tx|rx|ed|ping|pong)\n",
+                     argv[1]);
     }
 }
 

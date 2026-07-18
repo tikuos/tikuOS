@@ -72,4 +72,11 @@ int tiku_ieee154_arch_rx(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
  */
 int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm);
 
+/**
+ * @brief Clear-channel assessment (energy-detect mode) on the current
+ *        channel.  Leaves the radio DISABLED.
+ * @return 1 channel idle (clear to send), 0 busy or ramp/CCA timeout.
+ */
+int tiku_ieee154_arch_cca(void);
+
 #endif /* TIKU_NORDIC_IEEE154_ARCH_H_ */

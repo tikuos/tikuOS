@@ -240,3 +240,40 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm)
     }
     return lvl;
 }
+
+int tiku_ieee154_arch_cca(void)
+{
+    uint32_t spin;
+    int idle = 0;
+
+    /* Energy-detect CCA above a fixed threshold; RXREADY_CCASTART chains the
+     * measurement off the ramp so no software timing is in the loop. */
+    RADIO->CCACTRL =
+        ((uint32_t)RADIO_CCACTRL_CCAMODE_EdMode << RADIO_CCACTRL_CCAMODE_Pos) |
+        ((uint32_t)20u << RADIO_CCACTRL_CCAEDTHRES_Pos);
+    RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_RXREADY_CCASTART_Pos);
+    RADIO->EVENTS_CCAIDLE  = 0u;
+    RADIO->EVENTS_CCABUSY  = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+
+    tiku_radio_arch_hfclk_kick();
+    RADIO->TASKS_RXEN = 1u;
+    for (spin = 0u; spin < 2000000u; spin++) {
+        if (RADIO->EVENTS_CCAIDLE != 0u) {
+            idle = 1;
+            break;
+        }
+        if (RADIO->EVENTS_CCABUSY != 0u) {
+            break;
+        }
+    }
+    RADIO->SHORTS = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    for (spin = 0u; spin < 200000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    return idle;
+}

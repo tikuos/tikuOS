@@ -1240,6 +1240,8 @@ CFLAGS += -DTIKU_HAS_BLE_ADV=1
 # on TIKU_HAS_154 (capability, never the chip); the radio154 shell command
 # and any future 15.4 facade key off it.
 SRCS += arch/nordic/tiku_ieee154_arch.c
+SRCS += interfaces/radio/tiku_154_frame.c
+SRCS += interfaces/radio/tiku_154.c
 CFLAGS += -DTIKU_HAS_154=1
 # FLPR (VPR RISC-V coprocessor) -- opt-in.  Builds the tiny RISC-V firmware
 # (arch/nordic/flpr/) with the xPack riscv-none-elf toolchain (unpacked under
