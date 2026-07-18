@@ -216,6 +216,16 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
  */
 void tiku_radio_arch_central_updates(uint8_t on);
 
+/**
+ * @brief Arm the central as the SMP pairing INITIATOR on the next run.
+ *
+ * When on, the central drives LE Secure Connections "Just Works" on L2CAP
+ * CID 0x0006 (feature -> public key -> confirm/random -> DHKey check) to a
+ * shared LTK, instead of the NUS ATT loopback.  Read the result afterwards
+ * via tiku_ble_smp_pair_state()/_ltk() (Phase E, kintsugi/radio.md).
+ */
+void tiku_radio_arch_central_smp(uint8_t on);
+
 /** Peripheral T_IFS measured by the central (us), ground truth for L3. */
 extern uint32_t tiku_radio_arch_dbg_cen_tifs;
 

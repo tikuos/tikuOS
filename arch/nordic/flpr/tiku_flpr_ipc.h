@@ -91,6 +91,14 @@ typedef struct {
     volatile uint8_t  conn_hop;
     volatile uint8_t  conn_winsize;
     volatile uint8_t  conn_chm[5];
+    /* Peer identity captured from the CONNECT_IND (Phase E / SMP): the SMP
+     * f5/f6 key derivation binds the LTK to both device addresses.  InitA is
+     * the central (initiator, address A); AdvA is us (peripheral, responder,
+     * address B) -- echoed so the host needn't remember what it advertised.
+     * conn_addr_types: bit0 = InitA type, bit1 = AdvA type (1 = random). */
+    volatile uint8_t  conn_inita[6];    /* initiator (central) address = A  */
+    volatile uint8_t  conn_adva[6];     /* advertiser (our) address     = B  */
+    volatile uint8_t  conn_addr_types;  /* bit0 InitA, bit1 AdvA (1=random)  */
     volatile uint32_t conn_sub;         /* vestigial (host tracks CCCD, PhaseB)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */

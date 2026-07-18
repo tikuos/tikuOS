@@ -731,6 +731,16 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
                     sh->conn_chm[i] = conn_rx[31u + i];
                 }
                 sh->conn_hop = (uint8_t)(conn_rx[36] & 0x1Fu);
+                /* Peer identity for SMP f5/f6 (Phase E): InitA at [3..8],
+                 * AdvA at [9..14]; header bit6 (TxAdd)=InitA type, bit7
+                 * (RxAdd)=AdvA type. */
+                for (i = 0u; i < 6u; i++) {
+                    sh->conn_inita[i] = conn_rx[3u + i];
+                    sh->conn_adva[i]  = conn_rx[9u + i];
+                }
+                sh->conn_addr_types =
+                    (uint8_t)(((conn_rx[0] & 0x40u) ? 0x01u : 0x00u) |
+                              ((conn_rx[0] & 0x80u) ? 0x02u : 0x00u));
                 connected = 1u;
             } else {
                 r->TASKS_DISABLE = 1u;

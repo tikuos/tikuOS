@@ -90,4 +90,33 @@ int tiku_ble_host_request_conn_param(uint16_t interval_min,
  *         (accepted); 0 not yet, -1 rejected. */
 int tiku_ble_host_conn_param_result(void);
 
+/* --- SMP pairing (responder, L2CAP CID 0x0006, Phase E) ----------------- */
+
+/**
+ * @brief Arm the SMP responder for this connection (call once, connected).
+ * @param inita  initiator (central) address A (6 B, little-endian).
+ * @param at     A's address type (1 = random, 0 = public).
+ * @param adva   advertiser (our) address B (6 B).
+ * @param bt     B's address type.
+ *
+ * Incoming CID 0x0006 PDUs then drive the LE-SC pairing; the host wraps the
+ * engine's replies in L2CAP and hands them to tiku_ble_host_smp_pump().
+ */
+void tiku_ble_host_smp_start(const uint8_t inita[6], uint8_t at,
+                             const uint8_t adva[6], uint8_t bt);
+
+/**
+ * @brief Stage the next queued SMP PDU into the TX path if it is free.
+ *        Call after each TX drain until it returns 0 (drives the responder's
+ *        two-PDU steps, e.g. Public Key + Confirm).
+ * @return 1 if a PDU was staged, 0 if none pending / TX busy.
+ */
+int tiku_ble_host_smp_pump(void);
+
+/** @brief SMP state: 0 idle, 1 pairing, 2 done (LTK ready), 3 failed. */
+int tiku_ble_host_smp_state(void);
+
+/** @brief Copy the derived LTK (valid only when state == 2). @return 0/-1. */
+int tiku_ble_host_smp_ltk(uint8_t ltk[16]);
+
 #endif /* TIKU_BLE_HOST_H_ */

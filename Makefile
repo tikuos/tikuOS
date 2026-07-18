@@ -1260,6 +1260,14 @@ SRCS += arch/nordic/tiku_fault_arch.c
 # gate on TIKU_HAS_BLE_ADV, never on the chip (same pattern as TIKU_HAS_BLE).
 SRCS += interfaces/bluetooth/tiku_ble_adv.c
 CFLAGS += -DTIKU_HAS_BLE_ADV=1
+# Phase E: LE Secure Connections (SMP) pairing crypto + state machine.  Used by
+# BOTH roles -- the FLPR-backed peripheral host (responder) and the RADIO-driven
+# central test peer (initiator) -- so it lives with the BLE_ADV capability, not
+# the FLPR block.  AES-CMAC + f4/f5/f6 over the CRACEN AES-ECB, P-256 ECDH from
+# the crypto kit (self-contained); unused code is GC'd on non-pairing builds.
+SRCS += interfaces/bluetooth/tiku_ble_smp.c
+SRCS += interfaces/bluetooth/tiku_ble_smp_pair.c
+SRCS += $(wildcard tikukits/crypto/p256/*.c)
 # From-scratch IEEE 802.15.4 PHY on the same on-die RADIO (N-track).  Gated
 # on TIKU_HAS_154 (capability, never the chip); the radio154 shell command
 # and any future 15.4 facade key off it.
@@ -1291,10 +1299,8 @@ endif
 # Phase B: the M33-side ATT/GATT host for the FLPR controller (ATT moved off
 # the coprocessor; the FLPR forwards L2CAP frames over the mailbox).
 SRCS += interfaces/bluetooth/tiku_ble_host.c
-# Phase E: LE Secure Connections (SMP) pairing -- AES-CMAC + f4/f5/f6 over the
-# CRACEN AES-ECB, P-256 ECDH from the crypto kit (self-contained).
-SRCS += interfaces/bluetooth/tiku_ble_smp.c
-SRCS += $(wildcard tikukits/crypto/p256/*.c)
+# (SMP pairing crypto + engine build with the BLE_ADV capability above, so the
+#  central test peer gets them too -- not gated on the FLPR coprocessor.)
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
 RISCV_CC      = $(RISCV_PREFIX)gcc
 FLPR_BUILD    = $(BUILD_DIR)/flpr

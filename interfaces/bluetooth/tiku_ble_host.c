@@ -14,9 +14,13 @@
  */
 
 #include <interfaces/bluetooth/tiku_ble_host.h>
+#include <interfaces/bluetooth/tiku_ble_smp_pair.h>
 
 #define HOST_FRAG_MAX 27u                        /* L2CAP bytes per data PDU  */
-#define HOST_L2_MAX   (TIKU_BLE_HOST_MTU + 4u)   /* max L2CAP PDU (MTU + hdr) */
+/* Largest L2CAP PDU we handle: max of an ATT payload (MTU) and the SMP
+ * Pairing Public Key (65 B), each plus the 4-byte L2CAP header. */
+#define HOST_L2_MAX   (((TIKU_BLE_HOST_MTU + 4u) > (TIKU_BLE_SMP_PDU_MAX + 4u)) \
+                       ? (TIKU_BLE_HOST_MTU + 4u) : (TIKU_BLE_SMP_PDU_MAX + 4u))
 #define HOST_H_TX     0x0014u                    /* NUS TX (notify source)    */
 #define HOST_H_RX     0x0012u                    /* NUS RX (write target)     */
 #define HOST_H_CCCD   0x0015u                    /* NUS TX CCCD               */
@@ -112,6 +116,7 @@ void tiku_ble_host_reset(void)
     }
     gatt_db[2].len = 0u;                          /* NUS RX value cleared     */
     gatt_db[11].len = 0u;                         /* scratch value cleared    */
+    tiku_ble_smp_pair_reset();                    /* SMP: fresh per connection*/
 }
 
 int tiku_ble_host_subscribed(void)
@@ -437,6 +442,58 @@ static void host_sig(const uint8_t *l2cap, uint16_t len)
     }
 }
 
+/* --- SMP (CID 0x0006): drive the LE-SC pairing responder ----------------- */
+
+void tiku_ble_host_smp_start(const uint8_t inita[6], uint8_t at,
+                             const uint8_t adva[6], uint8_t bt)
+{
+    /* A = initiator (central) = inita; B = responder (us) = adva. */
+    (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_RESPONDER,
+                                  inita, at, adva, bt);
+}
+
+int tiku_ble_host_smp_pump(void)
+{
+    uint8_t  smp[TIKU_BLE_SMP_PDU_MAX];
+    uint8_t  pdu[HOST_L2_MAX];
+    uint16_t n, i;
+
+    if (host_tx_len != 0u) {                     /* TX still draining         */
+        return 0;
+    }
+    n = tiku_ble_smp_pair_next(smp, sizeof(smp));
+    if (n == 0u) {
+        return 0;
+    }
+    pdu[0] = (uint8_t)n; pdu[1] = 0u;            /* L2CAP length              */
+    pdu[2] = 0x06u; pdu[3] = 0x00u;             /* CID = SMP                 */
+    for (i = 0u; i < n; i++) {
+        pdu[4u + i] = smp[i];
+    }
+    host_store_tx(pdu, (uint16_t)(4u + n));
+    return 1;
+}
+
+int tiku_ble_host_smp_state(void)
+{
+    return (int)tiku_ble_smp_pair_state();
+}
+
+int tiku_ble_host_smp_ltk(uint8_t ltk[16])
+{
+    return tiku_ble_smp_pair_ltk(ltk);
+}
+
+/* Feed a recombined SMP L2CAP PDU to the engine, then stage the first reply. */
+static void host_smp(const uint8_t *l2cap, uint16_t len)
+{
+    if (len < 5u) {
+        return;
+    }
+    (void)tiku_ble_smp_pair_feed(&l2cap[4], (uint16_t)(len - 4u));
+    (void)tiku_ble_host_smp_pump();
+}
+
 int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid)
 {
     uint16_t i;
@@ -458,6 +515,8 @@ int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid)
     if (host_rc_expect >= 4u && host_rc_len >= host_rc_expect) {
         if (host_rc[2] == 0x05u && host_rc[3] == 0x00u) {
             host_sig(host_rc, host_rc_expect);   /* L2CAP signalling channel  */
+        } else if (host_rc[2] == 0x06u && host_rc[3] == 0x00u) {
+            host_smp(host_rc, host_rc_expect);   /* SMP pairing (CID 0x0006)  */
         } else {
             host_att(host_rc, host_rc_expect);   /* ATT (CID 0x0004)          */
         }

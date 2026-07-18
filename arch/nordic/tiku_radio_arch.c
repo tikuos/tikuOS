@@ -68,6 +68,7 @@
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
 #include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
+#include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
 #include <string.h>
 
 #define RADIO  NRF_RADIO_S
@@ -1314,10 +1315,24 @@ static uint32_t ll_ctrl_tx, ll_ctrl_rx;
  * doled one <=27-byte fragment per acked LL PDU (LLID 2 start / 1 cont).
  * RX buffer = recombine incoming fragments back into a whole L2CAP PDU. */
 #define L2_FRAG_MAX  27u
-static uint8_t  cen_sdu[68];        /* outgoing L2CAP PDU being fragmented  */
+/* 72 >= the largest L2CAP PDU either side moves: the SMP Pairing Public Key
+ * (65-byte SMP + 4-byte L2CAP header = 69).  ATT stays within the MTU. */
+static uint8_t  cen_sdu[72];        /* outgoing L2CAP PDU being fragmented  */
 static uint16_t cen_sdu_len, cen_sdu_off;
-static uint8_t  cen_rc[68];         /* incoming recombination buffer        */
+static uint8_t  cen_rc[72];         /* incoming recombination buffer        */
 static uint16_t cen_rc_len, cen_rc_expect;
+/* Phase E: SMP pairing INITIATOR.  When cen_test_smp is armed the central,
+ * once the LL is up, drives LE-SC "Just Works" on CID 0x0006 to a shared LTK
+ * instead of the NUS ATT flow.  A = InitA (us), B = AdvA (peer). */
+static uint8_t  cen_test_smp;
+static uint8_t  cen_smp_started;
+static uint8_t  cen_smp_a[6], cen_smp_b[6];
+/* Last SMP PDU we sent + a stall counter: the exchange is reply-driven, so if
+ * a reply is lost the initiator re-sends its last PDU to re-prompt it (the
+ * responder re-emits the matching reply -- see tiku_ble_smp_pair_feed). */
+static uint8_t  cen_smp_last[TIKU_BLE_SMP_PDU_MAX];
+static uint8_t  cen_smp_last_len;
+static uint16_t cen_smp_wait;
 /* Phase C signalling (CID 0x0005): a peripheral's Connection Parameter Update
  * Request sets cen_cpu_req; the master obliges by issuing an LL_CONNECTION_
  * UPDATE_IND with the requested interval (which the FLPR then follows). */
@@ -1389,6 +1404,8 @@ static void ll_reset(void)
     cen_sdu_len = 0u; cen_sdu_off = 0u;         /* Phase C frag/recomb        */
     cen_rc_len = 0u; cen_rc_expect = 0u;
     cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
+    cen_smp_started = 0u;                        /* Phase E: SMP not yet begun */
+    cen_smp_last_len = 0u; cen_smp_wait = 0u;
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1447,6 +1464,28 @@ static void l2cap_queue(uint8_t cid_lo, const uint8_t *payload, uint8_t plen)
 static void att_queue(const uint8_t *att, uint8_t alen)
 {
     l2cap_queue(0x04u, att, alen);
+}
+
+/* Phase E: pop the initiator engine's next SMP PDU and L2CAP-queue it (CID
+ * 0x0006).  The initiator is strict ping-pong -- at most one PDU per step. */
+static void cen_smp_pump(void)
+{
+    uint8_t  smp[TIKU_BLE_SMP_PDU_MAX];
+    uint16_t n = tiku_ble_smp_pair_next(smp, sizeof(smp));
+    if (n > 0u) {
+        memcpy(cen_smp_last, smp, n);            /* keep for retransmit       */
+        cen_smp_last_len = (uint8_t)n;
+        cen_smp_wait = 0u;
+        l2cap_queue(0x06u, smp, (uint8_t)n);
+    }
+}
+
+/* A recombined SMP PDU (CID 0x0006) arrived: feed the engine, send its reply. */
+static void cen_smp_rx(const uint8_t *smp, uint16_t len)
+{
+    cen_smp_wait = 0u;                           /* progress: reset the stall  */
+    (void)tiku_ble_smp_pair_feed(smp, len);
+    cen_smp_pump();
 }
 
 /* L2CAP signalling (CID 0x0005): a peripheral's Connection Parameter Update
@@ -1800,6 +1839,9 @@ static void ll_handle_rx(const uint8_t *buf)
             } else if (cen_rc[2] == 0x05u) {     /* L2CAP signalling          */
                 ll_ctrl_rx++;
                 sig_handle(cen_rc, (uint8_t)cen_rc_expect);
+            } else if (cen_rc[2] == 0x06u) {     /* SMP pairing (CID 0x0006)  */
+                ll_ctrl_rx++;
+                cen_smp_rx(&cen_rc[4], (uint16_t)(cen_rc_expect - 4u));
             }
             cen_rc_len = 0u; cen_rc_expect = 0u;
         }
@@ -1817,9 +1859,16 @@ static void ll_handle_rx(const uint8_t *buf)
         }
         if (!ll_sent_vers) {
             ll_queue_version();     /* reply with ours                     */
-        } else if (ll_is_central && att_step == 0u) {
-            att_step = 1u;              /* L5: kick off ATT (MTU Request)  */
-            att_client_send();
+        } else if (ll_is_central && att_step == 0u && !cen_smp_started) {
+            if (cen_test_smp) {         /* Phase E: pair instead of NUS    */
+                cen_smp_started = 1u;
+                (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_INITIATOR,
+                                              cen_smp_a, 1u, cen_smp_b, 1u);
+                cen_smp_pump();         /* queue the Pairing Request       */
+            } else {
+                att_step = 1u;          /* L5: kick off ATT (MTU Request)  */
+                att_client_send();
+            }
         }
         break;
     case LL_FEATURE_REQ: {
@@ -2230,6 +2279,13 @@ void tiku_radio_arch_central_updates(uint8_t on)
     cen_test_updates = (on != 0u) ? 1u : 0u;
 }
 
+/* Phase E: arm the central as the SMP pairing INITIATOR for the next
+ * connection (drives CID 0x0006 instead of the NUS ATT flow). */
+void tiku_radio_arch_central_smp(uint8_t on)
+{
+    cen_test_smp = (on != 0u) ? 1u : 0u;
+}
+
 /* One central event: TX empty PDU (our SN/NESN) on data channel @p k, then
  * hardware-T_IFS RX the peripheral's response.  Returns 2 = CRC-valid
  * response, 1 = response seen but CRC bad, 0 = no response. */
@@ -2441,6 +2497,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             cen_rxb[14] == 'T' && cen_rxb[15] == 'I' &&
             cen_rxb[16] == 'K' && cen_rxb[17] == 'U') {
             memcpy(&cind[9], &cen_rxb[3], 6u);     /* AdvA from the ADV_IND */
+            memcpy(cen_smp_a, my_addr, 6u);        /* Phase E: A = InitA (us) */
+            memcpy(cen_smp_b, &cind[9], 6u);       /*          B = AdvA (peer)*/
             RADIO->PACKETPTR = (uint32_t)cind;     /* hardware TX CONNECT_IND */
             RADIO->EVENTS_DISABLED = 0u;
             for (spin = 0u; spin < 400000u; spin++) {
@@ -2590,6 +2648,28 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             ll_queue(LL_CONNECTION_UPDATE, d, 11u);
             sig_pend = 1u;
             cen_cpu_req = 0u;
+        }
+
+        /* Phase E: SMP pairing is reply-driven (each RX -> at most one TX);
+         * once it reaches DONE/FAILED there is nothing left to exchange, so
+         * end the connection early rather than idle out the whole window. */
+        if (cen_test_smp &&
+            tiku_ble_smp_pair_state() >= TIKU_BLE_SMP_STATE_DONE) {
+            if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                st->reason = 0u;                    /* clean local teardown   */
+            }
+            break;
+        }
+        /* SMP stall recovery: if a reply hasn't come and the TX path is idle,
+         * re-send our last PDU to re-prompt it (esp. the final DHKey Check,
+         * whose loss would otherwise hang both ends on this no-LL-ACK link). */
+        if (cen_test_smp && cen_smp_last_len != 0u &&
+            tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_PAIRING &&
+            ll_tx_len == 0u && cen_sdu_len == 0u) {
+            if (++cen_smp_wait >= 6u) {
+                l2cap_queue(0x06u, cen_smp_last, cen_smp_last_len);
+                cen_smp_wait = 0u;
+            }
         }
 
         /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).

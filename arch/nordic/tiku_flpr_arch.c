@@ -491,6 +491,23 @@ uint32_t tiku_flpr_arch_conn_events(void)
     return TIKU_FLPR_SHARED->conn_events;
 }
 
+/* Phase E: peer + our address (from the CONNECT_IND) for SMP f5/f6.  Copies
+ * InitA (central = A) and AdvA (us = B); returns the type bitfield (bit0
+ * InitA, bit1 AdvA; 1 = random).  Valid once conn_active(). */
+uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6])
+{
+    int i;
+    for (i = 0; i < 6; i++) {
+        if (inita != (uint8_t *)0) {
+            inita[i] = TIKU_FLPR_SHARED->conn_inita[i];
+        }
+        if (adva != (uint8_t *)0) {
+            adva[i] = TIKU_FLPR_SHARED->conn_adva[i];
+        }
+    }
+    return TIKU_FLPR_SHARED->conn_addr_types;
+}
+
 /* Phase A telemetry: LL updates the FLPR applied this connection. */
 uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
 {

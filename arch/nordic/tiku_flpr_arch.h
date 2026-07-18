@@ -152,6 +152,14 @@ uint32_t tiku_flpr_arch_conn_state(void);
 uint32_t tiku_flpr_arch_conn_events(void);
 
 /**
+ * @brief Phase E: peer + our address from the CONNECT_IND, for SMP f5/f6.
+ * @param inita out: initiator (central) address A (6 B, little-endian); or NULL.
+ * @param adva  out: advertiser (our) address B (6 B); or NULL.
+ * @return address-type bitfield: bit0 InitA, bit1 AdvA (1 = random public 0).
+ */
+uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6]);
+
+/**
  * @brief Phase A telemetry: LL updates applied this connection.
  * @param chan_map  out: LL_CHANNEL_MAP_UPDATE_INDs followed to their Instant.
  * @param conn_upd  out: LL_CONNECTION_UPDATE_INDs followed to their Instant.

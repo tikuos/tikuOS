@@ -66,6 +66,7 @@
 #include <arch/nordic/tiku_device_select.h>  /* NRF_CLOCK_S / NRF_RADIO_S (dbg) */
 #include <arch/nordic/tiku_nordic_core.h>    /* wfe (ext pacing)                */
 #include <kernel/cpu/tiku_common.h>          /* unique id -> AdvA (ext)         */
+#include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP LTK readout */
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>      /* L6: FLPR-as-controller (F-L6.1) */
 #include <interfaces/bluetooth/tiku_ble_serial.h> /* facade (B3 auto-reconnect) */
@@ -546,6 +547,47 @@ static void bleadv_central(unsigned secs, uint8_t updates)
                                    "never connected");
 }
 
+/* Phase E: central as SMP INITIATOR.  Scan for the pairing peripheral
+ * (TIKU-PAIR), connect, and drive LE Secure Connections "Just Works" to a
+ * shared LTK; print the LTK (the peripheral prints its own -- a two-board
+ * suite asserts they match). */
+static void bleadv_censmp(unsigned secs)
+{
+    uint8_t addr[6];
+    tiku_radio_ll_conn_stats_t st;
+    char addrstr[18];
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;                             /* static random address    */
+    bleadv_fmt_addr(addrstr, addr);
+    tiku_ble_smp_pair_reset();                    /* clear any prior LTK/state */
+    tiku_radio_arch_central_smp(1u);              /* arm the initiator        */
+    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-PAIR, LE-SC pairing up to"
+                 " %u s...\n", addrstr, secs);
+    (void)tiku_radio_arch_central(addr, secs, &st);
+    tiku_radio_arch_central_smp(0u);              /* disarm for the next run  */
+
+    SHELL_PRINTF("  events=%lu rx_ok=%lu (%lu%% responded)\n",
+                 (unsigned long)st.events, (unsigned long)st.rx_ok,
+                 st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
+                           : 0ul);
+    if (tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_DONE) {
+        uint8_t ltk[16];
+        char hx[40];
+        (void)tiku_ble_smp_pair_ltk(ltk);
+        bleadv_fmt_hex(hx, ltk, 16, 0);
+        SHELL_PRINTF(SH_GREEN "  SMP OK: LTK=%s\n" SH_RST, hx);
+    } else {
+        SHELL_PRINTF(SH_RED "  SMP pairing did not complete (state=%d)\n"
+                     SH_RST, (int)tiku_ble_smp_pair_state());
+    }
+}
+
 /* L3: advertise connectably, accept a central, HOLD the link.  Blocking
  * (parks the shell while connected); a real central (nRF Connect on a
  * phone) is the oracle.  Exit: link held for many events / minutes. */
@@ -792,15 +834,19 @@ static void bleadv_flpr_drain_tx(void)
 {
     uint8_t  frag[32], llid;
     uint16_t fl;
-    while ((fl = tiku_ble_host_next_tx(frag, sizeof(frag), &llid)) > 0u) {
-        while (tiku_flpr_arch_conn_send(frag, fl, llid) == -2 &&
-               tiku_flpr_arch_conn_active()) {
-            tiku_watchdog_kick();
+    do {
+        while ((fl = tiku_ble_host_next_tx(frag, sizeof(frag), &llid)) > 0u) {
+            while (tiku_flpr_arch_conn_send(frag, fl, llid) == -2 &&
+                   tiku_flpr_arch_conn_active()) {
+                tiku_watchdog_kick();
+            }
+            if (!tiku_flpr_arch_conn_active()) {
+                return;
+            }
         }
-        if (!tiku_flpr_arch_conn_active()) {
-            break;
-        }
-    }
+        /* TX drained: stage the next SMP PDU (if the pairing engine has one
+         * queued, e.g. the responder's Public Key then Confirm) and resend. */
+    } while (tiku_ble_host_smp_pump() != 0);
 }
 
 static void bleadv_flprnus(uint8_t req_cpu)
@@ -945,6 +991,98 @@ static void bleadv_flprnus(uint8_t req_cpu)
     }
 }
 
+/* Phase E: SMP pairing RESPONDER.  Advertise, hold the link, and let the
+ * M33 host drive LE Secure Connections "Just Works" on CID 0x0006 to a shared
+ * LTK.  Prints the derived LTK (the peer central prints its own; a two-board
+ * suite asserts they match). */
+static void bleadv_flprpair(void)
+{
+    uint8_t addr[6], ad[31], adv[48];
+    uint8_t adlen = 0u, advlen;
+    static const char nm[] = "TIKU-PAIR";
+    tiku_flpr_conn_info_t info;
+    int rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
+        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;                             /* static random address    */
+    ad[adlen++] = 0x02u; ad[adlen++] = 0x01u; ad[adlen++] = 0x06u;
+    ad[adlen++] = (uint8_t)(1u + sizeof(nm) - 1u);
+    ad[adlen++] = 0x09u;
+    memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
+    adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
+    advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    adv[0] = 0x40u;                               /* ADV_IND, random TxAdd    */
+
+    SHELL_PRINTF("FLPR SMP pair: advertising 'TIKU-PAIR' -- run 'bleadv censmp'"
+                 " on the peer...\n");
+    tiku_radio_arch_init();
+    NRF_RADIO_S->TIFS = 150u;
+    tiku_radio_arch_constlat_hold(1);
+    rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
+    if (rc != 0) {
+        tiku_radio_arch_constlat_hold(0);
+        SHELL_PRINTF("no central connected (rc=%d)\n", rc);
+        return;
+    }
+    {
+        uint8_t frame[40], inita[6], adva[6], types;
+        int paired = 0;
+        tiku_clock_time_t start = tiku_clock_time();
+
+        tiku_ble_host_reset();
+        types = tiku_flpr_arch_conn_addrs(inita, adva);   /* A=InitA, B=AdvA  */
+        tiku_ble_host_smp_start(inita, (uint8_t)(types & 1u),
+                                adva, (uint8_t)((types >> 1) & 1u));
+        SHELL_PRINTF("  connected; responder armed (central %02x%02x%02x%02x"
+                     "%02x%02x) -- pairing...\n", inita[5], inita[4], inita[3],
+                     inita[2], inita[1], inita[0]);
+
+        while ((tiku_clock_time_t)(tiku_clock_time() - start) <
+               (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
+            uint8_t llid_in;
+            int n;
+            bleadv_flpr_drain_tx();                /* flush any staged reply   */
+            n = tiku_flpr_arch_conn_recv(frame, sizeof(frame), &llid_in);
+            if (n > 0) {
+                tiku_ble_host_rx(frame, (uint16_t)n, llid_in);
+                bleadv_flpr_drain_tx();            /* send the SMP response(s) */
+            }
+            /* On DONE, mark success but KEEP serving: our final DHKey Check
+             * must still go over the air, and a central that lost it will
+             * re-request (dup Ea -> engine re-emits Eb).  We exit when the
+             * central tears the link down, not the instant we finish. */
+            if (tiku_ble_host_smp_state() >= 2 && !paired) {
+                paired = 1;
+            }
+            tiku_watchdog_kick();
+            if (!tiku_flpr_arch_conn_active()) {
+                break;
+            }
+        }
+        tiku_flpr_arch_conn_stop();
+        tiku_radio_arch_constlat_hold(0);
+        if (paired && tiku_ble_host_smp_state() == 2) {
+            uint8_t ltk[16];
+            char hx[40];
+            (void)tiku_ble_host_smp_ltk(ltk);
+            bleadv_fmt_hex(hx, ltk, 16, 0);
+            SHELL_PRINTF(SH_GREEN "  SMP OK: LTK=%s\n" SH_RST, hx);
+        } else {
+            SHELL_PRINTF(SH_RED "  SMP pairing did not complete (state=%d)\n"
+                         SH_RST, tiku_ble_host_smp_state());
+        }
+    }
+}
+
 /* B3: drive the tiku_ble_serial FACADE (not the arch directly) as a
  * persistent NUS echo service for ~secs, so the auto-reconnect can be
  * exercised: connect a central, let it drop, and the service re-advertises
@@ -1027,6 +1165,10 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         bleadv_flprnus(1u);
         return;
     }
+    if (strcmp(argv[1], "flprpair") == 0) {       /* Phase E: SMP responder    */
+        bleadv_flprpair();
+        return;
+    }
     if (strcmp(argv[1], "serial") == 0) {
         bleadv_serial(argc > 2 ? (unsigned)strtoul(argv[2], (char **)0, 10)
                                : 30u);
@@ -1096,6 +1238,15 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             if (v > 0 && v <= 600) { s = (unsigned)v; }
         }
         bleadv_central(s, 1u);
+        return;
+    }
+    if (strcmp(argv[1], "censmp") == 0) {         /* Phase E: SMP initiator    */
+        unsigned s = 30u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        }
+        bleadv_censmp(s);
         return;
     }
     if (strcmp(argv[1], "conn") == 0) {
