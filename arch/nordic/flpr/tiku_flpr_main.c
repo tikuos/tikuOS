@@ -353,8 +353,8 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
     if (buf[1] == 0u) {
         return;
     }
-    if (llid == 0x02u) {                        /* L2CAP frame -> host       */
-        uint8_t n = buf[1], i;                  /* [len][CID][payload]       */
+    if (llid == 0x02u || llid == 0x01u) {       /* L2CAP fragment -> host    */
+        uint8_t n = buf[1], i;                  /* len>0 (empty PDU returned) */
         if (n > TIKU_FLPR_MSG_CAP) {
             n = TIKU_FLPR_MSG_CAP;
         }
@@ -362,6 +362,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             sh->f2a_buf[i] = buf[3u + i];       /* payload starts at buf[3]  */
         }
         sh->f2a_len = n;
+        sh->f2a_llid = llid;                    /* 2 start / 1 continuation  */
         sh->f2a_seq = sh->f2a_seq + 1u;         /* hand off to the M33       */
         flpr_doorbell_to_app();
         return;
@@ -627,7 +628,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             for (i = 0u; i < n; i++) {
                 fr[i] = sh->a2f_buf[i];
             }
-            fll_queue_raw(2u, fr, n);
+            fll_queue_raw((uint8_t)sh->a2f_llid, fr, n);  /* 2 start / 1 cont */
             sh->a2f_ack = sh->a2f_seq;            /* slot free for the host   */
         }
         have_anchor = 1u;                        /* locked: idle next event   */

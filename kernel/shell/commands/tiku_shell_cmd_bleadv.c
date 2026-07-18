@@ -761,6 +761,23 @@ static void bleadv_flpradv(void)
  * central writes (NUS RX -> f2a mailbox) straight back as notifications
  * (a2f mailbox -> NUS TX) -- the loopback runs central <-> FLPR <-> M33,
  * exercising the tiku_ble_serial recv/send primitives end to end. */
+/* Drain the host's pending TX PDU as data-PDU-sized fragments, each tagged
+ * with its LLID (2 start / 1 continuation), flow-controlled by the mailbox. */
+static void bleadv_flpr_drain_tx(void)
+{
+    uint8_t  frag[32], llid;
+    uint16_t fl;
+    while ((fl = tiku_ble_host_next_tx(frag, sizeof(frag), &llid)) > 0u) {
+        while (tiku_flpr_arch_conn_send(frag, fl, llid) == -2 &&
+               tiku_flpr_arch_conn_active()) {
+            tiku_watchdog_kick();
+        }
+        if (!tiku_flpr_arch_conn_active()) {
+            break;
+        }
+    }
+}
+
 static void bleadv_flprnus(void)
 {
     uint8_t addr[6], ad[31], adv[48];
@@ -802,41 +819,32 @@ static void bleadv_flprnus(void)
     SHELL_PRINTF("  connected; M33 NUS host live (ATT on M33), echoing"
                  " RX->TX ~15 s...\n");
     {
-        uint8_t frame[40], resp[40], nus[24];
+        uint8_t frame[40], nus[TIKU_BLE_HOST_MTU];
         char hx[50];
         uint32_t total = 0u;
         tiku_clock_time_t start = tiku_clock_time();
-        tiku_ble_host_reset();                    /* Phase B: M33 ATT server  */
+        tiku_ble_host_reset();                    /* Phase B/C: M33 host      */
         while ((tiku_clock_time_t)(tiku_clock_time() - start) <
                (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
-            /* Pump: L2CAP frame in (from the controller) -> ATT/GATT on the
-             * M33 -> response frame out.  A NUS RX write surfaces bytes we
-             * echo back as a TX notification. */
-            int n = tiku_flpr_arch_conn_recv(frame, sizeof(frame));
+            /* Pump: L2CAP fragment in -> recombine + ATT/GATT on the M33 ->
+             * response fragmented out.  A (possibly multi-fragment) NUS RX
+             * write surfaces bytes we echo back as a notification. */
+            uint8_t llid_in;
+            int n;
+            bleadv_flpr_drain_tx();               /* flush pending TX first   */
+            n = tiku_flpr_arch_conn_recv(frame, sizeof(frame), &llid_in);
             if (n > 0) {
-                uint16_t rl = tiku_ble_host_rx(frame, (uint16_t)n,
-                                               resp, sizeof(resp));
-                if (rl > 0u) {
-                    while (tiku_flpr_arch_conn_send(resp, rl) == -2 &&
-                           tiku_flpr_arch_conn_active()) {
-                        tiku_watchdog_kick();
-                    }
-                }
+                tiku_ble_host_rx(frame, (uint16_t)n, llid_in);
+                bleadv_flpr_drain_tx();           /* send the ATT response    */
                 {
                     uint16_t m = tiku_ble_host_nus_recv(nus, sizeof(nus));
                     if (m > 0u) {
-                        uint16_t nl;
                         total += m;
                         bleadv_fmt_hex(hx, nus, m > 16u ? 16 : (int)m, 0);
                         SHELL_PRINTF("  NUS RX %u B [%s] -> echoed to TX\n",
                                      (unsigned)m, hx);
-                        nl = tiku_ble_host_nus_notify(nus, m,
-                                                      resp, sizeof(resp));
-                        while (nl > 0u &&
-                               tiku_flpr_arch_conn_send(resp, nl) == -2 &&
-                               tiku_flpr_arch_conn_active()) {
-                            tiku_watchdog_kick();
-                        }
+                        (void)tiku_ble_host_nus_notify(nus, m);
+                        bleadv_flpr_drain_tx();   /* send the notification    */
                     }
                 }
             }
@@ -899,7 +907,7 @@ static void bleadv_serial(unsigned secs)
 {
     tiku_clock_time_t start;
     uint32_t connects = 0u, echoed = 0u, last_st = 9u;
-    uint8_t  was_ready = 0u, b[24];
+    uint8_t  was_ready = 0u, b[TIKU_BLE_HOST_MTU];  /* hold a recombined msg */
 
     if (tiku_ble_serial_start("TIKU-CONN") != 0) {
         SHELL_PRINTF("serial start failed (radio busy / FLPR down)\n");

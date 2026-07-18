@@ -594,8 +594,10 @@ int tiku_flpr_arch_conn_rx_ready(void)
     return (TIKU_FLPR_SHARED->f2a_seq != flpr_nus_rx_seen) ? 1 : 0;
 }
 
-/* Pop the L2CAP frame the controller forwarded (f2a); 0 if none new. */
-int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap)
+/* Pop the L2CAP fragment the controller forwarded (f2a); 0 if none new.
+ * @p llid (if non-NULL) gets the fragment boundary: 2 = start of an L2CAP
+ * PDU, 1 = continuation (the host recombines). */
+int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap, uint8_t *llid)
 {
     uint32_t seq = TIKU_FLPR_SHARED->f2a_seq;
     uint32_t n;
@@ -609,14 +611,18 @@ int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap)
         n = cap;
     }
     memcpy(buf, (const void *)TIKU_FLPR_SHARED->f2a_buf, n);
+    if (llid != (uint8_t *)0) {
+        *llid = (uint8_t)TIKU_FLPR_SHARED->f2a_llid;
+    }
     return (int)n;
 }
 
-/* Hand one L2CAP frame to the controller for TX (a2f mailbox).  Non-blocking
- * and flow-controlled: if the previous frame has not been consumed yet
+/* Hand one L2CAP fragment to the controller for TX (a2f mailbox), tagged with
+ * @p llid (2 = start of an L2CAP PDU, 1 = continuation).  Non-blocking and
+ * flow-controlled: if the previous fragment has not been consumed yet
  * (a2f_ack != a2f_seq) it returns -2 so the caller retries -- a fast host
- * cannot overwrite an unsent frame.  Returns bytes queued, or -1 bad state. */
-int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len)
+ * cannot overwrite an unsent fragment.  Returns bytes queued, or -1 bad. */
+int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len, uint8_t llid)
 {
     volatile tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
     uint32_t i;
@@ -628,12 +634,13 @@ int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len)
         return -2;                             /* TX slot busy: retry later  */
     }
     if (len > 32u) {
-        len = 32u;                             /* one L2CAP frame / data PDU */
+        len = 32u;                             /* one fragment / data PDU    */
     }
     for (i = 0u; i < len; i++) {
         sh->a2f_buf[i] = buf[i];
     }
     sh->a2f_len = len;
+    sh->a2f_llid = (llid == 1u) ? 1u : 2u;     /* default to start           */
     __asm__ volatile ("dsb 0xF" ::: "memory");
     sh->a2f_seq = sh->a2f_seq + 1u;
     return (int)len;

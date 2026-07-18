@@ -187,13 +187,20 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
 /** @brief 1 once the central subscribed to NUS TX notifications. */
 int tiku_flpr_arch_conn_subscribed(void);
 
-/** @brief Are NUS RX bytes waiting? (peek, no consume). */
+/** @brief Is a received L2CAP fragment waiting? (peek, no consume). */
 int tiku_flpr_arch_conn_rx_ready(void);
 
-/** @brief Pop NUS bytes the central wrote; returns count (0 if none). */
-int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap);
+/**
+ * @brief Pop the L2CAP fragment the controller forwarded; count (0 if none).
+ * @param llid out (may be NULL): 2 = start of an L2CAP PDU, 1 = continuation.
+ */
+int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap, uint8_t *llid);
 
-/** @brief Hand NUS bytes to the FLPR to notify the central; returns count. */
-int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len);
+/**
+ * @brief Hand one L2CAP fragment to the controller for TX; count, or -2 if
+ *        the previous fragment is still unconsumed (retry).
+ * @param llid 2 = start of an L2CAP PDU, 1 = continuation.
+ */
+int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len, uint8_t llid);
 
 #endif /* TIKU_NORDIC_FLPR_ARCH_H_ */

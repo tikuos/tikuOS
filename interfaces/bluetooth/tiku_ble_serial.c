@@ -192,7 +192,7 @@ tiku_ble_serial_beacon(const char *name)
  * send() is an ATT notification.  start() programs the static link config
  * while RADIO is secure, then hands RADIO+UARTE21 to the FLPR. */
 #define BLE_SERIAL_NAME_CAP  24u
-#define BLE_SERIAL_RXBUF     32u
+#define BLE_SERIAL_RXBUF     (TIKU_BLE_HOST_MTU)   /* hold a full recombined msg*/
 
 static uint8_t s_started;
 static uint8_t s_adv[48];                          /* stored for re-advertise */
@@ -291,36 +291,44 @@ tiku_ble_serial_stop(void)
     }
 }
 
-/* Send one L2CAP frame to the controller, retrying while the TX slot is busy
- * (flow control) until it lands or the link drops. */
-static void serial_tx_frame(const uint8_t *fr, uint16_t len)
+/* Drain the host's pending TX PDU as data-PDU-sized fragments (each with its
+ * LLID), retrying while the mailbox slot is busy, until sent or the link
+ * drops. */
+static void serial_drain_tx(void)
 {
-    while (len > 0u && tiku_flpr_arch_conn_send(fr, (uint32_t)len) == -2 &&
-           tiku_flpr_arch_conn_active()) {
-        tiku_watchdog_kick();
+    uint8_t  frag[32], llid;
+    uint16_t fl;
+    while ((fl = tiku_ble_host_next_tx(frag, sizeof(frag), &llid)) > 0u) {
+        while (tiku_flpr_arch_conn_send(frag, fl, llid) == -2 &&
+               tiku_flpr_arch_conn_active()) {
+            tiku_watchdog_kick();
+        }
+        if (!tiku_flpr_arch_conn_active()) {
+            break;
+        }
     }
 }
 
-/* Pump one L2CAP frame: in from the controller -> M33 ATT/GATT host ->
- * response out.  A NUS RX write surfaces bytes buffered for recv(). */
+/* Pump one L2CAP fragment: in from the controller -> recombine + ATT/GATT on
+ * the M33 -> response fragmented out.  A NUS RX write surfaces bytes buffered
+ * for recv(). */
 void
 tiku_ble_serial_service(void)
 {
-    uint8_t  frame[40], resp[40], nus[BLE_SERIAL_RXBUF];
+    uint8_t  frame[40], nus[BLE_SERIAL_RXBUF], llid_in;
     int      n;
-    uint16_t rl, m;
+    uint16_t m;
 
     if (!tiku_flpr_arch_conn_active()) {
         return;
     }
-    n = tiku_flpr_arch_conn_recv(frame, sizeof(frame));
+    serial_drain_tx();                           /* flush pending TX first    */
+    n = tiku_flpr_arch_conn_recv(frame, sizeof(frame), &llid_in);
     if (n <= 0) {
         return;
     }
-    rl = tiku_ble_host_rx(frame, (uint16_t)n, resp, sizeof(resp));
-    if (rl > 0u) {
-        serial_tx_frame(resp, rl);
-    }
+    tiku_ble_host_rx(frame, (uint16_t)n, llid_in);
+    serial_drain_tx();                           /* send the ATT response     */
     m = tiku_ble_host_nus_recv(nus, sizeof(nus));
     if (m > 0u) {
         uint16_t i;
@@ -346,18 +354,15 @@ tiku_ble_serial_ready(void)
 int
 tiku_ble_serial_send(const uint8_t *data, uint16_t len)
 {
-    uint8_t  resp[40];
-    uint16_t nl;
-
     if (data == (const uint8_t *)0 || !tiku_flpr_arch_conn_active()) {
         return -1;
     }
-    nl = tiku_ble_host_nus_notify(data, len, resp, sizeof(resp));
-    if (nl == 0u) {
-        return 0;                              /* not subscribed yet          */
+    if (tiku_ble_host_nus_notify(data, len) != 0) {
+        return 0;                              /* not subscribed / TX busy    */
     }
-    serial_tx_frame(resp, nl);
-    return (int)((len > 20u) ? 20u : len);
+    serial_drain_tx();                         /* fragment + send             */
+    return (int)((len > (TIKU_BLE_HOST_MTU - 3u))
+                 ? (TIKU_BLE_HOST_MTU - 3u) : len);
 }
 
 int

@@ -96,15 +96,19 @@ typedef struct {
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */
     volatile uint32_t conn_cm;          /* Phase A: CHANNEL_MAP_UPDATEs applied*/
     volatile uint32_t conn_cu;          /* Phase A: CONNECTION_UPDATEs applied */
-    volatile uint32_t a2f_ack;          /* Phase B: last a2f L2CAP frame the  */
-                                        /* controller consumed for TX (== a2f */
-                                        /* _seq means the slot is free again) */
-    /* L2CAP transport (Phase B): while a connection is held the mailbox
-     * carries complete L2CAP frames ([len][CID][payload]), NOT NUS bytes.
-     * RX: a received L2CAP data PDU -> f2a (doorbelled) for the M33 host to
-     * run ATT/GATT.  TX: the host's response/notification L2CAP frame -> a2f,
-     * which the controller wraps in an LLID=2 data PDU (flow-controlled via
-     * a2f_ack).  The FLPR no longer parses ATT -- it is a pure controller. */
+    volatile uint32_t a2f_ack;          /* Phase B: last a2f L2CAP fragment    */
+                                        /* the controller consumed for TX (==  */
+                                        /* a2f_seq means the slot is free)     */
+    volatile uint32_t f2a_llid;         /* Phase C: RX fragment boundary       */
+                                        /* (2 = start of L2CAP PDU, 1 = cont)  */
+    volatile uint32_t a2f_llid;         /* Phase C: TX fragment boundary       */
+    /* L2CAP transport (Phase B/C): while a connection is held the mailbox
+     * carries L2CAP FRAGMENTS ([{len}{CID}payload...] split across data PDUs),
+     * NOT NUS bytes.  RX: each received L2CAP data PDU -> f2a with f2a_llid
+     * (2 start / 1 continuation), doorbelled, for the M33 host to RECOMBINE
+     * and run ATT/GATT.  TX: the host's response/notification, fragmented, ->
+     * a2f with a2f_llid, flow-controlled via a2f_ack; the controller wraps
+     * each in a data PDU with that LLID.  The FLPR never parses ATT. */
 } tiku_flpr_shared_t;
 
 /* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + our AdvA. */

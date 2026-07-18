@@ -1309,6 +1309,15 @@ static uint8_t  ll_sent_vers;       /* we have queued our VERSION_IND      */
 static uint8_t  ll_want_term;       /* peer sent TERMINATE_IND             */
 static uint8_t  ll_is_central;      /* role: drives ATT client vs server   */
 static uint32_t ll_ctrl_tx, ll_ctrl_rx;
+/* Phase C: L2CAP fragmentation/recombination (an ATT PDU past the 23-byte
+ * default MTU spans several data PDUs).  TX SDU = the outgoing L2CAP PDU,
+ * doled one <=27-byte fragment per acked LL PDU (LLID 2 start / 1 cont).
+ * RX buffer = recombine incoming fragments back into a whole L2CAP PDU. */
+#define L2_FRAG_MAX  27u
+static uint8_t  cen_sdu[68];        /* outgoing L2CAP PDU being fragmented  */
+static uint16_t cen_sdu_len, cen_sdu_off;
+static uint8_t  cen_rc[68];         /* incoming recombination buffer        */
+static uint16_t cen_rc_len, cen_rc_expect;
 
 /* ATT/L2CAP (L5): a minimal NUS (Nordic UART Service) data path.
  *   peripheral = server: NUS RX (write target) + NUS TX (readable echo)
@@ -1324,7 +1333,14 @@ static uint32_t ll_ctrl_tx, ll_ctrl_rx;
 #define GATT_H_NUS_RX    0x0012u    /* write:  client -> server            */
 #define GATT_H_NUS_TX    0x0014u    /* readable echo (notify src, future)  */
 #define GATT_H_NUS_CCCD  0x0015u    /* CCCD for the TX characteristic       */
-static const uint8_t NUS_TEST_MSG[2] = { 'T', 'K' };
+/* 40 bytes -> ATT 43 -> L2CAP 47: spans two data PDUs, so the write AND the
+ * echoed notification both exercise L2CAP fragmentation (Phase C). */
+static const uint8_t NUS_TEST_MSG[40] = {
+    'F','R','A','G','-','L','2','C','A','P','-','P','H','A','S','E',
+    'C','-','0','1','2','3','4','5','6','7','8','9','-','a','b','c',
+    'd','e','f','g','h','i','j','k'
+};
+#define NUS_TEST_LEN  ((uint8_t)sizeof(NUS_TEST_MSG))
 
 static uint8_t  nus_rx[20];         /* server: last bytes written to RX     */
 static uint8_t  nus_rx_len;
@@ -1352,6 +1368,8 @@ static void ll_reset(void)
     att_step = 0u; att_ok = 0u; att_readback = 0u;
     att_disc_ok = 0u; att_d_rx = 0u; att_d_tx = 0u; att_d_cccd = 0u;
     att_d_next = 0u;
+    cen_sdu_len = 0u; cen_sdu_off = 0u;         /* Phase C frag/recomb        */
+    cen_rc_len = 0u; cen_rc_expect = 0u;
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1377,14 +1395,33 @@ static void ll_queue(uint8_t opcode, const uint8_t *data, uint8_t dlen)
     ll_queue_raw(3u, p, (uint8_t)(1u + dlen));
 }
 
-/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and queue as LLID=2. */
+/* Queue the fragment at cen_sdu_off (LLID 2 first, 1 continuation); does not
+ * advance -- ll_on_acked() advances once the fragment lands. */
+static void cen_sdu_frag(void)
+{
+    uint16_t n = (uint16_t)(cen_sdu_len - cen_sdu_off);
+    uint8_t  llid = (cen_sdu_off == 0u) ? 2u : 1u;
+    if (n > L2_FRAG_MAX) {
+        n = L2_FRAG_MAX;
+    }
+    ll_queue_raw(llid, &cen_sdu[cen_sdu_off], (uint8_t)n);
+}
+
+/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and send it, fragmenting
+ * across data PDUs when it exceeds one (Phase C). */
 static void att_queue(const uint8_t *att, uint8_t alen)
 {
-    uint8_t p[34];
-    p[0] = alen; p[1] = 0u;         /* L2CAP length                        */
-    p[2] = 0x04u; p[3] = 0x00u;     /* CID = ATT                           */
-    memcpy(&p[4], att, alen);
-    ll_queue_raw(2u, p, (uint8_t)(4u + alen));
+    uint16_t i, len = (uint16_t)(4u + alen);
+    if (len > (uint16_t)sizeof(cen_sdu)) {
+        return;
+    }
+    cen_sdu[0] = alen; cen_sdu[1] = 0u;         /* L2CAP length              */
+    cen_sdu[2] = 0x04u; cen_sdu[3] = 0x00u;     /* CID = ATT                 */
+    for (i = 0u; i < alen; i++) {
+        cen_sdu[4u + i] = att[i];
+    }
+    cen_sdu_len = len; cen_sdu_off = 0u;
+    cen_sdu_frag();                             /* first fragment            */
 }
 
 static void ll_queue_version(void)
@@ -1412,13 +1449,27 @@ static uint8_t ll_build_tx(uint8_t *out, const tiku_radio_ll_ack_t *ack)
     return 3u;
 }
 
-/* Our last TX was acknowledged (SN advanced): a pending control PDU got
- * through -- count it and clear the slot. */
+/* Our last TX was acknowledged (SN advanced): the pending PDU landed -- clear
+ * the slot, and if it was an L2CAP SDU fragment, advance and queue the next
+ * (Phase C fragmentation). */
 static void ll_on_acked(void)
 {
     if (ll_tx_len != 0u) {
+        uint8_t was_l2 = (uint8_t)(ll_tx_llid == 2u || ll_tx_llid == 1u);
         ll_ctrl_tx++;
         ll_tx_len = 0u;
+        if (was_l2 && cen_sdu_len != 0u) {
+            uint16_t n = (uint16_t)(cen_sdu_len - cen_sdu_off);
+            if (n > L2_FRAG_MAX) {
+                n = L2_FRAG_MAX;
+            }
+            cen_sdu_off += n;
+            if (cen_sdu_off < cen_sdu_len) {
+                cen_sdu_frag();                 /* next fragment             */
+            } else {
+                cen_sdu_len = 0u; cen_sdu_off = 0u;  /* SDU fully sent        */
+            }
+        }
     }
 }
 
@@ -1434,7 +1485,7 @@ static void att_client_send(void)
     uint16_t h_cccd = att_d_cccd ? att_d_cccd : GATT_H_NUS_CCCD;
 
     if (att_step == 1u) {                       /* Exchange MTU Request    */
-        b[0] = 0x02u; b[1] = 23u; b[2] = 0u;
+        b[0] = 0x02u; b[1] = 64u; b[2] = 0u;    /* MTU 64: room to fragment*/
         att_queue(b, 3u);
     } else if (att_step == 2u) {                /* Read By Group Type      */
         b[0] = 0x10u;                           /* discover primary svcs   */
@@ -1460,11 +1511,14 @@ static void att_client_send(void)
         b[1] = (uint8_t)h_cccd; b[2] = (uint8_t)(h_cccd >> 8);
         b[3] = 0x01u; b[4] = 0x00u;
         att_queue(b, 5u);
-    } else if (att_step == 6u) {                /* write NUS RX ("TK")     */
-        b[0] = 0x12u;
-        b[1] = (uint8_t)h_rx; b[2] = (uint8_t)(h_rx >> 8);
-        b[3] = NUS_TEST_MSG[0]; b[4] = NUS_TEST_MSG[1];
-        att_queue(b, 5u);
+    } else if (att_step == 6u) {                /* write NUS RX (40-byte msg)*/
+        uint8_t w[3 + NUS_TEST_LEN], i;
+        w[0] = 0x12u;
+        w[1] = (uint8_t)h_rx; w[2] = (uint8_t)(h_rx >> 8);
+        for (i = 0u; i < NUS_TEST_LEN; i++) {
+            w[3u + i] = NUS_TEST_MSG[i];
+        }
+        att_queue(w, (uint8_t)(3u + NUS_TEST_LEN));
     }
     /* step 7 awaits the server's pushed TX notification -- nothing to send */
 }
@@ -1529,9 +1583,17 @@ static void att_handle(const uint8_t *att, uint8_t alen)
         } else if (op == 0x1Bu && att_step == 7u) { /* Handle Value Notify */
             if (alen >= 5u && att[1] == (uint8_t)h_tx &&
                 att[2] == (uint8_t)(h_tx >> 8)) {
+                /* The whole 40-byte message must come back, recombined --
+                 * proof the notification fragmented + reassembled (Phase C). */
+                uint8_t ok = (uint8_t)(alen == (uint8_t)(3u + NUS_TEST_LEN));
+                uint8_t i;
                 att_readback = att[3];              /* echoed first byte   */
-                att_ok = (uint8_t)(att[3] == NUS_TEST_MSG[0] &&
-                                   att[4] == NUS_TEST_MSG[1]);
+                for (i = 0u; ok != 0u && i < NUS_TEST_LEN; i++) {
+                    if (att[3u + i] != NUS_TEST_MSG[i]) {
+                        ok = 0u;
+                    }
+                }
+                att_ok = ok;                        /* full echo matched   */
                 att_step = 8u;                      /* loopback verified   */
             }
         }
@@ -1592,11 +1654,28 @@ static void ll_handle_rx(const uint8_t *buf)
     if (buf[1] == 0u) {
         return;                     /* empty PDU                           */
     }
-    if (llid == 0x02u) {
-        /* L2CAP data: [len(2)][CID(2)][payload].  ATT is CID 0x0004. */
-        if (buf[1] >= 5u && buf[5] == 0x04u && buf[6] == 0x00u) {
+    if (llid == 0x02u || llid == 0x01u) {
+        /* L2CAP fragment: recombine ([len(2)][CID(2)][payload] across data
+         * PDUs, LLID 2 start / 1 continuation) then dispatch a whole PDU. */
+        uint8_t plen = buf[1], i;
+        if (llid == 0x02u) {
+            cen_rc_len = 0u; cen_rc_expect = 0u;
+            if (plen >= 2u) {
+                cen_rc_expect = (uint16_t)(buf[3] |
+                                           ((uint16_t)buf[4] << 8)) + 4u;
+                if (cen_rc_expect > (uint16_t)sizeof(cen_rc)) {
+                    cen_rc_expect = (uint16_t)sizeof(cen_rc);
+                }
+            }
+        }
+        for (i = 0u; i < plen && cen_rc_len < (uint16_t)sizeof(cen_rc); i++) {
+            cen_rc[cen_rc_len++] = buf[3u + i];
+        }
+        if (cen_rc_expect >= 4u && cen_rc_len >= cen_rc_expect &&
+            cen_rc[2] == 0x04u && cen_rc[3] == 0x00u) {
             ll_ctrl_rx++;
-            att_handle(&buf[7], (uint8_t)(buf[1] - 4u));
+            att_handle(&cen_rc[4], (uint8_t)(cen_rc_expect - 4u));
+            cen_rc_len = 0u; cen_rc_expect = 0u;
         }
         return;
     }
@@ -2056,13 +2135,16 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     (void)RADIO->EVENTS_DISABLED;
     RADIO->TASKS_TXEN = 1u;
 
-    /* All waits are TIME-bounded (conn_now us), not spin-count. */
-    dl = conn_now() + 400u;
+    /* All waits are TIME-bounded (conn_now us), not spin-count.  Budget for a
+     * full 27-byte fragment TX (~340 us ramp+packet), not just an empty PDU
+     * (~90 us) -- Phase C fragments large writes, and a too-short PHYEND wait
+     * would time out mid-packet and mis-time the RX turnaround. */
+    dl = conn_now() + 900u;
     while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_PHYEND == 0u) {
     }
     NRF_TIMER10_S->TASKS_CAPTURE[1] = 1u;
     t_txend = NRF_TIMER10_S->CC[1];
-    dl = conn_now() + 100u;
+    dl = conn_now() + 300u;
     while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_DISABLED == 0u) {
     }
     RADIO->PACKETPTR = (uint32_t)cen_rxb;
