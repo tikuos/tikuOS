@@ -383,6 +383,49 @@ static void bleadv_csa1(void)
     }
 }
 
+/* L3 two-board harness: this board is the CENTRAL -- scan for TIKU-CONN,
+ * connect, drive the link.  Run `bleadv conn` on the peer (peripheral).
+ * We impose lenient params so the link establishes while timing is tuned;
+ * reports events, peripheral responses heard, and the measured peripheral
+ * T_IFS (the ground truth the phone could never give). */
+static void bleadv_central(unsigned secs)
+{
+    uint8_t addr[6];
+    tiku_radio_ll_conn_stats_t st;
+    char addrstr[18];
+    int rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;
+    bleadv_fmt_addr(addrstr, addr);
+    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-CONN, up to %u s...\n",
+                 addrstr, secs);
+    rc = tiku_radio_arch_central(addr, secs, &st);
+    if (rc != 0) {
+        SHELL_PRINTF("no TIKU-CONN peripheral found in %u s\n", secs);
+        return;
+    }
+    SHELL_PRINTF(SH_GREEN "connection ran %lu ms\n" SH_RST,
+                 (unsigned long)st.ms);
+    SHELL_PRINTF("  events=%lu rx_ok=%lu addr_only=%lu missed=%lu"
+                 "  (%lu%% responded)\n",
+                 (unsigned long)st.events, (unsigned long)st.rx_ok,
+                 (unsigned long)st.addr_seen, (unsigned long)st.missed,
+                 st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
+                           : 0ul);
+    SHELL_PRINTF("  peripheral T_IFS=%lu us (spec 150)\n",
+                 (unsigned long)tiku_radio_arch_dbg_cen_tifs);
+    SHELL_PRINTF("  ended: %s\n",
+                 st.reason == 0u ? "duration cap" :
+                 st.reason == 1u ? "supervision (peripheral silent)" :
+                                   "never connected");
+}
+
 /* L3: advertise connectably, accept a central, HOLD the link.  Blocking
  * (parks the shell while connected); a real central (nRF Connect on a
  * phone) is the oracle.  Exit: link held for many events / minutes. */
@@ -507,6 +550,15 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             SHELL_PRINTF(SH_GREEN "ackfsm: 4/4 incl. retransmission"
                          " (SN/NESN correct)\n" SH_RST);
         }
+        return;
+    }
+    if (strcmp(argv[1], "central") == 0) {
+        unsigned s = 60u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        }
+        bleadv_central(s);
         return;
     }
     if (strcmp(argv[1], "conn") == 0) {

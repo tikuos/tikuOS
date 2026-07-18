@@ -1340,10 +1340,11 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
          * lands during RX ramp-up and every event is missed (measured:
          * addr_seen=0).  The first event's tail is widened by the
          * transmitWindowSize uncertainty. */
-        /* DIAG: huge first window reliably catches event 0 so we can
-         * MEASURE the anchor error (first_delta); narrow after. */
+        /* First window spans the transmitWindowSize (the master transmits
+         * at the window START); narrow after re-sync.  A huge first
+         * window catches garbage far from the anchor and re-syncs wrong. */
         rxen_at = anchor - 600u;
-        deadline = first ? (anchor + interval_us + 5000u)
+        deadline = first ? (anchor + (uint32_t)winsize * 1250u + 1000u)
                          : (anchor + 2500u);
 
         while ((int32_t)(conn_now() - rxen_at) < 0) {
@@ -1397,6 +1398,324 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
     }
 
     /* Teardown: radio idle, TX shorts + advertising CRC restored. */
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    {
+        uint32_t spin;
+        for (spin = 0u; spin < 40000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+    }
+    RADIO->TIFS = 0u;
+    RADIO->CRCINIT = BLE_ADV_CRC_INIT;
+    RADIO->BASE0 = BLE_ADV_ACCESS_BASE0;
+    RADIO->PREFIX0 = BLE_ADV_ACCESS_PREFIX0;
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    radio_constlat_exit();
+    return 0;
+}
+
+/*---------------------------------------------------------------------------*/
+/* Connection engine, CENTRAL role (L3 two-board harness)                    */
+/*---------------------------------------------------------------------------*/
+/*
+ * The debug oracle: a TikuOS central so an L3 connection can be driven
+ * board-to-board with microsecond ground truth on both consoles instead
+ * of a black-box phone.  As master, WE choose the CONNECT_IND parameters
+ * (WinOffset small + fixed => deterministic anchor; WinSize large +
+ * supervision long => lenient, so the link establishes while the
+ * peripheral's timing is still being tuned) and WE define the event
+ * cadence, so nothing has to be predicted.  A central event is the
+ * mirror of the peripheral's: TX an empty PDU first, hardware-T_IFS
+ * turnaround to RX the peripheral's response.
+ */
+
+/* Connection parameters we impose as master (chosen for easy bring-up). */
+#define CEN_AA        0x71764129ul
+#define CEN_CRCINIT   0x00555555ul
+#define CEN_HOP       7u
+#define CEN_INTERVAL  24u        /* 1.25ms units -> 30 ms                  */
+#define CEN_WINSIZE   10u        /* 12.5 ms transmit window (lenient)      */
+#define CEN_WINOFFSET 1u         /* 1.25 ms (small, predictable anchor)    */
+#define CEN_TIMEOUT   400u       /* 10ms units -> 4 s supervision (lenient)*/
+
+static uint8_t cen_rxb[48] __attribute__((aligned(4)));
+static uint8_t cen_txb[8]  __attribute__((aligned(4)));
+uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
+
+/* One central event: TX empty PDU (our SN/NESN) on data channel @p k, then
+ * hardware-T_IFS RX the peripheral's response.  Returns 2 = CRC-valid
+ * response, 1 = response seen but CRC bad, 0 = no response. */
+static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
+                     tiku_radio_ll_ack_t *ack)
+{
+    uint32_t t_txend = 0u;
+    uint8_t  crcok, got = 0u;
+
+    uint32_t dl;
+
+    radio_cfg_data(aa, crcinit, k);
+    cen_txb[0] = (uint8_t)(0x01u | (ack->nesn << 2) | (ack->sn << 3));
+    cen_txb[1] = 0x00u;
+    cen_txb[2] = cen_txb[0];
+
+    /* TX only (no turnaround short): we open the RX MANUALLY and EARLY
+     * afterwards, not via the hardware TIFS turnaround.  The turnaround
+     * opens RX at exactly TIFS=150us, but the peripheral's response T_IFS
+     * measures ~117us on this silicon, so a TIFS-timed RX opens 33us AFTER
+     * the response preamble and misses it entirely.  Opening manually
+     * right after the TX disables lets us listen well before the response. */
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    RADIO->PACKETPTR = (uint32_t)cen_txb;
+    RADIO->EVENTS_PHYEND   = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->EVENTS_ADDRESS  = 0u;
+    RADIO->EVENTS_CRCOK    = 0u;
+    RADIO->EVENTS_CRCERROR = 0u;
+    (void)RADIO->EVENTS_DISABLED;
+    RADIO->TASKS_TXEN = 1u;
+
+    /* All waits are TIME-bounded (conn_now us), not spin-count. */
+    dl = conn_now() + 400u;
+    while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_PHYEND == 0u) {
+    }
+    NRF_TIMER10_S->TASKS_CAPTURE[1] = 1u;
+    t_txend = NRF_TIMER10_S->CC[1];
+    dl = conn_now() + 100u;
+    while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_DISABLED == 0u) {
+    }
+    RADIO->PACKETPTR = (uint32_t)cen_rxb;
+    RADIO->EVENTS_PHYEND   = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->EVENTS_ADDRESS  = 0u;    /* clear our own TX's stale events     */
+    RADIO->EVENTS_CRCOK    = 0u;
+    RADIO->EVENTS_CRCERROR = 0u;
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    RADIO->TASKS_RXEN = 1u;
+
+    /* Peripheral responds T_IFS later; our RX is already listening. */
+    dl = conn_now() + 600u;
+    while ((int32_t)(conn_now() - dl) < 0) {
+        if (RADIO->EVENTS_ADDRESS != 0u) {
+            got = 1u;
+            break;
+        }
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    if (!got) {
+        RADIO->SHORTS = (1u << 0) | (1u << 19);
+        RADIO->TASKS_DISABLE = 1u;
+        dl = conn_now() + 200u;
+        while ((int32_t)(conn_now() - dl) < 0 &&
+               RADIO->EVENTS_DISABLED == 0u) {
+        }
+        return 0;
+    }
+    /* Peripheral T_IFS: its ADDRESS is 40us (preamble+AA) after its first
+     * bit; T_IFS = (ADDRESS - our TX end) - 40. */
+    {
+        uint32_t t_addr;
+        NRF_TIMER10_S->TASKS_CAPTURE[1] = 1u;
+        t_addr = NRF_TIMER10_S->CC[1];
+        if ((t_addr - t_txend) > 40u && (t_addr - t_txend) < 1000u) {
+            tiku_radio_arch_dbg_cen_tifs = (t_addr - t_txend) - 40u;
+        }
+    }
+    dl = conn_now() + 200u;
+    while ((int32_t)(conn_now() - dl) < 0) {
+        if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
+            break;
+        }
+    }
+    crcok = (RADIO->EVENTS_CRCOK != 0u) ? 1u : 0u;
+    if (crcok) {
+        uint8_t h = cen_rxb[0];
+        (void)tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
+                                (uint8_t)((h >> 2) & 1u));
+    }
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    dl = conn_now() + 200u;
+    while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_DISABLED == 0u) {
+    }
+    return crcok ? 2 : 1;
+}
+
+int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
+                            tiku_radio_ll_conn_stats_t *st)
+{
+    static uint8_t cind[48] __attribute__((aligned(4)));
+    uint8_t  chmap[5] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x1Fu };
+    uint8_t  chan = 0u, last_unmapped = 0u;
+    uint32_t anchor, last_valid, t_ci_end = 0u, cap_deadline;
+    tiku_radio_ll_ack_t ack = { 0u, 0u };
+    int      connected = 0;
+    uint8_t *ll;
+
+    if (st != (tiku_radio_ll_conn_stats_t *)0) {
+        memset(st, 0, sizeof(*st));
+        st->reason = 2u;
+        st->hop = CEN_HOP;
+    }
+
+    tiku_radio_arch_init();
+    radio_constlat_enter();
+    radio_xo_observe();
+    radio_hfclk_kick();
+    RADIO->TIFS = 150u;
+    conn_timer_start();
+
+    /* Pre-build the CONNECT_IND (all but AdvA): [S0][LEN][S1][InitA][AdvA]
+     * [LLData].  S0=0xC5 (CONNECT_IND, TxAdd+RxAdd random). */
+    cind[0] = 0xC5u;
+    cind[1] = 34u;
+    cind[2] = my_addr[0];                         /* erratum-49 S1 = pay0  */
+    memcpy(&cind[3], my_addr, 6u);                /* InitA                 */
+    ll = &cind[15];
+    ll[0] = (uint8_t)CEN_AA; ll[1] = (uint8_t)(CEN_AA >> 8);
+    ll[2] = (uint8_t)(CEN_AA >> 16); ll[3] = (uint8_t)(CEN_AA >> 24);
+    ll[4] = (uint8_t)CEN_CRCINIT; ll[5] = (uint8_t)(CEN_CRCINIT >> 8);
+    ll[6] = (uint8_t)(CEN_CRCINIT >> 16);
+    ll[7] = CEN_WINSIZE;
+    ll[8] = CEN_WINOFFSET; ll[9] = 0u;
+    ll[10] = CEN_INTERVAL; ll[11] = 0u;
+    ll[12] = 0u; ll[13] = 0u;                     /* latency               */
+    ll[14] = (uint8_t)CEN_TIMEOUT; ll[15] = (uint8_t)(CEN_TIMEOUT >> 8);
+    memcpy(&ll[16], chmap, 5u);
+    ll[21] = (uint8_t)(CEN_HOP & 0x1Fu);          /* hop | SCA=0           */
+
+    cap_deadline = conn_now() + max_secs * 1000000u;
+
+    /* --- Scan for TIKU-CONN's ADV_IND, then hardware-T_IFS the CONNECT_IND --- */
+    while (!connected && (int32_t)(conn_now() - cap_deadline) < 0) {
+        uint32_t spin;
+        tiku_watchdog_kick();
+
+        RADIO->BASE0   = BLE_ADV_ACCESS_BASE0;
+        RADIO->PREFIX0 = BLE_ADV_ACCESS_PREFIX0;
+        RADIO->CRCINIT = BLE_ADV_CRC_INIT;
+        RADIO->FREQUENCY = adv_freq[chan];
+        RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
+        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 2) | (1u << 4);
+        RADIO->PACKETPTR = (uint32_t)cen_rxb;
+        RADIO->EVENTS_DISABLED = 0u;
+        RADIO->EVENTS_CRCOK    = 0u;
+        RADIO->EVENTS_CRCERROR = 0u;
+        RADIO->EVENTS_PHYEND   = 0u;
+        (void)RADIO->EVENTS_DISABLED;
+        RADIO->TASKS_RXEN = 1u;
+
+        /* Listen ~8 ms for an ADV_IND. */
+        for (spin = 0u; spin < 260000u; spin++) {
+            if (RADIO->EVENTS_PHYEND != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_PHYEND == 0u) {
+            /* nothing: cancel the pending auto-TX and rotate */
+            RADIO->SHORTS = (1u << 0) | (1u << 19);
+            RADIO->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            chan = (uint8_t)((chan + 1u) % 3u);
+            continue;
+        }
+        /* Heard a packet; the DISABLED_TXEN turnaround is ramping.  If it
+         * is a connectable ADV_IND named TIKU-CONN, ship the CONNECT_IND;
+         * else abort the auto-TX.  (Name at cen_rxb[14] by our peripheral's
+         * fixed AD layout: [02 01 06][len 09 T I K U ...].) */
+        for (spin = 0u; spin < 4000u; spin++) {
+            if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_CRCOK != 0u && (cen_rxb[0] & 0x0Fu) == 0x00u &&
+            cen_rxb[14] == 'T' && cen_rxb[15] == 'I' &&
+            cen_rxb[16] == 'K' && cen_rxb[17] == 'U') {
+            memcpy(&cind[9], &cen_rxb[3], 6u);     /* AdvA from the ADV_IND */
+            RADIO->PACKETPTR = (uint32_t)cind;     /* hardware TX CONNECT_IND */
+            RADIO->EVENTS_DISABLED = 0u;
+            for (spin = 0u; spin < 400000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            NRF_TIMER10_S->TASKS_CAPTURE[1] = 1u;
+            t_ci_end = NRF_TIMER10_S->CC[1];       /* ~our CONNECT_IND end  */
+            connected = 1;
+        } else {
+            RADIO->SHORTS = (1u << 0) | (1u << 19);
+            RADIO->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        }
+        chan = (uint8_t)((chan + 1u) % 3u);
+    }
+    if (!connected) {
+        RADIO->TIFS = 0u;
+        NRF_TIMER10_S->TASKS_STOP = 1u;
+        RADIO->SHORTS = (1u << 0) | (1u << 19);
+        radio_constlat_exit();
+        return -1;
+    }
+
+    /* --- Connection loop: WE are the timing master --- */
+    anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)CEN_WINOFFSET * 1250u;
+    last_valid = t_ci_end;
+    for (;;) {
+        uint8_t k = tiku_radio_ll_csa1_next(last_unmapped, CEN_HOP, chmap,
+                                            &last_unmapped);
+        int r;
+
+        while ((int32_t)(conn_now() - anchor) < 0) {
+            /* park to our own anchor */
+        }
+        r = cen_event(CEN_AA, CEN_CRCINIT, k, &ack);
+        if (st != (tiku_radio_ll_conn_stats_t *)0) {
+            st->events++;
+            if (r == 2) {
+                st->rx_ok++;
+            } else if (r == 1) {
+                st->addr_seen++;
+            } else {
+                st->missed++;
+            }
+        }
+        if (r == 2) {
+            last_valid = conn_now();
+        }
+        anchor += (uint32_t)CEN_INTERVAL * 1250u;  /* master cadence       */
+
+        tiku_watchdog_kick();
+        if ((int32_t)(conn_now() - (last_valid +
+                      (uint32_t)CEN_TIMEOUT * 10000u)) >= 0) {
+            if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                st->reason = 1u;
+            }
+            break;
+        }
+        if ((int32_t)(conn_now() - cap_deadline) >= 0) {
+            if (st != (tiku_radio_ll_conn_stats_t *)0) {
+                st->reason = 0u;
+            }
+            break;
+        }
+    }
+
+    if (st != (tiku_radio_ll_conn_stats_t *)0) {
+        st->ms = (conn_now() - t_ci_end) / 1000u;
+    }
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
     {

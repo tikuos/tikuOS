@@ -158,6 +158,23 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
                             uint8_t ad_len, uint32_t max_secs,
                             tiku_radio_ll_conn_stats_t *st);
 
+/**
+ * @brief CENTRAL role: scan for TIKU-CONN, connect, drive the link (L3
+ *        two-board harness).
+ *
+ * The debug oracle for L3: as master we impose the CONNECT_IND params
+ * (deterministic anchor, lenient windows/supervision) and define the
+ * event cadence, so a board-to-board connection can be brought up with
+ * ground truth instead of a black-box phone.  Blocking + polled.
+ *
+ * @return 0 once a connection ran (see @p st), -1 if no peripheral found.
+ */
+int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
+                            tiku_radio_ll_conn_stats_t *st);
+
+/** Peripheral T_IFS measured by the central (us), ground truth for L3. */
+extern uint32_t tiku_radio_arch_dbg_cen_tifs;
+
 #define TIKU_RADIO_LL_NEWDATA  (1u << 0)  /**< rx payload is new, deliver */
 #define TIKU_RADIO_LL_ACKED    (1u << 1)  /**< my TX landed, advance      */
 
