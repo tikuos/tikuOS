@@ -93,6 +93,65 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
         return;
     }
 
+    /* FIPS-197 C.1 AES-128 ECB single-block known-answer test. */
+    if (argc >= 2 && strcmp(argv[1], "ecb") == 0) {
+        static const uint8_t key[16] = {
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
+        static const uint8_t pt[16] = {
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+            0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff };
+        static const uint8_t ct[16] = {
+            0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30,
+            0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4, 0xc5, 0x5a };
+        uint8_t out[16], back[16];
+        int rc = tiku_crypto_arch_aes_ecb(0, key, 16u, pt, out);
+        SHELL_PRINTF("ECB enc rc=%d out=", rc);
+        print_digest(out, 16u);
+        SHELL_PRINTF(memcmp(out, ct, 16u) == 0 ? SH_GREEN " MATCH\n" SH_RST
+                                               : SH_RED " MISMATCH\n" SH_RST);
+        rc = tiku_crypto_arch_aes_ecb(1, key, 16u, ct, back);
+        SHELL_PRINTF("ECB dec rc=%d %s\n", rc,
+                     memcmp(back, pt, 16u) == 0 ? "roundtrip OK" : "FAIL");
+        return;
+    }
+
+    /* RFC 3610 packet vector #1: AES-CCM* known-answer (M=8, L=2). */
+    if (argc >= 2 && strcmp(argv[1], "ccm") == 0) {
+        static const uint8_t key[16] = {
+            0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,
+            0xc8,0xc9,0xca,0xcb,0xcc,0xcd,0xce,0xcf };
+        static const uint8_t nonce[13] = {
+            0x00,0x00,0x00,0x03,0x02,0x01,0x00,0xa0,0xa1,0xa2,0xa3,0xa4,0xa5 };
+        static const uint8_t aad[8] = {
+            0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07 };
+        static const uint8_t msg[23] = {
+            0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,0x11,0x12,0x13,
+            0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e };
+        static const uint8_t ct[23] = {
+            0x58,0x8c,0x97,0x9a,0x61,0xc6,0x63,0xd2,0xf0,0x66,0xd0,0xc2,
+            0xc0,0xf9,0x89,0x80,0x6d,0x5f,0x6b,0x61,0xda,0xc3,0x84 };
+        static const uint8_t tag[8] = {
+            0x17,0xe8,0xd1,0x2c,0xfd,0xf9,0x26,0xe0 };
+        uint8_t out[23], mic[8], back[23];
+        int rc = tiku_crypto_arch_aes_ccm_star(0, key, 16u, nonce, aad, 8u,
+                                               msg, 23u, 8u, out, mic);
+        int ok = (rc == 0 && memcmp(out, ct, 23u) == 0 &&
+                  memcmp(mic, tag, 8u) == 0);
+        SHELL_PRINTF("CCM* enc rc=%d ct=", rc);
+        print_digest(out, 8u);
+        SHELL_PRINTF(".. mic=");
+        print_digest(mic, 8u);
+        SHELL_PRINTF(ok ? SH_GREEN " MATCH (RFC3610 #1)\n" SH_RST
+                        : SH_RED " MISMATCH\n" SH_RST);
+        rc = tiku_crypto_arch_aes_ccm_star(1, key, 16u, nonce, aad, 8u,
+                                           ct, 23u, 8u, back, mic);
+        SHELL_PRINTF("CCM* dec rc=%d %s\n", rc,
+                     (rc == 0 && memcmp(back, msg, 23u) == 0 &&
+                      memcmp(mic, tag, 8u) == 0) ? "verify OK" : "FAIL");
+        return;
+    }
+
     if (argc >= 2 && strcmp(argv[1], "sweep") == 0) {
         /* Candidate space: mode nibble (index- or one-hot-coded) x the
          * plausible hw-padding/final control bits seen on BA41x-family

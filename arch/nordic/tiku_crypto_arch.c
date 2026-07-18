@@ -464,6 +464,158 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
     return cm_run(fetch, push);
 }
 
+/*---------------------------------------------------------------------------*/
+/* AES-ECB (BA411E) -- the raw block cipher, one 16-byte block.  The         */
+/* building block for a spec-correct 802.15.4 CCM* (CBC-MAC + CTR are just   */
+/* repeated ECB), so the crypto stays in hardware without needing the        */
+/* undocumented CCM00 job-list or BA411E CCM mode config.                    */
+/*---------------------------------------------------------------------------*/
+#define CM_AES_CFG_ECB      (0x001UL << 8)      /* one-hot mode id 0          */
+
+int tiku_crypto_arch_aes_ecb(int decrypt, const uint8_t *key, size_t key_sz,
+                             const uint8_t in[16], uint8_t out[16])
+{
+    static cm_desc_t fetch[3];
+    static cm_desc_t push[1];
+    static uint32_t  cfg_word;
+    static uint8_t   keybuf[32] __attribute__((aligned(4)));
+    static uint8_t   inbuf[16]  __attribute__((aligned(4)));
+    cm_desc_t *d = fetch;
+
+    if (key_sz != 16u && key_sz != 32u) {
+        return -2;
+    }
+    cfg_word = CM_AES_CFG_ECB | (decrypt ? CM_AES_CFG_DECRYPT : 0u);
+    memcpy(keybuf, key, key_sz);
+    memcpy(inbuf, in, 16u);
+
+    d->addr = (const uint8_t *)&cfg_word;
+    d->length = 4u | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_CONFIG | CM_TAG_CFGREG(0);
+    d->next = d + 1; d++;
+
+    d->addr = keybuf;
+    d->length = (uint32_t)key_sz | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_CONFIG | CM_TAG_CFGREG(CM_AES_REG_KEY);
+    d->next = d + 1; d++;
+
+    d->addr = inbuf;
+    d->length = 16u | CM_LEN_REALIGN;
+    d->tag = CM_TAG_ENGINE_AES | CM_TAG_DATATYPE(0) | CM_TAG_LAST;
+    d->next = CM_DESC_STOP;
+
+    push[0].addr = out;
+    push[0].length = 16u | CM_LEN_REALIGN;
+    push[0].tag = CM_TAG_LAST;
+    push[0].next = CM_DESC_STOP;
+
+    return cm_run(fetch, push);
+}
+
+/* AES-CCM* (RFC 3610 / IEEE 802.15.4, L=2 -> 13-byte nonce) over the hardware
+ * ECB: CBC-MAC for the tag, CTR for the data.  Not "software AES" -- the block
+ * cipher is the BA411E; only the CCM* framing is here (the standard method
+ * when no usable CCM hardware mode is documented).  encrypt: out=ciphertext,
+ * mic=tag.  decrypt: m=ciphertext, out=plaintext, mic=RECOMPUTED tag (caller
+ * compares in constant time with the received one). */
+int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
+                                  size_t key_sz, const uint8_t nonce[13],
+                                  const uint8_t *aad, size_t aad_len,
+                                  const uint8_t *m, size_t m_len,
+                                  uint8_t mic_len, uint8_t *out, uint8_t *mic)
+{
+    uint8_t blk[16], x[16], s[16], ctr[16];
+    size_t i, off;
+    int rc;
+
+    if (mic_len != 4u && mic_len != 8u && mic_len != 16u) {
+        return -2;
+    }
+    if (m_len > 0xFFFFu || aad_len > 0xFEFFu) {
+        return -2;
+    }
+
+    /* On decrypt, CTR-recover the plaintext first so the MAC runs over it. */
+    if (decrypt) {
+        for (off = 0; off < m_len; off += 16u) {
+            size_t n = (m_len - off < 16u) ? (m_len - off) : 16u;
+            ctr[0] = 1u;                          /* A_i flags: L-1           */
+            memcpy(&ctr[1], nonce, 13u);
+            ctr[14] = (uint8_t)(((off / 16u) + 1u) >> 8);
+            ctr[15] = (uint8_t)((off / 16u) + 1u);
+            rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, ctr, s);
+            if (rc) { return rc; }
+            for (i = 0; i < n; i++) {
+                out[off + i] = m[off + i] ^ s[i];
+            }
+        }
+        m = out;
+    }
+
+    /* CBC-MAC.  B_0 = flags || nonce || l(m); X1 = E(B_0). */
+    blk[0] = (uint8_t)(((aad_len > 0u) ? 0x40u : 0u) |
+                       ((uint8_t)(((mic_len - 2u) / 2u)) << 3) | 1u);
+    memcpy(&blk[1], nonce, 13u);
+    blk[14] = (uint8_t)(m_len >> 8);
+    blk[15] = (uint8_t)m_len;
+    rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, blk, x);
+    if (rc) { return rc; }
+
+    if (aad_len > 0u) {                           /* 2-byte len prefix + pad   */
+        size_t apos = 0;
+        uint8_t first = 1u;
+        while (apos < aad_len || first) {
+            size_t j = 0;
+            memset(blk, 0, 16u);
+            if (first) {
+                blk[0] = (uint8_t)(aad_len >> 8);
+                blk[1] = (uint8_t)aad_len;
+                j = 2u;
+                first = 0u;
+            }
+            for (; j < 16u && apos < aad_len; j++) {
+                blk[j] = aad[apos++];
+            }
+            for (i = 0; i < 16u; i++) { x[i] ^= blk[i]; }
+            rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, x, x);
+            if (rc) { return rc; }
+        }
+    }
+    for (off = 0; off < m_len; off += 16u) {      /* message blocks (padded)   */
+        size_t n = (m_len - off < 16u) ? (m_len - off) : 16u;
+        memset(blk, 0, 16u);
+        memcpy(blk, &m[off], n);
+        for (i = 0; i < 16u; i++) { x[i] ^= blk[i]; }
+        rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, x, x);
+        if (rc) { return rc; }
+    }
+
+    /* U = T XOR E(A_0); A_0 counter = 0. */
+    ctr[0] = 1u;
+    memcpy(&ctr[1], nonce, 13u);
+    ctr[14] = 0u;
+    ctr[15] = 0u;
+    rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, ctr, s);
+    if (rc) { return rc; }
+    for (i = 0; i < mic_len; i++) { mic[i] = x[i] ^ s[i]; }
+
+    if (!decrypt) {                               /* CTR-encrypt the payload   */
+        for (off = 0; off < m_len; off += 16u) {
+            size_t n = (m_len - off < 16u) ? (m_len - off) : 16u;
+            ctr[0] = 1u;
+            memcpy(&ctr[1], nonce, 13u);
+            ctr[14] = (uint8_t)(((off / 16u) + 1u) >> 8);
+            ctr[15] = (uint8_t)((off / 16u) + 1u);
+            rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, ctr, s);
+            if (rc) { return rc; }
+            for (i = 0; i < n; i++) {
+                out[off + i] = m[off + i] ^ s[i];
+            }
+        }
+    }
+    return 0;
+}
+
 /**
  * @brief Kit-safe AES-GCM: stages in/out through SRAM so the caller's
  * buffers need no alignment headroom and may live in RRAM.  Encrypt or

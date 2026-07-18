@@ -60,6 +60,25 @@ int tiku_crypto_arch_sha256(const void *msg, size_t len, uint8_t out[32]);
  * @param out        needs align-4 headroom past @p in_sz (FIFO realign)
  * @return 0 ok; -2 unsupported shape (caller falls back to software)
  */
+/**
+ * @brief One-block AES-ECB through the BA411E engine (the raw block cipher).
+ * @return 0 on success, -2 on bad key size / DMA error.
+ */
+int tiku_crypto_arch_aes_ecb(int decrypt, const uint8_t *key, size_t key_sz,
+                             const uint8_t in[16], uint8_t out[16]);
+
+/**
+ * @brief AES-CCM* (IEEE 802.15.4, L=2 / 13-byte nonce) over the hardware ECB.
+ * encrypt: @p out=ciphertext, @p mic=tag.  decrypt: @p m=ciphertext,
+ * @p out=plaintext, @p mic=recomputed tag (compare with the received one).
+ * @param mic_len 4, 8, or 16.  @return 0 ok, -2 bad args, <0 engine error.
+ */
+int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
+                                  size_t key_sz, const uint8_t nonce[13],
+                                  const uint8_t *aad, size_t aad_len,
+                                  const uint8_t *m, size_t m_len,
+                                  uint8_t mic_len, uint8_t *out, uint8_t *mic);
+
 int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
                              const uint8_t *key, size_t key_sz,
                              const uint8_t iv[12],
