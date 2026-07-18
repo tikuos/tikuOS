@@ -1028,12 +1028,42 @@ radio_mode_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", tiku_radio_arch_mode_str());
 }
 
+/* L7 surface unification (#18): one /sys/radio surface over the two real
+ * nordic BLE implementations -- the M33 broadcast path and the FLPR
+ * connection controller.  `backend` names which is driving the radio right
+ * now; `caps` lists what this build's on-die radio can do (compiled from the
+ * capability flags, not speculation); `state` (above) is the arbiter owner. */
+static int
+radio_backend_read(char *buf, size_t max)
+{
+    tiku_ble_adv_owner_t o = tiku_ble_adv_owner();
+    const char *b = (o == TIKU_BLE_ADV_OWNER_BEACON_FLPR ||
+                     o == TIKU_BLE_ADV_OWNER_CONN)
+                    ? "nordic-flpr" : "nordic-m33";
+    return snprintf(buf, max, "%s\n", b);
+}
+
+static int
+radio_caps_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "adv scan observe 2m coded"
+#if (TIKU_FLPR_ENABLE + 0)
+                    " conn"
+#endif
+#if (TIKU_HAS_154 + 0)
+                    " ieee802154 aes-ccm"
+#endif
+                    "\n");
+}
+
 static const tiku_vfs_node_t sys_radio_children[] = {
     { "beacon",  TIKU_VFS_FILE, radio_beacon_read, radio_beacon_write,
       NULL, 0 },
     { "bursts",  TIKU_VFS_FILE, radio_bursts_read,  NULL, NULL, 0 },
     { "mode",    TIKU_VFS_FILE, radio_mode_read,    NULL, NULL, 0 },
     { "state",   TIKU_VFS_FILE, radio_state_read,   NULL, NULL, 0 },
+    { "backend", TIKU_VFS_FILE, radio_backend_read, NULL, NULL, 0 },
+    { "caps",    TIKU_VFS_FILE, radio_caps_read,    NULL, NULL, 0 },
     { "scan",    TIKU_VFS_FILE, radio_scan_read,    NULL, NULL, 0 },
     { "txpower", TIKU_VFS_FILE, radio_txpower_read, radio_txpower_write,
       NULL, 0 },
@@ -1220,7 +1250,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 3 },
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
-    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  6 },
+    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  8 },
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
     { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   6 },
