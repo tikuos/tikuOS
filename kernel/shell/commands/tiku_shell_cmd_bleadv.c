@@ -249,12 +249,16 @@ static void bleadv_phytx(uint8_t argc, const char *argv[])
     const char *pn = (argc > 2u) ? argv[2] : "1m";
     tiku_radio_arch_phy_t phy = bleadv_phy_of(pn);
     long n = (argc > 3u) ? (long)strtoul(argv[3], (char **)0, 10) : 100;
-    uint8_t pdu[8];
+    long plen = (argc > 4u) ? (long)strtoul(argv[4], (char **)0, 10) : 4;
+    uint8_t pdu[40];
     uint16_t i;
     uint32_t sent = 0u;
 
     if (n <= 0 || n > 5000) {
         n = 100;
+    }
+    if (plen < 4 || plen > 36) {
+        plen = 4;
     }
     if (tiku_ble_adv_active()) {
         SHELL_PRINTF(SH_RED "stop the beacon first (bleadv off)\n" SH_RST);
@@ -262,8 +266,11 @@ static void bleadv_phytx(uint8_t argc, const char *argv[])
     }
     tiku_radio_arch_init();
     pdu[0] = 0x42u;                              /* S0: ADV_NONCONN_IND head   */
-    pdu[1] = 4u;                                 /* LEN: 4-byte payload        */
+    pdu[1] = (uint8_t)plen;                      /* LEN                        */
     pdu[3] = 'P'; pdu[4] = 'H'; pdu[5] = 'Y';    /* magic tag                  */
+    for (i = 6u; i < (uint16_t)(3 + plen); i++) {
+        pdu[i] = (uint8_t)(0xA5u ^ i);           /* deterministic filler       */
+    }
     SHELL_PRINTF("PHY TX %s ch37: %ld pkts...\n", pn, n);
     tiku_radio_arch_constlat_hold(1);            /* erratum 20 across the run  */
     for (i = 0u; i < (uint16_t)n; i++) {

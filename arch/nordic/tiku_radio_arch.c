@@ -865,7 +865,16 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
         chan = 0u;
     }
     radio_phy_force_disable();
-    radio_apply_phy(phy);
+    /* Coded RX is ALWAYS armed as Ble_LR125Kbit (MODE 5): FEC block 1
+     * (header) is coded S=8 on every long-range packet, and its Coding
+     * Indicator tells the receiver whether the PAYLOAD is S=8 or S=2 -- the
+     * hardware then auto-boosts (EVENTS_RATEBOOST: "receive mode is changed
+     * from Ble_LR125Kbit to Ble_LR500Kbit", datasheet 8-radio).  Arming
+     * MODE 6 (LR500) for RX skips block-1 decode and misses S=2 packets --
+     * the R8.2 "Coded S2 RX ~1-2%" outlier.  So map any coded RX to S8's
+     * config; TX still uses MODE 6 to EMIT S=2. */
+    radio_apply_phy((phy == TIKU_RADIO_PHY_CODED_S2)
+                    ? TIKU_RADIO_PHY_CODED_S8 : phy);
     radio_phy_link_aa();
     RADIO->FREQUENCY = adv_freq[chan];
     RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
@@ -890,6 +899,7 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
             RADIO->EVENTS_END   = 0u;
             RADIO->EVENTS_CRCOK = 0u;
             RADIO->EVENTS_CRCERROR = 0u;
+            RADIO->EVENTS_RATEBOOST = 0u;
             RADIO->TASKS_START = 1u;             /* re-RX from RXIDLE (no ramp)*/
         }
         spin++;
