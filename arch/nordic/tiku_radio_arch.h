@@ -236,6 +236,13 @@ void tiku_radio_arch_central_bond(uint8_t on);
 int tiku_radio_arch_central_bonded(void);
 
 /**
+ * @brief Scan-by-address: make the initiator connect to a specific peer AdvA
+ *        (6 bytes) instead of matching the "TIKU" device name.  NULL clears
+ *        the filter (default name matching).
+ */
+void tiku_radio_arch_central_target(const uint8_t *addr);
+
+/**
  * @brief Phase E3: the session key the central derived after LL encryption
  *        startup (LL_ENC_REQ/RSP -> SK = e(LTK, SKDm||SKDs)).
  * @param sk out: 16-byte session key (may be NULL to just query).
@@ -261,6 +268,7 @@ int tiku_radio_arch_central_phy_result(uint16_t *survived);
 /** Peripheral T_IFS measured by the central (us), ground truth for L3. */
 extern uint32_t tiku_radio_arch_dbg_cen_tifs;
 extern uint32_t tiku_radio_arch_dbg_phy;   /* F2 debug: stage|att<<8|rsp<<16 */
+extern uint32_t tiku_radio_arch_dbg_cen_aa; /* last per-conn random central AA */
 
 #define TIKU_RADIO_LL_NEWDATA  (1u << 0)  /**< rx payload is new, deliver */
 #define TIKU_RADIO_LL_ACKED    (1u << 1)  /**< my TX landed, advance      */

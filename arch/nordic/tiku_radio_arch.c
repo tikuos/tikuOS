@@ -1367,6 +1367,10 @@ static uint8_t  cen_smp_a[6], cen_smp_b[6];
  * un-bonded -> pair as usual, then store the LTK so the NEXT reconnect skips. */
 static uint8_t  cen_bond_mode;      /* remember/reuse the LTK across connects */
 static uint8_t  cen_bonded;         /* this connection reused a stored bond   */
+/* Scan-by-address (central hardening): when set, the initiator connects to a
+ * specific AdvA instead of matching the "TIKU" device name. */
+static uint8_t  cen_target_set;
+static uint8_t  cen_target_addr[6];
 static uint8_t  cen_bond_stored;    /* we saved this run's fresh LTK already  */
 static uint8_t  cen_bond_ltk[16];   /* the stored LTK when cen_bonded         */
 /* Phase F2 PHY-update state (declared here: used in ll_reset/ll_handle_rx). */
@@ -2435,8 +2439,52 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
  */
 
 /* Connection parameters we impose as master (chosen for easy bring-up). */
-#define CEN_AA        0x71764129ul
+#define CEN_AA        0x71764129ul     /* fallback if RNG can't satisfy rules */
 #define CEN_CRCINIT   0x00555555ul
+
+/* Central-role hardening: a real initiator picks a FRESH Access Address per
+ * connection, meeting the Core-spec data-AA rules (Vol 6 Part B 2.1.2): not
+ * the advertising AA, not four equal octets, no run of >6 identical bits, no
+ * more than 24 transitions, and >= 2 transitions in the 6 most-significant
+ * bits.  Draw from the TRNG and reject-sample; fall back to the known-good
+ * fixed AA if the draws keep failing (never blocks the connection). */
+static uint32_t cen_gen_aa(void)
+{
+    uint8_t  tries;
+
+    for (tries = 0u; tries < 24u; tries++) {
+        uint8_t  b[4];
+        uint32_t aa;
+        uint8_t  i, run = 1u, maxrun = 1u, trans = 0u, toptrans = 0u;
+
+        (void)tiku_trng_arch_read_bytes(b, 4);
+        aa = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+             ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+        if (aa == 0x8E89BED6ul) {                    /* not the adv AA        */
+            continue;
+        }
+        if (b[0] == b[1] && b[1] == b[2] && b[2] == b[3]) {
+            continue;                                /* not four equal octets */
+        }
+        for (i = 1u; i < 32u; i++) {
+            uint8_t cur = (uint8_t)((aa >> i) & 1u);
+            uint8_t prv = (uint8_t)((aa >> (i - 1u)) & 1u);
+            if (cur == prv) {
+                run++;
+                if (run > maxrun) { maxrun = run; }
+            } else {
+                run = 1u;
+                trans++;
+                if (i >= 27u) { toptrans++; }        /* pairs in bits 26..31  */
+            }
+        }
+        if (maxrun > 6u || trans > 24u || toptrans < 2u) {
+            continue;
+        }
+        return aa;
+    }
+    return CEN_AA;
+}
 #define CEN_HOP       7u
 #define CEN_INTERVAL  24u        /* 1.25ms units -> 30 ms                  */
 #define CEN_WINSIZE   10u        /* 12.5 ms transmit window (lenient)      */
@@ -2447,6 +2495,7 @@ static uint8_t cen_rxb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 static uint8_t cen_txb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
 uint32_t tiku_radio_arch_dbg_phy;        /* F2 debug: stage|att<<8|rsp<<16  */
+uint32_t tiku_radio_arch_dbg_cen_aa;     /* last random central AA (hardening) */
 
 /* Phase A validation hook.  When armed, the master -- once the ATT loopback
  * has completed -- exercises the peripheral's LL control handling: it sends
@@ -2492,6 +2541,18 @@ void tiku_radio_arch_central_bond(uint8_t on)
 {
     cen_test_smp  = (on != 0u) ? 1u : 0u;
     cen_bond_mode = (on != 0u) ? 1u : 0u;
+}
+
+/* Scan-by-address: connect to a specific peer AdvA instead of by device name.
+ * @p addr NULL clears the filter (back to name matching). */
+void tiku_radio_arch_central_target(const uint8_t *addr)
+{
+    if (addr != (const uint8_t *)0) {
+        memcpy(cen_target_addr, addr, 6);
+        cen_target_set = 1u;
+    } else {
+        cen_target_set = 0u;
+    }
 }
 
 /* Bonding result: 1 = this connection reused a stored bond (skipped pairing),
@@ -2649,6 +2710,11 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     uint8_t *ll;
     uint8_t  att_prev = 0u, att_wait = 0u;        /* L5 transaction retry  */
     uint8_t  dle_wait = 0u;                       /* F1: LL_LENGTH_RSP wait*/
+    /* Per-connection random Access Address + CRCInit (central hardening). */
+    uint32_t cen_aa = cen_gen_aa();
+    uint32_t cen_crcinit;
+
+    tiku_radio_arch_dbg_cen_aa = cen_aa;          /* observability            */
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         memset(st, 0, sizeof(*st));
@@ -2671,11 +2737,17 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     cind[1] = 34u;
     cind[2] = my_addr[0];                         /* erratum-49 S1 = pay0  */
     memcpy(&cind[3], my_addr, 6u);                /* InitA                 */
+    {   /* Fresh 24-bit CRCInit per connection too (any value is spec-legal). */
+        uint8_t cb[3];
+        (void)tiku_trng_arch_read_bytes(cb, 3);
+        cen_crcinit = (uint32_t)cb[0] | ((uint32_t)cb[1] << 8) |
+                      ((uint32_t)cb[2] << 16);
+    }
     ll = &cind[15];
-    ll[0] = (uint8_t)CEN_AA; ll[1] = (uint8_t)(CEN_AA >> 8);
-    ll[2] = (uint8_t)(CEN_AA >> 16); ll[3] = (uint8_t)(CEN_AA >> 24);
-    ll[4] = (uint8_t)CEN_CRCINIT; ll[5] = (uint8_t)(CEN_CRCINIT >> 8);
-    ll[6] = (uint8_t)(CEN_CRCINIT >> 16);
+    ll[0] = (uint8_t)cen_aa; ll[1] = (uint8_t)(cen_aa >> 8);
+    ll[2] = (uint8_t)(cen_aa >> 16); ll[3] = (uint8_t)(cen_aa >> 24);
+    ll[4] = (uint8_t)cen_crcinit; ll[5] = (uint8_t)(cen_crcinit >> 8);
+    ll[6] = (uint8_t)(cen_crcinit >> 16);
     ll[7] = CEN_WINSIZE;
     ll[8] = CEN_WINOFFSET; ll[9] = 0u;
     ll[10] = CEN_INTERVAL; ll[11] = 0u;
@@ -2732,9 +2804,15 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 break;
             }
         }
-        if (RADIO->EVENTS_CRCOK != 0u && (cen_rxb[0] & 0x0Fu) == 0x00u &&
-            cen_rxb[14] == 'T' && cen_rxb[15] == 'I' &&
-            cen_rxb[16] == 'K' && cen_rxb[17] == 'U') {
+        /* Peer match: by explicit AdvA when a target is set (scan-by-address,
+         * central hardening), else by the "TIKU" device name (the two-board
+         * oracle's default).  ADV_IND = PDU type 0 (S0 low nibble). */
+        uint8_t peer_ok = (cen_rxb[0] & 0x0Fu) == 0x00u &&
+            (cen_target_set
+                 ? (memcmp(&cen_rxb[3], cen_target_addr, 6) == 0)
+                 : (cen_rxb[14] == 'T' && cen_rxb[15] == 'I' &&
+                    cen_rxb[16] == 'K' && cen_rxb[17] == 'U'));
+        if (RADIO->EVENTS_CRCOK != 0u && peer_ok) {
             memcpy(&cind[9], &cen_rxb[3], 6u);     /* AdvA from the ADV_IND */
             memcpy(cen_smp_a, my_addr, 6u);        /* Phase E: A = InitA (us) */
             memcpy(cen_smp_b, &cind[9], 6u);       /*          B = AdvA (peer)*/
@@ -2841,7 +2919,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         while ((int32_t)(conn_now() - anchor) < 0) {
             /* park to our own anchor */
         }
-        r = cen_event(CEN_AA, CEN_CRCINIT, k, &ack);
+        r = cen_event(cen_aa, cen_crcinit, k, &ack);
         if (st != (tiku_radio_ll_conn_stats_t *)0) {
             st->events++;
             if (r == 2) {

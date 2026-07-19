@@ -67,12 +67,12 @@
 #include <arch/nordic/tiku_nordic_core.h>    /* wfe (ext pacing)                */
 #include <kernel/cpu/tiku_common.h>          /* unique id -> AdvA (ext)         */
 #include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP LTK readout */
+#include <interfaces/bluetooth/tiku_ble_bond.h>      /* durable LTK bond store   */
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>      /* L6: FLPR-as-controller (F-L6.1) */
 #include <interfaces/bluetooth/tiku_ble_serial.h> /* facade (B3 auto-reconnect) */
 #include <interfaces/bluetooth/tiku_ble_host.h>   /* Phase B: M33 ATT/GATT host */
 #include <interfaces/bluetooth/tiku_ble_smp.h>     /* Phase E: SMP LESC crypto  */
-#include <interfaces/bluetooth/tiku_ble_bond.h>     /* durable LTK bond store    */
 #include <arch/nordic/tiku_crypto_arch.h>          /* E3c: AES-CCM decrypt      */
 #include <arch/nordic/tiku_ble_ccm_arch.h>         /* CCM00 hardware CCM KAT    */
 #include <interfaces/bluetooth/tiku_ble_enc.h>     /* E3c: demo params + nonce  */
@@ -84,6 +84,31 @@
 
 /* SHELL_PRINTF has no %02X, so format an address (host order: MSB first)
  * into "AA:BB:CC:DD:EE:FF" ourselves. */
+/* Parse "AA:BB:CC:DD:EE:FF" (as bleadv_fmt_addr prints, MSB first) into the
+ * packet byte order out[0..5] (LSB first).  Returns 1 on a clean parse. */
+static int bleadv_parse_addr(const char *s, uint8_t out[6])
+{
+    int i, hi, lo;
+    for (i = 5; i >= 0; i--) {
+        hi = (int)*s++;
+        lo = (int)*s++;
+        hi = (hi >= '0' && hi <= '9') ? hi - '0'
+           : (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10
+           : (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 : -1;
+        lo = (lo >= '0' && lo <= '9') ? lo - '0'
+           : (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10
+           : (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 : -1;
+        if (hi < 0 || lo < 0) {
+            return 0;
+        }
+        out[i] = (uint8_t)((hi << 4) | lo);      /* MSB token -> out[5..0]   */
+        if (i && *s == ':') {
+            s++;
+        }
+    }
+    return 1;
+}
+
 static void bleadv_fmt_addr(char *out, const uint8_t addr[6])
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -611,12 +636,12 @@ static void bleadv_censmp(unsigned secs)
 /* Bonding: central + durable LTK.  First run to a peer pairs (LE-SC) and
  * stores {AdvA -> LTK}; a reconnect finds the bond, SKIPS pairing, and
  * encrypts with the stored LTK.  Survives reboot (RRAM persist cell). */
-static void bleadv_cenbond(unsigned secs)
+static void bleadv_cenbond(unsigned secs, const char *target)
 {
-    uint8_t addr[6], sk[16];
+    uint8_t addr[6], sk[16], taddr[6];
     tiku_radio_ll_conn_stats_t st;
     char addrstr[18];
-    int bonded;
+    int bonded, by_addr = 0;
 
     if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
         SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
@@ -628,16 +653,27 @@ static void bleadv_cenbond(unsigned secs)
     bleadv_fmt_addr(addrstr, addr);
     tiku_ble_smp_pair_reset();
     tiku_radio_arch_central_bond(1u);             /* arm pair+remember/reuse  */
-    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-PAIR, bonding (bonds=%u) up to"
-                 " %u s...\n", addrstr, (unsigned)tiku_ble_bond_count(), secs);
+    /* Optional scan-BY-ADDRESS: connect to a specific AdvA instead of the
+     * "TIKU" name (central hardening). */
+    if (target != (const char *)0 && bleadv_parse_addr(target, taddr)) {
+        tiku_radio_arch_central_target(taddr);
+        by_addr = 1;
+    } else {
+        tiku_radio_arch_central_target((const uint8_t *)0);
+    }
+    SHELL_PRINTF("CENTRAL %s: %s, bonding (bonds=%u) up to %u s...\n", addrstr,
+                 by_addr ? "connecting by ADDRESS" : "scanning for TIKU-PAIR",
+                 (unsigned)tiku_ble_bond_count(), secs);
     (void)tiku_radio_arch_central(addr, secs, &st);
     bonded = tiku_radio_arch_central_bonded();
     tiku_radio_arch_central_bond(0u);
+    tiku_radio_arch_central_target((const uint8_t *)0);   /* clear filter    */
 
-    SHELL_PRINTF("  events=%lu rx_ok=%lu (%lu%% responded)\n",
+    SHELL_PRINTF("  events=%lu rx_ok=%lu (%lu%% responded) AA=%08lx\n",
                  (unsigned long)st.events, (unsigned long)st.rx_ok,
                  st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
-                           : 0ul);
+                           : 0ul,
+                 (unsigned long)tiku_radio_arch_dbg_cen_aa);
     if (tiku_radio_arch_central_enc(sk)) {
         char hx[40];
         bleadv_fmt_hex(hx, sk, 16, 0);
@@ -1207,8 +1243,12 @@ static void bleadv_flprpair(uint8_t bond_mode)
     advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
     adv[0] = 0x40u;                               /* ADV_IND, random TxAdd    */
 
-    SHELL_PRINTF("FLPR SMP pair: advertising 'TIKU-PAIR' -- run 'bleadv censmp'"
-                 " on the peer...\n");
+    {   /* Print our AdvA so a peer can connect scan-BY-ADDRESS to it. */
+        char astr[18];
+        bleadv_fmt_addr(astr, addr);
+        SHELL_PRINTF("FLPR SMP pair: advertising 'TIKU-PAIR' as %s -- run "
+                     "'bleadv censmp' on the peer...\n", astr);
+    }
     tiku_radio_arch_init();
     NRF_RADIO_S->TIFS = 150u;
     tiku_radio_arch_constlat_hold(1);
@@ -1519,16 +1559,20 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "cenbond") == 0) {        /* bonding: pair/reuse LTK   */
         unsigned s = 30u;
-        if (argc >= 3) {
-            long v = strtol(argv[2], (char **)0, 10);
-            if (v > 0 && v <= 600) { s = (unsigned)v; }
-        }
+        const char *target = (const char *)0;
         if (argc >= 3 && strcmp(argv[2], "clear") == 0) {
             tiku_ble_bond_clear();
             SHELL_PRINTF("bonds cleared\n");
             return;
         }
-        bleadv_cenbond(s);
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        }
+        if (argc >= 4) {                           /* scan-by-address arg     */
+            target = argv[3];
+        }
+        bleadv_cenbond(s, target);
         return;
     }
     if (strcmp(argv[1], "cenphy") == 0) {   /* F2: PHY update (2M / coded)  */
