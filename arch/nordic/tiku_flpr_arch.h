@@ -177,6 +177,9 @@ void tiku_flpr_arch_enc_sk(uint8_t sk[16]);
 /** @brief Copy the session IV = IVm||IVs (valid after enc_service() == 1). */
 void tiku_flpr_arch_enc_iv(uint8_t iv[8]);
 
+/** @brief Phase F1: negotiated DLE max LL payload (0 until LL_LENGTH done). */
+uint32_t tiku_flpr_arch_dle_max(void);
+
 /**
  * @brief Phase A telemetry: LL updates applied this connection.
  * @param chan_map  out: LL_CHANNEL_MAP_UPDATE_INDs followed to their Instant.

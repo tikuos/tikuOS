@@ -567,6 +567,12 @@ void tiku_flpr_arch_enc_iv(uint8_t iv[8])
     }
 }
 
+/* Phase F1: negotiated DLE max LL payload (0 until LL_LENGTH completes). */
+uint32_t tiku_flpr_arch_dle_max(void)
+{
+    return TIKU_FLPR_SHARED->dle_max;
+}
+
 /* Phase A telemetry: LL updates the FLPR applied this connection. */
 uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
 {

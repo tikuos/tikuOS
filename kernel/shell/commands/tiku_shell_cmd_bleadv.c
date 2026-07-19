@@ -74,6 +74,7 @@
 #include <interfaces/bluetooth/tiku_ble_smp.h>     /* Phase E: SMP LESC crypto  */
 #include <arch/nordic/tiku_crypto_arch.h>          /* E3c: AES-CCM decrypt      */
 #include <interfaces/bluetooth/tiku_ble_enc.h>     /* E3c: demo params + nonce  */
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>        /* F1: DLE frag buffer size  */
 #endif
 #include <kernel/cpu/tiku_watchdog.h>        /* kick across the ext loop        */
 #include <stdlib.h>
@@ -901,7 +902,8 @@ static void bleadv_flprnus(uint8_t req_cpu)
     SHELL_PRINTF("  connected; M33 NUS host live (ATT on M33), echoing"
                  " RX->TX ~15 s...\n");
     {
-        uint8_t frame[40], nus[TIKU_BLE_HOST_MTU];
+        uint8_t frame[TIKU_FLPR_DLE_MAX_OCTETS];  /* F1: hold a DLE LL PDU    */
+        uint8_t nus[TIKU_BLE_HOST_MTU];
         char hx[50];
         uint32_t total = 0u;
         tiku_clock_time_t start = tiku_clock_time();
@@ -913,6 +915,10 @@ static void bleadv_flprnus(uint8_t req_cpu)
              * write surfaces bytes we echo back as a notification. */
             uint8_t llid_in;
             int n;
+            uint32_t dm = tiku_flpr_arch_dle_max();   /* F1: DLE negotiated?  */
+            if (dm > 27u) {
+                tiku_ble_host_set_frag_max((uint8_t)dm);
+            }
             bleadv_flpr_drain_tx();               /* flush pending TX first   */
             n = tiku_flpr_arch_conn_recv(frame, sizeof(frame), &llid_in);
             if (n > 0) {
@@ -998,6 +1004,19 @@ static void bleadv_flprnus(uint8_t req_cpu)
         } else {
             SHELL_PRINTF("  no NUS bytes received (client didn't write?)\n");
         }
+        {   /* Phase F1: DLE negotiated + proof a whole L2CAP PDU rode one LL
+             * PDU (single-fragment RX > the 31-byte legacy L2CAP max). */
+            uint32_t dm = tiku_flpr_arch_dle_max();
+            uint16_t single = tiku_ble_host_max_single_frag();
+            if (dm > 27u && single > 31u) {
+                SHELL_PRINTF(SH_GREEN "  DLE OK: max=%lu octets, a %u-byte "
+                             "L2CAP PDU rode ONE LL PDU\n" SH_RST,
+                             (unsigned long)dm, (unsigned)single);
+            } else {
+                SHELL_PRINTF("  DLE: max=%lu single-frag=%u (not exercised)\n",
+                             (unsigned long)dm, (unsigned)single);
+            }
+        }
     }
 }
 
@@ -1044,7 +1063,8 @@ static void bleadv_flprpair(void)
         return;
     }
     {
-        uint8_t frame[40], inita[6], adva[6], types;
+        uint8_t frame[TIKU_FLPR_DLE_MAX_OCTETS];  /* F1: hold a DLE LL PDU    */
+        uint8_t inita[6], adva[6], types;
         uint8_t ltk[16], sk[16], iv[8];
         int paired = 0, enc_done = 0, dec_ok = 0;
         tiku_clock_time_t start = tiku_clock_time();
@@ -1061,6 +1081,10 @@ static void bleadv_flprpair(void)
                (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
             uint8_t llid_in;
             int n;
+            uint32_t dm = tiku_flpr_arch_dle_max();   /* F1: DLE negotiated?  */
+            if (dm > 27u) {
+                tiku_ble_host_set_frag_max((uint8_t)dm);
+            }
             bleadv_flpr_drain_tx();                /* flush any staged reply   */
             n = tiku_flpr_arch_conn_recv(frame, sizeof(frame), &llid_in);
             if (n > 0) {

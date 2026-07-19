@@ -48,6 +48,20 @@
  * whole page comfortably inside 1 KB. */
 #define TIKU_FLPR_MSG_CAP  240u
 
+/* Data Length Extension: the max LL data-PDU payload we negotiate (Phase F1).
+ * 80 comfortably fits our largest L2CAP PDU (the 69-byte SMP Public Key, the
+ * 68-byte long-read response) in a SINGLE LL PDU -- no fragmentation -- while
+ * an 80-byte-payload packet stays ~728 us on 1M PHY, inside the connection
+ * event's existing ~900 us TX/RX window (no timing re-tune).  Bounds the RADIO
+ * MAXLEN + the conn RX/TX buffers below. */
+#define TIKU_FLPR_DLE_MAX_OCTETS  80u
+/* Max air time for that payload, us: (octets + 14) * 8 on 1M PHY (preamble 1 +
+ * AA 4 + header 2 + MIC 4 + CRC 3 = 14).  Matches the spec's 2120 us @ 251. */
+#define TIKU_FLPR_DLE_MAX_TIME    ((TIKU_FLPR_DLE_MAX_OCTETS + 14u) * 8u)
+/* Buffer that holds a whole radio packet: S0 + LENGTH + S1 + payload(<=MAXLEN)
+ * + slack, word-aligned. */
+#define TIKU_FLPR_DLE_BUF_SIZE    96u
+
 typedef struct {
     volatile uint32_t magic;        /* TIKU_FLPR_MAGIC once main() runs   */
     volatile uint32_t heartbeat;    /* increments while un-parked          */
@@ -114,6 +128,11 @@ typedef struct {
     volatile uint8_t  enc_sk[16];       /* M33->FLPR: session key (CCM00)     */
     volatile uint8_t  enc_iv[8];        /* M33->FLPR: IV = IVm||IVs (CCM00)   */
     volatile uint32_t enc_on;           /* FLPR: 1 once encryption is active  */
+
+    /* Data Length Extension (Phase F1): once the FLPR answers LL_LENGTH_REQ it
+     * publishes the negotiated max LL payload here so the M33 host raises its
+     * L2CAP fragmentation threshold to match (0 = pre-DLE default, 27). */
+    volatile uint32_t dle_max;          /* FLPR->M33: negotiated max octets   */
     volatile uint32_t conn_sub;         /* vestigial (host tracks CCCD, PhaseB)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */

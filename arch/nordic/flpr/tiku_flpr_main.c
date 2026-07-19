@@ -275,7 +275,7 @@ static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
  * is forwarded verbatim to the M33 host over f2a; the host's response frame
  * comes back over a2f and is queued as an LLID=2 data PDU.  ATT/GATT lives
  * on the M33 now (tiku_ble_host) -- the coprocessor no longer parses it. */
-static uint8_t  fll_tx[40];             /* pending PDU [hdr][len][S1][pay]  */
+static uint8_t  fll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* pending PDU [hdr][len][S1][pay]*/
 static uint8_t  fll_tx_len;             /* payload len; 0 = none            */
 static uint8_t  fll_tx_llid;            /* 2 L2CAP / 3 control              */
 static uint8_t  fll_sent_vers;          /* we queued our VERSION_IND        */
@@ -435,7 +435,27 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             flpr_doorbell_to_app();
             fll_enc_pending = 1u;
         }
-    } else if (op != 0x09u && op != 0x13u && op != 0x07u) {
+    } else if (op == 0x14u) {                   /* LL_LENGTH_REQ (DLE)      */
+        /* Reply with our max, and publish the effective TX size (min of our
+         * max and the peer's MaxRxOctets) so the M33 host stops fragmenting a
+         * whole L2CAP PDU across data PDUs.  CtrData: MaxRxOctets[2] MaxRxTime
+         * [2] MaxTxOctets[2] MaxTxTime[2] (LE) at buf[4..11]. */
+        if (buf[1] >= 9u) {
+            uint16_t peer_rx = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
+            uint32_t eff = (peer_rx < TIKU_FLPR_DLE_MAX_OCTETS)
+                         ? peer_rx : TIKU_FLPR_DLE_MAX_OCTETS;
+            uint8_t rsp[8];
+            rsp[0] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; rsp[1] = 0u;
+            rsp[2] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
+            rsp[3] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);
+            rsp[4] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; rsp[5] = 0u;
+            rsp[6] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
+            rsp[7] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);
+            fll_queue_ctrl(0x15u, rsp, 8u);     /* LL_LENGTH_RSP            */
+            if (eff < 27u) { eff = 27u; }
+            sh->dle_max = eff;                  /* publish to the M33 host  */
+        }
+    } else if (op != 0x09u && op != 0x13u && op != 0x07u && op != 0x15u) {
         fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
     }
 }
@@ -445,8 +465,8 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
  * the CSA#1 channel and wait for its packet, hardware-T_IFS respond with
  * an empty PDU carrying our SN/NESN, and re-arm.  Channels advance per
  * event in lockstep with the central.  Supervision = a run of misses. */
-static uint8_t conn_txb[40]    __attribute__((aligned(4)));
-static uint8_t conn_datrx[48]  __attribute__((aligned(4)));
+static uint8_t conn_txb[TIKU_FLPR_DLE_BUF_SIZE]   __attribute__((aligned(4)));
+static uint8_t conn_datrx[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
 /* Anchored-RX: cut RADIO-on time without breaking the channel lock.  The
  * continuous-RX loop stays synced for free -- one catch == one CSA#1 hop ==
@@ -491,6 +511,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_cm_pending = 0u; fll_cu_pending = 0u;    /* Phase A: no update armed  */
     fll_enc_pending = 0u; fll_enc_done = 0u;      /* Phase E3: not encrypting  */
     sh->enc_on = 0u;
+    sh->dle_max = 0u;                             /* Phase F1: pre-DLE (27)    */
     sh->conn_sub = 0u;
     sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
 

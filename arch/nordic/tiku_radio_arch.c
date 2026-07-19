@@ -72,6 +72,7 @@
 #include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM (E3)      */
 #include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
 #include <interfaces/bluetooth/tiku_ble_enc.h>  /* E3c demo params + nonce     */
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* DLE max octets (F1)         */
 #include <string.h>
 
 #define RADIO  NRF_RADIO_S
@@ -204,11 +205,12 @@ void tiku_radio_arch_init(void)
 
     /* PDU layout: 1-byte S0 (the PDU header), 8-bit LENGTH, S1LEN=0 but
      * S1INCL=Include -- the erratum-49 workaround RAM slot (see header
-     * comment); 8-bit preamble.  MAXLEN 37, 3-byte base address,
-     * little-endian, whitening on. */
+     * comment); 8-bit preamble.  MAXLEN = the DLE max (Phase F1: was 37, the
+     * legacy 27+slack) so a whole L2CAP PDU rides one LL PDU; 3-byte base
+     * address, little-endian, whitening on. */
     RADIO->PCNF0 = (8u << 0) | (1u << 8) | (0u << 16) |
                    (1u << 20) | (0u << 24);
-    RADIO->PCNF1 = (37u << 0) | (0u << 8) | (3u << 16) |
+    RADIO->PCNF1 = (TIKU_FLPR_DLE_MAX_OCTETS << 0) | (0u << 8) | (3u << 16) |
                    (0u << 24) | (1u << 25);
 
     /* Access address 0x8E89BED6 on logical address 0 -- for TX (TXADDRESS
@@ -1300,6 +1302,8 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 #define LL_TERMINATE_IND     0x02u
 #define LL_ENC_REQ           0x03u
 #define LL_ENC_RSP           0x04u
+#define LL_LENGTH_REQ        0x14u
+#define LL_LENGTH_RSP        0x15u
 #define LL_UNKNOWN_RSP       0x07u
 #define LL_FEATURE_REQ       0x08u
 #define LL_FEATURE_RSP       0x09u
@@ -1307,7 +1311,7 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 #define LL_PING_REQ          0x12u
 #define LL_PING_RSP          0x13u
 
-static uint8_t  ll_tx[36];          /* pending PDU RAM [hdr][len][S1][pay] */
+static uint8_t  ll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* pending PDU [hdr][len][S1][pay]*/
 static uint8_t  ll_tx_len;          /* payload len; 0 = none               */
 static uint8_t  ll_tx_llid;         /* 2 = L2CAP data, 3 = LL control      */
 static uint8_t  ll_peer_vers;       /* peer VersNr (0 = not yet heard)     */
@@ -1319,7 +1323,11 @@ static uint32_t ll_ctrl_tx, ll_ctrl_rx;
  * default MTU spans several data PDUs).  TX SDU = the outgoing L2CAP PDU,
  * doled one <=27-byte fragment per acked LL PDU (LLID 2 start / 1 cont).
  * RX buffer = recombine incoming fragments back into a whole L2CAP PDU. */
-#define L2_FRAG_MAX  27u
+#define L2_FRAG_MAX  27u            /* pre-DLE default LL data payload      */
+/* Data Length Extension (F1): raised to the negotiated max on LL_LENGTH_RSP so
+ * a whole L2CAP PDU rides ONE LL PDU instead of 27-byte fragments. */
+static uint8_t  cen_dle_max = L2_FRAG_MAX;
+static uint8_t  cen_dle_sent;       /* we have queued LL_LENGTH_REQ        */
 /* 72 >= the largest L2CAP PDU either side moves: the SMP Pairing Public Key
  * (65-byte SMP + 4-byte L2CAP header = 69).  ATT stays within the MTU. */
 static uint8_t  cen_sdu[72];        /* outgoing L2CAP PDU being fragmented  */
@@ -1331,6 +1339,7 @@ static uint16_t cen_rc_len, cen_rc_expect;
  * instead of the NUS ATT flow.  A = InitA (us), B = AdvA (peer). */
 static uint8_t  cen_test_smp;
 static uint8_t  cen_smp_started;
+static uint8_t  cen_smp_ready;      /* keypair generated, Pairing Req staged */
 static uint8_t  cen_smp_a[6], cen_smp_b[6];
 /* Last SMP PDU we sent + a stall counter: the exchange is reply-driven, so if
  * a reply is lost the initiator re-sends its last PDU to re-prompt it (the
@@ -1415,9 +1424,10 @@ static void ll_reset(void)
     cen_sdu_len = 0u; cen_sdu_off = 0u;         /* Phase C frag/recomb        */
     cen_rc_len = 0u; cen_rc_expect = 0u;
     cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
-    cen_smp_started = 0u;                        /* Phase E: SMP not yet begun */
+    cen_smp_started = 0u; cen_smp_ready = 0u;    /* Phase E: SMP not yet begun */
     cen_smp_last_len = 0u; cen_smp_wait = 0u;
     cen_enc_stage = 0u;                          /* Phase E3: not encrypting   */
+    cen_dle_max = L2_FRAG_MAX; cen_dle_sent = 0u; /* Phase F1: pre-DLE         */
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -1449,8 +1459,8 @@ static void cen_sdu_frag(void)
 {
     uint16_t n = (uint16_t)(cen_sdu_len - cen_sdu_off);
     uint8_t  llid = (cen_sdu_off == 0u) ? 2u : 1u;
-    if (n > L2_FRAG_MAX) {
-        n = L2_FRAG_MAX;
+    if (n > cen_dle_max) {                        /* DLE-negotiated size       */
+        n = cen_dle_max;
     }
     ll_queue_raw(llid, &cen_sdu[cen_sdu_off], (uint8_t)n);
 }
@@ -1498,6 +1508,19 @@ static void cen_smp_rx(const uint8_t *smp, uint16_t len)
     cen_smp_wait = 0u;                           /* progress: reset the stall  */
     (void)tiku_ble_smp_pair_feed(smp, len);
     cen_smp_pump();
+}
+
+/* Phase F1: queue LL_LENGTH_REQ advertising our max RX/TX octets + time. */
+static void cen_send_length_req(void)
+{
+    uint8_t d[8];
+    d[0] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[1] = 0u;   /* MaxRxOctets      */
+    d[2] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
+    d[3] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);         /* MaxRxTime        */
+    d[4] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[5] = 0u;   /* MaxTxOctets      */
+    d[6] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
+    d[7] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);         /* MaxTxTime        */
+    ll_queue(LL_LENGTH_REQ, d, 8u);
 }
 
 /* Build + queue LL_ENC_REQ from the current SKDm/IVm (Rand/EDIV = 0 for
@@ -1861,6 +1884,27 @@ static void att_server_pump(void)
     }
 }
 
+/* Kick off the application phase once the LL setup (VERSION + DLE) is done:
+ * SMP pairing if armed, else the NUS ATT client.  Idempotent. */
+static void cen_kick_app(void)
+{
+    if (!ll_is_central || att_step != 0u || cen_smp_started) {
+        return;
+    }
+    if (cen_test_smp) {
+        if (!cen_smp_ready) {           /* keygen deferred? do it now      */
+            (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_INITIATOR,
+                                          cen_smp_a, 1u, cen_smp_b, 1u);
+            cen_smp_ready = 1u;
+        }
+        cen_smp_started = 1u;
+        cen_smp_pump();                 /* send the staged Pairing Request  */
+    } else {
+        att_step = 1u;                  /* L5: kick off ATT (MTU Request)  */
+        att_client_send();
+    }
+}
+
 /* Process a genuinely-new received PDU (RAM [hdr][len][S1][payload], so
  * payload starts at buf[3]); may queue a response. */
 static void ll_handle_rx(const uint8_t *buf)
@@ -1916,17 +1960,28 @@ static void ll_handle_rx(const uint8_t *buf)
         }
         if (!ll_sent_vers) {
             ll_queue_version();     /* reply with ours                     */
-        } else if (ll_is_central && att_step == 0u && !cen_smp_started) {
-            if (cen_test_smp) {         /* Phase E: pair instead of NUS    */
-                cen_smp_started = 1u;
-                (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_INITIATOR,
-                                              cen_smp_a, 1u, cen_smp_b, 1u);
-                cen_smp_pump();         /* queue the Pairing Request       */
-            } else {
-                att_step = 1u;          /* L5: kick off ATT (MTU Request)  */
-                att_client_send();
+        } else if (ll_is_central) {
+            /* DLE's payoff is the long-read/write DATA path.  Only negotiate
+             * it there; the one-time SMP handshake stays on 27-byte fragments
+             * (pre-F1 timing) -- the P-256 keygen already stresses this
+             * marginal link, and adding DLE's extra round-trip + larger PDUs
+             * on top collapses it.  So for pairing, kick SMP straight away. */
+            if (cen_test_smp) {
+                cen_kick_app();     /* SMP now, no DLE                      */
+            } else if (!cen_dle_sent) {
+                cen_send_length_req();  /* data path: negotiate DLE first   */
+                cen_dle_sent = 1u;
             }
         }
+        break;
+    case LL_LENGTH_RSP:             /* Phase F1: raise the fragment size    */
+        if (buf[1] >= 5u) {
+            uint16_t peer_rx = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
+            uint8_t eff = (peer_rx < (uint16_t)TIKU_FLPR_DLE_MAX_OCTETS)
+                        ? (uint8_t)peer_rx : (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS;
+            cen_dle_max = (eff < L2_FRAG_MAX) ? L2_FRAG_MAX : eff;
+        }
+        cen_kick_app();             /* DLE done -> start SMP / ATT          */
         break;
     case LL_FEATURE_REQ: {
         static const uint8_t none[8] = { 0u };
@@ -2335,8 +2390,8 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 #define CEN_WINOFFSET 1u         /* 1.25 ms (small, predictable anchor)    */
 #define CEN_TIMEOUT   400u       /* 10ms units -> 4 s supervision (lenient)*/
 
-static uint8_t cen_rxb[48] __attribute__((aligned(4)));
-static uint8_t cen_txb[36] __attribute__((aligned(4)));
+static uint8_t cen_rxb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
+static uint8_t cen_txb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
 
 /* Phase A validation hook.  When armed, the master -- once the ATT loopback
@@ -2502,6 +2557,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     int      connected = 0;
     uint8_t *ll;
     uint8_t  att_prev = 0u, att_wait = 0u;        /* L5 transaction retry  */
+    uint8_t  dle_wait = 0u;                       /* F1: LL_LENGTH_RSP wait*/
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         memset(st, 0, sizeof(*st));
@@ -2781,6 +2837,15 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 l2cap_queue(0x06u, cen_smp_last, cen_smp_last_len);
                 cen_smp_wait = 0u;
             }
+        }
+
+        /* Phase F1: if the peer never answers LL_LENGTH_REQ (no DLE support),
+         * start the app phase anyway after a few events (stays at 27-byte
+         * fragments).  For a DLE peer, LL_LENGTH_RSP already kicked it. */
+        if (ll_is_central && cen_dle_sent && att_step == 0u &&
+            !cen_smp_started && ll_tx_len == 0u && ++dle_wait >= 8u) {
+            cen_kick_app();
+            dle_wait = 0u;
         }
 
         /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).

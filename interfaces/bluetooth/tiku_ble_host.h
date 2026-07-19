@@ -90,6 +90,17 @@ int tiku_ble_host_request_conn_param(uint16_t interval_min,
  *         (accepted); 0 not yet, -1 rejected. */
 int tiku_ble_host_conn_param_result(void);
 
+/**
+ * @brief Phase F1 (Data Length Extension): set the TX fragment size to the
+ *        negotiated max LL payload, so a whole L2CAP PDU rides one LL PDU.
+ *        Clamped to >= the 27-byte legacy minimum.
+ */
+void tiku_ble_host_set_frag_max(uint8_t n);
+
+/** @brief Largest L2CAP PDU received whole in one LL PDU this connection
+ *         (> 31 = a >27-byte payload arrived un-fragmented, i.e. DLE worked). */
+uint16_t tiku_ble_host_max_single_frag(void);
+
 /* --- SMP pairing (responder, L2CAP CID 0x0006, Phase E) ----------------- */
 
 /**

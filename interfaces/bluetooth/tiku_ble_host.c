@@ -100,6 +100,8 @@ static uint8_t  host_cpu_resp;                    /* 0 none, 1 accept, 2 reject*
 static uint16_t host_prep_h;                      /* Prepare-Write handle     */
 static uint8_t  host_prep[HOST_SCRATCH_CAP];      /* accumulated long write   */
 static uint16_t host_prep_len;
+static uint8_t  host_frag_max = HOST_FRAG_MAX;   /* TX frag size (DLE raises) */
+static uint16_t host_max_single;                 /* largest 1-PDU L2CAP RX'd  */
 
 void tiku_ble_host_reset(void)
 {
@@ -109,6 +111,8 @@ void tiku_ble_host_reset(void)
     host_tx_len = 0u; host_tx_off = 0u;
     host_sig_id = 0u; host_cpu_resp = 0u;
     host_prep_h = 0u; host_prep_len = 0u;
+    host_frag_max = HOST_FRAG_MAX;               /* F1: pre-DLE default (27)  */
+    host_max_single = 0u;
     host_cccd[0] = 0u; host_cccd[1] = 0u;
     /* Deterministic long values so a client can verify a long read/write. */
     for (i = 0u; i < HOST_MODEL_LEN; i++) {
@@ -513,6 +517,9 @@ int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid)
         host_rc[host_rc_len++] = frag[i];
     }
     if (host_rc_expect >= 4u && host_rc_len >= host_rc_expect) {
+        if (llid == 2u && host_rc_expect > host_max_single) {
+            host_max_single = host_rc_expect;    /* F1: whole PDU in one LL PDU*/
+        }
         if (host_rc[2] == 0x05u && host_rc[3] == 0x00u) {
             host_sig(host_rc, host_rc_expect);   /* L2CAP signalling channel  */
         } else if (host_rc[2] == 0x06u && host_rc[3] == 0x00u) {
@@ -534,8 +541,8 @@ uint16_t tiku_ble_host_next_tx(uint8_t *out, uint16_t out_cap, uint8_t *llid)
         return 0u;                               /* nothing pending / done    */
     }
     n = (uint16_t)(host_tx_len - host_tx_off);
-    if (n > HOST_FRAG_MAX) {
-        n = HOST_FRAG_MAX;
+    if (n > host_frag_max) {                     /* DLE-negotiated size       */
+        n = host_frag_max;
     }
     if (n > out_cap) {
         n = out_cap;
@@ -621,4 +628,16 @@ int tiku_ble_host_request_conn_param(uint16_t interval_min,
 int tiku_ble_host_conn_param_result(void)
 {
     return (host_cpu_resp == 1u) ? 1 : ((host_cpu_resp == 2u) ? -1 : 0);
+}
+
+/* Phase F1 (DLE): set the TX fragment size (the negotiated max LL payload). */
+void tiku_ble_host_set_frag_max(uint8_t n)
+{
+    host_frag_max = (n < HOST_FRAG_MAX) ? HOST_FRAG_MAX : n;
+}
+
+/* Largest L2CAP PDU received whole in a single LL PDU (> 31 proves DLE). */
+uint16_t tiku_ble_host_max_single_frag(void)
+{
+    return host_max_single;
 }
