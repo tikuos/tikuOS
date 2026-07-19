@@ -134,3 +134,11 @@ tiku_basic_ext_error(int cat, const char *msg)
 {
     basic_throw(cat, msg);
 }
+
+void
+tiku_basic_ext_print(const char *s)
+{
+    if (s != NULL) {
+        SHELL_PRINTF("%s", s);            /* same stream PRINT writes to */
+    }
+}

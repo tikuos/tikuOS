@@ -88,4 +88,8 @@ int tiku_basic_ext_parse_strexpr(const char **p, char *buf, size_t cap);
  *  Routes through the A5 sink, so it works headless. */
 void tiku_basic_ext_error(int cat, const char *msg);
 
+/** Write @p s to the BASIC console (no newline added).  The output surface a
+ *  statement extension needs -- same stream PRINT uses. */
+void tiku_basic_ext_print(const char *s);
+
 #endif /* TIKU_BASIC_EXT_H_ */

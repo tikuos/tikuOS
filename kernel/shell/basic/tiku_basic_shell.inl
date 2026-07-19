@@ -40,6 +40,16 @@
 static int
 basic_session_begin(void)
 {
+    /* Register the native builtin words ONCE, before any dispatch can reach
+     * the registry fallthroughs.  Extensions are firmware config, not session
+     * state, so they live across sessions; the guard makes re-entry a no-op. */
+    {
+        static uint8_t ext_registered;
+        if (!ext_registered) {
+            basic_ext_register_kits();
+            ext_registered = 1u;
+        }
+    }
     if (basic_alloc_state() != 0) {
         SHELL_PRINTF(SH_RED
             "? basic: out of memory (need %u B in AUTO tier)" SH_RST "\n",

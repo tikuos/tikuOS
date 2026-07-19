@@ -344,6 +344,14 @@
 #define TIKU_BASIC_EXT_MAX          8
 #endif
 
+/* Ship the bundled native words (GCD/ISQRT/BITCNT/HEXPR, tiku_basic_ext_kits
+ * .inl) through the registry at boot.  On by default when the registry exists;
+ * set 0 to keep the seam but drop the bundle (each word is a handler + a few
+ * bytes of table). */
+#ifndef TIKU_BASIC_EXT_KITS
+#define TIKU_BASIC_EXT_KITS         1
+#endif
+
 #ifndef TIKU_BASIC_NAMEDVAR_LEN
 #define TIKU_BASIC_NAMEDVAR_LEN     8       /* 7 chars + NUL */
 #endif
