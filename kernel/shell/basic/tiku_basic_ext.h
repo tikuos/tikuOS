@@ -59,6 +59,18 @@ typedef void (*tiku_basic_ext_stmt_fn)(const char **p);
 typedef int (*tiku_basic_ext_nfn)(const long *args, int argc, long *out);
 
 /**
+ * @brief String-returning function handler (`NAME$`).
+ *
+ * Unlike numeric functions, the handler PARSES ITS OWN arguments (so it can
+ * take string args, numeric args, or a mix): on entry the cursor sits just
+ * past the name.  Use tiku_basic_ext_expect() for '(' / ',' / ')' and
+ * tiku_basic_ext_parse_expr / _parse_strexpr for the arguments; write the
+ * result string into @p out (capacity @p cap, always NUL-terminate); raise
+ * errors via tiku_basic_ext_error().
+ */
+typedef void (*tiku_basic_ext_strfn)(const char **p, char *out, size_t cap);
+
+/**
  * @brief Register a statement word.
  * @return 0 on success; -1 on invalid name / keyword collision / table full.
  */
@@ -70,6 +82,14 @@ int tiku_basic_register_stmt(const char *name, tiku_basic_ext_stmt_fn fn);
  */
 int tiku_basic_register_fn(const char *name, uint8_t arity,
                            tiku_basic_ext_nfn fn);
+
+/**
+ * @brief Register a string-returning function word.  @p name MUST end in '$'.
+ *        The handler parses its own args (see tiku_basic_ext_strfn).
+ * @return 0 on success; -1 on invalid name / collision / table full, or when
+ *         the build has string support disabled.
+ */
+int tiku_basic_register_strfn(const char *name, tiku_basic_ext_strfn fn);
 
 /*---------------------------------------------------------------------------*/
 /* Parser / error services for statement handlers.                           */
@@ -91,5 +111,10 @@ void tiku_basic_ext_error(int cat, const char *msg);
 /** Write @p s to the BASIC console (no newline added).  The output surface a
  *  statement extension needs -- same stream PRINT uses. */
 void tiku_basic_ext_print(const char *s);
+
+/** Skip whitespace, then require and consume @p ch (e.g. '(' ',' ')').
+ *  0 on success; -1 after raising a syntax error.  The punctuation helper a
+ *  self-parsing statement / string handler needs. */
+int tiku_basic_ext_expect(const char **p, char ch);
 
 #endif /* TIKU_BASIC_EXT_H_ */

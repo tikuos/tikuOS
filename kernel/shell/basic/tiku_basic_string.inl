@@ -1458,6 +1458,25 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
 #endif
 
+#if TIKU_BASIC_EXT_MAX > 0
+    /* Registered string-returning extensions (tiku_basic_ext.h, kind 2):
+     * after every builtin string function, before the bare string variable --
+     * so a registered NAME$ is a reserved word, not a variable.  The handler
+     * parses its own args and writes the result into out. */
+    {
+        uint8_t i;
+        for (i = 0; i < TIKU_BASIC_EXT_MAX; i++) {
+            if (basic_ext_tab[i].name[0] != '\0' &&
+                basic_ext_tab[i].kind == 2u &&
+                match_kw(p, basic_ext_tab[i].name)) {
+                if (cap > 0u) out[0] = '\0';
+                basic_ext_tab[i].u.strfn(p, out, cap);
+                return basic_error ? -1 : 0;
+            }
+        }
+    }
+#endif
+
     /* Bare string variable: A$ / NAME$ / etc.  Must come AFTER the
      * function-name matchers above so that LEFT$(...) and friends
      * aren't mis-tokenised as a variable named LEFT followed by a

@@ -208,11 +208,12 @@ static long          basic_sub_result;
  * match_kw's raw-text path at the dispatch fallthroughs. */
 typedef struct {
     char    name[TIKU_BASIC_EXT_NAME_MAX];   /* "" = free slot */
-    uint8_t kind;                            /* 0 = statement, 1 = numeric fn */
+    uint8_t kind;                            /* 0 stmt, 1 numeric fn, 2 str fn */
     uint8_t arity;                           /* numeric fns: 0..2 */
     union {
         tiku_basic_ext_stmt_fn stmt;
         tiku_basic_ext_nfn     nfn;
+        tiku_basic_ext_strfn   strfn;
     } u;
 } basic_ext_entry_t;
 static basic_ext_entry_t basic_ext_tab[TIKU_BASIC_EXT_MAX];

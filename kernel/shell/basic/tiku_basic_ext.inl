@@ -24,12 +24,18 @@
  * slot, not a crunched keyword (builtins win; rejecting the collision at
  * register time removes the silently-shadowed class entirely). */
 static int
-basic_ext_name_ok(const char *name)
+basic_ext_name_ok(const char *name, int allow_dollar)
 {
     size_t i, n;
     if (name == NULL || !(name[0] >= 'A' && name[0] <= 'Z')) return 0;
     n = strlen(name);
     if (n >= TIKU_BASIC_EXT_NAME_MAX) return 0;
+    /* A string-fn name is an identifier followed by exactly one trailing '$';
+     * a numeric/statement name has no '$' at all. */
+    if (allow_dollar) {
+        if (n < 2u || name[n - 1u] != '$') return 0;
+        n--;                                      /* validate the prefix only  */
+    }
     for (i = 0; i < n; i++) {
         char c = name[i];
         if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
@@ -59,7 +65,7 @@ int
 tiku_basic_register_stmt(const char *name, tiku_basic_ext_stmt_fn fn)
 {
     int s;
-    if (fn == NULL || !basic_ext_name_ok(name)) return -1;
+    if (fn == NULL || !basic_ext_name_ok(name, 0)) return -1;
     s = basic_ext_slot(name);
     if (s < 0) return -1;
     strncpy(basic_ext_tab[s].name, name, TIKU_BASIC_EXT_NAME_MAX - 1u);
@@ -74,7 +80,7 @@ int
 tiku_basic_register_fn(const char *name, uint8_t arity, tiku_basic_ext_nfn fn)
 {
     int s;
-    if (fn == NULL || arity > 2u || !basic_ext_name_ok(name)) return -1;
+    if (fn == NULL || arity > 2u || !basic_ext_name_ok(name, 0)) return -1;
     s = basic_ext_slot(name);
     if (s < 0) return -1;
     strncpy(basic_ext_tab[s].name, name, TIKU_BASIC_EXT_NAME_MAX - 1u);
@@ -83,6 +89,26 @@ tiku_basic_register_fn(const char *name, uint8_t arity, tiku_basic_ext_nfn fn)
     basic_ext_tab[s].arity = arity;
     basic_ext_tab[s].u.nfn = fn;
     return 0;
+}
+
+int
+tiku_basic_register_strfn(const char *name, tiku_basic_ext_strfn fn)
+{
+#if TIKU_BASIC_STRVARS_ENABLE
+    int s;
+    if (fn == NULL || !basic_ext_name_ok(name, 1)) return -1;
+    s = basic_ext_slot(name);
+    if (s < 0) return -1;
+    strncpy(basic_ext_tab[s].name, name, TIKU_BASIC_EXT_NAME_MAX - 1u);
+    basic_ext_tab[s].name[TIKU_BASIC_EXT_NAME_MAX - 1u] = '\0';
+    basic_ext_tab[s].kind    = 2u;
+    basic_ext_tab[s].arity   = 0u;
+    basic_ext_tab[s].u.strfn = fn;
+    return 0;
+#else
+    (void)name; (void)fn;
+    return -1;                                    /* no strings in this build  */
+#endif
 }
 
 #else  /* registry compiled out: registration is a clean no-op failure */
@@ -98,6 +124,13 @@ int
 tiku_basic_register_fn(const char *name, uint8_t arity, tiku_basic_ext_nfn fn)
 {
     (void)name; (void)arity; (void)fn;
+    return -1;
+}
+
+int
+tiku_basic_register_strfn(const char *name, tiku_basic_ext_strfn fn)
+{
+    (void)name; (void)fn;
     return -1;
 }
 
@@ -141,4 +174,21 @@ tiku_basic_ext_print(const char *s)
     if (s != NULL) {
         SHELL_PRINTF("%s", s);            /* same stream PRINT writes to */
     }
+}
+
+int
+tiku_basic_ext_expect(const char **p, char ch)
+{
+    skip_ws(p);
+    if (**p != ch) {
+        char msg[16];
+        msg[0] = '\''; msg[1] = ch; msg[2] = '\'';
+        msg[3] = ' '; msg[4] = 'e'; msg[5] = 'x'; msg[6] = 'p';
+        msg[7] = 'e'; msg[8] = 'c'; msg[9] = 't'; msg[10] = 'e';
+        msg[11] = 'd'; msg[12] = '\0';
+        basic_throw(TIKU_BASIC_ERR_SYNTAX, msg);
+        return -1;
+    }
+    (*p)++;
+    return 0;
 }

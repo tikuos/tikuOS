@@ -341,7 +341,8 @@
  * statement/function words from kernel services and tikukits.  Slots are a
  * few bytes of SRAM each; 0 compiles the whole feature out. */
 #ifndef TIKU_BASIC_EXT_MAX
-#define TIKU_BASIC_EXT_MAX          8
+#define TIKU_BASIC_EXT_MAX          16      /* bundled kit uses 6; rest for
+                                            * kernel services + tikukits */
 #endif
 
 /* Ship the bundled native words (GCD/ISQRT/BITCNT/HEXPR, tiku_basic_ext_kits
