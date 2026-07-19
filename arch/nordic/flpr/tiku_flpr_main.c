@@ -466,14 +466,15 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             sh->dle_max = eff;                  /* publish to the M33 host  */
         }
     } else if (op == 0x16u) {                   /* LL_PHY_REQ (PHY update)  */
-        static const uint8_t rsp[2] = { 0x03u, 0x03u };  /* TX/RX: 1M + 2M  */
+        static const uint8_t rsp[2] = { 0x07u, 0x07u };  /* 1M + 2M + Coded */
         fll_queue_ctrl(0x17u, rsp, 2u);         /* LL_PHY_RSP              */
     } else if (op == 0x18u) {                   /* LL_PHY_UPDATE_IND        */
         /* CtrData: PHY_C_TO_P[1] PHY_P_TO_C[1] Instant[2] at buf[4..7].
          * Symmetric switch: our RX (C->P) and TX (P->C) take the same PHY;
-         * apply RADIO MODE/PCNF0 at the Instant. */
+         * apply RADIO MODE/PCNF0 at the Instant.  0=1M 1=2M 2=Coded S8. */
         if (buf[1] >= 5u) {
-            fll_phy_new = ((buf[4] & 0x02u) != 0u) ? 1u : 0u;   /* 2M?      */
+            fll_phy_new = ((buf[4] & 0x04u) != 0u) ? 2u
+                        : ((buf[4] & 0x02u) != 0u) ? 1u : 0u;
             fll_phy_instant = (uint16_t)(buf[6] | ((uint16_t)buf[7] << 8));
             fll_phy_pending = 1u;
         }
@@ -592,7 +593,13 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
          * with the central which switches at the same connEventCount. */
         if (fll_phy_pending &&
             (uint16_t)(cec - fll_phy_instant) < 0x8000u) {
-            if (fll_phy_new == 1u) {             /* 2M                        */
+            if (fll_phy_new == 2u) {             /* Coded S8: MODE 5, PLEN
+                                                  * LongRange, CILEN 2,
+                                                  * TERMLEN 3 (R8.2 config)  */
+                r->MODE  = 5u;
+                r->PCNF0 = (8u << 0) | (1u << 8) | (1u << 20) |
+                           (3u << 24) | (2u << 22) | (3u << 29);
+            } else if (fll_phy_new == 1u) {      /* 2M                        */
                 r->MODE  = 4u;
                 r->PCNF0 = (8u << 0) | (1u << 8) | (1u << 20) | (1u << 24);
             } else {                             /* 1M                        */
@@ -747,10 +754,16 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             win = ARX_WIN_MIN;
         }
         /* CRC verdict lands just after PHYEND; bounded so we stay inside
-         * the 150 us T_IFS window before the auto-TX reads conn_txb. */
-        for (spin = 0u; spin < 3000u; spin++) {
-            if (r->EVENTS_CRCOK != 0u || r->EVENTS_CRCERROR != 0u) {
-                break;
+         * the 150 us T_IFS window before the auto-TX reads conn_txb.  On
+         * Coded S8 the packet BODY still has milliseconds of air time after
+         * ADDRESS (64 us/byte), so the verdict cap scales with the PHY --
+         * at 3000 iters every coded packet would be misread as CRC-bad. */
+        {
+            uint32_t crc_cap = (sh->conn_phy == 2u) ? 60000u : 3000u;
+            for (spin = 0u; spin < crc_cap; spin++) {
+                if (r->EVENTS_CRCOK != 0u || r->EVENTS_CRCERROR != 0u) {
+                    break;
+                }
             }
         }
         if (r->EVENTS_CRCOK != 0u && sh->conn_phy != 0u) {

@@ -1352,11 +1352,12 @@ static uint8_t  cen_smp_started;
 static uint8_t  cen_smp_ready;      /* keypair generated, Pairing Req staged */
 static uint8_t  cen_smp_a[6], cen_smp_b[6];
 /* Phase F2 PHY-update state (declared here: used in ll_reset/ll_handle_rx). */
-static uint8_t  cen_test_phy;       /* drive a PHY update this run           */
+static uint8_t  cen_test_phy;       /* PHY update target: 0 off, 1 2M, 2 S8  */
 static uint8_t  cen_phy_rsp;        /* LL_PHY_RSP received                   */
-static uint8_t  cen_phy_applied;    /* central switched its RADIO to 2M      */
+static uint8_t  cen_phy_applied;    /* central switched its RADIO             */
 static uint16_t cen_phy_survived;   /* events serviced after the switch      */
 static uint8_t  cen_phy_mode_cap;   /* RADIO->MODE readback at the switch    */
+static uint8_t  cen_phy_cur;        /* live PHY in-connection (0/1M 1/2M 2/S8)*/
 /* Last SMP PDU we sent + a stall counter: the exchange is reply-driven, so if
  * a reply is lost the initiator re-sends its last PDU to re-prompt it (the
  * responder re-emits the matching reply -- see tiku_ble_smp_pair_feed). */
@@ -2429,10 +2430,11 @@ void tiku_radio_arch_central_updates(uint8_t on)
     cen_test_updates = (on != 0u) ? 1u : 0u;
 }
 
-/* Phase F2: drive a PHY update to 2M on the next central() run. */
-void tiku_radio_arch_central_phy(uint8_t on)
+/* Phase F2: drive a PHY update on the next central() run.
+ * @p target 0 = off, 1 = 2M, 2 = Coded S8 (125 kbps long range). */
+void tiku_radio_arch_central_phy(uint8_t target)
 {
-    cen_test_phy = (on != 0u) ? 1u : 0u;
+    cen_test_phy = (target <= 2u) ? target : 1u;
 }
 
 /* @return 1 if the central applied the 2M switch; @p survived = events it then
@@ -2502,13 +2504,16 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     /* All waits are TIME-bounded (conn_now us), not spin-count.  Budget for a
      * full 27-byte fragment TX (~340 us ramp+packet), not just an empty PDU
      * (~90 us) -- Phase C fragments large writes, and a too-short PHYEND wait
-     * would time out mid-packet and mis-time the RX turnaround. */
-    dl = conn_now() + 900u;
+     * would time out mid-packet and mis-time the RX turnaround.  Coded S8 is
+     * 64 us/byte plus ~400 us preamble/AA/CI/TERM framing, so every budget
+     * scales up once the connection is on the coded PHY (a DLE-max PDU is
+     * ~5.9 ms on air at S8). */
+    dl = conn_now() + ((cen_phy_cur == 2u) ? 7000u : 900u);
     while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_PHYEND == 0u) {
     }
     NRF_TIMER10_S->TASKS_CAPTURE[1] = 1u;
     t_txend = NRF_TIMER10_S->CC[1];
-    dl = conn_now() + 300u;
+    dl = conn_now() + ((cen_phy_cur == 2u) ? 600u : 300u);
     while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_DISABLED == 0u) {
     }
     RADIO->PACKETPTR = (uint32_t)cen_rxb;
@@ -2520,8 +2525,10 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     RADIO->SHORTS = (1u << 0) | (1u << 19);
     RADIO->TASKS_RXEN = 1u;
 
-    /* Peripheral responds T_IFS later; our RX is already listening. */
-    dl = conn_now() + 600u;
+    /* Peripheral responds T_IFS later; our RX is already listening.  At S8
+     * its ADDRESS lands ~490 us after our TX end (150 T_IFS + 80 preamble +
+     * 256 AA), vs ~190 us at 1M -- budget accordingly. */
+    dl = conn_now() + ((cen_phy_cur == 2u) ? 2000u : 600u);
     while ((int32_t)(conn_now() - dl) < 0) {
         if (RADIO->EVENTS_ADDRESS != 0u) {
             got = 1u;
@@ -2555,8 +2562,8 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
      * a 200 us budget covers empties/short responses but a full-length
      * data PDU (an ATT notification) times out and is misread as a CRC
      * failure, so the peer never sees the ack and retransmits forever.
-     * Budget for a max-size PDU. */
-    dl = conn_now() + 700u;
+     * Budget for a max-size PDU (at S8 that is ~5.9 ms of air time). */
+    dl = conn_now() + ((cen_phy_cur == 2u) ? 7000u : 700u);
     while ((int32_t)(conn_now() - dl) < 0) {
         if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
             break;
@@ -2602,6 +2609,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->hop = CEN_HOP;
     }
     cen_phy_applied = 0u; cen_phy_survived = 0u;  /* Phase F2 result           */
+    cen_phy_cur = 0u;                             /* connection starts at 1M   */
 
     tiku_radio_arch_init();
     radio_constlat_enter();
@@ -2769,11 +2777,14 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             cen_interval = cen_cpu_interval;
             sig_pend = 2u;
         }
-        /* Phase F2: switch our RADIO to 2M at the PHY Instant -- must precede
-         * this event's RX arm, and match the FLPR's switch at the same cec. */
+        /* Phase F2: switch our RADIO to the target PHY at the Instant -- must
+         * precede this event's RX arm, and match the FLPR's switch at the
+         * same cec.  MODE readback: 4 = 2M, 5 = Coded S8. */
         if (phy_stage == 2u && (uint16_t)(cec - phy_instant) < 0x8000u) {
-            radio_apply_phy(TIKU_RADIO_PHY_2M);
-            cen_phy_mode_cap = (uint8_t)RADIO->MODE;   /* should read back 4   */
+            radio_apply_phy((cen_test_phy == 2u) ? TIKU_RADIO_PHY_CODED_S8
+                                                 : TIKU_RADIO_PHY_2M);
+            cen_phy_cur = cen_test_phy;                /* scale event budgets  */
+            cen_phy_mode_cap = (uint8_t)RADIO->MODE;
             phy_stage = 3u;
             phy_at = cec;
             phy_rxok = (st != (tiku_radio_ll_conn_stats_t *)0) ? st->rx_ok : 0u;
@@ -2834,24 +2845,25 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         if (cen_test_phy && ll_tx_len == 0u) {
             if (phy_stage == 0u && att_step >= 8u) {
                 uint8_t d[2];
-                d[0] = 0x03u; d[1] = 0x03u;         /* TX/RX_PHYS: 1M + 2M   */
+                d[0] = 0x07u; d[1] = 0x07u;      /* TX/RX_PHYS: 1M+2M+Coded  */
                 ll_queue(LL_PHY_REQ, d, 2u);
                 phy_stage = 1u; phy_wait = 0u;
             } else if (phy_stage == 1u && cen_phy_rsp) {
                 uint8_t d[4];
+                uint8_t m = (cen_test_phy == 2u) ? 0x04u : 0x02u;
                 /* cec+16, not the spec-floor 6: the IND is retransmitted via
                  * SN/NESN, and a bursty miss-stretch that outlives a small
                  * margin leaves the peripheral on 1M when we switch -- a
                  * one-sided flip that kills the link (observed at cec+8). */
                 phy_instant = (uint16_t)(cec + 16u);
-                d[0] = 0x02u; d[1] = 0x02u;         /* C->P, P->C = 2M       */
+                d[0] = m; d[1] = m;              /* C->P, P->C: 2M or Coded  */
                 d[2] = (uint8_t)phy_instant;
                 d[3] = (uint8_t)(phy_instant >> 8);
                 ll_queue(LL_PHY_UPDATE_IND, d, 4u);
                 phy_stage = 2u;                     /* wait for the Instant  */
             } else if (phy_stage == 1u && ++phy_wait >= 8u) {
                 uint8_t d[2];                       /* RSP lost: re-request  */
-                d[0] = 0x03u; d[1] = 0x03u;
+                d[0] = 0x07u; d[1] = 0x07u;
                 ll_queue(LL_PHY_REQ, d, 2u);
                 phy_wait = 0u;
             }
@@ -2986,6 +2998,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->att_lwrite = att_lwrite_ok;
     }
     radio_apply_phy(TIKU_RADIO_PHY_1M);            /* F2: back to 1M for scan  */
+    cen_phy_cur = 0u;
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
     {

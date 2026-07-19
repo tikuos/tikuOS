@@ -235,10 +235,11 @@ void tiku_radio_arch_central_smp(uint8_t on);
 int tiku_radio_arch_central_enc(uint8_t sk[16]);
 
 /**
- * @brief Phase F2: drive a PHY update to 2M on the next central() run (after
- *        the ATT loopback: LL_PHY_REQ/RSP then LL_PHY_UPDATE_IND at an Instant).
+ * @brief Phase F2: drive a PHY update on the next central() run (after the
+ *        ATT loopback: LL_PHY_REQ/RSP then LL_PHY_UPDATE_IND at an Instant).
+ * @param target 0 = off, 1 = 2M, 2 = Coded S8 (125 kbps long range).
  */
-void tiku_radio_arch_central_phy(uint8_t on);
+void tiku_radio_arch_central_phy(uint8_t target);
 
 /**
  * @brief Phase F2 result.

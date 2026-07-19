@@ -600,13 +600,15 @@ static void bleadv_censmp(unsigned secs)
 }
 
 /* Phase F2: central + PHY update.  Connects to TIKU-CONN, runs the NUS
- * loopback, then drives a PHY update to 2M (LL_PHY_REQ/RSP -> UPDATE_IND at an
- * Instant) and keeps servicing on 2M.  Survival on 2M = the update worked. */
-static void bleadv_cenphy(unsigned secs)
+ * loopback, then drives a PHY update (LL_PHY_REQ/RSP -> UPDATE_IND at an
+ * Instant) and keeps servicing on the new PHY.  Survival = it worked.
+ * @p target 1 = 2M, 2 = Coded S8. */
+static void bleadv_cenphy(unsigned secs, uint8_t target)
 {
     uint8_t addr[6];
     tiku_radio_ll_conn_stats_t st;
     char addrstr[18];
+    const char *pn = (target == 2u) ? "CODED-S8" : "2M";
     int rc;
 
     if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
@@ -617,9 +619,9 @@ static void bleadv_cenphy(unsigned secs)
     tiku_common_unique_id(addr, 6u);
     addr[5] |= 0xC0u;
     bleadv_fmt_addr(addrstr, addr);
-    tiku_radio_arch_central_phy(1u);              /* arm the PHY update       */
-    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-CONN, will update PHY -> 2M"
-                 " up to %u s...\n", addrstr, secs);
+    tiku_radio_arch_central_phy(target);          /* arm the PHY update       */
+    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-CONN, will update PHY -> %s"
+                 " up to %u s...\n", addrstr, pn, secs);
     rc = tiku_radio_arch_central(addr, secs, &st);
     tiku_radio_arch_central_phy(0u);
     if (rc != 0) {
@@ -633,8 +635,8 @@ static void bleadv_cenphy(unsigned secs)
     {
         uint16_t survived = 0u;
         if (tiku_radio_arch_central_phy_result(&survived) && survived > 20u) {
-            SHELL_PRINTF(SH_GREEN "  PHY OK: switched to 2M, survived %u events"
-                         " on 2M\n" SH_RST, (unsigned)survived);
+            SHELL_PRINTF(SH_GREEN "  PHY OK: switched to %s, survived %u events"
+                         " on %s\n" SH_RST, pn, (unsigned)survived, pn);
         } else {
             uint32_t dbg = tiku_radio_arch_dbg_phy;
             SHELL_PRINTF(SH_RED "  PHY: did not survive (survived=%u; stage=%lu"
@@ -1071,16 +1073,17 @@ static void bleadv_flprnus(uint8_t req_cpu)
             uint32_t phy = tiku_flpr_arch_conn_phy(&phy_at);
             uint32_t ev  = tiku_flpr_arch_conn_events();
             uint32_t pm = 0u, pa = 0u, pc = 0u;
+            const char *pn = (phy == 2u) ? "CODED-S8" : "2M";
             tiku_flpr_arch_conn_phy_diag(&pm, &pa, &pc);
-            if (phy == 1u && ev > phy_at + 20u) {
-                SHELL_PRINTF(SH_GREEN "  PHY OK: switched to 2M, survived %lu"
-                             " events on 2M\n" SH_RST,
-                             (unsigned long)(ev - phy_at));
-            } else if (phy == 1u) {
-                SHELL_PRINTF("  PHY: switched to 2M, survived %lu events\n",
-                             (unsigned long)(ev - phy_at));
+            if (phy != 0u && ev > phy_at + 20u) {
+                SHELL_PRINTF(SH_GREEN "  PHY OK: switched to %s, survived %lu"
+                             " events on %s\n" SH_RST, pn,
+                             (unsigned long)(ev - phy_at), pn);
+            } else if (phy != 0u) {
+                SHELL_PRINTF("  PHY: switched to %s, survived %lu events\n",
+                             pn, (unsigned long)(ev - phy_at));
             }
-            if (phy == 1u) {                /* H1 bisect (radioleft.md) */
+            if (phy != 0u) {                /* F2 diag (radioleft.md) */
                 SHELL_PRINTF("  PHY diag: mode=%lu addr=%lu crcok=%lu\n",
                              (unsigned long)pm, (unsigned long)pa,
                              (unsigned long)pc);
@@ -1399,13 +1402,17 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         bleadv_censmp(s);
         return;
     }
-    if (strcmp(argv[1], "cenphy") == 0) {         /* Phase F2: PHY update->2M  */
+    if (strcmp(argv[1], "cenphy") == 0) {   /* F2: PHY update (2M / coded)  */
         unsigned s = 30u;
+        uint8_t target = 1u;
         if (argc >= 3) {
             long v = strtol(argv[2], (char **)0, 10);
             if (v > 0 && v <= 600) { s = (unsigned)v; }
         }
-        bleadv_cenphy(s);
+        if (argc >= 4 && strcmp(argv[3], "coded") == 0) {
+            target = 2u;
+        }
+        bleadv_cenphy(s, target);
         return;
     }
     if (strcmp(argv[1], "conn") == 0) {

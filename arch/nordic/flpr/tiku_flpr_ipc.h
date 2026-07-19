@@ -137,7 +137,7 @@ typedef struct {
     /* PHY update (Phase F2).  The FLPR applies LL_PHY_UPDATE_IND at its Instant
      * (reprogram RADIO MODE/PCNF0) and publishes the new PHY + the event count
      * at which it switched, so the M33 can report survival on the new PHY. */
-    volatile uint32_t conn_phy;         /* current PHY: 0 = 1M, 1 = 2M        */
+    volatile uint32_t conn_phy;         /* current PHY: 0 1M, 1 2M, 2 Coded S8 */
     volatile uint32_t conn_phy_evt;     /* conn_events value when PHY applied  */
     /* F2 bisect telemetry (radioleft.md H1): did the FLPR's MODE write LATCH,
      * and does its receiver see ANYTHING on the new PHY?  mode = RADIO->MODE
