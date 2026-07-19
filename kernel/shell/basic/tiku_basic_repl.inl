@@ -141,6 +141,20 @@ process_line(const char *raw)
         }
         q = p;
         if (match_kw(&q, "IMPORT")) { exec_import(&q); return; }
+#if TIKU_BASIC_MODULE_ENABLE
+        q = p;
+        if (match_kw(&q, "MODLOAD")) {            /* Tier 3: install + run   */
+            SHELL_PRINTF(tiku_basic_module_load() == 0
+                         ? "module loaded\n" : "? module load failed\n");
+            return;
+        }
+        q = p;
+        if (match_kw(&q, "MODACT")) {             /* re-run resident module  */
+            SHELL_PRINTF(tiku_basic_module_activate() == 0
+                         ? "module activated\n" : "? no resident module\n");
+            return;
+        }
+#endif
 #if TIKU_BASIC_NAMED_SLOTS > 0
         q = p;
         if (match_kw(&q, "DIR")) {

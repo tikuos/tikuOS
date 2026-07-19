@@ -1,0 +1,99 @@
+/*
+ * Tiku Operating System v0.05
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_basic_module.h - runtime-loadable native module ABI (Tier 3 of
+ * kintsugi/loadable.md).
+ *
+ * A native module is machine code compiled SEPARATELY from the firmware, at a
+ * fixed load address (the module carve), that registers Tier-2 BASIC words at
+ * load time.  Because it is separately compiled, it cannot link against
+ * firmware symbols -- it reaches every firmware service through a JUMP TABLE
+ * (tiku_basic_syscalls_t) passed to its entry point.  This is the exact
+ * Tier-2 ABI (tiku_basic_ext.h) re-exposed as a table so a load-time-resolved
+ * module can call it.
+ *
+ * The module image begins with a tiku_module_header_t at the carve base; its
+ * init routine is at carve_base + init_off.  The loader validates the header,
+ * then calls init(&syscalls); the module registers its words and returns.
+ * This header is included by BOTH the firmware and the separate module build,
+ * so it stays plain C99 + the Tier-2 handler typedefs.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef TIKU_BASIC_MODULE_H_
+#define TIKU_BASIC_MODULE_H_
+
+#include <stddef.h>
+#include <stdint.h>
+#include "tiku_basic_ext.h"      /* the handler typedefs the table exposes */
+
+/* 'TMOD' little-endian -- first word of a module image. */
+#define TIKU_MODULE_MAGIC    0x444F4D54u
+#define TIKU_MODULE_ABI      1u
+
+/* Fixed module slot (nordic: 4 KB of EXECUTABLE RRAM just below the durable-
+ * persist region -- SRAM is W^X, so a module must run from RRAM, which also
+ * makes it durable in place).  The module is linked at this VMA; the loader
+ * writes the image here behind the WEN gate and runs it XIP.  Kept in sync
+ * with __tiku_module_slot in the device linker script. */
+#define TIKU_MODULE_CARVE_ADDR  0x1F8000u
+#define TIKU_MODULE_CARVE_SIZE  0x1000u
+
+/* Image header at the carve base.  init_off is the byte offset from the carve
+ * base to the module's init routine, with the Thumb bit (bit0) SET so the
+ * loader can call (carve_base + init_off) directly. */
+typedef struct {
+    uint32_t magic;          /* TIKU_MODULE_MAGIC                          */
+    uint32_t abi_version;    /* TIKU_MODULE_ABI                            */
+    uint32_t init_off;       /* offset to init routine | 1 (Thumb)         */
+    uint32_t reserved;       /* 0 (image size / CRC live in the gate)      */
+} tiku_module_header_t;
+
+/* The firmware services a module may call -- the Tier-2 ABI as a table.  A
+ * module stores nothing global for the MVP (its handlers are pure), but the
+ * table is passed so stateful modules and the durable path can use it. */
+typedef struct {
+    uint32_t abi_version;
+    int  (*register_fn)(const char *name, uint8_t arity,
+                        tiku_basic_ext_nfn fn);
+    int  (*register_strfn)(const char *name, tiku_basic_ext_strfn fn);
+    int  (*register_stmt)(const char *name, tiku_basic_ext_stmt_fn fn);
+    int  (*parse_expr)(const char **p, long *out);
+    int  (*parse_strexpr)(const char **p, char *buf, size_t cap);
+    void (*print)(const char *s);
+    void (*error)(int cat, const char *msg);
+    int  (*expect)(const char **p, char ch);
+} tiku_basic_syscalls_t;
+
+/* Module entry point.  The module defines this; the loader calls it. */
+typedef void (*tiku_module_init_fn)(const tiku_basic_syscalls_t *sys);
+
+/* --- Firmware-side loader (not seen by the module build) --- */
+#ifndef TIKU_MODULE_BUILD
+
+/**
+ * @brief Install the embedded image into the RRAM slot (gate-last, durable)
+ *        and activate it (validate + run init -> registers its BASIC words).
+ * @return 0 loaded, -1 no image / too big / bad magic / feature off.
+ */
+int tiku_basic_module_load(void);
+
+/**
+ * @brief Activate the module already resident in the RRAM slot: validate its
+ *        header and run its init (re-registers its words).  Safe to call every
+ *        boot -- a no-op (-1) when the slot holds no valid module.
+ * @return 0 activated, -1 no valid resident module / feature off.
+ */
+int tiku_basic_module_activate(void);
+
+/** @brief 1 once a module has been activated this boot. */
+int tiku_basic_module_loaded(void);
+
+#endif /* TIKU_MODULE_BUILD */
+
+#endif /* TIKU_BASIC_MODULE_H_ */

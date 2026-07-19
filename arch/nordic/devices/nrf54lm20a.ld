@@ -84,9 +84,18 @@ __tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
  * erase).  996 KB leaves a 1 MB code window below (Axon-enabled images are
  * the big ones; the ASSERT at the bottom is the hard cap).
  * __tiku_nvmfs_size is an absolute symbol whose ADDRESS is the size. */
-__tiku_nvmfs_size = 0xF9000;                                /* 996 KB */
-__tiku_nvmfs_base = __tiku_nvm_rram_start - __tiku_nvmfs_size;
-__tiku_nvmfs_end  = __tiku_nvm_rram_start;
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): a 4 KB
+ * byte-writable, EXECUTABLE RRAM span just below the durable-persist region.
+ * A module is linked at this VMA; the loader writes its image here in place
+ * behind the WEN gate (no erase) and runs it XIP -- SRAM is W^X (execute-
+ * never), so a module MUST live in RRAM, which also makes it durable for free.
+ * Carved from the top of the FS extent (FS base unchanged; -4 KB capacity). */
+__tiku_module_slot_size = 0x1000;                           /* 4 KB */
+__tiku_module_slot      = __tiku_nvm_rram_start - __tiku_module_slot_size;
+
+__tiku_nvmfs_size = 0xF8000;                                /* 992 KB (-4 KB) */
+__tiku_nvmfs_base = __tiku_module_slot - __tiku_nvmfs_size;
+__tiku_nvmfs_end  = __tiku_module_slot;
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */

@@ -141,6 +141,7 @@
 #include "tiku_basic_expr.inl"
 #include "tiku_basic_ext.inl"         /* registry impl (needs parse_expr) */
 #include "tiku_basic_ext_kits.inl"    /* bundled native words (first client) */
+#include "tiku_basic_module.h"        /* Tier 3: loadable native module API  */
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"
 #include "tiku_basic_net.inl"

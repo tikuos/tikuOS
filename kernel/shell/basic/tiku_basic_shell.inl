@@ -47,6 +47,12 @@ basic_session_begin(void)
         static uint8_t ext_registered;
         if (!ext_registered) {
             basic_ext_register_kits();
+#if TIKU_BASIC_MODULE_ENABLE
+            /* Re-register a durably-installed native module (Tier 3): its
+             * code persists in RRAM across reboots; only the volatile Tier-2
+             * table needs re-populating.  No-op if no module is resident. */
+            (void)tiku_basic_module_activate();
+#endif
             ext_registered = 1u;
         }
     }

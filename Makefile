@@ -1599,7 +1599,21 @@ endif
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 CFLAGS += -DTIKU_SHELL_CMD_BASIC=1
 SRCS += kernel/shell/basic/tiku_basic.c
+SRCS += kernel/shell/basic/tiku_basic_module.c   # Tier 3 loader (self-gates)
 SRCS += kernel/shell/commands/tiku_shell_cmd_basic.c
+endif
+
+# Loadable native module (Tier 3, loadable.md): compile mod_demo.c SEPARATELY
+# at the executable RRAM slot VMA, flatten to a blob, and wrap it as an ARM
+# object embedded in the firmware (the "bytes that arrive over the air").
+# Nordic-only (needs the byte-writable executable RRAM slot).
+ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
+CFLAGS        += -DTIKU_BASIC_MODULE_ENABLE=1
+MOD_BUILD      = $(BUILD_DIR)/module
+MOD_CFLAGS     = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -Os -ffreestanding \
+                 -nostdlib -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
+                 -I kernel/shell/basic
+TIKU_MOD_IMG_O = $(MOD_BUILD)/mod_demo_img.o
 endif
 
 # Embedded BASIC: BASIC_PROGRAM=foo.bas turns into a C string literal
@@ -2283,6 +2297,11 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 OBJS += $(TIKU_FLPR_IMG_O)
 endif
 
+ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
+# Embedded loadable-module image (recipes below `all:`).
+OBJS += $(TIKU_MOD_IMG_O)
+endif
+
 # Header-dependency tracking.  Each compile emits a .d next to its .o (via
 # -MMD -MP in the rules above) listing every header it pulled in; pull those
 # back in so editing a header rebuilds exactly the objects that include it --
@@ -2425,6 +2444,26 @@ $(TIKU_FLPR_IMG_O): $(FLPR_BUILD)/tiku_flpr.bin
 	    tiku_flpr.bin tiku_flpr_img.o
 
 -include $(FLPR_OBJS:.o=.d)
+endif
+
+# Loadable-module sub-build: separately-compiled ARM module at the RRAM slot
+# VMA -> flat blob -> ARM object with _binary_mod_demo_bin_* symbols the
+# loader (tiku_basic_module.c) installs from.
+ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
+$(MOD_BUILD)/mod_demo.elf: kernel/shell/basic/modules/mod_demo.c \
+                           kernel/shell/basic/modules/mod_demo.ld
+	@mkdir -p $(dir $@)
+	$(CC) $(MOD_CFLAGS) -T kernel/shell/basic/modules/mod_demo.ld \
+	    -Wl,--gc-sections -nostartfiles -o $@ $<
+
+$(MOD_BUILD)/mod_demo.bin: $(MOD_BUILD)/mod_demo.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo "  [module]  $$(stat -c%s $@) bytes"
+
+$(TIKU_MOD_IMG_O): $(MOD_BUILD)/mod_demo.bin
+	cd $(MOD_BUILD) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm \
+	    --rename-section .data=.rodata,alloc,load,readonly,data,contents \
+	    mod_demo.bin mod_demo_img.o
 endif
 
 size: $(TARGET)

@@ -345,6 +345,14 @@
                                             * kernel services + tikukits */
 #endif
 
+/* Tier 3 (loadable.md): the runtime-loadable native-module loader
+ * (tiku_basic_module.c).  Opt-in and platform-specific -- it needs an
+ * executable byte-writable RRAM slot + the separately-built module blob, so
+ * the Makefile turns it on only for the nordic module build. */
+#ifndef TIKU_BASIC_MODULE_ENABLE
+#define TIKU_BASIC_MODULE_ENABLE    0
+#endif
+
 /* Ship the bundled native words (GCD/ISQRT/BITCNT/HEXPR, tiku_basic_ext_kits
  * .inl) through the registry at boot.  On by default when the registry exists;
  * set 0 to keep the seam but drop the bundle (each word is a handler + a few
