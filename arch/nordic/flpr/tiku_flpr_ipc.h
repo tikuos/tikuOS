@@ -139,6 +139,13 @@ typedef struct {
      * at which it switched, so the M33 can report survival on the new PHY. */
     volatile uint32_t conn_phy;         /* current PHY: 0 = 1M, 1 = 2M        */
     volatile uint32_t conn_phy_evt;     /* conn_events value when PHY applied  */
+    /* F2 bisect telemetry (radioleft.md H1): did the FLPR's MODE write LATCH,
+     * and does its receiver see ANYTHING on the new PHY?  mode = RADIO->MODE
+     * read back right after the apply-block write (4 = 2M took); addr/crcok =
+     * EVENTS_ADDRESS / EVENTS_CRCOK counts observed AFTER the switch. */
+    volatile uint32_t conn_phy_mode;    /* FLPR: MODE readback at the switch   */
+    volatile uint32_t conn_phy_addr;    /* FLPR: post-switch ADDRESS events    */
+    volatile uint32_t conn_phy_crcok;   /* FLPR: post-switch CRCOK events      */
     volatile uint32_t conn_sub;         /* vestigial (host tracks CCCD, PhaseB)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */

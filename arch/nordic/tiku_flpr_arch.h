@@ -184,6 +184,11 @@ uint32_t tiku_flpr_arch_dle_max(void);
  *         switch (survival = current conn_events - at_evt). */
 uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt);
 
+/** @brief F2 bisect telemetry (H1): MODE readback at the switch + post-switch
+ *         ADDRESS/CRCOK counts.  Any pointer may be NULL. */
+void tiku_flpr_arch_conn_phy_diag(uint32_t *mode, uint32_t *addr,
+                                  uint32_t *crcok);
+
 /**
  * @brief Phase A telemetry: LL updates applied this connection.
  * @param chan_map  out: LL_CHANNEL_MAP_UPDATE_INDs followed to their Instant.

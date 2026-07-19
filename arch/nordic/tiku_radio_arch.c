@@ -495,7 +495,14 @@ static volatile uint8_t  scan_active;   /* ISR may re-arm while set        */
 static volatile uint8_t  scan_chan;
 static volatile uint32_t scan_isr_count;
 static volatile uint32_t scan_addr_evts, scan_crcok_evts;
-static uint8_t scan_rxbuf[48] __attribute__((aligned(4)));
+/* EVERY radio RX DMA target must hold [S0][LEN][S1 slot] + PCNF1.MAXLEN
+ * (80 since DLE, Phase F1) = 83 bytes: the RADIO writes up to MAXLEN
+ * payload bytes on ANY address-matched reception -- CRC pass NOT required
+ * -- so a 48-byte buffer lets ambient/garbage traffic overwrite whatever
+ * object follows it.  That exact overflow (into the FLPR's adv TX buffer)
+ * radiated prefix-corrupted-but-CRC-valid ADV_INDs and killed connect
+ * sessions for hours; see kintsugi/radioleft.md §0. */
+static uint8_t scan_rxbuf[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
 /* Program the current channel and start RX (arm path + ISR hop path). */
 static void radio_scan_arm_channel(void)
@@ -775,7 +782,7 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
 /* contract.  Together they measure link PER at 2M / Coded S8 / Coded S2.     */
 /*---------------------------------------------------------------------------*/
 
-static uint8_t phy_rxbuf[64] __attribute__((aligned(4)));
+static uint8_t phy_rxbuf[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
 /* Distinctive access address for the R8.2 link so ambient BLE (all on the
  * shared adv AA 0x8E89BED6 at 1M) is address-rejected, not received. */
@@ -963,7 +970,7 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
 {
     static uint8_t adv[48] __attribute__((aligned(4)));
     static uint8_t rsp[48] __attribute__((aligned(4)));
-    static uint8_t rx[48] __attribute__((aligned(4)));
+    static uint8_t rx[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
     tiku_clock_time_t t0 = tiku_clock_time();
     tiku_clock_time_t span =
         (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
@@ -2051,7 +2058,7 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
                       tiku_radio_ll_ack_t *ack, uint32_t deadline,
                       uint32_t *anchor)
 {
-    static uint8_t rxb[48] __attribute__((aligned(4)));
+    static uint8_t rxb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
     static uint8_t txb[36] __attribute__((aligned(4)));
     uint32_t spin;
     uint8_t  crcok, txn;
@@ -2178,7 +2185,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
     /* --- Advertising phase: ADV_IND until a CONNECT_IND for us --- */
     {
         static uint8_t adv[48] __attribute__((aligned(4)));
-        static uint8_t rx[48]  __attribute__((aligned(4)));
+        static uint8_t rx[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
         uint8_t chan = 0u;
         int connected = 0;
 
@@ -2832,7 +2839,11 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 phy_stage = 1u; phy_wait = 0u;
             } else if (phy_stage == 1u && cen_phy_rsp) {
                 uint8_t d[4];
-                phy_instant = (uint16_t)(cec + 8u);
+                /* cec+16, not the spec-floor 6: the IND is retransmitted via
+                 * SN/NESN, and a bursty miss-stretch that outlives a small
+                 * margin leaves the peripheral on 1M when we switch -- a
+                 * one-sided flip that kills the link (observed at cec+8). */
+                phy_instant = (uint16_t)(cec + 16u);
                 d[0] = 0x02u; d[1] = 0x02u;         /* C->P, P->C = 2M       */
                 d[2] = (uint8_t)phy_instant;
                 d[3] = (uint8_t)(phy_instant >> 8);

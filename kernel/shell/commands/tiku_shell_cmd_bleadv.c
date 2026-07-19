@@ -1070,6 +1070,8 @@ static void bleadv_flprnus(uint8_t req_cpu)
             uint32_t phy_at = 0u;
             uint32_t phy = tiku_flpr_arch_conn_phy(&phy_at);
             uint32_t ev  = tiku_flpr_arch_conn_events();
+            uint32_t pm = 0u, pa = 0u, pc = 0u;
+            tiku_flpr_arch_conn_phy_diag(&pm, &pa, &pc);
             if (phy == 1u && ev > phy_at + 20u) {
                 SHELL_PRINTF(SH_GREEN "  PHY OK: switched to 2M, survived %lu"
                              " events on 2M\n" SH_RST,
@@ -1078,8 +1080,21 @@ static void bleadv_flprnus(uint8_t req_cpu)
                 SHELL_PRINTF("  PHY: switched to 2M, survived %lu events\n",
                              (unsigned long)(ev - phy_at));
             }
+            if (phy == 1u) {                /* H1 bisect (radioleft.md) */
+                SHELL_PRINTF("  PHY diag: mode=%lu addr=%lu crcok=%lu\n",
+                             (unsigned long)pm, (unsigned long)pa,
+                             (unsigned long)pc);
+            }
         }
     }
+    /* Leave NOTHING behind: park the FLPR's hold loop, reclaim the secure
+     * RADIO alias, release constlat.  Without this the FLPR keeps chasing
+     * the dead link and owns the NS RADIO -- the next run's re-init writes
+     * to the secure alias are blocked, so residual link config (after F2,
+     * 2M MODE) leaks into the next advertising session and the central
+     * scans 1M in vain (the old "rerun without reboot flakes" gotcha). */
+    tiku_flpr_arch_conn_stop();
+    tiku_radio_arch_constlat_hold(0);
 }
 
 /* Phase E: SMP pairing RESPONDER.  Advertise, hold the link, and let the
