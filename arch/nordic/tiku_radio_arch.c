@@ -2855,15 +2855,17 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
      * small stage machine that sends each update after the loopback and
      * applies it here at the Instant (mirroring the peripheral). */
     {
-    /* A full-map update: a valid LL_CHANNEL_MAP_UPDATE_IND (a central sends
-     * this to re-enable channels).  It robustly exercises the peer's parse +
-     * Instant + apply path.  An AGGRESSIVE reduction (dropping channels, which
-     * forces CSA#1 remapping) additionally needs the peer's connEventCount to
-     * be exactly locked -- fragile on the timebase-free FLPR when heavy TX
-     * (loopback notifications) briefly slips it -- so that stays a Tier-A
-     * refinement (kintsugi/radio.md).  The CONNECTION_UPDATE below is the
-     * G6-critical case (phones renegotiate the interval) and re-locks cleanly. */
-    static const uint8_t CM_NEW[5] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x1Fu };
+    /* AGGRESSIVE-AFH channel-map update: drop 18 of 37 channels (keep every
+     * other one), which forces real CSA#1 REMAPPING on both ends -- the hard
+     * case.  It needs the peer's connEventCount to be EXACTLY locked at the
+     * Instant, since a slip makes the two sides remap to different channels
+     * and the link dies.  This was deferred while the timebase-free FLPR's cec
+     * slipped under heavy TX; the F2 miss->events cec accounting (evt_iters,
+     * flpr_conn_hold) fixed that, so the reduction now holds (two-board: the
+     * FLPR follows it + services ~176 events past both updates, reproducible).
+     * The CONNECTION_UPDATE below is the G6 case (phones renegotiate the
+     * interval) and re-locks cleanly. */
+    static const uint8_t CM_NEW[5] = { 0x55u, 0x55u, 0x55u, 0x55u, 0x15u };
     uint16_t cec = 0u;                     /* connEventCount (wraps)         */
     uint16_t cen_interval = CEN_INTERVAL;  /* mutable master cadence         */
     uint16_t cu_new = 36u;                 /* 45 ms: exercises re-converge   */
