@@ -69,6 +69,7 @@
 #include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
 #include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
+#include <interfaces/bluetooth/tiku_ble_bond.h>      /* durable LTK bond store   */
 #include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM (E3)      */
 #include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
 #include <interfaces/bluetooth/tiku_ble_enc.h>  /* E3c demo params + nonce     */
@@ -1361,6 +1362,13 @@ static uint8_t  cen_test_smp;
 static uint8_t  cen_smp_started;
 static uint8_t  cen_smp_ready;      /* keypair generated, Pairing Req staged */
 static uint8_t  cen_smp_a[6], cen_smp_b[6];
+/* Bonding: when armed, on connect the central looks the peer's AdvA up in the
+ * durable bond store.  Bonded -> SKIP SMP, encrypt with the stored LTK;
+ * un-bonded -> pair as usual, then store the LTK so the NEXT reconnect skips. */
+static uint8_t  cen_bond_mode;      /* remember/reuse the LTK across connects */
+static uint8_t  cen_bonded;         /* this connection reused a stored bond   */
+static uint8_t  cen_bond_stored;    /* we saved this run's fresh LTK already  */
+static uint8_t  cen_bond_ltk[16];   /* the stored LTK when cen_bonded         */
 /* Phase F2 PHY-update state (declared here: used in ll_reset/ll_handle_rx). */
 static uint8_t  cen_test_phy;       /* PHY update target: 0 off, 1 2M, 2 S8  */
 static uint8_t  cen_phy_rsp;        /* LL_PHY_RSP received                   */
@@ -1452,6 +1460,7 @@ static void ll_reset(void)
     cen_rc_len = 0u; cen_rc_expect = 0u;
     cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
     cen_smp_started = 0u; cen_smp_ready = 0u;    /* Phase E: SMP not yet begun */
+    cen_bonded = 0u; cen_bond_stored = 0u;       /* bonding: fresh this conn   */
     cen_smp_last_len = 0u; cen_smp_wait = 0u;
     cen_enc_stage = 0u;                          /* Phase E3: not encrypting   */
     cen_dle_max = L2_FRAG_MAX; cen_dle_sent = 0u; /* Phase F1: pre-DLE         */
@@ -1920,6 +1929,15 @@ static void cen_kick_app(void)
         return;
     }
     if (cen_test_smp) {
+        if (cen_bond_mode &&
+            tiku_ble_bond_find(cen_smp_b, 1u, cen_bond_ltk)) {
+            /* Known peer: skip pairing, go straight to LL encryption with
+             * the stored LTK (the encryption block below fires on
+             * cen_bonded without waiting for an SMP DONE). */
+            cen_bonded = 1u;
+            cen_smp_started = 1u;       /* don't kick the pairing exchange  */
+            return;
+        }
         if (!cen_smp_ready) {           /* keygen deferred? do it now      */
             (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_INITIATOR,
                                           cen_smp_a, 1u, cen_smp_b, 1u);
@@ -2030,7 +2048,11 @@ static void ll_handle_rx(const uint8_t *buf)
                 skd[i] = cen_skdm[i];            /* SKD = SKDm || SKDs       */
                 skd[8 + i] = buf[4 + i];         /* SKDs at buf[4..11]        */
             }
-            (void)tiku_ble_smp_pair_ltk(ltk);
+            if (cen_bonded) {
+                memcpy(ltk, cen_bond_ltk, 16);   /* stored bond LTK          */
+            } else {
+                (void)tiku_ble_smp_pair_ltk(ltk);
+            }
             (void)tiku_crypto_arch_aes_ecb(0, ltk, 16u, skd, cen_sk);
             for (i = 0; i < 4; i++) {
                 cen_iv[i] = cen_ivm[i];
@@ -2462,6 +2484,21 @@ int tiku_radio_arch_central_phy_result(uint16_t *survived)
 void tiku_radio_arch_central_smp(uint8_t on)
 {
     cen_test_smp = (on != 0u) ? 1u : 0u;
+}
+
+/* Bonding: arm SMP AND the durable bond store -- a first connection pairs and
+ * saves the LTK; a reconnect to the same peer skips SMP and reuses it. */
+void tiku_radio_arch_central_bond(uint8_t on)
+{
+    cen_test_smp  = (on != 0u) ? 1u : 0u;
+    cen_bond_mode = (on != 0u) ? 1u : 0u;
+}
+
+/* Bonding result: 1 = this connection reused a stored bond (skipped pairing),
+ * 0 = fresh pairing (or not in bond mode). */
+int tiku_radio_arch_central_bonded(void)
+{
+    return (cen_bonded != 0u) ? 1 : 0;
 }
 
 /* Phase E3: the session key the central derived (LL_ENC handshake complete).
@@ -2902,9 +2939,20 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
          * (send LL_ENC_REQ, derive SK from LL_ENC_RSP), then end the link.
          * FAILED pairing ends immediately. */
         if (cen_test_smp &&
-            tiku_ble_smp_pair_state() >= TIKU_BLE_SMP_STATE_DONE) {
-            if (tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_FAILED) {
+            (cen_bonded ||
+             tiku_ble_smp_pair_state() >= TIKU_BLE_SMP_STATE_DONE)) {
+            if (!cen_bonded &&
+                tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_FAILED) {
                 break;
+            }
+            /* Fresh pairing just completed: remember the LTK so the next
+             * reconnect skips SMP (bonding). */
+            if (cen_bond_mode && !cen_bonded && !cen_bond_stored) {
+                uint8_t ltk[16];
+                if (tiku_ble_smp_pair_ltk(ltk) == 0) {
+                    (void)tiku_ble_bond_store(cen_smp_b, 1u, ltk);
+                }
+                cen_bond_stored = 1u;
             }
             if (cen_enc_stage == 0u && ll_tx_len == 0u && cen_sdu_len == 0u) {
                 (void)tiku_trng_arch_read_bytes(cen_skdm, 8);

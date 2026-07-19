@@ -227,6 +227,15 @@ void tiku_radio_arch_central_updates(uint8_t on);
 void tiku_radio_arch_central_smp(uint8_t on);
 
 /**
+ * @brief Arm bonding for the next connection(s): pair + remember the LTK, and
+ *        on a reconnect to a known peer SKIP pairing and reuse the stored LTK.
+ */
+void tiku_radio_arch_central_bond(uint8_t on);
+
+/** @brief 1 if the last connection reused a stored bond (skipped pairing). */
+int tiku_radio_arch_central_bonded(void);
+
+/**
  * @brief Phase E3: the session key the central derived after LL encryption
  *        startup (LL_ENC_REQ/RSP -> SK = e(LTK, SKDm||SKDs)).
  * @param sk out: 16-byte session key (may be NULL to just query).

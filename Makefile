@@ -1268,6 +1268,7 @@ CFLAGS += -DTIKU_HAS_BLE_ADV=1
 # the crypto kit (self-contained); unused code is GC'd on non-pairing builds.
 SRCS += interfaces/bluetooth/tiku_ble_smp.c
 SRCS += interfaces/bluetooth/tiku_ble_smp_pair.c
+SRCS += interfaces/bluetooth/tiku_ble_bond.c
 SRCS += $(wildcard tikukits/crypto/p256/*.c)
 # From-scratch IEEE 802.15.4 PHY on the same on-die RADIO (N-track).  Gated
 # on TIKU_HAS_154 (capability, never the chip); the radio154 shell command
