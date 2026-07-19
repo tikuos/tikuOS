@@ -1304,6 +1304,9 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 #define LL_ENC_RSP           0x04u
 #define LL_LENGTH_REQ        0x14u
 #define LL_LENGTH_RSP        0x15u
+#define LL_PHY_REQ           0x16u
+#define LL_PHY_RSP           0x17u
+#define LL_PHY_UPDATE_IND    0x18u
 #define LL_UNKNOWN_RSP       0x07u
 #define LL_FEATURE_REQ       0x08u
 #define LL_FEATURE_RSP       0x09u
@@ -1341,6 +1344,12 @@ static uint8_t  cen_test_smp;
 static uint8_t  cen_smp_started;
 static uint8_t  cen_smp_ready;      /* keypair generated, Pairing Req staged */
 static uint8_t  cen_smp_a[6], cen_smp_b[6];
+/* Phase F2 PHY-update state (declared here: used in ll_reset/ll_handle_rx). */
+static uint8_t  cen_test_phy;       /* drive a PHY update this run           */
+static uint8_t  cen_phy_rsp;        /* LL_PHY_RSP received                   */
+static uint8_t  cen_phy_applied;    /* central switched its RADIO to 2M      */
+static uint16_t cen_phy_survived;   /* events serviced after the switch      */
+static uint8_t  cen_phy_mode_cap;   /* RADIO->MODE readback at the switch    */
 /* Last SMP PDU we sent + a stall counter: the exchange is reply-driven, so if
  * a reply is lost the initiator re-sends its last PDU to re-prompt it (the
  * responder re-emits the matching reply -- see tiku_ble_smp_pair_feed). */
@@ -1428,6 +1437,7 @@ static void ll_reset(void)
     cen_smp_last_len = 0u; cen_smp_wait = 0u;
     cen_enc_stage = 0u;                          /* Phase E3: not encrypting   */
     cen_dle_max = L2_FRAG_MAX; cen_dle_sent = 0u; /* Phase F1: pre-DLE         */
+    cen_phy_rsp = 0u;                            /* Phase F2: no LL_PHY_RSP yet*/
 }
 
 /* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
@@ -2011,6 +2021,9 @@ static void ll_handle_rx(const uint8_t *buf)
             cen_enc_stage = 2u;                  /* SK ready                 */
         }
         break;
+    case LL_PHY_RSP:                /* Phase F2: peer's PHYs -> send the IND */
+        cen_phy_rsp = 1u;
+        break;
     case LL_FEATURE_RSP:
     case LL_PING_RSP:
     case LL_UNKNOWN_RSP:
@@ -2393,6 +2406,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 static uint8_t cen_rxb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 static uint8_t cen_txb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
+uint32_t tiku_radio_arch_dbg_phy;        /* F2 debug: stage|att<<8|rsp<<16  */
 
 /* Phase A validation hook.  When armed, the master -- once the ATT loopback
  * has completed -- exercises the peripheral's LL control handling: it sends
@@ -2406,6 +2420,22 @@ static uint8_t cen_test_updates;
 void tiku_radio_arch_central_updates(uint8_t on)
 {
     cen_test_updates = (on != 0u) ? 1u : 0u;
+}
+
+/* Phase F2: drive a PHY update to 2M on the next central() run. */
+void tiku_radio_arch_central_phy(uint8_t on)
+{
+    cen_test_phy = (on != 0u) ? 1u : 0u;
+}
+
+/* @return 1 if the central applied the 2M switch; @p survived = events it then
+ * kept servicing on 2M (a rising count = the link survived the PHY change). */
+int tiku_radio_arch_central_phy_result(uint16_t *survived)
+{
+    if (survived != (uint16_t *)0) {
+        *survived = cen_phy_survived;
+    }
+    return (cen_phy_applied != 0u) ? 1 : 0;
 }
 
 /* Phase E: arm the central as the SMP pairing INITIATOR for the next
@@ -2564,6 +2594,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->reason = 2u;
         st->hop = CEN_HOP;
     }
+    cen_phy_applied = 0u; cen_phy_survived = 0u;  /* Phase F2 result           */
 
     tiku_radio_arch_init();
     radio_constlat_enter();
@@ -2701,6 +2732,10 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     uint16_t cm_instant = 0u, cu_instant = 0u, settle = 0u;
     uint8_t  sig_pend = 0u;                 /* Phase C signalling-CU state    */
     uint16_t sig_instant = 0u;
+    uint8_t  phy_stage = 0u;               /* F2: 0 idle 1 req 2 ind 3 done   */
+    uint16_t phy_instant = 0u, phy_at = 0u; /* Instant + cec when we switched */
+    uint8_t  phy_wait = 0u;                /* F2: LL_PHY_RSP stall counter    */
+    uint32_t phy_rxok = 0u;                /* rx_ok count at the switch       */
     for (;;) {
         uint8_t k;
         int r;
@@ -2726,6 +2761,15 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         if (sig_pend == 1u && (uint16_t)(cec - sig_instant) < 0x8000u) {
             cen_interval = cen_cpu_interval;
             sig_pend = 2u;
+        }
+        /* Phase F2: switch our RADIO to 2M at the PHY Instant -- must precede
+         * this event's RX arm, and match the FLPR's switch at the same cec. */
+        if (phy_stage == 2u && (uint16_t)(cec - phy_instant) < 0x8000u) {
+            radio_apply_phy(TIKU_RADIO_PHY_2M);
+            cen_phy_mode_cap = (uint8_t)RADIO->MODE;   /* should read back 4   */
+            phy_stage = 3u;
+            phy_at = cec;
+            phy_rxok = (st != (tiku_radio_ll_conn_stats_t *)0) ? st->rx_ok : 0u;
         }
         k = tiku_radio_ll_csa1_next(last_unmapped, CEN_HOP, chmap,
                                     &last_unmapped);
@@ -2774,6 +2818,31 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 d[9] = (uint8_t)cu_instant; d[10] = (uint8_t)(cu_instant >> 8);
                 ll_queue(LL_CONNECTION_UPDATE, d, 11u);
                 upd_stage = 3u;
+            }
+        }
+
+        /* Phase F2: PHY update -- after the loopback, LL_PHY_REQ, then (on the
+         * peer's LL_PHY_RSP) LL_PHY_UPDATE_IND to 2M with a cec+8 Instant; both
+         * sides flip RADIO MODE at the Instant (applied above). */
+        if (cen_test_phy && ll_tx_len == 0u) {
+            if (phy_stage == 0u && att_step >= 8u) {
+                uint8_t d[2];
+                d[0] = 0x03u; d[1] = 0x03u;         /* TX/RX_PHYS: 1M + 2M   */
+                ll_queue(LL_PHY_REQ, d, 2u);
+                phy_stage = 1u; phy_wait = 0u;
+            } else if (phy_stage == 1u && cen_phy_rsp) {
+                uint8_t d[4];
+                phy_instant = (uint16_t)(cec + 8u);
+                d[0] = 0x02u; d[1] = 0x02u;         /* C->P, P->C = 2M       */
+                d[2] = (uint8_t)phy_instant;
+                d[3] = (uint8_t)(phy_instant >> 8);
+                ll_queue(LL_PHY_UPDATE_IND, d, 4u);
+                phy_stage = 2u;                     /* wait for the Instant  */
+            } else if (phy_stage == 1u && ++phy_wait >= 8u) {
+                uint8_t d[2];                       /* RSP lost: re-request  */
+                d[0] = 0x03u; d[1] = 0x03u;
+                ll_queue(LL_PHY_REQ, d, 2u);
+                phy_wait = 0u;
             }
         }
 
@@ -2879,6 +2948,18 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         }
         cec++;                                     /* one connection event  */
     }
+    if (phy_stage >= 3u) {                     /* F2: switched to 2M         */
+        uint32_t final_rxok = (st != (tiku_radio_ll_conn_stats_t *)0)
+                            ? st->rx_ok : 0u;
+        cen_phy_applied = 1u;
+        /* Survival = RESPONSES received on 2M (not events merely run) -- a dead
+         * link would keep spinning but stop responding. */
+        cen_phy_survived = (uint16_t)(final_rxok - phy_rxok);
+    }
+    tiku_radio_arch_dbg_phy = (uint32_t)phy_stage |
+                              ((uint32_t)att_step << 8) |
+                              ((uint32_t)cen_phy_rsp << 16) |
+                              ((uint32_t)cen_phy_mode_cap << 24);
     }  /* Phase A test scope */
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
@@ -2893,6 +2974,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->att_lread = att_lread_ok;            /* Phase D long read/write   */
         st->att_lwrite = att_lwrite_ok;
     }
+    radio_apply_phy(TIKU_RADIO_PHY_1M);            /* F2: back to 1M for scan  */
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
     {

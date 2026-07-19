@@ -599,6 +599,54 @@ static void bleadv_censmp(unsigned secs)
     }
 }
 
+/* Phase F2: central + PHY update.  Connects to TIKU-CONN, runs the NUS
+ * loopback, then drives a PHY update to 2M (LL_PHY_REQ/RSP -> UPDATE_IND at an
+ * Instant) and keeps servicing on 2M.  Survival on 2M = the update worked. */
+static void bleadv_cenphy(unsigned secs)
+{
+    uint8_t addr[6];
+    tiku_radio_ll_conn_stats_t st;
+    char addrstr[18];
+    int rc;
+
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
+        return;
+    }
+    tiku_common_unique_id(addr, 6u);
+    addr[5] |= 0xC0u;
+    bleadv_fmt_addr(addrstr, addr);
+    tiku_radio_arch_central_phy(1u);              /* arm the PHY update       */
+    SHELL_PRINTF("CENTRAL %s: scanning for TIKU-CONN, will update PHY -> 2M"
+                 " up to %u s...\n", addrstr, secs);
+    rc = tiku_radio_arch_central(addr, secs, &st);
+    tiku_radio_arch_central_phy(0u);
+    if (rc != 0) {
+        SHELL_PRINTF("no TIKU-CONN peripheral found in %u s\n", secs);
+        return;
+    }
+    SHELL_PRINTF("  events=%lu rx_ok=%lu (%lu%% responded)\n",
+                 (unsigned long)st.events, (unsigned long)st.rx_ok,
+                 st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
+                           : 0ul);
+    {
+        uint16_t survived = 0u;
+        if (tiku_radio_arch_central_phy_result(&survived) && survived > 20u) {
+            SHELL_PRINTF(SH_GREEN "  PHY OK: switched to 2M, survived %u events"
+                         " on 2M\n" SH_RST, (unsigned)survived);
+        } else {
+            uint32_t dbg = tiku_radio_arch_dbg_phy;
+            SHELL_PRINTF(SH_RED "  PHY: did not survive (survived=%u; stage=%lu"
+                         " att=%lu rsp=%lu mode=%lu)\n" SH_RST,
+                         (unsigned)survived, (unsigned long)(dbg & 0xFFu),
+                         (unsigned long)((dbg >> 8) & 0xFFu),
+                         (unsigned long)((dbg >> 16) & 0xFFu),
+                         (unsigned long)((dbg >> 24) & 0xFFu));
+        }
+    }
+}
+
 /* L3: advertise connectably, accept a central, HOLD the link.  Blocking
  * (parks the shell while connected); a real central (nRF Connect on a
  * phone) is the oracle.  Exit: link held for many events / minutes. */
@@ -1017,6 +1065,20 @@ static void bleadv_flprnus(uint8_t req_cpu)
                              (unsigned long)dm, (unsigned)single);
             }
         }
+        {   /* Phase F2: PHY update applied by the FLPR at its Instant?  Survival
+             * = events serviced since the switch (a rising count = link held). */
+            uint32_t phy_at = 0u;
+            uint32_t phy = tiku_flpr_arch_conn_phy(&phy_at);
+            uint32_t ev  = tiku_flpr_arch_conn_events();
+            if (phy == 1u && ev > phy_at + 20u) {
+                SHELL_PRINTF(SH_GREEN "  PHY OK: switched to 2M, survived %lu"
+                             " events on 2M\n" SH_RST,
+                             (unsigned long)(ev - phy_at));
+            } else if (phy == 1u) {
+                SHELL_PRINTF("  PHY: switched to 2M, survived %lu events\n",
+                             (unsigned long)(ev - phy_at));
+            }
+        }
     }
 }
 
@@ -1320,6 +1382,15 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             if (v > 0 && v <= 600) { s = (unsigned)v; }
         }
         bleadv_censmp(s);
+        return;
+    }
+    if (strcmp(argv[1], "cenphy") == 0) {         /* Phase F2: PHY update->2M  */
+        unsigned s = 30u;
+        if (argc >= 3) {
+            long v = strtol(argv[2], (char **)0, 10);
+            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        }
+        bleadv_cenphy(s);
         return;
     }
     if (strcmp(argv[1], "conn") == 0) {

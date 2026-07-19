@@ -180,6 +180,10 @@ void tiku_flpr_arch_enc_iv(uint8_t iv[8]);
 /** @brief Phase F1: negotiated DLE max LL payload (0 until LL_LENGTH done). */
 uint32_t tiku_flpr_arch_dle_max(void);
 
+/** @brief Phase F2: current PHY (0 = 1M, 1 = 2M); @p at_evt = conn_events at the
+ *         switch (survival = current conn_events - at_evt). */
+uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt);
+
 /**
  * @brief Phase A telemetry: LL updates applied this connection.
  * @param chan_map  out: LL_CHANNEL_MAP_UPDATE_INDs followed to their Instant.

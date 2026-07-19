@@ -573,6 +573,16 @@ uint32_t tiku_flpr_arch_dle_max(void)
     return TIKU_FLPR_SHARED->dle_max;
 }
 
+/* Phase F2: current PHY (0 = 1M, 1 = 2M); @p at_evt = conn_events count when
+ * the FLPR switched, so the caller can measure survival on the new PHY. */
+uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt)
+{
+    if (at_evt != (uint32_t *)0) {
+        *at_evt = TIKU_FLPR_SHARED->conn_phy_evt;
+    }
+    return TIKU_FLPR_SHARED->conn_phy;
+}
+
 /* Phase A telemetry: LL updates the FLPR applied this connection. */
 uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
 {

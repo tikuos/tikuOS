@@ -305,6 +305,10 @@ static uint16_t fll_cu_timeout;         /* new supervision, 10 ms (telemetry)*/
 static uint8_t  fll_enc_pending;        /* LL_ENC_REQ seen, awaiting M33 SKDs */
 static uint8_t  fll_enc_done;           /* LL_ENC_RSP sent (dedup retransmits) */
 static uint32_t fll_enc_seq;            /* enc_req_seq value we published     */
+/* PHY update (Phase F2): apply the new PHY (RADIO MODE/PCNF0) at its Instant. */
+static uint8_t  fll_phy_pending;        /* LL_PHY_UPDATE_IND armed            */
+static uint8_t  fll_phy_new;            /* target PHY: 0 = 1M, 1 = 2M         */
+static uint16_t fll_phy_instant;        /* connEventCount to switch at        */
 
 static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
 {
@@ -455,7 +459,20 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             if (eff < 27u) { eff = 27u; }
             sh->dle_max = eff;                  /* publish to the M33 host  */
         }
-    } else if (op != 0x09u && op != 0x13u && op != 0x07u && op != 0x15u) {
+    } else if (op == 0x16u) {                   /* LL_PHY_REQ (PHY update)  */
+        static const uint8_t rsp[2] = { 0x03u, 0x03u };  /* TX/RX: 1M + 2M  */
+        fll_queue_ctrl(0x17u, rsp, 2u);         /* LL_PHY_RSP              */
+    } else if (op == 0x18u) {                   /* LL_PHY_UPDATE_IND        */
+        /* CtrData: PHY_C_TO_P[1] PHY_P_TO_C[1] Instant[2] at buf[4..7].
+         * Symmetric switch: our RX (C->P) and TX (P->C) take the same PHY;
+         * apply RADIO MODE/PCNF0 at the Instant. */
+        if (buf[1] >= 5u) {
+            fll_phy_new = ((buf[4] & 0x02u) != 0u) ? 1u : 0u;   /* 2M?      */
+            fll_phy_instant = (uint16_t)(buf[6] | ((uint16_t)buf[7] << 8));
+            fll_phy_pending = 1u;
+        }
+    } else if (op != 0x09u && op != 0x13u && op != 0x07u &&
+               op != 0x15u && op != 0x17u) {
         fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
     }
 }
@@ -512,6 +529,8 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_enc_pending = 0u; fll_enc_done = 0u;      /* Phase E3: not encrypting  */
     sh->enc_on = 0u;
     sh->dle_max = 0u;                             /* Phase F1: pre-DLE (27)    */
+    fll_phy_pending = 0u;                         /* Phase F2: 1M until update  */
+    sh->conn_phy = 0u; sh->conn_phy_evt = 0u;
     sh->conn_sub = 0u;
     sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
 
@@ -546,6 +565,30 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             win = ARX_WIN_MAX;
             fll_cu_pending = 0u;
             sh->conn_cu = sh->conn_cu + 1u;
+        }
+        /* Phase F2: switch the RADIO PHY at the Instant -- MODE + PCNF0.PLEN
+         * (2M = MODE 4, 16-bit preamble; 1M = MODE 3, 8-bit).  The base PCNF0
+         * bits (LFLEN 8, S0LEN 1, S1INCL) are PHY-independent.  This must
+         * precede the event's RX arm so we receive on the new PHY, in lockstep
+         * with the central which switches at the same connEventCount. */
+        if (fll_phy_pending &&
+            (uint16_t)(cec - fll_phy_instant) < 0x8000u) {
+            if (fll_phy_new == 1u) {             /* 2M                        */
+                r->MODE  = 4u;
+                r->PCNF0 = (8u << 0) | (1u << 8) | (1u << 20) | (1u << 24);
+            } else {                             /* 1M                        */
+                r->MODE  = 3u;
+                r->PCNF0 = (8u << 0) | (1u << 8) | (1u << 20);
+            }
+            /* Drop the anchor so we wide-re-acquire on the NEW PHY (its air
+             * time + turnaround differ) -- same recovery the connection update
+             * uses; absorbs any 1-event cec slip in when each side flips. */
+            have_anchor = 0u;
+            idle_iters  = 0u;
+            win = ARX_WIN_MAX;
+            fll_phy_pending = 0u;
+            sh->conn_phy = fll_phy_new;
+            sh->conn_phy_evt = sh->conn_events;  /* survival baseline         */
         }
 
         /* Phase E3: the M33 has returned SKDs/IVs -> send LL_ENC_RSP.  (The

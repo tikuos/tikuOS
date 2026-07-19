@@ -133,6 +133,12 @@ typedef struct {
      * publishes the negotiated max LL payload here so the M33 host raises its
      * L2CAP fragmentation threshold to match (0 = pre-DLE default, 27). */
     volatile uint32_t dle_max;          /* FLPR->M33: negotiated max octets   */
+
+    /* PHY update (Phase F2).  The FLPR applies LL_PHY_UPDATE_IND at its Instant
+     * (reprogram RADIO MODE/PCNF0) and publishes the new PHY + the event count
+     * at which it switched, so the M33 can report survival on the new PHY. */
+    volatile uint32_t conn_phy;         /* current PHY: 0 = 1M, 1 = 2M        */
+    volatile uint32_t conn_phy_evt;     /* conn_events value when PHY applied  */
     volatile uint32_t conn_sub;         /* vestigial (host tracks CCCD, PhaseB)*/
     volatile uint32_t conn_gap;         /* anchored-RX: converged idle iters */
     volatile uint32_t conn_rxon;        /* anchored-RX: last RX-on iters (s)  */

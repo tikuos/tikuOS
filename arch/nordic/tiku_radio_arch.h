@@ -234,8 +234,23 @@ void tiku_radio_arch_central_smp(uint8_t on);
  */
 int tiku_radio_arch_central_enc(uint8_t sk[16]);
 
+/**
+ * @brief Phase F2: drive a PHY update to 2M on the next central() run (after
+ *        the ATT loopback: LL_PHY_REQ/RSP then LL_PHY_UPDATE_IND at an Instant).
+ */
+void tiku_radio_arch_central_phy(uint8_t on);
+
+/**
+ * @brief Phase F2 result.
+ * @param survived out: connection events serviced AFTER the 2M switch (a rising
+ *        count = the link survived the PHY change).
+ * @return 1 if the central applied the 2M switch, else 0.
+ */
+int tiku_radio_arch_central_phy_result(uint16_t *survived);
+
 /** Peripheral T_IFS measured by the central (us), ground truth for L3. */
 extern uint32_t tiku_radio_arch_dbg_cen_tifs;
+extern uint32_t tiku_radio_arch_dbg_phy;   /* F2 debug: stage|att<<8|rsp<<16 */
 
 #define TIKU_RADIO_LL_NEWDATA  (1u << 0)  /**< rx payload is new, deliver */
 #define TIKU_RADIO_LL_ACKED    (1u << 1)  /**< my TX landed, advance      */
