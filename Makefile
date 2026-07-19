@@ -1254,6 +1254,7 @@ SRCS += arch/nordic/tiku_onewire_arch.c
 SRCS += arch/nordic/tiku_trng_arch.c
 SRCS += arch/nordic/tiku_crypto_arch.c
 SRCS += arch/nordic/tiku_radio_arch.c
+SRCS += arch/nordic/tiku_ble_ccm_arch.c
 SRCS += arch/nordic/tiku_fault_arch.c
 # On-die 2.4 GHz RADIO backs the GENERIC broadcast-BLE capability: the
 # tiku_ble_adv facade, the BASIC BLEBEACON/BLESCAN$ words and /sys/radio all

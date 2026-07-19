@@ -73,6 +73,7 @@
 #include <interfaces/bluetooth/tiku_ble_host.h>   /* Phase B: M33 ATT/GATT host */
 #include <interfaces/bluetooth/tiku_ble_smp.h>     /* Phase E: SMP LESC crypto  */
 #include <arch/nordic/tiku_crypto_arch.h>          /* E3c: AES-CCM decrypt      */
+#include <arch/nordic/tiku_ble_ccm_arch.h>         /* CCM00 hardware CCM KAT    */
 #include <interfaces/bluetooth/tiku_ble_enc.h>     /* E3c: demo params + nonce  */
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>        /* F1: DLE frag buffer size  */
 #endif
@@ -873,6 +874,24 @@ static void bleadv_flpradv(void)
  * exercising the tiku_ble_serial recv/send primitives end to end. */
 /* Drain the host's pending TX PDU as data-PDU-sized fragments, each tagged
  * with its LLID (2 start / 1 continuation), flow-controlled by the mailbox. */
+/* CCM00-inline foundation: hardware AES-CCM KAT vs the two-board-proven
+ * software path (encrypt match + decrypt round-trip + tamper reject). */
+static void bleadv_ccmhw(void)
+{
+    int r = tiku_ble_ccm_arch_selftest();
+    SHELL_PRINTF("CCM00 hardware AES-CCM self-test:\n");
+    SHELL_PRINTF("  encrypt == software CCM:   %s\n",
+                 (r & 1) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    SHELL_PRINTF("  decrypt + MIC verified:    %s\n",
+                 (r & 2) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    SHELL_PRINTF("  tampered MIC rejected:     %s\n",
+                 (r & 4) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    if (r == 7) {
+        SHELL_PRINTF(SH_GREEN "  CCM00 OK: typed job lists + reversed "
+                     "KEY/NONCE -- inline LL crypt buildable\n" SH_RST);
+    }
+}
+
 /* Phase E foundation: SMP LESC crypto self-test (AES-CMAC RFC-4493 KAT +
  * P-256 ECDH round-trip) -- the primitives pairing is built on. */
 static void bleadv_smp(void)
@@ -1195,12 +1214,14 @@ static void bleadv_flprpair(void)
                     static const uint8_t want[TIKU_BLE_ENC_DEMO_PT_LEN] =
                         TIKU_BLE_ENC_DEMO_PT;
                     uint8_t nonce[13], aad = TIKU_BLE_ENC_DEMO_AAD;
-                    uint8_t pt[TIKU_BLE_ENC_DEMO_PT_LEN], rmic[4];
+                    uint8_t pt[TIKU_BLE_ENC_DEMO_PT_LEN];
                     tiku_ble_enc_nonce(nonce, 0u, 1u, iv);   /* central->us    */
-                    if (tiku_crypto_arch_aes_ccm_star(
-                            1, sk, 16u, nonce, &aad, 1u, cbuf,
-                            TIKU_BLE_ENC_DEMO_PT_LEN, 4u, pt, rmic) == 0 &&
-                        memcmp(rmic, &cbuf[TIKU_BLE_ENC_DEMO_PT_LEN], 4) == 0 &&
+                    /* Decrypt + MIC-verify on CCM00 (the RADIO-companion
+                     * hardware engine) -- the same over-the-air ciphertext
+                     * the software path proved, now through CCM00 end to
+                     * end (CCM00-inline foundation over real traffic). */
+                    if (tiku_ble_ccm_arch_crypt(1, sk, nonce, aad, cbuf,
+                            TIKU_BLE_ENC_DEMO_PT_LEN, pt) == 0 &&
                         memcmp(pt, want, TIKU_BLE_ENC_DEMO_PT_LEN) == 0) {
                         dec_ok = 1;
                     }
@@ -1308,6 +1329,10 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "smp") == 0) {            /* Phase E: SMP crypto test */
         bleadv_smp();
+        return;
+    }
+    if (strcmp(argv[1], "ccmhw") == 0) {          /* CCM00 hardware CCM KAT   */
+        bleadv_ccmhw();
         return;
     }
     if (strcmp(argv[1], "flprnus") == 0) {
