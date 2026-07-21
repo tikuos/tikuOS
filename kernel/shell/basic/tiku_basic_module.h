@@ -36,12 +36,29 @@
 #define TIKU_MODULE_MAGIC    0x444F4D54u
 #define TIKU_MODULE_ABI      1u
 
-/* Fixed module slot (nordic: 4 KB of EXECUTABLE RRAM just below the durable-
- * persist region -- SRAM is W^X, so a module must run from RRAM, which also
- * makes it durable in place).  The module is linked at this VMA; the loader
- * writes the image here behind the WEN gate and runs it XIP.  Kept in sync
- * with __tiku_module_slot in the device linker script. */
+/* Fixed module slot -- 4 KB of EXECUTABLE NVM, kept in sync with
+ * __tiku_module_slot in the device linker script and the module's own .ld.
+ * The module is linked at this VMA; the loader installs the image here and
+ * runs it XIP (durable in place -- it survives reboot and power loss).
+ *
+ *   nordic (nRF54LM20): RRAM just below the durable-persist region.  SRAM is
+ *     W^X (execute-never), so a module MUST run from RRAM -- which is byte-
+ *     writable, so install is a store loop behind the WEN gate.
+ *   apollo510/510b:     MRAM at the top of the (shrunk) code window.  MRAM is
+ *     executable but NOT CPU-writable -- install goes through the bootrom
+ *     programmer (tiku_nvm_mram_program), and the M55's I-cache is
+ *     invalidated before the first XIP call.
+ *   apollo4l/4p:        same MRAM personality as apollo510 (bootrom-programmed,
+ *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
+ *     0x18000-based code window.  The unified CACHECTRL cache is flushed
+ *     after install (both parts define AM_PART_APOLLO4L). */
+#if defined(AM_PART_APOLLO510)
+#define TIKU_MODULE_CARVE_ADDR  0x48F000u
+#elif defined(AM_PART_APOLLO4L)
+#define TIKU_MODULE_CARVE_ADDR  0x97000u
+#else                                    /* nordic nRF54LM20 RRAM slot */
 #define TIKU_MODULE_CARVE_ADDR  0x1F8000u
+#endif
 #define TIKU_MODULE_CARVE_SIZE  0x1000u
 
 /* Image header at the carve base.  init_off is the byte offset from the carve

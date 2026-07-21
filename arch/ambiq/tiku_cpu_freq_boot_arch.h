@@ -106,6 +106,17 @@ void          tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len);
 void          tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len);
 
 /**
+ * @brief Invalidate the instruction cache (whole cache).
+ *
+ * Per-part: Apollo510 (M55) writes ICIALLU with barriers on both sides;
+ * Apollo4 Lite flushes its unified CACHECTRL cache (which also serves
+ * instruction fetches). Needed after out-of-band writes to executable
+ * MRAM (the Tier-3 module loader) before the first fetch from them.
+ * Routed from the portable tiku_cpu_icache_invalidate() HAL.
+ */
+void          tiku_cpu_ambiq_icache_invalidate(void);
+
+/**
  * @brief Raw identity + power snapshot for the HP-turbo bring-up (`freq probe`).
  *
  * Everything the Apollo5 High-Performance mode decision needs, read live:

@@ -13,6 +13,7 @@
 #ifndef TIKU_AMBIQ_MEM_ARCH_H_
 #define TIKU_AMBIQ_MEM_ARCH_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 /**
@@ -92,5 +93,24 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * am_hal_mram for full power-cycle durability; for now this is a no-op.
  */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief Program an arbitrary MRAM span via the on-chip bootrom.
+ *
+ * Absolute-address twin of the carved-region write path
+ * (tiku_nvm_region_apollo510.c): chunked read-modify-program through the
+ * SSRAM staging window, D-cache cleaned before each bootrom call and the
+ * programmed span invalidated after. Sub-16-byte edges are merged with
+ * the existing MRAM contents. Refuses spans touching the SBL/vector area
+ * (below user MRAM) or running past the end of MRAM.
+ *
+ * Apollo510/510b only (bootrom nv_program_main2 backend).
+ *
+ * @param dst  Absolute destination address in MRAM (>= 0x00410000).
+ * @param src  Source bytes (any address space; staged through SSRAM).
+ * @param len  Number of bytes to program.
+ * @return 0 on success, -1 on bounds violation or bootrom failure.
+ */
+int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len);
 
 #endif /* TIKU_AMBIQ_MEM_ARCH_H_ */

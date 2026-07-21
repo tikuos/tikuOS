@@ -185,6 +185,13 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
 #endif
 }
 
+void tiku_cpu_icache_invalidate(void) {
+#if defined(PLATFORM_AMBIQ)
+    tiku_cpu_ambiq_icache_invalidate();
+#endif
+    /* MSP430 / RP2350 / nRF54L M33: no instruction cache -- no-op. */
+}
+
 /*---------------------------------------------------------------------------*/
 /* CLOCK RATE QUERIES                                                        */
 /*---------------------------------------------------------------------------*/

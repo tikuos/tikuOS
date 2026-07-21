@@ -28,11 +28,12 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    /* Code window: a fixed ~512 KB budget for code/rodata. Everything between
-     * the code window and the 32 KB mirror becomes the carved NVM region, so
-     * the NVM store/tier gets the bulk of MRAM (~3.4 MB). A region overflow
-     * here means code outgrew its 512 KB budget. */
-    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x80000
+    /* Code window: a fixed ~508 KB budget for code/rodata (512 KB minus the
+     * 4 KB loadable-module slot carved off its top). Everything between the
+     * module slot and the 64 KB mirror becomes the carved NVM region, so the
+     * NVM store/tier gets the bulk of MRAM (~3.4 MB). A region overflow here
+     * means code outgrew its budget. */
+    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x7F000
     TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM: .data/.bss/heap/stack    */
     SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM (unused at bring-up) */
 }
@@ -40,12 +41,24 @@ MEMORY
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 
-/* Carved NVM store/tier region (substrate B): ALL MRAM between the 512 KB code
- * window and the 32 KB mirror -- ~3.4 MB on this part. Read in place by pointer
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 4 KB of MRAM at
+ * the top of the former code window (0x48F000..0x490000). A module is linked
+ * at this VMA; the loader programs its image here via the bootrom (gate-last)
+ * and runs it XIP. Carved from the CODE budget, NOT the NVM region below --
+ * the NVM region's interior (FS extent, PERSIST/ckpt reserved tail, tier) is
+ * end-anchored on __tiku_nvmfs_size, so shrinking THAT would shift every
+ * durable tenant and destroy on-device data. Keep in sync with
+ * TIKU_MODULE_CARVE_ADDR and modules/mod_demo_apollo510.ld. */
+__tiku_module_slot_size = 0x1000;                          /* 4 KB */
+__tiku_module_slot      = ORIGIN(MRAM) + LENGTH(MRAM);     /* 0x48F000 */
+
+/* Carved NVM store/tier region (substrate B): ALL MRAM between the module
+ * slot and the 64 KB mirror -- ~3.4 MB on this part. Read in place by pointer
  * (PRIVDEFENA's default map covers MRAM above the code window); written via the
  * bootrom backend (kernel/memory/tiku_nvm_region). The NVM tier and file store
- * ride this. */
-__tiku_nvmfs_base = ORIGIN(MRAM) + LENGTH(MRAM);   /* 0x490000: just above code */
+ * ride this. Base is PINNED (not derived from the code window) so the module-
+ * slot carve cannot move the FS/persist layout. */
+__tiku_nvmfs_base = 0x00490000;                    /* just above the module slot */
 
 /* NVM mirror page (mem port C, Proposal A): 64 KB at the top of MRAM
  * (0x7F0000..0x800000), where tiku_mem_arch_nvm_flush() programs the .uninit
@@ -207,7 +220,12 @@ SECTIONS
 
     /* The NVM mirror page must hold the magic word + the whole .uninit image. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 4),
-           "ERROR: .uninit too large for the 32 KB NVM mirror page (mem port C)")
+           "ERROR: .uninit too large for the 64 KB NVM mirror page (mem port C)")
+
+    /* The module slot must sit exactly between the code window and the NVM
+     * region -- a hole in neither, an overlap with neither. */
+    ASSERT(__tiku_module_slot + __tiku_module_slot_size == __tiku_nvmfs_base,
+           "ERROR: module slot does not abut __tiku_nvmfs_base (layout drift)")
 
     /DISCARD/ :
     {

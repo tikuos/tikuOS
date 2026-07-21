@@ -22,7 +22,7 @@
  * generic layer. The W^X guarantee that matters (code is RX, every data region
  * is execute-never) is fully enforced.
  *
- * Seven non-overlapping regions (this M55 reports 16, so headroom is ample):
+ * Eight non-overlapping regions (this M55 reports 16, so headroom is ample):
  *   0  NVM   .uninit (DTCM)               RW + XN   (writable: holds NVM tier)
  *   1  TEXT  MRAM __flash_start..end      RX            (code + rodata)
  *   2  SRAM  DTCM start..uninit_start     RW + XN       (.data/.bss/.mpu_diag)
@@ -30,6 +30,7 @@
  *   4  GUARD 4 KB below the stack budget  RO + XN       (stack-overflow trip)
  *   5  SRAM  guard+4K..__sram_end         RW + XN       (live stack)
  *   6  SSRAM 0x20080000 + 3 MB            RW + XN       (tier buffers, snapshot)
+ *   7  MOD   module slot (4 KB MRAM)      RO + X        (Tier-3 XIP modules)
  * MAIR0[0] = Normal Write-Back R/W-allocate so the M55 L1 caches keep working
  * (RP2350 used Non-cacheable — it has no cache). PRIVDEFENA lets peripherals
  * (0x40000000+), the SCS/MPU (0xE0000000+) and the bootrom keep the default
@@ -54,6 +55,7 @@ extern uint32_t __sram_start;     /* DTCM base   */
 extern uint32_t __sram_end;       /* DTCM top (= __stack) */
 extern uint32_t __flash_start;    /* MRAM code window base */
 extern uint32_t __flash_end;      /* MRAM code window end (below the NVM mirror) */
+extern uint32_t __tiku_module_slot; /* Tier-3 module slot (4 KB above the code window) */
 
 /**
  * @defgroup MPU_SSRAM_MAP Shared SRAM region constants
@@ -131,7 +133,7 @@ static volatile struct tiku_mpu_diag mpu_diag;
 
 /**
  * @defgroup MPU_REGIONS ARMv8-M MPU region index constants
- * @brief Slot numbers for the seven non-overlapping DTCM/MRAM/SSRAM regions.
+ * @brief Slot numbers for the eight non-overlapping DTCM/MRAM/SSRAM regions.
  * @{
  */
 #define MPU_REGION_NVM         0U
@@ -141,7 +143,12 @@ static volatile struct tiku_mpu_diag mpu_diag;
 #define MPU_REGION_STACK_GUARD 4U
 #define MPU_REGION_SRAM_TOP    5U
 #define MPU_REGION_SSRAM       6U
+#define MPU_REGION_MODULE      7U
 /** @} */
+
+/** Size of the Tier-3 module slot; matches __tiku_module_slot_size and
+ *  TIKU_MODULE_CARVE_SIZE (tiku_basic_module.h). */
+#define TIKU_MPU_MODULE_SLOT_BYTES  0x1000U
 
 /**
  * @defgroup MPU_STACK_GUARD Stack guard sizing constants
@@ -295,12 +302,12 @@ void tiku_mpu_arch_disable_irq(void) { tiku_cpu_irq_disable(); }
 void tiku_mpu_arch_enable_irq(void)  { tiku_cpu_irq_enable(); }
 
 /**
- * @brief Initialize all seven ARMv8-M MPU regions and enable the MPU
+ * @brief Initialize all eight ARMv8-M MPU regions and enable the MPU
  *
  * On cold boot (magic absent) zeroes the .mpu_diag block and stamps the
  * magic; on a warm (post-fault) reset the existing violation counters are
  * preserved. Then programs MAIR0[0] with Normal WB/WA attributes, sets up
- * the seven regions listed in the file header, enables the MPU with
+ * the eight regions listed in the file header, enables the MPU with
  * PRIVDEFENA (peripherals and the SCS keep default privileged access
  * without burning region slots), and routes MemManage faults to priority 0.
  * HFNMIENA is off by default; define TIKU_MPU_HFNMI_ENFORCE=1 to opt in.
@@ -353,6 +360,16 @@ void tiku_mpu_arch_init_segments(void) {
                    AMBIQ_SSRAM_BASE,
                    AMBIQ_SSRAM_BASE + AMBIQ_SSRAM_SIZE - 1U,
                    0U, 1U);                                     /* region 6 */
+        /* Tier-3 loadable-module slot: the 4 KB of MRAM directly above the
+         * code window (apollo510.ld __tiku_module_slot). RO + executable --
+         * the module runs XIP from here; the CPU never stores to it (installs
+         * go through the bootrom programmer, which is not gated by the MPU).
+         * Defense-in-depth: PRIVDEFENA would already allow privileged RX. */
+        mpu_region(MPU_REGION_MODULE,
+                   (uint32_t)(uintptr_t)&__tiku_module_slot,
+                   (uint32_t)(uintptr_t)&__tiku_module_slot +
+                       TIKU_MPU_MODULE_SLOT_BYTES - 1U,
+                   1U /* RO */, 0U /* exec OK */);              /* region 7 */
     }
 
     /* Enable MPU + PRIVDEFENA. HFNMIENA off by default (a buggy fault handler

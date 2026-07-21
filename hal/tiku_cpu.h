@@ -109,6 +109,17 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len);
  */
 void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len);
 
+/**
+ * @brief Invalidate the entire instruction cache.
+ *
+ * Required after out-of-band writes to executable memory (the Tier-3
+ * module loader programming MRAM via the bootrom) and before the first
+ * fetch from the modified range. Full invalidate: modules are small and
+ * install is rare, so by-address precision buys nothing. A no-op on parts
+ * without an instruction cache (MSP430, nRF54L M33, RP2350).
+ */
+void tiku_cpu_icache_invalidate(void);
+
 /*---------------------------------------------------------------------------*/
 /* IDLE / LOW-POWER MODES                                                    */
 /*---------------------------------------------------------------------------*/

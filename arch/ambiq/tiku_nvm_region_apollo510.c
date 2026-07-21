@@ -24,6 +24,7 @@
 #include <stddef.h>
 
 #include "kernel/memory/tiku_nvm_region.h"
+#include "tiku_mem_arch.h"     /* tiku_nvm_mram_program prototype */
 #include <hal/tiku_cpu.h>      /* tiku_cpu_dcache_clean / _invalidate */
 
 extern uint8_t __tiku_nvmfs_base;   /* region base (memory-mapped MRAM) */
@@ -68,44 +69,69 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
     return rc;
 }
 
-static int region_write(tiku_nvm_backend_t *be, size_t off,
-                        const void *src, size_t len)
+/**
+ * @brief Program an arbitrary MRAM span via the bootrom (absolute address)
+ *
+ * The chunked read-modify-program loop shared by the carved-region write
+ * path and the Tier-3 module loader: 16-byte-aligned spans staged through
+ * the SSRAM window (nvmr_stage), sub-16-byte edges merged with the
+ * existing MRAM contents, D-cache cleaned before / programmed span
+ * invalidated after each bootrom call (inside mram_program_span).
+ *
+ * Bounds: refuses anything below user MRAM (the SBL and its vectors live
+ * at 0x400000..0x410000) or past the 4 MB MRAM end.
+ *
+ * @param dst  Absolute destination address in MRAM
+ * @param src  Source bytes (staged; may live in MRAM itself)
+ * @param len  Number of bytes to program
+ * @return 0 on success, -1 on bounds violation or bootrom failure
+ */
+int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
 {
     const uint8_t *s = (const uint8_t *)src;
-    size_t span, aligned_start, aligned_end;
+    uintptr_t span, aligned_start, aligned_end;
 
-    if (off > be->size || len > be->size - off) {
+    if (dst < 0x00410000UL ||               /* SBL + vector area: never */
+        dst > 0x00800000UL || len > 0x00800000UL - dst) {
         return -1;
     }
     if (len == 0) {
         return 0;
     }
 
-    aligned_start = off & ~((size_t)15U);
-    aligned_end   = (off + len + 15U) & ~((size_t)15U);
+    aligned_start = dst & ~((uintptr_t)15U);
+    aligned_end   = (dst + len + 15U) & ~((uintptr_t)15U);
 
     for (span = aligned_start; span < aligned_end; ) {
         size_t chunk = aligned_end - span;
-        size_t ov_start, ov_end;
+        uintptr_t ov_start, ov_end;
 
         if (chunk > NVMR_STAGE_BYTES) {
             chunk = NVMR_STAGE_BYTES;
         }
-        memcpy(nvmr_stage, be->base + span, chunk);
+        memcpy(nvmr_stage, (const void *)span, chunk);
 
-        ov_start = (off > span) ? off : span;
-        ov_end   = (off + len < span + chunk) ? (off + len) : (span + chunk);
+        ov_start = (dst > span) ? dst : span;
+        ov_end   = (dst + len < span + chunk) ? (dst + len) : (span + chunk);
         if (ov_end > ov_start) {
             memcpy((uint8_t *)nvmr_stage + (ov_start - span),
-                   s + (ov_start - off), ov_end - ov_start);
+                   s + (ov_start - dst), ov_end - ov_start);
         }
-        if (mram_program_span((uintptr_t)(be->base + span), nvmr_stage,
-                              chunk) != 0) {
+        if (mram_program_span(span, nvmr_stage, chunk) != 0) {
             return -1;
         }
         span += chunk;
     }
     return 0;
+}
+
+static int region_write(tiku_nvm_backend_t *be, size_t off,
+                        const void *src, size_t len)
+{
+    if (off > be->size || len > be->size - off) {
+        return -1;
+    }
+    return tiku_nvm_mram_program((uintptr_t)(be->base + off), src, len);
 }
 
 static tiku_nvm_backend_t the_region;

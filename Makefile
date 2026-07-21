@@ -1604,13 +1604,30 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_basic.c
 endif
 
 # Loadable native module (Tier 3, loadable.md): compile mod_demo.c SEPARATELY
-# at the executable RRAM slot VMA, flatten to a blob, and wrap it as an ARM
+# at the executable NVM slot VMA, flatten to a blob, and wrap it as an ARM
 # object embedded in the firmware (the "bytes that arrive over the air").
-# Nordic-only (needs the byte-writable executable RRAM slot).
+# Per-DEVICE: the slot address, install mechanism and CPU differ --
+#   nrf54lm20a/b:         RRAM slot 0x1F8000, Cortex-M33 (byte-writable XIP)
+#   apollo510/apollo510b: MRAM slot 0x48F000, Cortex-M55 (bootrom-programmed)
+#   apollo4l/apollo4p:    MRAM slot 0x97000,  Cortex-M4  (bootrom-programmed)
+# Other MCUs have no module slot carved in their linker script -> hard error.
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 CFLAGS        += -DTIKU_BASIC_MODULE_ENABLE=1
 MOD_BUILD      = $(BUILD_DIR)/module
-MOD_CFLAGS     = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -Os -ffreestanding \
+ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
+MOD_CPU_FLAGS  = -mcpu=cortex-m33
+MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
+else ifneq (,$(filter apollo510 apollo510b,$(MCU)))
+MOD_CPU_FLAGS  = -mcpu=cortex-m55 -DAM_PART_APOLLO510
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_apollo510.ld
+else ifneq (,$(filter apollo4l apollo4p,$(MCU)))
+MOD_CPU_FLAGS  = -mcpu=cortex-m4 -DAM_PART_APOLLO4L
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_apollo4l.ld
+else
+$(error TIKU_BASIC_MODULE_ENABLE=1: no module slot for MCU=$(MCU) \
+        (supported: nrf54lm20a nrf54lm20b apollo510 apollo510b apollo4l apollo4p))
+endif
+MOD_CFLAGS     = $(MOD_CPU_FLAGS) -mthumb -mfloat-abi=soft -Os -ffreestanding \
                  -nostdlib -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
                  -I kernel/shell/basic
 TIKU_MOD_IMG_O = $(MOD_BUILD)/mod_demo_img.o
@@ -2446,19 +2463,20 @@ $(TIKU_FLPR_IMG_O): $(FLPR_BUILD)/tiku_flpr.bin
 -include $(FLPR_OBJS:.o=.d)
 endif
 
-# Loadable-module sub-build: separately-compiled ARM module at the RRAM slot
+# Loadable-module sub-build: separately-compiled ARM module at the NVM slot
 # VMA -> flat blob -> ARM object with _binary_mod_demo_bin_* symbols the
-# loader (tiku_basic_module.c) installs from.
+# loader (tiku_basic_module.c) installs from. $(MOD_LDS) selects the
+# per-device slot VMA (nordic RRAM vs apollo510 MRAM).
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 $(MOD_BUILD)/mod_demo.elf: kernel/shell/basic/modules/mod_demo.c \
-                           kernel/shell/basic/modules/mod_demo.ld
+                           $(MOD_LDS)
 	@mkdir -p $(dir $@)
-	$(CC) $(MOD_CFLAGS) -T kernel/shell/basic/modules/mod_demo.ld \
+	$(CC) $(MOD_CFLAGS) -T $(MOD_LDS) \
 	    -Wl,--gc-sections -nostartfiles -o $@ $<
 
 $(MOD_BUILD)/mod_demo.bin: $(MOD_BUILD)/mod_demo.elf
 	$(OBJCOPY) -O binary $< $@
-	@echo "  [module]  $$(stat -c%s $@) bytes"
+	@echo "  [module]  $$(wc -c < $@ | tr -d ' ') bytes"
 
 $(TIKU_MOD_IMG_O): $(MOD_BUILD)/mod_demo.bin
 	cd $(MOD_BUILD) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm \

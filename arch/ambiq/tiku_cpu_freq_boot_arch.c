@@ -717,3 +717,20 @@ void tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len) {
 void tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len) {
     SCB_InvalidateDCache_by_Addr((void *)(uintptr_t)addr, (int32_t)len);
 }
+
+/**
+ * @brief Apollo510 (M55) full instruction-cache invalidate.
+ *
+ * Required after out-of-band writes to EXECUTABLE MRAM (the Tier-3 module
+ * loader programs code via the bootrom) and before the first fetch from it.
+ * Canonical ARMv8-M code-modification sequence: barriers on BOTH sides of
+ * ICIALLU -- the leading pair orders the (already D-invalidated) writes,
+ * the trailing pair discards prefetched/pipelined stale instructions.
+ */
+void tiku_cpu_ambiq_icache_invalidate(void) {
+    __DSB();
+    __ISB();
+    SCB->ICIALLU = 0UL;
+    __DSB();
+    __ISB();
+}
