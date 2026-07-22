@@ -180,7 +180,7 @@ int
 tiku_basic_ext_expect(const char **p, char ch)
 {
     skip_ws(p);
-    if (**p != ch) {
+    if (cur_peek(p) != ch) {
         char msg[16];
         msg[0] = '\''; msg[1] = ch; msg[2] = '\'';
         msg[3] = ' '; msg[4] = 'e'; msg[5] = 'x'; msg[6] = 'p';
@@ -189,6 +189,6 @@ tiku_basic_ext_expect(const char **p, char ch)
         basic_throw(TIKU_BASIC_ERR_SYNTAX, msg);
         return -1;
     }
-    (*p)++;
+    cur_advance(p);
     return 0;
 }

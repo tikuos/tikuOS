@@ -176,7 +176,7 @@ exec_call(const char **p)
      * from the call site. Params may be numeric or string ($). Stop at the end
      * of either list. */
     if (*sp == '(') sp++;
-    if (**p == '(') (*p)++;
+    if (cur_peek(p) == '(') cur_advance(p);
     for (;;) {
         int            idx, is_str = 0;
         basic_scope_t *s;
@@ -216,7 +216,7 @@ exec_call(const char **p)
         }
         skip_ws(&sp); skip_ws(p);
         if (*sp == ',') sp++;
-        if (**p == ',') (*p)++;
+        if (cur_peek(p) == ',') cur_advance(p);
     }
     if (basic_error) {
         basic_scope_unwind(basic_frames[basic_call_sp].scope_base);
@@ -266,7 +266,7 @@ exec_local(const char **p)
             basic_vars[idx] = 0;
         }
         skip_ws(p);
-        if (**p == ',') { (*p)++; continue; }
+        if (cur_peek(p) == ',') { cur_advance(p); continue; }
         break;
     }
 }

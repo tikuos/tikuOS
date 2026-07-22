@@ -43,15 +43,15 @@ expr_prim(const char **p)
     long v;
     int  idx;
     skip_ws(p);
-    if (**p == '(') {
-        (*p)++;
+    if (cur_peek(p) == '(') {
+        cur_advance(p);
 #if TIKU_BASIC_STRVARS_ENABLE
         v = parse_cond(p);      /* a numeric expr OR a string comparison */
 #else
         v = parse_expr(p);
 #endif
         skip_ws(p);
-        if (**p == ')') (*p)++;
+        if (cur_peek(p) == ')') cur_advance(p);
         else { basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); }
         return v;
     }
@@ -70,11 +70,11 @@ expr_prim(const char **p)
      * element of the corresponding DIMmed numeric array. 1D and 2D
      * forms accepted via parse_array_index. */
     {
-        char c = to_upper(**p);
-        if (c >= 'A' && c <= 'Z' && *(*p + 1) == '(') {
+        char c = to_upper(cur_peek(p));
+        if (c >= 'A' && c <= 'Z' && cur_peek_at(p, 1) == '(') {
             int  aidx = c - 'A';
             long off;
-            (*p) += 2;
+            cur_skip(p, 2);
             off = parse_array_index(p, &basic_arrays[aidx], c);
             if (basic_error) return 0;
             return ((long *)basic_arrays[aidx].data)[off];
@@ -111,11 +111,11 @@ expr_pow(const char **p)
 {
     long base = expr_prim(p);
     skip_ws(p);
-    if (**p == '^') {
+    if (cur_peek(p) == '^') {
         long exp;
         long result;
         long n;
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
         /* Right-associative: recurse into expr_pow for the RHS. */
         exp = expr_pow(p);
@@ -136,8 +136,8 @@ static long
 expr_unary(const char **p)
 {
     skip_ws(p);
-    if (**p == '-') { (*p)++; return -expr_unary(p); }
-    if (**p == '+') { (*p)++; return  expr_unary(p); }
+    if (cur_peek(p) == '-') { cur_advance(p); return -expr_unary(p); }
+    if (cur_peek(p) == '+') { cur_advance(p); return  expr_unary(p); }
     /* NOT is bitwise complement (matches Microsoft BASIC for an
      * integer dialect). Bound at unary-precedence so `NOT a + 1`
      * parses as `(NOT a) + 1`; use parens for `NOT (a + 1)`. */
@@ -151,10 +151,10 @@ expr_term(const char **p)
     long v = expr_unary(p);
     skip_ws(p);
     for (;;) {
-        char op = **p;
+        char op = cur_peek(p);
         long rhs;
         if (op == '*' || op == '/') {
-            (*p)++;
+            cur_advance(p);
             rhs = expr_unary(p);
             if (op == '*') {
                 v = v * rhs;
@@ -188,10 +188,10 @@ expr_sum(const char **p)
 {
     long v = expr_term(p);
     skip_ws(p);
-    while (**p == '+' || **p == '-') {
-        char op = **p;
+    while (cur_peek(p) == '+' || cur_peek(p) == '-') {
+        char op = cur_peek(p);
         long rhs;
-        (*p)++;
+        cur_advance(p);
         rhs = expr_term(p);
         v = (op == '+') ? (v + rhs) : (v - rhs);
         skip_ws(p);
@@ -209,14 +209,14 @@ expr_rel(const char **p)
     int  result;
 
     skip_ws(p);
-    if (**p != '=' && **p != '<' && **p != '>') return lhs;
-    op1 = **p;
-    (*p)++;
-    if ((op1 == '<' && **p == '=') ||
-        (op1 == '>' && **p == '=') ||
-        (op1 == '<' && **p == '>')) {
-        op2 = **p;
-        (*p)++;
+    if (cur_peek(p) != '=' && cur_peek(p) != '<' && cur_peek(p) != '>') return lhs;
+    op1 = cur_peek(p);
+    cur_advance(p);
+    if ((op1 == '<' && cur_peek(p) == '=') ||
+        (op1 == '>' && cur_peek(p) == '=') ||
+        (op1 == '<' && cur_peek(p) == '>')) {
+        op2 = cur_peek(p);
+        cur_advance(p);
     }
     rhs = expr_sum(p);
     if      (op1 == '=' && op2 == 0)   result = (lhs == rhs);
@@ -279,14 +279,14 @@ parse_cond(const char **p)
         int  cmp;
         if (parse_strexpr(p, a, sizeof(a)) != 0) return 0;
         skip_ws(p);
-        if (**p != '=' && **p != '<' && **p != '>') {
+        if (cur_peek(p) != '=' && cur_peek(p) != '<' && cur_peek(p) != '>') {
             basic_throw(TIKU_BASIC_ERR_TYPE, "string relop expected");
             return 0;
         }
-        op1 = **p; (*p)++;
-        if ((op1 == '<' && (**p == '=' || **p == '>')) ||
-            (op1 == '>' && **p == '=')) {
-            op2 = **p; (*p)++;
+        op1 = cur_peek(p); cur_advance(p);
+        if ((op1 == '<' && (cur_peek(p) == '=' || cur_peek(p) == '>')) ||
+            (op1 == '>' && cur_peek(p) == '=')) {
+            op2 = cur_peek(p); cur_advance(p);
         }
         if (parse_strexpr(p, b, sizeof(b)) != 0) return 0;
         cmp = strcmp(a, b);

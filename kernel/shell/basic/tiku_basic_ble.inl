@@ -73,7 +73,7 @@ exec_bleadv(const char **p)
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
     skip_ws(p);
-    if (**p == '\0' || **p == ':') {        /* bare BLEADV -> default name */
+    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {        /* bare BLEADV -> default name */
         name[0] = '\0';
     } else if (parse_strexpr(p, name, sizeof(name)) != 0) {
         return;
@@ -142,30 +142,30 @@ exec_blebeacon(const char **p)
     long        dbm = 0;
     uint8_t     have_dbm = 0u;
     skip_ws(p);
-    if (**p == '\0' || **p == ':') {
+    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {
         name[0] = '\0';
-    } else if (**p == ',') {
+    } else if (cur_peek(p) == ',') {
         name[0] = '\0';                     /* BLEBEACON ,500 -> default    */
     } else if (parse_strexpr(p, name, sizeof(name)) != 0) {
         return;
     }
     skip_ws(p);
-    if (**p == ',') {
-        (*p)++;
+    if (cur_peek(p) == ',') {
+        cur_advance(p);
         ms = parse_expr(p);
         if (basic_error) return;
         if (ms < 0) ms = 0;
         if (ms > 65535) ms = 65535;
         skip_ws(p);
-        if (**p == ',') {
-            (*p)++;
+        if (cur_peek(p) == ',') {
+            cur_advance(p);
             if (parse_strexpr(p, data, sizeof(data)) != 0) {
                 return;
             }
             dlen = (uint8_t)strlen(data);
             skip_ws(p);
-            if (**p == ',') {
-                (*p)++;
+            if (cur_peek(p) == ',') {
+                cur_advance(p);
                 dbm = parse_expr(p);
                 if (basic_error) return;
                 have_dbm = 1u;
@@ -223,7 +223,7 @@ exec_bleobserve(const char **p)
         tiku_ble_adv_observe_stop();
         return;
     }
-    if (**p != '\0' && **p != ':') {
+    if (cur_peek(p) != '\0' && cur_peek(p) != ':') {
         secs = parse_expr(p);
         if (basic_error) return;
         if (secs < 0) secs = 0;

@@ -54,16 +54,16 @@ exec_httpheader(const char **p)
     char   name[48], val[TIKU_BASIC_STR_BUF_CAP];
     size_t nl, vl, cur;
     skip_ws(p);
-    if (**p == '\0' || **p == ':') {        /* bare HTTPHEADER -> clear */
+    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {        /* bare HTTPHEADER -> clear */
         basic_http_hdrs[0] = '\0';
         return;
     }
     if (parse_strexpr(p, name, sizeof(name)) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     if (parse_strexpr(p, val, sizeof(val)) != 0) return;
     nl = strlen(name); vl = strlen(val); cur = strlen(basic_http_hdrs);
     if (cur + nl + vl + 4u >= sizeof(basic_http_hdrs)) {
@@ -87,26 +87,26 @@ exec_fetch(const char **p)
     char host[64], path[80], body[TIKU_BASIC_STR_BUF_CAP];
     int  have_body = 0, rc;
     skip_ws(p);
-    if (**p != '#') {
+    if (cur_peek(p) != '#') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'#buffer' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     n = parse_expr(p);
     if (basic_error) return;
     if (n < 0 || n >= TIKU_BASIC_BIGBUF_COUNT || basic_bigbuf[n] == NULL) {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad #buffer"); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
-    (*p)++;
+    if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
+    cur_advance(p);
     if (parse_path_literal(p, host, sizeof(host)) != 0) return;
     skip_ws(p);
-    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
-    (*p)++;
+    if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
+    cur_advance(p);
     if (parse_path_literal(p, path, sizeof(path)) != 0) return;
     skip_ws(p);
-    if (**p == ',') {                       /* optional body -> POST */
-        (*p)++;
+    if (cur_peek(p) == ',') {                       /* optional body -> POST */
+        cur_advance(p);
         if (parse_strexpr(p, body, sizeof(body)) != 0) return;
         have_body = 1;
     }
@@ -156,16 +156,16 @@ exec_udpsend(const char **p)
         basic_throwf(TIKU_BASIC_ERR_SYNTAX, "bad IP '%s'", ipstr); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
-    (*p)++;
+    if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
+    cur_advance(p);
     port = parse_expr(p);
     if (basic_error) return;
     if (port < 1 || port > 65535) {
         basic_throw(TIKU_BASIC_ERR_NET, "UDP port out of range"); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
-    (*p)++;
+    if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
+    cur_advance(p);
     if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
     if (tiku_kits_net_udp_send(ip, (uint16_t)port, 5000U,
                                (const uint8_t *)payload,
@@ -347,12 +347,12 @@ exec_mqttpub(const char **p)
         basic_throwf(TIKU_BASIC_ERR_NET, "bad broker IP '%s'", ipstr); return;
     }
     skip_ws(p);
-    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
-    (*p)++;
+    if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
+    cur_advance(p);
     if (parse_path_literal(p, topic, sizeof(topic)) != 0) return;
     skip_ws(p);
-    if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
-    (*p)++;
+    if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return; }
+    cur_advance(p);
     if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
 
     /* Initialise the TCP connection table. On a lean WiFi profile nothing

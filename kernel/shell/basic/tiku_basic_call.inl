@@ -32,17 +32,17 @@ static int
 parse_call_1arg(const char **p, long *a)
 {
     skip_ws(p);
-    if (**p != '(') {
+    if (cur_peek(p) != '(') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     *a = parse_expr(p);
     if (basic_error) return 0;
     skip_ws(p);
-    if (**p != ')') {
+    if (cur_peek(p) != ')') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     return 1;
 }
 
@@ -50,24 +50,24 @@ static int
 parse_call_2arg(const char **p, long *a, long *b)
 {
     skip_ws(p);
-    if (**p != '(') {
+    if (cur_peek(p) != '(') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     *a = parse_expr(p);
     if (basic_error) return 0;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     *b = parse_expr(p);
     if (basic_error) return 0;
     skip_ws(p);
-    if (**p != ')') {
+    if (cur_peek(p) != ')') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     return 1;
 }
 
@@ -78,15 +78,15 @@ static int
 parse_call_0arg(const char **p)
 {
     skip_ws(p);
-    if (**p != '(') {
+    if (cur_peek(p) != '(') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     skip_ws(p);
-    if (**p != ')') {
+    if (cur_peek(p) != ')') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 0;
     }
-    (*p)++;
+    cur_advance(p);
     return 1;
 }
 
@@ -97,8 +97,8 @@ parse_call_0arg(const char **p)
 static int
 expr_call(const char **p, long *out_v)
 {
-    const char *save = *p;
-    const char *call = *p;
+    const char *save = cur_mark(p);
+    const char *call = cur_mark(p);
     long a, b;
 
     skip_ws(p);
@@ -125,7 +125,7 @@ expr_call(const char **p, long *out_v)
                     name++;
                 }
                 if (src == call && *name == '\0') {
-                    *p = save;
+                    cur_rewind(p, save);
                     return 0;
                 }
             }
@@ -300,10 +300,10 @@ expr_call(const char **p, long *out_v)
      * match would swallow the BLESEEN$ string function's prefix --
      * restore and fall through when '$' follows. */
     {
-        const char *save = *p;
+        const char *save = cur_mark(p);
         if (match_kw(p, "BLESEEN")) {
-            if (**p == '$') {
-                *p = save;              /* BLESEEN$: the string parser's */
+            if (cur_peek(p) == '$') {
+                cur_rewind(p, save);              /* BLESEEN$: the string parser's */
             } else {
                 if (!parse_call_0arg(p)) return 1;
                 *out_v = (long)tiku_ble_adv_last_scan_count();
@@ -317,15 +317,15 @@ expr_call(const char **p, long *out_v)
      * identifier with nothing to do). */
     if (match_kw(p, "MILLIS")) {
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         /* tiku_clock_time() is uint16_t; (ticks*1000)/HZ keeps the
          * computation in 32-bit and wraps at the same ~512 s as the
          * underlying tick. Good enough for short timing patterns. */
@@ -338,15 +338,15 @@ expr_call(const char **p, long *out_v)
      * treats it as a function. Fits a signed 32-bit long until 2038. */
     if (match_kw(p, "NOW")) {
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         *out_v = (long)tiku_rtc_get_seconds();
         return 1;
     }
@@ -468,9 +468,9 @@ expr_call(const char **p, long *out_v)
      * reads naturally. Guards UDPSEND / MQTTPUB / HTTPGET$. */
     if (match_kw(p, "NETUP")) {
         skip_ws(p);
-        if (**p == '(') {
-            (*p)++; skip_ws(p);
-            if (**p == ')') (*p)++;
+        if (cur_peek(p) == '(') {
+            cur_advance(p); skip_ws(p);
+            if (cur_peek(p) == ')') cur_advance(p);
             else { basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1; }
         }
         *out_v = (tiku_kits_net_ipv4_get_link() != (const tiku_kits_net_link_t *)0)
@@ -481,7 +481,7 @@ expr_call(const char **p, long *out_v)
     /* HTTPSTATUS() -- the HTTP status code from the last HTTPGET$ (0-arg). */
     if (match_kw(p, "HTTPSTATUS")) {
         skip_ws(p);
-        if (**p == '(') { (*p)++; skip_ws(p); if (**p == ')') (*p)++; }
+        if (cur_peek(p) == '(') { cur_advance(p); skip_ws(p); if (cur_peek(p) == ')') cur_advance(p); }
         *out_v = (long)basic_http_status;   /* set by basic_https_get() */
         return 1;
     }
@@ -489,15 +489,15 @@ expr_call(const char **p, long *out_v)
 #endif
     if (match_kw(p, "SECS")) {
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         *out_v = (long)tiku_clock_seconds();
         return 1;
     }
@@ -506,33 +506,33 @@ expr_call(const char **p, long *out_v)
         char buf[TIKU_BASIC_STR_BUF_CAP];
         const char *S; size_t SL;
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_str_ref(p, &S, &SL, buf, sizeof(buf)) != 0) return 1;  /* LEN(#n) too */
         (void)S;
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         *out_v = (long)SL;
         return 1;
     }
     if (match_kw(p, "ASC")) {
         char buf[TIKU_BASIC_STR_BUF_CAP];
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, buf, sizeof(buf)) != 0) return 1;
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         *out_v = (long)(unsigned char)buf[0];
         return 1;
     }
@@ -540,16 +540,16 @@ expr_call(const char **p, long *out_v)
         char buf[TIKU_BASIC_STR_BUF_CAP];
         char *end;
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, buf, sizeof(buf)) != 0) return 1;
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         *out_v = strtol(buf, &end, 0);     /* base 0 -> auto hex/dec */
         return 1;
     }
@@ -562,10 +562,10 @@ expr_call(const char **p, long *out_v)
         long start = 1;
         const char *match;
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
         if (peek_string_expr(*p)) {
             /* 2-arg form */
@@ -576,23 +576,23 @@ expr_call(const char **p, long *out_v)
             if (basic_error) return 1;
             if (start < 1) start = 1;
             skip_ws(p);
-            if (**p != ',') {
+            if (cur_peek(p) != ',') {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return 1;
             }
-            (*p)++;
+            cur_advance(p);
             if (parse_strexpr(p, haystack, sizeof(haystack)) != 0) return 1;
         }
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, needle, sizeof(needle)) != 0) return 1;
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (needle[0] == '\0') {
             *out_v = start;     /* empty needle matches at start */
             return 1;
@@ -615,22 +615,22 @@ expr_call(const char **p, long *out_v)
         long cnt = 0;
         size_t nl;
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, haystack, sizeof(haystack)) != 0) return 1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, needle, sizeof(needle)) != 0) return 1;
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         nl = strlen(needle);
         if (nl > 0) {
             hp = haystack;
@@ -649,16 +649,16 @@ expr_call(const char **p, long *out_v)
     if (match_kw(p, "VFSREAD")) {
         char path[48];
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_path_literal(p, path, sizeof(path)) != 0) return 1;
         skip_ws(p);
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
-        (*p)++;
+        cur_advance(p);
         *out_v = basic_vfsread(path);
         return 1;
     }
@@ -689,25 +689,25 @@ expr_call(const char **p, long *out_v)
                     const char *body;
                     int        ai;
                     int        ac = (int)basic_defns[i].arg_count;
-                    *p = q + 1;            /* past '(' */
+                    cur_set(p, q + 1);            /* past '(' */
                     /* Parse the argument list (must match arg_count). */
                     for (ai = 0; ai < ac; ai++) {
                         if (ai > 0) {
                             skip_ws(p);
-                            if (**p != ',') {
+                            if (cur_peek(p) != ',') {
                                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
                                 return 1;
                             }
-                            (*p)++;
+                            cur_advance(p);
                         }
                         args_v[ai] = parse_expr(p);
                         if (basic_error) return 1;
                     }
                     skip_ws(p);
-                    if (**p != ')') {
+                    if (cur_peek(p) != ')') {
                         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
                     }
-                    (*p)++;
+                    cur_advance(p);
                     /* Bind arguments to their named variables, saving the
                      * caller's previous values. */
                     for (ai = 0; ai < ac; ai++) {
@@ -764,6 +764,6 @@ expr_call(const char **p, long *out_v)
         }
     }
 #endif
-    *p = save;
+    cur_rewind(p, save);
     return 0;
 }

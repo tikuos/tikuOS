@@ -225,7 +225,7 @@ exec_select_case(const char **p)
             basic_pc_set = 1;
         }
     }
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }
 
 /**
@@ -258,12 +258,12 @@ exec_case(const char **p)
             basic_pc_set = 1;
         }
     }
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }
 
 /** @brief END SELECT marker: no-op when reached during execution. */
 static void
 exec_end_select(const char **p)
 {
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }

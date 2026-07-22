@@ -61,7 +61,7 @@ is_word_cont(char c) { return is_alpha(c) || is_digit(c) || c == '_'; }
 static void
 skip_ws(const char **p)
 {
-    while (**p == ' ' || **p == '\t') (*p)++;
+    while (cur_peek(p) == ' ' || cur_peek(p) == '\t') cur_advance(p);
 }
 
 /* Translate a backslash-escape inside a "..." literal. Recognises
@@ -92,12 +92,12 @@ print_escape(char esc)
 static int
 match_kw(const char **p, const char *kw)
 {
-    const char *q = *p;
-    uint8_t     b = (uint8_t)*q;
+    const char *q = cur_mark(p);
+    uint8_t     b = cur_peekb(p);
     if (b >= BASIC_TOK_BASE) {
         if (b >= BASIC_TOK_BASE + BASIC_TOK_N ||
             strcmp(basic_tok_tab[b - BASIC_TOK_BASE], kw) != 0) return 0;
-        *p = q + 1;
+        cur_set(p, q + 1);
         skip_ws(p);
         return 1;
     }
@@ -106,7 +106,7 @@ match_kw(const char **p, const char *kw)
         q++; kw++;
     }
     if (is_word_cont(*q)) return 0;
-    *p = q;
+    cur_set(p, q);
     skip_ws(p);
     return 1;
 }
@@ -121,46 +121,48 @@ parse_unum(const char **p, long *out)
     /* C-style hex 0x.. and binary 0b.. prefixes. The leading '0' lets
      * is_digit() recognise the literal as numeric, so process_line's
      * line-number heuristic correctly stores `0x10 PRINT 1` as line 16. */
-    if (**p == '0' && (*(*p + 1) == 'x' || *(*p + 1) == 'X')) {
-        q = *p + 2;
+    if (cur_peek(p) == '0' &&
+        (cur_peek_at(p, 1) == 'x' || cur_peek_at(p, 1) == 'X')) {
+        q = cur_mark(p) + 2;
         if (!is_hex_digit(*q)) return 0;
         while (is_hex_digit(*q)) { v = v * 16 + hex_value(*q); q++; }
-        *p = q;
+        cur_set(p, q);
         *out = v;
         return 1;
     }
-    if (**p == '0' && (*(*p + 1) == 'b' || *(*p + 1) == 'B')) {
-        q = *p + 2;
+    if (cur_peek(p) == '0' &&
+        (cur_peek_at(p, 1) == 'b' || cur_peek_at(p, 1) == 'B')) {
+        q = cur_mark(p) + 2;
         if (*q != '0' && *q != '1') return 0;
         while (*q == '0' || *q == '1') { v = v * 2 + (*q - '0'); q++; }
-        *p = q;
+        cur_set(p, q);
         *out = v;
         return 1;
     }
     /* BASIC-style &H.. and &B.. literals. Cannot serve as line numbers
      * (process_line guards on is_digit) but that's fine -- they appear
      * inside expressions next to PEEK / POKE / SHL etc. */
-    if (**p == '&' && (to_upper(*(*p + 1)) == 'H')) {
-        q = *p + 2;
+    if (cur_peek(p) == '&' && to_upper(cur_peek_at(p, 1)) == 'H') {
+        q = cur_mark(p) + 2;
         if (!is_hex_digit(*q)) return 0;
         while (is_hex_digit(*q)) { v = v * 16 + hex_value(*q); q++; }
-        *p = q;
+        cur_set(p, q);
         *out = v;
         return 1;
     }
-    if (**p == '&' && (to_upper(*(*p + 1)) == 'B')) {
-        q = *p + 2;
+    if (cur_peek(p) == '&' && to_upper(cur_peek_at(p, 1)) == 'B') {
+        q = cur_mark(p) + 2;
         if (*q != '0' && *q != '1') return 0;
         while (*q == '0' || *q == '1') { v = v * 2 + (*q - '0'); q++; }
-        *p = q;
+        cur_set(p, q);
         *out = v;
         return 1;
     }
 
-    if (!is_digit(**p)) return 0;
-    while (is_digit(**p)) {
-        v = v * 10 + (**p - '0');
-        (*p)++;
+    if (!is_digit(cur_peek(p))) return 0;
+    while (is_digit(cur_peek(p))) {
+        v = v * 10 + (cur_peek(p) - '0');
+        cur_advance(p);
     }
 #if TIKU_BASIC_FIXED_ENABLE
     /* Decimal point: scale by TIKU_BASIC_FIXED_SCALE and absorb up
@@ -173,18 +175,17 @@ parse_unum(const char **p, long *out)
      * Pure integers (no '.') retain their existing meaning, so any
      * old program that did its own scaling (`PI = 3142`) keeps
      * working unchanged. */
-    if (**p == '.') {
+    if (cur_match(p, '.')) {
         long frac = 0;
         long div  = 1;
         const long max_div = (long)TIKU_BASIC_FIXED_SCALE;
-        (*p)++;
-        while (is_digit(**p) && div < max_div) {
-            frac = frac * 10 + (**p - '0');
+        while (is_digit(cur_peek(p)) && div < max_div) {
+            frac = frac * 10 + (cur_peek(p) - '0');
             div *= 10;
-            (*p)++;
+            cur_advance(p);
         }
         while (div < max_div) { frac *= 10; div *= 10; }
-        while (is_digit(**p)) (*p)++;     /* skip trailing precision */
+        while (is_digit(cur_peek(p))) cur_advance(p); /* skip trailing precision */
         v = v * (long)TIKU_BASIC_FIXED_SCALE + frac;
     }
 #endif
@@ -213,13 +214,12 @@ parse_ident(const char **p, char *buf, size_t cap)
 {
     size_t n = 0;
     skip_ws(p);
-    if (!is_alpha(**p)) return 0;
-    while (is_word_cont(**p) && n + 1u < cap) {
-        buf[n++] = (char)to_upper(**p);
-        (*p)++;
+    if (!is_alpha(cur_peek(p))) return 0;
+    while (is_word_cont(cur_peek(p)) && n + 1u < cap) {
+        buf[n++] = (char)to_upper(cur_take(p));
     }
     buf[n] = '\0';
-    while (is_word_cont(**p)) (*p)++;        /* drop overflow */
+    while (is_word_cont(cur_peek(p))) cur_advance(p);   /* drop overflow */
     return (int)n;
 }
 
@@ -289,25 +289,25 @@ basic_named_lookup(const char *name, int is_string)
 static int
 parse_var(const char **p, int *idx)
 {
-    const char *save = *p;
+    const char *save = cur_mark(p);
     char        buf[TIKU_BASIC_NAMEDVAR_LEN];
     int         n;
     skip_ws(p);
     n = parse_ident(p, buf, sizeof(buf));
     if (n == 0) {
-        *p = save;
+        cur_rewind(p, save);
         return 0;
     }
-    if (**p == '$') {
+    if (cur_peek(p) == '$') {
         /* String variable; numeric-context call rejects it. */
-        *p = save;
+        cur_rewind(p, save);
         return 0;
     }
     {
         int slot = basic_named_lookup(buf, 0);
         if (slot < 0) {
             basic_throw(TIKU_BASIC_ERR_NOMEM, "too many named vars");
-            *p = save;
+            cur_rewind(p, save);
             return 0;
         }
         *idx = slot;
@@ -329,7 +329,7 @@ parse_var(const char **p, int *idx)
 static int
 parse_var_full(const char **p, int *out_idx, int *out_is_str)
 {
-    const char *save = *p;
+    const char *save = cur_mark(p);
     char        buf[TIKU_BASIC_NAMEDVAR_LEN];
     int         n;
     int         is_str = 0;
@@ -337,17 +337,16 @@ parse_var_full(const char **p, int *out_idx, int *out_is_str)
     skip_ws(p);
     n = parse_ident(p, buf, sizeof(buf));
     if (n == 0) {
-        *p = save;
+        cur_rewind(p, save);
         return 0;
     }
-    if (**p == '$') {
+    if (cur_match(p, '$')) {
         is_str = 1;
-        (*p)++;
     }
     slot = basic_named_lookup(buf, is_str);
     if (slot < 0) {
         basic_throw(TIKU_BASIC_ERR_NOMEM, "too many named vars");
-        *p = save;
+        cur_rewind(p, save);
         return 0;
     }
     *out_idx    = slot;

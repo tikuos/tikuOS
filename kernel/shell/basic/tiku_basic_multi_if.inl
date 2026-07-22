@@ -251,16 +251,16 @@ multi_if_take_false(uint16_t from_line, const char **p)
         int idx = find_next_if_branch(scan, &type);
         if (idx < 0) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "IF without END IF");
-            while (**p) (*p)++;
+            while (cur_peek(p)) cur_advance(p);
             return;
         }
         if (type == MIF_ELSEIF) {
             const char *c = line_is_elseif(prog[idx].text);
             long cond = parse_cond(&c);
-            if (basic_error) { while (**p) (*p)++; return; }
+            if (basic_error) { while (cur_peek(p)) cur_advance(p); return; }
             if (cond) {
                 multi_if_enter_after(idx);   /* run this ELSEIF's body */
-                while (**p) (*p)++;
+                while (cur_peek(p)) cur_advance(p);
                 return;
             }
             scan = prog[idx].number;         /* condition false: keep walking */
@@ -268,7 +268,7 @@ multi_if_take_false(uint16_t from_line, const char **p)
         }
         /* ELSE body, or (END IF) past the whole block. */
         multi_if_enter_after(idx);
-        while (**p) (*p)++;
+        while (cur_peek(p)) cur_advance(p);
         return;
     }
 }
@@ -289,7 +289,7 @@ exec_elseif(const char **p)
         return;
     }
     multi_if_enter_after(idx);
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }
 
 /* ELSE encountered as a top-level statement -- this means a multi-
@@ -314,13 +314,13 @@ exec_else_kw(const char **p)
             /* END IF was the last line -- end the run cleanly. */
             basic_running = 0;
             basic_pc = 0;
-            while (**p) (*p)++;
+            while (cur_peek(p)) cur_advance(p);
             return;
         }
         basic_pc = prog[next].number;
         basic_pc_set = 1;
     }
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }
 
 /* END IF / ENDIF is a marker; reaching it in normal execution is a
@@ -328,6 +328,6 @@ exec_else_kw(const char **p)
 static void
 exec_endif(const char **p)
 {
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }
 

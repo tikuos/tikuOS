@@ -39,12 +39,12 @@ renum_lookup(const uint16_t *old_nos, const uint16_t *new_nos,
 static int
 match_kw_no_ws(const char **q, const char *kw)
 {
-    const char *r = *q;
+    const char *r = cur_mark(q);
     uint8_t     b = (uint8_t)*r;
     if (b >= BASIC_TOK_BASE) {               /* A2: crunched keyword byte */
         if (b >= BASIC_TOK_BASE + BASIC_TOK_N ||
             strcmp(basic_tok_tab[b - BASIC_TOK_BASE], kw) != 0) return 0;
-        *q = r + 1;
+        cur_set(q, r + 1);
         return 1;
     }
     while (*kw) {
@@ -52,7 +52,7 @@ match_kw_no_ws(const char **q, const char *kw)
         r++; kw++;
     }
     if (is_word_cont(*r)) return 0;
-    *q = r;
+    cur_set(q, r);
     return 1;
 }
 
@@ -144,11 +144,11 @@ exec_renum(const char **q)
     char tmp[TIKU_BASIC_LINE_MAX];
 
     skip_ws(q);
-    if (is_digit(**q)) {
+    if (is_digit(cur_peek(q))) {
         (void)parse_unum(q, &start);
         skip_ws(q);
-        if (**q == ',') {
-            (*q)++;
+        if (cur_peek(q) == ',') {
+            cur_advance(q);
             (void)parse_unum(q, &step);
         }
     }

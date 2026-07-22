@@ -245,9 +245,9 @@ parse_str_ref(const char **p, const char **op, size_t *olen,
 {
     skip_ws(p);
 #if TIKU_BASIC_BIGBUF_COUNT > 0
-    if (**p == '#') {
+    if (cur_peek(p) == '#') {
         long n;
-        (*p)++;
+        cur_advance(p);
         n = parse_expr(p);
         if (basic_error) return -1;
         if (n < 0 || n >= TIKU_BASIC_BIGBUF_COUNT || basic_bigbuf[n] == NULL) {
@@ -398,17 +398,17 @@ parse_strprim(const char **p, char *out, size_t cap)
     skip_ws(p);
 
     /* Literal "..." -- mirrors PRINT's escape handling. */
-    if (**p == '"') {
+    if (cur_peek(p) == '"') {
         size_t n = 0;
-        (*p)++;
-        while (**p != '\0' && **p != '"') {
+        cur_advance(p);
+        while (cur_peek(p) != '\0' && cur_peek(p) != '"') {
             char ch;
-            if (**p == '\\' && *(*p + 1) != '\0') {
-                ch = print_escape(*(*p + 1));
-                (*p) += 2;
+            if (cur_peek(p) == '\\' && cur_peek_at(p, 1) != '\0') {
+                ch = print_escape(cur_peek_at(p, 1));
+                cur_skip(p, 2);
             } else {
-                ch = **p;
-                (*p)++;
+                ch = cur_peek(p);
+                cur_advance(p);
             }
             if (n + 1u >= cap) {
                 basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -416,7 +416,7 @@ parse_strprim(const char **p, char *out, size_t cap)
             }
             out[n++] = ch;
         }
-        if (**p == '"') (*p)++;
+        if (cur_peek(p) == '"') cur_advance(p);
         out[n] = '\0';
         return 0;
     }
@@ -426,12 +426,12 @@ parse_strprim(const char **p, char *out, size_t cap)
      * A$ because both start with `letter $`; the array form has `(`
      * as the next char, which is not a word_cont, so the scalar
      * check would otherwise accept it. */
-    if (is_alpha(**p) && *(*p + 1) == '$' && *(*p + 2) == '(') {
-        char    c   = (char)to_upper(**p);
+    if (is_alpha(cur_peek(p)) && cur_peek_at(p, 1) == '$' && cur_peek_at(p, 2) == '(') {
+        char    c   = (char)to_upper(cur_peek(p));
         uint8_t idx = (uint8_t)(c - 'A');
         long    off;
         const char *v;
-        (*p) += 3;
+        cur_skip(p, 3);
         off = parse_array_index(p, &basic_str_arrays[idx], c);
         if (basic_error) return -1;
         v = ((char **)basic_str_arrays[idx].data)[off];
@@ -454,17 +454,17 @@ parse_strprim(const char **p, char *out, size_t cap)
         char src[TIKU_BASIC_STR_BUF_CAP];
         long n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         n = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (n < 0) n = 0;
         {
             size_t srclen = strlen(src);
@@ -483,17 +483,17 @@ parse_strprim(const char **p, char *out, size_t cap)
         long n;
         size_t srclen, start;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         n = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (n < 0) n = 0;
         srclen = strlen(src);
         if ((size_t)n > srclen) n = (long)srclen;
@@ -511,23 +511,23 @@ parse_strprim(const char **p, char *out, size_t cap)
         long start_1, take = -1;          /* 1-based start, -1 = "rest" */
         size_t srclen, s0;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         start_1 = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p == ',') {
-            (*p)++;
+        if (cur_peek(p) == ',') {
+            cur_advance(p);
             take = parse_expr(p);
             if (basic_error) return -1;
             skip_ws(p);
         }
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         srclen = strlen(src);
         if (start_1 < 1) start_1 = 1;
         s0 = (size_t)(start_1 - 1);
@@ -552,12 +552,12 @@ parse_strprim(const char **p, char *out, size_t cap)
             char src[TIKU_BASIC_STR_BUF_CAP];
             size_t i, n;
             skip_ws(p);
-            if (**p != '(') goto fn_paren_err;
-            (*p)++;
+            if (cur_peek(p) != '(') goto fn_paren_err;
+            cur_advance(p);
             if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
             skip_ws(p);
-            if (**p != ')') goto fn_paren_err;
-            (*p)++;
+            if (cur_peek(p) != ')') goto fn_paren_err;
+            cur_advance(p);
             n = strlen(src);
             if (n + 1u > cap) {
                 basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -578,12 +578,12 @@ parse_strprim(const char **p, char *out, size_t cap)
         char src[TIKU_BASIC_STR_BUF_CAP];
         size_t a, b, n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         n = strlen(src);
         a = 0;
         while (a < n && (src[a] == ' ' || src[a] == '\t' ||
@@ -611,23 +611,23 @@ parse_strprim(const char **p, char *out, size_t cap)
         long w = 0;
         int in_tok = 0, found = 0, dgiven = 0;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         idx = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p == ',') {
-            (*p)++;
+        if (cur_peek(p) == ',') {
+            cur_advance(p);
             if (parse_strexpr(p, delim, sizeof(delim)) != 0) return -1;
             dgiven = 1;
             skip_ws(p);
         }
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         dl = (dgiven && delim[0]) ? delim : " \t\r\n";
         srclen = strlen(src);
         for (i = 0; i <= srclen && !found; i++) {
@@ -660,20 +660,20 @@ parse_strprim(const char **p, char *out, size_t cap)
         char from[TIKU_BASIC_STR_BUF_CAP], to[TIKU_BASIC_STR_BUF_CAP];
         size_t fl, tl, srclen, i = 0, o = 0;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         if (parse_strexpr(p, from, sizeof(from)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         if (parse_strexpr(p, to, sizeof(to)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         fl = strlen(from); tl = strlen(to); srclen = strlen(src);
         while (i < srclen) {
             if (fl > 0 && i + fl <= srclen && memcmp(src + i, from, fl) == 0) {
@@ -703,19 +703,19 @@ parse_strprim(const char **p, char *out, size_t cap)
         size_t i, srclen, lstart = 0, llen = 0;
         int found = 0;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_str_ref(p, &S, &SL, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         idx = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         srclen = SL;
         for (i = 0; ; i++) {
             if (i == srclen || S[i] == '\n') {
@@ -742,25 +742,25 @@ parse_strprim(const char **p, char *out, size_t cap)
         const char *sa, *sb, *S;
         size_t alen, blen, rlen, SL;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_str_ref(p, &S, &SL, src, sizeof(src)) != 0) return -1;
         (void)SL;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, am, sizeof(am)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, bm, sizeof(bm)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         alen = strlen(am); blen = strlen(bm);
         if (alen == 0) {
             sa = S;
@@ -791,16 +791,16 @@ parse_strprim(const char **p, char *out, size_t cap)
         char src[TIKU_BASIC_STR_BUF_CAP], jpath[TIKU_BASIC_STR_BUF_CAP];
         const char *jsrc; size_t jslen;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_str_ref(p, &jsrc, &jslen, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
-        (*p)++;
+        if (cur_peek(p) != ',') { basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1; }
+        cur_advance(p);
         if (parse_strexpr(p, jpath, sizeof(jpath)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         (void)basic_json_extract(jsrc, (uint16_t)jslen, jpath, out, cap);
         return 0;
     }
@@ -810,25 +810,25 @@ parse_strprim(const char **p, char *out, size_t cap)
          * entities decoded). Bounded by the string scratch (STR_BUF_CAP). */
         char src[TIKU_BASIC_STR_BUF_CAP];
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         basic_html_render(src, out, cap);
         return 0;
     }
     if (match_kw(p, "CHR$")) {
         long v;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         v = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (cap < 2u) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
             return -1;
@@ -857,13 +857,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         long v;
         int  n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         v = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         n = snprintf(out, cap, "%ld", v);
         if (n < 0 || (size_t)n >= cap) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -877,13 +877,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         long v;
         int  n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         v = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         n = snprintf(out, cap, "%lX", (unsigned long)v & 0xFFFFFFFFu);
         if (n < 0 || (size_t)n >= cap) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -898,11 +898,11 @@ parse_strprim(const char **p, char *out, size_t cap)
         tiku_kits_time_tm_t tm;
         int n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         (void)tiku_kits_time_to_tm(
             (tiku_kits_time_unix_t)tiku_rtc_get_seconds(), &tm);
         n = snprintf(out, cap, "%04u-%02u-%02u",
@@ -918,11 +918,11 @@ parse_strprim(const char **p, char *out, size_t cap)
         tiku_kits_time_tm_t tm;
         int n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         (void)tiku_kits_time_to_tm(
             (tiku_kits_time_unix_t)tiku_rtc_get_seconds(), &tm);
         n = snprintf(out, cap, "%02u:%02u:%02u",
@@ -944,13 +944,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         int  i, start = 0;
         size_t need;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         v = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         u = (unsigned long)v & 0xFFFFFFFFu;
         for (i = 0; i < 32; i++) {
             buf[i] = (char)('0' + (int)((u >> (31 - i)) & 1u));
@@ -973,13 +973,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         int  neg = 0;
         int  n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         v = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (v < 0) { neg = 1; v = -v; }
         ipart = v / TIKU_BASIC_FIXED_SCALE;
         frac  = v % TIKU_BASIC_FIXED_SCALE;
@@ -1002,12 +1002,12 @@ parse_strprim(const char **p, char *out, size_t cap)
         char path[48];
         int n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         n = tiku_vfs_read(path, out, cap - 1u);
         if (n < 0) {
             basic_throwf(TIKU_BASIC_ERR_IO, "VFS read failed: %s (%s)", path, tiku_vfs_strerror(n));
@@ -1033,12 +1033,12 @@ parse_strprim(const char **p, char *out, size_t cap)
         char path[48];
         int  n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         n = tiku_vfs_read(path, out, cap - 1u);
         if (n < 0) n = 0;                       /* missing file -> "" */
         if ((size_t)n >= cap) n = (int)cap - 1;
@@ -1053,10 +1053,10 @@ parse_strprim(const char **p, char *out, size_t cap)
     if (match_kw(p, "BLEGET$")) {
         int n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++; skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p); skip_ws(p);
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         n = tiku_ble_serial_recv((uint8_t *)out, (uint16_t)(cap - 1u));
         if (n < 0) n = 0;
         out[n] = '\0';
@@ -1072,13 +1072,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         tiku_ble_adv_report_t r;
         long idx;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         idx = parse_expr(p);
         if (basic_error) return 1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (idx < 0 || idx > 255 ||
             !tiku_ble_adv_observe_get((uint8_t)idx, &r)) {
             out[0] = '\0';
@@ -1101,13 +1101,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         int n, i;
         size_t o = 0u;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         secs = parse_expr(p);
         if (basic_error) return 1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (secs < 1) secs = 1;
         if (secs > 20) secs = 20;
         n = tiku_ble_adv_scan(reps, 8u, (uint16_t)(secs * 1000L));
@@ -1134,10 +1134,10 @@ parse_strprim(const char **p, char *out, size_t cap)
         const uint8_t *a;
         int n;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++; skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p); skip_ws(p);
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         a = tiku_kits_net_ipv4_get_addr();
         if (a == (const uint8_t *)0) { out[0] = '\0'; return 0; }
         n = snprintf(out, cap, "%u.%u.%u.%u",
@@ -1157,18 +1157,18 @@ parse_strprim(const char **p, char *out, size_t cap)
     if (match_kw(p, "HTTPGET$")) {
         char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX];
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_path_literal(p, host, sizeof(host)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         (void)basic_https_get("GET", host, path, NULL, NULL, out, cap);
         return 0;
     }
@@ -1182,30 +1182,30 @@ parse_strprim(const char **p, char *out, size_t cap)
         char body[TIKU_BASIC_STR_BUF_CAP];
         int have_ct = 0;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_path_literal(p, host, sizeof(host)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_path_literal(p, path, sizeof(path)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, body, sizeof(body)) != 0) return -1;
         skip_ws(p);
-        if (**p == ',') {                       /* optional content-type */
-            (*p)++;
+        if (cur_peek(p) == ',') {                       /* optional content-type */
+            cur_advance(p);
             if (parse_strexpr(p, ctype, sizeof(ctype)) != 0) return -1;
             have_ct = 1;
             skip_ws(p);
         }
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         (void)basic_https_get("POST", host, path, body,
                               have_ct ? ctype : NULL, out, cap);
         return 0;
@@ -1221,25 +1221,25 @@ parse_strprim(const char **p, char *out, size_t cap)
         char host[20], topic[48];
         long secs;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_path_literal(p, host, sizeof(host)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_path_literal(p, topic, sizeof(topic)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         secs = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         (void)basic_net_mqtt_wait(host, topic, secs, out, cap);
         return 0;
     }
@@ -1256,12 +1256,12 @@ parse_strprim(const char **p, char *out, size_t cap)
             char tmp[TIKU_BASIC_STR_BUF_CAP];
             int  i;
             skip_ws(p);
-            if (**p != '(') goto fn_paren_err;
-            (*p)++;
+            if (cur_peek(p) != '(') goto fn_paren_err;
+            cur_advance(p);
             if (parse_strexpr(p, tmp, sizeof(tmp)) != 0) return -1;
             skip_ws(p);
-            if (**p != ')') goto fn_paren_err;
-            (*p)++;
+            if (cur_peek(p) != ')') goto fn_paren_err;
+            cur_advance(p);
             for (i = 0; tmp[i] != '\0' && (size_t)i + 1u < cap; i++) {
                 char c = tmp[i];
                 if (upper && c >= 'a' && c <= 'z') {
@@ -1291,12 +1291,12 @@ parse_strprim(const char **p, char *out, size_t cap)
             char tmp[TIKU_BASIC_STR_BUF_CAP];
             int  i, n;
             skip_ws(p);
-            if (**p != '(') goto fn_paren_err;
-            (*p)++;
+            if (cur_peek(p) != '(') goto fn_paren_err;
+            cur_advance(p);
             if (parse_strexpr(p, tmp, sizeof(tmp)) != 0) return -1;
             skip_ws(p);
-            if (**p != ')') goto fn_paren_err;
-            (*p)++;
+            if (cur_peek(p) != ')') goto fn_paren_err;
+            cur_advance(p);
             n = (int)strlen(tmp);
             if (leading) {
                 int s = 0;
@@ -1330,13 +1330,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         long n;
         long i;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         n = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (n < 0) n = 0;
         if ((size_t)n + 1u > cap) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -1353,16 +1353,16 @@ parse_strprim(const char **p, char *out, size_t cap)
         char fill = ' ';
         long i;
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         n = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
             return -1;
         }
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
         if (peek_string_expr(*p)) {
             char tmp[TIKU_BASIC_STR_BUF_CAP];
@@ -1374,8 +1374,8 @@ parse_strprim(const char **p, char *out, size_t cap)
             fill = (char)(v & 0xFF);
         }
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (n < 0) n = 0;
         if ((size_t)n + 1u > cap) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -1393,12 +1393,12 @@ parse_strprim(const char **p, char *out, size_t cap)
     if (match_kw(p, "BASE64$")) {
         char src[TIKU_BASIC_STR_BUF_CAP];
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (tiku_kits_crypto_base64_encode((const uint8_t *)src,
                 (uint16_t)strlen(src), out, (uint16_t)cap, NULL)
             != TIKU_KITS_CRYPTO_OK) {
@@ -1412,12 +1412,12 @@ parse_strprim(const char **p, char *out, size_t cap)
         char    src[TIKU_BASIC_STR_BUF_CAP];
         uint8_t dig[TIKU_KITS_CRYPTO_SHA256_DIGEST_SIZE];
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, src, sizeof(src)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (cap < 2u * sizeof(dig) + 1u) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
             return -1;
@@ -1434,18 +1434,18 @@ parse_strprim(const char **p, char *out, size_t cap)
         char    key[TIKU_BASIC_STR_BUF_CAP], msg[TIKU_BASIC_STR_BUF_CAP];
         uint8_t mac[TIKU_KITS_CRYPTO_HMAC_SHA256_SIZE];
         skip_ws(p);
-        if (**p != '(') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != '(') goto fn_paren_err;
+        cur_advance(p);
         if (parse_strexpr(p, key, sizeof(key)) != 0) return -1;
         skip_ws(p);
-        if (**p != ',') {
+        if (cur_peek(p) != ',') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return -1;
         }
-        (*p)++;
+        cur_advance(p);
         if (parse_strexpr(p, msg, sizeof(msg)) != 0) return -1;
         skip_ws(p);
-        if (**p != ')') goto fn_paren_err;
-        (*p)++;
+        if (cur_peek(p) != ')') goto fn_paren_err;
+        cur_advance(p);
         if (cap < 2u * sizeof(mac) + 1u) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
             return -1;
@@ -1486,7 +1486,7 @@ parse_strprim(const char **p, char *out, size_t cap)
      * `NAME$(idx)` -- not supported (string arrays are still
      * single-letter; see DIM). */
     {
-        const char *save = *p;
+        const char *save = cur_mark(p);
         int idx;
         int is_str;
         if (parse_var_full(p, &idx, &is_str) && is_str) {
@@ -1499,7 +1499,7 @@ parse_strprim(const char **p, char *out, size_t cap)
             strcpy(out, v);
             return 0;
         }
-        *p = save;
+        cur_rewind(p, save);
     }
 
     basic_throw(TIKU_BASIC_ERR_TYPE, "string expected");
@@ -1517,10 +1517,10 @@ parse_strexpr(const char **p, char *out, size_t cap)
 {
     if (parse_strprim(p, out, cap) != 0) return -1;
     skip_ws(p);
-    while (**p == '+') {
+    while (cur_peek(p) == '+') {
         char tmp[TIKU_BASIC_STR_BUF_CAP];
         size_t cur, add;
-        (*p)++;
+        cur_advance(p);
         if (parse_strprim(p, tmp, sizeof(tmp)) != 0) return -1;
         cur = strlen(out);
         add = strlen(tmp);

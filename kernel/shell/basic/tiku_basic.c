@@ -18,6 +18,7 @@
  * boilerplate of a separate header per piece.  The order of
  * #includes follows the natural dependency chain:
  *
+ *   cursor                          - parse-cursor vocabulary
  *   config / state                  - tunables, types, globals
  *   arena / persist / VFS bridge    - memory + FRAM persistence
  *   peek-poke / hardware / PRNG     - low-level helpers
@@ -121,6 +122,7 @@
 /* AMALGAMATION                                                              */
 /*---------------------------------------------------------------------------*/
 
+#include "tiku_basic_cursor.inl"      /* parse-cursor vocabulary (before all parsers) */
 #include "tiku_basic_state.inl"
 #include "tiku_basic_token.inl"       /* A2: keyword crunch (before all users) */
 #include "tiku_basic_arena.inl"

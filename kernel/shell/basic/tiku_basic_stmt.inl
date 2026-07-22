@@ -57,24 +57,24 @@ exec_print(const char **p)
     int  col = 0;
     int  trailing = 0;
     skip_ws(p);
-    while (**p != '\0' && **p != ':') {
+    while (cur_peek(p) != '\0' && cur_peek(p) != ':') {
         /* TAB(n) and SPC(n) -- print-stream-tap pseudo-fns. */
         if (match_kw(p, "TAB")) {
             long target;
             skip_ws(p);
-            if (**p != '(') {
+            if (cur_peek(p) != '(') {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected");
                 return;
             }
-            (*p)++;
+            cur_advance(p);
             target = parse_expr(p);
             if (basic_error) return;
             skip_ws(p);
-            if (**p != ')') {
+            if (cur_peek(p) != ')') {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected");
                 return;
             }
-            (*p)++;
+            cur_advance(p);
             while (col < target - 1) {
                 SHELL_PRINTF(" ");
                 col++;
@@ -85,19 +85,19 @@ exec_print(const char **p)
         if (match_kw(p, "SPC")) {
             long n;
             skip_ws(p);
-            if (**p != '(') {
+            if (cur_peek(p) != '(') {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected");
                 return;
             }
-            (*p)++;
+            cur_advance(p);
             n = parse_expr(p);
             if (basic_error) return;
             skip_ws(p);
-            if (**p != ')') {
+            if (cur_peek(p) != ')') {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected");
                 return;
             }
-            (*p)++;
+            cur_advance(p);
             while (n-- > 0) {
                 SHELL_PRINTF(" ");
                 col++;
@@ -126,8 +126,8 @@ exec_print(const char **p)
         trailing = 0;
 sep:
         skip_ws(p);
-        if (**p == ',') { SHELL_PRINTF(" "); col++; (*p)++; trailing = 1; skip_ws(p); continue; }
-        if (**p == ';') { (*p)++;                       trailing = 1; skip_ws(p); continue; }
+        if (cur_peek(p) == ',') { SHELL_PRINTF(" "); col++; cur_advance(p); trailing = 1; skip_ws(p); continue; }
+        if (cur_peek(p) == ';') { cur_advance(p);                       trailing = 1; skip_ws(p); continue; }
         break;
     }
     if (!trailing) {
@@ -150,11 +150,11 @@ exec_let(const char **p, int already_consumed_var)
         return;
     }
     skip_ws(p);
-    if (**p != '=') {
+    if (cur_peek(p) != '=') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
 #if TIKU_BASIC_STRVARS_ENABLE
     if (is_string) {
         char buf[TIKU_BASIC_STR_BUF_CAP];
@@ -195,11 +195,11 @@ exec_const(const char **p)
         return;
     }
     skip_ws(p);
-    if (**p != '=') {
+    if (cur_peek(p) != '=') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     v = parse_expr(p);
     if (basic_error) return;
     basic_namedvar_const[idx - 26] = 0;      /* allow this defining write */
@@ -244,34 +244,34 @@ exec_strslice_assign(const char **p, char kind)
     size_t    i;
 
     skip_ws(p);
-    if (**p != '(') {
+    if (cur_peek(p) != '(') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     skip_ws(p);
     /* Target var: A$..Z$ */
-    svar = to_upper(**p);
+    svar = to_upper(cur_peek(p));
     if (svar < 'A' || svar > 'Z' ||
-        *(*p + 1) != '$' || is_word_cont(*(*p + 2))) {
+        cur_peek_at(p, 1) != '$' || is_word_cont(cur_peek_at(p, 2))) {
         basic_throw(TIKU_BASIC_ERR_TYPE, "string var expected");
         return;
     }
     sidx = svar - 'A';
-    (*p) += 2;
+    cur_skip(p, 2);
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     take = -1;
     if (kind == 'M') {
         start = parse_expr(p);
         if (basic_error) return;
         skip_ws(p);
-        if (**p == ',') {
-            (*p)++;
+        if (cur_peek(p) == ',') {
+            cur_advance(p);
             take = parse_expr(p);
             if (basic_error) return;
         }
@@ -283,17 +283,17 @@ exec_strslice_assign(const char **p, char kind)
         start = (kind == 'L') ? 1L : -1L;        /* see fixup below */
     }
     skip_ws(p);
-    if (**p != ')') {
+    if (cur_peek(p) != ')') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     skip_ws(p);
-    if (**p != '=') {
+    if (cur_peek(p) != '=') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     if (parse_strexpr(p, rhs, sizeof(rhs)) != 0) return;
 
     src = basic_strvars[sidx] ? basic_strvars[sidx] : "";
@@ -351,16 +351,16 @@ exec_input(const char **p)
      *   INPUT "name"; A$
      * without manually wrapping it in PRINT. */
     skip_ws(p);
-    if (**p == '"') {
-        (*p)++;
-        while (**p && **p != '"') {
-            char e[2]; e[0] = **p; e[1] = '\0';
+    if (cur_peek(p) == '"') {
+        cur_advance(p);
+        while (cur_peek(p) && cur_peek(p) != '"') {
+            char e[2]; e[0] = cur_peek(p); e[1] = '\0';
             SHELL_PRINTF("%s", e);
-            (*p)++;
+            cur_advance(p);
         }
-        if (**p == '"') (*p)++;
+        if (cur_peek(p) == '"') cur_advance(p);
         skip_ws(p);
-        if (**p == ';' || **p == ',') { (*p)++; skip_ws(p); }
+        if (cur_peek(p) == ';' || cur_peek(p) == ',') { cur_advance(p); skip_ws(p); }
     }
 
     if (!parse_var_full(p, &idx, &is_string)) {
@@ -500,7 +500,7 @@ parse_label_ref(const char **p, long *out_target)
     int         idx;
 
     skip_ws(p);
-    q = *p;
+    q = cur_mark(p);
     if (!is_alpha(*q)) return 0;
     /* If the next character ends the identifier (i.e. the alpha is a
      * single-letter variable), don't treat as a label. */
@@ -516,7 +516,7 @@ parse_label_ref(const char **p, long *out_target)
         basic_throwf(TIKU_BASIC_ERR_GENERAL, "unknown label %s", name);
         return -1;
     }
-    *p = q;
+    cur_set(p, q);
     *out_target = (long)prog[idx].number;
     return 1;
 }
@@ -843,11 +843,11 @@ exec_for(const char **p)
         return;
     }
     skip_ws(p);
-    if (**p != '=') {
+    if (cur_peek(p) != '=') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     e1 = parse_expr(p);
     if (basic_error) return;
     skip_ws(p);
@@ -992,11 +992,11 @@ parse_port_pin(const char **p, long *port, long *pin)
     *port = parse_expr(p);
     if (basic_error) return -1;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
         return -1;
     }
-    (*p)++;
+    cur_advance(p);
     *pin = parse_expr(p);
     if (basic_error) return -1;
     return 0;
@@ -1010,11 +1010,11 @@ exec_pin(const char **p)
     int8_t rc;
     if (parse_port_pin(p, &port, &pin) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     mode = parse_expr(p);
     if (basic_error) return;
     rc = (mode == 0)
@@ -1033,11 +1033,11 @@ exec_digwrite(const char **p)
     int8_t rc;
     if (parse_port_pin(p, &port, &pin) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     val = parse_expr(p);
     if (basic_error) return;
     rc = (val == 0 || val == 1)
@@ -1060,17 +1060,17 @@ exec_i2cwrite(const char **p)
     addr = parse_expr(p);
     if (basic_error) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     reg = parse_expr(p);
     if (basic_error) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     val = parse_expr(p);
     if (basic_error) return;
 
@@ -1111,10 +1111,10 @@ exec_led(const char **p)
     idx = parse_expr(p);
     if (basic_error) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     val = parse_expr(p);
     if (basic_error) return;
     if (idx < 0 || idx >= (long)tiku_led_count()) {
@@ -1140,24 +1140,24 @@ parse_path_literal(const char **p, char *buf, size_t cap)
 {
     size_t n = 0;
     skip_ws(p);
-    if (**p != '"') {
+    if (cur_peek(p) != '"') {
         basic_throw(TIKU_BASIC_ERR_IO, "quoted path expected");
         return -1;
     }
-    (*p)++;
-    while (**p != '\0' && **p != '"') {
+    cur_advance(p);
+    while (cur_peek(p) != '\0' && cur_peek(p) != '"') {
         if (n + 1 >= cap) {
             basic_throw(TIKU_BASIC_ERR_IO, "path too long");
             return -1;
         }
-        buf[n++] = **p;
-        (*p)++;
+        buf[n++] = cur_peek(p);
+        cur_advance(p);
     }
-    if (**p != '"') {
+    if (cur_peek(p) != '"') {
         basic_throw(TIKU_BASIC_ERR_IO, "unterminated path");
         return -1;
     }
-    (*p)++;
+    cur_advance(p);
     buf[n] = '\0';
     return 0;
 }
@@ -1175,10 +1175,10 @@ exec_vfswrite(const char **p)
 
     if (parse_path_literal(p, path, sizeof(path)) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     val = parse_expr(p);
     if (basic_error) return;
     n = snprintf(render, sizeof(render), "%ld", val);
@@ -1204,10 +1204,10 @@ exec_vfswrite_str(const char **p)
 
     if (parse_path_literal(p, path, sizeof(path)) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     if (parse_strexpr(p, val, sizeof(val)) != 0) return;
     rc = tiku_vfs_write(path, val, strlen(val));
     if (rc < 0) {
@@ -1287,10 +1287,10 @@ exec_append(const char **p)
 
     if (parse_path_literal(p, path, sizeof(path)) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     if (parse_strexpr(p, val, sizeof(val)) != 0) return;
 
     have = tiku_vfs_read(path, basic_file_scratch,
@@ -1318,10 +1318,10 @@ exec_fwrite(const char **p)
 
     if (parse_path_literal(p, path, sizeof(path)) != 0) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     if (parse_strexpr(p, val, sizeof(val)) != 0) return;
     if (tiku_vfs_write(path, val, strlen(val)) < 0) {
         basic_throwf(TIKU_BASIC_ERR_IO, "write failed: %s", path);
@@ -1337,11 +1337,11 @@ exec_poke(const char **p)
     long val;
     if (basic_error) return;
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     val = parse_expr(p);
     if (basic_error) return;
     basic_poke(addr, val);
@@ -1523,11 +1523,11 @@ exec_every(const char **p)
         return;
     }
     skip_ws(p);
-    if (**p != ':') {
+    if (cur_peek(p) != ':') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "':' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     skip_ws(p);
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) {
         if (!basic_everys[i].active) { slot = i; break; }
@@ -1538,11 +1538,11 @@ exec_every(const char **p)
     }
     {
         size_t n = 0;
-        while (**p && n + 1u < sizeof(basic_everys[slot].stmt)) {
-            basic_everys[slot].stmt[n++] = **p;
-            (*p)++;
+        while (cur_peek(p) && n + 1u < sizeof(basic_everys[slot].stmt)) {
+            basic_everys[slot].stmt[n++] = cur_peek(p);
+            cur_advance(p);
         }
-        if (**p != '\0') {
+        if (cur_peek(p) != '\0') {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "EVERY stmt too long");
             return;
         }
@@ -1724,7 +1724,7 @@ exec_resume(const char **p)
         return;
     }
     skip_ws(p);
-    if (**p == '\0' || **p == ':') {
+    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {
         basic_pc     = basic_err_pc;
         basic_pc_set = 1;
         return;
@@ -1838,8 +1838,8 @@ exec_on(const char **p)
         if (basic_error) return;
         if (n == sel) target = v;
         skip_ws(p);
-        if (**p != ',') break;
-        (*p)++;
+        if (cur_peek(p) != ',') break;
+        cur_advance(p);
         n++;
     }
     if (target == 0) return;          /* sel out of range -> no-op */
@@ -1980,7 +1980,7 @@ exec_read(const char **p)
     }
     while (1) {
         skip_ws(p);
-        c = to_upper(**p);
+        c = to_upper(cur_peek(p));
         if (c < 'A' || c > 'Z') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "variable expected");
             return;
@@ -1988,17 +1988,17 @@ exec_read(const char **p)
         idx = c - 'A';
         is_string = 0;
 #if TIKU_BASIC_STRVARS_ENABLE
-        if (*(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
+        if (cur_peek_at(p, 1) == '$' && !is_word_cont(cur_peek_at(p, 2))) {
             is_string = 1;
-            (*p) += 2;
+            cur_skip(p, 2);
         } else
 #endif
         {
-            if (is_word_cont(*(*p + 1))) {
+            if (is_word_cont(cur_peek_at(p, 1))) {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad variable");
                 return;
             }
-            (*p)++;
+            cur_advance(p);
         }
         if (!data_seek_value()) {
             basic_throw(TIKU_BASIC_ERR_RANGE, "out of DATA");
@@ -2050,8 +2050,8 @@ exec_read(const char **p)
             }
         }
         skip_ws(p);
-        if (**p != ',') return;
-        (*p)++;
+        if (cur_peek(p) != ',') return;
+        cur_advance(p);
     }
 }
 
@@ -2066,7 +2066,7 @@ exec_data_noop(const char **p)
      * as part of the data. The simplest, correct thing is to drop
      * the rest of the line, like REM does -- READ is what parses
      * DATA contents. */
-    while (**p) (*p)++;
+    while (cur_peek(p)) cur_advance(p);
 }
 
 #if TIKU_BASIC_ARRAYS_ENABLE
@@ -2095,44 +2095,44 @@ exec_dim(const char **p)
         basic_array_t *slot;
 
         skip_ws(p);
-        c = to_upper(**p);
+        c = to_upper(cur_peek(p));
         if (c < 'A' || c > 'Z') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "variable expected");
             return;
         }
         aidx = c - 'A';
 #if TIKU_BASIC_STRVARS_ENABLE
-        if (*(*p + 1) == '$' && !is_word_cont(*(*p + 2))) {
+        if (cur_peek_at(p, 1) == '$' && !is_word_cont(cur_peek_at(p, 2))) {
             is_str = 1;
-            (*p) += 2;
+            cur_skip(p, 2);
         } else
 #endif
         {
-            if (is_word_cont(*(*p + 1))) {
+            if (is_word_cont(cur_peek_at(p, 1))) {
                 basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad variable");
                 return;
             }
-            (*p)++;
+            cur_advance(p);
         }
         skip_ws(p);
-        if (**p != '(') {
+        if (cur_peek(p) != '(') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return;
         }
-        (*p)++;
+        cur_advance(p);
         d1 = parse_expr(p);
         if (basic_error) return;
         d2 = 0;
         skip_ws(p);
-        if (**p == ',') {
-            (*p)++;
+        if (cur_peek(p) == ',') {
+            cur_advance(p);
             d2 = parse_expr(p);
             if (basic_error) return;
             skip_ws(p);
         }
-        if (**p != ')') {
+        if (cur_peek(p) != ')') {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return;
         }
-        (*p)++;
+        cur_advance(p);
         if (d1 < 1 || d1 > TIKU_BASIC_ARRAY_MAX ||
             d2 < 0 || d2 > TIKU_BASIC_ARRAY_MAX) {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "bad array size");
@@ -2185,8 +2185,8 @@ exec_dim(const char **p)
             }
         }
         skip_ws(p);
-        if (**p != ',') return;
-        (*p)++;
+        if (cur_peek(p) != ',') return;
+        cur_advance(p);
     }
 }
 
@@ -2201,18 +2201,18 @@ parse_array_index(const char **p, basic_array_t *slot, char letter)
     i = parse_expr(p);
     if (basic_error) return -1;
     skip_ws(p);
-    if (**p == ',') {
-        (*p)++;
+    if (cur_peek(p) == ',') {
+        cur_advance(p);
         j = parse_expr(p);
         if (basic_error) return -1;
         skip_ws(p);
     } else {
         j = -1;
     }
-    if (**p != ')') {
+    if (cur_peek(p) != ')') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return -1;
     }
-    (*p)++;
+    cur_advance(p);
     if (slot->data == NULL) {
         basic_throwf(TIKU_BASIC_ERR_GENERAL, "array %c not DIMmed", letter);
         return -1;
@@ -2267,9 +2267,9 @@ exec_def(const char **p)
         return;
     }
     skip_ws(p);
-    while (is_word_cont(**p) && nlen + 1u < sizeof(nm)) {
-        nm[nlen++] = (char)to_upper(**p);
-        (*p)++;
+    while (is_word_cont(cur_peek(p)) && nlen + 1u < sizeof(nm)) {
+        nm[nlen++] = (char)to_upper(cur_peek(p));
+        cur_advance(p);
     }
     nm[nlen] = '\0';
     if (nlen < 2u) {
@@ -2277,17 +2277,17 @@ exec_def(const char **p)
         return;
     }
     skip_ws(p);
-    if (**p != '(') {
+    if (cur_peek(p) != '(') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
 
     /* Comma-separated list of single-letter argument variables. */
     while (1) {
         char c;
         skip_ws(p);
-        c = to_upper(**p);
-        if (c < 'A' || c > 'Z' || is_word_cont(*(*p + 1))) {
+        c = to_upper(cur_peek(p));
+        if (c < 'A' || c > 'Z' || is_word_cont(cur_peek_at(p, 1))) {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "argument variable expected");
             return;
         }
@@ -2296,20 +2296,20 @@ exec_def(const char **p)
             return;
         }
         args[argc++] = (uint8_t)(c - 'A');
-        (*p)++;
+        cur_advance(p);
         skip_ws(p);
-        if (**p == ',') { (*p)++; continue; }
+        if (cur_peek(p) == ',') { cur_advance(p); continue; }
         break;
     }
-    if (**p != ')') {
+    if (cur_peek(p) != ')') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     skip_ws(p);
-    if (**p != '=') {
+    if (cur_peek(p) != '=') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "'=' expected"); return;
     }
-    (*p)++;
+    cur_advance(p);
     skip_ws(p);
 
     for (i = 0; i < TIKU_BASIC_DEFN_MAX; i++) {
@@ -2326,12 +2326,12 @@ exec_def(const char **p)
         return;
     }
     blen = 0;
-    while (**p != '\0' && **p != ':' &&
+    while (cur_peek(p) != '\0' && cur_peek(p) != ':' &&
            blen + 1u < sizeof(basic_defns[slot].body)) {
-        basic_defns[slot].body[blen++] = **p;
-        (*p)++;
+        basic_defns[slot].body[blen++] = cur_peek(p);
+        cur_advance(p);
     }
-    if (**p != '\0' && **p != ':') {
+    if (cur_peek(p) != '\0' && cur_peek(p) != ':') {
         basic_throw(TIKU_BASIC_ERR_GENERAL, "DEF body too long");
         return;
     }
@@ -2507,11 +2507,11 @@ exec_swap(const char **p)
         return;
     }
     skip_ws(p);
-    if (**p != ',') {
+    if (cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "',' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
     if (!parse_var_full(p, &idx2, &is_str2)) {
         if (!basic_error) {
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "variable expected");
@@ -2563,23 +2563,23 @@ exec_print_using(const char **p)
     int  i;
 
     skip_ws(p);
-    if (**p != '"') {
+    if (cur_peek(p) != '"') {
         basic_throw(TIKU_BASIC_ERR_TYPE, "format string expected");
         return;
     }
-    (*p)++;
-    while (**p && **p != '"' && (size_t)flen + 1u < sizeof(fmt)) {
-        fmt[flen++] = **p;
-        (*p)++;
+    cur_advance(p);
+    while (cur_peek(p) && cur_peek(p) != '"' && (size_t)flen + 1u < sizeof(fmt)) {
+        fmt[flen++] = cur_peek(p);
+        cur_advance(p);
     }
     fmt[flen] = '\0';
-    if (**p == '"') (*p)++;
+    if (cur_peek(p) == '"') cur_advance(p);
     skip_ws(p);
-    if (**p != ';' && **p != ',') {
+    if (cur_peek(p) != ';' && cur_peek(p) != ',') {
         basic_throw(TIKU_BASIC_ERR_SYNTAX, "';' expected");
         return;
     }
-    (*p)++;
+    cur_advance(p);
 
     /* Walk the format left-to-right.  Two kinds of placeholder:
      *
@@ -2679,8 +2679,8 @@ exec_print_using(const char **p)
 
 sep_using:
         skip_ws(p);
-        if (**p == ',' || **p == ';') {
-            (*p)++;
+        if (cur_peek(p) == ',' || cur_peek(p) == ';') {
+            cur_advance(p);
             skip_ws(p);
         }
     }
