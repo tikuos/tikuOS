@@ -38,6 +38,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cwd.h"
+#include <kernel/vfs/tiku_vfs.h>   /* tiku_vfs_next_segment (header-only) */
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
@@ -222,7 +223,7 @@ tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
 {
     const char *p;
     const char *comp;
-    uint8_t complen;
+    size_t      complen;
 
     if (outsz == 0) {
         return;
@@ -240,23 +241,9 @@ tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
         p = input;
     }
 
-    /* Walk through each component */
-    while (*p != '\0') {
-        /* Skip slashes */
-        while (*p == '/') {
-            p++;
-        }
-        if (*p == '\0') {
-            break;
-        }
-
-        /* Extract component */
-        comp = p;
-        while (*p != '/' && *p != '\0') {
-            p++;
-        }
-        complen = (uint8_t)(p - comp);
-
+    /* Walk through each component (shared path lexer -- see
+     * tiku_vfs_next_segment for the slash-run/trailing-slash rules) */
+    while (tiku_vfs_next_segment(&p, &comp, &complen)) {
         /* Handle ".." */
         if (complen == 2 && comp[0] == '.' && comp[1] == '.') {
             go_up(out);
@@ -264,7 +251,7 @@ tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
         } else if (complen == 1 && comp[0] == '.') {
             continue;
         } else {
-            append_component(out, outsz, comp, complen);
+            append_component(out, outsz, comp, (uint8_t)complen);
         }
     }
 

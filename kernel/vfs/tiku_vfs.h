@@ -326,6 +326,37 @@ typedef void (*tiku_vfs_list_fn)(const struct tiku_vfs_node *node,
 void tiku_vfs_init(const tiku_vfs_node_t *root);
 
 /**
+ * @brief Extract the next segment of a slash-separated path.
+ *
+ * The ONE definition of TikuOS path lexing: every walker that steps
+ * through a path segment-by-segment (the resolver, the shell's cwd
+ * normaliser) goes through this helper so they cannot drift apart on
+ * the edge cases -- runs of slashes collapse ('//x' == '/x'), a
+ * trailing slash yields no empty segment, and an all-slash remainder
+ * is simply the end of the path.
+ *
+ * Purely lexical (never touches the tree) and header-only, so callers
+ * take no link-time dependency on the VFS proper.
+ *
+ * @param p    Cursor into the path; advanced past the extracted
+ *             segment (left on the terminating '/' or NUL).
+ * @param seg  Receives the start of the segment (not NUL-terminated).
+ * @param len  Receives the segment length in bytes (always > 0 on a
+ *             1 return).
+ * @return 1 if a segment was extracted, 0 at end of path.
+ */
+static inline int
+tiku_vfs_next_segment(const char **p, const char **seg, size_t *len)
+{
+    while (**p == '/') (*p)++;               /* collapse slash runs   */
+    if (**p == '\0') return 0;               /* end / trailing slash  */
+    *seg = *p;
+    while (**p != '/' && **p != '\0') (*p)++;
+    *len = (size_t)(*p - *seg);
+    return 1;
+}
+
+/**
  * @brief Resolve a path to its node
  * @param path  Absolute path (must start with "/")
  * @return Matching node, or NULL if not found

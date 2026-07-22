@@ -127,28 +127,10 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
     }
 
     node = vfs_root;
-    p = path + 1;  /* skip leading '/' */
+    p = path;      /* next_segment skips the leading '/' itself */
 
-    /* Root path: "/" or empty after slash */
-    if (*p == '\0') {
-        return node;
-    }
-
-    while (*p != '\0') {
-        /* Skip consecutive slashes */
-        while (*p == '/') {
-            p++;
-        }
-        if (*p == '\0') {
-            break;  /* trailing slash */
-        }
-
-        /* Extract component */
-        comp = p;
-        while (*p != '/' && *p != '\0') {
-            p++;
-        }
-        comp_len = (size_t)(p - comp);
+    /* One segment per iteration; "/" alone yields none -> root. */
+    while (tiku_vfs_next_segment(&p, &comp, &comp_len)) {
 
         /* Current node must be a directory to descend */
         if (node->type != TIKU_VFS_DIR || node->children == NULL) {
