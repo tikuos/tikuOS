@@ -110,6 +110,32 @@ uint32_t tiku_gpu_irq_count(void);
  */
 void tiku_gpu_irq_selftest_pend(void);
 
+/*---------------------------------------------------------------------------*/
+/* P1: drawing                                                               */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Fill an entire RGBA8888 surface with a solid color (RECT raster +
+ *        the constant-color pico-shader loaded at init).
+ *
+ * @p dst MUST live in SSRAM (GPU-visible; never DTCM). The driver handles the
+ * D-cache discipline (clean+invalidate before the kick so no dirty CPU line is
+ * evicted onto the GPU's output; invalidate after so the CPU reads fresh
+ * pixels). Waits (bounded) for the raster to go idle.
+ *
+ * @param dst           Destination surface base (SSRAM, 32-byte aligned).
+ * @param w             Width in pixels.
+ * @param h             Height in pixels.
+ * @param stride_bytes  Bytes per row (>= w*4).
+ * @param color         Fill color word (channel order TBD -- P1 characterizes it).
+ * @return TIKU_GPU_OK, or TIKU_GPU_ERR_TIMEOUT if the raster never went idle.
+ */
+tiku_gpu_err_t tiku_gpu_fill(void *dst, uint16_t w, uint16_t h,
+                             uint16_t stride_bytes, uint32_t color);
+
+/** @brief Raw STATUS after the last op (diagnostics during bring-up). */
+uint32_t tiku_gpu_last_status(void);
+
 /**
  * @brief GPU interrupt handler (IRQ 28).
  *
