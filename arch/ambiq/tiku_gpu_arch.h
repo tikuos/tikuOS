@@ -350,6 +350,15 @@ tiku_gpu_err_t tiku_gpu_convert(const tiku_gpu_surface_t *dst,
                                 const tiku_gpu_surface_t *src);
 
 /**
+ * @brief Bilinear resample @p src into @p dst at @p dst's size (scale gather).
+ *
+ * Up- or down-samples a 2D grid in one pass using the texture unit's free
+ * bilinear interpolation; downscaling doubles as a cheap reduction.
+ */
+tiku_gpu_err_t tiku_gpu_resample(const tiku_gpu_surface_t *dst,
+                                 const tiku_gpu_surface_t *src);
+
+/**
  * @brief GPU interrupt handler (IRQ 28).
  *
  * Strong override of the weak alias declared in tiku_crt_early.c. Present only

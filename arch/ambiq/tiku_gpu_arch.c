@@ -971,6 +971,27 @@ tiku_gpu_convert(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
     return tiku_gpu_blit(dst, src, 0, 0, TIKU_GPU_BLEND_SRC);
 }
 
+tiku_gpu_err_t
+tiku_gpu_resample(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
+{
+    /* Bilinear scale src -> dst (up- or down-sample). The texture unit is a
+     * 2D gather engine with free bilinear interpolation: one pass resamples a
+     * grid to any size. Downscaling is a cheap box-ish reduction. */
+    tiku_gpu_surface_t s = *src;
+    s.sampling = TIKU_GPU_SAMPLE_BILINEAR;
+    return tiku_gpu_blit_rect(dst, &s, 0, 0, dst->w, dst->h, TIKU_GPU_BLEND_SRC);
+}
+
+/*
+ * NOTE on affine warp (rotation / shear): the RECT-raster MatMul on this
+ * silicon applies only the diagonal (scale) + translation columns -- the
+ * off-diagonal terms MM01/MM10 are ignored, verified on hardware (a rotation
+ * matrix produces a pure scale, no axis mixing). Arbitrary warp therefore
+ * needs the quad-raster path (rotated geometry + interpolated texture coords,
+ * as the vendor's nema_blit_rotate uses DRAW_CMD=QUAD). Deferred; tiku_gpu_
+ * resample covers the scale gather that the rect path does support.
+ */
+
 void
 tiku_gpu_irq_selftest_pend(void)
 {
