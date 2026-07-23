@@ -1482,6 +1482,9 @@ TIKU_DRV_GPU_ENABLE ?= 0
 ifeq ($(TEST_GPU),1)
 override TIKU_DRV_GPU_ENABLE := 1
 endif
+ifeq ($(TEST_GPU_COMPUTE),1)
+override TIKU_DRV_GPU_ENABLE := 1
+endif
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 ifeq ($(filter apollo510 apollo510b,$(MCU)),)
 $(error TIKU_DRV_GPU_ENABLE=1 requires MCU=apollo510 or apollo510b (the GPU is \

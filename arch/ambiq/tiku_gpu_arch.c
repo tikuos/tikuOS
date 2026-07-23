@@ -958,6 +958,19 @@ tiku_gpu_last_cl_id(void)
     return s_cl_last_id;
 }
 
+/*---------------------------------------------------------------------------*/
+/* P3: compute -- the GPU as a 2D data / gather engine                       */
+/*---------------------------------------------------------------------------*/
+
+tiku_gpu_err_t
+tiku_gpu_convert(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
+{
+    /* A format-converting copy is just a 1:1 blit: the source is read in its
+     * format, the destination written in its own -- the texture unit and the
+     * output stage do the conversion in hardware. */
+    return tiku_gpu_blit(dst, src, 0, 0, TIKU_GPU_BLEND_SRC);
+}
+
 void
 tiku_gpu_irq_selftest_pend(void)
 {

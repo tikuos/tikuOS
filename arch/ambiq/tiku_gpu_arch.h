@@ -149,6 +149,7 @@ uint32_t tiku_gpu_last_status(void);
 typedef enum {
     TIKU_GPU_FMT_RGBA8888 = 0x01,
     TIKU_GPU_FMT_RGB565   = 0x04,
+    TIKU_GPU_FMT_L8       = 0x09,   /**< 8-bit luminance (1 B/px)             */
     TIKU_GPU_FMT_RGB24    = 0x3C,
 } tiku_gpu_fmt_t;
 
@@ -332,6 +333,21 @@ tiku_gpu_err_t tiku_gpu_wait(tiku_gpu_cl_t *cl);
 
 /** @brief Id of the most recently completed command list (set by the ISR). */
 int32_t tiku_gpu_last_cl_id(void);
+
+/*---------------------------------------------------------------------------*/
+/* P3: compute -- the GPU as a 2D data / gather engine                       */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Format-converting 2D copy: @p src (any format) -> @p dst (any format).
+ *
+ * The texture unit decodes the source to RGBA and the output stage repacks to
+ * the destination format, so an RGBA8888 -> RGB565 or -> L8 conversion is one
+ * blit pass with no CPU per-pixel work. @p src and @p dst must share
+ * dimensions; a same-format convert is a plain 2D copy.
+ */
+tiku_gpu_err_t tiku_gpu_convert(const tiku_gpu_surface_t *dst,
+                                const tiku_gpu_surface_t *src);
 
 /**
  * @brief GPU interrupt handler (IRQ 28).
