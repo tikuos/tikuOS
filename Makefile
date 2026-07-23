@@ -1398,6 +1398,7 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_gpu.c   # /sys/gpu status nodes
 endif
 ifeq ($(TIKU_DRV_DC_ENABLE),1)
 SRCS += arch/ambiq/tiku_dc_arch.c
+SRCS += interfaces/display/tiku_display.c    # GPU-accelerated compositor
 endif
 endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
