@@ -137,6 +137,15 @@ static int32_t s_cl_seq;
  * the multiplier must stay active. */
 #define GPU_RASTCTRL_MMUL_APPLY   0u
 
+/*
+ * P3 compute shader entry points (DRAWCODEPTR), recovered from the vendored
+ * ThinkSi blob (disassembly of nema_set_blend's LUT composer and the
+ * nema_shaderSpecific effect corpus -- see temp/gpu-roadmap.md). Each names a
+ * fragment program loaded to IMEM at draw time.
+ */
+#define GPU_CODEPTR_LUT        0x141D8000u  /* 3-instr palette lookup, slot 0  */
+#define GPU_CODEPTR_SCALEBIAS  0x0000C000u  /* 3-instr out = C1*src + C2       */
+
 /*---------------------------------------------------------------------------*/
 /* Interrupt handler                                                         */
 /*---------------------------------------------------------------------------*/
@@ -980,6 +989,99 @@ tiku_gpu_resample(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
     tiku_gpu_surface_t s = *src;
     s.sampling = TIKU_GPU_SAMPLE_BILINEAR;
     return tiku_gpu_blit_rect(dst, &s, 0, 0, dst->w, dst->h, TIKU_GPU_BLEND_SRC);
+}
+
+tiku_gpu_err_t
+tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *index,
+                   const uint32_t *palette)
+{
+    uint32_t dspan = (uint32_t)dst->stride * (uint32_t)dst->h;
+    uint32_t ispan = (uint32_t)index->stride * (uint32_t)index->h;
+    tiku_gpu_err_t err;
+
+    /* GPU reads the index and the 256-entry palette; writes dst. */
+    tiku_cpu_dcache_clean(index->base, ispan);
+    tiku_cpu_dcache_clean((void *)palette, 256u * 4u);
+    tiku_cpu_dcache_clean(dst->base, dspan);
+    tiku_cpu_dcache_invalidate(dst->base, dspan);
+
+    GPU->TEX0BASE   = (uint32_t)(uintptr_t)dst->base;
+    GPU->TEX0STRIDE = ((uint32_t)dst->format << 24) | ((uint32_t)dst->stride & 0xFFFFu);
+    GPU->TEX0RES    = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
+    /* index -> TEX1 (L8, point sampling). */
+    GPU->TEX1BASE   = (uint32_t)(uintptr_t)index->base;
+    GPU->TEX1STRIDE = ((uint32_t)TIKU_GPU_FMT_L8 << 24) | ((uint32_t)index->stride & 0xFFFFu);
+    GPU->TEX1RES    = (uint32_t)index->w | ((uint32_t)index->h << 16);
+    /* palette -> TEX2 (256x1 RGBA8888, bit18 = LUT/palette marker, stride 0). */
+    GPU->TEX2BASE   = (uint32_t)(uintptr_t)palette;
+    GPU->TEX2STRIDE = ((uint32_t)TIKU_GPU_FMT_RGBA8888 << 24) | 0x00040000u;
+    GPU->TEX2RES    = 256u | (1u << 16);
+
+    /* 3-instruction palette-lookup shader at IMEM slots 0..2 (sample index,
+     * fetch palette[index], emit). */
+    gpu_imem_load(0u, 0x080C108Bu, 0x00002000u);
+    gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
+    gpu_imem_load(2u, 0x080C0002u, 0x8A0761C7u);
+
+    GPU->RASTCTRL    = GPU_RASTCTRL_MMUL_BYPASS;     /* 1:1, no transform      */
+    gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
+    GPU->DRAWCODEPTR = GPU_CODEPTR_LUT;
+
+    GPU->CLIPMIN = 0u;
+    GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+    GPU->DRAWPT0 = 0u;
+    GPU->DRAWPT1 = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, dspan);
+    return err;
+}
+
+tiku_gpu_err_t
+tiku_gpu_scale_bias(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
+                    uint32_t scale, uint32_t bias)
+{
+    uint32_t dspan = (uint32_t)dst->stride * (uint32_t)dst->h;
+    uint32_t sspan = (uint32_t)src->stride * (uint32_t)src->h;
+    tiku_gpu_err_t err;
+
+    tiku_cpu_dcache_clean(src->base, sspan);
+    tiku_cpu_dcache_clean(dst->base, dspan);
+    tiku_cpu_dcache_invalidate(dst->base, dspan);
+
+    GPU->TEX0BASE   = (uint32_t)(uintptr_t)dst->base;
+    GPU->TEX0STRIDE = ((uint32_t)dst->format << 24) | ((uint32_t)dst->stride & 0xFFFFu);
+    GPU->TEX0RES    = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
+    GPU->TEX1BASE   = (uint32_t)(uintptr_t)src->base;
+    GPU->TEX1STRIDE = ((uint32_t)src->format << 24) | ((uint32_t)src->stride & 0xFFFFu);
+    GPU->TEX1RES    = (uint32_t)src->w | ((uint32_t)src->h << 16);
+
+    /* Custom kernel authored from the recovered ISA: out = C1*src + C2 per
+     * channel (the vendored contrast-stretch program, verbatim). */
+    gpu_imem_load(0u, 0x00001000u, 0x03076C54u);
+    gpu_imem_load(1u, 0x00001000u, 0x0200D448u);
+    gpu_imem_load(2u, 0x00001002u, 0x80049445u);
+    GPU->C1REG = scale;                              /* 8-bit/channel, 0x80=x0.5 */
+    GPU->C2REG = bias;                               /* 8-bit/channel bias       */
+
+    GPU->RASTCTRL    = GPU_RASTCTRL_MMUL_BYPASS;
+    gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
+    GPU->DRAWCODEPTR = GPU_CODEPTR_SCALEBIAS;
+
+    GPU->CLIPMIN = 0u;
+    GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+    GPU->DRAWPT0 = 0u;
+    GPU->DRAWPT1 = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, dspan);
+    return err;
 }
 
 /*

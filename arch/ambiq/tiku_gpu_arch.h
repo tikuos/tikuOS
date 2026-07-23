@@ -359,6 +359,29 @@ tiku_gpu_err_t tiku_gpu_resample(const tiku_gpu_surface_t *dst,
                                  const tiku_gpu_surface_t *src);
 
 /**
+ * @brief Indexed-color LUT: dst[x,y] = palette[ index[x,y] ] in one pass.
+ *
+ * @p index is an L8 (8-bit) surface of indices; @p palette is 256 RGBA8888
+ * entries; @p dst is RGBA8888 (same dimensions as @p index). A texture-gather
+ * via a 3-instruction palette-lookup shader -- palette/gamma remap for free.
+ */
+tiku_gpu_err_t tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst,
+                                  const tiku_gpu_surface_t *index,
+                                  const uint32_t *palette);
+
+/**
+ * @brief Custom shader kernel: dst = @p scale * src + @p bias, per channel.
+ *
+ * Runs a fragment program authored from the recovered pico-shader ISA (the
+ * GPU's ALU applied per pixel). @p scale and @p bias are 8-bit-per-channel
+ * constants packed as 0x00BBGGRR (0x80 = x0.5). Useful for brightness/
+ * contrast, normalization, and fixed-point rescaling of data grids.
+ */
+tiku_gpu_err_t tiku_gpu_scale_bias(const tiku_gpu_surface_t *dst,
+                                   const tiku_gpu_surface_t *src,
+                                   uint32_t scale, uint32_t bias);
+
+/**
  * @brief GPU interrupt handler (IRQ 28).
  *
  * Strong override of the weak alias declared in tiku_crt_early.c. Present only
