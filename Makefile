@@ -1395,6 +1395,9 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
 endif
+ifeq ($(TIKU_DRV_DC_ENABLE),1)
+SRCS += arch/ambiq/tiku_dc_arch.c
+endif
 endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
 # am_util_delay.c, am_util_stdio.c, am_resources.c all dropped.
@@ -1483,6 +1486,21 @@ $(error TIKU_DRV_GPU_ENABLE=1 requires MCU=apollo510 or apollo510b (the GPU is \
 Apollo510-only); currently MCU=$(MCU))
 endif
 CFLAGS += -DTIKU_DRV_GPU_ENABLE=1
+endif
+
+# Apollo510 display path (NemaDC + DSI + CO5300 round AMOLED) -- from-scratch,
+# register-level, no vendor blob. Opt-in; the panel kit is on the base
+# apollo510 EVB. GPU display tests pull it in via TEST_GPU_DISPLAY.
+TIKU_DRV_DC_ENABLE ?= 0
+ifeq ($(TEST_GPU_DISPLAY),1)
+override TIKU_DRV_DC_ENABLE := 1
+endif
+ifeq ($(TIKU_DRV_DC_ENABLE),1)
+ifeq ($(filter apollo510 apollo510b,$(MCU)),)
+$(error TIKU_DRV_DC_ENABLE=1 requires MCU=apollo510 or apollo510b (NemaDC is \
+Apollo510-only); currently MCU=$(MCU))
+endif
+CFLAGS += -DTIKU_DRV_DC_ENABLE=1
 endif
 
 SRCS += interfaces/led/tiku_led.c
