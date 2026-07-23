@@ -1063,12 +1063,17 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     GPU->TEX2RES    = 256u | (1u << 16);
 
     /* 3-instruction palette-lookup shader at IMEM slots 0..2 (sample index,
-     * fetch palette[index], emit). */
+     * fetch palette[index], emit). Words J-Link-verified identical to the
+     * vendor's CL capture (2026-07-23). */
     gpu_imem_load(0u, 0x080C108Bu, 0x00002000u);
     gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
     gpu_imem_load(2u, 0x080C0002u, 0x8A0761C7u);
 
-    GPU->RASTCTRL    = GPU_RASTCTRL_MMUL_BYPASS;     /* 1:1, no transform      */
+    /* The vendor runs the LUT draw with the MatMul ACTIVE (0x118=0), not
+     * bypassed -- captured from its command list. Load a full identity so the
+     * index texture is sampled 1:1 (the vendor relies on an uninitialized
+     * diagonal and its own capture-rig draw emitted nothing; ours doesn't). */
+    gpu_load_matrix(1.0f, 0.0f, 1.0f, 0.0f);
     gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
     GPU->DRAWCODEPTR = GPU_CODEPTR_LUT;
 
