@@ -232,6 +232,12 @@ tiku_gpu_err_t tiku_gpu_fill_triangle(const tiku_gpu_surface_t *dst,
                                       int16_t x1, int16_t y1,
                                       int16_t x2, int16_t y2, uint32_t color);
 
+/** @brief Fill a positioned rectangle (x,y,w,h) with a solid color; clipped
+ *         to the destination surface. */
+tiku_gpu_err_t tiku_gpu_fill_rect(const tiku_gpu_surface_t *dst,
+                                  int16_t x, int16_t y,
+                                  uint16_t w, uint16_t h, uint32_t color);
+
 /** @brief Draw a single-pixel-wide line (x0,y0)->(x1,y1) in a solid color. */
 tiku_gpu_err_t tiku_gpu_draw_line(const tiku_gpu_surface_t *dst,
                                   int16_t x0, int16_t y0,
@@ -249,6 +255,27 @@ tiku_gpu_err_t tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
                                       int16_t x, int16_t y, uint16_t w, uint16_t h,
                                       uint32_t color_a, uint32_t color_b,
                                       int vertical);
+
+/**
+ * @brief Fill a rounded rectangle (corner radius @p r) with a solid color.
+ *
+ * Exact per-pixel (a center band + circle-equation corner spans), clipped to
+ * @p dst. @p r is clamped to w/2 and h/2; r == 0 degenerates to a plain rect.
+ */
+tiku_gpu_err_t tiku_gpu_fill_rounded_rect(const tiku_gpu_surface_t *dst,
+                                          int16_t x, int16_t y,
+                                          uint16_t w, uint16_t h,
+                                          uint16_t r, uint32_t color);
+
+/**
+ * @brief Fill a circle of radius @p r centred at (@p cx, @p cy), solid color.
+ *
+ * A circle is a rounded rect with corner radius = w/2 = h/2 = r (the recovered
+ * vendor identity); pixel-exact at any radius, clipped to @p dst.
+ */
+tiku_gpu_err_t tiku_gpu_fill_circle(const tiku_gpu_surface_t *dst,
+                                    int16_t cx, int16_t cy,
+                                    uint16_t r, uint32_t color);
 
 /*---------------------------------------------------------------------------*/
 /* P2.4: async command-list submission                                       */

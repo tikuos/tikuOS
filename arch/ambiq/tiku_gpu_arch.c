@@ -608,6 +608,30 @@ tiku_gpu_fill_triangle(const tiku_gpu_surface_t *dst,
 }
 
 tiku_gpu_err_t
+tiku_gpu_fill_rect(const tiku_gpu_surface_t *dst, int16_t x, int16_t y,
+                   uint16_t w, uint16_t h, uint32_t color)
+{
+    uint32_t span = (uint32_t)dst->stride * (uint32_t)dst->h;
+    tiku_gpu_err_t err;
+
+    tiku_cpu_dcache_clean(dst->base, span);
+    tiku_cpu_dcache_invalidate(dst->base, span);
+
+    gpu_dst_setup(dst);   /* clips to the surface, so an oversized rect is safe */
+    GPU->DRAWCOLOR = color;
+    GPU->DRAWPT0 = ((uint32_t)(uint16_t)y << 16) | ((uint32_t)(uint16_t)x & 0xFFFFu);
+    GPU->DRAWPT1 = ((uint32_t)(uint16_t)(y + (int16_t)h) << 16) |
+                   ((uint32_t)(uint16_t)(x + (int16_t)w) & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, span);
+    return err;
+}
+
+tiku_gpu_err_t
 tiku_gpu_draw_line(const tiku_gpu_surface_t *dst,
                    int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t color)
 {
@@ -696,6 +720,100 @@ tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
 
 #undef GPU_GRAD_ANCHOR
     return err;
+}
+
+/* Integer floor(sqrt(v)) -- corner-span half-widths without a libm dependency
+ * in this low-level driver. */
+static uint32_t
+gpu_isqrt(uint32_t v)
+{
+    uint32_t r = 0u, bit = 1u << 30;
+    while (bit > v) { bit >>= 2; }
+    while (bit != 0u) {
+        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+        else              { r >>= 1; }
+        bit >>= 2;
+    }
+    return r;
+}
+
+/* Emit one axis-aligned RECT draw (integer coords). The surface, shader,
+ * color and clip must already be programmed; waits for the raster to drain. */
+static tiku_gpu_err_t
+gpu_emit_rect(int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    GPU->DRAWPT0 = ((uint32_t)(uint16_t)y << 16) | ((uint32_t)(uint16_t)x & 0xFFFFu);
+    GPU->DRAWPT1 = ((uint32_t)(uint16_t)(y + h) << 16) |
+                   ((uint32_t)(uint16_t)(x + w) & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+    return tiku_gpu_wait_idle();
+}
+
+/*
+ * Filled rounded rectangle -- and, via corner radius = w/2 = h/2, a filled
+ * circle (the recovered vendor identity: a circle IS a rounded rect). Exact
+ * per-pixel: a full-width center band plus, for each row of the top/bottom
+ * corner bands, one horizontal span whose half-width is the circle equation
+ * (no trig, no AA). Surface bind + cache happen once; each span is a direct
+ * RECT draw, clipped to the surface so shapes near an edge are safe.
+ */
+static tiku_gpu_err_t
+gpu_rounded_rect(const tiku_gpu_surface_t *dst, int32_t x0, int32_t y0,
+                 int32_t w, int32_t h, int32_t rr, uint32_t color)
+{
+    uint32_t span_bytes = (uint32_t)dst->stride * (uint32_t)dst->h;
+    tiku_gpu_err_t err = TIKU_GPU_OK;
+    int32_t dy;
+
+    tiku_cpu_dcache_clean(dst->base, span_bytes);
+    tiku_cpu_dcache_invalidate(dst->base, span_bytes);
+
+    gpu_dst_setup(dst);
+    GPU->DRAWCOLOR = color;
+
+    /* Center band (full width). Zero-height for a pure circle -> skipped. */
+    if (h > 2 * rr) {
+        err = gpu_emit_rect(x0, y0 + rr, w, h - 2 * rr);
+    }
+    /* Corner bands: one horizontal span per row, mirrored top and bottom. */
+    for (dy = 1; dy <= rr && err == TIKU_GPU_OK; dy++) {
+        int32_t cx   = (int32_t)gpu_isqrt((uint32_t)(rr * rr - dy * dy));
+        int32_t left = x0 + rr - cx;
+        int32_t sw   = (w - 2 * rr) + 2 * cx;
+        if (sw > 0) {
+            err = gpu_emit_rect(left, y0 + rr - dy, sw, 1);
+            if (err == TIKU_GPU_OK) {
+                err = gpu_emit_rect(left, y0 + h - rr + dy - 1, sw, 1);
+            }
+        }
+    }
+
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, span_bytes);
+    return err;
+}
+
+tiku_gpu_err_t
+tiku_gpu_fill_rounded_rect(const tiku_gpu_surface_t *dst, int16_t x, int16_t y,
+                           uint16_t w, uint16_t h, uint16_t r, uint32_t color)
+{
+    int32_t rr = (int32_t)r;
+
+    if (rr > (int32_t)w / 2) { rr = (int32_t)w / 2; }
+    if (rr > (int32_t)h / 2) { rr = (int32_t)h / 2; }
+    if (rr <= 0) {
+        return tiku_gpu_fill_rect(dst, x, y, w, h, color);
+    }
+    return gpu_rounded_rect(dst, x, y, (int32_t)w, (int32_t)h, rr, color);
+}
+
+tiku_gpu_err_t
+tiku_gpu_fill_circle(const tiku_gpu_surface_t *dst, int16_t cx, int16_t cy,
+                     uint16_t r, uint32_t color)
+{
+    return gpu_rounded_rect(dst, (int32_t)cx - (int32_t)r, (int32_t)cy - (int32_t)r,
+                            2 * (int32_t)r, 2 * (int32_t)r, (int32_t)r, color);
 }
 
 /*---------------------------------------------------------------------------*/
