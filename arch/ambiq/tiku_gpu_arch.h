@@ -250,6 +250,62 @@ tiku_gpu_err_t tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
                                       uint32_t color_a, uint32_t color_b,
                                       int vertical);
 
+/*---------------------------------------------------------------------------*/
+/* P2.4: async command-list submission                                       */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief A GPU command list: a buffer of (register-offset, value) word pairs.
+ *
+ * Built with tiku_gpu_cl_fill(), submitted asynchronously with
+ * tiku_gpu_submit(), and awaited (CPU asleep) with tiku_gpu_wait(). @p buf
+ * MUST be in SSRAM (the GPU reads it as a bus master) and 32-byte aligned.
+ */
+typedef struct {
+    uint32_t *buf;         /**< command buffer (SSRAM, 32-byte aligned)       */
+    uint32_t  cap_words;   /**< capacity in 32-bit words                      */
+    uint32_t  n_words;     /**< words written so far                          */
+    int32_t   id;          /**< submission id assigned at submit              */
+    void     *flush_base;  /**< destination to invalidate after completion    */
+    uint32_t  flush_span;  /**< bytes of @p flush_base to invalidate          */
+} tiku_gpu_cl_t;
+
+/** @brief Bind a caller-provided SSRAM buffer as an (empty) command list. */
+void tiku_gpu_cl_init(tiku_gpu_cl_t *cl, void *buf, uint32_t cap_words);
+
+/** @brief Rewind a command list to empty (keeps the buffer). */
+void tiku_gpu_cl_reset(tiku_gpu_cl_t *cl);
+
+/**
+ * @brief Append a solid-fill draw of @p dst to the command list.
+ *
+ * Records the destination so tiku_gpu_wait() can invalidate it on completion.
+ * @return TIKU_GPU_OK, or TIKU_GPU_ERR_TIMEOUT if the buffer is too small.
+ */
+tiku_gpu_err_t tiku_gpu_cl_fill(tiku_gpu_cl_t *cl,
+                                const tiku_gpu_surface_t *dst, uint32_t color);
+
+/**
+ * @brief Submit a command list to the GPU and return immediately (async).
+ *
+ * Appends a completion tail (stamp CLID, raise IRQ 28), cleans the list and
+ * destination from the D-cache, and kicks the command-list processor
+ * (CMDLISTADDR + CMDLISTSIZE). The GPU renders while the CPU is free.
+ */
+tiku_gpu_err_t tiku_gpu_submit(tiku_gpu_cl_t *cl);
+
+/**
+ * @brief Wait for a submitted command list to complete, CPU asleep (__WFI).
+ *
+ * Sleeps until the completion IRQ fires (bounded by a missed-IRQ fallback that
+ * checks STATUS), then invalidates the destination. @return TIKU_GPU_OK, or
+ * TIKU_GPU_ERR_TIMEOUT if completion was never signalled.
+ */
+tiku_gpu_err_t tiku_gpu_wait(tiku_gpu_cl_t *cl);
+
+/** @brief Id of the most recently completed command list (set by the ISR). */
+int32_t tiku_gpu_last_cl_id(void);
+
 /**
  * @brief GPU interrupt handler (IRQ 28).
  *

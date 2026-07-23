@@ -61,6 +61,13 @@ static volatile uint32_t s_irq_count;
 /** STATUS captured after the last drawing op (bring-up diagnostics). */
 static uint32_t s_last_status;
 
+/** Async command-list completion: flag set by the ISR, id of the finished CL. */
+static volatile uint32_t s_cl_done;
+static volatile int32_t  s_cl_last_id;
+
+/** Monotonic command-list submission id. */
+static int32_t s_cl_seq;
+
 /*---------------------------------------------------------------------------*/
 /* Register field encodings (from the vendored GPU_Type field defs)          */
 /*---------------------------------------------------------------------------*/
@@ -135,15 +142,21 @@ static uint32_t s_last_status;
 /*---------------------------------------------------------------------------*/
 
 /*
- * Strong override of the weak crt_early alias. For P0 this is a pure plumbing
- * proof: bump the counter. There is no asserted GPU line during the CPU-side
- * NVIC self-test, so no ack is needed (NVIC pending is one-shot). Real
- * completion handling -- ack via INTERRUPTCTRL and tiku_process_post to wake a
- * waiting process -- lands in the async-submission phase (P4).
+ * Strong override of the weak crt_early alias. Handles the real GPU completion
+ * interrupt raised by a command list's tail (INTERRUPTCTRL=1 after the HOLD'd
+ * draw retires): record which CL finished (CLID, 0x148), acknowledge by
+ * writing INTERRUPTCTRL=0, clear the NVIC pending bit, and signal the waiter.
+ * Also serves the P0 CPU-side NVIC self-test (which asserts no GPU line -- the
+ * CLID read and the ack write are harmless there).
  */
 void
 tiku_ambiq_gpu_isr(void)
 {
+    s_cl_last_id = (int32_t)(*(volatile uint32_t *)(uintptr_t)(GPU_BASE + 0x148u));
+    GPU->INTERRUPTCTRL = 0u;             /* ack: clear the GPU IRQ            */
+    __DSB();
+    NVIC_ClearPendingIRQ(GPU_IRQn);
+    s_cl_done = 1u;
     s_irq_count++;
 }
 
@@ -683,6 +696,148 @@ tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
 
 #undef GPU_GRAD_ANCHOR
     return err;
+}
+
+/*---------------------------------------------------------------------------*/
+/* P2.4: async command-list submission                                       */
+/*---------------------------------------------------------------------------*/
+
+/* Register offsets used when composing a command list as (offset,value)
+ * pairs (the CL processor writes each value to GPU_BASE + offset). */
+#define GPU_OFF_TEX0BASE    0x000u
+#define GPU_OFF_TEX0STRIDE  0x004u
+#define GPU_OFF_TEX0RES     0x008u
+#define GPU_OFF_DRAWCMD     0x100u
+#define GPU_OFF_STARTXY     0x104u
+#define GPU_OFF_ENDXY       0x108u
+#define GPU_OFF_CLIPMIN     0x110u
+#define GPU_OFF_CLIPMAX     0x114u
+#define GPU_OFF_RASTCTRL    0x118u
+#define GPU_OFF_CODEPTR     0x11Cu
+#define GPU_OFF_DRAWCOLOR   0x12Cu
+#define GPU_OFF_CLID        0x148u
+#define GPU_OFF_ROPBLEND    0x1D0u
+#define GPU_OFF_INTCTRL     0x0F8u
+
+/* HOLD flag OR'd into a command-list register offset: the CL processor blocks
+ * until that (drawing) write retires before advancing. Mandatory on DRAWCMD so
+ * the completion tail runs only after the draw is truly done. */
+#define GPU_CL_HOLD         0xFF000000u
+
+/* Wait bound: consecutive observations of an idle GPU without a completion
+ * signal before tiku_gpu_wait gives up (missed-IRQ safety, never hit in
+ * normal operation -- the completion IRQ sets the flag on the first wake). */
+#define GPU_CL_IDLE_GIVEUP  8u
+
+void
+tiku_gpu_cl_init(tiku_gpu_cl_t *cl, void *buf, uint32_t cap_words)
+{
+    cl->buf        = (uint32_t *)buf;
+    cl->cap_words  = cap_words;
+    cl->n_words    = 0u;
+    cl->id         = 0;
+    cl->flush_base = (void *)0;
+    cl->flush_span = 0u;
+}
+
+void
+tiku_gpu_cl_reset(tiku_gpu_cl_t *cl)
+{
+    cl->n_words    = 0u;
+    cl->flush_base = (void *)0;
+    cl->flush_span = 0u;
+}
+
+/** Append one (register, value) pair; silently drops if the buffer is full. */
+static void
+cl_add(tiku_gpu_cl_t *cl, uint32_t reg, uint32_t val)
+{
+    if (cl->n_words + 2u <= cl->cap_words) {
+        cl->buf[cl->n_words++] = reg;
+        cl->buf[cl->n_words++] = val;
+    }
+}
+
+tiku_gpu_err_t
+tiku_gpu_cl_fill(tiku_gpu_cl_t *cl, const tiku_gpu_surface_t *dst, uint32_t color)
+{
+    uint32_t res = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
+
+    /* Same register program as the synchronous tiku_gpu_fill, emitted as CL
+     * pairs; DRAWCMD carries HOLD so the completion tail waits for the draw. */
+    cl_add(cl, GPU_OFF_TEX0BASE,   (uint32_t)(uintptr_t)dst->base);
+    cl_add(cl, GPU_OFF_TEX0STRIDE, ((uint32_t)dst->format << 24) |
+                                   ((uint32_t)dst->stride & 0xFFFFu));
+    cl_add(cl, GPU_OFF_TEX0RES,    res);
+    cl_add(cl, GPU_OFF_CLIPMIN,    0u);
+    cl_add(cl, GPU_OFF_CLIPMAX,    ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu));
+    cl_add(cl, GPU_OFF_RASTCTRL,   GPU_RASTCTRL_MMUL_BYPASS);
+    cl_add(cl, GPU_OFF_CODEPTR,    GPU_CODEPTR_FILL);
+    cl_add(cl, GPU_OFF_ROPBLEND,   GPU_ROPBLEND_SRC);
+    cl_add(cl, GPU_OFF_DRAWCOLOR,  color);
+    cl_add(cl, GPU_OFF_STARTXY,    0u);
+    cl_add(cl, GPU_OFF_ENDXY,      res);
+    cl_add(cl, GPU_OFF_DRAWCMD | GPU_CL_HOLD, GPU_DRAWCMD_RECT);
+
+    cl->flush_base = dst->base;
+    cl->flush_span = (uint32_t)dst->stride * (uint32_t)dst->h;
+    return (cl->n_words <= cl->cap_words) ? TIKU_GPU_OK : TIKU_GPU_ERR_TIMEOUT;
+}
+
+tiku_gpu_err_t
+tiku_gpu_submit(tiku_gpu_cl_t *cl)
+{
+    /* Destination hygiene (as the synchronous path does). */
+    if (cl->flush_span != 0u) {
+        tiku_cpu_dcache_clean(cl->flush_base, cl->flush_span);
+        tiku_cpu_dcache_invalidate(cl->flush_base, cl->flush_span);
+    }
+
+    /* Completion tail: once the HOLD'd draw retires, stamp this CL's id and
+     * raise IRQ 28 by writing INTERRUPTCTRL=1. */
+    cl->id = ++s_cl_seq;
+    cl_add(cl, GPU_OFF_CLID,    (uint32_t)cl->id);
+    cl_add(cl, GPU_OFF_INTCTRL, 1u);
+
+    /* The GPU reads the list from memory as a non-coherent master. */
+    tiku_cpu_dcache_clean(cl->buf, cl->n_words * 4u);
+
+    s_cl_done = 0u;
+    __DSB();
+    GPU->CMDLISTADDR = (uint32_t)(uintptr_t)cl->buf;
+    __DSB();
+    GPU->CMDLISTSIZE = cl->n_words;    /* kick -- length in words */
+    return TIKU_GPU_OK;
+}
+
+tiku_gpu_err_t
+tiku_gpu_wait(tiku_gpu_cl_t *cl)
+{
+    uint32_t idle_seen = 0u;
+
+    /* Sleep until the completion IRQ sets the flag. __WFI wakes on the GPU
+     * IRQ (normal case, first wake) or the always-on STIMER tick. The idle
+     * fallback keeps a missed IRQ from wedging the system. */
+    while (s_cl_done == 0u) {
+        __WFI();
+        if ((GPU->STATUS & GPU_STATUS_BUSY_MASK) == 0u) {
+            if (++idle_seen > GPU_CL_IDLE_GIVEUP) {
+                break;
+            }
+        }
+    }
+
+    s_last_status = GPU->STATUS;
+    if (cl->flush_span != 0u) {
+        tiku_cpu_dcache_invalidate(cl->flush_base, cl->flush_span);
+    }
+    return (s_cl_done != 0u) ? TIKU_GPU_OK : TIKU_GPU_ERR_TIMEOUT;
+}
+
+int32_t
+tiku_gpu_last_cl_id(void)
+{
+    return s_cl_last_id;
 }
 
 void
