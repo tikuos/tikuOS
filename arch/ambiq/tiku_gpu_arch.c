@@ -46,9 +46,10 @@
  * STATUS busy mask -- OR of every documented per-stage busy field:
  *   SYSBSY(31) MEMBSY(30) CLBSY(29) CLPBSY(28) RASTBSY(27:24)
  *   DEPTHFIFOBSY(19:16) RENDERBSY(15:12) TEXTMAPBSY(11:8) PIPEBSY(7:4) COREBSY(3:0)
- * "Idle" == none of these set.
+ * "Idle" == none of these set. The RASTBSY nibble (27:24) MUST be included --
+ * every draw is a raster op, so omitting it lets wait_idle return mid-drain.
  */
-#define GPU_STATUS_BUSY_MASK  0xF00FFFFFu
+#define GPU_STATUS_BUSY_MASK  0xFF0FFFFFu
 
 /*---------------------------------------------------------------------------*/
 /* State                                                                     */
@@ -68,8 +69,15 @@ static uint32_t s_last_status;
 #define GPU_IMGFMT_RGBA8888   1u     /* IMGFMT enum: RGBA8888                 */
 #define GPU_IMGMODE_POINT     0u     /* IMGMODE enum: nearest-neighbour       */
 
-/* DRAWCMD.START enum. */
+/* DRAWCMD primitive codes. NOT a sequential enum -- a bitfield recovered from
+ * the raster disassembly: LINE=bit0, RECT=bit1, TRI=bit2, QUAD=bit0|bit2. */
+#define GPU_DRAWCMD_LINE      1u
 #define GPU_DRAWCMD_RECT      2u     /* "fill rectangle from STARTXY to ENDXY" */
+#define GPU_DRAWCMD_TRI       4u     /* triangle from the three 16.16 vertices */
+
+/* DRAWCMD flag: interpolate the rasterizer color across the primitive from the
+ * RGBA interpolator registers instead of the flat DRAW_COLOR (draw_flags b27). */
+#define GPU_DRAWFLAG_GRADIENT 0x08000000u
 
 /* RASTCTRL (a.k.a. the matrix-multiplier control): a solid fill uses no
  * coordinate transform, so the MatMul is bypassed. Bit names from the vendored
@@ -519,6 +527,162 @@ tiku_gpu_blit_rect(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
     float sy = (float)src->h / (float)dh;
     return gpu_blit_core(dst, src, dx, dy, dw, dh,
                          sx, -(float)dx * sx, sy, -(float)dy * sy, blend);
+}
+
+/*---------------------------------------------------------------------------*/
+/* P2.3: raster primitives (triangle, line) + color gradient                 */
+/*---------------------------------------------------------------------------*/
+
+/** Integer pixel coordinate -> 16.16 fixed point (the vertex registers). */
+static inline uint32_t
+gpu_i2fx16(int32_t v)
+{
+    return (uint32_t)(v << 16);
+}
+
+/** Per-channel gradient slope (b-a)/n in signed 16.16 (channel scale 0..255). */
+static inline int32_t
+gpu_grad_slope(int32_t a, int32_t b, int32_t n)
+{
+    if (n <= 0) { return 0; }
+    return ((b - a) << 16) / n;
+}
+
+/*
+ * Common flat-draw setup: bind dst as TEX0, clip to it, and select the
+ * constant-color shader with the MatMul bypassed (the fill path -- the
+ * primitives all reuse it; the rasterizer, not a texture, produces the color).
+ * The caller sets color/coordinates/interpolators, writes DRAWCMD last, and
+ * owns the cache discipline and idle wait.
+ */
+static void
+gpu_dst_setup(const tiku_gpu_surface_t *dst)
+{
+    GPU->TEX0BASE    = (uint32_t)(uintptr_t)dst->base;
+    GPU->TEX0STRIDE  = ((uint32_t)dst->format << 24) | ((uint32_t)dst->stride & 0xFFFFu);
+    GPU->TEX0RES     = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
+    GPU->CLIPMIN     = 0u;
+    GPU->CLIPMAX     = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+    GPU->RASTCTRL    = GPU_RASTCTRL_MMUL_BYPASS;
+    GPU->DRAWCODEPTR = GPU_CODEPTR_FILL;
+}
+
+tiku_gpu_err_t
+tiku_gpu_fill_triangle(const tiku_gpu_surface_t *dst,
+                       int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                       int16_t x2, int16_t y2, uint32_t color)
+{
+    uint32_t span = (uint32_t)dst->stride * (uint32_t)dst->h;
+    tiku_gpu_err_t err;
+
+    tiku_cpu_dcache_clean(dst->base, span);
+    tiku_cpu_dcache_invalidate(dst->base, span);
+
+    gpu_dst_setup(dst);
+    GPU->DRAWCOLOR = color;
+    /* Three vertices in the 16.16 per-vertex registers; the HW derives the
+     * edges (no edge-equation or depth programming for a flat 2D triangle). */
+    GPU->DRAWPT0X = gpu_i2fx16(x0);  GPU->DRAWPT0Y = gpu_i2fx16(y0);
+    GPU->DRAWPT1X = gpu_i2fx16(x1);  GPU->DRAWPT1Y = gpu_i2fx16(y1);
+    GPU->DRAWPT2X = gpu_i2fx16(x2);  GPU->DRAWPT2Y = gpu_i2fx16(y2);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_TRI;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, span);
+    return err;
+}
+
+tiku_gpu_err_t
+tiku_gpu_draw_line(const tiku_gpu_surface_t *dst,
+                   int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t color)
+{
+    uint32_t span = (uint32_t)dst->stride * (uint32_t)dst->h;
+    tiku_gpu_err_t err;
+
+    tiku_cpu_dcache_clean(dst->base, span);
+    tiku_cpu_dcache_invalidate(dst->base, span);
+
+    gpu_dst_setup(dst);
+    GPU->DRAWCOLOR = color;
+    /* A line uses the integer STARTXY/ENDXY (not the 16.16 vertex regs);
+     * single-pixel width. */
+    GPU->DRAWPT0 = ((uint32_t)(uint16_t)y0 << 16) | ((uint32_t)(uint16_t)x0 & 0xFFFFu);
+    GPU->DRAWPT1 = ((uint32_t)(uint16_t)y1 << 16) | ((uint32_t)(uint16_t)x1 & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_LINE;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, span);
+    return err;
+}
+
+tiku_gpu_err_t
+tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
+                       int16_t x, int16_t y, uint16_t w, uint16_t h,
+                       uint32_t color_a, uint32_t color_b, int vertical)
+{
+    uint32_t span = (uint32_t)dst->stride * (uint32_t)dst->h;
+    tiku_gpu_err_t err;
+
+    /* Unpack channels: word = A<<24 | B<<16 | G<<8 | R. */
+    int32_t ar = (int32_t)(color_a        & 0xFFu);
+    int32_t ag = (int32_t)((color_a >> 8)  & 0xFFu);
+    int32_t ab = (int32_t)((color_a >> 16) & 0xFFu);
+    int32_t aa = (int32_t)((color_a >> 24) & 0xFFu);
+    int32_t br = (int32_t)(color_b        & 0xFFu);
+    int32_t bg = (int32_t)((color_b >> 8)  & 0xFFu);
+    int32_t bb = (int32_t)((color_b >> 16) & 0xFFu);
+    int32_t ba = (int32_t)((color_b >> 24) & 0xFFu);
+    int32_t n  = vertical ? (int32_t)h : (int32_t)w;
+
+    /* Slope along the gradient axis (16.16), zero along the other. */
+    int32_t s_r = gpu_grad_slope(ar, br, n);
+    int32_t s_g = gpu_grad_slope(ag, bg, n);
+    int32_t s_b = gpu_grad_slope(ab, bb, n);
+    int32_t s_a = gpu_grad_slope(aa, ba, n);
+    int32_t dxr = vertical ? 0 : s_r, dyr = vertical ? s_r : 0;
+    int32_t dxg = vertical ? 0 : s_g, dyg = vertical ? s_g : 0;
+    int32_t dxb = vertical ? 0 : s_b, dyb = vertical ? s_b : 0;
+    int32_t dxa = vertical ? 0 : s_a, dya = vertical ? s_a : 0;
+
+    /* Interpolation is screen-absolute: color(px,py) = INIT + px*DX + py*DY.
+     * Anchor so the rect's top-left (x,y) evaluates to color_a. */
+#define GPU_GRAD_ANCHOR(c, dx, dy) \
+    ((uint32_t)(((int32_t)(c) << 16) - (int32_t)x * (dx) - (int32_t)y * (dy)))
+
+    tiku_cpu_dcache_clean(dst->base, span);
+    tiku_cpu_dcache_invalidate(dst->base, span);
+
+    gpu_dst_setup(dst);
+    /* Flat-color fallback so a mis-set gradient shows as solid color_a (which
+     * the test detects) rather than garbage; ignored when the gradient bit
+     * makes the rasterizer use the interpolated color. */
+    GPU->DRAWCOLOR = color_a;
+
+    GPU->REDX = (uint32_t)dxr;  GPU->REDY = (uint32_t)dyr;
+    GPU->GREENX = (uint32_t)dxg; GPU->GREENY = (uint32_t)dyg;
+    GPU->BLUEX = (uint32_t)dxb;  GPU->BLUEY = (uint32_t)dyb;
+    GPU->ALFX = (uint32_t)dxa;   GPU->ALFY = (uint32_t)dya;
+    GPU->REDINIT = GPU_GRAD_ANCHOR(ar, dxr, dyr);
+    GPU->GREINIT = GPU_GRAD_ANCHOR(ag, dxg, dyg);
+    GPU->BLUINIT = GPU_GRAD_ANCHOR(ab, dxb, dyb);
+    GPU->ALFINIT = GPU_GRAD_ANCHOR(aa, dxa, dya);
+
+    GPU->DRAWPT0 = ((uint32_t)(uint16_t)y << 16) | ((uint32_t)(uint16_t)x & 0xFFFFu);
+    GPU->DRAWPT1 = ((uint32_t)(uint16_t)(y + (int16_t)h) << 16) |
+                   ((uint32_t)(uint16_t)(x + (int16_t)w) & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWFLAG_GRADIENT | GPU_DRAWCMD_RECT;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+    tiku_cpu_dcache_invalidate(dst->base, span);
+
+#undef GPU_GRAD_ANCHOR
+    return err;
 }
 
 void

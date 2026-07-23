@@ -217,6 +217,39 @@ tiku_gpu_err_t tiku_gpu_blit_rect(const tiku_gpu_surface_t *dst,
                                   uint16_t dw, uint16_t dh,
                                   tiku_gpu_blend_t blend);
 
+/*---------------------------------------------------------------------------*/
+/* P2.3: raster primitives + gradient                                        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Fill a solid-color triangle from three vertices (16.16 rasterized).
+ *
+ * Reuses the constant-color shader; the hardware derives the edges from the
+ * vertices. @p dst is the destination surface; the driver handles cache.
+ */
+tiku_gpu_err_t tiku_gpu_fill_triangle(const tiku_gpu_surface_t *dst,
+                                      int16_t x0, int16_t y0,
+                                      int16_t x1, int16_t y1,
+                                      int16_t x2, int16_t y2, uint32_t color);
+
+/** @brief Draw a single-pixel-wide line (x0,y0)->(x1,y1) in a solid color. */
+tiku_gpu_err_t tiku_gpu_draw_line(const tiku_gpu_surface_t *dst,
+                                  int16_t x0, int16_t y0,
+                                  int16_t x1, int16_t y1, uint32_t color);
+
+/**
+ * @brief Fill a rectangle with a linear color gradient (color_a -> color_b).
+ *
+ * @p vertical selects the gradient axis (0 = left->right, non-zero =
+ * top->bottom). Uses the RGBA interpolators; the rasterizer produces the
+ * per-pixel color. All four channels interpolate, so pass matching alpha in
+ * @p color_a / @p color_b for a constant-alpha gradient.
+ */
+tiku_gpu_err_t tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
+                                      int16_t x, int16_t y, uint16_t w, uint16_t h,
+                                      uint32_t color_a, uint32_t color_b,
+                                      int vertical);
+
 /**
  * @brief GPU interrupt handler (IRQ 28).
  *
