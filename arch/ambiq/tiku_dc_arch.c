@@ -344,15 +344,92 @@ dc_core_init(void)
     return TIKU_DC_OK;
 }
 
+/* nemadc_timing(w,1,1,1, h,1,1,1) -- the [CAP]-verified 468x468 words
+ * generalized to an arbitrary region size (all porches = 1). */
 static void
-dc_timing_468(void)
+dc_timing(uint16_t w, uint16_t h)
 {
-    /* nemadc_timing(468,1,1,1, 468,1,1,1) -- [CAP]-verified words. */
-    DC_WR(DC_RESXY,      (468u << 16) | 468u);
-    DC_WR(DC_FRONTPORCH, (469u << 16) | 469u);
-    DC_WR(DC_BLANKING,   (470u << 16) | 470u);
-    DC_WR(DC_BACKPORCH,  (471u << 16) | 471u);
-    DC_WR(DC_STARTXY,    (469u << 16) | 468u);
+    DC_WR(DC_RESXY,      ((uint32_t)w << 16)       | h);
+    DC_WR(DC_FRONTPORCH, ((uint32_t)(w + 1u) << 16) | (uint32_t)(h + 1u));
+    DC_WR(DC_BLANKING,   ((uint32_t)(w + 2u) << 16) | (uint32_t)(h + 2u));
+    DC_WR(DC_BACKPORCH,  ((uint32_t)(w + 3u) << 16) | (uint32_t)(h + 3u));
+    DC_WR(DC_STARTXY,    ((uint32_t)(w + 1u) << 16) | h);
+}
+
+/** Bytes per pixel for a scanout format. */
+static uint32_t
+dc_bpp(tiku_dc_fmt_t fmt)
+{
+    return (fmt == TIKU_DC_FMT_RGB24) ? 3u : 4u;
+}
+
+/**
+ * Set the panel's addressable window via DCS CASET/RASET. The CO5300 has a
+ * 6-column X offset (baked into panel_init's full window); a damage rect at
+ * framebuffer column x therefore maps to panel column x + 6.
+ */
+static void
+dc_set_window(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    uint16_t xs = (uint16_t)(x + 6u);
+    uint16_t xe = (uint16_t)(xs + w - 1u);
+    uint16_t ye = (uint16_t)(y + h - 1u);
+    uint8_t caset[4] = { (uint8_t)(xs >> 8), (uint8_t)xs,
+                         (uint8_t)(xe >> 8), (uint8_t)xe };
+    uint8_t raset[4] = { (uint8_t)(y >> 8),  (uint8_t)y,
+                         (uint8_t)(ye >> 8), (uint8_t)ye };
+    dsi_dcs(0x2Au, caset, 4u);       /* column address set */
+    dsi_dcs(0x2Bu, raset, 4u);       /* row address set    */
+}
+
+/*
+ * One-shot DC transfer of a w x h region starting at @p base (physical), with
+ * @p stride bytes between rows. Programs layer 0, timing, issues DCS
+ * write_memory_start, launches one frame, and polls to completion. Shared by
+ * the full-frame and partial-rect present paths.
+ */
+static tiku_dc_err_t
+dc_do_transfer(uint32_t base, uint16_t w, uint16_t h,
+               uint16_t stride, tiku_dc_fmt_t fmt)
+{
+    uint32_t xy = ((uint32_t)w << 16) | h;
+    uint32_t cfg;
+    int ok;
+
+    DC_WR(DC_L0_BASEADDR, base);
+    DC_WR(DC_L0_STARTXY,  0u);
+    DC_WR(DC_L0_SIZEXY,   xy);
+    DC_WR(DC_L0_RESXY,    xy);
+    DC_WR(DC_L0_STRIDE,   stride);
+    DC_WR(DC_L0_CDEC_XY,  0u);
+    DC_WR(DC_L0_MODE, 0x88000000u | (0xFFu << 16) | (0x01u << 8) |
+                      ((uint32_t)fmt & 0x1Fu));
+    DC_WR(DC_L0_FORMAT, (uint32_t)fmt);
+
+    dc_timing(w, h);
+
+    cfg = DC_RD(DC_IF_CFG);
+    DC_WR(DC_GPIO, DC_RD(DC_GPIO) & ~0x1u);         /* high-speed mode        */
+    DC_WR(DC_CLKCTRL_CG, 0xFFFFFFF1u);              /* clock gating off       */
+    if (!dc_wait_dbi_idle()) { return TIKU_DC_ERR_TIMEOUT; }
+    DC_WR(DC_FORMAT_CTRL, 0x3939u);                 /* DCS long write         */
+    (void)dc_wait_pendcmd();
+    DC_WR(DC_IF_CFG, cfg | DC_IFCFG_SPI_HOLD);
+    dc_fifo(DC_CMD_DBI | DC_CMD_EXT | 0x2Cu);       /* write_memory_start     */
+    if (!dc_wait_dbi_idle()) { return TIKU_DC_ERR_TIMEOUT; }
+
+    DC_WR(DC_INTERRUPT, 1u << 4);                   /* frame-end (polled)     */
+    DC_WR(DC_MODE, (1u << 17) | (1u << 3));         /* ONE_FRAME | OUTP_OFF   */
+    DC_WR(DC_PLAY, 0u);
+
+    ok = poll32(DC_BASE + DC_STATUS, DC_STAT_DBI_BUSY | DC_STAT_ACTIVE, 0u);
+
+    DC_WR(DC_IF_CFG, cfg & ~DC_IFCFG_SPI_HOLD);
+    DC_WR(DC_CLKCTRL_CG, 1u);
+    DC_WR(DC_GPIO, DC_RD(DC_GPIO) | 0x1u);
+    DC_WR(DC_INTERRUPT, 0u);
+
+    return ok ? TIKU_DC_OK : TIKU_DC_ERR_TIMEOUT;
 }
 
 static void
@@ -364,7 +441,7 @@ dc_configure(void)
     DC_WR(DC_FORMAT_CTRL2, 0x2u << 30);             /* DBIB clk = fmt clk / 2 */
     (void)dc_wait_pendcmd();
     DC_WR(DC_IF_CFG, DC_IFCFG_DSI_RGB888);
-    dc_timing_468();
+    dc_timing(TIKU_DC_PANEL_W, TIKU_DC_PANEL_H);
     DC_WR(DC_CLKCTRL_CG, 1u);                       /* pixel-clock out enable */
 }
 
@@ -400,7 +477,7 @@ panel_init(void)
     dsi_dcs(0x11u, 0, 0u);        tiku_common_delay_ms(130u); /* sleep out    */
     dsi_dcs(0x29u, 0, 0u);        tiku_common_delay_ms(200u); /* display on   */
 
-    dc_timing_468();
+    dc_timing(TIKU_DC_PANEL_W, TIKU_DC_PANEL_H);
     dsi_dcs(0x2Au, caset, 4u);                                /* column window */
     dsi_dcs(0x2Bu, raset, 4u);    tiku_common_delay_ms(200u); /* row window   */
     dsi_dcs(0x34u, 0, 0u);        tiku_common_delay_ms(10u);  /* tearing off  */
@@ -432,60 +509,45 @@ tiku_dc_err_t
 tiku_dc_present(const void *fb, uint16_t w, uint16_t h,
                 uint16_t stride_bytes, tiku_dc_fmt_t fmt)
 {
-    uint32_t cfg;
-    uint32_t xy = ((uint32_t)w << 16) | h;
-    int ok;
+    tiku_dc_err_t err;
 
     /* The DC reads behind the M55 D-cache: push dirty lines out first. */
     tiku_cpu_dcache_clean((void *)(uintptr_t)fb,
                           (uint32_t)stride_bytes * (uint32_t)h);
 
-    /* Layer 0 ([DIS] nemadc_set_layer no-scale path; [CAP] RGB24 goldens).
-     * Our CONFIG (0x713B3159) has no layer-0 scaler and COLMOD has no YUV
-     * low bits, so the SCALEX/Y and U/V writes are correctly absent. */
-    DC_WR(DC_L0_BASEADDR, (uint32_t)(uintptr_t)fb);
-    DC_WR(DC_L0_STARTXY,  0u);
-    DC_WR(DC_L0_SIZEXY,   xy);
-    DC_WR(DC_L0_RESXY,    xy);
-    DC_WR(DC_L0_STRIDE,   stride_bytes);
-    DC_WR(DC_L0_CDEC_XY,  0u);                      /* IP 0x230601 > 0x220300 */
-    /* LAYER_ENABLE|AHBLOCK | alpha=0xFF | blend=SRC | format code. */
-    DC_WR(DC_L0_MODE, 0x88000000u | (0xFFu << 16) | (0x01u << 8) |
-                      ((uint32_t)fmt & 0x1Fu));
-    DC_WR(DC_L0_FORMAT, (uint32_t)fmt);             /* IP 0x230601 > 0x2301FF */
+    /* Full frame -- the panel window is already the full panel (panel_init). */
+    err = dc_do_transfer((uint32_t)(uintptr_t)fb, w, h, stride_bytes, fmt);
+    if (err == TIKU_DC_OK) { s_frames++; }
+    return err;
+}
 
-    dc_timing_468();
+tiku_dc_err_t
+tiku_dc_present_rect(const void *fb, uint16_t fb_stride,
+                     uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                     tiku_dc_fmt_t fmt)
+{
+    uint32_t bpp  = dc_bpp(fmt);
+    uint32_t base = (uint32_t)(uintptr_t)fb +
+                    (uint32_t)y * (uint32_t)fb_stride + (uint32_t)x * bpp;
+    tiku_dc_err_t err;
 
-    /* Prepare ([TSI] dc_transfer_frame, DSI path): HS mode, ungate clocks,
-     * pixel-stream data type, then DCS write_memory_start held in the FIFO. */
-    cfg = DC_RD(DC_IF_CFG);
-    DC_WR(DC_GPIO, DC_RD(DC_GPIO) & ~0x1u);         /* high-speed mode        */
-    DC_WR(DC_CLKCTRL_CG, 0xFFFFFFF1u);              /* clock gating off       */
-    if (!dc_wait_dbi_idle()) { return TIKU_DC_ERR_TIMEOUT; }
-    DC_WR(DC_FORMAT_CTRL, 0x3939u);                 /* DCS long write         */
-    (void)dc_wait_pendcmd();
-    DC_WR(DC_IF_CFG, cfg | DC_IFCFG_SPI_HOLD);
-    dc_fifo(DC_CMD_DBI | DC_CMD_EXT | 0x2Cu);       /* write_memory_start     */
-    if (!dc_wait_dbi_idle()) { return TIKU_DC_ERR_TIMEOUT; }
+    if ((uint32_t)x + w > TIKU_DC_PANEL_W || (uint32_t)y + h > TIKU_DC_PANEL_H) {
+        return TIKU_DC_ERR_TIMEOUT;   /* rect escapes the panel */
+    }
 
-    /* Launch one frame ([DIS] nemadc_set_mode: MODE then PLAY=0). */
-    DC_WR(DC_INTERRUPT, 1u << 4);                   /* frame-end (polled)     */
-    DC_WR(DC_MODE, (1u << 17) | (1u << 3));         /* ONE_FRAME | OUTP_OFF   */
-    DC_WR(DC_PLAY, 0u);
+    /* Clean the damaged rows (the DC reads them at the full stride). */
+    tiku_cpu_dcache_clean((void *)(uintptr_t)((uint32_t)(uintptr_t)fb +
+                          (uint32_t)y * (uint32_t)fb_stride),
+                          (uint32_t)h * (uint32_t)fb_stride);
 
-    /* Completion: vendor uses IRQ 29; we poll STATUS until the frame
-     * generator and DBI bridge drain (bounded). */
-    ok = poll32(DC_BASE + DC_STATUS, DC_STAT_DBI_BUSY | DC_STAT_ACTIVE, 0u);
+    /* Address only the damage rect on the panel, transfer it, then restore
+     * the full window so a later full present is unaffected. */
+    dc_set_window(x, y, w, h);
+    err = dc_do_transfer(base, w, h, fb_stride, fmt);
+    dc_set_window(0u, 0u, TIKU_DC_PANEL_W, TIKU_DC_PANEL_H);
 
-    /* End-of-frame restore ([TSI] nemadc_transfer_frame_end). */
-    DC_WR(DC_IF_CFG, cfg & ~DC_IFCFG_SPI_HOLD);
-    DC_WR(DC_CLKCTRL_CG, 1u);
-    DC_WR(DC_GPIO, DC_RD(DC_GPIO) | 0x1u);
-    DC_WR(DC_INTERRUPT, 0u);
-
-    if (!ok) { return TIKU_DC_ERR_TIMEOUT; }
-    s_frames++;
-    return TIKU_DC_OK;
+    if (err == TIKU_DC_OK) { s_frames++; }
+    return err;
 }
 
 uint32_t

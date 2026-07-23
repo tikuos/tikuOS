@@ -77,6 +77,25 @@ tiku_dc_err_t tiku_dc_init(void);
 tiku_dc_err_t tiku_dc_present(const void *fb, uint16_t w, uint16_t h,
                               uint16_t stride_bytes, tiku_dc_fmt_t fmt);
 
+/**
+ * @brief Push only a sub-rectangle of a surface to the panel (partial update).
+ *
+ * Transfers the @p w x @p h region at (@p x, @p y) of a surface whose full row
+ * pitch is @p fb_stride bytes -- addressing just that window on the panel
+ * (DCS CASET/RASET) and scanning the sub-rect out of the framebuffer. Far
+ * cheaper than a full frame for small damage. Restores the full panel window
+ * afterward so a later tiku_dc_present() is unaffected. @p fb MUST be in SSRAM.
+ *
+ * @param fb         Full surface base (SSRAM).
+ * @param fb_stride  Bytes per row of the FULL surface.
+ * @param x,y,w,h    Damage rectangle (must lie within the panel).
+ * @param fmt        Scanout format.
+ * @return TIKU_DC_OK, or TIKU_DC_ERR_TIMEOUT (incl. a rect outside the panel).
+ */
+tiku_dc_err_t tiku_dc_present_rect(const void *fb, uint16_t fb_stride,
+                                   uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                                   tiku_dc_fmt_t fmt);
+
 /** @brief Frames successfully presented since init (test/diagnostic). */
 uint32_t tiku_dc_frame_count(void);
 
