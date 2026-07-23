@@ -97,6 +97,7 @@ static int32_t s_cl_seq;
  * the vendored (MIT-granted) ThinkSi nema_regs.h. Written by raw offset.
  */
 #define GPU_REG_ROPBLEND_MODE  0x1D0u  /* NEMA_ROPBLENDER_BLEND_MODE          */
+#define GPU_REG_ROPBLEND_CONST 0x1D8u  /* NEMA_ROPBLENDER_CONST_COLOR         */
 #define GPU_REG_RAST_BYPASS    0x388u  /* NEMA_RAST_BYPASS                    */
 
 #define GPU_ROPBLEND_SRC       1u      /* NEMA_BL_SRC: replace destination    */
@@ -990,6 +991,50 @@ tiku_gpu_resample(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
     s.sampling = TIKU_GPU_SAMPLE_BILINEAR;
     return tiku_gpu_blit_rect(dst, &s, 0, 0, dst->w, dst->h, TIKU_GPU_BLEND_SRC);
 }
+
+tiku_gpu_err_t
+tiku_gpu_copy_rect(const tiku_gpu_surface_t *dst, int16_t dx, int16_t dy,
+                   const tiku_gpu_surface_t *src, int16_t sx, int16_t sy,
+                   uint16_t w, uint16_t h)
+{
+    /* Positioned strided 2D copy: dest rect (dx,dy,w,h) samples the source
+     * starting at (sx,sy) -- translate matrix tex = screen - (dx-sx, dy-sy).
+     * The general-purpose "2D memcpy" between arbitrary surface windows. */
+    return gpu_blit_core(dst, src, dx, dy, w, h,
+                         1.0f, -(float)(dx - sx), 1.0f, -(float)(dy - sy),
+                         TIKU_GPU_BLEND_SRC);
+}
+
+tiku_gpu_err_t
+tiku_gpu_multiply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
+{
+    /* Element-wise product: out = src * dst / 255 per channel. The ROP
+     * blender with source factor DESTCOLOR (and dst factor ZERO) computes it
+     * in fixed-function hardware -- masking, windowing, per-pixel gains. */
+    return tiku_gpu_blit(dst, src, 0, 0, TIKU_GPU_BLEND_MULTIPLY);
+}
+
+tiku_gpu_err_t
+tiku_gpu_scale_const(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
+                     uint32_t factor)
+{
+    /* Exact per-channel constant scale: out = src * factor / 255 via the ROP
+     * CONSTCOLOR source factor and the const-color register -- the calibrated
+     * fixed-function alternative to the shader-based tiku_gpu_scale_bias. */
+    gpu_reg_write(GPU_REG_ROPBLEND_CONST, factor);
+    return tiku_gpu_blit(dst, src, 0, 0, (tiku_gpu_blend_t)0x000A);
+}
+
+/*
+ * NOTE on scalar reduction (mean-to-1x1): a downsample chain is the natural
+ * implementation, but hardware probing shows MatMul SCALE FACTORS > 1 are
+ * unreliable -- the IEEE->internal conversion drops precision (2.0f converts
+ * to 0x00100000 where 1.0f is 0x000F8000, losing the mantissa), and ramp
+ * tests show inconsistent source coordinates for SX in {2,4}. Upsample
+ * (SX < 1) is proven correct. A trustworthy mean needs either the conversion
+ * quirk characterized on the bench or an ADD-based pyramid; deferred rather
+ * than shipped wrong.
+ */
 
 tiku_gpu_err_t
 tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *index,

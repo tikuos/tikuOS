@@ -172,6 +172,7 @@ typedef enum {
     TIKU_GPU_BLEND_SRC_OVER = 0x0501,  /**< Sa + Da*(1-Sa)                    */
     TIKU_GPU_BLEND_SIMPLE   = 0x0504,  /**< Sa*Sa + Da*(1-Sa) (Nema blit dflt)*/
     TIKU_GPU_BLEND_ADD      = 0x0101,  /**< Sa + Da (saturating)              */
+    TIKU_GPU_BLEND_MULTIPLY = 0x0008,  /**< Sc * Dc (element-wise product)    */
 } tiku_gpu_blend_t;
 
 /**
@@ -357,6 +358,39 @@ tiku_gpu_err_t tiku_gpu_convert(const tiku_gpu_surface_t *dst,
  */
 tiku_gpu_err_t tiku_gpu_resample(const tiku_gpu_surface_t *dst,
                                  const tiku_gpu_surface_t *src);
+
+/**
+ * @brief Positioned strided 2D copy: the (@p w x @p h) window of @p src at
+ *        (@p sx, @p sy) copied to @p dst at (@p dx, @p dy).
+ *
+ * The general-purpose 2D memcpy between arbitrary surface windows (clipped to
+ * @p dst); with differing formats it converts on the way.
+ */
+tiku_gpu_err_t tiku_gpu_copy_rect(const tiku_gpu_surface_t *dst,
+                                  int16_t dx, int16_t dy,
+                                  const tiku_gpu_surface_t *src,
+                                  int16_t sx, int16_t sy,
+                                  uint16_t w, uint16_t h);
+
+/**
+ * @brief Element-wise product: dst = src * dst / 255, per channel.
+ *
+ * Fixed-function (ROP DESTCOLOR factor): per-pixel masking, windowing, and
+ * gain maps with exact 8-bit semantics. Same dimensions required.
+ */
+tiku_gpu_err_t tiku_gpu_multiply(const tiku_gpu_surface_t *dst,
+                                 const tiku_gpu_surface_t *src);
+
+/**
+ * @brief Exact constant scale: dst = src * @p factor / 255, per channel.
+ *
+ * Fixed-function (ROP CONSTCOLOR factor + const-color register), so the
+ * arithmetic is exact 8-bit -- the calibrated counterpart to the shader-based
+ * tiku_gpu_scale_bias. @p factor packs 0x00BBGGRR (0x80 = x0.502).
+ */
+tiku_gpu_err_t tiku_gpu_scale_const(const tiku_gpu_surface_t *dst,
+                                    const tiku_gpu_surface_t *src,
+                                    uint32_t factor);
 
 /**
  * @brief Indexed-color LUT: dst[x,y] = palette[ index[x,y] ] in one pass.
