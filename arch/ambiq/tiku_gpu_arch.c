@@ -1036,6 +1036,12 @@ tiku_gpu_scale_const(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *sr
  * than shipped wrong.
  */
 
+/* Shadow palette: hardware LUT entries follow entry = i*17/16 (measured on
+ * silicon via a sawtooth sweep); the shadow holds the user's palette remapped
+ * through the inverse so dst = palette[index] comes out exact. SSRAM: the GPU
+ * reads it. */
+static uint32_t s_lut_shadow[256] __attribute__((section(".ssram"), aligned(32)));
+
 tiku_gpu_err_t
 tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *index,
                    const uint32_t *palette)
@@ -1043,10 +1049,17 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     uint32_t dspan = (uint32_t)dst->stride * (uint32_t)dst->h;
     uint32_t ispan = (uint32_t)index->stride * (uint32_t)index->h;
     tiku_gpu_err_t err;
+    uint32_t e;
 
-    /* GPU reads the index and the 256-entry palette; writes dst. */
+    /* Invert the measured entry = i*17/16 law: shadow[e] = palette[e*16/17]. */
+    for (e = 0u; e < 256u; e++) {
+        uint32_t i = (e * 16u + 8u) / 17u;
+        s_lut_shadow[e] = palette[i > 255u ? 255u : i];
+    }
+
+    /* GPU reads the index and the shadow palette; writes dst. */
     tiku_cpu_dcache_clean(index->base, ispan);
-    tiku_cpu_dcache_clean((void *)palette, 256u * 4u);
+    tiku_cpu_dcache_clean(s_lut_shadow, sizeof s_lut_shadow);
     tiku_cpu_dcache_clean(dst->base, dspan);
     tiku_cpu_dcache_invalidate(dst->base, dspan);
 
@@ -1057,8 +1070,8 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     GPU->TEX1BASE   = (uint32_t)(uintptr_t)index->base;
     GPU->TEX1STRIDE = ((uint32_t)TIKU_GPU_FMT_L8 << 24) | ((uint32_t)index->stride & 0xFFFFu);
     GPU->TEX1RES    = (uint32_t)index->w | ((uint32_t)index->h << 16);
-    /* palette -> TEX2 (256x1 RGBA8888, bit18 = LUT/palette marker, stride 0). */
-    GPU->TEX2BASE   = (uint32_t)(uintptr_t)palette;
+    /* shadow palette -> TEX2 (256x1 RGBA8888; vendor-captured packing). */
+    GPU->TEX2BASE   = (uint32_t)(uintptr_t)s_lut_shadow;
     GPU->TEX2STRIDE = ((uint32_t)TIKU_GPU_FMT_RGBA8888 << 24) | 0x00040000u;
     GPU->TEX2RES    = 256u | (1u << 16);
 
@@ -1069,11 +1082,12 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
     gpu_imem_load(2u, 0x080C0002u, 0x8A0761C7u);
 
-    /* The vendor runs the LUT draw with the MatMul ACTIVE (0x118=0), not
-     * bypassed -- captured from its command list. Load a full identity so the
-     * index texture is sampled 1:1 (the vendor relies on an uninitialized
-     * diagonal and its own capture-rig draw emitted nothing; ours doesn't). */
-    gpu_load_matrix(1.0f, 0.0f, 1.0f, 0.0f);
+    /* Calibrated coordinate compensation (sawtooth sweep, 2026-07-23): the
+     * LUT shader's explicit TEX1 sample sees the screen X coordinate divided
+     * by 16, so MM00=16.0 restores 1:1 column sampling. MM11 stays 1.0 --
+     * scaling Y by 16 overflows the packed sample coordinate and collapses
+     * the draw to a constant (measured). Matrix ACTIVE, never bypassed. */
+    gpu_load_matrix(16.0f, 0.0f, 1.0f, 0.0f);
     gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
     GPU->DRAWCODEPTR = GPU_CODEPTR_LUT;
 

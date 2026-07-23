@@ -404,12 +404,15 @@ tiku_gpu_err_t tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst,
                                   const uint32_t *palette);
 
 /**
- * @brief Custom shader kernel: dst = @p scale * src + @p bias, per channel.
+ * @brief EXPERIMENTAL custom shader kernel (uncalibrated constants).
  *
  * Runs a fragment program authored from the recovered pico-shader ISA (the
- * GPU's ALU applied per pixel). @p scale and @p bias are 8-bit-per-channel
- * constants packed as 0x00BBGGRR (0x80 = x0.5). Useful for brightness/
- * contrast, normalization, and fixed-point rescaling of data grids.
+ * GPU's ALU applied per pixel) computing a scale+bias-class op -- but the
+ * C-register constants pass through an undecoded (half-float-like, non-affine)
+ * packing: measured sweeps are in TikuBench/docs/gpu-calibration-findings.md.
+ * For EXACT constant scaling use tiku_gpu_scale_const (fixed-function,
+ * calibrated). This entry point remains as the proven "custom shaders
+ * execute" vehicle and the base for future ISA calibration.
  */
 tiku_gpu_err_t tiku_gpu_scale_bias(const tiku_gpu_surface_t *dst,
                                    const tiku_gpu_surface_t *src,
