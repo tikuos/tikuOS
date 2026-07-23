@@ -1394,6 +1394,7 @@ SRCS += arch/ambiq/tiku_nvm_region_apollo510.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_gpu.c   # /sys/gpu status nodes
 endif
 ifeq ($(TIKU_DRV_DC_ENABLE),1)
 SRCS += arch/ambiq/tiku_dc_arch.c
