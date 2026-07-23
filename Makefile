@@ -1392,6 +1392,9 @@ SRCS += arch/ambiq/tiku_mpu_arch.c
 SRCS += arch/ambiq/tiku_region_arch.c
 SRCS += arch/ambiq/tiku_nvm_region_apollo510.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
+ifeq ($(TIKU_DRV_GPU_ENABLE),1)
+SRCS += arch/ambiq/tiku_gpu_arch.c
+endif
 endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
 # am_util_delay.c, am_util_stdio.c, am_resources.c all dropped.
@@ -1466,6 +1469,22 @@ ifeq ($(TIKU_BITBANG_ENABLE),1)
 CFLAGS += -DTIKU_BITBANG_ENABLE=1
 SRCS += kernel/timers/tiku_bitbang.c
 endif
+
+# Apollo510 GPU (Think Silicon / Nema-class 2.5D) -- from-scratch, register-level
+# driver, no vendor blob. Opt-in, apollo510/apollo510b only (the SRCS entry is
+# in the apollo510 arch branch). GPU C tests pull it in via TEST_GPU.
+TIKU_DRV_GPU_ENABLE ?= 0
+ifeq ($(TEST_GPU),1)
+override TIKU_DRV_GPU_ENABLE := 1
+endif
+ifeq ($(TIKU_DRV_GPU_ENABLE),1)
+ifeq ($(filter apollo510 apollo510b,$(MCU)),)
+$(error TIKU_DRV_GPU_ENABLE=1 requires MCU=apollo510 or apollo510b (the GPU is \
+Apollo510-only); currently MCU=$(MCU))
+endif
+CFLAGS += -DTIKU_DRV_GPU_ENABLE=1
+endif
+
 SRCS += interfaces/led/tiku_led.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/bus/tiku_spi_bus.c
