@@ -136,6 +136,87 @@ tiku_gpu_err_t tiku_gpu_fill(void *dst, uint16_t w, uint16_t h,
 /** @brief Raw STATUS after the last op (diagnostics during bring-up). */
 uint32_t tiku_gpu_last_status(void);
 
+/*---------------------------------------------------------------------------*/
+/* P2: blit + blend                                                          */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief GPU pixel formats (hardware IMGFMT codes, TEXnSTRIDE[31:24]).
+ *
+ * These are the Nema texture-unit format codes (not the NemaDC scanout codes,
+ * which differ). RGBA8888 = 1 is the code proven by the P1 fill.
+ */
+typedef enum {
+    TIKU_GPU_FMT_RGBA8888 = 0x01,
+    TIKU_GPU_FMT_RGB565   = 0x04,
+    TIKU_GPU_FMT_RGB24    = 0x3C,
+} tiku_gpu_fmt_t;
+
+/** @brief Source-texture sampling (TEXnSTRIDE[23:16] IMGMODE). */
+typedef enum {
+    TIKU_GPU_SAMPLE_POINT    = 0,   /**< nearest-neighbour                    */
+    TIKU_GPU_SAMPLE_BILINEAR = 1,   /**< bilinear filter (for scaled blits)   */
+} tiku_gpu_sampling_t;
+
+/**
+ * @brief ROP blend modes (src_factor | dst_factor<<8, from nema_blender.h).
+ *
+ * The fragment shader samples the source; the fixed-function ROP blender
+ * (present on this silicon, CONFIG bit28) combines it with the destination
+ * per these factors.
+ */
+typedef enum {
+    TIKU_GPU_BLEND_CLEAR    = 0x0000,  /**< 0 (erase)                         */
+    TIKU_GPU_BLEND_SRC      = 0x0001,  /**< opaque copy: Sa                   */
+    TIKU_GPU_BLEND_SRC_OVER = 0x0501,  /**< Sa + Da*(1-Sa)                    */
+    TIKU_GPU_BLEND_SIMPLE   = 0x0504,  /**< Sa*Sa + Da*(1-Sa) (Nema blit dflt)*/
+    TIKU_GPU_BLEND_ADD      = 0x0101,  /**< Sa + Da (saturating)              */
+} tiku_gpu_blend_t;
+
+/**
+ * @brief A 2D surface in GPU-visible memory (SSRAM).
+ *
+ * Used as blit source and destination. @p base MUST be in SSRAM (never
+ * DTCM/ITCM). @p sampling applies only when the surface is a scaled-blit
+ * source; it is ignored for destinations and 1:1 blits.
+ */
+typedef struct {
+    void    *base;       /**< surface base (SSRAM, 32-byte aligned)           */
+    uint16_t w;          /**< width in pixels                                 */
+    uint16_t h;          /**< height in pixels                                */
+    uint16_t stride;     /**< bytes per row                                   */
+    uint8_t  format;     /**< tiku_gpu_fmt_t                                  */
+    uint8_t  sampling;   /**< tiku_gpu_sampling_t (source only)               */
+} tiku_gpu_surface_t;
+
+/**
+ * @brief 1:1 blit: copy @p src onto @p dst at (@p dx, @p dy), blended.
+ *
+ * Binds @p dst as TEX0 and @p src as TEX1, loads the texture-sampling
+ * fragment shader, programs the ROP blender for @p blend, and rasters a
+ * @p src->w × @p src->h rectangle. Handles D-cache discipline for both
+ * surfaces (clean the source, clean+invalidate the destination). Blocking.
+ *
+ * @return TIKU_GPU_OK, or TIKU_GPU_ERR_TIMEOUT if the raster never went idle.
+ */
+tiku_gpu_err_t tiku_gpu_blit(const tiku_gpu_surface_t *dst,
+                             const tiku_gpu_surface_t *src,
+                             int16_t dx, int16_t dy,
+                             tiku_gpu_blend_t blend);
+
+/**
+ * @brief Scaled blit: fit @p src into the @p dw × @p dh dest rect at (dx,dy).
+ *
+ * As tiku_gpu_blit but loads a scale matrix into the MatMul so the source is
+ * resampled to the destination rectangle (use TIKU_GPU_SAMPLE_BILINEAR on
+ * @p src for smooth scaling).
+ */
+tiku_gpu_err_t tiku_gpu_blit_rect(const tiku_gpu_surface_t *dst,
+                                  const tiku_gpu_surface_t *src,
+                                  int16_t dx, int16_t dy,
+                                  uint16_t dw, uint16_t dh,
+                                  tiku_gpu_blend_t blend);
+
 /**
  * @brief GPU interrupt handler (IRQ 28).
  *

@@ -109,6 +109,19 @@ static uint32_t s_last_status;
  * programming layer's no-texture path). */
 #define GPU_CODEPTR_FILL       0x141F001Fu
 
+/* DRAWCODEPTR for a textured blit: identical background (slot 31), but the
+ * foreground field carries the texture-emit bit (0x8000) -- the SAME slot-31
+ * shader then samples TEX1 and outputs the texel instead of DRAW_COLOR. So a
+ * blit needs NO per-draw shader upload; it reuses the init-time IMEM. Recovered
+ * from the ThinkSi blend path and confirmed by a live-silicon register capture
+ * of the vendor demo (DRAWCODEPTR read back as 0x141F801F during a blit). */
+#define GPU_CODEPTR_BLIT       0x141F801Fu
+
+/* MatMul (RASTCTRL 0x118): apply the loaded 3x3 (non-bypass). A blit derives
+ * source UVs by transforming the destination coordinates, so unlike the fill
+ * the multiplier must stay active. */
+#define GPU_RASTCTRL_MMUL_APPLY   0u
+
 /*---------------------------------------------------------------------------*/
 /* Interrupt handler                                                         */
 /*---------------------------------------------------------------------------*/
@@ -381,6 +394,131 @@ tiku_gpu_fill(void *dst, uint16_t w, uint16_t h,
     tiku_cpu_dcache_invalidate(dst, span);
 
     return err;
+}
+
+/*---------------------------------------------------------------------------*/
+/* P2: blit + blend                                                          */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * IEEE-754 bit pattern of a float. The MatMul registers accept this word and
+ * the hardware converts to its internal 24-bit matrix format on write --
+ * verified on silicon: writing 0x3F800000 (1.0f) to MM00 reads back
+ * 0x000F8000; writing -38.0f reads back exactly the value the vendor demo's
+ * matrix held. So the driver writes plain IEEE-754 and lets the GPU convert.
+ */
+static inline uint32_t
+gpu_f2u(float f)
+{
+    union { float f; uint32_t u; } x;
+    x.f = f;
+    return x.u;
+}
+
+/*
+ * Load the full 3x3 screen->texture matrix and leave the MatMul active.
+ * NemaGFX writes only the coefficients it changes and relies on an identity
+ * default that init never programs (both extraction passes flagged this), so
+ * we always write all nine -- correctness cannot depend on reset values.
+ * Off-diagonals are zero; only MM00/MM02/MM11/MM12 vary between translate and
+ * scale.
+ */
+static void
+gpu_load_matrix(float m00, float m02, float m11, float m12)
+{
+    GPU->MM00 = gpu_f2u(m00);   GPU->MM01 = gpu_f2u(0.0f);  GPU->MM02 = gpu_f2u(m02);
+    GPU->MM10 = gpu_f2u(0.0f);  GPU->MM11 = gpu_f2u(m11);   GPU->MM12 = gpu_f2u(m12);
+    GPU->MM20 = gpu_f2u(0.0f);  GPU->MM21 = gpu_f2u(0.0f);  GPU->MM22 = gpu_f2u(1.0f);
+    GPU->RASTCTRL = GPU_RASTCTRL_MMUL_APPLY;   /* apply the 3x3 (non-bypass) */
+}
+
+/*
+ * Common blit path. The destination rectangle is (dx,dy)..(dx+dw,dy+dh); the
+ * matrix maps each destination pixel back to a source texel. For a 1:1 blit
+ * dw/dh equal the source size and the matrix is a pure translate; for a scaled
+ * blit dw/dh differ and the matrix carries the scale factors.
+ */
+static tiku_gpu_err_t
+gpu_blit_core(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
+              int16_t dx, int16_t dy, uint16_t dw, uint16_t dh,
+              float m00, float m02, float m11, float m12,
+              tiku_gpu_blend_t blend)
+{
+    uint32_t dst_span = (uint32_t)dst->stride * (uint32_t)dst->h;
+    uint32_t src_span = (uint32_t)src->stride * (uint32_t)src->h;
+    tiku_gpu_err_t err;
+
+    /* Cache discipline for a non-coherent bus master: clean the source so the
+     * GPU sees the CPU's texel writes; clean+invalidate the destination so no
+     * dirty CPU line evicts onto the GPU output and the read-modify blend sees
+     * the current background. */
+    tiku_cpu_dcache_clean(src->base, src_span);
+    tiku_cpu_dcache_clean(dst->base, dst_span);
+    tiku_cpu_dcache_invalidate(dst->base, dst_span);
+
+    /* Destination surface = TEX0 (never sampled -> no IMGMODE field). */
+    GPU->TEX0BASE   = (uint32_t)(uintptr_t)dst->base;
+    GPU->TEX0STRIDE = ((uint32_t)dst->format << 24) |
+                      ((uint32_t)dst->stride & 0xFFFFu);
+    GPU->TEX0RES    = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
+
+    /* Source texture = TEX1 (sampled -> IMGMODE = sampling mode at [23:16]). */
+    GPU->TEX1BASE   = (uint32_t)(uintptr_t)src->base;
+    GPU->TEX1STRIDE = ((uint32_t)src->format   << 24) |
+                      ((uint32_t)src->sampling  << 16) |
+                      ((uint32_t)src->stride & 0xFFFFu);
+    GPU->TEX1RES    = (uint32_t)src->w | ((uint32_t)src->h << 16);
+
+    /* screen->texture transform (also clears the MatMul bypass). */
+    gpu_load_matrix(m00, m02, m11, m12);
+
+    /* Scissor to the destination surface: a stray coordinate cannot scribble
+     * beyond it (the draw rect bounds the write; this bounds the surface). */
+    GPU->CLIPMIN = 0u;
+    GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+
+    /* Fragment path: ROP blender = blend mode; DRAWCODEPTR = the slot-31
+     * shader with the texture-emit bit. No shader upload -- the init-time
+     * IMEM is reused. */
+    gpu_reg_write(GPU_REG_ROPBLEND_MODE, (uint32_t)blend);
+    GPU->DRAWCODEPTR = GPU_CODEPTR_BLIT;
+
+    /* Destination rectangle: packed integer (y<<16)|x, end corner exclusive. */
+    GPU->DRAWPT0 = ((uint32_t)(uint16_t)dy << 16) |
+                   ((uint32_t)(uint16_t)dx & 0xFFFFu);
+    GPU->DRAWPT1 = ((uint32_t)(uint16_t)(dy + (int16_t)dh) << 16) |
+                   ((uint32_t)(uint16_t)(dx + (int16_t)dw) & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+
+    err = tiku_gpu_wait_idle();
+    s_last_status = GPU->STATUS;
+
+    tiku_cpu_dcache_invalidate(dst->base, dst_span);
+    return err;
+}
+
+tiku_gpu_err_t
+tiku_gpu_blit(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
+              int16_t dx, int16_t dy, tiku_gpu_blend_t blend)
+{
+    /* 1:1 translate: tex = screen - (dx,dy), so the dest top-left samples
+     * src (0,0). Destination rect = source size. */
+    return gpu_blit_core(dst, src, dx, dy, src->w, src->h,
+                         1.0f, -(float)dx, 1.0f, -(float)dy, blend);
+}
+
+tiku_gpu_err_t
+tiku_gpu_blit_rect(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
+                   int16_t dx, int16_t dy, uint16_t dw, uint16_t dh,
+                   tiku_gpu_blend_t blend)
+{
+    /* Scale so the whole source fits the dest rect: tex = S*(screen - d),
+     * S = src_extent / dst_extent. */
+    float sx = (float)src->w / (float)dw;
+    float sy = (float)src->h / (float)dh;
+    return gpu_blit_core(dst, src, dx, dy, dw, dh,
+                         sx, -(float)dx * sx, sy, -(float)dy * sy, blend);
 }
 
 void
