@@ -107,6 +107,56 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
                                  int8_t *rssi);
 
 /**
+ * @brief Start a continuous RF test transmission and LEAVE IT ON.
+ *
+ * Unmodulated (@p modulated = 0) parks the RADIO in TXIDLE emitting a
+ * pure carrier at @p mhz -- one line on a spectrum analyser, for
+ * antenna/matching work, XO trim and conducted-power checks.
+ * Modulated (@p modulated = 1) additionally transmits a spectrally
+ * busy payload back-to-back via an END->START short, giving an
+ * occupied-bandwidth signal at the selected PHY.
+ *
+ * Unlike every other TX path here this RETURNS WITH THE RADIO ENABLED.
+ * The caller must call tiku_radio_arch_carrier_stop() before any
+ * beacon, scan or connection work, all of which assume they start from
+ * DISABLED.  Calling start twice stops the previous carrier first.
+ * TX power is whatever tiku_radio_arch_set_txpower() last selected.
+ *
+ * @param phy        PHY whose modulation/preamble to use
+ * @param mhz        Centre frequency in MHz, 2360..2500 (the low band
+ *                   below 2400 is reached via FREQUENCY.MAP)
+ * @param modulated  0 = unmodulated carrier, 1 = modulated
+ * @return 0 on success, -1 for an out-of-band @p mhz or a ramp-up that
+ *         never completed
+ */
+int tiku_radio_arch_carrier_start(tiku_radio_arch_phy_t phy,
+                                  uint16_t mhz, int modulated);
+
+/**
+ * @brief Stop a test carrier and restore the beacon/scan contract.
+ *
+ * Forces the RADIO to DISABLED, returns MODE to 1M and releases the
+ * Constant Latency hold.  Safe to call when no carrier is running.
+ */
+void tiku_radio_arch_carrier_stop(void);
+
+/**
+ * @brief Non-zero while a test carrier is transmitting.
+ */
+int tiku_radio_arch_carrier_active(void);
+
+/**
+ * @brief Live RADIO.STATE, the hardware's own view of what it is doing.
+ *
+ * The values that matter for a test carrier are TXIDLE (0xA, ramped up
+ * and emitting an unmodulated carrier) and TX (0xB, actively
+ * modulating); DISABLED is 0x0.  Reading the peripheral directly is how
+ * a bench session confirms RF is really on rather than trusting a
+ * driver flag.
+ */
+uint32_t tiku_radio_arch_state(void);
+
+/**
  * @brief Connectable advertising + CONNECT_IND capture (L-track L1).
  *
  * Transmits ADV_IND and hardware-turns-around (DISABLED_RXEN short)

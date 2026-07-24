@@ -133,6 +133,9 @@
 #ifndef TIKU_SHELL_CMD_RADIO154
 #define TIKU_SHELL_CMD_RADIO154 0 /**< radio154- 802.15.4 PHY bring-up (opt-in) */
 #endif
+#ifndef TIKU_SHELL_CMD_RFTEST
+#define TIKU_SHELL_CMD_RFTEST 0 /**< rftest- RF test carrier, bench only (opt-in) */
+#endif
 #ifndef TIKU_SHELL_CMD_AXONSPROBE
 #define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe- Axon NPU bring-up probe (opt-in) */
 #endif

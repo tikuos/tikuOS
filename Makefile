@@ -1797,6 +1797,9 @@ endif
 ifneq (,$(findstring TIKU_SHELL_CMD_RADIO154=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_radio154.c
 endif
+ifneq (,$(findstring TIKU_SHELL_CMD_RFTEST=1,$(EXTRA_CFLAGS)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_rftest.c
+endif
 endif
 # GPIO arch is always needed (VFS tree references GPIO read/write/dir).
 # RP2350 GPIO is bundled with the rp2350 arch sources at the top of the

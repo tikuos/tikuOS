@@ -810,8 +810,135 @@ static void radio_phy_force_disable(void)
         if (RADIO->EVENTS_DISABLED != 0u) {
             break;
         }
+
+
     }
     RADIO->EVENTS_DISABLED = 0u;
+}
+
+/*---------------------------------------------------------------------------*/
+/* RF TEST CARRIER -- unmodulated / modulated transmit for bench work         */
+/*---------------------------------------------------------------------------*/
+/*
+ * Two classic radio bring-up signals, on any frequency in the 2.4 GHz
+ * band rather than only the advertising channels:
+ *
+ *   UNMODULATED  ramp TX up and stop.  The RADIO parks in TXIDLE and
+ *                emits a pure carrier at FREQUENCY -- a single line on
+ *                a spectrum analyser.  Used for antenna/matching work,
+ *                XO trim, conducted-power checks and range rigs.
+ *   MODULATED    additionally START a packet whose payload is a
+ *                pseudo-random bit pattern, so the carrier carries the
+ *                modulation of the selected PHY -- an occupied-bandwidth
+ *                / eye-quality signal rather than a tone.
+ *
+ * The transmit stays on until tiku_radio_arch_carrier_stop().  That
+ * makes this the only path in the driver that leaves the RADIO enabled
+ * across a return, so the caller MUST stop it before any beacon, scan
+ * or connection work -- those all assume they start from DISABLED.
+ *
+ * The ramp sequence is the one every other TX path here uses: hold
+ * Constant Latency (erratum 20), observe the XO, kick HFCLK (this
+ * silicon needs the UARTE21 nudge), apply the PHY, then force DISABLED
+ * so a half-ramped prior op cannot make TXEN misfire.
+ */
+
+/** Non-zero while a test carrier is transmitting. */
+static uint8_t radio_carrier_on;
+
+/** PRBS-ish payload for the modulated form; content only needs to be
+ *  spectrally busy, not spec-exact PRBS9. */
+static uint8_t radio_carrier_pdu[64] __attribute__((aligned(4)));
+
+int tiku_radio_arch_carrier_start(tiku_radio_arch_phy_t phy,
+                                  uint16_t mhz, int modulated)
+{
+    uint32_t spin;
+    uint8_t  i;
+
+    if (mhz < 2360u || mhz > 2500u) {
+        return -1;                             /* outside the tunable band */
+    }
+    if (radio_carrier_on) {
+        tiku_radio_arch_carrier_stop();
+    }
+
+    radio_constlat_enter();
+    radio_xo_observe();
+    radio_hfclk_kick();
+    radio_apply_phy(phy);
+    radio_phy_force_disable();
+
+    /* FREQUENCY counts MHz above 2400; MAP=1 selects the low band so
+     * 2360..2399 is reachable as an offset above 2360. */
+    if (mhz >= 2400u) {
+        RADIO->FREQUENCY = (uint32_t)(mhz - 2400u);
+    } else {
+        RADIO->FREQUENCY = (uint32_t)(mhz - 2360u) |
+                           (1u << RADIO_FREQUENCY_MAP_Pos);
+    }
+    RADIO->TXPOWER = radio_txpower_code;
+    RADIO->SHORTS  = 0u;
+
+    if (modulated) {
+        /* Deliberately does NOT touch BASE0/PREFIX0/TXADDRESS: the
+         * access address is just four more bits on the air for a
+         * spectral test, and overwriting it left the shared adv AA
+         * clobbered so a later scan address-rejected every packet
+         * (12 devices -> 0).  Whatever AA is configured gets sent. */
+        radio_carrier_pdu[0] = 0x42u;
+        radio_carrier_pdu[1] = 37u;
+        for (i = 0u; i < 38u; i++) {
+            radio_carrier_pdu[2u + i] = (uint8_t)(0xA5u ^ (i * 7u));
+        }
+        RADIO->PACKETPTR = (uint32_t)(uintptr_t)radio_carrier_pdu;
+        /* END->START keeps re-transmitting without CPU help, so the
+         * modulation runs continuously rather than as one burst. */
+        RADIO->SHORTS = RADIO_SHORTS_END_START_Msk;
+    }
+
+    RADIO->EVENTS_READY = 0u;
+    RADIO->TASKS_TXEN   = 1u;
+    for (spin = 0u; spin < 400000u; spin++) {
+        if (RADIO->EVENTS_READY != 0u) {
+            break;
+        }
+    }
+    if (RADIO->EVENTS_READY == 0u) {
+        radio_phy_force_disable();
+        radio_constlat_exit();
+        return -1;                             /* ramp-up never completed  */
+    }
+    RADIO->EVENTS_READY = 0u;
+
+    if (modulated) {
+        RADIO->TASKS_START = 1u;
+    }
+
+    radio_carrier_on = 1u;
+    return 0;
+}
+
+void tiku_radio_arch_carrier_stop(void)
+{
+    if (radio_carrier_on == 0u) {
+        return;
+    }
+    RADIO->SHORTS = 0u;
+    radio_phy_force_disable();
+    radio_apply_phy(TIKU_RADIO_PHY_1M);         /* beacon/scan contract    */
+    radio_constlat_exit();
+    radio_carrier_on = 0u;
+}
+
+int tiku_radio_arch_carrier_active(void)
+{
+    return (int)radio_carrier_on;
+}
+
+uint32_t tiku_radio_arch_state(void)
+{
+    return RADIO->STATE;
 }
 
 int tiku_radio_arch_phy_tx(tiku_radio_arch_phy_t phy, uint8_t chan,
