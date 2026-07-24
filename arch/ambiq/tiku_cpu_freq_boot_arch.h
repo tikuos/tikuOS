@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -103,6 +103,26 @@ int           tiku_cpu_ambiq_clock_has_fault(void);
  * the portable tiku_cpu_dcache_* HAL.
  */
 void          tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len);
+
+/**
+ * @brief Drop cached copies of [addr, addr+len) so the next read is fresh.
+ *
+ * Call this AFTER an agent outside the CPU wrote that memory behind the
+ * cache's back -- the bootrom MRAM programmer (NVM mirror flush, NVM-region
+ * write, Tier-3 module load) or the GPU/DMA filling a buffer -- and before
+ * the CPU reads the range again, otherwise stale lines are returned. It is
+ * the mirror of tiku_cpu_ambiq_dcache_clean(), which runs BEFORE such an
+ * agent reads a CPU-written staging buffer.
+ *
+ * Per-part: Apollo510 (M55) invalidates exactly the given range with the SCB
+ * by-address op; Apollo4 Lite has no by-range op, so @p addr / @p len are
+ * ignored and the whole CACHECTRL cache is invalidated (coarse but correct)
+ * followed by a DSB/ISB pair. Routed from the portable
+ * tiku_cpu_dcache_invalidate() HAL.
+ *
+ * @param addr  Start of the range whose cached copies must be dropped.
+ * @param len   Length of the range in bytes.
+ */
 void          tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len);
 
 /**

@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -163,10 +163,11 @@
 #ifndef TIKU_SHELL_CMD_NAME
 #define TIKU_SHELL_CMD_NAME    1  /**< name    - Read or set device name */
 #endif
-/* `if` is opt-in: it costs ~1 KB of FRAM, and the default FR5969 build
- * (MEMORY_MODEL=small) sits within a few hundred bytes of the 48 KB
- * lower-FRAM cap once arrow-key history navigation is included.  `on`
- * (rules) covers most interactive use cases.  Re-enable with
+/* `if` is opt-in: it costs ~1 KB of FRAM.  The gate dates from the
+ * 48 KB lower-FRAM cap of the FR5969 (MEMORY_MODEL=small), which is no
+ * longer a supported part; FR5994/FR6989 have HIFRAM and default to
+ * MEMORY_MODEL=large, so the headroom argument no longer binds.  `on`
+ * (rules) still covers most interactive use cases.  Re-enable with
  *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_IF=1"
  * paired with a comparable disable (e.g. -DTIKU_SHELL_CMD_CALC=0). */
 #ifndef TIKU_SHELL_CMD_IF
@@ -294,15 +295,16 @@
 #define TIKU_SHELL_CMD_CHANGED 1  /**< changed - Block until VFS value changes */
 #endif
 /* I2C is opt-in: it pulls in tiku_i2c_bus and arch driver, which
- * together cost ~1.4 KB of FRAM.  The default FR5969 shell build
- * already sits at ~44 KB of the 48 KB FRAM cap, so enabling I2C
- * requires turning off something else of comparable size.  Two
- * recipes that fit comfortably:
+ * together cost ~1.4 KB of FRAM.  The gate dates from the FR5969's
+ * 48 KB lower-FRAM cap, where enabling I2C meant turning off
+ * something of comparable size; on the supported FR5994/FR6989 parts
+ * there is ample headroom and the pairing is no longer required.
+ * Two recipes that keep the trade explicit:
  *
- *   make MCU=msp430fr5969 TIKU_SHELL_ENABLE=1 \
+ *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
  *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1 -DTIKU_SHELL_CMD_HISTORY=0"
  *
- *   make MCU=msp430fr5969 TIKU_SHELL_ENABLE=1 \
+ *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
  *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1 -DTIKU_SHELL_CMD_CALC=0"
  */
 #ifndef TIKU_SHELL_CMD_I2C
@@ -315,11 +317,12 @@
 #define TIKU_SHELL_CMD_CLEAR  1  /**< clear  - ANSI clear screen */
 #endif
 
-/* Scripting and debugging extras: enabled per-build via EXTRA_CFLAGS
- * because the default FR5969 shell already sits ~250 B from the
- * 48 KB FRAM cap.  Pick the combination you need; multiple flags
+/* Scripting and debugging extras: enabled per-build via EXTRA_CFLAGS.
+ * The gate dates from the FR5969, whose default shell sat ~250 B from
+ * the 48 KB lower-FRAM cap; the supported FR5994/FR6989 parts have
+ * room to spare.  Pick the combination you need; multiple flags
  * are independent.  Example:
- *   make MCU=msp430fr5969 TIKU_SHELL_ENABLE=1 \
+ *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
  *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_DELAY=1 -DTIKU_SHELL_CMD_REPEAT=1"
  *
  * To enable the larger ones (peek/poke/i2c), pair them with a
@@ -347,7 +350,7 @@
 /** @defgroup TIKU_SHELL_COLOR ANSI Color Output
  * @brief Enable colored shell output via ANSI escape codes.
  *
- * Build with:  make TIKU_SHELL_COLOR=1 MCU=msp430fr5969
+ * Build with:  make TIKU_SHELL_COLOR=1 MCU=msp430fr5994
  *
  * Requires a terminal that renders ANSI escapes (picocom, screen,
  * minicom, PuTTY, telnet).  Disable for raw serial logging.
@@ -400,7 +403,7 @@
  * Requires the TikuKits TCP stack (TIKU_KITS_NET_TCP_ENABLE=1).
  * The net process must be auto-started alongside the CLI process.
  * Build with:
- *   make APP=cli MCU=msp430fr5969 \
+ *   make APP=cli MCU=msp430fr5994 \
  *        EXTRA_CFLAGS="-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_SHELL_TCP_ENABLE=1"
  */
 #ifndef TIKU_SHELL_TCP_ENABLE

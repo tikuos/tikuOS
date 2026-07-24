@@ -76,7 +76,7 @@ recompiling**.
   ___ _ _         ___  ___
  |_ _|_) |_ _  _/ _ \/ __|
   | || | / / || | (_) \__ \
-  |_||_|_\_\\_,_|\___/|___/  v0.05
+  |_||_|_\_\\_,_|\___/|___/  v0.06
   Simple. Ubiquitous. Intelligence, Everywhere.
 
   Apollo510  |  SRAM 512KB  MRAM 4MB

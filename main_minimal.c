@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05 — minimal smoke test (ARM ports)
+ * Tiku Operating System v0.06 — minimal smoke test (ARM ports)
  *
  * No kernel, no scheduler, no shell. Just brings up clocks + console
  * and prints a heartbeat in a loop, toggling an LED each iteration.

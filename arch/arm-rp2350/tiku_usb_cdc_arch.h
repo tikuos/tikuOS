@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -61,8 +61,47 @@ uint8_t tiku_usb_cdc_connected(void);
 /* OUTPUT (mirrors tiku_uart_arch.h)                                         */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Queue one character for the host.
+ *
+ * On a full TX ring this polls the bus for a bounded window
+ * (TX_FULL_WAIT_US) to let the host drain a slot rather than dropping
+ * the byte outright.  If it is still full at the deadline the driver
+ * latches an internal stalled flag so the rest of a burst drops fast
+ * instead of paying the wait per byte — a host that stops reading
+ * slows the console, it never freezes it.
+ *
+ * @param c  Character to queue
+ */
 void tiku_usb_cdc_putc(char c);
+
+/**
+ * @brief Queue a null-terminated string for the host.
+ *
+ * Feeds every character through tiku_usb_cdc_putc(), so it inherits the
+ * same TX-ring back-pressure: when the ring is full the call waits a
+ * bounded window for the host to drain a slot, and if the host is not
+ * reading it latches a stalled flag and drops the rest of the burst
+ * instead of freezing the console. No newline translation is done here.
+ *
+ * @param s  String to send; a NULL pointer is a no-op.
+ */
 void tiku_usb_cdc_puts(const char *s);
+
+/**
+ * @brief Formatted output over the CDC port (mirrors tiku_uart_printf).
+ *
+ * Lightweight formatter: no heap, no floating point. Supports %c, %s,
+ * %d, %u and %x with an optional '0' pad flag, a field width, and the
+ * 'l' length modifier (%ld, %lu, %lx); %% emits a literal percent sign
+ * and an unrecognized conversion is echoed verbatim. A newline in the
+ * literal format text is expanded to CRLF (text substituted by %s / %c
+ * is not). Emits through tiku_usb_cdc_putc(), so the same TX-ring
+ * back-pressure and drop-on-stalled-host behaviour applies.
+ *
+ * @param fmt  Format string; a NULL pointer is a no-op.
+ * @param ...  Format arguments.
+ */
 void tiku_usb_cdc_printf(const char *fmt, ...);
 
 /**
@@ -78,9 +117,49 @@ void tiku_usb_cdc_flush(void);
 /* INPUT (mirrors tiku_uart_arch.h)                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Non-zero if at least one received byte is waiting.
+ *
+ * Services the bus once before testing, so a byte the host has
+ * already delivered is visible without an intervening poll.  Never
+ * blocks.
+ *
+ * @return 1 if tiku_usb_cdc_getc() would return a byte, 0 otherwise.
+ */
 uint8_t  tiku_usb_cdc_rx_ready(void);
+
+/**
+ * @brief Read one byte from the RX ring. NON-BLOCKING.
+ *
+ * Services the bus first (tiku_usb_cdc_poll()) so bytes the host has
+ * already delivered are picked up, then pops the oldest byte from the
+ * 256-byte ring. It never waits for input: an empty ring returns the
+ * -1 sentinel immediately, so callers poll rather than block.
+ *
+ * @return The received byte as 0..255, or -1 if no byte is available.
+ */
 int      tiku_usb_cdc_getc(void);
+
+/**
+ * @brief Return the number of received bytes dropped since the counter
+ *        was last cleared.
+ *
+ * One overrun is counted per byte discarded because the 256-byte RX
+ * ring was already full when a bulk-OUT packet arrived from the host,
+ * i.e. the shell/application is not draining input fast enough. Purely
+ * diagnostic: it is free-running (wraps at 65535, no saturation), is
+ * zeroed by tiku_usb_cdc_init(), and reading it does not clear it.
+ *
+ * @return Dropped-byte count since init or the last overrun reset.
+ */
 uint16_t tiku_usb_cdc_overrun_count(void);
+
+/**
+ * @brief Clear the RX overrun counter back to zero.
+ *
+ * Diagnostic bookkeeping only -- it does not touch the RX ring or any
+ * buffered data. Use it to bracket a measurement window.
+ */
 void     tiku_usb_cdc_overrun_reset(void);
 
 /*---------------------------------------------------------------------------*/

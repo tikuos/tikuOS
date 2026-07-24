@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -109,6 +109,12 @@ void tiku_uart_overrun_reset(void);
  *
  * Allows unit tests to feed bytes into the UART receive path
  * without the RX ISR running.  Only available when HAS_TESTS=1.
+ *
+ * Not part of the normal driver path: nothing in the shell or the
+ * console backend calls it, and no hardware is touched.  The byte
+ * appears to tiku_uart_rx_ready() / tiku_uart_getc() exactly as a
+ * received one would.  If the ring is full the byte is dropped
+ * silently.  Under the CCS/TI build this is a no-op stub.
  *
  * @param byte Byte to inject
  */

@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -18,6 +18,20 @@
 
 #include <stdint.h>
 
+/**
+ * @brief "wifi" command handler — drive the CYW43439 WiFi radio.
+ *
+ * Sub-commands: "status" (driver state, MAC, link), "scan" (start an
+ * active scan), "list" (cached scan results), "connect <ssid> <psk>"
+ * (WPA2-PSK join), "connect3 <ssid> <psk>" (WPA3-SAE join),
+ * "disconnect", "forget" (clear stored credentials), "up" (bring the IP
+ * stack up over WiFi via DHCP, when that kit is built in) and "help".
+ * With no argument it prints the usage summary.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]
+ *              and argv[3] carry the SSID and passphrase for the joins
+ */
 void tiku_shell_cmd_wifi(uint8_t argc, const char *argv[]);
 
 #endif /* TIKU_SHELL_CMD_WIFI_H_ */

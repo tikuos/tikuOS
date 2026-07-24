@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -19,8 +19,9 @@
  * parser skips them during dispatch.  Every real entry is wrapped in
  * an #if TIKU_SHELL_CMD_* guard from tiku_shell_config.h, so the table
  * — and the code it pulls in — shrinks to exactly the commands a given
- * build enables.  This is how the same source fits both the tight
- * FR5969 lower-FRAM budget and the roomier FR5994/FR6989 parts.
+ * build enables.  This is how the same source spans everything from a
+ * tight lower-FRAM MSP430 budget to the roomier FR5994/FR6989 parts
+ * and the Cortex-M targets.
  *
  * The shell process itself is a single cooperative protothread driven
  * by a periodic poll timer.  On each TIKU_EVENT_TIMER it drains every
@@ -907,8 +908,8 @@ _Static_assert(TIKU_SHELL_LINE_SIZE <= 256,
  *
  * Uses the raw tiku_shell_io_putc() primitive rather than
  * SHELL_PRINTF to keep the formatted-output path out of the recall
- * code: the default FR5969 build sits very close to the lower-FRAM
- * cap and every avoided pull-in helps.
+ * code — it costs nothing here and keeps the smallest MSP430 builds
+ * from pulling in the formatter for history alone.
  *
  * @param up  Non-zero to recall an older entry, zero to step newer.
  */

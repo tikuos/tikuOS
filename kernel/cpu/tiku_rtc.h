@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -65,7 +65,38 @@ void tiku_rtc_set_seconds(uint32_t epoch_seconds);
 int tiku_rtc_is_set(void);
 
 #if defined(TIKU_RTC_TEST_HOOKS) && TIKU_RTC_TEST_HOOKS
+/**
+ * @brief TEST-ONLY hook: capture the wall clock and its persist gate.
+ *
+ * Exists so the test suite can save the RTC state it is about to
+ * perturb and put it back afterwards; it is not part of the normal
+ * API and is compiled only when TIKU_RTC_TEST_HOOKS is set.  @p epoch
+ * receives the *reconstructed* wall clock (what tiku_rtc_get_seconds()
+ * returns right now, so 0 when the clock was never set), @p gate the
+ * raw magic word that validates the persisted baseline.  Read-only:
+ * no NVM write, no MPU unlock.  Either pointer may be NULL to skip
+ * that field.
+ *
+ * @param epoch  Out: current wall-clock seconds (NULL to skip)
+ * @param gate   Out: raw persist-cell gate word (NULL to skip)
+ */
 void tiku_rtc_test_snapshot(uint32_t *epoch, uint32_t *gate);
+
+/**
+ * @brief TEST-ONLY hook: put back a snapshotted clock/gate pair.
+ *
+ * Counterpart of tiku_rtc_test_snapshot(), for the test suite only;
+ * compiled with TIKU_RTC_TEST_HOOKS.  Writes @p epoch and @p gate
+ * straight into the persistent cell inside one MPU-unlock window,
+ * then re-pairs the baseline with the current uptime so a later
+ * tiku_rtc_get_seconds() resumes from @p epoch.  The boot-init flag
+ * is set from @p gate, so restoring a gate other than the cell magic
+ * deliberately re-creates the never-set state and lets a later
+ * tiku_rtc_init() re-prime the cell.
+ *
+ * @param epoch  Epoch baseline to store
+ * @param gate   Gate word to store (the cell magic marks it valid)
+ */
 void tiku_rtc_test_restore(uint32_t epoch, uint32_t gate);
 #endif
 

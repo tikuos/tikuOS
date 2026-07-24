@@ -1,11 +1,11 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.c - MSP430FR5969 CPU watchdog timer configuration
+ * tiku_cpu_watchdog_arch.c - MSP430 CPU watchdog timer configuration
  *
  * SPDX-License-Identifier: Apache-2.0
  */

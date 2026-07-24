@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -30,7 +30,7 @@
  * Examples:
  *   gpio 1 0 1       — set P1.0 high
  *   gpio 4 5         — read P4.5
- *   gpio 4 6 t       — toggle P4.6 (red LED on FR5969 LP)
+ *   gpio 1 0 t       — toggle P1.0 (red LED on the FR5994 LP)
  *
  * @param argc  Argument count
  * @param argv  Argument vector

@@ -1,13 +1,13 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - MSP430FR5969 CPU common functions
+ * tiku_cpu_common.c - MSP430 CPU common functions
  *
- * This file provides MSP430FR5969-specific implementations of common
+ * This file provides MSP430-specific implementations of common
  * CPU functions including delay routines and hardware abstractions.
  *
  * SPDX-License-Identifier: Apache-2.0

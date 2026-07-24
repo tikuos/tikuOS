@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -61,7 +61,37 @@ void tiku_stack_paint(void);
 uint32_t tiku_stack_free(void);
 
 #if defined(TIKU_STACK_TEST_HOOKS) && TIKU_STACK_TEST_HOOKS
+/**
+ * @brief TEST-ONLY hook: paint an explicit range with the sentinel.
+ *
+ * The same painter tiku_stack_paint() uses, but on caller-supplied
+ * bounds, so the test suite can exercise it over a plain buffer
+ * instead of the live stack (whose bounds are arch-supplied and whose
+ * result is unrepeatable).  Not part of the normal API; compiled only
+ * when TIKU_STACK_TEST_HOOKS is set.  Fills the word-aligned range
+ * [bottom, sp - margin); a no-op when @p bottom is 0 or the range is
+ * no larger than @p margin.
+ *
+ * @param bottom  Lowest address to paint (0 = no-op)
+ * @param sp      Simulated stack pointer; painting stops @p margin below
+ * @param margin  Bytes left unpainted just below @p sp
+ */
 void tiku_stack_test_paint(uintptr_t bottom, uintptr_t sp, uint32_t margin);
+
+/**
+ * @brief TEST-ONLY hook: measure the intact cushion in an explicit range.
+ *
+ * The same scanner tiku_stack_free() uses, on caller-supplied bounds;
+ * test suite only, compiled with TIKU_STACK_TEST_HOOKS.  Counts intact
+ * sentinel words upward from @p bottom and stops at the first
+ * overwritten word — the deepest point the "stack" ever reached — or
+ * at @p sp, which is never read at or above.
+ *
+ * @param bottom  Lowest address of the painted range (0 = returns 0)
+ * @param sp      Upper bound of the scan
+ * @return Bytes of intact sentinel above @p bottom; 0 if @p bottom is 0
+ *         or @p sp is not above it
+ */
 uint32_t tiku_stack_test_free(uintptr_t bottom, uintptr_t sp);
 #endif
 

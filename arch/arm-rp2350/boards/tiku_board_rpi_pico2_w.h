@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -66,7 +66,29 @@
  * LED macros below do not pull the full GPIO header into the include chain.
  */
 void tiku_rp2350_gpio_init_output(uint8_t pin);
+
+/**
+ * @brief Drive an absolute GPIO pin to a logic level.
+ *
+ * Writes the SIO GPIO_OUT_SET / GPIO_OUT_CLR registers, so the update
+ * is atomic and leaves every other pin alone. (SIO ignores the generic
+ * +0x2000 / +0x3000 atomic aliases; its own adjacent SET/CLR/XOR
+ * registers are the only correct way to do this.) The pin must already
+ * be an output; pins above GP29 are silently ignored.
+ *
+ * @param pin    Absolute GP pin number (0..29).
+ * @param value  0 drives the pin low; non-zero drives it high.
+ */
 void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value);
+
+/**
+ * @brief Toggle an absolute GPIO output pin.
+ *
+ * Writes the SIO GPIO_OUT_XOR register: one atomic flip that does not
+ * disturb other pins. Pins above GP29 are silently ignored.
+ *
+ * @param pin  Absolute GP pin number (0..29).
+ */
 void tiku_rp2350_gpio_toggle(uint8_t pin);
 
 /**

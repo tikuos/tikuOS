@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -23,6 +23,20 @@
 extern "C" {
 #endif
 
+/**
+ * @brief "bt" command handler — drive the CYW43439 Bluetooth subsystem.
+ *
+ * Sub-commands: "status" (BD_ADDR, HCI/LMP version, firmware, adv/scan
+ * state), "advertise <name>|stop", "scan [stop]", "list" (cached scan
+ * results), "connections", "connect <slot|addr> [public]",
+ * "disconnect [N]", "discover [N]", "read <handle> [N]",
+ * "subscribe <cccd_handle> [N]", "bonds", "unpair [N]" and "help".
+ * With no argument it prints the help.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector; argv[1] selects the sub-command, argv[2..]
+ *              carry its name, slot, address or attribute handle
+ */
 void tiku_shell_cmd_bt(uint8_t argc, const char *argv[]);
 
 #ifdef __cplusplus

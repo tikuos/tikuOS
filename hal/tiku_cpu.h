@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -44,6 +44,27 @@ void tiku_cpu_irq_disable(void);
 /*---------------------------------------------------------------------------*/
 
 void tiku_cpu_boot_init(void);
+
+/**
+ * @brief Apply a core-clock frequency to the platform clock tree.
+ *
+ * Ordering matters: call this AFTER tiku_cpu_boot_init(), which brings
+ * the oscillators and clock tree to a known state, and BEFORE anything
+ * whose timing derives from the core or peripheral clock — UART baud,
+ * the system tick, and cycle-counted delays all read the rate this
+ * call establishes.  tiku_boot_init_cpu() does exactly that pairing,
+ * inside the CPU stage, ahead of memory, peripherals and services.
+ *
+ * Delegates to the arch backend, which also refreshes what
+ * tiku_cpu_mclk_hz() / _smclk_hz() / _aclk_hz() report.  A request the
+ * part cannot honour does not fail: it is clamped or ignored (MSP430
+ * clamps an out-of-range request; nRF54L is a no-op, its core PLL
+ * being fixed), so a caller that cares must confirm the outcome with
+ * tiku_cpu_mclk_hz() — which is what the shell "freq" command does
+ * when it re-invokes this at runtime.
+ *
+ * @param cpu_freq  Requested core frequency in MHz
+ */
 void tiku_cpu_freq_init(unsigned int cpu_freq);
 
 /*---------------------------------------------------------------------------*/

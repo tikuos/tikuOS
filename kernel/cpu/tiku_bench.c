@@ -1,6 +1,11 @@
 /*
- * Tiku Operating System v0.05
- * Portable micro-benchmark timebase.
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_bench.c - Portable micro-benchmark timebase
  *
  * ARM targets prefer the DWT cycle counter, with the already initialized
  * kernel htimer as a runtime fallback.  MSP430 uses its Timer_A htimer.

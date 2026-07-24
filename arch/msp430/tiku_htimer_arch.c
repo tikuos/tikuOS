@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -16,7 +16,7 @@
 
 /**
  * @file tiku_htimer_arch.c
- * @brief MSP430FR5969 hardware timer implementation
+ * @brief MSP430 hardware timer implementation
  *
  * Timer A1 based hardware timer for the htimer subsystem.
  */

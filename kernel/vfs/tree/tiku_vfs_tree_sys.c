@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -15,7 +15,7 @@
  *   /sys/time            (rw) wall-clock seconds since epoch
  *   /sys/device/name     (rw) FRAM-persisted device name
  *   /sys/device/id       stable per-chip ID from the unique-ID ROM
- *   /sys/device/mcu      silicon name ("MSP430FR5969", ...)
+ *   /sys/device/mcu      silicon name ("MSP430FR5994", ...)
  *   /sys/device/version  OS version (alias of /sys/version)
  *   /sys/mem/{sram,nvm}  configured memory sizes
  *   /sys/mem/free        live stack headroom (SP - _end)
@@ -187,7 +187,7 @@ time_write(const char *buf, size_t len)
  * @brief Read handler for /sys/mem/sram.
  *
  * Renders the device's total SRAM size in bytes as a decimal line
- * ("2048\n" on FR5969).  This is the silicon constant from the
+ * ("8192\n" on FR5994).  This is the silicon constant from the
  * device header, not a live measurement — see /sys/mem/free for
  * runtime headroom.
  *
@@ -435,7 +435,7 @@ sched_idle_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/version.
  *
- * Renders the TIKU_VERSION string from tiku.h ("0.05\n").  Also
+ * Renders the TIKU_VERSION string from tiku.h ("0.06\n").  Also
  * exposed as /sys/device/version for clients that read the whole
  * device directory in one sweep.
  *
@@ -569,7 +569,7 @@ device_id_read(char *buf, size_t max)
  * @brief Read handler for /sys/device/mcu.
  *
  * Renders the silicon name from the selected device header
- * ("MSP430FR5969\n", "RP2350\n", ...).
+ * ("MSP430FR5994\n", "RP2350\n", ...).
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -12,9 +12,9 @@
 
 /**
  * @file tiku_timer_arch.h
- * @brief MSP430FR5969 architecture-specific clock implementation
+ * @brief MSP430 architecture-specific clock implementation
  *
- * System clock functionality using Timer A0 on MSP430FR5969.
+ * System clock functionality using Timer A0 on MSP430.
  * Provides tick counting, delays, and time measurement.
  */
 
@@ -58,7 +58,7 @@ typedef unsigned int  tiku_clock_arch_counter_t;
 /**
  * @brief Initialize the architecture-specific system clock
  *
- * Sets up Timer A0 for system tick generation on MSP430FR5969.
+ * Sets up Timer A0 for system tick generation on MSP430.
  * Must be called during system initialization.
  */
 void tiku_clock_arch_init(void);

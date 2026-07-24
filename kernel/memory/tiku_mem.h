@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -258,6 +258,22 @@ typedef struct {
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 int tiku_thread_in_kernel(void);           /* kernel/threads/tiku_thread.c */
 void     tiku_mem_guard_note_violation(void);
+
+/**
+ * @brief Lifetime count of allocator calls refused by the worker guard.
+ *
+ * Counts every TIKU_MEM_KERNEL_ONLY / _VOID rejection since boot: a
+ * memory mutator entered from a preemptive worker thread instead of
+ * kernel context, which returns an error/NULL (or returns early) and
+ * bumps this counter rather than mutating allocator state.  It is
+ * therefore a violation count, not a capacity number: any non-zero
+ * value means a worker broke the pure-computation confinement policy
+ * and its allocation silently did not happen.  Zero on a healthy
+ * system.  Declared only under TIKU_THREADS_ENABLE; without it the
+ * guard compiles to nothing and there is nothing to count.
+ *
+ * @return Number of worker-context calls refused since boot
+ */
 uint32_t tiku_mem_guard_violations(void);
 
 #define TIKU_MEM_KERNEL_ONLY(retval)              \

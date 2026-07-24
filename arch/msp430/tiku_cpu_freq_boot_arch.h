@@ -1,14 +1,14 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_arch.h - MSP430FR5969 CPU frequency configuration
+ * tiku_cpu_freq_boot_arch.h - MSP430 CPU frequency configuration
  *
  * This file provides the core CPU frequency configuration functions
- * for the Tiku Operating System on the MSP430FR5969 microcontroller.
+ * for the Tiku Operating System on MSP430 microcontrollers.
  * It includes clock system configuration, frequency setting, and
  * frequency getting functions.
  *

@@ -1,15 +1,21 @@
-/* Generated trust store (RSA-2048/4096 + P-256 + P-384 roots).
- * Tiku Operating System v0.05
+/*
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * Source: Mozilla CA bundle (curl.se/ca/cacert.pem), filtered to
- * the algorithms the tiku verify kit supports.  Regenerate via
+ * tiku_basic_https_roots.inl - generated trust store
+ *                              (RSA-2048/4096 + P-256 + P-384 roots)
+ *
+ * NOT a standalone translation unit.  Included from tiku_basic_https.inl.
+ *
+ * Source: Mozilla CA bundle (curl.se/ca/cacert.pem), filtered to the
+ * algorithms the tiku verify kit supports.  Regenerate via gen_roots.c.
+ * Do not edit by hand.
  *
  * SPDX-License-Identifier: Apache-2.0
- * gen_roots.c.  Do not edit by hand. */
+ */
 static const unsigned char tiku_https_roots_der[] = {
   0x30,0x82,0x04,0x91,0x30,0x82,0x03,0x79,0xa0,0x03,0x02,0x01,0x02,0x02,0x04,0x45,
   0x6b,0x50,0x54,0x30,0x0d,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x01,0x05,

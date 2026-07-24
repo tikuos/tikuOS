@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -120,10 +120,88 @@ tiku_event_payload_kind_t tiku_event_payload_kind(tiku_event_t ev);
  * carries that kind, else a safe default (NULL / 0).  These replace the blind
  * void*->T* conversions at every consumer.
  */
+
+/**
+ * @brief Checked accessor for the process payload of an event.
+ *
+ * Yields the process only for the ids whose payload kind is PROC;
+ * every other id yields NULL rather than a misinterpreted object.
+ * Pure: it reads no kernel state, takes no atomic section, and only
+ * decodes the word it is handed — so it is reentrant and safe to call
+ * from ISR context as well as from a process thread.  It posts
+ * nothing; posting is tiku_process_post_proc().
+ *
+ * @param ev   Event identifier as delivered to the thread
+ * @param data Raw payload word delivered alongside @p ev
+ * @return The process carried by @p ev, or NULL if @p ev carries no
+ *         PROC payload
+ */
 struct tiku_process        *tiku_event_proc (tiku_event_t ev, tiku_event_data_t data);
+
+/**
+ * @brief Checked accessor for the VFS-node payload of an event.
+ *
+ * Yields the watched node only when @p ev is TIKU_EVENT_VFS, the one
+ * id whose payload kind is NODE; every other id yields NULL rather
+ * than a misinterpreted object.  Pure: it reads no kernel state,
+ * takes no atomic section, and only decodes the word it is handed —
+ * so it is reentrant and safe to call from ISR context as well as
+ * from a process thread.  It posts nothing; posting is
+ * tiku_process_post_node().
+ *
+ * @param ev   Event identifier as delivered to the thread
+ * @param data Raw payload word delivered alongside @p ev
+ * @return The node that changed, or NULL if @p ev carries no NODE
+ *         payload
+ */
 const struct tiku_vfs_node *tiku_event_node (tiku_event_t ev, tiku_event_data_t data);
+
+/**
+ * @brief Checked accessor for the software-timer payload of an event.
+ *
+ * Yields the timer that expired only when @p ev is TIKU_EVENT_TIMER;
+ * every other id yields NULL.  Pure (no kernel state, no atomic
+ * section), hence reentrant and safe from ISR context as well as from
+ * a process thread.
+ *
+ * @param ev   Event identifier as delivered to the thread
+ * @param data Raw payload word delivered alongside @p ev
+ * @return The tiku_timer that expired, or NULL if @p ev carries no
+ *         TIMER payload
+ */
 struct tiku_timer          *tiku_event_timer(tiku_event_t ev, tiku_event_data_t data);
+
+/**
+ * @brief Checked accessor for the packed integer payload of an event.
+ *
+ * Yields the value only when @p ev carries a U32 payload — today just
+ * TIKU_EVENT_GPIO, whose word packs the port/pin that changed; every
+ * other id yields 0.  The payload word is unpacked, never
+ * dereferenced, so a wrong id costs a zero and not a bad load.  Pure,
+ * reentrant, and safe from ISR context as well as from a process
+ * thread.
+ *
+ * @param ev   Event identifier as delivered to the thread
+ * @param data Raw payload word delivered alongside @p ev
+ * @return The packed value, or 0 if @p ev carries no U32 payload
+ */
 uint32_t                    tiku_event_u32  (tiku_event_t ev, tiku_event_data_t data);
+
+/**
+ * @brief Checked accessor for the opaque app pointer of an event.
+ *
+ * Yields the pointer only when @p ev carries a PTR payload:
+ * TIKU_EVENT_INIT (the data handed to tiku_process_start()) or any
+ * user-range id (TIKU_EVENT_USER .. TIKU_EVENT_TIMER-1).  Every other
+ * id — including the control events that carry nothing — yields NULL.
+ * Pure, reentrant, and safe from ISR context as well as from a
+ * process thread.
+ *
+ * @param ev   Event identifier as delivered to the thread
+ * @param data Raw payload word delivered alongside @p ev
+ * @return The application pointer, or NULL if @p ev carries no PTR
+ *         payload
+ */
 void                       *tiku_event_ptr  (tiku_event_t ev, tiku_event_data_t data);
 
 /*

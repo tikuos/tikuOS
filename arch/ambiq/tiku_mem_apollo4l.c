@@ -1,11 +1,11 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch_apollo4l.c - Apollo4 Lite memory architecture + MRAM-backed NVM
+ * tiku_mem_apollo4l.c - Apollo4 Lite memory architecture + MRAM-backed NVM
  *
  * Persistent state lives in the TCM .uninit region (warm-reset durable). For
  * power-cycle durability it is mirrored to a 32 KB MRAM page reserved at the top
