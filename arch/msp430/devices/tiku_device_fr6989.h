@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -146,6 +146,24 @@
 
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
 #define TIKU_DEVICE_ADC_CHANNELS    16  /**< External channels A0-A15 */
+
+/**
+ * External analog input pin for each ADC12_B channel, indexed by
+ * channel number and encoded as (port << 4) | bit — so 0x87 is P8.7.
+ * The analog function is selected by setting BOTH PxSEL0 and PxSEL1.
+ *
+ * NOTE: the FR6989 map differs sharply from FR5969/FR5994.  Only
+ * A0-A3 share the P1.0-P1.3 assignment; A4-A7 live on P8.7-P8.4
+ * (descending) and A8-A15 on P9.0-P9.7.  Assuming the FR59xx layout
+ * here silently muxes the wrong pins.
+ *
+ * Source: SLAS789D (MSP430FR698x/FR598x) pinout, A0-A15.
+ */
+#define TIKU_DEVICE_ADC_PIN_MAP                                     \
+    { 0x10, 0x11, 0x12, 0x13,   /* A0-A3   P1.0-P1.3 */             \
+      0x87, 0x86, 0x85, 0x84,   /* A4-A7   P8.7-P8.4 (descending) */\
+      0x90, 0x91, 0x92, 0x93,   /* A8-A11  P9.0-P9.3 */             \
+      0x94, 0x95, 0x96, 0x97 }  /* A12-A15 P9.4-P9.7 */
 
 /*---------------------------------------------------------------------------*/
 /* LCD CONTROLLER                                                            */

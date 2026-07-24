@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -155,5 +155,23 @@
 
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
 #define TIKU_DEVICE_ADC_CHANNELS    32  /**< External channels A0-A31 */
+
+/**
+ * External analog input pin for each ADC12_B channel, indexed by
+ * channel number and encoded as (port << 4) | bit — so 0x74 is P7.4.
+ * The analog function is selected by setting BOTH PxSEL0 and PxSEL1.
+ *
+ * A0-A15 match the FR5969 assignment; the FR5994 additionally brings
+ * A16-A19 out on P7.4-P7.7.  Channels above A19 have no external pin
+ * (A30/A31 are the internal temperature and battery inputs).
+ *
+ * Source: SLASE54D (MSP430FR5994 family) pinout, A0-A19.
+ */
+#define TIKU_DEVICE_ADC_PIN_MAP                                     \
+    { 0x10, 0x11, 0x12, 0x13,   /* A0-A3   P1.0-P1.3 */             \
+      0x14, 0x15, 0x23, 0x24,   /* A4-A7   P1.4,P1.5,P2.3,P2.4 */   \
+      0x40, 0x41, 0x42, 0x43,   /* A8-A11  P4.0-P4.3 */             \
+      0x30, 0x31, 0x32, 0x33,   /* A12-A15 P3.0-P3.3 */             \
+      0x74, 0x75, 0x76, 0x77 }  /* A16-A19 P7.4-P7.7 */
 
 #endif /* TIKU_DEVICE_FR5994_H_ */

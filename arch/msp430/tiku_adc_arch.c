@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -170,6 +170,58 @@ tiku_adc_arch_close(void)
     REFCTL0 &= ~REFON;
 }
 
+/**
+ * External analog input pin for each ADC12_B channel, supplied by the
+ * selected device header as (port << 4) | bit.  The map is per-device
+ * because the assignment is NOT common across the family: FR5969 and
+ * FR5994 agree, but on FR6989 only A0-A3 match and A4-A15 sit on
+ * ports 8 and 9 (see TIKU_DEVICE_ADC_PIN_MAP in each device header).
+ */
+static const uint8_t adc_pin_map[] = TIKU_DEVICE_ADC_PIN_MAP;
+
+#define ADC_PIN_MAP_LEN  (sizeof adc_pin_map / sizeof adc_pin_map[0])
+
+/** Marks a channel with no external pin on this device. */
+#define ADC_PIN_NONE     0xFFu
+
+/**
+ * @brief Switch one mapped pin to its analog function.
+ *
+ * Sets both PxSEL0 and PxSEL1 for the encoded pin, which is what
+ * selects the ADC input on ADC12_B parts.  Port cases beyond 4 are
+ * compiled only where the device actually has that port, so a part
+ * without P7/P8/P9 does not reference registers it lacks.
+ *
+ * @param enc  Pin encoded as (port << 4) | bit
+ * @return TIKU_ADC_OK, or TIKU_ADC_ERR_PARAM for an unmappable port
+ */
+static int
+adc_pin_to_analog(uint8_t enc)
+{
+    uint8_t port = (uint8_t)(enc >> 4);
+    uint8_t m    = (uint8_t)(1u << (enc & 0x0Fu));
+
+    switch (port) {
+    case 1: P1SEL0 |= m; P1SEL1 |= m; break;
+    case 2: P2SEL0 |= m; P2SEL1 |= m; break;
+    case 3: P3SEL0 |= m; P3SEL1 |= m; break;
+    case 4: P4SEL0 |= m; P4SEL1 |= m; break;
+#if TIKU_DEVICE_HAS_PORT7
+    case 7: P7SEL0 |= m; P7SEL1 |= m; break;
+#endif
+#if TIKU_DEVICE_HAS_PORT8
+    case 8: P8SEL0 |= m; P8SEL1 |= m; break;
+#endif
+#if TIKU_DEVICE_HAS_PORT9
+    case 9: P9SEL0 |= m; P9SEL1 |= m; break;
+#endif
+    default:
+        return TIKU_ADC_ERR_PARAM;
+    }
+
+    return TIKU_ADC_OK;
+}
+
 int
 tiku_adc_arch_channel_init(uint8_t channel)
 {
@@ -181,35 +233,12 @@ tiku_adc_arch_channel_init(uint8_t channel)
         return TIKU_ADC_OK;
     }
 
-    /*
-     * MSP430FR5969 ADC12_B channel-to-pin mapping:
-     *   A0-A5   -> P1.0-P1.5  (SEL0=1, SEL1=1 for analog)
-     *   A8-A11  -> P4.0-P4.3
-     *   A12-A15 -> P3.0-P3.3
-     *
-     * Channels 6-7 and 16-29 are not externally available
-     * on the MSP430FR5969.
-     */
-    switch (channel) {
-    case 0:  P1SEL0 |= BIT0; P1SEL1 |= BIT0; break;
-    case 1:  P1SEL0 |= BIT1; P1SEL1 |= BIT1; break;
-    case 2:  P1SEL0 |= BIT2; P1SEL1 |= BIT2; break;
-    case 3:  P1SEL0 |= BIT3; P1SEL1 |= BIT3; break;
-    case 4:  P1SEL0 |= BIT4; P1SEL1 |= BIT4; break;
-    case 5:  P1SEL0 |= BIT5; P1SEL1 |= BIT5; break;
-    case 8:  P4SEL0 |= BIT0; P4SEL1 |= BIT0; break;
-    case 9:  P4SEL0 |= BIT1; P4SEL1 |= BIT1; break;
-    case 10: P4SEL0 |= BIT2; P4SEL1 |= BIT2; break;
-    case 11: P4SEL0 |= BIT3; P4SEL1 |= BIT3; break;
-    case 12: P3SEL0 |= BIT0; P3SEL1 |= BIT0; break;
-    case 13: P3SEL0 |= BIT1; P3SEL1 |= BIT1; break;
-    case 14: P3SEL0 |= BIT2; P3SEL1 |= BIT2; break;
-    case 15: P3SEL0 |= BIT3; P3SEL1 |= BIT3; break;
-    default:
-        return TIKU_ADC_ERR_PARAM;
+    if (channel >= ADC_PIN_MAP_LEN ||
+        adc_pin_map[channel] == ADC_PIN_NONE) {
+        return TIKU_ADC_ERR_PARAM;   /* no external pin on this device */
     }
 
-    return TIKU_ADC_OK;
+    return adc_pin_to_analog(adc_pin_map[channel]);
 }
 
 int
