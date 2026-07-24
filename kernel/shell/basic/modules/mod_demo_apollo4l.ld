@@ -22,7 +22,7 @@ MEMORY
      * MRAM is executable but only bootrom-programmable, so the loader
      * installs via tiku_nvm_mram_program instead of CPU stores.  Kept in
      * sync with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */
-    CARVE (rx) : ORIGIN = 0x97000, LENGTH = 0x1000    /* 4 KB */
+    CARVE (rx) : ORIGIN = 0x90000, LENGTH = 0x8000   /* 32 KB */
 }
 
 ENTRY(module_init)

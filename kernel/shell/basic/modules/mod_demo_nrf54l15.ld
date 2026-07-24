@@ -17,7 +17,7 @@ MEMORY
 {
     /* Executable RRAM slot (nordic W^X forbids SRAM execution), L15 geometry.
      * Kept in sync with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */
-    CARVE (rx) : ORIGIN = 0x178000, LENGTH = 0x1000
+    CARVE (rx) : ORIGIN = 0x0B8000, LENGTH = 0x8000   /* 32 KB */
 }
 
 ENTRY(module_init)

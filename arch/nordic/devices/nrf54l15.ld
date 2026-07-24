@@ -77,15 +77,16 @@ __tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
  * erase).  740 KB leaves a 768 KB code window below (image today ~110 KB;
  * the ASSERT at the bottom is the hard cap).  __tiku_nvmfs_size is an
  * absolute symbol whose ADDRESS is the size (matches rp2350/ambiq). */
-/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): a 4 KB
- * byte-writable, EXECUTABLE RRAM span just below the durable-persist region,
- * LM20-style.  Keep in sync with TIKU_MODULE_CARVE_ADDR (0x178000). */
-__tiku_module_slot_size = 0x1000;                           /* 4 KB */
-__tiku_module_slot      = __tiku_nvm_rram_start - __tiku_module_slot_size;
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of
+ * byte-writable, EXECUTABLE RRAM at the TOP OF THE CODE WINDOW -- canonical
+ * layout order (2026-07): code | module | NVM region | persist.  Keep in
+ * sync with TIKU_MODULE_CARVE_ADDR (0x0B8000). */
+__tiku_module_slot_size = 0x8000;                           /* 32 KB */
+__tiku_module_slot      = 0x0B8000;                         /* code hard cap */
 
-__tiku_nvmfs_size = 0xB8000;                                /* 736 KB (-4 KB) */
-__tiku_nvmfs_base = __tiku_module_slot - __tiku_nvmfs_size;
-__tiku_nvmfs_end  = __tiku_module_slot;
+__tiku_nvmfs_size = 0xB9000;                                /* 740 KB */
+__tiku_nvmfs_base = __tiku_module_slot + __tiku_module_slot_size;
+__tiku_nvmfs_end  = __tiku_nvm_rram_start;
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */
@@ -196,7 +197,7 @@ SECTIONS
      * into the reserved NVM regions at the top of RRAM -- the filestore sits
      * just below the durable-persist region, so guard against the lower of
      * the two bases. */
-    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvmfs_base,
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_module_slot,
            "ERROR: RRAM image overruns the reserved NVM/persist regions")
 
     /* The durable persist data must fit inside the reserved region. */

@@ -882,9 +882,11 @@ ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 # 255 KB usable bank (top 1 KB of RAM2 is unbacked on this silicon).
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=196608    # 192 KB tier arena in RAM2
 else ifeq ($(TIKU_THREADS_ENABLE),1)
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=20480     # 20 KB: BASIC + thread headroom
+# BIG-tier 256-line BASIC (2026-07): arena ~40 KB + 16 KB FETCH buffers +
+# string heap; 64 KB holds it beside the worker/TLS state.
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=65536     # 64 KB: BIG-256 BASIC + threads
 else
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=32768     # 32 KB: FRAM-tier BASIC arena
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=98304     # 96 KB: BIG-256 BASIC arena
 endif
 endif
 
@@ -1651,12 +1653,14 @@ endif
 # at the executable NVM slot VMA, flatten to a blob, and wrap it as an ARM
 # object embedded in the firmware (the "bytes that arrive over the air").
 # Per-DEVICE: the slot address, install mechanism and CPU differ --
-#   nrf54lm20a/b:         RRAM slot 0x1F8000,  Cortex-M33 (byte-writable XIP)
-#   nrf54l15:             RRAM slot 0x178000,  Cortex-M33 (byte-writable XIP)
-#   apollo510/apollo510b: MRAM slot 0x48F000,  Cortex-M55 (bootrom-programmed)
-#   apollo4l/apollo4p:    MRAM slot 0x97000,   Cortex-M4  (bootrom-programmed)
-#   rp2350:               flash slot 0x100FF000, Cortex-M33 (boot-ROM sector)
+#   nrf54lm20a/b:         RRAM slot 0x0F8000,  Cortex-M33 (byte-writable XIP)
+#   nrf54l15:             RRAM slot 0x0B8000,  Cortex-M33 (byte-writable XIP)
+#   apollo510/apollo510b: MRAM slot 0x488000,  Cortex-M55 (bootrom-programmed)
+#   apollo4l/apollo4p:    MRAM slot 0x90000,   Cortex-M4  (bootrom-programmed)
+#   rp2350:               flash slot 0x100F8000, Cortex-M33 (boot-ROM sectors)
 #   msp430fr5994/fr6989:  FRAM slot 0x43000/0x23000 (HIFRAM top, MPU-unlocked)
+# ARM slots are 32 KB (canonical order: code | module | region | persist);
+# MSP430 keeps ~4 KB at the top of HIFRAM (deliberate small-part exception).
 # Other MCUs have no module slot carved in their linker script -> hard error.
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 CFLAGS        += -DTIKU_BASIC_MODULE_ENABLE=1

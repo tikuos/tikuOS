@@ -41,7 +41,7 @@ MEMORY
      * module slot and the 64 KB mirror becomes the carved NVM region, so the
      * NVM store/tier gets the bulk of MRAM. A region overflow here means code
      * outgrew its budget. */
-    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x7F000
+    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x78000
     TCM   (rwx) : ORIGIN = 0x10000000, LENGTH = 384K      /* .data/.bss/heap/stack          */
     SSRAM (rwx) : ORIGIN = 0x10060000, LENGTH = 2M        /* shared SRAM: both 1 MB banks    */
 }
@@ -55,8 +55,8 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
  * PERSIST/ckpt reserved tail, tier) is end-anchored on __tiku_nvmfs_size, so
  * shrinking THAT would shift every durable tenant and destroy on-device data.
  * Keep in sync with TIKU_MODULE_CARVE_ADDR and modules/mod_demo_apollo4l.ld. */
-__tiku_module_slot_size = 0x1000;                          /* 4 KB */
-__tiku_module_slot      = ORIGIN(MRAM) + LENGTH(MRAM);     /* 0x97000 */
+__tiku_module_slot_size = 0x8000;                          /* 32 KB */
+__tiku_module_slot      = ORIGIN(MRAM) + LENGTH(MRAM);     /* 0x90000 */
 
 /* Carved NVM store/tier region (substrate B): ALL MRAM between the module
  * slot and the 64 KB mirror -- ~1.34 MB on this part. Read in place by

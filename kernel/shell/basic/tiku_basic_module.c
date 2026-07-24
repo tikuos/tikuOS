@@ -149,25 +149,37 @@ tiku_basic_module_load(void)
      * just-installed code. */
     tiku_cpu_icache_invalidate();
 #elif defined(PLATFORM_RP2350)
-    /* Flash install: the slot is exactly ONE 4 KB erase sector, replaced
-     * through the proven interrupt-masked, XIP-suspended boot-ROM path.
-     * Flash can only clear bits, so the gate discipline inverts the RRAM
-     * ordering: stage the image with the whole first 256-byte page left
-     * ERASED (0xFF -- an invalid magic), commit erase+program, then
-     * program the real header page LAST onto still-erased cells.  A cut
-     * at any point leaves 0xFF or a torn word where the magic should be
-     * -- never a valid header over a torn body. */
+    /* Flash install: the slot spans several 4 KB erase sectors, each
+     * replaced through the proven interrupt-masked, XIP-suspended boot-ROM
+     * path.  Flash can only clear bits, so the gate discipline inverts the
+     * RRAM ordering: every sector the image touches is staged and
+     * committed with the FIRST 256-byte page of sector 0 left ERASED
+     * (0xFF -- an invalid magic), and that header page is programmed LAST
+     * onto still-erased cells.  A cut at any point -- between sectors,
+     * mid-sector, or mid-header -- leaves 0xFF or a torn word where the
+     * magic should be, never a valid header over a torn body. */
     {
-        static uint8_t stage[TIKU_MODULE_CARVE_SIZE];
-        uint32_t off = (uint32_t)(TIKU_MODULE_CARVE_ADDR - 0x10000000u);
+        static uint8_t stage[4096u];
+        uint32_t base = (uint32_t)(TIKU_MODULE_CARVE_ADDR - 0x10000000u);
+        uint32_t done;
 
-        memset(stage, 0xFF, sizeof(stage));
-        memcpy(stage, src, len);
-        memset(stage, 0xFF, 256u);                 /* header page: erased  */
-        tiku_rp2350_flash_commit_sector(off, stage, sizeof(stage));
+        for (done = 0u; done < len; done += 4096u) {
+            uint32_t chunk = len - done;
+            if (chunk > 4096u) {
+                chunk = 4096u;
+            }
+            memset(stage, 0xFF, sizeof(stage));
+            memcpy(stage, src + done, chunk);
+            if (done == 0u) {
+                memset(stage, 0xFF, 256u);         /* header page: erased  */
+            }
+            tiku_rp2350_flash_commit_sector(base + done, stage,
+                                            sizeof(stage));
+        }
 
+        memset(stage, 0xFF, 256u);
         memcpy(stage, src, (len < 256u) ? len : 256u);  /* real first page */
-        tiku_rp2350_flash_program(off, stage, 256u);
+        tiku_rp2350_flash_program(base, stage, 256u);
     }
     __asm__ volatile ("dsb 0xF; isb 0xF" ::: "memory");  /* code just written */
 #elif defined(PLATFORM_MSP430)

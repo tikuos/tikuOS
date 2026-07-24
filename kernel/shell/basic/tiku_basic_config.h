@@ -41,16 +41,16 @@
  *          limits, left EXACTLY as they were.
  *
  * Every macro stays -D-overridable; these branches only choose the default. */
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC)
+/* Nordic runs the BIG tier too (2026-07: it previously ran the middle FRAM
+ * tier, an MSP430-class 96-line BASIC on Ambiq-class silicon).  The LM20's
+ * tier arena lives in its own 256 KB SRAM bank (RAM2), so it takes the
+ * full BIG defaults; the L15 shares 240 KB with TLS/radio, so it caps
+ * PROGRAM_LINES below (capacity is the only lever that needs trimming --
+ * the string sizes are pure win). */
 #define TIKU_BASIC_TIER_BIG  1
-#elif defined(TIKU_MEMORY_MODEL_LARGE) || defined(PLATFORM_NORDIC)
-/* The nRF54L15 sits between the SMALL parts and the 512 KB BIG parts: 256 KB
- * SRAM.  The BIG tier's arena-backed FETCH buffers (sized for 512 KB) overflow
- * that, but the SMALL 64-byte defaults are too tight -- a 64-hex SHA256$ digest
- * (let alone its 88-char BASE64$) and the 60-line mem-stress program don't fit.
- * The FRAM (middle) tier is exactly the right size: 128-byte string scratch,
- * 2 KB string heap, 96 program lines.  It is pure sizing (no FRAM-specific
- * behaviour), so it fits the nRF54L15's RRAM/SRAM split cleanly. */
+#elif defined(TIKU_MEMORY_MODEL_LARGE)
 #define TIKU_BASIC_TIER_FRAM 1
 #endif
 
@@ -95,6 +95,11 @@
 #ifndef TIKU_BASIC_PROGRAM_LINES
 #  if defined(PLATFORM_RP2350)
 #    define TIKU_BASIC_PROGRAM_LINES 512
+#  elif defined(TIKU_DEVICE_NRF54L15)
+     /* 256 KB shared SRAM: a 256-line arena (~40 KB + BIG buffers) fits
+      * every L15 tier profile; the save slot (256 x 152 B) still fits the
+      * 64 KB reserved area with room for the resume snapshot. */
+#    define TIKU_BASIC_PROGRAM_LINES 256
 #  elif defined(TIKU_BASIC_TIER_HUGE)
 #    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 256 KB NVM save tail */
 #  elif defined(TIKU_BASIC_TIER_BIG)

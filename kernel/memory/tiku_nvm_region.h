@@ -51,8 +51,10 @@
 #define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)
 #elif defined(PLATFORM_RP2350)
 #define TIKU_NVM_RESERVED_BYTES  (128u * 1024u)   /* durable named-data tail */
+#elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)   /* BIG 1024-line save + ckpt */
 #elif defined(PLATFORM_NORDIC)
-#define TIKU_NVM_RESERVED_BYTES  (64u * 1024u)    /* RRAM tail (Ambiq-parity) */
+#define TIKU_NVM_RESERVED_BYTES  (64u * 1024u)    /* L15: 256-line save + ckpt */
 #else
 #define TIKU_NVM_RESERVED_BYTES  0u
 #endif

@@ -36,7 +36,8 @@
 #define TIKU_MODULE_MAGIC    0x444F4D54u
 #define TIKU_MODULE_ABI      1u
 
-/* Fixed module slot -- 4 KB of EXECUTABLE NVM, kept in sync with
+/* Fixed module slot -- EXECUTABLE NVM (32 KB on ARM parts, ~4 KB on
+ * MSP430), kept in sync with
  * __tiku_module_slot in the device linker script and the module's own .ld.
  * The module is linked at this VMA; the loader installs the image here and
  * runs it XIP (durable in place -- it survives reboot and power loss).
@@ -61,13 +62,13 @@
  *     place (behind the MPU unlock window) and natively executable (the
  *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_MODULE_CARVE_ADDR  0x48F000u
+#define TIKU_MODULE_CARVE_ADDR  0x488000u
 #elif defined(AM_PART_APOLLO4L)
-#define TIKU_MODULE_CARVE_ADDR  0x97000u
+#define TIKU_MODULE_CARVE_ADDR  0x90000u
 #elif defined(PLATFORM_RP2350)
-/* Top 4 KB (= one erase sector) of the 1 MB flash code window; XIP.
- * Install goes through the boot-ROM erase/program path. */
-#define TIKU_MODULE_CARVE_ADDR  0x100FF000u
+/* Top 32 KB (8 erase sectors) of the flash code window; XIP.
+ * Install goes sector-by-sector through the boot-ROM erase/program path. */
+#define TIKU_MODULE_CARVE_ADDR  0x100F8000u
 #elif defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
 /* Top 4 KB of HIFRAM (which the MPU already maps R+W+X, SAM 0x0755).
  * FRAM: byte-writable in place AND natively executable.  The slot ends
@@ -78,13 +79,13 @@
 #define TIKU_MODULE_CARVE_ADDR  0x23000u
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
 #elif defined(TIKU_DEVICE_NRF54L15)
-/* RRAM slot just below the durable-persist region, LM20-style. */
-#define TIKU_MODULE_CARVE_ADDR  0x178000u
+/* RRAM slot at the top of the code window, canonical order. */
+#define TIKU_MODULE_CARVE_ADDR  0x0B8000u
 #else                                    /* nordic nRF54LM20 RRAM slot */
-#define TIKU_MODULE_CARVE_ADDR  0x1F8000u
+#define TIKU_MODULE_CARVE_ADDR  0x0F8000u
 #endif
 #ifndef TIKU_MODULE_CARVE_SIZE
-#define TIKU_MODULE_CARVE_SIZE  0x1000u
+#define TIKU_MODULE_CARVE_SIZE  0x8000u
 #endif
 
 /* Entry-offset convention: ARM Thumb entry addresses carry bit0 SET so
