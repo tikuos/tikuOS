@@ -37,6 +37,7 @@ typedef enum {
     TIKU_GPU_ERR_POWER   = -1,   /**< GFX power domain never reached its target */
     TIKU_GPU_ERR_TIMEOUT = -2,   /**< GPU never went idle within the spin bound  */
     TIKU_GPU_ERR_ID      = -3,   /**< IDREG implausible (bad offset / dead core)  */
+    TIKU_GPU_ERR_PARAM   = -4,   /**< invalid argument (e.g. non-power-of-two dim)*/
 } tiku_gpu_err_t;
 
 /** GFXPERFREQ performance-mode knob (PWRCTRL->GFXPERFREQ). */
@@ -173,6 +174,7 @@ typedef enum {
     TIKU_GPU_BLEND_SIMPLE   = 0x0504,  /**< Sa*Sa + Da*(1-Sa) (Nema blit dflt)*/
     TIKU_GPU_BLEND_ADD      = 0x0101,  /**< Sa + Da (saturating)              */
     TIKU_GPU_BLEND_MULTIPLY = 0x0008,  /**< Sc * Dc (element-wise product)    */
+    TIKU_GPU_BLEND_AVG      = 0x0A0A,  /**< Cc*Sc + Cc*Dc: 50/50 avg (Cc=0x80)*/
 } tiku_gpu_blend_t;
 
 /**
@@ -385,8 +387,9 @@ tiku_gpu_err_t tiku_gpu_multiply(const tiku_gpu_surface_t *dst,
  * @brief Exact constant scale: dst = src * @p factor / 255, per channel.
  *
  * Fixed-function (ROP CONSTCOLOR factor + const-color register), so the
- * arithmetic is exact 8-bit -- the calibrated counterpart to the shader-based
- * tiku_gpu_scale_bias. @p factor packs 0x00BBGGRR (0x80 = x0.502).
+ * arithmetic is exact 8-bit -- the exact-scale building block that
+ * tiku_gpu_scale_bias reuses under an added bias. @p factor packs 0x00BBGGRR
+ * (0x80 = x0.502).
  */
 tiku_gpu_err_t tiku_gpu_scale_const(const tiku_gpu_surface_t *dst,
                                     const tiku_gpu_surface_t *src,
@@ -404,19 +407,47 @@ tiku_gpu_err_t tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst,
                                   const uint32_t *palette);
 
 /**
- * @brief EXPERIMENTAL custom shader kernel (uncalibrated constants).
+ * @brief Exact affine: dst = @p scale * src / 255 + @p bias, per channel,
+ *        saturating to [0,255].
  *
- * Runs a fragment program authored from the recovered pico-shader ISA (the
- * GPU's ALU applied per pixel) computing a scale+bias-class op -- but the
- * C-register constants pass through an undecoded (half-float-like, non-affine)
- * packing: measured sweeps are in TikuBench/docs/gpu-calibration-findings.md.
- * For EXACT constant scaling use tiku_gpu_scale_const (fixed-function,
- * calibrated). This entry point remains as the proven "custom shaders
- * execute" vehicle and the base for future ISA calibration.
+ * Two fixed-function ROP passes, each independently calibrated bit-exact: prime
+ * dst with the constant @p bias (solid fill), then blend the source with the
+ * CONSTCOLOR factor over a ONE destination factor -- i.e. the exact constant
+ * scale of tiku_gpu_scale_const summed onto the primed bias with the saturating
+ * semantics of TIKU_GPU_BLEND_ADD. @p scale packs 0x00BBGGRR (0x80 = x0.502,
+ * as in tiku_gpu_scale_const); @p bias is a packed constant in the
+ * destination's channel order (like a fill color). Same dimensions required.
  */
 tiku_gpu_err_t tiku_gpu_scale_bias(const tiku_gpu_surface_t *dst,
                                    const tiku_gpu_surface_t *src,
                                    uint32_t scale, uint32_t bias);
+
+/**
+ * @brief Pairwise 50/50 average: dst = (dst + src)/2, per channel (saturating).
+ *
+ * Fixed-function: the ROP CONSTCOLOR factor (const-color 0x80 = x0.502) applied
+ * to BOTH the source and the destination -> out = 0.502*src + 0.502*dst. A
+ * two-surface cross-fade, and the fold primitive behind tiku_gpu_reduce_mean.
+ * Same dimensions required. (0.502 vs 0.5 is absorbed by integer rounding.)
+ */
+tiku_gpu_err_t tiku_gpu_avg(const tiku_gpu_surface_t *dst,
+                            const tiku_gpu_surface_t *src);
+
+/**
+ * @brief Reduce a surface to the mean of all its pixels, per channel.
+ *
+ * A balanced fold tree: repeatedly average the two halves (a 1:1 translate blit
+ * with TIKU_GPU_BLEND_AVG -- disjoint read/write halves, so no scale-downsample
+ * and no read/write hazard), halving width then height until one pixel remains.
+ * That pixel -- the equal-weight grand mean -- is returned in @p out_mean
+ * (packed RGBA8888). Avoids the SX>1 downscale entirely.
+ *
+ * @p surf dimensions MUST be powers of two, and the fold OVERWRITES @p surf
+ * (pass a scratch copy if the data is still needed). @return TIKU_GPU_OK, or
+ * TIKU_GPU_ERR_PARAM for a non-power-of-two dimension.
+ */
+tiku_gpu_err_t tiku_gpu_reduce_mean(const tiku_gpu_surface_t *surf,
+                                    uint32_t *out_mean);
 
 /**
  * @brief GPU interrupt handler (IRQ 28).

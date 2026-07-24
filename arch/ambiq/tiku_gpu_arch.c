@@ -145,7 +145,6 @@ static int32_t s_cl_seq;
  * fragment program loaded to IMEM at draw time.
  */
 #define GPU_CODEPTR_LUT        0x141D8000u  /* 3-instr palette lookup, slot 0  */
-#define GPU_CODEPTR_SCALEBIAS  0x0000C000u  /* 3-instr out = C1*src + C2       */
 
 /*---------------------------------------------------------------------------*/
 /* Interrupt handler                                                         */
@@ -1019,8 +1018,8 @@ tiku_gpu_scale_const(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *sr
                      uint32_t factor)
 {
     /* Exact per-channel constant scale: out = src * factor / 255 via the ROP
-     * CONSTCOLOR source factor and the const-color register -- the calibrated
-     * fixed-function alternative to the shader-based tiku_gpu_scale_bias. */
+     * CONSTCOLOR source factor and the const-color register -- the exact-scale
+     * building block that tiku_gpu_scale_bias reuses under an added bias. */
     gpu_reg_write(GPU_REG_ROPBLEND_CONST, factor);
     return tiku_gpu_blit(dst, src, 0, 0, (tiku_gpu_blend_t)0x000A);
 }
@@ -1108,43 +1107,85 @@ tiku_gpu_err_t
 tiku_gpu_scale_bias(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
                     uint32_t scale, uint32_t bias)
 {
-    uint32_t dspan = (uint32_t)dst->stride * (uint32_t)dst->h;
-    uint32_t sspan = (uint32_t)src->stride * (uint32_t)src->h;
     tiku_gpu_err_t err;
 
-    tiku_cpu_dcache_clean(src->base, sspan);
-    tiku_cpu_dcache_clean(dst->base, dspan);
-    tiku_cpu_dcache_invalidate(dst->base, dspan);
+    /* Exact per-channel affine: dst = scale*src/255 + bias, saturating to
+     * [0,255]. Two fixed-function ROP passes, each independently calibrated to
+     * bit-exactness -- no custom shader, no undecoded C-registers:
+     *
+     *   1. prime dst with the constant bias (solid fill, replace mode);
+     *   2. dst = CONSTCOLOR*Src + ONE*Dst. The CONSTCOLOR source factor plus
+     *      the const-color register is the calibrated exact scale (identical to
+     *      tiku_gpu_scale_const); the ONE destination factor adds the primed
+     *      bias with saturation (identical to TIKU_GPU_BLEND_ADD).
+     *
+     * gpu_blit_core's read-modify blend reads the freshly-filled bias as the
+     * background, so the affine lands in a single blended pass. This replaces
+     * the former recovered-ISA kernel, whose C1*src+C2 packing did not hold
+     * affine on this silicon (see gpu-calibration-findings.md, round 2). */
+    err = tiku_gpu_fill(dst->base, src->w, src->h, dst->stride, bias);
+    if (err != TIKU_GPU_OK) {
+        return err;
+    }
+    gpu_reg_write(GPU_REG_ROPBLEND_CONST, scale);
+    return tiku_gpu_blit(dst, src, 0, 0, (tiku_gpu_blend_t)0x010Au); /* CONSTCOLOR|ONE */
+}
 
-    GPU->TEX0BASE   = (uint32_t)(uintptr_t)dst->base;
-    GPU->TEX0STRIDE = ((uint32_t)dst->format << 24) | ((uint32_t)dst->stride & 0xFFFFu);
-    GPU->TEX0RES    = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
-    GPU->TEX1BASE   = (uint32_t)(uintptr_t)src->base;
-    GPU->TEX1STRIDE = ((uint32_t)src->format << 24) | ((uint32_t)src->stride & 0xFFFFu);
-    GPU->TEX1RES    = (uint32_t)src->w | ((uint32_t)src->h << 16);
+tiku_gpu_err_t
+tiku_gpu_avg(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
+{
+    /* Pairwise 50/50 average: dst = (dst + src)/2 per channel. The ROP applies
+     * the CONSTCOLOR factor (const-color 0x80 = x0.502) to BOTH the source and
+     * the destination, so out = 0.502*Src + 0.502*Dst -- a two-surface
+     * cross-fade and the fold behind tiku_gpu_reduce_mean. The slight high bias
+     * (0.502 vs 0.5) is absorbed by integer rounding for typical inputs. */
+    gpu_reg_write(GPU_REG_ROPBLEND_CONST, 0x80808080u);
+    return tiku_gpu_blit(dst, src, 0, 0, TIKU_GPU_BLEND_AVG);
+}
 
-    /* Custom kernel authored from the recovered ISA: out = C1*src + C2 per
-     * channel (the vendored contrast-stretch program, verbatim). */
-    gpu_imem_load(0u, 0x00001000u, 0x03076C54u);
-    gpu_imem_load(1u, 0x00001000u, 0x0200D448u);
-    gpu_imem_load(2u, 0x00001002u, 0x80049445u);
-    GPU->C1REG = scale;                              /* 8-bit/channel, 0x80=x0.5 */
-    GPU->C2REG = bias;                               /* 8-bit/channel bias       */
+tiku_gpu_err_t
+tiku_gpu_reduce_mean(const tiku_gpu_surface_t *surf, uint32_t *out_mean)
+{
+    uint32_t w = surf->w;
+    uint32_t h = surf->h;
+    tiku_gpu_err_t err = TIKU_GPU_OK;
 
-    GPU->RASTCTRL    = GPU_RASTCTRL_MMUL_BYPASS;
-    gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
-    GPU->DRAWCODEPTR = GPU_CODEPTR_SCALEBIAS;
+    /* Balanced fold tree -> power-of-two dimensions only. */
+    if (w == 0u || h == 0u ||
+        (w & (w - 1u)) != 0u || (h & (h - 1u)) != 0u) {
+        return TIKU_GPU_ERR_PARAM;
+    }
 
-    GPU->CLIPMIN = 0u;
-    GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
-    GPU->DRAWPT0 = 0u;
-    GPU->DRAWPT1 = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
-    __DSB();
-    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+    /* out = 0.502*Src + 0.502*Dst on all four lanes (see tiku_gpu_avg). */
+    gpu_reg_write(GPU_REG_ROPBLEND_CONST, 0x80808080u);
 
-    err = tiku_gpu_wait_idle();
-    s_last_status = GPU->STATUS;
-    tiku_cpu_dcache_invalidate(dst->base, dspan);
+    /* Horizontal folds: average the right half onto the left, halving the width
+     * to 1. Each fold is a 1:1 TRANSLATE blit -- destination [0,w/2) samples
+     * source [w/2,w), disjoint regions of the SAME buffer, so there is no
+     * read/write hazard and the unreliable SX>1 downscale is never used. A
+     * balanced binary tree: after log2(w) folds column 0 holds the equal-weight
+     * mean of all w columns. */
+    while (w > 1u) {
+        uint32_t hw = w >> 1;
+        err = gpu_blit_core(surf, surf, 0, 0, (uint16_t)hw, (uint16_t)h,
+                            1.0f, (float)hw, 1.0f, 0.0f, TIKU_GPU_BLEND_AVG);
+        if (err != TIKU_GPU_OK) { return err; }
+        w = hw;
+    }
+    /* Vertical folds: same, over the surviving column 0 -> pixel (0,0) is the
+     * grand mean of the original surface. */
+    while (h > 1u) {
+        uint32_t hh = h >> 1;
+        err = gpu_blit_core(surf, surf, 0, 0, 1u, (uint16_t)hh,
+                            1.0f, 0.0f, 1.0f, (float)hh, TIKU_GPU_BLEND_AVG);
+        if (err != TIKU_GPU_OK) { return err; }
+        h = hh;
+    }
+
+    tiku_cpu_dcache_invalidate(surf->base, 4u);
+    if (out_mean != (uint32_t *)0) {
+        *out_mean = ((const volatile uint32_t *)surf->base)[0];
+    }
     return err;
 }
 
