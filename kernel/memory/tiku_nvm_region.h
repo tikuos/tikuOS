@@ -45,16 +45,38 @@
  * HUGE-tier program slot (1700 lines, ~258 KB) plus the checkpoint slot
  * outgrew the shared 256 KB default.
  */
+/*
+ * Each size below is derived from the platform's BASIC capacity commitment:
+ *
+ *     reserved >= PROGRAM_LINES x 152 B   (saved-program slot, tail base)
+ *              +  resume-snapshot slot     (vars + strings + arrays + pos)
+ *
+ * rounded up to a stable power-of-two-ish figure.  The numbers are
+ * DELIBERATELY per-platform constants, not computed from the live BASIC
+ * config: the region layout must not move when a build flag or a
+ * -DTIKU_BASIC_PROGRAM_LINES override changes, or /data and the saved
+ * program would silently relocate between builds of the same board.
+ * The sync is guarded both ways: raising PROGRAM_LINES past a platform's
+ * figure fails the _Static_assert in tiku_basic_ckpt.inl (save + ckpt
+ * must fit), so these constants cannot silently under-provide.
+ *
+ *   apollo510  1700 x 152 = 258,400 + ~69 KB snapshot  -> 320 KB
+ *   ambiq      1024 x 152 = 155,648 + ~106 KB snapshot -> 256 KB
+ *   lm20       1024 x 152 = 155,648 + ~106 KB snapshot -> 256 KB
+ *   rp2350      512 x 152 =  77,824 + ~53 KB snapshot  -> 128 KB
+ *   l15         256 x 152 =  38,912 + ~25 KB snapshot  ->  64 KB
+ *   msp430     no pinned tail: save/ckpt are .persistent FRAM arrays
+ */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_NVM_RESERVED_BYTES  (320u * 1024u)   /* HUGE program + ckpt slots */
+#define TIKU_NVM_RESERVED_BYTES  (320u * 1024u)   /* HUGE 1700-line + ckpt */
 #elif defined(PLATFORM_AMBIQ)
-#define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)
+#define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)   /* BIG 1024-line + ckpt  */
 #elif defined(PLATFORM_RP2350)
-#define TIKU_NVM_RESERVED_BYTES  (128u * 1024u)   /* durable named-data tail */
+#define TIKU_NVM_RESERVED_BYTES  (128u * 1024u)   /* BIG 512-line + ckpt   */
 #elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)   /* BIG 1024-line save + ckpt */
+#define TIKU_NVM_RESERVED_BYTES  (256u * 1024u)   /* BIG 1024-line + ckpt  */
 #elif defined(PLATFORM_NORDIC)
-#define TIKU_NVM_RESERVED_BYTES  (64u * 1024u)    /* L15: 256-line save + ckpt */
+#define TIKU_NVM_RESERVED_BYTES  (64u * 1024u)    /* BIG 256-line + ckpt   */
 #else
 #define TIKU_NVM_RESERVED_BYTES  0u
 #endif

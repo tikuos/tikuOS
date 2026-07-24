@@ -60,9 +60,10 @@ __flash_end   = ORIGIN(FLASH) + LENGTH(FLASH);
  * helpers use the flash OFFSET (from start of QSPI), not the absolute
  * XIP address; __tiku_nvm_flash_offset is that offset for convenience.
  *
- * Size matches one QSPI erase granule (4 KB).  The current .uninit
- * region is ~3 KB; growing past 4 KB will require multi-sector
- * backup which the arch driver does NOT support today. */
+ * Size is one QSPI erase granule (4 KB) today; the arch driver commits
+ * the mirror sector-by-sector, so growing it really is the one-number
+ * change: raise __tiku_layout_durable_size below (in whole 4 KB
+ * sectors) and flush, restore and the .uninit budget ASSERT follow. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(FLASH) + LENGTH(FLASH);
 __tiku_layout_code_cap     = ORIGIN(FLASH) + 0xF8000;      /* 992 KB code */

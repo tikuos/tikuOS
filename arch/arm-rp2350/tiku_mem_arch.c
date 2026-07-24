@@ -205,9 +205,10 @@ static int rom_flash_ready(void) {
 /**
  * @brief One-sector SRAM staging buffer used as flash program source.
  *
- * Layout: 4-byte magic (RP2350_NVM_MAGIC), then the .uninit region
- * verbatim, then 0xFF padding to fill the sector.  Written by
- * compose_snapshot() before every flash_commit_sector() call.
+ * Holds one sector's SLICE of the virtual mirror image (16-byte header ||
+ * .uninit contents || 0xFF padding); the flush loop stages and commits
+ * the mirror through it sector by sector, so the mirror can span several
+ * sectors without a bigger buffer.
  */
 static uint8_t g_flush_buf[RP2350_NVM_SECTOR_SIZE]
     __attribute__((aligned(4)));
@@ -234,40 +235,6 @@ tiku_nvm_restore_t tiku_mem_arch_nvm_restore_status(void)
 const uint8_t *tiku_mem_arch_nvm_mirror(void)
 {
     return (const uint8_t *)__tiku_nvm_flash_start;
-}
-
-/**
- * @brief Compose the NVM snapshot into g_flush_buf from the live .uninit region.
- *
- * Writes the 4-byte magic at offset 0, copies the current .uninit contents
- * at offset 4, and pads the remainder of the sector with 0xFF to match
- * the post-erase state.
- */
-static void compose_snapshot(void) {
-    size_t uninit_size =
-        (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
-
-    uint32_t *hdr = (uint32_t *)(void *)g_flush_buf;
-
-    if (uninit_size > (RP2350_NVM_SECTOR_SIZE - TIKU_NVM_MIRROR_HDR_BYTES)) {
-        uninit_size = RP2350_NVM_SECTOR_SIZE - TIKU_NVM_MIRROR_HDR_BYTES;
-    }
-
-    /* V2 header sans CRC -- the CRC word is filled by the flush only
-     * when the image actually changed and a program is unavoidable, so
-     * clean relocks never pay for it. */
-    hdr[TIKU_NVM_MIRROR_W_MAGIC] = TIKU_NVM_MIRROR_MAGIC_V2;
-    hdr[TIKU_NVM_MIRROR_W_CRC]   = 0;
-    hdr[TIKU_NVM_MIRROR_W_LEN]   = (uint32_t)uninit_size;
-    hdr[TIKU_NVM_MIRROR_W_RSVD]  = 0xFFFFFFFFu;
-
-    /* Live SRAM copy. */
-    memcpy(&g_flush_buf[TIKU_NVM_MIRROR_HDR_BYTES], &__uninit_start,
-           uninit_size);
-
-    /* Pad to sector size with 0xFF (post-erase state). */
-    memset(&g_flush_buf[TIKU_NVM_MIRROR_HDR_BYTES + uninit_size], 0xFF,
-           RP2350_NVM_SECTOR_SIZE - TIKU_NVM_MIRROR_HDR_BYTES - uninit_size);
 }
 
 /**
@@ -394,7 +361,8 @@ void tiku_mem_arch_init(void) {
         const uint8_t *img =
             (const uint8_t *)__tiku_nvm_flash_start +
             TIKU_NVM_MIRROR_HDR_BYTES;
-        if (len <= (RP2350_NVM_SECTOR_SIZE - TIKU_NVM_MIRROR_HDR_BYTES) &&
+        if (len <= (uint32_t)(uintptr_t)&__tiku_nvm_flash_size
+                       - TIKU_NVM_MIRROR_HDR_BYTES &&
             tiku_nvm_crc32(img, len) == flash[TIKU_NVM_MIRROR_W_CRC]) {
             if (uninit_size > len) {
                 uninit_size = len;
@@ -498,43 +466,78 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * this function returns.
  */
 void tiku_mem_arch_nvm_flush(void) {
-    /* Snapshot the live .uninit region into g_flush_buf (prepended
-     * with the magic word), then erase + program the 4 KB flash
-     * mirror sector.  This is the explicit durability checkpoint:
-     * every kernel write to .persistent / .uninit eventually flows
-     * through this on its way to surviving a power cycle. */
+    /* Snapshot the live .uninit region and commit it to the flash
+     * mirror.  This is the explicit durability checkpoint: every kernel
+     * write to .persistent / .uninit eventually flows through this on
+     * its way to surviving a power cycle.
+     *
+     * The mirror may span SEVERAL 4 KB erase sectors (its size is the
+     * linker's __tiku_nvm_flash_size; one sector today).  The virtual
+     * image is 16-byte header || .uninit contents || 0xFF padding; each
+     * sector's slice is staged through the one-sector g_flush_buf and
+     * committed in ascending order.  A power cut anywhere mid-commit
+     * leaves a mix of old and new sectors whose CRC cannot validate, so
+     * boot lands in RESTORE_CRC_FAIL rather than restoring a torn image
+     * -- the same failure class as a mid-sector cut always had. */
     const uint32_t *mirror = (const uint32_t *)__tiku_nvm_flash_start;
-    uint32_t *hdr = (uint32_t *)(void *)g_flush_buf;
+    const uint8_t  *mirror8 = (const uint8_t *)__tiku_nvm_flash_start;
+    uint32_t mirror_bytes = (uint32_t)(uintptr_t)&__tiku_nvm_flash_size;
+    size_t   uninit_size =
+        (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
+    const uint8_t *uninit = (const uint8_t *)&__uninit_start;
+    uint32_t crc;
+    uint32_t off;
 
-    compose_snapshot();
+    if (uninit_size > mirror_bytes - TIKU_NVM_MIRROR_HDR_BYTES) {
+        uninit_size = mirror_bytes - TIKU_NVM_MIRROR_HDR_BYTES;
+    }
 
     /* Dirty check (same policy as the Ambiq backends): skip the erase+
-     * program when the composed image already matches the mirror.  The
-     * compare covers the magic/length words and the image+padding span
-     * but NOT the CRC word (which compose leaves unfilled): on an
-     * unchanged image the mirror's existing CRC is necessarily the CRC
-     * of this same image, so the skip needs no CRC work at all.  The
-     * mirror is XIP-mapped and cache-coherent here — the boot-ROM
-     * sequence ends with flush_cache after every program, and a cold
-     * boot starts with a cold cache.  On NOR this matters far more than
-     * on MRAM: a skipped flush saves a ~20 ms IRQs-off erase+program
-     * AND a sector endurance cycle (~100 K lifetime), so relocks whose
-     * window touched nothing in .uninit (e.g. TCP paths writing .bss
-     * buffers) become free instead of costing flash wear per packet. */
-    if (mirror[TIKU_NVM_MIRROR_W_MAGIC] == hdr[TIKU_NVM_MIRROR_W_MAGIC] &&
-        mirror[TIKU_NVM_MIRROR_W_LEN]   == hdr[TIKU_NVM_MIRROR_W_LEN] &&
-        memcmp(&g_flush_buf[TIKU_NVM_MIRROR_HDR_BYTES],
-               (const uint8_t *)__tiku_nvm_flash_start +
-                   TIKU_NVM_MIRROR_HDR_BYTES,
-               RP2350_NVM_SECTOR_SIZE - TIKU_NVM_MIRROR_HDR_BYTES) == 0) {
+     * program when the live image already matches the mirror.  Compared
+     * directly against the XIP-mapped mirror -- header words (magic,
+     * length; NOT the CRC word, which on an unchanged image is
+     * necessarily the CRC of this same content) and the image bytes.
+     * Padding needs no compare: equal lengths mean the pad spans
+     * coincide, and both are post-erase 0xFF.  The mirror is cache-
+     * coherent here — the boot-ROM sequence ends with flush_cache after
+     * every program, and a cold boot starts with a cold cache.  On NOR
+     * this matters far more than on MRAM: a skipped flush saves a
+     * ~20 ms IRQs-off erase+program AND a sector endurance cycle
+     * (~100 K lifetime), so relocks whose window touched nothing in
+     * .uninit (e.g. TCP paths writing .bss buffers) become free instead
+     * of costing flash wear per packet. */
+    if (mirror[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2 &&
+        mirror[TIKU_NVM_MIRROR_W_LEN]   == (uint32_t)uninit_size &&
+        memcmp(uninit, mirror8 + TIKU_NVM_MIRROR_HDR_BYTES,
+               uninit_size) == 0) {
         return;
     }
 
-    hdr[TIKU_NVM_MIRROR_W_CRC] =
-        tiku_nvm_crc32(&g_flush_buf[TIKU_NVM_MIRROR_HDR_BYTES],
-                       hdr[TIKU_NVM_MIRROR_W_LEN]);
+    crc = tiku_nvm_crc32(uninit, (uint32_t)uninit_size);
 
-    flash_commit_sector((uint32_t)(uintptr_t)&__tiku_nvm_flash_offset,
-                        g_flush_buf, RP2350_NVM_SECTOR_SIZE);
+    /* Stage + commit each sector's slice of the virtual image. */
+    for (off = 0; off < mirror_bytes; off += RP2350_NVM_SECTOR_SIZE) {
+        uint32_t i;
+        for (i = 0; i < RP2350_NVM_SECTOR_SIZE; i++) {
+            uint32_t v = off + i;               /* virtual image offset */
+            if (v < TIKU_NVM_MIRROR_HDR_BYTES) {
+                g_flush_buf[i] = 0;             /* header patched below */
+            } else if (v - TIKU_NVM_MIRROR_HDR_BYTES < uninit_size) {
+                g_flush_buf[i] = uninit[v - TIKU_NVM_MIRROR_HDR_BYTES];
+            } else {
+                g_flush_buf[i] = 0xFFu;         /* post-erase padding   */
+            }
+        }
+        if (off == 0) {
+            uint32_t *hdr = (uint32_t *)(void *)g_flush_buf;
+            hdr[TIKU_NVM_MIRROR_W_MAGIC] = TIKU_NVM_MIRROR_MAGIC_V2;
+            hdr[TIKU_NVM_MIRROR_W_CRC]   = crc;
+            hdr[TIKU_NVM_MIRROR_W_LEN]   = (uint32_t)uninit_size;
+            hdr[TIKU_NVM_MIRROR_W_RSVD]  = 0xFFFFFFFFu;
+        }
+        flash_commit_sector((uint32_t)(uintptr_t)&__tiku_nvm_flash_offset
+                                + off,
+                            g_flush_buf, RP2350_NVM_SECTOR_SIZE);
+    }
     g_nvm_flush_programs++;
 }
