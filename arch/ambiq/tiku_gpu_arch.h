@@ -400,7 +400,11 @@ tiku_gpu_err_t tiku_gpu_scale_const(const tiku_gpu_surface_t *dst,
  *
  * @p index is an L8 (8-bit) surface of indices; @p palette is 256 RGBA8888
  * entries; @p dst is RGBA8888 (same dimensions as @p index). A texture-gather
- * via a 3-instruction palette-lookup shader -- palette/gamma remap for free.
+ * via a 3-instruction palette-lookup shader -- palette/gamma remap, or an
+ * arbitrary 256-entry activation table, for free. EXACT for all 256 entries
+ * across the full surface: the hardware's nibble-swapped palette addressing
+ * is inverted by a shadow permutation, and a zero-area priming draw absorbs
+ * the first-draw-after-init missample (both silicon-calibrated).
  */
 tiku_gpu_err_t tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst,
                                   const tiku_gpu_surface_t *index,

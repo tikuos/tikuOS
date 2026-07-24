@@ -1035,10 +1035,14 @@ tiku_gpu_scale_const(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *sr
  * than shipped wrong.
  */
 
-/* Shadow palette: hardware LUT entries follow entry = i*17/16 (measured on
- * silicon via a sawtooth sweep); the shadow holds the user's palette remapped
- * through the inverse so dst = palette[index] comes out exact. SSRAM: the GPU
- * reads it. */
+/* Shadow palette: the hardware palette lookup NIBBLE-SWAPS the index -- it
+ * addresses the 256 entries as a 16x16 grid with x = high nibble, y = low
+ * nibble, so entry = ((v & 0xF) << 4) | (v >> 4). Measured on silicon (probe
+ * flashes 1-3, 2026-07-24): dense-ramp discrimination, all four RGBA lanes
+ * pass through untouched. The swap is an involution, so pre-applying it to
+ * the shadow POSITIONS inverts it losslessly: shadow[i] = palette[swap(i)]
+ * makes dst = palette[swap(swap(v))] = palette[v] exact for all 256 values.
+ * SSRAM: the GPU reads it. */
 static uint32_t s_lut_shadow[256] __attribute__((section(".ssram"), aligned(32)));
 
 tiku_gpu_err_t
@@ -1050,10 +1054,9 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     tiku_gpu_err_t err;
     uint32_t e;
 
-    /* Invert the measured entry = i*17/16 law: shadow[e] = palette[e*16/17]. */
+    /* Invert the nibble-swap addressing: shadow[e] = palette[swap(e)]. */
     for (e = 0u; e < 256u; e++) {
-        uint32_t i = (e * 16u + 8u) / 17u;
-        s_lut_shadow[e] = palette[i > 255u ? 255u : i];
+        s_lut_shadow[e] = palette[((e & 0xFu) << 4) | (e >> 4)];
     }
 
     /* GPU reads the index and the shadow palette; writes dst. */
@@ -1081,17 +1084,40 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
     gpu_imem_load(2u, 0x080C0002u, 0x8A0761C7u);
 
-    /* Calibrated coordinate compensation (sawtooth sweep, 2026-07-23): the
-     * LUT shader's explicit TEX1 sample sees the screen X coordinate divided
-     * by 16, so MM00=16.0 restores 1:1 column sampling. MM11 stays 1.0 --
-     * scaling Y by 16 overflows the packed sample coordinate and collapses
-     * the draw to a constant (measured). Matrix ACTIVE, never bypassed. */
+    /* Coordinate law (probe flashes 1-2, 2026-07-24): the LUT shader's TEX1
+     * sample coordinate is 12.4 fixed point -- the matrix output is divided
+     * by 16 -- so MM00=16.0 yields texel = x exactly. Y needs no scaling
+     * (MM11=1.0 samples row y 1:1; verified with a row-discriminating
+     * pattern). No width clamp in steady state: exact through column 511 on
+     * a 512-wide surface. Matrix ACTIVE, never bypassed; MM02/MM12 stay 0 --
+     * a translate leaks into the PALETTE coordinate (raw/4), not the texel. */
     gpu_load_matrix(16.0f, 0.0f, 1.0f, 0.0f);
     gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
     GPU->DRAWCODEPTR = GPU_CODEPTR_LUT;
 
     GPU->CLIPMIN = 0u;
     GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+
+    /* Priming: the FIRST LUT-mode draw after a GPU init missamples -- the
+     * shader-coordinate 12.4 mode latches one PROGRAM+DRAW cycle late, so
+     * draw 1 sees texel = 16x+8 (the raw matrix output, undivided). Measured
+     * deterministically per init (probe flashes 1-3; a zero-area draw does
+     * NOT settle it -- no fragment reaches the latch point). So: run the
+     * full-rect draw, RE-program the mode-carrying state (IMEM, matrix,
+     * DRAWCODEPTR), and draw again -- draw 2 fully overwrites draw 1's
+     * missampled pixels with the exact result. */
+    GPU->DRAWPT0 = 0u;
+    GPU->DRAWPT1 = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
+    __DSB();
+    GPU->DRAWCMD = GPU_DRAWCMD_RECT;
+    err = tiku_gpu_wait_idle();
+    if (err != TIKU_GPU_OK) { return err; }
+
+    gpu_imem_load(0u, 0x080C108Bu, 0x00002000u);
+    gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
+    gpu_imem_load(2u, 0x080C0002u, 0x8A0761C7u);
+    gpu_load_matrix(16.0f, 0.0f, 1.0f, 0.0f);
+    GPU->DRAWCODEPTR = GPU_CODEPTR_LUT;
     GPU->DRAWPT0 = 0u;
     GPU->DRAWPT1 = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
     __DSB();
