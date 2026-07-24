@@ -55,8 +55,12 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
  * PERSIST/ckpt reserved tail, tier) is end-anchored on __tiku_nvmfs_size, so
  * shrinking THAT would shift every durable tenant and destroy on-device data.
  * Keep in sync with TIKU_MODULE_CARVE_ADDR and modules/mod_demo_apollo4l.ld. */
-__tiku_module_slot_size = 0x8000;                          /* 32 KB */
-__tiku_module_slot      = ORIGIN(MRAM) + LENGTH(MRAM);     /* 0x90000 */
+/* Canonical NVM layout: inputs + shared derivation (arch/common). */
+__tiku_layout_top          = 0x00200000;
+__tiku_layout_code_cap     = ORIGIN(MRAM) + LENGTH(MRAM);  /* end of code */
+__tiku_layout_module_size  = 0x8000;                       /* 32 KB slot  */
+__tiku_layout_durable_size = 0x10000;                      /* 64 KB mirror */
+INCLUDE arch/common/tiku_nvm_layout.ld
 
 /* Carved NVM store/tier region (substrate B): ALL MRAM between the module
  * slot and the 64 KB mirror -- ~1.34 MB on this part. Read in place by
@@ -64,14 +68,13 @@ __tiku_module_slot      = ORIGIN(MRAM) + LENGTH(MRAM);     /* 0x90000 */
  * (kernel/memory/tiku_nvm_region). The NVM memory tier and the file store ride
  * this. Base is PINNED (not derived from the code window) so the module-slot
  * carve cannot move the FS/persist layout. */
-__tiku_nvmfs_base  = 0x00098000;                   /* just above the module slot */
+/* (__tiku_nvmfs_base/__tiku_nvmfs_size come from the shared derivation.) */
 
 /* NVM mirror page (Proposal A, small hot state): 64 KB at the top of MRAM
  * (0x1F0000..0x200000), where tiku_mem_arch_nvm_flush() programs the .uninit
  * snapshot. Grown from 32 KB for more durable cells/aliases headroom. */
-__tiku_nvm_mram_start = 0x001F0000;                             /* top - 64 KB */
-__tiku_nvm_mram_size  = 0x10000;                                /* 64 KB */
-__tiku_nvmfs_size     = __tiku_nvm_mram_start - __tiku_nvmfs_base;  /* ~1.34 MB */
+__tiku_nvm_mram_start = __tiku_layout_durable_start;
+__tiku_nvm_mram_size  = __tiku_layout_durable_size;
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 

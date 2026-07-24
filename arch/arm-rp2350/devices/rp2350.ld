@@ -63,10 +63,17 @@ __flash_end   = ORIGIN(FLASH) + LENGTH(FLASH);
  * Size matches one QSPI erase granule (4 KB).  The current .uninit
  * region is ~3 KB; growing past 4 KB will require multi-sector
  * backup which the arch driver does NOT support today. */
-__tiku_nvm_flash_size   = 0x1000;             /* 4 KB = one sector */
-__tiku_nvm_flash_offset = LENGTH(FLASH) - __tiku_nvm_flash_size;
-__tiku_nvm_flash_start  = ORIGIN(FLASH) + __tiku_nvm_flash_offset;
-__tiku_nvm_flash_end    = ORIGIN(FLASH) + LENGTH(FLASH);
+/* Canonical NVM layout: inputs + shared derivation (arch/common). */
+__tiku_layout_top          = ORIGIN(FLASH) + LENGTH(FLASH);
+__tiku_layout_code_cap     = ORIGIN(FLASH) + 0xF8000;      /* 992 KB code */
+__tiku_layout_module_size  = 0x8000;                       /* 32 KB slot  */
+__tiku_layout_durable_size = 0x1000;                       /* 4 KB sector */
+INCLUDE arch/common/tiku_nvm_layout.ld
+
+__tiku_nvm_flash_size   = __tiku_layout_durable_size;
+__tiku_nvm_flash_start  = __tiku_layout_durable_start;
+__tiku_nvm_flash_end    = __tiku_layout_top;
+__tiku_nvm_flash_offset = __tiku_layout_durable_start - ORIGIN(FLASH);
 
 /* Carved NVM region (substrate B): a ~3 MB slice of QSPI flash just below the
  * 4 KB .uninit backup sector, owned by the /data file store + NVM tier via the
@@ -79,18 +86,13 @@ __tiku_nvm_flash_end    = ORIGIN(FLASH) + LENGTH(FLASH);
  *   __tiku_nvmfs_base   : XIP address (read in place by pointer); == 0x10100000
  *   __tiku_nvmfs_offset : byte offset from flash start (for the boot-ROM)
  *   __tiku_nvmfs_size   : ABSOLUTE symbol -- its ADDRESS is the size */
-/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): the TOP 32 KB
- * (8 erase sectors) of the code window (0x0F8000..0x100000, XIP
- * 0x100F8000) -- canonical layout order: code | module | NVM region |
- * mirror.  Installed sector-by-sector via the boot-ROM erase/program path
- * (header page programmed last); the ASSERT below keeps firmware code from
- * growing into it. */
-__tiku_module_slot_size = 0x8000;
-__tiku_module_slot      = ORIGIN(FLASH) + 0xF8000;
+/* Module slot: TOP 32 KB (8 erase sectors) of the code window, installed
+ * sector-by-sector via the boot-ROM path (header page programmed last).
+ * Symbols come from the shared derivation above. */
 
-__tiku_nvmfs_size   = 0x2FF000;     /* 3068 KB; code budget is now 1 MB-4 KB */
-__tiku_nvmfs_offset = __tiku_nvm_flash_offset - __tiku_nvmfs_size;
-__tiku_nvmfs_base   = ORIGIN(FLASH) + __tiku_nvmfs_offset;
+/* __tiku_nvmfs_base/size come from the shared derivation; only the
+ * boot-ROM byte offset is platform-local. */
+__tiku_nvmfs_offset = __tiku_nvmfs_base - ORIGIN(FLASH);
 
 /* The Cortex-M loads the initial SP from the first vector entry.
  * Place it at the very top of SRAM and let the stack grow downward. */

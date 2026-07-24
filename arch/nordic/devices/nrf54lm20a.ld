@@ -72,9 +72,16 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * NOTE (2026-07-15 Ambiq-parity layout, kintsugi/memoryfix.md B.0): growing
  * these carves MOVES every cell/TFS address -- established DKs re-prime once
  * (primed != 0, /data empty).  Expected, one-time. */
-__tiku_nvm_rram_size  = 0x4000;                             /* 16 KB */
-__tiku_nvm_rram_start = ORIGIN(RRAM) + LENGTH(RRAM) - __tiku_nvm_rram_size;
-__tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
+/* Canonical NVM layout: inputs + shared derivation (arch/common). */
+__tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
+__tiku_layout_code_cap     = 0x0F8000;                      /* 992 KB code */
+__tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
+__tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
+INCLUDE arch/common/tiku_nvm_layout.ld
+
+__tiku_nvm_rram_size  = __tiku_layout_durable_size;
+__tiku_nvm_rram_start = __tiku_layout_durable_start;
+__tiku_nvm_rram_end   = __tiku_layout_top;
 
 /* Carved NVM region (the tiku_nvm_region backend), Ambiq-style layout:
  * NVM tier at the front | TFS FS extent (256 KB, TIKU_NVMFS_FS_BYTES) |
@@ -91,12 +98,7 @@ __tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
  * The loader writes the image in place behind the WEN gate and runs it XIP
  * (durable across reboot and power loss); SRAM is W^X (execute-never), so a
  * module MUST live in RRAM.  Keep in sync with TIKU_MODULE_CARVE_ADDR. */
-__tiku_module_slot_size = 0x8000;                           /* 32 KB */
-__tiku_module_slot      = 0x0F8000;                         /* code hard cap */
-
-__tiku_nvmfs_size = 0xF9000;                                /* 996 KB */
-__tiku_nvmfs_base = __tiku_module_slot + __tiku_module_slot_size;
-__tiku_nvmfs_end  = __tiku_nvm_rram_start;
+/* (module slot + NVM region symbols come from the shared derivation.) */
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */

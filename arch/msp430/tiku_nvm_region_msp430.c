@@ -29,9 +29,33 @@
 #define TIKU_NVMFS_MSP430_BYTES  8192u
 #endif
 
-/* The region: a reserved, byte-writable FRAM span (durable in place). */
+/* The region span.  On the supported HIFRAM parts it is PINNED to a fixed
+ * address held back from HIFRAM by the device linker fragment (just below
+ * the Tier-3 module slot), so /data keeps its address across reflashes --
+ * every other platform's region is address-stable, and before this pin a
+ * rebuild could silently relocate the span (it was a .persistent array
+ * whose address moved with the build; the FS then found garbage at the new
+ * address and re-primed empty).  The pinned span lives in MPU segment 3
+ * (HIFRAM, R+W+X), so in-place writes behave exactly as before.
+ *
+ * Parts without a pinned carve (FR2433-class, host harness) keep the
+ * legacy floating .persistent array. */
+#if defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
+#define TIKU_NVMFS_MSP430_BASE  0x41000u   /* fr5994: below the 0x43000 slot */
+#elif defined(TIKU_DEVICE_MSP430FR6989) || defined(__MSP430FR6989__)
+#define TIKU_NVMFS_MSP430_BASE  0x21000u   /* fr6989: below the 0x23000 slot */
+#endif
+
+#ifdef TIKU_NVMFS_MSP430_BASE
+/* The held-back carve is 8 KB; growing TIKU_NVMFS_MSP430_BYTES past it
+ * requires holding back more HIFRAM in the device linker fragment too. */
+_Static_assert(TIKU_NVMFS_MSP430_BYTES <= 8192u,
+               "pinned msp430 /data region: grow the linker carve first");
+#define nvmfs_region  ((uint8_t *)TIKU_NVMFS_MSP430_BASE)
+#else
 static uint8_t __attribute__((section(".persistent")))
     nvmfs_region[TIKU_NVMFS_MSP430_BYTES];
+#endif
 
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
@@ -49,7 +73,8 @@ const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
     if (the_region.write == NULL) {
         the_region.base  = nvmfs_region;
-        the_region.size  = sizeof nvmfs_region;
+        the_region.size  = TIKU_NVMFS_MSP430_BYTES;   /* NOT sizeof: on the
+                                * pinned parts nvmfs_region is a pointer */
         the_region.write = region_write;
         the_region.erase = NULL;
         the_region.ctx   = NULL;

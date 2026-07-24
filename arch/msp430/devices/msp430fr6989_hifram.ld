@@ -40,14 +40,16 @@
 
 INCLUDE msp430fr6989.ld
 
-/* Tier-3 module slot: the stock script maps HIFRAM 0x10000..0x23FF7;
- * hold back the top 4 KB (0x23000..0x23FF7) as the loadable-native-
- * module slot so no .upper section can land there ("last MEMORY
- * declaration of a given name wins", region-by-region).  Keep in sync
- * with TIKU_MODULE_CARVE_ADDR / SIZE in tiku_basic_module.h
- * (0x23000/0xFF0; the slot stops at 0x23FF0, shy of the CPU47 end). */
+/* Held-back HIFRAM top ("last MEMORY declaration of a given name wins",
+ * region-by-region): the stock script maps HIFRAM 0x10000..0x23FF7.
+ * The top 12 KB is reserved, out of the linker's reach:
+ *   0x21000..0x23000  pinned /data region (tiku_nvm_region_msp430.c) --
+ *                     a FIXED address, so /data survives reflashes
+ *   0x23000..0x23FF0  Tier-3 loadable-module slot (tiku_basic_module.h;
+ *                     stops shy of the CPU47 region end)
+ * Keep in sync with TIKU_NVMFS_MSP430_BASE. */
 MEMORY {
-  HIFRAM (rxw) : ORIGIN = 0x00010000, LENGTH = 0x00013000
+  HIFRAM (rxw) : ORIGIN = 0x00010000, LENGTH = 0x00011000
 }
 
 /*
