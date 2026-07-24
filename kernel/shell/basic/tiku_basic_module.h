@@ -51,15 +51,51 @@
  *   apollo4l/4p:        same MRAM personality as apollo510 (bootrom-programmed,
  *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
  *     0x18000-based code window.  The unified CACHECTRL cache is flushed
- *     after install (both parts define AM_PART_APOLLO4L). */
+ *     after install (both parts define AM_PART_APOLLO4L).
+ *   rp2350 (Pico 2):    QSPI flash, XIP; the slot is exactly ONE 4 KB erase
+ *     sector at the top of the code window.  Install stages the image in
+ *     SRAM with the header page blank, commits erase+program via the
+ *     boot-ROM path, then programs the header page LAST -- flash can only
+ *     clear bits, so the gate stays invalid until that final program.
+ *   msp430 fr5994/fr6989: FRAM at the top of HIFRAM -- byte-writable in
+ *     place (behind the MPU unlock window) and natively executable (the
+ *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
 #if defined(AM_PART_APOLLO510)
 #define TIKU_MODULE_CARVE_ADDR  0x48F000u
 #elif defined(AM_PART_APOLLO4L)
 #define TIKU_MODULE_CARVE_ADDR  0x97000u
+#elif defined(PLATFORM_RP2350)
+/* Top 4 KB (= one erase sector) of the 1 MB flash code window; XIP.
+ * Install goes through the boot-ROM erase/program path. */
+#define TIKU_MODULE_CARVE_ADDR  0x100FF000u
+#elif defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
+/* Top 4 KB of HIFRAM (which the MPU already maps R+W+X, SAM 0x0755).
+ * FRAM: byte-writable in place AND natively executable.  The slot ends
+ * at 0x43FF0, short of the stock region's odd 0x43FF7 end (CPU47). */
+#define TIKU_MODULE_CARVE_ADDR  0x43000u
+#define TIKU_MODULE_CARVE_SIZE  0xFF0u
+#elif defined(TIKU_DEVICE_MSP430FR6989) || defined(__MSP430FR6989__)
+#define TIKU_MODULE_CARVE_ADDR  0x23000u
+#define TIKU_MODULE_CARVE_SIZE  0xFF0u
+#elif defined(TIKU_DEVICE_NRF54L15)
+/* RRAM slot just below the durable-persist region, LM20-style. */
+#define TIKU_MODULE_CARVE_ADDR  0x178000u
 #else                                    /* nordic nRF54LM20 RRAM slot */
 #define TIKU_MODULE_CARVE_ADDR  0x1F8000u
 #endif
+#ifndef TIKU_MODULE_CARVE_SIZE
 #define TIKU_MODULE_CARVE_SIZE  0x1000u
+#endif
+
+/* Entry-offset convention: ARM Thumb entry addresses carry bit0 SET so
+ * the loader can branch (carve_base + init_off) directly; MSP430 has no
+ * Thumb bit and entry offsets are plain (even) byte offsets.  Modules
+ * use this macro so one source builds for either CPU. */
+#if defined(__MSP430__)
+#define TIKU_MODULE_INIT_OFF(off)  (off)
+#else
+#define TIKU_MODULE_INIT_OFF(off)  ((off) | 1u)
+#endif
 
 /* Image header at the carve base.  init_off is the byte offset from the carve
  * base to the module's init routine, with the Thumb bit (bit0) SET so the

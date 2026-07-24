@@ -1651,29 +1651,62 @@ endif
 # at the executable NVM slot VMA, flatten to a blob, and wrap it as an ARM
 # object embedded in the firmware (the "bytes that arrive over the air").
 # Per-DEVICE: the slot address, install mechanism and CPU differ --
-#   nrf54lm20a/b:         RRAM slot 0x1F8000, Cortex-M33 (byte-writable XIP)
-#   apollo510/apollo510b: MRAM slot 0x48F000, Cortex-M55 (bootrom-programmed)
-#   apollo4l/apollo4p:    MRAM slot 0x97000,  Cortex-M4  (bootrom-programmed)
+#   nrf54lm20a/b:         RRAM slot 0x1F8000,  Cortex-M33 (byte-writable XIP)
+#   nrf54l15:             RRAM slot 0x178000,  Cortex-M33 (byte-writable XIP)
+#   apollo510/apollo510b: MRAM slot 0x48F000,  Cortex-M55 (bootrom-programmed)
+#   apollo4l/apollo4p:    MRAM slot 0x97000,   Cortex-M4  (bootrom-programmed)
+#   rp2350:               flash slot 0x100FF000, Cortex-M33 (boot-ROM sector)
+#   msp430fr5994/fr6989:  FRAM slot 0x43000/0x23000 (HIFRAM top, MPU-unlocked)
 # Other MCUs have no module slot carved in their linker script -> hard error.
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 CFLAGS        += -DTIKU_BASIC_MODULE_ENABLE=1
 MOD_BUILD      = $(BUILD_DIR)/module
+# Per-family wrap format for the embedded-image object (must match the
+# FIRMWARE's object format, since it links into the firmware).
+MOD_WRAP_OUT   = elf32-littlearm
+MOD_WRAP_ARCH  = arm
+# objcopy binary-wrap works for ARM; msp430-elf-ld REJECTS wrapped objects
+# (no .MSP430.attributes -> "unknown code model"), so MSP430 embeds the
+# image as a generated C array compiled with the firmware's own flags.
+MOD_EMBED      = objcopy
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-MOD_CPU_FLAGS  = -mcpu=cortex-m33
+MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
 MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
+else ifeq ($(MCU),nrf54l15)
+MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DTIKU_DEVICE_NRF54L15
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_nrf54l15.ld
+else ifeq ($(MCU),rp2350)
+MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DPLATFORM_RP2350
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_rp2350.ld
 else ifneq (,$(filter apollo510 apollo510b,$(MCU)))
-MOD_CPU_FLAGS  = -mcpu=cortex-m55 -DAM_PART_APOLLO510
+MOD_CPU_FLAGS  = -mcpu=cortex-m55 -mthumb -mfloat-abi=soft -DAM_PART_APOLLO510
 MOD_LDS        = kernel/shell/basic/modules/mod_demo_apollo510.ld
 else ifneq (,$(filter apollo4l apollo4p,$(MCU)))
-MOD_CPU_FLAGS  = -mcpu=cortex-m4 -DAM_PART_APOLLO4L
+MOD_CPU_FLAGS  = -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -DAM_PART_APOLLO4L
 MOD_LDS        = kernel/shell/basic/modules/mod_demo_apollo4l.ld
+else ifeq ($(MCU),msp430fr5994)
+# MSP430 module: same compiler/memory-model as the firmware (-mlarge, CALLA
+# calling convention through the syscall table); no Thumb, no ARM wrap.
+MOD_CPU_FLAGS  = -mmcu=msp430fr5994 -mlarge
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_msp430fr5994.ld
+MOD_LDFLAGS    =
+MOD_EMBED      = carray
+else ifeq ($(MCU),msp430fr6989)
+MOD_CPU_FLAGS  = -mmcu=msp430fr6989 -mlarge
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_msp430fr6989.ld
+MOD_LDFLAGS    =
+MOD_EMBED      = carray
 else
 $(error TIKU_BASIC_MODULE_ENABLE=1: no module slot for MCU=$(MCU) \
-        (supported: nrf54lm20a nrf54lm20b apollo510 apollo510b apollo4l apollo4p))
+        (supported: nrf54lm20a nrf54lm20b nrf54l15 rp2350 apollo510 \
+        apollo510b apollo4l apollo4p msp430fr5994 msp430fr6989))
 endif
-MOD_CFLAGS     = $(MOD_CPU_FLAGS) -mthumb -mfloat-abi=soft -Os -ffreestanding \
-                 -nostdlib -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
+MOD_CFLAGS     = $(MOD_CPU_FLAGS) -Os -ffreestanding \
+                 -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
                  -I kernel/shell/basic
+# ARM modules link fully freestanding; MSP430 keeps the toolchain specs
+# (minus crt0) so the hardware-multiply helper lib (libmul_f5) resolves.
+MOD_LDFLAGS   ?= -nostdlib
 TIKU_MOD_IMG_O = $(MOD_BUILD)/mod_demo_img.o
 endif
 
@@ -2542,17 +2575,23 @@ ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 $(MOD_BUILD)/mod_demo.elf: kernel/shell/basic/modules/mod_demo.c \
                            $(MOD_LDS)
 	@mkdir -p $(dir $@)
-	$(CC) $(MOD_CFLAGS) -T $(MOD_LDS) \
-	    -Wl,--gc-sections -nostartfiles -o $@ $<
+	$(CC) $(MOD_CFLAGS) $(MOD_LDFLAGS) -T $(MOD_LDS) \
+	    -Wl,--gc-sections -nostartfiles -o $@ $< -lgcc
 
 $(MOD_BUILD)/mod_demo.bin: $(MOD_BUILD)/mod_demo.elf
 	$(OBJCOPY) -O binary $< $@
 	@echo "  [module]  $$(wc -c < $@ | tr -d ' ') bytes"
 
+ifeq ($(MOD_EMBED),carray)
 $(TIKU_MOD_IMG_O): $(MOD_BUILD)/mod_demo.bin
-	cd $(MOD_BUILD) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm \
+	python3 tools/mod_embed.py $(MOD_BUILD)/mod_demo.bin $(MOD_BUILD)/mod_demo_img.c
+	$(CC) $(CFLAGS) -c -o $@ $(MOD_BUILD)/mod_demo_img.c
+else
+$(TIKU_MOD_IMG_O): $(MOD_BUILD)/mod_demo.bin
+	cd $(MOD_BUILD) && $(OBJCOPY) -I binary -O $(MOD_WRAP_OUT) -B $(MOD_WRAP_ARCH) \
 	    --rename-section .data=.rodata,alloc,load,readonly,data,contents \
 	    mod_demo.bin mod_demo_img.o
+endif
 endif
 
 size: $(TARGET)

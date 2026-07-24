@@ -77,9 +77,15 @@ __tiku_nvm_rram_end   = ORIGIN(RRAM) + LENGTH(RRAM);
  * erase).  740 KB leaves a 768 KB code window below (image today ~110 KB;
  * the ASSERT at the bottom is the hard cap).  __tiku_nvmfs_size is an
  * absolute symbol whose ADDRESS is the size (matches rp2350/ambiq). */
-__tiku_nvmfs_size = 0xB9000;                                /* 740 KB */
-__tiku_nvmfs_base = __tiku_nvm_rram_start - __tiku_nvmfs_size;
-__tiku_nvmfs_end  = __tiku_nvm_rram_start;
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): a 4 KB
+ * byte-writable, EXECUTABLE RRAM span just below the durable-persist region,
+ * LM20-style.  Keep in sync with TIKU_MODULE_CARVE_ADDR (0x178000). */
+__tiku_module_slot_size = 0x1000;                           /* 4 KB */
+__tiku_module_slot      = __tiku_nvm_rram_start - __tiku_module_slot_size;
+
+__tiku_nvmfs_size = 0xB8000;                                /* 736 KB (-4 KB) */
+__tiku_nvmfs_base = __tiku_module_slot - __tiku_nvmfs_size;
+__tiku_nvmfs_end  = __tiku_module_slot;
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */

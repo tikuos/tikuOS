@@ -79,7 +79,14 @@ __tiku_nvm_flash_end    = ORIGIN(FLASH) + LENGTH(FLASH);
  *   __tiku_nvmfs_base   : XIP address (read in place by pointer); == 0x10100000
  *   __tiku_nvmfs_offset : byte offset from flash start (for the boot-ROM)
  *   __tiku_nvmfs_size   : ABSOLUTE symbol -- its ADDRESS is the size */
-__tiku_nvmfs_size   = 0x2FF000;     /* 3068 KB; leaves a 1 MB code budget */
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): the TOP 4 KB
+ * erase sector of the code window (0x0FF000..0x100000, XIP 0x100FF000).
+ * Installed via the boot-ROM erase/program path; the ASSERT below keeps
+ * firmware code from growing into it. */
+__tiku_module_slot_size = 0x1000;
+__tiku_module_slot      = ORIGIN(FLASH) + 0xFF000;
+
+__tiku_nvmfs_size   = 0x2FF000;     /* 3068 KB; code budget is now 1 MB-4 KB */
 __tiku_nvmfs_offset = __tiku_nvm_flash_offset - __tiku_nvmfs_size;
 __tiku_nvmfs_base   = ORIGIN(FLASH) + __tiku_nvmfs_offset;
 
@@ -245,7 +252,7 @@ SECTIONS
 
     /* The flash image (code + rodata + the .data load copy) must not grow up
      * into the carved NVM region below the backup sector. */
-    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_nvmfs_base,
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_module_slot,
            "ERROR: flash image overruns the carved NVM region")
 
     /DISCARD/ :

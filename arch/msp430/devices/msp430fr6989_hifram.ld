@@ -17,8 +17,8 @@
  * the FR5994 override fixes, same fix here. (FR6989 doesn't need
  * the SRAM merging that FR5994 does — FR6989 only has 2 KB of SRAM
  * and no LEA peripheral, so the stock RAM region is already optimal.
- * This file therefore only adds the HIFRAM marker; it doesn't touch
- * the MEMORY block.)
+ * Besides the marker, this file also re-declares HIFRAM to hold back
+ * the top 4 KB as the Tier-3 module slot.)
  *
  * Implementation notes
  * ====================
@@ -39,6 +39,16 @@
  */
 
 INCLUDE msp430fr6989.ld
+
+/* Tier-3 module slot: the stock script maps HIFRAM 0x10000..0x23FF7;
+ * hold back the top 4 KB (0x23000..0x23FF7) as the loadable-native-
+ * module slot so no .upper section can land there ("last MEMORY
+ * declaration of a given name wins", region-by-region).  Keep in sync
+ * with TIKU_MODULE_CARVE_ADDR / SIZE in tiku_basic_module.h
+ * (0x23000/0xFF0; the slot stops at 0x23FF0, shy of the CPU47 end). */
+MEMORY {
+  HIFRAM (rxw) : ORIGIN = 0x00010000, LENGTH = 0x00013000
+}
 
 /*
  * Corrected high-bss clear size -- see the detailed note in

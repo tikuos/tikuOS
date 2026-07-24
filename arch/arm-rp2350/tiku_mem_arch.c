@@ -323,6 +323,35 @@ void tiku_rp2350_flash_commit_sector(uint32_t flash_offset,
     flash_commit_sector(flash_offset, src, len);
 }
 
+/**
+ * @brief Public: program flash WITHOUT erasing, via the boot-ROM helpers.
+ *
+ * Same interrupt-masked, XIP-suspended dance as the sector commit, minus
+ * the erase — for gate-last writers (the Tier-3 module installer) that
+ * deliberately left a page in the erased state during the sector commit
+ * and program it afterwards.  @p flash_offset and @p len must satisfy the
+ * boot-ROM's 256-byte program alignment; programming cells that are not
+ * in the erased state does not set bits (flash can only clear them).
+ */
+void tiku_rp2350_flash_program(uint32_t flash_offset,
+                               const uint8_t *src, size_t len) {
+    uint32_t primask;
+
+    if (!rom_flash_ready()) {
+        return;
+    }
+    __asm__ volatile ("mrs %0, primask" : "=r"(primask));
+    __asm__ volatile ("cpsid i" ::: "memory");
+
+    g_rom_connect_flash();
+    g_rom_flash_exit_xip();
+    g_rom_flash_range_program(flash_offset, src, len);
+    g_rom_flash_flush_cache();
+    g_rom_flash_enter_xip();
+
+    __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+}
+
 /*---------------------------------------------------------------------------*/
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/

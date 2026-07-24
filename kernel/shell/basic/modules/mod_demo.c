@@ -55,7 +55,7 @@ mod_mul(const long *args, int argc, long *out)
  * with the Thumb bit set so the loader calls (carve_base + init_off). */
 __attribute__((section(".modhdr"), used))
 const tiku_module_header_t mod_header = {
-    TIKU_MODULE_MAGIC, TIKU_MODULE_ABI, 16u | 1u, 0u
+    TIKU_MODULE_MAGIC, TIKU_MODULE_ABI, TIKU_MODULE_INIT_OFF(16u), 0u
 };
 
 /* Entry point -- the linker forces it to carve_base + 16 (.modinit). */

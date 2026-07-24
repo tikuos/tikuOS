@@ -20,12 +20,17 @@
  * -- and survives reboot: a boot only has to re-ACTIVATE (re-register into
  * the volatile Tier-2 table), never re-install.
  *
- * Two install backends, one per NVM personality:
- *   nordic (nRF54LM20 RRAM): byte-writable in place -- a store loop behind
+ * Four install backends, one per NVM personality:
+ *   nordic (RRAM):        byte-writable in place -- a store loop behind
  *     the WEN gate (tiku_mpu_unlock_nvm window).
- *   apollo510/510b (MRAM):   not CPU-writable -- spans are programmed via
- *     the bootrom (tiku_nvm_mram_program, SSRAM-staged), and the M55's
- *     I-cache is invalidated before the first XIP fetch of the new code.
+ *   ambiq (MRAM):         not CPU-writable -- spans are programmed via
+ *     the bootrom (tiku_nvm_mram_program, SSRAM-staged), and the I-cache
+ *     is invalidated before the first XIP fetch of the new code.
+ *   rp2350 (QSPI flash):  the slot is one erase sector; staged commit with
+ *     the header page left erased, header page programmed LAST (flash can
+ *     only clear bits, so the gate cannot go valid early).
+ *   msp430 (FRAM):        byte-writable in place behind the MPU unlock
+ *     window; natively executable, uncached, no barrier needed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,9 +44,18 @@
 #include <hal/tiku_cpu.h>            /* tiku_cpu_icache_invalidate */
 #include <string.h>
 
-/* Embedded image, wrapped as an ARM object by the Makefile module block. */
+/* Embedded image, wrapped as an object by the Makefile module block. */
 extern const uint8_t _binary_mod_demo_bin_start[];
 extern const uint8_t _binary_mod_demo_bin_end[];
+
+#if defined(PLATFORM_RP2350)
+/* The proven interrupt-masked, XIP-suspended boot-ROM flash path (declared
+ * extern-local like the region backend does; defined in tiku_mem_arch.c). */
+extern void tiku_rp2350_flash_commit_sector(uint32_t flash_offset,
+                                            const uint8_t *src, size_t len);
+extern void tiku_rp2350_flash_program(uint32_t flash_offset,
+                                      const uint8_t *src, size_t len);
+#endif
 
 static uint8_t module_activated;
 
@@ -70,11 +84,17 @@ tiku_basic_module_activate(void)
         hdr->abi_version != TIKU_MODULE_ABI) {
         return -1;                                /* no valid resident module */
     }
-    /* The entry must land past the header, inside the slot, with the Thumb
-     * bit set -- a corrupt init_off must not send the PC into the void. */
+    /* The entry must land past the header, inside the slot, and carry the
+     * CPU's entry-address convention -- ARM Thumb wants bit0 SET, MSP430
+     * wants a plain even offset.  A corrupt init_off must not send the PC
+     * into the void. */
     if (hdr->init_off < sizeof(tiku_module_header_t) ||
         hdr->init_off >= TIKU_MODULE_CARVE_SIZE ||
+#if defined(__MSP430__)
+        (hdr->init_off & 1u) != 0u) {
+#else
         (hdr->init_off & 1u) == 0u) {
+#endif
         return -1;
     }
     init = (tiku_module_init_fn)(uintptr_t)
@@ -128,6 +148,47 @@ tiku_basic_module_load(void)
      * span); the I-side is not -- drop stale lines before fetching the
      * just-installed code. */
     tiku_cpu_icache_invalidate();
+#elif defined(PLATFORM_RP2350)
+    /* Flash install: the slot is exactly ONE 4 KB erase sector, replaced
+     * through the proven interrupt-masked, XIP-suspended boot-ROM path.
+     * Flash can only clear bits, so the gate discipline inverts the RRAM
+     * ordering: stage the image with the whole first 256-byte page left
+     * ERASED (0xFF -- an invalid magic), commit erase+program, then
+     * program the real header page LAST onto still-erased cells.  A cut
+     * at any point leaves 0xFF or a torn word where the magic should be
+     * -- never a valid header over a torn body. */
+    {
+        static uint8_t stage[TIKU_MODULE_CARVE_SIZE];
+        uint32_t off = (uint32_t)(TIKU_MODULE_CARVE_ADDR - 0x10000000u);
+
+        memset(stage, 0xFF, sizeof(stage));
+        memcpy(stage, src, len);
+        memset(stage, 0xFF, 256u);                 /* header page: erased  */
+        tiku_rp2350_flash_commit_sector(off, stage, sizeof(stage));
+
+        memcpy(stage, src, (len < 256u) ? len : 256u);  /* real first page */
+        tiku_rp2350_flash_program(off, stage, 256u);
+    }
+    __asm__ volatile ("dsb 0xF; isb 0xF" ::: "memory");  /* code just written */
+#elif defined(PLATFORM_MSP430)
+    /* FRAM install: byte-write in place behind the MPU unlock window --
+     * FRAM is natively executable and uncached, so no barrier is needed.
+     * Gate-last like RRAM: body first, the 4-byte magic word LAST. */
+    {
+        volatile uint8_t *slot =
+            (volatile uint8_t *)(uintptr_t)TIKU_MODULE_CARVE_ADDR;
+        uint16_t saved;
+        uint32_t i;
+
+        saved = tiku_mpu_unlock_nvm();
+        for (i = 4u; i < len; i++) {
+            slot[i] = src[i];
+        }
+        for (i = 0u; i < 4u; i++) {
+            slot[i] = src[i];
+        }
+        tiku_mpu_lock_nvm(saved);
+    }
 #else
     /* RRAM install: byte-write in place behind the WEN gate: body first
      * (offset 4..), then the 4-byte magic LAST -- the magic is the install

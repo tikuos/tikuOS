@@ -58,6 +58,12 @@ MEMORY {
   RAM      (rw) : ORIGIN = 0x1C00, LENGTH = 0x2000  /* 8 KB merged */
   LEARAM        : ORIGIN = 0x3C00, LENGTH = 0
   LEASTACK      : ORIGIN = 0x3C00, LENGTH = 0
+  /* Tier-3 module slot: the stock script maps HIFRAM 0x10000..0x43FF7;
+   * hold back the top 4 KB (0x43000..0x43FF7) as the loadable-native-
+   * module slot so no .upper section can land there.  Keep in sync with
+   * TIKU_MODULE_CARVE_ADDR / SIZE in tiku_basic_module.h (0x43000/0xFF0;
+   * the slot deliberately stops at 0x43FF0, shy of the odd CPU47 end). */
+  HIFRAM  (rxw) : ORIGIN = 0x00010000, LENGTH = 0x00033000
 }
 
 /*
