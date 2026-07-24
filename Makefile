@@ -1432,6 +1432,9 @@ SRCS += arch/msp430/tiku_nvm_region_msp430.c
 endif
 SRCS += boot/tiku_boot.c
 SRCS += hal/tiku_cpu.c
+# Portable u8 vector kernels: Helium/MVE when -mcpu has it (Apollo510 M55),
+# bit-identical scalar elsewhere. Unreferenced kernels are gc-section'd away.
+SRCS += hal/tiku_simd.c
 SRCS += kernel/cpu/tiku_common.c
 SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/cpu/tiku_hang.c
