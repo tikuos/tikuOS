@@ -24,9 +24,12 @@
 #include "tiku_shell_cmd_radio154.h"
 
 #include <string.h>
+#include <kernel/shell/tiku_shell_config.h>   /* resolved command flag  */
 #include <kernel/shell/tiku_shell_io.h>
 
-#if (TIKU_HAS_154 + 0)
+/* The config header resolves this flag against TIKU_HAS_154, so a build
+ * without the 802.15.4 PHY compiles this file to nothing. */
+#if TIKU_SHELL_CMD_RADIO154
 
 #include <arch/nordic/tiku_ieee154_arch.h>
 #include <arch/nordic/tiku_radio_arch.h>       /* constlat hold around bursts  */
@@ -304,13 +307,4 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
     tiku_ble_adv_154_release();
 }
 
-#else /* !TIKU_HAS_154 */
-
-void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
-{
-    (void)argc;
-    (void)argv;
-    SHELL_PRINTF("radio154: 802.15.4 PHY not built for this target\n");
-}
-
-#endif /* TIKU_HAS_154 */
+#endif /* TIKU_SHELL_CMD_RADIO154 */

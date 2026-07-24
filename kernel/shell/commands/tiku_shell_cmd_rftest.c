@@ -24,9 +24,13 @@
 #include "tiku_shell_cmd_rftest.h"
 
 #include <string.h>
+#include <kernel/shell/tiku_shell_config.h>   /* resolved command flag  */
 #include <kernel/shell/tiku_shell_io.h>
 
-#if (TIKU_HAS_BLE_ADV + 0)
+/* The config header resolves this flag against TIKU_HAS_BLE_ADV, so a
+ * build without the radio compiles this file to nothing -- no stub, no
+ * table entry, no help line. */
+#if TIKU_SHELL_CMD_RFTEST
 
 #include <arch/nordic/tiku_radio_arch.h>
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND */
@@ -257,13 +261,4 @@ void tiku_shell_cmd_rftest(uint8_t argc, const char *argv[])
     }
 }
 
-#else  /* no BLE-capable radio in this build */
-
-void tiku_shell_cmd_rftest(uint8_t argc, const char *argv[])
-{
-    (void)argc;
-    (void)argv;
-    SHELL_PRINTF("rftest: no radio in this build\n");
-}
-
-#endif
+#endif /* TIKU_SHELL_CMD_RFTEST */

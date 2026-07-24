@@ -1261,6 +1261,7 @@ SRCS += arch/nordic/tiku_fault_arch.c
 # gate on TIKU_HAS_BLE_ADV, never on the chip (same pattern as TIKU_HAS_BLE).
 SRCS += interfaces/bluetooth/tiku_ble_adv.c
 CFLAGS += -DTIKU_HAS_BLE_ADV=1
+TIKU_CAP_BLE_ADV := 1
 # Phase E: LE Secure Connections (SMP) pairing crypto + state machine.  Used by
 # BOTH roles -- the FLPR-backed peripheral host (responder) and the RADIO-driven
 # central test peer (initiator) -- so it lives with the BLE_ADV capability, not
@@ -1277,6 +1278,7 @@ SRCS += arch/nordic/tiku_ieee154_arch.c
 SRCS += interfaces/radio/tiku_154_frame.c
 SRCS += interfaces/radio/tiku_154.c
 CFLAGS += -DTIKU_HAS_154=1
+TIKU_CAP_154 := 1
 # FLPR (VPR RISC-V coprocessor) -- opt-in.  Builds the tiny RISC-V firmware
 # (arch/nordic/flpr/) with the xPack riscv-none-elf toolchain (unpacked under
 # gitignored temp/toolchains/ -- see kintsugi/flpr_plan.md F0), embeds the
@@ -1734,10 +1736,18 @@ ifneq (,$(findstring TIKU_SHELL_CMD_NVMPROBE=1,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_CRYPTOPROBE=1,$(EXTRA_CFLAGS)))
+ifeq ($(TIKU_CRACEN_PK_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_cryptoprobe.c
+else
+$(warning cryptoprobe: needs TIKU_CRACEN_PK_ENABLE=1 (CRACEN PK) -- skipped)
+endif
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_AXONSPROBE=1,$(EXTRA_CFLAGS)))
+ifeq ($(MCU),nrf54lm20b)
 SRCS += kernel/shell/commands/tiku_shell_cmd_axonsprobe.c
+else
+$(warning axonsprobe: the Axon NPU exists only on nrf54lm20b -- skipped)
+endif
 endif
 
 # Axon NPU (nRF54LM20B) -- opt-in.  Links Nordic's Axon driver core from the
@@ -1791,14 +1801,30 @@ else
 CFLAGS += -DNRF_AXON_INTERLAYER_BUFFER_SIZE=0 -DNRF_AXON_PSUM_BUFFER_SIZE=0
 endif
 endif
+# Radio bring-up commands: requested via EXTRA_CFLAGS, honoured only where
+# the capability exists.  tiku_shell_config.h resolves the same rule on the
+# C side, so a skipped command vanishes from the table too -- these warnings
+# just tell the user WHY.
 ifneq (,$(findstring TIKU_SHELL_CMD_BLEADV=1,$(EXTRA_CFLAGS)))
+ifeq ($(TIKU_CAP_BLE_ADV),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_bleadv.c
+else
+$(warning bleadv: no broadcast-BLE radio on $(MCU) -- command skipped)
+endif
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_RADIO154=1,$(EXTRA_CFLAGS)))
+ifeq ($(TIKU_CAP_154),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_radio154.c
+else
+$(warning radio154: no 802.15.4 PHY on $(MCU) -- command skipped)
+endif
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_RFTEST=1,$(EXTRA_CFLAGS)))
+ifeq ($(TIKU_CAP_BLE_ADV),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_rftest.c
+else
+$(warning rftest: no test-capable 2.4 GHz radio on $(MCU) -- command skipped)
+endif
 endif
 endif
 # GPIO arch is always needed (VFS tree references GPIO read/write/dir).

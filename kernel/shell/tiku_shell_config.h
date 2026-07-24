@@ -19,6 +19,11 @@
  *   2. Create kernel/shell/commands/tiku_shell_cmd_xxx.h and .c
  *   3. Add #include and table entry in tiku_shell.c
  *   4. Add the .c file to the Makefile TIKU_SHELL_ENABLE section
+ *   5. If it drives hardware not every target has, add a rule to the
+ *      HARDWARE REQUIREMENTS section at the bottom of this file (and
+ *      gate/warn in the Makefile) so the flag resolves to 0 where the
+ *      capability is absent -- gate the whole .c on the resolved flag,
+ *      no runtime "not available" stubs
  */
 
 #ifndef TIKU_SHELL_CONFIG_H_
@@ -428,5 +433,82 @@
 #endif
 
 /** @} */
+
+/*---------------------------------------------------------------------------*/
+/* HARDWARE REQUIREMENTS -- capability resolution                            */
+/*---------------------------------------------------------------------------*/
+/*
+ * A command that drives hardware the build does not have is forced OFF
+ * here, AFTER every default and user override above.  This is the ONE
+ * place where "command X needs capability Y" is written down; the shell
+ * table, the command .c and the help listing all read the resolved
+ * flag, so a `-DTIKU_SHELL_CMD_X=1` on a target without the hardware
+ * yields a build without the command -- not a stub in `help` and not an
+ * undefined reference at link (both of which the pre-resolution scheme
+ * produced, depending on the command).
+ *
+ * The Makefile mirrors these rules where it owns the decision to
+ * compile the command's .c at all, and prints a warning when a command
+ * was requested on a target that cannot have it.
+ *
+ * Capability macros used here are -D flags from the Makefile (or, for
+ * LCD/Axon, board/device-header macros -- those resolutions are only
+ * meaningful in TUs that include tiku.h first, which tiku_shell.c
+ * does).  Keep each rule to the same three-line shape.
+ */
+
+/* rftest + bleadv drive the on-die 2.4 GHz RADIO (broadcast BLE). */
+#if TIKU_SHELL_CMD_RFTEST && !(TIKU_HAS_BLE_ADV + 0)
+#undef  TIKU_SHELL_CMD_RFTEST
+#define TIKU_SHELL_CMD_RFTEST 0
+#endif
+#if TIKU_SHELL_CMD_BLEADV && !(TIKU_HAS_BLE_ADV + 0)
+#undef  TIKU_SHELL_CMD_BLEADV
+#define TIKU_SHELL_CMD_BLEADV 0
+#endif
+
+/* radio154 drives the 802.15.4 PHY. */
+#if TIKU_SHELL_CMD_RADIO154 && !(TIKU_HAS_154 + 0)
+#undef  TIKU_SHELL_CMD_RADIO154
+#define TIKU_SHELL_CMD_RADIO154 0
+#endif
+
+/* cryptoprobe drives the CRACEN CryptoMaster. */
+#if TIKU_SHELL_CMD_CRYPTOPROBE && !(TIKU_CRACEN_PK_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_CRYPTOPROBE
+#define TIKU_SHELL_CMD_CRYPTOPROBE 0
+#endif
+
+/* wifi / bt drive the CYW43439; ble drives the EM9305. */
+#if TIKU_SHELL_CMD_WIFI && !(TIKU_DRV_WIFI_CYW43_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_WIFI
+#define TIKU_SHELL_CMD_WIFI 0
+#endif
+#if TIKU_SHELL_CMD_BT && !(TIKU_DRV_WIFI_CYW43_BT_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_BT
+#define TIKU_SHELL_CMD_BT 0
+#endif
+#if TIKU_SHELL_CMD_BLE && !(TIKU_DRV_BLE_EM9305_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_BLE
+#define TIKU_SHELL_CMD_BLE 0
+#endif
+
+/* mrambench drives the Ambiq bootrom MRAM programmer. */
+#if TIKU_SHELL_CMD_MRAMBENCH && !defined(PLATFORM_AMBIQ)
+#undef  TIKU_SHELL_CMD_MRAMBENCH
+#define TIKU_SHELL_CMD_MRAMBENCH 0
+#endif
+
+/* lcd drives the segment-LCD controller (board-header capability). */
+#if TIKU_SHELL_CMD_LCD && !(TIKU_BOARD_HAS_LCD + 0)
+#undef  TIKU_SHELL_CMD_LCD
+#define TIKU_SHELL_CMD_LCD 0
+#endif
+
+/* axonsprobe (Axon NPU) has NO rule here on purpose: its capability
+ * macro TIKU_DEVICE_HAS_AXONS lives in the device header, which
+ * tiku_shell_cmd_axonsprobe.h pulls in AFTER this file -- a rule here
+ * would evaluate before the macro exists and kill the flag in that TU
+ * only.  The Makefile gates its compilation to nrf54lm20b instead. */
 
 #endif /* TIKU_SHELL_CONFIG_H_ */
