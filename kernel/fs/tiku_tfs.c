@@ -10,11 +10,22 @@
  * On-NVM layout:
  *   [ superblock | directory[MAX_FILES] | data[NSLOTS] ]
  *   superblock : magic (4) + version-and-geometry (4)
- *   dirent     : gate (4) + slot (4) + name[NAME_MAX]   (one per file)
+ *   dirent     : gate (4) + run (4) + name[NAME_MAX]    (one per file)
  *   data slot  : length (4) + content[SLOT_DATA]        (NSLOTS = MAX_FILES+1)
- * Content + its length live together in a data slot; the dirent holds the slot
- * index.  Overwrite writes a fresh shadow slot then flips the dirent's slot
- * index in one aligned word -> a torn overwrite leaves the OLD file.
+ *
+ * SPANNED FILES.  A file owns a RUN of `span` CONTIGUOUS slots, and the dirent
+ * packs that run into the single word it already had: first | span<<16.  Only
+ * the FIRST slot's length word is metadata -- the rest of the run is content --
+ * so a run's bytes are one contiguous range starting at slot_off(first)+4 and
+ * a span of n holds n*SLOT_BYTES-4 bytes.  A one-slot file is exactly the n==1
+ * case of that formula, which is why single-slot behaviour is untouched and why
+ * tiku_tfs_map() keeps working over a span: contiguous in NVM means one pointer.
+ *
+ * Overwrite stages a fresh run then flips the dirent's run word in one aligned
+ * write -> a torn overwrite leaves the OLD file, as before.  What spans change
+ * is the space rule: replacing an n-slot file transiently needs n MORE free
+ * slots, so an overwrite can now fail with NOSPACE where the old
+ * one-shadow-slot guarantee made it impossible.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,7 +60,7 @@
  * purely because its slots are sector-sized -- i.e. because its geometry
  * differed -- which is now simply what the geometry field says.
  */
-#define TFS_FMT_VERSION  3u        /* on-NVM format revision (4 bits) */
+#define TFS_FMT_VERSION  4u        /* 4: spanned files (dirent run word) */
 #define TFS_VERSION                                                           \
     (((uint32_t)TFS_FMT_VERSION      << 28) |                                 \
      ((uint32_t)TIKU_TFS_MAX_FILES   << 16) |                                 \
@@ -84,10 +95,25 @@ typedef char tfs_region_size_check[(TFS_REGION == TIKU_TFS_REGION_BYTES) ? 1 : -
 
 /* field offsets within a dirent / a slot */
 #define TFS_DE_GATE  0u
-#define TFS_DE_SLOT  4u
+#define TFS_DE_SLOT  4u            /* the RUN word: first | span<<16 */
 #define TFS_DE_NAME  8u
 #define TFS_SL_LEN   0u
 #define TFS_SL_DATA  4u
+
+/*
+ * Run word packing.  Both halves must fit 16 bits, which bounds NSLOTS -- a
+ * 3.5 MB store is ~900 slots, so the headroom is ample, but assert it rather
+ * than assume it: an overflow here would alias two different runs onto the
+ * same word and silently hand back another file's bytes.
+ */
+typedef char tfs_nslots_check[(TIKU_TFS_NSLOTS <= 0xFFFFu) ? 1 : -1];
+
+#define TFS_RUN_MAKE(first, span)  ((uint32_t)(first) | ((uint32_t)(span) << 16))
+#define TFS_RUN_FIRST(w)           ((unsigned)((w) & 0xFFFFu))
+#define TFS_RUN_SPAN(w)            ((unsigned)((w) >> 16))
+
+/** @brief Content capacity of a run of @p span slots (the n==1 case == SLOT_DATA). */
+#define TFS_RUN_CAP(span)  ((size_t)(span) * TFS_SLOT_BYTES - TFS_SL_DATA)
 
 /*---------------------------------------------------------------------------*/
 /* LOW-LEVEL ACCESS                                                          */
@@ -123,7 +149,12 @@ static size_t dirent_off(unsigned i) { return TFS_DIR_OFF + (size_t)i * TFS_DE_B
 static size_t slot_off(unsigned s)   { return TFS_DATA_OFF + (size_t)s * TFS_SLOT_BYTES; }
 
 static uint32_t de_gate(tiku_tfs_t *fs, unsigned i) { return rd32(fs, dirent_off(i) + TFS_DE_GATE); }
-static uint32_t de_slot(tiku_tfs_t *fs, unsigned i) { return rd32(fs, dirent_off(i) + TFS_DE_SLOT); }
+/** @brief Raw run word of dirent @p i (first | span<<16). */
+static uint32_t de_run(tiku_tfs_t *fs, unsigned i) { return rd32(fs, dirent_off(i) + TFS_DE_SLOT); }
+/** @brief First slot of dirent @p i's run. */
+static unsigned de_first(tiku_tfs_t *fs, unsigned i) { return TFS_RUN_FIRST(de_run(fs, i)); }
+/** @brief Slot count of dirent @p i's run. */
+static unsigned de_span(tiku_tfs_t *fs, unsigned i) { return TFS_RUN_SPAN(de_run(fs, i)); }
 /**
  * @brief Pointer to the NUL-padded name field of directory entry @p i.
  */
@@ -193,19 +224,71 @@ static int free_dirent(tiku_tfs_t *fs)
 }
 
 /**
- * @brief Find the first free data slot from the allocation bitmap.
+ * @brief Find @p span contiguous free data slots.
  *
- * @return  Index of an unused slot, or -1 if every slot is allocated.
+ * DOUBLE-ENDED, and deliberately so.  Single-slot files -- the small, churny
+ * majority -- are packed from the BOTTOM up, exactly as before spans existed.
+ * Multi-slot runs are placed from the TOP down, because they are the large,
+ * long-lived tenants (model weights, radio firmware, a saved program) and
+ * interleaving them with churn is what fragments a store until a big
+ * contiguous run can no longer be found even with plenty of free space.
+ * Growing the two populations toward each other keeps the large-run end
+ * unbroken while confining reuse to the end where contiguity does not matter.
+ *
+ * @return  Index of the run's first slot, or -1 if no such run exists.
  */
-static int free_slot(tiku_tfs_t *fs)
+static int free_run(tiku_tfs_t *fs, unsigned span)
 {
-    unsigned s;
-    for (s = 0; s < TIKU_TFS_NSLOTS; s++) {
-        if (!bm_get(fs->slot_used, s)) {
+    unsigned s, k;
+
+    if (span == 0u || span > TIKU_TFS_NSLOTS) {
+        return -1;
+    }
+    if (span == 1u) {
+        for (s = 0; s < TIKU_TFS_NSLOTS; s++) {
+            if (!bm_get(fs->slot_used, s)) {
+                return (int)s;
+            }
+        }
+        return -1;
+    }
+    /* Top-down: try the highest start first, walking back one slot at a time. */
+    for (s = TIKU_TFS_NSLOTS - span + 1u; s-- > 0u; ) {
+        for (k = 0u; k < span; k++) {
+            if (bm_get(fs->slot_used, s + k)) {
+                break;
+            }
+        }
+        if (k == span) {
             return (int)s;
         }
     }
     return -1;
+}
+
+/** @brief Mark every slot of a run allocated / free. */
+static void run_mark(tiku_tfs_t *fs, unsigned first, unsigned span, int used)
+{
+    unsigned k;
+    for (k = 0u; k < span; k++) {
+        if (first + k < TIKU_TFS_NSLOTS) {
+            if (used) {
+                bm_set(fs->slot_used, first + k);
+            } else {
+                bm_clr(fs->slot_used, first + k);
+            }
+        }
+    }
+}
+
+/** @brief Slots needed to hold @p len content bytes (never fewer than one). */
+static unsigned run_span_for(size_t len)
+{
+    unsigned span = 1u;
+    while (TFS_RUN_CAP(span) < len) {
+        span++;
+    }
+    return span;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -255,18 +338,25 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (rd32(fs, 0) != TFS_MAGIC || rd32(fs, 4) != TFS_VERSION) {
         return tiku_tfs_format(fs);            /* virgin / wrong-version NVM */
     }
-    /* Rebuild the data-slot allocation map from the live directory. */
+    /* Rebuild the data-slot allocation map from the live directory. Every run
+     * is bounds-checked and claimed slot by slot, so an overlap between two
+     * files is caught here rather than discovered as corrupted content later. */
     memset(fs->slot_used, 0, sizeof fs->slot_used);
     for (i = 0; i < TIKU_TFS_MAX_FILES; i++) {
         if (de_gate(fs, i) == TFS_GATE) {
-            uint32_t s = de_slot(fs, i);
-            if (s >= TIKU_TFS_NSLOTS || sl_len(fs, (unsigned)s) > TIKU_TFS_SLOT_DATA) {
+            unsigned first = de_first(fs, i);
+            unsigned span  = de_span(fs, i);
+            unsigned k;
+            if (span == 0u || first + span > TIKU_TFS_NSLOTS ||
+                sl_len(fs, first) > TFS_RUN_CAP(span)) {
                 return TFS_ERR_CORRUPT;
             }
-            if (bm_get(fs->slot_used, (unsigned)s)) {
-                return TFS_ERR_CORRUPT;         /* two names own one slot */
+            for (k = 0u; k < span; k++) {
+                if (bm_get(fs->slot_used, first + k)) {
+                    return TFS_ERR_CORRUPT;     /* two names own one slot */
+                }
+                bm_set(fs->slot_used, first + k);
             }
-            bm_set(fs->slot_used, (unsigned)s);
         }
     }
     fs->mounted = 1;
@@ -293,7 +383,7 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     if (i < 0) {
         return TFS_ERR_NOSPACE;
     }
-    s = free_slot(fs);
+    s = free_run(fs, 1u);                       /* empty file: one slot */
     if (s < 0) {
         return TFS_ERR_NOSPACE;
     }
@@ -302,9 +392,10 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     }
     memset(nb, 0, sizeof nb);
     memcpy(nb, name, nl);
-    /* name + slot, then GATE last (the commit point). */
+    /* name + run, then GATE last (the commit point). */
     if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME, nb, TIKU_TFS_NAME_MAX) ||
-        wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT, (uint32_t)s) ||
+        wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
+             TFS_RUN_MAKE((unsigned)s, 1u)) ||
         wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
         return TFS_ERR_IO;
     }
@@ -325,70 +416,143 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
  * @param len   Byte count, at most TIKU_TFS_SLOT_DATA.
  * @return      TFS_OK, or a negative TFS_ERR_* code.
  */
-int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t len)
+int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
+                    const char *name, size_t max_len)
 {
-    int i, ns;
-    uint32_t old;
+    unsigned span;
+    size_t   nl;
+    int      r;
 
-    if (fs == NULL || !fs->mounted || name == NULL || (len && data == NULL)) {
+    if (fs == NULL || !fs->mounted || w == NULL || name == NULL) {
         return TFS_ERR_INVAL;
     }
-    if (len > TIKU_TFS_SLOT_DATA) {
+    if (max_len > TIKU_TFS_FILE_MAX) {
         return TFS_ERR_TOOBIG;
     }
-    if (strlen(name) == 0 || strlen(name) >= TIKU_TFS_NAME_MAX) {
+    nl = strlen(name);
+    if (nl == 0 || nl >= TIKU_TFS_NAME_MAX) {
         return TFS_ERR_NAMELEN;
     }
-    i = tfs_find(fs, name);
+    /* Claim the directory entry's availability up front: discovering a full
+     * directory only at commit would waste the whole stream. */
+    if (tfs_find(fs, name) < 0 && free_dirent(fs) < 0) {
+        return TFS_ERR_NOSPACE;
+    }
+    span = run_span_for(max_len);
+    r = free_run(fs, span);
+    if (r < 0) {
+        return TFS_ERR_NOSPACE;
+    }
+    /* Reserve in the RAM map so nothing else takes the run mid-stream. This
+     * is deliberately NOT durable: if power fails before commit, the next
+     * mount rebuilds the map from live dirents, none of which reference the
+     * staged run -- so it is free again with no cleanup pass. */
+    run_mark(fs, (unsigned)r, span, 1);
+    w->fs     = fs;
+    w->first  = (unsigned)r;
+    w->span   = span;
+    w->cap    = TFS_RUN_CAP(span);
+    w->off    = 0u;
+    w->active = 1;
+    memset(w->name, 0, sizeof w->name);
+    memcpy(w->name, name, nl);
+    return TFS_OK;
+}
+
+int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len)
+{
+    if (w == NULL || !w->active || (len && data == NULL)) {
+        return TFS_ERR_INVAL;
+    }
+    if (len > w->cap - w->off) {
+        return TFS_ERR_TOOBIG;
+    }
+    if (len && wr(w->fs, slot_off(w->first) + TFS_SL_DATA + w->off, data, len)) {
+        return TFS_ERR_IO;
+    }
+    w->off += len;
+    return TFS_OK;
+}
+
+int tiku_tfs_commit(tiku_tfs_wr_t *w)
+{
+    tiku_tfs_t *fs;
+    int         i;
+
+    if (w == NULL || !w->active) {
+        return TFS_ERR_INVAL;
+    }
+    fs = w->fs;
+    if (wr32(fs, slot_off(w->first) + TFS_SL_LEN, (uint32_t)w->off)) {
+        return TFS_ERR_IO;
+    }
+    i = tfs_find(fs, w->name);
     if (i < 0) {
         char nb[TIKU_TFS_NAME_MAX];
         i = free_dirent(fs);
         if (i < 0) {
-            return TFS_ERR_NOSPACE;
+            return TFS_ERR_NOSPACE;            /* directory filled mid-stream */
         }
-        ns = free_slot(fs);
-        if (ns < 0) {
-            return TFS_ERR_NOSPACE;
-        }
-        /* Create-with-content is one transaction: stage the final slot and
-         * directory payload, then stamp GATE last.  Calling create() first
-         * would expose a durable empty file if power failed before content. */
-        if ((len && wr(fs, slot_off((unsigned)ns) + TFS_SL_DATA, data, len)) ||
-            wr32(fs, slot_off((unsigned)ns) + TFS_SL_LEN, (uint32_t)len)) {
-            return TFS_ERR_IO;
-        }
+        /* Create-with-content is one transaction: the run and the name are
+         * already durable, so stamping GATE last is the single commit point.
+         * Creating the entry earlier would expose a durable empty file if
+         * power failed before the content landed. */
         memset(nb, 0, sizeof nb);
-        memcpy(nb, name, strlen(name));
+        memcpy(nb, w->name, strlen(w->name));
         if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME,
                nb, TIKU_TFS_NAME_MAX) ||
-            wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT, (uint32_t)ns) ||
+            wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
+                 TFS_RUN_MAKE(w->first, w->span)) ||
             wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
             return TFS_ERR_IO;
         }
-        bm_set(fs->slot_used, (unsigned)ns);
-        return TFS_OK;
+    } else {
+        /* Atomic flip: one aligned word repoints the dirent at the new run.
+         * A power cut before it leaves the dirent on the OLD run. */
+        uint32_t old = de_run(fs, (unsigned)i);
+        if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
+                 TFS_RUN_MAKE(w->first, w->span))) {
+            return TFS_ERR_IO;
+        }
+        run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);  /* reclaim */
     }
-    ns = free_slot(fs);
-    if (ns < 0) {
-        return TFS_ERR_NOSPACE;
-    }
-    /* Stage content + length in a fresh (shadow) slot. */
-    if ((len && wr(fs, slot_off((unsigned)ns) + TFS_SL_DATA, data, len)) ||
-        wr32(fs, slot_off((unsigned)ns) + TFS_SL_LEN, (uint32_t)len)) {
-        return TFS_ERR_IO;
-    }
-    /* Atomic flip: one aligned word repoints the dirent at the new slot. A
-     * power cut before this leaves the dirent on the OLD slot (old content). */
-    old = de_slot(fs, (unsigned)i);
-    bm_set(fs->slot_used, (unsigned)ns);
-    if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT, (uint32_t)ns)) {
-        bm_clr(fs->slot_used, (unsigned)ns);   /* flip failed: shadow is free */
-        return TFS_ERR_IO;
-    }
-    if (old < TIKU_TFS_NSLOTS) {
-        bm_clr(fs->slot_used, (unsigned)old);  /* reclaim the old slot */
-    }
+    w->active = 0;
     return TFS_OK;
+}
+
+void tiku_tfs_abort(tiku_tfs_wr_t *w)
+{
+    if (w != NULL && w->active) {
+        run_mark(w->fs, w->first, w->span, 0);
+        w->active = 0;
+    }
+}
+
+/*
+ * Whole-buffer write, expressed as a one-chunk stream.  Sharing the streamed
+ * path is the point: allocation, the commit sequence and the crash discipline
+ * exist once, so the two entry points cannot drift apart.
+ */
+int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t len)
+{
+    tiku_tfs_wr_t w;
+    int           rc;
+
+    if (len != 0u && data == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    rc = tiku_tfs_open_w(fs, &w, name, len);
+    if (rc != TFS_OK) {
+        return rc;
+    }
+    rc = tiku_tfs_write_chunk(&w, data, len);
+    if (rc == TFS_OK) {
+        rc = tiku_tfs_commit(&w);
+    }
+    if (rc != TFS_OK) {
+        tiku_tfs_abort(&w);
+    }
+    return rc;
 }
 
 /**
@@ -417,12 +581,12 @@ int tiku_tfs_read(tiku_tfs_t *fs, const char *name, void *buf, size_t max, size_
     if (i < 0) {
         return TFS_ERR_NOTFOUND;
     }
-    s = de_slot(fs, (unsigned)i);
-    if (s >= TIKU_TFS_NSLOTS) {
+    s = de_first(fs, (unsigned)i);
+    if (s + de_span(fs, (unsigned)i) > TIKU_TFS_NSLOTS) {
         return TFS_ERR_CORRUPT;
     }
     len = sl_len(fs, (unsigned)s);
-    if (len > TIKU_TFS_SLOT_DATA) {
+    if ((size_t)len > TFS_RUN_CAP(de_span(fs, (unsigned)i))) {
         return TFS_ERR_CORRUPT;
     }
     n = (len < max) ? len : max;
@@ -459,10 +623,12 @@ int tiku_tfs_map(tiku_tfs_t *fs, const char *name, const void **p, size_t *len)
     if (i < 0) {
         return TFS_ERR_NOTFOUND;
     }
-    s = de_slot(fs, (unsigned)i);
-    if (s >= TIKU_TFS_NSLOTS) {
+    s = de_first(fs, (unsigned)i);
+    if (s + de_span(fs, (unsigned)i) > TIKU_TFS_NSLOTS) {
         return TFS_ERR_CORRUPT;
     }
+    /* One pointer covers the whole run: only the first slot's length word is
+     * metadata, so the content bytes are contiguous across the span. */
     *p = sl_data(fs, (unsigned)s);             /* points into the NVM region */
     *len = sl_len(fs, (unsigned)s);
     return TFS_OK;
@@ -480,13 +646,11 @@ int tiku_tfs_delete(tiku_tfs_t *fs, const char *name)
     if (i < 0) {
         return TFS_ERR_NOTFOUND;
     }
-    s = de_slot(fs, (unsigned)i);
+    s = de_run(fs, (unsigned)i);
     if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, 0u)) {   /* commit */
         return TFS_ERR_IO;
     }
-    if (s < TIKU_TFS_NSLOTS) {
-        bm_clr(fs->slot_used, (unsigned)s);
-    }
+    run_mark(fs, TFS_RUN_FIRST(s), TFS_RUN_SPAN(s), 0);
     return TFS_OK;
 }
 
@@ -500,7 +664,7 @@ int tiku_tfs_stat(tiku_tfs_t *fs, const char *name, size_t *len)
     if (i < 0) {
         return TFS_ERR_NOTFOUND;
     }
-    *len = sl_len(fs, de_slot(fs, (unsigned)i));
+    *len = sl_len(fs, de_first(fs, (unsigned)i));
     return TFS_OK;
 }
 
@@ -514,7 +678,7 @@ int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx)
     for (i = 0; i < TIKU_TFS_MAX_FILES; i++) {
         if (de_gate(fs, i) == TFS_GATE) {
             if (cb) {
-                cb(de_name(fs, i), sl_len(fs, de_slot(fs, i)), ctx);
+                cb(de_name(fs, i), sl_len(fs, de_first(fs, i)), ctx);
             }
             n++;
         }
@@ -556,7 +720,7 @@ int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
         slash = strchr(rest, '/');
         if (slash == NULL) {                   /* a file in this directory */
             if (cb) {
-                cb(rest, sl_len(fs, de_slot(fs, i)), ctx);
+                cb(rest, sl_len(fs, de_first(fs, i)), ctx);
             }
             n++;
         } else {                               /* a sub-folder: first segment */

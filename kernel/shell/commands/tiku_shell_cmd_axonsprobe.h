@@ -13,6 +13,7 @@
 #ifndef TIKU_SHELL_CMD_AXONSPROBE_H_
 #define TIKU_SHELL_CMD_AXONSPROBE_H_
 
+#include <stdint.h>                          /* uint8_t in the handler type */
 #include <kernel/shell/tiku_shell_config.h>
 
 #if TIKU_SHELL_CMD_AXONSPROBE
@@ -30,7 +31,11 @@
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2..]
  *              carry its offset and word-count parameters
  */
-void tiku_shell_cmd_axonsprobe(int argc, char **argv);
+/* Signature MUST be tiku_shell_handler_t (tiku_shell.h): the command table
+ * stores it directly.  It read (int, char **) until the Axon checkout existed
+ * to build against, so nothing ever instantiated the table entry and the
+ * mismatch stayed invisible. */
+void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[]);
 #endif
 
 #endif /* TIKU_SHELL_CMD_AXONSPROBE_H_ */

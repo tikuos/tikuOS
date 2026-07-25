@@ -95,19 +95,22 @@
 
 /* PROGRAM_LINES scales program CAPACITY (line count) to the arena/RAM -- the
  * knob that varies per platform now that LINE_MAX is uniform.  It sizes the
- * prog[] arena block (PROGRAM_LINES * LINE_MAX) and the DURABLE save slot
- * (PROGRAM_LINES * (LINE_MAX + 8)).  The save SLOT is what the tail must hold:
- * on the region-backed parts it lives in the carved NVM-region tail and must fit
- * TIKU_NVM_RESERVED_BYTES -- that tail, NOT SSRAM, is what caps HUGE (a
- * _Static_assert in tiku_basic_persist.inl enforces it); .persistent FRAM on
- * MSP430.  Since v0.06 the save slot no longer implies a same-sized RAM buffer
- * on the region parts (SAVE streams through 4 KB, LOAD reads in place).
- * At LINE_MAX=144 that is ~152 bytes/line:
- *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB durable slot (256 KB tail)
- *   LM20              1400 -> ~200 KB prog + ~208 KB durable slot (256 KB tail)
- *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB durable slot (256 KB tail)
- *   RP2350             512 ->  ~74 KB prog +  ~78 KB durable slot (128 KB tail)
- *   L15                256 ->  ~37 KB prog +  ~39 KB durable slot  (64 KB tail)
+ * prog[] arena block (PROGRAM_LINES * LINE_MAX) and the DURABLE save file
+ * (PROGRAM_LINES * (LINE_MAX + 8)).  On the region-backed parts that file is
+ * prog.bas in /data, so what caps it is the STORE's capacity -- a spanned file
+ * cannot exceed the free slots -- not SSRAM and no longer a carved tail (the
+ * _Static_assert in tiku_basic_ckpt.inl checks prog.bas and prog.ckpt against
+ * the store together); .persistent FRAM on MSP430.  Since v0.06 the save file
+ * no longer implies a same-sized RAM buffer on the region parts (SAVE streams
+ * through 4 KB, LOAD reads in place).
+ * At LINE_MAX=144 that is ~152 bytes/line.  The last column is what prog.bas
+ * costs in /data slots out of the platform's total -- the real ceiling now, and
+ * why raising a line count is cheap: it buys slots, not a bigger carve.
+ *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB file   ( 64 of 910 slots)
+ *   LM20              1400 -> ~200 KB prog + ~208 KB file   ( 52 of 420 slots)
+ *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB file   ( 38 of 387 slots)
+ *   RP2350             512 ->  ~74 KB prog +  ~78 KB file   ( 20 of 934 slots)
+ *   L15                256 ->  ~37 KB prog +  ~39 KB file   ( 10 of 293 slots)
  *   FRAM (MSP430)       96 ->  ~14 KB prog +  ~15 KB FRAM + a same-sized buffer
  *   else (host/small)   50 ->   ~7 KB
  * RP2350 is split out from Apollo (both TIER_BIG) because its arena is an order
@@ -134,7 +137,10 @@
       * tiku_basic_ckpt.inl checks the two slots against the tail. */
 #    define TIKU_BASIC_PROGRAM_LINES 1400
 #  elif defined(TIKU_BASIC_TIER_HUGE)
-#    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 256 KB NVM save tail */
+#    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 320 KB NVM save tail
+                                             * (apollo510 carries a larger tail
+                                             * than the 256 KB shared default
+                                             * precisely to hold 1700 lines) */
 #  elif defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_PROGRAM_LINES 1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
@@ -650,19 +656,23 @@
 
 /* Where BASIC's durable slots (saved program + F1 run-state checkpoint) live.
  * Two backings, ONE decision point, keyed on the REGION LAYOUT rather than a
- * platform list so a new port with a reserved tail lights up automatically:
+ * platform list so a new port lights up automatically:
  *
- *   BASIC_NVM_ON_REGION = 1 -- the carved NVM region's reserved tail
- *     (TIKU_NVM_RESERVED_BYTES > 0: Ambiq MRAM, RP2350 QSPI flash, Nordic
- *     RRAM).  The slots are fixed offsets in the tail, written via
- *     tiku_tier_nvm_write (bootrom / erase+program / memcpy-behind-WEN);
- *     the _Static_assert in tiku_basic_ckpt.inl proves both slots fit.
+ *   BASIC_NVM_ON_REGION = 1 -- the /data store riding the carved NVM region
+ *     (TIKU_NVM_REGION_BYTES > 0: Ambiq MRAM, RP2350 QSPI flash, Nordic RRAM).
+ *     Both durable objects are ordinary files there -- the saved program is
+ *     prog.bas and the run-state checkpoint is prog.ckpt -- so neither has a
+ *     fixed offset any more.
  *
  *   BASIC_NVM_ON_REGION = 0 -- byte-writable buffers.  On MSP430 they carry
  *     TIKU_DURABLE (.persistent FRAM).  On host they land in plain .bss
- *     (volatile test harness). */
+ *     (volatile test harness).
+ *
+ * Keyed on the REGION existing, not on the reserved tail: the tail is a
+ * feature-shaped carve being deleted, while "is there a carved NVM region
+ * with a store on it" is the question this flag actually asks. */
 #include <kernel/memory/tiku_nvm_region.h>
-#if TIKU_NVM_RESERVED_BYTES > 0
+#if TIKU_NVM_REGION_BYTES > 0
 #define BASIC_NVM_ON_REGION  1
 #else
 #define BASIC_NVM_ON_REGION  0

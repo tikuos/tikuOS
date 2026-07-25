@@ -158,7 +158,7 @@ static void axons_diff(void)
                  (unsigned)changed, (unsigned)AXONS_WIN_WORDS);
 }
 
-void tiku_shell_cmd_axonsprobe(int argc, char **argv)
+void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
 {
     if (argc >= 2 && strcmp(argv[1], "en") == 0) {
         uint32_t spins = axons_enable_wait();
@@ -339,7 +339,7 @@ void tiku_shell_cmd_axonsprobe(int argc, char **argv)
 
 #else /* !TIKU_DEVICE_HAS_AXONS */
 
-void tiku_shell_cmd_axonsprobe(int argc, char **argv)
+void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
 {
     (void)argc; (void)argv;
     SHELL_PRINTF("no AXONS block on this device (build MCU=nrf54lm20b)\n");

@@ -74,26 +74,31 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x0C8000;                      /* 800 KB code */
-/* Shared Nordic code budget: 800 KB on BOTH parts, so "does this firmware
- * fit" has ONE answer for the family and the module slot lands at the same
- * address on each (one module image serves both).
+__tiku_layout_code_cap     = 0x40000;                       /* 256 KB code */
+/* Shared Nordic code budget: 256 KB on BOTH parts -- the same figure every
+ * TikuOS platform now uses (P4), so "does this firmware fit" has ONE answer for
+ * the whole fleet, and the module slot lands at the same address on both Nordic
+ * parts (one module image serves each).
  *
- * 800 KB is sized by the LARGEST real image, which is an Axon one -- compiled
- * model weights and KAT test vectors are const arrays, i.e. .rodata, i.e. they
- * live in THIS window (measured 2026-07-25, nrf54lm20b, -Os):
+ * This was 800 KB, and the reason is worth recording because it is the mistake
+ * the number now refuses to make.  It was sized by the largest image anyone
+ * could build, which was an Axon KAT: Nordic's compiled model weights and test
+ * vectors are const arrays, so they land in .rodata, so they landed in THIS
+ * window (measured 2026-07-25, nrf54lm20b, -Os):
  *
- *   shell + BASIC, no Axon .............................  129 KB   (16%)
- *   + Axon driver, model gc-dropped ....................  132 KB   (17%)
- *   + tinyml_kws  weights 25 KB + vectors  72 KB .......  ~230 KB  (29%)
- *   + tinyml_ad   weights 260 KB + vectors   5 KB ......  ~400 KB  (50%)
- *   + tinyml_vww  weights 203 KB + vectors 307 KB ......  701 KB   (88%)  <-- cap driver
+ *   shell + BASIC, no Axon .............................  126 KB
+ *   + Axon driver, model gc-dropped ....................  127 KB
+ *   + tinyml_kws  weights  25 KB + vectors  72 KB ......  206 KB
+ *   + tinyml_ic   weights                       .......  357 KB
+ *   + tinyml_ad   weights 260 KB + vectors   5 KB ......  362 KB
+ *   + tinyml_vww  weights 203 KB + vectors 307 KB ......  698 KB  <-- set the cap
  *
- * So the window is ~88% full in the worst case, NOT mostly empty: do not
- * shrink it below ~768 KB without re-measuring the vww KAT build
- * (MCU=nrf54lm20b TIKU_AXON_ENABLE=1 TIKU_AXON_MODEL=tinyml_vww
- *  EXTRA_CFLAGS=-DTIKU_SHELL_CMD_AXONSPROBE=1 -- the KAT must be REFERENCED
- *  or --gc-sections silently drops the whole model and the image looks tiny).
+ * Letting that set the cap put 544 KB of RRAM permanently beyond reach on every
+ * shipped board so that a vendor TEST HARNESS could link -- and the actual
+ * firmware is 126 KB, 16% of the window.  Model weights are data; they belong
+ * in /data (P3d), which is what the region below this window is for.  Until
+ * P3d lands, TIKU_AXON_MODEL=... does not link, and the Makefile says so before
+ * the linker does.  Do not raise this number to make it build.
  * The L15 has no NPU, so it only ever needs ~140 KB; it carries the same cap
  * for family consistency, and the address space it gives up was idle anyway
  * (the freed NVM goes to the durable tier, which currently has no consumer). */
@@ -106,12 +111,12 @@ __tiku_nvm_rram_start = __tiku_layout_durable_start;
 __tiku_nvm_rram_end   = __tiku_layout_top;
 
 /* Carved NVM region (the tiku_nvm_region backend), Ambiq-style layout:
- * NVM tier at the front | TFS FS extent (256 KB, TIKU_NVMFS_FS_BYTES) |
- * reserved named-slot tail (256 KB, TIKU_NVM_RESERVED_BYTES: BASIC saved
- * program + F1 run-state checkpoint).  A byte-writable RRAM span just BELOW
+ * NVM tier at the front (32 KB) | TFS FS extent (all the rest,
+ * TIKU_NVMFS_FS_BYTES -- BASIC's saved program and run-state checkpoint are
+ * files in it, not a carved tail).  A byte-writable RRAM span just BELOW
  * the durable-persist region; written in place behind the WEN gate (no
- * erase).  The 992 KB code window ends at the module slot (Axon-enabled
- * images are the big ones; the ASSERT at the bottom is the hard cap).
+ * erase).  The 256 KB code window ends at the module slot (the ASSERT at the
+ * bottom is the hard cap).
  * __tiku_nvmfs_size is an absolute symbol whose ADDRESS is the size. */
 /* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of
  * byte-writable, EXECUTABLE RRAM at the TOP OF THE CODE WINDOW -- canonical

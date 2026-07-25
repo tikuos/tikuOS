@@ -157,6 +157,16 @@ endif
 # (GP23..25 + GP29). The plain Pi Pico 2 doesn't carry the module, so
 # the driver requires BOTH the right silicon and the right PCB.
 ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+# WILL NOT LINK until the CYW43439 firmware becomes a store file (P3a,
+# temp/memlayout-fix-plan.md).  The blob is linked into .rodata -- wifi-only
+# measured 310 KB of image, +BT 338 KB -- and the code window is a 256 KB
+# contract on every platform.  Same rule as the Axon weights below: radio
+# firmware is DATA, and the window is not the thing to raise.  A virgin board
+# provisions the blob over the shell's recv, which needs no radio to work.
+$(warning TIKU_DRV_WIFI_CYW43_ENABLE=1: the CYW43439 firmware is linked into \
+.rodata, so this image will exceed the 256 KB code window. Blocked on P3a \
+(firmware -> /data). Do NOT raise the window -- that is the design this \
+replaced.)
 ifneq ($(TIKU_PLATFORM),rp2350)
 $(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires MCU=rp2350 \
 (currently MCU=$(MCU)). The CYW43439 driver depends on \
@@ -1573,6 +1583,10 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_data.c
 # File store backing the dynamic /data directory (self-gated; the data tree
 # module above references it only when the shell is built).
 SRCS += kernel/fs/tiku_tfs.c
+# Chunked large objects over the store (NN weights, radio firmware, module
+# images): stock TFS calls plus name arithmetic, no NVM access of its own.
+# Unreferenced entry points are gc-section'd away.
+SRCS += kernel/fs/tiku_blob.c
 
 # ---------------------------------------------------------------------------
 # Shell (kernel service — compiled when TIKU_SHELL_ENABLE=1)
@@ -1831,6 +1845,16 @@ LDLIBS_AXON = $(AXON_SDK)/lib/axon/bin/arm/libnrf-axon-driver-internal.a
 # 140000 covers the shipped tinyml set -- the model init verifies and
 # reports the exact need on mismatch).
 ifneq ($(strip $(TIKU_AXON_MODEL)),)
+# WILL NOT LINK until the weights become a store file (P3d, temp/memlayout-fix-
+# plan.md).  Nordic's compiled models are C arrays, so this config puts 200-700
+# KB of weights into .rodata -- the vww KAT measured 698 KB of image -- and the
+# code window is a 256 KB contract on every platform.  The window is NOT the
+# thing to raise: weights are DATA, and sizing the OS's permanent memory
+# contract around a vendor test harness is the exact design P3/P4 undid.
+$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): model weights are linked into \
+.rodata, so this image will exceed the 256 KB code window. Blocked on P3d \
+(weights -> /data). Do NOT raise the window -- that is the design this \
+replaced.)
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer.c
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer_test.c
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_op_extensions.c

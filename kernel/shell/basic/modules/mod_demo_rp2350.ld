@@ -17,7 +17,7 @@ MEMORY
 {
     /* XIP flash slot: the top 32 KB (8 erase sectors) of the code window.
      * Kept in sync with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */
-    CARVE (rx) : ORIGIN = 0x100F8000, LENGTH = 0x8000   /* 32 KB */
+    CARVE (rx) : ORIGIN = 0x10040000, LENGTH = 0x8000   /* 32 KB */
 }
 
 ENTRY(module_init)

@@ -42,15 +42,14 @@
  * The module is linked at this VMA; the loader installs the image here and
  * runs it XIP (durable in place -- it survives reboot and power loss).
  *
- *   nordic (nRF54L15 + nRF54LM20): RRAM at the top of the shared 800 KB code
+ *   nordic (nRF54L15 + nRF54LM20): RRAM at the top of the shared 256 KB code
  *     window -- the SAME address on both parts, so one module image is
  *     family-portable.  SRAM is W^X (execute-never), so a module MUST run
  *     from RRAM -- which is byte-writable, so install is a store loop
  *     behind the WEN gate.
- *   apollo510/510b:     MRAM at the top of the (shrunk) code window.  MRAM is
- *     executable but NOT CPU-writable -- install goes through the bootrom
- *     programmer (tiku_nvm_mram_program), and the M55's I-cache is
- *     invalidated before the first XIP call.
+ *   apollo510/510b:     NO NVM slot -- the image is copied into the ITCM and
+ *     run from there (TIKU_MODULE_EXEC_ADDR).  This is the one part where a RAM
+ *     execution window has been measured, so it is the one part that uses one.
  *   apollo4l/4p:        same MRAM personality as apollo510 (bootrom-programmed,
  *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
  *     0x18000-based code window.  The unified CACHECTRL cache is flushed
@@ -65,13 +64,18 @@
  *     place (behind the MPU unlock window) and natively executable (the
  *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_MODULE_CARVE_ADDR  0x488000u
+/* DELIBERATELY UNDEFINED on this part: there is no NVM carve (the module
+ * executes from the ITCM -- see TIKU_MODULE_EXEC_ADDR below), and the address
+ * this used to hold, 0x488000, is the NVM REGION BASE now that the slot is
+ * gone -- which is to say the NVM tier.  A stale reference would program over
+ * live tier data, so leaving it undefined turns that mistake into a compile
+ * error instead. */
 #elif defined(AM_PART_APOLLO4L)
-#define TIKU_MODULE_CARVE_ADDR  0x90000u
+#define TIKU_MODULE_CARVE_ADDR  0x58000u
 #elif defined(PLATFORM_RP2350)
 /* Top 32 KB (8 erase sectors) of the flash code window; XIP.
  * Install goes sector-by-sector through the boot-ROM erase/program path. */
-#define TIKU_MODULE_CARVE_ADDR  0x100F8000u
+#define TIKU_MODULE_CARVE_ADDR  0x10040000u
 #elif defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
 /* Top 4 KB of HIFRAM (which the MPU already maps R+W+X, SAM 0x0755).
  * FRAM: byte-writable in place AND natively executable.  The slot ends
@@ -83,12 +87,60 @@
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
 #else
 /* Nordic (nRF54L15 and nRF54LM20 alike): RRAM slot at the top of the
- * shared 800 KB code window.  Both parts use the SAME slot address, so
+ * shared 256 KB code window.  Both parts use the SAME slot address, so
  * one module image is binary-compatible across the Nordic family. */
-#define TIKU_MODULE_CARVE_ADDR  0x0C8000u
+#define TIKU_MODULE_CARVE_ADDR  0x40000u
 #endif
 #ifndef TIKU_MODULE_CARVE_SIZE
 #define TIKU_MODULE_CARVE_SIZE  0x8000u
+#endif
+
+/*
+ * WHERE THE IMAGE COMES FROM (P3e).  It used to come only from a blob linked
+ * into the firmware -- so a module image was counted TWICE, once as .rodata in
+ * the code window and once as the reserved slot it was copied into.  The image
+ * is now an ordinary store file, and the embedded blob becomes an optional
+ * SEEDER: when a board has never been provisioned, the first install writes the
+ * embedded copy into the store and thereafter the FILE is authoritative.  That
+ * is what makes a module replaceable over serial instead of by reflashing, and
+ * it is why deleting the embedded copy (TIKU_BASIC_MODULE_EMBED=0) cannot brick
+ * a provisioned board.
+ *
+ * Flat name, matching prog.bas / prog.ckpt: /data has a static "basic" node, so
+ * a "mod/" prefix would render as a phantom folder beside it.
+ */
+#define TIKU_MODULE_FILE  "mod.bin"
+
+/* Ship the embedded seeder by default: a board with no provisioned file must
+ * still be able to install.  Set to 0 for a provisioning-only image once the
+ * fleet is seeded -- that is what reclaims the image bytes. */
+#ifndef TIKU_BASIC_MODULE_EMBED
+#define TIKU_BASIC_MODULE_EMBED  1
+#endif
+
+/*
+ * WHERE THE MODULE EXECUTES (P3f).  A module is pre-linked to an absolute
+ * address, so SOME fixed window is unavoidable -- but nothing requires it to be
+ * in NVM.  On Apollo510 the window is the ITCM: 256 KB that is powered by the
+ * same PWRENTCM=7 the 512 KB DTCM already requires, sits completely idle, and
+ * executes code (all three measured -- see TikuBench tests/memory/
+ * test_mem_tcm.c).  Moving there costs nothing and lets the NVM module carve be
+ * deleted outright, which is the point.
+ *
+ * The window starts 4 KB in rather than at ITCM base 0x00000000, so no module
+ * address can ever be zero and be mistaken for a null pointer -- by the loader's
+ * own checks or by the module's.  It must match the module's .ld exactly.
+ *
+ * Elsewhere the module still runs XIP from the NVM carve: rp2350 and the Nordic
+ * parts would each need their own RAM window and their own verification, and
+ * that hardware is not on the bench.
+ */
+#if defined(AM_PART_APOLLO510)
+#define TIKU_MODULE_EXEC_IN_RAM  1
+#define TIKU_MODULE_EXEC_ADDR    0x00001000u   /* ITCM + 4 KB (mod_demo_apollo510.ld) */
+#else
+#define TIKU_MODULE_EXEC_IN_RAM  0
+#define TIKU_MODULE_EXEC_ADDR    TIKU_MODULE_CARVE_ADDR
 #endif
 
 /* Entry-offset convention: ARM Thumb entry addresses carry bit0 SET so

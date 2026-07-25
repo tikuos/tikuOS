@@ -97,8 +97,8 @@ data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
  * @brief Lazily mount the /data file store over the carved NVM region.
  *
  * Idempotent: returns immediately once mounted.  Locates the region backend
- * (MRAM), places the FS extent between the tier extent (front) and the
- * reserved tail, and mounts the TFS over it.
+ * (MRAM), places the FS extent above the tier extent, and mounts the TFS over
+ * it.
  *
  * @return 0 once the store is ready; -1 if the region is absent or too small
  *         to hold the FS extent, or the TFS mount fails.
@@ -113,17 +113,16 @@ data_tfs_ensure(void)
     }
     rgn = tiku_nvm_backend_get();
     if (rgn == NULL || rgn->base == NULL ||
-        rgn->size < (size_t)TIKU_NVM_TIER_BYTES +
-                    TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
+        rgn->size < (size_t)TIKU_NVM_TIER_BYTES + TIKU_NVMFS_FS_BYTES) {
         return -1;
     }
-    /* FS extent: between the tier extent (front) and the reserved tail, and
-     * anchored to the TAIL rather than to the tier, so the store stays adjacent
-     * to the reserved slots that tiku_basic_persist.inl locates the same way.
-     * On a correctly sized region the two anchors coincide -- the three extents
-     * tile it exactly (see tiku_nvm_region.h). */
-    data_be.base  = rgn->base +
-        (rgn->size - TIKU_NVMFS_FS_BYTES - TIKU_NVM_RESERVED_BYTES);
+    /* FS extent: everything above the tier extent, anchored to the TOP of the
+     * region.  Anchoring to the top rather than to the tier means a region that
+     * came out larger than TIKU_NVM_REGION_BYTES expected loses the surplus at
+     * the FRONT, where the tier can still be grown into it, instead of shifting
+     * every file.  On a correctly sized region the two anchors coincide -- the
+     * two extents tile it exactly (see tiku_nvm_region.h). */
+    data_be.base  = rgn->base + (rgn->size - TIKU_NVMFS_FS_BYTES);
     data_be.size  = TIKU_NVMFS_FS_BYTES;
     data_be.write = data_be_write;
     data_be.erase = NULL;
@@ -138,10 +137,10 @@ data_tfs_ensure(void)
 /**
  * @brief Report how the carved region is divided, for `df`.
  *
- * The three extents are compile-time constants; the region size is whatever
- * the linker carved.  Publishing both, plus the difference, is what keeps the
- * split honest at run time: `idle_bytes` is the number that was quietly 676 KB
- * on the nRF54LM20 before v0.06, and it must read 0.  A non-zero value means
+ * The two extents are compile-time constants; the region size is whatever the
+ * linker carved.  Publishing both, plus the difference, is what keeps the split
+ * honest at run time: `idle_bytes` is the number that was quietly 676 KB on the
+ * nRF54LM20 before v0.06, and it must read 0.  A non-zero value means
  * TIKU_NVM_REGION_BYTES has fallen out of step with the device linker script.
  *
  * @param out  Snapshot to fill in (extent fields only).
@@ -151,13 +150,11 @@ data_fill_extents(tiku_data_df_t *out)
 {
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
     const uint32_t accounted = (uint32_t)TIKU_NVM_TIER_BYTES +
-                               (uint32_t)TIKU_NVMFS_FS_BYTES +
-                               (uint32_t)TIKU_NVM_RESERVED_BYTES;
+                               (uint32_t)TIKU_NVMFS_FS_BYTES;
 
     out->region_bytes = (rgn != NULL) ? (uint32_t)rgn->size : 0u;
     out->tier_bytes   = (uint32_t)TIKU_NVM_TIER_BYTES;
     out->fs_bytes     = (uint32_t)TIKU_NVMFS_FS_BYTES;
-    out->rsvd_bytes   = (uint32_t)TIKU_NVM_RESERVED_BYTES;
     out->idle_bytes   = (out->region_bytes > accounted)
                         ? (out->region_bytes - accounted) : 0u;
 }
@@ -238,7 +235,6 @@ data_fill_extents(tiku_data_df_t *out)
     out->region_bytes = 0u;
     out->tier_bytes   = 0u;
     out->fs_bytes     = (uint32_t)sizeof data_tfs_region;
-    out->rsvd_bytes   = 0u;
     out->idle_bytes   = 0u;
 }
 
@@ -481,6 +477,17 @@ const tiku_vfs_node_t *
 tiku_vfs_tree_data_get(void)
 {
     return &data_node;
+}
+
+tiku_tfs_t *
+tiku_vfs_tree_data_store(void)
+{
+    /* Same lazy mount the VFS nodes use; callers that want whole objects
+     * (tiku_blob) work against the store rather than through path reads. */
+    if (data_tfs_ensure() != 0) {
+        return NULL;
+    }
+    return &data_fs;
 }
 
 #endif /* TIKU_SHELL_ENABLE */

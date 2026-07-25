@@ -67,10 +67,10 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x0C8000;                      /* 800 KB code */
-/* 800 KB is the shared Nordic budget; it is sized by the LM20's Axon KAT
- * image (701 KB) -- see the table in nrf54lm20a.ld before changing it.
- * The L15 has no NPU and needs only ~140 KB. */
+__tiku_layout_code_cap     = 0x40000;                       /* 256 KB code */
+/* 256 KB is the shared Nordic budget and the fleet-wide contract (P4); the LM20
+ * uses the same figure, so the module slot is at the same address on both parts.
+ * The L15 has no NPU and its largest measured image is 123 KB. */
 __tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
 __tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
 INCLUDE arch/common/tiku_nvm_layout.ld
@@ -80,12 +80,12 @@ __tiku_nvm_rram_start = __tiku_layout_durable_start;
 __tiku_nvm_rram_end   = __tiku_layout_top;
 
 /* Carved NVM region (the tiku_nvm_region backend), Ambiq-style layout:
- * NVM tier at the front | TFS FS extent (256 KB, TIKU_NVMFS_FS_BYTES) |
- * reserved named-slot tail (64 KB, TIKU_NVM_RESERVED_BYTES: BASIC saved
- * program + F1 run-state checkpoint).  A byte-writable RRAM span just BELOW
+ * NVM tier at the front (32 KB) | TFS FS extent (all the rest,
+ * TIKU_NVMFS_FS_BYTES -- BASIC's saved program and run-state checkpoint are
+ * files in it, not a carved tail).  A byte-writable RRAM span just BELOW
  * the durable-persist region; written in place behind the WEN gate (no
- * erase).  740 KB leaves a 768 KB code window below (image today ~110 KB;
- * the ASSERT at the bottom is the hard cap).  __tiku_nvmfs_size is an
+ * erase).  1220 KB of region sits below a 256 KB code window (largest measured
+ * image 123 KB; the ASSERT at the bottom is the hard cap).  __tiku_nvmfs_size is an
  * absolute symbol whose ADDRESS is the size (matches rp2350/ambiq). */
 /* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of
  * byte-writable, EXECUTABLE RRAM at the TOP OF THE CODE WINDOW -- canonical

@@ -63,23 +63,30 @@
  * kernel/vfs/tree/tiku_vfs_tree_data.c fail the build if a number here
  * either overflows its extent or leaves more than one file's worth idle.
  *
- *   apollo510  3104 KB extent -> 768   (3 MB of files, exactly)
- *   apollo4l/p 1088 KB extent -> 268
- *   rp2350     2908 KB extent -> 720   (fills the extent to the byte)
- *   lm20        900 KB extent -> 222
- *   l15         580 KB extent -> 142
+ *   apollo510  3680 KB extent -> 910   (4,092 B idle)
+ *   apollo4l/p 1568 KB extent -> 387   (2,440 B idle)
+ *   rp2350     3772 KB extent -> 934   (fills the extent to the byte)
+ *   lm20       1700 KB extent -> 420   (1,252 B idle)
+ *   l15        1188 KB extent -> 293   (1,728 B idle)
  *   msp430/host   no extent   ->  16   (store sizes its own FRAM array)
+ *
+ * These grew in v0.06 twice: first when the reserved durable tail was deleted
+ * and its bytes became file store (and on apollo510 the 32 KB module slot too),
+ * then again when every code window shrank to the uniform 256 KB contract.  Changing any
+ * of them CHANGES /data's on-media geometry: the superblock records the counts,
+ * so an old store fails to mount and the board reformats -- data loss by
+ * design, not by accident.  Land such changes together.
  */
 #  if defined(AM_PART_APOLLO510)
-#    define TIKU_TFS_MAX_FILES  768
+#    define TIKU_TFS_MAX_FILES  910
 #  elif defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_MAX_FILES  268
+#    define TIKU_TFS_MAX_FILES  387
 #  elif defined(PLATFORM_RP2350)
-#    define TIKU_TFS_MAX_FILES  720
+#    define TIKU_TFS_MAX_FILES  934
 #  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#    define TIKU_TFS_MAX_FILES  222
+#    define TIKU_TFS_MAX_FILES  420
 #  elif defined(PLATFORM_NORDIC)
-#    define TIKU_TFS_MAX_FILES  142
+#    define TIKU_TFS_MAX_FILES  293
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif
@@ -152,6 +159,33 @@ typedef enum {
 
 #define TIKU_TFS_NSLOTS  (TIKU_TFS_MAX_FILES + 1u)  /* +1 shadow for overwrite */
 
+/**
+ * @brief Largest file the store can hold: every data slot in one run.
+ *
+ * A file owns a run of contiguous slots and only the FIRST slot's length word
+ * is metadata, so a span of n holds n*SLOT_BYTES-4 bytes -- and a one-slot
+ * file is exactly the n==1 case (TIKU_TFS_SLOT_DATA).  This is the ceiling in
+ * principle; in practice a write also needs a free run of that length, and a
+ * REPLACE needs one on top of what the file already occupies (the new run must
+ * exist before the dirent flips to it).  So TFS_ERR_NOSPACE is now reachable
+ * for large files even when the total free byte count looks sufficient --
+ * fragmentation is real once files span.
+ */
+#define TIKU_TFS_FILE_MAX \
+    ((size_t)TIKU_TFS_NSLOTS * TIKU_TFS_SLOT_BYTES - 4u)
+
+/**
+ * @brief Slots a file of @p n content bytes occupies -- a CONSTANT expression.
+ *
+ * The closed form of the allocator's run_span_for(): since a span of s holds
+ * s*SLOT_BYTES-4 bytes, s = ceil((n + 4) / SLOT_BYTES).  run_span_for() is a
+ * loop and therefore unusable in a _Static_assert, which is exactly where a
+ * client needs this -- to prove at build time that its worst-case object fits
+ * the store alongside the other tenants.
+ */
+#define TIKU_TFS_SPAN_FOR(n) \
+    (((size_t)(n) + 4u + TIKU_TFS_SLOT_BYTES - 1u) / TIKU_TFS_SLOT_BYTES)
+
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
     uint8_t  slot_used[(TIKU_TFS_NSLOTS + 7u) / 8u]; /* data-slot allocation map */
@@ -178,6 +212,56 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name);
 /** @brief Create-or-overwrite @p name with @p len bytes (atomic overwrite). */
 int tiku_tfs_write(tiku_tfs_t *fs, const char *name,
                    const void *data, size_t len);
+
+/**
+ * @brief A write in progress (see tiku_tfs_open_w).  Caller-allocated.
+ *
+ * Fields are internal.  The staged run is reserved in RAM only, so a power
+ * cut mid-stream needs no cleanup: the next mount rebuilds the allocation map
+ * from the live directory, which never referenced the staged run.
+ */
+typedef struct {
+    tiku_tfs_t *fs;
+    unsigned    first;                  /**< first slot of the staged run   */
+    unsigned    span;                   /**< slots reserved                 */
+    size_t      cap;                    /**< content capacity of the run    */
+    size_t      off;                    /**< bytes appended so far          */
+    int         active;                 /**< 1 between open_w and commit    */
+    char        name[TIKU_TFS_NAME_MAX];
+} tiku_tfs_wr_t;
+
+/**
+ * @brief Begin a streamed write of @p name, reserving room for @p max_len.
+ *
+ * Lets a file be produced in bounded chunks instead of from one whole buffer
+ * -- required where the payload is larger than available RAM (a 258 KB saved
+ * BASIC program on a 240 KB part) or arrives incrementally (a model over
+ * serial).  Nothing in the directory changes until tiku_tfs_commit(), so the
+ * previous content stands until the moment it is replaced.
+ *
+ * @p max_len is a RESERVATION, not a promise: commit records however many
+ * bytes were actually appended, but keeps the reserved span.  Declaring a
+ * stable maximum is what makes a repeatedly-replaced file ping-pong between
+ * two equal-length runs instead of leaving ragged holes.
+ *
+ * @return TFS_OK, or TFS_ERR_NOSPACE / _TOOBIG / _NAMELEN / _INVAL.
+ */
+int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
+                    const char *name, size_t max_len);
+
+/** @brief Append @p len bytes to an open write. @return TFS_OK or an error. */
+int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len);
+
+/**
+ * @brief Publish an open write: length word, then ONE atomic dirent update.
+ *
+ * The old run is reclaimed only after the dirent points at the new one.
+ * @return TFS_OK, or a negative error (the write stays open on failure).
+ */
+int tiku_tfs_commit(tiku_tfs_wr_t *w);
+
+/** @brief Discard an open write; the file keeps its previous content. */
+void tiku_tfs_abort(tiku_tfs_wr_t *w);
 
 /** @brief Copy a file's content into @p buf; @p out_len gets the true length. */
 int tiku_tfs_read(tiku_tfs_t *fs, const char *name,
