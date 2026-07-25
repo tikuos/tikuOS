@@ -38,10 +38,25 @@
  *      32 KB   absorbs the rest    named durable
  *
  * The NVM memory tier bump-allocates from the FRONT of the region; the top
- * TIKU_NVM_RESERVED_BYTES is held back for durable NAMED data that needs a
- * STABLE location across boots -- the tier never hands this tail out, so a
- * named consumer can own a fixed offset in [size - reserved, size).
- * 0 where the tier owns the whole region (no carved tail).
+ * TIKU_NVM_RESERVED_BYTES is held back for data that needs a STABLE address
+ * across boots -- the tier never hands this tail out, so a consumer can own
+ * a fixed offset in [size - reserved, size).  0 where the tier owns the
+ * whole region (no carved tail).
+ *
+ * NAME IT HONESTLY: this is the BASIC DURABLE AREA, not a general facility.
+ * BASIC is its only tenant (the saved program at the base, the run-state
+ * checkpoint at the top); every size below is computed from BASIC's line
+ * capacity; there is no registration API, so a second consumer would have
+ * to hard-code an offset.  It is also reserved UNCONDITIONALLY -- a build
+ * with BASIC compiled out still carries the carve, because /data's geometry
+ * is compile-time (TIKU_TFS_MAX_FILES) and a moving tail would relocate
+ * every file.  The reservation therefore protects /data from a statically
+ * sized store, not BASIC from the allocator.
+ *
+ * This inverts layering (a core header sized by a shell feature) and is
+ * slated for removal: once the store gains spanned files + streamed
+ * replace, both slots become ordinary files and this constant disappears.
+ * See temp/memlayout-fix-plan.md (P3b/P3c/P3g).
  *
  * The file store's extent is DERIVED (region - tier - reserved), not
  * hand-written, so the three extents always tile the region exactly.  Before
@@ -73,12 +88,18 @@
  * figure fails the _Static_assert in tiku_basic_ckpt.inl (save + ckpt
  * must fit), so these constants cannot silently under-provide.
  *
- *   apollo510  1700 x 152 = 258,400 + ~69 KB snapshot  -> 320 KB
- *   ambiq      1024 x 152 = 155,648 + ~106 KB snapshot -> 256 KB
- *   lm20       1024 x 152 = 155,648 + ~106 KB snapshot -> 256 KB
- *   rp2350      512 x 152 =  77,824 + ~53 KB snapshot  -> 128 KB
- *   l15         256 x 152 =  38,912 + ~25 KB snapshot  ->  64 KB
- *   msp430     no pinned tail: save/ckpt are .persistent FRAM arrays
+ * (The "+ ... snapshot" column is the REMAINDER the figure leaves for the
+ * checkpoint slot, not the slot's own size -- the slot is ~16 KB, so every
+ * platform carries slack.  Keep this table in step with PROGRAM_LINES in
+ * tiku_basic_config.h; only the ckpt _Static_assert enforces the upper
+ * bound, nothing catches a figure that has gone stale downward.)
+ *
+ *   apollo510  1700 x 152 = 258,400 + ~52 KB spare -> 320 KB
+ *   ambiq      1024 x 152 = 155,648 + ~88 KB spare -> 256 KB
+ *   lm20       1400 x 152 = 212,800 + ~32 KB spare -> 256 KB
+ *   rp2350      512 x 152 =  77,824 + ~36 KB spare -> 128 KB
+ *   l15         256 x 152 =  38,912 + ~10 KB spare ->  64 KB
+ *   msp430     no tail: save/ckpt are .persistent FRAM arrays
  */
 #if defined(AM_PART_APOLLO510)
 #define TIKU_NVM_RESERVED_BYTES  (320u * 1024u)   /* HUGE 1700-line + ckpt */

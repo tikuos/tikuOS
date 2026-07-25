@@ -134,7 +134,10 @@
       * tiku_basic_ckpt.inl checks the two slots against the tail. */
 #    define TIKU_BASIC_PROGRAM_LINES 1400
 #  elif defined(TIKU_BASIC_TIER_HUGE)
-#    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 256 KB NVM save tail */
+#    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 320 KB NVM save tail
+                                             * (apollo510 carries a larger tail
+                                             * than the 256 KB shared default
+                                             * precisely to hold 1700 lines) */
 #  elif defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_PROGRAM_LINES 1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
