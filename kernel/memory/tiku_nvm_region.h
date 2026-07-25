@@ -123,7 +123,7 @@
  * executes from the ITCM (tiku_basic_module.h), so the 32 KB executable slot
  * every other ARM part still carves became region on this one.
  *
- * The code_cap column is the SAME on every part -- 256 KB (P4).  That is the
+ * The code_cap column is the SAME on every part -- 384 KB.  That is the
  * point: a code window is a contract about how much program a TikuOS image may
  * be, and it stopped being negotiable per platform when the things that used to
  * inflate it (BASIC's durable tail, a module image counted twice, model weights
@@ -132,22 +132,22 @@
  * 126.8 KB (lm20b + Axon driver), 60.4 KB (rp2350) -- so 256 KB is about 2x the
  * largest thing anyone has built, on every part.
  *
- *   apollo510  0x800000 - 0x450000 - 0x0000 - 0x10000 = 0x3A0000  3712 KB
- *   apollo4l/p 0x200000 - 0x058000 - 0x8000 - 0x10000 = 0x190000  1600 KB
- *   rp2350     0x400000 - 0x040000 - 0x8000 - 0x01000 = 0x3B7000  3804 KB
- *   lm20       0x1FD000 - 0x040000 - 0x8000 - 0x04000 = 0x1B1000  1732 KB
- *   l15        0x17D000 - 0x040000 - 0x8000 - 0x04000 = 0x131000  1220 KB
+ *   apollo510  0x800000 - 0x470000 - 0x0000 - 0x10000 = 0x380000  3584 KB
+ *   apollo4l/p 0x200000 - 0x078000 - 0x8000 - 0x10000 = 0x170000  1472 KB
+ *   rp2350     0x400000 - 0x060000 - 0x8000 - 0x01000 = 0x397000  3676 KB
+ *   lm20       0x1FD000 - 0x060000 - 0x8000 - 0x04000 = 0x191000  1604 KB
+ *   l15        0x17D000 - 0x060000 - 0x8000 - 0x04000 = 0x111000  1092 KB
  */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_NVM_REGION_BYTES  (3712u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (3584u * 1024u)
 #elif defined(PLATFORM_AMBIQ)
-#define TIKU_NVM_REGION_BYTES  (1600u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1472u * 1024u)
 #elif defined(PLATFORM_RP2350)
-#define TIKU_NVM_REGION_BYTES  (3804u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (3676u * 1024u)
 #elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#define TIKU_NVM_REGION_BYTES  (1732u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1604u * 1024u)
 #elif defined(PLATFORM_NORDIC)
-#define TIKU_NVM_REGION_BYTES  (1220u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1092u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif
@@ -158,16 +158,44 @@
  * Everything in the region above the tier extent.  0 where the file store rides
  * its own backing (msp430 FRAM / host).  Resulting sizes:
  *
- *   apollo510  3712 - 32 = 3680 KB      lm20  1732 - 32 = 1700 KB
- *   apollo4l/p 1600 - 32 = 1568 KB      l15   1220 - 32 = 1188 KB
- *   rp2350     3804 - 32 = 3772 KB
+ *   apollo510  3584 - 32 = 3552 KB      lm20  1604 - 32 = 1572 KB
+ *   apollo4l/p 1472 - 32 = 1440 KB      l15   1092 - 32 = 1060 KB
+ *   rp2350     3676 - 32 = 3644 KB
  *
- * TIKU_TFS_MAX_FILES (kernel/fs/tiku_tfs.h) is chosen to FILL its platform's
- * extent; the pair of static assertions in kernel/vfs/tree/tiku_vfs_tree_data.c
- * fails the build both if the store overflows the extent and if it leaves more
- * than one file's worth of it unused.
+ * The store DERIVES its capacity from whichever of these the linker actually
+ * carved -- there is no per-platform file count to keep in step any more, and
+ * the /data mount takes rgn->size - tier rather than a constant, so a carve that
+ * disagrees with the figures above yields more or fewer files instead of
+ * silently losing the difference.  These numbers are documentation now.
  */
-#if TIKU_NVM_REGION_BYTES > 0u
+/**
+ * @brief 1 on parts with a carved NVM region, 0 otherwise.  ALWAYS defined.
+ *
+ * Read this, never `TIKU_NVM_REGION_BYTES > 0`.  An undefined identifier
+ * evaluates to 0 in a preprocessor conditional, so the old spelling took the
+ * "no region" branch in any translation unit that forgot the include -- and
+ * that branch is not an error anywhere, it just silently selects the fallback
+ * storage.  The unconditional definition below plus the guard macro turn that
+ * mistake into a diagnosable one: a caller can `#ifndef TIKU_NVM_HAS_REGION
+ * #error` and know the header was actually seen.
+ */
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC)
+#define TIKU_NVM_HAS_REGION  1
+#else
+#define TIKU_NVM_HAS_REGION  0
+#endif
+
+/*
+ * FS extent, for the few callers that still want a compile-time figure.
+ *
+ * The /data mount and the NVM tier do NOT use this: they take the region size
+ * the linker actually carved (rgn->size) and split it at the tier boundary, so
+ * a carve that disagrees with the constants above cannot silently lose the
+ * difference.  This remains for documentation and for sizing decisions that
+ * genuinely must happen at compile time.
+ */
+#if TIKU_NVM_HAS_REGION
 #define TIKU_NVMFS_FS_BYTES  (TIKU_NVM_REGION_BYTES - TIKU_NVM_TIER_BYTES)
 #else
 #define TIKU_NVMFS_FS_BYTES  0u

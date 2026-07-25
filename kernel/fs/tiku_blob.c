@@ -99,6 +99,18 @@ blob_read_mnf(tiku_tfs_t *fs, const char *name, blob_mnf_t *m)
         m->chunks > TIKU_BLOB_CHUNK_MAX) {
         return TIKU_BLOB_ERR_CRC;            /* present but not a blob     */
     }
+    /*
+     * chunks must be exactly what total and chunk imply.  Callers iterate on
+     * chunks while sizing each copy from total, so an inflated count walks the
+     * destination past `total`: with total=100, chunk=4096, chunks=3, the second
+     * iteration computes `total - off` = 100 - 4096, which UNDERFLOWS size_t,
+     * clamps to one chunk, and writes 4096 bytes at dst+4096 -- past a buffer
+     * the cap check only ever sized against total.  Rejecting the manifest here
+     * is the single place that keeps every consumer safe.
+     */
+    if (m->chunks != (uint32_t)((m->total + m->chunk - 1u) / m->chunk)) {
+        return TIKU_BLOB_ERR_CRC;            /* inconsistent manifest      */
+    }
     return TIKU_BLOB_OK;
 }
 
@@ -131,6 +143,31 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
      * over chunks it does not describe.  A missing previous manifest is the
      * normal first-store case, so its result is deliberately ignored. */
     (void)tiku_tfs_delete(fs, nm);
+
+    /*
+     * Reclaim any chunk beyond what the NEW blob needs, before writing it.
+     *
+     * Storing a smaller blob over a larger one used to strand the surplus: the
+     * write loop only touches 0..chunks-1, and tiku_blob_delete() walks the
+     * CURRENT manifest's count, so `name.7` from a previous 8-chunk blob became
+     * a live file no API could ever reach -- one leaked slot per lost chunk, per
+     * shrink, permanently.  The same sweep collects the tail of a store that was
+     * cut partway through.
+     *
+     * Chunk indices are written densely from 0, so the first index that is not
+     * present is the end; the manifest is already gone, so nothing visible
+     * depends on these.
+     */
+    for (i = chunks; i < TIKU_BLOB_CHUNK_MAX; i++) {
+        size_t stale = 0u;
+        if (blob_name(nm, name, (int)i) != 0) {
+            break;
+        }
+        if (tiku_tfs_stat(fs, nm, &stale) != TFS_OK) {
+            break;                           /* dense naming: this is the end */
+        }
+        (void)tiku_tfs_delete(fs, nm);
+    }
 
     for (i = 0u, off = 0u; i < chunks; i++, off += TIKU_BLOB_CHUNK) {
         size_t this_len = len - off;
@@ -244,7 +281,8 @@ tiku_blob_delete(tiku_tfs_t *fs, const char *name)
     }
     /* Manifest first: the blob stops existing at that single write, and the
      * chunk deletions that follow are pure space reclamation.  A cut between
-     * them strands chunks, which the next store of the same name overwrites. */
+     * them strands chunks; the next store of the same name reclaims them, both
+     * the ones it overwrites and any tail beyond its own chunk count. */
     if (blob_name(nm, name, -1) == 0) {
         (void)tiku_tfs_delete(fs, nm);
     }

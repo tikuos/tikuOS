@@ -382,6 +382,11 @@ basic_save_to_persist(void)
             fill   = 0;
         }
         if (total + fill + line_hw > TIKU_BASIC_SAVE_BUF_BYTES) {
+            /* Release the staged run before bailing: the writer holds a
+             * reservation in the store's RAM allocation map, so returning
+             * without it strands those slots until the next mount -- and every
+             * later SAVE this boot then fails for space. */
+            basic_prog_discard();
             basic_report(TIKU_BASIC_ERR_IO, "save: program too large for slot");
             return -1;
         }
@@ -419,6 +424,9 @@ basic_save_to_persist(void)
         return -1;
     }
     if (basic_prog_commit() != 0) {
+        /* tiku_tfs_commit() leaves the writer active on its error returns, so
+         * the reservation needs releasing here too. */
+        basic_prog_discard();
         basic_report(TIKU_BASIC_ERR_IO, "save failed");
         return -1;
     }

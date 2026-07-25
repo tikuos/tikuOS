@@ -216,9 +216,9 @@
  * still exhaust it at run time -- that is a NOSPACE, not a corruption. */
 _Static_assert(TIKU_TFS_SPAN_FOR(TIKU_BASIC_SAVE_BUF_BYTES)
                    + 2u * TIKU_TFS_SPAN_FOR(BASIC_CKPT_IMG_MAX)
-                   <= TIKU_TFS_NSLOTS,
+                   <= TIKU_TFS_MIN_SLOTS,
                "BASIC's saved program + checkpoint cannot fit the /data store");
-_Static_assert(TIKU_BASIC_SAVE_BUF_BYTES <= TIKU_TFS_FILE_MAX,
+_Static_assert(TIKU_BASIC_SAVE_BUF_BYTES <= TIKU_TFS_FILE_MAX_GUARANTEED,
                "BASIC's saved program exceeds the largest possible store file");
 
 static tiku_tfs_wr_t basic_ckpt_wr;    /* open between save's begin and commit */

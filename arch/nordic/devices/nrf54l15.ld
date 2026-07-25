@@ -67,7 +67,7 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x40000;                       /* 256 KB code */
+__tiku_layout_code_cap     = 0x60000;                       /* 384 KB code */
 /* 256 KB is the shared Nordic budget and the fleet-wide contract (P4); the LM20
  * uses the same figure, so the module slot is at the same address on both parts.
  * The L15 has no NPU and its largest measured image is 123 KB. */
@@ -84,7 +84,7 @@ __tiku_nvm_rram_end   = __tiku_layout_top;
  * TIKU_NVMFS_FS_BYTES -- BASIC's saved program and run-state checkpoint are
  * files in it, not a carved tail).  A byte-writable RRAM span just BELOW
  * the durable-persist region; written in place behind the WEN gate (no
- * erase).  1220 KB of region sits below a 256 KB code window (largest measured
+ * erase).  1092 KB of region sits below a 384 KB code window (largest measured
  * image 123 KB; the ASSERT at the bottom is the hard cap).  __tiku_nvmfs_size is an
  * absolute symbol whose ADDRESS is the size (matches rp2350/ambiq). */
 /* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of

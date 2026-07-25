@@ -22,8 +22,15 @@
  *     in one aligned word -- so a power cut leaves the OLD file, never a torn
  *     one;
  *   - DELETE commits by clearing the gate.
- * Each commit is a single architecture-word write (the same atomicity unit the
- * persist cells rely on: 16-bit MSP430 / 32-bit ARM).
+ * Each commit is a single 32-bit write.  On ARM that is one aligned store, the
+ * same atomicity unit the persist cells rely on.  On MSP430 a 32-bit store is
+ * two instructions, so the guarantee holds there only because every file is
+ * one slot and the run word's span half never changes -- enforced in
+ * tiku_tfs_open_w().  What the backend turns that word into varies by
+ * technology, and only FRAM/RRAM/MRAM make it a true single program: on
+ * erase-sector flash (RP2350) a dirent write is a read-modify-erase-program of
+ * the sector holding it, which is a pre-existing property of that part, not of
+ * this format -- see arch/arm-rp2350/tiku_nvm_region_rp2350.c.
  *
  * The store depends ONLY on tiku_nvm_backend.h -- it has no kernel, VFS, tier
  * or shell dependency, so it is portable and host-unit-testable.
@@ -46,51 +53,54 @@
 #ifndef TIKU_TFS_NAME_MAX
 #define TIKU_TFS_NAME_MAX   24      /**< max filename length incl. NUL */
 #endif
-#ifndef TIKU_TFS_MAX_FILES
+#ifndef TIKU_TFS_MAX_SLOTS
 /*
- * Slot count, chosen to FILL the platform's FS extent
- * (TIKU_NVMFS_FS_BYTES, kernel/memory/tiku_nvm_region.h).  Each file costs
- * one dirent plus one data slot, and the store also carries the superblock
- * and the +1 shadow slot, so:
+ * CEILING -- the largest store this build can ADDRESS, not the store it has.
  *
- *     MAX_FILES = (extent - 8 - SLOT_BYTES - (SECT-1))
- *                 / (DE_BYTES + SLOT_BYTES)
+ * The store's capacity is DERIVED AT MOUNT from the extent the linker actually
+ * carved (be->size), so there is no per-platform capacity number here any more.
+ * What remains is a bound, and a bound cannot rot the way a mirror does: set it
+ * too high and you waste a few bytes of allocation bitmap; set it too low and
+ * the extent cannot be fully used, which the floor assertion below turns into a
+ * build failure rather than silent lost space.
  *
- * with DE_BYTES = 32 and SLOT_BYTES = 4100 (4096 + length word) on
- * byte/word-writable NVM, 4096 on sector-erased flash.  These are written
- * out rather than computed here so the store keeps its "depends only on
- * tiku_nvm_backend.h" property; the two static assertions in
- * kernel/vfs/tree/tiku_vfs_tree_data.c fail the build if a number here
- * either overflows its extent or leaves more than one file's worth idle.
+ * This replaced a hand-tuned per-platform table (910/387/934/420/293, retuned
+ * twice in v0.06 alone) that had to be recomputed by hand whenever a code
+ * window moved -- diagnosed as defect D-e, "static geometry mirrors rot", in
+ * the design of record, whose §4.6 prescribed exactly this.
  *
- *   apollo510  3680 KB extent -> 910   (4,092 B idle)
- *   apollo4l/p 1568 KB extent -> 387   (2,440 B idle)
- *   rp2350     3772 KB extent -> 934   (fills the extent to the byte)
- *   lm20       1700 KB extent -> 420   (1,252 B idle)
- *   l15        1188 KB extent -> 293   (1,728 B idle)
- *   msp430/host   no extent   ->  16   (store sizes its own FRAM array)
- *
- * These grew in v0.06 twice: first when the reserved durable tail was deleted
- * and its bytes became file store (and on apollo510 the 32 KB module slot too),
- * then again when every code window shrank to the uniform 256 KB contract.  Changing any
- * of them CHANGES /data's on-media geometry: the superblock records the counts,
- * so an old store fails to mount and the board reformats -- data loss by
- * design, not by accident.  Land such changes together.
+ * 2048 slots covers ~8 MB of store at a 4 KB slot and costs 256 bytes of
+ * bitmap; the largest shipped extent needs 903.
  */
-#  if defined(AM_PART_APOLLO510)
-#    define TIKU_TFS_MAX_FILES  910
-#  elif defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_MAX_FILES  387
-#  elif defined(PLATFORM_RP2350)
-#    define TIKU_TFS_MAX_FILES  934
-#  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#    define TIKU_TFS_MAX_FILES  420
-#  elif defined(PLATFORM_NORDIC)
-#    define TIKU_TFS_MAX_FILES  293
+#  if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+      defined(PLATFORM_NORDIC)
+#    define TIKU_TFS_MAX_SLOTS  2048
 #  else
-#    define TIKU_TFS_MAX_FILES  16
+#    define TIKU_TFS_MAX_SLOTS  32      /* msp430/host: 4 bytes of bitmap */
 #  endif
 #endif
+
+#ifndef TIKU_TFS_MIN_SLOTS
+/*
+ * FLOOR -- slots every board in this class is GUARANTEED to have.
+ *
+ * Mount refuses an extent that cannot reach this, so a shrunken carve fails
+ * loudly at boot instead of yielding a store too small for its tenants. Clients
+ * that must prove a worst case at BUILD time assert against this, never against
+ * the derived count, which is not a compile-time value any more.
+ */
+#  if defined(AM_PART_APOLLO510) || defined(PLATFORM_RP2350)
+#    define TIKU_TFS_MIN_SLOTS  512
+#  elif defined(PLATFORM_AMBIQ) || defined(TIKU_DEVICE_NRF54LM20A) || \
+        defined(TIKU_DEVICE_NRF54LM20B)
+#    define TIKU_TFS_MIN_SLOTS  256
+#  elif defined(PLATFORM_NORDIC)
+#    define TIKU_TFS_MIN_SLOTS  192
+#  else
+#    define TIKU_TFS_MIN_SLOTS  16
+#  endif
+#endif
+
 #ifndef TIKU_TFS_SLOT_DATA
 /*
  * Per-file ceiling.  4 KB on every part backed by the carved NVM region --
@@ -126,16 +136,36 @@
 #endif
 #define TIKU_TFS_ALIGN(n, a)   (((n) + (a) - 1u) & ~((a) - 1u))
 
-/** @brief Bytes of NVM the store occupies; size a backing region >= this.
- *  Mirrors the on-NVM layout in tiku_tfs.c (a static assertion keeps them in
- *  sync): superblock + directory[MAX_FILES] + (sector-aligned) data[MAX_FILES+1]. */
+/* Superblock: magic + one u32 per geometry parameter (see tiku_tfs.c).  Named
+ * here because the directory starts immediately after it, so every downstream
+ * offset depends on it -- it used to be a bare 8 written into DATA_OFF below,
+ * which is exactly the kind of duplicated constant that drifts. */
+#define TIKU_TFS_SB_BYTES    (8u * 4u)
 #define TIKU_TFS_DE_BYTES    (((8u + TIKU_TFS_NAME_MAX + 3u) & ~3u))
 #define TIKU_TFS_SLOT_BYTES  TIKU_TFS_ALIGN(4u + TIKU_TFS_SLOT_DATA, TIKU_TFS_SECT)
-#define TIKU_TFS_DATA_OFF                                                       \
-    TIKU_TFS_ALIGN(8u + TIKU_TFS_DE_BYTES * (unsigned)TIKU_TFS_MAX_FILES,       \
+
+/**
+ * @brief Where the data region starts for a store holding @p n files.
+ *
+ * The directory sits between the superblock and the data, so this moves with
+ * the file count -- which is why the count is recorded in the superblock and a
+ * store must never be parsed under a different one.
+ */
+#define TIKU_TFS_DATA_OFF_FOR(n)                                                \
+    TIKU_TFS_ALIGN(TIKU_TFS_SB_BYTES + TIKU_TFS_DE_BYTES * (unsigned)(n),       \
                    TIKU_TFS_SECT)
-#define TIKU_TFS_REGION_BYTES                                                   \
-    (TIKU_TFS_DATA_OFF + TIKU_TFS_SLOT_BYTES * (unsigned)(TIKU_TFS_MAX_FILES + 1u))
+
+/**
+ * @brief Bytes of NVM a store holding @p n files occupies.
+ *
+ * The INVERSE of what mount does: mount is handed an extent and derives the
+ * largest n that fits, while a caller that owns its own backing memory (the
+ * MSP430 FRAM array, the host test harness) starts from the n it wants and
+ * sizes the array with this.  Both directions use the same layout, so a store
+ * sized by this always derives exactly @p n back.
+ */
+#define TIKU_TFS_EXTENT_FOR_SLOTS(n)                                            \
+    (TIKU_TFS_DATA_OFF_FOR(n) + TIKU_TFS_SLOT_BYTES * (unsigned)((n) + 1u))
 
 /*---------------------------------------------------------------------------*/
 /* STATUS CODES                                                              */
@@ -157,7 +187,11 @@ typedef enum {
 /* MOUNT STATE (in SRAM; rebuilt at mount, never persisted)                  */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_TFS_NSLOTS  (TIKU_TFS_MAX_FILES + 1u)  /* +1 shadow for overwrite */
+/* The store carries one slot beyond its file count.  That guaranteed a shadow
+ * for overwrite when every file was exactly one slot; with spans it only
+ * guarantees one for a SPAN-1 file, so a spanned replace can still return
+ * NOSPACE with free bytes on the clock (see TIKU_TFS_FILE_MAX below).  The
+ * count itself is derived at mount and lives in tiku_tfs_t. */
 
 /**
  * @brief Largest file the store can hold: every data slot in one run.
@@ -172,7 +206,18 @@ typedef enum {
  * fragmentation is real once files span.
  */
 #define TIKU_TFS_FILE_MAX \
-    ((size_t)TIKU_TFS_NSLOTS * TIKU_TFS_SLOT_BYTES - 4u)
+    ((size_t)TIKU_TFS_MAX_SLOTS * TIKU_TFS_SLOT_BYTES - 4u)
+
+/**
+ * @brief Largest file EVERY board in this class is guaranteed to accept.
+ *
+ * TIKU_TFS_FILE_MAX above is what this build can ADDRESS; this is what it can
+ * PROMISE, derived from the floor rather than the ceiling.  A client proving at
+ * build time that its worst-case object fits must assert against this one --
+ * the addressable ceiling would pass on a board whose carve cannot deliver it.
+ */
+#define TIKU_TFS_FILE_MAX_GUARANTEED \
+    ((size_t)TIKU_TFS_MIN_SLOTS * TIKU_TFS_SLOT_BYTES - 4u)
 
 /**
  * @brief Slots a file of @p n content bytes occupies -- a CONSTANT expression.
@@ -188,7 +233,15 @@ typedef enum {
 
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
-    uint8_t  slot_used[(TIKU_TFS_NSLOTS + 7u) / 8u]; /* data-slot allocation map */
+    /* DERIVED AT MOUNT from be->size -- the extent the linker actually carved.
+     * They are not compile-time values any more, which is the point: nothing in
+     * C mirrors the carve, so nothing can disagree with it. */
+    uint16_t nfiles;      /**< directory entries this store holds        */
+    uint16_t nslots;      /**< data slots = nfiles + 1 (overwrite shadow) */
+    uint32_t data_off;    /**< byte offset of slot 0                      */
+    /* Sized by the CEILING, not the derived count: a bound may be generous
+     * (this costs bytes) but must never be short (that would be an overflow). */
+    uint8_t  slot_used[(TIKU_TFS_MAX_SLOTS + 7u) / 8u];
     uint8_t  mounted;
 } tiku_tfs_t;
 

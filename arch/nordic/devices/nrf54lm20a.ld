@@ -74,7 +74,7 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x40000;                       /* 256 KB code */
+__tiku_layout_code_cap     = 0x60000;                       /* 384 KB code */
 /* Shared Nordic code budget: 256 KB on BOTH parts -- the same figure every
  * TikuOS platform now uses (P4), so "does this firmware fit" has ONE answer for
  * the whole fleet, and the module slot lands at the same address on both Nordic
@@ -115,7 +115,7 @@ __tiku_nvm_rram_end   = __tiku_layout_top;
  * TIKU_NVMFS_FS_BYTES -- BASIC's saved program and run-state checkpoint are
  * files in it, not a carved tail).  A byte-writable RRAM span just BELOW
  * the durable-persist region; written in place behind the WEN gate (no
- * erase).  The 256 KB code window ends at the module slot (the ASSERT at the
+ * erase).  The 384 KB code window ends at the module slot (the ASSERT at the
  * bottom is the hard cap).
  * __tiku_nvmfs_size is an absolute symbol whose ADDRESS is the size. */
 /* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of

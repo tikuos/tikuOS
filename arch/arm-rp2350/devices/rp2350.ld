@@ -66,7 +66,7 @@ __flash_end   = ORIGIN(FLASH) + LENGTH(FLASH);
  * sectors) and flush, restore and the .uninit budget ASSERT follow. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(FLASH) + LENGTH(FLASH);
-__tiku_layout_code_cap     = ORIGIN(FLASH) + 0x40000;      /* 256 KB code */
+__tiku_layout_code_cap     = ORIGIN(FLASH) + 0x60000;      /* 384 KB code */
 __tiku_layout_module_size  = 0x8000;                       /* 32 KB slot  */
 __tiku_layout_durable_size = 0x1000;                       /* 4 KB sector */
 INCLUDE arch/common/tiku_nvm_layout.ld
@@ -82,7 +82,7 @@ __tiku_nvm_flash_offset = __tiku_layout_durable_start - ORIGIN(FLASH);
  * (front->top): NVM tier extent (32 KB, durable TIKU_MEM_NVM) | /data FS
  * extent (all the rest, TIKU_NVMFS_FS_BYTES -- durable named data lives in it
  * as files, not in a carved tail).  4 KB-sector aligned (the erase granule).
- * Code grows up from ORIGIN(FLASH) into a 256 KB window -- the fleet-wide
+ * Code grows up from ORIGIN(FLASH) into a 384 KB window -- the fleet-wide
  * contract (P4); an ASSERT in SECTIONS guards the flash image against
  * overrunning it.  The CYW43439 firmware blob does not fit that window and is
  * not supposed to: it is data, bound for /data (P3a).

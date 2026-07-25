@@ -28,12 +28,13 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    /* Code window: a fixed ~508 KB budget for code/rodata (512 KB minus the
-     * 32 KB loadable-module slot carved off its top). Everything between the
-     * module slot and the 64 KB mirror becomes the carved NVM region, so the
-     * NVM store/tier gets the bulk of MRAM (~3.7 MB). A region overflow here
-     * means code outgrew its budget. */
-    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x40000   /* 256 KB code window (P4) */
+    /* Code window: a fixed 384 KB budget for code/rodata -- the fleet-wide
+     * contract, sized for code growth (largest measured image 130.3 KB).
+     * apollo510 carves NO module slot (its module executes from ITCM), so
+     * everything between this window and the 64 KB durable mirror becomes the
+     * carved NVM region -- ~3.5 MB, which the tier and /data split. Overflow
+     * here means code outgrew its budget -- do NOT raise it to fit data. */
+    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x60000   /* 384 KB code window (M4) */
     TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM: .data/.bss/heap/stack    */
     SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM (unused at bring-up) */
 }

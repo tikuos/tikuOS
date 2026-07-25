@@ -142,6 +142,10 @@ tiku_basic_module_activate(void)
 {
     const tiku_module_header_t *hdr;
     tiku_module_init_fn init;
+    /* Bytes actually materialised into the window, 0 when unknown (the XIP
+     * path, where the carve holds a previously installed image rather than
+     * uninitialised memory).  init_off is bounded by this when it is known. */
+    uint32_t img_len = 0u;
 
 #if TIKU_MODULE_EXEC_IN_RAM
     /*
@@ -161,6 +165,7 @@ tiku_basic_module_activate(void)
             return -1;
         }
         memcpy((void *)(uintptr_t)TIKU_MODULE_EXEC_ADDR, src, len);
+        img_len = len;
         /* The bytes arrived through the D-side; the I-side must not serve stale
          * lines for an address we are about to branch to.  The HAL brackets the
          * invalidate with DSB/ISB itself, so no barriers are needed here (and
@@ -175,12 +180,19 @@ tiku_basic_module_activate(void)
         hdr->abi_version != TIKU_MODULE_ABI) {
         return -1;                                /* no valid resident module */
     }
-    /* The entry must land past the header, inside the slot, and carry the
+    /* The entry must land past the header, inside the IMAGE, and carry the
      * CPU's entry-address convention -- ARM Thumb wants bit0 SET, MSP430
      * wants a plain even offset.  A corrupt init_off must not send the PC
-     * into the void. */
+     * into the void.
+     *
+     * Bounding by the window (TIKU_MODULE_CARVE_SIZE) is not enough where the
+     * image is COPIED in: a 200-byte module declaring init_off 20000 sits
+     * inside the 32 KB window but far past the bytes memcpy wrote, so the
+     * branch target is whatever the window happened to contain.  Bound by the
+     * copied length when we know it, and never trust more than the window. */
     if (hdr->init_off < sizeof(tiku_module_header_t) ||
         hdr->init_off >= TIKU_MODULE_CARVE_SIZE ||
+        (img_len != 0u && hdr->init_off >= img_len) ||
 #if defined(__MSP430__)
         (hdr->init_off & 1u) != 0u) {
 #else

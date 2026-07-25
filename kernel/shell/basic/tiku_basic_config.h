@@ -659,7 +659,7 @@
  * platform list so a new port lights up automatically:
  *
  *   BASIC_NVM_ON_REGION = 1 -- the /data store riding the carved NVM region
- *     (TIKU_NVM_REGION_BYTES > 0: Ambiq MRAM, RP2350 QSPI flash, Nordic RRAM).
+ *     (TIKU_NVM_HAS_REGION: Ambiq MRAM, RP2350 QSPI flash, Nordic RRAM).
  *     Both durable objects are ordinary files there -- the saved program is
  *     prog.bas and the run-state checkpoint is prog.ckpt -- so neither has a
  *     fixed offset any more.
@@ -672,7 +672,11 @@
  * feature-shaped carve being deleted, while "is there a carved NVM region
  * with a store on it" is the question this flag actually asks. */
 #include <kernel/memory/tiku_nvm_region.h>
-#if TIKU_NVM_REGION_BYTES > 0
+#ifndef TIKU_NVM_HAS_REGION
+#error "tiku_nvm_region.h did not define TIKU_NVM_HAS_REGION -- a missing \
+include here would silently select the non-region storage backend"
+#endif
+#if TIKU_NVM_HAS_REGION
 #define BASIC_NVM_ON_REGION  1
 #else
 #define BASIC_NVM_ON_REGION  0

@@ -21,7 +21,7 @@
  *   - Ambiq : the FS extent of the memory-mapped NVM region -- read in place
  *             (no SRAM shadow), written via the region backend (MRAM bootrom),
  *             so files survive a power cut.  Sized in megabytes (see
- *             TIKU_NVMFS_FS_BYTES / TIKU_TFS_MAX_FILES), between the NVM tier's
+ *             derived from the carve at mount), above the NVM tier's
  *             bump extent (front) and the reserved durable tail.
  *   - else  : plain `.bss` (functional but volatile) until a backend lands.
  * When BASIC is built, the legacy /data/basic bridge to the interpreter's
@@ -64,21 +64,17 @@
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || defined(PLATFORM_NORDIC)
 
 /*
- * The store must FIT its extent -- and FILL it.  The fit check is obvious; the
- * fill check is the one that matters, because an under-provisioned
- * TIKU_TFS_MAX_FILES wastes region space silently, which is precisely the bug
- * the v0.06 layout rework set out to remove.  The tolerance is one file's cost
- * (dirent + slot) plus one alignment granule: file counts are integers and the
- * data region is sector-aligned, so that much is unavoidable, and anything
- * beyond it means the capacity table in tiku_tfs.h has fallen behind its
- * extent.  Raise TIKU_TFS_MAX_FILES until this passes.
+ * The fit/fill assertions that stood here are GONE, not relaxed.
+ *
+ * They existed because TIKU_TFS_MAX_FILES was a hand-tuned number that had to
+ * be kept in step with the extent by hand: one caught a store too big for its
+ * extent, the other a store that left more than a file's worth of it idle.
+ * Capacity is now derived from the extent at mount, so "too big" cannot be
+ * expressed and "leaves space idle" is false by construction -- the derivation
+ * returns the largest count that fits, and the host suite asserts that adding
+ * one more file would not.  What remains worth checking is the FLOOR, which
+ * mount enforces at runtime because only the linker knows the real carve.
  */
-_Static_assert(TIKU_TFS_REGION_BYTES <= TIKU_NVMFS_FS_BYTES,
-               "TFS store larger than the region FS extent");
-_Static_assert((TIKU_NVMFS_FS_BYTES - TIKU_TFS_REGION_BYTES) <
-                   TIKU_TFS_DE_BYTES + TIKU_TFS_SLOT_BYTES + TIKU_TFS_SECT,
-               "TFS leaves a file's worth of the FS extent unused -- "
-               "raise TIKU_TFS_MAX_FILES for this platform");
 
 static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
@@ -113,17 +109,21 @@ data_tfs_ensure(void)
     }
     rgn = tiku_nvm_backend_get();
     if (rgn == NULL || rgn->base == NULL ||
-        rgn->size < (size_t)TIKU_NVM_TIER_BYTES + TIKU_NVMFS_FS_BYTES) {
+        rgn->size <= (size_t)TIKU_NVM_TIER_BYTES) {
         return -1;
     }
-    /* FS extent: everything above the tier extent, anchored to the TOP of the
-     * region.  Anchoring to the top rather than to the tier means a region that
-     * came out larger than TIKU_NVM_REGION_BYTES expected loses the surplus at
-     * the FRONT, where the tier can still be grown into it, instead of shifting
-     * every file.  On a correctly sized region the two anchors coincide -- the
-     * two extents tile it exactly (see tiku_nvm_region.h). */
-    data_be.base  = rgn->base + (rgn->size - TIKU_NVMFS_FS_BYTES);
-    data_be.size  = TIKU_NVMFS_FS_BYTES;
+    /* FS extent: EVERYTHING above the tier, measured from the region the linker
+     * actually carved rather than from a constant describing it.
+     *
+     * The old form anchored the store to the top of the region and took a
+     * compile-time length, so a carve that disagreed with the C mirror silently
+     * lost the difference -- the failure that left 676 KB idle on an nRF54LM20.
+     * Now the only fixed number is the tier, which IS a platform contract, and
+     * the store takes the remainder: a bigger carve becomes more files (the
+     * store derives its capacity from this size), and a smaller one is caught by
+     * the floor check inside the mount rather than by arithmetic here. */
+    data_be.base  = rgn->base + TIKU_NVM_TIER_BYTES;
+    data_be.size  = rgn->size - TIKU_NVM_TIER_BYTES;
     data_be.write = data_be_write;
     data_be.erase = NULL;
     data_be.ctx   = NULL;
@@ -149,14 +149,17 @@ static void
 data_fill_extents(tiku_data_df_t *out)
 {
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
-    const uint32_t accounted = (uint32_t)TIKU_NVM_TIER_BYTES +
-                               (uint32_t)TIKU_NVMFS_FS_BYTES;
 
     out->region_bytes = (rgn != NULL) ? (uint32_t)rgn->size : 0u;
     out->tier_bytes   = (uint32_t)TIKU_NVM_TIER_BYTES;
-    out->fs_bytes     = (uint32_t)TIKU_NVMFS_FS_BYTES;
-    out->idle_bytes   = (out->region_bytes > accounted)
-                        ? (out->region_bytes - accounted) : 0u;
+    out->fs_bytes     = (out->region_bytes > (uint32_t)TIKU_NVM_TIER_BYTES)
+                        ? (out->region_bytes - (uint32_t)TIKU_NVM_TIER_BYTES)
+                        : 0u;
+    /* Idle space is now STRUCTURALLY zero -- the two extents are the tier and
+     * "everything else", so they tile the carve by construction rather than by
+     * a table being kept in step.  The field stays because df prints it and a
+     * non-zero value would mean this arithmetic broke. */
+    out->idle_bytes   = 0u;
 }
 
 #else  /* MSP430 FRAM / host: a static backing array */
@@ -167,7 +170,18 @@ data_fill_extents(tiku_data_df_t *out)
 #define DATA_TFS_SECTION                /* host: volatile test backing */
 #endif
 
-static DATA_TFS_SECTION uint8_t data_tfs_region[TIKU_TFS_REGION_BYTES];
+/*
+ * MSP430 and host have no carved extent to derive from -- the store's backing
+ * IS this array -- so here the geometry is stated rather than derived, and the
+ * array is sized from it.  Mount then derives the same count straight back,
+ * because TIKU_TFS_EXTENT_FOR_SLOTS is the exact inverse of the fit it does, so
+ * these platforms take the identical code path rather than a special case.
+ */
+#ifndef DATA_TFS_SLOTS
+#define DATA_TFS_SLOTS  TIKU_TFS_MIN_SLOTS
+#endif
+static DATA_TFS_SECTION uint8_t
+    data_tfs_region[TIKU_TFS_EXTENT_FOR_SLOTS(DATA_TFS_SLOTS)];
 static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
 static uint8_t             data_fs_ready;
@@ -458,9 +472,9 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     (void)tiku_tfs_list(&data_fs, data_df_thunk, &acc);
     out->used_files = acc.files;
     out->used_bytes = acc.bytes;
-    out->max_files  = (uint16_t)TIKU_TFS_MAX_FILES;
+    out->max_files  = data_fs.nfiles;          /* derived at mount */
     out->slot_bytes = (uint16_t)TIKU_TFS_SLOT_DATA;
-    out->cap_bytes  = (uint32_t)TIKU_TFS_MAX_FILES * (uint32_t)TIKU_TFS_SLOT_DATA;
+    out->cap_bytes  = (uint32_t)data_fs.nfiles * (uint32_t)TIKU_TFS_SLOT_DATA;
     /* One source of truth for what to CALL the NVM: the device header's
      * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash).  This used to be a
      * per-platform ladder here, which is exactly how a second copy drifts. */

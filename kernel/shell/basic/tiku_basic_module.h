@@ -71,11 +71,11 @@
  * live tier data, so leaving it undefined turns that mistake into a compile
  * error instead. */
 #elif defined(AM_PART_APOLLO4L)
-#define TIKU_MODULE_CARVE_ADDR  0x58000u
+#define TIKU_MODULE_CARVE_ADDR  0x78000u
 #elif defined(PLATFORM_RP2350)
 /* Top 32 KB (8 erase sectors) of the flash code window; XIP.
  * Install goes sector-by-sector through the boot-ROM erase/program path. */
-#define TIKU_MODULE_CARVE_ADDR  0x10040000u
+#define TIKU_MODULE_CARVE_ADDR  0x10060000u
 #elif defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
 /* Top 4 KB of HIFRAM (which the MPU already maps R+W+X, SAM 0x0755).
  * FRAM: byte-writable in place AND natively executable.  The slot ends
@@ -89,7 +89,7 @@
 /* Nordic (nRF54L15 and nRF54LM20 alike): RRAM slot at the top of the
  * shared 256 KB code window.  Both parts use the SAME slot address, so
  * one module image is binary-compatible across the Nordic family. */
-#define TIKU_MODULE_CARVE_ADDR  0x40000u
+#define TIKU_MODULE_CARVE_ADDR  0x60000u
 #endif
 #ifndef TIKU_MODULE_CARVE_SIZE
 #define TIKU_MODULE_CARVE_SIZE  0x8000u

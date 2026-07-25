@@ -26,12 +26,13 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    /* Code window: a fixed ~508 KB budget for code/rodata (512 KB minus the
-     * 32 KB loadable-module slot carved off its top). Everything between the
-     * module slot and the 64 KB mirror becomes the carved NVM region, so the
-     * NVM store/tier gets the bulk of MRAM. A region overflow here means code
-     * outgrew its budget. */
-    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x40000   /* 256 KB code window (P4) */
+    /* Code window: a fixed 384 KB budget for code/rodata -- the fleet-wide
+     * contract, sized for code growth (largest measured image 121.6 KB).
+     * The 32 KB loadable-module slot is carved above it; everything between
+     * that slot and the 64 KB durable mirror becomes the carved NVM region,
+     * which the tier and /data split. Overflow here means code outgrew its
+     * budget -- do NOT raise it to fit data. */
+    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x60000   /* 384 KB code window (M4) */
     TCM   (rwx) : ORIGIN = 0x10000000, LENGTH = 384K      /* .data/.bss/heap/stack          */
     SSRAM (rwx) : ORIGIN = 0x10060000, LENGTH = 1M        /* shared SRAM (unused at bring-up) */
 }

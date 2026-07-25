@@ -272,7 +272,7 @@ static void tier_wire_all(void)
          * and the tail is gone -- its durable named data (the BASIC save and
          * checkpoint slots) are ordinary files in that store. */
         if (rgn != NULL && rgn->base != NULL &&
-            rgn->size >= (size_t)TIKU_NVM_TIER_BYTES + TIKU_NVMFS_FS_BYTES) {
+            rgn->size > (size_t)TIKU_NVM_TIER_BYTES) {
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
             tier_state[TIKU_MEM_NVM].capacity =
                 (tiku_mem_arch_size_t)TIKU_NVM_TIER_BYTES;
