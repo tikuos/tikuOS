@@ -657,15 +657,19 @@
  *
  *   BASIC_NVM_ON_REGION = 1 -- the carved NVM region's reserved tail
  *     (TIKU_NVM_RESERVED_BYTES > 0: Ambiq MRAM, RP2350 QSPI flash, Nordic
- *     RRAM).  The slots are fixed offsets in the tail, written via
- *     tiku_tier_nvm_write (bootrom / erase+program / memcpy-behind-WEN);
- *     the _Static_assert in tiku_basic_ckpt.inl proves both slots fit.
+ *     RRAM).  Both durable slots are now ordinary files in the store that
+ *     rides that region -- the saved program is prog.bas and the run-state
+ *     checkpoint is prog.ckpt -- so neither has a fixed offset any more.
  *
  *   BASIC_NVM_ON_REGION = 0 -- byte-writable buffers.  On MSP430 they carry
  *     TIKU_DURABLE (.persistent FRAM).  On host they land in plain .bss
- *     (volatile test harness). */
+ *     (volatile test harness).
+ *
+ * Keyed on the REGION existing, not on the reserved tail: the tail is a
+ * feature-shaped carve being deleted, while "is there a carved NVM region
+ * with a store on it" is the question this flag actually asks. */
 #include <kernel/memory/tiku_nvm_region.h>
-#if TIKU_NVM_RESERVED_BYTES > 0
+#if TIKU_NVM_REGION_BYTES > 0
 #define BASIC_NVM_ON_REGION  1
 #else
 #define BASIC_NVM_ON_REGION  0

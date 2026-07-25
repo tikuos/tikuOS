@@ -167,6 +167,18 @@ typedef enum {
 #define TIKU_TFS_FILE_MAX \
     ((size_t)TIKU_TFS_NSLOTS * TIKU_TFS_SLOT_BYTES - 4u)
 
+/**
+ * @brief Slots a file of @p n content bytes occupies -- a CONSTANT expression.
+ *
+ * The closed form of the allocator's run_span_for(): since a span of s holds
+ * s*SLOT_BYTES-4 bytes, s = ceil((n + 4) / SLOT_BYTES).  run_span_for() is a
+ * loop and therefore unusable in a _Static_assert, which is exactly where a
+ * client needs this -- to prove at build time that its worst-case object fits
+ * the store alongside the other tenants.
+ */
+#define TIKU_TFS_SPAN_FOR(n) \
+    (((size_t)(n) + 4u + TIKU_TFS_SLOT_BYTES - 1u) / TIKU_TFS_SLOT_BYTES)
+
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
     uint8_t  slot_used[(TIKU_TFS_NSLOTS + 7u) / 8u]; /* data-slot allocation map */
