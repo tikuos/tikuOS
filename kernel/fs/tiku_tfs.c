@@ -416,73 +416,143 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
  * @param len   Byte count, at most TIKU_TFS_SLOT_DATA.
  * @return      TFS_OK, or a negative TFS_ERR_* code.
  */
-int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t len)
+int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
+                    const char *name, size_t max_len)
 {
-    int      i, ns;
     unsigned span;
-    uint32_t old;
+    size_t   nl;
+    int      r;
 
-    if (fs == NULL || !fs->mounted || name == NULL || (len && data == NULL)) {
+    if (fs == NULL || !fs->mounted || w == NULL || name == NULL) {
         return TFS_ERR_INVAL;
     }
-    if (len > TIKU_TFS_FILE_MAX) {
+    if (max_len > TIKU_TFS_FILE_MAX) {
         return TFS_ERR_TOOBIG;
     }
-    if (strlen(name) == 0 || strlen(name) >= TIKU_TFS_NAME_MAX) {
+    nl = strlen(name);
+    if (nl == 0 || nl >= TIKU_TFS_NAME_MAX) {
         return TFS_ERR_NAMELEN;
     }
-    span = run_span_for(len);
-    i = tfs_find(fs, name);
+    /* Claim the directory entry's availability up front: discovering a full
+     * directory only at commit would waste the whole stream. */
+    if (tfs_find(fs, name) < 0 && free_dirent(fs) < 0) {
+        return TFS_ERR_NOSPACE;
+    }
+    span = run_span_for(max_len);
+    r = free_run(fs, span);
+    if (r < 0) {
+        return TFS_ERR_NOSPACE;
+    }
+    /* Reserve in the RAM map so nothing else takes the run mid-stream. This
+     * is deliberately NOT durable: if power fails before commit, the next
+     * mount rebuilds the map from live dirents, none of which reference the
+     * staged run -- so it is free again with no cleanup pass. */
+    run_mark(fs, (unsigned)r, span, 1);
+    w->fs     = fs;
+    w->first  = (unsigned)r;
+    w->span   = span;
+    w->cap    = TFS_RUN_CAP(span);
+    w->off    = 0u;
+    w->active = 1;
+    memset(w->name, 0, sizeof w->name);
+    memcpy(w->name, name, nl);
+    return TFS_OK;
+}
+
+int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len)
+{
+    if (w == NULL || !w->active || (len && data == NULL)) {
+        return TFS_ERR_INVAL;
+    }
+    if (len > w->cap - w->off) {
+        return TFS_ERR_TOOBIG;
+    }
+    if (len && wr(w->fs, slot_off(w->first) + TFS_SL_DATA + w->off, data, len)) {
+        return TFS_ERR_IO;
+    }
+    w->off += len;
+    return TFS_OK;
+}
+
+int tiku_tfs_commit(tiku_tfs_wr_t *w)
+{
+    tiku_tfs_t *fs;
+    int         i;
+
+    if (w == NULL || !w->active) {
+        return TFS_ERR_INVAL;
+    }
+    fs = w->fs;
+    if (wr32(fs, slot_off(w->first) + TFS_SL_LEN, (uint32_t)w->off)) {
+        return TFS_ERR_IO;
+    }
+    i = tfs_find(fs, w->name);
     if (i < 0) {
         char nb[TIKU_TFS_NAME_MAX];
         i = free_dirent(fs);
         if (i < 0) {
-            return TFS_ERR_NOSPACE;
+            return TFS_ERR_NOSPACE;            /* directory filled mid-stream */
         }
-        ns = free_run(fs, span);
-        if (ns < 0) {
-            return TFS_ERR_NOSPACE;
-        }
-        /* Create-with-content is one transaction: stage the final run and
-         * directory payload, then stamp GATE last.  Calling create() first
-         * would expose a durable empty file if power failed before content. */
-        if ((len && wr(fs, slot_off((unsigned)ns) + TFS_SL_DATA, data, len)) ||
-            wr32(fs, slot_off((unsigned)ns) + TFS_SL_LEN, (uint32_t)len)) {
-            return TFS_ERR_IO;
-        }
+        /* Create-with-content is one transaction: the run and the name are
+         * already durable, so stamping GATE last is the single commit point.
+         * Creating the entry earlier would expose a durable empty file if
+         * power failed before the content landed. */
         memset(nb, 0, sizeof nb);
-        memcpy(nb, name, strlen(name));
+        memcpy(nb, w->name, strlen(w->name));
         if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME,
                nb, TIKU_TFS_NAME_MAX) ||
             wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-                 TFS_RUN_MAKE((unsigned)ns, span)) ||
+                 TFS_RUN_MAKE(w->first, w->span)) ||
             wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
             return TFS_ERR_IO;
         }
-        run_mark(fs, (unsigned)ns, span, 1);
-        return TFS_OK;
+    } else {
+        /* Atomic flip: one aligned word repoints the dirent at the new run.
+         * A power cut before it leaves the dirent on the OLD run. */
+        uint32_t old = de_run(fs, (unsigned)i);
+        if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
+                 TFS_RUN_MAKE(w->first, w->span))) {
+            return TFS_ERR_IO;
+        }
+        run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);  /* reclaim */
     }
-    /* Replace: the new run must coexist with the old one until the flip, so a
-     * big file needs its own size free ON TOP of what it already occupies. */
-    ns = free_run(fs, span);
-    if (ns < 0) {
-        return TFS_ERR_NOSPACE;
-    }
-    if ((len && wr(fs, slot_off((unsigned)ns) + TFS_SL_DATA, data, len)) ||
-        wr32(fs, slot_off((unsigned)ns) + TFS_SL_LEN, (uint32_t)len)) {
-        return TFS_ERR_IO;
-    }
-    /* Atomic flip: one aligned word repoints the dirent at the new run. A
-     * power cut before this leaves the dirent on the OLD run (old content). */
-    old = de_run(fs, (unsigned)i);
-    run_mark(fs, (unsigned)ns, span, 1);
-    if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-             TFS_RUN_MAKE((unsigned)ns, span))) {
-        run_mark(fs, (unsigned)ns, span, 0);   /* flip failed: shadow is free */
-        return TFS_ERR_IO;
-    }
-    run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);   /* reclaim */
+    w->active = 0;
     return TFS_OK;
+}
+
+void tiku_tfs_abort(tiku_tfs_wr_t *w)
+{
+    if (w != NULL && w->active) {
+        run_mark(w->fs, w->first, w->span, 0);
+        w->active = 0;
+    }
+}
+
+/*
+ * Whole-buffer write, expressed as a one-chunk stream.  Sharing the streamed
+ * path is the point: allocation, the commit sequence and the crash discipline
+ * exist once, so the two entry points cannot drift apart.
+ */
+int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t len)
+{
+    tiku_tfs_wr_t w;
+    int           rc;
+
+    if (len != 0u && data == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    rc = tiku_tfs_open_w(fs, &w, name, len);
+    if (rc != TFS_OK) {
+        return rc;
+    }
+    rc = tiku_tfs_write_chunk(&w, data, len);
+    if (rc == TFS_OK) {
+        rc = tiku_tfs_commit(&w);
+    }
+    if (rc != TFS_OK) {
+        tiku_tfs_abort(&w);
+    }
+    return rc;
 }
 
 /**

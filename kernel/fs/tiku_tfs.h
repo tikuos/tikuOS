@@ -194,6 +194,56 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name);
 int tiku_tfs_write(tiku_tfs_t *fs, const char *name,
                    const void *data, size_t len);
 
+/**
+ * @brief A write in progress (see tiku_tfs_open_w).  Caller-allocated.
+ *
+ * Fields are internal.  The staged run is reserved in RAM only, so a power
+ * cut mid-stream needs no cleanup: the next mount rebuilds the allocation map
+ * from the live directory, which never referenced the staged run.
+ */
+typedef struct {
+    tiku_tfs_t *fs;
+    unsigned    first;                  /**< first slot of the staged run   */
+    unsigned    span;                   /**< slots reserved                 */
+    size_t      cap;                    /**< content capacity of the run    */
+    size_t      off;                    /**< bytes appended so far          */
+    int         active;                 /**< 1 between open_w and commit    */
+    char        name[TIKU_TFS_NAME_MAX];
+} tiku_tfs_wr_t;
+
+/**
+ * @brief Begin a streamed write of @p name, reserving room for @p max_len.
+ *
+ * Lets a file be produced in bounded chunks instead of from one whole buffer
+ * -- required where the payload is larger than available RAM (a 258 KB saved
+ * BASIC program on a 240 KB part) or arrives incrementally (a model over
+ * serial).  Nothing in the directory changes until tiku_tfs_commit(), so the
+ * previous content stands until the moment it is replaced.
+ *
+ * @p max_len is a RESERVATION, not a promise: commit records however many
+ * bytes were actually appended, but keeps the reserved span.  Declaring a
+ * stable maximum is what makes a repeatedly-replaced file ping-pong between
+ * two equal-length runs instead of leaving ragged holes.
+ *
+ * @return TFS_OK, or TFS_ERR_NOSPACE / _TOOBIG / _NAMELEN / _INVAL.
+ */
+int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
+                    const char *name, size_t max_len);
+
+/** @brief Append @p len bytes to an open write. @return TFS_OK or an error. */
+int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len);
+
+/**
+ * @brief Publish an open write: length word, then ONE atomic dirent update.
+ *
+ * The old run is reclaimed only after the dirent points at the new one.
+ * @return TFS_OK, or a negative error (the write stays open on failure).
+ */
+int tiku_tfs_commit(tiku_tfs_wr_t *w);
+
+/** @brief Discard an open write; the file keeps its previous content. */
+void tiku_tfs_abort(tiku_tfs_wr_t *w);
+
 /** @brief Copy a file's content into @p buf; @p out_len gets the true length. */
 int tiku_tfs_read(tiku_tfs_t *fs, const char *name,
                   void *buf, size_t max, size_t *out_len);
