@@ -74,6 +74,7 @@
 #include <kernel/process/tiku_process.h>
 #include <kernel/scheduler/tiku_sched.h>
 #include <stdio.h>
+#include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_RAM_USABLE */
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <stdlib.h>                  /* strtoul: /sys/radio/beacon interval */
 #include <string.h>                  /* strchr/strcmp: beacon write parse   */
@@ -199,7 +200,7 @@ static int
 sram_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n",
-                    (unsigned long)TIKU_DEVICE_RAM_SIZE);
+                    (unsigned long)TIKU_DEVICE_RAM_USABLE);
 }
 
 /**

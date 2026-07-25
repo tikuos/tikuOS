@@ -123,6 +123,14 @@
  * nrf_common.ld (stack at the top of the lower bank; RAM2 = separate opt-in
  * region).  RAM_SIZE reports the primary bank. */
 #define TIKU_DEVICE_RAM_SIZE        (256UL * 1024UL)
+
+/* App-usable bytes of the PRIMARY bank, which is NOT the bank size: the top
+ * 16 KB (0x2003C000..0x2003FFFF) is the FLPR (VPR RISC-V) coprocessor carve,
+ * reserved unconditionally so the image layout does not shift with
+ * TIKU_FLPR_ENABLE.  The linker's SRAM region is that smaller figure, so memory
+ * reports must use this one -- RAM_SIZE above would over-report free SRAM by
+ * 16 KB.  Keep in sync with LENGTH(SRAM) in the device .ld. */
+#define TIKU_DEVICE_RAM_USABLE      (240UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL
 
 /**

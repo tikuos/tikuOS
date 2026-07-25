@@ -24,10 +24,14 @@
 #include <kernel/memory/tiku_mem.h>
 #include "tiku.h"
 #include <stdint.h>
+/* Unconditional: this header carries the TIKU_DEVICE_NVM_LABEL and
+ * TIKU_DEVICE_RAM_USABLE fallbacks that every memory report needs.  It used to
+ * be included only under TIKU_INIT_ENABLE, which meant the fallbacks were
+ * reachable in some builds and not others -- the include-order trap. */
+#include <kernel/memory/tiku_nvm_map.h>
 
 #if TIKU_INIT_ENABLE
 #include <kernel/init/tiku_init.h>
-#include <kernel/memory/tiku_nvm_map.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -148,7 +152,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     (void)argc;
     (void)argv;
 
-    sram_total = (unsigned long)TIKU_DEVICE_RAM_SIZE;
+    sram_total = (unsigned long)TIKU_DEVICE_RAM_USABLE;
 
     /*
      * fram_total is the size of the lower-FRAM 16-bit window

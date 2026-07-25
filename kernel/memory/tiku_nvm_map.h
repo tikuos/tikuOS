@@ -137,6 +137,17 @@ typedef tiku_nvm_region_t     tiku_fram_region_t;
 #define TIKU_DEVICE_NVM_LABEL     "NVM"
 #endif
 
+/*
+ * App-usable SRAM, for the same reason and in the same place: a memory report
+ * must not print the BANK size when part of the bank is carved away before the
+ * linker ever sees it (the nRF54L parts hold back 16 KB of the primary bank for
+ * the FLPR coprocessor, so `free` used to over-report free SRAM by that much).
+ * Devices that hand their whole bank to the application need declare nothing.
+ */
+#ifndef TIKU_DEVICE_RAM_USABLE
+#define TIKU_DEVICE_RAM_USABLE    TIKU_DEVICE_RAM_SIZE
+#endif
+
 #define tiku_fram_map_init        tiku_nvm_map_init
 #define tiku_fram_region_get      tiku_nvm_region_get
 #define tiku_fram_region_count    tiku_nvm_region_count
