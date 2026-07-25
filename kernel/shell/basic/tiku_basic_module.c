@@ -183,9 +183,14 @@ tiku_basic_module_load(void)
     }
     __asm__ volatile ("dsb 0xF; isb 0xF" ::: "memory");  /* code just written */
 #elif defined(PLATFORM_MSP430)
-    /* FRAM install: byte-write in place behind the MPU unlock window --
-     * FRAM is natively executable and uncached, so no barrier is needed.
-     * Gate-last like RRAM: body first, the 4-byte magic word LAST. */
+    /* FRAM install: byte-write in place behind the MPU unlock window -- FRAM is
+     * natively executable and uncached, so no barrier or flush is needed (the
+     * FRAM controller completes a store before the next instruction retires;
+     * only the RRAM branch below has a controller to wait on).
+     *
+     * Three phases, gate-last, for the same reason as RRAM: zero the magic
+     * FIRST so a power cut part-way through a REinstall cannot leave the old
+     * valid magic standing over a half-written image. */
     {
         volatile uint8_t *slot =
             (volatile uint8_t *)(uintptr_t)TIKU_MODULE_CARVE_ADDR;
@@ -193,20 +198,30 @@ tiku_basic_module_load(void)
         uint32_t i;
 
         saved = tiku_mpu_unlock_nvm();
-        for (i = 4u; i < len; i++) {
+        for (i = 0u; i < 4u; i++) {          /* 1. invalidate the gate */
+            slot[i] = 0u;
+        }
+        for (i = 4u; i < len; i++) {         /* 2. body */
             slot[i] = src[i];
         }
-        for (i = 0u; i < 4u; i++) {
+        for (i = 0u; i < 4u; i++) {          /* 3. magic LAST -- the commit */
             slot[i] = src[i];
         }
         tiku_mpu_lock_nvm(saved);
     }
 #else
-    /* RRAM install: byte-write in place behind the WEN gate: body first
-     * (offset 4..), then the 4-byte magic LAST -- the magic is the install
-     * gate.  (Known gap, deferred until it can be re-proven on the LM20:
-     * a REinstall over a resident module should zero the magic first, as
-     * the apollo510 branch above does.) */
+    /* RRAM install: byte-write in place behind the WEN gate, in three phases so
+     * the magic word is never valid over a body that is not fully written --
+     * the same shape the Ambiq branch above uses, and the reason it matters is
+     * REinstall: writing the body straight over a resident module left the old
+     * (valid) magic standing, so a power cut mid-body produced a module that
+     * passed the gate with a torn image behind it.  Zero the magic FIRST.
+     *
+     * Each phase ends with tiku_mem_arch_nvm_flush(), which spins until the
+     * RRAM controller has committed.  Without it the phases are only ordered in
+     * C, not in the controller, and the gate-last guarantee is not actually
+     * enforced -- region_write() in arch/nordic/tiku_nvm_region_nordic.c
+     * already follows this discipline for the same reason. */
     {
         volatile uint8_t *slot =
             (volatile uint8_t *)(uintptr_t)TIKU_MODULE_CARVE_ADDR;
@@ -214,12 +229,18 @@ tiku_basic_module_load(void)
         uint32_t i;
 
         saved = tiku_mpu_unlock_nvm();
-        for (i = 4u; i < len; i++) {
+        for (i = 0u; i < 4u; i++) {          /* 1. invalidate the gate */
+            slot[i] = 0u;
+        }
+        tiku_mem_arch_nvm_flush();
+        for (i = 4u; i < len; i++) {         /* 2. body */
             slot[i] = src[i];
         }
-        for (i = 0u; i < 4u; i++) {
+        tiku_mem_arch_nvm_flush();
+        for (i = 0u; i < 4u; i++) {          /* 3. magic LAST -- the commit */
             slot[i] = src[i];
         }
+        tiku_mem_arch_nvm_flush();
         tiku_mpu_lock_nvm(saved);
     }
     __asm__ volatile ("dsb 0xF; isb 0xF" ::: "memory");  /* code just written */

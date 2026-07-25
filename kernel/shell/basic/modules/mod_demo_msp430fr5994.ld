@@ -37,13 +37,27 @@ SECTIONS
 
     ASSERT(SIZEOF(.mod) <= LENGTH(CARVE), "module image overflows the carve")
 
+    /*
+     * Writable module state is NOT SUPPORTED, and saying so at link time is
+     * the point of this section.  Modules run execute-in-place from NVM and
+     * are never copied to RAM: there is no load step, no .data initialiser
+     * copy, and the syscall jump table exposes no allocator.  These inputs
+     * used to be listed in /DISCARD/ below, which meant a module declaring a
+     * global was accepted and shipped with its state pointing at nothing.
+     * Collect them instead and require the result to be empty, so the mistake
+     * is a link error naming the cause.  --gc-sections still drops a global
+     * that nothing references, so only state a handler actually uses trips it.
+     */
+    .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(COMMON) }
+
+    ASSERT(SIZEOF(.modwritable) == 0,
+           "module declares writable state (.data/.bss) -- modules get no RAM; keep state on the caller's stack or hand it to the firmware")
+
     /DISCARD/ :
     {
         *(.MSP430.attributes*)
         *(.comment)
         *(.note*)
         *(.debug*)
-        *(.bss*)
-        *(.data*)
     }
 }
