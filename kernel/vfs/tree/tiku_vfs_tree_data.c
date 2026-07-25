@@ -483,4 +483,15 @@ tiku_vfs_tree_data_get(void)
     return &data_node;
 }
 
+tiku_tfs_t *
+tiku_vfs_tree_data_store(void)
+{
+    /* Same lazy mount the VFS nodes use; callers that want whole objects
+     * (tiku_blob) work against the store rather than through path reads. */
+    if (data_tfs_ensure() != 0) {
+        return NULL;
+    }
+    return &data_fs;
+}
+
 #endif /* TIKU_SHELL_ENABLE */

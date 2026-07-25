@@ -23,6 +23,7 @@
 
 #include <stdint.h>
 #include <kernel/vfs/tiku_vfs.h>
+#include <kernel/fs/tiku_tfs.h>
 
 /**
  * @brief Get the fully-formed /data directory node.
@@ -64,5 +65,24 @@ typedef struct {
  * @return 0 on success, -1 if the store is unavailable.
  */
 int tiku_vfs_tree_data_df(tiku_data_df_t *out);
+
+/**
+ * @brief The mounted /data store itself (mounts on first use).
+ *
+ * The VFS nodes above are one VIEW of the store; callers that need whole
+ * objects rather than path reads -- tiku_blob (weights, firmware, module
+ * images) and, in time, BASIC's own slots -- work against the store
+ * directly.  Returns NULL when no store is available (region absent or too
+ * small, or the mount failed).
+ *
+ * NOTE (layering, temp/memlayout-fix-plan.md): the store is currently
+ * compiled only under TIKU_SHELL_ENABLE, because /data began life as the
+ * BASIC program store.  That gate has to go once modules and radio
+ * firmware become store tenants -- the store is a kernel facility, and
+ * /data is merely its VFS presentation.
+ *
+ * @return The mounted store, or NULL.
+ */
+tiku_tfs_t *tiku_vfs_tree_data_store(void);
 
 #endif /* TIKU_VFS_TREE_DATA_H_ */
