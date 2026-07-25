@@ -152,6 +152,21 @@ typedef enum {
 
 #define TIKU_TFS_NSLOTS  (TIKU_TFS_MAX_FILES + 1u)  /* +1 shadow for overwrite */
 
+/**
+ * @brief Largest file the store can hold: every data slot in one run.
+ *
+ * A file owns a run of contiguous slots and only the FIRST slot's length word
+ * is metadata, so a span of n holds n*SLOT_BYTES-4 bytes -- and a one-slot
+ * file is exactly the n==1 case (TIKU_TFS_SLOT_DATA).  This is the ceiling in
+ * principle; in practice a write also needs a free run of that length, and a
+ * REPLACE needs one on top of what the file already occupies (the new run must
+ * exist before the dirent flips to it).  So TFS_ERR_NOSPACE is now reachable
+ * for large files even when the total free byte count looks sufficient --
+ * fragmentation is real once files span.
+ */
+#define TIKU_TFS_FILE_MAX \
+    ((size_t)TIKU_TFS_NSLOTS * TIKU_TFS_SLOT_BYTES - 4u)
+
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
     uint8_t  slot_used[(TIKU_TFS_NSLOTS + 7u) / 8u]; /* data-slot allocation map */
