@@ -90,7 +90,7 @@ __tiku_nvm_rram_end   = __tiku_layout_top;
 /* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of
  * byte-writable, EXECUTABLE RRAM at the TOP OF THE CODE WINDOW -- canonical
  * layout order (2026-07): code | module | NVM region | persist.  Keep in
- * sync with TIKU_MODULE_CARVE_ADDR (0x0B8000). */
+ * sync with TIKU_MODULE_CARVE_ADDR (0x0C8000). */
 /* (module slot + NVM region symbols come from the shared derivation.) */
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of

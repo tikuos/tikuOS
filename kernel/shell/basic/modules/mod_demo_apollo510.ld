@@ -18,7 +18,7 @@
 
 MEMORY
 {
-    /* Executable MRAM slot: 4 KB at the top of the (shrunk) code window --
+    /* Executable MRAM slot: 32 KB at the top of the (shrunk) code window --
      * MRAM is executable but only bootrom-programmable, so the loader
      * installs via tiku_nvm_mram_program instead of CPU stores.  Kept in
      * sync with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */

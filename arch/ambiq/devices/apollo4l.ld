@@ -27,7 +27,7 @@ ENTRY(tiku_ambiq_reset_handler)
 MEMORY
 {
     /* Code window: a fixed ~508 KB budget for code/rodata (512 KB minus the
-     * 4 KB loadable-module slot carved off its top). Everything between the
+     * 32 KB loadable-module slot carved off its top). Everything between the
      * module slot and the 64 KB mirror becomes the carved NVM region, so the
      * NVM store/tier gets the bulk of MRAM. A region overflow here means code
      * outgrew its budget. */
@@ -39,8 +39,8 @@ MEMORY
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 
-/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 4 KB of MRAM at
- * the top of the former code window (0x97000..0x98000). Carved from the CODE
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of MRAM at
+ * the top of the former code window (0x90000..0x98000). Carved from the CODE
  * budget, NOT the NVM region below -- the NVM region's interior (FS extent,
  * PERSIST/ckpt reserved tail, tier) is end-anchored on __tiku_nvmfs_size, so
  * shrinking THAT would shift every durable tenant and destroy on-device data.

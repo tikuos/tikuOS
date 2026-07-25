@@ -49,8 +49,8 @@ MEMORY
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 
-/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 4 KB of MRAM at
- * the top of the former code window (0x97000..0x98000). Carved from the CODE
+/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of MRAM at
+ * the top of the former code window (0x90000..0x98000). Carved from the CODE
  * budget, NOT the NVM region below -- the NVM region's interior (FS extent,
  * PERSIST/ckpt reserved tail, tier) is end-anchored on __tiku_nvmfs_size, so
  * shrinking THAT would shift every durable tenant and destroy on-device data.

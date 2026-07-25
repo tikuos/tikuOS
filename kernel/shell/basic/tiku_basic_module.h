@@ -55,11 +55,12 @@
  *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
  *     0x18000-based code window.  The unified CACHECTRL cache is flushed
  *     after install (both parts define AM_PART_APOLLO4L).
- *   rp2350 (Pico 2):    QSPI flash, XIP; the slot is exactly ONE 4 KB erase
- *     sector at the top of the code window.  Install stages the image in
- *     SRAM with the header page blank, commits erase+program via the
- *     boot-ROM path, then programs the header page LAST -- flash can only
- *     clear bits, so the gate stays invalid until that final program.
+ *   rp2350 (Pico 2):    QSPI flash, XIP; the slot spans EIGHT 4 KB erase
+ *     sectors at the top of the code window.  Install walks them in a loop,
+ *     staging each sector through a 4 KB SRAM buffer and committing
+ *     erase+program via the boot-ROM path, with sector 0's header page left
+ *     blank and programmed LAST -- flash can only clear bits, so the gate
+ *     stays invalid until that final program.
  *   msp430 fr5994/fr6989: FRAM at the top of HIFRAM -- byte-writable in
  *     place (behind the MPU unlock window) and natively executable (the
  *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
