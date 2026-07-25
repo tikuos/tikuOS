@@ -58,21 +58,18 @@ static void process_line(const char *raw);
  */
 
 #if BASIC_NVM_ON_REGION
-#define BASIC_REGION_MAGIC  0x42415350u   /* 'BASP' */
-_Static_assert(TIKU_BASIC_SAVE_BUF_BYTES + 8u <= TIKU_NVM_RESERVED_BYTES,
-               "BASIC save buffer larger than the reserved NVM region tail");
-
-/* Base of the reserved NVM-region tail (program slot at offset 0), or NULL. */
-static uint8_t *
-basic_region_slot(void)
-{
-    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
-    if (rgn == NULL || rgn->base == NULL ||
-        rgn->size < TIKU_NVM_RESERVED_BYTES) {
-        return NULL;
-    }
-    return rgn->base + (rgn->size - TIKU_NVM_RESERVED_BYTES);
-}
+/*
+ * The reserved tail is GONE from BASIC's view.  Its two tenants are now store
+ * files -- prog.bas here, prog.ckpt in tiku_basic_ckpt.inl -- so the tail base
+ * locator, its 'BASP' magic and the fit-in-the-tail assertion have no callers
+ * left.  The replacement guards live next to the checkpoint's sizing, where
+ * both objects can be checked against the STORE together
+ * (TIKU_TFS_SPAN_FOR-based, in tiku_basic_ckpt.inl).
+ *
+ * With no tenants, TIKU_NVM_RESERVED_BYTES itself can go (P3g) -- which is the
+ * point of the exercise: a core memory header should never have been sized by
+ * a shell feature's line capacity.
+ */
 
 /*
  * PROGRAM SLOT -- an ordinary /data file, not a carve.
