@@ -56,14 +56,17 @@
  *   LAST -- single-word FRAM stores commit atomically, so a cut mid-write
  *   leaves the gate invalid.
  *
- *   Carved NVM region (Ambiq MRAM, RP2350 flash, Nordic RRAM): a fixed slot at the TOP of
- *   the region's reserved tail (the saved program owns the base).  These media
- *   are program-op (bootrom / sector erase+program), so multi-call gate-last
- *   ordering would cost one extra sector erase per save on flash -- instead
- *   the image is [u32 magic][u32 version][u32 len][u32 crc][payload], built in
- *   a RAM scratch and committed with ONE tiku_tier_nvm_write.  Validity =
- *   magic + version + CRC32(payload): any torn write (including a power cut
- *   mid-sector-erase) fails the CRC and RESUME restarts instead.
+ *   Carved NVM region (Nordic RRAM, Ambiq MRAM, RP2350 flash): a fixed slot at
+ *   the TOP of the region's reserved tail (the saved program owns the base).
+ *   The image is [u32 magic][u32 version][u32 len][u32 crc][payload], and
+ *   validity is magic + version + CRC32(payload) -- the CRC is the gate, so any
+ *   torn write (including a power cut mid-sector-erase) fails it and RESUME
+ *   restarts instead.  How the bytes get there depends on the medium
+ *   (BASIC_CKPT_STREAMING, see the sizing section): where a write is cheap and
+ *   fine-grained the payload is STREAMED through a 512 B chunk with the header
+ *   written last, so no whole-image RAM buffer exists; on erase-based flash the
+ *   image is staged whole and committed in ONE call, because the checkpoint is
+ *   periodic and chunking would multiply sector erases.
  *
  * Either way: losing an in-flight checkpoint (restart instead of resume) is
  * acceptable; resuming garbage is not.  The slot is sized to the compile-time
@@ -188,10 +191,45 @@ _Static_assert(TIKU_BASIC_SAVE_BUF_BYTES + 8u + BASIC_CKPT_SLOT_BYTES
                    <= TIKU_NVM_RESERVED_BYTES,
                "program + checkpoint slots overflow the reserved region tail");
 
-/* RAM staging for the single-call region write (BASIC_SCRATCH: .ssram on
- * Ambiq, .bss on RP2350 -- transient, rebuilt on every save). */
+/*
+ * STREAM THE PAYLOAD, OR STAGE IT WHOLE?
+ *
+ * Staging the whole image costs BASIC_CKPT_RGN_HDR + PAYLOAD_MAX of always-
+ * resident RAM -- 12,534 B, which after the v0.06 SAVE/LOAD diet is the single
+ * largest static buffer BASIC owns.  Streaming it into the slot in bounded
+ * chunks removes all but the chunk, exactly as SAVE now does.
+ *
+ * But the checkpoint is PERIODIC, and that changes the calculus on erase-based
+ * NVM in a way it did not for SAVE.  On RP2350 every backend write is a 4 KB
+ * read-modify-ERASE-program; region_write() loops the sectors of ONE call, so
+ * the whole image today costs 4 sector erases, while N chunked writes at
+ * unaligned offsets cost closer to 2N.  For an interactive command that is a
+ * fair trade; for something the interpreter does at every yield batch (which is
+ * precisely why flash checkpoints are interval-gated at all) it is not.
+ *
+ * So: stream where a write is cheap and fine-grained -- RRAM stores, MRAM
+ * 16-byte granules -- and keep the single-call commit where a write is an
+ * erase.  The condition is the erase granule, and only one supported platform
+ * has one.
+ */
+#if defined(PLATFORM_RP2350)
+#define BASIC_CKPT_STREAMING  0
+#else
+#define BASIC_CKPT_STREAMING  1
+#endif
+
+#if BASIC_CKPT_STREAMING
+/* Bounded staging: RAM cost is independent of the payload size.  512 B keeps
+ * the flush count modest (~25 for a full payload) while costing 4% of what the
+ * whole-image buffer did. */
+#define BASIC_CKPT_CHUNK  512u
+static uint8_t basic_ckpt_chunk[BASIC_CKPT_CHUNK];
+#else
+/* RAM staging for the single-call region write (BASIC_SCRATCH: .bss on
+ * RP2350 -- transient, rebuilt on every save). */
 static BASIC_SCRATCH uint8_t
     basic_ckpt_scratch[BASIC_CKPT_RGN_HDR + BASIC_CKPT_PAYLOAD_MAX];
+#endif
 
 /** @brief Base of the checkpoint slot inside the reserved tail, or NULL. */
 static uint8_t *
@@ -204,24 +242,75 @@ basic_ckpt_region_slot(void)
     return tail + (TIKU_NVM_RESERVED_BYTES - BASIC_CKPT_SLOT_BYTES);
 }
 #else
-/* Byte-writable slot.  .persistent FRAM on MSP430 (durable); plain .bss on
- * Nordic/host (session-only -- matches SAVE's durability envelope there). */
+/* Byte-writable slot.  .persistent FRAM on MSP430 (durable); plain .bss on host
+ * (session-only -- matches SAVE's durability envelope there).  Not built on any
+ * region-backed part: all three have a reserved tail now. */
 static BASIC_NVM_PERSISTENT uint8_t basic_ckpt_buf[TIKU_BASIC_CKPT_BYTES];
+#define BASIC_CKPT_STREAMING  0
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* BYTE CURSORS                                                               */
 /*---------------------------------------------------------------------------*/
 
-typedef struct { uint8_t *base; size_t pos, cap; int err; } basic_ckpt_wr_t;
+typedef struct {
+    uint8_t *base;          /* staging buffer: whole image, or the chunk */
+    size_t   pos;           /* payload bytes written so far, logically   */
+    size_t   cap;           /* capacity of base[]                        */
+    int      err;
+#if BASIC_CKPT_STREAMING
+    uint8_t *nvm;           /* slot base; payload lands at +RGN_HDR      */
+    size_t   fill;          /* bytes currently buffered in base[]        */
+    size_t   limit;         /* payload bytes the slot can hold           */
+    uint32_t crc;           /* running CRC over flushed + buffered bytes */
+#endif
+} basic_ckpt_wr_t;
 typedef struct { const uint8_t *base; size_t pos, len; int err; } basic_ckpt_rd_t;
 
+#if BASIC_CKPT_STREAMING
+/* Defined after basic_crc32_step, which it folds each chunk into. */
+static int ckpt_flush(basic_ckpt_wr_t *w);
+#endif
+
+/*
+ * Append n bytes of state.  The 51 call sites are purely sequential -- nothing
+ * seeks or back-patches -- which is what makes the streaming mode below a drop-in
+ * substitution for a single large buffer.
+ */
 static void
 ckpt_w(basic_ckpt_wr_t *w, const void *src, size_t n)
 {
+#if BASIC_CKPT_STREAMING
+    const uint8_t *p = (const uint8_t *)src;
+
+    while (n > 0u) {
+        size_t k;
+
+        if (w->err) {
+            return;
+        }
+        if (w->fill == w->cap && ckpt_flush(w) != 0) {
+            return;                             /* backend refused the chunk */
+        }
+        k = w->cap - w->fill;
+        if (k > n) {
+            k = n;
+        }
+        if (w->pos + k > w->limit) {
+            w->err = 1;                         /* would overrun the slot */
+            return;
+        }
+        memcpy(w->base + w->fill, p, k);
+        w->fill += k;
+        w->pos  += k;
+        p       += k;
+        n       -= k;
+    }
+#else
     if (w->err || w->pos + n > w->cap) { w->err = 1; return; }
     memcpy(w->base + w->pos, src, n);
     w->pos += n;
+#endif
 }
 
 static void
@@ -253,6 +342,35 @@ basic_crc32_step(uint32_t c, const uint8_t *p, size_t n)
     }
     return c;
 }
+
+#if BASIC_CKPT_STREAMING
+/**
+ * @brief Push the buffered chunk into the slot's payload area.
+ *
+ * Folds the chunk into the running CRC on the way out, so the checksum is
+ * computed once, incrementally, and never needs the whole payload resident.
+ * The destination offset is derived from the cursor: w->pos already counts the
+ * buffered bytes, so they belong at (pos - fill).
+ *
+ * @return 0 on success, -1 if the backend refused the write (w->err is set).
+ */
+static int
+ckpt_flush(basic_ckpt_wr_t *w)
+{
+    if (w->fill == 0u) {
+        return 0;
+    }
+    w->crc = basic_crc32_step(w->crc, w->base, w->fill);
+    if (tiku_tier_nvm_write(w->nvm + BASIC_CKPT_RGN_HDR + (w->pos - w->fill),
+                            w->base, (tiku_mem_arch_size_t)w->fill)
+        != TIKU_MEM_OK) {
+        w->err = 1;
+        return -1;
+    }
+    w->fill = 0;
+    return 0;
+}
+#endif
 
 /**
  * @brief CRC-32 fingerprint of the in-memory program (each line's number +
@@ -708,11 +826,43 @@ basic_ckpt_save(void)
 {
     basic_ckpt_wr_t w;
     uint8_t  *slot = basic_ckpt_region_slot();
+#if !BASIC_CKPT_STREAMING
     uint32_t  v;
+#endif
 
     if (slot == NULL) {
         return -1;                     /* region backend absent this boot */
     }
+#if BASIC_CKPT_STREAMING
+    /* Payload straight into the slot in bounded chunks, then the header LAST.
+     * Validity is still magic + version + CRC32(payload), so the guarantee is
+     * unchanged: until the new header lands, the slot carries the PREVIOUS
+     * header, whose length and CRC cannot describe the bytes now sitting in the
+     * payload area -- so load() rejects a cut mid-stream exactly as it rejected
+     * a torn single write, and RESUME restarts instead of resuming garbage. */
+    {
+        uint32_t hdr[4];
+
+        w.base  = basic_ckpt_chunk;
+        w.cap   = sizeof basic_ckpt_chunk;
+        w.pos   = 0;
+        w.err   = 0;
+        w.nvm   = slot;
+        w.fill  = 0;
+        w.limit = BASIC_CKPT_SLOT_BYTES - BASIC_CKPT_RGN_HDR;
+        w.crc   = 0xFFFFFFFFu;                 /* CRC-32 init, finalized below */
+        basic_ckpt_write(&w);
+        if (w.err || ckpt_flush(&w) != 0) {
+            return -1;
+        }
+        hdr[0] = BASIC_CKPT_MAGIC;
+        hdr[1] = BASIC_CKPT_VERSION;
+        hdr[2] = (uint32_t)w.pos;
+        hdr[3] = w.crc ^ 0xFFFFFFFFu;          /* same value basic_ckpt_crc32 gives */
+        return (tiku_tier_nvm_write(slot, hdr, (tiku_mem_arch_size_t)sizeof hdr)
+                == TIKU_MEM_OK) ? 0 : -1;
+    }
+#else
     w.base = basic_ckpt_scratch + BASIC_CKPT_RGN_HDR;
     w.pos  = 0;
     w.cap  = sizeof(basic_ckpt_scratch) - BASIC_CKPT_RGN_HDR;
@@ -732,6 +882,7 @@ basic_ckpt_save(void)
     return (tiku_tier_nvm_write(slot, basic_ckpt_scratch,
                 (tiku_mem_arch_size_t)(BASIC_CKPT_RGN_HDR + w.pos))
             == TIKU_MEM_OK) ? 0 : -1;
+#endif
 }
 
 /**
