@@ -42,11 +42,75 @@
 #include <kernel/memory/tiku_mem.h>  /* WEN gate (nordic) / bootrom programmer
                                       * prototype via hal/tiku_mem_hal.h (510) */
 #include <hal/tiku_cpu.h>            /* tiku_cpu_icache_invalidate */
+#include <kernel/fs/tiku_tfs.h>      /* the module image is a store file */
+#include <kernel/vfs/tree/tiku_vfs_tree_data.h>
 #include <string.h>
 
 /* Embedded image, wrapped as an object by the Makefile module block. */
 extern const uint8_t _binary_mod_demo_bin_start[];
 extern const uint8_t _binary_mod_demo_bin_end[];
+
+/*---------------------------------------------------------------------------*/
+/* IMAGE SOURCE (P3e): the store file first, the embedded blob as a seeder    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Locate the module image: the store file, optionally seeding it.
+ *
+ * The FILE is always authoritative, so a module uploaded over serial replaces
+ * the built-in one without a reflash.  The embedded blob is only a SEEDER, and
+ * only INSTALL (@p seed = 1) may fall back to it: it writes the embedded image
+ * into the store and returns it, so from then on the file is the source and the
+ * embedded copy is never needed again.  Without that step, deleting the blob
+ * would strand a fresh board with no way to install anything.
+ *
+ * ACTIVATE passes @p seed = 0, and that asymmetry is the whole install/activate
+ * distinction: activate runs at every BASIC session start, so if it seeded too,
+ * a board would silently acquire the built-in module without anyone asking and
+ * INSTALL would mean nothing.  No file, no module -- exactly what an unarmed
+ * gate used to mean on the parts that install into NVM.
+ *
+ * The returned pointer may point straight into memory-mapped NVM (the store
+ * maps a file's run as one contiguous span), so the caller must not assume RAM.
+ *
+ * @return 0 with @p src / @p len set, or -1 when no image is available at all.
+ */
+static int
+module_image(const uint8_t **src, uint32_t *len, int seed)
+{
+    tiku_tfs_t *fs = tiku_vfs_tree_data_store();
+    const void *p  = NULL;
+    size_t      n  = 0u;
+
+    if (fs != NULL && tiku_tfs_map(fs, TIKU_MODULE_FILE, &p, &n) == TFS_OK &&
+        n >= sizeof(tiku_module_header_t) && n <= TIKU_MODULE_CARVE_SIZE) {
+        *src = (const uint8_t *)p;
+        *len = (uint32_t)n;
+        return 0;
+    }
+#if TIKU_BASIC_MODULE_EMBED
+    if (seed) {
+        uint32_t elen = (uint32_t)(_binary_mod_demo_bin_end -
+                                   _binary_mod_demo_bin_start);
+        if (elen < sizeof(tiku_module_header_t) ||
+            elen > TIKU_MODULE_CARVE_SIZE) {
+            return -1;
+        }
+        /* Seed the store so the file becomes the source from now on.  A failure
+         * here is not fatal: the install can still proceed from .rodata. */
+        if (fs != NULL) {
+            (void)tiku_tfs_write(fs, TIKU_MODULE_FILE,
+                                 _binary_mod_demo_bin_start, elen);
+        }
+        *src = _binary_mod_demo_bin_start;
+        *len = elen;
+        return 0;
+    }
+#else
+    (void)seed;                      /* provisioning-only build, none present */
+#endif
+    return -1;
+}
 
 #if defined(PLATFORM_RP2350)
 /* The proven interrupt-masked, XIP-suspended boot-ROM flash path (declared
@@ -76,9 +140,36 @@ static const tiku_basic_syscalls_t module_syscalls = {
 int
 tiku_basic_module_activate(void)
 {
-    const tiku_module_header_t *hdr =
-        (const tiku_module_header_t *)(uintptr_t)TIKU_MODULE_CARVE_ADDR;
+    const tiku_module_header_t *hdr;
     tiku_module_init_fn init;
+
+#if TIKU_MODULE_EXEC_IN_RAM
+    /*
+     * Materialise the image into the execution window, then run it there.  The
+     * window is RAM (ITCM) so this must happen after every reset -- the module's
+     * durability now lives in the store file, not in the window.
+     *
+     * The image is linked FOR this address, so a plain copy is enough: no
+     * relocation, no fixups.  That is also the reason the window cannot simply
+     * be "wherever there is room" -- see the header.
+     */
+    {
+        const uint8_t *src = NULL;
+        uint32_t       len = 0u;
+
+        if (module_image(&src, &len, 0) != 0) {
+            return -1;
+        }
+        memcpy((void *)(uintptr_t)TIKU_MODULE_EXEC_ADDR, src, len);
+        /* The bytes arrived through the D-side; the I-side must not serve stale
+         * lines for an address we are about to branch to.  The HAL brackets the
+         * invalidate with DSB/ISB itself, so no barriers are needed here (and
+         * the M55 reaches its TCMs directly, bypassing the D-cache). */
+        tiku_cpu_icache_invalidate();
+    }
+#endif
+
+    hdr = (const tiku_module_header_t *)(uintptr_t)TIKU_MODULE_EXEC_ADDR;
 
     if (hdr->magic != TIKU_MODULE_MAGIC ||
         hdr->abi_version != TIKU_MODULE_ABI) {
@@ -98,8 +189,8 @@ tiku_basic_module_activate(void)
         return -1;
     }
     init = (tiku_module_init_fn)(uintptr_t)
-           (TIKU_MODULE_CARVE_ADDR + hdr->init_off);
-    init(&module_syscalls);                       /* XIP from the NVM slot     */
+           (TIKU_MODULE_EXEC_ADDR + hdr->init_off);
+    init(&module_syscalls);   /* from the RAM window, or XIP from the carve */
     module_activated = 1u;
     return 0;
 }
@@ -107,15 +198,30 @@ tiku_basic_module_activate(void)
 int
 tiku_basic_module_load(void)
 {
-    uint32_t len = (uint32_t)(_binary_mod_demo_bin_end -
-                              _binary_mod_demo_bin_start);
-    const uint8_t *src = _binary_mod_demo_bin_start;
+    const uint8_t *src = NULL;
+    uint32_t       len = 0u;
 
-    if (len < sizeof(tiku_module_header_t) || len > TIKU_MODULE_CARVE_SIZE) {
+    if (module_image(&src, &len, 1) != 0) {
         return -1;
     }
 
-#if defined(AM_PART_APOLLO510) || defined(AM_PART_APOLLO4L)
+#if TIKU_MODULE_EXEC_IN_RAM
+    /*
+     * P3f: nothing to install.  The image is durable in the STORE, and the
+     * execution window is RAM, so "install" is finished the moment the file
+     * exists -- module_image() has already guaranteed that (seeding it from the
+     * embedded copy if this board had none).  The copy into the window happens
+     * in activate(), which must run after every reset anyway because RAM does
+     * not survive one.
+     *
+     * This is what deletes an entire class of code: the three-phase gate-last
+     * NVM programming below exists purely to make a torn install detectable,
+     * and a torn install is impossible when the durable copy is a file the
+     * store already commits atomically.
+     */
+    (void)src;
+    return tiku_basic_module_activate();   /* same contract as every backend */
+#elif defined(AM_PART_APOLLO510) || defined(AM_PART_APOLLO4L)
     /* MRAM install via the bootrom programmer (apollo510/510b and apollo4l/4p
      * share the mechanism; each backend supplies its own tiku_nvm_mram_program
      * with the part's bootrom entry and geometry).  Three-phase so a power cut

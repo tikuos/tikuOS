@@ -91,6 +91,54 @@
 #define TIKU_MODULE_CARVE_SIZE  0x8000u
 #endif
 
+/*
+ * WHERE THE IMAGE COMES FROM (P3e).  It used to come only from a blob linked
+ * into the firmware -- so a module image was counted TWICE, once as .rodata in
+ * the code window and once as the reserved slot it was copied into.  The image
+ * is now an ordinary store file, and the embedded blob becomes an optional
+ * SEEDER: when a board has never been provisioned, the first install writes the
+ * embedded copy into the store and thereafter the FILE is authoritative.  That
+ * is what makes a module replaceable over serial instead of by reflashing, and
+ * it is why deleting the embedded copy (TIKU_BASIC_MODULE_EMBED=0) cannot brick
+ * a provisioned board.
+ *
+ * Flat name, matching prog.bas / prog.ckpt: /data has a static "basic" node, so
+ * a "mod/" prefix would render as a phantom folder beside it.
+ */
+#define TIKU_MODULE_FILE  "mod.bin"
+
+/* Ship the embedded seeder by default: a board with no provisioned file must
+ * still be able to install.  Set to 0 for a provisioning-only image once the
+ * fleet is seeded -- that is what reclaims the image bytes. */
+#ifndef TIKU_BASIC_MODULE_EMBED
+#define TIKU_BASIC_MODULE_EMBED  1
+#endif
+
+/*
+ * WHERE THE MODULE EXECUTES (P3f).  A module is pre-linked to an absolute
+ * address, so SOME fixed window is unavoidable -- but nothing requires it to be
+ * in NVM.  On Apollo510 the window is the ITCM: 256 KB that is powered by the
+ * same PWRENTCM=7 the 512 KB DTCM already requires, sits completely idle, and
+ * executes code (all three measured -- see TikuBench tests/memory/
+ * test_mem_tcm.c).  Moving there costs nothing and lets the NVM module carve be
+ * deleted outright, which is the point.
+ *
+ * The window starts 4 KB in rather than at ITCM base 0x00000000, so no module
+ * address can ever be zero and be mistaken for a null pointer -- by the loader's
+ * own checks or by the module's.  It must match the module's .ld exactly.
+ *
+ * Elsewhere the module still runs XIP from the NVM carve: rp2350 and the Nordic
+ * parts would each need their own RAM window and their own verification, and
+ * that hardware is not on the bench.
+ */
+#if defined(AM_PART_APOLLO510)
+#define TIKU_MODULE_EXEC_IN_RAM  1
+#define TIKU_MODULE_EXEC_ADDR    0x00001000u   /* ITCM + 4 KB (mod_demo_apollo510.ld) */
+#else
+#define TIKU_MODULE_EXEC_IN_RAM  0
+#define TIKU_MODULE_EXEC_ADDR    TIKU_MODULE_CARVE_ADDR
+#endif
+
 /* Entry-offset convention: ARM Thumb entry addresses carry bit0 SET so
  * the loader can branch (carve_base + init_off) directly; MSP430 has no
  * Thumb bit and entry offsets are plain (even) byte offsets.  Modules
