@@ -443,9 +443,24 @@ basic_https_get(const char *method, const char *host, const char *path,
     char     req[TIKU_BASIC_HTTP_REQ_MAX];  /* method+path+host+HTTPHEADER+POST hdrs; budget _Static_assert'd above */
     size_t   total = 0, rl;
     tiku_clock_time_t dl;
+    const tiku_kits_crypto_x509_root_t *roots = NULL;
+    int      nroots = 0;
     static uint16_t src_seq = 49150;     /* fresh ephemeral port pair per call */
 
     basic_http_status = 0;
+
+    /* Trust FIRST, before DNS and TCP.  The roots live in /data now, so they can
+     * be missing -- and a board that cannot validate anything should say so in
+     * one line instead of spending a DNS timeout and a connect to arrive at the
+     * same answer.  Refusing by name also keeps "unprovisioned" from being
+     * misread as a network fault, which is what an empty trust store looks like:
+     * every host failing signature validation. */
+    if (basic_https_roots_get(&roots, &nroots) != 0) {
+        basic_report(TIKU_BASIC_ERR_IO,
+                     "HTTPGET: no trust store -- provision /data/"
+                     BASIC_HTTPS_ROOTS_FILE " (tools/gen_roots.py)");
+        return -1;
+    }
 #if TIKU_BASIC_HTTPS_OFFLOAD
     /* Refuse a fetch triggered from a process the crypto drive loop dispatched
      * (a rule/timer that fetches while another fetch's crypto is in flight):
@@ -564,9 +579,16 @@ basic_https_get(const char *method, const char *host, const char *path,
         tiku_kits_net_http_tls_t    tconf;
         int8_t erc;
 
+        /* Re-map rather than reuse the pointers taken at entry: a re-provision
+         * between then and now would have invalidated them (tiku_tfs_map's
+         * pointer dies on the next write to that name). */
+        if (basic_https_roots_get(&roots, &nroots) != 0) {
+            basic_report(TIKU_BASIC_ERR_IO, "HTTPGET: trust store vanished");
+            return -1;
+        }
         tconf.trust    = TIKU_KITS_NET_HTTP_CERT;
-        tconf.roots    = tiku_https_roots;
-        tconf.nroots   = TIKU_HTTPS_NROOTS;
+        tconf.roots    = roots;
+        tconf.nroots   = nroots;
         tconf.rng      = basic_https_rng;
         tconf.now_unix = tiku_rtc_is_set() ? (uint64_t)tiku_rtc_get_seconds() : 0;
         tconf.offload  = NULL;              /* offload rides on io.offload */

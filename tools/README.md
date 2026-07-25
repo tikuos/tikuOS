@@ -114,3 +114,62 @@ Open-licensed, small, render well on EPD:
 - **Inter** (https://rsms.me/inter/) -- proportional UI font
 - **Atkinson Hyperlegible** (https://brailleinstitute.org/freefont) -- maximum-contrast
   proportional font designed for low-vision readers; very EPD-friendly
+
+---
+
+## gen_roots.py -- HTTPS trust store (`/data/roots.bin`)
+
+The 120-root Mozilla CA trust store used to be `.rodata`: 8,252 lines of
+generated C, 128,820 bytes of DER, compiled into every cert-TLS image.  That
+was 127.7 KB of a 256 KB code window, and it made trust changeable only by
+reflashing -- the wrong lifecycle for something that expires and gets revoked.
+Roots are now a store file, packed by this tool and provisioned over the
+console.
+
+**The trust store is no longer in the repository.**  Certificates are
+third-party data with their own release cadence, so the tree keeps the *packer*
+and the boards keep the *file*, following the same rule as the CYW43 firmware
+blobs.  Regenerate it from upstream:
+
+```sh
+curl -O https://curl.se/ca/cacert.pem            # verify the published sums
+python3 tools/gen_roots.py --from-pem cacert.pem -o roots.bin
+python3 tools/gen_roots.py --verify roots.bin
+```
+
+`--from-pem` filters the bundle to the algorithms the verify kit actually
+supports (RSA with SHA-256/384/512, ECDSA on P-256/P-384) and **reports what it
+skipped**, so a shrinking trust set is visible rather than silent.  It locates
+each certificate's subject DN by walking the ASN.1 -- checked against all 120
+shipping roots, reproducing every recorded offset -- because anchor matching
+compares a DN by byte compare rather than parsing every root.
+
+### Provisioning
+
+```sh
+# 130,768 bytes; the board acks each chunk, so the host must wait for '.'
+recv /data/roots.bin 130768
+```
+
+A streamed `recv` announces its chunk size (`recv: ready N chunk C`) and emits
+one `.` per chunk committed to NVM.  **Wait for it.**  There is no hardware flow
+control on the console and the board cannot drain the UART while writing a chunk:
+pushing the file without waiting cost 79 dropped bytes and 6,418 RX-ring
+recoveries on an nRF54LM20 at 115200, and the transfer never completed.  A
+dropped byte is not silently tolerated -- the file carries a CRC-32 and the
+loader refuses a store that fails it.
+
+`/data` survives a reflash, so this is a once-per-board step, not once per build.
+
+### Verifying a migration
+
+```sh
+python3 tools/gen_roots.py --self-test <old .inl>   # pack, unpack, compare
+```
+
+Packing from the generated C and round-tripping it proves the file carries
+exactly the bytes the firmware already trusted.  `--to-inl` regenerates the C
+form from a packed file, so the two representations can be diffed directly.
+Both directions were required to agree before the `.inl` was deleted, and
+`--from-pem` was shown to reproduce the same 130,768 bytes byte-for-byte from a
+reconstituted bundle.

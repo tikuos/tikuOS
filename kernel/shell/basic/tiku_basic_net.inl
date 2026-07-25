@@ -135,6 +135,11 @@ exec_fetch(const char **p)
             basic_biglen[n] = total;
         }
     } else {
+        /* Terminate as well as zero the length: PRINT reads the buffer as a C
+         * string, so a failed fetch that only cleared the length printed
+         * whatever the buffer happened to hold -- a screenful of garbage after
+         * every error line. */
+        basic_bigbuf[n][0] = '\0';
         basic_biglen[n] = 0;
     }
 }

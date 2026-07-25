@@ -1169,7 +1169,13 @@ parse_strprim(const char **p, char *out, size_t cap)
         skip_ws(p);
         if (cur_peek(p) != ')') goto fn_paren_err;
         cur_advance(p);
-        (void)basic_https_get("GET", host, path, NULL, NULL, out, cap);
+        /* On failure basic_https_get() leaves out[] untouched, and out[] is a
+         * shared string buffer -- so discarding the result printed whatever the
+         * last string operation had left there, a screenful of stale bytes after
+         * every error line.  A failed fetch is the empty string. */
+        if (basic_https_get("GET", host, path, NULL, NULL, out, cap) < 0) {
+            out[0] = '\0';
+        }
         return 0;
     }
     /* HTTPPOST$("host","path", body$ [, ctype$]) -- HTTPS POST body$ (default
@@ -1206,8 +1212,10 @@ parse_strprim(const char **p, char *out, size_t cap)
         }
         if (cur_peek(p) != ')') goto fn_paren_err;
         cur_advance(p);
-        (void)basic_https_get("POST", host, path, body,
-                              have_ct ? ctype : NULL, out, cap);
+        if (basic_https_get("POST", host, path, body,
+                            have_ct ? ctype : NULL, out, cap) < 0) {
+            out[0] = '\0';            /* same shared-buffer hazard as HTTPGET$ */
+        }
         return 0;
     }
 #endif
