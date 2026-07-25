@@ -62,7 +62,12 @@ exec_import(const char **q)
 {
     char         path[48];
     char *const  tmp     = basic_persist_scratch;
-    const size_t tmp_cap = TIKU_BASIC_SAVE_BUF_BYTES + 1u;
+    /* Whatever the scratch actually is -- 4 KB on the region-backed parts (one
+     * /data file, which is the largest thing this can be handed), the whole
+     * program buffer on MSP430/host.  IMPORT accepts at most
+     * TIKU_BASIC_IMPORT_LINES_MAX lines either way, and needs the file
+     * resident and mutable because pass 1 splits it in place. */
+    const size_t tmp_cap = sizeof basic_persist_scratch;
     uint16_t     old_nos[TIKU_BASIC_IMPORT_LINES_MAX];
     uint16_t     new_nos[TIKU_BASIC_IMPORT_LINES_MAX];
     const char  *line_txt[TIKU_BASIC_IMPORT_LINES_MAX];

@@ -41,6 +41,20 @@
  *          limits, left EXACTLY as they were.
  *
  * Every macro stays -D-overridable; these branches only choose the default. */
+
+/*
+ * What to CALL the non-volatile memory in user-facing text (HELP says "SAVE /
+ * LOAD persist across reboots in <label>").  Device headers declare the real
+ * technology -- FRAM / RRAM / MRAM / Flash -- and kernel/memory/tiku_nvm_map.h
+ * carries the canonical fallback for a header that forgot to.  BASIC needs its
+ * own copy of that fallback because the host BASIC harness deliberately stubs
+ * tiku_mem.h out (it defines TIKU_MEM_H_ to keep the real one from being read),
+ * so nvm_map.h's definition never reaches a host build.
+ */
+#ifndef TIKU_DEVICE_NVM_LABEL
+#define TIKU_DEVICE_NVM_LABEL     "NVM"
+#endif
+
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC)
 /* Nordic runs the BIG tier too (2026-07: it previously ran the middle FRAM
