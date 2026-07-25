@@ -860,32 +860,33 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
-# BASIC needs a real SRAM (AUTO) tier for its program arena (~98 KB for the
-# 1024-line BIG tier); the tiku_mem.h default is 128 B, so `basic` OOMs at
-# entry without this.  The nRF54L15 has 256 KB SRAM, so a 160 KB tier fits the
-# arena with ample room for .bss + stack.  Gated on BASIC so non-BASIC builds
-# keep the lean default.  (Same fix the rp2350 block applies for its part.)
-# 32 KB, not rp2350's 160 KB: nordic runs the FRAM BASIC tier (96 lines,
-# 2 KB heap -- observed AUTO-tier demand ~10 KB), and the https build must
-# leave room for BOTH TLS clients' RFC-max record buffers in 256 KB SRAM.
+# SRAM (AUTO) tier size.  BASIC's program arena is the tier's ONLY consumer,
+# and its size is exact, not an estimate:
+#
+#     BASIC_ARENA_BYTES = 148 * TIKU_BASIC_PROGRAM_LINES + 41344
+#
+# (the invariant 41 KB is mostly two fixed reserves -- 16 KB for DIMmed arrays
+# and 16 KB of big buffers -- carried whether a program uses them or not).
+# The tiku_mem.h default is 128 B, so `basic` OOMs at entry without an
+# override.  A _Static_assert in tiku_basic_arena.inl now checks the pool
+# against the request at BUILD time; before v0.06 nothing did, and a short
+# pool produced a clean build that failed on the board.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
-# Threaded HTTPS also carries the worker scheduler state in the same 240 KB
-# application SRAM window.  The Nordic FRAM-tier BASIC profile has measured
-# AUTO-tier demand of only ~10 KB, so keep 20 KB for threaded builds and
-# recover 12 KB of static headroom; non-threaded BASIC retains the original
-# 32 KB arena.  This lets the canonical TikuBench/TikuConsole HTTPS-offload
-# profile link while remaining comfortably above observed BASIC demand.
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-# The LM20's tier arena lives in RAM2 (the upper 256 KB SRAM bank, linker
-# section .ram2) and does not compete with the primary bank's .bss/stack at
-# all -- so give BASIC a roomy arena regardless of threads.  192 KB of the
-# 255 KB usable bank (top 1 KB of RAM2 is unbacked on this silicon).
+# LM20, 1024 lines -> 192,896 B.  Its tier lives in RAM2 (the upper SRAM bank,
+# linker section .ram2) and so does not compete with the primary bank's
+# .bss/stack at all: 192 KB of the 255 KB usable bank (the top 1 KB of RAM2 is
+# unbacked on this silicon).  Threads make no difference here.
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=196608    # 192 KB tier arena in RAM2
-else ifeq ($(TIKU_THREADS_ENABLE),1)
-# BIG-tier 256-line BASIC (2026-07): arena ~40 KB + 16 KB FETCH buffers +
-# string heap; 64 KB holds it beside the worker/TLS state.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=65536     # 64 KB: BIG-256 BASIC + threads
 else
+# L15, 256 lines -> 79,232 B.  One value regardless of TIKU_THREADS_ENABLE:
+# the worker/TLS state threads add is .bss and stack, NOT tier allocations, so
+# shrinking the tier does not pay for it.  The threaded build used to set
+# 65,536 here -- 13.7 KB short of the arena -- from a tally that counted the
+# line table, big buffers and string heap but missed the DIM reserve; `basic`
+# then failed at entry on any threaded L15 image.  96 KB in the single 240 KB
+# application bank still leaves ~56 KB above .bss for the stack, against the
+# linker's 36 KB floor.
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=98304     # 96 KB: BIG-256 BASIC arena
 endif
 endif

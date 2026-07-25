@@ -95,6 +95,46 @@
         BASIC_ARENA_BIGBUF_BYTES +                                          \
         128u))   /* alignment headroom */
 
+/*
+ * THE ARENA MUST FIT ITS TIER POOL -- AT BUILD TIME.
+ *
+ * basic_alloc_state() asks the AUTO tier for BASIC_ARENA_BYTES in one carve.
+ * Two numbers therefore have to agree, and until v0.06 nothing compared them:
+ * this figure, computed from the capacity macros below, and the tier pool size
+ * the Makefile passes per MCU.  When the pool was too small the build stayed
+ * completely clean and the failure appeared only when a user typed `basic` on
+ * the board and got "out of memory" -- which is how
+ * `MCU=nrf54l15 TIKU_THREADS_ENABLE=1` shipped with a 13.7 KB shortfall
+ * (65,536 B pool against a 79,232 B request; the sizing comment beside it had
+ * tallied the line table, big buffers and string heap but omitted the 16 KB
+ * DIM array reserve).
+ *
+ * The arena is the ONLY production consumer of the tier pool -- the other
+ * potential one, tiku_proc_mem, has no callers outside its own module -- so
+ * these asserts are exact today, not merely necessary.  If a second consumer
+ * ever appears, the pool has to cover both and this becomes a lower bound.
+ *
+ * Which pool applies follows AUTO's resolution order (HIFRAM -> SRAM -> NVM,
+ * kernel/memory/tiku_tier.c): on MSP430 the request clears the 1 KB HIFRAM
+ * threshold and lands in the upper FRAM bank; on the ARM parts no HIFRAM tier
+ * exists, so it lands in SRAM.  AUTO's third option, NVM, is deliberately
+ * refused in basic_alloc_state() -- the arena is rewritten on every statement
+ * and a store into MRAM or QSPI flash would fault -- so it is never a
+ * legitimate home and is not asserted against.  Host builds have no
+ * meaningful pool and are left alone.
+ */
+#if defined(PLATFORM_MSP430)
+_Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_HIFRAM_SIZE,
+               "BASIC arena does not fit the HIFRAM tier pool -- raise "
+               "TIKU_TIER_HIFRAM_SIZE or lower TIKU_BASIC_PROGRAM_LINES");
+#elif defined(PLATFORM_NORDIC) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_RP2350)
+_Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_SIZE,
+               "BASIC arena does not fit the SRAM tier pool -- raise "
+               "TIKU_TIER_SRAM_SIZE for this MCU in the Makefile, or lower "
+               "TIKU_BASIC_PROGRAM_LINES");
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* ALLOCATION                                                                */
 /*---------------------------------------------------------------------------*/
