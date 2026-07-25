@@ -32,11 +32,24 @@
 #include "kernel/fs/tiku_nvm_backend.h"
 
 /*
- * Region layout. The NVM memory tier bump-allocates from the FRONT of the
- * region; the top TIKU_NVM_RESERVED_BYTES is held back for durable NAMED data
- * that needs a STABLE location across boots -- the tier never hands this tail
- * out, so a named consumer can own a fixed offset in [size - reserved, size).
+ * Region layout -- THREE extents, in address order, and nothing else:
+ *
+ *     [ tier | file store (/data) | reserved tail ]
+ *      32 KB   absorbs the rest    named durable
+ *
+ * The NVM memory tier bump-allocates from the FRONT of the region; the top
+ * TIKU_NVM_RESERVED_BYTES is held back for durable NAMED data that needs a
+ * STABLE location across boots -- the tier never hands this tail out, so a
+ * named consumer can own a fixed offset in [size - reserved, size).
  * 0 where the tier owns the whole region (no carved tail).
+ *
+ * The file store's extent is DERIVED (region - tier - reserved), not
+ * hand-written, so the three extents always tile the region exactly.  Before
+ * v0.06 the *tier* was the remainder and the FS was a hand-set number; that
+ * put the leftovers in the one extent with no consumers (a live nRF54LM20
+ * measured "tier pool 0 / 692224 peak 0" -- 676 KB idle).  Deriving the FS
+ * instead makes idle space structurally impossible: whatever the code window
+ * frees goes to files, which is the extent that can actually use it.
  *
  * Current tail tenants (kernel/shell/basic): the BASIC saved-program slot at
  * the tail BASE and the BASIC execution-state checkpoint slot at the tail TOP
@@ -82,22 +95,93 @@
 #endif
 
 /*
- * Filesystem (TFS) extent: a fixed slice of the region the /data file store
- * owns, sitting between the tier extent (front) and the reserved tail. Balanced
- * split. 0 where the file store rides its own backing (msp430 FRAM / host).
+ * TIER EXTENT -- one number, every platform.
+ *
+ * 32 KB of region-backed NVM scratch is the PORTABLE CONTRACT: code that asks
+ * the NVM tier for <= 32 KB runs on every TikuOS platform, the same way the
+ * 4 KB RP2350 durable window sets the ceiling for TIKU_DURABLE.  The figure is
+ * set by the smallest member of the family -- MSP430, whose HIFRAM tier has
+ * shipped at 32 KB since the tier was introduced (TIKU_TIER_HIFRAM_SIZE) and
+ * cannot exceed 64 KB at all, because tiku_mem_arch_size_t is 16-bit there.
+ *
+ * What the extent is FOR (it is deliberately small -- see the ledger note in
+ * the layout comment above):
+ *   1. staging scratch for the machinery that manages the region itself --
+ *      TFS shadow slots, the RP2350 multi-sector mirror rebuild, and the
+ *      planned extent-header rewrite;
+ *   2. headroom for a whole module image (32 KB == TIKU_MODULE_CARVE_SIZE), so
+ *      a Tier-3 module arriving over a link could be staged in full before it
+ *      is committed into the module slot.  NOTE: no code does this today --
+ *      module images are compile-time blobs in .rodata and each backend stages
+ *      privately (Nordic/MSP430 store straight through, Ambiq via a 256 B
+ *      buffer, RP2350 via its own 4 KB static).  This is why the size was
+ *      chosen, not a use that exists;
+ *   3. the portable <= 32 KB allocation promise above.
+ * It is NOT a durable heap for applications: an anonymous NVM allocation has
+ * no name and no validity gate, so nothing can recover it after a reset.  Data
+ * that must survive with its identity intact belongs in a FILE (/data) or in a
+ * named TIKU_PERSIST_CELL -- both of which carry the gate discipline the raw
+ * tier cannot.
+ */
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC)
+#define TIKU_NVM_TIER_BYTES  (32u * 1024u)
+#else
+#define TIKU_NVM_TIER_BYTES  0u                /* no carved region */
+#endif
+
+/*
+ * REGION SIZE -- the compile-time mirror of what arch/common/tiku_nvm_layout.ld
+ * carves at link time:
+ *
+ *     region = layout_top - layout_code_cap - layout_module_size
+ *                         - layout_durable_size
+ *
+ * The C side needs this as a constant because the file store's geometry (its
+ * slot count, and on MSP430 its backing array) is fixed at compile time.  Keep
+ * the two in step: if a device script changes one of the four inputs, change
+ * the matching line here.  A mismatch is caught -- `df` prints the region size
+ * the linker actually produced next to this expectation, and both the tier and
+ * the /data mount refuse a region smaller than the three extents need.
+ *
+ *   apollo510  0x800000 - 0x488000 - 0x8000 - 0x10000 = 0x360000  3456 KB
+ *   apollo4l/p 0x200000 - 0x090000 - 0x8000 - 0x10000 = 0x158000  1376 KB
+ *   rp2350     0x400000 - 0x0F8000 - 0x8000 - 0x01000 = 0x2FF000  3068 KB
+ *   lm20       0x1FD000 - 0x0C8000 - 0x8000 - 0x04000 = 0x129000  1188 KB
+ *   l15        0x17D000 - 0x0C8000 - 0x8000 - 0x04000 = 0x0A9000   676 KB
  */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_NVMFS_FS_BYTES  (1536u * 1024u)   /* 1.5 MB */
+#define TIKU_NVM_REGION_BYTES  (3456u * 1024u)
 #elif defined(PLATFORM_AMBIQ)
-#define TIKU_NVMFS_FS_BYTES  (512u * 1024u)    /* 512 KB (apollo4l) */
+#define TIKU_NVM_REGION_BYTES  (1376u * 1024u)
 #elif defined(PLATFORM_RP2350)
-#define TIKU_NVMFS_FS_BYTES  (2816u * 1024u)   /* 2.75 MB (rp2350 Flash FS) */
+#define TIKU_NVM_REGION_BYTES  (3068u * 1024u)
+#elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#define TIKU_NVM_REGION_BYTES  (1188u * 1024u)
 #elif defined(PLATFORM_NORDIC)
-#define TIKU_NVMFS_FS_BYTES  (256u * 1024u)    /* 256 KB RRAM FS extent (the
-                                                * old 16 KB back-half + probe-
-                                                * scratch split is gone: the
-                                                * front is the NVM tier now,
-                                                * Ambiq-parity layout) */
+#define TIKU_NVM_REGION_BYTES  (676u * 1024u)
+#else
+#define TIKU_NVM_REGION_BYTES  0u
+#endif
+
+/*
+ * FILE-STORE (TFS) EXTENT -- the remainder, by construction.
+ *
+ * Sits between the tier extent (front) and the reserved tail.  0 where the
+ * file store rides its own backing (msp430 FRAM / host).  Resulting sizes:
+ *
+ *   apollo510  3456 - 32 - 320 = 3104 KB      lm20  1188 - 32 - 256 =  900 KB
+ *   apollo4l/p 1376 - 32 - 256 = 1088 KB      l15    676 - 32 -  64 =  580 KB
+ *   rp2350     3068 - 32 - 128 = 2908 KB
+ *
+ * TIKU_TFS_MAX_FILES (kernel/fs/tiku_tfs.h) is chosen to FILL its platform's
+ * extent; the pair of static assertions in kernel/vfs/tree/tiku_vfs_tree_data.c
+ * fails the build both if the store overflows the extent and if it leaves more
+ * than one file's worth of it unused.
+ */
+#if TIKU_NVM_REGION_BYTES > 0u
+#define TIKU_NVMFS_FS_BYTES                                                   \
+    (TIKU_NVM_REGION_BYTES - TIKU_NVM_TIER_BYTES - TIKU_NVM_RESERVED_BYTES)
 #else
 #define TIKU_NVMFS_FS_BYTES  0u
 #endif

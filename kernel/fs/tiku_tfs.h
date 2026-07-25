@@ -47,29 +47,60 @@
 #define TIKU_TFS_NAME_MAX   24      /**< max filename length incl. NUL */
 #endif
 #ifndef TIKU_TFS_MAX_FILES
-/* Ambiq backs /data with the carved NVM region's FS extent (megabytes), so the
- * store is roomy there. MSP430 FRAM / host: the smaller default. */
+/*
+ * Slot count, chosen to FILL the platform's FS extent
+ * (TIKU_NVMFS_FS_BYTES, kernel/memory/tiku_nvm_region.h).  Each file costs
+ * one dirent plus one data slot, and the store also carries the superblock
+ * and the +1 shadow slot, so:
+ *
+ *     MAX_FILES = (extent - 8 - SLOT_BYTES - (SECT-1))
+ *                 / (DE_BYTES + SLOT_BYTES)
+ *
+ * with DE_BYTES = 32 and SLOT_BYTES = 4100 (4096 + length word) on
+ * byte/word-writable NVM, 4096 on sector-erased flash.  These are written
+ * out rather than computed here so the store keeps its "depends only on
+ * tiku_nvm_backend.h" property; the two static assertions in
+ * kernel/vfs/tree/tiku_vfs_tree_data.c fail the build if a number here
+ * either overflows its extent or leaves more than one file's worth idle.
+ *
+ *   apollo510  3104 KB extent -> 768   (3 MB of files, exactly)
+ *   apollo4l/p 1088 KB extent -> 268
+ *   rp2350     2908 KB extent -> 720   (fills the extent to the byte)
+ *   lm20        900 KB extent -> 222
+ *   l15         580 KB extent -> 142
+ *   msp430/host   no extent   ->  16   (store sizes its own FRAM array)
+ */
 #  if defined(AM_PART_APOLLO510)
-#    define TIKU_TFS_MAX_FILES  300
+#    define TIKU_TFS_MAX_FILES  768
 #  elif defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_MAX_FILES  100
+#    define TIKU_TFS_MAX_FILES  268
 #  elif defined(PLATFORM_RP2350)
-#    define TIKU_TFS_MAX_FILES  512    /**< 2.75 MB Flash FS extent */
+#    define TIKU_TFS_MAX_FILES  720
+#  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#    define TIKU_TFS_MAX_FILES  222
 #  elif defined(PLATFORM_NORDIC)
-#    define TIKU_TFS_MAX_FILES  448    /**< 256 KB RRAM FS extent, 512 B slots */
+#    define TIKU_TFS_MAX_FILES  142
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif
 #endif
 #ifndef TIKU_TFS_SLOT_DATA
-/* Region-backed parts use a full erase/program granule per file; byte-writable
- * NVM (FRAM / host) uses the smaller default. On RP2350 the slot is sized so
- * that length+content == one 4 KB flash erase sector (see TIKU_TFS_SECT), so a
- * power cut during one file's write cannot reach a neighbor file's sector. */
+/*
+ * Per-file ceiling.  4 KB on every part backed by the carved NVM region --
+ * MRAM, RRAM and Flash alike -- so one number describes the target class.
+ * (Nordic ran at 512 B until v0.06; that was a capacity guess made when the
+ * RRAM FS extent was 256 KB, never a property of the silicon, and it capped
+ * files at an MSP430 figure on a part with megabytes of region.)
+ *
+ * On RP2350 the slot is sized so that length+content == one 4 KB flash erase
+ * sector (see TIKU_TFS_SECT), so a power cut during one file's write cannot
+ * reach a neighbour file's sector.  MSP430 FRAM and host keep 512 B: their
+ * store is a modest in-place FRAM array, not a region extent.
+ */
 #  if defined(PLATFORM_RP2350)
 #    define TIKU_TFS_SLOT_DATA  4092   /**< 4 B length + 4092 = 4096 (one sector) */
-#  elif defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_SLOT_DATA  4096   /**< MRAM: 16 B program granule, no erase */
+#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#    define TIKU_TFS_SLOT_DATA  4096   /**< MRAM/RRAM: no erase granule */
 #  else
 #    define TIKU_TFS_SLOT_DATA  512    /**< max bytes per file */
 #  endif

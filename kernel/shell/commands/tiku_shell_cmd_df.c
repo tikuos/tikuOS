@@ -97,4 +97,26 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
                  "/data", sz, us, av, pc, fl, s.backing);
     SHELL_PRINTF("  %s of file data stored; slot %u B\n",
                  st, (unsigned)s.slot_bytes);
+
+    /* Carved-region breakdown: how the NVM region divides into the tier extent,
+     * this file store, and the reserved durable tail.  "idle" is the point of
+     * printing it -- the three extents are meant to tile the region exactly, so
+     * anything other than 0 means region space is going nowhere (which is what
+     * this layout was reworked to make impossible).  Omitted on parts whose
+     * store rides its own backing array rather than a region. */
+    if (s.region_bytes != 0u) {
+        char rg[12], ti[12], fx[12], rv[12], id[12];
+        df_hsize(rg, sizeof rg, s.region_bytes);
+        df_hsize(ti, sizeof ti, s.tier_bytes);
+        df_hsize(fx, sizeof fx, s.fs_bytes);
+        df_hsize(rv, sizeof rv, s.rsvd_bytes);
+        df_hsize(id, sizeof id, s.idle_bytes);
+        SHELL_PRINTF("  region %s = tier %s + fs %s + reserved %s", rg, ti, fx,
+                     rv);
+        if (s.idle_bytes != 0u) {
+            SHELL_PRINTF(SH_RED " + idle %s" SH_RST "\n", id);
+        } else {
+            SHELL_PRINTF("\n");
+        }
+    }
 }

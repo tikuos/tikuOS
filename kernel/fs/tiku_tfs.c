@@ -9,7 +9,7 @@
  *
  * On-NVM layout:
  *   [ superblock | directory[MAX_FILES] | data[NSLOTS] ]
- *   superblock : magic (4) + version (4)
+ *   superblock : magic (4) + version-and-geometry (4)
  *   dirent     : gate (4) + slot (4) + name[NAME_MAX]   (one per file)
  *   data slot  : length (4) + content[SLOT_DATA]        (NSLOTS = MAX_FILES+1)
  * Content + its length live together in a data slot; the dirent holds the slot
@@ -28,15 +28,42 @@
 /*---------------------------------------------------------------------------*/
 
 #define TFS_MAGIC    0x54465331u   /* "TFS1" -- store is formatted */
-/* Store-format version: bump when the on-NVM layout changes so mount() reformats
- * stale stores. RP2350 = v2 (sector-isolated 4 KB data slots, aligned data
- * region); the unchanged byte/word-writable layout stays v1, so only RP2350
- * reformats on upgrade. */
-#if defined(PLATFORM_RP2350)
-#define TFS_VERSION  2u
-#else
-#define TFS_VERSION  1u
-#endif
+
+/*
+ * Superblock word 1 = format version PLUS the geometry that produced the
+ * on-NVM layout:
+ *
+ *     [31:28] format version   [27:16] MAX_FILES   [15:5] SLOT_BYTES/4
+ *                                                  [4:0]  NAME_MAX
+ *
+ * Every dirent and slot offset is a function of those three numbers, so a
+ * store written with one geometry MUST NOT be parsed with another -- the magic
+ * would still match while every offset had moved, and the mount would either
+ * report corruption or hand back another file's bytes.  Folding the geometry
+ * into the word mount() already compares for equality makes any change to the
+ * capacity table (or a -DTIKU_TFS_SLOT_DATA override) self-migrating: the
+ * store reads as virgin and reformats, with no extra superblock field and no
+ * change to the layout itself.
+ *
+ * It also retires the old per-platform version ladder.  RP2350 needed v2
+ * purely because its slots are sector-sized -- i.e. because its geometry
+ * differed -- which is now simply what the geometry field says.
+ */
+#define TFS_FMT_VERSION  3u        /* on-NVM format revision (4 bits) */
+#define TFS_VERSION                                                           \
+    (((uint32_t)TFS_FMT_VERSION      << 28) |                                 \
+     ((uint32_t)TIKU_TFS_MAX_FILES   << 16) |                                 \
+     (((uint32_t)TIKU_TFS_SLOT_BYTES / 4u) << 5) |                            \
+      (uint32_t)TIKU_TFS_NAME_MAX)
+
+/* Each field must fit its bit range, or distinct geometries could encode to the
+ * same word and a stale store would mount with the wrong offsets.  C89-portable
+ * assertions (this file also builds under -std=c89). */
+typedef char tfs_geom_files_check[(TIKU_TFS_MAX_FILES <= 4095) ? 1 : -1];
+typedef char tfs_geom_slot_check[((TIKU_TFS_SLOT_BYTES / 4u) <= 2047u &&
+                                  (TIKU_TFS_SLOT_BYTES % 4u) == 0u) ? 1 : -1];
+typedef char tfs_geom_name_check[(TIKU_TFS_NAME_MAX <= 31) ? 1 : -1];
+
 #define TFS_GATE     0x4C495645u   /* "LIVE" -- directory entry is in use */
 
 #define TFS_ALIGN4(n)   (((n) + 3u) & ~3u)

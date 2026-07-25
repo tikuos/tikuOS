@@ -48,6 +48,13 @@ typedef struct {
     uint16_t    max_files;   /**< directory slot count                */
     uint16_t    slot_bytes;  /**< per-file content slot size          */
     const char *backing;     /**< "MRAM" / "FRAM" / "RAM*" (volatile) */
+    /* Carved-region accounting, so region space cannot go idle unnoticed.
+     * Zero on parts whose store rides its own backing array (MSP430 / host). */
+    uint32_t    region_bytes;  /**< region the linker actually carved   */
+    uint32_t    tier_bytes;    /**< NVM tier extent (region front)      */
+    uint32_t    fs_bytes;      /**< file-store extent                   */
+    uint32_t    rsvd_bytes;    /**< reserved durable tail               */
+    uint32_t    idle_bytes;    /**< region - (tier+fs+tail): want 0     */
 } tiku_data_df_t;
 
 /**

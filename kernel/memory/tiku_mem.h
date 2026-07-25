@@ -1264,6 +1264,29 @@ uint32_t tiku_mpu_get_last_fault_addr(void);
 #define TIKU_TIER_SRAM_SIZE  128
 #endif
 
+/*
+ * THE 32 KB NVM-TIER CONTRACT
+ *
+ * Every TikuOS platform offers at least 32 KB of NVM-backed tier scratch, so
+ * code that allocates within that budget is portable across the whole family.
+ * Which pool provides it differs, because the memories differ:
+ *
+ *   ARM (Ambiq MRAM / Nordic RRAM / RP2350 Flash)
+ *       TIKU_NVM_TIER_BYTES -- a fixed 32 KB extent at the front of the carved
+ *       region (kernel/memory/tiku_nvm_region.h).
+ *   MSP430 (unified FRAM)
+ *       TIKU_TIER_HIFRAM_SIZE below -- 32 KB of the upper FRAM bank, which is
+ *       where the figure originally came from and why it is 32 KB and not 64:
+ *       tiku_mem_arch_size_t is 16-bit here, so no MSP430 tier can exceed
+ *       64 KB, and 32 KB is the largest size proven on both public parts.
+ *
+ * TIKU_TIER_NVM_SIZE below is deliberately NOT raised to 32 KB on MSP430: it
+ * backs a .persistent array in LOWER FRAM, which is the code estate on a part
+ * whose 16-bit window is only ~48 KB.  It stays a small pool for durable
+ * scalars; HIFRAM is where MSP430 meets the contract.  On ARM the macro is
+ * unused (the region supplies the tier).
+ */
+
 /** Size of the NVM tier backing pool in bytes. Override at compile time. */
 #ifndef TIKU_TIER_NVM_SIZE
 #define TIKU_TIER_NVM_SIZE   1024

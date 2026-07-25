@@ -264,14 +264,19 @@ static void tier_wire_all(void)
          * RRAM): read in place, written via the backend (tiku_tier_nvm_write).
          * NULL until the board's region backend exists. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
-        /* The tier bump-allocates from the front; the top
-         * TIKU_NVM_RESERVED_BYTES is reserved for durable named data (BASIC
-         * save, FS) and never handed out. */
+        /* The tier owns a FIXED extent at the front of the region -- 32 KB on
+         * every platform (TIKU_NVM_TIER_BYTES, the portable allocation
+         * contract).  It used to take whatever the file store and the reserved
+         * tail left over, which is how 676 KB ended up parked in the one
+         * extent with no consumers; the file store absorbs the remainder now.
+         * The tail (TIKU_NVM_RESERVED_BYTES) holds durable named data (the
+         * BASIC save + checkpoint slots) and is never handed out. */
         if (rgn != NULL && rgn->base != NULL &&
-            rgn->size > (size_t)TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
+            rgn->size >= (size_t)TIKU_NVM_TIER_BYTES +
+                         TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
-            tier_state[TIKU_MEM_NVM].capacity = (tiku_mem_arch_size_t)
-                (rgn->size - TIKU_NVMFS_FS_BYTES - TIKU_NVM_RESERVED_BYTES);
+            tier_state[TIKU_MEM_NVM].capacity =
+                (tiku_mem_arch_size_t)TIKU_NVM_TIER_BYTES;
         } else {
             tier_state[TIKU_MEM_NVM].buf      = NULL;
             tier_state[TIKU_MEM_NVM].capacity = 0u;

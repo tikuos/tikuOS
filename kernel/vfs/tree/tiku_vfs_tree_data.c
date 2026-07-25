@@ -63,8 +63,22 @@
  * Other parts: plain `.bss` (volatile) until a backend lands. */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || defined(PLATFORM_NORDIC)
 
+/*
+ * The store must FIT its extent -- and FILL it.  The fit check is obvious; the
+ * fill check is the one that matters, because an under-provisioned
+ * TIKU_TFS_MAX_FILES wastes region space silently, which is precisely the bug
+ * the v0.06 layout rework set out to remove.  The tolerance is one file's cost
+ * (dirent + slot) plus one alignment granule: file counts are integers and the
+ * data region is sector-aligned, so that much is unavoidable, and anything
+ * beyond it means the capacity table in tiku_tfs.h has fallen behind its
+ * extent.  Raise TIKU_TFS_MAX_FILES until this passes.
+ */
 _Static_assert(TIKU_TFS_REGION_BYTES <= TIKU_NVMFS_FS_BYTES,
                "TFS store larger than the region FS extent");
+_Static_assert((TIKU_NVMFS_FS_BYTES - TIKU_TFS_REGION_BYTES) <
+                   TIKU_TFS_DE_BYTES + TIKU_TFS_SLOT_BYTES + TIKU_TFS_SECT,
+               "TFS leaves a file's worth of the FS extent unused -- "
+               "raise TIKU_TFS_MAX_FILES for this platform");
 
 static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
@@ -99,10 +113,15 @@ data_tfs_ensure(void)
     }
     rgn = tiku_nvm_backend_get();
     if (rgn == NULL || rgn->base == NULL ||
-        rgn->size < (size_t)TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
+        rgn->size < (size_t)TIKU_NVM_TIER_BYTES +
+                    TIKU_NVMFS_FS_BYTES + TIKU_NVM_RESERVED_BYTES) {
         return -1;
     }
-    /* FS extent: between the tier extent (front) and the reserved tail. */
+    /* FS extent: between the tier extent (front) and the reserved tail, and
+     * anchored to the TAIL rather than to the tier, so the store stays adjacent
+     * to the reserved slots that tiku_basic_persist.inl locates the same way.
+     * On a correctly sized region the two anchors coincide -- the three extents
+     * tile it exactly (see tiku_nvm_region.h). */
     data_be.base  = rgn->base +
         (rgn->size - TIKU_NVMFS_FS_BYTES - TIKU_NVM_RESERVED_BYTES);
     data_be.size  = TIKU_NVMFS_FS_BYTES;
@@ -114,6 +133,33 @@ data_tfs_ensure(void)
     }
     data_fs_ready = 1;
     return 0;
+}
+
+/**
+ * @brief Report how the carved region is divided, for `df`.
+ *
+ * The three extents are compile-time constants; the region size is whatever
+ * the linker carved.  Publishing both, plus the difference, is what keeps the
+ * split honest at run time: `idle_bytes` is the number that was quietly 676 KB
+ * on the nRF54LM20 before v0.06, and it must read 0.  A non-zero value means
+ * TIKU_NVM_REGION_BYTES has fallen out of step with the device linker script.
+ *
+ * @param out  Snapshot to fill in (extent fields only).
+ */
+static void
+data_fill_extents(tiku_data_df_t *out)
+{
+    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+    const uint32_t accounted = (uint32_t)TIKU_NVM_TIER_BYTES +
+                               (uint32_t)TIKU_NVMFS_FS_BYTES +
+                               (uint32_t)TIKU_NVM_RESERVED_BYTES;
+
+    out->region_bytes = (rgn != NULL) ? (uint32_t)rgn->size : 0u;
+    out->tier_bytes   = (uint32_t)TIKU_NVM_TIER_BYTES;
+    out->fs_bytes     = (uint32_t)TIKU_NVMFS_FS_BYTES;
+    out->rsvd_bytes   = (uint32_t)TIKU_NVM_RESERVED_BYTES;
+    out->idle_bytes   = (out->region_bytes > accounted)
+                        ? (out->region_bytes - accounted) : 0u;
 }
 
 #else  /* MSP430 FRAM / host: a static backing array */
@@ -175,6 +221,25 @@ data_tfs_ensure(void)
     }
     data_fs_ready = 1;
     return 0;
+}
+
+/**
+ * @brief Report the store's extent, for `df` (no carved region here).
+ *
+ * MSP430 and host builds size the backing array FROM the store's geometry, so
+ * the extent always fits exactly and there is no region to divide -- reporting
+ * a zero region tells `df` to omit the region breakdown entirely.
+ *
+ * @param out  Snapshot to fill in (extent fields only).
+ */
+static void
+data_fill_extents(tiku_data_df_t *out)
+{
+    out->region_bytes = 0u;
+    out->tier_bytes   = 0u;
+    out->fs_bytes     = (uint32_t)sizeof data_tfs_region;
+    out->rsvd_bytes   = 0u;
+    out->idle_bytes   = 0u;
 }
 
 #endif
@@ -404,6 +469,7 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
      * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash).  This used to be a
      * per-platform ladder here, which is exactly how a second copy drifts. */
     out->backing = TIKU_DEVICE_NVM_LABEL;
+    data_fill_extents(out);
     return 0;
 }
 
