@@ -55,7 +55,9 @@ extern uint32_t __sram_start;     /* DTCM base   */
 extern uint32_t __sram_end;       /* DTCM top (= __stack) */
 extern uint32_t __flash_start;    /* MRAM code window base */
 extern uint32_t __flash_end;      /* MRAM code window end (below the NVM mirror) */
-extern uint32_t __tiku_module_slot; /* Tier-3 module slot (4 KB above the code window) */
+extern uint32_t __tiku_module_slot;      /* Tier-3 module slot base       */
+extern uint32_t __tiku_module_slot_size; /* ABSOLUTE: its ADDRESS is the  */
+                                         /* slot size (linker convention) */
 
 /**
  * @defgroup MPU_SSRAM_MAP Shared SRAM region constants
@@ -146,9 +148,13 @@ static volatile struct tiku_mpu_diag mpu_diag;
 #define MPU_REGION_MODULE      7U
 /** @} */
 
-/** Size of the Tier-3 module slot; matches __tiku_module_slot_size and
- *  TIKU_MODULE_CARVE_SIZE (tiku_basic_module.h). */
-#define TIKU_MPU_MODULE_SLOT_BYTES  0x1000U
+/* Size of the Tier-3 module slot, taken FROM THE LINKER rather than
+ * duplicated: __tiku_module_slot_size is an absolute symbol whose ADDRESS
+ * is the size, so this can never drift from the carve again (it did: it
+ * sat at 4 KB after the slot grew to 32 KB, leaving 28 KB of the slot
+ * outside the MPU region and covered only by PRIVDEFENA's default map). */
+#define TIKU_MPU_MODULE_SLOT_BYTES \
+    ((uint32_t)(uintptr_t)&__tiku_module_slot_size)
 
 /**
  * @defgroup MPU_STACK_GUARD Stack guard sizing constants
@@ -360,8 +366,8 @@ void tiku_mpu_arch_init_segments(void) {
                    AMBIQ_SSRAM_BASE,
                    AMBIQ_SSRAM_BASE + AMBIQ_SSRAM_SIZE - 1U,
                    0U, 1U);                                     /* region 6 */
-        /* Tier-3 loadable-module slot: the 4 KB of MRAM directly above the
-         * code window (apollo510.ld __tiku_module_slot). RO + executable --
+        /* Tier-3 loadable-module slot: the MRAM directly above the code
+         * window (32 KB; apollo510.ld __tiku_module_slot). RO + executable --
          * the module runs XIP from here; the CPU never stores to it (installs
          * go through the bootrom programmer, which is not gated by the MPU).
          * Defense-in-depth: PRIVDEFENA would already allow privileged RX. */
