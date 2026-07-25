@@ -63,23 +63,29 @@
  * kernel/vfs/tree/tiku_vfs_tree_data.c fail the build if a number here
  * either overflows its extent or leaves more than one file's worth idle.
  *
- *   apollo510  3104 KB extent -> 768   (3 MB of files, exactly)
- *   apollo4l/p 1088 KB extent -> 268
- *   rp2350     2908 KB extent -> 720   (fills the extent to the byte)
- *   lm20        900 KB extent -> 222
- *   l15         580 KB extent -> 142
+ *   apollo510  3456 KB extent -> 855   (1,976 B idle)
+ *   apollo4l/p 1344 KB extent -> 332   (  324 B idle)
+ *   rp2350     3036 KB extent -> 752   (fills the extent to the byte)
+ *   lm20       1156 KB extent -> 285   (2,016 B idle)
+ *   l15         644 KB extent -> 158   (2,492 B idle)
  *   msp430/host   no extent   ->  16   (store sizes its own FRAM array)
+ *
+ * These grew in v0.06 when the reserved durable tail was deleted and its bytes
+ * became file store (and on apollo510 the 32 KB module slot too).  Changing any
+ * of them CHANGES /data's on-media geometry: the superblock records the counts,
+ * so an old store fails to mount and the board reformats -- data loss by
+ * design, not by accident.  Land such changes together.
  */
 #  if defined(AM_PART_APOLLO510)
-#    define TIKU_TFS_MAX_FILES  768
+#    define TIKU_TFS_MAX_FILES  855
 #  elif defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_MAX_FILES  268
+#    define TIKU_TFS_MAX_FILES  332
 #  elif defined(PLATFORM_RP2350)
-#    define TIKU_TFS_MAX_FILES  720
+#    define TIKU_TFS_MAX_FILES  752
 #  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#    define TIKU_TFS_MAX_FILES  222
+#    define TIKU_TFS_MAX_FILES  285
 #  elif defined(PLATFORM_NORDIC)
-#    define TIKU_TFS_MAX_FILES  142
+#    define TIKU_TFS_MAX_FILES  158
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif

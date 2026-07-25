@@ -47,10 +47,9 @@
  *     family-portable.  SRAM is W^X (execute-never), so a module MUST run
  *     from RRAM -- which is byte-writable, so install is a store loop
  *     behind the WEN gate.
- *   apollo510/510b:     MRAM at the top of the (shrunk) code window.  MRAM is
- *     executable but NOT CPU-writable -- install goes through the bootrom
- *     programmer (tiku_nvm_mram_program), and the M55's I-cache is
- *     invalidated before the first XIP call.
+ *   apollo510/510b:     NO NVM slot -- the image is copied into the ITCM and
+ *     run from there (TIKU_MODULE_EXEC_ADDR).  This is the one part where a RAM
+ *     execution window has been measured, so it is the one part that uses one.
  *   apollo4l/4p:        same MRAM personality as apollo510 (bootrom-programmed,
  *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
  *     0x18000-based code window.  The unified CACHECTRL cache is flushed
@@ -65,7 +64,12 @@
  *     place (behind the MPU unlock window) and natively executable (the
  *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_MODULE_CARVE_ADDR  0x488000u
+/* DELIBERATELY UNDEFINED on this part: there is no NVM carve (the module
+ * executes from the ITCM -- see TIKU_MODULE_EXEC_ADDR below), and the address
+ * this used to hold, 0x488000, is the NVM REGION BASE now that the slot is
+ * gone -- which is to say the NVM tier.  A stale reference would program over
+ * live tier data, so leaving it undefined turns that mistake into a compile
+ * error instead. */
 #elif defined(AM_PART_APOLLO4L)
 #define TIKU_MODULE_CARVE_ADDR  0x90000u
 #elif defined(PLATFORM_RP2350)

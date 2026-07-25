@@ -221,10 +221,11 @@ tiku_basic_module_load(void)
      */
     (void)src;
     return tiku_basic_module_activate();   /* same contract as every backend */
-#elif defined(AM_PART_APOLLO510) || defined(AM_PART_APOLLO4L)
-    /* MRAM install via the bootrom programmer (apollo510/510b and apollo4l/4p
-     * share the mechanism; each backend supplies its own tiku_nvm_mram_program
-     * with the part's bootrom entry and geometry).  Three-phase so a power cut
+#elif defined(AM_PART_APOLLO4L)
+    /* MRAM install via the bootrom programmer (apollo4l/4p).  apollo510 shared
+     * this path until its image moved to the ITCM above; the backends are still
+     * interchangeable -- each supplies its own tiku_nvm_mram_program with the
+     * part's bootrom entry and geometry.  Three-phase so a power cut
      * at ANY point -- including during a REinstall over a resident module --
      * leaves an invalid gate, never a valid header over a torn body:
      *   1. invalidate the gate  (program a zeroed 16-byte header)

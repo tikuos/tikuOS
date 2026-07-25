@@ -185,8 +185,8 @@
  * CHECKPOINT SLOT -- an ordinary /data file, not a carve.
  *
  * This was the reserved tail's SECOND tenant, at a fixed offset below its top.
- * With it gone the tail has no tenants left and TIKU_NVM_RESERVED_BYTES can be
- * deleted (P3g), which is what finally stops a core memory header from being
+ * With it and prog.bas moved out, the tail had no tenants and was deleted
+ * outright -- which is what finally stopped a core memory header from being
  * sized by a shell feature's line capacity.
  *
  * Named flat, like prog.bas: /data carries a static VFS node called "basic",

@@ -79,9 +79,9 @@ __tiku_nvm_flash_offset = __tiku_layout_durable_start - ORIGIN(FLASH);
 /* Carved NVM region (substrate B): a ~3 MB slice of QSPI flash just below the
  * 4 KB .uninit backup sector, owned by the /data file store + NVM tier via the
  * Flash region backend (arch/arm-rp2350/tiku_nvm_region_rp2350.c).  Sub-layout
- * (front->top): NVM tier extent (~124 KB, durable TIKU_MEM_NVM) | /data FS
- * extent (TIKU_NVMFS_FS_BYTES, 2.75 MB) | reserved tail (TIKU_NVM_RESERVED_BYTES,
- * 128 KB durable named data).  4 KB-sector aligned (the flash erase granule).
+ * (front->top): NVM tier extent (32 KB, durable TIKU_MEM_NVM) | /data FS
+ * extent (all the rest, TIKU_NVMFS_FS_BYTES -- durable named data lives in it
+ * as files, not in a carved tail).  4 KB-sector aligned (the erase granule).
  * Code grows up from ORIGIN(FLASH) into the remaining 1 MB; an ASSERT in
  * SECTIONS guards the flash image against overrunning it.
  *   __tiku_nvmfs_base   : XIP address (read in place by pointer); == 0x10100000

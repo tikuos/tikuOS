@@ -66,9 +66,9 @@ static void process_line(const char *raw);
  * both objects can be checked against the STORE together
  * (TIKU_TFS_SPAN_FOR-based, in tiku_basic_ckpt.inl).
  *
- * With no tenants, TIKU_NVM_RESERVED_BYTES itself can go (P3g) -- which is the
- * point of the exercise: a core memory header should never have been sized by
- * a shell feature's line capacity.
+ * With no tenants, the tail itself was deleted -- which was the point of the
+ * exercise: a core memory header should never have been sized by a shell
+ * feature's line capacity.  Its bytes are file store now.
  */
 
 /*

@@ -106,9 +106,9 @@ __tiku_nvm_rram_start = __tiku_layout_durable_start;
 __tiku_nvm_rram_end   = __tiku_layout_top;
 
 /* Carved NVM region (the tiku_nvm_region backend), Ambiq-style layout:
- * NVM tier at the front | TFS FS extent (256 KB, TIKU_NVMFS_FS_BYTES) |
- * reserved named-slot tail (256 KB, TIKU_NVM_RESERVED_BYTES: BASIC saved
- * program + F1 run-state checkpoint).  A byte-writable RRAM span just BELOW
+ * NVM tier at the front (32 KB) | TFS FS extent (all the rest,
+ * TIKU_NVMFS_FS_BYTES -- BASIC's saved program and run-state checkpoint are
+ * files in it, not a carved tail).  A byte-writable RRAM span just BELOW
  * the durable-persist region; written in place behind the WEN gate (no
  * erase).  The 992 KB code window ends at the module slot (Axon-enabled
  * images are the big ones; the ASSERT at the bottom is the hard cap).
