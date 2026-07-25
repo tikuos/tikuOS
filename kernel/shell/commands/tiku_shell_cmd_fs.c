@@ -165,6 +165,25 @@ tiku_shell_cmd_recv(uint8_t argc, const char *argv[])
     }
     tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
 
+    /* Drain the command line's leftover terminator BEFORE announcing readiness.
+     * The line editor stops at the first CR or LF, so a host that ends the
+     * command with CRLF leaves the other half sitting in the RX buffer -- and
+     * the raw loop below would take it as payload byte 0, shifting the whole
+     * file by one and pushing the real last byte out to the prompt as a stray
+     * command.  It corrupts silently: the byte count still reaches N, so the
+     * transfer reports success.  Draining here is safe because the protocol has
+     * the host wait for the ready line, so nothing buffered at this instant can
+     * be payload; only CR and LF are consumed, never a data byte. */
+    while (tiku_shell_io_rx_ready()) {
+        int c = tiku_shell_io_getc();
+        if (c != '\r' && c != '\n') {
+            if (c >= 0) {
+                fs_xfer_buf[got++] = (uint8_t)c;   /* early byte: keep it */
+            }
+            break;
+        }
+    }
+
     /* Handshake: the host waits for this line, then streams exactly N bytes. */
     SHELL_PRINTF("recv: ready %u\n", (unsigned)n);
     while (got < n) {
