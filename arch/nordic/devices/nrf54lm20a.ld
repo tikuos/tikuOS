@@ -74,7 +74,29 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x0F8000;                      /* 992 KB code */
+__tiku_layout_code_cap     = 0x0C8000;                      /* 800 KB code */
+/* Shared Nordic code budget: 800 KB on BOTH parts, so "does this firmware
+ * fit" has ONE answer for the family and the module slot lands at the same
+ * address on each (one module image serves both).
+ *
+ * 800 KB is sized by the LARGEST real image, which is an Axon one -- compiled
+ * model weights and KAT test vectors are const arrays, i.e. .rodata, i.e. they
+ * live in THIS window (measured 2026-07-25, nrf54lm20b, -Os):
+ *
+ *   shell + BASIC, no Axon .............................  129 KB   (16%)
+ *   + Axon driver, model gc-dropped ....................  132 KB   (17%)
+ *   + tinyml_kws  weights 25 KB + vectors  72 KB .......  ~230 KB  (29%)
+ *   + tinyml_ad   weights 260 KB + vectors   5 KB ......  ~400 KB  (50%)
+ *   + tinyml_vww  weights 203 KB + vectors 307 KB ......  701 KB   (88%)  <-- cap driver
+ *
+ * So the window is ~88% full in the worst case, NOT mostly empty: do not
+ * shrink it below ~768 KB without re-measuring the vww KAT build
+ * (MCU=nrf54lm20b TIKU_AXON_ENABLE=1 TIKU_AXON_MODEL=tinyml_vww
+ *  EXTRA_CFLAGS=-DTIKU_SHELL_CMD_AXONSPROBE=1 -- the KAT must be REFERENCED
+ *  or --gc-sections silently drops the whole model and the image looks tiny).
+ * The L15 has no NPU, so it only ever needs ~140 KB; it carries the same cap
+ * for family consistency, and the address space it gives up was idle anyway
+ * (the freed NVM goes to the durable tier, which currently has no consumer). */
 __tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
 __tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
 INCLUDE arch/common/tiku_nvm_layout.ld

@@ -67,7 +67,10 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x0B8000;                      /* 736 KB code */
+__tiku_layout_code_cap     = 0x0C8000;                      /* 800 KB code */
+/* 800 KB is the shared Nordic budget; it is sized by the LM20's Axon KAT
+ * image (701 KB) -- see the table in nrf54lm20a.ld before changing it.
+ * The L15 has no NPU and needs only ~140 KB. */
 __tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
 __tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
 INCLUDE arch/common/tiku_nvm_layout.ld

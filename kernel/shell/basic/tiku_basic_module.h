@@ -42,9 +42,11 @@
  * The module is linked at this VMA; the loader installs the image here and
  * runs it XIP (durable in place -- it survives reboot and power loss).
  *
- *   nordic (nRF54LM20): RRAM just below the durable-persist region.  SRAM is
- *     W^X (execute-never), so a module MUST run from RRAM -- which is byte-
- *     writable, so install is a store loop behind the WEN gate.
+ *   nordic (nRF54L15 + nRF54LM20): RRAM at the top of the shared 800 KB code
+ *     window -- the SAME address on both parts, so one module image is
+ *     family-portable.  SRAM is W^X (execute-never), so a module MUST run
+ *     from RRAM -- which is byte-writable, so install is a store loop
+ *     behind the WEN gate.
  *   apollo510/510b:     MRAM at the top of the (shrunk) code window.  MRAM is
  *     executable but NOT CPU-writable -- install goes through the bootrom
  *     programmer (tiku_nvm_mram_program), and the M55's I-cache is
@@ -78,11 +80,11 @@
 #elif defined(TIKU_DEVICE_MSP430FR6989) || defined(__MSP430FR6989__)
 #define TIKU_MODULE_CARVE_ADDR  0x23000u
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
-#elif defined(TIKU_DEVICE_NRF54L15)
-/* RRAM slot at the top of the code window, canonical order. */
-#define TIKU_MODULE_CARVE_ADDR  0x0B8000u
-#else                                    /* nordic nRF54LM20 RRAM slot */
-#define TIKU_MODULE_CARVE_ADDR  0x0F8000u
+#else
+/* Nordic (nRF54L15 and nRF54LM20 alike): RRAM slot at the top of the
+ * shared 800 KB code window.  Both parts use the SAME slot address, so
+ * one module image is binary-compatible across the Nordic family. */
+#define TIKU_MODULE_CARVE_ADDR  0x0C8000u
 #endif
 #ifndef TIKU_MODULE_CARVE_SIZE
 #define TIKU_MODULE_CARVE_SIZE  0x8000u

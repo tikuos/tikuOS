@@ -1656,8 +1656,8 @@ endif
 # at the executable NVM slot VMA, flatten to a blob, and wrap it as an ARM
 # object embedded in the firmware (the "bytes that arrive over the air").
 # Per-DEVICE: the slot address, install mechanism and CPU differ --
-#   nrf54lm20a/b:         RRAM slot 0x0F8000,  Cortex-M33 (byte-writable XIP)
-#   nrf54l15:             RRAM slot 0x0B8000,  Cortex-M33 (byte-writable XIP)
+#   nrf54lm20a/b + nrf54l15: RRAM slot 0x0C8000, Cortex-M33 (byte-writable
+#                         XIP) -- ONE address for the whole Nordic family
 #   apollo510/apollo510b: MRAM slot 0x488000,  Cortex-M55 (bootrom-programmed)
 #   apollo4l/apollo4p:    MRAM slot 0x90000,   Cortex-M4  (bootrom-programmed)
 #   rp2350:               flash slot 0x100F8000, Cortex-M33 (boot-ROM sectors)
@@ -1680,8 +1680,10 @@ ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
 MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
 else ifeq ($(MCU),nrf54l15)
+# Same slot VMA as the LM20 (shared 800 KB Nordic code window), so the LM20
+# module script serves both parts and a module image is family-portable.
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DTIKU_DEVICE_NRF54L15
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_nrf54l15.ld
+MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
 else ifeq ($(MCU),rp2350)
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DPLATFORM_RP2350
 MOD_LDS        = kernel/shell/basic/modules/mod_demo_rp2350.ld
@@ -2411,6 +2413,18 @@ endif # MINIMAL=1 / else
 # by build.mk fragments (e.g. firmware-blob .incbin wrappers); same
 # CFLAGS as C, since the toolchain treats .S as preprocessed-and-then-
 # assembled and we only need the include-path / -D macros.
+# Deduplicate SRCS before deriving objects.  Several blocks legitimately
+# claim the same kit: the Nordic BLE-SMP block needs tikukits/crypto/p256
+# for LE Secure Connections, and the crypto-kit block adds it again, so
+# `MCU=nrf54l15 TIKU_KIT_CRYPTO_ENABLE=1` used to put the same object in
+# the link twice and fail with "multiple definition of
+# tiku_kits_crypto_p256_*".  $(sort) both sorts and removes duplicates;
+# link order of explicit objects does not affect symbol resolution (the
+# libraries come later, inside --start-group), and every section is placed
+# by pattern in the linker scripts rather than by object order.
+SRCS := $(sort $(SRCS))
+ASM_SRCS := $(sort $(ASM_SRCS))
+
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS)) \
        $(patsubst %.S,$(BUILD_DIR)/%.o,$(ASM_SRCS))
 

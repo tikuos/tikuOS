@@ -15,9 +15,11 @@
 
 MEMORY
 {
-    /* Executable RRAM slot (nordic W^X forbids SRAM execution).  Kept in sync
+    /* Executable RRAM slot at the top of the shared 800 KB Nordic code
+     * window -- SAME address on nRF54L15 and nRF54LM20, so one module image
+     * serves both (nordic W^X forbids SRAM execution).  Kept in sync
      * with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */
-    CARVE (rx) : ORIGIN = 0x0F8000, LENGTH = 0x8000   /* 32 KB */
+    CARVE (rx) : ORIGIN = 0x0C8000, LENGTH = 0x8000   /* 32 KB */
 }
 
 ENTRY(module_init)
