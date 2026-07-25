@@ -9,18 +9,213 @@
  *
  * NOT a standalone translation unit.  Included from tiku_basic.c.
  *
- * The default unnamed SAVE / LOAD use the BASIC_PERSIST_KEY slot in
- * the persist store (see tiku_basic_persist.inl).  Named slots live
- * in a fixed-size FRAM-backed array indexed by an 8-char name, with
- * DIR listing what's currently saved.  Each slot is
- * TIKU_BASIC_NAMED_SLOT_BYTES wide; the count is bounded by
- * TIKU_BASIC_NAMED_SLOTS.  All four functions compile to nothing
- * when TIKU_BASIC_NAMED_SLOTS is 0.
+ * The default unnamed SAVE / LOAD keep the program in the reserved NVM-region
+ * tail, or in the persist store on MSP430 (see tiku_basic_persist.inl).  Named
+ * saves have two backends:
+ *
+ *   region-backed parts -- ordinary /data FILES, "/data/<name>.bas".  Durable,
+ *       4 KB each, as many as the file store has room for, and visible to the
+ *       shell.  DIR lists /data children with the .bas suffix.
+ *   MSP430 / host      -- the original fixed array of TIKU_BASIC_NAMED_SLOTS
+ *       slots, each TIKU_BASIC_NAMED_SLOT_BYTES wide, in durable FRAM.
+ *
+ * Everything here compiles to nothing when TIKU_BASIC_NAMED_SLOTS is 0.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_NAMED_SLOTS > 0
+#if BASIC_NVM_ON_REGION
+/*
+ * NAMED PROGRAMS ARE ORDINARY /data FILES: "/data/<name>.bas".
+ *
+ * They used to be a fixed array of slots carrying BASIC_NVM_PERSISTENT, which
+ * is TIKU_DURABLE only on MSP430 -- .ssram on Ambiq (zeroed at boot, like .bss)
+ * and EMPTY everywhere else.  So on Nordic, RP2350 and Ambiq, `SAVE "name"` was
+ * silently lost across a reset while the header above documented the slots as
+ * "FRAM-backed", and unlike the default slot they had no region-tail fallback.
+ * The array also cost 6,180 B of always-resident RAM and capped a named program
+ * at TIKU_BASIC_NAMED_SLOT_BYTES (2,048), which a BIG-tier program exceeds
+ * after about thirteen lines -- even though the comment beside that constant
+ * says the slot scales with program size.  It does not; the two knobs move
+ * independently.
+ *
+ * Riding the file store fixes all of it at once: durable on every platform for
+ * free, 4 KB per program, and as many programs as /data has room for (222 on the
+ * LM20, not 3).  They also stop being invisible -- `ls /data`,
+ * `cat /data/foo.bas`, and `send` to copy one off the board.
+ *
+ * MSP430 keeps the slot array below: its /data files are 512 B, SMALLER than the
+ * slot it has today, and its slots are genuinely durable already.
+ */
+#define BASIC_NAMED_SUFFIX    ".bas"
+/* Keeps "<name>.bas" comfortably inside the file store's name field. */
+#define BASIC_NAMED_NAME_MAX  16u
+
+/**
+ * @brief Build "/data/<name>.bas", reporting the reason on failure.
+ * @return 0 on success, -1 if the name is empty, too long, or will not fit.
+ */
+static int
+basic_named_path(char *out, size_t cap, const char *name)
+{
+    int n;
+
+    if (name == NULL || name[0] == '\0') {
+        basic_report(TIKU_BASIC_ERR_SYNTAX, "named save/load: empty name");
+        return -1;
+    }
+    if (strlen(name) > BASIC_NAMED_NAME_MAX) {
+        basic_report(TIKU_BASIC_ERR_SYNTAX, "named save/load: name too long");
+        return -1;
+    }
+    n = snprintf(out, cap, "/data/%s%s", name, BASIC_NAMED_SUFFIX);
+    return (n > 0 && (size_t)n < cap) ? 0 : -1;
+}
+
+static int
+basic_save_to_named(const char *name)
+{
+    char         path[48];
+    /* The 4 KB serialization scratch is exactly one /data file, and named SAVE
+     * is a single interactive command -- never concurrent with the unnamed
+     * SAVE/LOAD that shares it. */
+    char *const  tmp = basic_persist_scratch;
+    const size_t cap = sizeof basic_persist_scratch;
+    size_t       pos = 0;
+    uint16_t     cur = 0;
+    int          full = 0;
+
+    if (basic_named_path(path, sizeof path, name) != 0) {
+        return -1;
+    }
+    for (;;) {
+        int idx = prog_next_index(cur);
+        int n;
+
+        if (idx < 0) {
+            break;
+        }
+        /* Number + detokenized body: the stored format stays plain text (A2). */
+        n = snprintf(tmp + pos, cap - pos, "%u ", (unsigned)prog[idx].number);
+        if (n < 0 || (size_t)n >= cap - pos) {
+            full = 1;
+            break;
+        }
+        pos += (size_t)n;
+        n = basic_detok(tmp + pos, cap - pos, prog[idx].text);
+        if (n < 0 || (size_t)n + 2u > cap - pos) {
+            full = 1;
+            break;
+        }
+        pos += (size_t)n;
+        tmp[pos++] = '\n';
+        if (prog[idx].number == 0xFFFFu) {
+            break;
+        }
+        cur = (uint16_t)(prog[idx].number + 1);
+    }
+    if (full) {
+        basic_report(TIKU_BASIC_ERR_IO,
+                     "named save: program too large for one file");
+        return -1;
+    }
+    if (tiku_vfs_write(path, tmp, pos) < 0) {
+        basic_reportf(TIKU_BASIC_ERR_IO, "named save: cannot write '%s'", path);
+        return -1;
+    }
+    SHELL_PRINTF(SH_GREEN "saved %u bytes" SH_RST " to '"
+                 SH_BOLD "%s" SH_RST "'\n", (unsigned)pos, name);
+    return 0;
+}
+
+static int
+basic_load_from_named(const char *name)
+{
+    char         path[48];
+    char *const  tmp = basic_persist_scratch;
+    const size_t cap = sizeof basic_persist_scratch;
+    int          rd;
+    size_t       got, i, ls = 0;
+
+    if (basic_named_path(path, sizeof path, name) != 0) {
+        return -1;
+    }
+    rd = tiku_vfs_read(path, tmp, cap - 1u);
+    if (rd < 0) {
+        basic_reportf(TIKU_BASIC_ERR_SYNTAX, "'%s' not found", name);
+        return -1;
+    }
+    /* /data reports the file's TRUE length, which can exceed what it copied --
+     * clamp before walking, or an over-long file would read past the buffer. */
+    got = ((size_t)rd < cap - 1u) ? (size_t)rd : cap - 1u;
+    if (got == 0u) {
+        basic_reportf(TIKU_BASIC_ERR_IO, "'%s' is empty", name);
+        return -1;
+    }
+
+    prog_clear();
+    basic_clear_vars();
+
+    /* Dispatch through the dedicated line buffer, not the scratch we are
+     * walking: process_line() can reach commands that use the scratch. */
+    for (i = 0; i <= got; i++) {
+        char c = (i < got) ? tmp[i] : '\n';
+
+        if (c != '\n' && c != '\r') {
+            continue;
+        }
+        if (i > ls && (i - ls) < sizeof basic_load_line) {
+            memcpy(basic_load_line, tmp + ls, i - ls);
+            basic_load_line[i - ls] = '\0';
+            process_line(basic_load_line);
+        }
+        ls = i + 1;
+    }
+    SHELL_PRINTF(SH_GREEN "loaded %u bytes" SH_RST " from '"
+                 SH_BOLD "%s" SH_RST "'\n", (unsigned)got, name);
+    return 0;
+}
+
+/**
+ * @brief Per-entry callback for DIR: print /data children ending in ".bas".
+ */
+static void
+basic_named_dir_cb(const tiku_vfs_node_t *node, void *vctx)
+{
+    const size_t sfx = sizeof(BASIC_NAMED_SUFFIX) - 1u;
+    char         nm[BASIC_NAMED_NAME_MAX + 1u];
+    size_t       n;
+
+    if (node == NULL || node->name == NULL) {
+        return;
+    }
+    n = strlen(node->name);
+    if (n <= sfx || n - sfx > BASIC_NAMED_NAME_MAX ||
+        strcmp(node->name + (n - sfx), BASIC_NAMED_SUFFIX) != 0) {
+        return;
+    }
+    memcpy(nm, node->name, n - sfx);
+    nm[n - sfx] = '\0';
+    SHELL_PRINTF("  " SH_BOLD "%s" SH_RST "\n", nm);
+    *(int *)vctx = 1;
+}
+
+static void
+basic_list_named_slots(void)
+{
+    int any = 0;
+
+    SHELL_PRINTF(SH_CYAN "  saved programs" SH_RST SH_DIM
+                 "  (/data/<name>" BASIC_NAMED_SUFFIX ")" SH_RST "\n");
+    (void)tiku_vfs_list("/data", basic_named_dir_cb, &any);
+    if (!any) {
+        SHELL_PRINTF("  " SH_DIM "(no saved programs)" SH_RST "\n");
+    }
+}
+
+#else  /* MSP430 / host: the durable FRAM slot array */
+
 typedef struct {
     char     name[8];                                     /* "" = empty */
     uint16_t length;
@@ -150,6 +345,7 @@ basic_list_named_slots(void)
     }
     if (!any) SHELL_PRINTF("  " SH_DIM "(no saved programs)" SH_RST "\n");
 }
+#endif /* BASIC_NVM_ON_REGION */
 #endif /* TIKU_BASIC_NAMED_SLOTS */
 
 /* Scratch buffer for IF/THEN truncation -- when ELSE is present we
