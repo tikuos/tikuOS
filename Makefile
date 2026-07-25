@@ -717,17 +717,19 @@ CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
 # Memory tiers. tiku_mem.h defaults to the MSP430-era 128 B SRAM (AUTO) tier,
-# which can't hold a real allocation. BASIC's program arena (~98 KB for the
-# 1024-line BIG tier RP2350 selects) then fails to fit SRAM and resolve_tier()
-# falls back to the 1 KB NVM tier -- which on RP2350 is QSPI flash (program-op,
-# not byte-writable), so the first arena store faults and `basic` wedged the
-# board at entry. Size the SRAM (AUTO) tier to hold the arena in the part's
-# 520 KB SRAM. Gated on BASIC so non-BASIC builds keep the lean default.
+# which can't hold a real allocation. BASIC's program arena (117,120 B at the
+# 512 lines RP2350 selects -- 148 * PROGRAM_LINES + 41344) then fails to fit
+# SRAM and resolve_tier() falls back to the NVM tier -- which on RP2350 is QSPI
+# flash (program-op, not byte-writable), so the first arena store faults and
+# `basic` wedged the board at entry. Size the SRAM (AUTO) tier to hold the arena
+# in the part's 520 KB SRAM. Gated on BASIC so non-BASIC builds keep the lean
+# default. A _Static_assert in tiku_basic_arena.inl now checks the two numbers
+# against each other at build time.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifeq ($(HAS_TLS),1)
 # HTTPS (HAS_TLS) adds the cert-TLS client's static buffers to .bss; trim the
 # BASIC tier to 128 KB so the cyw43 bring-up + stack keep their SRAM (the
-# ~98 KB 1024-line arena still fits).
+# 117 KB 512-line arena still fits, with 13.6 KB spare).
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072    # 128 KB: arena + TLS .bss + radio
 # TLS server flights are multi-KB; the lean 512 B TCP receive window turns
 # each one into fragile 512-byte stop-and-wait (a lost window-update ACK
@@ -737,7 +739,7 @@ CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072    # 128 KB: arena + TLS .bss + radio
 CFLAGS += -DTIKU_KITS_NET_TCP_RX_BUF_SIZE=4096
 CFLAGS += -DTIKU_KITS_NET_TCP_MAX_CONNS=2
 else
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 1024-line BASIC arena
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 512-line BASIC arena
 endif
 endif
 

@@ -248,9 +248,10 @@ static long parse_array_index(const char **p,
 
 /* Durable saved-program state, buffer-backed variant.  The save buffer + the
  * persist-store metadata carry BASIC_NVM_PERSISTENT (.persistent FRAM on
- * MSP430 -- durable; plain .bss on Nordic/host -- session-only);
+ * MSP430 -- durable; plain .bss on host -- session-only);
  * tiku_persist_init() validates entries via the magic number on every boot.
- * Not built on the region-backed parts (Ambiq MRAM, RP2350 flash): there the
+ * Not built on ANY region-backed part (Ambiq MRAM, RP2350 flash, Nordic RRAM --
+ * all three have a reserved tail now, so BASIC_NVM_ON_REGION is set): there the
  * saved program lives at a fixed offset in the carved NVM region's reserved
  * tail instead -- see basic_prog_store/fetch in tiku_basic_persist.inl. */
 #if !BASIC_NVM_ON_REGION
