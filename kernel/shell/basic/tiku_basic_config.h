@@ -104,8 +104,8 @@
  * on the region parts (SAVE streams through 4 KB, LOAD reads in place).
  * At LINE_MAX=144 that is ~152 bytes/line:
  *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB durable slot (256 KB tail)
+ *   LM20              1400 -> ~200 KB prog + ~208 KB durable slot (256 KB tail)
  *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB durable slot (256 KB tail)
- *   LM20              1024 -> ~147 KB prog + ~156 KB durable slot (256 KB tail)
  *   RP2350             512 ->  ~74 KB prog +  ~78 KB durable slot (128 KB tail)
  *   L15                256 ->  ~37 KB prog +  ~39 KB durable slot  (64 KB tail)
  *   FRAM (MSP430)       96 ->  ~14 KB prog +  ~15 KB FRAM + a same-sized buffer
@@ -121,6 +121,18 @@
       * every L15 tier profile; the save slot (256 x 152 B) still fits the
       * 64 KB reserved area with room for the resume snapshot. */
 #    define TIKU_BASIC_PROGRAM_LINES 256
+#  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+     /* The LM20's arena lives in its OWN SRAM bank (RAM2), so program capacity
+      * costs nothing in the primary bank -- and since v0.06 nothing static
+      * scales with PROGRAM_LINES there either (SAVE streams, LOAD reads in
+      * place, the checkpoint streams).  That makes RAM2 the binding constraint
+      * rather than .bss: 148*N + 41344 <= 261120 usable allows N <= 1484, and
+      * the reserved tail (N*152 + 8 + 16 KB checkpoint <= 256 KB) allows 1616.
+      * 1400 takes most of it while keeping ~5 KB of tier slack, 7 KB of RAM2
+      * unclaimed and 32 KB of tail spare.  The _Static_assert in
+      * tiku_basic_arena.inl checks the arena against the pool, and the one in
+      * tiku_basic_ckpt.inl checks the two slots against the tail. */
+#    define TIKU_BASIC_PROGRAM_LINES 1400
 #  elif defined(TIKU_BASIC_TIER_HUGE)
 #    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 256 KB NVM save tail */
 #  elif defined(TIKU_BASIC_TIER_BIG)

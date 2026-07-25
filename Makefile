@@ -875,11 +875,13 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # pool produced a clean build that failed on the board.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-# LM20, 1024 lines -> 192,896 B.  Its tier lives in RAM2 (the upper SRAM bank,
+# LM20, 1400 lines -> 248,544 B.  Its tier lives in RAM2 (the upper SRAM bank,
 # linker section .ram2) and so does not compete with the primary bank's
-# .bss/stack at all: 192 KB of the 255 KB usable bank (the top 1 KB of RAM2 is
-# unbacked on this silicon).  Threads make no difference here.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=196608    # 192 KB tier arena in RAM2
+# .bss/stack at all, which is why the LM20 can afford the largest program
+# capacity outside Apollo510: 248 KB of the 255 KB usable bank (the top 1 KB of
+# RAM2 is unbacked on this silicon), leaving ~5 KB of tier slack.  Threads make
+# no difference here.
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=253952    # 248 KB tier arena in RAM2
 else
 # L15, 256 lines -> 79,232 B.  One value regardless of TIKU_THREADS_ENABLE:
 # the worker/TLS state threads add is .bss and stack, NOT tier allocations, so
