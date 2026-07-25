@@ -117,6 +117,26 @@ typedef tiku_nvm_region_t     tiku_fram_region_t;
 #define TIKU_FRAM_REGION_COUNT    TIKU_NVM_REGION_COUNT
 #define TIKU_FRAM_REGION_ACTIVE   TIKU_NVM_REGION_ACTIVE
 
+/*---------------------------------------------------------------------------*/
+/* NVM TECHNOLOGY LABEL -- what to CALL the non-volatile memory in output    */
+/*---------------------------------------------------------------------------*/
+/*
+ * The internal macros still speak the MSP430-era "FRAM_*" vocabulary for the
+ * NVM window (TIKU_DEVICE_FRAM_START/END/SIZE) because every port reuses that
+ * shape; the aliases above are the same story for the region API.  But nothing
+ * the USER reads should call RRAM "FRAM".  Every device header declares its
+ * real technology in TIKU_DEVICE_NVM_LABEL -- "FRAM" (MSP430), "RRAM"
+ * (nRF54L), "MRAM" (Apollo), "Flash" (RP2350) -- and anything printing a
+ * memory report must use that label, never a literal.
+ *
+ * The fallback below is the last resort for a device header that forgot to
+ * declare one; it lives here, in the header every memory reporter already
+ * includes, so the definition is not duplicated per command.
+ */
+#ifndef TIKU_DEVICE_NVM_LABEL
+#define TIKU_DEVICE_NVM_LABEL     "NVM"
+#endif
+
 #define tiku_fram_map_init        tiku_nvm_map_init
 #define tiku_fram_region_get      tiku_nvm_region_get
 #define tiku_fram_region_count    tiku_nvm_region_count

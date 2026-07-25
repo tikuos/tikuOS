@@ -575,7 +575,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"info",    "Device, CPU, uptime, clock",  tiku_shell_cmd_info},
 #endif
 #if TIKU_SHELL_CMD_FREE
-    {"free",    "Memory usage (SRAM/FRAM)",    tiku_shell_cmd_free},
+    {"free",    "Memory usage (SRAM/" TIKU_DEVICE_NVM_LABEL ")", tiku_shell_cmd_free},
 #endif
 #if TIKU_SHELL_CMD_REBOOT
     {"reboot",  "System reset",                tiku_shell_cmd_reboot},
@@ -590,7 +590,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"ble",     "EM9305 BLE radio: probe | beacon [name] | stop", tiku_shell_cmd_ble},
 #endif
 #if TIKU_SHELL_CMD_HISTORY
-    {"history", "Last N commands from FRAM",   tiku_shell_cmd_history},
+    {"history", "Last N commands from " TIKU_DEVICE_NVM_LABEL, tiku_shell_cmd_history},
 #endif
 #if TIKU_SHELL_CMD_WIFI
     {"wifi",    "CYW43 WiFi: scan/connect/up/status", tiku_shell_cmd_wifi},
@@ -708,7 +708,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"irq",     "Enable/disable GPIO edge IRQ", tiku_shell_cmd_irq},
 #endif
 #if TIKU_SHELL_CMD_ALIAS
-    {"alias",   "Define/list FRAM-backed aliases",
+    {"alias",   "Define/list " TIKU_DEVICE_NVM_LABEL "-backed aliases",
                                                tiku_shell_cmd_alias},
     {"unalias", "Remove an alias",             tiku_shell_cmd_unalias},
 #endif
@@ -789,7 +789,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     /* ---- Boot ---- */
 #if TIKU_SHELL_CMD_INIT
     CMD_CATEGORY("Boot"),
-    {"init",    "Manage FRAM boot entries",    tiku_shell_cmd_init},
+    {"init",    "Manage " TIKU_DEVICE_NVM_LABEL " boot entries", tiku_shell_cmd_init},
 #endif
 
     {NULL, NULL, NULL}
@@ -1321,13 +1321,6 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
      * `both` mode USB just mirrors TIKU_PRINTF output). */
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
 #endif
-#endif
-
-    /* NVM technology label is per-device: MRAM on Apollo, Flash on RP2350,
-     * FRAM on MSP430.  Fall back to the MSP430-era "FRAM" if a device header
-     * has not declared one. */
-#ifndef TIKU_DEVICE_NVM_LABEL
-#define TIKU_DEVICE_NVM_LABEL "FRAM"
 #endif
 
 #if !TIKU_SHELL_TCP_ENABLE || TIKU_SHELL_NET_TEST

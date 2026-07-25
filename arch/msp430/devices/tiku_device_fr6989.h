@@ -31,6 +31,7 @@
 /*---------------------------------------------------------------------------*/
 
 #define TIKU_DEVICE_NAME            "MSP430FR6989"
+#define TIKU_DEVICE_NVM_LABEL       "FRAM"   /**< NVM technology (UI label). */
 
 /*---------------------------------------------------------------------------*/
 /* GPIO PORT AVAILABILITY                                                    */

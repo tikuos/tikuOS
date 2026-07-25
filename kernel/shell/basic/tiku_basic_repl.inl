@@ -321,7 +321,7 @@ process_line(const char *raw)
                 "  " SH_CYAN "Literals:  " SH_RST
                               " \\n \\t \\r \\\" \\\\ escapes inside \"...\".\n"
                 "  '?' is a PRINT alias; ' is a REM alias.\n"
-                "  SAVE/LOAD persist across reboots in FRAM.\n"
+                "  SAVE/LOAD persist across reboots in " TIKU_DEVICE_NVM_LABEL ".\n"
                 "  IMPORT \"/data/f\" merges a module of SUBs.\n"
                 "  Run `basic run` from the shell (or via `init add`)\n"
                 "    to autorun the saved program at boot.\n"

@@ -18,7 +18,8 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_ps.h"
-#include <kernel/shell/tiku_shell.h>             /* SHELL_PRINTF via tiku_shell_io.h */
+#include <kernel/shell/tiku_shell.h>
+#include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL */             /* SHELL_PRINTF via tiku_shell_io.h */
 #include <kernel/process/tiku_process.h>
 
 /*---------------------------------------------------------------------------*/
@@ -34,7 +35,7 @@ tiku_shell_cmd_ps(uint8_t argc, const char *argv[])
     (void)argc;
     (void)argv;
 
-    SHELL_PRINTF("PID  STATE     SRAM  FRAM  NAME\n");
+    SHELL_PRINTF("PID  STATE     SRAM  %-4s  NAME\n", TIKU_DEVICE_NVM_LABEL);
     SHELL_PRINTF("---  --------  ----  ----  ---------------\n");
 
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {

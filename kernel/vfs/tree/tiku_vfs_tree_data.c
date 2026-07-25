@@ -44,6 +44,7 @@
 #include "kernel/fs/tiku_tfs.h"
 #include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm, tiku_tier_nvm_write */
 #include "kernel/memory/tiku_nvm_region.h"
+#include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL fallback */
 
 #if TIKU_SHELL_CMD_BASIC
 #include "kernel/shell/basic/tiku_basic.h"
@@ -399,17 +400,10 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     out->max_files  = (uint16_t)TIKU_TFS_MAX_FILES;
     out->slot_bytes = (uint16_t)TIKU_TFS_SLOT_DATA;
     out->cap_bytes  = (uint32_t)TIKU_TFS_MAX_FILES * (uint32_t)TIKU_TFS_SLOT_DATA;
-#if defined(PLATFORM_AMBIQ)
-    out->backing = "MRAM";
-#elif defined(PLATFORM_MSP430)
-    out->backing = "FRAM";
-#elif defined(PLATFORM_RP2350)
-    out->backing = "Flash";  /* carved QSPI region, erase+program backend */
-#elif defined(PLATFORM_NORDIC)
-    out->backing = "RRAM";   /* carved byte-writable RRAM region, WEN-gated */
-#else
-    out->backing = "RAM*";   /* volatile until a backend lands */
-#endif
+    /* One source of truth for what to CALL the NVM: the device header's
+     * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash).  This used to be a
+     * per-platform ladder here, which is exactly how a second copy drifts. */
+    out->backing = TIKU_DEVICE_NVM_LABEL;
     return 0;
 }
 
