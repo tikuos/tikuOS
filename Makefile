@@ -1085,6 +1085,10 @@ ifneq ($(MSP430_SUPPORT_DIR),)
 LDFLAGS += -L$(MSP430_SUPPORT_DIR)
 endif
 LDFLAGS += -Wl,--gc-sections
+# Emit a link map like the ARM ports do, so MSP430 RAM/FRAM figures can be
+# MEASURED rather than computed. Every memory audit before this had to derive
+# MSP430 numbers by hand because this one flag was missing.
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 # --- msp430-elf ld DWARF workaround -------------------------------------
 # libnosys.a (pulled in by --specs=nosys.specs) ships a malformed
 # .debug_line unit that ld 9.3.1 mis-handles under --gc-sections on larger
