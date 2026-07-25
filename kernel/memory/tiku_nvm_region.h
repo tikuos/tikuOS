@@ -123,22 +123,31 @@
  * executes from the ITCM (tiku_basic_module.h), so the 32 KB executable slot
  * every other ARM part still carves became region on this one.
  *
- *   apollo510  0x800000 - 0x488000 - 0x0000 - 0x10000 = 0x368000  3488 KB
- *   apollo4l/p 0x200000 - 0x090000 - 0x8000 - 0x10000 = 0x158000  1376 KB
- *   rp2350     0x400000 - 0x0F8000 - 0x8000 - 0x01000 = 0x2FF000  3068 KB
- *   lm20       0x1FD000 - 0x0C8000 - 0x8000 - 0x04000 = 0x129000  1188 KB
- *   l15        0x17D000 - 0x0C8000 - 0x8000 - 0x04000 = 0x0A9000   676 KB
+ * The code_cap column is the SAME on every part -- 256 KB (P4).  That is the
+ * point: a code window is a contract about how much program a TikuOS image may
+ * be, and it stopped being negotiable per platform when the things that used to
+ * inflate it (BASIC's durable tail, a module image counted twice, model weights
+ * and radio firmware baked into .rodata) all became files.  Measured largest
+ * images: 130.3 KB (apollo510b + BLE), 121.6 KB (apollo4l/p), 122.6 KB (l15),
+ * 126.8 KB (lm20b + Axon driver), 60.4 KB (rp2350) -- so 256 KB is about 2x the
+ * largest thing anyone has built, on every part.
+ *
+ *   apollo510  0x800000 - 0x450000 - 0x0000 - 0x10000 = 0x3A0000  3712 KB
+ *   apollo4l/p 0x200000 - 0x058000 - 0x8000 - 0x10000 = 0x190000  1600 KB
+ *   rp2350     0x400000 - 0x040000 - 0x8000 - 0x01000 = 0x3B7000  3804 KB
+ *   lm20       0x1FD000 - 0x040000 - 0x8000 - 0x04000 = 0x1B1000  1732 KB
+ *   l15        0x17D000 - 0x040000 - 0x8000 - 0x04000 = 0x131000  1220 KB
  */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_NVM_REGION_BYTES  (3488u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (3712u * 1024u)
 #elif defined(PLATFORM_AMBIQ)
-#define TIKU_NVM_REGION_BYTES  (1376u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1600u * 1024u)
 #elif defined(PLATFORM_RP2350)
-#define TIKU_NVM_REGION_BYTES  (3068u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (3804u * 1024u)
 #elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#define TIKU_NVM_REGION_BYTES  (1188u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1732u * 1024u)
 #elif defined(PLATFORM_NORDIC)
-#define TIKU_NVM_REGION_BYTES  (676u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1220u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif
@@ -149,9 +158,9 @@
  * Everything in the region above the tier extent.  0 where the file store rides
  * its own backing (msp430 FRAM / host).  Resulting sizes:
  *
- *   apollo510  3488 - 32 = 3456 KB      lm20  1188 - 32 = 1156 KB
- *   apollo4l/p 1376 - 32 = 1344 KB      l15    676 - 32 =  644 KB
- *   rp2350     3068 - 32 = 3036 KB
+ *   apollo510  3712 - 32 = 3680 KB      lm20  1732 - 32 = 1700 KB
+ *   apollo4l/p 1600 - 32 = 1568 KB      l15   1220 - 32 = 1188 KB
+ *   rp2350     3804 - 32 = 3772 KB
  *
  * TIKU_TFS_MAX_FILES (kernel/fs/tiku_tfs.h) is chosen to FILL its platform's
  * extent; the pair of static assertions in kernel/vfs/tree/tiku_vfs_tree_data.c

@@ -31,9 +31,9 @@ MEMORY
     /* Code window: a fixed ~508 KB budget for code/rodata (512 KB minus the
      * 32 KB loadable-module slot carved off its top). Everything between the
      * module slot and the 64 KB mirror becomes the carved NVM region, so the
-     * NVM store/tier gets the bulk of MRAM (~3.4 MB). A region overflow here
+     * NVM store/tier gets the bulk of MRAM (~3.7 MB). A region overflow here
      * means code outgrew its budget. */
-    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x78000
+    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x40000   /* 256 KB code window (P4) */
     TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM: .data/.bss/heap/stack    */
     SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM (unused at bring-up) */
 }
@@ -58,7 +58,7 @@ __tiku_layout_durable_size = 0x10000;                      /* 64 KB mirror */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
 /* Carved NVM store/tier region (substrate B): ALL MRAM between the code window
- * and the 64 KB mirror -- ~3.4 MB on this part. Read in place by pointer
+ * and the 64 KB mirror -- ~3.7 MB on this part. Read in place by pointer
  * (PRIVDEFENA's default map covers MRAM above the code window); written via the
  * bootrom backend (kernel/memory/tiku_nvm_region). The NVM tier and file store
  * ride this. The base follows the code window directly now that no module slot

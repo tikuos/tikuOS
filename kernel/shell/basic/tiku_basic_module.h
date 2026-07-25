@@ -42,7 +42,7 @@
  * The module is linked at this VMA; the loader installs the image here and
  * runs it XIP (durable in place -- it survives reboot and power loss).
  *
- *   nordic (nRF54L15 + nRF54LM20): RRAM at the top of the shared 800 KB code
+ *   nordic (nRF54L15 + nRF54LM20): RRAM at the top of the shared 256 KB code
  *     window -- the SAME address on both parts, so one module image is
  *     family-portable.  SRAM is W^X (execute-never), so a module MUST run
  *     from RRAM -- which is byte-writable, so install is a store loop
@@ -71,11 +71,11 @@
  * live tier data, so leaving it undefined turns that mistake into a compile
  * error instead. */
 #elif defined(AM_PART_APOLLO4L)
-#define TIKU_MODULE_CARVE_ADDR  0x90000u
+#define TIKU_MODULE_CARVE_ADDR  0x58000u
 #elif defined(PLATFORM_RP2350)
 /* Top 32 KB (8 erase sectors) of the flash code window; XIP.
  * Install goes sector-by-sector through the boot-ROM erase/program path. */
-#define TIKU_MODULE_CARVE_ADDR  0x100F8000u
+#define TIKU_MODULE_CARVE_ADDR  0x10040000u
 #elif defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
 /* Top 4 KB of HIFRAM (which the MPU already maps R+W+X, SAM 0x0755).
  * FRAM: byte-writable in place AND natively executable.  The slot ends
@@ -87,9 +87,9 @@
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
 #else
 /* Nordic (nRF54L15 and nRF54LM20 alike): RRAM slot at the top of the
- * shared 800 KB code window.  Both parts use the SAME slot address, so
+ * shared 256 KB code window.  Both parts use the SAME slot address, so
  * one module image is binary-compatible across the Nordic family. */
-#define TIKU_MODULE_CARVE_ADDR  0x0C8000u
+#define TIKU_MODULE_CARVE_ADDR  0x40000u
 #endif
 #ifndef TIKU_MODULE_CARVE_SIZE
 #define TIKU_MODULE_CARVE_SIZE  0x8000u

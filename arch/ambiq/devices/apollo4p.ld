@@ -41,7 +41,7 @@ MEMORY
      * module slot and the 64 KB mirror becomes the carved NVM region, so the
      * NVM store/tier gets the bulk of MRAM. A region overflow here means code
      * outgrew its budget. */
-    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x78000
+    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x40000   /* 256 KB code window (P4) */
     TCM   (rwx) : ORIGIN = 0x10000000, LENGTH = 384K      /* .data/.bss/heap/stack          */
     SSRAM (rwx) : ORIGIN = 0x10060000, LENGTH = 2M        /* shared SRAM: both 1 MB banks    */
 }

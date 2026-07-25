@@ -63,29 +63,30 @@
  * kernel/vfs/tree/tiku_vfs_tree_data.c fail the build if a number here
  * either overflows its extent or leaves more than one file's worth idle.
  *
- *   apollo510  3456 KB extent -> 855   (1,976 B idle)
- *   apollo4l/p 1344 KB extent -> 332   (  324 B idle)
- *   rp2350     3036 KB extent -> 752   (fills the extent to the byte)
- *   lm20       1156 KB extent -> 285   (2,016 B idle)
- *   l15         644 KB extent -> 158   (2,492 B idle)
+ *   apollo510  3680 KB extent -> 910   (4,092 B idle)
+ *   apollo4l/p 1568 KB extent -> 387   (2,440 B idle)
+ *   rp2350     3772 KB extent -> 934   (fills the extent to the byte)
+ *   lm20       1700 KB extent -> 420   (1,252 B idle)
+ *   l15        1188 KB extent -> 293   (1,728 B idle)
  *   msp430/host   no extent   ->  16   (store sizes its own FRAM array)
  *
- * These grew in v0.06 when the reserved durable tail was deleted and its bytes
- * became file store (and on apollo510 the 32 KB module slot too).  Changing any
+ * These grew in v0.06 twice: first when the reserved durable tail was deleted
+ * and its bytes became file store (and on apollo510 the 32 KB module slot too),
+ * then again when every code window shrank to the uniform 256 KB contract.  Changing any
  * of them CHANGES /data's on-media geometry: the superblock records the counts,
  * so an old store fails to mount and the board reformats -- data loss by
  * design, not by accident.  Land such changes together.
  */
 #  if defined(AM_PART_APOLLO510)
-#    define TIKU_TFS_MAX_FILES  855
+#    define TIKU_TFS_MAX_FILES  910
 #  elif defined(PLATFORM_AMBIQ)
-#    define TIKU_TFS_MAX_FILES  332
+#    define TIKU_TFS_MAX_FILES  387
 #  elif defined(PLATFORM_RP2350)
-#    define TIKU_TFS_MAX_FILES  752
+#    define TIKU_TFS_MAX_FILES  934
 #  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#    define TIKU_TFS_MAX_FILES  285
+#    define TIKU_TFS_MAX_FILES  420
 #  elif defined(PLATFORM_NORDIC)
-#    define TIKU_TFS_MAX_FILES  158
+#    define TIKU_TFS_MAX_FILES  293
 #  else
 #    define TIKU_TFS_MAX_FILES  16
 #  endif

@@ -106,11 +106,11 @@
  * At LINE_MAX=144 that is ~152 bytes/line.  The last column is what prog.bas
  * costs in /data slots out of the platform's total -- the real ceiling now, and
  * why raising a line count is cheap: it buys slots, not a bigger carve.
- *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB file   ( 64 of 855 slots)
- *   LM20              1400 -> ~200 KB prog + ~208 KB file   ( 52 of 285 slots)
- *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB file   ( 38 of 332 slots)
- *   RP2350             512 ->  ~74 KB prog +  ~78 KB file   ( 20 of 752 slots)
- *   L15                256 ->  ~37 KB prog +  ~39 KB file   ( 10 of 158 slots)
+ *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB file   ( 64 of 910 slots)
+ *   LM20              1400 -> ~200 KB prog + ~208 KB file   ( 52 of 420 slots)
+ *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB file   ( 38 of 387 slots)
+ *   RP2350             512 ->  ~74 KB prog +  ~78 KB file   ( 20 of 934 slots)
+ *   L15                256 ->  ~37 KB prog +  ~39 KB file   ( 10 of 293 slots)
  *   FRAM (MSP430)       96 ->  ~14 KB prog +  ~15 KB FRAM + a same-sized buffer
  *   else (host/small)   50 ->   ~7 KB
  * RP2350 is split out from Apollo (both TIER_BIG) because its arena is an order
