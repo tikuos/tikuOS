@@ -736,6 +736,21 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
     size_t sl;
     uint8_t i;
 
+    /* A NULL callback used to reach the invocation below and jump to address
+     * zero.  Every other pointer argument in this file is tolerated -- notify()
+     * accepts a NULL node, desc_of() a NULL node -- so a caller reasonably
+     * expects the same here, and "does this path exist and is it a directory"
+     * is a legitimate use with nothing to enumerate into. */
+    if (callback == NULL) {
+        node = tiku_vfs_resolve(path);
+        if (node != NULL) {
+            return (node->type == TIKU_VFS_DIR) ? 0 : -1;
+        }
+        mount = vfs_parent_of(path, &sub);
+        return (mount != NULL && mount->dyn != NULL &&
+                mount->dyn->list_dir != NULL) ? 0 : -1;
+    }
+
     node = tiku_vfs_resolve(path);
     if (node != NULL) {
         if (node->type != TIKU_VFS_DIR) {
