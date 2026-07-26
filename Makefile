@@ -157,16 +157,26 @@ endif
 # (GP23..25 + GP29). The plain Pi Pico 2 doesn't carry the module, so
 # the driver requires BOTH the right silicon and the right PCB.
 ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
-# WILL NOT LINK until the CYW43439 firmware becomes a store file (P3a,
-# temp/memlayout-fix-plan.md).  The blob is linked into .rodata -- wifi-only
-# measured 310 KB of image, +BT 338 KB -- and the code window is a 256 KB
-# contract on every platform.  Same rule as the Axon weights below: radio
-# firmware is DATA, and the window is not the thing to raise.  A virgin board
-# provisions the blob over the shell's recv, which needs no radio to work.
-$(warning TIKU_DRV_WIFI_CYW43_ENABLE=1: the CYW43439 firmware is linked into \
-.rodata, so this image will exceed the 256 KB code window. Blocked on P3a \
-(firmware -> /data). Do NOT raise the window -- that is the design this \
-replaced.)
+# The CYW43439 firmware is linked into .rodata via .incbin, where the linker
+# counts ~233 KB of radio firmware as CODE.  That is what P3a removes: radio
+# firmware is DATA and belongs in /data, provisioned over the shell's recv,
+# which needs no radio to work.
+#
+# THE LINK ERROR THAT USED TO ENFORCE THIS IS GONE.  At the old 256 KB window
+# this config could not link, and that failure was the forcing function.  At
+# 384 KB it fits: rp2350 base is ~124 KB and the blobs are ~233 KB (+6 KB with
+# BT), so roughly 357-363 KB -- under the window with ~30 KB to spare.  That is
+# an estimate from the component sizes, not a measured link, because the blobs
+# are untracked (drivers 3d20e84) and absent from a fresh checkout by design.
+#
+# So this warning is now the ONLY thing standing between a working build and
+# shipping the shape P3a exists to remove.  Raising the window further to keep
+# it comfortable would be the exact pathology: the blob would once again be
+# sizing the OS's permanent memory contract.
+$(warning TIKU_DRV_WIFI_CYW43_ENABLE=1: the CYW43439 firmware is compiled into \
+.rodata and charged against the code window (~233 KB of it). This links at 384 \
+KB but is NOT the shipping shape -- P3a moves the firmware to /data. Do NOT \
+raise the window to make room for a blob.)
 ifneq ($(TIKU_PLATFORM),rp2350)
 $(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires MCU=rp2350 \
 (currently MCU=$(MCU)). The CYW43439 driver depends on \
@@ -1845,16 +1855,39 @@ LDLIBS_AXON = $(AXON_SDK)/lib/axon/bin/arm/libnrf-axon-driver-internal.a
 # 140000 covers the shipped tinyml set -- the model init verifies and
 # reports the exact need on mismatch).
 ifneq ($(strip $(TIKU_AXON_MODEL)),)
-# WILL NOT LINK until the weights become a store file (P3d, temp/memlayout-fix-
-# plan.md).  Nordic's compiled models are C arrays, so this config puts 200-700
-# KB of weights into .rodata -- the vww KAT measured 698 KB of image -- and the
-# code window is a 256 KB contract on every platform.  The window is NOT the
-# thing to raise: weights are DATA, and sizing the OS's permanent memory
-# contract around a vendor test harness is the exact design P3/P4 undid.
-$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): model weights are linked into \
-.rodata, so this image will exceed the 256 KB code window. Blocked on P3d \
-(weights -> /data). Do NOT raise the window -- that is the design this \
-replaced.)
+# Nordic's compiled models are C arrays, so this config bakes the weights (and
+# the KAT's test vectors) into .rodata, where the linker counts them as CODE and
+# they eat the code window.  That is the pathology P3d exists to remove: weights
+# are DATA and belong in /data as a file.
+#
+# Which models still overrun is a MEASURED fact, not a guess -- at the 384 KB
+# window, on nrf54lm20b:
+#     tinyml_kws  214,745 B   links
+#     tinyml_ic   369,213 B   links
+#     tinyml_ad   374,445 B   links
+#     tinyml_vww  ~700 KB     DOES NOT LINK
+# so the warning below fires only for the models that genuinely do not fit.  It
+# used to fire for all four and claim all four exceeded the window, which was
+# false for three of them -- and a warning that cries wolf is one nobody reads
+# on the occasion it is true.
+#
+# vww is the model P3d's acceptance gate is written against (the PERSON /
+# 161974240 / "output bit exact!" baseline), so the forcing function survives
+# exactly where it has to.  Add a model here if a future one overruns; do NOT
+# answer an overrun by raising the window.
+AXON_OVERSIZE_MODELS := tinyml_vww
+ifneq (,$(filter $(TIKU_AXON_MODEL),$(AXON_OVERSIZE_MODELS)))
+$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): this model's weights + KAT \
+vectors in .rodata exceed the 384 KB code window, so the link WILL fail. \
+Blocked on P3d (weights -> /data). Do NOT raise the window -- weights are \
+DATA, and sizing the OS's memory contract around a vendor test harness is the \
+design P3/P4 undid.)
+else
+$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): links today, but the weights are \
+still compiled into .rodata and charged against the code window. P3d moves \
+them to /data; until then this build is a development convenience, not the \
+shipping shape.)
+endif
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer.c
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer_test.c
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_op_extensions.c
