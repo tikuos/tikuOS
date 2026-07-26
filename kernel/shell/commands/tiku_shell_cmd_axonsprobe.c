@@ -51,6 +51,12 @@
 #include "drivers/axon/nrf_axon_driver.h"
 #include "axon/nrf_axon_platform.h"
 #include "drivers/axon/nrf_axon_dsp_intrinsics.h"
+#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+#include "drivers/axon/nrf_axon_nn_infer.h"
+#include "drivers/axon/nrf_axon_nn_infer_test.h"
+#include <kernel/fs/tiku_model.h>
+#include <kernel/vfs/tree/tiku_vfs_tree_data.h>
+#endif
 #endif
 
 /* Base + the two documented registers (offsets from the MDK struct). */
@@ -157,6 +163,166 @@ static void axons_diff(void)
     SHELL_PRINTF("%u of %u words changed across enable\n",
                  (unsigned)changed, (unsigned)AXONS_WIN_WORDS);
 }
+
+
+#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+/*---------------------------------------------------------------------------*/
+/* A2b: RUN THE SAME MODEL FROM THE STORE, AND COMPARE                       */
+/*---------------------------------------------------------------------------*/
+/*
+ * `axonsprobe model` runs Nordic's inference test against the model compiled
+ * into .rodata.  `axonsprobe modelstore` runs the IDENTICAL vendor test with the
+ * same model loaded from /data instead, so the two can be diffed.
+ *
+ * Everything before this proved the loader reproduces the linker's bytes, on the
+ * host.  This is the first point where the NPU is in the loop, and it is the only
+ * thing that can show the engine accepts a command buffer patched at runtime.
+ *
+ * HOW THE SUBSTITUTION WORKS.  The vendor's harness state is global rather than
+ * static, so AxonnnModelPrepare() runs exactly as the baked path runs it --
+ * populating the model pointer and the test vectors -- and only then is the model
+ * pointer repointed at a RAM COPY of the descriptor whose cmd_buffer_ptr is the
+ * patched buffer and whose model_const_ptr is the mapped weights.  No vendor
+ * source is modified, and the verdict ("output bit exact!") is the vendor's own
+ * rather than one written here.
+ *
+ * LAYER MODELS ARE EXCLUDED deliberately.  The packer extracts only the
+ * full-model command buffer, so the layer-mode buffers still hold link-time
+ * addresses; running them against relocated weights would mix a relocated and an
+ * unrelocated path and make the comparison meaningless.
+ */
+extern nrf_axon_nn_compiled_model_s const *the_full_model_static_info[1];
+extern nrf_axon_nn_model_test_info_s       the_test_vectors[];
+extern int  AxonnnModelPrepare(void);
+
+/* The weights stay MAPPED in RRAM; only the command buffer needs RAM.  Sized for
+ * the largest model that fits the code window today (tinyml_ic, 38,680 B); vww's
+ * 51,344 arrives with A3, when the arrays leave the image and free the room. */
+#ifndef AXONS_STORE_CMD_MAX
+#define AXONS_STORE_CMD_MAX  40960u
+#endif
+static uint8_t axons_store_cmd[AXONS_STORE_CMD_MAX] __attribute__((aligned(8)));
+static nrf_axon_nn_compiled_model_s axons_store_desc;
+
+/**
+ * @brief Publish the firmware addresses a packed model's table may name.
+ *
+ * Registered as &thing, never as a number: a relocation against a code symbol
+ * resolves Thumb-tagged, and taking the address in C is what supplies that bit
+ * (see tiku_model.h).  A hand-written constant would be one short, and the
+ * symptom is a single corrupt word in the command stream.
+ */
+static int axons_store_register_syms(void)
+{
+    extern int axonpro_int8_packing_filter(void);
+    extern int nrf_axon_nn_op_extension_softmax(void);
+    int rc;
+
+    tiku_model_sym_reset();
+    rc = tiku_model_sym_register("nrf_axon_interlayer_buffer",
+                                 (uintptr_t)nrf_axon_interlayer_buffer);
+    if (rc == TIKU_MODEL_OK) {
+        rc = tiku_model_sym_register("axonpro_int8_packing_filter",
+                                     (uintptr_t)&axonpro_int8_packing_filter);
+    }
+    if (rc == TIKU_MODEL_OK) {
+        rc = tiku_model_sym_register("nrf_axon_nn_op_extension_softmax",
+                                     (uintptr_t)&nrf_axon_nn_op_extension_softmax);
+    }
+    return rc;
+}
+
+static void axons_model_from_store(const char *name)
+{
+    tiku_tfs_t   *fs = tiku_vfs_tree_data_store();
+    tiku_model_t  m;
+    const char   *bad = NULL;
+    size_t        n = 0u;
+    uint32_t      t0;
+    int           rc;
+
+    if (fs == NULL) {
+        SHELL_PRINTF("modelstore: no /data store on this build\n");
+        return;
+    }
+    rc = tiku_model_open(fs, name, &m);
+    if (rc != TIKU_MODEL_OK) {
+        SHELL_PRINTF("modelstore: open %s: %s\n", name, tiku_model_strerror(rc));
+        return;
+    }
+    if (m.fmt != (uint8_t)TIKU_MODEL_FMT_RELOC) {
+        SHELL_PRINTF("modelstore: %s is not a relocatable model\n", name);
+        return;
+    }
+    SHELL_PRINTF("modelstore: %s  weights %u  cmd %u  %u sites / %u syms\n",
+                 name, (unsigned)m.weights_len, (unsigned)m.cmd_len,
+                 (unsigned)m.nsites, (unsigned)m.nsyms);
+    /* ALIGNMENT IS REPORTED FOR DIAGNOSIS, NOT BECAUSE IT IS A CONSTRAINT.  The
+     * store does not guarantee it: a mapped file starts at slot_off + 4 (the
+     * length word) and Nordic's slot stride is 4100 bytes -- neither a multiple
+     * of 16 -- so a file's base alignment depends on which slot it landed in.
+     *
+     * That looked like a hazard, so it was measured rather than assumed, and it
+     * is NOT one.  Three models ran bit-exact from the store at weights
+     * alignment 0 (kws), 8 (ic) and 12 (ad); kws was then deliberately shifted
+     * to alignment 4 by provisioning a padding file ahead of it and produced
+     * byte-identical results again.  Four of the four possible 4-byte phases
+     * work, so the NPU is reading these blobs without an alignment requirement
+     * this layer has to satisfy.
+     *
+     * Kept because it costs one line and is the first thing worth reading if a
+     * future model ever misbehaves only in some store layouts -- but on today's
+     * evidence, "aligned 12" is an observation, not a suspect. */
+    SHELL_PRINTF("modelstore: weights @%p (align %u)  cmd RAM @%p (align %u)\n",
+                 (const void *)m.weights,
+                 (unsigned)((uintptr_t)m.weights & 15u),
+                 (const void *)axons_store_cmd,
+                 (unsigned)((uintptr_t)axons_store_cmd & 15u));
+
+    rc = axons_store_register_syms();
+    if (rc != TIKU_MODEL_OK) {
+        SHELL_PRINTF("modelstore: symbol registry: %s\n",
+                     tiku_model_strerror(rc));
+        return;
+    }
+    rc = tiku_model_prepare(&m, axons_store_cmd, sizeof axons_store_cmd,
+                            &n, &bad);
+    if (rc != TIKU_MODEL_OK) {
+        SHELL_PRINTF("modelstore: prepare: %s%s%s\n", tiku_model_strerror(rc),
+                     bad ? ": " : "", bad ? bad : "");
+        return;
+    }
+    SHELL_PRINTF("modelstore: relocated %u sites into %u B of RAM\n",
+                 (unsigned)m.nsites, (unsigned)n);
+
+    if (nrf_axon_platform_init() != NRF_AXON_RESULT_SUCCESS) {
+        SHELL_PRINTF("modelstore: axon platform init failed\n");
+        return;
+    }
+    if (AxonnnModelPrepare() < 0) {
+        SHELL_PRINTF("modelstore: AxonnnModelPrepare failed\n");
+        nrf_axon_platform_close();
+        return;
+    }
+    axons_store_desc = *the_full_model_static_info[0];
+    axons_store_desc.cmd_buffer_ptr =
+        (const NRF_AXON_PLATFORM_BITWIDTH_UNSIGNED_TYPE *)axons_store_cmd;
+    /* model_const_ptr is read nowhere in the SDK -- the weights are reached
+     * through the command buffer's patched addresses -- but it is repointed so
+     * nothing left in the descriptor still names .rodata. */
+    axons_store_desc.model_const_ptr  = m.weights;
+    axons_store_desc.model_const_size = (uint32_t)m.weights_len;
+    the_full_model_static_info[0] = &axons_store_desc;
+
+    SHELL_PRINTF("modelstore: running vendor test vectors from the STORE\n");
+    t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+    (void)nrf_axon_nn_run_test_vectors(the_full_model_static_info, NULL, 1,
+                                       NULL, NULL, the_test_vectors);
+    SHELL_PRINTF("modelstore: total %u us\n",
+                 (unsigned)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0));
+    nrf_axon_platform_close();
+}
+#endif  /* TIKU_AXON_MODEL_TEST */
 
 void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
 {
@@ -324,6 +490,34 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         base_inference_main();
         SHELL_PRINTF("model run total: %u us\n",
                      (unsigned)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0));
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "modelstore") == 0) {
+        axons_model_from_store(argc >= 3 ? argv[2] : "kws.axm");
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "modelbaked") == 0) {
+        /* CONTROL for modelstore: the BAKED descriptor run through the SAME
+         * restricted vendor call (full model only, no layer models).  If this
+         * behaves like modelstore then the store is exonerated and the
+         * difference is the harness restriction, not the relocation. */
+        uint32_t t0;
+        if (nrf_axon_platform_init() != NRF_AXON_RESULT_SUCCESS) {
+            SHELL_PRINTF("modelbaked: axon platform init failed\n");
+            return;
+        }
+        if (AxonnnModelPrepare() < 0) {
+            SHELL_PRINTF("modelbaked: AxonnnModelPrepare failed\n");
+            nrf_axon_platform_close();
+            return;
+        }
+        SHELL_PRINTF("modelbaked: baked descriptor, full model only\n");
+        t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+        (void)nrf_axon_nn_run_test_vectors(the_full_model_static_info, NULL, 1,
+                                           NULL, NULL, the_test_vectors);
+        SHELL_PRINTF("modelbaked: total %u us\n",
+                     (unsigned)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0));
+        nrf_axon_platform_close();
         return;
     }
 #endif
