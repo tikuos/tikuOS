@@ -262,6 +262,7 @@
 #endif
 #if TIKU_SHELL_CMD_FREQ
 #include "commands/tiku_shell_cmd_freq.h"
+#include "commands/tiku_shell_cmd_power.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -784,6 +785,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_FREQ
     {"freq",    "Show/set CPU core frequency", tiku_shell_cmd_freq},
+#if TIKU_SHELL_CMD_POWER
+    {"power",   "Cache/DC-DC/idle power knobs", tiku_shell_cmd_power},
+#endif
 #endif
 
     /* ---- Boot ---- */

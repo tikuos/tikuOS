@@ -28,7 +28,10 @@
 /* CURRENT MODE TRACKING                                                     */
 /*---------------------------------------------------------------------------*/
 
-static tiku_cpu_idle_mode_t current_idle = TIKU_CPU_IDLE_OFF;
+/* Must match the hook tiku_sched_init() installs, or "sleep" reports a mode
+ * the scheduler is not in.  The scheduler owns the default; this only tracks
+ * it for reporting. */
+static tiku_cpu_idle_mode_t current_idle = TIKU_CPU_IDLE_LIGHT;
 
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */

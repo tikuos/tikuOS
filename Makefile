@@ -1200,6 +1200,7 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 SRCS += arch/nordic/tiku_crt_early.c
 SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
 SRCS += arch/nordic/tiku_cpu_common.c
+SRCS += arch/nordic/tiku_power_arch.c
 SRCS += arch/nordic/tiku_uart_arch.c
 SRCS += arch/nordic/tiku_gpio_arch.c
 else
@@ -1266,6 +1267,7 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 SRCS += arch/nordic/tiku_cpu_common.c
 SRCS += arch/nordic/tiku_crt_early.c
 SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
+SRCS += arch/nordic/tiku_power_arch.c
 SRCS += arch/nordic/tiku_timer_arch.c
 SRCS += arch/nordic/tiku_gpio_arch.c
 SRCS += arch/nordic/tiku_uart_arch.c
@@ -1784,6 +1786,7 @@ endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_freq.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_power.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_name.c
 ifeq (,$(findstring TIKU_SHELL_CMD_IF=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_if.c

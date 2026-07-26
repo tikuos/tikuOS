@@ -165,6 +165,9 @@
 #ifndef TIKU_SHELL_CMD_WAKE
 #define TIKU_SHELL_CMD_WAKE    1  /**< wake    - Show active wake sources */
 #endif
+#ifndef TIKU_SHELL_CMD_POWER
+#define TIKU_SHELL_CMD_POWER   1  /**< power   - Cache/DCDC/idle power knobs */
+#endif
 #ifndef TIKU_SHELL_CMD_FREQ
 #define TIKU_SHELL_CMD_FREQ    1  /**< freq    - Show/set CPU core frequency */
 #endif

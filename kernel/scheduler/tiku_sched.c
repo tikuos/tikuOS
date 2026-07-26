@@ -73,7 +73,29 @@ static uint8_t idle_tick_wakes = 1;
 void tiku_sched_init(void)
 {
     sched_state = TIKU_SCHED_RUNNING;
-    idle_hook = (tiku_sched_idle_hook_t)0;
+
+    /*
+     * IDLE SLEEPS BY DEFAULT.  This used to install no hook at all, so an idle
+     * scheduler spun the core at full speed -- measured on an nRF54LM20-DK at
+     * 6.76 mA doing nothing against 1.54 mA in WFI, a factor of 4.4 paid
+     * continuously by every board that never called "sleep".
+     *
+     * The cost of spinning is not only the CPU: on this part the HFCLK
+     * controller stops the clock automatically once nothing requests it, and
+     * "the CPU is awake" is itself a request.  Never sleeping therefore holds
+     * the whole MCU power domain up, and the hardware's own power management
+     * never gets a chance to act.
+     *
+     * TIKU_CPU_IDLE_LIGHT is the conservative choice: a plain WFI that any
+     * interrupt wakes, with no clock or peripheral state torn down, so nothing
+     * that worked while spinning can stop working.  Deeper modes stay opt-in
+     * because they do change what remains powered.  "sleep off" restores the
+     * old spin for anyone who needs it -- a tight-latency experiment, or
+     * bisecting a fault that only appears when the core never sleeps.
+     */
+    idle_hook = tiku_cpu_idle_hook(TIKU_CPU_IDLE_LIGHT);
+    tiku_sched_set_idle_tick_wakes(
+        (uint8_t)tiku_cpu_idle_mode_wakes_on_tick(TIKU_CPU_IDLE_LIGHT));
 
     SCHED_PRINTF("Init: process subsystem\n");
     tiku_process_init();
