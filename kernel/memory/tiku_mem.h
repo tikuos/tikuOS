@@ -1145,6 +1145,30 @@ typedef void (*tiku_mpu_write_fn)(void *ctx);
 void tiku_mpu_init(void);
 
 /**
+ * @brief Make the loadable-module execution window executable, or writable.
+ *
+ * W^X IN TIME.  A module is copied into a fixed window and then branched to --
+ * write-then-execute, which is exactly the pattern W^X exists to stop.  Rather
+ * than leave the window permanently writable AND executable (the state
+ * apollo510 shipped in, on the MPU background map with no region of its own),
+ * the window holds one permission at a time:
+ *
+ *     enable = 0   RW + XN   the resting state: the loader may write the image
+ *     enable = 1   RO + X    while a module runs: it may execute, nothing writes
+ *
+ * At no instant is it both.  Callers do copy -> validate -> enable(1) -> jump,
+ * and enable(0) before re-loading.  A module's writable globals therefore
+ * cannot live in the window; the ABI already requires handlers to be pure, and
+ * XIP platforms already enforced that by putting the image in NVM.
+ *
+ * No-op on platforms whose module runs XIP from NVM (everything except
+ * apollo510) -- there is no RAM window to flip.
+ *
+ * @param enable  1 = executable/read-only, 0 = writable/execute-never.
+ */
+void tiku_mpu_module_window_exec(int enable);
+
+/**
  * @brief Set permissions on a single MPU segment
  *
  * @param seg    Segment to configure (0-2)

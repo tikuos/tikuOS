@@ -142,15 +142,20 @@
  * a null pointer, by the loader's checks or the module's; it must match the
  * module's .ld exactly.
  *
- * THAT SAVING RESTS ON AN UNVERIFIED ASSUMPTION.  ITCM and DTCM power share one
- * field, PWRCTRL->MEMPWREN.PWRENTCM, and NOTHING in arch/ambiq programs it -- we
- * inherit the reset default.  The reasoning "we declare 512 KB of DTCM,
- * therefore PWRENTCM must be 7, therefore 256 KB of ITCM is powered" was
- * MEASURED FALSE: the port uses ~30 KB of DTCM, so even PWRENTCM=1 fits and
- * nothing forces the higher setting.  At PWRENTCM=1 only 32 KB of ITCM is
- * powered, and this window needs 36 KB (4 KB offset + 32 KB).  TikuBench's
- * tests/memory/test_mem_tcm.c exists to settle it and HAS NOT RUN.  Until it
- * does, treat apollo510's carve deletion as provisional.
+ * THE POWER QUESTION IS NOW MEASURED, not inferred.  ITCM and DTCM power share
+ * one field, PWRCTRL->MEMPWREN.PWRENTCM, and nothing in arch/ambiq programs it,
+ * so the reset default is what we get.  The old reasoning here -- "we declare
+ * 512 KB of DTCM, therefore PWRENTCM must be 7" -- was unsound (the port uses
+ * ~30 KB of DTCM, so PWRENTCM=1 would fit too), which is why the window needing
+ * 36 KB against a possible 32 KB was a real risk.
+ *
+ * Run on an Apollo510B EVB, 2026-07-26 (TikuBench tests/memory/test_mem_tcm.c):
+ * MEMPWREN=0x3f and MEMPWRSTATUS=0xdf both decode PWRENTCM/PWRSTTCM = 7, i.e.
+ * ITCM 256 KB and DTCM 512 KB are powered at the reset default; ITCM accepts a
+ * write and reads back through all 256 KB; and a stub copied there executes.
+ * The 36 KB window fits with room to spare and the DTCM the linker declares is
+ * genuinely there.  Keep the probe: nothing PROGRAMS PWRENTCM, so this is a
+ * property of the reset default, and a silicon or SDK revision could move it.
  *
  * WHY EVERY OTHER PART KEEPS THE CARVE -- three independent reasons, each
  * measured or read out of the tree rather than assumed:

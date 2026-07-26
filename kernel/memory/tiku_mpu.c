@@ -68,6 +68,11 @@ void tiku_mpu_init(void)
  * Delegates to the arch layer which handles the platform-specific
  * register encoding for setting per-segment permissions.
  */
+void tiku_mpu_module_window_exec(int enable)
+{
+    tiku_mpu_arch_module_window_exec(enable);
+}
+
 void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
 {
     tiku_mpu_arch_set_seg_perm((uint8_t)seg, (uint8_t)perm);

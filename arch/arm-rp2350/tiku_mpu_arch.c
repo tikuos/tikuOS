@@ -1036,3 +1036,16 @@ void tiku_rp2350_hard_fault_handler(void) {
         RP2350_SCB_AIRCR_VECTKEY | RP2350_SCB_AIRCR_SYSRESET;
     for (;;) { /* spin until reset asserts */ }
 }
+
+/**
+ * @brief No RAM execution window on this port -- the module runs XIP from NVM.
+ *
+ * Kept as an explicit no-op rather than omitted so the portable call site needs
+ * no #ifdef, and so a future port that DOES gain a window has an obvious place
+ * to implement it.  See kernel/shell/basic/tiku_basic_module.h for why every
+ * part except apollo510 executes in place.
+ */
+void tiku_mpu_arch_module_window_exec(int enable)
+{
+    (void)enable;
+}

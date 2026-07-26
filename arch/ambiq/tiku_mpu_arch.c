@@ -43,6 +43,7 @@
 #include "tiku_mpu_arch.h"
 #include "apollo510.h"            /* CMSIS: MPU/SCB/NVIC + mpu_armv8.h */
 #include <hal/tiku_cpu.h>         /* tiku_cpu_irq_disable/enable */
+#include <kernel/shell/basic/tiku_basic_module.h>  /* TIKU_MODULE_EXEC_* */
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -366,16 +367,34 @@ void tiku_mpu_arch_init_segments(void) {
                    AMBIQ_SSRAM_BASE,
                    AMBIQ_SSRAM_BASE + AMBIQ_SSRAM_SIZE - 1U,
                    0U, 1U);                                     /* region 6 */
-        /* Tier-3 loadable-module slot: the MRAM directly above the code
-         * window (32 KB; apollo510.ld __tiku_module_slot). RO + executable --
-         * the module runs XIP from here; the CPU never stores to it (installs
-         * go through the bootrom programmer, which is not gated by the MPU).
-         * Defense-in-depth: PRIVDEFENA would already allow privileged RX. */
+        /* Region 7 covers wherever a Tier-3 module EXECUTES, which differs by
+         * part -- see kernel/shell/basic/tiku_basic_module.h.
+         *
+         * XIP parts (apollo4l/4p): the MRAM slot directly above the code
+         * window.  RO + executable, permanently: the module runs in place and
+         * the CPU never stores to it (installs go through the bootrom
+         * programmer, which the MPU does not gate).
+         *
+         * apollo510: the module is COPIED into an ITCM window and run from
+         * there, so the slot size is 0 and this region would be degenerate
+         * (base .. base-1, matching nothing) -- which is how the window ended
+         * up with no MPU coverage at all, sitting RWX on the background map.
+         * It now covers the ITCM window instead, and starts in the RESTING
+         * state: RW + XN.  tiku_mpu_arch_module_window_exec() flips it to
+         * RO + X around the branch, so the window is never writable and
+         * executable at the same moment. */
+#if TIKU_MODULE_EXEC_IN_RAM
+        mpu_region(MPU_REGION_MODULE,
+                   TIKU_MODULE_EXEC_ADDR,
+                   TIKU_MODULE_EXEC_ADDR + TIKU_MODULE_CARVE_SIZE - 1U,
+                   0U /* RW */, 1U /* XN */);                   /* region 7 */
+#else
         mpu_region(MPU_REGION_MODULE,
                    (uint32_t)(uintptr_t)&__tiku_module_slot,
                    (uint32_t)(uintptr_t)&__tiku_module_slot +
                        TIKU_MPU_MODULE_SLOT_BYTES - 1U,
                    1U /* RO */, 0U /* exec OK */);              /* region 7 */
+#endif
     }
 
     /* Enable MPU + PRIVDEFENA. HFNMIENA off by default (a buggy fault handler
@@ -772,4 +791,29 @@ void tiku_ambiq_hard_fault_handler(void) {
         "mrsne r0, psp                \n\t"
         "b     ambiq_hard_fault_body  \n\t"
     );
+}
+
+/**
+ * @brief Flip the module execution window between writable and executable.
+ *
+ * The W^X-in-time half of the module loader (see kernel/memory/tiku_mem.h for
+ * the contract, and tiku_basic_module.h for why apollo510 is the only part with
+ * a window at all).  mpu_region() issues the DSB/ISB pair, so the new
+ * permissions are in force before the caller's next instruction fetch -- which
+ * matters here, because that next fetch may BE the module.
+ *
+ * @param enable  1 = RO + executable (a module is about to run / is running),
+ *                0 = RW + execute-never (resting; the loader may write).
+ */
+void tiku_mpu_arch_module_window_exec(int enable)
+{
+#if TIKU_MODULE_EXEC_IN_RAM
+    mpu_region(MPU_REGION_MODULE,
+               TIKU_MODULE_EXEC_ADDR,
+               TIKU_MODULE_EXEC_ADDR + TIKU_MODULE_CARVE_SIZE - 1U,
+               enable ? 1U : 0U,        /* RO while executable */
+               enable ? 0U : 1U);       /* XN while writable   */
+#else
+    (void)enable;                       /* XIP: no window to flip */
+#endif
 }

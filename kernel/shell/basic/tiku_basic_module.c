@@ -164,6 +164,9 @@ tiku_basic_module_activate(void)
         if (module_image(&src, &len, 0) != 0) {
             return -1;
         }
+        /* Resting state is RW+XN, but a previously activated module left the
+         * window RO+X -- make it writable again before copying over it. */
+        tiku_mpu_module_window_exec(0);
         memcpy((void *)(uintptr_t)TIKU_MODULE_EXEC_ADDR, src, len);
         img_len = len;
         /* The bytes arrived through the D-side; the I-side must not serve stale
@@ -200,6 +203,18 @@ tiku_basic_module_activate(void)
 #endif
         return -1;
     }
+    /*
+     * W^X in time: the window has been writable up to here so the image could
+     * be copied and its header checked.  Only now -- with magic, ABI and
+     * init_off all validated -- does it become executable, and it gives up
+     * write permission in the same operation.  A malformed image is therefore
+     * never executable, and a running module's code is never writable.
+     *
+     * The flip carries its own DSB/ISB, which is what makes the very next
+     * instruction fetch (the module's) see the new permissions.
+     */
+    tiku_mpu_module_window_exec(1);
+
     init = (tiku_module_init_fn)(uintptr_t)
            (TIKU_MODULE_EXEC_ADDR + hdr->init_off);
     init(&module_syscalls);   /* from the RAM window, or XIP from the carve */
