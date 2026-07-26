@@ -21,6 +21,8 @@
 #include <arch/nordic/tiku_nordic_mdk.h>
 #include <stddef.h>
 #include <arch/nordic/tiku_nordic_core.h>
+#include <arch/nordic/tiku_uart_arch.h>
+#include <arch/nordic/tiku_device_select.h>
 
 /*---------------------------------------------------------------------------*/
 /* CACHE                                                                     */
@@ -206,6 +208,165 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us)
         *out_us = (uint32_t)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0);
     }
     return sum;
+}
+
+/*---------------------------------------------------------------------------*/
+/* SLEEP FLOOR PROBE                                                         */
+/*---------------------------------------------------------------------------*/
+
+static uint32_t tiku_sleep_wakes;
+
+uint32_t tiku_nordic_sleep_wake_count(void) { return tiku_sleep_wakes; }
+
+/* CoreDebug DHCSR; C_DEBUGEN (bit 0) is set by the debugger over SWD and can
+ * only be cleared by it -- or by the pin reset the datasheet prescribes. */
+#define TIKU_DHCSR (*(volatile uint32_t *)0xE000EDF0UL)
+
+int tiku_nordic_debug_attached(void)
+{
+    return (TIKU_DHCSR & 1UL) != 0UL;
+}
+
+uint32_t tiku_nordic_sleep_probe(uint32_t ms, unsigned flags)
+{
+    uint32_t t0, now;
+    NRF_UARTE_Type *u = TIKU_BOARD_CONSOLE_UARTE;
+
+    if ((flags & TIKU_SLEEP_STOP_UART) != 0u) {
+        /* Let the caller's announcement finish leaving the wire before the
+         * transmitter is torn down, or the line that says what is about to
+         * happen is the line that gets truncated.  A few ms at 115200 clears
+         * anything the shell has queued. */
+        tiku_cpu_nordic_delay_ms(20u);
+        /* ENABLE=0 alone: on this UARTE the stop tasks live under TASKS_DMA
+         * rather than the legacy TASKS_STOPRX/STOPTX, and disabling the
+         * peripheral outright is what the probe wants anyway. */
+        u->ENABLE = 0u;
+    }
+    if ((flags & TIKU_SLEEP_STOP_PLL) != 0u) {
+        /* The erratum-39 workaround pins this on for the life of the boot.
+         * Releasing it is the whole question: does HFCLK then stop? */
+        NRF_CLOCK_S->TASKS_PLLSTOP = 1u;
+    }
+    if ((flags & TIKU_SLEEP_STOP_HFXO) != 0u) {
+        NRF_CLOCK_S->TASKS_XOSTOP = 1u;
+    }
+    if ((flags & TIKU_SLEEP_STOP_TIM) != 0u) {
+        /* The htimer's TIMER20 free-runs from sched init in EVERY build --
+         * a permanent PCLK16M request, i.e. a peripheral that is never idle
+         * in a system whose sleep depends on all of them being idle. */
+        NRF_TIMER20_S->TASKS_STOP = 1u;
+    }
+    if ((flags & TIKU_SLEEP_DEEP) != 0u) {
+        /* Sub-power mode: force Low-power in case anything earlier in the
+         * boot latched Constant Latency (the reset default is Low-power, but
+         * radio bursts and the Axon shim both touch CONSTLAT). */
+        NRF_POWER_S->TASKS_LOWPWR = 1u;
+        /* SLEEPDEEP is the difference between "the CPU pipeline is stalled"
+         * and "the CPU has released its clock".  Shallow WFI keeps the core's
+         * own HCLK request standing, so the HFCLK controller can never stop
+         * the clock no matter what else is released -- which is why stopping
+         * the PLL, the UARTE and the HFXO under shallow WFI measured a mere
+         * 85 uA of the 955: the biggest requestor was the sleeper itself. */
+        TIKU_SCB->SCR |= (1UL << 2);
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+
+    /* COUNT THE WAKES.  A WFI that returns immediately is not sleeping, and
+     * from the outside that is indistinguishable from one that is -- the
+     * current is simply higher than it should be and nobody knows why.  The
+     * wake count separates "the part will not sleep" from "the part sleeps and
+     * something else is drawing the current". */
+    tiku_sleep_wakes = 0u;
+    t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+    do {
+        __asm__ volatile ("wfi" ::: "memory");
+        tiku_sleep_wakes++;
+        /* Read twice: coming out of deep sleep the SYSCOUNTER may need a
+         * cycle to reactivate, and the first read can be stale. */
+        now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+        now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+    } while ((uint32_t)(now - t0) < ms * 1000u);
+
+    if ((flags & TIKU_SLEEP_DEEP) != 0u) {
+        /* Never left set: SLEEPDEEP changes what every later WFI in the
+         * system means, including the scheduler's idle hook, and that is a
+         * decision for the idle policy, not a side effect of one probe. */
+        TIKU_SCB->SCR &= ~(1UL << 2);
+    }
+
+    /* Restore in the reverse order, and give the clocks time to come back
+     * before anything tries to use them. */
+    if ((flags & TIKU_SLEEP_STOP_TIM) != 0u) {
+        NRF_TIMER20_S->TASKS_START = 1u;   /* free-running again; the origin
+                                            * shift is harmless at idle */
+    }
+    if ((flags & TIKU_SLEEP_STOP_HFXO) != 0u) {
+        NRF_CLOCK_S->EVENTS_XOSTARTED = 0u;
+        NRF_CLOCK_S->TASKS_XOSTART = 1u;
+    }
+    if ((flags & TIKU_SLEEP_STOP_PLL) != 0u) {
+        NRF_CLOCK_S->EVENTS_PLLSTARTED = 0u;
+        NRF_CLOCK_S->TASKS_PLLSTART = 1u;
+        while (NRF_CLOCK_S->EVENTS_PLLSTARTED == 0u) {
+            /* bounded by the PLL's own lock time, microseconds */
+        }
+    }
+    if ((flags & TIKU_SLEEP_STOP_UART) != 0u) {
+        /* Full re-init rather than restoring ENABLE: the RX path is
+         * DMA-driven and needs its buffer and short re-armed, which only
+         * tiku_uart_init() knows how to do. */
+        tiku_uart_init();
+    }
+    return (uint32_t)(now - t0);
+}
+
+uint32_t tiku_nordic_spin_probe(uint32_t ms)
+{
+    uint32_t t0, now;
+
+    t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+    do {
+        uint32_t n = 4096u;
+        /* Two instructions, entirely inside the cache/prefetch, no loads and
+         * no stores: as close to "the core is simply running" as this part
+         * can be asked to get. */
+        __asm__ volatile ("1: subs %0, %0, #1\n\t"
+                          "   bne  1b\n"
+                          : "+r" (n) : : "cc");
+        now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+    } while ((uint32_t)(now - t0) < ms * 1000u);
+    return (uint32_t)(now - t0);
+}
+
+void tiku_nordic_system_off(void)
+{
+    unsigned i;
+
+    /* DISARM EVERY WAKE SOURCE FIRST.  The kernel tick's GRTC compare is
+     * armed ~8 ms out at any moment, and a System OFF wake is a RESET, so an
+     * armed compare turns this into an instant reboot and the "measurement"
+     * is just the shell idling again.
+     *
+     * MEASURED CAVEAT (LM20-DK, 2026-07-26): disarming did NOT make System
+     * OFF hold on this rig.  The board still came back immediately, and with
+     * RESETREAS reading 0 -- a power-on-reset signature, not the OFF bit a
+     * real System OFF wake sets.  So entry collapses into a POR-class reset
+     * here, cause unresolved (candidates: a VDDM transient at the OFF
+     * load-step through the series instrument, or interference from the
+     * on-board debugger).  The disarm stays because it is necessary for the
+     * day entry works; it just is not sufficient on this bench. */
+    for (i = 0u; i < 16u; i++) {
+        NRF_GRTC_S->CC[i].CCEN = 0u;
+    }
+    NRF_GRTC_S->INTENCLR0 = 0xFFFFFFFFu;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+
+    NRF_REGULATORS_S->SYSTEMOFF = 1u;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    for (;;) {
+        __asm__ volatile ("wfi");
+    }
 }
 
 /*---------------------------------------------------------------------------*/

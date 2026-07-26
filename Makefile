@@ -2885,6 +2885,13 @@ else
 	@echo "Flashing $(TARGET_HEX) via nrfutil ($(NRFUTIL))..."
 	$(NRFUTIL_ENV) $(NRFUTIL) device program --firmware $(TARGET_HEX) --core Application \
 		--options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG)
+	@# RESET_PIN after programming: the datasheet (9.3) says the device stays
+	@# in DEBUG INTERFACE MODE until a debug session ends "followed by a pin
+	@# reset", and measured on an LM20-DK that mode costs ~130 uA of idle
+	@# current -- every power figure taken after a plain RESET_SYSTEM flash is
+	@# quietly an upper bound.  A pin reset also resets the debug domain, which
+	@# nothing in a normal flash-and-run flow needs to survive.
+	$(NRFUTIL_ENV) $(NRFUTIL) device reset --reset-kind RESET_PIN $(NRF_SN_ARG)
 endif
 
 run: flash

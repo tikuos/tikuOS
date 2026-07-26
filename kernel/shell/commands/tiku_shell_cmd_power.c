@@ -69,6 +69,12 @@ static void power_report(void)
     }
 #endif
     SHELL_PRINTF("idle:  %s\n", tiku_shell_sleep_mode_str());
+#if defined(PLATFORM_NORDIC)
+    /* Datasheet 9.3: the low-power figures apply to Normal mode; a device
+     * still in debug interface mode measures as an upper bound only. */
+    SHELL_PRINTF("debug: %s\n", tiku_nordic_debug_attached()
+                 ? "ATTACHED (currents are upper bounds)" : "normal");
+#endif
 }
 
 #if defined(PLATFORM_NORDIC)
@@ -107,6 +113,79 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
 #if defined(PLATFORM_NORDIC)
     if (streq(argv[1], "stat")) {
         power_stat();
+        return;
+    }
+    if (streq(argv[1], "idle") && argc >= 3) {
+        /* power idle <ms> [pll] [uart] [hfxo] -- sit in WFI with the named
+         * standing clock requests released, so an external instrument can
+         * attribute the idle floor instead of the operator guessing. */
+        unsigned flags = 0u, i;
+        uint32_t ms = 0u, us;
+        const char *p = argv[2];
+        while (*p >= '0' && *p <= '9') { ms = ms * 10u + (uint32_t)(*p++ - '0'); }
+        for (i = 3u; i < (unsigned)argc; i++) {
+            if (streq(argv[i], "pll"))  { flags |= TIKU_SLEEP_STOP_PLL; }
+            if (streq(argv[i], "uart")) { flags |= TIKU_SLEEP_STOP_UART; }
+            if (streq(argv[i], "hfxo")) { flags |= TIKU_SLEEP_STOP_HFXO; }
+            if (streq(argv[i], "deep")) { flags |= TIKU_SLEEP_DEEP; }
+            if (streq(argv[i], "tim"))  { flags |= TIKU_SLEEP_STOP_TIM; }
+        }
+        if (ms == 0u) { SHELL_PRINTF("Usage: power idle <ms> [pll] [uart] [hfxo]\n"); return; }
+        SHELL_PRINTF("idle %lu ms flags%s%s%s%s -- starting\n", (unsigned long)ms,
+                     (flags & TIKU_SLEEP_STOP_PLL)  ? " pll"  : "",
+                     (flags & TIKU_SLEEP_STOP_UART) ? " uart" : "",
+                     (flags & TIKU_SLEEP_STOP_HFXO) ? " hfxo" : "",
+                     (flags & TIKU_SLEEP_DEEP)      ? " deep" : "");
+        us = tiku_nordic_sleep_probe(ms, flags);
+        SHELL_PRINTF("idle done %lu us wakes %lu (%lu/s)\n",
+                     (unsigned long)us,
+                     (unsigned long)tiku_nordic_sleep_wake_count(),
+                     (unsigned long)(us ? (uint32_t)(((uint64_t)
+                        tiku_nordic_sleep_wake_count() * 1000000u) / us) : 0u));
+        return;
+    }
+    if (streq(argv[1], "why")) {
+        /* RESETREAS decode.  Exists to answer one question: WHAT woke the
+         * part out of System OFF, because "it came back" alone cannot
+         * distinguish a button, the GRTC, or the debugger -- and each of
+         * those implicates a completely different subsystem. */
+        uint32_t r = *(volatile uint32_t *)0x5010E600UL;
+        SHELL_PRINTF("RESETREAS %x:%s%s%s%s%s%s%s%s%s%s\n", (unsigned)r,
+                     (r & (1u << 0))  ? " pin"      : "",
+                     (r & (1u << 1))  ? " dog0"     : "",
+                     (r & (1u << 3))  ? " ctrlsoft" : "",
+                     (r & (1u << 4))  ? " ctrlhard" : "",
+                     (r & (1u << 6))  ? " sreq"     : "",
+                     (r & (1u << 8))  ? " OFF-wake" : "",
+                     (r & (1u << 10)) ? " DIF(debugger)" : "",
+                     (r & (1u << 11)) ? " GRTC"     : "",
+                     (r & (1u << 12)) ? " nfc"      : "",
+                     (r & (1u << 14)) ? " vbus"     : "");
+        if (argc >= 3 && streq(argv[2], "clear")) {
+            *(volatile uint32_t *)0x5010E600UL = r;   /* W1C */
+            SHELL_PRINTF("cleared\n");
+        }
+        return;
+    }
+    if (streq(argv[1], "off")) {
+        /* System OFF: the deepest state the part has, ~uA class per datasheet,
+         * wake by reset/GPIO only.  This is the CONTROL for the idle-floor
+         * hunt: P14 measures the VDDM RAIL, and if hundreds of uA remain with
+         * the SoC in System OFF, that current is the BOARD's (or the debug
+         * domain's) -- no firmware change can remove it, and chasing it in
+         * software would be chasing a ghost. */
+        SHELL_PRINTF("entering System OFF -- wake by RESET only\n");
+        tiku_cpu_nordic_delay_ms(20u);          /* let the line leave the wire */
+        tiku_nordic_system_off();               /* does not return */
+    }
+    if (streq(argv[1], "spin") && argc >= 3) {
+        uint32_t ms = 0u, us;
+        const char *p = argv[2];
+        while (*p >= '0' && *p <= '9') { ms = ms * 10u + (uint32_t)(*p++ - '0'); }
+        if (ms == 0u) { SHELL_PRINTF("Usage: power spin <ms>\n"); return; }
+        SHELL_PRINTF("spin %lu ms -- starting\n", (unsigned long)ms);
+        us = tiku_nordic_spin_probe(ms);
+        SHELL_PRINTF("spin done %lu us\n", (unsigned long)us);
         return;
     }
     if (streq(argv[1], "bench")) {

@@ -110,6 +110,84 @@ unsigned long tiku_nordic_cpu_hz_measure(void);
 uint32_t tiku_nordic_cache_workload(uint32_t *out_us);
 
 /*---------------------------------------------------------------------------*/
+/* SLEEP FLOOR PROBE                                                         */
+/*---------------------------------------------------------------------------*/
+
+/** Things this port leaves running that a truly idle part would not. */
+#define TIKU_SLEEP_STOP_PLL   0x1u   /**< release the pinned core PLL       */
+#define TIKU_SLEEP_STOP_UART  0x2u   /**< disable the console UARTE         */
+#define TIKU_SLEEP_STOP_HFXO  0x4u   /**< stop the 32 MHz crystal           */
+#define TIKU_SLEEP_DEEP       0x8u   /**< WFI with SCR.SLEEPDEEP set        */
+#define TIKU_SLEEP_STOP_TIM   0x10u  /**< stop the free-running htimer TIMER20 */
+
+/**
+ * @brief Sit in WFI for @p ms, optionally shutting down what holds HFCLK up.
+ *
+ * EXISTS BECAUSE "IDLE" WAS OFF BY A FACTOR OF 300.  This port's WFI idle
+ * measured 953 uA against a datasheet System ON IDLE figure of 3.0 uA (GRTC on
+ * XOSC, 256 KB RAM).  Halting the core is not the same as letting the part
+ * sleep: the HFCLK controller only stops the clock when NOTHING requests it,
+ * and this port holds at least two standing requests -- an enabled console
+ * UARTE, and a core PLL pinned on by the erratum-39 workaround, which triggers
+ * TASKS_PLLSTART at boot and never issues the paired PLLSTOP.
+ *
+ * Each flag releases one of those so the 953 uA can be attributed rather than
+ * guessed at.  Everything is restored before returning, including the console,
+ * so the caller can still report.
+ *
+ * NOT A POWER-MANAGEMENT API.  This is a measurement instrument: it tells you
+ * what a real low-power path would have to do, and what each piece is worth.
+ *
+ * @param ms     Duration to stay in WFI.
+ * @param flags  TIKU_SLEEP_STOP_* bits.
+ * @return Actual elapsed microseconds (GRTC-timed).
+ */
+uint32_t tiku_nordic_sleep_probe(uint32_t ms, unsigned flags);
+
+/** @brief How many times WFI returned during the last sleep probe. */
+uint32_t tiku_nordic_sleep_wake_count(void);
+
+/**
+ * @brief Non-zero if a debugger has halting debug enabled (DHCSR.C_DEBUGEN).
+ *
+ * The datasheet's low-power figures apply to NORMAL mode only: "when a debug
+ * session is over, the device must be set to Normal mode by the external
+ * debugger, followed by a pin reset" (9.3).  A flashing flow that ends with a
+ * SYSTEM reset never leaves debug interface mode, and every current
+ * measurement taken in that state is an upper bound, not a figure.
+ */
+int tiku_nordic_debug_attached(void);
+
+/**
+ * @brief Spin the core in a tight two-instruction loop for @p ms.
+ *
+ * The `while(1){}` reference point.  Measured against the WFI floor with
+ * everything else identical, the difference is the core's own dynamic cost --
+ * i.e. what the CPU clock is worth -- with no workload, no memory traffic and
+ * no peripheral activity mixed in.
+ *
+ * The loop is `subs`/`bne` in inline asm rather than C, so no optimiser
+ * decision stands between the source and what the core executes: an empty C
+ * `while(1)` compiles to a single backward branch, and a C loop with a counter
+ * may or may not survive -O2 intact.  The GRTC is read once per 4096
+ * iterations, keeping the peripheral bus below ~0.1% of the window so what is
+ * measured is the core, not the bus.
+ *
+ * @param ms  Duration to spin.
+ * @return Actual elapsed microseconds (GRTC-timed).
+ */
+uint32_t tiku_nordic_spin_probe(uint32_t ms);
+
+/**
+ * @brief Enter System OFF.  Does not return; wake is by reset or GPIO DETECT.
+ *
+ * The control experiment for the idle-floor hunt: the part specs ~uA here, so
+ * any current still measured on the rail with the SoC in System OFF belongs to
+ * the board or the debug domain, and no firmware change can remove it.
+ */
+void tiku_nordic_system_off(void) __attribute__((noreturn));
+
+/*---------------------------------------------------------------------------*/
 /* SUPPLY                                                                    */
 /*---------------------------------------------------------------------------*/
 
