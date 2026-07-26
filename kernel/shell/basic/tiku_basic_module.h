@@ -119,26 +119,78 @@
 #endif
 
 /*
- * WHERE THE MODULE EXECUTES (P3f).  A module is pre-linked to an absolute
- * address, so SOME fixed window is unavoidable -- but nothing requires it to be
- * in NVM.  On Apollo510 the window is the ITCM: 256 KB that is powered by the
- * same PWRENTCM=7 the 512 KB DTCM already requires, sits completely idle, and
- * executes code (all three measured -- see TikuBench tests/memory/
- * test_mem_tcm.c).  Moving there costs nothing and lets the NVM module carve be
- * deleted outright, which is the point.
+ * WHERE THE MODULE EXECUTES (P3f) -- A SETTLED DECISION, NOT PENDING WORK.
  *
- * The window starts 4 KB in rather than at ITCM base 0x00000000, so no module
- * address can ever be zero and be mistaken for a null pointer -- by the loader's
- * own checks or by the module's.  It must match the module's .ld exactly.
+ * A module is pre-linked to an absolute address, so SOME fixed window is
+ * unavoidable; nothing requires it to be in NVM.  The plan once read as "move
+ * every platform's window into RAM and delete the NVM carve".  Measurement
+ * turned that into a per-platform answer, because the condition that makes a
+ * RAM window free holds on exactly one part:
  *
- * Elsewhere the module still runs XIP from the NVM carve, and on Nordic that is
- * now a MEASURED constraint rather than a pending task.  TikuBench's RAM Exec
- * Probe (tests/memory/test_mem_ramexec.c) shows an nRF54LM20 HardFaults on any
- * attempt to execute from SRAM, because arch/nordic/tiku_mpu_arch.c marks both
- * banks RW+XN as W^X hardening (2026-07 D.1).  A Nordic RAM window therefore
- * requires punching an executable hole in W^X -- a security decision that has
- * to be taken deliberately, not a linker-script edit.  rp2350 is untested; that
- * hardware is not on the bench.
+ *   apollo510   ITCM window at 0x1000, NO NVM carve (module_size = 0)
+ *   apollo4l/p  XIP from the 32 KB NVM carve
+ *   nRF54L15    XIP from the 32 KB NVM carve
+ *   nRF54LM20   XIP from the 32 KB NVM carve
+ *   rp2350      XIP from the 32 KB NVM carve
+ *   MSP430      XIP from its 4 KB HIFRAM slot (natively executable; non-goal)
+ *
+ * WHY APOLLO510 IS THE EXCEPTION.  Its ITCM sits at 0x00000000 in a separate
+ * address space and is not even declared in the linker script's MEMORY block --
+ * dedicated instruction memory that nothing else can use.  Spending it costs
+ * nothing, which is what let the NVM carve go.  The window starts 4 KB in
+ * rather than at ITCM base so no module address can be zero and be mistaken for
+ * a null pointer, by the loader's checks or the module's; it must match the
+ * module's .ld exactly.
+ *
+ * THAT SAVING RESTS ON AN UNVERIFIED ASSUMPTION.  ITCM and DTCM power share one
+ * field, PWRCTRL->MEMPWREN.PWRENTCM, and NOTHING in arch/ambiq programs it -- we
+ * inherit the reset default.  The reasoning "we declare 512 KB of DTCM,
+ * therefore PWRENTCM must be 7, therefore 256 KB of ITCM is powered" was
+ * MEASURED FALSE: the port uses ~30 KB of DTCM, so even PWRENTCM=1 fits and
+ * nothing forces the higher setting.  At PWRENTCM=1 only 32 KB of ITCM is
+ * powered, and this window needs 36 KB (4 KB offset + 32 KB).  TikuBench's
+ * tests/memory/test_mem_tcm.c exists to settle it and HAS NOT RUN.  Until it
+ * does, treat apollo510's carve deletion as provisional.
+ *
+ * WHY EVERY OTHER PART KEEPS THE CARVE -- three independent reasons, each
+ * measured or read out of the tree rather than assumed:
+ *
+ *   1. SRAM is the scarce resource; NVM is not.  The carve costs 0.9% (rp2350)
+ *      to 2.8% (l15) of a part's NVM.  A 32 KB SRAM window would cost ~13% of
+ *      the nRF54LM20's 240 KB primary bank -- the bank BASIC's arena and Axon's
+ *      interlayer buffer already contend for.  Trading 2% of the abundant
+ *      resource for 13% of the contested one is backwards.
+ *   2. Their NVM already executes in place.  RRAM rides the background map as
+ *      Normal RX (arch/nordic/tiku_mpu_arch.c deliberately does NOT re-gate it)
+ *      and rp2350 runs XIP from flash by construction.  XIP needs no window, no
+ *      MPU exception, and no copy.
+ *   3. On Nordic, RAM execution is a HARD FAULT BY DESIGN.  TikuBench's RAM Exec
+ *      Probe (tests/memory/test_mem_ramexec.c) measured it on an nRF54LM20: the
+ *      primary bank accepts the write and reads it back, then executing faults
+ *      (IPSR=3 over SWD), because tiku_mpu_arch.c marks both banks RW+XN as W^X
+ *      hardening (2026-07 D.1).  rp2350's port uses the same W^X shape, so the
+ *      same is presumed there and remains untested -- no board on the bench.
+ *   And apollo4l/4p simply have no idle instruction memory to spend: one 384 KB
+ *   TCM at 0x10000000, already carrying .data, .bss, heap and stack.
+ *
+ * TWO ALTERNATIVES CONSIDERED AND REJECTED.  Punching a permanently executable
+ * hole in W^X recreates the exact write-then-execute primitive the hardening
+ * removes.  Flipping a window's permissions in time instead (RW+XN to hold the
+ * image, RO+X to run it, never both at once) preserves the invariant honestly --
+ * but on Nordic it would still require reserving the 32 KB of SRAM, and an
+ * unconditional feature-shaped carve is the pathology the whole v0.06 memory
+ * rework exists to delete.  It is the right pattern only where a window already
+ * exists: apollo510's is currently RWX with no MPU coverage at all, and that is
+ * where the flip belongs.
+ *
+ * THE PATH THAT ACTUALLY DELETES THE CARVE is relocatable modules -- ROPI, or a
+ * load-time relocation table -- so a module executes from wherever its store
+ * file happens to land, with no fixed window anywhere and no SRAM cost.  The
+ * design of record names it as the end state ("the RAM window is a waypoint,
+ * not the end state").  It should not be built separately: P3d's A2 already
+ * needs a GENERIC relocation backend for Nordic's compiled models, whose
+ * baked-absolute-address problem is the same one, and absorbing this there is
+ * how it gets done once instead of twice.
  */
 #if defined(AM_PART_APOLLO510)
 #define TIKU_MODULE_EXEC_IN_RAM  1
