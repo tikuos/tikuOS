@@ -51,10 +51,26 @@
 #include "drivers/axon/nrf_axon_driver.h"
 #include "axon/nrf_axon_platform.h"
 #include "drivers/axon/nrf_axon_dsp_intrinsics.h"
-#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+
+/* Nordic's inference sources are compiled in two configurations, and the store
+ * path is wanted in both:
+ *
+ *   TIKU_AXON_MODEL_TEST       one model baked into .rodata.  The store path
+ *                              runs beside it, so the two can be diffed --
+ *                              this is the configuration that PROVES the store.
+ *   TIKU_AXON_MODEL_FROM_STORE no model compiled at all.  The store path is the
+ *                              only path -- this is the shipping shape.
+ */
+#if (defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST) || \
+    (defined(TIKU_AXON_MODEL_FROM_STORE) && TIKU_AXON_MODEL_FROM_STORE)
+#define AXONS_HAVE_NN 1
+#endif
+
+#if defined(AXONS_HAVE_NN)
 #include "drivers/axon/nrf_axon_nn_infer.h"
 #include "drivers/axon/nrf_axon_nn_infer_test.h"
 #include <kernel/fs/tiku_model.h>
+#include <kernel/memory/tiku_nvm_mirror.h>
 #include <kernel/vfs/tree/tiku_vfs_tree_data.h>
 #endif
 #endif
@@ -165,7 +181,7 @@ static void axons_diff(void)
 }
 
 
-#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+#if defined(AXONS_HAVE_NN)
 /*---------------------------------------------------------------------------*/
 /* A2b: RUN THE SAME MODEL FROM THE STORE, AND COMPARE                       */
 /*---------------------------------------------------------------------------*/
@@ -191,18 +207,56 @@ static void axons_diff(void)
  * addresses; running them against relocated weights would mix a relocated and an
  * unrelocated path and make the comparison meaningless.
  */
+#if defined(TIKU_AXON_MODEL_FROM_STORE) && TIKU_AXON_MODEL_FROM_STORE
+/* NO MODEL TRANSLATION UNIT IS COMPILED in this configuration, so the four
+ * globals it used to define live here instead -- same names, same types, same
+ * (non-static) linkage.  Nordic's inference sources are untouched and cannot
+ * tell the difference; they were already written against these as externs.
+ *
+ * AxonnnModelPrepare() has nothing to prepare: there is no baked model to point
+ * at and no baked vectors to populate.  Both are filled in from the store. */
+nrf_axon_nn_compiled_model_s const *the_full_model_static_info[1];
+nrf_axon_nn_compiled_model_layer_s const **the_model_layers_static_info[1]
+                                                                    = { NULL };
+uint16_t model_layers_count[1] = { 0 };
+nrf_axon_nn_model_test_info_s the_test_vectors[1];
+
+int AxonnnModelPrepare(void)
+{
+    return 0;
+}
+#else
 extern nrf_axon_nn_compiled_model_s const *the_full_model_static_info[1];
 extern nrf_axon_nn_model_test_info_s       the_test_vectors[];
 extern int  AxonnnModelPrepare(void);
+#endif
 
 /* The weights stay MAPPED in RRAM; only the command buffer needs RAM.  Sized for
- * the largest model that fits the code window today (tinyml_ic, 38,680 B); vww's
- * 51,344 arrives with A3, when the arrays leave the image and free the room. */
+ * the largest command buffer in the shipped tinyml set (tinyml_vww, 51,344 B) --
+ * reachable only from a model-free image, which is exactly the configuration
+ * that has the RAM spare. */
 #ifndef AXONS_STORE_CMD_MAX
-#define AXONS_STORE_CMD_MAX  40960u
+#define AXONS_STORE_CMD_MAX  53248u
 #endif
 static uint8_t axons_store_cmd[AXONS_STORE_CMD_MAX] __attribute__((aligned(8)));
+
+/* The descriptor is built INTO a real struct, so the compiler supplies the
+ * alignment the engine expects rather than this code asserting it. */
 static nrf_axon_nn_compiled_model_s axons_store_desc;
+
+/* The label pointer array and the model's packed output.  Both are small and
+ * both are per-model, so they are sized generously once rather than tuned:
+ * the shipped models use 12 labels and 8 bytes of packed output. */
+#define AXONS_STORE_LABEL_MAX  32u
+/* Packed output.  64 bytes looked generous next to the classifiers' 8 -- and
+ * then tinyml_ad asked for 2560, because an autoencoder's output is a whole
+ * reconstructed frame rather than a handful of class scores.  The model states
+ * its own requirement in the file and the load refuses rather than overflows,
+ * so this only ever needs to be large enough; 4 KB clears the shipped set. */
+#define AXONS_STORE_POUT_MAX   4096u
+static const char *axons_store_labels[AXONS_STORE_LABEL_MAX];
+static uint8_t axons_store_pout[AXONS_STORE_POUT_MAX]
+                                            __attribute__((aligned(8)));
 
 /**
  * @brief Publish the firmware addresses a packed model's table may name.
@@ -211,6 +265,12 @@ static nrf_axon_nn_compiled_model_s axons_store_desc;
  * resolves Thumb-tagged, and taking the address in C is what supplies that bit
  * (see tiku_model.h).  A hand-written constant would be one short, and the
  * symptom is a single corrupt word in the command stream.
+ *
+ * @packed_out is registered here rather than resolved by the loader because it
+ * is neither in the file nor a fixed firmware address -- it is a buffer this
+ * caller lends the model.  The loader owns the names for the model's own parts
+ * and lets everything else fall through to the registry, which is exactly the
+ * seam that makes that possible.
  */
 static int axons_store_register_syms(void)
 {
@@ -229,13 +289,194 @@ static int axons_store_register_syms(void)
         rc = tiku_model_sym_register("nrf_axon_nn_op_extension_softmax",
                                      (uintptr_t)&nrf_axon_nn_op_extension_softmax);
     }
+    if (rc == TIKU_MODEL_OK) {
+        rc = tiku_model_sym_register("@packed_out",
+                                     (uintptr_t)axons_store_pout);
+    }
     return rc;
 }
 
-static void axons_model_from_store(const char *name)
+/*---------------------------------------------------------------------------*/
+/* A3: THE KNOWN ANSWERS, ALSO FROM THE STORE                                */
+/*---------------------------------------------------------------------------*/
+/*
+ * The vendor harness compares each inference against a shipped expected output,
+ * and those vectors are C arrays too -- 315 KB of .rodata for tinyml_vww, more
+ * than its weights.  A model-free image cannot carry them either, so they are
+ * packed into a companion .kat file (tools/axonpack.py --kat) and read here.
+ *
+ * DELIBERATELY A SEPARATE FILE, NOT A SECTION OF THE .axm.  These are the test
+ * harness's known answers, not part of the model: a product provisions the
+ * model and never the vectors.  Keeping them apart is what lets the shipping
+ * path be the small one.
+ *
+ * ONLY THE FULL-MODEL VECTORS ARE PACKED.  The other 232 KB is layer-by-layer
+ * data, and the store path does not run layer models -- their command buffers
+ * still hold link-time addresses (see the note above), so including their
+ * vectors would only invite a comparison that cannot mean anything.
+ */
+#define AKT_MAGIC       0x31544B41u    /* 'AKT1' little-endian */
+#define AKT_VERSION     1u
+#define AKT_HDR_BYTES   48u
+#define AXONS_KAT_MAX   8u             /* vector pairs; the shipped set has 3 */
+
+static const int8_t *axons_kat_in[AXONS_KAT_MAX];
+static const int8_t *axons_kat_exp[AXONS_KAT_MAX];
+
+/**
+ * @brief Map a .kat and point @p info at its vectors.
+ *
+ * The vectors are USED IN PLACE out of NVM -- only the two pointer arrays are
+ * built in RAM, which is why an 83 KB KAT costs 64 bytes of SRAM.
+ *
+ * @return 0 on success, or -1 with a reason already printed.
+ */
+static int axons_kat_load(tiku_tfs_t *fs, const char *name,
+                          nrf_axon_nn_model_test_info_s *info,
+                          const char *test_name)
+{
+    const void *p = NULL;
+    size_t      n = 0u;
+    const uint8_t *b;
+    uint32_t hdr[10];
+    uint32_t i;
+
+    if (tiku_tfs_map(fs, name, &p, &n) != TFS_OK) {
+        SHELL_PRINTF("modelstore: no such KAT file: %s\n", name);
+        return -1;
+    }
+    b = (const uint8_t *)p;
+    if (n < AKT_HDR_BYTES) {
+        SHELL_PRINTF("modelstore: %s is too short to be a KAT\n", name);
+        return -1;
+    }
+    memcpy(hdr, b, sizeof hdr);
+    if (hdr[0] != AKT_MAGIC || hdr[1] != AKT_VERSION ||
+        hdr[2] != AKT_HDR_BYTES) {
+        SHELL_PRINTF("modelstore: %s is not a v%u KAT\n", name,
+                     (unsigned)AKT_VERSION);
+        return -1;
+    }
+    {
+        uint32_t nvec = hdr[3], in_off = hdr[4], in_str = hdr[5];
+        uint32_t ex_off = hdr[6], ex_str = hdr[7];
+
+        if (nvec == 0u || nvec > AXONS_KAT_MAX) {
+            SHELL_PRINTF("modelstore: %s has %u vectors, room for %u\n",
+                         name, (unsigned)nvec, (unsigned)AXONS_KAT_MAX);
+            return -1;
+        }
+        /* Bounds as subtractions, never additions: two file-supplied u32s can
+         * wrap, and a wrapped sum passes a naive comparison. */
+        if (in_str == 0u || ex_str == 0u ||
+            in_off > (uint32_t)n || ex_off > (uint32_t)n ||
+            in_str > ((uint32_t)n - in_off) / nvec ||
+            ex_str > ((uint32_t)n - ex_off) / nvec) {
+            SHELL_PRINTF("modelstore: %s geometry does not fit the file\n",
+                         name);
+            return -1;
+        }
+        if (tiku_nvm_crc32(b + in_off, in_str * nvec) != hdr[8] ||
+            tiku_nvm_crc32(b + ex_off, ex_str * nvec) != hdr[9]) {
+            SHELL_PRINTF("modelstore: %s failed its checksum\n", name);
+            return -1;
+        }
+        for (i = 0u; i < nvec; i++) {
+            axons_kat_in[i]  = (const int8_t *)(b + in_off + i * in_str);
+            axons_kat_exp[i] = (const int8_t *)(b + ex_off + i * ex_str);
+        }
+        nrf_axon_nn_populate_model_test_info_s(info, test_name,
+                                               axons_kat_in, axons_kat_exp,
+                                               (uint16_t)nvec, NULL, 0u);
+        SHELL_PRINTF("modelstore: KAT %s: %u vectors, input %u B, "
+                     "expected %u B (mapped, not copied)\n",
+                     name, (unsigned)nvec, (unsigned)in_str, (unsigned)ex_str);
+    }
+    return 0;
+}
+
+#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+/**
+ * @brief Compare the descriptor built from the store against the linked one.
+ *
+ * Only possible in a baked build, and that is the point: this is the on-device
+ * counterpart of the packer's host-side reconstruction gate.  The packer proves
+ * the FILE reproduces the linker's bytes; this proves the DEVICE does, using
+ * the same model, at the addresses it will actually run at.
+ *
+ * The pointer fields are expected to differ -- they are the whole reason the
+ * model was relocated -- so they are reported rather than failed.  Everything
+ * else is a scalar the store must reproduce exactly, and a mismatch there means
+ * the packed descriptor does not describe the same model.
+ *
+ * @return the number of differing scalar fields (0 is the pass).
+ */
+static unsigned axons_store_desc_check(const nrf_axon_nn_compiled_model_s *got,
+                                       const nrf_axon_nn_compiled_model_s *want)
+{
+    unsigned bad = 0u;
+
+#define SCALAR(f, fmt)                                                        \
+    do {                                                                      \
+        if ((got)->f != (want)->f) {                                          \
+            SHELL_PRINTF("  desc." #f " store=" fmt " baked=" fmt "\n",       \
+                         (unsigned)(got)->f, (unsigned)(want)->f);            \
+            bad++;                                                            \
+        }                                                                     \
+    } while (0)
+
+    SCALAR(compiler_version, "%x");
+    SCALAR(input_cnt, "%u");
+    SCALAR(external_input_ndx, "%d");
+    SCALAR(interlayer_buffer_needed, "%u");
+    SCALAR(psum_buffer_needed, "%u");
+    SCALAR(model_const_size, "%u");
+    SCALAR(cmd_buffer_len, "%u");
+    SCALAR(inputs[0].dimensions.height, "%u");
+    SCALAR(inputs[0].dimensions.width, "%u");
+    SCALAR(inputs[0].dimensions.channel_cnt, "%u");
+    SCALAR(inputs[0].dimensions.byte_width, "%u");
+    SCALAR(inputs[0].quant_mult, "%u");
+    SCALAR(inputs[0].stride, "%u");
+    SCALAR(inputs[0].quant_round, "%u");
+    SCALAR(inputs[0].quant_zp, "%d");
+    SCALAR(inputs[0].is_external, "%u");
+    SCALAR(output_dimensions.height, "%u");
+    SCALAR(output_dimensions.width, "%u");
+    SCALAR(output_dimensions.channel_cnt, "%u");
+    SCALAR(output_dimensions.byte_width, "%u");
+    SCALAR(output_dequant_mult, "%u");
+    SCALAR(output_dequant_round, "%u");
+    SCALAR(output_dequant_zp, "%d");
+    SCALAR(output_stride, "%u");
+    SCALAR(is_layer_model, "%u");
+    SCALAR(persistent_vars.count, "%u");
+#undef SCALAR
+
+    /* The interlayer-relative pointers must land at the SAME offsets from the
+     * buffer base, even though the base itself is the same in both cases --
+     * this catches a descriptor whose REL addends were mispatched. */
+    if (got->output_ptr != want->output_ptr) {
+        SHELL_PRINTF("  desc.output_ptr store=%p baked=%p\n",
+                     (const void *)got->output_ptr,
+                     (const void *)want->output_ptr);
+        bad++;
+    }
+    if (got->inputs[0].ptr != want->inputs[0].ptr) {
+        SHELL_PRINTF("  desc.inputs[0].ptr store=%p baked=%p\n",
+                     (const void *)got->inputs[0].ptr,
+                     (const void *)want->inputs[0].ptr);
+        bad++;
+    }
+    return bad;
+}
+#endif  /* TIKU_AXON_MODEL_TEST */
+
+static void axons_model_from_store(const char *name, const char *kat)
 {
     tiku_tfs_t   *fs = tiku_vfs_tree_data_store();
     tiku_model_t  m;
+    tiku_model_dest_t dst[TIKU_MODEL_SECT_COUNT];
     const char   *bad = NULL;
     size_t        n = 0u;
     uint32_t      t0;
@@ -279,21 +520,53 @@ static void axons_model_from_store(const char *name)
                  (const void *)axons_store_cmd,
                  (unsigned)((uintptr_t)axons_store_cmd & 15u));
 
+    /* THE DESCRIPTOR'S SIZE IS THE ABI GATE.  The packed bytes are the vendor's
+     * struct as the compiler that built the packer's input laid it out; this
+     * image's struct must be the same shape or the fields land in the wrong
+     * places -- and the engine would read a plausible, wrong model.  A vendor
+     * header change is exactly what this catches. */
+    if (m.desc_len != sizeof axons_store_desc) {
+        SHELL_PRINTF("modelstore: descriptor is %u B, this build expects %u -- "
+                     "repack against this SDK\n",
+                     (unsigned)m.desc_len, (unsigned)sizeof axons_store_desc);
+        return;
+    }
+    if (m.nlabels > AXONS_STORE_LABEL_MAX) {
+        SHELL_PRINTF("modelstore: %u labels, room for %u\n",
+                     (unsigned)m.nlabels, (unsigned)AXONS_STORE_LABEL_MAX);
+        return;
+    }
+    if (m.packed_out_len > sizeof axons_store_pout) {
+        SHELL_PRINTF("modelstore: wants %u B of packed output, room for %u\n",
+                     (unsigned)m.packed_out_len,
+                     (unsigned)sizeof axons_store_pout);
+        return;
+    }
+
     rc = axons_store_register_syms();
     if (rc != TIKU_MODEL_OK) {
         SHELL_PRINTF("modelstore: symbol registry: %s\n",
                      tiku_model_strerror(rc));
         return;
     }
-    rc = tiku_model_prepare(&m, axons_store_cmd, sizeof axons_store_cmd,
-                            &n, &bad);
+
+    dst[TIKU_MODEL_SECT_CMD].dst    = axons_store_cmd;
+    dst[TIKU_MODEL_SECT_CMD].cap    = sizeof axons_store_cmd;
+    dst[TIKU_MODEL_SECT_DESC].dst   = &axons_store_desc;
+    dst[TIKU_MODEL_SECT_DESC].cap   = sizeof axons_store_desc;
+    dst[TIKU_MODEL_SECT_LABELS].dst = axons_store_labels;
+    dst[TIKU_MODEL_SECT_LABELS].cap = sizeof axons_store_labels;
+
+    rc = tiku_model_prepare_all(&m, dst, &bad);
     if (rc != TIKU_MODEL_OK) {
         SHELL_PRINTF("modelstore: prepare: %s%s%s\n", tiku_model_strerror(rc),
                      bad ? ": " : "", bad ? bad : "");
         return;
     }
-    SHELL_PRINTF("modelstore: relocated %u sites into %u B of RAM\n",
-                 (unsigned)m.nsites, (unsigned)n);
+    n = m.cmd_len;
+    SHELL_PRINTF("modelstore: relocated %u sites -> cmd %u B, desc %u B, "
+                 "%u labels\n", (unsigned)m.nsites, (unsigned)n,
+                 (unsigned)m.desc_len, (unsigned)m.nlabels);
 
     if (nrf_axon_platform_init() != NRF_AXON_RESULT_SUCCESS) {
         SHELL_PRINTF("modelstore: axon platform init failed\n");
@@ -304,15 +577,54 @@ static void axons_model_from_store(const char *name)
         nrf_axon_platform_close();
         return;
     }
-    axons_store_desc = *the_full_model_static_info[0];
+
+    /* The three pointers the FILE cannot know, because they name things this
+     * run chose: where the commands were built, where the labels were built,
+     * and where the store mapped the weights.  Everything else in the
+     * descriptor -- every dimension, every quantization constant, every buffer
+     * size -- came out of the file. */
     axons_store_desc.cmd_buffer_ptr =
         (const NRF_AXON_PLATFORM_BITWIDTH_UNSIGNED_TYPE *)axons_store_cmd;
+    axons_store_desc.labels = (m.nlabels != 0u) ? axons_store_labels : NULL;
     /* model_const_ptr is read nowhere in the SDK -- the weights are reached
      * through the command buffer's patched addresses -- but it is repointed so
      * nothing left in the descriptor still names .rodata. */
     axons_store_desc.model_const_ptr  = m.weights;
     axons_store_desc.model_const_size = (uint32_t)m.weights_len;
+
+#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+    /* THE ON-DEVICE RECONSTRUCTION GATE.  A baked build has the linker's own
+     * descriptor sitting right there, so the one built from the store can be
+     * compared against it field by field before either is used.  This is what
+     * turns "the store path ran and the answers matched" into "the store path
+     * built the same model" -- the second is the claim, and only this checks
+     * it directly. */
+    if (the_full_model_static_info[0] != NULL) {
+        unsigned bad_fields =
+            axons_store_desc_check(&axons_store_desc,
+                                   the_full_model_static_info[0]);
+        SHELL_PRINTF("modelstore: descriptor vs baked: %u field%s differ\n",
+                     bad_fields, (bad_fields == 1u) ? "" : "s");
+    }
+#endif
     the_full_model_static_info[0] = &axons_store_desc;
+
+    /* The known answers.  A model-free image has no baked vectors, so a KAT
+     * file is the only way to have anything to compare against -- and without a
+     * comparison "it ran" is not a result. */
+    if (kat != NULL) {
+        if (axons_kat_load(fs, kat, &the_test_vectors[0],
+                           "test_nn_inference_from_store") != 0) {
+            nrf_axon_platform_close();
+            return;
+        }
+    } else if (the_test_vectors[0].full_model_vector_count == 0u) {
+        SHELL_PRINTF("modelstore: no test vectors -- this image has none baked "
+                     "in, so name a .kat file: modelstore %s <file.kat>\n",
+                     name);
+        nrf_axon_platform_close();
+        return;
+    }
 
     SHELL_PRINTF("modelstore: running vendor test vectors from the STORE\n");
     t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
@@ -322,7 +634,7 @@ static void axons_model_from_store(const char *name)
                  (unsigned)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0));
     nrf_axon_platform_close();
 }
-#endif  /* TIKU_AXON_MODEL_TEST */
+#endif  /* AXONS_HAVE_NN */
 
 void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
 {
@@ -480,7 +792,18 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
                          ? "MATCH" : "CHECK");
         return;
     }
+#if defined(AXONS_HAVE_NN)
+    /* The only model command that exists in BOTH configurations -- and the only
+     * one at all in the shipping (model-free) image. */
+    if (argc >= 2 && strcmp(argv[1], "modelstore") == 0) {
+        axons_model_from_store(argc >= 3 ? argv[2] : "kws.axm",
+                               argc >= 4 ? argv[3] : NULL);
+        return;
+    }
+#endif
 #if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+    /* Baked-model commands.  These are the REFERENCE the store path is measured
+     * against, so they exist only where a model was compiled in. */
     if (argc >= 2 && strcmp(argv[1], "model") == 0) {
         /* Nordic's portable inference test: runs the compiled model
          * (TIKU_AXON_MODEL=... on the make line) against its shipped test
@@ -490,10 +813,6 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         base_inference_main();
         SHELL_PRINTF("model run total: %u us\n",
                      (unsigned)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0));
-        return;
-    }
-    if (argc >= 2 && strcmp(argv[1], "modelstore") == 0) {
-        axons_model_from_store(argc >= 3 ? argv[2] : "kws.axm");
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "modelbaked") == 0) {

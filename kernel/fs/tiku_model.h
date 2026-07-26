@@ -116,9 +116,13 @@ typedef enum {
  * buffer and extension entry points -- typically once at init.  Re-registering
  * a name replaces its address, so a driver re-init is not an error.
  *
- * The model's own weights are NOT registered: symbol index 0 always means "the
- * weights, wherever the store mapped them", which the loader knows without
- * being told.
+ * NAMES BEGINNING WITH '@' BELONG TO THE MODEL ITSELF and are resolved by the
+ * loader, not from here: @weights and @strings are where the file was mapped,
+ * @cmd / @desc / @labels are where the caller asked for each section to be
+ * built.  A name the loader does not recognise -- including an unknown
+ * '@' name -- falls through to this registry, which is how a caller supplies
+ * something like @packed_out that is neither in the file nor a fixed firmware
+ * address.
  *
  * THE THUMB BIT IS THE CALLER'S.  A relocation against a CODE symbol resolves
  * to a Thumb-tagged pointer -- bit 0 SET -- because that is what an ARM function
@@ -163,11 +167,51 @@ typedef struct {
     size_t         weights_len;
     const uint8_t *cmd;         /**< RELOC: command buffer, UNRELOCATED      */
     size_t         cmd_len;
-    const uint8_t *sites;       /**< RELOC: site table (off,sym) pairs       */
+
+    /* The engine-facing description of the model: how big its input is, how it
+     * is quantized, how much working buffer it needs.  Opaque here on purpose --
+     * this layer knows it is a relocatable blob and nothing more; the caller
+     * knows what struct it is.  Without it a model cannot be run at all by an
+     * image that has no other model to borrow a descriptor from. */
+    const uint8_t *desc;        /**< RELOC: descriptor bytes, UNRELOCATED    */
+    size_t         desc_len;
+    const uint8_t *labels;      /**< RELOC: pointer array, UNRELOCATED       */
+    size_t         labels_len;
+    uint32_t       nlabels;     /**< entries in @p labels                    */
+    const char    *strings;     /**< RELOC: string pool, used as mapped      */
+    size_t         strings_len;
+    /** Bytes the model wants for its packed output, i.e. how big the buffer
+     *  registered as \@packed_out must be.  0 if it does not use one. */
+    uint32_t       packed_out_len;
+
+    const uint8_t *sites;       /**< RELOC: site table (sect,sym,off)        */
     uint32_t       nsites;
     const char    *syms;        /**< RELOC: NUL-separated symbol names       */
     uint32_t       nsyms;
 } tiku_model_t;
+
+/*---------------------------------------------------------------------------*/
+/* SECTIONS                                                                  */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief The sections a model can ask to have patched.
+ *
+ * Weights and strings are absent because they are used exactly as mapped -- a
+ * section appears here only if something in it needs correcting.
+ */
+typedef enum {
+    TIKU_MODEL_SECT_CMD    = 0,
+    TIKU_MODEL_SECT_DESC   = 1,
+    TIKU_MODEL_SECT_LABELS = 2,
+    TIKU_MODEL_SECT_COUNT  = 3
+} tiku_model_sect_t;
+
+/** @brief Where one section should be built, and how much room is there. */
+typedef struct {
+    void  *dst;                 /**< NULL if the model has no such section   */
+    size_t cap;
+} tiku_model_dest_t;
 
 /**
  * @brief Open a model by file name and validate it end to end.
@@ -210,5 +254,29 @@ int tiku_model_open(tiku_tfs_t *fs, const char *name, tiku_model_t *out);
  */
 int tiku_model_prepare(const tiku_model_t *m, void *dst, size_t cap,
                        size_t *out_len, const char **bad_sym);
+
+/**
+ * @brief Build EVERY relocatable section of a model, not just the commands.
+ *
+ * The general form of tiku_model_prepare(): @p dst is indexed by
+ * tiku_model_sect_t, and each entry with a non-NULL @c dst receives that
+ * section's bytes with its relocations applied.  A section the model does not
+ * have is skipped; a section the model HAS but the caller left NULL is an
+ * error, because the sites naming it could not be resolved and a half-patched
+ * model is worse than a refused one.
+ *
+ * Sections may reference each other -- the descriptor points at the command
+ * buffer and at the labels, the labels point into the string pool -- so all
+ * destinations are resolved before any byte is written, and a model that cannot
+ * be fully built leaves every destination untouched.
+ *
+ * @param m        Model from tiku_model_open().
+ * @param dst      Array of TIKU_MODEL_SECT_COUNT destinations.
+ * @param bad_sym  Receives the unresolved symbol name on ERR_SYMBOL.  May be
+ *                 NULL.
+ * @return TIKU_MODEL_OK, or SPACE / SYMBOL / PARAM / FULL.
+ */
+int tiku_model_prepare_all(const tiku_model_t *m, tiku_model_dest_t *dst,
+                           const char **bad_sym);
 
 #endif /* TIKU_MODEL_H_ */

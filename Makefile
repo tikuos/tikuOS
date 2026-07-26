@@ -1855,7 +1855,43 @@ LDLIBS_AXON = $(AXON_SDK)/lib/axon/bin/arm/libnrf-axon-driver-internal.a
 # checkout.  The interlayer working buffer lives in RAM2 (size per model;
 # 140000 covers the shipped tinyml set -- the model init verifies and
 # reports the exact need on mismatch).
+# The two model configurations are mutually exclusive:
+#
+#   TIKU_AXON_MODEL=<name>          bake that one model into .rodata (the
+#                                   development convenience, and the reference
+#                                   the store path is checked against)
+#   TIKU_AXON_MODEL_FROM_STORE=1    bake NO model at all; every model arrives
+#                                   as a file in /data (the shipping shape)
+#
+# Naming one of them is not naming the other.
+ifeq ($(TIKU_AXON_MODEL_FROM_STORE),1)
 ifneq ($(strip $(TIKU_AXON_MODEL)),)
+$(error TIKU_AXON_MODEL_FROM_STORE=1 and TIKU_AXON_MODEL=$(TIKU_AXON_MODEL) are \
+mutually exclusive -- from-store means no model is compiled in. Drop \
+TIKU_AXON_MODEL to build the model-free image.)
+endif
+# THE SHIPPING SHAPE.  Nordic's inference sources are compiled for their CODE;
+# no model translation unit is compiled at all, so no weights, no command
+# buffer and no KAT vectors reach .rodata.  The vendor globals that the model TU
+# used to define are supplied by the probe instead, and every model -- including
+# its descriptor -- is read from /data at run time.
+#
+# This is what makes tinyml_vww buildable: its arrays are 632 KB in a single
+# translation unit, against a 384 KB code window.  Nothing about the image is
+# model-specific any more, so "which models fit" stops being a build question.
+SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer.c
+SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer_test.c
+SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_op_extensions.c
+SRCS += $(AXON_SDK)/lib/axon/platform/src/nrf_axon_logging.c
+SRCS += $(AXON_SDK)/lib/axon/platform/src/nrf_axon_vector_compare.c
+CFLAGS += -DPRId64='"lld"' -DPRIx64='"llx"'
+CFLAGS += -DTIKU_AXON_MODEL_FROM_STORE=1
+CFLAGS += -I$(AXON_SDK)/tests/axon/compiled_models
+TIKU_AXON_ILB ?= 140000
+CFLAGS += -DNRF_AXON_INTERLAYER_BUFFER_SIZE=$(TIKU_AXON_ILB)
+CFLAGS += -DNRF_AXON_PSUM_BUFFER_SIZE=$(TIKU_AXON_PSUM)
+TIKU_AXON_PSUM ?= 0
+else ifneq ($(strip $(TIKU_AXON_MODEL)),)
 # Nordic's compiled models are C arrays, so this config bakes the weights (and
 # the KAT's test vectors) into .rodata, where the linker counts them as CODE and
 # they eat the code window.  That is the pathology P3d exists to remove: weights
@@ -1880,14 +1916,14 @@ AXON_OVERSIZE_MODELS := tinyml_vww
 ifneq (,$(filter $(TIKU_AXON_MODEL),$(AXON_OVERSIZE_MODELS)))
 $(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): this model's weights + KAT \
 vectors in .rodata exceed the 384 KB code window, so the link WILL fail. \
-Blocked on P3d (weights -> /data). Do NOT raise the window -- weights are \
-DATA, and sizing the OS's memory contract around a vendor test harness is the \
-design P3/P4 undid.)
+Build TIKU_AXON_MODEL_FROM_STORE=1 instead and provision the model to /data. \
+Do NOT raise the window -- weights are DATA, and sizing the OS's memory \
+contract around a vendor test harness is the design P3/P4 undid.)
 else
 $(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): links today, but the weights are \
-still compiled into .rodata and charged against the code window. P3d moves \
-them to /data; until then this build is a development convenience, not the \
-shipping shape.)
+still compiled into .rodata and charged against the code window. This build is \
+a development convenience and the reference the store path is checked against; \
+TIKU_AXON_MODEL_FROM_STORE=1 is the shipping shape.)
 endif
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer.c
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer_test.c
@@ -2565,8 +2601,13 @@ $(PLATFORM_STAMP):
 	@mkdir -p build
 	@echo $(TIKU_PLATFORM) > $@
 
+# EXTRA_LDFLAGS is the link-side counterpart of EXTRA_CFLAGS, and like it, it is
+# fingerprinted by the flag-change guard -- switching it between builds of the
+# same MCU drops that build dir's objects rather than shipping stale ones.  It
+# exists for host-side tooling links (see the packing-only code-cap override in
+# the Nordic linker script), not as a way to reshape a shipped image.
 $(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
+	$(CC) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)

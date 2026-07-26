@@ -153,6 +153,22 @@ void nrf_axon_platform_free_reservation_from_driver(void)
 
 static volatile uint8_t tiku_axon_user_event;
 
+/*
+ * DELIBERATELY UNBOUNDED, AND DELIBERATELY NOT FEEDING THE WATCHDOG.
+ *
+ * The temptation is to call tiku_watchdog_kick() in here, because this loop
+ * blocks the calling process for as long as the NPU takes.  It was tried, on
+ * the theory that a long inference was tripping the 8 s hang detector -- and
+ * measurement refuted it: tinyml_vww's three vectors complete in 557 ms, and
+ * they complete identically with and without the kick.
+ *
+ * Leaving it out is the right answer anyway.  This wait has no bound, so a kick
+ * here would turn the one case that matters -- an engine that never raises its
+ * event -- from "the detector resets the chip in 8 s and /sys/boot/hang names
+ * the culprit" into "the board spins here forever with the watchdog cheerfully
+ * fed".  A pump may only feed the watchdog if it can independently tell that
+ * progress is still happening; this one cannot.
+ */
 void nrf_axon_platform_wait_for_user_event(void)
 {
     while (!tiku_axon_user_event) {
@@ -256,8 +272,36 @@ nrf_axon_result_e nrf_axon_platform_init(void)
     return result;
 }
 
+/**
+ * @brief End an Axon session: engine off, and NOBODY holding it.
+ *
+ * THE REFCOUNT IS FORCED TO ZERO, not decremented, and that is the fix for a
+ * real bug rather than defensive tidying.
+ *
+ * This function disables the hardware directly.  The refcount in
+ * tiku_axon_power_request/release is the other view of the same state, and a
+ * teardown that moves one without the other leaves them disagreeing -- which
+ * is exactly what happened: an NN inference returns with the count one higher
+ * than it started (measured: three inferences, "post-run refs=3"), close()
+ * then switched the engine OFF while the count still said three, and the next
+ * session's power_request() saw a non-zero count, concluded the engine was
+ * already up, and skipped the enable.  The engine never ran, its completion
+ * event never came, and 8 s later the hang detector reset the chip with
+ * /sys/boot/hang reading "0 Shell".
+ *
+ * The symptom was that the FIRST inference of a boot always worked and the
+ * SECOND always wedged -- which reads like a model or relocation fault and is
+ * neither.  It went unnoticed because the vendor's own entry point runs one
+ * inference and exits; running a second model is what the file store is for.
+ *
+ * Whether the driver's leftover reservation is deliberate (it may keep the
+ * engine warm between queued jobs) is not something this layer can know, so it
+ * does not try to guess: close() is the point at which the session is over by
+ * definition, and re-establishing the invariant here is correct either way.
+ */
 void nrf_axon_platform_close(void)
 {
+    tiku_axon_power_refs = 0u;
     tiku_axon_hw_disable();
 }
 

@@ -74,8 +74,19 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
  * (primed != 0, /data empty).  Expected, one-time. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
-__tiku_layout_code_cap     = 0x60000;                       /* 384 KB code */
-/* Shared Nordic code budget: 256 KB on BOTH parts -- the same figure every
+/* PACKING-ONLY ESCAPE HATCH -- not a tuning knob.  tools/axonpack.py's
+ * verification gate compares its patched output against a LINKED image of the
+ * same model, and the model that most needs checking (tinyml_vww, 698 KB) is
+ * precisely the one that cannot link.  Passing
+ * -Wl,--defsym=__tiku_code_cap_override=0xC0000 produces a reference ELF for
+ * that comparison only; it is never flashed and never shipped, and
+ * tools/axonpack_selftest.sh is the only caller.  A build that needs this to
+ * produce FIRMWARE has exactly the pathology the window exists to prevent --
+ * see the budget note below before reaching for it. */
+__tiku_layout_code_cap     = DEFINED(__tiku_code_cap_override)
+                             ? __tiku_code_cap_override
+                             : 0x60000;                     /* 384 KB code */
+/* Shared Nordic code budget: 384 KB on BOTH parts -- the same figure every
  * TikuOS platform now uses (P4), so "does this firmware fit" has ONE answer for
  * the whole fleet, and the module slot lands at the same address on both Nordic
  * parts (one module image serves each).
@@ -95,10 +106,19 @@ __tiku_layout_code_cap     = 0x60000;                       /* 384 KB code */
  *
  * Letting that set the cap put 544 KB of RRAM permanently beyond reach on every
  * shipped board so that a vendor TEST HARNESS could link -- and the actual
- * firmware is 126 KB, 16% of the window.  Model weights are data; they belong
- * in /data (P3d), which is what the region below this window is for.  Until
- * P3d lands, TIKU_AXON_MODEL=... does not link, and the Makefile says so before
- * the linker does.  Do not raise this number to make it build.
+ * firmware is 126 KB, 16% of the window.
+ *
+ * RESOLVED 2026-07-26 (A3).  Model weights are data and now live in /data:
+ * TIKU_AXON_MODEL_FROM_STORE=1 compiles no model at all and reads each one --
+ * weights, command buffer, descriptor and labels -- from a file at run time.
+ * That image is 91 KB, and it is 91 KB whichever model it runs, so the biggest
+ * model no longer has any say in this number.  All four shipped models,
+ * tinyml_vww included, run from it bit-exact against the vendor's own vectors.
+ * TIKU_AXON_MODEL=<name> still bakes one in for development and remains the
+ * reference the store path is diffed against; vww still cannot link that way,
+ * which is now a statement about the harness rather than a limitation.
+ *
+ * Do not raise this number to make something build.
  * The L15 has no NPU, so it only ever needs ~140 KB; it carries the same cap
  * for family consistency, and the address space it gives up was idle anyway
  * (the freed NVM goes to the durable tier, which currently has no consumer). */
