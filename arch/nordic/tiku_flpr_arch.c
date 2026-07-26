@@ -270,7 +270,16 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
         (1u << 28) |                           /* CTRLSEL = VPR            */
         (0u << 1);                             /* INPUT = Connect          */
 
-    req->half_cycles = period_us * 64u;        /* 128 cycles/us, half duty */
+    /* HALF-CYCLES FROM THE LIVE CORE CLOCK, NOT A CONSTANT.  The FLPR shares
+     * HCLK128M with the M33 (datasheet block diagram: both sit inside "MCU PD
+     * (128 MHz)"), so its cycle rate follows whatever the core was built for.
+     * This used to hard-code `period_us * 64`, i.e. 128 cycles/us -- and on a
+     * TIKU_NORDIC_CPU_MHZ=64 build every waveform then came out exactly TWICE
+     * as slow: measured, a requested 1000 ms pattern took 2078 ms.  Deriving
+     * the figure keeps the API's contract (period_us means microseconds) at
+     * either clock. */
+    req->half_cycles = period_us * (uint32_t)(tiku_nordic_cpu_hz_now()
+                                              / 2000000UL);
     req->edges = edges;
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->rsp = 0u;
