@@ -650,6 +650,12 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "off") == 0) {
+#if defined(TIKU_AXON_ENABLE) && TIKU_AXON_ENABLE
+        /* Close the driver session first: writing ENABLE=0 while the platform
+         * refcount is still non-zero leaves the two views disagreeing, and the
+         * refcount is the one that wins the moment anything reserves again. */
+        nrf_axon_platform_close();
+#endif
         AXONS_ENABLE = 0u;
         SHELL_PRINTF("disabled (ENABLE=%x STATUS=%x)\n",
                      (unsigned)AXONS_ENABLE, (unsigned)AXONS_STATUS);
@@ -688,7 +694,9 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         if (!axon_inited && argc >= 2 &&
             (strcmp(argv[1], "hw") == 0 ||
              strcmp(argv[1], "acc") == 0 ||
-             strcmp(argv[1], "fir") == 0)) {
+             strcmp(argv[1], "fir") == 0 ||
+             strcmp(argv[1], "hold") == 0 ||
+             strcmp(argv[1], "busy") == 0)) {
             nrf_axon_result_e rc = nrf_axon_platform_init();
             SHELL_PRINTF("nrf_axon_platform_init -> %d\n", (int)rc);
             if (rc != NRF_AXON_RESULT_SUCCESS) {
@@ -735,6 +743,82 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
                      (rc == NRF_AXON_RESULT_SUCCESS && hw_out == sw_out)
                          ? "MATCH" : "MISMATCH",
                      (unsigned)(t1 - t0));
+        return;
+    }
+    if (argc >= 2 && (strcmp(argv[1], "busy") == 0 ||
+                      strcmp(argv[1], "hold") == 0) && argc >= 3) {
+        /*
+         * SUSTAINED STATES FOR A CONTROLLED POWER MEASUREMENT.
+         *
+         * A single inference is ~200 ms and a single intrinsic ~50 us, so
+         * neither can be averaged by an external instrument without a marker
+         * channel to bound the window.  These two hold the NPU in a KNOWN
+         * state for a caller-chosen duration instead, so a plain average over
+         * the window is the figure:
+         *
+         *   hold <ms>  block powered and reserved, doing NOTHING  (static)
+         *   busy <ms>  the same, issuing MAC ops back to back     (dynamic)
+         *
+         * The pair is what makes the measurement controlled: subtracting them
+         * isolates the NPU's dynamic cost from its static cost, and
+         * subtracting `hold` from a run with the block DISABLED isolates what
+         * merely powering it costs.  Every difference is immune to any fixed
+         * offset on the supply rail, which matters because ~380 uA of what the
+         * rail shows is not the SoC's at all.
+         */
+        enum { DOT_LEN = 512 };
+        static int32_t bx[DOT_LEN] __attribute__((aligned(4)));
+        static int32_t by[DOT_LEN] __attribute__((aligned(4)));
+        int busy = (strcmp(argv[1], "busy") == 0);
+        uint32_t ms = 0u, t0, i, ops = 0u;
+        const char *p = argv[2];
+
+        while (*p >= '0' && *p <= '9') { ms = ms * 10u + (uint32_t)(*p++ - '0'); }
+        if (ms == 0u) {
+            SHELL_PRINTF("Usage: axonsprobe %s <ms>\n", argv[1]);
+            return;
+        }
+        for (i = 0u; i < DOT_LEN; i++) {
+            bx[i] = (int32_t)(((i * 2654435761u) >> 20) & 0x7Fu) - 64;
+            by[i] = (int32_t)(((i * 40503u) >> 6) & 0x7Fu) - 64;
+        }
+        if (!nrf_axon_platform_reserve_for_user()) {
+            SHELL_PRINTF("reserve failed\n");
+            return;
+        }
+        SHELL_PRINTF("%s %lu ms: ENABLE=%x -- starting\n", argv[1],
+                     (unsigned long)ms, (unsigned)AXONS_ENABLE);
+        t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+        do {
+            if (busy) {
+                int32_t out = 0;
+                /* keep_reservation = FALSE.  The outer reserve_for_user()
+                 * above already holds the block powered for the whole loop, so
+                 * a per-op release never drops the refcount to zero and the
+                 * engine does not power-cycle between ops.  Passing TRUE leaks
+                 * one reference PER OP instead: measured, that left the block
+                 * still drawing 2367 uA after the loop against an 834 uA
+                 * baseline, and the experiment's own drift check caught it. */
+                (void)axon_mar_24_24_32(bx, by, &out, DOT_LEN, 0u,
+                                        NRF_AXON_SYNC_MODE_BLOCKING_POLLING,
+                                        false);
+                ops++;
+            } else {
+                /* Powered and reserved, core asleep: the block's STATIC cost
+                 * with nothing issued to it. */
+                __asm__ volatile ("wfi" ::: "memory");
+            }
+        } while ((uint32_t)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0)
+                 < ms * 1000u);
+        nrf_axon_platform_free_reservation_from_user();
+        /* Then FORCE the session closed.  A measurement state is only useful
+         * if it can be left, and "balanced" is not the same as "off": any
+         * stray reservation anywhere keeps the engine powered and silently
+         * contaminates the next reading.  close() zeroes the refcount and
+         * disables the hardware, so the baseline is genuinely restorable. */
+        nrf_axon_platform_close();
+        SHELL_PRINTF("%s done: %lu ops, ENABLE=%x\n", argv[1],
+                     (unsigned long)ops, (unsigned)AXONS_ENABLE);
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "fir") == 0) {
