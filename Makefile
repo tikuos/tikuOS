@@ -2883,8 +2883,30 @@ ifeq ($(NRF_FLASH_RESOLVED),jlink)
 	$(JLINK) $(NRF_JLINK_SN_ARG) -CommanderScript $(JLINK_FLASH_SCRIPT)
 else
 	@echo "Flashing $(TARGET_HEX) via nrfutil ($(NRFUTIL))..."
-	$(NRFUTIL_ENV) $(NRFUTIL) device program --firmware $(TARGET_HEX) --core Application \
-		--options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG)
+	@# RECOVER-ON-FAILURE.  AP-protect re-latches intermittently on the
+	@# LM20-DK: the debug port goes away ("Setting the debug port SELECT
+	@# register failed while powering up sys and debug regions") and stays away
+	@# until `nrfutil device recover` erases the part.  It has bitten several
+	@# times across sessions, always costing a manual recover-then-reflash
+	@# cycle, so the recipe now does that itself.
+	@#
+	@# RECOVER ERASES THE CHIP, so this is announced loudly rather than done
+	@# silently: it takes /data, the persist cells and the boot counter with it,
+	@# and a test that quietly lost its provisioned files would look like a
+	@# firmware bug.  The first attempt is the normal path; the fallback runs
+	@# only after it has genuinely failed.
+	@$(NRFUTIL_ENV) $(NRFUTIL) device program --firmware $(TARGET_HEX) \
+		--core Application \
+		--options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG) \
+	  || ( echo ""; \
+	       echo "*** flash failed -- assuming AP-protect re-latched."; \
+	       echo "*** RUNNING RECOVER: this ERASES the part (/data, persist"; \
+	       echo "*** cells and the boot counter are lost), then reflashing."; \
+	       echo ""; \
+	       $(NRFUTIL_ENV) $(NRFUTIL) device recover $(NRF_SN_ARG); \
+	       $(NRFUTIL_ENV) $(NRFUTIL) device program --firmware $(TARGET_HEX) \
+	         --core Application \
+	         --options chip_erase_mode=ERASE_ALL,reset=RESET_SYSTEM $(NRF_SN_ARG) )
 	@# RESET_PIN after programming: the datasheet (9.3) says the device stays
 	@# in DEBUG INTERFACE MODE until a debug session ends "followed by a pin
 	@# reset", and measured on an LM20-DK that mode costs ~130 uA of idle
