@@ -480,6 +480,11 @@ int tiku_tfs_format(tiku_tfs_t *fs)
     if (!tfs_derive(fs, fs->be->size)) {
         return TFS_ERR_NOSPACE;
     }
+    /* Reformatting under an open writer would erase the directory it is about
+     * to commit into.  (mount() reaches format() with wr_open already cleared.) */
+    if (fs->wr_open) {
+        return TFS_ERR_BUSY;
+    }
     /* Invalidate the magic FIRST.  The descriptor is several words now, so
      * writing it over an already-formatted store has a window in which the
      * magic is valid but the geometry is half old and half new -- a power cut
@@ -513,6 +518,7 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     }
     fs->be = be;
     fs->mounted = 0;
+    fs->wr_open = 0;          /* a remount abandons any half-open writer */
     /* Derive BEFORE reading the superblock: every offset below, including the
      * superblock comparison's own view of the directory, depends on it. */
     if (!tfs_derive(fs, be->size)) {
@@ -621,6 +627,30 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     if (tfs_find(fs, name) < 0 && free_dirent(fs) < 0) {
         return TFS_ERR_NOSPACE;
     }
+    /*
+     * SINGLE WRITER, ENFORCED BY REFUSAL.
+     *
+     * The store stopped being BASIC-private: modules, radio firmware, models
+     * and BASIC's own checkpoint now share it, and a streamed write spans many
+     * calls with a yield between them.  Two writers interleaving would stage
+     * into each other's run or race the dirent flip, so the design of record
+     * requires them to serialise (§4.7, "all writers serialize through one
+     * kernel lock" -- listed as enforced-in-review, i.e. not enforced).
+     *
+     * This REFUSES rather than blocks, deliberately.  Scheduling here is
+     * cooperative, so a blocking lock could only be released by the holder
+     * running again -- which needs a scheduler this file is not allowed to know
+     * about (it depends on tiku_nvm_backend.h and nothing else, which is what
+     * keeps it host-testable).  A refusal needs no scheduler, cannot deadlock,
+     * and turns "two tenants wrote at once" from silent corruption into a
+     * distinct, loggable error at the point of the mistake.
+     *
+     * Readers are unaffected: they map in place and never take this.
+     */
+    if (fs->wr_open) {
+        return TFS_ERR_BUSY;
+    }
+
     span = run_span_for(max_len);
 #if defined(PLATFORM_MSP430)
     /*
@@ -661,6 +691,7 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     w->cap    = TFS_RUN_CAP(span);
     w->off    = 0u;
     w->active = 1;
+    fs->wr_open = 1;
     memset(w->name, 0, sizeof w->name);
     memcpy(w->name, name, nl);
     return TFS_OK;
@@ -724,6 +755,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
         run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);  /* reclaim */
     }
     w->active = 0;
+    fs->wr_open = 0;
     return TFS_OK;
 }
 
@@ -732,6 +764,7 @@ void tiku_tfs_abort(tiku_tfs_wr_t *w)
     if (w != NULL && w->active) {
         run_mark(w->fs, w->first, w->span, 0);
         w->active = 0;
+        w->fs->wr_open = 0;          /* release the interlock */
     }
 }
 
@@ -853,6 +886,12 @@ int tiku_tfs_delete(tiku_tfs_t *fs, const char *name)
 
     if (fs == NULL || !fs->mounted || name == NULL) {
         return TFS_ERR_INVAL;
+    }
+    /* Does not go through open_w, so it needs the interlock explicitly: a
+     * delete during someone else's stream could reclaim slots that stream has
+     * staged into. */
+    if (fs->wr_open) {
+        return TFS_ERR_BUSY;
     }
     i = tfs_find(fs, name);
     if (i < 0) {

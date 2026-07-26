@@ -131,9 +131,14 @@
  * address can ever be zero and be mistaken for a null pointer -- by the loader's
  * own checks or by the module's.  It must match the module's .ld exactly.
  *
- * Elsewhere the module still runs XIP from the NVM carve: rp2350 and the Nordic
- * parts would each need their own RAM window and their own verification, and
- * that hardware is not on the bench.
+ * Elsewhere the module still runs XIP from the NVM carve, and on Nordic that is
+ * now a MEASURED constraint rather than a pending task.  TikuBench's RAM Exec
+ * Probe (tests/memory/test_mem_ramexec.c) shows an nRF54LM20 HardFaults on any
+ * attempt to execute from SRAM, because arch/nordic/tiku_mpu_arch.c marks both
+ * banks RW+XN as W^X hardening (2026-07 D.1).  A Nordic RAM window therefore
+ * requires punching an executable hole in W^X -- a security decision that has
+ * to be taken deliberately, not a linker-script edit.  rp2350 is untested; that
+ * hardware is not on the bench.
  */
 #if defined(AM_PART_APOLLO510)
 #define TIKU_MODULE_EXEC_IN_RAM  1

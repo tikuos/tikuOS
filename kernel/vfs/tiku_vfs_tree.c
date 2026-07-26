@@ -124,8 +124,14 @@ tiku_vfs_tree_init(void)
     root_children[2] = *tiku_proc_vfs_get();
     n_root = 3;
 
-#if defined(TIKU_SHELL_ENABLE)
-    /* /data: the dynamic file store (plus /data/basic when BASIC is built). */
+/* Value, not defined(): tiku.h defines TIKU_SHELL_ENABLE unconditionally (0
+ * when the shell is off), so `defined()` would always be true and this would
+ * reference a node that is not compiled. */
+#if TIKU_SHELL_ENABLE
+    /* /data: the dynamic file store (plus /data/basic when BASIC is built).
+     * The STORE itself is always built -- kernel-level tenants reach it through
+     * tiku_vfs_tree_data_store() -- but presenting it as a namespace entry is a
+     * shell concern. */
     root_children[3] = *tiku_vfs_tree_data_get();
     n_root = 4;
 #endif

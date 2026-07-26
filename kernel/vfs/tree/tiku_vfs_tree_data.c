@@ -37,7 +37,22 @@
 #include "tiku_vfs_tree_data.h"
 #include "tiku.h"
 
-#if defined(TIKU_SHELL_ENABLE)
+/*
+ * THE STORE IS NOT A SHELL FEATURE.
+ *
+ * This whole file used to sit inside `#if defined(TIKU_SHELL_ENABLE)`, because
+ * /data began life as the place BASIC kept its saved program.  That was fine
+ * while every tenant was a shell feature, and wrong as soon as one was not:
+ * loadable modules and radio firmware are kernel-level tenants that must mount
+ * and read the store in a build with no shell at all.
+ *
+ * So the file is now in two halves.  Everything down to the DYNAMIC-DIRECTORY
+ * OPS banner -- the backing memory, the backend, the mount, and the
+ * tiku_vfs_tree_data_store() accessor -- is always compiled.  The VFS
+ * presentation above it (the /data node, its dynamic ops, and the df snapshot)
+ * stays behind the shell gate, because a namespace entry with no shell to type
+ * at it is genuinely shell-shaped.
+ */
 
 #include <string.h>
 
@@ -45,10 +60,6 @@
 #include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm, tiku_tier_nvm_write */
 #include "kernel/memory/tiku_nvm_region.h"
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL fallback */
-
-#if TIKU_SHELL_CMD_BASIC
-#include "kernel/shell/basic/tiku_basic.h"
-#endif
 
 /*---------------------------------------------------------------------------*/
 /* NVM-BACKED FILE STORE FOR /data                                           */
@@ -252,6 +263,24 @@ data_fill_extents(tiku_data_df_t *out)
     out->idle_bytes   = 0u;
 }
 
+#endif
+
+/*===========================================================================*/
+/* VFS PRESENTATION -- shell-gated.  Everything ABOVE this line is the store   */
+/* itself and is always compiled; everything below turns it into a namespace   */
+/* entry, which is what needs a shell.                                        */
+/*
+ * NOTE ON THE TEST: `#if TIKU_SHELL_ENABLE`, on the VALUE, not
+ * `#if defined(TIKU_SHELL_ENABLE)`.  tiku.h:265 defines the macro
+ * UNCONDITIONALLY (to 0 when the shell is off), so the `defined()` form is
+ * always true -- which is why the gate this file used to carry never actually
+ * excluded anything, and why the rest of kernel/vfs/tree/ spells it this way.
+ */
+/*===========================================================================*/
+#if TIKU_SHELL_ENABLE
+
+#if TIKU_SHELL_CMD_BASIC
+#include "kernel/shell/basic/tiku_basic.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -493,6 +522,8 @@ tiku_vfs_tree_data_get(void)
     return &data_node;
 }
 
+#endif /* TIKU_SHELL_ENABLE -- VFS presentation ends here */
+
 tiku_tfs_t *
 tiku_vfs_tree_data_store(void)
 {
@@ -503,5 +534,3 @@ tiku_vfs_tree_data_store(void)
     }
     return &data_fs;
 }
-
-#endif /* TIKU_SHELL_ENABLE */

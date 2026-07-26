@@ -180,7 +180,8 @@ typedef enum {
     TFS_ERR_EXISTS    = -5,  /**< file already exists (create) */
     TFS_ERR_NOTFOUND  = -6,  /**< no such file */
     TFS_ERR_IO        = -7,  /**< backend write failed */
-    TFS_ERR_CORRUPT   = -8   /**< on-NVM structure failed validation */
+    TFS_ERR_CORRUPT   = -8,  /**< on-NVM structure failed validation */
+    TFS_ERR_BUSY      = -9   /**< another writer holds the store (see below) */
 } tfs_err_t;
 
 /*---------------------------------------------------------------------------*/
@@ -233,6 +234,11 @@ typedef enum {
 
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
+    /* SINGLE-WRITER INTERLOCK.  Set while a streamed write is open, so any
+     * other write REFUSES with TFS_ERR_BUSY instead of interleaving into the
+     * staged run or the directory.  See tiku_tfs_open_w() for why this refuses
+     * rather than blocks. */
+    uint8_t  wr_open;
     /* DERIVED AT MOUNT from be->size -- the extent the linker actually carved.
      * They are not compile-time values any more, which is the point: nothing in
      * C mirrors the carve, so nothing can disagree with it. */
