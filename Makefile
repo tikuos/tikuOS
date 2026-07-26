@@ -1597,6 +1597,7 @@ SRCS += kernel/fs/tiku_tfs.c
 # images): stock TFS calls plus name arithmetic, no NVM access of its own.
 # Unreferenced entry points are gc-section'd away.
 SRCS += kernel/fs/tiku_blob.c
+SRCS += kernel/fs/tiku_model.c
 
 # ---------------------------------------------------------------------------
 # Shell (kernel service — compiled when TIKU_SHELL_ENABLE=1)

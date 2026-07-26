@@ -57,7 +57,7 @@ import sys
 import zlib
 
 AXM_MAGIC = 0x314D5841          # 'AXM1' little-endian
-AXM_VERSION = 1
+AXM_VERSION = 2                 # v2 adds crc32 over the reloc table + symtab
 AXM_HDR_BYTES = 64              # keeps the weights 16-byte aligned in the file
 
 OBJDUMP = "arm-none-eabi-objdump"
@@ -205,14 +205,23 @@ def build(obj, model, list_only=False):
     place(s_off, symtab)
 
     hdr = bytearray(AXM_HDR_BYTES)
-    struct.pack_into("<13I", hdr, 0,
+    # Third CRC covers the relocation TABLE and the symbol names -- everything
+    # from r_off to the end of the file.  v1 checksummed only the weights and
+    # the command buffer, leaving the one part of the file that says "write four
+    # bytes at offset N" unprotected.  The loader bounds every entry, so a
+    # corrupt table cannot escape the command buffer; but an in-bounds corrupt
+    # OFFSET patches the wrong word, and the symptom is wrong inference rather
+    # than a fault.  Only a checksum catches that.
+    tbl = bytes(body[r_off - AXM_HDR_BYTES:])
+    struct.pack_into("<14I", hdr, 0,
                      AXM_MAGIC, AXM_VERSION, AXM_HDR_BYTES,
                      w_off, len(weights),
                      c_off, len(cmd),
                      r_off, len(sites),
                      s_off, len(syms),
                      zlib.crc32(weights) & 0xFFFFFFFF,
-                     zlib.crc32(bytes(cmd)) & 0xFFFFFFFF)
+                     zlib.crc32(bytes(cmd)) & 0xFFFFFFFF,
+                     zlib.crc32(tbl) & 0xFFFFFFFF)
 
     return bytes(hdr) + bytes(body), {
         "weights_len": len(weights), "cmd_len": len(cmd),
