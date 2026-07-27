@@ -1052,6 +1052,29 @@ void tiku_flpr_main(void)
             sh->cmd = 0u;
             sh->rsp = 0u;
         }
+        if (sh->cmd == TIKU_FLPR_CMD_SPIN) {
+            /* Compute-only load: the VPR's answer to the M33's spin probe.
+             * Register-only inner loop, one shared-memory store per 4096
+             * iterations, so the current measured is this core executing and
+             * not the mailbox or a pin.  The pass count is the denominator that
+             * turns milliamps into energy per unit of work. */
+            /* .spin_iters is re-read every pass, so the app core can end the
+             * load early by writing 0 -- a sustained load has to be cancellable
+             * or a power harness spends its time waiting for one to drain. */
+            uint32_t done = 0u;
+            sh->spin_passes = 0u;
+            sh->cmd = 0u;
+            while (done < sh->spin_iters) {
+                register uint32_t n = 4096u;
+                __asm__ volatile (".p2align 4\n"
+                                  "1: addi %0, %0, -1\n\t"
+                                  "   bnez %0, 1b\n"
+                                  : "+r" (n) : : );
+                done++;
+                sh->spin_passes = done;
+            }
+            sh->rsp = TIKU_FLPR_RSP_SPIN_DONE;
+        }
         if (sh->cmd == TIKU_FLPR_CMD_PULSE) {
             tiku_flpr_pulse_t p;
             p.half_cycles = ((const volatile tiku_flpr_pulse_t *)

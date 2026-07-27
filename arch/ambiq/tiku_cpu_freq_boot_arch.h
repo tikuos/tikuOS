@@ -169,6 +169,15 @@ typedef struct {
 void tiku_cpu_freq_ambiq_hp_probe(tiku_ambiq_hp_probe_t *out);
 
 /**
+ * @brief Enable the SIMO buck without changing the frequency (measurement hook).
+ *
+ * The LP boot path never enables it, so the part ships in LDO-only mode.  This
+ * makes the buck switchable at run time so both states can be measured in one
+ * boot.  Returns 0 when VRSTATUS reports ACT.
+ */
+int tiku_cpu_freq_ambiq_simobuck_enable(void);
+
+/**
  * @brief Measure the true core clock against the 32.768 kHz STIMER crystal.
  *
  * Counts SysTick (CLKSOURCE = processor) decrements over a 125 ms STIMER

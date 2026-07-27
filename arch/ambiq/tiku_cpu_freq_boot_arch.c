@@ -611,6 +611,34 @@ unsigned long tiku_cpu_freq_ambiq_measured_hz(void) {
     return (unsigned long)((count * 32768u) / 4096u);
 }
 
+/**
+ * @brief Enable the SIMO buck WITHOUT entering HP mode (measurement hook).
+ *
+ * WHY THIS IS SEPARATE FROM THE HP PATH.  tiku_cpu_freq_ambiq_init() only calls
+ * hp_simobuck_enable() when a frequency above 96 MHz is requested, so an LP
+ * build -- the default -- leaves the part in the SBL's LDO-only state for its
+ * whole life.  Measured on an Apollo510B EVB at 96 MHz that costs 90 uA/MHz
+ * against a ~3 uA/MHz class figure; the buck is the first thing to rule out, and
+ * ruling it out needs it switchable at run time so both states can be measured
+ * in ONE boot (a regulator setting that survives a reflash is exactly how four
+ * -D-flag builds once all measured identically on the nRF54L).
+ *
+ * Loads the factory trims first -- the buck sequence needs them -- and stays in
+ * LP; the frequency is untouched.
+ *
+ * @return 0 when the buck reports ACT, negative if trims are unusable or it
+ *         never reached ACT.
+ */
+int tiku_cpu_freq_ambiq_simobuck_enable(void) {
+    if (PWRCTRL->VRSTATUS_b.SIMOBUCKST == PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
+        return 0;                                  /* idempotent */
+    }
+    if (!s_hp.trims_ok && hp_trims_load() != 0) {
+        return -1;                                 /* trims unusable */
+    }
+    return hp_simobuck_enable();
+}
+
 void tiku_cpu_freq_ambiq_hp_probe(tiku_ambiq_hp_probe_t *out) {
     uint8_t  otp_was_on = 0u;
     uint32_t i, spin;

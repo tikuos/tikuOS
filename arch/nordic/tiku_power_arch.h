@@ -110,6 +110,45 @@ unsigned long tiku_nordic_cpu_hz_measure(void);
 uint32_t tiku_nordic_cache_workload(uint32_t *out_us);
 
 /*---------------------------------------------------------------------------*/
+/* MEMORY-ACCESS WORKLOADS                                                   */
+/*---------------------------------------------------------------------------*/
+
+/* Kinds for tiku_nordic_mem_probe().  Each is a tight, alignment-pinned,
+ * access-counted loop; NOP is the register-only reference so "an access" can be
+ * priced against "a register operation" on one basis. */
+#define TIKU_MEM_KIND_NOP          0u
+#define TIKU_MEM_KIND_SRAM_R       1u
+#define TIKU_MEM_KIND_SRAM_W       2u
+#define TIKU_MEM_KIND_SRAM_STRIDE  3u
+#define TIKU_MEM_KIND_RRAM_HOT     4u   /* 4 KB set: inside the 8 KB cache   */
+#define TIKU_MEM_KIND_RRAM_COLD    5u   /* 64 KB + stride: defeats the cache */
+#define TIKU_MEM_KIND_COUNT        6u
+
+/**
+ * @brief Run a memory workload for @p ms; returns elapsed microseconds (GRTC).
+ *
+ * EXISTS BECAUSE EVERY CORE FIGURE SO FAR HAD NO MEMORY TRAFFIC IN IT.  The
+ * reference loop that priced the core is two register instructions; real code
+ * loads and stores, and a durability decision writes NVM.  These loops put a
+ * number on each.
+ */
+uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms);
+
+/** @brief Accesses retired by the last memory probe (the work denominator). */
+uint32_t tiku_nordic_mem_access_count(void);
+
+/**
+ * @brief Checksum of the last probe's traversal.
+ *
+ * Live for the SRAM kinds (the buffer is seeded with a pattern).  STRUCTURALLY
+ * ZERO for the RRAM kinds, whose arrays are `const` zero-filled -- so for those
+ * it is not evidence of anything and must not be read as such.  The access
+ * COUNT is the denominator that matters, and nop landing on its architectural
+ * 3 cycles/iteration is what validates the accounting.
+ */
+uint32_t tiku_nordic_mem_checksum(void);
+
+/*---------------------------------------------------------------------------*/
 /* SLEEP FLOOR PROBE                                                         */
 /*---------------------------------------------------------------------------*/
 
@@ -119,6 +158,18 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us);
 #define TIKU_SLEEP_STOP_HFXO  0x4u   /**< stop the 32 MHz crystal           */
 #define TIKU_SLEEP_DEEP       0x8u   /**< WFI with SCR.SLEEPDEEP set        */
 #define TIKU_SLEEP_STOP_TIM   0x10u  /**< stop the free-running htimer TIMER20 */
+#define TIKU_SLEEP_STOP_TICK  0x20u  /**< stretch the 128 Hz kernel tick across
+                                          the whole window (tickless path), so
+                                          the CPU takes ~1 wake instead of 128/s.
+                                          NOT part of `quiet`: quiet's meaning
+                                          is frozen by two published
+                                          experiments. */
+#define TIKU_SLEEP_STOP_SYSC  0x40u  /**< drop GRTC MODE.SYSCOUNTEREN for the
+                                          window (AUTOEN stays), letting the
+                                          1 MHz SYSCOUNTER sleep with the CPUs.
+                                          Needs LFCLK running for the wake
+                                          compare -- start it first
+                                          ('power lfclk'). */
 
 /**
  * @brief Sit in WFI for @p ms, optionally shutting down what holds HFCLK up.
@@ -148,6 +199,27 @@ uint32_t tiku_nordic_sleep_probe(uint32_t ms, unsigned flags);
 uint32_t tiku_nordic_sleep_wake_count(void);
 
 /**
+ * @brief Outer passes retired by the last busy probe, and iterations per pass.
+ *
+ * Current measured over a fixed WINDOW says nothing about efficiency on its own:
+ * a configuration that draws less may simply have executed less.  Pass count x
+ * iterations-per-pass is the denominator that turns milliamps into energy per
+ * unit of work, which is the quantity a clock or cache decision turns on.
+ */
+uint32_t tiku_nordic_spin_pass_count(void);
+
+#if (TIKU_FLPR_ENABLE + 0)
+/**
+ * @brief Coprocessor passes retired inside the last probe window.
+ *
+ * Sampled on-chip at the window edges so the figure carries no host round-trip
+ * error -- it is the denominator for the coprocessor's energy per unit work.
+ */
+uint32_t tiku_nordic_flpr_pass_delta(void);
+#endif
+uint32_t tiku_nordic_spin_inner(void);
+
+/**
  * @brief Non-zero if a debugger has halting debug enabled (DHCSR.C_DEBUGEN).
  *
  * The datasheet's low-power figures apply to NORMAL mode only: "when a debug
@@ -173,10 +245,15 @@ int tiku_nordic_debug_attached(void);
  * iterations, keeping the peripheral bus below ~0.1% of the window so what is
  * measured is the core, not the bus.
  *
- * @param ms  Duration to spin.
+ * Takes the SAME TIKU_SLEEP_STOP_* flags as the sleep probe and releases the
+ * same things, because a busy figure and an idle figure are only comparable if
+ * the only difference between them is what the CPU is doing.
+ *
+ * @param ms     Duration to spin.
+ * @param flags  TIKU_SLEEP_STOP_* bits.
  * @return Actual elapsed microseconds (GRTC-timed).
  */
-uint32_t tiku_nordic_spin_probe(uint32_t ms);
+uint32_t tiku_nordic_spin_probe(uint32_t ms, unsigned flags);
 
 /**
  * @brief Enter System OFF.  Does not return; wake is by reset or GPIO DETECT.

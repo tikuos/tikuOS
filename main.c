@@ -77,6 +77,18 @@ int main(void) {
 
   MAIN_PRINTF("Boot complete\n");
 
+#if defined(TIKU_POWER_AUTORUN) && TIKU_POWER_AUTORUN
+  /* Deep-sleep measurement firmware: run the console-free power staircase
+   * instead of the scheduler (see tiku_ambiq_power_autorun).  Never returns. */
+  {
+    extern void tiku_ambiq_power_autorun(void);
+    MAIN_PRINTF("POWER AUTORUN: spin3s / idle10s / deepsleep45s, forever.\n");
+    MAIN_PRINTF("Unplug J16 (J-Link) and power via the Apollo5 USB connector\n");
+    MAIN_PRINTF("for the real deep-sleep measurement; reconnect J16 to flash.\n");
+    tiku_ambiq_power_autorun();
+  }
+#endif
+
 #if TIKU_TURBO_BENCH
   /* Frequency-scaling benchmark firmware: run heavy TikuKits workloads at
    * 96 MHz (LP) and 192 MHz (HP), emit serial markers for host-side timing,

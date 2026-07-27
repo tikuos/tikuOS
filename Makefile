@@ -1419,6 +1419,14 @@ SRCS += arch/ambiq/tiku_crt_early.c
 SRCS += arch/ambiq/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ambiq/tiku_cpu_watchdog_arch.c
 SRCS += arch/ambiq/tiku_htimer_arch.c
+# Power-measurement instruments (Apollo counterpart of arch/nordic/tiku_power_arch.c).
+# Apollo510-ONLY: it uses the M55's architectural L1 caches and the apollo510.h
+# register map, neither of which exists on Apollo4.  Advertised as a -D
+# capability macro (not a device-header macro) so the shell command can gate on
+# it without depending on include order -- the trap documented in
+# kernel/shell/tiku_shell_config.h.
+SRCS += arch/ambiq/tiku_power_ambiq.c
+CFLAGS += -DTIKU_AMBIQ_POWER_PROBE=1
 SRCS += arch/ambiq/tiku_crit_arch.c
 SRCS += arch/ambiq/tiku_gpio_irq_arch.c
 SRCS += arch/ambiq/tiku_uart_arch.c

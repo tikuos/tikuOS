@@ -37,6 +37,7 @@
 #if TIKU_SHELL_CMD_AXONSPROBE
 
 #include <kernel/shell/tiku_shell_io.h>
+#include <kernel/cpu/tiku_hang.h>   /* check-in during hold/busy loops */
 #include <arch/nordic/tiku_device_select.h>
 #include <arch/nordic/tiku_cpu_common.h>
 #include <string.h>
@@ -808,6 +809,11 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
                  * with nothing issued to it. */
                 __asm__ volatile ("wfi" ::: "memory");
             }
+            /* Both arms block this process deliberately for the whole window.
+             * Check in so the detector does not read a legitimate long block as
+             * a wedge -- unhandled, that is an 8 s cliff (see the note on
+             * tiku_hang_arch_reset in tiku_cpu_watchdog_arch.c). */
+            tiku_hang_checkin();
         } while ((uint32_t)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0)
                  < ms * 1000u);
         nrf_axon_platform_free_reservation_from_user();

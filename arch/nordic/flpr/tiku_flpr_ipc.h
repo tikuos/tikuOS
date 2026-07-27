@@ -164,6 +164,16 @@ typedef struct {
      * and run ATT/GATT.  TX: the host's response/notification, fragmented, ->
      * a2f with a2f_llid, flow-controlled via a2f_ack; the controller wraps
      * each in a data PDU with that LLID.  The FLPR never parses ATT. */
+
+    /* Compute-only load (power characterisation).  The coprocessor's other
+     * sustained workloads are unusable as a POWER reference: the pulse engine
+     * drives VIO bit 7, which is DK LED3, so its current is mostly the LED, and
+     * the beacon/conn paths run the radio.  This one touches nothing outside
+     * the register file, so what it measures is the VPR core.  spin_passes is
+     * the WORK done -- current over a fixed window cannot tell "draws less"
+     * from "executed less" (see experiments/power/experiment1). */
+    volatile uint32_t spin_iters;       /* M33->FLPR: outer passes requested   */
+    volatile uint32_t spin_passes;      /* FLPR->M33: outer passes retired     */
 } tiku_flpr_shared_t;
 
 /* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + our AdvA. */
@@ -207,9 +217,17 @@ typedef struct {
  * conn_* fields (step 1a); step 1b then holds the link.  Same NS handoff. */
 #define TIKU_FLPR_CMD_CONN_ADV    7u
 #define TIKU_FLPR_CMD_CONN_STOP   8u
+/* Compute-only load (power characterisation): run .spin_iters outer passes of a
+ * register-only loop, publish the count in .spin_passes, then raise
+ * RSP_SPIN_DONE.  Deliberately touches no pin, no radio and no shared memory
+ * inside the loop, so the current it draws is the VPR core and nothing else.
+ * The M33 times it against its own clock -- the VPR's mcycle proved unusable as
+ * a timebase (see the pacing note in tiku_flpr_main.c). */
+#define TIKU_FLPR_CMD_SPIN        9u
 #define TIKU_FLPR_RSP_PARKED  1u
 #define TIKU_FLPR_RSP_PULSE_DONE 2u
 #define TIKU_FLPR_RSP_BEACON_STOPPED 3u
+#define TIKU_FLPR_RSP_SPIN_DONE      4u
 
 typedef struct {
     uint32_t half_cycles;           /* FLPR cycles per half-period (128/us) */

@@ -29,6 +29,7 @@
 
 #include <arch/nordic/tiku_device_select.h>   /* NRF_VPR00_NS / NRF_MPC00  */
 #include <arch/nordic/tiku_nordic_core.h>     /* NVIC enable (IRQ 76)      */
+#include <arch/nordic/tiku_cpu_common.h>      /* tiku_nordic_cpu_hz_now()  */
 #include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND    */
 #include <kernel/timers/tiku_clock.h>          /* pulse wall-clock measure  */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick during the long probe */
@@ -309,6 +310,74 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
               * 1000u / (uint32_t)TIKU_CLOCK_SECOND;
     }
     return (spin < 20000000u) ? 0 : -2;       /* -2: firmware never DONE  */
+}
+
+/*---------------------------------------------------------------------------*/
+/* Compute-only load (power characterisation)                                */
+/*---------------------------------------------------------------------------*/
+
+/* NON-BLOCKING by design.  The question this exists to answer is what the
+ * coprocessor costs while the APPLICATION CORE IS ASLEEP, so the M33 must be
+ * free to enter WFI after handing the work over.  A blocking call would make
+ * "FLPR busy, CPU idle" unmeasurable -- the only state it could ever produce is
+ * "both busy". */
+int tiku_flpr_arch_spin_start(uint32_t iters)
+{
+    if (!tiku_flpr_arch_running() || iters == 0u) {
+        return -1;
+    }
+    TIKU_FLPR_SHARED->spin_passes = 0u;
+    TIKU_FLPR_SHARED->spin_iters = iters;
+    TIKU_FLPR_SHARED->rsp = 0u;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_SPIN;
+    return 0;
+}
+
+uint32_t tiku_flpr_arch_spin_passes(void)
+{
+    return TIKU_FLPR_SHARED->spin_passes;
+}
+
+/* End a sustained load early.  The firmware re-reads the request count every
+ * pass, so zeroing it drops the coprocessor back to its mailbox loop. */
+void tiku_flpr_arch_spin_abort(void)
+{
+    TIKU_FLPR_SHARED->spin_iters = 0u;
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+}
+
+int tiku_flpr_arch_spin_done(void)
+{
+    return (TIKU_FLPR_SHARED->rsp == TIKU_FLPR_RSP_SPIN_DONE) ? 1 : 0;
+}
+
+/* Timed variant: the clock oracle.  The FLPR shares HCLK128M with the M33, so a
+ * FIXED amount of coprocessor work must complete in half the wall time at
+ * 128 MHz that it takes at 64 MHz.  Timed here against the GRTC (1 MHz,
+ * PLL-independent) rather than the 128 Hz system tick, because the tick's
+ * 7.81 ms granularity is coarser than the effect on short runs. */
+int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us)
+{
+    uint32_t t0, spin;
+
+    if (tiku_flpr_arch_spin_start(iters) != 0) {
+        return -1;
+    }
+    t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
+    for (spin = 0u; spin < 200000000u; spin++) {
+        if (TIKU_FLPR_SHARED->rsp == TIKU_FLPR_RSP_SPIN_DONE) {
+            break;
+        }
+    }
+    if (us != (uint32_t *)0) {
+        *us = (uint32_t)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0);
+    }
+    if (passes != (uint32_t *)0) {
+        *passes = TIKU_FLPR_SHARED->spin_passes;
+    }
+    TIKU_FLPR_SHARED->rsp = 0u;
+    return (spin < 200000000u) ? 0 : -2;
 }
 
 /*---------------------------------------------------------------------------*/

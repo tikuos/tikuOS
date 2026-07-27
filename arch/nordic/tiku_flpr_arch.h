@@ -76,6 +76,43 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
                          uint32_t *measured, uint32_t *ms);
 
 /**
+ * @brief Start a compute-only load on the coprocessor (non-blocking).
+ *
+ * @param iters Outer passes; each is 4096 register-only inner iterations.
+ * @return 0 if handed over, -1 if the coprocessor is not running.
+ *
+ * Returns as soon as the command is posted so the caller can sleep while the
+ * coprocessor works -- the "offloaded work, host asleep" state that a blocking
+ * call could never produce.  Unlike the pulse engine this drives no pin (that
+ * one owns DK LED3, whose current would dominate any power measurement) and
+ * unlike the beacon path it does not touch the radio.
+ */
+int tiku_flpr_arch_spin_start(uint32_t iters);
+
+/** @brief Outer passes the coprocessor has retired so far (the WORK done). */
+uint32_t tiku_flpr_arch_spin_passes(void);
+
+/** @brief End a sustained compute load early (drops back to the mailbox loop). */
+void tiku_flpr_arch_spin_abort(void);
+
+/** @brief Non-zero once the coprocessor has finished the requested passes. */
+int tiku_flpr_arch_spin_done(void);
+
+/**
+ * @brief Run a fixed compute load and time it against the GRTC.
+ *
+ * Blocks.  Exists as a clock oracle: the coprocessor shares HCLK128M with the
+ * application core, so the same work must take half as long on a 128 MHz build
+ * as on a 64 MHz one.  Measuring that is how the claim gets tested rather than
+ * assumed.  Note that the app core busy-polls while waiting, which contends for
+ * the shared SRAM and slows the coprocessor measurably -- compare like with
+ * like, or use the non-blocking form with the app core asleep.
+ *
+ * @return 0 on completion, -1 if not running, -2 if it never reported done.
+ */
+int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us);
+
+/**
  * @brief Offload duty-cycled BLE beaconing to the coprocessor.
  *
  * Caller contract: radio link-config registers already programmed

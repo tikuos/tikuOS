@@ -87,3 +87,8 @@ insight/
 # (Nordic-proprietary). TikuOS ships none; drop your own here to opt into
 # hardware PK (TIKU_CRACEN_PK_ENABLE=1). Never committed.
 arch/nordic/cracen_pk_microcode.h
+
+# Bench experiments: raw captures, scratch scripts and working notes.
+# Local lab output, never committed -- findings graduate into kintsugi/ decks
+# or TikuBench suites, and the raw data stays here.
+experiments/
