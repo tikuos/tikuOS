@@ -28,6 +28,7 @@
 
 #include "tiku_cpu_watchdog_arch.h"
 #include <arch/nordic/tiku_nordic_mdk.h>
+#include <arch/nordic/tiku_nordic_core.h>   /* tiku_nordic_system_reset()    */
 
 #define TIKU_WDT30                NRF_WDT30_S
 #define TIKU_WDT_RR_RELOAD_KEY    0x6E524635UL   /* WDT_RR_RR_Reload          */
@@ -86,4 +87,29 @@ void tiku_cpu_nordic_watchdog_resume_arch(int kick_on_resume)
 void tiku_cpu_nordic_watchdog_kick_arch(void)
 {
     TIKU_WDT30->RR[0] = TIKU_WDT_RR_RELOAD_KEY;
+}
+
+/*---------------------------------------------------------------------------*/
+/* HANG-DETECTOR RESET                                                       */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Arch reset for the check-in hang detector (overrides the weak spin).
+ *
+ * THE WEAK DEFAULT WAS THE BUG.  tiku_hang.c's fallback spins forever on the
+ * theory that "a real hardware watchdog, where present, still catches it" --
+ * but this port stops WDT30 at boot, so a detected hang became an infinite
+ * 128 MHz spin: ~5.9 mA, console dead (whatever the wedged code had torn down
+ * stays torn down), RESETREAS empty, until someone pulls the reset pin.  Found
+ * as "the 1024-tick cliff" during the power experiments -- any shell command
+ * that legitimately blocks its process for 8 s hit it.
+ *
+ * AIRCR.SYSRESETREQ is the same primitive the reboot command has exercised all
+ * along; it is a warm reset, so the .persistent.warm culprit record written
+ * just before this call survives into the next boot (/sys/boot/hang -- proven
+ * end-to-end by drill: "0 Shell" after a deliberate 9 s block).
+ */
+void tiku_hang_arch_reset(void)
+{
+    tiku_nordic_system_reset();   /* does not return */
 }
