@@ -40,6 +40,9 @@
 #include <arch/ambiq/tiku_power_ambiq.h>
 #include <arch/ambiq/tiku_timer_arch.h>       /* stimer reclock / rate       */
 #include <arch/ambiq/tiku_cpu_common.h>       /* tiku_cpu_ambiq_delay_us     */
+#if (TIKU_DRV_NOR_ENABLE + 0)
+#include <arch/ambiq/tiku_nor_arch.h>          /* MSPI1 + U12 external NOR    */
+#endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
 #include <kernel/memory/tiku_mem.h>           /* TIKU_MEM_PSRAM tier gate    */
@@ -120,6 +123,22 @@ static void power_stat(void)
          * like a damning result and is usually just an unarmed counter. */
         SHELL_PRINTF("hit rate n/a (counters not started -- run 'power clear')\n");
     }
+}
+#endif
+
+#if (TIKU_DRV_NOR_ENABLE + 0)
+/** @brief NOR bring-up step tracer -- a wedged step names itself. */
+static void nor_trace(const char *step)
+{
+    SHELL_PRINTF("  nor step: %s\n", step);
+}
+
+/** @brief Shared error-name table for the NOR verbs. */
+static const char *nor_errname(tiku_nor_err_t rc)
+{
+    static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
+                                      "ID", "ARG", "STATE", "PROGRAM" };
+    return ((unsigned)rc < 8u) ? en[rc] : "?";
 }
 #endif
 
@@ -608,6 +627,185 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("cache: %s\n", tiku_ambiq_cache_enabled() ? "on" : "off");
         return;
     }
+#if (TIKU_DRV_NOR_ENABLE + 0)
+    if (streq(argv[1], "nor")) {
+        /* N1/N2 bring-up and gates for the board's 8 MB octal NOR (U12).
+         *
+         *   power nor id [octal]  serial bring-up + identity; "octal" also
+         *                         switches to octal DDR and re-verifies
+         *   power nor fault       the same, with D0 stolen -- the guard
+         *                         must ERROR rather than invent an answer
+         *   power nor gate        the gate only an NVM can pass: erase,
+         *                         program, verify, and report the stamp
+         *                         that a later power cycle must still find
+         *   power nor verify      re-read that stamp WITHOUT writing --
+         *                         run it after a reboot or a load-switch
+         *                         cycle to prove persistence
+         *   power nor off | on    load switch: true zero / restore
+         *   power nor erases      how many erases this boot has spent
+         */
+        tiku_nor_id_t id;
+        tiku_nor_err_t rc;
+
+        if (argc >= 3 && streq(argv[2], "regs")) {
+            uint32_t g[12]; unsigned k7;
+            static const char *const nm[] = {
+                "devpwrstatus","ioclkctrl","dev0cfg","dev0cfg1","dev0ddr",
+                "dev0xip","dev0instr","padouten","mspicfg","ctrl","intstat",
+                "rxentries" };
+            tiku_nor_regs(g, 12u);
+            SHELL_PRINTF("nor regs (read back):\n");
+            for (k7 = 0u; k7 < 12u; k7++) {
+                SHELL_PRINTF("  %-13s %08lx\n", nm[k7], (unsigned long)g[k7]);
+            }
+            return;
+        }
+        if (argc >= 4 && streq(argv[2], "ls") && streq(argv[3], "really")) {
+            SHELL_PRINTF("nor ls: refused -- driving GP208 wedged the board\n"
+                         "  (SWD dead at every speed/reset type; needed a\n"
+                         "   physical power cycle).  Polarity and load are\n"
+                         "   unestablished; confirm on a scope first.\n");
+            return;
+        }
+        if (argc >= 4 && streq(argv[2], "ls") && 0) {
+            /* Settle the load-switch polarity by experiment: drive the pad
+             * each way (and high-Z) and see which state lets identity read. */
+            int lv = streq(argv[3], "z") ? -1 : (argv[3][0] == '1' ? 1 : 0);
+            tiku_nor_ls_set(lv);
+            rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+            if (rc == TIKU_NOR_OK) { rc = tiku_nor_read_id(&id); }
+            SHELL_PRINTF("nor ls=%s: mfr %02x type %02x cap %02x -- %s\n",
+                         (lv < 0) ? "hi-Z" : (lv ? "high" : "low"),
+                         id.mfr, id.type, id.capacity, nor_errname(rc));
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "erases")) {
+            SHELL_PRINTF("nor: %lu erases performed this boot (scratch"
+                         " sector %08lx)\n",
+                         (unsigned long)tiku_nor_erase_count(),
+                         (unsigned long)TIKU_NOR_SCRATCH_ADDR);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "off")) {
+            tiku_nor_deinit();
+            tiku_nor_power(0);
+            SHELL_PRINTF("nor: load switch OFF -- VDD_FLASH at true zero,"
+                         " contents retained\n");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "verify")) {
+            /* Persistence check with NO writes: read the stamp back. */
+            static uint8_t rd[64];
+            uint32_t i6;
+            int ok6 = 1;
+            rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+            if (rc == TIKU_NOR_OK) { rc = tiku_nor_read_id(&id); }
+            if (rc != TIKU_NOR_OK) {
+                SHELL_PRINTF("nor verify: bring-up %s\n", nor_errname(rc));
+                return;
+            }
+            rc = tiku_nor_read(TIKU_NOR_SCRATCH_ADDR, rd, sizeof rd);
+            if (rc != TIKU_NOR_OK) {
+                SHELL_PRINTF("nor verify: read %s\n", nor_errname(rc));
+                return;
+            }
+            for (i6 = 0u; i6 < sizeof rd; i6++) {
+                if (rd[i6] != (uint8_t)(0xA5u ^ i6)) { ok6 = 0; }
+            }
+            SHELL_PRINTF("nor verify: stamp %02x %02x %02x %02x ... -- %s\n",
+                         rd[0], rd[1], rd[2], rd[3],
+                         ok6 ? "INTACT (survived power loss)"
+                             : "absent/modified");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "gate")) {
+            /* erase -> program -> verify, on the scratch sector only. */
+            static uint8_t wr[64], rd[64];
+            uint32_t i6;
+            int ok6 = 1;
+            rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+            if (rc == TIKU_NOR_OK) { rc = tiku_nor_read_id(&id); }
+            if (rc != TIKU_NOR_OK) {
+                SHELL_PRINTF("nor gate: bring-up %s\n", nor_errname(rc));
+                return;
+            }
+            SHELL_PRINTF("  erasing scratch sector %08lx (this spends one"
+                         " erase cycle)...\n",
+                         (unsigned long)TIKU_NOR_SCRATCH_ADDR);
+            rc = tiku_nor_erase(TIKU_NOR_SCRATCH_ADDR, 0, 0);
+            if (rc != TIKU_NOR_OK) {
+                SHELL_PRINTF("nor gate: erase %s\n", nor_errname(rc));
+                return;
+            }
+            rc = tiku_nor_read(TIKU_NOR_SCRATCH_ADDR, rd, sizeof rd);
+            for (i6 = 0u; i6 < sizeof rd; i6++) {
+                if (rd[i6] != 0xFFu) { ok6 = 0; }
+            }
+            SHELL_PRINTF("  after erase: %s (erased NOR must read all ff)\n",
+                         ok6 ? "all ff" : "NOT ERASED");
+            for (i6 = 0u; i6 < sizeof wr; i6++) {
+                wr[i6] = (uint8_t)(0xA5u ^ i6);
+            }
+            rc = tiku_nor_program(TIKU_NOR_SCRATCH_ADDR, wr, sizeof wr);
+            if (rc != TIKU_NOR_OK) {
+                SHELL_PRINTF("nor gate: program %s\n", nor_errname(rc));
+                return;
+            }
+            rc = tiku_nor_read(TIKU_NOR_SCRATCH_ADDR, rd, sizeof rd);
+            ok6 = 1;
+            for (i6 = 0u; i6 < sizeof rd; i6++) {
+                if (rd[i6] != wr[i6]) { ok6 = 0; }
+            }
+            SHELL_PRINTF("nor gate: program+verify %s -- erases used %lu\n",
+                         ok6 ? "bit-exact" : "MISMATCH",
+                         (unsigned long)tiku_nor_erase_count());
+            SHELL_PRINTF("  now: power-cycle the board, then"
+                         " `power nor verify`\n");
+            return;
+        }
+        {
+            int want_octal = 0, want_fault = 0, k6;
+            for (k6 = 2; k6 < argc; k6++) {
+                if (streq(argv[k6], "octal")) { want_octal = 1; }
+                if (streq(argv[k6], "fault"))  { want_fault = 1; }
+            }
+            tiku_nor_set_trace(nor_trace);
+            rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+            tiku_nor_set_trace((void (*)(const char *))0);
+            if (rc != TIKU_NOR_OK) {
+                SHELL_PRINTF("nor init: %s\n", nor_errname(rc));
+                return;
+            }
+            if (want_fault) { tiku_nor_fault_inject(1); }
+            rc = tiku_nor_read_id(&id);
+            if (want_fault) { tiku_nor_fault_inject(0); }
+            SHELL_PRINTF("nor serial @%lu Hz: mfr %02x (9d=ISSI) type %02x"
+                         " cap %02x status %02x nvcr6 %02x\n",
+                         tiku_nor_clock_hz(), id.mfr, id.type, id.capacity,
+                         id.status, id.ncr6);
+            SHELL_PRINTF("  verdict: %s%s\n", nor_errname(rc),
+                         want_fault ? "  (fault injected: error EXPECTED)"
+                                    : "");
+            if (want_octal && rc == TIKU_NOR_OK) {
+                tiku_nor_set_trace(nor_trace);
+                rc = tiku_nor_enter_octal(TIKU_NOR_CLK_96MHZ);
+                tiku_nor_set_trace((void (*)(const char *))0);
+                if (rc == TIKU_NOR_ERR_STATE) {
+                    SHELL_PRINTF("nor octal: REFUSED -- non-volatile CR[6]"
+                                 " is %02x, not ff; this driver does not"
+                                 " write non-volatile config\n", id.ncr6);
+                    return;
+                }
+                (void)tiku_nor_read_id(&id);
+                SHELL_PRINTF("nor octal @%lu Hz: %s -- mfr %02x cap %02x"
+                             " (identity re-read IN OCTAL)\n",
+                             tiku_nor_clock_hz(), nor_errname(rc),
+                             id.mfr, id.capacity);
+            }
+        }
+        return;
+    }
+#endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
     if (streq(argv[1], "psram")) {
         /* M1 bring-up verb for the board's 64 MB octal-DDR PSRAM (EVB U14).

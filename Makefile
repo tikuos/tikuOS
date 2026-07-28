@@ -1448,6 +1448,13 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # hardware, not silicon, so a target without the part must not carry the
 # driver.  The -D is a capability macro so the shell command can gate on it
 # regardless of include order (see kernel/shell/tiku_shell_config.h).
+# External octal NOR flash on MSPI1 (EVB U12, 8 MB).  Opt-in board hardware,
+# same reasoning as the PSRAM: the -D is a capability macro so the shell
+# command can gate on it regardless of include order.
+ifeq ($(TIKU_DRV_NOR_ENABLE),1)
+SRCS += arch/ambiq/tiku_nor_arch.c
+CFLAGS += -DTIKU_DRV_NOR_ENABLE=1
+endif
 ifeq ($(TIKU_DRV_PSRAM_ENABLE),1)
 SRCS += arch/ambiq/tiku_psram_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram.c   # /sys/psram lifecycle nodes
