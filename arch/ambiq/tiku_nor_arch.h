@@ -73,6 +73,16 @@
  * the owner finding no U12 on the board, the conclusion is that THE BLUE EVB
  * DOES NOT CARRY THE NOR, and this driver has never had a device to talk to.
  *
+ * BUT IT DOES HAVE A TARGET: the lab also has the **Apollo510 EVB (green)**,
+ * which carries U12 per its own schematic.  On THAT board the pins are the
+ * ones the (correct, for it) AP510EVB_Rev2.2 schematic gives:
+ *
+ *     RSTn  GP54    CE0  GP53    load switch  GP208
+ *
+ * so this driver is board-conditional, not dead.  See the pin defines in the
+ * .c: they select by TIKU_BOARD_APOLLO510_EVB.  Finish N1-N5 on the green
+ * board; the Blue board simply has nothing to talk to.
+ *
  * THE MISTAKE THIS COMMENT EXISTS TO RECORD:
  *
  * An earlier version of this table asserted RSTn = GP54 and a load switch on

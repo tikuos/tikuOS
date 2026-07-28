@@ -98,12 +98,28 @@
 #define NOR_PAD_CLK    103u
 #define NOR_PAD_DQS    104u
 #define NOR_PAD_CE      53u
-#define NOR_PAD_RST     17u    /* the 510B BSP's value -- see the header's
-                                * correction; 54 came from the WRONG BOARD's
-                                * schematic                                  */
-#define NOR_PAD_LSEN   208u    /* NOT PRESENT ON THE 510B: this pad belongs to
-                                * the non-Blue EVB's load switch.  Kept only
-                                * so the disarmed verb still compiles.       */
+/*
+ * BOARD-CONDITIONAL.  The lab has both Apollo510 EVBs and they differ here:
+ *
+ *              Apollo510 EVB (green)      Apollo510B EVB (Blue)
+ *   U12 NOR    fitted                     NOT fitted
+ *   RSTn       GP54                       GP17 (per its BSP)
+ *   CE0        GP53                       not defined; vendor comments out
+ *                                         the CE pinconfig entirely
+ *   load sw    GP208                      none
+ *
+ * Build for the green board with -DTIKU_BOARD_APOLLO510_EVB=1 to get the
+ * pins that actually reach a device.  The Blue defaults are kept so the
+ * driver still compiles there (and reports honestly that nothing answers).
+ */
+#if (TIKU_BOARD_APOLLO510_EVB + 0)
+#define NOR_PAD_RST     54u    /* green board: schematic + its own BSP agree */
+#define NOR_PAD_LSEN   208u    /* green board: real load switch, real off    */
+#else
+#define NOR_PAD_RST     17u    /* Blue board: the 510B BSP's value           */
+#define NOR_PAD_LSEN   208u    /* Blue board: no load switch -- pad kept only
+                                * so the disarmed verb still compiles        */
+#endif
 
 #define PAD_FNCSEL_MSPI1     0u
 #define PAD_FNCSEL_MNCE1     0u
