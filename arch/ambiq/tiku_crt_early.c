@@ -32,6 +32,22 @@
 #include <stdint.h>
 #include "apollo510.h"   /* PWRCTRL (shared-SRAM power-enable) */
 
+/**
+ * @brief FP/MVE (EPU) behaviour on low-power entry -- PWRMODCTL ELPSTATE[5:4].
+ *
+ * 1 = ON with the clock stopped (the CMSIS SystemInit choice: no power-up stall
+ *     on wake, best continuous FP/MVE throughput)
+ * 2 = retained (state kept, unit powered down) -- the DEFAULT here
+ *
+ * 3 (OFF) is rejected below: see the rationale at the write site.
+ */
+#ifndef TIKU_AMBIQ_ELP_STATE
+#define TIKU_AMBIQ_ELP_STATE 2u
+#endif
+_Static_assert(TIKU_AMBIQ_ELP_STATE <= 2u,
+               "TIKU_AMBIQ_ELP_STATE=3 (EPU OFF) discards FP/MVE register state "
+               "and this build is hard-float -- it boot-loops the board");
+
 /*---------------------------------------------------------------------------*/
 /* Linker-script symbols                                                     */
 /*---------------------------------------------------------------------------*/
@@ -130,8 +146,9 @@ void tiku_ambiq_gpu_isr(void)              __attribute__((weak, alias("ambiq_def
  *   2. Set SP from __stack linker symbol — robust to alternate entries.
  *   3. Set VTOR to tiku_ambiq_vectors (1024-aligned at MRAM 0x410000).
  *   4. Enable FPU (CPACR CP10/CP11) — required by -mfloat-abi=hard.
- *   5. Set M55 EPU power state = ON/clock-off (PWRMODCTL.CPDLPSTATE
- *      ELPSTATE[5:4] = 0b01) and enable ARMv8.1-M LOB (SCB.CCR bit 19).
+ *   5. Set the M55 EPU (FP/MVE) sleep behaviour via PWRMODCTL.CPDLPSTATE
+ *      ELPSTATE[5:4] -- see TIKU_AMBIQ_ELP_STATE below -- and enable
+ *      ARMv8.1-M LOB (SCB.CCR bit 19).
  *   6. Power up the 3 MB shared SRAM (PWRCTRL.SSRAMPWREN, three groups)
  *      with a bounded wait — .ssram tier buffers live there.
  *   7. Copy .data MRAM->DTCM, zero .bss, zero .ssram.
@@ -146,8 +163,10 @@ void tiku_ambiq_reset_handler(void) {
     /* Mask maskable IRQs immediately. Cortex-M resets with PRIMASK = 0;
      * something that programs an IRQ source during kernel init (e.g.
      * SysTick.TICKINT in tiku_clock_arch_init()) would otherwise fire
-     * before tiku_sched_init() builds the process queue. The scheduler
-     * re-enables IRQs at the top of tiku_sched_loop(). */
+     * before tiku_sched_init() builds the process queue. IRQs are
+     * re-enabled at the end of tiku_cpu_full_init() (boot/tiku_boot.c),
+     * so scheduler-less builds (tests, benches, the power autorun) get a
+     * live tick too -- not only builds that reach tiku_sched_loop(). */
     __asm__ volatile ("cpsid i" ::: "memory");
 
     /* The SBL loads SP from vector[0], but set it explicitly so this
@@ -163,14 +182,35 @@ void tiku_ambiq_reset_handler(void) {
      * same way. */
     *(volatile uint32_t *)0xE000ED88U |= (0xFU << 20);
 
-    /* The two functional bits CMSIS SystemInit() set that the steps above do
-     * not: the M55 EPU (FP/MVE unit) power state = ON, clock-off (best FP/MVE
-     * performance, avoids power-up stalls) via PWRMODCTL.CPDLPSTATE
-     * ELPSTATE[5:4] = 0b01; and the ARMv8.1-M Low-Overhead-Branch extension
-     * via SCB.CCR.LOB (bit 19), used by -mcpu=cortex-m55 loop instructions. */
+    /* EPU (FP/MVE) sleep behaviour + the ARMv8.1-M Low-Overhead-Branch
+     * extension (SCB.CCR.LOB, used by -mcpu=cortex-m55 loop instructions).
+     * These are the two functional bits CMSIS SystemInit() sets that the steps
+     * above do not.
+     *
+     * ELPSTATE decides what happens to the FP/MVE unit when the core enters a
+     * low-power state.  CMSIS defaults to 0b01 (ON, clock stopped) for best
+     * FP/MVE performance -- no power-up stall on wake.  MEASURED on this board
+     * (Joulescope at J4, buck+tidied, n=4, SD 0.2-0.8 uA):
+     *
+     *     ELPSTATE=0b01 (ON, clk off)      idle 3.336 mA
+     *     ELPSTATE=0b10 (RET, state kept)  idle 2.398 mA   -937 uA = -28 %
+     *
+     * ...for +3.1 % on continuous MVE work (`dot` 1032 -> 1064 milli-cycles per
+     * element), with the saving already net of the 128 Hz tick's wake-ups and
+     * every kernel bit-exact afterwards.  For a duty-cycled OS that is the
+     * right trade, so RET is the default here; a compute-bound image can ask
+     * for the CMSIS choice with -DTIKU_AMBIQ_ELP_STATE=1.
+     *
+     * 0b11 (OFF) is NOT selectable: it discards FP/MVE register state on every
+     * low-power entry, and this build is hard-float, so the kernel holds live
+     * floating-point context across sleeps.  Selecting it once corrupted a
+     * calculation mid-flight and left the board in a crash-restart loop that
+     * needed a physical power cycle (2026-07-28).  The _Static_assert below
+     * refuses it at build time; `power cpdlp elp 3` refuses it at run time. */
     {
         volatile uint32_t *cpdlpstate = (volatile uint32_t *)0xE001E300U; /* PWRMODCTL */
-        *cpdlpstate = (*cpdlpstate & ~(0x3U << 4)) | (0x1U << 4);
+        *cpdlpstate = (*cpdlpstate & ~(0x3U << 4)) |
+                      ((uint32_t)TIKU_AMBIQ_ELP_STATE << 4);
     }
     *(volatile uint32_t *)0xE000ED14U |= (1U << 19);   /* SCB->CCR, LOB */
     __asm__ volatile ("dsb");

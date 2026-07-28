@@ -157,6 +157,39 @@ typedef struct {
     uint32_t powerstate[20];   /**< INFO1 SPOT-manager POWERSTATE trim table  */
     uint8_t  info1_in_otp;     /**< 1 = INFO1 read from OTP, 0 = MRAM shadow  */
     uint8_t  info1_ok;         /**< 1 = the INFO1 words above are valid reads */
+
+    /* --- VDDF PLAN (the measurement that motivated these fields) ---------
+     * Measured HP active power came in 53% above the datasheet's IRUNHPFB row
+     * (46.8 uW/MHz) while LP sat within 6% of IRUNLPFB -- on a workload LIGHTER
+     * than the CoreMark the spec is quoted for, which should read BELOW it.
+     * Dynamic power goes as V^2, so a ~24% VDDF over-volt would account for the
+     * whole excess, and this port computes its own VDDF boost for a
+     * TrimSubRev-0x5F part.  These fields expose that computation and the trim
+     * the hardware is ACTUALLY running, so the hypothesis is testable instead of
+     * plausible.  All read-only; nothing here changes a voltage. */
+    uint32_t vddf_ltrim;       /**< INFO1 L_TRIMCODE, raw (0 = not loaded)    */
+    uint32_t vddf_etrim;       /**< INFO1 E_TRIMCODE, raw                     */
+    uint32_t vddf_mv_x10;      /**< the formula's mV boost, x10 (no floats)   */
+    uint8_t  vddf_boost_codes; /**< boost converted to trim codes             */
+    uint8_t  vddf_ps5_raw;     /**< TVRGF(state 5), BEFORE the boost          */
+    uint8_t  vddf_ps13_raw;    /**< TVRGF(state 13), BEFORE the boost         */
+    uint8_t  vddf_lp;          /**< planned LP trim, boosted + clamped        */
+    uint8_t  vddf_hp;          /**< planned HP trim, boosted + clamped        */
+    uint8_t  vddf_clamped;     /**< 1 = the [0x8,0x7F] clamp actually bit     */
+    uint8_t  vddf_applied;     /**< LIVE MCUCTRL.VREFGEN4.TVRGFVREFTRIM       */
+    uint8_t  vddf_plan_ok;     /**< 1 = the plan above has been computed      */
+
+    /* Raw regulator/buck words for host-side LP-vs-HP diffing.  Raw on
+     * purpose: interpretation belongs to the analysis, and a firmware decoder
+     * is a second place for a transcription bug to hide.  All reads. */
+    uint32_t r_vrefgen2;       /**< MCUCTRL->VREFGEN2 (TVRGC = VDDC ref)      */
+    uint32_t r_vrefgen3;       /**< MCUCTRL->VREFGEN3 (TVRGCLV)               */
+    uint32_t r_vrefgen4;       /**< MCUCTRL->VREFGEN4 (TVRGF = VDDF ref)      */
+    uint32_t r_ldoreg1;        /**< MCUCTRL->LDOREG1 (core LDO trims)         */
+    uint32_t r_ldoreg2;        /**< MCUCTRL->LDOREG2 (mem LDO trims)          */
+    uint32_t r_vrctrl;         /**< MCUCTRL->VRCTRL (override bits)           */
+    uint32_t r_d2aspare;       /**< MCUCTRL->D2ASPARE (MEMLDOREF)             */
+    uint32_t r_sb[6];          /**< SIMOBUCK 0,2,4,6,7,15 (comp en + Ton)     */
 } tiku_ambiq_hp_probe_t;
 
 /**

@@ -116,8 +116,47 @@ static unsigned long tiku_ambiq_core_hz(void) {
  * core clock from the performance-mode register into s_core_hz. Called
  * once from main() before any kernel subsystem starts.
  */
+/**
+ * @brief Release the blocks the SBL leaves powered that a quiet image never uses.
+ *
+ * The secure bootloader hands over with the CryptoCell domain, the OTP reader
+ * and the Cortex-M55 trace unit all live.  MEASURED on this board (Joulescope
+ * at J4, 96 MHz, buck): OTP -577 uA, crypto -397 uA, trace -98 uA, together
+ * **-1072 uA of idle current** with the dynamic term unchanged -- the chip was
+ * paying rent on three blocks nobody had asked for.
+ *
+ * Safe to do unconditionally because every user of these blocks powers its own
+ * block up on demand and this port has no code that assumes they are already on:
+ *   - OTP:    hp_trims_load() / tiku_cpu_freq_ambiq_hp_probe() raise PWRENOTP
+ *             around their INFO1 reads and restore the previous state after, so
+ *             HP entry still works with OTP released here.
+ *   - crypto: tiku_trng_arch_init() raises PWRENCRYPTO and waits for
+ *             PWRSTCRYPTO before touching the block.
+ *   - trace:  every DWT user (the clock oracle, the memory benches, the SIMD
+ *             probe) sets DEMCR.TRCENA itself before reading CYCCNT.
+ *
+ * NOT released here, deliberately: the boot ROM and the upper MRAM bank
+ * (another 217 uA between them).  MRAM writes on this part are bootrom-mediated,
+ * so powering those down under a running OS faults the next NVM write -- learned
+ * by doing it and wedging the board.  They stay behind the `power dev ... force`
+ * verb until there is a sleep path that quiesces NVM first.
+ */
+#ifndef TIKU_AMBIQ_BOOT_TIDY
+#define TIKU_AMBIQ_BOOT_TIDY 1
+#endif
+
+static void tiku_ambiq_boot_tidy(void) {
+#if (TIKU_AMBIQ_BOOT_TIDY + 0)
+    CoreDebug->DEMCR &= ~CoreDebug_DEMCR_TRCENA_Msk;   /* trace unit  -98 uA */
+    PWRCTRL->DEVPWREN_b.PWRENCRYPTO = 0u;              /* CryptoCell -397 uA */
+    PWRCTRL->DEVPWREN_b.PWRENOTP    = 0u;              /* OTP reader -577 uA */
+    __DSB();
+#endif
+}
+
 void tiku_cpu_boot_ambiq_init(void) {
     tiku_ambiq_soc_init();          /* caches + prefetch; power/clocks from SBL */
+    tiku_ambiq_boot_tidy();         /* release the SBL's unused blocks          */
     s_core_hz = tiku_ambiq_core_hz();
 }
 
@@ -182,6 +221,38 @@ static uint32_t ambiq_info1_word(uint32_t otp_off, uint8_t in_otp) {
  * never set), so the SDK's HP-vs-deepsleep PWRSW handling does not apply.
  */
 
+/**
+ * @brief Which regulator an LP (96 MHz) image runs on -- 1 = SIMO buck, 0 = LDO.
+ *
+ * The SBL hands over on the LDOs, which drop 1.8 V to the core linearly and
+ * waste the difference as heat.  The SIMO buck converts instead.
+ *
+ * THIS SETTING IS NOT INDEPENDENT OF TIKU_AMBIQ_ELP_STATE, and measuring the
+ * two separately gives the wrong policy.  With the FP/MVE unit left ON with its
+ * clock stopped (the CMSIS choice), the buck cost 42 uA at idle while saving
+ * 2404 uA busy -- a break-even near 1.7 % CPU duty, which argued for the LDO on
+ * a duty-cycled node.  With the unit RETAINED (this port's default) the idle
+ * term inverts.  MEASURED on this board, one boot per row, tidied, ELP=RET:
+ *
+ *              idle        busy        work
+ *     LDO      3.129 mA    7.155 mA    31740 kiter/s
+ *     buck     2.433 mA    5.326 mA    31716 kiter/s
+ *              -696 uA     -1829 uA    unchanged
+ *
+ * The buck is now better at BOTH ends, so there is no duty cycle at which the
+ * LDO wins and no break-even to reason about: the buck is the default.  The LDO
+ * remains selectable (-DTIKU_AMBIQ_LP_BUCK=0) for a board whose SIMO inductor
+ * is absent or for isolating a regulator-related measurement.
+ *
+ * Two facts that are properties of the part, not of this choice: requesting HP
+ * (250 MHz) force-enables the buck whatever this says (HP hard-requires it),
+ * and there is no validated path back to the LDO, so a reboot is what returns
+ * an image to its configured state.
+ */
+#ifndef TIKU_AMBIQ_LP_BUCK
+#define TIKU_AMBIQ_LP_BUCK 1
+#endif
+
 /* INFO1 words (OTP offsets) consumed by the HP slice, beyond the probe's. */
 #define AMBIQ_INFO1_L_TRIMCODE_O   0x91CUL
 #define AMBIQ_INFO1_E_TRIMCODE_O   0x920UL
@@ -206,6 +277,15 @@ static struct {
     uint32_t defaultton;    /* buck Ton defaults (HP->LP restore)            */
     uint32_t vddclvadj;     /* VDDC_LV per-bucket trims                      */
     uint32_t memldocfg;     /* MEMLDO trim + reference select                */
+    /* Diagnostics only -- see the VDDF PLAN note in the header.  Read by
+     * `freq probe`; never read back by the transition itself. */
+    uint32_t dx_ltrim;      /* raw INFO1 L_TRIMCODE                          */
+    uint32_t dx_etrim;      /* raw INFO1 E_TRIMCODE                          */
+    uint32_t dx_mv_x10;     /* the formula's mV boost, x10                   */
+    uint32_t dx_boost;      /* boost in trim codes, pre-clamp                */
+    uint8_t  dx_ps5_raw;    /* TVRGF(state 5) before the boost               */
+    uint8_t  dx_ps13_raw;   /* TVRGF(state 13) before the boost              */
+    uint8_t  dx_clamped;    /* 1 = the clamp bit                             */
 } s_hp;
 
 extern void tiku_cpu_ambiq_delay_us(unsigned int us);   /* tiku_cpu_common.c */
@@ -238,7 +318,9 @@ static int hp_trims_load(void) {
     uint8_t  in_otp, otp_was_on = 0u;
     uint32_t ps0, ps5, ps13, ps19, ltrim, etrim, pgm, trimrev, rev;
     uint32_t tmp1, tmp2, boost = 0u, spin;
-    float    mv;
+    /* 0, not undefined: mv is only assigned on the TrimSubRev-0x5F path, and
+     * the diagnostic below records it unconditionally.  No boost == 0 mV. */
+    float    mv = 0.0f;
 
     if (s_hp.trims_ok) {
         return 0;
@@ -330,9 +412,26 @@ static int hp_trims_load(void) {
         }
     }
 
+    /* Record what the boost computation produced, for `freq probe`.  Pure
+     * bookkeeping of values this function already has: it changes no decision
+     * and writes no register.  Without it the boost is discarded the moment it
+     * is applied, which is why a 53%-over-spec HP measurement could not be
+     * attributed to a voltage. */
+    s_hp.dx_ltrim      = ltrim;
+    s_hp.dx_etrim      = etrim;
+    s_hp.dx_mv_x10     = (uint32_t)(mv * 10.0f + 0.5f);
+    s_hp.dx_boost      = boost;
+    s_hp.dx_ps5_raw    = (uint8_t)HP_PS_TVRGF(ps5);
+    s_hp.dx_ps13_raw   = (uint8_t)HP_PS_TVRGF(ps13);
+
     s_hp.tvrgf_lp  = hp_tvrgf_clamp(HP_PS_TVRGF(ps5)      + boost);
     s_hp.tvrgf_hp  = hp_tvrgf_clamp(HP_PS_TVRGF(ps13)     + boost);
     s_hp.tvrgf_ps7 = hp_tvrgf_clamp(HP_PS_TVRGF(s_hp.ps7) + boost);
+    /* Did the [0x8,0x7F] clamp actually bite?  A clamped HP trim means the
+     * requested boost exceeded what the window can express, which is a
+     * different failure from a merely large boost. */
+    s_hp.dx_clamped = ((HP_PS_TVRGF(ps5)  + boost) > 0x7Fu ||
+                       (HP_PS_TVRGF(ps13) + boost) > 0x7Fu) ? 1u : 0u;
     if (s_hp.tvrgf_hp < s_hp.tvrgf_lp) {        /* HP must not LOWER VDDF */
         return -1;
     }
@@ -563,6 +662,15 @@ void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
             if (spin-- == 0u) break;
         }
     }
+
+#if (TIKU_AMBIQ_LP_BUCK + 0)
+    /* Hand the load to the SIMO buck at 96 MHz (see TIKU_AMBIQ_LP_BUCK).
+     * Failure is non-fatal -- the LDOs are the SBL's own working state, so a
+     * refused buck means "less efficient", never "broken".  See the
+     * TIKU_AMBIQ_LP_BUCK comment for the duty-cycle trade this encodes. */
+    (void)tiku_cpu_freq_ambiq_simobuck_enable();
+#endif
+
     s_core_hz = tiku_ambiq_core_hz();
 }
 
@@ -687,6 +795,37 @@ void tiku_cpu_freq_ambiq_hp_probe(tiku_ambiq_hp_probe_t *out) {
         out->pgm_info       = 0xFFFFFFFFu;
         for (i = 0u; i < 20u; i++) { out->powerstate[i] = 0xFFFFFFFFu; }
     }
+
+    /* VDDF plan + the trim the hardware is actually running.  The plan is
+     * computed lazily on the FIRST HP request, so a probe taken before any
+     * `freq 250` has nothing to report -- say so via vddf_plan_ok rather than
+     * printing a zeroed plan that would read as "no boost". */
+    out->vddf_applied  = (uint8_t)MCUCTRL->VREFGEN4_b.TVRGFVREFTRIM;
+    out->vddf_plan_ok  = s_hp.trims_ok;
+    out->vddf_ltrim    = s_hp.dx_ltrim;
+    out->vddf_etrim    = s_hp.dx_etrim;
+    out->vddf_mv_x10   = s_hp.dx_mv_x10;
+    out->vddf_boost_codes = (uint8_t)s_hp.dx_boost;
+    out->vddf_ps5_raw  = s_hp.dx_ps5_raw;
+    out->vddf_ps13_raw = s_hp.dx_ps13_raw;
+    out->vddf_lp       = s_hp.tvrgf_lp;
+    out->vddf_hp       = s_hp.tvrgf_hp;
+    out->vddf_clamped  = s_hp.dx_clamped;
+
+    /* Raw regulator words for the LP-vs-HP diff. */
+    out->r_vrefgen2 = MCUCTRL->VREFGEN2;
+    out->r_vrefgen3 = MCUCTRL->VREFGEN3;
+    out->r_vrefgen4 = MCUCTRL->VREFGEN4;
+    out->r_ldoreg1  = MCUCTRL->LDOREG1;
+    out->r_ldoreg2  = MCUCTRL->LDOREG2;
+    out->r_vrctrl   = MCUCTRL->VRCTRL;
+    out->r_d2aspare = MCUCTRL->D2ASPARE;
+    out->r_sb[0]    = MCUCTRL->SIMOBUCK0;
+    out->r_sb[1]    = MCUCTRL->SIMOBUCK2;
+    out->r_sb[2]    = MCUCTRL->SIMOBUCK4;
+    out->r_sb[3]    = MCUCTRL->SIMOBUCK6;
+    out->r_sb[4]    = MCUCTRL->SIMOBUCK7;
+    out->r_sb[5]    = MCUCTRL->SIMOBUCK15;
 
     if (out->info1_in_otp && !otp_was_on) {
         PWRCTRL->DEVPWREN_b.PWRENOTP = 0u;      /* restore OTP power state */
