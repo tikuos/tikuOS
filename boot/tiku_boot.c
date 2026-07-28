@@ -23,6 +23,7 @@
 #include "kernel/memory/tiku_mem.h"
 #include "kernel/timers/tiku_clock.h"
 #include "kernel/scheduler/tiku_sched.h"
+#include "hal/tiku_cpu.h"        /* tiku_cpu_irq_enable() at boot-complete */
 #if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_uart_arch.h"
 #elif defined(PLATFORM_RP2350)
@@ -130,6 +131,21 @@ tiku_cpu_full_init(unsigned int cpu_freq)
 
     /* Mark boot as complete */
     current_boot_stage = TIKU_BOOT_STAGE_COMPLETE;
+
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC)
+    /* The ARM reset handlers mask IRQs (cpsid i in tiku_crt_early.c) so no
+     * ISR can fire into half-initialized kernel state.  Everything an ISR
+     * touches now exists -- tiku_sched_init() just built the process queue --
+     * so unmask HERE, not only at the top of tiku_sched_loop(): every build
+     * that runs work before (or instead of) the scheduler -- TEST_ENABLE,
+     * TIKU_TURBO_BENCH, the deep-sleep power autorun, embedded BASIC -- was
+     * otherwise running with a dead tick, and every WFI in it fell straight
+     * through (wake on pended IRQ, ISR never executed, time never advanced).
+     * The scheduler's own tiku_cpu_irq_enable() stays: it is idempotent.
+     * MSP430 is untouched -- its GIE discipline predates this and works. */
+    tiku_cpu_irq_enable();
+#endif
 
     boot_complete = 1;
     MAIN_PRINTF("Boot: complete\n");

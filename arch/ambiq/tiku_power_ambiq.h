@@ -107,6 +107,14 @@ unsigned long tiku_ambiq_cpu_hz_measure(void);
                                              latched power request may ignore
                                              it -- that is exactly what the
                                              measurement is for */
+#define TIKU_AMBIQ_SLEEP_LFRC     0x10u /**< reclock the STIMER timebase to the
+                                             ~900 Hz LFRC for the window (the
+                                             crystal dies under real deep
+                                             sleep -- measured).  Verified
+                                             switch; on a dead LFRC the flag
+                                             quietly degrades to XTAL.  The
+                                             window is then measured in
+                                             calibrated LFRC counts */
 
 /**
  * @brief Sit in WFI for @p ms; returns elapsed microseconds (STIMER-timed).

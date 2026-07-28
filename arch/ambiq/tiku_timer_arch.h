@@ -172,4 +172,25 @@ int                    tiku_clock_arch_fine_max(void);
 #define TIKU_CLOCK_ARCH_TICKS_TO_MS(ticks) \
     ((unsigned long)(((ticks) * 1000) / TIKU_CLOCK_ARCH_SECOND))
 
+/*---------------------------------------------------------------------------*/
+/* STIMER TIMEBASE RECLOCK (tiku_htimer_arch.c) -- deep-sleep support        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Switch the STIMER timebase: XTAL 32.768 kHz <-> LFRC ~900 Hz.
+ *
+ * The crystal dies under real (debugger-free) deep sleep on this port, which
+ * froze the STIMER and turned the tickless stretch into a sleep with no
+ * alarm.  The deep path reclocks to the LFRC around the sleep window.
+ * Verified switch (reverts to XTAL on a dead source), tick accounting stays
+ * continuous, refuses while a tickless stretch is open.
+ *
+ * @param use_lfrc  non-zero: to LFRC (rate measured against DWT); 0: to XTAL
+ * @return new rate in Hz, or 0 on failure (timebase left on XTAL)
+ */
+uint32_t tiku_ambiq_stimer_reclock(int use_lfrc);
+
+/** @brief Current STIMER timebase rate in Hz (32768 on XTAL). */
+uint32_t tiku_ambiq_stimer_rate_hz(void);
+
 #endif /* TIKU_AMBIQ_TIMER_ARCH_H_ */

@@ -38,7 +38,15 @@
 #endif
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
 #include <arch/ambiq/tiku_power_ambiq.h>
+#include <arch/ambiq/tiku_timer_arch.h>       /* stimer reclock / rate       */
+#include <kernel/timers/tiku_clock.h>         /* tickless begin/end (guard)  */
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>  /* SIMOBUCK enable hook     */
+#if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
+#include <arch/ambiq/tiku_gpu_power.h>        /* experiment 2: GPU as compute */
+#endif
+#if (TIKU_AMBIQ_POWER_PROBE_SIMD + 0)
+#include <arch/ambiq/tiku_simd_power.h>       /* experiment 3: Helium vs scalar */
+#endif
 #include "apollo510.h"                       /* PWRCTRL / CLKGEN for `floor` */
 #endif
 
@@ -581,6 +589,53 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("cache: %s\n", tiku_ambiq_cache_enabled() ? "on" : "off");
         return;
     }
+    if (streq(argv[1], "stimer")) {
+        /* Timebase health: current rate, is the counter visibly counting, and
+         * does the tickless guard accept or refuse a stretch.
+         *
+         * `power stimer kill` is the FAILURE-INJECTION form: it deliberately
+         * selects NOCLK, shows the guard REFUSE a stretch on the dead clock,
+         * then restores the crystal and shows recovery -- all in one verb, so
+         * the board can never be left parked on a dead timebase.  A guard
+         * that has never been seen to fire is a guard that may not exist. */
+        int kill = (argc >= 3 && streq(argv[2], "kill"));
+        int pass;
+        for (pass = 0; pass < (kill ? 2 : 1); pass++) {
+            uint32_t rate, c0, c1, spin_n = 4000000u;
+            int ok;
+            if (kill && pass == 0) {
+                STIMER->STCFG = (STIMER->STCFG & ~0xFu);      /* NOCLK */
+            }
+            if (kill && pass == 1) {
+                STIMER->STCFG = (STIMER->STCFG & ~0xFu) | 3u; /* XTAL  */
+            }
+            rate = tiku_ambiq_stimer_rate_hz();
+            c0 = tiku_ambiq_stimer_now();
+            while (tiku_ambiq_stimer_now() == c0 && --spin_n != 0u) { }
+            c1 = tiku_ambiq_stimer_now();
+            __asm__ volatile ("cpsid i" ::: "memory");
+            ok = tiku_clock_tickless_begin(2u);
+            tiku_clock_tickless_end();
+            __asm__ volatile ("cpsie i" ::: "memory");
+            SHELL_PRINTF("stimer%s rate %lu Hz counting %s stretch %s\n",
+                         kill ? (pass ? " [restored]" : " [killed]") : "",
+                         (unsigned long)rate,
+                         (c1 != c0) ? "yes" : "NO (frozen)",
+                         ok ? "accepted" : "REFUSED (guard)");
+        }
+        return;
+    }
+    if (streq(argv[1], "reclock") && argc >= 3) {
+        /* power reclock lfrc|xtal -- exercise the deep-sleep timebase switch
+         * from the shell, so the verified-switch path is provable without a
+         * deep-sleep window around it. */
+        int lf = streq(argv[2], "lfrc");
+        uint32_t hz = tiku_ambiq_stimer_reclock(lf ? 1 : 0);
+        SHELL_PRINTF("reclock %s -> %lu Hz%s\n", lf ? "lfrc" : "xtal",
+                     (unsigned long)hz,
+                     hz ? "" : " (FAILED, timebase left on XTAL)");
+        return;
+    }
     if ((streq(argv[1], "idle") || streq(argv[1], "spin")) && argc >= 3) {
         int spin = streq(argv[1], "spin");
         unsigned flags = 0u, i;
@@ -592,6 +647,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             if (streq(argv[i], "uart")) { flags |= TIKU_AMBIQ_SLEEP_STOP_UART; }
             if (streq(argv[i], "tick")) { flags |= TIKU_AMBIQ_SLEEP_STOP_TICK; }
             if (streq(argv[i], "dbg"))  { flags |= TIKU_AMBIQ_SLEEP_DBGLOCK; }
+            if (streq(argv[i], "lfrc")) { flags |= TIKU_AMBIQ_SLEEP_LFRC; }
         }
         if (ms == 0u) {
             SHELL_PRINTF("Usage: power %s <ms> [deep|uart|tick|dbg]\n", argv[1]);
@@ -603,6 +659,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (flags & TIKU_AMBIQ_SLEEP_STOP_UART) ? " uart" : "",
                      (flags & TIKU_AMBIQ_SLEEP_STOP_TICK) ? " tick" : "",
                      (flags & TIKU_AMBIQ_SLEEP_DBGLOCK)   ? " dbg"  : "",
+                     (flags & TIKU_AMBIQ_SLEEP_LFRC)      ? " lfrc" : "",
                      (flags & TIKU_AMBIQ_SLEEP_DEEP)      ? " deep" : "");
         us = spin ? tiku_ambiq_spin_probe(ms)
                   : tiku_ambiq_sleep_probe(ms, flags);
@@ -652,8 +709,315 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)tiku_ambiq_mem_checksum());
         return;
     }
+    /* ---- power cpdlp [elp|clp <0-3>] : Cortex-M55 low-power state ----
+     * CPDLPSTATE decides what the core power domain does when the PE enters a
+     * low-power state (WFI).  Three independent fields, each ON / ON-clock-off
+     * / RET / OFF:
+     *   CLPSTATE  the core itself          -- we have NEVER written it (= ON)
+     *   ELPSTATE  the FP/MVE extension     -- boot sets ON-clock-off (level 1)
+     *   RLPSTATE  the core's RAM           -- never written (= ON); OFF would
+     *                                         lose TCM, so this verb refuses it
+     * The boot choice of ELP level 1 is the PERFORMANCE option (no power-up
+     * stall); levels 2 and 3 trade wake latency for power and have never been
+     * measured.  This verb makes that measurable. */
+    if (streq(argv[1], "cpdlp")) {
+        static const char *const lp[4] = { "ON", "ON-clk-off", "RET", "OFF" };
+        uint32_t v;
+        if (argc >= 4) {
+            unsigned nv = (unsigned)(argv[3][0] - '0');
+            if (nv > 3u) {
+                SHELL_PRINTF("cpdlp: level must be 0..3\n");
+                return;
+            }
+            v = PWRMODCTL->CPDLPSTATE;
+            if (streq(argv[2], "elp")) {
+                /* ELP=OFF DISCARDS the FP/MVE register state on every
+                 * low-power entry.  This build is hard-float: the kernel holds
+                 * live floating-point context across sleeps, so losing it
+                 * corrupts whatever was interrupted.  Setting it once cost a
+                 * boot-looping board and a physical power cycle (2026-07-28),
+                 * and the loop took SWD down with it until the probe speed was
+                 * dropped to 1 MHz.  Refused rather than documented. */
+                if (nv == 3u) {
+                    SHELL_PRINTF("cpdlp: refusing ELP=OFF -- discards FP/MVE "
+                                 "state, and this build is hard-float\n");
+                    return;
+                }
+                v = (v & ~(3u << 4)) | (nv << 4);
+            } else if (streq(argv[2], "clp")) {
+                /* CLP=OFF is deep-sleep territory the SDK never requests from
+                 * here; refuse it rather than invent a sequence. */
+                if (nv == 3u) {
+                    SHELL_PRINTF("cpdlp: refusing CLP=OFF (deep-sleep path, "
+                                 "not this verb's job)\n");
+                    return;
+                }
+                v = (v & ~(3u << 0)) | (nv << 0);
+            } else {
+                SHELL_PRINTF("cpdlp: field must be elp or clp "
+                             "(rlp refused: OFF loses TCM)\n");
+                return;
+            }
+            PWRMODCTL->CPDLPSTATE = v;
+            __DSB();
+            __ISB();
+        }
+        v = PWRMODCTL->CPDLPSTATE;
+        SHELL_PRINTF("cpdlp %08lx: clp=%s elp=%s rlp=%s\n",
+                     (unsigned long)v,
+                     lp[v & 3u], lp[(v >> 4) & 3u], lp[(v >> 8) & 3u]);
+        return;
+    }
+
+#if (TIKU_AMBIQ_POWER_PROBE_SIMD + 0)
+    if (streq(argv[1], "simd") && argc >= 2) {
+        static const char *const kn[TIKU_SP_KIND_COUNT] = {
+            "fill", "copy", "multiply", "scale", "affine", "lut",
+            "sum", "addsat", "saxpy", "dot"
+        };
+        /* ---- power simd verify : gate for every energy number ---- */
+        if (argc >= 3 && streq(argv[2], "verify")) {
+            uint32_t mism = 0u;
+            int ok = tiku_simd_power_verify(&mism);
+            SHELL_PRINTF("simd verify %s mismatch %08lx native %s\n",
+                         ok ? "OK" : "FAILED", (unsigned long)mism,
+                         tiku_simd_power_native_backend() ? "helium" : "scalar");
+            SHELL_PRINTF("  buffers: dtcm %08lx ssram %08lx\n",
+                         (unsigned long)(uintptr_t)
+                            tiku_simd_power_buf(TIKU_SP_TIER_DTCM),
+                         (unsigned long)(uintptr_t)
+                            tiku_simd_power_buf(TIKU_SP_TIER_SSRAM));
+            return;
+        }
+        /* ---- power simd <kernel> <scalar|helium> <dtcm|ssram> <bytes> <ms> ---- */
+        if (argc >= 7) {
+            unsigned k = TIKU_SP_KIND_COUNT, i, be, tr;
+            uint32_t nb = 0u, ms = 0u, us;
+            const char *a = argv[5], *b = argv[6];
+            for (i = 0u; i < TIKU_SP_KIND_COUNT; i++) {
+                if (streq(argv[2], kn[i])) { k = i; }
+            }
+            be = streq(argv[3], "helium") ? TIKU_SP_BACKEND_HELIUM
+                                          : TIKU_SP_BACKEND_SCALAR;
+            tr = streq(argv[4], "ssram")  ? TIKU_SP_TIER_SSRAM
+                                          : TIKU_SP_TIER_DTCM;
+            while (*a >= '0' && *a <= '9') { nb = nb*10u + (uint32_t)(*a++ - '0'); }
+            while (*b >= '0' && *b <= '9') { ms = ms*10u + (uint32_t)(*b++ - '0'); }
+            if (k == TIKU_SP_KIND_COUNT || nb == 0u || ms == 0u) {
+                SHELL_PRINTF("Usage: power simd <kernel> <scalar|helium>"
+                             " <dtcm|ssram> <bytes> <ms>\n");
+                return;
+            }
+            SHELL_PRINTF("simd %s %s %s %lu B -- starting\n", kn[k],
+                         (be == TIKU_SP_BACKEND_HELIUM) ? "helium" : "scalar",
+                         (tr == TIKU_SP_TIER_SSRAM) ? "ssram" : "dtcm",
+                         (unsigned long)nb);
+            us = tiku_simd_power_probe(k, be, tr, nb, ms);
+            /* cyc/elem printed as milli-units: the formatter has no floats and
+             * the figure is well below 1 for the vector paths. */
+            SHELL_PRINTF("simd done %lu us passes %lu bytes %lu elems %lu "
+                         "cycles %lu mcpe %lu fp %lx\n",
+                         (unsigned long)us,
+                         (unsigned long)tiku_simd_power_passes(),
+                         (unsigned long)tiku_simd_power_bytes(),
+                         (unsigned long)tiku_simd_power_elems(),
+                         (unsigned long)tiku_simd_power_cycles(),
+                         (unsigned long)(tiku_simd_power_elems()
+                            ? (uint32_t)(((uint64_t)tiku_simd_power_cycles()
+                                * 1000u) / tiku_simd_power_elems()) : 0u),
+                         (unsigned long)tiku_simd_power_fingerprint());
+            return;
+        }
+        SHELL_PRINTF("Usage: power simd verify | power simd <kernel>"
+                     " <scalar|helium> <dtcm|ssram> <bytes> <ms>\n");
+        SHELL_PRINTF("  kernels: fill copy multiply scale affine lut sum"
+                     " addsat saxpy dot\n");
+        return;
+    }
+#endif
+#if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
+    if (streq(argv[1], "gpu") && argc >= 3) {
+        static const char *const wn[TIKU_GPU_W_KIND_COUNT] = {
+            "fill", "copy", "multiply", "scale", "lut", "reduce"
+        };
+        static const char *const pn[4] = {
+            "LP-96", "HP1-192", "HP2-125", "HP3-250"
+        };
+        /* ---- power gpu state <off|on> [perf] : the availability ladder ---- */
+        if (streq(argv[2], "off")) {
+            tiku_gpu_deinit();
+            SHELL_PRINTF("gpu off: powered %d\n", tiku_gpu_powered());
+            return;
+        }
+        if (streq(argv[2], "on")) {
+            unsigned perf = 0u;
+            tiku_gpu_err_t rc;
+            if (argc >= 4) {
+                const char *q = argv[3];
+                perf = 0u;
+                while (*q >= '0' && *q <= '9') { perf = perf*10u + (unsigned)(*q++ - '0'); }
+                if (perf > 3u) { perf = 0u; }
+            }
+            rc = tiku_gpu_init((tiku_gpu_perf_t)perf);
+            /* Report the mode and rail the SILICON has, not the request. */
+            {   /* Clock-gating forensics: CGCTRL's DISCLK* fields DISABLE
+                 * automatic gating.  The driver only ever read this register;
+                 * if the reset value has them set, an "idle" GPU is fully
+                 * clocked, which would explain a 6.37 mA standing draw. */
+                tiku_gpu_bringup_t bi;
+                tiku_gpu_bringup_info(&bi);
+                SHELL_PRINTF("  cgctrl %08lx (DISCLK proc %lu cfg %lu frame %lu"
+                             " core %lu mod %lu) status %08lx active %08lx\n",
+                             (unsigned long)bi.cgctrl,
+                             (unsigned long)(bi.cgctrl & 1u),
+                             (unsigned long)((bi.cgctrl >> 1) & 1u),
+                             (unsigned long)((bi.cgctrl >> 2) & 3u),
+                             (unsigned long)((bi.cgctrl >> 23) & 1u),
+                             (unsigned long)((bi.cgctrl >> 30) & 3u),
+                             (unsigned long)bi.status,
+                             (unsigned long)bi.active);
+                /* The clock DELIVERED to the domain is a separate control from
+                 * the block's own gating, and lives in CLKGEN, not the GPU. */
+                SHELL_PRINTF("  clkgen clkctrl %08lx (GFXCORECLKEN %lu "
+                             "GFXCORECLKSEL %lu)\n",
+                             (unsigned long)CLKGEN->CLKCTRL,
+                             (unsigned long)(CLKGEN->CLKCTRL & 1u),
+                             (unsigned long)((CLKGEN->CLKCTRL >> 1) & 3u));
+            }
+            SHELL_PRINTF("gpu on rc %d: powered %d id %08lx perf %lu (%s) "
+                         "rail %s\n", (int)rc, tiku_gpu_powered(),
+                         (unsigned long)tiku_gpu_id(),
+                         (unsigned long)tiku_gpu_perf_get(),
+                         pn[tiku_gpu_perf_get() & 3u],
+                         tiku_gpu_rail_is_vddf() ? "VDDF" : "VDDC");
+            return;
+        }
+        /* ---- power gpu ram <0..7> : SSRAMACTGFX forensics ----
+         * Boot state ships SSRAMACTGFX=7: ALL SSRAM banks forced ACTIVE
+         * whenever the GFX domain is powered -- including through the MCU's
+         * WFI, when they could otherwise fall back to retention.  The SDK's
+         * own default for this field is NONE; banks wake on access anyway
+         * (datasheet 4.3.4).  This verb A/Bs the field so the cost is a
+         * measurement, not an argument. */
+        if (streq(argv[2], "ram") && argc >= 4) {
+            unsigned v = (unsigned)(argv[3][0] - '0') & 7u;
+            unsigned before = PWRCTRL->SSRAMRETCFG_b.SSRAMACTGFX;
+            PWRCTRL->SSRAMRETCFG_b.SSRAMACTGFX = v;
+            SHELL_PRINTF("gpu ram: SSRAMACTGFX %u -> %lu (retcfg %08lx)\n",
+                         before,
+                         (unsigned long)PWRCTRL->SSRAMRETCFG_b.SSRAMACTGFX,
+                         (unsigned long)PWRCTRL->SSRAMRETCFG);
+            return;
+        }
+
+        /* ---- power gpu <work|cpu|contend> ... ---- */
+        if (streq(argv[2], "work") && argc >= 6) {
+            unsigned k = TIKU_GPU_W_KIND_COUNT, i;
+            uint32_t side = 0u, ms = 0u, us;
+            const char *a = argv[4], *b = argv[5];
+            /* "async" alone = batch 1 (one draw per list); "async <N>"
+             * batches N draws into each submitted list. */
+            int async = 0;
+            if (argc >= 7 && streq(argv[6], "async")) {
+                async = 1;
+                if (argc >= 8) {
+                    const char *q = argv[7]; int n = 0;
+                    while (*q >= '0' && *q <= '9') { n = n*10 + (*q++ - '0'); }
+                    if (n > 0) { async = n; }
+                }
+            }
+            for (i = 0u; i < TIKU_GPU_W_KIND_COUNT; i++) {
+                if (streq(argv[3], wn[i])) { k = i; }
+            }
+            while (*a >= '0' && *a <= '9') { side = side*10u + (uint32_t)(*a++ - '0'); }
+            while (*b >= '0' && *b <= '9') { ms   = ms*10u   + (uint32_t)(*b++ - '0'); }
+            if (k == TIKU_GPU_W_KIND_COUNT || side == 0u || ms == 0u) {
+                SHELL_PRINTF("Usage: power gpu work <fill|copy|multiply|scale|"
+                             "lut|reduce> <side> <ms> [async]\n");
+                return;
+            }
+            if (async) {
+                SHELL_PRINTF("gpu work %s side %lu async batch %d -- starting\n",
+                             wn[k], (unsigned long)side, async);
+            } else {
+                SHELL_PRINTF("gpu work %s side %lu blocking -- starting\n",
+                             wn[k], (unsigned long)side);
+            }
+            us = tiku_gpu_power_probe(k, side, ms, async);
+            SHELL_PRINTF("gpu done %lu us ops %lu bytes %lu MBps %lu wakes %lu "
+                         "sum %lx exact %d\n",
+                         (unsigned long)us,
+                         (unsigned long)tiku_gpu_power_ops(),
+                         (unsigned long)tiku_gpu_power_bytes(),
+                         (unsigned long)(us ? (uint32_t)(((uint64_t)
+                            tiku_gpu_power_bytes() * 1000u) / us / 1024u) : 0u),
+                         (unsigned long)tiku_gpu_power_wakes(),
+                         (unsigned long)tiku_gpu_power_checksum(),
+                         tiku_gpu_power_exact());
+            return;
+        }
+        if (streq(argv[2], "cpu") && argc >= 6) {
+            uint32_t side = 0u, ms = 0u, us;
+            unsigned k = streq(argv[3], "copy") ? TIKU_GPU_CPU_COPY
+                                                : TIKU_GPU_CPU_FILL;
+            const char *a = argv[4], *b = argv[5];
+            while (*a >= '0' && *a <= '9') { side = side*10u + (uint32_t)(*a++ - '0'); }
+            while (*b >= '0' && *b <= '9') { ms   = ms*10u   + (uint32_t)(*b++ - '0'); }
+            if (side == 0u || ms == 0u) {
+                SHELL_PRINTF("Usage: power gpu cpu <fill|copy> <side> <ms>\n");
+                return;
+            }
+            SHELL_PRINTF("gpu cpu %s side %lu -- starting\n", argv[3],
+                         (unsigned long)side);
+            us = tiku_gpu_power_cpu_probe(k, side, ms);
+            SHELL_PRINTF("gpu done %lu us ops %lu bytes %lu MBps %lu wakes 0 "
+                         "sum %lx exact %d\n",
+                         (unsigned long)us,
+                         (unsigned long)tiku_gpu_power_ops(),
+                         (unsigned long)tiku_gpu_power_bytes(),
+                         (unsigned long)(us ? (uint32_t)(((uint64_t)
+                            tiku_gpu_power_bytes() * 1000u) / us / 1024u) : 0u),
+                         (unsigned long)tiku_gpu_power_checksum(),
+                         tiku_gpu_power_exact());
+            return;
+        }
+        if (streq(argv[2], "contend") && argc >= 5) {
+            uint32_t side = 0u, ms = 0u, us;
+            const char *a = argv[3], *b = argv[4];
+            while (*a >= '0' && *a <= '9') { side = side*10u + (uint32_t)(*a++ - '0'); }
+            while (*b >= '0' && *b <= '9') { ms   = ms*10u   + (uint32_t)(*b++ - '0'); }
+            if (side == 0u || ms == 0u) {
+                SHELL_PRINTF("Usage: power gpu contend <side> <ms>\n");
+                return;
+            }
+            SHELL_PRINTF("gpu contend side %lu -- starting\n",
+                         (unsigned long)side);
+            us = tiku_gpu_power_contend_probe(side, ms);
+            SHELL_PRINTF("gpu done %lu us ops %lu bytes %lu cpuops %lu "
+                         "sum %lx exact %d\n",
+                         (unsigned long)us,
+                         (unsigned long)tiku_gpu_power_ops(),
+                         (unsigned long)tiku_gpu_power_bytes(),
+                         (unsigned long)tiku_gpu_power_cpu_ops(),
+                         (unsigned long)tiku_gpu_power_checksum(),
+                         tiku_gpu_power_exact());
+            return;
+        }
+        SHELL_PRINTF("Usage: power gpu on [0-3] | off | work <kind> <side> <ms>"
+                     " [async] | cpu <fill|copy> <side> <ms> | contend <side>"
+                     " <ms>\n");
+        SHELL_PRINTF("  surfaces: dst %08lx src %08lx (must be SSRAM)\n",
+                     (unsigned long)(uintptr_t)tiku_gpu_power_dst(),
+                     (unsigned long)(uintptr_t)tiku_gpu_power_src());
+        return;
+    }
+#endif
     SHELL_PRINTF("Usage: power [floor | clock | cache on|off | idle <ms> [deep]"
-                 " | spin <ms> | mem <kind> <ms>]\n");
+                 " | spin <ms> | mem <kind> <ms>"
+#if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
+                 " | gpu ..."
+#endif
+                 "]\n");
     return;
 #endif
 

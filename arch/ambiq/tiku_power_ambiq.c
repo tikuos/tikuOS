@@ -245,7 +245,10 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
 {
     uint32_t t0, dt = 0u;
     uint32_t freeze = 0u;
-    uint32_t target = (uint32_t)(((uint64_t)ms * TIKU_AMBIQ_STIMER_HZ) / 1000u);
+    uint32_t hz_used = TIKU_AMBIQ_STIMER_HZ;
+    uint32_t lfrc_hz = 0u;
+    uint32_t elp_saved = 0u;
+    uint32_t target;
 
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_UART) != 0u) {
         /* Let the caller's announcement leave the wire, then power the UART
@@ -255,6 +258,18 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
         tiku_cpu_ambiq_delay_us(4000u);
         PWRCTRL->DEVPWREN_b.PWRENUART1 = 0u;
     }
+    if (!spin && (flags & TIKU_AMBIQ_SLEEP_LFRC) != 0u) {
+        /* Reclock BEFORE the stretch (reclock refuses under an open stretch,
+         * by contract) and before the window target is computed, so the
+         * whole window is timed in calibrated LFRC counts.  0 = the LFRC
+         * was not seen counting; the probe degrades to the crystal rather
+         * than dying, and the caller can tell from the reported rate. */
+        lfrc_hz = tiku_ambiq_stimer_reclock(1);
+        if (lfrc_hz != 0u) {
+            hz_used = lfrc_hz;
+        }
+    }
+    target = (uint32_t)(((uint64_t)ms * hz_used) / 1000u);
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_TICK) != 0u) {
         /* Same pattern as the nRF54L probe: stretch through the port's own
          * tickless path, masked because begin() moves the compare under the
@@ -269,6 +284,19 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
         MCUCTRL->DEBUGGER = 1u;          /* lockout; restored below */
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_DEEP) != 0u) {
+        /* ELPSTATE=RET (the P0 idle default, -937 uA) FAULTS ON WAKE FROM
+         * SLEEPDEEP: 100 % reproducible on this board (MemManage IACCVIOL /
+         * HardFault at a garbage PC -- the FP/MVE context does not survive
+         * the deep wake path), while the same cell with ELPSTATE=ON-clk-off
+         * passes every time, and RET under plain WFI is what every idle
+         * measurement ran on.  So a SLEEPDEEP window brackets the EPU up to
+         * ON-clk-off and restores the caller's choice after.  The future
+         * DEEP idle hook must do the same. */
+        elp_saved = (PWRMODCTL->CPDLPSTATE >> 4) & 0x3u;
+        if (elp_saved == 2u) {
+            PWRMODCTL->CPDLPSTATE =
+                (PWRMODCTL->CPDLPSTATE & ~(0x3u << 4)) | (1u << 4);
+        }
         SCB->SCR |= (1ul << 2);          /* SLEEPDEEP */
     }
     __DSB();
@@ -309,6 +337,10 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
 
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_DEEP) != 0u) {
         SCB->SCR &= ~(1ul << 2);   /* never left set: it changes every later WFI */
+        if (elp_saved == 2u) {     /* restore the caller's EPU retention choice */
+            PWRMODCTL->CPDLPSTATE =
+                (PWRMODCTL->CPDLPSTATE & ~(0x3u << 4)) | (2u << 4);
+        }
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_DBGLOCK) != 0u) {
         MCUCTRL->DEBUGGER = 0u;
@@ -318,6 +350,9 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
         tiku_clock_tickless_end();
         __asm__ volatile ("cpsie i" ::: "memory");
     }
+    if (!spin && lfrc_hz != 0u) {
+        (void)tiku_ambiq_stimer_reclock(0);    /* back to the crystal */
+    }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_UART) != 0u) {
         PWRCTRL->DEVPWREN_b.PWRENUART1 = 1u;
         {
@@ -326,7 +361,10 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
         }
         tiku_uart_init();          /* full re-init: DMA/config, not just power */
     }
-    return tiku_ambiq_stimer_us(dt);
+    /* dt is in counts of whichever timebase timed the window. */
+    return (hz_used == 32768u)
+               ? (uint32_t)(((uint64_t)dt * 15625u) >> 9)
+               : (uint32_t)(((uint64_t)dt * 1000000u) / hz_used);
 }
 
 uint32_t tiku_ambiq_sleep_probe(uint32_t ms, unsigned flags)

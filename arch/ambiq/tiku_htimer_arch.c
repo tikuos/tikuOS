@@ -83,6 +83,16 @@ static uint32_t s_tick_anchor;
 /** @brief Non-zero while a tickless stretch window is open. */
 static volatile uint8_t s_stretched;
 
+/** @brief Current STIMER timebase rate in Hz (32768 on XTAL; measured on LFRC). */
+static uint32_t s_stimer_hz = 32768u;
+
+/** @brief Kernel tick rate in Hz, captured at tick_start so a timebase
+ *  reclock can recompute s_tick_period for the new clock. */
+static uint32_t s_tick_rate_hz = 128u;
+
+/** @brief Core clock query for the LFRC calibration (tiku_cpu_freq_boot_arch.c). */
+extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
+
 /** @brief Advance the kernel tick counters; provided by tiku_timer_arch.c. */
 extern void tiku_ambiq_tick_advance(void);
 extern void tiku_ambiq_tick_advance_n(unsigned long n);
@@ -302,6 +312,8 @@ void tiku_ambiq_stimer_cmpr0_isr(void) {
  */
 void tiku_ambiq_stimer_tick_start(uint32_t period_counts) {
     s_tick_period = period_counts ? period_counts : 1u;
+    s_tick_rate_hz = 32768u / s_tick_period;      /* tick_start runs on XTAL */
+    if (s_tick_rate_hz == 0u) { s_tick_rate_hz = 1u; }
 
     stimer_xtal_enable();
     STIMER->STCFG     = STIMER_CLKSEL_XTAL_32KHZ |
@@ -335,6 +347,147 @@ void tiku_ambiq_stimer_cmpr1_isr(void) {
 }
 
 /*---------------------------------------------------------------------------*/
+/* TIMEBASE RECLOCK -- deep sleep support                                    */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Bounded check that the STIMER counter is actually advancing.
+ *
+ * A clock is trusted only after it is seen counting -- the lesson of the
+ * deep-sleep autorun, whose first versions busy-polled a dead counter
+ * forever.  Exits as soon as the counter moves; the bound covers several
+ * counts even at the ~900 Hz LFRC rate.
+ *
+ * @return 1 if the counter advanced, 0 if it is frozen
+ */
+static int stimer_verify_counting(void) {
+    uint32_t c0 = stimer_counter();
+    uint32_t spin = 4000000u;
+    while (stimer_counter() == c0 && --spin != 0u) { }
+    return stimer_counter() != c0;
+}
+
+/**
+ * @brief Measure the actual LFRC rate against the DWT cycle counter.
+ *
+ * The datasheet calls the LFRC "approximately 900 Hz (uncalibrated)" -- a
+ * rate that wide cannot be assumed, only measured.  Times 4 LFRC counts
+ * against DWT CYCCNT at the known core clock; enables TRCENA/CYCCNT
+ * transiently and restores both (the boot tidy leaves TRCENA off).
+ * All waits are bounded.  Runs with interrupts masked (caller's section).
+ *
+ * @return measured Hz, clamped to nominal 900 if implausible
+ */
+static uint32_t stimer_lfrc_calibrate(void) {
+    volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
+    volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
+    volatile uint32_t *cyccnt = (volatile uint32_t *)0xE0001004UL;
+    uint32_t demcr0 = *demcr, ctl0 = *dwtctl;
+    uint32_t c0, cyc0, cyc1, hz, spin;
+    unsigned long core = tiku_cpu_ambiq_clock_get_hz();
+
+    *demcr |= (1u << 24);            /* TRCENA   */
+    *dwtctl |= 1u;                   /* CYCCNTENA */
+
+    spin = 8000000u;                                 /* edge-align */
+    c0 = stimer_counter();
+    while (stimer_counter() == c0 && --spin != 0u) { }
+    cyc0 = *cyccnt;
+    c0 = stimer_counter();
+    spin = 32000000u;                                /* 4 counts ~ 4.4 ms */
+    while ((uint32_t)(stimer_counter() - c0) < 4u && --spin != 0u) { }
+    cyc1 = *cyccnt;
+
+    *dwtctl = ctl0;
+    *demcr  = demcr0;
+
+    hz = (cyc1 != cyc0)
+             ? (uint32_t)(((uint64_t)core * 4u) / (uint32_t)(cyc1 - cyc0))
+             : 0u;
+    if (hz < 500u || hz > 2000u) {
+        hz = 900u;                   /* implausible measurement: use nominal */
+    }
+    return hz;
+}
+
+/**
+ * @brief Switch the STIMER timebase between the 32 kHz crystal and the LFRC.
+ *
+ * EXISTS BECAUSE THE CRYSTAL DIES UNDER REAL DEEP SLEEP on this rig (the
+ * software-override XTAL enable does not survive debugger-free SLEEPDEEP;
+ * measured: the deep-sleep autorun's STIMER froze and its tick-stretched
+ * sleep never woke).  The LFRC keeps running, so the deep path reclocks to
+ * it around the sleep window and back afterwards.
+ *
+ * VERIFIED SWITCH: the new source must be seen counting or the function
+ * reverts to the crystal and reports failure -- never trades a working
+ * timebase for a dead one.  Accounts elapsed ticks at the old rate first,
+ * then re-anchors and re-arms the tick at the new rate, so kernel time
+ * stays continuous across the switch.  Refuses while a tickless stretch is
+ * open (the stretch compare is armed in old-clock counts); callers reclock
+ * FIRST, then stretch.
+ *
+ * @param use_lfrc  non-zero: XTAL -> LFRC (rate measured); zero: back to XTAL
+ * @return the new timebase rate in Hz, or 0 on failure (reverted to XTAL)
+ */
+uint32_t tiku_ambiq_stimer_reclock(int use_lfrc) {
+    uint32_t primask, hz;
+    uint32_t clksel = use_lfrc ? 6u /* LFRC_NOMINAL */
+                               : STIMER_CLKSEL_XTAL_32KHZ;
+
+    if (s_stretched) {
+        return 0u;
+    }
+
+    __asm__ volatile ("mrs %0, primask" : "=r" (primask));
+    __asm__ volatile ("cpsid i" ::: "memory");
+
+    stimer_tick_account();                 /* settle time at the OLD rate */
+
+    if (!use_lfrc) {
+        stimer_xtal_enable();              /* re-assert the SWE override  */
+    }
+    STIMER->STCFG = (STIMER->STCFG & ~0xFu) | clksel;
+
+    if (!stimer_verify_counting()) {
+        STIMER->STCFG = (STIMER->STCFG & ~0xFu) | STIMER_CLKSEL_XTAL_32KHZ;
+        (void)stimer_verify_counting();
+        if ((primask & 1u) == 0u) {
+            __asm__ volatile ("cpsie i" ::: "memory");
+        }
+        return 0u;
+    }
+
+    hz = use_lfrc ? stimer_lfrc_calibrate() : 32768u;
+
+    s_stimer_hz   = hz;
+    /* ROUND, don't truncate: at 884 Hz / 128 ticks the true period is 6.91
+     * counts; floor(6) ran the tick 15 % fast and ended every tickless
+     * stretch early (measured: a 3 s LFRC window woke 58 times -- the
+     * stretch expired at 2.6 s and the remainder ran at per-tick cadence).
+     * Nearest (7) is 1.3 % slow -- the best an integer period can do at
+     * this granularity.  Exact on the crystal (32768/128 = 256). */
+    s_tick_period = (hz + s_tick_rate_hz / 2u) / s_tick_rate_hz;
+    if (s_tick_period == 0u) { s_tick_period = 1u; }
+    s_tick_anchor = stimer_counter();
+    /* The verify above burned >= 1 count of the NEW clock since the last
+     * compare write, so the inter-write spacing is already satisfied --
+     * back-date s_last_cmpr so the re-arm does not spin a full count. */
+    s_last_cmpr   = s_tick_anchor - 2u;
+    stimer_tick_rearm_boundary();
+
+    if ((primask & 1u) == 0u) {
+        __asm__ volatile ("cpsie i" ::: "memory");
+    }
+    return hz;
+}
+
+/** @brief Current STIMER timebase rate in Hz. */
+uint32_t tiku_ambiq_stimer_rate_hz(void) {
+    return s_stimer_hz;
+}
+
+/*---------------------------------------------------------------------------*/
 /* TICKLESS IDLE — strong overrides of the kernel's weak defaults            */
 /*---------------------------------------------------------------------------*/
 
@@ -355,6 +508,18 @@ void tiku_ambiq_stimer_cmpr1_isr(void) {
  */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
     uint32_t into, span, delta;
+
+    /* A stretch is a promise to sleep until the far compare fires; on a
+     * frozen timebase that compare never comes and the sleep has no alarm
+     * (the deep-sleep autorun measured exactly this: the crystal died under
+     * real SLEEPDEEP and the stretched sleep never woke).  Refuse to open a
+     * stretch on a clock that is not visibly counting -- the caller falls
+     * back to the per-tick cadence, which at worst wastes wakes rather than
+     * sleeping forever.  Cost when healthy: ~one timebase count (~30 us on
+     * the crystal), only on entries that would stretch. */
+    if (!stimer_verify_counting()) {
+        return 0;
+    }
 
     /* Deliberately NO accounting here: crediting a passed boundary
      * would post the timer poll (sched_notify) AFTER the scheduler
