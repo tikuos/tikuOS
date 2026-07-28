@@ -45,6 +45,7 @@
 #include "hal/tiku_cpu.h"        /* dcache clean/invalidate for the bench    */
 #include <kernel/cpu/tiku_hang.h>   /* bench loops block on purpose          */
 #include <kernel/shell/tiku_shell_io.h> /* bench reports via SHELL_PRINTF    */
+#include <kernel/memory/tiku_mem.h>    /* the TIKU_MEM_PSRAM tier attach     */
 #include "apollo510.h"           /* CMSIS register map -- register defs only */
 
 /*---------------------------------------------------------------------------*/
@@ -211,6 +212,8 @@ static const psram_lat_t s_lat[] = {
                                  kept in the table so a deliberate overclock
                                  experiment is expressible, never a default */
 };
+static uint8_t s_asleep;      /**< 1 while the device is in half sleep      */
+static uint8_t s_tap = 0xFFu; /**< shipped RXDQSDELAY tap (0xFF = unscanned) */
 static uint8_t s_turnaround = PSRAM_TURNAROUND_DQS;   /* live values        */
 static uint8_t s_writelat   = 10u;   /* matches the device's REAL power-up
                                         default, WLC5 -- see s_lat[]         */
@@ -1015,6 +1018,7 @@ uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
         unsigned c = best_start + best_len / 2u;
         MSPI0->DEV0DDR_b.RXDQSDELAY0 = (c & 0x1Fu);
         __DSB();
+        s_tap = (uint8_t)c;
         if (center) { *center = c; }
     } else if (center) {
         *center = 0u;
@@ -1087,6 +1091,105 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
         if (spins == 0u)                        { return TIKU_PSRAM_ERR_TIMEOUT; }
         if ((st & MSPI0_DMASTAT_DMAERR_Msk))    { return TIKU_PSRAM_ERR_TIMEOUT; }
     }
+    return TIKU_PSRAM_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+/* M4 -- LIFECYCLE: up / down / half sleep, and the memory tier              */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The GPU lesson, applied to a memory: power late, use, release -- except a
+ * RAM has one state the GPU does not: HALF SLEEP, where the die keeps its
+ * contents on self-refresh at microamp-class current while the interface
+ * sleeps.  So the ladder is:
+ *
+ *   down    domain off, tier detached, contents GONE
+ *   asleep  contents RETAINED, tier stays attached, every access refused
+ *   up      mapped at 0x60000000, tier attached, full speed
+ *
+ * Transcribed timing (vendor, APS25616BA_tHS/tXHS with margin): 155 us into
+ * and out of half sleep.  Enter = write MR6 = 0xF0 (one byte); exit on this
+ * part = any dummy command to pulse CE, then the wake delay.
+ */
+#define PSRAM_THS_US   155u
+#define PSRAM_MR6_HALFSLEEP 0xF0u
+
+tiku_psram_err_t tiku_psram_halfsleep(void)
+{
+    uint32_t v = PSRAM_MR6_HALFSLEEP;
+    tiku_psram_err_t rc;
+
+    if (!s_up)     { return TIKU_PSRAM_ERR_POWER; }
+    if (s_asleep)  { return TIKU_PSRAM_OK; }
+    (void)tiku_psram_xip_enable(0);        /* no CPU access while asleep    */
+    rc = psram_pio(PSRAM_CMD_REG_WRITE, 6u, &v, 1u, 0);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    tiku_cpu_ambiq_delay_us(PSRAM_THS_US);
+    s_asleep = 1u;
+    return TIKU_PSRAM_OK;
+}
+
+tiku_psram_err_t tiku_psram_wake(void)
+{
+    uint32_t dummy = 0u;
+    tiku_psram_err_t rc;
+
+    if (!s_up)    { return TIKU_PSRAM_ERR_POWER; }
+    if (!s_asleep) { return TIKU_PSRAM_OK; }
+    /* Any command pulses CE and begins the wake; the opcode is ignored by a
+     * half-sleeping device (vendor uses 0x0000). */
+    (void)psram_pio(0x0000u, 0u, &dummy, 2u, 0);
+    tiku_cpu_ambiq_delay_us(PSRAM_THS_US);
+    s_asleep = 0u;
+    /* The device is only trusted awake once it ANSWERS: identity again. */
+    rc = tiku_psram_read_id((tiku_psram_id_t *)0);
+    return rc;
+}
+
+int tiku_psram_asleep(void)
+{
+    return s_asleep ? 1 : 0;
+}
+
+unsigned tiku_psram_tap(void)
+{
+    return s_tap;
+}
+
+tiku_psram_err_t tiku_psram_up(unsigned clk, int scan)
+{
+    tiku_psram_err_t rc;
+    tiku_psram_id_t id;
+
+    rc = tiku_psram_set_speed(clk);        /* init-if-needed + MRs + clock  */
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    rc = tiku_psram_read_id(&id);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    if (scan) {
+        if (tiku_psram_timing_scan((uint32_t *)0, (unsigned *)0) == 0u) {
+            return TIKU_PSRAM_ERR_TIMEOUT; /* no passing tap: do not ship   */
+        }
+    }
+    rc = tiku_psram_xip_enable(1);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    if (tiku_tier_attach_psram((void *)TIKU_PSRAM_XIP_BASE,
+                               (tiku_mem_arch_size_t)TIKU_PSRAM_SIZE_BYTES)
+            != TIKU_MEM_OK) {
+        /* Already attached is fine on a re-up; anything else is not, but the
+         * attach only fails on double-attach or bad args here. */
+    }
+    return TIKU_PSRAM_OK;
+}
+
+tiku_psram_err_t tiku_psram_down(int force)
+{
+    if (tiku_tier_detach_psram(force) != TIKU_MEM_OK) {
+        return TIKU_PSRAM_ERR_ARG;         /* live allocations, no force    */
+    }
+    (void)tiku_psram_xip_enable(0);
+    tiku_psram_deinit();
+    s_asleep = 0u;
     return TIKU_PSRAM_OK;
 }
 

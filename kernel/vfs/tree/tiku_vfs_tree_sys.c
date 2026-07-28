@@ -59,6 +59,9 @@
 #if (TIKU_DRV_GPU_ENABLE + 0)
 #include "tiku_vfs_tree_gpu.h"       /* /sys/gpu -- Apollo510 GPU status     */
 #endif
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+#include "tiku_vfs_tree_psram.h"     /* /sys/psram -- external 64 MB PSRAM   */
+#endif
 #include "tiku_vfs_tree_persist.h"
 #include "tiku_vfs_tree_watch.h"
 #include "tiku_vfs_tree_inittab.h"
@@ -1295,6 +1298,10 @@ static const tiku_vfs_node_t sys_children[] = {
 #if (TIKU_DRV_GPU_ENABLE + 0)
     { "gpu",      TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_gpu_children,      TIKU_VFS_TREE_GPU_NCHILD },
+#endif
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+    { "psram",    TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_psram_children,    TIKU_VFS_TREE_PSRAM_NCHILD },
 #endif
     { "timer",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_timer_children,    TIKU_VFS_TREE_TIMER_NCHILD },

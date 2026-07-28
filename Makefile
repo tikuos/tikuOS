@@ -1450,6 +1450,7 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # regardless of include order (see kernel/shell/tiku_shell_config.h).
 ifeq ($(TIKU_DRV_PSRAM_ENABLE),1)
 SRCS += arch/ambiq/tiku_psram_arch.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_psram.c   # /sys/psram lifecycle nodes
 CFLAGS += -DTIKU_DRV_PSRAM_ENABLE=1
 endif
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)

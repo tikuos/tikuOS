@@ -42,6 +42,7 @@
 #include <arch/ambiq/tiku_cpu_common.h>       /* tiku_cpu_ambiq_delay_us     */
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
+#include <kernel/memory/tiku_mem.h>           /* TIKU_MEM_PSRAM tier gate    */
 #endif
 #include <kernel/timers/tiku_clock.h>         /* tickless begin/end (guard)  */
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>  /* SIMOBUCK enable hook     */
@@ -628,6 +629,112 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             for (k = 2; k < argc; k++) {
                 if (streq(argv[k], "nodqs")) { nodqs = 1; }
             }
+        }
+        if (argc >= 3 && streq(argv[2], "up")) {
+            /* power psram up [mhz] -- the M4 lifecycle: speed + identity +
+             * (at 192) timing scan + XIP map + TIKU_MEM_PSRAM tier attach. */
+            unsigned row = TIKU_PSRAM_CLK_192MHZ, n3 = 0u;
+            tiku_psram_err_t rc;
+            if (argc >= 4) {
+                const char *q3 = argv[3];
+                while (*q3 >= '0' && *q3 <= '9') { n3 = n3*10u + (unsigned)(*q3++ - '0'); }
+                if (n3 && n3 < 96u)        { row = TIKU_PSRAM_CLK_48MHZ; }
+                else if (n3 && n3 < 125u)  { row = TIKU_PSRAM_CLK_96MHZ; }
+                else if (n3 && n3 < 192u)  { row = TIKU_PSRAM_CLK_125MHZ; }
+            }
+            rc = tiku_psram_up(row, (row == TIKU_PSRAM_CLK_192MHZ) ? 1 : 0);
+            SHELL_PRINTF("psram up: %s -- io %lu Hz, tap %u, tier %s,"
+                         " 64 MB at 0x%08lx\n",
+                         (rc == TIKU_PSRAM_OK) ? "ok" : "FAILED",
+                         tiku_psram_clock_hz(), tiku_psram_tap(),
+                         (rc == TIKU_PSRAM_OK) ? "attached" : "no",
+                         (unsigned long)TIKU_PSRAM_XIP_BASE);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "down")) {
+            int force = (argc >= 4 && streq(argv[3], "force"));
+            tiku_psram_err_t rc = tiku_psram_down(force);
+            SHELL_PRINTF("psram down: %s%s\n",
+                         (rc == TIKU_PSRAM_OK) ? "ok (contents gone)"
+                         : "REFUSED -- tier has live allocations",
+                         (rc != TIKU_PSRAM_OK) ? " (use: down force)" : "");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "sleep")) {
+            tiku_psram_err_t rc = tiku_psram_halfsleep();
+            SHELL_PRINTF("psram sleep: %s (contents retained on"
+                         " self-refresh; access refused until wake)\n",
+                         (rc == TIKU_PSRAM_OK) ? "ok" : "FAILED");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "wake")) {
+            tiku_psram_err_t rc = tiku_psram_wake();
+            SHELL_PRINTF("psram wake: %s\n",
+                         (rc == TIKU_PSRAM_OK) ? "ok -- identity re-verified"
+                                               : "FAILED");
+            if (rc == TIKU_PSRAM_OK) {
+                (void)tiku_psram_xip_enable(1);   /* restore the mapping */
+            }
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "tier")) {
+            /* The M4 acceptance gate: carve 32 MB from the PSRAM tier, fill
+             * through the aperture, checksum it back, and report -- then
+             * survive a sleep/wake with the SAME checksum. */
+            static tiku_arena_t ar;
+            uint8_t *p2;
+            uint32_t i3, sum1 = 0u, sum2 = 0u;
+            const uint32_t N = 32u * 1024u * 1024u;
+            if (tiku_tier_arena_create(&ar, TIKU_MEM_PSRAM, N, 42u)
+                    != TIKU_MEM_OK) {
+                SHELL_PRINTF("tier: arena create failed (is psram up?)\n");
+                return;
+            }
+            p2 = (uint8_t *)tiku_arena_alloc(&ar, N - 64u);
+            if (!p2) {
+                SHELL_PRINTF("tier: alloc failed\n");
+                return;
+            }
+            SHELL_PRINTF("tier: 32 MB arena, buf %08lx -- filling\n",
+                         (unsigned long)(uintptr_t)p2);
+            for (i3 = 0u; i3 < N - 64u; i3 += 4u) {
+                *(volatile uint32_t *)(p2 + i3) = i3 * 2654435761u;
+                if ((i3 & 0xFFFFFu) == 0u) { tiku_hang_checkin(); }
+            }
+            tiku_cpu_dcache_clean(p2, N - 64u);
+            tiku_cpu_dcache_invalidate(p2, N - 64u);
+            for (i3 = 0u; i3 < N - 64u; i3 += 4096u) {
+                sum1 += *(volatile uint32_t *)(p2 + i3);
+                if ((i3 & 0xFFFFFu) == 0u) { tiku_hang_checkin(); }
+            }
+            SHELL_PRINTF("tier: filled, sparse checksum %08lx --"
+                         " sleeping...\n", (unsigned long)sum1);
+            if (tiku_psram_halfsleep() != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("tier: sleep failed\n");
+                return;
+            }
+            {   /* hold half sleep long enough to mean something */
+                uint32_t ms3;
+                for (ms3 = 0u; ms3 < 1500u; ms3++) {
+                    tiku_cpu_ambiq_delay_us(1000u);
+                    if ((ms3 & 63u) == 0u) { tiku_hang_checkin(); }
+                }
+            }
+            if (tiku_psram_wake() != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("tier: wake failed\n");
+                return;
+            }
+            (void)tiku_psram_xip_enable(1);
+            tiku_cpu_dcache_invalidate(p2, N - 64u);
+            for (i3 = 0u; i3 < N - 64u; i3 += 4096u) {
+                sum2 += *(volatile uint32_t *)(p2 + i3);
+                if ((i3 & 0xFFFFFu) == 0u) { tiku_hang_checkin(); }
+            }
+            SHELL_PRINTF("tier: after 1.5 s half sleep, checksum %08lx --"
+                         " %s\n", (unsigned long)sum2,
+                         (sum1 == sum2) ? "RETAINED, gate PASSES"
+                                        : "LOST -- gate FAILS");
+            return;
         }
         if (argc >= 3 && streq(argv[2], "speed") && argc >= 4) {
             /* power psram speed <48|96|125|192> -- program device latencies

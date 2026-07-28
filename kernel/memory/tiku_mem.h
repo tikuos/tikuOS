@@ -212,14 +212,21 @@ typedef enum {
     TIKU_MEM_SRAM   = 0, /**< Fast, volatile — for hot/temporary data */
     TIKU_MEM_NVM    = 1, /**< Persistent, slower writes — for cold/stable data */
     TIKU_MEM_AUTO   = 2, /**< OS selects: prefers SRAM, falls back to NVM/HIFRAM */
-    TIKU_MEM_HIFRAM = 3  /**< Upper FRAM bank (FR5994/FR6989, MEMORY_MODEL=large) */
+    TIKU_MEM_HIFRAM = 3, /**< Upper FRAM bank (FR5994/FR6989, MEMORY_MODEL=large) */
+    TIKU_MEM_PSRAM  = 4  /**< External PSRAM aperture (Apollo510 + U14, 64 MB).
+                              LATE-ATTACHED: exists only between
+                              tiku_tier_attach_psram()/detach, i.e. while the
+                              PSRAM lifecycle has the device up and mapped.
+                              Volatile, and never selected by AUTO — a tier
+                              whose backing can vanish must be asked for by
+                              name. */
 } tiku_mem_tier_t;
 
 /* Internal: the highest concrete tier value, used for tier_state[]
  * sizing. AUTO sits at index 2 but is never used to index — it gets
  * resolved to a concrete tier first. The 32 B of wasted slot-2 state
  * is the price of keeping AUTO=2 stable across releases. */
-#define TIKU_MEM_TIER_COUNT  4
+#define TIKU_MEM_TIER_COUNT  5
 
 /*---------------------------------------------------------------------------*/
 /* STATISTICS                                                                */
@@ -1351,6 +1358,27 @@ uint32_t tiku_mpu_get_last_fault_addr(void);
  * @return TIKU_MEM_OK on success
  */
 tiku_mem_err_t tiku_tier_init(void);
+
+/**
+ * @brief Attach a late-arriving backing pool as the TIKU_MEM_PSRAM tier.
+ *
+ * The external PSRAM exists as memory only while its driver has the device
+ * powered, timed, and XIP-mapped — which happens long after tiku_tier_init().
+ * The lifecycle verb calls this at bring-up with the aperture base and size.
+ * Refused while the tier is already attached.
+ */
+tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size);
+
+/**
+ * @brief Detach the PSRAM tier (power-down path).
+ *
+ * Refused while sub-allocations are outstanding UNLESS @p force — a bump
+ * allocator cannot free piecemeal, so an orderly shutdown drops the whole
+ * tier at once and every pointer into it dies with the power.  With
+ * force = 0 an occupied tier returns TIKU_MEM_ERR_INVALID so a caller
+ * cannot silently strand live data.
+ */
+tiku_mem_err_t tiku_tier_detach_psram(int force);
 
 /**
  * @brief Reset every tier pool to empty (destructive rewind)

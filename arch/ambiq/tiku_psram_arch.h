@@ -358,6 +358,41 @@ int tiku_psram_xip_enabled(void);
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device);
 
+/*---------------------------------------------------------------------------*/
+/* M4 -- lifecycle + the TIKU_MEM_PSRAM tier                                 */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Full bring-up: speed, identity, optional timing scan, XIP map,
+ *        and attach the aperture as the TIKU_MEM_PSRAM tier.
+ * @param clk   TIKU_PSRAM_CLK_* row
+ * @param scan  non-zero: run the RXDQSDELAY scan and refuse to ship if no
+ *              tap passes
+ */
+tiku_psram_err_t tiku_psram_up(unsigned clk, int scan);
+
+/**
+ * @brief Orderly power-down: detach the tier, unmap, release the domain.
+ *        Contents are LOST.  Refused (ERR_ARG) if tier allocations are
+ *        outstanding and @p force is 0.
+ */
+tiku_psram_err_t tiku_psram_down(int force);
+
+/**
+ * @brief Half sleep: contents RETAINED on self-refresh at uA-class device
+ *        current; XIP is unmapped and every access path refuses until wake.
+ */
+tiku_psram_err_t tiku_psram_halfsleep(void);
+
+/** @brief Wake from half sleep; trusted only after identity answers again. */
+tiku_psram_err_t tiku_psram_wake(void);
+
+/** @brief 1 while in half sleep. */
+int tiku_psram_asleep(void);
+
+/** @brief Shipped RXDQSDELAY tap (0xFF until a scan has run). */
+unsigned tiku_psram_tap(void);
+
 /**
  * @brief Controller-free identity read: bit-bang the octal waveform on GPIO.
  *

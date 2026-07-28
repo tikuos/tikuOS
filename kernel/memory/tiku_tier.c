@@ -248,8 +248,53 @@ static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
  * tiku_tier_reset() (on demand, teardown / test isolation).  Does not zero
  * the NVM backing array, so persistent FRAM contents survive.
  */
+/*---------------------------------------------------------------------------*/
+/* PSRAM TIER -- late attach (Apollo510 external PSRAM)                      */
+/*---------------------------------------------------------------------------*/
+
+tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size)
+{
+    if (base == NULL || size == 0u) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    if (tier_state[TIKU_MEM_PSRAM].initialized) {
+        return TIKU_MEM_ERR_INVALID;    /* already attached */
+    }
+    tier_state[TIKU_MEM_PSRAM].buf         = (uint8_t *)base;
+    tier_state[TIKU_MEM_PSRAM].capacity    = size;
+    tier_state[TIKU_MEM_PSRAM].offset      = 0;
+    tier_state[TIKU_MEM_PSRAM].peak        = 0;
+    tier_state[TIKU_MEM_PSRAM].alloc_count = 0;
+    tier_state[TIKU_MEM_PSRAM].fail_count  = 0;
+    tier_state[TIKU_MEM_PSRAM].initialized = 1;
+    return TIKU_MEM_OK;
+}
+
+tiku_mem_err_t tiku_tier_detach_psram(int force)
+{
+    if (!tier_state[TIKU_MEM_PSRAM].initialized) {
+        return TIKU_MEM_OK;             /* already gone: idempotent */
+    }
+    if (tier_state[TIKU_MEM_PSRAM].offset != 0u && !force) {
+        return TIKU_MEM_ERR_INVALID;    /* live allocations would be stranded */
+    }
+    tier_state[TIKU_MEM_PSRAM].initialized = 0;
+    tier_state[TIKU_MEM_PSRAM].buf         = NULL;
+    tier_state[TIKU_MEM_PSRAM].capacity    = 0;
+    tier_state[TIKU_MEM_PSRAM].offset      = 0;
+    return TIKU_MEM_OK;
+}
+
 static void tier_wire_all(void)
 {
+    /* PSRAM: never wired at boot -- it is a LATE-ATTACH tier owned by the
+     * PSRAM lifecycle (tiku_tier_attach_psram).  A tiku_tier_reset() drops
+     * any attachment, which is correct: reset means clean slate. */
+    tier_state[TIKU_MEM_PSRAM].initialized = 0;
+    tier_state[TIKU_MEM_PSRAM].buf         = NULL;
+    tier_state[TIKU_MEM_PSRAM].capacity    = 0;
+    tier_state[TIKU_MEM_PSRAM].offset      = 0;
+
     tier_state[TIKU_MEM_SRAM].buf         = tier_sram_buf;
     tier_state[TIKU_MEM_SRAM].capacity    = TIKU_TIER_SRAM_SIZE;
     tier_state[TIKU_MEM_SRAM].offset      = 0;
