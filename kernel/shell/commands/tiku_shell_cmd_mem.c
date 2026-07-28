@@ -79,21 +79,29 @@ mem_parse_u32(const char *s, uint32_t *out)
 }
 
 /**
- * @brief Common 16-bit address parse: rejects HIFRAM and above.
+ * @brief Address parse, sized for the platform's pointers.
+ *
+ * MSP430 (small model) pointers are 16-bit, so addresses above 0xFFFF are
+ * rejected there -- reaching HIFRAM needs __data20 accesses this command does
+ * not do.  Every 32-bit port takes the full 32-bit range: this command's first
+ * real job on Arm was reading MCUCTRL identity registers at 0x40021050, which
+ * the 16-bit cap rejected.
  *
  * @return 1 on success, 0 on parse error or out-of-range.
  */
 static uint8_t
-mem_parse_addr16(const char *s, uint16_t *out)
+mem_parse_addr(const char *s, uintptr_t *out)
 {
     uint32_t v;
     if (!mem_parse_u32(s, &v)) {
         return 0;
     }
+#if defined(PLATFORM_MSP430)
     if (v > 0xFFFFu) {
         return 0;
     }
-    *out = (uint16_t)v;
+#endif
+    *out = (uintptr_t)v;
     return 1;
 }
 
@@ -104,7 +112,7 @@ mem_parse_addr16(const char *s, uint16_t *out)
 void
 tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
 {
-    uint16_t addr;
+    uintptr_t addr;
     uint32_t count = 1;
     uint16_t i;
     volatile const uint8_t *p;
@@ -114,8 +122,8 @@ tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
                      (unsigned)MEM_PEEK_MAX);
         return;
     }
-    if (!mem_parse_addr16(argv[1], &addr)) {
-        SHELL_PRINTF("peek: bad address '%s' (0..0xFFFF)\n", argv[1]);
+    if (!mem_parse_addr(argv[1], &addr)) {
+        SHELL_PRINTF("peek: bad address '%s'\n", argv[1]);
         return;
     }
     if (argc == 3) {
@@ -126,15 +134,25 @@ tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
             return;
         }
     }
-    /* Defend against wraparound at the top of the address space:
-     * a peek that would cross 0x10000 is truncated rather than
-     * silently rolling over into low memory. */
+    /* Defend against wraparound at the top of the address space: a peek that
+     * would cross the pointer's ceiling is truncated rather than silently
+     * rolling over into low memory. */
+#if defined(PLATFORM_MSP430)
     if ((uint32_t)addr + count > 0x10000UL) {
         count = 0x10000UL - (uint32_t)addr;
     }
+#else
+    if ((uint32_t)addr + count < (uint32_t)addr) {
+        count = 0xFFFFFFFFUL - (uint32_t)addr;
+    }
+#endif
 
     p = (volatile const uint8_t *)addr;
+#if defined(PLATFORM_MSP430)
     SHELL_PRINTF("%04x:", (unsigned)addr);
+#else
+    SHELL_PRINTF("%08lx:", (unsigned long)addr);
+#endif
     for (i = 0; i < count; i++) {
         SHELL_PRINTF(" %02x", (unsigned)p[i]);
     }
@@ -148,7 +166,7 @@ tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
 void
 tiku_shell_cmd_poke(uint8_t argc, const char *argv[])
 {
-    uint16_t addr;
+    uintptr_t addr;
     uint32_t val;
     volatile uint8_t *p;
     uint8_t  before;
@@ -158,8 +176,8 @@ tiku_shell_cmd_poke(uint8_t argc, const char *argv[])
         SHELL_PRINTF("Usage: poke <addr> <byte>\n");
         return;
     }
-    if (!mem_parse_addr16(argv[1], &addr)) {
-        SHELL_PRINTF("poke: bad address '%s' (0..0xFFFF)\n", argv[1]);
+    if (!mem_parse_addr(argv[1], &addr)) {
+        SHELL_PRINTF("poke: bad address '%s'\n", argv[1]);
         return;
     }
     if (!mem_parse_u32(argv[2], &val) || val > 0xFFu) {
@@ -175,8 +193,13 @@ tiku_shell_cmd_poke(uint8_t argc, const char *argv[])
     *p     = (uint8_t)val;
     after  = *p;
 
+#if defined(PLATFORM_MSP430)
     SHELL_PRINTF("%04x: %02x -> %02x\n",
                  (unsigned)addr, (unsigned)before, (unsigned)after);
+#else
+    SHELL_PRINTF("%08lx: %02x -> %02x\n",
+                 (unsigned long)addr, (unsigned)before, (unsigned)after);
+#endif
     if (after != (uint8_t)val) {
         SHELL_PRINTF("poke: write rejected "
                      "(MPU/peripheral?), value remained %02x\n",

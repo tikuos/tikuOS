@@ -1427,6 +1427,15 @@ SRCS += arch/ambiq/tiku_htimer_arch.c
 # kernel/shell/tiku_shell_config.h.
 SRCS += arch/ambiq/tiku_power_ambiq.c
 CFLAGS += -DTIKU_AMBIQ_POWER_PROBE=1
+# Experiment 3: Helium-vs-scalar energy.  tiku_simd_scalar.c compiles
+# hal/tiku_simd.c a SECOND time with the vector backend forced off and its
+# symbols renamed, so both backends sit in ONE image -- see the header for why
+# two images would be the wrong experiment.
+ifeq ($(TIKU_AMBIQ_POWER_PROBE_SIMD),1)
+SRCS += arch/ambiq/tiku_simd_power.c
+SRCS += arch/ambiq/tiku_simd_scalar.c
+CFLAGS += -DTIKU_AMBIQ_POWER_PROBE_SIMD=1
+endif
 SRCS += arch/ambiq/tiku_crit_arch.c
 SRCS += arch/ambiq/tiku_gpio_irq_arch.c
 SRCS += arch/ambiq/tiku_uart_arch.c
@@ -1438,6 +1447,13 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_gpu.c   # /sys/gpu status nodes
+# GPU power-measurement instruments (experiment 2).  Rides the same -D as the
+# CPU probes so the shell can gate on it without include-order games, and needs
+# the GPU driver -- hence inside this block, not the power block above.
+ifeq ($(TIKU_AMBIQ_POWER_PROBE_GPU),1)
+SRCS += arch/ambiq/tiku_gpu_power.c
+CFLAGS += -DTIKU_AMBIQ_POWER_PROBE_GPU=1
+endif
 endif
 ifeq ($(TIKU_DRV_DC_ENABLE),1)
 SRCS += arch/ambiq/tiku_dc_arch.c

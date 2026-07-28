@@ -30,6 +30,10 @@
 #include "apollo510.h"           /* CMSIS: GPU / PWRCTRL / NVIC (no AmbiqSuite) */
 #include <hal/tiku_cpu.h>        /* tiku_cpu_dcache_clean / _invalidate       */
 
+/* Settle delays for the rail/mode change (tiku_cpu_common.c, as the freq boot
+ * path declares it -- same pattern, one declaration per user). */
+extern void tiku_cpu_ambiq_delay_us(unsigned int us);
+
 /*---------------------------------------------------------------------------*/
 /* Constants                                                                 */
 /*---------------------------------------------------------------------------*/
@@ -253,12 +257,81 @@ tiku_gpu_wait_idle(void)
     return TIKU_GPU_OK;
 }
 
+int
+tiku_gpu_perf_needs_vddf(tiku_gpu_perf_t perf)
+{
+    /* HP3 only.  The SDK compares against HIGH_PERFORMANCE, which aliases
+     * HFRC2_HP3 -- HP1 and HP2 stay on VDDC despite the name. */
+    return (perf == TIKU_GPU_PERF_HP3_250MHZ) ? 1 : 0;
+}
+
+unsigned long
+tiku_gpu_perf_hz(tiku_gpu_perf_t perf)
+{
+    switch (perf) {
+    case TIKU_GPU_PERF_HP1_192MHZ: return 192000000UL;   /* HFRC  */
+    case TIKU_GPU_PERF_HP2_125MHZ: return 125000000UL;   /* HFRC2 */
+    case TIKU_GPU_PERF_HP3_250MHZ: return 250000000UL;   /* HFRC2 */
+    default:                       return  96000000UL;   /* HFRC  */
+    }
+}
+
+uint32_t tiku_gpu_perf_get(void)
+{
+    return PWRCTRL->GFXPERFREQ_b.GFXPERFREQ;
+}
+
+int tiku_gpu_rail_is_vddf(void)
+{
+    return (PWRCTRL->GFXPWRSWSEL_b.GFXVDDSEL ==
+            PWRCTRL_GFXPWRSWSEL_GFXVDDSEL_VDDF) ? 1 : 0;
+}
+
 tiku_gpu_err_t
 tiku_gpu_init(tiku_gpu_perf_t perf)
 {
     uint32_t spins = 0u;
+    uint32_t pm;
 
-    /* 1. Power the GFX domain (mirror of the UART-domain enable pattern:
+    /* HP3 rides VDDF, which only exists as a regulated rail when the SIMO buck
+     * is running.  The SDK refuses the mode outright otherwise; so do we,
+     * rather than select a rail nothing is driving. */
+    if (tiku_gpu_perf_needs_vddf(perf) &&
+        PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
+        return TIKU_GPU_ERR_POWER;
+    }
+
+    /* 1. Mode + rail FIRST, with the domain DOWN.  Datasheet 4.3.2: GFX mode
+     *    changes are only legal while the device is powered off, and an HP
+     *    transition sets GFXVDDSEL before GFXPERFREQ.  If a previous init left
+     *    the domain up, drop it -- reprogramming underneath a live GPU is the
+     *    case the datasheet forbids.
+     *
+     *    NOT DONE, and deliberately recorded: the SDK also updates the SPOT
+     *    buck Ton state here (its states 2..5 cover GPU-mode x CPU-mode, from
+     *    their own INFO1 trim words).  This port implements only the CPU-only
+     *    Ton states, so with the GPU powered the buck runs on CPU-shaped
+     *    on-times.  Effect size unmeasured -- experiment 2's H8. */
+    if (PWRCTRL->DEVPWRSTATUS_b.PWRSTGFX != 0u) {
+        tiku_gpu_deinit();
+    }
+
+    pm = __get_PRIMASK();
+    __disable_irq();
+
+    PWRCTRL->GFXPWRSWSEL_b.GFXVDDSEL = tiku_gpu_perf_needs_vddf(perf)
+        ? PWRCTRL_GFXPWRSWSEL_GFXVDDSEL_VDDF
+        : PWRCTRL_GFXPWRSWSEL_GFXVDDSEL_VDDC;
+    __DSB();
+    tiku_cpu_ambiq_delay_us(2u);        /* SDK: VOLTADJ_WAIT = 1 us */
+
+    PWRCTRL->GFXPERFREQ_b.GFXPERFREQ = (uint32_t)perf & 0x3u;
+    __DSB();
+    tiku_cpu_ambiq_delay_us(8u);        /* SDK: PWRADJ_WAIT = 6 us  */
+
+    __set_PRIMASK(pm);
+
+    /* 2. Now power the GFX domain (mirror of the UART-domain enable pattern:
      *    DEVPWREN bit, then busy-wait for DEVPWRSTATUS). */
     PWRCTRL->DEVPWREN_b.PWRENGFX = 1u;
     while (PWRCTRL->DEVPWRSTATUS_b.PWRSTGFX == 0u) {
@@ -266,10 +339,6 @@ tiku_gpu_init(tiku_gpu_perf_t perf)
             return TIKU_GPU_ERR_POWER;
         }
     }
-
-    /* 2. Select the performance/clock mode (LP 96 MHz for bring-up). */
-    PWRCTRL->GFXPERFREQ_b.GFXPERFREQ = (uint32_t)perf & 0x3u;
-    __DSB();
 
     /* 3. Reset the core, then wait for idle. */
     tiku_gpu_reset();

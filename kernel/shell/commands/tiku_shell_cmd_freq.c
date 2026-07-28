@@ -66,6 +66,58 @@ freq_cmd_probe(void)
                  (((p.mcuperfreq >> 3) & 3u) == 2u) ? "HP" : "LP");
     SHELL_PRINTF("  MEASURED    %lu Hz core clock (SysTick vs 32 kHz XT)\n",
                  tiku_cpu_freq_ambiq_measured_hz());
+    /* VDDF plan.  Measured HP active power sat 53% above the datasheet's
+     * IRUNHPFB row while LP was within 6% of IRUNLPFB, and P ~ V^2 makes an
+     * over-volt the prime suspect -- so print the boost this port computes and
+     * the trim the silicon is actually running.  The plan is built on the FIRST
+     * HP request, so run `freq 250` before expecting numbers here. */
+    SHELL_PRINTF("  VDDF trim   applied=0x%02x (live MCUCTRL.VREFGEN4"
+                 ".TVRGFVREFTRIM)\n", (unsigned)p.vddf_applied);
+    if (p.vddf_plan_ok) {
+        SHELL_PRINTF("    plan      ps5=0x%02x ps13=0x%02x (raw) -> lp=0x%02x "
+                     "hp=0x%02x (boosted%s)\n",
+                     (unsigned)p.vddf_ps5_raw, (unsigned)p.vddf_ps13_raw,
+                     (unsigned)p.vddf_lp, (unsigned)p.vddf_hp,
+                     p.vddf_clamped ? ", CLAMPED at 0x7F" : "");
+        SHELL_PRINTF("    boost     %lu.%lu mV -> %u codes  (L=0x%08lx "
+                     "E=0x%08lx)\n",
+                     (unsigned long)(p.vddf_mv_x10 / 10u),
+                     (unsigned long)(p.vddf_mv_x10 % 10u),
+                     (unsigned)p.vddf_boost_codes,
+                     (unsigned long)p.vddf_ltrim,
+                     (unsigned long)p.vddf_etrim);
+        /* Plain %u only: SHELL_PRINTF's lightweight formatter has no %+d (it
+         * printed the format string verbatim), and no %p either. */
+        if (p.vddf_hp == p.vddf_ps13_raw) {
+            SHELL_PRINTF("    -> HP runs the FACTORY state-13 trim exactly "
+                         "(no boost applied)\n");
+        } else {
+            SHELL_PRINTF("    -> HP runs 0x%02x vs factory 0x%02x = %u codes "
+                         "above\n", (unsigned)p.vddf_hp,
+                         (unsigned)p.vddf_ps13_raw,
+                         (unsigned)(p.vddf_hp - p.vddf_ps13_raw));
+        }
+    } else {
+        SHELL_PRINTF("    plan      not computed yet -- run `freq 250` first\n");
+    }
+    /* Raw regulator/buck state, for diffing LP vs HP from the host.  Raw hex
+     * on purpose: interpretation belongs to the analysis, and a firmware
+     * formatter that decodes fields is a second place for a transcription bug
+     * to hide.  Reads only. */
+    SHELL_PRINTF("  REGS vrefgen2=%08lx vrefgen3=%08lx vrefgen4=%08lx\n",
+                 (unsigned long)p.r_vrefgen2,
+                 (unsigned long)p.r_vrefgen3,
+                 (unsigned long)p.r_vrefgen4);
+    SHELL_PRINTF("       ldoreg1=%08lx ldoreg2=%08lx vrctrl=%08lx d2a=%08lx\n",
+                 (unsigned long)p.r_ldoreg1,
+                 (unsigned long)p.r_ldoreg2,
+                 (unsigned long)p.r_vrctrl,
+                 (unsigned long)p.r_d2aspare);
+    SHELL_PRINTF("       sb0=%08lx sb2=%08lx sb4=%08lx sb6=%08lx sb7=%08lx "
+                 "sb15=%08lx\n",
+                 (unsigned long)p.r_sb[0], (unsigned long)p.r_sb[1],
+                 (unsigned long)p.r_sb[2], (unsigned long)p.r_sb[3],
+                 (unsigned long)p.r_sb[4], (unsigned long)p.r_sb[5]);
     SHELL_PRINTF("  POWERSTATE  trim table (INFO1 0x970..):\n");
     for (i = 0u; i < 20u; i += 4u) {
         SHELL_PRINTF("    [%2u] %08lx %08lx %08lx %08lx\n", i,

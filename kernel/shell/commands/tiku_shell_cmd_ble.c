@@ -21,6 +21,8 @@
 #include <hal/tiku_cpu.h>                      /* tiku_cpu_idle_hook (pump sleep) */
 #include <arch/ambiq/tiku_em9305.h>
 #include <arch/ambiq/tiku_ble_uart.h>
+#include <arch/ambiq/tiku_gpio_arch.h>        /* EN-strap forensics (ble en)   */
+#include <arch/ambiq/tiku_device_select.h>    /* TIKU_BOARD_EM9305_EN_PIN      */
 #include <string.h>
 
 /** Ctrl+C / ETX -- stops an interactive BLE session. */
@@ -227,6 +229,20 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
     tiku_em9305_probe_t p;
     int rc;
     uint16_t i;
+
+    /* "ble en 0|1" -- drive the EM9305 EN strap alone, nothing else.
+     * Power forensics (experiment 2/3 follow-up): EN low = radio hard-off,
+     * EN high = radio boots its ROM and idles unattended.  The rail delta
+     * between the two IS the radio's idle draw on the measured supply --
+     * settled by meter, not by datasheet argument. */
+    if (argc >= 3u && strcmp(argv[1], "en") == 0) {
+        uint8_t v = (argv[2][0] == '1') ? 1u : 0u;
+        tiku_ambiq_gpio_init_output(TIKU_BOARD_EM9305_EN_PIN);
+        tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_EN_PIN, v);
+        SHELL_PRINTF("ble: EN (pad %u) -> %u\n",
+                     (unsigned)TIKU_BOARD_EM9305_EN_PIN, (unsigned)v);
+        return;
+    }
 
     /* "ble uart [name]" -- connectable serial-over-GATT session (M3). */
     if (argc >= 2u && strcmp(argv[1], "uart") == 0) {

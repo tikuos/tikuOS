@@ -24,11 +24,27 @@
 
 #include "tiku_simd.h"
 
+/*
+ * TIKU_SIMD_MVE normally follows the target's own capability, and that is the
+ * only thing production builds should do.  It is left OVERRIDABLE for exactly
+ * one purpose: a measurement translation unit can force it to 0 and include
+ * this file a second time under renamed symbols, producing a scalar twin of
+ * every kernel *from this same source* in one firmware image.  That matters
+ * because the alternative -- two firmware images -- would compare across builds,
+ * and cross-build comparison on this part carries a ~3 % variance plus a
+ * loop-alignment hazard that has already manufactured one fake result.
+ * See arch/ambiq/tiku_simd_power.c.
+ */
+#ifndef TIKU_SIMD_MVE
 #if defined(__ARM_FEATURE_MVE) && (__ARM_FEATURE_MVE & 1)
 #define TIKU_SIMD_MVE 1
-#include <arm_mve.h>
 #else
 #define TIKU_SIMD_MVE 0
+#endif
+#endif
+
+#if TIKU_SIMD_MVE
+#include <arm_mve.h>
 #endif
 
 int

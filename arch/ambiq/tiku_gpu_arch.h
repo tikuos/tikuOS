@@ -40,12 +40,37 @@ typedef enum {
     TIKU_GPU_ERR_PARAM   = -4,   /**< invalid argument (e.g. non-power-of-two dim)*/
 } tiku_gpu_err_t;
 
-/** GFXPERFREQ performance-mode knob (PWRCTRL->GFXPERFREQ). */
+/**
+ * @brief GFXPERFREQ performance-mode knob (PWRCTRL->GFXPERFREQ).
+ *
+ * FOUR modes, not three -- HP3 was missing here until the power experiments
+ * needed it, and it is the one the SDK's deprecated "HIGH_PERFORMANCE" alias
+ * actually names.  Two of these run off HFRC and two off HFRC2, and only HP3
+ * moves the GFX domain onto the VDDF rail (see tiku_gpu_perf_needs_vddf).
+ */
 typedef enum {
-    TIKU_GPU_PERF_LP_96MHZ   = 0,   /**< low-power, 96 MHz (bring-up default)   */
-    TIKU_GPU_PERF_HP1_192MHZ = 1,   /**< high-performance 1, 192 MHz            */
-    TIKU_GPU_PERF_HP2_125MHZ = 2,   /**< high-performance 2, 125 MHz            */
+    TIKU_GPU_PERF_LP_96MHZ   = 0,   /**< HFRC   96 MHz, VDDC (bring-up default) */
+    TIKU_GPU_PERF_HP1_192MHZ = 1,   /**< HFRC  192 MHz, VDDC                    */
+    TIKU_GPU_PERF_HP2_125MHZ = 2,   /**< HFRC2 125 MHz, VDDC                    */
+    TIKU_GPU_PERF_HP3_250MHZ = 3,   /**< HFRC2 250 MHz, VDDF -- needs SIMOBUCK  */
 } tiku_gpu_perf_t;
+
+/**
+ * @brief Non-zero if @p perf requires the VDDF rail (and therefore the buck).
+ *
+ * Only HP3 does.  Transcribed from the SDK's am_hal_pwrctrl_gpu_mode_select,
+ * which compares against HIGH_PERFORMANCE == HFRC2_HP3: HP1 (192 MHz) and HP2
+ * (125 MHz) stay on VDDC despite being "high performance" by name.  Guessing
+ * that all three HP modes need VDDF would have over-volted two of them.
+ */
+int tiku_gpu_perf_needs_vddf(tiku_gpu_perf_t perf);
+
+/** @brief Nominal GFX clock in Hz for @p perf (for work-rate denominators). */
+unsigned long tiku_gpu_perf_hz(tiku_gpu_perf_t perf);
+
+/** @brief Live GFXPERFREQ / GFXPWRSWSEL, for a probe to report actual state. */
+uint32_t tiku_gpu_perf_get(void);
+int      tiku_gpu_rail_is_vddf(void);
 
 /**
  * @brief Bring-up forensics snapshot.
@@ -70,12 +95,33 @@ typedef struct {
  * wait DEVPWRSTATUS.PWRSTGFX, GFXPERFREQ select, SYSCLEAR, wait-idle, NVIC
  * enable. All waits are spin-bounded and fail closed.
  *
- * @param perf  Performance mode (LP 96 MHz for bring-up).
+ * ORDERING IS A HARDWARE REQUIREMENT, not a style choice.  Datasheet 4.3.2:
+ * "switching of operating mode for GFX must only be done when the GFX device is
+ * powered OFF", and an HP transition must set GFXPWRSWSEL.GFXVDDSEL *before*
+ * GFXPERFREQ.  The first cut of this function powered the domain up and only
+ * then wrote GFXPERFREQ, and never wrote GFXPWRSWSEL at all -- benign at LP
+ * (both are reset defaults) but wrong for every other mode.  So: mode and rail
+ * are programmed with the domain DOWN, then the domain comes up.
+ *
+ * @param perf  Performance mode.  HP3 additionally requires the SIMO buck to be
+ *              ACT (the SDK refuses otherwise) -- so does this, with ERR_POWER.
  * @return TIKU_GPU_OK, or ERR_POWER / ERR_ID / ERR_TIMEOUT.
  */
 tiku_gpu_err_t tiku_gpu_init(tiku_gpu_perf_t perf);
 
-/** @brief Disable the NVIC line and power the GFX domain back off. */
+/**
+ * @brief Disable the NVIC line and power the GFX domain back off.
+ *
+ * CALL THIS AS SOON AS THE WORK IS DONE.  A powered-but-idle GFX domain costs
+ * ~6.4 mA -- more than twice this SoC's entire idle current -- and that rent is
+ * charged for every microsecond the domain is up, whether or not the GPU is
+ * drawing.  Measured: the rail returns to the CPU-only baseline within a few uA
+ * afterwards, so releasing is clean and re-init is cheap relative to the rent.
+ *
+ * The lifecycle a caller should follow is init -> batch -> deinit, not
+ * init-once-at-boot.  There is deliberately no idle timeout inside the driver:
+ * only the caller knows whether another job is coming.
+ */
 void tiku_gpu_deinit(void);
 
 /** @brief 1 if DEVPWRSTATUS.PWRSTGFX is set (domain powered). */
@@ -291,6 +337,23 @@ tiku_gpu_err_t tiku_gpu_fill_circle(const tiku_gpu_surface_t *dst,
  * Built with tiku_gpu_cl_fill(), submitted asynchronously with
  * tiku_gpu_submit(), and awaited (CPU asleep) with tiku_gpu_wait(). @p buf
  * MUST be in SSRAM (the GPU reads it as a bus master) and 32-byte aligned.
+ *
+ * PUT MANY DRAWS IN ONE LIST.  cl_fill() appends (24 words per draw), so a list
+ * sized 24*N + 8 words carries N draws for one submit and one wake.  This is not
+ * a micro-optimisation -- it is the only power lever this GPU has, because its
+ * ~6.4 mA standing cost is architectural and no register reduces it.  The lever
+ * is therefore time-powered, and batching is what shortens it.  Measured, solid
+ * fill of a 256x256 RGBA surface, energy per byte referenced to the GPU-off
+ * rail (experiment 2 / P3, 2026-07-28):
+ *
+ *     one draw per list   95 MB/s   52.6 pJ/B   1458 wakes  <- the anti-pattern
+ *     4 draws per list   218 MB/s   27.9 pJ/B    832 wakes
+ *     16 draws per list  321 MB/s   21.7 pJ/B    307 wakes
+ *
+ * One draw per list is worth exactly NOTHING over a blocking loop (52.6 vs
+ * 52.5 pJ/B): the CPU sleeps, but rebuilding and resubmitting a list per draw
+ * costs the throughput back, so the "async saving" is a wash.  Async pays only
+ * when batched.
  */
 typedef struct {
     uint32_t *buf;         /**< command buffer (SSRAM, 32-byte aligned)       */
@@ -405,6 +468,24 @@ tiku_gpu_err_t tiku_gpu_scale_const(const tiku_gpu_surface_t *dst,
  * across the full surface: the hardware's nibble-swapped palette addressing
  * is inverted by a shadow permutation, and a zero-area priming draw absorbs
  * the first-draw-after-init missample (both silicon-calibrated).
+ *
+ * @warning KNOWN DEFECT, found by experiment 2 (GPU power), 2026-07-27, NOT YET
+ * FIXED.  This call leaves pipeline state that later ops assume is clean:
+ *   - a 16x MatMul SCALE MATRIX (gpu_load_matrix(16.0f, ...)) which
+ *     tiku_gpu_fill does not reset -- only the command-list path bypasses MMUL.
+ *     A blocking fill after a lut therefore draws into the wrong region and
+ *     leaves the surface's sampled pixels untouched while reporting SUCCESS:
+ *     measured, a 390-op fill did not change the destination checksum at all.
+ *   - DRAWCODEPTR at the LUT entry point and TEX2 bound to the shadow palette.
+ *   - state that stops ASYNC command lists completing: after a lut,
+ *     tiku_gpu_submit/tiku_gpu_wait never signals (0 completion IRQs) where the
+ *     same sequence does 1824 ops from a clean start.
+ * The only proven recovery is a GFX power-cycle (tiku_gpu_deinit +
+ * tiku_gpu_init), because gpu_processor_init() reloads the fill shader, resets
+ * the CL processor and clears INTERRUPTCTRL.  Until fixed, treat
+ * tiku_gpu_lut_apply as TERMINAL for a GPU session: re-init before any further
+ * fill, blit or async submission.  Diagnosis:
+ * experiments/power/apollo510b/experiment2/results.md.
  */
 tiku_gpu_err_t tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst,
                                   const tiku_gpu_surface_t *index,
