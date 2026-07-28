@@ -688,7 +688,14 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             }
             rc = tiku_emmc_write_blocks(lba, 1u, wr, 0);
             if (rc != TIKU_EMMC_OK) {
-                SHELL_PRINTF("emmc gate: write %s\n", en[rc]);
+                uint32_t e = tiku_emmc_last_error();
+                SHELL_PRINTF("emmc gate: write %s  intstat %08lx"
+                             "%s%s%s%s%s\n", en[rc], (unsigned long)e,
+                             (e & (1u<<16)) ? " CMD-TIMEOUT" : "",
+                             (e & (1u<<17)) ? " CMD-CRC" : "",
+                             (e & (1u<<19)) ? " CMD-INDEX" : "",
+                             (e & (1u<<20)) ? " DATA-TIMEOUT" : "",
+                             (e & (1u<<21)) ? " DATA-CRC" : "");
                 return;
             }
             for (i = 0u; i < sizeof rd; i++) { rd[i] = 0u; }
@@ -715,6 +722,15 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             tiku_emmc_set_trace((void (*)(const char *))0);
             if (rc != TIKU_EMMC_OK) {
                 uint32_t e = tiku_emmc_last_error();
+                /* Show whatever identity WAS collected before the failure:
+                 * a partial ladder still proves how far the card answered. */
+                (void)tiku_emmc_read_id(&id);
+                if (id.mfr_id != 0u) {
+                    SHELL_PRINTF("  (partial) mfr %02x product '%s' serial"
+                                 " %08lx  made %u/%u\n", id.mfr_id,
+                                 id.product, (unsigned long)id.serial,
+                                 id.mfg_month, id.mfg_year);
+                }
                 SHELL_PRINTF("emmc init: %s  intstat %08lx\n", en[rc],
                              (unsigned long)e);
                 if (e) {

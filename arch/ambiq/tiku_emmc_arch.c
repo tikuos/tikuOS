@@ -156,6 +156,10 @@ uint32_t tiku_emmc_scratch_lba(void)
 #define EMMC_CMD_SPINS   20000u   /* x 10 us = 200 ms per command            */
 #define EMMC_DATA_SPINS  50000u   /* x 10 us = 500 ms per block phase        */
 
+static tiku_emmc_err_t emmc_cmd_x(uint8_t idx, uint32_t arg, unsigned resp_type,
+                                  int crc, int idxchk, int data,
+                                  uint32_t xfer_mode, uint32_t *resp);
+
 /**
  * @brief Issue one MMC command and collect its response.
  *
@@ -170,7 +174,29 @@ uint32_t tiku_emmc_scratch_lba(void)
 static tiku_emmc_err_t emmc_cmd(uint8_t idx, uint32_t arg, unsigned resp_type,
                                 int crc, int idxchk, int data, uint32_t *resp)
 {
-    uint32_t xfer = 0u;
+    return emmc_cmd_x(idx, arg, resp_type, crc, idxchk, data, 0u, resp);
+}
+
+/**
+ * @brief The full form: transfer-mode bits travel WITH the command.
+ *
+ * TRANSFER is one 32-bit register holding both the transfer-mode fields
+ * (direction, block-count enable, DMA) in its low half and the command
+ * fields in its high half, and writing it is what STARTS the command.  So
+ * the mode bits cannot be programmed in a separate earlier write -- the
+ * command write erases them.  That is exactly what happened here: the
+ * direction bit was set, then zeroed a microsecond later by the command,
+ * so the host sat waiting to be given write data while this driver sat
+ * waiting to be handed read data.  Neither timed out on an error, because
+ * nothing was wrong -- they were simply facing opposite ways.
+ *
+ * @param xfer_mode extra low-half bits (DXFERDIRSEL, BLKCNTEN, ...)
+ */
+static tiku_emmc_err_t emmc_cmd_x(uint8_t idx, uint32_t arg, unsigned resp_type,
+                                  int crc, int idxchk, int data,
+                                  uint32_t xfer_mode, uint32_t *resp)
+{
+    uint32_t xfer = xfer_mode;
     uint32_t spins;
 
     /* The card owns the bus until it says otherwise: never issue a command
@@ -527,8 +553,15 @@ tiku_emmc_err_t tiku_emmc_init(void)
         s_id.rev     = cid[9];
         s_id.serial  = ((uint32_t)cid[10] << 24) | ((uint32_t)cid[11] << 16) |
                        ((uint32_t)cid[12] << 8)  |  (uint32_t)cid[13];
+        /* The year's BASE depends on EXT_CSD_REV, which is not read until
+         * several rungs later -- so keep the raw nibble now and resolve it
+         * at the end.  (Decoding it as 1997+n unconditionally printed "made
+         * 11/2001" for a card whose EXT_CSD revision did not exist until
+         * years after that: a plausible-looking field that is obviously
+         * wrong once you look at it, which is the kind this port does not
+         * ship.) */
         s_id.mfg_month = (uint8_t)(cid[14] & 0x0Fu);
-        s_id.mfg_year  = (uint16_t)(1997u + ((cid[14] >> 4) & 0x0Fu));
+        s_id.mfg_year  = (uint16_t)((cid[14] >> 4) & 0x0Fu);   /* raw */
     }
 
     trace("cmd3-rca");
@@ -558,9 +591,8 @@ tiku_emmc_err_t tiku_emmc_init(void)
     {
         static uint8_t ext[TIKU_EMMC_BLOCK_SIZE];
         SDIO0->BLOCK = TIKU_EMMC_BLOCK_SIZE;   /* one block of 512          */
-        SDIO0->TRANSFER_b.DXFERDIRSEL = 1u;    /* card -> host              */
-        SDIO0->TRANSFER_b.BLKCNTEN    = 0u;
-        rc = emmc_cmd(MMC_SEND_EXT_CSD, 0u, RESP_48, 1, 1, 1, resp);
+        rc = emmc_cmd_x(MMC_SEND_EXT_CSD, 0u, RESP_48, 1, 1, 1,
+                        SDIO0_TRANSFER_DXFERDIRSEL_Msk, resp);
         if (rc == TIKU_EMMC_OK) { rc = emmc_read_buffer(ext); }
         if (rc == TIKU_EMMC_OK) { rc = emmc_wait_xfer(); }
         if (rc == TIKU_EMMC_OK) {
@@ -570,6 +602,11 @@ tiku_emmc_err_t tiku_emmc_init(void)
             s_id.ext_csd_rev = ext[192];
         }
     }
+    /* Resolve the manufacture year now that EXT_CSD_REV is known: the MMC
+     * spec moved the epoch from 1997 to 2013 at EXT_CSD_REV >= 4. */
+    s_id.mfg_year = (uint16_t)((s_id.ext_csd_rev >= 4u ? 2013u : 1997u)
+                               + s_id.mfg_year);
+
     s_id.sec_count = s_sec_count;
     s_id.bus_width = s_bus_width;
     s_id.clock_hz  = s_clock_hz;
@@ -622,9 +659,8 @@ tiku_emmc_err_t tiku_emmc_read_blocks(uint32_t lba, uint32_t n_blk, void *buf)
      * fast one.  E3 adds the multi-block and DMA paths. */
     while (n_blk-- != 0u) {
         SDIO0->BLOCK = TIKU_EMMC_BLOCK_SIZE;
-        SDIO0->TRANSFER_b.DXFERDIRSEL = 1u;
-        SDIO0->TRANSFER_b.BLKCNTEN    = 0u;
-        rc = emmc_cmd(MMC_READ_SINGLE, lba, RESP_48, 1, 1, 1, resp);
+        rc = emmc_cmd_x(MMC_READ_SINGLE, lba, RESP_48, 1, 1, 1,
+                        SDIO0_TRANSFER_DXFERDIRSEL_Msk, resp);
         if (rc != TIKU_EMMC_OK) { return rc; }
         rc = emmc_read_buffer(dst);
         if (rc != TIKU_EMMC_OK) { return rc; }
@@ -658,9 +694,8 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
 
     while (n_blk-- != 0u) {
         SDIO0->BLOCK = TIKU_EMMC_BLOCK_SIZE;
-        SDIO0->TRANSFER_b.DXFERDIRSEL = 0u;    /* host -> card              */
-        SDIO0->TRANSFER_b.BLKCNTEN    = 0u;
-        rc = emmc_cmd(MMC_WRITE_SINGLE, lba, RESP_48, 1, 1, 1, resp);
+        rc = emmc_cmd_x(MMC_WRITE_SINGLE, lba, RESP_48, 1, 1, 1,
+                        0u /* DXFERDIRSEL clear = host -> card */, resp);
         if (rc != TIKU_EMMC_OK) { return rc; }
         rc = emmc_write_buffer(src);
         if (rc != TIKU_EMMC_OK) { return rc; }
