@@ -1452,6 +1452,16 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # same reasoning as the PSRAM: the -D is a capability macro so the shell
 # command can gate on it regardless of include order.
 ifeq ($(TIKU_DRV_NOR_ENABLE),1)
+# U12 is fitted on the Apollo510 EVB (green) and NOT on the Apollo510B (Blue):
+# the 510B BSP defines no MSPI1 chip select and comments out its pinconfig,
+# and the part is absent from the board.  Building it for the Blue board is
+# allowed (it compiles and reports honestly) but warned about, because a
+# silent bus there is expected, not a bug to chase.
+ifneq ($(MCU),apollo510)
+$(warning TIKU_DRV_NOR_ENABLE=1 with MCU=$(MCU): U12 NOR is fitted on the \
+Apollo510 EVB (MCU=apollo510) only.  On other boards the device will not \
+answer -- see kintsugi/mspi-nor-plan.md.)
+endif
 SRCS += arch/ambiq/tiku_nor_arch.c
 CFLAGS += -DTIKU_DRV_NOR_ENABLE=1
 endif

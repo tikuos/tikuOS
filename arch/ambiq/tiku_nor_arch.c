@@ -108,11 +108,14 @@
  *                                         the CE pinconfig entirely
  *   load sw    GP208                      none
  *
- * Build for the green board with -DTIKU_BOARD_APOLLO510_EVB=1 to get the
- * pins that actually reach a device.  The Blue defaults are kept so the
- * driver still compiles there (and reports honestly that nothing answers).
+ * Nothing to pass by hand: the Makefile already defines TIKU_BOARD_APOLLO510_EVB
+ * for MCU=apollo510 and TIKU_BOARD_APOLLO510B_EVB for MCU=apollo510b, so the
+ * right pins follow from the target.  The Blue variant is kept compiling (and
+ * reporting honestly that nothing answers) rather than #error'd, because a
+ * driver that vanishes on one board is a driver whose absence surprises
+ * someone later.
  */
-#if (TIKU_BOARD_APOLLO510_EVB + 0)
+#if defined(TIKU_BOARD_APOLLO510_EVB)
 #define NOR_PAD_RST     54u    /* green board: schematic + its own BSP agree */
 #define NOR_PAD_LSEN   208u    /* green board: real load switch, real off    */
 #else
