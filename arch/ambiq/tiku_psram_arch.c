@@ -278,11 +278,20 @@ static tiku_psram_err_t psram_pio(uint16_t instr, uint32_t addr,
     ctrl |= MSPI0_CTRL_SENDA_Msk;      /* octal DDR always sends an address */
     ctrl |= MSPI0_CTRL_START_Msk;
     if (is_read) {
-        /* RX direction is field value 1; a read needs the bus turned around
-         * and the write-latency count applied (vendor sets both). */
-        ctrl |= (1u << MSPI0_CTRL_TXRX_Pos) & MSPI0_CTRL_TXRX_Msk;
+        /* TXRX = 0 IS RECEIVE.  Bug #8 of this bring-up and the root cause
+         * of both terminal symptoms: the vendor enum is AM_HAL_MSPI_RX = 0,
+         * AM_HAL_MSPI_TX = 1, and this driver had it inverted -- so every
+         * "read" was issued as a TRANSMIT (completes instantly, captures
+         * nothing: the eternally-empty RX FIFO) and every "write" as a
+         * RECEIVE (in DQS mode, waits forever for a strobe the device was
+         * never asked to send: the eternal BUSY stall).  Found by halting
+         * the vendor's own example after its reset command and seeing
+         * CTRL.TXRX = 1 on a WRITE.  A read needs the bus turned around and
+         * the write-latency count applied (vendor sets both). */
         ctrl |= MSPI0_CTRL_ENTURN_Msk;
         ctrl |= MSPI0_CTRL_ENWLAT_Msk;
+    } else {
+        ctrl |= (1u << MSPI0_CTRL_TXRX_Pos) & MSPI0_CTRL_TXRX_Msk;
     }
 
     /* NO FIFORESET HERE, deliberately, and it was tried: pulsing FIFORESET
@@ -385,6 +394,24 @@ static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
 {
     uint32_t v;
 
+    /* THE VENDOR'S CLKGEN.MISC STATE, replicated.  Breakpointing the
+     * vendor's own example at its ID-read moment (the experiment that ended
+     * this hunt) showed its DEV0* configuration essentially identical to
+     * ours -- but CLKGEN.MISC = 0x08FBBFC1 against our 0x08000021.  The
+     * difference is the clock-gate-enable + power-on-clock chicken-bit block
+     * that am_hal_pwrctrl_low_power_init() writes at vendor boot and our
+     * bare-metal boot never has.  Replicated verbatim: bits 6-13 and 15-17
+     * (PWRONCLKEN family), 19-23 (clock-gate enables, including the APB DMA
+     * CPU clock gate), AXIXACLKENOVRRIDE (14) explicitly cleared, exactly as
+     * the vendor leaves them. */
+    {
+        uint32_t misc = CLKGEN->MISC;
+        misc |= 0x00FBBFC0u;
+        misc &= ~(1u << 14);
+        CLKGEN->MISC = misc;
+        __DSB();
+    }
+
     /* Force the oscillator block this source comes from.  Both are left on
      * afterwards: releasing them belongs to the M4 lifecycle verb, together
      * with the controller domain, not to a helper that only knows it needs a
@@ -483,16 +510,26 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DEV0BOUNDARY_b.DMABOUND0     = MSPI0_DEV0BOUNDARY_DMABOUND0_BREAK1K;
     MSPI0->DEV0BOUNDARY_b.DMATIMELIMIT0 = 40u;
 
-    /* Step 12: DQS receive.  RXDQSDELAY 16 is the vendor's mid-scale start;
-     * M2's timing scan is precisely a sweep of this field. */
-    /* DQS off is a DIAGNOSTIC mode, not a shipping one: without the strobe
-     * the controller times the read window itself (turnaround doubled, the
-     * vendor's USE_NON_DQS_MODE arithmetic), which is slower but does not
-     * depend on the device returning a strobe.  It separates "the controller
-     * cannot clock the bus" from "the device is not answering". */
+    /* Step 12: DQS receive -- delay-line taps FROM SILICON, NOT FROM THE SDK
+     * SOURCE.  The device driver's struct says TxDQSDelay=0 / RxDQSDelay=16,
+     * but the vendor's own prebuilt example, halted on THIS board after a
+     * successful bring-up, reads back DEV0DDR = 0x4945: TXDQSDELAY = 10,
+     * RXDQSDELAY = 18.  The datasheet (16.4.3) says TX taps delay the output
+     * SCLK relative to output data -- with 0 taps the clock edge lands on the
+     * data transition at the device, which matches the one-edge-off TX the
+     * bit-bang loopback measured.  Struct initialisers have lied twice now
+     * (TURNAROUND was the other); registers read back from working silicon
+     * do not.
+     *
+     * DQS off remains a DIAGNOSTIC mode only: the datasheet's timing chapters
+     * define DDR receive solely as "DDR with DQS", and the 176-cell capture
+     * sweep confirmed non-DQS DDR never captures on this part. */
     MSPI0->DEV0DDR_b.ENABLEDQS0       = s_nodqs ? 0u : 1u;
     MSPI0->DEV0DDR_b.DQSSYNCNEG0      = 0u;
     MSPI0->DEV0DDR_b.ENABLEFINEDELAY0 = 0u;
+    /* Octal-phase values from the breakpoint dump (DEV0DDR = 0x4005 at the
+     * vendor's own ID read): TX 0, RX 16.  The 10/18 pair seen in the final
+     * dump belongs to the later hex phase. */
     MSPI0->DEV0DDR_b.TXDQSDELAY0      = 0u;
     MSPI0->DEV0DDR_b.RXDQSDELAY0      = 16u;
     MSPI0->DEV0DDR_b.RXDQSDELAYNEG0   = 0u;
