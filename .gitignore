@@ -57,6 +57,12 @@ texput.log
 # Vendored third-party libraries / scratch (not part of the upstream tree)
 temp/
 
+# Local hardware reference library: vendor datasheets, board schematics and
+# hardware user guides.  Not our work, several are redistribution-restricted,
+# and they are large -- see hardware/README.md for the index and for the
+# wrong-board trap it exists to prevent.
+hardware/
+
 # Scratch demos — not yet promoted into examples/. Will move once
 # stable and the dependencies (ARP cache, DHCP wire-up) are public.
 demos/

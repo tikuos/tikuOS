@@ -36,7 +36,9 @@
  *   devices/am_devices_mspi_is25wx064.{c,h}   device protocol
  *   mcu/apollo510/hal/mcu/am_hal_mspi.c       controller (already transcribed)
  *   boards/apollo510b_evb/bsp/am_bsp_pins.h   pad assignments
- *   AP510EVB_Rev2.2_Schematic.pdf             THE ARBITER -- see below
+ *   hardware/ambiq/boards/AP510BEVB_Rev2.0_*.pdf   OUR board's schematic
+ *   (an earlier version of this file cited AP510EVB_Rev2.2, which is a
+ *    DIFFERENT board -- see the correction in table 0)
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -75,7 +77,9 @@
  *
  * An earlier version of this table asserted RSTn = GP54 and a load switch on
  * GP208, and called the BSP "stale for this board revision".  Both values came
- * from `AP510EVB_Rev2.2_Schematic.pdf` -- which is the schematic for the
+ * from `AP510EVB_Rev2.2_Schematic.pdf` (now filed under
+ * hardware/ambiq/boards/ as the labelled counter-example) -- which is the
+ * schematic for the
  * **Apollo510 EVB, not the Apollo510B (Blue) EVB we actually have**.  Its
  * title block says "Apollo510 EVB" and its SoC is AP510NFA-CBR; the file name
  * says AP510EVB with no B.  The proof is exact: the NON-B board's BSP says
