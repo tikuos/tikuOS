@@ -630,9 +630,13 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DEV0CFG1_b.SCLKRXHALT0 = 0u;
     MSPI0->DEV0CFG1_b.RXCAPEXT0  = 0u;
 
-    /* Step 14: FIFO threshold (high-speed class; DMA thresholds belong to
-     * the M3 DMA path, which owns the transfer-control buffer). */
+    /* Step 14: FIFO threshold + DMA burst sizing.  DMABCOUNT was missing
+     * from the first DMA bring-up (the vendor sets it only on its CQ path);
+     * 32 is its value for every speed class. */
     MSPI0->THRESHOLD_b.RXTHRESH = 30u;
+    MSPI0->DMABCOUNT            = 32u;
+    MSPI0->DMATHRESH_b.DMATXTHRESH = 32u - 4u;
+    MSPI0->DMATHRESH_b.DMARXTHRESH = 8u;
 
     /* Step 15: we are not bridging an IOM through this controller.
      *
@@ -1064,7 +1068,7 @@ int tiku_psram_xip_enabled(void)
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device)
 {
-    uint32_t spins = 4000000u;
+    uint32_t spins = 500000u;   /* x20 us = 10 s ceiling */
 
     if (!s_up)              { return TIKU_PSRAM_ERR_POWER; }
     if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_PSRAM_ERR_ARG; }
@@ -1081,15 +1085,138 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
         ((to_device ? 1u : 0u) << MSPI0_DMACFG_DMADIR_Pos);
     __DSB();
 
+    /* Backoff poll -- same reason as the CQ wait: the tight spin WAS the
+     * bandwidth plateau. */
     while (((MSPI0->DMASTAT &
              (MSPI0_DMASTAT_DMACPL_Msk | MSPI0_DMASTAT_DMAERR_Msk)) == 0u)
-           && --spins != 0u) { }
+           && --spins != 0u) {
+        tiku_cpu_ambiq_delay_us(20u);
+    }
     {
         uint32_t st = MSPI0->DMASTAT;
         MSPI0->DMACFG  = 0u;
         MSPI0->DMASTAT = 0u;
         if (spins == 0u)                        { return TIKU_PSRAM_ERR_TIMEOUT; }
         if ((st & MSPI0_DMASTAT_DMAERR_Msk))    { return TIKU_PSRAM_ERR_TIMEOUT; }
+    }
+    return TIKU_PSRAM_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+/* M3.5 -- COMMAND QUEUE: hardware-chained DMA segments                      */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * TABLE 3 -- THE CQ ENTRY (transcribed from am_hal_mspi.c's
+ * am_hal_mspi_cq_dma_entry_t and the am_hal_cmdq engine):
+ *
+ * The CQ hardware fetches 8-byte {register-address, value} pairs from SRAM
+ * at CQADDR and performs each as a register write.  Two special behaviours
+ * make chained DMA work with no CPU in the seams:
+ *
+ *   1. A write to DMACFG while a DMA is in progress STALLS THE ENGINE until
+ *      that DMA completes -- so the vendor's per-segment tail write of
+ *      DMAEN=0 is simultaneously the completion wait and the teardown, and
+ *      the next segment's writes follow with no software involvement.
+ *   2. CQPAUSE holds a condition mask evaluated against CQFLAGS; the mask
+ *      bit CQIDX ("CURIDX == ENDIDX") makes the engine pause exactly when
+ *      it runs out of posted work.  A queue-borne write to CQCURIDX is how
+ *      a block marks its own retirement.
+ *
+ * One segment, verbatim from the vendor (8 pairs, 64 bytes):
+ *      CQPAUSE    := pause mask (IDX)      DMATARGADDR := sram
+ *      CQPAUSE    := pause mask (IDX)      DMADEVADDR  := device addr
+ *      DMATOTCOUNT:= bytes                 DMACFG      := DIR|PRI|EN=3
+ *      DMACFG     := EN=0   <-- the stall  CQSETCLEAR  := 0
+ * and the block terminator: { CQCURIDX, n_segments }.
+ *
+ * WHY THIS EXISTS: plain DMA measured ~50 MB/s with a ~17 us per-kilobyte
+ * cost that is clock- and chunk-independent -- CPU-visible seams.  This
+ * engine is the vendor's only bulk path and removes every seam.
+ */
+
+#define CQ_PAIRS_PER_SEG   8u
+#define CQ_MAX_SEGS        66u
+/* 66 segs * 8 pairs + terminator, 8 B per pair */
+static uint32_t s_cq[(CQ_MAX_SEGS * CQ_PAIRS_PER_SEG + 1u) * 2u]
+    __attribute__((section(".ssram"), aligned(32)));
+
+#define CQ_PAUSE_IDX_MASK  0x4000u   /* CQFLAGS.CQIDX: pause when no work */
+
+tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
+                                    uint32_t total, uint32_t seg_bytes,
+                                    int to_device)
+{
+    uint32_t n_segs, i, w = 0u;
+    uint32_t spins = 200000u;   /* x50 us = 10 s ceiling */
+    uint8_t *sp = (uint8_t *)sram;
+
+    if (!s_up)                          { return TIKU_PSRAM_ERR_POWER; }
+    if (MSPI0->DEV0XIP_b.XIPEN0 != 0u)  { return TIKU_PSRAM_ERR_ARG; }
+    if (seg_bytes == 0u || (total % seg_bytes) != 0u ||
+        (seg_bytes & 3u) != 0u)         { return TIKU_PSRAM_ERR_ARG; }
+    n_segs = total / seg_bytes;
+    if (n_segs == 0u || n_segs > CQ_MAX_SEGS) { return TIKU_PSRAM_ERR_ARG; }
+
+    /* Build the queue: one vendor-shaped segment per chunk. */
+    for (i = 0u; i < n_segs; i++) {
+        uint32_t cfg_on =
+            ((to_device ? 1u : 0u) << MSPI0_DMACFG_DMADIR_Pos) |
+            ((uint32_t)MSPI0_DMACFG_DMAEN_EN << MSPI0_DMACFG_DMAEN_Pos);
+        s_cq[w++] = (uint32_t)&MSPI0->CQPAUSE;     s_cq[w++] = CQ_PAUSE_IDX_MASK;
+        s_cq[w++] = (uint32_t)&MSPI0->CQPAUSE;     s_cq[w++] = CQ_PAUSE_IDX_MASK;
+        s_cq[w++] = (uint32_t)&MSPI0->DMATARGADDR; s_cq[w++] =
+            (uint32_t)(uintptr_t)(sp + (uint64_t)i * seg_bytes);
+        s_cq[w++] = (uint32_t)&MSPI0->DMADEVADDR;  s_cq[w++] =
+            dev_addr + i * seg_bytes;
+        s_cq[w++] = (uint32_t)&MSPI0->DMATOTCOUNT; s_cq[w++] = seg_bytes;
+        s_cq[w++] = (uint32_t)&MSPI0->DMACFG;      s_cq[w++] = cfg_on;
+        /* The stall-until-done teardown -- behaviour 1 above. */
+        s_cq[w++] = (uint32_t)&MSPI0->DMACFG;      s_cq[w++] = 0u;
+        s_cq[w++] = (uint32_t)&MSPI0->CQSETCLEAR;  s_cq[w++] = 0u;
+    }
+    /* Terminator: retire the whole block -- behaviour 2 above. */
+    s_cq[w++] = (uint32_t)&MSPI0->CQCURIDX;        s_cq[w++] = n_segs;
+
+    /* The ENGINE reads these pairs as a bus master: clean them from the
+     * D-cache or it executes stale descriptors -- the GPU command-list
+     * lesson verbatim. */
+    tiku_cpu_dcache_clean(s_cq, w * 4u);
+    __DSB();
+
+    MSPI0->INTCLR   = 0xFFFFFFFFu;
+    MSPI0->CQCURIDX = 0u;
+    MSPI0->CQENDIDX = n_segs;              /* work available: IDX flag clear */
+    MSPI0->CQPAUSE  = CQ_PAUSE_IDX_MASK;   /* pause only when out of work    */
+    MSPI0->CQADDR   = (uint32_t)(uintptr_t)s_cq;
+    __DSB();
+    MSPI0->CQCFG    = (1u << MSPI0_CQCFG_CQEN_Pos)
+                    | (1u << MSPI0_CQCFG_CQPRI_Pos);
+    __DSB();
+
+    /* Done when the queue-borne CQCURIDX write lands AND the last DMA has
+     * been torn down.  POLL WITH BACKOFF: a tight spin on these registers is
+     * itself APB traffic into the very controller doing the work, and the
+     * plateau hunt found the smoking gun in its own hand -- throughput was
+     * invariant under clock, chunk, engine, DMATIMELIMIT and DMABOUND, i.e.
+     * under everything except the CPU hammering the register file during the
+     * transfer.  ~50 us between glances costs at most one glance of latency
+     * and takes the reader off the bus. */
+    while (((MSPI0->CQCURIDX & 0xFFu) != n_segs ||
+            (MSPI0->DMASTAT & MSPI0_DMASTAT_DMATIP_Msk) != 0u)
+           && --spins != 0u) {
+        tiku_cpu_ambiq_delay_us(50u);
+    }
+
+    {
+        uint32_t st = MSPI0->DMASTAT;
+        MSPI0->CQCFG   = 0u;               /* engine off between uses        */
+        MSPI0->DMACFG  = 0u;
+        MSPI0->DMASTAT = 0u;
+        if (spins == 0u) { return TIKU_PSRAM_ERR_TIMEOUT; }
+        if ((st & MSPI0_DMASTAT_DMAERR_Msk) != 0u) {
+            return TIKU_PSRAM_ERR_TIMEOUT;
+        }
     }
     return TIKU_PSRAM_OK;
 }
@@ -1326,6 +1453,65 @@ void tiku_psram_bench_run(void)
     }
     t1 = *cyccnt;
     bench_report("dma-write", BENCH_SPAN, t1 - t0, 1);
+
+    /* ---- leg 3b: CQ chained transfers -- the M3.5 measurement ----------- */
+    /* Same span, same verification style: the write leg re-lays the SAME
+     * inverted pattern (so leg 4's expected checksum stays true), the read
+     * leg is verified on its final tile. */
+    {
+        static const uint32_t cq_seg[2] = { 16384u, 65536u };
+        uint32_t c2;
+        for (c2 = 0u; c2 < 2u; c2++) {
+            uint32_t seg = cq_seg[c2];
+            uint32_t per_call = (seg == 16384u) ? (64u * 16384u)
+                                                : (16u * 65536u); /* 1 MB */
+            exact = 1;
+            (void)per_call;
+            for (i = 0u; i < BENCH_BUF; i++) {
+                s_bench_buf[i] = (uint8_t)~bench_pat(i % 16384u);
+            }
+            tiku_cpu_dcache_clean(s_bench_buf, BENCH_BUF);
+            /* Move the WHOLE span: BENCH_BUF per call, chained segments of
+             * @p seg inside each call.  (The first cut of this leg moved one
+             * buffer per outer step and divided the full span by its time --
+             * reporting 872 MB/s on a 384 MB/s wire.  Impossible numbers are
+             * bugs; the denominator must be bytes actually moved.) */
+            t0 = *cyccnt;
+            for (off = 0u; off < BENCH_SPAN; off += BENCH_BUF) {
+                if (tiku_psram_cq_xfer(off, s_bench_buf, BENCH_BUF,
+                        seg, 1) != TIKU_PSRAM_OK) { exact = 0; break; }
+                tiku_hang_checkin();
+            }
+            t1 = *cyccnt;
+            bench_report((c2 == 0u) ? "cq-wr16k" : "cq-wr64k",
+                         BENCH_SPAN, t1 - t0, exact);
+        }
+        /* CQ read: 1 MB in one call of 64 x 16 K segments into the 64 K
+         * buffer round-robin?  The engine writes tiles over each other in
+         * SRAM -- acceptable for a BANDWIDTH leg; verification reads the
+         * final tile only, like dma-read. */
+        exact = 1;
+        t0 = *cyccnt;
+        for (off = 0u; off < BENCH_SPAN; off += (64u * 16384u)) {
+            uint32_t k2;
+            for (k2 = 0u; k2 < 64u; k2 += 4u) {
+                if (tiku_psram_cq_xfer(off + k2 * 16384u, s_bench_buf,
+                        4u * 16384u, 16384u, 0) != TIKU_PSRAM_OK) {
+                    exact = 0; break;
+                }
+            }
+            tiku_hang_checkin();
+        }
+        t1 = *cyccnt;
+        tiku_cpu_dcache_invalidate(s_bench_buf, BENCH_BUF);
+        sum = 0u; expect = 0u;
+        for (i = 0u; i < BENCH_BUF; i++) {
+            sum    += s_bench_buf[i];
+            expect += (uint8_t)~bench_pat((i % 16384u));
+        }
+        if (sum != expect) { exact = 0; }
+        bench_report("cq-rd16k", BENCH_SPAN, t1 - t0, exact);
+    }
 
     /* ---- leg 4: XIP sequential READ (CPU streaming loads), checksummed -- */
     (void)tiku_psram_xip_enable(1);

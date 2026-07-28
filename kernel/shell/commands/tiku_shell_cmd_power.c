@@ -894,6 +894,29 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          errs2 ? "FAIL (refresh starved?)" : "bit-exact");
             return;
         }
+        if (argc >= 3 && streq(argv[2], "dbb") && argc >= 4) {
+            /* power psram dbb <code> -- DMA boundary A/B: 6=1K 7=2K 8=4K
+             * 9=8K 10=16K.  Longer bursts amortize the fixed per-row tax;
+             * the RISK is CE-low time vs the die's refresh (tCEM), which is
+             * exactly what the retain gate after each setting must clear. */
+            unsigned n5 = 0u; const char *q5 = argv[3];
+            while (*q5 >= '0' && *q5 <= '9') { n5 = n5*10u + (unsigned)(*q5++ - '0'); }
+            MSPI0->DEV0BOUNDARY_b.DMABOUND0 = n5;
+            SHELL_PRINTF("dbb: DMABOUND0 = %lu\n",
+                         (unsigned long)MSPI0->DEV0BOUNDARY_b.DMABOUND0);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "dtl") && argc >= 4) {
+            /* power psram dtl <n> -- runtime DMATIMELIMIT A/B (the per-KB
+             * plateau hunt).  Integrity gates (mem/retain) MUST follow any
+             * change before a number is believed. */
+            unsigned n4 = 0u; const char *q4 = argv[3];
+            while (*q4 >= '0' && *q4 <= '9') { n4 = n4*10u + (unsigned)(*q4++ - '0'); }
+            MSPI0->DEV0BOUNDARY_b.DMATIMELIMIT0 = n4;
+            SHELL_PRINTF("dtl: DMATIMELIMIT0 = %lu\n",
+                         (unsigned long)MSPI0->DEV0BOUNDARY_b.DMATIMELIMIT0);
+            return;
+        }
         if (argc >= 3 && streq(argv[2], "bench")) {
             /* power psram bench -- M3: DWT-timed bandwidth through each path.
              * Work is the denominator: bytes moved + checksum per leg. */

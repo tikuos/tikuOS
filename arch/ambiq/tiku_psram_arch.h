@@ -358,6 +358,18 @@ int tiku_psram_xip_enabled(void);
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device);
 
+/**
+ * @brief Hardware-chained DMA via the command queue (M3.5).
+ *
+ * Splits @p total into @p seg_bytes segments, builds the vendor-shaped
+ * descriptor list, and lets the CQ engine run every segment with no CPU in
+ * the seams.  Cache coherency of @p sram is the caller's job; XIP must be
+ * off.  total/seg_bytes <= 66 segments per call.
+ */
+tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
+                                    uint32_t total, uint32_t seg_bytes,
+                                    int to_device);
+
 /*---------------------------------------------------------------------------*/
 /* M4 -- lifecycle + the TIKU_MEM_PSRAM tier                                 */
 /*---------------------------------------------------------------------------*/
