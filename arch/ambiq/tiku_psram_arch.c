@@ -83,8 +83,16 @@
 #define PAD_OUTCFG_PUSHPULL (1u << 8)    /* OUTCFG[9:8] = push-pull         */
 #define PAD_NCEPOL_LOW      (0u << 22)   /* NCEPOL: active low              */
 
-/** Data/CLK/DQS: function select + drive strength, controller owns output. */
-#define PAD_CFG_MSPI_IO     (PAD_FNCSEL_MSPI0 | PAD_DS_0P5X)
+/** Data/CLK/DQS: function select + drive strength + INPUT ENABLE.
+ *
+ * The vendor BSP leaves INPEN clear on these pads and its driver works, so
+ * the dedicated-pad receive path presumably bypasses the GPIO input gate --
+ * but "presumably" has been wrong seven times in this file, the bit-bang
+ * probe demonstrated the GPIO input path DOES read these pins, and enabling
+ * the input buffer costs nothing.  Belt and braces until the RX path is
+ * proven either way. */
+#define PAD_INPEN           (1u << 4)
+#define PAD_CFG_MSPI_IO     (PAD_FNCSEL_MSPI0 | PAD_DS_0P5X | PAD_INPEN)
 /** CE: driven by the controller's NCE0 source, push-pull, active low. */
 #define PAD_CFG_MSPI_CE     (PAD_FNCSEL_MNCE0 | PAD_DS_0P5X | \
                              PAD_OUTCFG_PUSHPULL | PAD_NCEPOL_LOW)
@@ -113,17 +121,26 @@ typedef struct {
     uint8_t  ioclk_sel;   /**< MSPIIOCLKCTRL source select                  */
     uint8_t  clkdiv;      /**< DEV0CFG.CLKDIV0                              */
     uint8_t  sdr250;      /**< DEV0CFG1.SDR250EN0 -- bypasses the /2        */
+    uint8_t  txneg;       /**< DEV0CFG.TXNEG0 -- FREQUENCY-DEPENDENT        */
     uint32_t hz;          /**< nominal IO clock, for reporting              */
 } psram_clk_t;
 
 /* Order matches TIKU_PSRAM_CLK_*.  Every row obeys
- * hz = source / (2 * clkdiv), except where sdr250 bypasses the /2. */
+ * hz = source / (2 * clkdiv), except where sdr250 bypasses the /2.
+ *
+ * TXNEG is the TX clock-edge select and the vendor picks it BY FREQUENCY:
+ * 0 at 62.5 MHz and below, 1 at 96 MHz and above.  The first cut of this
+ * driver hard-coded 1 (the fast-clock value) at the 48 MHz bring-up clock,
+ * which launches every command bit half a clock early -- the device decodes
+ * garbage, never answers, and the controller-side "success" of TX-only
+ * commands hides it.  Bug #7 of this bring-up, and the one that silenced
+ * the device completely. */
 static const psram_clk_t s_clk[] = {
-    { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_2, 0u,  48000000u },
-    { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_1, 0u,  96000000u },
-    { IOCLK_SEL_HFRC2_250MHZ, CLKDIV_1, 0u, 125000000u },
-    { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_1, 1u, 192000000u },
-    { IOCLK_SEL_HFRC2_250MHZ, CLKDIV_1, 1u, 250000000u },
+    { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_2, 0u, 0u,  48000000u },
+    { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_1, 0u, 1u,  96000000u },
+    { IOCLK_SEL_HFRC2_250MHZ, CLKDIV_1, 0u, 1u, 125000000u },
+    { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_1, 1u, 1u, 192000000u },
+    { IOCLK_SEL_HFRC2_250MHZ, CLKDIV_1, 1u, 1u, 250000000u },
 };
 #define PSRAM_CLK_COUNT (sizeof s_clk / sizeof s_clk[0])
 
@@ -202,6 +219,9 @@ static uint8_t  s_clk_idx;   /**< index into s_clk of the live setting       */
 static uint8_t  s_faulted;   /**< 1 while fault injection is active           */
 static uint8_t  s_nodqs;     /**< 1 to bring up WITHOUT the DQS strobe        */
 static uint8_t  s_ta_override; /**< non-zero: use this TURNAROUND instead     */
+static uint8_t  s_rxneg;       /**< DEV0CFG.RXNEG0 override                    */
+static uint8_t  s_rxcap;       /**< DEV0CFG.RXCAP0 override                    */
+static uint8_t  s_rxsmp = 1u;  /**< DEV0CFG1.RXSMP0 (vendor default 1)         */
 
 /*---------------------------------------------------------------------------*/
 /* PIO TRANSFER (table 2)                                                    */
@@ -422,10 +442,14 @@ static void psram_controller_config(const psram_clk_t *c)
            & MSPI0_DEV0CFG_WRITELATENCY0_Msk;
     cfg |= ((uint32_t)c->clkdiv << MSPI0_DEV0CFG_CLKDIV0_Pos)
            & MSPI0_DEV0CFG_CLKDIV0_Msk;
-    /* SPI mode 0: CPOL = CPHA = 0.  DDR sampling: TXNEG=1, RXNEG=0, RXCAP=0
-     * -- the vendor's octal-DDR triple, and the starting point M2's timing
-     * scan sweeps around. */
-    cfg |= MSPI0_DEV0CFG_TXNEG0_Msk;
+    /* SPI mode 0: CPOL = CPHA = 0.  RXNEG = RXCAP = 0 at every speed per
+     * the vendor; TXNEG comes from the clock row.  The RX knobs are
+     * overridable because the capture point is being HUNTED -- the device is
+     * proven alive (bit-bang reads MR1=0x8D) while the controller captures
+     * nothing, so the wrongness is in these bits or their DEV0CFG1 cousins. */
+    if (c->txneg) { cfg |= MSPI0_DEV0CFG_TXNEG0_Msk; }
+    if (s_rxneg)  { cfg |= MSPI0_DEV0CFG_RXNEG0_Msk; }
+    if (s_rxcap)  { cfg |= MSPI0_DEV0CFG_RXCAP0_Msk; }
     cfg |= ((uint32_t)MSPI0_DEV0CFG_DEVCFG0_OCTAL0 << MSPI0_DEV0CFG_DEVCFG0_Pos)
            & MSPI0_DEV0CFG_DEVCFG0_Msk;
     MSPI0->DEV0CFG = cfg;                        /* SEPIO0 left 0: shared IO */
@@ -482,7 +506,7 @@ static void psram_controller_config(const psram_clk_t *c)
     /* Step 13: RX sampling.  Vendor values for this device; not guesses,
      * and not tunable knobs until something measures them. */
     MSPI0->DEV0CFG1_b.DQSTURN0   = 2u;
-    MSPI0->DEV0CFG1_b.RXSMP0     = 1u;
+    MSPI0->DEV0CFG1_b.RXSMP0     = s_rxsmp;
     MSPI0->DEV0CFG1_b.TAFOURTH0  = 1u;
     MSPI0->DEV0CFG1_b.SFTURN0    = 10u;
     MSPI0->DEV0CFG1_b.RXHI0      = 0u;
@@ -691,6 +715,118 @@ done:
 }
 
 /*---------------------------------------------------------------------------*/
+/* BIT-BANG PROBE -- the controller-free ground truth                        */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Drives the octal-DDR register-read waveform with plain GPIO, no MSPI
+ * involvement whatsoever.  Exists because after seven fixed bugs the
+ * controller path still returns nothing, and every remaining hypothesis
+ * needs the one fact only the wire can give: IS THE DEVICE ALIVE, and does
+ * it answer an octal command?  A slow manual waveform sidesteps every
+ * timing question -- in DDR the device changes data once per edge, so at
+ * microsecond edge rates the data sits stable for sampling.
+ *
+ * The read does not guess the latency: it clocks 32 edges after the address
+ * and reports ALL of them.  The mode registers appear somewhere in that
+ * stream if the device answers; all-zeros or all-ones means it does not.
+ * (tCEM, the DRAM refresh bound on CE-low time, is violated at this speed
+ * -- harmless for a REGISTER read; nothing here touches the array.)
+ */
+
+#define BB_GPIO_OUT   (3u | (1u << 8) | (1u << 4))   /* GPIO fn, push-pull, INPEN */
+#define BB_GPIO_IN    (3u | (1u << 4))                /* GPIO fn, input only       */
+
+static inline void bb_set(uint32_t pad, int v)
+{
+    uint32_t mask = 1u << (pad & 31u);
+    if (v) { (&GPIO->WTS0)[pad >> 5] = mask; }
+    else   { (&GPIO->WTC0)[pad >> 5] = mask; }
+}
+
+static inline uint32_t bb_get_d0_7(void)
+{
+    /* D0-7 = GP64..71: one contiguous byte in RD2 (pads 64..95). */
+    return (&GPIO->RD0)[2] & 0xFFu;
+}
+
+static void bb_drive_byte(uint8_t b)
+{
+    uint32_t pad;
+    for (pad = 0u; pad < 8u; pad++) {
+        bb_set(PSRAM_PAD_D0 + pad, (b >> pad) & 1u);
+    }
+}
+
+static inline void bb_dwell(void)
+{
+    /* ~1 us at 96 MHz: far slower than any DDR timing requirement. */
+    uint32_t n = 100u;
+    while (n--) { __asm__ volatile ("nop"); }
+}
+
+/** Clock one DDR edge with @p b driven on D0-7 (TX phase). */
+static void bb_tx_edge(uint8_t b, int clk_level)
+{
+    bb_drive_byte(b);
+    bb_dwell();
+    bb_set(PSRAM_PAD_CLK, clk_level);
+    bb_dwell();
+}
+
+void tiku_psram_bitbang_id(uint8_t *edges, uint32_t n_edges)
+{
+    tiku_psram_bitbang_reg(1u, edges, n_edges);
+}
+
+void tiku_psram_bitbang_reg(uint32_t mr, uint8_t *edges, uint32_t n_edges)
+{
+    uint8_t tx[6];
+    uint32_t i, pad;
+    int clk = 0;
+
+    tx[0] = 0x40u; tx[1] = 0x40u;      /* READ_REGISTER, one byte per edge  */
+    tx[2] = 0x00u; tx[3] = 0x00u;      /* 4-byte address, MSB first         */
+    tx[4] = 0x00u; tx[5] = (uint8_t)mr;
+
+    /* Claim every pin as GPIO: data + clock outputs, CE output high. */
+    for (pad = PSRAM_PAD_D0; pad <= PSRAM_PAD_D7; pad++) {
+        tiku_ambiq_gpio_pad_config(pad, BB_GPIO_OUT);
+    }
+    tiku_ambiq_gpio_pad_config(PSRAM_PAD_CLK, BB_GPIO_OUT);
+    tiku_ambiq_gpio_pad_config(PSRAM_PAD_CE,  BB_GPIO_OUT);
+    tiku_ambiq_gpio_pad_config(PSRAM_PAD_DQS, BB_GPIO_IN);
+    bb_set(PSRAM_PAD_CE, 1);
+    bb_set(PSRAM_PAD_CLK, 0);
+    bb_dwell();
+
+    /* Select, then one byte per DDR edge: rising, falling, rising, ... */
+    bb_set(PSRAM_PAD_CE, 0);
+    bb_dwell();
+    for (i = 0u; i < (uint32_t)(sizeof tx); i++) {
+        clk = (int)(~(uint32_t)clk & 1u);
+        bb_tx_edge(tx[i], clk);
+    }
+
+    /* Bus turnaround: release the data pins, then keep clocking and sample
+     * D0-7 after every edge.  No latency assumption -- report the stream. */
+    for (pad = PSRAM_PAD_D0; pad <= PSRAM_PAD_D7; pad++) {
+        tiku_ambiq_gpio_pad_config(pad, BB_GPIO_IN);
+    }
+    bb_dwell();
+    for (i = 0u; i < n_edges; i++) {
+        clk = (int)(~(uint32_t)clk & 1u);
+        bb_set(PSRAM_PAD_CLK, clk);
+        bb_dwell();
+        edges[i] = (uint8_t)bb_get_d0_7();
+    }
+
+    bb_set(PSRAM_PAD_CE, 1);
+    bb_set(PSRAM_PAD_CLK, 0);
+    /* Leave the pads as inputs; the next tiku_psram_init() reclaims them. */
+}
+
+/*---------------------------------------------------------------------------*/
 /* FAULT INJECTION -- so the guards can be SEEN to fire                      */
 /*---------------------------------------------------------------------------*/
 
@@ -721,6 +857,13 @@ void tiku_psram_regs(tiku_psram_regs_t *out)
 void tiku_psram_set_turnaround(unsigned ta)
 {
     s_ta_override = (uint8_t)(ta & 0x3Fu);
+}
+
+void tiku_psram_set_rx(unsigned rxneg, unsigned rxcap, unsigned rxsmp)
+{
+    s_rxneg = (uint8_t)(rxneg & 1u);
+    s_rxcap = (uint8_t)(rxcap & 1u);
+    s_rxsmp = (uint8_t)(rxsmp & 3u);
 }
 
 void tiku_psram_set_dqs(int enable)

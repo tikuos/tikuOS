@@ -628,6 +628,98 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 if (streq(argv[k], "nodqs")) { nodqs = 1; }
             }
         }
+        if (argc >= 3 && streq(argv[2], "scan2")) {
+            /* Hunt the RX capture point in no-DQS mode.  The device is
+             * proven alive (bit-bang: MR1 0x8d, MR2 0xde), so any cell that
+             * reads 8d is the capture configuration this silicon wants. */
+            unsigned rn, rc2, rs, ta;
+            SHELL_PRINTF("rx capture sweep (no DQS), target MR1=8d:\n");
+            for (rn = 0u; rn <= 1u; rn++) {
+             for (rc2 = 0u; rc2 <= 1u; rc2++) {
+              for (rs = 0u; rs <= 3u; rs++) {
+                for (ta = 8u; ta <= 18u; ta += 1u) {
+                    tiku_psram_id_t id;
+                    tiku_psram_deinit();
+                    tiku_psram_set_dqs(0);
+                    tiku_psram_set_rx(rn, rc2, rs);
+                    tiku_psram_set_turnaround(ta);
+                    if (tiku_psram_init(TIKU_PSRAM_CLK_48MHZ)
+                            != TIKU_PSRAM_OK) { continue; }
+                    (void)tiku_psram_read_id(&id);
+                    if (id.mr1 != 0x42u && id.mr1 != 0x00u) {
+                        SHELL_PRINTF("  rxneg %u rxcap %u rxsmp %u ta %2u:"
+                                     " MR1 %02x MR2 %02x%s\n",
+                                     rn, rc2, rs, ta, id.mr1, id.mr2,
+                                     (id.mr1 == 0x8Du) ? "  <== TARGET" : "");
+                    }
+                }
+              }
+             }
+            }
+            SHELL_PRINTF("sweep done (silent cells read 42 or 00)\n");
+            tiku_psram_set_rx(0u, 0u, 1u);
+            tiku_psram_set_turnaround(0u);
+            tiku_psram_set_dqs(1);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "txtest")) {
+            /* Does CONTROLLER TX reach the device at all?  The device is
+             * proven alive over GPIO, so: bit-bang-read MR0, write MR0
+             * through the CONTROLLER (drive-strength bits flipped), then
+             * bit-bang-read it again.  A change proves controller TX end to
+             * end with no dependence on controller RX; no change means the
+             * controller's bus never reaches the part and every RX theory
+             * is moot. */
+            static uint8_t before[16], after[16];
+            unsigned k; uint8_t b0 = 0u, a0 = 0u;
+            uint32_t wr;
+            tiku_psram_deinit();
+            tiku_psram_bitbang_reg(0u, before, 16u);
+            for (k = 8u; k < 16u; k += 2u) {   /* steady repeat region */
+                if (before[k] == before[k + 2u < 16u ? k + 2u : k]) {
+                    b0 = before[k]; break;
+                }
+            }
+            tiku_psram_set_dqs(0);
+            if (tiku_psram_init(TIKU_PSRAM_CLK_48MHZ) != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("txtest: init failed\n");
+                return;
+            }
+            wr = (uint32_t)(b0 ^ 0x01u);       /* flip DS bit0 */
+            (void)tiku_psram_reg_write(0u, wr);
+            tiku_psram_deinit();
+            tiku_psram_bitbang_reg(0u, after, 16u);
+            for (k = 8u; k < 16u; k += 2u) {
+                if (after[k] == after[k + 2u < 16u ? k + 2u : k]) {
+                    a0 = after[k]; break;
+                }
+            }
+            SHELL_PRINTF("txtest: MR0 before:");
+            for (k = 0u; k < 16u; k++) { SHELL_PRINTF(" %02x", before[k]); }
+            SHELL_PRINTF("\n        MR0 after :");
+            for (k = 0u; k < 16u; k++) { SHELL_PRINTF(" %02x", after[k]); }
+            SHELL_PRINTF("\n        wrote %02lx: %s\n", (unsigned long)wr,
+                         (a0 == (uint8_t)wr) ? "CONTROLLER TX REACHES DEVICE"
+                         : (a0 == b0) ? "no change -- controller TX never lands"
+                                      : "changed to something ELSE (partial)");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "bb")) {
+            /* Ground truth: the same identity read, bit-banged on GPIO with
+             * the MSPI controller out of the picture entirely. */
+            static uint8_t edges[32];
+            unsigned k;
+            tiku_psram_deinit();     /* controller off the pads first */
+            tiku_psram_bitbang_id(edges, 32u);
+            SHELL_PRINTF("bitbang MR1 read, D0-7 after each edge:\n ");
+            for (k = 0u; k < 32u; k++) {
+                SHELL_PRINTF(" %02x", edges[k]);
+                if ((k & 7u) == 7u) { SHELL_PRINTF("\n "); }
+            }
+            SHELL_PRINTF("(0d/8d somewhere = device alive in octal;"
+                         " 00/ff throughout = no answer)\n");
+            return;
+        }
         if (argc >= 3 && streq(argv[2], "scan")) {
             /* Sweep the read window and print the identity register for each
              * setting.  The right answer is the one that reads 0x0D in the

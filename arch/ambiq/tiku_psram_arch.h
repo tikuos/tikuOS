@@ -293,6 +293,9 @@ void tiku_psram_regs(tiku_psram_regs_t *out);
  */
 void tiku_psram_set_turnaround(unsigned ta);
 
+/** @brief Override the RX capture knobs before init (RXNEG, RXCAP, RXSMP). */
+void tiku_psram_set_rx(unsigned rxneg, unsigned rxcap, unsigned rxsmp);
+
 /** @brief Enable/disable the DQS strobe before init (diagnostic; default on). */
 void tiku_psram_set_dqs(int enable);
 
@@ -313,6 +316,18 @@ tiku_psram_err_t tiku_psram_cmd_probe(uint32_t *ctrl_out);
  * so the last line printed identifies where it died.  Pass NULL to remove.
  */
 void tiku_psram_set_trace(void (*fn)(const char *step));
+
+/**
+ * @brief Controller-free identity read: bit-bang the octal waveform on GPIO.
+ *
+ * Fills @p edges with the D0-7 byte sampled after each of @p n_edges clock
+ * edges following the READ_REGISTER(MR1) command.  The ground-truth probe:
+ * no MSPI controller, no timing configuration, no latency assumption.
+ */
+void tiku_psram_bitbang_id(uint8_t *edges, uint32_t n_edges);
+
+/** @brief Same, for an arbitrary mode register. */
+void tiku_psram_bitbang_reg(uint32_t mr, uint8_t *edges, uint32_t n_edges);
 
 /**
  * @brief Deliberately break the bus, for proving the guards fire.
