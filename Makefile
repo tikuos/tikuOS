@@ -1444,6 +1444,14 @@ SRCS += arch/ambiq/tiku_mpu_arch.c
 SRCS += arch/ambiq/tiku_region_arch.c
 SRCS += arch/ambiq/tiku_nvm_region_apollo510.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
+# External octal-DDR PSRAM on MSPI0 (EVB U14, 64 MB).  Opt-in: it is board
+# hardware, not silicon, so a target without the part must not carry the
+# driver.  The -D is a capability macro so the shell command can gate on it
+# regardless of include order (see kernel/shell/tiku_shell_config.h).
+ifeq ($(TIKU_DRV_PSRAM_ENABLE),1)
+SRCS += arch/ambiq/tiku_psram_arch.c
+CFLAGS += -DTIKU_DRV_PSRAM_ENABLE=1
+endif
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_gpu.c   # /sys/gpu status nodes

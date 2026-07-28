@@ -39,6 +39,9 @@
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
 #include <arch/ambiq/tiku_power_ambiq.h>
 #include <arch/ambiq/tiku_timer_arch.h>       /* stimer reclock / rate       */
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+#include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
+#endif
 #include <kernel/timers/tiku_clock.h>         /* tickless begin/end (guard)  */
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>  /* SIMOBUCK enable hook     */
 #if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
@@ -115,6 +118,20 @@ static void power_stat(void)
          * like a damning result and is usually just an unarmed counter. */
         SHELL_PRINTF("hit rate n/a (counters not started -- run 'power clear')\n");
     }
+}
+#endif
+
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+/**
+ * @brief PSRAM bring-up step tracer.
+ *
+ * Prints each step BEFORE it runs and flushes, so if a register write stalls
+ * the bus the last line on the wire names the step that wedged.  This is how
+ * the first bring-up attempt's silent hang was localised.
+ */
+static void psram_trace(const char *step)
+{
+    SHELL_PRINTF("  psram step: %s\n", step);
 }
 #endif
 
@@ -589,6 +606,148 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("cache: %s\n", tiku_ambiq_cache_enabled() ? "on" : "off");
         return;
     }
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+    if (streq(argv[1], "psram")) {
+        /* M1 bring-up verb for the board's 64 MB octal-DDR PSRAM (EVB U14).
+         *
+         *   power psram id [clk]   power MSPI0, reset the device, read its
+         *                          mode registers and check identity
+         *   power psram fault      the SAME read with D0 taken away from the
+         *                          controller -- proves the error path fires
+         *                          instead of returning plausible garbage
+         *   power psram off        release the controller domain
+         *
+         * Identity before anything else, at the lowest clock, because a
+         * mis-timed octal bus answers with numbers that look real. */
+        unsigned clk = TIKU_PSRAM_CLK_48MHZ;
+        int want_fault = (argc >= 3 && streq(argv[2], "fault"));
+        int nodqs = 0;
+        {   /* any trailing "nodqs" word switches the strobe off */
+            int k;
+            for (k = 2; k < argc; k++) {
+                if (streq(argv[k], "nodqs")) { nodqs = 1; }
+            }
+        }
+        if (argc >= 3 && streq(argv[2], "scan")) {
+            /* Sweep the read window and print the identity register for each
+             * setting.  The right answer is the one that reads 0x0D in the
+             * low five bits -- and the sweep must SHOW the wrong settings
+             * either side of it, or it has not proven anything. */
+            unsigned ta;
+            SHELL_PRINTF("turnaround sweep (%s), want MR1 vendor 0d:\n",
+                         nodqs ? "no DQS" : "DQS");
+            for (ta = 4u; ta <= 30u; ta += 1u) {
+                tiku_psram_id_t id;
+                tiku_psram_err_t rc;
+                tiku_psram_deinit();
+                tiku_psram_set_dqs(nodqs ? 0 : 1);
+                tiku_psram_set_turnaround(ta);
+                if (tiku_psram_init(TIKU_PSRAM_CLK_48MHZ) != TIKU_PSRAM_OK) {
+                    SHELL_PRINTF("  ta %2u: init failed\n", ta);
+                    continue;
+                }
+                rc = tiku_psram_read_id(&id);
+                SHELL_PRINTF("  ta %2u: MR1 %02x MR2 %02x vendor %02x%s\n",
+                             ta, id.mr1, id.mr2, id.vendor_id,
+                             (rc == TIKU_PSRAM_OK) ? "   <== MATCH" : "");
+            }
+            tiku_psram_set_turnaround(0u);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "cmd")) {
+            uint32_t c = 0u;
+            tiku_psram_err_t rc;
+            static const char *const en2[] = { "ok", "POWER", "CLOCK",
+                                              "TIMEOUT", "ID", "ARG" };
+            tiku_psram_set_dqs(nodqs ? 0 : 1);
+            rc = tiku_psram_init(clk);
+            if (rc != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("psram init: %s\n", en2[rc]);
+                return;
+            }
+            rc = tiku_psram_cmd_probe(&c);
+            SHELL_PRINTF("psram cmd (no data phase): %s  ctrl %08lx"
+                         " (bit1 STATUS=done, bit2 BUSY)\n",
+                         en2[rc], (unsigned long)c);
+            return;
+        }
+
+        if (argc >= 3 && streq(argv[2], "regs")) {
+            tiku_psram_regs_t g;
+            tiku_psram_regs(&g);
+            SHELL_PRINTF("psram regs (read back, not assumed):\n");
+            SHELL_PRINTF("  devpwrstatus %08lx  clkgen.misc %08lx  ioclkctrl %08lx\n",
+                         (unsigned long)g.devpwrstatus,
+                         (unsigned long)g.clkgen_misc,
+                         (unsigned long)g.mspiioclkctrl);
+            SHELL_PRINTF("  dev0cfg %08lx cfg1 %08lx ddr %08lx xip %08lx instr %08lx\n",
+                         (unsigned long)g.dev0cfg, (unsigned long)g.dev0cfg1,
+                         (unsigned long)g.dev0ddr, (unsigned long)g.dev0xip,
+                         (unsigned long)g.dev0instr);
+            SHELL_PRINTF("  padouten %08lx mspicfg %08lx ctrl %08lx intstat %08lx\n",
+                         (unsigned long)g.padouten, (unsigned long)g.mspicfg,
+                         (unsigned long)g.ctrl, (unsigned long)g.intstat);
+            SHELL_PRINTF("  rx %lu tx %lu entries\n",
+                         (unsigned long)g.rxentries, (unsigned long)g.txentries);
+            SHELL_PRINTF("  during last xfer: ctrl@start %08lx tx@write %lu"
+                         " -> tx %lu ctrl %08lx intstat %08lx\n",
+                         (unsigned long)g.dbg_ctrl_after_start,
+                         (unsigned long)g.dbg_tx_after_write,
+                         (unsigned long)g.dbg_tx_settled,
+                         (unsigned long)g.dbg_ctrl_settled,
+                         (unsigned long)g.dbg_intstat);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "off")) {
+            tiku_psram_deinit();
+            SHELL_PRINTF("psram: MSPI0 domain released (powered %d)\n",
+                         tiku_psram_powered());
+            return;
+        }
+        if (argc >= 4) {
+            const char *q = argv[3]; unsigned n = 0u;
+            while (*q >= '0' && *q <= '9') { n = n*10u + (unsigned)(*q++ - '0'); }
+            if (n >= 192u)      { clk = TIKU_PSRAM_CLK_192MHZ; }
+            else if (n >= 125u) { clk = TIKU_PSRAM_CLK_125MHZ; }
+            else if (n >= 96u)  { clk = TIKU_PSRAM_CLK_96MHZ; }
+        }
+        {
+            tiku_psram_id_t id;
+            tiku_psram_err_t rc;
+            tiku_psram_set_trace(psram_trace);
+            tiku_psram_set_dqs(nodqs ? 0 : 1);
+            rc = tiku_psram_init(clk);
+            tiku_psram_set_trace((void (*)(const char *))0);
+            static const char *const en[] = { "ok", "POWER", "CLOCK",
+                                              "TIMEOUT", "ID", "ARG" };
+            if (rc != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("psram init: %s\n", en[rc]);
+                return;
+            }
+            SHELL_PRINTF("psram: MSPI0 up, io clock %lu Hz, powered %d\n",
+                         tiku_psram_clock_hz(), tiku_psram_powered());
+            if (want_fault) {
+                tiku_psram_fault_inject(1);
+            }
+            rc = tiku_psram_read_id(&id);
+            if (want_fault) {
+                tiku_psram_fault_inject(0);
+            }
+            /* Raw bytes ALWAYS printed, verdict separately: the caller needs
+             * the numbers to tell a dead bus from a wrong part. */
+            SHELL_PRINTF("  MR0 %02x MR1 %02x MR2 %02x MR3 %02x MR4 %02x MR8 %02x\n",
+                         id.mr0, id.mr1, id.mr2, id.mr3, id.mr4, id.mr8);
+            SHELL_PRINTF("  vendor %02x (0d=AP) density %x (6=512Mb) gen %u die %s\n",
+                         id.vendor_id, id.density_code,
+                         (unsigned)(id.generation == 0u ? 5u : id.generation + 1u),
+                         id.good_die ? "pass" : "BAD");
+            SHELL_PRINTF("  size %lu bytes -- verdict: %s%s\n",
+                         (unsigned long)id.size_bytes, en[rc],
+                         want_fault ? "  (fault injected: error EXPECTED)" : "");
+        }
+        return;
+    }
+#endif
     if (streq(argv[1], "stimer")) {
         /* Timebase health: current rate, is the counter visibly counting, and
          * does the tickless guard accept or refuse a stretch.

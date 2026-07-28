@@ -93,6 +93,15 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 void tiku_ambiq_gpio_init_output(uint32_t pad);
 
 /**
+ * @brief Write a raw pad-configuration register under the PADKEY lock.
+ *
+ * For drivers assigning pads to an alternate function (MSPI, SDIO): the
+ * caller composes the PINCFG value, this owns the unlock/relock.  Out-of-
+ * range pads are ignored.
+ */
+void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg);
+
+/**
  * @brief Drive a raw Apollo510 pad to a logic level.
  *
  * @param pad    Apollo510 GPIO pad number.
