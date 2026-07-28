@@ -647,6 +647,77 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         tiku_nor_id_t id;
         tiku_nor_err_t rc;
 
+        if (argc >= 3 && streq(argv[2], "forceoctal")) {
+            /* Is the part already octal?  Configure the controller that way
+             * and ask for identity; a serial-mode part will stay silent and
+             * an octal one will finally answer. */
+            unsigned k9;
+            static const unsigned rows[3] = { TIKU_NOR_CLK_24MHZ,
+                                              TIKU_NOR_CLK_48MHZ,
+                                              TIKU_NOR_CLK_96MHZ };
+            for (k9 = 0u; k9 < 3u; k9++) {
+                rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+                if (rc != TIKU_NOR_OK) { continue; }
+                rc = tiku_nor_force_octal(rows[k9]);
+                if (rc != TIKU_NOR_OK) { continue; }
+                rc = tiku_nor_read_id(&id);
+                SHELL_PRINTF("  forced octal @%lu Hz: mfr %02x type %02x"
+                             " cap %02x -- %s\n", tiku_nor_clock_hz(),
+                             id.mfr, id.type, id.capacity, nor_errname(rc));
+            }
+            SHELL_PRINTF("  (all 00 in every row = the part is not answering"
+                         " octal either)\n");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "bbtest")) {
+            uint32_t t9 = tiku_nor_bitbang_selftest();
+            SHELL_PRINTF("nor bbtest: %02lx -- drive-low reads %lu,"
+                         " drive-high reads %lu, D1 floating %lu,"
+                         " D0 floating %lu\n", (unsigned long)t9,
+                         (unsigned long)(t9 & 1u), (unsigned long)((t9>>1)&1u),
+                         (unsigned long)((t9>>2)&1u),
+                         (unsigned long)((t9>>3)&1u));
+            SHELL_PRINTF("  CE lo/hi %lu/%lu  CLK lo/hi %lu/%lu"
+                         "  RST hi %lu  LSEN hi %lu\n",
+                         (unsigned long)((t9>>4)&1u), (unsigned long)((t9>>5)&1u),
+                         (unsigned long)((t9>>6)&1u), (unsigned long)((t9>>7)&1u),
+                         (unsigned long)((t9>>8)&1u), (unsigned long)((t9>>9)&1u));
+            SHELL_PRINTF("  instrument %s\n",
+                         ((t9 & 3u) == 2u) ? "WORKS (0 then 1)"
+                                           : "BROKEN -- ff verdicts are void");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "lson")) {
+            /* Enable the flash's load switch, then ask the device who it is
+             * over bit-bang (no controller involved).
+             *
+             * WHY HIGH IS THE SAFE DIRECTION: the switch is an NCP451FCT2G
+             * with a 100 kohm pull-DOWN on its enable, so the flash is
+             * unpowered by default -- which is exactly what an all-ff
+             * bit-bang read means.  Driving the pad HIGH powers the device,
+             * and the part is an inrush-limited switch designed for that.
+             * This verb never drives the pad low. */
+            static uint8_t idb[8];
+            unsigned k8;
+            tiku_nor_deinit();
+            tiku_nor_ls_set(1);
+            tiku_nor_bitbang_id(idb, 8u);
+            SHELL_PRINTF("nor loadsw HIGH, bitbang READ_ID:");
+            for (k8 = 0u; k8 < 8u; k8++) { SHELL_PRINTF(" %02x", idb[k8]); }
+            SHELL_PRINTF("\n  (9d = ISSI: the switch was the whole story)\n");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "bb")) {
+            static uint8_t idb[8];
+            unsigned k8;
+            tiku_nor_deinit();          /* controller off the pads first */
+            tiku_nor_bitbang_id(idb, 8u);
+            SHELL_PRINTF("nor bitbang READ_ID:");
+            for (k8 = 0u; k8 < 8u; k8++) { SHELL_PRINTF(" %02x", idb[k8]); }
+            SHELL_PRINTF("\n  (9d 60 17 = ISSI alive; all 00 or all ff ="
+                         " no answer)\n");
+            return;
+        }
         if (argc >= 3 && streq(argv[2], "regs")) {
             uint32_t g[12]; unsigned k7;
             static const char *const nm[] = {

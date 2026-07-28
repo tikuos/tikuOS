@@ -222,6 +222,14 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk);
  */
 tiku_nor_err_t tiku_nor_enter_octal(unsigned clk);
 
+/**
+ * @brief Configure the CONTROLLER for octal DDR without the device handshake.
+ *
+ * Diagnostic: for a part that is already in octal (non-volatile IO-mode
+ * default), every serial command is noise and the device looks dead.
+ */
+tiku_nor_err_t tiku_nor_force_octal(unsigned clk);
+
 /** @brief Release the controller domain (device keeps its contents). */
 void tiku_nor_deinit(void);
 
@@ -271,6 +279,22 @@ int tiku_nor_is_octal(void);
 
 /** @brief Install a step tracer (a wedged bring-up must name its step). */
 void tiku_nor_set_trace(void (*fn)(const char *step));
+
+/**
+ * @brief Controller-free identity read: bit-bang serial SPI on GPIO.
+ *
+ * The PSRAM's ground-truth instrument, ported to MSPI1's pads.  Answers
+ * "is the device alive and does it speak SPI at all" with no dependence on
+ * controller framing, latency or lane assignment.
+ */
+void tiku_nor_bitbang_id(uint8_t *out, uint32_t n_bytes);
+
+/**
+ * @brief Prove the bit-bang read path before trusting its verdict.
+ * @return b0 read-while-driving-low, b1 read-while-driving-high,
+ *         b2 D1 released, b3 D0 released.  0x02/0x06 = instrument OK.
+ */
+uint32_t tiku_nor_bitbang_selftest(void);
 
 /** @brief Snapshot controller registers (read back, never assumed). */
 void tiku_nor_regs(uint32_t *out, unsigned n);

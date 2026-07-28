@@ -523,6 +523,26 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
 /* PHASE B -- OCTAL DDR                                                      */
 /*---------------------------------------------------------------------------*/
 
+tiku_nor_err_t tiku_nor_force_octal(unsigned clk)
+{
+    /* Configure the CONTROLLER for octal DDR without asking the device to
+     * switch -- for the case where the device is ALREADY octal (a
+     * non-volatile IO-mode default, or a previous session's state that a
+     * board power cycle did not clear because the mode is not volatile).
+     * A serial-mode command is meaningless to such a part, which looks
+     * exactly like a dead device from the data lines' point of view. */
+    if (!s_up)                { return TIKU_NOR_ERR_POWER; }
+    if (clk >= NOR_CLK_COUNT) { return TIKU_NOR_ERR_ARG; }
+    s_octal = 1u;
+    nor_controller_config(&s_clk[clk], 1);
+    if (nor_ioclk_on(s_clk[clk].ioclk_sel) != TIKU_NOR_OK) {
+        return TIKU_NOR_ERR_CLOCK;
+    }
+    s_clk_idx = (uint8_t)clk;
+    tiku_cpu_ambiq_delay_us(100u);
+    return TIKU_NOR_OK;
+}
+
 tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
 {
     tiku_nor_id_t id;
@@ -788,6 +808,160 @@ void tiku_nor_ls_set(int level)
     }
     __DSB();
     tiku_cpu_ambiq_delay_us(2000u);
+}
+
+/*---------------------------------------------------------------------------*/
+/* BIT-BANG ARBITER -- controller-free ground truth                          */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The instrument that cracked the PSRAM, ported to MSPI1's pads and to
+ * single-lane SPI.  Drives CE/CLK/D0 by hand and samples D1, so it answers
+ * the only question that matters at first contact: IS THE DEVICE ALIVE AND
+ * DOES IT SPEAK SERIAL SPI?  Everything about the controller's framing,
+ * latency and lane assignment is out of the picture.
+ *
+ * Serial SPI here is mode 0: data launched on the falling edge, sampled by
+ * the device on the rising edge; the device returns data on D1, which we
+ * sample after each rising edge.  Microsecond edges -- far slower than any
+ * timing requirement.
+ */
+
+#define BB_OUT  (PAD_FNCSEL_GPIO | PAD_OUTCFG_PUSHPULL | PAD_INPEN | PAD_DS_0P5X)
+#define BB_IN   (PAD_FNCSEL_GPIO | PAD_INPEN)
+#define NOR_PAD_D1  96u
+
+static void bb_dwell(void)
+{
+    uint32_t n = 60u;
+    while (n--) { __asm__ volatile ("nop"); }
+}
+
+static uint32_t bb_read_d1(void)
+{
+    /* D1 = GP96: RD2 covers pads 64..95, RD3 covers 96..127 -> bit 0. */
+    return ((&GPIO->RD0)[3] >> 0) & 1u;
+}
+
+void tiku_nor_bitbang_id(uint8_t *out, uint32_t n_bytes)
+{
+    uint32_t i, b;
+
+    /* DEASSERT RESET FIRST.  GP54 is hi-Z out of SoC reset, and if the board
+     * has no pull-up on RSTn the device sits held in reset -- answering
+     * nothing, on every lane, forever.  The controller path pulses reset in
+     * nor_hw_reset(); the bit-bang path never did, which made this the one
+     * stone left unturned when the arbiter reported all-ones. */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_RST, BB_OUT);
+    tiku_ambiq_gpio_set(NOR_PAD_RST, 1u);
+    tiku_cpu_ambiq_delay_us(500u);
+
+    /* Claim the four pins we need; leave the rest of the bus alone. */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_CE,  BB_OUT);
+    tiku_ambiq_gpio_pad_config(NOR_PAD_CLK, BB_OUT);
+    tiku_ambiq_gpio_pad_config(NOR_PAD_D0,  BB_OUT);
+    tiku_ambiq_gpio_pad_config(NOR_PAD_D1,  BB_IN);
+    tiku_ambiq_gpio_set(NOR_PAD_CE, 1u);
+    tiku_ambiq_gpio_set(NOR_PAD_CLK, 0u);
+    bb_dwell();
+
+    tiku_ambiq_gpio_set(NOR_PAD_CE, 0u);        /* select                   */
+    bb_dwell();
+
+    /* Opcode 0x9F, MSB first: set D0 while clock low, pulse clock high. */
+    for (i = 0u; i < 8u; i++) {
+        tiku_ambiq_gpio_set(NOR_PAD_D0, (0x9Fu >> (7u - i)) & 1u);
+        bb_dwell();
+        tiku_ambiq_gpio_set(NOR_PAD_CLK, 1u);
+        bb_dwell();
+        tiku_ambiq_gpio_set(NOR_PAD_CLK, 0u);
+    }
+
+    /* Read n_bytes from D1, MSB first. */
+    for (b = 0u; b < n_bytes; b++) {
+        uint8_t v = 0u;
+        for (i = 0u; i < 8u; i++) {
+            bb_dwell();
+            tiku_ambiq_gpio_set(NOR_PAD_CLK, 1u);
+            bb_dwell();
+            v = (uint8_t)((v << 1) | (uint8_t)bb_read_d1());
+            tiku_ambiq_gpio_set(NOR_PAD_CLK, 0u);
+        }
+        out[b] = v;
+    }
+
+    tiku_ambiq_gpio_set(NOR_PAD_CE, 1u);
+    /* Leave the pads as inputs; the next init reclaims them. */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_D0, BB_IN);
+    tiku_ambiq_gpio_pad_config(NOR_PAD_CLK, BB_IN);
+    tiku_ambiq_gpio_pad_config(NOR_PAD_CE, BB_IN);
+}
+
+uint32_t tiku_nor_bitbang_selftest(void)
+{
+    /* PROVE THE INSTRUMENT BEFORE BELIEVING ITS VERDICT.
+     *
+     * The arbiter reads D1 (GP96).  If that read path is wrong it reports
+     * all-ones forever and looks exactly like a dead device -- so drive D1
+     * as an output, low then high, and read it back each time.  Result bits:
+     *   b0 = value read while driving LOW  (want 0)
+     *   b1 = value read while driving HIGH (want 1)
+     *   b2 = value read with D1 released to input (the device's own level)
+     *   b3 = same for D0 (GP95), the line we transmit on
+     * So 0x02 or 0x06 means the instrument works.  0x03 or 0x07 means the
+     * read is stuck high and every all-ff verdict is meaningless.
+     */
+    uint32_t r = 0u;
+
+    tiku_ambiq_gpio_pad_config(NOR_PAD_D1, BB_OUT);
+    tiku_ambiq_gpio_set(NOR_PAD_D1, 0u);
+    bb_dwell();
+    r |= (bb_read_d1() & 1u) << 0;
+    tiku_ambiq_gpio_set(NOR_PAD_D1, 1u);
+    bb_dwell();
+    r |= (bb_read_d1() & 1u) << 1;
+
+    tiku_ambiq_gpio_pad_config(NOR_PAD_D1, BB_IN);
+    bb_dwell();
+    r |= (bb_read_d1() & 1u) << 2;
+
+    tiku_ambiq_gpio_pad_config(NOR_PAD_D0, BB_IN);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[2] >> 31) & 1u) << 3);   /* GP95 = RD2 bit 31 */
+
+    /* b4/b5: does CE (GP53) actually drive?  A chip select that never
+     * asserts is indistinguishable from a dead device from the data lines'
+     * point of view -- everything reads as idle-high forever. */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_CE, BB_OUT);
+    tiku_ambiq_gpio_set(NOR_PAD_CE, 0u);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[1] >> 21) & 1u) << 4);   /* GP53 = RD1 bit 21 */
+    tiku_ambiq_gpio_set(NOR_PAD_CE, 1u);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[1] >> 21) & 1u) << 5);
+
+    /* b6/b7: same for CLK (GP103 = RD3 bit 7). */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_CLK, BB_OUT);
+    tiku_ambiq_gpio_set(NOR_PAD_CLK, 0u);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[3] >> 7) & 1u) << 6);
+    tiku_ambiq_gpio_set(NOR_PAD_CLK, 1u);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[3] >> 7) & 1u) << 7);
+    tiku_ambiq_gpio_set(NOR_PAD_CLK, 0u);
+
+    /* b8: RSTn (GP54 = RD1 bit 22) driven high, read back. */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_RST, BB_OUT);
+    tiku_ambiq_gpio_set(NOR_PAD_RST, 1u);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[1] >> 22) & 1u) << 8);
+
+    /* b9: the load-switch pad (GP208 = RD6 bit 16) driven high, read back. */
+    tiku_ambiq_gpio_pad_config(NOR_PAD_LSEN, BB_OUT);
+    tiku_ambiq_gpio_set(NOR_PAD_LSEN, 1u);
+    bb_dwell();
+    r |= ((((&GPIO->RD0)[6] >> 16) & 1u) << 9);
+    return r;
 }
 
 void tiku_nor_fault_inject(int enable)
