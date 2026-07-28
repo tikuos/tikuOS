@@ -47,38 +47,50 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 0 -- PINS, AND WHERE THE BSP IS WRONG                              */
+/* TABLE 0 -- PINS, AND A CORRECTION I GOT BACKWARDS ONCE                    */
 /*---------------------------------------------------------------------------*/
 /*
+ * FOR THE APOLLO510B (BLUE) EVB -- our board -- taken from the BSP for THAT
+ * board, `boards/apollo510b_evb/bsp/am_bsp_pins.h`:
+ *
  *   signal      pad          note
  *   ----------  -----------  ----------------------------------------------
  *   D0..D7      GP95..GP102  MSPI1 data, FNCSEL 0
  *   SCK         GP103        FNCSEL 0
  *   DQS/DM      GP104        FNCSEL 0
- *   CE0         GP53         MNCE1_0, FNCSEL 0
- *   RSTn        GP54         PLAIN GPIO (FNCSEL 3), active low
- *   LOADSW EN   GP208        PLAIN GPIO (FNCSEL 3) -- the power switch
+ *   RSTn        GP17         PLAIN GPIO, per the 510B BSP
+ *   CE0         *** NOT DEFINED ON THIS BOARD ***
  *
- * TWO OF THOSE CONTRADICT THE VENDOR BSP, AND THE SCHEMATIC WINS:
+ * READ THE LAST LINE AGAIN.  The 510B BSP does not define an MSPI1 chip
+ * select at all, and in am_bsp_mspi_pins_enable() Ambiq COMMENTED OUT the
+ * CE pinconfig for module 1:
  *
- *  1. RESET IS GP54, NOT GP17.  am_bsp_pins.h declares
- *     `AM_BSP_GPIO_MSPI1_RST 17`, but the schematic net is
- *     `FLASH1_RSTn_GP54` landing on U12's RSTn ball, and GP17 on this die is
- *     an ADC input (AM_HAL_PIN_17_ADCSE2) with no plausible reset function.
- *     The BSP entry is stale for this board revision.  Driving GP17 would
- *     have looked harmless and reset nothing -- the failure mode is a device
- *     that never returns to a known state, which is exactly the sort of
- *     silent wrongness that cost a week on the PSRAM.
+ *     // am_hal_gpio_pinconfig(AM_BSP_GPIO_MSPI1_CE0, g_AM_BSP_GPIO_MSPI1_CE0);
  *
- *  2. THE LOAD SWITCH EXISTS AND IS ON GP208.  Schematic net
- *     `MSPI1_LS_EN_GP208` drives the flash's LOADSW input, gating VDD_FLASH.
- *     The BSP names no such pin.  This is the only external memory on the
- *     board whose power TikuOS can take to true zero -- the rent discipline
- *     the GPU taught us, finally with a real off switch.
+ * A vendor does that when the device is not on the variant.  Combined with
+ * the owner finding no U12 on the board, the conclusion is that THE BLUE EVB
+ * DOES NOT CARRY THE NOR, and this driver has never had a device to talk to.
  *
- * Note GP54's alternate function is MNCE1_1 (chip select 1 for MSPI1); this
- * board deliberately spends it as a GPIO reset instead, so CE1 does not
- * exist here and only CE0 is wired.
+ * THE MISTAKE THIS COMMENT EXISTS TO RECORD:
+ *
+ * An earlier version of this table asserted RSTn = GP54 and a load switch on
+ * GP208, and called the BSP "stale for this board revision".  Both values came
+ * from `AP510EVB_Rev2.2_Schematic.pdf` -- which is the schematic for the
+ * **Apollo510 EVB, not the Apollo510B (Blue) EVB we actually have**.  Its
+ * title block says "Apollo510 EVB" and its SoC is AP510NFA-CBR; the file name
+ * says AP510EVB with no B.  The proof is exact: the NON-B board's BSP says
+ * MSPI1_RST = 54 and mentions GP208, while ours says 17 and never mentions
+ * GP208.  The schematic matches the other board perfectly.
+ *
+ * So the BSP was right, the schematic was for a different board, and I
+ * overrode the correct source with the wrong one -- confidently, in a
+ * comment, in the tree.  The rule that follows: BEFORE a schematic is
+ * allowed to overrule a BSP, confirm the schematic is for THIS BOARD --
+ * title block and part number, not the file name.
+ *
+ * (The MSPI0/PSRAM work is unaffected: both boards share the MSPI0 pinout
+ * pad-for-pad, including the x16 group and CE0 = GP199, so every PSRAM
+ * result stands.)
  */
 
 /*---------------------------------------------------------------------------*/

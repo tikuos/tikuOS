@@ -98,8 +98,12 @@
 #define NOR_PAD_CLK    103u
 #define NOR_PAD_DQS    104u
 #define NOR_PAD_CE      53u
-#define NOR_PAD_RST     54u    /* schematic, NOT the BSP's 17 -- see header */
-#define NOR_PAD_LSEN   208u    /* load switch: the true-off control          */
+#define NOR_PAD_RST     17u    /* the 510B BSP's value -- see the header's
+                                * correction; 54 came from the WRONG BOARD's
+                                * schematic                                  */
+#define NOR_PAD_LSEN   208u    /* NOT PRESENT ON THE 510B: this pad belongs to
+                                * the non-Blue EVB's load switch.  Kept only
+                                * so the disarmed verb still compiles.       */
 
 #define PAD_FNCSEL_MSPI1     0u
 #define PAD_FNCSEL_MNCE1     0u
