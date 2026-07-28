@@ -317,6 +317,47 @@ tiku_psram_err_t tiku_psram_cmd_probe(uint32_t *ctrl_out);
  */
 void tiku_psram_set_trace(void (*fn)(const char *step));
 
+/*---------------------------------------------------------------------------*/
+/* M2/M3 -- memory access, speed, timing scan, XIP, DMA                      */
+/*---------------------------------------------------------------------------*/
+
+/** @brief PIO read of device memory (chunked; any n).  XIP must be off. */
+tiku_psram_err_t tiku_psram_mem_read(uint32_t addr, void *buf, uint32_t n);
+/** @brief PIO write of device memory (chunked; any n).  XIP must be off. */
+tiku_psram_err_t tiku_psram_mem_write(uint32_t addr, const void *buf,
+                                      uint32_t n);
+
+/**
+ * @brief Move to clock row @p clk: program device MR0/MR4 latencies to match,
+ *        then reconfigure the controller -- no device reset in between.
+ */
+tiku_psram_err_t tiku_psram_set_speed(unsigned clk);
+
+/**
+ * @brief RXDQSDELAY scan at the live clock: pattern-verify all 32 taps.
+ *
+ * Two regions (one past 32 MB, proving high address bits), address-derived
+ * patterns, bit-exact compare per tap.  Ships the centre of the widest
+ * passing window and leaves it live.
+ *
+ * @param pass_mask  bit N set = tap N passed (may be NULL)
+ * @param center     shipped tap (may be NULL)
+ * @return width of the widest passing window (0 = nothing passed)
+ */
+uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center);
+
+/** @brief Map/unmap the 64 MB aperture at 0x60000000.  PIO refuses while on. */
+tiku_psram_err_t tiku_psram_xip_enable(int enable);
+/** @brief 1 if the aperture is live. */
+int tiku_psram_xip_enabled(void);
+
+/**
+ * @brief Blocking DMA between SRAM and the device (word-aligned, n%4==0).
+ *        Cache coherency is the caller's job.  XIP must be off.
+ */
+tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
+                                int to_device);
+
 /**
  * @brief Controller-free identity read: bit-bang the octal waveform on GPIO.
  *
@@ -328,6 +369,11 @@ void tiku_psram_bitbang_id(uint8_t *edges, uint32_t n_edges);
 
 /** @brief Same, for an arbitrary mode register. */
 void tiku_psram_bitbang_reg(uint32_t mr, uint8_t *edges, uint32_t n_edges);
+/** @brief Bit-bang ARRAY read: where does data physically live? */
+void tiku_psram_bitbang_mem(uint32_t addr, uint8_t *edges, uint32_t n_edges);
+/** @brief The generic bit-banged command underneath both. */
+void tiku_psram_bitbang_cmd(uint32_t opcode, uint32_t addr,
+                            uint8_t *edges, uint32_t n_edges);
 
 /**
  * @brief Deliberately break the bus, for proving the guards fire.

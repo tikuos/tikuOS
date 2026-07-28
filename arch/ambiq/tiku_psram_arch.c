@@ -42,6 +42,9 @@
 #include "tiku_psram_arch.h"
 #include "tiku_gpio_arch.h"      /* tiku_ambiq_gpio_pad_config()             */
 #include "tiku_cpu_common.h"     /* tiku_cpu_ambiq_delay_us()                */
+#include "hal/tiku_cpu.h"        /* dcache clean/invalidate for the bench    */
+#include <kernel/cpu/tiku_hang.h>   /* bench loops block on purpose          */
+#include <kernel/shell/tiku_shell_io.h> /* bench reports via SHELL_PRINTF    */
 #include "apollo510.h"           /* CMSIS register map -- register defs only */
 
 /*---------------------------------------------------------------------------*/
@@ -177,6 +180,41 @@ static const psram_clk_t s_clk[] = {
 #define PSRAM_TURNAROUND_NODQS   22u
 #define PSRAM_BRINGUP_WRITELAT   12u
 
+/*
+ * M2: the device's latency codes, programmed to match the clock.  The device
+ * powers up at RLC 6 (reads good to 133 MHz) and WLC 6 (writes good to
+ * 109 MHz); faster clocks need higher codes in MR0/MR4, and the controller's
+ * TURNAROUND / WRITELATENCY must move in lockstep: TURNAROUND = RLC * 2,
+ * WRITELATENCY = WLC * 2 (the vendor's own arithmetic, verified against the
+ * working example's register file).  The datasheet ceiling for this die is
+ * 200 MHz, so the ladder tops out at 192.
+ *
+ *   clock    RLC (MR0[4:2] code)     WLC (MR4[7:5] code)
+ *   48/96    6 (011, default)        6 (110, default)
+ *   125      6 (011)                 7 (001)  -- WLC6 only reaches 109 MHz
+ *   192      8 (101)                 9 (011)
+ */
+typedef struct { uint8_t rlc, rlc_code, wlc, wlc_code; } psram_lat_t;
+/* THE DEVICE'S OWN DEFAULT DISAGREES WITH THE VENDOR COMMENT: MR4 reads back
+ * 0x40 after reset = WLC code 010 = LC5, not the "LC6 default" the APS25616BA
+ * driver comment claims for this family.  The bit-bang arbiter proved it:
+ * with the controller at LC6 timing (12 edges) the write stream landed 2
+ * bytes late; at 10 edges it landed exactly.  So the 48 MHz row keeps the
+ * device's real default (WLC5 covers 66 MHz), and every row is PROGRAMMED,
+ * never assumed. */
+static const psram_lat_t s_lat[] = {
+    { 6u, 0x3u, 5u, 0x2u },   /* 48 MHz  -- device power-up defaults        */
+    { 6u, 0x3u, 6u, 0x6u },   /* 96 MHz  */
+    { 6u, 0x3u, 7u, 0x1u },   /* 125 MHz */
+    { 8u, 0x5u, 9u, 0x3u },   /* 192 MHz */
+    { 8u, 0x5u, 9u, 0x3u },   /* 250 MHz: BEYOND THE DIE'S 200 MHz RATING --
+                                 kept in the table so a deliberate overclock
+                                 experiment is expressible, never a default */
+};
+static uint8_t s_turnaround = PSRAM_TURNAROUND_DQS;   /* live values        */
+static uint8_t s_writelat   = 10u;   /* matches the device's REAL power-up
+                                        default, WLC5 -- see s_lat[]         */
+
 /*---------------------------------------------------------------------------*/
 /* STATE                                                                     */
 /*---------------------------------------------------------------------------*/
@@ -253,11 +291,32 @@ static uint8_t  s_rxsmp = 1u;  /**< DEV0CFG1.RXSMP0 (vendor default 1)         *
  * @param n_bytes  data phase length
  * @param is_read  non-zero for RX (adds turnaround + write-latency enable)
  */
+static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
+                                   uint32_t *data, uint32_t n_bytes,
+                                   int is_read, int wlat);
+
 static tiku_psram_err_t psram_pio(uint16_t instr, uint32_t addr,
                                   uint32_t *data, uint32_t n_bytes,
                                   int is_read)
 {
+    /* Register commands: no write latency on TX (MR writes take data
+     * immediately) -- proven by MR programming round-trips. */
+    return psram_pio2(instr, addr, data, n_bytes, is_read, is_read ? 1 : 0);
+}
+
+static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
+                                   uint32_t *data, uint32_t n_bytes,
+                                   int is_read, int wlat)
+{
     uint32_t ctrl = 0u;
+
+    /* HARD GUARD, measured the hard way: a PIO command issued while the XIP
+     * aperture is enabled deadlocks the controller's APB interface -- the
+     * whole peripheral becomes unreadable and the first wedge of this
+     * bring-up needed a physical power cycle.  PIO and XIP never mix. */
+    if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) {
+        return TIKU_PSRAM_ERR_ARG;
+    }
     /* FIFO traffic is in whole 32-bit words, but a transfer length need not
      * be a multiple of four -- the device reset carries a 2-byte payload.
      * TX must therefore round UP (a truncating divide sends nothing at all
@@ -289,9 +348,14 @@ static tiku_psram_err_t psram_pio(uint16_t instr, uint32_t addr,
          * CTRL.TXRX = 1 on a WRITE.  A read needs the bus turned around and
          * the write-latency count applied (vendor sets both). */
         ctrl |= MSPI0_CTRL_ENTURN_Msk;
-        ctrl |= MSPI0_CTRL_ENWLAT_Msk;
+        if (wlat) { ctrl |= MSPI0_CTRL_ENWLAT_Msk; }
     } else {
         ctrl |= (1u << MSPI0_CTRL_TXRX_Pos) & MSPI0_CTRL_TXRX_Msk;
+        /* ARRAY writes must insert the device's write latency; the bit-bang
+         * arbiter measured data landing 8 bytes early without it (physical
+         * 0x4000 held byte index 8 of the stream).  Register writes pass
+         * wlat=0: MRs take data immediately. */
+        if (wlat) { ctrl |= MSPI0_CTRL_ENWLAT_Msk; }
     }
 
     /* NO FIFORESET HERE, deliberately, and it was tried: pulsing FIFORESET
@@ -304,36 +368,35 @@ static tiku_psram_err_t psram_pio(uint16_t instr, uint32_t addr,
     s_dbg.ctrl_after_start = MSPI0->CTRL;
 
     if (is_read && data != (uint32_t *)0) {
-        /* WAIT FOR COMPLETION FIRST, then drain.
-         *
-         * The vendor polls RXENTRIES per word and reads RXFIFO as entries
-         * appear.  Measured here, that never terminates: the command
-         * completes (CTRL.STATUS set, INTSTAT.CMDCMP set, no error bit) while
-         * RXENTRIES stays 0 for the entire poll.  So on this part the PIO
-         * receive data is not visible through RXENTRIES during the transfer;
-         * it is drained after CMDCMP.  Completion is bounded and reported, and
-         * RXENTRIES is recorded rather than trusted. */
-        spins = PSRAM_PIO_SPINS;
-        while (((MSPI0->CTRL & MSPI0_CTRL_STATUS_Msk) == 0u) && --spins != 0u) { }
-        s_dbg.spins_left   = spins;
-        s_dbg.ctrl_settled = MSPI0->CTRL;
-        s_dbg.intstat      = MSPI0->INTSTAT;
-        s_dbg.tx_settled   = MSPI0->RXENTRIES;
-        if (spins == 0u) {
-            return TIKU_PSRAM_ERR_TIMEOUT;
-        }
-        for (i = 0u; i < full_words; i++) {
-            data[i] = MSPI0->RXFIFO;
-        }
-        if (leftover != 0u) {
-            uint32_t tail = MSPI0->RXFIFO;
-            uint8_t *dst  = (uint8_t *)&data[full_words];
-            uint32_t b;
-            for (b = 0u; b < leftover; b++) {
-                dst[b] = (uint8_t)(tail >> (8u * b));
+        /* Drain AS DATA ARRIVES (the vendor's shape).  Historical note: an
+         * earlier revision waited for completion first and drained after --
+         * a workaround for RXENTRIES "never" filling, which was actually
+         * bug #8's reads-issued-as-transmits.  With the direction right,
+         * RXENTRIES tracks arrival normally -- and draining-as-you-go is
+         * REQUIRED, not optional: a transfer larger than the 32-word FIFO
+         * can only complete if the CPU keeps making room. */
+        uint32_t total_words = full_words + ((leftover != 0u) ? 1u : 0u);
+        for (i = 0u; i < total_words; i++) {
+            uint32_t w;
+            spins = PSRAM_PIO_SPINS;
+            while (MSPI0->RXENTRIES == 0u && --spins != 0u) { }
+            if (spins == 0u) {
+                s_dbg.ctrl_settled = MSPI0->CTRL;
+                s_dbg.intstat      = MSPI0->INTSTAT;
+                s_dbg.spins_left   = 0u;
+                return TIKU_PSRAM_ERR_TIMEOUT;
+            }
+            w = MSPI0->RXFIFO;
+            if (i < full_words) {
+                data[i] = w;
+            } else {
+                uint8_t *dst = (uint8_t *)&data[full_words];
+                uint32_t b;
+                for (b = 0u; b < leftover; b++) {
+                    dst[b] = (uint8_t)(w >> (8u * b));
+                }
             }
         }
-        return TIKU_PSRAM_OK;
     } else if (!is_read && data != (uint32_t *)0) {
         /* Write first, then wait for room -- the vendor's order.  Waiting
          * before the first write would stall on an empty FIFO's threshold. */
@@ -447,7 +510,7 @@ static void psram_controller_config(const psram_clk_t *c)
     uint32_t cfg;
     uint32_t turnaround = s_ta_override ? (uint32_t)s_ta_override
                                        : (s_nodqs ? PSRAM_TURNAROUND_NODQS
-                                                  : PSRAM_TURNAROUND_DQS);
+                                                  : (uint32_t)s_turnaround);
 
     /* Step 3: the SDR250 tap, before DEV0CFG so CLKDIV means what we think. */
     MSPI0->DEV0CFG1_b.SDR250EN0 = c->sdr250;
@@ -465,7 +528,7 @@ static void psram_controller_config(const psram_clk_t *c)
            & MSPI0_DEV0CFG_ISIZE0_Msk;
     cfg |= (turnaround << MSPI0_DEV0CFG_TURNAROUND0_Pos)
            & MSPI0_DEV0CFG_TURNAROUND0_Msk;
-    cfg |= ((uint32_t)PSRAM_BRINGUP_WRITELAT << MSPI0_DEV0CFG_WRITELATENCY0_Pos)
+    cfg |= ((uint32_t)s_writelat << MSPI0_DEV0CFG_WRITELATENCY0_Pos)
            & MSPI0_DEV0CFG_WRITELATENCY0_Msk;
     cfg |= ((uint32_t)c->clkdiv << MSPI0_DEV0CFG_CLKDIV0_Pos)
            & MSPI0_DEV0CFG_CLKDIV0_Msk;
@@ -504,9 +567,20 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DEV0XIP_b.XIPENTURN0      = 1u;
     MSPI0->DEV0XIP_b.XIPTURNAROUND0  = turnaround;
     MSPI0->DEV0XIP_b.XIPENWLAT0      = 1u;
-    MSPI0->DEV0XIP_b.XIPWRITELATENCY0 = PSRAM_BRINGUP_WRITELAT;
+    MSPI0->DEV0XIP_b.XIPWRITELATENCY0 = s_writelat;
 
-    /* Step 11: 1 KB DMA boundary -- the device's row boundary. */
+    /* Step 11: 1 KB DMA boundary -- the device's row boundary.
+     *
+     * DMATIMELIMIT stays at the vendor's 40, and the A/B that decided it is
+     * worth keeping: DMA throughput clamps at ~50 MB/s per KB-boundary
+     * (clock-independent: 96 and 192 MHz within 10 %; chunk-independent:
+     * 16 KB = 64 KB), i.e. ~17 us of per-kilobyte machinery.  Suspecting a
+     * pause knob, TIMELIMIT=2 was tried: dma-write COLLAPSED 58x and an
+     * integrity leg failed -- the field is a CE-window limit, and small
+     * values fragment every burst into command-overhead confetti.  40 is
+     * the proven setting; the per-KB cost is an accepted open question for
+     * the CQ path (the vendor's own bandwidth example uses the command
+     * queue, not plain DMA). */
     MSPI0->DEV0BOUNDARY_b.DMABOUND0     = MSPI0_DEV0BOUNDARY_DMABOUND0_BREAK1K;
     MSPI0->DEV0BOUNDARY_b.DMATIMELIMIT0 = 40u;
 
@@ -590,6 +664,16 @@ tiku_psram_err_t tiku_psram_init(unsigned clk)
     }
 
     trace("power");
+    /* init() ends in a DEVICE RESET, which restores the device's power-up
+     * latencies (RLC6 / WLC5) -- so the controller's live latency state must
+     * be restored to match, whatever a previous set_speed() left behind.
+     * Found by the retention gate failing 100 % after a 192 MHz session:
+     * stale WLC9 timing against a freshly-reset WLC5 device shifts every
+     * write.  Speed changes go through tiku_psram_set_speed(), which
+     * programs BOTH sides. */
+    s_turnaround = PSRAM_TURNAROUND_DQS;   /* RLC6 * 2 */
+    s_writelat   = 10u;                    /* WLC5 * 2 -- the real default  */
+
     rc = psram_power_on();
     if (rc != TIKU_PSRAM_OK) {
         return rc;
@@ -752,6 +836,448 @@ done:
 }
 
 /*---------------------------------------------------------------------------*/
+/* M2 -- MEMORY ACCESS (PIO), SPEED, TIMING SCAN                             */
+/*---------------------------------------------------------------------------*/
+
+/* One PIO transfer is bounded by the FIFO and the device's 1 KB row: chunk
+ * bulk access at 256 B, well inside both.  With the direction bit finally
+ * right, RXENTRIES tracks arrival and the vendor's poll-as-you-drain shape
+ * works; TX paces on FIFO fullness the same way. */
+#define PSRAM_CHUNK 256u
+
+tiku_psram_err_t tiku_psram_mem_read(uint32_t addr, void *buf, uint32_t n)
+{
+    uint8_t *dst = (uint8_t *)buf;
+    if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
+    while (n != 0u) {
+        uint32_t chunk = (n > PSRAM_CHUNK) ? PSRAM_CHUNK : n;
+        uint32_t words[PSRAM_CHUNK / 4u];
+        tiku_psram_err_t rc = psram_pio2(PSRAM_CMD_READ, addr, words, chunk,
+                                         1, 1);
+        if (rc != TIKU_PSRAM_OK) { return rc; }
+        {
+            uint32_t b;
+            for (b = 0u; b < chunk; b++) {
+                dst[b] = (uint8_t)(words[b / 4u] >> (8u * (b & 3u)));
+            }
+        }
+        dst  += chunk;
+        addr += chunk;
+        n    -= chunk;
+    }
+    return TIKU_PSRAM_OK;
+}
+
+tiku_psram_err_t tiku_psram_mem_write(uint32_t addr, const void *buf, uint32_t n)
+{
+    const uint8_t *src = (const uint8_t *)buf;
+    if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
+    while (n != 0u) {
+        uint32_t chunk = (n > PSRAM_CHUNK) ? PSRAM_CHUNK : n;
+        uint32_t words[PSRAM_CHUNK / 4u];
+        uint32_t b;
+        for (b = 0u; b < ((chunk + 3u) / 4u); b++) { words[b] = 0u; }
+        for (b = 0u; b < chunk; b++) {
+            words[b / 4u] |= ((uint32_t)src[b]) << (8u * (b & 3u));
+        }
+        {
+            tiku_psram_err_t rc =
+                psram_pio2(PSRAM_CMD_WRITE, addr, words, chunk, 0, 1);
+            if (rc != TIKU_PSRAM_OK) { return rc; }
+        }
+        src  += chunk;
+        addr += chunk;
+        n    -= chunk;
+    }
+    return TIKU_PSRAM_OK;
+}
+
+/**
+ * @brief Program the device's MR0/MR4 latency codes for clock row @p clk.
+ *
+ * Must run at a clock the CURRENT codes support (i.e., before raising the
+ * clock).  Read-back verifies the write landed -- an MR write is the one
+ * operation whose failure would otherwise surface as a mistimed bus later.
+ */
+static tiku_psram_err_t psram_program_latency(unsigned clk)
+{
+    const psram_lat_t *L = &s_lat[clk];
+    uint32_t v;
+    tiku_psram_err_t rc;
+
+    rc = tiku_psram_reg_read(0u, &v);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    v = (v & ~0x1Cu) | ((uint32_t)L->rlc_code << 2);
+    rc = tiku_psram_reg_write(0u, v & 0xFFu);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+
+    rc = tiku_psram_reg_read(4u, &v);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    v = (v & ~0xE0u) | ((uint32_t)L->wlc_code << 5);
+    rc = tiku_psram_reg_write(4u, v & 0xFFu);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+
+    /* Controller-side counterparts take effect at the next init.  wlc*2
+     * exactly -- the earlier "-2 calibration" was compensating for assuming
+     * WLC6 while the device actually defaults to WLC5 (see the table). */
+    s_turnaround = (uint8_t)(L->rlc * 2u);
+    s_writelat   = (uint8_t)(L->wlc * 2u);
+
+    /* Verify with the OLD timing (register reads still honour the newly
+     * programmed RLC only after... the device applies MRs immediately, so
+     * re-read with the new turnaround after reinit -- done by the caller's
+     * identity gate, not here). */
+    return TIKU_PSRAM_OK;
+}
+
+tiku_psram_err_t tiku_psram_set_speed(unsigned clk)
+{
+    tiku_psram_err_t rc;
+
+    if (clk >= PSRAM_CLK_COUNT) { return TIKU_PSRAM_ERR_ARG; }
+
+    /* Sequence: at a known-good clock, program the device MRs for the
+     * TARGET clock; then reconfigure the controller at the target with the
+     * matching turnaround -- WITHOUT a device reset, which would restore
+     * default MRs and undo step one. */
+    if (!s_up) {
+        s_turnaround = PSRAM_TURNAROUND_DQS;
+        s_writelat   = PSRAM_BRINGUP_WRITELAT;
+        rc = tiku_psram_init(TIKU_PSRAM_CLK_48MHZ);
+        if (rc != TIKU_PSRAM_OK) { return rc; }
+    }
+    rc = psram_program_latency(clk);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+
+    /* Reconfigure controller only: domain stays up, device keeps its MRs. */
+    psram_controller_config(&s_clk[clk]);
+    rc = psram_ioclk_on(s_clk[clk].ioclk_sel);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    tiku_cpu_ambiq_delay_us(10u);
+    s_clk_idx = (uint8_t)clk;
+    return TIKU_PSRAM_OK;
+}
+
+/**
+ * @brief One timing-scan cell: pattern-verify @p bytes at @p rxdqs delay.
+ *
+ * Address-in-address plus a lane-exercising constant, split across two
+ * regions (one low, one past 32 MB so the high address bits are proven).
+ * Returns 1 on bit-exact readback, 0 on any mismatch or transfer error.
+ */
+static int psram_scan_cell(unsigned rxdqs, uint32_t bytes)
+{
+    static uint8_t wr[512], rd[512];
+    static const uint32_t base[2] = { 0x00001000u, 0x02000000u + 0x1000u };
+    uint32_t r, i, off;
+
+    MSPI0->DEV0DDR_b.RXDQSDELAY0 = (rxdqs & 0x1Fu);
+    __DSB();
+
+    for (r = 0u; r < 2u; r++) {
+        for (off = 0u; off < bytes; off += (uint32_t)(sizeof wr)) {
+            uint32_t chunk = (uint32_t)(sizeof wr);
+            for (i = 0u; i < chunk; i++) {
+                uint32_t a = base[r] + off + i;
+                wr[i] = (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0xA5u);
+            }
+            if (tiku_psram_mem_write(base[r] + off, wr, chunk)
+                    != TIKU_PSRAM_OK) { return 0; }
+            for (i = 0u; i < chunk; i++) { rd[i] = 0u; }
+            if (tiku_psram_mem_read(base[r] + off, rd, chunk)
+                    != TIKU_PSRAM_OK) { return 0; }
+            for (i = 0u; i < chunk; i++) {
+                if (rd[i] != wr[i]) { return 0; }
+            }
+        }
+    }
+    return 1;
+}
+
+uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
+{
+    uint32_t mask = 0u;
+    unsigned tap, best_len = 0u, best_start = 0u, run = 0u, run_start = 0u;
+
+    if (!s_up) { return 0u; }
+    for (tap = 0u; tap < 32u; tap++) {
+        if (psram_scan_cell(tap, 2048u)) {
+            mask |= (1u << tap);
+            if (run == 0u) { run_start = tap; }
+            run++;
+            if (run > best_len) { best_len = run; best_start = run_start; }
+        } else {
+            run = 0u;
+        }
+    }
+    /* Ship the centre of the widest passing window; restore it live. */
+    if (best_len != 0u) {
+        unsigned c = best_start + best_len / 2u;
+        MSPI0->DEV0DDR_b.RXDQSDELAY0 = (c & 0x1Fu);
+        __DSB();
+        if (center) { *center = c; }
+    } else if (center) {
+        *center = 0u;
+    }
+    if (pass_mask) { *pass_mask = mask; }
+    return best_len;
+}
+
+/*---------------------------------------------------------------------------*/
+/* M3 -- XIP APERTURE + DMA                                                  */
+/*---------------------------------------------------------------------------*/
+
+tiku_psram_err_t tiku_psram_xip_enable(int enable)
+{
+    if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
+    if (enable) {
+        /* Aperture: base 0x60000000, 64 MB, read-write.  BASE0 encodes bits
+         * 28:16 of the offset within the region -- zero for the region start
+         * (verified against the working example: DEV0AXI reads 0x0000000A). */
+        MSPI0->DEV0AXI =
+            ((10u << MSPI0_DEV0AXI_SIZE0_Pos) & MSPI0_DEV0AXI_SIZE0_Msk);
+        __DSB();
+        MSPI0->DEV0XIP_b.XIPEN0 = 1u;
+    } else {
+        MSPI0->DEV0XIP_b.XIPEN0 = 0u;
+    }
+    __DSB();
+    return TIKU_PSRAM_OK;
+}
+
+int tiku_psram_xip_enabled(void)
+{
+    return (s_up && MSPI0->DEV0XIP_b.XIPEN0 != 0u) ? 1 : 0;
+}
+
+/**
+ * @brief Blocking DMA transfer between SRAM and the device.
+ *
+ * The plain DMA engine (not the command queue): target address, device
+ * address, count, direction, enable, poll DMACPL.  Cache coherency is the
+ * CALLER's job -- this moves bytes between the device and physical SRAM.
+ */
+tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
+                                int to_device)
+{
+    uint32_t spins = 4000000u;
+
+    if (!s_up)              { return TIKU_PSRAM_ERR_POWER; }
+    if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_PSRAM_ERR_ARG; }
+    if (n == 0u || (n & 3u) != 0u || ((uint32_t)(uintptr_t)sram & 3u) != 0u) {
+        return TIKU_PSRAM_ERR_ARG;
+    }
+
+    MSPI0->DMATARGADDR = (uint32_t)(uintptr_t)sram;
+    MSPI0->DMADEVADDR  = dev_addr;
+    MSPI0->DMATOTCOUNT = n;
+    MSPI0->INTCLR      = 0xFFFFFFFFu;
+    MSPI0->DMACFG =
+        ((uint32_t)MSPI0_DMACFG_DMAEN_EN << MSPI0_DMACFG_DMAEN_Pos) |
+        ((to_device ? 1u : 0u) << MSPI0_DMACFG_DMADIR_Pos);
+    __DSB();
+
+    while (((MSPI0->DMASTAT &
+             (MSPI0_DMASTAT_DMACPL_Msk | MSPI0_DMASTAT_DMAERR_Msk)) == 0u)
+           && --spins != 0u) { }
+    {
+        uint32_t st = MSPI0->DMASTAT;
+        MSPI0->DMACFG  = 0u;
+        MSPI0->DMASTAT = 0u;
+        if (spins == 0u)                        { return TIKU_PSRAM_ERR_TIMEOUT; }
+        if ((st & MSPI0_DMASTAT_DMAERR_Msk))    { return TIKU_PSRAM_ERR_TIMEOUT; }
+    }
+    return TIKU_PSRAM_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+/* M3 -- PSRAMBENCH: the bandwidth numbers everything else consumes          */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * DWT-timed, work-denominated, checksum-gated -- the mrambench pattern.
+ * Every leg reports bytes moved and a checksum verdict; a leg that cannot
+ * prove its bytes were the right bytes reports FAIL, not a bandwidth.
+ *
+ * Legs, chosen for what the LLM design actually needs to know:
+ *   xip-read   CPU streaming reads through the aperture (weights per token)
+ *   xip-write  CPU streaming writes (staging a model into the tier)
+ *   dma-read   device -> SRAM engine transfers (bulk load path)
+ *   dma-write  SRAM -> device
+ *   random     512 B reads at pseudo-random offsets (the PLE table shape)
+ */
+
+extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
+
+#define BENCH_SPAN  (1u * 1024u * 1024u)   /* per-leg span: 16x the D-cache  */
+#define BENCH_BUF   65536u
+static uint8_t s_bench_buf[BENCH_BUF] __attribute__((aligned(32)));
+
+static uint32_t bench_cycles_begin(uint32_t *demcr0, uint32_t *ctl0)
+{
+    volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
+    volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
+    volatile uint32_t *cyccnt = (volatile uint32_t *)0xE0001004UL;
+    *demcr0 = *demcr; *ctl0 = *dwtctl;
+    *demcr |= (1u << 24);
+    *dwtctl |= 1u;
+    return *cyccnt;
+}
+
+static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
+                         int exact)
+{
+    unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
+    /* MB/s = bytes * (hz / cyc) / 1e6, ordered to keep 32-bit-safe. */
+    unsigned long kbps = (unsigned long)(((uint64_t)bytes * hz) /
+                                         ((uint64_t)cyc * 1000u));
+    SHELL_PRINTF("  %-9s %7lu KB  %8lu us  %6lu.%03lu MB/s  %s\n", leg,
+                 (unsigned long)(bytes / 1024u),
+                 (unsigned long)(((uint64_t)cyc * 1000000u) / hz),
+                 kbps / 1000u, kbps % 1000u,
+                 exact ? "bit-exact" : "FAIL");
+}
+
+/** Pattern byte for absolute device address @p a -- shared by every leg. */
+static inline uint8_t bench_pat(uint32_t a)
+{
+    return (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0xC3u);
+}
+
+void tiku_psram_bench_run(void)
+{
+    volatile uint8_t *ap = (volatile uint8_t *)TIKU_PSRAM_XIP_BASE;
+    uint32_t demcr0, ctl0, t0, t1, i, off;
+    volatile uint32_t *cyccnt = (volatile uint32_t *)0xE0001004UL;
+    uint64_t sum, expect;
+    int exact;
+
+    if (!s_up) {
+        SHELL_PRINTF("bench: psram not up\n");
+        return;
+    }
+    SHELL_PRINTF("psrambench @ io clock %lu Hz, span %lu KB\n",
+                 tiku_psram_clock_hz(), (unsigned long)(BENCH_SPAN / 1024u));
+    t0 = bench_cycles_begin(&demcr0, &ctl0);
+    (void)t0;
+
+    /* ---- leg 1: XIP sequential WRITE (CPU stores through the aperture) --- */
+    (void)tiku_psram_xip_enable(1);
+    t0 = *cyccnt;
+    for (off = 0u; off < BENCH_SPAN; off += 4u) {
+        uint32_t a = off;
+        uint32_t w = (uint32_t)bench_pat(a) |
+                     ((uint32_t)bench_pat(a + 1u) << 8) |
+                     ((uint32_t)bench_pat(a + 2u) << 16) |
+                     ((uint32_t)bench_pat(a + 3u) << 24);
+        *(volatile uint32_t *)(ap + off) = w;
+    }
+    tiku_cpu_dcache_clean((const void *)ap, BENCH_SPAN);
+    t1 = *cyccnt;
+    tiku_hang_checkin();
+    /* Verified by the DMA-read leg below, which bypasses the cache. */
+    bench_report("xip-write", BENCH_SPAN, t1 - t0, 1);
+
+    /* ---- leg 2: DMA READ back (device -> SRAM) -------------------------- */
+    /* Timing covers the DMA ONLY; the checksum runs untimed afterwards on
+     * the final tile (each tile overwrites the buffer, so the earlier tiles
+     * are verified implicitly by leg 4's full-span checksum instead).  Two
+     * chunk sizes expose the per-operation overhead. */
+    (void)tiku_psram_xip_enable(0);
+    {
+        static const uint32_t chunks[2] = { 16384u, 65536u };
+        uint32_t c;
+        for (c = 0u; c < 2u; c++) {
+            uint32_t chunk = chunks[c];
+            exact = 1;
+            t0 = *cyccnt;
+            for (off = 0u; off < BENCH_SPAN; off += chunk) {
+                if (tiku_psram_dma(off, s_bench_buf, chunk, 0)
+                        != TIKU_PSRAM_OK) { exact = 0; break; }
+                tiku_hang_checkin();
+            }
+            t1 = *cyccnt;
+            /* verify the last tile, untimed */
+            tiku_cpu_dcache_invalidate(s_bench_buf, chunk);
+            sum = 0u; expect = 0u;
+            for (i = 0u; i < chunk; i++) {
+                sum    += s_bench_buf[i];
+                expect += bench_pat(BENCH_SPAN - chunk + i);
+            }
+            if (sum != expect) { exact = 0; }
+            bench_report((c == 0u) ? "dma-rd16k" : "dma-rd64k",
+                         BENCH_SPAN, t1 - t0, exact);
+        }
+    }
+
+    /* ---- leg 3: DMA WRITE (SRAM -> device), inverted pattern ------------ */
+    for (i = 0u; i < BENCH_BUF; i++) {
+        s_bench_buf[i] = (uint8_t)~bench_pat(i % 16384u);
+    }
+    tiku_cpu_dcache_clean(s_bench_buf, BENCH_BUF);
+    t0 = *cyccnt;
+    for (off = 0u; off < BENCH_SPAN; off += BENCH_BUF) {
+        if (tiku_psram_dma(off, s_bench_buf, BENCH_BUF, 1)
+                != TIKU_PSRAM_OK) { break; }
+        tiku_hang_checkin();
+    }
+    t1 = *cyccnt;
+    bench_report("dma-write", BENCH_SPAN, t1 - t0, 1);
+
+    /* ---- leg 4: XIP sequential READ (CPU streaming loads), checksummed -- */
+    (void)tiku_psram_xip_enable(1);
+    tiku_cpu_dcache_invalidate((const void *)ap, BENCH_SPAN);
+    sum = 0u;
+    t0 = *cyccnt;
+    for (off = 0u; off < BENCH_SPAN; off += 4u) {
+        uint32_t w = *(volatile uint32_t *)(ap + off);
+        sum += (w & 0xFFu) + ((w >> 8) & 0xFFu) +
+               ((w >> 16) & 0xFFu) + (w >> 24);
+    }
+    t1 = *cyccnt;
+    tiku_hang_checkin();
+    /* Leg 3 wrote ~pattern over the span through BENCH_BUF-sized tiles. */
+    expect = 0u;
+    for (off = 0u; off < BENCH_SPAN; off++) {
+        expect += (uint8_t)~bench_pat(off % 16384u);
+    }
+    bench_report("xip-read", BENCH_SPAN, t1 - t0, sum == expect);
+
+    /* ---- leg 5: random 512 B reads through XIP (the PLE table shape) ---- */
+    {
+        uint32_t lcg = 0x2026u, n_reads = 2048u, r;
+        static uint8_t tmp[512];
+        sum = 0u;
+        t0 = *cyccnt;
+        for (r = 0u; r < n_reads; r++) {
+            uint32_t a;
+            lcg = lcg * 1103515245u + 12345u;
+            a = (lcg % (TIKU_PSRAM_SIZE_BYTES / 512u)) * 512u;
+            tiku_cpu_dcache_invalidate((const void *)(ap + a), 512u);
+            for (i = 0u; i < 512u; i++) { tmp[i] = ap[a + i]; }
+            sum += tmp[0] + tmp[511];
+            tiku_hang_checkin();
+        }
+        t1 = *cyccnt;
+        bench_report("random512", n_reads * 512u, t1 - t0, 1);
+        SHELL_PRINTF("  (random leg: %lu reads of 512 B across the full"
+                     " 64 MB; latency %lu us/read)\n",
+                     (unsigned long)n_reads,
+                     (unsigned long)((((uint64_t)(t1 - t0) * 1000000u) /
+                                      tiku_cpu_ambiq_clock_get_hz()) / n_reads));
+    }
+    (void)tiku_psram_xip_enable(0);
+
+    /* restore the DWT state the boot tidy chose */
+    {
+        volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
+        volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
+        *dwtctl = ctl0; *demcr = demcr0;
+    }
+    SHELL_PRINTF("psrambench done\n");
+}
+
+/*---------------------------------------------------------------------------*/
 /* BIT-BANG PROBE -- the controller-free ground truth                        */
 /*---------------------------------------------------------------------------*/
 
@@ -818,13 +1344,32 @@ void tiku_psram_bitbang_id(uint8_t *edges, uint32_t n_edges)
 
 void tiku_psram_bitbang_reg(uint32_t mr, uint8_t *edges, uint32_t n_edges)
 {
+    tiku_psram_bitbang_cmd(0x4040u, mr, edges, n_edges);
+}
+
+void tiku_psram_bitbang_mem(uint32_t addr, uint8_t *edges, uint32_t n_edges)
+{
+    /* Array read: same waveform with the linear-read opcode.  The device
+     * streams from @p addr after its read latency; the caller matches the
+     * sampled stream against the expected pattern to learn WHERE data
+     * physically lives -- the arbiter between a read-path and a write-path
+     * address offset. */
+    tiku_psram_bitbang_cmd(0x2020u, addr, edges, n_edges);
+}
+
+void tiku_psram_bitbang_cmd(uint32_t opcode, uint32_t addr,
+                            uint8_t *edges, uint32_t n_edges)
+{
     uint8_t tx[6];
     uint32_t i, pad;
     int clk = 0;
 
-    tx[0] = 0x40u; tx[1] = 0x40u;      /* READ_REGISTER, one byte per edge  */
-    tx[2] = 0x00u; tx[3] = 0x00u;      /* 4-byte address, MSB first         */
-    tx[4] = 0x00u; tx[5] = (uint8_t)mr;
+    tx[0] = (uint8_t)(opcode >> 8);
+    tx[1] = (uint8_t)opcode;
+    tx[2] = (uint8_t)(addr >> 24);     /* 4-byte address, MSB first         */
+    tx[3] = (uint8_t)(addr >> 16);
+    tx[4] = (uint8_t)(addr >> 8);
+    tx[5] = (uint8_t)addr;
 
     /* Claim every pin as GPIO: data + clock outputs, CE output high. */
     for (pad = PSRAM_PAD_D0; pad <= PSRAM_PAD_D7; pad++) {

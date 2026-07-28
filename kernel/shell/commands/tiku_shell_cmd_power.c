@@ -39,6 +39,7 @@
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
 #include <arch/ambiq/tiku_power_ambiq.h>
 #include <arch/ambiq/tiku_timer_arch.h>       /* stimer reclock / rate       */
+#include <arch/ambiq/tiku_cpu_common.h>       /* tiku_cpu_ambiq_delay_us     */
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
 #endif
@@ -628,6 +629,171 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 if (streq(argv[k], "nodqs")) { nodqs = 1; }
             }
         }
+        if (argc >= 3 && streq(argv[2], "speed") && argc >= 4) {
+            /* power psram speed <48|96|125|192> -- program device latencies
+             * and reconfigure the controller, then prove it with the
+             * identity gate at the new clock. */
+            unsigned n = 0u; const char *q = argv[3];
+            unsigned row;
+            tiku_psram_id_t id; tiku_psram_err_t rc;
+            while (*q >= '0' && *q <= '9') { n = n*10u + (unsigned)(*q++ - '0'); }
+            row = (n >= 192u) ? TIKU_PSRAM_CLK_192MHZ
+                : (n >= 125u) ? TIKU_PSRAM_CLK_125MHZ
+                : (n >= 96u)  ? TIKU_PSRAM_CLK_96MHZ
+                              : TIKU_PSRAM_CLK_48MHZ;
+            rc = tiku_psram_set_speed(row);
+            if (rc != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("speed: set failed (%d)\n", (int)rc);
+                return;
+            }
+            rc = tiku_psram_read_id(&id);
+            SHELL_PRINTF("speed: io clock %lu Hz, identity %s"
+                         " (vendor %02x density %x)\n",
+                         tiku_psram_clock_hz(),
+                         (rc == TIKU_PSRAM_OK) ? "ok" : "FAILED",
+                         id.vendor_id, id.density_code);
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "scan3")) {
+            /* power psram scan3 [mhz] -- the real M2 timing scan at the live
+             * (or requested) clock.  The output must show failing taps
+             * bracketing the window, or the scan proved nothing. */
+            uint32_t mask = 0u; unsigned center = 0u, width, t;
+            if (argc >= 5) { }
+            if (argc >= 4) {
+                unsigned n = 0u; const char *q = argv[3];
+                while (*q >= '0' && *q <= '9') { n = n*10u + (unsigned)(*q++ - '0'); }
+                if (n) {
+                    unsigned row = (n >= 192u) ? TIKU_PSRAM_CLK_192MHZ
+                                 : (n >= 125u) ? TIKU_PSRAM_CLK_125MHZ
+                                 : (n >= 96u)  ? TIKU_PSRAM_CLK_96MHZ
+                                               : TIKU_PSRAM_CLK_48MHZ;
+                    if (tiku_psram_set_speed(row) != TIKU_PSRAM_OK) {
+                        SHELL_PRINTF("scan3: speed set failed\n");
+                        return;
+                    }
+                }
+            }
+            width = tiku_psram_timing_scan(&mask, &center);
+            SHELL_PRINTF("timing scan @ %lu Hz: taps 0..31 = ",
+                         tiku_psram_clock_hz());
+            for (t = 0u; t < 32u; t++) {
+                SHELL_PRINTF("%c", (mask & (1u << t)) ? 'P' : '.');
+            }
+            SHELL_PRINTF("\n  widest window %lu taps, shipped tap %u%s\n",
+                         (unsigned long)width, center,
+                         (width == 32u) ? "  [WARNING: passes everywhere --"
+                                          " not a proven scan at this clock]"
+                                        : "");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "mem")) {
+            /* power psram mem -- the M2 acceptance gate: 64 KB address-derived
+             * pattern across low + high regions, bit-exact, via PIO. */
+            static uint8_t wr[1024], rd[1024];
+            static uint32_t xorh[256];
+            static const uint32_t base[2] = { 0x00010000u, 0x03F00000u };
+            uint32_t r, off, i, errs = 0u, sum = 0u;
+            for (i = 0u; i < 256u; i++) { xorh[i] = 0u; }
+            for (r = 0u; r < 2u; r++) {
+                for (off = 0u; off < 32768u; off += (uint32_t)(sizeof wr)) {
+                    for (i = 0u; i < (uint32_t)(sizeof wr); i++) {
+                        uint32_t a = base[r] + off + i;
+                        wr[i] = (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0x5Au);
+                    }
+                    if (tiku_psram_mem_write(base[r] + off, wr,
+                            (uint32_t)(sizeof wr)) != TIKU_PSRAM_OK) {
+                        SHELL_PRINTF("mem: write fail @%lx\n",
+                                     (unsigned long)(base[r] + off));
+                        return;
+                    }
+                }
+                for (off = 0u; off < 32768u; off += (uint32_t)(sizeof rd)) {
+                    if (tiku_psram_mem_read(base[r] + off, rd,
+                            (uint32_t)(sizeof rd)) != TIKU_PSRAM_OK) {
+                        SHELL_PRINTF("mem: read fail @%lx\n",
+                                     (unsigned long)(base[r] + off));
+                        return;
+                    }
+                    for (i = 0u; i < (uint32_t)(sizeof rd); i++) {
+                        uint32_t a = base[r] + off + i;
+                        uint8_t e = (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0x5Au);
+                        if (rd[i] != e) {
+                            if (errs < 6u) {
+                                SHELL_PRINTF("    @%08lx want %02x got %02x\n",
+                                             (unsigned long)a, e, rd[i]);
+                            }
+                            errs++;
+                            xorh[(uint8_t)(rd[i] ^ e)]++;
+                        }
+                        sum += rd[i];
+                    }
+                    tiku_hang_checkin();
+                }
+            }
+            for (i = 0u; i < 256u; i++) {
+                if (xorh[i] != 0u) {
+                    SHELL_PRINTF("    xor %02lx : %lu times\n",
+                                 (unsigned long)i, (unsigned long)xorh[i]);
+                }
+            }
+            SHELL_PRINTF("mem: 64 KB x2 regions @ %lu Hz: %lu errors,"
+                         " checksum %08lx -- %s\n",
+                         tiku_psram_clock_hz(), (unsigned long)errs,
+                         (unsigned long)sum,
+                         errs ? "FAIL" : "bit-exact");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "retain")) {
+            /* power psram retain <ms> -- the refresh-integrity gate: write a
+             * pattern, WAIT (self-refresh must carry it), verify bit-exact.
+             * Guards every burst/pause tuning against silent decay. */
+            static uint8_t wr2[1024];
+            uint32_t ms2 = 500u, off2, i2, errs2 = 0u;
+            if (argc >= 4) {
+                unsigned n2 = 0u; const char *q2 = argv[3];
+                while (*q2 >= '0' && *q2 <= '9') { n2 = n2*10u + (unsigned)(*q2++ - '0'); }
+                if (n2) { ms2 = n2; }
+            }
+            for (off2 = 0u; off2 < 65536u; off2 += (uint32_t)(sizeof wr2)) {
+                for (i2 = 0u; i2 < (uint32_t)(sizeof wr2); i2++) {
+                    uint32_t a2 = 0x00200000u + off2 + i2;
+                    wr2[i2] = (uint8_t)(a2 ^ (a2 >> 8) ^ 0x3Cu);
+                }
+                if (tiku_psram_mem_write(0x00200000u + off2, wr2,
+                        (uint32_t)(sizeof wr2)) != TIKU_PSRAM_OK) {
+                    SHELL_PRINTF("retain: write fail\n");
+                    return;
+                }
+            }
+            for (i2 = 0u; i2 < ms2; i2++) {
+                tiku_cpu_ambiq_delay_us(1000u);
+                if ((i2 & 63u) == 0u) { tiku_hang_checkin(); }
+            }
+            for (off2 = 0u; off2 < 65536u; off2 += (uint32_t)(sizeof wr2)) {
+                if (tiku_psram_mem_read(0x00200000u + off2, wr2,
+                        (uint32_t)(sizeof wr2)) != TIKU_PSRAM_OK) {
+                    SHELL_PRINTF("retain: read fail\n");
+                    return;
+                }
+                for (i2 = 0u; i2 < (uint32_t)(sizeof wr2); i2++) {
+                    uint32_t a2 = 0x00200000u + off2 + i2;
+                    if (wr2[i2] != (uint8_t)(a2 ^ (a2 >> 8) ^ 0x3Cu)) { errs2++; }
+                }
+                tiku_hang_checkin();
+            }
+            SHELL_PRINTF("retain: 64 KB held %lu ms: %lu errors -- %s\n",
+                         (unsigned long)ms2, (unsigned long)errs2,
+                         errs2 ? "FAIL (refresh starved?)" : "bit-exact");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "bench")) {
+            /* power psram bench -- M3: DWT-timed bandwidth through each path.
+             * Work is the denominator: bytes moved + checksum per leg. */
+            extern void tiku_psram_bench_run(void);
+            tiku_psram_bench_run();
+            return;
+        }
         if (argc >= 3 && streq(argv[2], "scan2")) {
             /* Hunt the RX capture point in no-DQS mode.  The device is
              * proven alive (bit-bang: MR1 0x8d, MR2 0xde), so any cell that
@@ -702,6 +868,46 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          (a0 == (uint8_t)wr) ? "CONTROLLER TX REACHES DEVICE"
                          : (a0 == b0) ? "no change -- controller TX never lands"
                                       : "changed to something ELSE (partial)");
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "arb")) {
+            /* THE ARBITER.  Controller-write a distinctive 64 B pattern at
+             * 0x4000, then bit-bang-read 0x3800 / 0x4000 / 0x4800 and print
+             * the streams.  Wherever the pattern physically shows up names
+             * the guilty path: at 0x4000 = write correct (read path adds
+             * 0x800); at 0x4800 = write path adds 0x800; at 0x3800 = write
+             * path subtracts. */
+            static uint8_t pat[64]; static uint8_t ed[48];
+            uint32_t i; unsigned k2;
+            static const uint32_t probe[3] = { 0x3800u, 0x4000u, 0x4800u };
+            tiku_psram_err_t rc;
+            unsigned row = TIKU_PSRAM_CLK_48MHZ;
+            if (argc >= 4) {
+                unsigned n2 = 0u; const char *q2 = argv[3];
+                while (*q2 >= '0' && *q2 <= '9') { n2 = n2*10u + (unsigned)(*q2++ - '0'); }
+                if (n2 >= 192u)      { row = TIKU_PSRAM_CLK_192MHZ; }
+                else if (n2 >= 125u) { row = TIKU_PSRAM_CLK_125MHZ; }
+                else if (n2 >= 96u)  { row = TIKU_PSRAM_CLK_96MHZ; }
+            }
+            rc = tiku_psram_set_speed(row);
+            if (rc != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("arb: speed failed\n");
+                return;
+            }
+            for (i = 0u; i < 64u; i++) { pat[i] = (uint8_t)(0xB0u + i); }
+            if (tiku_psram_mem_write(0x4000u, pat, 64u) != TIKU_PSRAM_OK) {
+                SHELL_PRINTF("arb: write failed\n");
+                return;
+            }
+            tiku_psram_deinit();
+            for (k2 = 0u; k2 < 3u; k2++) {
+                tiku_psram_bitbang_mem(probe[k2], ed, 48u);
+                SHELL_PRINTF("  bb @%04lx:", (unsigned long)probe[k2]);
+                for (i = 0u; i < 48u; i++) { SHELL_PRINTF(" %02x", ed[i]); }
+                SHELL_PRINTF("\n");
+            }
+            SHELL_PRINTF("  (wrote b0,b1,b2.. at 4000 via controller;"
+                         " find it above)\n");
             return;
         }
         if (argc >= 3 && streq(argv[2], "bb")) {
