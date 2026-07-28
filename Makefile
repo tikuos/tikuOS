@@ -1451,6 +1451,15 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # External octal NOR flash on MSPI1 (EVB U12, 8 MB).  Opt-in board hardware,
 # same reasoning as the PSRAM: the -D is a capability macro so the shell
 # command can gate on it regardless of include order.
+# On-board eMMC on SDIO0 (EVB U11, 8 GB).  Present on BOTH Apollo510 EVBs.
+ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
+ifeq ($(filter apollo510 apollo510b,$(MCU)),)
+$(error TIKU_DRV_EMMC_ENABLE=1 requires MCU=apollo510 or apollo510b (U11 is \
+on the Apollo510 EVBs))
+endif
+SRCS += arch/ambiq/tiku_emmc_arch.c
+CFLAGS += -DTIKU_DRV_EMMC_ENABLE=1
+endif
 ifeq ($(TIKU_DRV_NOR_ENABLE),1)
 # U12 is fitted on the Apollo510 EVB (green) and NOT on the Apollo510B (Blue):
 # the 510B BSP defines no MSPI1 chip select and comments out its pinconfig,

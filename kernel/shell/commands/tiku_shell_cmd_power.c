@@ -43,6 +43,9 @@
 #if (TIKU_DRV_NOR_ENABLE + 0)
 #include <arch/ambiq/tiku_nor_arch.h>          /* MSPI1 + U12 external NOR    */
 #endif
+#if (TIKU_DRV_EMMC_ENABLE + 0)
+#include <arch/ambiq/tiku_emmc_arch.h>         /* SDIO0 + U11 8 GB eMMC       */
+#endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
 #include <kernel/memory/tiku_mem.h>           /* TIKU_MEM_PSRAM tier gate    */
@@ -123,6 +126,14 @@ static void power_stat(void)
          * like a damning result and is usually just an unarmed counter. */
         SHELL_PRINTF("hit rate n/a (counters not started -- run 'power clear')\n");
     }
+}
+#endif
+
+#if (TIKU_DRV_EMMC_ENABLE + 0)
+/** @brief eMMC ladder tracer -- a wedged rung names itself. */
+static void emmc_trace(const char *step)
+{
+    SHELL_PRINTF("  emmc: %s\n", step);
 }
 #endif
 
@@ -627,6 +638,114 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("cache: %s\n", tiku_ambiq_cache_enabled() ? "on" : "off");
         return;
     }
+#if (TIKU_DRV_EMMC_ENABLE + 0)
+    if (streq(argv[1], "emmc")) {
+        /* E1/E2 for the board's 8 GB eMMC (U11).
+         *
+         *   power emmc id     identification ladder + decoded CID/EXT_CSD
+         *   power emmc regs   host registers (power-safe)
+         *   power emmc gate   write/read-back on the scratch region only
+         *   power emmc off    release the SDIO0 domain
+         */
+        static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
+                                          "CMD", "ID", "ARG", "STATE" };
+        tiku_emmc_id_t id;
+        tiku_emmc_err_t rc;
+
+        if (argc >= 3 && streq(argv[2], "off")) {
+            tiku_emmc_deinit();
+            SHELL_PRINTF("emmc: SDIO0 released (powered %d)\n",
+                         tiku_emmc_powered());
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "regs")) {
+            uint32_t g[8]; unsigned k;
+            static const char *const nm[] = { "devpwrstatus","present",
+                "clockctrl","hostctrl1","intstat","capabilities0",
+                "response0","transfer" };
+            tiku_emmc_regs(g, 8u);
+            SHELL_PRINTF("emmc regs (read back):\n");
+            for (k = 0u; k < 8u; k++) {
+                SHELL_PRINTF("  %-14s %08lx\n", nm[k], (unsigned long)g[k]);
+            }
+            return;
+        }
+        if (argc >= 3 && streq(argv[2], "gate")) {
+            /* E2: write a pattern to the scratch region and read it back.
+             * Single block, bit-exact, and nowhere near the card's own
+             * contents. */
+            static uint8_t wr[512], rd[512];
+            uint32_t lba, i, errs = 0u;
+            rc = tiku_emmc_read_id(&id);
+            if (rc != TIKU_EMMC_OK) {
+                SHELL_PRINTF("emmc gate: not identified (%s) -- run"
+                             " `power emmc id` first\n", en[rc]);
+                return;
+            }
+            lba = tiku_emmc_scratch_lba();
+            for (i = 0u; i < sizeof wr; i++) {
+                wr[i] = (uint8_t)((lba + i) ^ (i >> 3) ^ 0x5Au);
+            }
+            rc = tiku_emmc_write_blocks(lba, 1u, wr, 0);
+            if (rc != TIKU_EMMC_OK) {
+                SHELL_PRINTF("emmc gate: write %s\n", en[rc]);
+                return;
+            }
+            for (i = 0u; i < sizeof rd; i++) { rd[i] = 0u; }
+            rc = tiku_emmc_read_blocks(lba, 1u, rd);
+            if (rc != TIKU_EMMC_OK) {
+                SHELL_PRINTF("emmc gate: read %s\n", en[rc]);
+                return;
+            }
+            for (i = 0u; i < sizeof rd; i++) {
+                if (rd[i] != wr[i]) { errs++; }
+            }
+            SHELL_PRINTF("emmc gate: LBA %lu, 512 B: %lu errors -- %s\n",
+                         (unsigned long)lba, (unsigned long)errs,
+                         errs ? "MISMATCH" : "bit-exact");
+            SHELL_PRINTF("  negative: write below scratch must refuse: %s\n",
+                         (tiku_emmc_write_blocks(0u, 1u, wr, 0)
+                          == TIKU_EMMC_ERR_ARG) ? "REFUSED (correct)"
+                                                : "ALLOWED -- BUG");
+            return;
+        }
+        {
+            tiku_emmc_set_trace(emmc_trace);
+            rc = tiku_emmc_init();
+            tiku_emmc_set_trace((void (*)(const char *))0);
+            if (rc != TIKU_EMMC_OK) {
+                uint32_t e = tiku_emmc_last_error();
+                SHELL_PRINTF("emmc init: %s  intstat %08lx\n", en[rc],
+                             (unsigned long)e);
+                if (e) {
+                    SHELL_PRINTF("  errors:%s%s%s%s%s\n",
+                        (e & (1u<<16)) ? " CMD-TIMEOUT" : "",
+                        (e & (1u<<17)) ? " CMD-CRC" : "",
+                        (e & (1u<<18)) ? " CMD-ENDBIT" : "",
+                        (e & (1u<<19)) ? " CMD-INDEX" : "",
+                        (e & (1u<<20)) ? " DATA-TIMEOUT" : "");
+                }
+                return;
+            }
+            rc = tiku_emmc_read_id(&id);
+            SHELL_PRINTF("emmc: mfr %02x oem %04x product '%s' rev %02x\n",
+                         id.mfr_id, id.oem_id, id.product, id.rev);
+            SHELL_PRINTF("  serial %08lx  made %u/%u  rca %lu\n",
+                         (unsigned long)id.serial, id.mfg_month, id.mfg_year,
+                         (unsigned long)id.rca);
+            SHELL_PRINTF("  capacity %lu blocks = %lu MB  (ext_csd rev %u,"
+                         " spec %u)\n",
+                         (unsigned long)id.sec_count,
+                         (unsigned long)(id.sec_count / 2048u),
+                         id.ext_csd_rev, id.spec_vers);
+            SHELL_PRINTF("  bus %u-bit @ %lu Hz  scratch from LBA %lu\n",
+                         id.bus_width, (unsigned long)id.clock_hz,
+                         (unsigned long)tiku_emmc_scratch_lba());
+            SHELL_PRINTF("  verdict: %s\n", en[rc]);
+        }
+        return;
+    }
+#endif
 #if (TIKU_DRV_NOR_ENABLE + 0)
     if (streq(argv[1], "nor")) {
         /* N1/N2 bring-up and gates for the board's 8 MB octal NOR (U12).
