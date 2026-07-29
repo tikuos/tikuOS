@@ -39,10 +39,8 @@ void tiku_nordic_power_boot_init(void);
  * @brief Enable or disable the instruction/data cache.
  *
  * Unlike the core frequency, the datasheet explicitly sanctions changing this
- * at run time ("Ability to enable/disable cache at run-time"), which is what
- * lets the power suite measure the same workload both ways on one boot.
- *
- * Disabling invalidates first, so a later re-enable cannot serve stale lines.
+ * at run time, which is what lets the power suite measure the same workload
+ * both ways on one boot.  Disabling invalidates first.
  *
  * @param on  Non-zero to enable.
  */
@@ -85,16 +83,13 @@ unsigned long tiku_nordic_cpu_hz_measure(void);
 /**
  * @brief Run a fixed, cache-sensitive workload and report how long it took.
  *
- * Exists because the cache cannot be measured on an idle board: the scheduler's
- * idle path is a handful of instructions that sit in any prefetch buffer, so
- * enabling an 8 KB cache changes its power by nothing measurable (observed:
- * 3.031 mA vs 3.044 mA, i.e. noise).  A meaningful cache measurement needs a
- * working set bigger than a loop body, streamed out of NVM.
+ * The cache cannot be measured on an idle board: the scheduler's idle path is a
+ * handful of instructions that sit in any prefetch buffer, so an 8 KB cache
+ * moves its power by nothing measurable (3.031 mA vs 3.044 mA, i.e. noise).
  *
- * The workload walks a large const array in NVM with a stride that defeats
- * sequential prefetch, so it is dominated by fetch latency rather than by ALU
- * work -- which is exactly the axis the cache moves.
- *
+ * @note The workload walks a large const array in NVM with a stride that
+ *       defeats sequential prefetch, so it is dominated by fetch latency rather
+ *       than ALU work -- exactly the axis the cache moves.
  * @param out_us  Elapsed microseconds (GRTC-timed, so clock-independent).
  * @return A checksum of the traversal, returned so the compiler cannot
  *         optimise the work away and so a caller can confirm the SAME work was
@@ -120,10 +115,9 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us);
 /**
  * @brief Run a memory workload for @p ms; returns elapsed microseconds (GRTC).
  *
- * EXISTS BECAUSE EVERY CORE FIGURE SO FAR HAD NO MEMORY TRAFFIC IN IT.  The
- * reference loop that priced the core is two register instructions; real code
- * loads and stores, and a durability decision writes NVM.  These loops put a
- * number on each.
+ * Every core figure before this had no memory traffic in it: the reference loop
+ * that priced the core is two register instructions, while real code loads and
+ * stores and a durability decision writes NVM.  These loops price each.
  */
 uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms);
 
@@ -133,11 +127,12 @@ uint32_t tiku_nordic_mem_access_count(void);
 /**
  * @brief Checksum of the last probe's traversal.
  *
- * Live for the SRAM kinds (the buffer is seeded with a pattern).  STRUCTURALLY
- * ZERO for the RRAM kinds, whose arrays are `const` zero-filled -- so for those
- * it is not evidence of anything and must not be read as such.  The access
- * COUNT is the denominator that matters, and nop landing on its architectural
- * 3 cycles/iteration is what validates the accounting.
+ * Live for the SRAM kinds, whose buffer is seeded with a pattern.
+ * STRUCTURALLY ZERO for the RRAM kinds, whose arrays are `const` zero-filled,
+ * so for those it is not evidence of anything and must not be read as such.
+ *
+ * @note The access COUNT is the denominator that matters, and nop landing on
+ *       its architectural 3 cycles/iteration is what validates the accounting.
  */
 uint32_t tiku_nordic_mem_checksum(void);
 
@@ -152,36 +147,27 @@ uint32_t tiku_nordic_mem_checksum(void);
 #define TIKU_SLEEP_DEEP       0x8u   /**< WFI with SCR.SLEEPDEEP set        */
 #define TIKU_SLEEP_STOP_TIM   0x10u  /**< stop the free-running htimer TIMER20 */
 #define TIKU_SLEEP_STOP_TICK  0x20u  /**< stretch the 128 Hz kernel tick across
-                                          the whole window (tickless path), so
-                                          the CPU takes ~1 wake instead of 128/s.
-                                          NOT part of `quiet`: quiet's meaning
-                                          is frozen by two published
-                                          experiments. */
+                                          the whole window (tickless path), so the
+                                          CPU takes ~1 wake instead of 128/s.  NOT
+                                          part of `quiet`, whose meaning is frozen */
 #define TIKU_SLEEP_STOP_SYSC  0x40u  /**< drop GRTC MODE.SYSCOUNTEREN for the
-                                          window (AUTOEN stays), letting the
-                                          1 MHz SYSCOUNTER sleep with the CPUs.
-                                          Needs LFCLK running for the wake
-                                          compare -- start it first
-                                          ('power lfclk'). */
+                                          window (AUTOEN stays), letting the 1 MHz
+                                          SYSCOUNTER sleep with the CPUs.  Needs
+                                          LFCLK running ('power lfclk') to wake */
 
 /**
  * @brief Sit in WFI for @p ms, optionally shutting down what holds HFCLK up.
  *
- * EXISTS BECAUSE "IDLE" WAS OFF BY A FACTOR OF 300.  This port's WFI idle
- * measured 953 uA against a datasheet System ON IDLE figure of 3.0 uA (GRTC on
- * XOSC, 256 KB RAM).  Halting the core is not the same as letting the part
- * sleep: the HFCLK controller only stops the clock when NOTHING requests it,
- * and this port holds at least two standing requests -- an enabled console
- * UARTE, and a core PLL pinned on by the erratum-39 workaround, which triggers
- * TASKS_PLLSTART at boot and never issues the paired PLLSTOP.
+ * This port's WFI idle measured 953 uA against a datasheet System ON IDLE
+ * figure of 3.0 uA: halting the core is not the same as letting the part sleep,
+ * because HFCLK only stops when NOTHING requests it.
  *
- * Each flag releases one of those so the 953 uA can be attributed rather than
- * guessed at.  Everything is restored before returning, including the console,
- * so the caller can still report.
- *
- * NOT A POWER-MANAGEMENT API.  This is a measurement instrument: it tells you
- * what a real low-power path would have to do, and what each piece is worth.
- *
+ * @note This port holds at least two standing requests -- an enabled console
+ *       UARTE and a core PLL pinned on by the erratum-39 workaround, which
+ *       starts the PLL at boot and never issues the paired stop.  Each flag
+ *       releases one so the 953 uA can be attributed rather than guessed at;
+ *       everything is restored before returning.  A measurement instrument,
+ *       NOT a power-management API.
  * @param ms     Duration to stay in WFI.
  * @param flags  TIKU_SLEEP_STOP_* bits.
  * @return Actual elapsed microseconds (GRTC-timed).
@@ -194,10 +180,9 @@ uint32_t tiku_nordic_sleep_wake_count(void);
 /**
  * @brief Outer passes retired by the last busy probe, and iterations per pass.
  *
- * Current measured over a fixed WINDOW says nothing about efficiency on its own:
- * a configuration that draws less may simply have executed less.  Pass count x
- * iterations-per-pass is the denominator that turns milliamps into energy per
- * unit of work, which is the quantity a clock or cache decision turns on.
+ * Current measured over a fixed WINDOW says nothing about efficiency alone: a
+ * configuration that draws less may simply have executed less.  Passes x
+ * iterations-per-pass is the denominator that turns milliamps into energy.
  */
 uint32_t tiku_nordic_spin_pass_count(void);
 
@@ -215,33 +200,24 @@ uint32_t tiku_nordic_spin_inner(void);
 /**
  * @brief Non-zero if a debugger has halting debug enabled (DHCSR.C_DEBUGEN).
  *
- * The datasheet's low-power figures apply to NORMAL mode only: "when a debug
- * session is over, the device must be set to Normal mode by the external
- * debugger, followed by a pin reset" (9.3).  A flashing flow that ends with a
- * SYSTEM reset never leaves debug interface mode, and every current
- * measurement taken in that state is an upper bound, not a figure.
+ * The datasheet's low-power figures apply to NORMAL mode only (9.3), and a
+ * flashing flow that ends with a SYSTEM reset never leaves debug interface
+ * mode -- so every current measurement in that state is an upper bound.
  */
 int tiku_nordic_debug_attached(void);
 
 /**
  * @brief Spin the core in a tight two-instruction loop for @p ms.
  *
- * The `while(1){}` reference point.  Measured against the WFI floor with
- * everything else identical, the difference is the core's own dynamic cost --
- * i.e. what the CPU clock is worth -- with no workload, no memory traffic and
- * no peripheral activity mixed in.
+ * The `while(1){}` reference point: measured against the WFI floor with
+ * everything else identical, the difference is the core's own dynamic cost,
+ * with no workload, memory traffic or peripheral activity mixed in.
  *
- * The loop is `subs`/`bne` in inline asm rather than C, so no optimiser
- * decision stands between the source and what the core executes: an empty C
- * `while(1)` compiles to a single backward branch, and a C loop with a counter
- * may or may not survive -O2 intact.  The GRTC is read once per 4096
- * iterations, keeping the peripheral bus below ~0.1% of the window so what is
- * measured is the core, not the bus.
- *
- * Takes the SAME TIKU_SLEEP_STOP_* flags as the sleep probe and releases the
- * same things, because a busy figure and an idle figure are only comparable if
- * the only difference between them is what the CPU is doing.
- *
+ * @note The loop is `subs`/`bne` in inline asm, so no optimiser decision stands
+ *       between the source and what the core executes.  The GRTC is read once
+ *       per 4096 iterations, keeping the peripheral bus below ~0.1% of the
+ *       window.  Takes the SAME TIKU_SLEEP_STOP_* flags as the sleep probe and
+ *       releases the same things, so busy and idle stay comparable.
  * @param ms     Duration to spin.
  * @param flags  TIKU_SLEEP_STOP_* bits.
  * @return Actual elapsed microseconds (GRTC-timed).

@@ -107,11 +107,11 @@ void tiku_nordic_axons_isr(void)           __attribute__((weak, alias("nordic_de
 /**
  * @brief Apply factory analog/clock trims from FICR->TRIMCNF.
  *
- * The nRF54L ships per-die trim values in FICR->TRIMCNF[] as (register
- * address, value) pairs, terminated by an ADDR of 0xFFFFFFFF (or 0).  The
- * MDK SystemInit copies each value into its target register; without this
- * the HFXO / regulators / ADC run untrimmed.  This reproduces the MDK's
- * non-TrustZone (non-CMSE) path exactly.
+ * The nRF54L ships per-die trim values as (register address, value) pairs
+ * terminated by an ADDR of 0xFFFFFFFF or 0.  Without copying each into its
+ * target register the HFXO, regulators and ADC run untrimmed.
+ *
+ * @note Reproduces the MDK SystemInit non-TrustZone (non-CMSE) path exactly.
  */
 static void tiku_nordic_apply_trims(void)
 {
@@ -126,7 +126,7 @@ static void tiku_nordic_apply_trims(void)
     }
 }
 
-/* FICR silicon-identification words used to gate revision-specific errata
+/* FICR silicon-identification words that gate revision-specific errata
  * (nRF54L errata sheet 4503_401 + the MDK's nrf54l_erratas.h convention):
  * 0x00FFC340 = part marker (0x1C on nRF54L15, 0x29 on nRF54LM20A),
  * 0x00FFC344 = revision code (0x01/0x02 on nRF54L15), 0x00FFC334 = trim
@@ -137,17 +137,16 @@ static void tiku_nordic_apply_trims(void)
 
 /**
  * @brief Silicon errata workarounds the stock MDK SystemInit applies and a
- *        from-scratch startup must reproduce (raw register pokes from the
- *        public nRF54L errata sheet + nrfx system_nrf54l.c; every Nordic-SDK
- *        app gets these).
+ *        from-scratch startup must reproduce.
  *
- * Split around the trim loop to preserve the MDK's ordering: erratum 37 (TAD
- * poke) runs before trims; the regulator/RADIO pokes run after.  Erratum 37
- * is PRESENT on both the nRF54L15 (part 0x1C) and the nRF54LM20A (part 0x29)
- * and its TAD base (0x50053000) is identical, so it fires on both.  The
- * remaining pokes -- the ES-PDK regulator prime and errata 31/32/40 -- are
- * gated in system_nrf54l.c to the nRF54L05/L10/L15 only (NOT the LM20A), so
- * they are compiled in for the nRF54L15 build alone.
+ * Raw register pokes from the public nRF54L errata sheet and nrfx
+ * system_nrf54l.c.  Split around the trim loop to preserve the MDK's ordering:
+ * erratum 37 before trims, the regulator/RADIO pokes after.
+ *
+ * @note Erratum 37 is present on both the nRF54L15 (part 0x1C) and the
+ *       nRF54LM20A (0x29) with an identical TAD base, so it fires on both.  The
+ *       ES-PDK regulator prime and errata 31/32/40 are gated to the L05/L10/L15
+ *       only, so they compile in for the nRF54L15 build alone.
  */
 static void tiku_nordic_sysinit_errata_early(void)
 {
@@ -182,11 +181,12 @@ static void tiku_nordic_sysinit_errata_early(void)
 /**
  * @brief Drive one TAMPC debug signal open (unless a prior session locked it).
  *
- * Mirrors the MDK's nrf54l_handle_approtect_signal() default (APPROTECT
- * disabled) branch: clear the write protection, then set VALUE=High with
- * LOCK=Disabled.  A signal locked by hardware/UICR is left alone (no
- * ENABLE_APPROTECT product config in TikuOS, so the locked-open hard-reset
- * branch is intentionally not replicated).
+ * Mirrors the MDK's nrf54l_handle_approtect_signal() default branch: clear the
+ * write protection, then set VALUE=High with LOCK=Disabled.  A signal locked by
+ * hardware or UICR is left alone.
+ *
+ * @note There is no ENABLE_APPROTECT product config in TikuOS, so the
+ *       locked-open hard-reset branch is intentionally not replicated.
  */
 static void tiku_nordic_tampc_open(volatile uint32_t *sig)
 {
@@ -200,16 +200,14 @@ static void tiku_nordic_tampc_open(volatile uint32_t *sig)
 /**
  * @brief Re-open the debug port at every boot (MDK nrf54l_handle_approtect).
  *
- * With UICR.APPROTECT erased ("Unprotected"), the nRF54L leaves the debug
- * enables under FIRMWARE control: SystemInit must drive the TAMPC DBGEN /
- * NIDEN / SPIDEN / SPNIDEN domain signals (and the AUX AP DBGEN) high each
- * boot.  The original from-scratch startup skipped TAMPC entirely; that was
- * benign on the nRF54L15-DK, but on the nRF54LM20-DK a WATCHDOG reset brings
- * the signals up low, so the J-Link loses access ("AP-Protect enabled",
- * NotAvailableBecauseProtection) until a full `nrfutil device recover` chip
- * erase -- it killed every flash following a watchdog-reset test on HW
- * (2026-07-14).  Running the vendor sequence at boot keeps the port open on
- * both devices.
+ * With UICR.APPROTECT erased the nRF54L leaves the debug enables under FIRMWARE
+ * control, so SystemInit must drive the TAMPC DBGEN / NIDEN / SPIDEN / SPNIDEN
+ * signals, and the AUX AP DBGEN, high on every boot.
+ *
+ * @note Skipping TAMPC is benign on the nRF54L15-DK, but on the nRF54LM20-DK a
+ *       WATCHDOG reset brings the signals up LOW and the J-Link loses access
+ *       ("AP-Protect enabled") until a full chip erase -- it killed every flash
+ *       following a watchdog-reset test on HW (2026-07-14).
  */
 static void tiku_nordic_debug_unlock(void)
 {
@@ -264,19 +262,20 @@ void tiku_nordic_reset_handler(void) __attribute__((naked, section(".text"), use
 /**
  * @brief nRF54L15 reset handler: C-runtime init and entry to main().
  *
- * SP is already loaded by the CPU from vector[0].  Mask IRQs immediately
- * (Cortex-M resets with PRIMASK=0; an early-armed source such as SysTick
- * must not fire before the scheduler builds its queues -- the scheduler
- * re-enables IRQs at the top of its loop).  Then point VTOR at our table,
- * apply factory trims, copy .data, zero .bss (leaving .uninit for
- * warm-reset state), and call main().  Naked: no compiler prologue that
- * would touch uninitialised call-saved registers.
+ * SP is already loaded by the CPU from vector[0].  Masks IRQs immediately,
+ * points VTOR at the table, applies factory trims, copies .data and zeroes
+ * .bss (leaving .uninit for warm-reset state), then calls main().
+ *
+ * @note Cortex-M resets with PRIMASK=0, so an early-armed source such as
+ *       SysTick must not fire before the scheduler builds its queues; the
+ *       scheduler re-enables IRQs at the top of its loop.  Naked, so no
+ *       compiler prologue touches uninitialised call-saved registers.
  */
 void tiku_nordic_reset_handler(void)
 {
     __asm__ volatile ("cpsid i" ::: "memory");
 
-    /* VTOR -> our vector table (RRAM base). The CPU boots with VTOR=0 which
+    /* VTOR -> the vector table (RRAM base). The CPU boots with VTOR=0 which
      * already points here, but set it explicitly so a relocated table or a
      * warm reboot lands deterministically. */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_nordic_vectors;
@@ -342,12 +341,12 @@ void tiku_nordic_reset_handler(void)
 /**
  * @brief Cortex-M33 vector table for nRF54L15.
  *
- * Placed in .vectors, which the linker locates at the base of RRAM (0x0)
- * aligned to the VTOR requirement.  Index 0 is the initial SP; 1..15 are
- * the ARMv8-M system exceptions; 16.. are the NORDIC_NUM_EXT_IRQS external
- * IRQs (272 on nRF54L15, 290 on nRF54LM20A).  Unused external slots are
- * filled with nordic_default_handler so a spurious IRQ spins in a debuggable
- * loop rather than dispatching through a NULL slot.
+ * Placed in .vectors, which the linker locates at the base of RRAM aligned to
+ * the VTOR requirement.  Index 0 is the initial SP, 1..15 the ARMv8-M system
+ * exceptions, 16.. the external IRQs (272 on nRF54L15, 290 on nRF54LM20A).
+ *
+ * @note Unused external slots hold nordic_default_handler, so a spurious IRQ
+ *       spins in a debuggable loop rather than dispatching through NULL.
  */
 const nordic_isr_t tiku_nordic_vectors[16 + NORDIC_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {

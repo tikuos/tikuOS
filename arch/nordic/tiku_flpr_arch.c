@@ -265,7 +265,7 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
     /* HALF-CYCLES FROM THE LIVE CORE CLOCK, NOT A CONSTANT.  The FLPR shares
      * HCLK128M with the M33 (datasheet block diagram: both sit inside "MCU PD
      * (128 MHz)"), so its cycle rate follows whatever the core was built for.
-     * This used to hard-code `period_us * 64`, i.e. 128 cycles/us -- and on a
+     * Hard-coding `period_us * 64`, i.e. 128 cycles/us, would break: on a
      * TIKU_NORDIC_CPU_MHZ=64 build every waveform then came out exactly TWICE
      * as slow: measured, a requested 1000 ms pattern took 2078 ms.  Deriving
      * the figure keeps the API's contract (period_us means microseconds) at
@@ -562,8 +562,8 @@ uint32_t tiku_flpr_arch_conn_events(void)
     return TIKU_FLPR_SHARED->conn_events;
 }
 
-/* Phase E: peer + our address (from the CONNECT_IND) for SMP f5/f6.  Copies
- * InitA (central = A) and AdvA (us = B); returns the type bitfield (bit0
+/* Phase E: peer + local address (from the CONNECT_IND) for SMP f5/f6.  Copies
+ * InitA (central = A) and AdvA (local = B); returns the type bitfield (bit0
  * InitA, bit1 AdvA; 1 = random).  Valid once conn_active(). */
 uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6])
 {
@@ -579,10 +579,10 @@ uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6])
     return TIKU_FLPR_SHARED->conn_addr_types;
 }
 
-/* Phase E3: last enc_req_seq we derived a session key for. */
+/* Phase E3: last enc_req_seq a session key was derived for. */
 static uint32_t flpr_enc_serviced;
 
-/* Service an LL_ENC_REQ the FLPR forwarded: generate our SKDs/IVs, derive
+/* Service an LL_ENC_REQ the FLPR forwarded: generate the SKDs/IVs, derive
  * SK = e(LTK, SKDm||SKDs) + IV = IVm||IVs, publish them, and release the FLPR
  * to send LL_ENC_RSP.  Returns 1 the (first) call that services a request. */
 int tiku_flpr_arch_enc_service(const uint8_t ltk[16])
@@ -599,8 +599,8 @@ int tiku_flpr_arch_enc_service(const uint8_t ltk[16])
         skd[i] = sh->enc_skdm[i];
     }
     tiku_trng_arch_init();
-    (void)tiku_trng_arch_read_bytes(&skd[8], 8); /* our SKDs (MSO half)       */
-    (void)tiku_trng_arch_read_bytes(ivs, 4);     /* our IVs                   */
+    (void)tiku_trng_arch_read_bytes(&skd[8], 8); /* local SKDs (MSO half)     */
+    (void)tiku_trng_arch_read_bytes(ivs, 4);     /* local IVs                 */
     (void)tiku_crypto_arch_aes_ecb(0, ltk, 16u, skd, sk);   /* SK = e(LTK,SKD)*/
     for (i = 0; i < 8; i++) {
         sh->enc_skds[i] = skd[8 + i];

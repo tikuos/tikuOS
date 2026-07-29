@@ -35,8 +35,7 @@
  *
  * Board silk LED0..LED3 (User Guide Table 8) map to TikuOS 1-indexed LEDs:
  *   LED1 = P1.22   LED2 = P1.25   LED3 = P1.27   LED4 = P1.28
- * The DK LEDs are active-HIGH (transistor-buffered: write 1 to light), unlike
- * the active-LOW nRF54L15-DK.
+ * These are active-HIGH (transistor-buffered), unlike the nRF54L15-DK.
  */
 #define TIKU_BOARD_LED_COUNT        4
 #define TIKU_BOARD_LED_ACTIVE_LOW   0
@@ -112,24 +111,21 @@
 /* CONSOLE UART  (SWAPPABLE -- verify VCOM routing on hardware in Phase C)   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Console UARTE selection.
+/*
+ * Console UARTE selection.
  *
- * The DK exposes two VCOM ports (two /dev/ttyACM* devices) via the on-board
- * J-Link OB, routed through analog disconnect switches (User Guide Table 10):
- *   Serial Port 0 = UART_0 on P0.06/P0.07 (UARTE30, LP domain)
- *   Serial Port 1 = UART_1 on P1.16/P1.17 (UARTE20, PERI domain)
- * This is a single swappable block:
+ * The DK exposes two VCOM ports via the on-board J-Link OB, routed through
+ * analog disconnect switches (User Guide Table 10).  A single swappable block:
  *
  *   SEL 20 -> UARTE20 on P1.16 (TXD) / P1.17 (RXD)   [PERI domain, board UART1]
  *   SEL 30 -> UARTE30 on P0.06 (TXD) / P0.07 (RXD)   [LP domain,   board UART0]
  *
- * Default is UARTE30/P0 (board Serial Port 0).  CONFIRMED on hardware in
- * Phase C: on the LM20-DK the debugger routes UARTE30 to the FIRST VCOM
- * (/dev/ttyACM0, vcom 0) by default; UARTE20 (Serial Port 1) is NOT wired to
- * a VCOM by the default board-controller state (it needs Board Configurator).
- * This differs from the nRF54L15-DK, whose console is UARTE20 on the second
- * VCOM.  The SERIAL20/SERIAL30 IRQ numbers (198 / 260) match the nRF54L15.
+ * @note Default is UARTE30/P0 (board Serial Port 0).  CONFIRMED on hardware:
+ *       the debugger routes UARTE30 to the FIRST VCOM (/dev/ttyACM0) by
+ *       default, and UARTE20 is NOT wired to a VCOM by the default
+ *       board-controller state -- it needs Board Configurator.  This differs
+ *       from the nRF54L15-DK, whose console is UARTE20 on the second VCOM.
+ *       The SERIAL20/SERIAL30 IRQ numbers (198 / 260) match the L15.
  */
 #ifndef TIKU_BOARD_CONSOLE_SEL
 #define TIKU_BOARD_CONSOLE_SEL      30

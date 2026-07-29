@@ -60,7 +60,7 @@ static volatile uint8_t tiku_uart_txb __attribute__((aligned(4)));
  * for tens to ~100+ ms, and a 256 B ring holds only ~22 ms at 115200 -- it
  * overflowed on nearly every crypto pause (30 hardware overruns in one HTTPS
  * run), dropping mid-flight bytes and turning big RSA-chain server flights
- * into TCP-retransmit crawls until the peer RST us.  4 KB rides out those
+ * into TCP-retransmit crawls until the peer RSTs the link.  4 KB rides out those
  * pauses with room for SLIP escaping + retransmit duplicates (the ambiq port
  * documents the same failure and sizes its ring 8 KB).  Power of two;
  * override with -DTIKU_UART_RX_RING=<N>. */
@@ -163,12 +163,13 @@ void tiku_uart_printf(const char *fmt, ...)
 /**
  * @brief Console UARTE ISR: drain the DMA'd byte into the ring, re-arm.
  *
- * Overrides the weak alias installed by the crt vector table (SERIAL20 IRQn
- * 198 for UARTE20, SERIAL30 260 for UARTE30 -- the crt wires both to here,
- * only the console's is NVIC-enabled).  Copies the bounce byte into the
- * software ring, re-arms the 1-byte DMA (software re-arm -- the gap is what
- * lets a genuine blackout overrun surface in ERRORSRC), then folds any
- * latched hardware overrun into the same overrun counter the ring uses.
+ * Overrides the weak alias installed by the crt vector table.  Copies the
+ * bounce byte into the software ring, re-arms the 1-byte DMA, then folds any
+ * latched hardware overrun into the same counter the ring uses.
+ *
+ * @note The crt wires both SERIAL20 (198) and SERIAL30 (260) here, but only the
+ *       console's is NVIC-enabled.  The re-arm is in software, and that gap is
+ *       what lets a genuine blackout overrun surface in ERRORSRC.
  */
 void tiku_nordic_uart_console_isr(void)
 {

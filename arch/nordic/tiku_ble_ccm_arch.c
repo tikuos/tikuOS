@@ -141,7 +141,7 @@ int tiku_ble_ccm_arch_selftest(void)
 {
     /* Core-spec v5.4 Vol 6 Part C sample session: SK + IV as the datasheet's
      * own worked register example, so the byte-order recipe is cross-checked
-     * against both the spec AND our two-board-proven software CCM. */
+     * against both the spec AND the two-board-proven software CCM. */
     static const uint8_t sk[16] = {
         0x99u, 0xADu, 0x1Bu, 0x52u, 0x26u, 0xA3u, 0x7Eu, 0x3Eu,
         0x05u, 0x8Eu, 0x3Bu, 0x8Eu, 0x27u, 0xC2u, 0xC6u, 0x66u

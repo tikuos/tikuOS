@@ -24,9 +24,8 @@
  * @brief Configure the 1-Wire pin and bring up the bus (stub).
  *
  * Not implemented on this port: a bit-banged 1-Wire master needs a
- * microsecond-class delay source, which is a later phase.  Reports
- * failure instead of pretending the bus came up, so callers fall
- * through to their no-device path.
+ * microsecond-class delay source.  Reports failure rather than pretending the
+ * bus came up, so callers fall through to their no-device path.
  *
  * @return -1 always (never TIKU_OW_OK).
  */

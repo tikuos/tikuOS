@@ -71,10 +71,12 @@ static uint64_t grtc_syscounter(uint8_t cap_ch)
 /**
  * @brief Credit whole ticks elapsed since the anchor; return how many.
  *
- * Reads the live SYSCOUNTER, computes the whole ticks since s_anchor_half
- * (one 64-bit divide, so O(1) whether 1 tick or thousands elapsed), advances
- * g_ticks / g_seconds / the anchor by exactly that many.  Never reentrant:
- * called only from the ISR or from tickless code with IRQs masked.
+ * Reads the live SYSCOUNTER, computes the whole ticks since s_anchor_half in
+ * one 64-bit divide -- O(1) whether 1 tick or thousands elapsed -- and advances
+ * g_ticks, g_seconds and the anchor by exactly that many.
+ *
+ * @note Never reentrant: called only from the ISR, or from tickless code with
+ *       IRQs masked.
  */
 static uint32_t grtc_account(void)
 {
@@ -203,13 +205,14 @@ unsigned short tiku_clock_arch_fine(void)
 /**
  * @brief Stretch the tick compare to a deadline @p ticks_ahead ticks away.
  *
- * Called by the scheduler (IRQs masked) before an idle sleep when the earliest
- * armed timer is >1 tick out.  Points CC0 at the deadline boundary so the CPU
- * sleeps through the intervening ticks; the wake path (ISR at the deadline, or
- * tickless_end on an early non-tick wake) credits the elapsed ticks.  Does NOT
- * advance g_ticks here -- ticks_ahead is relative to the current (possibly
- * one-tick-stale) g_ticks, and the anchor is tied to it, so anchor + ticks_ahead
- * is the correct absolute deadline regardless.
+ * Called by the scheduler with IRQs masked before an idle sleep when the
+ * earliest armed timer is more than one tick out.  Points CC0 at the deadline
+ * boundary so the CPU sleeps through the intervening ticks.
+ *
+ * @note Does NOT advance g_ticks here: @p ticks_ahead is relative to the
+ *       current, possibly one-tick-stale g_ticks, and the anchor is tied to it,
+ *       so anchor + ticks_ahead is the right absolute deadline regardless.  The
+ *       wake path credits the elapsed ticks.
  */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 {
@@ -226,12 +229,14 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 }
 
 /**
- * @brief Close a stretch window: credit elapsed ticks, restore per-tick cadence.
+ * @brief Close a stretch window: credit elapsed ticks, restore the cadence.
  *
  * Runs with IRQs still masked.  On a deadline wake the stretched compare is
- * pending (taken after this returns) -- grtc_account here already credits the
- * ticks, and re-arming to the immediate boundary cancels the far compare so an
- * early non-tick wake does not later fire a stale deadline.
+ * pending and grtc_account() here has already credited the ticks; re-arming to
+ * the immediate boundary cancels the far compare.
+ *
+ * @note That cancellation is what stops an early non-tick wake from later
+ *       firing a stale deadline.
  */
 void tiku_clock_tickless_end(void)
 {

@@ -126,10 +126,9 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
 /**
  * @brief Read a pin's logical level.
  *
- * Output pins are read back from OUT, not IN: an output's input buffer
- * is left disconnected, so IN would read 0 whatever is being driven.
- * Input pins are read from IN.  This preserves the
- * read-back-what-you-drive semantics of the msp430/rp2350/ambiq ports.
+ * Output pins are read back from OUT, not IN: an output's input buffer is left
+ * disconnected, so IN would read 0 whatever is being driven.  This preserves
+ * the read-back-what-you-drive semantics of the other ports.
  *
  * @param port Virtual port (1 = P0, 2 = P1, 3 = P2).
  * @param pin  Pin index (0..31).

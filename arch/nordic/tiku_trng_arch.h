@@ -20,8 +20,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/**
- * @brief Return codes for the TRNG driver (identical to the other ports).
+/*
+ * Return codes for the TRNG driver (identical to the other ports).
  *
  * TIKU_TRNG_OK            — success.
  * TIKU_TRNG_ERR_INVALID   — NULL pointer.
@@ -33,8 +33,13 @@
 #define TIKU_TRNG_ERR_TIMEOUT   -2
 #define TIKU_TRNG_ERR_NOT_READY -3
 
-/**
- * @brief One-time init. Idempotent; the RNG is powered per request.
+/*
+ * Return codes for the TRNG driver (identical to the other ports).
+ *
+ * TIKU_TRNG_OK            — success.
+ * TIKU_TRNG_ERR_INVALID   — NULL pointer.
+ * TIKU_TRNG_ERR_TIMEOUT   — the RNG FIFO did not deliver in time.
+ * TIKU_TRNG_ERR_NOT_READY — reserved (kept for cross-port API parity).
  */
 void tiku_trng_arch_init(void);
 

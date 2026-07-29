@@ -61,13 +61,12 @@ static gpiote_ctx_t s_gpiote30 = { NRF_GPIOTE30_S, 268, { 0 } }; /* P0         *
 
 /**
  * @brief Select the GPIOTE instance that services a given physical port.
- * @param port  Physical port number (0/1/2/3 == P0/P1/P2/P3).
- * @return Pointer to the owning instance context, or NULL for an unknown port.
  *
  * P0 is in the LP / always-on domain (GPIOTE30); P1/P2/P3 are in the main
- * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A; verify its
- * GPIOTE20 reachability on-device via the CONFIG.PORT readback probe, the same
- * way P1/P2 were confirmed on the nRF54L15.
+ * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A.
+ *
+ * @param port  Physical port number (0/1/2/3 == P0/P1/P2/P3).
+ * @return Pointer to the owning instance context, or NULL for an unknown port.
  */
 static gpiote_ctx_t *ctx_for_port(uint8_t port)
 {
@@ -141,12 +140,12 @@ static int alloc_channel(gpiote_ctx_t *c)
 /**
  * @brief Enable an edge-triggered interrupt on the given (port, pin, edge).
  *
- * Configures the pin as an input with pull-up, allocates (or reuses) a GPIOTE
- * event channel on the port's owning instance, programs its CONFIG for the
- * requested edge, clears any stale latch, unmasks the channel on IRQ line 0,
- * and enables that line in the NVIC.  Subsequent matching edges broadcast
- * TIKU_EVENT_GPIO with data = TIKU_GPIO_IRQ_PACK(port, pin).
+ * Configures the pin as an input with pull-up, allocates or reuses a GPIOTE
+ * event channel on the port's owning instance, programs its CONFIG, clears any
+ * stale latch, unmasks the channel on IRQ line 0 and enables that line.
  *
+ * @note Subsequent matching edges broadcast TIKU_EVENT_GPIO with data =
+ *       TIKU_GPIO_IRQ_PACK(port, pin).
  * @param port  Virtual port number (1=P0, 2=P1, 3=P2).
  * @param pin   Pin index within the port (0..31).
  * @param edge  Edge polarity to arm.
@@ -208,11 +207,12 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
 /**
  * @brief Mask a pin's edge interrupt and free its channel.
  *
- * Masks the channel on IRQ line 0, disables the CONFIG (MODE=Disabled),
- * clears any pending latch, and releases the channel.  The pin's direction
- * and pull are left as-is so the app can still read the line afterwards.
- * Disabling a pin that was never armed is a successful no-op.
+ * Masks the channel on IRQ line 0, disables the CONFIG (MODE=Disabled), clears
+ * any pending latch and releases the channel.  Disabling a pin that was never
+ * armed is a successful no-op.
  *
+ * @note The pin's direction and pull are left as-is, so the app can still read
+ *       the line afterwards.
  * @param port  Virtual port number (1=P0, 2=P1, 3=P2).
  * @param pin   Pin index within the port.
  * @return TIKU_GPIO_IRQ_OK, or TIKU_GPIO_IRQ_ERR_INVALID for a bad port.
@@ -253,8 +253,7 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
  *
  * Walks the instance's 8 event channels; for each latched EVENTS_IN it clears
  * the latch, decodes the (port, pin) back out of the channel's CONFIG, and
- * broadcasts TIKU_EVENT_GPIO to every registered process.  Runs in ISR
- * context at NVIC priority 3.
+ * broadcasts TIKU_EVENT_GPIO.  Runs in ISR context at NVIC priority 3.
  *
  * @param c  The GPIOTE instance whose line fired.
  */

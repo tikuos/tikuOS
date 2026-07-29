@@ -28,11 +28,9 @@
 /**
  * @brief Stop the running watchdog (both gates: TSEN key, then TASKS_STOP).
  *
- * DOUBLE-GATED, unlike the classic nRF WDT: CONFIG.STOPEN must have been set
- * at start (every start here does) AND the TSEN key must be written
- * immediately before TASKS_STOP.  Miss either and the stop is silently
- * ignored -- pause and off appear to work, then the dog resets the system one
- * timeout later.  Safe to call when already stopped.
+ * DOUBLE-GATED, unlike the classic nRF WDT: CONFIG.STOPEN must have been set at
+ * start and the TSEN key must be written immediately before TASKS_STOP.  Miss
+ * either and the stop is silently ignored.  Safe to call when already stopped.
  */
 static void wdt30_stop(void)
 {
@@ -87,18 +85,13 @@ void tiku_cpu_nordic_watchdog_kick_arch(void)
 /**
  * @brief Arch reset for the check-in hang detector (overrides the weak spin).
  *
- * THE WEAK DEFAULT WAS THE BUG.  tiku_hang.c's fallback spins forever on the
- * theory that "a real hardware watchdog, where present, still catches it" --
- * but this port stops WDT30 at boot, so a detected hang became an infinite
- * 128 MHz spin: ~5.9 mA, console dead (whatever the wedged code had torn down
- * stays torn down), RESETREAS empty, until someone pulls the reset pin.  Found
- * as "the 1024-tick cliff" during the power experiments -- any shell command
- * that legitimately blocks its process for 8 s hit it.
+ * tiku_hang.c's fallback spins forever on the theory that a hardware watchdog
+ * still catches it -- but this port stops WDT30 at boot, so a detected hang
+ * becomes an infinite 128 MHz spin at ~5.9 mA with a dead console.
  *
- * AIRCR.SYSRESETREQ is the same primitive the reboot command has exercised all
- * along; it is a warm reset, so the .persistent.warm culprit record written
- * just before this call survives into the next boot (/sys/boot/hang -- proven
- * end-to-end by drill: "0 Shell" after a deliberate 9 s block).
+ * @note AIRCR.SYSRESETREQ is a warm reset, so the .persistent.warm culprit
+ *       record written just before this call survives into the next boot and
+ *       shows up at /sys/boot/hang.
  */
 void tiku_hang_arch_reset(void)
 {

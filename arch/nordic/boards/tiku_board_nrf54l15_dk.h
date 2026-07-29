@@ -33,10 +33,9 @@
 /**
  * @brief On-board LED count and per-LED (port,pin).
  *
- * Board silk LED1..LED4 (User Guide) map to TikuOS 1-indexed LEDs:
+ * Board silk LED1..LED4 map to TikuOS 1-indexed LEDs:
  *   LED1 = P2.09   LED2 = P1.10   LED3 = P2.07   LED4 = P1.14
- * The DK LEDs are active-LOW (drive the pin low to light).  Verify on
- * hardware in Phase 0; flip TIKU_BOARD_LED_ACTIVE_LOW if inverted.
+ * The DK LEDs are active-LOW -- drive the pin low to light.
  */
 #define TIKU_BOARD_LED_COUNT        4
 #define TIKU_BOARD_LED_ACTIVE_LOW   1
@@ -106,19 +105,18 @@
 /* CONSOLE UART  (SWAPPABLE -- verify VCOM routing on hardware in Phase 1)   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Console UARTE selection.
+/*
+ * Console UARTE selection.
  *
- * The DK exposes two VCOM ports (two /dev/ttyACM* devices) via the on-board
- * interface MCU, routed through analog disconnect switches (schematic sheet 4:
- * UART0_nRF54 = P0.00-03, UART1_nRF54 = P1.04-07).  This is a single swappable
- * block:
+ * The DK exposes two VCOM ports via the on-board interface MCU, routed through
+ * analog disconnect switches (schematic sheet 4: UART0_nRF54 = P0.00-03,
+ * UART1_nRF54 = P1.04-07).  A single swappable block:
  *
  *   SEL 20 -> UARTE20 on P1.04 (TXD) / P1.05 (RXD)   [PERI domain, board UART1]
  *   SEL 30 -> UARTE30 on P0.00 (TXD) / P0.01 (RXD)   [LP domain,   board UART0]
  *
- * Default is UARTE20/P1.  CONFIRMED on hardware: UARTE20 appears on the
- * SECOND VCOM (/dev/ttyACM1, vcom 1) at 115200 8N1.
+ * @note Default is UARTE20/P1.  CONFIRMED on hardware: UARTE20 appears on the
+ *       SECOND VCOM (/dev/ttyACM1, vcom 1) at 115200 8N1.
  */
 #ifndef TIKU_BOARD_CONSOLE_SEL
 #define TIKU_BOARD_CONSOLE_SEL      20

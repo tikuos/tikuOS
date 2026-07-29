@@ -70,7 +70,7 @@ void tiku_cpu_boot_nordic_init(void)
      * system or to an unsupported value causes undefined system behavior and
      * the device can malfunction."
      *
-     * Boot ordering already puts us inside that window -- tiku_boot_init_cpu()
+     * Boot ordering already lands inside that window -- tiku_boot_init_cpu()
      * runs this stage ahead of memory, peripherals and services -- so the write
      * lands before anything has requested the HF clock.  Nothing may move this
      * later, and nothing may repeat it afterwards.
@@ -155,7 +155,7 @@ void tiku_cpu_boot_nordic_init(void)
  * TikuOS actually configures are referenced to -- UARTE's baud constant, the
  * htimer's TIMER20 (16 MHz prescaled to 1 MHz) and the alternate TIMER10 tick.
  * A part with several peripheral rates cannot be summarised in one number, and
- * this HAL entry only offers one; reporting the rate our drivers derive from
+ * this HAL entry only offers one; reporting the rate the drivers derive from
  * is more useful than reporting a rate nothing uses.
  */
 unsigned long tiku_cpu_nordic_smclk_get_hz(void)
@@ -175,21 +175,16 @@ int tiku_cpu_nordic_clock_has_fault(void)
 /**
  * @brief Runtime frequency request -- DELIBERATELY A NO-OP.  Do not implement.
  *
- * This is not an unfinished feature, and the earlier comment here calling a
- * runtime switch "a later refinement" was wrong.  The datasheet forbids it
- * outright (5.5.3): "Changing the frequency on a running system or to an
- * unsupported value causes undefined system behavior and the device can
- * malfunction."
+ * The datasheet forbids it outright (5.5.3): "Changing the frequency on a
+ * running system or to an unsupported value causes undefined system behavior
+ * and the device can malfunction."
  *
- * The core clock and the MCU power domain are the same rail (HCLK128M), so
- * there is no sanctioned sequence for moving it once peripherals hold clock
- * requests -- unlike, say, the cache, which the same datasheet explicitly does
- * allow to be toggled at run time.
- *
- * Frequency is therefore selected at BUILD time via TIKU_NORDIC_CPU_MHZ and
- * applied once, in tiku_cpu_boot_nordic_init(), inside the documented window.
- * Callers are not lied to: the shell's "freq" command reports the request was
- * not applied, because tiku_cpu_mclk_hz() reads the hardware.
+ * @note The core clock and the MCU power domain are the same rail (HCLK128M),
+ *       so there is no sanctioned sequence for moving it once peripherals hold
+ *       clock requests.  Frequency is selected at BUILD time via
+ *       TIKU_NORDIC_CPU_MHZ and applied once in tiku_cpu_boot_nordic_init();
+ *       the shell's "freq" reports the request was not applied, because
+ *       tiku_cpu_mclk_hz() reads the hardware.
  */
 void tiku_cpu_freq_nordic_init(unsigned int cpu_freq)
 {
@@ -198,7 +193,7 @@ void tiku_cpu_freq_nordic_init(unsigned int cpu_freq)
 
 unsigned long tiku_cpu_nordic_clock_get_hz(void)
 {
-    /* Read the hardware, do not repeat the request.  This used to return the
+    /* Read the hardware, do not repeat the request.  Returning the
      * TIKU_NORDIC_CPU_HZ constant, so it claimed 128 MHz even on the boots
      * that actually came up at 64 -- the exact failure the delay layer already
      * had to work around by reading CURRENTFREQ itself. */

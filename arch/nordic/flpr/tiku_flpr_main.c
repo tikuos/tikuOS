@@ -135,7 +135,7 @@ static void flpr_beacon_burst(void)
  * channel 37 across many short RX attempts, tally ADDRESS/CRCOK, and
  * capture the head of the first CRC-valid packet.  RXADDRESSES + BASE0 +
  * the packet format are already set by the M33 (secure) before the flip;
- * we only touch FREQUENCY/DATAWHITE/PACKETPTR/SHORTS + the RX task, mirror
+ * only FREQUENCY/DATAWHITE/PACKETPTR/SHORTS + the RX task are touched, mirror
  * of flpr_beacon_burst's per-channel TX. */
 static uint8_t rxprobe_buf[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
@@ -204,7 +204,7 @@ static void flpr_rxprobe(tiku_flpr_shared_t *sh)
 /* Connection controller advertise + capture (L6 F-L6.1 step 1a): the
  * beacon's TX and the RX probe's RX joined by the hardware TX->RX
  * turnaround.  Per channel: TX the connectable ADV_IND (DISABLED_RXEN
- * short auto-opens RX), then listen for a CONNECT_IND addressed to us.
+ * short auto-opens RX), then listen for a CONNECT_IND addressed here.
  * On a match, parse the LLData (the data-channel AA/CRCInit + timing the
  * link needs) into the conn_* shared fields.  Register sequence mirrors
  * the M33 advertising phase in tiku_radio_arch_connect; the M33 set the
@@ -281,15 +281,15 @@ static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
 static uint8_t  fll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* pending PDU [hdr][len][S1][pay]*/
 static uint8_t  fll_tx_len;             /* payload len; 0 = none            */
 static uint8_t  fll_tx_llid;            /* 2 L2CAP / 3 control              */
-static uint8_t  fll_sent_vers;          /* we queued our VERSION_IND        */
+static uint8_t  fll_sent_vers;          /* VERSION_IND has been queued      */
 static uint8_t  fll_sn, fll_nesn;       /* link-layer sequence bits         */
 static uint32_t fll_a2f_seen;           /* last a2f_seq consumed (TX frame) */
 
 /* Phase A -- LL_CHANNEL_MAP_UPDATE_IND (0x01) / LL_CONNECTION_UPDATE_IND
  * (0x00) are INDICATIONS: the central commits and switches at the Instant
- * whether or not we ack them, so declining with LL_UNKNOWN_RSP (the old
- * fall-through) left us on stale params -> desync -> dropped link (audit
- * G6, and phones renegotiate the interval within the first second).  We
+ * whether or not they are acked, so declining with LL_UNKNOWN_RSP (the old
+ * fall-through) leaves stale params -> desync -> dropped link (audit
+ * G6, and phones renegotiate the interval within the first second).  It
  * parse the Instant and apply at that connection event.  The follow-the-
  * central hold needs no precise timebase for this: swap the channel map
  * before the event's CSA#1 pick, and for a connection update just drop the
@@ -303,11 +303,11 @@ static uint8_t  fll_cu_pending;         /* connection update armed           */
 static uint16_t fll_cu_instant;
 static uint16_t fll_cu_interval;        /* new interval, 1.25 ms (telemetry) */
 static uint16_t fll_cu_timeout;         /* new supervision, 10 ms (telemetry)*/
-/* Phase E3: LL encryption startup.  On LL_ENC_REQ we hand SKDm/IVm to the M33
+/* Phase E3: LL encryption startup.  On LL_ENC_REQ hand SKDm/IVm to the M33
  * (it owns the AES), then send LL_ENC_RSP once it returns SKDs/IVs. */
 static uint8_t  fll_enc_pending;        /* LL_ENC_REQ seen, awaiting M33 SKDs */
 static uint8_t  fll_enc_done;           /* LL_ENC_RSP sent (dedup retransmits) */
-static uint32_t fll_enc_seq;            /* enc_req_seq value we published     */
+static uint32_t fll_enc_seq;            /* enc_req_seq value published        */
 /* PHY update (Phase F2): apply the new PHY (RADIO MODE/PCNF0) at its Instant. */
 static uint8_t  fll_phy_pending;        /* LL_PHY_UPDATE_IND armed            */
 static uint8_t  fll_phy_new;            /* target PHY: 0 = 1M, 1 = 2M         */
@@ -418,7 +418,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         }
     } else if (op == 0x03u) {                   /* LL_ENC_REQ               */
         /* CtrData: Rand[8] EDIV[2] SKDm[8] IVm[4] -> payload buf[4..25].
-         * We have no AES; hand SKDm/IVm to the M33 (it derives the session
+         * The FLPR has no AES; hand SKDm/IVm to the M33 (it derives the session
          * key), then send LL_ENC_RSP once it returns SKDs/IVs. */
         if (fll_enc_done) {                     /* dup (central lost RSP):  */
             uint8_t rsp[12], i;                 /* re-send the same SKDs/IVs */
@@ -443,7 +443,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             fll_enc_pending = 1u;
         }
     } else if (op == 0x14u) {                   /* LL_LENGTH_REQ (DLE)      */
-        /* Reply with our max, and publish the effective TX size (min of our
+        /* Reply with the local max, and publish the effective TX size (min of
          * max and the peer's MaxRxOctets) so the M33 host stops fragmenting a
          * whole L2CAP PDU across data PDUs.  CtrData: MaxRxOctets[2] MaxRxTime
          * [2] MaxTxOctets[2] MaxTxTime[2] (LE) at buf[4..11]. */
@@ -467,7 +467,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         fll_queue_ctrl(0x17u, rsp, 2u);         /* LL_PHY_RSP              */
     } else if (op == 0x18u) {                   /* LL_PHY_UPDATE_IND        */
         /* CtrData: PHY_C_TO_P[1] PHY_P_TO_C[1] Instant[2] at buf[4..7].
-         * Symmetric switch: our RX (C->P) and TX (P->C) take the same PHY;
+         * Symmetric switch: the RX (C->P) and TX (P->C) take the same PHY;
          * apply RADIO MODE/PCNF0 at the Instant.  0=1M 1=2M 2=Coded S8. */
         if (buf[1] >= 5u) {
             fll_phy_new = ((buf[4] & 0x04u) != 0u) ? 2u
@@ -482,16 +482,16 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
 }
 
 /* Hold the link (L6 F-L6.1 step 1b): continuous-RX connection events.  No
- * timebase needed -- the central paces at connInterval, so we open RX on
+ * timebase needed -- the central paces at connInterval, so RX opens on
  * the CSA#1 channel and wait for its packet, hardware-T_IFS respond with
- * an empty PDU carrying our SN/NESN, and re-arm.  Channels advance per
+ * an empty PDU carrying the local SN/NESN, and re-arm.  Channels advance per
  * event in lockstep with the central.  Supervision = a run of misses. */
 static uint8_t conn_txb[TIKU_FLPR_DLE_BUF_SIZE]   __attribute__((aligned(4)));
 static uint8_t conn_datrx[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
 /* Anchored-RX: cut RADIO-on time without breaking the channel lock.  The
  * continuous-RX loop stays synced for free -- one catch == one CSA#1 hop ==
- * one connection event -- so we hold the RADIO OFF for the dead part of
+ * one connection event -- so the RADIO is held OFF for the dead part of
  * each interval, then fall into that same catch.  The hard part is the
  * idle length: the FLPR's execution rate is CONTENDED by the (awake) M33
  * on the shared bus and is neither known nor stable, so any open-loop idle
@@ -546,7 +546,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     sh->dle_max = 0u;                             /* Phase F1: pre-DLE (27)    */
     fll_phy_pending = 0u;                         /* Phase F2: 1M until update  */
     sh->conn_phy = 0u; sh->conn_phy_evt = 0u;
-    sh->conn_phy_mode = 0u;                       /* F2 bisect telemetry (H1)   */
+    sh->conn_phy_mode = 0u;                       /* F2 bisect telemetry        */
     sh->conn_phy_addr = 0u; sh->conn_phy_crcok = 0u;
     sh->conn_sub = 0u;
     sh->conn_gap = 0u; sh->conn_rxon = 0u;       /* telemetry: not yet anchored*/
@@ -560,7 +560,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
 
         /* Phase A: apply a pending update when cec reaches its Instant (the
          * wrap-safe >= test also fires if a miss-burst skipped the exact
-         * value).  The map swap must precede this event's CSA#1 pick so we
+         * value).  The map swap must precede this event's CSA#1 pick, so it
          * land on the same channel the central now uses; the connection
          * update drops the anchor so the wide re-acquire re-locks to the
          * central's new interval + WinOffset. */
@@ -586,7 +586,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         /* Phase F2: switch the RADIO PHY at the Instant -- MODE + PCNF0.PLEN
          * (2M = MODE 4, 16-bit preamble; 1M = MODE 3, 8-bit).  The base PCNF0
          * bits (LFLEN 8, S0LEN 1, S1INCL) are PHY-independent.  This must
-         * precede the event's RX arm so we receive on the new PHY, in lockstep
+         * precede the event's RX arm so reception is on the new PHY, in lockstep
          * with the central which switches at the same connEventCount. */
         if (fll_phy_pending &&
             (uint16_t)(cec - fll_phy_instant) < 0x8000u) {
@@ -603,7 +603,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 r->MODE  = 3u;
                 r->PCNF0 = (8u << 0) | (1u << 8) | (1u << 20);
             }
-            /* Drop the anchor so we wide-re-acquire on the NEW PHY (its air
+            /* Drop the anchor to force a wide re-acquire on the NEW PHY (its air
              * time + turnaround differ) -- same recovery the connection update
              * uses; absorbs any 1-event cec slip in when each side flips. */
             have_anchor = 0u;
@@ -702,7 +702,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             }
             /* Lost lock: back the idle WAY off (the overshoot that caused
              * this) and re-acquire on the wide window.  Keeping a fraction
-             * of the idle means we don't restart the climb from zero. */
+             * of the idle means the climb does not restart from zero. */
             have_anchor = 0u;
             idle_iters  = idle_iters / 2u;
             win         = ARX_WIN_MAX;
@@ -750,7 +750,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         } else if (win < ARX_WIN_MIN) {
             win = ARX_WIN_MIN;
         }
-        /* CRC verdict lands just after PHYEND; bounded so we stay inside
+        /* CRC verdict lands just after PHYEND; bounded to stay inside
          * the 150 us T_IFS window before the auto-TX reads conn_txb.  On
          * Coded S8 the packet BODY still has milliseconds of air time after
          * ADDRESS (64 us/byte), so the verdict cap scales with the PHY --
@@ -772,14 +772,14 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                                      (uint8_t)((h >> 3) & 1u),
                                      (uint8_t)((h >> 2) & 1u),
                                      (uint8_t)(conn_datrx[1] != 0u));
-            if (rc & 2u) {                       /* our last PDU landed      */
+            if (rc & 2u) {                       /* the last PDU landed      */
                 fll_tx_len = 0u;
             }
             if (rc & 1u) {                       /* genuinely-new payload    */
                 fll_handle_rx(conn_datrx, sh);
             }
         }
-        /* Build our response (pending LL/ATT PDU, else empty) with the
+        /* Build the response (pending LL/ATT PDU, else empty) with the
          * updated SN/NESN.  Drop DISABLED_TXEN so the response's own
          * DISABLED cannot re-trigger a spurious TX (the step-0 fix). */
         txn = fll_build_tx(conn_txb);

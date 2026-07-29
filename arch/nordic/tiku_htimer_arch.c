@@ -45,9 +45,10 @@ typedef tiku_htimer_clock_t htimer_t;
  *
  * Stops the timer, clears all interrupt masks, selects Timer mode / 16-bit
  * width / divide-by-16 prescaler, zeroes the counter, then enables the NVIC
- * line and starts the counter.  Priority 1 keeps htimer callbacks ahead of
- * the console (2) and the kernel tick (3), matching the microsecond-class
- * intent of the htimer API.  No compare is armed until schedule() runs.
+ * line and starts counting.  No compare is armed until schedule() runs.
+ *
+ * @note Priority 1 keeps htimer callbacks ahead of the console (2) and the
+ *       kernel tick (3), matching the microsecond-class intent of the API.
  */
 void tiku_htimer_arch_init(void)
 {
@@ -84,12 +85,12 @@ htimer_t tiku_htimer_arch_now(void)
 /**
  * @brief Arm a single-shot compare to fire at the 16-bit absolute tick @p t.
  *
- * Because the counter runs in 16-bit mode, the kernel's absolute deadline
- * maps directly onto CC[1]: the COMPARE1 event fires once when the counter
- * next equals @p t (the kernel guarantees @p t is at least the htimer guard
- * time ahead, so the match has not already passed).  The stale event is
- * cleared before unmasking so a previous fire cannot re-trigger immediately.
+ * With the counter in 16-bit mode the kernel's absolute deadline maps directly
+ * onto CC[1], so COMPARE1 fires once when the counter next equals @p t -- the
+ * kernel guarantees @p t is at least the htimer guard time ahead.
  *
+ * @note The stale event is cleared before unmasking, so a previous fire cannot
+ *       re-trigger immediately.
  * @param t  Target 16-bit tick value (kernel htimer_clock_t domain).
  */
 void tiku_htimer_arch_schedule(htimer_t t)
@@ -107,10 +108,9 @@ void tiku_htimer_arch_schedule(htimer_t t)
 /**
  * @brief TIMER20 COMPARE1 ISR: dispatch the expired htimer callback.
  *
- * Overrides the weak alias installed by the crt vector table (TIMER20_IRQn
- * 202).  Clears the compare event, masks the compare interrupt so a callback
- * that does not reschedule leaves the htimer idle, then runs the kernel's
- * pending-callback dispatcher in ISR context.
+ * Overrides the weak alias installed by the crt vector table.  Clears the
+ * compare event, masks the compare interrupt so a callback that does not
+ * reschedule leaves the htimer idle, then runs the pending-callback dispatcher.
  */
 void tiku_nordic_timer20_isr(void)
 {

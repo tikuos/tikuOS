@@ -35,12 +35,11 @@
 /**
  * @brief Virtual GPIO port availability flags.
  *
- * The nRF54L15 exposes three physical GPIO ports; TikuOS maps them to
- * virtual ports 1..3 so the /dev/gpio/{1..3}/{0..N} VFS layout works:
- *   port 1 = P0 (LP domain, P0.00..P0.04)
- *   port 2 = P1 (P1.00..P1.15)
- *   port 3 = P2 (P2.00..P2.10)
- * The port->base-pointer mapping lives in the GPIO arch layer.
+ * The nRF54L15 exposes three physical GPIO ports, mapped to virtual 1..3 so the
+ * /dev/gpio/{1..3}/{0..N} layout works: port 1 = P0 (LP domain, P0.00..P0.04),
+ * port 2 = P1 (P1.00..P1.15), port 3 = P2 (P2.00..P2.10).
+ *
+ * @note The port-to-base-pointer mapping lives in the GPIO arch layer.
  */
 #define TIKU_DEVICE_HAS_PORT1       1   /* P0 */
 #define TIKU_DEVICE_HAS_PORT2       1   /* P1 */
@@ -116,10 +115,9 @@
 /**
  * @brief On-chip RRAM range (exposed under the FRAM_* vocabulary).
  *
- * 1.5 MB non-volatile RRAM at 0x0 holds code and the TikuOS persistent /
- * config region.  Exposed via the FRAM_* names so the kernel memory
- * introspection and NVM region table share one vocabulary; RRAM is
- * write-in-place (no erase) behind the RRAMC WEN gate.
+ * 1.5 MB non-volatile RRAM at 0x0 holds code and the TikuOS persistent region.
+ * The FRAM_* names let the memory introspection and the NVM region table share
+ * one vocabulary; RRAM is write-in-place behind the RRAMC WEN gate.
  */
 /* Usable application RRAM is 0x17D000 (1524 KB); the top 12 KB of the nominal
  * 1.5 MB is reserved (MDK NRF_MEMORY_FLASH_SIZE) and bus-faults if addressed. */

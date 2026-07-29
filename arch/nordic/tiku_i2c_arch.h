@@ -23,14 +23,13 @@
 /**
  * @brief Architecture-specific I2C initialization.
  *
- * Parks SDA/SCL as open-drain pull-up pins, routes them to the TWIM via
- * PSEL, selects 100 kHz (Standard) or 400 kHz (Fast) and enables the
- * peripheral.  The instance is TWIM22 (SERIAL22): TWIM20 aliases the
- * console UARTE20, and a SERIALn base can only be UARTE, SPIM or TWIM at
- * a time.  Pins default to P1.11 (SDA) / P1.12 (SCL) and are overridable
- * from the board header.  External 4.7 kohm pull-ups are recommended --
- * the internal pull-up is weak.
+ * Parks SDA/SCL as open-drain pull-up pins, routes them to the TWIM via PSEL,
+ * selects 100 kHz (Standard) or 400 kHz (Fast) and enables the peripheral.
+ * Pins default to P1.11 (SDA) / P1.12 (SCL), overridable from the board header.
  *
+ * @note The instance is TWIM22 (SERIAL22): TWIM20 aliases the console UARTE20,
+ *       and a SERIALn base can only be UARTE, SPIM or TWIM at a time.  External
+ *       4.7 kohm pull-ups are recommended -- the internal pull-up is weak.
  * @param config  Pointer to I2C configuration (speed)
  * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if @p config is NULL
  */
@@ -77,10 +76,9 @@ int  tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
 /**
  * @brief Architecture-specific address probe (bus-scan presence check).
  *
- * The nRF TWIM will not clock an address for a zero-length transfer, so
- * the probe is a real 1-byte write and presence is decided solely by the
- * address ACK.  A data NACK (DNACK) still proves the device answered and
- * is deliberately not reported as absence.
+ * The nRF TWIM will not clock an address for a zero-length transfer, so the
+ * probe is a real 1-byte write and presence is decided solely by the address
+ * ACK.  A data NACK still proves the device answered.
  *
  * @param addr  7-bit slave address (unshifted)
  * @return TIKU_I2C_OK if the address was acknowledged, TIKU_I2C_ERR_NACK

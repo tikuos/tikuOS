@@ -23,13 +23,13 @@
 /**
  * @brief Architecture-specific ADC initialization.
  *
- * Decodes the requested 8/10/12-bit resolution into RESOLUTION and sets
- * ENABLE; the nRF54L SAADC self-clocks, so there is no clock gate or
- * power domain to open.  The reference selector has no nRF54L equivalent
- * (the hardware uses a fixed internal 0.9 V band-gap with gain 1/4, i.e.
- * a 0..3.6 V single-ended full scale) and is accepted but ignored.
+ * Decodes the requested 8/10/12-bit resolution into RESOLUTION and sets ENABLE;
+ * the nRF54L SAADC self-clocks, so there is no clock gate or power domain.
  * Offset auto-calibration is not run.
  *
+ * @note The reference selector has no nRF54L equivalent -- the hardware uses a
+ *       fixed internal 0.9 V band-gap with gain 1/4, i.e. a 0..3.6 V
+ *       single-ended full scale -- and is accepted but ignored.
  * @param config  Pointer to ADC configuration; must be non-NULL
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config or
  *         an unrecognised resolution
@@ -46,10 +46,9 @@ void tiku_adc_arch_close(void);
 /**
  * @brief Architecture-specific analog-input validation.
  *
- * There is no pin mux to program: the SAADC connects the selected input
- * through its own switch, and a GPIO's reset state (digital input buffer
- * disconnected) is already the correct high-impedance analog setting.
- * This call therefore only rejects channels with no SAADC input.
+ * There is no pin mux to program: the SAADC connects the selected input through
+ * its own switch, and a GPIO's reset state is already the correct
+ * high-impedance analog setting, so this only rejects inputs that do not exist.
  *
  * @param channel  Channel ID: 0..7 = AIN0..AIN7 (all on port P1: pins
  *                 4/5/6/7/11/12/13/14), 31 (TIKU_ADC_CH_BATTERY) = the
@@ -64,14 +63,13 @@ int  tiku_adc_arch_channel_init(uint8_t channel);
 /**
  * @brief Architecture-specific one-shot single-ended conversion.
  *
- * Routes the channel onto CH[0], points EasyDMA at a static word-aligned
- * RAM sample buffer and runs the START/STARTED -> SAMPLE/END handshake
- * (TASKS_SAMPLE is only valid once the DMA has started).  Every wait is
- * bounded, so a wedged conversion surfaces as a timeout instead of
- * hanging the kernel; on any failure @p value is left untouched.  A
- * negative sample (single-ended offset on a grounded input) is clamped
- * to 0 so the unsigned result cannot wrap.
+ * Routes the channel onto CH[0], points EasyDMA at a static word-aligned RAM
+ * buffer and runs the START/STARTED -> SAMPLE/END handshake, TASKS_SAMPLE being
+ * valid only once the DMA has started.
  *
+ * @note Every wait is bounded, so a wedged conversion surfaces as a timeout
+ *       rather than hanging the kernel; @p value is untouched on failure, and a
+ *       negative sample (single-ended offset on a grounded input) clamps to 0.
  * @param channel  Channel ID (0..7, or 31 for VDD)
  * @param value    Output: raw right-aligned result (0..255 / 0..1023 /
  *                 0..4095 per the configured resolution)

@@ -77,14 +77,15 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
 /**
  * @brief Start a compute-only load on the coprocessor (non-blocking).
  *
+ * Returns as soon as the command is posted, so the caller can sleep while the
+ * coprocessor works -- the "offloaded work, host asleep" state a blocking call
+ * could never produce.
+ *
+ * @note Drives no pin, unlike the pulse engine (which owns DK LED3, whose
+ *       current would dominate any power measurement), and does not touch the
+ *       radio, unlike the beacon path.
  * @param iters Outer passes; each is 4096 register-only inner iterations.
  * @return 0 if handed over, -1 if the coprocessor is not running.
- *
- * Returns as soon as the command is posted so the caller can sleep while the
- * coprocessor works -- the "offloaded work, host asleep" state that a blocking
- * call could never produce.  Unlike the pulse engine this drives no pin (that
- * one owns DK LED3, whose current would dominate any power measurement) and
- * unlike the beacon path it does not touch the radio.
  */
 int tiku_flpr_arch_spin_start(uint32_t iters);
 
@@ -100,13 +101,13 @@ int tiku_flpr_arch_spin_done(void);
 /**
  * @brief Run a fixed compute load and time it against the GRTC.
  *
- * Blocks.  Exists as a clock oracle: the coprocessor shares HCLK128M with the
- * application core, so the same work must take half as long on a 128 MHz build
- * as on a 64 MHz one.  Measuring that is how the claim gets tested rather than
- * assumed.  Note that the app core busy-polls while waiting, which contends for
- * the shared SRAM and slows the coprocessor measurably -- compare like with
- * like, or use the non-blocking form with the app core asleep.
+ * Blocks.  A clock oracle: the coprocessor shares HCLK128M with the application
+ * core, so the same work must take half as long on a 128 MHz build as on a
+ * 64 MHz one, which is how the claim gets tested rather than assumed.
  *
+ * @note The app core busy-polls while waiting, contending for the shared SRAM
+ *       and measurably slowing the coprocessor -- compare like with like, or
+ *       use the non-blocking form with the app core asleep.
  * @return 0 on completion, -1 if not running, -2 if it never reported done.
  */
 int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us);
@@ -114,10 +115,9 @@ int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us);
 /**
  * @brief Offload duty-cycled BLE beaconing to the coprocessor.
  *
- * Caller contract: radio link-config registers already programmed
- * (tiku_radio_arch_init) and the session CONSTLAT hold taken.  While
- * offloaded, the M33 must not touch RADIO/UARTE21 (they are flipped to
- * NonSecure for the FLPR).
+ * Caller contract: the radio link-config registers are already programmed by
+ * tiku_radio_arch_init and the session CONSTLAT hold is taken.  While
+ * offloaded the M33 must not touch RADIO or UARTE21, both flipped NonSecure.
  *
  * @param pdu          RAM-format PDU ([S0][LEN][S1][payload...]).
  * @param len          Buffer bytes (<= 48).
@@ -134,12 +134,11 @@ void tiku_flpr_arch_beacon_stop(void);
 uint32_t tiku_flpr_arch_beacon_bursts(void);
 
 /**
- * @brief RX probe (L6 F-L6.1 step 0): prove the FLPR can drive RADIO RX.
+ * @brief RX probe: prove the FLPR can drive RADIO RX.
  *
- * Same handoff as the beacon (caller programmed link config via
- * tiku_radio_arch_init and holds CONSTLAT; RADIO+UARTE21 flipped NonSecure
- * here).  Blocks ~4-5 s while the coprocessor listens on adv channel 37,
- * then reports what it heard.  Restores peripheral security on return.
+ * Same handoff as the beacon -- the caller programmed link config and holds
+ * CONSTLAT, and RADIO plus UARTE21 are flipped NonSecure here.  Blocks ~4-5 s
+ * listening on adv channel 37, then reports what it heard.
  *
  * @param addr_evts   Out: ADDRESS matches (AA matched, CRC unchecked).
  * @param crcok_evts  Out: CRC-valid packets received.
@@ -188,22 +187,22 @@ uint32_t tiku_flpr_arch_conn_state(void);
 uint32_t tiku_flpr_arch_conn_events(void);
 
 /**
- * @brief Phase E: peer + our address from the CONNECT_IND, for SMP f5/f6.
+ * @brief Phase E: peer + local address from the CONNECT_IND, for SMP f5/f6.
  * @param inita out: initiator (central) address A (6 B, little-endian); or NULL.
- * @param adva  out: advertiser (our) address B (6 B); or NULL.
+ * @param adva  out: advertiser (local) address B (6 B); or NULL.
  * @return address-type bitfield: bit0 InitA, bit1 AdvA (1 = random public 0).
  */
 uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6]);
 
 /**
- * @brief Phase E3: service an LL_ENC_REQ forwarded by the FLPR.
+ * @brief Service an LL_ENC_REQ forwarded by the FLPR.
  *
- * If the FLPR has published a fresh LL_ENC_REQ (SKDm/IVm), generate our
- * SKDs/IVs, derive the session key SK = e(LTK, SKDm||SKDs) and IV = IVm||IVs
- * (the FLPR has no AES), publish them, and release the FLPR to send
- * LL_ENC_RSP.  Call it each poll while connected.
+ * When the FLPR has published a fresh LL_ENC_REQ (SKDm/IVm), generates SKDs/IVs,
+ * derives the session key SK = e(LTK, SKDm||SKDs) and IV = IVm||IVs -- the FLPR
+ * has no AES -- publishes them, and releases the FLPR to send LL_ENC_RSP.
+ *
  * @param ltk the pairing Long Term Key.
- * @return 1 the call that services a request (SK now readable), else 0.
+ * @return 1 on the call that services a request (SK now readable), else 0.
  */
 int tiku_flpr_arch_enc_service(const uint8_t ltk[16]);
 
@@ -220,7 +219,7 @@ uint32_t tiku_flpr_arch_dle_max(void);
  *         switch (survival = current conn_events - at_evt). */
 uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt);
 
-/** @brief F2 bisect telemetry (H1): MODE readback at the switch + post-switch
+/** @brief F2 bisect telemetry: MODE readback at the switch + post-switch
  *         ADDRESS/CRCOK counts.  Any pointer may be NULL. */
 void tiku_flpr_arch_conn_phy_diag(uint32_t *mode, uint32_t *addr,
                                   uint32_t *crcok);

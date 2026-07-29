@@ -9,7 +9,7 @@
  *
  * A Joulescope measured the LM20-DK idling at 6.76 mA against a datasheet 2.6 mA
  * running CoreMark -- doing nothing cost more than doing work.  The cache and the
- * DC/DC are two of the three registers that gap turned out to be.
+ * DC/DC are two of the three registers that account for that gap.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -290,8 +290,7 @@ uint32_t tiku_nordic_mem_checksum(void)     { return tiku_mem_checksum; }
  *
  * Access count and checksum are published separately: the count is the
  * denominator for energy per access, and the checksum lets a caller confirm
- * that two configurations being compared did the SAME work rather than
- * assuming it.
+ * that two configurations being compared did the SAME work.
  */
 uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
 {
@@ -399,11 +398,13 @@ int tiku_nordic_debug_attached(void)
 /**
  * @brief The one probe body, shared by the idle and busy measurements.
  *
- * ONE FUNCTION AND NOT TWO, deliberately.  An idle figure and a busy figure are
- * only comparable if the ONLY difference between them is what the CPU is doing:
- * if the two paths released peripherals from separate copies of this list, the
- * copies would eventually drift, and the drift would show up as a physical
- * result about the core.  So @p spin selects the loop body and nothing else.
+ * ONE FUNCTION AND NOT TWO: an idle figure and a busy figure are comparable
+ * only if the ONLY difference is what the CPU is doing, so @p spin selects the
+ * loop body and nothing else.
+ *
+ * @note Two paths releasing peripherals from separate copies of this list would
+ *       eventually drift, and the drift would surface as a physical result
+ *       about the core.
  */
 static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
 {

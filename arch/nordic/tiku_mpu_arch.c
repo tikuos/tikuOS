@@ -58,11 +58,12 @@ static void rramc_wen_set(uint32_t open)
 /**
  * @brief Open an NVM write window: SAM bookkeeping + the real WEN flip.
  *
- * ORs the write bits into the SAM shadow (MSP430-path parity) and enables
- * RRAM writes.  Returns the prior SAM word; passing it to lock_nvm()
- * restores both the shadow and the gate, nest-safely (an inner lock inside
- * a still-open outer window sees write bits in the saved SAM and keeps the
- * gate open).
+ * ORs the write bits into the SAM shadow for MSP430-path parity and enables
+ * RRAM writes.  Returns the prior SAM word; passing it to lock_nvm() restores
+ * both the shadow and the gate, nest-safely.
+ *
+ * @note An inner lock inside a still-open outer window sees write bits in the
+ *       saved SAM and keeps the gate open.
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void)
 {
@@ -296,10 +297,9 @@ uint32_t tiku_stack_arch_bottom(void)
 /**
  * @brief No RAM execution window on this port -- the module runs XIP from NVM.
  *
- * Kept as an explicit no-op rather than omitted so the portable call site needs
- * no #ifdef, and so a future port that DOES gain a window has an obvious place
- * to implement it.  See kernel/shell/basic/tiku_basic_module.h for why every
- * part except apollo510 executes in place.
+ * An explicit no-op rather than an omission, so the portable call site needs no
+ * #ifdef and a future port that DOES gain a window has an obvious place to
+ * implement it.  See tiku_basic_module.h for why only apollo510 differs.
  */
 void tiku_mpu_arch_module_window_exec(int enable)
 {

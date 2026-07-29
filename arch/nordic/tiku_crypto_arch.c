@@ -87,18 +87,19 @@ void tiku_crypto_hw_counters(uint16_t *hw_ops, uint16_t *sw_ops,
 /**
  * @brief Run one CryptoMaster operation and wait for completion.
  *
- * Enables the engine, points the fetcher/pusher at the descriptor chains
- * (indirect mode), starts both, spins until idle (the engine is far faster
- * than an interrupt round-trip -- the nrfx driver documents the same
- * choice), then soft-resets the DMA and gates the engine back off.
+ * Enables the engine, points the fetcher and pusher at the descriptor chains in
+ * indirect mode, starts both, spins until idle, then soft-resets the DMA and
+ * gates the engine back off.
  *
+ * @note The spin is deliberate: the engine is far faster than an interrupt
+ *       round-trip, and the nrfx driver documents the same choice.
  * @return 0 on success, -1 on a fetch/push error or spin timeout.
  */
 /**
  * @brief One-time masking-seed load: the CryptoMaster (and IKG) refuse to
  * run until CRACEN.SEED[0..11] is written and SEEDVALID set (observed
  * on-die as an instant fetcher error with zero bytes moved).  Seed from
- * the CRACEN TRNG -- the masker wants real entropy, and we have the
+ * the CRACEN TRNG -- the masker wants real entropy, and this part has the
  * proven driver for it.
  *
  * @return 0 once the seed is valid, -1 if the TRNG failed.
@@ -149,12 +150,13 @@ static int cm_run_raw(cm_desc_t *fetch, cm_desc_t *push);
 /**
  * @brief One-time countermeasure-mask load.
  *
- * The CryptoMaster's data path runs through a DPA masking network that
- * stays DARK until a random mask word is DMA-written to the AES engine's
- * config offset 0x68 -- config-interface writes work unmasked, data
- * through any engine (even the bypass) never emerges.  Observed on-die
- * exactly so: fetcher completes, pusher starves.  Load one TRNG word,
- * output descriptor null (config-only ops produce nothing).
+ * The CryptoMaster's data path runs through a DPA masking network that stays
+ * DARK until a random mask word is DMA-written to the AES engine's config
+ * offset 0x68.  Loads one TRNG word; the output descriptor is null.
+ *
+ * @note Config-interface writes work unmasked, but data through any engine --
+ *       even the bypass -- never emerges: observed on-die as the fetcher
+ *       completing while the pusher starves.
  */
 static int cm_ensure_mask(void)
 {
@@ -645,7 +647,7 @@ int tiku_crypto_arch_aes_gcm_kit(int decrypt,
  * the whole TLS path untouched.
  *
  * The register/slot/command model comes from the BSD-licensed nrfx HAL and
- * the Nordic sxsymcrypt/silexpk register headers; this is our own
+ * the Nordic sxsymcrypt/silexpk register headers; this is a local
  * from-scratch implementation.  Operands load LITTLE-endian, LSB at the slot
  * base (determined empirically on-die -- the big-endian-flag path the vendor
  * documents gave OUT_OF_RANGE here); slots 8..12 = Qx,Qy,r,s,h; the status
@@ -729,7 +731,7 @@ static int s_pk_unavailable;
 /* Bring the PK engine to a runnable state once per boot: power all three
  * CRACEN modules (the vendor enables CRYPTOMASTER|RNG|PKEIKG together), apply
  * the CRACEN-Lite TRNG test-threshold workaround (these reset to bad defaults
- * on every RNG power-down -- and our TRNG driver powers RNG down after each
+ * on every RNG power-down -- and the TRNG driver powers RNG down after each
  * read -- wedging the IKG that shares the PKE domain), then run one
  * CLEAR_MEMORY command as the microcode's boot op. */
 /*
@@ -910,11 +912,12 @@ uint32_t tiku_crypto_arch_pk_hwconfig(void)
  * @brief Upload a caller-provided BA414EP microcode image to the PK RAM.
  *
  * The PK engine is a microcoded core: its microcode RAM at CRACENCORE+0xC000
- * must be loaded before any command runs.  This loader is generic -- it takes
- * whatever image the caller supplies and clears the unavailable latch so the
- * PK path re-arms.  TikuOS ships NO microcode image (the BA414EP microcode is
- * Nordic-proprietary, LicenseRef-Nordic-5-Clause); this exists so a build
- * that chooses to provide one can enable hardware PK.
+ * must be loaded before any command runs.  Generic -- it takes whatever image
+ * the caller supplies and clears the unavailable latch so the PK path re-arms.
+ *
+ * @note TikuOS ships NO microcode image (the BA414EP microcode is
+ *       Nordic-proprietary, LicenseRef-Nordic-5-Clause); this exists so a build
+ *       that chooses to provide one can enable hardware PK.
  */
 void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words)
 {

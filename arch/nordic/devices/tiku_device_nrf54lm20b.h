@@ -35,16 +35,17 @@
 /* GPIO PORT AVAILABILITY                                                    */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Virtual GPIO port availability flags.
+/*
+ * Virtual GPIO port availability flags.
  *
- * The nRF54LM20B exposes four physical GPIO ports; TikuOS maps them to
- * virtual ports 1..4 so the /dev/gpio/{1..4}/{0..N} VFS layout works:
+ * Four physical GPIO ports, mapped to virtual 1..4 so the
+ * /dev/gpio/{1..4}/{0..N} layout works:
  *   port 1 = P0 (LP domain,   P0.00..P0.09)
  *   port 2 = P1 (PERI domain,  P1.00..P1.31)
  *   port 3 = P2 (MCU domain,   P2.00..P2.10)
  *   port 4 = P3 (PERI domain,  P3.00..P3.12)
- * The port->base-pointer mapping lives in the GPIO arch layer.
+ *
+ * @note The port-to-base-pointer mapping lives in the GPIO arch layer.
  */
 #define TIKU_DEVICE_HAS_PORT1       1   /* P0 */
 #define TIKU_DEVICE_HAS_PORT2       1   /* P1 */
@@ -78,10 +79,9 @@
 /**
  * @brief Clock system type selector flags.
  *
- * No MSP430-style unlock key.  TIKU_DEVICE_CS_TYPE_NORDIC selects the
- * nRF54L clock driver in arch/nordic/tiku_cpu_freq_*.c.  The core runs at
- * 128 MHz (the PLL FREQ options are CK64M / CK128M, identical to the L15;
- * boot programs CK128M).
+ * No MSP430-style unlock key.  TIKU_DEVICE_CS_TYPE_NORDIC selects the nRF54L
+ * clock driver in arch/nordic/tiku_cpu_freq_*.c; the core runs at 128 MHz (the
+ * PLL FREQ options are CK64M / CK128M, as on the L15, and boot programs CK128M).
  */
 #define TIKU_DEVICE_CS_HAS_KEY      0
 #define TIKU_DEVICE_CS_TYPE_NORDIC  1
@@ -108,11 +108,9 @@
 
 /** @brief On-chip SRAM size and base address.
  *
- * The LM20B has 512 KB physical SRAM in two banks -- RAM (256 KB @ 0x20000000)
- * + RAM2 (256 KB @ 0x20040000).  The LOWER bank is the primary/managed bank:
- * image (.data/.bss), .uninit and the stack live there, matching Nordic's own
- * nrf_common.ld (stack at the top of the lower bank; RAM2 = separate opt-in
- * region).  RAM_SIZE reports the primary bank. */
+ * 512 KB physical SRAM in two banks -- RAM (256 KB @ 0x20000000) + RAM2 (256 KB
+ * @ 0x20040000).  The LOWER bank is primary: image, .uninit and the stack live
+ * there, matching Nordic's nrf_common.ld.  RAM_SIZE reports the primary bank. */
 #define TIKU_DEVICE_RAM_SIZE        (256UL * 1024UL)
 
 /* App-usable bytes of the PRIMARY bank, which is NOT the bank size: the top
@@ -127,14 +125,15 @@
 /**
  * @brief RAM2: the upper SRAM bank, used for large buffers (the tier arena).
  *
- * Exposed as its own linker region (SRAM2 in nrf54lm20a.ld, section .ram2,
- * zeroed by the crt) and a second SRAM entry in the region table so tier
- * sub-arenas validate.  The TOP OF THE BANK IS NOT FULLY BACKED on this
- * silicon: a CPU write to 0x2007FF00 bus-faults (measured on the LM20-DK's
- * nRF54LM20B eng sample -- a boot-time stack at 0x20080000 dies with STKERR,
- * BFAR 0x2007FFF0, and a 256 B-step write probe faults first at 0x2007FF00
- * while 0x2007FExx passes).  The MDK claims the full 0x40000; reserve the top
- * 1 KB for margin and expose 255 KB.
+ * Its own linker region (SRAM2, section .ram2, zeroed by the crt) plus a second
+ * SRAM entry in the region table so tier sub-arenas validate.  The top 1 KB is
+ * reserved for margin, so 255 KB is exposed.
+ *
+ * @note THE TOP OF THE BANK IS NOT FULLY BACKED on this silicon: a CPU write to
+ *       0x2007FF00 bus-faults (measured on the LM20-DK's nRF54LM20B eng sample
+ *       -- a boot-time stack at 0x20080000 dies with STKERR, BFAR 0x2007FFF0,
+ *       and a 256 B-step probe faults first at 0x2007FF00).  The MDK claims the
+ *       full 0x40000.
  */
 #define TIKU_DEVICE_RAM2_START      0x20040000UL
 #define TIKU_DEVICE_RAM2_SIZE       0x0003FC00UL   /* 255 KB (top 1 KB reserved) */
@@ -142,14 +141,13 @@
 /**
  * @brief On-chip RRAM range (exposed under the FRAM_* vocabulary).
  *
- * ~2 MB non-volatile RRAM at 0x0 holds code and the TikuOS persistent /
- * config region.  Exposed via the FRAM_* names so the kernel memory
- * introspection and NVM region table share one vocabulary; RRAM is
- * write-in-place (no erase) behind the RRAMC WEN gate.
+ * ~2 MB non-volatile RRAM at 0x0 holds code and the TikuOS persistent / config
+ * region.  The FRAM_* names let the kernel memory introspection and the NVM
+ * region table share one vocabulary; RRAM is write-in-place behind RRAMC WEN.
  *
- * Usable application RRAM is 0x1FD000 (2036 KB); the top 12 KB of the nominal
- * 2 MB is reserved (MDK NRF_MEMORY_FLASH_SIZE) and bus-faults if addressed --
- * the same reserved-tail pattern as the nRF54L15.
+ * @note Usable application RRAM is 0x1FD000 (2036 KB); the top 12 KB of the
+ *       nominal 2 MB is reserved (MDK NRF_MEMORY_FLASH_SIZE) and bus-faults if
+ *       addressed -- the same reserved-tail pattern as the nRF54L15.
  */
 #define TIKU_DEVICE_FRAM_SIZE       0x001FD000UL
 #define TIKU_DEVICE_FRAM_START      0x00000000UL

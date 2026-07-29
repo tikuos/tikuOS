@@ -254,29 +254,16 @@ nrf_axon_result_e nrf_axon_platform_init(void)
 /**
  * @brief End an Axon session: engine off, and NOBODY holding it.
  *
- * THE REFCOUNT IS FORCED TO ZERO, not decremented, and that is the fix for a
- * real bug rather than defensive tidying.
+ * The refcount is FORCED to zero, not decremented.  This disables the hardware
+ * directly, and the refcount in tiku_axon_power_request/release is the other
+ * view of the same state, so moving one without the other leaves them at odds.
  *
- * This function disables the hardware directly.  The refcount in
- * tiku_axon_power_request/release is the other view of the same state, and a
- * teardown that moves one without the other leaves them disagreeing -- which
- * is exactly what happened: an NN inference returns with the count one higher
- * than it started (measured: three inferences, "post-run refs=3"), close()
- * then switched the engine OFF while the count still said three, and the next
- * session's power_request() saw a non-zero count, concluded the engine was
- * already up, and skipped the enable.  The engine never ran, its completion
- * event never came, and 8 s later the hang detector reset the chip with
- * /sys/boot/hang reading "0 Shell".
- *
- * The symptom was that the FIRST inference of a boot always worked and the
- * SECOND always wedged -- which reads like a model or relocation fault and is
- * neither.  It went unnoticed because the vendor's own entry point runs one
- * inference and exits; running a second model is what the file store is for.
- *
- * Whether the driver's leftover reservation is deliberate (it may keep the
- * engine warm between queued jobs) is not something this layer can know, so it
- * does not try to guess: close() is the point at which the session is over by
- * definition, and re-establishing the invariant here is correct either way.
+ * @note That disagreement wedges the SECOND session of a boot: an inference can
+ *       return with the count one higher than it started, close() then switches
+ *       the engine off while the count still says three, and the next
+ *       power_request() concludes the engine is already up and skips the
+ *       enable.  close() is where the session is over by definition, so
+ *       re-establishing the invariant here is correct either way.
  */
 void nrf_axon_platform_close(void)
 {

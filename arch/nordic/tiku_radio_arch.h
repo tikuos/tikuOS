@@ -42,10 +42,10 @@ void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len);
  * TXPOWER is an enumerated register: only the silicon's discrete steps
  * (+8..+1, 0..-10, -12..-20 even, -22, -28, -40, -46) are legal; any other
  * value is rejected, never rounded.  Takes effect from the next ramp-up.
- * Must NOT be called while the RADIO is flipped NonSecure for the FLPR
- * beacon offload (secure-alias write = precise bus fault) -- the
- * tiku_ble_adv facade owns that reclaim/re-arm dance.
  *
+ * @note Must NOT be called while the RADIO is flipped NonSecure for the FLPR
+ *       beacon offload -- a secure-alias write is a precise bus fault.  The
+ *       tiku_ble_adv facade owns that reclaim/re-arm dance.
  * @return 0 on success, -1 if @p dbm is not a silicon-legal step.
  */
 int tiku_radio_arch_set_txpower(int8_t dbm);
@@ -66,17 +66,15 @@ typedef enum {
 
 /**
  * @brief One 3-channel TX burst at @p phy, reporting per-channel TX-state
- *        poll-iteration counts (R8.1's single-board PHY oracle).
+ *        poll-iteration counts (the single-board PHY oracle).
  *
- * Legacy advertising is 1M-ONLY by spec -- a 2M/coded burst on 37/38/39
- * is inaudible to any compliant scanner, so this is a bring-up probe,
- * not a beacon: the proof is ON-DIE.  The iteration count of the polled
- * TX window scales with airtime (verified against host decode during 1M
- * bring-up), so the same PDU must show ~0.5x iterations at 2M, ~3x at
- * S=2 and ~8x at S=8 relative to 1M.  If the modulator runs at the new
- * rate, the ratios cannot lie.  Restores the 1M link config before
- * returning, so beacon/scan semantics are untouched.
+ * Legacy advertising is 1M-ONLY by spec, so a 2M or coded burst on 37/38/39 is
+ * inaudible to any compliant scanner: this is a bring-up probe, not a beacon,
+ * and the proof is ON-DIE.
  *
+ * @note The polled TX window's iteration count scales with airtime, so the same
+ *       PDU must show ~0.5x iterations at 2M, ~3x at S=2 and ~8x at S=8
+ *       relative to 1M.  Restores the 1M link config before returning.
  * @param phy    PHY to probe.
  * @param iters  Out: TX-state poll iterations for ch 37/38/39.
  * @return 0 on success, -1 if any channel never reached DISABLED.
@@ -109,19 +107,14 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
 /**
  * @brief Start a continuous RF test transmission and LEAVE IT ON.
  *
- * Unmodulated (@p modulated = 0) parks the RADIO in TXIDLE emitting a
- * pure carrier at @p mhz -- one line on a spectrum analyser, for
- * antenna/matching work, XO trim and conducted-power checks.
- * Modulated (@p modulated = 1) additionally transmits a spectrally
- * busy payload back-to-back via an END->START short, giving an
- * occupied-bandwidth signal at the selected PHY.
+ * Unmodulated parks the RADIO in TXIDLE emitting a pure carrier at @p mhz --
+ * one line on a spectrum analyser.  Modulated adds a spectrally busy
+ * back-to-back payload via an END->START short, for occupied bandwidth.
  *
- * Unlike every other TX path here this RETURNS WITH THE RADIO ENABLED.
- * The caller must call tiku_radio_arch_carrier_stop() before any
- * beacon, scan or connection work, all of which assume they start from
- * DISABLED.  Calling start twice stops the previous carrier first.
- * TX power is whatever tiku_radio_arch_set_txpower() last selected.
- *
+ * @note Unlike every other TX path here this RETURNS WITH THE RADIO ENABLED.
+ *       The caller must stop it before any beacon, scan or connection work, all
+ *       of which assume they start from DISABLED.  Calling start twice stops
+ *       the previous carrier first; TX power is whatever was last selected.
  * @param phy        PHY whose modulation/preamble to use
  * @param mhz        Centre frequency in MHz, 2360..2500 (the low band
  *                   below 2400 is reached via FREQUENCY.MAP)
@@ -148,25 +141,22 @@ int tiku_radio_arch_carrier_active(void);
 /**
  * @brief Live RADIO.STATE, the hardware's own view of what it is doing.
  *
- * The values that matter for a test carrier are TXIDLE (0xA, ramped up
- * and emitting an unmodulated carrier) and TX (0xB, actively
- * modulating); DISABLED is 0x0.  Reading the peripheral directly is how
- * a bench session confirms RF is really on rather than trusting a
- * driver flag.
+ * For a test carrier the values that matter are TXIDLE (0xA, ramped up emitting
+ * an unmodulated carrier) and TX (0xB, actively modulating); DISABLED is 0x0.
+ * Reading the peripheral is how a bench session confirms RF is really on.
  */
 uint32_t tiku_radio_arch_state(void);
 
 /**
- * @brief Connectable advertising + CONNECT_IND capture (L-track L1).
+ * @brief Connectable advertising + CONNECT_IND capture.
  *
- * Transmits ADV_IND and hardware-turns-around (DISABLED_RXEN short)
- * into an RX window on the same channel, where a central answers
- * T_IFS=150 us after our packet: SCAN_REQs are counted, a CONNECT_IND
- * addressed to @p addr has its 22-byte LLData copied out (AA, CRCInit,
- * WinSize/Offset, Interval, Latency, Timeout, ChM, Hop|SCA).
- * Deliberately does not respond -- L1's exit is the decoded capture.
- * Blocking, polled, watchdog-kicked; radio must be idle (arbiter).
+ * Transmits ADV_IND and hardware-turns-around (DISABLED_RXEN short) into an RX
+ * window on the same channel, where a central answers T_IFS=150 us later.
+ * SCAN_REQs are counted and a CONNECT_IND for @p addr has its LLData copied out.
  *
+ * @note The 22 bytes are AA, CRCInit, WinSize/Offset, Interval, Latency,
+ *       Timeout, ChM and Hop|SCA.  Deliberately does not respond -- the decoded
+ *       capture is the exit.  Blocking, polled, watchdog-kicked; radio idle.
  * @return 1 = CONNECT_IND captured, 0 = timeout after @p ms.
  */
 int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
@@ -210,7 +200,7 @@ typedef struct {
     uint8_t  fail_bytes[5];     /**< first CRC-failed packet's RAM bytes  */
     uint16_t interval;          /**< connInterval, 1.25ms units (diag)   */
     uint16_t winoff;            /**< transmitWindowOffset units (diag)   */
-    uint32_t ctrl_tx;           /**< LL control PDUs we sent+acked (L4)  */
+    uint32_t ctrl_tx;           /**< LL control PDUs sent+acked (L4)     */
     uint32_t ctrl_rx;           /**< LL control PDUs received (L4)        */
     uint8_t  peer_vers;         /**< peer VersNr from LL_VERSION_IND (L4) */
     uint8_t  winsize;           /**< transmitWindowSize units (diag)     */
@@ -243,13 +233,11 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
                             tiku_radio_ll_conn_stats_t *st);
 
 /**
- * @brief CENTRAL role: scan for TIKU-CONN, connect, drive the link (L3
- *        two-board harness).
+ * @brief CENTRAL role: scan for TIKU-CONN, connect, drive the link.
  *
- * The debug oracle for L3: as master we impose the CONNECT_IND params
- * (deterministic anchor, lenient windows/supervision) and define the
- * event cadence, so a board-to-board connection can be brought up with
- * ground truth instead of a black-box phone.  Blocking + polled.
+ * The debug oracle for the two-board harness: as master this imposes the
+ * CONNECT_IND params and defines the event cadence, so a board-to-board
+ * connection comes up with ground truth instead of a black-box phone.
  *
  * @return 0 once a connection ran (see @p st), -1 if no peripheral found.
  */
@@ -257,22 +245,22 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                             tiku_radio_ll_conn_stats_t *st);
 
 /**
- * @brief Arm the Phase A LL-control exercise on the next central() run.
+ * @brief Arm the LL-control exercise on the next central() run.
  *
  * When on, the master sends LL_CHANNEL_MAP_UPDATE_IND then
- * LL_CONNECTION_UPDATE_IND mid-connection (after the ATT loopback),
- * applying each at its Instant.  Used to prove the peripheral follows both
- * (audit G6); off by default so normal central runs are unaffected.
+ * LL_CONNECTION_UPDATE_IND mid-connection, applying each at its Instant, to
+ * prove the peripheral follows both.  Off by default.
  */
 void tiku_radio_arch_central_updates(uint8_t on);
 
 /**
  * @brief Arm the central as the SMP pairing INITIATOR on the next run.
  *
- * When on, the central drives LE Secure Connections "Just Works" on L2CAP
- * CID 0x0006 (feature -> public key -> confirm/random -> DHKey check) to a
- * shared LTK, instead of the NUS ATT loopback.  Read the result afterwards
- * via tiku_ble_smp_pair_state()/_ltk() (Phase E, kintsugi/radio.md).
+ * When on, the central drives LE Secure Connections "Just Works" on L2CAP CID
+ * 0x0006 (feature -> public key -> confirm/random -> DHKey check) to a shared
+ * LTK, instead of the NUS ATT loopback.
+ *
+ * @note Read the result afterwards via tiku_ble_smp_pair_state() / _ltk().
  */
 void tiku_radio_arch_central_smp(uint8_t on);
 
@@ -326,26 +314,24 @@ extern uint32_t tiku_radio_arch_dbg_cen_aa; /* last per-conn random central AA *
 /**
  * @brief Fold one received Data-PDU header into the ack window.
  *
- * Updates @p a and returns TIKU_RADIO_LL_NEWDATA / _ACKED flags (either,
- * both, or neither -- the flips are independent).  @p has_payload must be
- * nonzero only for PDUs that carry a payload (LEN != 0); NESN advances
- * solely for those, so empty keepalives never forge a false ACK.
+ * Updates @p a and returns TIKU_RADIO_LL_NEWDATA / _ACKED flags -- either, both
+ * or neither, the flips being independent.  @p has_payload must be nonzero only
+ * for PDUs carrying one, so empty keepalives never forge a false ACK.
  */
 uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
                           uint8_t rx_nesn, uint8_t has_payload);
 
 /**
- * @brief One extended advertising event at 1M (R8.3a, blocking ~1.3 ms).
+ * @brief One extended advertising event at 1M (blocking, ~1.3 ms).
  *
- * ADV_EXT_IND (ch 37, ADI + AuxPtr) followed by a HARDWARE-timed
- * AUX_ADV_IND (secondary ch 20) carrying AdvA + up to 200 bytes of
- * AdvData -- the >31-byte payloads legacy advertising cannot.  The aux
- * launch is TIMER10+DPPI-exact; dbg_aux_us captures the aux packet's
- * actual start relative to the EXT_IND (nominal 600, the AuxPtr
- * offset).  Requires the radio idle (the facade arbiter's job).
- * Coded-PHY variant is a MODE/AuxPtr-PHY change once a coded-capable
- * receiver exists (kintsugi/radio.md R8.3).
+ * ADV_EXT_IND (ch 37, ADI + AuxPtr) followed by a HARDWARE-timed AUX_ADV_IND
+ * (secondary ch 20) carrying AdvA plus up to 200 bytes of AdvData -- the
+ * >31-byte payloads legacy advertising cannot reach.
  *
+ * @note The aux launch is TIMER10+DPPI-exact, and dbg_aux_us captures its
+ *       actual start relative to the EXT_IND (nominal 600, the AuxPtr offset).
+ *       Requires the radio idle.  The coded-PHY variant is a MODE/AuxPtr-PHY
+ *       change once a coded-capable receiver exists.
  * @return 0 on success, -1 EXT_IND never finished, -2 aux never flew.
  */
 int tiku_radio_arch_extadv_burst(const uint8_t *addr,
@@ -357,10 +343,9 @@ extern uint32_t tiku_radio_arch_dbg_aux_us;
 /**
  * @brief Session-scoped Constant Latency hold (nRF54L15 erratum 20).
  *
- * A duty-cycled radio user (background beacon) must hold Constant Latency
- * across the SLEEPS between its bursts, not just during each burst --
- * otherwise the erratum corrupts the on-air payload after a tickless idle.
- * While held, the per-operation exit to Low Power is suppressed.
+ * A duty-cycled radio user must hold Constant Latency across the SLEEPS between
+ * bursts, not just during each burst, or the erratum corrupts the on-air
+ * payload after a tickless idle.  The per-operation exit is suppressed.
  */
 void tiku_radio_arch_constlat_hold(int on);
 
@@ -410,15 +395,14 @@ void tiku_radio_arch_scan_start(void);
 /**
  * @brief Drain the ISR's packet ring and run the safety rotation.
  *
- * Cooperative half of the observer: pops every packet the RADIO_0 ISR
- * queued (8-entry SPSC ring; overflow drops rather than blocks) and hands
- * each to @p cb with its latched RSSI.  Also the counted safety net -- if
- * no DISABLED has fired for RADIO_SCAN_ROT_TICKS it forces a channel
- * rotation and bumps tiku_radio_arch_dbg_win_forced, which MUST stay 0
- * while the TIMER10->DPPI hardware window is alive.  The rotation is
- * skipped once the engine is disarmed, so a post-stop call only drains
- * stragglers.  Call every tick or two; never from ISR context.
+ * The cooperative half of the observer: pops every packet the RADIO_0 ISR
+ * queued (8-entry SPSC ring, overflow drops rather than blocks) and hands each
+ * to @p cb with its latched RSSI.  Call every tick or two, never from an ISR.
  *
+ * @note Also the counted safety net: with no DISABLED for RADIO_SCAN_ROT_TICKS
+ *       it forces a channel rotation and bumps dbg_win_forced, which MUST stay
+ *       0 while the TIMER10->DPPI hardware window is alive.  The rotation is
+ *       skipped once disarmed, so a post-stop call only drains stragglers.
  * @param cb  Per-packet callback; NULL discards the drained packets.
  * @param ud  Opaque context passed to @p cb.
  * @return Number of packets delivered on this call.
@@ -428,12 +412,12 @@ uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud);
 /**
  * @brief Disarm the observer and release the radio.
  *
- * Masks the RADIO IRQ, unwires the TIMER10->DPPI window (a live
- * SUBSCRIBE_DISABLE left behind would later kill a TX burst mid-air),
- * drives TASKS_DISABLE and restores the TX-only SHORTS contract, then
- * drops the per-operation Constant Latency -- suppressed while a beacon
- * session holds it (erratum 20).  Ring stragglers survive: call
- * tiku_radio_arch_scan_service() once more to deliver them.
+ * Masks the RADIO IRQ, unwires the TIMER10->DPPI window, drives TASKS_DISABLE,
+ * restores the TX-only SHORTS contract, then drops the per-operation Constant
+ * Latency unless a beacon session holds it (erratum 20).
+ *
+ * @note A live SUBSCRIBE_DISABLE left behind would later kill a TX burst
+ *       mid-air.  Ring stragglers survive: call scan_service() once more.
  */
 void tiku_radio_arch_scan_stop(void);
 
@@ -448,15 +432,15 @@ void tiku_radio_arch_scan_stop(void);
 void tiku_radio_arch_scan_pause(void);
 
 /**
- * @brief Re-arm the RX engine after a borrowed TX burst (R7.5).
+ * @brief Re-arm the RX engine after a borrowed TX burst.
  *
- * Restores the RX SHORTS, re-enables the RADIO IRQ, re-wires the
- * TIMER10->DPPI listen window and starts RX on the next advertising
- * channel.  The packet ring and its head/tail are untouched, so anything
- * queued before the pause is still delivered; Constant Latency is left
- * alone (the beacon session holds it).  Must pair with a preceding
- * tiku_radio_arch_scan_pause() from cooperative context -- no yield may
- * occur between the two.
+ * Restores the RX SHORTS, re-enables the RADIO IRQ, re-wires the TIMER10->DPPI
+ * listen window and starts RX on the next advertising channel.  The packet ring
+ * and its head/tail are untouched, so anything queued before the pause survives.
+ *
+ * @note Constant Latency is left alone, the beacon session holding it.  Must
+ *       pair with a preceding scan_pause() from cooperative context, with no
+ *       yield between the two.
  */
 void tiku_radio_arch_scan_resume(void);
 

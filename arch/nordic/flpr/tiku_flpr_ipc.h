@@ -50,8 +50,8 @@
  * whole page comfortably inside 1 KB. */
 #define TIKU_FLPR_MSG_CAP  240u
 
-/* Data Length Extension: the max LL data-PDU payload we negotiate (Phase F1).
- * 80 comfortably fits our largest L2CAP PDU (the 69-byte SMP Public Key, the
+/* Data Length Extension: the max LL data-PDU payload negotiated (Phase F1).
+ * 80 comfortably fits the largest L2CAP PDU (the 69-byte SMP Public Key, the
  * 68-byte long-read response) in a SINGLE LL PDU -- no fragmentation -- while
  * an 80-byte-payload packet stays ~728 us on 1M PHY, inside the connection
  * event's existing ~900 us TX/RX window (no timing re-tune).  Bounds the RADIO
@@ -109,11 +109,11 @@ typedef struct {
     volatile uint8_t  conn_chm[5];
     /* Peer identity captured from the CONNECT_IND (Phase E / SMP): the SMP
      * f5/f6 key derivation binds the LTK to both device addresses.  InitA is
-     * the central (initiator, address A); AdvA is us (peripheral, responder,
+     * the central (initiator, address A); AdvA is local (peripheral, responder,
      * address B) -- echoed so the host needn't remember what it advertised.
      * conn_addr_types: bit0 = InitA type, bit1 = AdvA type (1 = random). */
     volatile uint8_t  conn_inita[6];    /* initiator (central) address = A  */
-    volatile uint8_t  conn_adva[6];     /* advertiser (our) address     = B  */
+    volatile uint8_t  conn_adva[6];     /* advertiser (local) address   = B  */
     volatile uint8_t  conn_addr_types;  /* bit0 InitA, bit1 AdvA (1=random)  */
 
     /* LL encryption startup (Phase E3).  The FLPR has no AES, so the session
@@ -125,8 +125,8 @@ typedef struct {
     volatile uint32_t enc_rsp_seq;      /* M33: SKDs/IVs/sk/iv ready          */
     volatile uint8_t  enc_skdm[8];      /* FLPR->M33: central's SKD (LSO)     */
     volatile uint8_t  enc_ivm[4];       /* FLPR->M33: central's IV (LSO)      */
-    volatile uint8_t  enc_skds[8];      /* M33->FLPR: our SKD (MSO)           */
-    volatile uint8_t  enc_ivs[4];       /* M33->FLPR: our IV (MSO)            */
+    volatile uint8_t  enc_skds[8];      /* M33->FLPR: local SKD (MSO)         */
+    volatile uint8_t  enc_ivs[4];       /* M33->FLPR: local IV (MSO)          */
     volatile uint8_t  enc_sk[16];       /* M33->FLPR: session key (CCM00)     */
     volatile uint8_t  enc_iv[8];        /* M33->FLPR: IV = IVm||IVs (CCM00)   */
     volatile uint32_t enc_on;           /* FLPR: 1 once encryption is active  */
@@ -178,7 +178,7 @@ typedef struct {
     volatile uint32_t spin_passes;      /* FLPR->M33: outer passes retired     */
 } tiku_flpr_shared_t;
 
-/* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + our AdvA. */
+/* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + the AdvA. */
 typedef struct {
     uint32_t adv_len;                   /* bytes in adv[] ([S0][LEN][S1]..) */
     uint8_t  addr[6];                   /* AdvA to match in the CONNECT_IND */

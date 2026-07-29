@@ -251,7 +251,7 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
 
     RADIO->TIFS = 192u;                          /* aTurnaroundTime (12 sym)   */
     RADIO->PACKETPTR = (uint32_t)rx_frame;
-    /* RX with the turnaround pre-armed; we commit or abort in the window. */
+    /* RX with the turnaround pre-armed; commit or abort inside the window. */
     RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
                     ((uint32_t)1u << RADIO_SHORTS_PHYEND_DISABLE_Pos) |
                     ((uint32_t)1u << 2);         /* DISABLED_TXEN              */

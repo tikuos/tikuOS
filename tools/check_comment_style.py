@@ -34,16 +34,18 @@ HDR = re.compile(r'/\*.*?\*/', re.S)
 # Process log, not documentation: build-phase names, first person, and the
 # narration of how the code came to be.
 BANNED = [
-    # Phase names as the plan writes them: "(P3g)", "see P4", "A2b".  Bare
-    # "M4" or "P0" are a core and a GPIO port, so both sides must be anchored.
-    (re.compile(r'\((?:P[0-9][a-g]?|A[1-4][a-b]?|H[0-3]|M[1-6])\)'
+    # Phase names as the plan writes them: "(P3g)", "see A2b".  A bare P0..P3
+    # is a Nordic GPIO port and M3/M4 are Cortex cores, so the P-form requires
+    # its letter suffix and the M-form is not matched at all.
+    (re.compile(r'\((?:P[0-9][a-g]|A[1-4][a-b]?|H[0-3])\)'
                 r'|\b(?:see|per|from|in|since|until|after|before|blocked on)\s+'
-                r'(?:P[0-9][a-g]?|A[1-4][a-b]?|H[0-3])\b'), 'build-phase reference'),
+                r'(?:P[0-9][a-g]|A[1-4][a-b]?|H[0-3])\b'), 'build-phase reference'),
     # Case-sensitive: "I" is I/O and @p i far more often than it is a pronoun.
-    # "us" is microseconds after a number, and a parameter name after @param /
-    # @p; a trailing , ) ; : marks it as code rather than prose.
+    # "us" is microseconds after a number or a comma-separated unit label, and
+    # an identifier when it follows '*' or precedes an operator.
     (re.compile(r'\b(?:we|We|our|Our)\b'
-                r'|(?<!\d )(?<!@param )(?<!@p )\b(?:us|Us)\b(?![,);:])'),
+                r'|(?<![\d,*] )(?<!@param )(?<!@p )(?<!\*)'
+                r'\b(?:us|Us)\b(?![,);:=!]|\s*\*/)'),
      'first person'),
     (re.compile(r'\b(?:used to|predated|shipped because|never worked|turned out|'
                 r'which is the point|worth recording|the mistake (?:was|here))\b',

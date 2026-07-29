@@ -25,7 +25,7 @@
 
 /** @brief Max on-air frame (PHR counts it): 127 B incl the 2-byte FCS. */
 #define TIKU_154_MAX_FRAME   127u
-/** @brief Max MAC payload we hand to/from the caller (frame minus FCS). */
+/** @brief Max MAC payload handed to/from the caller (frame minus FCS). */
 #define TIKU_154_MAX_PSDU    125u
 
 /** @brief 1 if this build has the 15.4 PHY (nRF54L on-die RADIO). */
@@ -76,10 +76,10 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm);
 int tiku_ieee154_arch_cca(void);
 
 /**
- * @brief Receive one frame and, if it is a CRC-OK data frame for us that
+ * @brief Receive one frame and, if it is a CRC-OK data frame for this node that
  *        requests an ACK, transmit a spec-timed ACK via the hardware T_IFS
  *        turnaround (192 us) -- no software in the ack path.
- * @param my_pan/my_addr  our 16-bit PAN/short address for the in-window
+ * @param my_pan/my_addr  the 16-bit PAN/short address for the in-window
  *                        filter (0xFFFF dst = broadcast, never ACKed).
  * @param did_ack  out (optional): 1 if an ACK was launched.
  * @return >0 payload length (FCS stripped), 0 timeout, -1 bad FCS.
