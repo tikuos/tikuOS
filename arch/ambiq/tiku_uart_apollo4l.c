@@ -33,16 +33,34 @@
  * 60/47).  The register field layout is identical across instances (the UART0_*
  * field macros apply to all), so only the instance pointer, pads, NVIC IRQ and
  * power bit change.  TIKU_CONSOLE_UART0 (set for MCU=apollo4p) selects UART0. */
+/* WHICH peripheral is a board-routing choice expressed by TIKU_CONSOLE_UART0
+ * (set by BOARD=apollo4p_evb); WHICH PADS is board wiring and now comes from
+ * the board header, matching what the Apollo510 UART backend already does. */
 #if defined(TIKU_CONSOLE_UART0)
 #define TIKU_UART              UART0     /* Apollo4 Plus EVB COM UART */
-#define TIKU_UART_TX_PAD       60u
-#define TIKU_UART_RX_PAD       47u
 #define TIKU_UART_IRQ          15u       /* UART0_IRQn */
 #else
 #define TIKU_UART              UART2     /* Apollo4 Lite EVB COM UART */
-#define TIKU_UART_TX_PAD       54u
-#define TIKU_UART_RX_PAD       11u
 #define TIKU_UART_IRQ          17u       /* UART2_IRQn */
+#endif
+#define TIKU_UART_TX_PAD       TIKU_BOARD_UART_TX_PIN
+#define TIKU_UART_RX_PAD       TIKU_BOARD_UART_RX_PIN
+
+/*
+ * NO APOLLO4 BOARD WAS ON THE BENCH WHEN THE PADS MOVED OUT OF THIS FILE, and
+ * a wrong console pad is the worst failure mode available here: the board
+ * boots, runs, and says nothing, which reads as a dead image.  So the values
+ * are pinned to exactly what this file used before the move.  If a board
+ * header ever disagrees, that is a COMPILE error naming the pad, not a silent
+ * board -- which is as close to a hardware gate as is available without the
+ * hardware.
+ */
+#if defined(TIKU_CONSOLE_UART0)
+_Static_assert(TIKU_UART_TX_PAD == 60u, "Apollo4P console TX pad moved");
+_Static_assert(TIKU_UART_RX_PAD == 47u, "Apollo4P console RX pad moved");
+#else
+_Static_assert(TIKU_UART_TX_PAD == 54u, "Apollo4L console TX pad moved");
+_Static_assert(TIKU_UART_RX_PAD == 11u, "Apollo4L console RX pad moved");
 #endif
 /** GPIO PINCFG FUNCSEL that routes the pads to UART TX/RX (4 on all Apollo4). */
 #define TIKU_UART_PIN_FUNCSEL  4u

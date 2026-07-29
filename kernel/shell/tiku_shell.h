@@ -134,6 +134,40 @@ extern struct tiku_process tiku_shell_process;
  */
 void tiku_shell_init(void);
 
+/*---------------------------------------------------------------------------*/
+/* PUMPS -- work that must run in PROCESS context, once per shell pass        */
+/*---------------------------------------------------------------------------*/
+/**
+ * @brief A callback the shell loop invokes once per pass.
+ *
+ * For drivers that need to be serviced with interrupts ENABLED and cannot
+ * live on the scheduler's idle hook (which runs inside tiku_atomic_enter(),
+ * i.e. with PRIMASK set -- a long transfer there kills the tick, the console,
+ * and the debugger's ability to halt the CPU).
+ *
+ * The shell used to call one such driver DIRECTLY, with an
+ * `#include <arch/ambiq/...>` at the top of the transport-agnostic shell
+ * loop.  This registry exists so drivers depend on the shell rather than the
+ * shell on any particular driver.
+ *
+ * A pump runs on EVERY pass, so it must return promptly when it has nothing
+ * to do -- the loop is not a place to wait.
+ */
+typedef void (*tiku_shell_pump_fn)(void);
+
+/**
+ * @brief Register a pump.  Idempotent: re-registering the same function is a
+ *        no-op that still reports success.
+ * @return 0 on success, -1 if @p fn is NULL or the table is full.
+ */
+int tiku_shell_add_pump(tiku_shell_pump_fn fn);
+
+/**
+ * @brief Unregister a pump.  Unknown or NULL functions are ignored, so a
+ *        driver may call this unconditionally on teardown.
+ */
+void tiku_shell_remove_pump(tiku_shell_pump_fn fn);
+
 #if TIKU_SHELL_CMD_SLIP
 /**
  * @brief Drain the shared UART through the SLIP demux from a blocking builtin.

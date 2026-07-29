@@ -60,12 +60,16 @@
 /**
  * @brief Pull in board-level GPIO pin assignments for the selected board.
  *
- * The Makefile may define TIKU_BOARD_APOLLO510_EVB. If no board is
- * specified the Apollo510 EVB is assumed — it is the only supported
- * board for this silicon at this milestone.
+ * The Makefile always passes exactly one TIKU_BOARD_* (see BOARD_DEFINE_* /
+ * KNOWN_BOARDS there).  The fallback below covers builds that set only the
+ * device, and keeps the historical default.
  */
-#if defined(TIKU_BOARD_APOLLO510B_EVB)
+#if defined(TIKU_BOARD_TIKU_BARE)
+#include <arch/ambiq/boards/tiku_board_tiku_bare.h>
+#elif defined(TIKU_BOARD_APOLLO510B_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo510b_evb.h>
+#elif defined(TIKU_BOARD_APOLLO4P_EVB)
+#include <arch/ambiq/boards/tiku_board_apollo4p_evb.h>
 #elif defined(TIKU_BOARD_APOLLO4L_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo4l_evb.h>
 #elif defined(TIKU_BOARD_APOLLO510_EVB)

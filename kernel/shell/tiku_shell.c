@@ -46,6 +46,8 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell.h"
+#if (TIKU_DRV_USB_ENABLE + 0)
+#endif
 #include "tiku_shell_config.h"
 #include "tiku_shell_parser.h"
 #include "tiku_shell_cwd.h"          /* working directory for the path-aware prompt */
@@ -144,6 +146,7 @@
 #endif
 #if TIKU_SHELL_CMD_DF
 #include "commands/tiku_shell_cmd_df.h"
+#include "commands/tiku_shell_cmd_fat.h"
 #endif
 #if TIKU_SHELL_CMD_NVMPROBE
 #include "commands/tiku_shell_cmd_nvmprobe.h"
@@ -680,6 +683,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_DF
     {"df",      "/data file-store usage",      tiku_shell_cmd_df},
 #endif
+#if TIKU_SHELL_CMD_FAT
+    {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},
+#endif
 #if TIKU_SHELL_CMD_NVMPROBE
     {"nvmprobe","Carved NVM region diagnostic", tiku_shell_cmd_nvmprobe},
 #endif
@@ -1208,6 +1214,57 @@ shell_tab_complete(void)
  */
 TIKU_PROCESS(tiku_shell_process, "CLI");
 
+/*---------------------------------------------------------------------------*/
+/* PUMP REGISTRY                                                             */
+/*---------------------------------------------------------------------------*/
+/* Static and bounded, like everything else here -- no allocation, and a full
+ * table is a caller error reported at registration rather than a surprise
+ * later.  Four is well clear of the one real user today; raise it here if a
+ * second transport ever needs pumping. */
+#ifndef TIKU_SHELL_PUMP_MAX
+#define TIKU_SHELL_PUMP_MAX 4
+#endif
+
+static tiku_shell_pump_fn shell_pumps[TIKU_SHELL_PUMP_MAX];
+static uint8_t shell_pump_count;
+
+int tiku_shell_add_pump(tiku_shell_pump_fn fn)
+{
+    uint8_t i;
+
+    if (fn == NULL) { return -1; }
+    for (i = 0u; i < shell_pump_count; i++) {
+        if (shell_pumps[i] == fn) { return 0; }   /* idempotent */
+    }
+    if (shell_pump_count >= (uint8_t)TIKU_SHELL_PUMP_MAX) { return -1; }
+    shell_pumps[shell_pump_count++] = fn;
+    return 0;
+}
+
+void tiku_shell_remove_pump(tiku_shell_pump_fn fn)
+{
+    uint8_t i, j;
+
+    for (i = 0u; i < shell_pump_count; i++) {
+        if (shell_pumps[i] != fn) { continue; }
+        for (j = (uint8_t)(i + 1u); j < shell_pump_count; j++) {
+            shell_pumps[j - 1u] = shell_pumps[j];
+        }
+        shell_pump_count--;
+        shell_pumps[shell_pump_count] = NULL;
+        return;
+    }
+}
+
+static void shell_run_pumps(void)
+{
+    uint8_t i;
+
+    for (i = 0u; i < shell_pump_count; i++) {
+        shell_pumps[i]();
+    }
+}
+
 /**
  * @brief Shell process protothread — line editor and command dispatcher.
  *
@@ -1367,6 +1424,22 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
          * writes when the backend is UART/TCP (net-test, telnet, `both`). */
         tiku_usb_cdc_poll();
 #endif
+
+        /*
+         * Registered pumps, in PROCESS context with interrupts ENABLED.
+         *
+         * The USB mass-storage transport is the reason this exists.  It first
+         * lived on the scheduler's idle hook, which was wrong: that hook runs
+         * inside tiku_atomic_enter() (PRIMASK set) and an MSC data phase
+         * blocks for a whole 64 KB eMMC transfer -- milliseconds with every
+         * interrupt masked kills the tick, kills the console, and leaves the
+         * debugger unable to halt the CPU.  It then lived HERE as a direct
+         * call, which merely moved the problem from the wrong context to the
+         * wrong layer: a transport-agnostic shell loop naming one board's USB
+         * driver.  Now drivers register themselves and the shell knows none
+         * of them.
+         */
+        shell_run_pumps();
 
 #if TIKU_SHELL_CMD_RULES || TIKU_SHELL_CMD_WATCH || TIKU_SHELL_CMD_BASIC
         /* A watched VFS node changed: dispatch to the event-side

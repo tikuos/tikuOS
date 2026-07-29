@@ -62,6 +62,9 @@
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #include "tiku_vfs_tree_psram.h"     /* /sys/psram -- external 64 MB PSRAM   */
 #endif
+#if (TIKU_DRV_EMMC_ENABLE + 0)
+#include "tiku_vfs_tree_emmc.h"      /* /sys/emmc -- on-board 8 GB eMMC      */
+#endif
 #include "tiku_vfs_tree_persist.h"
 #include "tiku_vfs_tree_watch.h"
 #include "tiku_vfs_tree_inittab.h"
@@ -1302,6 +1305,10 @@ static const tiku_vfs_node_t sys_children[] = {
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
     { "psram",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_psram_children,    TIKU_VFS_TREE_PSRAM_NCHILD },
+#endif
+#if (TIKU_DRV_EMMC_ENABLE + 0)
+    { "emmc",     TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_emmc_children,     TIKU_VFS_TREE_EMMC_NCHILD },
 #endif
     { "timer",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_timer_children,    TIKU_VFS_TREE_TIMER_NCHILD },

@@ -93,36 +93,31 @@
 /* PADS (table 0)                                                            */
 /*---------------------------------------------------------------------------*/
 
-#define NOR_PAD_D0      95u
-#define NOR_PAD_D7     102u
-#define NOR_PAD_CLK    103u
-#define NOR_PAD_DQS    104u
-#define NOR_PAD_CE      53u
-/*
- * BOARD-CONDITIONAL.  The lab has both Apollo510 EVBs and they differ here:
- *
- *              Apollo510 EVB (green)      Apollo510B EVB (Blue)
- *   U12 NOR    fitted                     NOT fitted
- *   RSTn       GP54                       GP17 (per its BSP)
- *   CE0        GP53                       not defined; vendor comments out
- *                                         the CE pinconfig entirely
- *   load sw    GP208                      none
- *
- * Nothing to pass by hand: the Makefile already defines TIKU_BOARD_APOLLO510_EVB
- * for MCU=apollo510 and TIKU_BOARD_APOLLO510B_EVB for MCU=apollo510b, so the
- * right pins follow from the target.  The Blue variant is kept compiling (and
- * reporting honestly that nothing answers) rather than #error'd, because a
- * driver that vanishes on one board is a driver whose absence surprises
- * someone later.
- */
-#if defined(TIKU_BOARD_APOLLO510_EVB)
-#define NOR_PAD_RST     54u    /* green board: schematic + its own BSP agree */
-#define NOR_PAD_LSEN   208u    /* green board: real load switch, real off    */
-#else
-#define NOR_PAD_RST     17u    /* Blue board: the 510B BSP's value           */
-#define NOR_PAD_LSEN   208u    /* Blue board: no load switch -- pad kept only
-                                * so the disarmed verb still compiles        */
+#if !defined(TIKU_BOARD_NOR_PAD_D0)
+#error "This board declares no NOR pads (TIKU_BOARD_NOR_PAD_*). The build \
+system should not have compiled tiku_nor_arch.c for it -- see BOARD_CAPS/NOR \
+in the Makefile."
 #endif
+#define NOR_PAD_D0     TIKU_BOARD_NOR_PAD_D0
+#define NOR_PAD_D7     TIKU_BOARD_NOR_PAD_D7
+#define NOR_PAD_CLK    TIKU_BOARD_NOR_PAD_CLK
+#define NOR_PAD_DQS    TIKU_BOARD_NOR_PAD_DQS
+#define NOR_PAD_CE     TIKU_BOARD_NOR_PAD_CE
+/*
+ * RSTn and the load switch also come from the board header now.
+ *
+ * There USED to be a `#if defined(TIKU_BOARD_APOLLO510_EVB) / #else` here
+ * carrying a second set of pads for the Blue EVB (RST GP17, no load switch),
+ * kept "so the driver still compiles on that board".  After the capability
+ * split that branch is unreachable: the Blue board declares no NOR cap, so
+ * TIKU_DRV_NOR_ENABLE=1 is refused at make time and this file is never
+ * compiled for it.  Carrying pin numbers for a part that is not on the board
+ * is the fiction the split exists to end, so the branch is gone rather than
+ * left to rot -- if a future board fits a NOR, it declares the cap and its own
+ * pads, and this driver needs no edit at all.
+ */
+#define NOR_PAD_RST    TIKU_BOARD_NOR_PAD_RST
+#define NOR_PAD_LSEN   TIKU_BOARD_NOR_PAD_LSEN
 
 #define PAD_FNCSEL_MSPI1     0u
 #define PAD_FNCSEL_MNCE1     0u

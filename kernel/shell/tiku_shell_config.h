@@ -81,6 +81,17 @@
 #define TIKU_SHELL_CMD_MRAMBENCH 0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_FAT
+/* Auto-on wherever the eMMC driver is built: the card is the only FAT32
+ * volume in the system, so the command has nothing to read without it.
+ * The parser itself (kernel/fs/tiku_fat.c) is hardware-independent and is
+ * regression-tested on a host -- see tools/fat32. */
+#if defined(TIKU_DRV_EMMC_ENABLE)
+#define TIKU_SHELL_CMD_FAT 1  /**< fat - read the card's FAT32 volume */
+#else
+#define TIKU_SHELL_CMD_FAT 0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_BLE
 /* Auto-on for the EM9305 BLE build (apollo510b); the "ble" command runs the
  * radio first-contact self-test. The .c + the driver are only compiled when
@@ -198,8 +209,14 @@
 #endif
 /* `lcd` is only useful on boards that physically wire an LCD panel
  * to the LCD_C peripheral (currently FR6989 LaunchPad). Default it
- * on / off based on the board header's TIKU_BOARD_HAS_LCD; user
- * override via -DTIKU_SHELL_CMD_LCD still wins. */
+ * on / off from TIKU_BOARD_HAS_LCD; user override via
+ * -DTIKU_SHELL_CMD_LCD still wins.
+ *
+ * That macro is a BOARD_CAPS entry in the Makefile, so it arrives as a -D
+ * and is visible here regardless of what this file has included.  It used
+ * to be defined in the board header, which meant this test silently read
+ * "no LCD" in any translation unit that reached this header first -- the
+ * include-order hazard documented at the bottom of this file. */
 #ifndef TIKU_SHELL_CMD_LCD
 #  if defined(TIKU_BOARD_HAS_LCD) && TIKU_BOARD_HAS_LCD
 #    define TIKU_SHELL_CMD_LCD 1  /**< lcd     - Drive segment-LCD interface */

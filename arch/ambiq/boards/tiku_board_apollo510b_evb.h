@@ -197,4 +197,71 @@
 #define TIKU_BOARD_EM9305_CLK32K_PIN 138U
 #define TIKU_BOARD_EM9305_CLK32K_FUNCSEL 3U
 
+/*---------------------------------------------------------------------------*/
+/* eMMC (U11) on SDIO0                                                       */
+/*---------------------------------------------------------------------------*/
+/*
+ * The data/CLK/CMD pads are identical on both Apollo510 EVBs and agree with
+ * both the schematic and the BSP.  RSTn is NOT -- see below, and see TABLE 0
+ * in arch/ambiq/tiku_emmc_arch.h for how that disagreement was resolved.
+ *
+ * The driver walks D0..CLK and D4..CMD as CONTIGUOUS RANGES (84..88, 156..160),
+ * so a board that re-pins this bus must keep each run contiguous or teach the
+ * driver otherwise; the _Static_assert in tiku_emmc_arch.c enforces it.
+ *
+ * FUNCSEL is per-pad silicon, not a free choice, and it is NOT uniform across
+ * this bus: GP84..GP88 reach SDIF0 on FNCSEL 2, GP156..GP160 on FNCSEL 0.
+ * It travels with the pads because a board that moves the bus needs the
+ * funcsel matching ITS pads.
+ */
+#define TIKU_BOARD_EMMC_PAD_D0       84U  /**< DAT0; DAT1/2 at 85/86.      */
+#define TIKU_BOARD_EMMC_PAD_D3       87U  /**< DAT3 -- end of low run.     */
+#define TIKU_BOARD_EMMC_PAD_CLK      88U  /**< CLK; in the low run.        */
+#define TIKU_BOARD_EMMC_PAD_D4      156U  /**< DAT4; DAT5/6 at 157/158.    */
+#define TIKU_BOARD_EMMC_PAD_D7      159U  /**< DAT7 -- end of high run.    */
+#define TIKU_BOARD_EMMC_PAD_CMD     160U  /**< CMD; in the high run.       */
+#define TIKU_BOARD_EMMC_FNCSEL_LOW    2U  /**< GP84..GP88   -> SDIF0.      */
+#define TIKU_BOARD_EMMC_FNCSEL_HIGH   0U  /**< GP156..GP160 -> SDIF0.      */
+/*
+ * RSTn = GP13 on THIS board.  The Blue EVB schematic carries the net
+ * `SDIO0_RSTn_GP13`; the BSP says 12 but also gives GP12 to COM_UART_TX, so it
+ * contradicts itself and is not usable as the tie-breaker.  HARDWARE-VERIFIED
+ * on the Blue EVB (card enumerates, 8-bit HS, byte-exact bulk read/write).
+ */
+#define TIKU_BOARD_EMMC_PAD_RST      13U
+
+/*---------------------------------------------------------------------------*/
+/* USB device controller -- board-side rails and HS reference                */
+/*---------------------------------------------------------------------------*/
+/*
+ * The controller is silicon; what powers it and what clocks its PHY are not.
+ * Both rails are switched from board pads, and this board has NO high-speed
+ * crystal (AM_BSP_XTAL_HS_FREQ_HZ == 0) -- its HS reference is the 12 MHz
+ * EXTREFCLK exported by the EM9305 die in the same package, requested over
+ * GP136 and arriving on GP15.  The board declares USBHS_CLK_EM9305 in
+ * BOARD_CAPS, which is what selects that path in the driver.
+ * HARDWARE-VERIFIED: enumerates at both full and high speed on this board.
+ */
+#define TIKU_BOARD_USB_PAD_VDDUSB33   47U  /**< 3.3 V rail switch.           */
+#define TIKU_BOARD_USB_PAD_VDDUSB0P9  48U  /**< 0.9 V rail switch.           */
+#define TIKU_BOARD_USB_PAD_CLKREQ    136U  /**< Asks the EM9305 for 12 MHz.  */
+#define TIKU_BOARD_USB_PAD_REFCLK     15U  /**< Where that clock arrives.    */
+
+/*---------------------------------------------------------------------------*/
+/* PSRAM (U14, 64 MB APS25608N) on MSPI0                                     */
+/*---------------------------------------------------------------------------*/
+/*
+ * ONLY the chip select is here, deliberately.  MSPI0's data, clock and DQS
+ * pads (GP64..GP71, GP72, GP73) are DEDICATED to that MSPI instance in
+ * silicon -- a board does not get to choose them, it only chooses which MSPI
+ * instance to wire the part to.  Listing them here would imply a freedom the
+ * hardware does not offer, so they stay device-side in tiku_psram_arch.c.
+ *
+ * The chip select IS a board choice: MSPI0 exposes several CE lines and the
+ * part is strapped to one of them.  Both Apollo510 EVBs happen to use CE0 on
+ * GP199; a custom board need not.
+ * HARDWARE-VERIFIED on the Blue EVB (64 MB mapped, timing scan, bench).
+ */
+#define TIKU_BOARD_PSRAM_PAD_CE     199U  /**< MSPI0 CE0. */
+
 #endif /* TIKU_BOARD_APOLLO510B_EVB_H_ */

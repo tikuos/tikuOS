@@ -297,6 +297,30 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     SHELL_PRINTF("  free now    " SH_BOLD "%5lu" SH_RST "\n",
                  (unsigned long)(fram_total > fram_used ? fram_total - fram_used : 0));
 
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+    /*
+     * PSRAM: reported only WHILE ATTACHED, which is the honest thing for a
+     * tier that comes and goes.  It is a late-attach tier -- absent at boot,
+     * present after `power psram up`, gone again after `down` -- so a static
+     * line would claim 64 MB the system does not have most of the time.
+     * `tiku_tier_stats` failing is not an error here; it is the answer.
+     */
+    {
+        tiku_mem_stats_t ps_tier;
+        if (tiku_tier_stats(TIKU_MEM_PSRAM, &ps_tier) == TIKU_MEM_OK &&
+            ps_tier.total_bytes != 0u) {
+            SHELL_PRINTF(SH_BOLD "PSRAM" SH_RST "\n");
+            SHELL_PRINTF("  tier pool   %5lu / %lu  (peak %lu)\n",
+                         (unsigned long)ps_tier.used_bytes,
+                         (unsigned long)ps_tier.total_bytes,
+                         (unsigned long)ps_tier.peak_bytes);
+            SHELL_PRINTF("  free now    " SH_BOLD "%5lu" SH_RST "\n",
+                         (unsigned long)(ps_tier.total_bytes -
+                                         ps_tier.used_bytes));
+        }
+    }
+#endif
+
 #if TIKU_INIT_ENABLE
     {
         const tiku_nvm_region_t *r;

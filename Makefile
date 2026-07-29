@@ -75,62 +75,232 @@ endif
 endif
 
 # ---------------------------------------------------------------------------
-# Board selection (RP2350 only — MSP430 boards are 1:1 with MCU=)
+# Board selection (ALL platforms)
 #
-# BOARD picks which board header arch/arm-rp2350/boards/tiku_board_*.h
-# is pulled in by the device selector. The two RP2350 boards differ
-# in:
-#   - Pi Pico 2     (BOARD=pico2)   plain board, LED on GP25, no
-#                                   CYW43 module — TIKU_DRV_WIFI_*
-#                                   not available.
-#   - Pi Pico 2 W   (BOARD=pico2w)  default — adds the CYW43439
-#                                   wireless module on GP23..25 +
-#                                   GP29; LED is behind the chip so
-#                                   the board header reroutes LED1
-#                                   to GP15 when the WiFi driver is
-#                                   compiled in.
+# BOARD names the physical PCB.  MCU names the silicon on it.  They are
+# different facts and this build keeps them apart:
 #
-# Override on the make line, e.g.:  make MCU=rp2350 BOARD=pico2
+#   MCU=apollo510b        the AP510NFB part (Apollo510 die + EM9305 BLE die
+#                         in one package) -- silicon.
+#   BOARD=apollo510b_evb  Ambiq's evaluation board carrying that part, with
+#                         its eMMC (U11), PSRAM (U14), USB supply switches and
+#                         its own J-Link console routing -- none of which are
+#                         silicon, and none of which a custom board would have.
+#
+# Every MCU has a default board, so no existing command line changes.  Pass
+# BOARD= to build the same silicon on a different PCB, which is exactly what a
+# custom TikuOS board needs.  See kintsugi/board-device-separation-plan.md.
+#
+# Before this table, BOARD defaulted to `pico2w` GLOBALLY and was simply
+# ignored off RP2350 -- so an apollo510b build silently carried BOARD=pico2w.
+# Harmless while only RP2350 read it; a trap the moment anything else did.
 # ---------------------------------------------------------------------------
+
+# MCU -> its default board.
+DEFAULT_BOARD_msp430fr2433  := fr2433_launchpad
+DEFAULT_BOARD_msp430fr5969  := fr5969_launchpad
+DEFAULT_BOARD_msp430fr5994  := fr5994_launchpad
+DEFAULT_BOARD_msp430fr6989  := fr6989_launchpad
+DEFAULT_BOARD_rp2350        := pico2w
+DEFAULT_BOARD_apollo4l      := apollo4l_evb
+# The Apollo4 Plus EVB is a DIFFERENT physical board.  It gets its own BOARD
+# NAME here even though it still shares the Lite's HEADER (S6 splits the
+# header).  The name is what lets its console routing be a board fact instead
+# of a silicon fact -- keying that on BOARD=apollo4l_evb would have handed
+# UART0 to the Lite too, which is wrong.
+DEFAULT_BOARD_apollo4p      := apollo4p_evb
+DEFAULT_BOARD_apollo510     := apollo510_evb
+DEFAULT_BOARD_apollo510b    := apollo510b_evb
+DEFAULT_BOARD_nrf54l15      := nrf54l15_dk
+# Two silicon variants, one DK: the LM20-DK ships LM20B, both images run on it.
+DEFAULT_BOARD_nrf54lm20a    := nrf54lm20_dk
+DEFAULT_BOARD_nrf54lm20b    := nrf54lm20_dk
+
+# BOARD -> the macro its header is selected by, and the platform it belongs to.
+# Adding a board means adding one row to each table plus a board header.
+KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
+                fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
+                apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
+                tiku_bare
+
+BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
+BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
+BOARD_DEFINE_fr5994_launchpad  := TIKU_BOARD_FR5994_LAUNCHPAD
+BOARD_DEFINE_fr6989_launchpad  := TIKU_BOARD_FR6989_LAUNCHPAD
+BOARD_DEFINE_pico2             := TIKU_BOARD_RPI_PICO2
+BOARD_DEFINE_pico2w            := TIKU_BOARD_RPI_PICO2_W
+BOARD_DEFINE_apollo4l_evb      := TIKU_BOARD_APOLLO4L_EVB
+BOARD_DEFINE_apollo4p_evb      := TIKU_BOARD_APOLLO4P_EVB
+BOARD_DEFINE_apollo510_evb     := TIKU_BOARD_APOLLO510_EVB
+BOARD_DEFINE_apollo510b_evb    := TIKU_BOARD_APOLLO510B_EVB
+# A custom TikuOS board carrying Apollo510 silicon and none of the EVB's
+# parts.  Not any MCU's default -- ask for it with BOARD=tiku_bare.
+BOARD_DEFINE_tiku_bare         := TIKU_BOARD_TIKU_BARE
+BOARD_DEFINE_nrf54l15_dk       := TIKU_BOARD_NRF54L15_DK
+BOARD_DEFINE_nrf54lm20_dk      := TIKU_BOARD_NRF54LM20_DK
+
+BOARD_PLATFORM_fr2433_launchpad  := msp430
+BOARD_PLATFORM_fr5969_launchpad  := msp430
+BOARD_PLATFORM_fr5994_launchpad  := msp430
+BOARD_PLATFORM_fr6989_launchpad  := msp430
+BOARD_PLATFORM_pico2             := rp2350
+BOARD_PLATFORM_pico2w            := rp2350
+BOARD_PLATFORM_apollo4l_evb      := ambiq
+BOARD_PLATFORM_apollo4p_evb      := ambiq
+BOARD_PLATFORM_apollo510_evb     := ambiq
+BOARD_PLATFORM_apollo510b_evb    := ambiq
+BOARD_PLATFORM_tiku_bare         := ambiq
+BOARD_PLATFORM_nrf54l15_dk       := nordic
+BOARD_PLATFORM_nrf54lm20_dk      := nordic
+
+# ---------------------------------------------------------------------------
+# Board capabilities -- what is FITTED on the PCB, not what the silicon can do
+#
+# A capability answers "is the part actually there, and does this PCB route it?"
+# The MCU cannot answer that: an Apollo510 die is an Apollo510 die whether or
+# not somebody populated U11.  Before this table the driver gates asked the MCU
+# anyway (`ifeq ($(filter apollo510 apollo510b,$(MCU)),)`), which is why
+# building eMMC for a bare custom board carrying the same silicon would have
+# been ACCEPTED and then failed on the bench.
+#
+# Each cap becomes -DTIKU_BOARD_HAS_<CAP>=1 for the compiler, and gates the
+# corresponding TIKU_DRV_*_ENABLE below.  Caps are a per-board fact, so a board
+# that grows a part changes exactly one line here.
+#
+# NOTE the -D form is deliberate.  There is an older board-header capability
+# macro in the tree (TIKU_BOARD_HAS_LCD, defined inside the FR6989 board
+# header) -- that is the include-order-dependent shape CLAUDE.md warns about.
+# Caps declared here reach every translation unit regardless of what any file
+# happens to include.  Converging LCD onto this table is an S6 item.
+# ---------------------------------------------------------------------------
+
+# U11 eMMC (8 GB), U14 PSRAM (64 MB) and switched USB rails are on BOTH
+# Apollo510 EVBs.  U12 octal NOR is fitted on the green EVB ONLY -- the Blue
+# board's BSP defines no MSPI1 chip select and the part is absent.
+# The USB high-speed PHY reference differs per board: the Blue board clocks it
+# from the EM9305 die's 12 MHz EXTREFCLK, the green one from its own crystal.
+BOARD_CAPS_apollo510_evb       := EMMC PSRAM NOR USB_RAILS USBHS_CLK_XTAL
+BOARD_CAPS_apollo510b_evb      := EMMC PSRAM USB_RAILS USBHS_CLK_EM9305
+BOARD_CAPS_pico2w              := CYW43
+
+# Declared empty ON PURPOSE: nothing on these boards is driver-gated today.
+# An empty row still says "this question was asked and answered".
+BOARD_CAPS_pico2               :=
+BOARD_CAPS_apollo4l_evb        :=
+BOARD_CAPS_apollo4p_evb        :=
+BOARD_CAPS_fr2433_launchpad    :=
+BOARD_CAPS_fr5969_launchpad    :=
+BOARD_CAPS_fr5994_launchpad    :=
+# The FR6989 LaunchPad is the one board with a segment LCD wired to LCD_C.
+# This was a board-HEADER macro (TIKU_BOARD_HAS_LCD) until S6 -- the
+# include-order-dependent form CLAUDE.md warns about, and the shell's config
+# header could only see it if the board header had already been included.
+# As a cap it becomes a -D global that reaches every TU unconditionally.
+BOARD_CAPS_fr6989_launchpad    := LCD
+BOARD_CAPS_nrf54l15_dk         :=
+BOARD_CAPS_nrf54lm20_dk        :=
+# Empty because the board really is bare -- this is the row that makes every
+# storage/USB request for it fail at make time.  See S5 of the plan.
+BOARD_CAPS_tiku_bare           :=
+
+# $(call board_has,EMMC) -> non-empty when this board declares that cap.
+board_has = $(filter $(1),$(BOARD_CAPS_$(BOARD)))
+
+# A board with NO caps row is almost always an oversight rather than a board
+# with no hardware, and the failure it causes is remote: a driver gate silently
+# refuses and the user is told their board lacks a part it actually has.
+# $(origin) distinguishes "declared empty" from "never declared" -- $(if) alone
+# cannot.  Adding a board therefore forces the question "what is fitted on it?"
+$(foreach b,$(KNOWN_BOARDS),$(if $(filter undefined,$(origin BOARD_CAPS_$(b))),\
+    $(error BOARD_CAPS_$(b) is not declared. Every board in KNOWN_BOARDS must \
+declare its capabilities, even if the list is empty (BOARD_CAPS_$(b) := ).)))
+
+# KNOWN_BOARDS is only ever printed in error messages, so a board listed there
+# without a BOARD_DEFINE_ row would produce the self-contradicting "Unknown
+# BOARD=x. Known boards: ... x ..." below.  Catch it at parse time instead.
+$(foreach b,$(KNOWN_BOARDS),$(if $(BOARD_DEFINE_$(b)),,\
+    $(error KNOWN_BOARDS lists '$(b)' but BOARD_DEFINE_$(b) is unset)))
+$(foreach b,$(KNOWN_BOARDS),$(if $(BOARD_PLATFORM_$(b)),,\
+    $(error KNOWN_BOARDS lists '$(b)' but BOARD_PLATFORM_$(b) is unset)))
+
 BOARD ?= $(board)
 ifeq ($(BOARD),)
-BOARD = pico2w
+BOARD := $(DEFAULT_BOARD_$(MCU))
 endif
 BOARD := $(shell echo $(BOARD) | tr '[:upper:]' '[:lower:]')
 
-ifeq ($(TIKU_PLATFORM),rp2350)
-ifeq ($(BOARD),pico2w)
-TIKU_BOARD_DEFINE := TIKU_BOARD_RPI_PICO2_W
-else ifeq ($(BOARD),pico2)
-TIKU_BOARD_DEFINE := TIKU_BOARD_RPI_PICO2
-else
-$(error Unknown BOARD=$(BOARD) for MCU=rp2350. Valid: pico2, pico2w)
+ifeq ($(BOARD),)
+$(error No default board is known for MCU=$(MCU). Pass BOARD=<name>. \
+Known boards: $(KNOWN_BOARDS))
+endif
+TIKU_BOARD_DEFINE := $(BOARD_DEFINE_$(BOARD))
+ifeq ($(TIKU_BOARD_DEFINE),)
+$(error Unknown BOARD=$(BOARD) (MCU=$(MCU)). Known boards: $(KNOWN_BOARDS))
+endif
+# A board belongs to exactly one platform; catching the mismatch here beats
+# failing deep in a compile with a pin macro nobody defined.
+ifneq ($(BOARD_PLATFORM_$(BOARD)),$(TIKU_PLATFORM))
+$(error BOARD=$(BOARD) is a $(BOARD_PLATFORM_$(BOARD)) board, but MCU=$(MCU) \
+is $(TIKU_PLATFORM). Pick a $(TIKU_PLATFORM) board, or change MCU.)
+endif
+
+# Immediate (:=) and therefore ORDER-SENSITIVE: this must sit below the
+# resolution of BOARD above.  Placed with the tables instead, it expanded
+# $(BOARD_CAPS_) against an unset BOARD and silently produced NOTHING -- the
+# gates still worked (board_has is recursive) so only the -D vanished, which is
+# precisely the kind of quiet half-failure this stage exists to remove.
+BOARD_CAP_DEFINES := $(foreach c,$(BOARD_CAPS_$(BOARD)),-DTIKU_BOARD_HAS_$(c)=1)
+
+# ---------------------------------------------------------------------------
+# Capability refusals -- asked HERE, not inside a platform block
+#
+# "Can this board provide the part?" is platform-independent; only "how do I
+# build the driver?" is platform-local.  Keeping these checks next to the SRCS
+# lines (inside `ifeq ($(TIKU_PLATFORM),ambiq)` and an MCU filter under it)
+# meant that off that path the whole block -- error included -- was skipped:
+# TIKU_DRV_PSRAM_ENABLE=1 on an MSP430 built cleanly and silently produced an
+# image with no PSRAM, and the eMMC/USB `$(error ... requires MCU=apollo510)`
+# lines were unreachable, since the block they guarded already restricted the
+# MCU.  Measured: 4 of 6 negative gates returned rc=0 before this move.
+# ---------------------------------------------------------------------------
+
+ifeq ($(TIKU_DRV_USB_ENABLE),1)
+ifeq ($(call board_has,USB_RAILS),)
+$(error TIKU_DRV_USB_ENABLE=1 requires a board that switches the USB rails \
+(currently BOARD=$(BOARD), MCU=$(MCU)). The device controller is powered from \
+VDDUSB33 / VDDUSB0P9, which the Apollo510 EVBs gate from board pads; a board \
+that does not route them enumerates nothing. Build with BOARD=apollo510_evb \
+or BOARD=apollo510b_evb, or drop TIKU_DRV_USB_ENABLE.)
 endif
 endif
 
-ifeq ($(TIKU_PLATFORM),ambiq)
-ifeq ($(MCU),apollo510)
-TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510_EVB
-else ifeq ($(MCU),apollo510b)
-# Same Apollo510 silicon as apollo510, but the Blue EVB has its own pinout:
-# console on UART1 (pads 12/14, funcsel 5), LEDs 11/19/83, buttons 46/29 --
-# see tiku_board_apollo510b_evb.h + the TIKU_CONSOLE_UART1 gate below.
-TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO510B_EVB
-else
-# Apollo4 Lite and Apollo4 Plus EVBs share the M4F board pinout (console UART,
-# LEDs, buttons); apollo4p reuses the apollo4l board config for bring-up.
-TIKU_BOARD_DEFINE := TIKU_BOARD_APOLLO4L_EVB
+ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
+ifeq ($(call board_has,EMMC),)
+$(error TIKU_DRV_EMMC_ENABLE=1 requires a board with an eMMC fitted \
+(currently BOARD=$(BOARD), MCU=$(MCU)). U11 is the 8 GB eMMC on the Apollo510 \
+EVBs; no other supported board carries one, and the SDIO0 bus answers nothing \
+without it. Build with BOARD=apollo510_evb or BOARD=apollo510b_evb, or drop \
+TIKU_DRV_EMMC_ENABLE.)
 endif
 endif
 
-ifeq ($(TIKU_PLATFORM),nordic)
-# One board per device: nrf54l15 -> nRF54L15-DK (PCA10156);
-# nrf54lm20a/nrf54lm20b -> nRF54LM20-DK (PCA10184; the DK ships LM20B silicon,
-# both images run on it).
-ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54LM20_DK
-else
-TIKU_BOARD_DEFINE := TIKU_BOARD_NRF54L15_DK
+ifeq ($(TIKU_DRV_NOR_ENABLE),1)
+ifeq ($(call board_has,NOR),)
+$(error TIKU_DRV_NOR_ENABLE=1 requires a board with the octal NOR fitted \
+(currently BOARD=$(BOARD), MCU=$(MCU)). U12 is populated on the Apollo510 EVB \
+(green, BOARD=apollo510_evb) and is NOT populated on the Apollo510B (Blue) -- \
+its BSP defines no MSPI1 chip select. Build with BOARD=apollo510_evb, or drop \
+TIKU_DRV_NOR_ENABLE. See kintsugi/mspi-nor-plan.md.)
+endif
+endif
+
+ifeq ($(TIKU_DRV_PSRAM_ENABLE),1)
+ifeq ($(call board_has,PSRAM),)
+$(error TIKU_DRV_PSRAM_ENABLE=1 requires a board with PSRAM fitted \
+(currently BOARD=$(BOARD), MCU=$(MCU)). U14 is the 64 MB APS25608N on the \
+Apollo510 EVBs, reached over MSPI0; without it the tier has no backing store. \
+Build with BOARD=apollo510_evb or BOARD=apollo510b_evb, or drop \
+TIKU_DRV_PSRAM_ENABLE.)
 endif
 endif
 
@@ -183,7 +353,10 @@ $(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires MCU=rp2350 \
 RP2350-specific PIO + SIO peripherals and only runs on Pi Pico \
 2 W hardware. For other MCUs, omit TIKU_DRV_WIFI_CYW43_ENABLE.)
 endif
-ifneq ($(BOARD),pico2w)
+# Re-expressed through the same caps mechanism as the Apollo drivers.  This
+# board check predates the table and was already the right SHAPE -- the point
+# is that there is now one idiom, not that this one was wrong.
+ifeq ($(call board_has,CYW43),)
 $(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires BOARD=pico2w \
 (currently BOARD=$(BOARD)). The CYW43439 module is only present on \
 the Pi Pico 2 W; the plain Pi Pico 2 has no WiFi hardware. Either \
@@ -321,13 +494,29 @@ BUILD_DIR = build/$(MCU)
 # ENABLE) between builds of the same MCU would otherwise leave objects
 # compiled under the OLD flags -- the classic trap (a command silently
 # missing from the shell table, or `undefined reference to tiku_basic_*` when
-# a BASIC-on object meets a BASIC-off link).  Fingerprint the command-line
-# overrides; if they differ from the last build of this dir, drop its objects
-# so everything recompiles under the new flags.  Runs at parse time.
+# a BASIC-on object meets a BASIC-off link).  Fingerprint the inputs; if they
+# differ from the last build of this dir, drop its objects so everything
+# recompiles under the new flags.  Runs at parse time.
+#
+# THE FINGERPRINT COVERS THE MAKEFILE ITSELF, NOT JUST THE COMMAND LINE.
+# It used to hash only $(MAKEOVERRIDES), which left the sibling half of the
+# same bug wide open: objects have no Makefile prerequisite, so EDITING THE
+# BUILD SYSTEM recompiled nothing.  Measured, not argued -- changing the ambiq
+# CFLAGS from -Os to -O1 rebuilt 0 objects and produced a byte-identical
+# image, and `tools/board_split_check.sh` was therefore a gate that could not
+# fail until it started wiping per row.  Ordinary development had no such
+# workaround.  Hashing the Makefile's own bytes closes it: any edit to this
+# file drops the objects of whichever build dir you next build.
+#
+# Cost: one cksum of a ~2900-line file per invocation (sub-millisecond), and a
+# full rebuild after any Makefile edit.  That is the correct trade -- the
+# alternative is a stale object that silently disagrees with the build rules
+# that produced its siblings.
 # ---------------------------------------------------------------------------
 BUILD_FLAGS_STAMP := $(BUILD_DIR)/.buildflags
 _FLAG_GUARD := $(shell mkdir -p $(BUILD_DIR); \
-    printf '%s' "$(MAKEOVERRIDES)" > $(BUILD_DIR)/.buildflags.new; \
+    { printf '%s\n' "$(MAKEOVERRIDES)"; cksum $(firstword $(MAKEFILE_LIST)); } \
+        > $(BUILD_DIR)/.buildflags.new; \
     if ! cmp -s $(BUILD_DIR)/.buildflags.new $(BUILD_FLAGS_STAMP) 2>/dev/null; \
     then \
         find $(BUILD_DIR) -name '*.o' -delete 2>/dev/null; \
@@ -828,15 +1017,23 @@ CFLAGS += -DPART_apollo4l -DAM_PART_APOLLO4L -Dgcc
 else
 CFLAGS += -DPART_apollo510 -DAM_PART_APOLLO510 -DAM_PACKAGE_BGA -Dgcc
 endif
-# The Apollo4 Plus EVB routes its J-Link VCOM to UART0 (pads 60/47); the Lite
-# uses UART2 (pads 54/11). The shared UART driver + crt vector key off this.
-ifeq ($(MCU),apollo4p)
+# CONSOLE ROUTING IS A BOARD FACT, NOT A SILICON ONE.  Which UART the on-board
+# J-Link exposes as a VCOM is a PCB trace; the same die on another board routes
+# it differently, or not at all.  These were keyed on MCU= until the board/
+# device split -- which is why apollo4p, whose only real difference from
+# apollo4l here is this trace, had to be a separate MCU case at all.
+#
+# The Apollo4 Plus EVB routes its VCOM to UART0 (pads 60/47); the Lite uses
+# UART2 (pads 54/11).  Both still share one board HEADER (S6 splits it), but
+# they have separate board NAMES, so the routing is selected by the board.
+ifeq ($(BOARD),apollo4p_evb)
 CFLAGS += -DTIKU_CONSOLE_UART0
 endif
-# The Apollo510 Blue EVB routes its J-Link VCOM to UART1 (pads 12/14, funcsel 5);
-# the base Apollo510 EVB uses UART0 (pads 30/55). The shared M55 UART driver, the
-# crt vector table and the wake source all key off TIKU_CONSOLE_UART1.
-ifeq ($(MCU),apollo510b)
+# The Apollo510 Blue EVB routes its VCOM to UART1 (pads 12/14, funcsel 5); the
+# base Apollo510 EVB uses UART0 (pads 30/55). The shared M55 UART driver, the
+# crt vector table (the IRQ slot MOVES with it) and the wake source all key off
+# TIKU_CONSOLE_UART1.  Now selected by the BOARD, where it belongs.
+ifeq ($(BOARD),apollo510b_evb)
 CFLAGS += -DTIKU_CONSOLE_UART1
 endif
 # BLE radio (EM9305 on IOM6 SPI) -- opt-in, apollo510b only. Building it turns
@@ -919,6 +1116,10 @@ else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
 CFLAGS += -D$(DEVICE_DEFINE)=1
+# MSP430's board was hard-wired to its device inside tiku_device_select.h until
+# the board/device split -- the only port where the PCB was not selectable at
+# all.  It now takes the same -D every other platform does.
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_MSP430=1
 ifeq ($(MEMORY_MODEL),large)
 # -mlarge:               20-bit pointers, CALLA/MOVA for full FRAM reach
@@ -1010,6 +1211,10 @@ ifeq ($(TIKU_PLATFORM),ambiq)
 CFLAGS += -Wno-error=implicit-function-declaration
 endif
 endif
+# Board capabilities -> -DTIKU_BOARD_HAS_*.  Must land AFTER the per-platform
+# `CFLAGS = ...` assignments above, which would otherwise wipe them.
+CFLAGS += $(BOARD_CAP_DEFINES)
+
 ifeq ($(HAS_EXAMPLES),1)
 CFLAGS += -DHAS_EXAMPLES=1
 endif
@@ -1452,25 +1657,23 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # same reasoning as the PSRAM: the -D is a capability macro so the shell
 # command can gate on it regardless of include order.
 # On-board eMMC on SDIO0 (EVB U11, 8 GB).  Present on BOTH Apollo510 EVBs.
-ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
-ifeq ($(filter apollo510 apollo510b,$(MCU)),)
-$(error TIKU_DRV_EMMC_ENABLE=1 requires MCU=apollo510 or apollo510b (U11 is \
-on the Apollo510 EVBs))
+ifeq ($(TIKU_DRV_USB_ENABLE),1)
+SRCS += arch/ambiq/tiku_usb_arch.c
+CFLAGS += -DTIKU_DRV_USB_ENABLE=1
 endif
+ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
 SRCS += arch/ambiq/tiku_emmc_arch.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_emmc.c    # /sys/emmc lifecycle nodes
+SRCS += kernel/fs/tiku_fat.c                    # FAT32 reader (host-tested)
+SRCS += kernel/shell/commands/tiku_shell_cmd_fat.c
 CFLAGS += -DTIKU_DRV_EMMC_ENABLE=1
 endif
 ifeq ($(TIKU_DRV_NOR_ENABLE),1)
 # U12 is fitted on the Apollo510 EVB (green) and NOT on the Apollo510B (Blue):
 # the 510B BSP defines no MSPI1 chip select and comments out its pinconfig,
-# and the part is absent from the board.  Building it for the Blue board is
-# allowed (it compiles and reports honestly) but warned about, because a
-# silent bus there is expected, not a bug to chase.
-ifneq ($(MCU),apollo510)
-$(warning TIKU_DRV_NOR_ENABLE=1 with MCU=$(MCU): U12 NOR is fitted on the \
-Apollo510 EVB (MCU=apollo510) only.  On other boards the device will not \
-answer -- see kintsugi/mspi-nor-plan.md.)
-endif
+# and the part is absent from the board.  This was a $(warning) -- the build
+# went ahead and the silent bus was left to be discovered on the bench.  A
+# missing part is not a style issue, so it is now refused.
 SRCS += arch/ambiq/tiku_nor_arch.c
 CFLAGS += -DTIKU_DRV_NOR_ENABLE=1
 endif
@@ -1846,6 +2049,15 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_freq.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_power.c
+# S4: the per-driver verbs live in their own modules now.  Each self-gates on
+# its driver flag, so on a target without that driver the translation unit is
+# EMPTY (measured: 0 text, 0 data, 0 bss on msp430) and contributes nothing to
+# the image -- adding them unconditionally here, exactly as the other 45
+# command modules already are, leaves a bare build byte-identical.
+SRCS += kernel/shell/commands/tiku_shell_cmd_emmc.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_psram.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_usb.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_nor.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_name.c
 ifeq (,$(findstring TIKU_SHELL_CMD_IF=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_if.c
@@ -2881,11 +3093,51 @@ else ifeq ($(TIKU_PLATFORM),ambiq)
 JLINK_FLASH_SCRIPT = $(BUILD_DIR)/flash.jlink
 JLINK_ERASE_SCRIPT = $(BUILD_DIR)/erase.jlink
 
+# RESET AND HALT BEFORE PROGRAMMING, AND CHECK THAT IT WORKED.
+#
+# Two bugs in one recipe, both found on 2026-07-29 after an hour of testing
+# firmware that was never on the board:
+#
+#   1. No halt.  J-Link programs MRAM by first preserving target RAM, which
+#      it cannot do while the CPU is running -- and on this part the shell
+#      idles into a low-power state the debug unit cannot reach.  It printed
+#      "Failed to preserve target RAM @ 0x20000000-0x2007FFFF" and gave up,
+#      or worse, programmed and then failed verification, leaving a MIXTURE
+#      of old and new code on the part.  `r` + `h` before loadbin is what the
+#      operation actually requires.
+#   2. No exit check.  JLinkExe returns 0 whatever happens, so `make flash`
+#      reported success over "Verification failed" and the next test ran
+#      against stale firmware while its results were read as real.  The grep
+#      below turns a silent bad flash into a failed build.
+#   3. Scanning only for KNOWN failure strings is not enough -- silence is not
+#      success.  On 2026-07-29 a flash onto a wedged CPU never downloaded
+#      anything: J-Link printed "Failed to halt CPU" and stopped, none of the
+#      strings above appeared, `make flash` reported success, and an hour went
+#      into diagnosing a "driver regression" on a part still holding the old
+#      image.  "Failed to halt" cannot simply be added to the list -- it also
+#      appears in GOOD logs, where the first attempt fails and the implicit
+#      reset then succeeds.  So the second check demands POSITIVE evidence
+#      that bytes moved, which is the only thing that actually distinguishes
+#      the two cases.
 flash: all
 	@mkdir -p $(BUILD_DIR)
-	@printf 'device %s\nif %s\nspeed %s\nconnect\nloadbin %s %s\n$(JLINK_RUN_SEQ)\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nr\nh\nloadbin %s %s\n$(JLINK_RUN_SEQ)\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
 	@echo "Flashing $(TARGET_BIN) -> MRAM $(AMBIQ_LOAD_ADDR) via $(JLINK) ($(JLINK_DEVICE))..."
-	$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(JLINK_FLASH_SCRIPT)
+	@$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(JLINK_FLASH_SCRIPT) \
+	    2>&1 | tee $(BUILD_DIR)/flash.log; \
+	 if grep -qiE 'Verification failed|Failed to prepare|Could not connect|Error while programming' $(BUILD_DIR)/flash.log; then \
+	     echo "*** FLASH FAILED -- the part still holds the PREVIOUS image."; \
+	     echo "*** Anything tested now is testing stale firmware."; \
+	     grep -iE 'Verification failed|Failed to prepare|Could not connect|Failed to halt|Error while programming' $(BUILD_DIR)/flash.log | head -4; \
+	     exit 1; \
+	 fi; \
+	 if ! grep -qE 'Flash download: (Total|Program)' $(BUILD_DIR)/flash.log; then \
+	     echo "*** FLASH FAILED -- no download happened at all."; \
+	     echo "*** The part still holds the PREVIOUS image; anything tested"; \
+	     echo "*** now is testing stale firmware."; \
+	     grep -iE 'Failed to halt|Cannot connect|Timeout|Error' $(BUILD_DIR)/flash.log | head -4; \
+	     exit 1; \
+	 fi
 
 run: flash
 

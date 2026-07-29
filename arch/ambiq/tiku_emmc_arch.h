@@ -164,6 +164,57 @@
  */
 
 /*---------------------------------------------------------------------------*/
+/* TABLE 4 -- THE E3 UPGRADE: 1 BIT AT 400 kHz -> 8 BITS AT ~48 MHz          */
+/*---------------------------------------------------------------------------*/
+/*
+ * Identification is deliberately crippled: the MMC spec mandates a 1-bit bus
+ * at 400 kHz because the host does not yet know what it is talking to.  That
+ * is 50 KB/s of wire, and E2 measured the card through it.  E3 is the rung
+ * that turns a proven-correct block device into a useful one.  Two switches,
+ * a wider bus, a faster clock, and then the transfer engine stops issuing one
+ * command per 512 bytes:
+ *
+ *   what              from            to              factor
+ *   ----------------  --------------  --------------  ---------------------
+ *   bus width         1 bit           8 bits          8x the wire
+ *   clock             400 kHz         base/2          ~120x
+ *   blocks/command    1               up to 65535     amortises the command
+ *   byte path         CPU (PIO)       SDMA            frees the CPU
+ *
+ * ORDER IS NOT NEGOTIABLE, and each step is separately reversible:
+ *
+ *   1. CMD6 BUS_WIDTH -- the CARD switches first.  CMD6 travels on the CMD
+ *      line, which is 1 bit wide whatever the DAT lines are doing, so the
+ *      command itself is unaffected by the change it requests.
+ *   2. HOSTCTRL1.XFERWIDTH -- the HOST follows.  Between (1) and (2) the two
+ *      ends disagree about the bus width and NO DATA COMMAND MAY BE ISSUED.
+ *   3. CMD6 HS_TIMING, then HOSTCTRL1.HISPEEDEN, then the clock divider --
+ *      same shape, same reason.  Raising the clock before the card has been
+ *      told to expect high-speed timing is how a bus starts corrupting data
+ *      intermittently rather than failing.
+ *
+ * *** THE GATE IS THE CARD'S OWN ACCOUNT OF ITSELF ***
+ *
+ * After the switches, EXT_CSD is read AGAIN and bytes 183 and 185 are checked
+ * against what was asked for.  This is a better gate than any pattern test:
+ * the re-read is itself a data-phase transfer over the new width at the new
+ * clock, so a bus that cannot carry data at the new setting fails the gate by
+ * being unable to deliver the evidence -- and a card that quietly declined
+ * the switch is caught saying so in its own register file.  A checksum test
+ * alone would pass a host and card that had BOTH stayed at the old setting.
+ *
+ * EXT_CSD[196] DEVICE_TYPE says which speeds this card actually supports:
+ *   bit 0  26 MHz   bit 1  52 MHz   bits 2-7  HS200 / HS400 / DDR variants
+ * It is READ, not assumed, and the requested clock is clamped to it.  (The
+ * PSRAM driver got five bugs from deriving values that were there to be read;
+ * this driver has already had one.  The habit is now to look.)
+ *
+ * OUT OF SCOPE, ON PURPOSE: HS200 and HS400 need a tuning procedure and 1.8 V
+ * signalling changes; DDR modes need a different clock relationship.  The
+ * bench prints what it did NOT test so its table cannot be read as a ceiling.
+ */
+
+/*---------------------------------------------------------------------------*/
 /* PUBLIC CONSTANTS                                                          */
 /*---------------------------------------------------------------------------*/
 
@@ -207,20 +258,49 @@ typedef struct {
     uint8_t  spec_vers;      /**< CSD spec version                          */
     uint8_t  bus_width;      /**< bus width in force (1/4/8)                */
     uint32_t clock_hz;       /**< bus clock in force                        */
+    /* --- E3: the card's own account of its configuration (table 4) ------ */
+    uint8_t  device_type;    /**< EXT_CSD[196]: speeds the card supports    */
+    uint8_t  ext_bus_width;  /**< EXT_CSD[183] READ BACK after the switch   */
+    uint8_t  ext_hs_timing;  /**< EXT_CSD[185] READ BACK after the switch   */
 } tiku_emmc_id_t;
 
 /*---------------------------------------------------------------------------*/
-/* API -- E1/E2 surface.  Speed, DMA and the tier land in E3/E4.             */
+/* API -- E1/E2/E3 surface.  The tier and the staging demo land in E4.       */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Power the host, reset the card, run the identification ladder.
+ * @brief Power the host, reset the card, identify it, and go fast.
  *
- * Table 1 steps 1-8 at the mandatory 400 kHz / 1-bit identification setting.
- * Fails closed and bounded at every wait; the step tracer names the rung a
- * wedge happened on.
+ * Table 1 steps 1-8 at the mandatory 400 kHz / 1-bit identification setting,
+ * then the table 4 upgrade to an 8-bit bus at high speed.  Fails closed and
+ * bounded at every wait; the step tracer names the rung a wedge happened on.
+ *
+ * If the UPGRADE fails the card is left in the identification configuration,
+ * which is slow but proven -- a driver that half-switched a bus is worse than
+ * one that stayed slow, so this path never leaves the two ends disagreeing.
  */
 tiku_emmc_err_t tiku_emmc_init(void);
+
+/**
+ * @brief Init to an explicit bus configuration -- one code path, two uses.
+ *
+ * @p width 1, 4 or 8; @p hz the requested bus clock (clamped to the card's
+ * EXT_CSD[196] DEVICE_TYPE and to the host's divider grid).  `(1, 400000)`
+ * reproduces the E2 configuration exactly, which is what makes the E3 bench
+ * able to price the upgrade rather than merely assert it.
+ */
+tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz);
+
+/**
+ * @brief Microseconds the last bring-up took: identification, and total.
+ *
+ * The init ceremony is a MEASURED QUANTITY, not a nuisance -- the lifecycle
+ * policy (sleep vs power off vs stay up) is decided by this number against
+ * the domain's idle rent, exactly as the PSRAM's ladder was.  @p ladder_us
+ * is POR-to-transfer-ready at 400 kHz; the difference to @p total_us is what
+ * the table 4 upgrade cost.  Either pointer may be NULL.
+ */
+void tiku_emmc_init_time(uint32_t *ladder_us, uint32_t *total_us);
 
 /** @brief Release the SDIO0 domain (card keeps its contents, obviously). */
 void tiku_emmc_deinit(void);
@@ -254,5 +334,96 @@ uint32_t tiku_emmc_last_error(void);
 
 /** @brief Snapshot host registers (power-safe: returns 0xDEADDEAD when down). */
 void tiku_emmc_regs(uint32_t *out, unsigned n);
+
+/**
+ * @brief E3 bench: sequential read/write, random-block latency, init cost.
+ *
+ * DWT-timed, work-denominated and checksum-gated, like `psrambench`.  Writes
+ * touch the scratch region and nowhere else; every leg that cannot prove its
+ * bytes were the right bytes reports FAIL instead of a bandwidth.  Prints
+ * what it did NOT measure, so the table cannot be read as a ceiling.
+ */
+void tiku_emmc_bench_run(void);
+
+/*---------------------------------------------------------------------------*/
+/* E4 -- LIFECYCLE AND THE WAREHOUSE                                         */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Put the card into CMD5 sleep; contents kept, bus quiet.
+ *
+ * The rung between "up" and "gone", and E3 is what justifies it: a full
+ * bring-up costs ~52 ms, which is too much per access and acceptable per
+ * wake.  Sleep is only legal from STANDBY, so this deselects first and
+ * reselects on wake; block I/O refuses while asleep rather than timing out
+ * against a card that is doing exactly what it was told.
+ */
+tiku_emmc_err_t tiku_emmc_sleep(void);
+
+/** @brief Wake from CMD5 sleep and reselect; trusted once it answers again. */
+tiku_emmc_err_t tiku_emmc_wake(void);
+
+/** @brief 1 while the card is asleep. */
+int tiku_emmc_asleep(void);
+
+/**
+ * @brief Microseconds the last sleep or wake took.
+ *
+ * The number the lifecycle policy turns on: sleep earns its place only
+ * if waking costs far less than the ~52 ms of a full bring-up.
+ */
+uint32_t tiku_emmc_last_op_us(void);
+
+/** @brief Capacity in 512 B blocks (0 until identified). */
+uint32_t tiku_emmc_capacity_blocks(void);
+
+/** @brief Bus clock in force, 0 when down. */
+uint32_t tiku_emmc_clock_hz(void);
+
+/** @brief Bus width in force (1/4/8), 0 when down. */
+unsigned tiku_emmc_bus_width(void);
+
+/** @brief Decoded identity without a validity gate -- for observability. */
+const tiku_emmc_id_t *tiku_emmc_id(void);
+
+/**
+ * @brief Stage @p mb megabytes from the card into the PSRAM tier.
+ *
+ * eMMC DMA -> SSRAM bounce -> MSPI command queue -> PSRAM, checksum-gated
+ * against the read path E3 proved bit-exact.  Reads only; writes nothing to
+ * the card.  Transfer time and verification time are reported separately so
+ * the bandwidth figure is the pipeline's and not the hash's.
+ *
+ * Compiled only when the PSRAM driver is present.
+ */
+void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba);
+
+/*
+ * Extent-driven staging (F4).  E4's stage takes one LBA span because that is
+ * all a raw address can express; a FILE may be fragmented, so its extents are
+ * fed in one at a time and appended to the PSRAM image in order.
+ *
+ *   open()            XIP down, counters and the source hash reset
+ *   chunk(lba, nsec)  append one contiguous extent
+ *   close(...)        read the image back OUT of the PSRAM, hash it, XIP up
+ *
+ * close() hashes the PSRAM rather than the bounce buffer on purpose: hashing
+ * on the way in would only prove the card was read correctly, not that the
+ * bytes are where the tier will look for them.
+ */
+void tiku_emmc_stage_open(void);
+tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec);
+tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
+                                      uint32_t *dst, uint32_t *rd_us,
+                                      uint32_t *wr_us);
+
+/**
+ * @brief Read-path diagnostic: block count x buffer location x DMA/PIO.
+ *
+ * Varies one thing at a time against a known-good reference, for when a
+ * failure reports no controller error and the bench can only say that
+ * something is wrong, not which of its three entangled variables did it.
+ */
+void tiku_emmc_diag_run(void);
 
 #endif /* TIKU_EMMC_ARCH_H_ */

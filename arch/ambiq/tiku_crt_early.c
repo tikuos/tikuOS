@@ -132,6 +132,8 @@ void tiku_ambiq_timer0_isr(void)           __attribute__((weak, alias("ambiq_def
  *  when TIKU_DRV_GPU_ENABLE=1. The alias resolves to the same address as the
  *  default handler, so flag-off images are byte-identical. */
 void tiku_ambiq_gpu_isr(void)              __attribute__((weak, alias("ambiq_default_handler")));
+/** @brief USB device controller ISR — weak alias when TIKU_DRV_USB_ENABLE=0 */
+void tiku_ambiq_usb_isr(void)              __attribute__((weak, alias("ambiq_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Reset handler                                                             */
@@ -297,6 +299,7 @@ __attribute__((section(".vectors"), used)) = {
 #else
     [16 + 15] = tiku_ambiq_uart0_isr,        /* IRQ 15  UART0            */
 #endif
+    [16 + 27] = tiku_ambiq_usb_isr,          /* IRQ 27  USB0 device      */
     [16 + 28] = tiku_ambiq_gpu_isr,          /* IRQ 28  GPU (Nema)       */
     [16 + 32] = tiku_ambiq_stimer_cmpr0_isr, /* IRQ 32  STIMER Compare0  */
     [16 + 33] = tiku_ambiq_stimer_cmpr1_isr, /* IRQ 33  STIMER Compare1 (tick) */
@@ -313,12 +316,12 @@ __attribute__((section(".vectors"), used)) = {
      * is identical to the range default -- the flag-off image is byte-stable. */
 #if defined(TIKU_CONSOLE_UART1)
     [16 +  0 ... 16 + 15] = ambiq_default_handler,   /* skip IRQ 16 (UART1) */
-    [16 + 17 ... 16 + 27] = ambiq_default_handler,   /* skip IRQ 28 (GPU)   */
-    [16 + 29 ... 16 + 31] = ambiq_default_handler,
+    [16 + 17 ... 16 + 26] = ambiq_default_handler,   /* skip IRQ 27 (USB0)  */
+    [16 + 29 ... 16 + 31] = ambiq_default_handler,   /* skip IRQ 28 (GPU)   */
 #else
     [16 +  0 ... 16 + 14] = ambiq_default_handler,   /* skip IRQ 15 (UART0) */
-    [16 + 16 ... 16 + 27] = ambiq_default_handler,   /* skip IRQ 28 (GPU)   */
-    [16 + 29 ... 16 + 31] = ambiq_default_handler,
+    [16 + 16 ... 16 + 26] = ambiq_default_handler,   /* skip IRQ 27 (USB0)  */
+    [16 + 29 ... 16 + 31] = ambiq_default_handler,   /* skip IRQ 28 (GPU)   */
 #endif
     [16 + 34 ... 16 + 55] = ambiq_default_handler,
     [16 + 57 ... 16 + 66] = ambiq_default_handler,

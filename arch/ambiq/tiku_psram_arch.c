@@ -79,7 +79,14 @@
 #define PSRAM_PAD_D7        71u
 #define PSRAM_PAD_CLK       72u
 #define PSRAM_PAD_DQS       73u
-#define PSRAM_PAD_CE        199u
+/* The chip select is a BOARD fact (see the board header); D0..DQS above are
+ * MSPI0's dedicated pads and are silicon, which is why only this one moved. */
+#if !defined(TIKU_BOARD_PSRAM_PAD_CE)
+#error "This board declares no TIKU_BOARD_PSRAM_PAD_CE. The build system \
+should not have compiled the PSRAM driver for it -- see BOARD_CAPS/PSRAM in \
+the Makefile."
+#endif
+#define PSRAM_PAD_CE        TIKU_BOARD_PSRAM_PAD_CE
 
 #define PAD_FNCSEL_MSPI0    0u
 #define PAD_FNCSEL_MNCE0    1u

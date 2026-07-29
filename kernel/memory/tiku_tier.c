@@ -784,16 +784,23 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
         return TIKU_MEM_ERR_INVALID;
     }
 
+    /* PSRAM belongs here as much as the others.  It was added as a tier in
+     * M4 and this whitelist was not updated with it, which made a 64 MB
+     * attached tier INVISIBLE to every stats consumer -- `free` simply did
+     * not mention it, and read as though the memory were not there.  A tier
+     * the allocator honours but the accounting cannot see is worse than one
+     * that does not exist, because nothing looks wrong. */
     if (tier != TIKU_MEM_SRAM &&
         tier != TIKU_MEM_NVM &&
-        tier != TIKU_MEM_HIFRAM) {
+        tier != TIKU_MEM_HIFRAM &&
+        tier != TIKU_MEM_PSRAM) {
         return TIKU_MEM_ERR_INVALID;
     }
 
     ts = &tier_state[tier];
     if (!ts->initialized) {
-        /* HIFRAM tier on a non-HIFRAM build, or an as-yet-uninited
-         * tier — both report "not available" the same way. */
+        /* HIFRAM on a non-HIFRAM build, PSRAM before `power psram up`, or an
+         * as-yet-uninited tier — all report "not available" the same way. */
         return TIKU_MEM_ERR_INVALID;
     }
 

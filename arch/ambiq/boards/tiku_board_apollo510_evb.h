@@ -158,4 +158,100 @@
 /** @brief SPI0 MOSI pad (placeholder — real IOM pad TBD). */
 #define TIKU_BOARD_SPI0_MOSI_PIN    4U
 
+/*---------------------------------------------------------------------------*/
+/* eMMC (U11) on SDIO0                                                       */
+/*---------------------------------------------------------------------------*/
+/*
+ * The data/CLK/CMD pads are identical on both Apollo510 EVBs and agree with
+ * both the schematic and the BSP.  RSTn is NOT -- see below, and see TABLE 0
+ * in arch/ambiq/tiku_emmc_arch.h for how that disagreement was resolved.
+ *
+ * The driver walks D0..CLK and D4..CMD as CONTIGUOUS RANGES (84..88, 156..160),
+ * so a board that re-pins this bus must keep each run contiguous or teach the
+ * driver otherwise; the _Static_assert in tiku_emmc_arch.c enforces it.
+ *
+ * FUNCSEL is per-pad silicon, not a free choice, and it is NOT uniform across
+ * this bus: GP84..GP88 reach SDIF0 on FNCSEL 2, GP156..GP160 on FNCSEL 0.
+ * It travels with the pads because a board that moves the bus needs the
+ * funcsel matching ITS pads.
+ */
+#define TIKU_BOARD_EMMC_PAD_D0       84U  /**< DAT0; DAT1/2 at 85/86.      */
+#define TIKU_BOARD_EMMC_PAD_D3       87U  /**< DAT3 -- end of low run.     */
+#define TIKU_BOARD_EMMC_PAD_CLK      88U  /**< CLK; in the low run.        */
+#define TIKU_BOARD_EMMC_PAD_D4      156U  /**< DAT4; DAT5/6 at 157/158.    */
+#define TIKU_BOARD_EMMC_PAD_D7      159U  /**< DAT7 -- end of high run.    */
+#define TIKU_BOARD_EMMC_PAD_CMD     160U  /**< CMD; in the high run.       */
+#define TIKU_BOARD_EMMC_FNCSEL_LOW    2U  /**< GP84..GP88   -> SDIF0.      */
+#define TIKU_BOARD_EMMC_FNCSEL_HIGH   0U  /**< GP156..GP160 -> SDIF0.      */
+/*
+ * RSTn = GP12 on THIS board -- the green EVB schematic says `SDIO0_RSTn_GP12`
+ * and the BSP agrees, and GP12 is free here because this board's console is
+ * UART0 on pads 30/55 rather than UART1 on 12/14.
+ *
+ * NOT HARDWARE-VERIFIED: no green EVB has been on the bench.  It is still a
+ * correction -- the driver previously hard-coded the BLUE board's GP13, so an
+ * eMMC build for this board drove a pad that is not its reset net.  Verify
+ * with `power emmc id` when a green board is available.
+ */
+#define TIKU_BOARD_EMMC_PAD_RST      12U
+
+/*---------------------------------------------------------------------------*/
+/* USB device controller -- board-side rails and HS reference                */
+/*---------------------------------------------------------------------------*/
+/*
+ * The controller is silicon; what powers it and what clocks its PHY are not.
+ * Both rails are switched from board pads -- DIFFERENT pads than the Blue EVB
+ * (91/90 here, 47/48 there), which is why they had to leave the driver.
+ *
+ * This board carries its own 48 MHz high-speed crystal
+ * (AM_BSP_XTAL_HS_FREQ_HZ == 48000000), so it needs no clock-request line and
+ * no EM9305: it declares USBHS_CLK_XTAL in BOARD_CAPS and the driver takes the
+ * XTALHS_DIV2 reference.  There is deliberately no CLKREQ/REFCLK pad here --
+ * defining one would imply a wire this board does not have.
+ */
+#define TIKU_BOARD_USB_PAD_VDDUSB33   91U  /**< 3.3 V rail switch.           */
+#define TIKU_BOARD_USB_PAD_VDDUSB0P9  90U  /**< 0.9 V rail switch.           */
+
+/*---------------------------------------------------------------------------*/
+/* PSRAM (U14, 64 MB APS25608N) on MSPI0                                     */
+/*---------------------------------------------------------------------------*/
+/*
+ * ONLY the chip select is here, deliberately.  MSPI0's data, clock and DQS
+ * pads (GP64..GP71, GP72, GP73) are DEDICATED to that MSPI instance in
+ * silicon -- a board does not get to choose them, it only chooses which MSPI
+ * instance to wire the part to.  Listing them here would imply a freedom the
+ * hardware does not offer, so they stay device-side in tiku_psram_arch.c.
+ *
+ * The chip select IS a board choice: MSPI0 exposes several CE lines and the
+ * part is strapped to one of them.  Both Apollo510 EVBs happen to use CE0 on
+ * GP199; a custom board need not.
+ * HARDWARE-VERIFIED on the Blue EVB (64 MB mapped, timing scan, bench).
+ */
+#define TIKU_BOARD_PSRAM_PAD_CE     199U  /**< MSPI0 CE0. */
+
+/*---------------------------------------------------------------------------*/
+/* Octal NOR (U12, 8 MB) on MSPI1                                            */
+/*---------------------------------------------------------------------------*/
+/*
+ * Fitted on THIS board only -- the Blue EVB does not carry U12, declares no
+ * NOR capability, and its build is refused by the Makefile.  That is why the
+ * Blue board has no matching block: a pin definition for a part that is not
+ * on the PCB is exactly the fiction this split exists to end.
+ *
+ * As with the PSRAM, D0..D7/SCK/DQS are MSPI1's dedicated pads (silicon); the
+ * chip select, reset and load-switch lines are board wiring and live here.
+ * Note GP54 is MSPI1_CE1 in the BSP's naming but is wired as the NOR reset on
+ * this board -- the part uses CE0 (GP53).
+ *
+ * NOT HARDWARE-VERIFIED: no green EVB has been on the bench.  N1-N5 in
+ * kintsugi/mspi-nor-plan.md are still open.
+ */
+#define TIKU_BOARD_NOR_PAD_D0        95U  /**< D1..D6 follow at 96..101.     */
+#define TIKU_BOARD_NOR_PAD_D7       102U
+#define TIKU_BOARD_NOR_PAD_CLK      103U
+#define TIKU_BOARD_NOR_PAD_DQS      104U
+#define TIKU_BOARD_NOR_PAD_CE        53U  /**< MSPI1 CE0.                    */
+#define TIKU_BOARD_NOR_PAD_RST       54U  /**< BSP calls this CE1; wired RST.*/
+#define TIKU_BOARD_NOR_PAD_LSEN     208U  /**< Load switch enable.           */
+
 #endif /* TIKU_BOARD_APOLLO510_EVB_H_ */

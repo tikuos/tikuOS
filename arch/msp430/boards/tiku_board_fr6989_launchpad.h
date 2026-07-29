@@ -250,7 +250,12 @@
  * the font byte pair into them.
  */
 
-#define TIKU_BOARD_HAS_LCD          1
+/* TIKU_BOARD_HAS_LCD is no longer defined here: it is a CAPABILITY, declared
+ * as BOARD_CAPS_fr6989_launchpad := LCD in the Makefile and reaching every
+ * translation unit as -DTIKU_BOARD_HAS_LCD=1.  Defining it in this header made
+ * it visible only to files that had already included the header -- which is
+ * the include-order trap, not a style preference.  The panel geometry below
+ * stays: that is board wiring, not a capability. */
 #define TIKU_BOARD_LCD_NUM_CHARS    6
 
 /*
