@@ -43,12 +43,11 @@ static tiku_mem_arch_size_t claimed_count;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Check if two address ranges overlap
+ * @brief Check if two address ranges overlap.
  *
- * Two ranges [a, a+a_size) and [b, b+b_size) overlap if and only if
- * a < b + b_size AND b < a + a_size. All arithmetic is done in
- * uintptr_t to avoid pointer comparison undefined behavior and to
- * handle the full address space correctly on 16-bit targets.
+ * They overlap exactly when a < b + b_size and b < a + a_size.  All arithmetic
+ * is in uintptr_t, which avoids undefined pointer comparison and handles the
+ * full address space on 16-bit targets.
  *
  * @param a_base  Start of first range
  * @param a_size  Size of first range
@@ -128,18 +127,11 @@ static int region_is_known(const uint8_t *ptr, tiku_mem_arch_size_t size)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize the region registry with the platform's memory map
+ * @brief Initialize the region registry with the platform's memory map.
  *
- * Stores a pointer to the platform-provided region table (expected to
- * live in flash — no copy is made). Zeroes the claimed regions array.
- * Validates that no two regions in the table overlap, returning an
- * error if they do.
- *
- * Why validate overlaps at init:
- *   Overlapping region definitions would make containment checks
- *   ambiguous — a buffer could appear to be in two different region
- *   types simultaneously. Catching this at boot is cheap and prevents
- *   subtle misclassification bugs.
+ * Keeps a pointer to the platform table rather than copying it, and rejects a
+ * table whose regions overlap -- overlap would make a containment check
+ * ambiguous, letting one buffer appear to be in two region types at once.
  *
  * @param table  Platform's const region descriptor array
  * @param count  Number of entries in the table
@@ -181,24 +173,11 @@ tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
 }
 
 /**
- * @brief Check if a memory range is within a region of the expected type
+ * @brief Check if a memory range is within a region of the expected type.
  *
- * Linear scan through the region table. Returns 1 if the entire range
- * [ptr, ptr+size) is contained within a single region whose type
- * matches expected_type. Returns 0 otherwise.
- *
- * Why we check for pointer arithmetic overflow:
- *   On a 16-bit MCU, ptr + size can wrap around to zero if the range
- *   extends past the end of the address space. A wrapped range would
- *   pass the containment check erroneously. We detect this by checking
- *   that ptr + size >= ptr in uintptr_t arithmetic.
- *
- * Why uintptr_t for comparisons:
- *   Comparing pointers that do not point into the same array is
- *   undefined behavior in C. Casting to uintptr_t converts to an
- *   integer type where comparison is always well-defined. This is
- *   essential for a memory registry that compares addresses across
- *   different memory regions.
+ * A linear scan; the whole range must sit in one matching region.  Arithmetic
+ * is in uintptr_t, since comparing pointers into different objects is
+ * undefined, and a wrapped ptr + size is rejected rather than passing.
  *
  * @param ptr            Start of the range
  * @param size           Size of the range in bytes
@@ -253,24 +232,18 @@ tiku_mem_err_t tiku_region_contains(const uint8_t *ptr,
 }
 
 /**
- * @brief Claim a memory range for a subsystem
+ * @brief Claim a memory range for a subsystem.
  *
- * Registers ownership of a range so overlapping claims can be detected.
- * The range must fall within a declared region (any type — we just need
- * to know it's valid memory). Then we check the claimed table for
- * overlaps with existing claims. If none, the claim is stored in the
- * first empty slot.
- *
- * Why claim exists separately from region_contains:
- *   region_contains answers "is this the right type of memory?"
- *   Claim answers "is anyone else already using this memory?" Both
- *   checks are needed: a buffer in the right memory type can still
- *   collide with another subsystem's buffer.
+ * Records ownership so an overlapping claim is caught.  This is the question
+ * _contains() does not answer: a buffer can be in the right memory type and
+ * still collide with another subsystem's.
  *
  * @param ptr       Start of the range to claim
  * @param size      Size of the range in bytes
  * @param owner_id  Identifier of the claiming subsystem
- * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_FULL
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if the range is
+ *         outside every region, TIKU_MEM_ERR_FULL if the claim table is
+ *         full, or TIKU_MEM_ERR_BUSY on an overlapping claim
  */
 tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
                                   tiku_mem_arch_size_t size,

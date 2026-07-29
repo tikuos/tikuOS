@@ -66,10 +66,9 @@ typedef enum {
 /**
  * @brief CRC-32 (reflected, poly 0xEDB88320, init/final 0xFFFFFFFF).
  *
- * Nibble-table implementation: 64 bytes of table, ~2 lookups/byte —
- * small enough for every mirror backend to inline, fast enough that
- * even the RP2350's full 4 KB sector costs well under a millisecond.
- * Also used for the hibernate-marker integrity field.
+ * A nibble-table implementation: 64 bytes of table and about two lookups per
+ * byte, small enough to inline in every mirror backend and fast enough that a
+ * whole 4 KB sector costs well under a millisecond.
  */
 static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
 {

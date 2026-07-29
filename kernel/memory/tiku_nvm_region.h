@@ -159,13 +159,9 @@
 /**
  * @brief 1 on parts with a carved NVM region, 0 otherwise.  ALWAYS defined.
  *
- * Read this, never `TIKU_NVM_REGION_BYTES > 0`.  An undefined identifier
- * evaluates to 0 in a preprocessor conditional, so the old spelling took the
- * "no region" branch in any translation unit that forgot the include -- and
- * that branch is not an error anywhere, it just silently selects the fallback
- * storage.  The unconditional definition below plus the guard macro turn that
- * mistake into a diagnosable one: a caller can `#ifndef TIKU_NVM_HAS_REGION
- * #error` and know the header was actually seen.
+ * Read this, never `TIKU_NVM_REGION_BYTES > 0`: an undefined identifier is 0 in
+ * a preprocessor conditional, so the old spelling silently took the no-region
+ * branch in any unit that forgot the include, and that branch is never an error.
  */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC)

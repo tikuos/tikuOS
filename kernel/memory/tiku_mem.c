@@ -268,14 +268,11 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize the memory management module
+ * @brief Initialize the memory management module.
  *
- * Called during boot from tiku_boot_init_memory(). Initializes the
- * region registry first — it must be available before any other
- * subsystem so that arena and persist registrations can validate
- * their buffers. Then activates MPU NVM write-protection, and
- * finally performs platform-specific memory hardware setup via
- * the HAL.
+ * The region registry goes first, because arena and persist registrations
+ * validate their buffers against it.  Then MPU NVM write-protection is armed,
+ * and finally the HAL does the platform's own memory setup.
  */
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 /** Worker-context calls refused by TIKU_MEM_KERNEL_ONLY since boot. */

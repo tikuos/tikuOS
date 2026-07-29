@@ -47,12 +47,10 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 }
 
 /**
- * @brief Minimum block size for the embedded freelist
+ * @brief Minimum block size for the embedded freelist.
  *
- * Each free block must be large enough to hold a pointer to the next
- * free block. On MSP430, sizeof(void *) is 2 bytes. On 32-bit hosts,
- * it is 4 bytes. The minimum is the larger of sizeof(void *) and the
- * platform alignment, then rounded up to alignment.
+ * A free block must hold a pointer to the next one, so the minimum is the
+ * larger of a pointer and the platform alignment, rounded up.
  *
  * @return Minimum aligned block size in bytes
  */
@@ -124,10 +122,9 @@ static uint8_t pool_nvm_stage[TIKU_POOL_NVM_STAGE_BYTES];
 /**
  * @brief Thread a pool's free-list through NVM-backed block storage.
  *
- * The NVM path (Ambiq / RP2350) cannot rewrite a block in place without an
- * erase per pointer, so blocks at least one stage wide get a direct per-block
- * next-pointer write, while small blocks that share a sector are coalesced and
- * written a staged run at a time.
+ * The NVM path cannot rewrite a block in place without an erase per pointer, so
+ * blocks at least a stage wide get a direct next-pointer write while smaller
+ * ones sharing a sector are coalesced and written a staged run at a time.
  *
  * @param pool  Pool whose block_count / block_size / buf describe the region.
  * @return TIKU_MEM_OK, or an NVM-tier error on write failure (leaving a
@@ -249,15 +246,11 @@ static int block_is_already_free(const tiku_pool_t *pool, const void *block)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize a pool without region-registry validation
+ * @brief Initialize a pool without region-registry validation.
  *
- * Lightweight variant of tiku_pool_create() that skips region
- * checks. Intended for library code (e.g. tikukits/ds) that
- * needs a pool over an embedded struct member where the region
- * registry may not yet be initialized.
- *
- * The pool is marked as SRAM tier, id 0. All other pool operations
- * (alloc, free, reset, stats) work identically.
+ * For library code needing a pool over an embedded struct member before the
+ * registry exists.  Marked SRAM tier with id 0; every other operation behaves
+ * identically.
  *
  * @param pool         Pool control block to initialize
  * @param buf          Pointer to the backing buffer
@@ -309,21 +302,11 @@ tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize a pool over a caller-provided buffer
+ * @brief Initialize a pool over a caller-provided buffer.
  *
- * The pool does not own or allocate the buffer — the caller provides
- * a static array or a section of SRAM. This avoids any dependency on
- * a heap allocator.
- *
- * The block_size is aligned up to TIKU_MEM_ARCH_ALIGNMENT and clamped
- * to a minimum of sizeof(void *) (also aligned). This minimum ensures
- * that every free block can hold the embedded freelist pointer.
- *
- * Why block_size is aligned during create:
- *   Each block must start on an aligned boundary so that the returned
- *   pointer is safe for native word or struct access. Aligning the
- *   block size means every block starts at buf + i*aligned_block_size,
- *   which is aligned if buf itself is aligned (static arrays are).
+ * The caller owns the buffer, so there is no heap dependency.  block_size is
+ * aligned up and clamped to at least a pointer, which both lets a free block
+ * hold the freelist link and keeps every block start aligned.
  *
  * @param pool         Pool control block to initialize
  * @param buf          Pointer to the backing buffer
@@ -430,14 +413,11 @@ tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
 }
 
 /**
- * @brief Allocate a block from the pool
+ * @brief Allocate a block from the pool.
  *
- * Pops the head of the freelist. O(1) — no search, no fragmentation.
- *
- * Why there is no size parameter:
- *   Every block in the pool is the same size. The caller knows the
- *   block size (they chose it at create time). Omitting the size
- *   parameter prevents misuse and keeps the API minimal.
+ * Pops the freelist head in O(1), with no search and no fragmentation.  There
+ * is no size parameter because every block is the same size and the caller
+ * chose it at create time.
  *
  * @param pool   Pool to allocate from (must be active)
  * @return Pointer to the allocated block, or NULL if the pool is empty
@@ -473,18 +453,11 @@ void *tiku_pool_alloc(tiku_pool_t *pool)
 }
 
 /**
- * @brief Return a block to the pool
+ * @brief Return a block to the pool.
  *
- * Pushes the block back onto the head of the freelist. O(1).
- *
- * Why ptr is validated:
- *   On a small MCU with no MMU, a stray free can silently corrupt the
- *   freelist, causing subsequent allocs to return wild pointers. We
- *   check that ptr falls within the pool's buffer and is aligned to a
- *   block boundary. This catches common bugs: double-free (if the
- *   block was already freed and the pointer is still in range, but at
- *   least the alignment check catches offset errors), freeing a pointer
- *   from a different pool, and freeing stack/heap pointers.
+ * Pushes it back onto the freelist head in O(1).  The pointer is checked
+ * against the buffer and a block boundary first: with no MMU a stray free
+ * silently corrupts the freelist and later allocations return wild pointers.
  *
  * @param pool   Pool the block belongs to
  * @param ptr    Pointer previously returned by tiku_pool_alloc
@@ -549,17 +522,14 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 }
 
 /**
- * @brief Fill a stats struct with the pool's current state
+ * @brief Fill a stats struct with the pool's current state.
  *
- * Maps pool fields to the shared tiku_mem_stats_t:
- *   total_bytes  = block_size * block_count
- *   used_bytes   = block_size * used_count
- *   peak_bytes   = block_size * peak_count
- *   alloc_count  = used_count
+ * Total and used bytes are the block size times the block and used counts, and
+ * the peak is reported the same way.
  *
- * @param pool    Pool to query
- * @param stats   Output structure
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if either is NULL
+ * @param pool   Pool to query
+ * @param stats  Output structure (caller-provided)
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on a NULL argument
  */
 tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
                                 tiku_mem_stats_t *stats)
@@ -578,17 +548,11 @@ tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
 }
 
 /**
- * @brief Reset the pool, returning all blocks to the freelist
+ * @brief Reset the pool, returning all blocks to the freelist.
  *
- * Re-chains all blocks into the freelist and resets used_count.
- * The peak high-water mark is preserved across resets for lifetime
- * tracking.
- *
- * Why reset is O(n):
- *   Unlike the arena (which just moves a pointer), the pool must
- *   rebuild the freelist by writing a next-pointer into every block.
- *   This is O(n) in block_count. In practice, pool sizes are small
- *   (e.g. 8-32 blocks) so this is fast.
+ * Re-chains every block and zeroes used_count, keeping the peak so it stays a
+ * lifetime figure.  Unlike an arena this is O(n), since each block needs its
+ * next-pointer written -- cheap at the pool sizes in use.
  *
  * @param pool   Pool to reset
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pool is NULL

@@ -92,16 +92,11 @@ uint16_t tiku_mpu_unlock_nvm(void)
 }
 
 /**
- * @brief Restore MPU to a previously saved state
+ * @brief Restore the MPU to a previously saved state.
  *
- * Before re-locking, flush any in-RAM .persistent modifications to
- * non-volatile storage.  On MSP430 this is a no-op (FRAM is already
- * durable); on RP2350 it triggers the flash-sector commit so the
- * unlock window's writes survive a full power cycle, not just a warm
- * reset.  Placing the flush HERE -- at the natural transaction
- * boundary -- catches both writes via tiku_mem_arch_nvm_write() and
- * direct stores into .persistent variables (memset, struct
- * assignments) inside the unlock window.
+ * Flushes any in-RAM .persistent changes before re-locking.  Doing it HERE, at
+ * the transaction boundary, catches both writes through the NVM helper and
+ * direct stores into .persistent variables inside the window.
  */
 void tiku_mpu_lock_nvm(uint16_t saved_state)
 {
@@ -157,14 +152,11 @@ void tiku_mpu_enable_violation_nmi(void)
 /**
  * @brief Return the latched MPU violation flags from the NMI ISR.
  *
- * When the MPU detects a write to a protected region, the NMI ISR
- * latches the violation flags into a software variable.  This function
- * returns that latched value for diagnostic use (VFS `/sys/boot/mpu/violations`,
- * shell, tests).
+ * The ISR latches the flags into a software variable when a protected write is
+ * detected; this hands that value to the VFS, shell and tests.
  *
  * @return Bitmask of violated segments (platform-specific encoding).
  *         Zero means no violations have been recorded since last clear.
- *
  * @see tiku_mpu_clear_violation_flags()
  */
 uint16_t tiku_mpu_get_violation_flags(void)
@@ -189,10 +181,9 @@ void tiku_mpu_clear_violation_flags(void)
 /**
  * @brief Total MPU violations across warm boots.
  *
- * Delegates to the arch layer which returns the persistent counter
- * (in a NOLOAD section that survives a fault-triggered reset on
- * platforms that have one).  Returns 0 on platforms without
- * persistent diagnostic state.
+ * Delegates to the arch layer's persistent counter, which lives in a section
+ * that survives a fault-triggered reset where the platform has one, and reads
+ * 0 where it does not.
  */
 uint32_t tiku_mpu_get_violation_count(void)
 {

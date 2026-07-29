@@ -27,27 +27,11 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Create an isolated memory context for a process
+ * @brief Create an isolated memory context for a process.
  *
- * Allocates an SRAM arena and/or an NVM arena from the tier allocator,
- * both bound to the given process identifier. Either size may be zero
- * to skip that tier — a process that only needs scratch SRAM can pass
- * nvm_size = 0 and vice versa.
- *
- * The tier parameter controls arena placement:
- *   - TIKU_MEM_SRAM / TIKU_MEM_NVM: both arenas forced to that tier
- *     (only makes sense if one size is zero, otherwise the NVM arena
- *     on SRAM would defeat persistence).
- *   - TIKU_MEM_AUTO: SRAM arena placed in SRAM, NVM arena placed in
- *     NVM — the natural default.
- *
- * The context is zeroed first, so the HIFRAM arena (and every cache
- * slot) starts inactive; HIFRAM is added later via
- * tiku_proc_mem_attach_hifram(). If the NVM arena fails to allocate
- * after the SRAM arena succeeded, the SRAM arena is rolled back (reset
- * and marked inactive) so the caller is left with no half-built
- * context. Backing memory comes from the tier allocator, so a request
- * can fail when a tier's backing pool is exhausted.
+ * Carves an SRAM and/or NVM arena from the tier allocator, either size zero to
+ * skip that tier; AUTO puts each in its natural tier.  If the second arena
+ * fails the first is rolled back, so a caller never sees a half-built context.
  *
  * @param pmem       Context to initialize
  * @param pid        Owning process identifier (used as arena id)
@@ -55,9 +39,8 @@
  * @param sram_size  SRAM arena capacity in bytes (0 to skip)
  * @param nvm_size   NVM arena capacity in bytes (0 to skip)
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
- *         or both sizes are zero, or the tier-allocator error
- *         (e.g. TIKU_MEM_ERR_NOMEM) from the arena that could not be
- *         created
+ *         or both sizes are zero, or the tier-allocator error from the
+ *         arena that could not be created
  */
 tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
                                      uint8_t pid,
@@ -117,22 +100,11 @@ tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
 }
 
 /**
- * @brief Destroy a process memory context
+ * @brief Destroy a process memory context.
  *
- * Flushes and destroys all attached cached regions, then resets every
- * arena the context owns (SRAM, NVM, and the HIFRAM arena if one was
- * attached), marks each inactive, and finally marks the context itself
- * inactive. After this call, all memory previously allocated through
- * this context is invalid.
- *
- * Caches are flushed before destruction so that any dirty data in
- * SRAM is persisted to FRAM. This ensures no silent data loss when
- * a process exits. Note that the arenas are reset, not securely wiped
- * — their bytes (including any in FRAM) remain until overwritten by a
- * later allocation; use a secure reset path explicitly if a process
- * held secrets. The reset rewinds each arena's bump pointer but does
- * not return its sub-buffer to the tier pool (the tier allocator is
- * bump-only), so the underlying tier capacity is not reclaimed here.
+ * Flushes and destroys every attached cache first, so a dirty page is persisted
+ * rather than silently lost, then resets each arena.  Reset is not a secure
+ * wipe, and the tier allocator being bump-only means capacity is not reclaimed.
  *
  * @param pmem  Context to destroy
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
@@ -178,31 +150,11 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
 }
 
 /**
- * @brief Allocate within a process context (bounds-checked)
+ * @brief Allocate within a process context (bounds-checked).
  *
- * Routes the allocation to the correct arena based on the requested
- * memory tier:
- *   - SRAM / NVM: straight to that arena.
- *   - HIFRAM: to the HIFRAM arena, but only if one has been attached
- *     via tiku_proc_mem_attach_hifram(); otherwise NULL (a deliberate
- *     hard signal rather than a silent fall-through to NVM, so a
- *     placement bug in code that genuinely needs HIFRAM surfaces).
- *   - AUTO: prefers HIFRAM for large requests (size at or above
- *     TIKU_TIER_AUTO_HIFRAM_THRESHOLD) when a HIFRAM arena is attached,
- *     then SRAM, then NVM, taking the first arena that has room. This
- *     mirrors the tier-allocator AUTO policy.
- *
- * Isolation guarantee: allocations cannot escape the process's arenas.
- * The arena allocator itself enforces bounds — each alloc is checked
- * against the arena's capacity, and these arenas are the only ones this
- * context can reach.
- *
- * Note: unlike resolve_tier() in the tier allocator, the AUTO branch
- * here omits the TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0 guard, so with the
- * threshold set to 0 any request would prefer HIFRAM when an arena is
- * attached (rather than disabling HIFRAM routing). In practice the
- * threshold is left at its default, and HIFRAM is reached only when an
- * arena has actually been attached, so the two policies agree.
+ * SRAM and NVM go straight to their arena; HIFRAM returns NULL unless one was
+ * attached, deliberately, so a placement bug surfaces rather than falling
+ * through.  AUTO prefers HIFRAM for large requests, then SRAM, then NVM.
  *
  * @param pmem  Active process memory context
  * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
@@ -267,31 +219,15 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
 }
 
 /**
- * @brief Attach a HIFRAM arena to an existing process context
+ * @brief Attach a HIFRAM arena to an existing process context.
  *
- * Lazy opt-in path for a process that needs a chunk of the upper FRAM
- * bank (HIFRAM on FR5994 / FR6989, reachable only under
- * MEMORY_MODEL=large). It carves a HIFRAM-tier arena via
- * tiku_tier_arena_create() and stores it in pmem->hifram_arena, after
- * which tiku_proc_alloc() with TIKU_MEM_HIFRAM (or AUTO for large
- * requests) routes here instead of returning NULL.
- *
- * Kept separate from tiku_proc_mem_create() so processes that never
- * touch HIFRAM neither carry the attach cost nor depend on a tier that
- * doesn't exist on small parts. Re-attaching is rejected rather than
- * silently re-allocating: overwriting pmem->hifram_arena would abandon
- * the previous HIFRAM sub-buffer in the tier pool with no way to
- * reclaim it (the tier allocator is bump-only).
- *
- * On parts without HIFRAM, or under MEMORY_MODEL=small, the HIFRAM tier
- * is uninitialized, so the underlying tiku_tier_arena_create() returns
- * TIKU_MEM_ERR_NOMEM and that code propagates out cleanly.
+ * A lazy opt-in kept out of create(), so a process that never touches HIFRAM
+ * neither pays for it nor depends on a tier small parts lack.  Re-attaching is
+ * rejected: overwriting the arena would strand its sub-buffer unreclaimably.
  *
  * @param pmem  Active process memory context
- * @param size  HIFRAM arena capacity in bytes (must be > 0)
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
- *         or if a HIFRAM arena is already attached, TIKU_MEM_ERR_NOMEM
- *         if the HIFRAM tier is unavailable or lacks room
+ * @param size  HIFRAM arena capacity in bytes
+ * @return TIKU_MEM_OK on success
  */
 tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
                                             tiku_mem_arch_size_t size)
@@ -312,14 +248,10 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
 }
 
 /**
- * @brief Attach a cached region to a process context
+ * @brief Attach a cached region to a process context.
  *
- * Adds an already-created cached region to the process context's
- * ownership list. When the context is destroyed, all attached caches
- * are flushed and destroyed automatically.
- *
- * The cached region must already be created via tiku_cache_create().
- * This function only records ownership — it does not create the cache.
+ * Records ownership of an already-created region -- it does not create one --
+ * so destroying the context flushes and destroys every attached cache.
  *
  * @param pmem    Active process memory context
  * @param region  Cached region to attach (must be active)
@@ -344,17 +276,11 @@ tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
 }
 
 /**
- * @brief Get statistics for a process arena
+ * @brief Get statistics for a process arena.
  *
- * Delegates to tiku_arena_stats() for the requested tier's arena,
- * filling total / used / peak / alloc-count for that one arena. This is
- * the per-process memory-accounting hook: it answers "how much of this
- * process's SRAM (or NVM, or HIFRAM) scratch is in use right now."
- *
- * AUTO is not a queryable tier (there is no AUTO arena) and is
- * rejected. A HIFRAM query on a context that never attached a HIFRAM
- * arena returns TIKU_MEM_ERR_NOT_FOUND rather than zeroed stats, so the
- * caller can tell "0 bytes used" from "no such arena."
+ * Fills total, used, peak and allocation count for one tier's arena -- the
+ * per-process accounting hook.  AUTO is not queryable, and a HIFRAM query with
+ * no arena attached returns NOT_FOUND, so "0 used" differs from "no arena".
  *
  * @param pmem   Active process memory context
  * @param tier   Which arena to query (SRAM, NVM, or HIFRAM; not AUTO)
