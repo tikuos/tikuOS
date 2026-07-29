@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pio_arch.c - RP2350 PIO driver, bitbang state-machine flavour
+ * tiku_pio_arch.c - RP2350 PIO driver, bit-bang state-machine flavour.
  *
- * Drives one state machine on PIO0 as a hardware-offloaded GPIO
- * bitbang engine for kernel/timers/tiku_bitbang.c. Once the program
- * is loaded and the SM is configured, each tiku_pio_arch_bitbang_tx()
- * call:
- *
- *   1. Resets SM0 to instruction 0.
- *   2. Sets the SM clock divider so each bit takes the requested us.
- *   3. Configures pins (out_base = gpio_pin, out_count = 1) and
- *      shift direction (MSB-first or LSB-first).
- *   4. Forces 'set x, bit_count-1' via the EXEC register.
- *   5. Pushes the data word into the TX FIFO.
- *   6. Enables SM0. The SM runs the program at full clk_sys-relative
- *      rate, fires PIO IRQ 0 when done, and halts at the jmp-to-self
- *      instruction (no further FIFO pulls).
- *
- * The PIO0_IRQ_0 ISR clears the IRQ flag, sets the not-busy state,
- * and invokes the kernel completion callback.
+ * Drives one PIO0 state machine as a hardware-offloaded bit-bang engine for the
+ * kernel bit-bang layer: each call resets the SM, sets the clock divider for the
+ * requested bit period, pushes the word, and takes completion from PIO0_IRQ_0.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

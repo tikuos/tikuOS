@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_dma_arch.h - RP2350 DMA driver interface
+ * tiku_dma_arch.h - RP2350 DMA driver interface.
  *
- * Drives the 16-channel DMA engine (datasheet §12.6). First port
- * exposes a small set of operations:
- *
- *   - tiku_dma_arch_memcpy: word-aligned memory-to-memory transfer
- *     on channel 0, no DREQ pacing. CPU-free, IRQ on completion.
- *
- * Future operations to add when the use case lands:
- *   - tiku_dma_arch_pio_tx: feed a PIO state machine's TX FIFO
- *     from a SRAM buffer (paced by the SM's DREQ).
- *   - tiku_dma_arch_uart_tx: feed UART TX FIFO from SRAM.
- *
- * One channel is wired up (channel 0) and routed to DMA_IRQ_0.
- * Multi-channel use needs additional channel allocation logic.
+ * Exposes one operation on the 16-channel engine: a CPU-free word-aligned memcpy
+ * on channel 0, routed to DMA_IRQ_0.  Multi-channel use would need channel
+ * allocation logic that does not exist yet.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

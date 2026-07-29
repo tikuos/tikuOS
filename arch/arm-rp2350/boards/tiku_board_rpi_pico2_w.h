@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_rpi_pico2_w.h - Raspberry Pi Pico 2 W board definitions
+ * tiku_board_rpi_pico2_w.h - Raspberry Pi Pico 2 W board definitions.
  *
- * Board layout (per the Pico 2 W datasheet):
- *   - 12 MHz crystal on XIN/XOUT (XOSC)
- *   - 4 MB QSPI flash (W25Q32 family) at 0x10000000
- *   - CYW43439 wireless (SPI to GP23..GP25 + GP29) — out of scope for
- *     this first port; the wireless stack is intentionally stubbed.
- *   - LED is wired to the CYW43 chip's WL_GPIO0, NOT a CPU GPIO. To
- *     keep the LED demo working we expose GP25 as the "user LED" since
- *     it is broken out on the header and unused by anything else when
- *     the wireless chip is held in reset. The plain Pico 2 wires its
- *     LED to GP25 directly so existing examples just work there.
- *   - UART0 default backchannel: TX=GP0, RX=GP1 (matches the Pico SDK
- *     default, picotool, the Debug Probe, and OpenOCD documentation).
- *   - Button S1 (BOOTSEL): wired through QSPI bank — not usable as a
- *     plain GPIO without entering a special mode. Stub for now.
+ * Pin assignments per the Pico 2 W datasheet.  The board LED hangs off the
+ * CYW43439's WL_GPIO0 rather than a CPU pin, so GP25 is exposed as the user LED
+ * to match the plain Pico 2.  BOOTSEL runs through the QSPI bank and is stubbed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_region_rp2350.c - RP2350 carved-Flash region backend (substrate B).
+ * tiku_nvm_region_rp2350.c - RP2350 carved-flash region backend.
  *
- * Implements tiku_nvm_backend_get() over the linker-carved QSPI-flash span
- * (__tiku_nvmfs_base / __tiku_nvmfs_size in rp2350.ld), reserved between the
- * code image and the 4 KB .uninit backup sector.  This is the Flash analogue of
- * the Ambiq direct-MRAM backend: the /data file store and the NVM tier read the
- * region in place (XIP, no SRAM shadow) and write through the boot-ROM.
- *
- *   read  : the region is XIP-mapped, so a consumer dereferences be->base + off.
- *   write : NOR flash must be erased before programming, at a 4 KB granule, so
- *           region_write() does a read-modify-ERASE-program per sector: it
- *           stages the whole current sector into SRAM, overlays the new bytes,
- *           and erases+reprograms the sector via the proven boot-ROM path
- *           (tiku_rp2350_flash_commit_sector(), which suspends XIP with
- *           interrupts masked).  The caller holds the NVM window
- *           (tiku_tier_nvm_write() provides it).
- *
- * ATOMICITY NOTE.  Flash erase is sector-granular, so -- unlike FRAM/MRAM,
- * which commit a single aligned word atomically -- the TFS gate-last guarantee
- * degrades here to "survives a clean reboot; a power cut DURING a sector's
- * erase can lose that sector".  Functional durability is solid; full power-cut
- * atomicity wants a log-structured store (future work).  TFS slots are sized to
- * one sector (4 KB) on rp2350 to keep file data on its own erase granule.
+ * Implements tiku_nvm_backend_get() over the linker-carved QSPI span: reads are
+ * XIP pointer dereferences, and writes do a read-modify-erase-program per 4 KB
+ * sector through the boot-ROM path.  See the atomicity note at region_write().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -68,6 +50,14 @@ static uint8_t nvmr_sector[RP2350_SECTOR] __attribute__((aligned(4)));
  * @param src  Source bytes.
  * @param len  Number of bytes to write.
  * @return 0 on success, -1 if the range is out of bounds.
+ */
+/*
+ * ATOMICITY.  Flash erase is sector-granular, so unlike FRAM and MRAM -- which
+ * commit a single aligned word atomically -- the store's gate-last guarantee
+ * degrades here to "survives a clean reboot; a power cut DURING a sector erase
+ * can lose that sector".  TFS slots are sized to one 4 KB sector on this part
+ * so file data keeps its own erase granule.  Full power-cut atomicity would
+ * want a log-structured store.
  */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)

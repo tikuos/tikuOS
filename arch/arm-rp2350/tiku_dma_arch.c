@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_dma_arch.c - RP2350 DMA driver (channel 0)
+ * tiku_dma_arch.c - RP2350 DMA driver (channel 0).
  *
- * Programs DMA channel 0 for word-aligned memory-to-memory
- * transfers with no DREQ pacing (TREQ_PERMANENT).  The channel
- * runs at full AHB rate, so a 1 KB memcpy completes in roughly
- * 256 clk_sys cycles -- about 1.7 us at 150 MHz, ~10x faster than
- * a CPU-driven word-by-word memcpy.
- *
- * DMA_IRQ_0 fires on transfer completion.  The ISR clears the
- * channel's IRQ flag, marks the driver not-busy, and invokes the
- * caller's completion callback.
+ * Word-aligned memory-to-memory transfers with no DREQ pacing, running at full
+ * AHB rate -- roughly 1.7 us for 1 KB at 150 MHz.  DMA_IRQ_0 clears the flag,
+ * marks the driver idle and invokes the caller's completion callback.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

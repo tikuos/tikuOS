@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_rp2350_regs.h - Hand-written RP2350 register definitions
+ * tiku_rp2350_regs.h - hand-written RP2350 register definitions.
  *
- * Just enough peripheral register addresses, bitfield masks, and
- * helper macros to bring the kernel up bare-metal — we do not pull
- * in the Pico SDK or ARM CMSIS headers (matches the TikuOS philosophy
- * of "no abstractions; hit registers directly").
- *
- * Source: RP2350 datasheet (Raspberry Pi, 2024) §2 (memory map),
- * §3 (cores), §5 (clocks), §6 (resets), §9 (GPIO/IO_BANK0), §12
- * (UART/PL011), §10 (timer), §13 (watchdog).
+ * Just enough addresses, masks and helpers to bring the kernel up bare-metal;
+ * neither the Pico SDK nor CMSIS is pulled in.  Sourced from the RP2350
+ * datasheet.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

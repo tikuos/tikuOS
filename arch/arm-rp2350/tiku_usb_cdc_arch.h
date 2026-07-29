@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usb_cdc_arch.h - RP2350 native USB CDC-ACM console backend
+ * tiku_usb_cdc_arch.h - RP2350 native USB CDC-ACM console backend.
  *
- * A from-scratch USB 1.1 full-speed device stack, just enough to present a
- * single CDC-ACM virtual serial port on the Pico 2's own USB connector --
- * so console/debug output can come over the same cable used for BOOTSEL
- * flashing, with no external FT232. It mirrors the tiku_uart_arch.* API so
- * the printf HAL and the pluggable shell I/O backend can select between UART
- * and USB at build time via the TIKU_CONSOLE make variable.
- *
- * The stack is POLLED (no IRQ): tiku_usb_cdc_poll() must be called often --
- * it is wired to the scheduler idle hook and is also nudged from putc/getc.
- *
- * Caveats (USB CDC is a dev/interactive convenience, not a low-power or CI
- * transport): the port re-enumerates across each BOOTSEL flash cycle, output
- * emitted before the host opens the port is dropped, and keeping the USB PHY
- * + 48 MHz clock alive costs power. Use UART (TIKU_CONSOLE=uart) for the
- * automated test loop and deployed low-power nodes.
+ * Presents one CDC-ACM port on the Pico 2's own USB connector, mirroring the UART
+ * arch API so the console backend is a build-time choice.  The stack is POLLED:
+ * tiku_usb_cdc_poll() must be called often.  Prefer UART for CI and low power.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

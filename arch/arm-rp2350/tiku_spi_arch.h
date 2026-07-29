@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.h - RP2350 SPI driver interface
+ * tiku_spi_arch.h - RP2350 SPI driver interface.
  *
- * Drives the SPI0 PL022 controller (RP2350 datasheet §12.5). Master
- * mode, 8-bit frames, Motorola format. The driver auto-computes
- * SSPCPSR / SSPCR0.SCR from clk_peri and the requested baud, so the
- * same firmware works across all six supported clk_sys frequencies.
- * CS/SCK/MOSI/MISO pins are board-defined; see the per-board header
- * for the pin assignment.
+ * Drives the SPI0 PL022 in master mode with 8-bit Motorola frames.  Prescaler and
+ * SCR are computed from clk_peri and the requested baud, so one firmware works
+ * across every supported clk_sys.  Pins are board-defined.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

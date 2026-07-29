@@ -5,43 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.c - RP2350 memory operations + flash-backed NVM
+ * tiku_mem_arch.c - RP2350 memory operations and flash-backed NVM.
  *
- * Persistent state placed with __attribute__((section(".persistent"))) or
- * __attribute__((section(".uninit"))) lives in the SRAM .uninit section
- * (see linker script).  Reads of that state are plain memory accesses, but
- * writes through tiku_mem_arch_nvm_write() are additionally mirrored to a
- * 4 KB sector at the end of XIP flash (__tiku_nvm_flash_*).  On boot,
- * tiku_mem_arch_init() restores the SRAM region from that mirror so the
- * state survives full power cycles, not just warm resets.
- *
- * The mirror sector is a verbatim 1:1 image of the live .uninit region:
- *
- *   flash[__tiku_nvm_flash_start ..] = mirror image (4 KB, includes magic)
- *
- *   SRAM[__uninit_start ..] = live working copy
- *
- * The mirror starts with a 4-byte magic (RP2350_NVM_MAGIC).  On boot we
- * read flash[0..3]; if it matches the magic, the rest of the sector is a
- * valid snapshot and we copy it into .uninit.  If the magic is missing
- * (fresh chip, post-mass-erase) we leave .uninit at its NOLOAD garbage
- * and let the kernel's "no magic, initialise fresh" logic in each
- * subsystem (persist, init, lc_persist, ...) do its job.
- *
- * Each tiku_mem_arch_nvm_write() call commits to flash immediately by:
- *   1. Copying src bytes into SRAM .uninit (so reads see the new data).
- *   2. Snapshotting all of .uninit (plus the magic) into the SRAM
- *      flush buffer.
- *   3. Disabling IRQs (XIP is suspended during flash op; ISRs would
- *      bus-fault on instruction fetch).
- *   4. Calling boot-ROM flash_range_erase + flash_range_program for
- *      the mirror sector.
- *   5. Re-enabling IRQs.
- *
- * Cost: ~20 ms per write (sector erase + program time).  Acceptable for
- * one-shot config writes (boot counter, persist register/write, init
- * table); slow for hot paths (lc_persist).  Hot-path callers are opt-in
- * so the trade-off is theirs to manage.
+ * Durable state lives in SRAM .uninit and is mirrored verbatim into a 4 KB XIP
+ * flash sector, restored at boot when the sector's magic matches.  The flash op is
+ * deferred to the MPU relock boundary, amortising its ~20 ms over an unlock window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.h - RP2350 GPIO port access
+ * tiku_gpio_arch.h - RP2350 GPIO port access.
  *
- * The RP2350 has a single bank of 30+ pins. To stay shell/VFS-compatible
- * with the MSP430 layout (/dev/gpio/{1..4}/{0..7}) we expose four
- * virtual ports of 8 pins each:
- *   port 1 -> GP0..GP7
- *   port 2 -> GP8..GP15
- *   port 3 -> GP16..GP23
- *   port 4 -> GP24..GP31
+ * The part has one bank of 30+ pins.  To stay compatible with the shell and VFS
+ * layout inherited from MSP430, it is presented as four virtual ports of eight
+ * pins each: port 1 is GP0-GP7, port 2 GP8-GP15, and so on.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

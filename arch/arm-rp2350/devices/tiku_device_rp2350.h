@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_rp2350.h - Raspberry Pi RP2350 silicon-level constants
+ * tiku_device_rp2350.h - Raspberry Pi RP2350 silicon-level constants.
  *
- * RP2350 (used on Raspberry Pi Pico 2 / Pico 2 W) is a dual-core
- * Arm Cortex-M33 (or RISC-V Hazard3) MCU at up to 150 MHz with:
- *   - 520 KB on-chip SRAM (10 banks: SRAM0..7 4 MB-style + SRAM8/9
- *     boot SRAM); flat user-visible region from 0x20000000.
- *   - No on-chip Flash; the Pico 2 board ships 4 MB external QSPI
- *     PSRAM/Flash mapped XIP at 0x10000000.
- *   - 30 GPIO pins on bank 0 (GP0..GP29 on Pico 2) + extra pads on
- *     QSPI bank for the chip-select / clock to flash.
- *   - Standard ARM peripherals: NVIC, SysTick, MPU.
+ * A dual-core Cortex-M33 at up to 150 MHz with 520 KB SRAM, no on-chip flash (the
+ * board's QSPI part is mapped XIP at 0x10000000), 30 GPIO on bank 0, and the
+ * standard NVIC, SysTick and MPU.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

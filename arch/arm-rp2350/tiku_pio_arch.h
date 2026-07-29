@@ -5,28 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pio_arch.h - RP2350 PIO (Programmable I/O) driver
+ * tiku_pio_arch.h - RP2350 PIO (programmable I/O) driver.
  *
- * The RP2350 has three PIO blocks; each block has four state machines
- * sharing a 32-instruction program memory and 4-deep TX/RX FIFOs.
- * TikuOS uses one state machine on PIO0 as a hardware-offloaded
- * bit-bang engine (the backend for kernel/timers/tiku_bitbang.c).
- *
- * Program (4 instructions, loaded at address 0):
- *   addr 0:  out pins, 1     ; shift 1 bit from OSR to the output pin
- *   addr 1:  jmp x-- 0       ; decrement X, jump back if non-zero
- *   addr 2:  irq nowait 0    ; signal completion to PIO0_IRQ_0
- *   addr 3:  jmp 3           ; halt (waits for CPU to restart SM)
- *
- * CPU side per transmission:
- *   1. Reset SM, load OSR with the data word, load X with bit_count-1.
- *   2. Configure clkdiv for the requested bit period.
- *   3. Enable SM. SM shifts bit_count bits to the pin, fires IRQ.
- *   4. PIO0_IRQ_0 handler invokes the kernel completion callback.
- *
- * Single-shot per call; only one bit-bang transmission can run at a
- * time. Long bursts (> 32 bits) push multiple words; SM auto-pulls
- * on OSR exhaustion.
+ * One state machine on PIO0 runs a four-instruction program that shifts a data
+ * word out to a pin and raises an IRQ when done.  Single-shot per call; bursts
+ * longer than 32 bits push several words and the SM auto-pulls.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

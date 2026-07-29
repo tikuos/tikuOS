@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.c - 1-Wire bus driver for RP2350 (GPIO bit-bang)
+ * tiku_onewire_arch.c - 1-Wire bus driver for RP2350 (GPIO bit-bang).
  *
- * Implements the Dallas/Maxim 1-Wire protocol on top of the SIO-direct
- * GPIO path. Pin chosen at compile time via TIKU_BOARD_OW_PIN in the
- * board header (default GP15 on Pico 2 W). External 4.7 kohm pull-up
- * to 3V3 is required on the data line — the driver releases the line
- * by floating it as a high-impedance input and lets the pull-up bring
- * it high.
- *
- * Timing: tiku_cpu_rp2350_delay_us() spins on the TIMER0 microsecond
- * counter, so accuracy is +/- 1 us regardless of CPU clock. ARM IRQs
- * are masked across each timing-critical bit slot to keep an unrelated
- * interrupt from stretching the slot past the 1-Wire spec window.
+ * Bit-bangs the Dallas/Maxim protocol over the SIO-direct GPIO path, releasing
+ * the line as a high-impedance input so the required external pull-up drives it.
+ * Timing spins on the 1 us TIMER0 counter, so it is invariant to clk_sys.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

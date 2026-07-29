@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_config.h - Hardware timer configuration for RP2350
+ * tiku_htimer_config.h - hardware timer configuration for RP2350.
  *
- * The RP2350 TIMER0 block runs at exactly 1 MHz (sourced from the
- * TICKS block divider, 150 MHz / 150 = 1 MHz). One tick per
- * microsecond gives the kernel ~65 ms of scheduling range with the
- * 16-bit clock_t — comfortably above the 7.8 ms tick period used by
- * the system clock.
+ * TIMER0 runs at exactly 1 MHz from the TICKS divider, so one tick is one
+ * microsecond and the 16-bit clock covers ~65 ms -- comfortably above the 7.8 ms
+ * system tick period.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

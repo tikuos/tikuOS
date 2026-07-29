@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit_arch.c - RP2350 IRQ-mask backend for tiku_crit
+ * tiku_crit_arch.c - RP2350 IRQ-mask backend for tiku_crit.
  *
- * The Cortex-M NVIC has per-source enable/disable registers and no
- * MSP430-style "IE family" abstraction. We implement
- * tiku_crit_arch_mask_irqs() by snapshotting the NVIC ISER0 register
- * (covers IRQs 0..31, which is more than the RP2350 actually
- * exposes), masking everything not in the preserve set, and then
- * restoring on unmask.
- *
- * The tick / htimer / UART IRQs each have a single NVIC line so the
- * preserve mapping is straightforward; the GPIO bank is a single
- * source for all 30+ pins so we either keep them all or kill them
- * all.
+ * The NVIC has per-source enables and no MSP430-style IE families, so masking
+ * snapshots ISER0, clears everything outside the preserve set and restores it.
+ * The GPIO bank is one source for all pins, so it is kept or dropped whole.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_arch.c - RP2350 CPU bring-up
+ * tiku_cpu_freq_boot_arch.c - RP2350 CPU bring-up.
  *
- * Brings CLK_SYS to 150 MHz from a 12 MHz XOSC via PLL_SYS:
- *
- *   XOSC (12 MHz)
- *     -> REFDIV=1
- *     -> VCO target 1500 MHz (FBDIV = 125)
- *     -> POSTDIV1 = 5, POSTDIV2 = 2  -> 1500 / 10 = 150 MHz
- *     -> CLK_SYS = PLL_SYS / 1
- *     -> CLK_PERI = CLK_SYS / 1 (peripheral clock = 150 MHz)
- *
- * Then releases the peripherals we use from reset and prepares the
- * NVIC for use.
+ * Brings CLK_SYS to 150 MHz from the 12 MHz XOSC through PLL_SYS (VCO 1500 MHz,
+ * postdividers 5 and 2), sets CLK_PERI to match, then releases the peripherals
+ * in use from reset and prepares the NVIC.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

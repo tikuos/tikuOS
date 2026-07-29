@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pwm_arch.c - RP2350 PWM driver
+ * tiku_pwm_arch.c - RP2350 PWM driver.
  *
- * The 12 slices share one PWM_EN register; each slice has its own
- * CSR / DIV / CTR / CC / TOP. We always set TOP = 0xFFFF so duty
- * resolution stays 16-bit, then choose DIV (8.4 fixed-point) so the
- * effective wrap rate matches the requested freq_hz against the live
- * clk_sys rate. That way a clk_sys retune (12/48/100/125/133/150 MHz
- * — see tiku_cpu_freq_boot_arch.c) doesn't change PWM behaviour
- * once init runs.
- *
- * Single-shot init per pin; calling init again on the same pin
- * reconfigures the channel.
+ * TOP is fixed at 0xFFFF so duty resolution stays 16-bit, and DIV is chosen
+ * against the live clk_sys so the wrap rate matches the requested frequency --
+ * a clk_sys retune after init therefore does not change PWM behaviour.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

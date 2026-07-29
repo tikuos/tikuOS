@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.h - RP2350 system-tick (Cortex-M SysTick)
+ * tiku_timer_arch.h - RP2350 system tick (Cortex-M SysTick).
  *
- * The system clock runs at TIKU_CLOCK_ARCH_SECOND ticks per second.
- * Default 128 Hz to match the MSP430 port — gives ~7.8 ms resolution
- * which is plenty for the protothread scheduler and far below the
- * 24-bit SysTick reload limit at 150 MHz CPU clock.
+ * Runs at TIKU_CLOCK_ARCH_SECOND ticks per second, 128 Hz by default to match the
+ * MSP430 port -- ~7.8 ms resolution, ample for the scheduler and well inside the
+ * 24-bit SysTick reload at 150 MHz.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

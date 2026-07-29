@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.h - RP2350 True Random Number Generator HAL
+ * tiku_trng_arch.h - RP2350 true random number generator HAL.
  *
- * Wraps the dedicated TRNG block (datasheet §12.13). One blocking
- * read API; a 192-bit ring buffer in static RAM is kept full
- * automatically across calls so the typical read_u32() returns from
- * RAM and only re-arms the hardware when the cache is empty.
- *
- * Use cases:
- *   - Seed for the existing software PRNG in tikukits/crypto/
- *   - Nonce / IV for ephemeral session keys
- *   - One-time stack canary refresh
+ * One blocking read API over the dedicated TRNG block, backed by a 192-bit cache
+ * kept full across calls, so a typical read returns from RAM and only re-arms the
+ * hardware when the cache empties.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

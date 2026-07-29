@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_region_arch.c - RP2350 memory region table
+ * tiku_region_arch.c - RP2350 memory region table.
  *
- * Reports the RP2350 memory map split into three regions: the SRAM
- * area below .uninit (general-purpose volatile memory), the SRAM
- * .uninit area (where .persistent variables live -- treated as NVM
- * because tiku_mem_arch_nvm_{read,write} writes here on this port),
- * and the 4 MB QSPI XIP flash (also tagged NVM for introspection).
- *
- * Why .uninit is exposed as NVM:
- *   tiku_persist_register() requires its caller-supplied buffer to be
- *   contained in a region of type NVM.  On real MSP430 silicon that
- *   maps to FRAM at 0x4400+; on RP2350 the first port has no flash
- *   write driver, so .persistent variables go to SRAM .uninit (see
- *   linker script and tiku_mem_arch.c).  Reporting .uninit as NVM
- *   makes the persist + hibernate API work end-to-end on this port.
+ * Splits the map into SRAM below .uninit, the .uninit area itself and the QSPI
+ * XIP flash.  .uninit is reported as NVM because tiku_persist_register() requires
+ * an NVM-typed region and this port keeps .persistent variables there.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

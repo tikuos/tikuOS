@@ -5,15 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_select.h - RP2350 device + board include router
+ * tiku_device_select.h - RP2350 device and board include router.
  *
- * Mirrors arch/msp430/tiku_device_select.h. The Makefile sets one of:
- *   TIKU_DEVICE_RP2350      (silicon)
- *   TIKU_BOARD_RPI_PICO2_W  (board PCB definitions)
- *
- * Adding a new RP2350 board requires only:
- *   1. A board header in boards/ with pin assignments
- *   2. An #elif clause in this file
+ * Mirrors the MSP430 router: the Makefile names the silicon and the board PCB
+ * separately.  A new board needs a header in boards/ and one #elif here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

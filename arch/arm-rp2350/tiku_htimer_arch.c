@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_arch.c - RP2350 hardware-timer driver (TIMER0 alarm 0)
+ * tiku_htimer_arch.c - RP2350 hardware-timer driver (TIMER0 alarm 0).
  *
- * The kernel htimer uses a 16-bit clock that wraps every 65.5 ms
- * (at 1 MHz). We compose a 32-bit absolute target by extending the
- * 16-bit delta against the current timer reading. ALARM0 fires when
- * TIMELR matches; clearing the ARMED bit in the ISR (and then
- * re-arming on the next schedule call) gives us the single-shot
- * semantics the kernel expects.
+ * The kernel htimer uses a 16-bit clock, so a 32-bit absolute target is composed
+ * by extending the delta against the current reading.  Clearing ARMED in the ISR
+ * and re-arming on the next schedule gives the single-shot semantics expected.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

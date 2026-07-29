@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.c - RP2350 TRNG driver
+ * tiku_trng_arch.c - RP2350 TRNG driver.
  *
- * Hardware: RP2350 datasheet §12.13. CryptoCell-derived TRNG with a
- * 192-bit EHR (entropy holding register) split across six 32-bit
- * EHR_DATA[0..5] registers and a single VALID bit at TRNG_VALID[0]
- * that flips when all six are filled.
- *
- * Driver model:
- *   - One static 6-word cache. read_u32 returns the next cached word.
- *   - When the cache drains we re-arm: enable random source, wait
- *     for VALID, drain all six EHR words into the cache, disable.
- *   - The hardware drives the cache rather than the other way
- *     around: callers never deal with EHR ordering, valid bits, or
- *     timing.
- *
- * Why drain all six EHR words each cycle rather than reading one
- * and disabling: the EHR is filled atomically — once VALID asserts,
- * all six registers hold fresh bits. Throwing them away wastes
- * entropy and forces another (slow) ROSC sampling pass.
- *
- * Failure mode: if VALID never asserts inside our spin budget we
- * report TIKU_TRNG_ERR_TIMEOUT. The cache state stays "empty" so a
- * later call retries from scratch.
+ * The entropy holding register fills atomically across six words, so each re-arm
+ * drains all six into a static cache rather than discarding entropy and paying
+ * for another slow sampling pass.  A stalled VALID reports ERR_TIMEOUT.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

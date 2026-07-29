@@ -5,34 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.c - RP2350 ADC driver
+ * tiku_adc_arch.c - RP2350 ADC driver.
  *
- * Single 12-bit SAR ADC. Channels:
- *   0..3  external pins AIN0..AIN3 (GPIO26..GPIO29)
- *   4     internal temperature sensor (requires CS.TS_EN)
- *
- * The kernel's ADC interface uses MSP430-style channel constants:
- *   TIKU_ADC_CH_TEMP    (30)  -> AINSEL=4 + TS_EN
- *   TIKU_ADC_CH_BATTERY (31)  -> AINSEL=3 (GP29 is wired to VSYS via a
- *                                          1:3 divider on the standard
- *                                          Pico 2 board; Pico 2 W shares
- *                                          the same pin so the reading
- *                                          is meaningful only when the
- *                                          CYW43 isn't sampling)
- *
- * Reference is fixed to ADC_AVDD (~3.3 V on the LaunchPad-style boards).
- * The MSP430 internal-reference selectors (TIKU_ADC_REF_1V2 / _2V0 /
- * _2V5) are accepted but have no effect — the reference is whatever is
- * on the ADC_AVDD pin. Resolution is fixed at 12 bits in hardware; if
- * the caller asked for 8 or 10 bits we right-shift the result so the
- * value field carries the requested precision.
- *
- * Clock setup: the ADC needs clk_adc to actually count. PLL_USB isn't
- * brought up by the boot sequence today, so we point clk_adc at XOSC
- * (12 MHz) here in the driver. That's well below the spec'd 48 MHz
- * but the ADC is happy with it; conversions just take longer. When a
- * real clk_adc is wired into tiku_cpu_freq_boot_arch.c we can drop
- * the local clock setup.
+ * One 12-bit SAR ADC over AIN0-AIN3 plus the internal temperature sensor.  The
+ * reference is fixed to ADC_AVDD, so the MSP430 internal-reference selectors are
+ * accepted and ignored; a narrower requested resolution is shifted down.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

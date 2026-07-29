@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.h - RP2350 ADC driver interface
+ * tiku_adc_arch.h - RP2350 ADC driver interface.
  *
- * Drives the on-die 12-bit SAR ADC (RP2350 datasheet §12.4).
- * Four external channels are wired to GPIO 26..29; channel 4 is
- * the internal temperature sensor. The driver supports one-shot
- * conversions through tiku_adc_arch_read(); free-running and DMA
- * paths are not implemented because no current kernel subsystem
- * needs them.
+ * Drives the on-die 12-bit SAR ADC: four external channels on GPIO 26-29 and the
+ * internal temperature sensor.  One-shot conversions only -- free-running and DMA
+ * paths are unimplemented because nothing needs them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

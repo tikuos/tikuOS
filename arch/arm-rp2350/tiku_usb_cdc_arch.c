@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usb_cdc_arch.c - RP2350 native USB CDC-ACM console backend
+ * tiku_usb_cdc_arch.c - RP2350 native USB CDC-ACM console backend.
  *
- * A minimal, polled USB 1.1 full-speed device stack presenting one CDC-ACM
- * virtual serial port on the Pico 2's USB connector. See the header for the
- * rationale and caveats. The flow mirrors the canonical RP2040/RP2350
- * "dev_lowlevel" device example: PLL_USB -> clk_usb -> controller -> DPRAM
- * endpoint setup -> EP0 enumeration -> bulk IN/OUT data.
- *
- * HARDWARE BRING-UP NOTE: the USB *controller* and *DPRAM* register offsets
- * and bit positions below follow the RP2040 USB device controller (the
- * RP2350 device-mode block is the same IP). They are marked and grouped so
- * they can be checked against the RP2350 datasheet "USB" section during
- * first bring-up; the enumeration/descriptor logic above them is silicon-
- * independent. USB enumeration always needs a host-side dmesg / analyzer
- * pass on first silicon -- this driver is written correct-by-construction
- * but has not been validated on hardware here.
+ * A polled USB 1.1 full-speed device stack: PLL_USB, controller, DPRAM endpoint
+ * setup, EP0 enumeration, then bulk IN/OUT.  The register layout follows the
+ * RP2040 device block, which is the same IP; not yet validated on hardware.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

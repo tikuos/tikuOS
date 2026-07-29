@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_irq_arch.c - RP2350 GPIO interrupt backend
+ * tiku_gpio_irq_arch.c - RP2350 GPIO interrupt backend.
  *
- * Maps the platform-agnostic (port, pin, edge) request onto bank-0
- * IO interrupt registers. INTR/INTE/INTS arrays are 4 entries long
- * (8 pins per word). Each pin gets a 4-bit field with separate
- * level-low / level-high / edge-low / edge-high mask bits.
+ * Maps a (port, pin, edge) request onto the bank-0 IO interrupt registers, whose
+ * INTR/INTE/INTS arrays hold eight pins per word with a 4-bit field per pin for
+ * the level-low, level-high, edge-low and edge-high masks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - I2C bus driver for RP2350 (DW_apb_i2c on I2C0)
+ * tiku_i2c_arch.c - I2C bus driver for RP2350 (DW_apb_i2c on I2C0).
  *
- * Synopsys DW_apb_i2c block. Master-only, 7-bit addressing, blocking
- * polled I/O. Pin assignment from the board header
- * (TIKU_BOARD_I2C0_SDA_PIN / SCL_PIN). External pull-ups required on
- * both lines — the SoC's internal pulls are too weak (~50 kohm) for
- * reliable Fm operation.
- *
- * Speed: tiku_i2c_config_t.speed selects 100 kHz (Standard) or 400 kHz
- * (Fast). SCL high/low counts are computed at init from the live
- * clk_peri reading (tiku_cpu_rp2350_smclk_get_hz()), so the same
- * driver works at the production 150 MHz and at the 12 MHz XOSC
- * fallback. Fast mode at 12 MHz silently degrades — the high-time
- * minimum (0.6 us) needs >= 8 cycles which we just barely meet.
- *
- * NACK handling: every transaction polls IC_RAW_INTR_STAT.TX_ABRT.
- * On abort we read IC_TX_ABRT_SOURCE for diagnostic granularity, then
- * clear it via IC_CLR_TX_ABRT and translate to TIKU_I2C_ERR_NACK.
- * Bus-busy / timeout return TIKU_I2C_ERR_TIMEOUT.
+ * Master-only, 7-bit addressing, blocking polled I/O, with SCL counts computed at
+ * init from the live clk_peri so the same driver works at 150 MHz and at the
+ * 12 MHz fallback.  External pull-ups are required; the internal ones are too weak.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

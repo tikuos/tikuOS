@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_rpi_pico2.h - Raspberry Pi Pico 2 board definitions
+ * tiku_board_rpi_pico2.h - Raspberry Pi Pico 2 board definitions.
  *
- * Plain Pi Pico 2 (no CYW43439). The board is electrically simpler
- * than the Pico 2 W: no wireless module, no WL_REG_ON / WL_DATA /
- * WL_CS / WL_CLOCK lines, the on-board user LED is a real GPIO
- * (GP25) instead of being routed through the wireless chip's
- * WL_GPIO0.
- *
- * Board layout (per the Pico 2 datasheet):
- *   - 12 MHz crystal on XIN/XOUT (XOSC)
- *   - 4 MB QSPI flash (W25Q32 family) at 0x10000000
- *   - User LED on GP25 (drive high to illuminate)
- *   - UART0 default backchannel: TX=GP0, RX=GP1
- *   - Button S1 (BOOTSEL): wired through QSPI bank — not usable as
- *     a plain GPIO without entering a special mode. Stub for now.
- *
- * The non-LED / non-wireless pin assignments match the Pico 2 W
- * verbatim: same I2C0 / SPI0 / 1-Wire / bit-bang pin choices, same
- * ADC channels, same UART. Code that runs on Pico 2 W and doesn't
- * touch the CYW43 should run unchanged here.
+ * The plain Pico 2, electrically simpler than the W: no wireless module and the
+ * user LED is a real GPIO on GP25.  Every non-LED, non-wireless pin choice matches
+ * the Pico 2 W, so code that avoids the CYW43 runs unchanged on both.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

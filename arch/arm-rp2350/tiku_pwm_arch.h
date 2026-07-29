@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pwm_arch.h - RP2350 PWM driver interface
+ * tiku_pwm_arch.h - RP2350 PWM driver interface.
  *
- * Drives the 12 PWM slices (datasheet §12.7). Each slice has two
- * channels, A and B, mapped to even- and odd-numbered GPIO pins.
- * The driver picks the slice + channel for the requested pin and
- * computes TOP + DIV from a target frequency such that the duty
- * resolution stays at 16 bits across all supported clk_sys
- * frequencies.
- *
- * Typical uses: LED dimming, servo/motor control, audio tone
- * generation, DAC-style pin output.
+ * Drives the 12 slices, each with an A and B channel on even and odd GPIO pins.
+ * The driver picks slice and channel for the requested pin and computes TOP and
+ * DIV so duty resolution stays 16-bit at every supported clk_sys.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

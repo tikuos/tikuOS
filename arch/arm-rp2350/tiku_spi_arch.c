@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - SPI bus driver for RP2350 (ARM PrimeCell PL022 on SPI0)
+ * tiku_spi_arch.c - SPI bus driver for RP2350 (PL022 on SPI0).
  *
- * Master-only, 8-bit Motorola frames, blocking polled I/O. Pin
- * assignment from the board header (TIKU_BOARD_SPI0_SCK_PIN /
- * MOSI_PIN / MISO_PIN). CS / SS is left to the caller — drive any
- * free GPIO around each transaction.
- *
- * Bit order: PL022 only supports MSB-first natively. The kernel
- * config's TIKU_SPI_LSB_FIRST is rejected with TIKU_SPI_ERR_PARAM
- * rather than silently bit-reversing on the CPU (callers that
- * actually need LSB-first usually want a SW shifter so they can
- * spot the misconfiguration rather than absorb it).
- *
- * Clock: SCLK = clk_peri / (CPSR * (1 + SCR)).  We pick the smallest
- * even CPSR (>= 2) such that SCR fits in 8 bits, and floor SCR.
- * Effective rate is therefore <= the requested clk_peri/prescaler;
- * never higher.
+ * Master-only, 8-bit Motorola frames, blocking polled I/O, with chip select left
+ * to the caller.  LSB-first is rejected rather than emulated, so a
+ * misconfiguration is visible.  The clock is floored, never rounded up.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.h - RP2350 watchdog interface
+ * tiku_cpu_watchdog_arch.h - RP2350 watchdog interface.
  *
- * The RP2350 WDOG block counts a 24-bit microsecond field down to
- * zero from a reload value, then issues a system reset (or fires
- * an IRQ in interval mode — we don't expose interval mode in the
- * first port).
+ * The WDOG block counts a 24-bit microsecond field down from a reload value and
+ * issues a system reset.  Interval mode is not exposed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

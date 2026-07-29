@@ -5,57 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.c - RP2350 MPU driver (real ARMv8-M MPU enforcement)
+ * tiku_mpu_arch.c - RP2350 MPU driver (ARMv8-M enforcement).
  *
- * The kernel MPU layer was designed against the MSP430 segment-based
- * SAM/CTL register model: 3 segments (SEG1/2/3) × 3 permission bits
- * (R/W/X) packed into a 16-bit SAM word. SEG3 is "the NVM region" —
- * the kernel's persist + lc-persist + init layers wrap NVM writes
- * with tiku_mpu_unlock_nvm() / lock_nvm() so the MPU enforces "writes
- * to NVM only happen during the explicit unlock window".
- *
- * On RP2350 there's no FRAM, but the same protection model is useful:
- * .uninit (the SRAM region that survives warm reset and stands in for
- * NVM in this port) gets the same R+X-by-default / R+W+X-while-
- * unlocked treatment, enforced by the Cortex-M33's ARMv8-M MPU.
- *
- * Implementation:
- *   - Six MPU regions for full W^X (Write-XOR-Execute) coverage
- *     plus a stack-overflow guard:
- *       Region 0  SEG3      .uninit                       — RO (locked)
- *                                                           / RW (unlocked), XN
- *       Region 1  SEG1      flash 0x10000000..end         — RX
- *       Region 2  SEG2a     SRAM 0x20000000..uninit_start — RW + XN
- *       Region 3  SEG2b     SRAM uninit_end..guard_base   — RW + XN
- *       Region 4  STACK_GD  32-byte guard just below the stack — RO + XN
- *       Region 5  SEG2c     SRAM above the guard..sram_end — RW + XN
- *     All six are non-overlapping (M33 overlap behaviour is
- *     implementation-defined and unsafe). The guard sits
- *     MPU_STACK_RESERVED_BYTES below __sram_end; a descending stack
- *     that walks past that budget faults on the next push instead of
- *     silently corrupting .data / .bss / .uninit.
- *   - MPU_CTRL.PRIVDEFENA is set so other memory (peripherals at
- *     0x40000000+, SCS at 0xE0000000+, XIP cache control, boot ROM)
- *     keeps using the default privileged R/W policy without consuming
- *     more regions.
- *   - The SAM bookkeeping word still tracks SEG1/SEG2/SEG3 R/W/X bits
- *     so the kernel-level API tests pass unchanged, but only SEG3's
- *     W bit is wired through to actually move hardware permissions.
- *     SEG1/SEG2 hardware permissions are FIXED at the safe defaults
- *     above — calling tiku_mpu_set_permissions(SEG1/SEG2, anything)
- *     updates the bookkeeping but doesn't make flash writable or
- *     SRAM executable. Doing either would brick the kernel: flash
- *     can't physically take stores via XIP, and a writable SRAM that
- *     was suddenly stripped of XN would let a stack-smash become a
- *     code-injection. The MSP430 SAM model didn't anticipate W^X;
- *     we keep its API surface but apply the protection that actually
- *     makes sense on this architecture.
- *   - MemManage exception (vector 4) is wired to bump a violation
- *     counter, latch the faulting address into MMFAR for diagnosis,
- *     and trigger a system reset. Three faulting paths are covered
- *     by the test suite: write to .uninit (DACCVIOL, MMFAR in NVM
- *     range), write to .text (DACCVIOL, MMFAR in flash range), and
- *     execute from SRAM (IACCVIOL, MMFAR not valid).
+ * Six non-overlapping regions give full W^X coverage plus a stack-overflow guard,
+ * with .uninit standing in for NVM: read-only until an explicit unlock window.
+ * A MemManage fault latches the address, counts the violation and resets.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -818,6 +772,15 @@ void tiku_mpu_arch_test_hfnmi_clear(void) {
 void tiku_mpu_arch_set_default_protection(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
+
+/*
+ * ONLY SEG3's W BIT REACHES HARDWARE.  SEG1 and SEG2 keep the fixed W^X
+ * defaults -- flash RX, SRAM RW+XN -- and a call naming them updates the SAM
+ * bookkeeping without moving any permission.  That is deliberate: flash cannot
+ * physically take stores through XIP, and dropping XN from a writable SRAM
+ * would turn a stack smash into code injection.  The MSP430 SAM model this API
+ * came from predates W^X; the surface is kept, the protection is not.
+ */
 
 /**
  * @brief Set the permission bits for one segment in the SAM register.

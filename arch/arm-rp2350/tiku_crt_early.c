@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crt_early.c - RP2350 (Cortex-M33) startup
+ * tiku_crt_early.c - RP2350 (Cortex-M33) startup.
  *
- * Provides the bare minimum to get from the boot ROM to main():
- *   1. .boot2 stub (256 bytes that the boot ROM loads into SRAM at
- *      0x20000000 and jumps to). Its job is to bring up the QSPI
- *      interface so the rest of the image can be executed XIP from
- *      flash. We use a minimal "trust the ROM defaults" sequence
- *      that works for the standard Pico 2 W flash chip (W25Q32JV-IQ
- *      class) and just hands control back via the lr the ROM stashed.
- *   2. .image_def block: the RP2350 boot ROM scans the first 4 KB of
- *      flash for an IMAGE_DEF describing the image type/entry. We emit
- *      a minimal "executable, ARM, secure" descriptor.
- *   3. Vector table: 256 entries (16 system + 240 NVIC). All entries
- *      default to a do-nothing handler; drivers that care provide their
- *      own implementation via the matching weak symbol.
- *   4. Reset handler: copy .data, zero .bss, init SystemInit, call main.
+ * The minimum path from boot ROM to main(): the .boot2 stub that brings up QSPI
+ * for XIP, the IMAGE_DEF block the ROM scans for, a 256-entry vector table of weak
+ * handlers, and a reset handler that copies .data, zeroes .bss and calls main.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
