@@ -76,9 +76,35 @@ Covers `.c` `.h` `.inl` `.ld` `.S` `.m` `.py` `.sh`. Vendor trees
 
 ## Commit messages
 
-`area: what changed`, then at most 5 lines saying what it does and how it was
-checked. Areas are the subsystem: `basic` `memory` `shell` `vfs` `process`
-`hal` `docs`, or the port: `nordic` `ambiq` `rp2350` `msp430`.
+### Subject
+
+`area: the new state`. Max 72 chars. Areas are the subsystem — `basic`
+`memory` `shell` `vfs` `process` `hal` `docs` — or the port — `nordic`
+`ambiq` `rp2350` `msp430`.
+
+Name what is now true, with the identifier or the number that makes it
+checkable. A good subject still means something in a year, read alone.
+
+| no | yes |
+|---|---|
+| `comments: finish arch/ambiq` | `ambiq: doc comments to 3 lines, 262 blocks` |
+| `basic: improve module handling` | `basic: the module image is a store file, not a carve` |
+| `memory: update the code window` | `memory: one 384 KB code window for the whole fleet` |
+| `msp430: fix the ADC` | `msp430: fix ADC12_B channel->pin map, not common across the family` |
+
+Four things that make a subject rot:
+
+- **the activity, not the change** — `finish`, `trim`, `cleanup`, `update`,
+  `improve`. They describe the session, not the diff.
+- **milestone markers** — `M3.5`, `phase 1 complete`, `(S0-S6)`, `(A2b)`.
+  Nobody holds that map later.
+- **first person and flourish** — `three registers we never wrote`,
+  `the plateau confesses`, `I had the wrong schematic`.
+- **vague scope** — `the four big dirs`, `the standard`. Name them.
+
+### Body
+
+At most 5 lines: what it does and how it was checked.
 
 ```
 memory: report app-usable SRAM, not the bank size
