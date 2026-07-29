@@ -151,7 +151,11 @@
 /*---------------------------------------------------------------------------*/
 
 /** @brief MSPI1 XIP aperture base (module stride 0x04000000 from MSPI0). */
-#define TIKU_NOR_XIP_BASE     0x64000000UL
+/* MSPI1's aperture, 0x80000000..0x84000000 -- NOT 0x64000000, which lies
+ * inside MSPI0's window (0x60000000..0x70000000) where the PSRAM lives. A read
+ * there goes to the wrong controller and stalls the bus with no software
+ * recovery. Vendor: MSPI1_APERTURE_START_ADDR in am_reg_base_addresses.h. */
+#define TIKU_NOR_XIP_BASE     0x80000000UL
 /** @brief Device size: 64 Mbit. */
 #define TIKU_NOR_SIZE_BYTES   0x00800000UL
 /** @brief Program unit. */

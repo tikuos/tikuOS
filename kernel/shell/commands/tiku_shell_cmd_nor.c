@@ -72,7 +72,7 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
             SHELL_PRINTF("  aperture would not open\n");
             return;
         }
-        SHELL_PRINTF("  read %08lx at %08lx (expect a5a4a7a6 after"
+        SHELL_PRINTF("  read %08lx at %08lx (stamp a5 a4 a7 a6 little-endian after"
                      " `power nor gate`)\n", (unsigned long)w,
                      (unsigned long)(TIKU_NOR_XIP_BASE + TIKU_NOR_SCRATCH_ADDR));
         return;
