@@ -32,6 +32,8 @@
 #define NOR_CMD_READ_ID        0x9Fu
 #define NOR_CMD_RESET_ENABLE   0x66u
 #define NOR_CMD_RESET_MEMORY   0x99u
+#define NOR_OCMD_RESET_ENABLE  0x6666u
+#define NOR_OCMD_RESET_MEMORY  0x9999u
 #define NOR_CMD_WREN           0x06u
 #define NOR_CMD_WRDI           0x04u
 #define NOR_CMD_READ_STATUS    0x05u
@@ -473,6 +475,55 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk)
     return TIKU_NOR_OK;
 }
 
+uint32_t tiku_nor_scan_turnaround(uint32_t addr, const uint8_t *want,
+                                  uint32_t n)
+{
+    uint32_t mask = 0u;
+    uint32_t saved;
+    unsigned t;
+
+    if (!s_up || !s_octal || n > 32u) { return 0u; }
+    saved = MSPI1->DEV0CFG_b.TURNAROUND0;
+    for (t = 0u; t < 32u; t++) {
+        uint8_t got[32];
+        uint32_t i;
+        int same = 1;
+
+        MSPI1->DEV0CFG_b.TURNAROUND0 = t;
+        if (tiku_nor_read(addr, got, n) != TIKU_NOR_OK) { continue; }
+        for (i = 0u; i < n; i++) {
+            if (got[i] != want[i]) { same = 0; }
+        }
+        if (same) { mask |= (1u << t); }
+    }
+    MSPI1->DEV0CFG_b.TURNAROUND0 = saved;
+    return mask;
+}
+
+int tiku_nor_octal_hears(void)
+{
+    uint32_t dummy = 0u;
+    tiku_nor_id_t id;
+
+    if (!s_up || !s_octal) { return -1; }
+
+    /* Send the OCTAL software reset.  A part that is genuinely listening in
+     * octal parses it and returns to serial; one that is wedged, or in some
+     * other mode, does not.  This is a WRITE, so it needs no read capture --
+     * which is exactly what makes it able to test the command path alone,
+     * with the data-return path taken out of the question. */
+    (void)nor_pio(NOR_OCMD_RESET_ENABLE, 0u, &dummy, 0u, 0, 0, 0);
+    (void)nor_pio(NOR_OCMD_RESET_MEMORY, 0u, &dummy, 0u, 0, 0, 0);
+    tiku_cpu_ambiq_delay_us(1000u);
+
+    /* Put the controller back to serial and ask.  An answer means the octal
+     * reset landed, so the device does hear octal commands. */
+    s_octal = 0u;
+    nor_controller_config(&s_clk[0], 0);
+    if (nor_ioclk_on(s_clk[0].ioclk_sel) != TIKU_NOR_OK) { return -1; }
+    return (tiku_nor_read_id(&id) == TIKU_NOR_OK) ? 1 : 0;
+}
+
 uint32_t tiku_nor_scan_rxdqs(int with_dqs)
 {
     uint32_t mask = 0u;
@@ -651,12 +702,36 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
     trace("id-octal");
     rc = tiku_nor_read_id(&id);
     if (rc != TIKU_NOR_OK) {
+        /* Roll back so a caller that cannot talk octal is left somewhere it
+         * can talk.  Diagnostics that want to examine the octal state itself
+         * must use tiku_nor_enter_octal_raw(), or they end up probing a
+         * SERIAL controller against a device that is already in octal and
+         * reading the zeros that mismatch produces. */
         s_octal = 0u;
         nor_controller_config(&s_clk[TIKU_NOR_CLK_24MHZ], 0);
         s_clk_idx = (uint8_t)TIKU_NOR_CLK_24MHZ;
         return rc;
     }
     return TIKU_NOR_OK;
+}
+
+tiku_nor_err_t tiku_nor_enter_octal_raw(unsigned clk)
+{
+    tiku_nor_err_t rc = tiku_nor_enter_octal(clk);
+
+    if (rc == TIKU_NOR_ERR_ID) {
+        /* The ladder ran and the device left serial; only its closing
+         * identity read failed.  Put the controller back into octal so the
+         * caller is examining the configuration it means to examine. */
+        s_octal = 1u;
+        nor_controller_config(&s_clk[clk], 1);
+        s_clk_idx = (uint8_t)clk;
+        if (nor_ioclk_on(s_clk[clk].ioclk_sel) != TIKU_NOR_OK) {
+            return TIKU_NOR_ERR_CLOCK;
+        }
+        return TIKU_NOR_OK;
+    }
+    return rc;
 }
 
 /*---------------------------------------------------------------------------*/

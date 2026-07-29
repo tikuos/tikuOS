@@ -219,6 +219,15 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk);
 tiku_nor_err_t tiku_nor_enter_octal(unsigned clk);
 
 /**
+ * @brief Enter octal and STAY there even if the identity read comes back empty.
+ *
+ * For diagnostics that need to examine the octal configuration. The normal
+ * entry rolls back to serial on that failure, which leaves a probe reading a
+ * serial controller against an octal device.
+ */
+tiku_nor_err_t tiku_nor_enter_octal_raw(unsigned clk);
+
+/**
  * @brief Configure the CONTROLLER for octal DDR without the device handshake.
  *
  * Diagnostic: for a part that is already in octal (non-volatile IO-mode
@@ -247,6 +256,27 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out);
  * @return Bit d set when delay d produced a valid identity.
  */
 uint32_t tiku_nor_scan_rxdqs(int with_dqs);
+
+/**
+ * @brief Test whether the device parses OCTAL commands at all.
+ *
+ * Sends the octal software reset and checks the part comes back on serial.
+ * Uses no read capture, so it isolates the command path from the data path.
+ *
+ * @return 1 heard, 0 did not, -1 when not in octal.
+ */
+int tiku_nor_octal_hears(void);
+
+/**
+ * @brief Sweep the octal array-read turnaround against known-good bytes.
+ *
+ * The device's array dummy count lives in VCR 0x01 and the controller must
+ * match it; a mismatch shifts the data rather than losing it.
+ *
+ * @return Bit t set when turnaround t reproduced @p want exactly.
+ */
+uint32_t tiku_nor_scan_turnaround(uint32_t addr, const uint8_t *want,
+                                  uint32_t n);
 
 /** @brief Read @p n bytes from @p addr (PIO; XIP must be off). */
 tiku_nor_err_t tiku_nor_read(uint32_t addr, void *buf, uint32_t n);

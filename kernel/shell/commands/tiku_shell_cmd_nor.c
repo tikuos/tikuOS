@@ -59,15 +59,97 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
     tiku_nor_id_t id;
     tiku_nor_err_t rc;
 
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "hears")) {
+        int heard;
+        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+        if (rc == TIKU_NOR_OK) {
+            rc = tiku_nor_enter_octal_raw(TIKU_NOR_CLK_24MHZ);
+        }
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("nor hears: octal entry %s\n", nor_errname(rc));
+            return;
+        }
+        heard = tiku_nor_octal_hears();
+        SHELL_PRINTF("nor hears: %s\n",
+            heard == 1 ? "YES -- octal reset landed, the device parses octal"
+                         " commands; only the READ path is broken"
+          : heard == 0 ? "NO -- the device ignores octal commands, so it is"
+                         " not in octal DDR despite leaving serial"
+                       : "not in octal");
+        return;
+    }
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "arraycmp")) {
+        /* N2's real gate: an ARRAY read in octal must agree with the same
+         * address read in serial.  Identity is a register read, and a part
+         * that strobes DQS for the array need not strobe it for registers --
+         * so an octal identity that reads zero does not by itself condemn the
+         * array path. */
+        static uint8_t ser[64], oct[64];
+        uint32_t addr = 0u, i7;
+        int same = 1, ser_blank = 1;
+
+        if (argc >= 4) { addr = tiku_cmd_parse_u32(argv[3]); }
+        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+        if (rc == TIKU_NOR_OK) { rc = tiku_nor_read(addr, ser, sizeof ser); }
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("nor arraycmp: serial read %s\n", nor_errname(rc));
+            return;
+        }
+        for (i7 = 0u; i7 < sizeof ser; i7++) {
+            if (ser[i7] != 0xFFu) { ser_blank = 0; }
+        }
+        SHELL_PRINTF("nor arraycmp @%08lx: serial %02x %02x %02x %02x"
+                     " %02x %02x %02x %02x%s\n", (unsigned long)addr,
+                     ser[0], ser[1], ser[2], ser[3],
+                     ser[4], ser[5], ser[6], ser[7],
+                     ser_blank ? "  (erased -- pick an address with content"
+                                 " or this proves little)" : "");
+
+        rc = tiku_nor_enter_octal_raw(TIKU_NOR_CLK_24MHZ);
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("  octal entry %s\n", nor_errname(rc));
+            return;
+        }
+        rc = tiku_nor_read(addr, oct, sizeof oct);
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("  octal read %s -- the ARRAY path fails too\n",
+                         nor_errname(rc));
+            return;
+        }
+        for (i7 = 0u; i7 < sizeof oct; i7++) {
+            if (oct[i7] != ser[i7]) { same = 0; }
+        }
+        SHELL_PRINTF("  octal  %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                     oct[0], oct[1], oct[2], oct[3],
+                     oct[4], oct[5], oct[6], oct[7]);
+        SHELL_PRINTF("  verdict: %s\n", same
+            ? "MATCH -- octal array reads work; identity is the wrong probe"
+            : "DIFFER -- sweeping the array turnaround against serial");
+        if (!same) {
+            uint32_t tmask = tiku_nor_scan_turnaround(addr, ser, sizeof ser);
+            unsigned t7;
+            SHELL_PRINTF("  turnaround sweep: %08lx",
+                         (unsigned long)tmask);
+            if (tmask == 0u) {
+                SHELL_PRINTF("  -- no dummy count reproduces serial\n");
+            } else {
+                SHELL_PRINTF("  -- matches at:");
+                for (t7 = 0u; t7 < 32u; t7++) {
+                    if (tmask & (1u << t7)) { SHELL_PRINTF(" %u", t7); }
+                }
+                SHELL_PRINTF("\n");
+            }
+        }
+        return;
+    }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "scan")) {
         uint32_t mask;
         unsigned d;
         rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
-        if (rc == TIKU_NOR_OK) { rc = tiku_nor_enter_octal(TIKU_NOR_CLK_24MHZ); }
-        /* ERR_ID here means the entry ladder ran but its closing identity
-         * read came back empty -- which is the thing this scan exists to
-         * hunt, so it is not a reason to stop.  Any other error is. */
-        if (rc != TIKU_NOR_OK && rc != TIKU_NOR_ERR_ID) {
+        if (rc == TIKU_NOR_OK) {
+            rc = tiku_nor_enter_octal_raw(TIKU_NOR_CLK_24MHZ);
+        }
+        if (rc != TIKU_NOR_OK) {
             SHELL_PRINTF("nor scan: octal entry %s\n", nor_errname(rc));
             return;
         }
