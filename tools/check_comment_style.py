@@ -16,12 +16,16 @@
 
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Vendor headers and separate repos are not this repo's to reformat.
-SKIP_DIRS = {"build", "temp", "drivers", "TikuBench", "tikukits", ".git", "hardware"}
+# Scope is the tracked source tree, decided by git (see tracked()). Anything
+# gitignored -- notes, scratch, experiments, separate repos -- is out of scope
+# by construction. SKIP_DIRS covers what git DOES track but this repo should
+# not reformat: vendor headers and submodule content.
+SKIP_DIRS = {"build", ".git", "drivers", "TikuBench", "tikukits"}
 SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk", "tools/fat32",
               # This file quotes the banned patterns in order to define them.
               "tools/check_comment_style.py")
@@ -62,7 +66,21 @@ BANNED = [
 ]
 
 
+def tracked():
+    """Paths git tracks, or None when that cannot be determined."""
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "ls-files"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    names = {line for line in out.stdout.splitlines() if line}
+    return names or None
+
+
 def sources():
+    keep = tracked()
     for dirpath, dirnames, filenames in os.walk(ROOT):
         rel = os.path.relpath(dirpath, ROOT)
         top = rel.split(os.sep)[0]
@@ -75,8 +93,11 @@ def sources():
             if not name.endswith(C_EXT + BLOCK_EXT + HASH_EXT):
                 continue
             path = os.path.relpath(os.path.join(dirpath, name), ROOT)
-            if not path.startswith(SKIP_PATHS):
-                yield path
+            if path.startswith(SKIP_PATHS):
+                continue
+            if keep is not None and path not in keep:
+                continue
+            yield path
 
 
 def hash_header(text):

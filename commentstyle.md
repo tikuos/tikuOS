@@ -54,6 +54,18 @@ continuations do not count.
 Git holds the history. A comment that narrates how the code got here is a
 comment that will be wrong after the next change.
 
+A hazard that is still live is not history. State it in the present tense and
+keep it: `FUNCSEL is not uniform on this bus -- GP84-88 use 2, GP156-160 use 0`
+is a fact about the hardware. `assuming it was uniform cost a debugging round`
+is the story of finding it out. Keep the first, drop the second.
+
+## Where design history and milestones go
+
+Not in the source tree. Plans, milestone numbering, measurements and working
+notes live in `kintsugi/` and `experiments/`, both gitignored; conclusions that
+outlive a session go in the commit message. The source tree carries what the
+code is, not the route taken to it.
+
 ## Where longer content goes
 
 - **Reference material** — register maps, memory maps, command tables,
@@ -70,9 +82,18 @@ make lint                      # whole tree
 tools/check_comment_style.py kernel/vfs     # one subtree
 ```
 
-Covers `.c` `.h` `.inl` `.ld` `.S` `.m` `.py` `.sh`. Vendor trees
-(`arch/*/cmsis`, `arch/*/mdk`, `tools/fat32`) and the separate repos
-(`drivers/`, `TikuBench/`, `tikukits/`) are out of scope.
+Covers `.c` `.h` `.inl` `.ld` `.S` `.m` `.py` `.sh`.
+
+Scope is what git tracks, so anything gitignored -- `kintsugi/`,
+`experiments/`, `temp/`, `examples/`, `demos/` -- is out of scope by
+construction, and a new scratch directory needs no change here. Vendor trees
+(`arch/*/cmsis`, `arch/*/mdk`, `tools/fat32`) and submodule content
+(`drivers/`, `TikuBench/`, `tikukits/`) are tracked but still skipped.
+
+`check_durable_placement.sh` deliberately does NOT match that scope: it covers
+`drivers/` too, because misplaced durable data is a correctness fault in the
+linked image wherever it is written, not a style preference. `make lint` runs
+both and reports both -- a failing check must not hide the other's findings.
 
 ## Commit messages
 

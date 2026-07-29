@@ -2842,9 +2842,12 @@ TARGET = main.elf
 
 # Static placement lint: raw section(".persistent") outside the grade macros
 # is the audit's silent-volatile bug class (kintsugi/memoryfix.md Phase A).
+# Both checks always run: a failing one must not hide the other's findings.
 lint:
-	@./tools/check_durable_placement.sh
-	@./tools/check_comment_style.py
+	@rc=0; \
+	 ./tools/check_durable_placement.sh || rc=1; \
+	 ./tools/check_comment_style.py || rc=1; \
+	 exit $$rc
 
 # UF2 is the RP2350 deliverable; ELF is enough on MSP430.
 ifeq ($(TIKU_PLATFORM),rp2350)
