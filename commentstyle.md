@@ -1,6 +1,7 @@
-# Comment style
+# Comment and commit style
 
-Enforced by `tools/check_comment_style.py`, run from `make lint`.
+Comment rules are enforced by `tools/check_comment_style.py`, from `make lint`.
+Commit rules are convention, not enforced.
 
 ## File header
 
@@ -72,3 +73,26 @@ tools/check_comment_style.py kernel/vfs     # one subtree
 Covers `.c` `.h` `.inl` `.ld` `.S` `.m` `.py` `.sh`. Vendor trees
 (`arch/*/cmsis`, `arch/*/mdk`, `tools/fat32`) and the separate repos
 (`drivers/`, `TikuBench/`, `tikukits/`) are out of scope.
+
+## Commit messages
+
+`area: what changed`, then at most 5 lines saying what it does and how it was
+checked. Areas are the subsystem: `basic` `memory` `shell` `vfs` `process`
+`hal` `docs`, or the port: `nordic` `ambiq` `rp2350` `msp430`.
+
+```
+memory: report app-usable SRAM, not the bank size
+
+`free` printed the 256 KB bank, but the top 16 KB is the FLPR carve, so every
+Nordic board over-reported by 16 KB. Devices now declare
+TIKU_DEVICE_RAM_USABLE when it differs, falling back to RAM_SIZE.
+Verified on the LM20: `free` reads 245760. Seven targets build.
+```
+
+Do not write:
+
+- the debugging path, or what was tried and abandoned — git holds it
+- a file-by-file list, or anything else the diff already says
+- a section per concern, when one paragraph carries the change
+
+No tool or assistant co-author trailers.
