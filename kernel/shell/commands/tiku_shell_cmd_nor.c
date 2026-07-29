@@ -59,6 +59,40 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
     tiku_nor_id_t id;
     tiku_nor_err_t rc;
 
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "scan")) {
+        uint32_t mask;
+        unsigned d;
+        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+        if (rc == TIKU_NOR_OK) { rc = tiku_nor_enter_octal(TIKU_NOR_CLK_24MHZ); }
+        /* ERR_ID here means the entry ladder ran but its closing identity
+         * read came back empty -- which is the thing this scan exists to
+         * hunt, so it is not a reason to stop.  Any other error is. */
+        if (rc != TIKU_NOR_OK && rc != TIKU_NOR_ERR_ID) {
+            SHELL_PRINTF("nor scan: octal entry %s\n", nor_errname(rc));
+            return;
+        }
+        mask = tiku_nor_scan_rxdqs(1);
+        SHELL_PRINTF("nor rxdqs scan @%lu Hz: dqs-on %08lx",
+                     tiku_nor_clock_hz(), (unsigned long)mask);
+        {   /* A part that does not strobe DQS for register reads cannot be
+             * captured at ANY delay; latching on the controller clock is the
+             * distinguishing test. */
+            uint32_t nodqs = tiku_nor_scan_rxdqs(0);
+            SHELL_PRINTF("  dqs-off %08lx\n", (unsigned long)nodqs);
+            mask |= nodqs;
+        }
+        if (mask == 0u) {
+            SHELL_PRINTF("  nothing captures an ID either way -- the fault is"
+                         " not DQS capture timing\n");
+            return;
+        }
+        SHELL_PRINTF("  good delays:");
+        for (d = 0u; d < 32u; d++) {
+            if (mask & (1u << d)) { SHELL_PRINTF(" %u", d); }
+        }
+        SHELL_PRINTF("\n");
+        return;
+    }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "forceoctal")) {
         /* Is the part already octal?  Configure the controller that way
          * and ask for identity; a serial-mode part will stay silent and

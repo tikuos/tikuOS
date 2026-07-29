@@ -473,6 +473,26 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk)
     return TIKU_NOR_OK;
 }
 
+uint32_t tiku_nor_scan_rxdqs(int with_dqs)
+{
+    uint32_t mask = 0u;
+    uint32_t saved_d, saved_en;
+    unsigned d;
+
+    if (!s_up || !s_octal) { return 0u; }
+    saved_d  = MSPI1->DEV0DDR_b.RXDQSDELAY0;
+    saved_en = MSPI1->DEV0DDR_b.ENABLEDQS0;
+    MSPI1->DEV0DDR_b.ENABLEDQS0 = with_dqs ? 1u : 0u;
+    for (d = 0u; d < 32u; d++) {
+        tiku_nor_id_t id;
+        MSPI1->DEV0DDR_b.RXDQSDELAY0 = d;
+        if (tiku_nor_read_id(&id) == TIKU_NOR_OK) { mask |= (1u << d); }
+    }
+    MSPI1->DEV0DDR_b.RXDQSDELAY0 = saved_d;
+    MSPI1->DEV0DDR_b.ENABLEDQS0  = saved_en;
+    return mask;
+}
+
 tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
 {
     tiku_nor_id_t id;
@@ -591,6 +611,25 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
     rc = nor_pio(NOR_CMD_WRITE_VCR, 0u, &v, 1u, 0, 1, 0);
     if (rc != TIKU_NOR_OK) { return rc; }
     tiku_cpu_ambiq_delay_us(100u);
+
+    /*
+     * Did the device actually leave serial?  Ask in SERIAL, before the
+     * controller changes: a part that switched can no longer parse a 1-line
+     * command and must go quiet.  One that still answers 0x9D never moved,
+     * which separates "the VCR write did not take" from "the octal side is
+     * misconfigured" -- two faults that otherwise present identically as an
+     * all-zero identity.
+     */
+    {
+        uint32_t probe = 0u;
+        if (nor_pio(NOR_CMD_READ_ID, 0u, &probe, 4u, 1, 0, 0)
+                == TIKU_NOR_OK &&
+            (uint8_t)probe == TIKU_NOR_MFR_ISSI) {
+            trace("STILL-SERIAL: VCR write did not take");
+        } else {
+            trace("left-serial (device stopped answering 1-line)");
+        }
+    }
 
     /* The device is now octal; the controller must follow before any
      * further command is legible to it. */

@@ -238,6 +238,16 @@ int tiku_nor_powered(void);
 /** @brief Identity + config snapshot (works in either mode). */
 tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out);
 
+/**
+ * @brief Sweep RXDQSDELAY 0..31 and report which settings read a valid ID.
+ *
+ * The DQS capture point is board and speed dependent, which is why the vendor
+ * scans for it rather than assuming one. Octal only; 0 when nothing captures.
+ *
+ * @return Bit d set when delay d produced a valid identity.
+ */
+uint32_t tiku_nor_scan_rxdqs(int with_dqs);
+
 /** @brief Read @p n bytes from @p addr (PIO; XIP must be off). */
 tiku_nor_err_t tiku_nor_read(uint32_t addr, void *buf, uint32_t n);
 
