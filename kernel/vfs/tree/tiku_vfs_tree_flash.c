@@ -7,10 +7,9 @@
  *
  * tiku_vfs_tree_flash.c - /sys/flash VFS nodes (Apollo510 EVB external NOR).
  *
- * State, identity, clock, size, bus mode and erase count, all read-only. Every
- * value comes from driver bookkeeping and nothing here issues a command, so a
- * read while the part is down or the load switch is off cannot fault or wake
- * it.
+ * State, identity, clock, size, bus mode and erase count, all read-only.
+ * Values come from driver bookkeeping; no handler issues a bus command, so a
+ * read while the part is down or unpowered cannot fault or wake it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,10 +30,8 @@ flash_state_read(char *buf, size_t max)
  * @brief Cached JEDEC identity while the part is up, else "unread".
  *
  * Deliberately the CACHED value: issuing READ_ID here would make `cat` a bus
- * transaction, which is not what a status file should be. It reads "unread"
- * whenever the part is down -- including after a successful read followed by
- * `power nor off` -- because an identity nobody can currently confirm is a
- * claim about the past, not the state of the device.
+ * transaction. Down reads "unread" even after a prior success -- an identity
+ * nobody can currently confirm is a claim about the past, not device state.
  */
 static int
 flash_id_read(char *buf, size_t max)
