@@ -40,18 +40,13 @@ extern const tiku_vfs_node_t tiku_vfs_tree_boot_children[];
 /**
  * @brief Capture the reset cause and bump the FRAM boot counter.
  *
- * Must be the FIRST module init that tiku_vfs_tree_init() calls:
- * reading SYSRSTIV pops the highest-priority pending cause, so any
- * earlier read elsewhere would consume the value this module
- * snapshots for /sys/boot/reason, /sys/boot/rstiv and
- * /sys/last_reset.
+ * Validates this module's persist cells (boot counter, lifetime accumulator),
+ * increments the counter and snapshots the accumulator.  Other modules'
+ * persistent state is gated by its own cells and does not depend on this call.
  *
- * Validates this module's persist cells (boot counter, lifetime
- * accumulator) via tiku_persist_cell_init() — virgin or corrupted
- * FRAM is primed to defaults — then increments the boot counter and
- * snapshots the lifetime accumulator.  Other modules' persistent
- * state (device name, RTC epoch) is gated by its own cells and no
- * longer depends on this call.
+ * @note Must be the FIRST module init tiku_vfs_tree_init() calls: reading
+ *       SYSRSTIV pops the highest pending cause, so an earlier read would
+ *       consume the value snapshotted for /sys/boot/reason and /sys/boot/rstiv.
  */
 void tiku_vfs_tree_boot_init(void);
 

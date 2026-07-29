@@ -43,17 +43,12 @@ typedef struct {
     struct tiku_process   *proc;   /**< event receiver             */
 } tiku_vfs_watch_slot_t;
 
-/**
- * The watch table.  Fixed capacity (TIKU_VFS_WATCH_MAX, default 8);
- * linear scans throughout — at this size a scan is a handful of
- * compares, cheaper than any indexing structure's bookkeeping.
- *
- * Concurrency model: mutation (watch/unwatch) runs in process
- * context inside tiku_atomic_enter()/exit(), so an ISR calling
- * tiku_vfs_notify() can never observe a half-written slot.  Scans
- * (notify) take no lock: processes are cooperative (no preemption
- * between them) and ISR scans see either a fully-valid or a free
- * slot thanks to the masked mutation.
+/*
+ * The watch table.  Fixed capacity (TIKU_VFS_WATCH_MAX, default 8), linear
+ * scans.  Mutation runs in process context inside tiku_atomic_enter()/exit()
+ * so an ISR scan in tiku_vfs_notify() sees a fully-valid or a free slot,
+ * never a torn one; the scans themselves take no lock because processes are
+ * cooperative and do not preempt each other.
  */
 static tiku_vfs_watch_slot_t watch_table[TIKU_VFS_WATCH_MAX];
 
@@ -101,11 +96,9 @@ void tiku_vfs_init(const tiku_vfs_node_t *root)
 /**
  * @brief Walk the VFS tree to resolve a slash-separated path.
  *
- * Splits the path into components, descends through directory
- * nodes by matching each component against child names (linear
- * scan per level).  Returns NULL on any mismatch, non-directory
- * intermediate, or NULL root.  Handles leading/trailing/duplicate
- * slashes gracefully.
+ * Descends through directory nodes, matching each component by linear scan.
+ * Leading, trailing and duplicate slashes are tolerated; a mismatch, a
+ * non-directory intermediate or a NULL root yields NULL.
  */
 const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 {
@@ -261,10 +254,9 @@ typedef struct { tiku_vfs_list_fn cb; void *ctx; } vfs_dyn_list_adapter_t;
 /**
  * @brief Adapt a dynamic-directory entry to the tiku_vfs_list_fn callback.
  *
- * Synthesises a transient node (valid only for the duration of the
- * callback) for each entry: a name ending in '/' becomes a DIR (the
- * trailing slash stripped, `ls` re-appends it), everything else a FILE
- * flagged read+write so `ls` renders "rw".
+ * Synthesises a node valid only for the duration of the callback: a name
+ * ending in '/' becomes a DIR with the slash stripped (`ls` re-appends it),
+ * anything else a FILE flagged read+write so `ls` renders "rw".
  *
  * @param name  Entry name from the parent's dyn list op
  * @param vad   The vfs_dyn_list_adapter_t carrying the real callback + ctx
@@ -307,16 +299,9 @@ int tiku_vfs_unlink(const char *path)
 /**
  * @brief Invoke a resolved node's read handler directly.
  *
- * The by-node read path.  Callers that already hold a node pointer
- * skip the tree walk entirely: a watch event delivers the changed
- * node as its payload, and the rules engine and the `watch` command
- * cache the node at arm time.  On the reactive hot path — a read per
- * delivered event — this removes a full path resolution each time.
- *
- * Validation is identical to tiku_vfs_read() (the node must be a
- * readable FILE), so both entry points share one error contract; a
- * NULL @p node (e.g. from a failed resolve) yields -1, which lets
- * tiku_vfs_read() forward an unresolved path through unchanged.
+ * Callers already holding a node pointer skip the tree walk: a watch event
+ * delivers the changed node, and the rules engine and `watch` cache it at
+ * arm time.  Validation matches tiku_vfs_read(), so both share one contract.
  *
  * @param node  Node to read (NULL tolerated → -1)
  * @param buf   Output buffer
@@ -633,13 +618,11 @@ const char *tiku_vfs_strerror(int status)
 /**
  * @brief Resolve a path and invoke the file's write handler.
  *
- * Returns -1 if the path does not resolve to a writable file.
+ * A successful write rings the node's watchers via tiku_vfs_notify(), which
+ * makes every shell, BASIC and network write observable without the writer
+ * knowing watchers exist.  A failed write does not notify.
  *
- * On success (handler returned 0) the node's watchers are rung via
- * tiku_vfs_notify() — this is the automatic trigger path that makes
- * every shell, BASIC, and network write observable without the
- * writer knowing watchers exist.  Failed writes (handler returned
- * -1) do not notify: the node did not change.
+ * @return 0 on success, -1 if the path is not a writable file
  */
 /*---------------------------------------------------------------------------*/
 /* CALLER CAPABILITY                                                          */
@@ -730,11 +713,9 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
     size_t sl;
     uint8_t i;
 
-    /* A NULL callback used to reach the invocation below and jump to address
-     * zero.  Every other pointer argument in this file is tolerated -- notify()
-     * accepts a NULL node, desc_of() a NULL node -- so a caller reasonably
-     * expects the same here, and "does this path exist and is it a directory"
-     * is a legitimate use with nothing to enumerate into. */
+    /* A NULL callback is tolerated, like every other pointer argument here:
+     * "does this path exist and is it a directory" is a legitimate query with
+     * nothing to enumerate into. */
     if (callback == NULL) {
         node = tiku_vfs_resolve(path);
         if (node != NULL) {
@@ -839,16 +820,9 @@ int tiku_vfs_is_dir(const char *path)
 /**
  * @brief Subscribe a process to changes of a FILE node.
  *
- * Resolves the path once, at subscription time: the tree is static,
- * so the resulting node pointer is a stable subscription key and no
- * per-event path walk is ever needed.  The duplicate check makes
- * subscription idempotent — consumers that re-arm wholesale (drop
- * everything, re-subscribe every interest) need no bookkeeping
- * about what was already watched.
- *
- * Table mutation runs inside tiku_atomic_enter()/exit() so a
- * concurrent ISR notify scan can never see a torn slot (node and
- * proc are written as a masked pair).
+ * Resolves the path once: the tree is static, so the node pointer is a stable
+ * subscription key.  A duplicate subscription is idempotent; table mutation
+ * runs inside tiku_atomic_enter()/exit() so an ISR scan sees no torn slot.
  *
  * @param path  Absolute path to a FILE node
  * @param p     Receiving process
@@ -926,9 +900,8 @@ int8_t tiku_vfs_unwatch(const char *path, struct tiku_process *p)
 /**
  * @brief Remove every subscription held by @p p.
  *
- * The re-arm primitive: consumers drop all their watches and
- * re-subscribe from current state, which is simpler and safer than
- * tracking which subscription belonged to which (possibly deleted)
+ * The re-arm primitive: a consumer drops all its watches and re-subscribes
+ * from current state instead of tracking which slot belonged to which
  * interest.
  *
  * @param p  The subscribed process
@@ -954,17 +927,9 @@ void tiku_vfs_unwatch_all(struct tiku_process *p)
 /**
  * @brief Ring the watchers of @p node.
  *
- * Posts TIKU_EVENT_VFS (data = the node pointer) to every process
- * subscribed to @p node.  ISR-safe: the scan is lock-free (see the
- * watch_table concurrency note) and tiku_process_post() is itself
- * ISR-safe.  Events are not coalesced — each trigger posts one
- * event per watcher, and the receiver reads the node for the
- * current value, so several queued events for one node degrade to
- * harmless re-reads.
- *
- * Called automatically by tiku_vfs_write() on success; drivers
- * whose node values change without a write (GPIO edges, sensor
- * thresholds) call it explicitly.
+ * Posts TIKU_EVENT_VFS (data = the node pointer) to every subscriber; ISR-safe,
+ * uncoalesced, so duplicate events degrade to harmless re-reads.  Called by
+ * tiku_vfs_write() on success and by drivers whose values change without one.
  *
  * @param node  The node that changed
  */
@@ -1023,10 +988,9 @@ uint8_t tiku_vfs_watch_used(void)
 /**
  * @brief Fetch the contents of one watch slot.
  *
- * Lets an observability node show who watches what without exposing
- * the table type.  The returned node pointer is stable (static
- * tree); the process pointer is valid for the caller's yield-free
- * run.
+ * Lets an observability node show who watches what without exposing the table
+ * type.  The node pointer is stable; the process pointer is valid for the
+ * caller's yield-free run.
  *
  * @param i     Slot index in [0, TIKU_VFS_WATCH_MAX)
  * @param node  Out: the watched node (may be NULL to ignore)
@@ -1101,10 +1065,9 @@ static int path_find(const tiku_vfs_node_t *dir,
 /**
  * @brief Reverse-resolve a node pointer to its absolute path.
  *
- * The inverse of tiku_vfs_resolve(): the tree has no parent links,
- * so this DFS-searches from the root for the node's address and
- * reconstructs the path on the way down.  O(tree size), intended
- * for cold observability reads (e.g. /sys/watch), not a hot path.
+ * The tree has no parent links, so this DFS-searches from the root for the
+ * node's address and builds the path on the way down.  O(tree size): for cold
+ * observability reads such as /sys/watch, not a hot path.
  *
  * @param node  Node to name (must be in the tree)
  * @param buf   Output buffer (>= TIKU_VFS_PATH_MAX recommended)

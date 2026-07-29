@@ -294,11 +294,9 @@ typedef struct tiku_vfs_node {
     const struct tiku_vfs_dynops *dyn;         /**< Dynamic children; NULL =
                                                     static dir (back-compat) */
     tiku_vfs_cap_t               req_cap;       /**< Capability a writer must
-                                                    hold; 0 (NONE) = open.
-                                                    Trailing + zero-init, so
-                                                    untagged nodes are open and
-                                                    every existing table is
-                                                    unchanged. */
+                                                    hold; 0 (NONE) = open, and
+                                                    zero-init leaves untagged
+                                                    nodes open. */
 } tiku_vfs_node_t;
 
 /*---------------------------------------------------------------------------*/
@@ -324,15 +322,9 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 /**
  * @brief Extract the next segment of a slash-separated path.
  *
- * The ONE definition of TikuOS path lexing: every walker that steps
- * through a path segment-by-segment (the resolver, the shell's cwd
- * normaliser) goes through this helper so they cannot drift apart on
- * the edge cases -- runs of slashes collapse ('//x' == '/x'), a
- * trailing slash yields no empty segment, and an all-slash remainder
- * is simply the end of the path.
- *
- * Purely lexical (never touches the tree) and header-only, so callers
- * take no link-time dependency on the VFS proper.
+ * The one definition of TikuOS path lexing, shared by every segment walker so
+ * they cannot drift: runs of slashes collapse, a trailing slash yields no
+ * empty segment, and an all-slash remainder is the end of the path.
  *
  * @param p    Cursor into the path; advanced past the extracted
  *             segment (left on the terminating '/' or NUL).
@@ -371,10 +363,9 @@ int tiku_vfs_read(const char *path, char *buf, size_t max);
 /**
  * @brief Read directly from a resolved node, skipping the path walk.
  *
- * For callers that already hold a node pointer (a watch event
- * delivers one as its payload; the rules engine and `watch` cache
- * one at arm time).  Same readable-FILE validation and error
- * contract as tiku_vfs_read(); a NULL @p node returns -1.
+ * For callers that already hold a node pointer (a watch event delivers one;
+ * the rules engine and `watch` cache one at arm time).  Same readable-FILE
+ * validation and error contract as tiku_vfs_read().
  *
  * @param node  Node to read (NULL tolerated → -1)
  * @param buf   Output buffer
@@ -396,10 +387,9 @@ const tiku_vfs_desc_t *tiku_vfs_desc_of(const tiku_vfs_node_t *node);
 /**
  * @brief Read a node as a decoded, typed value.
  *
- * Requires a descriptor: a native producer (desc.read_val) is used
- * when present, otherwise the text handler is rendered once and
- * decoded per the declared type.  Untyped nodes — and STR types —
- * return -1; use the text path (tiku_vfs_read) for those.
+ * Requires a descriptor: a native producer (desc.read_val) is used when
+ * present, otherwise the text handler is rendered once and decoded per the
+ * declared type.  Untyped and STR nodes return -1; read those as text.
  *
  * @param path  Absolute path to a typed FILE node
  * @param out   Decoded value (always zeroed first; vtype=NONE on failure)
@@ -437,12 +427,9 @@ int tiku_vfs_write(const char *path, const char *data, size_t len);
 /**
  * @brief Set the ambient caller capability; returns the previous value.
  *
- * A single control plane (the shell process) drives every VFS write, so the
- * caller cap is one ambient word rather than a per-call argument.  The active
- * shell backend sets it (a console backend = ALL; a net/agent backend = a
- * restricted mask), and an untrusted sub-context (e.g. running a fetched
- * BASIC program) may lower it further and restore it after.  Defaults to
- * TIKU_VFS_CAP_ALL so any path that never sets it keeps full authority.
+ * One control plane (the shell) drives every VFS write, so the cap is an
+ * ambient word rather than a per-call argument.  It defaults to
+ * TIKU_VFS_CAP_ALL; net/agent backends and untrusted sub-contexts narrow it.
  *
  * @param cap  New ambient capability
  * @return     Previous value (save it to restore on the way out)
@@ -455,10 +442,9 @@ tiku_vfs_cap_t tiku_vfs_caller_cap_get(void);
 /**
  * @brief Delete a file at @p path.
  *
- * Only dynamic directories (a file store mounted via dynops) support
- * removal; a static node — or a directory without an unlink op —
- * returns -1.  On success the parent directory's watchers are rung,
- * exactly like a write.
+ * Only dynamic directories (a file store mounted via dynops) support removal;
+ * a static node, or a directory without an unlink op, returns -1.  On success
+ * the parent directory's watchers are rung, exactly like a write.
  *
  * @param path  Absolute path to a dynamic FILE node
  * @return 0 on success, -1 on error (not found / not removable)
@@ -530,11 +516,9 @@ struct tiku_process;
 /**
  * @brief Subscribe a process to changes of a FILE node.
  *
- * Resolves @p path now and stores the (node, process) pair in a
- * free watch slot.  Subscribing the same pair twice is idempotent
- * and returns the existing slot.  From then on, every successful
- * write to the node — and every explicit tiku_vfs_notify() on it —
- * posts TIKU_EVENT_VFS to @p p with the node pointer as event data.
+ * Resolves @p path now and stores the (node, process) pair in a free slot;
+ * subscribing the same pair twice returns the existing slot.  Thereafter each
+ * write and each tiku_vfs_notify() posts TIKU_EVENT_VFS to @p p, node as data.
  *
  * @param path  Absolute path to a FILE node
  * @param p     Receiving process
@@ -640,15 +624,14 @@ uint8_t tiku_vfs_depth(void);
 /**
  * @brief Render the whole static namespace as a machine-readable manifest.
  *
- * One tab-separated line per node so an agent learns the device in a single
- * read: `path  type  perms  vtype  unit  fresh  cost  range` (preceded by a
- * `#`-prefixed header row).  Dynamic-directory children (e.g. /data files) are
- * not walked -- capability metadata only.  snprintf-style: returns the FULL
- * length, so a return >= @p max means the manifest was truncated.
+ * One tab-separated line per node, after a `#`-prefixed header row:
+ * `path  type  perms  vtype  unit  fresh  cost  range`.  Dynamic-directory
+ * children are not walked -- capability metadata only.
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
- * @return Total manifest length in bytes (may exceed @p max on truncation)
+ * @return Total manifest length in bytes; a value >= @p max means the
+ *         manifest was truncated (snprintf-style)
  */
 int tiku_vfs_manifest(char *buf, size_t max);
 

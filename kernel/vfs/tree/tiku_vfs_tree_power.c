@@ -34,11 +34,9 @@
 /**
  * @brief Read handler for /sys/power/mode.
  *
- * Renders the configured idle sleep mode as a word — "LPM0\n",
- * "LPM3\n", "LPM4\n" or "off\n" on MSP430, "WFI\n" on RP2350 (the
- * names come from tiku_cpu_idle_mode_name() via the shell's `sleep`
- * command, so the two always agree).  Shell-less builds have no
- * sleep configuration to report and the node reads "off\n".
+ * Renders the configured idle sleep mode as a word -- "LPM0\n", "LPM3\n",
+ * "LPM4\n" or "off\n" on MSP430, "WFI\n" on RP2350.  The names come from
+ * tiku_cpu_idle_mode_name(), so this and the shell's `sleep` always agree.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -61,16 +59,9 @@ power_mode_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/power/wake.
  *
- * Queries the wake HAL and renders all four wake sources on one
- * line, each as name:on or name:off:
- *
- *   "timer0:on uart:on wdt:off gpio:off\n"
- *
- * timer0 is the system tick (TIKU_WAKE_SYSTICK), uart is RX
- * activity, wdt is the watchdog interval interrupt, gpio is any
- * armed pin interrupt.  A source shown "off" cannot bring the MCU
- * out of the current sleep mode — the first thing to check when a
- * board stops responding after a `sleep` change.
+ * Renders all four wake sources on one line as name:on or name:off, e.g.
+ * "timer0:on uart:on wdt:off gpio:off\n" (system tick, UART RX, watchdog
+ * interval, armed pin interrupt).  A source shown off cannot wake the MCU.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -100,13 +91,11 @@ power_wake_read(char *buf, size_t max)
 /* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * /sys/power directory table.
- *
- * Exported so tiku_vfs_tree_sys.c can attach it as the "power"
- * directory; the entry count travels as TIKU_VFS_TREE_POWER_NCHILD
- * (asserted below).  Both nodes are read-only by design — see the
- * file header for why mode is not writable.
+/*
+ * /sys/power directory table, exported so tiku_vfs_tree_sys.c can attach it as
+ * the "power" directory; the entry count travels as TIKU_VFS_TREE_POWER_NCHILD
+ * (asserted below).  Both nodes are read-only -- see the file header for why
+ * mode is not writable.
  */
 const tiku_vfs_node_t tiku_vfs_tree_power_children[] = {
     { "mode", TIKU_VFS_FILE, power_mode_read, NULL, NULL, 0 },

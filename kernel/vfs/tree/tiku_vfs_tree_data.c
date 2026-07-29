@@ -24,18 +24,13 @@
 /*
  * THE STORE IS NOT A SHELL FEATURE.
  *
- * This whole file used to sit inside `#if defined(TIKU_SHELL_ENABLE)`, because
- * /data began life as the place BASIC kept its saved program.  That was fine
- * while every tenant was a shell feature, and wrong as soon as one was not:
- * loadable modules and radio firmware are kernel-level tenants that must mount
- * and read the store in a build with no shell at all.
- *
- * So the file is now in two halves.  Everything down to the DYNAMIC-DIRECTORY
- * OPS banner -- the backing memory, the backend, the mount, and the
- * tiku_vfs_tree_data_store() accessor -- is always compiled.  The VFS
- * presentation above it (the /data node, its dynamic ops, and the df snapshot)
- * stays behind the shell gate, because a namespace entry with no shell to type
- * at it is genuinely shell-shaped.
+ * The file has two halves.  Everything down to the DYNAMIC-DIRECTORY OPS
+ * banner -- the backing memory, the backend, the mount, and the
+ * tiku_vfs_tree_data_store() accessor -- is always compiled, because loadable
+ * modules and radio firmware are kernel-level tenants that must mount and read
+ * the store in a build with no shell at all.  The VFS presentation above it
+ * (the /data node, its dynamic ops, and the df snapshot) stays behind the shell
+ * gate: a namespace entry with no shell to type at it is genuinely shell-shaped.
  */
 
 #include <string.h>
@@ -132,11 +127,9 @@ data_tfs_ensure(void)
 /**
  * @brief Report how the carved region is divided, for `df`.
  *
- * The two extents are compile-time constants; the region size is whatever the
- * linker carved.  Publishing both, plus the difference, is what keeps the split
- * honest at run time: `idle_bytes` is the number that was quietly 676 KB on the
- * nRF54LM20 before v0.06, and it must read 0.  A non-zero value means
- * TIKU_NVM_REGION_BYTES has fallen out of step with the device linker script.
+ * The extents are compile-time constants and the region size is whatever the
+ * linker carved, so `df` publishes both plus their difference: `idle_bytes`
+ * must read 0, or TIKU_NVM_REGION_BYTES is out of step with the linker script.
  *
  * @param out  Snapshot to fill in (extent fields only).
  */
@@ -255,10 +248,9 @@ data_fill_extents(tiku_data_df_t *out)
 /* entry, which is what needs a shell.                                        */
 /*
  * NOTE ON THE TEST: `#if TIKU_SHELL_ENABLE`, on the VALUE, not
- * `#if defined(TIKU_SHELL_ENABLE)`.  tiku.h:265 defines the macro
- * UNCONDITIONALLY (to 0 when the shell is off), so the `defined()` form is
- * always true -- which is why the gate this file used to carry never actually
- * excluded anything, and why the rest of kernel/vfs/tree/ spells it this way.
+ * `#if defined(TIKU_SHELL_ENABLE)`.  tiku.h defines the macro UNCONDITIONALLY
+ * (to 0 when the shell is off), so the `defined()` form is always true and
+ * gates nothing.  The rest of kernel/vfs/tree/ spells it this way too.
  */
 /*===========================================================================*/
 #if TIKU_SHELL_ENABLE
@@ -489,8 +481,8 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     out->slot_bytes = (uint16_t)TIKU_TFS_SLOT_DATA;
     out->cap_bytes  = (uint32_t)data_fs.nfiles * (uint32_t)TIKU_TFS_SLOT_DATA;
     /* One source of truth for what to CALL the NVM: the device header's
-     * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash).  This used to be a
-     * per-platform ladder here, which is exactly how a second copy drifts. */
+     * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash), never a per-platform
+     * ladder here -- a second copy is exactly how the two drift apart. */
     out->backing = TIKU_DEVICE_NVM_LABEL;
     data_fill_extents(out);
     return 0;

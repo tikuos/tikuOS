@@ -29,17 +29,9 @@
 /**
  * @brief Shared renderer for one port's direction summary.
  *
- * Renders one character per pin 0..7 followed by a newline:
- * 'O' output, 'I' input, '?' when the driver cannot determine the
- * direction (e.g. pin routed to a peripheral function).  Example
- * for a port with pins 2 and 3 as outputs:
- *
- *   "IIOOIIII\n"
- *
- * The pos < max-4 guard leaves room for the final character,
- * newline and terminator in degenerate tiny buffers.  Wrapped by
- * the GPIO_DIR() macro below so each port gets a plain
- * tiku_vfs_read_fn.
+ * One character per pin 0..7 plus a newline -- 'O' output, 'I' input, '?' when
+ * the direction is indeterminate (e.g. a peripheral function) -- so a port with
+ * pins 2 and 3 as outputs reads "IIOOIIII\n".  Wrapped by the GPIO_DIR() macro.
  *
  * @param port  Port number (1-based, matching MSP430 P1..P4)
  * @param buf   Output buffer for the rendered text
@@ -91,10 +83,9 @@ GPIO_DIR(4)
 /**
  * @brief Shared read worker for one GPIO pin.
  *
- * Renders the current input level as "0\n" or "1\n", or "err\n"
- * when the driver rejects the port/pin combination.  Reads the PxIN
- * register, so the value is meaningful for pins in input mode and
- * reflects the driven level for outputs.
+ * Renders the input level as "0\n" or "1\n", or "err\n" when the driver
+ * rejects the port/pin.  Reads PxIN, so the value is the sampled level for
+ * inputs and the driven level for outputs.
  *
  * @param port  Port number (1-based)
  * @param pin   Pin number (0..7)
@@ -115,16 +106,9 @@ gpio_pin_read(uint8_t port, uint8_t pin, char *buf, size_t max)
 /**
  * @brief Shared write worker for one GPIO pin.
  *
- * The first byte of the payload selects the action:
- *
- *   '0'  drive low (switches the pin to output)
- *   '1'  drive high (switches the pin to output)
- *   't'  toggle the output latch
- *   'i'  reconfigure as input with pull-up
- *
- * Unrecognised bytes are silently ignored (return 0) so that e.g.
- * an accidental trailing space does not surface as a write error
- * in shell scripts.
+ * The first payload byte selects the action: '0' drive low, '1' drive high
+ * (both switch the pin to output), 't' toggle the output latch, 'i'
+ * reconfigure as input with pull-up.  Anything else is ignored.
  *
  * @param port  Port number (1-based)
  * @param pin   Pin number (0..7)
@@ -157,10 +141,9 @@ gpio_pin_write(uint8_t port, uint8_t pin, const char *buf, size_t len)
 /**
  * @brief Generate a read and a write handler for one port/pin pair.
  *
- * Each wrapper is ~10 bytes of code (load constants + tail call);
- * generating them beats storing port/pin in the node struct, which
- * would grow every node in the entire VFS by two bytes for the
- * benefit of this module alone.
+ * Each wrapper is ~10 bytes of code (load constants, tail call).  Generating
+ * them beats storing port/pin in the node struct, which would grow every node
+ * in the whole VFS by two bytes for this module's benefit alone.
  */
 #define GPIO_PIN(p, b)                                                      \
     static int gpio_r_##p##_##b(char *buf, size_t max) {                    \
@@ -233,14 +216,12 @@ static const tiku_vfs_node_t gpio_p4[] = {
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
-/**
- * /dev/gpio directory table — one "1".."4" subdirectory per
- * available port, each pointing at its eight-pin table above.
- *
- * Exported so tiku_vfs_tree_dev.c can attach it as the "gpio"
- * directory; the entry count is TIKU_VFS_TREE_GPIO_NPORTS, derived
- * from the same TIKU_DEVICE_HAS_PORTn flags that gate the entries
- * (asserted below).
+/*
+ * /dev/gpio directory table -- one "1".."4" subdirectory per available port,
+ * each pointing at its eight-pin table above.  Exported so tiku_vfs_tree_dev.c
+ * can attach it as the "gpio" directory; the entry count is
+ * TIKU_VFS_TREE_GPIO_NPORTS, derived from the same TIKU_DEVICE_HAS_PORTn flags
+ * that gate the entries (asserted below).
  */
 const tiku_vfs_node_t tiku_vfs_tree_gpio_children[] = {
 #if TIKU_DEVICE_HAS_PORT1
@@ -294,24 +275,13 @@ _Static_assert(sizeof(tiku_vfs_tree_gpio_dir_children) /
 /**
  * @brief Ring the watchers of /dev/gpio/<port>/<pin> after a pin edge.
  *
- * The bridge from the GPIO edge interrupt to the VFS watch layer:
- * the port ISR (arch/msp430/tiku_gpio_irq_arch.c) calls this with the
- * pin that just fired, and it rings that pin node's watchers via
- * tiku_vfs_notify().  A rule or `watch` on the pin then reacts to the
- * physical edge exactly as it would to a write — the value comes from
- * re-reading the node (the live PxIN level).
+ * The bridge from the GPIO edge interrupt to the watch layer: the port ISR
+ * calls this with the pin that fired and it rings that node's watchers, so a
+ * rule or `watch` reacts to a physical edge as it would to a write.
  *
- * GPIO pin nodes are read/write (a pin is dual-direction), so a rule
- * on one is already event-armed; before this hook a hardware edge had
- * no event source — only an explicit `write` rang it.  This supplies
- * the missing source, turning "act when the pin changes" from a poll
- * into an interrupt-driven path.
- *
- * ISR-safe: a bounds check, a constant-time table index, and the
- * (itself ISR-safe) tiku_vfs_notify() scan.  Out-of-range port/pin
- * and ports absent on this device fall through to a NULL node, which
- * tiku_vfs_notify() treats as a no-op.
- *
+ * @note ISR-safe -- a bounds check, a constant-time table index, and the
+ *       ISR-safe tiku_vfs_notify() scan.  An out-of-range or device-absent
+ *       port/pin falls through to a NULL node, which notify() ignores.
  * @param port  Port number (1-based, P1..P4)
  * @param pin   Pin number (0..7)
  */

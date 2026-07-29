@@ -43,13 +43,11 @@
  * └── data/  — tree/tiku_vfs_tree_data.c (BASIC builds only)
  */
 
-/**
- * Mutable root children: sys + dev + proc (+ optionally data).
- *
- * Sized for the maximum possible set; `vfs_root.child_count`
- * records the actual count populated at init time.  Placed in
- * .persistent (FRAM) to conserve SRAM for the stack — writes
- * happen only inside the init-time MPU unlock window below.
+/*
+ * Mutable root children: sys + dev + proc (+ optionally data).  Sized for the
+ * maximum set; vfs_root.child_count records how many are populated.  Lives in
+ * .persistent (FRAM) to spare SRAM -- written only inside the init-time MPU
+ * unlock window below.
  */
 static TIKU_DURABLE tiku_vfs_node_t root_children[4];
 
@@ -64,28 +62,12 @@ static TIKU_DURABLE tiku_vfs_node_t vfs_root;
 /**
  * @brief Build and register the system VFS tree.
  *
- * Boot-time orchestration in three steps:
+ * Runs the module inits in dependency order -- boot first, because it must
+ * latch SYSRSTIV before anything else reads it -- copies each top-level
+ * directory into the FRAM-resident root, then calls tiku_vfs_init().
  *
- *   1. Module init, in dependency order: boot first — it must
- *      latch SYSRSTIV before anything else touches it.  dev brings
- *      up LED hardware; sys validates the RTC epoch and the
- *      device-name cell.  All persistent state is declared as
- *      magic-gated persist cells (TIKU_PERSIST_CELL); each module
- *      validates its own cells and the cell API owns the MPU
- *      unlock windows.
- *
- *   2. Root assembly: copy each top-level directory node (from
- *      the module _get() functions) into the FRAM-resident
- *      root_children array, inside one MPU unlock window.  /data
- *      is attached only when the BASIC interpreter is compiled in,
- *      and n_root records how many slots are live.
- *
- *   3. Hand the finished root to tiku_vfs_init(), after which
- *      every path is resolvable.
- *
- * Call once during boot, after hardware and process init (see
- * main.c); the drivers registry and shell start afterwards and
- * expect the tree to be live.
+ * @note Call once during boot, after hardware and process init; the drivers
+ *       registry and the shell start afterwards and expect a live tree.
  */
 void
 tiku_vfs_tree_init(void)

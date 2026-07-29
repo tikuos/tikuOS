@@ -73,12 +73,9 @@
 /**
  * @brief Read handler for /sys/uptime.
  *
- * Renders seconds since boot as a decimal line ("3600\n" after an
- * hour).
- *
- * tiku_clock_seconds() is the 32-bit running counter. The tick
- * value tiku_clock_time() is 16 bits and wraps every ~8.5 minutes
- * at 128 Hz, so we cannot derive seconds from it directly.
+ * Renders seconds since boot as a decimal line ("3600\n" after an hour), from
+ * the 32-bit tiku_clock_seconds().  The tick from tiku_clock_time() is 16 bits
+ * and wraps every ~8.5 minutes at 128 Hz, so seconds cannot come from it.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -108,10 +105,9 @@ uptime_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/time.
  *
- * Renders the wall-clock time as decimal seconds since the Unix
- * epoch ("1750000000\n").  Before anyone sets the time the value
- * is just uptime plus the persisted offset (0 on a fresh FRAM),
- * so a small number means "clock was never set".
+ * Renders wall-clock time as decimal seconds since the Unix epoch
+ * ("1750000000\n").  Until the time is set the value is uptime plus the
+ * persisted offset (0 on fresh FRAM), so a small number means never set.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -127,12 +123,9 @@ time_read(char *buf, size_t max)
 /**
  * @brief Write handler for /sys/time.
  *
- * Parses a strict decimal seconds-since-epoch value, terminated by
- * newline, carriage return, NUL or end of input.  Any non-digit
- * before the terminator rejects the whole write (-1) — no partial
- * parses, so a malformed script line cannot half-set the clock.
- * The accepted value is handed to tiku_rtc_set_seconds(), which
- * rebases and persists the epoch offset.
+ * Parses a strict decimal seconds-since-epoch value; any non-digit before the
+ * terminator rejects the whole write, so a malformed script line cannot
+ * half-set the clock.  tiku_rtc_set_seconds() then rebases and persists it.
  *
  * @param buf  Input text, decimal digits ("1750000000\n")
  * @param len  Input length in bytes
@@ -173,10 +166,9 @@ time_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/mem/sram.
  *
- * Renders the device's total SRAM size in bytes as a decimal line
- * ("8192\n" on FR5994).  This is the silicon constant from the
- * device header, not a live measurement — see /sys/mem/free for
- * runtime headroom.
+ * Renders the device's total SRAM size in bytes ("8192\n" on FR5994).  This is
+ * the silicon constant from the device header, not a live measurement -- see
+ * /sys/mem/free for runtime headroom.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -235,11 +227,9 @@ nvmfree_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/tiers.
  *
- * One line per available tier with MEASURED bump-allocator state
- * (capacity, used, lifetime peak, carve count, refused carves) straight
- * from tiku_tier_stats().  Unlike /sys/mem/used — which sums what
- * processes self-declare — these numbers cannot drift from reality.
- * Unavailable tiers (e.g. HIFRAM on parts without one) are omitted.
+ * One line per available tier with the MEASURED bump-allocator state (capacity,
+ * used, lifetime peak, carve count, refused carves) from tiku_tier_stats().
+ * Unavailable tiers, such as HIFRAM on parts without one, are omitted.
  */
 static int
 mem_tiers_read(char *buf, size_t max)
@@ -311,17 +301,9 @@ extern char __stack;
 /**
  * @brief Read handler for /sys/mem/free.
  *
- * Renders the live gap between the current stack pointer and the
- * end of static data, in bytes — i.e. how much deeper the stack
- * could grow right now before colliding with .bss/.data.  Reads
- * the SP register directly via inline asm, so the answer reflects
- * the call depth at the moment of the read (the VFS path itself
- * costs a few frames).
- *
- * "0\n" means the SP is at or below _end — the stack has already
- * met (or overflowed into) static data and a crash is imminent or
- * past.  Platform branches: MSP430 reads the 16-bit R1, Cortex-M
- * the 32-bit SP; host builds report 0.
+ * Renders the live gap in bytes between the stack pointer -- read straight out
+ * of the SP register, so it includes the VFS path's own frames -- and the end
+ * of static data.  "0\n" means the stack has already met .bss/.data.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -364,15 +346,9 @@ mem_free_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/used.
  *
- * Renders the sum of every registered process's SRAM use as a decimal
- * line: each process's declared proc-mem footprint plus its measured
- * live allocation (e.g. the BASIC arena), via tiku_process_sram_used().
- * Kernel statics and the stack are not included.  Walks the registry by
- * pid; empty slots return NULL from tiku_process_get() and are skipped.
- *
- * The accumulator is 32-bit: tiku_process_sram_used() returns a uint32_t
- * (a BASIC arena alone is hundreds of KB on the big-RAM parts), so a
- * 16-bit sum here would wrap modulo 65536 and under-report.
+ * Sums every registered process's declared proc-mem footprint plus its measured
+ * live allocation (tiku_process_sram_used()); kernel statics and the stack are
+ * excluded.  The accumulator is 32-bit because one BASIC arena can exceed 64 KB.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -399,11 +375,9 @@ mem_used_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/sched/idle.
  *
- * Renders the scheduler's idle counter as a decimal line — the
- * number of times the main loop found no runnable process and
- * dropped into the configured sleep mode.  The growth rate
- * between two reads is a cheap duty-cycle estimate: fast growth
- * means the system is mostly asleep (good for the power budget).
+ * Renders the scheduler's idle counter: how many times the main loop found no
+ * runnable process and dropped into the configured sleep mode.  The growth rate
+ * between two reads is a cheap duty-cycle estimate.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -484,15 +458,9 @@ device_name_read(char *buf, size_t max)
 /**
  * @brief Write handler for /sys/device/name.
  *
- * Stores up to DEVICE_NAME_MAX bytes of the payload as the new
- * persistent name.  A single trailing newline is stripped (the
- * shell appends one); an empty result is rejected because the read
- * path expects a non-empty NUL-terminated string and clearing the
- * name has no use case.  Longer names are truncated, not rejected.
- *
- * The new name is staged NUL-terminated in SRAM and stored through
- * tiku_persist_cell_write(), which owns the MPU unlock window for
- * the FRAM copy.
+ * Stores up to DEVICE_NAME_MAX bytes as the new persistent name, stripping one
+ * trailing newline and truncating longer input; an empty result is rejected.
+ * tiku_persist_cell_write() owns the FRAM unlock window for the store.
  *
  * @param buf  New name text
  * @param len  Text length in bytes
@@ -531,13 +499,9 @@ device_name_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/device/id.
  *
- * Renders a stable per-chip identifier derived from the MCU's
- * unique-device-ID registers: "tiku-XXXX\n" where XXXX are the
- * first two ID bytes in hex.  Four hex characters are enough to
- * distinguish a handful of devices on the same network without
- * dragging in a UUID library; unlike /sys/device/name this cannot
- * be changed, so it is the right key for scripts that must follow
- * the physical board across renames.
+ * Renders a stable per-chip identifier from the MCU's unique-device-ID
+ * registers: "tiku-XXXX\n", the first two ID bytes in hex.  Unlike
+ * /sys/device/name it cannot be changed, so it survives renames.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -592,10 +556,9 @@ device_version_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/cpu/freq.
  *
- * Renders the configured CPU frequency (TIKU_MAIN_CPU_HZ) in Hz as
- * a decimal line ("8000000\n").  This is the build-time constant;
- * compare against /sys/boot/clock/mclk, the live measurement, to
- * spot a DCO that failed to reach its target.
+ * Renders the configured CPU frequency (TIKU_MAIN_CPU_HZ) in Hz ("8000000\n").
+ * This is the build-time constant; compare it with /sys/boot/clock/mclk, the
+ * live measurement, to spot a DCO that failed to reach its target.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -672,21 +635,13 @@ static const tiku_vfs_node_t sys_device_children[] = {
     { "version", TIKU_VFS_FILE, device_version_read, NULL,              NULL, 0 },
 };
 
-/**
- * The /sys directory table — the master list of everything under
- * /sys.
- *
- * Three kinds of entries:
- *   - files handled in this module (version, uptime, time)
- *   - files whose handlers the boot module exports (boot_count,
- *     last_reset, cold_boots — boot-domain data surfaced at the
- *     top level for script convenience)
- *   - directories: local tables above, or sibling modules'
- *     exported children + NCHILD pairs
- *
- * To add a /sys node: implement the handler (here or in the owning
- * module), append the entry, and — if referencing a sibling's
- * table — keep its NCHILD macro beside the children pointer.
+/*
+ * The /sys directory table -- the master list of everything under /sys.  Three
+ * kinds of entry: files handled in this module; files whose handlers the boot
+ * module exports (boot_count, last_reset, cold_boots, surfaced at the top level
+ * for script convenience); and directories, either the local tables above or a
+ * sibling module's exported children + NCHILD pair.  To add a node, implement
+ * the handler and append the entry, keeping any NCHILD beside its pointer.
  */
 #if TIKU_SHELL_ENABLE
 /*---------------------------------------------------------------------------*/
@@ -1357,13 +1312,9 @@ tiku_vfs_tree_sys_get(void)
 /**
  * @brief Initialise /sys state (RTC epoch, device name default).
  *
- * Two independent pieces of persistent state are made valid here:
- * the RTC epoch offset (tiku_rtc_init() validates its own persist
- * cell, so the call is unconditional and idempotent) and the
- * device-name cell, which tiku_persist_cell_init() primes to its
- * "tiku" default exactly when its own gate reports virgin FRAM.
- * Neither depends on the boot module any more — each cell carries
- * its own validity.
+ * Validates two independent pieces of persistent state: the RTC epoch offset
+ * (tiku_rtc_init() checks its own cell, so the call is idempotent) and the
+ * device-name cell, primed to "tiku" when its gate reports virgin FRAM.
  */
 void
 tiku_vfs_tree_sys_init(void)

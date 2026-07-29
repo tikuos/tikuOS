@@ -51,10 +51,8 @@ emmc_cid_read(char *buf, size_t max)
 /**
  * @brief Capacity in BYTES, which is 64-bit on this part.
  *
- * 15 307 776 blocks x 512 is 7.84 GB -- past what a uint32_t holds, so the
- * arithmetic is done in 64 bits and printed as such.  Reporting it in blocks
- * instead would have avoided the question and also buried the one number
- * anybody actually wants from an 8 GB card.
+ * 15 307 776 blocks x 512 is 7.84 GB, past what a uint32_t holds, so the
+ * arithmetic is done in 64 bits and printed as such.
  */
 static int
 emmc_size_read(char *buf, size_t max)

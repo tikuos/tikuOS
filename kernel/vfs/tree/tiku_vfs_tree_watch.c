@@ -70,12 +70,9 @@ watch_free_read(char *buf, size_t max)
 /**
  * @brief Render one watch slot.
  *
- * A used slot becomes "<absolute-path> <process-name>", e.g.
- * "/dev/led0 shell"; a free slot becomes "free".  The node's path
- * is recovered with tiku_vfs_path_of() (a reverse-lookup), the
- * process name read from the slot's subscriber.  The deepest stock
- * path (~22 chars) plus a short process name sits well inside the
- * 64-byte read buffer the `cat`/`read` command supplies.
+ * A used slot becomes "<absolute-path> <process-name>", e.g. "/dev/led0 shell";
+ * a free slot becomes "free".  The path is recovered by tiku_vfs_path_of(), and
+ * the deepest stock path plus a short name fits the 64-byte read buffer.
  *
  * @param i    Watch slot index
  * @param buf  Output buffer

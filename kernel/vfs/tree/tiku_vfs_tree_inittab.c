@@ -50,21 +50,9 @@ init_count_read(char *buf, size_t max)
 /**
  * @brief Generate the four handlers + children table for slot N.
  *
- * Each expansion produces:
- *
- *   init_seq_N_read     boot-order sequence number, "(none)\n" if
- *                       the slot is empty
- *   init_name_N_read    entry name, empty line if the slot is empty
- *   init_cmd_N_read     shell command the entry runs at boot
- *   init_enable_N_read  "1\n" enabled / "0\n" disabled-or-empty
- *   init_enable_N_write writes through tiku_init_enable() (which
- *                       persists to FRAM); first byte '0' disables,
- *                       anything else enables; -1 on empty slot
- *   init_N_children[]   the four nodes of /sys/init/N/
- *
- * All five functions re-fetch the entry on every call: slots can
- * be added/removed at runtime by the `init` shell command, so
- * caching pointers across calls would go stale.
+ * Read handlers for the entry's boot-order sequence, name and shell command,
+ * plus a read/write enable flag writing through tiku_init_enable() (which
+ * persists to FRAM).  Each re-fetches the entry, since `init` edits slots live.
  */
 #define INIT_VFS_FUNCS(N)                                                     \
 static int init_seq_##N##_read(char *buf, size_t max)                         \
@@ -125,14 +113,11 @@ INIT_VFS_FUNCS(7);
 /* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * /sys/init directory table: the count file plus one directory per
- * slot.  Slot directories exist even for empty slots (their files
- * render placeholders) so the tree shape is stable regardless of
- * how full the init table is.
- *
- * Exported so tiku_vfs_tree_sys.c can attach it (guarded by
- * TIKU_INIT_ENABLE there); count travels as
+/*
+ * /sys/init directory table: the count file plus one directory per slot.  Slot
+ * directories exist even when empty (their files render placeholders) so the
+ * tree shape does not depend on how full the init table is.  Exported so
+ * tiku_vfs_tree_sys.c can attach it; count travels as
  * TIKU_VFS_TREE_INITTAB_NCHILD (asserted below).
  */
 const tiku_vfs_node_t tiku_vfs_tree_inittab_children[] = {
