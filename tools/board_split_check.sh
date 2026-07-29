@@ -1,11 +1,19 @@
 #!/bin/sh
-# S0 of kintsugi/board-device-separation-plan.md: pin the build baseline.
 #
-# Stages S1 and S2 of that plan claim "no behaviour change".  That claim is
-# unfalsifiable without a recorded baseline, so this script builds the matrix
-# and records sha256 of each image.  Run it BEFORE touching the build system
-# and again after; the diff is the gate.
+# Tiku Operating System v0.06
+# Simple. Ubiquitous. Intelligence, Everywhere.
+# http://tiku-os.org
 #
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
+# board_split_check.sh - pin the build baseline across a build-system edit.
+#
+# Builds the matrix and records a sha256 per image, so a "no behaviour
+# change" claim becomes falsifiable: run it before the edit and again after,
+# and the diff is the gate.  Sub-commands and the two traps are below.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 #   tools/board_split_check.sh record [file]   build the matrix, write hashes
 #   tools/board_split_check.sh check  [file]   rebuild, diff against them
 #   tools/board_split_check.sh determinism     prove the build repeats at all

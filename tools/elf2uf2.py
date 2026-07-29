@@ -19,7 +19,7 @@ The UF2 spec is one 512-byte block per 256 bytes of payload:
   uint32  payloadSize = always 256
   uint32  blockNo
   uint32  numBlocks
-  uint32  fileSize    = familyID for our flag
+  uint32  fileSize    = familyID for this flag
   uint8[476] data     (first 256 bytes meaningful, rest padding)
   uint32  magicEnd    = 0x0AB16F30
 

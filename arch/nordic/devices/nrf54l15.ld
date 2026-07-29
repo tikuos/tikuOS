@@ -1,6 +1,20 @@
 /*
- * Tiku Operating System v0.05 — Nordic nRF54L15 (nRF54L15-DK) linker script
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * nrf54l15.ld - Nordic nRF54L15 (nRF54L15-DK) linker script.
+ *
+ * Vectors at the RRAM base (VTOR=0), then code and the .data image, with the
+ * top 40 KB reserved for the byte-writable filestore and durable-persist
+ * regions behind the RRAMC WEN gate.  Map and exported symbols below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Memory map (nRF54L15 datasheet):
  *   RRAM  : 1.5 MB non-volatile, write-in-place, at 0x00000000
  *   SRAM  : 256 KB at 0x20000000
@@ -30,8 +44,6 @@
  *   __stack __data_load __data_start __data_end __bss_start __bss_end
  *   __uninit_start __uninit_end _end end __end__ __datastart
  *   __sram_start __sram_end __flash_start __flash_end   (FRAM_* vocabulary)
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 OUTPUT_FORMAT("elf32-littlearm")

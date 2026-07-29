@@ -1,9 +1,20 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
- * msp430fr6989_hifram.ld - FR6989 HIFRAM end-marker override
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
+ * msp430fr6989_hifram.ld - FR6989 HIFRAM end-marker override.
+ *
+ * Adds the __hifram_end symbol the stock script omits, so `free` can report
+ * actual HIFRAM usage rather than only total reachability, and holds back the
+ * top 4 KB as the Tier-3 module slot.  Always on for FR6989.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Why this exists
  * ===============
  * FR6989 has 80 KB of HIFRAM at 0x10000+ but the toolchain's stock
@@ -34,8 +45,6 @@
  *
  * Wired in from the Makefile when MCU=msp430fr6989. No flag is
  * needed to disable it; the override is always-on for FR6989.
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 INCLUDE msp430fr6989.ld

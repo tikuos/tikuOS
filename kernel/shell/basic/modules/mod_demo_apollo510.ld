@@ -1,7 +1,19 @@
 /*
- * Tiku Operating System v0.05 -- loadable native module linker script
- * (Apollo510/510b variant).
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * mod_demo_apollo510.ld - loadable native module script (Apollo510/510b).
+ *
+ * Position-FIXED at the ITCM execution window, so VMA == LMA and every
+ * internal reference resolves at run address.  Layout below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * The module is position-FIXED at the execution window (TIKU_MODULE_EXEC_ADDR
  * -- the ITCM on this part): the loader copies the flat image there and jumps
  * in, so VMA == LMA == the window base and every internal reference resolves at
@@ -11,8 +23,6 @@
  *   ...   .text / .rodata
  * No .data/.bss: the MVP module holds no writable state (pure handlers), so a
  * missing RAM/copy step cannot bite.  Keep in sync with the header.
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 MEMORY
@@ -20,7 +30,7 @@ MEMORY
     /* 32 KB execution window in the ITCM, 4 KB in from its base (so no module
      * address is ever zero).  The image lives in the store as an ordinary file
      * and is copied here at activate time -- there is no NVM slot on this part
-     * any more, which is why this used to say MRAM.  Kept in sync with
+     * any more, so this says ITCM rather than MRAM.  Kept in sync with
      * TIKU_MODULE_EXEC_ADDR. */
     CARVE (rx) : ORIGIN = 0x00001000, LENGTH = 0x8000  /* ITCM window */
 }
@@ -47,8 +57,8 @@ SECTIONS
      * the point of this section.  Modules run execute-in-place from NVM and
      * are never copied to RAM: there is no load step, no .data initialiser
      * copy, and the syscall jump table exposes no allocator.  These inputs
-     * used to be listed in /DISCARD/ below, which meant a module declaring a
-     * global was accepted and shipped with its state pointing at nothing.
+     * would be silently dropped by a /DISCARD/ entry, so a module declaring a
+     * global would be accepted and shipped with its state pointing at nothing.
      * Collect them instead and require the result to be empty, so the mistake
      * is a link error naming the cause.  --gc-sections still drops a global
      * that nothing references, so only state a handler actually uses trips it.

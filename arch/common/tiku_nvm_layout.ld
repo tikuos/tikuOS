@@ -7,6 +7,14 @@
  *
  * tiku_nvm_layout.ld - the ONE canonical NVM layout derivation (ARM).
  *
+ * Every ARM platform divides NVM the same way -- code, module slot, NVM
+ * region, durable home -- and this fragment holds that arithmetic once.
+ * The input/output symbol contract is below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Every ARM platform divides its non-volatile memory in the same order:
  *
  *     [boot] code | module slot | NVM region | durable home   (top)
@@ -30,8 +38,6 @@
  * The ASSERTs stitch every seam, so a script that edits one number cannot
  * silently open a gap or an overlap.  MSP430 does not use this file: its
  * unified FRAM is a genuinely different design (see the device fragments).
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 __tiku_module_slot          = __tiku_layout_code_cap;

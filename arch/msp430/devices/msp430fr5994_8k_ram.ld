@@ -1,9 +1,20 @@
 /*
- * Tiku Operating System
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
- * msp430fr5994_8k_ram.ld - FR5994 8 KB SRAM override
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
+ * msp430fr5994_8k_ram.ld - FR5994 8 KB SRAM override.
+ *
+ * Collapses the stock script's three SRAM regions (RAM + LEARAM + LEASTACK)
+ * into one 8 KB RAM region, since TikuOS does not use the LEA peripheral.
+ * Wired in by the Makefile unless LEA_ENABLE=1 restores the stock layout.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Why this exists
  * ===============
  * The stock msp430-elf-gcc linker script for MSP430FR5994 carves the
@@ -23,7 +34,7 @@
  * The stock script's `.leaRAM : {} > LEARAM` section directive still
  * resolves cleanly because LEARAM is redeclared with LENGTH=0
  * (an empty section landing in a zero-length region produces no
- * output, which is exactly the behaviour we want).
+ * output, which is exactly the behaviour required).
  *
  * The stack origin auto-follows: stock script uses
  *   .stack (ORIGIN(RAM) + LENGTH(RAM)) : ...
@@ -34,7 +45,7 @@
  * =================
  * Passing -T <file> on msp430-elf-gcc 9.3 *replaces* the spec-default
  * linker script — the spec-driven `-T msp430fr5994.ld` is suppressed
- * the moment a user-supplied -T appears. So we INCLUDE the stock
+ * the moment a user-supplied -T appears.  So this INCLUDEs the stock
  * script first to pick up all the SECTIONS / vector tables / FRAM
  * layout, then redeclare just the three SRAM-side MEMORY regions.
  * ld(1)'s "last MEMORY declaration of a given name wins" rule applies
@@ -48,8 +59,6 @@
  *
  * To get the stock 4 KB + LEA layout back:
  *   make MCU=msp430fr5994 LEA_ENABLE=1
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 INCLUDE msp430fr5994.ld
@@ -121,10 +130,10 @@ __high_bsssize = ADDR(.upper.bss) + SIZEOF(.upper.bss) - __high_bssstart;
  * standard HIFRAM-targeted section (.upper.rodata at :247,
  * .upper.bss at :337, .upper.text at :419), so __hifram_end
  * captures the end of *all* HIFRAM-resident sections. NOLOAD means
- * the marker contributes no bytes — we're just snapshotting the
+ * the marker contributes no bytes — it only snapshots the
  * location counter.
  *
- * (We previously tried INSERT AFTER .upper.text but ld errors out
+ * (INSERT AFTER .upper.text does not work here: ld errors out
  * with ".upper.text not found for insert" — INSERT only resolves
  * against sections in the spec-default linker script, not against
  * sections pulled in via INCLUDE.)

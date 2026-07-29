@@ -1,6 +1,20 @@
 /*
- * Tiku Operating System v0.05 — Ambiq Apollo 510 (Cortex-M55) linker script
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * apollo510.ld - Ambiq Apollo 510 (Cortex-M55) linker script.
+ *
+ * No .boot2 or .image_def header: the on-silicon Secure Boot Loader hands
+ * control straight to the application vector table at the start of user MRAM.
+ * Map and exported symbols below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Memory map (AmbiqSuite am_reg_base_addresses.h):
  *   ITCM   : 256 KB at 0x00000000   (not used at bring-up — see .text)
  *   MRAM   : 4 MB   at 0x00400000   (flash; low 64 KB reserved for the SBL)
@@ -18,8 +32,6 @@
  *   __stack, __sram_start/end, __flash_start/end,
  *   __data_load/start/end, __bss_start/end, __uninit_start/end,
  *   _end / end / __end__ / __datastart
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 OUTPUT_FORMAT("elf32-littlearm")
@@ -45,10 +57,10 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 /* NO loadable-native-module slot on this part (module_size = 0). A Tier-3
  * module image is a store file (mod.bin) that the loader copies into the ITCM
  * and runs from there -- see tiku_basic_module.h and modules/
- * mod_demo_apollo510.ld. The 32 KB of executable MRAM that used to be carved
- * here (0x488000..0x490000) is region now, which is the whole point: the image
- * was being counted twice, once as a .rodata blob in the code window and again
- * as the slot it was programmed into. Every other ARM part still carves the
+ * mod_demo_apollo510.ld. The 32 KB of executable MRAM at 0x488000..0x490000 is
+ * region here rather than a slot, because carving it would count the image
+ * twice: once as a .rodata blob in the code window and again as the slot it is
+ * programmed into. Every other ARM part still carves the
  * slot -- each needs its own RAM window and its own verification, and only
  * Apollo510 has been measured (TikuBench tests/memory/test_mem_tcm.c). */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
@@ -95,8 +107,8 @@ SECTIONS
     } > MRAM
 
     /* AmbiqSuite's SystemInit() (system_apollo510.c) sets VTOR from the
-     * symbol __Vectors. We own the vector table under a different name, so
-     * alias it here to let the SDK file link. Our reset handler also writes
+     * symbol __Vectors. This port owns the vector table under a different
+     * name, so alias it here to let the SDK file link. The reset handler writes
      * VTOR, so this is belt-and-braces. */
     __Vectors = tiku_ambiq_vectors;
 
@@ -105,7 +117,7 @@ SECTIONS
     {
         *(.text*)
         *(.glue_7) *(.glue_7t)
-        /* AmbiqSuite marks some HAL functions for ITCM. At bring-up we
+        /* AmbiqSuite marks some HAL functions for ITCM. At bring-up this
          * run them in place from MRAM (position-independent Thumb)
          * rather than copying to ITCM. Revisit for performance later. */
         *(.itcm_text*)
@@ -183,7 +195,7 @@ SECTIONS
          * every reset on this part (hardware-verified 2026-07-15: a J-Link
          * marker in DTCM reads back all-zeros after a reset while an SSRAM
          * marker survives -- the secure bootloader runs through TCM before
-         * our crt).  DURABLE (.persistent above) only survives because the
+         * the crt).  DURABLE (.persistent above) only survives because the
          * MRAM mirror restores it; WARM has no mirror, so it lives in the
          * retained SSRAM instead -- see .ssram below. */
     } > TCM

@@ -1,6 +1,20 @@
 /*
- * Tiku Operating System v0.05 - Ambiq Apollo4 Plus (Cortex-M4F) linker script
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * apollo4p.ld - Ambiq Apollo4 Plus (Cortex-M4F) linker script.
+ *
+ * The Apollo4 Lite script with the shared-SRAM window grown from 1 MB to the
+ * full 2 MB the Plus exposes through its two SSRAM banks.  Map, the MPU note
+ * and exported symbols below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Memory map (AmbiqSuite R4.5.0 apollo4p_evb / AMAP42KP):
  *   MRAM   : 2 MB   based at 0x0       (flash; low 96 KB reserved for boot/info)
  *   TCM    : 384 KB at 0x10000000      (.data / .bss / heap / stack)
@@ -26,8 +40,6 @@
  *   __stack, __sram_start/end, __flash_start/end,
  *   __data_load/start/end, __bss_start/end, __uninit_start/end,
  *   _end / end / __end__ / __datastart
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 OUTPUT_FORMAT("elf32-littlearm")
@@ -95,7 +107,7 @@ SECTIONS
         __vectors_end = .;
     } > MRAM
 
-    /* SystemInit()-style code may set VTOR from __Vectors. We own the table
+    /* SystemInit()-style code may set VTOR from __Vectors. This port owns the
      * under tiku_ambiq_vectors; alias it. The reset handler also writes VTOR. */
     __Vectors = tiku_ambiq_vectors;
 

@@ -1,12 +1,19 @@
 #!/bin/sh
+#
+# Tiku Operating System v0.06
+# Simple. Ubiquitous. Intelligence, Everywhere.
+# http://tiku-os.org
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # axonpack_selftest.sh - prove axonpack is MODEL-AGNOSTIC, not vww-shaped.
 #
-# The packer was written while looking at one model (tinyml_vww), which is
-# exactly how a tool ends up quietly encoding that model's shape.  This builds
-# EVERY model the Axon checkout ships and requires each to pass the
-# reconstruction gate -- patch the packed command buffer with the address the
-# real linker used, and demand byte-identical output against the linked image.
+# Builds every model the Axon checkout ships and requires each to pass the
+# reconstruction gate: patch the packed command buffer with the address the
+# real linker used, then demand byte-identical output.  Detail below.
 #
+# SPDX-License-Identifier: Apache-2.0
+
 # The models differ enough for this to mean something: tinyml_ad has 270 KB of
 # weights but 632 B of commands and only TWO relocation symbols, tinyml_ic has
 # 1468 relocation sites, tinyml_kws is 22 KB.  A tool that passes all of them
@@ -16,8 +23,6 @@
 #
 # Usage:  tools/axonpack_selftest.sh [model ...]      (default: all shipped)
 # Needs:  temp/axon-models checkout, MCU=nrf54lm20b toolchain.
-#
-# SPDX-License-Identifier: Apache-2.0
 set -e
 
 MODELS="${*:-tinyml_kws tinyml_ic tinyml_ad tinyml_vww}"

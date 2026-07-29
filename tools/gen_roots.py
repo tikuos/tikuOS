@@ -92,7 +92,7 @@ def parse_inl(path):
 # --------------------------------------------------------------------------
 
 # The verify kit supports RSA with SHA-256/384/512 and ECDSA on P-256/P-384.
-# A root outside that set cannot be used to validate anything, so shipping it
+# A root outside that set cannot validate anything, so shipping it
 # would only cost bytes -- but dropping one silently would shrink the trust set
 # without anyone noticing, which is why --from-pem reports what it skipped.
 OID_RSA_PK = bytes.fromhex("2a864886f70d010101")

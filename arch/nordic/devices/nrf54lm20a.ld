@@ -1,6 +1,20 @@
 /*
- * Tiku Operating System v0.05 — Nordic nRF54LM20A (nRF54LM20-DK) linker script
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * nrf54lm20a.ld - Nordic nRF54LM20A (nRF54LM20-DK) linker script.
+ *
+ * Cloned from nrf54l15.ld; the differences are the larger RRAM, the RAM2
+ * upper bank that backs the tier arena, and nothing else -- the FLPR carve
+ * and reserved-NVM geometry are identical.  Map and symbols below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Memory map (nRF54LM20A MDK):
  *   RRAM  : ~2 MB non-volatile, write-in-place, at 0x00000000
  *   SRAM  : 512 KB at 0x20000000 (RAM 256 KB + RAM2 256 KB, contiguous)
@@ -23,8 +37,6 @@
  *   .data / .bss / .uninit / .persistent.warm / __stack
  *
  * Symbols exposed to the kernel mirror the L15 script and the other ARM ports.
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 OUTPUT_FORMAT("elf32-littlearm")
@@ -91,11 +103,9 @@ __tiku_layout_code_cap     = DEFINED(__tiku_code_cap_override)
  * the whole fleet, and the module slot lands at the same address on both Nordic
  * parts (one module image serves each).
  *
- * This was 800 KB, and the reason is worth recording because it is the mistake
- * the number now refuses to make.  It was sized by the largest image anyone
- * could build, which was an Axon KAT: Nordic's compiled model weights and test
- * vectors are const arrays, so they land in .rodata, so they landed in THIS
- * window (measured 2026-07-25, nrf54lm20b, -Os):
+ * Sizing this window by the largest image anyone can build lands it on an Axon
+ * KAT: Nordic's compiled model weights and test vectors are const arrays, so
+ * they go to .rodata, so they land HERE (measured 2026-07-25, lm20b, -Os):
  *
  *   shell + BASIC, no Axon .............................  126 KB
  *   + Axon driver, model gc-dropped ....................  127 KB
@@ -104,11 +114,11 @@ __tiku_layout_code_cap     = DEFINED(__tiku_code_cap_override)
  *   + tinyml_ad   weights 260 KB + vectors   5 KB ......  362 KB
  *   + tinyml_vww  weights 203 KB + vectors 307 KB ......  698 KB  <-- set the cap
  *
- * Letting that set the cap put 544 KB of RRAM permanently beyond reach on every
- * shipped board so that a vendor TEST HARNESS could link -- and the actual
- * firmware is 126 KB, 16% of the window.
+ * Letting that set the cap would put 544 KB of RRAM permanently beyond reach on
+ * every shipped board so a vendor TEST HARNESS could link, against an actual
+ * firmware of 126 KB.
  *
- * RESOLVED 2026-07-26 (A3).  Model weights are data and now live in /data:
+ * So model weights are DATA and live in /data:
  * TIKU_AXON_MODEL_FROM_STORE=1 compiles no model at all and reads each one --
  * weights, command buffer, descriptor and labels -- from a file at run time.
  * That image is 91 KB, and it is 91 KB whichever model it runs, so the biggest

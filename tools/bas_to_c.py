@@ -27,7 +27,7 @@ import os
 def escape_for_c_string(s: str) -> str:
     """Escape a single line for inclusion in a C string literal.
 
-    We escape backslash, double-quote, and the printable controls
+    Escapes backslash, double-quote, and the printable controls
     that crop up in BASIC source (tab). Other characters pass through
     -- byte-clean for ASCII / UTF-8.
     """

@@ -146,7 +146,7 @@ def sym_name(target):
     objdump names a relocation target either by symbol or by section.  A section
     target like '.rodata.axon_model_const_tinyml_vww' carries its symbol as the
     last dotted component; a plain symbol like 'nrf_axon_interlayer_buffer' is
-    already what we want.
+    already the wanted value.
     """
     for pfx in (".rodata.", ".data.", ".bss.", ".text."):
         if target.startswith(pfx):
@@ -471,7 +471,7 @@ def verify(axm, meta, obj, model, elf):
     linked = linked_symbols(elf)
     secs = image_sections(elf)
 
-    # Where the linker put each section we patched.
+    # Where the linker put each patched section.
     sect_sym = {SECT_CMD: "cmd_buffer_%s" % model,
                 SECT_DESC: "model_%s" % model,
                 SECT_LABELS: "labels_%s" % model}

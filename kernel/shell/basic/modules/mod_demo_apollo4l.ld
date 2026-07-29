@@ -1,7 +1,19 @@
 /*
- * Tiku Operating System v0.05 -- loadable native module linker script
- * (Apollo4 Lite / Plus variant; both parts share the MRAM window layout).
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * mod_demo_apollo4l.ld - loadable native module script (Apollo4 Lite / Plus).
+ *
+ * Position-FIXED at the carve VMA, so VMA == LMA and every internal reference
+ * resolves at run address.  Layout and the no-writable-state rule below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * The module is position-FIXED at the carve VMA (TIKU_MODULE_CARVE_ADDR): the
  * loader programs the flat image there via the bootrom and jumps in, so
  * VMA == LMA == the carve base and every internal reference resolves at run
@@ -12,8 +24,6 @@
  * No .data/.bss: the MVP module holds no writable state (pure handlers), so a
  * missing RAM/copy step cannot bite.  Keep in sync with the header + the
  * apollo4l/apollo4p device .ld (__tiku_module_slot).
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 MEMORY
@@ -47,8 +57,8 @@ SECTIONS
      * the point of this section.  Modules run execute-in-place from NVM and
      * are never copied to RAM: there is no load step, no .data initialiser
      * copy, and the syscall jump table exposes no allocator.  These inputs
-     * used to be listed in /DISCARD/ below, which meant a module declaring a
-     * global was accepted and shipped with its state pointing at nothing.
+     * would be silently dropped by a /DISCARD/ entry, so a module declaring a
+     * global would be accepted and shipped with its state pointing at nothing.
      * Collect them instead and require the result to be empty, so the mistake
      * is a link error naming the cause.  --gc-sections still drops a global
      * that nothing references, so only state a handler actually uses trips it.

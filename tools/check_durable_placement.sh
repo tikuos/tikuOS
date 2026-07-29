@@ -1,17 +1,19 @@
 #!/bin/sh
 #
+# Tiku Operating System v0.06
+# Simple. Ubiquitous. Intelligence, Everywhere.
+# http://tiku-os.org
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # check_durable_placement.sh - ban raw .persistent section attributes.
 #
-# WHY: durable placement must go through the kernel-owned grade macros in
-# kernel/memory/tiku_mem.h (TIKU_DURABLE / TIKU_PERSIST_WARM /
-# TIKU_FRAM_SPILL).  Hand-rolled per-file macros of the shape
-#   #ifdef PLATFORM_MSP430  ->  section(".persistent")
-#   #else                   ->  (nothing)
-# are exactly how the 2026-07 audit found the inittab, shell history, and
-# BASIC save slots silently VOLATILE on platforms that have working durable
-# .persistent (see kintsugi/memory.md section 10c).  This check makes the
-# pattern a build failure instead of a latent data-loss bug.
+# Durable placement must go through the kernel-owned grade macros in
+# kernel/memory/tiku_mem.h, so a hand-rolled section attribute is a build
+# failure rather than a latent data-loss bug.  Scope and allow-list below.
 #
+# SPDX-License-Identifier: Apache-2.0
+
 # Scope: the main repo only (kernel/ interfaces/ drivers/ boot/ hal/ apps/).
 # arch/ is allowed (linker scripts + the mem/mpu ports ARE the mechanism).
 # tikukits/ and TikuBench/ are separate repositories with their own review.

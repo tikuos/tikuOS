@@ -20,9 +20,18 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Vendor headers and separate repos are not ours to reformat.
+# Vendor headers and separate repos are not this repo's to reformat.
 SKIP_DIRS = {"build", "temp", "drivers", "TikuBench", "tikukits", ".git", "hardware"}
-SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk", "tools/fat32")
+SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk", "tools/fat32",
+              # This file quotes the banned patterns in order to define them.
+              "tools/check_comment_style.py")
+
+# C family: /* */ header, /** */ doc comments.  Everything else carries a
+# header and nothing doxygen-shaped, so only the header cap and the vocabulary
+# apply there.
+C_EXT = ('.c', '.h', '.inl')
+BLOCK_EXT = ('.ld', '.S', '.m')     # /* */ header
+HASH_EXT = ('.py', '.sh')           # # header, after any #! line
 
 HEADER_MAX = 15   # boilerplate 7 + filename + blank + 3 desc + blank + SPDX + close
 PROSE_MAX = 3     # @param/@return/@brief tag lines do not count
@@ -63,11 +72,21 @@ def sources():
         dirnames[:] = [d for d in dirnames
                        if d not in SKIP_DIRS and not d.startswith('.')]
         for name in filenames:
-            if not name.endswith(('.c', '.h', '.inl')):
+            if not name.endswith(C_EXT + BLOCK_EXT + HASH_EXT):
                 continue
             path = os.path.relpath(os.path.join(dirpath, name), ROOT)
             if not path.startswith(SKIP_PATHS):
                 yield path
+
+
+def hash_header(text):
+    """(line count, text) of a leading '#' comment block, skipping any shebang."""
+    lines = text.split('\n')
+    i = 1 if lines and lines[0].startswith('#!') else 0
+    start = i
+    while i < len(lines) and lines[i].startswith('#'):
+        i += 1
+    return (i - start), '\n'.join(lines[start:i])
 
 
 def prose_lines(block):
@@ -95,6 +114,22 @@ def check(path):
     text = open(os.path.join(ROOT, path), errors='replace').read()
     out = []
 
+    if path.endswith(HASH_EXT):
+        n, _ = hash_header(text)
+        if n > HEADER_MAX:
+            out.append(f"{path}:1: header is {n} lines (max {HEADER_MAX})")
+        # '#' comments are line-scoped, so the vocabulary scan is per line.
+        for i, line in enumerate(text.split('\n'), 1):
+            stripped = line.lstrip()
+            if not stripped.startswith('#'):
+                continue
+            for pattern, why in BANNED:
+                hit = pattern.search(line)
+                if hit:
+                    out.append(f"{path}:{i}: {why}: \"{hit.group(0)}\"")
+                    break
+        return out
+
     header = HDR.match(text)
     if header:
         n = header.group(0).count('\n') + 1
@@ -104,12 +139,13 @@ def check(path):
     else:
         body_at = 0
 
-    for m in DOC.finditer(text, body_at):
-        n = prose_lines(m.group(0))
-        if n > PROSE_MAX:
-            line = text[:m.start()].count('\n') + 1
-            out.append(f"{path}:{line}: doc comment has {n} prose lines "
-                       f"(max {PROSE_MAX})")
+    if path.endswith(C_EXT):
+        for m in DOC.finditer(text, body_at):
+            n = prose_lines(m.group(0))
+            if n > PROSE_MAX:
+                line = text[:m.start()].count('\n') + 1
+                out.append(f"{path}:{line}: doc comment has {n} prose lines "
+                           f"(max {PROSE_MAX})")
 
     for m in HDR.finditer(text):
         line = text[:m.start()].count('\n') + 1

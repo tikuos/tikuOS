@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.05
+ * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
  * http://tiku-os.org
  *
@@ -7,6 +7,14 @@
  *
  * tiku_flpr_crt0.S - FLPR (VPR RISC-V) startup for the nRF54L15.
  *
+ * The M33 loader memcpy's the whole image into the SRAM carve before setting
+ * CPURUN, so there is no .data copy here: stack, global pointer, .bss, main().
+ * INITPC points at the carve base and .init is placed first, so _start leads.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * The whole image -- .text, .rodata, .data -- is memcpy'd into the SRAM
  * carve by the Cortex-M33 loader BEFORE CPURUN is set, so unlike a
  * flash-resident startup there is no .data copy here: only the stack, the
@@ -16,8 +24,6 @@
  *
  * Entry: INITPC points at the carve base; this section (.init) is placed
  * first by tiku_flpr.ld, so _start IS the first instruction of the image.
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
     .section .init, "ax"

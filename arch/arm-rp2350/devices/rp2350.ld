@@ -1,6 +1,20 @@
 /*
- * Tiku Operating System v0.05 — RP2350 (Pico 2 / Pico 2 W) linker script
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * rp2350.ld - RP2350 (Pico 2 / Pico 2 W) linker script.
+ *
+ * Places .boot2, the IMAGE_DEF block the boot ROM reads, and the Cortex-M33
+ * vector table at the base of XIP flash, then the image; SRAM holds .data,
+ * .bss, .uninit and a downward stack.  Map and exported symbols below.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Memory map (RP2350 datasheet §2.2):
  *   FLASH (XIP)  : 4 MB external QSPI at 0x10000000
  *   SRAM         : 520 KB unified at 0x20000000
@@ -34,8 +48,6 @@
  *   __data_end      — end of .data in SRAM (one past last byte)
  *   __bss_start     — start of .bss
  *   __bss_end       — end of .bss
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 OUTPUT_FORMAT("elf32-littlearm")
@@ -85,7 +97,7 @@ __tiku_nvm_flash_offset = __tiku_layout_durable_start - ORIGIN(FLASH);
  * Code grows up from ORIGIN(FLASH) into a 384 KB window -- the fleet-wide
  * contract (P4); an ASSERT in SECTIONS guards the flash image against
  * overrunning it.  The CYW43439 firmware blob does not fit that window and is
- * not supposed to: it is data, bound for /data (P3a).
+ * not supposed to: it is data, bound for /data.
  *   __tiku_nvmfs_base   : XIP address (read in place by pointer); == 0x10100000
  *   __tiku_nvmfs_offset : byte offset from flash start (for the boot-ROM)
  *   __tiku_nvmfs_size   : ABSOLUTE symbol -- its ADDRESS is the size */
@@ -118,7 +130,7 @@ SECTIONS
 
     /* The Cortex-M33 VTOR alignment requirement is the smallest
      * power-of-2 that's >= total-table-size-in-bytes, with a 128-byte
-     * minimum. Our table has 80 entries × 4 = 320 bytes -> 512-byte
+     * minimum. The table has 80 entries × 4 = 320 bytes -> 512-byte
      * alignment required. A misaligned VTOR silently truncates the
      * low bits, sending exception handlers to garbage. */
     .vectors : ALIGN(512)
@@ -150,7 +162,7 @@ SECTIONS
     } > FLASH
 
     /* C++/static-ctor tables (not used by tikuOS but linker may emit
-     * tiny stubs from libc we don't link). */
+     * tiny stubs from libc that are never linked). */
     .ARM.extab : { *(.ARM.extab*) } > FLASH
     .ARM.exidx : { __exidx_start = .; *(.ARM.exidx*) __exidx_end = .; } > FLASH
 

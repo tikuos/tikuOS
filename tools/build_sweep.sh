@@ -4,16 +4,16 @@
 # Simple. Ubiquitous. Intelligence, Everywhere.
 # http://tiku-os.org
 #
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # build_sweep.sh - compile every supported MCU in one command.
 #
-# WHY THIS EXISTS.  The store's mount-time bounds check was written as
-# `first + span > NSLOTS`, which is correct at 32 bits and WRAPS at 16 -- so it
-# was a live out-of-bounds write on MSP430 and nothing else.  It shipped because
-# the machine the work was done on had no MSP430 toolchain installed, so seven
-# green ARM builds looked like a green tree.  A per-platform integer width is
-# invisible to any single-target build; the only defence is compiling all of
-# them, which is cheap and takes one command.
+# A per-platform integer width is invisible to any single-target build, so
+# the only defence is compiling all of them -- which is cheap and takes one
+# command.  Usage and the shared-main.elf trap are below.
 #
+# SPDX-License-Identifier: Apache-2.0
+
 # Also handles the shared-main.elf trap: main.elf lives at the repo ROOT and is
 # reused across targets, so a build that fails to relink leaves the PREVIOUS
 # target's ELF in place and `size` reports it as if it were the new one.  Every
@@ -23,8 +23,6 @@
 #   tools/build_sweep.sh                 # every target + lint
 #   tools/build_sweep.sh --no-lint       # builds only
 #   tools/build_sweep.sh -j4             # pass jobs through to make
-#
-# SPDX-License-Identifier: Apache-2.0
 
 set -u
 

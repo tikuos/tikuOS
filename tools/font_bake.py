@@ -315,7 +315,7 @@ def main() -> int:
             gw = cell_width
         # Pad: storage is always cell_width columns (sparse for narrow
         # glyphs). Render the whole canvas; only the first gw columns
-        # carry per-glyph pixels but we still allocate cell_width columns.
+        # carry per-glyph pixels but cell_width columns are still allocated.
         packed = pack_glyph_columns(rows, cell_width, bytes_per_column)
         glyph_bytes.extend(packed)
 
