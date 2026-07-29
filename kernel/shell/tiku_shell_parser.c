@@ -5,33 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_parser.c - Command-line text parser implementation
+ * tiku_shell_parser.c - command-line text parser.
  *
- * Splits a line into tokens, matches the first token against the
- * registered command table, and on a miss falls through to the
- * FRAM-backed alias table. Alias bodies may contain ';'
- * separators that the parser splits and re-executes one piece at
- * a time (recursively), bounded by an alias-depth counter so a
- * runaway alias-of-alias cannot blow the stack.
- *
- * The parser is deliberately transport-agnostic: it never reads
- * input or touches hardware.  The shell process feeds it a single,
- * already-assembled, mutable line; the parser tokenises that line in
- * place (writing NUL bytes at token boundaries, so the caller's
- * buffer is clobbered) and emits any output — only an unknown-command
- * message in the common path — through SHELL_PRINTF, which routes to
- * whichever I/O backend is active.  Tokenisation honours double- and
- * single-quoted spans so an argument may contain spaces, and caps the
- * argument count at TIKU_SHELL_MAX_ARGS.
- *
- * Dispatch order is fixed and intentional: built-in commands are
- * matched before the alias table, so a misconfigured alias can never
- * shadow a built-in such as "help" or "reboot".  Category-header rows
- * in the table (handler == NULL) are skipped during matching.  Only
- * on a built-in miss is the first token looked up as an alias; an
- * alias body is then re-fed through the parser one ';'-separated piece
- * at a time, with a depth guard (ALIAS_DEPTH_MAX) bounding nested
- * alias-of-alias expansion.
+ * Tokenises a mutable line in place, honouring quoted spans, then matches the
+ * first token.  Built-ins are matched BEFORE aliases, so a misconfigured alias
+ * cannot shadow help or reboot; alias-of-alias expansion is depth-bounded.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

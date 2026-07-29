@@ -7,17 +7,14 @@
  *
  * tiku_basic_cursor.inl - the parse-cursor vocabulary.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c
- * (before every other parsing piece).
+ * The interpreter threads one cursor through the lexer, the expression parser and
+ * every statement handler.  These inline helpers name the raw pointer operations
+ * so call sites read as intent -- peek, advance, match -- not as mechanics.
  *
- * The interpreter threads ONE cursor -- `const char **p` -- through
- * the lexer, the expression parser, and every statement handler.
- * These inline helpers name the handful of raw pointer operations
- * the whole parser is built from, so call sites read as intent
- * (peek / advance / match) rather than as pointer mechanics
- * (**p / (*p)++ / *(*p + 1)).
- *
- * Invariants the vocabulary relies on:
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
+ Invariants the vocabulary relies on:
  *
  *  - The buffer behind the cursor is NUL-terminated.  Bounded
  *    lookahead (cur_peek_at) is therefore safe without a length:
@@ -43,8 +40,8 @@
  *    cur_rewind() to un-consume everything since the mark.  A probe
  *    that cannot fail needs no mark.
  *
- * SPDX-License-Identifier: Apache-2.0
  */
+
 
 /*---------------------------------------------------------------------------*/
 /* PEEK -- look, consume nothing                                             */

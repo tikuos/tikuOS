@@ -7,36 +7,9 @@
  *
  * tiku_basic_run.inl - the RUN loop, factored as a resumable step machine.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * The program executes in ascending line-number order.  Historically
- * this was a single blocking `while` loop (exec_run) that ran to
- * completion inside one shell-process dispatch -- which froze the
- * scheduler for the whole run and forced a 100k-iteration cap and
- * manual watchdog kicks to stay alive.
- *
- * It is now split into three pieces so the same walk can be driven
- * two ways:
- *
- *   basic_run_begin()  - reset run state, allocate nothing, pick the
- *                        first line.  Returns -1 (with a message) if
- *                        there is no program.
- *   basic_run_step()   - advance the program by exactly ONE line:
- *                        execute its statements, trap errors through
- *                        ON ERROR, advance the PC, then poll the
- *                        EVERY / ON CHANGE reactive table.  Returns
- *                        RUNNING / DONE / BROKEN.  All state lives in
- *                        file-static globals, so a step is fully
- *                        resumable across a yield.
- *   basic_run_end()    - clear basic_running.
- *
- * exec_run() drives the step machine synchronously (begin; while step;
- * end) with the classic iteration guard + inline Ctrl-C poll, so every
- * existing caller -- the REPL `RUN`, autorun, and embedded run_source --
- * behaves byte-for-byte as before.  The shell-mode driver
- * (tiku_basic_mode_*) drives the SAME step function one batch per poll
- * tick, yielding to the scheduler between batches and routing Ctrl-C
- * through the shell loop instead of the inline poll (basic_run_shell_mode).
+ * begin, step and end split the walk so it can be driven two ways: exec_run()
+ * runs it synchronously for the REPL and autorun, while the shell mode drives the
+ * same step a batch per tick.  All state is file-static, so a step survives a yield.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

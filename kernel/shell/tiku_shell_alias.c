@@ -5,30 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_alias.c - FRAM-backed shell alias table
+ * tiku_shell_alias.c - NVM-backed shell alias table.
  *
- * Implements the user-defined command shortcuts the shell parser
- * consults after a built-in command lookup misses.  An alias maps a
- * short name to a body string (which may itself chain commands with
- * ';'); the parser substitutes the body and re-dispatches it.
- *
- * Storage layout: a fixed-size array of TIKU_SHELL_ALIAS_MAX slots in
- * the .persistent (FRAM) section, paired with a 32-bit magic word for
- * first-boot detection.  Each slot holds a NUL-terminated name
- * (up to TIKU_SHELL_ALIAS_NAME_MAX chars) and a NUL-terminated body
- * (up to TIKU_SHELL_ALIAS_BODY_MAX chars); a slot is free exactly when
- * its name is empty (name[0] == '\0').  Lookup is a linear scan with
- * strcmp() name matching; there is no ordering or hashing.
- *
- * Persistence model: because the table lives in FRAM, aliases survive
- * reset, brownout, and power loss.  Every mutator (init prime, set,
- * clear) brackets its FRAM writes with tiku_mpu_unlock_nvm() /
- * tiku_mpu_lock_nvm() so the MPU keeps NVM write-protected the rest of
- * the time; read paths (lookup, get, count) touch FRAM directly but
- * never write, so they need no unlock.  The magic word distinguishes a
- * virgin or reflashed FRAM from a real persisted table: when it does
- * not match at init, every slot is emptied and the magic is stamped so
- * the prime runs exactly once per FRAM lifetime.
+ * A fixed array of slots in .persistent behind a magic-word gate, so aliases
+ * survive power loss and a virgin store primes exactly once.  Every mutator
+ * brackets its writes with the NVM unlock; read paths never write, so they do not.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

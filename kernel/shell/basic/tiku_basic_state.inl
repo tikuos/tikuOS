@@ -7,14 +7,9 @@
  *
  * tiku_basic_state.inl - core types and module-level state.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Defines the line / FOR-frame / loop-frame / DEF-FN / array
- * structs, the arena-backed pointers (`prog`, `basic_vars`, ...),
- * the FRAM-backed persistent buffers, and all the interpreter
- * status flags (basic_running, basic_pc, basic_error, AUTO state,
- * ON ERROR handler, EVERY / ON CHANGE registries, TRACE, DATA
- * cursor).
+ * Defines the line, frame, function and array structs, the arena-backed pointers,
+ * the durable buffers, and every interpreter status flag -- the program counter,
+ * error state, reactive registries, trace and DATA cursor.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

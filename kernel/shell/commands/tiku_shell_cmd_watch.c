@@ -5,37 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_watch.c - "watch" command implementation
+ * tiku_shell_cmd_watch.c - "watch" command implementation.
  *
- * Live view of a VFS node, rebuilt on the watch primitive.  Two
- * modes, chosen automatically from the node:
- *
- *   - EVENT mode (node has a write handler): subscribes via
- *     tiku_vfs_watch() and prints on every TIKU_EVENT_VFS — the
- *     value appears the moment a write lands, with zero work in
- *     between.
- *   - INTERVAL mode (read-only / sensor node): re-reads and prints
- *     every N seconds, counted in shell poll ticks.
- *
- * History note: the original implementation ran a synchronous
- * busy-wait loop INSIDE the shell protothread — while a watch was
- * active the CPU spun at full power, no timer events were
- * delivered, and jobs/rules/TCP all stalled until Ctrl+C.  The
- * rebuild turns watch into a shell-loop MODE: the command returns
- * immediately, the shell keeps sleeping between ticks/events, and
- * everything else (rules, jobs, even new commands) keeps running
- * while the watch streams.  Keystrokes during a watch are consumed
- * by the mode — Ctrl+C cancels it, everything else is discarded —
- * so the interactive feel of the old modal watch is preserved.
- *
- * Subscription ownership: the watch subscribes as the shell
- * process, the same subscriber the rules engine uses.  The rules
- * engine re-arms wholesale with tiku_vfs_unwatch_all() after any
- * rule mutation, which also drops this command's subscription;
- * watch_tick() therefore re-subscribes idempotently every tick
- * (an 8-slot scan, free at this scale) — self-healing within one
- * poll period.  A write landing inside that gap is not displayed,
- * which is acceptable for a live view: the next write re-rings.
+ * A non-blocking shell-loop mode, not a busy-wait: writable nodes stream on every
+ * write, read-only nodes re-read on an interval, and the shell keeps sleeping and
+ * servicing rules and jobs meanwhile.  Ctrl+C cancels; other keys are consumed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

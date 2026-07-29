@@ -5,41 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_mode.inl - BASIC as a non-blocking shell-loop MODE.
+ * tiku_basic_mode.inl - BASIC as a non-blocking shell-loop mode.
  *
- * NOT a standalone translation unit.  Included LAST from tiku_basic.c
- * (after shell.inl, so basic_session_begin / process_line / the run
- * step machine are all in scope).
- *
- * Historically the interpreter took over the shell for the whole
- * session: `basic` called tiku_basic_repl(), a blocking
- * `while (!basic_quit) { read_line(); process_line(); }` loop that ran
- * inside ONE shell-process dispatch.  For that entire session the
- * scheduler heartbeat was frozen -- which is why read_line, the RUN
- * loop, and INPUT all had to kick the watchdog by hand, and why RUN
- * needed a 100k-iteration cap to keep an infinite reactive program
- * (10 GOTO 10) from wedging the board.
- *
- * BASIC is now a MODE of the shell process, exactly like watch / ping /
- * mqtt: the `basic` command enters the mode and RETURNS, and the shell
- * poll loop drives it one slice per tick --
- *
- *   tiku_basic_mode_active()     - is the shell in BASIC mode?
- *   tiku_basic_mode_feed_char()  - line editor: called for each console
- *                                  byte while in mode (replaces read_line
- *                                  for the prompt; INPUT still uses the
- *                                  nested blocking read_line).
- *   tiku_basic_mode_tick()       - pump up to TIKU_BASIC_MODE_BATCH
- *                                  program steps, then yield.
- *   tiku_basic_mode_enter()      - `basic`      : interactive REPL mode.
- *   tiku_basic_mode_run_saved()  - `basic run`  : run the saved program
- *                                  headless, then leave the mode.
- *
- * The scheduler now runs between every batch of steps, so other
- * processes stay live during a RUN, SLEEP is cooperative, and the
- * iteration cap is gone for the yielding path.  Ctrl-C is delivered by
- * the shell loop (basic_run_shell_mode tells basic_run_step to skip its
- * inline poll).
+ * The `basic` command enters the mode and returns; the shell poll loop then drives
+ * it a batch of program steps per tick.  The scheduler runs between batches, so
+ * other processes stay live during a RUN and no iteration cap is needed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

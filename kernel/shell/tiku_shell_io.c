@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_io.c - I/O abstraction implementation
+ * tiku_shell_io.c - shell I/O abstraction implementation.
  *
- * Provides:
- *   - A lightweight printf that routes through the active backend's putc
- *   - Wrapper functions for input / output / flag queries
- *   - The built-in UART backend (serial terminal, echo + CRLF)
+ * A lightweight printf routed through the active backend's putc, wrappers for
+ * input, output and flag queries, and the built-in UART backend.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

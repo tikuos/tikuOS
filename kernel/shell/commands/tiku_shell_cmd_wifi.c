@@ -5,18 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_wifi.c - "wifi" command implementation
+ * tiku_shell_cmd_wifi.c - "wifi" command implementation.
  *
- * Subcommands:
- *   wifi status           — driver state, MAC, scan count
- *   wifi scan             — trigger a fresh scan; cached results print
- *                           when SCAN_COMPLETE event arrives
- *   wifi list             — show the cached scan results from last scan
- *   wifi help             — usage
- *
- * Implementation just glues to drivers/wifi/cyw43/whd.h's public
- * API: tiku_wireless_status(), tiku_wireless_scan_start(),
- * tiku_wireless_scan_results(). No driver state lives in shell code.
+ * Glue to the wireless driver's public API for status, scan and cached results.
+ * No driver state lives in shell code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

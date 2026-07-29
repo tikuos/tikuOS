@@ -7,22 +7,9 @@
  *
  * tiku_basic_stmt.inl - one exec_<keyword> per BASIC statement.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Covers: PRINT / LET / INPUT, GOTO / GOSUB / RETURN, FOR / NEXT,
- * WHILE / WEND, REPEAT / UNTIL, DIM / DEF FN, DATA / READ /
- * RESTORE, SWAP, PRINT USING, hardware bridges (PIN / DIGWRITE /
- * I2CWRITE / LED / DELAY / SLEEP / REBOOT / POKE / VFSWRITE),
- * reactive registrations (EVERY / ON CHANGE), error handling
- * (RESUME, ON ERROR / ON CHANGE), TRACE, CLS.
- *
- * The big switch (exec_stmt) and the colon-separated runner
- * (exec_stmts) live in tiku_basic_dispatch.inl, after the multi-
- * line IF helpers and the named-slot machinery, since they
- * reference symbols from those pieces.  exec_if and the
- * if_then_scratch buffer are also in tiku_basic_dispatch.inl
- * because exec_if depends on the multi-line IF helpers in
- * tiku_basic_multi_if.inl.
+ * Covers control flow, loops, DIM and DEF FN, DATA and READ, the hardware bridges,
+ * reactive registrations and error handling.  The keyword switch and the
+ * colon-separated runner live in dispatch, since they reference symbols from here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

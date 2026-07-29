@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell.h - Interactive command-line interface (public types and API)
+ * tiku_shell.h - interactive command-line interface (public types and API).
  *
- * The CLI is transport-agnostic: all I/O flows through the pluggable
- * backend in tiku_shell_io.h (UART today, network / LLM channel later).
- *
- * This header declares the pieces other translation units need: the
- * command-handler signature and command-table entry type
- * (tiku_shell_cmd_t), the line/argument sizing macros, the accessor
- * that hands out the static command table, and the one-call service
- * entry point tiku_shell_init().  The table itself, the line editor,
- * and the individual command handlers live in tiku_shell.c and the
- * commands/ directory.
+ * Transport-agnostic: all I/O flows through the pluggable backend in
+ * tiku_shell_io.h.  Declares the handler signature, the command-table entry type,
+ * the sizing macros, the table accessor and tiku_shell_init().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

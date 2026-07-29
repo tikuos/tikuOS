@@ -7,16 +7,9 @@
  *
  * tiku_basic_lex.inl - lexical helpers for Tiku BASIC.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Character predicates (is_alpha / is_digit / is_hex_digit /
- * is_word_cont), case folding, whitespace skipping, escape
- * decoding, keyword matching with word-boundary check, and the
- * unsigned-number / variable-letter parsers.  parse_unum() handles
- * every numeric literal form BASIC understands: plain decimal,
- * C-style 0x.. / 0b.., BASIC-style &H.. / &B.., and (when
- * fixed-point is enabled) decimal literals with a fractional part
- * scaled by TIKU_BASIC_FIXED_SCALE.
+ * Character predicates, case folding, whitespace skipping, escape decoding and
+ * keyword matching with a word-boundary check.  parse_unum() covers every literal
+ * form: decimal, C-style and BASIC-style hex and binary, and fixed-point.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

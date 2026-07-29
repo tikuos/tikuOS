@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_sleep.c - "sleep" command implementation
+ * tiku_shell_cmd_sleep.c - "sleep" command implementation.
  *
- * Configures the scheduler's idle hook to enter a low-power mode
- * when no events are pending. Modes are abstract (off / lpm0 /
- * lpm3 / lpm4) and resolved to the platform's real entry function
- * by the CPU HAL.
+ * Configures the scheduler's idle hook to enter a low-power mode when no events
+ * are pending.  Modes are abstract and resolved to the platform's real entry by
+ * the CPU HAL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

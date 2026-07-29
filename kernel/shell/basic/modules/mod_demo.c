@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * mod_demo.c - a runtime-loadable native module (Tier 3 of loadable.md).
+ * mod_demo.c - a runtime-loadable native module.
  *
- * Compiled SEPARATELY from the firmware, at the module carve VMA, with no
- * firmware symbols linked in.  It reaches the interpreter only through the
- * jump table passed to module_init().  The loader copies this image into the
- * carve and calls module_init(&syscalls); the module registers its words and
- * returns.  Handlers here are PURE (no firmware callback), so the module holds
- * no state -- the minimal proof that separately-compiled native code executes
- * from the carve and plugs into BASIC through the ABI seam.
- *
- * Build: arm-none-eabi-gcc -mcpu=cortex-m33 -mthumb -ffreestanding -nostdlib
- *        -T mod_demo.ld ... ; objcopy -O binary.  See the Makefile module block.
+ * Compiled separately from the firmware at a fixed address with no firmware
+ * symbols linked, reaching the interpreter only through the jump table passed to
+ * module_init().  Its handlers are pure, so the module holds no state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

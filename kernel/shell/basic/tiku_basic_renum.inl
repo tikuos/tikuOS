@@ -7,14 +7,9 @@
  *
  * tiku_basic_renum.inl - RENUM with line-reference rewriting.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Renumbers program lines from a given start with a given step and
- * rewrites every GOTO / GOSUB / IF..THEN <line> / ON..GOTO target
- * to track the new numbering.  GOTO references that don't match
- * any existing line are left alone -- they were already broken;
- * we don't want to break them harder by mapping them to a random
- * new number.
+ * Renumbers from a start with a step and rewrites every GOTO, GOSUB, THEN and ON
+ * target to track it.  A reference matching no existing line is left alone -- it
+ * was already broken, and remapping it to a live line would break it harder.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

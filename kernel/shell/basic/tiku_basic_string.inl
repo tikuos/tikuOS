@@ -7,25 +7,9 @@
  *
  * tiku_basic_string.inl - string heap and string-expression parser.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Manages the bump-allocated heap that backs A$..Z$ string
- * variables (reset at every RUN start, no GC, no per-line
- * reclamation), the string-expression-start detector used by PRINT
- * and condition parsing, and the recursive-descent parser for
- * string expressions (literals, variables, LEFT$ / RIGHT$ / MID$ /
- * CHR$ / STR$ / FSTR$ / HEX$ / BIN$, concatenation with `+`, array
- * indexing).
- *
- * The whole TU is gated on TIKU_BASIC_STRVARS_ENABLE.  When off,
- * none of these symbols are emitted and PRINT falls back to
- * numeric-only.
- *
- * The forward declarations near the top tie this piece to symbols
- * defined further down the orchestrator (parse_expr in
- * tiku_basic_expr.inl, VFSREAD glue in tiku_basic_stmt.inl) so we
- * can call them from string expressions without reordering the
- * whole include list.
+ * A bump-allocated heap backs the string variables, reset at each RUN start with
+ * no GC and no per-line reclamation.  The whole piece is gated: with strings off,
+ * none of these symbols are emitted and PRINT falls back to numeric only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

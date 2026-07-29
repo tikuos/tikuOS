@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_dns.c - "dns" command implementation (async A-record lookup)
+ * tiku_shell_cmd_dns.c - "dns" command (async A-record lookup).
  *
- * Resolves a hostname to an IPv4 address over SLIP using the DNS stub
- * resolver.  Sends an A-record query to a recursive resolver (default
- * 8.8.8.8, reached through the SLIP host's relay/NAT) and prints the result.
- * The resolver is poll-based and counts each no-reply poll() as one retry
- * toward a 3-strike timeout, so this command paces polling at ~1 Hz (the
- * cadence the library documents) rather than once per shell tick.  I/O flows
- * through the shell's shared RX demux, so the shell stays interactive.
+ * Resolves a hostname over SLIP through the stub resolver.  The resolver counts
+ * each no-reply poll as a retry, so polling is paced at ~1 Hz rather than once per
+ * shell tick, and I/O flows through the shared demux so the shell stays interactive.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

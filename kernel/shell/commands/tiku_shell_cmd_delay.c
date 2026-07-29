@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_delay.c - "delay" command implementation
+ * tiku_shell_cmd_delay.c - "delay" command implementation.
  *
- * Synchronous millisecond wait at clock-tick granularity.  The
- * wait is decomposed into 1-second chunks so the 16-bit
- * tick-deadline arithmetic stays well below the wraparound
- * boundary regardless of TIKU_CLOCK_SECOND.  Each iteration of
- * the inner busy loop polls the active I/O backend so a Ctrl+C
- * (0x03) byte from any transport (UART, telnet, LLM channel)
- * terminates the wait within one tick.
- *
- * Naming: this is intentionally distinct from `sleep`, which
- * configures the kernel's low-power idle mode (LPM3/LPM4).
- * `sleep` *changes power state*; `delay` *just waits*.
+ * A synchronous wait, decomposed into one-second chunks so the 16-bit deadline
+ * arithmetic stays clear of wraparound, polling for Ctrl+C each iteration.
+ * Distinct from `sleep`, which changes power state rather than just waiting.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

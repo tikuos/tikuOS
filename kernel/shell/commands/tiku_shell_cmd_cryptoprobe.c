@@ -7,16 +7,9 @@
  *
  * tiku_shell_cmd_cryptoprobe.c - CRACEN CryptoMaster bring-up probe.
  *
- * Interactive diagnostic for the hardware-crypto backend, in the nvmprobe
- * mold (opt-in, TIKU_SHELL_CMD_CRYPTOPROBE=1 via EXTRA_CFLAGS):
- *
- *   cryptoprobe hwcfg        dump the CRYPTMSTRHW fused-engine words
- *   cryptoprobe sha <hexcfg> hash "abc" with that BA413 config word,
- *                            print the digest + wall time + vector verdict
- *   cryptoprobe sweep        iterate candidate config words until one
- *                            reproduces SHA-256("abc") -- the empirical
- *                            way to pin the engine's config encoding
- *   cryptoprobe bench        time hw vs sw SHA-256 over 4 KB
+ * An interactive diagnostic for the hardware-crypto backend: dump the fused-engine
+ * words, hash with a candidate config, sweep candidates until one reproduces a
+ * known vector, and time hardware against software.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_slip.c - "slip" command: toggle SLIP/IP networking on the
- *                         shared console UART
+ * tiku_shell_cmd_slip.c - "slip" command: toggle SLIP/IP on the console UART.
  *
- * Net is a compile-time choice (TIKU_KIT_NET_ENABLE=1).  `slip` toggles a
- * runtime mode in which the shell's RX loop demultiplexes the single UART:
- * SLIP frames (0xC0-delimited) are routed to the IP stack while ordinary
- * keystrokes still reach the line editor, so the shell stays interactive AND
- * the device is an IP node at the same time (use the slmux host tool to drive
- * both over one wire).  Running `slip` again turns it back to console-only --
- * no reset needed.  `ping` enables this mode automatically.
+ * Toggles a runtime mode in which the RX loop demultiplexes one UART: SLIP frames
+ * reach the IP stack while keystrokes still reach the line editor, so the device
+ * is interactive and an IP node at once.  Running it again returns to console-only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

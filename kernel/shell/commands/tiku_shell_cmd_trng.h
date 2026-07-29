@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_trng.h - "trng" command: dump entropy-source bytes (hex).
+ * tiku_shell_cmd_trng.h - "trng" command: dump entropy-source bytes as hex.
  *
- * A diagnostic for the random-number source that backs the cert-TLS
- * handshake: a hardware TRNG where the die provides one (the RP2350
- * ring-oscillator TRNG, the Apollo CryptoCell-312), or a SHA-256-conditioned
- * software entropy source on parts without one (MSP430).  `trng [n]` prints
- * n (default 16, max 64) random bytes as hex.
+ * A diagnostic for the random source behind the TLS handshake: a hardware TRNG
+ * where the die has one, or the SHA-256-conditioned software source on parts
+ * without.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

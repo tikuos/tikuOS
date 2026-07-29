@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_tree.c - "tree" command implementation
+ * tiku_shell_cmd_tree.c - "tree" command implementation.
  *
- * Walks a VFS subtree depth-first and prints each entry indented
- * by its depth.  Implementation is a small recursive function
- * that takes the current node and the remaining depth budget;
- * the budget caps recursion so a malformed tree (or one that
- * grows beyond expectation on a future device) cannot exhaust
- * the stack on a 2 KB-SRAM target.
- *
- * The VFS exposes `children` and `child_count` directly on the
- * `tiku_vfs_node_t` struct, so we recurse on the in-memory tree
- * rather than re-resolving paths.  This avoids carrying a path
- * buffer down the stack and keeps each frame small (one pointer,
- * one int, one short loop counter).
+ * Walks a VFS subtree depth-first with a depth budget, so a malformed or unusually
+ * deep tree cannot exhaust the stack.  It recurses on the in-memory node pointers
+ * rather than re-resolving paths, which keeps each frame tiny.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

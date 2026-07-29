@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_rules.c - "rules" command implementation
+ * tiku_shell_cmd_rules.c - "rules" command implementation.
  *
- * Lists active rules with format
- *   #ID  on PATH OP VALUE        -> ACTION
- * and supports `rules del <id>` to free a slot.  The condition field
- * (everything before "->") is left-padded to a fixed width so the
- * arrow column is stable for short rules and gracefully extends for
- * long ones.
+ * Lists active rules and frees a slot by id.  The condition field is padded to a
+ * fixed width so the arrow column stays stable for short rules and extends
+ * gracefully for long ones.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

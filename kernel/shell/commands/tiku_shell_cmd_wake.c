@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_wake.c - "wake" command implementation
+ * tiku_shell_cmd_wake.c - "wake" command implementation.
  *
- * Shows which interrupt sources can wake the CPU from low-power
- * mode and which LPM levels each source supports. Wake-source
- * detection goes through the platform-agnostic wake HAL
- * (hal/tiku_wake_hal.h); the tables below describe how each
- * MSP430 LPM level interacts with each source.
+ * Shows which interrupt sources can wake the CPU and which low-power levels each
+ * supports.  Detection goes through the wake HAL; the tables below describe how
+ * each level interacts with each source.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

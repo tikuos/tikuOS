@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_echo.c - "echo" command implementation
+ * tiku_shell_cmd_echo.c - "echo" command implementation.
  *
- * Joins argv[1..argc-1] with single spaces and emits one trailing
- * newline.  This restores Unix `echo` semantics; the previous
- * `echo` alias for `write` (a VFS write) has been retired -- the
- * naming collision was confusing to anyone who had touched a
- * Bourne shell, and `write` is the right name for that operation.
+ * Joins the arguments with single spaces and emits one trailing newline -- Unix
+ * semantics.  The earlier `echo` alias for a VFS write was retired; `write` is
+ * the right name for that.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_select.inl - SELECT CASE / CASE / END SELECT helpers.
+ * tiku_basic_select.inl - SELECT CASE, CASE and END SELECT helpers.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Multi-line case-selection construct:
- *
- *   SELECT CASE expr
- *   CASE 1                 -- match exact value
- *      ...body...
- *   CASE 2, 3              -- match any in comma-separated list
- *      ...body...
- *   CASE 4 TO 6            -- inclusive numeric range
- *      ...body...
- *   CASE ELSE              -- catch-all (must be last arm)
- *      ...body...
- *   END SELECT
- *
- * On entry to SELECT CASE we evaluate the controlling expression,
- * scan forward for the first matching CASE arm (or CASE ELSE, or
- * END SELECT), and jump to the line after that arm.  Reaching a
- * CASE / CASE ELSE / END SELECT during normal flow means the
- * current arm has finished, so we jump past END SELECT.  Nested
- * SELECT CASE is supported via depth-aware scanning.
+ * Evaluates the controlling expression once, scans forward for the first matching
+ * arm and jumps past it; reaching another CASE during normal flow means the arm
+ * finished.  Nesting works through depth-aware scanning.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

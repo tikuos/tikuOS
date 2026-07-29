@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_rftest.c - "rftest" shell command: RF test carrier.
+ * tiku_shell_cmd_rftest.c - "rftest" command: RF test carrier.
  *
- * Drives tiku_radio_arch_carrier_start/stop -- the bench signals every
- * radio bring-up needs: an unmodulated tone for antenna/matching work,
- * XO trim and conducted-power checks, and a modulated carrier for
- * occupied-bandwidth and eye-quality looks.
- *
- * The carrier OUTLIVES the command: "rftest cw 2440" returns to the
- * prompt with the radio still transmitting, and it keeps transmitting
- * until "rftest off".  That is what a spectrum-analyser session wants,
- * but it means the radio is unavailable to beacon/scan/BLE until it is
- * stopped, so every path here says so and "status" reports it.
+ * Drives the bench signals a radio bring-up needs: an unmodulated tone and a
+ * modulated carrier.  The carrier OUTLIVES the command and holds the radio until
+ * stopped, which is what a spectrum-analyser session wants; status reports it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

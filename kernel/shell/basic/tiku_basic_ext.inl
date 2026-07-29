@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_ext.inl - native builtin registry implementation (Tier 2 of
- * kintsugi/loadable.md; public API in tiku_basic_ext.h).
+ * tiku_basic_ext.inl - native builtin registry implementation.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c after
- * tiku_basic_expr.inl (the parser-service shims wrap parse_expr /
- * parse_strexpr / basic_throw).  The registry TABLE lives in
- * tiku_basic_state.inl; the dispatch hooks live at the statement chain's
- * fallthrough (tiku_basic_dispatch.inl) and the function chain's
- * fallthrough (tiku_basic_call.inl).
+ * Not a standalone unit; included from tiku_basic.c after the expression parser,
+ * whose entry points the service shims wrap.  The table lives in the state piece
+ * and the dispatch hooks sit at each chain's fallthrough.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

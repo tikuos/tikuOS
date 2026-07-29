@@ -7,13 +7,9 @@
  *
  * tiku_basic_vfs_file.inl - VFS bridge for /data/basic.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Lets `read /data/basic` and `write /data/basic` round-trip the
- * saved BASIC program text through the same NVM-backed persist
- * store used by SAVE / LOAD.  These two functions are the only
- * non-static symbols defined in this piece -- they are declared in
- * tiku_basic.h.
+ * Lets a read and write of /data/basic round-trip the saved program text through
+ * the same durable store SAVE and LOAD use.  Its two entry points are the only
+ * non-static symbols here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

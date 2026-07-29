@@ -7,15 +7,9 @@
  *
  * tiku_basic_arena.inl - arena allocation for the BASIC working set.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Computes the arena footprint from the configured limits, then
- * lazily allocates the line table, variable table, GOSUB / FOR /
- * loop stacks, EVERY / ON CHANGE registries, string heap, DEF FN
- * table, and array tables out of the AUTO memory tier.  Subsequent
- * BASIC sessions reset the arena and re-allocate, so the cost is
- * "fresh state per entry" without paying permanent BSS for the full
- * feature set.
+ * Not a standalone unit; included from tiku_basic.c.  Computes the footprint from
+ * the configured limits, then lazily allocates every table out of the AUTO tier.
+ * Each session resets and re-allocates, so the feature set costs no permanent BSS.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

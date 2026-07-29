@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_net.inl - networking words for the full BASIC profile
- * (RP2350 / Apollo): UDPSEND (instant), MQTTPUB (tick-driven via a pump
- * helper), HTTPGET$ (bounded blocking). The numeric/string accessors
- * (IPADDR$, NETUP, HTTPGET$, HTTPSTATUS) live in tiku_basic_string.inl /
- * tiku_basic_call.inl; the statements + the cooperative pump live here.
+ * tiku_basic_net.inl - networking statements for the full BASIC profile.
  *
- * Cooperative-blocking rule: exec_run only pumps the console between
- * statements, so any net op that waits MUST pump the console itself or it
- * hard-hangs the board (the ADC-hang class). The MQTT path pumps via
- * basic_net_mqtt_pump(); UDP is instant; HTTP self-pumps the net stack.
- *
- * NOT a standalone translation unit -- included from tiku_basic.c after
- * tiku_basic_stmt.inl (it reuses parse_strexpr / parse_path_literal).
+ * exec_run only pumps the console between statements, so any net operation that
+ * waits must pump it itself or the board hard-hangs.  UDP is instant, MQTT pumps
+ * through a helper, and HTTP self-pumps the stack.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

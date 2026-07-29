@@ -7,20 +7,9 @@
  *
  * tiku_basic_repl.inl - the REPL line dispatcher.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * process_line is the heart of the read-eval-print loop.  It
- * decides whether the input is:
- *
- *   - a numbered statement (store / replace / delete via
- *     prog_store)
- *   - a direct command (BYE / EXIT / QUIT, LIST, NEW, RUN, SAVE,
- *     LOAD, DIR, AUTO, RENUM, HELP)
- *   - or a bare statement that runs immediately via exec_stmts.
- *
- * The HELP body is feature-gated (PEEK / GPIO / ADC / I2C / REBOOT
- * / LED / VFS / strings / fixed-point) so the printed reference
- * list matches what was actually compiled in.
+ * process_line decides whether input is a numbered statement to store, a direct
+ * command, or a bare statement to run immediately.  The HELP body is feature-gated
+ * so the printed reference matches what was compiled in.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

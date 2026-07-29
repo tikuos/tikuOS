@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_parser.h - Command-line text parser
+ * tiku_shell_parser.h - command-line text parser.
  *
- * Tokenizes a raw input line into argc/argv, looks up the first
- * token in the registered command table, and dispatches to the
- * matching handler.  Transport-agnostic — uses SHELL_PRINTF for any
- * output (unknown-command message, etc.).
- *
- * The interface is two calls: tiku_shell_parser_init() latches the
- * command table once at startup, and tiku_shell_parser_execute()
- * processes one assembled line.  Built-in commands are matched before
- * the FRAM-backed alias table, and alias bodies may chain commands
- * with ';'; both of those behaviours live in the implementation.  All
- * tokenisation is done in place in the caller's buffer.
+ * Two calls: init latches the command table once, execute processes one assembled
+ * line.  Transport-agnostic, and all tokenisation happens in place in the
+ * caller's buffer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

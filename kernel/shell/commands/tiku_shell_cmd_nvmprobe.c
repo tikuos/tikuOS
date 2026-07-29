@@ -7,19 +7,8 @@
  *
  * tiku_shell_cmd_nvmprobe.c - "nvmprobe" diagnostic for the carved NVM region.
  *
- * A thin, opt-in affordance to exercise the memory-mapped NVM region backend
- * (substrate B, tiku_nvm_backend_get) from the shell and the TikuBench suite:
- *
- *   nvmprobe [info]             region base + size
- *   nvmprobe read   <off> <len> dump <len> bytes at <off> (text + hex)
- *   nvmprobe write  <off> <txt> program <txt> at <off> via the backend
- *   nvmprobe verify <off> <txt> read back and compare -> PASS / FAIL
- *
- * Reads are pointer derefs into the region; writes go through be->write inside a
- * tiku_mpu_unlock_nvm()/lock_nvm() window (MRAM bootrom program / FRAM store).
- * Direct-MRAM power-cycle durability proof: write -> reset/power-cycle ->
- * verify. Gated by TIKU_SHELL_CMD_NVMPROBE (off by default; enable via
- * EXTRA_CFLAGS="-DTIKU_SHELL_CMD_NVMPROBE=1").
+ * An opt-in affordance to exercise the memory-mapped region backend from the
+ * shell and the bench suite: report its geometry, and read or write at an offset.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

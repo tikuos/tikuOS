@@ -7,13 +7,9 @@
  *
  * tiku_basic_prng.inl - linear-congruential RND() generator.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Lazy-seeded from tiku_clock_time() on first call; uses the
- * Numerical Recipes LCG constants.  Output draws from the high 16
- * bits of the state, which have the best statistical properties of
- * an LCG output.  Cheap on MSP430 (one mul, one add, one shift) and
- * good enough for casual BASIC games / test data.
+ * Lazily seeded from the clock on first call.  Output draws from the high 16 bits
+ * of the state, which are the best-behaved of an LCG, and costs one multiply, one
+ * add and one shift.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

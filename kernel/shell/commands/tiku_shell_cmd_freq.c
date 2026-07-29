@@ -7,14 +7,9 @@
  *
  * tiku_shell_cmd_freq.c - "freq" command: show or set the CPU core frequency.
  *
- *   freq          -- print the current core clock in MHz
- *   freq <mhz>    -- request a core frequency (e.g. 96, or 192 for Ambiq turbo)
- *
- * Setting drives the platform tiku_cpu_freq_init() path: on MSP430 it
- * reconfigures the DCO; on the Ambiq parts it selects the Low-Power / High-
- * Performance perf mode. A request the platform can't honour leaves the clock
- * unchanged and is reported back. (A runtime change can affect peripherals
- * whose clock derives from the core on some parts.)
+ * Setting drives the platform's frequency path -- the DCO on MSP430, the
+ * performance mode on Ambiq.  A request the platform cannot honour leaves the
+ * clock unchanged and is reported back.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

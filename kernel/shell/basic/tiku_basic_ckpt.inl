@@ -5,29 +5,16 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_ckpt.inl - F1: power-failure-transparent RUN.
+ * tiku_basic_ckpt.inl - power-failure-transparent RUN.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c AFTER
- * tiku_basic_persist.inl (it borrows the MPU-unlock discipline) and
- * tiku_basic_arena.inl (it needs BASIC_VAR_TABLE_LEN and the frame
- * struct sizes to bound the checkpoint buffer at compile time).
+ * The interpreter's whole machine state is reified in file-static globals, which
+ * makes it checkpointable: while PERSIST is armed each yield boundary writes that
+ * state to a durable file, and RUN RESUME continues mid-loop across a power cut.
  *
- * The single most important architectural fact about this interpreter is that
- * its entire machine state is reified in file-static globals: the program
- * counter (basic_pc), the FOR / GOSUB / loop stacks, the scalar + string
- * variables, and the error / DATA / PRNG state.  That makes it CHECKPOINTABLE.
- *
- *   PERSIST ON    arms checkpointing.
- *   <run>         at each yield boundary the reified state is written to a
- *                 durable NVM slot ("bck"), gate-last.
- *   RUN RESUME    restores that state and continues from basic_pc, mid-loop,
- *                 across a reset or power cut -- instead of restarting.
- *
- * This is distinct from SAVE / LOAD: those persist the PROGRAM TEXT, this
- * persists the RUNNING MACHINE ("energy scheduled, not survived", expressed as
- * a language feature).  No other embedded BASIC makes the claim.
- *
- * --- Why the serialization is pointer-free ------------------------------------
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
+ --- Why the serialization is pointer-free ------------------------------------
  * Almost every piece of state is a value: basic_pc (u16), the stacks (line
  * numbers, var indices, longs), basic_vars[] (long[]), the named-var name
  * tables (fixed char[]).  The ONLY pointers are the string variables, which
@@ -81,8 +68,8 @@
  * sector-erase wear, MRAM bootrom-call jitter).  The replay window after a
  * power cut grows accordingly -- see the config comment for the arithmetic.
  *
- * SPDX-License-Identifier: Apache-2.0
  */
+
 
 #if TIKU_BASIC_PERSIST_RUN_ENABLE
 

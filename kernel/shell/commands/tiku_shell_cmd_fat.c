@@ -1,21 +1,15 @@
 /*
  * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_fat.c - "fat" command: mount, list and hash the card's
- *                        PC-written FAT32 volume.  F1-F3 of the fat32 plan.
+ * tiku_shell_cmd_fat.c - "fat" command: read a PC-written FAT32 volume.
  *
- *   fat mount            find the volume, derive and print its geometry
- *   fat ls [path]        directory listing
- *   fat hash <path>      sha256 of a file, read through the chain walker
- *   fat runs <path>      contiguous extents -- what the staging path will use
- *
- * THE BINDING IS THE ONLY HARDWARE HERE.  kernel/fs/tiku_fat.c knows nothing
- * about eMMC; this file supplies the eight-line callback that connects it to
- * one, which is what let the parser be developed and regression-tested on a
- * Linux host first (tools/fat32, 34 gates).
+ * The binding is the only hardware here: the parser knows nothing about eMMC and
+ * this file supplies the small callback that connects it to one, which is what let
+ * the parser be developed and regression-tested on a host first.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

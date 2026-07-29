@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_df.h - "df" command (file-store disk-free)
+ * tiku_shell_cmd_df.h - "df" command (file-store disk free).
  *
- * Reports the capacity and usage of the /data file store (TFS): total
- * slot capacity, slots in use, free space, and the durable backing
- * medium.  Companion to "free" (which reports memory tiers): df is the
- * storage/filesystem view, free is the RAM/tier view.
+ * Reports capacity, usage and backing medium for the /data store.  Companion to
+ * "free": df is the storage view, free is the memory-tier view.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_module.c - runtime-loadable native module loader (Tier 3 of
- * kintsugi/loadable.md).
+ * tiku_basic_module.c - runtime-loadable native module loader.
  *
- * INSTALL writes a separately-compiled module image into the executable NVM
- * slot with a gate discipline that keeps every power-cut outcome safe: the
- * 16-byte header (whose magic word is the activation gate) is INVALIDATED
- * first, the body written next, and the real header written LAST.  A cut
- * mid-install therefore always leaves an invalid magic -- never a half-
- * written (or half-REwritten) module that "activates".  ACTIVATE validates
- * the resident image's header and calls its entry point, passing the jump
- * table (the Tier-2 ABI as a struct); the module registers its BASIC words
- * and returns.  The code executes in place from the slot -- no copy-to-RAM
- * -- and survives reboot: a boot only has to re-ACTIVATE (re-register into
- * the volatile Tier-2 table), never re-install.
- *
- * Four install backends, one per NVM personality:
- *   nordic (RRAM):        byte-writable in place -- a store loop behind
- *     the WEN gate (tiku_mpu_unlock_nvm window).
- *   ambiq (MRAM):         not CPU-writable -- spans are programmed via
- *     the bootrom (tiku_nvm_mram_program, SSRAM-staged), and the I-cache
- *     is invalidated before the first XIP fetch of the new code.
- *   rp2350 (QSPI flash):  the slot is one erase sector; staged commit with
- *     the header page left erased, header page programmed LAST (flash can
- *     only clear bits, so the gate cannot go valid early).
- *   msp430 (FRAM):        byte-writable in place behind the MPU unlock
- *     window; natively executable, uncached, no barrier needed.
+ * The image is a store file; where a part still installs into NVM, the 16-byte
+ * header is invalidated first and written last, so a cut leaves an invalid magic
+ * rather than a torn module.  Apollo510 instead copies it into the ITCM to run.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

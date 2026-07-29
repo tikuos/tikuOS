@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_syslog.c - "syslog" command implementation (remote log line)
+ * tiku_shell_cmd_syslog.c - "syslog" command (remote log line).
  *
- * Sends one RFC 3164 syslog datagram (UDP port 514) over SLIP to the SLIP
- * host, at severity INFO / facility LOCAL0 (the library defaults: hostname
- * "tikuOS", tag "os").  Syslog is fire-and-forget -- there is no reply -- so
- * the command sends synchronously and returns; no per-tick driver is needed.
+ * Sends one RFC 3164 datagram over SLIP to the host.  Syslog is fire-and-forget
+ * with no reply, so the command sends synchronously and needs no per-tick driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

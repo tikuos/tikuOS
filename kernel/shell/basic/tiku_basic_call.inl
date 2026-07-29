@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_call.inl - function-call dispatch for numeric exprs.
+ * tiku_basic_call.inl - function-call dispatch for numeric expressions.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * expr_call() is the heart of BASIC's primary-expression layer
- * when the lookahead is a keyword.  It dispatches on the keyword
- * to the matching builtin (ABS, INT, SGN, MIN, MAX, MOD, RND, FMUL,
- * FDIV, SQR, SIN, COS, TAN, LEN, ASC, VAL, ADC, MILLIS, SECS, PIN,
- * DIGREAD, I2CREAD, PEEK, VFSREAD, ...) or to a user-defined
- * DEF FN.  The two helpers parse_call_1arg / parse_call_2arg
- * consume the `(`, the comma-separated arg list, and the `)`.
+ * Not a standalone unit; included from tiku_basic.c.  Dispatches a keyword
+ * lookahead to the matching builtin or a user-defined DEF FN, with helpers that
+ * consume the parentheses and the comma-separated arguments.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

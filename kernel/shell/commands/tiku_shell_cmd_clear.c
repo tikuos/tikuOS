@@ -5,13 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_clear.c - "clear" command implementation
+ * tiku_shell_cmd_clear.c - "clear" command implementation.
  *
- * Writes the ANSI control sequence ESC[2J (erase entire display)
- * followed by ESC[H (move cursor to row 1, column 1).  Both
- * sequences are recognised by every common terminal emulator
- * (picocom, screen, minicom, PuTTY, telnet) and by ANSI-aware
- * pipes; non-ANSI viewers see the raw bytes harmlessly.
+ * Writes ESC[2J then ESC[H.  Every common terminal recognises both, and a
+ * non-ANSI viewer sees the raw bytes harmlessly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

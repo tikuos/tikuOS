@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_util.h - Argument helpers shared by shell command modules
+ * tiku_shell_cmd_util.h - argument helpers shared by command modules.
  *
- * Three one-liners that every command module wants and that used to live as
- * file-static copies inside tiku_shell_cmd_power.c.  When S4 split that file
- * into per-driver modules they had to be shared rather than duplicated four
- * more times.
- *
- * static inline, so each module still gets its own copy with no link-order
- * or one-definition-rule games, and the compiler drops what a module does
- * not use (which is why parse_u32/parse_on_off need no unused attribute).
+ * Three one-liners that were file-static copies until the power command was split
+ * per driver.  They are static inline, so each module gets its own copy with no
+ * one-definition-rule games and the compiler drops what a module does not use.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

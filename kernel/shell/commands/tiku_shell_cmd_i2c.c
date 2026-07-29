@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_i2c.c - "i2c" command implementation
+ * tiku_shell_cmd_i2c.c - "i2c" command implementation.
  *
- * Surfaces the existing tiku_i2c_bus driver as a shell tool for
- * sensor bring-up and bus debugging.  The handler dispatches on
- * argv[1] to one of three operations:
- *
- *   - scan : probe 0x08..0x77 for responders (tiku_i2c_probe, address-only ACK)
- *   - read : tiku_i2c_read into a small stack buffer, print hex
- *   - write: parse remaining argv tokens as bytes, tiku_i2c_write
- *
- * Address parsing accepts both decimal and 0x-prefixed hex (so the
- * same datasheet snippet "0x48" or "72" works either way).  The
- * bus is initialised lazily at standard speed on first call so the
- * user does not have to remember a separate "i2c init" step; the
- * arch backend is idempotent under repeated init.
+ * Surfaces the I2C bus driver for sensor bring-up: scan, read and write.
+ * Addresses parse as decimal or 0x hex, so a datasheet snippet works either way,
+ * and the bus initialises lazily on first use.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

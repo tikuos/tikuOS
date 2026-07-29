@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_io.h - I/O abstraction for the CLI
+ * tiku_shell_io.h - I/O abstraction for the CLI.
  *
- * Decouples the CLI from any specific transport. Backends provide
- * three function pointers (putc, rx_ready, getc) and a flags byte.
- * The active backend can be swapped at run time so the same CLI
- * code works over UART, a network socket, or an LLM/agent channel.
+ * Decouples the CLI from any transport: a backend supplies three function
+ * pointers (putc, rx_ready, getc) plus a flags byte, and the active backend can be
+ * swapped at run time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_hw.inl - lazy hardware-bridge init for ADC / I2C.
+ * tiku_basic_hw.inl - lazy hardware-bridge init for ADC and I2C.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * BASIC doesn't take ownership of peripherals at boot; the first
- * ADC() / I2CREAD / I2CWRITE call brings the corresponding HAL up
- * with a sensible default config (ADC: 12-bit, AVCC; I2C: 100 kHz).
- * Subsequent calls are O(1) thanks to the per-bridge `_ready` flag.
- *
- * GPIO and LED bridges have no init dance and live directly in the
- * statement-execution code.  REBOOT lives next to the watchdog
- * #include and is also inline.
+ * BASIC takes no peripheral at boot: the first call brings the matching HAL up
+ * with a sensible default, and later calls are O(1) behind a ready flag.  GPIO,
+ * LED and REBOOT need no init dance and live with their statements.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

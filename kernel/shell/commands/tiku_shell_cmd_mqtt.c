@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_mqtt.c - "mqtt" command implementation (MQTT 3.1.1 client)
+ * tiku_shell_cmd_mqtt.c - "mqtt" command (MQTT 3.1.1 client).
  *
- * Connects to an MQTT broker over the TCP stack and optionally publishes a
- * message (QoS 0).  The MQTT client is event-driven (callbacks) plus a
- * once-per-second periodic; this command wraps it in the shell's async tick
- * pattern: connect kicks off the TCP handshake + CONNECT, the tick paces
- * mqtt_periodic() and acts on the connection event (the shell loop already
- * drives tcp_periodic()).  All I/O flows through the shared SLIP demux, so the
- * shell stays interactive.
+ * Connects to a broker over TCP and optionally publishes at QoS 0, wrapped in the
+ * shell's async tick pattern so the periodic runs without blocking.  I/O flows
+ * through the shared SLIP demux, so the shell stays interactive.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -7,17 +7,8 @@
  *
  * tiku_shell_cmd_basic.c - "basic" shell command stub.
  *
- * Thin dispatch wrapper that the shell command table calls.  The
- * actual interpreter engine lives at kernel/shell/basic/ and is
- * exposed via tiku_basic.h:
- *
- *   `basic`            -> tiku_basic_mode_enter()        (interactive REPL mode)
- *   `basic run`        -> tiku_basic_mode_run_saved()    (run saved, non-blocking)
- *   `basic resume`     -> tiku_basic_mode_resume_saved() (F1: resume-or-start saved)
- *   `basic run resume` -> same as `basic resume`
- *   `basic run  <path>`-> load a /data file and run it
- *   `basic load <path>`-> load a /data file into the program store
- *   `basic save <path>`-> save the current program to a /data file
+ * A thin dispatch wrapper the command table calls; the interpreter itself lives
+ * under kernel/shell/basic/ and is reached through tiku_basic.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

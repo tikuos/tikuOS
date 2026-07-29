@@ -7,19 +7,9 @@
  *
  * tiku_basic_multi_if.inl - multi-line IF / ELSE / END IF helpers.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * Tiku BASIC supports both single-line IF (THEN body on the same
- * line) and multi-line IF (empty body after THEN, with the body /
- * ELSE block / END IF on subsequent program lines).  This piece
- * holds the depth-aware forward scanner used to find the matching
- * ELSE or END IF, plus the per-keyword detection helpers
- * (multi_if_starts_here, line_is_else_kw, line_is_endif).
- * exec_else_kw and exec_endif are the no-op statements seen by the
- * runner when execution walks naturally onto an ELSE / END IF line.
- *
- * exec_if itself lives in tiku_basic_dispatch.inl since it depends
- * on symbols from this piece.
+ * Holds the depth-aware forward scanner that finds the matching ELSE or END IF,
+ * plus the per-keyword detectors and the no-op statements the runner sees when
+ * execution walks onto an ELSE or END IF line.  exec_if itself lives in dispatch.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

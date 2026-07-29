@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_history.c - "history" command implementation
+ * tiku_shell_cmd_history.c - "history" command implementation.
  *
- * Maintains a circular ring buffer of command strings in FRAM so that
- * history survives across reboots.  The ring uses a magic number to
- * detect first-boot (uninitialised FRAM) and auto-clears in that case.
- *
- * All FRAM writes go through tiku_mpu_unlock_nvm / tiku_mem_arch_nvm_write /
- * tiku_mpu_lock_nvm to respect the kernel's MPU write-protection scheme.
+ * A circular ring of command strings in NVM, so history survives a reboot, behind
+ * a magic word that detects and clears an uninitialised store.  Every write goes
+ * through the MPU unlock window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

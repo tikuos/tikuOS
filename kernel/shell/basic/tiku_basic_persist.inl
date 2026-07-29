@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_persist.inl - default-slot SAVE / LOAD via NVM store.
+ * tiku_basic_persist.inl - default-slot SAVE and LOAD.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * The default unnamed `SAVE` and `LOAD` have two backends, selected by
- * BASIC_NVM_ON_REGION:
- *
- *   region-backed parts (Nordic RRAM, Ambiq MRAM, RP2350 flash)
- *       The program lives at the BASE of the carved NVM region's reserved tail,
- *       as [magic][len][text].  SAVE streams into it through a bounded 4 KB
- *       chunk; LOAD parses the text IN PLACE, since the region is memory-mapped.
- *       Neither direction stages a whole program in RAM.
- *   MSP430 / host
- *       basic_save_buf registered under BASIC_PERSIST_KEY ("prog") in the
- *       FRAM-backed tiku_persist store, whole-buffer in both directions --
- *       there is no mapped region to parse in place.  Registration is lazy
- *       (basic_persist_ensure() on first use); reads and writes then go through
- *       the bracketed MPU unlock.
- *
- * Named SAVE / LOAD live in tiku_basic_named_slots.inl, and are /data files on
- * the region-backed parts.
+ * Two backends: on region-backed parts the program is the store file prog.bas,
+ * streamed out in bounded chunks and parsed in place on load, so neither
+ * direction stages a whole program in RAM; MSP430 and host use the persist store.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

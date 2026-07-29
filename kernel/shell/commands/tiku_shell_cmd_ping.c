@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ping.c - "ping" command implementation (async ICMP echo)
+ * tiku_shell_cmd_ping.c - "ping" command (async ICMP echo).
  *
- * Concurrent, non-blocking ICMP echo over SLIP.  `ping` enables SLIP mode
- * (so the shell's shared RX demux routes frames to the IP stack), registers
- * an ICMP echo-reply callback, and sends one probe per shell tick, printing
- * RTT or a timeout.  Replies arrive through the shared RX path -- the shell
- * stays interactive the whole time.  After `count` probes it prints a summary
- * and releases the callback.
+ * Enables SLIP so the shared demux routes frames to the IP stack, then sends one
+ * probe per shell tick and prints RTT or a timeout.  Replies arrive on the shared
+ * path, so the shell stays interactive throughout.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

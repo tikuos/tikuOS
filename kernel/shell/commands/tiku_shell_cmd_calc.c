@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_calc.c - "calc" command implementation
+ * tiku_shell_cmd_calc.c - "calc" command implementation.
  *
- * Evaluates a space-separated infix expression of integer literals
- * combined by +, -, *, /, %, min, max.  Arithmetic is 32-bit signed;
- * no floating point (the FR5969 has no FPU and softfloat would dwarf
- * the rest of the shell).
- *
- * Strategy: a fixed-size operand/operator stack (four operands, three
- * operators -- the most that fits in the eight-token argv limit) is
- * reduced in two passes.  Pass 1 collapses every high-precedence
- * operator (*, /, %, min, max) left-to-right; pass 2 collapses the
- * remaining additive operators.  This matches schoolbook precedence
- * for the arithmetic ops without needing a full Pratt or Shunting-yard
- * parser.
+ * Evaluates a space-separated infix expression over integer literals with +, -,
+ * *, /, %, min and max.  Arithmetic is 32-bit signed and there is no floating
+ * point, since softfloat would dwarf the command on the smallest parts.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

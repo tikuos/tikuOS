@@ -5,42 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_io_tcp.c - TCP (telnet) I/O backend implementation
+ * tiku_shell_io_tcp.c - TCP (telnet) I/O backend.
  *
- * Provides a CLI I/O backend that listens on TCP port 23.
- * When a connection arrives, the three backend functions
- * (putc / rx_ready / getc) route through tcp_send / tcp_read.
- * When the connection closes the listener is still active, so
- * the next SYN is accepted automatically.
- *
- * Output is buffered in a small TX buffer and flushed when the
- * buffer fills or at the end of each CLI poll cycle, to avoid
- * one-byte TCP segments and TX pool exhaustion.
- *
- * Incoming telnet IAC command sequences (0xFF ...) are silently
- * consumed so raw telnet clients work without negotiation.
- *
- * Backend contract: this module exports a single const
- * tiku_shell_io_t descriptor (tiku_shell_io_tcp) populated with the
- * three function pointers above plus a flags byte of
- * TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO, so the I/O layer expands
- * '\n' to "\r\n" and echoes typed characters — making a raw telnet
- * client behave like a local serial console.  The descriptor is what
- * tiku_shell_io_set_backend() installs; the shell core itself never
- * names this file.  It coexists with the UART backend
- * (tiku_shell_io_uart): exactly one backend is active at a time, and
- * the CLI swaps to this one while a telnet client is connected and
- * back to UART when it disconnects, decided by polling
- * tiku_shell_io_tcp_is_connected() each cycle.
- *
- * Connection lifecycle: a single connection is tracked at a time via
- * the file-scope telnet_conn pointer.  tiku_shell_io_tcp_init() opens
- * the listener once; the TCP stack's event callback latches the
- * connection on CONNECTED and drops it on CLOSED/ABORTED.  A
- * half-close from the peer (CLOSE_WAIT) is completed lazily inside
- * tiku_shell_io_tcp_is_connected() so the slot frees and the listener
- * can accept the next client.  All buffer state is reset on every
- * connect and disconnect so a new session never sees stale bytes.
+ * Listens on port 23 and routes the three backend calls through the TCP stack,
+ * buffering output so a session does not emit one-byte segments.  Telnet IAC
+ * sequences are consumed silently, so a raw client works without negotiation.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

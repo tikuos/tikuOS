@@ -5,38 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell.c - Shell process, command table, and line editor
+ * tiku_shell.c - shell process, command table and line editor.
  *
- * Defines the command table, the "help" built-in, and the TikuOS
- * protothread that performs line editing and feeds completed lines
- * to the parser.  All I/O goes through the tiku_shell_io abstraction
- * so the same code works over UART, a network link, or an LLM pipe.
- *
- * The command table is the heart of this file.  Entries are grouped
- * into visual categories (System, Processes, Filesystem, Hardware,
- * Power, Boot) by inserting CMD_CATEGORY() sentinels whose handler is
- * NULL; the "help" built-in renders those as section titles and the
- * parser skips them during dispatch.  Every real entry is wrapped in
- * an #if TIKU_SHELL_CMD_* guard from tiku_shell_config.h, so the table
- * — and the code it pulls in — shrinks to exactly the commands a given
- * build enables.  This is how the same source spans everything from a
- * tight lower-FRAM MSP430 budget to the roomier FR5994/FR6989 parts
- * and the Cortex-M targets.
- *
- * The shell process itself is a single cooperative protothread driven
- * by a periodic poll timer.  On each TIKU_EVENT_TIMER it drains every
- * byte currently buffered by the active I/O backend, runs a small
- * line-editing state machine (printable echo, backspace, Ctrl+C, and
- * an ANSI CSI decoder for the up/down history arrows), and on CR or LF
- * hands the finished line to tiku_shell_parser_execute().  When the
- * optional jobs/rules subsystems are compiled in, their due timers and
- * reactive conditions are serviced once per poll after the input drain.
- *
- * Because protothread local variables do not survive a yield, all line
- * state that must persist between polls lives in the file-scope `cli`
- * struct rather than on the protothread stack.  The only stack local in
- * the thread body, `ch`, is re-read inside each drain loop iteration and
- * never relied upon across the wait.
+ * A single cooperative protothread drains the active I/O backend each poll, runs
+ * the line editor, and hands finished lines to the parser.  Line state lives in a
+ * file-scope struct because protothread locals do not survive a yield.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

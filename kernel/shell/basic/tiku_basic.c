@@ -7,32 +7,9 @@
  *
  * tiku_basic.c - Tiku BASIC interpreter engine (orchestrator).
  *
- * The interpreter is treated as a complex extension of the kernel
- * shell rather than a single shell command.  It owns ~5 KB of
- * source split across 22 themed pieces (one .inl per concern), all
- * amalgamated into this single translation unit by the chain of
- * #include directives below.
- *
- * The amalgamation keeps file-static identifiers private to BASIC,
- * lets the LTO pass see across the whole engine, and avoids the
- * boilerplate of a separate header per piece.  The order of
- * #includes follows the natural dependency chain:
- *
- *   cursor                          - parse-cursor vocabulary
- *   config / state                  - tunables, types, globals
- *   arena / persist / VFS bridge    - memory + FRAM persistence
- *   peek-poke / hardware / PRNG     - low-level helpers
- *   trig                            - SIN / COS LUT
- *   lex / I/O                       - lexical helpers, line reader
- *   string / call / expr            - expression parsers
- *   program                         - the line table
- *   stmt / multi-IF / RENUM / slots - statement executors
- *   dispatch                        - exec_if + the keyword switch
- *   run / repl / shell              - run loop + REPL + entry points
- *
- * The public API is declared in tiku_basic.h.  The shell command
- * `basic` lives in kernel/shell/commands/tiku_shell_cmd_basic.{c,h}
- * as a thin dispatch stub over these entry points.
+ * The engine is one translation unit amalgamated from themed .inl pieces by the
+ * includes below, which keeps its statics private, lets the optimiser see the
+ * whole engine, and avoids a header per piece.  Include order follows dependency.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

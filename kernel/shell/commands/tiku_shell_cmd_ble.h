@@ -7,10 +7,8 @@
  *
  * tiku_shell_cmd_ble.h - "ble" command: EM9305 radio first-contact probe.
  *
- * Runs the M0/M1 bring-up self-test on the Apollo510 Blue EVB's EM9305 radio:
- * reset it over IOM6 SPI, confirm the SPI status handshake (STS1 == 0xC0), then
- * send an HCI Reset and report the Command Complete. Ambiq-only, gated on
- * TIKU_DRV_BLE_EM9305_ENABLE.
+ * Runs the bring-up self-test on the Blue EVB's radio: reset it over SPI, confirm
+ * the status handshake, then send an HCI Reset and report the completion.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

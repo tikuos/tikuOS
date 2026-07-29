@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_radio154.c - 802.15.4 PHY bring-up command (N1).  Thin
- * veneer over arch/nordic/tiku_ieee154_arch.h; opt-in via
- * TIKU_SHELL_CMD_RADIO154=1 and gated on TIKU_HAS_154 (nRF54L on-die RADIO).
+ * tiku_shell_cmd_radio154.c - 802.15.4 PHY bring-up command.
  *
- * Mirrors the `bleadv` bring-up discipline: readbacks first-class, two-board
- * TikuOS<->TikuOS the oracle.  The demo frame is a raw PHY payload tagged
- * "TK15" (MAC framing/addressing is N2); the peer's `radio154 rx` labels a
- * matching tag so a busy 2.4 GHz band cannot spoof a pass.
- *
- *   radio154 tx [ch] [text]   send one frame (default ch 15, seq++)
- *   radio154 rx [ch] [secs]   listen; dump CRC-OK frames (default ch 15, 10 s)
- *   radio154 ed [ch]          energy detect one channel, or scan 11..26
+ * A thin veneer over the PHY arch layer, mirroring the bleadv discipline: two
+ * boards are the oracle.  The demo frame carries a tag the receiver checks, so a
+ * busy 2.4 GHz band cannot spoof a pass.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_df.c - "df" command implementation
+ * tiku_shell_cmd_df.c - "df" command implementation.
  *
- * Reports the /data file store (TFS) as a filesystem: total slot
- * capacity, used/free, percent used, live-file count and the durable
- * backing medium.  Block accounting follows the store's model -- each
- * file occupies one fixed slot, so "used" = used_files * slot_bytes --
- * with the exact stored byte count shown on a second line.
+ * Reports the /data store as a filesystem.  Block accounting follows the store's
+ * own model -- a file occupies whole slots -- with the exact stored byte count on
+ * a second line.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

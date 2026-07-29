@@ -5,51 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_rules.c - Reactive rule engine implementation
+ * tiku_shell_rules.c - reactive rule engine.
  *
- * This file is the storage and evaluation core behind the shell's
- * "on" and "rules" commands.  A rule is a stored quadruple kept in a
- * fixed-size SRAM slot table (rule_table): a VFS path, a comparison
- * operator, a right-hand-side value, and an action command line.  The
- * tick reads the path, evaluates the relation, and fires the action
- * exactly when the match state transitions from false to true.
- * Numeric comparison is preferred for any operator; equality and
- * inequality fall back to string compare when either side is
- * non-numeric, which is what makes "/sys/power/source == battery"
- * work the same way as "/dev/temp0 > 40".
- *
- * Slot model: rule_table[] holds TIKU_SHELL_RULES_MAX slots, each a
- * tiku_shell_rule_t.  A slot is free when its state field is
- * TIKU_SHELL_RULE_FREE (numerically 0, which is the BSS-zero value),
- * so the table needs no explicit clear at boot.  tiku_shell_rules_add()
- * fills the first free slot and publishes it by writing the state
- * field last; the slot id (its index) is the handle returned to
- * callers and shown by the "rules" command.  Field semantics depend
- * on the operator: for the six comparison operators the value field
- * is the immutable right-hand side and last_match remembers the
- * previous tick's boolean result; for the OP_CHANGED pseudo-operator
- * the value field instead holds the last-seen reading and last_match
- * doubles as a "baseline established" flag.
- *
- * Edge triggering keeps actions idempotent in the common pattern of
- * "on COND <set state>".  A rule that turns an LED on when temp
- * crosses a threshold fires once on the upward crossing; a paired
- * rule with the inverse condition fires once on the downward
- * crossing.  The kernel's VFS does not yet expose change-notify
- * subscribers, so evaluation is polling at shell-tick granularity
- * (~50 ms by default); the rule struct is laid out so a future
- * subscribe-based path can drive the same evaluator without
- * touching storage.
- *
- * Scheduling and scope: tiku_shell_rules_tick() is driven from the
- * shell main loop (gated on TIKU_SHELL_CMD_RULES), after the input
- * drain and the scheduled-job tick, so user keystrokes and "every"
- * jobs run first.  Fired actions are dispatched synchronously through
- * tiku_shell_parser_execute(), i.e. they run as if typed at the
- * prompt.  This engine backs only "on"/"rules"; the sibling "if"
- * (one-shot conditional), "every" (the tiku_shell_jobs scheduler) and
- * "watch" (interactive periodic read) commands are independent and do
- * not store state here.
+ * A rule is a VFS path, an operator, a right-hand side and an action line.  The
+ * tick fires the action only on a false-to-true transition, which keeps the common
+ * "on COND set-state" pattern idempotent.  Comparison is numeric where it can be.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

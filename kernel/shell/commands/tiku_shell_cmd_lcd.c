@@ -5,27 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_lcd.c - "lcd" shell command
+ * tiku_shell_cmd_lcd.c - "lcd" shell command.
  *
- * Sub-commands:
- *   lcd info
- *   lcd clear
- *   lcd char    <pos> <ch>
- *   lcd puts    <text...>            (left-aligned, blanks rest)
- *   lcd putsr   <text...>            (right-aligned, blanks left)
- *   lcd putsa   <pos> <text...>      (partial overwrite at pos)
- *   lcd putu    <decimal>            (right-aligned unsigned)
- *   lcd puti    <decimal>            (right-aligned signed)
- *   lcd puth    <hex> [digits]       (right-aligned uppercase hex)
- *   lcd icon    <id> <on|off|toggle>
- *   lcd icons   clear
- *
- * The text arguments are joined with single spaces, mirroring the
- * way `echo` reconstructs sentences from argv. Numeric arguments
- * accept "0x"-prefixed hex.
- *
- * Designed to pair with TikuBench/tikubench/lcd_test.py, which
- * paints a frame and prompts the user for visual confirmation.
+ * Surfaces the segment-LCD interface: clear, per-position characters, aligned
+ * text and numbers, and icon control where the board declares icons.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

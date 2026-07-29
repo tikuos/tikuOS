@@ -5,13 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ip.c - "ip" command: print the device's IPv4 address
+ * tiku_shell_cmd_ip.c - "ip" command: print the device's IPv4 address.
  *
- * Reads the current address straight from the IPv4 layer
- * (tiku_kits_net_ipv4_get_addr(), initialised at compile time from
- * TIKU_KITS_NET_IP_ADDR and updated by DHCP if used) and prints it as
- * dotted-quad.  The address is reachable from the host once SLIP carries
- * the wire -- run `slip` (or `ping`, which turns it on).
+ * Reads the address from the IPv4 layer and prints it as dotted-quad.  It becomes
+ * reachable from the host once SLIP carries the wire.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

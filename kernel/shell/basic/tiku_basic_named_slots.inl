@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_named_slots.inl - multi-slot named SAVE / LOAD / DIR.
+ * tiku_basic_named_slots.inl - multi-slot named SAVE, LOAD and DIR.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * The default unnamed SAVE / LOAD keep the program in the reserved NVM-region
- * tail, or in the persist store on MSP430 (see tiku_basic_persist.inl).  Named
- * saves have two backends:
- *
- *   region-backed parts -- ordinary /data FILES, "/data/<name>.bas".  Durable,
- *       4 KB each, as many as the file store has room for, and visible to the
- *       shell.  DIR lists /data children with the .bas suffix.
- *   MSP430 / host      -- the original fixed array of TIKU_BASIC_NAMED_SLOTS
- *       slots, each TIKU_BASIC_NAMED_SLOT_BYTES wide, in durable FRAM.
- *
- * Everything here compiles to nothing when TIKU_BASIC_NAMED_SLOTS is 0.
+ * Two backends: ordinary /data files on the region-backed parts, visible to the
+ * shell, and a fixed array of durable slots on MSP430 and host.  The whole piece
+ * compiles to nothing when named slots are disabled.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

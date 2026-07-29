@@ -5,30 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cwd.c - Shell current working directory and path resolution
+ * tiku_shell_cwd.c - shell working directory and path resolution.
  *
- * Maintains the shell's current working directory as a single static
- * SRAM string (always absolute, always starting with '/', at most
- * TIKU_SHELL_CWD_SIZE bytes including the NUL) and provides path
- * resolution so shell commands can accept both absolute and relative
- * paths.  The cwd is process-global to the shell and is not persistent
- * -- it resets to "/" on every reboot.
- *
- * tiku_shell_cwd_resolve() collapses a user-supplied path into a clean
- * absolute path: an input starting with '/' is resolved from root,
- * otherwise from the current cwd; "." components are dropped, ".."
- * pops one component (clamping at root), and runs of '/' are
- * coalesced.  Resolution is purely lexical string manipulation -- it
- * does NOT consult the VFS, so it neither verifies the path exists nor
- * follows any links.  Callers that need an existing target (e.g. the
- * `cd`, `ls`, `read` commands) resolve first and then validate the
- * result with tiku_vfs_resolve(); the absolute form produced here is
- * exactly the input that tiku_vfs_resolve() requires.
- *
- * All three helpers operate in place on a caller-provided buffer and
- * are bounded by the buffer size passed in: when a component would not
- * fit, append_component() truncates silently rather than overflowing.
- * No dynamic allocation is used anywhere in this module.
+ * Keeps one always-absolute cwd string, reset to "/" each boot.  Resolution is
+ * purely lexical -- it collapses ".", ".." and repeated slashes but never consults
+ * the VFS -- so callers needing an existing target must validate the result.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

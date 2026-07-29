@@ -5,31 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_import.inl - IMPORT "<path>": merge a module file of SUBs into
- * the current program (Tier 1 of kintsugi/loadable.md).
+ * tiku_basic_import.inl - IMPORT: merge a module file of SUBs into the program.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c after
- * tiku_basic_renum.inl (reuses renum_rewrite_body / renum_lookup) and
- * before tiku_basic_repl.inl (which dispatches the command).
- *
- * Semantics (v1):
- *   - REPL/immediate-mode command (like LOAD): `IMPORT "/data/mathlib.bas"`.
- *     A numbered `IMPORT` line in a stored program is a syntax error at RUN
- *     (deliberate -- mid-run program mutation would invalidate the F1
- *     checkpoint identity and the READ/DATA cursor).
- *   - MERGE, not replace: the module's lines are renumbered into a free band
- *     above the current program (next multiple of 1000), with internal
- *     GOTO/GOSUB/THEN/ELSE numeric refs rewritten via the RENUM machinery.
- *     `CALL name` and label refs are name-resolved and need no rewrite.
- *   - Module contract, validated before anything is stored: every non-blank
- *     line is a comment or inside SUB .. ENDSUB, lines are in ascending
- *     order, and no SUB name collides with the program or the module itself.
- *     Fall-through into the band is therefore harmless (exec_sub skips SUB
- *     bodies; comments are no-ops).
- *   - Any failure unwinds: a failed IMPORT leaves the program untouched.
- *   - The merged program is the artifact: LIST shows the band, SAVE persists
- *     it inlined (self-contained; the F1 identity CRC covers it, so RESUME
- *     against a different import state is rejected for free).
+ * A merge, not a replace: the module renumbers into a free band above the program
+ * and internal references are rewritten by the RENUM machinery.  The contract is
+ * validated before anything is stored, and any failure leaves the program untouched.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

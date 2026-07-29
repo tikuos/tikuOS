@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_ext.h - native builtin registry for Tiku BASIC (Tier 2 of
- * kintsugi/loadable.md).
+ * tiku_basic_ext.h - native builtin registry for Tiku BASIC.
  *
- * Lets kernel services and tikukits register new BASIC words at boot,
- * without editing the interpreter: statements dispatch after the built-in
- * keyword chain (before implicit-LET), numeric functions after the built-in
- * function chain.  Registered names are never crunched (they are not in the
- * A2 token table), so they work identically in stored programs and immediate
- * mode via match_kw's raw-text path.
- *
- * Rules:
- *   - Names are UPPERCASE identifiers (A-Z, 0-9, '_'; must start with a
- *     letter; no '$' -- string-returning extensions are a future step),
- *     at most TIKU_BASIC_EXT_NAME_MAX-1 chars.
- *   - Names colliding with a crunched keyword are rejected (builtins win).
- *   - Registration is boot-time and idempotent (re-registering a name
- *     updates its handler).  There is no unregister.
- *   - Registered names become reserved words: like builtins, they take
- *     precedence over variables of the same name.
- *   - TIKU_BASIC_EXT_MAX (config) sizes the table; 0 compiles the whole
- *     feature out.
+ * Lets kernel services register new words at boot without editing the interpreter:
+ * statements dispatch after the built-in keyword chain, functions after the
+ * built-in function chain.  Registered names are never crunched, so builtins win.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

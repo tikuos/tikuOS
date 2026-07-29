@@ -5,16 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_jobs.c - "jobs" command implementation
+ * tiku_shell_cmd_jobs.c - "jobs" command implementation.
  *
- * Lists scheduled jobs and allows deletion by id.  Output layout:
- *
- *   #ID  TYPE  INTERVALs   COMMAND (truncated to 25 cols)  [STATUS]
- *
- * The "TYPE INTERVALs" header field is padded to a fixed 13-column
- * width so the command column always starts at the same position
- * regardless of whether the type is "every" (5 chars) or "once"
- * (4 chars), and regardless of how many digits the interval needs.
+ * Lists scheduled jobs and deletes them by id.  The type and interval field is
+ * padded to a fixed width so the command column always starts at the same place.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

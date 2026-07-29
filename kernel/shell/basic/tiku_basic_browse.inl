@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_browse.inl - a tiny HTML-to-text renderer for the BASIC "browser".
+ * tiku_basic_browse.inl - a tiny HTML-to-text renderer for BASIC.
  *
- * Shared by the STRIP$() string function (renders an HTML string into a BASIC
- * string) and the BROWSE statement (renders a fetched page straight to the
- * console).  It strips tags, skips <script>/<style> contents, decodes the
- * common entities, collapses runs of whitespace, and turns block-level tags
- * into line breaks.  Deliberately tiny -- a lynx-style text view of a simple
- * page, not a real HTML parser: unknown tags are dropped, attributes ignored,
- * no CSS/JS/layout.  Included before tiku_basic_string.inl so STRIP$ can use it.
+ * Strips tags, skips script and style contents, decodes common entities and turns
+ * block tags into breaks.  Deliberately tiny -- a lynx-style view of a simple page,
+ * not a parser: unknown tags are dropped and attributes ignored.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

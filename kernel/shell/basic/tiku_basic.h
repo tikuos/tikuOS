@@ -7,29 +7,9 @@
  *
  * tiku_basic.h - public API of the Tiku BASIC interpreter engine.
  *
- * The engine is structured as a complex extension of the kernel
- * shell rather than a single shell command.  It owns its own
- * arena, FRAM-backed persistence, REPL, and embedded autorun
- * paths; the `basic` shell command is just a thin dispatch stub
- * over these entry points (see kernel/shell/commands/
- * tiku_shell_cmd_basic.{c,h}).
- *
- * Three entry points are exposed:
- *
- *   tiku_basic_repl()       - run the interactive REPL over the
- *                             active tiku_shell_io backend.
- *   tiku_basic_autorun()    - load the saved program from FRAM and
- *                             RUN it once (no REPL).
- *   tiku_basic_run_source() - parse a multi-line source string
- *                             (build-time BASIC_PROGRAM=foo.bas
- *                             firmware path) and RUN it.
- *
- * Plus the FRAM-backed persistence is also exposed as a VFS file
- * node so the saved program text can be read / written through the
- * normal `read /data/basic` / `write /data/basic` shell commands:
- *
- *   tiku_basic_vfs_read()   - read handler for /data/basic.
- *   tiku_basic_vfs_write()  - write handler for /data/basic.
+ * The engine is a complex extension of the shell rather than one command: it owns
+ * its arena, its durable persistence and its REPL, and the `basic` command is a
+ * thin dispatch stub over the entry points declared here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_peek_poke.inl - PEEK / POKE byte memory access.
+ * tiku_basic_peek_poke.inl - PEEK and POKE byte memory access.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * On MSP430 these go straight to a volatile uint8_t pointer cast
- * from the integer address (the canonical SFR poke).  On the host
- * harness they bounce off a 256-byte simulated buffer so tests can
- * round-trip without crashing on a wild pointer.  The whole file
- * compiles to nothing when TIKU_BASIC_PEEK_POKE_ENABLE is 0.
+ * On target these go straight to a volatile pointer cast from the address; on the
+ * host harness they bounce off a small simulated buffer so tests round-trip
+ * without a wild pointer.  Compiles to nothing when the feature is off.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_program.inl - line table + accessors.
+ * tiku_basic_program.inl - the line table and its accessors.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * `prog` is a flat array of basic_line_t with `number == 0`
- * marking empty slots.  prog_store inserts / replaces / deletes
- * lines; prog_next_index walks forward in numeric order;
- * prog_find_exact looks up by line number; prog_list streams the
- * program through the shell I/O (used by the LIST command).  All
- * callers go through these helpers, so the array layout is
- * encapsulated.
+ * A flat array of lines with number 0 marking an empty slot, plus helpers to
+ * store, walk in numeric order, look up and list.  Every caller goes through
+ * them, so the array layout stays encapsulated.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

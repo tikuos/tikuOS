@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ntp.c - "ntp" command implementation (async SNTP query)
+ * tiku_shell_cmd_ntp.c - "ntp" command (async SNTP query).
  *
- * Fetches wall-clock time from an SNTP server over SLIP and sets the system
- * RTC (tiku_rtc_set_seconds) so date-dependent consumers -- TLS certificate
- * validity, /sys/time, BASIC DATE$/NOW -- get a real clock.  Accepts either a
- * dotted IPv4 address or a hostname; a hostname is resolved first via the DNS
- * stub resolver (a public resolver reached through the SLIP host's relay/NAT),
- * then the SNTP query is sent to the resolved address.  With no argument it
- * queries a default public server (TIKU_SHELL_NTP_SERVER, time.google.com) so
- * a bare `ntp` works over a real internet bridge.  Both the DNS and NTP
- * libraries are poll-based and treat each no-reply poll() as one retry toward
- * a 3-strike timeout, so this command paces polling at ~1 Hz (the cadence the
- * libraries document) rather than once per shell tick.  All I/O flows through
- * the shell's shared RX demux, so the shell stays interactive throughout.
+ * Fetches wall-clock time over SLIP and sets the system RTC, so TLS validity,
+ * /sys/time and the BASIC date words get a real clock.  A hostname is resolved
+ * first; polling is paced at ~1 Hz because each no-reply poll counts as a retry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,14 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_config.h - compile-time tunables for the Tiku BASIC
- *                       interpreter engine.
+ * tiku_basic_config.h - compile-time tunables for the BASIC engine.
  *
- * Every macro is `#ifndef`-guarded so a build can override it
- * through -D flags or EXTRA_CFLAGS.  They control buffer sizes,
- * optional language features (string vars, DEF FN, arrays,
- * fixed-point), and which hardware bridges (GPIO / ADC / I2C / LED
- * / VFS / REBOOT) are compiled in.
+ * Every macro is #ifndef-guarded so a build can override it.  They control buffer
+ * sizes, optional language features and which hardware bridges are compiled in.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

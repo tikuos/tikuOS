@@ -7,21 +7,9 @@
  *
  * tiku_basic_shell.inl - public engine entry points.
  *
- * NOT a standalone translation unit. Included from tiku_basic.c.
- *
- * Three entry points are exposed via tiku_basic.h:
- *
- *   tiku_basic_repl()       - run the interactive REPL until BYE
- *                             or Ctrl-C at the prompt.
- *   tiku_basic_autorun()    - load the saved program from FRAM and
- *                             RUN it once (no REPL).
- *   tiku_basic_run_source() - parse a multi-line source string
- *                             (build-time BASIC_PROGRAM=foo.bas
- *                             firmware path) and RUN it.
- *
- * All three call basic_session_begin() to reset interpreter state
- * and lazily allocate the AUTO-tier arena that backs the line table,
- * variable table, and stacks.
+ * The REPL, the saved-program autorun and the embedded source runner.  All three
+ * call basic_session_begin() to reset interpreter state and lazily allocate the
+ * AUTO-tier arena behind the line table, variables and stacks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

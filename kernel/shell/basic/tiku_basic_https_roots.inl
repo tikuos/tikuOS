@@ -7,28 +7,9 @@
  *
  * tiku_basic_https_roots.inl - the HTTPS trust store, loaded from /data.
  *
- * NOT a standalone translation unit.  Included from tiku_basic_https.inl.
- *
- * WHAT CHANGED AND WHY.  This file used to BE the trust store: 8,252 lines of
- * generated C holding 120 CA root certificates, 128,820 bytes of DER, compiled
- * into .rodata.  That turned certificates -- third-party data with expiry dates
- * -- into program text, with two consequences.  It was the single largest thing
- * in the cert-TLS image (307,637 B against a 256 KB code window, 127.7 KB of it
- * this file), and trust could only be changed by reflashing, which is the wrong
- * lifecycle for something that gets revoked.
- *
- * Certificates are DATA, so they are now a named file in the one store:
- * /data/roots.bin, built by tools/gen_roots.py and provisioned over the shell's
- * binary transfer.  Same bytes, same 120 roots -- gen_roots.py --self-test packs
- * this file's former contents and requires the round trip to reproduce every
- * byte, so the migration cannot quietly change what the firmware trusts.
- *
- * NO EMBEDDED FALLBACK, deliberately.  Keeping a .rodata copy "just in case"
- * would mean the blob still sized the code window, which is the entire problem
- * being removed.  A board without roots.bin refuses HTTPS with a named error
- * rather than silently trusting nothing (which reads as a network fault) or
- * anything (which is worse).  Provisioning needs no radio, so a virgin board is
- * always recoverable over the console.
+ * Certificates are data with expiry dates, so the 120 CA roots live in
+ * /data/roots.bin rather than .rodata.  There is deliberately no embedded
+ * fallback: a board without the file refuses HTTPS by name instead of guessing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

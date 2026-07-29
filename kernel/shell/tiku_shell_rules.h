@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_rules.h - Reactive rule engine for the shell
+ * tiku_shell_rules.h - reactive rule engine for the shell.
  *
- * A reactive rule is a stored "if VFS_path OP value then run COMMAND"
- * triple.  Rules are evaluated on every shell tick: the configured
- * VFS path is read, the relation is checked against the right-hand
- * side, and the action is dispatched through the shell parser
- * exactly when the condition transitions from false to true
- * (edge-triggered).  This makes rules safe to combine with side-
- * effecting actions: a rule that turns on an LED when a temperature
- * threshold is crossed will not fire repeatedly while the temperature
- * stays above threshold.
- *
- * Rule storage today is SRAM-only; the structure leaves room for a
- * later FRAM-backed migration with a magic-number ring like the
- * history subsystem.
+ * A rule is "if VFS_path OP value then run COMMAND", evaluated every shell tick
+ * and dispatched only on a false-to-true transition, so an action with side
+ * effects fires once per crossing rather than every tick.  Storage is SRAM-only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

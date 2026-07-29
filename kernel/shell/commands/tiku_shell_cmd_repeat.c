@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_repeat.c - "repeat" command implementation
+ * tiku_shell_cmd_repeat.c - "repeat" command implementation.
  *
- * Loop dispatcher: builds a single command-line string from the
- * trailing argv tokens and re-runs it through the shell parser N
- * times.  The parser tokenises in place, so each iteration must
- * copy the template into a fresh writable buffer; we keep one
- * 80-byte stack buffer for the template (built once from argv)
- * and one for the per-iteration scratch (memcpy from template,
- * then handed to the parser).
- *
- * Bounds:
- *   - Count:    1..TIKU_SHELL_REPEAT_MAX_COUNT (default 1000)
- *   - Recursion: TIKU_SHELL_REPEAT_DEPTH_MAX (default 2)
- *
- * Ctrl+C is polled at the top of every iteration so a long-running
- * loop can be aborted without waiting for the inner command to
- * finish.  The body command may itself be a built-in, an alias,
- * or another control-flow command (`if`, `every`, etc.).
+ * Rebuilds the trailing tokens into a template and re-runs it through the parser.
+ * The parser tokenises in place, so each iteration copies the template to fresh
+ * scratch.  Ctrl+C is polled per iteration; count and recursion are both bounded.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

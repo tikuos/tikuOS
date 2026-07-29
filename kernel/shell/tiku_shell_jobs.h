@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_jobs.h - Periodic and one-shot scheduled shell commands
+ * tiku_shell_jobs.h - periodic and one-shot scheduled shell commands.
  *
- * The jobs subsystem is a tiny in-process scheduler that re-dispatches
- * stored command lines through the shell parser at user-defined
- * intervals.  It is driven by a tick called from the shell main loop
- * (so it inherits the shell's cooperative scheduling and shares its
- * I/O backend with no extra synchronisation).
- *
- * Two job types are supported:
- *   - JOB_EVERY : recurring; fires every interval_sec, forever (until
- *                 explicitly deleted).
- *   - JOB_ONCE  : single-shot; fires once after interval_sec, then
- *                 the slot is automatically reclaimed.
- *
- * Storage is a fixed-size SRAM array; jobs do not persist across
- * reboots.  Commands stored in jobs go through the same parser as
- * interactive input, so any registered command (including aliases)
- * may be scheduled.
+ * A tiny in-process scheduler driven by a tick from the shell main loop, so it
+ * inherits cooperative scheduling and needs no synchronisation.  Jobs live in SRAM
+ * and do not survive a reboot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

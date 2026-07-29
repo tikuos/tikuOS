@@ -5,45 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_jobs.c - Periodic and one-shot job scheduler
+ * tiku_shell_jobs.c - periodic and one-shot job scheduler.
  *
- * Implements a minimal in-process scheduler for the `every`, `once`,
- * and `jobs` shell commands.  The job table is a small static SRAM
- * array of TIKU_SHELL_JOBS_MAX slots; each slot stores a job type, an
- * interval in seconds, a wall-clock deadline, and the command line to
- * re-dispatch.  A slot is free exactly when its type field equals
- * TIKU_SHELL_JOB_FREE (== 0), which is the value the BSS zero-fill
- * leaves at boot, so no explicit init pass is required.
- *
- * Job lifecycle: tiku_shell_jobs_add() (directly or via the argv
- * helper) claims the first free slot, copies the command body, and
- * arms the deadline at tiku_clock_seconds() + interval_sec for both
- * job types.  tiku_shell_jobs_tick() is called from the shell's main
- * loop after input drain; it walks the table and, for every slot whose
- * deadline has been reached, re-runs the stored command line through
- * tiku_shell_parser_execute().  An EVERY job is then re-armed to fire
- * again interval_sec later; a ONCE job frees its slot.  Slots can also
- * be released explicitly via tiku_shell_jobs_del() or in bulk via
- * tiku_shell_jobs_clear().
- *
- * Time model: all deadlines are absolute "seconds since system start"
- * from tiku_clock_seconds() (see tiku_clock.h) -- not an epoch wall
- * clock.  This means re-arm is drift-free relative to the firing tick
- * (next = now + interval) but a stalled tick loop can let several
- * fires collapse into a single catch-up fire.
- *
- * Persistence: none.  The table lives in SRAM, so all jobs are lost
- * across reset, brownout, and power loss.  tiku_shell_jobs_init() is a
- * placeholder hook reserved for a future FRAM-backed variant.
- *
- * Re-entrancy: within a single firing, the command line is copied to a
- * local buffer and the slot is advanced (re-armed) or freed *before*
- * the command is dispatched.  So a command that mutates the job table
- * (e.g. `jobs del`, `every`, `once`) observes a coherent table and the
- * current slot cannot double-fire in the same tick.  Long-running shell
- * commands run synchronously, so a job that calls e.g. `watch` blocks
- * all other jobs and the shell prompt -- by design, since this is a
- * cooperative scheduler.
+ * A static slot table re-dispatches stored command lines through the parser when
+ * their deadline passes.  Each firing copies the line out and re-arms or frees the
+ * slot BEFORE dispatch, so a command that edits the table cannot double-fire.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

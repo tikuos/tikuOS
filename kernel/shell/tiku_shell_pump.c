@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_pump.c - shared busy-wait service step (see header)
+ * tiku_shell_pump.c - shared busy-wait service step.
  *
- * The body mirrors the device-proven BASIC MQTT pump it replaces:
- * every ingredient (drain-every-call, 8 Hz tcp pacing, SLIP-aware
- * Ctrl-C) was individually debugged on hardware before being
- * centralised here — see the comments at each step for the failure
- * mode it prevents.
+ * Implements the step described in the header: drain on every call, pace the TCP
+ * timer, and poll for Ctrl-C through the SLIP-aware demux.  Each step's comment
+ * records the failure it prevents.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

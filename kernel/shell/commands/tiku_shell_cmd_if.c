@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_if.c - "if" command implementation
+ * tiku_shell_cmd_if.c - "if" command implementation.
  *
- * Reads a VFS path, compares the result to a literal, and on a
- * truthy comparison rebuilds the trailing tokens into a fresh
- * shell line and dispatches it through the parser.
- *
- * Numeric vs string comparison: if both the VFS-read value and
- * the rhs literal parse cleanly as base-10 integers, the
- * compare is numeric; otherwise it falls back to byte-equal
- * (only == and != make sense in that mode).
+ * Reads a VFS path, compares it to a literal, and on a true result rebuilds the
+ * trailing tokens into a fresh line and dispatches it.  The compare is numeric
+ * when both sides parse as integers, otherwise byte-equal.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

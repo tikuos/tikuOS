@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_dispatch.inl - exec_if + the big keyword switch.
+ * tiku_basic_dispatch.inl - exec_if and the keyword switch.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * exec_if is a full statement on its own (multi-line aware -- it
- * relies on the helpers in tiku_basic_multi_if.inl).  exec_stmt is
- * the keyword dispatcher: it skips whitespace, matches the leading
- * keyword, and delegates to the corresponding exec_<keyword> from
- * tiku_basic_stmt.inl (or to exec_let when the line is a bare
- * assignment).  exec_stmts walks `:`-separated compound statements
- * within a line.
- *
- * Defines the if_then_scratch buffer used by exec_if to NUL-
- * truncate the THEN branch at the ELSE keyword so the THEN body's
- * exec_stmt call doesn't keep walking past it.
+ * exec_stmt matches a leading keyword and delegates to the matching handler, or to
+ * exec_let for a bare assignment; exec_stmts walks colon-separated compound
+ * statements.  exec_if is multi-line aware and truncates THEN at the ELSE keyword.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

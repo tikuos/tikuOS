@@ -5,50 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_bleadv.c - BLE beacon/scan shell command (broadcast facade).
+ * tiku_shell_cmd_bleadv.c - BLE beacon and scan command (broadcast facade).
  *
- * Opt-in (TIKU_SHELL_CMD_BLEADV=1 via EXTRA_CFLAGS); needs a broadcast-
- * capable radio (TIKU_HAS_BLE_ADV -- the nRF54L15 on-die RADIO today).
- * Thin veneer over interfaces/bluetooth/tiku_ble_adv.h; the same facade
- * backs the BASIC BLEBEACON/BLESCAN$ words and the /sys/radio VFS nodes,
- * so anything proven here holds for those too.
- *
- *   bleadv <name> [secs]   demo beacon for ~secs (100 ms bursts, auto-stop)
- *   bleadv on <name> [ms]  background beacon (kernel timer; system sleeps
- *                          between bursts) until `bleadv off`
- *   bleadv off             stop the background beacon
- *   bleadv scan [secs] [prefix]
- *                          passive scan; lists addr/rssi/type/name.  With a
- *                          prefix only advertisers whose name starts with it
- *                          are kept (insert-time filter, so ambient traffic
- *                          cannot flood the table -- the TikuBench
- *                          reverse-nonce oracle's knob)
- *   bleadv observe [secs]  BACKGROUND observer: the IRQ+hw-window engine
- *                          scans while the shell stays interactive; live
- *                          results in /sys/radio/scan (cat it, watch it,
- *                          or hang a rule on it).  secs 0/absent = until
- *                          `bleadv observe off`
- *   bleadv ext <name> [secs]
- *                          extended advertising (R8.3a): ADV_EXT_IND +
- *                          hardware-timed AUX_ADV_IND carrying >31-byte
- *                          AdvData; dbg_aux_us proves the AuxPtr timing
- *   bleadv conn [secs]     L3: advertise connectably, accept a central,
- *                          and HOLD the link (empty-PDU keepalive, CSA#1
- *                          hopping, SN/NESN, supervision).  Blocking;
- *                          connect from nRF Connect.  Reports events/held-ms
- *   bleadv connprobe [secs]
- *                          L1/L2: connectable ADV_IND, hardware-T_IFS
- *                          SCAN_RSP to scanners, and capture+decode a
- *                          central's CONNECT_IND LLData
- *   bleadv csa1            L3 self-test: CSA#1 hops vs an independent ref
- *   bleadv ackfsm          L3 self-test: SN/NESN ack window incl. resend
- *   bleadv phy             probe all four BLE PHYs (1M/2M/S8/S2) with one
- *                          3-channel burst each; prints TX-window iteration
- *                          counts + ratios vs 1M.  ON-DIE proof only:
- *                          legacy adv is 1M-only by spec, so 2M/coded
- *                          bursts are inaudible to compliant scanners
- *                          (kintsugi/radio.md R8.1)
- *   bleadv dbg             silicon + clock + radio readbacks (bring-up)
+ * A thin veneer over the broadcast facade, which also backs the BASIC words and
+ * the /sys/radio nodes, so anything proven here holds for those.  Opt-in, and
+ * needs a broadcast-capable radio.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

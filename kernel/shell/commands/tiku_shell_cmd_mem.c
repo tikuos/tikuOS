@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_mem.c - "peek" and "poke" implementation
+ * tiku_shell_cmd_mem.c - "peek" and "poke" implementation.
  *
- * Both handlers parse an address (decimal or 0x-prefixed hex),
- * then dereference it as a `volatile uint8_t *` for the actual
- * read/write.  No software MPU bypass is performed: reads honour
- * the active region permissions, and writes will silently drop
- * if the destination is configured as read-only (this matches
- * what the application would see if it did the same write
- * directly, so the behaviour at the prompt is faithful to runtime).
- *
- * Address-space note: pointers in the small memory model are
- * 16-bit, so addresses are accepted as uint32_t for parsing
- * convenience but rejected if they exceed 0xFFFF.  Far accesses
- * to HIFRAM (>= 0x10000) would need __data20 pointers and a
- * separate "peek_far" / "poke_far" pair; not included in this
- * minimal version because everyday register and FRAM debugging
- * fits in the low 64 KB.
+ * Parses an address then dereferences it directly, with no MPU bypass: a write to
+ * a read-only region drops exactly as it would from application code, so prompt
+ * behaviour is faithful to runtime.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

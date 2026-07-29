@@ -7,53 +7,9 @@
  *
  * tiku_basic_ble.inl - Bluetooth Low Energy words for BASIC.
  *
- * A tiny BLE vocabulary built on the driver-agnostic facades in
- * interfaces/bluetooth/ -- so these are GENERAL words, not tied to any one
- * radio.  Two independent capabilities light up their own words:
- *
- * TIKU_HAS_BLE (connection-capable: tiku_ble_serial, EM9305 today):
- *   BLEADV name$      start connectable advertising as a BLE serial peripheral
- *   BLESEND s$        send a string to the connected central (flow-controlled)
- *   BLEUP             function (call.inl): 1 when a central is connected+subscribed
- *   BLEAVAIL          function (call.inl): 1 when received bytes are waiting
- *   BLEGET$           function (string.inl): pop bytes the central sent, "" if none
- *
- * TIKU_HAS_BLE_ADV (broadcast: tiku_ble_adv, nRF54L15 on-die radio today):
- *   BLEBEACON name$[,ms[,data$[,dbm]]]  BACKGROUND non-connectable beacon
- *                         (kernel timer; survives RUN ending; board beacons
- *                         while sleeping).  data$ rides in the manufacturer
- *                         data ('TK' company id) -- the broadcast-sensor
- *                         path; dbm sets TX power (discrete steps)
- *   BLESCAN$(secs)    function (string.inl): passive scan -> "addr,rssi,name;"
- *
- * Both:
- *   BLEOFF            stop advertising / beaconing / drop the link
- *   BLEBEACON on a serial-only build maps to its connectionless beacon.
- *
- * Idiomatic loop (run at the UART/USB console; BLE is the data channel):
- *   10 BLEADV "tikuOS"
- *   20 IF BLEUP()=0 THEN 25 ELSE 30    ' wait for a phone to connect + subscribe
- *   25 DELAY 100 : GOTO 20
- *   30 BLESEND "hello from BASIC"
- *   40 IF BLEAVAIL() THEN PRINT "rx: "; BLEGET$()
- *   50 DELAY 50 : GOTO 40
- *
- * Two rules the loop above encodes:
- *  - Gate BLEGET$ on BLEAVAIL().  BASIC's string heap is not GC'd within a RUN,
- *    so `A$=BLEGET$()` every pass (even of "") would exhaust it; BLEAVAIL() is a
- *    numeric predicate that allocates nothing, so we only read when data waits.
- *  - Pace with DELAY.  A RUN is bounded by a 100k-statement anti-runaway cap
- *    (tiku_basic_run.inl); a tight poll spins through it in seconds, so a real
- *    responder paces itself (and a persistent one is better written with EVERY).
- *
- * Cooperative-blocking rule (see tiku_basic_net.inl): the only word that waits
- * is BLESEND, and its wait is the facade's bounded credit-drain -- it kicks the
- * watchdog and gives up after a one-second stall, so it cannot hard-hang the
- * board.  BLEUP/BLEAVAIL/BLEGET$ poll the stack once and return, which is also
- * what keeps the link serviced inside a BASIC poll loop.
- *
- * NOT a standalone translation unit -- included from tiku_basic.c after
- * tiku_basic_net.inl (reuses parse_strexpr, basic_error, SHELL_PRINTF).
+ * General words built on the driver-agnostic facades, not tied to one radio.  Two
+ * independent capabilities light up their own vocabularies: connection-capable
+ * serial words, and broadcast beacon and scan words.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

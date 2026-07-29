@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_watch.h - "watch" command: live view of a VFS node
+ * tiku_shell_cmd_watch.h - "watch" command: live view of a VFS node.
  *
- * Rebuilt on the watch primitive: writable nodes stream
- * event-driven (a print per write, zero work in between),
- * read-only nodes re-read on an interval.  The command is a
- * non-blocking shell-loop MODE — it returns immediately and the
- * shell stays interactive while values stream; Ctrl+C stops it.
- * The shell main loop drives the mode through the hooks below.
+ * Writable nodes stream event-driven, read-only nodes re-read on an interval.
+ * The command returns immediately and the shell main loop drives the mode through
+ * the hooks below, so the shell stays interactive.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

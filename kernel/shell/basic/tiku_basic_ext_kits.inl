@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_ext_kits.inl - bundled native BASIC extensions (Tier 2 of
- * kintsugi/loadable.md).
+ * tiku_basic_ext_kits.inl - bundled native BASIC extensions.
  *
- * The FIRST client of the native builtin registry (tiku_basic_ext.h): a
- * handful of genuinely-useful native words that are NOT interpreter builtins,
- * registered at boot through the SAME public API any kernel service or tikukit
- * uses -- proving the ABI seam end to end.  Nothing here touches the parser's
- * dispatch chain or the crunch/token machinery; adding a word is a handler +
- * one register call, never an edit to the interpreter's #if jungle.
- *
- * External extensions register the same way from their own init (called by the
- * app at boot) and need not touch this file at all; this bundle is the proof
- * of concept, and the default words a full BASIC build ships with.
- *
- * NOT a standalone translation unit -- included from tiku_basic.c after
- * tiku_basic_ext.inl.
+ * The first client of the builtin registry: useful words that are not interpreter
+ * builtins, registered through the same public API any service uses.  Adding a
+ * word is a handler plus one register call, never an edit to the interpreter.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

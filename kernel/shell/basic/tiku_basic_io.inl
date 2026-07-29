@@ -7,13 +7,9 @@
  *
  * tiku_basic_io.inl - shell-I/O helpers for Tiku BASIC.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c.
- *
- * The interpreter takes over the shell I/O for the duration of a
- * session.  This piece holds the blocking line reader used by the
- * REPL and the INPUT statement.  It mirrors the host shell's
- * BACKSPACE / local-echo behaviour and treats Ctrl-C as a hard
- * cancel of the line.
+ * Holds the blocking line reader used by the REPL and by INPUT.  It mirrors the
+ * host shell's backspace and echo behaviour and treats Ctrl-C as a hard cancel of
+ * the line.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_pump.h - one cooperative service step for busy-wait loops
+ * tiku_shell_pump.h - one cooperative service step for busy-wait loops.
  *
- * Long-running shell/BASIC operations (an MQTT connect, an HTTPS
- * fetch, a blocking receive) busy-wait inside a single command
- * dispatch, which starves every kernel service the scheduler would
- * normally run.  Historically each such loop hand-rolled its own
- * "pump" — kick the watchdog, drain the WiFi radio, pace
- * tcp_periodic, poll for Ctrl-C — and the copies drifted: one used
- * the raw console getc instead of the SLIP-aware demux and misread
- * IP payload bytes as Ctrl-C (the MQTTWAIT$ abort bug).  This is the
- * single shared implementation; busy-wait loops call it once per
- * iteration and abort when it returns non-zero.
+ * A long operation that busy-waits inside one command dispatch starves every
+ * kernel service, so each such loop calls this once per iteration and aborts when
+ * it returns non-zero.  One shared implementation, because hand-rolled copies drifted.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

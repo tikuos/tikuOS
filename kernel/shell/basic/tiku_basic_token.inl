@@ -5,24 +5,16 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_token.inl - keyword crunching (A2).
+ * tiku_basic_token.inl - keyword crunching.
  *
- * NOT a standalone translation unit.  Included from tiku_basic.c
- * (before tiku_basic_lex.inl -- match_kw consults the table).
+ * A stored line folds each keyword to a single byte and LIST detokenizes back.
+ * Execution is dual: the matchers accept either the token byte or the spelled-out
+ * word, so immediate mode runs raw and untabled keywords keep working.
  *
- * Classic Microsoft-BASIC line crunching: when a numbered line is stored
- * (prog_store), every keyword in the table below folds to a single byte
- * 0x80+index; LIST / SAVE / TRACE detokenize back to canonical text.  The
- * interpreter's execution paths are DUAL: match_kw (and the line scanners)
- * accept either the token byte or the spelled-out keyword, so
- *
- *   - immediate-mode input (typed, never stored) runs as raw text,
- *   - stored program lines run crunched (keyword match = one byte compare,
- *     statement dispatch = a switch on the byte),
- *   - keywords NOT in the table (rare/large: networking, BLE, crypto, REPL
- *     commands) stay raw in stored lines and keep working via the text path.
- *
- * Crunch rules:
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
+ Crunch rules:
  *   - Only maximal identifier runs fold, and only on an exact, word-bounded
  *     match (PRINTER / TOTAL / FORI never fold -- same word-boundary rule
  *     match_kw itself applies, so semantics are unchanged).
@@ -41,8 +33,8 @@
  * Known (pathological) limitation: a GOTO/GOSUB label spelled exactly like a
  * table keyword (e.g. `print:`) now folds and stops working as a label.
  *
- * SPDX-License-Identifier: Apache-2.0
  */
+
 
 /* Char predicates are defined in tiku_basic_lex.inl (included after us);
  * same-TU forward declarations keep the include order simple. */

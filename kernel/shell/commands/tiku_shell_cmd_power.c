@@ -7,17 +7,9 @@
  *
  * tiku_shell_cmd_power.c - "power": report and steer what the part costs.
  *
- * WHY A COMMAND AND NOT JUST BUILD FLAGS.  The first attempt at measuring the
- * cache and the DC/DC built four firmware images with different -D flags and
- * compared the current draw.  All four measured the same, and the reason took
- * a while to find: one of the two settings had silently not applied, and a
- * build flag is not evidence that a register was written.  An instrument
- * measures milliamps; only the device can say what state produced them.
- *
- * So every knob here is both readable and (where the silicon permits)
- * switchable at run time, which also means one boot can measure a workload
- * both ways instead of comparing across two flashes with everything else
- * subtly different.
+ * Every knob is readable and, where the silicon allows, switchable at run time.
+ * A build flag is not evidence that a register was written, and one boot
+ * measuring a workload both ways beats comparing two flashes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

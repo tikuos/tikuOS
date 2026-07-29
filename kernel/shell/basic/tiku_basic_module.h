@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_module.h - runtime-loadable native module ABI (Tier 3 of
- * kintsugi/loadable.md).
+ * tiku_basic_module.h - runtime-loadable native module ABI.
  *
- * A native module is machine code compiled SEPARATELY from the firmware, at a
- * fixed load address (the module carve), that registers Tier-2 BASIC words at
- * load time.  Because it is separately compiled, it cannot link against
- * firmware symbols -- it reaches every firmware service through a JUMP TABLE
- * (tiku_basic_syscalls_t) passed to its entry point.  This is the exact
- * Tier-2 ABI (tiku_basic_ext.h) re-exposed as a table so a load-time-resolved
- * module can call it.
- *
- * The module image begins with a tiku_module_header_t at the carve base; its
- * init routine is at carve_base + init_off.  The loader validates the header,
- * then calls init(&syscalls); the module registers its words and returns.
- * This header is included by BOTH the firmware and the separate module build,
- * so it stays plain C99 + the Tier-2 handler typedefs.
+ * A module is machine code compiled separately at a fixed address, so it cannot
+ * link against firmware symbols and reaches every service through a jump table
+ * passed to its entry point.  Included by both the firmware and the module build.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

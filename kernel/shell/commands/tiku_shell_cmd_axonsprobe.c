@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_axonsprobe.c - Axon NPU (nRF54LM20B) bring-up probe.
+ * tiku_shell_cmd_axonsprobe.c - Axon NPU bring-up probe.
  *
- * The nRF54LM20B carries the Axon NPU as peripheral NRF_AXONS @ 0x50056000
- * (IRQn 86, MCU power domain).  The PUBLIC register model is only a power
- * wrapper -- ENABLE.EN @ +0x400 and STATUS.READY @ +0x404 ("AXONS is
- * accessible") -- with the first 1 KB reserved and no nrfx HAL, no SVD block
- * and no documentation for the engine itself (the programming model lives in
- * Nordic's Neuton toolchain).  This probe is the on-die recon tool for that
- * unknown, the same role cryptoprobe played for CRACEN:
- *
- *   axonsprobe            ENABLE/STATUS + FICR identity
- *   axonsprobe en         enable, spin READY (bounded), report time-to-ready
- *   axonsprobe off        disable
- *   axonsprobe dump [o n] hex-dump n words of the 4 KB slot from offset o
- *                         (prints each address BEFORE reading: a bus fault
- *                         parks the core and the last line marks the edge)
- *   axonsprobe diff       snapshot the reserved window, enable, wait, then
- *                         print every word that CHANGED (finds live registers
- *                         without a single write)
- *   axonsprobe irq        NVIC-enable IRQ 86 + count what fires on enable
- *
- * READ-ONLY by design: no blind writes into an undocumented engine.  Findings
- * gate the Axon support plan's next phases.
+ * The public register model is only a power wrapper, with no HAL, SVD block or
+ * documentation for the engine itself, so this is on-die recon: enable, dump and
+ * diff the reserved window.  READ-ONLY by design -- no blind writes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

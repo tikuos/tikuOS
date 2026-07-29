@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_changed.c - "changed" command implementation
+ * tiku_shell_cmd_changed.c - "changed" command implementation.
  *
- * Synchronous blocking equivalent of an "on changed" rule, useful at
- * the prompt for one-off "wait for next event" debugging.  Polls the
- * VFS path at shell-tick granularity (~50 ms) so the latency-to-
- * detection is bounded by one tick; cancellation via Ctrl+C is
- * detected on every loop iteration and so is sub-tick.
- *
- * Trailing whitespace is stripped from both the baseline and current
- * reads so a path that returns "23.4\n" reads as "23.4" and does not
- * spuriously appear "changed" simply due to a trailing newline.
+ * A synchronous equivalent of an "on changed" rule, for one-off waits at the
+ * prompt.  Polls at shell-tick granularity and checks for Ctrl+C every iteration.
+ * Trailing whitespace is stripped so a bare newline does not read as a change.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

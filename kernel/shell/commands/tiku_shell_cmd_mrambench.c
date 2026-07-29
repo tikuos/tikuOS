@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_mrambench.c - "mrambench" command implementation (Ambiq).
+ * tiku_shell_cmd_mrambench.c - "mrambench" command (Ambiq).
  *
- * Only compiled on Ambiq (Makefile-gated), so it references the Ambiq-only
- * arch bench directly.  Two modes:
- *   mrambench          time the bootrom MRAM programmer at several spans.
- *   mrambench verify   assert the flush dirty-check skips idle flushes
- *                      (the P0 win): idle flush programs MRAM 0 times, a real
- *                      .uninit change programs exactly once.
- *
- * Both bracket the bench/flush in the NVM unlock window the bootrom program
- * requires; the closing lock_nvm re-commits the mirror (its dirty-check skips
- * the program when .uninit did not change).
+ * Times the bootrom MRAM programmer at several spans, and verifies that the flush
+ * dirty-check skips idle flushes.  Both bracket the work in the NVM unlock window
+ * the programmer requires.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

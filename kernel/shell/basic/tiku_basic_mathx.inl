@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_mathx.inl - extended fixed-point math for the full BASIC
- * profile: LOG (natural log), EXP, POW, ATAN. Q.3 fixed-point (scale
- * 1000), modeled on the bit-iterative SQR and the LUT trig already in
- * tiku_basic_call.inl / tiku_basic_trig.inl. All intermediates use
- * 64-bit (long long); results are coarse (~3 decimals) by the Q.3
- * representation. NOT a standalone translation unit -- included from
- * tiku_basic.c BEFORE tiku_basic_call.inl so the call dispatch can
- * reach these helpers.
+ * tiku_basic_mathx.inl - extended fixed-point math for the full BASIC profile.
+ *
+ * LOG, EXP, POW and ATAN in Q.3 fixed point, in the same style as the bit-iterative
+ * SQR and the LUT trig.  Intermediates are 64-bit and results are coarse to about
+ * three decimals, which is what the representation allows.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

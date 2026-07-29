@@ -5,14 +5,9 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_bt.c - "bt" command implementation
+ * tiku_shell_cmd_bt.c - "bt" command implementation.
  *
- * Subcommands:
- *   bt status   — chip BT MAC + HCI/LMP version + BTFW string
- *   bt help     — usage
- *
- * Implementation just glues to interfaces/bluetooth/tiku_bt.h's public API.
- * No driver state lives in shell code.
+ * Glue to the public Bluetooth API; no driver state lives in shell code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

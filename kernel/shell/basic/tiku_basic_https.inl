@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_https.inl - HTTPS GET backend for BASIC HTTPGET$.
+ * tiku_basic_https.inl - HTTPS GET backend for BASIC.
  *
- * Drives the certificate-based TLS 1.3 client (tikukits/crypto/tls13) over
- * the TikuOS TCP stack to fetch a page from a real https:// server.  The
- * send/recv callbacks busy-wait while pumping the WiFi RX drain + TCP timers
- * (the cooperative-blocking pattern shared with MQTTPUB), so the console
- * stays alive and the cyw43 RX path keeps flowing during the handshake.
- *
- * Trust anchor: ISRG Root X1 (Let's Encrypt), baked in below.  Certificate
- * validity dates are currently skipped (now=0) until a wall clock (NTP/RTC)
- * feeds the verifier.
+ * Drives the certificate-based TLS 1.3 client over the TCP stack.  The send and
+ * receive callbacks pump the radio drain and TCP timers while they wait, so the
+ * console stays alive and the RX path keeps flowing through the handshake.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

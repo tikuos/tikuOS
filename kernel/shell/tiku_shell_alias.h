@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_alias.h - User-defined shell shortcuts (FRAM-backed)
+ * tiku_shell_alias.h - user-defined shell shortcuts (NVM-backed).
  *
- * The shell consults this table after a built-in command lookup
- * fails. If the typed token matches an alias, the parser dispatches
- * the alias body (which may contain ';' separators for chained
- * commands). Built-in commands always win over aliases so a
- * misconfigured alias cannot lock out 'help' or 'reboot'.
- *
- * Storage lives in the .persistent linker section, so aliases
- * survive reset, brownout, and power loss. A magic-word gate
- * disambiguates virgin FRAM from a real persisted table.
+ * Consulted after a built-in lookup fails; the alias body may chain commands with
+ * ';'.  Built-ins always win, so a misconfigured alias cannot lock out help or
+ * reboot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

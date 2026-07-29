@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_nor.c - `power nor ...` verbs
+ * tiku_shell_cmd_nor.c - `power nor ...` verbs.
  *
- * Split out of tiku_shell_cmd_power.c (2316 lines, 31 top-level verbs) by S4
- * of kintsugi/board-device-separation-plan.md.  The verb bodies are moved
- * VERBATIM -- the stage is gated on a before/after diff of every verb's
+ * Split out of the power command, whose top-level verb forwards here.  The verb
+ * bodies were moved verbatim and gated on a before/after diff of every verb's
  * output, so this file deliberately contains no improvements.
- *
- * The `power nor` spelling is unchanged: tiku_shell_cmd_power.c keeps the
- * top-level verb and forwards here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

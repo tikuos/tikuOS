@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_subs.inl - multi-line subroutines with parameters and local
- * variables (full BASIC profile). Generalizes DEF FN's save/restore trick
- * to a block:
+ * tiku_basic_subs.inl - multi-line subroutines with parameters and locals.
  *
- *     SUB name(P1, P2)        ' parameters bound positionally
- *       LOCAL T               ' locals: saved on entry, restored on exit
- *       ...
- *     ENDSUB                  ' restores params+locals, returns to caller
- *
- *     CALL name(10, 20)       ' invoke
- *
- * Scoping model: params and locals are ordinary global slots whose prior
- * values are pushed on a save-stack at CALL/LOCAL and restored at ENDSUB --
- * so parse_var and every existing word stay untouched. A SUB reached by
- * fall-through is skipped to its ENDSUB (the body only runs via CALL).
- *
- * NOT a standalone translation unit -- included from tiku_basic.c after
- * tiku_basic_stmt.inl (reuses parse_var / parse_expr / prog navigation).
+ * Parameters and locals are ordinary global slots whose prior values are pushed on
+ * a save-stack at entry and restored at exit, so every existing word stays
+ * untouched.  A SUB reached by fall-through is skipped; the body runs only via CALL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
