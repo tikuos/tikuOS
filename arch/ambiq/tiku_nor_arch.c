@@ -834,6 +834,19 @@ uint32_t tiku_nor_scan_rxdqs(int with_dqs)
     return mask;
 }
 
+/* Last identity that actually validated, so /sys/flash/id can be READ without
+ * putting a command on the bus.  Only a plausible answer is cached: a zero or
+ * shifted read must not become the file's contents. */
+static tiku_nor_id_t s_id_cache;
+static uint8_t       s_id_valid;
+
+int tiku_nor_id_cached(tiku_nor_id_t *out)
+{
+    if (!s_id_valid) { return -1; }
+    if (out != (tiku_nor_id_t *)0) { *out = s_id_cache; }
+    return 0;
+}
+
 tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
 {
     tiku_nor_id_t id;
@@ -891,7 +904,12 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
 
     if (out) { *out = id; }
     if (rc != TIKU_NOR_OK) { return rc; }
-    return (id.mfr == TIKU_NOR_MFR_ISSI) ? TIKU_NOR_OK : TIKU_NOR_ERR_ID;
+    if (id.mfr == TIKU_NOR_MFR_ISSI) {
+        s_id_cache = id;
+        s_id_valid = 1u;
+        return TIKU_NOR_OK;
+    }
+    return TIKU_NOR_ERR_ID;
 }
 
 /*---------------------------------------------------------------------------*/

@@ -252,6 +252,16 @@ int tiku_nor_powered(void);
 tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out);
 
 /**
+ * @brief The last identity that validated, without touching the bus.
+ *
+ * For status readers such as /sys/flash/id: a `cat` should not be a bus
+ * transaction, and must not wake a part whose load switch is off.
+ *
+ * @return 0 when an identity has been read since boot, -1 otherwise.
+ */
+int tiku_nor_id_cached(tiku_nor_id_t *out);
+
+/**
  * @brief Sweep RXDQSDELAY 0..31 and report which settings read a valid ID.
  *
  * The DQS capture point is board and speed dependent, which is why the vendor

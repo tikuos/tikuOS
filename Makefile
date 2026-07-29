@@ -1675,6 +1675,7 @@ ifeq ($(TIKU_DRV_NOR_ENABLE),1)
 # went ahead and the silent bus was left to be discovered on the bench.  A
 # missing part is not a style issue, so it is now refused.
 SRCS += arch/ambiq/tiku_nor_arch.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_flash.c   # /sys/flash lifecycle nodes
 CFLAGS += -DTIKU_DRV_NOR_ENABLE=1
 endif
 ifeq ($(TIKU_DRV_PSRAM_ENABLE),1)
