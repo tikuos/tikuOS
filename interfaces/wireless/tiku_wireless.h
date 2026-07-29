@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_wireless.h - Board-independent wireless-interface API
+ * tiku_wireless.h - board-independent wireless-interface API.
  *
- * Mirrors the pattern set by interfaces/led/ and interfaces/adc/:
- * the kernel declares the API + types here; one driver (today the
- * CYW43439 at drivers/wifi/cyw43/) supplies the implementation.
- * Application code, shell commands, and future network stacks call
- * `tiku_wireless_*` instead of any driver-specific name, so adding a
- * second wireless driver (e.g. ESP32 over UART, Nordic over SPI)
- * doesn't require rewriting consumers.
- *
- * The API is intentionally small. A single-radio system at a time
- * is assumed; if/when TikuOS gains concurrent radios, a per-radio
- * handle becomes the first argument and this file evolves
- * compatibly.
- *
- * Events posted by the implementation via
- * tiku_process_post(TIKU_PROCESS_BROADCAST, ev, data):
- *   TIKU_WIRELESS_EVT_SCAN_COMPLETE  (uintptr_t) ap_count
- *   TIKU_WIRELESS_EVT_AP_FOUND       (tiku_wireless_ap_t *) discovered AP
- *   TIKU_WIRELESS_EVT_LINK_UP        (uintptr_t) reason code (future)
- *   TIKU_WIRELESS_EVT_LINK_DOWN      (uintptr_t) reason code (future)
+ * The kernel declares the API and types here and one driver supplies them, so
+ * consumers call tiku_wireless_* rather than a driver name.  A single radio is
+ * assumed; concurrent radios would add a per-radio handle as the first argument.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_init.h - NVM-backed configurable boot (init system)
+ * tiku_init.h - NVM-backed configurable boot (init system).
  *
- * Stores an ordered table of shell commands in non-volatile memory.
- * At boot, tiku_init_run_all() feeds each enabled entry through the
- * shell parser — making the boot sequence configurable without
- * recompiling.
- *
- * The init table lives inside a NVM config region managed by the
- * platform's NVM region map (e.g. FRAM on MSP430, MRAM/RRAM on
- * other targets).
+ * Stores an ordered table of shell commands in NVM; tiku_init_run_all() feeds
+ * each enabled entry through the shell parser at boot.  The table lives in a
+ * config region from the NVM region map.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_led.c - Platform-independent LED interface implementation
+ * tiku_led.c - platform-independent LED interface implementation.
  *
- * Dispatches indexed LED operations to TIKU_BOARD_LEDn_* macros
- * defined by the active board header.  The switch cases are
- * compile-time bounded by TIKU_BOARD_LED_COUNT so only the
- * macros actually defined by the board are referenced.
+ * Dispatches indexed LED operations to the TIKU_BOARD_LEDn_* macros of the active
+ * board.  The switch cases are bounded by TIKU_BOARD_LED_COUNT, so only macros
+ * the board actually defines are referenced.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,30 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_bitbang.h - Hardware-timer-driven precision bit-bang engine
+ * tiku_bitbang.h - hardware-timer-driven precision bit-bang engine.
  *
- * Drives a single GPIO pin through an arbitrary bit pattern at a
- * caller-specified bit rate. The bit clock is supplied by the htimer
- * subsystem (Timer A1 on MSP430), so each pin transition fires from
- * an ISR with sub-microsecond scheduling resolution. The CPU is free
- * between transitions.
- *
- * Intended for backscatter, software UART, software SPI, IR remote,
- * and similar protocols where edge timing matters but full hardware
- * support (SPI/UART peripherals) is unavailable or already in use.
- *
- * The transmitter is one-shot per call. Only one bit-bang stream may
- * be active at a time -- the htimer is single-pending.
- *
- * Recommended use:
- *   1. Caller wraps tiku_bitbang_tx() in
- *        tiku_crit_begin(max_us, TIKU_CRIT_PRESERVE_HTIMER)
- *        ...
- *        tiku_crit_end()
- *      so every other ISR (system tick, UART, ADC, ...) is masked
- *      and only the bit-clock ISR fires between edges.
- *   2. The on_done callback runs in ISR context. Keep it short; it
- *      typically just sets a flag the foreground task is waiting on.
+ * Drives one GPIO pin through an arbitrary bit pattern at a caller-set rate, with
+ * the bit clock supplied by hardware so the CPU is free between transitions.
+ * One-shot per call, and only one stream may be active at a time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

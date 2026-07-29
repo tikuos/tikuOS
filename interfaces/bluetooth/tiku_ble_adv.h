@@ -5,36 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_adv.h - driver-agnostic BLE broadcaster/observer facade
+ * tiku_ble_adv.h - driver-agnostic BLE broadcaster/observer facade.
  *
- * The connection-less sibling of tiku_ble_serial.h: advertise a beacon
- * (non-connectable ADV_NONCONN_IND with Flags + Complete Local Name + a
- * 2-byte 'TK' manufacturer marker) and observe the advertising channels
- * (passive scan with RSSI).  It is what a high-level consumer (the BASIC
- * BLEBEACON/BLESCAN$ words, /sys/radio, shell commands) wants from a
- * broadcast radio, without touching the radio registers.
- *
- * tiku_ble_serial.h is connection-shaped (advertise -> connect -> byte
- * pipe) and needs a link-layer-capable backend (today the EM9305 host
- * stack).  This facade is broadcast-shaped and is backed by the nRF54L15
- * on-die RADIO (arch/nordic/tiku_radio_arch); the two capabilities are
- * independent: a build may have either, both, or neither.
- *
- * The background beacon is a kernel software timer in CALLBACK mode: each
- * expiry transmits one 3-channel burst (~1.3 ms) and re-arms drift-free
- * with tiku_timer_reset().  Between bursts the system idles normally
- * (tickless WFI; the session holds Constant Latency per nRF54L15 erratum
- * 20, and the arch send path issues the per-burst HF clock kick that makes
- * a post-sleep burst decodable), which is what keeps a beacon compatible
- * with microwatt operation.
- * The callback runs in the context of the process that started the beacon,
- * dispatched by the cooperative scheduler -- so it never preempts a
- * blocking scan; radio ownership needs no locking.
- *
- * Capability: TIKU_BLE_ADV_PRESENT is 1 when the build compiled in a
- * backend.  The Makefile maps the concrete radio to the generic
- * TIKU_HAS_BLE_ADV capability (nRF54L15 today); consumers gate on the
- * capability, never on a chip.
+ * The connection-less sibling of tiku_ble_serial.h: advertise a non-connectable
+ * beacon and passively scan with RSSI, without touching radio registers.  The
+ * beacon is a re-arming software timer, so a build stays microwatt-compatible.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

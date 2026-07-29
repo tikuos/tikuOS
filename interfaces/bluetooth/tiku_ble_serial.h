@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_serial.h - driver-agnostic "serial port over BLE" facade
+ * tiku_ble_serial.h - driver-agnostic "serial port over BLE" facade.
  *
- * A deliberately small abstraction: advertise as a connectable peripheral that
- * exposes a byte pipe (the well-known Nordic UART Service GATT layout), tell me
- * when a central is connected + subscribed, and let me push/pull bytes.  It is
- * the wireless twin of a UART -- exactly what a high-level consumer (the BASIC
- * BLE words, a user app) wants, without touching HCI / L2CAP / ATT.
- *
- * This is intentionally NOT the full Bluetooth Core-Spec stack in tiku_bt.h
- * (HCI/GATT/GAP/SMP); it sits ABOVE a radio backend and can be implemented on
- * top of either.  Today the only backend is the EM9305 host stack on the
- * Apollo510 Blue (arch/ambiq/tiku_ble_uart); a future CYW43 backend would layer
- * the same facade over tiku_bt.h's GATT server + a NUS-style service.  Callers
- * stay portable: they see this facade, never the concrete radio.
- *
- * Capability: TIKU_BLE_SERIAL_PRESENT is 1 when the build compiled in a backend.
- * The build maps a concrete driver enable to the generic TIKU_HAS_BLE capability
- * (see the Makefile), so consumers gate on the capability, not on any one chip.
+ * Advertise as a connectable peripheral exposing a byte pipe (the Nordic UART
+ * Service layout), report when a central subscribes, and push or pull bytes -- the
+ * wireless twin of a UART, with no HCI, L2CAP or ATT in the caller's view.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

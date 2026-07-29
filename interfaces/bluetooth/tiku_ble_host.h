@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_host.h - M33-side BLE host: L2CAP (fragmentation/recombination) +
- *                   the ATT/GATT server, fed L2CAP FRAGMENTS by the FLPR
- *                   controller across the shared-page mailbox.
+ * tiku_ble_host.h - M33-side BLE host: L2CAP plus the ATT/GATT server.
  *
- * Phase B split the peripheral into controller (FLPR) + host (M33).  Phase C
- * makes the host speak REAL L2CAP: a BLE data PDU carries at most ~27 bytes,
- * so an L2CAP PDU larger than that (any ATT payload past the 23-byte default
- * MTU) is fragmented across several data PDUs, tagged by the LL header's
- * LLID -- 0b10 (start) / 0b01 (continuation).  The controller forwards each
- * fragment with its LLID; this host RECOMBINES them into a whole L2CAP PDU
- * before running ATT, and FRAGMENTS its own responses/notifications back.
- * That unlocks payloads bigger than one PDU (a longer NUS message, a larger
- * MTU) -- the foundation general GATT (Phase D) needs.
+ * A BLE data PDU carries at most ~27 bytes, so a larger L2CAP PDU is fragmented
+ * and tagged by the LL header's LLID.  This host recombines inbound fragments
+ * before running ATT and fragments its own responses back.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

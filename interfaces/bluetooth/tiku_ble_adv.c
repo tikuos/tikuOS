@@ -7,15 +7,9 @@
  *
  * tiku_ble_adv.c - BLE broadcaster/observer facade, nRF54L15 backend.
  *
- * Backend-specific implementation of interfaces/bluetooth/tiku_ble_adv.h
- * on the on-die 2.4 GHz RADIO (arch/nordic/tiku_radio_arch).  Compiled only
- * when the build maps a broadcast-capable radio to TIKU_HAS_BLE_ADV (see
- * the Makefile's nordic section); consumers gate on TIKU_BLE_ADV_PRESENT.
- *
- * Concurrency model (see the header): the background beacon is a CALLBACK
- * software timer dispatched by the cooperative scheduler in the arming
- * process's context.  Nothing here preempts anything -- a blocking scan
- * simply delays the next burst -- so radio ownership needs no locking.
+ * Implements tiku_ble_adv.h on the on-die 2.4 GHz RADIO, compiled only where the
+ * build maps a broadcast-capable radio to TIKU_HAS_BLE_ADV.  The background beacon
+ * is a callback timer in the arming process's context, so nothing preempts.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

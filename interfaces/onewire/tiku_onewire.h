@@ -5,26 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire.h - Platform-independent 1-Wire bus interface
+ * tiku_onewire.h - platform-independent 1-Wire bus interface.
  *
- * Provides a portable 1-Wire (Dallas/Maxim) master API for communicating
- * with 1-Wire slave devices such as the DS18B20 temperature sensor.
- * All operations are synchronous (blocking). The underlying hardware is
- * bit-banged on a GPIO pin configured in the board header.
- *
- * Typical usage:
- *   tiku_onewire_init();
- *   if (tiku_onewire_reset() == TIKU_OW_OK) {
- *       tiku_onewire_write_byte(0xCC);  // Skip ROM
- *       tiku_onewire_write_byte(0x44);  // Convert T
- *       // ... wait for conversion ...
- *       tiku_onewire_reset();
- *       tiku_onewire_write_byte(0xCC);
- *       tiku_onewire_write_byte(0xBE);  // Read Scratchpad
- *       lsb = tiku_onewire_read_byte();
- *       msb = tiku_onewire_read_byte();
- *   }
- *   tiku_onewire_close();
+ * A portable 1-Wire master API for devices such as the DS18B20.  All operations
+ * block, and the bus is bit-banged on a GPIO pin named by the board header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

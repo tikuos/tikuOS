@@ -7,23 +7,9 @@
  *
  * tiku_ble_smp_pair.h - LE Secure Connections "Just Works" pairing engine.
  *
- * A transport-agnostic state machine that drives the SMP exchange on L2CAP
- * CID 0x0006 to a shared Long Term Key.  It consumes and produces raw SMP
- * PDUs (opcode || payload); the caller wraps them in L2CAP + moves them over
- * its own path (the M33 host mailbox as responder, the RADIO central engine
- * as initiator).  The crypto (P-256 ECDH, AES-CMAC, f4/f5/f6) lives in
- * tiku_ble_smp.{c,h}; this file is only the protocol.
- *
- * Flow (Core Spec Vol 3, Part H, 2.3.5.6 -- LE SC, Just Works / no MITM):
- *   I -> R  Pairing Request                R -> I  Pairing Response
- *   I -> R  Pairing Public Key (PKa)       R -> I  Pairing Public Key (PKb)
- *                                          R -> I  Pairing Confirm (Cb)
- *   I -> R  Pairing Random (Na)            R -> I  Pairing Random (Nb)
- *   I -> R  DHKey Check (Ea)               R -> I  DHKey Check (Eb)
- * Both ends derive (MacKey, LTK) = f5(DHKey, Na, Nb, A, B) and cross-check the
- * DHKey checks with f6; a match on both sides means matching LTKs.
- *
- * One pairing at a time (single connection); all state is static.
+ * A transport-agnostic state machine driving the SMP exchange to a shared LTK.
+ * It handles raw SMP PDUs only; the caller wraps them in L2CAP and moves them.
+ * The crypto lives in tiku_ble_smp.{c,h}.  One pairing at a time, all state static.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

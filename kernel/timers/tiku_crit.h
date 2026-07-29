@@ -5,60 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit.h - Critical execution window
+ * tiku_crit.h - critical execution window.
  *
- * A kernel-aware, bounded-duration critical section. Two flavours
- * are exposed because the right answer depends on the caller's
- * timing budget AND on whether other peripherals must keep working
- * during the window:
- *
- *   tiku_crit_begin_defer()   -- defer software-timer dispatch
- *                                only. Touches NO peripheral IE
- *                                bits. UART, ADC, GPIO IRQs etc.
- *                                all keep firing. Cooperative-
- *                                friendly and minimum-impact;
- *                                accept ISR jitter as the cost.
- *
- *   tiku_crit_begin()         -- defer + clear every known
- *                                peripheral IE bit not listed in
- *                                preserve_mask. Zero peripheral
- *                                jitter; the cost is that masked
- *                                subsystems are paused for the
- *                                window's duration (UART RX
- *                                drops bytes, GPIO edges may
- *                                collapse to one, etc.).
- *
- * Both share tiku_crit_end() and the tiku_crit_active() flag.
- *
- * Why two? TikuOS uses cooperative protothreads, so "the scheduler
- * cannot run other processes while a window is held" is not a
- * concern -- the caller is already parked in PT_WAIT_UNTIL by the
- * time the window opens. The remaining cost of masking is purely
- * the loss of fidelity for whatever each masked ISR was tracking.
- * For some workloads (high-rate bit-bang) that loss is worth the
- * jitter savings; for others (slow bit-bang with active UART) it
- * is not. Letting the caller pick keeps both honest.
- *
- * Use cases (non-exhaustive):
- *   - tiku_crit_begin_defer:  ~kHz software UART, slow IR remote,
- *                             dispatcher-bound timing where
- *                             individual ISRs are not the bottleneck.
- *   - tiku_crit_begin:        backscatter symbol streams, software
- *                             SPI at MHz, sub-microsecond bit
- *                             timing where any extra ISR would
- *                             break the protocol.
- *
- * Common semantics during a held window (either flavour):
- *   - The software-timer dispatcher early-exits if polled.
- *   - The Timer A0 ISR suppresses tiku_timer_request_poll().
- *   - The process scheduler is NOT frozen; tiku_process_post()
- *     calls during the window queue up exactly as today.
- *   - Global interrupts (GIE) stay ENABLED. We never blanket-mask
- *     because the bit-clock ISR (htimer) must keep firing.
- *
- * Watchdog note: the watchdog RESET (not the interval interrupt)
- * is hardware and not maskable. Hold windows must be shorter than
- * the configured WDT timeout regardless of which flavour is used.
+ * A kernel-aware, bounded critical section in two flavours: _begin_defer() only
+ * defers software-timer dispatch and touches no IE bits, while _begin() also
+ * clears every peripheral IE outside preserve_mask.  Both end with _crit_end().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -67,6 +18,19 @@
 #define TIKU_CRIT_H_
 
 #include <stdint.h>
+
+/*
+ * Semantics while a window is held, either flavour:
+ *   - the software-timer dispatcher early-exits if polled, and the Timer A0
+ *     ISR suppresses tiku_timer_request_poll();
+ *   - the process scheduler is NOT frozen -- tiku_process_post() during the
+ *     window queues as usual;
+ *   - global interrupts stay ENABLED.  Never blanket-mask: the bit-clock ISR
+ *     has to keep firing.
+ *
+ * WATCHDOG.  The watchdog RESET is hardware and not maskable, so a held window
+ * must be shorter than the configured WDT timeout whichever flavour is used.
+ */
 
 /*---------------------------------------------------------------------------*/
 /* RETURN CODES                                                              */

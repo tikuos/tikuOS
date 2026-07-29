@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_enc.h - shared bits for the LL data-encryption demo (Phase E3c).
+ * tiku_ble_enc.h - shared parameters for the LL data-encryption demo.
  *
- * Once LL encryption startup has agreed the session key (SK) and IV, the
- * central sends one AES-CCM-encrypted payload and the peripheral decrypts +
- * MIC-verifies it -- proof that our pairing-derived key encrypts data over
- * the air.  The CCM primitive is tiku_crypto_arch_aes_ccm_star (CRACEN); this
- * header only fixes the parameters both ends must agree on: the demo
- * plaintext, the 1-byte AAD, and the BLE nonce layout.
+ * Once encryption startup has agreed the session key and IV, one AES-CCM payload
+ * is sent and MIC-verified.  This header only fixes what both ends must agree on:
+ * the demo plaintext, the 1-byte AAD and the BLE nonce layout.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

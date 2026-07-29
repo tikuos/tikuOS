@@ -5,36 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_bt.h — driver-agnostic Bluetooth Low Energy API
+ * tiku_bt.h - driver-agnostic Bluetooth Low Energy API.
  *
- * The TikuOS BLE stack (tikukits/net/bluetooth/) implements the
- * standard Bluetooth Core Spec layers — HCI, L2CAP, ATT, GATT, GAP,
- * SMP — on top of an abstract transport (@ref tiku_bt_transport_t in
- * interfaces/bluetooth/tiku_bt_transport.h). Drivers plug their
- * chip-specific transport in: today that's BTSDIO over the
- * CYW43439's WLAN-RAM ring buffers (drivers/wifi/cyw43/bt_transport.c),
- * but a UART-HCI driver for Nordic / ESP32 / TI parts would fit the
- * same vtable verbatim.
- *
- * Public application API only; protocol-internal declarations live
- * in tikukits/net/bluetooth/.
- *
- * Phases:
- *   6.A — firmware upload + verify FW_RDY  (implemented)
- *   6.B — bring-up + HOST_CTRL handshake   (implemented)
- *   6.C — HCI command/event ring transport (implemented)
- *   6.D — first HCI commands               (implemented;
- *                                           Reset/Version/BD_ADDR)
- *   7   — GAP advertising                  (implemented)
- *   8   — GAP scanning                     (implemented)
- *   9   — connection management            (implemented)
- *   10  — L2CAP + ATT + GAP service        (implemented)
- *   11  — GATT server (service/char regn)  (implemented)
- *   12  — notifications + CCCD             (implemented)
- *   13  — GATT client (read/write/notify)  (implemented)
- *   14  — SMP LE-SC Just-Works pairing +   (implemented;
- *         LTK bonding, peripheral role      MITM / OOB / IRK still
- *                                           deferred)
+ * The stack in tikukits/net/bluetooth/ implements HCI, L2CAP, ATT, GATT, GAP and
+ * SMP over an abstract transport, so a driver plugs in its own without the stack
+ * changing.  Public application API only; internals live beside the stack.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

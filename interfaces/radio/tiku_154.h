@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_154.h - IEEE 802.15.4 MAC-min facade (kintsugi/radio.md N2).
+ * tiku_154.h - IEEE 802.15.4 MAC-min facade.
  *
- * Ties the PHY (arch/nordic/tiku_ieee154_arch) to the PHY-free frame layer
- * (tiku_154_frame): addressed data frames with 16-bit PAN/short addressing
- * and sequence numbers, address filtering on receive, unslotted CSMA-CA on
- * the hardware CCA (N2.2), and auto-ACK via the T_IFS turnaround (N2.3).
- * Same facade discipline as tiku_ble_adv -- the shell command and any
- * future stack sit on this, not on registers.
+ * Ties the PHY to the frame layer: addressed data frames with 16-bit PAN/short
+ * addressing, receive address filtering, unslotted CSMA-CA on the hardware CCA,
+ * and auto-ACK on the T_IFS turnaround.  Shell and stacks sit here, not on registers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

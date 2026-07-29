@@ -7,14 +7,9 @@
  *
  * tiku_154_frame.h - IEEE 802.15.4-2006 MAC frame primitives (PHY-free).
  *
- * The N-track's groundwork (kintsugi/radio.md), the 802.15.4 analog of the
- * L-track's CSA#1 / SN-NESN helpers: the fiddly, bug-prone, PHY-INDEPENDENT
- * logic -- FCS, channel<->frequency, and the MHR build/parse with its
- * addressing-mode + PAN-ID-compression rules -- done and verified before the
- * PHY bring-up (MODE=0xF, SFD, ED/CCA) needs it.  Deliberately register-free
- * so it host-compiles and self-tests off-target; the nordic RADIO computes
- * the FCS in hardware, but a software copy is what a sniffer/validator, an
- * ACK builder, and any FLPR/host path all need.
+ * FCS, channel<->frequency and MHR build/parse with its addressing-mode and
+ * PAN-ID-compression rules.  Deliberately register-free so it host-compiles and
+ * self-tests off target, which a sniffer, an ACK builder and any host path need.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

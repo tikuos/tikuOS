@@ -7,15 +7,9 @@
  *
  * tiku_ble_bond.h - durable LTK bond store (BLE bonding).
  *
- * After LE Secure Connections pairing derives an LTK (Phase E2), a BONDED
- * device remembers {peer address -> LTK} across reboots so a later
- * reconnection SKIPS pairing entirely and goes straight to LL encryption
- * with the stored key.  The table lives in durable NVM (a magic-gated
- * persist cell, kernel/memory) so it survives power cycles; an SRAM mirror
- * serves lookups without touching the NVM write gate.
- *
- * Transport-agnostic: the central keys the bond on the peripheral's AdvA,
- * the peripheral on the central's InitA (both from the CONNECT_IND).
+ * A bonded device remembers {peer address -> LTK} across reboots, so a later
+ * reconnection skips pairing and goes straight to encryption.  Transport-agnostic:
+ * each side keys the bond on the other's address from the CONNECT_IND.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

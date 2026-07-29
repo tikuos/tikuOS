@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit.c - Critical execution window implementation
+ * tiku_crit.c - critical execution window implementation.
  *
- * Two flavours: defer-only (no IE masking) and masked
- * (selective IE masking via preserve_mask). End restores whatever
- * begin set up; the mode is recorded so end can short-circuit the
- * unmask path when nothing was masked in the first place.
- *
- * The masked flavour delegates the actual IE-bit save/clear/restore
- * to the platform via hal/tiku_crit_hal.h. Everything in this file
- * is platform-agnostic: held flag, mode, accounting, htimer-based
- * duration measurement, and the post-window timer-process drain.
+ * Two flavours: defer-only, which masks nothing, and masked, which delegates the
+ * IE save/clear/restore to hal/tiku_crit_hal.h.  Everything here is
+ * platform-agnostic: held flag, mode, accounting and the post-window drain.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

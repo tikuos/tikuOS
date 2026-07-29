@@ -5,43 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lcd.h - Platform-independent segment-LCD interface
+ * tiku_lcd.h - platform-independent segment-LCD interface.
  *
- * A small, ergonomic API for fixed-segment LCDs (e.g. the FH-1138P
- * 96-segment glass on the MSP-EXP430FR6989 LaunchPad). Designed so
- * application code can talk to the display without caring which
- * controller is underneath.
- *
- * QUICK START
- * -----------
- *   #include <interfaces/lcd/tiku_lcd.h>
- *
- *   tiku_lcd_init();
- *   tiku_lcd_puts("HELLO");          // left-aligned banner
- *   tiku_lcd_puts_right("3");        // right-aligned, e.g. version
- *   tiku_lcd_put_uint(1234);         // counter / sensor value
- *   tiku_lcd_put_int(-42);           // signed value
- *   tiku_lcd_puts_at(4, "OK");       // partial overwrite at pos 4..
- *   tiku_lcd_clear();                // blank everything
- *
- * Icons (optional, board declares them via TIKU_BOARD_LCD_HAS_ICONS):
- *
- *   tiku_lcd_icon_on(TIKU_LCD_ICON_HEART);
- *   tiku_lcd_icon_toggle(TIKU_LCD_ICON_DOT2);
- *   tiku_lcd_icons_clear();
- *
- * PORTABILITY
- * -----------
- * Boards without an LCD compile this header just fine; every entry
- * point is a no-op when TIKU_BOARD_HAS_LCD is 0, and the runtime
- * predicate TIKU_LCD_PRESENT folds to a constant so portable code
- * can branch without #ifdef:
- *
- *   if (TIKU_LCD_PRESENT) { tiku_lcd_puts("ALIVE"); }
- *
- * The icon API is only declared when the board sets
- * TIKU_BOARD_LCD_HAS_ICONS — guard calls with #ifdef if you want
- * the same source to compile on icon-less boards.
+ * A small API for fixed-segment glass, with optional icons where the board sets
+ * TIKU_BOARD_LCD_HAS_ICONS.  Boards without an LCD compile fine: entry points
+ * become no-ops and TIKU_LCD_PRESENT folds to a constant for branching.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

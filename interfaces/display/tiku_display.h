@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_display.h - minimal GPU-accelerated compositor for tikuOS.
+ * tiku_display.h - minimal GPU-accelerated compositor.
  *
- * A thin layer over the from-scratch Apollo510 GPU (tiku_gpu_arch) and display
- * controller (tiku_dc_arch): one framebuffer surface, GPU draw operations that
- * accumulate a damage rectangle, and a flush() that pushes ONLY the damaged
- * region to the panel (a partial-rect transfer) -- so a small change costs a
- * small transfer, not a whole 468x468 frame.
- *
- * Usage:
- *   static uint8_t fb[468*468*4] __attribute__((section(".ssram"), aligned(32)));
- *   tiku_display_t d;
- *   tiku_display_init(&d, fb, 468, 468);
- *   tiku_display_clear(&d, 0xFF101418);       // dark background
- *   tiku_display_fill_rect(&d, 40, 40, 80, 80, 0xFF3366CC);
- *   tiku_display_flush(&d);                    // presents just the damage
- *
- * apollo510/apollo510b only; compiled behind TIKU_DRV_DC_ENABLE (which implies
- * the GPU driver). The framebuffer MUST live in SSRAM (GPU/DC bus-master
- * visible; never DTCM).
+ * One framebuffer surface over the Apollo510 GPU and display controller; draws
+ * accumulate a damage rectangle and flush() pushes only that region, so a small
+ * change costs a small transfer.  The framebuffer must live in SSRAM, never DTCM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

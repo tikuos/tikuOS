@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_led.h - Platform-independent LED interface
+ * tiku_led.h - platform-independent LED interface.
  *
- * Provides an indexed LED API that adapts to the number of LEDs
- * defined by the board header (TIKU_BOARD_LED_COUNT).  LED indices
- * are zero-based: LED 0 maps to TIKU_BOARD_LED1_*, LED 1 to
- * TIKU_BOARD_LED2_*, and so on.
- *
- * Typical usage:
- *   for (uint8_t i = 0; i < tiku_led_count(); i++) {
- *       tiku_led_init(i);
- *   }
- *   tiku_led_on(0);
- *   tiku_led_toggle(1);
+ * An indexed LED API sized by the board header's TIKU_BOARD_LED_COUNT.  Indices
+ * are zero-based: LED 0 maps to TIKU_BOARD_LED1_*, LED 1 to TIKU_BOARD_LED2_*,
+ * and so on.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

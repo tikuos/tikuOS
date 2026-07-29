@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc.h - Platform-independent ADC interface
+ * tiku_adc.h - platform-independent ADC interface.
  *
- * Provides a portable ADC API for reading analog sensors. Supports
- * configurable resolution (8/10/12-bit) and reference voltage sources.
- * All operations are synchronous (blocking). The underlying hardware is
- * accessed through the architecture-specific layer (arch/msp430/tiku_adc_arch.c).
- *
- * Typical usage:
- *   tiku_adc_config_t cfg = {
- *       .resolution = TIKU_ADC_RES_12BIT,
- *       .reference  = TIKU_ADC_REF_AVCC
- *   };
- *   tiku_adc_init(&cfg);
- *   tiku_adc_channel_init(2);          // Enable A2 pin for analog input
- *   tiku_adc_read(2, &value);          // Read channel A2
- *   tiku_adc_read(TIKU_ADC_CH_TEMP, &value);  // Read internal temp sensor
- *   tiku_adc_close();
+ * A portable API for reading analog sensors, with configurable resolution
+ * (8/10/12-bit) and reference source.  All operations block; the hardware is
+ * reached through the arch layer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

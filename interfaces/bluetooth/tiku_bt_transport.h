@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_bt_transport.h — driver-agnostic Bluetooth transport interface
+ * tiku_bt_transport.h - driver-agnostic Bluetooth transport interface.
  *
- * The TikuOS BLE stack lives in tikukits/net/bluetooth/ and is
- * portable across HCI-capable chips (CYW43439, nRF52 with HCI UART,
- * ESP32 BT, TI CC256x, external dongles). Each driver implements
- * the small @ref tiku_bt_transport_t vtable below and registers
- * itself via @ref tiku_bt_register_transport(); the generic stack
- * then drives BLE end-to-end without knowing the chip's transport
- * details (BTSDIO vs HCI-UART vs HCI-SPI vs USB-HCI).
- *
- * The expected HCI packet framing is the standard Bluetooth Core
- * Spec form:
- *
- *   byte 0   packet type (0x01 = HCI cmd, 0x02 = ACL data,
- *                          0x04 = HCI event)
- *   byte 1+  type-specific bytes (HCI cmd opcode+len+params,
- *                                  ACL handle+len+L2CAP, etc.)
- *
- * The transport hides whatever wrapping the chip needs around that
- * (BTSDIO 4-byte header on CYW43, raw UART on Nordic, etc.).
+ * The vtable each driver implements to carry HCI for the portable stack, whether
+ * that is BTSDIO over a chip's shared RAM rings or an HCI UART.  Keeps the stack
+ * independent of any one Bluetooth part.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

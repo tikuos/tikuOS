@@ -5,19 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_bus.h - Platform-independent I2C bus interface
+ * tiku_i2c_bus.h - platform-independent I2C bus interface.
  *
- * Provides a portable I2C master API for communicating with slave devices.
- * Supports standard (100 kHz) and fast (400 kHz) modes. All operations
- * are synchronous (blocking). The underlying hardware is accessed through
- * the architecture-specific layer (arch/msp430/tiku_i2c_arch.c).
- *
- * Typical usage:
- *   tiku_i2c_config_t cfg = { .speed = TIKU_I2C_SPEED_STANDARD };
- *   tiku_i2c_init(&cfg);
- *   tiku_i2c_write(0x48, data, 2);
- *   tiku_i2c_write_read(0x48, &reg, 1, buf, 2);
- *   tiku_i2c_close();
+ * A portable I2C master API supporting standard (100 kHz) and fast (400 kHz)
+ * modes.  All operations block; the hardware is reached through the arch layer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

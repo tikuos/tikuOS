@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_serial.c - driver-agnostic BLE-serial facade implementation
+ * tiku_ble_serial.c - driver-agnostic BLE-serial facade implementation.
  *
- * Dispatches the small facade in tiku_ble_serial.h to whichever radio backend
- * the build compiled in.  Today that is the EM9305 host stack on the Apollo510
- * Blue (arch/ambiq/tiku_ble_uart); adding a second backend means adding an
- * #elif branch here -- callers (the BASIC BLE words, apps) never change.
+ * Dispatches the facade in tiku_ble_serial.h to whichever radio backend the build
+ * compiled in.  Adding a second backend adds an #elif here; callers never change.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

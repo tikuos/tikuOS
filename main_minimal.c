@@ -1,25 +1,11 @@
 /*
- * Tiku Operating System v0.06 — minimal smoke test (ARM ports)
+ * Tiku Operating System v0.06 -- minimal smoke test (ARM ports).
  *
- * No kernel, no scheduler, no shell. Just brings up clocks + console
- * and prints a heartbeat in a loop, toggling an LED each iteration.
- * Intended as a debugging aid: if THIS doesn't print, the failure is in
- * the boot/clock/console layer; if it does, the failure is higher up.
+ * No kernel, scheduler or shell: brings up clocks and console, then prints a
+ * heartbeat and toggles an LED in a loop.  If this does not print, the failure
+ * is in boot/clock/console; if it does, the failure is higher up.
  *
- * RP2350 (UART0 @115200 on GP0/GP1, LED on GP25):
- *   make MCU=rp2350 MINIMAL=1
- *   sudo picotool load -fx main.uf2
- *   make monitor MCU=rp2350
- *
- * Apollo510 EVB (console on SWO/ITM @1MHz, LED0 on pad 165):
- *   make MCU=apollo510 MINIMAL=1
- *   <flash main.bin to MRAM 0x410000 via J-Link>
- *   <open a SWO viewer at 1 MHz / SWOClock=1000>
- *
- * Expected output:
- *   TikuOS minimal: hello #0  clk=... Hz  fault=0
- *   TikuOS minimal: hello #1  clk=... Hz  fault=0
- *   ...
+ * Build with MINIMAL=1, e.g. `make MCU=rp2350 MINIMAL=1`.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

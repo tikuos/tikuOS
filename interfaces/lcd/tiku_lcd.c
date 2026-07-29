@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lcd.c - Generic segment-LCD glue
+ * tiku_lcd.c - generic segment-LCD glue.
  *
- * Forwards the platform-independent API to the active arch driver
- * (currently arch/msp430/tiku_lcd_arch.c). Owns the formatting
- * helpers — alignment, integer-to-digits, hex — so each arch only
- * has to implement init/clear/putchar (+ optional icon hook).
- *
- * On boards without a segment LCD (TIKU_BOARD_HAS_LCD == 0) every
- * entry point is a no-op so portable code that calls into the LCD
- * compiles and links everywhere without #ifdef.
+ * Forwards the portable API to the active arch driver and owns the formatting
+ * helpers, so an arch only implements init/clear/putchar.  Every entry point is a
+ * no-op where the board has no LCD, so portable code links without #ifdef.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

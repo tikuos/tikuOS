@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_init.c - NVM-backed configurable boot (init system)
+ * tiku_init.c - NVM-backed configurable boot (init system).
  *
- * Stores an ordered table of shell-command "init entries" in
- * non-volatile memory and replays them at boot through the shell
- * parser, so the startup sequence can be reconfigured without
- * recompiling — the embedded analogue of /etc/init.d run through the
- * shell.
- *
- * The init table is stored inside a non-volatile memory (NVM) config
- * region obtained from the NVM region map.  A magic word detects
- * first-boot and auto-clears.  All NVM writes go through the
- * platform's memory-protection unlock / nvm_write / lock sequence.
- *
- * On-NVM layout (see the NVM LAYOUT section) is a magic word, a
- * one-byte entry count, a reserved byte, then a fixed array of
- * tiku_init_entry_t slots.  Reads are plain (NVM is always readable),
- * but every mutation — first-boot prime, add, remove, enable toggle —
- * is bracketed by tiku_mpu_unlock_nvm() / tiku_mpu_lock_nvm() because
- * the MPU write-protects NVM by default.  The magic word is always
- * written last on first boot so a power loss mid-prime leaves the
- * region detectably uninitialised rather than half-formed.
+ * Replays an ordered table of shell commands stored in the NVM config region, so
+ * the startup sequence is reconfigurable without recompiling.  Every mutation is
+ * bracketed by the MPU unlock/lock, and the magic word is written last.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

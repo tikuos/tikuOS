@@ -7,15 +7,9 @@
  *
  * tiku_ble_smp.h - LE Secure Connections (SMP) pairing, Just Works.
  *
- * Phase E of the from-scratch BLE stack (kintsugi/radio.md).  The Security
- * Manager runs on L2CAP CID 0x0006: feature exchange -> P-256 public-key
- * exchange -> confirm/random -> f5 key derivation, ending with both peers
- * holding the same Long Term Key (LTK).  The crypto is standard BLE:
- *   - P-256 ECDH  (tikukits/crypto/p256) for the DHKey,
- *   - AES-CMAC    (RFC 4493, over tiku_crypto_arch_aes_ecb) for f4/f5/f6.
- * Role-aware: the central is initiator, the peripheral responder.  The module
- * is transport-agnostic -- it consumes/produces SMP PDUs; the caller moves
- * them over its own L2CAP path (M33 host mailbox, or the central engine).
+ * The Security Manager on L2CAP CID 0x0006: feature exchange, P-256 public keys,
+ * confirm/random, then f5 key derivation leaving both peers with the same LTK.
+ * Role-aware and transport-agnostic -- it only consumes and produces SMP PDUs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

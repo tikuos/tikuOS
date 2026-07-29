@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio.h - Platform-agnostic raw GPIO interface
+ * tiku_gpio.h - platform-agnostic raw GPIO interface.
  *
- * Thin pass-through over the architecture GPIO driver. Provides a
- * stable, port/pin-indexed API for kernel code that needs direct
- * pin control (e.g. bit-bang transmitters, software protocols)
- * without taking a dependency on the per-board LED indirection.
- *
- * Header-only: every call is a static inline that resolves to the
- * arch implementation at compile time. Cost is identical to calling
- * the arch driver directly; the indirection exists only so that
- * higher-level modules read as platform-agnostic.
+ * A stable port/pin-indexed API for kernel code needing direct pin control, with
+ * no dependency on the per-board LED indirection.  Header-only: every call is a
+ * static inline resolving to the arch driver, so it costs nothing extra.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

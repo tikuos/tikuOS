@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_sched.h - Scheduler interface
+ * tiku_sched.h - scheduler interface.
  *
- * Central scheduler for the Tiku Operating System. Coordinates process
- * dispatch, timer expiration, and low-power idle. The main loop lives
- * here so that main.c only needs to call tiku_sched_init() and
- * tiku_sched_loop().
+ * Coordinates process dispatch, timer expiration and low-power idle.  The main
+ * loop lives here, so main.c only calls tiku_sched_init() and tiku_sched_loop().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

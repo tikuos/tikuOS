@@ -5,28 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_bus.h - Platform-independent SPI bus interface
+ * tiku_spi_bus.h - platform-independent SPI bus interface.
  *
- * Provides a portable SPI master API for communicating with slave devices.
- * Supports all four SPI clock modes (0-3), configurable bit order, and
- * a raw prescaler for clock speed selection. All operations are synchronous
- * (blocking). Chip select (CS) is managed by the application via GPIO.
- *
- * The underlying hardware is accessed through the architecture-specific
- * layer (arch/msp430/tiku_spi_arch.c).
- *
- * Typical usage:
- *   tiku_spi_config_t cfg = {
- *       .mode      = TIKU_SPI_MODE_0,
- *       .bit_order = TIKU_SPI_MSB_FIRST,
- *       .prescaler = TIKU_BOARD_SPI_BRW_1MHZ
- *   };
- *   tiku_spi_init(&cfg);
- *   CS_LOW();
- *   tiku_spi_write(cmd, sizeof(cmd));
- *   tiku_spi_read(buf, 4);
- *   CS_HIGH();
- *   tiku_spi_close();
+ * A portable SPI master API with all four clock modes, configurable bit order and
+ * a raw prescaler.  All operations block, and chip select is the application's
+ * to drive over GPIO.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
