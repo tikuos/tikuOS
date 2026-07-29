@@ -44,8 +44,11 @@
 #define NOR_CMD_READ_NVCR      0xB5u
 #define NOR_CMD_FAST_READ_4B   0x0Cu
 #define NOR_CMD_PAGE_PROG_4B   0x12u
-#define NOR_CMD_SUBSEC_ERASE   0x20u
-#define NOR_CMD_SECTOR_ERASE   0xD8u
+/* 4-BYTE-ADDRESS opcodes, because this driver always sends a 4-byte
+ * address. 0x20/0xD8 are the 3-byte forms; pairing them with a 4-byte
+ * address makes the device erase somewhere else, or nowhere. */
+#define NOR_CMD_SUBSEC_ERASE   0x21u
+#define NOR_CMD_SECTOR_ERASE   0xDCu
 /* NOTE: 0xB1 (write non-volatile CR) and 0xC7 (chip erase) are deliberately
  * ABSENT.  One is permanent, the other destroys the whole die; neither has
  * any business being reachable from a driver that runs unattended. */
@@ -54,7 +57,7 @@
 #define NOR_OCMD_READ          0xFDFDu
 #define NOR_OCMD_PAGE_PROG     0x1212u
 #define NOR_OCMD_SUBSEC_ERASE  0x2121u
-#define NOR_OCMD_SECTOR_ERASE  0xD8D8u
+#define NOR_OCMD_SECTOR_ERASE  0xDCDCu
 #define NOR_OCMD_WREN          0x0606u
 #define NOR_OCMD_WRDI          0x0404u
 #define NOR_OCMD_READ_STATUS   0x0505u

@@ -376,7 +376,19 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         }
         SHELL_PRINTF("  after erase: %s (erased NOR must read all ff)\n",
                      ok6 ? "all ff" : "NOT ERASED");
+        if (!ok6) {
+            /* Stop here.  Programming on top of an unerased sector can still
+             * verify -- NOR only clears bits, so writing bytes that need no
+             * 0->1 transition succeeds -- and the run would report bit-exact
+             * while the erase did nothing. */
+            SHELL_PRINTF("nor gate: ABORT -- erase did not clear the sector,"
+                         " so program+verify would prove nothing\n");
+            return;
+        }
         for (i6 = 0u; i6 < sizeof wr; i6++) {
+            /* Fixed, so `power nor verify` can check it after a power cycle
+             * without knowing this run's history. A no-op erase cannot fake a
+             * pass here because the all-ff check above aborts first. */
             wr[i6] = (uint8_t)(0xA5u ^ i6);
         }
         rc = tiku_nor_program(TIKU_NOR_SCRATCH_ADDR, wr, sizeof wr);
