@@ -18,13 +18,9 @@
 /**
  * @brief "ntp" command -- query an SNTP server for wall-clock time.
  *
- * Usage: ntp [a.b.c.d]
- *
- * Enables SLIP mode (so the shell's shared RX demux routes the UDP reply to
- * the IP stack), sends one SNTP request, and prints the received UTC time.
- * With no argument the request goes to the SLIP host (the device subnet's
- * .1 address).  Non-blocking: the reply is awaited across shell ticks via
- * tiku_shell_cmd_ntp_tick(), so the shell stays interactive.
+ * Enables SLIP mode so the shell's RX demux routes the UDP reply to the IP
+ * stack, sends one request (to the SLIP host by default) and prints the UTC
+ * time.  Non-blocking: the reply is awaited across shell ticks.
  */
 void tiku_shell_cmd_ntp(uint8_t argc, const char *argv[]);
 

@@ -18,13 +18,8 @@
 /**
  * @brief "read" command handler — read and display a VFS node's value.
  *
- * Usage:
- *   read <path>
- *
- * Examples:
- *   read /sys/uptime       — print system uptime
- *   read /sys/mem/sram     — print SRAM size
- *   read /dev/led0         — print LED state
+ * Takes one absolute or CWD-relative path -- `read /sys/uptime`,
+ * `read /dev/led0` -- and prints the node's rendered value.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

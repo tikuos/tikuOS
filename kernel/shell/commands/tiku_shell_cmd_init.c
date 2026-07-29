@@ -67,7 +67,7 @@ cmd_parse_u8(const char *s, uint8_t *out)
  * @brief Concatenate argv[first..argc-1] into buf with spaces.
  *
  * The init command syntax is: init add <seq> <name> <cmd tokens...>
- * We need to reassemble the command tokens back into a single string.
+ * The command tokens must be reassembled back into a single string.
  */
 static void
 cmd_join_args(char *buf, uint8_t bufsz,

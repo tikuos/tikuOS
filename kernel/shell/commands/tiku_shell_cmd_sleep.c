@@ -53,13 +53,11 @@ streq(const char *a, const char *b)
 }
 
 /**
- * Map a user-typed token ("off", "lpm0", "lpm3", "lpm4") to a HAL
- * idle-mode enum. Returns 0 on match, -1 on unknown token.
+ * Map a user-typed token ("off", "lpm0", "lpm3", "lpm4") to a HAL idle-mode
+ * enum.  Token names follow the short name tiku_cpu_idle_mode_name() returns,
+ * which keeps the CLI stable while the HAL chooses the actual entry hook.
  *
- * Token names follow the platform-specific short name returned by
- * tiku_cpu_idle_mode_name(); this keeps the user-facing CLI stable
- * with the documented MSP430 mode names while letting the HAL
- * choose the actual entry hook.
+ * @return 0 on match, -1 on unknown token.
  */
 static int
 parse_mode(const char *tok, tiku_cpu_idle_mode_t *out)

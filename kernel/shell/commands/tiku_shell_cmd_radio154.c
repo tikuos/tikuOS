@@ -227,7 +227,7 @@ static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
                  (unsigned long)((ok * 100u) / (uint32_t)n));
 }
 
-/* MAC-min pong (responder): receive frames for us and echo the payload back
+/* MAC-min pong (responder): receive frames for this node and echo the payload back
  * to the source, for ~secs. */
 static void r154_pong(uint8_t argc, const char *argv[], uint8_t secure)
 {

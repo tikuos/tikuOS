@@ -18,13 +18,8 @@
 /**
  * @brief "init" command handler — manage FRAM-backed boot entries.
  *
- * Subcommands:
- *   init list                       — show all entries
- *   init add <seq> <name> <cmd...>  — add or replace an entry
- *   init rm <name>                  — remove an entry
- *   init enable <name>              — enable a disabled entry
- *   init disable <name>             — disable without removing
- *   init run                        — re-execute all entries now
+ * Sub-commands: list, add <seq> <name> <cmd...>, rm <name>, enable <name>,
+ * disable <name>, and run (re-execute every entry now).
  *
  * @param argc  Argument count
  * @param argv  Argument vector

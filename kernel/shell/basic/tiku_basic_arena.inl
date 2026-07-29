@@ -22,7 +22,7 @@
  * Used when sizing the arena and when walking var arrays. */
 #define BASIC_VAR_TABLE_LEN  (26u + (unsigned)TIKU_BASIC_NAMEDVAR_MAX)
 
-/* Compute the arena size we need for the configured limits, with a
+/* Compute the arena size the configured limits need, with a
  * small slack for word alignment between sub-allocations. */
 #if TIKU_BASIC_STRVARS_ENABLE
 #define BASIC_ARENA_STR_BYTES                                               \
@@ -50,7 +50,7 @@
     (sizeof(basic_array_t) * 26u)
 #endif
 /* Array element storage allocates from the arena lazily on DIM, so
- * we just reserve enough total headroom for one or two reasonably-
+ * the reservation is simply enough total headroom for one or two reasonably-
  * sized arrays; the exact cap depends on what else has been
  * allocated by the time DIM is invoked. Override via
  * TIKU_BASIC_ARRAY_TOTAL_LONGS to bump it. */
@@ -136,17 +136,13 @@ _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_SIZE,
 /**
  * @brief Reset the BASIC variable namespace to its just-entered state.
  *
- * Clears every user-visible binding -- scalar vars (A..Z + the named pool),
- * string vars and their heap, numeric and string arrays, and DEF FN
- * definitions -- and rewinds the arena to basic_arena_mark so the element
- * storage of any DIMmed arrays is reclaimed (the array counterpart of the
- * per-RUN string-heap reset). The program line table is deliberately left
- * untouched: RUN clears the variables but keeps the program, while NEW / LOAD
- * clear the program separately via prog_clear().
+ * Clears every user-visible binding -- scalars, strings and their heap, arrays,
+ * DEF FN -- and rewinds the arena to basic_arena_mark so DIMmed element storage
+ * is reclaimed.  The program line table is deliberately left alone.
  *
- * Shared by basic_alloc_state() (initial entry), NEW, RUN, and LOAD so all
- * four agree on exactly what "fresh variables" means -- and so re-DIMming an
- * array across runs no longer trips "array already DIMmed".
+ * @note Shared by basic_alloc_state(), NEW, RUN and LOAD so all four agree on
+ *       what "fresh variables" means, and so re-DIMming across runs does not
+ *       trip "array already DIMmed".
  */
 static void
 basic_clear_vars(void)

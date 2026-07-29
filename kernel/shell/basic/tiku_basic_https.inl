@@ -115,7 +115,7 @@ static void drbg_reseed(void)
     size_t  i;
     if (tiku_trng_arch_read_bytes(seed, sizeof seed) != TIKU_TRNG_OK) {
         /* Healthy hardware never lands here; if the TRNG faults, mix the clock
-         * so we at least don't reuse a fixed state rather than hanging. */
+         * so at least a fixed state is not reused, rather than hanging. */
         for (i = 0; i < sizeof seed; i++)
             seed[i] ^= (uint8_t)(tiku_clock_time() >> ((i & 3u) * 8u));
     }
@@ -178,15 +178,15 @@ static void basic_tls13_dbg(const char *m)
  * same trap as dns_poll).
  *
  * RX delivery is transport-specific. On WiFi the radio RX is a separate channel
- * (cyw43 SPI), drained via whd_drain_rx(); the console UART is unrelated, so we
+ * (cyw43 SPI), drained via whd_drain_rx(); the console UART is unrelated, so it
  * also drop a stray keystroke that would otherwise pile up. On a SLIP build the
  * console UART *is* the IP transport, and the shell loop that normally runs the
- * shared RX demux is blocked inside this builtin -- so we drive that same demux
+ * shared RX demux is blocked inside this builtin -- so it drives that same demux
  * here via tiku_shell_net_pump().  It must be the shell's demux (not a private
  * slip_poll_rx loop): a SLIP frame trickles in at the line rate over several ms,
  * far slower than this is polled, so a caller-local accumulator gets reset
  * between calls and shreds the frame into 1-byte garbage.  The shell demux keeps
- * its frame buffer in static state, so it reassembles correctly.  We also must
+ * its frame buffer in static state, so it reassembles correctly.  It must also
  * NOT read via the console getc, which would discard the SLIP bytes.  Without
  * this, HTTPGET$ over SLIP never sees a single reply (DNS / SYN-ACK / TLS). */
 static void
@@ -305,10 +305,10 @@ basic_tls_stage_str(int s)
  * Heavy-crypto offload onto a worker thread (threads phase-1).
  *
  * The handshake's CPU-bound public-key ops (ECDHE, CertVerify, cert-chain
- * verify) used to run inline on the shell thread -- tens to hundreds of ms
- * each during which NOTHING pumped the net (the peer could RST -- the
- * apollo510 half-fail class) and no kernel timer or rule was serviced.  When
- * worker threads are available we install io.offload: the handshake runs each
+ * verify) run inline on the shell thread by default -- tens to hundreds of ms
+ * each during which NOTHING pumps the net (the peer can RST -- the apollo510
+ * half-fail class) and no kernel timer or rule is serviced.  When
+ * worker threads are available io.offload is installed: the handshake runs each
  * of those ops on ONE dedicated worker while this drive loop keeps the net
  * pumped and dispatches the rest of the kernel's processes.  With threads off
  * (or the knob cleared) io.offload stays NULL and the handshake is exactly as
@@ -345,11 +345,11 @@ static void basic_crypto_worker_body(void *arg)
 
 /*
  * io.offload: run @p fn (a pure handshake-crypto closure over connect()'s
- * still-live stack) on the worker while keeping the kernel alive.  The drive
+ * still-live stack) on the worker while keeping the kernel alive.  This drive
  * loop mirrors the scheduler idle branch -- pump the net, dispatch every ready
- * process EXCEPT our own (tiku_process_run_except so a queued shell event can't
+ * process EXCEPT this one (tiku_process_run_except so a queued shell event can't
  * recursively re-enter this very command), then hand the CPU to the worker
- * until an event wakes us.  tiku_current_process, which call_process() clears
+ * until an event wakes it.  tiku_current_process, which call_process() clears
  * as it fans out, is restored before returning to the handshake.  Any failure
  * to start the worker falls back to running @p fn inline -- byte-identical to
  * the no-offload path -- so correctness never depends on the worker.
@@ -544,7 +544,7 @@ basic_https_get(const char *method, const char *host, const char *path,
     rl = strlen(req);
 
     /* Hand the connected socket to the shared kit engine: it runs the TLS 1.3
-     * cert handshake over our transport (basic_https_send/recv), falls back to
+     * cert handshake over this transport (basic_https_send/recv), falls back to
      * TLS 1.2 on a fresh connection via basic_https_reconnect (the ServerHello
      * is consumed on a 1.3 failure), sends the request + body, and streams the
      * response into out[] through basic_https_sink.

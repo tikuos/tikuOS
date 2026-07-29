@@ -30,7 +30,7 @@ extern const uint8_t _binary_mod_demo_bin_start[];
 extern const uint8_t _binary_mod_demo_bin_end[];
 
 /*---------------------------------------------------------------------------*/
-/* IMAGE SOURCE (P3e): the store file first, the embedded blob as a seeder    */
+/* IMAGE SOURCE: the store file first, the embedded blob as a seeder         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -38,20 +38,13 @@ extern const uint8_t _binary_mod_demo_bin_end[];
  *
  * The FILE is always authoritative, so a module uploaded over serial replaces
  * the built-in one without a reflash.  The embedded blob is only a SEEDER, and
- * only INSTALL (@p seed = 1) may fall back to it: it writes the embedded image
- * into the store and returns it, so from then on the file is the source and the
- * embedded copy is never needed again.  Without that step, deleting the blob
- * would strand a fresh board with no way to install anything.
+ * only INSTALL (@p seed = 1) may fall back to it.
  *
- * ACTIVATE passes @p seed = 0, and that asymmetry is the whole install/activate
- * distinction: activate runs at every BASIC session start, so if it seeded too,
- * a board would silently acquire the built-in module without anyone asking and
- * INSTALL would mean nothing.  No file, no module -- exactly what an unarmed
- * gate used to mean on the parts that install into NVM.
- *
- * The returned pointer may point straight into memory-mapped NVM (the store
- * maps a file's run as one contiguous span), so the caller must not assume RAM.
- *
+ * @note ACTIVATE passes @p seed = 0, and that asymmetry IS the install/activate
+ *       distinction: activate runs at every BASIC session start, so seeding
+ *       there would silently arm the built-in module with nobody asking.  No
+ *       file, no module.  The returned pointer may point straight into
+ *       memory-mapped NVM, so the caller must not assume RAM.
  * @return 0 with @p src / @p len set, or -1 when no image is available at all.
  */
 static int
@@ -149,7 +142,7 @@ tiku_basic_module_activate(void)
         memcpy((void *)(uintptr_t)TIKU_MODULE_EXEC_ADDR, src, len);
         img_len = len;
         /* The bytes arrived through the D-side; the I-side must not serve stale
-         * lines for an address we are about to branch to.  The HAL brackets the
+         * lines for an address about to be branched to.  The HAL brackets the
          * invalidate with DSB/ISB itself, so no barriers are needed here (and
          * the M55 reaches its TCMs directly, bypassing the D-cache). */
         tiku_cpu_icache_invalidate();
@@ -171,7 +164,7 @@ tiku_basic_module_activate(void)
      * image is COPIED in: a 200-byte module declaring init_off 20000 sits
      * inside the 32 KB window but far past the bytes memcpy wrote, so the
      * branch target is whatever the window happened to contain.  Bound by the
-     * copied length when we know it, and never trust more than the window. */
+     * copied length once known, and never trust more than the window. */
     if (hdr->init_off < sizeof(tiku_module_header_t) ||
         hdr->init_off >= TIKU_MODULE_CARVE_SIZE ||
         (img_len != 0u && hdr->init_off >= img_len) ||

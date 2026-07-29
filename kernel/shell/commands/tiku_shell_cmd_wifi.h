@@ -21,12 +21,9 @@
 /**
  * @brief "wifi" command handler — drive the CYW43439 WiFi radio.
  *
- * Sub-commands: "status" (driver state, MAC, link), "scan" (start an
- * active scan), "list" (cached scan results), "connect <ssid> <psk>"
- * (WPA2-PSK join), "connect3 <ssid> <psk>" (WPA3-SAE join),
- * "disconnect", "forget" (clear stored credentials), "up" (bring the IP
- * stack up over WiFi via DHCP, when that kit is built in) and "help".
- * With no argument it prints the usage summary.
+ * Sub-commands cover status, scanning (scan/list), the WPA2-PSK and WPA3-SAE
+ * joins, disconnect and forget, and `up` to bring the IP stack up over WiFi
+ * via DHCP.  No argument prints the usage summary.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]

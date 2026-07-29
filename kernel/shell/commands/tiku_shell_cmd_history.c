@@ -34,20 +34,18 @@
 /* FRAM-BACKED RING BUFFER                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * History ring placement — an EXPLICIT grade split (2026-07 audit C.2):
+/*
+ * History ring placement -- an EXPLICIT grade split:
  *
- *   MSP430    TIKU_DURABLE — FRAM in place, survives power cycles (the
- *             original behavior; FRAM is ample).
- *   Cortex-M  TIKU_PERSIST_WARM — survives a warm reset, reseeds on a
- *             power cycle.  The ring is LINE_SIZE-scaled (~2 KB at
- *             256 B x 8 deep), which would consume half of RP2350's
- *             entire 4 KB durable-small budget — not worth it for
- *             command history.  (Before the audit this was a silent
- *             `.bss` fallback that survived nothing.)
+ *   MSP430    TIKU_DURABLE -- FRAM in place, survives power cycles, and FRAM
+ *             is ample there.
+ *   Cortex-M  TIKU_PERSIST_WARM -- survives a warm reset, reseeds on a power
+ *             cycle.  The ring is LINE_SIZE-scaled (~2 KB at 256 B x 8 deep),
+ *             which would consume half of RP2350's entire 4 KB durable-small
+ *             budget -- not worth it for command history.
  *
- * The magic word self-primes either way, so garbage-on-first-boot is
- * handled identically at both grades.
+ * The magic word self-primes either way, so garbage-on-first-boot is handled
+ * identically at both grades.
  */
 #ifdef PLATFORM_MSP430
 #define HIST_PERSISTENT TIKU_DURABLE

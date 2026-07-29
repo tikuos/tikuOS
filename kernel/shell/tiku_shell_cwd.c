@@ -29,12 +29,8 @@
 /**
  * The shell's current working directory (SRAM, not persistent).
  *
- * Always an absolute path beginning with '/', held without a trailing
- * slash except for the root "/" itself.  Initialised to root and reset
- * to root on every boot.  Read via tiku_shell_cwd_get(); replaced via
- * tiku_shell_cwd_set(); used as the base for relative resolution in
- * tiku_shell_cwd_resolve().  Capacity is TIKU_SHELL_CWD_SIZE bytes
- * including the NUL (see tiku_shell_cwd.h).
+ * Always absolute and beginning with '/', held without a trailing slash except
+ * for root itself, and reset to root on every boot.
  */
 static char cwd[TIKU_SHELL_CWD_SIZE] = "/";
 
@@ -46,8 +42,8 @@ static char cwd[TIKU_SHELL_CWD_SIZE] = "/";
  * @brief Strip trailing '/' characters from a path, in place.
  *
  * Removes every trailing slash but never shortens the path below one
- * character, so the root "/" is preserved.  Used to normalise both the
- * stored cwd and freshly resolved paths to the no-trailing-slash form.
+ * character, so the root "/" is preserved.  Normalises both the stored cwd
+ * and freshly resolved paths to the no-trailing-slash form.
  *
  * @param path  NUL-terminated path, modified in place
  */
@@ -63,10 +59,9 @@ strip_trailing_slash(char *path)
 /**
  * @brief Remove the last path component in place (handle "..").
  *
- * Drops any trailing slash, then deletes back to and including the
- * last '/', leaving the parent directory.  The result is clamped to
- * root: applying ".." at or above "/" yields "/" rather than an empty
- * string, so a path can never walk above the filesystem root.
+ * Drops any trailing slash, then deletes back to and including the last '/'.
+ * The result is clamped to root, so ".." at or above "/" yields "/" and a path
+ * can never walk above the filesystem root.
  *
  * @param path  NUL-terminated path, modified in place
  */
@@ -102,12 +97,9 @@ go_up(char *path)
 /**
  * @brief Append one path component, inserting a '/' separator.
  *
- * Adds a '/' before the component unless @p path is still at root
- * (length 1), then copies up to @p complen characters of @p comp and
- * NUL-terminates.  Strictly bounded by @p pathsz: if the separator or
- * the component would not fit, the excess is dropped silently (the
- * function neither reports nor signals truncation -- the path is just
- * shorter than the source implied).
+ * Adds a '/' unless @p path is still at root, then copies up to @p complen
+ * characters and NUL-terminates.  Strictly bounded by @p pathsz: anything that
+ * would not fit is dropped silently, without signalling truncation.
  *
  * @param path     Destination path, modified in place
  * @param pathsz   Capacity of @p path in bytes, including the NUL
@@ -141,10 +133,9 @@ append_component(char *path, uint8_t pathsz,
 /**
  * @brief Return the shell's current working directory.
  *
- * Returns a pointer to the internal cwd buffer; it is always an
- * absolute, NUL-terminated path beginning with '/'.  The caller must
- * not modify or free it, and the contents may change on the next
- * tiku_shell_cwd_set().
+ * A pointer to the internal buffer, always an absolute NUL-terminated path.
+ * The caller must not modify or free it, and the contents may change on the
+ * next tiku_shell_cwd_set().
  *
  * @return Pointer to the cwd string (never NULL).
  */
@@ -157,13 +148,12 @@ tiku_shell_cwd_get(void)
 /**
  * @brief Replace the current working directory.
  *
- * Stores @p path as the new cwd, truncating to TIKU_SHELL_CWD_SIZE - 1
- * characters and stripping any trailing slash.  The path must already
- * be absolute: a NULL pointer or one not starting with '/' is ignored
- * (the cwd is left unchanged).  This routine does NOT check that the
- * directory exists -- existence/type validation is the caller's job
- * (e.g. `cd` validates with tiku_vfs_resolve() before calling this).
+ * Stores @p path as the new cwd, truncating to TIKU_SHELL_CWD_SIZE - 1 and
+ * stripping any trailing slash.  A NULL pointer or a path not starting with
+ * '/' is ignored.
  *
+ * @note Existence and type validation belong to the caller -- `cd` resolves
+ *       through the VFS before calling this.
  * @param path  Absolute path to adopt (must start with '/')
  */
 void
@@ -180,21 +170,14 @@ tiku_shell_cwd_set(const char *path)
 /**
  * @brief Resolve a user-supplied path to a clean absolute path.
  *
- * Builds the result in @p out from a base that depends on @p input: if
- * @p input starts with '/', the base is root; otherwise it is the
- * current cwd.  The remaining path is then walked component by
- * component -- runs of '/' are skipped, "." is ignored, ".." pops one
- * component (clamped at root via go_up()), and anything else is
- * appended via append_component().  A trailing slash is stripped and an
- * empty result is forced back to "/", so @p out is always a non-empty
- * absolute path on return.
+ * Builds the result from root when @p input is absolute and from the cwd
+ * otherwise, then walks it component by component: runs of '/' are skipped,
+ * "." is ignored, ".." pops one (clamped at root) and anything else appends.
  *
- * Resolution is purely lexical: the VFS is never consulted, so this
- * neither verifies that the path exists nor resolves links.  All
- * writes are bounded by @p outsz; an over-long path is truncated
- * silently (see append_component()).  @p out is left untouched only
- * when @p outsz is 0.
- *
+ * @note Purely lexical -- the VFS is never consulted, so this neither verifies
+ *       existence nor resolves links.  Writes are bounded by @p outsz and an
+ *       over-long path truncates silently; @p out is always a non-empty
+ *       absolute path unless @p outsz is 0.
  * @param input  User-supplied path, absolute or relative to the cwd
  * @param out    Output buffer receiving the resolved absolute path
  * @param outsz  Capacity of @p out in bytes, including the NUL

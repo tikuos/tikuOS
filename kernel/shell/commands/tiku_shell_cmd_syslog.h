@@ -18,12 +18,9 @@
 /**
  * @brief "syslog" command -- send a remote syslog line over SLIP.
  *
- * Usage: syslog <message...>
- *
- * Sends one RFC 3164 datagram (UDP port 514) to the SLIP host (the device
- * subnet's .1 address) at severity INFO, facility LOCAL0.  Fire-and-forget:
- * syslog has no reply, so this completes synchronously and the shell prompt
- * returns immediately.
+ * Sends one RFC 3164 datagram (UDP port 514) to the SLIP host at severity
+ * INFO, facility LOCAL0.  Fire-and-forget -- syslog has no reply, so this
+ * completes synchronously and the prompt returns immediately.
  */
 void tiku_shell_cmd_syslog(uint8_t argc, const char *argv[]);
 

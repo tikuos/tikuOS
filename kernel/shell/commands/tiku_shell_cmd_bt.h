@@ -26,12 +26,9 @@ extern "C" {
 /**
  * @brief "bt" command handler — drive the CYW43439 Bluetooth subsystem.
  *
- * Sub-commands: "status" (BD_ADDR, HCI/LMP version, firmware, adv/scan
- * state), "advertise <name>|stop", "scan [stop]", "list" (cached scan
- * results), "connections", "connect <slot|addr> [public]",
- * "disconnect [N]", "discover [N]", "read <handle> [N]",
- * "subscribe <cccd_handle> [N]", "bonds", "unpair [N]" and "help".
- * With no argument it prints the help.
+ * Sub-commands cover status, advertising, scanning and the cached results,
+ * connection management (connect/disconnect/connections), GATT discovery and
+ * access (discover/read/subscribe) and bonding.  No argument prints the help.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2..]

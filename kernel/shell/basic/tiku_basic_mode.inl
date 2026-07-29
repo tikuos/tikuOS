@@ -218,13 +218,14 @@ tiku_basic_mode_feed_char(int ch)
 }
 
 /**
- * @brief Notify BASIC that a watched VFS node changed (F2).
+ * @brief Notify BASIC that a watched VFS node changed.
  *
- * Called by the shell process on TIKU_EVENT_VFS with the changed node.  Marks
- * every event-armed ON CHANGE slot on that node as pending; the mode/RUN poll
- * then re-reads and fires it at the next statement boundary (so the GOSUB
- * return address is correct).  Defined even when the feature is off so the
- * shell's dispatch hook always links.
+ * Called by the shell process on TIKU_EVENT_VFS.  Marks every event-armed
+ * ON CHANGE slot on that node pending; the mode/RUN poll then re-reads and
+ * fires it at the next statement boundary, so the GOSUB return address is right.
+ *
+ * @note Defined even when the feature is off, so the shell's dispatch hook
+ *       always links.
  */
 void
 tiku_basic_mode_on_vfs(const void *node)
@@ -262,7 +263,7 @@ tiku_basic_mode_tick(void)
     }
 #if TIKU_BASIC_ONCHG_EVENT
     /* F2 self-heal: the shell's rules engine does a wholesale unwatch_all() on
-     * re-arm, dropping our ON CHANGE subscriptions too.  Re-arm each active
+     * re-arm, dropping the ON CHANGE subscriptions too.  Re-arm each active
      * event slot idempotently every tick, exactly as the `watch` command does. */
     {
         int i;
@@ -344,11 +345,9 @@ tiku_basic_mode_enter(void)
 /**
  * @brief Run the saved program headlessly as a non-blocking mode (`basic run`).
  *
- * Loads the persisted program and starts the step machine, then returns; the
- * shell poll loop pumps it to completion and leaves the mode.  Unlike the
- * interactive REPL there is no prompt -- the program simply runs alongside the
- * live shell and other processes.  Pairs with `init add ... 'basic run'` for a
- * saved program that autostarts at boot without blocking the system.
+ * Loads the persisted program, starts the step machine and returns; the shell
+ * poll loop pumps it to completion.  Unlike the REPL there is no prompt -- the
+ * program runs alongside the live shell and other processes.
  *
  * @return 0 if a program started running, -1 otherwise (message printed).
  */
@@ -380,15 +379,15 @@ tiku_basic_mode_run_saved(void)
 
 /**
  * @brief Resume (or, first boot, start) the saved program headlessly (`basic
- *        run resume`) -- F1's power-failure-transparent autostart.
+ *        run resume`) -- the power-failure-transparent autostart.
  *
- * Loads the persisted program, then tries to continue it mid-loop from the
- * durable execution-state checkpoint; if none exists (a clean first boot, or a
- * program that ended in an orderly way), it starts the program fresh.  The
- * resume-or-fresh behaviour is exactly what an autostart wants: `init add ...
- * 'basic run resume'` boots straight into the program on the first power-up and,
- * after a power cut mid-run, picks it back up where it left off.
+ * Loads the persisted program, then continues it mid-loop from the durable
+ * checkpoint; with none (a clean first boot, or an orderly end) it starts
+ * fresh.
  *
+ * @note That resume-or-fresh behaviour is exactly what an autostart wants: it
+ *       boots straight into the program on first power-up and, after a power
+ *       cut mid-run, picks it back up where it left off.
  * @return 0 if a program is running (resumed or fresh), -1 otherwise.
  */
 int

@@ -25,9 +25,9 @@
 #include "tiku.h"
 #include <stdint.h>
 /* Unconditional: this header carries the TIKU_DEVICE_NVM_LABEL and
- * TIKU_DEVICE_RAM_USABLE fallbacks that every memory report needs.  It used to
- * be included only under TIKU_INIT_ENABLE, which meant the fallbacks were
- * reachable in some builds and not others -- the include-order trap. */
+ * TIKU_DEVICE_RAM_USABLE fallbacks that every memory report needs.  Gating it
+ * on TIKU_INIT_ENABLE would make the fallbacks reachable in some builds and
+ * not others -- the include-order trap. */
 #include <kernel/memory/tiku_nvm_map.h>
 
 #if TIKU_INIT_ENABLE
@@ -40,7 +40,7 @@
 
 /*
  * The MSP430 GCC linker emits these symbols at section boundaries.
- * We take their addresses (not values) to compute region sizes.
+ * Their ADDRESSES (not values) give the region sizes.
  *
  * SRAM layout (low → high):
  *   __datastart     .data start (initialised globals)
@@ -68,8 +68,8 @@ extern char _etext;         /* past last byte of .text         */
  * (and any future per-device LD overrides). It marks the byte right
  * after the last HIFRAM-resident section (.upper.rodata, .upper.bss,
  * .upper.text). Defined as `weak` so this file still links on parts
- * whose LD script doesn't provide the symbol — we treat the absence
- * (address == 0) as "no usage data available" and skip the row.
+ * whose LD script doesn't provide the symbol; an absent symbol
+ * (address == 0) means "no usage data available" and the row is skipped.
  *
  * Gated on TIKU_MEMORY_MODEL_LARGE because in small-mode builds the
  * 16-bit relocation can't reach a HIFRAM address (>= 0x10000) — a
@@ -89,7 +89,7 @@ extern char __hifram_end __attribute__((weak));
  * The MSP430 IVT lives in the top 128 bytes of lower FRAM
  * (0xFF80..0xFFFF on every FR-series part TikuOS targets). The
  * linker reserves it through the __interrupt_vector_* sections in
- * each device's .ld file; we subtract it here so "unallocd" reports
+ * each device's .ld file, and it is subtracted here so "unallocd" reports
  * the truly empty lower-FRAM space, not "empty space + 128 B IVT".
  */
 #if defined(PLATFORM_MSP430)
@@ -120,8 +120,8 @@ stack_used(void)
     }
     return 0;
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
-    /* Cortex-M: 32-bit SP. Truncate to uint16_t (the max usage we
-     * realistically report on a microcontroller fits comfortably). */
+    /* Cortex-M: 32-bit SP. Truncated to uint16_t -- the peak usage a
+     * microcontroller realistically reports fits comfortably. */
     uintptr_t sp;
     uintptr_t top = (uintptr_t)&__stack;
     __asm__ volatile ("mov %0, sp" : "=r"(sp));
@@ -179,16 +179,15 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
      *
      *   In small mode the FRAM layout is
      *     [ rodata . persistent . data-init . text ] _etext . slack . IVT
-     *   so _start - FRAM_START used to give "const/data" and
-     *   _etext - _start used to give "code". That worked.
+     *   so _start - FRAM_START would give "const/data" and
+     *   _etext - _start would give "code".
      *
      *   In large mode (-mcode-region=either) the layout becomes
      *     [ rodata . persistent . data-init . lower.text . text ]
      *     _etext . slack . IVT
-     *   .lower.text lands BELOW _start, so the old split silently
-     *   reclassified ~30 KB of code as "const/data" and reported
-     *   "code = 396" on a build that actually had 36 KB of code in
-     *   lower FRAM.
+     *   .lower.text lands BELOW _start, so that split silently
+     *   reclassifies ~30 KB of code as "const/data" -- reporting
+     *   "code = 396" on a build with 36 KB of code in lower FRAM.
      *
      *   _etext is the end of all FRAM-resident sections that the
      *   linker fills upward from FRAM_START, regardless of which
@@ -242,7 +241,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
      * default small model this region is reserved but unused.
      *
      * If the per-device LD provides __hifram_end (the override
-     * msp430fr5994_8k_ram.ld does), we report used + free split.
+     * msp430fr5994_8k_ram.ld does), the split is used + free.
      * Otherwise fall back to the single "total reachable" line.
      */
     {

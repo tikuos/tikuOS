@@ -763,7 +763,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
      * CPDLPSTATE decides what the core power domain does when the PE enters a
      * low-power state (WFI).  Three independent fields, each ON / ON-clock-off
      * / RET / OFF:
-     *   CLPSTATE  the core itself          -- we have NEVER written it (= ON)
+     *   CLPSTATE  the core itself          -- never written here (= ON)
      *   ELPSTATE  the FP/MVE extension     -- boot sets ON-clock-off (level 1)
      *   RLPSTATE  the core's RAM           -- never written (= ON); OFF would
      *                                         lose TCM, so this verb refuses it

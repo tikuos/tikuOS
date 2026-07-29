@@ -18,16 +18,9 @@
 /**
  * @brief "sleep" command handler — configure low-power idle mode.
  *
- * Installs the scheduler idle hook to enter a low-power mode
- * when no events are pending.  The system wakes on any enabled
- * interrupt (Timer A0 for LPM0/LPM3, GPIO/UART if configured).
- *
- * Usage:
- *   sleep              — show current LPM setting
- *   sleep lpm0         — idle in LPM0 (CPU off, SMCLK+ACLK on)
- *   sleep lpm3         — idle in LPM3 (CPU+SMCLK off, ACLK on)
- *   sleep lpm4         — idle in LPM4 (all clocks off)
- *   sleep off          — disable LPM (busy-wait idle loop)
+ * Installs the scheduler idle hook to enter a low-power mode when no events
+ * are pending; the system wakes on any enabled interrupt.  Takes lpm0, lpm3,
+ * lpm4 or off, and prints the current setting with no argument.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

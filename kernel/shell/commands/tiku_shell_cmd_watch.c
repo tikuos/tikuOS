@@ -90,10 +90,9 @@ watch_parse_interval(const char *s, uint8_t *out)
 /**
  * @brief Read the watched path and print one uniform output line.
  *
- * Strips the trailing CR/LF/space run (VFS handlers append a
- * newline by convention) and prints the value indented.  A read
- * failure cancels the watch with a message — matching the old
- * behaviour of ending on error — and reports it via the return.
+ * Strips the trailing CR/LF/space run (VFS handlers append a newline by
+ * convention) and prints the value indented.  A read failure cancels the watch
+ * with a message and reports it via the return.
  *
  * @return 1 on success, 0 when the read failed (watch cancelled)
  */
@@ -143,10 +142,9 @@ tiku_shell_cmd_watch_active(void)
 /**
  * @brief Per-tick service; called once per shell poll tick.
  *
- * INTERVAL mode: counts ticks and re-prints on each elapsed
- * interval.  EVENT mode: re-subscribes idempotently — the
- * self-heal against the rules engine's wholesale
- * tiku_vfs_unwatch_all() (see the file header).
+ * INTERVAL mode counts ticks and re-prints on each elapsed interval.  EVENT
+ * mode re-subscribes idempotently -- the self-heal against the rules engine's
+ * wholesale tiku_vfs_unwatch_all().
  */
 void
 tiku_shell_cmd_watch_tick(void)
@@ -218,12 +216,12 @@ tiku_shell_cmd_watch_cancel(void)
 /**
  * @brief `watch <path> [interval]` — start a live view.
  *
- * Resolves the path, prints the current value once, then arms the
- * mode: EVENT for writable nodes (interval argument ignored — the
- * display is change-driven), INTERVAL otherwise (default 1 s).
- * Returns immediately; the shell stays fully interactive while
- * values stream.  A second `watch` replaces the running one;
- * Ctrl+C stops it.
+ * Resolves the path, prints the current value once, then arms the mode: EVENT
+ * for writable nodes (the interval argument is ignored, since the display is
+ * change-driven), INTERVAL otherwise at a 1 s default.
+ *
+ * @note Returns immediately and the shell stays fully interactive while values
+ *       stream.  A second `watch` replaces the running one; Ctrl+C stops it.
  */
 void
 tiku_shell_cmd_watch(uint8_t argc, const char *argv[])

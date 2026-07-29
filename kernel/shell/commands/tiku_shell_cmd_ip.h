@@ -18,15 +18,9 @@
 /**
  * @brief "ip" command: print the device's IPv4 address.
  *
- *   ip
- *
- * Prints the device's current IPv4 address from the TikuKits net stack
- * (default 172.16.7.2 / TIKU_KITS_NET_IP_ADDR, or whatever DHCP assigned).
- * The address becomes reachable from the host once SLIP is on -- run
- * `slip` (or `ping`, which enables it).
- *
- * Requires the TikuKits net stack (TIKU_KIT_NET_ENABLE=1); compiled in
- * only when the stack is present.
+ * Prints the current IPv4 address from the TikuKits net stack (the
+ * TIKU_KITS_NET_IP_ADDR default, or whatever DHCP assigned).  The address
+ * becomes reachable from the host once SLIP is on.
  *
  * @param argc  Argument count (including the command name)
  * @param argv  Argument strings (argv[0] is the command name)

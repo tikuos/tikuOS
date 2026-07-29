@@ -18,13 +18,9 @@
 /**
  * @brief "start" command handler — start or resume a process by name.
  *
- * Usage:
- *   start              — list available processes and their status
- *   start <name>       — start/resume the named process
- *
- * Search order:
- *   1. Active registry (stopped → resume)
- *   2. Process catalog (not yet started → register + start)
+ * With no argument it lists the available processes and their status.  Named,
+ * it searches the active registry first (a stopped process resumes) and then
+ * the process catalog (registering and starting it).
  *
  * @param argc  Argument count
  * @param argv  Argument vector

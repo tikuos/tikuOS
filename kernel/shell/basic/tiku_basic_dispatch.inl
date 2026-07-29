@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Scratch buffer for IF/THEN truncation -- when ELSE is present we
+/* Scratch buffer for IF/THEN truncation -- when ELSE is present the
  * need to stop the THEN branch's exec_stmt from consuming the ELSE
  * keyword as if it were part of its own arguments. The simplest
  * portable approach is to copy the THEN branch into a buffer with
@@ -46,8 +46,8 @@ exec_if(const char **p)
     if (basic_running && (cur_peek(p) == '\0' || cur_peek(p) == ':')) {
         if (cond) {
             /* TRUE: fall through to the next line. The runner advances
-             * basic_pc normally. When eventually we hit ELSE during
-             * sequential execution, that handler skips us past END IF. */
+             * basic_pc normally. When ELSE is eventually reached during
+             * sequential execution, that handler skips past END IF. */
             while (cur_peek(p)) cur_advance(p);
             return;
         } else {
@@ -61,7 +61,7 @@ exec_if(const char **p)
     }
 
     /* Scan the rest of the line for an unquoted ELSE keyword. If
-     * found we split: THEN branch is *p..else_pos, ELSE branch is
+     * found it splits: THEN branch is *p..else_pos, ELSE branch is
      * after the ELSE keyword. */
     else_pos = scan_for_else(*p);
 
@@ -103,7 +103,7 @@ exec_if(const char **p)
         /* Drop any unscanned tail (e.g. the ELSE branch when cond
          * was true, or trailing whitespace that exec_stmts didn't
          * walk over). The outer walker treats unconsumed bytes
-         * after a successful stmt as "trailing junk", so we must
+         * after a successful stmt as "trailing junk", so it must
          * leave *p at end-of-line. */
         while (cur_peek(p)) cur_advance(p);
         return;
@@ -436,7 +436,7 @@ exec_stmt(const char **p)
 #endif
 
     /* Implicit LET: "A = expr" or "A$ = expr$" or "A(i) = expr".
-     * The save / restore dance lets us back out cleanly when the
+     * The save / restore dance backs out cleanly when the
      * cursor sits on a single letter that isn't actually being
      * assigned (e.g. a stray `A` line that's just a syntax error). */
     {
@@ -542,7 +542,7 @@ exec_stmt(const char **p)
  * can resume after the dropped tail without rescanning.
  *
  * Note on basic_running: it is 1 only inside RUN. In immediate mode
- * it stays 0, so we must only short-circuit on a *transition* from
+ * it stays 0, so short-circuiting must happen only on a *transition* from
  * 1->0 (END/STOP during RUN), not on the steady-state 0 outside RUN. */
 static void
 exec_stmts(const char **p)

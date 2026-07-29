@@ -19,12 +19,9 @@
 /**
  * @brief "cryptoprobe" command handler — CRACEN CryptoMaster probe.
  *
- * Sub-commands: "hwcfg" (dump the fused-engine words), "sha <hexcfg>"
- * (hash "abc" with that BA413 config word), "sweep" (search the config
- * words for one that reproduces SHA-256("abc")), "ecb", "ccm",
- * "gcm [hexextra]" and "pk" (known-answer tests), "bench" (hardware vs
- * software SHA-256 over 4 KB), "bypass" and "direct" (DMA path probes),
- * "mode <sw|auto>", "counters" and "dbg".  Anything else prints usage.
+ * Sub-commands cover the fused-engine dump (hwcfg), the SHA config search
+ * (sha/sweep), the ecb/ccm/gcm/pk known-answer tests, a hardware-vs-software
+ * bench, the bypass/direct DMA probes, and mode/counters/dbg.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]

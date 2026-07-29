@@ -18,14 +18,9 @@
 /**
  * @brief "changed" command — block until @p path's VFS value changes.
  *
- * Usage: changed <path>
- *
- * Reads the path once to baseline, then re-reads at shell-tick
- * granularity until the value differs from the baseline (excluding
- * trailing whitespace).  Prints the old/new pair as
- *   "  <old> -> <new>"
- * and returns.  Ctrl+C cancels and prints "^C".  A transient read
- * failure (path missing) is ignored; the command keeps waiting.
+ * Baselines the path with one read, then re-reads at shell-tick granularity
+ * until the value differs (ignoring trailing whitespace) and prints the
+ * old/new pair.  Ctrl+C cancels; a transient read failure keeps it waiting.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

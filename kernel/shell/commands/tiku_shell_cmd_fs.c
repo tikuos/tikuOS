@@ -59,7 +59,7 @@ tiku_shell_cmd_touch(uint8_t argc, const char *argv[])
     }
     tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
 
-    /* Already exists -> no-op (no mtime to bump), so we never truncate it. */
+    /* Already exists -> no-op (no mtime to bump), so it is never truncated. */
     if (tiku_vfs_read(resolved, probe, sizeof(probe)) >= 0) {
         return;
     }

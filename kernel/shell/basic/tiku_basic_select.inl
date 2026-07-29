@@ -94,11 +94,9 @@ case_arm_matches(const char *t, long value)
  * @brief Find the prog[] index of the matching arm for SELECT CASE
  *        starting at @p select_line.
  *
- * Walks forward in line-number order tracking nested SELECT CASE
- * depth.  Returns the index of:
- *   - the first CASE arm whose pattern matches @p value, OR
- *   - the CASE ELSE arm if none matched, OR
- *   - the END SELECT line if neither.
+ * Walks forward in line-number order tracking nested SELECT CASE depth, and
+ * returns the first CASE arm whose pattern matches @p value, else the CASE ELSE
+ * arm, else the END SELECT line.
  *
  * @return prog index, or -1 if no END SELECT found.
  */
@@ -145,7 +143,7 @@ find_select_arm(uint16_t select_line, long value)
  *        (open) SELECT CASE that contains @p start_line.
  *
  * Used when execution reaches a CASE / CASE ELSE during normal
- * flow (= "previous arm just finished"); we jump past END SELECT.
+ * flow (= "previous arm just finished"); the jump goes past END SELECT.
  *
  * @return prog index of END SELECT, or -1 if not found.
  */
@@ -213,7 +211,7 @@ exec_select_case(const char **p)
 /**
  * @brief CASE encountered as a statement during normal flow.
  *
- * Means the previous arm has just finished and we're about to
+ * Means the previous arm has just finished and control is about to
  * start the next arm by accident; jump past the matching END
  * SELECT so only the dispatched arm runs.
  */

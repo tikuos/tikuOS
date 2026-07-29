@@ -26,10 +26,12 @@
 /**
  * @brief Statement handler.
  *
- * The cursor sits just past the keyword (trailing whitespace consumed).
- * Parse arguments with the services below; raise errors via
- * tiku_basic_ext_error().  On return the interpreter treats remaining
- * unconsumed text like any statement tail (':' continues, junk errors).
+ * The cursor sits just past the keyword, trailing whitespace consumed.  Parse
+ * arguments with the services below and raise errors via
+ * tiku_basic_ext_error().
+ *
+ * @note On return the interpreter treats remaining unconsumed text like any
+ *       statement tail: ':' continues, junk errors.
  */
 typedef void (*tiku_basic_ext_stmt_fn)(const char **p);
 
@@ -45,12 +47,13 @@ typedef int (*tiku_basic_ext_nfn)(const long *args, int argc, long *out);
 /**
  * @brief String-returning function handler (`NAME$`).
  *
- * Unlike numeric functions, the handler PARSES ITS OWN arguments (so it can
- * take string args, numeric args, or a mix): on entry the cursor sits just
- * past the name.  Use tiku_basic_ext_expect() for '(' / ',' / ')' and
- * tiku_basic_ext_parse_expr / _parse_strexpr for the arguments; write the
- * result string into @p out (capacity @p cap, always NUL-terminate); raise
- * errors via tiku_basic_ext_error().
+ * Unlike numeric functions the handler PARSES ITS OWN arguments, so it can take
+ * string args, numeric args or a mix; on entry the cursor sits just past the
+ * name.  Write the result into @p out (capacity @p cap, always NUL-terminated).
+ *
+ * @note Use tiku_basic_ext_expect() for '(' / ',' / ')' and
+ *       tiku_basic_ext_parse_expr / _parse_strexpr for the arguments; raise
+ *       errors via tiku_basic_ext_error().
  */
 typedef void (*tiku_basic_ext_strfn)(const char **p, char *out, size_t cap);
 

@@ -18,19 +18,9 @@
 /**
  * @brief "delay" command -- block the shell for <ms> milliseconds.
  *
- * Usage:
- *   delay <ms>
- *
- * Distinct from "sleep", which sets the system low-power idle
- * mode: this command is a synchronous wait at clock-tick
- * granularity (~7.81 ms at the default 128 Hz tick), useful for
- * timing recipes inside aliases, "every" jobs, or scripted bring-
- * up sequences.  Ctrl+C cancels.
- *
- * Granularity floor is one tick; values < 1 tick worth of ms
- * round up to one tick so the request always advances the clock.
- * Maximum 60000 ms (one minute) -- longer waits should use
- * "every"/"once" so the shell remains interactive.
+ * A synchronous wait at clock-tick granularity (~7.81 ms at the default
+ * 128 Hz tick), unlike `sleep`, which sets the idle low-power mode.  Values
+ * below one tick round up; the maximum is 60000 ms and Ctrl+C cancels.
  */
 void tiku_shell_cmd_delay(uint8_t argc, const char *argv[]);
 

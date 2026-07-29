@@ -18,19 +18,9 @@
 /**
  * @brief "calc" command — evaluate an infix integer expression.
  *
- * Usage: calc N [op N]...
- *
- * Operators (space-separated tokens):
- *   +  -  *  /  %  min  max
- *
- * Arithmetic uses 32-bit signed integers; no floating point.
- * Operator precedence has two classes:
- *   - High (left-to-right):  *  /  %  min  max
- *   - Low  (left-to-right):  +  -
- *
- * The expression must alternate operand / operator / operand and is
- * bounded by the shell argv limit (TIKU_SHELL_MAX_ARGS = 8 tokens
- * including "calc"), so up to four operands and three operators.
+ * Space-separated tokens over 32-bit signed integers, no floating point.
+ * Two precedence classes, both left-to-right: * / % min max bind tighter
+ * than + -.  The shell argv limit bounds it to four operands.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

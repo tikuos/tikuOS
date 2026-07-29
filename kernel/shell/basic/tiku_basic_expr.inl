@@ -78,18 +78,14 @@ expr_prim(const char **p)
 /**
  * @brief Right-associative power operator: base ^ exp -- INTEGER only.
  *
- * `^` is integer exponentiation, unconditionally.  It does NOT infer a
- * value's type from its magnitude, so `2000 ^ 2` is 4000000 (consistent
- * with `2000 * 2000`), never 4000.  The engine carries no per-value type
- * bit -- it cannot tell the integer 2000 from the Q.3 value 2.000, which
- * share a representation -- so guessing from magnitude produced the same
- * operands yielding incompatible readings (fixed in A6).  For Q.3
- * fixed-point power, use the explicit FPOW(base, n) builtin instead.
+ * `^` is integer exponentiation unconditionally, and does NOT infer a type from
+ * magnitude: `2000 ^ 2` is 4000000, consistent with `2000 * 2000`.  For Q.3
+ * fixed-point power use the explicit FPOW(base, n) builtin.
  *
- * The exponent is an integer count; a negative exponent yields 0 (no
- * fractions in the integer domain).  `x ^ 0 == 1` and `0 ^ 0 == 1`
- * (BASIC convention).  Precedence is higher than unary minus so
- * `-2^2 == -(2^2) == -4`, matching Microsoft BASIC.
+ * @note The engine carries no per-value type bit -- it cannot tell the integer
+ *       2000 from the Q.3 value 2.000 -- so guessing from magnitude gave the
+ *       same operands incompatible readings.  A negative exponent yields 0,
+ *       `x ^ 0 == 1`, and precedence beats unary minus so `-2^2 == -4`.
  */
 static long
 expr_pow(const char **p)

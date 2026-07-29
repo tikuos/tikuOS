@@ -18,11 +18,9 @@
 /**
  * @brief "freq" command handler — show or set the CPU core frequency.
  *
- * With no argument it prints the current core clock in MHz.
- * "freq <mhz>" requests a core frequency (96, or turbo: 192 on Apollo4,
- * 250 on Apollo510) and reports the clock actually applied.  On
- * Apollo510, "freq probe" dumps the read-only silicon, trim and power
- * identity that decides whether High-Performance mode can be used.
+ * No argument prints the current core clock in MHz; `freq <mhz>` requests one
+ * (96, or turbo: 192 on Apollo4, 250 on Apollo510) and reports what was
+ * applied.  On Apollo510 `freq probe` dumps the HP-mode identity.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] is the requested frequency in

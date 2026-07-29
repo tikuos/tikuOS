@@ -366,10 +366,10 @@ static void bleadv_ext(const char *name, unsigned secs)
                  bursts, rc, aux_last);
 }
 
-/* L1 bring-up: connectable advertising until a central sends us a
+/* L1 bring-up: connectable advertising until a central sends a
  * CONNECT_IND, then decode its LLData -- the first packet of the
  * link-layer ladder, captured off the air from a real central
- * (`bluetoothctl connect <addr>` on the host).  We do not accept the
+ * (`bluetoothctl connect <addr>` on the host).  This does not accept the
  * connection yet; the central will retry and time out. */
 static void bleadv_connprobe(unsigned secs)
 {
@@ -478,7 +478,7 @@ static void bleadv_csa1(void)
 
 /* L3 two-board harness: this board is the CENTRAL -- scan for TIKU-CONN,
  * connect, drive the link.  Run `bleadv conn` on the peer (peripheral).
- * We impose lenient params so the link establishes while timing is tuned;
+ * Lenient params, so the link establishes while timing is tuned;
  * reports events, peripheral responses heard, and the measured peripheral
  * T_IFS (the ground truth the phone could never give). */
 static void bleadv_central(unsigned secs, uint8_t updates)
@@ -1033,7 +1033,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
                (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
             /* Pump: L2CAP fragment in -> recombine + ATT/GATT on the M33 ->
              * response fragmented out.  A (possibly multi-fragment) NUS RX
-             * write surfaces bytes we echo back as a notification. */
+             * write surfaces bytes echoed back as a notification. */
             uint8_t llid_in;
             int n;
             uint32_t dm = tiku_flpr_arch_dle_max();   /* F1: DLE negotiated?  */
@@ -1204,7 +1204,7 @@ static void bleadv_flprpair(uint8_t bond_mode)
     advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
     adv[0] = 0x40u;                               /* ADV_IND, random TxAdd    */
 
-    {   /* Print our AdvA so a peer can connect scan-BY-ADDRESS to it. */
+    {   /* Print the AdvA so a peer can connect scan-BY-ADDRESS to it. */
         char astr[18];
         bleadv_fmt_addr(astr, addr);
         SHELL_PRINTF("FLPR SMP pair: advertising 'TIKU-PAIR' as %s -- run "
@@ -1258,10 +1258,10 @@ static void bleadv_flprpair(uint8_t bond_mode)
                 tiku_ble_host_rx(frame, (uint16_t)n, llid_in);
                 bleadv_flpr_drain_tx();            /* send the SMP response(s) */
             }
-            /* On DONE, mark success but KEEP serving: our final DHKey Check
+            /* On DONE, mark success but KEEP serving: the final DHKey Check
              * must still go over the air, and a central that lost it will
-             * re-request (dup Ea -> engine re-emits Eb).  We exit when the
-             * central tears the link down, not the instant we finish. */
+             * re-request (dup Ea -> engine re-emits Eb).  It exits when the
+             * central tears the link down, not the instant pairing ends. */
             if (tiku_ble_host_smp_state() >= 2 && !paired) {
                 paired = 1;
                 (void)tiku_ble_host_smp_ltk(ltk);
@@ -1273,7 +1273,7 @@ static void bleadv_flprpair(uint8_t bond_mode)
                 bond_saved = 1;
             }
             /* Phase E3: once paired, derive the session key when the central
-             * starts LL encryption (the FLPR forwards SKDm/IVm to us). */
+             * starts LL encryption (the FLPR forwards SKDm/IVm here). */
             if (paired && !enc_done && tiku_flpr_arch_enc_service(ltk)) {
                 enc_done = 1;
                 tiku_flpr_arch_enc_sk(sk);
@@ -1289,7 +1289,7 @@ static void bleadv_flprpair(uint8_t bond_mode)
                         TIKU_BLE_ENC_DEMO_PT;
                     uint8_t nonce[13], aad = TIKU_BLE_ENC_DEMO_AAD;
                     uint8_t pt[TIKU_BLE_ENC_DEMO_PT_LEN];
-                    tiku_ble_enc_nonce(nonce, 0u, 1u, iv);   /* central->us    */
+                    tiku_ble_enc_nonce(nonce, 0u, 1u, iv);   /* central->local */
                     /* Decrypt + MIC-verify on CCM00 (the RADIO-companion
                      * hardware engine) -- the same over-the-air ciphertext
                      * the software path proved, now through CCM00 end to
@@ -1467,9 +1467,9 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             uint8_t rx_sn, rx_nesn, newd, ackd, sn, nesn;
         } seq[4] = {
             { 0, 0, 1, 0, 0, 1 },   /* first packet: new, no ack yet     */
-            { 1, 1, 1, 1, 1, 0 },   /* acks us + new data                */
+            { 1, 1, 1, 1, 1, 0 },   /* peer acks + sends new data        */
             { 1, 1, 0, 0, 1, 0 },   /* peer RE-SENDS: not new, not acked */
-            { 0, 0, 1, 1, 0, 1 },   /* acks us + new data                */
+            { 0, 0, 1, 1, 0, 1 },   /* peer acks + sends new data again  */
         };
         tiku_radio_ll_ack_t a = { 0u, 0u };
         int i, fails = 0;

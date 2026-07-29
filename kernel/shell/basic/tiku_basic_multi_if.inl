@@ -28,10 +28,10 @@
  * exec_if dispatches to the multi-line path; otherwise it stays on
  * the existing single-line path.
  *
- * Runtime: when cond is true we just fall through to the body. When
- * we eventually hit ELSE, that's the signal that the THEN branch
+ * Runtime: a true cond simply falls through to the body. When
+ * ELSE is eventually reached, that is the signal that the THEN branch
  * just finished -- skip forward to matching END IF. When cond is
- * false at multi-line entry, we scan forward for the first matching
+ * false at multi-line entry, the scan goes forward for the first matching
  * ELSE or END IF and jump past it.
  *
  * Nesting works because the forward scans are depth-aware: a nested
@@ -314,7 +314,7 @@ exec_else_kw(const char **p)
 }
 
 /* END IF / ENDIF is a marker; reaching it in normal execution is a
- * no-op (we just fall through to the next line). */
+ * no-op (control just falls through to the next line). */
 static void
 exec_endif(const char **p)
 {

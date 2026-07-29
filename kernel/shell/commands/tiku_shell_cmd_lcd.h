@@ -22,12 +22,9 @@
 /**
  * @brief "lcd" command handler — paint the board's segment LCD.
  *
- * Sub-commands: "info" (panel size + icon count), "clear",
- * "char <pos> <ch>", "puts <text...>", "putsr <text...>",
- * "putsa <pos> <text...>", "putu <decimal>", "puti <signed-decimal>",
- * "puth <hex> [digits]", "putf <int> <decimals>",
- * "icon <id> <on|off|toggle>" and "icons clear".  With no argument it
- * prints the usage list.
+ * Sub-commands cover panel info and clear, single characters, the puts family
+ * (plain, right-aligned, at a position), the numeric formatters (putu, puti,
+ * puth, putf) and the icons.  No argument prints the usage list.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2..]

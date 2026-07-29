@@ -71,9 +71,7 @@ mem_parse_u32(const char *s, uint32_t *out)
  *
  * MSP430 (small model) pointers are 16-bit, so addresses above 0xFFFF are
  * rejected there -- reaching HIFRAM needs __data20 accesses this command does
- * not do.  Every 32-bit port takes the full 32-bit range: this command's first
- * real job on Arm was reading MCUCTRL identity registers at 0x40021050, which
- * the 16-bit cap rejected.
+ * not do.  Every 32-bit port takes the full 32-bit range.
  *
  * @return 1 on success, 0 on parse error or out-of-range.
  */

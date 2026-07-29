@@ -41,10 +41,9 @@ static uint32_t basic_run_guard;
 /**
  * @brief Freeze ERR/ERL and route an error to the ON ERROR handler.
  *
- * Records the erroring line in ERL and the classified category in ERR
- * (GENERAL when the throw site could not classify), then -- if an ON ERROR
- * handler is registered and we are not already inside it -- clears the error
- * and redirects the PC to the handler.  RESUME continues from basic_err_pc.
+ * Records the erroring line in ERL and the classified category in ERR (GENERAL
+ * when the throw site could not classify), then redirects the PC to a
+ * registered handler unless already inside it.  RESUME continues from there.
  *
  * @param prev_pc  The line that was executing when the error fired.
  * @return 1 if the error was routed to a handler (keep running), 0 if it is
@@ -56,7 +55,7 @@ basic_run_trap_error(uint16_t prev_pc)
     basic_erl = prev_pc;
     basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
     /* A handler is one-shot in the sense that an error INSIDE the handler is
-     * fatal -- we'd otherwise risk infinite-looping on a buggy handler. */
+     * fatal -- otherwise a buggy handler could loop forever. */
     if (basic_err_handler != 0u && basic_pc != basic_err_handler) {
         basic_err_pc = prev_pc;
         basic_pc     = basic_err_handler;
@@ -75,12 +74,11 @@ basic_run_trap_error(uint16_t prev_pc)
 /**
  * @brief Initialise run state and select the first program line.
  *
- * Clears the control-flow stacks, the error/handler state, the DATA cursor,
- * and the reactive registrations, then wipes the variable namespace (each RUN
- * starts fresh -- this RUN-boundary reset is also what keeps the arena budget
- * bounded across many invocations).  Does not allocate: the arena is already
- * bound by basic_session_begin().
+ * Clears the control-flow stacks, error/handler state, DATA cursor and reactive
+ * registrations, then wipes the variable namespace -- the RUN-boundary reset
+ * that keeps the arena budget bounded across many invocations.
  *
+ * @note Does not allocate; the arena is already bound by basic_session_begin().
  * @return 0 on success, -1 if there is no program (message printed).
  */
 static int
@@ -131,10 +129,9 @@ basic_run_begin(void)
 /**
  * @brief Advance the program by exactly one line.
  *
- * Locate the line at basic_pc, run its statements via exec_stmts, trap any
- * error through ON ERROR, advance the PC to the next line, then poll the
- * EVERY / ON CHANGE reactive table.  All state persists in globals, so the
- * caller may return to the scheduler between steps.
+ * Locates the line at basic_pc, runs its statements, traps any error through
+ * ON ERROR, advances the PC and polls the EVERY / ON CHANGE reactive table.
+ * All state persists in globals, so the caller may return to the scheduler.
  *
  * @return BASIC_STEP_RUNNING to continue, BASIC_STEP_DONE when the program
  *         ended, BASIC_STEP_BROKEN on an unhandled error or a Ctrl-C break.
@@ -203,7 +200,7 @@ basic_run_step(void)
     {
         /* Skip a `label:` prefix at the start of the line so it isn't parsed
          * as a statement. The label registry is built lazily by
-         * prog_find_label, which scans on each GOTO label-ref; we just step
+         * prog_find_label, which scans on each GOTO label-ref; this just steps
          * over it here. */
         const char *q = p;
         skip_ws(&q);
@@ -292,17 +289,14 @@ basic_run_end(void)
 /**
  * @brief Resume a checkpointed run from the durable execution-state slot.
  *
- * F1's counterpart to basic_run_begin: instead of the fresh-state reset (which
- * would wipe the very variables we want back), it restores basic_pc, the
- * control-flow stacks, the variables, and the error / DATA / PRNG state from the
- * checkpoint, then marks the machine running so a driver can continue from the
- * saved PC.  The program must already be in prog[] (RESUME continues an existing
- * program; it does not load one) and the arena must be allocated.
+ * The counterpart to basic_run_begin: instead of the fresh-state reset, which
+ * would wipe the very variables being restored, it reinstates basic_pc, the
+ * control-flow stacks, the variables and the error / DATA / PRNG state.
  *
- * Silent on failure -- the caller owns the messaging, which differs between the
- * interactive `RUN RESUME` ("no checkpoint to resume") and the autostart path
- * ("no checkpoint; starting fresh").
- *
+ * @note The program must already be in prog[] -- RESUME continues an existing
+ *       program, it does not load one -- and the arena must be allocated.
+ *       Silent on failure: the caller owns the messaging, which differs between
+ *       interactive `RUN RESUME` and the autostart path.
  * @return 0 if a checkpoint was restored (basic_running := 1), -1 if there is no
  *         program or no valid checkpoint (the caller may fall back to a fresh
  *         RUN).
@@ -333,10 +327,9 @@ basic_run_resume(void)
 /**
  * @brief Drive the step machine to completion (blocking), state already set up.
  *
- * Assumes basic_running is set by a prior basic_run_begin() or
- * basic_run_resume().  A 100k-step guard catches runaway tight loops -- printing
- * "? iteration cap reached" and dropping back to the REPL rather than wedging
- * the shell.
+ * Assumes basic_running was set by a prior basic_run_begin() or
+ * basic_run_resume().  A 100k-step guard catches runaway tight loops, printing
+ * "? iteration cap reached" and dropping back to the REPL rather than wedging.
  */
 static void
 exec_run_drive(void)
@@ -355,7 +348,7 @@ exec_run_drive(void)
     }
     /* Periodic checkpointing is the yielding (mode) driver's job -- this
      * blocking driver pins the CPU, so F1's "resume the always-on loop" story
-     * lives on tiku_basic_mode_tick().  Here we only drop any stale checkpoint
+     * lives on tiku_basic_mode_tick().  Here only a stale checkpoint is dropped
      * on orderly completion, so a finished program cannot later RESUME into its
      * own finished state (a power cut, by contrast, never reaches here, leaving
      * the last mode-path checkpoint live). */

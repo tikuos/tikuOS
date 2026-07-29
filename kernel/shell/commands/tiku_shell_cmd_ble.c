@@ -93,12 +93,11 @@ static void ble_uart_to_ble(const tiku_shell_io_t *uart_be,
 }
 
 /**
- * @brief "ble uart [name]" -- interactive tikuOS shell over BLE (M3.3).
+ * @brief "ble uart [name]" -- interactive tikuOS shell over BLE.
  *
- * Advertises connectably; when a central connects and subscribes to TX
- * notifications, its RX writes become shell input and shell output is streamed
- * back as TX notifications -- a wireless console in nRF Connect's UART tab.
- * Ctrl-C on the local UART stops the session.
+ * Advertises connectably; once a central connects and subscribes to TX
+ * notifications, its RX writes become shell input and shell output streams back
+ * as TX notifications.  Ctrl-C on the local UART stops the session.
  */
 static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
     const char *name = (argc >= 3u) ? argv[2] : "tikuOS";
@@ -244,7 +243,7 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
         return;
     }
 
-    /* "ble uart [name]" -- connectable serial-over-GATT session (M3). */
+    /* "ble uart [name]" -- connectable serial-over-GATT session. */
     if (argc >= 2u && strcmp(argv[1], "uart") == 0) {
         ble_cmd_uart(argc, argv);
         return;

@@ -58,11 +58,11 @@ static void process_line(const char *raw);
 /*
  * PROGRAM SLOT -- an ordinary /data file, not a carve.
  *
- * The saved program used to own the BASE of the reserved tail, which is why a
- * core memory header had to know BASIC's line capacity (see the layering note
- * in tiku_nvm_region.h).  It is now the store file BASIC_PROG_FILE, so the
- * program competes for space with everything else instead of being handed a
- * per-platform reservation, and a build without BASIC costs the store nothing.
+ * Owning the BASE of a reserved tail would force a core memory header to know
+ * BASIC's line capacity (see the layering note in tiku_nvm_region.h).  The
+ * program is instead the store file BASIC_PROG_FILE, competing for space with
+ * everything else rather than being handed a per-platform reservation, so a
+ * build without BASIC costs the store nothing.
  *
  * The three primitives map onto the store's streamed write, which exists for
  * exactly this shape of producer: begin (reserve a run), append (bounded
@@ -144,10 +144,9 @@ basic_prog_discard(void)
 /**
  * @brief Zero-copy view of the saved program text.
  *
- * Still read in place -- the store hands back a pointer straight into the
- * memory-mapped NVM, and because a file's slots are contiguous that stays one
- * pointer even for a program spanning many slots.  So LOAD copies nothing,
- * which is what let the serialization scratch shrink.
+ * Read in place: the store hands back a pointer straight into memory-mapped
+ * NVM, and because a file's slots are contiguous that stays one pointer even
+ * for a program spanning many.  LOAD therefore copies nothing.
  *
  * @param len_out  Receives the stored text length on success.
  * @return Pointer to the text inside the store, or NULL when none is saved.
@@ -206,7 +205,7 @@ basic_prog_store(const char *text, size_t len)
     if (len > TIKU_BASIC_SAVE_BUF_BYTES) {
         return -1;
     }
-    /* Whole-blob path, kept for the /data/basic VFS bridge, which hands us a
+    /* Whole-blob path, kept for the /data/basic VFS bridge, which supplies a
      * complete image.  SAVE itself streams -- see basic_save_to_persist. */
     if (basic_prog_begin(TIKU_BASIC_SAVE_BUF_BYTES) != 0 ||
         basic_prog_append(text, len) != 0) {
@@ -271,11 +270,11 @@ basic_prog_fetch(char *buf, size_t max, size_t *out_len)
 /*
  * SERIALIZATION SCRATCH -- BOUNDED, not program-sized.
  *
- * This used to be a whole worst-case program image, PROGRAM_LINES*(LINE_MAX+8)
- * bytes of always-resident RAM: 155,649 B on the nRF54LM20 (63% of its primary
- * SRAM bank) and 258,401 B on the Apollo510, reserved at link time whether or
- * not SAVE or LOAD was ever used, and duplicating the arena's own prog[] line
- * table almost exactly -- 2.07 bytes of live SRAM per byte of program capacity.
+ * A whole worst-case program image would be PROGRAM_LINES*(LINE_MAX+8) bytes of
+ * always-resident RAM: 155,649 B on the nRF54LM20 (63% of its primary SRAM
+ * bank) and 258,401 B on the Apollo510, reserved at link time whether or not
+ * SAVE or LOAD is ever used, and duplicating the arena's own prog[] line table
+ * almost exactly -- 2.07 bytes of live SRAM per byte of program capacity.
  *
  * On the region-backed parts neither direction actually needs it:
  *   - LOAD reads the program in place.  The region is memory-mapped, so the
@@ -306,7 +305,7 @@ static BASIC_SCRATCH char basic_persist_scratch[BASIC_SCRATCH_BYTES];
 
 #if BASIC_NVM_ON_REGION
 /* One line at a time, for LOAD.  Deliberately NOT the scratch above: a saved
- * line is dispatched through process_line() while we still hold a pointer into
+ * line is dispatched through process_line() while a pointer is still held into
  * the buffer, and process_line() can reach commands that use the scratch
  * themselves (IMPORT).  160 bytes buys that aliasing hazard away. */
 static char basic_load_line[TIKU_BASIC_LINE_MAX + 16];
@@ -374,7 +373,7 @@ basic_save_to_persist(void)
             basic_report(TIKU_BASIC_ERR_IO, "save: program too large for slot");
             return -1;
         }
-        /* Number, then the DETOKENIZED body (A2): the on-media format stays
+        /* Number, then the DETOKENIZED body: the on-media format stays
          * plain text, so pre-A2 saves load unchanged and LOAD re-crunches. */
         n = snprintf(chunk + fill, cap - fill, "%u ",
                      (unsigned)prog[idx].number);
@@ -433,7 +432,7 @@ basic_save_to_persist(void)
         if (idx < 0) {
             break;
         }
-        /* Number, then the DETOKENIZED body (A2): the on-media format stays
+        /* Number, then the DETOKENIZED body: the on-media format stays
          * plain text, so pre-A2 saves load unchanged and LOAD re-crunches. */
         n = snprintf(tmp + pos, tmp_cap - pos, "%u ",
                      (unsigned)prog[idx].number);

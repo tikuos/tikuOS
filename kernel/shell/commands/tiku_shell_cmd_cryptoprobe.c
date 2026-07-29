@@ -170,7 +170,7 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
     if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
         /* Iterate each path over 4 KB and count kernel ticks -- coarse per
          * tick (7.8 ms) but honest; the iteration count divides it down to
-         * us-per-op.  (The GRTC fine capture proved unreliable for short
+         * microseconds per op.  (The GRTC fine capture proved unreliable for short
          * deltas; ticks x N is wraparound-proof.) */
         static uint8_t buf[4096];
         uint8_t  hw[32], sw[32];

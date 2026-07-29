@@ -18,11 +18,8 @@
 /**
  * @brief "wake" command handler — show active wake sources.
  *
- * Displays which interrupts can wake the CPU from low-power mode
- * and which LPM levels each source supports.
- *
- * Usage:
- *   wake              — list all wake sources and status
+ * Lists which interrupts can wake the CPU from low-power mode, and which LPM
+ * levels each source supports.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

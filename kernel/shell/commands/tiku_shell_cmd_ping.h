@@ -18,18 +18,12 @@
 /**
  * @brief "ping" command: ICMP echo a host over SLIP.
  *
- *   ping <a.b.c.d> [count]   (count defaults to 4)
+ * Brings up the SLIP link, then enters a non-blocking ping mode: each shell
+ * tick pumps the SLIP RX for the echo reply and prints the round-trip time or
+ * a timeout, ending with a summary after @p count probes (default 4).
  *
- * Brings up the SLIP link, then enters a non-blocking ping mode: a probe
- * is sent and, each shell tick, the SLIP RX is pumped for the echo reply
- * (the round-trip time is printed, or a timeout).  After @p count probes
- * it prints a summary and returns to the prompt.  While active the UART
- * carries binary SLIP, so the shell yields all input to the ping engine
- * (there is no Ctrl+C; the run is bounded by count).
- *
- * Requires the TikuKits net stack (TIKU_KIT_NET_ENABLE=1); compiled in
- * only when the stack is present.
- *
+ * @note While active the UART carries binary SLIP, so the shell yields all
+ *       input to the ping engine; the run is bounded by count, not Ctrl+C.
  * @param argc  Argument count (including the command name)
  * @param argv  Argument strings (argv[0] is the command name)
  */

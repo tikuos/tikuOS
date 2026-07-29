@@ -24,7 +24,7 @@
 
 /* On the actual target, PEEK / POKE are byte access through a
  * volatile pointer cast from the integer address.  This is exactly
- * the operation users want for SFR pokes -- we don't try to validate
+ * the operation users want for SFR pokes -- there is no attempt to validate
  * the address. */
 static long
 basic_peek(long addr)

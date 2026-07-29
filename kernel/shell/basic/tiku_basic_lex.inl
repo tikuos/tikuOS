@@ -78,7 +78,7 @@ print_escape(char esc)
 /* KEYWORDS / NUMBERS / VARIABLES                                            */
 /*---------------------------------------------------------------------------*/
 
-/* Case-insensitive keyword match with word-boundary check.  DUAL (A2): a
+/* Case-insensitive keyword match with word-boundary check.  DUAL: a
  * crunched token byte matches its spelling in one compare, so stored program
  * lines dispatch on bytes while immediate-mode raw text keeps the char path.
  * @p kw is always an UPPERCASE literal (matches the table spellings). */
@@ -189,11 +189,9 @@ parse_unum(const char **p, long *out)
 /**
  * @brief Read a multi-character identifier into @p buf.
  *
- * The identifier must start with an alpha character; subsequent
- * characters can be alpha / digit / underscore.  Letters are
- * folded to upper case.  Identifiers longer than @p cap-1 are
- * truncated (the cursor still advances past the rest of the
- * identifier so the caller doesn't re-read those bytes).
+ * Must start with an alpha character; subsequent characters may be alpha, digit
+ * or underscore, and letters fold to upper case.  An identifier longer than
+ * @p cap-1 is truncated, with the cursor still advanced past the rest.
  *
  * @param p    Cursor (advanced past the identifier on return).
  * @param buf  Destination, NUL-terminated on return.
@@ -220,10 +218,9 @@ parse_ident(const char **p, char *buf, size_t cap)
  * @brief Look up (or allocate) a slot in one of the named-var
  *        tables.
  *
- * Single-letter names short-circuit to the A..Z fast slots
- * (returns 0..25); multi-letter names land in the named-var
- * region (returns 26..(26+TIKU_BASIC_NAMEDVAR_MAX-1)) of the
- * corresponding table (numeric or string).
+ * Single-letter names short-circuit to the A..Z fast slots (0..25);
+ * multi-letter names land in the named-var region of the corresponding
+ * numeric or string table.
  *
  * @param name       Upper-cased identifier (1..NAMEDVAR_LEN-1).
  * @param is_string  Pick the string-var or numeric-var name table.

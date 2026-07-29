@@ -18,13 +18,9 @@
 /**
  * @brief "mqtt" command -- connect to an MQTT broker, optionally publish.
  *
- * Usage:
- *   mqtt [broker-ip] [port]                  -- connect, report status
- *   mqtt pub <topic> <msg> [broker] [port]   -- connect, publish (QoS 0)
- *
- * Broker defaults to the SLIP host (subnet .1) on port 1883.  Runs over the
- * TCP stack; non-blocking -- the TCP handshake + MQTT CONNECT progress across
- * shell ticks (the shell drives tcp_periodic + this command's mqtt_periodic).
+ * Bare form connects and reports status; `pub <topic> <msg>` publishes at
+ * QoS 0.  The broker defaults to the SLIP host on port 1883, and the TCP
+ * handshake plus MQTT CONNECT progress across shell ticks.
  */
 void tiku_shell_cmd_mqtt(uint8_t argc, const char *argv[]);
 

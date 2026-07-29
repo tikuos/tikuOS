@@ -18,23 +18,9 @@
 /**
  * @brief "i2c" command -- master-mode bus operations.
  *
- * Subcommands (numeric arguments accept decimal or 0x-prefixed hex):
- *
- *   i2c scan
- *       Probe addresses 0x08..0x77 with a zero-length write and
- *       print the list of devices that ACK.  Mirrors the output of
- *       i2cdetect(8) but in compact one-line form.
- *
- *   i2c read <addr> <count>
- *       Read up to TIKU_SHELL_I2C_MAX_BYTES from <addr>.  The bytes
- *       are printed as space-separated hex.
- *
- *   i2c write <addr> <byte> [<byte> ...]
- *       Write 1..(argc-2) bytes to <addr>.  The byte count is
- *       capped by TIKU_SHELL_MAX_ARGS.
- *
- * The bus is initialised lazily at standard speed (100 kHz) on
- * first use; subsequent calls are no-ops at the arch layer.
+ * `scan` probes 0x08..0x77 with a zero-length write and lists what ACKs;
+ * `read <addr> <count>` prints hex bytes; `write <addr> <byte>...` sends up to
+ * the argv limit.  The bus initialises lazily at 100 kHz on first use.
  */
 void tiku_shell_cmd_i2c(uint8_t argc, const char *argv[]);
 

@@ -50,13 +50,9 @@ typedef struct {
     int     (*getc)(void);          /**< Read one byte, -1 if empty */
     uint8_t flags;                  /**< Bitwise OR of TIKU_SHELL_IO_* */
     uint8_t cap;                    /**< Capability this channel confers on
-                                         VFS writes (a tiku_vfs_cap_t /
-                                         TIKU_VFS_CAP_* mask).  The physical
-                                         console is CAP_ALL; a remote backend
-                                         (TCP/BLE) is restricted.  0 (NONE) is
-                                         the fail-closed default: a backend
-                                         that forgets to declare a cap can
-                                         write only open nodes. */
+                                         VFS writes (a TIKU_VFS_CAP_* mask).
+                                         The console is CAP_ALL, a remote
+                                         backend restricted; 0 fails closed. */
 } tiku_shell_io_t;
 
 /*---------------------------------------------------------------------------*/

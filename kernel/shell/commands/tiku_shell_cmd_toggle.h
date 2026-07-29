@@ -18,11 +18,8 @@
 /**
  * @brief "toggle" command — flip a binary VFS node.
  *
- * Usage: toggle <path>
- *
- * Writes "t" to the node (which writable nodes can interpret as
- * toggle).  Works with any writable VFS file — LEDs, GPIOs, etc.
- * Also reads and prints the new state after toggling.
+ * Writes "t" to the node, which a writable node may interpret as toggle, then
+ * reads and prints the new state.  Works with any writable VFS file.
  *
  * @param argc  Argument count
  * @param argv  Argument vector (argv[1] = VFS path)

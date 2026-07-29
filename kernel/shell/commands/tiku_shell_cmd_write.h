@@ -18,14 +18,8 @@
 /**
  * @brief "write" command handler — write a value to a VFS path.
  *
- * Usage:
- *   write <path> <value>
- *
- * Examples:
- *   write /dev/led0 1          — turn LED on
- *   write /dev/led0 0          — turn LED off
- *   write /dev/led0 t          — toggle LED
- *   write /config/baud 9600    — set a config parameter (future)
+ * Takes a path and a value -- `write /dev/led0 1` to turn an LED on, 0 for
+ * off, 't' to toggle -- and hands the value to the node's write handler.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

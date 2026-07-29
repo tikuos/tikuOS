@@ -288,7 +288,7 @@ exec_browse(const char **p)
 #endif /* TIKU_KITS_NET_HTTP_ENABLE */
 
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
-/* MQTT publish (QoS 0). The broker exchange is poll-based, so we drive it
+/* MQTT publish (QoS 0). The broker exchange is poll-based, so it is driven
  * across a bounded deadline, pumping the console between polls so the board
  * never hard-hangs (the ADC-hang class). */
 static volatile uint8_t basic_mqtt_evt;

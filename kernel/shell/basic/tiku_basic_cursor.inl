@@ -20,7 +20,7 @@
  *    lookahead (cur_peek_at) is therefore safe without a length:
  *    once a NUL is seen, no helper reads past it, and every parser
  *    loop terminates on '\0'.
- *  - Crunched program lines (A2) store keyword bytes >=
+ *  - Crunched program lines store keyword bytes >=
  *    BASIC_TOK_BASE in the same buffer.  Read those through
  *    cur_peekb(), which yields the byte as uint8_t -- plain
  *    cur_peek() returns char, whose sign for bytes >= 0x80 is

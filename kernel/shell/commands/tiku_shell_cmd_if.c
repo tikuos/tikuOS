@@ -148,7 +148,7 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
     }
 
     /* Rebuild the tail tokens (argv[4..]) into a single line for
-     * the parser. The parser tokenises in place, so we cannot
+     * the parser. The parser tokenises in place, so it cannot
      * just reuse the original buffer. */
     pos = 0;
     for (i = 4; i < argc; i++) {

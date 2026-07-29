@@ -19,24 +19,9 @@
  * @brief "if" command — read a VFS path, compare it to a value,
  *        and dispatch a sub-command on match.
  *
- * Usage:
- *   if <path> <op> <value> <command...>
- *
- * Operators:
- *   ==  !=             string or numeric
- *   >   <   >=  <=     numeric only
- *
- * Examples:
- *   if /dev/temp0 > 40 write /dev/led0 1
- *   if /sys/power/source == battery write /dev/led1 1
- *
- * Numeric comparison is attempted first; if either side fails to
- * parse as an integer, the command falls back to string compare
- * (which then only accepts == and !=).
- *
- * The sub-command is dispatched through the same shell parser, so
- * any registered command works on the right-hand side. Recursion
- * is bounded to keep stack usage finite on small MCUs.
+ * Operators are == and != (string or numeric) and > < >= <= (numeric only).
+ * Numeric comparison is tried first, falling back to string compare.  The
+ * sub-command runs through the same parser, with recursion bounded.
  */
 void tiku_shell_cmd_if(uint8_t argc, const char *argv[]);
 

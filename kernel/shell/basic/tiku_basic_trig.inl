@@ -43,10 +43,9 @@ static const int16_t basic_sin_lut[65] = {
 /**
  * @brief Compute sin(x) in Q.3 fixed point.
  *
- * Reduces the argument modulo 2*pi, maps it to [0, pi/2] via the
- * usual sign / reflection identities, then linearly interpolates
- * between two adjacent LUT samples.  Negative arguments work
- * naturally: SIN(-PI/2) = -1000.
+ * Reduces the argument modulo 2*pi, maps it to [0, pi/2] via the usual sign and
+ * reflection identities, then linearly interpolates between two adjacent LUT
+ * samples.  Negative arguments work naturally: SIN(-PI/2) = -1000.
  *
  * @param angle_q3  Angle in radians, scaled by 1000.
  * @return          sin(angle) x 1000 (range -1000..+1000).

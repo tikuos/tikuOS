@@ -54,11 +54,10 @@
  *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
 #if defined(AM_PART_APOLLO510)
 /* DELIBERATELY UNDEFINED on this part: there is no NVM carve (the module
- * executes from the ITCM -- see TIKU_MODULE_EXEC_ADDR below), and the address
- * this used to hold, 0x488000, is the NVM REGION BASE now that the slot is
- * gone -- which is to say the NVM tier.  A stale reference would program over
- * live tier data, so leaving it undefined turns that mistake into a compile
- * error instead. */
+ * executes from the ITCM -- see TIKU_MODULE_EXEC_ADDR below), and 0x488000 is
+ * the NVM REGION BASE here, which is to say the NVM tier.  A stale reference
+ * would program over live tier data, so leaving this undefined turns that
+ * mistake into a compile error instead. */
 #elif defined(AM_PART_APOLLO4L)
 #define TIKU_MODULE_CARVE_ADDR  0x78000u
 #elif defined(PLATFORM_RP2350)
@@ -85,10 +84,10 @@
 #endif
 
 /*
- * WHERE THE IMAGE COMES FROM (P3e).  It used to come only from a blob linked
- * into the firmware -- so a module image was counted TWICE, once as .rodata in
- * the code window and once as the reserved slot it was copied into.  The image
- * is now an ordinary store file, and the embedded blob becomes an optional
+ * WHERE THE IMAGE COMES FROM.  A blob linked into the firmware would be
+ * counted TWICE -- once as .rodata in the code window, once as the reserved
+ * slot it is copied into.  The image is therefore an ordinary store file, and
+ * the embedded blob is only an optional
  * SEEDER: when a board has never been provisioned, the first install writes the
  * embedded copy into the store and thereafter the FILE is authoritative.  That
  * is what makes a module replaceable over serial instead of by reflashing, and
@@ -108,7 +107,7 @@
 #endif
 
 /*
- * WHERE THE MODULE EXECUTES (P3f) -- A SETTLED DECISION, NOT PENDING WORK.
+ * WHERE THE MODULE EXECUTES -- A SETTLED DECISION, NOT PENDING WORK.
  *
  * A module is pre-linked to an absolute address, so SOME fixed window is
  * unavoidable; nothing requires it to be in NVM.  The plan once read as "move
@@ -133,9 +132,9 @@
  *
  * THE POWER QUESTION IS NOW MEASURED, not inferred.  ITCM and DTCM power share
  * one field, PWRCTRL->MEMPWREN.PWRENTCM, and nothing in arch/ambiq programs it,
- * so the reset default is what we get.  The old reasoning here -- "we declare
- * 512 KB of DTCM, therefore PWRENTCM must be 7" -- was unsound (the port uses
- * ~30 KB of DTCM, so PWRENTCM=1 would fit too), which is why the window needing
+ * so the reset default is what applies.  Arguing "the linker declares 512 KB
+ * of DTCM, therefore PWRENTCM must be 7" would be unsound -- the port uses
+ * ~30 KB of DTCM, so PWRENTCM=1 would fit too -- which is why a window needing
  * 36 KB against a possible 32 KB was a real risk.
  *
  * Run on an Apollo510B EVB, 2026-07-26 (TikuBench tests/memory/test_mem_tcm.c):

@@ -34,7 +34,7 @@ tree_print_indent(uint8_t depth, uint8_t is_last_chain)
 {
     uint8_t i;
     /* Leading vertical guides for ancestor levels.  Without per-level
-     * "last child" tracking we cannot draw the full guide-set
+     * "last child" tracking it cannot draw the full guide-set
      * faithfully; using a uniform "|  " for ancestors and the proper
      * connector for the current level keeps the output unambiguous
      * while costing one byte of stack instead of one bit per level. */

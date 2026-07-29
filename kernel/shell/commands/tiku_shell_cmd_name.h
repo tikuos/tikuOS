@@ -19,13 +19,9 @@
  * @brief "name" command handler — read or set the persistent
  *        device name.
  *
- * Usage:
- *   name                  — print the current device name
- *   name <new-name>       — set the device name (FRAM-backed,
- *                           survives reboot, max 31 chars)
- *
- * Thin wrapper over /sys/device/name. The name is intended for
- * use as an mDNS hostname or any user-visible identifier.
+ * A thin wrapper over /sys/device/name: no argument prints the current name,
+ * an argument sets it (FRAM-backed, survives reboot, max 31 chars).  Intended
+ * as an mDNS hostname or any user-visible identifier.
  */
 void tiku_shell_cmd_name(uint8_t argc, const char *argv[]);
 

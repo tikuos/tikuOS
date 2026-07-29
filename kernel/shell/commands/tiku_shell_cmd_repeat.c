@@ -139,7 +139,7 @@ tiku_shell_cmd_repeat(uint8_t argc, const char *argv[])
         }
 
         /* Fresh writable copy: the parser inserts NULs at space
-         * boundaries, so we must hand it a new buffer each loop. */
+         * boundaries, so it needs a new buffer each loop. */
         for (j = 0; j < TIKU_SHELL_REPEAT_CMD_MAX - 1; j++) {
             scratch[j] = tmpl[j];
             if (tmpl[j] == '\0') {

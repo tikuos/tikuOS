@@ -18,13 +18,9 @@
 /**
  * @brief "adc" command handler — read analog channels through the HAL.
  *
- * Usage:
- *   adc <channel>               — read channel (12-bit, AVCC ref)
- *   adc <channel> <ref>         — read with reference (avcc|1v2|2v0|2v5)
- *   adc temp                    — read internal temperature sensor
- *   adc bat                     — read battery (AVCC/2)
- *
- * Channel is 0-15 for external pins, or "temp"/"bat" for internal.
+ * Takes a channel (0-15 for external pins, or "temp"/"bat" for the internal
+ * sensor and battery divider) and an optional reference (avcc|1v2|2v0|2v5),
+ * defaulting to a 12-bit conversion against AVCC.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

@@ -18,12 +18,9 @@
 /**
  * @brief "dns" command -- resolve a hostname to an IPv4 address.
  *
- * Usage: dns <hostname> [resolver-ip]
- *
  * Sends an A-record query to a recursive resolver (default 8.8.8.8, reached
- * through the SLIP host's relay/NAT) and prints the resolved address + TTL.
- * Non-blocking: the reply is awaited across shell ticks, polled at ~1 Hz to
- * match the resolver's retry budget.
+ * through the SLIP host's relay/NAT) and prints the address and TTL.
+ * Non-blocking: the reply is awaited across shell ticks, polled at ~1 Hz.
  */
 void tiku_shell_cmd_dns(uint8_t argc, const char *argv[]);
 

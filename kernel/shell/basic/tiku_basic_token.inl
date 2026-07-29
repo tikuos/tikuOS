@@ -26,7 +26,7 @@
  *     replaced with '?', so in stored text a high byte IS a valid token.
  *
  * The on-media SAVE format stays detokenized (human-readable) text, so
- * programs saved before A2 load unchanged, and the checkpoint identity CRC
+ * programs saved by an earlier build load unchanged, and the identity CRC
  * (computed over the crunched bytes) is stable across SAVE/LOAD because
  * crunching is deterministic.
  *

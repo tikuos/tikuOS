@@ -22,21 +22,14 @@ static void exec_stmts(const char **p);
 /**
  * @brief PRINT statement.
  *
- * Each item is a numeric or string expression.  Items can be
- * separated by `,` (which emits a single space between them) or
- * `;` (no separator).  A trailing `;` suppresses the final newline.
+ * Each item is a numeric or string expression, separated by `,` (one space
+ * between them) or `;` (no separator); a trailing `;` suppresses the newline.
+ * `TAB(n)` and `SPC(n)` tap the print stream and are recognised here.
  *
- * Two pseudo-functions tap directly into the print stream and so
- * are recognised here rather than in the expression parser:
- *   - `TAB(n)` advances output to column `n` (1-based) by emitting
- *     spaces; if the cursor is already past column `n` it does
- *     nothing.
- *   - `SPC(n)` emits `n` spaces unconditionally.
- *
- * The print column is tracked locally for this PRINT statement
- * only -- no global cursor state is maintained, and TAB() acts on
- * the position relative to the current PRINT, which matches the
- * common BASIC convention.
+ * @note TAB(n) advances to 1-based column n and does nothing if already past
+ *       it; SPC(n) emits n spaces unconditionally.  The print column is local
+ *       to this statement -- no global cursor -- which matches the common
+ *       BASIC convention.
  */
 static void
 exec_print(const char **p)
@@ -198,19 +191,12 @@ exec_const(const char **p)
 /**
  * @brief LHS string-slice assignment.
  *
- * Three statement forms:
- *   MID$(A$, start [, n]) = expr$   -- overwrite n chars of A$ at
- *                                      position `start` (1-based)
- *                                      with expr$.  If n is omitted,
- *                                      uses LEN(expr$).
- *   LEFT$(A$, n)  = expr$           -- overwrite first n chars.
- *   RIGHT$(A$, n) = expr$           -- overwrite last n chars.
+ * MID$(A$, start [, n]) overwrites n chars at 1-based `start` (LEN(expr$) when
+ * n is omitted); LEFT$(A$, n) and RIGHT$(A$, n) overwrite the first or last n.
+ * The length of A$ never changes.
  *
- * Length of A$ is NOT changed -- excess source bytes are dropped,
- * missing source bytes leave the original characters in place
- * (matching QuickBASIC semantics).  A$ being NULL (unbound) treats
- * it as an empty string and yields an empty-after-assignment value.
- *
+ * @note Excess source bytes are dropped and missing ones leave the original
+ *       characters, matching QuickBASIC.  An unbound A$ is treated as empty.
  * @param p     Cursor; on entry points at the keyword, on success
  *              advanced past the RHS expression.
  * @param kind  Which slice form: 'L' = LEFT$, 'R' = RIGHT$,
@@ -677,10 +663,9 @@ static void exec_endsub(void);      /* defined later in tiku_basic_subs.inl */
  * @brief EXIT FOR | EXIT WHILE | EXIT REPEAT | EXIT SUB  -- early exit from
  *        the innermost matching loop or subroutine.
  *
- * Pops the corresponding frame and advances basic_pc to the line
- * after the matching NEXT / WEND / UNTIL (loops), or to the caller
- * (EXIT SUB, identical to reaching ENDSUB).  Exits in immediate mode
- * are rejected because there's no run to terminate.
+ * Pops the corresponding frame and advances basic_pc to the line after the
+ * matching NEXT / WEND / UNTIL, or to the caller for EXIT SUB.  An exit in
+ * immediate mode is rejected, there being no run to terminate.
  */
 static void
 exec_exit(const char **p)
@@ -862,7 +847,7 @@ exec_for(const char **p)
     for_sp++;
     /* If the loop is already past the end on entry, skip the body. */
     if ((e3 > 0 && e1 > e2) || (e3 < 0 && e1 < e2)) {
-        /* Empty body: pop immediately. We can't conveniently scan
+        /* Empty body: pop immediately. There is no convenient way to scan
          * forward to the matching NEXT here without a parser, so the
          * common case is handled by NEXT itself terminating the loop
          * on first iteration if the entry condition was already past
@@ -920,8 +905,8 @@ exec_next(const char **p)
  * PRINT body containing the substring doesn't trigger a false match.
  *
  * Nesting (A6 fix): ELSE binds to the *nearest* IF, the conventional
- * rule.  A nested `IF ... THEN` in our THEN-branch opens an inner IF that
- * claims the next ELSE, so we count unmatched inner THENs and only return
+ * rule.  A nested `IF ... THEN` in the THEN-branch opens an inner IF that
+ * claims the next ELSE, so unmatched inner THENs are counted and only
  * an ELSE once that count is zero.  Thus in
  *     IF a THEN IF b THEN x ELSE y
  * the ELSE binds to `IF b` (this function returns NULL for the outer IF),
@@ -961,7 +946,7 @@ scan_for_else(const char *src)
                     q += 4;
                     continue;
                 }
-                return q;             /* this ELSE binds to our IF */
+                return q;             /* this ELSE binds to this IF */
             }
         }
         q++;
@@ -1076,7 +1061,7 @@ exec_i2cwrite(const char **p)
 #if TIKU_BASIC_REBOOT_ENABLE
 /* REBOOT -- mirror what the shell `reboot` command does: configure the
  * watchdog for a short interval and spin until it fires. Code after
- * REBOOT is unreachable, so we don't bother returning to exec_stmts. */
+ * REBOOT is unreachable, so there is no return to exec_stmts. */
 static void
 exec_reboot(void)
 {
@@ -1662,13 +1647,13 @@ basic_poll_reactive(void)
     now_ms = (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND;
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) {
         if (!basic_everys[i].active) continue;
-        /* Wrap-tolerant compare: if we've reached or passed the
+        /* Wrap-tolerant compare: on reaching or passing the
          * scheduled time, fire. */
         if (now_ms >= basic_everys[i].next_due_ms) {
             const char *p = basic_everys[i].stmt;
             exec_stmts(&p);
             if (basic_error) {
-                /* Deactivate the broken handler so we don't keep
+                /* Deactivate the broken handler so it does not keep
                  * re-firing on every poll. */
                 basic_everys[i].active = 0;
                 return;
@@ -1901,7 +1886,7 @@ data_find_next_line(uint16_t from_lineno, int *out_off)
         const char *t = prog[n].text;
         size_t      k;
         skip_ws(&t);
-        k = tok_kw_at(t, "DATA");            /* token byte or raw text (A2) */
+        k = tok_kw_at(t, "DATA");            /* token byte or raw text */
         if (k != 0) {
             *out_off = (int)((t + k) - prog[n].text);
             return n;
@@ -1914,8 +1899,8 @@ data_find_next_line(uint16_t from_lineno, int *out_off)
 
 /* At the current (basic_data_idx, basic_data_off), advance past any
  * delimiting whitespace and commas, returning 1 if a value is
- * available. If we hit end-of-line, walk forward to the next DATA
- * statement. Sets basic_data_idx = -2 to mark exhaustion so we don't
+ * available. At end-of-line, walk forward to the next DATA
+ * statement. Sets basic_data_idx = -2 to mark exhaustion so as not to
  * keep re-scanning the program. */
 static int
 data_seek_value(void)
@@ -2527,20 +2512,13 @@ exec_swap(const char **p)
 /**
  * @brief PRINT USING -- formatted output.
  *
- * Format-string placeholders:
- *   `#`  -- digit position (right-aligned, space-padded).  A run of
- *           N `#`s consumes one numeric argument; overflow renders
- *           the run as `*` characters.  Negatives consume one digit
- *           position for the leading `-`.
- *   `&`  -- whole-string field (no truncation, no padding).
- *           Consumes one string argument.
+ * `#` is a digit position, right-aligned and space-padded: a run of N consumes
+ * one numeric argument and renders as `*` on overflow.  `&` is a whole-string
+ * field, no truncation or padding.  Anything else is emitted literally.
  *
- * Any other character in the format string is emitted literally.
- *
- * Multiple arguments may be supplied after the format, separated by
- * `,` or `;`; placeholders are filled in left-to-right.  When the
- * format has no `#` and no `&`, the format is printed literally
- * with no argument required.
+ * @note A negative number spends one digit position on the leading '-'.
+ *       Arguments after the format are separated by `,` or `;` and fill
+ *       left-to-right; a format with no `#` and no `&` prints literally.
  */
 static void
 exec_print_using(const char **p)
@@ -2588,7 +2566,7 @@ exec_print_using(const char **p)
         if (fmt[i] == '#') {
             /* Find end of this numeric field.  `.` and `,` inside
              * the run stay part of the field (literal characters
-             * within it) so we keep a separate digit_count for the
+             * within it) so a separate digit_count is kept for the
              * `#` slots only. */
             int  start = i;
             int  end;

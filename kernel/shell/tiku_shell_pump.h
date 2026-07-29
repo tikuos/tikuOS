@@ -22,16 +22,15 @@
 /**
  * @brief One cooperative service step for a busy-wait loop.
  *
- * Kicks the watchdog; drains the WiFi radio RX (CYW43 builds — the
- * driver process is starved while we busy-wait, so without this the
- * chip's FIFO fills and inbound segments never reach the stack);
- * paces tiku_kits_net_tcp_periodic() to ~8 Hz (it advances
- * connect/retransmit timeouts PER CALL, so calling it every loop
- * iteration would blow through them) and runs @p periodic at the
- * same paced point; then polls the console for Ctrl-C — through the
- * SLIP-aware demux on shared-UART builds, so an IP payload byte 0x03
- * is never misread as a break (and no stack-bound bytes are stolen).
+ * Kicks the watchdog, drains the WiFi radio RX, paces
+ * tiku_kits_net_tcp_periodic() to ~8 Hz along with @p periodic, then polls the
+ * console for Ctrl-C through the SLIP-aware demux.
  *
+ * @note The RX drain matters because the driver process is starved during a
+ *       busy-wait, so the chip's FIFO would fill and inbound segments never
+ *       reach the stack.  tcp_periodic advances connect/retransmit timeouts PER
+ *       CALL, so calling it every iteration would blow through them.  The
+ *       SLIP-aware poll keeps an IP payload byte 0x03 from reading as a break.
  * @param periodic Optional protocol housekeeping to run at the paced
  *                 net service point (e.g. tiku_kits_net_mqtt_periodic);
  *                 NULL for none.

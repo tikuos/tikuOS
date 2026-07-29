@@ -208,7 +208,7 @@ static void rft_sweep(const char *lo_s, const char *hi_s, const char *dbm_s)
             SHELL_PRINTF("rftest: start failed at %ld MHz\n", f);
             break;
         }
-        {   /* Dwell ~20 ms per step, kicking the WDT as we go. */
+        {   /* Dwell ~20 ms per step, kicking the WDT along the way. */
             tiku_clock_time_t t0 = tiku_clock_time();
             while ((tiku_clock_time() - t0) <
                    (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 50u)) {

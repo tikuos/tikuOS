@@ -192,7 +192,7 @@ static void axons_diff(void)
  */
 #if defined(TIKU_AXON_MODEL_FROM_STORE) && TIKU_AXON_MODEL_FROM_STORE
 /* NO MODEL TRANSLATION UNIT IS COMPILED in this configuration, so the four
- * globals it used to define live here instead -- same names, same types, same
+ * globals it would otherwise define live here -- same names, same types, same
  * (non-static) linkage.  Nordic's inference sources are untouched and cannot
  * tell the difference; they were already written against these as externs.
  *
@@ -245,15 +245,12 @@ static uint8_t axons_store_pout[AXONS_STORE_POUT_MAX]
  * @brief Publish the firmware addresses a packed model's table may name.
  *
  * Registered as &thing, never as a number: a relocation against a code symbol
- * resolves Thumb-tagged, and taking the address in C is what supplies that bit
- * (see tiku_model.h).  A hand-written constant would be one short, and the
- * symptom is a single corrupt word in the command stream.
+ * resolves Thumb-tagged, and taking the address in C supplies that bit.  A
+ * hand-written constant would be one short -- a single corrupt command word.
  *
- * @packed_out is registered here rather than resolved by the loader because it
- * is neither in the file nor a fixed firmware address -- it is a buffer this
- * caller lends the model.  The loader owns the names for the model's own parts
- * and lets everything else fall through to the registry, which is exactly the
- * seam that makes that possible.
+ * @note @packed_out is registered here rather than resolved by the loader
+ *       because it is neither in the file nor a fixed firmware address -- it is
+ *       a buffer this caller lends the model.
  */
 static int axons_store_register_syms(void)
 {
@@ -382,16 +379,13 @@ static int axons_kat_load(tiku_tfs_t *fs, const char *name,
 /**
  * @brief Compare the descriptor built from the store against the linked one.
  *
- * Only possible in a baked build, and that is the point: this is the on-device
- * counterpart of the packer's host-side reconstruction gate.  The packer proves
- * the FILE reproduces the linker's bytes; this proves the DEVICE does, using
- * the same model, at the addresses it will actually run at.
+ * The on-device counterpart of the packer's host-side reconstruction gate: the
+ * packer proves the FILE reproduces the linker's bytes, this proves the DEVICE
+ * does, using the same model at the addresses it will actually run at.
  *
- * The pointer fields are expected to differ -- they are the whole reason the
- * model was relocated -- so they are reported rather than failed.  Everything
- * else is a scalar the store must reproduce exactly, and a mismatch there means
- * the packed descriptor does not describe the same model.
- *
+ * @note The pointer fields are expected to differ -- that is what relocation is
+ *       for -- so they are reported rather than failed.  Everything else is a
+ *       scalar the store must reproduce exactly.
  * @return the number of differing scalar fields (0 is the pass).
  */
 static unsigned axons_store_desc_check(const nrf_axon_nn_compiled_model_s *got,

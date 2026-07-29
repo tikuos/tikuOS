@@ -36,9 +36,9 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
      *                      requests high speed, "msc" presents mass
      *                      storage instead of the console
      *   power usb hash [n] FNV-1a of the RAM disk -- the U3 gate
-     *   power usb attach   soft-connect -- the host may now find us
+     *   power usb attach   soft-connect -- the host may now enumerate
      *   power usb detach   soft-disconnect
-     *   power usb state    what the host has done to us so far
+     *   power usb state    what the host has done so far
      *   power usb regs     host registers (power-safe)
      *   power usb console  move the shell onto the CDC pipes
      *   power usb uart     move it back (the escape hatch)

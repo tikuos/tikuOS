@@ -18,13 +18,9 @@
 /**
  * @brief "slip" command: start the net process and hand it the console UART.
  *
- * Switches the shell into SLIP mode: the net process
- * (tiku_kits_net_process) takes over the UART for binary SLIP/IP framing
- * and the shell stops reading input.  Reset the board to return to the
- * interactive shell.
- *
- * Requires the TikuKits net stack (TIKU_KIT_NET_ENABLE=1); the command is
- * compiled in only when the stack is present.
+ * Switches the shell into SLIP mode: the net process takes the UART for binary
+ * SLIP/IP framing and the shell stops reading input.  Reset the board to
+ * return to the interactive shell.
  *
  * @param argc  Argument count (including the command name)
  * @param argv  Argument strings (argv[0] is the command name)

@@ -29,7 +29,7 @@ typedef struct {
 
 /* FOR-loop frame. The loop body is the range of program lines
  * starting at `loop_line` (the line AFTER the FOR statement); on
- * NEXT we step the index var, compare against `target`, and either
+ * NEXT steps the index var, compares against `target`, and either
  * jump back to `loop_line` or pop. */
 typedef struct {
     uint16_t var_idx;       /* index into basic_vars[] (0..) */
@@ -217,7 +217,7 @@ static basic_ext_entry_t basic_ext_tab[TIKU_BASIC_EXT_MAX];
 #if TIKU_BASIC_ARRAYS_ENABLE
 /* 1D / 2D integer or string arrays. Stored row-major as a flat
  * buffer (long[] for numeric, char*[] for string). For 1D arrays
- * dim2 == 0 and we treat (i) as element [i]; for 2D, (i, j) is
+ * dim2 == 0 and (i) is element [i]; for 2D, (i, j) is
  * element [i * dim2 + j]. The numeric and string array tables are
  * separate so A and A$ can both be DIMmed independently. */
 typedef struct basic_array_s {

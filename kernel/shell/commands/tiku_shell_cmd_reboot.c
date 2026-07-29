@@ -38,7 +38,7 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
         argv[1][3] == 't') {
         SHELL_PRINTF("Rebooting to BOOTSEL...\n");
         tiku_cpu_rp2350_reboot_to_bootsel();
-        /* If we return, the bootrom call failed; fall through to plain
+        /* A return means the bootrom call failed; fall through to plain
          * watchdog reset below so the device at least reboots. */
     }
 #endif

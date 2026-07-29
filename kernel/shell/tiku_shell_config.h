@@ -10,9 +10,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * @file tiku_shell_config.h
- * @brief Enable/disable individual CLI commands
+/*
+ * tiku_shell_config.h - enable/disable individual CLI commands.
  *
  * To add a new command:
  *   1. Add a TIKU_SHELL_CMD_xxx flag here (set to 1)
@@ -20,10 +19,9 @@
  *   3. Add #include and table entry in tiku_shell.c
  *   4. Add the .c file to the Makefile TIKU_SHELL_ENABLE section
  *   5. If it drives hardware not every target has, add a rule to the
- *      HARDWARE REQUIREMENTS section at the bottom of this file (and
- *      gate/warn in the Makefile) so the flag resolves to 0 where the
- *      capability is absent -- gate the whole .c on the resolved flag,
- *      no runtime "not available" stubs
+ *      HARDWARE REQUIREMENTS section at the bottom of this file so the
+ *      flag resolves to 0 where the capability is absent.  Gate the
+ *      whole .c on the resolved flag; no runtime "not available" stubs.
  */
 
 #ifndef TIKU_SHELL_CONFIG_H_
@@ -428,11 +426,9 @@
 /**
  * @brief Enable TCP (telnet) backend on port 23.
  *
- * Requires the TikuKits TCP stack (TIKU_KITS_NET_TCP_ENABLE=1).
- * The net process must be auto-started alongside the CLI process.
- * Build with:
- *   make APP=cli MCU=msp430fr5994 \
- *        EXTRA_CFLAGS="-DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_SHELL_TCP_ENABLE=1"
+ * Requires the TikuKits TCP stack (TIKU_KITS_NET_TCP_ENABLE=1), and the net
+ * process must be auto-started alongside the CLI process -- so a build needs
+ * both -DTIKU_KITS_NET_TCP_ENABLE=1 and -DTIKU_SHELL_TCP_ENABLE=1.
  */
 #ifndef TIKU_SHELL_TCP_ENABLE
 #define TIKU_SHELL_TCP_ENABLE 0
@@ -441,12 +437,13 @@
 /**
  * @brief Bring the net test servers (UDP echo + TCP + CoAP) up inside the shell.
  *
- * Off by default so the normal shell stays lean.  When set -- TikuBench's net
- * suite enables it on boards without a working APP=net (Ambiq) -- the shell
- * inits UDP/TCP and registers the CoAP server; the existing `slip` RX demux
- * feeds tiku_kits_net_ipv4_input(), which then dispatches to them, so the
- * device answers the suite's UDP/TCP/CoAP tests over SLIP.  No net process is
- * started (the shell owns the UART RX, so a second reader would conflict).
+ * Off by default so the normal shell stays lean.  When set, the shell inits
+ * UDP/TCP and registers the CoAP server, and the `slip` RX demux feeds
+ * tiku_kits_net_ipv4_input(), which dispatches to them.
+ *
+ * @note No net process is started -- the shell owns the UART RX, so a second
+ *       reader would conflict.  TikuBench's net suite enables this on boards
+ *       without a working APP=net.
  */
 #ifndef TIKU_SHELL_NET_TEST
 #define TIKU_SHELL_NET_TEST 0

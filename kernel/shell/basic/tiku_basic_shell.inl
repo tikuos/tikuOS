@@ -111,11 +111,9 @@ tiku_basic_autorun(void)
 /**
  * @brief Parse a multi-line BASIC source string and RUN the result.
  *
- * Walks @p source line by line, dispatching each through
- * process_line().  Numbered lines get stored; un-numbered direct
- * commands (LIST / RUN / NEW / ...) execute as they would at the
- * REPL.  After all lines have been parsed, exec_run() fires once
- * unless the source already issued an explicit `RUN`.
+ * Walks @p source line by line through process_line(): numbered lines are
+ * stored, un-numbered direct commands execute as at the REPL.  exec_run() then
+ * fires once unless the source already issued an explicit `RUN`.
  *
  * @param source NUL-terminated multi-line BASIC source ('\n' breaks).
  */
@@ -141,7 +139,7 @@ tiku_basic_run_source(const char *source)
                 memcpy(line_buf, line_start, len);
                 line_buf[len] = '\0';
                 {
-                    /* Detect un-numbered RUN so we can suppress the
+                    /* Detect un-numbered RUN so as to suppress the
                      * implicit auto-RUN below. */
                     const char *t = line_buf;
                     while (*t == ' ' || *t == '\t') t++;

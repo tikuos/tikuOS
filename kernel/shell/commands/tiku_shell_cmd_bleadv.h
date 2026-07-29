@@ -20,14 +20,9 @@
 /**
  * @brief "bleadv" command handler — BLE beacon, scan and link harness.
  *
- * The bare form "bleadv <name> [secs]" starts a background demo beacon
- * that stops itself.  Sub-commands: "on <name> [ms]" and "off"
- * (background beacon), "scan [secs] [prefix]" and "observe [secs|off]"
- * (passive scanning), "ext <name> [secs]" (extended advertising),
- * "conn [secs]" and "connprobe [secs]" (peripheral role), "central",
- * "cenupd", "censmp", "cenbond" and "cenphy" [secs] (central role),
- * "phy", "phytx" and "phyrx" (multi-PHY probes), "csa1" and "ackfsm"
- * (link-layer self-tests) and "dbg" (silicon/clock/radio readbacks).
+ * The bare form starts a self-stopping demo beacon.  Sub-commands cover the
+ * background beacon (on/off), scanning (scan/observe), extended advertising,
+ * both roles (conn/central and their variants), the PHY probes and link tests.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] is the sub-command or the beacon

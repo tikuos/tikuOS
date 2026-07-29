@@ -93,9 +93,9 @@ tiku_shell_cmd_irq(uint8_t argc, const char *argv[])
     }
 
     /* The GPIO-IRQ arch API is 1-based virtual (1 = the device's first port).
-     * The user types the physical port NAME: nRF54L parts are named from P0,
-     * so P0/P1/P2 map to virtual 1/2/3 (matching tiku_gpio_arch.c); parts named
-     * from P1 (MSP430) already have name == virtual port. */
+     * The user types the physical port NAME: nRF54L parts number ports from 0,
+     * so P0/P1/P2 map to virtual 1/2/3 (matching tiku_gpio_arch.c); a part
+     * whose first port is named 1 (MSP430) already has name == virtual. */
 #if defined(PLATFORM_NORDIC)
     vport = (uint8_t)(port + 1u);
 #else

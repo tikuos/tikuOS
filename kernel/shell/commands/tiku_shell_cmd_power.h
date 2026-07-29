@@ -21,16 +21,9 @@
 /**
  * @brief "power" command handler.
  *
- *   power                 report core clock, cache, supply and idle mode
- *   power cache on|off    toggle the instruction/data cache
- *   power dcdc  on|off    toggle the DC/DC converter (needs an inductor)
- *   power stat            cache hit/miss counters since the last reset
- *   power clear           restart the cache counters from zero
- *
- * Exists so a power measurement can name its configuration instead of
- * inferring it from the build command line: an external instrument sees
- * milliamps, not registers, and every reading here has to be attributable to
- * a state the device itself reported.
+ * Reports core clock, cache, supply and idle mode; toggles the cache and the
+ * DC/DC converter; and reads or clears the cache hit/miss counters.  Exists so
+ * a power measurement can name its configuration rather than infer it.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

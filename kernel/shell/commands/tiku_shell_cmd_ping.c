@@ -158,7 +158,7 @@ tiku_shell_cmd_ping(uint8_t argc, const char *argv[])
         ping_count = 1u;
     }
 
-    /* Make sure SLIP mode is on so the shared RX demux delivers our replies,
+    /* Make sure SLIP mode is on so the shared RX demux delivers the replies,
      * and hook the ICMP echo-reply callback. */
     tiku_shell_cmd_slip_enable();
     tiku_kits_net_icmp_set_reply_cb(ping_on_reply);

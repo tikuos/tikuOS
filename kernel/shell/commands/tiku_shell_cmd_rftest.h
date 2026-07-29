@@ -19,18 +19,12 @@
 /**
  * @brief "rftest" command handler — bench RF test transmissions.
  *
- *   rftest cw <mhz> [dbm] [phy]   unmodulated carrier (a pure tone)
- *   rftest mod <mhz> [dbm] [phy]  modulated carrier at the given PHY
- *   rftest sweep <lo> <hi> [dbm]  step a carrier across a range
- *   rftest off                    stop and release the radio
- *   rftest status                 show what is transmitting
+ * Sub-commands: cw (unmodulated carrier), mod (modulated at the given PHY),
+ * sweep, off and status.  @p mhz is 2360..2500, @p dbm a silicon-legal step
+ * (-46..+8, default 0), @p phy one of 1m / 2m / s8 / s2.
  *
- * @p mhz is 2360..2500; @p dbm is a silicon-legal step (-46..+8),
- * default 0; @p phy is 1m / 2m / s8 / s2, default 1m.
- *
- * The carrier keeps transmitting after the command returns — it must be
- * stopped with "rftest off" before any beacon, scan or BLE work.
- *
+ * @note The carrier keeps transmitting after the command returns and must be
+ *       stopped with "rftest off" before any beacon, scan or BLE work.
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command
  */

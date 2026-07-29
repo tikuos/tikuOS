@@ -18,11 +18,8 @@
 /**
  * @brief "once" command — schedule a command to run a single time.
  *
- * Usage: once <seconds> <command...>
- *
- * Joins the remaining tokens with single spaces and stores them as a
- * one-shot job that fires at now + seconds.  The slot is reclaimed
- * automatically after dispatch.
+ * Joins the remaining tokens with single spaces and stores them as a one-shot
+ * job firing at now + seconds.  The slot is reclaimed after dispatch.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

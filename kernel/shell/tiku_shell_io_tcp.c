@@ -28,44 +28,37 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * Currently accepted TCP connection, or NULL when nobody is connected.
+ * @brief Currently accepted TCP connection, or NULL when nobody is connected.
  *
- * The TCB itself is owned by the TCP stack (tiku_kits_net_tcp_conn_t,
- * declared in tiku_kits_net_tcp.h); this is just the handle the
- * backend was handed by telnet_event_cb() on CONNECTED.  Every backend
- * entry point guards on it, so all I/O is a no-op while it is NULL.
- * It is cleared on CLOSED/ABORTED and on the lazy CLOSE_WAIT
- * completion in tiku_shell_io_tcp_is_connected().
+ * The TCB is owned by the TCP stack; this is the handle telnet_event_cb() was
+ * given on CONNECTED.  Every backend entry point guards on it, so all I/O is a
+ * no-op while it is NULL.
  */
 static tiku_kits_net_tcp_conn_t *telnet_conn;
 
 /**
- * Outgoing byte buffer accumulating CLI output between flushes.
+ * @brief Outgoing byte buffer accumulating CLI output between flushes.
  *
- * tcp_putc() appends here instead of emitting a TCP segment per byte;
- * tiku_shell_io_tcp_flush() drains it into MSS-sized segments.  Sized
- * by TIKU_SHELL_TCP_TX_BUF_SIZE.  Coalescing matters because each
- * segment costs a SLIP TX (~150 ms at 9600 baud) and a slot in the
- * shared TCP TX retransmission pool, both of which are scarce.
+ * tcp_putc() appends here rather than emitting a segment per byte, and the
+ * flush drains it into MSS-sized segments -- coalescing matters because each
+ * segment costs a SLIP TX and a shared TX pool slot.
  */
 static uint8_t tx_buf[TIKU_SHELL_TCP_TX_BUF_SIZE];
 
 /**
- * Number of valid bytes currently held in tx_buf[0 .. tx_pos-1].
+ * @brief Number of valid bytes currently held in tx_buf[0 .. tx_pos-1].
  *
- * Advanced by tcp_putc(), reduced by tiku_shell_io_tcp_flush() as
- * bytes are sent (with any unsent tail shifted to the front), and
- * forced to 0 on connect/disconnect so a new session starts clean.
+ * Advanced by tcp_putc(), reduced by the flush as bytes are sent (with any
+ * unsent tail shifted to the front), and forced to 0 on connect/disconnect.
  */
 static uint16_t tx_pos;
 
 /**
- * One-byte history flag: nonzero if the last byte returned by the TCP
- * stack to tcp_getc() was a carriage return.
+ * @brief One-byte history flag: nonzero if the last byte the TCP stack returned to
+ * tcp_getc() was a carriage return.
  *
- * Telnet line endings arrive as the pair "\r\n"; this lets tcp_getc()
- * drop the '\n' that immediately follows a '\r' so the line editor
- * sees a single end-of-line.  Reset on every new connection.
+ * Telnet line endings arrive as "\r\n", so this lets tcp_getc() drop the '\n'
+ * and hand the line editor one end-of-line.  Reset on each connection.
  */
 static uint8_t last_was_cr;
 
@@ -76,21 +69,14 @@ static uint8_t last_was_cr;
 /**
  * @brief Push buffered output toward the peer, at most one segment.
  *
- * Sends at most one MSS-sized segment (snd_mss from the connection)
- * per call, then returns — see the inline rationale: each
- * tiku_kits_net_tcp_send() blocks the CPU for the duration of a SLIP
- * transmit, so capping the burst lets the scheduler run the net
- * process to process ACKs and free TX pool slots before the next
- * flush.  Multi-segment output therefore drains over several CLI poll
- * cycles rather than in one stall.
+ * Sends at most one MSS-sized segment per call: each send blocks the CPU for a
+ * SLIP transmit, so capping the burst lets the scheduler run the net process to
+ * process ACKs and free TX pool slots before the next flush.
  *
- * A no-op when nobody is connected or the buffer is empty.  On a
- * successful send the sent bytes are removed: any unsent tail is
- * shifted to the front of tx_buf and tx_pos reduced accordingly.  If
- * the send fails (TX pool full) the buffer is left intact and the same
- * bytes are retried on the next poll cycle.  Called automatically from
- * tcp_putc() when tx_buf fills, and explicitly by the CLI process at
- * the end of each poll iteration to push any residue.
+ * @note A no-op with nobody connected or an empty buffer.  A successful send
+ *       shifts any unsent tail to the front; a failed one (TX pool full) leaves
+ *       the buffer intact to retry next cycle.  Called from tcp_putc() when the
+ *       buffer fills and by the CLI at the end of each poll iteration.
  */
 void
 tiku_shell_io_tcp_flush(void)
@@ -104,7 +90,7 @@ tiku_shell_io_tcp_flush(void)
 
     /* Send at most ONE MSS-sized segment per call.  Each call blocks
      * the CPU for ~150 ms (SLIP TX at 9600 baud).  By sending only
-     * one segment, we yield back to the scheduler sooner, giving the
+     * one segment, control returns to the scheduler sooner, giving the
      * net process a chance to process incoming ACKs and free TX pool
      * slots before the next flush.  The CLI poll loop calls this
      * every cycle, so multi-segment output drains over several
@@ -145,20 +131,14 @@ tiku_shell_io_tcp_flush(void)
 /**
  * @brief Backend putc: buffer one outgoing byte (tiku_shell_io_t.putc).
  *
- * Appends @p c to tx_buf rather than transmitting immediately; the
- * accumulated bytes are sent by tiku_shell_io_tcp_flush().  Does
- * nothing when no client is connected, so CLI output produced with no
- * telnet session simply vanishes.
+ * Appends @p c to tx_buf rather than transmitting; the accumulated bytes go out
+ * on the next flush.  Does nothing with no client connected, so CLI output
+ * produced without a telnet session simply vanishes.
  *
- * Overflow is handled defensively: if the buffer is already full (a
- * previous flush failed because the TX pool was exhausted) a flush is
- * attempted first; if it is still full after that, the byte is dropped
- * rather than indexing past the end of tx_buf.  After appending, a full
- * buffer is flushed eagerly.  Flushing on '\n' is deliberately NOT
- * done here — per-line flushing would emit one segment per output line
- * and exhaust the shared TCP TX segment pool within a single poll
- * cycle, before the net process can ACK and reclaim slots.
- *
+ * @note A full buffer is flushed first and the byte dropped if it is still
+ *       full, rather than indexing past the end.  Flushing on '\n' is
+ *       deliberately NOT done: per-line flushing would emit one segment per
+ *       line and exhaust the shared TX pool within a single poll cycle.
  * @param c  Raw byte to enqueue for transmission
  */
 static void
@@ -169,7 +149,7 @@ tcp_putc(char c)
     }
 
     /* If a previous flush failed (TX pool full), the buffer is
-     * still at capacity.  Try again before writing so we never
+     * still at capacity.  Try again before writing so this never
      * index past the end of tx_buf. */
     if (tx_pos >= TIKU_SHELL_TCP_TX_BUF_SIZE) {
         tiku_shell_io_tcp_flush();
@@ -198,12 +178,9 @@ tcp_putc(char c)
 /**
  * @brief Backend rx_ready: any RX bytes pending (tiku_shell_io_t.rx_ready).
  *
- * Reports whether the connection's RX ring buffer holds at least one
- * byte by comparing its head and tail indices directly
- * (rx_head != rx_tail in the TCB).  Returns 0 when no client is
- * connected.  Note this counts raw stream bytes, so it may report
- * "ready" for input that tcp_getc() then consumes as a telnet IAC
- * sequence or a suppressed "\r\n" half and hands back as no user data.
+ * Compares the connection's RX ring head and tail directly, and returns 0 with
+ * no client connected.  Counts raw stream bytes, so it may report ready for
+ * input tcp_getc() then consumes as a telnet IAC sequence or a "\r\n" half.
  *
  * @return 1 if at least one byte is buffered, 0 otherwise.
  */
@@ -223,25 +200,13 @@ tcp_rx_ready(void)
 /**
  * @brief Backend getc: read one user byte (tiku_shell_io_t.getc).
  *
- * Pulls a single byte from the connection's RX ring via
- * tiku_kits_net_tcp_read() and applies two telnet fix-ups before
- * returning it to the line editor:
+ * Pulls one byte from the connection's RX ring and applies two telnet fix-ups:
+ * a leading 0xFF (IAC) swallows its command byte, plus an option byte for
+ * WILL/WONT/DO/DONT, and a '\n' straight after a '\r' is dropped.
  *
- *   - IAC filtering: a leading 0xFF (Interpret-As-Command) byte begins
- *     a telnet command.  The command byte is read and discarded; for
- *     WILL/WONT/DO/DONT (0xFB..0xFE) one further option byte is also
- *     consumed.  The whole sequence is swallowed and -1 is returned so
- *     raw telnet clients work with no option negotiation.
- *   - CRLF folding: a '\n' arriving immediately after a '\r' is
- *     dropped (returns -1) because last_was_cr remembers the carriage
- *     return; the editor thus sees one end-of-line per "\r\n" pair.
- *     last_was_cr is updated on every non-IAC byte.
- *
- * Non-blocking: returns -1 when no client is connected, when the ring
- * is empty, or when the byte just read was consumed as protocol/CRLF
- * rather than user data.  A return of -1 therefore does not by itself
- * mean "disconnected"; pair with tiku_shell_io_tcp_is_connected().
- *
+ * @note Non-blocking, returning -1 with no client, an empty ring, or a byte
+ *       consumed as protocol rather than user data -- so -1 does not by itself
+ *       mean disconnected; pair it with tiku_shell_io_tcp_is_connected().
  * @return 0..255 for a user data byte, or -1 if none this call.
  */
 static int
@@ -287,11 +252,9 @@ tcp_getc(void)
 /**
  * @brief TCP data-arrival callback (tiku_kits_net_tcp_recv_cb_t).
  *
- * Registered with the listener so the stack can notify the backend
- * when bytes land in the RX ring.  Intentionally empty: the CLI is a
- * polling consumer that checks tcp_rx_ready() and drains via
- * tcp_getc() on its own schedule, so there is no work to do on the
- * notification itself.  Both parameters are unused.
+ * Registered with the listener so the stack can notify the backend.
+ * Intentionally empty: the CLI is a polling consumer that checks rx_ready and
+ * drains on its own schedule, so the notification itself needs no work.
  *
  * @param c          Connection that received data (unused)
  * @param available  Bytes now available in the RX ring (unused)
@@ -306,14 +269,9 @@ telnet_recv_cb(struct tiku_kits_net_tcp_conn *c, uint16_t available)
 /**
  * @brief TCP connection-event callback (tiku_kits_net_tcp_event_cb_t).
  *
- * Maintains the backend's single-connection state in response to
- * stack lifecycle events.  On TIKU_KITS_NET_TCP_EVT_CONNECTED it
- * latches the accepted connection into telnet_conn and resets the
- * per-session buffers (last_was_cr and tx_pos) so the new client
- * starts clean.  On TIKU_KITS_NET_TCP_EVT_CLOSED or
- * TIKU_KITS_NET_TCP_EVT_ABORTED it forgets the connection (telnet_conn
- * back to NULL) and discards any buffered output, leaving the listener
- * ready to accept the next client.  Other events are ignored.
+ * CONNECTED latches the accepted connection and resets the per-session state so
+ * a new client starts clean; CLOSED and ABORTED forget the connection and
+ * discard buffered output, leaving the listener ready.  Other events ignored.
  *
  * @param c      Connection the event pertains to
  * @param event  One of TIKU_KITS_NET_TCP_EVT_*
@@ -327,8 +285,8 @@ telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
         tx_pos = 0;
     } else if (event == TIKU_KITS_NET_TCP_EVT_CLOSED ||
                event == TIKU_KITS_NET_TCP_EVT_ABORTED) {
-        /* Only forget the connection if the one that closed is the one we
-         * currently track.  There are several TCP slots, so a just-RST'd
+        /* Only forget the connection if the one that closed is the one
+         * currently tracked.  There are several TCP slots, so a just-RST'd
          * PREVIOUS client's CLOSED/ABORTED event can arrive AFTER the next
          * client has already connected (telnet_conn = new): nulling
          * unconditionally would drop the live session, and its first command
@@ -349,14 +307,13 @@ telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
 /**
  * @brief Start the telnet listener and reset backend state.
  *
- * Clears the connection handle and per-session buffers, then opens a
- * passive TCP listener on TIKU_SHELL_TCP_PORT (default 23) via
- * tiku_kits_net_tcp_listen(), wiring telnet_recv_cb / telnet_event_cb
- * as the callbacks inherited by accepted connections.  Call once
- * during CLI initialisation, before the main loop.  The listener stays
- * active for the process lifetime, so after each client disconnects
- * the next SYN is accepted automatically — there is no per-connection
- * re-listen.
+ * Clears the connection handle and per-session buffers, then opens a passive
+ * listener on TIKU_SHELL_TCP_PORT wiring telnet_recv_cb / telnet_event_cb as
+ * the callbacks accepted connections inherit.  Call once during CLI init.
+ *
+ * @note The listener stays active for the process lifetime, so the next SYN
+ *       after a disconnect is accepted automatically -- no per-connection
+ *       re-listen.
  */
 void
 tiku_shell_io_tcp_init(void)
@@ -371,18 +328,13 @@ tiku_shell_io_tcp_init(void)
 /**
  * @brief Report whether a usable telnet client is connected.
  *
- * Polled by the CLI each cycle to decide whether to keep the TCP
- * backend installed (returns 1) or fall back to the UART backend
- * (returns 0).  Returns 0 immediately when no connection is latched.
+ * Polled by the CLI each cycle to decide whether to keep the TCP backend
+ * installed or fall back to the UART one.  Returns 1 only when the connection
+ * is ESTABLISHED, and 0 for no connection or any transient state.
  *
- * Doubles as the place where a peer's half-close is finalised: if the
- * connection is in CLOSE_WAIT (the peer sent FIN and the stack is
- * waiting for the application to close its half), this completes the
- * shutdown with tiku_kits_net_tcp_close(), drops telnet_conn, clears
- * the TX buffer, and returns 0 — freeing the slot so the listener can
- * accept the next client.  Otherwise it returns 1 only when the
- * connection is ESTABLISHED, and 0 for any other transient state.
- *
+ * @note Also where a peer's half-close is finalised: a connection in CLOSE_WAIT
+ *       is closed here, the handle dropped and the TX buffer cleared, freeing
+ *       the slot for the next client.
  * @return 1 if a client is ESTABLISHED, 0 otherwise.
  */
 uint8_t

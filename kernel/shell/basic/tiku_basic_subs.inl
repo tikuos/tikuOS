@@ -22,7 +22,7 @@
  * This file owns the SUB / CALL / LOCAL logic that operates on them. */
 
 /* Does a (whitespace-stripped) line text start with keyword KW followed by a
- * word boundary? KW must be upper-case.  Accepts crunched token bytes (A2). */
+ * word boundary? KW must be upper-case.  Accepts crunched token bytes. */
 static int
 subs_line_kw(const char *t, const char *kw)
 {

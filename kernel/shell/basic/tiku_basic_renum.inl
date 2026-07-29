@@ -16,7 +16,7 @@
 
 /* Look up an old line number in the renumber map; returns the new
  * number, or the original old number if not in the map (i.e. the
- * GOTO referenced a non-existent line, which we leave alone). */
+ * GOTO referenced a non-existent line, which is left alone). */
 static uint16_t
 renum_lookup(const uint16_t *old_nos, const uint16_t *new_nos,
              int n, uint16_t old)
@@ -56,7 +56,7 @@ match_kw_no_ws(const char **q, const char *kw)
  * each digit run gets remapped via the (old_nos, new_nos) tables.
  * Quoted strings ("...") are skipped without modification.
  *
- * After GOTO/GOSUB we also accept comma-separated number lists to
+ * After GOTO/GOSUB comma-separated number lists are also accepted, to
  * cover `ON expr GOTO l1, l2, ...`.
  *
  * Returns 0 on success, -1 if the rewritten line would exceed the
@@ -175,7 +175,7 @@ exec_renum(const char **q)
         new_nos[i] = (uint16_t)(start + (long)i * step);
     }
 
-    /* Rewrite each line's body using the map. Do this BEFORE we
+    /* Rewrite each line's body using the map. Do this BEFORE
      * change the line numbers, so the prog table is still self-
      * consistent during the rewrite. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {

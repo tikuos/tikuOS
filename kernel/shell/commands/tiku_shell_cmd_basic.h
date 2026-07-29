@@ -22,11 +22,9 @@
 /**
  * @brief "basic" command handler.
  *
- *   `basic`        Enter the interactive REPL until BYE / EXIT.
- *   `basic run`    Load the persisted program from FRAM and run it
- *                  to completion without entering the REPL.  Pair
- *                  with `init add <seq> <name> 'basic run'` to
- *                  autorun a saved program at boot.
+ * Bare `basic` enters the interactive REPL until BYE / EXIT.  `basic run` loads
+ * the persisted program from FRAM and runs it to completion without the REPL,
+ * which pairs with an `init` entry to autorun a saved program at boot.
  *
  * @param argc  Argument count.
  * @param argv  Argument vector (argv[0] == "basic").

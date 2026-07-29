@@ -18,16 +18,9 @@
 /**
  * @brief "irq" command: configure a per-pin edge interrupt.
  *
- * Usage:
- *   irq P<port>.<pin> <rising|falling|both|off>
- *
- * Examples:
- *   irq P1.3 falling     — wake on a button press to GND
- *   irq P2.0 rising      — wake on a sensor pulse
- *   irq P1.4 both        — wake on every transition
- *   irq P1.3 off         — disable
- *
- * Each fired edge posts TIKU_EVENT_GPIO to every process.
+ * Takes P<port>.<pin> and one of rising, falling, both or off -- e.g.
+ * `irq P1.3 falling` to wake on a button press to GND.  Each fired edge posts
+ * TIKU_EVENT_GPIO to every process.
  */
 void tiku_shell_cmd_irq(uint8_t argc, const char *argv[]);
 

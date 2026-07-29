@@ -18,21 +18,9 @@
 /**
  * @brief "alias" command — define or list shell shortcuts.
  *
- * Usage:
- *   alias                       — list all defined aliases
- *   alias <name> <body...>      — define / overwrite an alias
- *
- * The body is the rest of the line, joined with single spaces.
- * Surrounding double quotes are stripped, so both forms work:
- *   alias temp read /dev/temp0
- *   alias temp "read /dev/temp0"
- *
- * Use ';' inside the body to chain commands:
- *   alias status "ps; free; read /sys/power/source"
- *
- * Aliases live in FRAM and survive reset / power loss. Built-in
- * commands always win, so an alias cannot shadow 'help', 'reboot',
- * or any other registered command.
+ * The body is the rest of the line joined with single spaces, with surrounding
+ * double quotes stripped and ';' chaining several commands.  Aliases live in
+ * FRAM and survive reset; a built-in command always wins over an alias.
  */
 void tiku_shell_cmd_alias(uint8_t argc, const char *argv[]);
 

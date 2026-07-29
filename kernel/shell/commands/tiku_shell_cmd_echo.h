@@ -18,16 +18,9 @@
 /**
  * @brief "echo" command -- print arguments space-separated, then newline.
  *
- * Matches the Unix convention: arguments are joined with single
- * spaces and a trailing newline is added.  With no arguments,
- * prints just a blank line.  Useful for marking script progress,
- * separating output sections, or feeding text to a downstream
- * pipe in a future LLM/agent backend.
- *
- * Note: prior versions of the shell aliased "echo" to "write" (a
- * VFS write).  The alias has been removed so "echo" matches user
- * expectations from every other shell; users who want to write to
- * a VFS path should use "write" directly.
+ * Matches the Unix convention: arguments joined with single spaces and a
+ * trailing newline, or a blank line with no arguments.  Writing to a VFS path
+ * is `write`, not this.
  */
 void tiku_shell_cmd_echo(uint8_t argc, const char *argv[]);
 

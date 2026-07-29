@@ -31,8 +31,7 @@
  *
  * 120 roots ship today; the headroom lets a refreshed bundle grow without a
  * firmware change, which is half the point of moving them out.  Costs
- * BASIC_HTTPS_MAX_ROOTS * sizeof(tiku_kits_crypto_x509_root_t) of .bss
- * (160 * 16 = 2,560 B on a 32-bit part) against 127.7 KB of NVM returned.
+ * BASIC_HTTPS_MAX_ROOTS * sizeof(root_t) of .bss against 127.7 KB of NVM.
  */
 #ifndef BASIC_HTTPS_MAX_ROOTS
 #define BASIC_HTTPS_MAX_ROOTS    160
@@ -55,21 +54,15 @@ basic_https_rd32(const uint8_t *p)
  *
  * The packed table stores OFFSETS into the DER blob, because the blob's address
  * is only known once the store has mapped it.  Turning those into the pointer
- * pairs the verify kit wants is this function's whole job:
- * tiku_kits_crypto_x509_root_t holds (der, der_len, subject, subject_len) where
- * the subject DN is a slice of the cert it belongs to -- that is what lets
- * anchor matching compare a DN by byte compare without parsing every root.
+ * pairs the verify kit wants is this function's whole job.
  *
- * WHY THIS RE-LOADS EVERY TIME rather than caching.  tiku_tfs_map() returns a
- * pointer valid only until the next write or delete of that name, so a table
- * cached across a re-provision would hold pointers into reclaimed slots.
- * Re-mapping costs 120 bounds checks and one CRC against a handshake that does
- * RSA, so the saving was never worth owning that invalidation problem -- and
- * re-provisioned roots now take effect without a reboot.
- *
- * Every field is re-checked even though the CRC passed: a CRC proves the bytes
- * are the ones that were written, not that this packer wrote them.
- *
+ * @note Re-loads every time rather than caching: tiku_tfs_map() returns a
+ *       pointer valid only until the next write or delete of that name, so a
+ *       cached table would hold pointers into reclaimed slots.  Re-mapping
+ *       costs 120 bounds checks against a handshake that does RSA, and
+ *       re-provisioned roots take effect without a reboot.  Every field is
+ *       re-checked even though the CRC passed: a CRC proves the bytes are the
+ *       ones written, not that this packer wrote them.
  * @param out    Receives the fixed-up table (points at static storage).
  * @param nroots Receives the root count.
  * @return 0 on success, -1 if the store, the file, or its contents are unusable.
@@ -108,7 +101,7 @@ basic_https_roots_get(const tiku_kits_crypto_x509_root_t **out, int *nroots)
         return -1;
     }
     if (count == 0u || count > (uint32_t)BASIC_HTTPS_MAX_ROOTS) {
-        return -1;                        /* empty, or more than we can hold */
+        return -1;                        /* empty, or more than fits */
     }
     /* Geometry: header, blob, table, ending exactly at EOF.  Phrased as
      * subtractions throughout so no bound can wrap at any integer width. */

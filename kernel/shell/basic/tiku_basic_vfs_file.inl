@@ -48,10 +48,9 @@ tiku_basic_vfs_read(char *buf, unsigned int max)
 /**
  * @brief Write handler for the /data/basic VFS node.
  *
- * Mirrors tiku_persist_write under MPU bracketing.  The caller-
- * supplied data is taken verbatim -- the user is responsible for
- * sending text that LOAD can parse (numbered lines, '\n'
- * separated).
+ * Mirrors tiku_persist_write under MPU bracketing.  The caller-supplied data is
+ * taken verbatim -- the user is responsible for sending text LOAD can parse,
+ * meaning numbered lines separated by '\n'.
  *
  * @param buf  Source buffer.
  * @param len  Number of bytes to write.

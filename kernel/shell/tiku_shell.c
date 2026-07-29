@@ -259,37 +259,23 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
 /* COMMAND TABLE                                                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Static command table (NULL-terminated sentinel)
+/*
+ * Static command table (NULL-terminated sentinel).
  *
- * A flat, statically-allocated array of tiku_shell_cmd_t.  Two kinds
- * of entry appear here:
+ * A flat array of tiku_shell_cmd_t holding two kinds of entry: real commands
+ * { "name", "help text", handler }, and category headers from CMD_CATEGORY()
+ * with handler == NULL, which only group the "help" listing and are skipped by
+ * the parser.  Laid out in category order and terminated by { NULL, NULL, NULL }
+ * so callers iterate until name == NULL.
  *
- *   - Real commands: { "name", "help text", handler }.  The parser
- *     matches argv[0] against the name and calls the handler; the
- *     "help" built-in prints name + help text.
- *   - Category headers: produced by CMD_CATEGORY() with handler ==
- *     NULL.  They carry only a label and exist purely to group the
- *     listing that "help" prints; the parser skips them.
+ * Every real entry is gated by its TIKU_SHELL_CMD_* flag from
+ * tiku_shell_config.h.  A flag set to 0 removes the row AND, via the matching
+ * include guard above, the command's object code, so a trimmed build costs
+ * nothing for what it omits.  "cat" is doubly gated (CAT && READ) because it
+ * reuses the "read" handler, "pwd" rides the CD flag, and the "Boot" banner
+ * sits inside the INIT guard so an empty category never prints.
  *
- * The array is laid out in category order (System, Processes,
- * Filesystem, Hardware, Power, Boot) and terminated by a sentinel
- * { NULL, NULL, NULL } so callers can iterate until name == NULL
- * without needing an element count.
- *
- * Every real entry is individually gated by its TIKU_SHELL_CMD_*
- * flag from tiku_shell_config.h.  A flag set to 0 (whether by the
- * default in the config header or by -DTIKU_SHELL_CMD_X=0 via
- * EXTRA_CFLAGS) removes both the table row and, via the matching
- * #include guard above, the command's object code — so a trimmed
- * build costs nothing for the commands it omits.  Note that "cat"
- * is doubly gated (TIKU_SHELL_CMD_CAT && TIKU_SHELL_CMD_READ) because
- * it simply reuses the "read" handler, and "pwd" rides on the same
- * TIKU_SHELL_CMD_CD flag as "cd".  The "Boot" category banner is
- * itself inside the TIKU_SHELL_CMD_INIT guard so an empty category
- * never prints.
- *
- * To add a new command:
+ * To add a command:
  *   1. Create the handler in kernel/shell/commands/tiku_shell_cmd_xxx.c
  *   2. Add a TIKU_SHELL_CMD_XXX flag to tiku_shell_config.h
  *   3. #include the header above and add an entry here
@@ -299,10 +285,9 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
 /**
  * @brief Emit a category-header table entry.
  *
- * Expands to a tiku_shell_cmd_t with handler == NULL and the help
- * field unused, so @p label is the only meaningful field.  The
- * "help" built-in renders these as section titles; the parser's
- * dispatch loop skips any entry whose handler is NULL.
+ * Expands to a tiku_shell_cmd_t with handler == NULL and the help field unused,
+ * so @p label is the only meaningful field.  "help" renders these as section
+ * titles; the dispatch loop skips any entry whose handler is NULL.
  *
  * @param label  Static string shown as the section heading.
  */
@@ -477,7 +462,7 @@ static void htimer_selftest_cb(struct tiku_htimer *t, void *ptr) {
 }
 
 static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
-    static struct tiku_htimer ht;   /* static: the ISR references it after we return */
+    static struct tiku_htimer ht;   /* static: the ISR uses it after this returns */
     tiku_htimer_clock_t now;
     tiku_clock_time_t   t0;
     unsigned long       elapsed;
@@ -805,17 +790,9 @@ tiku_shell_get_commands(void)
 /**
  * @brief "help" — print every registered command grouped by category.
  *
- * Walks tiku_shell_commands from the first entry to the NULL-name
- * sentinel.  For each entry whose handler is NULL (a CMD_CATEGORY()
- * marker) it prints the name field as a dimmed/cyan section title;
- * for every real entry it prints the command name left-justified in
- * a fixed column followed by its one-line help text.  The output is
- * therefore an exact, build-specific reflection of the table — only
- * the commands compiled into this image are listed.
- *
- * Takes no arguments; argc/argv are accepted to match
- * tiku_shell_handler_t and are deliberately ignored.  All output
- * goes through SHELL_PRINTF so it follows the active I/O backend.
+ * Walks tiku_shell_commands to the sentinel, printing a CMD_CATEGORY() marker
+ * as a section title and every real entry as a left-justified name plus its
+ * one-line help.  The listing is therefore an exact reflection of this build.
  *
  * @param argc  Argument count (ignored).
  * @param argv  Argument vector (ignored).
@@ -847,11 +824,9 @@ tiku_shell_cmd_help(uint8_t argc, const char *argv[])
 /**
  * @brief Persistent line-editor state for the shell process.
  *
- * Statically allocated (no dynamic allocation) and file-scope rather
- * than a protothread local because protothread locals do not survive
- * a yield: every field here must persist across the
- * TIKU_PROCESS_WAIT_EVENT_UNTIL() at the top of the poll loop.  There
- * is exactly one shell process, so a single shared instance suffices.
+ * Statically allocated and file-scope rather than a protothread local, because
+ * protothread locals do not survive a yield and every field here must persist
+ * across the wait at the top of the poll loop.  There is exactly one shell.
  */
 static struct {
     char               buf[TIKU_SHELL_LINE_SIZE];
@@ -880,26 +855,14 @@ _Static_assert(TIKU_SHELL_LINE_SIZE <= 256,
 /**
  * @brief Replace the current input line with a recalled history entry.
  *
- * Implements the up/down-arrow behaviour of an interactive shell.
- * @p up != 0 walks towards older entries (incrementing cli.hist_age);
- * up == 0 walks towards newer ones (decrementing it).  Walking newer
- * past the newest entry sets hist_age back to -1 and clears the line;
- * walking older past the oldest stored command is a no-op (the
- * history lookup returns NULL and the function returns early without
- * disturbing the line).
+ * The up/down-arrow behaviour: @p up walks towards older entries, zero towards
+ * newer.  Stepping newer past the newest clears the line and resets hist_age to
+ * -1; stepping older past the oldest is a no-op.
  *
- * On a successful step it first erases whatever is currently on the
- * line by emitting "\b \b" for each held character, then writes the
- * recalled text into cli.buf, echoes it, and updates cli.pos and
- * cli.hist_age.  The recalled string is read straight from the
- * FRAM-backed history ring via tiku_shell_history_get() (age 0 =
- * most recent) and is copied in, bounded by TIKU_SHELL_LINE_SIZE - 1.
- *
- * Uses the raw tiku_shell_io_putc() primitive rather than
- * SHELL_PRINTF to keep the formatted-output path out of the recall
- * code — it costs nothing here and keeps the smallest MSP430 builds
- * from pulling in the formatter for history alone.
- *
+ * @note Erases the held characters with "\b \b" before echoing the recalled
+ *       text, which comes from the FRAM-backed ring via
+ *       tiku_shell_history_get().  Uses the raw putc primitive rather than
+ *       SHELL_PRINTF so the smallest builds do not pull in the formatter.
  * @param up  Non-zero to recall an older entry, zero to step newer.
  */
 static void
@@ -1024,13 +987,13 @@ tab_accum(const char *nm, uint8_t is_dir, const char **first,
 /**
  * @brief Tab-complete the token at the end of the current line.
  *
- * The first token (no leading space) completes against the command table;
- * later tokens complete against the VFS namespace -- the token is split into
- * a directory part (resolved against the cwd) and a leaf prefix, and the
- * directory's children supply the candidates.  A unique match is filled in
- * (with a trailing '/' for a directory, ' ' otherwise); an ambiguous one is
- * extended to the longest common prefix, and a second Tab (no further
- * progress) lists the matches and redraws the line.
+ * The first token completes against the command table; later tokens complete
+ * against the VFS, split into a directory part resolved against the cwd and a
+ * leaf prefix whose siblings supply the candidates.
+ *
+ * @note A unique match is filled in ('/' for a directory, ' ' otherwise); an
+ *       ambiguous one extends to the longest common prefix, and a second Tab
+ *       lists the matches and redraws the line.
  */
 static void
 shell_tab_complete(void)
@@ -1180,10 +1143,9 @@ shell_tab_complete(void)
 /**
  * @brief Define the shell process control block.
  *
- * Declares the tiku_process struct backing the shell and ties it to
- * the protothread body below.  The string "CLI" is the name the
- * process exposes through the process table and /proc views (the
- * service is separately registered as "Shell" in tiku_shell_init()).
+ * Declares the tiku_process struct backing the shell and ties it to the
+ * protothread body below.  "CLI" is the name the process exposes through the
+ * process table and /proc; the service registers separately as "Shell".
  */
 TIKU_PROCESS(tiku_shell_process, "CLI");
 
@@ -1238,69 +1200,34 @@ static void shell_run_pumps(void)
     }
 }
 
-/**
- * @brief Shell process protothread — line editor and command dispatcher.
+/*
+ * Shell process protothread -- line editor and command dispatcher.
  *
- * Runs as a single cooperative TikuOS process.  After a one-time
- * initialisation pass it spends its life in a poll loop: it waits for
- * the periodic poll timer, drains every byte currently available from
- * the active I/O backend through a small line-editing state machine,
- * and on a carriage-return or line-feed hands the completed line to
- * tiku_shell_parser_execute().  Control returns to the scheduler
- * between polls, so the shell consumes no CPU while idle.
+ * A single cooperative TikuOS process: after a one-time initialisation pass it
+ * waits for the poll timer, drains every byte the active I/O backend has
+ * through a line-editing state machine, and hands a completed line to
+ * tiku_shell_parser_execute().  Control returns to the scheduler between polls,
+ * so an idle shell costs no CPU.
  *
- * One-time initialisation (runs once, after TIKU_PROCESS_BEGIN):
- *   1. Register the command table with the parser.
- *   2. Initialise the optional alias / jobs / rules subsystems when
- *      their TIKU_SHELL_CMD_* flags are set.
- *   3. Reset the line-editor state (cli.pos, cli.esc_state,
- *      cli.hist_age).
- *   4. Choose the I/O backend.  Over UART this installs
- *      tiku_shell_io_uart and prints the banner + first prompt
- *      immediately; with the TCP backend the banner is deferred and
- *      printed later, when a telnet client actually connects.
- *   5. Arm the poll timer for TIKU_SHELL_POLL_TICKS.
+ * One-time init registers the command table, brings up the optional alias /
+ * jobs / rules subsystems, resets the editor state, chooses the I/O backend
+ * (UART prints the banner immediately; TCP defers it until a client connects)
+ * and arms the poll timer.
  *
- * Poll loop (one pass per TIKU_EVENT_TIMER):
- *   - When TCP is enabled, manage the connection lifecycle first:
- *     drop the backend when the client disconnects, and install the
- *     backend + print the banner on a freshly accepted connection.
- *   - Re-arm the poll timer up front (via tiku_timer_reset(), which
- *     re-adds it drift-free) so a command that inspects
- *     /sys/timer/count sees the shell's own timer as active while it
- *     runs.
- *   - Input-byte path: while the backend reports bytes ready, read one
- *     byte and route it:
- *       * ESC (0x1B) starts a two-step ANSI CSI sequence; the next two
- *         bytes are consumed by the esc_state machine so that "ESC [ A"
- *         and "ESC [ B" map to up/down history recall (left/right are
- *         intentionally ignored — there is no in-line cursor).
- *       * CR or LF terminates the line: echo a newline, NUL-terminate
- *         the buffer, record it in history and dispatch it to the
- *         parser when non-empty, then reset the line and reprint the
- *         prompt.
- *       * Backspace (0x08) or DEL (0x7F) removes the last character and,
- *         when the backend wants local echo, erases it on screen.
- *       * Ctrl+C (0x03) is the escape hatch when an `every` job or rule
- *         is flooding output: it clears any auto-firing jobs/rules,
- *         abandons the current line, and reprints the prompt.
- *       * Any other printable byte is appended to the line (up to
- *         TIKU_SHELL_LINE_SIZE - 1) and echoed when echo is enabled;
- *         typing exits history-recall mode by resetting cli.hist_age.
- *   - After the drain, service the optional jobs and rules ticks (so
- *     user keystrokes are always processed before scheduled work), and
- *     flush the TCP backend if it is in use.
+ * Each poll pass manages the TCP connection lifecycle, re-arms the timer up
+ * front via tiku_timer_reset() so a command inspecting /sys/timer/count sees
+ * the shell's own timer as active, drains input, then services the jobs and
+ * rules ticks -- keystrokes always before scheduled work -- and flushes TCP.
  *
- * Protothread caveat: TIKU_PROCESS_WAIT_EVENT_UNTIL expands to a
- * PT_YIELD_UNTIL, so the C stack is unwound at the wait point and no
- * protothread local survives it.  All editor state therefore lives in
- * the file-scope `cli` struct; the only local here, `ch`, is assigned
- * and consumed within a single drain-loop iteration and is never read
- * across the wait.
+ * Input routing: ESC starts a two-step ANSI CSI sequence (up/down recall
+ * history; left/right are ignored, there being no in-line cursor), CR/LF
+ * terminates and dispatches the line, BS/DEL erases, Ctrl+C clears auto-firing
+ * jobs and rules and abandons the line, and anything printable appends.
  *
- * @param ev    Event delivered to the process (TIKU_EVENT_TIMER drives
- *              each poll pass).
- * @param data  Event data pointer (unused).
+ * Protothread caveat: the wait expands to a PT_YIELD_UNTIL, so the C stack is
+ * unwound and no local survives it.  All editor state lives in the file-scope
+ * `cli` struct; the only local, `ch`, is assigned and consumed inside one
+ * drain-loop iteration.
  */
 TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 {
@@ -1708,7 +1635,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
 #if TIKU_SHELL_CMD_PING
         /* Service an active ping run: send/await probes across ticks.  When
-         * the run completes the mode clears and we restore the prompt. */
+         * the run completes the mode clears and the prompt is restored. */
         if (tiku_shell_cmd_ping_active()) {
             tiku_shell_cmd_ping_tick();
             if (!tiku_shell_cmd_ping_active()) {
@@ -1764,12 +1691,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 /**
  * @brief Initialise and start the shell kernel service.
  *
- * Registers the CLI process (and optionally the network process
- * when TCP shell is enabled) with the TikuOS scheduler.  Call once
- * from main() after tiku_vfs_tree_init().
- *
- * The shell process prints the boot banner, starts the I/O poll
- * timer, and begins accepting commands on the next scheduler tick.
+ * Registers the CLI process, and the network process when the TCP shell is
+ * enabled, with the TikuOS scheduler.  Call once from main() after
+ * tiku_vfs_tree_init().
  */
 void tiku_shell_init(void)
 {
