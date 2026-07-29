@@ -59,6 +59,44 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
     tiku_nor_id_t id;
     tiku_nor_err_t rc;
 
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "xip")) {
+        uint32_t w = 0u;
+        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("nor xip: bring-up %s\n", nor_errname(rc));
+            return;
+        }
+        SHELL_PRINTF("nor xip: opening the aperture and reading one word --"
+                     " if this is the last line, the bus stalled\n");
+        if (tiku_nor_xip_probe(&w) != 0) {
+            SHELL_PRINTF("  aperture would not open\n");
+            return;
+        }
+        SHELL_PRINTF("  read %08lx at %08lx (expect a5a4a7a6 after"
+                     " `power nor gate`)\n", (unsigned long)w,
+                     (unsigned long)(TIKU_NOR_XIP_BASE + TIKU_NOR_SCRATCH_ADDR));
+        return;
+    }
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "bench")) {
+        int want_oct = (argc >= 4 && tiku_cmd_streq(argv[3], "octal"));
+        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+        if (rc == TIKU_NOR_OK && want_oct) {
+            rc = tiku_nor_enter_octal_raw(TIKU_NOR_CLK_96MHZ);
+        }
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("norbench: bring-up %s\n", nor_errname(rc));
+            return;
+        }
+        if (argc >= 5 && tiku_cmd_streq(argv[4], "xip")) {
+            tiku_nor_bench_set_xip(1);
+        } else if (argc >= 4 && tiku_cmd_streq(argv[3], "xip")) {
+            tiku_nor_bench_set_xip(1);
+        } else {
+            tiku_nor_bench_set_xip(0);
+        }
+        tiku_nor_bench_run();
+        return;
+    }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "tascan")) {
         /* Sweep the SERIAL fast-read dummy count against the stamp the gate
          * programs.  Erased content is a weak reference -- a misframed read of

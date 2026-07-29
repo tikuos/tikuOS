@@ -23,6 +23,7 @@
 #include "tiku_cpu_common.h"     /* tiku_cpu_ambiq_delay_us()               */
 #include "apollo510.h"           /* CMSIS register map -- defs only         */
 #include <kernel/cpu/tiku_hang.h>   /* erase waits block on purpose         */
+#include <kernel/shell/tiku_shell_io.h>  /* norbench reports via SHELL_PRINTF */
 
 /*---------------------------------------------------------------------------*/
 /* COMMANDS (table 2)                                                        */
@@ -483,6 +484,211 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk)
     (void)nor_pio(NOR_CMD_RESET_MEMORY, 0u, &dummy, 0u, 0, 0, 0);
     tiku_cpu_ambiq_delay_us(1000u);
     return TIKU_NOR_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+/* norbench                                                                  */
+/*---------------------------------------------------------------------------*/
+/*
+ * DWT-timed, work-denominated, checksum-gated, like psrambench.  Every leg
+ * reports the bytes it moved and whether they were the RIGHT bytes; a leg that
+ * cannot prove its content reports FAIL rather than a bandwidth.
+ *
+ * Everything runs inside the scratch sector.  Erase endurance is finite and
+ * this benchmark is re-runnable, so it spends exactly the erases it announces.
+ */
+
+extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
+
+#define NORB_SPAN   4096u                  /* one subsector per read leg   */
+#define NORB_BUF    4096u
+static uint8_t s_norb_buf[NORB_BUF] __attribute__((aligned(32)));
+
+static uint32_t norb_cyc_begin(uint32_t *demcr0, uint32_t *ctl0)
+{
+    volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
+    volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
+    volatile uint32_t *cyccnt = (volatile uint32_t *)0xE0001004UL;
+    *demcr0 = *demcr; *ctl0 = *dwtctl;
+    *demcr |= (1u << 24);
+    *dwtctl |= 1u;
+    return *cyccnt;
+}
+
+static uint32_t norb_cyc_now(void)
+{
+    return *(volatile uint32_t *)0xE0001004UL;
+}
+
+static void norb_report(const char *leg, uint32_t bytes, uint32_t cyc,
+                        int exact)
+{
+    unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
+    unsigned long kbps;
+
+    if (cyc == 0u) { cyc = 1u; }
+    kbps = (unsigned long)(((uint64_t)bytes * hz) / ((uint64_t)cyc * 1000u));
+    SHELL_PRINTF("  %-11s %6lu KB  %8lu us  %5lu.%03lu MB/s  %s\n", leg,
+                 (unsigned long)(bytes / 1024u),
+                 (unsigned long)(((uint64_t)cyc * 1000000u) / hz),
+                 kbps / 1000u, kbps % 1000u,
+                 exact ? "bit-exact" : "FAIL");
+}
+
+/** @brief Report a leg measured in time per operation, not bandwidth. */
+static void norb_report_op(const char *leg, uint32_t ops, uint32_t cyc,
+                           int exact)
+{
+    unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
+    unsigned long us = (unsigned long)(((uint64_t)cyc * 1000000u) / hz);
+
+    if (ops == 0u) { ops = 1u; }
+    SHELL_PRINTF("  %-11s %6lu ops %8lu us  %5lu us/op    %s\n", leg,
+                 (unsigned long)ops, us, us / ops,
+                 exact ? "bit-exact" : "FAIL");
+}
+
+static inline uint8_t norb_pat(uint32_t a)
+{
+    return (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0x5Au);
+}
+
+/* XIP is OFF in the bench by default: a read of a mis-decoding aperture stalls
+ * the bus with no software recovery -- the board needs a reflash -- and that
+ * cost is not worth paying on every benchmark run.  `power nor xip` probes it
+ * deliberately with a single word. */
+static uint8_t s_xip_leg;
+
+void tiku_nor_bench_set_xip(int on) { s_xip_leg = on ? 1u : 0u; }
+
+int tiku_nor_xip_probe(uint32_t *out)
+{
+    volatile const uint32_t *ap;
+    uint32_t v;
+
+    if (!s_up) { return -1; }
+    if (tiku_nor_xip_enable(1) != TIKU_NOR_OK) { return -1; }
+    ap = (volatile const uint32_t *)(TIKU_NOR_XIP_BASE + TIKU_NOR_SCRATCH_ADDR);
+    v = *ap;                       /* the single word that either works or hangs */
+    (void)tiku_nor_xip_enable(0);
+    if (out != (uint32_t *)0) { *out = v; }
+    return 0;
+}
+
+void tiku_nor_bench_run(void)
+{
+    uint32_t demcr0, ctl0, t0, cyc;
+    uint32_t base = TIKU_NOR_SCRATCH_ADDR;
+    uint32_t i, off;
+    int exact;
+
+    if (!s_up) {
+        SHELL_PRINTF("norbench: NOR is down -- run `power nor` first\n");
+        return;
+    }
+
+    SHELL_PRINTF("norbench @%lu Hz, %s, scratch %08lx, span %u KB\n",
+                 tiku_nor_clock_hz(), s_octal ? "octal DDR" : "serial",
+                 (unsigned long)base, NORB_SPAN / 1024u);
+
+    (void)norb_cyc_begin(&demcr0, &ctl0);
+
+    /* Prepare: erase one subsector and fill it with a known pattern, timing
+     * both, so the erase and program legs are measured on the way in rather
+     * than as separate work. */
+    t0 = norb_cyc_now();
+    if (tiku_nor_erase(base, 1, 0) != TIKU_NOR_OK) {
+        SHELL_PRINTF("  subsec-erase  FAILED\n");
+        return;
+    }
+    cyc = norb_cyc_now() - t0;
+    exact = 1;
+    if (tiku_nor_read(base, s_norb_buf, NORB_SPAN) != TIKU_NOR_OK) {
+        exact = 0;
+    }
+    for (i = 0u; i < NORB_SPAN; i++) {
+        if (s_norb_buf[i] != 0xFFu) { exact = 0; }
+    }
+    norb_report_op("subsec-eras", 1u, cyc, exact);
+
+    for (i = 0u; i < NORB_SPAN; i++) {
+        s_norb_buf[i] = norb_pat(base + i);
+    }
+    t0 = norb_cyc_now();
+    if (tiku_nor_program(base, s_norb_buf, NORB_SPAN) != TIKU_NOR_OK) {
+        SHELL_PRINTF("  page-program  FAILED\n");
+        return;
+    }
+    cyc = norb_cyc_now() - t0;
+    for (i = 0u; i < NORB_SPAN; i++) { s_norb_buf[i] = 0u; }
+    exact = (tiku_nor_read(base, s_norb_buf, NORB_SPAN) == TIKU_NOR_OK);
+    for (i = 0u; i < NORB_SPAN; i++) {
+        if (s_norb_buf[i] != norb_pat(base + i)) { exact = 0; }
+    }
+    norb_report_op("page-prog", NORB_SPAN / TIKU_NOR_PAGE_SIZE, cyc, exact);
+
+    /* Sequential PIO read of the whole span. */
+    for (i = 0u; i < NORB_SPAN; i++) { s_norb_buf[i] = 0u; }
+    t0 = norb_cyc_now();
+    exact = (tiku_nor_read(base, s_norb_buf, NORB_SPAN) == TIKU_NOR_OK);
+    cyc = norb_cyc_now() - t0;
+    for (i = 0u; i < NORB_SPAN; i++) {
+        if (s_norb_buf[i] != norb_pat(base + i)) { exact = 0; }
+    }
+    norb_report("seq-read", NORB_SPAN, cyc, exact);
+
+    /* 512 B reads at pseudo-random offsets inside the span. */
+    exact = 1;
+    off = 0u;
+    t0 = norb_cyc_now();
+    for (i = 0u; i < 8u; i++) {
+        off = (off + 1741u) % (NORB_SPAN - 512u);
+        off &= ~3u;
+        if (tiku_nor_read(base + off, s_norb_buf, 512u) != TIKU_NOR_OK) {
+            exact = 0;
+            break;
+        }
+        {
+            uint32_t b;
+            for (b = 0u; b < 512u; b++) {
+                if (s_norb_buf[b] != norb_pat(base + off + b)) { exact = 0; }
+            }
+        }
+    }
+    cyc = norb_cyc_now() - t0;
+    norb_report("random512", 8u * 512u, cyc, exact);
+
+    /*
+     * XIP: the CPU reads the aperture directly, so there is no per-chunk
+     * command overhead and this is the leg the 100+ MB/s expectation belongs
+     * to.  PIO is refused while the aperture is live, so it goes last and the
+     * aperture is closed again before returning.
+     */
+    if (s_xip_leg && tiku_nor_xip_enable(1) == TIKU_NOR_OK) {
+        const volatile uint8_t *ap =
+            (const volatile uint8_t *)(TIKU_NOR_XIP_BASE + base);
+        exact = 1;
+        t0 = norb_cyc_now();
+        for (i = 0u; i < NORB_SPAN; i++) { s_norb_buf[i] = ap[i]; }
+        cyc = norb_cyc_now() - t0;
+        for (i = 0u; i < NORB_SPAN; i++) {
+            if (s_norb_buf[i] != norb_pat(base + i)) { exact = 0; }
+        }
+        norb_report("xip-read", NORB_SPAN, cyc, exact);
+        (void)tiku_nor_xip_enable(0);
+    } else if (s_xip_leg) {
+        SHELL_PRINTF("  xip-read     aperture would not open\n");
+    }
+
+    SHELL_PRINTF("  erases spent this run: 1 (total %lu)\n",
+                 (unsigned long)s_erases);
+    SHELL_PRINTF("  not tested: DMA/CQ, sector (128 KB) erase\n");
+
+    {   /* restore the DWT state the boot tidy chose */
+        volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
+        volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
+        *dwtctl = ctl0; *demcr = demcr0;
+    }
 }
 
 uint32_t tiku_nor_scan_turnaround(uint32_t addr, const uint8_t *want,

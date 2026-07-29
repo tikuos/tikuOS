@@ -302,6 +302,28 @@ tiku_nor_err_t tiku_nor_erase(uint32_t addr, int small, int force);
 /** @brief Total erases this driver has performed since boot. */
 uint32_t tiku_nor_erase_count(void);
 
+/**
+ * @brief Run norbench: erase, program, sequential read and random reads.
+ *
+ * DWT-timed and checksum-gated; a leg that cannot prove its bytes reports FAIL
+ * rather than a bandwidth. Spends one subsector erase per run.
+ *
+ * @note Requires the NOR to be up; run `power nor` first.
+ */
+void tiku_nor_bench_run(void);
+
+/** @brief Include the XIP leg in the next bench run (off by default). */
+void tiku_nor_bench_set_xip(int on);
+
+/**
+ * @brief Read ONE word through the XIP aperture.
+ *
+ * @note A mis-decoding aperture stalls the bus with no software recovery; the
+ *       board needs a reflash. One word keeps the exposure minimal.
+ * @return 0 on success, -1 when the NOR is down or the aperture will not open.
+ */
+int tiku_nor_xip_probe(uint32_t *out);
+
 /** @brief Map/unmap the 8 MB read aperture at 0x64000000. */
 tiku_nor_err_t tiku_nor_xip_enable(int enable);
 /** @brief 1 if the aperture is live. */
