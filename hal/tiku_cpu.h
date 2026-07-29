@@ -47,20 +47,9 @@ void tiku_cpu_boot_init(void);
 /**
  * @brief Apply a core-clock frequency to the platform clock tree.
  *
- * Ordering matters: call this AFTER tiku_cpu_boot_init(), which brings
- * the oscillators and clock tree to a known state, and BEFORE anything
- * whose timing derives from the core or peripheral clock — UART baud,
- * the system tick, and cycle-counted delays all read the rate this
- * call establishes.  tiku_boot_init_cpu() does exactly that pairing,
- * inside the CPU stage, ahead of memory, peripherals and services.
- *
- * Delegates to the arch backend, which also refreshes what
- * tiku_cpu_mclk_hz() / _smclk_hz() / _aclk_hz() report.  A request the
- * part cannot honour does not fail: it is clamped or ignored (MSP430
- * clamps an out-of-range request; nRF54L is a no-op, its core PLL
- * being fixed), so a caller that cares must confirm the outcome with
- * tiku_cpu_mclk_hz() — which is what the shell "freq" command does
- * when it re-invokes this at runtime.
+ * Call after tiku_cpu_boot_init() and before anything timed off the core or
+ * peripheral clock.  A request the part cannot honour is clamped or ignored
+ * rather than failing, so a caller that cares must confirm with _mclk_hz().
  *
  * @param cpu_freq  Requested core frequency in MHz
  */
@@ -110,33 +99,27 @@ int tiku_cpu_clock_has_fault(void);
 /**
  * @brief Clean (write back) the data cache over an address range.
  *
- * Ensures dirty cache lines covering [addr, addr+len) reach memory so an
- * out-of-band reader (a ROM/DMA agent) sees them. The memory module calls
- * this before handing a staging buffer to the NVM programmer. A no-op where
- * there is no data cache (MSP430) or the region is not cached.
+ * Pushes dirty lines to memory so an out-of-band reader such as a DMA or ROM
+ * agent sees them; the memory module calls it before handing a staging buffer
+ * to the NVM programmer.  A no-op where the range is not cached.
  */
 void tiku_cpu_dcache_clean(const void *addr, unsigned long len);
 
 /**
  * @brief Invalidate the data cache over an address range.
  *
- * Drops cached copies of [addr, addr+len) so the next read fetches fresh data
- * after an out-of-band writer (the bootrom NVM programmer) changed memory
- * underneath the cache -- the key to keeping the D-cache coherent with the
- * persist layer. A no-op without a data cache; on parts whose controller has
- * no by-range op (Apollo4 CACHECTRL) the whole cache is invalidated (coarser
- * but correct).
+ * Drops cached copies so the next read sees what an out-of-band writer left --
+ * the key to D-cache coherence with the persist layer.  Where the controller
+ * has no by-range op the whole cache is invalidated: coarser but correct.
  */
 void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len);
 
 /**
  * @brief Invalidate the entire instruction cache.
  *
- * Required after out-of-band writes to executable memory (the Tier-3
- * module loader programming MRAM via the bootrom) and before the first
- * fetch from the modified range. Full invalidate: modules are small and
- * install is rare, so by-address precision buys nothing. A no-op on parts
- * without an instruction cache (MSP430, nRF54L M33, RP2350).
+ * Required after out-of-band writes to executable memory and before the first
+ * fetch from the modified range.  Full invalidate, because modules are small
+ * and installs are rare, so by-address precision buys nothing.
  */
 void tiku_cpu_icache_invalidate(void);
 
@@ -144,14 +127,10 @@ void tiku_cpu_icache_invalidate(void);
 /* IDLE / LOW-POWER MODES                                                    */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Generic idle-mode classifications. Each platform maps these to its
- * native low-power state. The mapping for MSP430 is:
- *
- *   OFF      -> busy-wait (no LPM entry)
- *   LIGHT    -> LPM0  (CPU off, SMCLK+ACLK on)
- *   DEEP     -> LPM3  (CPU+SMCLK off, ACLK on)
- *   DEEPEST  -> LPM4  (all clocks off, GPIO wake only)
+/*
+ * Generic idle-mode classifications, mapped by each platform to its native
+ * low-power state.  On MSP430: OFF is a busy-wait, LIGHT is LPM0 (CPU off),
+ * DEEP is LPM3 (SMCLK off too) and DEEPEST is LPM4 (all clocks off, GPIO wake).
  */
 typedef enum {
     TIKU_CPU_IDLE_OFF      = 0,
@@ -173,12 +152,9 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode);
 /**
  * @brief Does the system tick interrupt wake this idle mode?
  *
- * The scheduler's deadline-aware idle sleeps while software timers
- * are armed ONLY if the tick can wake the CPU to dispatch them.
- * MSP430: true for LPM0-LPM3 (Timer A0 runs from ACLK and its ISR
- * clears the LPM bits on exit), false for LPM4 (all clocks off).
- * RP2350 / Ambiq: every supported mode is a WFI variant, which any
- * enabled interrupt — including the tick — wakes, so always true.
+ * Deadline-aware idle sleeps with timers armed only if the tick can wake the
+ * CPU to dispatch them.  True for every MSP430 mode but LPM4, and always true
+ * on the Cortex-M parts, where each mode is a WFI variant.
  *
  * @return Non-zero if the tick wakes the CPU out of @p mode
  */

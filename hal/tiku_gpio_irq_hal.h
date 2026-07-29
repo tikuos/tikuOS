@@ -60,11 +60,9 @@ typedef enum {
 /**
  * @brief Enable an edge-triggered interrupt on the given pin.
  *
- * Configures the pin as an input with the platform's standard
- * pull resistor enabled, sets the edge-select bit per @p edge,
- * clears any pending flag, and unmasks the interrupt. Subsequent
- * matching edges post a TIKU_EVENT_GPIO broadcast event whose
- * data field is TIKU_GPIO_IRQ_PACK(port, pin).
+ * Configures the pin as an input with the standard pull, sets the edge, clears
+ * any pending flag and unmasks.  Matching edges then post a TIKU_EVENT_GPIO
+ * broadcast whose data is TIKU_GPIO_IRQ_PACK(port, pin).
  *
  * @return TIKU_GPIO_IRQ_OK or a negative error code.
  */

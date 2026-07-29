@@ -53,10 +53,8 @@
  * @struct tiku_wake_sources_t
  * @brief Snapshot of currently-armed wake sources.
  *
- * sources    -- bit-OR of TIKU_WAKE_* flags above.
- * gpio_ie[i] -- per-port pin-IE mask for port (i+1) if that port
- *               exists and any pin in it has an interrupt enabled.
- *               Valid only when TIKU_WAKE_GPIO is set in @p sources.
+ * `sources` is a bit-OR of the TIKU_WAKE_* flags; `gpio_ie[i]` is the per-pin
+ * IE mask for port i+1 and is valid only when TIKU_WAKE_GPIO is set.
  */
 typedef struct {
     uint8_t sources;

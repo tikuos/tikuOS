@@ -39,12 +39,11 @@
 
 /**
  * @typedef tiku_sched_idle_hook_t
- * @brief Optional hook called when the scheduler has no pending work
+ * @brief Optional hook called when the scheduler has no pending work.
  *
- * The platform can register a function that is called each time the
- * scheduler finds no events to process and no timers due. Typical use
- * is to enter a low-power mode. The hook should return; the scheduler
- * will re-check for work after it returns.
+ * The platform may register a function called whenever there are no events and
+ * no timers due, typically to enter a low-power mode.  It should return; the
+ * scheduler re-checks for work afterwards.
  */
 typedef void (*tiku_sched_idle_hook_t)(void);
 
@@ -81,12 +80,10 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data);
 uint8_t tiku_sched_run_once(void);
 
 /**
- * @brief Enter the main scheduler loop (never returns)
+ * @brief Enter the main scheduler loop (never returns).
  *
- * Repeatedly dispatches events and checks timers. When no work is
- * pending, calls the idle hook (if set) to allow the platform to
- * enter a low-power mode. An interrupt will wake the CPU and the
- * loop continues.
+ * Dispatches events and checks timers, calling the idle hook when nothing is
+ * pending so the platform can drop into a low-power mode until an interrupt.
  */
 void tiku_sched_loop(void);
 
@@ -99,15 +96,11 @@ void tiku_sched_loop(void);
 void tiku_sched_stop(void);
 
 /**
- * @brief Check if there is pending work
+ * @brief Check if there is pending work.
  *
- * Returns non-zero if the event queue is non-empty or any software
- * timer is DUE (expired but not yet dispatched). A timer armed for
- * a future deadline is not pending work: the tick ISR wakes the CPU
- * when it comes due. Useful for deciding whether to enter low-power
- * mode.
- *
- * @return Non-zero if work is pending
+ * Non-zero when the event queue is non-empty or a software timer is due.  A
+ * timer armed for a future deadline is not pending work: the tick ISR wakes the
+ * CPU when it arrives.
  */
 uint8_t tiku_sched_has_pending(void);
 
@@ -123,15 +116,11 @@ uint8_t tiku_sched_has_pending(void);
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook);
 
 /**
- * @brief Declare whether the current idle mode is woken by the tick
+ * @brief Declare whether the current idle mode is woken by the tick.
  *
- * When non-zero (the default), the scheduler will idle even while
- * software timers are armed: the tick interrupt wakes the CPU and
- * the due timer is dispatched on the next pass. Set to zero when
- * registering an idle mode whose wake sources do not include the
- * system tick (e.g. MSP430 LPM4) — the scheduler then refuses to
- * idle while any timer is armed, since sleeping would miss the
- * deadline forever. Pair with tiku_cpu_idle_mode_wakes_on_tick().
+ * Non-zero (the default) lets the scheduler idle while timers are armed, since
+ * the tick wakes the CPU.  Zero for a mode whose wake sources exclude the tick,
+ * where sleeping would miss the deadline forever.
  *
  * @param wakes Non-zero if the tick wakes the registered idle mode
  */

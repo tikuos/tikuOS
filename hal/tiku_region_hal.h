@@ -38,12 +38,10 @@ struct tiku_mem_region;
  */
 
 /**
- * @brief Return the platform's memory region table
+ * @brief Return the platform's memory region table.
  *
- * Returns a pointer to a const array of region descriptors that
- * describe the platform's physical memory map (SRAM, NVM, peripheral,
- * flash regions). The returned table is expected to reside in flash
- * and remain valid for the lifetime of the system.
+ * A const array of descriptors for the physical memory map, expected to live in
+ * NVM and stay valid for the lifetime of the system.
  *
  * @param count  Output: number of entries in the returned table
  * @return Pointer to the platform's region descriptor array (const)

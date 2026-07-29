@@ -48,11 +48,9 @@ typedef enum {
 /**
  * @brief Thread control block.
  *
- * Statically allocated via TIKU_THREAD().  sp is the saved process
- * stack pointer while the thread is off the CPU (the arch switcher's
- * software frame lives at *sp).  cycles accumulates DWT CPU cycles
- * across every occupancy — the energy-accounting substrate; budget is
- * the cumulative-cycle ceiling the scheduler enforces (0 = unlimited).
+ * Statically allocated via TIKU_THREAD().  sp holds the saved process stack
+ * pointer while the thread is off the CPU; cycles accumulates CPU cycles across
+ * every occupancy, and budget is the ceiling the scheduler enforces (0 = none).
  */
 typedef struct tiku_thread {
     uint32_t            *sp;          /**< Saved PSP (off-CPU)            */
@@ -94,15 +92,12 @@ typedef struct tiku_thread {
 /**
  * @brief Start a worker thread.
  *
- * First call performs the one-time bring-up: the kernel context
- * migrates from MSP to PSP (same stack, seamless), MSP is re-pointed
- * at a dedicated ISR stack, PendSV drops to the lowest exception
- * priority, and the DWT cycle counter starts.  Must be called from
- * the kernel thread (process context).
+ * The first call performs the one-time bring-up: the kernel context migrates
+ * from MSP to PSP on the same stack, MSP re-points at a dedicated ISR stack, and
+ * PendSV drops to the lowest priority.  Must be called from the kernel thread.
  *
  * @param t      Thread declared with TIKU_THREAD()
- * @param entry  Worker body; returning is equivalent to
- *               tiku_thread_exit()
+ * @param entry  Worker body; returning is equivalent to tiku_thread_exit()
  * @param arg    Passed to @p entry
  * @return 0 on success, -1 (bad args / stack too small / slots full /
  *         already running)
@@ -160,12 +155,9 @@ int tiku_thread_is_done(const tiku_thread_t *t);
 /**
  * @brief Park the calling PROCESS until worker @p t finishes.
  *
- * A protothread-level await: the process YIELDS to the scheduler each pass
- * (so the kernel keeps running) and resumes when @p t is DONE -- instead of
- * busy-driving the pump from a nested call.  Use inside a
- * TIKU_PROCESS_THREAD.  (The FETCH/TLS offload can't use this: it runs mid
- * C-callstack where a protothread cannot yield -- that path stays a driven
- * pump until the tikukits handshake is restructured.)
+ * A protothread-level await: the process yields to the scheduler each pass and
+ * resumes when @p t is DONE.  Use inside a TIKU_PROCESS_THREAD -- code running
+ * mid C-callstack cannot yield and has to keep driving a pump instead.
  */
 #define TIKU_WAIT_WORKER(t)  PT_YIELD_UNTIL(process_pt, tiku_thread_is_done(t))
 
@@ -176,12 +168,9 @@ int tiku_thread_is_done(const tiku_thread_t *t);
 /**
  * @brief Grant @p t @p cycles of CPU run-time starting now.
  *
- * Sets a cumulative-cycle ceiling at (already-consumed + @p cycles): the
- * worker is scheduled until its accounted cycles reach the ceiling, then
- * parked until refilled or cleared.  Enforcement is at context-switch
- * boundaries, so a worker overruns its grant by at most one tenure (one
- * tick's worth of cycles) before it is parked.  A grant of 0 parks the
- * worker at once.
+ * Sets a cumulative ceiling at already-consumed plus @p cycles, parking the
+ * worker when it is reached until a refill.  Enforcement is at switch
+ * boundaries, so a worker overruns by at most one tenure.  A grant of 0 parks it.
  */
 void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles);
 
@@ -210,21 +199,18 @@ int tiku_thread_budget_exhausted(const tiku_thread_t *t);
 /**
  * @brief Kernel thread yields the CPU to the ready workers.
  *
- * Called from the scheduler's idle branch (interrupts masked, no
- * dispatchable work, at least one worker READY) INSTEAD of the idle
- * hook: marks thread 0 not-ready, rotates the worker round-robin, and
- * pends the switch — which fires when the atomic section exits.  The
- * kernel resumes here as soon as tiku_thread_kernel_wake() runs.
+ * Called from the scheduler's idle branch instead of the idle hook: marks thread
+ * 0 not-ready, rotates the worker cursor and pends the switch, which fires when
+ * the atomic section exits.  The kernel resumes on tiku_thread_kernel_wake().
  */
 void tiku_thread_kernel_block(void);
 
 /**
  * @brief Make the kernel thread runnable again (absolute priority).
  *
- * ISR-safe; called by tiku_process_post()/poll() after every
- * successful enqueue, so ANY event — a tick's timer poll, UART RX, a
- * worker's own post — preempts workers back to the kernel at the
- * next unmasked instant.  A no-op before threading starts.
+ * ISR-safe, and called after every successful post, so any event preempts
+ * workers back to the kernel at the next unmasked instant.  A no-op before
+ * threading has started.
  */
 void tiku_thread_kernel_wake(void);
 

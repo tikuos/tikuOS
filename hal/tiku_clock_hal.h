@@ -95,11 +95,9 @@ int tiku_clock_arch_fine_max(void);
 /**
  * @brief Clock source fault codes.
  *
- * Reported by tiku_clock_arch_fault() when the platform was unable to
- * bring up the intended low-frequency clock source and silently fell
- * back to a less accurate one. The system tick continues to run but
- * its rate no longer matches TIKU_CLOCK_SECOND, so all software
- * timers expire at a different wall-clock rate.
+ * Reported when the platform could not bring up the intended low-frequency
+ * source and fell back to a less accurate one.  The tick keeps running but no
+ * longer matches TIKU_CLOCK_SECOND, so every software timer drifts with it.
  */
 enum tiku_clock_arch_fault_code {
   TIKU_CLOCK_ARCH_FAULT_NONE     = 0, /**< Configured source is in use */

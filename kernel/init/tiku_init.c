@@ -30,17 +30,11 @@
 /* CONFIGURATION                                                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Magic word distinguishing an initialised init region from blank
- * NVM.
- *
- * Written (last) at offset OFF_MAGIC by init_first_boot(); checked by
- * tiku_init_load().  A mismatch means the region was never primed —
- * fresh flash/FRAM or a wiped device — and triggers a one-time
- * first-boot prime.  The literal 0x1417 has no semantic meaning
- * beyond being an unlikely value for uninitialised memory; bump it if
- * the on-NVM layout below ever changes incompatibly so old images
- * re-prime cleanly after reflashing.
+/*
+ * Magic word distinguishing an initialised init region from blank NVM.  Written
+ * last by init_first_boot() and checked by tiku_init_load(); a mismatch means
+ * fresh or wiped storage and triggers a one-time prime.  Bump it if the layout
+ * below ever changes incompatibly, so old images re-prime cleanly.
  */
 #define TIKU_INIT_MAGIC  0x1417U
 
@@ -48,42 +42,28 @@
 /* NVM LAYOUT                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
+/*
  * The NVM config region is laid out as:
  *
  *   [0..1]   uint16_t magic
  *   [2]      uint8_t  count   (number of populated entries)
  *   [3]      uint8_t  reserved
  *   [4..]    tiku_init_entry_t entries[TIKU_INIT_MAX_ENTRIES]
- *
- * Total: 4 + 8 * sizeof(tiku_init_entry_t) = 4 + 8*66 = 532 bytes
  */
 
-/**
- * Byte offsets of each field within the config region.
- *
- *   OFF_MAGIC   (0) -- uint16_t magic word (OFF_COUNT follows at 2,
- *                      so the count byte is naturally past the word).
- *   OFF_COUNT   (2) -- uint8_t populated-entry count; the reserved
- *                      pad byte sits at OFF_COUNT + 1.
- *   OFF_ENTRIES (4) -- start of the tiku_init_entry_t array.
- *
- * These must stay consistent with the layout diagram above; the
- * helpers (init_read_magic / init_read_count / init_entry_ptr) index
- * the region through exactly these constants.
+/*
+ * Byte offsets of each field within the config region.  These must stay
+ * consistent with the layout above: init_read_magic(), init_read_count() and
+ * init_entry_ptr() index the region through exactly these constants.
  */
 #define OFF_MAGIC    0
 #define OFF_COUNT    2
 #define OFF_ENTRIES  4
 
-/**
- * Total bytes the layout consumes: the 4-byte header plus the full
- * fixed array of entry slots.
- *
- * Deliberately written as a live sizeof() expression (not a hand-
- * computed literal) so it tracks any change to TIKU_INIT_MAX_ENTRIES
- * or tiku_init_entry_t automatically and feeds the static assert
- * below.
+/*
+ * Total bytes the layout consumes: the 4-byte header plus the entry array.  A
+ * live sizeof() expression rather than a computed literal, so it tracks any
+ * change to the entry count or struct and feeds the static assert below.
  */
 #define TIKU_INIT_REGION_BYTES_NEEDED \
     (OFF_ENTRIES + (TIKU_INIT_MAX_ENTRIES * sizeof(tiku_init_entry_t)))
@@ -117,17 +97,11 @@ _Static_assert(TIKU_DEVICE_FRAM_CONFIG_SIZE >= TIKU_INIT_REGION_BYTES_NEEDED,
 /* INTERNAL STATE                                                            */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Cached base address of the NVM config region.
- *
- * Resolved once by tiku_init_load() via tiku_nvm_region_get() and
- * reused by every helper and public entry point as the anchor for
- * the OFF_* offsets.  NULL until tiku_init_load() succeeds; every
- * public function guards on it, so calls made before load() (or when
- * the region is absent) become safe no-ops rather than NULL
- * dereferences.  Points into NVM, not SRAM — direct stores would
- * fault under the MPU, which is why all writes go through the unlock
- * helpers.
+/*
+ * Cached base address of the NVM config region, resolved once by
+ * tiku_init_load() and reused as the anchor for every OFF_* offset.  NULL until
+ * that succeeds, and every public function guards on it, so an early call is a
+ * no-op rather than a NULL dereference.
  */
 static uint8_t *cfg_base;
 
@@ -244,11 +218,9 @@ init_find(const char *name)
 /**
  * @brief Initialise NVM on first boot (zero everything, write magic).
  *
- * Called when init_read_magic() does not match TIKU_INIT_MAGIC,
- * indicating uninitialised NVM (fresh flash or corrupted region).
- * Zeros the count, reserved byte, and all entry slots, then writes
- * the magic word last as a commit marker so a power loss during
- * initialisation leaves the region detectable as uninitialised.
+ * Called when the magic does not match.  Zeros the count, the reserved byte and
+ * every entry slot, then writes the magic LAST as the commit marker, so a power
+ * loss mid-prime leaves the region detectably uninitialised.
  */
 static void
 init_first_boot(void)
@@ -287,17 +259,9 @@ init_first_boot(void)
 /**
  * @brief Resolve the config region and validate (or prime) the table.
  *
- * Looks up the CONFIG NVM region, caches its base in cfg_base, and
- * checks the magic word.  On a magic mismatch — blank or corrupted
- * NVM — it calls init_first_boot() to zero the table and stamp the
- * magic.  If the region is not allocated on this build the function
- * returns with cfg_base left NULL, which disables every other entry
- * point gracefully.
- *
- * Must be called once during boot after tiku_nvm_map_init() and
- * before tiku_init_run_all() (see main.c).  The only NVM write it can
- * trigger is the first-boot prime, which manages its own MPU unlock
- * window internally.
+ * Caches the region base and checks the magic, priming on a mismatch.  Where the
+ * region does not exist the base stays NULL, which disables every other entry
+ * point gracefully.  Call once at boot, after the NVM map and before run_all().
  */
 void
 tiku_init_load(void)
@@ -319,22 +283,9 @@ tiku_init_load(void)
 /**
  * @brief Execute every enabled entry, ordered by sequence number.
  *
- * The boot replay step.  Builds an index array sorted by each entry's
- * seq field with an insertion sort (at most TIKU_INIT_MAX_ENTRIES
- * elements, so the O(n^2) cost is trivial and avoids pulling in a
- * library sort), then walks it in order.  Entries that are disabled
- * or carry an empty command are skipped.
- *
- * Each surviving command is copied from NVM into an SRAM scratch
- * buffer before dispatch because tiku_shell_parser_execute() tokenises
- * its argument in place (inserting NUL bytes at spaces) — it must not
- * write into the read-only NVM image, and a private copy also keeps
- * the persisted command text intact.  No NVM writes occur here; the
- * side effects are entirely whatever the dispatched shell commands do,
- * plus a "[init]" log line per executed entry.
- *
- * Reads served from cfg_base; returns 0 immediately if the table was
- * never loaded or is empty.
+ * Insertion-sorts an index array by seq, then dispatches each enabled, non-empty
+ * command from an SRAM copy -- the parser tokenises in place and must not write
+ * into the read-only NVM image.  No NVM writes happen here.
  *
  * @return Number of entries actually executed (enabled, non-empty).
  */
@@ -396,20 +347,11 @@ tiku_init_run_all(void)
 }
 
 /**
- * @brief Add a new init entry, or replace an existing one by name.
+ * @brief Add or replace an init entry.
  *
- * Assembles the entry in an SRAM stack struct first (zeroed, then
- * seq/enabled/name/cmd filled with bounded strncpy), so only one
- * fully-formed record is ever written to NVM.  If an entry with the
- * same name already exists it is overwritten in place — a single
- * entry-sized NVM write, no count change.  Otherwise the record is
- * appended at slot `count` and the count byte is bumped afterwards;
- * writing the entry before the count means a power loss between the
- * two writes leaves a stale slot that the (unincremented) count still
- * hides, never a counted-but-empty entry.
- *
- * The new entry is created enabled (entry.enabled = 1).  Each NVM
- * mutation is bracketed by tiku_mpu_unlock_nvm() / tiku_mpu_lock_nvm().
+ * Assembles the record in SRAM first, so only a fully-formed entry reaches NVM.
+ * An existing name is overwritten in place; otherwise the record is appended and
+ * the count bumped AFTER, so a power loss leaves a stale slot the count hides.
  *
  * @param seq   Boot sequence number; lower runs earlier.
  * @param name  Entry name, truncated to TIKU_INIT_NAME_SIZE-1 chars.
@@ -465,15 +407,9 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
 /**
  * @brief Remove an init entry by name.
  *
- * Compacts the table with a swap-with-last: the final populated slot
- * is copied over the removed slot (unless the removed slot was
- * already last), the now-duplicate tail slot is zeroed, and the count
- * is decremented.  Entry order in NVM is irrelevant because
- * tiku_init_run_all() re-sorts by seq on every boot, so this O(1)
- * move is preferred over shifting the whole array.
- *
- * All three writes (the move, the tail zero, the count) happen inside
- * a single tiku_mpu_unlock_nvm() / tiku_mpu_lock_nvm() window.
+ * Compacts with a swap-with-last, then zeroes the tail slot and decrements the
+ * count, all inside one unlock window.  Order in NVM is irrelevant because
+ * run_all() re-sorts by seq every boot, so the O(1) move beats shifting.
  *
  * @param name  Name of the entry to remove (NUL-terminated).
  * @return 0 on success; -1 if the table was never loaded, @p name is
@@ -524,14 +460,9 @@ tiku_init_remove(const char *name)
 /**
  * @brief Enable or disable an init entry by name.
  *
- * Flips just the entry's `enabled` flag in place: it normalises @p en
- * to 0/1 and writes that single byte to the address of the entry's
- * enabled field, leaving seq/name/cmd untouched.  A disabled entry
- * stays in the table (and in the count) but is skipped by
+ * Writes just the entry's enabled byte, leaving seq, name and cmd untouched.  A
+ * disabled entry stays in the table and in the count but is skipped by
  * tiku_init_run_all().
- *
- * The one-byte write is bracketed by tiku_mpu_unlock_nvm() /
- * tiku_mpu_lock_nvm().
  *
  * @param name  Name of the entry to toggle (NUL-terminated).
  * @param en    Non-zero to enable, zero to disable.
@@ -584,11 +515,9 @@ tiku_init_count(void)
 /**
  * @brief Get a read-only pointer to the idx-th entry.
  *
- * Bounds-checks idx against the live count and returns a pointer
- * straight into the NVM config region — no copy.  Callers may read
- * the fields but must not write through the pointer (NVM is MPU-
- * protected); use tiku_init_add() / _remove() / _enable() to mutate.
- * Used by the "init" shell command to list the table.
+ * Bounds-checks against the live count and returns a pointer straight into NVM,
+ * with no copy.  Callers may read but must not write through it; use add,
+ * remove or enable to mutate.
  *
  * @param idx  Zero-based index, valid range 0 .. tiku_init_count()-1.
  * @return Pointer to the entry, or NULL if the table was never loaded

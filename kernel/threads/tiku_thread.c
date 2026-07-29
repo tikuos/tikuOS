@@ -77,13 +77,9 @@ static volatile uint16_t s_canary_faults;
 /**
  * @brief Is worker @p t eligible for the CPU right now?
  *
- * READY and within its energy budget.  budget == 0 is unlimited (the
- * default — every worker that never set a budget behaves exactly as
- * before); otherwise the worker is eligible only while its accounted
- * cycles stay below the ceiling.  This is the single enforcement point:
- * both the switcher's pick loop and tiku_thread_worker_ready() consult
- * it, so the switch and the scheduler always agree on who may run, and
- * an over-budget worker is invisible to both until it is refilled.
+ * READY and within its energy budget; a budget of 0 is unlimited.  The single
+ * enforcement point -- both the switcher's pick loop and
+ * tiku_thread_worker_ready() consult it, so the two can never disagree.
  */
 static int worker_runnable(const tiku_thread_t *t)
 {
@@ -100,25 +96,19 @@ static int worker_runnable(const tiku_thread_t *t)
 /**
  * @brief Save the outgoing context's sp, account its cycles, pick next.
  *
- * Called by the arch PendSV handler with the outgoing thread's sp
- * (software frame already pushed).  Returns the incoming thread's sp
- * (whose software frame the handler pops).  Policy: kernel if
- * runnable; else the next READY worker from the round-robin cursor;
- * else the kernel as fallback (it knows how to idle).
+ * Called by the arch PendSV handler with the outgoing sp, returning the incoming
+ * one.  Policy: the kernel if runnable, else the next READY worker from the
+ * round-robin cursor, else the kernel again -- it is what knows how to idle.
  *
  * @param old_sp  Outgoing stack pointer (past the software frame)
  * @return Incoming stack pointer
  */
 /**
- * @brief Non-zero when the caller runs in kernel-thread (or pre-thread
- *        boot) context; zero inside a preemptive worker.
+ * @brief Non-zero in kernel-thread (or pre-thread boot) context, zero in a worker.
  *
- * The confinement predicate for TIKU_MEM_KERNEL_ONLY (kernel/memory):
- * memory mutators refuse worker-context calls instead of racing the
- * cooperative kernel's lock-free structures.  A single aligned pointer
- * read of s_current (already volatile) — safe from any context; an ISR
- * that interrupted a worker reads "not kernel", which is the correct
- * conservative answer for allocators there too.
+ * The confinement predicate for TIKU_MEM_KERNEL_ONLY: memory mutators refuse
+ * worker-context calls rather than race the kernel's lock-free structures.  One
+ * aligned volatile read, so it is safe from any context, an ISR included.
  */
 int tiku_thread_in_kernel(void)
 {
@@ -126,15 +116,11 @@ int tiku_thread_in_kernel(void)
 }
 
 /**
- * @brief Cooperative context-switch core: park the outgoing context and pick
- *        the next worker to run.
+ * @brief Context-switch core: park the outgoing context, pick the next worker.
  *
- * Invoked from the arch switch trampoline with the outgoing stack pointer.
- * Charges the elapsed cycles to whoever was running (a worker or the kernel),
- * saves its @p old_sp, checks the outgoing stack canary, then selects the next
- * READY, in-budget worker from the round-robin cursor (an over-budget worker
- * is skipped until a refill lifts it back over budget).  With no runnable
- * worker it returns to the kernel context.
+ * Charges elapsed cycles to whoever ran, saves @p old_sp, checks the outgoing
+ * stack canary, then takes the next READY in-budget worker from the round-robin
+ * cursor.  With no runnable worker it returns to the kernel context.
  *
  * @param old_sp  Stack pointer of the context being switched out.
  * @return The stack pointer of the context to switch in.

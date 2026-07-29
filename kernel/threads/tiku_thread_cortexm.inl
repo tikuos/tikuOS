@@ -80,11 +80,9 @@ uint32_t tiku_thread_arch_cycles(void)
 /**
  * @brief Dedicated exception stack (MSP) once threading starts.
  *
- * Before threading, MSP serves both the kernel and every ISR from the
- * big boot stack.  The migration hands that whole region to the kernel
- * thread (as PSP) and points MSP here.  2 KB comfortably covers the
- * lean ISR set (tick, UART RX, GPIO, radio) with no nesting deeper than
- * the NVIC preemption levels in use.
+ * Before threading, MSP serves the kernel and every ISR from the boot stack.
+ * Migration hands that region to the kernel thread as PSP and points MSP here.
+ * 2 KB covers the lean ISR set at the NVIC preemption levels in use.
  */
 static uint32_t s_isr_stack[512] __attribute__((aligned(8)));
 
@@ -151,11 +149,9 @@ void tiku_thread_arch_pend(void)
 /**
  * @brief Build a worker's initial frames on its stack.
  *
- * Layout (descending): 8-word hardware frame (R0=arg, LR=exit
- * trampoline, PC=entry, xPSR=Thumb), then the 9-word software frame the
- * PendSV handler pops (R4-R11 zeroed, EXC_RETURN=0xFFFFFFFD: thread
- * mode, PSP, standard frame -- the FPU frame appears only after the
- * worker's first FP instruction, via lazy stacking).
+ * Descending: the 8-word hardware frame (R0=arg, LR=exit trampoline, PC=entry,
+ * xPSR=Thumb), then the 9-word software frame PendSV pops, EXC_RETURN set for
+ * thread mode on PSP -- the FPU frame appears only on the first FP instruction.
  *
  * @return Initial sp (what the switcher's LDMIA expects)
  */
@@ -194,13 +190,9 @@ extern uint32_t *tiku_thread_switch(uint32_t *old_sp);
 /**
  * @brief PendSV handler (strong override of the vector's weak alias).
  *
- * Saves the outgoing thread's software frame on its PSP stack --
- * S16-S31 first when the extended (FP) frame is live (EXC_RETURN bit 4
- * clear) -- asks the policy layer for the next sp, and unwinds the
- * incoming thread the same way.  EXC_RETURN travels in the software
- * frame, so standard- and FP-frame threads interleave freely.  The
- * symbol name is supplied by the including shim so each part's vector
- * table binds to it.
+ * Saves the outgoing software frame on its PSP stack, S16-S31 first when the FP
+ * frame is live, asks the policy layer for the next sp, then unwinds the incoming
+ * thread the same way.  EXC_RETURN travels in the frame, so the two kinds mix.
  */
 __attribute__((naked))
 void TIKU_THREAD_ARCH_PENDSV(void)

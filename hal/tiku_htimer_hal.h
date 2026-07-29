@@ -12,14 +12,10 @@
 
 /**
  * @file tiku_htimer_hal.h
- * @brief Platform-agnostic hardware timer interface
+ * @brief Platform-agnostic hardware timer interface.
  *
- * Declares the functions and constants that each platform must
- * provide to support the htimer (hardware timer) subsystem.
- * No platform-specific headers are included.
- *
- * The platform implementation (e.g. arch/msp430/tiku_htimer_arch.c)
- * provides the actual timer hardware control.
+ * Declares what each platform must provide for the htimer subsystem, with no
+ * platform headers included.  The arch file supplies the timer control.
  */
 
 #ifndef TIKU_HTIMER_HAL_H_
@@ -39,29 +35,19 @@
 /* REQUIRED PLATFORM FUNCTIONS                                               */
 /*---------------------------------------------------------------------------*/
 
-/**
- * The htimer kernel module requires three arch functions:
- *   - tiku_htimer_arch_init()
- *   - tiku_htimer_arch_schedule(tiku_htimer_clock_t t)
- *   - tiku_htimer_arch_now()
- *
- * These are declared in tiku_htimer.h and must be provided by
- * the platform.
- *
- * The platform must also define TIKU_HTIMER_ARCH_SECOND to
- * indicate the hardware timer tick frequency.
+/*
+ * The htimer kernel module requires three arch functions -- _init(), _schedule()
+ * and _now() -- declared in tiku_htimer.h.  The platform must also define
+ * TIKU_HTIMER_ARCH_SECOND as the hardware tick frequency.
  */
 
 /*---------------------------------------------------------------------------*/
 /* PLATFORM ISR CONTRACT                                                     */
 /*---------------------------------------------------------------------------*/
 
-/**
- * The platform timer ISR must call tiku_htimer_run_next() when
- * the compare-match interrupt fires. This dispatches the pending
- * htimer callback and handles rescheduling.
- *
- * tiku_htimer_run_next() is declared in tiku_htimer.h.
+/*
+ * The platform timer ISR must call tiku_htimer_run_next() when the compare-match
+ * interrupt fires; that dispatches the pending callback and reschedules.
  */
 
 #endif /* TIKU_HTIMER_HAL_H_ */

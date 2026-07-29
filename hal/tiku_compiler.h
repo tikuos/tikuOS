@@ -24,27 +24,9 @@
 /**
  * @brief Declare an ISR portably across CCS and GCC.
  *
- * Usage:
- *   TIKU_ISR(TIMER0_A0_VECTOR, timer0_a0_isr)
- *   {
- *       // handler body
- *   }
- *
- * CCS expands to:
- *   #pragma vector=TIMER0_A0_VECTOR
- *   __interrupt void timer0_a0_isr(void) { ... }
- *
- * GCC expands to:
- *   __attribute__((interrupt(TIMER0_A0_VECTOR), lower))
- *   void timer0_a0_isr(void) { ... }
- *
- * The `lower` attribute pins the handler in lower FRAM (0x4400-0xFF7F).
- * MSP430 interrupt vectors at 0xFF80 are 16-bit, so any ISR that drifts
- * into HIFRAM under MEMORY_MODEL=large gets its address truncated and
- * the vector points to garbage — boot may complete but the handler
- * silently never fires. Under the default small model the attribute is
- * a no-op (all code already lives in lower FRAM). Keeping it on every
- * ISR site is what makes the large-model build safe.
+ * The `lower` attribute pins the handler in lower FRAM.  MSP430 vectors are
+ * 16-bit, so an ISR that drifts into HIFRAM under the large model has its
+ * address truncated and the vector silently points at garbage.
  */
 #if defined(__TI_COMPILER_VERSION__)
 #define TIKU_ISR(vec, name) \
