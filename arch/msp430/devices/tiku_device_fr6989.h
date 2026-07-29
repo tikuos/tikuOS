@@ -113,9 +113,10 @@
  *   Segment 3: 0x10000 - 0x23FFF (80 KB,  HIFRAM data — large mode only)
  *
  * On parts without HIFRAM (FR5969, FR2433) segment 3 traditionally
- * covered the high lower-FRAM region; here we push it past the lower
- * window so HIFRAM gets its own permission domain. Lower FRAM stays
- * R+X (no W) via segments 1 and 2; HIFRAM gets R+W+X via segment 3.
+ * covered the high lower-FRAM region; here it is pushed past the
+ * lower window so HIFRAM gets its own permission domain. Lower FRAM
+ * stays R+X (no W) via segments 1 and 2; HIFRAM gets R+W+X via
+ * segment 3.
  *
  * Addresses are shifted right by 4 before being written to the
  * MPUSEGBx registers (handled in arch/msp430/tiku_mpu_arch.c).

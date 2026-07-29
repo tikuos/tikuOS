@@ -62,8 +62,8 @@
 
 /*
  * Semantic timeout aliases. The MSP430 divider model only naturally
- * yields four time points when paired with a 32 kHz ACLK, so we
- * surface those four with names that read like wall-clock timeouts:
+ * yields four time points when paired with a 32 kHz ACLK, so those four
+ * carry names that read like wall-clock timeouts:
  *
  *   TIKU_WDT_TIMEOUT_2MS    ~  1.95 ms  (divider /64)
  *   TIKU_WDT_TIMEOUT_16MS   ~ 15.6  ms  (divider /512)

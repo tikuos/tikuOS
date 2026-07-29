@@ -157,11 +157,11 @@ int tiku_bt_is_advertising(void);
 /*---------------------------------------------------------------------------*/
 
 /** Hard cap on the scan-results cache. Sized so a busy office BLE
- *  environment (~10..30 devices) fits without truncation; bumped above
- *  16 would push us into FRAM and lose the bound-allocator simplicity. */
+ *  environment (~10..30 devices) fits without truncation; a value above
+ *  16 would spill into FRAM and lose the bound-allocator simplicity. */
 #define TIKU_BT_SCAN_MAX         16U
 
-/** Max bytes of local name we keep per scan entry (not NUL-terminated). */
+/** Max bytes of local name kept per scan entry (not NUL-terminated). */
 #define TIKU_BT_SCAN_NAME_MAX    24U
 
 /**

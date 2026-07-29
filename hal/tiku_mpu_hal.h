@@ -60,8 +60,8 @@ void tiku_mpu_arch_set_sam(uint16_t sam);
 /**
  * @brief Read the current MPU control register
  *
- * Returns the raw value of the MPU control register (MPUCTL0 on MSP430).
- * Used to check whether the MPU is enabled.
+ * Returns the raw value of the MPU control register (MPUCTL0 on MSP430), from
+ * which the caller can tell whether the MPU is enabled.
  *
  * @return Current control register value
  */

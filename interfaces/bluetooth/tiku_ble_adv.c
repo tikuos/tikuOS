@@ -444,7 +444,7 @@ static void scan_parse_name(const uint8_t *ad, uint8_t ad_len, char *out)
  * (instances append the name to the SCAN RESPONSE -- kernel
  * MGMT_ADV_FLAG_LOCAL_NAME semantics; hardware-measured: the host showed
  * up as a strong nameless ADV_SCAN_IND), so the reverse-nonce oracle
- * ships its nonce as ASCII after the 'TK' company id (0x4B54, our own
+ * ships its nonce as ASCII after the 'TK' company id (0x4B54, the tikuOS
  * beacon marker) -- manufacturer data DOES ride in the ADV payload.
  * Restricted to the TK id so ambient vendor blobs (Apple beacons etc.)
  * can never masquerade as a name. */

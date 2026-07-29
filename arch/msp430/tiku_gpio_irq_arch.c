@@ -108,7 +108,7 @@ tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
 
-    /* Mask the pin while we reconfigure */
+    /* Mask the pin across the reconfigure */
     *p->ie &= (uint8_t)~mask;
 
     /* Edge select: PxIES bit = 1 -> falling, 0 -> rising. The
@@ -126,8 +126,8 @@ tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
         gpio_irq_both[port] &= (uint8_t)~mask;
     }
 
-    /* Clear any spurious flag that may have latched while we
-     * were touching IES, then unmask. */
+    /* Clear any spurious flag that may have latched while IES
+     * was being touched, then unmask. */
     *p->ifg &= (uint8_t)~mask;
     *p->ie  |= mask;
 

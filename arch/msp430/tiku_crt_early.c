@@ -23,7 +23,7 @@
 /*
  * Place this in `.crt_0050early`. Sections sort lexicographically:
  *   .crt_0000start          (toolchain — set SP)
- *   .crt_0050early          (us         — disable WDT)              <-- here
+ *   .crt_0050early          (this file  — disable WDT)              <-- here
  *   .crt_0100init_bss       (toolchain — zero .lower.bss / .bss)
  *   .crt_0200init_highbss   (toolchain — zero .upper.bss)
  *   .crt_0300movedata       (toolchain — copy .lower.data / .data)
@@ -40,10 +40,10 @@
  */
 /*
  * The WDTCTL register lives at address 0x015C on every MSP430.
- * `WDTPW | WDTHOLD` = 0x5A00 | 0x0080 = 0x5A80. We bake both
- * constants into the asm template directly so the constraint
- * machinery doesn't have to deal with `&WDTCTL` vs `#WDTCTL`
- * ambiguity in the immediate/absolute operand slots.
+ * `WDTPW | WDTHOLD` = 0x5A00 | 0x0080 = 0x5A80. Both constants are
+ * baked into the asm template directly so the constraint machinery
+ * does not have to deal with `&WDTCTL` vs `#WDTCTL` ambiguity in
+ * the immediate/absolute operand slots.
  */
 __attribute__((naked, used, section(".crt_0050early")))
 void __tiku_crt_early_disable_wdt(void)

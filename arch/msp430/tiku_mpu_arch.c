@@ -58,9 +58,9 @@ uint16_t tiku_mpu_arch_get_sam(void)
 
 /*
  * Why unlock-write-enable in every set_sam call:
- *   The MPU config registers are locked by default. To modify MPUSAM
- *   we must write the password to MPUCTL0 first, then change MPUSAM,
- *   then write password | enable to MPUCTL0 to re-activate. Bundling
+ *   The MPU config registers are locked by default. Modifying MPUSAM
+ *   means writing the password to MPUCTL0 first, then changing MPUSAM,
+ *   then writing password | enable to MPUCTL0 to re-activate. Bundling
  *   this into set_sam means the kernel never needs to know about the
  *   password or the enable bit.
  *
@@ -203,9 +203,9 @@ void tiku_mpu_arch_enable_violation_nmi(void)
 
 /*
  * When MPUSEGIE is set, an MPU violation triggers a System NMI instead
- * of a PUC (reset). We latch MPUCTL1 before reading SYSSNIV because
- * the read clears the hardware violation flags. The latched value
- * can then be inspected by tiku_mpu_get_violation_flags().
+ * of a PUC (reset). MPUCTL1 is latched before SYSSNIV is read, because
+ * that read clears the hardware violation flags. The latched value can
+ * then be inspected by tiku_mpu_get_violation_flags().
  */
 TIKU_ISR(SYSNMI_VECTOR, tiku_mpu_sysnmi_isr)
 {

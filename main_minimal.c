@@ -95,12 +95,8 @@ volatile uint32_t g_nordic_loop_count;
  * HW result (2026-07-10, nRF54L15-DK): ALL THREE PASS -- with the WEN gate
  * open, plain CPU stores to RRAM just work, from RRAM-executing code, with or
  * without the nrfx READY/READYNEXT handshakes, buffered or not (the controller
- * stalls the bus as needed).  The kernel-boot bus fault this probe was built
- * to bisect turned out to be a store issued with WEN CLOSED: TIKU_PERSIST_WARM
- * was mis-graded into RRAM `.persistent` on nordic, so the hang detector's
- * intentionally-unbracketed warm write hit the shut gate (fixed in
- * kernel/memory/tiku_mem.h).  Kept as a regression probe for the RRAM write
- * path:
+ * stalls the bus as needed).  A store issued with WEN CLOSED faults the bus
+ * instead.  Kept as a regression probe for the RRAM write path:
  *   T1  word store bracketed by the full nrfx handshake
  *   T2  8 back-to-back byte stores into the 32-entry write buffer, then
  *       TASKS_COMMITWRITEBUF + READY wait

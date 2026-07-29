@@ -134,7 +134,7 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
     }
 
     /*
-     * Scan for expired timers. We restart the scan after
+     * Scan for expired timers.  The scan restarts after
      * each dispatch because the callback or event handler
      * might modify the list (set/stop/reset timers).
      */

@@ -49,11 +49,11 @@ static void mac_nonce(uint8_t n[13], uint16_t src, uint32_t ctr)
 
 /* Durable TX frame counter (kill the nonce-reuse-on-reboot bug).  The nonce
  * is src||counter||level with a fixed key, so a counter that restarts at 0
- * after a power cycle repeats a keystream -- catastrophic for CTR mode.  We
- * reserve counters AHEAD in durable storage: persist a high-water mark
- * WINDOW past what we hand out, so at most one durable write per WINDOW
- * frames, and on reboot we resume above every counter ever used (unused
- * reserved counters are simply skipped -- safe). */
+ * after a power cycle repeats a keystream -- catastrophic for CTR mode.
+ * Counters are reserved AHEAD in durable storage: a high-water mark is
+ * persisted WINDOW past what has been handed out, so at most one durable
+ * write per WINDOW frames, and a reboot resumes above every counter ever
+ * used (unused reserved counters are simply skipped -- safe). */
 #define MAC_CTR_MAGIC   0x15CC7201u
 #define MAC_CTR_WINDOW  64u
 
@@ -242,7 +242,7 @@ static int mac_wait_ack(uint8_t seq)
 
 /* Build a SECURED DATA frame: MHR (Security-Enabled) + Auxiliary Security
  * Header + AES-CCM*-encrypted payload + MIC.  AAD = MHR||ASH (authenticated,
- * not encrypted); nonce = our addr || frame counter || sec level. */
+ * not encrypted); nonce = local addr || frame counter || sec level. */
 static uint16_t mac_build_secured(uint8_t *frame, uint16_t dst,
                                   const uint8_t *payload, uint8_t len,
                                   uint8_t ack)

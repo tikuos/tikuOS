@@ -94,7 +94,7 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 {
     if (TIKU_UART_IFG & UCRXIFG) {
         /* Check for hardware overrun (byte lost inside the UART shift
-         * register before we could read RXBUF).  Reading RXBUF clears
+         * register before RXBUF could be read).  Reading RXBUF clears
          * UCOE, so sample it first. */
         if (TIKU_UART_STATW & UCOE) {
             rx.overrun_count++;

@@ -107,8 +107,8 @@ void tiku_mpu_lock_nvm(uint16_t saved_state)
 /*
  * Why scoped_write disables interrupts:
  *   While NVM is unlocked, any ISR that fires has write access to
- *   NVM. A bug in an ISR could corrupt persistent data. By disabling
- *   interrupts for the duration of the unlock window, we guarantee that
+ *   NVM. A bug in an ISR could corrupt persistent data. Disabling
+ *   interrupts for the duration of the unlock window guarantees that
  *   only the caller's function can write to NVM.
  *
  * Caveat: the write function (fn) must be short — while it runs,

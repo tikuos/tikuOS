@@ -170,10 +170,10 @@ typedef enum {
                               asked for by name. */
 } tiku_mem_tier_t;
 
-/* Internal: the highest concrete tier value, used for tier_state[]
- * sizing. AUTO sits at index 2 but is never used to index — it gets
- * resolved to a concrete tier first. The 32 B of wasted slot-2 state
- * is the price of keeping AUTO=2 stable across releases. */
+/* Internal: the highest concrete tier value, for tier_state[] sizing.
+ * AUTO sits at index 2 but never indexes the array -- it resolves to a
+ * concrete tier first. The 32 B of wasted slot-2 state is the price of
+ * keeping AUTO=2 stable across releases. */
 #define TIKU_MEM_TIER_COUNT  5
 
 /*---------------------------------------------------------------------------*/
@@ -806,8 +806,8 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
  * The static counterpart to the key-value store above.  A cell is a
  * single value in the `.persistent` section paired with a magic-word
  * gate, declared at compile time and validated once at boot.  This
- * codifies the idiom that boot_count, cold_boots, the device name and
- * the RTC epoch each used to hand-roll:
+ * codifies the idiom behind boot_count, cold_boots, the device name
+ * and the RTC epoch:
  *
  *   1. magic gate    — a sentinel beside the data distinguishes real
  *                      persisted state from virgin/corrupted NVM

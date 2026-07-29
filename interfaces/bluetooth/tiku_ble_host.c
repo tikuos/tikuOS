@@ -17,7 +17,7 @@
 #include <interfaces/bluetooth/tiku_ble_smp_pair.h>
 
 #define HOST_FRAG_MAX 27u                        /* L2CAP bytes per data PDU  */
-/* Largest L2CAP PDU we handle: max of an ATT payload (MTU) and the SMP
+/* Largest L2CAP PDU handled here: max of an ATT payload (MTU) and the SMP
  * Pairing Public Key (65 B), each plus the 4-byte L2CAP header. */
 #define HOST_L2_MAX   (((TIKU_BLE_HOST_MTU + 4u) > (TIKU_BLE_SMP_PDU_MAX + 4u)) \
                        ? (TIKU_BLE_HOST_MTU + 4u) : (TIKU_BLE_SMP_PDU_MAX + 4u))

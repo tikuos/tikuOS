@@ -7,7 +7,7 @@
  * tiku_ble_smp_pair.c - LE Secure Connections "Just Works" pairing engine.
  * See tiku_ble_smp_pair.h for the message flow.  Endianness contract: SMP
  * fields (public keys, nonces, DHKey checks) travel little-endian; f4/f5/f6
- * take that wire order directly.  Our P-256 kit is big-endian (SEC1), so the
+ * take that wire order directly.  The P-256 kit is big-endian (SEC1), so the
  * only conversions are at the key boundary: X/Y coords reverse when they enter
  * or leave the wire, and the ECDH shared-X reverses into the DHKey.
  *
@@ -29,7 +29,7 @@
 #define SMP_PAIRING_PUBLIC_KEY  0x0Cu
 #define SMP_PAIRING_DHKEY_CHECK 0x0Du
 
-/* Our pairing parameters: NoInputNoOutput -> Just Works, SC bit set. */
+/* Local pairing parameters: NoInputNoOutput -> Just Works, SC bit set. */
 #define SMP_IO_CAP     0x03u                 /* NoInputNoOutput               */
 #define SMP_OOB        0x00u                 /* no OOB                        */
 #define SMP_AUTHREQ    0x08u                 /* SC=1, no MITM/bonding/keypress*/
@@ -48,8 +48,8 @@ typedef struct {
     uint8_t  a[6], b[6];                     /* initiator A, responder B      */
     uint8_t  at, bt;                         /* address types (1 = random)    */
 
-    uint8_t  priv[32];                       /* our ECDH private (big-endian) */
-    uint8_t  pk_local[64];                   /* our public key   (wire, X||Y) */
+    uint8_t  priv[32];                       /* local ECDH private (big-endian) */
+    uint8_t  pk_local[64];                   /* local public key  (wire, X||Y) */
     uint8_t  pk_peer[64];                    /* peer public key  (wire)       */
     uint8_t  na[16], nb[16];                 /* initiator, responder nonces   */
     uint8_t  dhkey[32];                      /* wire (little-endian) DHKey    */
@@ -209,7 +209,7 @@ int tiku_ble_smp_pair_start(tiku_ble_smp_role_t role,
     rev(&sc.pk_local[0], &pub[1], 32);
     rev(&sc.pk_local[32], &pub[33], 32);
 
-    /* Our nonce (initiator -> Na, responder -> Nb). */
+    /* Local nonce (initiator -> Na, responder -> Nb). */
     if (tiku_trng_arch_read_bytes((role == TIKU_BLE_SMP_ROLE_INITIATOR)
                                   ? sc.na : sc.nb, 16) != 0) {
         sc.state = TIKU_BLE_SMP_STATE_FAILED;
@@ -343,11 +343,11 @@ int tiku_ble_smp_pair_feed(const uint8_t *pdu, uint16_t len)
         return 1;
     }
     /* Accept PDUs while pairing, and -- for the tail's sake -- a duplicate of
-     * the last opcode even after DONE, so a peer that lost our final reply can
-     * re-request it (we re-run the same handler, which is deterministic).
-     * A duplicate re-runs its handler; clearing the queue first keeps the
-     * regenerated PDUs correctly ordered.  On the retransmit link (no full LL
-     * ACK yet) this is what makes the last DHKey Check reliably delivered. */
+     * the last opcode even after DONE, so a peer that lost the final reply can
+     * re-request it (the same handler re-runs, and it is deterministic).
+     * Clearing the queue first keeps the regenerated PDUs correctly ordered.
+     * On the retransmit link (no full LL ACK yet) this is what makes the last
+     * DHKey Check reliably delivered. */
     if (sc.state != TIKU_BLE_SMP_STATE_PAIRING &&
         !(sc.state == TIKU_BLE_SMP_STATE_DONE && op == sc.last_rx_op)) {
         return 0;

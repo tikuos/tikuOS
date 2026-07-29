@@ -133,9 +133,9 @@ int tiku_htimer_cancel(void) {
   pending = NULL;
 
   /*
-   * We don't disable the hardware interrupt — the spurious ISR
-   * will call run_next(), see pending==NULL, and return harmlessly.
-   * This avoids needing a platform-specific "disarm" function.
+   * The hardware interrupt is left enabled: a spurious ISR calls
+   * run_next(), sees pending == NULL and returns harmlessly, which
+   * avoids needing a platform-specific "disarm" function.
    */
   return TIKU_HTIMER_OK;
 }

@@ -251,11 +251,9 @@ static void tier_wire_all(void)
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
         /* The tier owns a FIXED extent at the front of the region -- 32 KB on
          * every platform (TIKU_NVM_TIER_BYTES, the portable allocation
-         * contract).  It used to take whatever the file store and a reserved
-         * tail left over, which is how 676 KB ended up parked in the one
-         * extent with no consumers; the file store absorbs the remainder now,
-         * and the tail is gone -- its durable named data (the BASIC save and
-         * checkpoint slots) are ordinary files in that store. */
+         * contract).  The file store absorbs the remainder, so nothing can sit
+         * parked in an extent with no consumers; durable named data (the BASIC
+         * save and checkpoint slots) are ordinary files in that store. */
         if (rgn != NULL && rgn->base != NULL &&
             rgn->size > (size_t)TIKU_NVM_TIER_BYTES) {
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
@@ -359,9 +357,9 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
 
 #if TIKU_TIER_HIFRAM_AVAILABLE
     /* Last-resort capacity check: NVM full but HIFRAM has room (a
-     * sub-threshold size that no longer fits anywhere else).  AUTO
-     * used to return NVM unconditionally here and fail the carve
-     * even with HIFRAM capacity sitting idle. */
+     * sub-threshold size that no longer fits anywhere else).  Without
+     * it AUTO would return NVM unconditionally and fail the carve with
+     * HIFRAM capacity sitting idle. */
     if (tier_state[TIKU_MEM_NVM].initialized &&
         aligned > tier_state[TIKU_MEM_NVM].capacity -
                   tier_state[TIKU_MEM_NVM].offset &&
@@ -522,8 +520,8 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
 
     /*
      * Compute total buffer size needed. This must mirror the
-     * alignment logic in tiku_pool_create() so we allocate
-     * exactly enough space.
+     * alignment logic in tiku_pool_create() so the allocation is
+     * exactly big enough.
      */
     aligned_blk = align_up(block_size);
     min_blk = align_up((tiku_mem_arch_size_t)sizeof(void *));
@@ -603,9 +601,9 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 
     /* Check the tier allocator's own backing pools first.
      * This works on both host and target — the backing pools may
-     * not be in the platform's region table on host. We iterate
-     * over every concrete tier (SRAM, NVM, HIFRAM) and skip AUTO
-     * since it never has its own backing pool. */
+     * not be in the platform's region table on host. The loop covers
+     * every concrete tier (SRAM, NVM, HIFRAM) and skips AUTO, which
+     * never has its own backing pool. */
     for (i = 0; i < TIKU_MEM_TIER_COUNT; i++) {
         if (i == TIKU_MEM_AUTO) {
             continue;

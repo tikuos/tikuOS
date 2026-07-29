@@ -50,7 +50,8 @@ tiku_trng_arch_init(void)
 #ifdef TIKU_BOARD_ADC_AVAILABLE
     {
         /* 12-bit conversions off AVCC.  The temperature sensor is a
-         * high-impedance, noisy channel: we want the LSBs, not accuracy. */
+         * high-impedance, noisy channel: the LSBs are the point, not
+         * accuracy. */
         tiku_adc_config_t cfg;
         cfg.resolution = TIKU_ADC_RES_12BIT;
         cfg.reference  = TIKU_ADC_REF_AVCC;
@@ -154,7 +155,7 @@ tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
         size_t chunk = len - off;
         int    rc    = trng_block(block);
         if (rc != TIKU_TRNG_OK) {
-            /* Fail closed: zero what we've written so a caller that
+            /* Fail closed: zero whatever was written so a caller that
              * ignores the return (the void TLS RNG adapter) gets an
              * invalid all-zero key and the handshake aborts at the peer,
              * rather than leaking stack or using predictable bytes. */

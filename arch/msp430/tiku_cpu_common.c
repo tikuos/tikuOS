@@ -102,7 +102,7 @@ void tiku_cpu_msp430_delay_us(unsigned int us)
 /** Boot-time reset cause (captured once before SYSRSTIV auto-clears) */
 static uint16_t boot_rstiv;
 
-/** Flag so we capture SYSRSTIV only on the first call */
+/** Flag so SYSRSTIV is captured only on the first call */
 static uint8_t  rstiv_captured;
 
 uint16_t

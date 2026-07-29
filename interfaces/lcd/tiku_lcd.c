@@ -100,7 +100,7 @@ tiku_lcd_puts_right(const char *s)
         return;
     }
 
-    /* Measure (clamped). Avoids strlen so we don't pull in <string.h>
+    /* Measure (clamped). Avoids strlen so <string.h> is not pulled in
      * on parts where it isn't already linked. */
     for (p = s; *p && len < width; p++) {
         len++;
@@ -258,8 +258,8 @@ tiku_lcd_put_int(int32_t value)
 #if TIKU_BOARD_HAS_LCD && \
     defined(TIKU_BOARD_LCD_DOT_COUNT) && TIKU_BOARD_LCD_DOT_COUNT > 0
 
-/* Turn off every inter-digit dot. Used before lighting the one we
- * want, so a previous put_fixed doesn't leave a stale separator. */
+/* Turn off every inter-digit dot. Runs before lighting the wanted one,
+ * so a previous put_fixed doesn't leave a stale separator. */
 static void
 clear_all_dots(void)
 {
@@ -374,9 +374,9 @@ tiku_lcd_put_fixed(int32_t value, uint8_t decimals)
 #if defined(TIKU_BOARD_LCD_DOT_COUNT) && TIKU_BOARD_LCD_DOT_COUNT > 0
     clear_all_dots();
     /* Dot index is 1-based: dot N sits to the right of digit
-     * position (N-1), i.e. between cells (N-1) and N. We want the
-     * dot between the last integer digit and the first fractional
-     * digit, which is at cell index (width - decimals). */
+     * position (N-1), i.e. between cells (N-1) and N.  The dot
+     * belongs between the last integer digit and the first
+     * fractional digit, at cell index (width - decimals). */
     if (decimals > 0 && decimals < width) {
         light_dot((uint8_t)(width - decimals));
     }

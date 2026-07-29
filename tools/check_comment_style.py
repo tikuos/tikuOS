@@ -39,9 +39,12 @@ BANNED = [
     (re.compile(r'\((?:P[0-9][a-g]?|A[1-4][a-b]?|H[0-3]|M[1-6])\)'
                 r'|\b(?:see|per|from|in|since|until|after|before|blocked on)\s+'
                 r'(?:P[0-9][a-g]?|A[1-4][a-b]?|H[0-3])\b'), 'build-phase reference'),
-    # Case-sensitive: "I" is I/O and @p i far more often than it is a pronoun,
-    # and "us" is microseconds unless a number precedes it.
-    (re.compile(r'\b(?:we|We|our|Our)\b|(?<!\d )\b(?:us|Us)\b'), 'first person'),
+    # Case-sensitive: "I" is I/O and @p i far more often than it is a pronoun.
+    # "us" is microseconds after a number, and a parameter name after @param /
+    # @p; a trailing , ) ; : marks it as code rather than prose.
+    (re.compile(r'\b(?:we|We|our|Our)\b'
+                r'|(?<!\d )(?<!@param )(?<!@p )\b(?:us|Us)\b(?![,);:])'),
+     'first person'),
     (re.compile(r'\b(?:used to|predated|shipped because|never worked|turned out|'
                 r'which is the point|worth recording|the mistake (?:was|here))\b',
                 re.I), 'design history (git has it)'),

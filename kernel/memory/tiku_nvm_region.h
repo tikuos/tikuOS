@@ -26,35 +26,23 @@
  *      32 KB   absorbs the rest
  *
  * The NVM memory tier bump-allocates from the FRONT of the region; the file
- * store owns everything above it.  That is the whole layout.
- *
- * There used to be a third extent -- a "reserved tail" at the top, held back
- * for data needing a STABLE address across boots.  It had exactly one tenant
- * (BASIC: the saved program at its base, the run-state checkpoint at its top),
- * every size was computed from BASIC's line capacity, and it was reserved
- * UNCONDITIONALLY -- a build with BASIC compiled out still carried the carve,
- * up to 320 KB of NVM that nothing could reach.  A core memory header sized by
- * a shell feature, with no registration API, so a second tenant would have had
- * to hard-code an offset.
- *
- * Both tenants are now ordinary files (prog.bas, prog.ckpt), which is what the
- * store gaining spanned files and streamed writes bought: a file can exceed one
- * slot and be replaced in place without a RAM copy of the whole thing, so a
- * fixed extent buys nothing a name does not.  The rule that replaced it:
+ * store owns everything above it.  That is the whole layout.  The rule that
+ * keeps it that way:
  *
  *     Fixed extents are platform CONTRACTS.  Everything feature-shaped is a
  *     named file in one self-describing store.
  *
- * The tier extent stays fixed because it IS a contract (32 KB on every part --
- * see below).  Nothing else qualifies.
+ * The tier extent is fixed because it IS a contract (32 KB on every part --
+ * see below).  Nothing else qualifies: BASIC's saved program and run-state
+ * checkpoint are ordinary files (prog.bas, prog.ckpt).  Spanned files and
+ * streamed writes are what make that workable -- a file can exceed one slot and
+ * be replaced in place without a RAM copy of the whole thing, so a fixed extent
+ * buys nothing a name does not.
  *
  * The file store's extent is DERIVED (region - tier), not hand-written, so the
- * two extents always tile the region exactly.  Before v0.06 the *tier* was the
- * remainder and the FS was a hand-set number; that put the leftovers in the one
- * extent with no consumers (a live nRF54LM20 measured "tier pool 0 / 692224
- * peak 0" -- 676 KB idle).  Deriving the FS instead makes idle space
- * structurally impossible: whatever the code window frees goes to files, which
- * is the extent that can actually use it.
+ * two extents always tile the region exactly.  Deriving the FS rather than the
+ * tier makes idle space structurally impossible: whatever the code window frees
+ * goes to files, the one extent that can actually spend it.
  */
 
 /*
@@ -111,14 +99,13 @@
  * executes from the ITCM (tiku_basic_module.h), so the 32 KB executable slot
  * every other ARM part still carves became region on this one.
  *
- * The code_cap column is the SAME on every part -- 384 KB.  That is the
- * point: a code window is a contract about how much program a TikuOS image may
- * be, and it stopped being negotiable per platform when the things that used to
- * inflate it (BASIC's durable tail, a module image counted twice, model weights
- * and radio firmware baked into .rodata) all became files.  Measured largest
- * images: 130.3 KB (apollo510b + BLE), 121.6 KB (apollo4l/p), 122.6 KB (l15),
- * 126.8 KB (lm20b + Axon driver), 60.4 KB (rp2350) -- so 256 KB is about 2x the
- * largest thing anyone has built, on every part.
+ * The code window is 0x60000 -- 384 KB -- on every part.  That is the point: a
+ * code window is a contract about how much program a TikuOS image may be, not a
+ * per-platform negotiation.  Measured largest images: 130.3 KB (apollo510b +
+ * BLE), 121.6 KB (apollo4l/p), 122.6 KB (l15), 126.8 KB (lm20b + Axon driver),
+ * 60.4 KB (rp2350) -- roughly 3x headroom everywhere.  Model weights and radio
+ * firmware are store files, never .rodata, which is what keeps the window from
+ * having to grow to fit a blob.
  *
  *   apollo510  0x800000 - 0x470000 - 0x0000 - 0x10000 = 0x380000  3584 KB
  *   apollo4l/p 0x200000 - 0x078000 - 0x8000 - 0x10000 = 0x170000  1472 KB

@@ -252,9 +252,10 @@
  *
  * The Energia LCD_Launchpad driver and TI's MSP-EXP430FR6989 demos
  * use 0-indexed LCDMEM[] (where LCDMEM is defined as
- * `(volatile char *) &LCDM1`, so LCDMEM[0] == LCDM1). Our arch
- * driver uses LCD_MEM_BYTE(i) which is 1-indexed (LCD_MEM_BYTE(1)
- * == LCDM1), so the constants below are Energia's pos values + 1.
+ * `(volatile char *) &LCDM1`, so LCDMEM[0] == LCDM1). The tikuOS
+ * arch driver uses LCD_MEM_BYTE(i), which is 1-indexed
+ * (LCD_MEM_BYTE(1) == LCDM1), so the constants below are Energia's
+ * pos values + 1.
  *
  * Energia A1=9 → LCDM10/LCDM11, A2=5 → LCDM6/LCDM7, etc.
  */
@@ -291,7 +292,7 @@
  * of icon segments alongside the six 14-segment digit positions.
  * The (LCDMEM-byte-index, bit-mask) pairs below come from the
  * Energia LCD_Launchpad reference (on-hardware verified). Indices
- * are in our 1-indexed LCD_MEM_BYTE() form (Energia's value + 1).
+ * are in the 1-indexed LCD_MEM_BYTE() form (Energia's value + 1).
  *
  * IDs are dense, in icon-table order — keep TIKU_LCD_ICON_* and
  * TIKU_BOARD_LCD_ICON_TABLE in lockstep when adding new icons.

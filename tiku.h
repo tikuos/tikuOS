@@ -29,8 +29,8 @@
 
 /*
  * The Makefile sets exactly one PLATFORM_* define on the command line.
- * If nothing is set we fall back to MSP430 to keep the historical
- * default working out-of-the-box for legacy targets.
+ * With nothing set the build falls back to MSP430, so the historical
+ * default keeps working out-of-the-box for legacy targets.
  */
 #if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
     !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC)
@@ -102,7 +102,7 @@
 /*
  * Nordic nRF54L silicon. The Makefile derives one TIKU_DEVICE_NRF54* macro
  * from MCU=... and passes it on the command line, along with the matching
- * board define. When no nordic device is selected we fall back to the
+ * board define. With no nordic device selected the build falls back to the
  * nRF54L15 (the first-supported / primary part) so a bare PLATFORM_NORDIC
  * build still resolves a device.
  */

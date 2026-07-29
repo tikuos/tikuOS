@@ -63,10 +63,10 @@ void tiku_sched_init(void)
     sched_state = TIKU_SCHED_RUNNING;
 
     /*
-     * IDLE SLEEPS BY DEFAULT.  This used to install no hook at all, so an idle
-     * scheduler spun the core at full speed -- measured on an nRF54LM20-DK at
-     * 6.76 mA doing nothing against 1.54 mA in WFI, a factor of 4.4 paid
-     * continuously by every board that never called "sleep".
+     * IDLE SLEEPS BY DEFAULT.  With no hook installed an idle scheduler spins
+     * the core at full speed -- measured on an nRF54LM20-DK at 6.76 mA doing
+     * nothing against 1.54 mA in WFI, a factor of 4.4 paid continuously by
+     * every board that never calls "sleep".
      *
      * The cost of spinning is not only the CPU: on this part the HFCLK
      * controller stops the clock automatically once nothing requests it, and
@@ -78,8 +78,8 @@ void tiku_sched_init(void)
      * interrupt wakes, with no clock or peripheral state torn down, so nothing
      * that worked while spinning can stop working.  Deeper modes stay opt-in
      * because they do change what remains powered.  "sleep off" restores the
-     * old spin for anyone who needs it -- a tight-latency experiment, or
-     * bisecting a fault that only appears when the core never sleeps.
+     * spin for anyone who needs it -- a tight-latency experiment, or bisecting
+     * a fault that only appears when the core never sleeps.
      */
     idle_hook = tiku_cpu_idle_hook(TIKU_CPU_IDLE_LIGHT);
     tiku_sched_set_idle_tick_wakes(
@@ -163,10 +163,9 @@ void tiku_sched_loop(void)
         /*
          * No more events — enter idle.
          *
-         * The atomic section ensures that if an ISR fires between
-         * our check and the idle hook, the resulting event will be
-         * processed on the next iteration rather than being missed
-         * while we sleep.
+         * The atomic section ensures that an ISR firing between the
+         * check and the idle hook has its event processed on the next
+         * iteration rather than missed during sleep.
          *
          * An ARMED (not yet due) timer does not block idle when the
          * registered idle mode is tick-woken: the tick ISR wakes the
@@ -200,10 +199,9 @@ void tiku_sched_loop(void)
                  * arch to stretch the next tick interrupt straight to
                  * the earliest deadline instead of waking every tick
                  * to do nothing.  IRQs are masked, so the deadline
-                 * cannot move under us.  The weak default never
-                 * stretches, and with NO timers armed the per-tick
-                 * cadence is kept (it is what paces uptime and the
-                 * counted-idle tests). */
+                 * cannot move.  The weak default never stretches, and
+                 * with NO timers armed the per-tick cadence is kept
+                 * (it is what paces uptime and the counted-idle tests). */
                 if (idle_tick_wakes &&
                     idle_hook != (tiku_sched_idle_hook_t)0 &&
                     tiku_timer_any_pending()) {

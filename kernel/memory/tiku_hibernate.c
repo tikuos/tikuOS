@@ -128,7 +128,7 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
     }
 
     /* Read existing marker to get current boot count (may fail on
-     * first hibernate — that's fine, we start from zero). */
+     * first hibernate — that's fine, the count starts from zero). */
     memset(&existing, 0, sizeof(existing));
     if (tiku_persist_read(&hibernate_store, TIKU_HIBERNATE_KEY,
                            (uint8_t *)&existing, sizeof(existing),

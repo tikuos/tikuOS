@@ -67,11 +67,11 @@ static tiku_mem_arch_size_t min_block_size(void)
 
 /*
  * Why pointer arithmetic uses uint8_t *:
- *   Struct padding and pointer size vary across platforms. By casting
- *   the buffer to uint8_t * and indexing by (i * block_size), we get
+ *   Struct padding and pointer size vary across platforms. Casting
+ *   the buffer to uint8_t * and indexing by (i * block_size) gives
  *   exact byte-offset arithmetic that works identically on 16-bit
- *   MSP430 and 32/64-bit hosts. No platform-dependent struct layout
- *   issues.
+ *   MSP430 and 32/64-bit hosts, with no platform-dependent struct
+ *   layout issues.
  */
 
 /**
@@ -162,8 +162,8 @@ static tiku_mem_err_t build_freelist_nvm(tiku_pool_t *pool)
             uint8_t *base = pool->buf + (i * bs);
             tiku_mem_arch_size_t j;
 
-            /* Seed the run with its current NVM bytes so block payloads we do
-             * not touch survive the write, then overlay each next-pointer. */
+            /* Seed the run with its current NVM bytes so untouched block
+             * payloads survive the write, then overlay each next-pointer. */
             memcpy(pool_nvm_stage, base, span);
             for (j = 0; j < cnt; j++) {
                 tiku_mem_arch_size_t gi = i + j;
@@ -224,7 +224,7 @@ static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
     return TIKU_MEM_OK;
 }
 
-/* Bounded freelist membership check used to reject double-free.  Pool free is
+/* Bounded freelist membership check that rejects a double-free.  Pool free is
  * normally O(1); the validation walk is O(n), but embedded pools are small and
  * preventing a used_count underflow / cyclic freelist is worth the bound. */
 static int block_is_already_free(const tiku_pool_t *pool, const void *block)
@@ -334,8 +334,8 @@ tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
     /*
      * Enforce minimum: each block must hold at least one pointer for the
      * embedded freelist. If the caller requests less, silently clamp up.
-     * Returning an error would be hostile — the caller's data fits, we
-     * just need room for the freelist pointer when the block is free.
+     * Returning an error would be hostile — the caller's data fits, and the
+     * extra room is only for the freelist pointer while the block is free.
      */
     if (aligned_size < min_size) {
         aligned_size = min_size;

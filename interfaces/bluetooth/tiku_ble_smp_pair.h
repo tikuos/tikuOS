@@ -33,7 +33,7 @@ typedef enum {
     TIKU_BLE_SMP_STATE_FAILED            /* aborted / verification mismatch  */
 } tiku_ble_smp_state_t;
 
-/** Largest SMP PDU we emit/consume: Pairing Public Key = 1 + 64 = 65 bytes. */
+/** Largest SMP PDU emitted or consumed: Pairing Public Key = 1 + 64 = 65 bytes. */
 #define TIKU_BLE_SMP_PDU_MAX  65u
 
 /** @brief Clear all pairing state back to IDLE. */
@@ -42,7 +42,7 @@ void tiku_ble_smp_pair_reset(void);
 /**
  * @brief Begin a pairing.  Generates the P-256 keypair + local nonce; the
  *        initiator also stages the first Pairing Request for next().
- * @param role  our role.
+ * @param role  the local role.
  * @param a,at  initiator (central) address A (6 B, little-endian) + type.
  * @param b,bt  responder (peripheral) address B (6 B) + type (1 = random).
  *        Both callers pass A then B (initiator-first), regardless of role.

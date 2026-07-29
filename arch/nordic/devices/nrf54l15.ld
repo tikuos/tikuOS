@@ -68,8 +68,8 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
 __tiku_layout_code_cap     = 0x60000;                       /* 384 KB code */
-/* 256 KB is the shared Nordic budget and the fleet-wide contract (P4); the LM20
- * uses the same figure, so the module slot is at the same address on both parts.
+/* 384 KB is the shared Nordic budget and the fleet-wide contract; the LM20 uses
+ * the same figure, so the module slot is at the same address on both parts.
  * The L15 has no NPU and its largest measured image is 123 KB. */
 __tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
 __tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */

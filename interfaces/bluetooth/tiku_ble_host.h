@@ -98,7 +98,7 @@ uint16_t tiku_ble_host_max_single_frag(void);
  * @brief Arm the SMP responder for this connection (call once, connected).
  * @param inita  initiator (central) address A (6 B, little-endian).
  * @param at     A's address type (1 = random, 0 = public).
- * @param adva   advertiser (our) address B (6 B).
+ * @param adva   advertiser (local) address B (6 B).
  * @param bt     B's address type.
  *
  * Incoming CID 0x0006 PDUs then drive the LE-SC pairing; the host wraps the

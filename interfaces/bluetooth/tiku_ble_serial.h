@@ -95,7 +95,7 @@ int tiku_ble_serial_send(const uint8_t *data, uint16_t len);
 int tiku_ble_serial_rx_ready(void);
 
 /**
- * @brief Pop up to @p cap bytes the central has written to us.
+ * @brief Pop up to @p cap bytes the central has written to this device.
  * @return Number of bytes copied (0 if none waiting).
  */
 int tiku_ble_serial_recv(uint8_t *buf, uint16_t cap);
