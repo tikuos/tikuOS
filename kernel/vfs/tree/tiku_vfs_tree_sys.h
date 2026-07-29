@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_sys.h - /sys subtree (files + assembly)
+ * tiku_vfs_tree_sys.h - /sys subtree (files and assembly).
  *
- * Owns the top-level /sys files (version, uptime, time) and the
- * small static subtrees /sys/{device,mem,cpu,sched}, and assembles
- * the complete /sys directory from the sibling modules (boot,
- * timer, watchdog, power, inittab).  The root assembly in
- * tiku_vfs_tree.c only sees the two functions below — all child
- * tables stay private to this layer.
+ * Owns the top-level /sys files and the small static device/mem/cpu/sched
+ * subtrees, and assembles the whole directory from the sibling modules.  The root
+ * assembly sees only the two functions below; child tables stay private.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

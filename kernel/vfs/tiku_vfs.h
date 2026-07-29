@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs.h - Virtual Filesystem public API and types
+ * tiku_vfs.h - virtual filesystem public API and types.
  *
- * Exposes all device state (sensors, config, network, memory, processes)
- * as a tree of named paths.  No block storage, no inodes — just a static
- * tree of nodes with read/write handler functions.
- *
- * Unified access: CLI `cat /dev/temp0`, CoAP `GET /dev/temp0`, and
- * application code `tiku_vfs_read("/dev/temp0", ...)` all use the same
- * path and get the same result.
+ * Exposes device state as a tree of named paths backed by read/write handlers,
+ * with no block storage and no inodes.  The shell, CoAP and application code all
+ * use the same path and get the same result.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

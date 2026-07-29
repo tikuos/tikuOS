@@ -5,34 +5,34 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_cache.c - Freshness cache (read coalescing) implementation
+ * tiku_vfs_cache.c - freshness cache (read coalescing) implementation.
  *
- * See tiku_vfs_cache.h for the rationale.  Three design points worth
- * stating here:
- *
- *  1. Wrap-safe freshness.  Timestamps pair a 32-bit second
- *     (tiku_clock_seconds) with the 16-bit tick (tiku_clock_time).
- *     The 16-bit tick wraps every ~8.5 min; the coarse seconds guard
- *     (CACHE_MAX_AGE_S) declares anything older than a few seconds
- *     stale, which is far under the wrap, so the tick subtraction
- *     below is always exact.  Freshness windows must therefore stay
- *     well under CACHE_MAX_AGE_S (they are sub-second to ~1 s).
- *
- *  2. Race vs. the event bus.  A miss samples the handler OUTSIDE the
- *     atomic section (an ADC conversion is slow).  If a notify (ISR or
- *     write) fires during that sample, storing the just-sampled value
- *     as "fresh" would mask the change.  A global notify sequence,
- *     captured before the sample and re-checked under the mask before
- *     the store, blocks exactly that: any notify during the sample
- *     skips the store.
- *
- *  3. Concurrency.  invalidate() runs from ISR context (driver edges);
- *     get()/sample() store from process context.  All table mutation
- *     is bracketed by tiku_atomic_enter()/exit() so an ISR can never
- *     observe a torn slot -- the same discipline as the watch table.
+ * See tiku_vfs_cache.h for the rationale; the three properties this file has to
+ * hold -- wrap-safe freshness, the race against the event bus, and ISR/process
+ * concurrency -- are stated below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+/*
+ * Three properties this file has to hold:
+ *
+ *  1. WRAP-SAFE FRESHNESS.  Timestamps pair a 32-bit second with the 16-bit
+ *     tick, which wraps every ~8.5 min.  The coarse guard CACHE_MAX_AGE_S
+ *     declares anything older than a few seconds stale -- far under the wrap --
+ *     so the tick subtraction below is always exact.  Freshness windows must
+ *     therefore stay well under CACHE_MAX_AGE_S.
+ *
+ *  2. RACE VS THE EVENT BUS.  A miss samples the handler OUTSIDE the atomic
+ *     section, because a conversion is slow.  A global notify sequence is
+ *     captured before the sample and re-checked under the mask before the
+ *     store, so a notify arriving during the sample skips the store instead of
+ *     masking the change.
+ *
+ *  3. CONCURRENCY.  invalidate() runs from ISR context while get()/sample()
+ *     store from process context, so every table mutation is bracketed by
+ *     tiku_atomic_enter()/exit() -- an ISR can never see a torn slot.
+ */
+
 
 #include "tiku_vfs_cache.h"
 

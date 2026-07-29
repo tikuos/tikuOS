@@ -5,31 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_sys.c - /sys subtree (files + assembly)
+ * tiku_vfs_tree_sys.c - /sys subtree (files and assembly).
  *
- * Two roles in one module.  First, the /sys content that is too
- * small to deserve its own file:
- *
- *   /sys/version         OS version string
- *   /sys/uptime          seconds since boot
- *   /sys/time            (rw) wall-clock seconds since epoch
- *   /sys/device/name     (rw) FRAM-persisted device name
- *   /sys/device/id       stable per-chip ID from the unique-ID ROM
- *   /sys/device/mcu      silicon name ("MSP430FR5994", ...)
- *   /sys/device/version  OS version (alias of /sys/version)
- *   /sys/mem/{sram,nvm}  configured memory sizes
- *   /sys/mem/free        live stack headroom (SP - _end)
- *   /sys/mem/used        sum of per-process SRAM accounting
- *   /sys/cpu/freq        configured CPU frequency
- *   /sys/sched/idle      scheduler idle-loop counter
- *
- * Second, the /sys directory table itself: the boot_count /
- * last_reset / cold_boots files come from the boot module's
- * exported handlers, and the boot/timer/clock/watchdog/htimer/
- * power/init directories come from the sibling modules' exported
- * children tables + NCHILD count macros.  Adding a new /sys entry
- * means adding one initialiser to sys_children below (plus, for a
- * new subtree, including its header).
+ * Owns the /sys content too small for its own module -- version, uptime, time,
+ * device identity, memory and CPU figures -- and assembles the /sys directory from
+ * the sibling modules' exported tables.  A new entry is one initialiser below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

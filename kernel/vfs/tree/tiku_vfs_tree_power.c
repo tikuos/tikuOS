@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_power.c - /sys/power VFS nodes
+ * tiku_vfs_tree_power.c - /sys/power VFS nodes.
  *
- * Two read-only views of the power-management state:
- *
- *   /sys/power/mode  the idle sleep depth the scheduler enters
- *                    (owned by the shell `sleep` command when the
- *                    shell is compiled in; "off" otherwise)
- *   /sys/power/wake  which wake sources are currently armed, as
- *                    reported by the wake HAL
- *
- * The mode is deliberately NOT writable here: changing sleep depth
- * has system-wide consequences (UART RX may stop working below
- * LPM1) and is gated behind the interactive `sleep` command, which
- * prints those caveats.
+ * Two read-only views: the idle sleep depth the scheduler enters, and which wake
+ * sources are armed.  The mode is deliberately not writable here -- changing sleep
+ * depth can stop UART RX, so it stays behind the shell command that says so.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_inittab.c - /sys/init VFS nodes (init-table mirror)
+ * tiku_vfs_tree_inittab.c - /sys/init VFS nodes (init-table mirror).
  *
- * Mirror the FRAM-backed init table at /sys/init/<idx>/{seq,name,
- * cmd,enable}. Reading is always available; writing `enable` is the
- * single mutating path so a BASIC program (or any VFS client) can
- * enable / disable a boot entry without going through the shell.
- *
- * Add / remove of entries is intentionally NOT exposed here -- those
- * are multi-field operations that don't fit single-node writes.
- * Use the `init` shell command (or its parser API) for those.
- *
- * Slot count is fixed at TIKU_INIT_MAX_ENTRIES (default 8); empty
- * slots return placeholder text so a passive `tree /sys/init` works
- * regardless of the table's fill level.
- *
- * The whole module compiles away when TIKU_INIT_ENABLE is 0: the
- * translation unit then contains only the includes, and the /sys
- * assembly omits its "init" entry under the same flag.
+ * Mirrors the init table so a VFS client can read entries and toggle `enable`
+ * without the shell.  Add and remove are deliberately absent: they are multi-field
+ * operations that do not fit a single-node write.  Compiles away when init is off.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

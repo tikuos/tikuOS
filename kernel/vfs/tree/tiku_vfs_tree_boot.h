@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_boot.h - /sys/boot VFS nodes + boot bookkeeping
+ * tiku_vfs_tree_boot.h - /sys/boot VFS nodes and boot bookkeeping.
  *
- * This module owns the boot-related persistent state: the FRAM
- * boot counter, the lifetime-uptime accumulator, the first-boot
- * magic word, and the SYSRSTIV snapshot taken at init.  Besides
- * the /sys/boot directory it also provides three top-level /sys
- * files (boot_count, last_reset, cold_boots), whose read handlers
- * are exported below so the /sys assembly can reference them in
- * its static table.
+ * Owns the boot-related persistent state: the boot counter, the lifetime-uptime
+ * accumulator and the reset-cause snapshot taken at init.  Also exports three
+ * top-level /sys read handlers so the /sys assembly can reference them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

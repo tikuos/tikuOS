@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree.c - System VFS tree root assembly
+ * tiku_vfs_tree.c - system VFS tree root assembly.
  *
- * Builds the production VFS root from the per-subtree modules in
- * tree/ and calls tiku_vfs_init().  The actual node handlers live
- * in the modules; this file only orchestrates init and attaches
- * the top-level directories.
- *
- * Assembly model: the inner tree (every node below /sys and /dev)
- * is const data wired together at compile time inside the modules.
- * Only this top level is assembled at runtime, because /proc/
- * builds its node arrays dynamically and /data exists only in
- * BASIC-enabled builds — so the root's child list cannot be a
- * compile-time constant.  Each top-level module therefore exports
- * a _get() function returning its fully-formed directory node,
- * which is copied by value into the mutable root_children array
- * below (the same contract tiku_proc_vfs_get() has always had).
+ * Builds the production root from the per-subtree modules in tree/.  The inner
+ * tree is const data wired at compile time; only this top level is assembled at
+ * run time, because /proc builds its arrays dynamically and /data is optional.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_watch.h - /sys/watch and /sys/vfs VFS nodes
+ * tiku_vfs_tree_watch.h - /sys/watch and /sys/vfs VFS nodes.
  *
- * The namespace observing itself: two small read-only subtrees that
- * expose the VFS core's private state through the same VFS it
- * implements.
- *
- *   /sys/watch   the watch-table occupancy and per-slot contents
- *                (subscription-leak / self-heal debugging)
- *   /sys/vfs     tree statistics (node count, depth)
- *
- * Linkage contract matches the other subtree modules: exported
- * children tables + compile-time entry counts, consumed by the /sys
- * assembly in tiku_vfs_tree_sys.c.
+ * Two read-only subtrees exposing the VFS core's own state through the VFS it
+ * implements: watch-table contents for leak debugging, and tree statistics.
+ * Same linkage contract as the sibling modules.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

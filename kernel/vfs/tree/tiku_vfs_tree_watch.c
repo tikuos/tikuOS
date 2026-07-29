@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_watch.c - /sys/watch and /sys/vfs VFS nodes
+ * tiku_vfs_tree_watch.c - /sys/watch and /sys/vfs VFS nodes.
  *
- * The namespace observing itself.  Two read-only subtrees rendered
- * from the VFS core's introspection accessors (tiku_vfs.c):
- *
- *   /sys/watch/used    watch slots in use
- *   /sys/watch/free    watch slots available
- *   /sys/watch/<i>     slot i: "<path> <process>" or "free"
- *   /sys/vfs/nodes     total nodes in the tree (dirs + files)
- *   /sys/vfs/depth     deepest path, in components
- *
- * /sys/watch is the diagnostic for the watch layer the way
- * /sys/persist is for the cell layer: `cat /sys/watch/used` answers
- * "is the 8-slot table filling up / leaking?", and the per-slot
- * nodes show exactly who subscribed to what — the wholesale
- * unwatch_all() re-arm and the watch command's self-heal both
- * become visible.  Reads cost a short table scan (used/free) or a
- * tree DFS (the per-slot path reverse-lookup, /sys/vfs); all are
- * cold, human-triggered paths.
+ * The namespace observing itself: watch-table occupancy and per-slot contents,
+ * plus tree node count and depth.  This is the diagnostic for subscription leaks.
+ * Reads cost a table scan or a tree walk, both cold human-triggered paths.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

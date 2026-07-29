@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_emmc.c - /sys/emmc VFS nodes (Apollo510 SDIO0 + on-board
- *                        8 GB eMMC -- EVB U11).
+ * tiku_vfs_tree_emmc.c - /sys/emmc VFS nodes (Apollo510 SDIO0 + 8 GB eMMC).
  *
- *   /sys/emmc/state  "down" / "up" / "asleep" -- the lifecycle ladder
- *   /sys/emmc/cid    manufacturer, product, serial, date -- one line
- *   /sys/emmc/size   capacity in bytes (0 until identified)
- *   /sys/emmc/hz     bus clock in Hz (0 when down)
- *   /sys/emmc/width  bus width in bits (0 when down)
- *
- * All read-only and power-safe: nothing here touches the card or the host
- * controller -- every value comes from the driver's own bookkeeping, so a
- * `cat` while the SDIO0 domain is unpowered cannot stall the APB.  That is
- * not a theoretical concern on this port; reading an unpowered peripheral
- * hung the CPU with no fault during the NOR bring-up and cost a board wedge.
- *
- * Compiled only under TIKU_DRV_EMMC_ENABLE.
+ * State, CID, capacity, bus clock and width, all read-only.  Every value comes
+ * from the driver's own bookkeeping and nothing here touches the card or host
+ * controller, so a read while the SDIO0 domain is unpowered cannot stall the APB.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

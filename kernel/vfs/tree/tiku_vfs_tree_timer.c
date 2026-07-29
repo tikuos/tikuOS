@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_timer.c - /sys/timer, /sys/clock, /sys/htimer VFS nodes
+ * tiku_vfs_tree_timer.c - /sys/timer, /sys/clock and /sys/htimer VFS nodes.
  *
- * Read-only observability for the timer subsystem:
- *
- *   /sys/timer/count      active software timers
- *   /sys/timer/fired      expirations since boot
- *   /sys/timer/next       ticks until the next expiration
- *   /sys/timer/list/<n>   per-slot detail (mode, remaining, interval)
- *   /sys/clock/ticks      raw system tick counter (16-bit, wraps)
- *   /sys/htimer/now       hardware timer free-running count
- *   /sys/htimer/scheduled whether a one-shot htimer is pending
- *
- * Everything here is a snapshot taken at read time from the public
- * tiku_timer / tiku_clock / tiku_htimer accessors — no state is
- * kept in this module and nothing is writable, so the handlers are
- * safe to call from any process context.
+ * Read-only observability for the timer subsystem: active timers, expirations,
+ * ticks to the next one, per-slot detail, the raw tick counter and the hardware
+ * timer.  Every value is a snapshot taken at read time; nothing is kept here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

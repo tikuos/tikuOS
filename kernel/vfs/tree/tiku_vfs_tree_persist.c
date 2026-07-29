@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_persist.c - /sys/persist VFS nodes
+ * tiku_vfs_tree_persist.c - /sys/persist VFS nodes.
  *
- * Two read-only counters that make the persist-cell layer
- * observable from the namespace it serves:
- *
- *   /sys/persist/cells   cells validated by tiku_persist_cell_init()
- *                        this boot (the persistent footprint of the
- *                        running image)
- *   /sys/persist/primed  of those, how many had to be primed to
- *                        defaults because their gate did not
- *                        validate
- *
- * `primed` is the diagnostic: 0 on every boot of an established
- * device.  Non-zero exactly once after first flash, after a reflash
- * whose layout moved the `.persistent` cells, or after an NVM wipe
- * — and on any other boot it is a forensic signal that NVM content
- * was lost or corrupted in the field (`cat /sys/persist/primed` is
- * the first question to ask a device whose counters look wrong).
+ * Two read-only counters: how many magic-gated persist cells validated this boot,
+ * and how many had to be primed to defaults.  `primed` is the diagnostic -- 0 on
+ * an established device, so non-zero means NVM content was lost or moved.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

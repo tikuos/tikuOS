@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_dev.h - /dev subtree (files + assembly)
+ * tiku_vfs_tree_dev.h - /dev subtree (files and assembly).
  *
- * Owns /dev/led*, /dev/console, /dev/null, /dev/zero and the small
- * static subtrees /dev/{uart,adc,i2c,spi}, and assembles the
- * complete /dev directory (stitching in /dev/gpio and /dev/gpio_dir
- * from the gpio module).  The root assembly in tiku_vfs_tree.c
- * only sees the two functions below — all child tables stay
- * private to this layer.
+ * Owns /dev/led*, console, null, zero and the uart/adc/i2c/spi subtrees, and
+ * assembles the complete directory, stitching in gpio from its own module.  The
+ * root assembly sees only the two functions below; child tables stay private.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

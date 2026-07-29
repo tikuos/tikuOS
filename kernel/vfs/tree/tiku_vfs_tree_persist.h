@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_persist.h - /sys/persist VFS nodes
+ * tiku_vfs_tree_persist.h - /sys/persist VFS nodes.
  *
- * Observability for the persist-cell layer (kernel/memory,
- * TIKU_PERSIST_CELL): how many magic-gated cells the system
- * validated this boot and how many had to be primed.  Linkage
- * contract matches the other subtree modules: exported children
- * table + compile-time entry count, consumed by the /sys assembly
- * in tiku_vfs_tree_sys.c.
+ * Observability for the persist-cell layer: cells validated this boot and cells
+ * primed.  Same linkage contract as the other subtree modules -- an exported
+ * children table and entry count, consumed by the /sys assembly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

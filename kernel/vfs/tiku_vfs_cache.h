@@ -5,28 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_cache.h - Freshness cache (read coalescing) for the VFS
+ * tiku_vfs_cache.h - freshness cache (read coalescing) for the VFS.
  *
- * A small SRAM table that remembers the most recent rendered value of
- * nodes whose descriptor declares a freshness window (desc.fresh_ticks
- * > 0).  A read that lands inside the window is served from SRAM
- * instead of re-invoking the handler -- which, for a LIVE/PERIPH node
- * such as /dev/adc/temp, avoids waking the ADC.  This is "read
- * coalescing": several reads of the same sensor within one window cost
- * a single conversion.
- *
- * NOT to be confused with kernel/memory/tiku_cache.c, the FRAM
- * write-back cache -- an entirely different mechanism.
- *
- * The cache caches the rendered TEXT at the handler boundary (inside
- * tiku_vfs_read_node), so every text consumer -- the shell, the rules
- * tick, `watch`, BASIC -- benefits; the typed read path
- * (tiku_vfs_read_val) decodes the cached text and benefits too.
- *
- * Coherence rides the event bus: tiku_vfs_notify() invalidates a
- * node's entry, so a successful write or a driver edge never leaves a
- * stale value behind.  The cache is .bss -- a power loss / LPMx.5 wake
- * destroys it, which for a cache is exactly correct.
+ * Remembers the rendered text of nodes declaring a freshness window, so repeated
+ * reads inside it cost one handler call rather than one conversion each.
+ * tiku_vfs_notify() invalidates an entry, so a write never leaves a stale value.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

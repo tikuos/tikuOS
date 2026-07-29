@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_gpu.h - /sys/gpu VFS nodes (Apollo510 2.5D GPU)
+ * tiku_vfs_tree_gpu.h - /sys/gpu VFS nodes (Apollo510 2.5D GPU).
  *
- * Linkage contract for the gpu subtree: children table + entry count
- * macro, consumed by the /sys assembly in tiku_vfs_tree_sys.c. Present
- * only when the from-scratch GPU driver is compiled (TIKU_DRV_GPU_ENABLE);
- * the /sys entry is gated on the same flag so the GPU-off image is
- * byte-identical.
+ * Linkage contract for the gpu subtree: child table and entry-count macro,
+ * consumed by the /sys assembly.  Present only under TIKU_DRV_GPU_ENABLE, and the
+ * /sys entry is gated the same way so a GPU-off image is byte-identical.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

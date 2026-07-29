@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_data.c - /data VFS nodes (user-data / persisted state)
+ * tiku_vfs_tree_data.c - /data VFS nodes (user data and persisted state).
  *
- * /data is a DYNAMIC directory backed by the Tiku File Store (kernel/fs):
- * arbitrary files can be created, written, read, listed and deleted at run
- * time and are kept in NVM.  So:
- *
- *   write /data/blink.bas "10 LED 0,1 : ..."   # create / overwrite
- *   ls /data                                    # list files
- *   cat /data/blink.bas                         # read
- *
- * The file store sits on the carved NVM region's filesystem extent and is
- * durable on both NVM families:
- *   - MSP430: a `.persistent` FRAM array, written in place.
- *   - Ambiq : the FS extent of the memory-mapped NVM region -- read in place
- *             (no SRAM shadow), written via the region backend (MRAM bootrom),
- *             so files survive a power cut.  Sized in megabytes (see
- *             derived from the carve at mount), above the NVM tier's
- *             bump extent (front) and the reserved durable tail.
- *   - else  : plain `.bss` (functional but volatile) until a backend lands.
- * When BASIC is built, the legacy /data/basic bridge to the interpreter's
- * program store is kept as a static child.
+ * A dynamic directory backed by the Tiku File Store: files can be created,
+ * written, read, listed and deleted at run time.  The store rides the carved NVM
+ * region where there is one, a .persistent FRAM array on MSP430, else .bss.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

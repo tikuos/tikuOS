@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs.c - Tree walker, path resolver, read/write dispatch, watch
+ * tiku_vfs.c - tree walker, path resolver, read/write dispatch, watch.
  *
- * The VFS core is intentionally minimal: it resolves slash-separated
- * paths against a static tree of nodes and dispatches to read/write
- * handler functions.  No malloc, no string copies, no inodes.
- *
- * It also owns the watch layer — the namespace as event bus: a
- * fixed table of (node, process) subscriptions, rung automatically
- * on every successful write and explicitly by drivers via
- * tiku_vfs_notify().  See the WATCH section in tiku_vfs.h for the
- * full semantics.
+ * Resolves slash-separated paths against a static tree of nodes and dispatches to
+ * handler functions -- no malloc, no string copies, no inodes.  Also owns the
+ * watch table, rung on every successful write and by drivers via _notify().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

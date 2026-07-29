@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_gpio.h - /dev/gpio and /dev/gpio_dir VFS nodes
+ * tiku_vfs_tree_gpio.h - /dev/gpio and /dev/gpio_dir VFS nodes.
  *
- * Linkage contract for the GPIO subtrees: both children tables are
- * exported together with the port count, consumed by the /dev
- * assembly in tiku_vfs_tree_dev.c.  Unlike the fixed-size NCHILD
- * macros of other modules, the count here is derived from the
- * device header's TIKU_DEVICE_HAS_PORTn flags so it tracks the
- * selected silicon automatically.
+ * Linkage contract for the GPIO subtrees: both child tables plus the port count,
+ * consumed by the /dev assembly.  The count derives from the device header's
+ * TIKU_DEVICE_HAS_PORTn flags, so it tracks the selected silicon automatically.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

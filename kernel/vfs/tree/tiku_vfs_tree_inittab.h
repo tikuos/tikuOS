@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_inittab.h - /sys/init VFS nodes (init-table mirror)
+ * tiku_vfs_tree_inittab.h - /sys/init VFS nodes (init-table mirror).
  *
- * Named "inittab" (after the classic Unix file) rather than "init"
- * to avoid colliding with tiku_vfs_tree_init(), the root assembly
- * entry point.
- *
- * The table is only compiled when TIKU_INIT_ENABLE is set; the
- * declarations below are intentionally unconditional so consumers
- * guard usage with the same flag instead of needing this header to
- * know the build configuration.  Referencing the array in a build
- * where it is compiled out fails at link time — loudly, by design.
+ * Named after the classic Unix file rather than "init", which would collide with
+ * the root assembly entry point.  The declarations are unconditional, so a build
+ * with the table compiled out fails at link time -- loudly, by design.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

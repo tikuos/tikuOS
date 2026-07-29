@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_gpu.c - /sys/gpu VFS nodes (Apollo510 2.5D GPU)
+ * tiku_vfs_tree_gpu.c - /sys/gpu VFS nodes (Apollo510 2.5D GPU).
  *
- * Read-only views of the from-scratch Nema-class GPU driver:
- *
- *   /sys/gpu/power   "on"/"off" -- is the GFX power domain up
- *   /sys/gpu/id      IDREG (fixed silicon id) in hex, or "off"
- *   /sys/gpu/status  STATUS register in hex + "busy"/"idle", or "off"
- *   /sys/gpu/irqs    count of GPU completion interrupts serviced
- *
- * All nodes are power-safe: id/status touch GPU registers only after
- * confirming the domain is powered (an unpowered register access would
- * fault), so `cat`-ing them with the GPU off reports "off" rather than
- * wedging. The whole subtree is compiled only under TIKU_DRV_GPU_ENABLE.
+ * Read-only views of the GPU driver: power state, silicon id, status register and
+ * serviced interrupt count.  Register reads happen only after confirming the
+ * domain is powered, so a read with the GPU off reports "off" instead of faulting.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

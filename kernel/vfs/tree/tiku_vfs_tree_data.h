@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_data.h - /data VFS nodes (user-data / persisted state)
+ * tiku_vfs_tree_data.h - /data VFS nodes (user data and persisted state).
  *
- * The /data directory holds user-facing persisted content (as
- * opposed to /sys system state and /dev hardware).  Currently its
- * only member is the BASIC program store, so the module compiles
- * away entirely unless the shell's BASIC interpreter is enabled.
- * The declaration below is unconditional so the root assembly can
- * guard the call with the same build flags instead of needing this
- * header to know the configuration.
+ * Holds user-facing persisted content, as opposed to /sys system state and /dev
+ * hardware.  The declaration is unconditional so the root assembly guards the
+ * call with build flags rather than this header knowing the configuration.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_gpio.c - /dev/gpio and /dev/gpio_dir VFS nodes
+ * tiku_vfs_tree_gpio.c - /dev/gpio and /dev/gpio_dir VFS nodes.
  *
- * Pin-level GPIO access through the filesystem:
- *
- *   /dev/gpio/<port>/<pin>  (rw) read level; write 0/1/t/i
- *   /dev/gpio_dir/<port>    (r)  eight-character direction summary
- *
- * VFS read/write handlers carry no user argument, so a pair of
- * common workers (gpio_pin_read/gpio_pin_write) is wrapped by
- * macro-generated per-pin functions that hardcode the port/pin
- * constants — 64 wrappers of ~10 bytes each on a 4-port device,
- * cheaper and simpler than threading a context pointer through the
- * node struct.  Ports are gated on the TIKU_DEVICE_HAS_PORTn
- * device macros so only real silicon shows up in the tree.
- *
- * Everything dispatches through interfaces/gpio/tiku_gpio.h, which
- * owns the port-register lookup tables and bounds checking.
+ * Pin-level GPIO through the filesystem.  VFS handlers take no user argument, so
+ * macro-generated per-pin wrappers hardcode the port and pin around two common
+ * workers; ports are gated on TIKU_DEVICE_HAS_PORTn so only real silicon appears.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

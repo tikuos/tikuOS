@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_watchdog.h - /sys/watchdog VFS nodes
+ * tiku_vfs_tree_watchdog.h - /sys/watchdog VFS nodes.
  *
- * Linkage contract for the watchdog subtree: the children table is
- * exported together with a compile-time entry count so the parent
- * (/sys assembly in tiku_vfs_tree_sys.c) can embed it in its own
- * static directory table.  A _Static_assert next to the table
- * definition guarantees the macro matches the array.
+ * Linkage contract for the watchdog subtree: the children table is exported with
+ * a compile-time entry count so the /sys assembly can embed it, and a
+ * _Static_assert beside the table keeps the macro and the array in step.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_watchdog.c - /sys/watchdog VFS nodes
+ * tiku_vfs_tree_watchdog.c - /sys/watchdog VFS nodes.
  *
- * Exposes the kernel watchdog (kernel/cpu/tiku_watchdog.c) as six
- * VFS files so shells, scripts, and BASIC programs can inspect and
- * reconfigure it without linking against the watchdog API:
- *
- *   /sys/watchdog/mode      (rw) "watchdog" or "interval"
- *   /sys/watchdog/clock     (rw) "aclk" or "smclk"
- *   /sys/watchdog/interval  (rw) divider as decimal: 64..32768
- *   /sys/watchdog/kick      (w)  any write pets the watchdog
- *   /sys/watchdog/enabled   (rw) "1" running / "0" stopped
- *   /sys/watchdog/kicks     (r)  lifetime kick counter
- *
- * Every write funnels through tiku_watchdog_config(), which owns the
- * WDTCTL password handshake and ISR bookkeeping — handlers here only
- * parse text and forward.  Reconfiguration writes preserve all other
- * settings by re-reading them through the tiku_watchdog_get_*()
- * accessors, so e.g. changing the clock never alters the interval.
+ * Exposes the kernel watchdog as six files so shells, scripts and BASIC can
+ * inspect and reconfigure it without linking the API.  Every write forwards to
+ * tiku_watchdog_config() and re-reads the other settings, so one field changes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_timer.h - /sys/timer, /sys/clock, /sys/htimer VFS nodes
+ * tiku_vfs_tree_timer.h - /sys/timer, /sys/clock and /sys/htimer VFS nodes.
  *
- * One module covers all three time-related subtrees because they
- * observe the same subsystem (kernel/timers/): software timers,
- * the system tick, and the single-shot hardware timer.  Each
- * subtree is exported as its own children table + count macro so
- * the /sys assembly can attach them as three separate directories.
+ * One module covers all three subtrees because they observe the same subsystem.
+ * Each is exported as its own children table and count macro, so the /sys
+ * assembly can attach them as three separate directories.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

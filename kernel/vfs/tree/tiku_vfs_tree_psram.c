@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_psram.c - /sys/psram VFS nodes (Apollo510 external 64 MB
- *                         PSRAM on MSPI0 -- EVB U14).
+ * tiku_vfs_tree_psram.c - /sys/psram VFS nodes (Apollo510 external 64 MB PSRAM).
  *
- *   /sys/psram/state  "down" / "up" / "asleep" -- the lifecycle ladder
- *   /sys/psram/hz     IO clock in Hz (0 when down)
- *   /sys/psram/size   device size in bytes (fixed once identified)
- *   /sys/psram/tap    shipped RXDQSDELAY tap, or "unscanned"
- *
- * All read-only and power-safe: nothing here touches the device -- state
- * comes from the driver's own bookkeeping, so `cat` while down cannot
- * fault.  Compiled only under TIKU_DRV_PSRAM_ENABLE.
+ * State, IO clock, device size and the shipped RXDQSDELAY tap, all read-only.
+ * Every value comes from the driver's bookkeeping and nothing here touches the
+ * device, so a read while it is down cannot fault.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

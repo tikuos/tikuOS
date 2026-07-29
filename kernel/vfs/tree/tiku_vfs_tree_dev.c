@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_dev.c - /dev subtree (files + assembly)
+ * tiku_vfs_tree_dev.c - /dev subtree (files and assembly).
  *
- * Hardware-facing nodes:
- *
- *   /dev/led0..ledN     (rw) board LEDs; count from TIKU_BOARD_LED_COUNT
- *   /dev/console        (rw) raw UART access (non-blocking read)
- *   /dev/null           (rw) data sink, reads empty
- *   /dev/zero           (r)  NUL-byte source
- *   /dev/uart/overruns  (r)  RX overrun counter
- *   /dev/uart/baud      (r)  configured baud rate
- *   /dev/adc/temp       (r)  raw internal temperature conversion
- *   /dev/adc/battery    (r)  raw supply-voltage conversion
- *   /dev/i2c/scan       (r)  bus scan — probing happens at read time!
- *   /dev/spi/config     (r)  active SPI mode/order/prescaler
- *   /dev/gpio, gpio_dir      stitched in from tiku_vfs_tree_gpio.c
- *
- * LED nodes drive real hardware via the tiku_led_*() API and keep
- * a shadow state in SRAM because PxOUT cannot be read back
- * uniformly across boards (active-low wiring would invert the
- * answer).  Everything else queries its driver live at read time.
+ * Hardware-facing nodes: board LEDs, console, null, zero, and the small static
+ * subtrees for uart, adc, i2c and spi.  LED nodes keep an SRAM shadow because
+ * PxOUT cannot be read back uniformly; everything else queries its driver live.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

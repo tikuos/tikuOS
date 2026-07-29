@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree.h - System VFS tree (production, not test)
+ * tiku_vfs_tree.h - system VFS tree (production, not test).
  *
- * Builds and initialises the root VFS tree with /sys, /dev, /proc
- * and (in BASIC builds) /data.  The node handlers live in the
- * per-subtree modules under kernel/vfs/tree/; this header is the
- * only thing the rest of the system needs to include to bring the
- * whole tree up.
+ * Builds and initialises the root tree with /sys, /dev, /proc and /data.  The
+ * node handlers live in the per-subtree modules under kernel/vfs/tree/; this is
+ * the only header the rest of the system needs to bring the whole tree up.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

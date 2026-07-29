@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_boot.c - /sys/boot VFS nodes + boot bookkeeping
+ * tiku_vfs_tree_boot.c - /sys/boot VFS nodes and boot bookkeeping.
  *
- * Everything a postmortem wants to know about how and how often
- * this device boots:
- *
- *   /sys/boot/reason     decoded SYSRSTIV ("wdt-timeout", "brownout"...)
- *   /sys/boot/count      monotonic FRAM boot counter
- *   /sys/boot/stage      current boot stage from boot/tiku_boot.c
- *   /sys/boot/rstiv      raw SYSRSTIV value in hex, for scripting
- *   /sys/boot/clock/...  live MCLK/SMCLK/ACLK frequencies + fault flag
- *   /sys/boot/mpu/...    MPU violation diagnostics
- *   /sys/last_reset      coarse 4-bucket reset cause (top-level /sys)
- *   /sys/cold_boots      lifetime uptime accumulator (top-level /sys)
- *
- * Persistence model: two uint32 values live in .persistent (FRAM)
- * — boot_count_persist and lifetime_seconds_persist — each declared
- * as a magic-gated persist cell (TIKU_PERSIST_CELL, kernel/memory).
- * The shared cell API owns the gate validation, first-boot priming
- * and MPU-window writes that this module used to hand-roll, and
- * each cell validates independently (no more shared magic across
- * modules).  Read paths serve SRAM mirrors so the hot path never
- * unlocks the MPU; only init and the lazy cold_boots save write to
- * FRAM, through the cell API.
+ * Exposes the decoded reset reason, boot count, boot stage, live clocks and MPU
+ * diagnostics.  The boot counter and lifetime accumulator are magic-gated persist
+ * cells; reads serve SRAM mirrors so the hot path never unlocks the MPU.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
