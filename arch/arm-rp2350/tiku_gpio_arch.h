@@ -93,10 +93,9 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 /**
  * @brief Per-pin direct GPIO helpers used by the LED macros.
  *
- * These operate on the absolute RP2350 pin number (0..29) and bypass
- * the virtual-port layer. They are called directly from the board
- * LED macros (TIKU_BOARD_LEDn_INIT/ON/OFF/TOGGLE) and must not be
- * used for pins that are also managed via the port-based API.
+ * These take the absolute RP2350 pin number (0..29) and bypass the virtual-port
+ * layer.  Called directly from the board LED macros, and not to be used for
+ * pins that are also managed through the port-based API.
  */
 
 /**

@@ -76,7 +76,7 @@ void tiku_cpu_rp2350_delay_ms(unsigned int ms) {
 /*
  * Reading the actual flash chip's unique ID requires temporarily
  * disabling XIP and issuing a 0x4B command to the QSPI controller —
- * out of scope for the first port. We synthesise a stable 8-byte ID
+ * out of scope for the first port, so a stable 8-byte ID is synthesised
  * from the addresses of three linker symbols: this is unique per
  * build (the linker layout is deterministic across reboots of the
  * same image). Programs that need a true silicon ID should add a
@@ -89,14 +89,13 @@ extern char __vectors_start;
 /**
  * @brief Fill @p buf with a stable 8-byte pseudo-unique device identifier.
  *
- * Reading the flash chip's true 8-byte UID requires disabling XIP and
- * issuing a 0x4B QSPI command — not implemented in this port. Instead,
- * a stable identifier is synthesised by XOR-mixing a build-time magic
- * constant with low bits of three linker-symbol addresses. The result is
- * deterministic across reboots of the same image but differs between
- * builds, which is sufficient for most TikuOS use-cases. Programs
- * requiring a true silicon ID should add a flash-readback driver later.
+ * Synthesised by XOR-mixing a build-time magic constant with low bits of three
+ * linker-symbol addresses: deterministic across reboots of the same image, but
+ * different between builds.
  *
+ * @note Reading the flash chip's true 8-byte UID needs XIP disabled and a 0x4B
+ *       QSPI command, which this port does not implement.  A program needing a
+ *       real silicon ID should add a flash-readback driver.
  * @param buf  Output buffer; must be non-NULL and at least @p len bytes
  * @param len  Number of ID bytes to write (clamped to 8)
  * @return Number of bytes written (0 if buf is NULL or len is 0)
@@ -137,7 +136,7 @@ uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len) {
  */
 uint16_t tiku_cpu_rp2350_reset_reason(void) {
     /* WD_REASON: bit 0 = TIMEOUT, bit 1 = FORCE. Higher bits report
-     * other reset sources on a future revision. We map the low byte
+     * other reset sources on a future revision.  The low byte maps
      * directly so callers see a 16-bit value compatible with MSP430
      * SYSRSTIV. 0 means cold boot. */
     return (uint16_t)(_RP2350_REG(RP2350_WD_REASON) & 0xFFU);
@@ -147,14 +146,13 @@ uint16_t tiku_cpu_rp2350_reset_reason(void) {
 /* Reboot to USB BOOTSEL                                                     */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Reboot the RP2350 into USB BOOTSEL (mass-storage) mode.
+/*
+ * Reboot the RP2350 into USB BOOTSEL (mass-storage) mode.
  *
- * RP2350 has no portable watchdog-scratch BOOTSEL trick (the 0xB007C0D3
- * scratch[4] magic in pico-sdk's watchdog_reboot() redirects to an
- * arbitrary PC, NOT BOOTSEL). The correct path is via the boot ROM's
- * reset_usb_boot() / reboot() functions, looked up from the ROM table at
- * fixed offset 0x16 (bootrom_constants.h: BOOTROM_TABLE_LOOKUP_OFFSET).
+ * RP2350 has no portable watchdog-scratch BOOTSEL trick -- the 0xB007C0D3
+ * scratch[4] magic in pico-sdk's watchdog_reboot() redirects to an arbitrary
+ * PC, NOT BOOTSEL.  The path is via the boot ROM's reset_usb_boot() / reboot(),
+ * looked up from the ROM table at fixed offset 0x16.
  *
  * Lookup signature on RP2350 ARM:
  *   void *rom_table_lookup(uint32_t code, uint32_t mask);
@@ -171,11 +169,10 @@ uint16_t tiku_cpu_rp2350_reset_reason(void) {
  *   0x002  REBOOT2_FLAG_REBOOT_TYPE_BOOTSEL
  *   0x100  REBOOT2_FLAG_NO_RETURN_ON_SUCCESS
  *
- * Strategy: drain the UART TX FIFO, disable all IRQs, disable the
- * watchdog, disable the MPU, then walk every (function, mask) pair
- * until a bootrom call succeeds. If every lookup misses, falls back
- * to a plain watchdog reset so the chip restarts (back into TikuOS;
- * the user must BOOTSEL manually).
+ * Strategy: drain the UART TX FIFO, disable all IRQs, disable the watchdog,
+ * disable the MPU, then walk every (function, mask) pair until a bootrom call
+ * succeeds.  If every lookup misses, fall back to a plain watchdog reset so the
+ * chip restarts back into TikuOS and the user must BOOTSEL manually.
  */
 void tiku_cpu_rp2350_reboot_to_bootsel(void) {
     typedef void *(*lookup_fn_t)(uint32_t code, uint32_t mask);
@@ -216,8 +213,8 @@ void tiku_cpu_rp2350_reboot_to_bootsel(void) {
     /* Disable the MPU. PRIVDEFENA covers unmapped memory (the ROM
      * lives at 0x00000000-ish and isn't covered by any region), but
      * during the ROM's USB-reconfig path it touches address ranges
-     * we'd rather not assume anything about. Lifting all protection
-     * here costs nothing: we're about to reset the chip anyway. */
+     * whose state is not worth assuming.  Lifting all protection
+     * here costs nothing, the chip being about to reset anyway. */
     _RP2350_REG(RP2350_MPU_CTRL) = 0U;
     __asm__ volatile ("dsb" ::: "memory");
     __asm__ volatile ("isb" ::: "memory");
@@ -250,7 +247,7 @@ void tiku_cpu_rp2350_reboot_to_bootsel(void) {
     }
 
     /* Bootrom paths all failed.  Plain watchdog reset (no BOOTSEL).
-     * Print a marker so the host sees we tried but missed, then
+     * Print a marker so the host sees the attempt missed, then
      * reset.  After the reset TikuOS will boot again; the user
      * can BOOTSEL manually. */
     tiku_uart_puts("[BOOTSEL: rom lookup failed; resetting]\n");

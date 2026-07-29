@@ -78,10 +78,9 @@ void tiku_cpu_rp2350_watchdog_off_arch(void);
 /**
  * @brief Enable and configure the watchdog timer.
  *
- * Loads the microsecond timeout derived from @p isel, enables the
- * WDOG block, and performs the first kick. The @p src parameter is
- * accepted for API symmetry with the MSP430 HAL but is ignored on
- * RP2350 — the watchdog always uses the 1 µs tick source.
+ * Loads the microsecond timeout derived from @p isel, enables the WDOG block and
+ * performs the first kick.  @p src is accepted for API symmetry with the MSP430
+ * HAL but ignored -- the watchdog always uses the 1 us tick source.
  *
  * @param src   Clock source (ignored on RP2350; present for HAL compat).
  * @param isel  Interval divider value — maps to microsecond timeout.
@@ -92,10 +91,9 @@ void tiku_cpu_rp2350_watchdog_on_arch(tiku_wdt_clk_t src,
 /**
  * @brief Pause the watchdog counter without disabling it.
  *
- * Sets WDOG_CTRL.PAUSE_JTAG and PAUSE_DBG bits so the counter
- * freezes while the CPU is halted in a debugger. Calling this
- * outside a debug context stalls the counter until
- * tiku_cpu_rp2350_watchdog_resume_arch() is called.
+ * Sets WDOG_CTRL.PAUSE_JTAG and PAUSE_DBG so the counter freezes while the CPU
+ * is halted in a debugger.  Called outside a debug context it stalls the
+ * counter until tiku_cpu_rp2350_watchdog_resume_arch() runs.
  */
 void tiku_cpu_rp2350_watchdog_pause_arch(void);
 

@@ -50,11 +50,9 @@ void tiku_dma_arch_init(void);
 /**
  * @brief Start a word-aligned memory-to-memory transfer on channel 0.
  *
- * Source and destination must be 4-byte aligned; @p word_cnt is the
- * number of 32-bit words to copy (total bytes = word_cnt * 4). Both
- * READ_INCR and WRITE_INCR are set so the channel walks through both
- * buffers sequentially. The transfer is CPU-free; the optional
- * @p on_done callback fires from DMA_IRQ_0 on completion.
+ * Source and destination must be 4-byte aligned, and @p word_cnt counts 32-bit
+ * words.  Both READ_INCR and WRITE_INCR are set so the channel walks each
+ * buffer sequentially.  CPU-free; @p on_done fires from DMA_IRQ_0.
  *
  * @param dst       Destination buffer (must be 32-bit aligned).
  * @param src       Source buffer (must be 32-bit aligned).
@@ -89,10 +87,9 @@ int tiku_dma_arch_abort(void);
 /**
  * @brief DMA_IRQ_0 interrupt service routine.
  *
- * Strong override of the weak alias in tiku_crt_early.c. Wired
- * automatically when this driver is linked in. Clears the interrupt
- * status, resets the busy flag, and dispatches the registered
- * completion callback if one was supplied.
+ * Strong override of the weak alias in tiku_crt_early.c, wired automatically
+ * when this driver is linked in.  Clears the interrupt status, resets the busy
+ * flag and dispatches the registered completion callback.
  */
 void tiku_rp2350_dma_irq0_handler(void);
 

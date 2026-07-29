@@ -40,10 +40,9 @@
 /**
  * @brief Route the board-level pin-assignment header.
  *
- * TIKU_BOARD_RPI_PICO2_W selects the Pico 2 W (with CYW43439 footprint);
- * TIKU_BOARD_RPI_PICO2 selects the plain Pico 2 (direct GP25 LED, no
- * wireless). When neither is defined the Pico 2 W is used as the default
- * primary supported board.
+ * TIKU_BOARD_RPI_PICO2_W selects the Pico 2 W (CYW43439 footprint);
+ * TIKU_BOARD_RPI_PICO2 selects the plain Pico 2 (direct GP25 LED, no wireless).
+ * With neither defined the Pico 2 W is the default.
  */
 #if defined(TIKU_BOARD_RPI_PICO2_W)
 #include <arch/arm-rp2350/boards/tiku_board_rpi_pico2_w.h>

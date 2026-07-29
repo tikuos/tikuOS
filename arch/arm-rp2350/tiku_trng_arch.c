@@ -17,21 +17,19 @@
 #include "tiku_trng_arch.h"
 #include "tiku_rp2350_regs.h"
 
-/**
- * @defgroup trng_config TRNG private configuration
- * @brief Tuning constants for the RP2350 TRNG driver.
+/*
+ * TRNG private configuration -- tuning constants for the RP2350 driver.
  *
- * TRNG_SAMPLE_COUNT controls ROSC clocks per sample: higher values
- * improve whitening at the cost of latency.  pico-sdk uses ~0x4E20
- * (120 ms EHR fill); TikuOS uses 100 for responsiveness.  Raise if
- * AUTOCORR_STATISTIC trips downstream.
+ * TRNG_SAMPLE_COUNT controls ROSC clocks per sample: higher values improve
+ * whitening at the cost of latency.  pico-sdk uses ~0x4E20 (120 ms EHR fill);
+ * TikuOS uses 100 for responsiveness.  Raise it if AUTOCORR_STATISTIC trips
+ * downstream.
  *
- * TRNG_FILL_SPIN_LIMIT is the maximum spin cycles waiting for VALID
- * after arming the random source.  ~10 ms headroom at 150 MHz is well
- * above the worst-case EHR fill at SAMPLE_COUNT=100.
+ * TRNG_FILL_SPIN_LIMIT is the maximum spin waiting for VALID after arming the
+ * random source; ~10 ms headroom at 150 MHz is well above the worst-case EHR
+ * fill at SAMPLE_COUNT=100.
  *
  * TRNG_CACHE_WORDS is the number of 32-bit EHR data registers (0..5).
- * @{
  */
 #define TRNG_SAMPLE_COUNT       0x0064U   /**< ROSC cycles per sample */
 #define TRNG_FILL_SPIN_LIMIT    1500000UL /**< Spin budget for EHR fill */
@@ -48,16 +46,12 @@ static uint8_t  trng_initialised;
 /**
  * @brief Refill the EHR cache from the TRNG hardware.
  *
- * Stops the random source, clears pending IRQ status, programs
- * SAMPLE_CNT1, and re-arms the source.  Spins on EHR_VALID up to
- * TRNG_FILL_SPIN_LIMIT cycles, then drains all six EHR_DATA registers
- * into trng_cache and disables the source.
+ * Stops the random source, clears pending IRQ status, programs SAMPLE_CNT1 and
+ * re-arms.  Spins on EHR_VALID up to TRNG_FILL_SPIN_LIMIT, then drains all six
+ * EHR_DATA registers into trng_cache and disables the source.
  *
- * As a defence-in-depth sanity check the function rejects an all-zero
- * or all-ones 192-bit fill and returns TIKU_TRNG_ERR_NOT_READY, leaving
- * trng_cache_used at TRNG_CACHE_WORDS so the next call retries from
- * scratch.
- *
+ * @note As defence in depth an all-zero or all-ones 192-bit fill is rejected,
+ *       leaving trng_cache_used at TRNG_CACHE_WORDS so the next call retries.
  * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_TIMEOUT if EHR_VALID
  *         never asserted within the spin budget, TIKU_TRNG_ERR_NOT_READY
  *         if the fill was all-zero or all-ones.
@@ -72,8 +66,8 @@ trng_refill(void)
     _RP2350_REG(RP2350_TRNG_RND_SOURCE_ENABLE) = 0U;
 
     /* Clear pending interrupt status bits — datasheet says writing
-     * the same bit pattern to ICR clears the corresponding ISR. We
-     * clear everything we know about (EHR_VALID + a few error
+     * the same bit pattern to ICR clears the corresponding ISR.  This
+     * clears every known source (EHR_VALID + a few error
      * bits); leftover bits in higher positions are reserved. */
     _RP2350_REG(RP2350_TRNG_TRNG_ICR) = 0x3FU;
 
@@ -104,7 +98,7 @@ trng_refill(void)
     trng_cache[4] = _RP2350_REG(RP2350_TRNG_EHR_DATA4);
     trng_cache[5] = _RP2350_REG(RP2350_TRNG_EHR_DATA5);
 
-    /* Idle the source — entropy preserved in the cache; we'll
+    /* Idle the source — entropy preserved in the cache, to be
      * re-enable next refill. */
     _RP2350_REG(RP2350_TRNG_RND_SOURCE_ENABLE) = 0U;
 
@@ -130,10 +124,10 @@ trng_refill(void)
 /**
  * @brief Initialize the RP2350 TRNG peripheral.
  *
- * Brings the TRNG out of reset and marks the cache empty.  The EHR
- * is not prefilled here: boot-time entropy budget is tight and a
- * refill takes milliseconds.  The first tiku_trng_arch_read_u32()
- * caller pays the cost.  Idempotent: subsequent calls return early.
+ * Brings the TRNG out of reset and marks the cache empty.  Idempotent.
+ *
+ * @note The EHR is not prefilled: the boot-time entropy budget is tight and a
+ *       refill takes milliseconds, so the first reader pays the cost.
  */
 void
 tiku_trng_arch_init(void)
@@ -145,7 +139,7 @@ tiku_trng_arch_init(void)
     rp2350_unreset(RP2350_RESETS_TRNG);
 
     /* Mark the cache empty so the first read does a hardware refill.
-     * We do not preemptively refill here: the boot-time entropy
+     * No preemptive refill here: the boot-time entropy
      * budget is tight and a refill takes ~milliseconds. The first
      * caller pays the cost, not boot. */
     trng_cache_used   = TRNG_CACHE_WORDS;
@@ -188,10 +182,9 @@ tiku_trng_arch_read_u32(uint32_t *out)
 /**
  * @brief Fill a byte buffer with random data from the TRNG.
  *
- * Consumes the EHR cache word-by-word, extracting bytes in
- * little-endian order.  A partial final word is used up to the
- * requested length and then discarded.  Calls tiku_trng_arch_init()
- * lazily if not already initialized.
+ * Consumes the EHR cache word by word, extracting bytes little-endian; a
+ * partial final word is used up to the requested length and then discarded.
+ * Calls tiku_trng_arch_init() lazily if needed.
  *
  * @param buf  Destination buffer (must be non-NULL).
  * @param len  Number of random bytes to produce.

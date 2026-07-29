@@ -70,7 +70,7 @@ static int wait_status(uint32_t mask) {
  * @brief Wait until a status flag is cleared in SSPSR.
  *
  * Polls SSPSR until @p mask has all bits clear or the spin limit is
- * exhausted.  Used to drain BSY before closing the controller.
+ * exhausted.  Drains BSY before closing the controller.
  *
  * @param mask  Bit mask to wait for clearance.
  * @return 0 on success, -1 on timeout.
@@ -88,12 +88,12 @@ static int wait_status_clear(uint32_t mask) {
 /**
  * @brief Compute PL022 clock divider fields (CPSR, SCR).
  *
- * Finds the smallest even CPSR in [2, 254] such that
- * CPSR * (1 + SCR) approximates @p prescaler with SCR in [0, 255].
- * Biasing toward a small CPSR gives the caller finer tunability via
- * SCR.  On failure (prescaler too large) falls back to the slowest
- * possible setting (CPSR=254, SCR=255).
+ * Finds the smallest even CPSR in [2, 254] such that CPSR * (1 + SCR)
+ * approximates @p prescaler with SCR in [0, 255]; biasing toward a small CPSR
+ * gives the caller finer tunability via SCR.
  *
+ * @note A prescaler too large to represent falls back to the slowest possible
+ *       setting (CPSR=254, SCR=255).
  * @param prescaler  Desired total divider (clk_peri / SCLK).
  * @param cpsr_out   Output: SSPCPSR value to write.
  * @param scr_out    Output: SCR field for SSPCR0.
@@ -124,14 +124,13 @@ static void compute_clk(uint16_t prescaler, uint8_t *cpsr_out,
 /**
  * @brief Initialize SPI0 with the given configuration.
  *
- * Brings SPI0 out of reset, muxes the SCK/MOSI/MISO pads to the SPI
- * function, programs the clock divider (CPSR + SCR), CR0 (8-bit
- * Motorola, mode bits), and enables the controller.
+ * Brings SPI0 out of reset, muxes the SCK/MOSI/MISO pads to the SPI function,
+ * programs the clock divider (CPSR + SCR) and CR0 (8-bit Motorola, mode bits),
+ * then enables the controller.
  *
- * LSB-first bit order is rejected with TIKU_SPI_ERR_PARAM because the
- * PL022 has no hardware LSB-first mode and a silent CPU-side bit-reversal
- * would hide misconfiguration.
- *
+ * @note LSB-first bit order is rejected rather than emulated: the PL022 has no
+ *       hardware LSB-first mode, and a silent CPU-side bit-reversal would hide
+ *       a misconfiguration.
  * @param config  SPI bus parameters (mode, prescaler, bit_order).
  * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM on NULL config,
  *         unsupported mode, or LSB-first bit order.
@@ -148,7 +147,7 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config) {
         return TIKU_SPI_ERR_PARAM;
     }
 
-    /* Bring SPI0 out of reset, then disable while we program. */
+    /* Bring SPI0 out of reset, then disable while programming. */
     rp2350_unreset(RP2350_RESETS_SPI0);
     _RP2350_REG(SPI_REG(RP2350_SPI_SSPCR1)) = 0U;
 
@@ -200,7 +199,7 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config) {
  * Sets spi_initialised to 0 so subsequent calls return early.
  */
 void tiku_spi_arch_close(void) {
-    /* Wait for any in-flight transfer to drain so we don't truncate
+    /* Wait for any in-flight transfer to drain so as not to truncate
      * a CS-asserted byte. */
     (void)wait_status_clear(RP2350_SPI_SR_BSY);
     _RP2350_REG(SPI_REG(RP2350_SPI_SSPCR1)) = 0U;
@@ -210,17 +209,13 @@ void tiku_spi_arch_close(void) {
 /**
  * @brief Perform a full-duplex single-byte SPI transfer.
  *
- * Writes @p tx_byte into the TX FIFO and returns the byte shifted in
- * on MISO during the same clock cycles.  The PL022 always shifts a
- * byte in both directions; there is no write-only or read-only path
- * at the hardware level.
- *
- * Returns 0xFF on any error (not initialized or FIFO timeout) so the
- * caller can detect a communication anomaly without a separate error
- * path.
+ * Writes @p tx_byte into the TX FIFO and returns the byte shifted in on MISO
+ * during the same clocks.  The PL022 always shifts in both directions; there is
+ * no write-only or read-only path at the hardware level.
  *
  * @param tx_byte  Byte to transmit.
- * @return Received byte, or 0xFF on timeout or if not initialized.
+ * @return Received byte, or 0xFF on timeout or if not initialized -- so the
+ *         caller can spot an anomaly without a separate error path.
  */
 uint8_t tiku_spi_arch_transfer(uint8_t tx_byte) {
     if (spi_initialised == 0U) {

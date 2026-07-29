@@ -36,12 +36,12 @@ static volatile unsigned long          g_seconds  = 0UL;
 /**
  * @brief Initialize the RP2350 SysTick for the kernel clock.
  *
- * Resets g_ticks and g_seconds to zero (unlike the MSP430 port where
- * Timer A0 starts at zero automatically), then programs SysTick with
- * a reload value of TIKU_CLOCK_ARCH_INTERVAL - 1, clamped to the
- * 24-bit register width.  Enables the SysTick counter with the CPU
- * clock source and TICKINT asserted so every underflow fires the
- * tiku_rp2350_systick_handler() ISR.
+ * Resets g_ticks and g_seconds, then programs SysTick with a reload of
+ * TIKU_CLOCK_ARCH_INTERVAL - 1 clamped to the 24-bit register width, and
+ * enables it with the CPU clock source and TICKINT asserted.
+ *
+ * @note The explicit reset is needed here, unlike the MSP430 port where Timer
+ *       A0 starts at zero automatically.
  */
 void tiku_clock_arch_init(void) {
     /* Reset the software tick / seconds accumulators. The MSP430 port
@@ -165,10 +165,9 @@ unsigned char tiku_clock_arch_fault(void) {
 /**
  * @brief SysTick interrupt handler — advances the kernel clock.
  *
- * Increments g_ticks on every SysTick underflow.  When g_ticks is a
- * multiple of TIKU_CLOCK_ARCH_SECOND, increments g_seconds.  Calls
- * tiku_sched_notify() to wake the timer-poll process so expired software
- * timers fire on the next scheduler iteration.
+ * Increments g_ticks on every underflow, and g_seconds on each multiple of
+ * TIKU_CLOCK_ARCH_SECOND.  Calls tiku_sched_notify() so expired software timers
+ * fire on the next scheduler iteration.
  */
 void tiku_rp2350_systick_handler(void) {
     g_ticks++;

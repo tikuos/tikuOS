@@ -174,7 +174,7 @@ static void pio_sm_drain_tx_fifo(uint8_t sm) {
  * @brief Force a PIO state machine to execute one instruction immediately.
  *
  * The instruction runs out-of-band with respect to the program counter.
- * Used to preload the X scratch register with bit_count-1 before the SM
+ * Preloads the X scratch register with bit_count-1 before the SM
  * is enabled.
  *
  * @param sm     State machine index (0-3).
@@ -187,10 +187,9 @@ static void pio_sm_exec(uint8_t sm, uint16_t instr) {
 /**
  * @brief Convert a microseconds-per-bit period to the SM_CLKDIV register value.
  *
- * Derivation: divider = bit_period_us * clk_sys_hz / 1e6.
- * SM_CLKDIV is 16.8 fixed point ([31:16] integer, [15:8] fractional).
- * Example: clk_sys = 150 MHz, bit_period_us = 200 ->
- *   divider = 30000 -> 0x7530_0000.
+ * divider = bit_period_us * clk_sys_hz / 1e6, formatted as the 16.8 fixed point
+ * SM_CLKDIV expects ([31:16] integer, [15:8] fractional).  At clk_sys = 150 MHz
+ * and bit_period_us = 200 that is 30000 -> 0x7530_0000.
  *
  * @param bit_period_us  Desired bit period in microseconds.
  * @return               SM_CLKDIV register value in 16.8 fixed-point format.
@@ -238,7 +237,7 @@ void tiku_pio_arch_init(void) {
 
     /* Enable PIO0_IRQ_0 in the NVIC. The PIO's own IRQ-enable mask
      * (IRQ0_INTE) is set per-transmission in bitbang_tx() so the IRQ
-     * only fires when we expect it to. */
+     * only fires when expected. */
     rp2350_nvic_enable(RP2350_IRQ_PIO0_0);
 
     g_pio_initialised = 1U;
@@ -247,15 +246,12 @@ void tiku_pio_arch_init(void) {
 /**
  * @brief Start a non-blocking PIO bitbang transmission on a GPIO pin.
  *
- * Configures SM0 on PIO0 for the requested pin, bit-order, and bit period,
- * then starts the SM.  The SM runs to completion autonomously; when the
- * `irq nowait 0` instruction fires, the ISR clears the busy flag and
- * invokes @p on_done (if non-NULL) from interrupt context.
+ * Configures SM0 on PIO0 for the requested pin, bit-order and bit period, then
+ * starts it.  The SM runs to completion autonomously; when `irq nowait 0` fires
+ * the ISR clears the busy flag and invokes @p on_done from interrupt context.
  *
- * Only one transmission may be in progress at a time.  Poll completion
- * with tiku_pio_arch_bitbang_busy() or cancel with
- * tiku_pio_arch_bitbang_abort().
- *
+ * @note Only one transmission at a time.  Poll with
+ *       tiku_pio_arch_bitbang_busy() or cancel with _abort().
  * @param gpio_pin      GPIO pin number to drive (0-based, RP2350 bank 0).
  * @param data          Data word to shift out (up to 32 bits).
  * @param bit_count     Number of bits to transmit (1-32).
@@ -319,19 +315,19 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     PIO0(RP2350_PIO_SM_CLKDIV(BITBANG_SM)) = clkdiv;
 
     /* 4. Configure shift direction. Pull threshold = 32 so each pull
-     * supplies a full word; we'll only push one word per tx. */
+     * supplies a full word; only one word is pushed per tx. */
     shiftctrl = (32U & 0x1FU) << RP2350_PIO_SHIFTCTRL_PULL_THRESH_SHIFT;
     if (msb_first) {
         shiftctrl |= RP2350_PIO_SHIFTCTRL_OUT_SHIFTDIR_LEFT;
     } else {
         shiftctrl |= RP2350_PIO_SHIFTCTRL_OUT_SHIFTDIR_RIGHT;
     }
-    /* No autopull -- we push exactly one word per tx and the SM
+    /* No autopull -- exactly one word is pushed per tx and the SM
      * stops at the jmp-to-self before trying to pull a second. */
     PIO0(RP2350_PIO_SM_SHIFTCTRL(BITBANG_SM)) = shiftctrl;
 
     /* 5. Configure pin assignment: SET base + OUT base both point at
-     * the target pin so we can use `set pindirs, 1` to drive it. */
+     * the target pin so `set pindirs, 1` can drive it. */
     pinctrl = ((uint32_t)gpio_pin
                   << RP2350_PIO_PINCTRL_OUT_BASE_SHIFT) |
               ((uint32_t)gpio_pin
@@ -342,7 +338,7 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
 
     /* 6. Pre-load X with bit_count - 1 via SMx_INSTR. The SM is
      * currently disabled; the write parks the instruction in the
-     * 1-slot SMx_INSTR queue. On the FIRST tick after we enable
+     * 1-slot SMx_INSTR queue. On the FIRST tick after enabling
      * the SM below, this is the very first instruction that runs
      * (force-execs take priority over the program-counter fetch),
      * so X holds the right value before the program ever advances
@@ -360,10 +356,10 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     pio_sm_exec(BITBANG_SM, set_x);
 
     /* 7. Push the data word. For MSB-first, the SM shifts the
-     * top-most bit of the OSR first; we left-align our data into the
+     * top-most bit of the OSR first, so the data is left-aligned into the
      * 32-bit word so the first bit on the wire is bit[31] of `data`.
      * The PULL inside the program will block on this FIFO entry until
-     * we enable the SM, then copy it into OSR. */
+     * the SM is enabled, then copied into OSR. */
     if (msb_first) {
         shifted_data = data << (32U - bit_count);
     } else {
@@ -418,7 +414,7 @@ int tiku_pio_arch_bitbang_abort(void) {
         return TIKU_PIO_ERR_NOT_READY;
     }
 
-    /* Disable interrupts so the completion ISR can't race with us. */
+    /* Disable interrupts so the completion ISR cannot race this. */
     PIO0(RP2350_PIO_IRQ0_INTE) = 0U;
 
     /* Stop the SM and drain any pending FIFO contents. */
@@ -438,16 +434,15 @@ int tiku_pio_arch_bitbang_abort(void) {
 /**
  * @brief ISR for NVIC IRQ 15 (PIO0_IRQ_0) — bitbang transmission complete.
  *
- * Clears the SM0 IRQ flag, disables the PIO IRQ source, stops SM0, clears
- * the busy state, and invokes the registered completion callback (if any).
- * The callback is called with the driver already marked idle, so a
- * re-entrant tiku_pio_arch_bitbang_tx() from inside the callback is safe.
+ * Clears the SM0 IRQ flag, disables the PIO IRQ source, stops SM0, clears the
+ * busy state and invokes the registered completion callback.  The callback runs
+ * with the driver already idle, so a re-entrant tx from inside it is safe.
  */
 void tiku_rp2350_pio0_irq0_handler(void) {
     /* Clear the SM0 IRQ flag (W1C). */
     PIO0(RP2350_PIO_IRQ) = 0x01U;
 
-    /* Disable IRQ source so we don't fire again until the next tx. */
+    /* Disable IRQ source so it does not fire again until the next tx. */
     PIO0(RP2350_PIO_IRQ0_INTE) = 0U;
 
     /* The SM has already entered the jmp-to-self halt instruction.

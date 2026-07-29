@@ -21,10 +21,9 @@
 /**
  * @brief Initialize UART0 (PL011) at the board-defined baud rate.
  *
- * Unresets UART0, configures the integer and fractional baud-rate
- * divisors from clk_peri, enables the 8N1 FIFO, and installs the
- * NVIC handler for the RX IRQ that fills the 256-byte ring buffer.
- * Called once at early boot.
+ * Unresets UART0, configures the integer and fractional baud divisors from
+ * clk_peri, enables the 8N1 FIFO, and installs the NVIC handler for the RX IRQ
+ * that fills the 256-byte ring buffer.  Called once at early boot.
  */
 void     tiku_uart_init(void);
 

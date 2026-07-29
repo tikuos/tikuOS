@@ -26,22 +26,19 @@
 /**
  * @brief Bring all peripherals out of reset and prepare basic state.
  *
- * Called once from tiku_cpu_boot_init(). Releases IO_BANK0 +
- * PADS_BANK0 from reset, clears pad ISO, and configures NVIC priority
- * grouping. Does NOT touch clocks — that is handled by
- * tiku_cpu_freq_rp2350_init().
+ * Called once from tiku_cpu_boot_init().  Releases IO_BANK0 and PADS_BANK0 from
+ * reset, clears pad ISO and configures NVIC priority grouping.  Does NOT touch
+ * clocks -- that is tiku_cpu_freq_rp2350_init()'s job.
  */
 void tiku_cpu_boot_rp2350_init(void);
 
 /**
  * @brief Configure the system clock tree.
  *
- * Starts the XOSC, locks PLL_SYS to the requested frequency, and
- * switches CLK_SYS to the PLL output. The first port only supports
- * the silicon-default 150 MHz; any other value is silently snapped
- * to 150.
+ * Starts the XOSC, locks PLL_SYS to the requested frequency and switches
+ * CLK_SYS to the PLL output.
  *
- * @param target_mhz  Requested CLK_SYS frequency in MHz (150 on RP2350).
+ * @param target_mhz  Requested CLK_SYS frequency in MHz.
  */
 void tiku_cpu_freq_rp2350_init(unsigned int target_mhz);
 

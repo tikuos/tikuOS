@@ -20,23 +20,14 @@
 /**
  * @brief Query the currently armed wake sources on RP2350.
  *
- * Reads NVIC ISER0 and the SysTick CSR to determine which interrupt
- * sources are enabled, then maps them to the platform-agnostic
- * tiku_wake_sources_t bit-field.  The mapping is:
+ * Reads NVIC ISER0 and the SysTick CSR, then maps them to the
+ * platform-agnostic bit-field: TICKINT -> SYSTICK, TIMER0_0 -> HTIMER,
+ * UART0 -> UART_RX, IO_BANK0 -> GPIO.
  *
- *   SYST_CSR.TICKINT set  -> TIKU_WAKE_SYSTICK
- *   NVIC TIMER0_0 enabled -> TIKU_WAKE_HTIMER
- *   NVIC UART0    enabled -> TIKU_WAKE_UART_RX
- *   NVIC IO_BANK0 enabled -> TIKU_WAKE_GPIO
- *
- * The WDT wake bit is left clear intentionally: the watchdog armed
- * state is tracked by the kernel's tiku_watchdog layer and queried
- * separately by the "wake" shell command.
- *
- * gpio_ie[] is filled by scanning PROC0_INTE registers (4 words,
- * 4 bits per pin) and compressing them into the MSP430-compatible
- * 8-bit-per-port layout expected by the wake HAL.
- *
+ * @note The WDT bit is left clear intentionally -- the watchdog armed state
+ *       lives in the tiku_watchdog layer and the "wake" command queries it
+ *       separately.  gpio_ie[] comes from scanning PROC0_INTE (4 words, 4 bits
+ *       per pin), compressed into the MSP430-compatible 8-bit-per-port layout.
  * @param out  Destination for wake source bitmap (must be non-NULL).
  *             If NULL the function returns immediately.
  */
@@ -65,7 +56,7 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     }
     /* Watchdog reset is always armed when the watchdog is enabled —
      * the kernel's tiku_watchdog tracks its own enabled flag and the
-     * "wake" command queries that separately, so we leave WDT cleared
+     * "wake" command queries that separately, so WDT is left cleared
      * here. */
 
     /* Per-port GPIO IE summary: scan PROC0_INTE for non-zero words.

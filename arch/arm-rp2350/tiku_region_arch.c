@@ -32,12 +32,11 @@ static tiku_mem_arch_size_t rp2350_region_count;
 /**
  * @brief Return the RP2350 memory region table, building it on first call.
  *
- *  Describes up to three regions: general-purpose SRAM (volatile), the
- *  .uninit SRAM overlay tagged as NVM so the persist API can accept
- *  .persistent buffers, and the 4 MB XIP flash tagged NVM for
- *  introspection.  The .uninit NVM entry is omitted when .uninit is
- *  empty in the current build.  The table is built once and cached.
+ *  Up to three regions: general-purpose SRAM (volatile), the .uninit SRAM
+ *  overlay tagged NVM so the persist API accepts .persistent buffers, and the
+ *  4 MB XIP flash tagged NVM for introspection.  Built once and cached.
  *
+ * @note The .uninit NVM entry is omitted when .uninit is empty in this build.
  * @param count  Output pointer; set to the number of valid table entries.
  * @return Pointer to the internal region table array.
  */

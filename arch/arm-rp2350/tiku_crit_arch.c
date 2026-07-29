@@ -32,7 +32,7 @@
 
 #define IRQ_BIT_TICK    0U   /* SysTick is a system exception, not NVIC,
                                 so masking it requires touching the SCB
-                                instead — for the first port we just
+                                instead — for the first port this just
                                 leave the system tick alone. */
 #define IRQ_BIT_HTIMER  BIT(RP2350_IRQ_TIMER0_0)
 #define IRQ_BIT_UART    BIT(RP2350_IRQ_UART0)
@@ -52,11 +52,11 @@ static struct {
 /**
  * @brief Mask NVIC IRQs, keeping only those listed in @p preserve_mask.
  *
- * Snapshots NVIC ISER0, builds a keep-set from the TIKU_CRIT_PRESERVE_*
- * bits, and writes the difference to NVIC ICER0. A DSB+ISB pair ensures
- * the disable is architecturally visible before the critical section body
- * runs. SysTick is not in the NVIC so it is always left enabled.
+ * Snapshots NVIC ISER0, builds a keep-set from the TIKU_CRIT_PRESERVE_* bits and
+ * writes the difference to ICER0.  A DSB+ISB pair makes the disable
+ * architecturally visible before the critical section body runs.
  *
+ * @note SysTick is not in the NVIC, so it is always left enabled.
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags for sources to
  *                       keep enabled (HTIMER, UART, GPIO, PIO)
  */

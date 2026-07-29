@@ -106,12 +106,11 @@ void tiku_onewire_arch_close(void) {
 /**
  * @brief Issue a 1-Wire reset pulse and detect a presence response.
  *
- *  Master pulls the bus low for 480 us then releases.  The external
- *  pull-up restores the line in <15 us; any attached device pulls it low
- *  for 60-240 us within that recovery window.  The full reset cycle
- *  occupies 480 us low + 480 us recovery.  IRQs are masked throughout
- *  to preserve timing accuracy.
+ *  The master pulls the bus low for 480 us then releases; the external pull-up
+ *  restores the line in <15 us and any attached device pulls it low for
+ *  60-240 us within that window.  The full cycle is 480 us low + 480 recovery.
  *
+ * @note IRQs are masked throughout to preserve timing accuracy.
  * @return TIKU_OW_OK if a device presence pulse was detected,
  *         TIKU_OW_ERR_NO_DEVICE if the bus stayed high.
  */
@@ -128,7 +127,7 @@ int tiku_onewire_arch_reset(void) {
     tiku_cpu_rp2350_delay_us(70U);
     presence = ow_read();
 
-    /* Finish the 480 us recovery window so the bus is idle when we
+    /* Finish the 480 us recovery window so the bus is idle on
      * return. */
     tiku_cpu_rp2350_delay_us(410U);
 
@@ -141,10 +140,9 @@ int tiku_onewire_arch_reset(void) {
 /**
  * @brief Write one bit onto the 1-Wire bus.
  *
- *  Write-1: pull low 6 us, release, idle 64 us.
- *  Write-0: pull low 60 us, release, idle 10 us.
- *  Total slot is >= 70 us in either case.  IRQs are masked across the
- *  slot to prevent timing violations.
+ *  Write-1 pulls low 6 us, releases, idles 64 us; write-0 pulls low 60 us,
+ *  releases, idles 10 us.  The slot is >= 70 us either way, and IRQs are masked
+ *  across it to prevent timing violations.
  *
  * @param bit  Value to write; only the LSB is used (0 or non-zero).
  */

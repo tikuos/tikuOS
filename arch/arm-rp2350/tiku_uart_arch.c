@@ -45,8 +45,8 @@
 #define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1) /**< Index wrap mask. */
 /** @} */
 
-/**
- * @brief UART0 receive ring buffer state.
+/*
+ * UART0 receive ring buffer state.
  *
  * head  — written by the ISR (producer).
  * tail  — read by tiku_uart_getc() (consumer).
@@ -115,12 +115,12 @@ static void uart_pins_init(void) {
 /**
  * @brief Initialize UART0 at TIKU_BOARD_UART_BAUD, 8N1.
  *
- * Computes PL011 integer (IBRD) and fractional (FBRD) baud divisors
- * from the live peripheral clock frequency, configures pads, enables
- * the RX FIFO at 1/8 threshold, installs the RX interrupt mask, drains
- * any boot-time FIFO noise, resets the ring buffer, and enables the
- * UART with TX+RX.  Unmasks UART0 in the NVIC so the ISR fires on
- * received bytes.
+ * Computes the PL011 integer and fractional baud divisors from the live
+ * peripheral clock, configures pads, enables the RX FIFO at 1/8 threshold and
+ * installs the RX interrupt mask.
+ *
+ * @note Drains any boot-time FIFO noise, resets the ring buffer, enables the
+ *       UART with TX+RX, and unmasks UART0 in the NVIC so the ISR fires.
  */
 void tiku_uart_init(void) {
     /* PL011 baud divisor formula:
@@ -139,7 +139,7 @@ void tiku_uart_init(void) {
     uint32_t ibrd = bauddiv >> 6;
     uint32_t fbrd = bauddiv & 0x3FU;
 
-    /* Disable UART while we reconfigure. */
+    /* Disable UART while reconfiguring. */
     uart_write(RP2350_UART_CR, 0U);
 
     uart_pins_init();
@@ -289,12 +289,13 @@ void tiku_uart_test_inject(uint8_t byte) {
 /**
  * @brief UART0 interrupt handler — drains the RX FIFO into the ring buffer.
  *
- * Defined non-weak so the linker resolves to this rather than the default
- * trap handler.  Processes both the RX FIFO threshold interrupt (RXIM) and
- * the RX timeout interrupt (RTIM).  For each byte read from the PL011 DR
- * register, the hardware OE bit is checked and counted; bytes that would
- * overflow the ring buffer are counted as software overruns and discarded.
- * Acknowledges all asserted interrupt sources at exit via ICR.
+ * Non-weak, so the linker resolves here rather than to the default trap.
+ * Handles both the FIFO threshold (RXIM) and timeout (RTIM) interrupts, and
+ * acknowledges every asserted source at exit via ICR.
+ *
+ * @note For each byte read from DR the hardware OE bit is checked and counted;
+ *       bytes that would overflow the ring count as software overruns and are
+ *       discarded.
  */
 void tiku_rp2350_uart0_isr(void) {
     uint32_t mis = uart_read(RP2350_UART_MIS);
@@ -327,13 +328,9 @@ void tiku_rp2350_uart0_isr(void) {
 /**
  * @brief Print an unsigned integer in the given base over UART0.
  *
- * Supports optional minimum field width and a pad character (space or
- * '0').  Renders digits from LSD to MSD into a local 20-char buffer,
- * then emits them in order.
- *
- * Same minimal subset as the MSP430 driver: %s, %c, %d, %u, %x,
- * %ld, %lu, %lx, %%, and optional width (e.g. %4d, %08x).  Avoids
- * pulling in newlib-nano's printf.
+ * Supports an optional minimum field width and a pad character.  Renders digits
+ * LSD to MSD into a local 20-char buffer, then emits them in order, which keeps
+ * newlib-nano's printf out of the link.
  *
  * @param v      Value to print.
  * @param base   Numeric base (10 or 16).
@@ -386,11 +383,9 @@ static void uart_print_int(long v, unsigned width, char pad) {
 /**
  * @brief Lightweight printf over UART0.
  *
- * Supports: %s, %c, %d, %u, %x, %ld, %lu, %lx, %%, and an optional
- * decimal width prefix with '0' or ' ' padding (e.g. %4d, %08x).
- * Converts bare '\n' in the format string to '\r\n'.  Sufficient to
- * render the shell banner and ps/free/info output without linking
- * newlib-nano's printf.
+ * Supports %s, %c, %d, %u, %x, %ld, %lu, %lx, %% and an optional decimal width
+ * prefix with '0' or ' ' padding.  Converts a bare '\n' to "\r\n", and covers
+ * the banner and ps/free/info output without linking newlib-nano's printf.
  *
  * @param fmt  printf-style format string (must be non-NULL).
  * @param ...  Arguments matching the format specifiers.

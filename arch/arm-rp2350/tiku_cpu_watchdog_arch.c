@@ -17,18 +17,13 @@
 /**
  * @brief Convert an MSP430-style WDT interval selector to microseconds.
  *
- * The RP2350 watchdog counts down at 1 us per tick (configured by the
- * TICKS block). Its reload register is 24 bits, giving a max timeout of
- * ~16.7 s. The MSP430 interval selector encodes a ACLK (32 kHz) divisor,
- * so the equivalent wall-clock time is: isel / 32768 seconds, or
- * isel * 1 000 000 / 32768 microseconds.
+ * The RP2350 watchdog counts down at 1 us per tick with a 24-bit reload, so the
+ * max timeout is ~16.7 s.  The MSP430 selector encodes an ACLK (32 kHz) divisor,
+ * making the equivalent isel * 1 000 000 / 32768 microseconds.
  *
- * The intermediate product overflows uint32_t for large isel values
- * (e.g. 32768 * 1 000 000 = 32.77 billion > 4.29 billion). One operand
- * is cast to uint64_t so the multiplication is done in 64-bit before
- * the division truncates back to 32-bit. The result is clamped to
- * [1 ms, 16.7 s] to satisfy hardware constraints.
- *
+ * @note One operand is cast to uint64_t because the intermediate product
+ *       overflows uint32_t for large isel (32768 * 1e6 = 32.77 billion).  The
+ *       result is clamped to [1 ms, 16.7 s] to satisfy the hardware.
  * @param isel  MSP430-style watchdog interval divisor
  * @return Watchdog reload value in microseconds (24-bit range)
  */
@@ -63,10 +58,9 @@ void tiku_cpu_rp2350_watchdog_off_arch(void) {
 /**
  * @brief Enable the RP2350 watchdog with the given interval.
  *
- * Converts @p isel to a microsecond count, programs PAUSE_DBG/PAUSE_JTAG
- * so the watchdog freezes when the CPU is halted by a debugger, primes
- * WD_LOAD twice (once before and once after enabling) to seed the
- * countdown correctly.
+ * Converts @p isel to a microsecond count, programs PAUSE_DBG/PAUSE_JTAG so the
+ * watchdog freezes when a debugger halts the CPU, and primes WD_LOAD twice --
+ * once before and once after enabling -- to seed the countdown correctly.
  *
  * @param src   Clock source selector (ignored; RP2350 watchdog has one source)
  * @param isel  MSP430-style interval divisor that sets the timeout period

@@ -23,8 +23,8 @@
 /* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return codes for the PIO bit-bang driver.
+/*
+ * Return codes for the PIO bit-bang driver.
  *
  * TIKU_PIO_OK           — operation succeeded.
  * TIKU_PIO_ERR_BUSY     — a transmission is already in progress.
@@ -66,11 +66,9 @@ void tiku_pio_arch_init(void);
 /**
  * @brief Start a one-shot bit-bang transmission on PIO0 / SM0.
  *
- * Configures the pin as a PIO0 output, sets the state machine clock
- * divider so each bit takes @p bit_period_us microseconds, loads
- * the data word and the bit count, and enables the SM. Returns
- * immediately; @p on_done is called from the PIO0 IRQ once the
- * stream completes.
+ * Configures the pin as a PIO0 output, sets the SM clock divider so each bit
+ * takes @p bit_period_us, loads the data word and bit count, and enables the
+ * SM.  Returns immediately; @p on_done fires from the PIO0 IRQ.
  *
  * @param gpio_pin     GPIO number (0..47) to drive
  * @param data         Up to 32 bits, packed MSB-first if msb_first=1
@@ -114,11 +112,11 @@ int tiku_pio_arch_bitbang_abort(void);
 /**
  * @brief PIO0_IRQ_0 interrupt service routine.
  *
- * Strong override of the weak alias in tiku_crt_early.c.  Wired
- * automatically when this driver is linked in.  Clears the IRQ source,
- * resets the busy flag, and invokes the on_done callback registered
- * with tiku_pio_arch_bitbang_tx().  Runs in NVIC ISR context — keep
- * callbacks short.
+ * Strong override of the weak alias in tiku_crt_early.c, wired automatically
+ * when this driver is linked in.  Clears the IRQ source, resets the busy flag
+ * and invokes the on_done callback.
+ *
+ * @note Runs in NVIC ISR context -- keep callbacks short.
  */
 void tiku_rp2350_pio0_irq0_handler(void);
 

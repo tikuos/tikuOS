@@ -45,7 +45,7 @@
 #define USB_EP_STALL_ARM     0x68U
 #define USB_USB_MUXING       0x74U
 #define USB_USB_PWR          0x78U
-#define USB_INTE             0x90U   /* (unused: we poll, no NVIC IRQ)       */
+#define USB_INTE             0x90U   /* (unused: polled, no NVIC IRQ)        */
 
 /* MAIN_CTRL */
 #define USB_MAIN_CTRL_CONTROLLER_EN  (1U << 0)
@@ -365,7 +365,7 @@ static void handle_setup(void) {
             ep0_status_in();
             break;
         case 0x20:                                    /* SET_LINE_CODING    */
-            /* 7-byte OUT data stage follows; accept it (we don't use it) and
+            /* 7-byte OUT data stage follows; accept it (unused) and
              * the IN status is sent once the data arrives (PH_DATA_OUT). */
             u.ep0_phase = PH_DATA_OUT;
             ep_arm(DP_EP0_OUT_BUFCTRL, BUF_CTRL_DATA1_PID | 7U);
@@ -438,7 +438,7 @@ static void handle_buff_status(void) {
         u.ep2_pid ^= 1U;
         rx_arm();
     }
-    if (bs & BUFF_STATUS_EP3_IN) {    /* bulk IN: host took our packet      */
+    if (bs & BUFF_STATUS_EP3_IN) {    /* bulk IN: host took the packet      */
         usb_wr(USB_BUFF_STATUS, BUFF_STATUS_EP3_IN);
         u.ep3_busy = 0U;
         tx_kick();

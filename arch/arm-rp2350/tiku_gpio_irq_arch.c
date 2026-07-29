@@ -70,10 +70,9 @@ static int8_t gp_index(uint8_t port, uint8_t pin) {
 /**
  * @brief Enable a GPIO edge interrupt for the given (port, pin, edge).
  *
- * Translates the virtual (port, pin) pair to a GP index, configures the
- * corresponding nibble in the IO_BANK0 PROC0_INTE register, clears any
- * stale pending edge in INTR, and unmasks IO_BANK0 in the NVIC.  The pin
- * is also reconfigured as an SIO input with pull-up.
+ * Translates the virtual pair to a GP index, configures the matching nibble in
+ * IO_BANK0 PROC0_INTE, clears any stale pending edge in INTR and unmasks
+ * IO_BANK0 in the NVIC.  The pin is reconfigured as an SIO input with pull-up.
  *
  * @param port  Virtual port number (1–4).
  * @param pin   Pin index within the port (0–7).
@@ -102,7 +101,7 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     uint8_t  shift = (uint8_t)((gp & 7U) << 2);   /* (gp % 8) * 4 */
     uint32_t mask  = (uint32_t)bits << shift;
 
-    /* Clear any pending edge from before we armed. */
+    /* Clear any pending edge from before arming. */
     _RP2350_REG_SET(RP2350_IO_BANK0_INTR(word), mask);
 
     /* Unmask the edge in PROC0_INTE. */
@@ -118,10 +117,9 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
 /**
  * @brief Disable the GPIO edge interrupt for the given (port, pin).
  *
- * Clears all four edge/level bits for the pin's nibble in the IO_BANK0
- * PROC0_INTE register and then clears any latched pending edge in INTR.
- * The NVIC mask for IO_BANK0 is left unchanged; use the HAL-level disable
- * if no other pins on the bank require interrupts.
+ * Clears all four edge/level bits for the pin's nibble in IO_BANK0 PROC0_INTE,
+ * then clears any latched pending edge in INTR.  The NVIC mask for IO_BANK0 is
+ * left alone; use the HAL-level disable if no other pin on the bank needs it.
  *
  * @param port  Virtual port number (1–4).
  * @param pin   Pin index within the port (0–7).

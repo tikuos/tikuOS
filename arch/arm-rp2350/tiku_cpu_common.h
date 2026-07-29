@@ -40,11 +40,9 @@ void tiku_cpu_rp2350_delay_us(unsigned int us);
 /**
  * @brief Read the on-chip unique device identifier.
  *
- * The RP2350's flash chip holds a unique 64-bit ID. The first port
- * exposes a synthesised value derived from a few SRAM-relative
- * addresses so that tests remain deterministic across reboots without
- * needing a flash-readback routine. Up to @p len bytes are copied
- * into @p buf.
+ * The RP2350's flash chip holds a unique 64-bit ID, but this port exposes a
+ * synthesised value derived from a few SRAM-relative addresses so tests stay
+ * deterministic across reboots without a flash-readback routine.
  *
  * @param buf  Destination buffer (caller-provided).
  * @param len  Number of bytes to copy (1..8).
@@ -66,16 +64,12 @@ uint16_t tiku_cpu_rp2350_reset_reason(void);
 /**
  * @brief Reboot the device into USB BOOTSEL mass-storage mode.
  *
- * Drains the UART TX FIFO, disables interrupts, and asks the RP2350
- * boot ROM to reboot into USB BOOTSEL mode. On success this function
- * does not return. On failure (boot ROM lookup miss or signature
- * mismatch) it falls through to a watchdog reset, which reboots the
- * chip but does NOT enter BOOTSEL — a manual BOOTSEL hold and replug
- * will then be required to reflash.
+ * Drains the UART TX FIFO, disables interrupts and asks the boot ROM to reboot
+ * into BOOTSEL.  On success this does not return; on a ROM lookup miss it falls
+ * through to a watchdog reset, which reboots but does NOT enter BOOTSEL.
  *
- * Used by the test harness when TIKU_TEST_AUTO_BOOTSEL is defined so
- * the Python loop runner can chain test categories without a physical
- * button press between cycles.
+ * @note Used by the test harness when TIKU_TEST_AUTO_BOOTSEL is defined, so the
+ *       Python loop runner can chain test categories without a button press.
  */
 void tiku_cpu_rp2350_reboot_to_bootsel(void) __attribute__((noreturn));
 

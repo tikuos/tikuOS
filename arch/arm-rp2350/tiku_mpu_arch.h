@@ -32,10 +32,9 @@
 /**
  * @brief Read the kernel's software segment-access-map (SAM) register.
  *
- * The SAM is maintained in software to track logical permission state
- * across SEG1/SEG2/SEG3 for parity with the MSP430 port.  On RP2350
- * only SEG3 (the .uninit NVM stand-in) flows through to real hardware
- * permission changes.
+ * The SAM is maintained in software to track logical permission state across
+ * SEG1/SEG2/SEG3 for parity with the MSP430 port.  On RP2350 only SEG3, the
+ * .uninit NVM stand-in, flows through to a real hardware permission change.
  *
  * @return Current SAM value.
  */
@@ -56,7 +55,7 @@ void     tiku_mpu_arch_set_sam(uint16_t sam);
 uint16_t tiku_mpu_arch_get_ctl(void);
 
 /**
- * @brief Disable IRQs (PRIMASK = 1) — used to bracket NVM windows.
+ * @brief Disable IRQs (PRIMASK = 1), bracketing an NVM window.
  */
 void     tiku_mpu_arch_disable_irq(void);
 
@@ -85,10 +84,9 @@ void     tiku_mpu_arch_set_default_protection(void);
 /**
  * @brief Set logical permissions on a kernel segment (SEG1/SEG2/SEG3).
  *
- * Updates the software SAM and, for SEG3 only, adjusts the hardware
- * MPU region.  SEG1 (flash) and SEG2 (SRAM) hardware permissions are
- * pinned — making flash writable or SRAM executable would brick the
- * kernel on Cortex-M33.
+ * Updates the software SAM and, for SEG3 only, adjusts the hardware MPU region.
+ * SEG1 (flash) and SEG2 (SRAM) hardware permissions are pinned -- making flash
+ * writable or SRAM executable would brick the kernel on Cortex-M33.
  *
  * @param seg   Segment index (0 = SEG1, 1 = SEG2, 2 = SEG3).
  * @param perm  Permission bitmask (TIKU_MPU_READ / WRITE / EXEC).

@@ -58,10 +58,9 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /**
  * @brief SysTick reload value for one tick period at the current clk_sys.
  *
- * SysTick uses the CPU clock; reload = clk_sys / TICK_HZ.
- * TIKU_MAIN_CPU_HZ tracks MAIN_CPU_FREQ so the system tick stays at
- * TIKU_CLOCK_ARCH_SECOND Hz across all supported clk_sys frequencies
- * (12 / 48 / 100 / 125 / 133 / 150 MHz).
+ * SysTick uses the CPU clock, so reload = clk_sys / TICK_HZ.  TIKU_MAIN_CPU_HZ
+ * tracks MAIN_CPU_FREQ, keeping the tick at TIKU_CLOCK_ARCH_SECOND Hz across
+ * every supported clk_sys (12 / 48 / 100 / 125 / 133 / 150 MHz).
  */
 #define TIKU_CLOCK_ARCH_INTERVAL  (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND)
 

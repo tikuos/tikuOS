@@ -132,12 +132,11 @@ static void set_target(uint8_t addr) {
 /**
  * @brief Initialise the RP2350 I2C0 peripheral.
  *
- *        Brings I2C0 out of reset, configures GPIO pins for I2C function,
- *        programs IC_CON for master mode and the requested speed, computes
- *        SCL high/low counts from the live clk_peri frequency, and enables
- *        the controller.  Safe to call once; re-initialisation requires
- *        tiku_i2c_arch_close() first.
+ * Brings I2C0 out of reset, configures the GPIO pins for I2C function, programs
+ * IC_CON for master mode and the requested speed, computes SCL high/low counts
+ * from the live clk_peri frequency, and enables the controller.
  *
+ * @note Safe to call once; re-initialisation requires tiku_i2c_arch_close().
  * @param config  Pointer to a tiku_i2c_config_t describing the desired
  *                bus speed (TIKU_I2C_SPEED_STANDARD or _FAST).
  * @return        TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if config
@@ -151,7 +150,7 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     /* Bring I2C0 out of reset. */
     rp2350_unreset(RP2350_RESETS_I2C0);
 
-    /* Disable while we program. */
+    /* Disable while programming. */
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_ENABLE)) = 0U;
 
     /* IO_BANK0 + PADS_BANK0: route both pins to I2C function (3),
@@ -183,13 +182,13 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     /* Compute SCL high/low counts from the live clk_peri Hz. The
      * DW IP databook gives a conservative formula; using equal high
      * and low halves at 100 kHz yields ~5 us each (well above the
-     * 4.7 us / 4.0 us SS minimums). At 400 kHz we tilt low > high
+     * 4.7 us / 4.0 us SS minimums). At 400 kHz the split tilts low > high
      * (~1.9 us / 0.6 us) to satisfy the FS minimums. */
     unsigned long peri_hz = tiku_cpu_rp2350_smclk_get_hz();
     if (peri_hz == 0UL) {
         peri_hz = 12000000UL;                   /* sensible fallback */
     }
-    /* cycles-per-microsecond, rounded up so we always meet minimums. */
+    /* cycles-per-microsecond, rounded up so the minimums always hold. */
     unsigned long cyc_per_us = (peri_hz + 999999UL) / 1000000UL;
 
     /* Standard mode: 5 us high, 5 us low. HCNT minimum = 6 (DW IP). */
@@ -304,7 +303,7 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     (void)_RP2350_REG(I2C_REG(RP2350_I2C_IC_CLR_TX_ABRT));
 
     uint16_t i;
-    /* Issue a read-cmd into the TX FIFO for each byte we want back. */
+    /* Issue a read-cmd into the TX FIFO for each byte wanted back. */
     for (i = 0U; i < len; i++) {
         if (wait_status(RP2350_I2C_STATUS_TFNF) < 0) {
             return check_abort();
@@ -330,12 +329,12 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
 /**
  * @brief Probe a slave address (presence check for a bus scan).
  *
- *        The DW_apb_i2c cannot issue a zero-byte transaction — the address is
- *        only clocked out alongside a queued data/read command — so a probe
- *        is a single 1-byte read.  A missing device NACKs the address, which
- *        surfaces as TX_ABRT (ABRT_7B_ADDR_NOACK); an ACK means the device is
- *        present and the one byte read back is discarded.
+ * The DW_apb_i2c cannot issue a zero-byte transaction -- the address is only
+ * clocked out alongside a queued data or read command -- so a probe is a single
+ * 1-byte read, and the byte read back is discarded.
  *
+ * @note A missing device NACKs the address, surfacing as TX_ABRT
+ *       (ABRT_7B_ADDR_NOACK).
  * @param addr  7-bit slave address.
  * @return      TIKU_I2C_OK if the device acknowledged, TIKU_I2C_ERR_NACK if
  *              not, or TIKU_I2C_ERR_PARAM / TIKU_I2C_ERR_TIMEOUT.
@@ -348,11 +347,9 @@ int tiku_i2c_arch_probe(uint8_t addr) {
 /**
  * @brief Perform a combined I2C write followed by a repeated-start read.
  *
- *        Transmits tx_len bytes then issues a Sr (repeated START) and
- *        reads rx_len bytes in a single bus transaction.  If either
- *        length is zero the operation degrades to a pure write or pure
- *        read, delegating to tiku_i2c_arch_write() or
- *        tiku_i2c_arch_read() respectively.
+ * Transmits @p tx_len bytes, issues a repeated START, then reads @p rx_len
+ * bytes in a single bus transaction.  A zero length degrades the call to a pure
+ * write or pure read, delegating to the matching single-direction entry point.
  *
  * @param addr    7-bit slave address.
  * @param tx_buf  Pointer to bytes to write in the first phase.
@@ -386,7 +383,7 @@ int tiku_i2c_arch_write_read(uint8_t addr,
     set_target(addr);
     (void)_RP2350_REG(I2C_REG(RP2350_I2C_IC_CLR_TX_ABRT));
 
-    /* Send TX bytes (no STOP — we'll restart for the read phase). */
+    /* Send TX bytes (no STOP — a restart opens the read phase). */
     uint16_t i;
     for (i = 0U; i < tx_len; i++) {
         if (wait_status(RP2350_I2C_STATUS_TFNF) < 0) {

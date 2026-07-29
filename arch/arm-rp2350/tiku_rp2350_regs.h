@@ -23,8 +23,8 @@
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Atomic register access aliases and accessor macros.
+/*
+ * Atomic register access aliases and accessor macros.
  *
  * Every peripheral block on the RP2350 exposes four aliases at a
  * 0x1000-byte stride: normal RW at +0x0000, XOR at +0x1000,
@@ -94,8 +94,8 @@
 /* RESETS BLOCK                                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief RESETS block — peripheral reset control (datasheet §6).
+/*
+ * RESETS block — peripheral reset control (datasheet §6).
  *
  * Writing a bit to RESETS_RESET holds the peripheral in reset; clearing
  * it releases reset.  RESETS_RESET_DONE is read-back: a bit goes high
@@ -146,8 +146,8 @@
 /* CLOCKS BLOCK                                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Clocks block — clock source selection and dividers (datasheet §5).
+/*
+ * Clocks block — clock source selection and dividers (datasheet §5).
  *
  * Each clock domain has a CTRL (source mux + enable), DIV (integer /
  * fractional divider), and SELECTED (readback of the active source).
@@ -252,8 +252,8 @@
 /* PLL                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief PLL_SYS and PLL_USB register offsets (datasheet §5.4).
+/*
+ * PLL_SYS and PLL_USB register offsets (datasheet §5.4).
  *
  * Offsets are relative to the respective PLL base address
  * (RP2350_PLL_SYS_BASE or RP2350_PLL_USB_BASE).  The lock sequence:
@@ -278,8 +278,8 @@
 /* IO_BANK0 (per-pin function select + interrupt config)                     */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief IO_BANK0 — GPIO function select and interrupt config (datasheet §9).
+/*
+ * IO_BANK0 — GPIO function select and interrupt config (datasheet §9).
  *
  * Each of the 48 GPIO pins has an 8-byte block (STATUS + CTRL).
  * GPIOn_CTRL.FUNCSEL (low 5 bits) routes the pin to a peripheral;
@@ -323,8 +323,8 @@
 /* PADS_BANK0 (drive strength, pull, schmitt)                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief PADS_BANK0 — pad electrical properties (datasheet §9.3).
+/*
+ * PADS_BANK0 — pad electrical properties (datasheet §9.3).
  *
  * Each GPIO pad has one 32-bit register controlling output-disable (OD),
  * input-enable (IE), drive strength (2/4/8/12 mA), pull-up (PUE),
@@ -352,8 +352,8 @@
 /* SIO (Single-cycle I/O for fast GPIO)                                      */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief SIO — single-cycle GPIO data registers (datasheet §3.1.5).
+/*
+ * SIO — single-cycle GPIO data registers (datasheet §3.1.5).
  *
  * SIO is the fast GPIO path: reads and writes complete in one CPU cycle.
  * Dedicated *_SET / *_CLR / *_XOR registers avoid the read-modify-write
@@ -371,7 +371,7 @@
 #define RP2350_SIO_GPIO_OE_SET      (RP2350_SIO_BASE + 0x038U)
 #define RP2350_SIO_GPIO_OE_CLR      (RP2350_SIO_BASE + 0x040U)
 
-/* High GPIO bank (pins 32..47): we don't expose these via VFS but
+/* High GPIO bank (pins 32..47): not exposed via VFS, but
  * declare the addresses for completeness. */
 #define RP2350_SIO_GPIO_HI_IN       (RP2350_SIO_BASE + 0x008U)
 #define RP2350_SIO_GPIO_HI_OUT      (RP2350_SIO_BASE + 0x014U)
@@ -380,8 +380,8 @@
 /* UART (PrimeCell PL011)                                                    */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief UART0/UART1 — PrimeCell PL011 registers (datasheet §12.2).
+/*
+ * UART0/UART1 — PrimeCell PL011 registers (datasheet §12.2).
  *
  * Offsets are relative to RP2350_UART0_BASE or RP2350_UART1_BASE.
  * The PL011 register layout is identical on both blocks and matches
@@ -442,8 +442,8 @@
 /* TIMER (TIMER0)                                                            */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief TIMER0 — 64-bit free-running microsecond timer (datasheet §12.7).
+/*
+ * TIMER0 — 64-bit free-running microsecond timer (datasheet §12.7).
  *
  * Clocked by the 1 us tick from the TICKS block.  TIMERAWL/TIMERAWH
  * give the raw 64-bit value without latching; TIMELR/TIMEHR use a
@@ -481,8 +481,8 @@
 /* ADC (single 12-bit SAR — datasheet §12.4)                                 */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief ADC — 12-bit successive-approximation converter (datasheet §12.4).
+/*
+ * ADC — 12-bit successive-approximation converter (datasheet §12.4).
  *
  * CS.AINSEL selects the channel (0..3 = AIN0..AIN3 on GP26..GP29;
  * channel 4 = on-chip temperature sensor).  Start a single conversion
@@ -522,8 +522,8 @@
 /* I2C (DW_apb_i2c — datasheet §12.3, plus the DesignWare IP databook)       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief I2C0/I2C1 — DesignWare DW_apb_i2c registers (datasheet §12.3).
+/*
+ * I2C0/I2C1 — DesignWare DW_apb_i2c registers (datasheet §12.3).
  *
  * Offsets are relative to RP2350_I2C0_BASE or RP2350_I2C1_BASE.
  * Master-only, 7-bit addressing.  IC_CON sets speed and role; IC_TAR
@@ -582,8 +582,8 @@
 /* SPI (PL022 — datasheet §12.5)                                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief SPI0/SPI1 — PrimeCell PL022 SSP registers (datasheet §12.5).
+/*
+ * SPI0/SPI1 — PrimeCell PL022 SSP registers (datasheet §12.5).
  *
  * Offsets are relative to RP2350_SPI0_BASE or RP2350_SPI1_BASE.
  * Configure 8-bit Motorola format via SSPCR0; set baud via SSPCPSR
@@ -619,8 +619,8 @@
 /* WATCHDOG                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Watchdog timer registers (datasheet §13).
+/*
+ * Watchdog timer registers (datasheet §13).
  *
  * CTRL.ENABLE arms the watchdog; CTRL.TRIGGER forces an immediate reset.
  * LOAD sets the down-count reload value (in 2 us ticks from the TICKS
@@ -646,8 +646,8 @@
 /* TICKS BLOCK (per-block tick generators on RP2350 — datasheet §10.6)       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief TICKS block — per-subsystem 1 us tick generators (datasheet §10.6).
+/*
+ * TICKS block — per-subsystem 1 us tick generators (datasheet §10.6).
  *
  * The RP2350 TICKS block provides nine independently-controllable tick
  * generators (PROC0, PROC1, TIMER0, TIMER1, WATCHDOG, and four more).
@@ -676,8 +676,8 @@
 /* SysTick (Cortex-M)                                                        */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Cortex-M33 SysTick registers (ARMv8-M TRM §B3.3).
+/*
+ * Cortex-M33 SysTick registers (ARMv8-M TRM §B3.3).
  *
  * CSR controls the timer (ENABLE, TICKINT to fire SysTick exception,
  * CLKSRC selects processor vs. reference clock).  RVR is the 24-bit
@@ -699,8 +699,8 @@
 /* NVIC (basic ISER/ICER/ISPR/ICPR layout, indexed by IRQ number)           */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Cortex-M33 NVIC registers (ARMv8-M TRM §B3.4).
+/*
+ * Cortex-M33 NVIC registers (ARMv8-M TRM §B3.4).
  *
  * ISER0/ICER0 enable/disable IRQs by setting a bit at position irq%32
  * in the word at base + (irq/32)*4.  ISPR/ICPR set and clear pending
@@ -718,8 +718,8 @@
 /* SCB (System Control Block) — Cortex-M33                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief SCB — System Control Block registers (ARMv8-M TRM §B3.2).
+/*
+ * SCB — System Control Block registers (ARMv8-M TRM §B3.2).
  *
  * AIRCR.SYSRESET (with VECTKEY = 0x05FA) triggers a warm system reset.
  * SHCSR.MEMFAULTENA enables the MemManage fault handler; without it,
@@ -748,8 +748,8 @@
 /* MPU — ARMv8-M (Cortex-M33)                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief ARMv8-M MPU registers (ARMv8-M TRM §B3.5).
+/*
+ * ARMv8-M MPU registers (ARMv8-M TRM §B3.5).
  *
  * The Cortex-M33 MPU supports up to 8 regions (TYPE.DREGION = 8 on
  * RP2350).  Each region is configured by writing RNR (select), then
@@ -790,7 +790,7 @@
 
 /* MPU_MAIR memory attribute encodings (one byte per attr index 0..3 in MAIR0,
  * 4..7 in MAIR1). 0x44 = Normal, Inner & Outer Non-cacheable — fine for
- * SRAM where we don't need cache coherence guarantees beyond the Cortex-M33
+ * SRAM, needing no cache coherence guarantees beyond the Cortex-M33
  * default MPU semantics. */
 #define RP2350_MPU_MAIR_NORMAL_NC   0x44U
 
@@ -798,8 +798,8 @@
 /* PWM (Pulse Width Modulator) — RP2350 datasheet §12.7                      */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief PWM block — 12 slices, 2 channels each (datasheet §12.7).
+/*
+ * PWM block — 12 slices, 2 channels each (datasheet §12.7).
  *
  * Per-slice registers stride 0x14 bytes from PWM_BASE.  Slice for GPIO n
  * is (n/2)%12; channel is n%2 (A=even, B=odd).  TOP sets the wrap value
@@ -860,8 +860,8 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 /* DMA — RP2350 datasheet §12.6                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief DMA controller — 16 channels (datasheet §12.6).
+/*
+ * DMA controller — 16 channels (datasheet §12.6).
  *
  * Each channel has READ_ADDR, WRITE_ADDR, TRANS_COUNT, and CTRL_TRIG
  * at a 0x40-byte stride from DMA_BASE.  Writing CTRL_TRIG starts the
@@ -920,8 +920,8 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 /* PIO (Programmable I/O) — RP2350 datasheet §11                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief PIO blocks PIO0/PIO1/PIO2 — registers and bit fields (datasheet §11).
+/*
+ * PIO blocks PIO0/PIO1/PIO2 — registers and bit fields (datasheet §11).
  *
  * Three identical PIO blocks; each has four state machines (SM0..SM3)
  * sharing 32 instruction-memory slots and 4-deep TX/RX FIFOs.  All
@@ -1057,8 +1057,8 @@ static inline void rp2350_nvic_clear_pending(uint32_t irq) {
 /* TRNG (True Random Number Generator) — RP2350 datasheet §12.13             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief TRNG — ARM CryptoCell-312 derivative (datasheet §12.13).
+/*
+ * TRNG — ARM CryptoCell-312 derivative (datasheet §12.13).
  *
  * Sequence to fill EHR_DATA0..5 (192 random bits): unreset via RESETS
  * bit 25; disable RND_SOURCE_ENABLE; clear ICR; write TRNG_CONFIG and

@@ -2844,6 +2844,7 @@ TARGET = main.elf
 # is the audit's silent-volatile bug class (kintsugi/memoryfix.md Phase A).
 lint:
 	@./tools/check_durable_placement.sh
+	@./tools/check_comment_style.py
 
 # UF2 is the RP2350 deliverable; ELF is enough on MSP430.
 ifeq ($(TIKU_PLATFORM),rp2350)

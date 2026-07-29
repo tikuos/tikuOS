@@ -49,10 +49,9 @@ void tiku_mem_arch_init(void);
 /**
  * @brief Overwrite a buffer with zeros using a volatile loop.
  *
- * The volatile pointer prevents the compiler from eliding the zeroing
- * when the buffer is never read after the call — a known pitfall in
- * security-sensitive code.  Use for wiping keys, nonces, and
- * credentials from SRAM before releasing the buffer.
+ * The volatile pointer stops the compiler eliding the zeroing when the buffer
+ * is never read afterwards -- a known pitfall in security-sensitive code.  Use
+ * it for keys, nonces and credentials before releasing the buffer.
  *
  * @param buf  Buffer to wipe.
  * @param len  Number of bytes to zero.
@@ -90,14 +89,12 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 /**
  * @brief Flush any in-RAM NVM modifications to non-volatile storage.
  *
- * On RP2350 this snapshots the SRAM .uninit region (which holds all
- * .persistent placements) into the dedicated 4 KB flash mirror sector,
- * making the data durable across full power cycles instead of just
- * warm resets.  Called automatically by the kernel-level
- * tiku_mpu_lock_nvm() at the end of every unlock window.
+ * On RP2350 this snapshots the SRAM .uninit region, which holds all .persistent
+ * placements, into the dedicated 4 KB flash mirror sector, making the data
+ * durable across full power cycles rather than only warm resets.
  *
- * On platforms where NVM writes are already durable (MSP430 FRAM),
- * this is a no-op.
+ * @note Called automatically by tiku_mpu_lock_nvm() at the end of every unlock
+ *       window.  A no-op where NVM writes are already durable (MSP430 FRAM).
  */
 void tiku_mem_arch_nvm_flush(void);
 

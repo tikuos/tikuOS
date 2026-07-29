@@ -67,9 +67,8 @@ int  tiku_i2c_arch_read (uint8_t addr, uint8_t *buf, uint16_t len);
  * @brief Architecture-specific address probe (bus-scan presence check).
  *
  * Reports whether a device acknowledges @p addr.  The DW_apb_i2c cannot do a
- * zero-byte transaction, so the backend probes with a single 1-byte read.
- * The `i2c scan` command uses this instead of a zero-length write (which the
- * bus layer rejects).
+ * zero-byte transaction, so the backend probes with a single 1-byte read and
+ * `i2c scan` uses this rather than the zero-length write the bus layer rejects.
  *
  * @param addr  7-bit slave address (unshifted).
  * @return 0 (TIKU_I2C_OK) if acknowledged, negative errno-style code if not.

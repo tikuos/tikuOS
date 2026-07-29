@@ -22,10 +22,9 @@
 /**
  * @brief Initialize the ADC peripheral.
  *
- * Powers on the ADC block, enables its clock, and applies the
- * caller-supplied configuration (channel enable mask, reference
- * voltage selection if applicable). Must be called once before
- * any tiku_adc_arch_channel_init() or tiku_adc_arch_read() call.
+ * Powers on the ADC block, enables its clock and applies the caller-supplied
+ * configuration.  Must be called once before any tiku_adc_arch_channel_init()
+ * or tiku_adc_arch_read().
  *
  * @param config  Pointer to ADC configuration struct (must not be NULL).
  * @return 0 on success, negative error code on failure.
@@ -43,10 +42,9 @@ void tiku_adc_arch_close(void);
 /**
  * @brief Prepare a single ADC channel for sampling.
  *
- * Configures the GPIO pad (GP26..GP29) or internal mux entry
- * (channel 4 = temperature sensor) for ADC use. Must be called
- * after tiku_adc_arch_init() and before tiku_adc_arch_read() on
- * the same channel.
+ * Configures the GPIO pad (GP26..GP29) or the internal mux entry for the
+ * temperature sensor.  Must follow tiku_adc_arch_init() and precede
+ * tiku_adc_arch_read() on the same channel.
  *
  * @param channel  ADC channel index (0..3 = GP26..GP29, 4 = temp).
  * @return 0 on success, negative error code on invalid channel.

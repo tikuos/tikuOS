@@ -19,8 +19,8 @@
 
 #include <stdint.h>
 
-/**
- * @brief Return codes for the PWM driver.
+/*
+ * Return codes for the PWM driver.
  *
  * TIKU_PWM_OK           — operation succeeded.
  * TIKU_PWM_ERR_INVALID  — gpio_pin is out of range (> 47).
@@ -36,10 +36,9 @@
  * @brief Configure a PWM channel on @p gpio_pin at @p freq_hz and
  *        @p duty_u16 (0..65535) and start it.
  *
- * Picks the slice + channel from the pin number (slice = (pin/2)%12,
- * channel = pin%1). Sets TOP = 65535 so duty resolution is the full
- * 16 bits; sets DIV so the wrap frequency matches freq_hz against
- * the live clk_sys rate.
+ * Picks the slice and channel from the pin number (slice = (pin/2)%12, channel
+ * = pin%1).  TOP = 65535 gives full 16-bit duty resolution, and DIV is set so
+ * the wrap frequency matches @p freq_hz against the live clk_sys rate.
  *
  * @param gpio_pin   GPIO 0..47
  * @param freq_hz    Wrap frequency in Hz (~10 Hz to ~clk_sys/65536)

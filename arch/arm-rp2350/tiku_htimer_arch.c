@@ -24,11 +24,10 @@
  *         throughout the driver. */
 typedef tiku_htimer_clock_t htimer_t;
 
-/** @brief ISR-fire counter, exposed for diagnostics.  The htimer test
- *         fleet was failing every "callback fired" assertion on this
- *         port; having a live counter the test can read tells us whether
- *         the ISR is even running, instead of guessing.  Also useful for
- *         any future "did the ISR storm during this op?" check. */
+/** @brief ISR-fire counter, exposed for diagnostics.  A live counter the
+ *         htimer test can read shows whether the ISR is running at all,
+ *         rather than leaving a failed "callback fired" assertion to guess.
+ *         Also serves any future "did the ISR storm during this op?" check. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
 /** @brief Initialise the RP2350 TIMER0 alarm-0 hardware for single-shot

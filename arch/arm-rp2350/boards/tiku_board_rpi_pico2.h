@@ -55,12 +55,12 @@ void tiku_rp2350_gpio_init_output(uint8_t pin);
 /**
  * @brief Drive an absolute GPIO pin to a logic level.
  *
- * Writes the SIO GPIO_OUT_SET / GPIO_OUT_CLR registers, so the update
- * is atomic and leaves every other pin alone. (SIO ignores the generic
- * +0x2000 / +0x3000 atomic aliases; its own adjacent SET/CLR/XOR
- * registers are the only correct way to do this.) The pin must already
- * be an output; pins above GP29 are silently ignored.
+ * Writes the SIO GPIO_OUT_SET / GPIO_OUT_CLR registers, so the update is atomic
+ * and leaves every other pin alone.  The pin must already be an output, and
+ * pins above GP29 are silently ignored.
  *
+ * @note SIO ignores the generic +0x2000 / +0x3000 atomic aliases; its own
+ *       adjacent SET/CLR/XOR registers are the only correct way to do this.
  * @param pin    Absolute GP pin number (0..29).
  * @param value  0 drives the pin low; non-zero drives it high.
  */
@@ -126,10 +126,9 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /**
  * @brief Bit-bang / backscatter output pin assignment.
  *
- * GP14 defaults are shared with the Pico 2 W port (no peripheral
- * conflict on either board). RP2350 has a single GPIO bank so port
- * is 0 by convention. Override at compile time via
- * -DTIKU_BOARD_BSCAT_PIN=<n>.
+ * GP14 defaults are shared with the Pico 2 W port, with no peripheral conflict
+ * on either board.  RP2350 has a single GPIO bank, so port is 0 by convention;
+ * override at compile time via -DTIKU_BOARD_BSCAT_PIN=<n>.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       0U
@@ -145,10 +144,9 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 /**
  * @brief Bus and peripheral availability flags.
  *
- * Platform-independent drivers self-gate to empty translation units when
- * these macros are absent. Declaring them here pulls in the RP2350 arch
- * implementations. I2C_BRW_100K is symbolic — the RP2350 I2C driver
- * speed is set in tiku_i2c_arch.c, not here.
+ * Platform-independent drivers self-gate to empty translation units when these
+ * macros are absent, so declaring them here pulls in the RP2350 arch
+ * implementations.  I2C_BRW_100K is symbolic; speed is set in tiku_i2c_arch.c.
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
 #define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic */

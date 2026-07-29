@@ -49,10 +49,9 @@ static inline int8_t gp_index(uint8_t port, uint8_t pin) {
 /**
  * @brief Initialise a GP pin as a push-pull SIO output, driven low.
  *
- * Configures PADS_BANK0 (4 mA, input-enable kept on so SIO_GPIO_IN
- * reflects the driven level), routes IO_BANK0 to SIO, clears the
- * output latch, then enables the output-enable bit via the SIO
- * dedicated SET register.  Silently ignores pins above MAX_GP_PIN.
+ * Configures PADS_BANK0 at 4 mA with input-enable kept on so SIO_GPIO_IN
+ * reflects the driven level, routes IO_BANK0 to SIO, clears the output latch,
+ * then enables output via the SIO SET register.  Pins above MAX_GP_PIN ignored.
  *
  * @param pin  GP pin number (0..MAX_GP_PIN).
  */
