@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.c - nRF54L memory HAL (RRAM read/write)
+ * tiku_mem_arch.c - nRF54L memory HAL (RRAM read/write).
  *
- * RRAM is memory-mapped and byte-writable in place (no erase cycle), so:
- *   read  -- a plain copy (RRAM reads like SRAM).
- *   write -- open the RRAMC WEN gate (tiku_mpu_arch_unlock_nvm), copy the
- *            bytes straight into RRAM, wait for the controller to report
- *            ready, then restore the gate.
- * This mirrors the MSP430 FRAM writer.  Callers that already hold the WEN
- * window (persist cells) still work: unlock/lock save+restore the prior gate
- * state, so the nesting is correct.
+ * RRAM is memory-mapped and byte-writable with no erase cycle, so a read is a
+ * plain copy and a write opens the RRAMC WEN gate, copies, waits for ready and
+ * restores the gate.  Unlock and lock save and restore, so nesting is correct.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

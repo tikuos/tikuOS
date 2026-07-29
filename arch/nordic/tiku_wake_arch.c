@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_wake_arch.c - nRF54L backend for the wake-source HAL
+ * tiku_wake_arch.c - nRF54L backend for the wake-source HAL.
  *
- * Reports which wake sources are armed by inspecting the NVIC enable state
- * of the live interrupt lines (all IRQ numbers are the MDK IRQn enum):
- *
- *   GRTC 226 (default tick) or TIMER10 133 (fallback) -> TIKU_WAKE_SYSTICK
- *   TIMER20 202 (hardware one-shot htimer)            -> TIKU_WAKE_HTIMER
- *   SERIAL20 198 / SERIAL30 260 (console UARTE RX)    -> TIKU_WAKE_UART_RX
- *   GPIOTE20 218 / GPIOTE30 268 (pin edges)           -> TIKU_WAKE_GPIO
- *
- * The WDT wake bit is left clear intentionally: WDT30 runs in reset mode
- * (no NVIC line armed) and the kernel's tiku_watchdog layer tracks the
- * armed state separately -- same convention as the rp2350 backend.
- *
- * gpio_ie[] is a best-effort per-port summary built by scanning the GPIOTE
- * event-channel CONFIG registers (MODE=Event entries carry the pin+port),
- * compressed into the HAL's 8-bit-per-port layout (bit = pin % 8).
+ * Reports which wake sources are armed by inspecting the NVIC enable state of the
+ * live lines.  The WDT bit stays clear deliberately: WDT30 runs in reset mode with
+ * no NVIC line, and the watchdog layer tracks its own armed state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.c - nRF54L GPIO primitives (P0/P1/P2)
+ * tiku_gpio_arch.c - nRF54L GPIO primitives (P0/P1/P2).
  *
- * The nRF GPIO block drives outputs via OUTSET/OUTCLR, reads inputs from IN,
- * and configures each pin through PIN_CNF[pin] (DIR bit0, INPUT-buffer bit1,
- * PULL bits2-3).  Helpers take a physical port (0/1/2) matching the board
- * silk P<port>.<pin>; see tiku_gpio_arch.h.
+ * Outputs drive through OUTSET/OUTCLR, inputs read from IN, and each pin is
+ * configured through PIN_CNF[].  Helpers take a physical port number matching the
+ * board silk.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

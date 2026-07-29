@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.h - nRF54L SPI arch header
+ * tiku_spi_arch.h - nRF54L SPI arch header.
  *
- * Blocking SPIM + EasyDMA backend for the nRF54L (see tiku_spi_arch.c).
- * Unlike adc/i2c/onewire (whose interface layers are board-capability gated),
- * interfaces/bus/tiku_spi_bus.c calls tiku_spi_arch_* unconditionally, so
- * these prototypes are declared here (mirroring the RP2350 arch header) to
- * keep the call sites warning-free.
+ * Blocking SPIM and EasyDMA backend.  The bus interface calls tiku_spi_arch_*
+ * unconditionally rather than behind a board-capability gate, so these prototypes
+ * are declared here to keep the call sites warning-free.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

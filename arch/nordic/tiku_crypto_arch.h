@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crypto_arch.h - nRF54L15 CRACEN CryptoMaster offload (hash first).
+ * tiku_crypto_arch.h - nRF54L CRACEN CryptoMaster offload (hash first).
  *
- * Hardware acceleration behind the tikukits/crypto software APIs: the kit
- * entry points stay the contract, the software implementation stays the
- * always-present reference, and a RUNTIME mode selects the path:
- *
- *   mode 0 (auto) - try the CRACEN engine, fall back to software on any
- *                   hardware error (fail-open to correctness);
- *   mode 1 (sw)   - software only (the A/B switch for benchmarks and a
- *                   kill-switch if the engine misbehaves in the field).
- *
- * Counters expose which path actually ran, so the crypto-hw TikuBench
- * suite can assert "hardware really executed" instead of trusting the
- * mode knob.
+ * Hardware acceleration behind the software crypto APIs, selected at run time:
+ * auto tries the engine and falls back to software on any error, sw forces the
+ * reference path.  Counters expose which path ran, so tests can assert it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

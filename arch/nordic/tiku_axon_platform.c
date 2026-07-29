@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_axon_platform.c - TikuOS platform layer for the Axon NPU (nRF54LM20B)
+ * tiku_axon_platform.c - TikuOS platform layer for the Axon NPU (nRF54LM20B).
  *
- * Implements the nrf_axon_platform_* porting seam that Nordic's Axon driver
- * core (libnrf-axon-driver-internal.a, LicenseRef-Nordic-5-Clause, linked
- * from the gitignored temp/axon-models checkout -- NEVER vendored, same
- * policy as the CRACEN PK microcode) expects from the host environment.
- * Reference semantics: the Zephyr platform layer in that checkout; the
- * interface is OS-agnostic by design (a simulator platform ships too).
- *
- * TikuOS is single-context (cooperative protothreads), so this is the
- * BARE-METAL flavor the interface documents:
- *   - reservations: a power refcount; no semaphore needed (one context).
- *   - driver events: nrf_axon_process_driver_event() is called DIRECTLY
- *     (the interface doc's bare-metal option) instead of a work queue.
- *   - user events: volatile flag + WFE.
- *   - the ISR (IRQ 86, crt slot wired in tiku_crt_early.c) forwards to
- *     nrf_axon_handle_interrupt() exactly like the Zephyr handler.
- *
- * Power quirk replicated from the vendor platform: while Axon is enabled the
- * system must hold a constant-latency-style state and RRAMC's low-power
- * config needs bit 0x20 restored after enable (vendor FIXME "magic bit" --
- * their code registers a retained sys-event; we pulse CONSTLAT and restore
- * the RRAMC bit directly).
- *
- * Build: opt-in via TIKU_AXON_ENABLE=1 (Makefile adds the checkout include
- * paths and links the blob; nrf54lm20b only).
+ * Implements the nrf_axon_platform_* seam the vendor driver core expects, in its
+ * bare-metal flavour: reservations are a power refcount, driver events are called
+ * directly rather than queued, and the IRQ forwards to the vendor handler.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

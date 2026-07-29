@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_nrf54lm20b.h - Nordic nRF54LM20B silicon-level constants
+ * tiku_device_nrf54lm20b.h - Nordic nRF54LM20B silicon-level constants.
  *
- * The nRF54LM20B is the nRF54LM20A plus the 128 MHz Axon NPU (NRF_AXONS @
- * 0x50056000, IRQn 86, MCU power domain); every other block, the memory map
- * and the IRQ enum are identical (diff-proven).  Like the A it is an Arm
- * Cortex-M33 (128 MHz max, FPv5-SP FPU, TrustZone,
- * ARMv8-M MPU) wireless MCU -- the higher-memory sibling of the nRF54L15 in
- * the same nRF54L family (identical PLL/clock/RRAMC/GRTC architecture), with:
- *   - 512 KB on-chip SRAM at 0x20000000 (RAM 256 KB + RAM2 256 KB, contiguous).
- *   - ~2 MB on-chip RRAM (write-in-place non-volatile memory) at 0x0, holding
- *     code + the TikuOS persistent/config region.  RRAM needs no erase cycle:
- *     a WEN write-enable gate behind the RRAMC controller maps onto
- *     tiku_mpu_unlock_nvm()/lock_nvm() exactly like MSP430 FRAM.
- *   - Four GPIO ports (P0 / P1 / P2 / P3), modelled as virtual ports 1/2/3/4
- *     (one more than the nRF54L15, which lacks P3).
- *   - GRTC (global RTC, 1 MHz off LFCLK) as the kernel tick source.
- *   - DMA-based UARTE peripherals for the console.
- *
- * The device runs All-Secure (no TF-M / SPM); peripherals use the secure
- * (_S, 0x5xxx_xxxx) aliases.  See arch/nordic/mdk/nrf54lm20a.h.
+ * The nRF54LM20A plus the 128 MHz Axon NPU at 0x50056000, IRQn 86, in the MCU
+ * power domain.  Every other block, the memory map and the IRQ enum are identical
+ * to the A (diff-proven).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

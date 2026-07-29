@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ieee154_arch.h - from-scratch IEEE 802.15.4-2006 250 kbps PHY on the
- *                       nRF54L on-die RADIO (N1 PHY bring-up; kintsugi/
- *                       radio.md N-track).  Clean-room: MDK registers only,
- *                       no SoftDevice / OpenThread / sdk-nrf.
+ * tiku_ieee154_arch.h - from-scratch IEEE 802.15.4 250 kbps PHY (nRF54L RADIO).
  *
- * The RADIO is a single peripheral shared with the BLE facade; 15.4 mode
- * REPLACES the link config (MODE/PCNF/CRC/SFD).  Callers must own the
- * radio (idle BLE first) and restore BLE with tiku_ieee154_arch_mode_ble()
- * when done.  PHY only -- no addressing, ACK, or CSMA yet (that is N2).
+ * The RADIO is shared with the BLE facade and 15.4 mode REPLACES the link config,
+ * so a caller must own the radio and restore BLE with _mode_ble() when done.
+ * Clean-room: MDK registers only, no SoftDevice, OpenThread or sdk-nrf.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

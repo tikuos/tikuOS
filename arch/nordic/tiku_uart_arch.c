@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_arch.c - UARTE console backend (nRF54L, EasyDMA)
+ * tiku_uart_arch.c - UARTE console backend (nRF54L, EasyDMA).
  *
- * The nRF54L UARTE has no byte FIFO register: every transfer goes through
- * EasyDMA against a RAM buffer.  For a console this means:
- *   TX -- copy one byte into a RAM bounce buffer, point DMA.TX at it, trigger
- *         TASKS_DMA.TX.START, spin on EVENTS_DMA.TX.END.
- *   RX -- a single-byte DMA into a RAM bounce byte; the DMARXEND ISR copies
- *         the byte into a software ring and re-arms the DMA itself (software
- *         re-arm, NOT the DMA_RX_END->DMA_RX_START hardware short).  The
- *         deliberate tradeoff: the short's zero-gap re-arm keeps receiving
- *         during an IRQ blackout but silently overwrites the bounce byte --
- *         loss with no trace.  With software re-arm, blackout bytes back up
- *         into the UARTE's internal RX buffer and a genuine hardware overrun
- *         raises ERRORSRC.OVERRUN, which the ISR counts -- loss is DETECTED
- *         (the uart overrun-provocation C-unit verifies exactly this).  The
- *         re-arm gap is ISR-latency-sized (~us) against 86 us/byte at 115200,
- *         so no bytes are lost on the normal path.
- *
- * EasyDMA can only reach RAM (0x2000_0000), so the bounce buffers are static
- * .bss and word-aligned.
+ * No byte FIFO, so both directions move through EasyDMA against static aligned
+ * bounce buffers.  RX re-arms in software, not via the hardware short, so an IRQ
+ * blackout raises a countable overrun instead of silently overwriting.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

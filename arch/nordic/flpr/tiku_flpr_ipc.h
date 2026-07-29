@@ -5,22 +5,24 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_flpr_ipc.h - shared-memory layout between the Cortex-M33 app core
- *                   and the FLPR RISC-V coprocessor.
+ * tiku_flpr_ipc.h - shared-memory layout between the M33 app core and FLPR.
  *
- * Included by BOTH builds (arm-none-eabi and riscv-none-elf), so it must
- * stay plain C99 + <stdint.h>.  The FLPR image lives in a carve at the top
- * of SRAM; the LAST kilobyte of the carve is this shared page.  SRAM is
- * uncached for both masters, so `volatile` plus write-payload-then-flag
- * ordering is the whole coherency story.
+ * Included by both the arm-none-eabi and riscv-none-elf builds, so it stays plain
+ * C99 plus <stdint.h>.  The shared page is the last kilobyte of the FLPR SRAM
+ * carve; the layout contract is below.
  *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
  * Layout contract (see also the app linker script and tiku_flpr.ld):
  *   0x2003C000  FLPR .text/.rodata/.data/.bss   (image, loader-placed)
  *   ...         FLPR stack (grows down from the shared page)
  *   0x2003FC00  tiku_flpr_shared_t              (this header)
  *
- * SPDX-License-Identifier: Apache-2.0
+ * SRAM is uncached for both masters, so `volatile` plus
+ * write-payload-then-flag ordering is the whole coherency story.
  */
+
 
 #ifndef TIKU_FLPR_IPC_H_
 #define TIKU_FLPR_IPC_H_

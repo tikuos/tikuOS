@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_flpr_main.c - FLPR coprocessor firmware (F1: liveness heartbeat).
+ * tiku_flpr_main.c - FLPR coprocessor firmware (liveness heartbeat).
  *
- * Runs on the nRF54L15's VPR RISC-V core out of the SRAM carve.  F1 scope
- * is deliberately tiny: stamp the magic (proves the crt reached C), then
- * bump the heartbeat forever (proves steady-state life, visible to the
- * app core through /sys/flpr/heartbeat).  The pacing loop keeps the bump
- * rate in the ~kHz class so the counter is obviously moving yet reads
- * stay meaningful across a slow console.
+ * Runs on the VPR RISC-V core out of the SRAM carve: stamp the magic to prove the
+ * crt reached C, then bump a heartbeat forever so the app core can see steady-state
+ * life through /sys/flpr/heartbeat.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

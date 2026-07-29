@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_nrf54lm20_dk.h - Nordic nRF54LM20-DK (PCA10184) GPIO assignments
+ * tiku_board_nrf54lm20_dk.h - Nordic nRF54LM20-DK (PCA10184) GPIO assignments.
  *
- * Pin assignments are from the nRF54LM20 DK Hardware User Guide (v0.3.4).
- * GPIO helpers take a PHYSICAL port number (0/1/2/3 == P0/P1/P2/P3) matching
- * the board silk (e.g. P1.22 -> port 1, pin 22); the arch GPIO layer maps that
- * to the port base.
- *
- * Board silk numbers LEDs/buttons 0..3; TikuOS uses 1-indexed LED1..LED4 /
- * BTN1..BTN4, so silk "LED 0" is TikuOS LED1, etc.
+ * Pin assignments from the DK hardware user guide.  Helpers take a physical port
+ * matching the board silk.  Silk numbers LEDs and buttons from 0 while TikuOS is
+ * 1-indexed, so silk "LED 0" is TikuOS LED1.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

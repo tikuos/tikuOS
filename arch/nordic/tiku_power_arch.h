@@ -7,16 +7,9 @@
  *
  * tiku_power_arch.h - nRF54L power and performance configuration.
  *
- * Two registers this port had never written, both found by measuring the board
- * against its own datasheet: the instruction/data cache, and the DC/DC
- * converter.  Neither is subtle -- each is one enable bit -- and between them
- * they account for most of the gap between the datasheet's 2.6 mA running
- * CoreMark and the 6.76 mA this port measured doing nothing.
- *
- * Kept out of the clock file on purpose.  Clock setup has a hard ordering
- * constraint (the core frequency may only be chosen before any peripheral
- * requests the HF clock); these two do not, and mixing them would invite
- * someone to "simplify" the ordering later.
+ * Two enable bits, the instruction/data cache and the DC/DC converter, which
+ * between them account for most of the measured idle-current gap.  Kept out of the
+ * clock file deliberately: clock setup has an ordering constraint and these do not.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.h - nRF54L I2C (TWIM) arch header
+ * tiku_i2c_arch.h - nRF54L I2C (TWIM) arch header.
  *
- * Blocking TWIM (I2C master) backend for the nRF54L (see tiku_i2c_arch.c).
- * These prototypes mirror the RP2350 arch header so the interface layer
- * (interfaces/bus/tiku_i2c_bus.c) and the I2C HAL routing (hal/tiku_i2c_hal.h)
- * resolve without implicit declarations on Nordic.
+ * Blocking TWIM master backend.  These prototypes mirror the RP2350 arch header
+ * so the interface layer and the I2C HAL routing resolve without implicit
+ * declarations.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

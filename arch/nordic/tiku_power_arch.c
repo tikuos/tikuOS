@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_power_arch.c - nRF54L cache + DC/DC.  See tiku_power_arch.h for why.
+ * tiku_power_arch.c - nRF54L cache and DC/DC enables.
  *
- * HOW THESE WERE FOUND.  A Joulescope on the LM20-DK's P14 header measured the
- * board drawing 6.76 mA with the shell idle, against a datasheet figure of
- * 2.6 mA for the same part running CoreMark.  Doing nothing cost more than
- * doing work.  Chasing that gap turned up three registers the port had never
- * written -- the cache and the DC/DC live here; the third (an idle hook) is
- * the scheduler's, not the arch's.
+ * A Joulescope measured the LM20-DK idling at 6.76 mA against a datasheet 2.6 mA
+ * running CoreMark -- doing nothing cost more than doing work.  The cache and the
+ * DC/DC are two of the three registers that gap turned out to be.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

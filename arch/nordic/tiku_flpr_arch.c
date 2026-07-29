@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_flpr_arch.c - nRF54L15 FLPR (VPR RISC-V) coprocessor control.
+ * tiku_flpr_arch.c - nRF54L FLPR (VPR RISC-V) coprocessor control.
  *
- * The FLPR firmware is built by the RISC-V sub-build (arch/nordic/flpr/),
- * objcopy'd to a flat binary and embedded into this application image as a
- * binary blob (_binary_* symbols).  Starting the coprocessor is then pure
- * software: copy the blob into the SRAM carve, point VPR00.INITPC at the
- * carve base (the crt0 `_start` is the first instruction by linker-script
- * construction) and set CPURUN.EN.  Stopping clears CPURUN; a subsequent
- * start reloads the image so the firmware always boots a fresh world.
- *
- * The blob contains .text/.rodata/.data; .bss is zeroed by the FLPR crt0
- * itself.  The shared IPC page (top 1 KB of the carve, tiku_flpr_ipc.h)
- * is scrubbed here before each start so stale magic/heartbeat values can
- * never masquerade as liveness.
+ * Copies the embedded FLPR image into the SRAM carve, points VPR00.INITPC at the
+ * base and sets CPURUN; a restart reloads the image so the firmware always boots
+ * fresh.  The shared IPC page is scrubbed first so stale values cannot read as live.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

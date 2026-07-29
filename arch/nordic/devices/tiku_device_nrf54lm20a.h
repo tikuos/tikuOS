@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_nrf54lm20a.h - Nordic nRF54LM20A silicon-level constants
+ * tiku_device_nrf54lm20a.h - Nordic nRF54LM20A silicon-level constants.
  *
- * The nRF54LM20A is an Arm Cortex-M33 (128 MHz max, FPv5-SP FPU, TrustZone,
- * ARMv8-M MPU) wireless MCU -- the higher-memory sibling of the nRF54L15 in
- * the same nRF54L family (identical PLL/clock/RRAMC/GRTC architecture), with:
- *   - 512 KB on-chip SRAM at 0x20000000 (RAM 256 KB + RAM2 256 KB, contiguous).
- *   - ~2 MB on-chip RRAM (write-in-place non-volatile memory) at 0x0, holding
- *     code + the TikuOS persistent/config region.  RRAM needs no erase cycle:
- *     a WEN write-enable gate behind the RRAMC controller maps onto
- *     tiku_mpu_unlock_nvm()/lock_nvm() exactly like MSP430 FRAM.
- *   - Four GPIO ports (P0 / P1 / P2 / P3), modelled as virtual ports 1/2/3/4
- *     (one more than the nRF54L15, which lacks P3).
- *   - GRTC (global RTC, 1 MHz off LFCLK) as the kernel tick source.
- *   - DMA-based UARTE peripherals for the console.
- *
- * The device runs All-Secure (no TF-M / SPM); peripherals use the secure
- * (_S, 0x5xxx_xxxx) aliases.  See arch/nordic/mdk/nrf54lm20a.h.
+ * The higher-memory sibling of the nRF54L15 with identical clock, RRAMC and GRTC
+ * architecture: 512 KB SRAM in two contiguous banks, ~2 MB RRAM, and a fourth GPIO
+ * port the L15 lacks.  All-Secure, so peripherals use the _S aliases.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

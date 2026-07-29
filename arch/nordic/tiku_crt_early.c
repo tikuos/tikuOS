@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crt_early.c - Nordic nRF54L15 (Cortex-M33) startup
+ * tiku_crt_early.c - Nordic nRF54L (Cortex-M33) startup.
  *
- * The nRF54L boots directly from RRAM at 0x0 -- no XIP, no second-stage
- * bootloader, no image header (unlike RP2350).  The CPU loads SP from
- * word 0 and PC from word 1 of the vector table, which the linker places
- * at the very start of RRAM.  This file provides:
- *   1. Vector table (16 system exceptions + 272 external IRQ slots), all
- *      defaulting to a debuggable spin; real handlers override the weak
- *      aliases by name.
- *   2. Reset handler: mask IRQs, set VTOR, apply factory FICR trims (the
- *      one mandatory bit of the MDK SystemInit -- analog/clock trims), copy
- *      .data, zero .bss, leave .uninit for warm-reset state, call main().
- *
- * The port is All-Secure and built WITHOUT -mcmse, so the TrustZone parts
- * of the MDK SystemInit (SAU / KMU / TAMPC) are intentionally skipped;
- * only the trim application (its non-CMSE path) is reproduced here.
+ * The part boots directly from RRAM at 0x0 -- no XIP, bootloader or image header.
+ * This file supplies the vector table of weak spin handlers and a reset handler
+ * that applies the factory FICR trims, copies .data, zeroes .bss and calls main.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

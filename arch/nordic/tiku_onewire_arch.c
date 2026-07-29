@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.c - nRF54L 1-Wire bit-bang (stub — not yet wired)
+ * tiku_onewire_arch.c - nRF54L 1-Wire bit-bang (stub, not yet wired).
  *
- * Honest placeholder for the GPIO bit-bang 1-Wire driver. init/reset
- * report failure and bus reads return the idle-high pattern (bit = 1,
- * byte = 0xFF) rather than fake device data. A real bit-bang backend
- * (which needs a microsecond time source) is a later phase.
+ * An honest placeholder: init and reset report failure and bus reads return the
+ * idle-high pattern rather than fabricated device data.  A real bit-bang backend
+ * needs a microsecond time source and is a later phase.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - nRF54L busy delays (SysTick) + system reset
+ * tiku_cpu_common.c - nRF54L busy delays (SysTick) and system reset.
  *
- * Delays use SysTick as a polled one-shot down-counter clocked from the
- * processor clock.  SysTick is core-internal and runs whether or not a
- * debugger is attached -- unlike the DWT cycle counter, whose CYCCNT can be
- * frozen without an active trace clock (an early nRF54L bring-up used DWT and
- * hung the delay loop when run standalone, printing nothing over UART).  The
- * kernel tick will live on the GRTC (low-power, always-on), so SysTick stays
- * free for busy-delays in the full build too.
+ * Delays poll SysTick as a one-shot down-counter, because it is core-internal and
+ * runs with or without a debugger attached -- unlike DWT's CYCCNT, which can be
+ * frozen with no trace clock and once hung the delay loop on a standalone boot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

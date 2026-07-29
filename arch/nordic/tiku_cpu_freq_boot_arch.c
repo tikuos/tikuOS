@@ -5,35 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_arch.c - nRF54L clock/power boot bring-up
+ * tiku_cpu_freq_boot_arch.c - nRF54L clock and power boot bring-up.
  *
- * Programs the core PLL to 128 MHz explicitly.  The PLL's reset default is
- * CK64M, and whether a given boot arrives at 64 or 128 MHz turns out to
- * depend on the debug session: with nrfutil/J-Link attached CURRENTFREQ
- * reads CK128M (the Phase-0 observation this file used to trust), but a
- * STANDALONE boot runs at 64 MHz -- which made every SysTick busy-delay 2x
- * slow (surfaced by the watchdog C-unit test: 500 ms kick delays stretched
- * past the 1 s timeout, reset-looping the device).  Setting PLL.FREQ here
- * removes the ambiguity; the delay layer additionally reads CURRENTFREQ so
- * its math is correct at either speed.
- *
- * Also starts the 32 MHz HFXO so the UARTE (16 MHz reference) and, later,
- * the radio have an accurate high-frequency source.  A start-timeout
- * latches a clock-fault flag reported through the /sys clock view.
- *
- * Erratum 39 ("Device can behave erratically after XOSTART"): if XOSTART
- * is triggered while the PLLSTART task has never been triggered and the
- * CPU later sleeps, peripherals OUTSIDE the MCU power domain -- i.e. the
- * RADIO -- can behave erratically and the device can become unresponsive.
- * TikuOS idles in WFI constantly (tickless), so the prescribed workaround
- * is mandatory here: trigger CLOCK.TASKS_PLLSTART (pin the PLL on,
- * independent of automatic clock requests) BEFORE CLOCK.TASKS_XOSTART.
- * TikuOS never issues XOSTOP, so the paired PLLSTOP is not needed.
- *
- * The HFXO wait also covers EVENTS_XOTUNED: XOSTART kicks an automatic
- * load-capacitor tuning pass, and only a TUNED crystal is radio-grade
- * (carrier accuracy).  An untuned-but-running XO is fine for UARTE, so
- * XOTUNED timeout latches the same non-fatal clock-fault flag.
+ * Programs the core PLL to 128 MHz explicitly, because a standalone boot
+ * otherwise lands at 64 MHz while a debug session reports 128.  Also starts the
+ * 32 MHz HFXO; see the erratum 39 note at the PLLSTART/XOSTART ordering.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -117,9 +93,17 @@ void tiku_cpu_boot_nordic_init(void)
         tiku_nordic_clock_fault = 1;
     }
 
-    /* Erratum 39: pin the PLL on via its explicit task BEFORE XOSTART (see
-     * the header comment).  The PLL already clocks the core, so PLLSTARTED
-     * reports quickly; bounded anyway. */
+    /*
+     * ERRATUM 39 -- "device can behave erratically after XOSTART".  If XOSTART
+     * is triggered while PLLSTART never was, and the CPU later sleeps, then
+     * peripherals outside the MCU power domain (the RADIO) can misbehave and
+     * the device can hang.  TikuOS idles in WFI constantly, so the workaround
+     * is mandatory: pin the PLL on with its explicit task BEFORE XOSTART.  No
+     * paired PLLSTOP is needed because XOSTOP is never issued.
+     *
+     * The PLL already clocks the core, so PLLSTARTED reports quickly; bounded
+     * anyway.
+     */
     NRF_CLOCK_S->EVENTS_PLLSTARTED = 0U;
     NRF_CLOCK_S->TASKS_PLLSTART    = 1U;
     spin = TIKU_NORDIC_XOSTART_SPIN;

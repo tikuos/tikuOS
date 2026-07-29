@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.h - nRF54L 1-Wire arch header (stub port)
+ * tiku_onewire_arch.h - nRF54L 1-Wire arch header (stub port).
  *
- * The 1-Wire backend is a stub on this port (see tiku_onewire_arch.c); a real
- * bit-banged driver is a later phase.  These prototypes mirror the RP2350 arch
- * header so the interface layer (interfaces/onewire/tiku_onewire.c) and the
- * 1-Wire HAL routing resolve without implicit declarations on Nordic.
+ * The backend is a stub; these prototypes mirror the RP2350 arch header so the
+ * interface layer and the 1-Wire HAL routing resolve without implicit
+ * declarations.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

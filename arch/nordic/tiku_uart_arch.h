@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_arch.h - UARTE console backend for printf (nRF54L, EasyDMA)
+ * tiku_uart_arch.h - UARTE console backend for printf (nRF54L, EasyDMA).
  *
- * Mirrors arch/arm-rp2350/tiku_uart_arch.h.  The nRF54L UARTE is DMA-only
- * (EasyDMA), so TX transmits a byte at a time from a small RAM bounce buffer
- * and RX arms a single-byte DMA that re-arms on each read.  The UARTE
- * instance and pins come from the board header (TIKU_BOARD_CONSOLE_UARTE,
- * TIKU_BOARD_UART_TX_PORT/PIN, ...).
+ * Mirrors the RP2350 UART arch header.  The UARTE is DMA-only, so TX sends a byte
+ * at a time from a bounce buffer and RX arms a single-byte DMA that re-arms per
+ * read.  Instance and pins come from the board header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

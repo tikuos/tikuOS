@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.h - nRF54L system-tick (GRTC by default; TIMER10 fallback)
+ * tiku_timer_arch.h - nRF54L system tick (GRTC by default, TIMER10 fallback).
  *
- * The system clock runs at TIKU_CLOCK_ARCH_SECOND ticks per second.  Default
- * source is the GRTC (Global RTC): its 1 MHz SYSCOUNTER is already running
- * (started by the boot ROM) and lives in the always-on low-frequency domain,
- * so the tick keeps firing through deep sleep -- the low-power foundation.  A
- * compare channel (CC0) is armed each tick by an alternating 7812/7813-count
- * step, averaging exactly 7812.5 = 128 Hz with no drift, and re-armed relative
- * to the previous compare so ISR latency never accumulates.  SysTick stays
- * free for busy-delays (the DWT cycle counter freezes without a debugger).
- *
- * Build with -DTIKU_NORDIC_TICK_TIMER10 to fall back to the bring-up tick: a
- * 32-bit TIMER10 at 16 MHz, CC0=125000, COMPARE0->CLEAR short (exact 128 Hz
- * but stops when HFCLK gates in deep sleep).
+ * The GRTC source keeps firing through deep sleep, which is the low-power
+ * foundation; ticks are accounted against a half-count anchor so the rate re-locks
+ * to the crystal and never drifts.  SysTick stays free for busy-delays.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - nRF54L I2C master (TWIM, EasyDMA)
+ * tiku_i2c_arch.c - nRF54L I2C master (TWIM, EasyDMA).
  *
- * Blocking, polled I2C master for the nRF54L15.  The nRF54L TWIM uses the
- * "new" EasyDMA model: a transaction is described by DMA.TX/RX.PTR +
- * DMA.TX/RX.MAXCNT, kicked off by TASKS_DMA.TX.START / TASKS_DMA.RX.START,
- * and terminated on the bus by a STOP condition wired up through the SHORTS
- * register (LASTTX->STOP for a write, LASTRX->STOP for a read, and
- * LASTTX->STARTRX + LASTRX->STOP for a combined write-then-read).  Completion
- * is the EVENTS_STOPPED event; a slave NACK additionally latches ERRORSRC
- * (ANACK = address NACK, DNACK = data NACK) and auto-stops the transfer, so
- * polling EVENTS_STOPPED catches both success and NACK.  EasyDMA can only
- * reach RAM; the interface passes the caller's RAM buffers straight through.
- *
- * Instance + pins (see the block below): TWIM22 on P1.12 (SCL) / P1.11 (SDA).
- * TWIM20 is *not* used because it aliases the console UARTE20 (SERIAL20).
- * The pin choice is a documented placeholder to confirm against the DK
- * schematic; override it from the board header without touching this file.
- *
- * Field names were taken from the vendored MDK (nrf54l15_types.h,
- * NRF_TWIM_Type) -- this is the new DMA layout, not the older nRF52 TWIM.
+ * Blocking polled master on the new EasyDMA model: pointers and counts describe
+ * the transaction and SHORTS wire the STOP condition, so EVENTS_STOPPED catches
+ * both success and a NACK.  EasyDMA reaches only RAM, so caller buffers pass through.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

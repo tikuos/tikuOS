@@ -5,43 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.c - nRF54L SAADC one-shot single-ended driver
+ * tiku_adc_arch.c - nRF54L SAADC one-shot single-ended driver.
  *
- * The nRF54L SAADC returns every conversion through EasyDMA: the result is
- * written to a RAM buffer, never read from a data register.  A blocking
- * one-shot single-ended read is therefore:
- *
- *   configure CH[0].PSELP (input) + CH[0].CONFIG (gain/reference/acq time,
- *   single-ended) -> set RESOLUTION -> point RESULT.PTR/MAXCNT at a static
- *   RAM buffer -> TASKS_START, wait EVENTS_STARTED -> TASKS_SAMPLE, wait
- *   EVENTS_END -> read the 16-bit sample from RAM -> TASKS_STOP.
- *
- * TASKS_SAMPLE requires that the DMA has started (EVENTS_STARTED set), so the
- * START->STARTED handshake precedes the sample trigger.  EasyDMA can only
- * reach RAM, so the result buffer is static, volatile and word-aligned.
- *
- * The reference is the internal 0.9 V band-gap and the channel gain is fixed
- * at 1/4, giving a 0..3.6 V single-ended full scale that spans the whole
- * nRF54L VDD range without clipping.  The interface's reference selector
- * (AVCC / 1V2 / 2V0 / 2V5) has no nRF54L equivalent, so it is accepted but
- * ignored -- the same contract as the RP2350 port.  RESOLUTION follows the
- * requested 8/10/12-bit setting; the SAADC right-aligns the sample so the raw
- * value already fits the interface's 0..255 / 0..1023 / 0..4095 range.
- *
- * Channel -> analog-input map (nRF54L15 product specification; every analog
- * input is on physical port P1):
- *   ch 0..7 -> AIN0..AIN7 = P1.04 P1.05 P1.06 P1.07 P1.11 P1.12 P1.13 P1.14
- *   ch 31   -> internal VDD rail            (TIKU_ADC_CH_BATTERY)
- *   ch 30   -> unsupported: the nRF54L die temperature is a separate TEMP
- *              peripheral, not a SAADC input, so TIKU_ADC_CH_TEMP returns an
- *              error rather than a fabricated value.
- *
- * On the nRF54L15-DK several AINs are already taken by board functions:
- * AIN0/AIN1 (P1.04/05) are the console UART, AIN6 (P1.13) is BTN1 and AIN7
- * (P1.14) is LED4.  The free analog pins for a bring-up read are AIN2/AIN3/
- * AIN4/AIN5 (P1.06/07/11/12) -- Nordic routes its DK ADC examples to AIN4
- * (P1.11).  The AIN<->pin routing is from the datasheet and should be
- * confirmed on hardware.
+ * Every conversion returns through EasyDMA into a static word-aligned RAM buffer,
+ * so the sequence is START/STARTED, then SAMPLE/END.  The reference is the 0.9 V
+ * band-gap at 1/4 gain; TIKU_ADC_CH_TEMP errors, since die temp is not a SAADC input.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

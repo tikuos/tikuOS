@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.h - nRF54L GPIO primitives (physical port/pin addressing)
+ * tiku_gpio_arch.h - nRF54L GPIO primitives (physical port/pin addressing).
  *
- * Helpers take a PHYSICAL port number (0/1/2 == P0/P1/P2) and a pin index
- * (0..31) matching the board silk (P<port>.<pin>).  The nRF GPIO block uses
- * DIRSET/OUTSET/OUTCLR and a per-pin PIN_CNF[] register; these helpers wrap
- * that so board headers can express LEDs/buttons declaratively.  The virtual
- * VFS port numbering (1/2/3) is a separate concern handled in the VFS layer.
+ * Helpers take a physical port (0/1/2) and pin index matching the board silk, so
+ * board headers can express LEDs and buttons declaratively.  The VFS's virtual
+ * port numbering is a separate concern handled in that layer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

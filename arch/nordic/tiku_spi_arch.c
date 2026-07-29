@@ -5,45 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - SPI master for nRF54L (SPIM + EasyDMA, blocking poll)
+ * tiku_spi_arch.c - SPI master for nRF54L (SPIM + EasyDMA, blocking poll).
  *
- * Master-only, 8-bit frames, synchronous polled I/O on the nRF54L SPIM
- * peripheral.  The nRF54L SPIM has no byte FIFO: every transfer moves
- * through EasyDMA against a RAM buffer, using the "new" register layout
- * (DMA.TX/RX.PTR/MAXCNT) rather than the older nRF52 TXD/RXD block.  A
- * single transaction is:
- *
- *   1. clear EVENTS_END
- *   2. DMA.TX.PTR/MAXCNT  <- transmit buffer / length
- *      DMA.RX.PTR/MAXCNT  <- receive buffer  / length
- *   3. trigger TASKS_START
- *   4. spin on EVENTS_END
- *
- * (TASKS_START + EVENTS_END are retained on the nRF54L SPIM even though
- * the DMA buffer registers moved; the TASKS_DMA/EVENTS_DMA sub-blocks
- * here only drive the RX pattern-matcher, which this driver does not
- * use -- verified against the MDK NRF_SPIM_Type struct.)
- *
- * EasyDMA can only reach RAM (0x2000_0000..).  The interface hands the
- * transmit pointer straight through from the caller, and callers legally
- * pass RRAM/flash-resident constants (e.g. an e-paper image or LUT living
- * in .rodata).  Those cannot be DMA sources, so the transmit path is
- * staged through a static RAM bounce buffer in bounded chunks -- this
- * makes tiku_spi_arch_write()/write_read() accept any source address,
- * matching the CPU-copy behaviour of the PL022 (RP2350) backend.  Receive
- * data lands directly in the caller's buffer (a receive destination is by
- * definition writable RAM); a defensive RAM-reachability check rejects a
- * non-RAM destination with TIKU_SPI_ERR_PARAM rather than faulting.
- *
- * Instance & pins (see the block above the config defines): SPIM21 on
- * P1.11/P1.12/P1.15.  The nRF54L15-DK board header carries no SPI pin
- * assignment yet, so these are a documented, board-overridable default
- * to be confirmed against the DK schematic -- not a hardware-verified
- * mapping.
- *
- * Received bytes are the real MISO levels: with no slave driving the bus
- * an idle (pulled-up) MISO reads 0xFF, which is the honest hardware
- * result, not fabricated data.
+ * The SPIM has no byte FIFO, so every transfer moves through EasyDMA, which can
+ * only reach RAM.  Transmit is staged through a bounce buffer so callers may pass
+ * .rodata sources; a non-RAM receive destination is rejected rather than faulting.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

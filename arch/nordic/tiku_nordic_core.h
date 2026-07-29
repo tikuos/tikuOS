@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nordic_core.h - hand-rolled Cortex-M33 core intrinsics for the Nordic
- *                      port.  Replaces the CMSIS core_cm33.h dependency with
- *                      the small subset TikuOS actually uses: system reset,
- *                      vector-table relocation, SysTick, NVIC enable/priority,
- *                      and the barrier / interrupt-mask intrinsics.  This is
- *                      the same self-contained approach as arm-rp2350, keeping
- *                      the vendored MDK register headers free of any CMSIS
- *                      core requirement.
+ * tiku_nordic_core.h - hand-rolled Cortex-M33 core intrinsics.
  *
- * All addresses are architectural (ARMv8-M Main, Cortex-M33) and identical
- * across every nRF54L variant, so nothing here is device-specific.
+ * Replaces the CMSIS core_cm33.h dependency with the subset actually used: system
+ * reset, vector relocation, SysTick, NVIC enable and priority, and the barrier and
+ * mask intrinsics.  All addresses are architectural, so nothing is device-specific.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

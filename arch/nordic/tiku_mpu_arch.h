@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.h - nRF54L MPU / NVM-gate arch header
+ * tiku_mpu_arch.h - nRF54L MPU and NVM-gate arch header.
  *
- * The MPU HAL (hal/tiku_mpu_hal.h) declares the tiku_mpu_arch_* API.  On this
- * port the load-bearing pair is unlock_nvm()/lock_nvm() (the RRAMC WEN write
- * gate); the MSP430-style segment-access-mask is a software shadow (same
- * bookkeeping model as the rp2350/ambiq ports) whose write bits track the WEN
- * window, so the portable MPU semantics tests exercise the same state machine
- * on every port.  ARMv8-M MPU region protection of the persistent range is a
- * later hardening step.
+ * The load-bearing pair on this port is unlock_nvm()/lock_nvm(), the RRAMC WEN
+ * gate; the segment-access-mask is a software shadow whose write bits track that
+ * window.  MPU region protection of the persistent range is a later step.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

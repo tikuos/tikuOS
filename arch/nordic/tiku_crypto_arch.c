@@ -5,31 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crypto_arch.c - nRF54L15 CRACEN CryptoMaster offload backend.
+ * tiku_crypto_arch.c - nRF54L CRACEN CryptoMaster offload backend.
  *
- * The CryptoMaster is a Silex Insight DMA front-end to fused symmetric
- * engines (BA411E AES, BA413 hash).  An operation is a chain of FETCH
- * descriptors -- configuration words routed to the selected engine's
- * config interface, then data routed to its data interface -- plus one
- * PUSH descriptor for the result:
- *
- *   desc = { addr, next, length, tag }
- *     next  = 0x1 terminates the chain
- *     length bit 29 = realign to the FIFO word boundary after this block
- *     tag   = engine id | 0x10 (config iface) | 0x20 ("last" strobe)
- *             | datatype << 6 | (config-register offset << 8)
- *
- * Engine ids: AES = 0x1, hash = 0x3, bypass = 0xF (from the BSD-licensed
- * nrfx HAL, which documents the wire format; this implementation is our
- * own).  The engine is enabled for exactly the duration of one operation
- * (CRACEN.ENABLE is read-modify-write shared with the TRNG's RNG bit and
- * gated off after, same discipline as tiku_trng_arch.c), then the DMA is
- * soft-reset so no state leaks between operations.
- *
- * The BA413 hash-engine CONFIG word for SHA-256 was determined EMPIRICALLY
- * on this die against known SHA-256 vectors via the cryptoprobe shell
- * command (mode field one-hot, hardware padding enabled) -- see the
- * bring-up notes in kintsugi/nrf54l15_phase6_coproc_radio_cracen.md.
+ * An operation is a chain of FETCH descriptors routing config then data to the
+ * selected engine, plus one PUSH for the result.  The engine is enabled only for
+ * the operation and the DMA is soft-reset after, so no state leaks between them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

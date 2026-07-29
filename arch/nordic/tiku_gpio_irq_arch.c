@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_irq_arch.c - nRF54L GPIO edge interrupts (GPIOTE)
+ * tiku_gpio_irq_arch.c - nRF54L GPIO edge interrupts (GPIOTE).
  *
- * Bridges the platform-agnostic (port, pin, edge) request onto the nRF54L
- * GPIOTE peripheral and broadcasts TIKU_EVENT_GPIO on each matching edge.
- *
- * nRF54L15 splits GPIO across two power domains, each served by its own
- * GPIOTE instance:
- *
- *     P0        (LP / always-on domain)  -> GPIOTE30, IRQ line 0 = 268
- *     P1, P2    (main peripheral domain) -> GPIOTE20, IRQ line 0 = 218
- *
- * Each GPIOTE instance owns 8 event channels.  A channel's CONFIG register
- * carries MODE=Event, the pin (PSEL) and port (PORT, a 4-bit field that lets
- * one instance address several ports in its domain), and the edge POLARITY
- * (LoToHi / HiToLo / Toggle -- Toggle gives "both edges" in hardware, so
- * TIKU_GPIO_EDGE_BOTH needs no software IES flipping).  A firing channel
- * latches EVENTS_IN[n]; with its INTENSET0 bit set that raises IRQ line 0,
- * whose ISR decodes the port/pin back out of CONFIG and posts the event.
+ * GPIO spans two power domains with a GPIOTE instance each, so a request is
+ * routed to GPIOTE30 for P0 or GPIOTE20 for P1/P2.  Toggle polarity gives both
+ * edges in hardware, so EDGE_BOTH needs no software flipping.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

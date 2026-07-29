@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_flpr_arch.h - nRF54L15 FLPR (VPR RISC-V) coprocessor control.
+ * tiku_flpr_arch.h - nRF54L FLPR (VPR RISC-V) coprocessor control.
  *
- * App-core side of the coprocessor: load the embedded FLPR image into the
- * SRAM carve, start/stop the core (VPR00 INITPC + CPURUN), and read the
- * liveness state the firmware publishes through the shared page
- * (arch/nordic/flpr/tiku_flpr_ipc.h).
+ * App-core side: load the embedded image into the SRAM carve, start and stop the
+ * core, and read the liveness state the firmware publishes through the shared
+ * page.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_config.h - Hardware timer configuration for nRF54L
+ * tiku_htimer_config.h - hardware timer configuration for nRF54L.
  *
- * The htimer backend is a stub on this port for now (see tiku_htimer_arch.c);
- * a real one-shot hardware timer (a spare TIMER instance) is a later phase.
- * This header defines the tick rate the htimer API expresses deadlines in,
- * kept at 1 MHz to match the other ports so any timing math is consistent.
+ * Defines the tick rate the htimer API expresses deadlines in, kept at 1 MHz to
+ * match the other ports so timing math stays consistent.  The backend is TIMER20
+ * (tiku_htimer_arch.c).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

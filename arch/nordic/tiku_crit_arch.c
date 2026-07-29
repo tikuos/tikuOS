@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit_arch.c - nRF54L selective NVIC-mask backend for tiku_crit
+ * tiku_crit_arch.c - nRF54L selective NVIC-mask backend for tiku_crit.
  *
- * Critical execution windows mask interrupt sources at the NVIC, keeping the
- * lines named in the preserve_mask alive -- the same model as the rp2350 and
- * ambiq backends.  (The first cut of this port used PRIMASK and ignored the
- * preserve_mask, which was defensible while the console was polled and the
- * htimer/GPIO IRQs were stubs; with those now live, a preserved htimer must
- * keep firing through a window, so the selective form is required.)
- *
- * nRF54L external IRQs span nine NVIC ISER/ICER words (0..271), so the
- * snapshot covers all nine.  The preserve flags map to the MDK IRQn enum:
- *
- *   TIKU_CRIT_PRESERVE_TICK   -> GRTC 226 (+ TIMER10 133 fallback tick)
- *   TIKU_CRIT_PRESERVE_HTIMER -> TIMER20 202
- *   TIKU_CRIT_PRESERVE_UART   -> SERIAL20 198 + SERIAL30 260
- *   TIKU_CRIT_PRESERVE_GPIO   -> GPIOTE20 218 + GPIOTE30 268
- *
- * I2C/ADC/SPI are polled (no NVIC lines) and the WDT runs in reset mode, so
- * their flags have nothing to keep.  Not nesting-safe (single saved snapshot),
- * matching the rp2350 backend -- the kernel brackets short, non-nested
- * critical sections.
+ * Masks interrupt sources at the NVIC while keeping the lines named in
+ * preserve_mask alive, so a preserved htimer keeps firing through a window.
+ * External IRQs span nine ISER words, so the snapshot covers all nine.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

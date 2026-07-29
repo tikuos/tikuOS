@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.c - nRF54L system tick @ 128 Hz (GRTC, tickless-capable)
+ * tiku_timer_arch.c - nRF54L system tick at 128 Hz (GRTC, tickless-capable).
  *
- * Default source is the GRTC (Global RTC): its 1 MHz SYSCOUNTER already runs
- * (boot ROM starts it) in the always-on low-frequency domain, so the tick
- * survives deep sleep -- and, crucially, TICKLESS idle can stretch the wake
- * straight to the next software-timer deadline instead of waking 128x/second
- * to do nothing.
- *
- * Tick accounting uses a HALF-COUNT ANCHOR: 1 MHz / 128 = 7812.5 counts/tick is
- * fractional, so the anchor is tracked in half-counts (SYSCOUNTER x2), where a
- * tick is exactly 15625 half-counts.  Every accounting point (the compare ISR,
- * a tickless wake) reads the live SYSCOUNTER and advances g_ticks by the WHOLE
- * ticks elapsed since the anchor (one 64-bit divide, O(1) even across a long
- * stretch), then advances the anchor by exactly that many ticks.  So the tick
- * re-locks to the crystal and never drifts, and no tick is lost across a
- * stretched sleep.  g_seconds tracks second-boundaries crossed (preserving any
- * RTC offset from tiku_clock_arch_set_seconds()).
- *
- * Build with -DTIKU_NORDIC_TICK_TIMER10 for the bring-up fallback: a 32-bit
- * TIMER10 at 16 MHz, CC0=125000, COMPARE0->CLEAR short (exact 128 Hz too, but
- * runs off PCLK16M -- stops when HFCLK gates -- and has no tickless backend).
- *
- * SysTick is left free for busy-delays (see tiku_cpu_common.c).
+ * The GRTC's 1 MHz SYSCOUNTER already runs in the always-on domain, so the tick
+ * survives deep sleep and tickless idle can stretch to the next deadline.  1 MHz /
+ * 128 is fractional, so accounting anchors in half-counts: 15625 per tick, exactly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

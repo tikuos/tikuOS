@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_nrf54l15.h - Nordic nRF54L15 silicon-level constants
+ * tiku_device_nrf54l15.h - Nordic nRF54L15 silicon-level constants.
  *
- * The nRF54L15 is an Arm Cortex-M33 (128 MHz max, FPv5-SP FPU, TrustZone,
- * ARMv8-M MPU) wireless MCU with:
- *   - 256 KB on-chip SRAM at 0x20000000.
- *   - 1.5 MB on-chip RRAM (write-in-place non-volatile memory) at 0x0,
- *     holding code + the TikuOS persistent/config region.  RRAM needs no
- *     erase cycle: a WEN write-enable gate behind the RRAMC controller
- *     maps onto tiku_mpu_unlock_nvm()/lock_nvm() exactly like MSP430 FRAM.
- *   - Three GPIO ports (P0 / P1 / P2), modelled as virtual ports 1/2/3.
- *   - GRTC (global RTC, 1 MHz off LFCLK) as the kernel tick source.
- *   - New DMA-based UARTE peripherals for the console.
- *
- * The device runs All-Secure (no TF-M / SPM); peripherals use the secure
- * (_S, 0x5xxx_xxxx) aliases.  See arch/nordic/mdk/nrf54l15.h.
+ * A Cortex-M33 wireless MCU with 256 KB SRAM and 1.5 MB write-in-place RRAM at 0x0
+ * holding code and the persistent region, three GPIO ports, and the GRTC as tick
+ * source.  The device runs All-Secure, so peripherals use the _S aliases.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

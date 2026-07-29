@@ -5,40 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.c - nRF54L15 True Random Number Generator (CRACEN RNG)
+ * tiku_trng_arch.c - nRF54L true random number generator (CRACEN RNG).
  *
- * Hardware: the nRF54L15 has no classic RNG peripheral.  Its entropy
- * source is the ring-oscillator TRNG inside CRACEN (the Crypto
- * Accelerator Engine).  Two register views are involved, both through
- * their secure (_S) aliases since the app runs All-Secure:
- *   - NRF_CRACEN_S      -- the Nordic wrapper; ENABLE.RNG gates power
- *                          and clock to the RNG sub-module.
- *   - NRF_CRACENCORE_S  -- the crypto core; RNGCONTROL.* holds the TRNG
- *                          control / status / FIFO registers.
- *
- * Entropy path (mirrors Nordic's nrfx_cracen driver -- the vendor's
- * validated polled sequence):
- *   1. Enable NRF_CRACEN_S->ENABLE.RNG for the duration of the request.
- *   2. Configure RNGCONTROL: pulse SOFTRST, program the warm-up and
- *      sample-clock counters, then enable with AES conditioning over
- *      four 128-bit blocks (NB128BITBLOCKS = 4).  The AES conditioner
- *      is this silicon's entropy / bias-correction stage -- there is no
- *      Von-Neumann blending field on the nRF54L15, so the conditioning
- *      function is the debiasing.
- *   3. Wait for the FSM to leave RESET/STARTUP, then seed the AES
- *      conditioning key KEY[0..3] from the first four FIFO words.
- *   4. Poll RNGCONTROL.FIFOLEVEL and drain conditioned words from
- *      RNGCONTROL.FIFO[0] (little-endian byte order) until the caller's
- *      buffer is full.
- *   5. Disable NRF_CRACEN_S->ENABLE.RNG so the entropy path draws no
- *      power while idle (the FSM also switches the ring oscillators off
- *      once the FIFO is full).
- *
- * No pseudo-random fallback: if the hardware never delivers within the
- * spin budget the driver returns TIKU_TRNG_ERR_TIMEOUT and writes
- * nothing fabricated into the caller's buffer.  An FSM ERROR (startup /
- * health-test failure) triggers a reset-and-retry inside the same
- * budget rather than emitting suspect bytes.
+ * The part has no classic RNG: entropy comes from the ring-oscillator TRNG inside
+ * CRACEN, conditioned by its AES stage, which is this silicon's debiasing.  No
+ * pseudo-random fallback -- a timeout returns an error and writes nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

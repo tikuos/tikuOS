@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.h - nRF54L watchdog (WDT30) arch interface
+ * tiku_cpu_watchdog_arch.h - nRF54L watchdog (WDT30) arch interface.
  *
- * Mirrors the MSP430 / rp2350 watchdog arch shape.  WDT30 is a 32.768 kHz
- * countdown watchdog: CRV sets the timeout in 32.768 kHz ticks, RREN enables
- * reload request RR[0], and writing the reload key to RR[0] kicks it.  A
- * timeout triggers a system reset (decoded as a watchdog reset by the
- * reset-reason layer).
+ * Mirrors the MSP430 and rp2350 watchdog arch shape over a 32.768 kHz countdown
+ * watchdog whose timeout triggers a system reset, decoded as such by the
+ * reset-reason layer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

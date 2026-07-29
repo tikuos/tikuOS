@@ -5,14 +5,30 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_radio_arch.c - nRF54L15 2.4 GHz RADIO: BLE legacy advertising (TX)
- *                     plus a diagnostic receiver probe.
+ * tiku_radio_arch.c - nRF54L 2.4 GHz RADIO: BLE legacy advertising plus a receiver probe.
  *
- * From-scratch BLE driver against the MDK register map (no SoftDevice, no
- * sdk-nrf).  Broadcaster only: it transmits a legacy ADV_NONCONN_IND PDU on
- * the three primary advertising channels (37/38/39).  Connections, scanning,
- * and 802.15.4 are separate phases.
+ * A from-scratch broadcaster against the MDK register map -- no SoftDevice, no
+ * sdk-nrf -- transmitting ADV_NONCONN_IND on the three primary channels, driven by
+ * SHORTS so the CPU polls one event.  See the register and errata notes below.
  *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <arch/nordic/tiku_radio_arch.h>
+#include <arch/nordic/tiku_device_select.h>   /* MDK register types + NRF_RADIO_S */
+#include <arch/nordic/tiku_nordic_core.h>      /* NVIC + WFE (IRQ scan, R6.1)   */
+#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
+#include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
+#include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
+#include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
+#include <interfaces/bluetooth/tiku_ble_bond.h>      /* durable LTK bond store   */
+#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM (E3)      */
+#include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
+#include <interfaces/bluetooth/tiku_ble_enc.h>  /* E3c demo params + nonce     */
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* DLE max octets (F1)         */
+#include <string.h>
+
+/*
  * nRF54 vs nRF52 register facts that bit the bring-up (the RP2350 lesson --
  * never paste an older generation's offsets/encodings):
  *   - PACKETPTR moved to 0xED0 (was 0x504).
@@ -54,27 +70,7 @@
  *   at boot in tiku_cpu_freq_boot_arch.c; the SystemInit-parity trim/errata
  *   pokes live in tiku_crt_early.c.
  *
- * Sequence per channel, driven entirely by SHORTS so the CPU only polls one
- * event: set FREQUENCY + DATAWHITE + PACKETPTR, TASKS_TXEN; the chain
- * READY->START (SHORTS bit 0) transmits, PHYEND->DISABLE (SHORTS bit 19)
- * tears down, and we poll EVENTS_DISABLED.
- *
- * SPDX-License-Identifier: Apache-2.0
  */
-
-#include <arch/nordic/tiku_radio_arch.h>
-#include <arch/nordic/tiku_device_select.h>   /* MDK register types + NRF_RADIO_S */
-#include <arch/nordic/tiku_nordic_core.h>      /* NVIC + WFE (IRQ scan, R6.1)   */
-#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
-#include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
-#include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
-#include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
-#include <interfaces/bluetooth/tiku_ble_bond.h>      /* durable LTK bond store   */
-#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM (E3)      */
-#include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
-#include <interfaces/bluetooth/tiku_ble_enc.h>  /* E3c demo params + nonce     */
-#include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* DLE max octets (F1)         */
-#include <string.h>
 
 #define RADIO  NRF_RADIO_S
 

@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nordic_mdk.h - vendored Nordic MDK register-map router
+ * tiku_nordic_mdk.h - vendored Nordic MDK register-map router.
  *
- * Every Nordic arch .c that touches silicon registers includes THIS header
- * rather than a device-specific MDK entry point, so a single #elif chain
- * selects the right register map for the chosen device.  The Makefile defines
- * exactly one TIKU_DEVICE_NRF54* macro (derived from MCU=...).
- *
- * Adding a new nRF54L variant = vendor its <device>_types.h / <device>_global.h
- * under mdk/, add a TikuOS entry wrapper mdk/<device>.h (see nrf54l15.h /
- * nrf54lm20a.h), and add one #elif clause below.
+ * Every Nordic arch file that touches registers includes this rather than a
+ * device-specific MDK entry point, so one #elif chain selects the right map from
+ * the single TIKU_DEVICE_NRF54* macro the Makefile defines.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

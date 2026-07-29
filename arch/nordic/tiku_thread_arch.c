@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_thread_arch.c - nRF54L15 worker-thread switcher shim
+ * tiku_thread_arch.c - nRF54L worker-thread switcher shim.
  *
- * The nRF54L15's Cortex-M33 (ARMv8-M) uses the identical generic
- * Cortex-M switcher as the Apollo and RP2350 parts; this build's vector
- * table (tiku_crt_early.c) names slot 14 as the weak alias
- * tiku_nordic_pendsv_handler, so naming the strong handler the same and
- * including the shared body overrides that vector entry.
- *
- * CYCLE SOURCE -- the one real divergence from the other Cortex-M
- * parts: this die's DWT CYCCNT only counts while a debugger session is
- * up (the CoreSight trace clock is off standalone -- the same silicon
- * behaviour that broke Phase-0 DWT busy-delays), so per-thread cycle
- * accounting cannot ride the DWT.  Instead TIMER00 -- the one 128 MHz
- * timer instance on this part, otherwise unused by the port (tick=GRTC,
- * htimer=TIMER20) -- free-runs in 32-bit mode at PRESCALER=0, giving a
- * counter in exact 1:1 CPU cycles (boot locks the CPU PLL to CK128M).
- * Reads latch the live count into CC[0] via TASKS_CAPTURE.  A read
- * preempted between capture and load returns the interrupting
- * context's (slightly newer) capture -- a sub-microsecond, monotonic
- * accounting error, harmless for tenure charging.
- *
- * The timer starts only when threading starts (first tiku_thread_start),
- * so non-threaded builds/boots pay nothing for it.
+ * The Cortex-M33 uses the same generic switcher as the other parts; only the
+ * PendSV symbol differs.  Cycle accounting rides TIMER00 rather than DWT, whose
+ * CYCCNT only counts while a debugger session is up on this die.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

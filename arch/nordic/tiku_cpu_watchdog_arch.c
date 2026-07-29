@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.c - nRF54L watchdog backend (WDT30)
+ * tiku_cpu_watchdog_arch.c - nRF54L watchdog backend (WDT30).
  *
- * WDT30 is a 32.768 kHz down-counter: CRV is the timeout in ticks, RREN
- * enables reload-request channel RR[0], and writing the reload key to RR[0]
- * kicks it.  On timeout the WDT issues a system reset (the reset-reason layer
- * decodes RESETREAS.DOG0 as a watchdog reset).
- *
- * Stopping (the trap that reset-looped the watchdog tests): unlike the classic
- * nRF WDT, WDT30 has TASKS_STOP -- but it is DOUBLE-GATED.  CONFIG.STOPEN must
- * be set when the dog is started, AND the magic key 0x6E524635 must be written
- * to TSEN immediately before each TASKS_STOP.  Without both, TASKS_STOP is
- * silently ignored: pause/off appear to work, then the "stopped" dog resets
- * the system one timeout later.
- *
- * Clock note: WDT30 counts on the 32.768 kHz low-frequency clock.  If neither
- * LFXO nor LFRC is running the counter may not advance; starting LFCLK is a
- * bring-up follow-up.  Kick/off/configure are register-correct regardless.
+ * A 32.768 kHz down-counter: CRV is the timeout in ticks, RREN enables reload
+ * channel RR[0], and the reload key kicks it.  Stopping is double-gated -- see
+ * wdt30_stop().  The counter needs LFCLK running to advance.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,8 +28,11 @@
 /**
  * @brief Stop the running watchdog (both gates: TSEN key, then TASKS_STOP).
  *
- * Only effective when the dog was started with CONFIG.STOPEN set (all starts
- * from this backend are).  Safe to call when already stopped.
+ * DOUBLE-GATED, unlike the classic nRF WDT: CONFIG.STOPEN must have been set
+ * at start (every start here does) AND the TSEN key must be written
+ * immediately before TASKS_STOP.  Miss either and the stop is silently
+ * ignored -- pause and off appear to work, then the dog resets the system one
+ * timeout later.  Safe to call when already stopped.
  */
 static void wdt30_stop(void)
 {

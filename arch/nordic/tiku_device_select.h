@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_select.h - Nordic nRF54L device + board include router
+ * tiku_device_select.h - Nordic nRF54L device and board include router.
  *
- * Mirrors arch/msp430/tiku_device_select.h.  The Makefile sets one of:
- *   TIKU_DEVICE_NRF54L15   / TIKU_DEVICE_NRF54LM20A     (silicon)
- *   TIKU_BOARD_NRF54L15_DK / TIKU_BOARD_NRF54LM20_DK    (board PCB definitions)
- *
- * Adding a new nRF54L device or board requires only a header under devices/ or
- * boards/ and an #elif clause below.
+ * Mirrors the MSP430 router: the Makefile names the silicon and the board PCB
+ * separately.  A new device or board needs a header under devices/ or boards/
+ * and one #elif here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

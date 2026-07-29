@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_fault_arch.c - nRF54L15 fault reporters (Cortex-M33).
+ * tiku_fault_arch.c - nRF54L fault reporters (Cortex-M33).
  *
- * Overrides the weak WFE-spin exception handlers in tiku_crt_early.c with
- * ones that print WHICH fault fired, the fault-status registers, and the
- * faulting PC/LR over the console UARTE (TX is polled EasyDMA, safe in
- * handler context), then park in WFE.  Before this, a hard fault was
- * indistinguishable from a hang -- the RADIO RX bring-up burned a day on
- * exactly that ambiguity.
- *
- * If the fault hits before the UART is initialised the first putc spins,
- * which degrades to the old behaviour (silent park) rather than a crash
- * loop -- deliberate: bring-up boards should hold state for the debugger.
+ * Replaces the weak spin handlers with ones that print which fault fired, the
+ * fault-status registers and the faulting PC and LR over the polled console,
+ * then park.  A fault before UART init degrades to a silent park, deliberately.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_arch.c - nRF54L hardware one-shot timer (TIMER20)
+ * tiku_htimer_arch.c - nRF54L hardware one-shot timer (TIMER20).
  *
- * The kernel htimer expresses deadlines as a 16-bit tick that wraps every
- * 65.536 ms at 1 MHz (tiku_htimer_clock_t == unsigned short).  We map that
- * onto TIMER20 run in 16-bit BITMODE at 1 MHz: the hardware counter *is* the
- * kernel's 16-bit clock, so a deadline maps straight onto a compare register
- * with no delta arithmetic.  now() captures the live count into CC[0];
- * schedule() arms CC[1] and unmasks its COMPARE interrupt.  The COMPARE1 ISR
- * masks itself (single-shot) and dispatches the pending callback through
- * tiku_htimer_run_next().  The counter free-runs the whole time so now()
- * always reflects real elapsed microseconds.
- *
- * TIMER20 sits in the main peripheral domain; its base clock is 16 MHz, so a
- * PRESCALER of 4 (divide-by-16) yields exactly 1 MHz.  TIMER00/TIMER10 are the
- * high-speed timers (used elsewhere / reserved for the tick fallback), so
- * TIMER20 is a conflict-free choice for the htimer.
+ * TIMER20 runs in 16-bit BITMODE at 1 MHz, so the hardware counter IS the kernel's
+ * 16-bit clock and a deadline maps onto a compare register with no delta
+ * arithmetic.  The COMPARE1 ISR masks itself, giving single-shot semantics.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

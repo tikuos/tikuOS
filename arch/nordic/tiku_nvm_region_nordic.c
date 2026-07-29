@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_region_nordic.c - nRF54L15 RRAM filestore region backend.
+ * tiku_nvm_region_nordic.c - nRF54L RRAM filestore region backend.
  *
- * RRAM is byte-writable in place behind the RRAMC controller's WEN gate -- the
- * same "NVM behind a gate" model as MSP430 FRAM -- so the carved region is a
- * plain span reserved by the linker (__tiku_nvmfs_base / __tiku_nvmfs_size in
- * nrf54l15.ld, just below the durable-persist reserve).  Writes are a memcpy
- * (no bootrom, no erase, no staging); reads are pointer dereferences into the
- * span.  The write MUST be issued inside a tiku_mpu_unlock_nvm() /
- * tiku_mpu_lock_nvm() window (which opens/closes the WEN gate) -- the generic
- * tiku_nvm_region / TFS layer already brackets its writes, exactly as it does
- * for the MSP430 FRAM backend.
+ * RRAM is byte-writable in place behind the RRAMC WEN gate, so the carved region
+ * is a plain linker-reserved span: writes are a memcpy and reads are pointer
+ * dereferences.  The write must sit inside an unlock/lock window, which TFS does.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

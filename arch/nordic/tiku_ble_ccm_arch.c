@@ -7,20 +7,9 @@
  *
  * tiku_ble_ccm_arch.c - CCM00 hardware AES-CCM for the BLE link layer.
  *
- * Register recipe (datasheet 8.4, decoded against the Core-spec v5.4
- * Vol 6 Part C sample data the datasheet itself uses):
- *   - KEY.VALUE[0..3]   = the 16-byte session key byte-REVERSED, read as
- *                         little-endian words (VALUE[0] low byte = sk[15]).
- *   - NONCE.VALUE[0..3] = the 13-byte BLE nonce byte-reversed into the
- *                         low 13 bytes (VALUE[0] low byte = nonce[12]),
- *                         top 3 bytes zero.  With the tiku_ble_enc_nonce
- *                         layout (ctr LSO || dir || IV LSO) this lands
- *                         exactly on the datasheet's worked example.
- *   - IN/OUT are TYPED MVDMA job lists: ALEN(11,2-byte l(a)) MLEN(12,
- *     2-byte l(m)) ADATA(13,a) MDATA(14,m or c) then a NULL terminator.
- *     Plain-data jobs leave the engine waiting forever -- the Phase-E
- *     "standalone crypt never completes" wall.
- *   - Job lists and field buffers must be word-aligned (probe-proven).
+ * KEY and NONCE take the byte-REVERSED value relative to the wire, and the in/out
+ * job lists are TYPED -- ALEN, MLEN, ADATA, MDATA, NULL-terminated.  Plain-data
+ * jobs leave the engine waiting forever.  Job lists and buffers must be word-aligned.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
