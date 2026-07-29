@@ -83,17 +83,11 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Reset the hibernate subsystem to uninitialized state
+ * @brief Reset the hibernate subsystem to uninitialised state.
  *
- * Clears the internal persist store and initialization flag so the
- * next hibernate or resume call re-registers the marker key with
- * value_len = 0.  This is required between independent test groups
- * that each expect boot_count to start from 1, because
- * hibernate_initialized lives in SRAM and survives across calls
- * (unlike a real power cycle where SRAM is lost).
- *
- * Not needed in production — a real LPMx.5 wake clears SRAM,
- * which naturally resets hibernate_initialized to 0.
+ * Test-only.  hibernate_initialized lives in SRAM and survives across calls,
+ * unlike a real power cycle, so independent test groups that each expect
+ * boot_count to start at 1 need this between them.
  *
  * @note Only for test use.  Has no effect on NVM contents beyond
  *       clearing the SRAM-resident persist-store cache.
@@ -105,15 +99,11 @@ void tiku_mem_hibernate_reset(void)
 }
 
 /**
- * @brief Prepare the memory subsystem for hibernation
+ * @brief Prepare the memory subsystem for hibernation.
  *
- * Flushes all dirty write-back caches to FRAM, then writes a hibernate
- * marker containing the current boot count (incremented) and caller-
- * supplied timestamp. The entire operation runs in a single MPU-unlocked
- * critical section to minimize overhead.
- *
- * Call this immediately before entering LPMx.5 or any deep sleep mode
- * that loses SRAM contents.
+ * Flushes every dirty cache, then writes a marker holding the incremented boot
+ * count and the caller's timestamp, all in one MPU window.  Call immediately
+ * before entering a sleep mode that loses SRAM.
  *
  * @param fram_buf   FRAM buffer for the hibernate marker (must reside
  *                   in NVM, at least sizeof(tiku_hibernate_marker_t))
@@ -172,16 +162,11 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
 }
 
 /**
- * @brief Check for a warm resume after hibernation
+ * @brief Check for a warm resume after hibernation.
  *
- * Call after tiku_mem_init() on every boot. Reads the persist store
- * for a valid hibernate marker. If found, reloads all registered
- * cached regions from FRAM (resync SRAM with FRAM) and returns
- * TIKU_MEM_OK for a warm resume. If no valid marker is found,
- * returns TIKU_MEM_ERR_NOT_FOUND indicating a cold boot.
- *
- * On warm resume the marker is preserved so the boot count remains
- * readable via tiku_mem_hibernate_get_marker().
+ * Call after tiku_mem_init() on every boot.  A valid marker means warm resume:
+ * every cached region is reloaded from NVM and the marker is preserved so the
+ * boot count stays readable.  No marker means a cold boot.
  *
  * @param fram_buf    FRAM buffer that was used for the hibernate marker
  * @param marker_out  Output: hibernate marker (may be NULL if not needed)

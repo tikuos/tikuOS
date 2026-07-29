@@ -191,12 +191,11 @@ tiku_mem_err_t tiku_cache_flush(tiku_cached_region_t *region)
 }
 
 /**
- * @brief Flush all registered cached regions
+ * @brief Flush all registered cached regions.
  *
- * Unlocks the MPU once for the entire batch. This is more efficient
- * than flushing individually when multiple regions are dirty, because
- * each MPU unlock/lock pair writes to the password-protected MPUCTL0
- * register.
+ * Unlocks the MPU once for the whole batch, which beats flushing one at a time
+ * when several are dirty -- each unlock/lock pair writes the password-protected
+ * control register.
  */
 tiku_mem_err_t tiku_cache_flush_all(void)
 {

@@ -26,15 +26,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Round a size up to the platform's required alignment
+ * @brief Round a size up to the platform's required alignment.
  *
- * Uses TIKU_MEM_ARCH_ALIGNMENT (provided by the memory HAL) so the
- * same code works across 16-bit, 32-bit, and 64-bit targets.
- *
- * The standard power-of-two round-up formula:
- *   (size + (align - 1)) & ~(align - 1)
- *
- * Example (alignment = 4): 3 -> 4, 4 -> 4, 5 -> 8, 0 -> 0
+ * Uses TIKU_MEM_ARCH_ALIGNMENT from the memory HAL, so the same code works on
+ * 16-, 32- and 64-bit targets.
  *
  * @param size  Raw size in bytes
  * @return Size rounded up to TIKU_MEM_ARCH_ALIGNMENT boundary
@@ -55,16 +50,11 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize an arena without region-registry validation
+ * @brief Initialize an arena without region-registry validation.
  *
- * Lightweight variant of tiku_arena_create() that skips
- * tiku_region_contains() and tiku_region_claim(). Intended for
- * library code (e.g. tikukits/ds) that needs an arena over an
- * embedded struct member where the region registry may not yet be
- * initialized.
- *
- * The arena is marked as SRAM tier. All other arena operations
- * (alloc, reset, secure_reset, stats) work identically.
+ * For library code needing an arena over an embedded struct member before the
+ * region registry exists.  The arena is marked SRAM tier; every other operation
+ * behaves identically.
  *
  * @param arena    Arena control block to initialize
  * @param buf      Pointer to the backing buffer
@@ -164,21 +154,11 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
 }
 
 /**
- * @brief Allocate memory from an arena (bump-pointer)
+ * @brief Allocate memory from an arena (bump-pointer).
  *
- * Advances the offset by the aligned size. Tracks the peak offset
- * for lifetime high-water mark reporting.
- *
- * Why no individual free:
- *   Arenas are designed for groups of allocations with a shared lifetime.
- *   Removing individual free eliminates per-object metadata, free-list
- *   traversal, and fragmentation — all critical on small SRAM.
- *
- * Why alignment:
- *   The target architecture may require word-aligned access. Unaligned
- *   access can trigger a bus fault or incur a performance penalty.
- *   Aligning every allocation to TIKU_MEM_ARCH_ALIGNMENT bytes ensures
- *   any returned pointer is safe for native word or struct access.
+ * Advances the offset by the aligned size and tracks the peak for high-water
+ * reporting.  There is no individual free: dropping it removes per-object
+ * metadata, free-list walks and fragmentation, which small SRAM cannot afford.
  *
  * @param arena    Arena to allocate from (must be active)
  * @param size     Bytes requested (must be > 0)
@@ -216,19 +196,11 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 }
 
 /**
- * @brief Reset an arena, reclaiming all allocations at once
+ * @brief Reset an arena, reclaiming all allocations at once.
  *
- * Sets the offset back to zero so the entire buffer is available again.
- * The allocation count is also reset.
- *
- * Why memory is not zeroed:
- *   Zeroing the buffer would make reset O(n) in buffer size, which
- *   defeats the purpose of an O(1) bump-pointer allocator. Callers
- *   should not rely on arena memory being zeroed — just as malloc()
- *   does not guarantee zeroed memory.
- *
- * The peak high-water mark is intentionally preserved across resets
- * so it reflects the lifetime maximum, not just the current cycle.
+ * Sets the offset back to zero.  The buffer is NOT zeroed -- that would make
+ * reset O(n) and defeat a bump allocator -- so callers must not assume it is.
+ * The peak high-water mark survives, so it stays a lifetime maximum.
  *
  * @param arena    Arena to reset
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if arena is NULL
@@ -247,19 +219,10 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 }
 
 /**
- * @brief Securely reset an arena, zeroing all memory before reclaiming
+ * @brief Securely reset an arena, zeroing all memory before reclaiming.
  *
- * Delegates to tiku_mem_arch_secure_wipe() for a platform-optimized
- * zeroing implementation, then resets the arena state. The arch layer
- * uses a volatile pointer (or equivalent) to ensure the compiler
- * cannot optimize away the zeroing.
- *
- * This is O(n) in buffer size — use tiku_arena_reset() for the fast
- * path and this function only when the arena held cryptographic keys,
- * nonces, or other secrets that must not survive in memory.
- *
- * @param arena    Arena to securely reset
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if arena is NULL
+ * Delegates the zeroing to the arch layer, which uses a volatile access so the
+ * compiler cannot optimise it away, then resets the arena state.
  */
 tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 {
