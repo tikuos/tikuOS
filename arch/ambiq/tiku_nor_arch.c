@@ -130,7 +130,9 @@ static const nor_clk_t s_clk[] = {
  * vendor's 31 (its default dummy-cycle configuration).  Program has no
  * turnaround in either mode. */
 #define NOR_TA_SERIAL  8u
-#define NOR_TA_OCTAL  31u
+#define NOR_TA_OCTAL  31u   /* array reads: matches VCR 0x01 default (0x1F) */
+#define NOR_TA_OCTAL_ID     15u   /* octal READ_ID below 96 MHz  */
+#define NOR_TA_OCTAL_ID_96  16u   /* octal READ_ID at 96 MHz     */
 
 /*---------------------------------------------------------------------------*/
 /* STATE                                                                     */
@@ -317,6 +319,11 @@ static void nor_controller_config(const nor_clk_t *c, int octal)
     cfg |= ((uint32_t)(octal ? MSPI0_DEV0CFG_DEVCFG0_OCTAL0
                              : MSPI0_DEV0CFG_DEVCFG0_SERIAL0)
             << MSPI0_DEV0CFG_DEVCFG0_Pos) & MSPI0_DEV0CFG_DEVCFG0_Msk;
+    /* SEPIO marks a device with separate MOSI and MISO, which is what a
+     * 1-line SPI NOR is: the controller drives D0 and samples D1. Clear, the
+     * controller samples D0 and every serial read returns zero. Octal shares
+     * its eight lines in both directions and must leave it clear. */
+    if (!octal) { cfg |= MSPI0_DEV0CFG_SEPIO0_Msk; }
     MSPI1->DEV0CFG = cfg;
 
     MSPI1->DEV0DDR_b.EMULATEDDR0 = octal ? 1u : 0u;
@@ -478,9 +485,25 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
     id.ncr6 = 0u; id.status = 0u; id.octal = s_octal;
 
     /* READ_ID takes no address in serial mode; in octal the device expects
-     * the standard address+dummy framing. */
-    rc = nor_pio(nor_op(NOR_CMD_READ_ID, NOR_OCMD_READ_ID), 0u, &raw, 4u,
-                 1, s_octal ? 1 : 0, s_octal ? 1 : 0);
+     * the standard address+dummy framing.
+     *
+     * Octal READ_ID carries its OWN dummy count, fixed by the device and
+     * unrelated to the array dummy cycles in VCR 0x01 (default 31, which is
+     * what NOR_TA_OCTAL matches for reads). It is 15, or 16 at 96 MHz. Using
+     * the array count here samples long past the identity window and returns
+     * zeros -- indistinguishable from a part that is not answering. */
+    if (s_octal) {
+        uint32_t saved_ta = MSPI1->DEV0CFG_b.TURNAROUND0;
+        MSPI1->DEV0CFG_b.TURNAROUND0 =
+            (tiku_nor_clock_hz() >= 96000000u) ? NOR_TA_OCTAL_ID_96
+                                               : NOR_TA_OCTAL_ID;
+        rc = nor_pio(nor_op(NOR_CMD_READ_ID, NOR_OCMD_READ_ID), 0u, &raw, 4u,
+                     1, 1, 1);
+        MSPI1->DEV0CFG_b.TURNAROUND0 = saved_ta;
+    } else {
+        rc = nor_pio(nor_op(NOR_CMD_READ_ID, NOR_OCMD_READ_ID), 0u, &raw, 4u,
+                     1, 0, 0);
+    }
     if (rc == TIKU_NOR_OK) {
         id.mfr      = (uint8_t)raw;
         id.type     = (uint8_t)(raw >> 8);

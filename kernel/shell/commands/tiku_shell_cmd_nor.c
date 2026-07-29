@@ -126,7 +126,7 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         tiku_nor_bitbang_id(idb, 8u);
         SHELL_PRINTF("nor bitbang READ_ID:");
         for (k8 = 0u; k8 < 8u; k8++) { SHELL_PRINTF(" %02x", idb[k8]); }
-        SHELL_PRINTF("\n  (9d 60 17 = ISSI alive; all 00 or all ff ="
+        SHELL_PRINTF("\n  (9d 5b 17 = IS25WX064 alive; all 00 or all ff ="
                      " no answer)\n");
         return;
     }
