@@ -108,18 +108,9 @@ void tiku_mpu_arch_enable_irq(void)
 /**
  * @brief Set default NVM protection.
  *
- * On parts without HIFRAM all three segments live in lower FRAM and
- * carry persistent data, vectors, and code; the safe default there is
- * R+X (no W) on every segment — SAM value 0x0555.
- *
- * On parts with HIFRAM (TIKU_DEVICE_HAS_HIFRAM=1) the device header
- * places segment 3 at the HIFRAM start, so segment 3 covers nothing
- * but kernel mutable state under MEMORY_MODEL=large. That segment
- * needs W or every store to .upper.bss / .upper.data MPU-faults
- * silently — including the UART RX ring, process queue, and shell
- * command table, which is enough to brick the boot path. SAM value
- * 0x0755 grants R+W+X to segment 3 while keeping segments 1 and 2
- * (lower FRAM) at R+X.
+ * Without HIFRAM every segment is R+X, since all three hold persistent data,
+ * vectors and code.  With HIFRAM, segment 3 covers kernel mutable state and
+ * MUST be writable, or every store to it faults silently and bricks the boot.
  */
 void tiku_mpu_arch_set_default_protection(void)
 {
@@ -127,12 +118,11 @@ void tiku_mpu_arch_set_default_protection(void)
 }
 
 /**
- * @brief Set permissions on a single MPU segment
+ * @brief Set permissions on a single MPU segment.
  *
- * Each segment occupies a 4-bit nybble in the SAM register. The lower
- * 3 bits are R/W/X permissions; the 4th bit is reserved. This function
- * clears the old permission bits and sets the new ones, leaving all
- * other segments untouched.
+ * Each segment owns a nybble of the access-mask register, whose low three bits
+ * are read, write and execute.  Clears the old bits and sets the new ones,
+ * leaving other segments untouched.
  *
  * @param seg    Segment number (0-2)
  * @param perm   Permission flags (TIKU_MPU_READ/WRITE/EXEC or combinations)
@@ -258,10 +248,8 @@ uint32_t tiku_stack_arch_bottom(void)
 /**
  * @brief No RAM execution window on this port -- the module runs XIP from NVM.
  *
- * Kept as an explicit no-op rather than omitted so the portable call site needs
- * no #ifdef, and so a future port that DOES gain a window has an obvious place
- * to implement it.  See kernel/shell/basic/tiku_basic_module.h for why every
- * part except apollo510 executes in place.
+ * An explicit no-op rather than an omission, so the portable call site needs no
+ * #ifdef and a future port that gains a window has an obvious place to put it.
  */
 void tiku_mpu_arch_module_window_exec(int enable)
 {

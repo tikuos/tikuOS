@@ -30,14 +30,9 @@
 /**
  * @brief Architecture-specific 1-Wire initialization.
  *
- * Configures the board's 1-Wire pin (TIKU_BOARD_OW_* macros) as a
- * GPIO input with the output latch cleared, so the line is released
- * and held high by the external pull-up.  Driving low later is done
- * by flipping the direction bit, giving open-drain behaviour.
- *
- * An external 4.7 kohm pull-up on the data line is required.  All
- * bit timings assume an 8 MHz MCLK (they are generated with
- * __delay_cycles()), so the bus is only reliable at that clock.
+ * Leaves the board's pin an input with its latch clear, so the external 4.7
+ * kohm pull-up holds the line high and driving low later is a direction flip --
+ * open drain.  Timings assume an 8 MHz MCLK, so the bus is reliable only there.
  *
  * @return TIKU_OW_OK (this port cannot fail)
  */
@@ -54,12 +49,9 @@ void tiku_onewire_arch_close(void);
 /**
  * @brief Issue a 1-Wire reset pulse and sample for a presence pulse.
  *
- * Timing-critical: interrupts (GIE) are disabled for the whole
- * ~960 us sequence.  The line is driven low for 480 us and released;
- * 15 us later the line is sampled to confirm the pull-up brought it
- * high, then again at ~70 us after release to catch a slave pulling
- * it low (the presence pulse).  A further 410 us completes the reset
- * window before interrupts are restored.
+ * Timing-critical, so interrupts are masked for the whole ~960 us sequence.
+ * The line is checked high after release, proving the pull-up, then sampled for
+ * a slave pulling it low.
  *
  * @return TIKU_OW_OK if a presence pulse was seen,
  *         TIKU_OW_ERR_NO_DEVICE if no device responded or the line
@@ -70,11 +62,9 @@ int tiku_onewire_arch_reset(void);
 /**
  * @brief Write one bit into a 1-Wire time slot.
  *
- * Timing-critical: interrupts (GIE) are disabled for the duration of
- * the slot.  A write-1 drives the line low for 2 us then releases it
- * for 62 us; a write-0 drives low for 60 us then releases for 4 us.
- * Slaves sample around 30 us into the slot, so the short write-1
- * pulse guarantees the line is high by then.
+ * Timing-critical, so interrupts are masked for the slot.  A write-1 is 2 us
+ * low then 62 released; a write-0 is 60 low then 4.  Slaves sample around 30 us
+ * in, which the short write-1 pulse is sized for.
  *
  * @param bit  Value to write; only the least significant bit is used
  */
@@ -83,13 +73,9 @@ void tiku_onewire_arch_write_bit(uint8_t bit);
 /**
  * @brief Read one bit from a 1-Wire time slot.
  *
- * Timing-critical: interrupts (GIE) are disabled for the duration of
- * the slot.  The master drives the line low for 2 us, releases it,
- * waits 10 us and samples (the master must sample within 15 us of
- * the falling edge), then idles 50 us for a ~62 us slot.  The 10 us
- * settle also covers the MSP430 input synchronizer: PxIN is clocked
- * through a flip-flop on MCLK and can lag a direction change by up
- * to two MCLK cycles.
+ * Timing-critical, so interrupts are masked.  Drive low 2 us, release, wait 10
+ * and sample -- inside the 15 us the master has -- then idle 50.  That settle
+ * also covers the input synchroniser's two-cycle lag after a direction change.
  *
  * @return The sampled bit (0 or 1)
  */

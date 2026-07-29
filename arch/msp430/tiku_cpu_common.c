@@ -117,13 +117,9 @@ tiku_cpu_msp430_reset_reason(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * MSP430 TLV die-record layout (all devices):
- *   0x01A0A  lot/wafer ID (4 bytes)
- *   0x01A0E  die X pos   (2 bytes)
- *   0x01A10  die Y pos   (2 bytes)
- *
- * We concatenate lot + X + Y for an 8-byte unique ID.
+/*
+ * MSP430 TLV die record: lot/wafer id at 0x01A0A (4 bytes), die X at 0x01A0E
+ * and die Y at 0x01A10 (2 each).  Concatenated, they give an 8-byte unique id.
  */
 uint8_t
 tiku_cpu_msp430_unique_id(uint8_t *buf, uint8_t len)

@@ -32,10 +32,9 @@ void tiku_lcd_arch_clear(void);
 /**
  * @brief Render one ASCII character at a position.
  *
- * Caller has already validated that pos < TIKU_BOARD_LCD_NUM_CHARS.
- * Bits reserved for icons in byte1 (per
- * TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK) are preserved across
- * the write so a digit overwrite does not clobber lit icons.
+ * The caller has already bounds-checked the position.  Bits reserved for icons
+ * are preserved across the write, so overwriting a digit does not clobber a lit
+ * icon.
  */
 void tiku_lcd_arch_putchar(uint8_t pos, char ch);
 

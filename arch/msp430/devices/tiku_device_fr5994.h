@@ -157,16 +157,10 @@
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
 #define TIKU_DEVICE_ADC_CHANNELS    32  /**< External channels A0-A31 */
 
-/**
- * External analog input pin for each ADC12_B channel, indexed by
- * channel number and encoded as (port << 4) | bit — so 0x74 is P7.4.
- * The analog function is selected by setting BOTH PxSEL0 and PxSEL1.
- *
- * A0-A15 match the FR5969 assignment; the FR5994 additionally brings
- * A16-A19 out on P7.4-P7.7.  Channels above A19 have no external pin
- * (A30/A31 are the internal temperature and battery inputs).
- *
- * Source: SLASE54D (MSP430FR5994 family) pinout, A0-A19.
+/*
+ * External analog input pin per ADC12_B channel, encoded as (port << 4) | bit.
+ * A0-A15 match the FR5969 assignment and this part adds A16-A19 on P7.4-P7.7;
+ * above A19 there is no external pin.  Source: SLASE54D pinout.
  */
 #define TIKU_DEVICE_ADC_PIN_MAP                                     \
     { 0x10, 0x11, 0x12, 0x13,   /* A0-A3   P1.0-P1.3 */             \

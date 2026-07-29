@@ -166,12 +166,10 @@ tiku_adc_arch_close(void)
     REFCTL0 &= ~REFON;
 }
 
-/**
- * External analog input pin for each ADC12_B channel, supplied by the
- * selected device header as (port << 4) | bit.  The map is per-device
- * because the assignment is NOT common across the family: FR5969 and
- * FR5994 agree, but on FR6989 only A0-A3 match and A4-A15 sit on
- * ports 8 and 9 (see TIKU_DEVICE_ADC_PIN_MAP in each device header).
+/*
+ * External analog input pin per ADC12_B channel, supplied by the device header
+ * as (port << 4) | bit.  The map is per-device because the family disagrees:
+ * FR5969 and FR5994 match, but on FR6989 only A0-A3 do.
  */
 static const uint8_t adc_pin_map[] = TIKU_DEVICE_ADC_PIN_MAP;
 
@@ -183,10 +181,9 @@ static const uint8_t adc_pin_map[] = TIKU_DEVICE_ADC_PIN_MAP;
 /**
  * @brief Switch one mapped pin to its analog function.
  *
- * Sets both PxSEL0 and PxSEL1 for the encoded pin, which is what
- * selects the ADC input on ADC12_B parts.  Port cases beyond 4 are
- * compiled only where the device actually has that port, so a part
- * without P7/P8/P9 does not reference registers it lacks.
+ * Sets both PxSEL0 and PxSEL1, which is what selects the ADC input on these
+ * parts.  Ports beyond 4 compile only where the device has them, so a part
+ * without P7-P9 never names registers it lacks.
  *
  * @param enc  Pin encoded as (port << 4) | bit
  * @return TIKU_ADC_OK, or TIKU_ADC_ERR_PARAM for an unmappable port

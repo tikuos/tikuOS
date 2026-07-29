@@ -62,32 +62,27 @@ typedef uint16_t tiku_wdt_interval_t;
 /**
  * @brief Stop the watchdog completely (WDTPW | WDTHOLD).
  *
- * Unlike tiku_cpu_msp430_watchdog_pause_arch(), this replaces the
- * whole WDTCTL low byte rather than preserving mode/clock/interval —
- * a later resume alone will not restore the previous configuration,
- * so re-enable via the _on_arch / _config_arch entry points.
+ * Replaces the whole control low byte rather than preserving mode, clock and
+ * interval, so a later resume alone will not restore the configuration --
+ * re-enable through the _on_arch or _config_arch entry points.
  */
 void tiku_cpu_msp430_watchdog_off_arch(void);
 
 /**
  * @brief Pause (hold) the watchdog without losing its configuration.
  *
- * Sets WDTHOLD while preserving the rest of the WDTCTL low byte, so
- * mode, clock source and interval survive; the counter is left as it
- * is and keeps its value until resumed.  Held is not the same as off:
- * tiku_cpu_msp430_watchdog_resume_arch() restarts it without a full
- * reconfiguration.  Unlike resume/kick, this read-modify-write of
- * WDTCTL is not performed with interrupts disabled.
+ * Sets WDTHOLD but preserves mode, clock and interval, and leaves the counter
+ * where it is.  Held is not off: resume restarts it without reconfiguring.
+ * Unlike resume and kick, this read-modify-write is not interrupt-protected.
  */
 void tiku_cpu_msp430_watchdog_pause_arch(void);
 
 /**
  * @brief Resume a paused watchdog.
  *
- * Clears WDTHOLD while preserving every other WDTCTL low-byte bit
- * (mode, clock source, interval).  The read-modify-write runs with
- * interrupts disabled and the previous GIE state restored, so it is
- * safe against an ISR that also touches WDTCTL.
+ * Clears WDTHOLD while preserving every other control bit.  The
+ * read-modify-write runs with interrupts disabled and the prior state restored,
+ * so it is safe against an ISR that also touches the register.
  *
  * @param kick_on_resume  0 resumes with the counter where pause left
  *                        it; non-zero also sets WDTCNTCL so the full
@@ -98,22 +93,18 @@ void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume);
 /**
  * @brief Kick (clear) the watchdog counter.
  *
- * Sets WDTCNTCL, restarting the timeout window from zero, while
- * preserving the rest of the WDTCTL low byte — including WDTHOLD, so
- * kicking a paused watchdog leaves it paused.  The read-modify-write
- * runs with interrupts disabled and the previous GIE state restored.
- * In watchdog mode this is what prevents a reset; in interval-timer
- * mode it just postpones the next WDTIFG.
+ * Restarts the timeout window while preserving the rest of the control byte,
+ * WDTHOLD included -- so kicking a paused watchdog leaves it paused.  In
+ * watchdog mode this is what prevents a reset; in interval mode it defers the flag.
  */
 void tiku_cpu_msp430_watchdog_kick_arch(void);
 
 /**
- * @brief Compose and write the whole WDTCTL low byte in one store.
+ * @brief Compose and write the whole control low byte in one store.
  *
- * The primitive behind _on_arch and _interval_timer_on_arch: mode,
- * clock and interval are OR-ed together and written as a single
- * password-protected word, so any previous configuration is REPLACED,
- * not merged.
+ * The primitive behind the two _on_arch entry points: mode, clock and interval
+ * are OR-ed and written as one password-protected word, so any previous
+ * configuration is REPLACED rather than merged.
  *
  * @param mode           TIKU_WDT_MODE_WATCHDOG (expiry resets the
  *                       device) or TIKU_WDT_MODE_INTERVAL (expiry
@@ -134,10 +125,9 @@ void tiku_cpu_msp430_watchdog_config_arch(tiku_wdt_mode_t mode,
 /**
  * @brief Start the WDT in watchdog (reset) mode.
  *
- * Convenience wrapper over tiku_cpu_msp430_watchdog_config_arch()
- * with WDTTMSEL = 0: the timer runs immediately with a cleared
- * counter, and reaching @p isel counts of @p src resets the device
- * unless tiku_cpu_msp430_watchdog_kick_arch() is called first.
+ * A wrapper over the config primitive with the timer-mode bit clear: it runs
+ * immediately from a cleared counter, and reaching the interval resets the
+ * device unless a kick arrives first.
  *
  * @param src   TIKU_WDT_SRC_SMCLK or TIKU_WDT_SRC_ACLK
  * @param isel  Interval divider, one of WDTIS__64, WDTIS__512,
@@ -148,11 +138,9 @@ void tiku_cpu_msp430_watchdog_on_arch(tiku_wdt_clk_t src, tiku_wdt_interval_t is
 /**
  * @brief Start the WDT in interval-timer mode.
  *
- * Same hardware, WDTTMSEL = 1: expiry sets WDTIFG and requests an
- * interrupt instead of resetting the device, giving a periodic tick.
- * The timer runs immediately with a cleared counter.  The interrupt
- * itself is left masked — the caller must enable it (SFRIE1 |= WDTIE)
- * and supply a WDT_VECTOR handler, otherwise expiry is silent.
+ * Same hardware with the timer-mode bit set: expiry raises the flag and
+ * requests an interrupt instead of resetting.  The interrupt is left masked, so
+ * the caller must enable it and supply a handler or expiry is silent.
  *
  * @param src   TIKU_WDT_SRC_SMCLK or TIKU_WDT_SRC_ACLK
  * @param isel  Interval divider, one of WDTIS__64, WDTIS__512,

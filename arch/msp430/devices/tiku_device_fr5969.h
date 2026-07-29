@@ -114,12 +114,10 @@
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
 #define TIKU_DEVICE_ADC_CHANNELS    16  /**< External channels A0-A15 */
 
-/**
- * External analog input pin for each ADC12_B channel, indexed by
- * channel number and encoded as (port << 4) | bit — so 0x23 is P2.3.
- * The analog function is selected by setting BOTH PxSEL0 and PxSEL1.
- *
- * Source: SLAS704 (MSP430FR5969 family) pinout, A0-A15.
+/*
+ * External analog input pin per ADC12_B channel, indexed by channel and encoded
+ * as (port << 4) | bit, so 0x23 is P2.3.  The analog function needs BOTH PxSEL0
+ * and PxSEL1 set.  Source: SLAS704 pinout, A0-A15.
  */
 #define TIKU_DEVICE_ADC_PIN_MAP                                     \
     { 0x10, 0x11, 0x12, 0x13,   /* A0-A3   P1.0-P1.3 */             \

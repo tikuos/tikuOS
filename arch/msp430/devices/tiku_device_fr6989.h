@@ -139,17 +139,10 @@
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
 #define TIKU_DEVICE_ADC_CHANNELS    16  /**< External channels A0-A15 */
 
-/**
- * External analog input pin for each ADC12_B channel, indexed by
- * channel number and encoded as (port << 4) | bit — so 0x87 is P8.7.
- * The analog function is selected by setting BOTH PxSEL0 and PxSEL1.
- *
- * NOTE: the FR6989 map differs sharply from FR5969/FR5994.  Only
- * A0-A3 share the P1.0-P1.3 assignment; A4-A7 live on P8.7-P8.4
- * (descending) and A8-A15 on P9.0-P9.7.  Assuming the FR59xx layout
- * here silently muxes the wrong pins.
- *
- * Source: SLAS789D (MSP430FR698x/FR598x) pinout, A0-A15.
+/*
+ * External analog input pin per ADC12_B channel, encoded as (port << 4) | bit.
+ * This map differs sharply from the FR59xx parts -- only A0-A3 share their
+ * assignment -- so assuming that layout here silently muxes the wrong pins.
  */
 #define TIKU_DEVICE_ADC_PIN_MAP                                     \
     { 0x10, 0x11, 0x12, 0x13,   /* A0-A3   P1.0-P1.3 */             \
@@ -161,12 +154,10 @@
 /* LCD CONTROLLER                                                            */
 /*---------------------------------------------------------------------------*/
 
-/**
- * FR6989 has the LCD_C segment-LCD driver: up to 320 segments
- * (8 mux × 40 pins) with built-in charge pump for 3.0/3.3V drive.
- * The MSP-EXP430FR6989 LaunchPad wires it to an on-board FH-1138P
- * 96-segment display (4-mux, six 14-segment alphanumeric positions
- * plus various icons).
+/*
+ * The FR6989 carries the LCD_C segment driver: up to 320 segments with a
+ * built-in charge pump.  The LaunchPad wires it to an on-board FH-1138P
+ * 96-segment display with six alphanumeric positions plus icons.
  */
 #define TIKU_DEVICE_HAS_LCD_C       1
 
@@ -174,15 +165,10 @@
 /* FRAM REGION BUDGET                                                        */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Per-device sizing for FRAM-backed regions. The kernel/memory/tiku_fram_map
- * module reads these to declare storage arrays; the linker places them.
- * Adjust sizes per device — the rest of the system adapts automatically.
- *
- * 128 KB FRAM: lower window is the same ~48 KB code/data ceiling as
- * FR5969, so the budgets below reflect what the larger HIFRAM unlocks
- * for slot-style data. Slots large enough to overflow lower FRAM should
- * be placed via TIKU_HIFRAM* (see <kernel/memory/tiku_mem.h>).
+/*
+ * Per-device sizing for the NVM-backed regions; the map module declares the
+ * arrays and the linker places them.  The lower window keeps the same ~48 KB
+ * ceiling as the FR5969, so slots large enough to overflow it belong in HIFRAM.
  */
 #define TIKU_DEVICE_FRAM_CONFIG_SIZE      2048U   /* Init table + credentials */
 

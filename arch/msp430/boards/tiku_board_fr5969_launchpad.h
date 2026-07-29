@@ -61,13 +61,10 @@
         P2SEL0 &= (uint8_t)~(BIT0 | BIT1);                                     \
     } while(0)
 
-/** UART baud-rate selection from 8 MHz SMCLK (oversampling).
- *  Values from TI SLAU367 Table 30-5 for eUSCI_A @ 8 MHz.
- *
- *  Override at compile time:
- *    make APP=cli MCU=msp430fr5969 UART_BAUD=115200
- *
- *  Supported: 9600 (default), 19200, 38400, 57600, 115200.
+/*
+ * UART baud-rate selection from an 8 MHz SMCLK, oversampled; values from TI
+ * SLAU367 Table 30-5.  9600 by default, with 19200, 38400, 57600 and 115200
+ * selectable at build time through UART_BAUD.
  */
 #define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
 
@@ -157,13 +154,10 @@
 /* ADC12_B                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * ADC12_B is available on the FR5969 LaunchPad.
- * External channels A2-A5 (P1.2-P1.5) and A8-A15 (P4.0-P4.3, P3.0-P3.3)
- * are accessible on the BoosterPack headers.
- *
- * Note: A0 (P1.0) conflicts with LED2, A1 (P1.1) conflicts with Button S2.
- * Internal channels: ch30 = temperature sensor, ch31 = battery monitor.
+/*
+ * ADC12_B is available.  External channels A2-A5 and A8-A15 reach the
+ * BoosterPack headers; A0 and A1 clash with LED2 and button S2.  Channel 30 is
+ * the internal temperature sensor and 31 the battery monitor.
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
 
@@ -171,12 +165,9 @@
 /* 1-Wire on P1.2 (BoosterPack J1 pin 4)                                    */
 /*---------------------------------------------------------------------------*/
 
-/**
- * 1-Wire (Dallas/Maxim) bit-banged on P1.2.
- * Requires an external 4.7 kohm pull-up resistor from P1.2 to 3.3V.
- *
- * Note: P1.2 is also ADC channel A2. If using both 1-Wire and ADC,
- * choose a different pin for one of them.
+/*
+ * 1-Wire bit-banged on P1.2, which needs an external 4.7 kohm pull-up to 3V3.
+ * P1.2 is also ADC channel A2, so a design using both must move one of them.
  */
 #define TIKU_BOARD_OW_AVAILABLE     1
 #define TIKU_BOARD_OW_DIR           P1DIR
@@ -190,14 +181,10 @@
 /* Bit-bang test pin (tiku_bitbang demos / backscatter prototyping)          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Default pin for tiku_bitbang transmitters on this board: P1.4.
- *
- * P1.4 is brought out on BoosterPack header J1.5 (with GND on J1.20)
- * which makes it a good logic-analyzer probe point. It does not
- * conflict with the LEDs, buttons, UART, I2C, SPI, or 1-Wire pins
- * declared above. Override at compile time by passing
- * -DTIKU_BOARD_BSCAT_PORT=<n> -DTIKU_BOARD_BSCAT_PIN=<n>.
+/*
+ * Default pin for tiku_bitbang transmitters on this board: P1.4, brought out on
+ * a BoosterPack header next to a ground pin, which makes it a convenient
+ * logic-analyser probe point and clashes with nothing declared above.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       1

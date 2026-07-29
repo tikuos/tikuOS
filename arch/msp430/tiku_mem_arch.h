@@ -84,12 +84,11 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
 /**
- * @brief Write from SRAM into non-volatile memory
+ * @brief Write from SRAM into non-volatile memory.
  *
- * On MSP430, FRAM is memory-mapped so this is a memcpy. The caller
- * is responsible for unlocking the MPU before calling this function.
- * Abstracted through the arch layer because other NVM technologies
- * (Flash, EEPROM) may require erase-before-write or page alignment.
+ * A memcpy here, since FRAM is memory-mapped, with the caller owning the
+ * unlock.  It goes through the arch layer because other NVM technologies need
+ * erase-before-write or page alignment.
  *
  * @param dst   NVM destination address
  * @param src   SRAM source buffer
@@ -101,10 +100,9 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 /**
  * @brief Flush in-RAM NVM modifications to non-volatile storage.
  *
- * No-op on MSP430: FRAM writes are already durable as soon as the bus
- * cycle completes.  Exists for API parity with the RP2350 port, where
- * .persistent state is mirrored to a 4 KB flash sector that needs an
- * explicit erase+program at the end of each unlock window.
+ * A no-op here: FRAM writes are durable as soon as the bus cycle completes.  It
+ * exists for parity with ports whose .persistent state is mirrored to a flash
+ * sector needing an explicit erase and program per unlock window.
  */
 static inline void tiku_mem_arch_nvm_flush(void) { /* no-op */ }
 

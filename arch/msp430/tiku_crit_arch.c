@@ -84,12 +84,10 @@ static struct {
 /* HAL ENTRY POINTS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * GIE remains enabled so any preserved ISR (typically the bit
- * clock) keeps firing. Each register is touched at most once.
- *
- * Devices vary in which peripherals exist; the #if defined()
- * guards skip families that the current MCU lacks.
+/*
+ * GIE stays enabled so a preserved ISR -- typically the bit clock -- keeps
+ * firing, and each register is touched at most once.  The #if guards skip
+ * peripheral families the current device lacks.
  */
 void
 tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
@@ -186,20 +184,14 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
     }
 }
 
-/**
- * Lost-interrupt notes:
- *   - Timer A0: while masked, CCIFG can latch only one missed
- *     tick. Multiple missed compares collapse to a single
- *     post-window ISR. tiku_arch_count slips by the residual.
- *   - UART RX: bytes received during the window are lost beyond
- *     the 1-byte hardware buffer. UCAxIFG is preserved across
- *     IE clear/set, so the most recent byte may still trigger
- *     an ISR after restore.
- *   - GPIO edges: PxIFG latches a single edge per pin; multiple
- *     edges across the window collapse to one.
- *   - ADC done / I2C / WDT: completion flags are preserved in
- *     hardware; one ISR fires after restore for whatever was
- *     pending.
+/*
+ * Lost-interrupt notes for the masked window:
+ *   - Timer A0: CCIFG latches only one missed tick, so several missed compares
+ *     collapse into a single post-window ISR and the tick count slips.
+ *   - UART RX: bytes beyond the 1-byte hardware buffer are lost, though the
+ *     most recent one may still raise an ISR after restore.
+ *   - GPIO: PxIFG latches one edge per pin, so several edges collapse to one.
+ *   - ADC / I2C / WDT: completion flags survive in hardware and fire once.
  */
 void
 tiku_crit_arch_unmask_irqs(void)

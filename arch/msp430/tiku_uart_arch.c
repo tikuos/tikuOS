@@ -116,10 +116,9 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 /**
  * @brief Initialize the kernel UART at 9600 baud, 8N1.
  *
- * Drives the eUSCI module selected by TIKU_BOARD_UART_MODULE
- * (0 = eUSCI_A0, default; 1 = eUSCI_A1). Enables the RX interrupt so
- * incoming bytes are buffered in a software ring buffer regardless of
- * when the application polls.
+ * Drives the eUSCI instance the board header selects, and enables the RX
+ * interrupt so incoming bytes land in a software ring whatever the application
+ * is doing.
  */
 void
 tiku_uart_init(void)

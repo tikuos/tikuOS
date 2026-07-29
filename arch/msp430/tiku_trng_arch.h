@@ -20,16 +20,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/**
- * @brief Return codes for the TRNG driver (shared with the HW-TRNG ports).
- *
- * TIKU_TRNG_OK            — success.
- * TIKU_TRNG_ERR_INVALID   — NULL pointer or zero-length buffer.
- * TIKU_TRNG_ERR_TIMEOUT   — a health test failed (dead timer / stuck
- *                           jitter source); the output buffer is left
- *                           unmodified.
- * TIKU_TRNG_ERR_NOT_READY — tiku_trng_arch_init() was not called (unused
- *                           here: reads auto-init).
+/*
+ * Return codes for the TRNG driver, shared with the hardware-TRNG ports: OK,
+ * INVALID for a NULL or zero-length buffer, TIMEOUT when a health test fails
+ * and the buffer is left unmodified, and NOT_READY (unused here, since a read
+ * auto-initialises).
  */
 #define TIKU_TRNG_OK             0
 #define TIKU_TRNG_ERR_INVALID   -1

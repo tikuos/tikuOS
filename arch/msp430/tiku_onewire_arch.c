@@ -94,14 +94,9 @@ tiku_onewire_arch_close(void)
 /**
  * @brief 1-Wire reset: 480 us low pulse, then listen for presence.
  *
- * Timing:
- *   Master: pull low 480 us, release
- *   Wait 15-60 us for line to go high (pull-up)
- *   Wait until ~70 us mark, then sample (device pulls low if present)
- *   Wait remaining 410 us for reset window to complete
- *
- * We first verify the line goes HIGH after release (pull-up working),
- * then check for the device pulling it LOW (presence pulse).
+ * Drives low 480 us and releases, first checking the line returns HIGH so the
+ * pull-up is proven working, then sampling around the 70 us mark for a slave
+ * pulling it LOW.  The remaining 410 us completes the reset window.
  */
 int
 tiku_onewire_arch_reset(void)
@@ -144,11 +139,9 @@ tiku_onewire_arch_reset(void)
 /**
  * @brief Write a single bit.
  *
- * Write-1 slot: pull low 2 us, release, wait 62 us
- * Write-0 slot: pull low 60 us, release, wait 4 us
- *
- * The DS18B20 samples at ~30 us from the falling edge.
- * A shorter write-1 pulse ensures the line is high at sample time.
+ * A write-1 drives low 2 us then releases for 62; a write-0 drives low 60 then
+ * releases for 4.  The slave samples around 30 us in, so the short write-1
+ * pulse guarantees the line is high by then.
  */
 void
 tiku_onewire_arch_write_bit(uint8_t bit)
@@ -176,17 +169,9 @@ tiku_onewire_arch_write_bit(uint8_t bit)
 /**
  * @brief Read a single bit.
  *
- * Read slot: pull low 2 us, release, wait 10 us, sample, wait 50 us
- * Total slot: ~62 us (>60 us minimum)
- *
- * The master must sample within 15 us of the falling edge.
- * A shorter initial pulse gives the pull-up more time to charge
- * the line before sampling.
- *
- * Note: On MSP430, the input register (PxIN) is synchronized through
- * a D-type flip-flop clocked by MCLK. After switching DIR from output
- * to input, the new line state may not appear in PxIN for up to
- * 2 MCLK cycles. The delay after release ensures correct sampling.
+ * Drive low 2 us, release, wait 10, sample, idle 50 -- the master must sample
+ * within 15 us of the falling edge.  The 10 us also covers the input
+ * synchroniser, which can lag a direction change by two MCLK cycles.
  */
 uint8_t
 tiku_onewire_arch_read_bit(void)

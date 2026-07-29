@@ -51,14 +51,10 @@
 /* CLOCK SYSTEM TYPE                                                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * FR2433 uses the CS module with FLL (different from FR5969's CS_A).
- * Key differences:
- *   - No CSKEY password protection
- *   - DCO frequency set via DCORSEL (3-bit, in CSCTL1)
- *   - MCLK+SMCLK source: SELMS (combined, in CSCTL4)
- *   - ACLK source: SELA (1-bit, in CSCTL4): XT1CLK or REFOCLK
- *   - Dividers in CSCTL5 (not CSCTL3)
+/*
+ * The FR2433 clock system differs from the FR59xx CS_A: no password protection,
+ * DCO frequency through DCORSEL, MCLK and SMCLK sharing one source select, a
+ * one-bit ACLK select, and the dividers in a different register.
  */
 #define TIKU_DEVICE_CS_HAS_KEY      0
 #define TIKU_DEVICE_CS_TYPE_FR2X33  1

@@ -19,12 +19,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize MSP430-specific memory hardware
+ * @brief Initialize MSP430-specific memory hardware.
  *
- * Currently a no-op. Future implementations may configure:
- *   - FRAM wait states for high-frequency operation
- *   - Memory Protection Unit (MPU) regions
- *   - DMA controller defaults for bulk transfers
+ * Currently a no-op; the hook exists for future FRAM wait-state, MPU or DMA
+ * defaults.
  */
 void tiku_mem_arch_init(void)
 {
@@ -36,25 +34,11 @@ void tiku_mem_arch_init(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Securely wipe a memory region with zeros
+ * @brief Securely wipe a memory region with zeros.
  *
- * Overwrites each byte through a volatile pointer to prevent the
- * compiler from optimizing away the zeroing — without the volatile
- * qualifier, GCC -O2 and LLVM see that the memory is never read
- * afterward and may elide the entire loop.
- *
- * MSP430 cycle cost (16-bit RISC, single-cycle SRAM writes):
- *   The inner loop compiles to roughly:
- *       MOV.B #0, 0(Rn)    ; 4 cycles (indexed mode)
- *       INC   Rn            ; 1 cycle
- *       CMP   Rn, Rm        ; 1 cycle
- *       JNZ   loop          ; 2 cycles (taken)
- *   Total: ~8 cycles per byte on MSP430, ~5 cycles per byte on MSP430X.
- *
- *   Concrete examples at 16 MHz MCLK:
- *     64 B   →   ~512 cycles →   32 us
- *    256 B   →  ~2048 cycles →  128 us
- *   2048 B   → ~16384 cycles → 1024 us  (1 ms)
+ * Writes through a volatile pointer so the compiler cannot elide the loop --
+ * without it, an optimiser sees the memory is never read again and may drop the
+ * whole thing.  Costs roughly 5-8 cycles per byte.
  *
  * @param buf   Start of the region to wipe
  * @param len   Number of bytes to zero
@@ -99,12 +83,10 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Write from SRAM into FRAM
+ * @brief Write from SRAM into FRAM.
  *
- * FRAM on MSP430 is memory-mapped, so this is a straight memcpy.
- * The caller must unlock the MPU before calling — this function does
- * not manage MPU state, allowing the caller to batch multiple writes
- * in a single MPU-unlocked critical section.
+ * FRAM is memory-mapped, so this is a straight copy.  The caller unlocks the
+ * MPU, which lets several writes share one unlocked window.
  *
  * @param dst   FRAM destination
  * @param src   SRAM source

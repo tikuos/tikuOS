@@ -105,13 +105,10 @@
 #error "TIKU_BOARD_UART_MODULE must be 0 (eUSCI_A0) or 1 (eUSCI_A1)"
 #endif
 
-/** UART baud-rate selection from 8 MHz SMCLK (oversampling).
- *  Values from TI SLAU367 Table 30-5 for eUSCI_A @ 8 MHz.
- *
- *  Override at compile time:
- *    make MCU=msp430fr6989 UART_BAUD=115200
- *
- *  Supported: 9600 (default), 19200, 38400, 57600, 115200.
+/*
+ * UART baud-rate selection from an 8 MHz SMCLK, oversampled; values from TI
+ * SLAU367 Table 30-5.  9600 by default, with 19200, 38400, 57600 and 115200
+ * selectable at build time through UART_BAUD.
  */
 #define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
 
@@ -193,11 +190,10 @@
 /* ADC12_B                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * ADC12_B is available on the FR6989 LaunchPad.
- * Internal channels: ch30 = temperature sensor, ch31 = battery monitor.
- * External channels routed to BoosterPack headers depend on PCB rev;
- * consult the LaunchPad pinout (SLAU627) before wiring analog inputs.
+/*
+ * ADC12_B is available.  Channel 30 is the internal temperature sensor and 31
+ * the battery monitor; which external channels reach the BoosterPack headers
+ * depends on PCB revision, so check the LaunchPad pinout before wiring analog.
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
 

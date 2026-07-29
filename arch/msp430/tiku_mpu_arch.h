@@ -25,19 +25,11 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Expected MPUSAM value after tiku_mpu_init() / tiku_mem_init().
+ * @brief Expected access-mask value after MPU and memory init.
  *
- * Parts without HIFRAM (FR5969, FR4133, ...): every segment is R+X
- * with no W bit set, i.e. 0x0555.
- *
- * Parts with HIFRAM (FR6989, FR5994, ...): segment 3 covers HIFRAM
- * (0x10000+) and must be writable so kernel mutable state placed
- * there can be updated without an explicit unlock around every
- * store. Segments 1-2 stay R+X. The resulting SAM is 0x0755.
- *
- * Tests and assertions reach for this constant rather than hard-coding
- * 0x0555 — that hard-coding is correct on FR5969 but wrong on FR6989,
- * and was the source of the FR6989 mpu / memory-edge regressions.
+ * Without HIFRAM every segment is R+X.  With it, segment 3 covers HIFRAM and
+ * must be writable so kernel state there needs no unlock per store.  Tests
+ * assert against this rather than a literal, which is what broke on FR6989.
  */
 #if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
 #define TIKU_MPU_DEFAULT_SAM    0x0755U
@@ -100,15 +92,11 @@ void tiku_mpu_arch_enable_irq(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Configure MPU segment boundaries
+ * @brief Configure MPU segment boundaries.
  *
- * Sets MPUSEGB1 and MPUSEGB2 to partition FRAM into three segments.
- * Boundary addresses are taken from device-level constants
- * (TIKU_DEVICE_MPU_SEG2_START, TIKU_DEVICE_MPU_SEG3_START) and
- * right-shifted by 4 before writing to the boundary registers.
- *
- * Must be called before enabling MPU protection so that the SAM
- * permissions map to meaningful address ranges.
+ * Partitions FRAM into three segments from the device-level boundary constants.
+ * Must run before protection is enabled, so the permission bits map to
+ * meaningful address ranges.
  */
 void tiku_mpu_arch_init_segments(void);
 
@@ -121,15 +109,10 @@ void tiku_mpu_arch_init_segments(void);
 void tiku_mpu_arch_set_default_protection(void);
 
 /**
- * @brief Set permissions on a single MPU segment
+ * @brief Set permissions on a single MPU segment.
  *
- * Updates the permission bits for one segment without affecting the
- * other segments. The seg and perm values use the platform-independent
- * TIKU_MPU_SEG and TIKU_MPU_PERM enums (passed as uint8_t to avoid
- * circular header dependencies).
- *
- * @param seg    Segment number (0-2)
- * @param perm   Permission flags (TIKU_MPU_READ/WRITE/EXEC or combinations)
+ * Updates one segment's bits without touching the others, taking the
+ * platform-independent segment and permission enums as plain integers.
  */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 
@@ -151,12 +134,10 @@ uint16_t tiku_mpu_arch_unlock_nvm(void);
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 
 /**
- * @brief Read violation flags
+ * @brief Read violation flags.
  *
- * Returns per-segment violation flags. Each bit corresponds to one
- * segment: bit 0 = segment 1, bit 1 = segment 2, bit 2 = segment 3.
- * A set bit means a write was attempted on that segment while it
- * lacked write permission.
+ * One bit per segment, low bit first; a set bit means a write was attempted on
+ * that segment while it lacked write permission.
  *
  * @return Violation flags (bits [2:0] meaningful)
  */
@@ -171,11 +152,10 @@ uint16_t tiku_mpu_arch_get_violation_flags(void);
 void tiku_mpu_arch_clear_violation_flags(void);
 
 /**
- * @brief Enable NMI on MPU violation instead of PUC reset
+ * @brief Enable NMI on MPU violation instead of a PUC reset.
  *
- * Sets the MPUSEGIE bit in MPUCTL0. When a violation occurs the
- * CPU vectors to the SYSNMI handler rather than performing a full
- * power-up clear (reset). This allows violation detection without
+ * Sets the segment-interrupt-enable bit, so a violation vectors to the NMI
+ * handler rather than performing a full power-up clear -- detection without
  * losing system state.
  */
 void tiku_mpu_arch_enable_violation_nmi(void);

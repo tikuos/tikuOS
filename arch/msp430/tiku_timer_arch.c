@@ -373,10 +373,9 @@ tiku_clock_arch_counter_t tiku_clock_arch_counter(void)
 /**
  * @brief Return the active clock-source fault code.
  *
- * Set to TIKU_CLOCK_ARCH_FAULT_LFXT_VLO inside tiku_configure_aclk_source()
- * when XT1 fails to start and ACLK is rerouted to VLOCLK; the system tick
- * then runs ~3x slower than TIKU_CLOCK_SECOND implies. Cleared on each
- * tiku_clock_arch_init().
+ * Set when XT1 fails to start and ACLK is rerouted to VLOCLK, after which the
+ * tick runs about three times slower than TIKU_CLOCK_SECOND implies.  Cleared
+ * on each clock init.
  */
 unsigned char tiku_clock_arch_fault(void)
 {
