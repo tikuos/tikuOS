@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_bitbang.c - Hardware-driven precision bit-bang engine
+ * tiku_bitbang.c - hardware-driven precision bit-bang engine.
  *
- * Two backends share a single kernel API surface (tiku_bitbang_tx,
- * busy, abort, tx_count):
- *
- *   MSP430  -- Timer A1 (htimer) ISR per bit edge.  Each transition
- *              is driven from software, but the bit clock is the
- *              hardware compare-match so jitter stays sub-microsecond
- *              and the CPU is free between edges.
- *
- *   RP2350  -- PIO0 state machine.  A 4-instruction PIO program
- *              shifts bits from the TX FIFO to the configured GPIO at
- *              SM clock rate; the CPU loads the data word, configures
- *              the divider, and waits for a PIO IRQ.  No per-bit CPU
- *              work at all, and the bit rate can reach clk_sys/2 -- a
- *              hundred-megahertz ceiling instead of a few-hundred-
- *              kilohertz htimer-ISR ceiling.
- *
- * Kernel-side state (busy flag, completion counter, the cfg snapshot
- * for the idle-level write and the user callback) is shared.  The
- * platform-specific scheduling code is inside #if blocks below.
- *
- * Limits on the RP2350 PIO backend:
- *   - bit_count must be in [1, 32] per call.  Longer bursts will
- *     need either multiple tx calls or extending the PIO program to
- *     pull more than one word; not implemented yet.
+ * Two backends behind one API: MSP430 drives each bit edge from a Timer A1 ISR
+ * clocked by hardware compare-match, and RP2350 shifts bits from a PIO state
+ * machine with no per-bit CPU work at all.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,6 +19,9 @@
 /*---------------------------------------------------------------------------*/
 
 #include <tiku.h>
+/* RP2350 PIO backend limit: bit_count must be in [1, 32] per tiku_bitbang_tx()
+ * call.  A longer burst needs several calls, or a PIO program extended to pull
+ * more than one word. */
 #include "tiku_bitbang.h"
 #include <interfaces/gpio/tiku_gpio.h>
 #include <stddef.h>

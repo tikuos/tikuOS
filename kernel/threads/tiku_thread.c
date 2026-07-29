@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_thread.c - preemptive worker threads: portable core
+ * tiku_thread.c - preemptive worker threads: portable core.
  *
- * Policy lives here; the mechanics (PendSV switcher, frame layout,
- * MSP->PSP migration, DWT) live in the arch backend.  The scheduling
- * policy is deliberately minimal:
- *
- *   - Thread 0 (the kernel) has ABSOLUTE priority: whenever it is
- *     runnable it gets the CPU.  It goes not-runnable only in the
- *     scheduler's idle branch via tiku_thread_kernel_block(), and any
- *     successful event post makes it runnable again.
- *   - Workers round-robin the CPU the kernel leaves behind.  The
- *     rotation advances every time the kernel blocks and on every
- *     voluntary yield; since the system tick posts the timer poll
- *     each tick (waking the kernel), workers are naturally
- *     time-sliced at tick granularity.
- *   - If nothing is runnable the switcher falls back to the kernel:
- *     its loop is the only context that knows how to idle properly
- *     (tickless stretch + WFI), so the "all quiet" case lands there.
+ * Policy only; the PendSV switcher, frame layout and DWT live in the arch
+ * backend.  Thread 0 (the kernel) has absolute priority, workers round-robin
+ * what it leaves, and the switcher falls back to the kernel when nothing runs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

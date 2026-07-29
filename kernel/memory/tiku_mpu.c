@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu.c - MPU write-protection wrappers (platform-independent)
+ * tiku_mpu.c - MPU write-protection wrappers (platform-independent).
  *
- * Provides a controlled interface for NVM protection using the MPU.
- * All hardware register access and bit manipulation is routed through
- * the arch-level functions (tiku_mpu_arch_set_default_protection,
- * tiku_mpu_arch_set_seg_perm, tiku_mpu_arch_unlock_nvm, etc.), so
- * this file contains only platform-independent orchestration logic.
- *
- * Default policy: all MPU segments are read+execute, no write.
- * This prevents stray pointers and runaway code from corrupting NVM.
- * To write to NVM, code explicitly unlocks, writes, and relocks.
- *
- * FAULT-BEHAVIOR CONTRACT (what an UNBRACKETED durable store does):
- *   MSP430   the FRAM MPU silently DROPS the write — no fault, no flag
- *            (unless the violation NMI below is armed).  The quietest
- *            and therefore most dangerous failure mode in the fleet.
- *   nRF54L   precise BUS FAULT (RRAMC WEN closed) — the loud canary.
- *   RP2350 / Ambiq   MemManage fault -> deliberate reset, with a
- *            persistent .mpu_diag violation record.
- * Same bug, three behaviors: never rely on "it didn't crash" as proof
- * a durable write landed on MSP430.  Debug/bench builds should arm the
- * violation NMI (TIKU_MPU_NMI_ON_VIOLATION below) so all platforms
- * fail loudly.
+ * Orchestration only; every register access goes through tiku_mpu_arch_*.  The
+ * default is read+execute with no write, so code explicitly unlocks NVM, writes
+ * and relocks -- see tiku_mpu_unlock_nvm() for what an unbracketed store does.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -86,10 +68,23 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
  *   on individual segments.
  */
 
+/*
+ * FAULT-BEHAVIOR CONTRACT -- what an UNBRACKETED durable store does:
+ *   MSP430          the FRAM MPU silently DROPS the write -- no fault, no flag
+ *                   (unless the violation NMI is armed).  The quietest, and so
+ *                   the most dangerous, failure mode in the fleet.
+ *   nRF54L          precise BUS FAULT (RRAMC WEN closed) -- the loud canary.
+ *   RP2350 / Ambiq  MemManage fault -> deliberate reset, with a persistent
+ *                   .mpu_diag violation record.
+ * Same bug, three behaviours: never read "it did not crash" as proof a durable
+ * write landed on MSP430.  Bench builds should arm TIKU_MPU_NMI_ON_VIOLATION so
+ * every platform fails loudly.
+ */
+
 /**
- * @brief Unlock NVM for writing — adds write permission to all segments
+ * @brief Unlock NVM for writing -- adds write permission to all segments.
  *
- * @return Previous protection state for later restoration
+ * @return Previous protection state for later restoration.
  */
 uint16_t tiku_mpu_unlock_nvm(void)
 {

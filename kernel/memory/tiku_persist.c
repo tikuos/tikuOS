@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_persist.c - Persistent NVM key-value store implementation
+ * tiku_persist.c - persistent NVM key-value store implementation.
  *
- * Implements a registry that maps short string keys to NVM-backed
- * buffers. Entries are registered at boot with caller-provided NVM
- * regions. A magic number validates entries across reboots, and
- * write counts track wear for endurance monitoring.
- *
- * All NVM access is routed through the HAL (tiku_mem_arch_nvm_read/write)
- * so the kernel code stays platform-independent.
+ * Maps short string keys to NVM-backed buffers registered at boot.  A magic word
+ * validates entries across reboots and write counts track wear.  All NVM access
+ * goes through tiku_mem_arch_nvm_read/write, so this file stays portable.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

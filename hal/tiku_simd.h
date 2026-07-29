@@ -7,25 +7,9 @@
  *
  * tiku_simd.h - portable u8 vector kernels (Helium/MVE when the ISA has it).
  *
- * A small set of unsigned-8-bit tensor kernels with ONE fixed arithmetic
- * contract, chosen to match the Apollo510 GPU's ROP blender semantics so the
- * scalar reference, this layer, and the GPU are mutually checkable:
- *
- *     product   :  floor(a * b / 255)            (the 8-bit "unit scale")
- *     addition  :  saturating to [0, 255]
- *
- * Backend selection is by INSTRUCTION SET, not platform: when the translation
- * unit is compiled for a core with M-Profile Vector Extension (Helium -- e.g.
- * the Apollo510's Cortex-M55; __ARM_FEATURE_MVE from -mcpu), the kernels run
- * 16 lanes per beat via <arm_mve.h> compiler intrinsics -- no vendor library,
- * same blob-free discipline as the GPU driver. Everywhere else (M33, M4,
- * MSP430) the same entry points run a portable scalar implementation with
- * bit-identical results. tiku_simd_backend() reports which one was built.
- *
- * All kernels accept any n >= 0 (the MVE paths use tail predication -- there
- * is no alignment or multiple-of-16 requirement). Buffers may be in any
- * readable RAM; on Apollo510, DTCM buffers are fastest (single-cycle, no
- * cache), SSRAM goes through the cache hierarchy (and is what the GPU shares).
+ * One fixed arithmetic contract -- product is floor(a * b / 255), addition
+ * saturates to [0, 255] -- chosen to match the Apollo510 GPU's ROP blender, so
+ * scalar, Helium and GPU results are mutually checkable.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,6 +18,10 @@
 #define TIKU_SIMD_H_
 
 #include <stdint.h>
+
+/* Every kernel accepts any n >= 0: the MVE paths tail-predicate, so there is no
+ * alignment or multiple-of-16 requirement.  Buffers may sit in any readable RAM;
+ * on Apollo510 DTCM is single-cycle while SSRAM goes through the cache. */
 
 /** @brief Compiled backend: 0 = portable scalar, 1 = Helium/MVE. */
 int tiku_simd_backend(void);

@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pool.c - Fixed-size block pool allocator implementation
+ * tiku_pool.c - fixed-size block pool allocator.
  *
- * Implements a pool allocator that manages equal-sized blocks from a
- * contiguous caller-provided buffer. An embedded freelist chains free
- * blocks together — each free block stores a pointer to the next free
- * block inside its own memory, so there is zero metadata overhead.
- *
- * Why a pool allocator alongside the arena:
- *   The arena is ideal when allocations share a common lifetime and are
- *   freed together. But many embedded patterns need individual alloc/free
- *   of fixed-size objects — packet buffers, message slots, sensor sample
- *   records. A pool provides O(1) alloc and O(1) free with zero
- *   fragmentation, because every block is the same size.
- *
- * Why an embedded freelist:
- *   Each free block is large enough to hold at least one pointer. The
- *   first sizeof(void *) bytes of a free block store a pointer to the
- *   next free block. When the block is allocated, those bytes are
- *   returned to the caller — zero per-block metadata. When freed, the
- *   pointer is written back. This is the classic freelist technique used
- *   in kernels and allocators where per-object overhead must be zero.
+ * Manages equal-sized blocks in a caller-provided buffer.  Free blocks chain
+ * through an embedded freelist stored in their own memory, so there is no
+ * metadata overhead and no fragmentation.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

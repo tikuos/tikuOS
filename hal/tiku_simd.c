@@ -7,17 +7,9 @@
  *
  * tiku_simd.c - portable u8 vector kernels (Helium/MVE + scalar backends).
  *
- * See tiku_simd.h for the arithmetic contract. The two backends live in this
- * one translation unit, selected by __ARM_FEATURE_MVE (a property of the
- * -mcpu the file is compiled for, not of any vendor SDK): the Helium paths
- * are written directly against the <arm_mve.h> COMPILER intrinsics -- 16 u8
- * lanes per operation, tail predication via VCTP so any n works with no
- * scalar epilogue -- and the scalar paths are the bit-identical reference.
- *
- * The one non-obvious identity: exact floor(v/255) for a 16-bit product v is
- *     (v + 1 + (v >> 8)) >> 8
- * (no overflow: v <= 255*255 = 65025, so the sum <= 65280 fits u16). This is
- * what lets the MVE product path match the scalar (x*y)/255 bit-for-bit.
+ * Both backends live in one translation unit, selected by __ARM_FEATURE_MVE -- a
+ * property of the -mcpu, not of any vendor SDK.  The MVE paths use <arm_mve.h>
+ * with VCTP tail predication; the scalar paths are the bit-identical reference.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -59,7 +51,11 @@ tiku_simd_backend(void)
 
 #if TIKU_SIMD_MVE
 
-/** Exact floor(v/255) on eight u16 lanes (identity above). */
+/*
+ * Exact floor(v/255) on eight u16 lanes:  (v + 1 + (v >> 8)) >> 8
+ * No overflow: v <= 255*255 = 65025, so the sum <= 65280 still fits u16.  This
+ * is what makes the MVE product match the scalar (x*y)/255 bit for bit.
+ */
 static inline uint16x8_t
 simd_div255_u16(uint16x8_t v)
 {

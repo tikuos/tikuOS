@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem.h - Memory management module
+ * tiku_mem.h - memory management for parts with small SRAM.
  *
- * TikuOS memory management for microcontrollers with small SRAM (2-8 KB).
- *
- * Two allocator types are provided:
- *
- *   Arena (bump-pointer) — for groups of allocations that share a
- *   lifetime. O(1) alloc, O(1) bulk free. Zero per-object metadata.
- *   No individual free.
- *
- *   Pool (fixed-size block) — for individual alloc/free of equal-sized
- *   objects. O(1) alloc, O(1) free. Zero per-block metadata via an
- *   embedded freelist. Zero fragmentation.
- *
- * Why arenas:
- *   malloc/free on small SRAM leads to fragmentation that is fatal on
- *   microcontrollers with no MMU. An arena allocates by advancing a
- *   pointer — O(1) with zero per-object metadata — and frees everything
- *   at once by resetting the pointer. Ideal for temporary buffers during
- *   packet processing, sensor data batching, or any scenario where a
- *   group of allocations is used and discarded together.
+ * Two allocators: an arena (bump pointer, O(1) alloc and bulk free, no metadata,
+ * no individual free) for allocations sharing a lifetime, and a pool (fixed-size
+ * blocks, embedded freelist) for individual alloc/free without fragmentation.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

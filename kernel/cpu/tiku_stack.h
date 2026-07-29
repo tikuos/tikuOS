@@ -7,22 +7,9 @@
  *
  * tiku_stack.h - stack high-water measurement by painting.
  *
- * /sys/mem/free reports the LIVE gap under the current SP -- headroom at this
- * instant.  It cannot tell you how close the stack has EVER come to overflow,
- * which is the number that matters for sizing.  Painting does: fill the
- * unused stack with a sentinel early in boot; the deepest the stack ever
- * reached is the lowest overwritten sentinel, and the intact cushion below it
- * is the worst-case headroom -- measured, not guessed.  Pairs with the MPU
- * stack guard: the guard catches an overflow, this warns before one.
- *
- * SAFETY: painting is bounded by the ARCH-DECLARED stack bottom
- * (tiku_stack_arch_bottom), not by _end.  The gap between _end and the stack
- * holds the heap and the armed no-access MPU guard region -- painting or
- * scanning through those faults the CPU (the lesson of the first attempt).
- * The arch override lives next to the guard-arming code, computed from the
- * SAME expression, so the paint floor and the guard top cannot diverge.  On
- * an arch with no override the weak default returns 0 and the whole feature
- * is dormant: nothing painted, stack_free reports 0.
+ * /sys/mem/free reports the live gap under SP; painting reports how close the
+ * stack has ever come to overflow, which is the number that sizes it.  Bounded by
+ * the arch-declared stack bottom, never _end -- the heap and MPU guard lie between.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

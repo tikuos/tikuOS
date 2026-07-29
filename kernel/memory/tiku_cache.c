@@ -5,28 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cache.c - Write-back cache for hot FRAM regions
+ * tiku_cache.c - write-back cache for hot FRAM regions.
  *
- * Implements SRAM write-back caching of FRAM-backed data. Frequently
- * updated structures (network state, sensor buffers, counters) are
- * kept in fast SRAM during active processing and flushed to persistent
- * FRAM only at explicit sync points or before entering low-power mode.
- *
- * Why write-back caching:
- *   FRAM writes on MSP430 consume roughly 3x more energy per access
- *   than SRAM writes and contribute to cell wear (~10^15 cycle
- *   endurance). By absorbing rapid read-modify-write bursts in SRAM,
- *   the cache reduces both energy consumption and wear. The trade-off
- *   is that data in SRAM is volatile — a power failure before flush
- *   loses uncommitted changes. Callers control this trade-off by
- *   choosing when to flush.
- *
- * How MPU interaction works:
- *   FRAM is write-protected by default via the MPU. Individual flushes
- *   unlock/relock around each write. The batch flush
- *   (tiku_cache_flush_all) unlocks once for the entire batch to
- *   minimize the unlock/lock overhead — important because each
- *   MPU register write goes through the password-protected MPUCTL0.
+ * Absorbs rapid read-modify-write bursts in SRAM and flushes to FRAM at explicit
+ * sync points, cutting both write energy and cell wear.  Uncommitted data is
+ * volatile, so callers choose the sync points.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_proto.h - Protothreads for lightweight stackless threads
+ * tiku_proto.h - protothreads for lightweight stackless threads.
  *
- * Derived from and inspired by the protothreads implementation
- * in Contiki OS (contiki-os.org) by Adam Dunkels.
- *
- * Protothreads provide a blocking context on top of an event-driven system,
- * without the overhead of per-thread stacks. Useful for embedded systems
- * and other memory-constrained environments.
+ * Provides a blocking context on top of an event-driven system without the cost
+ * of per-thread stacks.  Derived from the protothreads implementation in Contiki
+ * OS (contiki-os.org) by Adam Dunkels.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

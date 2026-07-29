@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_map.c - NVM region table and backing storage
+ * tiku_nvm_map.c - NVM region table and backing storage.
  *
- * Declares durable arrays sized by device-header constants.  The
- * linker places them — no hardcoded addresses.  A static region table
- * provides runtime lookup by ID.
- *
- * The backing is TIKU_DURABLE (.persistent) on EVERY platform — FRAM
- * in place on MSP430, RRAM in place on nRF54L, SRAM+NVM-mirror on
- * RP2350/Ambiq.  (Until the 2026-07 audit this was MSP430-only, which
- * silently made the CONFIG region — the inittab! — volatile on every
- * Cortex-M part: `init add` entries vanished at each reboot.  Audit
- * finding P0-1; see kintsugi/memory.md §10c.)
+ * Declares durable arrays sized by device-header constants and placed by the
+ * linker, plus a static table for lookup by ID.  The backing is TIKU_DURABLE on
+ * every platform, so no region is silently volatile on the Cortex-M parts.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

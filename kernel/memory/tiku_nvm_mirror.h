@@ -5,31 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_mirror.h - shared layout + integrity check for the .uninit
- *                     NVM mirror (Ambiq MRAM page, RP2350 flash sector)
+ * tiku_nvm_mirror.h - layout and integrity check for the .uninit NVM mirror.
  *
- * On the mirror platforms the live copy of .persistent state is SRAM;
- * durability is a whole-region snapshot programmed to NVM at MPU-relock
- * time.  V1 of that snapshot was validated by a single magic word — but
- * the magic is programmed at offset 0, FIRST, so a power cut mid-program
- * could leave a torn image wearing a valid magic, and the next boot
- * would restore corrupt state as good.  V2 closes that hole: a 16-byte
- * header carrying a CRC-32 over the image, checked before any restore.
- * A torn program fails the CRC and the boot falls back to per-subsystem
- * first-boot priming — crash-consistent, never silently corrupt.
- *
- * Header layout (four 32-bit words; 16 bytes keeps the image at the
- * Ambiq bootrom's 16-byte program-alignment unit):
- *
- *   word 0  TIKU_NVM_MIRROR_MAGIC_V2
- *   word 1  CRC-32 (reflected, poly 0xEDB88320) over the image bytes
- *   word 2  image length in bytes (the .uninit size at flush time)
- *   word 3  0xFFFFFFFF (reserved; erased-flash value)
- *
- * Flush-cost note: the dirty check compares the IMAGE span (and the
- * magic/length words) against the mirror first; the CRC is computed
- * only when the image actually changed and a program is unavoidable.
- * Clean relocks — the per-packet TCP path — never pay for the CRC.
+ * On the mirror platforms (Ambiq MRAM page, RP2350 flash sector) .persistent
+ * lives in SRAM and is snapshotted to NVM at relock.  A 16-byte header carries a
+ * CRC-32, so a torn program is refused rather than restored as good.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -51,6 +31,16 @@
 
 /** Header size in bytes (and the image offset within the mirror). */
 #define TIKU_NVM_MIRROR_HDR_BYTES  16U
+
+/*
+ * Header layout -- four 32-bit words.  16 bytes keeps the image at the Ambiq
+ * bootrom's program-alignment unit.
+ *
+ *   word 0  TIKU_NVM_MIRROR_MAGIC_V2
+ *   word 1  CRC-32 (reflected, poly 0xEDB88320) over the image bytes
+ *   word 2  image length in bytes (the .uninit size at flush time)
+ *   word 3  0xFFFFFFFF (reserved; the erased-flash value)
+ */
 
 /** Header word indices. */
 #define TIKU_NVM_MIRROR_W_MAGIC    0U

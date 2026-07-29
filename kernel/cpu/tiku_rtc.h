@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_rtc.h - Wall-clock RTC API
+ * tiku_rtc.h - wall-clock RTC API.
  *
- * Soft RTC implemented on top of tiku_clock_seconds() (system uptime)
- * plus a persistent epoch baseline. Stored in `.persistent`, so the last
- * explicitly set epoch survives warm reset on every platform, and survives
- * power cycle wherever `.persistent` is flash- or FRAM-backed
- * (MSP430 FRAM, RP2350 with flash NVM mirror).
- *
- * Resolution is one second. Sub-second time stays available through
- * the existing tiku_clock_arch_fine() / tiku_htimer_now() APIs.
- *
- * This API backs the /sys/time VFS node; the implementation in
- * tiku_rtc.c keeps the persistent baseline and the MPU-unlock
- * handshake out of the VFS handlers.
+ * A soft RTC over tiku_clock_seconds() plus a persistent epoch baseline, so the
+ * last set time survives warm reset everywhere and power cycle wherever
+ * .persistent is FRAM- or flash-backed.  One-second resolution; backs /sys/time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

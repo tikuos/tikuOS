@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_printf_hal.h - Platform-routing header for debug printf
+ * tiku_printf_hal.h - platform routing for debug printf.
  *
- * Defines TIKU_PRINTF() based on the active platform.  Each platform
- * block selects the correct low-level output channel (semihosting,
- * UART, RTT, etc.) and handles transport-conflict suppression
- * (e.g. SLIP owns the UART).
- *
- * Adding a new platform:
- *   1. Add an #elif block for PLATFORM_<NAME>
- *   2. Include the platform's console/UART header
- *   3. Map TIKU_PRINTF to the platform's printf function
- *   4. Handle any transport conflicts (SLIP, BLE, etc.)
+ * Defines TIKU_PRINTF() per platform, selecting the low-level output channel
+ * (semihosting, UART, RTT) and suppressing it where a transport owns the link,
+ * as SLIP owns the UART.  A new port adds one #elif block.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

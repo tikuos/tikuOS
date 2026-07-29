@@ -5,35 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_thread.h - opt-in preemptive worker threads (Cortex-M only)
+ * tiku_thread.h - opt-in preemptive worker threads (Cortex-M only).
  *
- * The hybrid model: thread 0 is the ENTIRE existing kernel — the
- * scheduler loop, every protothread process, every service — running
- * exactly as before, cooperative and run-to-completion.  Workers are
- * statically declared, stackful, preemptible compute threads that run
- * ONLY when the kernel has nothing to dispatch, and are preempted
- * back to the kernel the moment any event arrives (every ISR post
- * wakes thread 0, which has absolute priority).  Between themselves,
- * workers round-robin on the system tick.
- *
- * CONFINEMENT, NOT LOCKING.  Workers may do pure computation plus the
- * ISR-safe kernel primitives — tiku_process_post(), the channel API —
- * and NOTHING else: no VFS, no tier/arena, no net, no shell IO.  The
- * safety argument is structural: tiku_atomic_enter() masks PRIMASK,
- * PendSV is an interrupt, so no context switch can occur inside any
- * existing critical section — every atomic-guarded structure is
- * already worker-safe unchanged, and everything else stays
- * kernel-thread-only by policy (MPU enforcement is a later phase).
- *
- * The context switch accounts per-thread CPU cycles from the DWT
- * cycle counter at every switch — the substrate for energy-budgeted
- * scheduling: a worker given a non-zero cycle budget is parked once it
- * spends it and stays parked until refilled (tiku_thread_budget_*).
- *
- * Opt-in via TIKU_THREADS_ENABLE=1 (Makefile; Cortex-M parts only —
- * per-thread stacks are noise on 384-520 KB parts and impossible on a
- * 2 KB MSP430, which stays cooperative AND byte-identical: with the
- * flag off none of this compiles).
+ * Thread 0 is the entire existing kernel, cooperative and unchanged; workers are
+ * statically declared, preemptible compute threads that run only when it has
+ * nothing to dispatch.  A worker may compute and post events, and nothing else.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

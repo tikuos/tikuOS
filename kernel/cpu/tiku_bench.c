@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_bench.c - Portable micro-benchmark timebase
+ * tiku_bench.c - portable micro-benchmark timebase.
  *
- * ARM targets prefer the DWT cycle counter, with the already initialized
- * kernel htimer as a runtime fallback.  MSP430 uses its Timer_A htimer.
- * Nordic deliberately uses TIMER20: its DWT counter freezes without a live
- * debugger, so DWT figures would be plausible-looking zeros on real boards.
+ * ARM prefers the DWT cycle counter with the kernel htimer as fallback; MSP430
+ * uses Timer_A.  Nordic deliberately uses TIMER20 because its DWT counter freezes
+ * without a live debugger, which would report plausible-looking zeros.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

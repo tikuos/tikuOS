@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_hang.h - check-in (software) watchdog: live-hang detection with
- *               named-culprit attribution across a reset.
+ * tiku_hang.h - check-in watchdog: live-hang detection with named attribution.
  *
- * Process supervision (tiku_process) recovers a process that EXITS.  A
- * process that WEDGES the cooperative scheduler -- an infinite loop that
- * never yields -- is different: the run loop never turns, so the supervisor
- * can never run to save it, and the board goes down.  Today that reset is
- * anonymous.
- *
- * This turns it into a NAMED, quarantinable event.  The scheduler bumps a
- * progress heartbeat once per dispatched event; the system-tick ISR (which
- * preempts even a wedged thread) watches it.  If a process has held the CPU
- * for TIKU_HANG_THRESHOLD_TICKS without the loop making progress, the ISR
- * records WHICH process was on the CPU (tiku_current_process) into
- * warm-reset-surviving storage and resets.  On the recovery boot the culprit
- * is readable (/sys/boot/hang) and the autostart quarantines it once, so a
- * process that hangs on start cannot wedge the board forever.
+ * A process that wedges the cooperative scheduler never lets the supervisor run,
+ * so the board resets anonymously.  The tick ISR watches a progress heartbeat and
+ * records which process held the CPU, so the recovery boot can quarantine it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

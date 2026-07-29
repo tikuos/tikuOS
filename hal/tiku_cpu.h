@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu.h - Platform-agnostic CPU abstraction interface
+ * tiku_cpu.h - platform-agnostic CPU abstraction interface.
  *
- * Provides atomic section entry/exit, IRQ control, clock-rate
- * queries, and idle-mode entry hooks. Each function delegates to
- * the active platform's arch implementation; non-MSP430 ports
- * supply their own backend.
+ * Atomic section entry/exit, IRQ control, clock-rate queries and idle-mode entry.
+ * Every function delegates to the active platform's arch implementation, which
+ * each port supplies.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

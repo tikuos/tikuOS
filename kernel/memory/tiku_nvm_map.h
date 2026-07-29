@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_map.h - Platform-independent NVM region management
+ * tiku_nvm_map.h - platform-independent NVM region management.
  *
- * Declares named non-volatile memory (NVM) regions whose sizes come
- * from the per-device header (TIKU_DEVICE_FRAM_CONFIG_SIZE on MSP430,
- * MRAM/RRAM equivalents on other targets).  The linker places the
- * backing arrays — no hardcoded addresses.  Subsystems obtain pointers
- * at runtime via tiku_nvm_region_get().
+ * Declares named NVM regions whose sizes come from the per-device header and
+ * whose backing arrays the linker places, so no address is hard-coded.
+ * Subsystems obtain pointers at run time via tiku_nvm_region_get().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

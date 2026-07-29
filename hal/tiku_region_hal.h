@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_region_hal.h - HAL interface for memory region registry
+ * tiku_region_hal.h - HAL interface for the memory region registry.
  *
- * Declares the arch-level region table accessor that each platform port
- * must implement. The platform port returns a const table of memory
- * region descriptors describing its physical memory map (SRAM, NVM,
+ * Declares the arch-level region table accessor every port implements, returning
+ * a const table of descriptors for its physical memory map (SRAM, NVM,
  * peripherals, flash).
  *
  * SPDX-License-Identifier: Apache-2.0

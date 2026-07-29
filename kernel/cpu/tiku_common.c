@@ -5,30 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_common.c - Common utility functions
+ * tiku_common.c - common utility functions.
  *
- * Platform-independent utility functions used throughout TikuOS:
- *
- *   - **Delay**:  Blocking busy-wait in milliseconds or microseconds.
- *                 Delegates to the HAL for cycle-accurate loops.
- *
- *   - **Bit manipulation**:  popcount, count-trailing-zeros (ctz),
- *                 count-leading-zeros (clz).  Useful for bitmaps,
- *                 scheduler priority encoding, and fault-flag analysis.
- *
- *   - **Byte / word utilities** (inline, in the header):
- *                 min, max, clamp, bswap16.  Safe against double
- *                 evaluation; bswap16 is critical for network byte
- *                 order on little-endian targets like MSP430.
- *
- *   - **Platform identity**:  Unique device ID and boot reset-cause.
- *                 Delegates to the HAL so the API is portable across
- *                 MCU families (MSP430 TLV die-record, Ambiq OTP,
- *                 Nordic FICR, etc.).
- *
- * LED control formerly lived here but has been refactored into
- * interfaces/led/tiku_led.c.  Backward-compatible macros remain
- * in the header.
+ * Blocking delays, bit manipulation (popcount, ctz, clz) and platform identity
+ * (unique device id, boot reset cause), all delegating to the HAL so the API is
+ * portable.  LED control moved to interfaces/led/tiku_led.c.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

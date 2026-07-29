@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_region.c - Memory region registry implementation
+ * tiku_region.c - memory region registry.
  *
- * Implements a boot-time registry for the platform's physical memory
- * map. Subsystems use it to verify that their buffers reside in the
- * correct memory type (SRAM for arenas, NVM for persistent storage)
- * and to detect conflicting buffer assignments via claim tracking.
- *
- * Why a region registry:
- *   On microcontrollers, accidentally placing an arena buffer in NVM
- *   (or a persistent store in SRAM) is a silent, hard-to-diagnose bug.
- *   The region registry catches these mistakes at init time with a
- *   simple address-range check, before the system runs. The cost is
- *   a small static table and a few linear scans during boot — nothing
- *   on the hot path.
- *
- * Why overlap detection:
- *   Two subsystems using overlapping buffers corrupt each other silently.
- *   The claim table tracks which ranges are owned, and rejects overlaps
- *   at registration time. On a small MCU this is far better than chasing
- *   memory corruption at runtime.
+ * A boot-time registry of the platform's physical memory map, so a subsystem can
+ * check its buffers sit in the right memory type and claim tracking can reject
+ * two subsystems that overlap -- both caught at init rather than at run time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,28 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_proc_vfs.h - VFS /proc subtree registration
+ * tiku_proc_vfs.h - VFS /proc subtree registration.
  *
- * Public interface to the /proc subtree of the VFS — the live,
- * runtime counterpart to the static /sys subtree.  The VFS root
- * assembly calls tiku_proc_vfs_get() to obtain the top-level "proc"
- * directory and tiku_proc_vfs_child_count() to size it.
- *
- * Exposes process observability data through the VFS:
- *   /proc/count           → number of registered processes
- *   /proc/<pid>/name      → process name
- *   /proc/<pid>/state     → running / ready / waiting / sleeping / stopped
- *   /proc/<pid>/pid       → numeric pid
- *   /proc/<pid>/sram_used → SRAM bytes
- *   /proc/<pid>/fram_used → FRAM bytes
- *   /proc/<pid>/uptime    → seconds since start
- *   /proc/<pid>/wake_count→ times scheduled
- *
- * The implementation also adds /proc/queue, /proc/catalog and, when
- * the corresponding drivers are compiled in, /proc/wifi and /proc/bt;
- * see tiku_proc_vfs.c for the full subtree map and the FRAM/MPU
- * rebuild model (the node tables are mutable, FRAM-backed, and
- * regenerated on every tiku_proc_vfs_get() call).
+ * Public interface to the live runtime counterpart of the static /sys subtree.
+ * The VFS root assembly calls tiku_proc_vfs_get() for the top-level directory and
+ * _child_count() to size it.  See the .c file for the full subtree map.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

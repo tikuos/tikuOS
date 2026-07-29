@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_irq_hal.h - Platform-agnostic GPIO interrupt interface
+ * tiku_gpio_irq_hal.h - platform-agnostic GPIO interrupt interface.
  *
- * Bridges per-pin edge interrupts on the underlying MCU into
- * TIKU_EVENT_GPIO process events. The arch backend owns the
- * register-level configuration (edge-select, IE, IFG) and the
- * ISR; the kernel-side abstraction is just a single API plus a
- * single event identifier.
- *
- * Event payload encoding (passed via tiku_event_data_t):
- *
- *     ((port & 0xFF) << 8) | (pin & 0xFF)
- *
- * Example: P1.3 fires => data = 0x0103. The macros below extract
- * the fields without the caller having to remember the layout.
+ * Bridges per-pin edge interrupts into TIKU_EVENT_GPIO process events.  The arch
+ * backend owns edge-select, IE, IFG and the ISR; this side is one API plus one
+ * event id, whose payload packs the port and pin (see the macros below).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

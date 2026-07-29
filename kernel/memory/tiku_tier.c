@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_tier.c - Tier-aware memory allocator
+ * tiku_tier.c - tier-aware memory allocator.
  *
- * Provides placement-aware allocation by managing pre-allocated
- * backing pools for SRAM and NVM. The caller specifies a memory
- * tier (SRAM, NVM, or AUTO) and the tier allocator carves the
- * buffer from the correct physical memory type, then initializes
- * a standard arena or pool over it.
- *
- * Why tier-aware allocation:
- *   On MCUs with both SRAM and NVM (FRAM), the caller often knows
- *   whether data is hot (frequent reads/writes, volatile OK) or
- *   cold (rarely updated, persistence desired). The tier allocator
- *   makes this intent explicit without requiring the caller to
- *   manage raw buffers and memory regions manually.
- *
- * Why AUTO:
- *   AUTO prefers SRAM (fast, low-energy) and falls back to NVM
- *   when SRAM is exhausted. This gives a simple "best effort"
- *   placement without the caller needing to know the memory budget.
+ * Carves a buffer from the caller's chosen memory type (SRAM, NVM or AUTO) and
+ * initialises an arena or pool over it.  AUTO prefers SRAM and falls back to NVM,
+ * so a caller can express intent without managing raw buffers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_region.h - the board's carved, memory-mapped NVM region (substrate B).
+ * tiku_nvm_region.h - the board's carved, memory-mapped NVM region.
  *
- * A board-sized span of non-volatile memory carved by the linker
- * (__tiku_nvmfs_base / __tiku_nvmfs_size) straight out of the chip's FRAM /
- * MRAM / Flash -- distinct from the small SRAM-shadowed .uninit mirror.  It is
- * exposed as a single tiku_nvm_backend_t:
- *
- *   reads  : a plain pointer dereference into be->base (the region is
- *            memory-mapped and read in place -- zero SRAM shadow);
- *   writes : be->write(off, src, len), which must be issued inside a
- *            tiku_mpu_unlock_nvm() / tiku_mpu_lock_nvm() window.  The
- *            per-platform backend does the actual program (FRAM store in place
- *            / MRAM bootrom program / Flash erase+program).
- *
- * The NVM memory tier and the file store (tiku_tfs) ride this one region
- * without caring which technology backs it.  Parts with no carved region
- * (host, or a board where the feature is off) return NULL.
+ * A linker-carved span of FRAM/MRAM/Flash exposed as one tiku_nvm_backend_t:
+ * reads are a pointer dereference into be->base, writes go through be->write
+ * inside an unlock window.  The NVM tier and the file store both ride it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

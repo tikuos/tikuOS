@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_proc_mem.c - Per-process isolated memory contexts
+ * tiku_proc_mem.c - per-process isolated memory contexts.
  *
- * Binds an SRAM scratch arena, an NVM persistent arena, an optional
- * HIFRAM bulk arena, and a set of write-back cached regions to a
- * single process identifier. Isolation is enforced at allocation time:
- * tiku_proc_alloc() routes requests to the correct arena, which is
- * bounds-checked by the arena allocator. A request can never escape
- * the arenas owned by the process that issued it.
- *
- * This is cheap and correct for cooperative scheduling — processes do
- * not preempt each other, so there is no concurrent-access concern.
- * The context owns its arenas and caches; destroying it flushes all
- * dirty caches and resets every arena.
- *
- * The SRAM and NVM arenas are allocated up front by
- * tiku_proc_mem_create(); the HIFRAM arena is opt-in via
- * tiku_proc_mem_attach_hifram(), so processes that never need the
- * upper FRAM bank pay nothing for it. tiku_proc_mem_stats() exposes
- * each arena's live usage (total / used / peak / alloc count) for
- * per-process memory accounting, the same kind of figure the shell
- * `ps` command and the /proc nodes surface as sram_used / fram_used.
+ * Binds an SRAM scratch arena, an NVM persistent arena, an optional HIFRAM bulk
+ * arena and a set of cached regions to one process id.  tiku_proc_alloc() routes
+ * to the right arena, so an allocation cannot escape the process that made it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

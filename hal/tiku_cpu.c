@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu.c - Platform-agnostic CPU abstraction implementation
+ * tiku_cpu.c - platform-agnostic CPU abstraction implementation.
  *
- * Provides atomic section entry/exit, IRQ control, clock-rate
- * queries, and idle-mode hooks. On MSP430 these forward to the
- * tiku_cpu_msp430_* / tiku_cpu_boot_msp430_* arch functions; the ARM
- * ports (RP2350, Apollo510) share the PRIMASK/cpsid atomics and forward
- * boot/clock/idle to their own arch backends.
- *
- * The atomic functions use MSP430 intrinsics directly (<msp430.h>) rather
- * than including tiku.h, because tiku.h defines PLATFORM_MSP430 which
- * would also activate tiku_cpu_boot_init() and tiku_cpu_freq_init() —
- * those require proper clock/pin configuration that is not yet ready
- * at the HAL level.
+ * Atomic sections, IRQ control, clock-rate queries and idle hooks, each
+ * forwarding to the active port's arch backend.  The atomics use MSP430
+ * intrinsics directly rather than tiku.h, which would pull in boot init too early.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

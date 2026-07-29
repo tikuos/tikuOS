@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_bench.h - Portable micro-benchmark timebase
+ * tiku_bench.h - portable micro-benchmark timebase.
  *
- * Declares a wrapping counter with the best resolution each platform
- * can measure reliably, plus the metadata TikuBench needs to label a
- * measurement (unit, clock name, frequency, resolution).  The backend
- * is selected at init; see tiku_bench.c for the per-platform choices.
+ * Declares a wrapping counter at the best resolution each platform can measure
+ * reliably, plus the metadata TikuBench needs to label a measurement.  The
+ * backend is chosen at init; see tiku_bench.c for the per-platform picks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

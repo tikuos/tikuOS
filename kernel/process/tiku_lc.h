@@ -5,46 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lc.h - Local continuations for lightweight stackless threads
+ * tiku_lc.h - local continuations for lightweight stackless threads.
  *
- * Local continuations capture and restore a function's execution state
- * via case labels embedded in a switch statement.  They form the
- * foundation for higher-level cooperative concurrency primitives such
- * as protothreads.  An optional NVM-backed variant lets a continuation
- * survive a power cycle so that battery-free / intermittent-computing
- * applications can resume from their last checkpoint instead of
- * restarting from the beginning.
- *
- * Derived from and inspired by the local-continuations implementation
- * in Contiki OS (contiki-os.org) by Adam Dunkels.
- *
- * Typical usage:
- * @code
- *   lc_t lc;
- *   LC_INIT(lc);
- *
- *   for (;;) {
- *       LC_RESUME(lc);
- *       do_step();
- *       LC_SET(lc);     // save the line number to resume from
- *       return;         // yield back to the caller
- *       LC_END(lc);
- *   }
- * @endcode
- *
- * Persistent (NVM-backed) variant:
- * @code
- *   tiku_lc_persist_init();
- *   tiku_lc_persist_register("tls");
- *   ...
- *   LC_RESUME_PERSISTENT(pt->lc, "tls");
- *       step_one();
- *       LC_SET_PERSISTENT(pt->lc);   // checkpoint survives power loss
- *       return;
- *       step_two();
- *   LC_END(pt->lc);
- *   LC_CLEAR_PERSISTENT("tls");      // done -- clear the NVM entry
- * @endcode
+ * Captures and restores a function's execution point via case labels in a switch,
+ * the substrate for protothreads.  An optional NVM-backed variant survives a power
+ * cycle.  Derived from the implementation in Contiki OS by Adam Dunkels.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

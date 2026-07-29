@@ -5,28 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_hibernate.c - Hibernate/resume orchestration for memory subsystem
+ * tiku_hibernate.c - hibernate/resume orchestration for the memory subsystem.
  *
- * Coordinates an orderly transition to and from deep sleep by flushing
- * all write-back caches, persisting a hibernate marker (boot count +
- * timestamp), and reloading cached regions on warm resume.
- *
- * Why a hibernate layer:
- *   Entering low-power mode (LPMx.5 on MSP430) requires every dirty
- *   SRAM-cached region to be flushed to FRAM beforehand — otherwise
- *   volatile data is lost. On wake-up the system needs to distinguish
- *   a cold boot (first power-on, no valid FRAM state) from a warm
- *   resume (returning from hibernate with valid FRAM data). The
- *   hibernate marker in the persist store, protected by the standard
- *   magic-number scheme, provides that discrimination. A monotonic
- *   boot count lets application code detect how many sleep/wake cycles
- *   have occurred (useful for wear budgeting and diagnostics).
- *
- * Interaction with other subsystems:
- *   - tiku_cache_flush_all() — persists every dirty cached region
- *   - tiku_persist — stores/reads the hibernate marker
- *   - tiku_mpu — MPU is unlocked during marker writes and cache flushes
- *   - tiku_mem_init() — must be called before tiku_mem_resume()
+ * Flushes every write-back cache, persists a hibernate marker (boot count and
+ * timestamp), and reloads cached regions on warm resume.  The marker is what
+ * distinguishes a cold boot from a return out of deep sleep.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,44 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_thread_cortexm.inl - generic Cortex-M worker-thread switcher
+ * tiku_thread_cortexm.inl - generic Cortex-M worker-thread switcher.
  *
- * The one context-switch implementation shared by every Cortex-M part
- * TikuOS threads on: Apollo510 (M55, ARMv8.1-M), Apollo4 Lite/Plus
- * (M4F, ARMv7E-M) and RP2350 (M33, ARMv8-M).  The mechanics are pure
- * architectural Cortex-M -- the register block (SCB/DWT/FPCCR), the
- * PendSV/PSP model, lazy FP stacking and the {s16-s31} callee-saved FP
- * set are identical across those cores -- so the body below is written
- * once here and pulled in by one thin per-platform shim.
- *
- * A shim is a two-liner: it names the PendSV handler that its vector
- * table expects and includes this file --
- *
- *     #define TIKU_THREAD_ARCH_PENDSV  tiku_ambiq_pendsv_handler
- *     #include "kernel/threads/tiku_thread_cortexm.inl"
- *
- * so the strong handler here overrides that vector's weak alias.  Only
- * one shim is compiled per build, so the fixed-name backend functions
- * (tiku_thread_arch_boot/_pend/_cycles/_frame_init) never collide.
- *
- * The model: threads run on PSP; every exception runs on MSP (a small
- * dedicated ISR stack installed at boot).  The kernel context is
- * migrated from MSP to PSP once, in place -- same stack, same frame,
- * execution simply continues -- so main()/tiku_sched_loop() never know
- * anything happened.
- *
- * FPU: lazy stacking (FPCCR.ASPEN/LSPEN, the reset default) means the
- * hardware stacks S0-S15/FPSCR only for threads that actually touched
- * the FPU; the switcher checks EXC_RETURN bit 4 and saves/restores
- * S16-S31 only then.  On the M55 the MVE/Helium predication state (VPR)
- * rides that same extended frame -- {s16-s31} names the identical
- * callee-saved encoding -- so vector-using workers are covered by the
- * one sequence with no core-specific code.
- *
- * PendSV runs at the LOWEST exception priority: it never preempts an
- * ISR, only thread mode -- and because tiku_atomic_enter() masks
- * PRIMASK, it can never fire inside a kernel critical section either.
- * That single fact is the safety argument for the whole hybrid model.
+ * The one context-switch body shared by every Cortex-M part: threads run on PSP,
+ * exceptions on MSP, and the kernel context migrates to PSP once at boot.  A
+ * per-platform shim names its PendSV handler and includes this file.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

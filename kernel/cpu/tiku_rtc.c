@@ -5,44 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_rtc.c - Wall-clock RTC implementation
+ * tiku_rtc.c - wall-clock RTC implementation.
  *
- * Soft real-time clock backing the /sys/time VFS node.  There is no
- * dedicated RTC peripheral here: wall-clock time is reconstructed
- * from the free-running system clock (tiku_clock_seconds(), uptime
- * since this boot) plus a persisted epoch baseline.
- *
- * State model:
- *   - `rtc_epoch_base` lives in `.persistent`; `rtc_uptime_base` is reset-local.
- *     The wall clock equals epoch_base + (uptime - uptime_base).
- *   - Its persist-cell gate (`rtc_cell`) distinguishes a never-set
- *     RTC (return 0) from a real persisted epoch.
- *
- * Boot semantics:
- *   - tiku_rtc_init() checks the magic. On first boot it zeroes the
- *     baseline and writes the magic; on subsequent boots it leaves the
- *     persisted baseline alone.
- *   - On warm reset the persisted epoch becomes the new boot baseline.  This
- *     preserves the last explicitly set value but, without an always-on RTC,
- *     cannot recover time elapsed while reset or unpowered.
- *
- * Persistence and the magic-gate idiom:
- *   The baseline is declared as a persist cell (TIKU_PERSIST_CELL,
- *   kernel/memory): value storage in `.persistent` (FRAM on MSP430,
- *   a flash-mirrored region on RP2350) plus a magic-word gate that
- *   proves the cell holds real data rather than power-on garbage.
- *   The shared cell API owns the MPU unlock window and the
- *   data-before-gate commit ordering this file used to hand-roll;
- *   writes go through tiku_persist_cell_commit() so a set on a
- *   never-initialised device self-validates.  The read paths touch
- *   no lock, so reading the clock never disturbs the MPU.
- *
- * Caveats:
- *   - Uptime restarts at 0 after reset.  The clock therefore resumes from the
- *     last explicitly persisted epoch; it cannot recover time elapsed since
- *     that set, during reset, or while unpowered.  Pairing this with an
- *     external time source (NTP, GNSS, host sync) closes the gap; we expose a
- *     clean set_seconds entry point for that.
+ * No RTC peripheral: wall clock is uptime plus a persisted epoch baseline held in
+ * a persist cell, whose magic gate separates a never-set clock from a real one.
+ * Uptime restarts at reset, so time elapsed while unpowered cannot be recovered.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

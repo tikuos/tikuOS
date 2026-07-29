@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lc_persist.c - NVM-backed local continuation persistence
+ * tiku_lc_persist.c - NVM-backed local continuation persistence.
  *
- * Allows protothreads to survive power loss by storing their
- * continuation state (line number) in non-volatile memory via
- * the kernel persist store.  On resume after a power cycle the
- * protothread picks up from its last LC_SET_PERSISTENT point
- * instead of restarting from the beginning.
- *
- * This is the enabling mechanism for intermittent computing on
- * battery-free devices: a multi-step protocol handshake can
- * checkpoint after each step, so energy spent on completed steps
- * is never wasted.
+ * Stores a protothread's continuation state in the kernel persist store, so after
+ * a power cycle it resumes from its last LC_SET_PERSISTENT point instead of
+ * restarting.  The enabling mechanism for intermittent computing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
