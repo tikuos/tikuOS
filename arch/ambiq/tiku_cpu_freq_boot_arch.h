@@ -22,20 +22,18 @@
 /**
  * @brief Perform one-time CPU and SoC bring-up.
  *
- * Configures power domains, the clock tree, and caches after SBL
- * hand-off. Called once very early in main() before any other
- * subsystem initializes. Uses direct CMSIS register access only —
- * no AmbiqSuite HAL/BSP calls.
+ * Configures power domains, the clock tree and caches after SBL hand-off.
+ * Called once very early in main(), before any other subsystem initializes.
+ * Uses direct CMSIS register access only -- no AmbiqSuite HAL/BSP calls.
  */
 void tiku_cpu_boot_ambiq_init(void);
 
 /**
  * @brief Apply a target core frequency to the Apollo510 clock tree.
  *
- * Apollo510 derives the core clock from HFRC or HFRC2. The @p cpu_freq
- * parameter is accepted for API compatibility with the portable boot
- * sequencer (see TIKU_MAIN_CPU_FREQ in tiku.h); the implementation
- * selects the nearest supported divider.
+ * Apollo510 derives the core clock from HFRC or HFRC2.  @p cpu_freq is accepted
+ * for API compatibility with the portable boot sequencer (TIKU_MAIN_CPU_FREQ in
+ * tiku.h); the implementation selects the nearest supported divider.
  *
  * @param cpu_freq  Desired core frequency in MHz.
  */
@@ -95,28 +93,21 @@ int           tiku_cpu_ambiq_clock_has_fault(void);
  * @brief Clean / invalidate the data cache over [addr, addr+len).
  *
  * Per-part: Apollo510 (M55) uses the SCB by-address ops; Apollo4 Lite uses
- * the CACHECTRL (clean is a no-op -- its MRAM data cache is read-only from the
- * CPU; invalidate flushes the whole cache, lacking a by-range op). Routed from
- * the portable tiku_cpu_dcache_* HAL.
+ * CACHECTRL, where clean is a no-op (its MRAM data cache is read-only from the
+ * CPU) and invalidate flushes the whole cache for want of a by-range op.
  */
 void          tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len);
 
 /**
  * @brief Drop cached copies of [addr, addr+len) so the next read is fresh.
  *
- * Call this AFTER an agent outside the CPU wrote that memory behind the
- * cache's back -- the bootrom MRAM programmer (NVM mirror flush, NVM-region
- * write, Tier-3 module load) or the GPU/DMA filling a buffer -- and before
- * the CPU reads the range again, otherwise stale lines are returned. It is
- * the mirror of tiku_cpu_ambiq_dcache_clean(), which runs BEFORE such an
- * agent reads a CPU-written staging buffer.
+ * Call AFTER an agent outside the CPU wrote that memory behind the cache's back
+ * -- the bootrom MRAM programmer, or the GPU/DMA filling a buffer -- and before
+ * the CPU reads it again.  Mirror of tiku_cpu_ambiq_dcache_clean().
  *
- * Per-part: Apollo510 (M55) invalidates exactly the given range with the SCB
- * by-address op; Apollo4 Lite has no by-range op, so @p addr / @p len are
- * ignored and the whole CACHECTRL cache is invalidated (coarse but correct)
- * followed by a DSB/ISB pair. Routed from the portable
- * tiku_cpu_dcache_invalidate() HAL.
- *
+ * @note Apollo510 (M55) invalidates exactly the range with the SCB by-address
+ *       op; Apollo4 Lite has none, so @p addr / @p len are ignored and the whole
+ *       CACHECTRL cache is invalidated (coarse but correct) plus DSB/ISB.
  * @param addr  Start of the range whose cached copies must be dropped.
  * @param len   Length of the range in bytes.
  */
@@ -126,21 +117,17 @@ void          tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long l
  * @brief Invalidate the instruction cache (whole cache).
  *
  * Per-part: Apollo510 (M55) writes ICIALLU with barriers on both sides;
- * Apollo4 Lite flushes its unified CACHECTRL cache (which also serves
- * instruction fetches). Needed after out-of-band writes to executable
- * MRAM (the Tier-3 module loader) before the first fetch from them.
- * Routed from the portable tiku_cpu_icache_invalidate() HAL.
+ * Apollo4 Lite flushes its unified CACHECTRL cache, which also serves
+ * instruction fetches.  Needed after out-of-band writes to executable MRAM.
  */
 void          tiku_cpu_ambiq_icache_invalidate(void);
 
 /**
  * @brief Raw identity + power snapshot for the HP-turbo bring-up (`freq probe`).
  *
- * Everything the Apollo5 High-Performance mode decision needs, read live:
- * silicon revision, INFO1 residency, the factory trim revision words, the
- * SIMOBUCK/perf-mode state, and the SPOT-manager POWERSTATE trim table. The
- * shell formats it; keeping the raw words here lets the HP port (and a bug
- * report) see exactly what the chip carries.
+ * Everything the High-Performance mode decision needs, read live: silicon
+ * revision, INFO1 residency, factory trim revision words, SIMOBUCK/perf-mode
+ * state, and the SPOT-manager POWERSTATE trim table.  The shell formats it.
  */
 typedef struct {
     uint32_t chiprev;          /**< MCUCTRL->CHIPREV (REVMAJ/REVMIN)          */

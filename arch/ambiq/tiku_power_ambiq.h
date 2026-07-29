@@ -73,35 +73,25 @@ unsigned long tiku_ambiq_cpu_hz_measure(void);
 /*---------------------------------------------------------------------------*/
 
 /** Release bits for tiku_ambiq_sleep_probe().  Deliberately a SHORTER list
- *  than the Nordic port's: each one is added only once its effect has been
- *  measured on this part, rather than transcribed from the other platform's
- *  vocabulary.  `quiet` does not exist here on purpose -- that word's meaning
- *  is frozen by published nRF54L experiments and must not acquire a second,
- *  different definition. */
+ *  than the Nordic port's: each is added only once its effect is measured on
+ *  this part.  `quiet` does not exist here on purpose -- that word's meaning is
+ *  frozen by published nRF54L experiments. */
 #define TIKU_AMBIQ_SLEEP_DEEP  0x1u   /**< WFI with SCR.SLEEPDEEP set */
 #define TIKU_AMBIQ_SLEEP_STOP_UART 0x2u /**< power the console UART1 domain off
-                                             for the window (its clock request
+                                             for the window; its clock request
                                              is what keeps HFRC from gating in
-                                             deep sleep); restored + re-inited
-                                             after */
+                                             deep sleep.  Restored after */
 #define TIKU_AMBIQ_SLEEP_STOP_TICK 0x4u /**< stretch the 128 Hz kernel tick
-                                             across the window via this port's
-                                             tickless path (strong overrides in
-                                             tiku_htimer_arch.c) -- ~1 wake
-                                             instead of 128/s */
+                                             across the window via the tickless
+                                             path -- ~1 wake instead of 128/s */
 #define TIKU_AMBIQ_SLEEP_DBGLOCK   0x8u /**< write MCUCTRL.DEBUGGER lockout for
                                              the window.  An attached probe's
-                                             latched power request may ignore
-                                             it -- that is exactly what the
-                                             measurement is for */
+                                             latched power request may ignore it,
+                                             which is what this measures */
 #define TIKU_AMBIQ_SLEEP_LFRC     0x10u /**< reclock the STIMER timebase to the
-                                             ~900 Hz LFRC for the window (the
-                                             crystal dies under real deep
-                                             sleep -- measured).  Verified
-                                             switch; on a dead LFRC the flag
-                                             quietly degrades to XTAL.  The
-                                             window is then measured in
-                                             calibrated LFRC counts */
+                                             ~900 Hz LFRC for the window: the
+                                             crystal dies under real deep sleep.
+                                             Verified switch, degrading to XTAL */
 
 /**
  * @brief Sit in WFI for @p ms; returns elapsed microseconds (STIMER-timed).
@@ -115,11 +105,11 @@ uint32_t tiku_ambiq_sleep_probe(uint32_t ms, unsigned flags);
 uint32_t tiku_ambiq_sleep_wake_count(void);
 
 /**
- * @brief Run a register-only busy loop for @p ms; returns elapsed us.
+ * @brief Run a register-only busy loop for @p ms; returns elapsed microseconds.
  *
  * The reference workload, matched to the Nordic port's so the two parts can be
  * compared on identical work.  Alignment-pinned: on the other platform an
- * unrelated build option moved this loop and changed its current by 956 uA.
+ * unrelated build option moved this loop and shifted its current by 956 uA.
  */
 uint32_t tiku_ambiq_spin_probe(uint32_t ms);
 
@@ -140,7 +130,7 @@ uint32_t tiku_ambiq_spin_inner(void);
 #define TIKU_AMBIQ_MEM_KIND_COUNT   6u
 
 /**
- * @brief Run a memory workload for @p ms; returns elapsed us (STIMER-timed).
+ * @brief Run a memory workload for @p ms; returns microseconds (STIMER-timed).
  *
  * The MRAM counterpart of the nRF54L's RRAM sweep, so "what does one access
  * cost" can be answered on two different non-volatile technologies with one

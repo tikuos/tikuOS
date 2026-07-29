@@ -112,10 +112,10 @@
  *      185  HS_TIMING     (0=legacy, 1=high speed)
  *
  * EXT_CSD is partly ONE-TIME-PROGRAMMABLE.  Writing the wrong index can
- * permanently disable a feature or repartition the device -- irreversibly,
- * on an 8 GB part we do not own a spare of.  The allowed list is enforced in
- * the .c by a switch that REFUSES anything else, not by a comment.  Boot and
- * RPMB partitions are never addressed; all traffic is the user area.
+ * permanently disable a feature or repartition the device, irreversibly.  The
+ * allowed list is enforced in the .c by a switch that REFUSES anything else,
+ * not by a comment.  Boot and RPMB partitions are never addressed; all traffic
+ * is the user area.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -198,10 +198,9 @@
 /**
  * @brief Scratch region: the top 1024 blocks of the user area.
  *
- * Every self-test writes HERE and nowhere else.  The card's existing
- * contents are treated as opaque and precious: we did not put them there and
- * cannot replace them.  Low LBAs are where a future filesystem would live,
- * so tests stay far away from them.
+ * Every self-test writes HERE and nowhere else.  The card's existing contents
+ * are treated as opaque and precious -- this port did not put them there and
+ * cannot replace them -- and low LBAs are where a filesystem would live.
  */
 #define TIKU_EMMC_SCRATCH_BLOCKS  1024u
 
@@ -226,7 +225,7 @@ typedef struct {
     uint32_t serial;         /**< product serial number                     */
     uint8_t  mfg_month;      /**< manufacture date                          */
     uint16_t mfg_year;
-    uint32_t rca;            /**< relative card address we assigned         */
+    uint32_t rca;            /**< relative card address assigned here       */
     uint32_t sec_count;      /**< EXT_CSD[215:212]: capacity in 512 B blocks */
     uint8_t  ext_csd_rev;    /**< EXT_CSD revision                          */
     uint8_t  spec_vers;      /**< CSD spec version                          */
@@ -249,9 +248,8 @@ typedef struct {
  * then the table 4 upgrade to an 8-bit bus at high speed.  Fails closed and
  * bounded at every wait; the step tracer names the rung a wedge happened on.
  *
- * If the UPGRADE fails the card is left in the identification configuration,
- * which is slow but proven -- a driver that half-switched a bus is worse than
- * one that stayed slow, so this path never leaves the two ends disagreeing.
+ * @note A failed UPGRADE leaves the card in the identification configuration
+ *       -- slow but proven -- so the two ends never end up disagreeing.
  */
 tiku_emmc_err_t tiku_emmc_init(void);
 
@@ -268,11 +266,12 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz);
 /**
  * @brief Microseconds the last bring-up took: identification, and total.
  *
- * The init ceremony is a MEASURED QUANTITY, not a nuisance -- the lifecycle
- * policy (sleep vs power off vs stay up) is decided by this number against
- * the domain's idle rent, exactly as the PSRAM's ladder was.  @p ladder_us
- * is POR-to-transfer-ready at 400 kHz; the difference to @p total_us is what
- * the table 4 upgrade cost.  Either pointer may be NULL.
+ * The init ceremony is a MEASURED QUANTITY: the lifecycle policy (sleep vs
+ * power off vs stay up) is decided by this number against the domain's idle
+ * rent.  Either pointer may be NULL.
+ *
+ * @param ladder_us POR-to-transfer-ready at 400 kHz
+ * @param total_us  including the table 4 upgrade; the difference is its cost
  */
 void tiku_emmc_init_time(uint32_t *ladder_us, uint32_t *total_us);
 
@@ -313,9 +312,11 @@ void tiku_emmc_regs(uint32_t *out, unsigned n);
  * @brief E3 bench: sequential read/write, random-block latency, init cost.
  *
  * DWT-timed, work-denominated and checksum-gated, like `psrambench`.  Writes
- * touch the scratch region and nowhere else; every leg that cannot prove its
- * bytes were the right bytes reports FAIL instead of a bandwidth.  Prints
- * what it did NOT measure, so the table cannot be read as a ceiling.
+ * touch the scratch region and nowhere else, and a leg that cannot prove its
+ * bytes reports FAIL instead of a bandwidth.
+ *
+ * @note The run prints what it did NOT measure, so the table cannot be read
+ *       as a ceiling.
  */
 void tiku_emmc_bench_run(void);
 
@@ -326,11 +327,9 @@ void tiku_emmc_bench_run(void);
 /**
  * @brief Put the card into CMD5 sleep; contents kept, bus quiet.
  *
- * The rung between "up" and "gone", and E3 is what justifies it: a full
- * bring-up costs ~52 ms, which is too much per access and acceptable per
- * wake.  Sleep is only legal from STANDBY, so this deselects first and
- * reselects on wake; block I/O refuses while asleep rather than timing out
- * against a card that is doing exactly what it was told.
+ * The rung between "up" and "gone": a full bring-up costs ~52 ms, too much per
+ * access and acceptable per wake.  Sleep is only legal from STANDBY, so this
+ * deselects first and reselects on wake; block I/O refuses while asleep.
  */
 tiku_emmc_err_t tiku_emmc_sleep(void);
 
@@ -364,11 +363,10 @@ const tiku_emmc_id_t *tiku_emmc_id(void);
  * @brief Stage @p mb megabytes from the card into the PSRAM tier.
  *
  * eMMC DMA -> SSRAM bounce -> MSPI command queue -> PSRAM, checksum-gated
- * against the read path E3 proved bit-exact.  Reads only; writes nothing to
- * the card.  Transfer time and verification time are reported separately so
- * the bandwidth figure is the pipeline's and not the hash's.
+ * against the read path.  Reads only.  Transfer and verification times are
+ * reported separately so the bandwidth figure is the pipeline's, not the hash's.
  *
- * Compiled only when the PSRAM driver is present.
+ * @note Compiled only when the PSRAM driver is present.
  */
 void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba);
 

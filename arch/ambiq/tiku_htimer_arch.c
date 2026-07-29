@@ -47,15 +47,12 @@ static uint32_t s_tick_period;
 /**
  * @brief STIMER count at the last ACCOUNTED tick boundary.
  *
- * The single source of truth for tick accounting: every accounting
- * point (the compare-B ISR, an early tickless wake, the htimer
- * one-shot ISR during a stretch) derives elapsed whole ticks from
- * (counter - anchor) / period and advances the anchor by exactly the
- * credited counts.  This is wrap-safe 32-bit unsigned math (the
- * STIMER wraps every ~36 h; deltas stay correct), self-healing after
- * any latency, and — unlike the old fixed-delta re-arm — phase-locks
- * the tick to the crystal, eliminating the per-re-arm drift the old
- * comment accepted.
+ * The single source of truth for tick accounting: every accounting point
+ * derives elapsed whole ticks from (counter - anchor) / period and advances
+ * the anchor by exactly the credited counts.
+ *
+ * @note Wrap-safe 32-bit unsigned math (the STIMER wraps every ~36 h), so it
+ *       self-heals after latency and phase-locks the tick to the crystal.
  */
 static uint32_t s_tick_anchor;
 
@@ -79,10 +76,9 @@ extern void tiku_ambiq_tick_advance_n(unsigned long n);
 /**
  * @brief Triple-read the async 32 kHz STIMER counter and vote
  *
- * Mirrors am_hal_stimer_counter_get: if the first two reads agree,
- * neither was caught mid-ripple across the clock-domain boundary.
- * Otherwise the third read (taken after the ripple has settled) is
- * returned.
+ * Mirrors am_hal_stimer_counter_get: if the first two reads agree, neither was
+ * caught mid-ripple across the clock-domain boundary.  Otherwise the third
+ * read, taken after the ripple has settled, is returned.
  *
  * @return Current 32-bit STIMER counter value
  */
@@ -96,10 +92,9 @@ static uint32_t stimer_counter(void) {
 /**
  * @brief Power up the 32.768 kHz crystal oscillator via MCUCTRL
  *
- * Implements the functional core of
- * am_hal_mcuctrl_control(EXTCLK32K_ENABLE): powers up the oscillator
- * core and comparator, routes through (not bypasses) the comparator,
- * and asserts the software-override enable bit.
+ * The functional core of am_hal_mcuctrl_control(EXTCLK32K_ENABLE): powers up
+ * the oscillator core and comparator, routes through (not bypasses) the
+ * comparator, and asserts the software-override enable bit.
  */
 static void stimer_xtal_enable(void) {
     MCUCTRL->XTALCTRL_b.XTALPDNB       = 1u;  /* power up XTAL core       */
@@ -112,11 +107,9 @@ static void stimer_xtal_enable(void) {
 /**
  * @brief Write a compare register with the spacing the async STIMER requires.
  *
- * Waits until the COUNTER has advanced past the previous compare write (tracked
- * in the shared s_last_cmpr), then writes the DELTA and records the write.
- * Self-contained PRIMASK critical section, so it is safe from either thread
- * context (htimer schedule) or ISR context (the tick re-arm), and serialises
- * the one-shot (SCMPR0) against the periodic tick (SCMPR1) on the shared bus.
+ * Waits until the COUNTER has passed the previous compare write (tracked in
+ * s_last_cmpr), writes the DELTA, and records it.  Its own PRIMASK section, so
+ * it is safe from thread or ISR context and serialises SCMPR0 against SCMPR1.
  *
  * @param scmpr  Pointer to the SCMPR0/SCMPR1 compare register
  * @param delta  DELTA value (hardware adds the COUNTER); floored to 1
@@ -150,14 +143,12 @@ static void stimer_arm(volatile uint32_t *scmpr, uint32_t delta) {
 /**
  * @brief Credit every whole tick that has elapsed since the anchor.
  *
- * Reads the free-running counter, converts the distance from
- * s_tick_anchor into whole ticks, credits them to the kernel clock in
- * one call, and advances the anchor by exactly the credited counts
- * (the sub-tick remainder stays in the anchor, preserving phase).
- * Idempotent — calling it twice in a row credits nothing the second
- * time — so every wake path may call it defensively.  Must run with
- * interrupts masked (ISR context, or inside the scheduler's atomic
- * idle section).
+ * Converts the distance from s_tick_anchor into whole ticks, credits them in
+ * one call, and advances the anchor by exactly that many counts, so the
+ * sub-tick remainder stays in the anchor and phase is preserved.
+ *
+ * @note Idempotent, so any wake path may call it defensively.  Must run with
+ *       interrupts masked (ISR, or the scheduler's atomic idle section).
  */
 static void stimer_tick_account(void) {
     uint32_t elapsed = stimer_counter() - s_tick_anchor;
@@ -186,12 +177,11 @@ static void stimer_tick_rearm_boundary(void) {
  * @brief Initialize the STIMER and enable the NVIC compare-0 interrupt
  *
  * Powers up the 32.768 kHz crystal, free-runs the STIMER from it with both
- * compares enabled (compare-A one-shot here, compare-B periodic tick), clears any
- * stale COMPAREA flag, and enables IRQ 32 in the NVIC. The STMINTEN compare-A
- * source is left masked here; it is armed per-schedule in
- * tiku_htimer_arch_schedule() so a stale SCMPR0 match cannot fire before the
- * first real compare. COMPAREBEN is kept set so this (later) init does not
- * disturb the periodic tick that tiku_clock_arch_init() armed earlier at boot.
+ * compares enabled, clears any stale COMPAREA flag, and enables IRQ 32.
+ *
+ * @note STMINTEN compare-A stays masked here and is armed per-schedule, so a
+ *       stale SCMPR0 match cannot fire first.  COMPAREBEN is kept set so this
+ *       later init does not disturb the tick tiku_clock_arch_init() armed.
  */
 void tiku_htimer_arch_init(void) {
     stimer_xtal_enable();
@@ -207,14 +197,11 @@ void tiku_htimer_arch_init(void) {
 /**
  * @brief Schedule an STIMER compare-A interrupt at the given clock tick
  *
- * Converts the absolute 16-bit target tick @p t into the DELTA value the
- * STIMER hardware requires (it adds the current counter internally, NOT
- * an absolute). Adjusts for the 2-cycle COMPARE write latency, the 1-
- * cycle interrupt delay, and elapsed time since the snapshot. Floors the
- * delta to 1, spaces from the previous COMPARE write, all inside a PRIMASK
- * critical section. STMINTEN is OR-ed (not overwritten) so the periodic
- * tick's COMPAREB enable is preserved.
+ * Converts the absolute 16-bit target @p t into the DELTA the hardware wants
+ * (it adds the counter itself), adjusting for the 2-cycle COMPARE write
+ * latency, the 1-cycle interrupt delay and time since the snapshot.
  *
+ * @note STMINTEN is OR-ed, not overwritten, so the tick's COMPAREB survives.
  * @param t  Target 16-bit STIMER tick (absolute, wrapping)
  */
 void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
@@ -264,11 +251,9 @@ tiku_htimer_clock_t tiku_htimer_arch_now(void) {
 /**
  * @brief STIMER compare-0 ISR (vector slot 16+32 in tiku_crt_early.c)
  *
- * Clears the COMPAREA pending flag and calls tiku_htimer_run_next() to
- * fire the next pending one-shot callback registered with the kernel
- * htimer layer.  During a tickless stretch the kernel clock is
- * resynced FIRST, so an htimer callback that reads tiku_clock_time()
- * never sees a value stale by the stretch length.
+ * Clears the COMPAREA pending flag and calls tiku_htimer_run_next().  During a
+ * tickless stretch the kernel clock is resynced FIRST, so a callback reading
+ * tiku_clock_time() never sees a value stale by the stretch length.
  */
 void tiku_ambiq_stimer_cmpr0_isr(void) {
     STIMER->STMINTCLR = STIMER_INT_COMPAREA;
@@ -281,11 +266,9 @@ void tiku_ambiq_stimer_cmpr0_isr(void) {
 /**
  * @brief Start the always-on periodic kernel tick on STIMER compare-B (IRQ 33).
  *
- * Called once from tiku_clock_arch_init() (which runs before the htimer init at
- * boot). Brings up the crystal + free-running STIMER, arms compare-B one period
- * ahead, unmasks COMPAREB, and enables NVIC IRQ 33. Because this runs first, it
- * does the full STIMER bring-up; the later tiku_htimer_arch_init() re-asserts the
- * same STCFG (with COMPAREBEN preserved) idempotently.
+ * Called once from tiku_clock_arch_init(), which runs before the htimer init,
+ * so it does the full STIMER bring-up: crystal, free-running counter,
+ * compare-B armed one period ahead, COMPAREB unmasked, NVIC IRQ 33 enabled.
  *
  * @param period_counts  STIMER counts per kernel tick (32768 / tick rate)
  */
@@ -311,12 +294,9 @@ void tiku_ambiq_stimer_tick_start(uint32_t period_counts) {
 /**
  * @brief STIMER compare-1 ISR (vector slot 16+33) -- the periodic kernel tick.
  *
- * Clears the COMPAREB flag, credits every whole tick elapsed since the
- * anchor (one on the normal cadence; the full stretch after a tickless
- * sleep — the anchor math never assumes which compare fired, so a
- * one-tick match that was already latched when a stretch was being
- * armed still accounts correctly), closes any stretch window, and
- * re-arms compare-B at the next crystal-locked tick boundary.
+ * Clears the COMPAREB flag, credits every whole tick elapsed since the anchor,
+ * closes any stretch window, and re-arms compare-B at the next crystal-locked
+ * boundary.  The anchor math never assumes which compare fired.
  */
 void tiku_ambiq_stimer_cmpr1_isr(void) {
     STIMER->STMINTCLR = STIMER_INT_COMPAREB;
@@ -332,10 +312,8 @@ void tiku_ambiq_stimer_cmpr1_isr(void) {
 /**
  * @brief Bounded check that the STIMER counter is actually advancing.
  *
- * A clock is trusted only after it is seen counting -- the lesson of the
- * deep-sleep autorun, whose first versions busy-polled a dead counter
- * forever.  Exits as soon as the counter moves; the bound covers several
- * counts even at the ~900 Hz LFRC rate.
+ * A clock is trusted only after it is seen counting.  Exits as soon as the
+ * counter moves; the bound covers several counts even at the ~900 Hz LFRC rate.
  *
  * @return 1 if the counter advanced, 0 if it is frozen
  */
@@ -349,11 +327,9 @@ static int stimer_verify_counting(void) {
 /**
  * @brief Measure the actual LFRC rate against the DWT cycle counter.
  *
- * The datasheet calls the LFRC "approximately 900 Hz (uncalibrated)" -- a
- * rate that wide cannot be assumed, only measured.  Times 4 LFRC counts
- * against DWT CYCCNT at the known core clock; enables TRCENA/CYCCNT
- * transiently and restores both (the boot tidy leaves TRCENA off).
- * All waits are bounded.  Runs with interrupts masked (caller's section).
+ * The datasheet calls the LFRC "approximately 900 Hz (uncalibrated)" -- a rate
+ * that wide can only be measured.  Times 4 LFRC counts against DWT CYCCNT at
+ * the known core clock, enabling TRCENA/CYCCNT transiently and restoring both.
  *
  * @return measured Hz, clamped to nominal 900 if implausible
  */
@@ -392,20 +368,14 @@ static uint32_t stimer_lfrc_calibrate(void) {
 /**
  * @brief Switch the STIMER timebase between the 32 kHz crystal and the LFRC.
  *
- * EXISTS BECAUSE THE CRYSTAL DIES UNDER REAL DEEP SLEEP on this rig (the
- * software-override XTAL enable does not survive debugger-free SLEEPDEEP;
- * measured: the deep-sleep autorun's STIMER froze and its tick-stretched
- * sleep never woke).  The LFRC keeps running, so the deep path reclocks to
- * it around the sleep window and back afterwards.
+ * The software-override XTAL enable does not survive debugger-free SLEEPDEEP on
+ * this rig, so the deep path reclocks to the LFRC (which keeps running) around
+ * the sleep window and back afterwards.
  *
- * VERIFIED SWITCH: the new source must be seen counting or the function
- * reverts to the crystal and reports failure -- never trades a working
- * timebase for a dead one.  Accounts elapsed ticks at the old rate first,
- * then re-anchors and re-arms the tick at the new rate, so kernel time
- * stays continuous across the switch.  Refuses while a tickless stretch is
- * open (the stretch compare is armed in old-clock counts); callers reclock
- * FIRST, then stretch.
- *
+ * @note VERIFIED SWITCH: the new source must be seen counting or this reverts
+ *       to the crystal and reports failure.  Elapsed ticks are accounted at the
+ *       old rate first, then the tick is re-anchored and re-armed at the new
+ *       one.  Refuses while a stretch is open -- reclock first, then stretch.
  * @param use_lfrc  non-zero: XTAL -> LFRC (rate measured); zero: back to XTAL
  * @return the new timebase rate in Hz, or 0 on failure (reverted to XTAL)
  */
@@ -523,11 +493,9 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
 /**
  * @brief Close the stretch window after the idle hook returns.
  *
- * Runs with interrupts still masked (inside the scheduler's atomic
- * idle section).  If the stretched compare already fired, its ISR
- * resynced the clock and restored the cadence — nothing to do.  On an
- * early wake by any other interrupt, credit the elapsed whole ticks
- * and re-arm the per-tick cadence at the next boundary.
+ * Runs with interrupts still masked.  If the stretched compare already fired,
+ * its ISR resynced the clock and restored the cadence.  On an early wake by any
+ * other interrupt, credit the elapsed whole ticks and re-arm the cadence.
  */
 void tiku_clock_tickless_end(void) {
     if (!s_stretched) {

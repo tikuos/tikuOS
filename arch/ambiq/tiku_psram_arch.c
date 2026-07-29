@@ -75,12 +75,9 @@ the Makefile."
 
 /** Data/CLK/DQS: function select + drive strength + INPUT ENABLE.
  *
- * The vendor BSP leaves INPEN clear on these pads and its driver works, so
- * the dedicated-pad receive path presumably bypasses the GPIO input gate --
- * but "presumably" has been wrong seven times in this file, the bit-bang
- * probe demonstrated the GPIO input path DOES read these pins, and enabling
- * the input buffer costs nothing.  Belt and braces until the RX path is
- * proven either way. */
+ * The vendor BSP leaves INPEN clear on these pads and its driver works, so the
+ * receive path presumably bypasses the GPIO input gate.  But the bit-bang probe
+ * showed the GPIO path DOES read these pins, and the buffer costs nothing. */
 #define PAD_INPEN           (1u << 4)
 #define PAD_CFG_MSPI_IO     (PAD_FNCSEL_MSPI0 | PAD_DS_0P5X | PAD_INPEN)
 /** CE: driven by the controller's NCE0 source, push-pull, active low. */
@@ -212,11 +209,8 @@ static uint8_t s_writelat   = 10u;   /* matches the device's REAL power-up
  * @brief Optional step tracer.
  *
  * Bring-up on a dead bus can HANG rather than fail: a register write to a
- * peripheral whose clock is wrong stalls the bus with no fault and no
- * output, which is indistinguishable from a crash.  When a tracer is
- * installed, each risky step announces itself first, so the last line
- * printed names the step that wedged -- the same "the trace is the report"
- * technique the deep-sleep autorun uses on the current meter.
+ * peripheral whose clock is wrong stalls the bus with no fault and no output.
+ * With a tracer installed, the last line printed names the step that wedged.
  */
 static void (*s_trace)(const char *step);
 
@@ -264,16 +258,12 @@ static uint8_t  s_rxsmp = 1u;  /**< DEV0CFG1.RXSMP0 (vendor default 1)         *
 /**
  * @brief One PIO command, optionally with an address and a data phase.
  *
- * Transcribed from am_hal_mspi_blocking_transfer's PIO path: INSTR and ADDR
- * are staged, then a single CTRL write with START launches it; RX data is
- * drained from RXFIFO as RXENTRIES reports words available; completion is
- * CTRL.STATUS going to 1.
+ * Transcribed from am_hal_mspi_blocking_transfer's PIO path: INSTR and ADDR are
+ * staged, then a single CTRL write with START launches it; RX data drains from
+ * RXFIFO as RXENTRIES reports words; completion is CTRL.STATUS going to 1.
  *
- * Interrupts are not used and INTEN is left alone -- this driver never
- * enables MSPI interrupts, so there is nothing to save and restore (the
- * vendor's save/restore exists because its HAL shares the peripheral with
- * a DMA/command-queue path that does).
- *
+ * @note INTEN is left alone -- this driver never enables MSPI interrupts, so
+ *       there is nothing to save and restore.
  * @param instr    2-byte octal-DDR opcode
  * @param addr     device address (byte address, or MR number for reg access)
  * @param data     word buffer in/out, may be NULL when n_bytes is 0
@@ -434,14 +424,9 @@ static tiku_psram_err_t psram_power_on(void)
 
 /** @brief Table-1 step 2: select and enable the MSPI0 IO clock.
  *
- * TWO STEPS, and the first one is easy to miss: the oscillator block must be
- * FORCED ON before a peripheral can clock from it.  CLKGEN.MISC.FRCHFRC is
- * what the vendor's clock manager sets on the first HFRC user
- * (am_hal_clkgen_private_hfrc_force_on); without it the core still runs --
- * it has its own demand on HFRC -- but the MSPI's IO clock branch has no
- * source, and every transfer times out with a perfectly configured
- * controller.  That was the second bring-up failure here.
- */
+ * TWO STEPS, and the first is easy to miss: the oscillator block must be FORCED
+ * ON before a peripheral can clock from it.  Without CLKGEN.MISC.FRCHFRC the
+ * MSPI's IO clock branch has no source and every transfer times out. */
 static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
 {
     uint32_t v;
@@ -449,10 +434,10 @@ static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
     /* THE VENDOR'S CLKGEN.MISC STATE, replicated.  Breakpointing the
      * vendor's own example at its ID-read moment (the experiment that ended
      * this hunt) showed its DEV0* configuration essentially identical to
-     * ours -- but CLKGEN.MISC = 0x08FBBFC1 against our 0x08000021.  The
+     * this one -- but CLKGEN.MISC = 0x08FBBFC1 against 0x08000021 here.  The
      * difference is the clock-gate-enable + power-on-clock chicken-bit block
-     * that am_hal_pwrctrl_low_power_init() writes at vendor boot and our
-     * bare-metal boot never has.  Replicated verbatim: bits 6-13 and 15-17
+     * that am_hal_pwrctrl_low_power_init() writes at vendor boot and this
+     * port's bare-metal boot never has.  Replicated verbatim: bits 6-13 and 15-17
      * (PWRONCLKEN family), 19-23 (clock-gate enables, including the APB DMA
      * CPU clock gate), AXIXACLKENOVRRIDE (14) explicitly cleared, exactly as
      * the vendor leaves them. */
@@ -501,7 +486,7 @@ static void psram_controller_config(const psram_clk_t *c)
                                        : (s_nodqs ? PSRAM_TURNAROUND_NODQS
                                                   : (uint32_t)s_turnaround);
 
-    /* Step 3: the SDR250 tap, before DEV0CFG so CLKDIV means what we think. */
+    /* Step 3: the SDR250 tap, before DEV0CFG so CLKDIV means what it says. */
     MSPI0->DEV0CFG1_b.SDR250EN0 = c->sdr250;
 
     /* Step 4+5: command format, clock divider, bus width, in ONE write --
@@ -624,7 +609,7 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DMATHRESH_b.DMATXTHRESH = 32u - 4u;
     MSPI0->DMATHRESH_b.DMARXTHRESH = 8u;
 
-    /* Step 15: we are not bridging an IOM through this controller.
+    /* Step 15: no IOM is bridged through this controller.
      *
      * DISABLED is 15 ("No IOM selected. Signals always zero").  The vendor
      * HAL writes 7 here via its own AM_HAL_MSPI_LINK_NONE constant, but 7 is

@@ -30,22 +30,20 @@
 /* TABLE 0 -- BOARD: WHICH SOCKET, WHICH RAILS, AND WHICH BOARD              */
 /*---------------------------------------------------------------------------*/
 /*
- * *** THE EVB HAS TWO USB-C SOCKETS AND ONLY ONE OF THEM IS OURS. ***
+ * *** THE EVB HAS TWO USB-C SOCKETS AND ONLY ONE IS THE DEVICE PORT. ***
  *
  *   J18  "AP5 USB-C Connector"  -- the Apollo5 DEVICE port.  THIS ONE.
  *                                  nets USB0AP50P/N -> USB_AP5_P/N
  *   J16  "USB-C Connector"      -- the on-board J-Link.  Plugging the host
- *                                  here enumerates the DEBUGGER, not us, and
- *                                  the resulting "nothing happened" looks
- *                                  exactly like a driver that never attached.
+ *                                  here enumerates the DEBUGGER, and the
+ *                                  resulting "nothing happened" looks exactly
+ *                                  like a driver that never attached.
  *
- * D+/D- are dedicated PHY pins, not GPIO: there is no pad configuration to
- * get wrong here, which is a pleasant change.  What there IS to get wrong:
- *
- * TWO EXTERNAL SUPPLY RAILS MUST BE SWITCHED ON BY GPIO, and the two boards
- * we own disagree about which GPIOs -- for the THIRD time in this port (the
- * NOR reset pin and the eMMC reset pin were the first two).  Verified against
- * both the BSP and the Blue board's schematic, which agree here:
+ * D+/D- are dedicated PHY pins, not GPIO, so there is no pad configuration to
+ * get wrong.  What there IS to get wrong: TWO EXTERNAL SUPPLY RAILS MUST BE
+ * SWITCHED ON BY GPIO, and the two boards disagree about which GPIOs (as with
+ * the NOR reset pin and the eMMC reset pin).  Verified against both the BSP
+ * and the Blue board's schematic, which agree here:
  *
  *              | Apollo510B EVB (Blue)      | Apollo510 EVB (green)
  *   -----------+----------------------------+-----------------------
@@ -93,8 +91,8 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *
  * The bug this produces is a device that enumerates nine times out of ten.
  * The vendor HAL avoids it by casting to pointers-to-volatile-uint8_t and
- * pointers-to-volatile-uint16_t at byte offsets, and so must we.  ACCESS
- * THESE AT THEIR TRUE WIDTHS.
+ * pointers-to-volatile-uint16_t at byte offsets, and this driver does the
+ * same.  ACCESS THESE AT THEIR TRUE WIDTHS.
  *
  * The true map, byte offsets from USB_BASE.  PROVENANCE, because this port
  * has paid repeatedly for values that were derived rather than read: the
@@ -148,14 +146,14 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *  3  write the USB SRAM trim                 USB->SRAMCTRL
  *     -- an undocumented magic value the vendor writes unconditionally:
  *        WABL=1 WABLM=1 RAWL=1 RAWLM=2 EMAW=0 EMAS=0 EMA=3 RET1N=1.
- *        Transcribed, not derived; the FIFO RAM is what it tunes.  ("Three
- *        registers we never wrote" is already a title in this project.)
+ *        Transcribed, not derived; the FIFO RAM is what it tunes.  Skipping
+ *        an undocumented trim register has cost this port a bring-up before.
  *  4  HOLD the PHY in reset                   MCUCTRL->USBRSTCTRL: CLEAR
  *                                             USBRSTENABLE, USBPORRSTRELEASE,
  *                                             USBUTMIRSTRELEASE
  *     -- note the vendor's naming is inverted from its effect: the function
  *        called "enable_phy_reset_override" CLEARS these bits and thereby
- *        HOLDS the PHY in reset.  Our names will say what they do.
+ *        HOLDS the PHY in reset.  The names here say what they do.
  *  5  switch the external rails on            GP47 high, GP48 high
  *  6  wait                                    50 ms
  *  7  disconnect battery-charger detection    USB->BCDETCRTL1 = USBSWRESET=1,
@@ -245,7 +243,7 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  * the eMMC's INTENABLE trap (a register whose behaviour depends on how you
  * look at it), and it is why polling is not merely slow here but wrong.
  *
- * ON BUS RESET the controller does NOT tidy up for us.  The handler must:
+ * ON BUS RESET the controller does NOT tidy up on its own.  The handler must:
  *   - abort every in-flight transfer and tell the upper layer
  *   - reset the EP0 state machine to IDLE
  *   - re-init EP0 with a 64-byte max packet
@@ -332,17 +330,16 @@ BOARD_CAPS/USB_RAILS in the Makefile."
 /* THE DECISION U0 EXISTS TO MAKE: INTERRUPT-DRIVEN, AND IT IS NOT CLOSE     */
 /*---------------------------------------------------------------------------*/
 /*
- * Every other driver in this port polls.  This one cannot, for four reasons,
- * in increasing order of how badly they end the argument:
+ * Every other driver in this port polls.  This one cannot, for four reasons:
  *
  * 1. THE STATUS REGISTERS ARE READ-TO-CLEAR.  Any reader that is not the
  *    single owner of INTRTX/INTRRX/INTRUSB destroys events for everyone else.
  *    A poll loop that races with anything -- including a diagnostic that
  *    dumps registers -- loses bus resets.
  *
- * 2. THE HOST HAS TIMEOUTS AND WE DO NOT CONTROL THEM.  Enumeration is a
- *    conversation with deadlines set by the other end.  Missing them does not
- *    produce an error; it produces a device the host gives up on.
+ * 2. THE HOST SETS THE TIMEOUTS.  Enumeration is a conversation with
+ *    deadlines set by the other end.  Missing them does not produce an error;
+ *    it produces a device the host gives up on.
  *
  * 3. THE SHELL BLOCKS FOR SECONDS.  `power emmc bench` occupies the shell
  *    process for over two seconds; a 54 MB stage for 2.2 s; `fat hash` on a
@@ -350,9 +347,9 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *    time the board did anything interesting -- and "interesting" here means
  *    exactly the operations USB exists to feed.
  *
- * 4. IT IS THE WHOLE POINT.  MSC must serve the host WHILE the board is doing
- *    something else.  A polled implementation is not a slower version of that
- *    feature; it is a different, useless feature.
+ * 4. MSC must serve the host WHILE the board is doing something else.  A
+ *    polled implementation is not a slower version of that feature; it is a
+ *    different, useless one.
  *
  * SO: the ISR owns the controller.  The split of work:
  *
@@ -366,10 +363,9 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *            CBW/CSW-sized decisions are deferred, and the ring absorbs the
  *            latency.
  *
- * This makes tiku_usb the port's first genuinely interrupt-driven driver, so
- * two disciplines arrive with it: the INDEX-masking rule in table 3, and a
- * bounded ISR (no waits, no hang_checkin, no SHELL_PRINTF from interrupt
- * context -- diagnostics go through a ring the process drains).
+ * Two disciplines come with being interrupt-driven: the INDEX-masking rule in
+ * table 3, and a bounded ISR (no waits, no hang_checkin, no SHELL_PRINTF from
+ * interrupt context -- diagnostics go through a ring the process drains).
  *
  * The EP0 state machine, transcribed:
  *      IDLE -> SETUP        on CSR0.OutPktRdy, 8 bytes read from FIFO0
@@ -380,8 +376,8 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *      STATUS_* -> IDLE
  * SET_ADDRESS is the classic trap and the HAL confirms the order: send the
  * zero-length status IN packet FIRST, and only then write FADDR.  Writing the
- * address before the host has seen the acknowledgement means the host talks
- * to address 0 while we answer on the new one, and enumeration stalls.
+ * address before the host has seen the acknowledgement leaves the host talking
+ * to address 0 while the device answers on the new one, and enumeration stalls.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -560,7 +556,7 @@ extern const tiku_shell_io_t tiku_shell_io_usbcdc;
 /** @brief Queue one byte to the host (no-op unless configured and DTR set). */
 void tiku_usb_cdc_putc(char c);
 
-/** @brief 1 when the host has configured us AND opened the terminal (DTR). */
+/** @brief 1 when the host has configured the device AND opened the terminal (DTR). */
 int tiku_usb_cdc_ready(void);
 
 /**

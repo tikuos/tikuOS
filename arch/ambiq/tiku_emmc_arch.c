@@ -154,18 +154,13 @@ _Static_assert(EMMC_PAD_D7 - EMMC_PAD_D4 == 3,
 /**
  * @brief SDMA boundary: how far the engine runs before it wants attention.
  *
- * SDHCI's simple DMA mode interrupts every time the destination address
- * crosses a power-of-two boundary, and software restarts it by writing the
- * address back.  512 KB (encoding 7) is the largest the field offers, and at
- * that size a whole scratch-region transfer takes a single service.
+ * SDHCI's simple DMA mode interrupts whenever the destination address crosses a
+ * power-of-two boundary, and software restarts it by writing the address back.
+ * 512 KB (encoding 7) is the largest offered: one service per scratch transfer.
  *
- * The PSRAM's DMABOUND taught that a boundary field can silently corrupt
- * rather than merely slow: there, a value above 4 KB produced identical
- * timing and wrong data, caught only because the leg was checksum-gated.
- * That was a different engine with a different field, so the lesson carried
- * here is not the value but the METHOD -- every DMA leg below compares its
- * bytes against a known pattern, so if this boundary misbehaves the bench
- * says FAIL instead of quoting a bandwidth.
+ * @note A boundary field can corrupt rather than merely slow -- the PSRAM's
+ *       DMABOUND gave identical timing and wrong data above 4 KB.  Every DMA
+ *       leg below is therefore checksum-gated against a known pattern.
  */
 #define EMMC_SDMA_BOUND     7u    /* 0=4K, 1=8K, ... 7=512K                  */
 
@@ -270,32 +265,25 @@ uint32_t tiku_emmc_scratch_lba(void)
 #define EMMC_CHUNK_US  2000000u          /* max wire time in ONE command     */
 
 /*
- * Backstop for the time budgets above.  A loop bounded only by a cycle
- * counter is unbounded if that counter ever stops -- and DWT's CYCCNT is a
- * debug resource that a probe detaching, or a low-power transition, can
- * switch off underneath us.  The largest budget here is 8 s, which at the
- * backoff's 10 us floor is about 800k iterations, so four million is far
- * above any legitimate wait and still finite.  Bounded waits are a rule in
- * this port, and a rule with an exception for "the clock is fine" is not one.
+ * Backstop for the time budgets above.  A loop bounded only by a cycle counter
+ * is unbounded if that counter ever stops -- and DWT's CYCCNT is a debug
+ * resource that a probe detaching, or a low-power transition, can switch off.
+ * The largest budget here is 8 s, which at the backoff's 10 us floor is about
+ * 800k iterations, so four million is far above any legitimate wait and still
+ * finite.  Bounded waits are a rule in this port, and a rule with an exception
+ * for "the clock is fine" is not one.
  */
 #define EMMC_SPIN_CEILING 4000000u
 
 /**
  * @brief Escalating poll backoff -- tight, then 2 us, then 10 us.
  *
- * BOTH EXTREMES ARE WRONG, and E3 is where that stops being academic.
+ * A tight spin forever is bus traffic aimed at the controller doing the work
+ * (20 % of the DMA plateau on the PSRAM), but a flat 10 us floor dominates once
+ * the clock reaches 48 MHz, where a single-block read is ~11 us on the wire.
  *
- * A tight spin forever is bus traffic aimed at the very controller doing the
- * work: on the PSRAM it was 20 % of the DMA plateau, and the same contention
- * exists here.  But a FLAT 10 us floor -- which is what E2 shipped, and was
- * harmless when a 400 kHz command took 100 us -- becomes the dominant term
- * the moment the clock is 48 MHz.  A single-block read then takes about 11 us
- * on the wire, so a 10 us poll would have made the random-latency figure a
- * measurement of this function rather than of the card.
- *
- * So: free for the first 64 reads (short transfers finish inside that window
- * and pay nothing), 2 us to about half a millisecond, 10 us thereafter.  The
- * outer spin budgets stay the same order, and the bound is still bounded.
+ * @note Free for the first 64 reads (short transfers finish inside that window
+ *       and pay nothing), 2 us to about half a millisecond, 10 us thereafter.
  */
 static void poll_backoff(uint32_t iter)
 {
@@ -369,15 +357,9 @@ static tiku_emmc_err_t emmc_cmd(uint8_t idx, uint32_t arg, unsigned resp_type,
 /**
  * @brief The full form: transfer-mode bits travel WITH the command.
  *
- * TRANSFER is one 32-bit register holding both the transfer-mode fields
- * (direction, block-count enable, DMA) in its low half and the command
- * fields in its high half, and writing it is what STARTS the command.  So
- * the mode bits cannot be programmed in a separate earlier write -- the
- * command write erases them.  That is exactly what happened here: the
- * direction bit was set, then zeroed a microsecond later by the command,
- * so the host sat waiting to be given write data while this driver sat
- * waiting to be handed read data.  Neither timed out on an error, because
- * nothing was wrong -- they were simply facing opposite ways.
+ * TRANSFER is one 32-bit register holding the transfer-mode fields (direction,
+ * block-count enable, DMA) in its low half and the command in its high half, and
+ * writing it STARTS the command -- so an earlier mode-only write gets erased.
  *
  * @param xfer_mode extra low-half bits (DXFERDIRSEL, BLKCNTEN, ...)
  */
@@ -505,16 +487,12 @@ static tiku_emmc_err_t emmc_write_buffer(const uint8_t *src)
 /**
  * @brief Wait for TRANSFERCOMPLETE, servicing SDMA boundary crossings.
  *
- * SDMA is a one-register engine, and the register is also its progress
- * report: when the destination address crosses the boundary programmed in
- * BLOCK.HOSTSDMABUFSZ the engine STOPS, raises DMAINTERRUPT, and leaves the
- * address it wants to continue from in SDMA.  Writing that value back is the
- * whole of "restart".  Miss it and the transfer simply never completes --
- * no error, no data, just a timeout several hundred milliseconds later with
- * a perfectly healthy card, which is a diagnosis nobody enjoys reaching.
+ * When the destination crosses the boundary in BLOCK.HOSTSDMABUFSZ the engine
+ * STOPS, raises DMAINTERRUPT and leaves the continue-from address in SDMA;
+ * writing it back is the whole of "restart".  Miss it and nothing completes.
  *
- * Boundary service does NOT back off: it is the fast path, and every
- * microsecond spent here is a microsecond the bus is idle mid-transfer.
+ * @note Boundary service does NOT back off: every microsecond here is a
+ *       microsecond the bus is idle mid-transfer.
  */
 static tiku_emmc_err_t emmc_wait_xfer(uint32_t budget_cyc)
 {
@@ -549,11 +527,9 @@ static tiku_emmc_err_t emmc_wait_xfer(uint32_t budget_cyc)
 /**
  * @brief Poll CMD13 until the card is out of PROGRAMMING and back in TRAN.
  *
- * CMD6 and every write leave the card busy on its own internal flash, and
- * the host's TRANSFERCOMPLETE says only that the BUS is free -- the card can
- * still be programming for milliseconds afterwards.  Issuing the next command
- * into that window is legal but pointless, and issuing a SWITCH into it is
- * how a configuration change gets silently dropped.
+ * CMD6 and every write leave the card busy on its own flash, and the host's
+ * TRANSFERCOMPLETE says only that the BUS is free.  Issuing a SWITCH into that
+ * window is how a configuration change gets silently dropped.
  */
 static tiku_emmc_err_t emmc_wait_ready(void)
 {
@@ -626,9 +602,8 @@ static tiku_emmc_err_t emmc_power_on(void)
  * @brief Set the bus clock.  Divider is a power of two; enabling is a dance.
  *
  * FREQSEL takes divider>>1, and the sequence is CLKEN -> poll CLKSTABLE ->
- * SDCLKEN.  Skipping the stability poll is how a card gets clocked before
- * the host's PLL has settled, which presents as a card that answers
- * intermittently -- the worst failure mode to debug.
+ * SDCLKEN.  Skipping the stability poll clocks the card before the host's PLL
+ * has settled, which presents as a card that answers intermittently.
  */
 static tiku_emmc_err_t emmc_set_clock(uint32_t target_hz)
 {
@@ -728,12 +703,9 @@ static tiku_emmc_err_t emmc_read_ext_csd(uint8_t *out)
 /**
  * @brief CMD6 SWITCH -- and the allow-list that keeps this card alive.
  *
- * EXT_CSD is partly one-time-programmable.  A wrong index here does not
- * throw an error; it permanently disables a feature, repartitions the
- * device, or locks a boot configuration, on an 8 GB part we do not own a
- * spare of.  The header says only 183 and 185 may ever be written; this is
- * where that stops being a comment.  The refusal is unconditional and takes
- * no force flag, because there is no argument that would justify one.
+ * EXT_CSD is partly one-time-programmable, and a wrong index does not error: it
+ * permanently disables a feature, repartitions the device, or locks a boot
+ * configuration.  Only 183 and 185 may be written, and there is no force flag.
  */
 static tiku_emmc_err_t emmc_switch(uint8_t index, uint8_t value)
 {
@@ -786,10 +758,9 @@ static tiku_emmc_err_t emmc_set_bus_width(unsigned bits)
 /**
  * @brief High-speed timing, clamped to what EXT_CSD[196] says the card allows.
  *
- * The clamp is the point.  "eMMC high speed is 52 MHz" is the sort of thing
- * that is true of the standard and not necessarily of the part in front of
- * you, and this driver has already spent one debugging round on a value that
- * was derived instead of read.  DEVICE_TYPE is a register; it is consulted.
+ * The clamp is the point: "eMMC high speed is 52 MHz" is true of the standard
+ * and not necessarily of the part in front of you.  DEVICE_TYPE is a register,
+ * so it is consulted rather than assumed.
  */
 static tiku_emmc_err_t emmc_set_high_speed(uint32_t target_hz)
 {
@@ -820,12 +791,9 @@ static tiku_emmc_err_t emmc_set_high_speed(uint32_t target_hz)
 /**
  * @brief Put both ends back at the identification setting after a failure.
  *
- * HOST FIRST here, which is the reverse of the upgrade order and for the
- * mirror-image reason: the upgrade fails when the CARD did not adopt the new
- * setting, so it is the host that is out of step, and narrowing the host is
- * what makes the card reachable again.  The CMD6s afterwards are best-effort
- * housekeeping -- they travel on the 1-bit CMD line and are deliverable
- * whatever the DAT lines were doing.
+ * HOST FIRST, the reverse of the upgrade order: an upgrade fails when the CARD
+ * did not adopt the setting, so the host is what is out of step and narrowing it
+ * is what makes the card reachable.  The CMD6s afterwards are best-effort.
  */
 static void emmc_fallback_slow(void)
 {
@@ -964,7 +932,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
         /* A 136-bit response arrives with the CRC byte shifted out, so the
          * CID's fields sit 8 bits low across RESPONSE3..0.  Getting this
          * wrong prints a plausible-looking product name, which is why the
-         * gate checks the decoded values rather than merely "we got bits". */
+         * gate checks the decoded values rather than merely that bits
+         * arrived. */
         uint8_t cid[16];
         int i;
         for (i = 0; i < 4; i++) {
@@ -1249,13 +1218,9 @@ tiku_emmc_err_t tiku_emmc_read_id(tiku_emmc_id_t *out)
 /**
  * @brief One command covering up to 65535 blocks, DMA or PIO.
  *
- * E2 issued one command per 512 bytes, which was the right shape for proving
- * correctness and the wrong shape for everything after.  At 400 kHz the
- * command overhead disappeared into a 10 ms data phase; at 48 MHz on 8 bits
- * the data phase is 11 us and the per-command ceremony -- inhibit poll,
- * argument, transfer write, completion poll, response read -- is the
- * measurement.  Hence: BLKCNT armed, Auto CMD12 so the HOST closes the
- * transfer rather than this driver spending another command on STOP.
+ * One command per 512 bytes proves correctness and then becomes the bottleneck:
+ * at 48 MHz on 8 bits the data phase is 11 us and the per-command ceremony is
+ * the measurement.  Hence BLKCNT armed and Auto CMD12, so the HOST closes it.
  */
 static tiku_emmc_err_t emmc_xfer_chunk(uint32_t lba, uint32_t n_blk,
                                        uint8_t *buf, int is_write, int use_dma)
@@ -1302,17 +1267,12 @@ static tiku_emmc_err_t emmc_xfer_chunk(uint32_t lba, uint32_t n_blk,
  * @brief Block transfer: chunking, DMA selection and cache maintenance.
  *
  * SDMA takes a 32-bit system address and moves whole words, so an unaligned
- * buffer is not a slow case but a WRONG one.  Rather than refuse the call,
- * such buffers fall back to PIO, which has no alignment requirement: callers
- * get correctness by default and bandwidth when their buffer earns it.
+ * buffer is not a slow case but a WRONG one; such buffers fall back to PIO,
+ * which has no alignment requirement.
  *
- * And the cache.  DMA moves bytes on the bus; the CPU's D-cache is not on
- * that path.  Clean before (so a dirty line cannot be written back OVER data
- * the engine has since delivered) and invalidate after a read (so the CPU
- * sees the memory the engine wrote, not the lines it held before).  Omitting
- * this produces the worst class of bug in the catalogue: correct data most of
- * the time, wrong data depending on what the CPU happened to touch, and a
- * failure that disappears when you add a print to look at it.
+ * @note Cache maintenance is not optional: clean before (so a dirty line cannot
+ *       be written back OVER data the engine delivered) and invalidate after a
+ *       read (so the CPU sees the memory the engine wrote).
  */
 static tiku_emmc_err_t emmc_xfer(uint32_t lba, uint32_t n_blk, uint8_t *buf,
                                  int is_write)
@@ -1362,8 +1322,8 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
         return TIKU_EMMC_ERR_ARG;
     }
     /* Default-deny outside the scratch region.  The card arrived with
-     * contents we did not write and cannot restore; an unattended driver
-     * has no business touching them. */
+     * contents this driver did not write and cannot restore; an unattended
+     * driver has no business touching them. */
     if (!force && lba < tiku_emmc_scratch_lba()) {
         return TIKU_EMMC_ERR_ARG;
     }
@@ -1421,13 +1381,9 @@ static inline uint8_t bench_pat(uint32_t a, uint32_t s)
 /**
  * @brief Report a leg -- and quote NO bandwidth when the leg failed.
  *
- * The first version printed a rate beside the word FAIL, and produced
- * "0.304 MB/s" for a leg on a 375 kHz one-bit wire that cannot carry more
- * than 0.047 MB/s.  The rate was six times the wire because the numerator
- * counted the whole span while the clock only ran until the transfer broke:
- * the PSRAM's 872-MB/s-on-a-384-MB/s-bus mistake, in mirror image.  A leg
- * that did not move its bytes has no bandwidth to report, so it reports the
- * failure and the controller's account of it instead.
+ * A rate printed beside FAIL is misleading: the numerator counts the whole span
+ * while the clock runs only until the transfer breaks, which once produced
+ * 0.304 MB/s on a wire that cannot carry 0.047.  A failed leg quotes no rate.
  */
 static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                          int exact, tiku_emmc_err_t rc)
@@ -1502,11 +1458,11 @@ void tiku_emmc_bench_run(void)
      * about 50 KB/s, so the 512 KB span used at speed would be ten seconds per
      * leg and the better part of two minutes overall -- long enough that the
      * hang watchdog, not the card, would decide how the run ended.  When the
-     * clock says we are still slow, drop to 64 KB and run only the transfer
-     * sizes that fit inside it.  Bandwidth is work-denominated, so the two
-     * spans are directly comparable, which is the entire reason for being
-     * able to run at the slow configuration at all: the upgrade gets PRICED
-     * against the same code and the same card rather than merely asserted.
+     * clock is still slow, drop to 64 KB and run only the transfer sizes that
+     * fit inside it.  Bandwidth is work-denominated, so the two spans stay
+     * directly comparable, which is the entire reason for being able to run at
+     * the slow configuration at all: the upgrade gets PRICED against the same
+     * code and the same card rather than merely asserted.
      */
     span_blk   = (s_clock_hz < 1000000u) ? 128u : BENCH_BLOCKS;
     span_bytes = span_blk * TIKU_EMMC_BLOCK_SIZE;
@@ -1977,16 +1933,9 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
 /**
  * @brief Untangle a read failure by varying ONE thing at a time.
  *
- * Written because the bench failed at the identification setting with
- * intstat = 0 -- no controller error, no timeout, transfers reporting
- * success and returning the wrong bytes, some of them faster than the wire
- * can carry.  Three variables were entangled in every leg (block count,
- * buffer location, DMA vs PIO), so the bench could say THAT it was wrong and
- * never WHICH.  This walks the matrix with a known-good reference.
- *
- * The reference is a single-block write followed by a single-block read into
- * DTCM: that exact path is what `power emmc gate` exercises, and it passes at
- * both configurations.  Everything else is measured against it.
+ * Block count, buffer location and DMA-vs-PIO are entangled in every bench leg,
+ * so the bench says THAT a transfer was wrong and never WHICH variable did it.
+ * This walks the matrix against a known-good single-block write/read into DTCM.
  */
 void tiku_emmc_diag_run(void)
 {
@@ -2025,10 +1974,10 @@ void tiku_emmc_diag_run(void)
     SHELL_PRINTF("  setup: 4 x single-block write ok\n");
 
     /*
-     * Each case names its three variables and its verdict.  "us" is the
-     * measured time; compare it against the wire: at 1 bit and 375 kHz a
-     * 512 B block cannot cross in less than 10900 us, so a faster case is
-     * reporting success for data that never arrived.
+     * Each case names its three variables and its verdict.  The time column is
+     * in microseconds; compare it against the wire: at 1 bit and 375 kHz a
+     * 512 B block cannot cross in less than 10900 microseconds, so a faster
+     * case is reporting success for data that never arrived.
      */
     {
         struct { const char *name; uint8_t *buf; uint32_t nblk; } cases[] = {

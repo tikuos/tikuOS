@@ -392,12 +392,12 @@ static volatile uint32_t s_n_reset, s_n_setup, s_n_irq, s_n_stall,
 static volatile uint16_t s_last_req;   /**< bRequest<<8 | bmRequestType      */
 
 /*
- * WHICH requests we refuse, not merely how many.  A stall count alone cannot
+ * WHICH requests are refused, not merely how many.  A stall count alone cannot
  * distinguish "correctly declining DEVICE_QUALIFIER on a full-speed device"
  * from "failing to implement something the host needs", and those look
  * identical from the outside until enumeration breaks.  The ring records the
- * last four, as bRequest<<8 | (wValue >> 8) -- for GET_DESCRIPTOR the low
- * byte is the descriptor TYPE, which is the informative half.
+ * last four, as bRequest<<8 | (wValue >> 8) -- for GET_DESCRIPTOR the low byte
+ * is the descriptor TYPE, which is the informative half.
  */
 static volatile uint16_t s_stalled[4];
 static volatile uint8_t  s_stall_wr;
@@ -462,11 +462,12 @@ static inline uint16_t ring_used(uint16_t h, uint16_t t, uint16_t sz)
 /**
  * @brief Mask the USB interrupt around process-context register access.
  *
- * Table 3's rule made concrete: INDEX and the CSR window it selects are
- * shared mutable state, so any process-context sequence that sets INDEX and
- * then uses it must not be interrupted by an ISR that will set INDEX to
- * something else.  Returns the previous enable so nesting cannot wrongly
- * re-enable.  PROCESS CONTEXT ONLY -- never call from the ISR.
+ * INDEX and the CSR window it selects are shared mutable state, so a
+ * process-context sequence that sets INDEX and then uses it must not be
+ * interrupted by an ISR that sets INDEX to something else.
+ *
+ * @note PROCESS CONTEXT ONLY -- never call from the ISR.
+ * @return Previous enable state, so nesting cannot wrongly re-enable.
  */
 static inline uint32_t usb_lock(void)
 {
@@ -488,9 +489,8 @@ static inline void usb_unlock(uint32_t was)
  * @brief Read @p n bytes out of an endpoint FIFO.
  *
  * The FIFO port is a 32-bit window onto a byte FIFO: byte-width accesses pop
- * one byte each, which is what a control transfer needs (8-byte SETUP
- * packets and odd-length descriptors are routine).  Word accesses would be
- * faster and wrong here.
+ * one byte each, which is what a control transfer needs (8-byte SETUP packets
+ * and odd-length descriptors).  Word accesses would be faster and wrong.
  */
 static void fifo_read(unsigned ep, uint8_t *dst, uint16_t n)
 {
@@ -527,11 +527,9 @@ static void ep0_stall(void)
 /**
  * @brief Push the next packet of a control-IN transfer.
  *
- * DataEnd travels WITH the last packet.  A short packet (less than the
- * maximum) is itself the end-of-transfer signal, so DataEnd is set whenever
- * this packet exhausts the payload -- and when the payload is an exact
- * multiple of 64 the host stops asking after wLength is satisfied, which the
- * caller has already clamped for.
+ * DataEnd travels WITH the last packet: a short packet is itself the
+ * end-of-transfer signal, so DataEnd is set whenever this packet exhausts the
+ * payload, which the caller has already clamped to wLength.
  */
 static void ep0_tx_next(void)
 {
@@ -674,8 +672,9 @@ static void ep0_setup(const uint8_t *p)
             }
         }
         switch (bRequest) {
-        case 0x20:  /* SET_LINE_CODING -- 7 bytes of baud/parity we ignore,
-                     * but must ACCEPT: this is a real control-OUT stage. */
+        case 0x20:  /* SET_LINE_CODING -- 7 bytes of baud/parity that are
+                     * ignored, but must be ACCEPTED: this is a real
+                     * control-OUT stage. */
             s_ep0 = EP0_RX;
             s_rx_expect = (wLength > sizeof s_line_coding)
                           ? (uint16_t)sizeof s_line_coding : wLength;
@@ -765,9 +764,9 @@ static void ep0_irq(void)
 
     /*
      * SetupEnd means the host abandoned the previous control transfer before
-     * we finished it.  It is not an error and it is not rare (a host that
-     * only wanted the first 8 bytes of a config descriptor does exactly
-     * this).  Acknowledge, drop whatever was in flight, and carry on.
+     * it finished.  It is not an error and it is not rare (a host that only
+     * wanted the first 8 bytes of a config descriptor does exactly this).
+     * Acknowledge, drop whatever was in flight, and carry on.
      */
     if (csr & CSR0_SETUPEND) {
         USB_CSR0 = CSR0_SERVICEDSETUPEND;
@@ -832,11 +831,9 @@ static void ep0_irq(void)
 /**
  * @brief Configure EP1 (bulk in + out) and EP2 (interrupt in).
  *
- * FIFO space is allocated by hand and CUMULATIVELY, in units of 8 bytes,
- * starting past the 64 bytes EP0 owns.  A bus reset resets the running
- * pointer, so this is called from SET_CONFIGURATION and nowhere else --
- * allocating twice without an intervening reset would silently overlap two
- * endpoints onto the same RAM.
+ * FIFO space is allocated by hand and CUMULATIVELY, in units of 8 bytes, past
+ * the 64 EP0 owns.  A bus reset resets the running pointer, so this runs from
+ * SET_CONFIGURATION only -- allocating twice would overlap two endpoints.
  */
 static void cdc_endpoints_open(void)
 {
@@ -936,10 +933,9 @@ static void cdc_tx_fill(void)
 /**
  * @brief Move one received packet into the RX ring, or leave it and back off.
  *
- * THE BACK-OFF IS THE FEATURE.  Unloading a packet the ring cannot hold would
- * mean dropping bytes; leaving it in the FIFO means the controller NAKs and
- * the host slows down instead.  That is the difference between this console
- * and the UART one.
+ * Unloading a packet the ring cannot hold would drop bytes; leaving it in the
+ * FIFO makes the controller NAK and the host slow down instead.  That is the
+ * difference between this console and the UART one.
  */
 static void cdc_rx_pump(void)
 {
@@ -952,9 +948,9 @@ static void cdc_rx_pump(void)
     free_sp = (uint16_t)(CDC_RX_RING - 1u -
                     ring_used(s_rx_head, s_rx_tail, CDC_RX_RING));
     if (cnt > free_sp) {
-        /* No room: do not touch the FIFO.  Mask this endpoint's interrupt so
-         * we are not re-entered, and let the host be NAKed until the shell
-         * drains.  cdc_rx_resume() undoes this. */
+        /* No room: do not touch the FIFO.  Mask this endpoint's interrupt to
+         * avoid re-entry and let the host be NAKed until the shell drains.
+         * cdc_rx_resume() undoes this. */
         USB_INTRRXE = (uint16_t)(USB_INTRRXE &
                                  (uint16_t)~(1u << CDC_EP_DATA));
         s_rx_stalled = 1u;
@@ -973,10 +969,9 @@ static void cdc_rx_pump(void)
 /**
  * @brief Re-arm reception after the shell has made room.
  *
- * Called from process context.  Re-enabling the interrupt is not enough on
- * its own: INTRRX is read-to-clear and the ISR already consumed the pending
- * bit, so a packet sitting in the FIFO would never announce itself again.
- * The FIFO is therefore pumped explicitly here.
+ * Process context.  Re-enabling the interrupt is not enough on its own:
+ * INTRRX is read-to-clear and the ISR already consumed the pending bit, so a
+ * packet sitting in the FIFO would never announce itself.  It is pumped here.
  */
 static void cdc_rx_resume(void)
 {
@@ -1026,13 +1021,9 @@ static void put_be32(uint8_t *p, uint32_t v)
 /**
  * @brief Is this READ/WRITE range inside the disk?
  *
- * *** THE ORDER OF THESE TESTS IS THE POINT. ***  The obvious form,
- * `(lba + nblk) > MSC_DISK_BLOCKS`, is wrong: the host controls both values,
- * and lba near 2^32 makes the sum WRAP to something small and pass.  The
- * command would then hand out a pointer far outside s_disk[] and the transfer
- * would read or write whatever follows it in SSRAM -- the tier arena, as it
- * happens.  Subtracting instead of adding cannot overflow, so lba is bounded
- * first and the count is checked against what remains.
+ * The order of the tests matters: `(lba + nblk) > MSC_DISK_BLOCKS` is wrong
+ * because the host controls both values and an lba near 2^32 wraps the sum
+ * small.  Subtracting cannot overflow: lba is bounded first, then the count.
  */
 static int msc_lba_ok(uint32_t lba, uint32_t nblk)
 {
@@ -1169,10 +1160,9 @@ static void msc_scsi_reply(const uint8_t *cb, uint32_t host_len)
 /**
  * @brief Decode one SCSI command and set up whatever data phase it needs.
  *
- * The subset is exactly what a host issues to mount, read and write a disk.
- * Everything else is failed with ILLEGAL REQUEST rather than ignored -- a
- * command silently treated as success is how a host ends up believing a
- * write landed when it did not.
+ * The subset is what a host issues to mount, read and write a disk.  Anything
+ * else is failed with ILLEGAL REQUEST rather than ignored -- a command
+ * silently treated as success is how a host comes to believe a write landed.
  */
 static void msc_scsi(const uint8_t *cb, uint32_t host_len, int host_wants_in)
 {
@@ -1615,10 +1605,10 @@ static void msc_emmc_write(uint32_t lba, uint32_t bytes, uint32_t host_len)
         }
         nblk = chunk / MSC_BLOCK_SIZE;
         /* force=1: in MSC mode the HOST owns the medium.  The scratch-region
-         * default-deny exists to protect the card from OUR unattended tests,
-         * not from the person who deliberately plugged it into a PC -- and
-         * the scratch blocks are unreachable anyway, being outside the
-         * capacity we reported (see msc_capacity). */
+         * default-deny protects the card from unattended on-board tests, not
+         * from the person who deliberately plugged it into a PC -- and the
+         * scratch blocks are unreachable anyway, being outside the reported
+         * capacity (see msc_capacity). */
 #if (TIKU_DRV_EMMC_ENABLE + 0)
         if (tiku_emmc_write_blocks(lba + (done / MSC_BLOCK_SIZE), nblk,
                                    s_disk, 1) != TIKU_EMMC_OK)
@@ -1675,11 +1665,11 @@ void tiku_usb_msc_poll(void)
          * NOTHING WAITING IS NOT THE SAME AS NOTHING COMING.
          *
          * Bulk-Only Transport is strictly ping-pong at the command level: the
-         * host will not send the next CBW until it has our CSW.  Returning
-         * the moment the queue looks empty therefore hands control back to a
-         * shell that only polls every TIKU_SHELL_POLL_TICKS -- about 47 ms --
-         * so the transfer ran at roughly ONE COMMAND PER 47 ms.  Formatting
-         * the card took 207 s instead of 10.
+         * host will not send the next CBW until the CSW arrives.  Returning
+         * the moment the queue looks empty hands control back to a shell that
+         * only polls every TIKU_SHELL_POLL_TICKS -- about 47 ms -- so the
+         * transfer runs at roughly ONE COMMAND PER 47 ms.  Formatting the card
+         * took 207 s that way instead of 10.
          *
          * So wait briefly for the host to come back before giving up.  A few
          * hundred microseconds covers the turnaround; the bound keeps an idle
@@ -1756,9 +1746,9 @@ static int msc_poll_one(void)
 /**
  * @brief Bus reset: put everything back the way the host expects to find it.
  *
- * The controller does NOT tidy up for us (table 4).  Getting this wrong is
- * precisely how a device enumerates once and then fails on replug, which is
- * why the plan's gate is ten cycles rather than one.
+ * The controller does NOT tidy up on its own (table 4).  Getting this wrong is
+ * precisely how a device enumerates once and then fails on replug, which is why
+ * the acceptance gate is ten cycles rather than one.
  */
 static void bus_reset(void)
 {
@@ -1771,7 +1761,7 @@ static void bus_reset(void)
     s_config = 0u;
 
     /* The configuration is gone and so is the FIFO allocation; endpoints are
-     * re-opened only when the host configures us again. */
+     * re-opened only when the host configures the device again. */
     s_configured = 0u;
     s_dtr = 0u;
     s_tx_busy = 0u;
@@ -1857,13 +1847,9 @@ tiku_usb_err_t tiku_usb_up_as(tiku_usb_speed_t want, tiku_usb_class_t cls)
 /**
  * @brief Bring up, choosing the MSC backing store as well.
  *
- * *** CAPACITY IS WHERE THE OWNERSHIP RULE BECOMES STRUCTURAL. ***  In eMMC
- * mode the host is told the card is SCRATCH_BLOCKS shorter than it is, so the
- * scratch region is not merely by-convention off limits -- it is outside the
- * medium as far as the host can tell, and no partition table or format it
- * writes can reach it.  `emmcbench` and `power emmc gate` keep working on a
- * region no filesystem will ever claim.  A rule enforced by arithmetic beats
- * a rule enforced by remembering.
+ * In eMMC mode the host is told the card is SCRATCH_BLOCKS shorter than it is,
+ * so the scratch region is outside the medium as far as the host can tell and
+ * no partition table or format it writes can reach it.
  */
 tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
                                 int use_emmc)
@@ -1883,7 +1869,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
         uint32_t cap = tiku_emmc_capacity_blocks();
         if (cap <= TIKU_EMMC_SCRATCH_BLOCKS) {
             /* Not identified yet, or implausibly small: refuse rather than
-             * present a disk whose size we cannot justify. */
+             * present a disk whose size cannot be justified. */
             return TIKU_USB_ERR_STATE;
         }
         s_store = MSC_STORE_EMMC;
@@ -1910,8 +1896,8 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     if (spins == 100000u) { return TIKU_USB_ERR_POWER; }
 
     /* 3. The undocumented FIFO-SRAM trim.  Transcribed from the vendor,
-     *    not derived; "three registers we never wrote" is already a title in
-     *    this project and this is how that title is avoided a second time. */
+     *    not derived -- an unwritten configuration register is exactly the
+     *    kind of omission that costs a bring-up. */
     USB->SRAMCTRL = (1u  << USB_SRAMCTRL_WABL_Pos)  |
                     (1u  << USB_SRAMCTRL_WABLM_Pos) |
                     (1u  << USB_SRAMCTRL_RAWL_Pos)  |
@@ -2054,7 +2040,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
 
     /*
      * Hand the MSC transport to the shell rather than having the shell reach
-     * in and call us.  Registered on the way UP so a build that never brings
+     * in and call it.  Registered on the way UP so a build that never brings
      * USB up never pays for the pump; dropped again in tiku_usb_down().
      * Registration is idempotent, so repeated `usb up` is harmless.
      */
@@ -2104,11 +2090,9 @@ void tiku_usb_down(void)
 /**
  * @brief Queue one byte for the host.
  *
- * Gated on DTR: a board printing into a port nobody has opened must not
- * block, and must not fill a ring that will never drain.  When the terminal
- * IS open, a full ring is waited on briefly and then the byte is DROPPED and
- * COUNTED -- silently losing console output would be worse, and an honest
- * counter is what makes the difference visible in `power usb state`.
+ * Gated on DTR: a board printing into a port nobody has opened must not block
+ * or fill a ring that will never drain.  With the terminal open a full ring is
+ * waited on briefly, then the byte is DROPPED and COUNTED for `power usb state`.
  */
 void tiku_usb_cdc_putc(char c)
 {
@@ -2138,7 +2122,7 @@ static uint8_t cdc_rx_ready(void)
 {
     if (s_rx_head == s_rx_tail) {
         /* Empty ring is also the moment to check whether a packet is sitting
-         * in the FIFO because we previously ran out of room. */
+         * in the FIFO because the pump previously ran out of room. */
         cdc_rx_resume();
     }
     return (uint8_t)(s_rx_head != s_rx_tail);
@@ -2174,14 +2158,9 @@ int tiku_usb_cdc_ready(void)
  * @brief Drain the CDC receive pipe for @p ms, counting bytes, interpreting
  *        none of them.
  *
- * The transport gate needs to measure the TRANSPORT.  Running a megabyte
- * through the shell parser would measure the parser too, and would generate
- * megabytes of echo and prompts in the opposite direction -- so this drains
- * through exactly the path the shell uses (the same ring, the same
- * flow-control resume) and simply counts.  Bytes in must equal bytes out;
- * anything less is a drop, which is the whole question.
- *
- * Runs on whichever channel is NOT being tested, so the shell stays usable.
+ * The gate has to measure the transport, so this drains the same ring and
+ * flow-control path the shell uses and simply counts; bytes in must equal bytes
+ * out.  Runs on whichever channel is NOT under test, so the shell stays usable.
  */
 uint32_t tiku_usb_cdc_sink(uint32_t ms)
 {
@@ -2264,10 +2243,9 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
 /**
  * @brief Exercise the LBA bounds check with values that must be REFUSED.
  *
- * A guard nobody has watched fail is a guard nobody has tested, and this one
- * stands between a hostile or buggy host and the memory after the disk.  The
- * cases below include the overflow pair that defeats the naive form of the
- * check -- so this is a regression test for a specific bug, not a formality.
+ * The guard stands between a hostile or buggy host and the memory after the
+ * disk.  The cases include the overflow pair that defeats the naive form of
+ * the check, so this is a regression test rather than a formality.
  *
  * @return 0 if every case behaved; otherwise a bitmask of the ones that did
  *         not, so a failure names itself.
