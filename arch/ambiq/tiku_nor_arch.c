@@ -24,6 +24,7 @@
 #include "apollo510.h"           /* CMSIS register map -- defs only         */
 #include <kernel/cpu/tiku_hang.h>   /* erase waits block on purpose         */
 #include <kernel/shell/tiku_shell_io.h>  /* norbench reports via SHELL_PRINTF */
+#include "hal/tiku_cpu.h"        /* dcache clean/invalidate around DMA      */
 
 /*---------------------------------------------------------------------------*/
 /* COMMANDS (table 2)                                                        */
@@ -487,6 +488,47 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk)
 }
 
 /*---------------------------------------------------------------------------*/
+/* DMA                                                                       */
+/*---------------------------------------------------------------------------*/
+
+tiku_nor_err_t tiku_nor_dma_read(uint32_t addr, void *sram, uint32_t n)
+{
+    uint32_t spins = 500000u;          /* x20 us = 10 s ceiling */
+
+    if (!s_up) { return TIKU_NOR_ERR_POWER; }
+    /* Same deadlock as the PIO path: a DMA started while the aperture is
+     * live wedges the APB. */
+    if (MSPI1->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_NOR_ERR_ARG; }
+    if (n == 0u || (n & 3u) != 0u ||
+        ((uint32_t)(uintptr_t)sram & 3u) != 0u) {
+        return TIKU_NOR_ERR_ARG;
+    }
+    if (addr + n > TIKU_NOR_SIZE_BYTES) { return TIKU_NOR_ERR_ARG; }
+
+    MSPI1->DMATARGADDR = (uint32_t)(uintptr_t)sram;
+    MSPI1->DMADEVADDR  = addr;
+    MSPI1->DMATOTCOUNT = n;
+    MSPI1->INTCLR      = 0xFFFFFFFFu;
+    MSPI1->DMACFG =
+        ((uint32_t)MSPI0_DMACFG_DMAEN_EN << MSPI0_DMACFG_DMAEN_Pos);
+    __DSB();
+
+    while (((MSPI1->DMASTAT &
+             (MSPI0_DMASTAT_DMACPL_Msk | MSPI0_DMASTAT_DMAERR_Msk)) == 0u)
+           && --spins != 0u) {
+        tiku_cpu_ambiq_delay_us(20u);
+    }
+    {
+        uint32_t st = MSPI1->DMASTAT;
+        MSPI1->DMACFG  = 0u;
+        MSPI1->DMASTAT = 0u;
+        if (spins == 0u)                     { return TIKU_NOR_ERR_TIMEOUT; }
+        if ((st & MSPI0_DMASTAT_DMAERR_Msk)) { return TIKU_NOR_ERR_TIMEOUT; }
+    }
+    return TIKU_NOR_OK;
+}
+
+/*---------------------------------------------------------------------------*/
 /* norbench                                                                  */
 /*---------------------------------------------------------------------------*/
 /*
@@ -500,8 +542,12 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk)
 
 extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 
-#define NORB_SPAN   4096u                  /* one subsector per read leg   */
-#define NORB_BUF    4096u
+/* 32 KB, not 4: at 4 KB a DMA read finished in 86 us and fixed setup cost was
+ * a visible share of that, so the bandwidth legs were reporting a floor rather
+ * than a rate.  The prepare erases the whole 128 KB scratch sector, which also
+ * gives the sector-erase timing for free. */
+#define NORB_SPAN   32768u
+#define NORB_BUF    32768u
 static uint8_t s_norb_buf[NORB_BUF] __attribute__((aligned(32)));
 
 static uint32_t norb_cyc_begin(uint32_t *demcr0, uint32_t *ctl0)
@@ -558,8 +604,10 @@ static inline uint8_t norb_pat(uint32_t a)
  * cost is not worth paying on every benchmark run.  `power nor xip` probes it
  * deliberately with a single word. */
 static uint8_t s_xip_leg;
+static uint8_t s_sector_leg;
 
 void tiku_nor_bench_set_xip(int on) { s_xip_leg = on ? 1u : 0u; }
+void tiku_nor_bench_set_sector(int on) { s_sector_leg = on ? 1u : 0u; }
 
 int tiku_nor_xip_probe(uint32_t *out)
 {
@@ -597,8 +645,8 @@ void tiku_nor_bench_run(void)
      * both, so the erase and program legs are measured on the way in rather
      * than as separate work. */
     t0 = norb_cyc_now();
-    if (tiku_nor_erase(base, 1, 0) != TIKU_NOR_OK) {
-        SHELL_PRINTF("  subsec-erase  FAILED\n");
+    if (tiku_nor_erase(base, 0, 0) != TIKU_NOR_OK) {
+        SHELL_PRINTF("  sector-erase  FAILED\n");
         return;
     }
     cyc = norb_cyc_now() - t0;
@@ -609,7 +657,7 @@ void tiku_nor_bench_run(void)
     for (i = 0u; i < NORB_SPAN; i++) {
         if (s_norb_buf[i] != 0xFFu) { exact = 0; }
     }
-    norb_report_op("subsec-eras", 1u, cyc, exact);
+    norb_report_op("sector-eras", 1u, cyc, exact);
 
     for (i = 0u; i < NORB_SPAN; i++) {
         s_norb_buf[i] = norb_pat(base + i);
@@ -658,6 +706,20 @@ void tiku_nor_bench_run(void)
     cyc = norb_cyc_now() - t0;
     norb_report("random512", 8u * 512u, cyc, exact);
 
+    /* DMA read: the engine moves device -> SRAM with no per-chunk command
+     * from the CPU, so this is the bulk-load path.  The buffer is invalidated
+     * first because the engine writes physical SRAM behind the D-cache. */
+    for (i = 0u; i < NORB_SPAN; i++) { s_norb_buf[i] = 0u; }
+    tiku_cpu_dcache_clean(s_norb_buf, NORB_SPAN);
+    t0 = norb_cyc_now();
+    exact = (tiku_nor_dma_read(base, s_norb_buf, NORB_SPAN) == TIKU_NOR_OK);
+    cyc = norb_cyc_now() - t0;
+    tiku_cpu_dcache_invalidate(s_norb_buf, NORB_SPAN);
+    for (i = 0u; i < NORB_SPAN; i++) {
+        if (s_norb_buf[i] != norb_pat(base + i)) { exact = 0; }
+    }
+    norb_report("dma-read", NORB_SPAN, cyc, exact);
+
     /*
      * XIP: the CPU reads the aperture directly, so there is no per-chunk
      * command overhead and this is the leg the 100+ MB/s expectation belongs
@@ -680,9 +742,21 @@ void tiku_nor_bench_run(void)
         SHELL_PRINTF("  xip-read     aperture would not open\n");
     }
 
-    SHELL_PRINTF("  erases spent this run: 1 (total %lu)\n",
+    /* Subsector erase, inside the sector already spent above. */
+    t0 = norb_cyc_now();
+    exact = (tiku_nor_erase(base, 1, 0) == TIKU_NOR_OK);
+    cyc = norb_cyc_now() - t0;
+    if (exact && tiku_nor_read(base, s_norb_buf, 4096u) == TIKU_NOR_OK) {
+        for (i = 0u; i < 4096u; i++) {
+            if (s_norb_buf[i] != 0xFFu) { exact = 0; }
+        }
+    } else {
+        exact = 0;
+    }
+    norb_report_op("subsec-eras", 1u, cyc, exact);
+
+    SHELL_PRINTF("  erases spent this run: 2 (total %lu)\n",
                  (unsigned long)s_erases);
-    SHELL_PRINTF("  not tested: DMA/CQ, sector (128 KB) erase\n");
 
     {   /* restore the DWT state the boot tidy chose */
         volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;

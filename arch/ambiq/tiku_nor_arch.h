@@ -319,6 +319,18 @@ void tiku_nor_bench_run(void);
 /** @brief Include the XIP leg in the next bench run (off by default). */
 void tiku_nor_bench_set_xip(int on);
 
+/** @brief Include the 128 KB sector-erase leg; spends a second erase cycle. */
+void tiku_nor_bench_set_sector(int on);
+
+/**
+ * @brief Read @p n bytes device -> SRAM with the DMA engine.
+ *
+ * @note Cache coherency is the caller's job; the engine writes physical SRAM.
+ *       Refused while the XIP aperture is live -- that combination wedges the
+ *       APB, as on the PIO path.
+ */
+tiku_nor_err_t tiku_nor_dma_read(uint32_t addr, void *sram, uint32_t n);
+
 /**
  * @brief Read ONE word through the XIP aperture.
  *

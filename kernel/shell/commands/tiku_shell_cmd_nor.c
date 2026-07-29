@@ -87,12 +87,14 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
             SHELL_PRINTF("norbench: bring-up %s\n", nor_errname(rc));
             return;
         }
-        if (argc >= 5 && tiku_cmd_streq(argv[4], "xip")) {
-            tiku_nor_bench_set_xip(1);
-        } else if (argc >= 4 && tiku_cmd_streq(argv[3], "xip")) {
-            tiku_nor_bench_set_xip(1);
-        } else {
-            tiku_nor_bench_set_xip(0);
+        {   /* any trailing word may be `octal`, `xip` or `sector` */
+            int k5, xip = 0, sec = 0;
+            for (k5 = 3; k5 < argc; k5++) {
+                if (tiku_cmd_streq(argv[k5], "xip"))    { xip = 1; }
+                if (tiku_cmd_streq(argv[k5], "sector")) { sec = 1; }
+            }
+            tiku_nor_bench_set_xip(xip);
+            tiku_nor_bench_set_sector(sec);
         }
         tiku_nor_bench_run();
         return;
