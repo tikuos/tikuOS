@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.c - ADC driver for MSP430 ADC12_B
+ * tiku_adc_arch.c - ADC driver for the MSP430 ADC12_B.
  *
- * Implements blocking single-channel ADC conversions on the ADC12_B
- * peripheral found in MSP430FR5x/6x devices. Supports 8/10/12-bit
- * resolution, multiple reference voltage sources, and both external
- * channels (A0-A15) and internal channels (temperature sensor, battery).
- *
- * All busy-wait loops are guarded by a timeout counter to prevent
- * infinite hangs on hardware errors.
+ * Blocking single-channel conversions at 8/10/12-bit resolution, over external
+ * channels A0-A15 and the internal temperature and battery channels.  Every
+ * busy-wait is bounded by a timeout so a hardware fault cannot hang the caller.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

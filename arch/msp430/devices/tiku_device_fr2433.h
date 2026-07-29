@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_fr2433.h - MSP430FR2433 silicon-level constants
+ * tiku_device_fr2433.h - MSP430FR2433 silicon-level constants.
  *
- * This header defines the hardware capabilities of the MSP430FR2433
- * microcontroller: available GPIO ports, crystal support, memory
- * sizes, and peripheral availability. Board-level (PCB) definitions
- * such as LED and button pin assignments belong in the board header.
- *
- * Key differences from FR5969/FR5994:
- *   - No external crystal oscillators (no LFXT, no HFXT)
- *   - Only 3 GPIO ports (P1, P2, P3) — no P4 and no PJ
- *   - CS module has no password protection (no CSKEY)
- *   - DCO uses DCORSEL (3-bit) instead of DCOFSEL + DCORSEL
- *   - MCLK and SMCLK share a combined source select (SELMS)
- *   - 16 KB FRAM, 4 KB SRAM
+ * GPIO ports, crystal support, memory sizes and peripheral availability; PCB-level
+ * pin assignments belong in the board header.  This part has no external crystals,
+ * three ports, an unprotected CS module and a different DCO layout.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

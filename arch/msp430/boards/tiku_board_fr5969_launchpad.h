@@ -5,17 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_fr5969_launchpad.h - MSP430FR5969 LaunchPad board definitions
+ * tiku_board_fr5969_launchpad.h - MSP430FR5969 LaunchPad board definitions.
  *
- * This header defines the PCB-level GPIO pin assignments for the
- * MSP430FR5969 LaunchPad development board: LEDs, buttons, and
- * other board-specific peripherals.
- *
- * Board layout (per TI MSP-EXP430FR5969 schematic):
- *   - LED1 (Red)   -> P4.6
- *   - LED2 (Green) -> P1.0
- *   - Button S1    -> P4.5 (Active low)
- *   - Button S2    -> P1.1 (Active low)
+ * PCB-level GPIO assignments for the MSP-EXP430FR5969: LEDs, buttons and other
+ * board peripherals, per the TI schematic.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,50 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crt_early.c - Early-boot patch: disable WDT before crt0 BSS init
+ * tiku_crt_early.c - early-boot patch: disable the WDT before crt0 BSS init.
  *
- * Why this exists
- * ===============
- * The msp430-elf-gcc startup runs .upper.bss zero-init in
- * __crt0_init_highbss *before* main() gets a chance to call
- * tiku_watchdog_off(). At FR6989's POR-default DCO of 8 MHz
- * (CSCTL1 reset → DCOFSEL_3, DCORSEL=0 → 8 MHz; MCLK and SMCLK
- * both run from DCOCLK / 1 at reset), the WDT's POR-default
- * timeout is only:
- *
- *     SMCLK / 32768 = 32768 / 8 MHz = 4.10 ms
- *
- * Zeroing 6.8 KB of HIFRAM at ~5 cycles/byte takes about 4.25 ms
- * — past the WDT window. The chip resets mid-init, restarts crt0,
- * resets again, and boot-loops silently. UART isn't initialised
- * until main() runs, so even `make monitor` shows nothing.
- *
- * Confirmed on MSP430FR6989. See
- * `kintsugi/fr6989_hifram_bss_volume_crash.md` for the symptom,
- * the bisection (works at 2 KB, hangs at 6.8 KB), and the math
- * spelt out in full.
- *
- * How the patch works
- * ===================
- * msp430-elf-gcc orders .crt_* sections lexicographically and the
- * linker `KEEP (*(SORT(.crt_*)))` lays them out contiguously in
- * .text. The startup phases (set SP, init bss, init high bss,
- * move data, ..., call_main) are inlined as a fall-through chain
- * — no RET separates them; execution simply runs off the end of
- * one section into the next.
- *
- * We slot in at `.crt_0050early`, lexicographically between the
- * existing `.crt_0000start` and `.crt_0100init_bss`. The function
- * is `naked` so the compiler emits no prologue/epilogue, and it
- * deliberately ends WITHOUT a RET so execution falls through to
- * the next .crt section — same convention as the toolchain's
- * own startup phases.
- *
- * Cost: 4 bytes of .text (a single MOV.W immediate-to-absolute
- * instruction). No data, no stack use, no SR change. Safe on
- * every MSP430FR-series part — `WDTPW | WDTHOLD` is the documented
- * stop sequence and works the same way regardless of the chip's
- * BSS layout.
+ * The toolchain zeroes .upper.bss before main() can stop the watchdog, and at the
+ * POR-default 8 MHz the WDT window is 4.10 ms while zeroing 6.8 KB of HIFRAM takes
+ * ~4.25 ms -- a silent boot loop, confirmed on MSP430FR6989.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_select.h - Device and board include router
+ * tiku_device_select.h - device and board include router.
  *
- * This header routes to the correct device and board headers. The two
- * are SEPARATE choices:
- *
- *   TIKU_DEVICE_*  the silicon        -> devices/ (memory map, ports, xtal)
- *   TIKU_BOARD_*   the physical PCB   -> boards/  (LEDs, buttons, headers)
- *
- * The device selects the device header; the board selects the board
- * header.  They were fused here until the board/device split -- an
- * FR5994 could only ever be a LaunchPad, which is wrong the moment the
- * same part sits on a custom TikuOS board.
- *
- * Builds that pass no TIKU_BOARD_* (TI Code Composer Studio, which sets
- * only the device via __MSP430FR*__) fall back to that device's default
- * LaunchPad, so nothing outside the Makefile has to change.
- *
- * Adding a new MSP430 variant requires:
- *   1. A device header in devices/ with silicon constants
- *   2. A board header in boards/ with GPIO pin assignments
- *   3. An #elif clause in each of the two routers below
+ * Two separate choices: TIKU_DEVICE_* picks the silicon header (memory map,
+ * ports, xtal) and TIKU_BOARD_* the PCB header (LEDs, buttons, headers).  A build
+ * that names only the device falls back to that part's default LaunchPad.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

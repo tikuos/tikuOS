@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_arch.h - UART backend for printf (MSP430 architecture)
+ * tiku_uart_arch.h - UART backend for printf (MSP430).
  *
- * Provides a compiler-aware UART printf backend:
- *   - GCC (msp430-elf-gcc): Routes printf through eUSCI_A0 UART
- *     using the LaunchPad backchannel (USB-to-serial on debugger).
- *   - CCS (cl430): No-op; CIO semihosting handles printf via JTAG.
- *
- * Call tiku_uart_init() during boot, after clock and GPIO are ready.
+ * Routes printf through the LaunchPad backchannel UART under GCC, and is a no-op
+ * under CCS where semihosting handles it.  Call tiku_uart_init() during boot,
+ * after clock and GPIO are ready.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

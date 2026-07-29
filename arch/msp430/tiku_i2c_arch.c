@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - I2C master driver for MSP430 eUSCI_B0
+ * tiku_i2c_arch.c - I2C master driver for MSP430 eUSCI_B0.
  *
- * Implements blocking I2C master transactions on the eUSCI_B0 peripheral.
- * Pin routing and clock prescaler values come from the board header via
- * TIKU_BOARD_I2C_* macros. All busy-wait loops are guarded by a timeout
- * counter to prevent infinite hangs on bus errors.
+ * Blocking master transactions, with pin routing and clock prescaler taken from
+ * the board header's TIKU_BOARD_I2C_* macros.  Every busy-wait is bounded by a
+ * timeout so a stuck bus cannot hang the caller.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

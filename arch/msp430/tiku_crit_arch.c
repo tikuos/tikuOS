@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit_arch.c - MSP430 IRQ-mask backend for tiku_crit
+ * tiku_crit_arch.c - MSP430 IRQ-mask backend for tiku_crit.
  *
- * Implements the two HAL hooks declared in hal/tiku_crit_hal.h.
- * Each subsystem family is guarded by the corresponding register's
- * compile-time visibility so this file compiles unchanged across
- * FR5969, FR5994, FR2433, etc.
+ * Implements the two hooks in hal/tiku_crit_hal.h.  Each subsystem family is
+ * guarded by its register's compile-time visibility, so the file compiles
+ * unchanged across FR5969, FR5994 and FR2433.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

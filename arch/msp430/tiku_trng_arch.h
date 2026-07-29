@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.h - MSP430 software entropy source (no hardware TRNG)
+ * tiku_trng_arch.h - MSP430 software entropy source (no hardware TRNG).
  *
- * The MSP430FR5xxx/6xxx parts carry no dedicated true-random-number
- * generator (unlike the RP2350 ROSC-TRNG or the Apollo CryptoCell-312).
- * This driver synthesises one in software from two physical noise
- * sources on the die, so the same one-blocking-read API and the same
- * kit-side binding (tikukits/net/tls/.../tiku_kits_crypto_tls_config.h,
- * which backs TIKU_KITS_CRYPTO_TLS_RNG_FILL) work identically to the
- * hardware-TRNG ports:
- *
- *   1. Oscillator-ratio jitter -- MCLK (DCO, ~8 MHz) and ACLK (the
- *      32.768 kHz XT1 crystal) are independent, unlocked oscillators.
- *      Counting MCLK loop iterations across exactly one ACLK tick gives
- *      a ratio whose low bits walk unpredictably with the two sources'
- *      cycle-to-cycle jitter and relative drift.  This is the reliable
- *      source and gates the health check.
- *   2. ADC thermal noise -- the low bits of repeated 12-bit reads of the
- *      internal temperature sensor (a high-impedance, noisy channel).
- *
- * Both are pooled over many rounds and conditioned with SHA-256, so the
- * low per-round entropy still yields a full-entropy 256-bit block.  A
- * dead timer or a stuck jitter source fails the health test and the read
- * returns TIKU_TRNG_ERR_TIMEOUT (buffer unmodified) -- the TLS layer then
- * fails closed rather than handshaking on weak entropy.  Callers that
- * need many bytes should seed a DRBG once from this (as the HTTPS layer
- * does): collection is deliberately slow (~10 ms per 32-byte block).
+ * Synthesises a TRNG from two on-die noise sources so the same blocking-read API
+ * as the hardware-TRNG ports works here.  A stuck source returns ERR_TIMEOUT and
+ * TLS fails closed.  Collection is slow, so seed a DRBG once rather than looping.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

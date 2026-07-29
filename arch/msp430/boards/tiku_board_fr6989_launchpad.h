@@ -5,38 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_fr6989_launchpad.h - MSP430FR6989 LaunchPad board definitions
+ * tiku_board_fr6989_launchpad.h - MSP430FR6989 LaunchPad board definitions.
  *
- * This header defines the PCB-level GPIO pin assignments for the
- * MSP-EXP430FR6989 LaunchPad development board: LEDs, buttons, and
- * other board-specific peripherals.
- *
- * Board layout (per TI MSP-EXP430FR6989 user's guide, SLAU627):
- *   - LED1 (Red)   -> P1.0
- *   - LED2 (Green) -> P9.7
- *   - Button S1    -> P1.1 (Active low)
- *   - Button S2    -> P1.2 (Active low)
- *   - LFXT crystal -> PJ.4 (LFXIN) / PJ.5 (LFXOUT) — populated
- *   - HFXT crystal -> PJ.6 (HFXIN) / PJ.7 (HFXOUT) — not populated
- *   - On-board LCD glass on P5/P6/P7/P8/P9/P10 (LCD_C kept disabled by
- *     the kernel, so pins behave as GPIO defaults)
- *
- * UART transport (compile-time):
- *   The kernel UART defaults to eUSCI_A1 on P3.4 (TX) / P3.5 (RX). On
- *   this LaunchPad those pins are simultaneously the eZ-FET backchannel
- *   and the BoosterPack J1.3/J1.4 UART pads, so the same MCU pinout
- *   covers all practical wiring choices:
- *     - on-board eZ-FET (jumpers in place)        → /dev/ttyACM0
- *     - external FT232 in place of eZ-FET (jumpers pulled, FT232 wired
- *       to the MCU side of the same J5/J6 jumper block)  → /dev/ttyUSB*
- *     - external FT232 on BoosterPack J1.3/J1.4   → /dev/ttyUSB*
- *
- *   Note: P2.0/P2.1 (eUSCI_A0) on this LaunchPad are routed to the
- *   on-board segment-LCD glass and are NOT broken out to any header;
- *   driving UART on UCA0 only makes sense on a custom carrier that has
- *   physically rerouted P2.0/P2.1. For that case, override:
- *
- *     make MCU=msp430fr6989 EXTRA_CFLAGS=-DTIKU_BOARD_UART_MODULE=0
+ * PCB-level GPIO assignments for the MSP-EXP430FR6989 per TI SLAU627: LEDs,
+ * buttons, the populated LFXT crystal and the on-board LCD glass.  The UART
+ * transport choices are documented at TIKU_BOARD_UART_MODULE below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_platform.h - MSP430 platform header
+ * tiku_platform.h - MSP430 platform header.
  *
- * This file provides the core CPU frequency configuration functions
- * for the Tiku Operating System on MSP430 microcontrollers.
- * It includes clock system configuration, frequency setting, and
- * frequency getting functions.
+ * Pulls in the MSP430 device and board selection and the arch entry points the
+ * portable layers expect on this platform.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

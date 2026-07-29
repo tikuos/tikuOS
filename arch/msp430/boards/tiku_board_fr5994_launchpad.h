@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_fr5994_launchpad.h - MSP430FR5994 LaunchPad board definitions
+ * tiku_board_fr5994_launchpad.h - MSP430FR5994 LaunchPad board definitions.
  *
- * This header defines the PCB-level GPIO pin assignments for the
- * MSP430FR5994 LaunchPad development board: LEDs, buttons, UART
- * back-channel routing, BoosterPack I2C / SPI / ADC / 1-Wire mappings,
- * and the bit-bang test pin used by tiku_bitbang demos.
- *
- * Board layout (per TI MSP-EXP430FR5994 schematic):
- *   - LED1 (Red)   -> P1.0
- *   - LED2 (Green) -> P1.1
- *   - Button S1    -> P5.6 (Active low)
- *   - Button S2    -> P5.5 (Active low)
- *   - UART back-channel: P2.0 = TXD, P2.1 = RXD (eUSCI_A0)
- *
- * Notes vs the FR5969 LaunchPad:
- *   - LEDs swapped to P1.0 / P1.1 (FR5969 has them on P4.6 / P1.0)
- *     so ADC channels A0 / A1 are NOT usable on the FR5994 board
- *     because the same pins drive the LEDs.
- *   - Buttons moved to P5.5 / P5.6.
- *   - Otherwise the BoosterPack pin standard matches: I2C on P1.6/P1.7,
- *     SPI on P2.5/P2.6/P2.7, OneWire on P1.2, bit-bang on P1.4.
- *   - 256 KB FRAM with HIFRAM at 0x10000+ — kernel + shell + every
- *     TikuKits library fits in `MEMORY_MODEL=large`.
+ * PCB-level assignments for the MSP-EXP430FR5994: LEDs, buttons, the UART
+ * back-channel, the BoosterPack I2C/SPI/ADC/1-Wire mappings and the bit-bang test
+ * pin, per the TI schematic.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

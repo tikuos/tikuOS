@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.c - MSP430 software entropy source
+ * tiku_trng_arch.c - MSP430 software entropy source.
  *
- * See tiku_trng_arch.h for the rationale.  The MSP430 has no hardware
- * RNG, so entropy is harvested from two independent physical sources on
- * the die and conditioned with SHA-256:
- *
- *   - Oscillator-ratio jitter: MCLK (DCO) and ACLK (XT1 32.768 kHz) are
- *     unlocked oscillators.  Each round counts MCLK loop iterations that
- *     elapse across exactly one ACLK tick; the low bits of that count
- *     drift with the two clocks' jitter (plus any interrupt latency that
- *     lands in the window).  This is the load-bearing source and gates
- *     the health check.
- *   - ADC thermal noise: the low bits of a 12-bit read of the internal
- *     temperature sensor.
- *
- * A feedback delay whose length depends on the previous round's noise
- * perturbs the ACLK sampling phase so successive rounds decorrelate.
- * POOL_ROUNDS rounds feed one SHA-256 block; the previous block's digest
- * is chained in so long reads keep advancing.  If the jitter source is
- * dead (count never varies -> stopped/absent timer) the read fails
- * closed: TLS then aborts rather than using predictable bytes.
+ * Harvests oscillator-ratio jitter between MCLK and ACLK, plus ADC thermal noise,
+ * and conditions many rounds with SHA-256 chained across blocks.  A dead jitter
+ * source fails the health check and the read fails closed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

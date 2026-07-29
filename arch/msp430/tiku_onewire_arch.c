@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.c - 1-Wire bus driver for MSP430 (GPIO bit-bang)
+ * tiku_onewire_arch.c - 1-Wire bus driver for MSP430 (GPIO bit-bang).
  *
- * Implements the Dallas/Maxim 1-Wire protocol using GPIO bit-banging
- * on the pin specified by TIKU_BOARD_OW_* macros in the board header.
- * Timing is derived from an 8 MHz MCLK using __delay_cycles().
- *
- * An external 4.7 kohm pull-up resistor is required on the data line.
- * Interrupts are disabled during timing-critical operations to ensure
- * correct bit timing.
+ * Bit-bangs the Dallas/Maxim protocol on the board's TIKU_BOARD_OW_* pin, timed
+ * from an 8 MHz MCLK.  The line needs an external 4.7 kohm pull-up, and interrupts
+ * are masked across timing-critical windows.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

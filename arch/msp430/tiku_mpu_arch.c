@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.c - MSP430 MPU architecture implementation
+ * tiku_mpu_arch.c - MSP430 MPU register access.
  *
- * Implements the arch-level MPU register access for MSP430FR series.
- * All accesses to MPUCTL0 and MPUSAM go through this file, keeping
- * the password handling and hardware details in one place.
- *
- * The MSP430 MPU registers are password-protected: every write to
- * MPUCTL0 must include MPUPW (0xA500) in the upper byte. This
- * prevents wild pointer writes from accidentally modifying memory
- * protection configuration.
+ * Keeps every MPUCTL0 and MPUSAM access in one place.  The registers are
+ * password-protected: a write to MPUCTL0 must carry MPUPW in the upper byte, so a
+ * wild pointer cannot alter memory protection by accident.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_arch.h - MSP430 CPU frequency configuration
+ * tiku_cpu_freq_boot_arch.h - MSP430 CPU frequency configuration.
  *
- * This file provides the core CPU frequency configuration functions
- * for the Tiku Operating System on MSP430 microcontrollers.
- * It includes clock system configuration, frequency setting, and
- * frequency getting functions.
+ * Declares the clock-system setup and the frequency set and get entry points
+ * that the portable CPU HAL forwards to on MSP430.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

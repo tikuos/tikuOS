@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_fr5969.h - MSP430FR5969 silicon-level constants
+ * tiku_device_fr5969.h - MSP430FR5969 silicon-level constants.
  *
- * This header defines the hardware capabilities of the MSP430FR5969
- * microcontroller: available GPIO ports, crystal pin routing, memory
- * sizes, and peripheral availability. Board-level (PCB) definitions
- * such as LED and button pin assignments belong in the board header.
+ * GPIO ports, crystal pin routing, memory sizes and peripheral availability.
+ * PCB-level definitions such as LED and button pins belong in the board header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

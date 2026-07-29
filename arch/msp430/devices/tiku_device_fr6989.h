@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_fr6989.h - MSP430FR6989 silicon-level constants
+ * tiku_device_fr6989.h - MSP430FR6989 silicon-level constants.
  *
- * This header defines the hardware capabilities of the MSP430FR6989
- * microcontroller: available GPIO ports, crystal pin routing, memory
- * sizes, and peripheral availability. Board-level (PCB) definitions
- * such as LED and button pin assignments belong in the board header.
- *
- * Family notes:
- *   - 100-pin LQFP, ~76 GPIO pins
- *   - 128 KB FRAM, 2 KB SRAM
- *   - LCD_C segment-LCD driver on chip (drives the on-board LCD glass
- *     of MSP-EXP430FR6989; not used by TikuOS, kept disabled at boot)
- *   - HFXT pins on PJ.6/PJ.7 (matches FR5994, NOT FR5969 which uses
- *     PJ.2/PJ.3)
+ * GPIO ports, crystal pin routing, memory sizes and peripheral availability; PCB
+ * definitions belong in the board header.  Note HFXT is on PJ.6/PJ.7, matching
+ * FR5994 rather than FR5969, and the part carries an on-chip LCD_C driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

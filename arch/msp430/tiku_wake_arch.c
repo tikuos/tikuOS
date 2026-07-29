@@ -5,23 +5,22 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_wake_arch.c - MSP430 backend for the wake-source HAL
+ * tiku_wake_arch.c - MSP430 backend for the wake-source HAL.
  *
- * Maps each TIKU_WAKE_* role flag to whichever MSP430 IE register
- * covers it on the current device. Each register access is guarded
- * by #if defined(OFS_<reg>) so the file compiles unchanged across
- * FR5969, FR5994, FR2433, etc.
- *
- * NB: the guard tests OFS_<reg>, NOT <reg>.  PxIE / UCxIE / SFRIE1
- * are declared with sfr_b()/sfr_w() — extern symbols, not macros —
- * so `#if defined(OFS_P1IE)` is FALSE under the msp430-elf-gcc headers
- * even when the register exists, which would silently drop that
- * source from the query (reporting only the ungated timers).
- * OFS_<reg> is the real macro defined exactly when the register is
- * present on the selected MCU.
+ * Maps each TIKU_WAKE_* role flag to whichever IE register covers it on the
+ * current device, with every access guarded so the file compiles unchanged across
+ * FR5969, FR5994 and FR2433.  See the note below on how the guards are spelt.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+/*
+ * The guards below test OFS_<reg>, NOT <reg>.  PxIE / UCxIE / SFRIE1 are
+ * declared with sfr_b()/sfr_w() -- extern symbols, not macros -- so
+ * `#if defined(P1IE)` is FALSE under msp430-elf-gcc even where the register
+ * exists, which would silently drop that source from the query.  OFS_<reg> is
+ * the macro that is defined exactly when the register is present.
+ */
+
 
 #include <hal/tiku_wake_hal.h>
 #include <msp430.h>

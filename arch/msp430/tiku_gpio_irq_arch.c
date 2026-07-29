@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_irq_arch.c - MSP430 GPIO interrupt -> event bridge
+ * tiku_gpio_irq_arch.c - MSP430 GPIO interrupt to event bridge.
  *
- * Each MSP430 GPIO port has a single interrupt vector covering
- * all eight pins. The PxIV register, when read, returns the
- * offset of the highest-priority pending IFG bit and atomically
- * clears that flag. This file uses PxIV for dispatch so the ISR
- * stays short and lock-free.
- *
- * Today P1 and P2 are wired up; P3/P4 can be added by copying
- * the same handler pattern when a board needs them. (FR2433 has
- * only P1/P2/P3; FR5969 has P1/P2/PJ; vector availability is
- * device-specific and gated below by #ifdef PORTn_VECTOR.)
+ * Each port has one vector for all eight pins, so dispatch reads PxIV, which
+ * returns the highest-priority pending flag and clears it atomically -- keeping
+ * the ISR short and lock-free.  Ports are gated on PORTn_VECTOR visibility.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

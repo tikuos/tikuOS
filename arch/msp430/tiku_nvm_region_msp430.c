@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_region_msp430.c - MSP430 FRAM region backend (B).
+ * tiku_nvm_region_msp430.c - MSP430 FRAM region backend.
  *
- * FRAM is byte-writable in place, so the carved "region" is simply a reserved
- * .persistent span (durable across power loss for free) and writes are a plain
- * memcpy -- no bootrom, no erase, no staging. The caller already holds the NVM
- * write window (tiku_mpu_unlock_nvm() gates FRAM writes via the MPU). Reads are
- * pointer dereferences into the span.
- *
- * Size is modest by default (FRAM is shared with code); override
- * TIKU_NVMFS_MSP430_BYTES to grow it on the larger FRxxxx parts.
+ * FRAM is byte-writable in place, so the carved region is a reserved .persistent
+ * span, writes are a plain memcpy and reads are pointer dereferences -- no bootrom,
+ * erase or staging.  The caller already holds the MPU write window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

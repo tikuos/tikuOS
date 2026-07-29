@@ -5,27 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - SPI master driver for MSP430 eUSCI modules
+ * tiku_spi_arch.c - SPI master driver for MSP430 eUSCI modules.
  *
- * Implements blocking SPI master transactions in 3-pin mode (CS is
- * managed by the application via GPIO). The eUSCI module used is
- * selected by the board header via TIKU_BOARD_SPI_MODULE:
- *
- *   0 = eUSCI_A1 (default — used by FR5969 LaunchPad)
- *   1 = eUSCI_B1 (used by FR5994 LaunchPad's BoosterPack header)
- *
- * The pin routing for the chosen module comes from the board
- * header's TIKU_BOARD_SPI_PINS_INIT() macro. Both UCA and UCB
- * modules expose the same SPI-relevant register set (CTLW0 / BRW /
- * IFG / IE / RXBUF / TXBUF / STATW), so a single driver
- * implementation covers both via preprocessor register-name
- * substitution — same pattern tiku_uart_arch.c uses for UCA0/UCA1.
- *
- * SPI mode mapping (MSP430 UCCKPH is inverted vs standard CPHA):
- *   Mode 0 (CPOL=0 CPHA=0) → UCCKPL=0 UCCKPH=1
- *   Mode 1 (CPOL=0 CPHA=1) → UCCKPL=0 UCCKPH=0
- *   Mode 2 (CPOL=1 CPHA=0) → UCCKPL=1 UCCKPH=1
- *   Mode 3 (CPOL=1 CPHA=1) → UCCKPL=1 UCCKPH=0
+ * Blocking master transactions in 3-pin mode, with chip select left to the
+ * application over GPIO.  The board header's TIKU_BOARD_SPI_MODULE selects which
+ * eUSCI instance is driven.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

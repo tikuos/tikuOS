@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lcd_arch.c - MSP430 LCD_C peripheral driver
+ * tiku_lcd_arch.c - MSP430 LCD_C peripheral driver.
  *
- * Drives the LCD_C controller present on FR6989 (and other FR6xx
- * parts) with a board-specific pin map provided by the board
- * header. Built only when both TIKU_DEVICE_HAS_LCD_C (silicon
- * carries LCD_C) and TIKU_BOARD_HAS_LCD (board wires it to a
- * panel) are set; otherwise this translation unit is empty.
- *
- * Current target: MSP-EXP430FR6989 LaunchPad with the on-board
- * FH-1138P 96-segment LCD (4-mux, 1/3 bias, six 14-segment
- * alphanumeric positions plus icons). The font and per-position
- * LCDMEM index map are derived from TI's lcd_c_lib reference
- * example for that board. Other boards using the same LCD_C
- * peripheral with a different glass can supply their own segment
- * encoding by overriding the per-position byte indices in their
- * board header (see TIKU_BOARD_LCD_POSx_BYTE0/1).
+ * Drives the LCD_C controller with a board-supplied pin map, built only where the
+ * silicon has LCD_C and the board wires a panel.  The font and per-position
+ * LCDMEM map suit the FH-1138P glass; a board may override the byte indices.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
