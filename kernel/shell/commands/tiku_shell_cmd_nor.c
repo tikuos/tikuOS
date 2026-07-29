@@ -59,6 +59,40 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
     tiku_nor_id_t id;
     tiku_nor_err_t rc;
 
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "tascan")) {
+        /* Sweep the SERIAL fast-read dummy count against the stamp the gate
+         * programs.  Erased content is a weak reference -- a misframed read of
+         * all-FF is still all-FF -- so the reference here is the 0xA5^i
+         * pattern, which the octal path already reads back bit-exact. */
+        static uint8_t want[32];
+        uint32_t i8, mask;
+        unsigned t8;
+
+        for (i8 = 0u; i8 < sizeof want; i8++) {
+            want[i8] = (uint8_t)(0xA5u ^ i8);
+        }
+        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("nor tascan: serial init %s\n", nor_errname(rc));
+            return;
+        }
+        mask = tiku_nor_scan_turnaround(TIKU_NOR_SCRATCH_ADDR, want,
+                                        sizeof want);
+        SHELL_PRINTF("nor serial turnaround sweep @%08lx: %08lx\n",
+                     (unsigned long)TIKU_NOR_SCRATCH_ADDR,
+                     (unsigned long)mask);
+        if (mask == 0u) {
+            SHELL_PRINTF("  no dummy count reproduces the stamp -- run"
+                         " `power nor gate` first to put it there\n");
+        } else {
+            SHELL_PRINTF("  matches at:");
+            for (t8 = 0u; t8 < 32u; t8++) {
+                if (mask & (1u << t8)) { SHELL_PRINTF(" %u", t8); }
+            }
+            SHELL_PRINTF("\n");
+        }
+        return;
+    }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "hears")) {
         int heard;
         rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);

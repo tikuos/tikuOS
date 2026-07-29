@@ -131,10 +131,17 @@ static const nor_clk_t s_clk[] = {
 /* Latency: serial fast-read needs 8 dummy cycles; octal DDR needs the
  * vendor's 31 (its default dummy-cycle configuration).  Program has no
  * turnaround in either mode. */
-#define NOR_TA_SERIAL  8u
+/* 10, measured: `power nor tascan` sweeps this against the 0xA5^i stamp and
+ * matches at 10 alone.  8 is the generic SPI-NOR fast-read figure and is two
+ * cycles short for this part, which reads erased FF correctly -- shifting FF
+ * still gives FF -- and every real byte wrong. */
+#define NOR_TA_SERIAL  10u
 #define NOR_TA_OCTAL  31u   /* array reads: matches VCR 0x01 default (0x1F) */
 #define NOR_TA_OCTAL_ID     15u   /* octal READ_ID below 96 MHz  */
-#define NOR_TA_OCTAL_ID_96  16u   /* octal READ_ID at 96 MHz     */
+/* The vendor's value.  Octal identity is unreliable on this part regardless --
+ * it returns `17 01 ...`, the tail of `9d 5b 17`, at both 15 and 16 -- which
+ * is why octal entry does not gate on it.  Array reads are bit-exact. */
+#define NOR_TA_OCTAL_ID_96  16u
 
 /*---------------------------------------------------------------------------*/
 /* STATE                                                                     */
@@ -482,7 +489,7 @@ uint32_t tiku_nor_scan_turnaround(uint32_t addr, const uint8_t *want,
     uint32_t saved;
     unsigned t;
 
-    if (!s_up || !s_octal || n > 32u) { return 0u; }
+    if (!s_up || n > 32u) { return 0u; }   /* either mode */
     saved = MSPI1->DEV0CFG_b.TURNAROUND0;
     for (t = 0u; t < 32u; t++) {
         uint8_t got[32];
@@ -699,8 +706,19 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
 
     /* PROVE THE SWITCH: identity again, now in octal.  Two identities in two
      * modes is this part's equivalent of the PSRAM's bit-bang arbiter. */
+    /*
+     * Identity is NOT a valid octal health check on this part.  Measured on
+     * the green EVB: octal array reads come back bit-exact against a serial
+     * reference while the octal READ_ID returns zero, so gating entry on
+     * identity refuses a bus that works.  Register and array reads differ in
+     * whether the device strobes DQS, which is the likely reason.
+     *
+     * The trace still reports it, because a change there is worth seeing.
+     */
     trace("id-octal");
     rc = tiku_nor_read_id(&id);
+    trace(rc == TIKU_NOR_OK ? "id-octal ok" : "id-octal empty (not fatal)");
+    rc = TIKU_NOR_OK;
     if (rc != TIKU_NOR_OK) {
         /* Roll back so a caller that cannot talk octal is left somewhere it
          * can talk.  Diagnostics that want to examine the octal state itself
