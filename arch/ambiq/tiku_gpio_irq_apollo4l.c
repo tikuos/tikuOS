@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_irq_apollo4l.c - Apollo4 Lite GPIO edge interrupts
+ * tiku_gpio_irq_apollo4l.c - Apollo4 Lite GPIO edge interrupts.
  *
- * Bridges per-pin edge interrupts into TIKU_EVENT_GPIO broadcast events, the
- * same contract as the RP2350 backend (arch/arm-rp2350/tiku_gpio_irq_arch.c).
- * tikuOS addresses GPIO as virtual (port 1.., pin 0-7) -> pad (port-1)*8+pin
- * (matching tiku_gpio_apollo4l.c). Only pads 0-31 are wired here: they raise
- * GPIO0_001F_IRQn (56) via the GPIO->MCUN0INT0{EN,STAT,CLR} mask registers.
- * Higher pads (other IRQ vectors 60-63) report UNSUP.
- *
- * Edge select lives in the pad's PINCFG register eIntDir field [7:6]
- * (HI2LO=1 falling, LO2HI=2 rising, BOTH=3), written under the PADKEY lock.
+ * Bridges per-pin edges into TIKU_EVENT_GPIO broadcasts, the same contract as the
+ * other backends.  Only pads 0-31 are wired, raising GPIO0_001F; higher pads sit
+ * on other vectors and report UNSUP.  Edge select lives in PINCFG under PADKEY.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

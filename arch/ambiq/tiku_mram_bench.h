@@ -7,9 +7,8 @@
  *
  * tiku_mram_bench.h - MRAM program-timing benchmark (mrambench command).
  *
- * A focused, Ambiq-only interface shared between the arch backends
- * (tiku_mem_apollo4l.c / tiku_mem_arch.c) and the mrambench shell command.
- * Kept in its own header so neither the big kernel memory API nor the arch
+ * An Ambiq-only interface shared between the arch memory backends and the shell
+ * command, kept in its own header so neither the kernel memory API nor the arch
  * memory header has to cross into the other.
  *
  * SPDX-License-Identifier: Apache-2.0

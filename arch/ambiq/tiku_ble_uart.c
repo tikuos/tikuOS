@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_uart.c - Minimal connectable GATT peripheral (BLE UART service)
+ * tiku_ble_uart.c - minimal connectable GATT peripheral (BLE UART service).
  *
- * A tiny hand-rolled BLE host on top of the EM9305 SPI-HCI transport
- * (tiku_em9305): connectable advertising, a polled HCI event/ACL pump, LE
- * connection handling, an L2CAP-LE + ATT server, and the BLE UART service.
- * This is the wireless-shell transport (M3). No Cordio, no AmbiqSuite.
- *
- * Bring-up is staged so each layer has its own HW gate:
- *   M3.1  connectable adv + connection/disconnection detection   <-- this file
- *   M3.2  ATT server + BLE UART discovery
- *   M3.3  RX/TX wired to the shell io-backend
+ * A hand-rolled BLE host over the EM9305 SPI-HCI transport: connectable
+ * advertising, a polled HCI event and ACL pump, LE connection handling, and an
+ * L2CAP-LE plus ATT server.  No Cordio, no AmbiqSuite.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

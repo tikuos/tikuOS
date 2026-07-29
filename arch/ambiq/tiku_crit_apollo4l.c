@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit_apollo4l.c - Apollo4 Lite critical-window IRQ masking (NVIC)
+ * tiku_crit_apollo4l.c - Apollo4 Lite critical-window IRQ masking (NVIC).
  *
- * Mirrors arch/ambiq/tiku_crit_arch.c (Apollo510). Snapshots the NVIC enable
- * state and clears every IRQ not named in preserve_mask, restoring on exit.
- * Pure Cortex-M NVIC. Apollo4 Lite has 84 external IRQs (ceil(84/32) = 3 words)
- * and a different IRQ map: UART2=17, STIMER_CMPR0=32, GPIO0 pins0-31=56.
- * SysTick is a core exception, never masked here.
+ * Mirrors the Apollo510 backend: snapshot the NVIC enable state, clear every IRQ
+ * outside preserve_mask, restore on exit.  This part has 84 external IRQs and a
+ * different IRQ map.  SysTick is a core exception and is never masked here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

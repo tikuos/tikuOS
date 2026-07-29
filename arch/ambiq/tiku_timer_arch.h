@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.h - Apollo 510 system-tick (Cortex-M SysTick)
+ * tiku_timer_arch.h - Apollo510 system tick.
  *
- * Mirrors arch/arm-rp2350/tiku_timer_arch.h. The system clock runs at
- * TIKU_CLOCK_ARCH_SECOND ticks/second (128 Hz by default). The SysTick
- * reload is derived from TIKU_MAIN_CPU_HZ (96 MHz / 128 = 750000, well
- * within SysTick's 24-bit reload limit).
+ * The system clock runs at TIKU_CLOCK_ARCH_SECOND ticks per second.  The source is
+ * the always-on STIMER, not SysTick, which freezes during WFI on this part -- see
+ * tiku_timer_arch.c.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

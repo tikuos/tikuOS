@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.c - Ambiq Apollo4/5 CryptoCell-312 TRNG driver
+ * tiku_trng_arch.c - Ambiq CryptoCell-312 TRNG driver.
  *
- * Hardware: the Arm CryptoCell-312 RNG sub-block inside the Apollo CRYPTO
- * peripheral (base 0x400C0000).  A ring oscillator (one of four selectable
- * lengths) is sampled every SAMPLECNT1 rng_clk cycles; once 192 bits are
- * whitened into EHR_DATA[0..5], RNGISR.EHRVALID asserts.  On-die health
- * tests (autocorrelation, CRNGT, Von Neumann) flag a bad sample run via the
- * RNGISR error bits, which we treat as "re-arm and try again".
- *
- * Collect sequence (CC312 TRM, matched to Ambiq's am_hal_entropy):
- *   1. RNGCLKENABLE = 1                  enable the RNG clock
- *   2. RNGSWRESET   = 1                  reset the RNG core ...
- *   3. RNGCLKENABLE = 1                  ... which clears the clock-enable
- *   4. RNGICR = all-1s                   clear stale status
- *   5. TRNGCONFIG = ROSC select          pick a ring-oscillator length
- *   6. SAMPLECNT1 = sample count         clocks between bit samples
- *   7. RNDSOURCEENABLE = 1               start sampling
- *   8. spin on RNGISR: EHRVALID -> read EHR_DATA[0..5]; error bit -> re-arm
- *   9. RNDSOURCEENABLE = 0; clear status
- *
- * Power: the CRYPTO domain is power-gated; tiku_trng_arch_init() raises
- * PWRCTRL.DEVPWREN.PWRENCRYPTO and waits for DEVPWRSTATUS.PWRSTCRYPTO.
- *
- * The driver fills the cache from hardware; callers never deal with EHR
- * ordering, valid bits, or ROSC timing.  A health-test failure or a dead
- * source surfaces as TIKU_TRNG_ERR_TIMEOUT (the TLS layer then fails closed).
+ * A ring oscillator is sampled until 192 whitened bits fill the EHR.  On-die
+ * health tests flag a bad run, which is treated as re-arm and retry; a dead source
+ * surfaces as ERR_TIMEOUT so the TLS layer fails closed.  The CRYPTO domain is gated.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_simd_power.c - Helium (MVE) vs scalar energy-measurement instruments.
+ * tiku_simd_power.c - Helium (MVE) versus scalar energy instruments.
  *
- * See tiku_simd_power.h for the two design rules, and tiku_simd_scalar.c for how
- * the scalar twin gets into the same image.  Timebase is the always-on STIMER,
- * as everywhere else in the Apollo power work; cycles come from DWT, which
- * experiment 1 established is the only trustworthy cycle source on this part
- * (SysTick reloads and wraps, and reported 14 kHz for a 96 MHz core).
+ * The timebase is the always-on STIMER and cycles come from DWT, the only
+ * trustworthy cycle source on this part -- SysTick reloads and wraps, and once
+ * reported 14 kHz for a 96 MHz core.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

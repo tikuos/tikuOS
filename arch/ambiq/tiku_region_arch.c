@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_region_arch.c - Apollo 510 physical memory-region table
+ * tiku_region_arch.c - Apollo510 physical memory-region table.
  *
- * Builds the region table at runtime from linker symbols, mirroring the
- * RP2350 port (arch/arm-rp2350/tiku_region_arch.c). The DTCM is split into:
- *   - a general SRAM region below .uninit (.data / .bss / the tier buffers),
- *   - an NVM overlay on .uninit -- the NOLOAD area where .persistent vars
- *     live. It survives warm reset, and crucially is a region of type NVM,
- *     which is what tiku_persist_register() and the hibernate marker REQUIRE
- *     (they reject any buffer not contained in an NVM region). Without this
- *     the persist + hibernate APIs silently fail on Apollo510.
- *
- * Power-cycle durability is provided by tiku_mem_arch.c: it mirrors .uninit to
- * a reserved MRAM page via the bootrom and restores it on boot. The .uninit
- * area is the live working copy (warm-reset durable); the MRAM mirror carries
- * it across power loss. MRAM is still reported FLASH here -- the mirror is a
- * small reserved slice at the top of MRAM, not a separate region.
+ * Built at run time from linker symbols.  The DTCM splits into a general SRAM
+ * region and an NVM overlay on .uninit -- typed NVM because persist and hibernate
+ * reject buffers outside an NVM region, and would silently fail without it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

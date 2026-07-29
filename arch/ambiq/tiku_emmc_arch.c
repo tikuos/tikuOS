@@ -5,31 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_emmc_arch.c - Apollo510 SDIO0 + IS21EF08G eMMC bring-up.
+ * tiku_emmc_arch.c - Apollo510 SDIO0 and IS21EF08G eMMC bring-up.
  *
- * Implements tables 0-3 of tiku_emmc_arch.h.  Read that header first: the
- * pin table there records a BSP that contradicts itself, and the command
- * table records which EXT_CSD indexes may EVER be written.
- *
- * LESSONS INHERITED, NOT RE-LEARNED.  This is the fourth external-memory
- * driver in this port and it starts from what the first three paid for:
- *
- *   - every register field through its CMSIS enum NAME or a position from
- *     the header; never a value inferred from vendor-source ordering
- *   - every wait bounded, every failure a DISTINCT error, fail closed
- *   - status polls BACK OFF: a tight spin is bus traffic into the very
- *     controller doing the work (it was 20 % of the PSRAM's plateau)
- *   - a register dump is POWER-SAFE: reading an unpowered peripheral stalls
- *     the APB and hangs the CPU with no fault (it cost a board wedge)
- *   - a step tracer on every risky rung, because a wedged bring-up prints
- *     nothing and the last line becomes the diagnosis
- *   - prove the instrument before believing its verdict
- *
- * WHAT IS NEW HERE: a card with its own firmware and a STATE MACHINE.  The
- * device must be walked idle -> identify -> standby -> transfer, and a
- * command issued in the wrong state fails in ways that look like wiring
- * faults.  Hence the ladder in tiku_emmc_init() is linear, traced, and
- * refuses to continue past a rung that did not do what it claimed.
+ * The card runs its own firmware and a state machine, so it must be walked idle
+ * -> identify -> standby -> transfer; a command in the wrong state fails like a
+ * wiring fault.  The init ladder is therefore linear, traced, and fails closed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

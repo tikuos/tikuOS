@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.c - Apollo510 hardware watchdog
+ * tiku_cpu_watchdog_arch.c - Apollo510 hardware watchdog.
  *
- * The WDT lives in the always-on domain, clocked by the LFRC (128/16/1 Hz)
- * with 8-bit reset/interrupt compare values. It keeps counting through deep
- * sleep and, when RSTGEN.WDREN is also set, drives a full system reset on
- * expiry (latched as RSTGEN.STAT.WDRSTAT -> "watchdog"). Disabled out of
- * reset, so _off() is safe to call at boot.
- *
- * The WDT register layout is identical on Apollo510 and Apollo4 Lite, so the
- * on/off/pause/resume/kick logic here mirrors tiku_cpu_watchdog_apollo4l.c
- * apart from the CMSIS header pulled in.
+ * The WDT sits in the always-on domain on the LFRC and keeps counting through
+ * deep sleep, driving a full system reset when RSTGEN.WDREN is also set.  The
+ * register layout matches Apollo4 Lite, so the logic mirrors that file.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

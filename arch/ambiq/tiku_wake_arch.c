@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_wake_arch.c - Ambiq (Apollo510 / Apollo4 Lite) wake-source query
+ * tiku_wake_arch.c - Ambiq wake-source query.
  *
- * Reports the interrupt sources currently armed to bring the core out of a WFI
- * sleep: the system tick, plus the NVIC set-enable state of the STIMER htimer,
- * the console UART RX and GPIO0 lines. Both Ambiq parts tick off the always-on
- * STIMER compare-B (IRQ 33) -- SysTick freezes in sleep, so it is not the tick
- * here -- and the STIMER-htimer (IRQ 32) and GPIO0 range match. Only the console
- * UART IRQ differs per part (UART0=15 on apollo510, UART2=17 on apollo4l). Pure
- * Cortex-M register reads -- no AmbiqSuite dependency.
+ * Reports which sources are armed to bring the core out of WFI, from pure
+ * Cortex-M register reads.  Both parts tick off the always-on STIMER, since
+ * SysTick freezes in sleep; only the console UART IRQ number differs per part.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

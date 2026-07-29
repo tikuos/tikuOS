@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.h - Apollo 510 GPIO access
+ * tiku_gpio_arch.h - Apollo510 GPIO access.
  *
- * Two layers:
- *   1. The (port,pin)-indexed API the VFS/shell share with MSP430 and
- *      RP2350 (/dev/gpio/{1..N}/{0..7}). Apollo510 has >200 pads, far
- *      more than the 8-pin-per-port VFS view exposes; the low pads map
- *      port N pin p -> pad (N-1)*8 + p.
- *   2. Raw-pad helpers (tiku_ambiq_gpio_*) used by the board LED macros,
- *      because the EVB LEDs (165/89/92) sit well above the VFS range.
+ * Two layers: the (port,pin)-indexed API shared with the other ports, which maps
+ * the low pads onto the 8-pin-per-port VFS view, and raw-pad helpers for the board
+ * LED macros, whose pads sit well above that range.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

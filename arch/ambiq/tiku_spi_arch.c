@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - Apollo510 SPI master (IOM, bare-metal)
+ * tiku_spi_arch.c - Apollo510 SPI master (IOM, bare-metal).
  *
- * A minimal blocking full-duplex SPI master on one Apollo510 I/O Master (IOM),
- * talking straight to the CMSIS register map -- no AmbiqSuite am_hal_iom. Built
- * for the EM9305 BLE radio on the Apollo510 Blue EVB (IOM6, SPI mode 0, 16 MHz),
- * so it is compiled only when TIKU_SPI_IOM_ENABLE is defined (pulled in by the
- * BLE build). Without that flag every entry point is the historic stub, so the
- * base Apollo510 / Apollo4 builds are byte-identical.
- *
- * Bring-up (functional core of am_hal_iom_configure + _enable, minus the DMA /
- * command-queue machinery we do not use):
- *   - power:  PWRCTRL.DEVPWREN.PWRENIOM6 + wait DEVPWRSTATUS;
- *   - pins:   route SCK/MOSI/MISO to the IOM via GPIO PINCFG funcsel;
- *   - config: MSPICFG (SPI mode + full-duplex), CLKCFG (48 MHz HFRC / 3 = 16 MHz
- *             via the DIV3 prescaler), enable the MSPI submodule, wait idle.
- * A transfer is polled: build the CMD (WRITE + TSIZE + full-duplex), then pump
- * the 64-byte TX/RX FIFOs a word at a time until the byte counts drain. Chip
- * select is a plain GPIO the caller drives (the IOM nCE is unused here).
+ * A blocking full-duplex master on one I/O Master, straight to the CMSIS register
+ * map with no vendor HAL.  Transfers are polled through the 64-byte FIFOs, and
+ * chip select is a plain GPIO the caller drives; the IOM's own nCE is unused.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

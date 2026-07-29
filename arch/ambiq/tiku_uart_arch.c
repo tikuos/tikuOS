@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_arch.c - Apollo 510 console (COM UART, interactive)
+ * tiku_uart_arch.c - Apollo510 console (COM UART, interactive).
  *
- * Bare-metal driver for UART0 (the EVB COM UART) on TX=pad 30 / RX=pad 55 at
- * TIKU_BOARD_UART_BAUD (default 115200, 8N1). The Apollo5 UART is PL011-based;
- * this talks straight to the UART0 registers (DR/FR/IBRD/FBRD/LCRH/CR/IFLS/
- * IER/MIS/IEC) via the CMSIS register map — no AmbiqSuite. Bring-up:
- *   - power: PWRCTRL.DEVPWREN.PWRENUART0 + wait DEVPWRSTATUS (the functional
- *     core of am_hal_pwrctrl_periph_enable, minus the spotmgr optimisation);
- *   - clock: CR.CLKSEL = HFRC/24 MHz tap + CR.CLKEN (HFRC is already running,
- *     no clock-manager request needed);
- *   - pins:  GPIO PINCFG funcsel = 4 (UART0 TX/RX) on pads 30/55.
- * RX is interrupt-driven (RX + RX-timeout) into a ring buffer; TX polls the
- * hardware FIFO. The printf is the same self-contained formatter the
- * RP2350/MSP430 drivers use (no am_util_stdio / newlib).
+ * Bare-metal PL011-based driver on UART0 straight to the CMSIS register map, with
+ * no vendor HAL.  RX is interrupt-driven into a ring buffer, TX polls the FIFO,
+ * and printf is the same self-contained formatter the other ports use.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

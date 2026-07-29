@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_apollo4l.c - Apollo4 Lite hardware one-shot timer (STIMER)
- *                          + the always-on periodic kernel tick.
+ * tiku_htimer_apollo4l.c - Apollo4 Lite STIMER one-shot plus the kernel tick.
  *
- * Mirrors arch/ambiq/tiku_htimer_arch.c (Apollo510). The Apollo4 Lite STIMER is
- * register-identical: STCFG/STTMR/SCMPR0/STMINT*, CLKSEL=3 (XTAL 32 kHz), the
- * COMPAREA interrupt on NVIC IRQ 32 (STIMER_CMPR0_IRQn), and the MCUCTRL.XTALCTRL
- * crystal-enable fields all match -- only the register header differs. The
- * compare register takes a DELTA (the hardware adds the counter); the async
- * 32 kHz counter is triple-read and voted; COMPARE writes are spaced.
- *
- * On Apollo4 Lite this file ALSO hosts the kernel system tick. SysTick (the tick
- * source on Apollo510, see tiku_timer_arch.c) freezes during WFI sleep on Ambiq,
- * so a WFI idle with only SysTick armed never wakes -- and the tick never
- * advances while parked. The STIMER runs from the always-on 32 kHz crystal and
- * survives sleep, so the periodic tick is driven here off compare-B (SCMPR1,
- * NVIC IRQ 33) alongside the htimer's one-shot on compare-A. Both compares share
- * the single COUNTER and the inter-write spacing guard (s_last_cmpr), so the
- * tick and one-shot never corrupt each other's compare writes. The tick counters
- * live in tiku_timer_apollo4l.c; this file only delivers the periodic interrupt.
+ * Mirrors the Apollo510 driver; the STIMER is register-identical.  It also hosts
+ * the system tick, because SysTick freezes during WFI on Ambiq while the STIMER
+ * runs from the always-on crystal and survives sleep.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

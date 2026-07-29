@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_apollo4l.c - Apollo4 Lite memory architecture + MRAM-backed NVM
+ * tiku_mem_apollo4l.c - Apollo4 Lite memory architecture and MRAM-backed NVM.
  *
- * Persistent state lives in the TCM .uninit region (warm-reset durable). For
- * power-cycle durability it is mirrored to a 32 KB MRAM page reserved at the top
- * of MRAM (apollo4l.ld __tiku_nvm_mram_*). tiku_mem_arch_nvm_flush() snapshots
- * .uninit (prefixed with a magic word) into a TCM staging buffer and programs
- * the page via the Apollo4 on-chip bootrom helper nv_program_main2. On boot,
- * tiku_mem_arch_init() copies the page back into .uninit if the magic matches;
- * a fresh chip has no magic, so .uninit keeps its NOLOAD value and each
- * subsystem's "no magic -> init fresh" path runs.
- *
- * Mirrors arch/ambiq/tiku_mem_arch.c (Apollo510), with the Apollo4 deltas:
- *   - bootrom helper nv_program_main2 lives at 0x0800006D (verified in the
- *     R4.5.0 g_am_hal_bootrom_helper table) -- a DIFFERENT address than
- *     Apollo5's 0x0200ff20. The value is already Thumb-encoded (bit 0 set).
- *   - MRAM array origin is 0x0 (so the destination word offset is addr >> 2),
- *     vs Apollo5's 0x00400000.
- *   - the Cortex-M4 has NO SCB L1 D-cache, so the TCM staging buffer needs no
- *     clean before the bootrom reads it (unlike the M55/SSRAM path on 510).
- *     The Apollo4 CACHECTRL does, however, cache MRAM reads, so the mirror
- *     page is invalidated after a real program -- and the flush dirty-check
- *     relies on that invalidate to keep its compare coherent.
- *   - the staging buffer lives in the always-on TCM (.bss), not a separately
- *     powered SSRAM bank; 0x10000000 is a valid bootrom source (SRAM_BASEADDR).
- * MRAM is direct-write (no erase, unlike NOR flash). The reserved page is far
- * above the firmware code; the SBL (low MRAM) is untouched.
+ * Persistent state lives in TCM .uninit and is mirrored to a reserved MRAM page
+ * through the on-chip bootrom helper, restored at boot when the magic matches.
+ * MRAM is direct-write, so there is no erase step; the bootloader is untouched.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -7,31 +7,9 @@
  *
  * tiku_usb_arch.h - Apollo510 USB 2.0 device controller.
  *
- * The last wire of the warehouse.  E4 stages a 54 MB model from the eMMC into
- * the PSRAM tier in 2.23 s, but nothing can yet PUT a model on the card: it is
- * a soldered BGA whose SDIO bus reaches only the SoC, UART would take 1.6
- * hours for 54 MB, and this board has no WiFi.  USB is the only bulk path in.
- *
- * *** THIS FILE IS THE U0 DELIVERABLE: TABLES BEFORE CODE. ***
- *
- * SOURCES READ (2026-07-29) -- as documentation for what the SILICON needs.
- * No vendor code is compiled into this tree and no vendor image is flashed:
- *   mcu/apollo510/hal/am_hal_usb.c        4734 lines, the full HAL
- *   mcu/apollo510/hal/am_hal_usbcharger.h  the reset/override register writes
- *   third_party/tinyusb/ambiq_port/apollo5/dcd_apollo5.c
- *                                         1082 lines -- the concentrated
- *       answer: a device-controller driver is by construction the smallest
- *       complete statement of what the hardware requires
- *   boards/apollo510b_evb/bsp/am_bsp.c, am_bsp_pins.h     rails and pins
- *   hardware/ambiq/boards/AP510BEVB_Rev2.0_Schematic_Prints.pdf   OUR board
- *   CMSIS apollo510.h                     register field names
- *
- * WHAT THIS CONTROLLER IS.  A Mentor/Inventra MUSBMHDRC-class device core --
- * identified, not guessed: the POWER register's bit order (ENSUSPM, SUSPENDM,
- * RESUME, RESET, HSMODE, HSENAB, SOFTCONN, ISOUPDATE), an INDEX register
- * selecting a window of per-endpoint CSRs, INTRTX/INTRRX/INTRUSB read-to-clear
- * status, and FIFO ports at 0x20 + 4n are the MUSB signature.  Ambiq wraps it
- * with a PHY, two power domains, and a 10-channel "auto DMA" engine.
+ * A Mentor/Inventra MUSB-class device core -- identified from the POWER bit order,
+ * the INDEX-selected per-endpoint CSR window and read-to-clear status -- wrapped by
+ * a PHY, two power domains and an auto-DMA engine.  USB is the only bulk path in.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

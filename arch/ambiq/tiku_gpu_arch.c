@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpu_arch.c - Apollo510 2.5D GPU (Think Silicon / Nema-class) driver.
+ * tiku_gpu_arch.c - Apollo510 2.5D GPU (Nema-class) driver.
  *
- * From-scratch, register-level. No AmbiqSuite, no NemaGFX. The register map is
- * the vendored CMSIS GPU_Type (apollo510.h); this file drives it directly.
- *
- * PHASE P0: bring-up -- power the GFX domain, select the clock, reset via
- * SYSCLEAR, read IDREG, capture reset-value forensics, and prove the IRQ 28
- * plumbing (vector slot + strong ISR + counter) via a CPU-side NVIC pend that
- * needs no GPU cooperation.
- *
- * PHASE P1 (this milestone): synchronous solid fill. The pipeline is
- * programmable -- a draw emits no fragments without a fragment "pico-shader"
- * in instruction memory and DRAWCODEPTR pointing at it. Init parks the stock
- * 8-byte constant-color instruction at IMEM slot 31 (recovered from the
- * vendored, MIT-granted ThinkSi port layer -- see temp/gpuplan.md); fills
- * point DRAWCODEPTR there with the ROP blender in SRC mode. Command lists,
- * blits, compute and async completion arrive in later phases.
+ * From-scratch and register-level over the vendored CMSIS GPU_Type: no
+ * AmbiqSuite, no NemaGFX.  A draw emits no fragments without a fragment shader in
+ * instruction memory, so init parks a constant-colour instruction for fills.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

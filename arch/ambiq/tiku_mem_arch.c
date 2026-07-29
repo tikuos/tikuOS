@@ -5,21 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.c - Apollo 510 memory architecture support + MRAM-backed NVM
+ * tiku_mem_arch.c - Apollo510 memory architecture and MRAM-backed NVM.
  *
- * Persistent state lives in the SRAM .uninit region (warm-reset durable). For
- * power-cycle durability it is mirrored to a 32 KB MRAM page reserved at the top
- * of MRAM (apollo510.ld __tiku_nvm_mram_*). tiku_mem_arch_nvm_flush() snapshots
- * .uninit (prefixed with a magic word) and programs the page via the on-chip
- * bootrom (nv_program_main2 -- MRAM is direct-write, NO erase, unlike NOR
- * flash). On boot, tiku_mem_arch_init() copies the page back into .uninit if the
- * magic matches; otherwise (fresh chip) .uninit keeps its NOLOAD value and each
- * subsystem's "no magic -> init fresh" logic runs.
- *
- * Mirrors the RP2350 flash-mirror design (arch/arm-rp2350/tiku_mem_arch.c),
- * substituting the MRAM bootrom for the QSPI boot-ROM, plus D-cache maintenance
- * around the SSRAM snapshot and the programmed page (Apollo5 has L1 cache). The
- * reserved page is far above the firmware code; the SBL (0x400000) is untouched.
+ * Persistent state lives in .uninit and is mirrored to a reserved MRAM page via
+ * the on-chip bootrom, restored at boot when the magic matches.  MRAM is
+ * direct-write with no erase; the M55's L1 cache means the snapshot needs maintenance.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

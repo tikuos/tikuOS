@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.c - Apollo 510 system tick (always-on STIMER)
+ * tiku_timer_arch.c - Apollo510 system tick (always-on STIMER).
  *
- * On Ambiq the Cortex-M SysTick freezes during WFI sleep -- its clock is gated --
- * so a WFI idle with only SysTick armed never wakes, and the tick does not
- * advance while the core is parked (verified on hardware on Apollo4 Lite, the
- * same trait on this M55 part). The system tick therefore runs from the always-on
- * 32.768 kHz STIMER (compare-B / NVIC IRQ 33), which keeps running through sleep
- * and wakes the core every tick -- see tiku_htimer_arch.c, which owns the STIMER
- * and delivers the periodic interrupt into tiku_ambiq_tick_advance() below.
- * SysTick is left configured as a free-running down-counter (no TICKINT) purely so
- * the calibrated SYST_CVR micro-delay in tiku_cpu_common.c still works.
+ * SysTick freezes during WFI on Ambiq, so an idle with only SysTick armed never
+ * wakes and the tick stops while parked.  The tick therefore runs from the 32.768
+ * kHz STIMER; SysTick stays free-running, untick-ed, for the calibrated delay.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

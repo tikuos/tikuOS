@@ -5,14 +5,21 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_apollo4l.c - Apollo4 Lite (Cortex-M4) MPU driver -- ARMv7-M W^X
+ * tiku_mpu_apollo4l.c - Apollo4 Lite (Cortex-M4) MPU driver, ARMv7-M W^X.
  *
- * The Cortex-M4 has the ARMv7-M PMSAv7 MPU (8 regions, RBAR + RASR, power-of-two
- * size-aligned regions) -- NOT the ARMv8-M MPU (RBAR + RLAR, arbitrary base/limit,
- * MAIR) used by the apollo510 driver. This is a from-scratch PMSAv7 version that
- * keeps the same HAL surface and fault-diagnostic behaviour but uses the vendored
- * mpu_armv7.h helpers.
+ * The M4 has the PMSAv7 MPU -- eight power-of-two regions with RBAR and RASR --
+ * not the ARMv8-M layout the Apollo510 driver uses.  Same HAL surface and fault
+ * behaviour; see the region map below.
  *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "tiku_mpu_arch.h"
+#include "apollo4l.h"            /* CMSIS: MPU/SCB/NVIC + mpu_armv7.h (via core_cm4.h) */
+#include <hal/tiku_cpu.h>        /* tiku_cpu_irq_disable/enable */
+#include <stdint.h>
+
+/*
  * W^X map (PMSAv7 -- the highest-numbered overlapping region wins):
  *   0  CODE   MRAM 0x0 + 2 MB              RO + exec   (code + rodata; SBL is RO too)
  *   1  RAM    TCM/SRAM 0x10000000 + 2 MB   RW + XN     (.data/.bss/stack/.ssram/tier)
@@ -23,13 +30,7 @@
  * all data is execute-never, and a stack overflow trips the guard before it can
  * corrupt .data/.bss/.uninit (which end far below the guard).
  *
- * SPDX-License-Identifier: Apache-2.0
  */
-
-#include "tiku_mpu_arch.h"
-#include "apollo4l.h"            /* CMSIS: MPU/SCB/NVIC + mpu_armv7.h (via core_cm4.h) */
-#include <hal/tiku_cpu.h>        /* tiku_cpu_irq_disable/enable */
-#include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
 /* Region constants (apollo4l memory map)                                    */

@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_psram_arch.c - Apollo510 MSPI0 + APS512 octal-DDR PSRAM bring-up.
+ * tiku_psram_arch.c - Apollo510 MSPI0 and APS512 octal-DDR PSRAM bring-up.
  *
- * Implements tables 1 and 2 of tiku_psram_arch.h.  Read that header first:
- * it is the transcription this file is checked against, and the ordering
- * constraints in it are hardware requirements, not style.
- *
- * A LESSON THIS FILE PAID FOR ON ITS FIRST RUN: four field encodings were
- * DERIVED (from the order values appear in vendor code) instead of READ from
- * the register header's encoding tables, and all four were wrong -- the IO
- * clock select (off by 128x), XIPACK, the DMA boundary, and IOMSEL, where
- * the wrong value selected IOM6, the internal link to the radio die.  The
- * board wedged with no output and no fault.  Every field is now written
- * through the CMSIS enum NAME, so the compiler owns the encoding.
- *
- * DESIGN NOTES THAT COST SOMETHING TO LEARN ELSEWHERE IN THIS PORT:
- *
- *   - Configure the CONTROLLER before the PADS.  While the pads are still
- *     GPIO the device sees nothing, so a half-programmed controller cannot
- *     drive a malformed transaction at it.  (Mirrors the GPU's "mode and
- *     rail with the domain down" rule.)
- *   - Every wait is spin-bounded and returns a DISTINCT error.  The Nordic
- *     and STIMER work both showed that an unbounded poll on dead hardware
- *     is indistinguishable from a hang.
- *   - Identity is read at the LOWEST clock, before anything is trusted.  A
- *     mis-timed octal bus returns plausible garbage; asking the device who
- *     it is, slowly, is the only cheap way to know the wiring is right.
+ * Every register field is written through its CMSIS enum name, so the compiler
+ * owns the encoding.  Configure the controller before the pads, bound every wait
+ * with a distinct error, and read identity at the lowest clock before trusting it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

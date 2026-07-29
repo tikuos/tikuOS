@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_apollo4l.c - Apollo4 Lite CPU/SoC bring-up + clocks
+ * tiku_cpu_freq_boot_apollo4l.c - Apollo4 Lite CPU/SoC bring-up and clocks.
  *
- * Mirrors arch/ambiq/tiku_cpu_freq_boot_arch.c (Apollo510) but for the
- * Cortex-M4: there is no SCB L1 I/D cache on the M4 core (Apollo4 has a
- * separate CACHECTRL system cache, brought up with the full-kernel milestone),
- * and no HFRC2 high-performance turbo -- the core runs at the ~96 MHz HFRC the
- * boot ROM leaves configured. SoC bring-up therefore inherits the boot power
- * rails and clock tree as-is; no AmbiqSuite SDK is linked.
+ * Mirrors the Apollo510 file for the Cortex-M4: no SCB L1 cache and no HFRC2
+ * turbo, so the core runs at the ~96 MHz HFRC the boot ROM leaves configured and
+ * bring-up inherits the boot rails and clock tree as-is.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

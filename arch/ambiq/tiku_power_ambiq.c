@@ -1,22 +1,15 @@
 /*
  * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_power_ambiq.c - Apollo510 power-measurement instruments.
  *
- * WHY THIS FILE EXISTS.  Five power experiments characterised one part
- * (nRF54LM20B, RRAM) in detail.  Every cross-platform claim TikuOS makes --
- * above all the "durability options invert across FRAM/MRAM/RRAM/Flash" thesis
- * -- rests on a single NVM technology's measured behaviour.  This is the second
- * point: Cortex-M55, MRAM, a different power architecture.
- *
- * WHAT IS DELIBERATELY *NOT* COPIED FROM THE NORDIC PORT.  The `quiet` release
- * set, whose meaning is frozen by published experiments over there and must not
- * acquire a second definition here; and any peripheral-release flag whose effect
- * has not yet been measured on this part.  A release vocabulary transcribed
- * across silicon is a list of assumptions wearing the clothes of a measurement.
+ * The second measured point behind the cross-platform durability claims, after
+ * the Nordic part.  The `quiet` release set is deliberately not copied over: a
+ * release vocabulary transcribed across silicon is assumptions dressed as measurement.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

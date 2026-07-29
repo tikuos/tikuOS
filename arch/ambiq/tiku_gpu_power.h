@@ -5,32 +5,27 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpu_power.h - GPU (coprocessor) power-measurement instruments.
+ * tiku_gpu_power.h - GPU power-measurement instruments.
  *
- * The GPU counterpart of tiku_power_ambiq.h, and the Apollo counterpart of the
- * nRF54L's FLPR/NPU probes.  Experiment 2 on this platform measures the GPU as
- * a COMPUTE engine: its availability tax, its energy per byte and per op
- * against a CPU baseline doing the same work in the same memory tier, the
- * saving from sleeping the CPU behind an async submission, fabric contention,
- * and the per-mode tariff across all four GFXPERFREQ modes.
+ * Measures the GPU as a compute engine: availability tax, energy per byte and per
+ * op against a CPU baseline, the saving from sleeping behind an async submission,
+ * and the per-mode tariff.  Instruments, not an API -- each restores what it changed.
  *
- * TWO RULES THIS HEADER EXISTS TO ENFORCE:
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
+ * TWO RULES THESE INSTRUMENTS ENFORCE:
  *
  *   1. WORK IS THE DENOMINATOR.  Every probe reports bytes touched and ops
  *      retired, because current without work is not efficiency -- the mistake
  *      that inverted a cache conclusion on the other platform.
  *
  *   2. THE CPU BASELINE MUST TARGET THE SAME MEMORY.  The GPU is a bus master
- *      that can only see SSRAM; DTCM is CPU-private.  experiment 1's `sram_*`
- *      workloads run in DTCM -- a tightly-coupled, uncached tier -- so they are
- *      NOT a licensed baseline for a GPU comparison.  tiku_gpu_power_cpu_probe
- *      exists to do the same bytes in the same SSRAM buffer.
- *
- * NOT A GRAPHICS API and not a power-management API: these are instruments, and
- * every one restores what it changed.
- *
- * SPDX-License-Identifier: Apache-2.0
+ *      that can only see SSRAM, while DTCM is CPU-private, so a DTCM workload
+ *      is NOT a licensed baseline for a GPU comparison.
+ *      tiku_gpu_power_cpu_probe does the same bytes in the same SSRAM buffer.
  */
+
 
 #ifndef TIKU_GPU_POWER_H_
 #define TIKU_GPU_POWER_H_

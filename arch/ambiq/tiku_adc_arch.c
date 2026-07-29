@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.c - Apollo510 (Apollo5) SAR-ADC entry point.
+ * tiku_adc_arch.c - Apollo510 SAR-ADC entry point.
  *
- * Apollo5 derives the ADC clock from HFRC and needs it forced on (CLKGEN.
- * FRCHFRC) before the ADC will convert -- the one thing Apollo4 does not need.
- * Everything else (power-on, slot config, software trigger, FIFO read) is
- * shared with Apollo4 in tiku_adc_ambiq.inl, since the ADC register block is
- * identical across both parts.
+ * Apollo5 needs HFRC forced on through CLKGEN.FRCHFRC before the ADC will
+ * convert, which is the one thing Apollo4 does not.  Everything else is shared in
+ * tiku_adc_ambiq.inl.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

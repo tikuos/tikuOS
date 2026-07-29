@@ -5,13 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_apollo510_evb.h - Ambiq Apollo 510 EVB board definitions
+ * tiku_board_apollo510_evb.h - Ambiq Apollo510 EVB board definitions.
  *
- * Pin assignments from the AmbiqSuite apollo510_evb BSP:
- *   - User LEDs: LED0 = pad 165, LED1 = pad 89, LED2 = pad 92
- *     (open-drain / active-low in the BSP).
- *   - Console UART (COM): TX = pad 30, RX = pad 55.
- *   - SWO (default console transport): pad 28.
+ * Pin assignments from the AmbiqSuite apollo510_evb BSP: three open-drain
+ * active-low user LEDs, the COM UART pads, and SWO.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

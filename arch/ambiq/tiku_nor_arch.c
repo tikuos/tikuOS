@@ -5,33 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nor_arch.c - Apollo510 MSPI1 + IS25WX064 octal NOR bring-up.
+ * tiku_nor_arch.c - Apollo510 MSPI1 and IS25WX064 octal NOR bring-up.
  *
- * Implements tables 0-2 of tiku_nor_arch.h.  Read that header first.
- *
- * TWELVE BUGS INHERITED AS FIXES.  This driver is the PSRAM driver's
- * younger sibling and starts from everything that one paid for:
- *
- *   - every register field written through its CMSIS enum NAME, never a
- *     value derived from the order things appear in vendor source (five
- *     bugs, one of which selected the radio's private bus and froze the CPU)
- *   - CTRL.TXRX: 0 IS RECEIVE.  The inverted sense made reads complete
- *     instantly capturing nothing and writes hang forever -- two symptoms,
- *     one bit
- *   - TXNEG is frequency-dependent (0 at <= 62.5 MHz, 1 above)
- *   - latency counts come from the DEVICE's registers and from working
- *     silicon, never from a vendor struct initialiser
- *   - PIO reads drain as data arrives; the FIFO is 32 words
- *   - array writes need CTRL.ENWLAT; register writes must not have it
- *   - a status poll must BACK OFF; a tight spin is APB traffic into the
- *     very controller doing the work (it was 20 % of the PSRAM's plateau)
- *   - PIO and XIP never mix; mixing deadlocks the APB (hard guard below)
- *   - init must restore the timing the device actually has after a reset
- *
- * WHAT IS GENUINELY NEW HERE is the device's personality, not the bus:
- * a NOR wakes in 1-line SPI, must be talked into octal, cannot clear bits
- * without a slow destructive erase, and remembers everything through a
- * power cycle.  Those four facts shape every function below.
+ * A NOR wakes in 1-line SPI and must be talked into octal, cannot clear bits
+ * without a slow destructive erase, and remembers everything through a power
+ * cycle.  Those facts shape every function here.  PIO and XIP never mix.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,15 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.c - Apollo 510 GPIO access (bare-metal)
+ * tiku_gpio_arch.c - Apollo510 GPIO access (bare-metal).
  *
- * Direct register access via the CMSIS device header (GPIO_Type) — no
- * am_hal calls, so the GPIO path no longer pulls libam_hal (de-SDK stage).
- *
- *   - pad config:  PADKEY unlock -> GPIO->PINCFG[pad] -> PADKEY relock
- *     (FNCSEL[3:0]=3 GPIO, INPEN[4], OUTCFG[9:8]=1 push-pull)
- *   - output:      GPIO->WTS0/WTC0/WT0 (set / clear / toggle), pad/32 indexed
- *   - input:       GPIO->RD0
+ * Direct register access through the CMSIS device header, so the GPIO path pulls
+ * no vendor HAL: a PADKEY-bracketed PINCFG write configures a pad, and output,
+ * toggle and input use the pad/32-indexed banks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_apollo4l.c - Apollo4 Lite (AMAP42KL) SAR-ADC entry point.
+ * tiku_adc_apollo4l.c - Apollo4 Lite SAR-ADC entry point.
  *
- * Apollo4's ADC runs straight off HFRC, so it needs no special clock bring-up
- * (the clock hook is a no-op). All the conversion logic -- power-on, slot
- * config, software trigger and FIFO read -- is shared with Apollo5 in
- * tiku_adc_ambiq.inl, since the ADC register block is identical across parts.
+ * The ADC runs straight off HFRC here, so the clock hook is a no-op.  All the
+ * conversion logic is shared with Apollo5 in tiku_adc_ambiq.inl.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

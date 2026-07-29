@@ -5,18 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_apollo510b_evb.h - Ambiq Apollo510 Blue EVB board definitions
+ * tiku_board_apollo510b_evb.h - Ambiq Apollo510 Blue EVB board definitions.
  *
- * The Apollo510 Blue EVB carries the SAME Apollo510 (Cortex-M55) silicon as
- * the base apollo510_evb (so it shares the whole arch backend, linker and
- * register map) but a DIFFERENT board pinout, plus an on-board EM9305 BLE
- * radio the base EVB lacks. Pin assignments from the AmbiqSuite apollo510b_evb
- * BSP:
- *   - User LEDs: LED0 = pad 11, LED1 = pad 19, LED2 = pad 83 (active-low).
- *   - Console UART (COM): TX = pad 12, RX = pad 14 -- on UART1 (funcsel 5),
- *     NOT UART0/30/55 like the base EVB. The Makefile selects the instance via
- *     -DTIKU_CONSOLE_UART1 (see tiku_uart_arch.c).
- *   - Buttons: BTN0 = pad 46, BTN1 = pad 29 (recorded; wired as stubs for now).
+ * The same Apollo510 silicon as the base EVB, so it shares the arch backend and
+ * linker, but a different pinout plus an on-board EM9305 BLE radio.  Its console
+ * is UART1, not UART0 -- the Makefile selects the instance.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

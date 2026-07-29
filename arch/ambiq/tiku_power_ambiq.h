@@ -7,22 +7,9 @@
  *
  * tiku_power_ambiq.h - Apollo510 power-measurement instruments.
  *
- * The Apollo counterpart of arch/nordic/tiku_power_arch.h.  Same discipline,
- * different silicon:
- *
- *   - the timebase is the always-on 32.768 kHz STIMER (it survives WFI, which
- *     the core's SysTick does not), so every window is measured on a clock the
- *     sleep state cannot stop;
- *   - the clock oracle times the CORE-clocked SysTick against that always-on
- *     STIMER, which reports what the core is actually doing rather than what a
- *     clock register claims;
- *   - the cache is the Cortex-M55's ARCHITECTURAL L1 (there is no vendor
- *     CACHECTRL block on this part), and its geometry is READ from CLIDR/CCSIDR
- *     rather than assumed -- a working-set size copied from another part's
- *     datasheet is how a memory experiment silently measures the wrong thing.
- *
- * NOT A POWER-MANAGEMENT API.  These are measurement instruments: they say what
- * a state costs, and every one of them restores what it changed.
+ * The timebase is the always-on STIMER, which survives WFI where SysTick does not.
+ * The cache is the M55's architectural L1 and its geometry is READ from
+ * CLIDR/CCSIDR, never assumed.  Instruments, not an API: each restores what it changed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

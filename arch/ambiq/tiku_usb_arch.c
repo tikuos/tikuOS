@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usb_arch.c - Apollo510 USB device controller: bring-up + enumeration.
+ * tiku_usb_arch.c - Apollo510 USB device controller: bring-up and enumeration.
  *
- * Implements tables 0-5 of tiku_usb_arch.h.  READ THAT HEADER FIRST -- in
- * particular table 1, which explains why this file never once uses a CMSIS
- * bitfield accessor on CFG0/CFG1/CFG2.  Those words pack read-to-clear
- * interrupt status, and a 32-bit read-modify-write on any of them silently
- * discards pending interrupts.
- *
- * U1 SCOPE: full speed, enumerate, survive replug.  The device presents one
- * vendor-specific interface with NO endpoints beyond EP0, because U1 is
- * testing exactly one thing -- that the control endpoint works -- and adding
- * bulk endpoints would add a second suspect.  CDC arrives in U2, MSC in U3.
- *
- * THE FIRST INTERRUPT-DRIVEN DRIVER IN THIS PORT, and not by preference: the
- * status registers are read-to-clear (so a poll racing anything loses
- * events), the host sets deadlines we do not control, and the shell blocks
- * for seconds at a time during a bench or a stage.  A polled USB device would
- * drop off the bus every time the board did something worth doing.
+ * Never uses a CMSIS bitfield accessor on CFG0/CFG1/CFG2: those words pack
+ * read-to-clear interrupt status, so a read-modify-write silently discards pending
+ * interrupts.  Interrupt-driven by necessity -- a polled device would drop off the bus.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpu_power.c - GPU (coprocessor) power-measurement instruments.
+ * tiku_gpu_power.c - GPU power-measurement instruments.
  *
- * See tiku_gpu_power.h for the two rules this file enforces (work as the
- * denominator; the CPU baseline must live in the same memory tier the GPU can
- * actually see).  Timebase is the always-on 32.768 kHz STIMER, as everywhere
- * else in the Apollo power work.
+ * Implements the probes declared in tiku_gpu_power.h, whose two measurement rules
+ * this file enforces.  The timebase is the always-on 32.768 kHz STIMER, as
+ * everywhere else in the Apollo power work.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

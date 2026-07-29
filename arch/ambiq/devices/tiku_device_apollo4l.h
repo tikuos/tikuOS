@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_apollo4l.h - Ambiq Apollo4 Lite silicon-level constants
+ * tiku_device_apollo4l.h - Ambiq Apollo4 Lite silicon-level constants.
  *
- * Apollo4 Lite (AMAP42KL) is an Arm Cortex-M4F (ARMv7E-M, single-precision
- * FPU, PMSAv7 MPU) MCU with:
- *   - 384 KB TCM at 0x10000000 (primary RAM pool) + 1 MB shared SRAM at
- *     0x10060000 (contiguous).
- *   - 2 MB internal MRAM (flash) based at 0x0; the application image lives
- *     above the reserved low region, at 0x00018000.
- *   - GPIO pads; standard ARM peripherals (NVIC, SysTick, STIMER, MPU).
- *
- * Pure constants -- no SDK/CMSIS include. The arch .c files pull in only the
- * bare CMSIS register header (apollo4l.h); no AmbiqSuite HAL/BSP is linked.
- * Mirrors arch/ambiq/devices/tiku_device_apollo510.h.
+ * A Cortex-M4F with 384 KB TCM plus 1 MB contiguous shared SRAM, and 2 MB MRAM at
+ * 0x0 with the application image above the reserved low region.  Pure constants:
+ * the arch files pull in only the bare CMSIS register header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

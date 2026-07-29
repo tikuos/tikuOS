@@ -5,20 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_em9305.c - EM9305 BLE controller SPI-HCI transport (bare-metal)
+ * tiku_em9305.c - EM9305 BLE controller SPI-HCI transport (bare-metal).
  *
- * Speaks the EM9305's framed SPI protocol over tiku_spi (IOM6) + GPIOs:
- *   - reset:  pulse EN low->high, wait RDY low then high, read the radio's
- *             {04 FF 01 01} "active state entered" boot event;
- *   - frame:  assert CS (GPIO), wait RDY high, exchange a 1-byte header
- *             (0x42 write / 0x81 read) + read two status bytes -- STS1 == 0xC0
- *             means the controller is ready and STS2 is the free/available
- *             byte count -- then move the payload full-duplex and release CS.
- * Every EM9305 exchange is full-duplex (the SPI master keeps FULLDUP on).
- *
- * This is the M0/M1 bring-up layer (raw HCI in/out + a self-test); the minimal
- * HCI host + GATT server land later in tikukits/ble. Built only for the BLE
- * config (TIKU_DRV_BLE_EM9305_ENABLE, apollo510b).
+ * Speaks the controller's framed SPI protocol over SPI and a few GPIOs: reset by
+ * EN pulse and RDY handshake, then a header byte plus two status bytes before the
+ * payload moves full-duplex.  No AmbiqSuite, no Cordio.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

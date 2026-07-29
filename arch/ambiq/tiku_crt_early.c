@@ -5,26 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crt_early.c - Apollo 510 (Cortex-M55) startup
+ * tiku_crt_early.c - Apollo510 (Cortex-M55) startup.
  *
- * Modelled on arch/arm-rp2350/tiku_crt_early.c but with the M55/Apollo
- * specifics from AmbiqSuite's startup_gcc.c. Unlike RP2350 there is NO
- * .boot2 / .image_def header: the on-silicon Secure Boot Loader transfers
- * control straight to the vector table at MRAM 0x410000.
- *
- * Reset flow:
- *   1. Mask IRQs (the scheduler re-enables them in tiku_sched_loop()).
- *   2. Set SP and VTOR explicitly.
- *   3. Enable the FPU (CPACR) — the build uses the hard-float ABI.
- *   4. Copy .data (MRAM->DTCM), zero .bss.
- *   5. M55 finishing touches (the functional bits of CMSIS SystemInit):
- *      EPU (FP/MVE) power state + Low-Overhead-Branch enable.
- *   6. main().
- *
- * Fully bare-metal: no AmbiqSuite dependency. CMSIS SystemInit() is gone —
- * its VTOR/FPU were already done here, its TrustZone SAU setup is compiled
- * out in our non-cmse build, its SystemCoreClock stub is unused (we read the
- * perf-mode register), and the remaining two register writes are in step 5.
+ * There is no boot2 or image header: the on-silicon secure bootloader jumps
+ * straight to the vector table in MRAM.  Reset masks IRQs, sets SP and VTOR,
+ * enables the FPU, copies .data, zeroes .bss, powers the EPU, then calls main.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

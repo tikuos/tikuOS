@@ -5,23 +5,22 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.c - Apollo 510 (Cortex-M55) MPU driver — real ARMv8-M W^X
+ * tiku_mpu_arch.c - Apollo510 (Cortex-M55) MPU driver, ARMv8-M W^X.
  *
- * Ports the RP2350 driver (arch/arm-rp2350/tiku_mpu_arch.c) to the M55,
- * re-pinned to the Apollo memory map and using the vendored CMSIS MPU helpers
- * (mpu_armv8.h) instead of hand-rolled RBAR/RLAR. The kernel MPU layer keeps
- * its MSP430 SAM/segment API as software bookkeeping.
+ * Code is RX and every data region execute-never, with a guard below the stack.
+ * .uninit stays RW+XN because the NVM tier pool shares it, so SEG3's unlock and
+ * lock are bookkeeping that still drive the MRAM flush.  Region map below.
  *
- * NVM region note (Apollo510-specific): on RP2350 the NVM tier pool lives in
- * volatile .bss, so .uninit (persist vars only) can be RO-locked and SEG3's W
- * bit moves real hardware permissions. On Apollo510 the NVM tier pool
- * (tier_nvm_buf — the backing store for per-process NVM memory) shares .uninit
- * (mem port B1), and that pool IS written at runtime. RO-locking .uninit would
- * fault those tier writes, so here .uninit stays RW+XN and the unlock/lock are
- * SAM bookkeeping only — they still drive the mem-port-C MRAM flush through the
- * generic layer. The W^X guarantee that matters (code is RX, every data region
- * is execute-never) is fully enforced.
- *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "tiku_mpu_arch.h"
+#include "apollo510.h"            /* CMSIS: MPU/SCB/NVIC + mpu_armv8.h */
+#include <hal/tiku_cpu.h>         /* tiku_cpu_irq_disable/enable */
+#include <kernel/shell/basic/tiku_basic_module.h>  /* TIKU_MODULE_EXEC_* */
+#include <stdint.h>
+
+/*
  * Eight non-overlapping regions (this M55 reports 16, so headroom is ample):
  *   0  NVM   .uninit (DTCM)               RW + XN   (writable: holds NVM tier)
  *   1  TEXT  MRAM __flash_start..end      RX            (code + rodata)
@@ -37,14 +36,7 @@
  * privileged policy without burning regions. MemManage is enabled at priority
  * 0; a violation records into the warm-durable .mpu_diag and resets.
  *
- * SPDX-License-Identifier: Apache-2.0
  */
-
-#include "tiku_mpu_arch.h"
-#include "apollo510.h"            /* CMSIS: MPU/SCB/NVIC + mpu_armv8.h */
-#include <hal/tiku_cpu.h>         /* tiku_cpu_irq_disable/enable */
-#include <kernel/shell/basic/tiku_basic_module.h>  /* TIKU_MODULE_EXEC_* */
-#include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
 /* Linker symbols for the protected regions                                  */

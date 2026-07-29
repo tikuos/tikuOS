@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_thread_arch.c - Ambiq worker-thread switcher shim
+ * tiku_thread_arch.c - Ambiq worker-thread switcher shim.
  *
- * The Apollo parts -- Apollo510 (Cortex-M55) and Apollo4 Lite/Plus
- * (Cortex-M4F) -- share the one generic Cortex-M switcher.  Their
- * crt-early vector tables all name PendSV slot 14 as the weak alias
- * tiku_ambiq_pendsv_handler (see tiku_crt_early*.c), so naming the
- * strong handler the same and pulling in the shared body is the whole
- * port: the strong definition overrides the weak vector alias.
+ * Apollo510 and Apollo4 Lite/Plus share the one generic Cortex-M switcher.  Their
+ * vector tables all name PendSV slot 14 as the same weak alias, so defining the
+ * strong handler here and pulling in the shared body is the whole port.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

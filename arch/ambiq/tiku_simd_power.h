@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_simd_power.h - Helium (MVE) vs scalar energy-measurement instruments.
+ * tiku_simd_power.h - Helium (MVE) versus scalar energy instruments.
  *
- * The CPU-side twin of tiku_gpu_power.h.  Experiment 3 compares three engines
- * on matched kernels -- scalar CPU, Helium CPU, and the GPU measured in
- * experiment 2 -- so the deciding question can be answered: the GPU is 3-6x
- * cheaper per byte but costs 6374 uA merely to be powered, while Helium's
- * availability tax is structurally zero.  There must be a job size where that
- * inverts, and it is the number a dispatch layer needs.
- *
- * TWO DESIGN RULES THIS HEADER EXISTS TO ENFORCE:
- *
- *   1. BOTH BACKENDS IN ONE IMAGE.  hal/tiku_simd.c compiles the scalar path
- *      out on an MVE target, so the obvious approach is two firmware images --
- *      and cross-build comparison on this part carries ~3 % variance (exp1 F11)
- *      plus a loop-alignment hazard that manufactured a 956 uA fake result on
- *      the other platform.  Instead the .c is compiled a SECOND time with
- *      TIKU_SIMD_MVE forced to 0 and its symbols renamed, so the scalar twin is
- *      the same source, in the same image, at one build's alignment.
- *
- *   2. BOTH MEMORY TIERS, LABELLED.  Helium can work from DTCM (fast, private)
- *      or SSRAM.  The GPU can only reach SSRAM.  So the *fair* three-way
- *      comparison is the SSRAM one, and the DTCM column is a Helium-only bonus
- *      that must never be quoted against a GPU figure.
+ * Compares scalar CPU, Helium CPU and the GPU on matched kernels.  Both backends
+ * live in one image (see tiku_simd_scalar.c), and the fair three-way comparison is
+ * the SSRAM column -- the DTCM one is Helium-only and must not be quoted against the GPU.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

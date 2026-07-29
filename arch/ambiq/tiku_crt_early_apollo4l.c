@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crt_early_apollo4l.c - Apollo4 Lite (Cortex-M4F) startup
+ * tiku_crt_early_apollo4l.c - Apollo4 Lite (Cortex-M4F) startup.
  *
- * Mirrors arch/ambiq/tiku_crt_early.c (Apollo510 / Cortex-M55) but for the
- * Cortex-M4: ARMv7E-M, single-precision FPU, no Helium, no Low-Overhead-Branch,
- * no EPU power-state register, and 84 external IRQs (vs 135). Apollo4 Lite is
- * not a secure part, so the boot ROM hands control straight to the vector table
- * at user MRAM 0x00018000 the standard Cortex-M way.
- *
- * Reset flow:
- *   1. Mask IRQs (the scheduler re-enables them in tiku_sched_loop()).
- *   2. Set SP and VTOR explicitly.
- *   3. Enable the FPU (CPACR CP10/CP11) -- the build uses the hard-float ABI.
- *   4. Power shared SRAM (when .ssram is used); copy .data (MRAM->TCM),
- *      zero .bss, zero .ssram.
- *   5. main().
- *
- * Fully bare-metal: no AmbiqSuite dependency.
+ * Mirrors the Apollo510 startup for ARMv7E-M: single-precision FPU, no Helium or
+ * low-overhead branch, and 84 external IRQs.  The part is not secure, so the boot
+ * ROM hands control to the vector table the standard Cortex-M way.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

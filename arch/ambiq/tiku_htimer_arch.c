@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_arch.c - Apollo 510 hardware one-shot timer (STIMER)
- *                      + the always-on periodic kernel tick.
+ * tiku_htimer_arch.c - Apollo510 STIMER one-shot plus the kernel tick.
  *
- * Bare-metal driver for the Apollo510 System Timer (STIMER), clocked from the
- * 32.768 kHz crystal (TIKU_HTIMER_ARCH_SECOND). The kernel htimer's 16-bit
- * clock_t is the low 16 bits of the 32-bit counter; the compare-A interrupt
- * (NVIC IRQ 32) drives tiku_htimer_run_next(). No AmbiqSuite — this brings up
- * the crystal and the STIMER directly, transcribing the am_hal_stimer quirks:
- *   - the crystal is enabled via MCUCTRL.XTALCTRL (am_hal_mcuctrl_control's
- *     EXTCLK32K_ENABLE) — nothing else in our boot starts it;
- *   - the compare register takes a DELTA (the hardware adds the counter), NOT
- *     an absolute value;
- *   - the counter is in the async 32 kHz domain, so it is read three times
- *     and voted (am_hal_stimer_counter_get);
- *   - COMPARE writes have a 2-cycle latency and cannot be issued back-to-back,
- *     so the delta is adjusted and the write is spaced from the previous one.
- *
- * This file ALSO hosts the kernel system tick. On Ambiq the Cortex-M SysTick
- * freezes during WFI sleep (its clock is gated), so a WFI idle with only SysTick
- * armed never wakes and the tick does not advance while parked. The STIMER runs
- * from the always-on crystal and survives sleep, so the periodic tick is driven
- * here off compare-B (SCMPR1, NVIC IRQ 33) alongside the htimer's one-shot on
- * compare-A. Both compares share the single COUNTER and the inter-write spacing
- * guard (s_last_cmpr), so the tick and one-shot never corrupt each other's
- * compare writes. The tick counters live in tiku_timer_arch.c; this file only
- * delivers the periodic interrupt.
+ * Bare-metal STIMER off the 32.768 kHz crystal.  The compare register takes a
+ * DELTA, the async counter is triple-read and voted, and compare writes are
+ * spaced.  It hosts the tick too: SysTick freezes during WFI, the STIMER does not.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

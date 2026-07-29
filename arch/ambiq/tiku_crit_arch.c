@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crit_arch.c - Apollo 510 critical-window IRQ masking (NVIC)
+ * tiku_crit_arch.c - Apollo510 critical-window IRQ masking (NVIC).
  *
- * Snapshots the NVIC enable state and clears every IRQ family not named
- * in preserve_mask, restoring on exit. Pure Cortex-M NVIC — no AmbiqSuite
- * dependency. SysTick (the system tick) is a core exception, not an NVIC
- * line, so it is never masked here and keeps advancing the clock.
+ * Snapshots the NVIC enable state and clears every IRQ family outside
+ * preserve_mask, restoring on exit.  SysTick is a core exception rather than an
+ * NVIC line, so it is never masked and keeps advancing the clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

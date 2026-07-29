@@ -5,37 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_emmc_arch.h - Apollo510 SDIO0 + on-board eMMC (8 GB).
+ * tiku_emmc_arch.h - Apollo510 SDIO0 and on-board 8 GB eMMC.
  *
- * The warehouse.  Schematic U11 on the Apollo510B EVB is an IS21EF08G-JCLI
- * (ISSI, 8 GB eMMC).  Eight gigabytes against the SoC's 4 MB of internal
- * NVM: a thousandfold, permanent, and the missing floor under the PSRAM
- * working tier.
- *
- * THIS IS NOT AN MSPI VARIANT, and the plan says so on purpose.  SDIO is an
- * SD-Host-Controller-class peripheral speaking the MMC command protocol to a
- * managed flash device that runs its own firmware.  The vendor stack is
- * ~8000 lines across am_hal_sdhc.c, am_hal_card.c and am_hal_card_host.c.
- * We transcribe a MINIMAL VERTICAL SLICE of it:
- *
- *   - card states idle -> identify -> standby -> transfer, and nothing else
- *   - PIO and simple DMA block transfers, bounded backoff polls, no interrupts
- *   - 8-bit bus at high speed (<= ~48 MHz); HS200 and its tuning procedure
- *     are explicitly OUT OF SCOPE for the first pass
- *   - raw block API (LBA read/write); NO filesystem
- *
- * SOURCES READ (2026-07-29):
- *   mcu/apollo510/hal/mcu/am_hal_sdhc.c   host controller
- *   mcu/apollo510/hal/mcu/am_hal_card.c   card protocol
- *   hardware/ambiq/boards/AP510BEVB_Rev2.0_Schematic_Prints.pdf  OUR board
- *   boards/apollo510b_evb/bsp/am_bsp_pins.h                      pads
- *   hardware/ambiq/soc/Apollo_SoC_Family_Technical_Reference_Manual_v1p1.pdf
- * And, available from day one, the arbiter that cracked the PSRAM: a
- * PREBUILT vendor example for this exact board at
- *   boards/apollo510b_evb/examples/bm_sdmmc_sdio/emmc_raw_block_read_write/
- *   gcc/bin/emmc_raw_block_read_write.bin
- * Breakpoint it at a known-good moment and diff its register file against
- * ours whenever transcription fights silicon.
+ * SDIO is an SD-Host-Controller-class peripheral speaking MMC to a managed flash
+ * device, not an MSPI variant.  This is a minimal vertical slice: four card
+ * states, PIO and simple DMA blocks, 8-bit high speed, raw LBA API, no filesystem.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

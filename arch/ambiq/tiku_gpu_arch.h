@@ -5,23 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpu_arch.h - Apollo510 2.5D GPU (Think Silicon / Nema-class) driver.
+ * tiku_gpu_arch.h - Apollo510 2.5D GPU (Nema-class) driver.
  *
- * A from-scratch, register-level driver for the GPU block at 0x40090000 --
- * NO vendor blob, no NemaGFX library. The complete register map lives in the
- * vendored CMSIS header (GPU_Type, apollo510.h); this driver programs it
- * directly. apollo510/apollo510b only (Cortex-M55); compiled in behind
- * TIKU_DRV_GPU_ENABLE (the whole TU is omitted otherwise -- no in-file guard).
- *
- * The GPU is a non-coherent AHB bus master: every surface it reads (command
- * lists, source textures) MUST be cleaned from the M55 D-cache before a kick,
- * and every surface it writes (framebuffers) invalidated after completion, and
- * every GPU-visible buffer MUST live in SSRAM (.ssram) -- NEVER in DTCM/ITCM,
- * which are CPU-private and invisible to the GPU bus master.
- *
- * This header currently exposes the P0 (bring-up) surface: power, clocks,
- * identity, reset, and IRQ plumbing. Drawing / compute / async submission land
- * in later phases (see kintsugi GPU plan).
+ * The GPU is a non-coherent bus master: every surface it reads must be cleaned
+ * from the D-cache before a kick and every surface it writes invalidated after,
+ * and every GPU-visible buffer must live in SSRAM -- never DTCM or ITCM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

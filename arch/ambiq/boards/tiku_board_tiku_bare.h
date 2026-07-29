@@ -5,29 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_tiku_bare.h - A custom TikuOS board carrying Apollo510 silicon
- *                          and nothing else
+ * tiku_board_tiku_bare.h - a custom board carrying Apollo510 silicon and nothing else.
  *
- * THIS BOARD IS THE POINT OF THE BOARD/DEVICE SPLIT, NOT A PRODUCT.
- *
- * It describes the minimum a PCB must tell TikuOS: a console, and the absence
- * of everything else.  There is no eMMC, no PSRAM, no NOR, no USB rail
- * switching, no LEDs and no buttons -- because a custom board built around
- * this silicon has none of them until somebody solders them on.
- *
- * Before the split (S1-S4 of kintsugi/board-device-separation-plan.md) this
- * header could not have existed usefully: the driver gates asked the MCU
- * ("are you an apollo510?") rather than the board ("do you carry U11?"), so
- * a board like this one would have compiled the eMMC, PSRAM and USB drivers
- * and failed at runtime, on the bench, in the least informative way
- * available.  Now `BOARD=tiku_bare` declares empty BOARD_CAPS and every one
- * of those requests is refused at MAKE time, by name, with the fix in the
- * message.
- *
- * WHAT A REAL CUSTOM BOARD DOES WITH THIS FILE: copy it, rename it, set the
- * console pads to whatever it actually routes, and add one BOARD_CAPS line
- * per part it fits.  That is the entire porting surface -- no driver edit, no
- * Makefile conditional, no `#if defined(TIKU_BOARD_...)` inside an arch .c.
+ * Describes the minimum a PCB must declare: a console, and the absence of
+ * everything else.  Its empty BOARD_CAPS makes a request for eMMC, PSRAM, NOR or
+ * USB fail at make time by name, rather than at run time on the bench.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

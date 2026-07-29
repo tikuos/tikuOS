@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_region_apollo4l.c - Apollo4 Lite physical memory-region table
+ * tiku_region_apollo4l.c - Apollo4 Lite physical memory-region table.
  *
- * Mirrors arch/ambiq/tiku_region_arch.c (Apollo510); the only device delta is
- * the shared-SRAM base/size (apollo4l: 1 MB at 0x10060000). RAM/MRAM bounds come
- * from the device header (tiku_device_apollo4l.h). The TCM is split into a
- * general SRAM region below .uninit and an NVM overlay on .uninit (the NOLOAD
- * area for .persistent vars, required by tiku_persist_register() + the hibernate
- * marker, which reject non-NVM-region buffers).
+ * Mirrors the Apollo510 table; the only device delta is the shared-SRAM base and
+ * size.  The TCM splits into a general SRAM region and an NVM overlay on .uninit,
+ * which the persist and hibernate APIs require.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

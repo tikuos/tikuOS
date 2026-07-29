@@ -5,12 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_apollo4l_evb.h - Ambiq Apollo4 Lite EVB board definitions
+ * tiku_board_apollo4l_evb.h - Ambiq Apollo4 Lite EVB board definitions.
  *
- * Pin assignments from the AmbiqSuite R4.5.0 apollo4l_evb BSP:
- *   - User LEDs: LED0 = pad 12, LED1 = pad 13, LED2 = pad 14.
- *   - Console UART (COM, instance 2): TX = pad 54, RX = pad 11.
- *   - Default console transport is SWO/ITM.
+ * Pin assignments from the AmbiqSuite apollo4l_evb BSP: three user LEDs and the
+ * COM UART on instance 2.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

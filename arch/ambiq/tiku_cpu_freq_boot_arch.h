@@ -5,14 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_arch.h - Apollo 510 (Cortex-M55) CPU boot + clocks
+ * tiku_cpu_freq_boot_arch.h - Apollo510 (Cortex-M55) CPU boot and clocks.
  *
- * Mirrors arch/arm-rp2350/tiku_cpu_freq_boot_arch.h. These are the
- * arch backends dispatched by hal/tiku_cpu.c under PLATFORM_AMBIQ.
- *
- * NOTE (de-SDK): fully bare-metal. The implementation uses only direct
- * CMSIS register access (apollo510.h); no AmbiqSuite HAL/BSP calls remain.
- * Power and clocks are inherited from the secure bootloader (SBL).
+ * The arch backends dispatched by hal/tiku_cpu.c on this platform.  Fully
+ * bare-metal -- direct CMSIS register access only -- with power and clocks
+ * inherited from the secure bootloader.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

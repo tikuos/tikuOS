@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_region_apollo510.c - Apollo510 carved-MRAM region backend (B).
+ * tiku_nvm_region_apollo510.c - Apollo510 carved-MRAM region backend.
  *
- * Mirrors the apollo4l backend over the linker-carved MRAM span
- * (__tiku_nvmfs_base / __tiku_nvmfs_size in apollo510.ld), with the Apollo5
- * deltas: the bootrom programmer nv_program_main2 lives at 0x0200ff20, the MRAM
- * array origin is 0x00400000 (so dst word offset = (addr - 0x400000) >> 2), and
- * the Cortex-M55 has an L1 D-cache -- the SSRAM staging buffer is cleaned before
- * the bootrom reads it and the programmed MRAM page is invalidated after, so
- * same-session reads see fresh data. MRAM is direct-write (no erase). Callers
- * already hold the NVM unlock window (tiku_mpu_unlock_nvm()).
+ * Mirrors the Apollo4 Lite backend with the Apollo5 deltas: a different bootrom
+ * entry and MRAM origin, and an L1 D-cache, so the staging buffer is cleaned
+ * before the bootrom reads it and the programmed page invalidated after.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

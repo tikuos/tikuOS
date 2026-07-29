@@ -5,34 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_psram_arch.h - Apollo510 MSPI0 + external octal-DDR PSRAM (64 MB).
+ * tiku_psram_arch.h - Apollo510 MSPI0 and external octal-DDR PSRAM (64 MB).
  *
- * The board's third memory tier.  Schematic U14 on the AP510 EVB is an
- * APS512XXN-AOB4BI-WBRZ (AP Memory, 512 Mbit = 64 MB), wired to MSPI0 as
- * x8 (octal) DDR: D0-D7 + CLK + DQS0 only, even though the die is x16
- * capable.  The board decides the width, not the die -- there is no hex
- * mode here.  Core rail is 1.2 V (VDD2), its own supply, OUTSIDE the J4
- * measurement loop: nothing this driver does shows on the SoC rail except
- * the controller domain, the pads and the PHY.
- *
- * WHY IT MATTERS: 64 MB of working memory against the SoC's 3 MB SSRAM, at
- * a bandwidth this file's benchmark will establish.  It is what makes a
- * model far larger than the firmware image possible at all.
- *
- * BARE METAL, like every other driver in this port: no AmbiqSuite objects
- * are linked.  The vendor sources are read and transcribed, and the two
- * tables below are that transcription -- they are the contract every
- * function in the .c is checked against.
- *
- * SOURCES READ (2026-07-28, AmbiqSuite 5.1.0):
- *   devices/am_devices_mspi_psram_aps25616ba_1p2v.{c,h}   device protocol
- *   mcu/apollo510/hal/mcu/am_hal_mspi.c                   controller
- *   boards/apollo510b_evb/bsp/am_bsp_pins.c               pad configs
- *   boards/apollo510b_evb/bsp/am_bsp.h                    which device/mode
- * The BSP for THIS board selects `AM_BSP_MSPI_PSRAM_DEVICE_APS25616BA` plus
- * `USE_APS51216BA` -- so the command set is the APS25616BA family's and the
- * die is the 512 Mbit member.  That pairing is the whole reason this file
- * can be written from the aps25616ba driver.
+ * The board wires the die as x8 octal DDR even though it is x16 capable, so the
+ * board decides the width.  Its 1.2 V core rail is outside the measurement loop,
+ * so only the controller domain, pads and PHY show on the SoC rail.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

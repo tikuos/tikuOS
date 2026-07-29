@@ -5,16 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_em9305.h - EM9305 BLE controller: SPI-HCI transport + first-contact probe
+ * tiku_em9305.h - EM9305 BLE controller: SPI-HCI transport and first-contact probe.
  *
- * The Apollo510 Blue EVB carries an EM9305 BLE radio on IOM6 SPI. This is the
- * bare-metal transport that speaks the EM9305's framed SPI-HCI protocol
- * (0x42 write / 0x81 read headers, a two-byte ready/space status, RDY-line
- * handshake) over tiku_spi + a few GPIOs -- no AmbiqSuite, no Cordio. It is the
- * M0/M1 bring-up layer: reset the radio and exchange raw HCI packets. The
- * minimal HCI host + GATT will layer on top later (tikukits/ble).
- *
- * Built only when TIKU_DRV_BLE_EM9305_ENABLE is defined (apollo510b).
+ * The bare-metal transport for the radio on the Blue EVB: reset it and exchange
+ * raw HCI packets over the framed SPI-HCI protocol.  The HCI host and GATT layer
+ * on top of this.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

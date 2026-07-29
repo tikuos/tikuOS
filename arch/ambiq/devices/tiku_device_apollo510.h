@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_apollo510.h - Ambiq Apollo 510 silicon-level constants
+ * tiku_device_apollo510.h - Ambiq Apollo510 silicon-level constants.
  *
- * Apollo 510 is an Arm Cortex-M55 (ARMv8.1-M, FPU + Helium) MCU with:
- *   - 512 KB DTCM at 0x20000000 (primary RAM pool) + 3 MB shared SRAM
- *     at 0x20080000 + 256 KB ITCM at 0x0.
- *   - 4 MB internal MRAM (flash) at 0x00400000; the application image
- *     lives above the SBL at 0x00410000.
- *   - 100+ GPIO pads; standard ARM peripherals (NVIC, SysTick, MPU).
- *
- * Pure constants — no SDK/CMSIS include. The arch .c files pull in only the
- * bare CMSIS register header (apollo510.h); no AmbiqSuite HAL/BSP remains.
+ * A Cortex-M55 with 512 KB DTCM, 3 MB shared SRAM and 256 KB ITCM, plus 4 MB MRAM
+ * with the application image above the secure bootloader.  Pure constants: the arch
+ * files pull in only the bare CMSIS register header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

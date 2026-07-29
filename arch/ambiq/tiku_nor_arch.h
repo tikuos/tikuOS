@@ -5,40 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nor_arch.h - Apollo510 MSPI1 + external octal NOR flash (8 MB).
+ * tiku_nor_arch.h - Apollo510 MSPI1 and external octal NOR flash (8 MB).
  *
- * The board's first EXTERNAL NON-VOLATILE tier.  Schematic U12 on the AP510
- * EVB is an IS25WX064-JHL (ISSI, 64 Mbit = 8 MB octal xSPI NOR) on MSPI1.
- * Unlike the PSRAM it keeps its contents with the power off -- and unlike the
- * SoC's internal MRAM it can be switched to LITERALLY ZERO by a board load
- * switch (see the pin table).  That combination is a durability grade TikuOS
- * has never had: bulk, read-mostly, byte-readable through an aperture, and
- * free to hold.
- *
- * ITS PERSONALITY, IN ONE PARAGRAPH: reads are cheap and fast (XIP-able,
- * no row-boundary tax -- the vendor sets DMA boundary NONE for this part,
- * which also makes it an independent cross-check on the PSRAM's per-KB
- * plateau).  Writes are expensive and stateful: a page program touches at
- * most 256 B and takes hundreds of microseconds, and a byte can only go
- * 1 -> 0 -- clearing bits back to 1 requires ERASING a whole 128 KB sector
- * (or a 4 KB subsector), which takes hundreds of milliseconds and consumes
- * one of roughly 100 000 lifetime cycles.  Erases are therefore a BUDGET
- * this driver counts, not an action it takes casually.
- *
- * BARE METAL, as always: the vendor sources are read and transcribed, never
- * linked.  The MSPI controller knowledge is inherited wholesale from the
- * PSRAM bring-up (arch/ambiq/tiku_psram_arch.c) -- same register file at a
- * different base -- which is why this driver starts with twelve bugs already
- * paid for.  Those lessons are listed at the top of the .c and are not
- * repeated here.
- *
- * SOURCES READ (2026-07-29, AmbiqSuite 5.1.0 + AP510EVB Rev 2.2 schematic):
- *   devices/am_devices_mspi_is25wx064.{c,h}   device protocol
- *   mcu/apollo510/hal/mcu/am_hal_mspi.c       controller (already transcribed)
- *   boards/apollo510b_evb/bsp/am_bsp_pins.h   pad assignments
- *   hardware/ambiq/boards/AP510BEVB_Rev2.0_*.pdf   OUR board's schematic
- *   (an earlier version of this file cited AP510EVB_Rev2.2, which is a
- *    DIFFERENT board -- see the correction in table 0)
+ * Reads are cheap and XIP-able; writes are expensive and stateful -- a page
+ * program touches at most 256 B and a bit can only go 1 to 0, so clearing needs a
+ * sector erase costing one of ~100,000 cycles.  Erases are a counted budget.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

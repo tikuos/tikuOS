@@ -5,30 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_ambiq.inl - shared Apollo (Apollo4 / Apollo5) SAR-ADC logic.
+ * tiku_adc_ambiq.inl - shared Apollo4/Apollo5 SAR-ADC logic.
  *
- * NOT a standalone translation unit. Included from the per-part entry files
- * (tiku_adc_apollo4l.c for Apollo4 Lite, tiku_adc_arch.c for Apollo510) AFTER
- * they pull in the matching CMSIS register header and define
- * TIKU_ADC_ARCH_CLK_ENABLE() for any part-specific clock bring-up.
- *
- * The ADC register block (base 0x40038000) is identical across both parts --
- * same CFG / SL0CFG / SWT / FIFO layout, same channel codes, same software-
- * trigger magic -- so the whole single-conversion path lives here. The only
- * difference is the clock: Apollo5 must force HFRC on (CLKGEN.FRCHFRC) before
- * the ADC will run; Apollo4 needs nothing. Each entry file supplies that via
- * the TIKU_ADC_ARCH_CLK_ENABLE() hook.
- *
- * One software-triggered single-ended conversion, polled (no DMA, no IRQ, no
- * repeat scan). tikuOS channel map -> SL0CFG.CHSEL0:
- *   0..7  external single-ended SE0..SE7
- *   30    internal temperature sensor  (CHSEL0 = TEMP = 8)
- *   31    battery / VDD divide-by-3     (CHSEL0 = BATT = 9)
- * The two internal channels need no pin setup and are the verified ones.
- *
- * Resolution is fixed at 12-bit and the reference is the part's internal
- * reference, so the per-read tiku_adc_config_t is accepted but not acted on;
- * the result is returned as a 12-bit count to match the shell's 0x%03X view.
+ * Not a standalone unit: included from the per-part entry files, which supply the
+ * CMSIS header and a clock hook.  The ADC register block is identical across both
+ * parts, so the whole polled single-conversion path lives here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

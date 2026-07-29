@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_apollo4l.c - Apollo4 Lite GPIO access (bare-metal)
+ * tiku_gpio_apollo4l.c - Apollo4 Lite GPIO access (bare-metal).
  *
- * Mirrors arch/ambiq/tiku_gpio_arch.c (Apollo510). The Apollo4 Lite GPIO block
- * is register-compatible for the operations tikuOS uses: the per-pad PINCFG0[]
- * array has FNCSEL[2:0] (3=GPIO), INPEN[4], OUTCFG[9:8] (1=push-pull) at the
- * same positions, and the WTS0/WTC0/WT0/RD0 set/clear/toggle/read banks are
- * indexed by pad/32 exactly as on Apollo510. PADKEY unlock value is 0x73.
+ * Mirrors the Apollo510 driver: the GPIO block is register-compatible for every
+ * operation used here, with the same PINCFG field positions and the same
+ * pad/32-indexed set, clear, toggle and read banks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

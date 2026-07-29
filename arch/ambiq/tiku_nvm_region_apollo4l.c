@@ -5,32 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_region_apollo4l.c - Apollo4 Lite carved-MRAM region backend (B).
+ * tiku_nvm_region_apollo4l.c - Apollo4 Lite carved-MRAM region backend.
  *
- * Implements tiku_nvm_backend_get() over the linker-carved MRAM span
- * (__tiku_nvmfs_base / __tiku_nvmfs_size in apollo4l.ld), reserved between the
- * code window and the 32 KB .uninit mirror.  This is the "direct MRAM" backend
- * the file store and the NVM tier were designed for -- megabytes of NVM read in
- * place, with NO SRAM shadow.
- *
- *   read  : the region is memory-mapped (MPU region 0 maps all MRAM RO), so a
- *           consumer dereferences be->base + off directly.
- *   write : MRAM is programmed by the on-chip bootrom (nv_program_main2), NOT
- *           by CPU stores, and only in whole 32-bit words from a 16-byte-aligned
- *           source.  region_write() therefore does a read-modify-program: for
- *           each 16-byte-aligned window overlapping the write, it stages the
- *           current region bytes into a small aligned TCM buffer, overlays the
- *           new bytes, and programs the window.  MRAM is direct-write (no erase,
- *           unlike NOR flash).  Callers must already hold the NVM unlock window
- *           (tiku_mpu_unlock_nvm()); this backend does not open it.
- *
- * The bootrom entry (0x0800006D) and program key match the mirror flush in
- * tiku_mem_apollo4l.c (AmbiqSuite R4.5.0 g_am_hal_bootrom_helper).  The Cortex-M4
- * has no L1 data cache and the TCM staging buffer is uncached, so nothing is
- * cleaned before the program; AFTER programming, the unified CACHECTRL cache
- * (which serves both data reads and instruction fetches from MRAM) is flushed
- * so same-session readers -- and the Tier-3 module loader's XIP call -- see
- * the fresh bytes.
+ * Reads dereference the memory-mapped region directly.  Writes go through the
+ * bootrom in whole words from an aligned source, so region_write() stages,
+ * overlays and programs each window; the caller must already hold the unlock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

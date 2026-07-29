@@ -5,25 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_arch.c - Apollo 510 CPU/SoC bring-up + clocks
+ * tiku_cpu_freq_boot_arch.c - Apollo510 CPU/SoC bring-up and clocks.
  *
- * Clock facts (Apollo510, hardware-confirmed):
- *   - CPU core: 96 MHz in Low-Power mode (the SBL default), ~250 MHz in
- *     High-Performance "turbo" mode (the M55 runs from the free-running
- *     HFRC2; there is no HP frequency select -- CMSIS comments saying 192
- *     are stale Apollo4-era text). HP is a live feature now: `freq 250`
- *     performs the full SPOT bring-up; see tiku_cpu_freq_ambiq_init().
- *   - SysTick timer clock: 48 MHz = core/2 on this Cortex-M55. That is the OS
- *     tick + busy-delay timebase (see TIKU_MAIN_CPU_HZ in tiku.h, and the
- *     SysTick delay in tiku_cpu_common.c) — NOT the core clock.
- *   - The HFRC "free-run ~48 MHz" the SBL leaves running is a peripheral
- *     reference oscillator, unrelated to the core clock.
- * s_core_hz below reports the TRUE core clock (read from the perf-mode reg).
- *
- * SoC bring-up is fully bare-metal now (direct CMSIS register access, no
- * AmbiqSuite SDK): it enables the I/D caches + M55 prefetch unit and otherwise
- * inherits the power rails and clock tree exactly as the secure bootloader
- * (SBL) left them. Each dropped am_hal_* call is documented inline below.
+ * Fully bare-metal: direct CMSIS register access, no AmbiqSuite.  Bring-up enables
+ * the I/D caches and the M55 prefetch unit and otherwise inherits the rails and
+ * clock tree the secure bootloader left.  See the clock facts at s_core_hz.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,6 +18,16 @@
 #include "tiku_cpu_freq_boot_arch.h"
 
 /** True CPU core frequency in Hz; updated from the perf-mode register at boot */
+/*
+ * CLOCK FACTS, hardware-confirmed.  Three different rates get confused here:
+ *   - CPU core: 96 MHz in Low-Power (the SBL default), ~250 MHz in
+ *     High-Performance.  There is no HP frequency select; CMSIS comments
+ *     saying 192 are stale Apollo4-era text.
+ *   - SysTick: 48 MHz = core/2 on this M55.  That is the OS tick and
+ *     busy-delay timebase -- NOT the core clock.
+ *   - The HFRC "free-run ~48 MHz" the SBL leaves running is a peripheral
+ *     reference oscillator, unrelated to the core clock.
+ */
 static unsigned long s_core_hz = 96000000UL;  /* true CPU core; set from perf mode */
 
 /**

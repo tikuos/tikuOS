@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_apollo4l.c - Apollo4 Lite console (COM UART2)
+ * tiku_uart_apollo4l.c - Apollo4 Lite console (COM UART2).
  *
- * Bare-metal driver for UART2 (the EVB COM UART) on TX=pad 54 / RX=pad 11 at
- * TIKU_BOARD_UART_BAUD (default 115200, 8N1). The Apollo4 UART is PL011-based,
- * register-compatible with the Apollo510 driver (UART0_* field macros apply to
- * all instances); this talks straight to UART2 via the CMSIS register map -- no
- * AmbiqSuite. Bring-up: power (PWRCTRL.DEVPWREN.PWRENUART2 + wait), pins
- * (FUNCSEL=4 on pads 54/11), clock (CLKSEL=24 MHz HFRC tap + CLKEN), baud, 8N1.
- *
- * This milestone provides the TX path (puts/printf) used for first light; the
- * interrupt-driven RX ring is added with the full-kernel/shell milestone.
+ * Bare-metal PL011-based driver straight to the CMSIS register map, with no
+ * vendor HAL: power the instance, route the pads, select the HFRC tap, then set
+ * baud and framing.  TX only for now; the interrupt RX ring lands with the shell.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

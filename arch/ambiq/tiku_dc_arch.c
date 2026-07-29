@@ -5,19 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_dc_arch.c - Apollo510 display path: NemaDC + DSI host + CO5300 panel.
+ * tiku_dc_arch.c - Apollo510 display path: NemaDC, DSI host and CO5300 panel.
  *
- * From-scratch, register-level, no vendor code linked. Provenance of every
- * sequence below (three independent sources, cross-checked):
- *   [TSI]  open MIT-granted ThinkSi sources: nema_dc_regs.h/_intern/_mipi/_dsi
- *          register map + the fully-open Ambiq port layer nema_dc_hal.c
- *          (configure / command-send / frame-transfer orchestration).
- *   [DIS]  disassembly of the vendored blobs (lib_nema_apollo510_nemagfx.a
- *          nema_dc*.o primitives; libam_hal.a am_hal_dsi/clkgen/pwrctrl).
- *   [CAP]  J-Link register capture of the vendor demo running on this exact
- *          board (2026-07-23) -- the golden values quoted in comments. Where
- *          an algorithm was not recovered bit-exact (D-PHY timing), the
- *          captured words are carried as constants for the shipped frequency.
+ * From-scratch and register-level, with no vendor code linked.  Every sequence
+ * was cross-checked against three sources: the MIT-granted ThinkSi register map,
+ * disassembly of the vendored blobs, and a J-Link capture of the vendor demo.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

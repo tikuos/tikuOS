@@ -5,22 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_dc_arch.h - Apollo510 display path: NemaDC + DSI host + CO5300 panel.
+ * tiku_dc_arch.h - Apollo510 display path: NemaDC, DSI host and CO5300 panel.
  *
- * From-scratch, register-level -- NO AmbiqSuite HAL, no NemaDC library. The
- * register sequences were recovered from the vendored MIT-granted ThinkSi
- * sources (nema_dc_regs.h + the open nema_dc_hal.c port layer), disassembly
- * of the vendored libam_hal.a/lib_nema_apollo510_nemagfx.a treated as
- * documentation, and a J-Link register capture of the running vendor demo
- * (golden values noted in-line in the .c). See temp/gpu-roadmap.md.
- *
- * Scope (first milestone): the Apollo510 EVB round-display kit -- 468x468
- * CO5300 AMOLED on MIPI DSI (1 lane, 16-bit DBI bridge, trim X20). Synchronous
- * one-shot frame pushes, polled completion, no TE sync yet. The DC scans any
- * SSRAM surface; pair with tiku_gpu_arch for GPU-rendered frames.
- *
- * Cache rule: the DC is a non-coherent bus master READING the framebuffer --
- * tiku_dc_present() cleans the D-cache range before the push.
+ * Drives the round 468x468 AMOLED over MIPI DSI with synchronous one-shot frame
+ * pushes and polled completion.  The DC is a non-coherent bus master reading the
+ * framebuffer, so present() cleans the D-cache range before each push.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

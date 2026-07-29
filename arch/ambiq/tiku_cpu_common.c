@@ -5,13 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - Apollo 510 common CPU helpers (delays, IDs)
+ * tiku_cpu_common.c - Apollo510 common CPU helpers (delays, IDs).
  *
- * Bare-metal delays spin on the Cortex-M SysTick counter — reliable (unlike
- * the Apollo5 DWT, which ticks at 2x the core and broke a DWT-based delay) and
- * sharing the exact clock basis as the system tick, so a delay and a tick can
- * never disagree. Scaled by the SysTick clock = TIKU_MAIN_CPU_HZ = 96 MHz, the
- * full M55 core (SysTick CLKSOURCE=processor). No AmbiqSuite dependency.
+ * Delays spin on SysTick rather than DWT, which ticks at twice the core on this
+ * part and once broke a DWT-based delay.  SysTick also shares the system tick's
+ * clock basis, so a delay and a tick can never disagree.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

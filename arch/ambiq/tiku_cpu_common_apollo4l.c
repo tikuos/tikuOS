@@ -5,12 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common_apollo4l.c - Apollo4 Lite common CPU helpers (delays, IDs)
+ * tiku_cpu_common_apollo4l.c - Apollo4 Lite common CPU helpers (delays, IDs).
  *
- * Mirrors arch/ambiq/tiku_cpu_common.c (Apollo510). Bare-metal delays spin on
- * the Cortex-M SysTick down-counter (core peripheral, identical on M4 and M55),
- * scaled by TIKU_MAIN_CPU_HZ. Falls back to a NOP spin when SysTick is not yet
- * configured (e.g. the minimal smoke build, which has no kernel tick).
+ * Mirrors the Apollo510 file: delays spin on the SysTick down-counter, which is
+ * identical on M4 and M55, and fall back to a NOP spin when SysTick is not yet
+ * configured -- as in the minimal smoke build, which has no kernel tick.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
