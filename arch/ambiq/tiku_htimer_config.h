@@ -22,21 +22,18 @@
 /**
  * @brief Hardware timer tick rate in ticks per second.
  *
- * Set to the MEASURED STIMER rate: the XTAL_32KHZ tap (STCFG.CLKSEL=3)
- * counts at crystal/2 = 16384 Hz on this board, confirmed by the htimer
- * shell self-test. Using 16384 rather than the nominal 32768 keeps
- * htimer intervals time-accurate (~61 us/tick). See the file header for
- * the full rationale.
+ * Set to the MEASURED STIMER rate: the XTAL_32KHZ tap (STCFG.CLKSEL=3) counts
+ * at crystal/2 = 16384 Hz on this board, confirmed by the htimer shell
+ * self-test, which keeps htimer intervals time-accurate (~61 us/tick).
  */
 #define TIKU_HTIMER_ARCH_SECOND  16384UL
 
 /**
  * @brief Minimum scheduling lead, in htimer ticks.
  *
- * The generic default is (TIKU_HTIMER_ARCH_SECOND >> 14) = 1 at our 16384 Hz
- * rate -- too tight: it lets a now+1 schedule through, racing the STIMER
- * compare-write latency. Pin it to 2 ticks (~122 us), matching the 32768 Hz
- * parts' effective guard, so a target within 1 tick is rejected with ERR_TIME.
+ * The generic default of (TIKU_HTIMER_ARCH_SECOND >> 14) = 1 at 16384 Hz is too
+ * tight: it lets a now+1 schedule through, racing the STIMER compare-write
+ * latency.  Pinned to 2 ticks (~122 us), matching the 32768 Hz parts.
  */
 #define TIKU_HTIMER_CONF_GUARD_TIME  2
 

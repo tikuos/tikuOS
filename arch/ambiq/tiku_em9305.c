@@ -62,7 +62,8 @@ static inline void cs_assert(void)   { tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_CS_
 static inline void cs_release(void)  { tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_CS_PIN, 1); }
 static inline int  rdy_high(void)    { return tiku_gpio_arch_read(EM_RDY_PORT, EM_RDY_PIN) == 1; }
 
-/** Rough busy delay. ~96 MHz core; a volatile decrement is ~20 iters/us. Only
+/** Rough busy delay. ~96 MHz core; a volatile decrement is ~20 iters per
+ *  microsecond. Only
  *  used for short, non-critical spacing (reset pulse, inter-retry gaps). */
 static void busy_us(uint32_t us) {
     volatile uint32_t n = us * 20u;
@@ -116,13 +117,13 @@ static void pins_init(void) {
 /**
  * @brief Open a frame: wait RDY, assert CS, exchange the header + status.
  *
- * On success returns OK with CS left ASSERTED (the caller moves the payload and
- * then calls cs_release()) and @p sts2 = the controller's free/available byte
- * count. On any failure CS is released before returning.
+ * On success CS is left ASSERTED -- the caller moves the payload and then calls
+ * cs_release() -- and @p sts2 holds the controller's free-byte count.  On any
+ * failure CS is released before returning.
  *
- * Chip-select is asserted BEFORE waiting on RDY: a host-initiated write only
- * gets an RDY assertion once the controller sees CS low (CS is the prompt). The
- * read path already has RDY high when it arrives, so this order works for both.
+ * @note CS is asserted BEFORE waiting on RDY: a host-initiated write only gets
+ *       an RDY assertion once the controller sees CS low.  The read path
+ *       already has RDY high on arrival, so this order works for both.
  */
 static int frame_begin(uint8_t header, uint8_t *sts2) {
     uint8_t tx[2];
@@ -314,7 +315,7 @@ int tiku_em9305_probe(tiku_em9305_probe_t *out) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* HCI command helper + LE beacon (M2)                                       */
+/* HCI command helper + LE beacon                                            */
 /*---------------------------------------------------------------------------*/
 
 #define HCI_OP_RESET             0x0C03u

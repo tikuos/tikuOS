@@ -83,9 +83,8 @@ const void *tiku_simd_power_buf(unsigned tier)
 /**
  * Bytes of memory traffic for one pass over @p n elements.
  *
- * Counted as reads + writes, so the figure is comparable with the GPU's, which
- * experiment 2 accounted the same way (a copy is 2n: read n, write n).  A
- * reduction reads n and writes one word, so it counts as n.
+ * Counted as reads + writes, so the figure is comparable with the GPU's: a copy
+ * is 2n, while a reduction reads n and writes one word so it counts as n.
  */
 static uint32_t sp_bytes_of(unsigned kind, uint32_t n)
 {

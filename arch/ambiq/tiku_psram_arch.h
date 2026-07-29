@@ -62,8 +62,8 @@
  *                                  SFTURN0=10, rest 0)
  * 14  FIFO thresholds             THRESHOLD.RXTHRESH=30,        speed-class
  *                                 DMATHRESH (only with a TCB)   dependent
- * 15  unlink IOM                  MSPICFG.IOMSEL = NONE         we are not
- *                                                               bridging an IOM
+ * 15  unlink IOM                  MSPICFG.IOMSEL = NONE         no IOM is
+ *                                                               bridged here
  * 16  configure the pads          GPIO.PINCFG[64..73, 199]      AFTER the
  *                                                               controller
  * 17  settle                      150 us delay                  vendor
@@ -206,9 +206,8 @@ int tiku_psram_powered(void);
  * @brief Read the device's mode registers and check identity.
  *
  * Table-1 step 19 plus the identity gate.  @p out is filled whenever the
- * transfers succeeded, EVEN IF the identity is wrong -- the caller needs the
- * raw bytes to diagnose a mis-timed bus, so the values are reported and the
- * verdict is returned separately.
+ * transfers succeeded, EVEN IF the identity is wrong -- the caller needs the raw
+ * bytes to diagnose a mis-timed bus, so the verdict is returned separately.
  *
  * @param out  filled with mode registers and decoded fields (may be NULL)
  * @return TIKU_PSRAM_OK if identity matches U14; ERR_ID if it answered with
@@ -339,9 +338,10 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
  * @brief Hardware-chained DMA via the command queue (M3.5).
  *
  * Splits @p total into @p seg_bytes segments, builds the vendor-shaped
- * descriptor list, and lets the CQ engine run every segment with no CPU in
- * the seams.  Cache coherency of @p sram is the caller's job; XIP must be
- * off.  total/seg_bytes <= 66 segments per call.
+ * descriptor list, and lets the CQ engine run every segment with no CPU in the
+ * seams.  Cache coherency of @p sram is the caller's job; XIP must be off.
+ *
+ * @note total/seg_bytes must be <= 66 segments per call.
  */
 tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
                                     uint32_t total, uint32_t seg_bytes,

@@ -52,10 +52,9 @@ static inline void pad_config(uint32_t pad, uint32_t cfg) {
 /**
  * @brief Public pad-config write, for drivers that own alternate functions.
  *
- * Exists so that a peripheral driver (MSPI/PSRAM, and later SDIO) can hand
- * its pads to the controller without each one hand-rolling the PADKEY
- * unlock -- the same reason the persist-cell API owns the NVM unlock
- * windows.  The caller composes the PINCFG value; this owns the lock.
+ * Lets a peripheral driver hand its pads to the controller without each one
+ * hand-rolling the PADKEY unlock -- the same reason the persist-cell API owns
+ * the NVM unlock windows.  The caller composes the value; this owns the lock.
  *
  * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1); out of range is
  *             ignored rather than writing past the register array

@@ -67,15 +67,12 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
 /**
  * @brief Program an arbitrary MRAM span via the bootrom (absolute address)
  *
- * The chunked read-modify-program loop shared by the carved-region write
- * path and the Tier-3 module loader: 16-byte-aligned spans staged through
- * the SSRAM window (nvmr_stage), sub-16-byte edges merged with the
- * existing MRAM contents, D-cache cleaned before / programmed span
- * invalidated after each bootrom call (inside mram_program_span).
+ * The chunked read-modify-program loop shared by the carved-region write path
+ * and the Tier-3 module loader: 16-byte-aligned spans staged through the SSRAM
+ * window, edges merged with existing MRAM, D-cache cleaned before each call.
  *
- * Bounds: refuses anything below user MRAM (the SBL and its vectors live
- * at 0x400000..0x410000) or past the 4 MB MRAM end.
- *
+ * @note Refuses anything below user MRAM (the SBL and its vectors live at
+ *       0x400000..0x410000) or past the 4 MB MRAM end.
  * @param dst  Absolute destination address in MRAM
  * @param src  Source bytes (staged; may live in MRAM itself)
  * @param len  Number of bytes to program

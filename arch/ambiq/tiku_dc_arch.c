@@ -30,7 +30,7 @@
 #define DSI_RD(off)     REG32(DSI_BASE + (off))
 #define DSI_WR(off, v)  (REG32(DSI_BASE + (off)) = (v))
 
-/* Blocks the CMSIS header names but whose members we address by offset so
+/* Blocks the CMSIS header names but whose members are addressed by offset so
  * every write maps 1:1 onto the recovered sequences. */
 #define CLKGEN_DISPCLKCTRL   REG32(CLKGEN_BASE + 0x84u)
 #define CLKGEN_CLKCTRL       REG32(CLKGEN_BASE + 0x120u)
@@ -107,7 +107,7 @@
 /*
  * D-PHY timing words for FREQ_TRIM_X20 (240 MHz PLL, 480 Mbps/lane). The
  * vendor computes these from D-PHY spec targets in double-precision at run
- * time; the selection logic is not recovered bit-exact, so we carry the
+ * time; the selection logic is not recovered bit-exact, so this carries the
  * words [CAP]tured from this board at this trim. Recompute/redump if the
  * trim ever changes.
  */

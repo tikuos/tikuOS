@@ -64,10 +64,9 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /**
  * @brief SysTick reload value.
  *
- * SysTick is clocked from the core clock; reload = core_hz / TICK_HZ.
- * TIKU_MAIN_CPU_HZ tracks MAIN_CPU_FREQ so the tick stays accurate
- * when the core frequency changes. At 96 MHz and 128 Hz this is
- * 750000 — well within SysTick's 24-bit reload limit (16777215).
+ * SysTick is clocked from the core clock, so reload = core_hz / TICK_HZ, and
+ * TIKU_MAIN_CPU_HZ tracks MAIN_CPU_FREQ so the tick stays accurate across a
+ * frequency change.  At 96 MHz and 128 Hz this is 750000 (24-bit limit).
  */
 #define TIKU_CLOCK_ARCH_INTERVAL  (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND)
 
@@ -178,12 +177,12 @@ int                    tiku_clock_arch_fine_max(void);
 /**
  * @brief Switch the STIMER timebase: XTAL 32.768 kHz <-> LFRC ~900 Hz.
  *
- * The crystal dies under real (debugger-free) deep sleep on this port, which
- * froze the STIMER and turned the tickless stretch into a sleep with no
- * alarm.  The deep path reclocks to the LFRC around the sleep window.
- * Verified switch (reverts to XTAL on a dead source), tick accounting stays
- * continuous, refuses while a tickless stretch is open.
+ * The crystal dies under real (debugger-free) deep sleep on this port, freezing
+ * the STIMER and turning a tickless stretch into a sleep with no alarm, so the
+ * deep path reclocks to the LFRC around the sleep window.
  *
+ * @note Verified switch (reverts to XTAL on a dead source); tick accounting
+ *       stays continuous; refuses while a tickless stretch is open.
  * @param use_lfrc  non-zero: to LFRC (rate measured against DWT); 0: to XTAL
  * @return new rate in Hz, or 0 on failure (timebase left on XTAL)
  */

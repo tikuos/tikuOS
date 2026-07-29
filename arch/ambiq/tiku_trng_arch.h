@@ -20,8 +20,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/**
- * @brief Return codes for the TRNG driver.
+/*
+ * Return codes for the TRNG driver.
  *
  * TIKU_TRNG_OK            — success.
  * TIKU_TRNG_ERR_INVALID   — NULL pointer or zero-length buffer.
@@ -44,10 +44,9 @@ void tiku_trng_arch_init(void);
 /**
  * @brief Block until a 32-bit random word is available; return it.
  *
- * Fast path returns the next word from the 6-word software cache the
- * hardware already filled; slow path re-arms the ring-oscillator source and
- * spins on EHR_VALID (re-arming on a health-test failure) for a bounded
- * budget before giving up — see TIKU_TRNG_ERR_TIMEOUT.
+ * The fast path returns the next word from the 6-word software cache the
+ * hardware already filled; the slow path re-arms the ring-oscillator source and
+ * spins on EHR_VALID for a bounded budget, re-arming on a health-test failure.
  *
  * @param out  Where to store the random word. Must not be NULL.
  * @return TIKU_TRNG_OK or a negative error code.

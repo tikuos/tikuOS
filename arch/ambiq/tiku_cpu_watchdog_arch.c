@@ -24,12 +24,11 @@
  * @brief Map the TikuOS interval selector to an Apollo (CLKSEL, RESVAL) pair.
  *
  * tiku_wdt_interval_t carries a divider on a nominal 32768 Hz ACLK, so the
- * requested timeout is (isel / 32768) s -- e.g. 64 -> ~2 ms, 32768 -> ~1 s
- * (see hal/tiku_watchdog_hal.h). Apollo has only the LFRC, so the timeout is
- * realised on the finest LFRC tap that can hold it in <= 255 counts; requests
- * below one 128 Hz tick (~7.8 ms) clamp up to one tick. `src` (SMCLK vs ACLK)
- * selects no clock here -- Apollo has no high-frequency WDT source.
+ * requested timeout is (isel / 32768) s.  Apollo has only the LFRC, so it is
+ * realised on the finest LFRC tap that holds it in <= 255 counts.
  *
+ * @note Requests below one 128 Hz tick (~7.8 ms) clamp up to one tick, and
+ *       `src` selects nothing -- Apollo has no high-frequency WDT source.
  * @param isel    Interval selector (clock divider on a 32768 Hz basis).
  * @param clksel  Out: WDT_CFG_CLKSEL_* field value (128/16/1 Hz).
  * @param resval  Out: 8-bit reset compare value (1..255).
@@ -81,12 +80,12 @@ void tiku_cpu_ambiq_watchdog_off_arch(void) {
 /**
  * @brief Enable and configure the watchdog timer.
  *
- * Programs the LFRC clock tap and reset compare from @p isel, enables the
- * WDT reset path (both WDT.RESEN and RSTGEN.WDREN), and starts the counter
- * from zero. Armed in reset-only mode: INTVAL is parked at max with INTEN
- * clear. The lock register is left untouched so pause()/off()/reconfigure
- * can still write CFG.
+ * Programs the LFRC clock tap and reset compare from @p isel, enables the reset
+ * path (both WDT.RESEN and RSTGEN.WDREN), and starts the counter from zero.
+ * Armed reset-only: INTVAL parked at max with INTEN clear.
  *
+ * @note The lock register is left untouched so pause()/off()/reconfigure can
+ *       still write CFG.
  * @param src   Clock source (ignored -- Apollo drives the WDT from the LFRC).
  * @param isel  Timeout interval selector.
  */

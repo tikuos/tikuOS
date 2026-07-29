@@ -82,17 +82,14 @@ in the Makefile."
 #define NOR_PAD_DQS    TIKU_BOARD_NOR_PAD_DQS
 #define NOR_PAD_CE     TIKU_BOARD_NOR_PAD_CE
 /*
- * RSTn and the load switch also come from the board header now.
+ * RSTn and the load switch also come from the board header.
  *
- * There USED to be a `#if defined(TIKU_BOARD_APOLLO510_EVB) / #else` here
- * carrying a second set of pads for the Blue EVB (RST GP17, no load switch),
- * kept "so the driver still compiles on that board".  After the capability
- * split that branch is unreachable: the Blue board declares no NOR cap, so
- * TIKU_DRV_NOR_ENABLE=1 is refused at make time and this file is never
- * compiled for it.  Carrying pin numbers for a part that is not on the board
- * is the fiction the split exists to end, so the branch is gone rather than
- * left to rot -- if a future board fits a NOR, it declares the cap and its own
- * pads, and this driver needs no edit at all.
+ * There is deliberately no per-board `#if` here carrying a second set of pads:
+ * a board without a NOR declares no NOR cap, so TIKU_DRV_NOR_ENABLE=1 is
+ * refused at make time and this file is never compiled for it.  Carrying pin
+ * numbers for a part that is not on the board is the fiction the capability
+ * split exists to end -- a future board that fits a NOR declares the cap and
+ * its own pads, and this driver needs no edit at all.
  */
 #define NOR_PAD_RST    TIKU_BOARD_NOR_PAD_RST
 #define NOR_PAD_LSEN   TIKU_BOARD_NOR_PAD_LSEN
@@ -166,10 +163,8 @@ unsigned long tiku_nor_clock_hz(void)
  * @brief One PIO command on MSPI1.
  *
  * Deliberately a near-copy of the PSRAM's psram_pio2 rather than a shared
- * helper: the two devices disagree about instruction width, latency and
- * which phases exist, and a single parameterised routine serving both would
- * hide exactly the differences that matter.  Same discipline though --
- * bounded everywhere, distinct errors, drain-as-you-go, XIP guard.
+ * helper: the two devices disagree about instruction width, latency and which
+ * phases exist, so one parameterised routine would hide what matters.
  *
  * @param instr    opcode (1 byte in serial, 2 duplicated bytes in octal)
  * @param addr     device address; ignored when @p send_addr is 0
@@ -383,7 +378,7 @@ void tiku_nor_power(int on)
      *
      * DANGER, LEARNED THE HARD WAY: GP208's polarity and its true load are
      * NOT established.  The schematic names the net MSPI1_LS_EN_GP208 into
-     * a LOADSW input but does not tell us the sense, and the first session
+     * a LOADSW input without stating the sense, and the first session
      * that drove this pad ended with the board unreachable over SWD at
      * every speed and reset type -- a physical power cycle was required.
      * Nothing in the bring-up path touches it any more; it is reachable
@@ -814,13 +809,13 @@ void tiku_nor_ls_set(int level)
  * The instrument that cracked the PSRAM, ported to MSPI1's pads and to
  * single-lane SPI.  Drives CE/CLK/D0 by hand and samples D1, so it answers
  * the only question that matters at first contact: IS THE DEVICE ALIVE AND
- * DOES IT SPEAK SERIAL SPI?  Everything about the controller's framing,
- * latency and lane assignment is out of the picture.
+ * DOES IT SPEAK SERIAL SPI?  The controller's framing, latency and lane
+ * assignment are out of the picture.
  *
  * Serial SPI here is mode 0: data launched on the falling edge, sampled by
- * the device on the rising edge; the device returns data on D1, which we
- * sample after each rising edge.  Microsecond edges -- far slower than any
- * timing requirement.
+ * the device on the rising edge; the device returns data on D1, sampled after
+ * each rising edge.  Microsecond edges -- far slower than any timing
+ * requirement.
  */
 
 #define BB_OUT  (PAD_FNCSEL_GPIO | PAD_OUTCFG_PUSHPULL | PAD_INPEN | PAD_DS_0P5X)
@@ -852,7 +847,7 @@ void tiku_nor_bitbang_id(uint8_t *out, uint32_t n_bytes)
     tiku_ambiq_gpio_set(NOR_PAD_RST, 1u);
     tiku_cpu_ambiq_delay_us(500u);
 
-    /* Claim the four pins we need; leave the rest of the bus alone. */
+    /* Claim the four pins this path drives; leave the rest of the bus. */
     tiku_ambiq_gpio_pad_config(NOR_PAD_CE,  BB_OUT);
     tiku_ambiq_gpio_pad_config(NOR_PAD_CLK, BB_OUT);
     tiku_ambiq_gpio_pad_config(NOR_PAD_D0,  BB_OUT);
@@ -897,13 +892,13 @@ uint32_t tiku_nor_bitbang_selftest(void)
 {
     /* PROVE THE INSTRUMENT BEFORE BELIEVING ITS VERDICT.
      *
-     * The arbiter reads D1 (GP96).  If that read path is wrong it reports
-     * all-ones forever and looks exactly like a dead device -- so drive D1
-     * as an output, low then high, and read it back each time.  Result bits:
+     * The arbiter reads D1 (GP96).  A wrong read path reports all-ones
+     * forever and looks exactly like a dead device -- so drive D1 as an
+     * output, low then high, and read it back each time.  Result bits:
      *   b0 = value read while driving LOW  (want 0)
      *   b1 = value read while driving HIGH (want 1)
      *   b2 = value read with D1 released to input (the device's own level)
-     *   b3 = same for D0 (GP95), the line we transmit on
+     *   b3 = same for D0 (GP95), the transmit line
      * So 0x02 or 0x06 means the instrument works.  0x03 or 0x07 means the
      * read is stuck high and every all-ff verdict is meaningless.
      */

@@ -75,11 +75,9 @@ int  tiku_i2c_arch_probe(uint8_t addr);
 /**
  * @brief Perform a combined I2C write-then-read transaction.
  *
- * Issues a write followed immediately by a repeated-START and read
- * to the same device address. Commonly used for register reads on
- * I2C sensors and EEPROMs.
- *
- * Stub — returns a not-supported error code.
+ * Issues a write followed immediately by a repeated-START and read to the same
+ * device address, the usual shape for register reads on I2C sensors and
+ * EEPROMs.  Stub on this part -- returns a not-supported error code.
  *
  * @param addr    7-bit I2C target address (unshifted).
  * @param tx_buf  Data buffer to transmit in the write phase.

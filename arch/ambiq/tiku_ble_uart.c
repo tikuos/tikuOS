@@ -43,7 +43,7 @@
 /* LE Meta subevent codes. A controller reports a new link as either the legacy
  * Connection Complete (0x01) or the Enhanced Connection Complete (0x0A); the two
  * share identical leading fields (status, handle, role, peer address), so the
- * same parse handles both -- we just have to accept both subevent codes. */
+ * same parse handles both -- it only has to accept both subevent codes. */
 #define HCI_LE_CONN_COMPLETE       0x01u
 #define HCI_LE_ENH_CONN_COMPLETE   0x0Au
 
@@ -100,7 +100,7 @@
 #define CHAR_PROP_WRITE            0x08u     /* write                           */
 #define CHAR_PROP_NOTIFY           0x10u     /* notify                          */
 
-/* ATT MTU we offer. Notifications carry up to MTU-3 bytes of shell output. */
+/* ATT MTU offered. Notifications carry up to MTU-3 bytes of shell output. */
 #define BLEUART_SERVER_MTU             247u
 
 /* ------------------------------------------------------------------ *
@@ -209,7 +209,7 @@ static uint8_t             s_dbg_nsteps;
 /*
  * Drain any HCI packets the controller already has waiting (RDY asserted).
  *
- * The EM9305 signals "I have something to send" by raising RDY; if we start a
+ * The EM9305 signals "I have something to send" by raising RDY; starting a
  * host *write* while a *read* is pending the framed transaction collides and
  * the command is lost. An HCI host must service events between commands, so
  * clear the pipe (non-blocking: timeout 0 reads only if RDY is already high)
@@ -344,7 +344,7 @@ static int bleuart_advertise(const char *name, uint8_t *bad) {
     static uint8_t adv_data[32];
     uint8_t nlen, idx, en;
 
-    /* Enable the LE meta events we depend on. The controller gates LE events
+    /* Enable the LE meta events this driver depends on. The controller gates
      * (Connection Complete, etc.) behind this mask; on the EM9305 a bare HCI
      * Reset leaves them off, so without this the host never learns a central
      * connected even though the link (and ATT) is live. Enable bits 0..15. */
@@ -580,7 +580,7 @@ static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
         if (len < 7u) { bleuart_att_error(op, 0u, ATT_ERR_INVALID_HANDLE); break; }
         start = rd16(att + 1);
         end   = rd16(att + 3);
-        /* Group type must be Primary Service (0x2800), and our service in range. */
+        /* Group type must be Primary Service (0x2800), the service in range. */
         if (att[5] == (uint8_t)(GATT_PRIMARY_SVC & 0xFFu) &&
             att[6] == (uint8_t)(GATT_PRIMARY_SVC >> 8) &&
             start <= ATT_H_SVC && end >= ATT_H_SVC) {
@@ -723,7 +723,7 @@ static int bleuart_on_event(const uint8_t *ev, uint16_t len) {
 
     /* Number Of Completed Packets: 04 13 len num_h [handle:2 count:2]*.
      * Each acks packets the controller finished transmitting, freeing its ACL
-     * buffers -- the credit our TX flow control waits on. */
+     * buffers -- the credit the TX flow control waits on. */
     if (ev[1] == HCI_EVT_NUM_COMPLETE && len >= 4u) {
         uint8_t nh = ev[3];
         uint8_t i;
@@ -825,7 +825,7 @@ uint8_t tiku_ble_uart_last_meta(uint8_t *buf, uint8_t cap) {
  * Layout: [0]=type [1..2]=handle|flags [3..4]=ACL len [5..6]=L2CAP len
  *         [7..8]=CID [9..]=ATT PDU.
  *
- * Also serves as the connection fallback: if ATT data is flowing but we never
+ * Also serves as the connection fallback: if ATT data is flowing but no
  * saw a Connection Complete event, adopt the link from the ACL handle.
  */
 static int bleuart_on_acl(const uint8_t *acl, uint16_t len) {
@@ -853,7 +853,7 @@ static int bleuart_on_acl(const uint8_t *acl, uint16_t len) {
     }
     {
         int r = bleuart_att_handle(acl + 9, attlen);
-        /* A freshly adopted link reports CONNECTED even though we also just
+        /* A freshly adopted link reports CONNECTED even though the driver just
          * served (e.g.) the MTU request in the same packet. */
         return (adopted == TIKU_BLE_EVT_CONNECTED) ? TIKU_BLE_EVT_CONNECTED : r;
     }

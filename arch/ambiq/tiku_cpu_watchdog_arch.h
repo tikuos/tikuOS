@@ -38,10 +38,9 @@ typedef enum {
 /**
  * @brief Watchdog clock source selector.
  *
- * Chooses the clock that drives the WDT counter. SMCLK is the
- * sub-main (peripheral) clock; ACLK is the low-frequency auxiliary
- * clock (~32 kHz), which extends the maximum timeout and keeps the
- * WDT running during deep-sleep.
+ * Chooses the clock driving the WDT counter.  SMCLK is the sub-main
+ * (peripheral) clock; ACLK is the ~32 kHz auxiliary clock, which extends the
+ * maximum timeout and keeps the WDT running during deep-sleep.
  */
 typedef enum {
     TIKU_WDT_SRC_SMCLK = 0, /**< Sub-main clock (higher frequency). */

@@ -47,10 +47,9 @@
 /**
  * @brief Run one kernel repeatedly for @p ms; returns elapsed microseconds.
  *
- * STIMER-timed (the one clock WFI cannot stop), hang-detector aware.  Reports
- * bytes touched, elements processed, retired passes, DWT cycles, and a result
- * fingerprint -- so this experiment also produces the durable cycles-per-element
- * table that until now existed only in a console scroll.
+ * STIMER-timed (the one clock WFI cannot stop) and hang-detector aware.  Reports
+ * bytes touched, elements processed, retired passes, DWT cycles and a result
+ * fingerprint, giving a durable cycles-per-element table.
  *
  * @param kind     TIKU_SP_*
  * @param backend  TIKU_SP_BACKEND_SCALAR or _HELIUM
@@ -77,7 +76,7 @@ uint32_t tiku_simd_power_fingerprint(void);
  * @brief Verify the two backends agree bit-for-bit on every kernel.
  *
  * Runs each kernel on both backends over identical inputs and compares the full
- * output. No energy figure is worth recording for a kernel whose two paths
+ * output. No energy figure means anything for a kernel whose two paths
  * disagree, so the harness gates on this.
  *
  * @param out_mismatch  Out: bitmask of kernels that differed (0 = all agree).

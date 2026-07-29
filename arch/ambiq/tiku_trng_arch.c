@@ -23,24 +23,24 @@
 #include "apollo4l.h"          /* apollo4l / apollo4p: register-compatible */
 #endif
 
-/**
- * @defgroup trng_config TRNG private configuration
- * @{
+/*
+ * TRNG private configuration.
  *
  * TRNG_ROSC_SEL selects the ring-oscillator length (TRNGCONFIG.RNDSRCSEL,
- * 0..3 = fastest..slowest).  The longer oscillators are better whitened and
- * pass the autocorrelation test more reliably at the cost of fill latency.
- * The slowest (3) + 1000-cycle sampling took ~10 s to gather a ClientHello's
- * worth of entropy on Apollo510 -- long enough to stall the TLS handshake
- * mid-flight -- so use the 2nd-slowest ROSC (2, still well-whitened) at half
- * the sample count (~4x faster fill).  The von Neumann debiaser + the
- * autocorr/CRNGT/VN health tests (re-arm on failure, below) are the quality
- * guarantee at any ROSC/sample setting, so this trades only margin, not bias.
+ * 0..3 = fastest..slowest).  Longer oscillators are better whitened and pass
+ * autocorrelation more reliably, at the cost of fill latency.
+ *
+ * The slowest (3) plus 1000-cycle sampling took ~10 s to gather a
+ * ClientHello's worth of entropy on Apollo510, long enough to stall the
+ * TLS handshake mid-flight.  The 2nd-slowest ROSC at half the sample
+ * count fills ~4x faster; the von Neumann debiaser and the
+ * autocorr/CRNGT/VN health tests are the quality guarantee at any
+ * setting, so this trades margin, not bias.
  *
  * TRNG_SAMPLE_COUNT is the rng_clk cycle count between bit samples
- * (SAMPLECNT1) -- higher = more decorrelation per bit.
+ * (SAMPLECNT1) -- higher means more decorrelation per bit.
  *
- * TRNG_CACHE_WORDS = the six EHR_DATA registers (192 bits per collection).
+ * TRNG_CACHE_WORDS is the six EHR_DATA registers (192 bits per collection).
  * TRNG_SPIN_LIMIT bounds the wait for EHRVALID; TRNG_MAX_RETRIES bounds the
  * health-test re-arm loop.
  */
@@ -51,7 +51,7 @@
 #define TRNG_MAX_RETRIES     16u         /* health-test re-arm attempts        */
 /** @} */
 
-/* RNGISR bits we care about. */
+/* RNGISR bits this driver acts on. */
 #define RNG_ISR_EHR_VALID    (1ul << 0)
 #define RNG_ISR_AUTOCORRERR  (1ul << 1)
 #define RNG_ISR_CRNGTERR     (1ul << 2)

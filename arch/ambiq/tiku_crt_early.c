@@ -24,7 +24,7 @@
  *     on wake, best continuous FP/MVE throughput)
  * 2 = retained (state kept, unit powered down) -- the DEFAULT here
  *
- * 3 (OFF) is rejected below: see the rationale at the write site.
+ * @note 3 (OFF) is rejected below; see the rationale at the write site.
  */
 #ifndef TIKU_AMBIQ_ELP_STATE
 #define TIKU_AMBIQ_ELP_STATE 2u
@@ -65,11 +65,9 @@ extern const ambiq_isr_t tiku_ambiq_vectors[16 + AMBIQ_NUM_EXT_IRQS];
 /**
  * @brief Default (catch-all) exception and IRQ handler
  *
- * Spins on WFE so a debugger halt lands on something recognisable
- * rather than hard-faulting into an unknown location. All vector
- * table slots that tikuOS has not claimed are aliased to this via
- * weak attributes; override by providing a non-weak definition of
- * the corresponding named handler symbol.
+ * Spins on WFE so a debugger halt lands on something recognisable rather than
+ * hard-faulting into an unknown location.  Every vector slot tikuOS has not
+ * claimed aliases here weakly; override with a non-weak named handler.
  */
 static void ambiq_default_handler(void) {
     while (1) {
@@ -124,25 +122,25 @@ void tiku_ambiq_usb_isr(void)              __attribute__((weak, alias("ambiq_def
 /* Reset handler                                                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Apollo510 (Cortex-M55) reset handler — bare-metal startup entry
+/*
+ * Apollo510 (Cortex-M55) reset handler -- bare-metal startup entry.
  *
- * Executed immediately after the SBL transfers control. Performs:
- *   1. Mask maskable IRQs (CPSID i) — prevents spurious interrupts
+ * Executed immediately after the SBL transfers control.  Performs:
+ *   1. Mask maskable IRQs (CPSID i) -- prevents spurious interrupts
  *      during kernel init before the scheduler queue is built.
- *   2. Set SP from __stack linker symbol — robust to alternate entries.
+ *   2. Set SP from the __stack linker symbol -- robust to alternate entries.
  *   3. Set VTOR to tiku_ambiq_vectors (1024-aligned at MRAM 0x410000).
- *   4. Enable FPU (CPACR CP10/CP11) — required by -mfloat-abi=hard.
+ *   4. Enable the FPU (CPACR CP10/CP11) -- required by -mfloat-abi=hard.
  *   5. Set the M55 EPU (FP/MVE) sleep behaviour via PWRMODCTL.CPDLPSTATE
  *      ELPSTATE[5:4] -- see TIKU_AMBIQ_ELP_STATE below -- and enable
  *      ARMv8.1-M LOB (SCB.CCR bit 19).
  *   6. Power up the 3 MB shared SRAM (PWRCTRL.SSRAMPWREN, three groups)
- *      with a bounded wait — .ssram tier buffers live there.
+ *      with a bounded wait -- .ssram tier buffers live there.
  *   7. Copy .data MRAM->DTCM, zero .bss, zero .ssram.
  *   8. Call main(); hang on WFE if main() returns.
  *
- * Fully bare-metal: no AmbiqSuite dependency. CMSIS SystemInit() is
- * not called (its work is done inline above).
+ * Fully bare-metal: no AmbiqSuite dependency, and CMSIS SystemInit() is not
+ * called because its work is done inline above.
  */
 void tiku_ambiq_reset_handler(void) __attribute__((naked, section(".text"), used));
 
@@ -160,7 +158,7 @@ void tiku_ambiq_reset_handler(void) {
      * handler is robust to alternate entry paths. */
     __asm__ volatile ("ldr sp, =__stack");
 
-    /* Point VTOR at our table (the table address is 1024-aligned because
+    /* Point VTOR at this table (the table address is 1024-aligned because
      * it sits at MRAM origin 0x410000). */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_ambiq_vectors;
 
@@ -249,12 +247,12 @@ void tiku_ambiq_reset_handler(void) {
 /**
  * @brief Apollo510 interrupt vector table
  *
- * 16 system exceptions + 135 external IRQs = 151 entries. Placed in
- * .vectors by the linker at MRAM origin (0x410000), naturally satisfying
- * the M55 VTOR 1024-byte alignment requirement. Peripheral slots
- * default to ambiq_default_handler; the four named driver slots point
- * at weak symbols that tikuOS arch drivers override with strong
- * definitions.
+ * 16 system exceptions + 135 external IRQs = 151 entries, placed in .vectors at
+ * MRAM origin (0x410000), which satisfies the M55 VTOR 1024-byte alignment.
+ * Peripheral slots default to ambiq_default_handler.
+ *
+ * @note The four named driver slots point at weak symbols that the arch drivers
+ *       override with strong definitions.
  */
 const ambiq_isr_t tiku_ambiq_vectors[16 + AMBIQ_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {

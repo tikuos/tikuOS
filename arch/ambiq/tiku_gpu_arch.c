@@ -198,7 +198,7 @@ gpu_imem_load(uint32_t slot, uint32_t lo, uint32_t hi)
 
 /*
  * Post-reset processor init -- the de-SDK'd equivalent of the stock library's
- * init sequence (init_nema_regs + blender init), reduced to what our silicon
+ * init sequence (init_nema_regs + blender init), reduced to what this silicon
  * config (LOADCTRL/CONFIG = 0xF4030105: ROP blender present, no depth buffer)
  * actually takes:
  *   - reset the command-list processor and status,
@@ -282,7 +282,7 @@ tiku_gpu_init(tiku_gpu_perf_t perf)
     uint32_t pm;
 
     /* HP3 rides VDDF, which only exists as a regulated rail when the SIMO buck
-     * is running.  The SDK refuses the mode outright otherwise; so do we,
+     * is running.  The SDK refuses the mode outright otherwise, and so does this,
      * rather than select a rail nothing is driving. */
     if (tiku_gpu_perf_needs_vddf(perf) &&
         PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
@@ -506,7 +506,7 @@ gpu_f2u(float f)
  * Load the full 3x3 screen->texture matrix and leave the MatMul active.
  * NemaGFX writes only the coefficients it changes and relies on an identity
  * default that init never programs (both extraction passes flagged this), so
- * we always write all nine -- correctness cannot depend on reset values.
+ * all nine are always written -- correctness cannot depend on reset values.
  * Off-diagonals are zero; only MM00/MM02/MM11/MM12 vary between translate and
  * scale.
  */

@@ -117,7 +117,7 @@ void tiku_ble_uart_tx_credit_reset(void);
 /** @brief Snapshot of the current (or most recent) LE connection. */
 typedef struct {
     uint16_t handle;       /**< HCI connection handle (0xFFFF if none)      */
-    uint8_t  role;         /**< 0 = we are peripheral (expected)            */
+    uint8_t  role;         /**< 0 = peripheral (expected)                   */
     uint8_t  peer_type;    /**< peer address type                           */
     uint8_t  peer[6];      /**< peer address, LSB first (as HCI delivers)   */
 } tiku_ble_uart_conn_t;

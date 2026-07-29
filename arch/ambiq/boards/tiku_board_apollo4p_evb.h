@@ -33,10 +33,9 @@
 /**
  * @brief LED definitions for the Apollo4 Lite EVB.
  *
- * Three EVB user LEDs: LED0 = pad 12, LED1 = pad 13, LED2 = pad 14 (the
- * TIKU_BOARD_LED1/LED2/LED3 macros are 1-indexed and surface as /dev/led0..2).
- * Assumed active-low (ON drives the pad low), matching the Apollo510 EVB
- * convention; flip the ON/OFF macros if first-light shows inverted polarity.
+ * Three EVB user LEDs: LED0 = pad 12, LED1 = pad 13, LED2 = pad 14.  The
+ * TIKU_BOARD_LED1/LED2/LED3 macros are 1-indexed and surface as /dev/led0..2.
+ * Assumed active-low, matching the Apollo510 EVB convention.
  */
 #define TIKU_BOARD_LED_COUNT        3
 
@@ -72,11 +71,12 @@
 /**
  * @brief Console UART pin assignments.
  *
- * The Apollo4 PLUS EVB routes its COM/console to UART instance 0 on pads
- * TX=60, RX=47 -- this is the ONE established difference from the Lite EVB
- * (which uses UART2 on 54/11) and the reason this header exists.  The
- * instance/IRQ selection stays in the UART backend, keyed on
- * TIKU_CONSOLE_UART0, because "which UART peripheral" is not a pad fact.
+ * The Apollo4 PLUS EVB routes its COM/console to UART instance 0 on pads TX=60,
+ * RX=47 -- the one established difference from the Lite EVB (UART2 on 54/11)
+ * and the reason this header exists.
+ *
+ * @note The instance/IRQ selection stays in the UART backend, keyed on
+ *       TIKU_CONSOLE_UART0, because "which UART peripheral" is not a pad fact.
  */
 #define TIKU_BOARD_UART_TX_PIN      60U     /**< UART0 TX pad number. */
 #define TIKU_BOARD_UART_RX_PIN      47U     /**< UART0 RX pad number. */

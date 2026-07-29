@@ -91,11 +91,13 @@ void tiku_ambiq_gpio0_isr(void)            __attribute__((weak, alias("ambiq_def
 /**
  * @brief Apollo4 Lite (Cortex-M4F) reset handler -- bare-metal startup entry
  *
- * Executed immediately after the boot ROM transfers control. Unlike the
- * Cortex-M55 startup, there is no EPU power-state, no Low-Overhead-Branch, and
- * no SecureFault. The shared SRAM banks are powered on here when the build
- * places statics in .ssram (the SRAM tier's backing pool); the minimal/smoke
- * build keeps .ssram empty and leaves SSRAM unpowered.
+ * Executed immediately after the boot ROM transfers control.  Unlike the M55
+ * startup there is no EPU power-state, no Low-Overhead-Branch and no
+ * SecureFault.
+ *
+ * @note The shared SRAM banks are powered on here when the build places statics
+ *       in .ssram; the minimal/smoke build keeps .ssram empty and leaves SSRAM
+ *       unpowered.
  */
 void tiku_ambiq_reset_handler(void) __attribute__((naked, section(".text"), used));
 
@@ -107,7 +109,7 @@ void tiku_ambiq_reset_handler(void) {
     /* Set SP explicitly so this handler is robust to alternate entry paths. */
     __asm__ volatile ("ldr sp, =__stack");
 
-    /* Point VTOR at our table (512-aligned at MRAM origin 0x18000). */
+    /* Point VTOR at this table (512-aligned at MRAM origin 0x18000). */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_ambiq_vectors;
 
     /* Enable the FPU: CPACR grants full access to CP10/CP11. Required because
@@ -168,11 +170,12 @@ void tiku_ambiq_reset_handler(void) {
 /**
  * @brief Apollo4 Lite interrupt vector table
  *
- * 16 system exceptions + 84 external IRQs = 100 entries. Placed in .vectors by
- * the linker at MRAM origin (0x18000), satisfying the 512-byte VTOR alignment.
- * All external IRQ slots default to ambiq_default_handler at this milestone;
- * the full-kernel build adds named driver slots (UART2, STIMER, GPIO) with the
- * apollo4l IRQ numbers.
+ * 16 system exceptions + 84 external IRQs = 100 entries, placed in .vectors at
+ * MRAM origin (0x18000), satisfying the 512-byte VTOR alignment.  All external
+ * slots default to ambiq_default_handler at this milestone.
+ *
+ * @note The full-kernel build adds named driver slots (UART2, STIMER, GPIO)
+ *       with the apollo4l IRQ numbers.
  */
 const ambiq_isr_t tiku_ambiq_vectors[16 + AMBIQ_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {

@@ -43,14 +43,12 @@ static int irq_enabled(unsigned irq) {
  * @brief Query the wake sources currently armed
  *
  * Populates @p out->sources with the TIKU_WAKE_* flags whose underlying
- * interrupt is enabled: SysTick (SYST_CSR.TICKINT), and the NVIC-enabled
- * STIMER / UART0 / GPIO0 lines. A NULL @p out is a no-op.
+ * interrupt is enabled: SysTick (SYST_CSR.TICKINT) and the NVIC-enabled STIMER
+ * / UART0 / GPIO0 lines.  A NULL @p out is a no-op.
  *
- * The Apollo510 watchdog (NVIC IRQ 1, often left enabled by the SBL) is the
- * reset watchdog, not the MSP430-style interval-interrupt wake source that
- * TIKU_WAKE_WDT denotes, so it is intentionally not reported (the RP2350
- * query omits WDT likewise).
- *
+ * @note The Apollo510 watchdog (NVIC IRQ 1, often left enabled by the SBL) is
+ *       the reset watchdog, not the interval-interrupt wake source TIKU_WAKE_WDT
+ *       denotes, so it is intentionally not reported.
  * @param out  Wake-source snapshot to populate
  */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {

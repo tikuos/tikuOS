@@ -30,14 +30,15 @@
  * @defgroup UART_RXBUF RX ring buffer configuration
  * @brief Size and mask for the interrupt-driven receive ring buffer.
  *
- * Must be a power of two so the index mask trick works. Default 8 KB so
- * SLIP/IP at high baud survives long stretches where the CPU stops draining
- * the UART (chiefly TLS cert verification, which can stall the main loop tens
- * to ~100+ ms): at 460800 a 256 B ring buffers only ~5.5 ms and overflows on
- * nearly every crypto pause, dropping bytes and forcing TCP retransmits that
- * make HTTPS slower than at 115200. TCP flow control caps in-flight data at the
- * board's window (<=4 KB), so >=2x can't be overrun. Apollo SRAM is MB-class.
- * Override at compile time with -DTIKU_UART_RXBUF_SIZE=<N>.
+ * Must be a power of two so the index mask works.  Default 8 KB so SLIP/IP at
+ * high baud survives the stretches where the CPU stops draining -- chiefly TLS
+ * cert verification, which can stall the main loop 100+ ms.
+ *
+ * @note At 460800 a 256 B ring buffers only ~5.5 ms and overflows on nearly
+ *       every crypto pause, forcing TCP retransmits that make HTTPS slower than
+ *       at 115200.  TCP flow control caps in-flight data at the board's window
+ *       (<=4 KB), so >=2x cannot be overrun.  Override with
+ *       -DTIKU_UART_RXBUF_SIZE=<N>.
  * @{
  */
 #ifndef TIKU_UART_RXBUF_SIZE
@@ -54,11 +55,9 @@
 /**
  * @brief Interrupt-driven RX ring buffer
  *
- * Written in ISR context (tiku_ambiq_uart0_isr), read from task
- * context (tiku_uart_getc / tiku_uart_rx_ready). head and tail are
- * power-of-two indices masked by TIKU_UART_RXBUF_MASK; no critical
- * section is needed on single-core Cortex-M (head is only written by
- * the ISR, tail only by the consumer).
+ * Written in ISR context (tiku_ambiq_uart0_isr), read from task context.  head
+ * and tail are power-of-two indices masked by TIKU_UART_RXBUF_MASK; no critical
+ * section is needed, since only the ISR writes head and only the consumer tail.
  */
 static struct {
     volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE]; /**< Circular byte store */
@@ -73,12 +72,13 @@ static struct {
  *        EVB COM UART.
  *
  * The base Apollo510 EVB wires its J-Link VCOM to UART0 (pads 30/55, funcsel 4,
- * IRQ 15). The Apollo510 Blue EVB (apollo510b) routes it to UART1 (pads 12/14,
- * funcsel 5, IRQ 16) instead -- selected by the build via -DTIKU_CONSOLE_UART1.
- * Only the instance pointer, the PWRCTRL enable/status bits and the NVIC line
- * differ: UART1 is a UART0_Type* at UART1_BASE, so the PL011 register layout and
- * every UART0_* bitfield macro below apply to it unchanged. The pads + funcsel
- * come from the selected board header (tiku_board_apollo510[b]_evb.h).
+ * IRQ 15); the Blue EVB routes it to UART1 (pads 12/14, funcsel 5, IRQ 16),
+ * selected by -DTIKU_CONSOLE_UART1.
+ *
+ * @note Only the instance pointer, the PWRCTRL bits and the NVIC line differ:
+ *       UART1 is a UART0_Type* at UART1_BASE, so the PL011 layout and every
+ *       UART0_* macro apply unchanged.  Pads and funcsel come from the board
+ *       header.
  * @{
  */
 #if defined(TIKU_CONSOLE_UART1)
@@ -111,11 +111,9 @@ static struct {
 /**
  * @brief Route a GPIO pad to a peripheral function
  *
- * Writes the FUNCSEL field of the pad's PINCFG register, leaving all
- * other fields at zero (the UART drives TX / reads RX through the
- * function mux, not the GPIO in/out path). PADKEY must be written with
- * the unlock value before the PINCFG store; this function handles both.
- * Mirrors the BSP's COM-UART pincfg sequence.
+ * Writes the FUNCSEL field of the pad's PINCFG register, leaving the other
+ * fields zero -- the UART drives TX and reads RX through the function mux, not
+ * the GPIO path.  PADKEY is unlocked before the store, both handled here.
  *
  * @param pad      Pad number (0-based index into GPIO->PINCFG0[])
  * @param funcsel  FUNCSEL[3:0] value to program
@@ -130,21 +128,20 @@ static void uart_pad_funcsel(uint32_t pad, uint32_t funcsel) {
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize UART0 for 8N1 console operation
+/*
+ * Initialize UART0 for 8N1 console operation.
  *
- * Performs the full bring-up sequence in PL011 order:
+ * The full bring-up sequence in PL011 order:
  *   1. Power: enables the UART0 peripheral domain via PWRCTRL.DEVPWREN
- *      and waits for DEVPWRSTATUS (core of am_hal_pwrctrl_periph_enable,
- *      minus the spot-manager optimisation).
+ *      and waits for DEVPWRSTATUS.
  *   2. Pins: routes pads 30 (TX) and 55 (RX) to UART0 via FUNCSEL=4.
  *   3. Clock: selects the 24 MHz HFRC tap (CLKSEL) and enables it (CLKEN);
- *      HFRC is already running so no clock-manager request is needed.
+ *      HFRC is already running, so no clock-manager request is needed.
  *   4. Baud: programs IBRD and FBRD from TIKU_BOARD_UART_BAUD and a
  *      24 MHz reference.
  *   5. Line control: 8 data bits (WLEN=3), FIFOs enabled, no parity, 1 stop.
- *   6. Interrupts: clears all pending flags, enables RX, RX-timeout, and
- *      overrun interrupts, then unmasks UART0 in the NVIC.
+ *   6. Interrupts: clears pending flags, enables RX, RX-timeout and overrun,
+ *      then unmasks UART0 in the NVIC.
  *   7. Enable: UARTEN + TXE + RXE.
  */
 void tiku_uart_init(void) {
@@ -358,15 +355,13 @@ void tiku_uart_test_inject(uint8_t byte) {
 /**
  * @brief UART0 interrupt service routine — drains the RX FIFO
  *
- * Reads all available bytes from the hardware FIFO into the ring buffer
- * on every RX or RX-timeout interrupt. Increments overrun_count when the
- * software ring is full instead of silently discarding. Clears only the
- * interrupts that were active at entry (mis snapshot).
+ * Reads every available byte from the hardware FIFO into the ring on each RX or
+ * RX-timeout interrupt, incrementing overrun_count when the ring is full rather
+ * than discarding silently.  Clears only the interrupts active at entry.
  *
- * Non-weak so it overrides the default trap in tiku_crt_early.c, which places
- * this handler at the console UART's vector slot (IRQ 15 for UART0, IRQ 16 for
- * UART1 -- both gated on TIKU_CONSOLE_UART1). Drains whichever instance
- * CON_UART resolves to.
+ * @note Non-weak, so it overrides the default trap in tiku_crt_early.c at the
+ *       console UART's vector slot (IRQ 15 for UART0, IRQ 16 for UART1) and
+ *       drains whichever instance CON_UART resolves to.
  */
 void tiku_ambiq_uart0_isr(void) {
     uint32_t mis = CON_UART->MIS;   /* masked interrupt status */
@@ -457,10 +452,9 @@ static void uart_print_int(long v, unsigned width, char pad) {
 /**
  * @brief Lightweight printf over UART0
  *
- * Implements the same minimal format subset as the RP2350 and MSP430
- * drivers: %c, %s, %d, %ld, %u, %lu, %x, %lx, %%, and optional
- * zero/space padding with width. No floating point, no %p, no %n.
- * LF in format strings is converted to CR+LF automatically.
+ * The same minimal format subset as the RP2350 and MSP430 drivers: %c, %s, %d,
+ * %ld, %u, %lu, %x, %lx, %%, and optional zero/space padding with width.  No
+ * floating point, no %p, no %n.  LF is converted to CR+LF automatically.
  *
  * @param fmt  printf-style format string
  * @param ...  Format arguments

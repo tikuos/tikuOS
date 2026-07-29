@@ -97,15 +97,13 @@ void tiku_mem_arch_nvm_flush(void);
 /**
  * @brief Program an arbitrary MRAM span via the on-chip bootrom.
  *
- * Absolute-address twin of the carved-region write path
- * (tiku_nvm_region_apollo510.c): chunked read-modify-program through the
- * SSRAM staging window, D-cache cleaned before each bootrom call and the
- * programmed span invalidated after. Sub-16-byte edges are merged with
- * the existing MRAM contents. Refuses spans touching the SBL/vector area
- * (below user MRAM) or running past the end of MRAM.
+ * Absolute-address twin of the carved-region write path: chunked
+ * read-modify-program through the SSRAM staging window, D-cache cleaned before
+ * each bootrom call and the programmed span invalidated after.
  *
- * Apollo510/510b only (bootrom nv_program_main2 backend).
- *
+ * @note Sub-16-byte edges merge with existing MRAM contents.  Spans touching
+ *       the SBL/vector area or running past the end of MRAM are refused.
+ *       Apollo510/510b only (bootrom nv_program_main2 backend).
  * @param dst  Absolute destination address in MRAM (>= 0x00410000).
  * @param src  Source bytes (any address space; staged through SSRAM).
  * @param len  Number of bytes to program.

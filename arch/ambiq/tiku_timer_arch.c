@@ -59,9 +59,10 @@ static volatile unsigned int   s_subsec  = 0;
  *
  * Leaves SysTick free-running (ENABLE | CLKSOURCE, no TICKINT) so the SYST_CVR
  * micro-delay keeps working, then starts the always-on STIMER periodic tick at
- * TIKU_CLOCK_ARCH_SECOND Hz (STIMER_XTAL_HZ / rate counts per tick). The STIMER
- * survives WFI sleep, so the kernel clock advances and the core wakes every tick
- * even while idle-parked.
+ * TIKU_CLOCK_ARCH_SECOND Hz.
+ *
+ * @note The STIMER survives WFI sleep, so the kernel clock advances and the
+ *       core wakes every tick even while idle-parked.
  */
 void tiku_clock_arch_init(void) {
     SYST_RVR = (uint32_t)(TIKU_CLOCK_ARCH_INTERVAL - 1u);
@@ -83,13 +84,12 @@ void tiku_ambiq_tick_advance(void) {
 /**
  * @brief Advance the system clock by @p n ticks at once.
  *
- * The tickless-idle resync path (tiku_htimer_arch.c): after a
- * stretched sleep the STIMER counter says how many whole ticks really
- * elapsed, and they are credited in one call so the kernel clock is
- * exact regardless of how far the tick interrupt was stretched.
- * n == 1 is the normal per-tick cadence.  Rolls the sub-second
- * accumulator with a divide so a long stretch costs O(1).
+ * The tickless-idle resync path: after a stretched sleep the STIMER counter
+ * says how many whole ticks really elapsed, and they are credited in one call
+ * so the kernel clock is exact however far the tick was stretched.
  *
+ * @note n == 1 is the normal per-tick cadence.  The sub-second accumulator
+ *       rolls with a divide, so a long stretch costs O(1).
  * @param n  Whole ticks to credit (>= 1)
  */
 void tiku_ambiq_tick_advance_n(unsigned long n) {

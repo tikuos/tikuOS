@@ -80,7 +80,7 @@ static void surf_of(tiku_gpu_surface_t *s, void *base, uint32_t side,
 
 /** Sum of the first and last words + a mid word: cheap, and enough to catch a
  *  wrong result without adding a full-surface CPU read to every window (which
- *  would pollute the very current we are measuring). */
+ *  would pollute the very current under measurement). */
 static uint32_t probe_sum(const void *base, uint32_t bytes)
 {
     const volatile uint32_t *w = (const volatile uint32_t *)base;
@@ -183,7 +183,7 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
          * every single job, and experiment 2 measured that overhead exactly
          * cancelling the sleep saving.  Since the GPU's 6.4 mA standing cost is
          * architectural, shortening the powered window by batching is the only
-         * power lever the part leaves us -- which is what this sweep measures. */
+         * power lever the part offers -- which is what this sweep measures. */
         tiku_gpu_cl_t cl;
         uint32_t batch = (uint32_t)async;
         uint32_t k;

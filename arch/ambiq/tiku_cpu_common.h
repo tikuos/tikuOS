@@ -51,10 +51,9 @@ uint8_t  tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len);
 /**
  * @brief Return a bitmask of the reset cause(s) from the last reset.
  *
- * Reads the RSTGEN STAT register to determine what triggered the most
- * recent reset (power-on, watchdog, external pin, software, etc.).
- * Individual bit positions are defined by the Apollo510 RSTGEN register
- * layout in the CMSIS header.
+ * Reads the RSTGEN STAT register to determine what triggered the most recent
+ * reset (power-on, watchdog, external pin, software).  Bit positions follow the
+ * Apollo510 RSTGEN layout in the CMSIS header.
  *
  * @return Bitmask of RSTGEN reset-cause flags.
  */

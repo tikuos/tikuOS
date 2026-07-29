@@ -34,9 +34,8 @@
  * @brief Virtual GPIO port availability flags.
  *
  * Four virtual ports of 8 pins each (pads 0..31) are exposed through the
- * /dev/gpio/{1..4}/{0..7} VFS view to match the MSP430/RP2350/Apollo510
- * layout. The EVB LEDs (pads 12/13/14) fall inside this range and are also
- * driven by raw pad number via the board header macros.
+ * /dev/gpio/{1..4}/{0..7} view to match the MSP430/RP2350/Apollo510 layout.
+ * The EVB LEDs (pads 12/13/14) fall inside this range.
  */
 #define TIKU_DEVICE_HAS_PORT1       1  /**< Virtual port 1 (pads 0..7). */
 #define TIKU_DEVICE_HAS_PORT2       1  /**< Virtual port 2 (pads 8..15). */

@@ -45,7 +45,7 @@
  * conventional UART0 pinout and matches the base EVB.
  *
  * A real custom board OVERRIDES these three lines with whatever it routes.
- * They are the only board wiring here, which is the point: everything else a
+ * They are the only board wiring here; everything else a
  * driver might want is absent, and absence is now expressible.
  */
 #define TIKU_BOARD_UART_TX_PIN      30U     /**< UART0 TX pad. */

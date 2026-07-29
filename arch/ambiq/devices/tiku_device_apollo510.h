@@ -33,10 +33,9 @@
 /**
  * @brief Virtual GPIO port availability flags.
  *
- * Apollo510 has 100+ pads. Four virtual ports of 8 pins each (pads 0..31)
- * are exposed through the /dev/gpio/{1..4}/{0..7} VFS view to match the
- * MSP430/RP2350 layout. Board LEDs (pads 89/92/165) sit above this range
- * and are driven by raw pad number via the board header macros.
+ * Apollo510 has 100+ pads; four virtual ports of 8 pins each (pads 0..31) are
+ * exposed through /dev/gpio/{1..4}/{0..7} to match the MSP430/RP2350 layout.
+ * Board LEDs (pads 89/92/165) sit above this range and use raw pad numbers.
  */
 #define TIKU_DEVICE_HAS_PORT1       1  /**< Virtual port 1 (pads 0..7). */
 #define TIKU_DEVICE_HAS_PORT2       1  /**< Virtual port 2 (pads 8..15). */
@@ -107,10 +106,9 @@
 /**
  * @brief Non-volatile memory (MRAM) map.
  *
- * The "FRAM" naming follows the portable TikuOS convention. On Apollo510
- * the NVM is internal MRAM (flash). The usable region starts at 0x00410000
- * because the low 64 KB of MRAM is reserved for the Secure Bootloader (SBL).
- * Persistent storage uses an MRAM page via the NVM HAL (tiku_mem_arch.c).
+ * The "FRAM" naming follows the portable TikuOS convention; on Apollo510 the
+ * NVM is internal MRAM.  The usable region starts at 0x00410000 because the low
+ * 64 KB is reserved for the Secure Bootloader.
  */
 #define TIKU_DEVICE_FRAM_SIZE       (4128768UL)   /**< ~3.94 MB usable MRAM. */
 #define TIKU_DEVICE_FRAM_START      0x00410000UL  /**< First usable MRAM addr. */

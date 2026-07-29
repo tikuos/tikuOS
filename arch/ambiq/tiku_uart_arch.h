@@ -20,12 +20,11 @@
 #include <stdint.h>
 
 /**
- * @brief Initialize the console transport (SWO/ITM or wire UART).
+ * @brief Initialize the console transport (wire UART).
  *
- * Configures the ITM stimulus port and enables SWO output via
- * am_hal_itm. Called once during boot before any printf output.
- * A real COM-UART backend (TX=pad 30, RX=pad 55) may be substituted
- * by reconfiguring this entry point.
+ * Brings up the board's COM UART (see the board header for pads and FUNCSEL)
+ * for 8N1 at TIKU_BOARD_UART_BAUD.  Called once during boot, before any printf
+ * output.
  */
 void     tiku_uart_init(void);
 

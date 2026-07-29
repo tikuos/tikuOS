@@ -33,10 +33,9 @@
 /**
  * @brief LED definitions for the Apollo510 EVB.
  *
- * All three EVB user LEDs are mapped: LED0 = pad 165, LED1 = pad 89,
- * LED2 = pad 92 (the TIKU_BOARD_LED1/LED2/LED3 macros are 1-indexed and
- * surface as /dev/led0, /dev/led1, /dev/led2). All EVB LEDs are
- * active-low, so ON drives the pad low and OFF drives it high.
+ * All three EVB user LEDs are mapped: LED0 = pad 165, LED1 = pad 89, LED2 =
+ * pad 92.  The TIKU_BOARD_LED1/LED2/LED3 macros are 1-indexed and surface as
+ * /dev/led0..2.  All are active-low, so ON drives the pad low.
  */
 #define TIKU_BOARD_LED_COUNT        3
 
@@ -72,10 +71,8 @@
 /**
  * @brief Console UART pin assignments.
  *
- * The default console transport is SWO/ITM (pad 28). The COM-UART
- * pins (TX=30, RX=55) are recorded here for use when a wire-UART
- * backend is selected. Pin mux is performed by am_hal at init time,
- * so the board-level init macro is a no-op.
+ * The COM-UART pins are TX=30, RX=55 (funcsel 4).  Pin mux is performed by the
+ * UART backend at init time, so the board-level init macro is a no-op.
  */
 #define TIKU_BOARD_UART_TX_PIN      30U     /**< UART TX pad number. */
 #define TIKU_BOARD_UART_RX_PIN      55U     /**< UART RX pad number. */
@@ -108,12 +105,12 @@
  * @brief Bit-bang / backscatter port and pin defaults.
  *
  * The tiku_gpio (port,pin) API encodes an Apollo510 pad as (port-1)*8 + pin,
- * with port >= 1 and pin in 0..7 (see ambiq_pad_of in tiku_gpio_arch.c). The
- * pair below therefore selects pad 13 -- a plain GPIO, clear of the SWO (pad
- * 28) and console UART (pads 30/55) lines, so the bit-bang self-test has a
- * valid, harmless pin to toggle. (A bare pad number like 0/13 is NOT a valid
- * encoding here: port 0 and pin 13 are both rejected.) Override in the build
- * system to point at a real backscatter pad.
+ * with port >= 1 and pin in 0..7, so the pair below selects pad 13 -- a plain
+ * GPIO clear of SWO (28) and the console UART (30/55).
+ *
+ * @note A bare pad number like 0/13 is NOT a valid encoding: port 0 and pin 13
+ *       are both rejected.  Override in the build to point at a real
+ *       backscatter pad.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       2U   /**< Port 2 -> pad base 8. */
@@ -130,9 +127,8 @@
  * @brief Peripheral bus availability flags and pin assignments.
  *
  * ADC and 1-Wire drivers are stubs at this milestone and are marked
- * unavailable. I2C and SPI pin macros are placeholders (TODO: assign
- * real IOM pads) — they are defined so the interface layer compiles
- * without errors on this target.
+ * unavailable.  The I2C and SPI pin macros are placeholders (TODO: assign real
+ * IOM pads), defined so the interface layer compiles on this target.
  */
 /** @brief ADC not available at this milestone (stub driver). */
 #define TIKU_BOARD_ADC_AVAILABLE    0

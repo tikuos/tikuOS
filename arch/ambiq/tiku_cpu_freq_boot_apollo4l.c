@@ -40,10 +40,9 @@ static unsigned long tiku_ambiq_core_hz(void) {
 /**
  * @brief Bare-metal Apollo4 Lite SoC bring-up.
  *
- * The Cortex-M4 core has no SCB I/D cache to enable (unlike the M55), and the
- * boot ROM leaves the HFRC core clock and power rails in a usable state. Nothing
- * to do here at the minimal/smoke milestone; the CACHECTRL system cache and any
- * power tuning are added with the full-kernel backends.
+ * The Cortex-M4 core has no SCB I/D cache to enable, and the boot ROM leaves
+ * the HFRC core clock and power rails usable.  Nothing to do at the
+ * minimal/smoke milestone; the CACHECTRL cache arrives with the full backends.
  */
 static void tiku_ambiq_soc_init(void) {
     /* Enable the Apollo4 CPU cache. The SBL configures CACHECFG but leaves it
@@ -70,11 +69,12 @@ static void tiku_ambiq_soc_init(void) {
 /**
  * @brief Apollo4 Lite data-cache maintenance (routed from tiku_cpu_dcache_*).
  *
- * Clean is a no-op: the CACHECTRL D-cache only ever holds read-only MRAM data
- * (the CPU never writes MRAM through it). Invalidate flushes the whole cache --
- * the Apollo4 CACHECTRL has no by-range op -- which is coarse but correct, and
- * NVM flushes are rare. The barrier pair lets the invalidate take effect before
- * the next fetch/load.
+ * Clean is a no-op: the CACHECTRL D-cache only holds read-only MRAM data.
+ * Invalidate flushes the whole cache -- Apollo4 CACHECTRL has no by-range op --
+ * which is coarse but correct, and NVM flushes are rare.
+ *
+ * @note The barrier pair lets the invalidate take effect before the next
+ *       fetch or load.
  */
 void tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len) {
     (void)addr; (void)len;   /* nothing dirty to write back */
@@ -116,14 +116,12 @@ void tiku_cpu_boot_ambiq_init(void) {
  *        High-Performance mode.
  *
  * The SBL boots Apollo4 Lite on the LDO; HP (192 MHz) requires the buck active.
- * This mirrors the AmbiqSuite SIMOBUCK_INIT post-PCM / post-A0 path: set the
- * buck LP-TON trims, short VDDF to VDDS (mandatory on this part -- doubles the
- * VDDF load cap so the buck can regulate), enable RX compensation, turn the
- * buck on, then force it active with the CORE + MEM LDOs in parallel, and wait
- * for ACT. The SBL already loaded the per-chip voltage (VREF) trims, so the
- * regulated voltages are unchanged -- this only flips the buck on (no over-volt
- * risk).
+ * Mirrors the AmbiqSuite SIMOBUCK_INIT post-PCM path: LP-TON trims, VDDF shorted
+ * to VDDS, RX compensation, buck on, force active with CORE + MEM LDOs.
  *
+ * @note The short doubles the VDDF load cap so the buck can regulate.  The SBL
+ *       already loaded the per-chip VREF trims, so the regulated voltages are
+ *       unchanged and there is no over-volt risk.
  * @return 0 once VRSTATUS.SIMOBUCKST == ACT, -1 on timeout.
  */
 static int tiku_ambiq_simobuck_enable(void) {
@@ -193,13 +191,13 @@ static int tiku_ambiq_simobuck_enable(void) {
 /**
  * @brief Select the CPU operating frequency (perf mode).
  *
- * Apollo4 Lite supports Low-Power (96 MHz) and High-Performance "turbo"
- * (192 MHz), selected via the PWRCTRL performance-mode request. Unlike
- * Apollo510 this part needs no manual core-voltage step, so the switch is just
- * the request + an ACK poll -- HP only requires the SIMOBUCK regulator active.
- * The OS tick is on the STIMER and the busy-delay re-reads the live core clock,
- * so a mode change doesn't disturb timekeeping.
+ * Apollo4 Lite has Low-Power (96 MHz) and High-Performance turbo (192 MHz),
+ * selected via the PWRCTRL performance-mode request.  This part needs no manual
+ * core-voltage step, so the switch is the request plus an ACK poll.
  *
+ * @note HP only requires the SIMOBUCK regulator active.  The tick is on the
+ *       STIMER and the busy delay re-reads the live core clock, so a mode
+ *       change does not disturb timekeeping.
  * @param cpu_freq  Requested core frequency in MHz.
  */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {

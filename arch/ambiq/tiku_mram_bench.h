@@ -29,15 +29,14 @@ typedef struct {
  * @brief Time the bootrom MRAM programmer (nv_program_main2) at several spans.
  *
  * Separates the fixed per-call overhead from the per-word cost -- the numbers
- * that size a future block-granular delta flush.  Programs the UPPER half of
- * the reserved mirror page (scratch the flush never uses), so it does not
- * disturb durable state and is power-cut-safe.  Must be called inside an NVM
- * unlock window (tiku_mpu_unlock_nvm()).
+ * that size a future block-granular delta flush.  Programs the UPPER half of the
+ * reserved mirror page, so durable state is undisturbed and it is power-cut-safe.
  *
+ * @note Must be called inside an NVM unlock window (tiku_mpu_unlock_nvm()).
  * @param rows        Output rows (caller-provided).
  * @param max         Capacity of @p rows.
- * @param dwt_hz_out  Receives the DWT tick rate (calibrated against the
- *                    SysTick us-delay) for a cycles->us conversion; 0 if the
+ * @param dwt_hz_out  Receives the DWT tick rate (calibrated against the SysTick
+ *                    delay) for a cycles-to-microseconds conversion; 0 if the
  *                    cycle counter did not advance.  May be NULL.
  * @return Number of rows filled (0 if no safe scratch window is available).
  */
@@ -48,9 +47,8 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
  * @brief Number of real mirror programs the flush has performed so far.
  *
  * Increments only when tiku_mem_arch_nvm_flush()'s dirty-check finds a change
- * and actually programs MRAM.  An idle flush (no .uninit change) leaves it
- * unchanged -- which is exactly what the mrambench dirty-check self-test
- * asserts.
+ * and actually programs MRAM.  An idle flush leaves it unchanged, which is what
+ * the mrambench dirty-check self-test asserts.
  */
 uint32_t tiku_mem_arch_nvm_program_count(void);
 

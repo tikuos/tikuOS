@@ -58,7 +58,7 @@
 #define TIKU_GPU_SURF_MAX_SIDE 256u          /* 256*256*4 = 256 KB per surface */
 
 /**
- * @brief Run @p kind on a @p side x @p side surface for @p ms; returns elapsed us.
+ * @brief Run @p kind on a @p side x @p side surface for @p ms; elapsed microseconds.
  *
  * STIMER-timed (the one clock WFI cannot stop), hang-detector aware, and
  * bit-exactness checked: the traversal checksum is available afterwards so a

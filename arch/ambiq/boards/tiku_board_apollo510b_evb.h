@@ -35,9 +35,8 @@
  * @brief LED definitions for the Apollo510 Blue EVB.
  *
  * The three user LEDs sit on different pads than the base EVB: LED0 = pad 11,
- * LED1 = pad 19, LED2 = pad 83 (the TIKU_BOARD_LED1/LED2/LED3 macros are
- * 1-indexed and surface as /dev/led0, /dev/led1, /dev/led2). All EVB LEDs are
- * active-low, so ON drives the pad low and OFF drives it high.
+ * LED1 = pad 19, LED2 = pad 83, surfacing as /dev/led0..2.  All are active-low,
+ * so ON drives the pad low.
  */
 #define TIKU_BOARD_LED_COUNT        3
 
@@ -74,9 +73,8 @@
  * @brief Console UART pin assignments.
  *
  * The Blue EVB routes its J-Link VCOM to UART1 on pads 12 (TX) / 14 (RX),
- * funcsel 5 -- unlike the base EVB's UART0 on 30/55 funcsel 4. The UART
- * instance itself is chosen in the build (-DTIKU_CONSOLE_UART1); these macros
- * carry the pads + funcsel that tiku_uart_arch.c programs into the pin mux.
+ * funcsel 5, unlike the base EVB's UART0 on 30/55 funcsel 4.  The instance is
+ * chosen in the build (-DTIKU_CONSOLE_UART1); these macros carry the pads.
  */
 #define TIKU_BOARD_UART_TX_PIN      12U     /**< UART1 TX pad number. */
 #define TIKU_BOARD_UART_RX_PIN      14U     /**< UART1 RX pad number. */
@@ -108,9 +106,8 @@
 /**
  * @brief Bit-bang / backscatter port and pin defaults.
  *
- * Same (port,pin) encoding as the base EVB: (port-1)*8 + pin selects pad 13 --
- * a plain GPIO clear of the console UART (pads 12/14) and the LEDs
- * (11/19/83), so the bit-bang self-test has a valid, harmless pin to toggle.
+ * Same (port,pin) encoding as the base EVB: (port-1)*8 + pin selects pad 13, a
+ * plain GPIO clear of the console UART (12/14) and the LEDs (11/19/83).
  * Override in the build system to point at a real backscatter pad.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
@@ -159,12 +156,12 @@
 /**
  * @brief EM9305 BLE controller wiring on the Apollo510 Blue EVB.
  *
- * The radio is an EM9305 companion chip on IOM6 SPI (mode 0, up to 16 MHz).
- * Chip-select is a plain GPIO the driver toggles (the IOM's own nCE is not
- * used). RDY (a.k.a. INT) is the data-ready / handshake line. Values verified
- * from the AmbiqSuite apollo510b_evb BSP + am_devices_em9305.c. The IOM SPI
- * master (tiku_spi_arch.c) and the EM9305 transport (tiku_em9305.c) are gated
- * on TIKU_DRV_BLE_EM9305_ENABLE; the base Apollo510 EVB has no radio.
+ * An EM9305 companion chip on IOM6 SPI (mode 0, up to 16 MHz).  Chip-select is
+ * a plain GPIO the driver toggles (the IOM's own nCE is unused); RDY (a.k.a.
+ * INT) is the data-ready line.  Values from the apollo510b_evb BSP.
+ *
+ * @note The IOM SPI master and the EM9305 transport are gated on
+ *       TIKU_DRV_BLE_EM9305_ENABLE; the base Apollo510 EVB has no radio.
  */
 /** @brief IOM instance the radio hangs off (I/O Master 6). */
 #define TIKU_BOARD_SPI_IOM_MODULE   6U

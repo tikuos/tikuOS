@@ -20,11 +20,11 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 0 -- PINS, AND A CORRECTION I GOT BACKWARDS ONCE                    */
+/* TABLE 0 -- PINS                                                           */
 /*---------------------------------------------------------------------------*/
 /*
- * FOR THE APOLLO510B (BLUE) EVB -- our board -- taken from the BSP for THAT
- * board, `boards/apollo510b_evb/bsp/am_bsp_pins.h`:
+ * FOR THE APOLLO510B (BLUE) EVB, taken from the BSP for THAT board,
+ * `boards/apollo510b_evb/bsp/am_bsp_pins.h`:
  *
  *   signal      pad          note
  *   ----------  -----------  ----------------------------------------------
@@ -61,7 +61,7 @@
  * from `AP510EVB_Rev2.2_Schematic.pdf` (now filed under
  * hardware/ambiq/boards/ as the labelled counter-example) -- which is the
  * schematic for the
- * **Apollo510 EVB, not the Apollo510B (Blue) EVB we actually have**.  Its
+ * **Apollo510 EVB, not the Apollo510B (Blue) EVB in the lab**.  Its
  * title block says "Apollo510 EVB" and its SoC is AP510NFA-CBR; the file name
  * says AP510EVB with no B.  The proof is exact: the NON-B board's BSP says
  * MSPI1_RST = 54 and mentions GP208, while ours says 17 and never mentions
@@ -167,9 +167,8 @@
  * @brief The ONE sector this driver's own gates are allowed to erase.
  *
  * The last 128 KB of the die.  Erase endurance is finite (~100 k cycles per
- * sector) and a test that loops erases is a test that consumes hardware, so
- * every self-test writes here and the driver counts every erase it performs
- * (tiku_nor_erase_count) for the record.
+ * sector), so every self-test writes here and the driver counts every erase it
+ * performs (tiku_nor_erase_count) for the record.
  */
 #define TIKU_NOR_SCRATCH_ADDR (TIKU_NOR_SIZE_BYTES - TIKU_NOR_SECTOR_SIZE)
 
@@ -247,8 +246,7 @@ tiku_nor_err_t tiku_nor_read(uint32_t addr, void *buf, uint32_t n);
  *
  * Split across page boundaries internally; each page is WREN -> program ->
  * WIP-poll.  NOR can only clear bits, so programming over non-erased data
- * silently ANDs -- the verify gates catch that, and the API does not
- * pretend otherwise.
+ * silently ANDs -- the verify gates catch that, and the API does not pretend.
  */
 tiku_nor_err_t tiku_nor_program(uint32_t addr, const void *buf, uint32_t n);
 
