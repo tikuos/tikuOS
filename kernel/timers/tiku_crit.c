@@ -48,12 +48,10 @@ static uint8_t             crit_mode;
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Convert microseconds to htimer ticks at compile-time-known rate.
- *
- * Two-step division avoids 32-bit overflow at 1 MHz htimer × 65 535 us
- * (which would be 6.5e10, larger than 2^32). Requires htimer >= 1 kHz,
- * which is true for every preset in tiku_htimer_config.h.
+/*
+ * Convert microseconds to htimer ticks at a compile-time-known rate.  The
+ * two-step division avoids 32-bit overflow at 1 MHz x 65535 us, and requires
+ * an htimer of at least 1 kHz -- true for every preset.
  */
 static inline tiku_htimer_clock_t
 crit_us_to_ticks(uint16_t us)

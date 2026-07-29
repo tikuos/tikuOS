@@ -41,11 +41,10 @@
 /* DEVICE SELECTION                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Device selection: passed via -DTIKU_DEVICE_<PART>=1 from the Makefile.
- * CCS passes -D__MSP430FRxxxx__ for MSP430 parts, so map those automatically.
- * Default to FR2433 (MSP430) if no MSP430 device is defined and we're on
- * the MSP430 platform.
+/*
+ * Device selection, passed as -DTIKU_DEVICE_<PART>=1 from the Makefile.  CCS
+ * passes -D__MSP430FRxxxx__ instead, so those are mapped automatically, and an
+ * MSP430 build with no device named defaults to the FR2433.
  */
 #if defined(PLATFORM_MSP430)
 
@@ -121,16 +120,11 @@
 /** Clock time type definition */
 #define TIKU_CLOCK_CONF_TIME_T unsigned short
 
-/** Target CPU frequency setting.
- *
- *  On MSP430 this is an enum index into a small table of DCO presets
- *  (1=1MHz ... 7=8MHz). On RP2350 there is only one shipped configuration
- *  (PLL_SYS = 150 MHz) so the value is ignored at the arch level — it
- *  is kept here only to satisfy callers of tiku_cpu_full_init().
- *
- *  MSP430 enum:
- *    1=1MHz, 2=2.67MHz, 3=3.5MHz, 4=4MHz, 5=5.33MHz, 6=7MHz, 7=8MHz (max)
- *    NOTE: 16MHz (value 8) is currently DISABLED due to stability issues.
+/*
+ * Target CPU frequency setting.  On MSP430 an enum index into a small table of
+ * DCO presets (1=1MHz .. 7=8MHz; 16 MHz is disabled for stability).  On RP2350
+ * there is one shipped configuration, so the value is ignored at the arch level
+ * and kept only to satisfy callers of tiku_cpu_full_init().
  */
 #if defined(PLATFORM_RP2350)
 /* RP2350 PLL_SYS target in MHz. Supported values (see
@@ -212,11 +206,10 @@
 /* PLATFORM-ROUTED PRINTF                                                    */
 /*---------------------------------------------------------------------------*/
 
-/**
- * TIKU_PRINTF() is routed through hal/tiku_printf_hal.h which selects
- * the correct output channel for the active platform and compiler
- * (semihosting, UART, RTT, etc.).  Transport conflicts such as
- * SLIP-over-UART are handled there as well.
+/*
+ * TIKU_PRINTF() routes through hal/tiku_printf_hal.h, which picks the output
+ * channel for the active platform and compiler and resolves transport conflicts
+ * such as SLIP over the console UART.
  */
 #include <hal/tiku_printf_hal.h>
 
@@ -311,22 +304,10 @@
 
 /**
  * @defgroup TIKU_DEBUG_CONFIG Debug Configuration Flags
- * @brief Configuration flags for enabling/disabling debug output
+ * @brief Per-subsystem debug output switches.
  *
- * Each subsystem has its own debug macro following the pattern:
- * - MAIN_PRINTF()       - Main application debug
- * - PROCESS_PRINTF()    - Process management debug
- * - HTIMER_PRINTF()     - Hardware timer debug
- * - TIMER_PRINTF()      - Event timer debug
- * - CPU_FREQ_PRINTF()   - CPU frequency debug
- * - CLOCK_PRINTF()      - Clock architecture debug
- * - TEST_PRINTF()       - Test module debug
- * - HTIMER_ARCH_PRINTF()- Hardware timer arch debug
- * - SCHED_PRINTF()      - Scheduler debug
- * - WDT_PRINTF()        - Watchdog timer debug
- *
- * All debug messages are disabled by default (flags set to 0).
- * Set any flag to 1 to enable debug output for that subsystem.
+ * Each subsystem has its own <NAME>_PRINTF() macro gated by its own flag.  All
+ * are 0 by default; set one to 1 to enable that subsystem's output.
  * @{
  */
 

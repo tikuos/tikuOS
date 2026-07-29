@@ -26,25 +26,17 @@
 /* PERSISTENT STATE                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * Gate key for the epoch-baseline cell.
- *
- * The bytes spell 'WALD' (wall-clock durable baseline) in ASCII — an arbitrary
- * non-trivial sentinel; the odds of an uninitialised FRAM word
- * happening to match are 1 in 2^32.  When the cell's gate does not
- * hold this value the baseline is treated as virgin: reads return 0
- * and tiku_rtc_init() re-primes the baseline to zero.  Bump the value
- * if the cell's meaning ever changes incompatibly so a stale image
- * re-primes cleanly on the next boot after reflashing.
+/*
+ * Gate key for the epoch-baseline cell.  An arbitrary non-trivial sentinel: a
+ * gate that does not hold it means the baseline is virgin, so reads return 0
+ * and init re-primes.  Bump it if the cell's meaning ever changes.
  */
 #define TIKU_RTC_MAGIC  0x57414C44UL /* 'WALD': epoch-baseline layout */
 
-/**
- * FRAM cell: wall-clock epoch paired with this boot's uptime baseline.
- *
- * Lives in `.persistent` so the explicitly set epoch survives reset and power
- * loss.  Read paths add only the uptime elapsed since the baseline was paired
- * on this boot.  Only meaningful while the cell gate validates.
+/*
+ * The wall-clock epoch, paired with this boot's uptime baseline.  Lives in
+ * .persistent so an explicitly set epoch survives reset and power loss; reads
+ * add only the uptime since the pairing, and only while the gate validates.
  */
 static TIKU_DURABLE uint32_t rtc_epoch_base;
 
@@ -62,13 +54,9 @@ TIKU_PERSIST_CELL(rtc_cell, rtc_epoch_base, TIKU_RTC_MAGIC, NULL, 0);
 /**
  * @brief Initialise the soft RTC. Idempotent.
  *
- * Delegates to tiku_persist_cell_init(): when the gate already
- * validates the persisted baseline is real and is left untouched —
- * this is the warm/cold reboot path where the wall clock is meant
- * to survive.  Otherwise this is a first boot (or a wiped FRAM):
- * the cell API zeroes the baseline and stamps the gate last, inside
- * its own MPU unlock window.  Called once during boot (from the
- * /sys VFS init path) before any get/set.
+ * A validating gate means the persisted baseline is real and is left alone --
+ * the reboot path where the clock is meant to survive.  Otherwise the cell API
+ * zeroes the baseline and stamps the gate last, in its own unlock window.
  */
 void
 tiku_rtc_init(void)
@@ -83,14 +71,9 @@ tiku_rtc_init(void)
 /**
  * @brief Return current wall-clock seconds since the epoch.
  *
- * Reconstructs time as epoch_base + (uptime - uptime_base), where uptime
- * comes from tiku_clock_seconds().  Returns 0 if the RTC has
- * never been set since first power-on (magic mismatch) — callers
- * treat a small value as "clock not set".
- *
- * Read-only and lock-free: it inspects FRAM cells but performs no
- * write, so the MPU is never unlocked here.  This is the hot path
- * behind every read of /sys/time.
+ * Reconstructs epoch_base plus the uptime elapsed since the baseline was
+ * paired, returning 0 when the clock was never set.  Read-only and lock-free,
+ * so the MPU is never unlocked here; this is the hot path behind /sys/time.
  *
  * @return Wall-clock seconds, or 0 if the RTC was never set.
  */
@@ -108,17 +91,9 @@ tiku_rtc_get_seconds(void)
 /**
  * @brief Set the wall clock to @p epoch_seconds.
  *
- * Rebases the persisted epoch so that future reads agree with the just-set
- * time: it stores epoch_seconds and pairs that value with the current boot's
- * uptime.  A subsequent get adds only uptime elapsed since that pairing.  The
- * write goes through tiku_persist_cell_commit(), which stores the
- * value and then (re)stamps the gate in one MPU window — so the
- * value becomes valid even if this is the very first set on a
- * virgin FRAM.
- *
- * Snapshots uptime *before* the cell write so the unlock window
- * stays minimal.  This is the write path behind /sys/time and the
- * external-time-sync entry point.
+ * Stores the epoch and pairs it with the current uptime, so later reads add
+ * only what has elapsed since.  The commit stamps value then gate in one
+ * window, so the value is valid even on a virgin store.
  *
  * @param epoch_seconds  Desired wall-clock time, seconds since epoch.
  */
@@ -136,11 +111,8 @@ tiku_rtc_set_seconds(uint32_t epoch_seconds)
 /**
  * @brief Report whether the wall clock holds a real, set value.
  *
- * True only when the magic gate is valid AND the epoch baseline is non-zero.
- * The non-zero test draws a deliberate line between "initialised to
- * defaults" (tiku_rtc_init() stamps the magic but leaves the baseline
- * at 0) and "explicitly set" via tiku_rtc_set_seconds().  Lock-free;
- * no NVM write.
+ * True only when the gate validates AND the baseline is non-zero -- the line
+ * between initialised-to-defaults, which init leaves at 0, and explicitly set.
  *
  * @return Non-zero if the clock has been set at least once since the
  *         chip was first programmed, 0 otherwise.

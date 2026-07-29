@@ -50,13 +50,10 @@ typedef void (*tiku_timer_callback_t)(void *ptr);
 
 /**
  * @struct tiku_timer
- * @brief Unified software timer structure
+ * @brief Unified software timer structure.
  *
- * In EVENT mode, the process field determines where the expiration
- * event goes. In CALLBACK mode, the func/ptr fields determine
- * what gets called.
- *
- * Memory cost per timer: ~20-24 bytes
+ * In EVENT mode the process field says where the expiration goes; in CALLBACK
+ * mode the func and ptr fields say what runs.  About 20-24 bytes per timer.
  */
 struct tiku_timer {
   struct tiku_timer *next; /**< Linked list pointer (internal) */
@@ -158,15 +155,9 @@ void tiku_timer_stop(struct tiku_timer *t);
  * @param t Timer structure
  * @return Non-zero if the timer is inactive, zero if it is pending.
  *
- * A timer is "inactive" in two distinct cases:
- *   1. it has never been set (the struct is zero-initialised), or
- *   2. it was set, fired, and has been dispatched.
- *
- * This call cannot tell those two cases apart — callers that need to
- * distinguish "fired since I set it" from "never set" must track that
- * themselves (e.g. set a sentinel before tiku_timer_set_*). The
- * common pattern of "set then PT_WAIT_UNTIL(tiku_timer_expired(t))"
- * is unaffected because the caller knows the timer was just set.
+ * Inactive covers both never-set and set-fired-and-dispatched, and this call
+ * cannot tell them apart; a caller needing that must track it.  The usual
+ * set-then-wait pattern is unaffected, since the caller just set the timer.
  */
 int tiku_timer_expired(struct tiku_timer *t);
 
@@ -200,13 +191,10 @@ tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t);
 int tiku_timer_any_pending(void);
 
 /**
- * @brief Check if any software timer is due RIGHT NOW.
+ * @brief Check if any software timer is due right now.
  *
- * Distinct from tiku_timer_any_pending(): "armed for later" is not
- * work.  A timer whose deadline has not arrived contributes nothing
- * to this predicate, so the scheduler can enter a tick-woken idle
- * state instead of busy-spinning until the expiry (the tick ISR
- * wakes the CPU and posts the poll that dispatches the timer).
+ * Distinct from tiku_timer_any_pending(): armed-for-later is not work, so the
+ * scheduler can enter a tick-woken idle instead of spinning until expiry.
  *
  * @return Non-zero if at least one active timer has expired but has
  *         not yet been dispatched
@@ -312,18 +300,16 @@ extern struct tiku_process tiku_timer_process;
 
 /**
  * @def PT_WAIT_UNTIL_TIMEOUT(pt, timer, cond, ticks)
- * @brief Block until @p cond is true or @p ticks have elapsed
+ * @brief Block until @p cond is true or @p ticks have elapsed.
  *
- * Sets a one-shot event timer for @p ticks clock ticks, blocks the
- * protothread (returning PT_WAITING -- the process appears as
- * "waiting" in /proc and ps) until @p cond evaluates true or the
- * timer fires, then stops the timer.
+ * Sets a one-shot event timer, blocks the protothread -- the process reads as
+ * "waiting" in /proc -- until the condition holds or the timer fires, then
+ * stops the timer.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer
  * @param cond  Boolean expression re-evaluated on each schedule
- * @param ticks Timeout duration in clock ticks (use TIKU_CLOCK_SECOND
- *              and friends for readability)
+ * @param ticks Timeout duration in clock ticks
  */
 #define PT_WAIT_UNTIL_TIMEOUT(pt, timer, cond, ticks)                  \
   do {                                                                  \
@@ -334,13 +320,11 @@ extern struct tiku_process tiku_timer_process;
 
 /**
  * @def PT_YIELD_UNTIL_TIMEOUT(pt, timer, cond, ticks)
- * @brief Yield until @p cond is true or @p ticks have elapsed
+ * @brief Yield until @p cond is true or @p ticks have elapsed.
  *
- * Identical to PT_WAIT_UNTIL_TIMEOUT but uses PT_YIELD_UNTIL semantics
- * (returning PT_YIELDED -- the process appears as "ready" in /proc
- * and ps).  Use this when the wait is part of a cooperative polling
- * loop that the scheduler should consider immediately runnable
- * between checks rather than parked.
+ * As PT_WAIT_UNTIL_TIMEOUT but with yield semantics, so the process reads as
+ * "ready" rather than "waiting" -- use it when the wait belongs to a polling
+ * loop the scheduler should keep treating as runnable.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer
@@ -358,21 +342,11 @@ extern struct tiku_process tiku_timer_process;
 
 /**
  * @def PT_WAIT_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)
- * @brief Persistent variant of PT_WAIT_UNTIL_TIMEOUT
+ * @brief Persistent variant of PT_WAIT_UNTIL_TIMEOUT.
  *
- * Behaves like PT_WAIT_UNTIL_TIMEOUT but the underlying wait is
- * PT_WAIT_UNTIL_PERSISTENT, so the continuation point is checkpointed
- * to NVM via the persist store.
- *
- * Post-reboot semantics: the struct tiku_timer lives in RAM and is
- * lost across power cycles, so when the protothread resumes from the
- * NVM checkpoint inside the wait, tiku_timer_expired() reports the
- * (zeroed) timer as already expired and the macro falls through
- * immediately as if the wait had timed out.  The caller code that
- * follows the macro should re-check @p cond and treat a false result
- * as "the wait was interrupted by power loss -- retry".
- *
- * Available only when TIKU_LC_PERSISTENT is defined.
+ * The continuation point is checkpointed to NVM, but the timer lives in RAM and
+ * does not survive a power cycle: on resume it reads as already expired and the
+ * macro falls through, so the caller must re-check @p cond and retry.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer
@@ -389,16 +363,11 @@ extern struct tiku_process tiku_timer_process;
 
 /**
  * @def PT_YIELD_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)
- * @brief Persistent variant of PT_YIELD_UNTIL_TIMEOUT
+ * @brief Persistent variant of PT_YIELD_UNTIL_TIMEOUT.
  *
- * Behaves like PT_YIELD_UNTIL_TIMEOUT but uses
- * PT_YIELD_UNTIL_PERSISTENT, so the continuation point is checkpointed
- * to NVM and the process is reported as "ready" rather than "waiting"
- * while the wait is in progress.  Same post-reboot semantics as
- * PT_WAIT_UNTIL_TIMEOUT_PERSISTENT -- the timer is gone after a power
- * cycle and the macro falls through as if it had timed out.
- *
- * Available only when TIKU_LC_PERSISTENT is defined.
+ * As the WAIT variant but with yield semantics, so the process reads as "ready"
+ * while waiting.  Same post-reboot behaviour: the timer is gone and the macro
+ * falls through as if it had timed out.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer

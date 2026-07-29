@@ -109,11 +109,9 @@ void tiku_clock_delay_usec(unsigned int dt);
 /**
  * @brief Return the active clock-source fault code.
  *
- * Non-zero if the platform had to fall back from the configured
- * low-frequency source (e.g. XT1 crystal -> VLO). When non-zero, the
- * effective tick rate differs from TIKU_CLOCK_SECOND and every
- * software timer will expire at a proportionally different wall-clock
- * rate. See enum tiku_clock_arch_fault_code in tiku_clock_hal.h.
+ * Non-zero when the platform fell back from the configured low-frequency
+ * source, in which case the tick rate differs from TIKU_CLOCK_SECOND and every
+ * software timer expires at a proportionally different wall-clock rate.
  */
 unsigned char tiku_clock_fault(void);
 
@@ -124,19 +122,9 @@ unsigned char tiku_clock_fault(void);
 /**
  * @brief Stretch the next tick interrupt up to @p ticks_ahead away.
  *
- * Called by the scheduler, with interrupts masked, immediately before
- * entering a tick-woken idle mode while software timers are armed but
- * none is due: instead of waking every tick to do nothing, the arch
- * may program its tick compare straight to the next deadline.  On any
- * wake (the stretched compare or another interrupt) the arch accounts
- * the true elapsed ticks from its free-running counter, so the kernel
- * clock stays exact.  Pair every successful call with
- * tiku_clock_tickless_end() after the idle hook returns.
- *
- * The weak default returns 0 (no tickless backend): the scheduler
- * falls back to per-tick wake-ups — the deadline-aware-idle behavior.
- * Archs with a free-running always-on time base (Ambiq STIMER)
- * override it.
+ * Called with interrupts masked before a tick-woken idle while timers are armed
+ * but none due: the arch may program its compare straight to the next deadline
+ * and accounts true elapsed ticks on wake, so the kernel clock stays exact.
  *
  * @param ticks_ahead Ticks until the next software-timer deadline (>1)
  * @return Non-zero if the stretch was armed, 0 if unsupported
@@ -146,11 +134,9 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead);
 /**
  * @brief Close a stretch window opened by tiku_clock_tickless_begin().
  *
- * Called with interrupts masked after the idle hook returns.  If the
- * stretched compare already fired (the tick ISR resynced the clock and
- * restored the per-tick cadence) this is a no-op; on an early wake by
- * another interrupt it accounts the elapsed whole ticks and re-arms
- * the per-tick cadence at the next tick boundary.
+ * Called with interrupts masked after the idle hook returns.  A no-op if the
+ * stretched compare already fired; on an early wake it accounts the elapsed
+ * whole ticks and re-arms the per-tick cadence at the next boundary.
  */
 void tiku_clock_tickless_end(void);
 

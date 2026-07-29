@@ -31,16 +31,9 @@ extern "C" {
 /**
  * @brief Bring the BT subsystem online.
  *
- * Must run AFTER the WiFi side has finished phase 2.F (WLAN firmware
- * loaded + HT clock up). Performs the seven-step BT bring-up:
- *
- *   1. Power up BT via BT2WLAN_PWRUP backplane register
- *   2. Upload 43439A0_btfw.bin into chip RAM (Intel-HEX-like parse)
- *   3. Wait for BT_CTRL_REG.FW_RDY = 1 (up to ~300 ms)
- *   4. Read WLAN_RAM_BASE_REG_ADDR for the buffer-ring base
- *   5. Zero the four buffer pointers (H2BT_IN/OUT, BT2H_IN/OUT)
- *   6. Wait for BT_CTRL_REG.BT_AWAKE = 1
- *   7. Set HOST_CTRL_REG.SW_RDY + toggle DATA_VALID interrupt
+ * Must run after the WiFi side has loaded its firmware and raised the HT clock.
+ * Powers BT up, uploads its firmware, waits for ready, zeroes the ring pointers
+ * and completes the host handshake.
  *
  * @return TIKU_DRV_OK on success, otherwise an error from the bring-up
  *         step that failed.
@@ -48,12 +41,10 @@ extern "C" {
 int tiku_bt_init(void);
 
 /**
- * @brief Send one HCI command/ACL packet to the chip.
+ * @brief Send one HCI command or ACL packet to the chip.
  *
- * The buffer must start with an HCI packet-type byte (0x01 command,
- * 0x02 ACL data, 0x03 SCO, 0x04 event — chip side only).
- * Caller is responsible for serialising calls (the runner does
- * this; ad-hoc callers must not race the runner).
+ * The buffer must start with an HCI packet-type byte.  The caller serialises
+ * calls -- the runner does, and ad-hoc callers must not race it.
  *
  * @param packet  HCI packet bytes including the 1-byte type prefix
  * @param len     Total length including the type byte
@@ -83,17 +74,11 @@ int tiku_bt_recv(uint8_t *out, uint16_t out_max);
 int tiku_bt_is_ready(void);
 
 /**
- * @brief Information returned by HCI Read_Local_Version_Information
+ * @brief Information returned by HCI Read_Local_Version_Information.
  *
- * Cached on bring-up; valid once tiku_bt_is_ready() returns 1.
- * Field meanings follow the Bluetooth Core Spec
- * "Read_Local_Version_Information" command (OGF=0x04, OCF=0x0001):
- *   hci_version    Host Controller Interface version  (5.1 = 0x0A,
- *                  5.2 = 0x0B, ...)
- *   hci_revision   Vendor-specific HCI revision
- *   lmp_version    Link Manager Protocol version (Bluetooth radio core)
- *   manufacturer   Bluetooth SIG manufacturer ID (0x000F = Broadcom)
- *   lmp_subversion Vendor-specific LMP subversion / patch level
+ * Cached on bring-up and valid once tiku_bt_is_ready() returns 1.  The fields
+ * follow the Core Spec command of the same name: HCI and LMP versions, the
+ * vendor revisions, and the SIG manufacturer id.
  */
 typedef struct {
     uint8_t  hci_version;
@@ -136,29 +121,19 @@ const char *tiku_bt_fw_version(void);
 /* GAP advertising (phase 7)                                                 */
 /*---------------------------------------------------------------------------*/
 
-/** Maximum local-name length accepted by tiku_bt_advertise_start.
- *
- * The legacy LE Set Advertising Data PDU carries up to 31 bytes of AD
- * records. We pre-pend a 3-byte Flags record, then the Complete Local
- * Name AD record itself costs 2 bytes of overhead (len + AD type), so
- * the longest name that still fits is 31 - 3 - 2 = 26 bytes. We allow
- * 26 chars + 1 NUL terminator in the public API. */
+/*
+ * Maximum local-name length accepted by tiku_bt_advertise_start().  A legacy
+ * advertising PDU carries 31 bytes of AD records; a 3-byte Flags record plus
+ * the name record's own 2 bytes of overhead leave 26.
+ */
 #define TIKU_BT_ADV_NAME_MAX     26U
 
 /**
  * @brief Start advertising with the given local name.
  *
- * Sequence:
- *   1. LE_Set_Advertising_Parameters  (ADV_IND, 100..150 ms interval,
- *                                      use the chip's public BD_ADDR,
- *                                      all 3 advertising channels)
- *   2. LE_Set_Advertising_Data        (Flags = 0x06 + Complete Local
- *                                      Name = @p name)
- *   3. LE_Set_Advertising_Enable(1)
- *
- * Each step waits for its Command Complete event with status=0x00
- * before the next; a failure aborts the sequence and disables any
- * advertising started so far.
+ * Sets the advertising parameters, then the data (Flags plus Complete Local
+ * Name), then enables.  Each step waits for a successful Command Complete, and
+ * a failure aborts the sequence and disables anything already started.
  *
  * @param name  UTF-8 local name, 1..26 chars. NULL or empty rejected.
  * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID for bad name,
@@ -190,16 +165,11 @@ int tiku_bt_is_advertising(void);
 #define TIKU_BT_SCAN_NAME_MAX    24U
 
 /**
- * @brief One entry in the scan-results cache
+ * @brief One entry in the scan-results cache.
  *
- * Populated from HCI_LE_Advertising_Report subevents. We keep enough
- * to display the device but drop the rest of the AD payload to bound
- * SRAM use. @p addr is MSB-first (display order), @p name is not
- * NUL-terminated -- use @p name_len.
- *
- *   addr_type   0 = public, 1 = random
- *   evt_type    0 ADV_IND, 1 ADV_DIRECT_IND, 2 ADV_SCAN_IND,
- *               3 ADV_NONCONN_IND, 4 SCAN_RSP
+ * Populated from LE Advertising Report subevents, keeping enough to display the
+ * device and dropping the rest of the AD payload to bound SRAM.  @p addr is
+ * MSB-first display order and @p name is not NUL-terminated -- use @p name_len.
  */
 typedef struct {
     uint8_t  addr[6];
@@ -254,13 +224,11 @@ uint8_t tiku_bt_scan_results(tiku_bt_scan_entry_t *out,
                                    uint8_t max);
 
 /**
- * @brief Drain pending LE_Advertising_Report events from the BT2H ring.
+ * @brief Drain pending LE Advertising Report events from the BT2H ring.
  *
- * Idempotent and cheap (one bp_read32 + early-return when nothing is
- * pending). The WHD runner calls this on every tick while a scan is
- * active, an LE link is up, or advertising is enabled, so events
- * don't pile up in the chip's ring buffer. Safe to call always --
- * it just no-ops when nothing is pending.
+ * Idempotent and cheap, with an early return when nothing is pending.  The
+ * runner calls it every tick while a scan, link or advertising is active, so
+ * events do not pile up in the chip's ring.
  */
 void tiku_bt_poll(void);
 
@@ -275,19 +243,11 @@ void tiku_bt_poll(void);
 #define TIKU_BT_CONN_MAX         1U
 
 /**
- * @brief One active LE connection
+ * @brief One active LE connection.
  *
- * Populated from HCI_LE_Connection_Complete (subevent 0x01) and torn
- * down on HCI_Disconnection_Complete (event 0x05). @p handle is the
- * 12-bit chip-assigned identifier used in every subsequent ACL data
- * packet for this link; @p peer_addr is MSB-first display order to
- * match @ref tiku_bt_scan_entry_t.
- *
- *   role                 0 = central (we initiated; rare today),
- *                        1 = peripheral (phone initiated)
- *   conn_interval_units  1.25 ms units (e.g. 24 = 30 ms)
- *   conn_latency         number of intervals the peripheral may skip
- *   supv_timeout_units   10 ms units (typical 500 = 5 s)
+ * Populated from LE Connection Complete and torn down on Disconnection
+ * Complete.  @p handle is the chip-assigned id used in every subsequent ACL
+ * packet; @p peer_addr is MSB-first display order, matching the scan entry.
  */
 typedef struct {
     uint16_t handle;
@@ -315,11 +275,9 @@ uint8_t tiku_bt_connections(tiku_bt_connection_t *out,
 /**
  * @brief Tear down an LE link.
  *
- * Issues HCI_Disconnect (OGF=0x01, OCF=0x0006) with reason 0x13
- * "Remote User Terminated Connection". The chip's response is a
- * Command Status, then later a Disconnection Complete event arrives
- * asynchronously -- the connection table entry is cleared then, not
- * here.
+ * Issues HCI_Disconnect with "remote user terminated".  The chip answers with a
+ * Command Status; the Disconnection Complete arrives later and is what clears
+ * the connection-table entry, not this call.
  *
  * @param handle  Connection handle returned via tiku_bt_connections.
  *                Pass 0xFFFF to disconnect the first active link
@@ -377,12 +335,11 @@ typedef int (*tiku_bt_char_write_t)(void *user, const uint8_t *data,
                                           uint16_t len);
 
 /**
- * @brief One characteristic in a GATT service
+ * @brief One characteristic in a GATT service.
  *
- * A char must provide either a static value (@p static_value + @p
- * static_value_len) or an @p on_read callback. The callback takes
- * precedence when both are set. NOTIFY/INDICATE props auto-allocate
- * a CCCD descriptor after the value handle.
+ * A characteristic must supply either a static value or an on_read callback,
+ * and the callback wins when both are set.  NOTIFY and INDICATE properties
+ * auto-allocate a CCCD descriptor after the value handle.
  */
 typedef struct {
     uint16_t                    uuid;
@@ -410,12 +367,9 @@ typedef struct {
 /**
  * @brief Register a GATT service.
  *
- * Must be called once per service, typically from a process init
- * function. The service's attributes are appended to the attribute
- * table; subsequent registrations get higher handle numbers. After
- * any registration the next ATT request from a connected client
- * will see the new attributes (no service-changed indication is
- * sent today -- Phase 13+ feature).
+ * Called once per service, typically from a process init.  Its attributes are
+ * appended to the table and later registrations get higher handles; the next
+ * ATT request sees them, with no service-changed indication sent today.
  *
  * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID if @p svc is
  *         NULL or if the registry is full (cap = TIKU_BT_SVC_MAX).
@@ -429,11 +383,9 @@ int tiku_bt_register_service(const tiku_bt_service_t *svc);
 /**
  * @brief Initiate an LE central-role connection to a peer.
  *
- * Issues HCI_LE_Create_Connection with sensible defaults
- * (30..50 ms interval, 5 s supervision timeout, all 3 PHYs).
- * The chip's LE Connection Complete event fires asynchronously
- * once the link is up; @ref tiku_bt_connections() then
- * shows the new entry with role=0 (central).
+ * Issues LE Create Connection with sensible defaults.  The Connection Complete
+ * event fires asynchronously, after which tiku_bt_connections() shows the new
+ * entry with role 0.
  *
  * @param peer_addr       BD_ADDR in MSB-first order (display order)
  * @param peer_addr_type  0 = public, 1 = random
@@ -487,10 +439,9 @@ int tiku_bt_client_subscribe(uint16_t conn_handle,
 /**
  * @brief Push a Handle Value Notification for a characteristic.
  *
- * Walks the attribute table looking for a char with the given UUID,
- * confirms NOTIFY is in its properties, and if any active connection
- * has CCCD bit 0 set, sends ATT Handle Value Notification (opcode
- * 0x1B) over L2CAP CID 4. Silent no-op when no peer is subscribed.
+ * Finds the characteristic by UUID, confirms NOTIFY is in its properties, and
+ * sends the notification to every connection whose CCCD has it enabled.  A
+ * silent no-op when nobody is subscribed.
  *
  * @param char_uuid  16-bit UUID of the characteristic
  * @param value      Bytes to put in the notification PDU
@@ -516,18 +467,11 @@ int tiku_bt_notify(uint16_t char_uuid, const uint8_t *value,
 #define TIKU_BT_BOND_MAGIC       0x424F4E44UL
 
 /**
- * @brief One stored LE bond (LTK + peer identity)
+ * @brief One stored LE bond (LTK and peer identity).
  *
- * 32-byte fixed-width record. The slot is laid out so that future
- * Phase 14 SMP work can drop in real LTK/IRK material without
- * shifting bytes or migrating storage.
- *
- *   magic            TIKU_BT_BOND_MAGIC when populated, 0 otherwise
- *   peer_addr_type   0 = public, 1 = random
- *   peer_addr        MSB-first display order (matches scan / conn)
- *   _pad             reserved (zero today; future flags or IRK hash)
- *   ltk              long-term key, 16 B (zeros today)
- *   flags            placeholder for authenticated / SC / MITM bits
+ * A 32-byte fixed-width record, laid out so real LTK and IRK material can drop
+ * in later without shifting bytes or migrating storage.  `magic` marks a
+ * populated slot and `peer_addr` is MSB-first, matching scan and connection.
  */
 typedef struct {
     uint32_t magic;
@@ -539,12 +483,11 @@ typedef struct {
 } tiku_bt_bond_record_t;
 
 /**
- * @brief Save a bond record to the persistent store
+ * @brief Save a bond record to the persistent store.
  *
- * Writes the supplied record into the .persistent slot (FRAM-backed
- * on MSP430, flash-backed on RP2350). Used by the SMP state machine
- * when LE-SC pairing completes to persist the derived LTK so the
- * link can re-encrypt on reconnect without re-pairing.
+ * Writes the record into its durable slot.  The SMP state machine calls this
+ * when pairing completes, so the link can re-encrypt on reconnect without
+ * pairing again.
  *
  * @param slot  Bond index in [0, TIKU_BT_BOND_MAX)
  * @param rec   Record to store; magic is set automatically

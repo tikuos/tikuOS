@@ -53,10 +53,9 @@ uint8_t tiku_lcd_num_chars(void);
 /**
  * @brief Bring up the LCD controller and clear the panel.
  *
- * Configures the LCD peripheral (charge pump, mux ratio, frame
- * frequency, pin muxing) and blanks every segment. Safe to call
- * once at boot before the scheduler starts. No-op on boards
- * without an LCD.
+ * Configures the peripheral -- charge pump, mux ratio, frame frequency, pin
+ * muxing -- and blanks every segment.  Safe to call at boot before the
+ * scheduler starts, and a no-op on boards without an LCD.
  */
 void tiku_lcd_init(void);
 
@@ -158,23 +157,12 @@ void tiku_lcd_put_int(int32_t value);
 void tiku_lcd_put_hex(uint32_t value, uint8_t digits);
 
 /**
- * @brief Display a fixed-point value, right-aligned, with the
- *        decimal point shown via the board's inter-digit dot icon.
+ * @brief Display a fixed-point value, right-aligned, with the decimal point
+ *        shown via the board's inter-digit dot icon.
  *
- * Renders @p value as an integer and lights the dot icon between
- * the integer and fractional cells, so e.g.
- * `tiku_lcd_put_fixed(2345, 2)` shows `   23.45` (last 2 digits
- * are the fractional part) and `tiku_lcd_put_fixed(-50, 1)` shows
- * `   -5.0`. Negative values reserve one cell for the leading
- * '-'. If the magnitude has fewer digits than @p decimals + 1, a
- * leading zero is added so the integer cell is never empty.
- * Values that would not fit (including the sign) are clamped to
- * all-9s and the dot is cleared.
- *
- * On boards that do not declare TIKU_BOARD_LCD_DOT_COUNT the
- * function is still callable but no dot is lit — the digits
- * appear without a visible separator. On boards without an LCD
- * the call is a no-op.
+ * Renders @p value as an integer and lights the dot before the last @p decimals
+ * digits, reserving a cell for a leading '-' and adding a leading zero so the
+ * integer cell is never empty.  A value that will not fit clamps to all-9s.
  *
  * @param value     Signed value to render (raw, no scaling).
  * @param decimals  Number of fractional digits. 0 behaves like

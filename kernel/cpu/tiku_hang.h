@@ -44,10 +44,9 @@ struct tiku_process;
 /**
  * @brief Arm the detector.
  *
- * Call once when the scheduler loop starts.  Until armed, the per-tick
- * detector is a no-op -- so a test harness that drives the kernel without the
- * sched loop can never trip a false hang reset, while the pure predicate
- * tiku_hang_detect_step() remains independently testable.
+ * Call once when the scheduler loop starts.  Until armed the per-tick detector
+ * is a no-op, so a harness driving the kernel without the loop cannot trip a
+ * false hang reset while the predicate stays independently testable.
  */
 void tiku_hang_arm(void);
 

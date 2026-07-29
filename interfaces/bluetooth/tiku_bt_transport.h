@@ -24,13 +24,11 @@ extern "C" {
 #endif
 
 /**
- * @brief Driver-supplied transport vtable
+ * @brief Driver-supplied transport vtable.
  *
- * Each function is called by the generic stack as it pumps HCI
- * traffic. Implementations must be synchronous (no PT_YIELD) since
- * they may be called from shell context, the BT runner, and ISR
- * follow-ups. Reentrancy: only the BT runner and shell touch the
- * transport at most one-at-a-time (single-process BT use today).
+ * Called by the generic stack as it pumps HCI traffic.  Implementations must be
+ * synchronous, since they run from shell context, the runner and ISR
+ * follow-ups; only one caller touches the transport at a time today.
  */
 typedef struct {
     /**
@@ -57,15 +55,9 @@ typedef struct {
 /**
  * @brief Register the active BT transport.
  *
- * Drivers call this once during their init, typically right after
- * the chip-side bring-up (BTFW upload + ring-buffer handshake on
- * CYW43, or pin/baud config on a UART-HCI driver). The generic
- * stack stashes the pointer and uses it for every subsequent send /
- * recv operation. Only one transport may be registered at a time;
- * a second call replaces the first.
- *
- * The vtable storage must outlive every BT operation -- usually
- * declared `static const` in the driver's translation unit.
+ * A driver calls this once during init, after its chip-side bring-up.  Only one
+ * transport is active and a second call replaces the first, so the vtable must
+ * outlive every BT operation -- usually a static const in the driver.
  *
  * @return 0 on success, non-zero on bad args.
  */

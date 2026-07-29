@@ -135,11 +135,9 @@ int tiku_crit_begin(uint16_t max_us, uint8_t preserve_mask);
  *                disables the bound.
  * @return TIKU_CRIT_OK, or TIKU_CRIT_ERR_BUSY if a window is held.
  *
- * Sets the held flag so the software-timer dispatcher and the
- * tick ISR's poll-up suppress themselves, but does NOT clear any
- * peripheral IE bit. Hardware ISRs continue to fire and may
- * inject jitter into bit-bang edges (typically 3-5 us per
- * Timer A0 tick). Windows do not nest.
+ * Sets the held flag so the timer dispatcher and the tick ISR's poll suppress
+ * themselves, but clears no peripheral IE bit -- hardware ISRs keep firing and
+ * may jitter bit-bang edges.  Windows do not nest.
  */
 int tiku_crit_begin_defer(uint16_t max_us);
 
@@ -147,10 +145,8 @@ int tiku_crit_begin_defer(uint16_t max_us);
  * @brief Close the held critical-execution window.
  * @return TIKU_CRIT_OK, or TIKU_CRIT_ERR_NOT_HELD if none is open.
  *
- * Restores any IE bits that were masked at begin (no-op for the
- * defer flavour) and drains the timer-process by re-issuing a
- * poll. If the elapsed htimer count exceeded max_us the
- * violation counter advances.
+ * Restores any IE bits masked at begin and drains the timer process with a
+ * fresh poll.  Exceeding max_us advances the violation counter.
  */
 int tiku_crit_end(void);
 

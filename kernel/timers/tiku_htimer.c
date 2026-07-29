@@ -50,11 +50,9 @@ void tiku_htimer_init(void) {
 /**
  * @brief Schedule a single-shot hardware timer callback.
  *
- * Validates that the target time is far enough in the future
- * (beyond the guard time) to avoid races with the hardware
- * counter.  Only one htimer can be pending at a time; setting
- * a new one implicitly replaces the previous.  The callback
- * runs in ISR context when the hardware match fires.
+ * Validates that the target is beyond the guard time, so it cannot race the
+ * hardware counter.  Only one htimer is pending at a time and a new one
+ * replaces the previous; the callback runs in ISR context.
  */
 int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                     tiku_htimer_callback_t func, void *ptr) {
@@ -97,10 +95,9 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 /**
  * @brief Schedule without the guard-time gate.
  *
- * Used by tight rescheduling paths (notably tiku_bitbang) where the
- * caller knows the bit period and accepts responsibility for staying
- * ahead of the hardware counter. Same body as tiku_htimer_set minus
- * the guard check.
+ * For tight rescheduling paths where the caller knows the period and takes
+ * responsibility for staying ahead of the counter.  Same body as
+ * tiku_htimer_set() minus the guard check.
  */
 int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                              tiku_htimer_callback_t func, void *ptr) {

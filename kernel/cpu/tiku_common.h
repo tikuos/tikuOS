@@ -124,12 +124,8 @@ static inline int tiku_common_clamp(int val, int lo, int hi)
 /**
  * @brief Byte-swap a 16-bit value (big-endian <-> little-endian).
  *
- * Swaps the high and low bytes: 0x1234 becomes 0x3412.  Essential
- * for converting between host byte order (little-endian on MSP430)
- * and network byte order (big-endian) in protocol stacks (IP, UDP,
- * TCP, MQTT, etc.).
- *
- * A double swap is the identity: bswap16(bswap16(x)) == x.
+ * Converts between host order and network order for the protocol stacks.  A
+ * double swap is the identity.
  *
  * @param val  16-bit value to swap.
  * @return     Byte-swapped value.

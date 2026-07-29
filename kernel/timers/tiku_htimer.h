@@ -115,15 +115,11 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                     tiku_htimer_callback_t func, void *ptr);
 
 /**
- * @brief Schedule a single-shot hardware timer without guard-time check.
+ * @brief Schedule a single-shot hardware timer without the guard-time check.
  *
- * Identical to tiku_htimer_set() but skips the
- * TIKU_HTIMER_GUARD_TIME check that rejects targets too close to now.
- *
- * Intended for tight back-to-back rescheduling from inside an ISR
- * callback where the caller has already done its own timing-margin
- * analysis (e.g. tiku_bitbang at sub-guard-time bit periods). Misuse
- * from non-ISR contexts can produce missed compares and silent drops.
+ * For tight back-to-back rescheduling from inside an ISR callback where the
+ * caller has done its own margin analysis.  Misuse from non-ISR context
+ * produces missed compares and silent drops.
  */
 int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                              tiku_htimer_callback_t func, void *ptr);

@@ -104,12 +104,9 @@ typedef struct {
 /**
  * @brief Trigger an active scan (non-blocking).
  *
- * Returns TIKU_DRV_OK if the scan was queued; TIKU_DRV_ERR_INVALID
- * if the radio isn't up yet; TIKU_DRV_ERR_TIMEOUT if a scan is
- * already in flight or the runner's event queue is full.
- *
- * Subscribers receive AP_FOUND events as each unique AP is
- * discovered and one SCAN_COMPLETE event when the scan ends.
+ * Subscribers get an AP_FOUND event per unique access point and one
+ * SCAN_COMPLETE when it ends.  Fails if the radio is not up, or if a scan is
+ * already in flight or the runner's queue is full.
  */
 int tiku_wireless_scan_start(void);
 
@@ -169,16 +166,11 @@ int tiku_wireless_connect_auth(const char *ssid, const char *psk,
 int tiku_wireless_disconnect(void);
 
 /**
- * @brief Forget the persistent WPA credentials cached after the
- *        last successful join. After this call:
+ * @brief Forget the persistent WPA credentials cached after the last join.
  *
- *          - the current association (if any) is torn down
- *          - the FRAM-backed SSID/PSK record is cleared
- *          - cold-boot rejoin will NOT trigger on the next reboot
- *
- * Useful for "factory reset" flows or before handing a device to
- * someone else. Idempotent — calling on a device with no stored
- * credentials is a no-op.
+ * Tears down any current association, clears the stored SSID and PSK, and stops
+ * cold-boot rejoin on the next reboot.  Idempotent, so it is safe on a device
+ * that has none.
  *
  * @return TIKU_DRV_OK on success.
  */

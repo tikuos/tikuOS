@@ -94,10 +94,9 @@ void tiku_adc_close(void);
 /**
  * @brief Configure a pin for analog input.
  *
- * Sets the GPIO pin corresponding to the given ADC channel to
- * analog function mode. Must be called once per external channel
- * before reading. Not needed for internal channels (temp sensor,
- * battery monitor).
+ * Puts the pin backing the channel into analog function mode.  Needed once per
+ * external channel before reading, and not at all for the internal temperature
+ * and battery channels.
  *
  * @param channel  ADC channel number (0-15 for external pins)
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM if invalid
@@ -107,12 +106,8 @@ int tiku_adc_channel_init(uint8_t channel);
 /**
  * @brief Perform a single ADC conversion and return the result.
  *
- * Selects the specified channel, triggers a conversion, waits for
- * completion, and returns the raw digital value. The result range
- * depends on the configured resolution:
- *   - 8-bit:  0 to 255
- *   - 10-bit: 0 to 1023
- *   - 12-bit: 0 to 4095
+ * Selects the channel, triggers a conversion and waits for it.  The raw value
+ * spans 0..255, 0..1023 or 0..4095 depending on the configured resolution.
  *
  * @param channel  ADC channel number (0-15 external, 30=temp, 31=battery)
  * @param value    Output: raw ADC conversion result

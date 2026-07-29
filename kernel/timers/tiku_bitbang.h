@@ -58,11 +58,9 @@ typedef struct {
     uint8_t  msb_first;       /**< 1 = MSB of each byte first; 0 = LSB first */
     uint8_t  idle_level;      /**< Pin level driven after the last bit */
 
-    /** Bit period in htimer ticks. With the default HIGH_ACCURACY
-     *  preset 1 tick = 1 us, so bit_time_ticks is the bit period in
-     *  microseconds. Must be at least a few ticks to allow the ISR
-     *  to reschedule before the next compare-match. See note below
-     *  on guard-time bypass. */
+    /** Bit period in htimer ticks.  With the default HIGH_ACCURACY preset one
+     *  tick is 1 us.  Must be at least a few ticks so the ISR can reschedule
+     *  before the next compare-match; see the guard-time note below. */
     uint16_t bit_time_ticks;
 
     const uint8_t *data;      /**< Bit array, MSB-first or LSB-first per flag */
@@ -81,16 +79,9 @@ typedef struct {
  * @param cfg Caller-owned config; copied internally
  * @return TIKU_BITBANG_OK or a negative error code
  *
- * Configures the pin as output, schedules the first bit edge via
- * htimer, and returns immediately. Subsequent edges are produced
- * by the htimer ISR. The caller polls tiku_bitbang_busy() or waits
- * on the completion callback.
- *
- * Bit periods shorter than TIKU_HTIMER_GUARD_TIME are accepted: the
- * engine bypasses the guard via tiku_htimer_set_no_guard() during
- * back-to-back rescheduling. The first edge still goes through the
- * standard guarded set, so very-short periods require enough margin
- * before the first edge.
+ * Configures the pin, schedules the first edge and returns; the ISR produces
+ * the rest.  Periods shorter than the htimer guard time are accepted -- the
+ * engine bypasses the guard when rescheduling, but the first edge still uses it.
  */
 int tiku_bitbang_tx(const tiku_bitbang_t *cfg);
 

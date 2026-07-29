@@ -103,11 +103,9 @@ unsigned char tiku_clock_fault(void)
 /**
  * @brief Weak default: no tickless backend, never stretches.
  *
- * Platforms with an always-on free-running time base override all
- * three symbols (arch/ambiq/tiku_htimer_arch.c for Apollo510).  With
- * the defaults the scheduler keeps per-tick wake-ups — exactly the
- * deadline-aware-idle behavior — so MSP430 / RP2350 / Apollo4 Lite
- * are unchanged until their backends are written and bench-proven.
+ * A platform with an always-on free-running time base overrides all three
+ * symbols.  With the defaults the scheduler keeps per-tick wake-ups, so parts
+ * without a backend behave exactly as before.
  */
 TIKU_WEAK int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 {
