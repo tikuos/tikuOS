@@ -65,12 +65,10 @@
 #define LC_NVM_PERSISTENT
 #endif
 
-/**
- * NVM pool: one lc_t-sized buffer per slot.
- *
- * On MSP430, placed in FRAM via the .persistent section.
- * Each tiku_lc_persist_register() call claims the next free slot
- * and hands its address to the persist store.
+/*
+ * NVM pool: one lc_t-sized buffer per slot, placed in the durable section.
+ * Each register call claims the next free slot and hands its address to the
+ * persist store.
  */
 static LC_NVM_PERSISTENT uint8_t
     lc_nvm_pool[TIKU_LC_PERSIST_MAX_SLOTS * sizeof(lc_t)] = {0};
@@ -159,14 +157,11 @@ void tiku_lc_persist_init(void)
 }
 
 /**
- * @brief Register a persistent LC slot under a key
+ * @brief Register a persistent LC slot under a key.
  *
- * Allocates the next sizeof(lc_t) chunk from the NVM pool and
- * registers it in the persist store.  If the key already exists
- * (duplicate registration in the same boot, or survived a reboot
- * and was recovered by tiku_persist_init), this is a no-op: the
- * existing slot and stored value are preserved without burning
- * a fresh slot from the pool.
+ * Claims the next chunk of the pool and registers it.  An existing key -- a
+ * duplicate this boot, or one recovered at init -- is a no-op that keeps its
+ * slot and value rather than burning a fresh one.
  *
  * @param key  Null-terminated key (max 7 chars + NUL)
  * @return 0 on success, -1 if store not initialized,
@@ -217,15 +212,11 @@ int tiku_lc_persist_register(const char *key)
 }
 
 /**
- * @brief Save an lc_t value to NVM
+ * @brief Save an lc_t value to NVM.
  *
- * Writes the continuation line number into the persist store.
- * Updates both the NVM data buffer and the FRAM-backed entry
- * metadata (value_len, write_count).
- *
- * Unlocks the MPU internally — the PT_*_PERSISTENT macros do not
- * unlock NVM, and the persist write touches both the data slot and
- * the FRAM-backed entry metadata (value_len, write_count).
+ * Writes the continuation line, updating both the data slot and the durable
+ * entry metadata.  It unlocks the MPU itself, because the PT_*_PERSISTENT
+ * macros do not.
  *
  * @param key  Key previously registered with tiku_lc_persist_register
  * @param val  The lc_t value (line number) to persist
@@ -246,14 +237,11 @@ int tiku_lc_persist_save(const char *key, lc_t val)
 }
 
 /**
- * @brief Load an lc_t value from NVM
+ * @brief Load an lc_t value from NVM.
  *
- * Reads the stored continuation line number.  Returns non-zero if
- * the key does not exist or has no stored value (first boot or
- * after LC_CLEAR_PERSISTENT), in which case *val is untouched and
- * the protothread starts from the beginning.
- *
- * Does not need MPU unlock (read-only).
+ * Non-zero when the key is unknown or has no stored value -- first boot, or
+ * after a clear -- in which case the output is untouched and the protothread
+ * starts from the beginning.  Read-only, so no unlock is needed.
  *
  * @param key  Key previously registered with tiku_lc_persist_register
  * @param val  Output: the stored lc_t value
@@ -303,15 +291,11 @@ int tiku_lc_persist_clear(const char *key)
 }
 
 /**
- * @brief Reset the NVM value to 0 without deleting the entry
+ * @brief Reset the NVM value to 0 without deleting the entry.
  *
- * Writes 0 to the persist store so LC_RESUME_PERSISTENT treats
- * it as "start from beginning".  The key stays registered so
- * future saves succeed — unlike clear which removes the key.
- *
- * Unlocks the MPU internally — the PT_*_PERSISTENT macros do not
- * unlock NVM, and the persist write touches both the data slot and
- * the FRAM-backed entry metadata.
+ * The checkpoint then reads as "start from the beginning", but the key stays
+ * registered so later saves succeed -- unlike clear, which removes it.  Unlocks
+ * the MPU itself.
  *
  * @param key  Key to reset
  * @return 0 on success, negative on error

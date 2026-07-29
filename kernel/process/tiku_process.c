@@ -36,16 +36,11 @@
 /* PRIVATE TYPES                                                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief One slot in the event queue ring
- *
- * Captures a single posted event in flight between the poster
- * (tiku_process_post / tiku_process_poll, possibly an ISR) and the
- * dispatcher (tiku_process_run).  The target @p p is either a
- * specific process or TIKU_PROCESS_BROADCAST (NULL) for a fan-out to
- * every running process.  Field order is chosen so the wider data
- * pointer leads, which keeps the struct naturally packed on both the
- * 16-bit MSP430 and the 32-bit RP2350.
+/*
+ * One slot in the event queue ring: a single posted event in flight between the
+ * poster, which may be an ISR, and the dispatcher.  The target is a process or
+ * BROADCAST.  The wider data pointer leads, keeping the struct packed on 16-
+ * and 32-bit alike.
  */
 struct event_item {
     tiku_event_data_t data;     /**< Opaque payload passed to the thread */
@@ -58,84 +53,59 @@ struct event_item {
 /* PRIVATE VARIABLES                                                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief The event queue ring buffer
- *
- * A fixed-size circular buffer of TIKU_QUEUE_SIZE event_item slots.
- * Written by tiku_process_post() / tiku_process_poll() (which an ISR
- * may invoke) and drained one entry per call by tiku_process_run().
- * The slots themselves are not declared volatile because every access
- * is bracketed by a tiku_atomic_enter()/exit() critical section that
- * serialises ISR and process-context use; only the head and length
- * indices below carry the volatile qualifier.
+/*
+ * The event queue ring: a fixed-size circular buffer written by post and poll,
+ * possibly from an ISR, and drained one entry per run.  The slots are not
+ * volatile because every access sits in an atomic section; only the head and
+ * length indices are.
  */
 static struct event_item queue[TIKU_QUEUE_SIZE];
 
-/**
- * @brief Index of the oldest pending event (the next to dispatch)
- *
- * Advances by one (mod TIKU_QUEUE_SIZE) each time tiku_process_run()
- * dequeues an event.  volatile because an ISR posting through
- * tiku_process_post() reads it to compute the tail slot.  Only ever
- * mutated inside an atomic section.
+/*
+ * Index of the oldest pending event.  Advances on each dequeue.  volatile
+ * because an ISR posting reads it to compute the tail, and only ever mutated
+ * inside an atomic section.
  */
 static volatile uint8_t q_head = 0;
 
-/**
- * @brief Number of events currently in the ring
- *
- * Ranges 0..TIKU_QUEUE_SIZE.  The tail slot is derived as
- * (q_head + q_len) % TIKU_QUEUE_SIZE, so head + length fully describe
- * the ring without a separate tail index.  Incremented on post,
- * decremented on dispatch; volatile and atomic-section guarded for
- * the same ISR-vs-process reason as q_head.
+/*
+ * Number of events in the ring.  The tail is derived as head + length, so no
+ * separate tail index is kept; volatile and atomic-guarded for the same
+ * ISR-versus-process reason as the head.
  */
 static volatile uint8_t q_len = 0;
 
-/**
- * @brief Lifetime count of dropped events (queue full at post time)
- *
- * Bumped inside the same atomic section as the failed enqueue, so it
- * is exact.  Never reset except by tiku_process_init(); wraps at
- * 65535.  Surfaced at /proc/queue/dropped — the observability for a
- * failure mode that used to be completely silent.
+/*
+ * Lifetime count of events dropped because the queue was full at post time.
+ * Bumped inside the same atomic section as the failed enqueue, so it is exact.
+ * Surfaced at /proc/queue/dropped -- observability for an otherwise silent failure.
  */
 static volatile uint16_t q_dropped = 0;
 
-/**
- * @brief Is @p ev a kernel/system event (vs an application event)?
- *
- * System events occupy the low control range (INIT..FORCE_EXIT,
- * below TIKU_EVENT_USER) and the high kernel range (TIMER and up).
- * Application events live in [TIKU_EVENT_USER, TIKU_EVENT_TIMER).
- * The distinction feeds the TIKU_QUEUE_RESERVE admission check in
- * tiku_process_post().
+/*
+ * Is this a kernel event rather than an application one?  System events occupy
+ * the low control range and the high kernel range, applications the span
+ * between.  The distinction feeds the reserve admission check in post().
  */
 static inline uint8_t event_is_system(tiku_event_t ev)
 {
     return (ev < TIKU_EVENT_USER) || (ev >= TIKU_EVENT_TIMER);
 }
 
-/**
- * @brief Return the event generation for a target process
- *
- * Broadcast events are expanded at dispatch time and do not name one
- * process lifetime, so they carry generation 0.  Unicast events carry the
- * target's current generation so a stale event posted for an old lifetime
- * can be dropped after supervision restarts the same process structure.
+/*
+ * Event generation for a target process.  A broadcast names no single lifetime
+ * so it carries 0; a unicast carries the target's generation, which is what
+ * lets a stale event for a restarted process be dropped.
  */
 static inline uint8_t event_generation(const struct tiku_process *p)
 {
     return (p != TIKU_PROCESS_BROADCAST) ? p->generation : 0u;
 }
 
-/**
- * @brief Drop queued unicast events for @p p
- *
- * Must be called with the process queue atomic section already held.
- * Broadcasts are kept because they are not private wakeups for @p p; the
- * existing dispatch semantics deliver them to whichever processes are
- * running when the broadcast reaches the head of the queue.
+/*
+ * Drop queued unicast events for a process; the caller already holds the queue
+ * atomic section.  Broadcasts are kept, because they are not private wakeups
+ * and go to whichever processes are running when they reach the head.
  */
 static void queue_purge_process_locked(const struct tiku_process *p)
 {
@@ -161,10 +131,8 @@ static void queue_purge_process_locked(const struct tiku_process *p)
 /**
  * @brief Remove the queued event at ring position @p pos, compacting the queue.
  *
- * Must run inside the atomic section (hence "_locked"): the caller brackets it
- * with tiku_atomic_enter()/exit().  If @p out is non-NULL the removed slot is
- * copied there first; the remaining tail entries are then shifted down by one
- * and q_len is decremented.
+ * Runs inside the caller's atomic section.  The removed slot is copied out when
+ * @p out is non-NULL, then the tail shifts down one and the length drops.
  *
  * @param pos  Offset from q_head of the entry to remove (0 = oldest pending).
  * @param out  Optional destination for the removed event (may be NULL).
@@ -218,16 +186,10 @@ static uint8_t queue_has_dispatchable_except_locked(
     return 0u;
 }
 
-/**
- * @brief Process registry — fixed array indexed by pid
- *
- * Slot i holds the process whose pid == i, or NULL when free.
- * Capacity is TIKU_PROCESS_MAX (8).  Populated by
- * tiku_process_register(), cleared back to NULL by
- * tiku_process_init().  Note that stopping a process
- * (tiku_process_stop / exit) does not vacate its registry slot — the
- * pid stays reserved so /proc and the shell can still inspect a
- * stopped process and resume it.  Touched only from process context.
+/*
+ * Process registry, indexed by pid, NULL where free.  Stopping a process does
+ * NOT vacate its slot -- the pid stays reserved so /proc and the shell can
+ * still inspect and resume it.  Touched only from process context.
  */
 static struct tiku_process *registry[TIKU_PROCESS_MAX];
 
@@ -235,28 +197,17 @@ static struct tiku_process *registry[TIKU_PROCESS_MAX];
 /* PUBLIC VARIABLES                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Head of the singly-linked list of started processes
- *
- * Every process with is_running != 0 is linked here through its
- * ->next field; tiku_process_run() walks this list to fan out a
- * broadcast event.  Insertion (start/resume) and removal (exit) are
- * performed inside atomic sections because a broadcast post from an
- * ISR could otherwise observe a half-linked node.  Process context
- * is the only reader.
+/*
+ * Head of the list of started processes, walked to fan out a broadcast.
+ * Insertion and removal happen inside atomic sections, because a broadcast post
+ * from an ISR could otherwise see a half-linked node.
  */
 struct tiku_process *tiku_process_list_head = NULL;
 
-/**
- * @brief The process whose thread is currently executing
- *
- * Set by call_process() for the duration of a single thread
- * invocation and cleared back to NULL on return.  The TIKU_THIS() /
- * TIKU_LOCAL() macros read it so a thread body can reach its own
- * control block and local storage without being passed a self
- * pointer.  Because dispatch is cooperative and single-threaded this
- * never needs locking; it is meaningful only between the enter and
- * exit of one thread call.
+/*
+ * The process currently executing, set for the duration of one thread call.
+ * TIKU_THIS() and TIKU_LOCAL() read it, so a thread body reaches its own
+ * control block without being passed a self pointer.  Meaningful only mid-call.
  */
 struct tiku_process *tiku_current_process = NULL;
 
@@ -318,23 +269,11 @@ void tiku_process_init(void)
 }
 
 /**
- * @brief Start a process
+ * @brief Start a process.
  *
- * Idempotent: if the process is already running this returns
- * immediately, so double-start is harmless.  Otherwise it
- * reinitialises the protothread state with PT_INIT(), links the
- * process at the head of tiku_process_list_head, marks it READY, and
- * stamps start_time from the current clock tick while zeroing
- * wake_count for fresh observability counters.  The link edit runs
- * inside an atomic section because a broadcast event posted from an
- * ISR walks the list and must never see a partially-linked node.
- *
- * After the critical section the INIT event is delivered.  The post
- * may fail only if the 32-slot event queue is full; in that case the
- * thread is run synchronously via call_process() so INIT is never
- * silently dropped — a started process is guaranteed exactly one
- * INIT.  This does NOT register the process in the pid registry;
- * tiku_process_register() does that and then calls this.
+ * Idempotent.  Re-inits the protothread and links it at the list head inside an
+ * atomic section, so an ISR broadcast never walks a half-linked node.  A full
+ * queue falls back to a synchronous call, so a start always yields one INIT.
  *
  * @param p    Process to start
  * @param data Data passed with the INIT event
@@ -346,7 +285,7 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     }
 
     /* Protect list modification — an ISR could post a broadcast event
-     * while we are linking a new node into the list. */
+     * midway through linking a new node into the list. */
     tiku_atomic_enter();
 
     PT_INIT(&p->pt);
@@ -375,22 +314,11 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
 }
 
 /**
- * @brief Exit a process
+ * @brief Exit a process.
  *
- * No-op if the process is not running.  Clears is_running, sets the
- * state to STOPPED, and unlinks the process from
- * tiku_process_list_head (handling both the head case and the
- * mid-list case via a predecessor scan).  The unlink runs inside an
- * atomic section for the same reason as start: an ISR broadcast walk
- * must not trip over a node being removed.
- *
- * After unlinking, a TIKU_EVENT_EXITED is broadcast to all surviving
- * processes with the exiting process pointer as the event data, so
- * subsystems that hold per-process resources (notably the timer
- * process) can release anything they own on its behalf.  The exiting
- * process keeps its registry slot and pid — only the linked-list
- * membership and is_running flag are cleared here, so the process can
- * still be inspected and later resumed by pid.
+ * Clears the running flag and unlinks from the list inside an atomic section,
+ * then broadcasts EXITED so subsystems holding per-process resources can
+ * release them.  The registry slot and pid survive, so it can still be resumed.
  *
  * @param p Process to exit
  */
@@ -530,22 +458,11 @@ uint16_t tiku_process_restarts(const struct tiku_process *p)
 }
 
 /**
- * @brief Post an event to a process
+ * @brief Post an event to a process.
  *
- * Appends one event_item to the tail of the ring buffer.  The tail
- * slot is computed as (q_head + q_len) % TIKU_QUEUE_SIZE, so no
- * separate tail index is kept.  When the queue is full (q_len ==
- * TIKU_QUEUE_SIZE) the event is dropped and 0 is returned; the
- * caller decides how to recover (tiku_process_start(), for example,
- * falls back to a synchronous dispatch).
- *
- * Safe to call from interrupt context: the read-modify-write of the
- * ring is wrapped in a tiku_atomic_enter()/exit() pair, which on the
- * outermost level masks interrupts and restores the prior interrupt
- * state on exit.  This does not itself run the target thread —
- * delivery happens later when tiku_process_run() drains the queue
- * from process context.  TIKU_PROCESS_BROADCAST (NULL) is stored
- * verbatim and expanded to a fan-out at dispatch time.
+ * Appends to the ring tail, returning 0 when full so the caller decides how to
+ * recover.  Safe from interrupt context, since the read-modify-write sits in an
+ * atomic section.  Delivery happens later, when run() drains from process context.
  *
  * @param p    Target process (or TIKU_PROCESS_BROADCAST)
  * @param ev   Event identifier
@@ -675,25 +592,11 @@ uint8_t tiku_process_post_node(struct tiku_process *dest, tiku_event_t ev,
 }
 
 /**
- * @brief Run the process scheduler
+ * @brief Run the process scheduler.
  *
- * Dequeues exactly one event from the head of the ring and
- * dispatches it, then returns.  The main loop calls this repeatedly
- * and drops to a low-power mode when it returns 0 (queue empty),
- * relying on an ISR posting a new event to wake the CPU.
- *
- * The dequeue (reading head fields, advancing q_head, decrementing
- * q_len) is done inside an atomic section so it cannot race an
- * ISR-side post.  Dispatch deliberately happens AFTER leaving the
- * atomic section: running a thread can take many cycles, and holding
- * interrupts off across it would inflate interrupt latency.  A
- * broadcast target (TIKU_PROCESS_BROADCAST) is fanned out to every
- * process on tiku_process_list_head; the next pointer is cached
- * before each call so a process that exits itself mid-dispatch does
- * not corrupt the walk.  A unicast target is delivered directly.
- *
- * Note this delivers one queued event per call, not one per process;
- * fairness across processes therefore follows queue (FIFO) order.
+ * Dequeues and dispatches exactly one event.  The dequeue is atomic but the
+ * dispatch deliberately is not, since holding interrupts off across a thread
+ * call would inflate latency.  A broadcast caches each next pointer first.
  *
  * @return 1 if an event was processed, 0 if idle
  */
@@ -742,17 +645,9 @@ uint8_t tiku_process_run(void)
 /**
  * @brief Dispatch one queued event, but never re-enter @p skip.
  *
- * Similar to tiku_process_run(), but it scans for one event that can be handled
- * without re-entering @p skip.  Events for @p skip are preserved in FIFO order
- * unless they are POLL, which is safe to coalesce because @p skip is already
- * awake and running.  Broadcasts are still dispatched to every process except
- * @p skip.
- *
- * The one use is a synchronous, long-running op running INSIDE @p skip's own
- * dispatch (e.g. BASIC's blocking HTTPGET$ while it drives a crypto worker):
- * it may pump the rest of the kernel's processes so timers and rules keep
- * firing, but must not recursively re-enter its own protothread, whose saved
- * PT state points at the last yield, not the deep C call it is parked in.
+ * For a long synchronous operation running INSIDE @p skip's own dispatch: it
+ * may pump the other processes so timers and rules keep firing, but must not
+ * recursively re-enter a protothread whose saved state points at its last yield.
  *
  * @param skip Process not to dispatch (typically TIKU_THIS()); NULL == plain run
  * @return 1 if an event was dispatched/discarded, 0 if no eligible work exists
@@ -823,20 +718,11 @@ uint8_t tiku_process_queue_dispatchable_except(const struct tiku_process *skip)
 }
 
 /**
- * @brief Request a process to be polled
+ * @brief Request a process to be polled.
  *
- * Enqueues a TIKU_EVENT_POLL targeted at @p p so the scheduler will
- * dispatch it on the next pass.  Pending POLL events are coalesced:
- * if a POLL for the same target is already in the queue, this call
- * is a no-op.  Without that de-duplication, a hot poll source (for
- * example a periodic timer ISR or a chatty interrupt-driven driver)
- * could fill the 32-slot event queue with redundant POLLs and starve
- * other event posters.
- *
- * The scan-and-enqueue runs inside a single atomic section so the
- * function stays safe to call from interrupt context.  Worst-case
- * cost is O(TIKU_QUEUE_SIZE) compares per call, which is bounded
- * (32 by default) and acceptable for poll-rate sources.
+ * Enqueues a POLL, coalescing with one already queued for the same target --
+ * without that, a hot poll source would fill the queue with redundant POLLs and
+ * starve other posters.  The scan and enqueue are one atomic section.
  *
  * @param p Process to poll
  */
@@ -893,28 +779,11 @@ void tiku_process_poll(struct tiku_process *p)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Dispatch an event to a single process
+ * @brief Dispatch an event to a single process.
  *
- * Runs the process thread and handles automatic exit when the thread
- * returns PT_EXITED or PT_ENDED.  TIKU_EVENT_FORCE_EXIT bypasses the thread
- * body and exits the process immediately.
- *
- * The post-dispatch state is classified by the protothread return code
- * so /proc and `ps` show an accurate picture instead of collapsing
- * every non-exit return into WAITING:
- *
- *   PT_WAITING -> WAITING -- thread is blocked on a PT_WAIT_UNTIL
- *                            condition or an event it has not yet
- *                            received; will be re-scheduled when an
- *                            event for it arrives
- *   PT_YIELDED -> READY   -- thread voluntarily yielded via PT_YIELD;
- *                            it is immediately runnable on the next
- *                            scheduler pass
- *   PT_EXITED  -> STOPPED -- handled via tiku_process_exit() below
- *   PT_ENDED   -> STOPPED -- ditto
- *
- * SLEEPING is reserved for explicit timer-driven blocking once the
- * timer subsystem feeds back wake-up state into the process record.
+ * Runs the thread and exits the process on PT_EXITED or PT_ENDED; FORCE_EXIT
+ * bypasses the body entirely.  The return code is mapped to a state, so /proc
+ * and `ps` distinguish WAITING from READY instead of collapsing both.
  *
  * @param p    Target process
  * @param ev   Event to deliver
@@ -1135,14 +1004,10 @@ uint8_t tiku_process_is_running(struct tiku_process *p)
 /* PROCESS REGISTRY FUNCTIONS                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Lowercase names for the tiku_process_state_t enum
- *
- * Indexed directly by the enum value, so the order MUST stay aligned
- * with tiku_process_state_t (RUNNING, READY, WAITING, SLEEPING,
- * STOPPED) in tiku_process.h.  Read only through
- * tiku_process_state_str(); consumed by /proc nodes and the shell
- * "ps" command for human-readable state output.
+/*
+ * Lowercase names for the process-state enum, indexed directly by value -- so
+ * the order MUST stay aligned with the enum.  Read only through
+ * tiku_process_state_str(), for /proc and the `ps` command.
  */
 static const char * const state_names[] = {
     "running",
@@ -1153,12 +1018,10 @@ static const char * const state_names[] = {
 };
 
 /**
- * @brief Convert a process state enum to a printable string
+ * @brief Convert a process state enum to a printable string.
  *
- * Bounds-checks @p state against the last enumerator and indexes
- * state_names[].  Any out-of-range value (including a corrupted
- * record) renders as "unknown" rather than reading past the table.
- * The returned pointer is to static storage and must not be freed.
+ * Bounds-checked, so an out-of-range or corrupted value renders "unknown"
+ * rather than reading past the table.  The pointer is to static storage.
  *
  * @param state  Process state value
  * @return Static lowercase name, or "unknown" if out of range
@@ -1172,23 +1035,11 @@ const char *tiku_process_state_str(tiku_process_state_t state)
 }
 
 /**
- * @brief Register a process in the pid registry and start it
+ * @brief Register a process in the pid registry and start it.
  *
- * Idempotent on the pid: if @p p already occupies its recorded slot
- * (pid valid and registry[pid] == p) the existing pid is returned and
- * nothing else happens, so calling this twice is safe.  Otherwise the
- * first free registry slot is claimed, its index becomes the pid, and
- * the optional @p name overrides the struct's name field.  If the
- * process is not already running it is then started via
- * tiku_process_start(), which links it into the active list and
- * delivers INIT — so on first registration the start_time and
- * wake_count counters are established here transitively.
- *
- * Runs in process context (typically at boot or from the shell
- * "start" path); it does not enter an atomic section itself because
- * the registry array is only ever touched from process context, while
- * the list edit it triggers inside tiku_process_start() does its own
- * locking.
+ * Idempotent on the pid.  Claims the first free slot, whose index becomes the
+ * pid, then starts the process if it is not already running.  Process-context
+ * only, and the list edit it triggers does its own locking.
  *
  * @param name  Human-readable name (NULL keeps the struct's name)
  * @param p     Process to register (NULL is rejected)
@@ -1294,19 +1145,11 @@ struct tiku_process *tiku_process_get(int8_t pid)
 }
 
 /**
- * @brief Stop a registered process by pid
+ * @brief Stop a registered process by pid.
  *
- * Marks the process STOPPED and clears is_running so call_process()
- * skips it on every subsequent dispatch (a STOPPED process never
- * runs its thread).  The two field writes are wrapped in an atomic
- * section so a concurrent ISR post or scheduler pass sees a
- * consistent (state, is_running) pair.
- *
- * Unlike tiku_process_exit(), this does NOT unlink the process from
- * tiku_process_list_head and does NOT broadcast EXITED — the node
- * stays on the list, just inert.  tiku_process_resume() relies on
- * that to bring it back cheaply, and the still-present registry slot
- * keeps the pid valid for inspection.
+ * Marks it STOPPED and clears the running flag inside an atomic section, so a
+ * concurrent post sees a consistent pair.  Unlike exit() it stays on the list
+ * and broadcasts nothing, which is what lets resume() bring it back cheaply.
  *
  * @param pid  Process identifier
  * @return 0 on success, -1 if the pid does not resolve to a process
@@ -1329,24 +1172,11 @@ int8_t tiku_process_stop(int8_t pid)
 }
 
 /**
- * @brief Resume a previously stopped process by pid
+ * @brief Resume a previously stopped process by pid.
  *
- * Only acts on a process currently in the STOPPED state; any other
- * state (or an unknown pid) is rejected with -1.  Because either
- * tiku_process_stop() or tiku_process_exit() may have produced the
- * STOPPED state, the process might or might not still be on the
- * active list, so this first scans tiku_process_list_head and
- * re-links the node at the head only if it is absent — avoiding a
- * double-link that would create a cycle.  The list check, optional
- * re-link, and the (state, is_running) update all run inside one
- * atomic section.
- *
- * Note the protothread state (p->pt) is left intact, so the thread
- * resumes from where it yielded rather than restarting.  A
- * TIKU_EVENT_CONTINUE is posted afterwards so the scheduler actually
- * dispatches the process again; if that post is dropped because the
- * queue is full the process is runnable but will not wake until some
- * other event targets it.
+ * STOPPED can come from either stop() or exit(), so the node may or may not
+ * still be listed; this re-links only if absent, avoiding a cycle.  The
+ * protothread state is intact, so it resumes where it yielded.
  *
  * @param pid  Process identifier
  * @return 0 on success, -1 if the pid is unknown or not STOPPED
@@ -1391,12 +1221,10 @@ int8_t tiku_process_resume(int8_t pid)
 }
 
 /**
- * @brief Count the occupied registry slots
+ * @brief Count the occupied registry slots.
  *
- * Counts non-NULL entries across the whole registry.  This is the
- * number of registered processes, which includes ones that are
- * currently STOPPED — a stopped process keeps its slot — so it may
- * exceed the number of processes presently on the active list.
+ * The number of registered processes, STOPPED ones included since they keep
+ * their slot -- so it can exceed the number currently on the active list.
  *
  * @return Number of registered processes (0..TIKU_PROCESS_MAX)
  */
@@ -1417,15 +1245,10 @@ uint8_t tiku_process_count(void)
 /* PROCESS CATALOG                                                           */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Catalog of available-but-not-yet-started processes
- *
- * Name-to-process directory, distinct from the pid registry: a
- * catalog entry only advertises that a process *can* be started (by
- * the shell "start" command or the init system), it does not run it.
- * Subsystems populate it at boot via tiku_process_catalog_add().
- * Holds up to TIKU_PROCESS_CATALOG_MAX entries; entries [0,
- * catalog_count) are valid.  Process-context only.
+/*
+ * Catalog of available-but-not-started processes: a name-to-process directory
+ * distinct from the pid registry, advertising only that something CAN be
+ * started.  Populated at boot; process-context only.
  */
 static tiku_process_catalog_entry_t catalog[TIKU_PROCESS_CATALOG_MAX];
 
@@ -1438,15 +1261,11 @@ static tiku_process_catalog_entry_t catalog[TIKU_PROCESS_CATALOG_MAX];
 static uint8_t catalog_count;
 
 /**
- * @brief Byte-wise full-string equality test
+ * @brief Byte-wise full-string equality test.
  *
- * A minimal strcmp() substitute that returns a boolean rather than an
- * ordering, used so small targets need not pull strcmp() into the
- * image.  Walks both strings in lockstep; on the first differing byte
- * returns 0.  When one string ends first the trailing comparison
- * (*a == *b) is false unless BOTH terminate together, so "net" does
- * not match "network" — equality requires identical length and
- * content.  Neither argument may be NULL.
+ * A boolean strcmp() substitute, so small targets need not pull strcmp() in.
+ * Equality requires identical length and content, so "net" does not match
+ * "network".  Neither argument may be NULL.
  *
  * @param a  First NUL-terminated string
  * @param b  Second NUL-terminated string
@@ -1466,15 +1285,11 @@ name_match(const char *a, const char *b)
 }
 
 /**
- * @brief Add (or update) a catalog entry mapping a name to a process
+ * @brief Add (or update) a catalog entry mapping a name to a process.
  *
- * Advertises @p proc under @p name without starting it.  If an entry
- * with a matching name already exists its process pointer is replaced
- * in place and 0 is returned (so re-advertising under the same name
- * is an update, not a duplicate).  Otherwise a new entry is appended
- * and catalog_count grows.  The name pointer is stored verbatim, not
- * copied, so it must point to storage with program lifetime (a string
- * literal or a long-lived buffer).
+ * Advertises the process without starting it; a matching name updates in place
+ * rather than duplicating.  The name pointer is stored verbatim, not copied, so
+ * it must have program lifetime.
  *
  * @param name  Human-readable name (e.g. "net", "mqtt"); NULL rejected
  * @param proc  Process struct to advertise; NULL rejected
@@ -1508,13 +1323,11 @@ tiku_process_catalog_add(const char *name, struct tiku_process *proc)
 }
 
 /**
- * @brief Look up a catalog entry by name
+ * @brief Look up a catalog entry by name.
  *
- * Linear scan of the catalog using name_match() (exact, full-length
- * equality).  Returns the advertised process struct so the caller can
- * start it; this does not start anything itself.  Searches only the
- * catalog, not the active pid registry — use
- * tiku_process_find_by_name() for the latter.
+ * A linear scan on exact equality, returning the advertised process so the
+ * caller can start it.  Searches only the catalog -- use find_by_name() for the
+ * live registry.
  *
  * @param name  Process name to search for (NULL yields NULL)
  * @return Pointer to the advertised process, or NULL if not catalogued
@@ -1548,12 +1361,11 @@ tiku_process_catalog_count(void)
 }
 
 /**
- * @brief Fetch a catalog entry by index
+ * @brief Fetch a catalog entry by index.
  *
- * Bounds-checked accessor for iterating the catalog (e.g. a shell
- * "start" command listing available processes).  The returned pointer
- * aliases the internal table and stays valid as long as the catalog
- * is not modified; callers must not write through it.
+ * A bounds-checked accessor for iterating the catalog.  The pointer aliases the
+ * internal table and stays valid while the catalog is unmodified; callers must
+ * not write through it.
  *
  * @param idx  Index in [0, tiku_process_catalog_count())
  * @return Pointer to the entry, or NULL if @p idx is out of range
@@ -1568,13 +1380,11 @@ tiku_process_catalog_get(uint8_t idx)
 }
 
 /**
- * @brief Find a running/registered process by name
+ * @brief Find a running or registered process by name.
  *
- * Linear scan of the pid registry (NOT the catalog) for a slot whose
- * process has a matching name, compared with name_match() (exact,
- * full-length).  This finds processes that have actually been
- * registered/started, including ones currently STOPPED that still
- * hold their slot.  Entries with a NULL name are skipped.
+ * A linear scan of the pid registry, not the catalog, on exact equality.  It
+ * finds processes that were actually registered, STOPPED ones included since
+ * they keep their slot; nameless entries are skipped.
  *
  * @param name  Process name to search for (NULL yields NULL)
  * @return Pointer to the registered process, or NULL if none matches

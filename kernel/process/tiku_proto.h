@@ -132,14 +132,8 @@ struct pt {
  * @param pt Pointer to the protothread control structure
  * @param condition Boolean expression to evaluate
  *
- * The thread will block and return PT_WAITING until the condition
- * evaluates to true. The condition is checked each time the thread
- * is scheduled.
- *
- * Example:
- * @code
- *   PT_WAIT_UNTIL(pt, sensor_ready == 1);
- * @endcode
+ * Returns PT_WAITING until @p condition evaluates true; it is re-checked
+ * each time the thread is scheduled.
  */
 #define PT_WAIT_UNTIL(pt, condition)  \
   do {                                \
@@ -245,15 +239,8 @@ struct pt {
  * @param f Function call to the protothread
  * @return Non-zero if thread is running, zero if it has exited
  *
- * Used to determine if a protothread should continue to be scheduled.
- * Returns true for PT_WAITING and PT_YIELDED, false for PT_EXITED and PT_ENDED.
- *
- * Example:
- * @code
- *   while(PT_SCHEDULE(my_thread(&pt))) {
- *     // Thread is still running
- *   }
- * @endcode
+ * True for PT_WAITING and PT_YIELDED, false for PT_EXITED and PT_ENDED, so
+ * `while (PT_SCHEDULE(my_thread(&pt)))` runs a thread to completion.
  */
 #define PT_SCHEDULE(f) ((f) < PT_EXITED)
 
@@ -316,43 +303,9 @@ struct pt {
 /**
  * @section pt_persistent NVM-Persistent Protothreads
  *
- * Persistent variants of the core protothread macros.  Enable with
- * TIKU_LC_PERSISTENT=1.  A persistent protothread checkpoints its
- * continuation state to non-volatile memory so it survives power loss
- * and resumes from the last checkpoint instead of restarting.
- *
- * Setup (once at boot, before the protothread runs):
- * @code
- *   tiku_lc_persist_init();
- *   tiku_lc_persist_register("tls");
- * @endcode
- *
- * Usage (drop-in replacement for PT_BEGIN/PT_END):
- * @code
- *   PT_THREAD(tls_handshake(struct pt *pt))
- *   {
- *     PT_BEGIN_PERSISTENT(pt, "tls");
- *
- *     tiku_dns_resolve(host, &ip);
- *     PT_YIELD_PERSISTENT(pt);       // checkpoint survives power loss
- *
- *     tiku_tcp_connect(ip, 443);
- *     PT_YIELD_PERSISTENT(pt);       // checkpoint survives power loss
- *
- *     tiku_tls_send_client_hello();
- *     PT_WAIT_UNTIL_PERSISTENT(pt, tls_reply_ready());
- *
- *     // Power dies and returns -- resumes from last checkpoint,
- *     // not from the beginning.
- *
- *     PT_END_PERSISTENT(pt, "tls");
- *   }
- * @endcode
- *
- * Mixing persistent and non-persistent macros within the same
- * protothread is allowed: use PT_YIELD for cheap steps where
- * replaying is acceptable, and PT_YIELD_PERSISTENT for expensive
- * steps that must not be repeated.
+ * Core-macro variants, enabled with TIKU_LC_PERSISTENT=1, that checkpoint the
+ * continuation to NVM so the thread resumes at the last checkpoint after power
+ * loss.  Needs tiku_lc_persist_init() and tiku_lc_persist_register(key) at boot.
  */
 
 #if TIKU_LC_PERSISTENT
@@ -457,10 +410,8 @@ struct pt {
  * @def PT_RESTART_PERSISTENT(pt, key)
  * @brief Restart persistent protothread from the beginning
  *
- * Like PT_RESTART but also resets the NVM value to 0 so the
- * restart begins from case 0.  Uses reset (not clear) so the
- * key stays registered and future PT_YIELD_PERSISTENT calls
- * can still write checkpoints.
+ * Like PT_RESTART, but also resets the NVM value to 0.  Reset rather than
+ * clear, so the key stays registered for later checkpoints.
  */
 #define PT_RESTART_PERSISTENT(pt, key)     \
   do {                                     \

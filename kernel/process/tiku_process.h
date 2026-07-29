@@ -36,12 +36,9 @@
 /**
  * @brief Queue slots reserved for system events.
  *
- * User-range events (TIKU_EVENT_USER .. TIKU_EVENT_TIMER-1) may fill
- * the queue only up to TIKU_QUEUE_SIZE - TIKU_QUEUE_RESERVE; the
- * last slots are held back so a flood of application posts can never
- * drop kernel events (TIMER, EXITED, INIT, VFS, GPIO).  Dropping a
- * TIMER event stalls its owner until some other event arrives —
- * the reserve makes that failure mode structurally impossible.
+ * User-range posts may fill the queue only to TIKU_QUEUE_SIZE minus this
+ * reserve, so an application flood cannot drop a kernel event (TIMER,
+ * EXITED, INIT, VFS, GPIO).
  */
 #define TIKU_QUEUE_RESERVE      4
 
@@ -84,16 +81,10 @@ typedef void *tiku_event_data_t;
 /*
  * The event data is a bare void* on the wire, but every event id carries a
  * FIXED payload type -- EXITED a process, VFS a node, TIMER a timer, GPIO a
- * packed pin, INIT/USER an opaque app pointer.  That contract used to live
- * only in comments, and every consumer reconstructed the type with a blind
- * void*->T* conversion (e.g. `struct tiku_process *p = data;`).  A mis-tagged
- * event silently misread the payload.
- *
- * The id already sits in the queue slot, so it IS the type tag.  We make the
- * id->payload contract explicit in one place (tiku_event_payload_kind) and
- * route reads through CHECKED accessors that return the payload only when the
- * id matches -- so a wrong id yields NULL/0, not a misinterpreted object.  The
- * wire format is unchanged (no queue growth: matters on 2-8 KB MSP430 parts).
+ * packed pin, INIT/USER an opaque app pointer.  The id sits in the queue slot
+ * alongside the word, so it IS the type tag: tiku_event_payload_kind() states
+ * the contract in one place and the checked accessors below return a payload
+ * only when the id matches, yielding NULL/0 instead of a misread object.
  *
  * Payloads owned by higher layers are forward-declared here and never
  * dereferenced in the process layer -- only cast through -- so the layering
@@ -124,12 +115,9 @@ tiku_event_payload_kind_t tiku_event_payload_kind(tiku_event_t ev);
 /**
  * @brief Checked accessor for the process payload of an event.
  *
- * Yields the process only for the ids whose payload kind is PROC;
- * every other id yields NULL rather than a misinterpreted object.
- * Pure: it reads no kernel state, takes no atomic section, and only
- * decodes the word it is handed — so it is reentrant and safe to call
- * from ISR context as well as from a process thread.  It posts
- * nothing; posting is tiku_process_post_proc().
+ * Yields the process only for ids whose payload kind is PROC; any other
+ * id yields NULL rather than a misinterpreted object.  Pure, so it is
+ * reentrant and safe from ISR context.
  *
  * @param ev   Event identifier as delivered to the thread
  * @param data Raw payload word delivered alongside @p ev
@@ -141,13 +129,9 @@ struct tiku_process        *tiku_event_proc (tiku_event_t ev, tiku_event_data_t 
 /**
  * @brief Checked accessor for the VFS-node payload of an event.
  *
- * Yields the watched node only when @p ev is TIKU_EVENT_VFS, the one
- * id whose payload kind is NODE; every other id yields NULL rather
- * than a misinterpreted object.  Pure: it reads no kernel state,
- * takes no atomic section, and only decodes the word it is handed —
- * so it is reentrant and safe to call from ISR context as well as
- * from a process thread.  It posts nothing; posting is
- * tiku_process_post_node().
+ * Yields the watched node only for TIKU_EVENT_VFS, the one id whose
+ * payload kind is NODE; any other id yields NULL.  Pure, so it is
+ * reentrant and safe from ISR context.
  *
  * @param ev   Event identifier as delivered to the thread
  * @param data Raw payload word delivered alongside @p ev
@@ -159,10 +143,8 @@ const struct tiku_vfs_node *tiku_event_node (tiku_event_t ev, tiku_event_data_t 
 /**
  * @brief Checked accessor for the software-timer payload of an event.
  *
- * Yields the timer that expired only when @p ev is TIKU_EVENT_TIMER;
- * every other id yields NULL.  Pure (no kernel state, no atomic
- * section), hence reentrant and safe from ISR context as well as from
- * a process thread.
+ * Yields the expired timer only for TIKU_EVENT_TIMER; any other id
+ * yields NULL.  Pure, so it is reentrant and safe from ISR context.
  *
  * @param ev   Event identifier as delivered to the thread
  * @param data Raw payload word delivered alongside @p ev
@@ -174,12 +156,9 @@ struct tiku_timer          *tiku_event_timer(tiku_event_t ev, tiku_event_data_t 
 /**
  * @brief Checked accessor for the packed integer payload of an event.
  *
- * Yields the value only when @p ev carries a U32 payload — today just
- * TIKU_EVENT_GPIO, whose word packs the port/pin that changed; every
- * other id yields 0.  The payload word is unpacked, never
- * dereferenced, so a wrong id costs a zero and not a bad load.  Pure,
- * reentrant, and safe from ISR context as well as from a process
- * thread.
+ * Yields the value only for ids carrying a U32 payload -- today just
+ * TIKU_EVENT_GPIO, whose word packs the port and pin; any other id
+ * yields 0.  The word is unpacked, never dereferenced.
  *
  * @param ev   Event identifier as delivered to the thread
  * @param data Raw payload word delivered alongside @p ev
@@ -190,12 +169,9 @@ uint32_t                    tiku_event_u32  (tiku_event_t ev, tiku_event_data_t 
 /**
  * @brief Checked accessor for the opaque app pointer of an event.
  *
- * Yields the pointer only when @p ev carries a PTR payload:
- * TIKU_EVENT_INIT (the data handed to tiku_process_start()) or any
- * user-range id (TIKU_EVENT_USER .. TIKU_EVENT_TIMER-1).  Every other
- * id — including the control events that carry nothing — yields NULL.
- * Pure, reentrant, and safe from ISR context as well as from a
- * process thread.
+ * Yields the pointer only for ids carrying a PTR payload: TIKU_EVENT_INIT
+ * and the user range (TIKU_EVENT_USER .. TIKU_EVENT_TIMER-1).  Any other
+ * id yields NULL.  Pure, so it is reentrant and safe from ISR context.
  *
  * @param ev   Event identifier as delivered to the thread
  * @param data Raw payload word delivered alongside @p ev
@@ -228,10 +204,8 @@ typedef enum {
 /**
  * @brief Per-process restart policy (supervision).
  *
- * When a process exits, the supervisor (tiku_process_exit) consults this
- * to decide whether to bring it straight back -- a fresh instance, same
- * pid -- instead of the recovery being manual (or a whole-board reboot).
- * NEVER is the default, so unset processes behave exactly as before.
+ * tiku_process_exit() consults this to decide whether to bring a fresh
+ * instance straight back under the same pid.  NEVER is the default.
  */
 typedef enum {
     TIKU_RESTART_NEVER      = 0,  /**< one-shot; never auto-restarted (default) */
@@ -284,12 +258,9 @@ typedef struct tiku_process {
     tiku_clock_time_t start_time;   /**< Tick count when process started */
     uint16_t wake_count;            /**< Number of times scheduled */
     const void *mem_arena;          /**< Attached tiku_arena_t (or NULL): the
-                                         MEASURED memory source.  Set via
-                                         tiku_process_attach_mem_arena(); read
-                                         through tiku_process_sram/fram_used(),
-                                         which report measured + declared.  A
-                                         bump allocator cannot misreport, so
-                                         attached beats advertised. */
+                                         MEASURED source, read through
+                                         tiku_process_sram/fram_used(), which
+                                         report measured + declared. */
     /* --- Supervision (per-process restart policy) --- */
     uint8_t  restart;               /**< tiku_restart_policy_t; 0 = NEVER      */
     uint8_t  exit_reason;           /**< tiku_exit_reason_t; set at exit        */
@@ -355,22 +326,13 @@ struct tiku_msg {
  * @def TIKU_PROCESS_WITH_LOCAL(proc, strname, local_type)
  * @brief Declare and define a process with typed local storage
  *
- * Allocates a static instance of local_type and wires the pointer
- * into the process struct at compile time. No runtime setup needed.
- *
- * The storage is zero-initialized by the C runtime at boot (BSS).
- * If the process is restarted, the storage retains its previous values.
- * Initialize explicitly in the thread body if clean-slate is needed.
+ * Allocates a static instance of local_type and wires the pointer into the
+ * process struct at compile time.  The storage is BSS, so a restarted
+ * process sees its previous values unless the thread body clears them.
  *
  * @param proc       Process variable name
  * @param strname    Human-readable name string
  * @param local_type The struct type for local storage
- *
- * Example:
- * @code
- *   struct my_state { uint16_t counter; uint8_t flag; };
- *   TIKU_PROCESS_WITH_LOCAL(my_proc, "my process", struct my_state);
- * @endcode
  */
 #define TIKU_PROCESS_WITH_LOCAL(proc, strname, local_type)                  \
     TIKU_PROCESS_THREAD(proc, ev, data);                                    \
@@ -400,57 +362,25 @@ struct tiku_msg {
  * @def TIKU_LOCAL(type)
  * @brief Access the current process's local storage with a typed cast
  *
- * Returns a pointer to the local storage of the currently running
- * process, cast to the specified type. Must only be called from
- * within a process thread body.
- *
- * This is the quick-and-easy accessor. The compiler trusts you to
- * pass the correct type. For stronger safety, use TIKU_LOCAL_OF()
- * or the per-process typed accessor generated by TIKU_PROCESS_TYPED().
- *
- * Place this ABOVE TIKU_PROCESS_BEGIN() so it runs on every re-entry
- * of the protothread function (the pointer variable is a stack local
- * that doesn't survive across yields).
+ * Valid only inside a process thread body, and must be placed above
+ * TIKU_PROCESS_BEGIN() so it re-runs on every re-entry.  The cast is
+ * unchecked; TIKU_PROCESS_TYPED() generates a checked accessor instead.
  *
  * @param type The struct type of the local storage
  * @return Pointer to the typed local storage
- *
- * Example:
- * @code
- *   TIKU_PROCESS_THREAD(my_proc, ev, data) {
- *       struct my_state *s = TIKU_LOCAL(struct my_state);
- *       TIKU_PROCESS_BEGIN();
- *       s->counter = 0;
- *       // ...
- *   }
- * @endcode
  */
 #define TIKU_LOCAL(type) ((type *)TIKU_THIS()->local)
 
 /**
  * @def TIKU_PROCESS_TYPED(name, strname, local_type)
- * @brief Declare a process with a per-process type-safe accessor (NEW)
+ * @brief Declare a process with a per-process type-safe accessor
  *
- * Combines TIKU_PROCESS_WITH_LOCAL with a generated inline accessor
- * function: name_local(), which returns a correctly typed pointer.
- *
- * This is the safest option — no casts in user code, impossible
- * to accidentally pass the wrong type.
+ * Like TIKU_PROCESS_WITH_LOCAL, plus a generated inline name_local() that
+ * returns a correctly typed pointer with no cast at the call site.
  *
  * @param name       Process variable name
  * @param strname    Human-readable name string
  * @param local_type The struct type for local storage
- *
- * Example:
- * @code
- *   struct sensor_state { uint16_t reading; uint8_t count; };
- *   TIKU_PROCESS_TYPED(sensor_proc, "sensor", struct sensor_state);
- *
- *   TIKU_PROCESS_THREAD(sensor_proc, ev, data) {
- *       struct sensor_state *s = sensor_proc_local();  // fully type-safe
- *       // ...
- *   }
- * @endcode
  */
 #define TIKU_PROCESS_TYPED(name, strname, local_type)                       \
     TIKU_PROCESS_WITH_LOCAL(name, strname, local_type);                     \
@@ -486,14 +416,8 @@ struct tiku_msg {
  * @def TIKU_AUTOSTART_PROCESSES(...)
  * @brief Register processes for automatic startup
  *
- * Defines a NULL-terminated array of process pointers that the
- * scheduler will start automatically at the beginning of the
- * main loop (inside tiku_sched_loop).
- *
- * Example:
- * @code
- *   TIKU_AUTOSTART_PROCESSES(&proc_a, &proc_b);
- * @endcode
+ * Defines the NULL-terminated array of process pointers that
+ * tiku_sched_loop() starts before entering the main loop.
  */
 #define TIKU_AUTOSTART_PROCESSES(...)                                       \
     __attribute__((used))                                                  \
@@ -549,13 +473,9 @@ void tiku_process_exit(struct tiku_process *p);
 /**
  * @brief Set a process's restart policy.
  *
- * With NEVER (the default) a process that exits stays stopped -- recovery
- * is manual, exactly as before.  ON_FAILURE brings it back only if it
- * FAILED; ALWAYS brings it back on any exit.  A restart is a FRESH instance
- * (protothread re-initialised, INIT replayed) reusing the same pid, and
- * only the exited process is touched -- the rest of the system runs on.
- * A restart storm (too many restarts too fast) trips a cap: the policy
- * falls back to NEVER and the process is left stopped rather than looping.
+ * NEVER (the default) leaves an exited process stopped; ON_FAILURE restarts
+ * only after a FAILED exit, ALWAYS after any exit.  A restart is a fresh
+ * instance under the same pid; a restart storm falls back to NEVER.
  */
 void tiku_process_set_restart(struct tiku_process *p,
                               tiku_restart_policy_t policy);
@@ -605,16 +525,12 @@ uint8_t tiku_process_run(void);
 /**
  * @brief Run the scheduler, but never re-enter @p skip.
  *
- * Like tiku_process_run() but it does not dispatch unicast events for @p skip.
- * Non-POLL events for @p skip stay queued for the normal scheduler; skipped
- * POLL events are coalesced because @p skip is already awake and running.
- * Broadcast events still run for every process except @p skip.
+ * For a long synchronous op inside @p skip's own dispatch that wants to keep
+ * the kernel live without recursing.  Unicast events for @p skip stay queued
+ * (POLL is coalesced); broadcasts still run for everyone else.
  *
- * This is for a long synchronous op running inside @p skip's own dispatch that
- * wants to keep the rest of the kernel live without recursing into its own
- * protothread.  @p skip == NULL behaves like tiku_process_run().
- *
- * @param skip Process not to dispatch (typically TIKU_THIS())
+ * @param skip Process not to dispatch (typically TIKU_THIS()), or NULL for
+ *             plain tiku_process_run()
  * @return 1 if an event was dispatched or discarded, 0 if no eligible work exists
  */
 uint8_t tiku_process_run_except(const struct tiku_process *skip);
@@ -661,13 +577,12 @@ int8_t tiku_process_register(const char *name, struct tiku_process *p);
  * @brief Attach a memory arena to a process for MEASURED accounting.
  *
  * ps, /proc/<pid>/sram_used|fram_used and /sys/mem/used then report the
- * arena's real bump-pointer state (which cannot drift) on top of the
- * advisory self-declared fields.  Pass the process's dominant arena
- * (e.g. BASIC's working arena for the shell process); NULL detaches.
+ * arena's real bump-pointer state on top of the advisory self-declared
+ * fields.  Pass the process's dominant arena.
  *
  * @param p      Process (no-op when NULL)
  * @param arena  const tiku_arena_t* (typed void to keep this header
- *               free of the memory-module include)
+ *               free of the memory-module include); NULL detaches
  */
 void tiku_process_attach_mem_arena(struct tiku_process *p,
                                    const void *arena);
@@ -801,12 +716,9 @@ uint8_t tiku_process_queue_length(void);
 /**
  * @brief Lifetime count of events dropped because the queue was full.
  *
- * Increments every time tiku_process_post() (or an internal poll
- * enqueue) fails for lack of space — including user posts refused by
- * the TIKU_QUEUE_RESERVE guard.  A nonzero, growing value is the
- * tell for queue-overflow bugs that were previously silent (the
- * failed post returns 0 and most callers ignore it).  Wraps at
- * 65535; exported at /proc/queue/dropped.
+ * Counts every tiku_process_post() or internal poll enqueue that failed for
+ * lack of space, including posts refused by the TIKU_QUEUE_RESERVE guard.
+ * Wraps at 65535; exported at /proc/queue/dropped.
  */
 uint16_t tiku_process_queue_dropped(void);
 
@@ -833,21 +745,11 @@ uint8_t tiku_process_is_running(struct tiku_process *p);
  * @brief Declare a channel with type-safe inline accessors
  *
  * Generates static storage, a channel instance, and typed
- * init / put / get helpers.  The compiler will reject pointer
- * type mismatches at call sites.
+ * name_init / name_put / name_get helpers.
  *
  * @param name  Identifier prefix (used for buffer, channel, helpers)
  * @param type  Message type (e.g., struct sensor_msg)
  * @param depth Maximum number of buffered messages
- *
- * Example:
- * @code
- *   TIKU_CHANNEL_DECLARE(sensor_ch, struct sensor_msg, 4);
- *
- *   sensor_ch_init();
- *   sensor_ch_put(&msg);
- *   sensor_ch_get(&msg);
- * @endcode
  */
 #define TIKU_CHANNEL_DECLARE(name, type, depth)                             \
     static type name##_buf[depth];                                          \
