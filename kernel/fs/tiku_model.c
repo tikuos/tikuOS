@@ -5,37 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_model.c - Tiku model loader.  See tiku_model.h for the model and the why.
+ * tiku_model.c - Tiku model loader.  See tiku_model.h for the interface.
  *
- * ON-FILE LAYOUT of a RELOC model, as tools/axonpack.py writes it.  A 96-byte
- * header of little-endian u32s, then the blobs at the offsets it names:
- *
- *    0  magic 'AXM1'      24  desc_off          48  reloc_off
- *    4  version (3)       28  desc_len          52  nsites
- *    8  hdr_bytes (96)    32  labels_off        56  syms_off
- *   12  weights_off       36  labels_len        60  nsyms
- *   16  weights_len       40  strings_off       64  packed_out_len
- *   20  cmd_off           44  strings_len       68  nlabels
- *   (cmd_len is at 20+4)
- *   72  crc32(weights)    76  crc32(cmd)
- *   80  crc32(desc+labels+strings)               84  crc32(sites+syms)
- *
- *   [weights] [cmd] [desc] [labels] [strings]
- *   [nsites x (u16 sect, u16 sym, u32 off)] [names\0...]
- *
- * Every patched section ships UNRELOCATED because ARM's REL form already stores
- * each site's addend in place, so patching is one addition per site rather than
- * a rewrite.
- *
- * WHY THREE PATCHED SECTIONS AND NOT ONE.  v2 packed only the command buffer,
- * which is enough while the firmware still has a baked model to borrow a
- * DESCRIPTOR from -- the struct saying how big the input is, how it is
- * quantized, how much working buffer the model needs.  An image with no model
- * compiled in has no donor, so v3 packs the descriptor as well; and because the
- * descriptor points at the labels and the labels point into the string pool,
- * those come too.  All three are relocatable in the identical sense, so they
- * share one site table with a section field rather than growing three
- * mechanisms.
+ * Validates a packed model file, then patches its relocation sites in place.
+ * The file is a 96-byte little-endian header naming each section's offset and
+ * length, followed by the blobs, the site table and the symbol names.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -246,10 +220,9 @@ static const char *model_sym_nth(const char *tab, const char *end, uint32_t i)
 /**
  * @brief Validate a RELOC header and fill @p out.
  *
- * Every bound is written as a SUBTRACTION against the remaining length rather
- * than an addition compared to it.  Additions of two file-supplied u32s wrap --
- * on a 16-bit `unsigned` that is a live out-of-bounds hazard, and this file
- * builds for MSP430 too -- and a wrapped sum passes a naive check.
+ * Every bound is a subtraction against the remaining length, never an addition
+ * compared to it: two file-supplied u32s added together wrap, and a wrapped sum
+ * passes a naive check.
  */
 static int model_open_reloc(tiku_model_t *out)
 {

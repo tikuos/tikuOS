@@ -7,33 +7,9 @@
  *
  * tiku_fat.h - FAT32 reader.  Read-only, by decision, not by omission.
  *
- * WHY FAT32 AND WHY ONLY READING (2026-07-29 decision, kintsugi/fat32-plan.md):
- *
- * TFS is this project's filesystem and it stays where it belongs -- internal
- * NVM, where the medium is byte-addressable and the OS controls write
- * ordering.  The eMMC is neither: it is block-addressed behind a flash
- * translation layer that reorders at will, so TFS's durability discipline
- * would be reasoning about guarantees it no longer has.  And the card exists
- * to be filled from a PC over USB mass storage, which requires a filesystem
- * a host already mounts.  That is FAT32 or nothing.
- *
- * READ-ONLY is the other half of the decision.  The warehouse flow is
- * PC-writes / board-reads, and write support is a real filesystem commitment
- * -- free-cluster management, FAT and directory update ordering, and a
- * torn-write surface on a medium whose ordering cannot be reasoned about.
- * It waits for something that actually needs it.
- *
- * THE DURABILITY CONTRACT THAT MAKES A JOURNAL-LESS FILESYSTEM ACCEPTABLE:
- * the card holds REPRODUCIBLE BULK -- models re-copyable from a PC, logs
- * whose tail is expendable.  Anything that must survive a power cut mid-write
- * lives in internal NVM under TFS and the persist cells.  Without that
- * contract, FAT would be a compromise; with it, it is the right tool.
- *
- * PORTABLE BY CONSTRUCTION.  This file includes no hardware header and knows
- * nothing about eMMC, USB or Ambiq.  All I/O goes through an injected
- * callback, which is what lets the parser be developed and regression-tested
- * on a Linux host against images written by mkfs.vfat -- with the kernel's
- * own mount as the reference implementation sitting right there.
+ * Parses FAT32 on removable block media, so a PC can fill a card over USB mass
+ * storage and the board can read it.  All I/O goes through an injected callback,
+ * so this file knows nothing about eMMC, USB or any SoC.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -44,20 +20,19 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/** @brief Sector size this reader supports.  512 is what eMMC gives us. */
+/** @brief Sector size this reader supports; 512 is what eMMC reports. */
 #define TIKU_FAT_SECTOR   512u
 
-/** @brief Longest path component and full path we will resolve. */
+/** @brief Longest path component and full path this reader resolves. */
 #define TIKU_FAT_NAME_MAX 128u
 #define TIKU_FAT_PATH_MAX 255u
 
 /**
  * @brief Result codes.  Distinct causes stay distinct.
  *
- * A filesystem reader is fed bytes written by machines outside our control
- * the moment mass storage ships, so "it did not work" is never a sufficient
- * answer -- REFUSED-because-FAT16 and REFUSED-because-corrupt need different
- * responses from the caller and different fixes from us.
+ * A reader is fed bytes written by other machines, so "it did not work" is not
+ * a sufficient answer: refused-because-FAT16 and refused-because-corrupt need
+ * different responses from the caller.
  */
 typedef enum {
     TIKU_FAT_OK = 0,
@@ -131,11 +106,9 @@ typedef struct {
 /**
  * @brief Find the volume, validate its BPB, derive its geometry.
  *
- * Accepts either a whole-device filesystem or an MBR-partitioned one, and
- * determines the FAT width by the SPEC'S OWN ARITHMETIC (cluster count), not
- * by the label in the boot sector -- that label is a comment and is routinely
- * wrong.  A FAT12 or FAT16 volume is REFUSED with ERR_NOT_FAT32 rather than
- * half-read.
+ * Accepts a whole-device filesystem or an MBR-partitioned one.  The FAT width
+ * comes from the cluster count, not the boot sector's type label, which is
+ * informational and routinely wrong; FAT12/16 is refused, not half-read.
  */
 tiku_fat_err_t tiku_fat_mount(tiku_fat_t *fs, tiku_fat_read_fn read,
                               void *ctx);
@@ -183,22 +156,9 @@ tiku_fat_err_t tiku_fat_runs(tiku_fat_t *fs, tiku_fat_file_t *f,
 /**
  * @brief Walk a file's whole chain and prove it is well formed.
  *
- * *** WHAT THE READ PATH CAN AND CANNOT CATCH, STATED PLAINLY. ***
- *
- * tiku_fat_read() is bounded by the file's size in clusters, so a chain that
- * loops in a way that makes it LONGER than the file is caught and reported
- * CORRUPT.  A loop that preserves the length is not: the reader returns
- * exactly the right NUMBER of bytes, read from the wrong clusters.  Detecting
- * that in the read path would mean cycle detection on every file -- doubling
- * FAT reads for every caller, to defend against a case most callers already
- * defend against better with a checksum.
- *
- * So it is offered here instead, as one extra chain walk the caller asks for
- * when it matters: the chain must reach end-of-chain after EXACTLY the number
- * of clusters the file's size implies.  A loop never reaches it and is
- * reported CORRUPT; a chain that is short or long is reported too.
- *
- * Staging a model is precisely when to call this -- and it still checksums.
+ * Requires the chain to reach end-of-chain after exactly the number of clusters
+ * the file size implies, so a length-preserving loop is caught -- which the read
+ * path cannot do without cycle-detecting every file.  Call it when staging.
  */
 tiku_fat_err_t tiku_fat_verify(tiku_fat_t *fs, tiku_fat_file_t *f);
 

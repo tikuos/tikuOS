@@ -7,49 +7,9 @@
  *
  * tiku_model.h - read a model out of the file store instead of out of .rodata.
  *
- * THE PROBLEM.  A compiled neural-network model is emitted as C arrays, so it
- * lands in .rodata -- inside the code window -- and a 208 KB model then sizes
- * the OS's permanent memory contract.  Models are DATA: they belong in /data as
- * named files, swappable over serial without reflashing.
- *
- * WHY THAT IS NOT JUST "PUT THE BYTES IN A FILE".  Weights alone would be: map
- * the file, hand over the pointer, done -- that is the RAW format below.  But
- * an Axon model also carries a COMMAND BUFFER, the instruction stream the NPU
- * executes, and that stream contains ABSOLUTE ADDRESSES of individual weight
- * members, baked in at link time.  Move the weights into a file and every one
- * of those addresses points at where the model used to be.
- *
- * They can be corrected, because the toolchain records every site.  ARM uses
- * REL, so each site's word already holds its own addend, and the fix is exactly
- *
- *     site_word = resolved_base + stored_addend
- *
- * which is what tools/axonpack.py packs the site list for, and what the RELOC
- * format below applies.  That rule is not argued: the packer proves it by
- * applying it on the host with the linker's real addresses and requiring the
- * result to equal the linked image byte for byte.
- *
- * DELIBERATELY NOT AXON-SHAPED.  This layer knows about formats, not engines: it
- * opens by name, maps in place, and dispatches to a per-format prepare().  The
- * RELOC machinery -- a site table plus symbols resolved BY NAME -- is generic,
- * and a pre-linked loadable module has the identical baked-address problem, so
- * one mechanism is meant to serve both rather than each inventing its own.
- *
- * WHY SYMBOLS RESOLVE BY NAME AND NOT BY POSITION.  The symbol COUNT differs
- * per model -- tinyml_ad needs 2 where the others need 4 -- so a positional
- * table would feed one model's slot another model's address.  The failure is
- * not a crash: the patched word is a plausible pointer, inference runs, and the
- * answers are confidently wrong.  Resolving by name makes that impossible, and
- * an unknown name fails immediately, naming the symbol it could not find.
- *
- * VALIDATION POSTURE.  A model file arrives over a serial cable and then sits in
- * NVM where it can rot.  A relocation table is uniquely dangerous input, because
- * every entry says "write four bytes at offset N" -- so structure is checked
- * before anything is used: magic, version, every section inside the file, every
- * site inside the command buffer and 4-byte aligned, every symbol index inside
- * the symbol table, and three CRCs.  A CRC proves the bytes are the ones that
- * were written; the field checks prove they mean what a valid packer would have
- * written.  Anything inconsistent is refused, never repaired.
+ * Opens a model by name, maps it in place and dispatches on format: RAW is
+ * opaque bytes; RELOC carries a relocation table whose sites are patched from
+ * symbols resolved by name.  Engine-agnostic.  Packed by tools/axonpack.py.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -112,27 +72,9 @@ typedef enum {
 /**
  * @brief Publish an address a model's relocation table may name.
  *
- * Called by whatever owns the address -- the NPU driver for its interlayer
- * buffer and extension entry points -- typically once at init.  Re-registering
- * a name replaces its address, so a driver re-init is not an error.
- *
- * NAMES BEGINNING WITH '@' BELONG TO THE MODEL ITSELF and are resolved by the
- * loader, not from here: @weights and @strings are where the file was mapped,
- * @cmd / @desc / @labels are where the caller asked for each section to be
- * built.  A name the loader does not recognise -- including an unknown
- * '@' name -- falls through to this registry, which is how a caller supplies
- * something like @packed_out that is neither in the file nor a fixed firmware
- * address.
- *
- * THE THUMB BIT IS THE CALLER'S.  A relocation against a CODE symbol resolves
- * to a Thumb-tagged pointer -- bit 0 SET -- because that is what an ARM function
- * pointer is.  Registering `(uintptr_t)&some_function` gets this right for free,
- * which is why the loader does not (and cannot) add the bit itself: it has no way
- * to know which names are functions.  Registering an address taken from a linker
- * script, an `nm` listing, or a hard-coded constant will therefore be one short
- * on a function, and the symptom is a single wrong word in the command stream --
- * the packer's reconstruction gate caught exactly this as a one-word mismatch on
- * a softmax extension site.  Register `&thing`, never a number.
+ * Called once at init; re-registering a name replaces it.  Names beginning with
+ * '@' are the model's own sections, resolved by the loader.  Register `&thing`,
+ * never a number -- code symbols must carry the Thumb bit.
  *
  * @param name  NUL-terminated symbol name as the packer recorded it.
  * @param addr  Runtime address the name resolves to, Thumb-tagged for code.
@@ -216,11 +158,9 @@ typedef struct {
 /**
  * @brief Open a model by file name and validate it end to end.
  *
- * Sniffs the format from the magic, checks every header field and section
- * bound, verifies the CRCs, and -- for RELOC -- walks the whole site table
- * proving each site lies 4-byte aligned inside the command buffer and names a
- * symbol index that exists.  Nothing downstream re-checks those, so a model
- * that opens is structurally safe to use.
+ * Checks every header field, section bound and CRC, and for RELOC proves each
+ * site is 4-byte aligned inside the command buffer and names a symbol that
+ * exists.  Nothing downstream re-checks, so a model that opens is safe to use.
  *
  * @param fs    Mounted store (tiku_vfs_tree_data_store()).
  * @param name  File name, e.g. "vww.axm".
@@ -232,17 +172,9 @@ int tiku_model_open(tiku_tfs_t *fs, const char *name, tiku_model_t *out);
 /**
  * @brief Make a model ready to run, per its format.
  *
- * RAW: nothing to do; @p dst is untouched and *@p out_len is 0.
- *
- * RELOC: copies the command buffer into @p dst and applies every relocation --
- * `word = resolved(symbol) + stored_addend` -- with symbol 0 resolving to the
- * mapped weights and the rest resolved through the registry.  The WEIGHTS are
- * not copied: they stay mapped in NVM, which is the same memory the engine read
- * them from when they were baked into .rodata.
- *
- * On ERR_SYMBOL the name that could not be resolved is reported through
- * @p bad_sym, so the failure says which symbol rather than merely that one
- * failed.
+ * RAW does nothing.  RELOC copies the command buffer into @p dst and applies
+ * every relocation -- `word = resolved(symbol) + stored_addend`.  Weights are
+ * not copied; they stay mapped in NVM and the engine reads them there.
  *
  * @param m        Model from tiku_model_open().
  * @param dst      Destination for the patched command buffer (RELOC only).
@@ -259,16 +191,8 @@ int tiku_model_prepare(const tiku_model_t *m, void *dst, size_t cap,
  * @brief Build EVERY relocatable section of a model, not just the commands.
  *
  * The general form of tiku_model_prepare(): @p dst is indexed by
- * tiku_model_sect_t, and each entry with a non-NULL @c dst receives that
- * section's bytes with its relocations applied.  A section the model does not
- * have is skipped; a section the model HAS but the caller left NULL is an
- * error, because the sites naming it could not be resolved and a half-patched
- * model is worse than a refused one.
- *
- * Sections may reference each other -- the descriptor points at the command
- * buffer and at the labels, the labels point into the string pool -- so all
- * destinations are resolved before any byte is written, and a model that cannot
- * be fully built leaves every destination untouched.
+ * tiku_model_sect_t and each non-NULL entry receives that section, relocated.
+ * Sections cross-reference, so a model that cannot be fully built writes nothing.
  *
  * @param m        Model from tiku_model_open().
  * @param dst      Array of TIKU_MODEL_SECT_COUNT destinations.

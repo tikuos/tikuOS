@@ -7,31 +7,9 @@
  *
  * tiku_tfs.c - Tiku File Store implementation.  See tiku_tfs.h for the model.
  *
- * On-NVM layout:
- *   [ superblock | directory[nfiles] | data[nslots] ]
- *   superblock : magic (4) + geometry descriptor (7 x 4)
- *   dirent     : gate (4) + run (4) + name[NAME_MAX]    (one per file)
- *   data slot  : length (4) + content[SLOT_DATA]        (nslots = nfiles + 1)
- *
- * nfiles is DERIVED AT MOUNT from the extent the backend reports, and recorded
- * in the superblock so a store is never parsed under a geometry it was not
- * written with.  It is not a compile-time constant: the only C-side numbers are
- * TIKU_TFS_MAX_SLOTS (a ceiling that sizes the allocation bitmap) and
- * TIKU_TFS_MIN_SLOTS (a floor mount refuses to go below).
- *
- * SPANNED FILES.  A file owns a RUN of `span` CONTIGUOUS slots, and the dirent
- * packs that run into the single word it already had: first | span<<16.  Only
- * the FIRST slot's length word is metadata -- the rest of the run is content --
- * so a run's bytes are one contiguous range starting at slot_off(fs, first)+4 and
- * a span of n holds n*SLOT_BYTES-4 bytes.  A one-slot file is exactly the n==1
- * case of that formula, which is why single-slot behaviour is untouched and why
- * tiku_tfs_map() keeps working over a span: contiguous in NVM means one pointer.
- *
- * Overwrite stages a fresh run then flips the dirent's run word in one aligned
- * write -> a torn overwrite leaves the OLD file, as before.  What spans change
- * is the space rule: replacing an n-slot file transiently needs n MORE free
- * slots, so an overwrite can now fail with NOSPACE where the old
- * one-shadow-slot guarantee made it impossible.
+ * On-NVM layout is [superblock | directory | data slots].  The slot count is
+ * derived at mount from the extent the backend reports and recorded in the
+ * superblock, so a store is never parsed under a geometry it was not written with.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -241,14 +219,9 @@ static int free_dirent(tiku_tfs_t *fs)
 /**
  * @brief Find @p span contiguous free data slots.
  *
- * DOUBLE-ENDED, and deliberately so.  Single-slot files -- the small, churny
- * majority -- are packed from the BOTTOM up, exactly as before spans existed.
- * Multi-slot runs are placed from the TOP down, because they are the large,
- * long-lived tenants (model weights, radio firmware, a saved program) and
- * interleaving them with churn is what fragments a store until a big
- * contiguous run can no longer be found even with plenty of free space.
- * Growing the two populations toward each other keeps the large-run end
- * unbroken while confining reuse to the end where contiguity does not matter.
+ * Double-ended: single-slot files pack from the bottom up, multi-slot runs from
+ * the top down.  Growing the churny and the long-lived populations toward each
+ * other keeps the large-run end unfragmented.
  *
  * @return  Index of the run's first slot, or -1 if no such run exists.
  */
@@ -284,11 +257,9 @@ static int free_run(tiku_tfs_t *fs, unsigned span)
 /**
  * @brief Mark every slot of a run allocated / free.
  *
- * Clamps the run to the slot array FIRST, so `first + k` below cannot wrap.
- * Two callers hand this a run word read straight out of a dirent -- the
- * overwrite reclaim in tiku_tfs_commit() and tiku_tfs_delete() -- so a corrupt
- * `first` must not be able to alias a live slot belonging to another file.  See
- * run_check() for why the bound is expressed as a subtraction.
+ * Clamps the run to the slot array first, so `first + k` cannot wrap.  Two
+ * callers pass a run word straight out of a dirent, so a corrupt `first` must
+ * not alias another file's slot.  See run_check() for the bound's form.
  */
 static void run_mark(tiku_tfs_t *fs, unsigned first, unsigned span, int used)
 {
@@ -322,17 +293,9 @@ static unsigned run_span_for(size_t len)
 /**
  * @brief Validate dirent @p i's stored run and hand back its first slot + length.
  *
- * The ONE place a run word read from NVM is checked before it is used, so every
- * consumer gets the same guarantees: the run lies inside the slot array, and the
- * content length fits the run's capacity.
- *
- * NOTE ON THE BOUND -- do not "simplify" this back to `first + span > NSLOTS`.
- * Both halves come out of a 32-bit run word into `unsigned`, which is 16-bit on
- * MSP430, so that sum WRAPS for a corrupt word whose halves total past 65535 and
- * the check passes.  What follows a passing check is an unguarded index into
- * fs->slot_used (a 3-byte array on MSP430), i.e. the corruption this function
- * exists to reject would instead be written out of bounds.  `span > NSLOTS -
- * first`, guarded by `first >= NSLOTS`, cannot overflow at any width.
+ * The one place a run word from NVM is checked.  Do NOT rewrite the bound as
+ * `first + span > NSLOTS`: both halves land in `unsigned`, 16-bit on MSP430, so
+ * that sum wraps for a corrupt word and indexes fs->slot_used out of bounds.
  *
  * @param i      Directory index (caller has already confirmed the gate).
  * @param first  Out: index of the run's first slot.  May be NULL.
@@ -374,16 +337,9 @@ size_t tiku_tfs_region_size(void)
 /**
  * @brief Largest file count whose store fits in an extent of @p ext bytes.
  *
- * This is the whole of "derived geometry": the linker carves an extent, and the
- * store takes as much of it as the layout allows instead of a hand-tuned number
- * having to be recomputed whenever a code window moves.
- *
  * The closed form charges a full sector of directory padding, so it can come out
- * one file short whenever the alignment absorbs slack -- on RP2350, where SECT
- * is 4096, that is every extent.  One correction step recovers it, and one is
- * provably enough because a file costs DE_BYTES + SLOT_BYTES, which exceeds the
- * SECT-1 the estimate gave away on every geometry this builds for (asserted).
- * The loop still guards the general case rather than relying on that.
+ * one file short when alignment absorbs the slack.  One correction step recovers
+ * it, and one suffices because a file costs more than the SECT-1 given away.
  *
  * @param ext Extent in bytes.
  * @return File count, clamped to the addressing ceiling; 0 if nothing fits.
@@ -400,7 +356,7 @@ static unsigned tfs_fit(size_t ext)
     if (n > (unsigned)TIKU_TFS_MAX_SLOTS - 1u) {
         n = (unsigned)TIKU_TFS_MAX_SLOTS - 1u;      /* ceiling: bitmap bound */
     }
-    /* Climb while the next file still fits, then back off if we overshot. */
+    /* Climb while the next file still fits, then back off on overshoot. */
     while (n + 1u <= (unsigned)TIKU_TFS_MAX_SLOTS - 1u &&
            TIKU_TFS_EXTENT_FOR_SLOTS(n + 1u) <= ext) {
         n++;
@@ -630,12 +586,10 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     /*
      * SINGLE WRITER, ENFORCED BY REFUSAL.
      *
-     * The store stopped being BASIC-private: modules, radio firmware, models
-     * and BASIC's own checkpoint now share it, and a streamed write spans many
-     * calls with a yield between them.  Two writers interleaving would stage
-     * into each other's run or race the dirent flip, so the design of record
-     * requires them to serialise (§4.7, "all writers serialize through one
-     * kernel lock" -- listed as enforced-in-review, i.e. not enforced).
+     * Modules, radio firmware, models and BASIC's checkpoint all share the
+     * store, and a streamed write spans many calls with a yield between them.
+     * Two writers interleaving would stage into each other's run or race the
+     * dirent flip, so all writers serialise through this one interlock.
      *
      * This REFUSES rather than blocks, deliberately.  Scheduling here is
      * cooperative, so a blocking lock could only be released by the holder

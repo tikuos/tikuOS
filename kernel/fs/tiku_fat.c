@@ -66,20 +66,9 @@ const char *tiku_fat_strerror(tiku_fat_err_t e)
 /**
  * @brief Validate a boot sector as a FAT BPB and fill in the geometry.
  *
- * *** THE FAT WIDTH IS DECIDED BY ARITHMETIC, NOT BY THE LABEL. ***
- *
- * Boot sectors carry a filesystem-type string ("FAT32   ") and it is, per
- * Microsoft's own specification, informational only -- it is routinely wrong,
- * and trusting it is the classic way a reader half-mounts a FAT16 volume and
- * then returns garbage from the wrong place.  The ONLY correct test is the
- * count of data clusters:
- *
- *      < 4085   FAT12
- *      < 65525  FAT16
- *      else     FAT32
- *
- * That is computed here from the fields it depends on, and the volume is
- * refused with a distinct error if it comes out as anything but FAT32.
+ * The FAT width comes from the data cluster count (<4085 FAT12, <65525 FAT16,
+ * else FAT32), never from the boot sector's type string, which the spec calls
+ * informational.  Anything but FAT32 is refused with a distinct error.
  */
 static tiku_fat_err_t bpb_parse(tiku_fat_t *fs, const uint8_t *sec,
                                 uint32_t base)
@@ -179,8 +168,8 @@ tiku_fat_err_t tiku_fat_mount(tiku_fat_t *fs, tiku_fat_read_fn read, void *ctx)
         rc = bpb_parse(fs, part, start);
         if (rc == TIKU_FAT_OK) { return rc; }
     }
-    /* Report the most specific reason we have: if a partition WAS a FAT of
-     * the wrong width, say so rather than "no filesystem". */
+    /* Report the most specific reason available: a partition that WAS a FAT of
+     * the wrong width says so rather than "no filesystem". */
     return (rc == TIKU_FAT_ERR_NOT_FAT32) ? rc : TIKU_FAT_ERR_NOFS;
 }
 
@@ -197,10 +186,9 @@ static uint32_t clus_lba(const tiku_fat_t *fs, uint32_t clus)
 /**
  * @brief Follow one link of the chain.
  *
- * Every value the FAT can hold is classified: a link out of range, a cluster
- * marked bad, or a free cluster inside a chain are all CORRUPTION and are
- * reported as such rather than followed.  This is the function a hostile or
- * damaged volume attacks, so it refuses everything it does not recognise.
+ * Classifies every value the FAT can hold: an out-of-range link, a bad cluster
+ * and a free cluster inside a chain are all corruption and are reported rather
+ * than followed.  Refuses anything it does not recognise.
  */
 static tiku_fat_err_t fat_next(tiku_fat_t *fs, uint32_t clus, uint32_t *next)
 {
@@ -299,10 +287,9 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
         uint32_t lba;
 
         /*
-         * BOUNDED.  A directory chain that loops -- through corruption or
-         * through a volume crafted to make us loop -- must terminate the
-         * walk, not the system.  The bound is generous enough for any real
-         * directory and finite regardless.
+         * BOUNDED.  A directory chain that loops -- through corruption or a
+         * crafted volume -- must terminate the walk, not the system.  The bound
+         * is generous for any real directory and finite regardless.
          */
         if (dir->steps++ > (1u << 20)) { return TIKU_FAT_ERR_CORRUPT; }
 
@@ -557,12 +544,11 @@ int32_t tiku_fat_read(tiku_fat_t *fs, tiku_fat_file_t *f, void *buf,
         /*
          * THE FAST PATH: WHOLE SECTORS, STRAIGHT INTO THE CALLER'S BUFFER.
          *
-         * Reading one sector per call was costing one block command per 512
-         * bytes -- 110 592 of them for a 54 MB file, at ~145 us each.  When
-         * the caller is sector-aligned and wants at least a sector, hand the
-         * block layer every contiguous sector that remains in this cluster
-         * and let it do one command.  It also skips the bounce copy, since
-         * the destination is already where the bytes belong.
+         * One sector per call costs one block command per 512 bytes -- 110 592
+         * of them for a 54 MB file, at ~145 us each.  A sector-aligned caller
+         * wanting at least a sector gets every contiguous sector left in the
+         * cluster in one command, and skips the bounce copy because the
+         * destination is already where the bytes belong.
          *
          * Clusters are contiguous BY DEFINITION, so no chain walk is needed
          * inside a cluster; crossing into the next one goes back around the
@@ -652,7 +638,7 @@ tiku_fat_err_t tiku_fat_runs(tiku_fat_t *fs, tiku_fat_file_t *f,
         if (next != clus + 1u || run_len >= left) {
             uint32_t nsec = (run_len > left) ? left : run_len;
             if (cb(clus_lba(fs, run_start), nsec, ctx) != 0) {
-                return TIKU_FAT_OK;          /* caller asked us to stop     */
+                return TIKU_FAT_OK;          /* callback asked to stop      */
             }
             left      -= nsec;
             run_len    = 0u;

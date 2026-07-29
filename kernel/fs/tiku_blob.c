@@ -147,9 +147,9 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
     /*
      * Reclaim any chunk beyond what the NEW blob needs, before writing it.
      *
-     * Storing a smaller blob over a larger one used to strand the surplus: the
-     * write loop only touches 0..chunks-1, and tiku_blob_delete() walks the
-     * CURRENT manifest's count, so `name.7` from a previous 8-chunk blob became
+     * Storing a smaller blob over a larger one strands the surplus otherwise:
+     * the write loop only touches 0..chunks-1, and tiku_blob_delete() walks the
+     * CURRENT manifest's count, so `name.7` from a previous 8-chunk blob becomes
      * a live file no API could ever reach -- one leaked slot per lost chunk, per
      * shrink, permanently.  The same sweep collects the tail of a store that was
      * cut partway through.

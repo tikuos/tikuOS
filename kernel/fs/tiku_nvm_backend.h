@@ -7,19 +7,9 @@
  *
  * tiku_nvm_backend.h - the NVM "region" substrate (the B layer).
  *
- * A board-sized, memory-mapped non-volatile region plus a thin write/erase
- * backend.  This is the ONLY thing that differs across parts: reads are a
- * plain pointer dereference into `base` (FRAM, MRAM and Flash are all
- * memory-mapped), while writes go through the backend --
- *
- *   FRAM  (MSP430)  : store in place
- *   MRAM  (Apollo)  : bootrom program (nv_program)
- *   Flash (RP2350)  : erase block, then program
- *
- * Consumers (the file store, the NVM tier, the persist store) ride this
- * substrate without caring which technology backs it.  The file store
- * (tiku_tfs) depends ONLY on this interface -- no kernel, VFS or tier
- * dependency -- so it is portable and host-unit-testable.
+ * A memory-mapped non-volatile region plus a thin write/erase backend: reads are
+ * a pointer dereference into `base`, writes go through the backend, which is the
+ * only thing that differs across FRAM, MRAM and Flash.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,10 +25,9 @@ struct tiku_nvm_backend;
 /**
  * @brief Program @p len bytes at byte offset @p off within the region.
  *
- * The data is durable once this returns 0 (the backend completes the program
- * synchronously, or buffers and commits on erase/flush for log-structured
- * Flash).  Writes are expected to occur inside the platform's NVM write window
- * (tiku_mpu_unlock_nvm()/lock_nvm()); the backend does not open it itself.
+ * The data is durable once this returns 0.  Writes must occur inside the
+ * platform's NVM write window (tiku_mpu_unlock_nvm()/lock_nvm()); the backend
+ * does not open it itself.
  *
  * @return 0 on success, negative on failure.
  */

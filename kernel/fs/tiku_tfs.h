@@ -5,35 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_tfs.h - Tiku File Store: a tiny, bounded, power-cut-safe file store
- *              over an NVM region (the tiku_nvm_backend "B" substrate).
+ * tiku_tfs.h - Tiku File Store: bounded, power-cut-safe files over NVM.
  *
- * Flat namespace, whole-file I/O, fixed slots -- no subdirectories, no partial
- * seek.  Designed for the actual need: named custom files (BASIC programs,
- * configs, small data blobs) kept in FRAM / MRAM / Flash across power loss.
- *
- * Durability model (per-file atomic, power-cut safe):
- *   - the store is gated by a superblock magic; an absent/invalid one formats;
- *   - each directory entry carries a magic GATE (live vs free);
- *   - content + its length live together in a physical data SLOT, and the
- *     directory entry holds the slot index;
- *   - CREATE commits by stamping the entry gate LAST;
- *   - OVERWRITE writes a fresh shadow slot, then flips the entry's slot index
- *     in one aligned word -- so a power cut leaves the OLD file, never a torn
- *     one;
- *   - DELETE commits by clearing the gate.
- * Each commit is a single 32-bit write.  On ARM that is one aligned store, the
- * same atomicity unit the persist cells rely on.  On MSP430 a 32-bit store is
- * two instructions, so the guarantee holds there only because every file is
- * one slot and the run word's span half never changes -- enforced in
- * tiku_tfs_open_w().  What the backend turns that word into varies by
- * technology, and only FRAM/RRAM/MRAM make it a true single program: on
- * erase-sector flash (RP2350) a dirent write is a read-modify-erase-program of
- * the sector holding it, which is a pre-existing property of that part, not of
- * this format -- see arch/arm-rp2350/tiku_nvm_region_rp2350.c.
- *
- * The store depends ONLY on tiku_nvm_backend.h -- it has no kernel, VFS, tier
- * or shell dependency, so it is portable and host-unit-testable.
+ * Flat namespace, whole-file I/O, fixed-size slots; a file may span several
+ * contiguous slots.  Every commit is a single aligned 32-bit write, so a power
+ * cut leaves the previous contents rather than a torn file.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -138,8 +114,7 @@
 
 /* Superblock: magic + one u32 per geometry parameter (see tiku_tfs.c).  Named
  * here because the directory starts immediately after it, so every downstream
- * offset depends on it -- it used to be a bare 8 written into DATA_OFF below,
- * which is exactly the kind of duplicated constant that drifts. */
+ * offset depends on it. */
 #define TIKU_TFS_SB_BYTES    (8u * 4u)
 #define TIKU_TFS_DE_BYTES    (((8u + TIKU_TFS_NAME_MAX + 3u) & ~3u))
 #define TIKU_TFS_SLOT_BYTES  TIKU_TFS_ALIGN(4u + TIKU_TFS_SLOT_DATA, TIKU_TFS_SECT)
@@ -158,11 +133,9 @@
 /**
  * @brief Bytes of NVM a store holding @p n files occupies.
  *
- * The INVERSE of what mount does: mount is handed an extent and derives the
- * largest n that fits, while a caller that owns its own backing memory (the
- * MSP430 FRAM array, the host test harness) starts from the n it wants and
- * sizes the array with this.  Both directions use the same layout, so a store
- * sized by this always derives exactly @p n back.
+ * The inverse of mount, which derives the largest n that fits an extent.  A
+ * caller owning its backing memory (MSP430 FRAM, host harness) starts from n
+ * instead; both use the same layout, so a store sized here derives @p n back.
  */
 #define TIKU_TFS_EXTENT_FOR_SLOTS(n)                                            \
     (TIKU_TFS_DATA_OFF_FOR(n) + TIKU_TFS_SLOT_BYTES * (unsigned)((n) + 1u))
@@ -197,14 +170,9 @@ typedef enum {
 /**
  * @brief Largest file the store can hold: every data slot in one run.
  *
- * A file owns a run of contiguous slots and only the FIRST slot's length word
- * is metadata, so a span of n holds n*SLOT_BYTES-4 bytes -- and a one-slot
- * file is exactly the n==1 case (TIKU_TFS_SLOT_DATA).  This is the ceiling in
- * principle; in practice a write also needs a free run of that length, and a
- * REPLACE needs one on top of what the file already occupies (the new run must
- * exist before the dirent flips to it).  So TFS_ERR_NOSPACE is now reachable
- * for large files even when the total free byte count looks sufficient --
- * fragmentation is real once files span.
+ * Only the first slot's length word is metadata, so a span of n holds
+ * n*SLOT_BYTES-4 bytes.  This is the ceiling in principle: a write also needs a
+ * free run that long, and a replace needs one on top of the file's own.
  */
 #define TIKU_TFS_FILE_MAX \
     ((size_t)TIKU_TFS_MAX_SLOTS * TIKU_TFS_SLOT_BYTES - 4u)
@@ -212,10 +180,9 @@ typedef enum {
 /**
  * @brief Largest file EVERY board in this class is guaranteed to accept.
  *
- * TIKU_TFS_FILE_MAX above is what this build can ADDRESS; this is what it can
- * PROMISE, derived from the floor rather than the ceiling.  A client proving at
- * build time that its worst-case object fits must assert against this one --
- * the addressable ceiling would pass on a board whose carve cannot deliver it.
+ * TIKU_TFS_FILE_MAX is what this build can address; this is what it can promise,
+ * derived from the floor.  A build-time fit proof must assert against this one --
+ * the ceiling would pass on a board whose carve cannot deliver it.
  */
 #define TIKU_TFS_FILE_MAX_GUARANTEED \
     ((size_t)TIKU_TFS_MIN_SLOTS * TIKU_TFS_SLOT_BYTES - 4u)
@@ -223,11 +190,9 @@ typedef enum {
 /**
  * @brief Slots a file of @p n content bytes occupies -- a CONSTANT expression.
  *
- * The closed form of the allocator's run_span_for(): since a span of s holds
- * s*SLOT_BYTES-4 bytes, s = ceil((n + 4) / SLOT_BYTES).  run_span_for() is a
- * loop and therefore unusable in a _Static_assert, which is exactly where a
- * client needs this -- to prove at build time that its worst-case object fits
- * the store alongside the other tenants.
+ * Closed form of the allocator's run_span_for(): s = ceil((n + 4) / SLOT_BYTES).
+ * run_span_for() is a loop and so unusable in a _Static_assert, which is exactly
+ * where a client needs it.
  */
 #define TIKU_TFS_SPAN_FOR(n) \
     (((size_t)(n) + 4u + TIKU_TFS_SLOT_BYTES - 1u) / TIKU_TFS_SLOT_BYTES)
@@ -239,9 +204,8 @@ typedef struct tiku_tfs {
      * staged run or the directory.  See tiku_tfs_open_w() for why this refuses
      * rather than blocks. */
     uint8_t  wr_open;
-    /* DERIVED AT MOUNT from be->size -- the extent the linker actually carved.
-     * They are not compile-time values any more, which is the point: nothing in
-     * C mirrors the carve, so nothing can disagree with it. */
+    /* DERIVED AT MOUNT from be->size, the extent the linker actually carved.
+     * Nothing in C mirrors the carve, so nothing can disagree with it. */
     uint16_t nfiles;      /**< directory entries this store holds        */
     uint16_t nslots;      /**< data slots = nfiles + 1 (overwrite shadow) */
     uint32_t data_off;    /**< byte offset of slot 0                      */
@@ -292,16 +256,9 @@ typedef struct {
 /**
  * @brief Begin a streamed write of @p name, reserving room for @p max_len.
  *
- * Lets a file be produced in bounded chunks instead of from one whole buffer
- * -- required where the payload is larger than available RAM (a 258 KB saved
- * BASIC program on a 240 KB part) or arrives incrementally (a model over
- * serial).  Nothing in the directory changes until tiku_tfs_commit(), so the
- * previous content stands until the moment it is replaced.
- *
- * @p max_len is a RESERVATION, not a promise: commit records however many
- * bytes were actually appended, but keeps the reserved span.  Declaring a
- * stable maximum is what makes a repeatedly-replaced file ping-pong between
- * two equal-length runs instead of leaving ragged holes.
+ * Produces a file in bounded chunks, for payloads larger than RAM or arriving
+ * incrementally.  Nothing in the directory changes until tiku_tfs_commit().
+ * @p max_len reserves a span and is kept; commit records the bytes appended.
  *
  * @return TFS_OK, or TFS_ERR_NOSPACE / _TOOBIG / _NAMELEN / _INVAL.
  */

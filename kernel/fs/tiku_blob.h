@@ -7,31 +7,9 @@
  *
  * tiku_blob.h - large objects as chunked files in the /data store.
  *
- * TFS caps a file at one slot (TIKU_TFS_SLOT_DATA -- 4 KB on the region
- * platforms), which is far smaller than the objects an OS now wants to keep
- * as DATA rather than as firmware: neural-network weights, radio firmware,
- * loadable module images.  Today those live in .rodata, which is why the
- * code windows are sized by payloads instead of by code (see
- * temp/memlayout-fix-plan.md).  This layer spans a blob across numbered
- * chunk files with a small manifest, so an object of any size is an
- * ordinary store tenant:
- *
- *     <name>.mnf    manifest: magic, version, total, chunk, chunks, crc32
- *     <name>.000    first chunk
- *     <name>.001    ...
- *
- * Crash discipline mirrors TFS's own gate-last commit: on store the
- * manifest is written LAST and deleted FIRST, so a power cut leaves either
- * the complete previous blob or no blob at all -- never a manifest standing
- * over a half-written chunk set.  A CRC32 over the whole payload is checked
- * on load, so a torn or partially overwritten chunk is caught rather than
- * returned.
- *
- * Deliberately a CONVENTION over stock TFS: it needs no on-NVM format
- * change and introduces no new crash-safety argument.  When the store gains
- * spanned files, these entry points keep their signatures and the
- * implementation collapses to a single write / map -- callers do not
- * change.
+ * Spans an object across numbered chunk files (<name>.000, .001, ...) described
+ * by a <name>.mnf manifest.  The manifest is written last and deleted first, so
+ * a power cut leaves the whole previous blob or none.  CRC32 checked on load.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
