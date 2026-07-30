@@ -47,6 +47,7 @@ Thumbs.db
 takenote.md
 problem.md
 tikukits/
+experiment/
 
 # drivers/ is registered as a git submodule pointing at
 # https://github.com/tikuos/drivers.git — no gitignore entry needed.

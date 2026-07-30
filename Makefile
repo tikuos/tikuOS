@@ -1683,6 +1683,12 @@ SRCS += arch/ambiq/tiku_psram_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram.c   # /sys/psram lifecycle nodes
 CFLAGS += -DTIKU_DRV_PSRAM_ENABLE=1
 endif
+# Private experiment overlay: a sibling repo cloned into experiment/ that
+# adds features to this build when present (the LLM stack lives there).
+# Absent, the mainline build is byte-identical to a tree that never had it;
+# the overlay may only ADD sources and -D capability macros, never patch.
+-include experiment/experiment.mk
+
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_gpu.c   # /sys/gpu status nodes

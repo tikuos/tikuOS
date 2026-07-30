@@ -121,6 +121,11 @@
 #include "commands/tiku_shell_cmd_df.h"
 #include "commands/tiku_shell_cmd_fat.h"
 #endif
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+#if defined(TIKU_EXP_LLM)
+#include <experiment/llm/tiku_shell_cmd_llm.h>  /* overlay repo, see Makefile */
+#endif
+#endif
 #if TIKU_SHELL_CMD_NVMPROBE
 #include "commands/tiku_shell_cmd_nvmprobe.h"
 #endif
@@ -643,6 +648,11 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_FAT
     {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},
+#endif
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+#if defined(TIKU_EXP_LLM)
+    {"llm",     "run a staged .tgf model: bind|verify|run", tiku_shell_cmd_llm},
+#endif
 #endif
 #if TIKU_SHELL_CMD_NVMPROBE
     {"nvmprobe","Carved NVM region diagnostic", tiku_shell_cmd_nvmprobe},
