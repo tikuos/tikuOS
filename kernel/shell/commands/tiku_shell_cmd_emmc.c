@@ -80,6 +80,12 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
                      tiku_emmc_powered());
         return;
     }
+    if (argc >= 3 && tiku_cmd_streq(argv[2], "hs200")) {
+        tiku_emmc_err_t rc = tiku_emmc_hs200();
+        SHELL_PRINTF("emmc hs200: %s\n",
+                     (rc == TIKU_EMMC_OK) ? "ok" : "failed (still usable at HS 48)");
+        return;
+    }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "bench")) {
         tiku_emmc_bench_run();
         return;

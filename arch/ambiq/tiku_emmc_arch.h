@@ -287,6 +287,15 @@ tiku_emmc_err_t tiku_emmc_read_id(tiku_emmc_id_t *out);
 /** @brief Read @p n_blk 512-byte blocks starting at @p lba. */
 tiku_emmc_err_t tiku_emmc_read_blocks(uint32_t lba, uint32_t n_blk, void *buf);
 
+/** @brief Arm a read and return; collect it with tiku_emmc_read_wait(). */
+tiku_emmc_err_t tiku_emmc_read_start(uint32_t lba, uint32_t n_blk, void *buf);
+
+/** @brief Switch to HS200 at 96 MHz with an RX-tap scan; falls back to HS 48. */
+tiku_emmc_err_t tiku_emmc_hs200(void);
+
+/** @brief Wait for the read armed by tiku_emmc_read_start(). */
+tiku_emmc_err_t tiku_emmc_read_wait(void);
+
 /**
  * @brief Write @p n_blk 512-byte blocks starting at @p lba.
  *

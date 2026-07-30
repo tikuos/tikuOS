@@ -24,6 +24,8 @@
 #include "apollo510.h"
 #include "hal/tiku_cpu.h"                /* dcache clean/invalidate: DMA     */
 #include <kernel/cpu/tiku_hang.h>
+#include <string.h>
+
 #include <kernel/shell/tiku_shell_io.h>  /* the bench reports via SHELL_PRINTF */
 
 /*---------------------------------------------------------------------------*/
@@ -807,6 +809,129 @@ static void emmc_fallback_slow(void)
     (void)emmc_switch(EXT_CSD_HS_TIMING, 0u);
 }
 
+/*---------------------------------------------------------------------------*/
+/* HS200                                                                     */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * HS200 at the silicon's 96 MHz ceiling (the vendor header caps the mode's
+ * 200 MHz nominal at the SDHC base clock).  Sequence per JEDEC + the vendor
+ * HAL read as documentation: CMD6 HS_TIMING=2, host UHSMODESEL=SDR104,
+ * divider 1, then pick the RX sample point.
+ *
+ * Tuning is NOT the standard CMD21 loop: this host samples through MCUCTRL
+ * delay taps (OTAPDLYSEL for TX, ITAPDLYSEL for RX, changed inside an
+ * ITAPCHGWIN window), so the procedure mirrors the PSRAM rxdqs scan --
+ * write a pattern to the scratch region at the proven 48 MHz, raise the
+ * clock, then read it back at every RX tap and take the centre of the
+ * widest passing run.  Every failure path drops cleanly back to HS 48.
+ */
+#define EMMC_ITAP_MAX 32u
+
+static void emmc_set_taps(uint32_t otap, uint32_t itap, int ena)
+{
+    MCUCTRL->SDIO0CTRL_b.SDIO0ITAPCHGWIN = 1u;
+    MCUCTRL->SDIO0CTRL_b.SDIO0OTAPDLYSEL = otap & 15u;
+    MCUCTRL->SDIO0CTRL_b.SDIO0OTAPDLYENA = ena ? 1u : 0u;
+    MCUCTRL->SDIO0CTRL_b.SDIO0ITAPDLYSEL = itap & 31u;
+    MCUCTRL->SDIO0CTRL_b.SDIO0ITAPDLYENA = ena ? 1u : 0u;
+    MCUCTRL->SDIO0CTRL_b.SDIO0ITAPCHGWIN = 0u;
+    __DSB();
+}
+
+/** @brief Reset the host CMD and DAT state machines after a failed read. */
+static void emmc_recover_lines(void)
+{
+    uint32_t g;
+    SDIO0->CLOCKCTRL_b.SWRSTCMD = 1u;
+    g = 1000u;
+    while (SDIO0->CLOCKCTRL_b.SWRSTCMD != 0u && --g != 0u) { }
+    SDIO0->CLOCKCTRL_b.SWRSTDAT = 1u;
+    g = 1000u;
+    while (SDIO0->CLOCKCTRL_b.SWRSTDAT != 0u && --g != 0u) { }
+    SDIO0->INTSTAT = 0xFFFFFFFFu;
+}
+
+tiku_emmc_err_t tiku_emmc_hs200(void)
+{
+    static uint8_t pat[512], rd[512];
+    uint32_t lba = tiku_emmc_scratch_lba();
+    uint32_t i, itap;
+    uint8_t ok[EMMC_ITAP_MAX];
+    uint32_t best_len = 0u, best_start = 0u, run = 0u, run_start = 0u;
+    tiku_emmc_err_t rc;
+
+    if (!s_up)    { return TIKU_EMMC_ERR_POWER; }
+    if (s_asleep) { return TIKU_EMMC_ERR_STATE; }
+
+    /* Known bytes on the card, written and verified at the current mode. */
+    for (i = 0u; i < 512u; i++) { pat[i] = (uint8_t)(i * 7u + 0x35u); }
+    rc = tiku_emmc_write_blocks(lba, 1u, pat, 0);
+    if (rc != TIKU_EMMC_OK) { return rc; }
+    rc = tiku_emmc_read_blocks(lba, 1u, rd);
+    if (rc != TIKU_EMMC_OK || memcmp(pat, rd, 512u) != 0) {
+        return TIKU_EMMC_ERR_CMD;
+    }
+
+    /* Card first, then host: HS_TIMING=2 is valid at the current clock. */
+    rc = emmc_switch(EXT_CSD_HS_TIMING, 2u);
+    if (rc != TIKU_EMMC_OK) { goto fallback; }
+    SDIO0->AUTO_b.UHSMODESEL = 3u;               /* SDR104 sampling       */
+    __DSB();
+    rc = emmc_set_clock(96000000u);
+    if (rc != TIKU_EMMC_OK) { goto fallback; }
+
+    /* RX tap scan.  A failing point leaves error status and possibly a
+     * wedged data state machine; both lines are reset before the verdict
+     * is recorded so point N cannot poison point N+1. */
+    for (itap = 0u; itap < EMMC_ITAP_MAX; itap++) {
+        emmc_set_taps(0u, itap, 1);
+        rc = tiku_emmc_read_blocks(lba, 1u, rd);
+        ok[itap] = (rc == TIKU_EMMC_OK && memcmp(pat, rd, 512u) == 0)
+                   ? 1u : 0u;
+        if (!ok[itap]) { emmc_recover_lines(); }
+    }
+    for (itap = 0u; itap < EMMC_ITAP_MAX; itap++) {
+        if (ok[itap]) {
+            if (run == 0u) { run_start = itap; }
+            run++;
+            if (run > best_len) { best_len = run; best_start = run_start; }
+        } else {
+            run = 0u;
+        }
+    }
+    SHELL_PRINTF("  hs200 itap scan:");
+    for (itap = 0u; itap < EMMC_ITAP_MAX; itap++) {
+        SHELL_PRINTF("%c", ok[itap] ? '1' : '.');
+    }
+    SHELL_PRINTF("\n");
+    if (best_len < 3u) { goto fallback; }        /* no trustworthy window */
+
+    emmc_set_taps(0u, best_start + best_len / 2u, 1);
+    rc = tiku_emmc_read_blocks(lba, 1u, rd);
+    if (rc != TIKU_EMMC_OK || memcmp(pat, rd, 512u) != 0) { goto fallback; }
+
+    SHELL_PRINTF("  hs200: %lu MHz, itap %lu (window %lu wide)\n",
+                 (unsigned long)(s_clock_hz / 1000000u),
+                 (unsigned long)(best_start + best_len / 2u),
+                 (unsigned long)best_len);
+    return TIKU_EMMC_OK;
+
+fallback:
+    emmc_set_taps(0u, 0u, 0);
+    SDIO0->AUTO_b.UHSMODESEL = 0u;
+    (void)emmc_switch(EXT_CSD_HS_TIMING, 1u);
+    (void)emmc_set_clock(48000000u);
+    emmc_recover_lines();
+    {   /* the fallback must be PROVEN, not assumed */
+        tiku_emmc_err_t v = tiku_emmc_read_blocks(lba, 1u, rd);
+        SHELL_PRINTF("  hs200: failed, back at HS 48 (%s)\n",
+                     (v == TIKU_EMMC_OK && memcmp(pat, rd, 512u) == 0)
+                     ? "verified" : "AND THE FALLBACK READ FAILED");
+    }
+    return TIKU_EMMC_ERR_CLOCK;
+}
+
 tiku_emmc_err_t tiku_emmc_init(void)
 {
     return tiku_emmc_init_at(8u, 48000000u);
@@ -1298,6 +1423,77 @@ static tiku_emmc_err_t emmc_xfer(uint32_t lba, uint32_t n_blk, uint8_t *buf,
     return TIKU_EMMC_OK;
 }
 
+/*
+ * Split read: arm the transfer, do other work, collect it.
+ *
+ * The blocking path spends the whole data phase in a poll loop; a caller
+ * that streams weights can compute on the previous chunk instead.  One
+ * transfer outstanding at a time; must fit a single chunk (no re-chunking
+ * loop is possible once control has returned to the caller).  The wait side
+ * keeps the SDMA-boundary service from the blocking path: if the engine
+ * pauses at a 512 KB line mid-flight it simply waits there until collect.
+ */
+static uint32_t s_rd_busy, s_rd_bytes, s_rd_budget, s_rd_t0;
+static uint8_t *s_rd_buf;
+
+tiku_emmc_err_t tiku_emmc_read_start(uint32_t lba, uint32_t n_blk, void *buf)
+{
+    uint32_t resp[4], xfer;
+    tiku_emmc_err_t rc;
+    uint8_t cmd;
+
+    if (!s_up)                        { return TIKU_EMMC_ERR_POWER; }
+    if (s_asleep)                     { return TIKU_EMMC_ERR_STATE; }
+    if (s_rd_busy)                    { return TIKU_EMMC_ERR_STATE; }
+    if (n_blk == 0u || n_blk > emmc_max_chunk() ||
+        (((uint32_t)(uintptr_t)buf & 3u) != 0u)) {
+        return TIKU_EMMC_ERR_ARG;
+    }
+    if (s_sec_count && (lba + n_blk) > s_sec_count) {
+        return TIKU_EMMC_ERR_ARG;
+    }
+
+    s_rd_bytes = n_blk * TIKU_EMMC_BLOCK_SIZE;
+    tiku_cpu_dcache_clean(buf, s_rd_bytes);
+
+    SDIO0->BLOCK = ((n_blk << SDIO0_BLOCK_BLKCNT_Pos) & SDIO0_BLOCK_BLKCNT_Msk)
+                 | ((uint32_t)EMMC_SDMA_BOUND << SDIO0_BLOCK_HOSTSDMABUFSZ_Pos)
+                 | (TIKU_EMMC_BLOCK_SIZE & SDIO0_BLOCK_TRANSFERBLOCKSIZE_Msk);
+    xfer = SDIO0_TRANSFER_DXFERDIRSEL_Msk | SDIO0_TRANSFER_DMAEN_Msk;
+    if (n_blk > 1u) {
+        xfer |= SDIO0_TRANSFER_BLKSEL_Msk | SDIO0_TRANSFER_BLKCNTEN_Msk
+              | ((1u << SDIO0_TRANSFER_ACMDEN_Pos) & SDIO0_TRANSFER_ACMDEN_Msk);
+        cmd = MMC_READ_MULTIPLE;
+    } else {
+        cmd = MMC_READ_SINGLE;
+    }
+    SDIO0->HOSTCTRL1_b.DMASELECT = SDIO0_HOSTCTRL1_DMASELECT_SDMA;
+    SDIO0->SDMA = (uint32_t)(uintptr_t)buf;
+    __DSB();
+
+    rc = emmc_cmd_x(cmd, lba, RESP_48, 1, 1, 1, xfer, resp);
+    if (rc != TIKU_EMMC_OK) { return rc; }
+
+    s_rd_buf    = (uint8_t *)buf;
+    s_rd_budget = emmc_xfer_budget_cyc(n_blk);
+    s_rd_t0     = cyc_now();
+    s_rd_busy   = 1u;
+    return TIKU_EMMC_OK;
+}
+
+tiku_emmc_err_t tiku_emmc_read_wait(void)
+{
+    tiku_emmc_err_t rc;
+
+    if (!s_rd_busy) { return TIKU_EMMC_OK; }
+    rc = emmc_wait_xfer(s_rd_budget);
+    if (rc == TIKU_EMMC_OK) {
+        tiku_cpu_dcache_invalidate(s_rd_buf, s_rd_bytes);
+    }
+    s_rd_busy = 0u;
+    return rc;
+}
+
 tiku_emmc_err_t tiku_emmc_read_blocks(uint32_t lba, uint32_t n_blk, void *buf)
 {
     if (!s_up)       { return TIKU_EMMC_ERR_POWER; }
@@ -1751,6 +1947,7 @@ tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec)
         uint32_t n = (left > (STAGE_CHUNK / TIKU_EMMC_BLOCK_SIZE))
                      ? (STAGE_CHUNK / TIKU_EMMC_BLOCK_SIZE) : left;
         uint32_t bytes = n * TIKU_EMMC_BLOCK_SIZE;
+        uint32_t seg;
         uint32_t t0;
         tiku_emmc_err_t rc;
 
@@ -1762,9 +1959,18 @@ tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec)
         s_stg_src = stage_hash(s_bench_buf, bytes, s_stg_src);
         tiku_cpu_dcache_clean(s_bench_buf, bytes);
 
+        /*
+         * The command queue requires total % seg == 0, and the LAST chunk of
+         * a file is whatever is left over -- 397824 bytes here, which 64 KB
+         * does not divide. Staging worked until now only because the first
+         * file tried was exactly 108 x 512 KB. A short chunk goes as a single
+         * segment of its own length instead.
+         */
+        seg = ((bytes % STAGE_SEG) == 0u) ? STAGE_SEG : bytes;
+
         t0 = cyc_now();
         if (tiku_psram_cq_xfer(s_stg_off, s_bench_buf, bytes,
-                               STAGE_SEG, 1) != 0) {
+                               seg, 1) != 0) {
             s_stg_wr += cyc_now() - t0;
             return TIKU_EMMC_ERR_CMD;
         }
@@ -1791,7 +1997,10 @@ tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
     for (off = 0u; off < total_bytes; off += STAGE_CHUNK) {
         uint32_t n = ((total_bytes - off) < STAGE_CHUNK)
                      ? (total_bytes - off) : STAGE_CHUNK;
-        if (tiku_psram_cq_xfer(off, s_bench_buf, n, STAGE_SEG, 0) != 0) {
+        /* Same short-chunk rule as the write path: the queue needs
+         * total % seg == 0, and the last chunk is whatever is left. */
+        uint32_t seg = ((n % STAGE_SEG) == 0u) ? STAGE_SEG : n;
+        if (tiku_psram_cq_xfer(off, s_bench_buf, n, seg, 0) != 0) {
             rc = TIKU_EMMC_ERR_CMD;
             break;
         }
