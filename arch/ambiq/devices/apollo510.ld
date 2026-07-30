@@ -234,7 +234,11 @@ SECTIONS
     } > SSRAM
 
     /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
-    ASSERT((__stack - _end) >= 0x1000,
+    /* The MPU reserves 32 KB of stack budget + a 4 KB no-access guard below
+     * the stack top (tiku_mpu_arch.c).  Statics that reach into that band
+     * pass a naive headroom check and then MemManage-fault at boot -- the
+     * assert must cover the full reservation, not 4 KB. */
+    ASSERT((__stack - _end) >= 0xA000,
            "ERROR: DTCM exhausted — less than 4 KB free for stack")
 
     /* The NVM mirror page must hold the magic word + the whole .uninit image. */
