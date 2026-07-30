@@ -3334,6 +3334,11 @@ monitor:
 		echo "  Or point it at a specific port: make monitor PORT=/dev/ttyACM0"; \
 		exit 1; \
 	fi; \
+	echo "Baud $(BAUD), from MCU=$(MCU) -- monitor needs MCU= like every"; \
+	echo "  other target, and forgetting it is silent: a bare \`make\` picks"; \
+	echo "  msp430fr5994 (9600) and a 115200 board then prints mojibake that"; \
+	echo "  reads like broken hardware.  Garbled? \`make monitor MCU=<yours>\`"; \
+	echo "  or override BAUD= directly."; \
 	if command -v picocom >/dev/null 2>&1; then \
 		echo "Connecting to $(PORT) at $(BAUD) baud  (Ctrl-A Ctrl-X to exit)"; \
 		picocom -b $(BAUD) $(PORT); \
