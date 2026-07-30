@@ -57,7 +57,16 @@
  * Bounds the argv array the parser fills (argv[0] is the command
  * name).  Tokens beyond this count are not parsed.
  */
-#define TIKU_SHELL_MAX_ARGS   8
+#ifndef TIKU_SHELL_MAX_ARGS
+#  ifdef PLATFORM_MSP430
+#    define TIKU_SHELL_MAX_ARGS 8
+#  else
+/* 24, not 8: llm/pf-style commands take long id lists, and an argv cap
+ * CLIPS SILENTLY -- six hours of timing data were once taken on commands
+ * the parser had quietly truncated. */
+#    define TIKU_SHELL_MAX_ARGS 24
+#  endif
+#endif
 
 /**
  * @brief I/O poll interval in clock ticks.
