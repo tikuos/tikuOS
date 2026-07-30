@@ -252,6 +252,25 @@ endif
 BOARD_CAP_DEFINES := $(foreach c,$(BOARD_CAPS_$(BOARD)),-DTIKU_BOARD_HAS_$(c)=1)
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Private experiment overlay
+#
+# A sibling private repo cloned into experiment/ that adds features when it is
+# present.  Included HERE -- after board capabilities are known, before the
+# capability refusals below -- so an overlay can say "my feature needs the
+# PSRAM and eMMC drivers" and have that request validated against the board
+# like any other.  It is opt-in per feature (e.g. LLM=1); with nothing opted
+# in it contributes nothing, and with the directory absent the build is
+# byte-identical to a tree that never had it.
+#
+# TWO PHASES, because the platform blocks below assign SRCS and CFLAGS with
+# `=` and would wipe anything added here: the overlay sets DRIVER REQUESTS and
+# per-feature macros now, and exports EXP_SRCS / EXP_CFLAGS which are appended
+# after those assignments (see "overlay sources" further down).  An overlay may
+# ADD sources, include paths and -D macros; it may not patch mainline sources.
+# ---------------------------------------------------------------------------
+-include experiment/experiment.mk
+
 # Capability refusals -- asked HERE, not inside a platform block
 #
 # "Can this board provide the part?" is platform-independent; only "how do I
@@ -1683,11 +1702,11 @@ SRCS += arch/ambiq/tiku_psram_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram.c   # /sys/psram lifecycle nodes
 CFLAGS += -DTIKU_DRV_PSRAM_ENABLE=1
 endif
-# Private experiment overlay: a sibling repo cloned into experiment/ that
-# adds features to this build when present (the LLM stack lives there).
-# Absent, the mainline build is byte-identical to a tree that never had it;
-# the overlay may only ADD sources and -D capability macros, never patch.
--include experiment/experiment.mk
+# Overlay sources: appended after the platform blocks have assigned SRCS and
+# CFLAGS, so the overlay's additions survive.  Empty unless a feature was
+# opted in (see the overlay include above).
+SRCS   += $(EXP_SRCS)
+CFLAGS += $(EXP_CFLAGS)
 
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
