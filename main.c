@@ -113,13 +113,19 @@ int main(void) {
 #endif
 
 #if TIKU_INIT_ENABLE
+  /* Load only.  Execution happens in the shell process's first schedule
+   * (tiku_shell.c): the parser's command table and the console backend are
+   * process-startup state, so an entry dispatched from here hits a NULL
+   * table and silently does nothing -- five bus-touching entries once
+   * echoed at boot with no effect, no output, and no error.  Running from
+   * the shell also puts entries after the driver registry and the VFS
+   * tree, so they behave exactly like typed commands. */
   tiku_nvm_map_init();
   tiku_init_load();
-  tiku_init_run_all();
 #endif
 
-  /* Initialize the VFS tree after processes are registered so /proc/
-   * captures the shell and any init-started processes. */
+  /* Initialize the VFS tree.  (/proc rebuilds its node table on every
+   * lookup, so process-registration order does not matter to it.) */
   tiku_vfs_tree_init();
 
   /* Hand off to the driver registry. With HAS_DRIVERS=0 the table

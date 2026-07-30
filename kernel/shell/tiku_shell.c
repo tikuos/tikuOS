@@ -19,6 +19,9 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell.h"
+#if TIKU_INIT_ENABLE
+#include <kernel/init/tiku_init.h>
+#endif
 #if (TIKU_DRV_USB_ENABLE + 0)
 #endif
 #include "tiku_shell_config.h"
@@ -1312,6 +1315,15 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                  TIKU_DEVICE_NVM_LABEL,
                  (unsigned long)(TIKU_DEVICE_FRAM_SIZE / 1024));
     SHELL_PRINTF(SH_DIM "  Type 'help' for commands." SH_RST "\n\n");
+#if TIKU_INIT_ENABLE
+    /* Init-table entries run HERE, not from main(): the parser's command
+     * table (registered a few lines up) and the console backend are both
+     * process-startup state, and main() runs before the driver registry
+     * besides.  From this point an entry behaves exactly like a typed
+     * command -- same dispatch, same output, same subsystem state -- which
+     * is the property `init run` at the prompt always had and boot lacked. */
+    tiku_init_run_all();
+#endif
     shell_print_prompt();
 #endif
 
