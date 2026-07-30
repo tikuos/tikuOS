@@ -282,6 +282,78 @@ static uint32_t s_stage_sec;
 static unsigned s_stage_runs;
 static int      s_stage_bad;
 
+/*
+ * Helpers for other commands that address a file by LBA (the llm command
+ * streams weights straight off the card).  Both require a mounted volume.
+ */
+
+static uint32_t s_loc_first, s_loc_runs;
+
+static int locate_cb(uint32_t lba, uint32_t nsec, void *ctx)
+{
+    (void)nsec; (void)ctx;
+    if (s_loc_runs == 0u) { s_loc_first = lba; }
+    s_loc_runs++;
+    return 0;
+}
+
+/** @brief First LBA, byte size and extent count of a file. */
+int tiku_shell_fat_locate(const char *path, uint32_t *lba0, uint32_t *size,
+                          uint32_t *nruns)
+{
+    tiku_fat_file_t f;
+    if (!s_mounted) { return -1; }
+    if (tiku_fat_open(&s_fs, path, &f) != TIKU_FAT_OK) { return -1; }
+    if (tiku_fat_verify(&s_fs, &f) != TIKU_FAT_OK) { return -1; }
+    s_loc_first = 0u; s_loc_runs = 0u;
+    if (tiku_fat_runs(&s_fs, &f, locate_cb, 0) != TIKU_FAT_OK) { return -1; }
+    *lba0 = s_loc_first; *size = f.size; *nruns = s_loc_runs;
+    return 0;
+}
+
+static uint32_t s_pfx_left;
+
+static int prefix_cb(uint32_t lba, uint32_t nsec, void *ctx)
+{
+    (void)ctx;
+    if (nsec > s_pfx_left) { nsec = s_pfx_left; }
+    if (tiku_emmc_stage_chunk(lba, nsec) != TIKU_EMMC_OK) {
+        s_pfx_left = 0xFFFFFFFFu;        /* poison: caller sees failure */
+        return 1;
+    }
+    s_pfx_left -= nsec;
+    return (s_pfx_left == 0u) ? 1 : 0;   /* covered the prefix: stop     */
+}
+
+/**
+ * @brief Stage the first @p bytes of a file into the PSRAM tier base.
+ *
+ * The same verified eMMC->SRAM->PSRAM pipeline as `fat stage`, walked only
+ * until the prefix is covered.  Rounds up to whole sectors.
+ */
+int tiku_shell_fat_stage_prefix(const char *path, uint32_t bytes)
+{
+    tiku_fat_file_t f;
+    uint32_t nsec = (bytes + 511u) / 512u;
+    uint32_t src = 0u, dst = 0u, rd_us = 0u, wr_us = 0u;
+
+    if (!s_mounted || bytes == 0u) { return -1; }
+    if (tiku_fat_open(&s_fs, path, &f) != TIKU_FAT_OK) { return -1; }
+    if (tiku_fat_verify(&s_fs, &f) != TIKU_FAT_OK) { return -1; }
+    if ((uint64_t)nsec * 512u > f.size + 511u) { return -1; }
+    s_pfx_left = nsec;
+    tiku_emmc_stage_open();
+    (void)tiku_fat_runs(&s_fs, &f, prefix_cb, 0);
+    if (s_pfx_left != 0u) {
+        (void)tiku_emmc_stage_close(0u, &src, &dst, &rd_us, &wr_us);
+        return -1;
+    }
+    if (tiku_emmc_stage_close(nsec * 512u, &src, &dst, &rd_us, &wr_us)
+        != TIKU_EMMC_OK) {
+        return -1;                       /* readback hash mismatch       */
+    }
+    return (src == dst) ? 0 : -1;
+}
 static int stage_cb(uint32_t lba, uint32_t nsec, void *ctx)
 {
     (void)ctx;
@@ -335,8 +407,14 @@ static void cmd_stage(const char *path)
         (void)tiku_emmc_stage_close(0u, &src, &dst, &rd_us, &wr_us);
         return;
     }
+    /*
+     * Whole sectors, NOT the file size. The staging pipeline hashes every
+     * byte it moves, and it moves whole sectors; clamping to the file size
+     * here made the two hashes cover regions 224 bytes apart and report a
+     * MISMATCH on a perfectly good transfer. Only a file whose length is an
+     * exact sector multiple hid it.
+     */
     bytes = s_stage_sec * 512u;
-    if (bytes > f.size) { bytes = f.size; }
 
     if (tiku_emmc_stage_close(bytes, &src, &dst, &rd_us, &wr_us)
         != TIKU_EMMC_OK) {
