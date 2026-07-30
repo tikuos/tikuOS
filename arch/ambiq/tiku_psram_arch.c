@@ -1036,6 +1036,63 @@ int tiku_psram_xip_enabled(void)
  * address, count, direction, enable, poll DMACPL.  Cache coherency is the
  * CALLER's job -- this moves bytes between the device and physical SRAM.
  */
+/*
+ * Split form of the transfer below: arm it, go and do something else, then
+ * collect it.
+ *
+ * The blocking call polls with a 20 us backoff, so a caller that streams a
+ * weight matrix spends the whole transfer idle. Splitting start from wait
+ * lets the CPU work on the previous slice while the current one lands.
+ */
+static uint32_t s_dma_busy;
+
+tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
+                                      uint32_t n, int to_device)
+{
+    if (!s_up)              { return TIKU_PSRAM_ERR_POWER; }
+    if (s_dma_busy)         { return TIKU_PSRAM_ERR_ARG; }
+    if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_PSRAM_ERR_ARG; }
+    if (n == 0u || (n & 3u) != 0u || ((uint32_t)(uintptr_t)sram & 3u) != 0u) {
+        return TIKU_PSRAM_ERR_ARG;
+    }
+    MSPI0->DMATARGADDR = (uint32_t)(uintptr_t)sram;
+    MSPI0->DMADEVADDR  = dev_addr;
+    MSPI0->DMATOTCOUNT = n;
+    MSPI0->INTCLR      = 0xFFFFFFFFu;
+    MSPI0->DMACFG =
+        ((uint32_t)MSPI0_DMACFG_DMAEN_EN << MSPI0_DMACFG_DMAEN_Pos) |
+        ((to_device ? 1u : 0u) << MSPI0_DMACFG_DMADIR_Pos);
+    __DSB();
+    s_dma_busy = 1u;
+    return TIKU_PSRAM_OK;
+}
+
+/**
+ * @brief Collect a transfer armed by tiku_psram_dma_start().
+ *
+ * @note Spins without a backoff: the caller has already done its work and
+ *       any sleep here is pure added latency.
+ */
+tiku_psram_err_t tiku_psram_dma_wait(void)
+{
+    uint32_t spins = 40000000u;
+    uint32_t st;
+
+    if (!s_dma_busy) { return TIKU_PSRAM_OK; }
+    while (((MSPI0->DMASTAT &
+             (MSPI0_DMASTAT_DMACPL_Msk | MSPI0_DMASTAT_DMAERR_Msk)) == 0u)
+           && --spins != 0u) {
+        __NOP();
+    }
+    st = MSPI0->DMASTAT;
+    MSPI0->DMACFG  = 0u;
+    MSPI0->DMASTAT = 0u;
+    s_dma_busy     = 0u;
+    if (spins == 0u) { return TIKU_PSRAM_ERR_TIMEOUT; }
+    if ((st & MSPI0_DMASTAT_DMAERR_Msk) != 0u) { return TIKU_PSRAM_ERR_TIMEOUT; }
+    return TIKU_PSRAM_OK;
+}
+
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device)
 {

@@ -331,6 +331,13 @@ int tiku_psram_xip_enabled(void);
  * @brief Blocking DMA between SRAM and the device (word-aligned, n%4==0).
  *        Cache coherency is the caller's job.  XIP must be off.
  */
+/** @brief Arm a transfer and return; collect it with tiku_psram_dma_wait(). */
+tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
+                                      uint32_t n, int to_device);
+
+/** @brief Wait for the transfer armed by tiku_psram_dma_start(). */
+tiku_psram_err_t tiku_psram_dma_wait(void);
+
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device);
 
