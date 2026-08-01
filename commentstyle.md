@@ -88,6 +88,12 @@ Scope is what git tracks, so anything gitignored -- `kintsugi/`,
 `experiments/`, `temp/`, `examples/`, `demos/` -- is out of scope by
 construction, and a new scratch directory needs no change here.
 
+AN UNCOMMITTED FILE IS ALSO OUT OF SCOPE, for the same reason and just as
+silently: a brand-new source file is untracked until it is added, so a lint
+run before the commit passes without opening it. That is the worst moment to
+be told nothing -- it is exactly when a file has never been checked. Lint
+AFTER staging, or check the file directly by path.
+
 A NESTED REPO IS ALSO OUT OF SCOPE, and silently: `make lint` here reports
 success without opening a file in `experiment/`. Such a tree lints itself
 with `--root`, which points the walk and the git query at it so it is scoped
