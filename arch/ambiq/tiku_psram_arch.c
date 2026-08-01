@@ -1018,6 +1018,17 @@ tiku_psram_err_t tiku_psram_xip_enable(int enable)
         __DSB();
         MSPI0->DEV0XIP_b.XIPEN0 = 1u;
     } else {
+        /* CLEAN AND INVALIDATE THE D-CACHE BEFORE THE APERTURE GOES AWAY.
+         * The aperture is write-back cacheable, and a session that staged a
+         * model has megabytes of its writes sitting as dirty lines.  Disable
+         * the aperture with those still resident and they evict later, under
+         * whatever code happens to be running -- an IMPRECISE bus fault with
+         * a misleading PC.  That was the `reboot` hardfault at psram_pio2
+         * (cfsr=0x400) and the wedge after `power psram down`; one
+         * mechanism, two symptoms.  Whole-cache by set/way: 64 KB of cache
+         * against 64 MB of aperture makes by-address the wrong tool. */
+        __DSB();
+        SCB_CleanInvalidateDCache();
         MSPI0->DEV0XIP_b.XIPEN0 = 0u;
     }
     __DSB();
