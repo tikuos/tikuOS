@@ -128,6 +128,12 @@
 #if defined(TIKU_EXP_LLM)
 #include <experiment/llm/tiku_shell_cmd_llm.h>  /* overlay repo, see Makefile */
 #endif
+#if defined(TIKU_EXP_VIT)
+#include <experiment/vit/tiku_shell_cmd_vit.h>  /* overlay repo, see Makefile */
+#endif
+#if defined(TIKU_EXP_ASR)
+#include <experiment/asr/tiku_shell_cmd_asr.h>  /* overlay repo, see Makefile */
+#endif
 #endif
 #if TIKU_SHELL_CMD_NVMPROBE
 #include "commands/tiku_shell_cmd_nvmprobe.h"
@@ -655,6 +661,14 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #if defined(TIKU_EXP_LLM)
     {"llm",     "run a staged .tgf model: bind|verify|run", tiku_shell_cmd_llm},
+#endif
+#if defined(TIKU_EXP_VIT)
+    {"vit",     "run a staged .tvf vision model: bind|verify|run",
+                tiku_shell_cmd_vit},
+#endif
+#if defined(TIKU_EXP_ASR)
+    {"asr",     "transcribe a .twf speech model: bindf|wavf|run",
+                tiku_shell_cmd_asr},
 #endif
 #endif
 #if TIKU_SHELL_CMD_NVMPROBE
