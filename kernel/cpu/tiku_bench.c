@@ -15,6 +15,7 @@
  */
 
 #include "tiku_bench.h"
+#include <hal/tiku_cpu.h>
 #include "tiku.h"
 #include <kernel/timers/tiku_htimer.h>
 
@@ -93,9 +94,18 @@ tiku_bench_clock(void)
 uint32_t
 tiku_bench_hz(void)
 {
-    return s_backend == TIKU_BENCH_DWT
-        ? (uint32_t)TIKU_MAIN_CPU_HZ
-        : (uint32_t)TIKU_HTIMER_ARCH_SECOND;
+    if (s_backend != TIKU_BENCH_DWT) {
+        return (uint32_t)TIKU_HTIMER_ARCH_SECOND;
+    }
+    /* The DWT counts core cycles, so its rate is whatever the core is
+     * running at NOW -- not TIKU_MAIN_CPU_HZ, which is a compile-time
+     * constant and stays at the boot frequency after any runtime change.
+     * Reporting the constant scaled every converted duration on a board
+     * running at 250 MHz by 2.6x. */
+    {
+        unsigned long hz = tiku_cpu_mclk_hz();
+        return (hz != 0UL) ? (uint32_t)hz : (uint32_t)TIKU_MAIN_CPU_HZ;
+    }
 }
 
 uint32_t

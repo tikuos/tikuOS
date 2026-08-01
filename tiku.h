@@ -117,8 +117,23 @@
 /* SYSTEM CONFIGURATION (before includes to avoid circular dependencies)    */
 /*---------------------------------------------------------------------------*/
 
-/** Clock time type definition */
+/*
+ * Clock time type.
+ *
+ * 16 bits wraps every 512 s at 128 Hz, and any interval measured as a single
+ * difference past that is silently wrong -- a 605 s measurement once read
+ * back as 92 s.  A 16-bit MCU keeps the narrow type because every timer
+ * compare pays for the width; parts with a 32-bit ALU do not, and 32 bits
+ * moves the wrap from 512 seconds to 388 days.
+ *
+ * TIKU_CLOCK_LT / _DIFF follow this type's width automatically, so changing
+ * it here is sufficient -- they no longer assume 16 bits.
+ */
+#if defined(PLATFORM_MSP430)
 #define TIKU_CLOCK_CONF_TIME_T unsigned short
+#else
+#define TIKU_CLOCK_CONF_TIME_T unsigned long
+#endif
 
 /*
  * Target CPU frequency setting.  On MSP430 an enum index into a small table of

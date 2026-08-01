@@ -38,6 +38,22 @@ typedef TIKU_CLOCK_CONF_TIME_T tiku_clock_time_t;
 typedef unsigned short tiku_clock_time_t;
 #endif
 
+/*
+ * HOW LONG AN INTERVAL THIS TYPE CAN MEASURE.
+ *
+ * The counter wraps, and the arithmetic below is wraparound-safe only for
+ * intervals shorter than half its range: 256 s at 16 bits and 128 Hz, and a
+ * plain difference is wrong past 512 s.  That is not hypothetical -- a 605 s
+ * encode once reported 92 s, and before that a 25 s turn reported 3 489 178,
+ * both from taking one difference across a wrap.
+ *
+ * MEASURE LONG THINGS AS A SUM OF SHORT DIFFERENCES, each taken in the
+ * counter's own width, or use a cycle counter.  Widening this type is the
+ * other option and costs a 16-bit MCU real work in every timer compare.
+ */
+#define TIKU_CLOCK_MAX_INTERVAL \
+    ((tiku_clock_time_t)(((tiku_clock_time_t)~(tiku_clock_time_t)0) / 2u))
+
 /*---------------------------------------------------------------------------*/
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
@@ -52,17 +68,28 @@ typedef unsigned short tiku_clock_time_t;
 /* CLOCK ARITHMETIC                                                          */
 /*---------------------------------------------------------------------------*/
 
+/*
+ * Both are expressed in the clock type's OWN width, with no fixed-width
+ * cast anywhere.  A `signed short` cast here would be correct only while
+ * the type is 16 bits, so overriding TIKU_CLOCK_CONF_TIME_T -- which the
+ * typedef above openly invites -- would silently truncate every comparison
+ * and every difference.
+ */
+
 /**
  * @def TIKU_CLOCK_LT(a, b)
  * @brief Wraparound-safe less-than comparison
  */
-#define TIKU_CLOCK_LT(a, b) ((signed short)((a) - (b)) < 0)
+#define TIKU_CLOCK_LT(a, b) \
+    ((tiku_clock_time_t)((a) - (b)) > TIKU_CLOCK_MAX_INTERVAL)
 
 /**
  * @def TIKU_CLOCK_DIFF(a, b)
  * @brief Wraparound-safe difference (a - b)
  */
-#define TIKU_CLOCK_DIFF(a, b) ((signed short)((a) - (b)))
+#define TIKU_CLOCK_DIFF(a, b)                                                 \
+    (TIKU_CLOCK_LT((a), (b)) ? -(long)(tiku_clock_time_t)((b) - (a))          \
+                             :  (long)(tiku_clock_time_t)((a) - (b)))
 
 /**
  * @def TIKU_CLOCK_MS_TO_TICKS(ms)
