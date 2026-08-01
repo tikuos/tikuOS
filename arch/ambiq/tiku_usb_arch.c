@@ -314,7 +314,15 @@ static const uint8_t s_str_serial[] = { 18, DESC_STRING,
 #define SCSI_SYNC_CACHE10      0x35u
 
 #define MSC_BLOCK_SIZE   512u
+/* Overridable: in eMMC mode this is only ever touched in MSC_BOUNCE_BYTES
+ * chunks, so the full megabyte is the RAM-DISK mode's size, not a transfer
+ * requirement.  A build that only ever exposes the card (and wants the SSRAM
+ * for something else) can shrink it -- the LLM overlay does exactly that,
+ * because a megabyte of idle staging buffer is a megabyte the streaming
+ * bounce buffers could have had. */
+#ifndef MSC_DISK_BYTES
 #define MSC_DISK_BYTES   (1024u * 1024u)
+#endif
 #define MSC_DISK_BLOCKS  (MSC_DISK_BYTES / MSC_BLOCK_SIZE)
 
 /*
