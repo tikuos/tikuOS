@@ -3149,8 +3149,20 @@ JLINK_ERASE_SCRIPT = $(BUILD_DIR)/erase.jlink
 #      reset then succeeds.  So the second check demands POSITIVE evidence
 #      that bytes moved, which is the only thing that actually distinguishes
 #      the two cases.
+# WAKE THE PART BEFORE ATTACHING.  `connect` runs against the firmware that
+# is still executing, and a core sitting in WFI does not answer it: the log
+# reads "Failed to halt CPU" and the reset that follows leaves the part
+# wedged -- console dead, SWD unreachable, power cycle the only way out.
+# Measured, both directions: idle board fails twice out of two, the same
+# board after `sleep off` flashes clean.  So ask the running shell to stop
+# idling first.  Best-effort: no console, or a board already wedged, just
+# falls through to the attempt below, which is what happened before.
 flash: all
 	@mkdir -p $(BUILD_DIR)
+	@if [ -n "$(PORT)" ] && [ -w "$(PORT)" ]; then \
+	    printf 'sleep off\r\n' > "$(PORT)" 2>/dev/null || true; \
+	    sleep 1; \
+	 fi
 	@printf 'device %s\nif %s\nspeed %s\nconnect\nr\nh\nloadbin %s %s\n$(JLINK_RUN_SEQ)\n' "$(JLINK_DEVICE)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET_BIN)" "$(AMBIQ_LOAD_ADDR)" > $(JLINK_FLASH_SCRIPT)
 	@echo "Flashing $(TARGET_BIN) -> MRAM $(AMBIQ_LOAD_ADDR) via $(JLINK) ($(JLINK_DEVICE))..."
 	@$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(JLINK_FLASH_SCRIPT) \
@@ -3159,6 +3171,8 @@ flash: all
 	     echo "*** FLASH FAILED -- the part still holds the PREVIOUS image."; \
 	     echo "*** Anything tested now is testing stale firmware."; \
 	     grep -iE 'Verification failed|Failed to prepare|Could not connect|Failed to halt|Error while programming' $(BUILD_DIR)/flash.log | head -4; \
+	     echo "*** 'Failed to halt' means the core was in WFI when J-Link"; \
+	     echo "*** attached.  Send 'sleep off' on the console, then retry."; \
 	     exit 1; \
 	 fi; \
 	 if ! grep -qE 'Flash download: (Total|Program)' $(BUILD_DIR)/flash.log; then \
