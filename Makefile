@@ -3149,14 +3149,21 @@ JLINK_ERASE_SCRIPT = $(BUILD_DIR)/erase.jlink
 #      reset then succeeds.  So the second check demands POSITIVE evidence
 #      that bytes moved, which is the only thing that actually distinguishes
 #      the two cases.
-# WAKE THE PART BEFORE ATTACHING.  `connect` runs against the firmware that
-# is still executing, and a core sitting in WFI does not answer it: the log
-# reads "Failed to halt CPU" and the reset that follows leaves the part
-# wedged -- console dead, SWD unreachable, power cycle the only way out.
-# Measured, both directions: idle board fails twice out of two, the same
-# board after `sleep off` flashes clean.  So ask the running shell to stop
-# idling first.  Best-effort: no console, or a board already wedged, just
-# falls through to the attempt below, which is what happened before.
+# `connect` runs against the firmware that is still executing, and on
+# apollo510 it often cannot halt it: "Failed to halt CPU", and the reset that
+# follows leaves the part wedged -- console dead, SWD unreachable, power
+# cycle the only way out.
+#
+# NOT FULLY DIAGNOSED.  Six attempts: the two that succeeded were both
+# immediately after a power cycle with nothing brought up; the three real
+# failures all had the board having done work (PSRAM up, a model staged).
+# Idle mode is NOT the discriminator -- one failure had `sleep off` already
+# set.  `sleep off` is sent anyway because it is free and cannot hurt, but it
+# is not the fix and should not be believed to be.
+#
+# What reliably works today: flash right after a power cycle.  The candidate
+# real fix is connect-under-reset, which bypasses the running firmware
+# entirely; untested.
 flash: all
 	@mkdir -p $(BUILD_DIR)
 	@if [ -n "$(PORT)" ] && [ -w "$(PORT)" ]; then \
@@ -3171,8 +3178,10 @@ flash: all
 	     echo "*** FLASH FAILED -- the part still holds the PREVIOUS image."; \
 	     echo "*** Anything tested now is testing stale firmware."; \
 	     grep -iE 'Verification failed|Failed to prepare|Could not connect|Failed to halt|Error while programming' $(BUILD_DIR)/flash.log | head -4; \
-	     echo "*** 'Failed to halt' means the core was in WFI when J-Link"; \
-	     echo "*** attached.  Send 'sleep off' on the console, then retry."; \
+	     echo "*** 'Failed to halt' -- J-Link could not stop the running"; \
+	     echo "*** firmware.  Power cycle and flash before bringing"; \
+	     echo "*** PSRAM or a model up; that is the only reliable order"; \
+	     echo "*** found so far.  The part is probably wedged now."; \
 	     exit 1; \
 	 fi; \
 	 if ! grep -qE 'Flash download: (Total|Program)' $(BUILD_DIR)/flash.log; then \
