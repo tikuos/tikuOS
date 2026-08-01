@@ -86,7 +86,17 @@ Covers `.c` `.h` `.inl` `.ld` `.S` `.m` `.py` `.sh`.
 
 Scope is what git tracks, so anything gitignored -- `kintsugi/`,
 `experiments/`, `temp/`, `examples/`, `demos/` -- is out of scope by
-construction, and a new scratch directory needs no change here. Vendor trees
+construction, and a new scratch directory needs no change here.
+
+A NESTED REPO IS ALSO OUT OF SCOPE, and silently: `make lint` here reports
+success without opening a file in `experiment/`. Such a tree lints itself
+with `--root`, which points the walk and the git query at it so it is scoped
+by its own tracking:
+
+```
+python3 ../tools/check_comment_style.py --root=$(pwd)   # or `make lint` there
+```
+ Vendor trees
 (`arch/*/cmsis`, `arch/*/mdk`, `tools/fat32`) and submodule content
 (`drivers/`, `TikuBench/`, `tikukits/`) are tracked but still skipped.
 

@@ -23,8 +23,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Scope is the tracked source tree, decided by git (see tracked()). Anything
 # gitignored -- notes, scratch, experiments, separate repos -- is out of scope
-# by construction. SKIP_DIRS covers what git DOES track but this repo should
-# not reformat: vendor headers and submodule content.
+# by construction, which means a nested repo that this one ignores is NOT
+# checked by a plain run: it reports success without opening a file there.
+# Such a tree lints itself with --root, which points both the walk and the
+# git query at it, so it is scoped by its OWN tracking.
+# SKIP_DIRS covers what git DOES track but this repo should not reformat:
+# vendor headers and submodule content.
 SKIP_DIRS = {"build", ".git", "drivers", "TikuBench", "tikukits"}
 SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk", "tools/fat32",
               # This file quotes the banned patterns in order to define them.
@@ -179,7 +183,12 @@ def check(path):
 
 
 def main():
-    only = sys.argv[1:]
+    global ROOT
+    argv = sys.argv[1:]
+    if argv and argv[0].startswith("--root="):
+        ROOT = os.path.abspath(argv[0].split("=", 1)[1])
+        argv = argv[1:]
+    only = argv
     problems = []
     for path in sorted(sources()):
         if only and not any(path.startswith(p) for p in only):
