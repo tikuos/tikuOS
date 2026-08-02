@@ -1784,6 +1784,19 @@ SRCS += arch/stm32n6/tiku_uart_arch.c
 SRCS += arch/stm32n6/tiku_gpio_arch.c
 SRCS += arch/stm32n6/tiku_crit_arch.c
 SRCS += arch/stm32n6/tiku_timer_arch.c
+SRCS += arch/stm32n6/tiku_mem_arch.c
+SRCS += arch/stm32n6/tiku_mpu_arch.c
+SRCS += arch/stm32n6/tiku_cpu_watchdog_arch.c
+SRCS += arch/stm32n6/tiku_region_arch.c
+SRCS += arch/stm32n6/tiku_wake_arch.c
+SRCS += arch/stm32n6/tiku_htimer_arch.c
+SRCS += arch/stm32n6/tiku_gpio_irq_arch.c
+# No hardware backend behind these yet; they fail cleanly so a caller learns
+# the bus is absent rather than reading zeros as data.
+SRCS += arch/stm32n6/tiku_adc_arch.c
+SRCS += arch/stm32n6/tiku_i2c_arch.c
+SRCS += arch/stm32n6/tiku_spi_arch.c
+SRCS += arch/stm32n6/tiku_onewire_arch.c
 
 else
 

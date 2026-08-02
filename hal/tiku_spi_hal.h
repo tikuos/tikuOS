@@ -25,6 +25,8 @@
 #include <arch/ambiq/tiku_spi_arch.h>
 #elif defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_spi_arch.h>
+#elif defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_spi_arch.h>
 #endif
 
 #endif /* TIKU_SPI_HAL_H_ */

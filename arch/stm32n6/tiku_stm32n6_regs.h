@@ -73,15 +73,18 @@
 #define STM32N6_USART_ISR(b)        ((b) + 0x1CU)
 #define STM32N6_USART_RDR(b)        ((b) + 0x24U)
 #define STM32N6_USART_TDR(b)        ((b) + 0x28U)
+#define STM32N6_USART_ICR(b)        ((b) + 0x20U)
 #define STM32N6_USART_PRESC(b)      ((b) + 0x2CU)
 
 #define STM32N6_USART_CR1_UE        (1UL << 0)
+#define STM32N6_USART_CR1_FIFOEN    (1UL << 29)
 #define STM32N6_USART_CR1_RE        (1UL << 2)
 #define STM32N6_USART_CR1_TE        (1UL << 3)
 #define STM32N6_USART_ISR_RXNE      (1UL << 5)
 #define STM32N6_USART_ISR_TC        (1UL << 6)
 #define STM32N6_USART_ISR_TXE       (1UL << 7)
 #define STM32N6_USART_ISR_ORE       (1UL << 3)
+#define STM32N6_USART_ICR_ORECF     (1UL << 3)
 
 #define STM32N6_USART1_TX_PIN       5U
 #define STM32N6_USART1_RX_PIN       6U
@@ -92,6 +95,15 @@
 #define STM32N6_NVIC_ICER(n)        (0xE000E180UL + ((n) * 4U))
 #define STM32N6_NVIC_ICPR(n)        (0xE000E280UL + ((n) * 4U))
 #define STM32N6_NVIC_IPR(irq)       (0xE000E400UL + (irq))
+
+/* Reset cause flags, latched across a reset. */
+#define STM32N6_RCC_RSR             (STM32N6_RCC_BASE + 0x034U)
+#define STM32N6_RCC_RSR_PINRSTF     (1UL << 22)
+#define STM32N6_RCC_RSR_PORRSTF     (1UL << 23)
+#define STM32N6_RCC_RSR_SFTRSTF     (1UL << 24)
+#define STM32N6_RCC_RSR_IWDGRSTF    (1UL << 26)
+#define STM32N6_RCC_RSR_WWDGRSTF    (1UL << 28)
+#define STM32N6_RCC_RSR_LPWRRSTF    (1UL << 30)
 
 /* LPTIM1 is the kernel time base. Its clock comes from CLKP, and CLKP is
  * pointed at HSI, so the tick does not move when the CPU clock does -- which
@@ -112,10 +124,18 @@
 #define STM32N6_LPTIM_DIER(b)       ((b) + 0x08U)
 #define STM32N6_LPTIM_CFGR(b)       ((b) + 0x0CU)
 #define STM32N6_LPTIM_CR(b)         ((b) + 0x10U)
+#define STM32N6_LPTIM_CCR1(b)       ((b) + 0x14U)
 #define STM32N6_LPTIM_ARR(b)        ((b) + 0x18U)
 #define STM32N6_LPTIM_CNT(b)        ((b) + 0x1CU)
 
+#define STM32N6_LPTIM_ISR_CC1IF     (1UL << 0)
+#define STM32N6_LPTIM_ICR_CC1CF     (1UL << 0)
+#define STM32N6_LPTIM_DIER_CC1IE    (1UL << 0)
 #define STM32N6_LPTIM_ISR_ARRM      (1UL << 1)
+#define STM32N6_LPTIM_ISR_ARROK     (1UL << 4)
+#define STM32N6_LPTIM_ISR_DIEROK    (1UL << 24)
+#define STM32N6_LPTIM_ICR_ARROKCF   (1UL << 4)
+#define STM32N6_LPTIM_ICR_DIEROKCF  (1UL << 24)
 #define STM32N6_LPTIM_ICR_ARRMCF    (1UL << 1)
 #define STM32N6_LPTIM_DIER_ARRMIE   (1UL << 1)
 #define STM32N6_LPTIM_CFGR_PRESC_POS 9U

@@ -48,6 +48,14 @@
 #define tiku_common_arch_delay_us(us)   tiku_cpu_nordic_delay_us(us)
 #define tiku_common_arch_unique_id(b,l) tiku_cpu_nordic_unique_id((b),(l))
 #define tiku_common_arch_reset_reason() tiku_cpu_nordic_reset_reason()
+
+#elif defined(PLATFORM_STM32N6)
+#include "arch/stm32n6/tiku_cpu_common.h"
+
+#define tiku_common_arch_delay_ms(ms)   tiku_cpu_stm32n6_delay_ms(ms)
+#define tiku_common_arch_delay_us(us)   tiku_cpu_stm32n6_delay_us(us)
+#define tiku_common_arch_unique_id(b,l) tiku_cpu_stm32n6_unique_id((b),(l))
+#define tiku_common_arch_reset_reason() tiku_cpu_stm32n6_reset_reason()
 #endif
 
 #endif /* TIKU_COMMON_HAL_H_ */

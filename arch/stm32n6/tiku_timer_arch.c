@@ -15,8 +15,13 @@
 
 #include "tiku_timer_arch.h"
 #include "tiku_stm32n6_regs.h"
+#include <kernel/scheduler/tiku_sched.h>
 
 #define LPTIM   STM32N6_LPTIM1_BASE
+
+/* Owned by tiku_htimer_arch.c, which shares LPTIM1 and this interrupt. */
+void tiku_stm32n6_htimer_on_compare(void);
+void tiku_stm32n6_htimer_on_tick(void);
 
 /** @brief Ticks since boot, incremented by the LPTIM1 autoreload interrupt. */
 static volatile tiku_clock_arch_time_t g_ticks;
@@ -59,11 +64,31 @@ void tiku_clock_arch_init(void) {
     TIKU_REG32(STM32N6_LPTIM_CFGR(LPTIM)) =
         ((uint32_t)TIKU_STM32N6_LPTIM_PRESC_LOG2 << STM32N6_LPTIM_CFGR_PRESC_POS);
 
-    /* ARR is the reload value, so the period is ARR + 1 counts. */
+    /* ARR and DIER writes cross into the LPTIM kernel-clock domain and take
+     * effect only when ARROK / DIEROK confirm the transfer, so each write is
+     * confirmed before the counter starts -- otherwise CNTSTRT can run the
+     * timer with the reset ARR and the interrupt enable never lands. Bounded:
+     * a wedged sync then costs a beat, not the boot. */
     TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM))  = STM32N6_LPTIM_ICR_ARRMCF;
     TIKU_REG32(STM32N6_LPTIM_CR(LPTIM))   = STM32N6_LPTIM_CR_ENABLE;
+
+    TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM))  = STM32N6_LPTIM_ICR_ARROKCF;
     TIKU_REG32(STM32N6_LPTIM_ARR(LPTIM))  = TIKU_CLOCK_ARCH_INTERVAL - 1UL;
+    for (unsigned long spins = 100000UL; spins > 0UL; spins--) {
+        if (TIKU_REG32(STM32N6_LPTIM_ISR(LPTIM)) & STM32N6_LPTIM_ISR_ARROK) {
+            break;
+        }
+    }
+    TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM))  = STM32N6_LPTIM_ICR_ARROKCF;
+
+    TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM))  = STM32N6_LPTIM_ICR_DIEROKCF;
     TIKU_REG32(STM32N6_LPTIM_DIER(LPTIM)) = STM32N6_LPTIM_DIER_ARRMIE;
+    for (unsigned long spins = 100000UL; spins > 0UL; spins--) {
+        if (TIKU_REG32(STM32N6_LPTIM_ISR(LPTIM)) & STM32N6_LPTIM_ISR_DIEROK) {
+            break;
+        }
+    }
+    TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM))  = STM32N6_LPTIM_ICR_DIEROKCF;
 
     TIKU_REG32(STM32N6_NVIC_ICPR(STM32N6_IRQ_LPTIM1 / 32U)) =
         (1UL << (STM32N6_IRQ_LPTIM1 % 32U));
@@ -80,15 +105,31 @@ void tiku_clock_arch_init(void) {
  * Overrides the weak stub the vector table starts with.
  */
 void tiku_stm32n6_lptim1_isr(void) {
-    if ((TIKU_REG32(STM32N6_LPTIM_ISR(LPTIM)) & STM32N6_LPTIM_ISR_ARRM) == 0UL) {
-        return;
-    }
-    TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM)) = STM32N6_LPTIM_ICR_ARRMCF;
+    uint32_t isr = TIKU_REG32(STM32N6_LPTIM_ISR(LPTIM));
 
-    g_ticks++;
-    if (++g_subsec >= TIKU_CLOCK_ARCH_SECOND) {
-        g_subsec = 0U;
-        g_seconds++;
+    /* Channel 1 is the high-resolution alarm; the driver that owns it is in
+     * tiku_htimer_arch.c, which shares this peripheral and this interrupt. */
+    if ((isr & STM32N6_LPTIM_ISR_CC1IF) &&
+        (TIKU_REG32(STM32N6_LPTIM_DIER(LPTIM)) & STM32N6_LPTIM_DIER_CC1IE)) {
+        tiku_stm32n6_htimer_on_compare();
+    }
+
+    if (isr & STM32N6_LPTIM_ISR_ARRM) {
+        TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM)) = STM32N6_LPTIM_ICR_ARRMCF;
+
+        g_ticks++;
+        if (++g_subsec >= TIKU_CLOCK_ARCH_SECOND) {
+            g_subsec = 0U;
+            g_seconds++;
+        }
+        /* A new counter period opened, so an alarm that was too far out to
+         * program may now fit. */
+        tiku_stm32n6_htimer_on_tick();
+
+        /* Wake the scheduler so expired software timers dispatch on the next
+         * pass -- without this the shell's poll timer expires unseen and the
+         * console never reads a byte. */
+        tiku_sched_notify();
     }
 }
 

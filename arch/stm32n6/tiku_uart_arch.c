@@ -42,10 +42,14 @@ static unsigned long uart_hsi_hz(void) {
 }
 
 void tiku_uart_init(void) {
-    /* HSI must be running before it can clock the USART. */
+    /* HSI must be running before it can clock the USART. The wait is bounded:
+     * a console that never opens is bad, but a boot that never returns is
+     * worse, and the divisor below is right whenever the clock is actually up. */
     TIKU_REG32(STM32N6_RCC_CR) |= STM32N6_RCC_CR_HSION;
-    while ((TIKU_REG32(STM32N6_RCC_SR) & STM32N6_RCC_SR_HSIRDY) == 0UL) {
-        /* wait for the oscillator to settle */
+    for (unsigned long spins = 1000000UL; spins > 0UL; spins--) {
+        if (TIKU_REG32(STM32N6_RCC_SR) & STM32N6_RCC_SR_HSIRDY) {
+            break;
+        }
     }
 
     tiku_stm32n6_gpio_init_alt(STM32N6_GPIO_PORT_E, STM32N6_USART1_TX_PIN,
@@ -76,7 +80,11 @@ void tiku_uart_init(void) {
     }
     TIKU_REG32(STM32N6_USART_BRR(UART_BASE)) = (uint32_t)brr;
 
+    /* FIFO mode: the RX FIFO rides out the gap between shell polls, where a
+     * single RDR drops the second of two closely spaced characters. RXNE and
+     * TXE keep their bit positions as RXFNE/TXFNF, so the polled paths hold. */
     TIKU_REG32(STM32N6_USART_CR1(UART_BASE)) =
+        STM32N6_USART_CR1_FIFOEN |
         STM32N6_USART_CR1_UE | STM32N6_USART_CR1_TE | STM32N6_USART_CR1_RE;
 }
 
@@ -102,12 +110,16 @@ void tiku_uart_puts(const char *s) {
     }
 }
 
+static void uart_check_overrun(void);
+
 uint8_t tiku_uart_rx_ready(void) {
+    uart_check_overrun();
     return (TIKU_REG32(STM32N6_USART_ISR(UART_BASE)) & STM32N6_USART_ISR_RXNE) ? 1U : 0U;
 }
 
 int tiku_uart_getc(void) {
-    if (!tiku_uart_rx_ready()) {
+    uart_check_overrun();
+    if ((TIKU_REG32(STM32N6_USART_ISR(UART_BASE)) & STM32N6_USART_ISR_RXNE) == 0UL) {
         return -1;
     }
     return (int)(TIKU_REG32(STM32N6_USART_RDR(UART_BASE)) & 0xFFUL);
@@ -241,3 +253,45 @@ void tiku_uart_printf(const char *fmt, ...) {
 
     va_end(ap);
 }
+
+/*---------------------------------------------------------------------------*/
+/* Receive overruns                                                          */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Overruns seen since the counter was last reset. */
+static uint16_t uart_overruns;
+
+#ifdef HAS_TESTS
+/** @brief One byte staged by tiku_uart_test_inject(), 0x100 when empty. */
+static unsigned int uart_injected = 0x100U;
+#endif
+
+/**
+ * @brief Fold a pending overrun into the counter and clear it in hardware.
+ *
+ * ORE latches and blocks further reception until acknowledged, so this runs on
+ * every receive-path query.
+ */
+static void uart_check_overrun(void) {
+    if (TIKU_REG32(STM32N6_USART_ISR(UART_BASE)) & STM32N6_USART_ISR_ORE) {
+        TIKU_REG32(STM32N6_USART_ICR(UART_BASE)) = STM32N6_USART_ICR_ORECF;
+        if (uart_overruns < 0xFFFFU) {
+            uart_overruns++;
+        }
+    }
+}
+
+uint16_t tiku_uart_overrun_count(void) {
+    uart_check_overrun();
+    return uart_overruns;
+}
+
+void tiku_uart_overrun_reset(void) {
+    uart_overruns = 0U;
+}
+
+#ifdef HAS_TESTS
+void tiku_uart_test_inject(uint8_t byte) {
+    uart_injected = (unsigned int)byte;
+}
+#endif

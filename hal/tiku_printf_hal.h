@@ -79,6 +79,14 @@
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
+/* STM32N6 (Cortex-M55) — console over USART1, the ST-LINK virtual COM port   */
+/*---------------------------------------------------------------------------*/
+
+#elif defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+
+/*---------------------------------------------------------------------------*/
 /* Fallback: no platform defined — suppress output                           */
 /*---------------------------------------------------------------------------*/
 

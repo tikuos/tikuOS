@@ -20,11 +20,14 @@
 #if defined(PLATFORM_MSP430)
 #include <msp430.h>    /* MSP430 intrinsics for interrupt state management */
 #include "arch/msp430/tiku_cpu_freq_boot_arch.h"
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 #if defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_cpu_freq_boot_arch.h"
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_cpu_freq_boot_arch.h"
+#elif defined(PLATFORM_STM32N6)
+#include "arch/stm32n6/tiku_cpu_freq_boot_arch.h"
 #else
 #include "arch/nordic/tiku_cpu_freq_boot_arch.h"
 #endif
@@ -79,7 +82,8 @@ void tiku_atomic_enter(void) {
     tiku_atomic_gie_saved = (sr & GIE) != 0;
   }
   tiku_atomic_nesting++;
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
   /* PRIMASK = 0 means IRQs enabled; PRIMASK = 1 means masked. The bit is
    * snapshotted on the outermost entry and restored on the outermost
    * exit, mirroring the MSP430 GIE handling above. */
@@ -96,7 +100,8 @@ void tiku_atomic_exit(void) {
   if (--tiku_atomic_nesting == 0 && tiku_atomic_gie_saved) {
 #if defined(PLATFORM_MSP430)
     __enable_interrupt();
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     tiku_arm_enable_irq();
 #endif
   }
@@ -109,7 +114,8 @@ void tiku_atomic_exit(void) {
 void tiku_cpu_irq_enable(void) {
 #if defined(PLATFORM_MSP430)
     __enable_interrupt();
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     tiku_arm_enable_irq();
 #endif
 }
@@ -117,7 +123,8 @@ void tiku_cpu_irq_enable(void) {
 void tiku_cpu_irq_disable(void) {
 #if defined(PLATFORM_MSP430)
     __disable_interrupt();
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     tiku_arm_disable_irq();
 #endif
 }
@@ -135,6 +142,8 @@ void tiku_cpu_boot_init(void) {
     tiku_cpu_boot_ambiq_init();
 #elif defined(PLATFORM_NORDIC)
     tiku_cpu_boot_nordic_init();
+#elif defined(PLATFORM_STM32N6)
+    tiku_cpu_boot_stm32n6_init();
 #endif
 }
 
@@ -194,6 +203,9 @@ unsigned long tiku_cpu_mclk_hz(void) {
     return tiku_cpu_ambiq_clock_get_hz();
 #elif defined(PLATFORM_NORDIC)
     return tiku_cpu_nordic_clock_get_hz();
+#elif defined(PLATFORM_STM32N6)
+    /* Estimate: the boot-ROM clock is inherited and varies between resets. */
+    return tiku_cpu_stm32n6_clock_get_hz();
 #else
     return 0;
 #endif
@@ -208,6 +220,8 @@ unsigned long tiku_cpu_smclk_hz(void) {
     return tiku_cpu_ambiq_smclk_get_hz();
 #elif defined(PLATFORM_NORDIC)
     return tiku_cpu_nordic_smclk_get_hz();
+#elif defined(PLATFORM_STM32N6)
+    return tiku_cpu_stm32n6_smclk_get_hz();
 #else
     return 0;
 #endif
@@ -309,7 +323,8 @@ int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode) {
      * clears the LPM bits on exit.  LPM4 stops every clock, so the
      * tick can never fire, let alone wake the core. */
     return mode != TIKU_CPU_IDLE_DEEPEST;
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     /* Every supported mode is a WFI variant; any enabled interrupt
      * (SysTick / STIMER tick included) wakes the core. */
     (void)mode;
@@ -329,7 +344,8 @@ const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_OFF:
         default:                    return "off";
     }
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:   return "WFI";
         case TIKU_CPU_IDLE_DEEP:    return "WFI";

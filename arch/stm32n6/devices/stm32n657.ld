@@ -68,6 +68,9 @@ SECTIONS
         __exidx_end = .;
     } > SRAM
 
+    /* End of .text: /sys/mem/free reports image size from this. */
+    _etext = .;
+
     .data :
     {
         . = ALIGN(4);
@@ -78,6 +81,7 @@ SECTIONS
     } > SRAM
 
     __data_load = LOADADDR(.data);
+    __datastart = __data_start;
 
     .bss (NOLOAD) :
     {
@@ -89,7 +93,21 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
-    _end = __bss_end;
+    /* Durable cells. Outside .bss so the reset handler's zero-fill skips them,
+     * which is what lets a value survive a warm reset. Nothing here survives
+     * power loss on this part: the whole image is SRAM until an XSPI backend
+     * exists, so this is warm-reset persistence only. */
+    .uninit (NOLOAD) : ALIGN(32)
+    {
+        __uninit_start = .;
+        *(.uninit*)
+        *(.persistent)
+        *(.persistent.warm)
+        . = ALIGN(4);
+        __uninit_end = .;
+    } > SRAM
+
+    _end = __uninit_end;
     PROVIDE(end = _end);
 
     __stack = __sram_end;

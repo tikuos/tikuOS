@@ -15,6 +15,7 @@
 
 #include "tiku_cpu_common.h"
 #include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_stm32n6_regs.h"
 
 /**
  * @brief Spin for a given number of loop iterations.
@@ -49,4 +50,24 @@ void tiku_cpu_stm32n6_delay_ms(unsigned int ms) {
     while (ms-- > 0U) {
         cpu_spin(TIKU_STM32N6_SPIN_ITERS_PER_MS);
     }
+}
+
+uint8_t tiku_cpu_stm32n6_unique_id(uint8_t *buf, uint8_t len) {
+    (void)buf;
+    (void)len;
+    return 0U;
+}
+
+uint16_t tiku_cpu_stm32n6_reset_reason(void) {
+    uint32_t rsr = TIKU_REG32(STM32N6_RCC_RSR);
+    uint16_t out = 0U;
+
+    if (rsr & STM32N6_RCC_RSR_PINRSTF)  out |= TIKU_STM32N6_RESET_PIN;
+    if (rsr & STM32N6_RCC_RSR_PORRSTF)  out |= TIKU_STM32N6_RESET_POWER;
+    if (rsr & STM32N6_RCC_RSR_SFTRSTF)  out |= TIKU_STM32N6_RESET_SOFT;
+    if (rsr & (STM32N6_RCC_RSR_IWDGRSTF | STM32N6_RCC_RSR_WWDGRSTF)) {
+        out |= TIKU_STM32N6_RESET_WATCHDOG;
+    }
+    if (rsr & STM32N6_RCC_RSR_LPWRRSTF) out |= TIKU_STM32N6_RESET_LOWPOWER;
+    return out;
 }

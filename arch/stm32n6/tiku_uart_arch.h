@@ -64,4 +64,23 @@ uint8_t tiku_uart_rx_ready(void);
  */
 int tiku_uart_getc(void);
 
+/**
+ * @brief Count of receive overruns since the last reset of the counter.
+ *
+ * @return Overruns observed
+ */
+uint16_t tiku_uart_overrun_count(void);
+
+/** @brief Zero the overrun counter. */
+void tiku_uart_overrun_reset(void);
+
+#ifdef HAS_TESTS
+/**
+ * @brief Push a byte into the receive path without hardware.
+ *
+ * @param byte  Byte to deliver to the next tiku_uart_getc()
+ */
+void tiku_uart_test_inject(uint8_t byte);
+#endif
+
 #endif /* TIKU_STM32N6_UART_ARCH_H_ */

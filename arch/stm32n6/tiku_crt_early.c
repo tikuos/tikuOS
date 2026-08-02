@@ -73,25 +73,31 @@ void tiku_stm32n6_systick_handler(void)     __attribute__((weak, alias("stm32n6_
  * handler; the weak stub keeps builds that leave it out linking. */
 void tiku_stm32n6_lptim1_isr(void)          __attribute__((weak, alias("stm32n6_default_handler")));
 
-void tiku_stm32n6_reset_handler(void) __attribute__((naked, section(".text"), used));
+
+void tiku_stm32n6_startup(void);
 
 /**
- * @brief Reset handler: C runtime setup, then main().
+ * @brief Image entry point: establish the stack, then run the C startup.
  *
- * Masks interrupts, points VTOR at the table, copies .data when its load and
- * run addresses differ, zeroes .bss and calls main().
+ * The boot ROM jumps here without loading SP from vector word 0, so SP must
+ * be set before any compiler-generated prologue can push to it.
  *
- * @note Naked, so the compiler emits no prologue touching call-saved registers
- *       before the stack pointer is known good.
+ * @note Naked and assembly-only, the sole defined use of the attribute.
  */
+__attribute__((naked, section(".text"), used))
 void tiku_stm32n6_reset_handler(void) {
+    __asm__ volatile (
+        "ldr  r0, =__stack\n"
+        "mov  sp, r0\n"
+        "bl   tiku_stm32n6_startup\n"
+        "b    .\n"
+        ".ltorg\n");
+}
+
+void tiku_stm32n6_startup(void) {
     /* The core resets with interrupts enabled; mask them until the kernel is
      * ready to take one. */
     __asm__ volatile ("cpsid i" ::: "memory");
-
-    /* The boot ROM loads SP from vector word 0, but a warm entry may not have,
-     * so set it explicitly before anything uses the stack. */
-    __asm__ volatile ("ldr r0, =__stack\n\tmov sp, r0" ::: "r0", "memory");
 
     extern const stm32n6_isr_t tiku_stm32n6_vectors[];
     *(volatile uint32_t *)0xE000ED08UL = (uint32_t)(uintptr_t)tiku_stm32n6_vectors;
