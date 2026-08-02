@@ -169,14 +169,16 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "speed") && argc >= 4) {
-        /* power psram speed <48|96|125|192> -- program device latencies
+        /* power psram speed <48|96|125|192|250> -- program device
+         * latencies
          * and reconfigure the controller, then prove it with the
          * identity gate at the new clock. */
         unsigned n = 0u; const char *q = argv[3];
         unsigned row;
         tiku_psram_id_t id; tiku_psram_err_t rc;
         while (*q >= '0' && *q <= '9') { n = n*10u + (unsigned)(*q++ - '0'); }
-        row = (n >= 192u) ? TIKU_PSRAM_CLK_192MHZ
+        row = (n >= 250u) ? TIKU_PSRAM_CLK_250MHZ
+            : (n >= 192u) ? TIKU_PSRAM_CLK_192MHZ
             : (n >= 125u) ? TIKU_PSRAM_CLK_125MHZ
             : (n >= 96u)  ? TIKU_PSRAM_CLK_96MHZ
                           : TIKU_PSRAM_CLK_48MHZ;
@@ -567,7 +569,8 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
     if (argc >= 4) {
         const char *q = argv[3]; unsigned n = 0u;
         while (*q >= '0' && *q <= '9') { n = n*10u + (unsigned)(*q++ - '0'); }
-        if (n >= 192u)      { clk = TIKU_PSRAM_CLK_192MHZ; }
+        if (n >= 250u)      { clk = TIKU_PSRAM_CLK_250MHZ; }
+        else if (n >= 192u) { clk = TIKU_PSRAM_CLK_192MHZ; }
         else if (n >= 125u) { clk = TIKU_PSRAM_CLK_125MHZ; }
         else if (n >= 96u)  { clk = TIKU_PSRAM_CLK_96MHZ; }
     }
