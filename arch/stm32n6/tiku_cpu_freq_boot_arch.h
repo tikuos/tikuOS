@@ -16,22 +16,18 @@
 #ifndef TIKU_STM32N6_CPU_FREQ_BOOT_ARCH_H_
 #define TIKU_STM32N6_CPU_FREQ_BOOT_ARCH_H_
 
-/* Spin rate of the delay loop in tiku_cpu_common.c, measured on a
- * NUCLEO-N657X0-Q. Five runs of identical images gave 132, 157, 162, 268 and
- * 390 M iterations/s -- a 3x spread with nothing changed but the reset.
- *
- * The port does not program the clock tree, and the rate the boot ROM leaves
- * behind is not reproducible across resets, so these delays are approximate --
- * good enough for a heartbeat or a settle, wrong for a protocol deadline.
- * Anything needing real time waits for a hardware time base (N6-3). */
-#ifndef TIKU_STM32N6_SPIN_ITERS_PER_MS
-#define TIKU_STM32N6_SPIN_ITERS_PER_MS  150000UL
+/* Fallback CPU rate, used only until LPTIM1 runs and the real rate can be
+ * measured. Measured against the LPTIM reference the inherited clock reads a
+ * consistent 128 MHz (2x HSI) across boots; the port still measures rather
+ * than asserts, because the ROM owns that choice. 600 MHz is the part's
+ * maximum and needs PLL1 plus voltage scaling, which the port does not yet do. */
+#ifndef TIKU_STM32N6_CPU_HZ
+#define TIKU_STM32N6_CPU_HZ     128000000UL
 #endif
 
-/* CPU rate implied by the spin rate at about one cycle per iteration. Not read
- * from the clock tree and not stable across boots; treat it as a magnitude. */
-#ifndef TIKU_STM32N6_CPU_HZ
-#define TIKU_STM32N6_CPU_HZ     150000000UL
+/* Spin rate fallback for delays before the first measurement lands. */
+#ifndef TIKU_STM32N6_SPIN_ITERS_PER_MS
+#define TIKU_STM32N6_SPIN_ITERS_PER_MS  (TIKU_STM32N6_CPU_HZ / 1000UL)
 #endif
 
 /**
@@ -43,9 +39,12 @@
 void tiku_cpu_boot_stm32n6_init(void);
 
 /**
- * @brief CPU clock rate in Hz.
+ * @brief CPU clock rate in Hz, measured against LPTIM1.
  *
- * @return TIKU_STM32N6_CPU_HZ, the assumed post-ROM rate
+ * Measured once per boot on first call after the tick starts; before that the
+ * compile-time fallback is reported.
+ *
+ * @return Measured rate, or TIKU_STM32N6_CPU_HZ until LPTIM1 runs
  */
 unsigned long tiku_cpu_stm32n6_clock_get_hz(void);
 

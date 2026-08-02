@@ -7,8 +7,8 @@
  *
  * tiku_cpu_common.c - STM32N6 busy-wait delays.
  *
- * Scaled by a spin rate measured on hardware rather than a cycle count, since
- * neither the CPU clock nor the cycles per iteration are known yet.
+ * Scaled by the measured CPU rate once LPTIM1 is running, falling back to the
+ * compile-time estimate before that -- the inherited clock varies per boot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,18 +37,26 @@ static void cpu_spin(unsigned long iters) {
         : "cc");
 }
 
+/** @brief Spin iterations per millisecond at the current measured rate. */
+static unsigned long cpu_iters_per_ms(void) {
+    /* One iteration per cycle, so the clock rate is the spin rate. */
+    return tiku_cpu_stm32n6_clock_get_hz() / 1000UL;
+}
+
 void tiku_cpu_stm32n6_delay_us(unsigned int us) {
+    unsigned long per_ms = cpu_iters_per_ms();
     /* Split so the multiply cannot overflow on long waits. */
     while (us >= 1000U) {
-        cpu_spin(TIKU_STM32N6_SPIN_ITERS_PER_MS);
+        cpu_spin(per_ms);
         us -= 1000U;
     }
-    cpu_spin(((unsigned long)us * TIKU_STM32N6_SPIN_ITERS_PER_MS) / 1000UL);
+    cpu_spin(((unsigned long)us * per_ms) / 1000UL);
 }
 
 void tiku_cpu_stm32n6_delay_ms(unsigned int ms) {
+    unsigned long per_ms = cpu_iters_per_ms();
     while (ms-- > 0U) {
-        cpu_spin(TIKU_STM32N6_SPIN_ITERS_PER_MS);
+        cpu_spin(per_ms);
     }
 }
 
