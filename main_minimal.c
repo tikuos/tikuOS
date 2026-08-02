@@ -291,6 +291,56 @@ int main(void)
     return 0;
 }
 
+#elif defined(PLATFORM_STM32N6)
+
+#include "arch/stm32n6/tiku_cpu_freq_boot_arch.h"
+#include "arch/stm32n6/tiku_cpu_common.h"
+#include "arch/stm32n6/tiku_uart_arch.h"
+#include "arch/stm32n6/tiku_gpio_arch.h"
+#include "arch/stm32n6/tiku_stm32n6_regs.h"
+
+/* NUCLEO-N657X0-Q LED3, the one the boot stub proved reachable. LED1 is PG8
+ * and LED2 is PG10 on the same port. */
+#define TIKU_MIN_LED_PORT   STM32N6_GPIO_PORT_G
+#define TIKU_MIN_LED_PIN    0U
+
+int main(void)
+{
+    /* HSI only: the boot ROM's clock tree is left alone, so nothing here can
+     * strand the console the ROM already relies on. */
+    tiku_cpu_boot_stm32n6_init();
+
+    tiku_stm32n6_gpio_init_output(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
+
+    /* USART1 on PE5/PE6 -- the ST-LINK virtual COM port. */
+    tiku_uart_init();
+
+    tiku_cpu_stm32n6_delay_ms(100);
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (NUCLEO-N657X0-Q) ---\n");
+    /* The image identifies its own delay calibration, so a heartbeat period
+     * can never be attributed to the wrong build. */
+    tiku_uart_printf("spin=%u iters/ms\n",
+                     (unsigned int)TIKU_STM32N6_SPIN_ITERS_PER_MS);
+
+    unsigned long clk = tiku_cpu_stm32n6_smclk_get_hz();
+    int           fault = tiku_cpu_stm32n6_clock_has_fault();
+
+    uint32_t i = 0;
+    while (1) {
+        tiku_uart_printf(
+            "TikuOS minimal: hello #%u  clk=%u Hz  fault=%d\n",
+            (unsigned int)i,
+            (unsigned int)clk,
+            fault);
+
+        tiku_stm32n6_gpio_toggle(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
+        tiku_cpu_stm32n6_delay_ms(500U);
+        i++;
+    }
+
+    return 0;
+}
+
 #else /* PLATFORM_RP2350 */
 
 #include "arch/arm-rp2350/tiku_cpu_freq_boot_arch.h"

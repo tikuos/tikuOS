@@ -52,6 +52,11 @@ else ifeq ($(MCU),nrf54lm20a)
 TIKU_PLATFORM := nordic
 else ifeq ($(MCU),nrf54lm20b)
 TIKU_PLATFORM := nordic
+else ifeq ($(MCU),stm32n6)
+# STM32N657X0 (NUCLEO-N657X0-Q): Cortex-M55 with no internal flash. The boot
+# ROM loads one signed image into SRAM, so the image is built, signed and
+# loaded rather than programmed.
+TIKU_PLATFORM := stm32n6
 else
 TIKU_PLATFORM := msp430
 endif
@@ -115,13 +120,14 @@ DEFAULT_BOARD_nrf54l15      := nrf54l15_dk
 # Two silicon variants, one DK: the LM20-DK ships LM20B, both images run on it.
 DEFAULT_BOARD_nrf54lm20a    := nrf54lm20_dk
 DEFAULT_BOARD_nrf54lm20b    := nrf54lm20_dk
+DEFAULT_BOARD_stm32n6       := nucleo_n657x0q
 
 # BOARD -> the macro its header is selected by, and the platform it belongs to.
 # Adding a board means adding one row to each table plus a board header.
 KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
                 fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
-                tiku_bare
+                nucleo_n657x0q tiku_bare
 
 BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
@@ -138,6 +144,7 @@ BOARD_DEFINE_apollo510b_evb    := TIKU_BOARD_APOLLO510B_EVB
 BOARD_DEFINE_tiku_bare         := TIKU_BOARD_TIKU_BARE
 BOARD_DEFINE_nrf54l15_dk       := TIKU_BOARD_NRF54L15_DK
 BOARD_DEFINE_nrf54lm20_dk      := TIKU_BOARD_NRF54LM20_DK
+BOARD_DEFINE_nucleo_n657x0q    := TIKU_BOARD_NUCLEO_N657X0Q
 
 BOARD_PLATFORM_fr2433_launchpad  := msp430
 BOARD_PLATFORM_fr5969_launchpad  := msp430
@@ -152,6 +159,7 @@ BOARD_PLATFORM_apollo510b_evb    := ambiq
 BOARD_PLATFORM_tiku_bare         := ambiq
 BOARD_PLATFORM_nrf54l15_dk       := nordic
 BOARD_PLATFORM_nrf54lm20_dk      := nordic
+BOARD_PLATFORM_nucleo_n657x0q    := stm32n6
 
 # ---------------------------------------------------------------------------
 # Board capabilities -- what is FITTED on the PCB, not what the silicon can do
@@ -199,6 +207,7 @@ BOARD_CAPS_fr5994_launchpad    :=
 BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
+BOARD_CAPS_nucleo_n657x0q      :=
 # Empty because the board really is bare -- this is the row that makes every
 # storage/USB request for it fail at make time.  See S5 of the plan.
 BOARD_CAPS_tiku_bare           :=
@@ -412,8 +421,9 @@ DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 # rp2350:  arm-none-eabi-gcc auto-detected from PATH
 # apollo510: arm-none-eabi-gcc auto-detected from PATH
 # nrf54l15:  arm-none-eabi-gcc auto-detected from PATH (Cortex-M33)
+# stm32n6:   arm-none-eabi-gcc auto-detected from PATH (Cortex-M55)
 # ---------------------------------------------------------------------------
-ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq nordic))
+ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6))
 
 # ARM Embedded toolchain (apt: gcc-arm-none-eabi).
 TOOLCHAIN_PREFIX ?= arm-none-eabi-
@@ -1131,6 +1141,21 @@ CFLAGS += -DTIKU_TIER_SRAM_SIZE=98304     # 96 KB: BIG-256 BASIC arena
 endif
 endif
 
+else ifeq ($(TIKU_PLATFORM),stm32n6)
+
+# STM32N657: Cortex-M55 with Helium, same core as Apollo510. The whole image
+# runs from the 255 KB SRAM window the boot ROM loads it into, so there is no
+# flash region and no XIP -- code, data and stack share one bank.
+CFLAGS  = -mcpu=cortex-m55 -mthumb
+CFLAGS += -mfpu=auto -mfloat-abi=hard
+CFLAGS += -Os -Wall -Wextra -Wno-psabi
+CFLAGS += --specs=nano.specs --specs=nosys.specs
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
+CFLAGS += -DPLATFORM_STM32N6=1
+CFLAGS += -I$(PROJ_DIR)
+CFLAGS += -ffunction-sections -fdata-sections
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -1318,6 +1343,21 @@ LDLIBS += $(LDLIBS_AXON)
 LDLIBS += -lm -lc -lgcc
 LDLIBS += -Wl,--end-group
 
+else ifeq ($(TIKU_PLATFORM),stm32n6)
+
+LDFLAGS  = -mcpu=cortex-m55 -mthumb -mfpu=auto -mfloat-abi=hard
+LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
+LDFLAGS += -Tarch/stm32n6/devices/stm32n657.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+# The vector table is the image's first bytes and nothing references it, so
+# --gc-sections would drop it and the boot ROM would read an empty header.
+LDFLAGS += -Wl,-u,tiku_stm32n6_vectors
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+LDLIBS   = -Wl,--start-group
+LDLIBS  += -lm -lc -lgcc
+LDLIBS  += -Wl,--end-group
+
 else
 
 LDFLAGS  = -mmcu=$(MCU)
@@ -1397,8 +1437,8 @@ endif # TIKU_PLATFORM == msp430
 MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
-ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic),)
-$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, or MCU=nrf54lm20a)
+ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6),)
+$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, MCU=nrf54lm20a, or MCU=stm32n6)
 endif
 
 # Use the minimal entry point and exactly the arch files it needs.
@@ -1427,6 +1467,12 @@ SRCS += arch/nordic/tiku_cpu_common.c
 SRCS += arch/nordic/tiku_power_arch.c
 SRCS += arch/nordic/tiku_uart_arch.c
 SRCS += arch/nordic/tiku_gpio_arch.c
+else ifeq ($(TIKU_PLATFORM),stm32n6)
+SRCS += arch/stm32n6/tiku_crt_early.c
+SRCS += arch/stm32n6/tiku_cpu_freq_boot_arch.c
+SRCS += arch/stm32n6/tiku_cpu_common.c
+SRCS += arch/stm32n6/tiku_uart_arch.c
+SRCS += arch/stm32n6/tiku_gpio_arch.c
 else
 SRCS += arch/arm-rp2350/tiku_crt_early.c
 SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
@@ -2886,6 +2932,12 @@ all: $(TARGET) $(TARGET_BIN) size
 else ifeq ($(TIKU_PLATFORM),nordic)
 TARGET_HEX = main.hex
 all: $(TARGET) $(TARGET_HEX) size
+else ifeq ($(TIKU_PLATFORM),stm32n6)
+# The N6 deliverable is a signed image: the boot ROM reads a header for the
+# entry point and refuses a bare binary.
+TARGET_BIN    = main.bin
+TARGET_SIGNED = main.signed.bin
+all: $(TARGET) $(TARGET_BIN) $(TARGET_SIGNED) size
 else
 all: $(TARGET) size
 endif
@@ -2940,6 +2992,28 @@ endif
 ifeq ($(TIKU_PLATFORM),ambiq)
 $(TARGET_BIN): $(TARGET)
 	$(OBJCOPY) -O binary $< $@
+endif
+
+# STM32N6: .elf -> .bin -> signed image the boot ROM will accept.
+ifeq ($(TIKU_PLATFORM),stm32n6)
+STM32N6_CUBE   ?= /Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/Resources/bin
+STM32N6_SIGN   ?= $(STM32N6_CUBE)/STM32_SigningTool_CLI
+STM32N6_PROG   ?= $(STM32N6_CUBE)/STM32_Programmer_CLI
+# FSBL partition ID advertised by the ROM's DFU interface.
+STM32N6_PART   ?= 0x01
+
+$(TARGET_BIN): $(TARGET)
+	$(OBJCOPY) -O binary $< $@
+
+# No -la/-ep: the tool derives the entry point from vector word 1, which
+# carries the Thumb bit. An even entry point locks the core up before the
+# first instruction. The tool writes its output read-only and prompts before
+# overwriting, so the stale file goes first and stdin is closed.
+$(TARGET_SIGNED): $(TARGET_BIN)
+	@rm -f $@
+	@$(STM32N6_SIGN) -bin $< -nk -of 0x80000000 -t fsbl -hv 2.3 -align -s -o $@ \
+	    < /dev/null > /dev/null
+	@echo "  [sign]  $< -> $@"
 endif
 
 # nRF54L15: Intel HEX for nrfutil to program into RRAM.
@@ -3297,6 +3371,27 @@ ifeq ($(NRF_FLASH_RESOLVED),jlink)
 else
 	$(NRFUTIL_ENV) $(NRFUTIL) device erase --core Application $(NRF_SN_ARG)
 endif
+
+else ifeq ($(TIKU_PLATFORM),stm32n6)
+
+# Load over the ROM's DFU interface, which needs development boot (BOOT1 in
+# position 2-3) and both USB-C ports connected. -g hands the CPU over, at which
+# point the ROM's DFU disappears and the programmer reports a reconnect
+# timeout: that is the handoff succeeding, not a failure.
+flash: all
+	-@$(STM32N6_PROG) -c port=usb1 -w $(TARGET_SIGNED) $(STM32N6_PART) \
+	    -g $(STM32N6_PART)
+
+run: flash
+
+# SRAM is volatile, so a reset always lands back in the ROM with DFU up,
+# ready for the next load.
+dfu-reset:
+	@$(STM32N6_PROG) -c port=SWD mode=UR -hardRst
+
+erase:
+	@echo "stm32n6: nothing to erase -- the image lives in SRAM, so a reset"
+	@echo "  (make dfu-reset) already clears it."
 
 else
 
