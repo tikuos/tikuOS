@@ -1773,6 +1773,18 @@ endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
 # am_util_delay.c, am_util_stdio.c, am_resources.c all dropped.
 
+else ifeq ($(TIKU_PLATFORM),stm32n6)
+
+# STM32N6 arch. Backends land here as they are written; what is absent is
+# absent, so the link names it rather than a stub hiding it.
+SRCS += arch/stm32n6/tiku_crt_early.c
+SRCS += arch/stm32n6/tiku_cpu_common.c
+SRCS += arch/stm32n6/tiku_cpu_freq_boot_arch.c
+SRCS += arch/stm32n6/tiku_uart_arch.c
+SRCS += arch/stm32n6/tiku_gpio_arch.c
+SRCS += arch/stm32n6/tiku_crit_arch.c
+SRCS += arch/stm32n6/tiku_timer_arch.c
+
 else
 
 # MSP430 arch (default)

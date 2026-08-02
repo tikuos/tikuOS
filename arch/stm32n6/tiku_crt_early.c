@@ -15,6 +15,13 @@
 
 #include <stdint.h>
 
+#include "tiku_stm32n6_regs.h"
+
+/* Shorthand for filling the external-IRQ span with the default handler. */
+#define DFL     stm32n6_default_handler
+#define DFL4    DFL, DFL, DFL, DFL
+#define DFL16   DFL4, DFL4, DFL4, DFL4
+
 /* Linker-script symbols. */
 extern uint32_t __data_load;
 extern uint32_t __data_start;
@@ -61,6 +68,10 @@ void tiku_stm32n6_svc_handler(void)         __attribute__((weak, alias("stm32n6_
 void tiku_stm32n6_debug_handler(void)       __attribute__((weak, alias("stm32n6_default_handler")));
 void tiku_stm32n6_pendsv_handler(void)      __attribute__((weak, alias("stm32n6_default_handler")));
 void tiku_stm32n6_systick_handler(void)     __attribute__((weak, alias("stm32n6_default_handler")));
+
+/* External IRQs the port wires. The timer driver supplies the real LPTIM1
+ * handler; the weak stub keeps builds that leave it out linking. */
+void tiku_stm32n6_lptim1_isr(void)          __attribute__((weak, alias("stm32n6_default_handler")));
 
 void tiku_stm32n6_reset_handler(void) __attribute__((naked, section(".text"), used));
 
@@ -129,6 +140,13 @@ const stm32n6_isr_t tiku_stm32n6_vectors[16 + STM32N6_NUM_EXT_IRQS] = {
     0,
     tiku_stm32n6_pendsv_handler,
     tiku_stm32n6_systick_handler,
-    /* External IRQs default to the weak handler via the tail zero-fill; the
-     * kernel installs real ones by overriding the named stubs. */
+
+    /* Every external IRQ gets the default handler. A zero-filled tail would
+     * send an unexpected interrupt to address 0 instead of parking it. */
+    DFL16, DFL16, DFL16, DFL16, DFL16,
+    DFL16, DFL16, DFL16, DFL16, DFL16,
+
+    /* Named handlers last: a designated initializer overrides the positional
+     * default already written at that index. */
+    [16 + STM32N6_IRQ_LPTIM1] = tiku_stm32n6_lptim1_isr,
 };

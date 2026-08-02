@@ -87,4 +87,41 @@
 #define STM32N6_USART1_RX_PIN       6U
 #define STM32N6_USART1_AF           7U
 
+/* Cortex-M NVIC. One ISER/ICER word per 32 IRQs. */
+#define STM32N6_NVIC_ISER(n)        (0xE000E100UL + ((n) * 4U))
+#define STM32N6_NVIC_ICER(n)        (0xE000E180UL + ((n) * 4U))
+#define STM32N6_NVIC_ICPR(n)        (0xE000E280UL + ((n) * 4U))
+#define STM32N6_NVIC_IPR(irq)       (0xE000E400UL + (irq))
+
+/* LPTIM1 is the kernel time base. Its clock comes from CLKP, and CLKP is
+ * pointed at HSI, so the tick does not move when the CPU clock does -- which
+ * on this part is inherited from the boot ROM and not reproducible. */
+#define STM32N6_RCC_CCIPR7          (STM32N6_RCC_BASE + 0x15CU)
+#define STM32N6_RCC_CCIPR12         (STM32N6_RCC_BASE + 0x170U)
+#define STM32N6_RCC_APB1LENR        (STM32N6_RCC_BASE + 0x264U)
+
+#define STM32N6_CCIPR7_PERSEL_MSK   (7UL << 0)
+#define STM32N6_CCIPR7_PERSEL_HSI   (0UL << 0)
+#define STM32N6_CCIPR12_LPTIM1_MSK  (7UL << 8)
+#define STM32N6_CCIPR12_LPTIM1_CLKP (1UL << 8)
+#define STM32N6_RCC_APB1LENR_LPTIM1 (1UL << 9)
+
+#define STM32N6_LPTIM1_BASE         0x40002400UL
+#define STM32N6_LPTIM_ISR(b)        ((b) + 0x00U)
+#define STM32N6_LPTIM_ICR(b)        ((b) + 0x04U)
+#define STM32N6_LPTIM_DIER(b)       ((b) + 0x08U)
+#define STM32N6_LPTIM_CFGR(b)       ((b) + 0x0CU)
+#define STM32N6_LPTIM_CR(b)         ((b) + 0x10U)
+#define STM32N6_LPTIM_ARR(b)        ((b) + 0x18U)
+#define STM32N6_LPTIM_CNT(b)        ((b) + 0x1CU)
+
+#define STM32N6_LPTIM_ISR_ARRM      (1UL << 1)
+#define STM32N6_LPTIM_ICR_ARRMCF    (1UL << 1)
+#define STM32N6_LPTIM_DIER_ARRMIE   (1UL << 1)
+#define STM32N6_LPTIM_CFGR_PRESC_POS 9U
+#define STM32N6_LPTIM_CR_ENABLE     (1UL << 0)
+#define STM32N6_LPTIM_CR_CNTSTRT    (1UL << 2)
+
+#define STM32N6_IRQ_LPTIM1          136U
+
 #endif /* TIKU_STM32N6_REGS_H_ */

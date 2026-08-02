@@ -33,7 +33,8 @@
  * default keeps working out-of-the-box for legacy targets.
  */
 #if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
-    !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC)
+    !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC) && \
+    !defined(PLATFORM_STM32N6)
 #define PLATFORM_MSP430 1
 #endif
 
@@ -170,6 +171,14 @@
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 128
 #endif
+#elif defined(PLATFORM_STM32N6)
+/* The port inherits whatever clock the boot ROM left and does not program the
+ * tree, and that rate is not reproducible across resets (132-390 M spin
+ * iterations/s measured). This value only feeds compile-time constants; real
+ * timing waits for a hardware time base. */
+#ifndef MAIN_CPU_FREQ
+#define MAIN_CPU_FREQ 150
+#endif
 #else
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
 #endif
@@ -178,7 +187,8 @@
  *  and other subsystems that need the clock frequency as a compile-time
  *  constant.
  */
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 #define TIKU_MAIN_CPU_HZ  ((unsigned long)MAIN_CPU_FREQ * 1000000UL)
 #elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
@@ -215,6 +225,8 @@
 #include <arch/ambiq/tiku_device_select.h>
 #elif defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_device_select.h>
+#elif defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_device_select.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -256,6 +268,8 @@
 #include <arch/ambiq/tiku_timer_arch.h>
 #elif defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_timer_arch.h>
+#elif defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_timer_arch.h>
 #endif
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>
