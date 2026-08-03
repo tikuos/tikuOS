@@ -1804,6 +1804,10 @@ SRCS += arch/stm32n6/tiku_dma_arch.c
 SRCS += arch/stm32n6/tiku_pwm_arch.c
 SRCS += arch/stm32n6/tiku_xspi_arch.c
 SRCS += arch/stm32n6/tiku_sram_arch.c
+SRCS += arch/stm32n6/tiku_nvm_region_stm32n6.c
+ifeq ($(TIKU_N6_NVM_DEBUG),1)
+CFLAGS += -DTIKU_N6_NVM_DEBUG=1
+endif
 ifeq ($(TIKU_N6_SRAM_PROBE),1)
 # Destructive bank walk; diagnostics only, never in a default build.
 CFLAGS += -DTIKU_N6_SRAM_PROBE=1

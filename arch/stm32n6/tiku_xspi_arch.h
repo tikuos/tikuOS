@@ -45,13 +45,26 @@ typedef struct {
 /* The memory-mapped window, for reference; this driver uses indirect access. */
 #define TIKU_XSPI_MMAP_BASE     0x70000000UL
 
-/* Flash layout. The top of the device mirrors the durable SRAM region, and
- * the scratch the shell's erase test uses sits below it so a test can never
- * destroy state that is meant to survive.
+/* Flash layout of the 64 MB device:
  *
- * Four sectors, against a durable region under nine: the headroom is
- * deliberate, and the linker script asserts the region still fits, because a
- * mirror one byte too small loses the tail of durable state in silence. */
+ *   0x0000000  FSBL1     256 KB  the boot image; the ROM loads this one
+ *   0x0040000  FSBL2     256 KB  the ROM's fallback search address
+ *   0x0080000  /data       8 MB  the carved NVM region (tier + TFS store)
+ *   0x0880000  unclaimed  ~55 MB model and blob space, for N6-11
+ *   0x3FFB000  scratch     4 KB  what `xflash test` erases
+ *   0x3FFC000  mirror     16 KB  the durable .uninit mirror
+ *
+ * The region is 8 MB rather than the whole device because TFS addresses at
+ * most TIKU_TFS_MAX_SLOTS slots and formatting writes a gate word per
+ * directory entry: 8 MB uses that ceiling exactly. Growing it is this one
+ * constant plus the mirror of it in tiku_nvm_region.h.
+ *
+ * The mirror is four sectors against a durable region under nine: the headroom
+ * is deliberate, and the linker script asserts the region still fits, because
+ * a mirror one byte too small loses the tail of durable state in silence. */
+#define TIKU_XSPI_BOOT_SLOT_BYTES   0x40000UL
+#define TIKU_XSPI_REGION_ADDR       0x80000UL
+#define TIKU_XSPI_REGION_BYTES      (8UL * 1024UL * 1024UL)
 #define TIKU_XSPI_MIRROR_SECTORS 4U
 #define TIKU_XSPI_MIRROR_BYTES  (TIKU_XSPI_SECTOR_SIZE * TIKU_XSPI_MIRROR_SECTORS)
 #define TIKU_XSPI_MIRROR_ADDR   (TIKU_XSPI_SIZE_BYTES - TIKU_XSPI_MIRROR_BYTES)

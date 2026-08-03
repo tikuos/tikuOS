@@ -111,10 +111,10 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
 #elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-      defined(PLATFORM_NORDIC)
-/* Ambiq (MRAM) / RP2350 (QSPI Flash) / Nordic (RRAM): the NVM tier is backed
- * by the carved, memory-mapped region (tiku_nvm_region) -- read in place,
- * written via the region backend -- so there is no static pool here.
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+/* Ambiq (MRAM) / RP2350 (QSPI Flash) / Nordic (RRAM) / STM32N6 (XSPI NOR): the
+ * NVM tier is backed by the carved, memory-mapped region (tiku_nvm_region) --
+ * read in place, written via the region backend -- so there is no pool here.
  * tier_wire_all() points the tier at the region's front extent and
  * tiku_tier_nvm_write() routes writes through its backend (MRAM bootrom
  * program / Flash erase+program / RRAM memcpy behind the WEN gate). */
@@ -252,10 +252,11 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_SRAM].initialized = 1;
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     {
         /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash / Nordic
-         * RRAM): read in place, written via the backend (tiku_tier_nvm_write).
+         * RRAM / STM32N6 NOR): read in place, written via the backend
+         * (tiku_tier_nvm_write).
          * NULL until the board's region backend exists. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
         /* The tier owns a FIXED extent at the front of the region -- 32 KB on
@@ -727,9 +728,9 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
         return TIKU_MEM_ERR_INVALID;
     }
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
-    /* Region-backed NVM (Ambiq MRAM, RP2350 Flash, Nordic RRAM): route through
-     * the backend's program path.  On Ambiq/RP2350 the medium is not
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+    /* Region-backed NVM (Ambiq MRAM, RP2350 Flash, Nordic RRAM, STM32N6 NOR):
+     * route through the backend's program path.  On Ambiq/RP2350 the medium is not
      * plain-store-writable at all; on Nordic it is (behind WEN), but the
      * backend path adds the same bounds check + READY drain uniformly. */
     {

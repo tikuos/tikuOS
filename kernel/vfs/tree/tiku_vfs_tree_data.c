@@ -51,7 +51,8 @@
  * RRAM region (byte-writable NVM read in place, written via the region backend
  * through the RRAMC WEN gate).  MSP430: a `.persistent` FRAM array (in place).
  * Other parts: plain `.bss` (volatile) until a backend lands. */
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || defined(PLATFORM_NORDIC)
+#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 
 /*
  * The fit/fill assertions that stood here are GONE, not relaxed.

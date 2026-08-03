@@ -340,6 +340,14 @@ tiku_xspi_err_t tiku_xspi_mmap_enable(void) {
     if (!xspi_ready) {
         return TIKU_XSPI_ERR_STATE;
     }
+    /* Already up: say so rather than fall through to the busy wait. In mapped
+     * mode the controller reports busy for as long as the window is live, so
+     * the wait below could only ever time out -- which turned a redundant
+     * enable into a spurious failure for every caller that opens the window
+     * defensively before reading through it. */
+    if (xspi_mmap) {
+        return TIKU_XSPI_OK;
+    }
     if (!xspi_wait(STM32N6_XSPI_SR, STM32N6_XSPI_SR_BUSY, 0, XSPI_SPINS)) {
         return TIKU_XSPI_ERR_TIMEOUT;
     }

@@ -75,7 +75,7 @@
  * tier cannot.
  */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 #define TIKU_NVM_TIER_BYTES  (32u * 1024u)
 #else
 #define TIKU_NVM_TIER_BYTES  0u                /* no carved region */
@@ -123,6 +123,11 @@
 #define TIKU_NVM_REGION_BYTES  (1604u * 1024u)
 #elif defined(PLATFORM_NORDIC)
 #define TIKU_NVM_REGION_BYTES  (1092u * 1024u)
+#elif defined(PLATFORM_STM32N6)
+/* Not linker-carved: the region is a span of the external NOR, so this mirrors
+ * TIKU_XSPI_REGION_ADDR/BYTES in arch/stm32n6/tiku_xspi_arch.h rather than a
+ * device script.  8 MB is what TIKU_TFS_MAX_SLOTS can address at a 4 KB slot. */
+#define TIKU_NVM_REGION_BYTES  (8192u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif
@@ -151,7 +156,7 @@
  * branch in any unit that forgot the include, and that branch is never an error.
  */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 #define TIKU_NVM_HAS_REGION  1
 #else
 #define TIKU_NVM_HAS_REGION  0
