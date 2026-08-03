@@ -1796,6 +1796,11 @@ SRCS += arch/stm32n6/tiku_lcd_arch.c
 SRCS += arch/stm32n6/tiku_dma_arch.c
 SRCS += arch/stm32n6/tiku_pwm_arch.c
 SRCS += arch/stm32n6/tiku_xspi_arch.c
+ifeq ($(TIKU_N6_OTP_TOOL),1)
+# One-shot provisioning tool; burns OTP, so never in a default build.
+SRCS += arch/stm32n6/tiku_otp_tool.c
+CFLAGS += -DTIKU_N6_OTP_TOOL=1
+endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_xflash.c
 # No hardware backend behind these yet; they fail cleanly so a caller learns
 # the bus is absent rather than reading zeros as data.

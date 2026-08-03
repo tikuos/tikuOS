@@ -250,6 +250,13 @@ void tiku_shell_cmd_xflash(uint8_t argc, const char *argv[])
         xflash_id();
         return;
     }
+#if defined(TIKU_N6_OTP_TOOL)
+    if (strcmp(argv[1], "otpburn") == 0) {
+        extern void tiku_stm32n6_otp_burn_hslv(void);
+        tiku_stm32n6_otp_burn_hslv();
+        return;
+    }
+#endif
     if (strcmp(argv[1], "test") == 0) {
         xflash_test();
         return;
