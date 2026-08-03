@@ -19,6 +19,14 @@
 #include <hal/tiku_cpu.h>              /* tiku_cpu_freq_init / tiku_cpu_mclk_hz */
 #include <string.h>                    /* strcmp ("probe" subcommand)          */
 
+/* Round to nearest: a measured clock sits a hair under its nominal rate, and
+ * truncating reported an exact 600 MHz switch as 599. */
+#define TIKU_HZ_TO_MHZ(hz)  (((hz) + 500000UL) / 1000000UL)
+
+#if defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_cpu_freq_boot_arch.h> /* clock-tree read-back */
+#endif
+
 #if defined(PLATFORM_AMBIQ) && defined(AM_PART_APOLLO510)
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>   /* HP identity probe */
 
@@ -124,6 +132,52 @@ freq_cmd_probe(void)
 }
 #endif /* PLATFORM_AMBIQ && AM_PART_APOLLO510 */
 
+#if defined(PLATFORM_STM32N6)
+/** @brief Names for the CPUSWS/SYSSWS source encoding. */
+static const char *freq_n6_src(uint8_t s)
+{
+    switch (s) {
+    case 0:  return "HSI";
+    case 1:  return "MSI";
+    case 2:  return "HSE";
+    default: return "IC";
+    }
+}
+
+/**
+ * @brief Print the live STM32N6 clock tree.
+ *
+ * Reads RCC and PWR back rather than reporting what was requested, so a
+ * setting that did not take shows up as itself.
+ */
+static void freq_cmd_probe_n6(void)
+{
+    tiku_stm32n6_clock_t c;
+
+    tiku_cpu_stm32n6_clock_probe(&c);
+
+    SHELL_PRINTF("  CPU src   %s", freq_n6_src(c.cpu_src));
+    if (c.cpu_src == 3u) {
+        SHELL_PRINTF(" (IC1 = PLL%u / %u)", (unsigned)(c.ic1_sel + 1u),
+                     (unsigned)c.ic1_div);
+    }
+    SHELL_PRINTF("\n");
+    SHELL_PRINTF("  BUS src   %s (IC2 / %u), AHB / %lu\n",
+                 freq_n6_src(c.sys_src), (unsigned)c.ic2_div,
+                 (unsigned long)c.ahb_div);
+    SHELL_PRINTF("  PLL1      %s%s src %s  M %u  N %u  frac %lu  P %u/%u\n",
+                 c.pll1_on ? "on" : "off", c.pll1_ready ? ", locked" : "",
+                 freq_n6_src(c.pll1_src), (unsigned)c.pll1_m,
+                 (unsigned)c.pll1_n, (unsigned long)c.pll1_frac,
+                 (unsigned)c.pll1_p1, (unsigned)c.pll1_p2);
+    SHELL_PRINTF("  PLL1 out  %lu Hz\n", (unsigned long)c.pll1_hz);
+    SHELL_PRINTF("  VOS       range %u (%s)\n", c.vos_high ? 0u : 1u,
+                 c.vos_high ? "overdrive rail" : "nominal");
+    SHELL_PRINTF("  CPU       %lu Hz from the tree, %lu Hz measured\n",
+                 (unsigned long)c.cpu_hz, tiku_cpu_mclk_hz());
+}
+#endif /* PLATFORM_STM32N6 */
+
 void
 tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
 {
@@ -132,13 +186,19 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
     unsigned long now;
 
     if (argc < 2) {
-        SHELL_PRINTF("CPU: %lu MHz\n", tiku_cpu_mclk_hz() / 1000000UL);
+        SHELL_PRINTF("CPU: %lu MHz\n", TIKU_HZ_TO_MHZ(tiku_cpu_mclk_hz()));
         return;
     }
 
 #if defined(PLATFORM_AMBIQ) && defined(AM_PART_APOLLO510)
     if (strcmp(argv[1], "probe") == 0) {
         freq_cmd_probe();
+        return;
+    }
+#endif
+#if defined(PLATFORM_STM32N6)
+    if (strcmp(argv[1], "probe") == 0) {
+        freq_cmd_probe_n6();
         return;
     }
 #endif
@@ -151,14 +211,20 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         p++;
     }
     if (*p != '\0' || req == 0u) {
-        SHELL_PRINTF("Usage: freq [<mhz>]\n");
+        SHELL_PRINTF("Usage: freq [<mhz>|probe]\n");
+#if defined(PLATFORM_STM32N6)
+        SHELL_PRINTF("  no arg: show the core clock; probe: the clock tree;\n");
+        SHELL_PRINTF("  <mhz>: 64 (HSI), any exact divisor of 1200 up to 600, "
+                     "or 800 (overdrive).\n");
+#else
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: request a frequency "
                      "(96, or turbo: 192 on Apollo4, 250 on Apollo510).\n");
+#endif
         return;
     }
 
     tiku_cpu_freq_init((unsigned int)req);
-    now = tiku_cpu_mclk_hz() / 1000000UL;
+    now = TIKU_HZ_TO_MHZ(tiku_cpu_mclk_hz());
     if (now == req) {
         SHELL_PRINTF("CPU: %lu MHz\n", now);
     } else {

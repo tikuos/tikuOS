@@ -49,7 +49,8 @@ tiku_shell_cmd_info(uint8_t argc, const char *argv[])
     (void)argv;
 
     SHELL_PRINTF("Device:    %s\n", CLI_DEVICE_NAME);
-    SHELL_PRINTF("CPU:       %lu MHz\n", tiku_cpu_mclk_hz() / 1000000UL);
+    SHELL_PRINTF("CPU:       %lu MHz\n",
+                 (tiku_cpu_mclk_hz() + 500000UL) / 1000000UL);
     SHELL_PRINTF("Uptime:    %luh %lum %lus (%lu s)\n",
                 hours, mins, s, secs);
     SHELL_PRINTF("Clock:     %u ticks/sec (now %u)\n",

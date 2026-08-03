@@ -37,10 +37,9 @@ static void cpu_spin(unsigned long iters) {
         : "cc");
 }
 
-/** @brief Spin iterations per millisecond at the current measured rate. */
+/** @brief Spin iterations per millisecond, measured rather than derived. */
 static unsigned long cpu_iters_per_ms(void) {
-    /* One iteration per cycle, so the clock rate is the spin rate. */
-    return tiku_cpu_stm32n6_clock_get_hz() / 1000UL;
+    return tiku_cpu_stm32n6_spin_per_ms();
 }
 
 void tiku_cpu_stm32n6_delay_us(unsigned int us) {

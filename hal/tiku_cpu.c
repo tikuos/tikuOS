@@ -156,6 +156,8 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
     tiku_cpu_freq_ambiq_init(cpu_freq);
 #elif defined(PLATFORM_NORDIC)
     tiku_cpu_freq_nordic_init(cpu_freq);
+#elif defined(PLATFORM_STM32N6)
+    tiku_cpu_freq_stm32n6_init(cpu_freq);
 #endif
 }
 

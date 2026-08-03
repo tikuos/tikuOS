@@ -172,10 +172,10 @@
 #define MAIN_CPU_FREQ 128
 #endif
 #elif defined(PLATFORM_STM32N6)
-/* The port inherits whatever clock the boot ROM left and does not program the
- * tree, and that rate is not reproducible across resets (132-390 M spin
- * iterations/s measured). This value only feeds compile-time constants; real
- * timing waits for a hardware time base. */
+/* Boot rate, applied by tiku_cpu_freq_init(): 150 MHz is what the boot ROM
+ * hands over, so booting here changes nothing but makes the tree ours rather
+ * than inherited. `freq <mhz>` moves it up to 800 or down to 10 at runtime;
+ * the tick and console run from HSI and do not follow. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 150
 #endif

@@ -144,4 +144,82 @@
 
 #define STM32N6_IRQ_LPTIM1          136U
 
+/* DWT cycle counter: a true count of core cycles, so the CPU rate can be
+ * measured without assuming how many cycles an instruction takes. */
+#define STM32N6_SCB_DEMCR           0xE000EDFCUL
+#define STM32N6_SCB_DEMCR_TRCENA    (1UL << 24)
+#define STM32N6_DWT_CTRL            0xE0001000UL
+#define STM32N6_DWT_CTRL_CYCCNTENA  (1UL << 0)
+#define STM32N6_DWT_CYCCNT          0xE0001004UL
+#define STM32N6_DWT_LAR             0xE0001FB0UL
+#define STM32N6_DWT_LAR_KEY         0xC5ACCE55UL
+
+/* Clock tree. PLL1..4 feed twenty IC dividers; IC1 drives the CPU alone and
+ * IC2/IC6/IC11 drive the system buses, so the core rate moves independently.
+ * PLL M/N/P fields hold raw values, IC dividers hold divider - 1. */
+#define STM32N6_RCC_CFGR1           (STM32N6_RCC_BASE + 0x020U)
+#define STM32N6_RCC_CFGR2           (STM32N6_RCC_BASE + 0x024U)
+#define STM32N6_RCC_PLL1CFGR1       (STM32N6_RCC_BASE + 0x080U)
+#define STM32N6_RCC_PLL1CFGR2       (STM32N6_RCC_BASE + 0x084U)
+#define STM32N6_RCC_PLL1CFGR3       (STM32N6_RCC_BASE + 0x088U)
+#define STM32N6_RCC_ICCFGR(n)       (STM32N6_RCC_BASE + 0x0C4U + (((n) - 1U) * 4U))
+#define STM32N6_RCC_DIVENR          (STM32N6_RCC_BASE + 0x240U)
+
+#define STM32N6_RCC_CR_HSEON        (1UL << 4)
+#define STM32N6_RCC_CR_PLL1ON       (1UL << 8)
+#define STM32N6_RCC_SR_HSERDY       (1UL << 4)
+#define STM32N6_RCC_SR_PLL1RDY      (1UL << 8)
+
+/* CPUSW and SYSSW share one encoding; 3 selects the IC dividers. */
+#define STM32N6_CLKSRC_HSI          0UL
+#define STM32N6_CLKSRC_MSI          1UL
+#define STM32N6_CLKSRC_HSE          2UL
+#define STM32N6_CLKSRC_IC           3UL
+
+#define STM32N6_CFGR1_CPUSW_POS     16U
+#define STM32N6_CFGR1_CPUSW_MSK     (3UL << 16)
+#define STM32N6_CFGR1_CPUSWS_POS    20U
+#define STM32N6_CFGR1_SYSSW_POS     24U
+#define STM32N6_CFGR1_SYSSW_MSK     (3UL << 24)
+#define STM32N6_CFGR1_SYSSWS_POS    28U
+
+/* Bus prescalers encode log2, so 0 divides by 1 and 1 divides by 2. */
+#define STM32N6_CFGR2_PPRE1_MSK     (7UL << 0)
+#define STM32N6_CFGR2_PPRE2_MSK     (7UL << 4)
+#define STM32N6_CFGR2_PPRE4_MSK     (7UL << 12)
+#define STM32N6_CFGR2_PPRE5_MSK     (7UL << 16)
+#define STM32N6_CFGR2_HPRE_POS      20U
+#define STM32N6_CFGR2_HPRE_MSK      (7UL << 20)
+
+#define STM32N6_PLL1_DIVN_POS       8U
+#define STM32N6_PLL1_DIVN_MSK       (0xFFFUL << 8)
+#define STM32N6_PLL1_DIVM_POS       20U
+#define STM32N6_PLL1_DIVM_MSK       (0x3FUL << 20)
+#define STM32N6_PLL1_BYP            (1UL << 27)
+#define STM32N6_PLL1_SEL_POS        28U
+#define STM32N6_PLL1_SEL_MSK        (7UL << 28)
+#define STM32N6_PLL1_PDIV2_POS      24U
+#define STM32N6_PLL1_PDIV2_MSK      (7UL << 24)
+#define STM32N6_PLL1_PDIV1_POS      27U
+#define STM32N6_PLL1_PDIV1_MSK      (7UL << 27)
+#define STM32N6_PLL1_PDIVEN         (1UL << 30)
+
+#define STM32N6_IC_INT_POS          16U
+#define STM32N6_IC_INT_MSK          (0xFFUL << 16)
+#define STM32N6_IC_SEL_POS          28U
+#define STM32N6_IC_SEL_MSK          (3UL << 28)
+#define STM32N6_IC_SEL_PLL1         0UL
+
+/* Voltage scaling: VOS set is range 0, the high-frequency range. */
+#define STM32N6_PWR_BASE            0x46024800UL
+#define STM32N6_PWR_VOSCR           (STM32N6_PWR_BASE + 0x020U)
+#define STM32N6_PWR_VOSCR_VOS       (1UL << 0)
+#define STM32N6_PWR_VOSCR_VOSRDY    (1UL << 1)
+
+/* The Nucleo drives its external SMPS from PB12: high selects the 0.89 V
+ * overdrive rail that the core needs above the nominal range. Board revisions
+ * before C01 leave that net unpopulated. */
+#define STM32N6_GPIO_PORT_B         1U
+#define STM32N6_SMPS_OVD_PIN        12U
+
 #endif /* TIKU_STM32N6_REGS_H_ */
