@@ -14,34 +14,10 @@
  */
 
 #include "tiku_dma_arch.h"
+#include "tiku_cache_arch.h"
 #include "tiku_stm32n6_regs.h"
 
 #define DMA_CH      STM32N6_GPDMA_MEMCPY_CH
-
-/**
- * @brief Run a data-cache maintenance operation over an address range.
- *
- * The core reaches memory through the cache and the controller does not, so
- * every buffer handed to DMA needs one of these on each side of the transfer.
- *
- * @param op    Register to write, clean or invalidate by address
- * @param addr  Range start
- * @param len   Range length in bytes
- */
-static void dma_cache_op(uint32_t op, const void *addr, size_t len) {
-    if ((TIKU_REG32(STM32N6_SCB_CCR) & STM32N6_SCB_CCR_DC) == 0UL) {
-        return;                                  /* no data cache to maintain */
-    }
-    uintptr_t p   = (uintptr_t)addr & ~(STM32N6_CACHE_LINE - 1UL);
-    uintptr_t end = (uintptr_t)addr + len;
-
-    __asm__ volatile ("dsb" ::: "memory");
-    while (p < end) {
-        TIKU_REG32(op) = (uint32_t)p;
-        p += STM32N6_CACHE_LINE;
-    }
-    __asm__ volatile ("dsb\n\tisb" ::: "memory");
-}
 
 /** @brief Completion callback and its context, held across the transfer. */
 static volatile tiku_dma_done_cb_t dma_cb;
@@ -94,7 +70,7 @@ int tiku_dma_arch_busy(void) {
     }
     /* Completion seen by polling rather than by interrupt: the destination
      * still has to leave the cache before the caller reads it. */
-    dma_cache_op(STM32N6_SCB_DCIMVAC, dma_dst, dma_len);
+    tiku_stm32n6_dcache_invalidate(dma_dst, dma_len);
     return 0;
 }
 
@@ -131,8 +107,8 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t len,
     /* Push the source out of the cache so the controller reads what the core
      * wrote, and drop the destination so a dirty line cannot land on top of
      * the transfer afterwards. */
-    dma_cache_op(STM32N6_SCB_DCCMVAC, src, len);
-    dma_cache_op(STM32N6_SCB_DCIMVAC, dst, len);
+    tiku_stm32n6_dcache_clean(src, len);
+    tiku_stm32n6_dcache_invalidate(dst, len);
 
     __asm__ volatile ("dsb" ::: "memory");
     TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH)) =
@@ -162,7 +138,7 @@ void tiku_stm32n6_gpdma_ch0_isr(void) {
 
     /* The controller wrote past the cache, so drop those lines before anyone
      * reads the destination. */
-    dma_cache_op(STM32N6_SCB_DCIMVAC, dma_dst, dma_len);
+    tiku_stm32n6_dcache_invalidate(dma_dst, dma_len);
     dma_running = 0U;
 
     /* An error flag still ends the transfer; the callback reports completion,

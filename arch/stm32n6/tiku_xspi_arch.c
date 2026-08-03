@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include "tiku_xspi_arch.h"
+#include "tiku_cache_arch.h"
 #include "tiku_gpio_arch.h"
 #include "tiku_stm32n6_regs.h"
 
@@ -293,7 +294,15 @@ tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr) {
     if (rc != TIKU_XSPI_OK) {
         return rc;
     }
-    return xspi_wait_idle(XSPI_ERASE_SPINS);
+    rc = xspi_wait_idle(XSPI_ERASE_SPINS);
+
+    /* The data cache can hold the old sector via the memory-mapped alias; a
+     * reader would then see pre-erase bytes and, worse, trust a stale CRC. */
+    tiku_stm32n6_dcache_invalidate(
+        (const void *)(uintptr_t)(TIKU_XSPI_MMAP_BASE +
+                                  (addr & ~(TIKU_XSPI_SECTOR_SIZE - 1UL))),
+        TIKU_XSPI_SECTOR_SIZE);
+    return rc;
 }
 
 tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) {
@@ -306,6 +315,8 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
     }
 
     const uint8_t *p = (const uint8_t *)buf;
+    uint32_t start_addr = addr;
+    uint32_t total_len  = len;
     while (len > 0U) {
         /* A program never crosses a page boundary: the device wraps within the
          * page instead of advancing, which would silently corrupt the start. */
@@ -333,6 +344,10 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
         p    += n;
         len  -= n;
     }
+    /* Same staleness hazard as erase, over exactly the bytes programmed. */
+    tiku_stm32n6_dcache_invalidate(
+        (const void *)(uintptr_t)(TIKU_XSPI_MMAP_BASE + start_addr),
+        total_len);
     return TIKU_XSPI_OK;
 }
 

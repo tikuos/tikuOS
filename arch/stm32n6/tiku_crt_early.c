@@ -17,6 +17,7 @@
 
 #include "tiku_stm32n6_regs.h"
 #include "tiku_sram_arch.h"
+#include "tiku_cache_arch.h"
 
 /* Shorthand for filling the external-IRQ span with the default handler. */
 #define DFL     stm32n6_default_handler
@@ -125,6 +126,11 @@ void tiku_stm32n6_startup(void) {
      * reset shut down, and a write to a shut-down bank is swallowed silently
      * rather than faulting, so the zeroing would simply not happen. */
     tiku_stm32n6_sram_init();
+
+    /* Both caches: the ROM's dev-boot path hands over with them off, and the
+     * flash-boot path keeps only the I-cache -- so neither state can be
+     * assumed. Before the arena zero loop, which then runs write-allocated. */
+    tiku_stm32n6_cache_enable();
 
     for (uint32_t *a = &__axisram_start; a < &__axisram_end; a++) {
         *a = 0UL;

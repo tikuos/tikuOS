@@ -312,6 +312,11 @@
 #define STM32N6_SCB_CCR_IC          (1UL << 17)
 #define STM32N6_SCB_DCCMVAC         0xE000EF68UL   /* clean by address      */
 #define STM32N6_SCB_DCIMVAC         0xE000EF5CUL   /* invalidate by address */
+#define STM32N6_SCB_ICIALLU         0xE000EF50UL   /* invalidate whole I$   */
+#define STM32N6_SCB_DCISW           0xE000EF60UL   /* invalidate by set/way */
+#define STM32N6_SCB_DCCISW          0xE000EF74UL   /* clean+inval by set/way */
+#define STM32N6_SCB_CSSELR          0xE000ED84UL   /* cache size selection  */
+#define STM32N6_SCB_CCSIDR          0xE000ED80UL   /* selected cache's size */
 #define STM32N6_CACHE_LINE          32UL
 
 /* DWT cycle counter: a true count of core cycles, so the CPU rate can be

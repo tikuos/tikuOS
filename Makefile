@@ -1804,6 +1804,7 @@ SRCS += arch/stm32n6/tiku_dma_arch.c
 SRCS += arch/stm32n6/tiku_pwm_arch.c
 SRCS += arch/stm32n6/tiku_xspi_arch.c
 SRCS += arch/stm32n6/tiku_sram_arch.c
+SRCS += arch/stm32n6/tiku_cache_arch.c
 SRCS += arch/stm32n6/tiku_nvm_region_stm32n6.c
 ifeq ($(TIKU_N6_NVM_DEBUG),1)
 CFLAGS += -DTIKU_N6_NVM_DEBUG=1
@@ -1818,6 +1819,7 @@ SRCS += arch/stm32n6/tiku_otp_tool.c
 CFLAGS += -DTIKU_N6_OTP_TOOL=1
 endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_xflash.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_cache.c
 # No hardware backend behind these yet; they fail cleanly so a caller learns
 # the bus is absent rather than reading zeros as data.
 SRCS += arch/stm32n6/tiku_adc_arch.c

@@ -85,6 +85,9 @@
 #include "commands/tiku_shell_cmd_trng.h"
 #include "commands/tiku_shell_cmd_xflash.h"
 #endif
+#if TIKU_SHELL_CMD_CACHE
+#include "commands/tiku_shell_cmd_cache.h"
+#endif
 #if TIKU_SHELL_CMD_MRAMBENCH
 #include "commands/tiku_shell_cmd_mrambench.h"
 #endif
@@ -562,6 +565,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_XFLASH
     {"xflash",  "External NOR: id | test | dump", tiku_shell_cmd_xflash},
+#endif
+#if TIKU_SHELL_CMD_CACHE
+    {"cache",   "CPU caches: on | off | bench | dma", tiku_shell_cmd_cache},
 #endif
 #if TIKU_SHELL_CMD_MRAMBENCH
     {"mrambench","Time the MRAM programmer",   tiku_shell_cmd_mrambench},
