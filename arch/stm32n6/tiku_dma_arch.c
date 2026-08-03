@@ -7,8 +7,8 @@
  *
  * tiku_dma_arch.c - STM32N6 memory-to-memory copy offload on HPDMA channel 0.
  *
- * Programmed and verified as far as the controller goes; transfers are refused
- * because the isolation framework does not yet grant the master its memory.
+ * The channel runs secure to match the memory: the image lives in the secure
+ * AXISRAM alias, and a non-secure transaction is filtered to nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -58,6 +58,17 @@ void tiku_dma_arch_init(void) {
     TIKU_REG32(STM32N6_RCC_AHB5ENR) |= STM32N6_RCC_AHB5ENR_HPDMA1;
     (void)TIKU_REG32(STM32N6_RCC_AHB5ENR);
 
+    /* The channel issues transactions with its own attributes, not the CPU's.
+     * Three all have to match the memory the image occupies: secure (SECCFGR
+     * plus TR1 SSEC/DSEC), privileged, and the trusted CID -- the IAC latched
+     * a violation for every transfer until the CID was set, because a channel
+     * with filtering off emits CID 0 and only CID 1 passes RISAF's default. */
+    TIKU_REG32(STM32N6_GPDMA_SECCFGR)  |= (1UL << DMA_CH);
+    TIKU_REG32(STM32N6_GPDMA_PRIVCFGR) |= (1UL << DMA_CH);
+    TIKU_REG32(STM32N6_GPDMA_CIDCFGR(DMA_CH)) =
+        STM32N6_GPDMA_CID_CFEN |
+        (STM32N6_GPDMA_CID_TRUSTED << STM32N6_GPDMA_CID_SCID_POS);
+
     TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH))  = 0UL;
     TIKU_REG32(STM32N6_GPDMA_FCR(DMA_CH)) = STM32N6_GPDMA_FCR_ALL;
     TIKU_REG32(STM32N6_GPDMA_LLR(DMA_CH)) = 0UL;   /* single transfer */
@@ -92,17 +103,7 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t len,
     if (dst == NULL || src == NULL || len == 0U || len > 0xFFFFU) {
         return TIKU_DMA_ERR_INVALID;
     }
-#if !TIKU_STM32N6_DMA_ENABLE
-    /* Measured on hardware: the channel accepts the transfer, counts the block
-     * down to zero and raises transfer-complete with no error, but the
-     * destination is untouched. The data cache is off, so this is not a
-     * coherency effect; the part gates bus masters through RIFSC/RISAF, and
-     * this master has not been granted the AXISRAM the image runs in. Refusing
-     * beats reporting a copy that did not happen. */
-    (void)cb;
-    (void)ctx;
-    return TIKU_DMA_ERR_INVALID;
-#else
+
     if (dma_running) {
         return TIKU_DMA_ERR_BUSY;
     }
@@ -119,7 +120,8 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t len,
     /* Byte width both sides with both addresses incrementing: correct for any
      * alignment, and the controller still bursts internally. */
     TIKU_REG32(STM32N6_GPDMA_TR1(DMA_CH)) =
-        STM32N6_GPDMA_TR1_SINC | STM32N6_GPDMA_TR1_DINC;
+        STM32N6_GPDMA_TR1_SINC | STM32N6_GPDMA_TR1_DINC |
+        STM32N6_GPDMA_TR1_SSEC | STM32N6_GPDMA_TR1_DSEC;
     TIKU_REG32(STM32N6_GPDMA_TR2(DMA_CH)) = STM32N6_GPDMA_TR2_SWREQ;
     TIKU_REG32(STM32N6_GPDMA_BR1(DMA_CH)) = (uint32_t)len;
     TIKU_REG32(STM32N6_GPDMA_SAR(DMA_CH)) = (uint32_t)(uintptr_t)src;
@@ -136,7 +138,6 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t len,
     TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH)) =
         STM32N6_GPDMA_CR_TCIE | STM32N6_GPDMA_CR_EN;
     return TIKU_DMA_OK;
-#endif
 }
 
 int tiku_dma_arch_abort(void) {

@@ -7,8 +7,8 @@
  *
  * tiku_dma_arch.h - STM32N6 memory-to-memory copy offload on GPDMA.
  *
- * One channel, software-requested. Transfers are refused until the isolation
- * framework grants this master the AXISRAM -- see the note in the .c file.
+ * One channel, software-requested, issuing secure transactions to match the
+ * secure AXISRAM alias the image runs in.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,11 +22,6 @@
 #define TIKU_DMA_OK            0
 #define TIKU_DMA_ERR_INVALID  -1
 #define TIKU_DMA_ERR_BUSY     -2
-
-/* Off until RIFSC/RISAF lets the controller reach the memory the image uses. */
-#ifndef TIKU_STM32N6_DMA_ENABLE
-#define TIKU_STM32N6_DMA_ENABLE 0
-#endif
 
 /** @brief Called from interrupt context when a transfer finishes. */
 typedef void (*tiku_dma_done_cb_t)(void *ctx);

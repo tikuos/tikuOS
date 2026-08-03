@@ -144,14 +144,17 @@
 
 #define STM32N6_IRQ_LPTIM1          136U
 
-/* HPDMA: sixteen channels, 0x80 apart, register-identical to GPDMA. The
- * high-performance controller is the one used here because it sits on the AXI
- * side and so reaches the AXISRAM the image and its buffers live in; GPDMA
- * accepted the same transfer and moved nothing. */
+/* HPDMA: sixteen channels, 0x80 apart. Driven through the SECURE alias (bit
+ * 28 set): the image lives at 0x341xxxxx, the secure alias of AXISRAM, so the
+ * channel must issue secure transactions (SECCFGR + TR1 SSEC/DSEC) or RISAF
+ * filters them to read-as-zero / write-ignored -- and the SECCFGR write itself
+ * is only accepted when it arrives as a secure access. */
 #define STM32N6_RCC_AHB5ENR         (STM32N6_RCC_BASE + 0x260U)
 #define STM32N6_RCC_AHB5ENR_HPDMA1  (1UL << 0)
 
-#define STM32N6_GPDMA_BASE          0x48020000UL
+#define STM32N6_GPDMA_BASE          0x58020000UL
+#define STM32N6_GPDMA_SECCFGR       (STM32N6_GPDMA_BASE + 0x00U)
+#define STM32N6_GPDMA_PRIVCFGR      (STM32N6_GPDMA_BASE + 0x04U)
 #define STM32N6_GPDMA_CH_STRIDE     0x80UL
 #define STM32N6_GPDMA_CH(c)         (STM32N6_GPDMA_BASE + ((c) * STM32N6_GPDMA_CH_STRIDE))
 #define STM32N6_GPDMA_FCR(c)        (STM32N6_GPDMA_CH(c) + 0x5CU)
@@ -163,6 +166,14 @@
 #define STM32N6_GPDMA_SAR(c)        (STM32N6_GPDMA_CH(c) + 0x9CU)
 #define STM32N6_GPDMA_DAR(c)        (STM32N6_GPDMA_CH(c) + 0xA0U)
 #define STM32N6_GPDMA_LLR(c)        (STM32N6_GPDMA_CH(c) + 0xCCU)
+#define STM32N6_GPDMA_CIDCFGR(c)    (STM32N6_GPDMA_CH(c) + 0x54U)
+
+/* With CFEN clear a channel emits CID 0 whatever SCID says; the CPU and the
+ * trusted domain are CID 1, which is the only CID RISAF's default rule passes
+ * when no region is configured -- and the boot ROM configures none. */
+#define STM32N6_GPDMA_CID_CFEN      (1UL << 0)
+#define STM32N6_GPDMA_CID_SCID_POS  4U
+#define STM32N6_GPDMA_CID_TRUSTED   1UL
 
 #define STM32N6_GPDMA_CR_EN         (1UL << 0)
 #define STM32N6_GPDMA_CR_RESET      (1UL << 1)
@@ -174,6 +185,8 @@
 #define STM32N6_GPDMA_SR_USEF       (1UL << 12)
 #define STM32N6_GPDMA_FCR_ALL       (0x7F00UL)
 #define STM32N6_GPDMA_TR1_SINC      (1UL << 3)
+#define STM32N6_GPDMA_TR1_SSEC      (1UL << 15)
+#define STM32N6_GPDMA_TR1_DSEC      (1UL << 31)
 #define STM32N6_GPDMA_TR1_DINC      (1UL << 19)
 #define STM32N6_GPDMA_TR1_SDW_POS   0U
 #define STM32N6_GPDMA_TR1_DDW_POS   16U
