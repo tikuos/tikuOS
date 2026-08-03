@@ -170,6 +170,8 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
     tiku_cpu_ambiq_dcache_clean(addr, len);
 #elif defined(PLATFORM_NORDIC)
     (void)addr; (void)len;            /* nRF54L M33: no data cache */
+#elif defined(PLATFORM_STM32N6)
+    (void)addr; (void)len;            /* caches are not enabled on this port */
 #endif
 }
 
@@ -182,6 +184,8 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
     tiku_cpu_ambiq_dcache_invalidate(addr, len);
 #elif defined(PLATFORM_NORDIC)
     (void)addr; (void)len;            /* nRF54L M33: no data cache */
+#elif defined(PLATFORM_STM32N6)
+    (void)addr; (void)len;            /* caches are not enabled on this port */
 #endif
 }
 

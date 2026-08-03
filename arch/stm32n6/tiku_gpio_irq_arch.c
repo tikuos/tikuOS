@@ -23,7 +23,7 @@
  * @param edge  Edge selection
  * @return -1: no EXTI backend on this port yet
  */
-int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, uint8_t edge) {
+int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) {
     (void)port; (void)pin; (void)edge;
     return -1;
 }

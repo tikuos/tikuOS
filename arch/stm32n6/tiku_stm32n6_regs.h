@@ -144,6 +144,91 @@
 
 #define STM32N6_IRQ_LPTIM1          136U
 
+/* HPDMA: sixteen channels, 0x80 apart, register-identical to GPDMA. The
+ * high-performance controller is the one used here because it sits on the AXI
+ * side and so reaches the AXISRAM the image and its buffers live in; GPDMA
+ * accepted the same transfer and moved nothing. */
+#define STM32N6_RCC_AHB5ENR         (STM32N6_RCC_BASE + 0x260U)
+#define STM32N6_RCC_AHB5ENR_HPDMA1  (1UL << 0)
+
+#define STM32N6_GPDMA_BASE          0x48020000UL
+#define STM32N6_GPDMA_CH_STRIDE     0x80UL
+#define STM32N6_GPDMA_CH(c)         (STM32N6_GPDMA_BASE + ((c) * STM32N6_GPDMA_CH_STRIDE))
+#define STM32N6_GPDMA_FCR(c)        (STM32N6_GPDMA_CH(c) + 0x5CU)
+#define STM32N6_GPDMA_SR(c)         (STM32N6_GPDMA_CH(c) + 0x60U)
+#define STM32N6_GPDMA_CR(c)         (STM32N6_GPDMA_CH(c) + 0x64U)
+#define STM32N6_GPDMA_TR1(c)        (STM32N6_GPDMA_CH(c) + 0x90U)
+#define STM32N6_GPDMA_TR2(c)        (STM32N6_GPDMA_CH(c) + 0x94U)
+#define STM32N6_GPDMA_BR1(c)        (STM32N6_GPDMA_CH(c) + 0x98U)
+#define STM32N6_GPDMA_SAR(c)        (STM32N6_GPDMA_CH(c) + 0x9CU)
+#define STM32N6_GPDMA_DAR(c)        (STM32N6_GPDMA_CH(c) + 0xA0U)
+#define STM32N6_GPDMA_LLR(c)        (STM32N6_GPDMA_CH(c) + 0xCCU)
+
+#define STM32N6_GPDMA_CR_EN         (1UL << 0)
+#define STM32N6_GPDMA_CR_RESET      (1UL << 1)
+#define STM32N6_GPDMA_CR_TCIE       (1UL << 8)
+#define STM32N6_GPDMA_SR_IDLEF      (1UL << 0)
+#define STM32N6_GPDMA_SR_TCF        (1UL << 8)
+#define STM32N6_GPDMA_SR_DTEF       (1UL << 10)
+#define STM32N6_GPDMA_SR_ULEF       (1UL << 11)
+#define STM32N6_GPDMA_SR_USEF       (1UL << 12)
+#define STM32N6_GPDMA_FCR_ALL       (0x7F00UL)
+#define STM32N6_GPDMA_TR1_SINC      (1UL << 3)
+#define STM32N6_GPDMA_TR1_DINC      (1UL << 19)
+#define STM32N6_GPDMA_TR1_SDW_POS   0U
+#define STM32N6_GPDMA_TR1_DDW_POS   16U
+#define STM32N6_GPDMA_TR2_SWREQ     (1UL << 9)
+#define STM32N6_GPDMA_MEMCPY_CH     0U
+#define STM32N6_IRQ_GPDMA1_CH0      68U   /* HPDMA1_CH0 */
+
+/* TIM1 drives four PWM channels; ST maps them to PE9/PE11/PE13/PE14 on AF1,
+ * none of which collide with the console on PE5/PE6. */
+#define STM32N6_RCC_APB2ENR_TIM1    (1UL << 0)
+#define STM32N6_TIM1_BASE           0x42000000UL
+#define STM32N6_TIM_CR1(b)          ((b) + 0x00U)
+#define STM32N6_TIM_EGR(b)          ((b) + 0x14U)
+#define STM32N6_TIM_CCMR1(b)        ((b) + 0x18U)
+#define STM32N6_TIM_CCMR2(b)        ((b) + 0x1CU)
+#define STM32N6_TIM_CCER(b)         ((b) + 0x20U)
+#define STM32N6_TIM_PSC(b)          ((b) + 0x28U)
+#define STM32N6_TIM_ARR(b)          ((b) + 0x2CU)
+#define STM32N6_TIM_CCR(b, ch)      ((b) + 0x34U + (((ch) - 1U) * 4U))
+#define STM32N6_TIM_BDTR(b)         ((b) + 0x44U)
+#define STM32N6_TIM_CR1_CEN         (1UL << 0)
+#define STM32N6_TIM_CR1_ARPE        (1UL << 7)
+#define STM32N6_TIM_EGR_UG          (1UL << 0)
+#define STM32N6_TIM_BDTR_MOE        (1UL << 15)
+#define STM32N6_TIM1_AF             1U
+#define STM32N6_TIM1_PWM_PORT       STM32N6_GPIO_PORT_E
+
+/* True random number generator, on its own AHB3 clock gate. */
+#define STM32N6_RCC_AHB3ENR         (STM32N6_RCC_BASE + 0x258U)
+#define STM32N6_RCC_AHB3ENR_RNG     (1UL << 0)
+
+#define STM32N6_RNG_BASE            0x44020000UL
+#define STM32N6_RNG_CR              (STM32N6_RNG_BASE + 0x000U)
+#define STM32N6_RNG_SR              (STM32N6_RNG_BASE + 0x004U)
+#define STM32N6_RNG_DR              (STM32N6_RNG_BASE + 0x008U)
+
+#define STM32N6_RNG_CR_RNGEN        (1UL << 2)
+#define STM32N6_RNG_CR_IE           (1UL << 3)
+#define STM32N6_RNG_CR_CED          (1UL << 5)
+#define STM32N6_RNG_CR_CONDRST      (1UL << 30)
+#define STM32N6_RNG_SR_DRDY         (1UL << 0)
+#define STM32N6_RNG_SR_CECS         (1UL << 1)
+#define STM32N6_RNG_SR_SECS         (1UL << 2)
+#define STM32N6_RNG_SR_CEIS         (1UL << 5)
+#define STM32N6_RNG_SR_SEIS         (1UL << 6)
+
+/* Cache maintenance. DMA moves data behind the caches, so a buffer must be
+ * cleaned before the controller reads it and invalidated after it writes. */
+#define STM32N6_SCB_CCR             0xE000ED14UL
+#define STM32N6_SCB_CCR_DC          (1UL << 16)
+#define STM32N6_SCB_CCR_IC          (1UL << 17)
+#define STM32N6_SCB_DCCMVAC         0xE000EF68UL   /* clean by address      */
+#define STM32N6_SCB_DCIMVAC         0xE000EF5CUL   /* invalidate by address */
+#define STM32N6_CACHE_LINE          32UL
+
 /* DWT cycle counter: a true count of core cycles, so the CPU rate can be
  * measured without assuming how many cycles an instruction takes. */
 #define STM32N6_SCB_DEMCR           0xE000EDFCUL

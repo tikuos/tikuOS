@@ -1,0 +1,177 @@
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_dma_arch.c - STM32N6 memory-to-memory copy offload on HPDMA channel 0.
+ *
+ * Programmed and verified as far as the controller goes; transfers are refused
+ * because the isolation framework does not yet grant the master its memory.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "tiku_dma_arch.h"
+#include "tiku_stm32n6_regs.h"
+
+#define DMA_CH      STM32N6_GPDMA_MEMCPY_CH
+
+/**
+ * @brief Run a data-cache maintenance operation over an address range.
+ *
+ * The core reaches memory through the cache and the controller does not, so
+ * every buffer handed to DMA needs one of these on each side of the transfer.
+ *
+ * @param op    Register to write, clean or invalidate by address
+ * @param addr  Range start
+ * @param len   Range length in bytes
+ */
+static void dma_cache_op(uint32_t op, const void *addr, size_t len) {
+    if ((TIKU_REG32(STM32N6_SCB_CCR) & STM32N6_SCB_CCR_DC) == 0UL) {
+        return;                                  /* no data cache to maintain */
+    }
+    uintptr_t p   = (uintptr_t)addr & ~(STM32N6_CACHE_LINE - 1UL);
+    uintptr_t end = (uintptr_t)addr + len;
+
+    __asm__ volatile ("dsb" ::: "memory");
+    while (p < end) {
+        TIKU_REG32(op) = (uint32_t)p;
+        p += STM32N6_CACHE_LINE;
+    }
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+}
+
+/** @brief Completion callback and its context, held across the transfer. */
+static volatile tiku_dma_done_cb_t dma_cb;
+static void *volatile dma_ctx;
+
+/** @brief Set while a transfer is outstanding. */
+static volatile uint8_t dma_running;
+
+/** @brief Destination of the transfer in flight, for the completion invalidate. */
+static void *volatile dma_dst;
+static volatile size_t dma_len;
+
+void tiku_dma_arch_init(void) {
+    TIKU_REG32(STM32N6_RCC_AHB5ENR) |= STM32N6_RCC_AHB5ENR_HPDMA1;
+    (void)TIKU_REG32(STM32N6_RCC_AHB5ENR);
+
+    TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH))  = 0UL;
+    TIKU_REG32(STM32N6_GPDMA_FCR(DMA_CH)) = STM32N6_GPDMA_FCR_ALL;
+    TIKU_REG32(STM32N6_GPDMA_LLR(DMA_CH)) = 0UL;   /* single transfer */
+
+    TIKU_REG32(STM32N6_NVIC_ICPR(STM32N6_IRQ_GPDMA1_CH0 / 32U)) =
+        (1UL << (STM32N6_IRQ_GPDMA1_CH0 % 32U));
+    TIKU_REG32(STM32N6_NVIC_ISER(STM32N6_IRQ_GPDMA1_CH0 / 32U)) =
+        (1UL << (STM32N6_IRQ_GPDMA1_CH0 % 32U));
+
+    dma_running = 0U;
+}
+
+int tiku_dma_arch_busy(void) {
+    /* Read the controller rather than the software flag: a caller polling with
+     * interrupts masked would otherwise wait forever on a transfer that has
+     * already finished. */
+    if (!dma_running) {
+        return 0;
+    }
+    uint32_t sr = TIKU_REG32(STM32N6_GPDMA_SR(DMA_CH));
+    if ((sr & (STM32N6_GPDMA_SR_TCF | STM32N6_GPDMA_SR_IDLEF)) == 0UL) {
+        return 1;
+    }
+    /* Completion seen by polling rather than by interrupt: the destination
+     * still has to leave the cache before the caller reads it. */
+    dma_cache_op(STM32N6_SCB_DCIMVAC, dma_dst, dma_len);
+    return 0;
+}
+
+int tiku_dma_arch_memcpy(void *dst, const void *src, size_t len,
+                         tiku_dma_done_cb_t cb, void *ctx) {
+    if (dst == NULL || src == NULL || len == 0U || len > 0xFFFFU) {
+        return TIKU_DMA_ERR_INVALID;
+    }
+#if !TIKU_STM32N6_DMA_ENABLE
+    /* Measured on hardware: the channel accepts the transfer, counts the block
+     * down to zero and raises transfer-complete with no error, but the
+     * destination is untouched. The data cache is off, so this is not a
+     * coherency effect; the part gates bus masters through RIFSC/RISAF, and
+     * this master has not been granted the AXISRAM the image runs in. Refusing
+     * beats reporting a copy that did not happen. */
+    (void)cb;
+    (void)ctx;
+    return TIKU_DMA_ERR_INVALID;
+#else
+    if (dma_running) {
+        return TIKU_DMA_ERR_BUSY;
+    }
+
+    dma_cb  = cb;
+    dma_ctx = ctx;
+    dma_dst = dst;
+    dma_len = len;
+    dma_running = 1U;
+
+    TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH))  = 0UL;
+    TIKU_REG32(STM32N6_GPDMA_FCR(DMA_CH)) = STM32N6_GPDMA_FCR_ALL;
+
+    /* Byte width both sides with both addresses incrementing: correct for any
+     * alignment, and the controller still bursts internally. */
+    TIKU_REG32(STM32N6_GPDMA_TR1(DMA_CH)) =
+        STM32N6_GPDMA_TR1_SINC | STM32N6_GPDMA_TR1_DINC;
+    TIKU_REG32(STM32N6_GPDMA_TR2(DMA_CH)) = STM32N6_GPDMA_TR2_SWREQ;
+    TIKU_REG32(STM32N6_GPDMA_BR1(DMA_CH)) = (uint32_t)len;
+    TIKU_REG32(STM32N6_GPDMA_SAR(DMA_CH)) = (uint32_t)(uintptr_t)src;
+    TIKU_REG32(STM32N6_GPDMA_DAR(DMA_CH)) = (uint32_t)(uintptr_t)dst;
+    TIKU_REG32(STM32N6_GPDMA_LLR(DMA_CH)) = 0UL;
+
+    /* Push the source out of the cache so the controller reads what the core
+     * wrote, and drop the destination so a dirty line cannot land on top of
+     * the transfer afterwards. */
+    dma_cache_op(STM32N6_SCB_DCCMVAC, src, len);
+    dma_cache_op(STM32N6_SCB_DCIMVAC, dst, len);
+
+    __asm__ volatile ("dsb" ::: "memory");
+    TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH)) =
+        STM32N6_GPDMA_CR_TCIE | STM32N6_GPDMA_CR_EN;
+    return TIKU_DMA_OK;
+#endif
+}
+
+int tiku_dma_arch_abort(void) {
+    TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH))  = STM32N6_GPDMA_CR_RESET;
+    TIKU_REG32(STM32N6_GPDMA_FCR(DMA_CH)) = STM32N6_GPDMA_FCR_ALL;
+    dma_running = 0U;
+    dma_cb = NULL;
+    return TIKU_DMA_OK;
+}
+
+/**
+ * @brief GPDMA channel-0 interrupt: retire the transfer and call back.
+ *
+ * The callback runs last so a handler that starts another copy sees the
+ * channel already idle.
+ */
+void tiku_stm32n6_gpdma_ch0_isr(void) {
+    uint32_t sr = TIKU_REG32(STM32N6_GPDMA_SR(DMA_CH));
+
+    TIKU_REG32(STM32N6_GPDMA_FCR(DMA_CH)) = STM32N6_GPDMA_FCR_ALL;
+    TIKU_REG32(STM32N6_GPDMA_CR(DMA_CH))  = 0UL;
+
+    /* The controller wrote past the cache, so drop those lines before anyone
+     * reads the destination. */
+    dma_cache_op(STM32N6_SCB_DCIMVAC, dma_dst, dma_len);
+    dma_running = 0U;
+
+    /* An error flag still ends the transfer; the callback reports completion,
+     * not success, which matches every other port's contract. */
+    (void)sr;
+
+    tiku_dma_done_cb_t cb = dma_cb;
+    void *ctx = dma_ctx;
+    dma_cb = NULL;
+    if (cb != NULL) {
+        cb(ctx);
+    }
+}
