@@ -1795,6 +1795,8 @@ SRCS += arch/stm32n6/tiku_trng_arch.c
 SRCS += arch/stm32n6/tiku_lcd_arch.c
 SRCS += arch/stm32n6/tiku_dma_arch.c
 SRCS += arch/stm32n6/tiku_pwm_arch.c
+SRCS += arch/stm32n6/tiku_xspi_arch.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_xflash.c
 # No hardware backend behind these yet; they fail cleanly so a caller learns
 # the bus is absent rather than reading zeros as data.
 SRCS += arch/stm32n6/tiku_adc_arch.c

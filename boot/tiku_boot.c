@@ -18,6 +18,9 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_boot.h"
+#if defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_xspi_arch.h>
+#endif
 #include <kernel/cpu/tiku_stack.h>   /* stack-paint for /sys/mem/stack_free */
 #include "kernel/cpu/tiku_common.h"
 #include "kernel/memory/tiku_mem.h"
@@ -246,6 +249,13 @@ tiku_boot_init_peripherals(void)
 
     /* System clock must be up before timers or scheduler */
     tiku_clock_init();
+
+#if defined(PLATFORM_STM32N6)
+    /* External NOR. A failure here is not fatal: the image runs from SRAM and
+     * nothing on the boot path needs the flash yet, so the shell reports the
+     * controller as unavailable rather than the system refusing to start. */
+    (void)tiku_xspi_init();
+#endif
 
     return TIKU_BOOT_SUCCESS;
 }

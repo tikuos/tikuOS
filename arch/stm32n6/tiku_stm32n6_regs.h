@@ -214,6 +214,77 @@
 #define STM32N6_TIM1_AF             1U
 #define STM32N6_TIM1_PWM_PORT       STM32N6_GPIO_PORT_E
 
+/* XSPI2 drives the board's 64 MB Macronix NOR through the XSPI I/O manager on
+ * port 2. All eleven signals are GPION at AF9; the flash also answers at
+ * 0x70000000 once memory-mapped mode is armed, which this driver does not
+ * need because every access here is an explicit indirect transfer. */
+#define STM32N6_RCC_AHB4ENR_GPION   (1UL << 13)
+#define STM32N6_RCC_AHB5ENR_XSPI2   (1UL << 12)
+#define STM32N6_RCC_AHB5ENR_XSPIM   (1UL << 13)
+#define STM32N6_RCC_CCIPR6          (STM32N6_RCC_BASE + 0x158U)
+#define STM32N6_CCIPR6_XSPI2SEL_MSK (3UL << 4)
+#define STM32N6_CCIPR6_XSPI2SEL_IC3 (2UL << 4)      /* IC3, per ST's config */
+
+#define STM32N6_GPIO_PORT_N         13U
+#define STM32N6_XSPI2_AF            9U
+
+/* The XSPI2 pads live in the VDDIO3 supply domain, which comes up unpowered:
+ * the rail has to be declared valid and its range selected before the pins
+ * drive anything. This board supplies 1.8 V, which is what ST's own board
+ * code selects -- the range bit is only dangerous on a 3.3 V rail. */
+#define STM32N6_PWR_SVMCR3          (STM32N6_PWR_BASE + 0x03CU)
+#define STM32N6_PWR_SVMCR3_VDDIO3SV (1UL << 9)
+#define STM32N6_PWR_SVMCR3_VDDIO3RDY (1UL << 17)
+#define STM32N6_PWR_SVMCR3_VDDIO3VRSEL (1UL << 26)
+
+#define STM32N6_XSPIM_BASE          0x4802B400UL
+#define STM32N6_XSPIM_CR            (STM32N6_XSPIM_BASE + 0x00U)
+#define STM32N6_XSPIM_CR_MUXEN      (1UL << 0)
+#define STM32N6_XSPIM_CR_MODE       (1UL << 1)
+#define STM32N6_XSPIM_CR_CSSEL_OVR_EN (1UL << 4)
+#define STM32N6_XSPIM_CR_REQ2ACK_POS 16U
+
+#define STM32N6_XSPI2_BASE          0x4802A000UL
+#define STM32N6_XSPI_CR             (STM32N6_XSPI2_BASE + 0x000U)
+#define STM32N6_XSPI_DCR1           (STM32N6_XSPI2_BASE + 0x008U)
+#define STM32N6_XSPI_DCR2           (STM32N6_XSPI2_BASE + 0x00CU)
+#define STM32N6_XSPI_SR             (STM32N6_XSPI2_BASE + 0x020U)
+#define STM32N6_XSPI_FCR            (STM32N6_XSPI2_BASE + 0x024U)
+#define STM32N6_XSPI_DLR            (STM32N6_XSPI2_BASE + 0x040U)
+#define STM32N6_XSPI_AR             (STM32N6_XSPI2_BASE + 0x048U)
+#define STM32N6_XSPI_DR             (STM32N6_XSPI2_BASE + 0x050U)
+#define STM32N6_XSPI_CCR            (STM32N6_XSPI2_BASE + 0x100U)
+#define STM32N6_XSPI_TCR            (STM32N6_XSPI2_BASE + 0x108U)
+#define STM32N6_XSPI_IR             (STM32N6_XSPI2_BASE + 0x110U)
+
+#define STM32N6_XSPI_CR_EN          (1UL << 0)
+#define STM32N6_XSPI_CR_ABORT       (1UL << 1)
+#define STM32N6_XSPI_CR_FTHRES_POS  8U
+#define STM32N6_XSPI_CR_CSSEL       (1UL << 24)
+#define STM32N6_XSPI_CR_FMODE_POS   28U
+#define STM32N6_XSPI_CR_FMODE_MSK   (3UL << 28)
+#define STM32N6_XSPI_FMODE_WRITE    0UL
+#define STM32N6_XSPI_FMODE_READ     1UL
+
+#define STM32N6_XSPI_DCR1_CKMODE    (1UL << 0)
+#define STM32N6_XSPI_DCR1_CSHT_POS  8U
+#define STM32N6_XSPI_DCR1_DEVSIZE_POS 16U
+#define STM32N6_XSPI_DCR1_MTYP_MACRONIX (1UL << 24)
+
+#define STM32N6_XSPI_SR_TEF         (1UL << 0)
+#define STM32N6_XSPI_SR_TCF         (1UL << 1)
+#define STM32N6_XSPI_SR_FTF         (1UL << 2)
+#define STM32N6_XSPI_SR_BUSY        (1UL << 5)
+#define STM32N6_XSPI_FCR_ALL        (0x1BUL)
+
+/* One line for instruction, address and data: the part powers up in plain SPI
+ * and answers there without any mode switch. */
+#define STM32N6_XSPI_CCR_IMODE_1L   (1UL << 0)
+#define STM32N6_XSPI_CCR_ADMODE_1L  (1UL << 8)
+#define STM32N6_XSPI_CCR_ADSIZE_32  (3UL << 12)
+#define STM32N6_XSPI_CCR_DMODE_1L   (1UL << 24)
+#define STM32N6_XSPI_TCR_DHQC       (1UL << 28)
+
 /* True random number generator, on its own AHB3 clock gate. */
 #define STM32N6_RCC_AHB3ENR         (STM32N6_RCC_BASE + 0x258U)
 #define STM32N6_RCC_AHB3ENR_RNG     (1UL << 0)

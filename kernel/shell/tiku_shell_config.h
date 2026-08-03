@@ -67,6 +67,14 @@
 #ifndef TIKU_SHELL_CMD_TRNG
 #define TIKU_SHELL_CMD_TRNG    1  /**< trng    - Dump hardware TRNG bytes */
 #endif
+#ifndef TIKU_SHELL_CMD_XFLASH
+/* Auto-on where an XSPI NOR is wired; off elsewhere. */
+#if defined(PLATFORM_STM32N6)
+#define TIKU_SHELL_CMD_XFLASH  1  /**< xflash - external NOR over XSPI */
+#else
+#define TIKU_SHELL_CMD_XFLASH  0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
 #endif
