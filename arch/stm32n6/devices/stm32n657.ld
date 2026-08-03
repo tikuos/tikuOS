@@ -95,9 +95,8 @@ SECTIONS
     } > SRAM
 
     /* Durable cells. Outside .bss so the reset handler's zero-fill skips them,
-     * which is what lets a value survive a warm reset. Nothing here survives
-     * power loss on this part: the whole image is SRAM until an XSPI backend
-     * exists, so this is warm-reset persistence only. */
+     * which is what lets a value survive a warm reset; the XSPI backend
+     * mirrors this span into the NOR, so it survives power loss too. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
@@ -132,9 +131,11 @@ SECTIONS
     ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
            "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS")
 
-    /* The array ends at 0x343C0000 -- measured, not assumed: a write above it
-     * bus-faults rather than wrapping, so an oversized arena would fail as a
-     * boot-time wedge instead of a link error. */
+    /* The array ends at 0x343C0000 -- measured, not assumed. An access above
+     * it HANGS the bus rather than faulting: with real fault handlers now
+     * installed, a read there produced neither a dump nor a reset. So an
+     * oversized arena would wedge silently at boot; this makes it a link
+     * error instead. */
     ASSERT(__axisram_end <= 0x343C0000,
            "tier arena runs past the top of AXI SRAM; lower TIKU_TIER_SRAM_SIZE")
 

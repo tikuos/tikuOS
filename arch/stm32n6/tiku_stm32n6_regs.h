@@ -92,6 +92,10 @@
 
 /* Cortex-M NVIC. One ISER/ICER word per 32 IRQs. */
 #define STM32N6_NVIC_ISER(n)        (0xE000E100UL + ((n) * 4U))
+/* Armv8-M interrupt target: a set bit sends the IRQ to the non-secure state,
+ * which this image does not have, so the vector would simply never run. */
+#define STM32N6_NVIC_ITNS(n)        (0xE000E380UL + ((n) * 4U))
+#define STM32N6_NVIC_ISPR(n)        (0xE000E200UL + ((n) * 4U))
 #define STM32N6_NVIC_ICER(n)        (0xE000E180UL + ((n) * 4U))
 #define STM32N6_NVIC_ICPR(n)        (0xE000E280UL + ((n) * 4U))
 #define STM32N6_NVIC_IPR(irq)       (0xE000E400UL + (irq))
@@ -193,6 +197,41 @@
 #define STM32N6_GPDMA_TR2_SWREQ     (1UL << 9)
 #define STM32N6_GPDMA_MEMCPY_CH     0U
 #define STM32N6_IRQ_GPDMA1_CH0      68U   /* HPDMA1_CH0 */
+
+/* EXTI gives every line its own vector on this part, so a handler always knows
+ * which line it is for without scanning a shared pending register. */
+#define STM32N6_IRQ_EXTI0           20U
+
+/* EXTI. EXTICR selects which PORT drives each line; the line NUMBER is always
+ * the pin number, so PC13 and PA13 contend for line 13. */
+#define STM32N6_RCC_APB4HENR        (STM32N6_RCC_BASE + 0x278U)
+#define STM32N6_RCC_APB4HENR_SYSCFGEN (1UL << 0)
+
+/* The SECURE alias: the image runs secure and marks its lines secure, and a
+ * secure line's configuration is not writable through the non-secure view --
+ * the same trap the GPDMA channel hit. */
+#define STM32N6_EXTI_BASE           0x56025000UL
+#define STM32N6_EXTI_RTSR1          (STM32N6_EXTI_BASE + 0x000U)
+#define STM32N6_EXTI_FTSR1          (STM32N6_EXTI_BASE + 0x004U)
+#define STM32N6_EXTI_SWIER1         (STM32N6_EXTI_BASE + 0x008U)
+#define STM32N6_EXTI_RPR1           (STM32N6_EXTI_BASE + 0x00CU)
+#define STM32N6_EXTI_FPR1           (STM32N6_EXTI_BASE + 0x010U)
+#define STM32N6_EXTI_SECCFGR1       (STM32N6_EXTI_BASE + 0x014U)
+#define STM32N6_EXTI_PRIVCFGR1      (STM32N6_EXTI_BASE + 0x018U)
+#define STM32N6_EXTI_EXTICR(n)      (STM32N6_EXTI_BASE + 0x060U + ((n) * 4U))
+#define STM32N6_EXTI_IMR1           (STM32N6_EXTI_BASE + 0x080U)
+
+/* IWDG runs from the LSI and, once started, cannot be stopped by software. */
+#define STM32N6_IWDG_BASE           0x46004800UL
+#define STM32N6_IWDG_KR             (STM32N6_IWDG_BASE + 0x00U)
+#define STM32N6_IWDG_PR             (STM32N6_IWDG_BASE + 0x04U)
+#define STM32N6_IWDG_RLR            (STM32N6_IWDG_BASE + 0x08U)
+#define STM32N6_IWDG_SR             (STM32N6_IWDG_BASE + 0x0CU)
+#define STM32N6_IWDG_KR_FEED        0x0000AAAAUL
+#define STM32N6_IWDG_KR_UNLOCK      0x00005555UL
+#define STM32N6_IWDG_KR_START       0x0000CCCCUL
+#define STM32N6_IWDG_SR_BUSY        0x00000007UL   /* PVU | RVU | WVU */
+#define STM32N6_LSI_HZ              32000UL
 
 /* TIM1 drives four PWM channels; ST maps them to PE9/PE11/PE13/PE14 on AF1,
  * none of which collide with the console on PE5/PE6. */
@@ -321,6 +360,24 @@
 
 /* DWT cycle counter: a true count of core cycles, so the CPU rate can be
  * measured without assuming how many cycles an instruction takes. */
+#define STM32N6_SCB_CFSR            0xE000ED28UL   /* configurable fault st */
+#define STM32N6_SCB_HFSR            0xE000ED2CUL   /* hard fault status     */
+#define STM32N6_SCB_MMFAR           0xE000ED34UL   /* memmanage address     */
+#define STM32N6_SCB_BFAR            0xE000ED38UL   /* bus fault address     */
+#define STM32N6_SCB_SHCSR           0xE000ED24UL   /* fault enables         */
+#define STM32N6_SCB_SHCSR_MEMFAULTENA  (1UL << 16)
+#define STM32N6_SCB_SHCSR_BUSFAULTENA  (1UL << 17)
+#define STM32N6_SCB_SHCSR_USGFAULTENA  (1UL << 18)
+#define STM32N6_SCB_AIRCR           0xE000ED0CUL
+#define STM32N6_SCB_AIRCR_VECTKEY   0x05FA0000UL
+#define STM32N6_SCB_AIRCR_SYSRESETREQ (1UL << 2)
+/* MMFSR.MMARVALID and BFSR.BFARVALID say the address registers mean anything;
+ * MMFSR.MSTKERR / BFSR.STKERR say the frame push itself failed, so the stacked
+ * PC and LR are not to be believed. */
+#define STM32N6_CFSR_MMARVALID      (1UL << 7)
+#define STM32N6_CFSR_BFARVALID      (1UL << 15)
+#define STM32N6_CFSR_STKERR_MSK     ((1UL << 4) | (1UL << 12))
+
 #define STM32N6_SCB_DEMCR           0xE000EDFCUL
 #define STM32N6_SCB_DEMCR_TRCENA    (1UL << 24)
 #define STM32N6_DWT_CTRL            0xE0001000UL

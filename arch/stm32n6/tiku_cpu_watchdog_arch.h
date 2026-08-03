@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.h - STM32N6 watchdog contract.
+ * tiku_cpu_watchdog_arch.h - STM32N6 independent watchdog.
  *
- * The independent watchdog is not armed by this port yet, so these calls
- * record intent and report state without resetting the part.
+ * The IWDG counts off the LSI, so it outlives any system-clock change; once
+ * started nothing but a reset stops it, which is why there is no true off.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -46,8 +46,9 @@ void tiku_cpu_stm32n6_watchdog_off_arch(void);
  * @brief Start the watchdog.
  *
  * @param src       Clock source request
- * @param interval  Timeout selector
- * @note Records the request only; the IWDG is not armed on this port yet.
+ * @param interval  Timeout in LSI ticks (~32 kHz), as on Nordic
+ * @note Arms the IWDG. Nothing but a reset stops it again, so off/pause feed
+ *       the counter rather than pretending to halt it.
  */
 void tiku_cpu_stm32n6_watchdog_on_arch(tiku_wdt_clk_t src,
                                        tiku_wdt_interval_t interval);

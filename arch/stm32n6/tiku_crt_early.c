@@ -18,6 +18,7 @@
 #include "tiku_stm32n6_regs.h"
 #include "tiku_sram_arch.h"
 #include "tiku_cache_arch.h"
+#include "tiku_fault_arch.h"
 
 /* Shorthand for filling the external-IRQ span with the default handler. */
 #define DFL     stm32n6_default_handler
@@ -78,6 +79,14 @@ void tiku_stm32n6_systick_handler(void)     __attribute__((weak, alias("stm32n6_
 void tiku_stm32n6_lptim1_isr(void)          __attribute__((weak, alias("stm32n6_default_handler")));
 void tiku_stm32n6_gpdma_ch0_isr(void)       __attribute__((weak, alias("stm32n6_default_handler")));
 
+/* One EXTI vector per line, so a handler never has to scan for its own line. */
+#define EXTI_WEAK(n) \
+    void tiku_stm32n6_exti##n##_isr(void) __attribute__((weak, alias("stm32n6_default_handler")));
+EXTI_WEAK(0)  EXTI_WEAK(1)  EXTI_WEAK(2)  EXTI_WEAK(3)
+EXTI_WEAK(4)  EXTI_WEAK(5)  EXTI_WEAK(6)  EXTI_WEAK(7)
+EXTI_WEAK(8)  EXTI_WEAK(9)  EXTI_WEAK(10) EXTI_WEAK(11)
+EXTI_WEAK(12) EXTI_WEAK(13) EXTI_WEAK(14) EXTI_WEAK(15)
+
 
 void tiku_stm32n6_startup(void);
 
@@ -132,6 +141,10 @@ void tiku_stm32n6_startup(void) {
      * assumed. Before the arena zero loop, which then runs write-allocated. */
     tiku_stm32n6_cache_enable();
 
+    /* Before any driver runs: a bus or usage error that escalates to
+     * HardFault loses the status bits that say what it actually was. */
+    tiku_stm32n6_fault_init();
+
     for (uint32_t *a = &__axisram_start; a < &__axisram_end; a++) {
         *a = 0UL;
     }
@@ -179,5 +192,22 @@ const stm32n6_isr_t tiku_stm32n6_vectors[16 + STM32N6_NUM_EXT_IRQS] = {
      * default already written at that index. */
     [16 + STM32N6_IRQ_LPTIM1]     = tiku_stm32n6_lptim1_isr,
     [16 + STM32N6_IRQ_GPDMA1_CH0] = tiku_stm32n6_gpdma_ch0_isr,
+
+    [16 + STM32N6_IRQ_EXTI0 +  0] = tiku_stm32n6_exti0_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  1] = tiku_stm32n6_exti1_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  2] = tiku_stm32n6_exti2_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  3] = tiku_stm32n6_exti3_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  4] = tiku_stm32n6_exti4_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  5] = tiku_stm32n6_exti5_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  6] = tiku_stm32n6_exti6_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  7] = tiku_stm32n6_exti7_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  8] = tiku_stm32n6_exti8_isr,
+    [16 + STM32N6_IRQ_EXTI0 +  9] = tiku_stm32n6_exti9_isr,
+    [16 + STM32N6_IRQ_EXTI0 + 10] = tiku_stm32n6_exti10_isr,
+    [16 + STM32N6_IRQ_EXTI0 + 11] = tiku_stm32n6_exti11_isr,
+    [16 + STM32N6_IRQ_EXTI0 + 12] = tiku_stm32n6_exti12_isr,
+    [16 + STM32N6_IRQ_EXTI0 + 13] = tiku_stm32n6_exti13_isr,
+    [16 + STM32N6_IRQ_EXTI0 + 14] = tiku_stm32n6_exti14_isr,
+    [16 + STM32N6_IRQ_EXTI0 + 15] = tiku_stm32n6_exti15_isr,
 };
 #pragma GCC diagnostic pop

@@ -83,6 +83,14 @@
 #define TIKU_SHELL_CMD_CACHE   0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_DIAG
+/* Auto-on where the port owns fault/EXTI/watchdog silicon; off elsewhere. */
+#if defined(PLATFORM_STM32N6)
+#define TIKU_SHELL_CMD_DIAG    1  /**< diag - faults, EXTI and the watchdog */
+#else
+#define TIKU_SHELL_CMD_DIAG    0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
 #endif
