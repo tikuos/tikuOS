@@ -20,6 +20,7 @@
 #include "tiku_boot.h"
 #if defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_xspi_arch.h>
+#include <arch/stm32n6/tiku_sram_arch.h>
 #endif
 #include <kernel/cpu/tiku_stack.h>   /* stack-paint for /sys/mem/stack_free */
 #include "kernel/cpu/tiku_common.h"
@@ -219,7 +220,7 @@ tiku_boot_init_memory(void)
     tiku_mem_init();
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
     /* Bring up the tier allocator at boot so tier-backed allocations (per-
      * process memory, etc.) work without relying on a lazy first-touch init.
      * tiku_tier_init is idempotent, so BASIC's later lazy call is a no-op.
@@ -247,6 +248,12 @@ tiku_boot_init_peripherals(void)
     /* UART must be initialized before clock so printf is available
      * as early as possible (GPIO is already unlocked by init_cpu). */
     tiku_uart_init();
+
+#if defined(PLATFORM_STM32N6) && defined(TIKU_N6_SRAM_PROBE)
+    /* After the console exists: the probe reports as it walks, and nothing
+     * owns the banks it writes to yet. */
+    tiku_stm32n6_sram_probe();
+#endif
 
 #if defined(TIKU_CONSOLE_USB)
     /* Native USB CDC-ACM console (TIKU_CONSOLE=usb/both). Polled: serviced

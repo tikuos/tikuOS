@@ -1145,7 +1145,8 @@ else ifeq ($(TIKU_PLATFORM),stm32n6)
 
 # STM32N657: Cortex-M55 with Helium, same core as Apollo510. The whole image
 # runs from the 255 KB SRAM window the boot ROM loads it into, so there is no
-# flash region and no XIP -- code, data and stack share one bank.
+# flash region and no XIP -- code, data and stack share that window.  The rest
+# of the 3.75 MB array is claimed separately (see TIKU_TIER_SRAM_SIZE below).
 CFLAGS  = -mcpu=cortex-m55 -mthumb
 CFLAGS += -mfpu=auto -mfloat-abi=hard
 CFLAGS += -Os -Wall -Wextra -Wno-psabi
@@ -1155,6 +1156,12 @@ CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_STM32N6=1
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
+# The AXI SRAM array runs to 0x343C0000 -- measured on silicon, since a write
+# above it bus-faults -- so the 2 MB above the ROM's image window is free.  The
+# tier arena takes 1.5 MB of that (linker section .axisram, woken and zeroed in
+# tiku_crt_early.c), which costs the image window nothing and leaves 512 KB of
+# the block for the NPU-side buffers N6-11 will want.
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=1572864   # 1.5 MB tier arena above the window
 
 else
 
@@ -1796,6 +1803,11 @@ SRCS += arch/stm32n6/tiku_lcd_arch.c
 SRCS += arch/stm32n6/tiku_dma_arch.c
 SRCS += arch/stm32n6/tiku_pwm_arch.c
 SRCS += arch/stm32n6/tiku_xspi_arch.c
+SRCS += arch/stm32n6/tiku_sram_arch.c
+ifeq ($(TIKU_N6_SRAM_PROBE),1)
+# Destructive bank walk; diagnostics only, never in a default build.
+CFLAGS += -DTIKU_N6_SRAM_PROBE=1
+endif
 ifeq ($(TIKU_N6_OTP_TOOL),1)
 # One-shot provisioning tool; burns OTP, so never in a default build.
 SRCS += arch/stm32n6/tiku_otp_tool.c

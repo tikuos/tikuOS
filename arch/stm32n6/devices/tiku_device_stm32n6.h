@@ -41,11 +41,19 @@
 #define TIKU_DEVICE_CS_TYPE_STM32N6 1
 #define TIKU_DEVICE_MAX_STABLE_MHZ  600
 
-/* The image window the boot ROM loads into, per the CubeProgrammer device DB:
- * 0x34180400 for 0x3FC00 bytes. Code, data and stack all live here, so this is
- * the whole memory budget -- the part's other SRAM banks are not claimed yet. */
-#define TIKU_DEVICE_RAM_START       0x34180400UL
-#define TIKU_DEVICE_RAM_SIZE        0x3FC00UL
+/* The AXI SRAM array is one contiguous span from 0x34000000 to 0x343C0000 --
+ * 3.75 MB, measured on silicon rather than taken from a datasheet total, since
+ * a write above the top bus-faults. The boot ROM loads the image into a 255 KB
+ * window part-way up it (0x34180400), so code, data and stack occupy that
+ * window while the tier arena takes the 2 MB above it. */
+#define TIKU_DEVICE_RAM_START       0x34000000UL
+#define TIKU_DEVICE_RAM_SIZE        0x3C0000UL
+
+/* The window the boot ROM copies into, which is what .data/.bss/stack fit in
+ * and what the linker script bounds; the rest of the array is reached through
+ * the region table rather than by linking into it. */
+#define TIKU_DEVICE_IMAGE_WINDOW_START  0x34180400UL
+#define TIKU_DEVICE_IMAGE_WINDOW_SIZE   0x3FC00UL
 
 /* No internal NVM: the durable store is the 64 MB Macronix NOR on XSPI2,
  * described here by its memory-mapped window. Nothing of the image lives

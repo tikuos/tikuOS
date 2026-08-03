@@ -122,7 +122,7 @@ _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_HIFRAM_SIZE,
                "BASIC arena does not fit the HIFRAM tier pool -- raise "
                "TIKU_TIER_HIFRAM_SIZE or lower TIKU_BASIC_PROGRAM_LINES");
 #elif defined(PLATFORM_NORDIC) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_RP2350)
+      defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6)
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_SIZE,
                "BASIC arena does not fit the SRAM tier pool -- raise "
                "TIKU_TIER_SRAM_SIZE for this MCU in the Makefile, or lower "

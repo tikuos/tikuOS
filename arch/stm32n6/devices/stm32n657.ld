@@ -38,7 +38,8 @@ ENTRY(tiku_stm32n6_reset_handler)
 
 MEMORY
 {
-    SRAM (rwx) : ORIGIN = 0x34180400, LENGTH = 0x3FC00
+    SRAM   (rwx) : ORIGIN = 0x34180400, LENGTH = 0x3FC00
+    AXISRAM (rw) : ORIGIN = 0x341C0000, LENGTH = 0x200000
 }
 
 __sram_start = ORIGIN(SRAM);
@@ -107,6 +108,19 @@ SECTIONS
         __uninit_end = .;
     } > SRAM
 
+    /* The AXI SRAM array runs on past the image window the boot ROM loads
+     * into, so the tier arena lives above __stack rather than competing with
+     * .bss for the 255 KB the ROM copies. NOLOAD: the ROM copies the image
+     * only, and tiku_stm32n6_sram_init() has to wake the banks before the
+     * startup code may zero this. */
+    .axisram (NOLOAD) : ALIGN(32)
+    {
+        __axisram_start = .;
+        *(.axisram*)
+        . = ALIGN(4);
+        __axisram_end = .;
+    } > AXISRAM
+
     _end = __uninit_end;
     PROVIDE(end = _end);
 
@@ -117,6 +131,12 @@ SECTIONS
      * runtime with nothing to show for it, so it is a link error instead. */
     ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
            "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS")
+
+    /* The array ends at 0x343C0000 -- measured, not assumed: a write above it
+     * bus-faults rather than wrapping, so an oversized arena would fail as a
+     * boot-time wedge instead of a link error. */
+    ASSERT(__axisram_end <= 0x343C0000,
+           "tier arena runs past the top of AXI SRAM; lower TIKU_TIER_SRAM_SIZE")
 
     /DISCARD/ :
     {

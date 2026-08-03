@@ -55,7 +55,7 @@
 #endif
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 /* Nordic runs the BIG tier too (2026-07: it previously ran the middle FRAM
  * tier, an MSP430-class 96-line BASIC on Ambiq-class silicon).  The LM20's
  * tier arena lives in its own 256 KB SRAM bank (RAM2), so it takes the

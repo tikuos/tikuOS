@@ -20,6 +20,8 @@ extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t _end;       /* end of the image, including durable cells */
 extern uint32_t __stack;    /* top of the window; the stack grows down from here */
+extern uint32_t __axisram_start;    /* tier arena, above the image window */
+extern uint32_t __axisram_end;
 
 /* Headroom left for the stack between the free region and __stack. The whole
  * image lives in the same window as the heap on this part, so a region that
@@ -27,7 +29,7 @@ extern uint32_t __stack;    /* top of the window; the stack grows down from here
 #define STM32N6_STACK_RESERVE   (16UL * 1024UL)
 
 /** @brief Built on first call; zero count means not yet populated. */
-static tiku_mem_region_t stm32n6_region_table[2];
+static tiku_mem_region_t stm32n6_region_table[3];
 static tiku_mem_arch_size_t stm32n6_region_count;
 
 /**
@@ -57,6 +59,19 @@ const struct tiku_mem_region *tiku_region_arch_get_table(
             : 0U;
         stm32n6_region_table[idx].type = TIKU_MEM_REGION_SRAM;
         idx++;
+
+        /* The arena above the image window. Listed separately rather than
+         * merged with the block above because the two are not adjacent: the
+         * stack sits between them. */
+        uintptr_t arena_start = (uintptr_t)&__axisram_start;
+        uintptr_t arena_end   = (uintptr_t)&__axisram_end;
+        if (arena_end > arena_start) {
+            stm32n6_region_table[idx].base = (const uint8_t *)arena_start;
+            stm32n6_region_table[idx].size =
+                (tiku_mem_arch_size_t)(arena_end - arena_start);
+            stm32n6_region_table[idx].type = TIKU_MEM_REGION_SRAM;
+            idx++;
+        }
 
         if (uninit_end > uninit_start) {
             stm32n6_region_table[idx].base = (const uint8_t *)uninit_start;

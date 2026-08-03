@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "tiku_stm32n6_regs.h"
+#include "tiku_sram_arch.h"
 
 /* Shorthand for filling the external-IRQ span with the default handler. */
 #define DFL     stm32n6_default_handler
@@ -29,6 +30,8 @@ extern uint32_t __data_end;
 extern uint32_t __bss_start;
 extern uint32_t __bss_end;
 extern uint32_t __stack;
+extern uint32_t __axisram_start;
+extern uint32_t __axisram_end;
 
 extern int main(void);
 
@@ -116,6 +119,15 @@ void tiku_stm32n6_startup(void) {
 
     for (uint32_t *b = &__bss_start; b < &__bss_end; b++) {
         *b = 0UL;
+    }
+
+    /* Before the arena is zeroed, not after: the banks it lives in come out of
+     * reset shut down, and a write to a shut-down bank is swallowed silently
+     * rather than faulting, so the zeroing would simply not happen. */
+    tiku_stm32n6_sram_init();
+
+    for (uint32_t *a = &__axisram_start; a < &__axisram_end; a++) {
+        *a = 0UL;
     }
 
     (void)main();
