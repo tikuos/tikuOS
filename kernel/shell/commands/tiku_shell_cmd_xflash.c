@@ -15,6 +15,10 @@
 
 #include "tiku_shell_cmd_xflash.h"
 #include <kernel/shell/tiku_shell.h>
+#include <kernel/shell/tiku_shell_io.h>
+#include <kernel/memory/tiku_nvm_mirror.h>
+#include <arch/stm32n6/tiku_uart_arch.h>
+#include <hal/tiku_cpu.h>
 #include <string.h>
 
 #if defined(PLATFORM_STM32N6)
@@ -134,6 +138,108 @@ static void xflash_dump(uint32_t addr)
     SHELL_PRINTF("\n");
 }
 
+/* Staging lives in the free SRAM above the image rather than in .bss: an
+ * install buffer big enough for a whole firmware image would otherwise cost
+ * that much memory permanently for a command that runs once. */
+extern uint32_t _end;
+extern uint32_t __stack;
+
+/** @brief Headroom left for the stack above the staging area. */
+#define XFLASH_STACK_RESERVE  (32u * 1024u)
+
+/**
+ * @brief Read one byte from the console, bounded.
+ *
+ * @return The byte, or -1 if none arrived before the bound expired
+ */
+static int xflash_getc_timeout(void)
+{
+    for (unsigned long spins = 40000000UL; spins > 0UL; spins--) {
+        int c = tiku_shell_io_getc();
+        if (c >= 0) {
+            return c;
+        }
+    }
+    return -1;
+}
+
+/**
+ * @brief Receive an image over the console and program it into the flash.
+ *
+ * The whole image is staged in RAM first, because reading and programming
+ * cannot interleave: a page program outlasts the 87 us between bytes at this
+ * line rate, and the UART has nowhere to hold the difference.
+ *
+ * @param addr  Byte offset into the device
+ * @param len   Image length in bytes
+ */
+static void xflash_write(uint32_t addr, uint32_t len)
+{
+    uint8_t *buf = (uint8_t *)(((uintptr_t)&_end + 31u) & ~(uintptr_t)31u);
+    uintptr_t top = (uintptr_t)&__stack - XFLASH_STACK_RESERVE;
+
+    if (len == 0u || addr + len > TIKU_XSPI_SIZE_BYTES) {
+        SHELL_PRINTF("xflash: bad range\n");
+        return;
+    }
+    if ((uintptr_t)buf + len > top) {
+        SHELL_PRINTF("xflash: image too large to stage (%lu free)\n",
+                     (unsigned long)(top - (uintptr_t)buf));
+        return;
+    }
+
+    SHELL_PRINTF("xflash: send %lu bytes now\n", (unsigned long)len);
+    tiku_shell_io_putc('<');
+
+    for (uint32_t i = 0u; i < len; i++) {
+        int c = xflash_getc_timeout();
+        if (c < 0) {
+            SHELL_PRINTF("\nxflash: timed out %lu bytes in, %u overruns\n",
+                         (unsigned long)i, (unsigned)tiku_uart_overrun_count());
+            return;
+        }
+        buf[i] = (uint8_t)c;
+    }
+
+    uint32_t sum = 0u;
+    for (uint32_t i = 0u; i < len; i++) {
+        sum += buf[i];
+    }
+    SHELL_PRINTF("\nxflash: received, checksum %08lx; erasing %lu sectors\n",
+                 (unsigned long)sum,
+                 (unsigned long)((len + TIKU_XSPI_SECTOR_SIZE - 1u)
+                                 / TIKU_XSPI_SECTOR_SIZE));
+
+    for (uint32_t off = 0u; off < len; off += TIKU_XSPI_SECTOR_SIZE) {
+        if (tiku_xspi_erase_sector(addr + off) != TIKU_XSPI_OK) {
+            SHELL_PRINTF("xflash: erase failed at %lx\n",
+                         (unsigned long)(addr + off));
+            return;
+        }
+    }
+    if (tiku_xspi_program(addr, buf, len) != TIKU_XSPI_OK) {
+        SHELL_PRINTF("xflash: program failed\n");
+        return;
+    }
+
+    /* Read back through the flash rather than trusting the write. */
+    uint32_t back = 0u;
+    for (uint32_t off = 0u; off < len; off += 256u) {
+        uint8_t tmp[256];
+        uint32_t n = (len - off < 256u) ? (len - off) : 256u;
+        if (tiku_xspi_read(addr + off, tmp, n) != TIKU_XSPI_OK) {
+            SHELL_PRINTF("xflash: verify read failed\n");
+            return;
+        }
+        for (uint32_t i = 0u; i < n; i++) {
+            back += tmp[i];
+        }
+    }
+    SHELL_PRINTF("xflash: wrote %lu bytes at %lx, flash checksum %08lx %s\n",
+                 (unsigned long)len, (unsigned long)addr, (unsigned long)back,
+                 (back == sum) ? "(matches)" : "(MISMATCH)");
+}
+
 void tiku_shell_cmd_xflash(uint8_t argc, const char *argv[])
 {
     if (!tiku_xspi_ready()) {
@@ -165,7 +271,22 @@ void tiku_shell_cmd_xflash(uint8_t argc, const char *argv[])
         xflash_dump(addr);
         return;
     }
-    SHELL_PRINTF("Usage: xflash [id|test|dump <hexaddr>]\n");
+    if (strcmp(argv[1], "write") == 0 && argc >= 4) {
+        uint32_t a = 0u, l = 0u;
+        for (const char *q = argv[2]; *q; q++) {
+            uint32_t d = (*q <= '9') ? (uint32_t)(*q - '0')
+                                     : (uint32_t)((*q | 32) - 'a' + 10);
+            a = (a << 4) | d;
+        }
+        for (const char *q = argv[3]; *q; q++) {
+            uint32_t d = (*q <= '9') ? (uint32_t)(*q - '0')
+                                     : (uint32_t)((*q | 32) - 'a' + 10);
+            l = (l << 4) | d;
+        }
+        xflash_write(a, l);
+        return;
+    }
+    SHELL_PRINTF("Usage: xflash [id|test|dump <hexaddr>|write <hexaddr> <hexlen>]\n");
     SHELL_PRINTF("  test erases and rewrites the scratch sector at %lx\n",
                  (unsigned long)XFLASH_SCRATCH);
 }
