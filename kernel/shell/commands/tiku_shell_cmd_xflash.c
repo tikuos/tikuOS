@@ -20,8 +20,9 @@
 #if defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_xspi_arch.h>
 
-/* The last sector, as far from a boot image at offset 0 as the part allows. */
-#define XFLASH_SCRATCH  (TIKU_XSPI_SIZE_BYTES - TIKU_XSPI_SECTOR_SIZE)
+/* Sits below the durable mirror, so an erase test cannot destroy state that
+ * is meant to survive; both are far from a boot image at offset 0. */
+#define XFLASH_SCRATCH  TIKU_XSPI_SCRATCH_ADDR
 
 /** @brief Human-readable form of an XSPI result. */
 static const char *xflash_err(tiku_xspi_err_t e)

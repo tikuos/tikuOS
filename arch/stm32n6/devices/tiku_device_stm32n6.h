@@ -47,12 +47,14 @@
 #define TIKU_DEVICE_RAM_START       0x34180400UL
 #define TIKU_DEVICE_RAM_SIZE        0x3FC00UL
 
-/* No internal NVM of any kind. Durability is SRAM-backed for now; the 64 Mbit
- * Macronix XSPI part on the board is the eventual home. */
-#define TIKU_DEVICE_FRAM_SIZE       0UL
-#define TIKU_DEVICE_FRAM_START      0UL
-#define TIKU_DEVICE_FRAM_END        0UL
-#define TIKU_DEVICE_NVM_LABEL       "none (SRAM)"
+/* No internal NVM: the durable store is the 64 MB Macronix NOR on XSPI2,
+ * described here by its memory-mapped window. Nothing of the image lives
+ * there -- code runs from SRAM -- so the in-use figure derived from _etext
+ * correctly comes out zero. */
+#define TIKU_DEVICE_FRAM_SIZE       0x04000000UL
+#define TIKU_DEVICE_FRAM_START      0x70000000UL
+#define TIKU_DEVICE_FRAM_END        0x73FFFFFFUL
+#define TIKU_DEVICE_NVM_LABEL       "NOR"
 
 #define TIKU_DEVICE_HAS_MPU         1
 

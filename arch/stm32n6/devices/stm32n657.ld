@@ -112,6 +112,12 @@ SECTIONS
 
     __stack = __sram_end;
 
+    /* The durable region is mirrored into four 4 KB NOR sectors less a
+     * 16-byte header. A region that outgrows that would lose its tail at
+     * runtime with nothing to show for it, so it is a link error instead. */
+    ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
+           "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS")
+
     /DISCARD/ :
     {
         *(.comment)

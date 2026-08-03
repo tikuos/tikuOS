@@ -207,6 +207,14 @@ tiku_boot_init_cpu(unsigned int cpu_freq)
 static int
 tiku_boot_init_memory(void)
 {
+#if defined(PLATFORM_STM32N6)
+    /* External NOR first: the durable mirror is restored from it inside
+     * tiku_mem_init(), so the controller has to be live before that runs. A
+     * failure is not fatal -- the image runs from SRAM and the durable region
+     * simply keeps its reset contents. */
+    (void)tiku_xspi_init();
+#endif
+
     /* Initialize memory subsystem (arch-specific setup + module state) */
     tiku_mem_init();
 
@@ -249,13 +257,6 @@ tiku_boot_init_peripherals(void)
 
     /* System clock must be up before timers or scheduler */
     tiku_clock_init();
-
-#if defined(PLATFORM_STM32N6)
-    /* External NOR. A failure here is not fatal: the image runs from SRAM and
-     * nothing on the boot path needs the flash yet, so the shell reports the
-     * controller as unavailable rather than the system refusing to start. */
-    (void)tiku_xspi_init();
-#endif
 
     return TIKU_BOOT_SUCCESS;
 }

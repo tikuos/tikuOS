@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.h - STM32N6 memory helpers.
+ * tiku_mem_arch.h - STM32N6 memory helpers and the durable mirror.
  *
- * The part has no internal NVM, so the durable calls act on ordinary SRAM and
- * the flush is a barrier rather than a program cycle.
+ * Durable state lives in SRAM and is mirrored to the last sector of the
+ * external NOR, so it survives a power cycle rather than only a warm reset.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,12 +52,32 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
  * @param dst  Destination inside the durable region
  * @param src  Source
  * @param len  Length in bytes
- * @note SRAM-backed here, so this does not survive a power cycle.
+ * @note Reaches flash only at the next tiku_mem_arch_nvm_flush().
  */
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
-/** @brief Make prior durable writes visible; a barrier on this part. */
+/**
+ * @brief Commit the durable SRAM region to the flash mirror.
+ *
+ * The explicit durability checkpoint: once this returns, the state survives a
+ * power cycle. Skipped when the mirror already matches, which costs an erase
+ * cycle out of a finite budget for nothing.
+ */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief What the boot-time mirror restore found.
+ *
+ * @return One of the tiku_nvm_restore_t values
+ */
+int tiku_mem_arch_nvm_restore_status(void);
+
+/**
+ * @brief Count of mirror commits since boot.
+ *
+ * @return Number of erase/program cycles this boot has spent
+ */
+uint32_t tiku_mem_arch_nvm_program_count(void);
 
 #endif /* TIKU_STM32N6_MEM_ARCH_H_ */

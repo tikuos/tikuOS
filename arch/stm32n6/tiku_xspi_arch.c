@@ -47,6 +47,9 @@
 /** @brief Set once init has completed, so later calls can refuse early. */
 static uint8_t xspi_ready;
 
+/** @brief Set while the memory-mapped window is live. */
+static uint8_t xspi_mmap;
+
 /** @brief Wait for a status-register bit, returning 0 on timeout. */
 static int xspi_wait(uint32_t reg, uint32_t mask, int want_set,
                      unsigned long spins) {
@@ -80,6 +83,9 @@ static void xspi_finish(void) {
  */
 static tiku_xspi_err_t xspi_xfer(uint8_t cmd, uint32_t addr, int use_addr,
                                  void *buf, uint32_t len, int write) {
+    if (xspi_mmap) {
+        (void)tiku_xspi_mmap_disable();
+    }
     if (!xspi_wait(STM32N6_XSPI_SR, STM32N6_XSPI_SR_BUSY, 0, XSPI_SPINS)) {
         return TIKU_XSPI_ERR_TIMEOUT;
     }
@@ -327,6 +333,52 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
         p    += n;
         len  -= n;
     }
+    return TIKU_XSPI_OK;
+}
+
+tiku_xspi_err_t tiku_xspi_mmap_enable(void) {
+    if (!xspi_ready) {
+        return TIKU_XSPI_ERR_STATE;
+    }
+    if (!xspi_wait(STM32N6_XSPI_SR, STM32N6_XSPI_SR_BUSY, 0, XSPI_SPINS)) {
+        return TIKU_XSPI_ERR_TIMEOUT;
+    }
+    xspi_finish();
+
+    /* The window replays one read command for every fetch, so the command
+     * shape is programmed once here rather than per access. */
+    TIKU_REG32(STM32N6_XSPI_CCR) = STM32N6_XSPI_CCR_IMODE_1L |
+                                   STM32N6_XSPI_CCR_ADMODE_1L |
+                                   STM32N6_XSPI_CCR_ADSIZE_32 |
+                                   STM32N6_XSPI_CCR_DMODE_1L;
+    TIKU_REG32(STM32N6_XSPI_TCR) = 0UL;
+    TIKU_REG32(STM32N6_XSPI_IR)  = CMD_READ_4B;
+
+    uint32_t cr = TIKU_REG32(STM32N6_XSPI_CR);
+    cr &= ~STM32N6_XSPI_CR_FMODE_MSK;
+    cr |= (STM32N6_XSPI_FMODE_MMAP << STM32N6_XSPI_CR_FMODE_POS);
+    TIKU_REG32(STM32N6_XSPI_CR) = cr;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+    xspi_mmap = 1U;
+    return TIKU_XSPI_OK;
+}
+
+tiku_xspi_err_t tiku_xspi_mmap_disable(void) {
+    if (!xspi_mmap) {
+        return TIKU_XSPI_OK;
+    }
+    /* Abort ends the outstanding mapped access; without it the controller
+     * stays busy and the next indirect command never starts. */
+    TIKU_REG32(STM32N6_XSPI_CR) |= STM32N6_XSPI_CR_ABORT;
+    (void)xspi_wait(STM32N6_XSPI_CR, STM32N6_XSPI_CR_ABORT, 0, XSPI_SPINS);
+    (void)xspi_wait(STM32N6_XSPI_SR, STM32N6_XSPI_SR_BUSY, 0, XSPI_SPINS);
+    xspi_finish();
+
+    uint32_t cr = TIKU_REG32(STM32N6_XSPI_CR);
+    cr &= ~STM32N6_XSPI_CR_FMODE_MSK;
+    TIKU_REG32(STM32N6_XSPI_CR) = cr;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+    xspi_mmap = 0U;
     return TIKU_XSPI_OK;
 }
 

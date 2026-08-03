@@ -45,6 +45,18 @@ typedef struct {
 /* The memory-mapped window, for reference; this driver uses indirect access. */
 #define TIKU_XSPI_MMAP_BASE     0x70000000UL
 
+/* Flash layout. The top of the device mirrors the durable SRAM region, and
+ * the scratch the shell's erase test uses sits below it so a test can never
+ * destroy state that is meant to survive.
+ *
+ * Four sectors, against a durable region under nine: the headroom is
+ * deliberate, and the linker script asserts the region still fits, because a
+ * mirror one byte too small loses the tail of durable state in silence. */
+#define TIKU_XSPI_MIRROR_SECTORS 4U
+#define TIKU_XSPI_MIRROR_BYTES  (TIKU_XSPI_SECTOR_SIZE * TIKU_XSPI_MIRROR_SECTORS)
+#define TIKU_XSPI_MIRROR_ADDR   (TIKU_XSPI_SIZE_BYTES - TIKU_XSPI_MIRROR_BYTES)
+#define TIKU_XSPI_SCRATCH_ADDR  (TIKU_XSPI_MIRROR_ADDR - TIKU_XSPI_SECTOR_SIZE)
+
 /**
  * @brief Bring up XSPI2, its I/O manager and the pins, then read the identity.
  *
@@ -89,6 +101,23 @@ tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr);
  * @note Programming only clears bits; the target must be erased first.
  */
 tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len);
+
+/**
+ * @brief Map the flash into the address space for pointer reads.
+ *
+ * Indirect commands cannot run while the window is live, so the write paths
+ * take it down and put it back.
+ *
+ * @return TIKU_XSPI_OK, or an error
+ */
+tiku_xspi_err_t tiku_xspi_mmap_enable(void);
+
+/**
+ * @brief Take the memory-mapped window down so indirect commands can run.
+ *
+ * @return TIKU_XSPI_OK, or an error
+ */
+tiku_xspi_err_t tiku_xspi_mmap_disable(void);
 
 /**
  * @brief Report the clock the flash is being driven at.
