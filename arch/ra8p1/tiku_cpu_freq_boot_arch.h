@@ -9,9 +9,6 @@
  *
  * R2 does not touch the clock tree.  The part comes out of reset on MOCO at
  * 8 MHz with every SCKDIVCR field zero, and every derived constant in the port
- * -- console divisor, SysTick reload, delay loop -- is computed from that one
- * number.  What this module does provide is a way to READ the tree back, so
- * R4 can prove the PLL landed where it was asked to rather than assuming it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

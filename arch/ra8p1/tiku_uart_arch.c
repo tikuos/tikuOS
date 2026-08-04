@@ -9,8 +9,6 @@
  *
  * The route to this channel is spread over three documents and worth naming
  * once: the kit manual puts the debugger's virtual COM port on PD02/PD03, the
- * hardware manual's PORTD table gives those pins as TXD8_C/RXD8_C at
- * PSEL=00100b, and the datasheet places SCI8_B at 0x4035_8800 on PCLKA.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,21 +20,15 @@
 
 #define SCI     TIKU_BOARD_CONSOLE_SCI
 
-/**
- * @brief Solve the manual's asynchronous baud equation for BRR.
- *
- * UM 39: with ABCS/ABCSE/BGDM clear the generator divides by 32 per bit, not
- * by the 16 the sampling rate might suggest --
+/*
+ * Solve UM 39's asynchronous baud equation for BRR:
  *
  *     baud = PCLKA / (32 * 2^(2*CKS) * (BRR + 1))
  *
- * That factor is the whole trap.  Reading it as 16 gives BRR 51 instead of 25
- * at 9600 from 8 MHz, the console runs at half rate, and the symptom is a
- * silent-looking port rather than an obviously wrong number.  The check is
- * cheap: the manual's own table (UM Table 39.11) gives CKS 0, BRR 25 for this
- * exact case, and the _Static_assert below refuses a build that disagrees.
- *
- * The + half-divisor rounds to nearest rather than truncating.
+ * The generator divides by 32 per bit, NOT the 16 the sampling rate suggests;
+ * reading it as 16 halves the line rate, and the symptom is a silent-looking
+ * port rather than an obviously wrong number.  The assert below pins the
+ * result to the manual's own table entry.
  */
 #define SCI_BRR_FOR(pclk, baud) \
     ((uint32_t)((((pclk) + (16UL * (baud))) / (32UL * (baud))) - 1UL))
@@ -54,6 +46,71 @@ _Static_assert(CONSOLE_BRR == 25UL,
                "8 MHz PCLKA is CKS 0, BRR 25) -- check the /32, not the /16");
 #endif
 
+/*
+ * Received bytes are taken by an ISR into a ring, not polled by the shell.
+ *
+ * That is not a preference.  The scheduler idles in WFI between ticks, so a
+ * polled reader samples the SCI at 128 Hz while characters arrive at ~960/s:
+ * typing "help" delivered 'h' and lost "elp", every time.  A one-byte hardware
+ * register cannot bridge that gap; a ring fed at character rate can.
+ */
+/* 4096, matching the Nordic port and for its reason.  64 was both too small
+ * and off by one -- a ring of N holds N-1, so the burst test's 64 bytes could
+ * never fit -- but the size that matters is the one that rides out a pause:
+ * a long crypto or NVM operation blocks the reader for tens of milliseconds,
+ * and at 115200 (where R4 leaves this port) a small ring overflows on every
+ * one.  Power of two; override with -DTIKU_UART_RX_RING=<N>. */
+#ifndef TIKU_UART_RX_RING
+#define TIKU_UART_RX_RING   4096U
+#endif
+
+static volatile uint8_t  uart_rxring[TIKU_UART_RX_RING];
+static volatile uint16_t uart_rx_head;
+static volatile uint16_t uart_rx_tail;
+
+/** @brief Bytes lost, whether to a full ring or a hardware overrun. */
+static volatile uint16_t uart_overruns;
+
+/** @brief NVIC slot this port links the SCI receive event onto. */
+#define UART_RXI_SLOT   0U
+
+/**
+ * @brief Point one NVIC slot at one peripheral event and unmask it.
+ *
+ * @param slot   NVIC slot, 0..TIKU_RA8P1_NUM_EXT_IRQS-1
+ * @param event  Event number from the manual's event list
+ */
+static void icu_link(unsigned slot, uint32_t event)
+{
+    TIKU_REG32(RA8P1_ICU_IELSR(slot)) = event;
+    /* Read back before unmasking: the write crosses into the ICU's clock
+     * domain, and an NVIC enable that overtakes it would arm a slot still
+     * pointing at whatever was there before. */
+    (void)TIKU_REG32(RA8P1_ICU_IELSR(slot));
+    TIKU_REG32(RA8P1_NVIC_ISER(slot / 32U)) = (1UL << (slot % 32U));
+}
+
+/**
+ * @brief SCI receive interrupt: take the byte before the next one lands.
+ *
+ * A full ring drops the NEW byte rather than the oldest.  Dropping the oldest
+ * would corrupt a command line already half-typed; dropping the newest loses
+ * the tail, which the user can see and retype.
+ */
+void tiku_ra8p1_sci_rxi_handler(void)
+{
+    uint8_t b = (uint8_t)(TIKU_REG32(RA8P1_SCI_RDR(SCI)) & 0xFFUL);
+    uint16_t next = (uint16_t)((uart_rx_head + 1U) % TIKU_UART_RX_RING);
+
+    if (next != uart_rx_tail) {
+        uart_rxring[uart_rx_head] = b;
+        uart_rx_head = next;
+    } else {
+        uart_overruns++;
+    }
+    TIKU_REG32(RA8P1_ICU_IELSR(UART_RXI_SLOT)) &= ~RA8P1_ICU_IELSR_IR;
+}
+
 void tiku_uart_init(void)
 {
     /* Ungate SCI8 before any of its registers are touched: a write to a
@@ -61,7 +118,7 @@ void tiku_uart_init(void)
     TIKU_REG32(RA8P1_MSTPCRB) &= ~RA8P1_MSTPB_SCI8;
 
     /* PFS writes are protected.  Clear B0WI first, then set PFSWE: the two
-     * cannot be written in one access, which is the point of the interlock. */
+     * cannot be written in one access. */
     TIKU_REG8(RA8P1_PWPR_S) = 0x00U;
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_PFSWE;
 
@@ -86,7 +143,12 @@ void tiku_uart_init(void)
      * asynchronous 8N1 with the internal clock (UM 39: MOD=000, CHR=10 for
      * 8-bit, STP=0).  Writing them would only risk disagreeing with the
      * manual's own defaults. */
-    TIKU_REG32(RA8P1_SCI_CCR0(SCI)) = RA8P1_SCI_CCR0_TE | RA8P1_SCI_CCR0_RE;
+    uart_rx_head = 0U;
+    uart_rx_tail = 0U;
+    icu_link(UART_RXI_SLOT, RA8P1_EVENT_SCI8_RXI);
+
+    TIKU_REG32(RA8P1_SCI_CCR0(SCI)) = RA8P1_SCI_CCR0_TE | RA8P1_SCI_CCR0_RE |
+                                      RA8P1_SCI_CCR0_RIE;
 }
 
 void tiku_uart_putc(char c)
@@ -106,13 +168,34 @@ void tiku_uart_puts(const char *s)
 
 uint8_t tiku_uart_rx_ready(void)
 {
-    return (TIKU_REG32(RA8P1_SCI_CSR(SCI)) & RA8P1_SCI_CSR_RDRF) ? 1U : 0U;
+    /* An overrun latches ORER and STOPS reception until it is cleared, so a
+     * single dropped byte would silence the port permanently -- which reads as
+     * dead hardware rather than as a lost character. */
+    if (TIKU_REG32(RA8P1_SCI_CSR(SCI)) & RA8P1_SCI_CSR_ORER) {
+        uart_overruns++;
+        TIKU_REG32(RA8P1_SCI_CFCLR(SCI)) = RA8P1_SCI_CFCLR_ORERC;
+    }
+    return (uart_rx_head != uart_rx_tail) ? 1U : 0U;
 }
 
 int tiku_uart_getc(void)
 {
-    if (!tiku_uart_rx_ready()) { return -1; }
-    return (int)(TIKU_REG32(RA8P1_SCI_RDR(SCI)) & 0xFFUL);
+    uint8_t b;
+
+    if (uart_rx_head == uart_rx_tail) { return -1; }
+    b = uart_rxring[uart_rx_tail];
+    uart_rx_tail = (uint16_t)((uart_rx_tail + 1U) % TIKU_UART_RX_RING);
+    return (int)b;
+}
+
+uint16_t tiku_uart_overrun_count(void)
+{
+    return uart_overruns;
+}
+
+void tiku_uart_overrun_reset(void)
+{
+    uart_overruns = 0U;
 }
 
 /** @brief Emit an unsigned value in the given base, no padding. */

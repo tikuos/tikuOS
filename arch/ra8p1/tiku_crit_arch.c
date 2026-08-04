@@ -9,9 +9,6 @@
  *
  * The kernel tick is SysTick, a core exception with no NVIC line, so masking
  * the NVIC never silences it -- TIKU_CRIT_PRESERVE_HTIMER therefore has
- * nothing to select here and the tick survives a critical section for free.
- * That is a property of the tick choice, not an oversight; when R4 moves the
- * tick to ULPT or AGT, this file gains a preserve entry with it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

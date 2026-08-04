@@ -7,16 +7,8 @@
  *
  * r7ka8p1kf.ld - R7KA8P1KF (EK-RA8P1) linker script, SRAM-resident image.
  *
- * The part has 1 MB of code MRAM at 0x02000000, but R2 images are loaded into
- * SRAM by the debugger: nothing is programmed into MRAM until R6/R7 establish
- * how to write it safely.  So code, data and stack all live in the SRAM
- * window, exactly as the STM32N6 port does for the same reason.
- *
- * Memory map (MEASURED on this board, R1 log):
- *   0x22000000  user SRAM.  Read/write verified to 0x221C0000; the datasheet
- *               puts user SRAM at 1664 KB, ending 0x221A0000.  The smaller
- *               figure is used -- the port does not rely on the 128 KB the
- *               two disagree about.
+ * The 1 MB code MRAM is not written until R6 establishes how to do it
+ * safely, so code, data and stack all live in the SRAM window at 0x22000000.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -61,6 +53,7 @@ SECTIONS
     .data : AT(__data_load)
     {
         __data_start = .;
+        __datastart = .;
         *(.data*)
         . = ALIGN(4);
         __data_end = .;

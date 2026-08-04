@@ -68,4 +68,14 @@ uint8_t tiku_uart_rx_ready(void);
  */
 int tiku_uart_getc(void);
 
+/**
+ * @brief Count of receive overruns since the counter was last cleared.
+ *
+ * @return Overruns observed
+ */
+uint16_t tiku_uart_overrun_count(void);
+
+/** @brief Zero the overrun counter. */
+void tiku_uart_overrun_reset(void);
+
 #endif /* TIKU_RA8P1_UART_ARCH_H_ */

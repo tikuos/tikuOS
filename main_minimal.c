@@ -421,6 +421,22 @@ int main(void)
                          (b != a) ? "PASS" : "FAIL -- tick was silenced");
     }
 
+    /* Is the busy-wait delay the length it claims?  Everything that paces
+     * itself without the tick -- notably a watchdog kick loop -- depends on
+     * this, and the answer is a measurement, not the spin constant. */
+    {
+        tiku_clock_arch_time_t a, b;
+
+        a = tiku_clock_arch_time();
+        tiku_cpu_ra8p1_delay_ms(1000U);
+        b = tiku_clock_arch_time();
+        tiku_uart_printf("delay: 1000 ms measured %u ticks (%u expected), "
+                         "spin=%u/ms\n",
+                         (unsigned int)(b - a),
+                         (unsigned int)TIKU_CLOCK_ARCH_SECOND,
+                         (unsigned int)tiku_cpu_ra8p1_spin_per_ms());
+    }
+
     tiku_clock_arch_time_t next = tiku_clock_arch_time() +
                                   (tiku_clock_arch_time_t)TIKU_CLOCK_ARCH_SECOND;
     uint32_t i = 0;

@@ -29,22 +29,19 @@
 #define TIKU_RA8P1_MRAM_SIZE        (1024UL * 1024UL)
 
 /**
- * @brief User SRAM base.
+ * @brief User SRAM base and extent.
  *
- * MEASURED read/write to 0x221C_0000 on this board; accesses above that abort.
- * The datasheet's 1664 KB user SRAM would end at 0x221A_0000, so the extent
- * below is the smaller, provable one -- the port does not rely on the 128 KB
- * the two figures disagree about.
+ * R1 read/wrote up to 0x221C_0000, but the datasheet's 1664 KB ends at
+ * 0x221A_0000; the smaller, provable figure is the one used.
  */
 #define TIKU_RA8P1_SRAM_BASE        0x22000000UL
 #define TIKU_RA8P1_SRAM_SIZE        (1664UL * 1024UL)
 
 /**
- * @brief CM85 TCM window.
+ * @brief CM85 TCM window: recorded, not used.
  *
- * Responds at the base, but repeated probing of its extent gave inconsistent
- * results in R1, so nothing is placed here until the TCM control registers are
- * driven deliberately.  Recorded, not used.
+ * Responds at the base, but R1's probes of its extent disagreed, so nothing
+ * is placed here until the TCM control registers are driven deliberately.
  */
 #define TIKU_RA8P1_TCM_BASE         0x20000000UL
 
@@ -55,24 +52,62 @@
 /**
  * @brief Peripheral clock A after reset, in Hz.
  *
- * SCKDIVCR reads 0 out of reset -- MEASURED -- so every divider is /1 and both
- * ICLK and PCLKA are the middle-speed oscillator.  The 8 MHz below is MOCO's
- * NOMINAL rate; its spec is 7.2 / 8.0 / 8.8 (datasheet Table, FMOCO), and this
- * board measures 8.330 MHz -- +4.12%, well inside spec.
- *
- * The nominal figure is nevertheless the right constant to derive from, and
- * the reason is worth stating: it is what the manual's own baud tables are
- * computed against, so a divisor derived from it agrees with the table a
- * reader will check it against.  What it costs is that every derived rate
- * inherits MOCO's tolerance -- the 128 Hz tick really runs at 133.3 Hz here,
- * and the 9600 console really runs at 10012 baud, which is inside 8N1's
- * framing tolerance but not by much.  R4's crystal-referenced PLL is what
- * turns these from nominal into true; nothing before R4 should be believed to
- * better than 10%.
+ * SCKDIVCR reads 0 out of reset, so ICLK and PCLKA are both MOCO.  This is
+ * MOCO's NOMINAL rate (spec 7.2/8.0/8.8); the board measures 8.330 MHz, so
+ * everything derived from it inherits +-10% until R4's PLL.
  */
 #define TIKU_RA8P1_MOCO_HZ          8000000UL
 #define TIKU_RA8P1_PCLKA_BOOT_HZ    TIKU_RA8P1_MOCO_HZ
 #define TIKU_RA8P1_ICLK_BOOT_HZ     TIKU_RA8P1_MOCO_HZ
+
+/*---------------------------------------------------------------------------*/
+/* Kernel-facing device description                                          */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * I/O ports.  The manual names them PORT0..PORT9 then PORTA..PORTD, and the
+ * VFS gpio tree numbers its nodes 1..9 -- so /dev/gpio/6 is PORT6, the one
+ * carrying LED1.  PORTA..PORTD have no node under that numbering; the LED
+ * interface reaches PA07 through the board macros instead.
+ */
+#define TIKU_DEVICE_HAS_PORT1       1
+#define TIKU_DEVICE_HAS_PORT2       1
+#define TIKU_DEVICE_HAS_PORT3       1
+#define TIKU_DEVICE_HAS_PORT4       1
+#define TIKU_DEVICE_HAS_PORT5       1
+#define TIKU_DEVICE_HAS_PORT6       1
+#define TIKU_DEVICE_HAS_PORT7       1
+#define TIKU_DEVICE_HAS_PORT8       1
+#define TIKU_DEVICE_HAS_PORT9       1
+#define TIKU_DEVICE_HAS_PORTJ       0   /* MSP430 port J has no RA analogue */
+
+/* Both crystals are fitted on the EK (kit UM Table 8); neither is running
+ * before R4, so nothing yet depends on either figure. */
+#define TIKU_DEVICE_HAS_LFXT        1
+#define TIKU_DEVICE_HAS_HFXT        1
+#define TIKU_DEVICE_XOSC_HZ         24000000UL
+#define TIKU_DEVICE_CS_HAS_KEY      0
+#define TIKU_DEVICE_CS_TYPE_RA8P1   1
+#define TIKU_DEVICE_MAX_STABLE_MHZ  1000
+
+/* SRAM as the port uses it: the provable 1664 KB from the base, not the wider
+ * span R1 could still read. */
+#define TIKU_DEVICE_RAM_START       TIKU_RA8P1_SRAM_BASE
+#define TIKU_DEVICE_RAM_SIZE        TIKU_RA8P1_SRAM_SIZE
+
+/*
+ * The code MRAM, described so `free` and the region table can name it.  No
+ * part of the image lives there at R3 -- code runs from SRAM -- so the in-use
+ * figure derived from _etext correctly comes out zero, and it stays zero until
+ * R6 works out how to write MRAM safely.
+ */
+#define TIKU_DEVICE_FRAM_SIZE       TIKU_RA8P1_MRAM_SIZE
+#define TIKU_DEVICE_FRAM_START      TIKU_RA8P1_MRAM_BASE
+#define TIKU_DEVICE_FRAM_END        (TIKU_RA8P1_MRAM_BASE + \
+                                     TIKU_RA8P1_MRAM_SIZE - 1UL)
+#define TIKU_DEVICE_NVM_LABEL       "MRAM"
+
+#define TIKU_DEVICE_HAS_MPU         1
 
 /*---------------------------------------------------------------------------*/
 /* Interrupts                                                                */
@@ -81,10 +116,8 @@
 /**
  * @brief External interrupt count, for the vector table and the NVIC loops.
  *
- * The RA event-link controller maps peripheral events onto a fixed bank of
- * NVIC lines; 96 covers the bank with room to spare and keeps the table one
- * page.  Nothing external is wired in R2 -- the tick is SysTick, which is a
- * core exception and needs no NVIC line at all.
+ * The ICU maps peripheral events onto any of these slots; 96 covers the bank
+ * with room to spare and keeps the vector table one page.
  */
 #define TIKU_RA8P1_NUM_EXT_IRQS     96
 

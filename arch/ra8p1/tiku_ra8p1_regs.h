@@ -9,10 +9,6 @@
  *
  * Every address here is from the RA8P1 Group User's Manual: Hardware
  * (R01UH1064EJ0130) or the Group Datasheet (R01DS0439EJ0110); the section is
- * named beside each block so a reader can check it without guessing.  The
- * SECURE aliases are used throughout: the Security Extension is enabled on
- * this part and the port runs entirely in the secure world (see the R2 note
- * in kintsugi/ra8p1-port.md).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,6 +22,8 @@
 #define TIKU_REG32(a)   (*(volatile uint32_t *)(uintptr_t)(a))
 /** @brief 8-bit MMIO accessor, for the byte-wide protect registers. */
 #define TIKU_REG8(a)    (*(volatile uint8_t *)(uintptr_t)(a))
+/** @brief 16-bit MMIO accessor; the watchdogs insist on halfword access. */
+#define TIKU_REG16(a)   (*(volatile uint16_t *)(uintptr_t)(a))
 
 /*---------------------------------------------------------------------------*/
 /* System control (UM 9, "Clock Generation Circuit")                         */
@@ -49,6 +47,22 @@
 #define RA8P1_SCKDIVCR_ICK_SHIFT    24U
 #define RA8P1_SCKDIVCR_MRPCK_SHIFT  28U
 #define RA8P1_SCKSCR_CKSEL_MASK     0x07U
+
+/*
+ * Reset status (UM 6.2).  Note the offsets are NOT adjacent: RSTSR1 sits at
+ * 0x0C0 while RSTSR0 and RSTSR2 are up at 0xA40/0xA44.
+ */
+#define RA8P1_RSTSR0            (RA8P1_SYSC_BASE + 0xA40UL)  /* 8-bit  */
+#define RA8P1_RSTSR1            (RA8P1_SYSC_BASE + 0x0C0UL)  /* 16-bit */
+#define RA8P1_RSTSR2            (RA8P1_SYSC_BASE + 0xA44UL)  /* 8-bit  */
+#define RA8P1_RSTSR0_PORF       (1U << 0)
+#define RA8P1_RSTSR0_DPSRSTF    (1U << 7)
+#define RA8P1_RSTSR1_IWDTRF     (1U << 0)
+#define RA8P1_RSTSR1_WDT0RF     (1U << 1)
+#define RA8P1_RSTSR1_SWRF       (1U << 2)
+
+/** @brief Unique ID words (UM 60.5.41), four of them, read-only. */
+#define RA8P1_UIDR(n)           (0x02F07B00UL + (4UL * (n)))
 
 /*---------------------------------------------------------------------------*/
 /* Module stop (UM 11.2, "Module Stop Control Registers")                    */
@@ -100,8 +114,11 @@
 #define RA8P1_SCI_CCR2(ch)      (RA8P1_SCI_BASE(ch) + 0x10UL)
 #define RA8P1_SCI_CCR3(ch)      (RA8P1_SCI_BASE(ch) + 0x14UL)
 #define RA8P1_SCI_CSR(ch)       (RA8P1_SCI_BASE(ch) + 0x48UL)
+#define RA8P1_SCI_CFCLR(ch)     (RA8P1_SCI_BASE(ch) + 0x68UL)
+#define RA8P1_SCI_CFCLR_ORERC   (1UL << 24)
 #define RA8P1_SCI_CCR0_RE       (1UL << 0)
 #define RA8P1_SCI_CCR0_TE       (1UL << 4)
+#define RA8P1_SCI_CCR0_RIE      (1UL << 16)  /* receive interrupt enable */
 #define RA8P1_SCI_CSR_ORER      (1UL << 24)
 #define RA8P1_SCI_CSR_TDRE      (1UL << 29)
 #define RA8P1_SCI_CSR_TEND      (1UL << 30)
@@ -115,6 +132,41 @@
 #define RA8P1_SCI_CCR2_BASE     0xFF000004UL
 #define RA8P1_SCI_CCR2_BRR(n)   (((uint32_t)(n) & 0xFFUL) << 8)
 #define RA8P1_SCI_CCR2_CKS(n)   (((uint32_t)(n) & 0x03UL) << 20)
+
+/*---------------------------------------------------------------------------*/
+/* ICU event link (UM 14.2.17)                                               */
+/*                                                                           */
+/* Peripheral interrupts do NOT have fixed NVIC slots on this family: any of  */
+/* the 96 slots can carry any event, and IELSRn says which.  Nothing reaches  */
+/* the NVIC until its slot is linked -- which is why SysTick, a core          */
+/* exception, was the tick that needed none of this.                          */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_ICU_BASE          0x4000C000UL
+#define RA8P1_ICU_IELSR(n)      (RA8P1_ICU_BASE + 0x300UL + (4UL * (n)))
+#define RA8P1_ICU_IELSR_IR      (1UL << 16)   /* interrupt status, write 0 */
+
+/** @brief Event numbers this port links (UM Table 14.5). */
+#define RA8P1_EVENT_SCI8_RXI    0x2FCUL
+#define RA8P1_EVENT_SCI8_ERI    0x2FFUL
+
+/*---------------------------------------------------------------------------*/
+/* IWDT (UM 29, "Independent Watchdog Timer")                                */
+/*                                                                           */
+/* Counts IWDTCLK = LOCO/2 = 16.384 kHz, which is why this and not WDT is the */
+/* kernel's watchdog: WDT counts PCLKB and would need re-arming every time R4 */
+/* moves the clock.  OFS0 reads 0xFFFFFFFF on this board -- MEASURED -- so    */
+/* IWDTSTRT is 1: register start mode, counting begins on the first refresh.  */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_IWDT_BASE         0x40202200UL
+#define RA8P1_IWDT_RR           (RA8P1_IWDT_BASE + 0x00UL)  /* 8-bit  */
+#define RA8P1_IWDT_CR           (RA8P1_IWDT_BASE + 0x02UL)  /* 16-bit */
+#define RA8P1_IWDT_SR           (RA8P1_IWDT_BASE + 0x04UL)  /* 16-bit */
+#define RA8P1_IWDT_CR_TOPS(n)   (((uint16_t)(n) & 0x3U) << 0)
+#define RA8P1_IWDT_CR_CKS(n)    (((uint16_t)(n) & 0xFU) << 4)
+#define RA8P1_IWDT_CR_RPES_NONE (0x3U << 8)   /* no window end   */
+#define RA8P1_IWDT_CR_RPSS_NONE (0x3U << 12)  /* no window start */
+/** @brief IWDTCLK in Hz: the LOCO, always divided by two (UM 9.10.32). */
+#define RA8P1_IWDTCLK_HZ        16384UL
 
 /*---------------------------------------------------------------------------*/
 /* Cortex-M85 core peripherals (Armv8.1-M, not part-specific)                */
@@ -135,5 +187,8 @@
 #define RA8P1_SAU_TYPE          0xE000EDD4UL
 #define RA8P1_NVIC_ISER(i)      (0xE000E100UL + (4UL * (i)))
 #define RA8P1_NVIC_ICER(i)      (0xE000E180UL + (4UL * (i)))
+#define RA8P1_SCB_AIRCR         0xE000ED0CUL
+#define RA8P1_AIRCR_VECTKEY     0x05FA0000UL
+#define RA8P1_AIRCR_SYSRESETREQ (1UL << 2)
 
 #endif /* TIKU_RA8P1_REGS_H_ */

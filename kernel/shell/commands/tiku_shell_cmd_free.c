@@ -196,7 +196,14 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
      */
     {
         unsigned long text_end = (unsigned long)(uintptr_t)&_etext;
-        fram_used = text_end > TIKU_DEVICE_FRAM_START
+        /* Both bounds, not just the lower one.  On a port whose image runs
+         * from SRAM ABOVE the NVM window -- RA8P1 loads at 0x22000000 with
+         * MRAM at 0x02000000 -- a lower-bound test alone passes and reports
+         * the distance between two unrelated memories as "in use", which came
+         * out as 512 MB of a 1 MB part.  Outside the window the honest answer
+         * is that no image bytes live in NVM. */
+        fram_used = (text_end > TIKU_DEVICE_FRAM_START &&
+                     text_end <= TIKU_DEVICE_FRAM_END)
                     ? (unsigned long)(text_end + TIKU_FREE_IVT_BYTES
                                  - TIKU_DEVICE_FRAM_START)
                     : TIKU_FREE_IVT_BYTES;

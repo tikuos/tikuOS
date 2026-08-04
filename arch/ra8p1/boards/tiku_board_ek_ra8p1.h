@@ -36,12 +36,13 @@
 /**
  * @brief Console baud rate.
  *
- * 9600, not the 115200 the other fast parts use, and that is a clock fact
- * rather than a preference: out of reset PCLKA is MOCO at 8 MHz, and the
- * manual's own BRR table marks 38400 and above unachievable there.  R4 raises
- * the clock; this constant moves with it, not before.
+ * 9600, not the house 115200: out of reset PCLKA is MOCO at 8 MHz, where the
+ * manual's BRR table marks 38400 and above unachievable.  R4 raises the
+ * clock; this constant moves with it, not before.
  */
+#ifndef TIKU_BOARD_UART_BAUD
 #define TIKU_BOARD_UART_BAUD        9600UL
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* Oscillators fitted on the board                                           */
@@ -69,6 +70,25 @@
 #define TIKU_BOARD_LED3_PORT        0xAU    /* red,   PA07 */
 #define TIKU_BOARD_LED3_PIN         7U
 
+/* Active high: the MCU pin drives the anode through the series resistor, so a
+ * 1 lights the LED.  Verified by eye on LED1 during R2's smoke test. */
+#include <arch/ra8p1/tiku_gpio_arch.h>
+
+#define TIKU_BOARD_LED1_INIT()   tiku_ra8p1_gpio_init_output(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN)
+#define TIKU_BOARD_LED1_ON()     tiku_ra8p1_gpio_set(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN, 1)
+#define TIKU_BOARD_LED1_OFF()    tiku_ra8p1_gpio_set(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN, 0)
+#define TIKU_BOARD_LED1_TOGGLE() tiku_ra8p1_gpio_toggle(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN)
+
+#define TIKU_BOARD_LED2_INIT()   tiku_ra8p1_gpio_init_output(TIKU_BOARD_LED2_PORT, TIKU_BOARD_LED2_PIN)
+#define TIKU_BOARD_LED2_ON()     tiku_ra8p1_gpio_set(TIKU_BOARD_LED2_PORT, TIKU_BOARD_LED2_PIN, 1)
+#define TIKU_BOARD_LED2_OFF()    tiku_ra8p1_gpio_set(TIKU_BOARD_LED2_PORT, TIKU_BOARD_LED2_PIN, 0)
+#define TIKU_BOARD_LED2_TOGGLE() tiku_ra8p1_gpio_toggle(TIKU_BOARD_LED2_PORT, TIKU_BOARD_LED2_PIN)
+
+#define TIKU_BOARD_LED3_INIT()   tiku_ra8p1_gpio_init_output(TIKU_BOARD_LED3_PORT, TIKU_BOARD_LED3_PIN)
+#define TIKU_BOARD_LED3_ON()     tiku_ra8p1_gpio_set(TIKU_BOARD_LED3_PORT, TIKU_BOARD_LED3_PIN, 1)
+#define TIKU_BOARD_LED3_OFF()    tiku_ra8p1_gpio_set(TIKU_BOARD_LED3_PORT, TIKU_BOARD_LED3_PIN, 0)
+#define TIKU_BOARD_LED3_TOGGLE() tiku_ra8p1_gpio_toggle(TIKU_BOARD_LED3_PORT, TIKU_BOARD_LED3_PIN)
+
 /*---------------------------------------------------------------------------*/
 /* User switches                                                             */
 /*                                                                           */
@@ -79,5 +99,37 @@
 #define TIKU_BOARD_SW1_PIN          9U
 #define TIKU_BOARD_SW2_PORT         0U      /* P008, IRQ12-DS */
 #define TIKU_BOARD_SW2_PIN          8U
+
+#define TIKU_BOARD_BTN1_PORT        TIKU_BOARD_SW1_PORT
+#define TIKU_BOARD_BTN1_PIN         TIKU_BOARD_SW1_PIN
+#define TIKU_BOARD_BTN1_INIT()      (void)tiku_gpio_arch_set_input(TIKU_BOARD_BTN1_PORT, TIKU_BOARD_BTN1_PIN)
+/* Active low: the switch pulls the pin to ground and the board fits a
+ * pull-up, so a read of 0 is a press. */
+#define TIKU_BOARD_BTN1_PRESSED()   (tiku_gpio_arch_read(TIKU_BOARD_BTN1_PORT, TIKU_BOARD_BTN1_PIN) == 0)
+
+#define TIKU_BOARD_BTN2_PORT        TIKU_BOARD_SW2_PORT
+#define TIKU_BOARD_BTN2_PIN         TIKU_BOARD_SW2_PIN
+#define TIKU_BOARD_BTN2_INIT()      (void)tiku_gpio_arch_set_input(TIKU_BOARD_BTN2_PORT, TIKU_BOARD_BTN2_PIN)
+#define TIKU_BOARD_BTN2_PRESSED()   (tiku_gpio_arch_read(TIKU_BOARD_BTN2_PORT, TIKU_BOARD_BTN2_PIN) == 0)
+
+/*---------------------------------------------------------------------------*/
+/* Buses with no arch backend yet                                            */
+/*                                                                           */
+/* The EK routes plenty of these -- SCI, IIC and SPI all reach the Arduino,   */
+/* mikroBUS, Qwiic and PMOD headers -- but a board macro describes what the   */
+/* SOFTWARE can drive, and none of them has a driver on this port.  Each turns */
+/* on with its driver, not before.                                            */
+/*---------------------------------------------------------------------------*/
+#define TIKU_BOARD_BSCAT_PORT       0U
+#define TIKU_BOARD_BSCAT_PIN        0U
+#define TIKU_BOARD_ADC_AVAILABLE    0
+#define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic */
+#define TIKU_BOARD_OW_AVAILABLE     0
+#define TIKU_BOARD_OW_PIN           0U
+#define TIKU_BOARD_I2C0_SDA_PIN     0U
+#define TIKU_BOARD_I2C0_SCL_PIN     0U
+#define TIKU_BOARD_SPI0_MISO_PIN    0U
+#define TIKU_BOARD_SPI0_SCK_PIN     0U
+#define TIKU_BOARD_SPI0_MOSI_PIN    0U
 
 #endif /* TIKU_BOARD_EK_RA8P1_H_ */

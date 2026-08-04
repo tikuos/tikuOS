@@ -9,9 +9,6 @@
  *
  * A vector table at the image base and a reset handler that runs .data/.bss
  * and calls main.  R2 images are loaded into SRAM by the debugger, which sets
- * SP and PC explicitly, so unlike the STM32N6 there is no ROM handing over
- * without a stack -- but the table still carries the correct SP in word 0 so
- * that an MRAM-resident image (R7 onward) boots the same code unchanged.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -71,6 +68,9 @@ void tiku_ra8p1_pendsv_handler(void)      __attribute__((weak, alias("ra8p1_defa
 /* The kernel clock supplies the real SysTick handler; the weak stub keeps
  * builds that leave the timer out linking. */
 void tiku_ra8p1_systick_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
+
+/* Console receive; weak so a build without the UART still links. */
+void tiku_ra8p1_sci_rxi_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
 
 void tiku_ra8p1_startup(void);
 
@@ -150,8 +150,15 @@ const ra8p1_isr_t tiku_ra8p1_vectors[16 + TIKU_RA8P1_NUM_EXT_IRQS] = {
     tiku_ra8p1_pendsv_handler,
     tiku_ra8p1_systick_handler,
 
-    /* Every external IRQ gets the default handler.  A zero-filled tail would
-     * send an unexpected interrupt to address 0 instead of parking it. */
-    DFL16, DFL16, DFL16, DFL16, DFL16, DFL16,
+    /* External IRQ 0 carries the console receive event; the ICU decides that
+     * at run time (tiku_uart_arch.c links it), but the VECTOR is a build-time
+     * choice and has to agree with UART_RXI_SLOT there.
+     *
+     * The rest get the default handler.  A zero-filled tail would send an
+     * unexpected interrupt to address 0 instead of parking it. */
+    tiku_ra8p1_sci_rxi_handler,
+    DFL, DFL, DFL,
+    DFL4, DFL4, DFL4,
+    DFL16, DFL16, DFL16, DFL16, DFL16,
 };
 #pragma GCC diagnostic pop

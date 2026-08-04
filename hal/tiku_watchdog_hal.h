@@ -27,6 +27,8 @@
 #include "arch/nordic/tiku_cpu_watchdog_arch.h"
 #elif defined(PLATFORM_STM32N6)
 #include "arch/stm32n6/tiku_cpu_watchdog_arch.h"
+#elif defined(PLATFORM_RA8P1)
+#include "arch/ra8p1/tiku_cpu_watchdog_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -148,6 +150,20 @@
     tiku_cpu_stm32n6_watchdog_pause_arch()
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_stm32n6_watchdog_resume_arch(kick)
+#elif defined(PLATFORM_RA8P1)
+/* The IWDT has no interrupt-on-timeout mode, so interval mode is absent
+ * rather than emulated. */
+#define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
+#define tiku_watchdog_arch_on(src, isel) \
+    tiku_cpu_ra8p1_watchdog_on_arch((src), (isel))
+#define tiku_watchdog_arch_off() \
+    tiku_cpu_ra8p1_watchdog_off_arch()
+#define tiku_watchdog_arch_kick() \
+    tiku_cpu_ra8p1_watchdog_kick_arch()
+#define tiku_watchdog_arch_pause() \
+    tiku_cpu_ra8p1_watchdog_pause_arch()
+#define tiku_watchdog_arch_resume(kick) \
+    tiku_cpu_ra8p1_watchdog_resume_arch(kick)
 #endif
 
 #endif /* TIKU_WATCHDOG_HAL_H_ */

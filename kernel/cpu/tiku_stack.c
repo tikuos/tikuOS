@@ -28,7 +28,7 @@
 static uintptr_t stack_sp(void)
 {
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_RA8P1)
     uintptr_t sp;
     __asm__ volatile ("mov %0, sp" : "=r"(sp));
     return sp;

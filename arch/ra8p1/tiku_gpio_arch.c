@@ -9,10 +9,6 @@
  *
  * Two register views reach the same pin.  Configuration goes through PmnPFS,
  * which is per-pin and write-protected; the level goes through the port's
- * PCNTR3, whose set and clear halves are separate write-only fields, so
- * driving one pin never reads back and rewrites its neighbours.  That
- * distinction matters here because the ports carry peripheral pins too: a
- * read-modify-write on PCNTR1 could re-drive a pin the SCI owns.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,8 +23,8 @@
 /**
  * @brief Write one PmnPFS register through the protect interlock.
  *
- * PFSWE cannot be set in the same access that clears B0WI, which is the point
- * of the interlock; the sequence below is the manual's (UM 21.2.8).
+ * PFSWE cannot be set in the same access that clears B0WI; the sequence
+ * below is the manual's (UM 21.2.8).
  *
  * @param port  Port index
  * @param pin   Pin number

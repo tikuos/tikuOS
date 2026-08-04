@@ -21,13 +21,16 @@
 #include <msp430.h>    /* MSP430 intrinsics for interrupt state management */
 #include "arch/msp430/tiku_cpu_freq_boot_arch.h"
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
 #if defined(PLATFORM_RP2350)
 #include "arch/arm-rp2350/tiku_cpu_freq_boot_arch.h"
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_cpu_freq_boot_arch.h"
 #elif defined(PLATFORM_STM32N6)
 #include "arch/stm32n6/tiku_cpu_freq_boot_arch.h"
+#elif defined(PLATFORM_RA8P1)
+#include "arch/ra8p1/tiku_cpu_freq_boot_arch.h"
 #else
 #include "arch/nordic/tiku_cpu_freq_boot_arch.h"
 #endif
@@ -35,8 +38,8 @@
 
 /* ARM Cortex-M PRIMASK helpers, written out rather than pulled from
  * <cmsis_gcc.h> or <core_cm33.h> to keep tikuOS dependency-free. The
- * instructions are identical on Cortex-M33 (RP2350 / nRF54L) and M55
- * (Apollo510). */
+ * instructions are identical on Cortex-M33 (RP2350 / nRF54L), M55
+ * (Apollo510 / STM32N6) and M85 (RA8P1). */
 static inline uint32_t tiku_arm_get_primask(void) {
     uint32_t v;
     __asm__ volatile ("mrs %0, primask" : "=r"(v));
@@ -83,7 +86,8 @@ void tiku_atomic_enter(void) {
   }
   tiku_atomic_nesting++;
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
   /* PRIMASK = 0 means IRQs enabled; PRIMASK = 1 means masked. The bit is
    * snapshotted on the outermost entry and restored on the outermost
    * exit, mirroring the MSP430 GIE handling above. */
@@ -101,7 +105,8 @@ void tiku_atomic_exit(void) {
 #if defined(PLATFORM_MSP430)
     __enable_interrupt();
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
     tiku_arm_enable_irq();
 #endif
   }
@@ -115,7 +120,8 @@ void tiku_cpu_irq_enable(void) {
 #if defined(PLATFORM_MSP430)
     __enable_interrupt();
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
     tiku_arm_enable_irq();
 #endif
 }
@@ -124,7 +130,8 @@ void tiku_cpu_irq_disable(void) {
 #if defined(PLATFORM_MSP430)
     __disable_interrupt();
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
     tiku_arm_disable_irq();
 #endif
 }
@@ -144,6 +151,8 @@ void tiku_cpu_boot_init(void) {
     tiku_cpu_boot_nordic_init();
 #elif defined(PLATFORM_STM32N6)
     tiku_cpu_boot_stm32n6_init();
+#elif defined(PLATFORM_RA8P1)
+    tiku_cpu_boot_ra8p1_init();
 #endif
 }
 
@@ -158,6 +167,10 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
     tiku_cpu_freq_nordic_init(cpu_freq);
 #elif defined(PLATFORM_STM32N6)
     tiku_cpu_freq_stm32n6_init(cpu_freq);
+#elif defined(PLATFORM_RA8P1)
+    /* R4's milestone.  Silently accepting the request would leave `freq`
+     * reporting a rate the part is not running at. */
+    (void)cpu_freq;
 #endif
 }
 
@@ -172,6 +185,8 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
     (void)addr; (void)len;            /* nRF54L M33: no data cache */
 #elif defined(PLATFORM_STM32N6)
     (void)addr; (void)len;            /* caches are not enabled on this port */
+#elif defined(PLATFORM_RA8P1)
+    (void)addr; (void)len;            /* M85 caches are off until R5 */
 #endif
 }
 
@@ -186,6 +201,8 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
     (void)addr; (void)len;            /* nRF54L M33: no data cache */
 #elif defined(PLATFORM_STM32N6)
     (void)addr; (void)len;            /* caches are not enabled on this port */
+#elif defined(PLATFORM_RA8P1)
+    (void)addr; (void)len;            /* M85 caches are off until R5 */
 #endif
 }
 
@@ -212,6 +229,12 @@ unsigned long tiku_cpu_mclk_hz(void) {
 #elif defined(PLATFORM_STM32N6)
     /* Estimate: the boot-ROM clock is inherited and varies between resets. */
     return tiku_cpu_stm32n6_clock_get_hz();
+#elif defined(PLATFORM_RA8P1)
+    /* NOMINAL: derived from SCKSCR + SCKDIVCR against the datasheet figure for
+     * the selected source.  MOCO's tolerance is +-10% and this board measures
+     * +4.1%, so this is what the tree is set to, not what it runs at.  R4 is
+     * where the two converge. */
+    return tiku_cpu_ra8p1_clock_get_hz();
 #else
     return 0;
 #endif
@@ -228,6 +251,8 @@ unsigned long tiku_cpu_smclk_hz(void) {
     return tiku_cpu_nordic_smclk_get_hz();
 #elif defined(PLATFORM_STM32N6)
     return tiku_cpu_stm32n6_smclk_get_hz();
+#elif defined(PLATFORM_RA8P1)
+    return tiku_cpu_ra8p1_pclka_get_hz();
 #else
     return 0;
 #endif
@@ -330,7 +355,8 @@ int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode) {
      * tick can never fire, let alone wake the core. */
     return mode != TIKU_CPU_IDLE_DEEPEST;
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
     /* Every supported mode is a WFI variant; any enabled interrupt
      * (SysTick / STIMER tick included) wakes the core. */
     (void)mode;
@@ -351,7 +377,8 @@ const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode) {
         default:                    return "off";
     }
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:   return "WFI";
         case TIKU_CPU_IDLE_DEEP:    return "WFI";

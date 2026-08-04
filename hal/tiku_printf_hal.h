@@ -87,6 +87,14 @@
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
+/* RA8P1 (Cortex-M85) — console over SCI8, the kit's J-Link OB virtual COM    */
+/*---------------------------------------------------------------------------*/
+
+#elif defined(PLATFORM_RA8P1)
+#include <arch/ra8p1/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+
+/*---------------------------------------------------------------------------*/
 /* Fallback: no platform defined — suppress output                           */
 /*---------------------------------------------------------------------------*/
 
