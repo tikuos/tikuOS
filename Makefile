@@ -3052,11 +3052,40 @@ endif
 
 # STM32N6: .elf -> .bin -> signed image the boot ROM will accept.
 ifeq ($(TIKU_PLATFORM),stm32n6)
-STM32N6_CUBE   ?= /Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/Resources/bin
+#
+# CubeProgrammer lives somewhere different on every host, and the tools are
+# not on PATH by default on any of them.  Search the usual places and take
+# the first that exists; STM32N6_CUBE= overrides the search entirely.
+#
+# The failure this replaces was worth a diagnostic: with a macOS path
+# hardcoded, a Linux build linked correctly and then died at the signing
+# step with a bare "Error 127" and no hint that a path was the problem.
+#
+STM32N6_CUBE_CANDIDATES := \
+    /Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/Resources/bin \
+    /opt/st/stm32cubeprog/bin \
+    /opt/STM32CubeProgrammer/bin \
+    $(HOME)/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin \
+    $(HOME)/st/stm32cubeprog/bin \
+    /usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin
+STM32N6_CUBE   ?= $(firstword $(foreach d,$(STM32N6_CUBE_CANDIDATES),\
+                    $(if $(wildcard $(d)/STM32_SigningTool_CLI),$(d))))
 STM32N6_SIGN   ?= $(STM32N6_CUBE)/STM32_SigningTool_CLI
 STM32N6_PROG   ?= $(STM32N6_CUBE)/STM32_Programmer_CLI
 # FSBL partition ID advertised by the ROM's DFU interface.
 STM32N6_PART   ?= 0x01
+
+# One message naming the fix, rather than a 127 from the shell.  A recipe,
+# not an $(error): the ELF and the .bin are still worth building on a host
+# with no CubeProgrammer, and only signing and flashing actually need it.
+define STM32N6_NEED_CUBE
+	echo "stm32n6: CubeProgrammer not found -- cannot $(1)."; \
+	 echo "  looked in:"; \
+	 $(foreach d,$(STM32N6_CUBE_CANDIDATES),echo "    $(d)";) \
+	 echo "  install it, or point at it:"; \
+	 echo "    make MCU=stm32n6 STM32N6_CUBE=/path/to/bin $(1)"; \
+	 exit 1
+endef
 
 $(TARGET_BIN): $(TARGET)
 	$(OBJCOPY) -O binary $< $@
@@ -3066,6 +3095,7 @@ $(TARGET_BIN): $(TARGET)
 # first instruction. The tool writes its output read-only and prompts before
 # overwriting, so the stale file goes first and stdin is closed.
 $(TARGET_SIGNED): $(TARGET_BIN)
+	@test -x "$(STM32N6_SIGN)" || { $(call STM32N6_NEED_CUBE,sign); }
 	@rm -f $@
 	@$(STM32N6_SIGN) -bin $< -nk -of 0x80000000 -t fsbl -hv 2.3 -align -s -o $@ \
 	    < /dev/null > /dev/null
@@ -3435,6 +3465,7 @@ else ifeq ($(TIKU_PLATFORM),stm32n6)
 # point the ROM's DFU disappears and the programmer reports a reconnect
 # timeout: that is the handoff succeeding, not a failure.
 flash: all
+	@test -x "$(STM32N6_PROG)" || { $(call STM32N6_NEED_CUBE,flash); }
 	-@$(STM32N6_PROG) -c port=usb1 -w $(TARGET_SIGNED) $(STM32N6_PART) \
 	    -g $(STM32N6_PART)
 
@@ -3443,6 +3474,7 @@ run: flash
 # SRAM is volatile, so a reset always lands back in the ROM with DFU up,
 # ready for the next load.
 dfu-reset:
+	@test -x "$(STM32N6_PROG)" || { $(call STM32N6_NEED_CUBE,dfu-reset); }
 	@$(STM32N6_PROG) -c port=SWD mode=UR -hardRst
 
 erase:

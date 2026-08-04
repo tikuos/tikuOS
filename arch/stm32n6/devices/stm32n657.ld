@@ -127,9 +127,14 @@ SECTIONS
 
     /* The durable region is mirrored into four 4 KB NOR sectors less a
      * 16-byte header. A region that outgrows that would lose its tail at
-     * runtime with nothing to show for it, so it is a link error instead. */
+     * runtime with nothing to show for it, so it is a link error instead.
+     *
+     * The bound is spelled out here AND as TIKU_XSPI_MIRROR_SECTORS in
+     * tiku_xspi_arch.h; the linker cannot see the header, so raising one
+     * without the other either keeps this failing or lets the runtime clamp
+     * in tiku_mem_arch.c silently drop the tail. Move both. */
     ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
-           "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS")
+           "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS in tiku_xspi_arch.h AND the 4 in this ASSERT together")
 
     /* The array ends at 0x343C0000 -- measured, not assumed. An access above
      * it HANGS the bus rather than faulting: with real fault handlers now
