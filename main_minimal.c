@@ -341,6 +341,106 @@ int main(void)
     return 0;
 }
 
+#elif defined(PLATFORM_RA8P1)
+
+#include "arch/ra8p1/tiku_cpu_freq_boot_arch.h"
+#include "arch/ra8p1/tiku_cpu_common.h"
+#include "arch/ra8p1/tiku_uart_arch.h"
+#include "arch/ra8p1/tiku_gpio_arch.h"
+#include "arch/ra8p1/tiku_timer_arch.h"
+#include "arch/ra8p1/tiku_ra8p1_regs.h"
+#include "hal/tiku_crit_hal.h"
+
+/* EK-RA8P1 LED1, the blue one at P600. */
+#define TIKU_MIN_LED_PORT   TIKU_BOARD_LED1_PORT
+#define TIKU_MIN_LED_PIN    TIKU_BOARD_LED1_PIN
+
+int main(void)
+{
+    /* Nothing to do: the reset clock tree is what every constant in this image
+     * was computed from.  The call is here so the shape matches the other
+     * ports and R4 has one place to grow into. */
+    tiku_cpu_boot_ra8p1_init();
+
+    tiku_ra8p1_gpio_init_output(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
+
+    /* SCI8 on PD02/PD03 -- the J-Link OB virtual COM port. */
+    tiku_uart_init();
+
+    tiku_cpu_ra8p1_delay_ms(100);
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (EK-RA8P1 v1) ---\n");
+
+    tiku_ra8p1_clock_t c;
+    tiku_cpu_ra8p1_clock_probe(&c);
+    /* NOMINAL, not measured: these are what SCKSCR and SCKDIVCR imply given
+     * the datasheet's figure for the selected source.  MOCO's own tolerance is
+     * +-10%, and on this board the real rate is 8.33 MHz -- so this line says
+     * what the tree is CONFIGURED as, and R4's job is to make it also true. */
+    tiku_uart_printf("clk: cksel=%u src=%u Hz(nom) iclk=%u Hz pclka=%u Hz\n",
+                     (unsigned int)c.cksel, (unsigned int)c.src_hz,
+                     (unsigned int)c.iclk_hz, (unsigned int)c.pclka_hz);
+    tiku_uart_printf("cpuid=%x  tick=%u Hz reload=%u\n",
+                     (unsigned int)TIKU_REG32(RA8P1_SCB_CPUID),
+                     (unsigned int)TIKU_CLOCK_ARCH_SECOND,
+                     (unsigned int)TIKU_CLOCK_ARCH_INTERVAL);
+    /* SAU is readable only from the secure state, so a plausible region count
+     * here is direct evidence the image executes secure -- rather than the
+     * debugger's claim quoted back at itself. */
+    tiku_uart_printf("tz: sau_type=%x sau_ctrl=%x (secure-only port)\n",
+                     (unsigned int)TIKU_REG32(RA8P1_SAU_TYPE),
+                     (unsigned int)TIKU_REG32(RA8P1_SAU_CTRL));
+
+    /* Start the tick and let it drive the loop.  This is the whole point of
+     * the R2 smoke test: the interval between lines is measured by SysTick and
+     * by nothing else, so a line every second of WALL clock is proof the tick
+     * counts at the rate it claims.  A delay-loop heartbeat would prove only
+     * that the delay loop is self-consistent. */
+    tiku_clock_arch_init();
+    __asm__ volatile ("cpsie i" ::: "memory");
+
+    /* Prove the claim tiku_crit_arch.c makes in its header comment, rather
+     * than asserting it: hold a masked critical window across a whole tick
+     * period and show the counter advanced anyway.  It can, because SysTick is
+     * a core exception with no NVIC line for the mask to reach.  When R4 moves
+     * the tick to ULPT or AGT this test starts FAILING, which is exactly when
+     * someone needs to be told. */
+    {
+        tiku_clock_arch_time_t a, b;
+        /* Bounded by ITERATIONS, not by the tick.  Waiting on the tick would
+         * make a silenced tick spin here forever -- the FAIL branch would be
+         * unreachable and the test could only ever pass. */
+        unsigned long budget = 5000000UL;
+
+        a = tiku_clock_arch_time();
+        tiku_crit_arch_mask_irqs(0U);
+        while (budget-- != 0UL && (long)(tiku_clock_arch_time() - a) < 4) { }
+        b = tiku_clock_arch_time();
+        tiku_crit_arch_unmask_irqs();
+        tiku_uart_printf("crit: tick advanced %u ticks under NVIC mask (%s)\n",
+                         (unsigned int)(b - a),
+                         (b != a) ? "PASS" : "FAIL -- tick was silenced");
+    }
+
+    tiku_clock_arch_time_t next = tiku_clock_arch_time() +
+                                  (tiku_clock_arch_time_t)TIKU_CLOCK_ARCH_SECOND;
+    uint32_t i = 0;
+    while (1) {
+        while ((long)(tiku_clock_arch_time() - next) < 0) {
+            __asm__ volatile ("wfi");
+        }
+        next += (tiku_clock_arch_time_t)TIKU_CLOCK_ARCH_SECOND;
+
+        tiku_uart_printf("TikuOS minimal: hello #%u  ticks=%u\n",
+                         (unsigned int)i,
+                         (unsigned int)tiku_clock_arch_time());
+
+        tiku_ra8p1_gpio_toggle(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
+        i++;
+    }
+
+    return 0;
+}
+
 #else /* PLATFORM_RP2350 */
 
 #include "arch/arm-rp2350/tiku_cpu_freq_boot_arch.h"

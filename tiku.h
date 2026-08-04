@@ -34,7 +34,7 @@
  */
 #if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
     !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC) && \
-    !defined(PLATFORM_STM32N6)
+    !defined(PLATFORM_STM32N6) && !defined(PLATFORM_RA8P1)
 #define PLATFORM_MSP430 1
 #endif
 
@@ -171,6 +171,14 @@
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 128
 #endif
+#elif defined(PLATFORM_RA8P1)
+/* Boot rate: MEASURED, not chosen.  SCKDIVCR reads 0 out of reset, so every
+ * divider is /1 and the core runs from the 8 MHz middle-speed oscillator.
+ * R4 brings the PLL up to 1 GHz; until then every derived constant -- the
+ * console divisor, the SysTick reload -- follows this number. */
+#ifndef MAIN_CPU_FREQ
+#define MAIN_CPU_FREQ 8
+#endif
 #elif defined(PLATFORM_STM32N6)
 /* Boot rate, applied by tiku_cpu_freq_init(): 150 MHz is what the boot ROM
  * hands over, so booting here changes nothing but makes the tree ours rather
@@ -188,7 +196,8 @@
  *  constant.
  */
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+    defined(PLATFORM_RA8P1)
 #define TIKU_MAIN_CPU_HZ  ((unsigned long)MAIN_CPU_FREQ * 1000000UL)
 #elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
@@ -227,6 +236,8 @@
 #include <arch/nordic/tiku_device_select.h>
 #elif defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_device_select.h>
+#elif defined(PLATFORM_RA8P1)
+#include <arch/ra8p1/tiku_device_select.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -270,6 +281,8 @@
 #include <arch/nordic/tiku_timer_arch.h>
 #elif defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_timer_arch.h>
+#elif defined(PLATFORM_RA8P1)
+#include <arch/ra8p1/tiku_timer_arch.h>
 #endif
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>

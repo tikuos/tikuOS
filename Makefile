@@ -57,6 +57,12 @@ else ifeq ($(MCU),stm32n6)
 # ROM loads one signed image into SRAM, so the image is built, signed and
 # loaded rather than programmed.
 TIKU_PLATFORM := stm32n6
+else ifeq ($(MCU),ra8p1)
+# R7KA8P1KF (EK-RA8P1): Cortex-M85 at 1 GHz beside an M33, with 1 MB of code
+# MRAM and an Ethos-U55.  The part has real non-volatile code memory, but
+# nothing is programmed into it until R6 establishes how to write it safely --
+# until then the image is loaded into SRAM and run from there.
+TIKU_PLATFORM := ra8p1
 else
 TIKU_PLATFORM := msp430
 endif
@@ -121,13 +127,14 @@ DEFAULT_BOARD_nrf54l15      := nrf54l15_dk
 DEFAULT_BOARD_nrf54lm20a    := nrf54lm20_dk
 DEFAULT_BOARD_nrf54lm20b    := nrf54lm20_dk
 DEFAULT_BOARD_stm32n6       := nucleo_n657x0q
+DEFAULT_BOARD_ra8p1         := ek_ra8p1
 
 # BOARD -> the macro its header is selected by, and the platform it belongs to.
 # Adding a board means adding one row to each table plus a board header.
 KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
                 fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
-                nucleo_n657x0q tiku_bare
+                nucleo_n657x0q ek_ra8p1 tiku_bare
 
 BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
@@ -145,6 +152,7 @@ BOARD_DEFINE_tiku_bare         := TIKU_BOARD_TIKU_BARE
 BOARD_DEFINE_nrf54l15_dk       := TIKU_BOARD_NRF54L15_DK
 BOARD_DEFINE_nrf54lm20_dk      := TIKU_BOARD_NRF54LM20_DK
 BOARD_DEFINE_nucleo_n657x0q    := TIKU_BOARD_NUCLEO_N657X0Q
+BOARD_DEFINE_ek_ra8p1          := TIKU_BOARD_EK_RA8P1
 
 BOARD_PLATFORM_fr2433_launchpad  := msp430
 BOARD_PLATFORM_fr5969_launchpad  := msp430
@@ -160,6 +168,7 @@ BOARD_PLATFORM_tiku_bare         := ambiq
 BOARD_PLATFORM_nrf54l15_dk       := nordic
 BOARD_PLATFORM_nrf54lm20_dk      := nordic
 BOARD_PLATFORM_nucleo_n657x0q    := stm32n6
+BOARD_PLATFORM_ek_ra8p1          := ra8p1
 
 # ---------------------------------------------------------------------------
 # Board capabilities -- what is FITTED on the PCB, not what the silicon can do
@@ -208,6 +217,11 @@ BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
 BOARD_CAPS_nucleo_n657x0q      :=
+# EK-RA8P1: an Ethernet PHY, a 64 Mbit OSPI NOR, a microSD slot, a camera
+# header and a 5-inch display connector are all fitted -- but a cap declares
+# what a DRIVER may be gated on, and none of those has a driver yet.  Empty is
+# the accurate answer today; each entry lands with the driver that reads it.
+BOARD_CAPS_ek_ra8p1            :=
 # Empty because the board really is bare -- this is the row that makes every
 # storage/USB request for it fail at make time.  See S5 of the plan.
 BOARD_CAPS_tiku_bare           :=
@@ -422,8 +436,9 @@ DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 # apollo510: arm-none-eabi-gcc auto-detected from PATH
 # nrf54l15:  arm-none-eabi-gcc auto-detected from PATH (Cortex-M33)
 # stm32n6:   arm-none-eabi-gcc auto-detected from PATH (Cortex-M55)
+# ra8p1:     arm-none-eabi-gcc auto-detected from PATH (Cortex-M85)
 # ---------------------------------------------------------------------------
-ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6))
+ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1))
 
 # ARM Embedded toolchain (apt: gcc-arm-none-eabi).
 TOOLCHAIN_PREFIX ?= arm-none-eabi-
@@ -1163,6 +1178,23 @@ CFLAGS += -ffunction-sections -fdata-sections
 # the block for the NPU-side buffers N6-11 will want.
 CFLAGS += -DTIKU_TIER_SRAM_SIZE=1572864   # 1.5 MB tier arena above the window
 
+else ifeq ($(TIKU_PLATFORM),ra8p1)
+
+# R7KA8P1KF: Cortex-M85 with Helium, the same ISA the ASR and LLM kernels are
+# written against on the M55 parts.  R2 runs the whole image out of SRAM: the
+# 1 MB of code MRAM is real non-volatile memory, but writing it is R6's
+# milestone, and a port that cannot yet erase safely should not be linking
+# against the region it would erase.
+CFLAGS  = -mcpu=cortex-m85 -mthumb
+CFLAGS += -mfpu=auto -mfloat-abi=hard
+CFLAGS += -Os -Wall -Wextra -Wno-psabi
+CFLAGS += --specs=nano.specs --specs=nosys.specs
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
+CFLAGS += -DPLATFORM_RA8P1=1
+CFLAGS += -I$(PROJ_DIR)
+CFLAGS += -ffunction-sections -fdata-sections
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -1365,6 +1397,21 @@ LDLIBS   = -Wl,--start-group
 LDLIBS  += -lm -lc -lgcc
 LDLIBS  += -Wl,--end-group
 
+else ifeq ($(TIKU_PLATFORM),ra8p1)
+
+LDFLAGS  = -mcpu=cortex-m85 -mthumb -mfpu=auto -mfloat-abi=hard
+LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
+LDFLAGS += -Tarch/ra8p1/devices/r7ka8p1kf.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+# Nothing in C references the vector table, so --gc-sections would drop it and
+# the reset handler would never be reached from a warm start.
+LDFLAGS += -Wl,-u,tiku_ra8p1_vectors
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+LDLIBS   = -Wl,--start-group
+LDLIBS  += -lm -lc -lgcc
+LDLIBS  += -Wl,--end-group
+
 else
 
 LDFLAGS  = -mmcu=$(MCU)
@@ -1444,8 +1491,8 @@ endif # TIKU_PLATFORM == msp430
 MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
-ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6),)
-$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, MCU=nrf54lm20a, or MCU=stm32n6)
+ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1),)
+$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, MCU=nrf54lm20a, MCU=stm32n6, or MCU=ra8p1)
 endif
 
 # Use the minimal entry point and exactly the arch files it needs.
@@ -1480,6 +1527,20 @@ SRCS += arch/stm32n6/tiku_cpu_freq_boot_arch.c
 SRCS += arch/stm32n6/tiku_cpu_common.c
 SRCS += arch/stm32n6/tiku_uart_arch.c
 SRCS += arch/stm32n6/tiku_gpio_arch.c
+else ifeq ($(TIKU_PLATFORM),ra8p1)
+SRCS += arch/ra8p1/tiku_crt_early.c
+SRCS += arch/ra8p1/tiku_cpu_freq_boot_arch.c
+SRCS += arch/ra8p1/tiku_cpu_common.c
+SRCS += arch/ra8p1/tiku_uart_arch.c
+SRCS += arch/ra8p1/tiku_gpio_arch.c
+# The tick joins the minimal build here and nowhere else: R2's whole claim is
+# that it counts at 128 Hz against a wall clock, and MINIMAL is the build with
+# nothing else running that could explain a wrong rate.
+SRCS += arch/ra8p1/tiku_timer_arch.c
+# Critical sections join too, for the same reason: this file's central claim is
+# that masking the NVIC cannot silence a tick that is a CORE exception, and an
+# untested claim in a comment is worth nothing.
+SRCS += arch/ra8p1/tiku_crit_arch.c
 else
 SRCS += arch/arm-rp2350/tiku_crt_early.c
 SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
@@ -3480,6 +3541,57 @@ dfu-reset:
 erase:
 	@echo "stm32n6: nothing to erase -- the image lives in SRAM, so a reset"
 	@echo "  (make dfu-reset) already clears it."
+
+else ifeq ($(TIKU_PLATFORM),ra8p1)
+
+# EK-RA8P1 over its on-board J-Link OB.  The image is SRAM-resident (see the
+# linker script), so `loadfile` writes RAM rather than programming MRAM -- no
+# erase, no verification pass, and no risk of leaving a half-programmed part.
+# What it does mean is that the image does NOT survive a power cycle: pulling
+# USB loses it and the factory demo in MRAM boots instead.
+#
+# THE RESET AFTER THE LOAD IS THE TRAP.  A reset re-reads SP and PC from
+# whatever VTOR points at out of reset, which is MRAM at 0x02000000 -- the
+# factory demo.  So `r` after loadfile boots the FACTORY image over a freshly
+# loaded one, and the symptom is a silent console that looks exactly like a
+# broken UART driver.  MSP and PC are therefore set explicitly from the ELF's
+# own symbols, which is what R1 proved on this board.
+#
+# `r` `h` BEFORE the load stays, for the reason the Ambiq recipe has it: bytes
+# must not land under a running CPU.
+JLINK_DEVICE_RA8P1 ?= R7KA8P1KF
+RA8P1_JLINK_SCRIPT  = $(BUILD_DIR)/flash.jlink
+
+flash: all
+	@mkdir -p $(BUILD_DIR)
+	@entry=$$($(TOOLCHAIN_PREFIX)readelf -h $(TARGET) \
+	          | awk '/Entry point/ {printf "0x%X", strtonum($$4) - and(strtonum($$4),1)}'); \
+	 stack=$$($(TOOLCHAIN_PREFIX)nm $(TARGET) | awk '/ __stack$$/ {print "0x"$$1}'); \
+	 test -n "$$entry" -a -n "$$stack" || { \
+	     echo "*** Could not read entry/__stack from $(TARGET)."; exit 1; }; \
+	 printf 'device %s\nif %s\nspeed %s\nconnect\nr\nh\nloadfile %s\nwreg MSP %s\nSetPC %s\ngo\nqc\n' \
+	    "$(JLINK_DEVICE_RA8P1)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET)" \
+	    "$$stack" "$$entry" > $(RA8P1_JLINK_SCRIPT); \
+	 echo "Loading $(TARGET) -> SRAM (MSP=$$stack PC=$$entry) via $(JLINK) ($(JLINK_DEVICE_RA8P1))..."
+	@$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(RA8P1_JLINK_SCRIPT) \
+	    2>&1 | tee $(BUILD_DIR)/flash.log; \
+	 if ! grep -qiE 'O\.K\.|Download.*complete|bytes.*downloaded' $(BUILD_DIR)/flash.log; then \
+	     echo "*** LOAD FAILED -- no positive evidence any bytes moved."; \
+	     echo "*** JLinkExe exits 0 whatever happens, so this check, not"; \
+	     echo "*** its status, is what says the image is on the part."; \
+	     grep -iE 'Cannot connect|Failed to halt|Error|Timeout' $(BUILD_DIR)/flash.log | head -4; \
+	     exit 1; \
+	 fi
+
+run: flash
+
+debug: all
+	@echo "Debug: start a GDB server against the kit's J-Link OB with"
+	@echo "  $(JLINK_GDB) -device $(JLINK_DEVICE_RA8P1) -if $(JLINK_IF) -speed $(JLINK_SPEED)"
+
+erase:
+	@echo "ra8p1: nothing to erase -- the image lives in SRAM, so a power"
+	@echo "  cycle already clears it and the factory MRAM image boots."
 
 else
 
