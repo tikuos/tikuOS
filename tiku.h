@@ -177,7 +177,7 @@
  * R4 brings the PLL up to 1 GHz; until then every derived constant -- the
  * console divisor, the SysTick reload -- follows this number. */
 #ifndef MAIN_CPU_FREQ
-#define MAIN_CPU_FREQ 8
+#define MAIN_CPU_FREQ 240
 #endif
 #elif defined(PLATFORM_STM32N6)
 /* Boot rate, applied by tiku_cpu_freq_init(): 150 MHz is what the boot ROM

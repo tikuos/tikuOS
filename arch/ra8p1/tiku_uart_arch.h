@@ -78,4 +78,11 @@ uint16_t tiku_uart_overrun_count(void);
 /** @brief Zero the overrun counter. */
 void tiku_uart_overrun_reset(void);
 
+/**
+ * @brief Re-time the console for a new baud rate at the current PCLKA.
+ *
+ * @param baud  Line rate to program; 0 is ignored
+ */
+void tiku_uart_arch_set_baud(unsigned long baud);
+
 #endif /* TIKU_RA8P1_UART_ARCH_H_ */

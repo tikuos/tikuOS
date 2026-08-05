@@ -36,12 +36,12 @@
 /**
  * @brief Console baud rate.
  *
- * 9600, not the house 115200: out of reset PCLKA is MOCO at 8 MHz, where the
- * manual's BRR table marks 38400 and above unachievable.  R4 raises the
- * clock; this constant moves with it, not before.
+ * The house 115200, reachable since R4 puts SCICLK on the PLL at 120 MHz.
+ * The divisor comes from the live SCICLK, so this constant needs no second
+ * value for the 8 MHz boot clock -- it is simply unreachable there.
  */
 #ifndef TIKU_BOARD_UART_BAUD
-#define TIKU_BOARD_UART_BAUD        9600UL
+#define TIKU_BOARD_UART_BAUD        115200UL
 #endif
 
 /*---------------------------------------------------------------------------*/

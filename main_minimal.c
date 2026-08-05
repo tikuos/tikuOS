@@ -348,6 +348,7 @@ int main(void)
 #include "arch/ra8p1/tiku_uart_arch.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
+#include "arch/ra8p1/tiku_uart_arch.h"
 #include "arch/ra8p1/tiku_ra8p1_regs.h"
 #include "hal/tiku_crit_hal.h"
 
@@ -435,6 +436,35 @@ int main(void)
                          (unsigned int)(b - a),
                          (unsigned int)TIKU_CLOCK_ARCH_SECOND,
                          (unsigned int)tiku_cpu_ra8p1_spin_per_ms());
+    }
+
+    /* The clock, stated without a host stopwatch: CAC counts one on-chip
+     * clock against the board's crystal, so this is the port's own witness. */
+    {
+        uint16_t n = tiku_cpu_ra8p1_cac_measure(RA8P1_CAC_CLK_MOCO,
+                                                RA8P1_CAC_CLK_MAIN, 3U);
+
+        if (n != 0U) {
+            tiku_uart_printf("cac: moco=%u Hz (nominal %u)\n",
+                             (unsigned int)((unsigned long)n *
+                                            (TIKU_BOARD_MOSC_HZ / 8192UL)),
+                             (unsigned int)TIKU_RA8P1_MOCO_HZ);
+        } else {
+            tiku_uart_printf("cac: measurement did not complete\n");
+        }
+    }
+
+    tiku_cpu_freq_ra8p1_init(240U);
+    tiku_uart_printf("pll: core %u Hz, sciclk %u Hz, tick reload %u\n",
+                     (unsigned int)tiku_cpu_ra8p1_clock_get_hz(),
+                     (unsigned int)tiku_cpu_ra8p1_sciclk_get_hz(),
+                     (unsigned int)tiku_clock_arch_fine_max());
+    {
+        uint16_t n = tiku_cpu_ra8p1_cac_measure(RA8P1_CAC_CLK_PCLKB,
+                                                RA8P1_CAC_CLK_MAIN, 3U);
+        tiku_uart_printf("cac: pclkb=%u Hz (expect 60000000)\n",
+                         (unsigned int)((unsigned long)n *
+                                        (TIKU_BOARD_MOSC_HZ / 8192UL)));
     }
 
     tiku_clock_arch_time_t next = tiku_clock_arch_time() +

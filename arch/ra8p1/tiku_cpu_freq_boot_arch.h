@@ -46,6 +46,49 @@ typedef struct {
 } tiku_ra8p1_clock_t;
 
 /**
+ * @brief Start the board's main crystal oscillator.
+ *
+ * Needed both as the PLL's reference and as the CAC's, so it is the first
+ * thing R4 brings up.
+ *
+ * @return 0 when the oscillator reports stable, -1 when it never did
+ */
+int tiku_cpu_ra8p1_mosc_start(void);
+
+/**
+ * @brief Count one clock against another, entirely on-chip.
+ *
+ * The reference is divided by 32 << (2 * ref_div), and the return is how many
+ * target-clock edges fell inside one such period -- so the target rate is
+ * count * ref_hz / divider.
+ *
+ * @param target     Clock to measure, an RA8P1_CAC_CLK_* value
+ * @param reference  Clock to measure against, an RA8P1_CAC_CLK_* value
+ * @param ref_div    RCDS code: 0 = /32, 1 = /128, 2 = /1024, 3 = /8192
+ * @return Target-clock count, or 0 if the measurement never completed
+ */
+uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
+                                    uint8_t ref_div);
+
+/**
+ * @brief Move the clock tree to @p mhz.
+ *
+ * Refuses a rate it cannot produce rather than approximating: `freq` naming a
+ * rate the part is not running at is worse than a refusal.
+ *
+ * @param mhz  Requested core frequency in MHz
+ */
+void tiku_cpu_freq_ra8p1_init(unsigned int mhz);
+
+/**
+ * @brief Report whether a frequency is one this port can select.
+ *
+ * @param mhz  Frequency in MHz
+ * @return 1 when supported, 0 otherwise
+ */
+int tiku_cpu_freq_ra8p1_supported(unsigned int mhz);
+
+/**
  * @brief Prepare whatever clock state the rest of the port depends on.
  *
  * Nothing, deliberately: R2 runs on the reset tree.  The call exists so the
@@ -73,6 +116,16 @@ unsigned long tiku_cpu_ra8p1_clock_get_hz(void);
  * @return The rate implied by SCKSCR and SCKDIVCR
  */
 unsigned long tiku_cpu_ra8p1_pclka_get_hz(void);
+
+/**
+ * @brief SCICLK rate in Hz -- what the console's baud divisor divides.
+ *
+ * A separate clock from PCLKA, with its own source select; they only coincide
+ * at boot, when both are MOCO at /1.
+ *
+ * @return The rate SCICLK is running at
+ */
+unsigned long tiku_cpu_ra8p1_sciclk_get_hz(void);
 
 /**
  * @brief Delay-loop iterations per millisecond.

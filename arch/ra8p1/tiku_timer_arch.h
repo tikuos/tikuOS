@@ -63,9 +63,11 @@ typedef unsigned int tiku_clock_arch_counter_t;
  * silently mid-tick rather than fail.  R4 raises the clock, so this is a
  * link-time tripwire, not a comment.
  */
-_Static_assert(TIKU_CLOCK_ARCH_INTERVAL <= 65535U,
-               "sub-tick reload exceeds the HAL's 16-bit fine counter; give "
-               "tiku_clock_arch_fine() a shift, or divide the tick source");
+/* The BOOT reload only.  A retune to a faster clock exceeds 16 bits, and
+ * tiku_clock_arch_fine() shifts to compensate; SysTick's own 24 bits are the
+ * limit that cannot be worked around. */
+_Static_assert(TIKU_CLOCK_ARCH_INTERVAL <= 0x00FFFFFFUL,
+               "boot tick reload exceeds SysTick's 24 bits");
 
 /*---------------------------------------------------------------------------*/
 /* HAL entry points                                                          */
@@ -86,6 +88,13 @@ unsigned long tiku_clock_arch_seconds(void);
  * @return 1 when the tick is enabled and its interrupt unmasked, 0 otherwise
  */
 int tiku_ra8p1_clock_arch_running(void);
+
+/**
+ * @brief Effective resolution of tiku_clock_arch_fine(), in counts per second.
+ *
+ * @return Sub-tick counts per second after the range shift
+ */
+uint32_t tiku_ra8p1_clock_arch_fine_hz(void);
 
 /** @brief Counts elapsed inside the current tick, for sub-tick timing. */
 unsigned short tiku_clock_arch_fine(void);

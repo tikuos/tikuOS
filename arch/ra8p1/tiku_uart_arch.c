@@ -15,6 +15,7 @@
 
 #include "tiku_uart_arch.h"
 #include "tiku_ra8p1_regs.h"
+#include "tiku_cpu_freq_boot_arch.h"
 
 #include <stdarg.h>
 
@@ -36,15 +37,20 @@
 #define CONSOLE_BRR \
     SCI_BRR_FOR(TIKU_RA8P1_PCLKA_BOOT_HZ, TIKU_BOARD_UART_BAUD)
 
+/** @brief Baud the console is currently programmed for. */
+static unsigned long uart_baud = TIKU_BOARD_UART_BAUD;
+
 /* Anchor the equation to the one value the manual publishes AND R1 measured
  * working on this board.  If PCLKA or the baud rate moves this assert stops
  * applying and should move with them -- but while both are at their R2 values
  * it is a direct check on the arithmetic above. */
-#if (TIKU_RA8P1_PCLKA_BOOT_HZ == 8000000UL) && (TIKU_BOARD_UART_BAUD == 9600UL)
-_Static_assert(CONSOLE_BRR == 25UL,
-               "SCI baud divisor disagrees with UM Table 39.11 (9600 from "
-               "8 MHz PCLKA is CKS 0, BRR 25) -- check the /32, not the /16");
-#endif
+/* The manual publishes one worked example for this generator, and it is the
+ * only external check on the arithmetic: 9600 from an 8 MHz SCICLK is CKS 0,
+ * BRR 25 (UM Table 39.11).  Asserted against the formula rather than against
+ * the live configuration, which no longer uses either number. */
+_Static_assert(SCI_BRR_FOR(8000000UL, 9600UL) == 25UL,
+               "SCI baud formula disagrees with UM Table 39.11 -- the "
+               "generator divides by 32 per bit, not 16");
 
 /*
  * Received bytes are taken by an ISR into a ring, not polled by the shell.
@@ -131,13 +137,31 @@ void tiku_uart_init(void)
 
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_B0WI;   /* re-protect */
 
+    /* DRAIN before disabling.  Clearing TE stops the shifter mid-character,
+     * so a re-init while output is in flight truncates it -- one lost newline
+     * per re-init, which the marker parser sees as two records run together
+     * and which no amount of baud change fixes.  Skipped on the first init,
+     * where TE has never been set and TEND means nothing. */
+    if (TIKU_REG32(RA8P1_SCI_CCR0(SCI)) & RA8P1_SCI_CCR0_TE) {
+        while ((TIKU_REG32(RA8P1_SCI_CSR(SCI)) & RA8P1_SCI_CSR_TEND) == 0UL) { }
+    }
+
     /* Transmitter and receiver off while the divisor changes. */
     TIKU_REG32(RA8P1_SCI_CCR0(SCI)) = 0UL;
     while (TIKU_REG32(RA8P1_SCI_CCR0(SCI)) != 0UL) { }
 
-    TIKU_REG32(RA8P1_SCI_CCR2(SCI)) = RA8P1_SCI_CCR2_BASE |
-                                      RA8P1_SCI_CCR2_BRR(CONSOLE_BRR) |
-                                      RA8P1_SCI_CCR2_CKS(0);
+    /* From the live SCICLK -- the SCI's own clock, not PCLKA and not a build
+     * constant.  They coincide only at boot, when both are MOCO at /1. */
+    {
+        unsigned long sciclk = tiku_cpu_ra8p1_sciclk_get_hz();
+        uint32_t brr = (uint32_t)(((sciclk + (16UL * uart_baud)) /
+                                   (32UL * uart_baud)) - 1UL);
+
+        if (brr > 0xFFUL) { brr = 0xFFUL; }   /* clamp, never wrap */
+        TIKU_REG32(RA8P1_SCI_CCR2(SCI)) = RA8P1_SCI_CCR2_BASE |
+                                          RA8P1_SCI_CCR2_BRR(brr) |
+                                          RA8P1_SCI_CCR2_CKS(0);
+    }
 
     /* CCR1, CCR3 and CCR4 keep their reset values, which are already
      * asynchronous 8N1 with the internal clock (UM 39: MOD=000, CHR=10 for
@@ -252,4 +276,11 @@ void tiku_uart_printf(const char *fmt, ...)
         if (*fmt != '\0') { fmt++; }
     }
     va_end(ap);
+}
+
+void tiku_uart_arch_set_baud(unsigned long baud)
+{
+    if (baud == 0UL) { return; }
+    uart_baud = baud;
+    tiku_uart_init();   /* drains before it touches the divisor */
 }

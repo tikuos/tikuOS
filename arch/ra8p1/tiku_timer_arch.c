@@ -12,6 +12,7 @@
 
 #include "tiku_timer_arch.h"
 #include "tiku_ra8p1_regs.h"
+#include "tiku_cpu_freq_boot_arch.h"
 
 #ifndef TIKU_MINIMAL
 #include <kernel/scheduler/tiku_sched.h>
@@ -24,10 +25,49 @@ static volatile tiku_clock_arch_time_t clock_ticks;
 /** @brief Reload currently programmed, so fine() can invert the down-counter. */
 static uint32_t clock_reload = TIKU_CLOCK_ARCH_INTERVAL;
 
+/**
+ * @brief Right-shift applied to the sub-tick count.
+ *
+ * The HAL types fine() as unsigned short but the reload grows with the clock:
+ * 62500 at 8 MHz fits, 1875000 at 240 MHz does not.  Shifting costs resolution
+ * where truncating would cost correctness.
+ */
+static uint8_t clock_fine_shift;
+
+/**
+ * @brief Smallest shift that brings @p reload inside 16 bits.
+ *
+ * @param reload  SysTick reload value
+ * @return Shift to apply to sub-tick counts
+ */
+static uint8_t fine_shift_for(uint32_t reload)
+{
+    uint8_t sh = 0U;
+
+    while ((reload >> sh) > 0xFFFFUL && sh < 24U) {
+        sh++;
+    }
+    return sh;
+}
+
 void tiku_clock_arch_init(void)
 {
+    /*
+     * From the LIVE clock, not TIKU_CLOCK_ARCH_INTERVAL.  The boot constant is
+     * an 8 MHz figure, and the kernel starts the tick AFTER the frequency
+     * request -- so using it silently undid R4's retune and left the tick 30x
+     * fast, with uptime racing and every timeout short by the same factor.
+     */
+    unsigned long hz = tiku_cpu_ra8p1_clock_get_hz();
+    unsigned long reload = hz / (unsigned long)TIKU_CLOCK_ARCH_SECOND;
+
+    if (reload == 0UL || reload > 0x01000000UL) {
+        reload = TIKU_CLOCK_ARCH_INTERVAL;
+    }
+
     clock_ticks = 0UL;
-    clock_reload = TIKU_CLOCK_ARCH_INTERVAL;
+    clock_reload = (uint32_t)reload;
+    clock_fine_shift = fine_shift_for(clock_reload);
 
     TIKU_REG32(RA8P1_SYST_CSR) = 0UL;               /* stop before re-arming */
     TIKU_REG32(RA8P1_SYST_RVR) = clock_reload - 1UL;
@@ -50,6 +90,7 @@ int tiku_ra8p1_clock_arch_retune(unsigned long iclk_hz)
 
     TIKU_REG32(RA8P1_SYST_CSR) = 0UL;
     clock_reload = (uint32_t)reload;
+    clock_fine_shift = fine_shift_for(clock_reload);
     TIKU_REG32(RA8P1_SYST_RVR) = clock_reload - 1UL;
     TIKU_REG32(RA8P1_SYST_CVR) = 0UL;
     TIKU_REG32(RA8P1_SYST_CSR) = RA8P1_SYST_CSR_CLKSOURCE |
@@ -74,7 +115,7 @@ unsigned short tiku_clock_arch_fine(void)
 {
     /* SysTick counts DOWN, so elapsed-within-tick is the complement. */
     uint32_t cvr = TIKU_REG32(RA8P1_SYST_CVR) & 0x00FFFFFFUL;
-    return (unsigned short)(clock_reload - cvr);
+    return (unsigned short)((clock_reload - cvr) >> clock_fine_shift);
 }
 
 unsigned long tiku_clock_arch_seconds(void)
@@ -85,7 +126,13 @@ unsigned long tiku_clock_arch_seconds(void)
 
 int tiku_clock_arch_fine_max(void)
 {
-    return (int)clock_reload;
+    return (int)(clock_reload >> clock_fine_shift);
+}
+
+uint32_t tiku_ra8p1_clock_arch_fine_hz(void)
+{
+    return (uint32_t)((unsigned long)TIKU_CLOCK_ARCH_SECOND *
+                      (clock_reload >> clock_fine_shift));
 }
 
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t)

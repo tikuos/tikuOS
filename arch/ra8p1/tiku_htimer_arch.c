@@ -49,8 +49,22 @@ static unsigned long long htimer_counts_now(void)
     return ((unsigned long long)ticks * TIKU_CLOCK_ARCH_INTERVAL) + cnt;
 }
 
-/** @brief Core-clock counts that make up one microsecond, at the boot clock. */
-#define COUNTS_PER_US   (TIKU_RA8P1_ICLK_BOOT_HZ / 1000000UL)
+/**
+ * @brief Sub-tick counts per microsecond, at whatever the clock is NOW.
+ *
+ * A compile-time constant here would keep reporting boot-clock microseconds
+ * after R4 raises the tree -- every measurement out by the clock ratio.
+ */
+static unsigned long counts_per_us(void)
+{
+    unsigned long hz = tiku_ra8p1_clock_arch_fine_hz() /
+                       (unsigned long)TIKU_CLOCK_ARCH_SECOND *
+                       (unsigned long)TIKU_CLOCK_ARCH_SECOND;
+
+    return (hz >= 1000000UL) ? (hz / 1000000UL) : 1UL;
+}
+
+#define COUNTS_PER_US   counts_per_us()
 
 void tiku_htimer_arch_init(void)
 {

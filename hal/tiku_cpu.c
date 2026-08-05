@@ -168,9 +168,7 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
 #elif defined(PLATFORM_STM32N6)
     tiku_cpu_freq_stm32n6_init(cpu_freq);
 #elif defined(PLATFORM_RA8P1)
-    /* R4's milestone.  Silently accepting the request would leave `freq`
-     * reporting a rate the part is not running at. */
-    (void)cpu_freq;
+    tiku_cpu_freq_ra8p1_init(cpu_freq);
 #endif
 }
 
@@ -230,10 +228,6 @@ unsigned long tiku_cpu_mclk_hz(void) {
     /* Estimate: the boot-ROM clock is inherited and varies between resets. */
     return tiku_cpu_stm32n6_clock_get_hz();
 #elif defined(PLATFORM_RA8P1)
-    /* NOMINAL: derived from SCKSCR + SCKDIVCR against the datasheet figure for
-     * the selected source.  MOCO's tolerance is +-10% and this board measures
-     * +4.1%, so this is what the tree is set to, not what it runs at.  R4 is
-     * where the two converge. */
     return tiku_cpu_ra8p1_clock_get_hz();
 #else
     return 0;
