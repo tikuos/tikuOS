@@ -598,22 +598,15 @@ int main(void)
         }
     }
 
-    /* Octo-SPI flash phase 1: identify the part over 1-1-1 SPI. */
+    /* Octo-SPI flash phase 1: identify the part over 1-1-1 SPI.  Known-good
+     * on this board: C2 86 3A -- Macronix, 1.8 V octaflash family, 512 Mb. */
     {
         uint8_t id[3] = { 0, 0, 0 };
         int rc = tiku_ra8p1_xflash_read_id(id);
 
-        extern uint32_t xf_last_ctl0, xf_last_comstt;
-        tiku_uart_printf("xflash: rc=%d id = %x %x %x "
-                         "(ctl0-after-req=%x comstt=%x liocfg=%x mstpb=%x)\n",
-                         rc, (unsigned int)id[0], (unsigned int)id[1],
-                         (unsigned int)id[2], (unsigned int)xf_last_ctl0,
-                         (unsigned int)xf_last_comstt,
-                         (unsigned int)TIKU_REG32(RA8P1_OSPI_LIOCFG(0, 0)),
-                         (unsigned int)TIKU_REG32(RA8P1_MSTPCRB));
-        tiku_uart_printf("xflash: OCTACKCR=%x OCTACKDIVCR=%x\n",
-                         (unsigned int)TIKU_REG8(0x4001E075UL),
-                         (unsigned int)TIKU_REG8(0x4001E06DUL));
+        tiku_uart_printf("xflash: rc=%d id = %x %x %x\n", rc,
+                         (unsigned int)id[0], (unsigned int)id[1],
+                         (unsigned int)id[2]);
     }
 
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",

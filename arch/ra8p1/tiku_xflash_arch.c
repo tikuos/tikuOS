@@ -18,6 +18,7 @@
 
 #include "tiku_xflash_arch.h"
 #include "tiku_ra8p1_regs.h"
+#include "tiku_cpu_common.h"
 
 /*
  * OSPI0, not OSPI1.  The address map lists an OSPI1 window at 0x7000_0000 and
@@ -28,7 +29,13 @@
  * every transaction completes against an empty bus.
  */
 #define XF_UNIT   0U
-#define XF_CS     0U
+/*
+ * CS1, and the pin table is the only place that says so.  At PSEL 11100b,
+ * P104 -- the board's OSPI_FLASH_CS# -- is OM_0_CS1; OM_0_CS0 is P107, which
+ * this board gives to Ethernet.  Aim at CS0 and the flash never sees a
+ * command while a live bus reads back all-ones.
+ */
+#define XF_CS     1U
 
 /*
  * EK-RA8P1 wiring (board manual Table 29).  Transcribed, not generated: the
@@ -83,6 +90,23 @@ void tiku_ra8p1_xflash_init(void)
             RA8P1_PFS_DSCR_HS_HIGH | RA8P1_PFS_PMR;
     }
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_B0WI;
+    __asm__ volatile ("dsb" ::: "memory");
+
+    /*
+     * RELEASE THE FLASH FROM RESET.  LIOCTL.RSTCS0 drives the OM_RESET pin
+     * and resets to 0 = drive low, so muxing P106 to the OSPI function put
+     * the part into hardware reset -- which reads as a live, pulled-high bus
+     * with no device answering, on both positions of the isolation switch.
+     * Read-modify-write, since bit 17 must be written back as the 1 it reads.
+     */
+    TIKU_REG32(RA8P1_OSPI_LIOCTL(XF_UNIT)) =
+        TIKU_REG32(RA8P1_OSPI_LIOCTL(XF_UNIT)) | RA8P1_OSPI_LIOCTL_RSTCS0;
+    __asm__ volatile ("dsb" ::: "memory");
+
+    /* Reset-recovery: tREADY2 depends on what the part was doing when reset
+     * hit; a fresh power-up recovers in microseconds.  1 ms costs nothing at
+     * init and covers every table row short of an interrupted erase. */
+    tiku_cpu_ra8p1_delay_us(1000U);
 
     /*
      * CS idle term: the reset value is 0, which asks for no gap at all
@@ -114,7 +138,10 @@ int tiku_ra8p1_xflash_read_id(uint8_t out[3])
      * in, so it needs none of the octal configuration to work.
      */
     TIKU_REG32(RA8P1_OSPI_CDTBUF(XF_UNIT, 0)) =
-        RA8P1_CDTBUF_CMD(RA8P1_MX_CMD_RDID) |
+        /* CMD[15:8] carries a 1-byte opcode in 1S-1S-1S; CMD[7:0] is "not
+         * used" -- so an unshifted opcode transmits 0x00 and the device
+         * rightly ignores it. */
+        RA8P1_CDTBUF_CMD((uint32_t)RA8P1_MX_CMD_RDID << 8) |
         RA8P1_CDTBUF_CMDSIZE(1U) |
         RA8P1_CDTBUF_ADDSIZE(0U) |
         RA8P1_CDTBUF_DATASIZE(3U) |
@@ -122,7 +149,8 @@ int tiku_ra8p1_xflash_read_id(uint8_t out[3])
     TIKU_REG32(RA8P1_OSPI_CDABUF(XF_UNIT, 0)) = 0UL;
     TIKU_REG32(RA8P1_OSPI_CDD0BUF(XF_UNIT, 0)) = 0UL;
 
-    TIKU_REG32(RA8P1_OSPI_CDCTL0(XF_UNIT)) = RA8P1_CDCTL0_TRREQ;
+    TIKU_REG32(RA8P1_OSPI_CDCTL0(XF_UNIT)) =
+        ((XF_CS != 0U) ? RA8P1_CDCTL0_CSSEL : 0UL) | RA8P1_CDCTL0_TRREQ;
     __asm__ volatile ("dsb" ::: "memory");
 
     /* Confirm the request was ACCEPTED before waiting for it.  A dropped

@@ -171,7 +171,13 @@
 #define RA8P1_OSPI_CDABUF(n, b) (RA8P1_OSPI_BASE(n) + 0x084UL + (0x10UL * (b)))
 #define RA8P1_OSPI_CDD0BUF(n,b) (RA8P1_OSPI_BASE(n) + 0x088UL + (0x10UL * (b)))
 #define RA8P1_OSPI_CDD1BUF(n,b) (RA8P1_OSPI_BASE(n) + 0x08CUL + (0x10UL * (b)))
+#define RA8P1_OSPI_LIOCTL(n)    (RA8P1_OSPI_BASE(n) + 0x108UL)
 #define RA8P1_OSPI_COMSTT(n)    (RA8P1_OSPI_BASE(n) + 0x184UL)
+
+/* LIOCTL.RSTCS0 drives the OM_RESET pin: 0 = LOW.  It RESETS TO 0, so the
+ * instant the reset pin is muxed to the OSPI function the controller holds
+ * the flash in hardware reset until software says otherwise. */
+#define RA8P1_OSPI_LIOCTL_RSTCS0 (1UL << 16)
 
 /* Mapped windows, from the address map: OSPI0 gets 256 MB per chip select,
  * OSPI1 gets 128 MB. */
@@ -189,6 +195,7 @@
 
 #define RA8P1_CDCTL0_TRREQ      (1UL << 0)   /* self-clears on completion */
 #define RA8P1_CDCTL0_PERMD      (1UL << 1)
+#define RA8P1_CDCTL0_CSSEL      (1UL << 3)   /* 0 = CS0, 1 = CS1 */
 
 /** @brief Module stop: OSPI0 is MSTPB16, OSPI1 (the board's flash) MSTPB17. */
 #define RA8P1_MSTPB_OSPI0       (1UL << 16)

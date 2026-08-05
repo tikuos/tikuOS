@@ -22,8 +22,15 @@
 #define TIKU_RA8P1_XFLASH_ERR_TIMEOUT -1  /**< transaction never completed  */
 #define TIKU_RA8P1_XFLASH_ERR_ID      -2  /**< no Macronix device answered  */
 
+/** @brief Known-good RDID on the EK-RA8P1: C2 (Macronix) 86 (1.8 V octa) 3A
+ *         (512 Mb).  The 3 V LM sibling reports 85 in the type byte, which is
+ *         how the silicon distinguishes the two when the docs disagree. */
+#define TIKU_RA8P1_XFLASH_ID0   0xC2U
+#define TIKU_RA8P1_XFLASH_ID1   0x86U
+#define TIKU_RA8P1_XFLASH_ID2   0x3AU
+
 /** @brief Mapped window and capacity of the board's part. */
-#define TIKU_RA8P1_XFLASH_ADDR   0x80000000UL   /* OSPI0 CS0 */
+#define TIKU_RA8P1_XFLASH_ADDR   0x90000000UL   /* OSPI0 CS1 */
 #define TIKU_RA8P1_XFLASH_BYTES  (64UL * 1024UL * 1024UL)
 
 /** @brief Bring up the OSPI1 controller and its pins.  Idempotent. */
