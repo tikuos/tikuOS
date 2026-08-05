@@ -348,6 +348,7 @@ int main(void)
 #include "arch/ra8p1/tiku_uart_arch.h"
 #include "arch/ra8p1/tiku_cache_arch.h"
 #include "arch/ra8p1/tiku_sdram_arch.h"
+#include "arch/ra8p1/tiku_xflash_arch.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
 #include "arch/ra8p1/tiku_uart_arch.h"
@@ -595,6 +596,21 @@ int main(void)
             tiku_uart_printf("sdram: seq read  4 MB = %u counts (%x)\n",
                              (unsigned int)(t1 - t0), (unsigned int)bad);
         }
+    }
+
+    /* Octo-SPI flash phase 1: identify the part over 1-1-1 SPI. */
+    {
+        uint8_t id[3] = { 0, 0, 0 };
+        int rc = tiku_ra8p1_xflash_read_id(id);
+
+        extern uint32_t xf_last_ctl0, xf_last_comstt;
+        tiku_uart_printf("xflash: rc=%d id = %x %x %x "
+                         "(ctl0-after-req=%x comstt=%x liocfg=%x mstpb=%x)\n",
+                         rc, (unsigned int)id[0], (unsigned int)id[1],
+                         (unsigned int)id[2], (unsigned int)xf_last_ctl0,
+                         (unsigned int)xf_last_comstt,
+                         (unsigned int)TIKU_REG32(RA8P1_OSPI_LIOCFG(1, 0)),
+                         (unsigned int)TIKU_REG32(RA8P1_MSTPCRB));
     }
 
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",

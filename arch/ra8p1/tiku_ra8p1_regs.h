@@ -178,8 +178,27 @@
 #define RA8P1_OSPI0_CS0_ADDR    0x80000000UL
 #define RA8P1_OSPI1_CS0_ADDR    0x70000000UL
 
+/* Manual-command transaction descriptor (CDTBUFn).  Sizes are byte COUNTS,
+ * not encodings, except that command size 10b means 2 bytes -- which is what
+ * 8D-8D-8D octal needs, where opcodes are sent as a value and its complement. */
+#define RA8P1_CDTBUF_CMDSIZE(n) (((uint32_t)(n) & 0x3UL) << 0)    /*  1:0 */
+#define RA8P1_CDTBUF_ADDSIZE(n) (((uint32_t)(n) & 0x7UL) << 2)    /*  4:2 */
+#define RA8P1_CDTBUF_DATASIZE(n) (((uint32_t)(n) & 0xFUL) << 5)   /*  8:5 */
+#define RA8P1_CDTBUF_LATE(n)    (((uint32_t)(n) & 0x1FUL) << 9)   /* 13:9 */
+#define RA8P1_CDTBUF_CMD(c)     (((uint32_t)(c) & 0xFFFFUL) << 16)
+
+#define RA8P1_CDCTL0_TRREQ      (1UL << 0)   /* self-clears on completion */
+#define RA8P1_CDCTL0_PERMD      (1UL << 1)
+
+/** @brief Module stop: OSPI0 is MSTPB16, OSPI1 (the board's flash) MSTPB17. */
+#define RA8P1_MSTPB_OSPI1       (1UL << 17)
+
+/** @brief PSEL that selects the OSPI function on any pin (OM_1_* here). */
+#define RA8P1_PFS_PSEL_OSPI     0x1CUL
+
 /** @brief Macronix RDID reply: C2 = manufacturer, then type and density. */
 #define RA8P1_MX_MANUFACTURER   0xC2U
+#define RA8P1_MX_CMD_RDID       0x9FU
 
 /*---------------------------------------------------------------------------*/
 /* External bus / SDRAM controller (UM 15.6)                                 */
