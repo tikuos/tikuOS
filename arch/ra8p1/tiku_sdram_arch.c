@@ -153,6 +153,16 @@ int tiku_ra8p1_sdram_init(void)
     TIKU_REG8(RA8P1_SDCCR)  = (uint8_t)RA8P1_SDCCR_BSIZE_32;
     TIKU_REG8(RA8P1_SDADR)  = (uint8_t)RA8P1_SDADR_MXC_9BIT;  /* 512 columns */
 
+    /*
+     * Continuous access ON, and it is the single biggest number on this
+     * bus.  BE resets to 0, where the controller runs every access
+     * standalone -- activate, CL, precharge, ~9 BCLK per word, measured as
+     * 52 MB/s sequential.  With the row held open, consecutive accesses
+     * pipeline.  Writes to SDAMOD are silently IGNORED once EXENB is set,
+     * so this must happen here in the config window or not at all.
+     */
+    TIKU_REG8(RA8P1_SDAMOD) = (uint8_t)RA8P1_SDAMOD_BE;
+
     TIKU_REG32(RA8P1_SDTR) = RA8P1_SDTR_CL(cl) |
                              RA8P1_SDTR_RCD(trcd) |
                              RA8P1_SDTR_RP(trp) |

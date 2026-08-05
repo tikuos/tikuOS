@@ -181,6 +181,10 @@
  * column part (A0-A8) needs. */
 #define RA8P1_SDADR_MXC_9BIT    (1U << 0)
 #define RA8P1_SDRFEN_RFEN       (1U << 0)      /* auto-refresh enable      */
+/* Continuous access: hold the row open across consecutive accesses.  OFF at
+ * reset, and writes are IGNORED once EXENB is set -- so it must be enabled in
+ * the config window or every access pays a full ACT/CAS/PRE (~9 BCLK). */
+#define RA8P1_SDAMOD_BE         (1U << 0)
 #define RA8P1_SDICR_INIRQ       (1U << 0)      /* start the init sequencer */
 #define RA8P1_SDSR_INIST        (1U << 3)      /* init sequence running    */
 #define RA8P1_SDSR_MRSST        (1U << 2)
