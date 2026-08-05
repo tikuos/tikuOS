@@ -23,7 +23,7 @@
 #define TIKU_RA8P1_XFLASH_ERR_ID      -2  /**< no Macronix device answered  */
 
 /** @brief Mapped window and capacity of the board's part. */
-#define TIKU_RA8P1_XFLASH_ADDR   0x70000000UL
+#define TIKU_RA8P1_XFLASH_ADDR   0x80000000UL   /* OSPI0 CS0 */
 #define TIKU_RA8P1_XFLASH_BYTES  (64UL * 1024UL * 1024UL)
 
 /** @brief Bring up the OSPI1 controller and its pins.  Idempotent. */

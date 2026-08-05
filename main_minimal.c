@@ -609,8 +609,11 @@ int main(void)
                          rc, (unsigned int)id[0], (unsigned int)id[1],
                          (unsigned int)id[2], (unsigned int)xf_last_ctl0,
                          (unsigned int)xf_last_comstt,
-                         (unsigned int)TIKU_REG32(RA8P1_OSPI_LIOCFG(1, 0)),
+                         (unsigned int)TIKU_REG32(RA8P1_OSPI_LIOCFG(0, 0)),
                          (unsigned int)TIKU_REG32(RA8P1_MSTPCRB));
+        tiku_uart_printf("xflash: OCTACKCR=%x OCTACKDIVCR=%x\n",
+                         (unsigned int)TIKU_REG8(0x4001E075UL),
+                         (unsigned int)TIKU_REG8(0x4001E06DUL));
     }
 
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",

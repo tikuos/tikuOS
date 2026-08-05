@@ -19,8 +19,15 @@
 #include "tiku_xflash_arch.h"
 #include "tiku_ra8p1_regs.h"
 
-/** @brief The board wires its flash to OSPI1, chip select 0. */
-#define XF_UNIT   1U
+/*
+ * OSPI0, not OSPI1.  The address map lists an OSPI1 window at 0x7000_0000 and
+ * it is tempting to pair that with "the flash on the octal bus", but the pin
+ * function tables settle it: PORT1 and PORT8 -- every pin this board uses --
+ * carry OM_0_* functions at PSEL 11100b.  There is no OM_1_* on these ports,
+ * so a driver aimed at unit 1 configures a controller wired to nothing and
+ * every transaction completes against an empty bus.
+ */
+#define XF_UNIT   0U
 #define XF_CS     0U
 
 /*
@@ -60,7 +67,7 @@ void tiku_ra8p1_xflash_init(void)
     }
 
     /* Ungate first: no OSPI register answers while the module is stopped. */
-    TIKU_REG32(RA8P1_MSTPCRB) &= ~RA8P1_MSTPB_OSPI1;
+    TIKU_REG32(RA8P1_MSTPCRB) &= ~RA8P1_MSTPB_OSPI0;
     (void)TIKU_REG32(RA8P1_MSTPCRB);
 
     TIKU_REG8(RA8P1_PWPR_S) = 0U;
@@ -76,6 +83,17 @@ void tiku_ra8p1_xflash_init(void)
             RA8P1_PFS_DSCR_HS_HIGH | RA8P1_PFS_PMR;
     }
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_B0WI;
+
+    /*
+     * CS idle term: the reset value is 0, which asks for no gap at all
+     * between frames.  A NOR part needs CS high for a minimum time between
+     * transactions to register them as separate, so give it a generous
+     * eight cycles -- at 8 MHz that costs a microsecond and removes a
+     * whole class of "the device never saw a command" from the picture.
+     */
+    TIKU_REG32(RA8P1_OSPI_LIOCFG(XF_UNIT, XF_CS)) =
+        (TIKU_REG32(RA8P1_OSPI_LIOCFG(XF_UNIT, XF_CS)) & ~0xF0000UL) |
+        (8UL << 16);
     __asm__ volatile ("dsb" ::: "memory");
 
     xf_ready = 1U;

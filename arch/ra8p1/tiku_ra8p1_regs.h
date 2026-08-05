@@ -191,6 +191,7 @@
 #define RA8P1_CDCTL0_PERMD      (1UL << 1)
 
 /** @brief Module stop: OSPI0 is MSTPB16, OSPI1 (the board's flash) MSTPB17. */
+#define RA8P1_MSTPB_OSPI0       (1UL << 16)
 #define RA8P1_MSTPB_OSPI1       (1UL << 17)
 
 /** @brief PSEL that selects the OSPI function on any pin (OM_1_* here). */
