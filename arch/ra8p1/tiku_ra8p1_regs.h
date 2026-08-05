@@ -150,6 +150,53 @@
 #define RA8P1_MSTPB_SCI8        (1UL << 23)                  /* SCI8       */
 
 /*---------------------------------------------------------------------------*/
+/* DMA controller (UM 17)                                                    */
+/*                                                                           */
+/* Eight channels, 0x40 apart, plus one global activation register.  Unlike   */
+/* the RSIP the DMAC is fully published, so it is driven directly rather      */
+/* than through a vendor library.                                            */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_DMAC_BASE(n)      (0x4000A000UL + (0x40UL * (n)))
+#define RA8P1_DMAC_DMSAR(n)     (RA8P1_DMAC_BASE(n) + 0x00UL)  /* 32-bit */
+#define RA8P1_DMAC_DMDAR(n)     (RA8P1_DMAC_BASE(n) + 0x04UL)  /* 32-bit */
+#define RA8P1_DMAC_DMCRA(n)     (RA8P1_DMAC_BASE(n) + 0x08UL)  /* 32-bit */
+#define RA8P1_DMAC_DMTMD(n)     (RA8P1_DMAC_BASE(n) + 0x10UL)  /* 16-bit */
+#define RA8P1_DMAC_DMINT(n)     (RA8P1_DMAC_BASE(n) + 0x13UL)  /*  8-bit */
+#define RA8P1_DMAC_DMAMD(n)     (RA8P1_DMAC_BASE(n) + 0x14UL)  /* 16-bit */
+#define RA8P1_DMAC_DMCNT(n)     (RA8P1_DMAC_BASE(n) + 0x1CUL)  /*  8-bit */
+#define RA8P1_DMAC_DMREQ(n)     (RA8P1_DMAC_BASE(n) + 0x1DUL)  /*  8-bit */
+#define RA8P1_DMAC_DMSTS(n)     (RA8P1_DMAC_BASE(n) + 0x1EUL)  /*  8-bit */
+
+/** @brief Global DMAC activation; without DMST no channel runs. */
+#define RA8P1_DMAC_DMAST        0x4000A800UL
+#define RA8P1_DMAC_DMAST_DMST   (1U << 0)
+
+/* DMTMD: mode 15:14, repeat-area select 13:12, transfer size 9:8. */
+#define RA8P1_DMTMD_MD_NORMAL   (0U << 14)
+#define RA8P1_DMTMD_MD_BLOCK    (2U << 14)
+#define RA8P1_DMTMD_SZ_8        (0U << 8)
+#define RA8P1_DMTMD_SZ_16       (1U << 8)
+#define RA8P1_DMTMD_SZ_32       (2U << 8)
+
+/* DMAMD: source mode 15:14, dest mode 7:6.  00 fixed, 10 increment. */
+#define RA8P1_DMAMD_SM_FIXED    (0U << 14)
+#define RA8P1_DMAMD_SM_INC      (2U << 14)
+#define RA8P1_DMAMD_DM_FIXED    (0U << 6)
+#define RA8P1_DMAMD_DM_INC      (2U << 6)
+
+#define RA8P1_DMINT_DTIE        (1U << 4)   /* transfer-end interrupt      */
+#define RA8P1_DMCNT_DTE         (1U << 0)   /* channel enable              */
+#define RA8P1_DMREQ_SWREQ       (1U << 0)   /* software trigger            */
+#define RA8P1_DMREQ_CLRS        (1U << 4)   /* do not auto-clear SWREQ     */
+#define RA8P1_DMSTS_ESIF        (1U << 0)   /* error                       */
+#define RA8P1_DMSTS_DTIF        (1U << 4)   /* transfer end                */
+#define RA8P1_DMSTS_ACT         (1U << 7)   /* channel active              */
+
+/** @brief Module stop: MSTPCRA.MSTPA22 gates the whole DMAC. */
+#define RA8P1_MSTPCRA           (RA8P1_MSTP_BASE + 0x00UL)
+#define RA8P1_MSTPA_DMAC        (1UL << 22)
+
+/*---------------------------------------------------------------------------*/
 /* I/O ports (UM 21.2)                                                       */
 /*                                                                           */
 /* PmnPFS is one 32-bit register per pin: 0x40*m + 4*n from the PFS base,     */
