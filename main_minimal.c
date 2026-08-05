@@ -350,6 +350,7 @@ int main(void)
 #include "arch/ra8p1/tiku_sdram_arch.h"
 #include "arch/ra8p1/tiku_xflash_arch.h"
 #include "arch/ra8p1/tiku_usbhs_arch.h"
+#include "kernel/fs/tiku_bigblob.h"
 #include "kernel/fs/tiku_nvm_backend.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
@@ -1017,6 +1018,87 @@ int main(void)
                                        ? "SERVING" : "incomplete");
                 }
             }
+        }
+    }
+
+    /*
+     * U4b: the import path -- staging SDRAM to flash, and back at boot.
+     *
+     * This half needs no host at all, so it is proved on its own before the
+     * USB half it will eventually be fed by: fill SDRAM with a pattern whose
+     * value depends on its position, publish it to the flash blob slot,
+     * verify from the medium, then restore it into a DIFFERENT part of SDRAM
+     * and compare.  A restore that read back its own source would prove
+     * nothing, which is why the destination is moved.
+     */
+    if (tiku_ra8p1_sdram_ready()) {
+        struct tiku_nvm_backend *be = tiku_ra8p1_xflash_backend();
+        const uint32_t slot = 0x00400000UL;        /* 4 MB into the flash */
+        const uint32_t n = 1024UL * 1024UL;        /* 1 MB proof          */
+        uint8_t *stage = (uint8_t *)TIKU_RA8P1_SDRAM_ADDR;
+        uint8_t *back  = (uint8_t *)(TIKU_RA8P1_SDRAM_ADDR + 0x02000000UL);
+        volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
+        unsigned long q;
+
+        TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
+        TIKU_REG32(0xE0001000UL) |= 1UL;
+
+        for (q = 0; q < n; q++) {
+            stage[q] = (uint8_t)((q * 31u) + (q >> 13) + 7u);
+        }
+
+        if (be != NULL) {
+            uint32_t t0 = *cyc, wcyc, rcyc;
+            int rw, rv;
+            uint32_t blen = 0;
+            const void *bp;
+            unsigned bad = 0;
+
+            rw = tiku_bigblob_write(be, slot, "gemma-stage", stage, n);
+            wcyc = *cyc - t0;
+            rv = tiku_bigblob_verify(be, slot);
+
+            bp = tiku_bigblob_map(be, slot, &blen);
+            t0 = *cyc;
+            if (bp != NULL) {
+                const uint32_t *s32 = (const uint32_t *)bp;
+                uint32_t *d32 = (uint32_t *)back;
+                for (q = 0; q < (n / 4u); q++) { d32[q] = s32[q]; }
+                __asm__ volatile ("dsb" ::: "memory");
+            }
+            rcyc = *cyc - t0;
+            for (q = 0; q < n; q++) {
+                if (back[q] != stage[q]) { bad++; }
+            }
+            tiku_uart_printf("blob: write rc=%d verify rc=%d len=%u"
+                             " restore bad=%u/%u\n", rw, rv,
+                             (unsigned int)blen, bad, (unsigned int)n);
+            /*
+             * Reduce to milliseconds BEFORE scaling.  n * 240000 for a 1 MB
+             * blob is 2.5e11, which a uint32_t silently wraps -- the same
+             * width trap already on record for this project, and it turns a
+             * throughput figure into fiction rather than into an error.
+             */
+            {
+                uint32_t wms = wcyc / 240000UL;
+                uint32_t rms = rcyc / 240000UL;
+                uint32_t kb  = n / 1024UL;
+
+                tiku_uart_printf("blob: write %u ms (%u KB/s), restore %u ms"
+                                 " (%u MB/s)\n",
+                                 (unsigned int)wms,
+                                 (unsigned int)(wms ? (kb * 1000UL) / wms : 0),
+                                 (unsigned int)rms,
+                                 (unsigned int)(rms ? ((n / 1048576UL)
+                                                       * 1000UL) / rms : 0));
+                tiku_uart_printf("blob: extrapolated to 62.8 MB: import %u s,"
+                                 " restore %u ms\n",
+                                 (unsigned int)((wms * 63UL) / 1000UL),
+                                 (unsigned int)(rms * 63UL));
+            }
+            tiku_uart_printf("blob: U4b gate: %s\n",
+                             (rw == 0 && rv == 0 && bad == 0 && blen == n)
+                               ? "IMPORT+RESTORE PROVEN" : "incomplete");
         }
     }
 
