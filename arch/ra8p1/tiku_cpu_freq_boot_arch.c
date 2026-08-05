@@ -310,6 +310,15 @@ unsigned long tiku_cpu_ra8p1_pclka_get_hz(void)
                         RA8P1_SCKDIVCR_PCKA_SHIFT);
 }
 
+unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void)
+{
+    unsigned long src = cpu_hz_now *
+        div_of(TIKU_REG32(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
+
+    return src / div_of(TIKU_REG32(RA8P1_SCKDIVCR) >>
+                        RA8P1_SCKDIVCR_PCKD_SHIFT);
+}
+
 unsigned long tiku_cpu_ra8p1_sciclk_get_hz(void)
 {
     return sci_hz_now;

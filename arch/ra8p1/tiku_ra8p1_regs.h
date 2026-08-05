@@ -226,6 +226,28 @@
 /** @brief Event numbers this port links (UM Table 14.5). */
 #define RA8P1_EVENT_SCI8_RXI    0x2FCUL
 #define RA8P1_EVENT_SCI8_ERI    0x2FFUL
+#define RA8P1_EVENT_GPT0_CCMPA  0x181UL
+
+/*---------------------------------------------------------------------------*/
+/* GPT32 (UM 23) -- the htimer's counter and compare                          */
+/*                                                                            */
+/* A 32-bit free-running counter on PCLKD with a compare that raises an event. */
+/* Note GTINTAD carries NO per-compare interrupt enable (bits 7:0 reserved):   */
+/* the compare always raises its event and the ICU decides whether it reaches  */
+/* the NVIC, which is the event-link architecture doing the gating.            */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_GPT_BASE(n)       (0x40322000UL + (0x100UL * (n)))
+#define RA8P1_GPT_GTCR(n)       (RA8P1_GPT_BASE(n) + 0x2CUL)
+#define RA8P1_GPT_GTST(n)       (RA8P1_GPT_BASE(n) + 0x3CUL)
+#define RA8P1_GPT_GTCNT(n)      (RA8P1_GPT_BASE(n) + 0x48UL)
+#define RA8P1_GPT_GTCCRA(n)     (RA8P1_GPT_BASE(n) + 0x4CUL)
+#define RA8P1_GPT_GTPR(n)       (RA8P1_GPT_BASE(n) + 0x64UL)
+#define RA8P1_GPT_GTCR_CST      (1UL << 0)     /* count start          */
+#define RA8P1_GPT_GTCR_MD_SAW   (0UL << 16)    /* saw-wave PWM mode 1  */
+#define RA8P1_GPT_GTST_TCFA     (1UL << 0)     /* compare match A      */
+
+#define RA8P1_MSTPCRE           (RA8P1_MSTP_BASE + 0x10UL)  /* UM 11.2.10 */
+#define RA8P1_MSTPE_GPT0        (1UL << 31)
 
 /*---------------------------------------------------------------------------*/
 /* CAC (UM 10, "Clock Frequency Accuracy Measurement Circuit")                */

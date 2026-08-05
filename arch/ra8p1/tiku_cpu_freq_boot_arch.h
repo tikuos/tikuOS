@@ -128,6 +128,13 @@ unsigned long tiku_cpu_ra8p1_pclka_get_hz(void);
 unsigned long tiku_cpu_ra8p1_sciclk_get_hz(void);
 
 /**
+ * @brief PCLKD rate in Hz -- what the GPT counts, and so the htimer's tick.
+ *
+ * @return The rate PCLKD is running at
+ */
+unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void);
+
+/**
  * @brief Delay-loop iterations per millisecond.
  *
  * Measured against the kernel tick on first call once the tick is running;
