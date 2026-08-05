@@ -105,6 +105,22 @@ static void icu_link(unsigned slot, uint32_t event)
  * the tail, which the user can see and retype.
  */
 /**
+ * @brief Clear a slot's interrupt-status flag and make the clear STICK.
+ *
+ * The read-back is not decorative: without it the IELSR write may not have
+ * retired when the handler returns, the NVIC re-pends, and one byte arrives
+ * twice.  Hidden until the caches shortened the path to the exception return.
+ *
+ * @param slot  NVIC slot to acknowledge
+ */
+static void icu_ack(unsigned slot)
+{
+    TIKU_REG32(RA8P1_ICU_IELSR(slot)) &= ~RA8P1_ICU_IELSR_IR;
+    (void)TIKU_REG32(RA8P1_ICU_IELSR(slot));
+    __asm__ volatile ("dsb" ::: "memory");
+}
+
+/**
  * @brief SCI error interrupt: count the overrun and restart reception.
  *
  * An overrun latches ORER and STOPS the receiver, so noticing it lazily on the
@@ -117,7 +133,7 @@ void tiku_ra8p1_sci_eri_handler(void)
         uart_overruns++;
         TIKU_REG32(RA8P1_SCI_CFCLR(SCI)) = RA8P1_SCI_CFCLR_ORERC;
     }
-    TIKU_REG32(RA8P1_ICU_IELSR(UART_ERI_SLOT)) &= ~RA8P1_ICU_IELSR_IR;
+    icu_ack(UART_ERI_SLOT);
 }
 
 void tiku_ra8p1_sci_rxi_handler(void)
@@ -131,7 +147,7 @@ void tiku_ra8p1_sci_rxi_handler(void)
     } else {
         uart_overruns++;
     }
-    TIKU_REG32(RA8P1_ICU_IELSR(UART_RXI_SLOT)) &= ~RA8P1_ICU_IELSR_IR;
+    icu_ack(UART_RXI_SLOT);
 }
 
 void tiku_uart_init(void)

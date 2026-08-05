@@ -305,6 +305,74 @@
 #define RA8P1_SAU_TYPE          0xE000EDD4UL
 #define RA8P1_NVIC_ISER(i)      (0xE000E100UL + (4UL * (i)))
 #define RA8P1_NVIC_ICER(i)      (0xE000E180UL + (4UL * (i)))
+/*
+ * PMSAv8 MPU (Armv8.1-M ARM B11).  Region attributes here are also what set
+ * CACHEABILITY through MAIR, which is why the MPU and the caches are one
+ * milestone: enabling the M85's caches without programmed regions inherits
+ * the default memory map's attributes.
+ */
+#define RA8P1_MPU_BASE          0xE000ED90UL
+#define RA8P1_MPU_TYPE          (RA8P1_MPU_BASE + 0x00UL)  /* DREGION count */
+#define RA8P1_MPU_CTRL          (RA8P1_MPU_BASE + 0x04UL)
+#define RA8P1_MPU_RNR           (RA8P1_MPU_BASE + 0x08UL)
+#define RA8P1_MPU_RBAR          (RA8P1_MPU_BASE + 0x0CUL)
+#define RA8P1_MPU_RLAR          (RA8P1_MPU_BASE + 0x10UL)
+#define RA8P1_MPU_MAIR0         (RA8P1_MPU_BASE + 0x30UL)
+#define RA8P1_MPU_MAIR1         (RA8P1_MPU_BASE + 0x34UL)
+#define RA8P1_MPU_TYPE_DREGION_SHIFT  8U
+#define RA8P1_MPU_TYPE_DREGION_MASK   0xFFU
+
+#define RA8P1_MPU_CTRL_ENABLE       (1UL << 0)
+#define RA8P1_MPU_CTRL_HFNMIENA     (1UL << 1)
+#define RA8P1_MPU_CTRL_PRIVDEFENA   (1UL << 2)
+
+/* RBAR: base[31:5] | SH[4:3] | AP[2:1] | XN[0]  (ARM B11.2.9) */
+#define RA8P1_MPU_RBAR_AP_RW        (0x1UL << 1)   /* RW at any privilege */
+#define RA8P1_MPU_RBAR_AP_RO        (0x3UL << 1)   /* RO at any privilege */
+#define RA8P1_MPU_RBAR_AP_MASK      (0x3UL << 1)
+#define RA8P1_MPU_RBAR_XN           (1UL << 0)
+/* RLAR: limit[31:5] | AttrIndx[3:1] | EN[0]  (ARM B11.2.10) */
+#define RA8P1_MPU_RLAR_ATTR(i)      (((uint32_t)(i) & 0x7UL) << 1)
+#define RA8P1_MPU_RLAR_EN           (1UL << 0)
+
+/*
+ * MAIR attribute bytes.  Index 0 is Normal write-back read/write-allocate --
+ * the one that makes the D-cache actually cache SRAM; index 1 is Device
+ * nGnRE for peripherals, which must never be cached or speculated into.
+ */
+#define RA8P1_MPU_MAIR_NORMAL_WB    0xFFU
+#define RA8P1_MPU_MAIR_DEVICE       0x04U
+#define RA8P1_MPU_ATTR_NORMAL       0U
+#define RA8P1_MPU_ATTR_DEVICE       1U
+
+/* Cortex-M85 cache control (SCB CCR / cache maintenance, ARM B) */
+#define RA8P1_SCB_CCR           0xE000ED14UL
+#define RA8P1_SCB_CCR_IC        (1UL << 17)
+#define RA8P1_SCB_CCR_DC        (1UL << 16)
+#define RA8P1_SCB_CLIDR         0xE000ED78UL
+#define RA8P1_SCB_CTR           0xE000ED04UL
+#define RA8P1_SCB_CCSIDR        0xE000ED80UL
+#define RA8P1_SCB_CSSELR        0xE000ED84UL
+#define RA8P1_SCB_ICIALLU       0xE000EF50UL
+#define RA8P1_SCB_DCIMVAC       0xE000EF5CUL
+#define RA8P1_SCB_DCISW         0xE000EF60UL
+#define RA8P1_SCB_DCCMVAC       0xE000EF68UL
+#define RA8P1_SCB_DCCSW         0xE000EF6CUL
+#define RA8P1_SCB_DCCIMVAC      0xE000EF70UL
+#define RA8P1_SCB_DCCISW        0xE000EF74UL
+
+/** @brief Cortex-M85 cache line, in bytes; range ops round to it. */
+#define RA8P1_CACHE_LINE        32UL
+
+/* MemManage: SHCSR enables the fault, CFSR's low byte reports it. */
+#define RA8P1_SCB_SHCSR         0xE000ED24UL
+#define RA8P1_SCB_SHCSR_MEMFAULTENA (1UL << 16)
+#define RA8P1_SCB_CFSR          0xE000ED28UL
+#define RA8P1_SCB_MMFAR         0xE000ED34UL
+#define RA8P1_CFSR_MMARVALID    (1UL << 7)
+#define RA8P1_CFSR_DACCVIOL     (1UL << 1)
+#define RA8P1_CFSR_IACCVIOL     (1UL << 0)
+
 #define RA8P1_SCB_AIRCR         0xE000ED0CUL
 #define RA8P1_AIRCR_VECTKEY     0x05FA0000UL
 #define RA8P1_AIRCR_SYSRESETREQ (1UL << 2)

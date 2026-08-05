@@ -346,6 +346,7 @@ int main(void)
 #include "arch/ra8p1/tiku_cpu_freq_boot_arch.h"
 #include "arch/ra8p1/tiku_cpu_common.h"
 #include "arch/ra8p1/tiku_uart_arch.h"
+#include "arch/ra8p1/tiku_cache_arch.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
 #include "arch/ra8p1/tiku_uart_arch.h"
@@ -466,6 +467,9 @@ int main(void)
                          (unsigned int)((unsigned long)n *
                                         (TIKU_BOARD_MOSC_HZ / 8192UL)));
     }
+
+    tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",
+                     (unsigned int)tiku_ra8p1_cache_state());
 
     tiku_clock_arch_time_t next = tiku_clock_arch_time() +
                                   (tiku_clock_arch_time_t)TIKU_CLOCK_ARCH_SECOND;

@@ -84,10 +84,23 @@
  * takes a precise bus fault (found on-device: tiku_hang_boot_init's
  * one-shot clear was the first boot-time write to hit the closed gate).
  */
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
-#define TIKU_PERSIST_WARM  __attribute__((section(".persistent.warm")))
-#else
+/*
+ * MSP430 is the EXCEPTION and is named as such; everyone else separates.
+ *
+ * This was the other way round -- an allow-list of the platforms that
+ * separate -- and the default was to fold WARM into `.persistent`.  That
+ * makes the UNSAFE grade the default for any platform not yet listed, and
+ * the same bug then arrives once per port: nordic hit it when
+ * tiku_hang_boot_init's one-shot clear became the first store into RRAM
+ * behind the closed WEN gate (see above), and ra8p1 hit the identical thing
+ * when that clear became the first store into an MPU-protected region.  Both
+ * were fixed by adding a name to the list, which left the trap armed for the
+ * next port.  Naming the exception costs a future port nothing.
+ */
+#if defined(PLATFORM_MSP430)
 #define TIKU_PERSIST_WARM  __attribute__((section(".persistent")))
+#else
+#define TIKU_PERSIST_WARM  __attribute__((section(".persistent.warm")))
 #endif
 
 /*

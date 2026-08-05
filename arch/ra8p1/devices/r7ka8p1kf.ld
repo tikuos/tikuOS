@@ -29,11 +29,21 @@ SECTIONS
         __vectors_end = .;
     } > SRAM
 
-    .text :
+    /*
+     * ALIGN(32) on every MPU boundary, not ALIGN(4).
+     *
+     * PMSAv8's region granule is 32 bytes: RBAR keeps base[31:5] and RLAR
+     * keeps limit[31:5].  A boundary that is only 4-aligned cannot be
+     * expressed, so the region would either overlap its neighbour (behaviour
+     * the architecture leaves implementation-defined) or leave a hole that
+     * falls through to the background map.  Aligning here is what lets the
+     * W^X split be exact rather than approximate.
+     */
+    .text : ALIGN(32)
     {
         *(.text*)
         *(.rodata*)
-        . = ALIGN(4);
+        . = ALIGN(32);
     } > SRAM
 
     /* ARM unwind tables: kept so a fault handler can walk the stack.  Without
@@ -61,7 +71,7 @@ SECTIONS
      * the linker actually chose, so src == dst and the copy is correctly
      * skipped.
      */
-    .data :
+    .data : ALIGN(32)
     {
         __data_start = .;
         __datastart = .;
@@ -72,7 +82,7 @@ SECTIONS
 
     __data_load = LOADADDR(.data);
 
-    .bss (NOLOAD) :
+    .bss (NOLOAD) : ALIGN(32)
     {
         __bss_start = .;
         *(.bss*)
@@ -89,10 +99,19 @@ SECTIONS
     {
         __uninit_start = .;
         *(.uninit*)
+        /* DURABLE grade: exact-match `.persistent` only.  The MPU's NVM
+         * region covers __uninit_start..__uninit_end and nothing else. */
         *(.persistent)
-        *(.persistent.warm)
-        . = ALIGN(4);
+        . = ALIGN(32);
         __uninit_end = .;
+        /* WARM grade sits OUTSIDE that window, deliberately.  tiku_mem.h is
+         * explicit that TIKU_PERSIST_WARM is "never mirrored, never
+         * MPU-protected", and its callers write it unbracketed on purpose --
+         * tiku_hang_boot_init() clears the hang record at every boot.  Sweep
+         * it in with `.persistent` and that write MemManage-faults before the
+         * shell ever starts, which is how this was found. */
+        *(.persistent.warm*)
+        . = ALIGN(32);
     } > SRAM
 
     _end = __uninit_end;

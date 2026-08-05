@@ -31,6 +31,7 @@
 #include "arch/stm32n6/tiku_cpu_freq_boot_arch.h"
 #elif defined(PLATFORM_RA8P1)
 #include "arch/ra8p1/tiku_cpu_freq_boot_arch.h"
+#include "arch/ra8p1/tiku_cache_arch.h"
 #else
 #include "arch/nordic/tiku_cpu_freq_boot_arch.h"
 #endif
@@ -184,7 +185,7 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
 #elif defined(PLATFORM_STM32N6)
     (void)addr; (void)len;            /* caches are not enabled on this port */
 #elif defined(PLATFORM_RA8P1)
-    (void)addr; (void)len;            /* M85 caches are off until R5 */
+    tiku_ra8p1_dcache_clean(addr, len);
 #endif
 }
 
@@ -200,13 +201,15 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
 #elif defined(PLATFORM_STM32N6)
     (void)addr; (void)len;            /* caches are not enabled on this port */
 #elif defined(PLATFORM_RA8P1)
-    (void)addr; (void)len;            /* M85 caches are off until R5 */
+    tiku_ra8p1_dcache_invalidate(addr, len);
 #endif
 }
 
 void tiku_cpu_icache_invalidate(void) {
 #if defined(PLATFORM_AMBIQ)
     tiku_cpu_ambiq_icache_invalidate();
+#elif defined(PLATFORM_RA8P1)
+    tiku_ra8p1_icache_invalidate();
 #endif
     /* MSP430 / RP2350 / nRF54L M33: no instruction cache -- no-op. */
 }
