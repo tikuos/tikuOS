@@ -917,6 +917,28 @@ int main(void)
             tiku_uart_printf("usbhs: final syscfg=%x syssts=%x dvstctr=%x"
                              " intsts0=%x frame=%u\n",
                              r[0], r[1], r[3], r[5], r[7]);
+            /*
+             * The U1 gate, stated rather than left to be read off: a host
+             * drove a bus reset (device state left Powered) and the chirp
+             * handshake settled on high speed.  The frame counter is the
+             * corroborating evidence -- it only advances on SOF packets the
+             * host actually sends, so it cannot be produced by the device
+             * misreading its own idle bus.
+             */
+            {
+                int reset_seen = (tiku_ra8p1_usbhs_devstate() !=
+                                  TIKU_RA8P1_USBHS_DEV_POWERED);
+                int hs = (tiku_ra8p1_usbhs_speed() ==
+                          TIKU_RA8P1_USBHS_SPEED_HIGH);
+
+                tiku_uart_printf("usbhs: U1 gate: bus reset=%s speed=%s"
+                                 " sof=%s -> %s\n",
+                                 reset_seen ? "yes" : "NO",
+                                 hs ? "HIGH" : "not high",
+                                 (r[7] != 0u) ? "running" : "NONE",
+                                 (reset_seen && hs && r[7] != 0u)
+                                   ? "PASS" : "incomplete");
+            }
         }
     }
 
