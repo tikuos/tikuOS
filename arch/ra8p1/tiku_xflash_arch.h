@@ -37,6 +37,53 @@
 void tiku_ra8p1_xflash_init(void);
 
 /**
+ * @brief Issue one manual-command transaction.
+ *
+ * The single primitive every other call is built from: opcode, optional
+ * address, optional dummy cycles, up to 8 bytes in or out.
+ *
+ * @param cmd        Opcode, already positioned for the active protocol
+ * @param addr       Address, ignored when @p addr_bytes is 0
+ * @param addr_bytes 0..4
+ * @param dummy      Latency cycles between address and data
+ * @param data       Buffer read into, or written from; may be NULL when len 0
+ * @param len        0..8 bytes
+ * @param is_write   Non-zero for a transaction that sends data
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_cmd(uint16_t cmd, uint32_t addr, uint8_t addr_bytes,
+                          uint8_t dummy, void *data, uint8_t len,
+                          int is_write);
+
+/**
+ * @brief Read @p len bytes of the SFDP parameter table at @p addr.
+ *
+ * Self-verifying at offset 0, where JESD216 requires the signature "SFDP" --
+ * which is why this is the first transaction to carry an address and dummy
+ * cycles rather than a data read the caller has to trust.
+ *
+ * @param addr  SFDP offset
+ * @param dst   Destination, up to 8 bytes
+ * @param len   0..8
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_read_sfdp(uint32_t addr, void *dst, uint8_t len);
+
+/**
+ * @brief Open the mapped window so the CPU can read flash as memory.
+ *
+ * Programs the command map with FAST READ 4B (0x0C, four address bytes, eight
+ * dummy cycles) and enables read access for CS1.  Reads only: the window
+ * stays write-disabled, so a stray store cannot start a program cycle.
+ *
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_mmap_enable(void);
+
+/** @brief Read the status register (RDSR). @param sr Receives it @return rc */
+int tiku_ra8p1_xflash_read_status(uint8_t *sr);
+
+/**
  * @brief Read the JEDEC ID over 1-1-1 SPI.
  *
  * The identifying transaction, and deliberately the first one: it proves

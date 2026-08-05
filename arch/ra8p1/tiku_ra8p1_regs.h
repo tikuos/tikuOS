@@ -171,7 +171,19 @@
 #define RA8P1_OSPI_CDABUF(n, b) (RA8P1_OSPI_BASE(n) + 0x084UL + (0x10UL * (b)))
 #define RA8P1_OSPI_CDD0BUF(n,b) (RA8P1_OSPI_BASE(n) + 0x088UL + (0x10UL * (b)))
 #define RA8P1_OSPI_CDD1BUF(n,b) (RA8P1_OSPI_BASE(n) + 0x08CUL + (0x10UL * (b)))
+#define RA8P1_OSPI_BMCTL0(n)    (RA8P1_OSPI_BASE(n) + 0x060UL)
 #define RA8P1_OSPI_LIOCTL(n)    (RA8P1_OSPI_BASE(n) + 0x108UL)
+
+/* Memory-map command config.  CMCFG1 holds the read opcode and its latency;
+ * FFMT picks the frame shape and ADDSIZE the address width. */
+#define RA8P1_CMCFG0_FFMT_NORMAL  (0UL << 0)
+#define RA8P1_CMCFG0_FFMT_8D      (1UL << 0)
+#define RA8P1_CMCFG0_ADDSIZE(n)   ((((uint32_t)(n) - 1UL) & 0x3UL) << 2)
+#define RA8P1_CMCFG1_RDCMD(c)     (((uint32_t)(c) & 0xFFFFUL) << 0)
+#define RA8P1_CMCFG1_RDLATE(n)    (((uint32_t)(n) & 0x1FUL) << 16)
+
+/* BMCTL0: two bits per (channel, chip select).  01 = read enable. */
+#define RA8P1_BMCTL0_CH0CS1_RD    (1UL << 2)
 #define RA8P1_OSPI_COMSTT(n)    (RA8P1_OSPI_BASE(n) + 0x184UL)
 
 /* LIOCTL.RSTCS0 drives the OM_RESET pin: 0 = LOW.  It RESETS TO 0, so the
@@ -192,6 +204,7 @@
 #define RA8P1_CDTBUF_DATASIZE(n) (((uint32_t)(n) & 0xFUL) << 5)   /*  8:5 */
 #define RA8P1_CDTBUF_LATE(n)    (((uint32_t)(n) & 0x1FUL) << 9)   /* 13:9 */
 #define RA8P1_CDTBUF_CMD(c)     (((uint32_t)(c) & 0xFFFFUL) << 16)
+#define RA8P1_CDTBUF_TRTYPE_WRITE (1UL << 15)   /* 0 = read from the slave */
 
 #define RA8P1_CDCTL0_TRREQ      (1UL << 0)   /* self-clears on completion */
 #define RA8P1_CDCTL0_PERMD      (1UL << 1)

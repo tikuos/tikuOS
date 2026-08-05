@@ -607,6 +607,52 @@ int main(void)
         tiku_uart_printf("xflash: rc=%d id = %x %x %x\n", rc,
                          (unsigned int)id[0], (unsigned int)id[1],
                          (unsigned int)id[2]);
+
+        /* SFDP offset 0 must read the JESD216 signature "SFDP".  This is the
+         * first transaction carrying an address AND dummy cycles, and it
+         * checks itself: no other four bytes are correct. */
+        {
+            uint8_t sf[8] = { 0 };
+            uint8_t sr = 0xFFU;
+            int rs = tiku_ra8p1_xflash_read_sfdp(0UL, sf, 8U);
+
+            tiku_uart_printf("xflash: sfdp rc=%d -> %x %x %x %x (\"%c%c%c%c\")"
+                             " rev %x.%x\n", rs,
+                             (unsigned int)sf[0], (unsigned int)sf[1],
+                             (unsigned int)sf[2], (unsigned int)sf[3],
+                             sf[0], sf[1], sf[2], sf[3],
+                             (unsigned int)sf[5], (unsigned int)sf[4]);
+            rs = tiku_ra8p1_xflash_read_status(&sr);
+            tiku_uart_printf("xflash: rdsr rc=%d sr=%x (wip=%u wel=%u)\n",
+                             rs, (unsigned int)sr, (unsigned int)(sr & 1U),
+                             (unsigned int)((sr >> 1) & 1U));
+
+            /*
+             * Memory-mapped read, cross-checked against the manual path.
+             * Agreement between two independent routes to the same bytes is
+             * the proof; a mapped window that returns plausible-looking data
+             * nobody compared is how a wrong dummy count ships.
+             */
+            {
+                volatile const uint8_t *xm =
+                    (volatile const uint8_t *)TIKU_RA8P1_XFLASH_ADDR;
+                uint8_t man[8];
+                unsigned k, bad = 0;
+
+                (void)tiku_ra8p1_xflash_mmap_enable();
+                (void)tiku_ra8p1_xflash_cmd(0x0C00U, 0UL, 4U, 8U, man, 8U, 0);
+                for (k = 0; k < 8u; k++) {
+                    if (xm[k] != man[k]) { bad++; }
+                }
+                tiku_uart_printf("xflash: mmap[0..7] = %x %x %x %x %x %x %x %x"
+                                 "  (vs manual: %u mismatches)\n",
+                                 (unsigned int)xm[0], (unsigned int)xm[1],
+                                 (unsigned int)xm[2], (unsigned int)xm[3],
+                                 (unsigned int)xm[4], (unsigned int)xm[5],
+                                 (unsigned int)xm[6], (unsigned int)xm[7],
+                                 bad);
+            }
+        }
     }
 
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",

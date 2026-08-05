@@ -123,43 +123,46 @@ void tiku_ra8p1_xflash_init(void)
     xf_ready = 1U;
 }
 
-int tiku_ra8p1_xflash_read_id(uint8_t out[3])
+int tiku_ra8p1_xflash_cmd(uint16_t cmd, uint32_t addr, uint8_t addr_bytes,
+                          uint8_t dummy, void *data, uint8_t len,
+                          int is_write)
 {
-    uint32_t spins, d0;
+    uint32_t spins, d0, d1;
+    uint8_t *b = (uint8_t *)data;
+    unsigned i;
 
-    if (out == NULL) {
+    if (len > 8U || addr_bytes > 4U) {
         return TIKU_RA8P1_XFLASH_ERR_ID;
     }
     tiku_ra8p1_xflash_init();
 
-    /*
-     * One manual-command transaction: 1-byte opcode, no address, no dummy
-     * cycles, 3 bytes back.  This is the 1-1-1 SPI form the part powers up
-     * in, so it needs none of the octal configuration to work.
-     */
+    if (is_write && b != NULL) {
+        d0 = 0UL;
+        d1 = 0UL;
+        for (i = 0; i < len; i++) {
+            if (i < 4U) { d0 |= (uint32_t)b[i] << (8U * i); }
+            else        { d1 |= (uint32_t)b[i] << (8U * (i - 4U)); }
+        }
+        TIKU_REG32(RA8P1_OSPI_CDD0BUF(XF_UNIT, 0)) = d0;
+        TIKU_REG32(RA8P1_OSPI_CDD1BUF(XF_UNIT, 0)) = d1;
+    } else {
+        TIKU_REG32(RA8P1_OSPI_CDD0BUF(XF_UNIT, 0)) = 0UL;
+        TIKU_REG32(RA8P1_OSPI_CDD1BUF(XF_UNIT, 0)) = 0UL;
+    }
+
     TIKU_REG32(RA8P1_OSPI_CDTBUF(XF_UNIT, 0)) =
-        /* CMD[15:8] carries a 1-byte opcode in 1S-1S-1S; CMD[7:0] is "not
-         * used" -- so an unshifted opcode transmits 0x00 and the device
-         * rightly ignores it. */
-        RA8P1_CDTBUF_CMD((uint32_t)RA8P1_MX_CMD_RDID << 8) |
+        RA8P1_CDTBUF_CMD(cmd) |
         RA8P1_CDTBUF_CMDSIZE(1U) |
-        RA8P1_CDTBUF_ADDSIZE(0U) |
-        RA8P1_CDTBUF_DATASIZE(3U) |
-        RA8P1_CDTBUF_LATE(0U);
-    TIKU_REG32(RA8P1_OSPI_CDABUF(XF_UNIT, 0)) = 0UL;
-    TIKU_REG32(RA8P1_OSPI_CDD0BUF(XF_UNIT, 0)) = 0UL;
+        RA8P1_CDTBUF_ADDSIZE(addr_bytes) |
+        RA8P1_CDTBUF_DATASIZE(len) |
+        RA8P1_CDTBUF_LATE(dummy) |
+        (is_write ? RA8P1_CDTBUF_TRTYPE_WRITE : 0UL);
+    TIKU_REG32(RA8P1_OSPI_CDABUF(XF_UNIT, 0)) = addr;
 
     TIKU_REG32(RA8P1_OSPI_CDCTL0(XF_UNIT)) =
         ((XF_CS != 0U) ? RA8P1_CDCTL0_CSSEL : 0UL) | RA8P1_CDCTL0_TRREQ;
     __asm__ volatile ("dsb" ::: "memory");
 
-    /* Confirm the request was ACCEPTED before waiting for it.  A dropped
-     * write reads back as 0, which the wait loop below would take for
-     * "already finished" and report success on garbage. */
-    xf_last_ctl0 = TIKU_REG32(RA8P1_OSPI_CDCTL0(XF_UNIT));
-    xf_last_comstt = TIKU_REG32(RA8P1_OSPI_COMSTT(XF_UNIT));
-
-    /* TRREQ self-clears when the transaction completes. */
     for (spins = 1000000UL; spins != 0UL; spins--) {
         if ((TIKU_REG32(RA8P1_OSPI_CDCTL0(XF_UNIT)) &
              RA8P1_CDCTL0_TRREQ) == 0UL) {
@@ -170,10 +173,67 @@ int tiku_ra8p1_xflash_read_id(uint8_t out[3])
         return TIKU_RA8P1_XFLASH_ERR_TIMEOUT;
     }
 
-    d0 = TIKU_REG32(RA8P1_OSPI_CDD0BUF(XF_UNIT, 0));
-    out[0] = (uint8_t)(d0 & 0xFFU);
-    out[1] = (uint8_t)((d0 >> 8) & 0xFFU);
-    out[2] = (uint8_t)((d0 >> 16) & 0xFFU);
+    if (!is_write && b != NULL) {
+        d0 = TIKU_REG32(RA8P1_OSPI_CDD0BUF(XF_UNIT, 0));
+        d1 = TIKU_REG32(RA8P1_OSPI_CDD1BUF(XF_UNIT, 0));
+        for (i = 0; i < len; i++) {
+            b[i] = (i < 4U) ? (uint8_t)(d0 >> (8U * i))
+                            : (uint8_t)(d1 >> (8U * (i - 4U)));
+        }
+    }
+    return TIKU_RA8P1_XFLASH_OK;
+}
+
+int tiku_ra8p1_xflash_read_sfdp(uint32_t addr, void *dst, uint8_t len)
+{
+    /* 0x5A, three address bytes, eight dummy cycles -- the JESD216 form the
+     * datasheet spells out for SPI mode. */
+    return tiku_ra8p1_xflash_cmd(0x5A00U, addr, 3U, 8U, dst, len, 0);
+}
+
+int tiku_ra8p1_xflash_read_status(uint8_t *sr)
+{
+    return tiku_ra8p1_xflash_cmd(0x0500U, 0UL, 0U, 0U, sr, 1U, 0);
+}
+
+int tiku_ra8p1_xflash_mmap_enable(void)
+{
+    tiku_ra8p1_xflash_init();
+
+    /*
+     * FAST READ 4B (0x0C): an explicit four-byte-address opcode, chosen over
+     * plain READ (0x03) because 0x03 reaches only 16 MB of a 64 MB part and
+     * over 0x13 because the fast form's eight dummy cycles are what lets the
+     * clock rise later without changing the command.  The opcode sits in
+     * CMD[15:8], the same placement the manual path needs.
+     */
+    TIKU_REG32(RA8P1_OSPI_CMCFG0(XF_UNIT, XF_CS)) =
+        RA8P1_CMCFG0_FFMT_NORMAL | RA8P1_CMCFG0_ADDSIZE(4U);
+    TIKU_REG32(RA8P1_OSPI_CMCFG1(XF_UNIT, XF_CS)) =
+        RA8P1_CMCFG1_RDCMD(0x0C00U) | RA8P1_CMCFG1_RDLATE(8U);
+
+    /* Read enable only.  Leaving write disabled means a stray store into the
+     * window is refused by the bridge rather than becoming a program cycle
+     * on a device whose erase state nobody checked. */
+    TIKU_REG32(RA8P1_OSPI_BMCTL0(XF_UNIT)) =
+        TIKU_REG32(RA8P1_OSPI_BMCTL0(XF_UNIT)) | RA8P1_BMCTL0_CH0CS1_RD;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+
+    return TIKU_RA8P1_XFLASH_OK;
+}
+
+int tiku_ra8p1_xflash_read_id(uint8_t out[3])
+{
+    int rc;
+
+    if (out == NULL) {
+        return TIKU_RA8P1_XFLASH_ERR_ID;
+    }
+    rc = tiku_ra8p1_xflash_cmd((uint16_t)(RA8P1_MX_CMD_RDID << 8), 0UL, 0U,
+                               0U, out, 3U, 0);
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
 
     /* Self-checking: only 0xC2 is a Macronix part, so a floating bus or a
      * dead controller cannot pass by accident. */
