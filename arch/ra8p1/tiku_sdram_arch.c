@@ -19,6 +19,10 @@
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_cpu_common.h"
 
+#include <string.h>
+#include <kernel/memory/tiku_mem.h>
+#include <kernel/shell/tiku_shell_io.h>
+
 /*
  * EK-RA8P1 wiring (board manual Table 30), 57 signals.  This is BOARD data,
  * not silicon: another RA8P1 design wiring fewer address lines or a 16-bit
@@ -217,4 +221,118 @@ int tiku_ra8p1_sdram_init(void)
 int tiku_ra8p1_sdram_ready(void)
 {
     return sdram_ready != 0U;
+}
+
+int tiku_ra8p1_sdram_attach(void)
+{
+    int rc = tiku_ra8p1_sdram_init();
+
+    if (rc != TIKU_RA8P1_SDRAM_OK) {
+        return rc;
+    }
+    if (tiku_tier_attach_psram((void *)TIKU_RA8P1_SDRAM_ADDR,
+                               (tiku_mem_arch_size_t)TIKU_RA8P1_SDRAM_BYTES)
+            != TIKU_MEM_OK) {
+        return TIKU_RA8P1_SDRAM_ERR_INIT;
+    }
+    return TIKU_RA8P1_SDRAM_OK;
+}
+
+/*---------------------------------------------------------------------------*/
+/* BENCH                                                                     */
+/*---------------------------------------------------------------------------*/
+
+#define SD_BENCH_BYTES  (1UL * 1024UL * 1024UL)   /* 1 MB per leg */
+#define SD_DWT_CYCCNT   0xE0001004UL
+#define SD_DWT_CTRL     0xE0001000UL
+#define SD_DEMCR        0xE000EDFCUL
+
+/** @brief Staging buffer for the copy legs; SRAM side of the transfer. */
+static uint32_t sd_bench_src[1024];
+
+/**
+ * @brief Report one leg as MB/s, computed from CPU cycles.
+ *
+ * Every leg is NAMED because a single "SDRAM bandwidth" number is a fiction:
+ * sequential and strided differ by an order of magnitude on the same array,
+ * and quoting one as the figure is how a benchmark misleads.
+ */
+static void sd_report(const char *name, uint32_t bytes, uint32_t cycles,
+                      uint32_t cpu_hz)
+{
+    uint32_t mbps = 0U;
+
+    if (cycles != 0U) {
+        /* bytes/cycle * cpu_hz / 1e6, ordered to stay inside 32 bits. */
+        mbps = (uint32_t)(((uint64_t)bytes * (uint64_t)cpu_hz) /
+                          ((uint64_t)cycles * 1000000ULL));
+    }
+    SHELL_PRINTF("  %-18s %8lu cycles  %4lu MB/s\n", name,
+                 (unsigned long)cycles, (unsigned long)mbps);
+}
+
+void tiku_ra8p1_sdram_bench_run(void)
+{
+    volatile uint32_t *sd = (volatile uint32_t *)TIKU_RA8P1_SDRAM_ADDR;
+    volatile uint32_t *cyc = (volatile uint32_t *)SD_DWT_CYCCNT;
+    uint32_t words = SD_BENCH_BYTES / 4UL;
+    uint32_t cpu_hz = (uint32_t)tiku_cpu_ra8p1_clock_get_hz();
+    uint32_t t0, i, sum;
+
+    if (!sdram_ready) {
+        SHELL_PRINTF("sdram: not up\n");
+        return;
+    }
+
+    /* DWT must actually be counting; a bench on a dead counter reports
+     * infinite bandwidth rather than failing. */
+    TIKU_REG32(SD_DEMCR) |= (1UL << 24);            /* TRCENA */
+    TIKU_REG32(SD_DWT_CTRL) |= 1UL;                 /* CYCCNTENA */
+    t0 = *cyc;
+    __asm__ volatile ("nop; nop; nop" ::: "memory");
+    if (*cyc == t0) {
+        SHELL_PRINTF("sdram: DWT cycle counter is not running -- refusing"
+                     " to report timings\n");
+        return;
+    }
+
+    SHELL_PRINTF("sdrambench: %lu MB per leg, bclk %lu Hz, cpu %lu Hz\n",
+                 (unsigned long)(SD_BENCH_BYTES >> 20),
+                 (unsigned long)tiku_cpu_ra8p1_bclk_get_hz(),
+                 (unsigned long)cpu_hz);
+
+    t0 = *cyc;
+    for (i = 0; i < words; i++) { sd[i] = i; }
+    sd_report("seq-write-32", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+
+    t0 = *cyc;
+    sum = 0U;
+    for (i = 0; i < words; i++) { sum += sd[i]; }
+    sd_report("seq-read-32", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+
+    /* Strided by a cache line: every access a fresh line, so this is the
+     * cache-miss path rather than the streaming one. */
+    t0 = *cyc;
+    for (i = 0; i < words; i += 8u) { sum += sd[i]; }
+    sd_report("read-stride-32B", SD_BENCH_BYTES / 8UL, *cyc - t0, cpu_hz);
+
+    /* Row-hostile: 4 KB apart is a new SDRAM row every access. */
+    t0 = *cyc;
+    for (i = 0; i < words; i += 1024u) { sum += sd[i]; }
+    sd_report("read-stride-4KB", SD_BENCH_BYTES / 1024UL, *cyc - t0, cpu_hz);
+
+    for (i = 0; i < 1024u; i++) { sd_bench_src[i] = i; }
+    t0 = *cyc;
+    for (i = 0; i < words; i += 1024u) {
+        memcpy((void *)&sd[i], sd_bench_src, sizeof(sd_bench_src));
+    }
+    sd_report("memcpy-sram->sd", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+
+    t0 = *cyc;
+    for (i = 0; i < words; i += 1024u) {
+        memcpy(sd_bench_src, (const void *)&sd[i], sizeof(sd_bench_src));
+    }
+    sd_report("memcpy-sd->sram", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+
+    SHELL_PRINTF("  (checksum %lx)\n", (unsigned long)sum);
 }

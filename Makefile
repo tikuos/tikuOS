@@ -1935,6 +1935,7 @@ SRCS += arch/ra8p1/tiku_spi_arch.c
 SRCS += arch/ra8p1/tiku_onewire_arch.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_diag.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_sdram.c
 endif
 
 else

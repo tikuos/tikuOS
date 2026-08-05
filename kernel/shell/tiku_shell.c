@@ -91,6 +91,9 @@
 #if TIKU_SHELL_CMD_DIAG
 #include "commands/tiku_shell_cmd_diag.h"
 #endif
+#if TIKU_SHELL_CMD_SDRAM
+#include "commands/tiku_shell_cmd_sdram.h"
+#endif
 #if TIKU_SHELL_CMD_MRAMBENCH
 #include "commands/tiku_shell_cmd_mrambench.h"
 #endif
@@ -574,6 +577,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_DIAG
     {"diag",    "Faults, EXTI and the watchdog", tiku_shell_cmd_diag},
+#endif
+#if TIKU_SHELL_CMD_SDRAM
+    {"sdram",   "External SDRAM: up | bench", tiku_shell_cmd_sdram},
 #endif
 #if TIKU_SHELL_CMD_MRAMBENCH
     {"mrambench","Time the MRAM programmer",   tiku_shell_cmd_mrambench},

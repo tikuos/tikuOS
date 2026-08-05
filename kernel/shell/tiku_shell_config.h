@@ -94,6 +94,14 @@
 #ifndef TIKU_SHELL_CMD_HISTORY
 #define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
 #endif
+#ifndef TIKU_SHELL_CMD_SDRAM
+/* Auto-on where the board wires external SDRAM to the bus. */
+#if defined(PLATFORM_RA8P1)
+#define TIKU_SHELL_CMD_SDRAM   1  /**< sdram - bring up, attach, bench */
+#else
+#define TIKU_SHELL_CMD_SDRAM   0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_MRAMBENCH
 /* Auto-on on Ambiq (benches the Ambiq bootrom MRAM programmer); off
  * elsewhere. The .c is only compiled on Ambiq (Makefile-gated). */

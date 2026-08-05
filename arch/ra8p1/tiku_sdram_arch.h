@@ -41,4 +41,18 @@ int tiku_ra8p1_sdram_init(void);
 /** @brief Non-zero once init() has completed successfully. */
 int tiku_ra8p1_sdram_ready(void);
 
+/**
+ * @brief Bring the array up and hand it to the tier allocator.
+ *
+ * Attaches as TIKU_MEM_PSRAM, the tier's name for a large external volatile
+ * aperture that exists only once its controller is up -- the same role Ambiq's
+ * PSRAM fills, so a model placed there is board-agnostic.
+ *
+ * @return TIKU_RA8P1_SDRAM_OK, or a negative error code
+ */
+int tiku_ra8p1_sdram_attach(void);
+
+/** @brief Timed read/write/copy legs over the array, each named. */
+void tiku_ra8p1_sdram_bench_run(void);
+
 #endif /* TIKU_RA8P1_SDRAM_ARCH_H_ */
