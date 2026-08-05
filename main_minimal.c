@@ -351,6 +351,7 @@ int main(void)
 #include "arch/ra8p1/tiku_xflash_arch.h"
 #include "arch/ra8p1/tiku_usbhs_arch.h"
 #include "kernel/fs/tiku_bigblob.h"
+#include "arch/ra8p1/tiku_store_arch.h"
 #include "kernel/fs/tiku_nvm_backend.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
@@ -1022,85 +1023,34 @@ int main(void)
     }
 
     /*
-     * U4b: the import path -- staging SDRAM to flash, and back at boot.
-     *
-     * This half needs no host at all, so it is proved on its own before the
-     * USB half it will eventually be fed by: fill SDRAM with a pattern whose
-     * value depends on its position, publish it to the flash blob slot,
-     * verify from the medium, then restore it into a DIFFERENT part of SDRAM
-     * and compare.  A restore that read back its own source would prove
-     * nothing, which is why the destination is moved.
+     * U4c: restore whatever the last import left, BEFORE the disk is
+     * offered to a host.  Doing it first means the staging window already
+     * holds the model when the board starts serving, so a host that reads
+     * the disk sees the same bytes it wrote last session.
      */
-    if (tiku_ra8p1_sdram_ready()) {
-        struct tiku_nvm_backend *be = tiku_ra8p1_xflash_backend();
-        const uint32_t slot = 0x00400000UL;        /* 4 MB into the flash */
-        const uint32_t n = 1024UL * 1024UL;        /* 1 MB proof          */
-        uint8_t *stage = (uint8_t *)TIKU_RA8P1_SDRAM_ADDR;
-        uint8_t *back  = (uint8_t *)(TIKU_RA8P1_SDRAM_ADDR + 0x02000000UL);
-        volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
-        unsigned long q;
+    {
+        char mname[TIKU_STORE_NAME_MAX + 1u];
+        uint32_t rms = 0, rlen = 0;
 
-        TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
-        TIKU_REG32(0xE0001000UL) |= 1UL;
-
-        for (q = 0; q < n; q++) {
-            stage[q] = (uint8_t)((q * 31u) + (q >> 13) + 7u);
-        }
-
-        if (be != NULL) {
-            uint32_t t0 = *cyc, wcyc, rcyc;
-            int rw, rv;
-            uint32_t blen = 0;
-            const void *bp;
-            unsigned bad = 0;
-
-            rw = tiku_bigblob_write(be, slot, "gemma-stage", stage, n);
-            wcyc = *cyc - t0;
-            rv = tiku_bigblob_verify(be, slot);
-
-            bp = tiku_bigblob_map(be, slot, &blen);
-            t0 = *cyc;
-            if (bp != NULL) {
-                const uint32_t *s32 = (const uint32_t *)bp;
-                uint32_t *d32 = (uint32_t *)back;
-                for (q = 0; q < (n / 4u); q++) { d32[q] = s32[q]; }
-                __asm__ volatile ("dsb" ::: "memory");
-            }
-            rcyc = *cyc - t0;
-            for (q = 0; q < n; q++) {
-                if (back[q] != stage[q]) { bad++; }
-            }
-            tiku_uart_printf("blob: write rc=%d verify rc=%d len=%u"
-                             " restore bad=%u/%u\n", rw, rv,
-                             (unsigned int)blen, bad, (unsigned int)n);
-            /*
-             * Reduce to milliseconds BEFORE scaling.  n * 240000 for a 1 MB
-             * blob is 2.5e11, which a uint32_t silently wraps -- the same
-             * width trap already on record for this project, and it turns a
-             * throughput figure into fiction rather than into an error.
-             */
-            {
-                uint32_t wms = wcyc / 240000UL;
-                uint32_t rms = rcyc / 240000UL;
-                uint32_t kb  = n / 1024UL;
-
-                tiku_uart_printf("blob: write %u ms (%u KB/s), restore %u ms"
-                                 " (%u MB/s)\n",
-                                 (unsigned int)wms,
-                                 (unsigned int)(wms ? (kb * 1000UL) / wms : 0),
-                                 (unsigned int)rms,
-                                 (unsigned int)(rms ? ((n / 1048576UL)
-                                                       * 1000UL) / rms : 0));
-                tiku_uart_printf("blob: extrapolated to 62.8 MB: import %u s,"
-                                 " restore %u ms\n",
-                                 (unsigned int)((wms * 63UL) / 1000UL),
-                                 (unsigned int)(rms * 63UL));
-            }
-            tiku_uart_printf("blob: U4b gate: %s\n",
-                             (rw == 0 && rv == 0 && bad == 0 && blen == n)
-                               ? "IMPORT+RESTORE PROVEN" : "incomplete");
+        if (tiku_ra8p1_store_restore(&rms, &rlen, mname)) {
+            tiku_uart_printf("store: restored \"%s\" %u bytes in %u ms"
+                             " (%u MB/s)\n", mname, (unsigned int)rlen,
+                             (unsigned int)rms,
+                             (unsigned int)(rms ? (rlen / 1048576UL)
+                                                  * 1000UL / rms : 0));
+        } else {
+            tiku_uart_printf("store: no model in flash yet\n");
         }
     }
+
+    /*
+     * NOTHING BELOW MAY WRITE THE STAGING WINDOW OR THE FLASH SLOT.  Both
+     * now hold a real model, restored above, and a probe that fills either
+     * with a test pattern destroys it at every boot -- silently, because the
+     * pattern verifies against itself perfectly.  Exercise the store through
+     * the import path, which checks the same properties against data someone
+     * actually wanted.
+     */
 
     /*
      * SERVE INDEFINITELY.  The gates above are a snapshot; a mass-storage
@@ -1127,6 +1077,36 @@ int main(void)
             mark = *cyc;
             tiku_ra8p1_usbhs_msc_stats(&c, &rd, &wr, &bad);
             tiku_ra8p1_usbhs_msc_out_stats(&pk, &st);
+            /*
+             * The commit record is checked on the reporting tick rather than
+             * inside the transport, so an import can never run partway
+             * through the write that requested it.
+             */
+            if (wr != last_wr) {
+                uint32_t wl = 0, wb = 0;
+
+                (void)tiku_ra8p1_usbhs_msc_last_write(&wl, &wb);
+                if (wl == tiku_ra8p1_store_commit_lba()) {
+                    static const char *const sname[6] = {
+                        "idle", "DONE", "bad magic", "bad length",
+                        "flash write failed", "verify failed"
+                    };
+                    tiku_store_state_t r;
+
+                    tiku_uart_printf("store: commit record seen, importing"
+                                     " (the disk goes quiet for this)\n");
+                    r = tiku_ra8p1_store_on_write(wl, wb);
+                    tiku_uart_printf("store: import -> %s\n",
+                                     sname[(unsigned)r < 6u ? (unsigned)r : 0u]);
+                    /* Re-present the device: the import holds the CPU long
+                     * enough that the host gives up and resets the port, so
+                     * detaching and attaching is how it finds the disk
+                     * again. */
+                    (void)tiku_ra8p1_usbhs_attach(0);
+                    tiku_cpu_ra8p1_delay_us(200000u);
+                    (void)tiku_ra8p1_usbhs_attach(1);
+                }
+            }
             {
                 uint16_t pr[7];
 
@@ -1158,7 +1138,10 @@ int main(void)
              * on the device -- a diagnostic that causes the failure it is
              * there to observe.
              */
-            if (wr != 0u && wr == last_wr) {
+            /* Hash whenever the write count is STABLE -- including zero.
+             * Requiring a write first meant a freshly restored model was
+             * never checked, which is exactly the case worth checking. */
+            if (wr == last_wr) {
                 tiku_uart_printf("usbhs: settled, hash(8MB)=%x\n",
                                  (unsigned int)
                                      tiku_ra8p1_usbhs_msc_hash(16384u));

@@ -770,6 +770,7 @@ static tiku_usbd_msc_t msc_medium = {
 static uint8_t  msc_reply[TIKU_USBD_MSC_REPLY_MAX];
 static uint32_t n_cbw, n_rd, n_wr, n_bad;
 static uint32_t n_pkt_out, n_stall_out;
+static uint32_t last_wr_lba, last_wr_blocks;
 static uint16_t cfg_in, buf_in, maxp_in, cfg_out, buf_out, maxp_out;
 static uint16_t last_dtln;
 
@@ -1052,6 +1053,11 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     case TIKU_USBD_MSC_ACT_WRITE:
         n_wr++;
         ok = msc_recv_blocks(cmd.lba, cmd.bytes);
+        /* Recorded, not acted on.  Which block means what is a policy
+         * question, and a transport that answers it starts refusing writes
+         * on behalf of whoever asked. */
+        last_wr_lba    = cmd.lba;
+        last_wr_blocks = cmd.nblk;
         break;
     case TIKU_USBD_MSC_ACT_REPLY:
         ok = pipe_write(msc_reply, cmd.len);
@@ -1093,6 +1099,13 @@ void tiku_ra8p1_usbhs_pipe_regs(uint16_t *out7)
     out7[0] = cfg_in;  out7[1] = buf_in;  out7[2] = maxp_in;
     out7[3] = cfg_out; out7[4] = buf_out; out7[5] = maxp_out;
     out7[6] = last_dtln;
+}
+
+uint32_t tiku_ra8p1_usbhs_msc_last_write(uint32_t *lba, uint32_t *blocks)
+{
+    if (lba    != NULL) { *lba    = last_wr_lba;    }
+    if (blocks != NULL) { *blocks = last_wr_blocks; }
+    return n_wr;
 }
 
 uint32_t tiku_ra8p1_usbhs_msc_trace(uint32_t *resets, uint32_t *cswfail)

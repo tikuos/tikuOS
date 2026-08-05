@@ -122,6 +122,15 @@ void tiku_ra8p1_usbhs_msc_out_stats(uint32_t *pkts, uint32_t *stalls);
  */
 uint32_t tiku_ra8p1_usbhs_msc_trace(uint32_t *resets, uint32_t *cswfail);
 
+/**
+ * @brief Where the most recent WRITE(10) landed, and how many have happened.
+ *
+ * @param lba    receives the first block of the last write
+ * @param blocks receives its length in blocks
+ * @return total WRITE(10) commands served
+ */
+uint32_t tiku_ra8p1_usbhs_msc_last_write(uint32_t *lba, uint32_t *blocks);
+
 /** @brief Pipe geometry read back from hardware: cfg/buf/maxp per pipe, last DTLN. */
 void tiku_ra8p1_usbhs_pipe_regs(uint16_t *out7);
 

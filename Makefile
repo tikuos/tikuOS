@@ -1549,6 +1549,7 @@ SRCS += arch/ra8p1/tiku_xflash_arch.c
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
 SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 SRCS += kernel/fs/tiku_bigblob.c                # model-sized objects on flash
+SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
 # that masking the NVIC cannot silence a tick that is a CORE exception, and an
 # untested claim in a comment is worth nothing.
 SRCS += arch/ra8p1/tiku_crit_arch.c
@@ -1933,6 +1934,7 @@ SRCS += arch/ra8p1/tiku_xflash_arch.c
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
 SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 SRCS += kernel/fs/tiku_bigblob.c                # model-sized objects on flash
+SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
 SRCS += arch/ra8p1/tiku_wake_arch.c
 SRCS += arch/ra8p1/tiku_htimer_arch.c
 SRCS += arch/ra8p1/tiku_gpio_irq_arch.c
