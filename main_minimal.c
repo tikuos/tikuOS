@@ -651,6 +651,38 @@ int main(void)
                                  (unsigned int)xm[4], (unsigned int)xm[5],
                                  (unsigned int)xm[6], (unsigned int)xm[7],
                                  bad);
+
+                /*
+                 * Write path on the LAST sector, deliberately far from
+                 * offset 0 which holds what this board shipped with.
+                 * Erase to FF, program a pattern, read it back both ways.
+                 */
+                {
+                    const uint32_t a = TIKU_RA8P1_XFLASH_BYTES -
+                                       TIKU_RA8P1_XFLASH_SECTOR;
+                    static const uint8_t pat[8] =
+                        { 0xC0, 0xFF, 0xEE, 0x01, 0x23, 0x45, 0x67, 0x89 };
+                    uint8_t rb[8] = { 0 };
+                    int re, rp;
+                    unsigned q, blank = 0, match = 0, mm_ok = 0;
+
+                    re = tiku_ra8p1_xflash_erase_sector(a);
+                    (void)tiku_ra8p1_xflash_cmd(0x0C00U, a, 4U, 8U, rb, 8U, 0);
+                    for (q = 0; q < 8u; q++) {
+                        if (rb[q] == 0xFFU) { blank++; }
+                    }
+
+                    rp = tiku_ra8p1_xflash_program(a, pat, 8U);
+                    for (q = 0; q < 8u; q++) { rb[q] = 0; }
+                    (void)tiku_ra8p1_xflash_cmd(0x0C00U, a, 4U, 8U, rb, 8U, 0);
+                    for (q = 0; q < 8u; q++) {
+                        if (rb[q] == pat[q]) { match++; }
+                        if (xm[a + q] == pat[q]) { mm_ok++; }
+                    }
+                    tiku_uart_printf("xflash: erase rc=%d blank=%u/8 |"
+                                     " program rc=%d manual=%u/8 mmap=%u/8\n",
+                                     re, blank, rp, match, mm_ok);
+                }
             }
         }
     }

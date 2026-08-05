@@ -196,6 +196,119 @@ int tiku_ra8p1_xflash_read_status(uint8_t *sr)
     return tiku_ra8p1_xflash_cmd(0x0500U, 0UL, 0U, 0U, sr, 1U, 0);
 }
 
+/**
+ * @brief Poll WIP until the device goes idle, or @p ms elapses.
+ *
+ * Bounded by the datasheet MAXIMUM for the operation, never by a typical:
+ * a part that is merely slow must be reported as an error, not waited on
+ * forever, and must not be declared finished early either.
+ */
+static int xflash_wait_idle(uint32_t ms)
+{
+    uint32_t i;
+    uint8_t sr;
+
+    for (i = 0; i < ms; i++) {
+        if (tiku_ra8p1_xflash_read_status(&sr) != TIKU_RA8P1_XFLASH_OK) {
+            return TIKU_RA8P1_XFLASH_ERR_TIMEOUT;
+        }
+        if ((sr & 0x01U) == 0U) {          /* WIP clear */
+            return TIKU_RA8P1_XFLASH_OK;
+        }
+        tiku_cpu_ra8p1_delay_us(1000U);
+    }
+    return TIKU_RA8P1_XFLASH_ERR_BUSY;
+}
+
+/** @brief WREN, then confirm WEL actually latched before trusting it. */
+static int xflash_write_enable(void)
+{
+    uint8_t sr;
+    int rc = tiku_ra8p1_xflash_cmd(0x0600U, 0UL, 0U, 0U, NULL, 0U, 1);
+
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
+    /* Read WEL back rather than assume: a write-enable that did not latch
+     * turns every following erase and program into a silent no-op, which
+     * reads back as "the data did not stick" long after the cause. */
+    rc = tiku_ra8p1_xflash_read_status(&sr);
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
+    return ((sr & 0x02U) != 0U) ? TIKU_RA8P1_XFLASH_OK
+                                : TIKU_RA8P1_XFLASH_ERR_BUSY;
+}
+
+/** @brief Shared body for the two erase granularities. */
+static int xflash_erase(uint16_t cmd, uint32_t addr, uint32_t ms)
+{
+    int rc;
+
+    if (addr >= TIKU_RA8P1_XFLASH_BYTES) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+    rc = xflash_write_enable();
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
+    /* Four-byte-address opcodes throughout: a 64 MB part is past what the
+     * three-byte forms can address, and mixing the two depends on a mode
+     * bit nobody set. */
+    rc = tiku_ra8p1_xflash_cmd(cmd, addr, 4U, 0U, NULL, 0U, 1);
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
+    return xflash_wait_idle(ms);
+}
+
+/*
+ * Erase budgets are 5x the datasheet maxima, deliberately.
+ *
+ * The reference to hand is the MX25LM (3 V); the fitted part is the MX25LW
+ * (1.8 V), and measurement already shows the timings do NOT simply carry
+ * across: a sector erase held WIP past 50 ms where LM quotes 25 ms typical,
+ * and the first erase attempt overran a 500 ms budget built from LM's 400 ms
+ * maximum.  Since the cost of a generous ceiling is nothing on the happy
+ * path and the cost of a tight one is a spurious failure on a healthy
+ * device, these bound "the part is broken", not "the part is slow".
+ */
+int tiku_ra8p1_xflash_erase_sector(uint32_t addr)
+{
+    return xflash_erase(0x2100U, addr, 2000UL);     /* SE4B */
+}
+
+int tiku_ra8p1_xflash_erase_block(uint32_t addr)
+{
+    return xflash_erase(0xDC00U, addr, 10000UL);    /* BE4B */
+}
+
+int tiku_ra8p1_xflash_program(uint32_t addr, const void *src, uint8_t len)
+{
+    int rc;
+
+    if (len == 0U || len > 8U || addr >= TIKU_RA8P1_XFLASH_BYTES) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+    /* A page program that runs off the end of its page WRAPS to the start of
+     * the same page rather than continuing -- silent corruption, so it is
+     * refused here instead. */
+    if ((addr & (TIKU_RA8P1_XFLASH_PAGE - 1UL)) + len >
+        TIKU_RA8P1_XFLASH_PAGE) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+
+    rc = xflash_write_enable();
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
+    rc = tiku_ra8p1_xflash_cmd(0x1200U, addr, 4U, 0U, (void *)src, len, 1);
+    if (rc != TIKU_RA8P1_XFLASH_OK) {
+        return rc;
+    }
+    return xflash_wait_idle(5UL);                   /* tPP max 0.75 ms */
+}
+
 int tiku_ra8p1_xflash_mmap_enable(void)
 {
     tiku_ra8p1_xflash_init();

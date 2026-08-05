@@ -21,6 +21,8 @@
 #define TIKU_RA8P1_XFLASH_OK          0
 #define TIKU_RA8P1_XFLASH_ERR_TIMEOUT -1  /**< transaction never completed  */
 #define TIKU_RA8P1_XFLASH_ERR_ID      -2  /**< no Macronix device answered  */
+#define TIKU_RA8P1_XFLASH_ERR_BUSY    -3  /**< device still busy after tMAX */
+#define TIKU_RA8P1_XFLASH_ERR_RANGE   -4  /**< off the device, or spans a page */
 
 /** @brief Known-good RDID on the EK-RA8P1: C2 (Macronix) 86 (1.8 V octa) 3A
  *         (512 Mb).  The 3 V LM sibling reports 85 in the type byte, which is
@@ -79,6 +81,40 @@ int tiku_ra8p1_xflash_read_sfdp(uint32_t addr, void *dst, uint8_t len);
  * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
  */
 int tiku_ra8p1_xflash_mmap_enable(void);
+
+/** @brief Erase granularities this driver issues, in bytes. */
+#define TIKU_RA8P1_XFLASH_SECTOR  4096UL
+#define TIKU_RA8P1_XFLASH_BLOCK   65536UL
+#define TIKU_RA8P1_XFLASH_PAGE    256UL
+
+/**
+ * @brief Erase one 4 KB sector containing @p addr.
+ *
+ * Blocks until the device reports idle.  tSE is 25 ms typical but 400 ms
+ * worst case, so the wait is sized from the datasheet maximum rather than
+ * from what a healthy part happens to do.
+ *
+ * @param addr  Any address inside the sector
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_erase_sector(uint32_t addr);
+
+/** @brief Erase the 64 KB block containing @p addr (tBE up to 2 s). */
+int tiku_ra8p1_xflash_erase_block(uint32_t addr);
+
+/**
+ * @brief Program up to 8 bytes at @p addr, which must not cross a page.
+ *
+ * Eight is the manual-command data limit, not the part's: a page is 256
+ * bytes.  Bulk writing wants the mapped path, which this exists to validate
+ * rather than replace.
+ *
+ * @param addr  Destination, within one 256-byte page
+ * @param src   Bytes to write
+ * @param len   1..8
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_program(uint32_t addr, const void *src, uint8_t len);
 
 /** @brief Read the status register (RDSR). @param sr Receives it @return rc */
 int tiku_ra8p1_xflash_read_status(uint8_t *sr);
