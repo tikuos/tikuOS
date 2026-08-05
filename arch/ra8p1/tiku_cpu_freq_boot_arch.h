@@ -135,6 +135,16 @@ unsigned long tiku_cpu_ra8p1_sciclk_get_hz(void);
 unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void);
 
 /**
+ * @brief External bus clock (BCLK), which is also the SDRAM clock source.
+ *
+ * Read live rather than assumed: the SDRAM timings are derived from it, and a
+ * clock change that outran the part would otherwise corrupt data silently.
+ *
+ * @return BCLK in Hz
+ */
+unsigned long tiku_cpu_ra8p1_bclk_get_hz(void);
+
+/**
  * @brief Delay-loop iterations per millisecond.
  *
  * Measured against the kernel tick on first call once the tick is running;

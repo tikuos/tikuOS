@@ -172,9 +172,14 @@
 #define RA8P1_SDSR              (RA8P1_BUS_BASE + 0xC50UL)   /*  8-bit */
 
 #define RA8P1_SDCCR_EXENB       (1U << 0)      /* SDRAM access enable      */
-#define RA8P1_SDCCR_BSIZE_16    (1U << 4)      /* BSIZE[1:0] at 4:3        */
-#define RA8P1_SDCCR_BSIZE_32    (2U << 3)
-#define RA8P1_SDADR_MXC_9BIT    (1U << 0)      /* MXC[1:0]: column width   */
+/* BSIZE[1:0] is at 5:4 and 32-bit is 01, NOT 10 -- the ordering is
+ * 16 / 32 / 8, which reads like a typo in the manual and is not. */
+#define RA8P1_SDCCR_BSIZE_16    (0U << 4)
+#define RA8P1_SDCCR_BSIZE_32    (1U << 4)
+#define RA8P1_SDCCR_BSIZE_8     (2U << 4)
+/* MXC[1:0]: the column-address shift.  01 = 9 bits, which is what a 512
+ * column part (A0-A8) needs. */
+#define RA8P1_SDADR_MXC_9BIT    (1U << 0)
 #define RA8P1_SDRFEN_RFEN       (1U << 0)      /* auto-refresh enable      */
 #define RA8P1_SDICR_INIRQ       (1U << 0)      /* start the init sequencer */
 #define RA8P1_SDSR_INIST        (1U << 3)      /* init sequence running    */
@@ -200,6 +205,10 @@
 
 /** @brief PSEL value that selects the external-bus function on any pin. */
 #define RA8P1_PFS_PSEL_BUS      0x0BUL
+
+/* PmnPFS.DSCR[1:0] at 11:10.  00 low, 01 middle, 10 HIGH SPEED high drive,
+ * 11 high drive -- note 10 and 11 are not ordered the way they read. */
+#define RA8P1_PFS_DSCR_HS_HIGH  (2UL << 10)
 
 /*---------------------------------------------------------------------------*/
 /* DMA controller (UM 17)                                                    */

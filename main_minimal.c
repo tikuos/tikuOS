@@ -347,6 +347,7 @@ int main(void)
 #include "arch/ra8p1/tiku_cpu_common.h"
 #include "arch/ra8p1/tiku_uart_arch.h"
 #include "arch/ra8p1/tiku_cache_arch.h"
+#include "arch/ra8p1/tiku_sdram_arch.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
 #include "arch/ra8p1/tiku_uart_arch.h"
@@ -466,6 +467,134 @@ int main(void)
         tiku_uart_printf("cac: pclkb=%u Hz (expect 60000000)\n",
                          (unsigned int)((unsigned long)n *
                                         (TIKU_BOARD_MOSC_HZ / 8192UL)));
+    }
+
+    /*
+     * SDRAM bring-up probe (R7b).  MINIMAL on purpose: no MPU and no caches,
+     * so what is measured is the controller and the part rather than a cache
+     * interaction.
+     */
+    {
+        volatile uint32_t *sd = (volatile uint32_t *)TIKU_RA8P1_SDRAM_ADDR;
+        uint32_t words = TIKU_RA8P1_SDRAM_BYTES / 4u;
+        uint32_t i, bad, first_bad, t0, t1;
+        int rc;
+
+        tiku_uart_printf("sdram: bclk = %u Hz\n",
+                         (unsigned int)tiku_cpu_ra8p1_bclk_get_hz());
+        rc = tiku_ra8p1_sdram_init();
+        tiku_uart_printf("sdram: init rc=%d SDTR=%x SDCCR=%x SDSR=%x\n", rc,
+                         (unsigned int)TIKU_REG32(RA8P1_SDTR),
+                         (unsigned int)TIKU_REG8(RA8P1_SDCCR),
+                         (unsigned int)TIKU_REG8(RA8P1_SDSR));
+
+        if (rc == TIKU_RA8P1_SDRAM_OK) {
+            /* Walking ones: catches a stuck or shorted data line before the
+             * long test spends a second proving the same thing. */
+            bad = 0u;
+            for (i = 0; i < 32u; i++) {
+                sd[0] = (1UL << i);
+                if (sd[0] != (1UL << i)) { bad++; }
+            }
+            tiku_uart_printf("sdram: walking-1 dq errors = %u\n",
+                             (unsigned int)bad);
+
+            /*
+             * WALKING ADDRESS.  Write a unique marker at each power-of-two
+             * word offset, then read them all back.  A dropped or swapped
+             * address line shows up here as one specific offset aliasing
+             * onto another, which a linear test only reports as "everything
+             * is wrong".
+             */
+            for (i = 0; i < 24u; i++) { sd[1UL << i] = 0xC0DE0000u + i; }
+            sd[0] = 0xC0DEFFFFu;
+            bad = 0u;
+            for (i = 0; i < 24u; i++) {
+                uint32_t got = sd[1UL << i];
+                if (got != 0xC0DE0000u + i) {
+                    bad++;
+                    if (bad <= 3u) {
+                        tiku_uart_printf("sdram:   A%u (word %x) = %x,"
+                                         " expected %x\n", (unsigned int)i,
+                                         (unsigned int)(1UL << i),
+                                         (unsigned int)got,
+                                         (unsigned int)(0xC0DE0000u + i));
+                    }
+                }
+            }
+            tiku_uart_printf("sdram: walking-address errors = %u of 24"
+                             " (sd0=%x)\n", (unsigned int)bad,
+                             (unsigned int)sd[0]);
+
+            /* RETENTION vs ADDRESSING, isolated.  Write a small block and
+             * read it straight back, then again after >64 ms.  If the first
+             * passes and the second does not, the array is fine and refresh
+             * is not running -- which is the difference between a wiring
+             * fault and a controller one. */
+            for (i = 0; i < 256u; i++) { sd[i] = 0xA5A50000u + i; }
+            bad = 0u;
+            for (i = 0; i < 256u; i++) {
+                if (sd[i] != 0xA5A50000u + i) { bad++; }
+            }
+            tiku_uart_printf("sdram: 256w immediate errors = %u "
+                             "(sd0=%x sd1=%x sd2=%x MOD=%x)\n",
+                             (unsigned int)bad, (unsigned int)sd[0],
+                             (unsigned int)sd[1], (unsigned int)sd[2],
+                             (unsigned int)TIKU_REG16(RA8P1_SDMOD));
+            tiku_cpu_ra8p1_delay_us(150000u);      /* > 64 ms retention */
+            bad = 0u;
+            for (i = 0; i < 256u; i++) {
+                if (sd[i] != 0xA5A50000u + i) { bad++; }
+            }
+            tiku_uart_printf("sdram: 256w after 150ms errors = %u "
+                             "(RFEN=%x RFCR=%x SELF=%x CKO=%x)\n",
+                             (unsigned int)bad,
+                             (unsigned int)TIKU_REG8(RA8P1_SDRFEN),
+                             (unsigned int)TIKU_REG16(RA8P1_SDRFCR),
+                             (unsigned int)TIKU_REG8(RA8P1_SDSELF),
+                             (unsigned int)TIKU_REG8(RA8P1_SDCKOCR));
+
+            /*
+             * Address-as-data over the WHOLE 64 MB.  This is the test that
+             * matters: a wrong column shift, bus width or bank mapping shows
+             * up as ALIASING -- two addresses sharing a cell -- which any
+             * spot check passes and this cannot.
+             */
+            for (i = 0; i < words; i++) { sd[i] = i; }
+            bad = 0u; first_bad = 0xFFFFFFFFu;
+            for (i = 0; i < words; i++) {
+                if (sd[i] != i) {
+                    if (bad == 0u) { first_bad = i; }
+                    bad++;
+                }
+            }
+            tiku_uart_printf("sdram: address-as-data over %u MB: %u errors"
+                             " (first at word %x)\n",
+                             (unsigned int)(TIKU_RA8P1_SDRAM_BYTES >> 20),
+                             (unsigned int)bad, (unsigned int)first_bad);
+
+            /* Bandwidth, GPT0 at PCLKD. */
+            TIKU_REG32(RA8P1_MSTPCRE) |= RA8P1_MSTPE_GPT0;
+            TIKU_REG32(RA8P1_GPT_GTCLKCR) = RA8P1_GPT_GTCLKCR_BPEN;
+            TIKU_REG32(RA8P1_MSTPCRE) &= ~RA8P1_MSTPE_GPT0;
+            (void)TIKU_REG32(RA8P1_MSTPCRE);
+            TIKU_REG32(RA8P1_GPT_GTCR(0)) = 0UL;
+            TIKU_REG32(RA8P1_GPT_GTPR(0)) = 0xFFFFFFFFUL;
+            TIKU_REG32(RA8P1_GPT_GTCNT(0)) = 0UL;
+            TIKU_REG32(RA8P1_GPT_GTCR(0)) = RA8P1_GPT_GTCR_MD_SAW |
+                                            RA8P1_GPT_GTCR_CST;
+            t0 = TIKU_REG32(RA8P1_GPT_GTCNT(0));
+            for (i = 0; i < (1u << 20); i++) { sd[i] = i; }
+            t1 = TIKU_REG32(RA8P1_GPT_GTCNT(0));
+            tiku_uart_printf("sdram: seq write 4 MB = %u counts\n",
+                             (unsigned int)(t1 - t0));
+            t0 = TIKU_REG32(RA8P1_GPT_GTCNT(0));
+            bad = 0u;
+            for (i = 0; i < (1u << 20); i++) { bad += sd[i]; }
+            t1 = TIKU_REG32(RA8P1_GPT_GTCNT(0));
+            tiku_uart_printf("sdram: seq read  4 MB = %u counts (%x)\n",
+                             (unsigned int)(t1 - t0), (unsigned int)bad);
+        }
     }
 
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",
