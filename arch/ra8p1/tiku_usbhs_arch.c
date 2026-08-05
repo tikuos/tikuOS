@@ -181,6 +181,498 @@ int tiku_ra8p1_usbhs_up(int want_high)
     return TIKU_RA8P1_USBHS_OK;
 }
 
+/*---------------------------------------------------------------------------*/
+/* EP0: enumeration (U2)                                                     */
+/*---------------------------------------------------------------------------*/
+/*
+ * The controller decodes the setup packet itself.  On receiving one it sets
+ * INTSTS0.VALID, forces DCPCTR.PID to NAK and clears CCPL, then publishes
+ * bmRequestType/bRequest/wValue/wIndex/wLength in four registers -- so there
+ * is no eight-byte FIFO read to mistime and no way to lose a SETUP to one.
+ *
+ * The software half is small: clear VALID (until it is clear the pipe cannot be
+ * set to BUF and the transfer cannot be ended), move any data through the
+ * CFIFO port, then set CCPL with PID at BUF and let the hardware run the
+ * status stage in whichever direction the request implied.
+ *
+ * SET_ADDRESS is answered by the hardware.  The manual is explicit that
+ * software must respond to everything EXCEPT a well-formed SET_ADDRESS, so
+ * this clears VALID for it and deliberately touches nothing else -- setting
+ * CCPL as well would be a second completion for one transfer.
+ */
+
+/* pid.codes 1209:0001 is the block that project reserves for prototyping.
+ * Borrowing a vendor ID this project does not own would be wrong on a device
+ * that plugs into other people's machines; 0001 says "not a product" aloud. */
+#define USBD_VID          0x1209U
+#define USBD_PID          0x0001U
+
+#define USBD_DESC_DEVICE      1U
+#define USBD_DESC_CONFIG      2U
+#define USBD_DESC_STRING      3U
+#define USBD_DESC_QUALIFIER   6U
+#define USBD_DESC_OTHERSPEED  7U
+
+#define USBD_REQ_GET_STATUS        0x00U
+#define USBD_REQ_CLEAR_FEATURE     0x01U
+#define USBD_REQ_SET_FEATURE       0x03U
+#define USBD_REQ_SET_ADDRESS       0x05U
+#define USBD_REQ_GET_DESCRIPTOR    0x06U
+#define USBD_REQ_GET_CONFIGURATION 0x08U
+#define USBD_REQ_SET_CONFIGURATION 0x09U
+#define USBD_REQ_GET_INTERFACE     0x0AU
+#define USBD_REQ_SET_INTERFACE     0x0BU
+
+#define USBD_EP0_MAXPACKET  64U
+
+static const uint8_t desc_device[18] = {
+    18U, USBD_DESC_DEVICE,
+    0x00U, 0x02U,               /* bcdUSB 2.00                              */
+    0x00U, 0x00U, 0x00U,        /* class/subclass/protocol: at the interface */
+    USBD_EP0_MAXPACKET,
+    (uint8_t)USBD_VID, (uint8_t)(USBD_VID >> 8),
+    (uint8_t)USBD_PID, (uint8_t)(USBD_PID >> 8),
+    0x06U, 0x00U,               /* bcdDevice 0.06                           */
+    1U, 2U, 3U,                 /* manufacturer, product, serial            */
+    1U                          /* one configuration                        */
+};
+
+/*
+ * A vendor-specific interface on purpose.  Declaring mass storage here would
+ * make Linux bind usb-storage and start issuing commands this milestone
+ * cannot answer, so a failure to enumerate and a failure to serve would be
+ * entangled.  The endpoints are already the two bulk pipes U3 needs, so only
+ * the class triple changes then.
+ */
+static const uint8_t desc_config[32] = {
+    9U, USBD_DESC_CONFIG, 32U, 0U, 1U, 1U, 0U,
+    0xC0U,                      /* self-powered                             */
+    50U,                        /* 100 mA                                   */
+    9U, 4U, 0U, 0U, 2U, 0xFFU, 0x00U, 0x00U, 0U,
+    7U, 5U, 0x81U, 0x02U, 0x00U, 0x02U, 0U,   /* EP1 IN  bulk 512           */
+    7U, 5U, 0x02U, 0x02U, 0x00U, 0x02U, 0U    /* EP2 OUT bulk 512           */
+};
+
+/* A high-speed capable device MUST answer these two, and a device that
+ * stalls them enumerates at full speed while looking correct. */
+static const uint8_t desc_qualifier[10] = {
+    10U, USBD_DESC_QUALIFIER, 0x00U, 0x02U,
+    0x00U, 0x00U, 0x00U, USBD_EP0_MAXPACKET, 1U, 0U
+};
+
+static const uint8_t desc_other_speed[32] = {
+    9U, USBD_DESC_OTHERSPEED, 32U, 0U, 1U, 1U, 0U, 0xC0U, 50U,
+    9U, 4U, 0U, 0U, 2U, 0xFFU, 0x00U, 0x00U, 0U,
+    7U, 5U, 0x81U, 0x02U, 0x40U, 0x00U, 0U,   /* full speed: 64-byte bulk   */
+    7U, 5U, 0x02U, 0x02U, 0x40U, 0x00U, 0U
+};
+
+static const uint8_t desc_lang[4] = { 4U, USBD_DESC_STRING, 0x09U, 0x04U };
+
+/*
+ * A trace of what the hardware actually reported for each SETUP, because on
+ * this bus the interesting failures are silent: nothing errors, the host
+ * simply asks again.  Sixteen entries covers an enumeration attempt.
+ */
+typedef struct {
+    uint16_t req, val, len, ctsq;
+    uint16_t dcp_wr, ctr_wr;   /* state right after the bytes were written */
+    uint16_t spins;            /* how long BEMP took; 0 = it was already set */
+    uint16_t dcp_pre, dcp_post; /* around the status-stage completion        */
+    uint8_t  sel_ok, sent_ok;
+} ep0_trace_t;
+
+static ep0_trace_t ep0_trace[16];
+static uint8_t     ep0_trace_n;
+static ep0_trace_t *tr;      /* the entry being filled, or NULL */
+
+static uint8_t  ep0_buf[80];
+static uint8_t  usbhs_config;
+static uint32_t n_setup, n_stall;
+static uint16_t last_req;
+
+/** @brief Render an ASCII string as a USB string descriptor (UTF-16LE). */
+static uint16_t string_desc(const char *s, uint8_t *out)
+{
+    uint16_t n = 0U;
+
+    out[1] = USBD_DESC_STRING;
+    while (*s != '\0' && n < 36U) {
+        out[2U + (n * 2U)] = (uint8_t)*s++;
+        out[3U + (n * 2U)] = 0U;
+        n++;
+    }
+    out[0] = (uint8_t)(2U + (n * 2U));
+    return out[0];
+}
+
+/** @brief The board's own unique ID as hex, so two boards differ. */
+static uint16_t serial_desc(uint8_t *out)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char t[17];
+    unsigned i;
+    uint32_t w0 = TIKU_REG32(RA8P1_UIDR(0));
+    uint32_t w1 = TIKU_REG32(RA8P1_UIDR(1));
+
+    for (i = 0U; i < 8U; i++) {
+        t[i] = hex[(w0 >> (28U - (4U * i))) & 0xFU];
+        t[8U + i] = hex[(w1 >> (28U - (4U * i))) & 0xFU];
+    }
+    t[16] = '\0';
+    return string_desc(t, out);
+}
+
+/** @brief Point the CFIFO port at the control pipe and wait for the port. */
+static int dcp_select(int writing)
+{
+    const uint16_t want =
+        (uint16_t)(RA8P1_CFIFOSEL_CURPIPE(0U) | RA8P1_CFIFOSEL_MBW_8 |
+                   (writing ? RA8P1_CFIFOSEL_ISEL : 0U));
+    const uint16_t keep =
+        (uint16_t)(RA8P1_CFIFOSEL_ISEL | RA8P1_CFIFOSEL_CURPIPE(0xFU));
+    uint32_t spins;
+
+    /*
+     * WRITE, THEN CONFIRM BY READING BACK.  The selection crosses into the
+     * USB clock domain, so it is not visible the instant it is written -- and
+     * FRDY answers for whatever selection is CURRENTLY in effect.  Polling
+     * FRDY straight after the write therefore reads the PREVIOUS pipe's
+     * readiness, and the bytes that follow go somewhere else: the buffer
+     * stays empty, the device NAKs every IN token, and the host times out
+     * mid-descriptor with nothing anywhere reporting an error.
+     */
+    for (spins = 0U; spins < 1000U; spins++) {
+        TIKU_REG16(RA8P1_USBHS_CFIFOSEL) = want;
+        if ((TIKU_REG16(RA8P1_USBHS_CFIFOSEL) & keep) == (want & keep)) {
+            break;
+        }
+    }
+    if (spins >= 1000U) {
+        return 0;
+    }
+
+    /* Only now is FRDY answering for the pipe just selected. */
+    for (spins = 0U; spins < 100000U; spins++) {
+        if ((TIKU_REG16(RA8P1_USBHS_CFIFOCTR) & RA8P1_CFIFOCTR_FRDY) != 0U) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void dcp_pid(uint16_t pid)
+{
+    TIKU_REG16(RA8P1_USBHS_DCPCTR) =
+        (uint16_t)((TIKU_REG16(RA8P1_USBHS_DCPCTR) &
+                    ~(uint16_t)RA8P1_DCPCTR_PID_MASK) | pid);
+}
+
+/** @brief Refuse the request.  A stall is an answer; silence is not. */
+static void ep0_stall(void)
+{
+    dcp_pid(RA8P1_DCPCTR_PID_STALL);
+    n_stall++;
+}
+
+/** @brief Finish a transfer that carries no data of ours. */
+static void ep0_ack(void)
+{
+    dcp_pid(RA8P1_DCPCTR_PID_BUF);
+    TIKU_REG16(RA8P1_USBHS_DCPCTR) =
+        (uint16_t)(TIKU_REG16(RA8P1_USBHS_DCPCTR) | RA8P1_DCPCTR_CCPL);
+}
+
+/**
+ * @brief Send up to @p wlen bytes of @p p, then complete the transfer.
+ *
+ * @param p    bytes to send
+ * @param len  how many exist
+ * @param wlen how many the host asked for
+ */
+static void ep0_send(const uint8_t *p, uint16_t len, uint16_t wlen)
+{
+    uint32_t spins;
+    uint16_t n, i;
+
+    /* Never send more than was asked for: a host that requested eight bytes
+     * of the device descriptor is sizing EP0 and will not read more. */
+    if (len > wlen) {
+        len = wlen;
+    }
+
+    for (;;) {
+        if (!dcp_select(1)) {
+            if (tr != NULL) { tr->sel_ok = 0U; }
+            ep0_stall();
+            return;
+        }
+        if (tr != NULL) { tr->sel_ok = 1U; }
+
+        /* Clear the DCP's buffer-empty flag first, so the wait below observes
+         * THIS packet leaving rather than a previous one's stale flag.
+         * Write-0-to-clear: zero the bit to clear, ones everywhere else. */
+        TIKU_REG16(RA8P1_USBHS_BEMPSTS) = (uint16_t)~1U;
+
+        n = (len > USBD_EP0_MAXPACKET) ? USBD_EP0_MAXPACKET : len;
+        for (i = 0U; i < n; i++) {
+            TIKU_REG8(RA8P1_USBHS_CFIFOHH) = p[i];
+        }
+        p += n;
+        len = (uint16_t)(len - n);
+        if (tr != NULL) {
+            /* Did the buffer actually take the bytes?  BSTS should have gone
+             * to 0 (transmission not complete) now that data is staged. */
+            tr->dcp_wr = TIKU_REG16(RA8P1_USBHS_DCPCTR);
+            tr->ctr_wr = TIKU_REG16(RA8P1_USBHS_CFIFOCTR);
+        }
+
+        /* A packet shorter than the maximum must be marked valid to be sent;
+         * a full one commits by itself when the buffer fills. */
+        if (n < USBD_EP0_MAXPACKET) {
+            TIKU_REG16(RA8P1_USBHS_CFIFOCTR) =
+                (uint16_t)(TIKU_REG16(RA8P1_USBHS_CFIFOCTR) |
+                           RA8P1_CFIFOCTR_BVAL);
+        }
+        dcp_pid(RA8P1_DCPCTR_PID_BUF);
+
+        /*
+         * WAIT FOR THE PACKET TO ACTUALLY GO OUT.  Queueing data only makes
+         * it available for the next IN token; the host still has to ask.
+         * Completing the transfer before that turns a descriptor read into a
+         * status stage over data the host never received -- which is not an
+         * error anywhere, just a host that asks again and eventually gives
+         * up.  BEMP is the hardware saying the buffer drained.
+         */
+        for (spins = 0U; spins < 2000000U; spins++) {
+            if ((TIKU_REG16(RA8P1_USBHS_BEMPSTS) & 1U) != 0U) {
+                break;
+            }
+        }
+        if (tr != NULL) {
+            tr->spins = (spins > 0xFFFEU) ? 0xFFFEU : (uint16_t)spins;
+        }
+        if (spins >= 2000000U) {
+            if (tr != NULL) { tr->sent_ok = 0U; }
+            return;      /* host walked away; the next SETUP resyncs */
+        }
+        if (tr != NULL) { tr->sent_ok = 1U; }
+        TIKU_REG16(RA8P1_USBHS_BEMPSTS) = (uint16_t)~1U;
+
+        if (len == 0U) {
+            break;
+        }
+    }
+
+    /*
+     * Data delivered; now the status stage.  CCPL only takes effect while
+     * PID is BUF, and the hardware may have dropped the pipe back to NAK
+     * when the packet completed -- so set both in one write rather than
+     * assuming BUF survived.
+     */
+    if (tr != NULL) { tr->dcp_pre = TIKU_REG16(RA8P1_USBHS_DCPCTR); }
+    TIKU_REG16(RA8P1_USBHS_DCPCTR) =
+        (uint16_t)((TIKU_REG16(RA8P1_USBHS_DCPCTR) &
+                    ~(uint16_t)RA8P1_DCPCTR_PID_MASK) |
+                   RA8P1_DCPCTR_PID_BUF | RA8P1_DCPCTR_CCPL);
+    if (tr != NULL) { tr->dcp_post = TIKU_REG16(RA8P1_USBHS_DCPCTR); }
+}
+
+/** @brief GET_DESCRIPTOR, the request enumeration is mostly made of. */
+static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wlen)
+{
+    uint16_t n;
+
+    switch (type) {
+    case USBD_DESC_DEVICE:
+        ep0_send(desc_device, sizeof(desc_device), wlen);
+        return;
+    case USBD_DESC_CONFIG:
+        ep0_send(desc_config, sizeof(desc_config), wlen);
+        return;
+    case USBD_DESC_QUALIFIER:
+        ep0_send(desc_qualifier, sizeof(desc_qualifier), wlen);
+        return;
+    case USBD_DESC_OTHERSPEED:
+        ep0_send(desc_other_speed, sizeof(desc_other_speed), wlen);
+        return;
+    case USBD_DESC_STRING:
+        if (idx == 0U) {
+            ep0_send(desc_lang, sizeof(desc_lang), wlen);
+        } else if (idx == 1U) {
+            n = string_desc("TikuOS", ep0_buf);
+            ep0_send(ep0_buf, n, wlen);
+        } else if (idx == 2U) {
+            n = string_desc("EK-RA8P1 USB-HS", ep0_buf);
+            ep0_send(ep0_buf, n, wlen);
+        } else if (idx == 3U) {
+            n = serial_desc(ep0_buf);
+            ep0_send(ep0_buf, n, wlen);
+        } else {
+            ep0_stall();
+        }
+        return;
+    default:
+        ep0_stall();
+        return;
+    }
+}
+
+void tiku_ra8p1_usbhs_ep0_poll(void)
+{
+    uint16_t sts, ctsq, req, val, len;
+    uint8_t type, request;
+
+    if (!usbhs_up) {
+        return;
+    }
+    sts = TIKU_REG16(RA8P1_USBHS_INTSTS0);
+
+    /*
+     * TRIGGER ON THE STAGE TRANSITION, NOT ON VALID.
+     *
+     * VALID is set when the setup PACKET arrives, but the manual is careful
+     * about the order: the request parameters are stored "when the USBHS
+     * receives a data packet FOLLOWING a setup packet".  A poll loop tight
+     * enough to land between those two reads USBREQ before it means anything
+     * and dispatches on a request the host never sent -- observed directly,
+     * as bmRequestType/bRequest pairs of 0x00/0x00 and 0x40/0x00 in a trace
+     * where the host was only ever sending GET_DESCRIPTOR.
+     *
+     * CTRT fires on the stage transition, by which time CTSQ names the stage
+     * and the four request registers are populated.  That is the documented
+     * mechanism and it has no window.
+     */
+    if ((sts & RA8P1_INTSTS0_CTRT) == 0U) {
+        return;
+    }
+    ctsq = (uint16_t)(sts & RA8P1_INTSTS0_CTSQ_MASK);
+
+    /* Write-0-to-clear: zero the flag being cleared, ones everywhere else. */
+    TIKU_REG16(RA8P1_USBHS_INTSTS0) = (uint16_t)~RA8P1_INTSTS0_CTRT;
+
+    if (ctsq == 6U) {
+        /* The controller says the host's sequence made no sense.  Stalling
+         * is the defined answer; staying silent is not. */
+        ep0_stall();
+        return;
+    }
+    /* 1 = control read data, 3 = control write data, 5 = no-data status.
+     * Any other stage is the hardware moving through a transfer already
+     * answered, and carries no new request. */
+    if (ctsq != 1U && ctsq != 3U && ctsq != 5U) {
+        return;
+    }
+
+    req     = TIKU_REG16(RA8P1_USBHS_USBREQ);
+    val     = TIKU_REG16(RA8P1_USBHS_USBVAL);
+    len     = TIKU_REG16(RA8P1_USBHS_USBLENG);
+    type    = (uint8_t)(req & 0xFFU);          /* bmRequestType */
+    request = (uint8_t)(req >> 8);             /* bRequest      */
+    n_setup++;
+    last_req = (uint16_t)((request << 8) | type);
+
+    tr = (ep0_trace_n < 16U) ? &ep0_trace[ep0_trace_n++] : NULL;
+    if (tr != NULL) {
+        tr->req      = req;
+        tr->val      = val;
+        tr->len      = len;
+        tr->ctsq     = ctsq;
+        tr->sel_ok   = 0xFFU;
+        tr->sent_ok  = 0xFFU;
+        tr->dcp_wr   = 0U;
+        tr->ctr_wr   = 0U;
+        tr->spins    = 0xFFFFU;
+        tr->dcp_pre  = 0U;
+        tr->dcp_post = 0U;
+    }
+
+    /* Clear VALID before responding: while it is set the pipe cannot be put
+     * into BUF and the transfer cannot be ended. */
+    TIKU_REG16(RA8P1_USBHS_INTSTS0) = (uint16_t)~RA8P1_INTSTS0_VALID;
+
+    /* Answered in hardware.  Touching CCPL here would complete it twice. */
+    if (request == USBD_REQ_SET_ADDRESS && type == 0x00U) {
+        return;
+    }
+
+    switch (request) {
+    case USBD_REQ_GET_DESCRIPTOR:
+        ep0_get_descriptor((uint8_t)(val >> 8), (uint8_t)(val & 0xFFU), len);
+        break;
+
+    case USBD_REQ_SET_CONFIGURATION:
+        usbhs_config = (uint8_t)(val & 0xFFU);
+        ep0_ack();
+        break;
+
+    case USBD_REQ_GET_CONFIGURATION:
+        ep0_buf[0] = usbhs_config;
+        ep0_send(ep0_buf, 1U, len);
+        break;
+
+    case USBD_REQ_GET_STATUS:
+        /* Self-powered, no remote wakeup. */
+        ep0_buf[0] = 0x01U;
+        ep0_buf[1] = 0x00U;
+        ep0_send(ep0_buf, 2U, len);
+        break;
+
+    case USBD_REQ_GET_INTERFACE:
+        ep0_buf[0] = 0U;
+        ep0_send(ep0_buf, 1U, len);
+        break;
+
+    case USBD_REQ_SET_INTERFACE:
+    case USBD_REQ_CLEAR_FEATURE:
+    case USBD_REQ_SET_FEATURE:
+        ep0_ack();
+        break;
+
+    default:
+        ep0_stall();
+        break;
+    }
+}
+
+uint8_t tiku_ra8p1_usbhs_address(void)
+{
+    if (!usbhs_up) {
+        return 0U;
+    }
+    return (uint8_t)(TIKU_REG16(RA8P1_USBHS_USBADDR) & 0x7FU);
+}
+
+uint8_t tiku_ra8p1_usbhs_configured(void)
+{
+    return usbhs_config;
+}
+
+unsigned tiku_ra8p1_usbhs_ep0_trace(unsigned i, uint16_t *out9)
+{
+    if (i >= ep0_trace_n || out9 == NULL) {
+        return 0U;
+    }
+    out9[0] = ep0_trace[i].req;
+    out9[1] = ep0_trace[i].val;
+    out9[2] = ep0_trace[i].len;
+    out9[3] = ep0_trace[i].ctsq;
+    out9[4] = ep0_trace[i].dcp_wr;
+    out9[5] = ep0_trace[i].ctr_wr;
+    out9[6] = ep0_trace[i].spins;
+    out9[7] = ep0_trace[i].dcp_pre;
+    out9[8] = ep0_trace[i].dcp_post;
+    return ep0_trace_n;
+}
+
+void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
+                                uint16_t *last)
+{
+    if (setup != NULL) { *setup = n_setup; }
+    if (stall != NULL) { *stall = n_stall; }
+    if (last  != NULL) { *last  = last_req; }
+}
+
 int tiku_ra8p1_usbhs_attach(int on)
 {
     if (!usbhs_up) {
@@ -211,6 +703,7 @@ void tiku_ra8p1_usbhs_down(void)
         (uint16_t)(TIKU_REG16(RA8P1_USBHS_PHYSET) | RA8P1_PHYSET_DIRPD);
     __asm__ volatile ("dsb" ::: "memory");
     usbhs_up = 0U;
+    usbhs_config = 0U;
 }
 
 tiku_ra8p1_usbhs_speed_t tiku_ra8p1_usbhs_speed(void)

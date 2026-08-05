@@ -877,6 +877,7 @@ int main(void)
         uint16_t r[8];
         int rc = tiku_ra8p1_usbhs_up(1);
         unsigned last_dv = 99u, last_sp = 99u, last_ln = 99u, t;
+        uint32_t last_su = 0xFFFFFFFFu;
 
         tiku_uart_printf("usbhs: up rc=%d pll_locked=%d\n", rc,
                          tiku_ra8p1_usbhs_pll_locked());
@@ -891,27 +892,79 @@ int main(void)
             (void)tiku_ra8p1_usbhs_attach(1);
             tiku_uart_printf("usbhs: attached, watching for a host...\n");
 
-            /* Six seconds is generous: a host enumerates in tens of
-             * milliseconds, so a quiet window this long means the cable or
-             * the port is the answer, not the timing. */
-            for (t = 0; t < 600u; t++) {
-                unsigned dv = (unsigned)tiku_ra8p1_usbhs_devstate();
-                unsigned sp = (unsigned)tiku_ra8p1_usbhs_speed();
-                unsigned ln;
+            /*
+             * Enumeration is a conversation with deadlines the host sets, so
+             * EP0 is serviced in a tight loop and the reporting is hung off
+             * a divider rather than the other way round.  Nothing else runs
+             * in this build, so polling is honest here; the moment a shell
+             * or scheduler shares the CPU this has to become an interrupt.
+             */
+            /*
+             * BOUNDED BY TIME, NOT BY ITERATIONS.  A million turns of this
+             * loop is about a tenth of a second at 240 MHz, while the host
+             * takes seconds just to start asking -- so an iteration count
+             * silently decides how much of the enumeration gets serviced,
+             * and the answer changes with the compiler's mood.  Fifteen
+             * seconds is far longer than any host needs.
+             */
+            {
+                volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
+                const uint32_t limit = 240000000u / 4u;   /* 250 ms   */
+                uint32_t t0 = *cyc, mark = *cyc;
 
-                tiku_ra8p1_usbhs_regs(r, 8u);
-                ln = (unsigned)(r[1] & 3u);
-                if (dv != last_dv || sp != last_sp || ln != last_ln) {
-                    tiku_uart_printf("usbhs: t=%ums state=%s speed=%s"
-                                     " lnst=%u(%s) frame=%u\n", t * 10u,
+                TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
+                TIKU_REG32(0xE0001000UL) |= 1UL;
+
+                while ((*cyc - t0) < (15u * 240000000u)) {
+                    unsigned dv, sp, ln;
+                    uint32_t nsu, nst;
+                    uint16_t lr;
+
+                    tiku_ra8p1_usbhs_ep0_poll();
+
+                    if ((*cyc - mark) < limit) {
+                        continue;
+                    }
+                    mark = *cyc;
+
+                    dv = (unsigned)tiku_ra8p1_usbhs_devstate();
+                    sp = (unsigned)tiku_ra8p1_usbhs_speed();
+                    tiku_ra8p1_usbhs_regs(r, 8u);
+                    ln = (unsigned)(r[1] & 3u);
+                    tiku_ra8p1_usbhs_ep0_stats(&nsu, &nst, &lr);
+                    if (dv == last_dv && sp == last_sp && ln == last_ln &&
+                        nsu == last_su) {
+                        continue;
+                    }
+                    last_su = nsu;
+                    tiku_uart_printf("usbhs: state=%s speed=%s lnst=%s"
+                                     " addr=%u cfg=%u setup=%u stall=%u"
+                                     " last=%x\n",
                                      dvname[dv < 5u ? dv : 4u],
-                                     spname[sp < 3u ? sp : 0u], ln,
-                                     lnname[ln], (unsigned int)r[7]);
+                                     spname[sp < 3u ? sp : 0u], lnname[ln],
+                                     (unsigned int)
+                                         tiku_ra8p1_usbhs_address(),
+                                     (unsigned int)
+                                         tiku_ra8p1_usbhs_configured(),
+                                     (unsigned int)nsu, (unsigned int)nst,
+                                     (unsigned int)lr);
                     last_dv = dv;
                     last_sp = sp;
                     last_ln = ln;
                 }
-                tiku_cpu_ra8p1_delay_us(10000u);
+                (void)t;
+            }
+            {
+                uint16_t tv[9];
+                unsigned k, nt = tiku_ra8p1_usbhs_ep0_trace(0u, tv);
+
+                for (k = 0; k < nt && k < 16u; k++) {
+                    (void)tiku_ra8p1_usbhs_ep0_trace(k, tv);
+                    tiku_uart_printf("usbhs: [%u] req=%x val=%x len=%u"
+                                     " ctsq=%u spins=%u pre=%x post=%x\n",
+                                     k, tv[0], tv[1], tv[2], tv[3],
+                                     tv[6], tv[7], tv[8]);
+                }
             }
             tiku_ra8p1_usbhs_regs(r, 8u);
             tiku_uart_printf("usbhs: final syscfg=%x syssts=%x dvstctr=%x"
@@ -930,7 +983,10 @@ int main(void)
                                   TIKU_RA8P1_USBHS_DEV_POWERED);
                 int hs = (tiku_ra8p1_usbhs_speed() ==
                           TIKU_RA8P1_USBHS_SPEED_HIGH);
+                uint32_t nsu, nst;
+                uint16_t lr;
 
+                tiku_ra8p1_usbhs_ep0_stats(&nsu, &nst, &lr);
                 tiku_uart_printf("usbhs: U1 gate: bus reset=%s speed=%s"
                                  " sof=%s -> %s\n",
                                  reset_seen ? "yes" : "NO",
@@ -938,6 +994,14 @@ int main(void)
                                  (r[7] != 0u) ? "running" : "NONE",
                                  (reset_seen && hs && r[7] != 0u)
                                    ? "PASS" : "incomplete");
+                tiku_uart_printf("usbhs: U2 gate: addr=%u cfg=%u setups=%u"
+                                 " stalls=%u -> %s\n",
+                                 (unsigned int)tiku_ra8p1_usbhs_address(),
+                                 (unsigned int)tiku_ra8p1_usbhs_configured(),
+                                 (unsigned int)nsu, (unsigned int)nst,
+                                 (tiku_ra8p1_usbhs_address() != 0u &&
+                                  tiku_ra8p1_usbhs_configured() != 0u)
+                                   ? "ENUMERATED" : "incomplete");
             }
         }
     }

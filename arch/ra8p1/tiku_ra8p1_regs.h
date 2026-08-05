@@ -312,6 +312,79 @@
 #define RA8P1_USBHS_LPCTRL      (RA8P1_USBHS_BASE + 0x100UL)
 #define RA8P1_USBHS_LPSTS       (RA8P1_USBHS_BASE + 0x102UL)
 
+/* Control transfers.  The hardware DECODES the setup packet into these four
+ * registers, so there is no eight-byte FIFO read and no chance of losing a
+ * SETUP to a mistimed one. */
+#define RA8P1_USBHS_USBREQ      (RA8P1_USBHS_BASE + 0x054UL)  /* type|request */
+#define RA8P1_USBHS_USBVAL      (RA8P1_USBHS_BASE + 0x056UL)  /* wValue       */
+#define RA8P1_USBHS_USBINDX     (RA8P1_USBHS_BASE + 0x058UL)  /* wIndex       */
+#define RA8P1_USBHS_USBLENG     (RA8P1_USBHS_BASE + 0x05AUL)  /* wLength      */
+#define RA8P1_USBHS_DCPCFG      (RA8P1_USBHS_BASE + 0x05CUL)
+#define RA8P1_USBHS_DCPMAXP     (RA8P1_USBHS_BASE + 0x05EUL)
+
+/*
+ * The CFIFO port is the only way to reach the DCP's 64-byte buffer -- and the
+ * ADDRESS TO USE DEPENDS ON THE ACCESS WIDTH, in the opposite direction to
+ * what the names suggest.  With BIGEND=0 (little endian), UM Table 38.8 says
+ * 8-bit access must go to CFIFO*HH* at 0x017 and calls CFIFOLL at 0x014
+ * "access prohibited" -- 0x014 being exactly the offset the register is
+ * listed under.  16-bit access likewise uses CFIFOH at 0x016.
+ *
+ * Writing bytes to 0x014 is therefore silently discarded: FRDY still reads
+ * ready, BVAL still commits, and BEMP still fires -- because the buffer was
+ * empty and stayed empty.  The host sees a device that never answers an IN
+ * token and reports a timeout, with nothing on the device side reporting
+ * anything at all.
+ */
+#define RA8P1_USBHS_CFIFO       (RA8P1_USBHS_BASE + 0x014UL)  /* 32-bit     */
+#define RA8P1_USBHS_CFIFOH      (RA8P1_USBHS_BASE + 0x016UL)  /* 16-bit, LE */
+#define RA8P1_USBHS_CFIFOHH     (RA8P1_USBHS_BASE + 0x017UL)  /* 8-bit,  LE */
+#define RA8P1_USBHS_CFIFOSEL    (RA8P1_USBHS_BASE + 0x020UL)
+#define RA8P1_USBHS_CFIFOCTR    (RA8P1_USBHS_BASE + 0x022UL)
+#define RA8P1_USBHS_BRDYENB     (RA8P1_USBHS_BASE + 0x036UL)
+#define RA8P1_USBHS_BEMPENB     (RA8P1_USBHS_BASE + 0x03AUL)
+#define RA8P1_USBHS_BRDYSTS     (RA8P1_USBHS_BASE + 0x046UL)
+#define RA8P1_USBHS_BEMPSTS     (RA8P1_USBHS_BASE + 0x04AUL)
+#define RA8P1_USBHS_PIPESEL     (RA8P1_USBHS_BASE + 0x064UL)
+#define RA8P1_USBHS_PIPECFG     (RA8P1_USBHS_BASE + 0x068UL)
+#define RA8P1_USBHS_PIPEBUF     (RA8P1_USBHS_BASE + 0x06AUL)
+#define RA8P1_USBHS_PIPEMAXP    (RA8P1_USBHS_BASE + 0x06CUL)
+#define RA8P1_USBHS_PIPECTR(n)  (RA8P1_USBHS_BASE + 0x070UL + (2UL * ((n) - 1U)))
+
+/* CFIFOSEL.  ISEL picks the DIRECTION of DCP access and is meaningless for
+ * other pipes; MBW picks the access width, which must agree with the width
+ * of the accesses actually issued to the port. */
+#define RA8P1_CFIFOSEL_CURPIPE(n) ((uint16_t)((n) & 0xFU))
+#define RA8P1_CFIFOSEL_ISEL       (1U << 5)   /* 1 = writing to the buffer  */
+#define RA8P1_CFIFOSEL_BIGEND     (1U << 8)
+#define RA8P1_CFIFOSEL_MBW_8      (0U << 10)
+#define RA8P1_CFIFOSEL_MBW_16     (1U << 10)
+#define RA8P1_CFIFOSEL_MBW_32     (2U << 10)
+#define RA8P1_CFIFOSEL_REW        (1U << 14)
+#define RA8P1_CFIFOSEL_RCNT       (1U << 15)
+
+/* CFIFOCTR */
+#define RA8P1_CFIFOCTR_DTLN_MASK  0xFFFU
+#define RA8P1_CFIFOCTR_FRDY       (1U << 13)
+#define RA8P1_CFIFOCTR_BCLR       (1U << 14)
+#define RA8P1_CFIFOCTR_BVAL       (1U << 15)
+
+/* DCPCTR.  PID is the response the pipe gives: NAK stalls the conversation
+ * politely, BUF answers from the buffer, STALL refuses. */
+#define RA8P1_DCPCTR_PID_MASK   0x3U
+#define RA8P1_DCPCTR_PID_NAK    0U
+#define RA8P1_DCPCTR_PID_BUF    1U
+#define RA8P1_DCPCTR_PID_STALL  2U
+#define RA8P1_DCPCTR_CCPL       (1U << 2)   /* 1 = finish the transfer     */
+#define RA8P1_DCPCTR_PBUSY      (1U << 5)
+#define RA8P1_DCPCTR_SQMON      (1U << 6)
+#define RA8P1_DCPCTR_SQSET      (1U << 7)
+#define RA8P1_DCPCTR_SQCLR      (1U << 8)
+#define RA8P1_DCPCTR_BSTS       (1U << 15)
+
+#define RA8P1_DCPCFG_DIR        (1U << 4)
+#define RA8P1_DCPMAXP_MXPS(n)   ((uint16_t)((n) & 0x7FU))
+
 /* SYSCFG.  DRPD resets to 1 -- those are the HOST pull-downs, so device
  * mode has to clear a bit rather than merely set the ones it wants. */
 #define RA8P1_SYSCFG_USBE       (1U << 0)

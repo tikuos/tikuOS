@@ -78,6 +78,30 @@ tiku_ra8p1_usbhs_devstate_t tiku_ra8p1_usbhs_devstate(void);
 /** @brief Non-zero once the PHY's internal PLL reports lock. */
 int tiku_ra8p1_usbhs_pll_locked(void);
 
+/**
+ * @brief Service one pending SETUP packet, if any.
+ *
+ * Poll this often.  Enumeration is a conversation whose deadlines the host
+ * sets, so a caller that visits rarely will be given up on.
+ */
+void tiku_ra8p1_usbhs_ep0_poll(void);
+
+/** @brief Address the host assigned; 0 until SET_ADDRESS. */
+uint8_t tiku_ra8p1_usbhs_address(void);
+
+/** @brief Configuration the host selected; 0 until SET_CONFIGURATION. */
+uint8_t tiku_ra8p1_usbhs_configured(void);
+
+/** @brief EP0 counters: setups decoded, requests stalled, most recent. */
+void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
+                                uint16_t *last);
+
+/**
+ * @brief Read trace entry @p i (9 words: req val len ctsq dcp/ctr spins pre post).
+ * @return total entries recorded, or 0 when @p i is past the end
+ */
+unsigned tiku_ra8p1_usbhs_ep0_trace(unsigned i, uint16_t *out9);
+
 /** @brief OTG ID pin: 1 = device role strap, 0 = host, -1 = not up. */
 int tiku_ra8p1_usbhs_id_high(void);
 
