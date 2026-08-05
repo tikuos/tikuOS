@@ -14,6 +14,8 @@
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_freq_boot_arch.h"
 
+#include <hal/tiku_clock_hal.h>
+
 #ifndef TIKU_MINIMAL
 #include <kernel/scheduler/tiku_sched.h>
 void tiku_ra8p1_htimer_on_tick(void);
@@ -127,6 +129,17 @@ unsigned long tiku_clock_arch_seconds(void)
 int tiku_clock_arch_fine_max(void)
 {
     return (int)(clock_reload >> clock_fine_shift);
+}
+
+unsigned char tiku_clock_arch_fault(void)
+{
+    /* The tick is SysTick off the processor clock, and the processor clock is
+     * whatever the tree was switched to -- there is no lower-accuracy source
+     * it can silently fall back to, so there is no fault of this KIND to
+     * report.  A PLL that failed to lock leaves the tree on MOCO, which the
+     * clock probe reports as its source; that is a different question and is
+     * answered there rather than pretended to be answered here. */
+    return TIKU_CLOCK_ARCH_FAULT_NONE;
 }
 
 uint32_t tiku_ra8p1_clock_arch_fine_hz(void)

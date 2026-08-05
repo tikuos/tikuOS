@@ -69,8 +69,9 @@ void tiku_ra8p1_pendsv_handler(void)      __attribute__((weak, alias("ra8p1_defa
  * builds that leave the timer out linking. */
 void tiku_ra8p1_systick_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
 
-/* Console receive; weak so a build without the UART still links. */
+/* Console receive and error; weak so a build without the UART still links. */
 void tiku_ra8p1_sci_rxi_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
+void tiku_ra8p1_sci_eri_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
 
 void tiku_ra8p1_startup(void);
 
@@ -157,7 +158,8 @@ const ra8p1_isr_t tiku_ra8p1_vectors[16 + TIKU_RA8P1_NUM_EXT_IRQS] = {
      * The rest get the default handler.  A zero-filled tail would send an
      * unexpected interrupt to address 0 instead of parking it. */
     tiku_ra8p1_sci_rxi_handler,
-    DFL, DFL, DFL,
+    tiku_ra8p1_sci_eri_handler,
+    DFL, DFL,
     DFL4, DFL4, DFL4,
     DFL16, DFL16, DFL16, DFL16, DFL16,
 };

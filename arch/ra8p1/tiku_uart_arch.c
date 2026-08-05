@@ -77,8 +77,9 @@ static volatile uint16_t uart_rx_tail;
 /** @brief Bytes lost, whether to a full ring or a hardware overrun. */
 static volatile uint16_t uart_overruns;
 
-/** @brief NVIC slot this port links the SCI receive event onto. */
+/** @brief NVIC slots this port links the SCI events onto. */
 #define UART_RXI_SLOT   0U
+#define UART_ERI_SLOT   1U
 
 /**
  * @brief Point one NVIC slot at one peripheral event and unmask it.
@@ -103,6 +104,22 @@ static void icu_link(unsigned slot, uint32_t event)
  * would corrupt a command line already half-typed; dropping the newest loses
  * the tail, which the user can see and retype.
  */
+/**
+ * @brief SCI error interrupt: count the overrun and restart reception.
+ *
+ * An overrun latches ORER and STOPS the receiver, so noticing it lazily on the
+ * next rx_ready() poll leaves the port deaf and a direct read of the counter
+ * sees zero.  Clearing here restarts reception where it stalled.
+ */
+void tiku_ra8p1_sci_eri_handler(void)
+{
+    if (TIKU_REG32(RA8P1_SCI_CSR(SCI)) & RA8P1_SCI_CSR_ORER) {
+        uart_overruns++;
+        TIKU_REG32(RA8P1_SCI_CFCLR(SCI)) = RA8P1_SCI_CFCLR_ORERC;
+    }
+    TIKU_REG32(RA8P1_ICU_IELSR(UART_ERI_SLOT)) &= ~RA8P1_ICU_IELSR_IR;
+}
+
 void tiku_ra8p1_sci_rxi_handler(void)
 {
     uint8_t b = (uint8_t)(TIKU_REG32(RA8P1_SCI_RDR(SCI)) & 0xFFUL);
@@ -170,6 +187,7 @@ void tiku_uart_init(void)
     uart_rx_head = 0U;
     uart_rx_tail = 0U;
     icu_link(UART_RXI_SLOT, RA8P1_EVENT_SCI8_RXI);
+    icu_link(UART_ERI_SLOT, RA8P1_EVENT_SCI8_ERI);
 
     TIKU_REG32(RA8P1_SCI_CCR0(SCI)) = RA8P1_SCI_CCR0_TE | RA8P1_SCI_CCR0_RE |
                                       RA8P1_SCI_CCR0_RIE;
