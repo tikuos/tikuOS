@@ -280,11 +280,13 @@
 #define RA8P1_ICU_SLOT_UART_RXI 0U
 #define RA8P1_ICU_SLOT_UART_ERI 1U
 #define RA8P1_ICU_SLOT_HTIMER   2U
+#define RA8P1_ICU_SLOT_DMAC0    3U
 
 /** @brief Event numbers this port links (UM Table 14.5). */
 #define RA8P1_EVENT_SCI8_RXI    0x2FCUL
 #define RA8P1_EVENT_SCI8_ERI    0x2FFUL
 #define RA8P1_EVENT_GPT0_CCMPA  0x181UL
+#define RA8P1_EVENT_DMAC0_INT   0x040UL
 
 /*---------------------------------------------------------------------------*/
 /* GPT32 (UM 23) -- the htimer's counter and compare                          */

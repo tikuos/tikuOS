@@ -49,6 +49,15 @@ void tiku_ra8p1_dcache_clean(const void *addr, size_t len);
 void tiku_ra8p1_dcache_invalidate(const void *addr, size_t len);
 
 /**
+ * @brief Write back then drop the lines covering @p addr.
+ *
+ * The safe choice after a DMA write into a buffer that is not cache-line
+ * aligned: a plain invalidate would DISCARD dirty data belonging to whatever
+ * shares the first and last lines.
+ */
+void tiku_ra8p1_dcache_clean_invalidate(const void *addr, size_t len);
+
+/**
  * @brief Invalidate the whole instruction cache.
  *
  * For code that changed under the cache -- a written MRAM page, a loaded

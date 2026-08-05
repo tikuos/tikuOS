@@ -75,6 +75,7 @@ void tiku_ra8p1_sci_eri_handler(void)     __attribute__((weak, alias("ra8p1_defa
 
 /* htimer compare; weak so a build without it still links. */
 void tiku_ra8p1_gpt0_ccmpa_handler(void)  __attribute__((weak, alias("ra8p1_default_handler")));
+void tiku_ra8p1_dmac0_handler(void)       __attribute__((weak, alias("ra8p1_default_handler")));
 
 void tiku_ra8p1_startup(void);
 
@@ -163,7 +164,7 @@ const ra8p1_isr_t tiku_ra8p1_vectors[16 + TIKU_RA8P1_NUM_EXT_IRQS] = {
     tiku_ra8p1_sci_rxi_handler,
     tiku_ra8p1_sci_eri_handler,
     tiku_ra8p1_gpt0_ccmpa_handler,
-    DFL,
+    tiku_ra8p1_dmac0_handler,
     DFL4, DFL4, DFL4,
     DFL16, DFL16, DFL16, DFL16, DFL16,
 };
