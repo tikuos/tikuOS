@@ -22,7 +22,7 @@
 
 /** @brief GPT channel and the NVIC slot its compare event is linked onto. */
 #define HT_GPT          0U
-#define HT_SLOT         2U
+#define HT_SLOT         RA8P1_ICU_SLOT_HTIMER
 
 /** @brief Alarms taken, for localising "the ISR never fired" reports. */
 volatile uint32_t tiku_htimer_arch_isr_count;

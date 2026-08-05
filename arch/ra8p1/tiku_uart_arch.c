@@ -77,9 +77,9 @@ static volatile uint16_t uart_rx_tail;
 /** @brief Bytes lost, whether to a full ring or a hardware overrun. */
 static volatile uint16_t uart_overruns;
 
-/** @brief NVIC slots this port links the SCI events onto. */
-#define UART_RXI_SLOT   0U
-#define UART_ERI_SLOT   1U
+/** @brief NVIC slots this port links the SCI events onto (map in the regs). */
+#define UART_RXI_SLOT   RA8P1_ICU_SLOT_UART_RXI
+#define UART_ERI_SLOT   RA8P1_ICU_SLOT_UART_ERI
 
 /**
  * @brief Point one NVIC slot at one peripheral event and unmask it.

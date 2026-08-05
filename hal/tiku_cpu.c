@@ -339,6 +339,20 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         default:
             return NULL;
     }
+#elif defined(PLATFORM_RA8P1)
+    switch (mode) {
+        case TIKU_CPU_IDLE_LIGHT:
+        case TIKU_CPU_IDLE_DEEP:
+        case TIKU_CPU_IDLE_DEEPEST:
+            /* Sleep mode (WFI) on Cortex-M85 — SysTick / console RX / an armed
+             * htimer all still wake the core.  RA8 Software Standby is deeper
+             * but stops the clocks, so it needs wake sources wired through the
+             * ICU first; see the entry function. */
+            return tiku_cpu_boot_ra8p1_power_wfi_enter;
+        case TIKU_CPU_IDLE_OFF:
+        default:
+            return NULL;
+    }
 #else
     (void)mode;
     return NULL;

@@ -323,3 +323,21 @@ unsigned long tiku_cpu_ra8p1_sciclk_get_hz(void)
 {
     return sci_hz_now;
 }
+
+void tiku_cpu_boot_ra8p1_power_wfi_enter(void)
+{
+    /*
+     * Sleep mode: WFI with SBYCR.SSBY clear, which is the reset state and the
+     * only mode this port enters.  The core stops, every clock keeps running,
+     * and any unmasked interrupt resumes it -- so the tick, the console and an
+     * armed htimer all still wake it.
+     *
+     * Software Standby (SSBY=1) would be deeper, but it stops the clocks, so
+     * coming back needs a wake source the ICU is told to honour while stopped.
+     * Entering it before that is wired means a part that never wakes, and the
+     * saving cannot be shown until R9 puts a PPK2 on the measurement header.
+     * Deliberately not entered here, rather than mapped and hoped for.
+     */
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    __asm__ volatile ("wfi" ::: "memory");
+}

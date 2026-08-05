@@ -112,3 +112,15 @@ void tiku_ra8p1_dcache_clean(const void *addr, size_t len) {
 void tiku_ra8p1_dcache_invalidate(const void *addr, size_t len) {
     dcache_range(RA8P1_SCB_DCIMVAC, addr, len);
 }
+
+void tiku_ra8p1_icache_invalidate(void) {
+    if (!(TIKU_REG32(RA8P1_SCB_CCR) & RA8P1_SCB_CCR_IC)) {
+        return;                                  /* nothing cached to drop */
+    }
+    /* Whole-cache: the M85 has no invalidate-by-address for the I-side, and
+     * the callers of this (a freshly written code page, a loaded module) want
+     * everything stale gone rather than one line. */
+    __asm__ volatile ("dsb" ::: "memory");
+    TIKU_REG32(RA8P1_SCB_ICIALLU) = 0UL;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+}

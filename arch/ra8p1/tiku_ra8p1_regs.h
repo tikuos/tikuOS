@@ -223,6 +223,17 @@
 #define RA8P1_ICU_IELSR(n)      (RA8P1_ICU_BASE + 0x300UL + (4UL * (n)))
 #define RA8P1_ICU_IELSR_IR      (1UL << 16)   /* interrupt status, write 0 */
 
+/*
+ * Slot allocation.  Any of the 96 slots can carry any event, so nothing stops
+ * two drivers picking the same one and each silently stealing the other's
+ * interrupt.  The map lives here, once, rather than as a private #define in
+ * each driver -- it is a system-wide resource, and the wake-source reporter
+ * has to read it too.
+ */
+#define RA8P1_ICU_SLOT_UART_RXI 0U
+#define RA8P1_ICU_SLOT_UART_ERI 1U
+#define RA8P1_ICU_SLOT_HTIMER   2U
+
 /** @brief Event numbers this port links (UM Table 14.5). */
 #define RA8P1_EVENT_SCI8_RXI    0x2FCUL
 #define RA8P1_EVENT_SCI8_ERI    0x2FFUL

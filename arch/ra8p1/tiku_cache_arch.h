@@ -48,4 +48,12 @@ void tiku_ra8p1_dcache_clean(const void *addr, size_t len);
  */
 void tiku_ra8p1_dcache_invalidate(const void *addr, size_t len);
 
+/**
+ * @brief Invalidate the whole instruction cache.
+ *
+ * For code that changed under the cache -- a written MRAM page, a loaded
+ * module.  No-op when the I-cache is off.
+ */
+void tiku_ra8p1_icache_invalidate(void);
+
 #endif /* TIKU_RA8P1_CACHE_ARCH_H_ */
