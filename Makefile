@@ -1540,6 +1540,7 @@ SRCS += arch/ra8p1/tiku_gpio_arch.c
 SRCS += arch/ra8p1/tiku_timer_arch.c
 SRCS += arch/ra8p1/tiku_cache_arch.c
 SRCS += arch/ra8p1/tiku_mram_arch.c
+SRCS += arch/ra8p1/tiku_nvm_region_ra8p1.c
 # Critical sections join too, for the same reason: this file's central claim is
 # that masking the NVIC cannot silence a tick that is a CORE exception, and an
 # untested claim in a comment is worth nothing.
@@ -1914,6 +1915,7 @@ endif
 SRCS += arch/ra8p1/tiku_mem_arch.c
 SRCS += arch/ra8p1/tiku_cache_arch.c
 SRCS += arch/ra8p1/tiku_mram_arch.c
+SRCS += arch/ra8p1/tiku_nvm_region_ra8p1.c
 SRCS += arch/ra8p1/tiku_mpu_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_wake_arch.c

@@ -75,7 +75,8 @@
  * tier cannot.
  */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+    defined(PLATFORM_RA8P1)
 #define TIKU_NVM_TIER_BYTES  (32u * 1024u)
 #else
 #define TIKU_NVM_TIER_BYTES  0u                /* no carved region */

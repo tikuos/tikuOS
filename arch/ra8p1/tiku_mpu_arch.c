@@ -25,7 +25,7 @@ extern uint32_t _etext;
 extern uint32_t __data_start;
 extern uint32_t __uninit_end;
 extern uint32_t __stack;
-extern uint32_t __tiku_nvm_mram_start;
+extern uint32_t __tiku_nvmfs_base;
 extern uint32_t __tiku_nvm_mram_end;
 
 /**
@@ -107,10 +107,22 @@ static uintptr_t guard_base(void)
  */
 static void mpu_nvm_ap(uint32_t ap)
 {
-    /* Non-cacheable, because this region IS the MRAM program path: stores
-     * must reach the controller's 32-byte buffer, not settle in a D-cache
-     * line of exactly the same width. */
-    mpu_region(MPU_RGN_NVM, (uintptr_t)&__tiku_nvm_mram_start,
+    /*
+     * The whole reserved MRAM tail -- file store AND durable persist -- in one
+     * region, because both need the same two things.
+     *
+     * Non-cacheable: this span IS the MRAM program path, and a D-cache line is
+     * 32 bytes, exactly the program granule.  A cached store would settle in a
+     * line instead of reaching the controller's buffer, then write the whole
+     * granule back at an eviction the code never chose -- outside any window,
+     * with the programming gate shut.
+     *
+     * Read-only outside the window: every write into either span goes through
+     * a bracketed path (persist cells, and the region backend, which opens its
+     * own window), so a store that arrives unbracketed is a bug and faults
+     * here rather than quietly corrupting a file.
+     */
+    mpu_region(MPU_RGN_NVM, (uintptr_t)&__tiku_nvmfs_base,
                (uintptr_t)&__tiku_nvm_mram_end, ap, 1,
                RA8P1_MPU_ATTR_NORMAL_NC);
     mpu_barrier();

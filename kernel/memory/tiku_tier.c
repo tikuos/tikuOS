@@ -111,8 +111,10 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
 #elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
-/* Ambiq (MRAM) / RP2350 (QSPI Flash) / Nordic (RRAM) / STM32N6 (XSPI NOR): the
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_RA8P1)
+/* Ambiq (MRAM) / RP2350 (QSPI Flash) / Nordic (RRAM) / STM32N6 (XSPI NOR) /
+ * RA8P1 (code MRAM): the
  * NVM tier is backed by the carved, memory-mapped region (tiku_nvm_region) --
  * read in place, written via the region backend -- so there is no pool here.
  * tier_wire_all() points the tier at the region's front extent and
@@ -251,11 +253,18 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_SRAM].alloc_count = 0;
     tier_state[TIKU_MEM_SRAM].initialized = 1;
 
+/* A board NOT listed here falls to the static pool below, which is plain .bss
+ * off MSP430 -- a 1 KB "NVM tier" that is not non-volatile at all.  RA8P1 ran
+ * that way for six milestones with 464 KB of carved MRAM unused.  The list is
+ * the wrong shape (the runtime NULL check below already decides it), but
+ * inverting it rewires memory on five boards, so it is named debt, not a
+ * drive-by here. */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+    defined(PLATFORM_RA8P1)
     {
         /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash / Nordic
-         * RRAM / STM32N6 NOR): read in place, written via the backend
+         * RRAM / STM32N6 NOR / RA8P1 MRAM): read in place, via the backend
          * (tiku_tier_nvm_write).
          * NULL until the board's region backend exists. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
