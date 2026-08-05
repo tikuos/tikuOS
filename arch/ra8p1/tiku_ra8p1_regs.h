@@ -150,6 +150,58 @@
 #define RA8P1_MSTPB_SCI8        (1UL << 23)                  /* SCI8       */
 
 /*---------------------------------------------------------------------------*/
+/* External bus / SDRAM controller (UM 15.6)                                 */
+/*                                                                           */
+/* The SDRAM window is 0x6800_0000.  Registers are byte/half/word wide and    */
+/* NOT adjacent -- the offsets below are read off the manual, not strided.    */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_SDRAM_BASE        0x68000000UL   /* the mapped SDRAM window */
+#define RA8P1_BUS_BASE          0x40003000UL
+
+#define RA8P1_SDCCR             (RA8P1_BUS_BASE + 0xC00UL)   /*  8-bit */
+#define RA8P1_SDCMOD            (RA8P1_BUS_BASE + 0xC01UL)   /*  8-bit */
+#define RA8P1_SDAMOD            (RA8P1_BUS_BASE + 0xC02UL)   /*  8-bit */
+#define RA8P1_SDSELF            (RA8P1_BUS_BASE + 0xC10UL)   /*  8-bit */
+#define RA8P1_SDRFCR            (RA8P1_BUS_BASE + 0xC14UL)   /* 16-bit */
+#define RA8P1_SDRFEN            (RA8P1_BUS_BASE + 0xC16UL)   /*  8-bit */
+#define RA8P1_SDICR             (RA8P1_BUS_BASE + 0xC20UL)   /*  8-bit */
+#define RA8P1_SDIR              (RA8P1_BUS_BASE + 0xC24UL)   /* 16-bit */
+#define RA8P1_SDADR             (RA8P1_BUS_BASE + 0xC40UL)   /*  8-bit */
+#define RA8P1_SDTR              (RA8P1_BUS_BASE + 0xC44UL)   /* 32-bit */
+#define RA8P1_SDMOD             (RA8P1_BUS_BASE + 0xC48UL)   /* 16-bit */
+#define RA8P1_SDSR              (RA8P1_BUS_BASE + 0xC50UL)   /*  8-bit */
+
+#define RA8P1_SDCCR_EXENB       (1U << 0)      /* SDRAM access enable      */
+#define RA8P1_SDCCR_BSIZE_16    (1U << 4)      /* BSIZE[1:0] at 4:3        */
+#define RA8P1_SDCCR_BSIZE_32    (2U << 3)
+#define RA8P1_SDADR_MXC_9BIT    (1U << 0)      /* MXC[1:0]: column width   */
+#define RA8P1_SDRFEN_RFEN       (1U << 0)      /* auto-refresh enable      */
+#define RA8P1_SDICR_INIRQ       (1U << 0)      /* start the init sequencer */
+#define RA8P1_SDSR_INIST        (1U << 3)      /* init sequence running    */
+#define RA8P1_SDSR_MRSST        (1U << 2)
+#define RA8P1_SDSR_SRFST        (1U << 4)
+
+/* SDTR timing, all in SDCLK cycles.  Field encodings are value-minus-one for
+ * CL/RP/RCD/RAI and a plain flag for WR (0 = 1 cycle, 1 = 2). */
+#define RA8P1_SDTR_CL(c)        (((uint32_t)(c) & 0x7UL) << 0)    /*  2:0 */
+#define RA8P1_SDTR_WR_2CYC      (1UL << 8)                        /*    8 */
+#define RA8P1_SDTR_RP(c)        ((((uint32_t)(c) - 1UL) & 0x7UL) << 9)  /* 11:9 */
+#define RA8P1_SDTR_RCD(c)       ((((uint32_t)(c) - 1UL) & 0x3UL) << 12) /* 13:12 */
+#define RA8P1_SDTR_RAI(c)       ((((uint32_t)(c) - 1UL) & 0x7UL) << 16) /* 18:16 */
+
+/* SDIR: initialisation sequencer timing. */
+#define RA8P1_SDIR_ARFI(c)      (((uint16_t)(c) & 0xFU) << 0)     /*  3:0 */
+#define RA8P1_SDIR_ARFC(c)      (((uint16_t)(c) & 0xFU) << 4)     /*  7:4 */
+#define RA8P1_SDIR_PRC(c)       (((uint16_t)(c) & 0x7U) << 8)     /* 10:8 */
+
+/** @brief SDCLK output enable, in the SYSC block rather than the bus one. */
+#define RA8P1_SDCKOCR           (RA8P1_SYSC_BASE + 0x053UL)  /* 8-bit */
+#define RA8P1_SDCKOCR_SDCKOEN   (1U << 0)
+
+/** @brief PSEL value that selects the external-bus function on any pin. */
+#define RA8P1_PFS_PSEL_BUS      0x0BUL
+
+/*---------------------------------------------------------------------------*/
 /* DMA controller (UM 17)                                                    */
 /*                                                                           */
 /* Eight channels, 0x40 apart, plus one global activation register.  Unlike   */
