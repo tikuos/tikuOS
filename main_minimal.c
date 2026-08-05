@@ -682,6 +682,71 @@ int main(void)
                     tiku_uart_printf("xflash: erase rc=%d blank=%u/8 |"
                                      " program rc=%d manual=%u/8 mmap=%u/8\n",
                                      re, blank, rp, match, mm_ok);
+
+                    /*
+                     * OPI.  Verified against the device's own factory SFDP
+                     * inside opi_enter(), then benched here against the
+                     * single-bit baseline over the same span.
+                     *
+                     * Note the pattern programmed above was written in SPI,
+                     * so reading it back in DOPI returns it PAIR-SWAPPED --
+                     * that is the documented device behaviour, not a fault,
+                     * and it is why the check below compares against the
+                     * swapped pattern rather than the plain one.
+                     */
+                    {
+                        volatile uint32_t *cyc =
+                            (volatile uint32_t *)0xE0001004UL;
+                        uint8_t o[8];
+                        uint32_t t0, slow, fast;
+                        unsigned n, okp = 0;
+                        volatile uint32_t sink = 0;
+
+                        /* DWT counts only once the trace block is powered:
+                         * DEMCR.TRCENA first, then CYCCNTENA.  Setting the
+                         * second without the first leaves the counter at
+                         * zero and a bench that reports an infinite speedup. */
+                        TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
+                        TIKU_REG32(0xE0001000UL) |= 1UL;
+                        *cyc = 0UL;
+
+                        t0 = *cyc;
+                        for (n = 0; n < 4096U; n += 4U) {
+                            sink += *(volatile const uint32_t *)(xm + n);
+                        }
+                        slow = *cyc - t0;
+
+                        re = tiku_ra8p1_xflash_opi_enter();
+                        if (re == 0) {
+                            (void)tiku_ra8p1_xflash_read(a, o, 8U);
+                            for (n = 0; n < 8u; n++) {
+                                if (o[n] == pat[n ^ 1u]) { okp++; }
+                            }
+                            (void)tiku_ra8p1_xflash_mmap_enable();
+                            t0 = *cyc;
+                            for (n = 0; n < 4096U; n += 4U) {
+                                sink += *(volatile const uint32_t *)(xm + n);
+                            }
+                            fast = *cyc - t0;
+                            tiku_uart_printf("xflash: OPI ok, dqs=%d"
+                                " (eye %d cells) ddrsmpex=%d, pattern=%u/8\n",
+                                tiku_ra8p1_xflash_dqs_shift(),
+                                tiku_ra8p1_xflash_dqs_margin(),
+                                tiku_ra8p1_xflash_ddrsmpex(), okp);
+                            tiku_uart_printf("xflash: 4KB mapped read %u cyc"
+                                " (SPI 4MHz x1) -> %u cyc (OPI 120MHz x8 DDR)"
+                                " = %ux\n", (unsigned int)slow,
+                                (unsigned int)fast,
+                                (unsigned int)(fast ? slow / fast : 0));
+                        } else {
+                            tiku_uart_printf("xflash: OPI enter rc=%d (%s),"
+                                " device left in SPI\n", re,
+                                (re == -2) ? "frame rejected even at 4 MHz"
+                                           : "ok slow, fails at 120 MHz");
+                        }
+                        (void)sink;
+                        (void)sink;
+                    }
                 }
             }
         }

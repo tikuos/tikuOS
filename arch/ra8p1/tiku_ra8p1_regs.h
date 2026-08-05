@@ -115,6 +115,23 @@
  */
 #define RA8P1_SCICKDIVCR        (RA8P1_SYSC_BASE + 0x054UL)  /* 8-bit */
 #define RA8P1_SCICKCR           (RA8P1_SYSC_BASE + 0x055UL)  /* 8-bit */
+
+/*
+ * Octal-SPI clock.  Another private clock register in the SCICKCR/GTCLKCR
+ * family: the OSPI module has no divider of its own, so OCTACLK is the only
+ * thing that sets the flash bus speed, and it comes out of reset on MOCO.
+ * OM_SCLK is OCTACLK divided by two (UM Table 4.4), which is the whole
+ * reason a 240 MHz source is the right one rather than an overclock.
+ * PRCR.PRC0 gates writes here, as with every clock register.
+ */
+#define RA8P1_OCTACKDIVCR       (RA8P1_SYSC_BASE + 0x06DUL)  /* 8-bit */
+#define RA8P1_OCTACKCR          (RA8P1_SYSC_BASE + 0x075UL)  /* 8-bit */
+#define RA8P1_OCTACKCR_SEL_MASK 0x0FU
+#define RA8P1_OCTACKCR_SEL_MOCO 0x01U
+#define RA8P1_OCTACKCR_SEL_PLL1P 0x05U
+#define RA8P1_OCTACKCR_SREQ     (1U << 6)
+#define RA8P1_OCTACKCR_SRDY     (1U << 7)
+#define RA8P1_OCTACKDIV_1       0x0U
 #define RA8P1_SCICKCR_SREQ      (1U << 6)
 #define RA8P1_SCICKCR_SRDY      (1U << 7)
 #define RA8P1_SCICKSEL_MOCO     0x1U
@@ -184,6 +201,34 @@
 
 /* BMCTL0: two bits per (channel, chip select).  01 = read enable. */
 #define RA8P1_BMCTL0_CH0CS1_RD    (1UL << 2)
+
+/*
+ * LIOCFGCSn protocol mode.  Only the listed encodings exist -- the manual
+ * marks every other value "setting prohibited" -- and the list is the reason
+ * this port runs the flash in DTR and not STR octal: there is a 8D-8D-8D
+ * encoding and NO 8S-8S-8S one, so the simpler-looking STR OPI mode has no
+ * way to be expressed on this controller at all.
+ */
+#define RA8P1_LIOCFG_PRTMD_MASK   0x3FFUL
+#define RA8P1_LIOCFG_PRTMD_1S1S1S 0x000UL
+#define RA8P1_LIOCFG_PRTMD_8D8D8D 0x3FFUL
+/* Extends the DDR sampling window; how far depends on the memory's output
+ * delay, so it is calibrated against real data rather than assumed. */
+#define RA8P1_LIOCFG_DDRSMPEX(n)  (((uint32_t)(n) & 0xFUL) << 28)
+#define RA8P1_LIOCFG_DDRSMPEX_MASK (0xFUL << 28)
+#define RA8P1_LIOCFG_CSMIN(n)     (((uint32_t)(n) & 0xFUL) << 16)
+#define RA8P1_LIOCFG_CSMIN_MASK   (0xFUL << 16)
+
+/*
+ * WRAPCFG.DSSFTCSn -- delay cells on the OM_DQS input, 0..31.  The
+ * configuration flow calls this "drive/sample timing"; leaving it at its
+ * reset 0 puts the strobe on the data transition, so one of the two DDR
+ * edges captures garbage and every other byte comes back wrong.
+ */
+#define RA8P1_WRAPCFG_DSSFTCS0(n)   (((uint32_t)(n) & 0x1FUL) << 8)
+#define RA8P1_WRAPCFG_DSSFTCS0_MASK (0x1FUL << 8)
+#define RA8P1_WRAPCFG_DSSFTCS1(n)   (((uint32_t)(n) & 0x1FUL) << 24)
+#define RA8P1_WRAPCFG_DSSFTCS1_MASK (0x1FUL << 24)
 #define RA8P1_OSPI_COMSTT(n)    (RA8P1_OSPI_BASE(n) + 0x184UL)
 
 /* LIOCTL.RSTCS0 drives the OM_RESET pin: 0 = LOW.  It RESETS TO 0, so the

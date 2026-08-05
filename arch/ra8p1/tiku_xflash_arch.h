@@ -82,6 +82,61 @@ int tiku_ra8p1_xflash_read_sfdp(uint32_t addr, void *dst, uint8_t len);
  */
 int tiku_ra8p1_xflash_mmap_enable(void);
 
+/**
+ * @brief Read @p len bytes of the array, whichever protocol is active.
+ *
+ * @param addr byte offset into the device
+ * @param dst  destination, up to 8 bytes (one manual transaction)
+ * @param len  byte count, 1..8
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_read(uint32_t addr, void *dst, uint8_t len);
+
+/*
+ * DTR octal is not a preference but the only octal this controller can
+ * express: LIOCFGCSn.PRTMD has no 8S-8S-8S encoding.  On success the bus runs
+ * at OM_SCLK = 120 MHz on eight lanes at both edges, against 4 MHz on one
+ * lane at reset.  Entry is confirmed against the factory SFDP signature, and
+ * any failure resets the device to single-bit mode rather than leaving it in
+ * a state nothing can talk to.
+ *
+ * WARNING: DOPI transfers bytes PAIR-SWAPPED (D1 D0 D3 D2 ...) relative to
+ * SPI, on the mapped window as well as the command path -- and no controller
+ * setting undoes it, so software cannot hide it from a memory-mapped read.
+ * Read data back in the protocol it was written in.
+ */
+
+/**
+ * @brief Switch device and controller to 8D-8D-8D and raise the bus clock.
+ *
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_opi_enter(void);
+
+/**
+ * @brief Pulse OM_RESET, returning the device to its power-on protocol.
+ *
+ * The unconditional escape hatch: the protocol-select bits in CR2 are
+ * volatile, so a device left speaking something the controller cannot is
+ * always one pulse from answering single-bit commands again.
+ */
+void tiku_ra8p1_xflash_reset(void);
+
+/** @brief Return device and controller to single-bit mode at the slow clock. */
+int tiku_ra8p1_xflash_opi_exit(void);
+
+/** @brief Non-zero while the octal protocol is active. */
+int tiku_ra8p1_xflash_opi_active(void);
+
+/** @brief The DDR sampling extension calibration settled on. */
+int tiku_ra8p1_xflash_ddrsmpex(void);
+
+/** @brief The OM_DQS delay cell count calibration settled on. */
+int tiku_ra8p1_xflash_dqs_shift(void);
+
+/** @brief How many delay cells worked -- the width of the eye, in cells. */
+int tiku_ra8p1_xflash_dqs_margin(void);
+
 /** @brief Erase granularities this driver issues, in bytes. */
 #define TIKU_RA8P1_XFLASH_SECTOR  4096UL
 #define TIKU_RA8P1_XFLASH_BLOCK   65536UL
