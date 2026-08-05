@@ -102,6 +102,26 @@ void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
  */
 unsigned tiku_ra8p1_usbhs_ep0_trace(unsigned i, uint16_t *out9);
 
+/**
+ * @brief Service one mass-storage command, if the host has sent one.
+ *
+ * Poll alongside ep0_poll().  Bulk transfers have no deadline of their own,
+ * but the host will not send the next command until this one is answered.
+ */
+void tiku_ra8p1_usbhs_msc_poll(void);
+
+/** @brief MSC counters: wrappers seen, reads, writes, and failures. */
+void tiku_ra8p1_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
+                                uint32_t *bad);
+
+/**
+ * @brief FNV-1a over the first @p nblocks of the staging disk (0 = all).
+ *
+ * @param nblocks blocks to hash
+ * @return the hash, to be compared against one computed on the host
+ */
+uint32_t tiku_ra8p1_usbhs_msc_hash(uint32_t nblocks);
+
 /** @brief OTG ID pin: 1 = device role strap, 0 = host, -1 = not up. */
 int tiku_ra8p1_usbhs_id_high(void);
 

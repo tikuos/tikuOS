@@ -351,6 +351,36 @@
 #define RA8P1_USBHS_PIPEMAXP    (RA8P1_USBHS_BASE + 0x06CUL)
 #define RA8P1_USBHS_PIPECTR(n)  (RA8P1_USBHS_BASE + 0x070UL + (2UL * ((n) - 1U)))
 
+/* D0FIFO: a second port so bulk pipes need not fight the DCP for CFIFO.
+ * 32-bit access is valid at N+0 with BIGEND=0 (UM Table 38.6), unlike the
+ * 8-bit case -- so bulk data moves a word at a time from 0x018. */
+#define RA8P1_USBHS_D0FIFO      (RA8P1_USBHS_BASE + 0x018UL)  /* 32-bit, LE */
+#define RA8P1_USBHS_D0FIFOSEL   (RA8P1_USBHS_BASE + 0x028UL)
+#define RA8P1_USBHS_D0FIFOCTR   (RA8P1_USBHS_BASE + 0x02AUL)
+
+/* PIPECFG / PIPEBUF / PIPEMAXP / PIPEnCTR */
+#define RA8P1_PIPECFG_EPNUM(n)  ((uint16_t)((n) & 0xFU))
+#define RA8P1_PIPECFG_DIR_IN    (1U << 4)    /* 1 = transmitting to host   */
+#define RA8P1_PIPECFG_SHTNAK    (1U << 7)
+#define RA8P1_PIPECFG_CNTMD     (1U << 8)
+#define RA8P1_PIPECFG_DBLB      (1U << 9)
+#define RA8P1_PIPECFG_BFRE      (1U << 10)
+#define RA8P1_PIPECFG_TYPE_BULK (1U << 14)
+/* BUFSIZE counts 64-byte blocks minus one; a pipe occupies
+ * (BUFSIZE + 1) * (DBLB + 1) blocks starting at BUFNMB. */
+#define RA8P1_PIPEBUF_BUFNMB(n)  ((uint16_t)((n) & 0xFFU))
+#define RA8P1_PIPEBUF_BUFSIZE(n) ((uint16_t)(((n) & 0x1FU) << 10))
+#define RA8P1_PIPEMAXP_MXPS(n)   ((uint16_t)((n) & 0x7FFU))
+#define RA8P1_PIPECTR_PID_MASK   0x3U
+#define RA8P1_PIPECTR_PID_NAK    0U
+#define RA8P1_PIPECTR_PID_BUF    1U
+#define RA8P1_PIPECTR_PID_STALL  2U
+#define RA8P1_PIPECTR_PBUSY      (1U << 5)
+#define RA8P1_PIPECTR_SQCLR      (1U << 8)
+#define RA8P1_PIPECTR_ACLRM      (1U << 9)
+#define RA8P1_PIPECTR_INBUFM     (1U << 14)
+#define RA8P1_PIPECTR_BSTS       (1U << 15)
+
 /* CFIFOSEL.  ISEL picks the DIRECTION of DCP access and is meaningless for
  * other pipes; MBW picks the access width, which must agree with the width
  * of the accesses actually issued to the port. */

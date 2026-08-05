@@ -915,12 +915,13 @@ int main(void)
                 TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
                 TIKU_REG32(0xE0001000UL) |= 1UL;
 
-                while ((*cyc - t0) < (15u * 240000000u)) {
+                while ((*cyc - t0) < (20u * 240000000u)) {
                     unsigned dv, sp, ln;
                     uint32_t nsu, nst;
                     uint16_t lr;
 
                     tiku_ra8p1_usbhs_ep0_poll();
+                    tiku_ra8p1_usbhs_msc_poll();
 
                     if ((*cyc - mark) < limit) {
                         continue;
@@ -1002,7 +1003,59 @@ int main(void)
                                  (tiku_ra8p1_usbhs_address() != 0u &&
                                   tiku_ra8p1_usbhs_configured() != 0u)
                                    ? "ENUMERATED" : "incomplete");
+                {
+                    uint32_t c, rd, wr, bad;
+
+                    tiku_ra8p1_usbhs_msc_stats(&c, &rd, &wr, &bad);
+                    tiku_uart_printf("usbhs: U3 gate: cbw=%u read=%u write=%u"
+                                     " bad=%u hash(1MB)=%x -> %s\n",
+                                     (unsigned int)c, (unsigned int)rd,
+                                     (unsigned int)wr, (unsigned int)bad,
+                                     (unsigned int)
+                                         tiku_ra8p1_usbhs_msc_hash(2048u),
+                                     (c > 0u && bad == 0u)
+                                       ? "SERVING" : "incomplete");
+                }
             }
+        }
+    }
+
+    /*
+     * SERVE INDEFINITELY.  The gates above are a snapshot; a mass-storage
+     * device that stops answering the moment its probe loop ends looks to
+     * the host exactly like one that crashed, and the host duly resets it.
+     * Staying up is also what makes the disk usable from the other side.
+     */
+    {
+        volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
+        uint32_t mark = *cyc;
+        uint32_t last_wr = 0xFFFFFFFFu;
+
+        tiku_uart_printf("usbhs: serving; write to the disk and watch the"
+                         " hash settle\n");
+        for (;;) {
+            uint32_t c, rd, wr, bad;
+
+            tiku_ra8p1_usbhs_ep0_poll();
+            tiku_ra8p1_usbhs_msc_poll();
+
+            if ((*cyc - mark) < (5u * 240000000u)) {
+                continue;
+            }
+            mark = *cyc;
+            tiku_ra8p1_usbhs_msc_stats(&c, &rd, &wr, &bad);
+            /* Only reprint when the picture changed, so a quiet disk does
+             * not bury the interesting moment in repeats. */
+            if (wr == last_wr) {
+                continue;
+            }
+            last_wr = wr;
+            tiku_uart_printf("usbhs: cbw=%u read=%u write=%u bad=%u"
+                             " hash(8MB)=%x\n",
+                             (unsigned int)c, (unsigned int)rd,
+                             (unsigned int)wr, (unsigned int)bad,
+                             (unsigned int)
+                                 tiku_ra8p1_usbhs_msc_hash(16384u));
         }
     }
 

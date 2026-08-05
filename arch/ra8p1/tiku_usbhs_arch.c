@@ -18,6 +18,7 @@
 #include "tiku_usbhs_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
+#include <kernel/usb/tiku_usbd_msc.h>
 
 /*
  * THE CLOCK QUESTION, SETTLED BY THE MANUAL RATHER THAN BY FAMILY RESEMBLANCE.
@@ -225,6 +226,10 @@ int tiku_ra8p1_usbhs_up(int want_high)
 
 #define USBD_EP0_MAXPACKET  64U
 
+#define USBD_CLASS_MSC      0x08U
+#define USBD_SUBCLASS_SCSI  0x06U
+#define USBD_PROTO_BOT      0x50U
+
 static const uint8_t desc_device[18] = {
     18U, USBD_DESC_DEVICE,
     0x00U, 0x02U,               /* bcdUSB 2.00                              */
@@ -248,7 +253,8 @@ static const uint8_t desc_config[32] = {
     9U, USBD_DESC_CONFIG, 32U, 0U, 1U, 1U, 0U,
     0xC0U,                      /* self-powered                             */
     50U,                        /* 100 mA                                   */
-    9U, 4U, 0U, 0U, 2U, 0xFFU, 0x00U, 0x00U, 0U,
+    9U, 4U, 0U, 0U, 2U, USBD_CLASS_MSC, USBD_SUBCLASS_SCSI,
+    USBD_PROTO_BOT, 0U,
     7U, 5U, 0x81U, 0x02U, 0x00U, 0x02U, 0U,   /* EP1 IN  bulk 512           */
     7U, 5U, 0x02U, 0x02U, 0x00U, 0x02U, 0U    /* EP2 OUT bulk 512           */
 };
@@ -262,7 +268,8 @@ static const uint8_t desc_qualifier[10] = {
 
 static const uint8_t desc_other_speed[32] = {
     9U, USBD_DESC_OTHERSPEED, 32U, 0U, 1U, 1U, 0U, 0xC0U, 50U,
-    9U, 4U, 0U, 0U, 2U, 0xFFU, 0x00U, 0x00U, 0U,
+    9U, 4U, 0U, 0U, 2U, USBD_CLASS_MSC, USBD_SUBCLASS_SCSI,
+    USBD_PROTO_BOT, 0U,
     7U, 5U, 0x81U, 0x02U, 0x40U, 0x00U, 0U,   /* full speed: 64-byte bulk   */
     7U, 5U, 0x02U, 0x02U, 0x40U, 0x00U, 0U
 };
@@ -286,7 +293,23 @@ static ep0_trace_t ep0_trace[16];
 static uint8_t     ep0_trace_n;
 static ep0_trace_t *tr;      /* the entry being filled, or NULL */
 
+/*
+ * PIPE1 carries EP1 IN and PIPE2 carries EP2 OUT, matching the descriptors.
+ * Both are 512-byte double-buffered bulk pipes, costing (512/64) * 2 = 16
+ * blocks of the controller's 8.5 KB buffer each, placed at block 8 and 24 --
+ * leaving 0x00 to the DCP and 0x04-0x07 to the pipes that own those numbers.
+ */
+#define MSC_PIPE_IN     1U          /* device -> host */
+#define MSC_PIPE_OUT    2U          /* host -> device */
+#define MSC_MPS         512U
+#define MSC_BUFSIZE     ((MSC_MPS / 64U) - 1U)
+#define MSC_BUFNMB_IN   0x08U
+#define MSC_BUFNMB_OUT  0x18U
+
 static uint8_t  ep0_buf[80];
+static void pipe_config(uint8_t pipe, uint8_t epnum, int dir_in,
+                        uint8_t bufnmb);
+static void pipe_pid(uint8_t pipe, uint16_t pid);
 static uint8_t  usbhs_config;
 static uint32_t n_setup, n_stall;
 static uint16_t last_req;
@@ -603,6 +626,13 @@ void tiku_ra8p1_usbhs_ep0_poll(void)
 
     case USBD_REQ_SET_CONFIGURATION:
         usbhs_config = (uint8_t)(val & 0xFFU);
+        if (usbhs_config != 0U) {
+            /* Endpoints only exist once a configuration is selected, and the
+             * host expects them freshly reset when it is. */
+            pipe_config(MSC_PIPE_IN, 1U, 1, MSC_BUFNMB_IN);
+            pipe_config(MSC_PIPE_OUT, 2U, 0, MSC_BUFNMB_OUT);
+            pipe_pid(MSC_PIPE_OUT, RA8P1_PIPECTR_PID_BUF);
+        }
         ep0_ack();
         break;
 
@@ -671,6 +701,297 @@ void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
     if (setup != NULL) { *setup = n_setup; }
     if (stall != NULL) { *stall = n_stall; }
     if (last  != NULL) { *last  = last_req; }
+}
+
+/*---------------------------------------------------------------------------*/
+/* Bulk pipes and mass storage (U3)                                          */
+/*---------------------------------------------------------------------------*/
+/*
+ * PIPE1 carries EP1 IN and PIPE2 carries EP2 OUT, matching the descriptors
+ * U2 already publishes.  Both are 512-byte double-buffered bulk pipes, which
+ * costs (512/64) * 2 = 16 blocks of the controller's 8.5 KB buffer each; they
+ * are placed at block 8 and block 24, leaving 0x00 to the DCP and 0x04-0x07
+ * to the interrupt pipes that own those numbers.
+ *
+ * Data moves through D0FIFO rather than CFIFO so bulk traffic and control
+ * traffic never have to take the port away from each other -- and through it
+ * 32 bits at a time, which IS valid at the port's own offset, unlike the
+ * 8-bit case that cost U2 a day.
+ */
+/* The staging disk is the SDRAM window itself: 64 MB, already proven, and
+ * the place a model has to end up anyway before it is written to flash. */
+#define MSC_DISK_BASE   0x68000000UL
+#define MSC_DISK_BYTES  (64UL * 1024UL * 1024UL)
+
+static tiku_usbd_msc_t msc_medium = {
+    (uint32_t)(MSC_DISK_BYTES / TIKU_USBD_MSC_BLOCK), "SDRAM Stage", 0U, 0U
+};
+static uint8_t  msc_reply[TIKU_USBD_MSC_REPLY_MAX];
+static uint32_t n_cbw, n_rd, n_wr, n_bad;
+
+/** @brief Configure one bulk pipe.  PID must be NAK while this happens. */
+static void pipe_config(uint8_t pipe, uint8_t epnum, int dir_in,
+                        uint8_t bufnmb)
+{
+    TIKU_REG16(RA8P1_USBHS_PIPESEL) = (uint16_t)pipe;
+
+    /* Everything below is only legal while the pipe answers NAK. */
+    TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) = RA8P1_PIPECTR_PID_NAK;
+
+    TIKU_REG16(RA8P1_USBHS_PIPECFG) =
+        (uint16_t)(RA8P1_PIPECFG_TYPE_BULK | RA8P1_PIPECFG_DBLB |
+                   (dir_in ? RA8P1_PIPECFG_DIR_IN : 0U) |
+                   RA8P1_PIPECFG_EPNUM(epnum));
+    TIKU_REG16(RA8P1_USBHS_PIPEBUF) =
+        (uint16_t)(RA8P1_PIPEBUF_BUFSIZE(MSC_BUFSIZE) |
+                   RA8P1_PIPEBUF_BUFNMB(bufnmb));
+    TIKU_REG16(RA8P1_USBHS_PIPEMAXP) = RA8P1_PIPEMAXP_MXPS(MSC_MPS);
+
+    /* Toggle ACLRM to empty both buffers, and reset the data toggle: the
+     * host restarts every pipe at DATA0 after SET_CONFIGURATION. */
+    TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) =
+        (uint16_t)(RA8P1_PIPECTR_ACLRM | RA8P1_PIPECTR_PID_NAK);
+    TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) = RA8P1_PIPECTR_PID_NAK;
+    TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) =
+        (uint16_t)(RA8P1_PIPECTR_SQCLR | RA8P1_PIPECTR_PID_NAK);
+
+    TIKU_REG16(RA8P1_USBHS_PIPESEL) = 0U;
+}
+
+static void pipe_pid(uint8_t pipe, uint16_t pid)
+{
+    TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) =
+        (uint16_t)((TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) &
+                    ~(uint16_t)RA8P1_PIPECTR_PID_MASK) | pid);
+}
+
+/** @brief Point D0FIFO at @p pipe and wait for the port, as CFIFO needed. */
+static int d0_select(uint8_t pipe)
+{
+    const uint16_t want =
+        (uint16_t)(RA8P1_CFIFOSEL_CURPIPE(pipe) | RA8P1_CFIFOSEL_MBW_32);
+    uint32_t spins;
+
+    for (spins = 0U; spins < 1000U; spins++) {
+        TIKU_REG16(RA8P1_USBHS_D0FIFOSEL) = want;
+        if ((TIKU_REG16(RA8P1_USBHS_D0FIFOSEL) & 0xFU) == (uint16_t)pipe) {
+            break;
+        }
+    }
+    if (spins >= 1000U) {
+        return 0;
+    }
+    for (spins = 0U; spins < 200000U; spins++) {
+        if ((TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) & RA8P1_CFIFOCTR_FRDY) != 0U) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** @brief Non-zero when the OUT pipe has a packet waiting. */
+static int pipe_out_ready(void)
+{
+    return ((TIKU_REG16(RA8P1_USBHS_PIPECTR(MSC_PIPE_OUT)) &
+             RA8P1_PIPECTR_BSTS) != 0U) ? 1 : 0;
+}
+
+/**
+ * @brief Read one packet from the OUT pipe.
+ *
+ * @param dst destination
+ * @param cap room available
+ * @return bytes taken
+ */
+static uint32_t pipe_read(uint8_t *dst, uint32_t cap)
+{
+    uint32_t n, i;
+
+    if (!d0_select(MSC_PIPE_OUT)) {
+        return 0U;
+    }
+    n = (uint32_t)(TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) &
+                   RA8P1_CFIFOCTR_DTLN_MASK);
+    if (n > cap) {
+        n = cap;
+    }
+    /* Words while a whole word remains, then the tail a byte at a time --
+     * and the 8-bit tail must use the HH alias, exactly as the DCP does. */
+    for (i = 0U; (i + 4U) <= n; i += 4U) {
+        uint32_t w = TIKU_REG32(RA8P1_USBHS_D0FIFO);
+        dst[i]     = (uint8_t)w;
+        dst[i + 1] = (uint8_t)(w >> 8);
+        dst[i + 2] = (uint8_t)(w >> 16);
+        dst[i + 3] = (uint8_t)(w >> 24);
+    }
+    if (i < n) {
+        uint32_t w = TIKU_REG32(RA8P1_USBHS_D0FIFO);
+        while (i < n) {
+            dst[i] = (uint8_t)w;
+            w >>= 8;
+            i++;
+        }
+    }
+    /* Hand the buffer back to the controller. */
+    TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) = RA8P1_CFIFOCTR_BCLR;
+    return n;
+}
+
+/**
+ * @brief Send @p len bytes on the IN pipe, in maximum-sized packets.
+ *
+ * @param src bytes to send
+ * @param len how many
+ * @return 1 on success, 0 if the host stopped collecting
+ */
+static int pipe_write(const uint8_t *src, uint32_t len)
+{
+    uint32_t sent = 0U;
+
+    pipe_pid(MSC_PIPE_IN, RA8P1_PIPECTR_PID_BUF);
+
+    do {
+        uint32_t n, i, spins;
+
+        if (!d0_select(MSC_PIPE_IN)) {
+            return 0;
+        }
+        n = ((len - sent) > MSC_MPS) ? MSC_MPS : (len - sent);
+
+        for (i = 0U; (i + 4U) <= n; i += 4U) {
+            TIKU_REG32(RA8P1_USBHS_D0FIFO) =
+                (uint32_t)src[sent + i] |
+                ((uint32_t)src[sent + i + 1] << 8) |
+                ((uint32_t)src[sent + i + 2] << 16) |
+                ((uint32_t)src[sent + i + 3] << 24);
+        }
+        for (; i < n; i++) {
+            TIKU_REG8(RA8P1_USBHS_D0FIFO + 3UL) = src[sent + i];
+        }
+        /* Short packets need marking valid; a full buffer commits itself. */
+        if (n < MSC_MPS) {
+            TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) =
+                (uint16_t)(TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) |
+                           RA8P1_CFIFOCTR_BVAL);
+        }
+        sent += n;
+
+        /* Wait for room again before refilling.  Double buffering means this
+         * usually returns at once; the bound is for a host that stopped. */
+        for (spins = 0U; spins < 4000000U; spins++) {
+            if ((TIKU_REG16(RA8P1_USBHS_PIPECTR(MSC_PIPE_IN)) &
+                 RA8P1_PIPECTR_BSTS) != 0U) {
+                break;
+            }
+        }
+        if (spins >= 4000000U) {
+            return 0;
+        }
+    } while (sent < len);
+
+    return 1;
+}
+
+/** @brief Stream a READ(10) out of the staging disk. */
+static int msc_send_blocks(uint32_t lba, uint32_t bytes)
+{
+    const uint8_t *p = (const uint8_t *)(MSC_DISK_BASE +
+                                         (lba * TIKU_USBD_MSC_BLOCK));
+    return pipe_write(p, bytes);
+}
+
+/** @brief Take a WRITE(10) into the staging disk, a packet at a time. */
+static int msc_recv_blocks(uint32_t lba, uint32_t bytes)
+{
+    uint8_t *p = (uint8_t *)(MSC_DISK_BASE + (lba * TIKU_USBD_MSC_BLOCK));
+    uint32_t got = 0U;
+
+    pipe_pid(MSC_PIPE_OUT, RA8P1_PIPECTR_PID_BUF);
+    while (got < bytes) {
+        uint32_t spins;
+
+        for (spins = 0U; spins < 4000000U; spins++) {
+            if (pipe_out_ready()) {
+                break;
+            }
+        }
+        if (spins >= 4000000U) {
+            return 0;
+        }
+        got += pipe_read(&p[got], bytes - got);
+    }
+    return 1;
+}
+
+void tiku_ra8p1_usbhs_msc_poll(void)
+{
+    uint8_t raw[TIKU_USBD_MSC_CBW_LEN];
+    uint8_t csw[TIKU_USBD_MSC_CSW_LEN];
+    tiku_usbd_msc_cbw_t cbw;
+    tiku_usbd_msc_cmd_t cmd;
+    uint32_t n;
+    int ok = 1;
+
+    if (!usbhs_up || usbhs_config == 0U || !pipe_out_ready()) {
+        return;
+    }
+
+    n = pipe_read(raw, sizeof(raw));
+    if (!tiku_usbd_msc_parse_cbw(raw, (uint16_t)n, &cbw)) {
+        n_bad++;
+        return;      /* not a wrapper; the next packet resyncs */
+    }
+    n_cbw++;
+
+    /* The SAME decoder the Apollo510 driver uses.  Two controllers, one
+     * opinion about what the bytes mean. */
+    tiku_usbd_msc_decode(&msc_medium, &cbw, msc_reply, &cmd);
+
+    switch (cmd.action) {
+    case TIKU_USBD_MSC_ACT_READ:
+        n_rd++;
+        ok = msc_send_blocks(cmd.lba, cmd.bytes);
+        break;
+    case TIKU_USBD_MSC_ACT_WRITE:
+        n_wr++;
+        ok = msc_recv_blocks(cmd.lba, cmd.bytes);
+        break;
+    case TIKU_USBD_MSC_ACT_REPLY:
+        ok = pipe_write(msc_reply, cmd.len);
+        break;
+    default:
+        break;
+    }
+    if (!ok) {
+        n_bad++;
+    }
+
+    tiku_usbd_msc_build_csw(csw, cbw.tag, cmd.residue, cmd.status);
+    (void)pipe_write(csw, TIKU_USBD_MSC_CSW_LEN);
+}
+
+void tiku_ra8p1_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
+                                uint32_t *bad)
+{
+    if (cbw != NULL) { *cbw = n_cbw; }
+    if (rd  != NULL) { *rd  = n_rd;  }
+    if (wr  != NULL) { *wr  = n_wr;  }
+    if (bad != NULL) { *bad = n_bad; }
+}
+
+uint32_t tiku_ra8p1_usbhs_msc_hash(uint32_t nblocks)
+{
+    const uint8_t *p = (const uint8_t *)MSC_DISK_BASE;
+    uint32_t h = 2166136261u, i, n;
+
+    if (nblocks == 0U || nblocks > msc_medium.blocks) {
+        nblocks = msc_medium.blocks;
+    }
+    n = nblocks * TIKU_USBD_MSC_BLOCK;
+    for (i = 0U; i < n; i++) {
+        h = (h ^ p[i]) * 16777619u;
+    }
+    return h;
 }
 
 int tiku_ra8p1_usbhs_attach(int on)
