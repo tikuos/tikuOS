@@ -3,6 +3,12 @@
  *
  * msc_host_test.c - U0: exercise kernel/usb/tiku_usbd_msc.c on a Linux host.
  *
+ * Build: tools/usbmsc/Makefile     Run: ./msc_host_test
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * THE POINT OF THIS FILE.  Mass storage is a wire format, and a wire format
  * is nothing but byte offsets and endianness -- the class of thing that is
  * silent when wrong.  A CSW with its residue in the wrong byte order still
@@ -14,10 +20,6 @@
  * MUST be refused -- including one that a plausible wrong implementation
  * accepts, so the guard is shown to be load-bearing rather than merely
  * present.
- *
- * Build: tools/usbmsc/Makefile     Run: ./msc_host_test
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <stdio.h>

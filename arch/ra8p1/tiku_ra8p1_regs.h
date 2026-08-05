@@ -274,6 +274,92 @@
 /** @brief Module stop: OSPI0 is MSTPB16, OSPI1 (the board's flash) MSTPB17. */
 #define RA8P1_MSTPB_OSPI0       (1UL << 16)
 #define RA8P1_MSTPB_OSPI1       (1UL << 17)
+/** @brief Module stop for the USB 2.0 high-speed controller (UM 11.2.7). */
+#define RA8P1_MSTPB_USBHS       (1UL << 12)
+
+/*---------------------------------------------------------------------------*/
+/* USB 2.0 High-Speed Module (UM 38)                                         */
+/*---------------------------------------------------------------------------*/
+/*
+ * The classic Renesas pipe controller: 16-bit registers throughout, a
+ * default control pipe plus nine programmable ones, and an on-chip UTMI
+ * transceiver on dedicated DP/DM pins -- so unlike every other bus on this
+ * board there is no pin muxing to get wrong for the data lines.
+ *
+ * The clock is the part worth writing down.  High speed requires the PHY's
+ * own PLL running from a 12/20/24/48 MHz reference on the EXTAL pin, which
+ * on this board is the 24 MHz crystal that is already running.  It does NOT
+ * use USBCLK: that feeds USBFS, and USBHS only in CL-only mode -- a mode the
+ * manual states plainly does not support high speed.  So there is no
+ * USBCKCR request/ready dance here, despite USBCKCR being a member of this
+ * part's private-clock-register family.
+ */
+#define RA8P1_USBHS_BASE        0x40351000UL
+#define RA8P1_USBHS_SYSCFG      (RA8P1_USBHS_BASE + 0x000UL)  /* 16-bit */
+#define RA8P1_USBHS_SYSSTS0     (RA8P1_USBHS_BASE + 0x004UL)
+#define RA8P1_USBHS_PLLSTA      (RA8P1_USBHS_BASE + 0x006UL)
+#define RA8P1_USBHS_DVSTCTR0    (RA8P1_USBHS_BASE + 0x008UL)
+#define RA8P1_USBHS_TESTMODE    (RA8P1_USBHS_BASE + 0x00CUL)
+#define RA8P1_USBHS_INTENB0     (RA8P1_USBHS_BASE + 0x030UL)
+#define RA8P1_USBHS_INTENB1     (RA8P1_USBHS_BASE + 0x032UL)
+#define RA8P1_USBHS_SOFCFG      (RA8P1_USBHS_BASE + 0x03CUL)
+#define RA8P1_USBHS_PHYSET      (RA8P1_USBHS_BASE + 0x03EUL)
+#define RA8P1_USBHS_INTSTS0     (RA8P1_USBHS_BASE + 0x040UL)
+#define RA8P1_USBHS_INTSTS1     (RA8P1_USBHS_BASE + 0x042UL)
+#define RA8P1_USBHS_FRMNUM      (RA8P1_USBHS_BASE + 0x04CUL)
+#define RA8P1_USBHS_USBADDR     (RA8P1_USBHS_BASE + 0x050UL)
+#define RA8P1_USBHS_DCPCTR      (RA8P1_USBHS_BASE + 0x060UL)
+#define RA8P1_USBHS_LPCTRL      (RA8P1_USBHS_BASE + 0x100UL)
+#define RA8P1_USBHS_LPSTS       (RA8P1_USBHS_BASE + 0x102UL)
+
+/* SYSCFG.  DRPD resets to 1 -- those are the HOST pull-downs, so device
+ * mode has to clear a bit rather than merely set the ones it wants. */
+#define RA8P1_SYSCFG_USBE       (1U << 0)
+#define RA8P1_SYSCFG_DPRPU      (1U << 4)   /* D+ pull-up = soft connect    */
+#define RA8P1_SYSCFG_DRPD       (1U << 5)   /* D+/D- pull-downs (host)      */
+#define RA8P1_SYSCFG_DCFM       (1U << 6)   /* 0 = device, 1 = host         */
+#define RA8P1_SYSCFG_HSE        (1U << 7)   /* high-speed operation enable  */
+#define RA8P1_SYSCFG_CNEN       (1U << 8)
+
+/* PHYSET.  DIRPD resets to 1: the transceiver starts POWERED DOWN, so a
+ * bring-up that only sets bits leaves a PHY that answers nothing. */
+#define RA8P1_PHYSET_DIRPD      (1U << 0)   /* 1 = low power                */
+#define RA8P1_PHYSET_PLLRESET   (1U << 1)   /* resets to 1; clear once only */
+#define RA8P1_PHYSET_CDPEN      (1U << 3)
+#define RA8P1_PHYSET_CLKSEL(n)  (((uint16_t)(n) & 0x3U) << 4)
+#define RA8P1_PHYSET_CLKSEL_MASK (0x3U << 4)
+#define RA8P1_PHYSET_CLKSEL_12M 0U
+#define RA8P1_PHYSET_CLKSEL_48M 1U
+#define RA8P1_PHYSET_CLKSEL_20M 2U
+#define RA8P1_PHYSET_CLKSEL_24M 3U          /* this board's crystal         */
+#define RA8P1_PHYSET_REPSTART   (1U << 11)
+#define RA8P1_PHYSET_HSEB       (1U << 15)  /* CL-only mode: NO high speed  */
+
+#define RA8P1_LPSTS_SUSPENDM    (1U << 14)  /* 1 = UTMI normal mode         */
+#define RA8P1_PLLSTA_PLLLOCK    (1U << 0)
+
+/* DVSTCTR0.RHST, read in DEVICE mode: 010 is "bus reset in progress OR
+ * full speed" and 011 is "bus reset in progress OR high speed" -- the same
+ * code covers both, so a speed read during a reset is not yet the answer. */
+#define RA8P1_DVSTCTR0_RHST_MASK 0x7U
+#define RA8P1_DVSTCTR0_RHST_NONE 0U
+#define RA8P1_DVSTCTR0_RHST_FULL 2U
+#define RA8P1_DVSTCTR0_RHST_HIGH 3U
+
+/* INTSTS0 */
+#define RA8P1_INTSTS0_CTSQ_MASK  0x7U
+#define RA8P1_INTSTS0_VALID      (1U << 3)
+#define RA8P1_INTSTS0_DVSQ_SHIFT 4U
+#define RA8P1_INTSTS0_DVSQ_MASK  (0x7U << 4)
+#define RA8P1_INTSTS0_VBSTS      (1U << 7)
+#define RA8P1_INTSTS0_BRDY       (1U << 8)
+#define RA8P1_INTSTS0_NRDY       (1U << 9)
+#define RA8P1_INTSTS0_BEMP       (1U << 10)
+#define RA8P1_INTSTS0_CTRT       (1U << 11)
+#define RA8P1_INTSTS0_DVST       (1U << 12)
+#define RA8P1_INTSTS0_SOFR       (1U << 13)
+#define RA8P1_INTSTS0_RESM       (1U << 14)
+#define RA8P1_INTSTS0_VBINT      (1U << 15)
 
 /** @brief PSEL that selects the OSPI function on any pin (OM_1_* here). */
 #define RA8P1_PFS_PSEL_OSPI     0x1CUL

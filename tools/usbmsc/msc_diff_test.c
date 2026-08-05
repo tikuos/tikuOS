@@ -3,6 +3,12 @@
  *
  * msc_diff_test.c - U0: prove the extraction changed no behaviour.
  *
+ * Build: tools/usbmsc/Makefile     Run: ./msc_diff_test
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * THE GATE THIS DISCHARGES.  U0 moved proven code out of a driver that only
  * an Apollo510 can exercise.  "It still compiles" is not evidence, and "the
  * new code passes its own tests" only says the new code agrees with itself.
@@ -15,10 +21,6 @@
  * configurations, plus a directed sweep of READ/WRITE block ranges including
  * the ones that wrap 32 bits.  Anything the two disagree about is printed
  * with the input that caused it.
- *
- * Build: tools/usbmsc/Makefile     Run: ./msc_diff_test
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <stdio.h>

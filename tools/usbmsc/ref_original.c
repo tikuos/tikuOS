@@ -3,6 +3,10 @@
  *
  * ref_original.c - the PRE-EXTRACTION Apollo510 logic, copied verbatim.
  *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * This is not a reimplementation and must never become one.  It is the code
  * that shipped in arch/ambiq/tiku_usb_arch.c before U0 moved the wire format
  * out, transcribed unchanged apart from the prefixes needed to link it beside
@@ -13,8 +17,6 @@
  * If a deliberate behaviour change is ever wanted, this file must change in
  * the same commit and the diff must say why -- otherwise the differential
  * test silently starts comparing new code against new code.
- *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "ref_original.h"

@@ -1546,6 +1546,7 @@ SRCS += arch/ra8p1/tiku_fault_arch.c
 SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+SRCS += arch/ra8p1/tiku_usbhs_arch.c
 # that masking the NVIC cannot silence a tick that is a CORE exception, and an
 # untested claim in a comment is worth nothing.
 SRCS += arch/ra8p1/tiku_crit_arch.c
@@ -1927,6 +1928,7 @@ SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+SRCS += arch/ra8p1/tiku_usbhs_arch.c
 SRCS += arch/ra8p1/tiku_wake_arch.c
 SRCS += arch/ra8p1/tiku_htimer_arch.c
 SRCS += arch/ra8p1/tiku_gpio_irq_arch.c

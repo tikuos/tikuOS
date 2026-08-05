@@ -349,6 +349,7 @@ int main(void)
 #include "arch/ra8p1/tiku_cache_arch.h"
 #include "arch/ra8p1/tiku_sdram_arch.h"
 #include "arch/ra8p1/tiku_xflash_arch.h"
+#include "arch/ra8p1/tiku_usbhs_arch.h"
 #include "kernel/fs/tiku_nvm_backend.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
@@ -856,6 +857,64 @@ int main(void)
                     }
                 }
             }
+        }
+    }
+
+    /*
+     * U1: USB-HS bring-up.  The gate is that a host attach produces a bus
+     * reset and DVSTCTR0.RHST reports high speed -- both of which the
+     * hardware does by itself (the chirp handshake is not software's job),
+     * so this is reachable with no endpoint code at all.
+     */
+    {
+        static const char *const dvname[5] = {
+            "powered", "default", "address", "configured", "suspend"
+        };
+        static const char *const spname[3] = { "none", "full", "HIGH" };
+        /* Full-speed reading of the line pair; in HS these mean squelch /
+         * unsquelch, and during a reset handshake, chirp J / chirp K. */
+        static const char *const lnname[4] = { "SE0", "J", "K", "SE1" };
+        uint16_t r[8];
+        int rc = tiku_ra8p1_usbhs_up(1);
+        unsigned last_dv = 99u, last_sp = 99u, last_ln = 99u, t;
+
+        tiku_uart_printf("usbhs: up rc=%d pll_locked=%d\n", rc,
+                         tiku_ra8p1_usbhs_pll_locked());
+        if (rc == 0) {
+            tiku_ra8p1_usbhs_regs(r, 8u);
+            tiku_uart_printf("usbhs: syscfg=%x syssts=%x pllsta=%x"
+                             " dvstctr=%x physet=%x intsts0=%x lpsts=%x\n",
+                             r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
+
+            (void)tiku_ra8p1_usbhs_attach(1);
+            tiku_uart_printf("usbhs: attached, watching for a host...\n");
+
+            /* Six seconds is generous: a host enumerates in tens of
+             * milliseconds, so a quiet window this long means the cable or
+             * the port is the answer, not the timing. */
+            for (t = 0; t < 600u; t++) {
+                unsigned dv = (unsigned)tiku_ra8p1_usbhs_devstate();
+                unsigned sp = (unsigned)tiku_ra8p1_usbhs_speed();
+                unsigned ln;
+
+                tiku_ra8p1_usbhs_regs(r, 8u);
+                ln = (unsigned)(r[1] & 3u);
+                if (dv != last_dv || sp != last_sp || ln != last_ln) {
+                    tiku_uart_printf("usbhs: t=%ums state=%s speed=%s"
+                                     " lnst=%u(%s) frame=%u\n", t * 10u,
+                                     dvname[dv < 5u ? dv : 4u],
+                                     spname[sp < 3u ? sp : 0u], ln,
+                                     lnname[ln], (unsigned int)r[7]);
+                    last_dv = dv;
+                    last_sp = sp;
+                    last_ln = ln;
+                }
+                tiku_cpu_ra8p1_delay_us(10000u);
+            }
+            tiku_ra8p1_usbhs_regs(r, 8u);
+            tiku_uart_printf("usbhs: final syscfg=%x syssts=%x dvstctr=%x"
+                             " intsts0=%x frame=%u\n",
+                             r[0], r[1], r[3], r[5], r[7]);
         }
     }
 
