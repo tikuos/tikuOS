@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 
+struct tiku_nvm_backend;
+
 #define TIKU_RA8P1_XFLASH_OK          0
 #define TIKU_RA8P1_XFLASH_ERR_TIMEOUT -1  /**< transaction never completed  */
 #define TIKU_RA8P1_XFLASH_ERR_ID      -2  /**< no Macronix device answered  */
@@ -104,6 +106,10 @@ int tiku_ra8p1_xflash_read(uint32_t addr, void *dst, uint8_t len);
  * SPI, on the mapped window as well as the command path -- and no controller
  * setting undoes it, so software cannot hide it from a memory-mapped read.
  * Read data back in the protocol it was written in.
+ *
+ * DOPI also addresses the array in 2-byte units (A0 must be 0).  Odd
+ * addresses and odd lengths are REFUSED rather than obeyed, because the
+ * device accepts them, reports success, and moves the wrong bytes.
  */
 
 /**
@@ -170,6 +176,27 @@ int tiku_ra8p1_xflash_erase_block(uint32_t addr);
  * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
  */
 int tiku_ra8p1_xflash_program(uint32_t addr, const void *src, uint8_t len);
+
+/**
+ * @brief Write @p len bytes at @p addr through the mapped window.
+ *
+ * @param addr  destination, 64-byte aligned
+ * @param src   source, 8-byte aligned
+ * @param len   byte count, a multiple of 64
+ * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
+ */
+int tiku_ra8p1_xflash_write(uint32_t addr, const void *src, uint32_t len);
+
+/*
+ * The octal flash as an NVM region, which is what lets the existing store
+ * layers use it unchanged: reads are already pointer dereferences into the
+ * mapped window, and write/erase are the only things that differ from MRAM.
+ * tiku_tfs_mount() takes a backend by argument, so this is a second volume
+ * alongside the carved internal region rather than a replacement for it.
+ */
+
+/** @brief The external flash as an NVM backend, or NULL if the map failed. */
+struct tiku_nvm_backend *tiku_ra8p1_xflash_backend(void);
 
 /** @brief Read the status register (RDSR). @param sr Receives it @return rc */
 int tiku_ra8p1_xflash_read_status(uint8_t *sr);

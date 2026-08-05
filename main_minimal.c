@@ -349,6 +349,7 @@ int main(void)
 #include "arch/ra8p1/tiku_cache_arch.h"
 #include "arch/ra8p1/tiku_sdram_arch.h"
 #include "arch/ra8p1/tiku_xflash_arch.h"
+#include "kernel/fs/tiku_nvm_backend.h"
 #include "arch/ra8p1/tiku_gpio_arch.h"
 #include "arch/ra8p1/tiku_timer_arch.h"
 #include "arch/ra8p1/tiku_uart_arch.h"
@@ -728,6 +729,112 @@ int main(void)
                                 sink += *(volatile const uint32_t *)(xm + n);
                             }
                             fast = *cyc - t0;
+
+                            /* The number that decides whether a model can
+                             * live in flash: a real bulk copy into SDRAM,
+                             * the way a boot-time restore would do it. */
+                            if (tiku_ra8p1_sdram_ready()) {
+                                uint32_t t1, cp;
+                                unsigned long kbps;
+
+                                uint32_t *d = (uint32_t *)
+                                    TIKU_RA8P1_SDRAM_ADDR;
+                                const uint32_t *sp = (const uint32_t *)
+                                    TIKU_RA8P1_XFLASH_ADDR;
+                                unsigned long q;
+
+                                t1 = *cyc;
+                                for (q = 0; q < 262144UL / 4UL; q++) {
+                                    d[q] = sp[q];
+                                }
+                                __asm__ volatile ("dsb" ::: "memory");
+                                cp = *cyc - t1;
+                                /* 240 MHz core: bytes * 240 / cycles = MB/s */
+                                kbps = cp ? (262144UL / (cp / 240UL)) : 0UL;
+                                tiku_uart_printf("xflash: 256KB flash->SDRAM"
+                                    " %u cyc = %u MB/s -> 62.8 MB in %u ms\n",
+                                    (unsigned int)cp, (unsigned int)kbps,
+                                    (unsigned int)(kbps ? 62800UL / kbps : 0));
+                            }
+                            /* Bulk write: erase a sector, fill 4 KB with a
+                             * position-dependent pattern (so a shifted or
+                             * duplicated chunk cannot pass), read it back
+                             * through the mapped window. */
+                            {
+                                static uint64_t buf[512];
+                                const uint32_t wa = 0x02000000UL;
+                                unsigned long q;
+                                unsigned bad = 0;
+                                int rw;
+                                uint32_t t2, wc;
+
+                                for (q = 0; q < 512UL; q++) {
+                                    buf[q] = 0x5A5A0000UL + q;
+                                }
+                                (void)tiku_ra8p1_xflash_erase_sector(wa);
+                                t2 = *cyc;
+                                rw = tiku_ra8p1_xflash_write(wa, buf, 4096UL);
+                                wc = *cyc - t2;
+                                (void)tiku_ra8p1_xflash_mmap_enable();
+                                for (q = 0; q < 512UL; q++) {
+                                    const volatile uint64_t *v =
+                                        (const volatile uint64_t *)
+                                        (TIKU_RA8P1_XFLASH_ADDR + wa);
+                                    if (v[q] != buf[q]) { bad++; }
+                                }
+                                tiku_uart_printf("xflash: bulk write 4KB rc=%d"
+                                    " bad=%u/512 in %u cyc (%u KB/s)\n",
+                                    rw, bad, (unsigned int)wc,
+                                    (unsigned int)(wc ? (4096UL * 240000UL)
+                                                        / wc : 0));
+                            }
+
+                            /* The backend path a filesystem actually
+                             * exercises: an odd offset and a length that is
+                             * no multiple of anything, so head, aligned
+                             * middle and tail all get used. */
+                            {
+                                struct tiku_nvm_backend *be =
+                                    tiku_ra8p1_xflash_backend();
+                                static uint8_t ub[300];
+                                unsigned long q2;
+                                unsigned off2;
+
+                                for (q2 = 0; q2 < 300UL; q2++) {
+                                    ub[q2] = (uint8_t)(q2 * 7UL + 3UL);
+                                }
+                                /* Odd vs even start, and a 64-aligned start,
+                                 * so the failing case is isolated rather than
+                                 * inferred. */
+                                for (off2 = 0; off2 < 3U; off2++) {
+                                    const uint32_t base2 =
+                                        0x02010000UL + (off2 * 0x2000UL);
+                                    const uint32_t delta =
+                                        (off2 == 0U) ? 5UL
+                                                     : ((off2 == 1U) ? 4UL
+                                                                     : 0UL);
+                                    unsigned bad2 = 0, head = 0;
+                                    int rb2;
+
+                                    if (be == NULL) { break; }
+                                    (void)be->erase(be, base2, 4096UL);
+                                    rb2 = be->write(be, base2 + delta,
+                                                    ub, 300UL);
+                                    (void)tiku_ra8p1_xflash_mmap_enable();
+                                    for (q2 = 0; q2 < 300UL; q2++) {
+                                        if (be->base[base2 + delta + q2] !=
+                                            ub[q2]) {
+                                            bad2++;
+                                            if (q2 < 64UL) { head++; }
+                                        }
+                                    }
+                                    tiku_uart_printf("xflash: backend +%u"
+                                        " len300 rc=%d bad=%u/300"
+                                        " (first64 bad=%u)\n",
+                                        (unsigned int)delta, rb2, bad2, head);
+                                }
+                            }
+
                             tiku_uart_printf("xflash: OPI ok, dqs=%d"
                                 " (eye %d cells) ddrsmpex=%d, pattern=%u/8\n",
                                 tiku_ra8p1_xflash_dqs_shift(),

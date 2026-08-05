@@ -18,6 +18,7 @@
 #include "tiku_xflash_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
+#include <kernel/fs/tiku_nvm_backend.h>
 
 /*
  * OSPI0, not OSPI1.  The address map lists an OSPI1 window at 0x7000_0000 and
@@ -215,6 +216,17 @@ int tiku_ra8p1_xflash_cmd(uint16_t cmd, uint32_t addr, uint8_t addr_bytes,
 
     if (len > 8U || addr_bytes > 4U) {
         return TIKU_RA8P1_XFLASH_ERR_ID;
+    }
+    /*
+     * DTR octal addresses the array in 2-byte units: the datasheet requires
+     * A0 = 0, and a request that ignores it is not refused by the device --
+     * it completes, reports success, and moves the wrong bytes.  Measured:
+     * a 300-byte write at an odd offset returned OK with 251 bytes wrong.
+     * Refusing here catches every path at once, since they all funnel
+     * through this one transaction primitive.
+     */
+    if (xf_opi && addr_bytes > 0U && (addr & 1UL) != 0UL) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
     }
     tiku_ra8p1_xflash_init();
 
@@ -676,6 +688,12 @@ int tiku_ra8p1_xflash_mmap_enable(void)
             RA8P1_CMCFG1_RDCMD(0x0C00U) | RA8P1_CMCFG1_RDLATE(8U);
     }
 
+    /* Prefetch on.  A mapped read without it re-sends command, address and
+     * twenty latency cycles for every burst the CPU asks for, which on a bus
+     * this fast is nearly all of the time. */
+    TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) =
+        TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) | RA8P1_BMCFG_PREEN;
+
     /* Read enable only.  Leaving write disabled means a stray store into the
      * window is refused by the bridge rather than becoming a program cycle
      * on a device whose erase state nobody checked. */
@@ -684,6 +702,182 @@ int tiku_ra8p1_xflash_mmap_enable(void)
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
 
     return TIKU_RA8P1_XFLASH_OK;
+}
+
+/*
+ * Bulk write goes through the mapped window, because the manual path cannot:
+ * its data buffers are two 32-bit registers, so eight bytes is the hard
+ * ceiling per transaction, and eight bytes per program cycle would put a
+ * 64 MB device somewhere north of an hour.  The bridge's write-combination
+ * mode gathers CPU stores into one frame instead -- up to MWRSIZE, whose
+ * maximum is 64 bytes, so that is the unit this works in.
+ *
+ * Two constraints come with it.  Stores must be 64-bit while combining (the
+ * manual prohibits any other width), and WEL is not something the controller
+ * knows about: it clears after every program, so each chunk needs its own
+ * write-enable issued down the manual path first.
+ */
+#define XF_WRCHUNK  64UL
+
+int tiku_ra8p1_xflash_write(uint32_t addr, const void *src, uint32_t len)
+{
+    const uint64_t *s = (const uint64_t *)src;
+    uint32_t done;
+    int rc;
+
+    if (src == NULL || len == 0UL) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+    /* Refuse a misaligned request rather than issue a frame that straddles a
+     * page and wraps -- the device would corrupt the head of the page. */
+    if (((addr | len) & (XF_WRCHUNK - 1UL)) != 0UL ||
+        ((uintptr_t)src & 7U) != 0U ||
+        addr > TIKU_RA8P1_XFLASH_BYTES ||
+        len > TIKU_RA8P1_XFLASH_BYTES - addr) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+
+    tiku_ra8p1_xflash_mmap_enable();
+
+    TIKU_REG32(RA8P1_OSPI_CMCFG2(XF_UNIT, XF_CS)) =
+        RA8P1_CMCFG2_WRCMD((uint32_t)(xf_opi ? 0x12EDU : 0x1200U)) |
+        RA8P1_CMCFG2_WRLATE(0U);
+    TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) =
+        (TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) & ~0xFF00UL) |
+        RA8P1_BMCFG_MWRCOMB | RA8P1_BMCFG_MWRSIZE(RA8P1_BMCFG_MWRSIZE_64);
+    TIKU_REG32(RA8P1_OSPI_BMCTL0(XF_UNIT)) |= RA8P1_BMCTL0_CH0CS1_WR;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+
+    rc = TIKU_RA8P1_XFLASH_OK;
+    for (done = 0UL; done < len; done += XF_WRCHUNK) {
+        volatile uint64_t *d = (volatile uint64_t *)
+            (TIKU_RA8P1_XFLASH_ADDR + addr + done);
+        unsigned k;
+
+        rc = xflash_write_enable();
+        if (rc != TIKU_RA8P1_XFLASH_OK) {
+            break;
+        }
+        for (k = 0; k < XF_WRCHUNK / 8UL; k++) {
+            d[k] = s[k];
+        }
+        __asm__ volatile ("dsb" ::: "memory");
+
+        rc = xflash_wait_idle(50UL);
+        if (rc != TIKU_RA8P1_XFLASH_OK) {
+            break;
+        }
+        s += XF_WRCHUNK / 8UL;
+    }
+
+    /* Close the window again.  Leaving the map writable turns any stray
+     * store into a program cycle on a device nobody checked the erase state
+     * of, which is a corruption that surfaces long after its cause. */
+    TIKU_REG32(RA8P1_OSPI_BMCTL0(XF_UNIT)) &= ~RA8P1_BMCTL0_CH0CS1_WR;
+    TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) &= ~RA8P1_BMCFG_MWRCOMB;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+    return rc;
+}
+
+/*
+ * A filesystem writes whatever length it likes at whatever offset it likes,
+ * so the backend cannot inherit the combined path's 64-byte alignment rule.
+ * It splits instead: unaligned head and tail go down the manual path eight
+ * bytes at a time, and only the aligned middle uses the fast combined frames.
+ * Slow at the edges, fast where it matters, correct everywhere.
+ */
+static int xflash_write_any(uint32_t addr, const uint8_t *p, uint32_t len)
+{
+    int rc;
+
+    while (len != 0UL) {
+        uint32_t n;
+
+        if (((addr & (XF_WRCHUNK - 1UL)) == 0UL) && len >= XF_WRCHUNK &&
+            (((uintptr_t)p & 7U) == 0U)) {
+            n = len & ~(XF_WRCHUNK - 1UL);
+            rc = tiku_ra8p1_xflash_write(addr, p, n);
+        } else {
+            /* Up to eight bytes, and never across a page: the device wraps a
+             * program that would leave its page rather than continuing. */
+            n = (len < 8UL) ? len : 8UL;
+            if ((addr & (TIKU_RA8P1_XFLASH_PAGE - 1UL)) + n >
+                TIKU_RA8P1_XFLASH_PAGE) {
+                n = TIKU_RA8P1_XFLASH_PAGE -
+                    (addr & (TIKU_RA8P1_XFLASH_PAGE - 1UL));
+            }
+            rc = tiku_ra8p1_xflash_program(addr, p, (uint8_t)n);
+        }
+        if (rc != TIKU_RA8P1_XFLASH_OK) {
+            return rc;
+        }
+        addr += n;
+        p    += n;
+        len  -= n;
+    }
+    return TIKU_RA8P1_XFLASH_OK;
+}
+
+static int xflash_be_write(struct tiku_nvm_backend *be, size_t off,
+                           const void *src, size_t len)
+{
+    if (be == NULL || src == NULL || off + len > be->size) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+    /* Stated up front rather than discovered eight bytes in, so a caller
+     * gets a clean refusal instead of a partially written span. */
+    if (xf_opi && ((off | len) & 1U) != 0U) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+    return xflash_write_any((uint32_t)off, (const uint8_t *)src,
+                            (uint32_t)len);
+}
+
+static int xflash_be_erase(struct tiku_nvm_backend *be, size_t off,
+                           size_t len)
+{
+    size_t done;
+
+    if (be == NULL || off + len > be->size ||
+        (off & (TIKU_RA8P1_XFLASH_SECTOR - 1UL)) != 0U) {
+        return TIKU_RA8P1_XFLASH_ERR_RANGE;
+    }
+    for (done = 0; done < len; ) {
+        int rc;
+
+        /* Prefer the 64 KB opcode when a whole block is in range: sixteen
+         * sector erases cost far more than one block erase. */
+        if (((off + done) & (TIKU_RA8P1_XFLASH_BLOCK - 1UL)) == 0U &&
+            (len - done) >= TIKU_RA8P1_XFLASH_BLOCK) {
+            rc = tiku_ra8p1_xflash_erase_block((uint32_t)(off + done));
+            done += TIKU_RA8P1_XFLASH_BLOCK;
+        } else {
+            rc = tiku_ra8p1_xflash_erase_sector((uint32_t)(off + done));
+            done += TIKU_RA8P1_XFLASH_SECTOR;
+        }
+        if (rc != TIKU_RA8P1_XFLASH_OK) {
+            return rc;
+        }
+    }
+    return TIKU_RA8P1_XFLASH_OK;
+}
+
+static tiku_nvm_backend_t xf_backend = {
+    (uint8_t *)TIKU_RA8P1_XFLASH_ADDR,
+    (size_t)TIKU_RA8P1_XFLASH_BYTES,
+    xflash_be_write,
+    xflash_be_erase,
+    NULL
+};
+
+tiku_nvm_backend_t *tiku_ra8p1_xflash_backend(void)
+{
+    /* Reads through this backend are pointer dereferences into the mapped
+     * window, so the map has to be open before anyone holds the pointer. */
+    if (tiku_ra8p1_xflash_mmap_enable() != TIKU_RA8P1_XFLASH_OK) {
+        return NULL;
+    }
+    return &xf_backend;
 }
 
 int tiku_ra8p1_xflash_read_id(uint8_t out[3])

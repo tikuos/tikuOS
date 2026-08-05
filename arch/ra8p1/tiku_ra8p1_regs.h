@@ -199,8 +199,24 @@
 #define RA8P1_CMCFG1_RDCMD(c)     (((uint32_t)(c) & 0xFFFFUL) << 0)
 #define RA8P1_CMCFG1_RDLATE(n)    (((uint32_t)(n) & 0x1FUL) << 16)
 
+/*
+ * BMCFGCHn: bridge behaviour for one channel.  PREEN is the one that matters
+ * for bulk reads -- without prefetch every incremental read pays the full
+ * command + address + latency again, so the bus spends most of its cycles
+ * re-announcing where it already is.
+ */
+#define RA8P1_BMCFG_WRMD        (1UL << 0)
+#define RA8P1_BMCFG_MWRCOMB     (1UL << 7)
+#define RA8P1_BMCFG_MWRSIZE(n)  (((uint32_t)(n) & 0xFFUL) << 8)
+#define RA8P1_BMCFG_MWRSIZE_64  0x0FUL    /* max: 64 bytes per combined frame */
+#define RA8P1_BMCFG_PREEN       (1UL << 16)
+#define RA8P1_BMCFG_CMBTIM(n)   (((uint32_t)(n) & 0xFFUL) << 24)
+
 /* BMCTL0: two bits per (channel, chip select).  01 = read enable. */
 #define RA8P1_BMCTL0_CH0CS1_RD    (1UL << 2)
+#define RA8P1_BMCTL0_CH0CS1_WR    (1UL << 3)
+#define RA8P1_CMCFG2_WRCMD(c)     (((uint32_t)(c) & 0xFFFFUL) << 0)
+#define RA8P1_CMCFG2_WRLATE(n)    (((uint32_t)(n) & 0x1FUL) << 16)
 
 /*
  * LIOCFGCSn protocol mode.  Only the listed encodings exist -- the manual
