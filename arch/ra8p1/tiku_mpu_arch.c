@@ -35,7 +35,14 @@ void tiku_mpu_arch_set_sam(uint16_t sam) {
 }
 
 uint16_t tiku_mpu_arch_get_ctl(void) {
-    /* Zero reads as "MPU disabled", which is the truth on this port. */
+    /*
+     * Zero: "MPU disabled", and that is the truth rather than a gap in the
+     * bookkeeping.  The other ports mirror MSP430's MPUCTL0 password|enable
+     * here BECAUSE they also program real protection -- rp2350 and Ambiq both
+     * write MPU_CTRL.  This port programs no PMSAv8 regions, so reporting
+     * enabled would claim a protection it does not have, and the two mpu
+     * assertions that check for it SHOULD fail until W^X is real here.
+     */
     return 0U;
 }
 
@@ -46,23 +53,35 @@ void tiku_mpu_arch_enable_irq(void) {
 }
 
 void tiku_mpu_arch_init_segments(void) {
+    tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
 void tiku_mpu_arch_set_default_protection(void) {
+    tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
-    (void)seg;
-    (void)perm;
+    uint16_t shift = (uint16_t)seg * 4U;
+    uint16_t mask  = (uint16_t)0x07U << shift;
+
+    tiku_mpu_arch_set_sam((uint16_t)((mpu_sam & ~mask) |
+                                     (((uint16_t)perm & 0x07U) << shift)));
 }
 
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
-    /* Durable data is ordinary SRAM here, so it is already writable. */
-    return mpu_sam;
+    /* Bookkeeping, and it is not decorative: the SAM is the kernel's PORTABLE
+     * permission model, and callers read it back to check that a durable
+     * write is bracketed.  The hardware side is a no-op here because durable
+     * data is ordinary SRAM until R6 -- but leaving the model unchanged made
+     * unlock indistinguishable from lock to anyone who asked. */
+    uint16_t saved = mpu_sam;
+
+    mpu_sam = (uint16_t)(saved | 0x0222U);   /* write bit into every segment */
+    return saved;
 }
 
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
-    (void)saved_state;
+    tiku_mpu_arch_set_sam(saved_state);
 }
 
 uint16_t tiku_mpu_arch_get_violation_flags(void) {
