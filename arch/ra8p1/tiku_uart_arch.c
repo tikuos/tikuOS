@@ -120,6 +120,10 @@ static void icu_ack(unsigned slot)
     __asm__ volatile ("dsb" ::: "memory");
 }
 
+/* NOTE: the console slots stay permanently unmasked, so they never
+ * accumulate a stale NVIC pend the way the htimer's masked slot does; the
+ * IELSR clear above is sufficient here. */
+
 /**
  * @brief SCI error interrupt: count the overrun and restart reception.
  *

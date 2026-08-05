@@ -18,7 +18,6 @@
 
 #ifndef TIKU_MINIMAL
 #include <kernel/scheduler/tiku_sched.h>
-void tiku_ra8p1_htimer_on_tick(void);
 #endif
 
 /** @brief Monotonic tick counter, advanced by the SysTick exception. */
@@ -180,9 +179,6 @@ void tiku_ra8p1_systick_handler(void)
 {
     clock_ticks++;
 #ifndef TIKU_MINIMAL
-    /* The htimer has no compare hardware of its own, so this is where a due
-     * alarm is noticed.  See tiku_htimer_arch.c for what that costs. */
-    tiku_ra8p1_htimer_on_tick();
     tiku_sched_notify();
 #endif
 }

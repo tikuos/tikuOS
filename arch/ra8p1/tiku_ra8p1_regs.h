@@ -243,10 +243,22 @@
 #define RA8P1_GPT_GTCCRA(n)     (RA8P1_GPT_BASE(n) + 0x4CUL)
 #define RA8P1_GPT_GTPR(n)       (RA8P1_GPT_BASE(n) + 0x64UL)
 #define RA8P1_GPT_GTCR_CST      (1UL << 0)     /* count start          */
+/*
+ * GTCLKCR must be written BEFORE the module-stop release and is locked once
+ * MSTPE31 is 0 (UM 23.10.1).  BPEN=1 selects the synchronous PCLKD core
+ * clock; the reset default is the ASYNC GPTCLK domain, and with GPTCLK at
+ * the 8 MHz MOCO against a 120 MHz PCLKA bus the synchroniser drops every
+ * register write -- the block reads as zeros and takes nothing, which cost
+ * this port a full diagnostic pass to attribute.
+ */
+#define RA8P1_GPT_GTCLKCR       0x40323F10UL
+#define RA8P1_GPT_GTCLKCR_BPEN  (1UL << 0)
 #define RA8P1_GPT_GTCR_MD_SAW   (0UL << 16)    /* saw-wave PWM mode 1  */
 #define RA8P1_GPT_GTST_TCFA     (1UL << 0)     /* compare match A      */
 
 #define RA8P1_MSTPCRE           (RA8P1_MSTP_BASE + 0x10UL)  /* UM 11.2.10 */
+#define RA8P1_GPTCKDIVCR        (RA8P1_SYSC_BASE + 0x05CUL)  /* 8-bit */
+#define RA8P1_GPTCKCR           (RA8P1_SYSC_BASE + 0x05DUL)  /* 8-bit */
 #define RA8P1_MSTPE_GPT0        (1UL << 31)
 
 /*---------------------------------------------------------------------------*/
@@ -327,6 +339,7 @@
 #define RA8P1_SAU_TYPE          0xE000EDD4UL
 #define RA8P1_NVIC_ISER(i)      (0xE000E100UL + (4UL * (i)))
 #define RA8P1_NVIC_ICER(i)      (0xE000E180UL + (4UL * (i)))
+#define RA8P1_NVIC_ICPR(i)      (0xE000E280UL + (4UL * (i)))
 /*
  * PMSAv8 MPU (Armv8.1-M ARM B11).  Region attributes here are also what set
  * CACHEABILITY through MAIR, which is why the MPU and the caches are one
