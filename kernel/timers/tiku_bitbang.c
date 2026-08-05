@@ -27,11 +27,16 @@
 #include <stddef.h>
 
 /*
- * The htimer + GPIO software bit-bang backend is shared by any target without
- * a dedicated PIO/hardware engine (MSP430 and Apollo510 today): it toggles the
- * pin from an htimer ISR using only the generic tiku_gpio / tiku_htimer APIs.
+ * The htimer + GPIO software backend is the DEFAULT: it toggles the pin from
+ * an htimer ISR using only the generic tiku_gpio / tiku_htimer APIs, so it
+ * works anywhere both exist.  A platform is excepted only when it has a
+ * dedicated engine to use instead -- RP2350's PIO today.
+ *
+ * This was a list of platforms that opted IN, which left every other target
+ * falling through to the ERR_INVALID stub below: a bit-bang engine that
+ * refused every valid config, with no build error to say so.
  */
-#if defined(PLATFORM_MSP430) || defined(PLATFORM_AMBIQ)
+#if !defined(TIKU_BITBANG_SOFT) && !defined(PLATFORM_RP2350)
 #define TIKU_BITBANG_SOFT 1
 #endif
 

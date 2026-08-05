@@ -96,16 +96,17 @@
 #define TIKU_DEVICE_RAM_SIZE        TIKU_RA8P1_SRAM_SIZE
 
 /*
- * The code MRAM, described so `free` and the region table can name it.  No
- * part of the image lives there at R3 -- code runs from SRAM -- so the in-use
- * figure derived from _etext correctly comes out zero, and it stays zero until
- * R6 works out how to write MRAM safely.
+ * The code MRAM: since R6 the image runs from it, `.persistent` lives in a
+ * carve at its top, and the in-use figure derived from _etext is real.
  */
 #define TIKU_DEVICE_FRAM_SIZE       TIKU_RA8P1_MRAM_SIZE
 #define TIKU_DEVICE_FRAM_START      TIKU_RA8P1_MRAM_BASE
 #define TIKU_DEVICE_FRAM_END        (TIKU_RA8P1_MRAM_BASE + \
                                      TIKU_RA8P1_MRAM_SIZE - 1UL)
 #define TIKU_DEVICE_NVM_LABEL       "MRAM"
+
+/** @brief Config region for the init table, inside the durable carve. */
+#define TIKU_DEVICE_FRAM_CONFIG_SIZE  576U
 
 #define TIKU_DEVICE_HAS_MPU         1
 
