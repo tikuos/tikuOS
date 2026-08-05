@@ -49,8 +49,19 @@ SECTIONS
 
     _etext = .;
 
-    __data_load = .;
-    .data : AT(__data_load)
+    /*
+     * No AT() here, and __data_load comes from LOADADDR AFTERWARDS.
+     *
+     * Capturing `.` into __data_load and pinning the LMA to it is wrong the
+     * moment the linker pads: .data aligns to 8, so if `.` is only 4-aligned
+     * the VMA moves up while the LMA does not.  The loader writes the VMA,
+     * the startup copy then sees src != dst and shifts every initialised
+     * variable down by the padding -- .data silently corrupt, and only in
+     * builds whose alignment happened not to work out.  LOADADDR reports what
+     * the linker actually chose, so src == dst and the copy is correctly
+     * skipped.
+     */
+    .data :
     {
         __data_start = .;
         __datastart = .;
@@ -58,6 +69,8 @@ SECTIONS
         . = ALIGN(4);
         __data_end = .;
     } > SRAM
+
+    __data_load = LOADADDR(.data);
 
     .bss (NOLOAD) :
     {

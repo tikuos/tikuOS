@@ -1260,13 +1260,14 @@ ifeq ($(TIKU_PLATFORM),msp430)
 $(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part; MSP430 \
 stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
 endif
-ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b,$(MCU)),)
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b ra8p1,$(MCU)),)
 $(error TIKU_THREADS_ENABLE=1 needs a supported Cortex-M part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
-nrf54l15/nrf54lm20a (M33); $(MCU) has no thread backend. The switcher is generic \
-Cortex-M asm (kernel/threads/tiku_thread_cortexm.inl); adding a part = a \
-two-line shim that names its PendSV vector symbol (plus a custom cycle \
-source if the part's DWT freezes standalone), and proving the torture suite)
+nrf54l15/nrf54lm20a (M33), ra8p1 (M85); $(MCU) has no thread backend. The \
+switcher is generic Cortex-M asm (kernel/threads/tiku_thread_cortexm.inl); \
+adding a part = a two-line shim that names its PendSV vector symbol (plus a \
+custom cycle source if the part's DWT freezes standalone), and proving the \
+torture suite)
 endif
 CFLAGS += -DTIKU_THREADS_ENABLE=1
 endif
@@ -1902,6 +1903,12 @@ SRCS += arch/ra8p1/tiku_gpio_arch.c
 SRCS += arch/ra8p1/tiku_crit_arch.c
 SRCS += arch/ra8p1/tiku_timer_arch.c
 SRCS += arch/ra8p1/tiku_cpu_watchdog_arch.c
+ifeq ($(TIKU_THREADS_ENABLE),1)
+# Cortex-M85 workers: the generic switcher via the RA8P1 shim (its strong
+# tiku_ra8p1_pendsv_handler overrides the crt weak alias).
+SRCS += kernel/threads/tiku_thread.c
+SRCS += arch/ra8p1/tiku_thread_arch.c
+endif
 SRCS += arch/ra8p1/tiku_mem_arch.c
 SRCS += arch/ra8p1/tiku_mpu_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
