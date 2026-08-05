@@ -55,6 +55,17 @@
 #define USBHS_PORT_VBUSEN   0xDU
 #define USBHS_PIN_VBUSEN    7U
 
+/*
+ * PD04 is USBHS_ID, the OTG role pin: low says A-device (host), high says
+ * B-device (device).  Muxing it costs nothing -- it is an input function --
+ * and buys the one thing the board manual will not say, which is what its
+ * "USBHS Role Toggle" switch actually selects.  A floating read is possible
+ * if the board does not wire it, so treat it as evidence, not proof.
+ */
+#define USBHS_PORT_ID       0xDU
+#define USBHS_PIN_ID        4U
+#define USBHS_PFS_PSEL_USBHS 0x14U   /* 10100b, per the port function tables */
+
 static uint8_t usbhs_up;
 
 /** @brief Bounded spin for the PLL lock flag, in ~1 us units. */
@@ -67,6 +78,10 @@ static void usbhs_vbusen_low(void)
     /* Output, driving low, peripheral mux OFF. */
     TIKU_REG32(RA8P1_PFS(USBHS_PORT_VBUSEN, USBHS_PIN_VBUSEN)) =
         RA8P1_PFS_PDR;
+    /* ID as a peripheral input, so SYSSTS0.IDMON reports the role strap. */
+    TIKU_REG32(RA8P1_PFS(USBHS_PORT_ID, USBHS_PIN_ID)) =
+        ((uint32_t)USBHS_PFS_PSEL_USBHS << RA8P1_PFS_PSEL_SHIFT) |
+        RA8P1_PFS_PMR;
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_B0WI;
     __asm__ volatile ("dsb" ::: "memory");
 }
@@ -237,6 +252,15 @@ int tiku_ra8p1_usbhs_pll_locked(void)
         return 0;
     }
     return ((TIKU_REG16(RA8P1_USBHS_PLLSTA) & RA8P1_PLLSTA_PLLLOCK) != 0U)
+           ? 1 : 0;
+}
+
+int tiku_ra8p1_usbhs_id_high(void)
+{
+    if (!usbhs_up) {
+        return -1;
+    }
+    return ((TIKU_REG16(RA8P1_USBHS_SYSSTS0) & RA8P1_SYSSTS0_IDMON) != 0U)
            ? 1 : 0;
 }
 

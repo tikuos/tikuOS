@@ -78,6 +78,9 @@ tiku_ra8p1_usbhs_devstate_t tiku_ra8p1_usbhs_devstate(void);
 /** @brief Non-zero once the PHY's internal PLL reports lock. */
 int tiku_ra8p1_usbhs_pll_locked(void);
 
+/** @brief OTG ID pin: 1 = device role strap, 0 = host, -1 = not up. */
+int tiku_ra8p1_usbhs_id_high(void);
+
 /** @brief Non-zero while the controller is enabled. */
 int tiku_ra8p1_usbhs_up_state(void);
 

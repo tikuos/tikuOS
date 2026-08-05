@@ -337,6 +337,7 @@
 
 #define RA8P1_LPSTS_SUSPENDM    (1U << 14)  /* 1 = UTMI normal mode         */
 #define RA8P1_PLLSTA_PLLLOCK    (1U << 0)
+#define RA8P1_SYSSTS0_IDMON     (1U << 2)   /* OTG role: 1 = device      */
 
 /* DVSTCTR0.RHST, read in DEVICE mode: 010 is "bus reset in progress OR
  * full speed" and 011 is "bus reset in progress OR high speed" -- the same

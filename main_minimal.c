@@ -885,6 +885,8 @@ int main(void)
             tiku_uart_printf("usbhs: syscfg=%x syssts=%x pllsta=%x"
                              " dvstctr=%x physet=%x intsts0=%x lpsts=%x\n",
                              r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
+            tiku_uart_printf("usbhs: ID pin = %d (1=device strap, 0=host)\n",
+                             tiku_ra8p1_usbhs_id_high());
 
             (void)tiku_ra8p1_usbhs_attach(1);
             tiku_uart_printf("usbhs: attached, watching for a host...\n");
