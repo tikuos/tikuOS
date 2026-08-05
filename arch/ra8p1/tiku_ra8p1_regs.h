@@ -150,6 +150,38 @@
 #define RA8P1_MSTPB_SCI8        (1UL << 23)                  /* SCI8       */
 
 /*---------------------------------------------------------------------------*/
+/* Octal SPI controller (UM 45) -- EK-RA8P1 U3, MX25LW51245G, 64 MB          */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_OSPI_BASE(n)      (0x40268000UL + (0x400UL * (n)))
+#define RA8P1_OSPI_WRAPCFG(n)   (RA8P1_OSPI_BASE(n) + 0x000UL)
+#define RA8P1_OSPI_COMCFG(n)    (RA8P1_OSPI_BASE(n) + 0x004UL)
+#define RA8P1_OSPI_BMCFG(n, c)  (RA8P1_OSPI_BASE(n) + 0x008UL + (0x4UL * (c)))
+#define RA8P1_OSPI_CMCFG0(n, c) (RA8P1_OSPI_BASE(n) + 0x010UL + (0x10UL * (c)))
+#define RA8P1_OSPI_CMCFG1(n, c) (RA8P1_OSPI_BASE(n) + 0x014UL + (0x10UL * (c)))
+#define RA8P1_OSPI_CMCFG2(n, c) (RA8P1_OSPI_BASE(n) + 0x018UL + (0x10UL * (c)))
+#define RA8P1_OSPI_LIOCFG(n, c) (RA8P1_OSPI_BASE(n) + 0x050UL + (0x04UL * (c)))
+#define RA8P1_OSPI_CMCTL(n, c)  (RA8P1_OSPI_BASE(n) + 0x068UL + (0x04UL * (c)))
+
+/* Manual command: the path that issues one transaction and reads its reply,
+ * which is how a device is identified before any memory-map mode is set up. */
+#define RA8P1_OSPI_CDCTL0(n)    (RA8P1_OSPI_BASE(n) + 0x070UL)
+#define RA8P1_OSPI_CDCTL1(n)    (RA8P1_OSPI_BASE(n) + 0x074UL)
+#define RA8P1_OSPI_CDCTL2(n)    (RA8P1_OSPI_BASE(n) + 0x078UL)
+#define RA8P1_OSPI_CDTBUF(n, b) (RA8P1_OSPI_BASE(n) + 0x080UL + (0x10UL * (b)))
+#define RA8P1_OSPI_CDABUF(n, b) (RA8P1_OSPI_BASE(n) + 0x084UL + (0x10UL * (b)))
+#define RA8P1_OSPI_CDD0BUF(n,b) (RA8P1_OSPI_BASE(n) + 0x088UL + (0x10UL * (b)))
+#define RA8P1_OSPI_CDD1BUF(n,b) (RA8P1_OSPI_BASE(n) + 0x08CUL + (0x10UL * (b)))
+#define RA8P1_OSPI_COMSTT(n)    (RA8P1_OSPI_BASE(n) + 0x184UL)
+
+/* Mapped windows, from the address map: OSPI0 gets 256 MB per chip select,
+ * OSPI1 gets 128 MB. */
+#define RA8P1_OSPI0_CS0_ADDR    0x80000000UL
+#define RA8P1_OSPI1_CS0_ADDR    0x70000000UL
+
+/** @brief Macronix RDID reply: C2 = manufacturer, then type and density. */
+#define RA8P1_MX_MANUFACTURER   0xC2U
+
+/*---------------------------------------------------------------------------*/
 /* External bus / SDRAM controller (UM 15.6)                                 */
 /*                                                                           */
 /* The SDRAM window is 0x6800_0000.  Registers are byte/half/word wide and    */
