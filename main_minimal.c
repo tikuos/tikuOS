@@ -1116,7 +1116,7 @@ int main(void)
         tiku_uart_printf("usbhs: serving; write to the disk and watch the"
                          " hash settle\n");
         for (;;) {
-            uint32_t c, rd, wr, bad;
+            uint32_t c, rd, wr, bad, pk, st;
 
             tiku_ra8p1_usbhs_ep0_poll();
             tiku_ra8p1_usbhs_msc_poll();
@@ -1126,18 +1126,44 @@ int main(void)
             }
             mark = *cyc;
             tiku_ra8p1_usbhs_msc_stats(&c, &rd, &wr, &bad);
-            /* Only reprint when the picture changed, so a quiet disk does
-             * not bury the interesting moment in repeats. */
-            if (wr == last_wr) {
-                continue;
+            tiku_ra8p1_usbhs_msc_out_stats(&pk, &st);
+            {
+                uint16_t pr[7];
+
+                tiku_ra8p1_usbhs_pipe_regs(pr);
+                tiku_uart_printf("usbhs: pipeIN cfg=%x buf=%x maxp=%u |"
+                                 " pipeOUT cfg=%x buf=%x maxp=%u | dtln=%u\n",
+                                 pr[0], pr[1], (unsigned int)(pr[2] & 0x7FFu),
+                                 pr[3], pr[4], (unsigned int)(pr[5] & 0x7FFu),
+                                 (unsigned int)pr[6]);
+            }
+
+            {
+                uint32_t rs, cf, ops;
+
+                ops = tiku_ra8p1_usbhs_msc_trace(&rs, &cf);
+                tiku_uart_printf("usbhs: cbw=%u rd=%u wr=%u bad=%u outpkt=%u"
+                                 " outstall=%u rst=%u cswfail=%u ops=%x\n",
+                                 (unsigned int)c, (unsigned int)rd,
+                                 (unsigned int)wr, (unsigned int)bad,
+                                 (unsigned int)pk, (unsigned int)st,
+                                 (unsigned int)rs, (unsigned int)cf,
+                                 (unsigned int)ops);
+            }
+
+            /*
+             * Hash only once the writing has STOPPED.  Folding 8 MB takes
+             * well over a hundred milliseconds, and spending that inside a
+             * transfer starves the pump long enough for the host to give up
+             * on the device -- a diagnostic that causes the failure it is
+             * there to observe.
+             */
+            if (wr != 0u && wr == last_wr) {
+                tiku_uart_printf("usbhs: settled, hash(8MB)=%x\n",
+                                 (unsigned int)
+                                     tiku_ra8p1_usbhs_msc_hash(16384u));
             }
             last_wr = wr;
-            tiku_uart_printf("usbhs: cbw=%u read=%u write=%u bad=%u"
-                             " hash(8MB)=%x\n",
-                             (unsigned int)c, (unsigned int)rd,
-                             (unsigned int)wr, (unsigned int)bad,
-                             (unsigned int)
-                                 tiku_ra8p1_usbhs_msc_hash(16384u));
         }
     }
 

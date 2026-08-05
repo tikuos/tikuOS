@@ -224,6 +224,17 @@ int tiku_ra8p1_usbhs_up(int want_high)
 #define USBD_REQ_GET_INTERFACE     0x0AU
 #define USBD_REQ_SET_INTERFACE     0x0BU
 
+/*
+ * Bulk-Only Transport defines two requests on the interface, and one of them
+ * is the host's ONLY way out of a wedged transfer.  Stalling MSC_RESET turns
+ * a single failed command into a permanent one: the host tries to recover,
+ * is refused, and can do nothing but reissue the command that failed --
+ * forever.  Observed exactly that, as a command-wrapper counter climbing
+ * steadily while no READ or WRITE ever decoded.
+ */
+#define USBD_REQ_MSC_GET_MAX_LUN   0xFEU
+#define USBD_REQ_MSC_RESET         0xFFU
+
 #define USBD_EP0_MAXPACKET  64U
 
 #define USBD_CLASS_MSC      0x08U
@@ -307,6 +318,11 @@ static ep0_trace_t *tr;      /* the entry being filled, or NULL */
 #define MSC_BUFNMB_OUT  0x18U
 
 static uint8_t  ep0_buf[80];
+/* Recovery counters live up here because EP0 raises them: the class reset
+ * arrives on the control pipe, not the bulk one. */
+static uint32_t n_msc_reset, n_csw_fail;
+static uint8_t  last_ops[4];
+static uint8_t  last_op_i;
 static void pipe_config(uint8_t pipe, uint8_t epnum, int dir_in,
                         uint8_t bufnmb);
 static void pipe_pid(uint8_t pipe, uint16_t pid);
@@ -659,6 +675,31 @@ void tiku_ra8p1_usbhs_ep0_poll(void)
         ep0_ack();
         break;
 
+    case USBD_REQ_MSC_GET_MAX_LUN:
+        /* Class request, device-to-host: one LUN, so the highest index is 0. */
+        if (type == 0xA1U) {
+            ep0_buf[0] = 0U;
+            ep0_send(ep0_buf, 1U, len);
+        } else {
+            ep0_stall();
+        }
+        break;
+
+    case USBD_REQ_MSC_RESET:
+        if (type == 0x21U) {
+            /* Put both pipes back where SET_CONFIGURATION left them: buffers
+             * emptied and the data toggles cleared, which is the whole point
+             * of the request -- the host resumes at DATA0 afterwards. */
+            pipe_config(MSC_PIPE_IN, 1U, 1, MSC_BUFNMB_IN);
+            pipe_config(MSC_PIPE_OUT, 2U, 0, MSC_BUFNMB_OUT);
+            pipe_pid(MSC_PIPE_OUT, RA8P1_PIPECTR_PID_BUF);
+            n_msc_reset++;
+            ep0_ack();
+        } else {
+            ep0_stall();
+        }
+        break;
+
     default:
         ep0_stall();
         break;
@@ -728,6 +769,9 @@ static tiku_usbd_msc_t msc_medium = {
 };
 static uint8_t  msc_reply[TIKU_USBD_MSC_REPLY_MAX];
 static uint32_t n_cbw, n_rd, n_wr, n_bad;
+static uint32_t n_pkt_out, n_stall_out;
+static uint16_t cfg_in, buf_in, maxp_in, cfg_out, buf_out, maxp_out;
+static uint16_t last_dtln;
 
 /** @brief Configure one bulk pipe.  PID must be NAK while this happens. */
 static void pipe_config(uint8_t pipe, uint8_t epnum, int dir_in,
@@ -754,6 +798,20 @@ static void pipe_config(uint8_t pipe, uint8_t epnum, int dir_in,
     TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) = RA8P1_PIPECTR_PID_NAK;
     TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) =
         (uint16_t)(RA8P1_PIPECTR_SQCLR | RA8P1_PIPECTR_PID_NAK);
+
+    /* Read the geometry back before releasing the window.  A pipe whose
+     * maximum packet size did not take still works -- it just moves 64 bytes
+     * at a time while the descriptor promises 512, which is eight times the
+     * packets and a host that eventually gives up on a long transfer. */
+    if (pipe == MSC_PIPE_IN) {
+        cfg_in  = TIKU_REG16(RA8P1_USBHS_PIPECFG);
+        buf_in  = TIKU_REG16(RA8P1_USBHS_PIPEBUF);
+        maxp_in = TIKU_REG16(RA8P1_USBHS_PIPEMAXP);
+    } else {
+        cfg_out  = TIKU_REG16(RA8P1_USBHS_PIPECFG);
+        buf_out  = TIKU_REG16(RA8P1_USBHS_PIPEBUF);
+        maxp_out = TIKU_REG16(RA8P1_USBHS_PIPEMAXP);
+    }
 
     TIKU_REG16(RA8P1_USBHS_PIPESEL) = 0U;
 }
@@ -805,18 +863,25 @@ static int pipe_out_ready(void)
  */
 static uint32_t pipe_read(uint8_t *dst, uint32_t cap)
 {
-    uint32_t n, i;
+    uint32_t avail, n, i;
 
     if (!d0_select(MSC_PIPE_OUT)) {
         return 0U;
     }
-    n = (uint32_t)(TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) &
-                   RA8P1_CFIFOCTR_DTLN_MASK);
-    if (n > cap) {
-        n = cap;
+    avail = (uint32_t)(TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) &
+                       RA8P1_CFIFOCTR_DTLN_MASK);
+
+    /*
+     * A zero-length packet cannot be read, only cleared -- and it must be
+     * cleared, or the plane is never handed back.
+     */
+    if (avail == 0U) {
+        TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) = RA8P1_CFIFOCTR_BCLR;
+        return 0U;
     }
-    /* Words while a whole word remains, then the tail a byte at a time --
-     * and the 8-bit tail must use the HH alias, exactly as the DCP does. */
+
+    last_dtln = (uint16_t)avail;
+    n = (avail > cap) ? cap : avail;
     for (i = 0U; (i + 4U) <= n; i += 4U) {
         uint32_t w = TIKU_REG32(RA8P1_USBHS_D0FIFO);
         dst[i]     = (uint8_t)w;
@@ -832,8 +897,24 @@ static uint32_t pipe_read(uint8_t *dst, uint32_t cap)
             i++;
         }
     }
-    /* Hand the buffer back to the controller. */
-    TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) = RA8P1_CFIFOCTR_BCLR;
+
+    /*
+     * READING ALL OF IT IS WHAT RELEASES IT.  The manual is explicit: with
+     * RCNT = 0 the controller holds DTLN "until the CPU has read all of the
+     * received data in the FIFO buffer (or until it has read a single plane
+     * in double buffer mode)".  So a BCLR issued after a COMPLETE read does
+     * not tidy up -- it discards the next plane, which under double
+     * buffering is the packet that already arrived while this one was being
+     * copied.  Every second packet then vanishes, the byte count stops
+     * advancing, and the transfer never finishes: observed as a host dd that
+     * sat for forty minutes having moved zero bytes.
+     *
+     * BCLR is therefore only for the case it is named for: throwing away
+     * what will not fit.
+     */
+    if (n < avail) {
+        TIKU_REG16(RA8P1_USBHS_D0FIFOCTR) = RA8P1_CFIFOCTR_BCLR;
+    }
     return n;
 }
 
@@ -908,7 +989,7 @@ static int msc_recv_blocks(uint32_t lba, uint32_t bytes)
 
     pipe_pid(MSC_PIPE_OUT, RA8P1_PIPECTR_PID_BUF);
     while (got < bytes) {
-        uint32_t spins;
+        uint32_t spins, n;
 
         for (spins = 0U; spins < 4000000U; spins++) {
             if (pipe_out_ready()) {
@@ -916,9 +997,23 @@ static int msc_recv_blocks(uint32_t lba, uint32_t bytes)
             }
         }
         if (spins >= 4000000U) {
+            n_stall_out++;
             return 0;
         }
-        got += pipe_read(&p[got], bytes - got);
+        n = pipe_read(&p[got], bytes - got);
+        /*
+         * NO PROGRESS MEANS STOP.  A ready pipe that yields nothing is a
+         * state this cannot argue its way out of, and continuing turns it
+         * into a hang -- which is strictly worse than a failed command,
+         * because the host cannot even time out and retry a device whose
+         * CPU has stopped answering.
+         */
+        if (n == 0U) {
+            n_stall_out++;
+            return 0;
+        }
+        got += n;
+        n_pkt_out++;
     }
     return 1;
 }
@@ -942,6 +1037,8 @@ void tiku_ra8p1_usbhs_msc_poll(void)
         return;      /* not a wrapper; the next packet resyncs */
     }
     n_cbw++;
+    last_ops[last_op_i & 3u] = cbw.cdb[0];
+    last_op_i++;
 
     /* The SAME decoder the Apollo510 driver uses.  Two controllers, one
      * opinion about what the bytes mean. */
@@ -967,7 +1064,12 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     }
 
     tiku_usbd_msc_build_csw(csw, cbw.tag, cmd.residue, cmd.status);
-    (void)pipe_write(csw, TIKU_USBD_MSC_CSW_LEN);
+    if (!pipe_write(csw, TIKU_USBD_MSC_CSW_LEN)) {
+        /* A command the host never gets a status for is a command it must
+         * assume is still running; counting these separates "answered wrong"
+         * from "never answered". */
+        n_csw_fail++;
+    }
 }
 
 void tiku_ra8p1_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
@@ -977,6 +1079,28 @@ void tiku_ra8p1_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
     if (rd  != NULL) { *rd  = n_rd;  }
     if (wr  != NULL) { *wr  = n_wr;  }
     if (bad != NULL) { *bad = n_bad; }
+}
+
+void tiku_ra8p1_usbhs_msc_out_stats(uint32_t *pkts, uint32_t *stalls)
+{
+    if (pkts   != NULL) { *pkts   = n_pkt_out;   }
+    if (stalls != NULL) { *stalls = n_stall_out; }
+}
+
+void tiku_ra8p1_usbhs_pipe_regs(uint16_t *out7)
+{
+    if (out7 == NULL) { return; }
+    out7[0] = cfg_in;  out7[1] = buf_in;  out7[2] = maxp_in;
+    out7[3] = cfg_out; out7[4] = buf_out; out7[5] = maxp_out;
+    out7[6] = last_dtln;
+}
+
+uint32_t tiku_ra8p1_usbhs_msc_trace(uint32_t *resets, uint32_t *cswfail)
+{
+    if (resets  != NULL) { *resets  = n_msc_reset; }
+    if (cswfail != NULL) { *cswfail = n_csw_fail;  }
+    return ((uint32_t)last_ops[0]) | ((uint32_t)last_ops[1] << 8) |
+           ((uint32_t)last_ops[2] << 16) | ((uint32_t)last_ops[3] << 24);
 }
 
 uint32_t tiku_ra8p1_usbhs_msc_hash(uint32_t nblocks)

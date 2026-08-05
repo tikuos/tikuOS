@@ -110,6 +110,21 @@ unsigned tiku_ra8p1_usbhs_ep0_trace(unsigned i, uint16_t *out9);
  */
 void tiku_ra8p1_usbhs_msc_poll(void);
 
+/** @brief OUT-pipe counters: packets taken, and stalls that ended a transfer. */
+void tiku_ra8p1_usbhs_msc_out_stats(uint32_t *pkts, uint32_t *stalls);
+
+/**
+ * @brief The last four SCSI opcodes, plus recovery counters.
+ *
+ * @param resets  receives Bulk-Only Reset requests served
+ * @param cswfail receives status wrappers that could not be delivered
+ * @return the four opcodes packed little-endian, oldest in the low byte
+ */
+uint32_t tiku_ra8p1_usbhs_msc_trace(uint32_t *resets, uint32_t *cswfail);
+
+/** @brief Pipe geometry read back from hardware: cfg/buf/maxp per pipe, last DTLN. */
+void tiku_ra8p1_usbhs_pipe_regs(uint16_t *out7);
+
 /** @brief MSC counters: wrappers seen, reads, writes, and failures. */
 void tiku_ra8p1_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
                                 uint32_t *bad);

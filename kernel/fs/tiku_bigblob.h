@@ -49,18 +49,18 @@ typedef enum {
 /** @brief Longest blob name, excluding the terminator. */
 #define TIKU_BIGBLOB_NAME_MAX  23u
 
-/**
- * @brief Bytes reserved for a slot's header.
- *
+/*
  * Sized to the LARGEST erase granularity the medium offers, not to the header,
  * so the payload begins on a block boundary and a blob's erase can never reach
  * into a neighbouring slot's block.  That is a containment property, not a
  * speed one: this was raised from 4 KB expecting the aligned case to erase
  * faster, and measurement said otherwise -- 1 MB took 5127 ms aligned against
  * 5084 ms unaligned, because erase time on this flash tracks the AREA cleared
- * rather than the number of commands issued.  The claim is recorded because
- * the opposite is the natural guess.
+ * rather than the number of commands issued.  Recorded because the opposite
+ * is the natural guess.
  */
+
+/** @brief Bytes reserved for a slot's header. */
 #define TIKU_BIGBLOB_HDR_BYTES 65536u
 
 /** @brief What a slot holds, as reported by tiku_bigblob_info(). */
