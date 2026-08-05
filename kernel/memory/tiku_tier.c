@@ -102,27 +102,18 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 #endif
 
 /**
- * @brief Backing store for the NVM tier.
+ * @brief Backing store for the NVM tier, on the one architecture that needs it.
  *
- * On MSP430 it is forced into .persistent so its contents survive reset; on
- * host builds it falls back to .bss, which is enough to exercise tier routing.
+ * MSP430's FRAM is unified with the code estate, so there is no region to
+ * carve and TIKU_DURABLE puts this array in genuinely non-volatile memory.
+ * Every other board takes its NVM tier from the carved region.
  */
+/* No untagged fallback: a tier promising survival across power loss must never
+ * quietly be RAM, so a board with neither unified FRAM nor a carved region has
+ * NO NVM tier and asking for one fails at the call site. */
 #ifdef PLATFORM_MSP430
 static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
-#elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-      defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_RA8P1)
-/* Ambiq (MRAM) / RP2350 (QSPI Flash) / Nordic (RRAM) / STM32N6 (XSPI NOR) /
- * RA8P1 (code MRAM): the
- * NVM tier is backed by the carved, memory-mapped region (tiku_nvm_region) --
- * read in place, written via the region backend -- so there is no pool here.
- * tier_wire_all() points the tier at the region's front extent and
- * tiku_tier_nvm_write() routes writes through its backend (MRAM bootrom
- * program / Flash erase+program / RRAM memcpy behind the WEN gate). */
-#else
-static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
-    tier_nvm_buf[TIKU_TIER_NVM_SIZE];
 #endif
 
 /**
@@ -253,44 +244,43 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_SRAM].alloc_count = 0;
     tier_state[TIKU_MEM_SRAM].initialized = 1;
 
-/* A board NOT listed here falls to the static pool below, which is plain .bss
- * off MSP430 -- a 1 KB "NVM tier" that is not non-volatile at all.  RA8P1 ran
- * that way for six milestones with 464 KB of carved MRAM unused.  The list is
- * the wrong shape (the runtime NULL check below already decides it), but
- * inverting it rewires memory on five boards, so it is named debt, not a
- * drive-by here. */
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1)
+#ifdef PLATFORM_MSP430
+    /* Unified FRAM: the pool above is the NVM, and it is really non-volatile. */
+    tier_state[TIKU_MEM_NVM].buf         = tier_nvm_buf;
+    tier_state[TIKU_MEM_NVM].capacity    = TIKU_TIER_NVM_SIZE;
+    tier_state[TIKU_MEM_NVM].initialized = 1;
+#else
     {
-        /* NVM tier = the carved region (Ambiq MRAM / RP2350 Flash / Nordic
-         * RRAM / STM32N6 NOR / RA8P1 MRAM): read in place, via the backend
-         * (tiku_tier_nvm_write).
-         * NULL until the board's region backend exists. */
+        /* Asked, not listed.  tiku_nvm_backend_get() is the one authority on
+         * whether this board carved a region -- its weak default returns NULL
+         * where no arch backend exists -- so a new port needs no entry
+         * anywhere: it gets a working NVM tier the moment it supplies a
+         * backend, and an honestly absent one until then.
+         *
+         * The tier owns a FIXED 32 KB extent at the front (the portable
+         * allocation contract); the file store absorbs the remainder. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
-        /* The tier owns a FIXED extent at the front of the region -- 32 KB on
-         * every platform (TIKU_NVM_TIER_BYTES, the portable allocation
-         * contract).  The file store absorbs the remainder, so nothing can sit
-         * parked in an extent with no consumers; durable named data (the BASIC
-         * save and checkpoint slots) are ordinary files in that store. */
+
         if (rgn != NULL && rgn->base != NULL &&
             rgn->size > (size_t)TIKU_NVM_TIER_BYTES) {
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
             tier_state[TIKU_MEM_NVM].capacity =
                 (tiku_mem_arch_size_t)TIKU_NVM_TIER_BYTES;
+            tier_state[TIKU_MEM_NVM].initialized = 1;
         } else {
-            tier_state[TIKU_MEM_NVM].buf      = NULL;
-            tier_state[TIKU_MEM_NVM].capacity = 0u;
+            /* NOT initialized, rather than an empty-but-present tier: the
+             * difference is what makes tiku_tier_arena_create(TIKU_MEM_NVM)
+             * fail at the call site instead of handing back memory that does
+             * not have the property the caller asked for. */
+            tier_state[TIKU_MEM_NVM].buf         = NULL;
+            tier_state[TIKU_MEM_NVM].capacity    = 0u;
+            tier_state[TIKU_MEM_NVM].initialized = 0;
         }
     }
-#else
-    tier_state[TIKU_MEM_NVM].buf         = tier_nvm_buf;
-    tier_state[TIKU_MEM_NVM].capacity    = TIKU_TIER_NVM_SIZE;
 #endif
     tier_state[TIKU_MEM_NVM].offset      = 0;
     tier_state[TIKU_MEM_NVM].peak        = 0;
     tier_state[TIKU_MEM_NVM].alloc_count = 0;
-    tier_state[TIKU_MEM_NVM].initialized = 1;
 
 #if TIKU_TIER_HIFRAM_AVAILABLE
     tier_state[TIKU_MEM_HIFRAM].buf         = tier_hifram_buf;
@@ -736,14 +726,12 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
     if (dst == NULL || src == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
-    /* Region-backed NVM (Ambiq MRAM, RP2350 Flash, Nordic RRAM, STM32N6 NOR):
-     * route through the backend's program path.  On Ambiq/RP2350 the medium is not
-     * plain-store-writable at all; on Nordic it is (behind WEN), but the
-     * backend path adds the same bounds check + READY drain uniformly. */
+    /* Ask the backend, do not consult a platform list: if this board carved a
+     * region its writes go through the program path, and the same code is
+     * correct on a board that has not carved one. */
     {
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+
         if (rgn != NULL && rgn->base != NULL && rgn->write != NULL) {
             uintptr_t d = (uintptr_t)dst;
             uintptr_t b = (uintptr_t)rgn->base;
@@ -759,17 +747,28 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
                 return (rc == 0) ? TIKU_MEM_OK : TIKU_MEM_ERR_INVALID;
             }
         }
-        /* Region-backed platform but no usable backend: a direct CPU store would
-         * bus-fault on program-op NVM, so fail rather than fall through to the
-         * in-place memcpy below. */
-        return TIKU_MEM_ERR_INVALID;
+        if (rgn != NULL) {
+            /* A region exists but its backend cannot write: a direct CPU store
+             * would bus-fault on program-op NVM, so fail rather than fall
+             * through to the in-place copy below. */
+            return TIKU_MEM_ERR_INVALID;
+        }
     }
-#endif
-    /* Byte-writable NVM tier (FRAM / host .bss): store in place. */
+
+#ifdef PLATFORM_MSP430
+    /* Unified FRAM: byte-writable in place, and the only architecture where an
+     * NVM-tier write is a plain store. */
     {
         uint16_t mpu = tiku_mpu_unlock_nvm();
         memcpy(dst, src, (size_t)len);
         tiku_mpu_lock_nvm(mpu);
     }
     return TIKU_MEM_OK;
+#else
+    /* No region and no unified FRAM: this board has no NVM tier, so there is
+     * nowhere for this write to go.  Returning OK here would report a durable
+     * write that never happened. */
+    (void)len;
+    return TIKU_MEM_ERR_INVALID;
+#endif
 }

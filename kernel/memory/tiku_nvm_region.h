@@ -74,13 +74,13 @@
  * named TIKU_PERSIST_CELL -- both of which carry the gate discipline the raw
  * tier cannot.
  */
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1)
+/*
+ * Unconditional: this is the SIZE of the tier extent, not a claim that the
+ * board has one.  Whether a region exists is answered at run time by
+ * tiku_nvm_backend_get(), so the constant needs no platform list -- it is only
+ * ever consulted on the path where a backend was already found.
+ */
 #define TIKU_NVM_TIER_BYTES  (32u * 1024u)
-#else
-#define TIKU_NVM_TIER_BYTES  0u                /* no carved region */
-#endif
 
 /*
  * REGION SIZE -- the compile-time mirror of what arch/common/tiku_nvm_layout.ld
@@ -156,11 +156,16 @@
  * a preprocessor conditional, so the old spelling silently took the no-region
  * branch in any unit that forgot the include, and that branch is never an error.
  */
-#if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
-#define TIKU_NVM_HAS_REGION  1
-#else
+/* Names the EXCEPTIONS, not the members.  MSP430's FRAM is unified with the
+ * code estate and host builds have no NVM at all; every other target carves a
+ * region, so a new port is included by default rather than by being added
+ * here.  A port with no backend yet still behaves: every consumer checks
+ * tiku_nvm_backend_get() at run time, so being wrong here costs an error
+ * rather than silent RAM. */
+#if defined(PLATFORM_MSP430) || defined(TIKU_TEST_HOST)
 #define TIKU_NVM_HAS_REGION  0
+#else
+#define TIKU_NVM_HAS_REGION  1
 #endif
 
 /*
