@@ -1539,6 +1539,7 @@ SRCS += arch/ra8p1/tiku_gpio_arch.c
 # nothing else running that could explain a wrong rate.
 SRCS += arch/ra8p1/tiku_timer_arch.c
 SRCS += arch/ra8p1/tiku_cache_arch.c
+SRCS += arch/ra8p1/tiku_mram_arch.c
 # Critical sections join too, for the same reason: this file's central claim is
 # that masking the NVIC cannot silence a tick that is a CORE exception, and an
 # untested claim in a comment is worth nothing.
@@ -1912,6 +1913,7 @@ SRCS += arch/ra8p1/tiku_thread_arch.c
 endif
 SRCS += arch/ra8p1/tiku_mem_arch.c
 SRCS += arch/ra8p1/tiku_cache_arch.c
+SRCS += arch/ra8p1/tiku_mram_arch.c
 SRCS += arch/ra8p1/tiku_mpu_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_wake_arch.c
@@ -3596,20 +3598,26 @@ else ifeq ($(TIKU_PLATFORM),ra8p1)
 JLINK_DEVICE_RA8P1 ?= R7KA8P1KF
 RA8P1_JLINK_SCRIPT  = $(BUILD_DIR)/flash.jlink
 
+# Since R6 the image is MRAM-resident, so this PROGRAMS the part and resets
+# into it.  Before R6 it loaded SRAM and injected MSP/PC, because a reset would
+# otherwise re-enter the factory MRAM image; that is exactly what moving the
+# image into MRAM fixes, so the injection is gone and `r` is now the real
+# reset path the watchdog tests need.
 flash: all
 	@mkdir -p $(BUILD_DIR)
-	@entry=$$($(TOOLCHAIN_PREFIX)readelf -h $(TARGET) \
-	          | awk '/Entry point/ {printf "0x%X", strtonum($$4) - and(strtonum($$4),1)}'); \
-	 stack=$$($(TOOLCHAIN_PREFIX)nm $(TARGET) | awk '/ __stack$$/ {print "0x"$$1}'); \
-	 test -n "$$entry" -a -n "$$stack" || { \
-	     echo "*** Could not read entry/__stack from $(TARGET)."; exit 1; }; \
-	 printf 'device %s\nif %s\nspeed %s\nconnect\nr\nh\nloadfile %s\nwreg MSP %s\nSetPC %s\ngo\nqc\n' \
+	@printf 'device %s\nif %s\nspeed %s\nconnect\nr\nh\nloadfile %s\nr\ngo\nqc\n' \
 	    "$(JLINK_DEVICE_RA8P1)" "$(JLINK_IF)" "$(JLINK_SPEED)" "$(TARGET)" \
-	    "$$stack" "$$entry" > $(RA8P1_JLINK_SCRIPT); \
-	 echo "Loading $(TARGET) -> SRAM (MSP=$$stack PC=$$entry) via $(JLINK) ($(JLINK_DEVICE_RA8P1))..."
+	    > $(RA8P1_JLINK_SCRIPT)
+	@echo "Programming $(TARGET) -> MRAM via $(JLINK) ($(JLINK_DEVICE_RA8P1))..."
 	@$(JLINK) $(JLINK_SN_ARG) -CommanderScript $(RA8P1_JLINK_SCRIPT) \
 	    2>&1 | tee $(BUILD_DIR)/flash.log; \
-	 if ! grep -qiE 'O\.K\.|Download.*complete|bytes.*downloaded' $(BUILD_DIR)/flash.log; then \
+	 if grep -qiE 'Verification failed|Failed to prepare|Could not connect|Error while programming' $(BUILD_DIR)/flash.log; then \
+	     echo "*** FLASH FAILED -- the part still holds the PREVIOUS image."; \
+	     echo "*** Anything tested now is testing stale firmware."; \
+	     grep -iE 'Verification failed|Failed to prepare|Could not connect|Failed to halt|Error while programming' $(BUILD_DIR)/flash.log | head -4; \
+	     exit 1; \
+	 fi; \
+	 if ! grep -qiE 'Flash download: (Total|Program)|O\.K\.|Download.*complete' $(BUILD_DIR)/flash.log; then \
 	     echo "*** LOAD FAILED -- no positive evidence any bytes moved."; \
 	     echo "*** JLinkExe exits 0 whatever happens, so this check, not"; \
 	     echo "*** its status, is what says the image is on the part."; \

@@ -567,11 +567,10 @@
  * All real parts have the watchdog path: the shell `reboot` command uses
  * it everywhere.) */
 #ifndef TIKU_BASIC_REBOOT_ENABLE
-#if defined(PLATFORM_MSP430) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_AMBIQ)  || defined(PLATFORM_NORDIC)
-#define TIKU_BASIC_REBOOT_ENABLE    1
-#else
+#if defined(TIKU_TEST_HOST)
 #define TIKU_BASIC_REBOOT_ENABLE    0
+#else
+#define TIKU_BASIC_REBOOT_ENABLE    1
 #endif
 #endif
 

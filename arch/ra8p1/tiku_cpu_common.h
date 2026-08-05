@@ -44,15 +44,8 @@ uint8_t tiku_cpu_ra8p1_unique_id(uint8_t *buf, uint8_t len);
 /**
  * @brief Why the part last reset, from the SYSC reset status registers.
  *
- * @return Bit field of TIKU_RA8P1_RESET_* causes
+ * @return MSP430 SYSRSTIV-style cause code, as every port reports
  */
 uint16_t tiku_cpu_ra8p1_reset_reason(void);
-
-/** @brief Reset causes reported by tiku_cpu_ra8p1_reset_reason(). */
-#define TIKU_RA8P1_RESET_PIN      0x0001U
-#define TIKU_RA8P1_RESET_POWER    0x0002U
-#define TIKU_RA8P1_RESET_SOFT     0x0004U
-#define TIKU_RA8P1_RESET_WATCHDOG 0x0008U
-#define TIKU_RA8P1_RESET_LOWPOWER 0x0010U
 
 #endif /* TIKU_RA8P1_CPU_COMMON_H_ */

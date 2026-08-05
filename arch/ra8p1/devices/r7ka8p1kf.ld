@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * r7ka8p1kf.ld - R7KA8P1KF (EK-RA8P1) linker script, SRAM-resident image.
+ * r7ka8p1kf.ld - R7KA8P1KF (EK-RA8P1) linker script, MRAM-resident image.
  *
- * The 1 MB code MRAM is not written until R6 establishes how to do it
- * safely, so code, data and stack all live in the SRAM window at 0x22000000.
+ * The image lives in MRAM so a reset returns to it rather than to the factory
+ * one, and `.persistent` sits in a reserved MRAM carve: measured, this MRAM is
+ * byte-writable in place with no erase, so the durable grade needs no mirror.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,17 +18,54 @@ ENTRY(tiku_ra8p1_reset_handler)
 
 MEMORY
 {
+    MRAM (rx)  : ORIGIN = 0x02000000, LENGTH = 1024K
     SRAM (rwx) : ORIGIN = 0x22000000, LENGTH = 1664K
 }
 
+/* "FRAM_*" vocabulary the kernel memory introspection speaks == MRAM here. */
+__flash_start = ORIGIN(MRAM);
+__flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
+__sram_start  = ORIGIN(SRAM);
+__sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
+
+/*
+ * Canonical NVM layout: inputs + the shared derivation (arch/common).
+ *
+ *   0x02000000  code            512 KB (largest image measured: 63 KB)
+ *   0x02080000  module slot      32 KB (ARM-wide contract)
+ *   0x02088000  NVM region      464 KB (tier + file store)
+ *   0x020FC000  durable persist  16 KB (exact `.persistent`, in place)
+ *   0x02100000  top
+ *
+ * Growing any of these MOVES every cell and file address, so an established
+ * board re-primes once (/sys/persist reports primed != 0, /data empty).
+ */
+__tiku_layout_top          = ORIGIN(MRAM) + LENGTH(MRAM);
+__tiku_layout_code_cap     = ORIGIN(MRAM) + 0x80000;        /* 512 KB code */
+__tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
+__tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
+INCLUDE arch/common/tiku_nvm_layout.ld
+
+/* Platform aliases.  The name matches Ambiq's, the meaning does not: there
+ * the MRAM span is a MIRROR that SRAM `.persistent` is flushed into, here it
+ * is where the durable data actually lives and is written in place. */
+__tiku_nvm_mram_size  = __tiku_layout_durable_size;
+__tiku_nvm_mram_start = __tiku_layout_durable_start;
+__tiku_nvm_mram_end   = __tiku_layout_top;
+
+/* The Cortex-M loads the initial SP from vector[0]; place it at the top of
+ * SRAM and let the stack grow down toward .bss. */
+__stack = __sram_end;
+
 SECTIONS
 {
-    .vectors : ALIGN(512)
+    /* -------- 1. Vectors (MRAM base -- this is the reset address) ----- */
+    .vectors ORIGIN(MRAM) : ALIGN(512)
     {
         __vectors_start = .;
         KEEP(*(.vectors))
         __vectors_end = .;
-    } > SRAM
+    } > MRAM
 
     /*
      * ALIGN(32) on every MPU boundary, not ALIGN(4).
@@ -42,34 +80,41 @@ SECTIONS
     .text : ALIGN(32)
     {
         *(.text*)
+        *(.glue_7) *(.glue_7t)
+        KEEP(*(.init))
+        KEEP(*(.fini))
         *(.rodata*)
+        *(.gnu.linkonce.r.*)
         . = ALIGN(32);
-    } > SRAM
+    } > MRAM
 
     /* ARM unwind tables: kept so a fault handler can walk the stack.  Without
      * an explicit output section the linker gives .ARM.exidx its own default
      * placement and it collides with .data's load address -- a link error, but
      * an obscure one to read. */
-    .ARM.exidx :
+    .ARM.extab : { *(.ARM.extab*) } > MRAM
+    .ARM.exidx : ALIGN(32)
     {
         __exidx_start = .;
         *(.ARM.exidx* .gnu.linkonce.armexidx.*)
         __exidx_end = .;
-    } > SRAM
+        . = ALIGN(32);
+    } > MRAM
 
     _etext = .;
+    etext  = .;
 
     /*
-     * No AT() here, and __data_load comes from LOADADDR AFTERWARDS.
+     * .data: VMA in SRAM, LMA in MRAM, and __data_load comes from LOADADDR
+     * AFTERWARDS -- never from a captured `.`.
      *
      * Capturing `.` into __data_load and pinning the LMA to it is wrong the
-     * moment the linker pads: .data aligns to 8, so if `.` is only 4-aligned
-     * the VMA moves up while the LMA does not.  The loader writes the VMA,
-     * the startup copy then sees src != dst and shifts every initialised
-     * variable down by the padding -- .data silently corrupt, and only in
-     * builds whose alignment happened not to work out.  LOADADDR reports what
-     * the linker actually chose, so src == dst and the copy is correctly
-     * skipped.
+     * moment the linker pads: .data aligns to 32, so if `.` is only 4-aligned
+     * the VMA moves up while the LMA does not, the startup copy sees a src/dst
+     * skew and shifts every initialised variable by the padding -- .data
+     * silently corrupt, and only in builds whose alignment happened not to
+     * work out.  `AT > MRAM` lets the linker choose and LOADADDR reports what
+     * it chose, so the two can never drift apart.
      */
     .data : ALIGN(32)
     {
@@ -78,7 +123,7 @@ SECTIONS
         *(.data*)
         . = ALIGN(4);
         __data_end = .;
-    } > SRAM
+    } > SRAM AT > MRAM
 
     __data_load = LOADADDR(.data);
 
@@ -91,36 +136,71 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
-    /* Durable cells sit outside .bss so the reset handler's zero-fill skips
-     * them, which is what lets a value survive a warm reset.  Surviving power
-     * loss needs the MRAM mirror, which is R6's milestone -- until then this
-     * region is warm-reset durable only, and the port claims nothing more. */
+    /* -------- Warm-reset survivor state (SRAM) ----------------------- */
+    /* `.uninit` and the WARM grade sit outside .bss so the reset handler's
+     * zero-fill skips them: they survive a warm reset and are reseeded on a
+     * power cycle.  The DURABLE grade is NOT here any more -- as of R6 exact
+     * `.persistent` lives in MRAM below and survives power loss too.
+     *
+     * TIKU_PERSIST_WARM is "never mirrored, never MPU-protected", and its
+     * callers write it unbracketed on purpose -- tiku_hang_boot_init() clears
+     * the hang record at every boot.  Sweep it into the protected window and
+     * that write MemManage-faults before the shell ever starts, which is how
+     * this was found. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
         *(.uninit*)
-        /* DURABLE grade: exact-match `.persistent` only.  The MPU's NVM
-         * region covers __uninit_start..__uninit_end and nothing else. */
-        *(.persistent)
         . = ALIGN(32);
-        __uninit_end = .;
-        /* WARM grade sits OUTSIDE that window, deliberately.  tiku_mem.h is
-         * explicit that TIKU_PERSIST_WARM is "never mirrored, never
-         * MPU-protected", and its callers write it unbracketed on purpose --
-         * tiku_hang_boot_init() clears the hang record at every boot.  Sweep
-         * it in with `.persistent` and that write MemManage-faults before the
-         * shell ever starts, which is how this was found. */
         *(.persistent.warm*)
         . = ALIGN(32);
+        __uninit_end = .;
     } > SRAM
 
-    _end = __uninit_end;
-    PROVIDE(end = _end);
+    _end = .;
+    end = .;
+    __end__ = .;
+    PROVIDE(__heap_start = .);
 
-    __stack = ORIGIN(SRAM) + LENGTH(SRAM);
+    /* SRAM headroom: the stack budget the MPU actually programs
+     * (MPU_STACK_RESERVED_BYTES 32 KB + MPU_STACK_GUARD_BYTES 4 KB in
+     * tiku_mpu_arch.c) must fit above the statics.  The old 16 KB figure here
+     * was smaller than what the MPU reserves, so the link could succeed while
+     * the guard region overlapped .uninit. */
+    ASSERT((__stack - _end) >= 0x9000,
+           "ERROR: RA8P1 SRAM exhausted -- need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
 
-    /* Stack headroom.  The SRAM window is large, so this is a tripwire for a
-     * runaway static allocation rather than a tight budget. */
-    ASSERT((__stack - _end) >= 0x4000,
-           "ERROR: RA8P1 SRAM exhausted -- less than 16 KB left for stack")
+    /* -------- DURABLE persist (MRAM, byte-writable in place) --------- */
+    /* NOLOAD: not in the programmed image, so a reflash leaves it alone and
+     * a virgin part leaves it blank for the persist-cell magic gates to prime
+     * on first boot.
+     *
+     * CONTRACT (enforced in hardware): every store into `.persistent` MUST be
+     * bracketed by tiku_mpu_unlock_nvm()/lock_nvm().  Two gates stand behind
+     * it here -- the MPU region is read-only outside the window, and MRAM
+     * programming is disabled at MRCPC1.MRCPSEN.  Measured: with the second
+     * one shut a store does not fall through silently, it HardFaults. */
+    .persistent __tiku_nvm_mram_start (NOLOAD) : ALIGN(32)
+    {
+        __persistent_start = .;
+        *(.persistent)
+        . = ALIGN(32);
+        __persistent_end = .;
+    } > MRAM
+
+    /* The MRAM image (code + rodata + .data load copy) must not grow up into
+     * the reserved module slot, NVM region or persist home above it. */
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_module_slot,
+           "ERROR: RA8P1 MRAM image overruns the reserved module/NVM/persist regions")
+
+    /* The durable persist data must fit inside the reserved region. */
+    ASSERT(__persistent_end <= __tiku_nvm_mram_end,
+           "ERROR: durable .persistent overruns the reserved MRAM region")
+
+    /DISCARD/ :
+    {
+        *(.note*)
+        *(.comment)
+        *(.ARM.attributes)
+    }
 }

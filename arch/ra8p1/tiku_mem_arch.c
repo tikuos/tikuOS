@@ -7,19 +7,24 @@
  *
  * tiku_mem_arch.c - RA8P1 memory arch hooks.
  *
- * The durable region is a linker section the reset handler's zero-fill skips,
- * so reads and writes are plain memory access and the "commit" has nothing to
+ * `.persistent` is real MRAM, byte-writable in place, so reads and writes are
+ * plain memory access and there is no mirror.  A commit still has work to do:
+ * push the controller's 32-byte write buffer into the array.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_mem_arch.h"
+#include "tiku_mram_arch.h"
 
-#include <kernel/memory/tiku_nvm_mirror.h>
+/** @brief Programs counted since boot; see tiku_mem_arch_nvm_program_count(). */
+static uint32_t ra8p1_nvm_programs;
 
 void tiku_mem_arch_init(void)
 {
-    /* Nothing to unlock: the region is ordinary SRAM until R6. */
+    /* Nothing to unlock here: the MRAM programming gate is opened per write
+     * window by tiku_mpu_arch_unlock_nvm(), so it is shut whenever no durable
+     * write is in progress. */
 }
 
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)
@@ -60,20 +65,15 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 
 void tiku_mem_arch_nvm_flush(void)
 {
-    /* Deliberately empty.  See the file comment: there is no mirror to flush,
-     * and the program count below reports that honestly rather than counting
-     * flushes that moved nothing. */
-}
-
-int tiku_mem_arch_nvm_restore_status(void)
-{
-    /* VIRGIN, always: nothing was restored because there is nowhere to restore
-     * from.  Reporting V2_OK here would tell /sys/persist that durable state
-     * survived a power cycle, which on this port it does not. */
-    return TIKU_NVM_RESTORE_VIRGIN;
+    /* No mirror to copy -- but a real commit to make.  A store leaves its
+     * bytes in the controller's 32-byte buffer and READS BACK from there, so
+     * without this the caller cannot tell a durable write from a lost one. */
+    if (tiku_ra8p1_mram_flush() == TIKU_RA8P1_MRAM_OK) {
+        ra8p1_nvm_programs++;
+    }
 }
 
 uint32_t tiku_mem_arch_nvm_program_count(void)
 {
-    return 0UL;
+    return ra8p1_nvm_programs;
 }

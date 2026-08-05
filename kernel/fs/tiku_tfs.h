@@ -93,7 +93,8 @@
  */
 #  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6)
 #    define TIKU_TFS_SLOT_DATA  4092   /**< 4 B length + 4092 = 4096 (one sector) */
-#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC) || \
+       defined(PLATFORM_RA8P1)
 #    define TIKU_TFS_SLOT_DATA  4096   /**< MRAM/RRAM: no erase granule */
 #  else
 #    define TIKU_TFS_SLOT_DATA  512    /**< max bytes per file */

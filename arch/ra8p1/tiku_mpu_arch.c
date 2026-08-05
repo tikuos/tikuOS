@@ -16,22 +16,24 @@
 #include "tiku_mpu_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cache_arch.h"
+#include "tiku_mram_arch.h"
 
 /* Linker-provided boundaries; every one is 32-byte aligned by the script,
  * because PMSAv8 cannot express a finer region edge. */
 extern uint32_t __vectors_start;
 extern uint32_t _etext;
 extern uint32_t __data_start;
-extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t __stack;
+extern uint32_t __tiku_nvm_mram_start;
+extern uint32_t __tiku_nvm_mram_end;
 
 /**
  * @brief Region indices.  Non-overlapping: overlap is implementation-defined.
  */
-#define MPU_RGN_TEXT        0U   /* vectors + text + rodata: RO, executable */
-#define MPU_RGN_DATA        1U   /* data + bss: RW, XN                      */
-#define MPU_RGN_NVM         2U   /* .uninit: RO until the unlock window     */
+#define MPU_RGN_TEXT        0U   /* MRAM vectors + text + rodata: RO, exec  */
+#define MPU_RGN_DATA        1U   /* data + bss + warm survivors: RW, XN     */
+#define MPU_RGN_NVM         2U   /* MRAM durable carve: RO outside the window */
 #define MPU_RGN_FREE        3U   /* SRAM above .uninit up to the guard      */
 #define MPU_RGN_GUARD       4U   /* RO trap under the stack                 */
 #define MPU_RGN_STACK       5U   /* the live stack                          */
@@ -105,8 +107,12 @@ static uintptr_t guard_base(void)
  */
 static void mpu_nvm_ap(uint32_t ap)
 {
-    mpu_region(MPU_RGN_NVM, (uintptr_t)&__uninit_start,
-               (uintptr_t)&__uninit_end, ap, 1, RA8P1_MPU_ATTR_NORMAL);
+    /* Non-cacheable, because this region IS the MRAM program path: stores
+     * must reach the controller's 32-byte buffer, not settle in a D-cache
+     * line of exactly the same width. */
+    mpu_region(MPU_RGN_NVM, (uintptr_t)&__tiku_nvm_mram_start,
+               (uintptr_t)&__tiku_nvm_mram_end, ap, 1,
+               RA8P1_MPU_ATTR_NORMAL_NC);
     mpu_barrier();
 }
 
@@ -132,15 +138,21 @@ void tiku_mpu_arch_init_segments(void)
 
     TIKU_REG32(RA8P1_MPU_MAIR0) =
         (uint32_t)RA8P1_MPU_MAIR_NORMAL_WB |
-        ((uint32_t)RA8P1_MPU_MAIR_DEVICE << 8);
+        ((uint32_t)RA8P1_MPU_MAIR_DEVICE << 8) |
+        ((uint32_t)RA8P1_MPU_MAIR_NORMAL_NC << 16);
 
-    /* W^X: the image's text is read-only AND executable; everything else in
-     * SRAM is writable AND never executable.  The split is exact because the
-     * linker aligned _etext to the 32-byte granule. */
+    /* W^X: the image's text is read-only AND executable; everything else is
+     * writable AND never executable.  The split is exact because the linker
+     * aligned _etext to the 32-byte granule.  Since R6 the text side lives in
+     * MRAM, so this region is also what keeps a stray store from rewriting
+     * the program image now that it is in writable non-volatile memory. */
     mpu_region(MPU_RGN_TEXT, (uintptr_t)&__vectors_start, (uintptr_t)&_etext,
                RA8P1_MPU_RBAR_AP_RO, 0, RA8P1_MPU_ATTR_NORMAL);
+    /* One SRAM span now: .data, .bss, .uninit and the WARM survivors.  The
+     * durable grade left SRAM in R6, and WARM must stay writable -- callers
+     * write it unbracketed by design. */
     mpu_region(MPU_RGN_DATA, (uintptr_t)&__data_start,
-               (uintptr_t)&__uninit_start,
+               (uintptr_t)&__uninit_end,
                RA8P1_MPU_RBAR_AP_RW, 1, RA8P1_MPU_ATTR_NORMAL);
     mpu_nvm_ap(RA8P1_MPU_RBAR_AP_RO);
     mpu_region(MPU_RGN_FREE, (uintptr_t)&__uninit_end, guard_base(),
@@ -207,22 +219,47 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
                                      (((uint16_t)perm & 0x07U) << shift)));
 }
 
+/*
+ * TWO gates, not one.
+ *
+ * The MPU decides whether the store is allowed to issue; MRCPC1.MRCPSEN
+ * decides whether the MRAM controller will program what the store put in its
+ * buffer.  Opening only the MPU gives a store that raises no fault and
+ * commits nothing -- which is exactly the silent-loss failure the durable
+ * grade exists to prevent -- so both move together here.
+ *
+ * The close side also FLUSHES.  A store leaves its bytes in the controller's
+ * 32-byte buffer, and a read returns the buffered value, so nothing the
+ * caller can observe distinguishes "written" from "durable": if lock_nvm()
+ * did not commit, a power cut after a apparently-successful write would lose
+ * it with no diagnostic anywhere.
+ */
 uint16_t tiku_mpu_arch_unlock_nvm(void)
 {
     uint16_t saved = mpu_sam;
 
     mpu_sam = (uint16_t)(saved | 0x0222U);
     mpu_nvm_ap(RA8P1_MPU_RBAR_AP_RW);
+    tiku_ra8p1_mram_program_enable(1);
     return saved;
 }
 
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 {
+    int still_open = (saved_state & 0x0222U) != 0U;
+
+    /* Commit before revoking anything: MRCFL is itself a controller write. */
+    (void)tiku_ra8p1_mram_flush();
+
     tiku_mpu_arch_set_sam(saved_state);
     /* Nest-safe: an inner lock inside a still-open outer window restores the
-     * permission the SAVED state implies, not unconditionally RO. */
-    mpu_nvm_ap((saved_state & 0x0222U) ? RA8P1_MPU_RBAR_AP_RW
-                                       : RA8P1_MPU_RBAR_AP_RO);
+     * permission the SAVED state implies, not unconditionally RO -- and
+     * leaves the programming gate open for the outer window to close. */
+    if (!still_open) {
+        tiku_ra8p1_mram_program_enable(0);
+    }
+    mpu_nvm_ap(still_open ? RA8P1_MPU_RBAR_AP_RW
+                          : RA8P1_MPU_RBAR_AP_RO);
 }
 
 uint16_t tiku_mpu_arch_get_violation_flags(void)

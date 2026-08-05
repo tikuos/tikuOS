@@ -7,8 +7,9 @@
  *
  * tiku_region_arch.c - RA8P1 memory map for the allocator.
  *
- * Code, data, durable cells and stack all share the SRAM window, so free space
- * starts past the image rather than at the window base.
+ * Two banks, two kinds: SRAM at 0x22000000 and byte-writable non-volatile
+ * MRAM at 0x02000000.  Each is listed whole; the durable carve is a reserved
+ * part of MRAM, not a different kind of memory.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,8 +18,6 @@
 #include <kernel/memory/tiku_mem.h>
 #include <stddef.h>
 
-extern uint32_t __uninit_start;
-extern uint32_t __uninit_end;
 extern uint32_t __stack;    /* top of SRAM; the stack grows down from here */
 
 /*
@@ -41,16 +40,36 @@ uint32_t tiku_stack_arch_bottom(void)
     return (uint32_t)((uintptr_t)&__stack - RA8P1_STACK_RESERVE);
 }
 
-/** @brief Built on first call; zero count means not yet populated. */
-static tiku_mem_region_t ra8p1_region_table[3];
-static tiku_mem_arch_size_t ra8p1_region_count;
+/*
+ * The table answers "what kind of memory is this address" -- a property of the
+ * address, not of who owns it.  So each bank is listed WHOLE: a static buffer
+ * in .bss must classify as SRAM, and bounding the SRAM entry at _end instead
+ * made tiku_arena_create() reject every caller-supplied static buffer.
+ * Entries must also not overlap, because tiku_region_init() rejects an
+ * overlapping table outright and installs NOTHING -- leaving every
+ * classification to fail with no visible error.
+ */
+static const tiku_mem_region_t ra8p1_region_table[] = {
+    {
+        (const uint8_t *)TIKU_DEVICE_RAM_START,
+        (tiku_mem_arch_size_t)TIKU_DEVICE_RAM_SIZE,
+        TIKU_MEM_REGION_SRAM,
+    },
+    {
+        /* All 1 MB of it: MRAM is byte-writable non-volatile end to end, and
+         * the durable carve at the top is not a different KIND of memory,
+         * only a differently reserved part of the same one. */
+        (const uint8_t *)TIKU_DEVICE_FRAM_START,
+        (tiku_mem_arch_size_t)TIKU_DEVICE_FRAM_SIZE,
+        TIKU_MEM_REGION_NVM,
+    },
+};
+
+#define RA8P1_REGION_COUNT \
+    (sizeof(ra8p1_region_table) / sizeof(ra8p1_region_table[0]))
 
 /**
- * @brief Report the memory map, building it once on first use.
- *
- * The durable overlay is tagged NVM so the persist API accepts cells placed in
- * it.  On this part that tag describes an INTENT, not the silicon: the region
- * is SRAM and survives a warm reset only, until R6 gives it MRAM backing.
+ * @brief Report the memory map.
  *
  * @param count  Receives the number of valid entries
  * @return The region table
@@ -58,55 +77,8 @@ static tiku_mem_arch_size_t ra8p1_region_count;
 const struct tiku_mem_region *tiku_region_arch_get_table(
     tiku_mem_arch_size_t *count)
 {
-    if (ra8p1_region_count == 0U) {
-        uintptr_t uninit_start = (uintptr_t)&__uninit_start;
-        uintptr_t uninit_end   = (uintptr_t)&__uninit_end;
-        uintptr_t ram_start = (uintptr_t)TIKU_DEVICE_RAM_START;
-        uintptr_t ram_end   = ram_start + (uintptr_t)TIKU_DEVICE_RAM_SIZE;
-        tiku_mem_arch_size_t idx = 0U;
-
-        /*
-         * The whole bank, SPLIT around the durable overlay.
-         *
-         * Two constraints meet here.  The table answers "what kind of memory
-         * is this address", which is a property of the address and not of who
-         * owns it -- so a static buffer in .bss must classify as SRAM, and
-         * bounding the region at _end instead made tiku_arena_create() reject
-         * every caller-supplied static buffer.  But tiku_region_init()
-         * REJECTS a table whose entries overlap, and installs nothing at all
-         * -- so a whole-bank SRAM entry with the durable overlay listed
-         * separately inside it silently leaves the registry empty and every
-         * classification fails.  Three non-overlapping spans satisfy both.
-         */
-        if (uninit_end > uninit_start) {
-            ra8p1_region_table[idx].base = (const uint8_t *)ram_start;
-            ra8p1_region_table[idx].size =
-                (tiku_mem_arch_size_t)(uninit_start - ram_start);
-            ra8p1_region_table[idx].type = TIKU_MEM_REGION_SRAM;
-            idx++;
-
-            ra8p1_region_table[idx].base = (const uint8_t *)uninit_start;
-            ra8p1_region_table[idx].size =
-                (tiku_mem_arch_size_t)(uninit_end - uninit_start);
-            ra8p1_region_table[idx].type = TIKU_MEM_REGION_NVM;
-            idx++;
-
-            ra8p1_region_table[idx].base = (const uint8_t *)uninit_end;
-            ra8p1_region_table[idx].size =
-                (tiku_mem_arch_size_t)(ram_end - uninit_end);
-            ra8p1_region_table[idx].type = TIKU_MEM_REGION_SRAM;
-            idx++;
-        } else {
-            ra8p1_region_table[idx].base = (const uint8_t *)ram_start;
-            ra8p1_region_table[idx].size =
-                (tiku_mem_arch_size_t)TIKU_DEVICE_RAM_SIZE;
-            ra8p1_region_table[idx].type = TIKU_MEM_REGION_SRAM;
-            idx++;
-        }
-        ra8p1_region_count = idx;
-    }
     if (count != NULL) {
-        *count = ra8p1_region_count;
+        *count = (tiku_mem_arch_size_t)RA8P1_REGION_COUNT;
     }
     return ra8p1_region_table;
 }

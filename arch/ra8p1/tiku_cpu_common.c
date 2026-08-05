@@ -173,18 +173,46 @@ uint8_t tiku_cpu_ra8p1_unique_id(uint8_t *buf, uint8_t len)
 
 uint16_t tiku_cpu_ra8p1_reset_reason(void)
 {
-    uint8_t  s0 = TIKU_REG8(RA8P1_RSTSR0);
-    uint16_t s1 = TIKU_REG16(RA8P1_RSTSR1);
-    uint16_t out = 0U;
+    static uint16_t captured;
+    static uint8_t  captured_valid;
+    uint8_t  s0;
+    uint16_t s1;
 
-    if (s0 & RA8P1_RSTSR0_PORF)    { out |= TIKU_RA8P1_RESET_POWER; }
-    if (s0 & RA8P1_RSTSR0_DPSRSTF) { out |= TIKU_RA8P1_RESET_LOWPOWER; }
-    if (s1 & RA8P1_RSTSR1_SWRF)    { out |= TIKU_RA8P1_RESET_SOFT; }
-    if (s1 & (RA8P1_RSTSR1_IWDTRF | RA8P1_RSTSR1_WDT0RF)) {
-        out |= TIKU_RA8P1_RESET_WATCHDOG;
+    if (captured_valid) {
+        return captured;
     }
-    /* No pin-reset flag exists here: RES# reports as a power-on reset, and
-     * claiming TIKU_RA8P1_RESET_PIN would invent a distinction the silicon
-     * does not make. */
-    return out;
+
+    s0 = TIKU_REG8(RA8P1_RSTSR0);
+    s1 = TIKU_REG16(RA8P1_RSTSR1);
+
+    /* Clear the flags so the NEXT boot sees only its own cause; they are
+     * sticky otherwise and every reason accumulates forever. */
+    TIKU_REG8(RA8P1_RSTSR0)  = 0U;
+    TIKU_REG16(RA8P1_RSTSR1) = 0U;
+
+    /*
+     * Report the MSP430 SYSRSTIV-style codes the kernel already speaks, as
+     * nordic and ambiq do -- /sys/boot/reason renders those and nothing else.
+     * This returned a private TIKU_RA8P1_RESET_* bitmask until R6, which
+     * rendered as "unknown"; nothing caught it earlier because until the
+     * image moved into MRAM there was no way to come back from a reset and
+     * read it.
+     *
+     * Most specific first: a watchdog reset also raises the power-on flag.
+     */
+    if (s1 & (RA8P1_RSTSR1_IWDTRF | RA8P1_RSTSR1_WDT0RF)) {
+        captured = 0x16U;       /* wdt-timeout */
+    } else if (s1 & RA8P1_RSTSR1_SWRF) {
+        captured = 0x06U;       /* sw-bor: SCB SYSRESETREQ / reboot */
+    } else if (s0 & RA8P1_RSTSR0_DPSRSTF) {
+        captured = 0x08U;       /* lpm5-wake: deep software standby */
+    } else if (s0 & RA8P1_RSTSR0_PORF) {
+        /* RES# reports as power-on too: the silicon makes no distinction, so
+         * neither does this. */
+        captured = 0x00U;       /* none: cold / power-on */
+    } else {
+        captured = 0x00U;
+    }
+    captured_valid = 1U;
+    return captured;
 }

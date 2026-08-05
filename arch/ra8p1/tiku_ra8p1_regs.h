@@ -262,6 +262,42 @@
 #define RA8P1_MSTPE_GPT0        (1UL << 31)
 
 /*---------------------------------------------------------------------------*/
+/* Code MRAM programming (UM 60.4.2)                                          */
+/*                                                                            */
+/* No bootrom and no erase: an ordinary STR to an MRAM address enters a        */
+/* 32-byte program buffer, which commits when it fills, when a write leaves    */
+/* its 32-byte boundary, or on an explicit MRCFL flush.  Writes of 1..31 bytes */
+/* are legal -- barrier, then flush.  Both control registers are key-gated and */
+/* must be written 16 bits at a time or the write is dropped.                  */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_MRAM_REG_BASE     0x4013C000UL
+#define RA8P1_MRPSC             (RA8P1_MRAM_REG_BASE + 0x2800UL) /* 8-bit  */
+#define RA8P1_MRPSC_MHSPEN      (1U << 0)   /* high-speed program mode     */
+#define RA8P1_MRCPS             (RA8P1_MRAM_REG_BASE + 0x3010UL) /* 8-bit  */
+#define RA8P1_MRCPS_PRGERRC     (1U << 0)
+#define RA8P1_MRCPS_ECCERRC     (1U << 1)
+#define RA8P1_MRCPS_ABUFEMP     (1U << 5)
+#define RA8P1_MRCPS_ABUFFULL    (1U << 6)
+#define RA8P1_MRCPS_PRGBSYC     (1U << 7)
+/*
+ * Programming the SECURE alias needs MRCPSEN, and it outranks block
+ * protection -- a store without it is not dropped, it BUS FAULTS.  Each
+ * register carries its own key and must be written 16 bits at a time.
+ * BPCN1 is ignored unless MRCPSEN is already 1, so the order is fixed.
+ */
+#define RA8P1_MRCPC1            (RA8P1_MRAM_REG_BASE + 0x3004UL) /* 16-bit */
+#define RA8P1_MRCPC1_KEY        0x6800U
+#define RA8P1_MRCPC1_MRCPSEN    (1U << 0)
+#define RA8P1_MRCBPROT1         (RA8P1_MRAM_REG_BASE + 0x300CUL) /* 16-bit */
+#define RA8P1_MRCBPROT1_KEY     0xB100U
+#define RA8P1_MRCBPROT1_BPCN1   (1U << 0)
+#define RA8P1_MRCFLR            (RA8P1_MRAM_REG_BASE + 0x3030UL) /* 16-bit */
+#define RA8P1_MRCFLR_KEY        0xC300U
+#define RA8P1_MRCFLR_MRCFL      (1U << 0)
+/** @brief Program granule: buffer width, and the MPU/cache line width too. */
+#define RA8P1_MRAM_GRANULE      32UL
+
+/*---------------------------------------------------------------------------*/
 /* CAC (UM 10, "Clock Frequency Accuracy Measurement Circuit")                */
 /*                                                                           */
 /* Counts one clock against another entirely on-chip, which is the only way   */
@@ -377,8 +413,15 @@
  */
 #define RA8P1_MPU_MAIR_NORMAL_WB    0xFFU
 #define RA8P1_MPU_MAIR_DEVICE       0x04U
+/* Normal, non-cacheable inner and outer (0b0100_0100).  The durable MRAM
+ * carve uses this: a D-cache line is 32 bytes, exactly the MRAM program
+ * granule, so a cached store would sit in the line instead of reaching the
+ * program buffer and an eviction would rewrite the whole granule at a time
+ * the code never asked for. */
+#define RA8P1_MPU_MAIR_NORMAL_NC    0x44U
 #define RA8P1_MPU_ATTR_NORMAL       0U
 #define RA8P1_MPU_ATTR_DEVICE       1U
+#define RA8P1_MPU_ATTR_NORMAL_NC    2U
 
 /* Cortex-M85 cache control (SCB CCR / cache maintenance, ARM B) */
 #define RA8P1_SCB_CCR           0xE000ED14UL
