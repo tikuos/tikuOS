@@ -475,7 +475,7 @@ int main(void)
     }
 
     /*
-     * SDRAM bring-up probe (R7b).  MINIMAL on purpose: no MPU and no caches,
+     * SDRAM bring-up probe.  MINIMAL on purpose: no MPU and no caches,
      * so what is measured is the controller and the part rather than a cache
      * interaction.
      */
@@ -863,10 +863,9 @@ int main(void)
     }
 
     /*
-     * U1: USB-HS bring-up.  The gate is that a host attach produces a bus
-     * reset and DVSTCTR0.RHST reports high speed -- both of which the
-     * hardware does by itself (the chirp handshake is not software's job),
-     * so this is reachable with no endpoint code at all.
+     * USB-HS bring-up.  A host attach produces a bus reset and DVSTCTR0.RHST
+     * reports the negotiated speed, both done by the hardware -- the chirp
+     * handshake is not software's job -- so this needs no endpoint code.
      */
     {
         static const char *const dvname[5] = {
@@ -974,7 +973,7 @@ int main(void)
                              " intsts0=%x frame=%u\n",
                              r[0], r[1], r[3], r[5], r[7]);
             /*
-             * The U1 gate, stated rather than left to be read off: a host
+             * Stated rather than left to be read off: a host
              * drove a bus reset (device state left Powered) and the chirp
              * handshake settled on high speed.  The frame counter is the
              * corroborating evidence -- it only advances on SOF packets the
@@ -990,14 +989,14 @@ int main(void)
                 uint16_t lr;
 
                 tiku_ra8p1_usbhs_ep0_stats(&nsu, &nst, &lr);
-                tiku_uart_printf("usbhs: U1 gate: bus reset=%s speed=%s"
+                tiku_uart_printf("usbhs: bus: reset=%s speed=%s"
                                  " sof=%s -> %s\n",
                                  reset_seen ? "yes" : "NO",
                                  hs ? "HIGH" : "not high",
                                  (r[7] != 0u) ? "running" : "NONE",
                                  (reset_seen && hs && r[7] != 0u)
                                    ? "PASS" : "incomplete");
-                tiku_uart_printf("usbhs: U2 gate: addr=%u cfg=%u setups=%u"
+                tiku_uart_printf("usbhs: enum: addr=%u cfg=%u setups=%u"
                                  " stalls=%u -> %s\n",
                                  (unsigned int)tiku_ra8p1_usbhs_address(),
                                  (unsigned int)tiku_ra8p1_usbhs_configured(),
@@ -1009,7 +1008,7 @@ int main(void)
                     uint32_t c, rd, wr, bad;
 
                     tiku_ra8p1_usbhs_msc_stats(&c, &rd, &wr, &bad);
-                    tiku_uart_printf("usbhs: U3 gate: cbw=%u read=%u write=%u"
+                    tiku_uart_printf("usbhs: msc: cbw=%u read=%u write=%u"
                                      " bad=%u hash(1MB)=%x -> %s\n",
                                      (unsigned int)c, (unsigned int)rd,
                                      (unsigned int)wr, (unsigned int)bad,
@@ -1023,7 +1022,7 @@ int main(void)
     }
 
     /*
-     * U4c: restore whatever the last import left, BEFORE the disk is
+     * Restore whatever the last import left, BEFORE the disk is
      * offered to a host.  Doing it first means the staging window already
      * holds the model when the board starts serving, so a host that reads
      * the disk sees the same bytes it wrote last session.

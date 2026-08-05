@@ -7,8 +7,8 @@
  *
  * tiku_usbhs_arch.h - EK-RA8P1 USB 2.0 high-speed device controller.
  *
- * U1: power, clock and PHY up, pull-up presented on demand, and the speed
- * the host settled on readable.  Enumeration is U2.
+ * Power, clock and PHY; the pull-up presented on demand; enumeration over the
+ * default control pipe; and mass storage across two bulk pipes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

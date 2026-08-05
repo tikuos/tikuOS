@@ -477,7 +477,7 @@ static void xflash_set_protocol(uint32_t prtmd, uint8_t ddrsmpex)
  * down in SPI order, and DOPI transfers bytes PAIR-SWAPPED (D1 D0 D3 D2 ...),
  * so the same four bytes read as "SFDP" on one link and "FSPD" on the other.
  * A checker that admits only the first spelling rejects a perfectly
- * calibrated octal bus -- which it did, for one entire debugging cycle.
+ * calibrated octal bus.
  */
 
 /** @brief True when an SFDP read returns the JESD216 signature. */

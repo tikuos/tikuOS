@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usbhs_arch.c - EK-RA8P1 USB 2.0 high-speed device controller (U1).
+ * tiku_usbhs_arch.c - EK-RA8P1 USB 2.0 high-speed device controller.
  *
  * Follows the bring-up order the manual draws in Figure 38.2, which is an
  * ORDER with two waits in it, not a set of bits.
@@ -183,7 +183,7 @@ int tiku_ra8p1_usbhs_up(int want_high)
 }
 
 /*---------------------------------------------------------------------------*/
-/* EP0: enumeration (U2)                                                     */
+/* EP0: enumeration                                                          */
 /*---------------------------------------------------------------------------*/
 /*
  * The controller decodes the setup packet itself.  On receiving one it sets
@@ -254,11 +254,9 @@ static const uint8_t desc_device[18] = {
 };
 
 /*
- * A vendor-specific interface on purpose.  Declaring mass storage here would
- * make Linux bind usb-storage and start issuing commands this milestone
- * cannot answer, so a failure to enumerate and a failure to serve would be
- * entangled.  The endpoints are already the two bulk pipes U3 needs, so only
- * the class triple changes then.
+ * Mass storage, bulk-only transport, SCSI transparent command set.  The two
+ * bulk endpoints carry every command and every byte of data; the control
+ * pipe carries only enumeration and the two class requests.
  */
 static const uint8_t desc_config[32] = {
     9U, USBD_DESC_CONFIG, 32U, 0U, 1U, 1U, 0U,
@@ -745,19 +743,19 @@ void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Bulk pipes and mass storage (U3)                                          */
+/* Bulk pipes and mass storage                                               */
 /*---------------------------------------------------------------------------*/
 /*
  * PIPE1 carries EP1 IN and PIPE2 carries EP2 OUT, matching the descriptors
- * U2 already publishes.  Both are 512-byte double-buffered bulk pipes, which
+ * publishes.  Both are 512-byte double-buffered bulk pipes, which
  * costs (512/64) * 2 = 16 blocks of the controller's 8.5 KB buffer each; they
  * are placed at block 8 and block 24, leaving 0x00 to the DCP and 0x04-0x07
  * to the interrupt pipes that own those numbers.
  *
  * Data moves through D0FIFO rather than CFIFO so bulk traffic and control
- * traffic never have to take the port away from each other -- and through it
- * 32 bits at a time, which IS valid at the port's own offset, unlike the
- * 8-bit case that cost U2 a day.
+ * traffic never take the port from each other, and 32 bits at a time -- a
+ * width that IS valid at the port's own offset, where 8-bit access is not
+ * (UM Table 38.8).
  */
 /* The staging disk is the SDRAM window itself: 64 MB, already proven, and
  * the place a model has to end up anyway before it is written to flash. */
