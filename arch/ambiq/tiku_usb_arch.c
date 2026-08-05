@@ -19,6 +19,7 @@
 #if defined(PLATFORM_AMBIQ) && (TIKU_DRV_USB_ENABLE + 0)
 
 #include "tiku_usb_arch.h"
+#include <kernel/usb/tiku_usbd_msc.h>
 #include "tiku_gpio_arch.h"
 #include "tiku_cpu_common.h"
 #include "apollo510.h"
@@ -294,26 +295,17 @@ static const uint8_t s_str_serial[] = { 18, DESC_STRING,
  * planned change, not a surprise; it is written down so it is not discovered.
  */
 
-/* Bulk-Only Transport wrappers */
-#define CBW_SIG   0x43425355u      /* "USBC" */
-#define CSW_SIG   0x53425355u      /* "USBS" */
-#define CBW_LEN   31u
-#define CSW_LEN   13u
+/*
+ * The wire format -- wrappers, SCSI replies, the sense latch, the range
+ * check -- lives in kernel/usb/tiku_usbd_msc.c, where it is exercised on the
+ * build machine against the byte offsets the specification names.  What is
+ * left here is the only part that is about THIS controller: moving bytes
+ * through a MUSB FIFO.
+ */
+#define CBW_LEN   TIKU_USBD_MSC_CBW_LEN
+#define CSW_LEN   TIKU_USBD_MSC_CSW_LEN
 
-/* SCSI opcodes -- the subset a host actually issues to mount a disk */
-#define SCSI_TEST_UNIT_READY   0x00u
-#define SCSI_REQUEST_SENSE     0x03u
-#define SCSI_INQUIRY           0x12u
-#define SCSI_MODE_SENSE6       0x1Au
-#define SCSI_START_STOP        0x1Bu
-#define SCSI_PREVENT_ALLOW     0x1Eu
-#define SCSI_READ_CAPACITY10   0x25u
-#define SCSI_READ10            0x28u
-#define SCSI_WRITE10           0x2Au
-#define SCSI_MODE_SENSE10      0x5Au
-#define SCSI_SYNC_CACHE10      0x35u
-
-#define MSC_BLOCK_SIZE   512u
+#define MSC_BLOCK_SIZE   TIKU_USBD_MSC_BLOCK
 /* Overridable: in eMMC mode this is only ever touched in MSC_BOUNCE_BYTES
  * chunks, so the full megabyte is the RAM-DISK mode's size, not a transfer
  * requirement.  A build that only ever exposes the card (and wants the SSRAM
@@ -348,8 +340,12 @@ _Static_assert(MSC_BOUNCE_BYTES <= MSC_DISK_BYTES,
 typedef enum { MSC_STORE_RAM = 0, MSC_STORE_EMMC } msc_store_t;
 static msc_store_t s_store = MSC_STORE_RAM;
 
-/** @brief Blocks the host is told about -- see msc_capacity(). */
-static uint32_t s_msc_blocks = MSC_DISK_BLOCKS;
+/**
+ * @brief The medium as the host sees it: capacity, product name, sense latch.
+ *
+ * Blocks the host is told about -- see msc_capacity().
+ */
+static tiku_usbd_msc_t s_msc = { MSC_DISK_BLOCKS, "RAM Disk", 0u, 0u };
 
 typedef enum {
     BOT_CBW = 0,     /**< waiting for a command wrapper                     */
@@ -364,8 +360,9 @@ static uint32_t s_bot_residue;
 static uint8_t  s_bot_status;        /**< 0 pass, 1 fail                    */
 static uint8_t *s_bot_ptr;           /**< cursor into the disk or a reply   */
 static uint32_t s_bot_left;          /**< bytes still owed in the data phase*/
-static uint8_t  s_bot_reply[64];     /**< INQUIRY / sense / capacity        */
-static uint8_t  s_sense_key, s_sense_asc;
+static uint8_t  s_bot_reply[TIKU_USBD_MSC_REPLY_MAX];
+_Static_assert(sizeof(s_bot_reply) >= TIKU_USBD_MSC_CSW_LEN,
+               "the reply buffer also carries the status wrapper");
 static volatile uint32_t s_n_cbw, s_n_rd, s_n_wr;
 
 /*---------------------------------------------------------------------------*/
@@ -460,6 +457,7 @@ static void msc_tx_done(void);
 static int  msc_tx_wait(void);
 static void msc_tx_raw(const uint8_t *p, uint16_t n);
 static void msc_csw_poll(uint8_t status, uint32_t residue);
+static void msc_scsi(const tiku_usbd_msc_cbw_t *cbw);
 static int  msc_poll_one(void);
 
 static inline uint16_t ring_used(uint16_t h, uint16_t t, uint16_t sz)
@@ -913,7 +911,7 @@ static void cdc_endpoints_open(void)
 
     s_bot = BOT_CBW;
     s_bot_left = 0u;
-    s_sense_key = 0u; s_sense_asc = 0u;
+    s_msc.sense_key = 0u; s_msc.sense_asc = 0u;
 }
 
 /** @brief Fill the IN FIFO from the TX ring and hand it to the host. */
@@ -1010,35 +1008,12 @@ static void cdc_rx_resume(void)
 /* MSC: THE BULK-ONLY TRANSPORT STATE MACHINE                                */
 /*---------------------------------------------------------------------------*/
 
-static uint32_t le32(const uint8_t *p)
-{
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-static uint32_t be32(const uint8_t *p)
-{
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-}
-static void put_be32(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
-    p[2] = (uint8_t)(v >> 8);  p[3] = (uint8_t)v;
-}
-
-/**
- * @brief Is this READ/WRITE range inside the disk?
- *
- * The order of the tests matters: `(lba + nblk) > MSC_DISK_BLOCKS` is wrong
- * because the host controls both values and an lba near 2^32 wraps the sum
- * small.  Subtracting cannot overflow: lba is bounded first, then the count.
+/*
+ * The endianness helpers, the range check and every small SCSI reply moved
+ * to kernel/usb/tiku_usbd_msc.c, where they are exercised on the build
+ * machine against the byte offsets the specification names.  What remains
+ * below is the transport: FIFOs, packets and the BOT state machine.
  */
-static int msc_lba_ok(uint32_t lba, uint32_t nblk)
-{
-    if (nblk == 0u)           { return 1; }
-    if (lba >= s_msc_blocks)  { return 0; }
-    return (nblk <= (s_msc_blocks - lba)) ? 1 : 0;
-}
 
 /** @brief Push one packet of the IN data phase (or the CSW) to the host. */
 static void msc_tx_packet(void)
@@ -1060,171 +1035,61 @@ static void msc_tx_packet(void)
 /** @brief Queue the 13-byte status wrapper that ends every command. */
 static void msc_send_csw(void)
 {
-    uint8_t *p = s_bot_reply;
-    p[0] = 0x55; p[1] = 0x53; p[2] = 0x42; p[3] = 0x53;   /* "USBS" LE      */
-    p[4] = (uint8_t)s_bot_tag;         p[5] = (uint8_t)(s_bot_tag >> 8);
-    p[6] = (uint8_t)(s_bot_tag >> 16); p[7] = (uint8_t)(s_bot_tag >> 24);
-    p[8]  = (uint8_t)s_bot_residue;
-    p[9]  = (uint8_t)(s_bot_residue >> 8);
-    p[10] = (uint8_t)(s_bot_residue >> 16);
-    p[11] = (uint8_t)(s_bot_residue >> 24);
-    p[12] = s_bot_status;
+    tiku_usbd_msc_build_csw(s_bot_reply, s_bot_tag, s_bot_residue,
+                            s_bot_status);
     s_bot_ptr  = s_bot_reply;
     s_bot_left = CSW_LEN;
     s_bot      = BOT_CSW;
     msc_tx_packet();
 }
 
-/** @brief Record a sense condition for the REQUEST SENSE that will follow. */
+/** @brief Latch a sense condition AND fail the command in flight. */
 static void msc_fail(uint8_t key, uint8_t asc)
 {
-    s_sense_key = key;
-    s_sense_asc = asc;
+    tiku_usbd_msc_fail(&s_msc, key, asc);
     s_bot_status = 1u;
 }
 
 /**
- * @brief Build the reply for a small, memory-resident SCSI command.
+ * @brief Set up whatever data phase the decoded command asks for.
  *
- * Shared by both transports: the ISR-driven RAM-disk path and the
- * process-context eMMC pump ask the same question and must not drift apart,
- * so there is one implementation and two callers.
- *
- * @return bytes placed in s_bot_reply; 0 when the command carries no data.
- *         Sets s_bot_status / sense on an unsupported opcode.
+ * The decision -- which opcode, which bytes, what residue -- is the core's;
+ * everything here is about where those bytes live and which FIFO moves them.
  */
-static uint16_t msc_small_reply(const uint8_t *cb, uint32_t host_len)
+static void msc_scsi(const tiku_usbd_msc_cbw_t *cbw)
 {
-    uint8_t *r = s_bot_reply;
-    unsigned i;
-    uint16_t len = 0u;
+    tiku_usbd_msc_cmd_t c;
 
-    switch (cb[0]) {
-    case SCSI_TEST_UNIT_READY:
-    case SCSI_START_STOP:
-    case SCSI_PREVENT_ALLOW:
-    case SCSI_SYNC_CACHE10:
-        return 0u;
+    tiku_usbd_msc_decode(&s_msc, cbw, s_bot_reply, &c);
+    s_bot_status  = c.status;
+    s_bot_residue = c.residue;
 
-    case SCSI_INQUIRY: {
-        static const char vid[8]  = { 'T','i','k','u','O','S',' ',' ' };
-        for (i = 0u; i < 36u; i++) { r[i] = 0u; }
-        r[0] = 0x00; r[1] = 0x80; r[2] = 0x04; r[3] = 0x02; r[4] = 31;
-        for (i = 0u; i < 8u; i++) { r[8 + i] = (uint8_t)vid[i]; }
-        if (s_store == MSC_STORE_EMMC) {
-            static const char pe[16] = { 'e','M','M','C',' ','8','G','B',
-                                         ' ',' ',' ',' ',' ',' ',' ',' ' };
-            for (i = 0u; i < 16u; i++) { r[16 + i] = (uint8_t)pe[i]; }
-        } else {
-            static const char pr[16] = { 'R','A','M',' ','D','i','s','k',
-                                         ' ',' ',' ',' ',' ',' ',' ',' ' };
-            for (i = 0u; i < 16u; i++) { r[16 + i] = (uint8_t)pr[i]; }
-        }
-        r[32] = '0'; r[33] = '.'; r[34] = '0'; r[35] = '6';
-        len = 36u;
-        break;
-    }
+    switch (c.action) {
+    case TIKU_USBD_MSC_ACT_READ:
+        s_n_rd++;
+        s_bot_ptr  = &s_disk[c.lba * MSC_BLOCK_SIZE];
+        s_bot_left = c.bytes;
+        s_bot      = BOT_DATA_IN;
+        msc_tx_packet();
+        return;
 
-    case SCSI_REQUEST_SENSE:
-        for (i = 0u; i < 18u; i++) { r[i] = 0u; }
-        r[0] = 0x70; r[2] = s_sense_key; r[7] = 10; r[12] = s_sense_asc;
-        s_sense_key = 0u; s_sense_asc = 0u;
-        len = 18u;
-        break;
+    case TIKU_USBD_MSC_ACT_WRITE:
+        s_n_wr++;
+        s_bot_ptr  = &s_disk[c.lba * MSC_BLOCK_SIZE];
+        s_bot_left = c.bytes;
+        s_bot      = BOT_DATA_OUT;   /* packets arrive on the OUT endpoint  */
+        return;
 
-    case SCSI_READ_CAPACITY10:
-        put_be32(&r[0], s_msc_blocks - 1u);   /* LAST LBA, not the count   */
-        put_be32(&r[4], MSC_BLOCK_SIZE);
-        len = 8u;
-        break;
-
-    case SCSI_MODE_SENSE6:
-        r[0] = 3; r[1] = 0; r[2] = 0; r[3] = 0;
-        len = 4u;
-        break;
-
-    case SCSI_MODE_SENSE10:
-        for (i = 0u; i < 8u; i++) { r[i] = 0u; }
-        r[1] = 6;
-        len = 8u;
-        break;
+    case TIKU_USBD_MSC_ACT_REPLY:
+        s_bot_ptr  = s_bot_reply;
+        s_bot_left = c.len;
+        s_bot      = BOT_DATA_IN;
+        msc_tx_packet();
+        return;
 
     default:
-        msc_fail(0x05u, 0x20u);               /* ILLEGAL REQUEST / opcode  */
-        return 0u;
-    }
-    if (len > host_len) { len = (uint16_t)host_len; }
-    return len;
-}
-
-/** @brief Poll-path counterpart: ship a small reply, then the status. */
-static void msc_scsi_reply(const uint8_t *cb, uint32_t host_len)
-{
-    uint16_t len = msc_small_reply(cb, host_len);
-    if (len && msc_tx_wait()) { msc_tx_raw(s_bot_reply, len); }
-    msc_csw_poll(s_bot_status, host_len - len);
-}
-
-/**
- * @brief Decode one SCSI command and set up whatever data phase it needs.
- *
- * The subset is what a host issues to mount, read and write a disk.  Anything
- * else is failed with ILLEGAL REQUEST rather than ignored -- a command
- * silently treated as success is how a host comes to believe a write landed.
- */
-static void msc_scsi(const uint8_t *cb, uint32_t host_len, int host_wants_in)
-{
-    uint8_t op = cb[0];
-    uint32_t lba, nblk, bytes;
-
-    s_bot_status = 0u;
-    s_bot_residue = host_len;
-
-    switch (op) {
-    case SCSI_READ10:
-    case SCSI_WRITE10:
-        lba  = be32(&cb[2]);
-        nblk = (uint32_t)cb[7] << 8 | cb[8];
-        bytes = nblk * MSC_BLOCK_SIZE;
-        /* Range check BEFORE handing out a pointer: an out-of-range LBA
-         * would otherwise index straight off the end of the disk array. */
-        if (!msc_lba_ok(lba, nblk)) {
-            msc_fail(0x05u, 0x21u);       /* ILLEGAL REQUEST / LBA range   */
-            s_bot_residue = host_len;
-            msc_send_csw();
-            return;
-        }
-        if (bytes > host_len) { bytes = host_len; }
-        s_bot_ptr  = &s_disk[lba * MSC_BLOCK_SIZE];
-        s_bot_left = bytes;
-        s_bot_residue = host_len - bytes;
-        if (op == SCSI_READ10) {
-            s_n_rd++;
-            s_bot = BOT_DATA_IN;
-            msc_tx_packet();
-        } else {
-            s_n_wr++;
-            s_bot = BOT_DATA_OUT;   /* packets arrive on the OUT endpoint  */
-        }
-        (void)host_wants_in;
+        msc_send_csw();
         return;
-
-    default: {
-        /* Everything else is small and memory-resident: one shared builder
-         * so the two transports cannot drift apart. */
-        uint16_t len = msc_small_reply(cb, host_len);
-        if (len) {
-            s_bot_ptr = s_bot_reply;
-            s_bot_left = len;
-            s_bot_residue = host_len - len;
-            s_bot = BOT_DATA_IN;
-            msc_tx_packet();
-        } else {
-            s_bot_residue = host_len;
-            msc_send_csw();
-        }
-        return;
-    }
     }
 }
 
@@ -1233,6 +1098,7 @@ static void msc_rx_packet(void)
 {
     uint16_t cnt, i;
     uint8_t cbw[CBW_LEN];
+    tiku_usbd_msc_cbw_t c;
 
     USB_INDEX = CDC_EP_DATA;
     if (!(USB_RXCSR & RXCSR_RXPKTRDY)) { return; }
@@ -1262,10 +1128,10 @@ static void msc_rx_packet(void)
     }
     USB_RXCSR = RXCSR_DPKTBUFDIS;
 
-    if (le32(&cbw[0]) != CBW_SIG) { return; }   /* not a CBW: ignore        */
+    if (!tiku_usbd_msc_parse_cbw(cbw, CBW_LEN, &c)) { return; }  /* ignore */
     s_n_cbw++;
-    s_bot_tag = le32(&cbw[4]);
-    msc_scsi(&cbw[15], le32(&cbw[8]), (cbw[12] & 0x80u) ? 1 : 0);
+    s_bot_tag = c.tag;
+    msc_scsi(&c);
 }
 
 /** @brief The bulk IN endpoint has emptied: continue, or finish. */
@@ -1546,12 +1412,8 @@ static uint16_t msc_rx_raw(uint8_t *p, uint32_t cap)
 static void msc_csw_poll(uint8_t status, uint32_t residue)
 {
     uint8_t csw[CSW_LEN];
-    csw[0] = 0x55; csw[1] = 0x53; csw[2] = 0x42; csw[3] = 0x53;
-    csw[4] = (uint8_t)s_bot_tag;         csw[5] = (uint8_t)(s_bot_tag >> 8);
-    csw[6] = (uint8_t)(s_bot_tag >> 16); csw[7] = (uint8_t)(s_bot_tag >> 24);
-    csw[8]  = (uint8_t)residue;          csw[9]  = (uint8_t)(residue >> 8);
-    csw[10] = (uint8_t)(residue >> 16);  csw[11] = (uint8_t)(residue >> 24);
-    csw[12] = status;
+
+    tiku_usbd_msc_build_csw(csw, s_bot_tag, residue, status);
     if (msc_tx_wait()) { msc_tx_raw(csw, CSW_LEN); }
 }
 
@@ -1696,10 +1558,10 @@ static int msc_poll_one(void)
 {
     uint8_t cbw[CBW_LEN];
     uint16_t got;
-    uint32_t host_len, lba, nblk, bytes;
-    uint8_t op;
     uint32_t was;
     uint16_t csr;
+    tiku_usbd_msc_cbw_t c;
+    tiku_usbd_msc_cmd_t cmd;
 
     if (!s_up || !s_configured || s_class != TIKU_USB_CLASS_MSC ||
         s_store != MSC_STORE_EMMC) {
@@ -1714,36 +1576,30 @@ static int msc_poll_one(void)
     if (!(csr & RXCSR_RXPKTRDY)) { return 0; }
 
     got = msc_rx_raw(cbw, CBW_LEN);
-    if (got != CBW_LEN || le32(&cbw[0]) != CBW_SIG) { return 1; }
+    if (!tiku_usbd_msc_parse_cbw(cbw, got, &c)) { return 1; }
     s_n_cbw++;
-    s_bot_tag = le32(&cbw[4]);
-    host_len  = le32(&cbw[8]);
-    op        = cbw[15];
+    s_bot_tag = c.tag;
 
-    if (op == SCSI_READ10 || op == SCSI_WRITE10) {
-        lba  = be32(&cbw[17]);
-        nblk = (uint32_t)cbw[22] << 8 | cbw[23];
-        bytes = nblk * MSC_BLOCK_SIZE;
-        if (!msc_lba_ok(lba, nblk)) {
-            msc_fail(0x05u, 0x21u);
-            msc_csw_poll(1u, host_len);
-            return 1;
-        }
-        if (bytes > host_len) { bytes = host_len; }
-        if (op == SCSI_READ10) {
-            s_n_rd++;
-            msc_emmc_read(lba, bytes, host_len);
-        } else {
-            s_n_wr++;
-            msc_emmc_write(lba, bytes, host_len);
-        }
+    /* The SAME decoder the ISR path uses.  Two transports, one opinion about
+     * what the bytes mean -- which is the whole reason it is a separate file
+     * rather than a second copy that drifts. */
+    tiku_usbd_msc_decode(&s_msc, &c, s_bot_reply, &cmd);
+
+    if (cmd.action == TIKU_USBD_MSC_ACT_READ) {
+        s_n_rd++;
+        msc_emmc_read(cmd.lba, cmd.bytes, c.host_len);
+        return 1;
+    }
+    if (cmd.action == TIKU_USBD_MSC_ACT_WRITE) {
+        s_n_wr++;
+        msc_emmc_write(cmd.lba, cmd.bytes, c.host_len);
         return 1;
     }
 
-    /* Everything else is small and memory-resident: reuse the same SCSI
-     * decoder the RAM-disk path uses, then ship its reply from here. */
-    s_bot_status = 0u;
-    msc_scsi_reply(&cbw[15], host_len);
+    /* Everything else is memory-resident: ship the reply, then the status.
+     * A refused command arrives here too, with len 0 and status 1. */
+    if (cmd.len && msc_tx_wait()) { msc_tx_raw(s_bot_reply, cmd.len); }
+    msc_csw_poll(cmd.status, cmd.residue);
     return 1;
 }
 
@@ -1871,7 +1727,8 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     }
     s_class = cls;
     s_store = MSC_STORE_RAM;
-    s_msc_blocks = MSC_DISK_BLOCKS;
+    s_msc.blocks  = MSC_DISK_BLOCKS;
+    s_msc.product = "RAM Disk";
     if (cls == TIKU_USB_CLASS_MSC && use_emmc) {
 #if (TIKU_DRV_EMMC_ENABLE + 0)
         uint32_t cap = tiku_emmc_capacity_blocks();
@@ -1881,7 +1738,8 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
             return TIKU_USB_ERR_STATE;
         }
         s_store = MSC_STORE_EMMC;
-        s_msc_blocks = cap - TIKU_EMMC_SCRATCH_BLOCKS;
+        s_msc.blocks  = cap - TIKU_EMMC_SCRATCH_BLOCKS;
+        s_msc.product = "eMMC 8GB";
 #else
         return TIKU_USB_ERR_ARG;
 #endif
@@ -2238,7 +2096,7 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
     if (cbw)    { *cbw    = s_n_cbw; }
     if (rd)     { *rd     = s_n_rd;  }
     if (wr)     { *wr     = s_n_wr;  }
-    if (blocks) { *blocks = s_msc_blocks; }
+    if (blocks) { *blocks = s_msc.blocks; }
 }
 
 /**
@@ -2262,17 +2120,17 @@ uint32_t tiku_usb_msc_selftest(void)
 {
     uint32_t bad = 0u;
     /* must be ACCEPTED */
-    if (!msc_lba_ok(0u, 1u))                        { bad |= 1u << 0; }
-    if (!msc_lba_ok(MSC_DISK_BLOCKS - 1u, 1u))      { bad |= 1u << 1; }
-    if (!msc_lba_ok(0u, MSC_DISK_BLOCKS))           { bad |= 1u << 2; }
+    if (!tiku_usbd_msc_lba_ok(&s_msc, 0u, 1u))                        { bad |= 1u << 0; }
+    if (!tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS - 1u, 1u))      { bad |= 1u << 1; }
+    if (!tiku_usbd_msc_lba_ok(&s_msc, 0u, MSC_DISK_BLOCKS))           { bad |= 1u << 2; }
     /* must be REFUSED */
-    if (msc_lba_ok(MSC_DISK_BLOCKS, 1u))            { bad |= 1u << 3; }
-    if (msc_lba_ok(MSC_DISK_BLOCKS - 1u, 2u))       { bad |= 1u << 4; }
-    if (msc_lba_ok(0u, MSC_DISK_BLOCKS + 1u))       { bad |= 1u << 5; }
+    if (tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS, 1u))            { bad |= 1u << 3; }
+    if (tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS - 1u, 2u))       { bad |= 1u << 4; }
+    if (tiku_usbd_msc_lba_ok(&s_msc, 0u, MSC_DISK_BLOCKS + 1u))       { bad |= 1u << 5; }
     /* the overflow pair: lba + nblk wraps to 0, which the naive check
      * would have waved through */
-    if (msc_lba_ok(0xFFFFFF00u, 0x100u))            { bad |= 1u << 6; }
-    if (msc_lba_ok(0x80000000u, 0x80000000u))       { bad |= 1u << 7; }
+    if (tiku_usbd_msc_lba_ok(&s_msc, 0xFFFFFF00u, 0x100u))            { bad |= 1u << 6; }
+    if (tiku_usbd_msc_lba_ok(&s_msc, 0x80000000u, 0x80000000u))       { bad |= 1u << 7; }
     return bad;
 }
 

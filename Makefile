@@ -1800,6 +1800,7 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # On-board eMMC on SDIO0 (EVB U11, 8 GB).  Present on BOTH Apollo510 EVBs.
 ifeq ($(TIKU_DRV_USB_ENABLE),1)
 SRCS += arch/ambiq/tiku_usb_arch.c
+SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 CFLAGS += -DTIKU_DRV_USB_ENABLE=1
 endif
 ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
