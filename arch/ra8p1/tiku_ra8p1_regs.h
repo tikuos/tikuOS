@@ -462,6 +462,16 @@
 #define RA8P1_CFSR_DACCVIOL     (1UL << 1)
 #define RA8P1_CFSR_IACCVIOL     (1UL << 0)
 
+#define RA8P1_SCB_HFSR          0xE000ED2CUL
+#define RA8P1_SCB_BFAR          0xE000ED38UL
+#define RA8P1_CFSR_BFARVALID    (1UL << 15)
+/* Any of the four stacking/unstacking errors means the exception frame push
+ * itself faulted, so the words it points at are not the faulting context. */
+#define RA8P1_CFSR_STKERR_MSK   ((1UL << 4) | (1UL << 3) | \
+                                 (1UL << 12) | (1UL << 11))
+#define RA8P1_SCB_SHCSR_BUSFAULTENA  (1UL << 17)
+#define RA8P1_SCB_SHCSR_USGFAULTENA  (1UL << 18)
+
 #define RA8P1_SCB_AIRCR         0xE000ED0CUL
 #define RA8P1_AIRCR_VECTKEY     0x05FA0000UL
 #define RA8P1_AIRCR_SYSRESETREQ (1UL << 2)

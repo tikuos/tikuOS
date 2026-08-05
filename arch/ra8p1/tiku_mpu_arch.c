@@ -17,6 +17,7 @@
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cache_arch.h"
 #include "tiku_mram_arch.h"
+#include "tiku_fault_arch.h"
 
 /* Linker-provided boundaries; every one is 32-byte aligned by the script,
  * because PMSAv8 cannot express a finer region edge. */
@@ -137,6 +138,11 @@ void tiku_mpu_arch_init_segments(void)
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
     mpu_violations = 0U;
 
+    /* Before the dregion check below, which can return early: the fault
+     * handlers are worth arming even where the part offers too few regions
+     * to program a map at all. */
+    tiku_ra8p1_fault_init();
+
     /* Refuse rather than program a subset: a partial map leaves the gaps
      * falling through to the background region, which is the opposite of the
      * protection this is here to provide. */
@@ -184,7 +190,6 @@ void tiku_mpu_arch_init_segments(void)
                                  RA8P1_MPU_CTRL_PRIVDEFENA;
     mpu_barrier();
 
-    TIKU_REG32(RA8P1_SCB_SHCSR) |= RA8P1_SCB_SHCSR_MEMFAULTENA;
     mpu_ctl = 0xA500U | 0x0001U;   /* password | enable, MSP430 parity */
 
     /* Caches LAST, and from here rather than from boot: MAIR is what makes
@@ -276,12 +281,26 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 
 uint16_t tiku_mpu_arch_get_violation_flags(void)
 {
+    const tiku_ra8p1_fault_record_t *f = tiku_ra8p1_fault_last();
+
+    /* The in-RAM latch cannot outlive the reset the fault handler now forces,
+     * so the surviving evidence is the fault record: an access violation in it
+     * IS the flag, and it is still there on the next boot. */
+    if (f->magic == TIKU_RA8P1_FAULT_MAGIC &&
+        f->kind == (uint32_t)TIKU_RA8P1_FAULT_MEM &&
+        (f->cfsr & (RA8P1_CFSR_DACCVIOL | RA8P1_CFSR_IACCVIOL))) {
+        return (uint16_t)(mpu_violations | 0x0002U);   /* SEG1, MSP430 mirror */
+    }
     return mpu_violations;
 }
 
 void tiku_mpu_arch_clear_violation_flags(void)
 {
     mpu_violations = 0U;
+    /* The surviving half of the flag lives in the fault record, so clearing
+     * only the RAM latch would leave get_violation_flags() still reporting a
+     * violation from a previous boot. */
+    tiku_ra8p1_fault_clear();
 }
 
 void tiku_mpu_arch_enable_violation_nmi(void)
@@ -289,20 +308,9 @@ void tiku_mpu_arch_enable_violation_nmi(void)
     mpu_ctl |= 0x0010U;   /* mirror MSP430's MPUSEGIE */
 }
 
-/**
- * @brief MemManage: record the violation.
- *
- * Records and returns, so a store that can never succeed re-executes forever:
- * this catches a stray write for a debugger, it does not RESUME past one.
- * Resumable handling is R8's fault-record work.
+/*
+ * The MemManage handler moved to tiku_fault_arch.c in R8, which dumps, records
+ * and RESETS.  The old one here recorded and returned, so a store that can
+ * never succeed re-executed forever -- and before R6 resetting instead would
+ * have re-entered the factory image, which is why it could not.
  */
-void tiku_ra8p1_mem_fault_handler(void)
-{
-    uint32_t cfsr = TIKU_REG32(RA8P1_SCB_CFSR) & 0xFFUL;
-
-    if (cfsr & (RA8P1_CFSR_DACCVIOL | RA8P1_CFSR_IACCVIOL)) {
-        mpu_violations |= 0x0002U;   /* SEG1 in the MSP430 mirror */
-    }
-    TIKU_REG32(RA8P1_SCB_CFSR) = cfsr;   /* write-1-to-clear */
-    mpu_barrier();
-}

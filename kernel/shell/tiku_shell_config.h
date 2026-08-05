@@ -85,7 +85,7 @@
 #endif
 #ifndef TIKU_SHELL_CMD_DIAG
 /* Auto-on where the port owns fault/EXTI/watchdog silicon; off elsewhere. */
-#if defined(PLATFORM_STM32N6)
+#if defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1)
 #define TIKU_SHELL_CMD_DIAG    1  /**< diag - faults, EXTI and the watchdog */
 #else
 #define TIKU_SHELL_CMD_DIAG    0

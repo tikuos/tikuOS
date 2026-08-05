@@ -156,3 +156,70 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
 }
 
 #endif /* PLATFORM_STM32N6 */
+
+#if defined(PLATFORM_RA8P1)
+
+#include <arch/ra8p1/tiku_fault_arch.h>
+#include <arch/ra8p1/tiku_ra8p1_regs.h>
+#include <kernel/memory/tiku_mem.h>
+
+/** @brief Report the stored fault record, or say there is none. */
+static void diag_fault_show(void) {
+    const tiku_ra8p1_fault_record_t *f = tiku_ra8p1_fault_last();
+
+    if (f->magic != TIKU_RA8P1_FAULT_MAGIC) {
+        SHELL_PRINTF("  no fault recorded since the last cold start\n");
+        return;
+    }
+    SHELL_PRINTF("  last %s (#%lu)\n", tiku_ra8p1_fault_kind_name(f->kind),
+                 (unsigned long)f->count);
+    SHELL_PRINTF("  cfsr=%lx hfsr=%lx addr=%lx\n",
+                 (unsigned long)f->cfsr, (unsigned long)f->hfsr,
+                 (unsigned long)f->addr);
+    SHELL_PRINTF("  pc=%lx lr=%lx psr=%lx sp=%lx\n",
+                 (unsigned long)f->pc, (unsigned long)f->lr,
+                 (unsigned long)f->psr, (unsigned long)f->sp);
+}
+
+/** @brief Take one fault on purpose, so the handler can be seen working. */
+static void diag_fault_force(const char *which) {
+    SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
+                 " then shows it\n", which);
+
+    if (strcmp(which, "undef") == 0) {
+        /* No ambiguity: an undefined instruction is a precise UsageFault at a
+         * known PC, with no bus or MPU involved. */
+        __asm__ volatile ("udf #0");
+    } else if (strcmp(which, "durable") == 0) {
+        /* The violation this port exists to catch: a store into `.persistent`
+         * that never opened the NVM window.  MPU says read-only, so it is a
+         * DACCVIOL naming its own address in MMFAR -- and it must NOT be
+         * silently dropped, which is the whole durable-write contract. */
+        extern uint32_t __persistent_start;
+        *(volatile uint32_t *)(uintptr_t)&__persistent_start = 0xDEADBEEFUL;
+    } else {
+        SHELL_PRINTF("  kinds: undef | durable\n");
+        return;
+    }
+    SHELL_PRINTF("  (no fault taken -- UNEXPECTED, the guard is not working)\n");
+}
+
+void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
+    if (argc >= 2 && strcmp(argv[1], "fault") == 0) {
+        if (argc >= 3) {
+            diag_fault_force(argv[2]);
+        } else {
+            diag_fault_show();
+        }
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "clear") == 0) {
+        tiku_ra8p1_fault_clear();
+        SHELL_PRINTF("  fault record cleared\n");
+        return;
+    }
+    SHELL_PRINTF("Usage: diag fault [undef|durable] | clear\n");
+    diag_fault_show();
+}
+
+#endif /* PLATFORM_RA8P1 */
