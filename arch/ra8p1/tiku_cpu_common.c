@@ -45,8 +45,8 @@ static void cpu_spin(unsigned long iters)
 /**
  * @brief Spin a total iteration count in as few calls as the range allows.
  *
- * One long spin rather than N short ones, for the same reason: the call
- * overhead the measurement never saw would otherwise be spent N times.
+ * One long spin rather than N short ones: the calibration does not include
+ * call overhead, so N calls would spend it N times outside the measurement.
  *
  * @param iters  Total iterations
  */

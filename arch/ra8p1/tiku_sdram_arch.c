@@ -172,7 +172,7 @@ int tiku_ra8p1_sdram_init(void)
     /*
      * The datasheet's power-up: 100 us of stable clock, precharge all, at
      * least two auto-refresh, then the mode register.  The controller's
-     * sequencer does the last three; the 100 us is ours to wait.
+     * sequencer does the last three; the 100 us is this driver's to wait.
      *
      * Eight refreshes rather than the minimum two: it is what JEDEC parts
      * conventionally get, costs microseconds once, and removes any question

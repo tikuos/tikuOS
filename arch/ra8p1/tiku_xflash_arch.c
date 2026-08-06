@@ -127,7 +127,7 @@ void tiku_ra8p1_xflash_init(void)
      * and no edge is produced.  A device left in octal mode by the previous
      * session then stays there, and every single-bit command at boot returns
      * 0xFF -- a "dead flash" that is really a live one mid-conversation in
-     * another protocol.  Observed exactly that; the pulse is the fix.
+     * another protocol.
      */
     tiku_ra8p1_xflash_reset();
 

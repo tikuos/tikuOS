@@ -45,12 +45,11 @@ typedef void (*ra8p1_isr_t)(void);
 __attribute__((naked)) static void ra8p1_default_handler(void)
 {
     /*
-     * Record, never park.  An exception no handler claims must not spin
-     * here silently -- that reads as a dead board and preserves nothing.
-     * A MISFETCHED vector lands here too, carrying the one thing worth
-     * keeping: the stacked frame and the active exception number.
-     * Same naked entry as the fault shims: no C prologue may run before
-     * the frame pointer is captured, or a stack fault loses the frame.
+     * Record, never park: an exception no handler claims would otherwise
+     * spin here silently, preserving nothing, and a misfetched vector lands
+     * here too carrying the stacked frame and the exception number.  Naked
+     * like the fault shims -- no C prologue may run before the frame pointer
+     * is captured, or a stack fault loses the frame.
      */
     __asm__ volatile (
         "tst  lr, #4\n"

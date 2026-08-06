@@ -113,21 +113,29 @@ both and reports both -- a failing check must not hide the other's findings.
 
 ## Commit messages
 
+### One commit per capability
+
+A commit is a thing that now works, not a step on the way there. Bring-up
+that took six sessions of PLL experiments is one commit when it lands, not
+six. Split only when the parts stand alone: a driver and the test suite that
+exercises it are two commits; the driver and the four fixes it needed are one.
+
+The question is not "did I do these at different times" but "would someone
+reverting this want them separated".
+
 ### Subject
 
-`area: the new state`. Max 72 chars. Areas are the subsystem — `basic`
-`memory` `shell` `vfs` `process` `hal` `docs` — or the port — `nordic`
-`ambiq` `rp2350` `msp430`.
+`Area: what now works`. Max 72 chars, no trailing period.
 
-Name what is now true, with the identifier or the number that makes it
-checkable. A good subject still means something in a year, read alone.
+Areas are read by people, so they are names: `RA8P1 Port`, `Shell`, `VFS`,
+`BASIC`, `Memory`, `TikuBench`, `Docs`. Say the capability plainly.
 
 | no | yes |
 |---|---|
-| `comments: finish arch/ambiq` | `ambiq: doc comments to 3 lines, 262 blocks` |
-| `basic: improve module handling` | `basic: the module image is a store file, not a carve` |
-| `memory: update the code window` | `memory: one 384 KB code window for the whole fleet` |
-| `msp430: fix the ADC` | `msp430: fix ADC12_B channel->pin map, not common across the family` |
+| `ra8p1: 1 GHz, and the four-byte store that kept it away` | `RA8P1 Port: 1 GHz core clock with 240/480/1000 MHz ladder` |
+| `ra8p1: the sleep rule above 240 MHz` | `RA8P1 Port: Core steps down to ICLK before sleep` |
+| `memory: update the code window` | `Memory: One 384 KB code window for the whole fleet` |
+| `basic: improve module handling` | `BASIC: Module image is a store file, not a carve` |
 
 Four things that make a subject rot:
 
@@ -135,27 +143,32 @@ Four things that make a subject rot:
   `improve`. They describe the session, not the diff.
 - **milestone markers** — `M3.5`, `phase 1 complete`, `(S0-S6)`, `(A2b)`.
   Nobody holds that map later.
-- **first person and flourish** — `three registers we never wrote`,
-  `the plateau confesses`, `I had the wrong schematic`.
+- **literary flourish** — `the four-byte store that kept it away`, `the
+  plateau confesses`, `locate where 480 dies`. A subject is an index entry,
+  not a title.
 - **vague scope** — `the four big dirs`, `the standard`. Name them.
 
 ### Body
 
-At most 5 lines: what it does and how it was checked.
+Bullet points. At most 5, one line each, `- ` prefix. What changed and how it
+was checked. No prose paragraphs, no narrative.
 
 ```
-memory: report app-usable SRAM, not the bank size
+RA8P1 Port: 1 GHz core clock with 240/480/1000 MHz ladder
 
-`free` printed the 256 KB bank, but the top 16 KB is the FLPR carve, so every
-Nordic board over-reported by 16 KB. Devices now declare
-TIKU_DEVICE_RAM_USABLE when it differs, falling back to RAM_SIZE.
-Verified on the LM20: `free` reads 245760. Seven targets build.
+- SCKDIVCR2 is 16-bit; the 32-bit store clobbered SCKSCR with a disabled
+  oscillator select
+- Rungs above 240 MHz run at VSCR_1; MRAM notifications retry until they
+  read back
+- Rung changes run with interrupts masked, PLL stop confirmed via PLLSF
+- All six ordered rung pairs verified; shell suite 125/125 at 1000 MHz
+- CAC agrees with the configured tree at every rung (0 ppt)
 ```
 
 Do not write:
 
 - the debugging path, or what was tried and abandoned — git holds it
 - a file-by-file list, or anything else the diff already says
-- a section per concern, when one paragraph carries the change
+- a paragraph where a bullet does
 
 No tool or assistant co-author trailers.

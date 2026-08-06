@@ -125,12 +125,10 @@ int tiku_cpu_ra8p1_mosc_start(void)
     }
 
     /*
-     * More than one attempt, because of soft resets.  A fault-triggered
-     * SYSRESETREQ re-asserts MOSTP while the crystal is still physically
-     * ringing, and restarting a decaying resonator does not always reach
-     * the stability flag inside one wait.  Stop, let it ring down, start
-     * again: the retry is idle on a cold boot and the cure after a warm
-     * one.  Bounded still -- a board with no crystal fitted must report
+     * More than one attempt, because SYSRESETREQ re-asserts MOSTP while the
+     * crystal is still ringing, and a decaying resonator does not always
+     * reach the stability flag inside one wait.  Stop, let it ring down,
+     * start again.  Bounded: a board with no crystal fitted must report
      * failure, not hang the boot it was called from.
      */
     for (tries = 0U; tries < 3U; tries++) {
@@ -232,10 +230,9 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
      ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR_PCKD_SHIFT))    /* 240 */
 
 /*
- * NPUCK sits at /1 relative to ICLK, not /2.  UM Table 9.2 requires
- * NPUCLK >= ICLK, and the original tree had the NPU at 120 under a 240 ICLK
- * -- out of spec, invisible because the Ethos-U55 is not driven yet, and
- * exactly the kind of thing that would be blamed on the NPU bring-up.
+ * NPUCK sits at /1 relative to ICLK, not /2: UM Table 9.2 requires
+ * NPUCLK >= ICLK.  An NPU clocked below ICLK is out of spec and silent
+ * about it while the Ethos-U55 is undriven.
  */
 #define SCKDIVCR2_TREE(s, cpu0div)                                                    \
     (((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_MRICK_SHIFT)  |  /* 240 */   \
@@ -336,18 +333,12 @@ static int pll_up(const ra8p1_opoint_t *op)
     STEP(3);
 
     /*
-     * PARK ON MOCO BEFORE TOUCHING THE PLL, AND THAT IS NOT OPTIONAL.
-     *
-     * PLLCCR is not writable while the PLL runs, and the PLL cannot be
-     * stopped while the system clock is sourced from it -- so a rung change
-     * that goes straight to "stop the PLL" kills the clock it is executing
-     * on.  Raising the tree from the boot clock never met this, because the
-     * tree was still on MOCO; the SECOND change is where it bites, which is
-     * why a driver that could only make one change never saw it.
-     *
-     * The console rides SCICLK, so that has to come back to MOCO too or its
-     * source vanishes mid-sequence.  Bytes in flight are lost either way;
-     * the divisor is recomputed at the end.
+     * Park on MOCO before touching the PLL.  PLLCCR is not writable while
+     * the PLL runs, and the PLL cannot be stopped while the system clock is
+     * sourced from it, so stopping it directly kills the clock this code
+     * executes on.  SCICLK comes back to MOCO too, or the console loses its
+     * source mid-sequence; bytes in flight are lost either way and the
+     * divisor is recomputed at the end.
      */
     TIKU_REG8(RA8P1_SCICKCR) |= (uint8_t)RA8P1_SCICKCR_SREQ;
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) == 0U) { }
@@ -374,12 +365,11 @@ static int pll_up(const ra8p1_opoint_t *op)
      * inverts this; every rung here is entered from the boot clock, so this
      * is always the speed-up order.)
      *
-     * Write-until-it-reads-back, which is the manual's own flow (Figure
-     * 60.5 loops the write, and the vendor BSP does the same): the
-     * notification can miss on a first attempt, and treating one miss as
-     * failure is why recipe-crossing rung changes refused while the same
-     * write from another rung sailed.  Extra MRAM gets the same telling --
-     * MRPCLK is half of MRICLK at every rung in this table. */
+     * Write until it reads back, per the manual's own flow (Figure 60.5
+     * loops the write): the notification can miss on a first attempt, so a
+     * single-shot verify rejects transitions the hardware accepts.  Extra
+     * MRAM gets the same telling -- MRPCLK is half of MRICLK at every rung
+     * in this table. */
     {
         unsigned long tell;
 
@@ -419,12 +409,10 @@ static int pll_up(const ra8p1_opoint_t *op)
 
     TIKU_REG8(RA8P1_PLLCR) = (uint8_t)RA8P1_PLLCR_PLLSTP;   /* stop first */
     /*
-     * Wait for the stop to TAKE, not merely be requested.  Reprogramming
-     * a VCO that is still spinning down from the old multiplier is how
-     * every recipe-to-recipe transition (x40 to x250 and back) failed to
-     * relock while same-recipe changes sailed: the one path that worked
-     * crossed a VSCR transition whose settling wait supplied this gap by
-     * accident.  PLLSF clearing is the hardware saying the PLL is down.
+     * Wait for the stop to take, not merely be requested: a VCO still
+     * spinning down from the old multiplier does not relock when
+     * reprogrammed, so a change of PLL recipe needs this gap.  PLLSF
+     * clearing is the hardware reporting the PLL down.
      */
     {
         unsigned long spd;
@@ -478,12 +466,10 @@ static int pll_up(const ra8p1_opoint_t *op)
     STEP(8);
     TIKU_REG32(RA8P1_SCKDIVCR)  = SCKDIVCR_TREE(op->scale);
     /*
-     * 16-BIT, AND THE WIDTH IS LOAD-BEARING: SCKDIVCR2 is a 16-bit register
+     * 16-bit, and the width is load-bearing: SCKDIVCR2 is a 16-bit register
      * at +0x024 and SCKSCR -- the system clock SOURCE -- is the byte at
-     * +0x026.  A 32-bit store here also writes 0x00 over SCKSCR, and CKSEL 0
-     * selects the HOCO, which this part keeps disabled -- a transient select
-     * of a dead oscillator on every rung change, losing nondeterministically
-     * above 240 MHz.
+     * +0x026.  A 32-bit store also writes 0x00 over SCKSCR, and CKSEL 0
+     * selects the HOCO, which this part keeps disabled.
      */
     TIKU_REG16(RA8P1_SCKDIVCR2) =
         (uint16_t)SCKDIVCR2_TREE(op->scale, op->cpuck0div);
@@ -498,14 +484,11 @@ static int pll_up(const ra8p1_opoint_t *op)
      * NOPs, and nothing else, for 30 us (UM Figure 9.15).  The DCDC is
      * settling into the stepped-up load, and the manual's word for what the
      * core may do meanwhile is NOP -- no loads, no stores, no peripherals.
-     * Skipping this is not a latent risk but the observed failure: the core
-     * ran on into real work and died on corrupted fetches within the window,
-     * IACCVIOL + UNDEFINSTR, locked up inside its own fault recorder.
      *
-     * Sized in iterations of a register-only loop at the NEW core rate: even
-     * fully dual-issued at one iteration per cycle, 120 x mhz iterations is
-     * 120 us -- four times the requirement, and still invisible next to the
-     * oscillator waits either side of it.
+     * Sized in iterations of a register-only loop at the new core rate: even
+     * fully dual-issued at one per cycle, 120 x mhz iterations is 120 us,
+     * four times the requirement and still invisible beside the oscillator
+     * waits either side.
      */
     {
         unsigned long settle = 120UL * (unsigned long)op->mhz;
@@ -587,19 +570,16 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
      *
      * pll_up() parks on MOCO before it touches the PLL, so a failure exits
      * with the tree at 8 MHz and every consumer still tuned for the old rate
-     * -- a console too fast to frame and a tick counting wrong.  That reads
-     * as a bricked board rather than as a refused request, which is how a
-     * PLL setting that simply did not lock came to look like a crash.  Fall
-     * back to the rung that was already proven, and only if THAT cannot be
-     * re-established accept the parked tree and retune everything down to it.
+     * -- a console too fast to frame and a tick counting wrong, which is
+     * indistinguishable from a dead board.  Fall back to the rung already
+     * established, and only if that cannot be re-entered accept the parked
+     * tree and retune everything down to it.
      */
     /*
-     * Atomic, and that closes the last nondeterminism.  An interrupt taken
-     * mid-change means exception entry through a half-reprogrammed machine:
-     * a parked 8 MHz tree, caches off inside the voltage transition, MRAM
-     * waits mid-retell.  Whether a tick landed in the window was the dice
-     * every rung change had been rolling.  The vendor BSP masks interrupts
-     * around its clock changes for the same reason.
+     * Atomic.  An interrupt taken mid-change means exception entry through
+     * a half-reprogrammed machine: a parked 8 MHz tree, caches off inside
+     * the voltage transition, MRAM waits mid-retell.  The vendor BSP masks
+     * interrupts around its clock changes for the same reason.
      */
     {
         uint32_t primask;
@@ -620,9 +600,9 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
         }
         cur_op = op;
 
-        /* Still masked: the retune and console re-init below are part of the
-         * same not-yet-consistent window -- a tick against the stale reload
-         * or an RX against a half-initialised SCI is the same dice. */
+        /* Still masked: the retune and console re-init below are part of
+         * the same inconsistent window -- a tick against the stale reload or
+         * an RX against a half-initialised SCI. */
         tiku_cpu_ra8p1_spin_invalidate();
         STEP(12);
         (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
@@ -733,15 +713,11 @@ void tiku_cpu_boot_ra8p1_power_wfi_enter(void)
      * sleep and restored on wake, which is what the vendor BSP does ("Need to
      * slow CPUCLK down before sleeping if it is above 240MHz").
      *
-     * NOT a correctness fix here, and the record should say so: with the
-     * SCKDIVCR2 store width corrected, sleeping at a full 1 GHz survives a
-     * soak of tick-paced idles with the step-down disabled.  An earlier
-     * session read a WFI gate as the cure for rung instability; it was only
-     * perturbing the window the width bug raced in.  This is kept because the
-     * vendor states it as a requirement -- a 40-iteration soak does not
-     * disprove a marginal effect -- and because idling a 1 GHz clock tree at
-     * ICLK should cost less.  Both claims are R9 PPK2 work; neither is
-     * measured yet.
+     * Not required for correctness on this port: 1 GHz survives a soak of
+     * tick-paced idles without it.  Kept because the vendor states it as a
+     * requirement, which a soak cannot disprove for a marginal effect, and
+     * because idling a 1 GHz clock tree at ICLK should cost less.  Neither
+     * claim is measured.
      *
      * All four SCKDIVCR2 fields go to ICLK's divider rather than only the two
      * the vendor writes: their shape leaves CPUCK1 and NPUCK at /1, which

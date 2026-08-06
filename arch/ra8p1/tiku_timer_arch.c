@@ -159,12 +159,10 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
     uint32_t primask;
 
     /*
-     * A masked tick can never end this wait: with PRIMASK set the ISR
-     * cannot run, but a pending SysTick still WAKES every wfi, so the
-     * loop spins at exactly the tick rate reading a counter that will
-     * never move again.  Observed after a fault-triggered soft reset,
-     * where early boot still holds interrupts off; sampled twice eight
-     * seconds apart at the same PC.  Substitute a calibrated spin.
+     * A masked tick can never end this wait: with PRIMASK set the ISR cannot
+     * run, but a pending SysTick still wakes every wfi, so the loop spins at
+     * the tick rate on a counter that will never move.  Early boot holds
+     * interrupts off, so substitute a calibrated spin there.
      */
     __asm__ volatile ("mrs %0, primask" : "=r" (primask));
     if (primask != 0UL || !tiku_ra8p1_clock_arch_running()) {
