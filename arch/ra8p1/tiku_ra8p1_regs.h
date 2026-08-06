@@ -465,6 +465,16 @@
 #define RA8P1_INTSTS0_RESM       (1U << 14)
 #define RA8P1_INTSTS0_VBINT      (1U << 15)
 
+/* INTENB0 mirrors INTSTS0's upper bits. */
+#define RA8P1_INTENB0_BRDYE      (1U << 8)
+#define RA8P1_INTENB0_NRDYE      (1U << 9)
+#define RA8P1_INTENB0_BEMPE      (1U << 10)
+#define RA8P1_INTENB0_CTRE       (1U << 11)
+#define RA8P1_INTENB0_DVSE       (1U << 12)
+#define RA8P1_INTENB0_SOFE       (1U << 13)
+#define RA8P1_INTENB0_RSME       (1U << 14)
+#define RA8P1_INTENB0_VBSE       (1U << 15)
+
 /** @brief PSEL that selects the OSPI function on any pin (OM_1_* here). */
 #define RA8P1_PFS_PSEL_OSPI     0x1CUL
 
@@ -669,12 +679,18 @@
 #define RA8P1_ICU_SLOT_UART_ERI 1U
 #define RA8P1_ICU_SLOT_HTIMER   2U
 #define RA8P1_ICU_SLOT_DMAC0    3U
+#define RA8P1_ICU_SLOT_USBHS    4U
 
 /** @brief Event numbers this port links (UM Table 14.5). */
 #define RA8P1_EVENT_SCI8_RXI    0x2FCUL
 #define RA8P1_EVENT_SCI8_ERI    0x2FFUL
 #define RA8P1_EVENT_GPT0_CCMPA  0x181UL
 #define RA8P1_EVENT_DMAC0_INT   0x040UL
+/* One event carries every USB source -- VBUS, resume, frame, device state,
+ * control stage, BRDY, BEMP -- so the handler must drain INTSTS0 rather than
+ * assume one cause per edge.  0x2C1/0x2C2 are the D0/D1FIFO DMA requests,
+ * which this port does not use. */
+#define RA8P1_EVENT_USBHS_USBIR 0x2C3UL
 
 /*---------------------------------------------------------------------------*/
 /* GPT32 (UM 23) -- the htimer's counter and compare                          */

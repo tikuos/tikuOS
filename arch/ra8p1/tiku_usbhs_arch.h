@@ -79,12 +79,14 @@ tiku_ra8p1_usbhs_devstate_t tiku_ra8p1_usbhs_devstate(void);
 int tiku_ra8p1_usbhs_pll_locked(void);
 
 /**
- * @brief Service one pending SETUP packet, if any.
+ * @brief USB interrupt handler; enumeration runs entirely from here.
  *
- * Poll this often.  Enumeration is a conversation whose deadlines the host
- * sets, so a caller that visits rarely will be given up on.
+ * @note Vector index 16 + RA8P1_ICU_SLOT_USBHS, linked to USBHS_USBIR.
  */
-void tiku_ra8p1_usbhs_ep0_poll(void);
+void tiku_ra8p1_usbhs_handler(void);
+
+/** @brief Interrupts taken, and device-state transitions seen. */
+void tiku_ra8p1_usbhs_irq_stats(uint32_t *irqs, uint32_t *dvst);
 
 /** @brief Address the host assigned; 0 until SET_ADDRESS. */
 uint8_t tiku_ra8p1_usbhs_address(void);

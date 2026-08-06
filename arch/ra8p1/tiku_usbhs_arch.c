@@ -178,6 +178,27 @@ int tiku_ra8p1_usbhs_up(int want_high)
     TIKU_REG16(RA8P1_USBHS_SYSCFG) =
         (uint16_t)(TIKU_REG16(RA8P1_USBHS_SYSCFG) | RA8P1_SYSCFG_USBE);
 
+    /*
+     * Enumeration is a conversation whose deadlines the host sets, so EP0
+     * runs from the interrupt and not from whatever else the CPU is doing.
+     * Only the stage transition, the device state and the DCP's buffer-empty
+     * are enabled here; the bulk pipes stay in process context, where a SCSI
+     * command may take milliseconds without costing anyone else.
+     */
+    TIKU_REG16(RA8P1_USBHS_BEMPENB) = 0U;
+    TIKU_REG16(RA8P1_USBHS_INTENB0) =
+        (uint16_t)(RA8P1_INTENB0_CTRE | RA8P1_INTENB0_DVSE |
+                   RA8P1_INTENB0_BEMPE);
+
+    TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_USBHS)) =
+        RA8P1_EVENT_USBHS_USBIR;
+    /* Read back before unmasking: the write crosses into the ICU's clock
+     * domain, and an NVIC enable that overtakes it would arm a slot still
+     * pointing at whatever was there before. */
+    (void)TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_USBHS));
+    TIKU_REG32(RA8P1_NVIC_ISER(RA8P1_ICU_SLOT_USBHS / 32U)) =
+        (1UL << (RA8P1_ICU_SLOT_USBHS % 32U));
+
     usbhs_up = 1U;
     return TIKU_RA8P1_USBHS_OK;
 }
@@ -319,6 +340,7 @@ static uint8_t  ep0_buf[80];
 /* Recovery counters live up here because EP0 raises them: the class reset
  * arrives on the control pipe, not the bulk one. */
 static uint32_t n_msc_reset, n_csw_fail;
+static volatile uint32_t n_irq, n_dvst;
 static uint8_t  last_ops[4];
 static uint8_t  last_op_i;
 static void pipe_config(uint8_t pipe, uint8_t epnum, int dir_in,
@@ -389,8 +411,15 @@ static int dcp_select(int writing)
         return 0;
     }
 
-    /* Only now is FRDY answering for the pipe just selected. */
-    for (spins = 0U; spins < 100000U; spins++) {
+    /*
+     * Only now is FRDY answering for the pipe just selected.  The bound is
+     * deliberately short: this runs in the ISR, and the buffer is known free
+     * (either untouched since reset, or just emptied by the interrupt that
+     * got here), so FRDY is a handshake across a clock domain rather than a
+     * wait on the host.  If it is not ready almost immediately something is
+     * wrong, and stalling one request beats holding the CPU.
+     */
+    for (spins = 0U; spins < 2000U; spins++) {
         if ((TIKU_REG16(RA8P1_USBHS_CFIFOCTR) & RA8P1_CFIFOCTR_FRDY) != 0U) {
             return 1;
         }
@@ -427,92 +456,97 @@ static void ep0_ack(void)
  * @param len  how many exist
  * @param wlen how many the host asked for
  */
-static void ep0_send(const uint8_t *p, uint16_t len, uint16_t wlen)
+/*
+ * THE DATA STAGE CANNOT BLOCK, BECAUSE IT RUNS IN THE ISR.
+ *
+ * Queueing a packet only makes it available for the next IN token; the host
+ * still has to ask, and it asks on its own schedule.  Waiting for that in
+ * interrupt context would hold the CPU for as long as the host felt like
+ * taking, so a stalled transfer would become a stalled system rather than a
+ * failed request.
+ *
+ * So the send is a state machine instead: push one packet, return, and let
+ * the buffer-empty interrupt push the next.  The cursor below is what the
+ * ISR resumes from, which is why the caller's buffer must outlive the call
+ * -- every caller passes either a const descriptor or the static reply
+ * buffer, both of which do.
+ */
+static const uint8_t *ep0_tx_p;
+static uint16_t       ep0_tx_left;
+static uint8_t        ep0_tx_busy;
+
+/** @brief Put one packet in the DCP buffer and hand it to the controller. */
+static void ep0_tx_push(void)
 {
-    uint32_t spins;
     uint16_t n, i;
 
+    if (!dcp_select(1)) {
+        ep0_stall();
+        ep0_tx_busy = 0U;
+        return;
+    }
+    n = (ep0_tx_left > USBD_EP0_MAXPACKET) ? USBD_EP0_MAXPACKET : ep0_tx_left;
+    for (i = 0U; i < n; i++) {
+        TIKU_REG8(RA8P1_USBHS_CFIFOHH) = ep0_tx_p[i];
+    }
+    ep0_tx_p    += n;
+    ep0_tx_left  = (uint16_t)(ep0_tx_left - n);
+
+    /* A packet shorter than the maximum must be marked valid to be sent; a
+     * full one commits by itself when the buffer fills. */
+    if (n < USBD_EP0_MAXPACKET) {
+        TIKU_REG16(RA8P1_USBHS_CFIFOCTR) =
+            (uint16_t)(TIKU_REG16(RA8P1_USBHS_CFIFOCTR) |
+                       RA8P1_CFIFOCTR_BVAL);
+    }
+    dcp_pid(RA8P1_DCPCTR_PID_BUF);
+}
+
+/**
+ * @brief Begin a control-IN data stage; the ISR carries it to completion.
+ *
+ * @param p    bytes to send; must outlive the transfer
+ * @param len  how many exist
+ * @param wlen how many the host asked for
+ */
+static void ep0_send(const uint8_t *p, uint16_t len, uint16_t wlen)
+{
     /* Never send more than was asked for: a host that requested eight bytes
      * of the device descriptor is sizing EP0 and will not read more. */
     if (len > wlen) {
         len = wlen;
     }
+    ep0_tx_p    = p;
+    ep0_tx_left = len;
+    ep0_tx_busy = 1U;
 
-    for (;;) {
-        if (!dcp_select(1)) {
-            if (tr != NULL) { tr->sel_ok = 0U; }
-            ep0_stall();
-            return;
-        }
-        if (tr != NULL) { tr->sel_ok = 1U; }
+    /* Buffer-empty is what says a packet actually left. */
+    TIKU_REG16(RA8P1_USBHS_BEMPSTS) = (uint16_t)~1U;
+    TIKU_REG16(RA8P1_USBHS_BEMPENB) =
+        (uint16_t)(TIKU_REG16(RA8P1_USBHS_BEMPENB) | 1U);
+    ep0_tx_push();
+}
 
-        /* Clear the DCP's buffer-empty flag first, so the wait below observes
-         * THIS packet leaving rather than a previous one's stale flag.
-         * Write-0-to-clear: zero the bit to clear, ones everywhere else. */
-        TIKU_REG16(RA8P1_USBHS_BEMPSTS) = (uint16_t)~1U;
-
-        n = (len > USBD_EP0_MAXPACKET) ? USBD_EP0_MAXPACKET : len;
-        for (i = 0U; i < n; i++) {
-            TIKU_REG8(RA8P1_USBHS_CFIFOHH) = p[i];
-        }
-        p += n;
-        len = (uint16_t)(len - n);
-        if (tr != NULL) {
-            /* Did the buffer actually take the bytes?  BSTS should have gone
-             * to 0 (transmission not complete) now that data is staged. */
-            tr->dcp_wr = TIKU_REG16(RA8P1_USBHS_DCPCTR);
-            tr->ctr_wr = TIKU_REG16(RA8P1_USBHS_CFIFOCTR);
-        }
-
-        /* A packet shorter than the maximum must be marked valid to be sent;
-         * a full one commits by itself when the buffer fills. */
-        if (n < USBD_EP0_MAXPACKET) {
-            TIKU_REG16(RA8P1_USBHS_CFIFOCTR) =
-                (uint16_t)(TIKU_REG16(RA8P1_USBHS_CFIFOCTR) |
-                           RA8P1_CFIFOCTR_BVAL);
-        }
-        dcp_pid(RA8P1_DCPCTR_PID_BUF);
-
-        /*
-         * WAIT FOR THE PACKET TO ACTUALLY GO OUT.  Queueing data only makes
-         * it available for the next IN token; the host still has to ask.
-         * Completing the transfer before that turns a descriptor read into a
-         * status stage over data the host never received -- which is not an
-         * error anywhere, just a host that asks again and eventually gives
-         * up.  BEMP is the hardware saying the buffer drained.
-         */
-        for (spins = 0U; spins < 2000000U; spins++) {
-            if ((TIKU_REG16(RA8P1_USBHS_BEMPSTS) & 1U) != 0U) {
-                break;
-            }
-        }
-        if (tr != NULL) {
-            tr->spins = (spins > 0xFFFEU) ? 0xFFFEU : (uint16_t)spins;
-        }
-        if (spins >= 2000000U) {
-            if (tr != NULL) { tr->sent_ok = 0U; }
-            return;      /* host walked away; the next SETUP resyncs */
-        }
-        if (tr != NULL) { tr->sent_ok = 1U; }
-        TIKU_REG16(RA8P1_USBHS_BEMPSTS) = (uint16_t)~1U;
-
-        if (len == 0U) {
-            break;
-        }
+/** @brief A DCP packet has gone: send the next, or finish the transfer. */
+static void ep0_tx_done(void)
+{
+    if (!ep0_tx_busy) {
+        return;
     }
+    if (ep0_tx_left != 0U) {
+        ep0_tx_push();
+        return;
+    }
+    ep0_tx_busy = 0U;
+    TIKU_REG16(RA8P1_USBHS_BEMPENB) =
+        (uint16_t)(TIKU_REG16(RA8P1_USBHS_BEMPENB) & ~1U);
 
-    /*
-     * Data delivered; now the status stage.  CCPL only takes effect while
-     * PID is BUF, and the hardware may have dropped the pipe back to NAK
-     * when the packet completed -- so set both in one write rather than
-     * assuming BUF survived.
-     */
-    if (tr != NULL) { tr->dcp_pre = TIKU_REG16(RA8P1_USBHS_DCPCTR); }
+    /* Data delivered; the hardware runs the status stage from here.  CCPL
+     * only takes effect while PID is BUF, so both go down together. */
     TIKU_REG16(RA8P1_USBHS_DCPCTR) =
         (uint16_t)((TIKU_REG16(RA8P1_USBHS_DCPCTR) &
                     ~(uint16_t)RA8P1_DCPCTR_PID_MASK) |
                    RA8P1_DCPCTR_PID_BUF | RA8P1_DCPCTR_CCPL);
-    if (tr != NULL) { tr->dcp_post = TIKU_REG16(RA8P1_USBHS_DCPCTR); }
 }
 
 /** @brief GET_DESCRIPTOR, the request enumeration is mostly made of. */
@@ -555,15 +589,10 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wlen)
     }
 }
 
-void tiku_ra8p1_usbhs_ep0_poll(void)
+static void ep0_on_setup(uint16_t sts)
 {
-    uint16_t sts, ctsq, req, val, len;
+    uint16_t ctsq, req, val, len;
     uint8_t type, request;
-
-    if (!usbhs_up) {
-        return;
-    }
-    sts = TIKU_REG16(RA8P1_USBHS_INTSTS0);
 
     /*
      * TRIGGER ON THE STAGE TRANSITION, NOT ON VALID.
@@ -580,13 +609,7 @@ void tiku_ra8p1_usbhs_ep0_poll(void)
      * and the four request registers are populated.  That is the documented
      * mechanism and it has no window.
      */
-    if ((sts & RA8P1_INTSTS0_CTRT) == 0U) {
-        return;
-    }
     ctsq = (uint16_t)(sts & RA8P1_INTSTS0_CTSQ_MASK);
-
-    /* Write-0-to-clear: zero the flag being cleared, ones everywhere else. */
-    TIKU_REG16(RA8P1_USBHS_INTSTS0) = (uint16_t)~RA8P1_INTSTS0_CTRT;
 
     if (ctsq == 6U) {
         /* The controller says the host's sequence made no sense.  Stalling
@@ -702,6 +725,60 @@ void tiku_ra8p1_usbhs_ep0_poll(void)
         ep0_stall();
         break;
     }
+}
+
+/*
+ * ONE EVENT LINE CARRIES EVERY SOURCE.  USBHS_USBIR aggregates VBUS, resume,
+ * frame, device state, control-stage and buffer interrupts, so an edge says
+ * only "something happened" -- a handler that services one cause and returns
+ * leaves the rest pending behind an edge that will not repeat, and the device
+ * simply stops answering.  Hence the drain loop, bounded so a source that
+ * cannot be cleared costs one bounded burst rather than the system.
+ */
+void tiku_ra8p1_usbhs_handler(void)
+{
+    unsigned guard;
+
+    for (guard = 0U; guard < 16U; guard++) {
+        uint16_t sts = TIKU_REG16(RA8P1_USBHS_INTSTS0);
+
+        if ((sts & RA8P1_INTSTS0_DVST) != 0U) {
+            /* Write-0-to-clear: zero the flag being cleared, ones elsewhere. */
+            TIKU_REG16(RA8P1_USBHS_INTSTS0) = (uint16_t)~RA8P1_INTSTS0_DVST;
+            n_dvst++;
+            /* A bus reset abandons whatever EP0 was doing; the host will ask
+             * again from the start and a half-finished cursor would answer
+             * the new request with the tail of the old one. */
+            if (((sts & RA8P1_INTSTS0_DVSQ_MASK) >>
+                 RA8P1_INTSTS0_DVSQ_SHIFT) <= 1U) {
+                ep0_tx_busy = 0U;
+                ep0_tx_left = 0U;
+                usbhs_config = 0U;
+                TIKU_REG16(RA8P1_USBHS_BEMPENB) =
+                    (uint16_t)(TIKU_REG16(RA8P1_USBHS_BEMPENB) & ~1U);
+            }
+            continue;
+        }
+        if (ep0_tx_busy &&
+            (TIKU_REG16(RA8P1_USBHS_BEMPSTS) & 1U) != 0U) {
+            TIKU_REG16(RA8P1_USBHS_BEMPSTS) = (uint16_t)~1U;
+            ep0_tx_done();
+            continue;
+        }
+        if ((sts & RA8P1_INTSTS0_CTRT) != 0U) {
+            TIKU_REG16(RA8P1_USBHS_INTSTS0) = (uint16_t)~RA8P1_INTSTS0_CTRT;
+            ep0_on_setup(sts);
+            continue;
+        }
+        break;
+    }
+    n_irq++;
+
+    /* Clear the ICU latch and make the clear stick before returning, or the
+     * NVIC re-pends on an event already handled. */
+    TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_USBHS)) &= ~RA8P1_ICU_IELSR_IR;
+    (void)TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_USBHS));
+    __asm__ volatile ("dsb" ::: "memory");
 }
 
 uint8_t tiku_ra8p1_usbhs_address(void)
@@ -1211,6 +1288,12 @@ int tiku_ra8p1_usbhs_id_high(void)
     }
     return ((TIKU_REG16(RA8P1_USBHS_SYSSTS0) & RA8P1_SYSSTS0_IDMON) != 0U)
            ? 1 : 0;
+}
+
+void tiku_ra8p1_usbhs_irq_stats(uint32_t *irqs, uint32_t *dvst)
+{
+    if (irqs != NULL) { *irqs = n_irq;  }
+    if (dvst != NULL) { *dvst = n_dvst; }
 }
 
 int tiku_ra8p1_usbhs_up_state(void)

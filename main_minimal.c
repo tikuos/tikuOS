@@ -921,7 +921,6 @@ int main(void)
                     uint32_t nsu, nst;
                     uint16_t lr;
 
-                    tiku_ra8p1_usbhs_ep0_poll();
                     tiku_ra8p1_usbhs_msc_poll();
 
                     if ((*cyc - mark) < limit) {
@@ -1060,14 +1059,29 @@ int main(void)
     {
         volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
         uint32_t mark = *cyc;
+        uint32_t t0 = *cyc;
         uint32_t last_wr = 0xFFFFFFFFu;
 
-        tiku_uart_printf("usbhs: serving; write to the disk and watch the"
-                         " hash settle\n");
+        tiku_uart_printf("usbhs: serving; EP0 is on the interrupt, MSC on"
+                         " this loop\n");
         for (;;) {
-            uint32_t c, rd, wr, bad, pk, st;
+            uint32_t c, rd, wr, bad, pk, st, iq, dv;
 
-            tiku_ra8p1_usbhs_ep0_poll();
+            /*
+             * DELIBERATE OBSTRUCTION, for the first thirty seconds only.
+             * Process context spends 10 ms of every iteration doing nothing,
+             * which is what a shell or a scheduler does to this loop in the
+             * real build.  Enumeration has deadlines the host sets, so a
+             * polled EP0 cannot survive it -- if the device still enumerates,
+             * the interrupt carried it rather than a free CPU.
+             *
+             * It is then lifted, because it obstructs the MSC pump too and
+             * that one IS in process context: leaving it on would prove the
+             * point and hand back a disk too slow to use.
+             */
+            if ((*cyc - t0) < (30u * 240000000u)) {
+                tiku_cpu_ra8p1_delay_us(10000u);
+            }
             tiku_ra8p1_usbhs_msc_poll();
 
             if ((*cyc - mark) < (5u * 240000000u)) {
@@ -1076,11 +1090,16 @@ int main(void)
             mark = *cyc;
             tiku_ra8p1_usbhs_msc_stats(&c, &rd, &wr, &bad);
             tiku_ra8p1_usbhs_msc_out_stats(&pk, &st);
-            /*
-             * The commit record is checked on the reporting tick rather than
-             * inside the transport, so an import can never run partway
-             * through the write that requested it.
-             */
+            tiku_ra8p1_usbhs_irq_stats(&iq, &dv);
+
+            tiku_uart_printf("usbhs: irq=%u dvst=%u | addr=%u cfg=%u | cbw=%u"
+                             " rd=%u wr=%u bad=%u outstall=%u\n",
+                             (unsigned int)iq, (unsigned int)dv,
+                             (unsigned int)tiku_ra8p1_usbhs_address(),
+                             (unsigned int)tiku_ra8p1_usbhs_configured(),
+                             (unsigned int)c, (unsigned int)rd,
+                             (unsigned int)wr, (unsigned int)bad,
+                             (unsigned int)st);
             if (wr != last_wr) {
                 uint32_t wl = 0, wb = 0;
 
@@ -1092,58 +1111,11 @@ int main(void)
                     };
                     tiku_store_state_t r;
 
-                    tiku_uart_printf("store: commit record seen, importing"
-                                     " (the disk goes quiet for this)\n");
+                    tiku_uart_printf("store: commit record seen, importing\n");
                     r = tiku_ra8p1_store_on_write(wl, wb);
                     tiku_uart_printf("store: import -> %s\n",
                                      sname[(unsigned)r < 6u ? (unsigned)r : 0u]);
-                    /* Re-present the device: the import holds the CPU long
-                     * enough that the host gives up and resets the port, so
-                     * detaching and attaching is how it finds the disk
-                     * again. */
-                    (void)tiku_ra8p1_usbhs_attach(0);
-                    tiku_cpu_ra8p1_delay_us(200000u);
-                    (void)tiku_ra8p1_usbhs_attach(1);
                 }
-            }
-            {
-                uint16_t pr[7];
-
-                tiku_ra8p1_usbhs_pipe_regs(pr);
-                tiku_uart_printf("usbhs: pipeIN cfg=%x buf=%x maxp=%u |"
-                                 " pipeOUT cfg=%x buf=%x maxp=%u | dtln=%u\n",
-                                 pr[0], pr[1], (unsigned int)(pr[2] & 0x7FFu),
-                                 pr[3], pr[4], (unsigned int)(pr[5] & 0x7FFu),
-                                 (unsigned int)pr[6]);
-            }
-
-            {
-                uint32_t rs, cf, ops;
-
-                ops = tiku_ra8p1_usbhs_msc_trace(&rs, &cf);
-                tiku_uart_printf("usbhs: cbw=%u rd=%u wr=%u bad=%u outpkt=%u"
-                                 " outstall=%u rst=%u cswfail=%u ops=%x\n",
-                                 (unsigned int)c, (unsigned int)rd,
-                                 (unsigned int)wr, (unsigned int)bad,
-                                 (unsigned int)pk, (unsigned int)st,
-                                 (unsigned int)rs, (unsigned int)cf,
-                                 (unsigned int)ops);
-            }
-
-            /*
-             * Hash only once the writing has STOPPED.  Folding 8 MB takes
-             * well over a hundred milliseconds, and spending that inside a
-             * transfer starves the pump long enough for the host to give up
-             * on the device -- a diagnostic that causes the failure it is
-             * there to observe.
-             */
-            /* Hash whenever the write count is STABLE -- including zero.
-             * Requiring a write first meant a freshly restored model was
-             * never checked, which is exactly the case worth checking. */
-            if (wr == last_wr) {
-                tiku_uart_printf("usbhs: settled, hash(8MB)=%x\n",
-                                 (unsigned int)
-                                     tiku_ra8p1_usbhs_msc_hash(16384u));
             }
             last_wr = wr;
         }
