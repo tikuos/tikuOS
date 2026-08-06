@@ -13,6 +13,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_cpu_common.h"
 
 #include <hal/tiku_clock_hal.h>
 
@@ -155,6 +156,24 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
      * caller stops waiting once the system has been up a while.  Here it made
      * all five software-timer tests fail at once. */
     tiku_clock_arch_time_t target = clock_ticks + t;
+    uint32_t primask;
+
+    /*
+     * A masked tick can never end this wait: with PRIMASK set the ISR
+     * cannot run, but a pending SysTick still WAKES every wfi, so the
+     * loop spins at exactly the tick rate reading a counter that will
+     * never move again.  Observed after a fault-triggered soft reset,
+     * where early boot still holds interrupts off; sampled twice eight
+     * seconds apart at the same PC.  Substitute a calibrated spin.
+     */
+    __asm__ volatile ("mrs %0, primask" : "=r" (primask));
+    if (primask != 0UL || !tiku_ra8p1_clock_arch_running()) {
+        while (t-- != 0U) {
+            tiku_cpu_ra8p1_delay_us(1000000UL /
+                                    (unsigned long)TIKU_CLOCK_ARCH_SECOND);
+        }
+        return;
+    }
 
     while ((long)(target - clock_ticks) > 0) {
         /* WFI, not a spin: only the tick ISR can end this wait.  Except

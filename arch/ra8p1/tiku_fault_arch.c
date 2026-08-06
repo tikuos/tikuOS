@@ -58,6 +58,7 @@ const char *tiku_ra8p1_fault_kind_name(uint32_t kind)
         case TIKU_RA8P1_FAULT_MEM:   return "memmanage";
         case TIKU_RA8P1_FAULT_BUS:   return "bus";
         case TIKU_RA8P1_FAULT_USAGE: return "usage";
+        case TIKU_RA8P1_FAULT_UNEXPECTED: return "unexpected";
         default:                     return "unknown";
     }
 }
@@ -94,7 +95,8 @@ static void fault_putfield(const char *name, uint32_t v)
  * @param kind   Which handler ran
  */
 __attribute__((used, noreturn))
-void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind)
+void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
+                           uint32_t exc_return)
 {
     uint32_t cfsr = TIKU_REG32(RA8P1_SCB_CFSR);
     uint32_t hfsr = TIKU_REG32(RA8P1_SCB_HFSR);
@@ -125,6 +127,18 @@ void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind)
     fault_rec.lr   = frame_ok ? frame[5] : 0UL;
     fault_rec.psr  = frame_ok ? frame[7] : 0UL;
     fault_rec.sp   = (uint32_t)(uintptr_t)frame;
+    fault_rec.exc  = exc_return;
+    __asm__ volatile ("mrs %0, msp" : "=r" (fault_rec.msp));
+    __asm__ volatile ("mrs %0, psp" : "=r" (fault_rec.psp));
+    {
+        /* The frame area verbatim -- twelve words spans a basic frame
+         * plus four beyond, which is where a shifted pop's real words
+         * sit.  Guarded reads: the frame pointer itself is untrusted. */
+        uint32_t i;
+        for (i = 0U; i < 12U; i++) {
+            fault_rec.raw[i] = frame_ok ? frame[i] : 0UL;
+        }
+    }
 
     fault_putstr("\n[TM:FAULT] ");
     fault_putstr(tiku_ra8p1_fault_kind_name(kind));
@@ -171,6 +185,7 @@ void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind)
             "mrseq r0, msp\n"                                                 \
             "mrsne r0, psp\n"                                                 \
             "mov  r1, %0\n"                                                   \
+            "mov  r2, lr\n"                                                   \
             "b    tiku_ra8p1_fault_body\n"                                    \
             :: "I"(kindval));                                                 \
     }

@@ -34,6 +34,11 @@ typedef struct {
     uint32_t lr;        /**< stacked LR, same caveat                        */
     uint32_t psr;       /**< stacked xPSR                                   */
     uint32_t sp;        /**< the frame's own address                        */
+    uint32_t exc;       /**< EXC_RETURN, naming frame type and stack        */
+    uint32_t msp;       /**< both stack pointers at record time, because a  */
+    uint32_t psp;       /**< shifted frame is visible only against them     */
+    uint32_t raw[12];   /**< the frame area verbatim, for when the eight    */
+                        /**< named fields are themselves the corruption    */
 } tiku_ra8p1_fault_record_t;
 
 /** @brief Which handler ran. */
@@ -42,6 +47,7 @@ typedef enum {
     TIKU_RA8P1_FAULT_MEM   = 1,
     TIKU_RA8P1_FAULT_BUS   = 2,
     TIKU_RA8P1_FAULT_USAGE = 3,
+    TIKU_RA8P1_FAULT_UNEXPECTED = 4,
 } tiku_ra8p1_fault_kind_t;
 
 /**
@@ -51,6 +57,17 @@ typedef enum {
  * same access escalated to HardFault does not.
  */
 void tiku_ra8p1_fault_init(void);
+
+/**
+ * @brief Record a fault and reset; the shims and the default handler land here.
+ *
+ * @param frame       Stacked exception frame, or NULL if the push failed
+ * @param kind        Which handler ran, a tiku_ra8p1_fault_kind_t
+ * @param exc_return  The handler's EXC_RETURN, naming frame type and stack
+ */
+__attribute__((noreturn))
+void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
+                           uint32_t exc_return);
 
 /**
  * @brief The last recorded fault.

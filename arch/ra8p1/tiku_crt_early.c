@@ -17,6 +17,7 @@
 
 #include <arch/ra8p1/tiku_device_select.h>
 #include "tiku_ra8p1_regs.h"
+#include "tiku_fault_arch.h"
 
 /* Shorthand for filling the external-IRQ span with the default handler. */
 #define DFL     ra8p1_default_handler
@@ -41,11 +42,25 @@ typedef void (*ra8p1_isr_t)(void);
  * Spinning on WFE keeps the core quiet and lands a debugger halt on a
  * recognisable PC instead of a random instruction stream.
  */
-static void ra8p1_default_handler(void)
+__attribute__((naked)) static void ra8p1_default_handler(void)
 {
-    while (1) {
-        __asm__ volatile ("wfe");
-    }
+    /*
+     * Record, never park.  An exception no handler claims must not spin
+     * here silently -- that reads as a dead board and preserves nothing.
+     * A MISFETCHED vector lands here too, carrying the one thing worth
+     * keeping: the stacked frame and the active exception number.
+     * Same naked entry as the fault shims: no C prologue may run before
+     * the frame pointer is captured, or a stack fault loses the frame.
+     */
+    __asm__ volatile (
+        "tst  lr, #4\n"
+        "ite  eq\n"
+        "mrseq r0, msp\n"
+        "mrsne r0, psp\n"
+        "mov  r1, %0\n"
+        "mov  r2, lr\n"
+        "b    tiku_ra8p1_fault_body\n"
+        :: "I"(TIKU_RA8P1_FAULT_UNEXPECTED));
 }
 
 /**

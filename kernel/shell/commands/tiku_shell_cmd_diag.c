@@ -179,6 +179,21 @@ static void diag_fault_show(void) {
     SHELL_PRINTF("  pc=%lx lr=%lx psr=%lx sp=%lx\n",
                  (unsigned long)f->pc, (unsigned long)f->lr,
                  (unsigned long)f->psr, (unsigned long)f->sp);
+    SHELL_PRINTF("  exc=%lx msp=%lx psp=%lx\n",
+                 (unsigned long)f->exc, (unsigned long)f->msp,
+                 (unsigned long)f->psp);
+    /* The frame verbatim: when a pop lands on stacked data, the eight
+     * named fields above ARE the corruption, and only the raw words say
+     * where the real frame sat. */
+    SHELL_PRINTF("  frame %lx %lx %lx %lx\n",
+                 (unsigned long)f->raw[0], (unsigned long)f->raw[1],
+                 (unsigned long)f->raw[2], (unsigned long)f->raw[3]);
+    SHELL_PRINTF("        %lx %lx %lx %lx\n",
+                 (unsigned long)f->raw[4], (unsigned long)f->raw[5],
+                 (unsigned long)f->raw[6], (unsigned long)f->raw[7]);
+    SHELL_PRINTF("        %lx %lx %lx %lx\n",
+                 (unsigned long)f->raw[8], (unsigned long)f->raw[9],
+                 (unsigned long)f->raw[10], (unsigned long)f->raw[11]);
 }
 
 /** @brief Take one fault on purpose, so the handler can be seen working. */

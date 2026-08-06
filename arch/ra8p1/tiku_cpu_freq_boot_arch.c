@@ -16,6 +16,7 @@
 #include "tiku_ra8p1_regs.h"
 #include "tiku_xflash_arch.h"
 #include "tiku_cache_arch.h"
+#include "tiku_cpu_common.h"
 
 #include <stdint.h>
 
@@ -111,25 +112,40 @@ static void clock_protect(int unlock)
 int tiku_cpu_ra8p1_mosc_start(void)
 {
     unsigned long spins;
+    uint8_t       tries;
 
     if ((TIKU_REG8(RA8P1_MOSCCR) & RA8P1_MOSCCR_MOSTP) == 0U) {
         return 0;                       /* already running */
     }
 
-    clock_protect(1);
-    /* MOMCR before MOSTP -- the manual is explicit that the mode register must
-     * be settled first (UM 9, MOSCCR note 1). */
-    TIKU_REG8(RA8P1_MOMCR) = (uint8_t)RA8P1_MOMCR_DRV_24MHZ;
-    TIKU_REG8(RA8P1_MOSCWTCR) = 0x09U;  /* longest documented settle wait */
-    TIKU_REG8(RA8P1_MOSCCR) = 0U;       /* MOSTP = 0: start oscillating   */
-    clock_protect(0);
+    /*
+     * More than one attempt, because of soft resets.  A fault-triggered
+     * SYSRESETREQ re-asserts MOSTP while the crystal is still physically
+     * ringing, and restarting a decaying resonator does not always reach
+     * the stability flag inside one wait.  Stop, let it ring down, start
+     * again: the retry is idle on a cold boot and the cure after a warm
+     * one.  Bounded still -- a board with no crystal fitted must report
+     * failure, not hang the boot it was called from.
+     */
+    for (tries = 0U; tries < 3U; tries++) {
+        clock_protect(1);
+        /* MOMCR before MOSTP -- the manual is explicit that the mode
+         * register must be settled first (UM 9, MOSCCR note 1). */
+        TIKU_REG8(RA8P1_MOMCR) = (uint8_t)RA8P1_MOMCR_DRV_24MHZ;
+        TIKU_REG8(RA8P1_MOSCWTCR) = 0x09U;  /* longest documented wait */
+        TIKU_REG8(RA8P1_MOSCCR) = 0U;       /* MOSTP = 0: oscillate    */
+        clock_protect(0);
 
-    /* Bounded: a board with no crystal fitted must report failure, not hang
-     * the boot it was called from. */
-    for (spins = 4000000UL; spins != 0UL; spins--) {
-        if (TIKU_REG8(RA8P1_OSCSF) & RA8P1_OSCSF_MOSCSF) {
-            return 0;
+        for (spins = 4000000UL; spins != 0UL; spins--) {
+            if (TIKU_REG8(RA8P1_OSCSF) & RA8P1_OSCSF_MOSCSF) {
+                return 0;
+            }
         }
+
+        clock_protect(1);
+        TIKU_REG8(RA8P1_MOSCCR) = (uint8_t)RA8P1_MOSCCR_MOSTP;
+        clock_protect(0);
+        tiku_cpu_ra8p1_delay_us(500U);      /* ring-down before retry */
     }
     return -1;
 }
