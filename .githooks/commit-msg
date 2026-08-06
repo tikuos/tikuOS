@@ -1,0 +1,20 @@
+#!/bin/sh
+#
+# Tiku Operating System v0.06
+# Simple. Ubiquitous. Intelligence, Everywhere.
+# http://tiku-os.org
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
+# commit-msg - hold the message to the shape in commentstyle.md.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The nested repos (TikuBench, tikukits, kintsugi) share this hook through
+# tools/install_hooks.sh, so find the checker from this file rather than from
+# the repo being committed to.
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+checker="$hook_dir/../tools/check_commit_msg.py"
+
+[ -x "$checker" ] || exit 0
+exec "$checker" "$1"

@@ -172,3 +172,20 @@ Do not write:
 - a paragraph where a bullet does
 
 No tool or assistant co-author trailers.
+
+### Checking
+
+A `commit-msg` hook refuses a message that misses the shape. It lives in
+`.githooks/` and runs `tools/check_commit_msg.py`; `core.hooksPath` is
+per-repository local config, so a fresh clone needs `tools/install_hooks.sh`
+once, which points this repo and every nested one at it.
+
+```
+tools/install_hooks.sh                      # after cloning
+tools/check_commit_msg.py <file>            # check a message by hand
+git commit --no-verify                      # bypass, for a fixup and no more
+```
+
+The hook checks shape: subject form, length, milestone markers, bullet bodies,
+trailers. It cannot see flourish, a body that narrates the debugging path, or
+five commits that should have been one -- those stay the author's job.
