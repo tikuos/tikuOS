@@ -18,6 +18,24 @@
 
 #include <stdint.h>
 
+#include <kernel/memory/tiku_mem.h>
+
+#ifndef TIKU_RA8P1_FREQ_UNPROVEN
+#define TIKU_RA8P1_FREQ_UNPROVEN 0
+#endif
+
+#if (TIKU_RA8P1_FREQ_UNPROVEN + 0)
+/*
+ * How far the last rung change got, in warm-persist memory so it survives
+ * whatever it is explaining.  Only an unproven-rung build carries it, so the
+ * ladder is instrumented exactly while it is being brought up.
+ */
+TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_freq_step;
+#define STEP(n)  do { tiku_ra8p1_freq_step = (n); } while (0)
+#else
+#define STEP(n)  do { } while (0)
+#endif
+
 /** @brief Rate the tree is running at now; the boot clock until it is raised. */
 static unsigned long cpu_hz_now = TIKU_RA8P1_ICLK_BOOT_HZ;
 
@@ -208,9 +226,6 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
  * that resets the board is worse than one that refuses.  Build with
  * -DTIKU_RA8P1_FREQ_UNPROVEN=1 to select them while diagnosing.
  */
-#ifndef TIKU_RA8P1_FREQ_UNPROVEN
-#define TIKU_RA8P1_FREQ_UNPROVEN 0
-#endif
 
 /** @brief One selectable rung of the clock ladder. */
 typedef struct {
@@ -261,9 +276,11 @@ static int pll_up(const ra8p1_opoint_t *op)
     unsigned long spins;
     uint8_t       i;
 
+    STEP(1);
     if (tiku_cpu_ra8p1_mosc_start() != 0) {
         return -1;
     }
+    STEP(2);
 
     clock_protect(1);
 
@@ -278,6 +295,7 @@ static int pll_up(const ra8p1_opoint_t *op)
     for (i = 0U; i < 3U; i++) {
         (void)TIKU_REG8(RA8P1_MRCPFB);
     }
+    STEP(3);
 
     /*
      * PARK ON MOCO BEFORE TOUCHING THE PLL, AND THAT IS NOT OPTIONAL.
@@ -300,6 +318,7 @@ static int pll_up(const ra8p1_opoint_t *op)
                                          RA8P1_SCICKSEL_MOCO);
     TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)RA8P1_SCICKSEL_MOCO;
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
+    STEP(4);
 
     /* Undivided is safe at MOCO's 8 MHz: every ceiling in Table 9.2 is far
      * above it, so no domain is out of spec during the window. */
@@ -309,6 +328,7 @@ static int pll_up(const ra8p1_opoint_t *op)
     while ((TIKU_REG8(RA8P1_SCKSCR) & RA8P1_SCKSCR_CKSEL_MASK) !=
            TIKU_RA8P1_CKSEL_MOCO) { }
     cpu_hz_now = TIKU_RA8P1_MOCO_HZ;
+    STEP(5);
 
     /* Memory first.  MRAM picks its read wait states from the frequency it is
      * TOLD, so telling it after the clock rose would mean running a whole
@@ -324,6 +344,7 @@ static int pll_up(const ra8p1_opoint_t *op)
     }
     /* ICLK lands past half of SRAM's 250 MHz ceiling at every rung, so one
      * wait, which is the only setting this bit has. */
+    STEP(6);
     TIKU_REG8(RA8P1_SRAMWTSC) = (uint8_t)RA8P1_SRAMWTSC_WTEN;
 
     TIKU_REG8(RA8P1_PLLCR) = (uint8_t)RA8P1_PLLCR_PLLSTP;   /* stop first */
@@ -334,6 +355,7 @@ static int pll_up(const ra8p1_opoint_t *op)
         RA8P1_PLLCCR2_PLODIVP(op->plodivp) |
         RA8P1_PLLCCR2_PLODIVQ(RA8P1_PLODIV_6) |
         RA8P1_PLLCCR2_PLODIVR(RA8P1_PLODIV_6));
+    STEP(7);
     TIKU_REG8(RA8P1_PLLCR) = 0U;                            /* run */
 
     for (spins = 4000000UL; spins != 0UL; spins--) {
@@ -349,6 +371,7 @@ static int pll_up(const ra8p1_opoint_t *op)
         return -1;
     }
 
+    STEP(8);
     TIKU_REG32(RA8P1_SCKDIVCR)  = SCKDIVCR_TREE(op->scale);
     TIKU_REG32(RA8P1_SCKDIVCR2) = SCKDIVCR2_TREE(op->scale);
     TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_PLL1P;
@@ -357,6 +380,7 @@ static int pll_up(const ra8p1_opoint_t *op)
      * rate. */
     while ((TIKU_REG8(RA8P1_SCKSCR) & RA8P1_SCKSCR_CKSEL_MASK) !=
            TIKU_RA8P1_CKSEL_PLL1P) { }
+    STEP(9);
 
     /* The console rides SCICLK, which is still on MOCO and would otherwise
      * stay there -- so the tree moving is exactly when it must be moved too.
@@ -370,6 +394,7 @@ static int pll_up(const ra8p1_opoint_t *op)
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
     /* Every rung divides SCICLK back to 120 MHz -- its Table 9.2 ceiling and
      * the rate the console's divisor was proven against. */
+    STEP(10);
     sci_hz_now = 120000000UL;
 
     /* Prefetch back on: above 100 MHz the manual requires it, and MRICLK is
@@ -378,6 +403,7 @@ static int pll_up(const ra8p1_opoint_t *op)
 
     clock_protect(0);
     cpu_hz_now = (unsigned long)op->mhz * 1000000UL;
+    STEP(11);
     return 0;
 }
 
