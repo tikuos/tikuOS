@@ -3126,7 +3126,12 @@ TARGET = main.elf
 lint:
 	@rc=0; \
 	 ./tools/check_durable_placement.sh || rc=1; \
-	 ./tools/check_comment_style.py || rc=1; \
+	 if [ -x ./hygiene/check_comment_style.py ]; then \
+	   ./hygiene/check_comment_style.py || rc=1; \
+	 else \
+	   echo "check_comment_style: SKIPPED -- no hygiene/ in this working copy"; \
+	   echo "  comment style is UNCHECKED; see hygiene/commentstyle.md"; \
+	 fi; \
 	 exit $$rc
 
 # UF2 is the RP2350 deliverable; ELF is enough on MSP430.

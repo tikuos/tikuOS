@@ -99,3 +99,8 @@ arch/nordic/cracen_pk_microcode.h
 # Local lab output, never committed -- findings graduate into kintsugi/ decks
 # or TikuBench suites, and the raw data stays here.
 experiments/
+
+# Local process tooling: comment/commit style rules, their checkers and the
+# commit-msg hook.  House convention for this working copy, not part of the
+# OS, so a clone of TikuOS carries no opinion about how to write a commit.
+hygiene/
