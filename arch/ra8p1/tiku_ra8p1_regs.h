@@ -185,6 +185,8 @@
 #define RA8P1_MRCPFB_MPFBEN         (1U << 0)
 #define RA8P1_MRCFREQ               0x4013C004UL
 #define RA8P1_MRCFREQ_KEY           (0x1EUL << 24)
+#define RA8P1_MREFREQ               0x4013C008UL /* extra MRAM, same idea */
+#define RA8P1_MREFREQ_KEY           (0xE1UL << 24)
 #define RA8P1_MRCFREQ_MHZ_MASK      0x3FFUL
 #define RA8P1_MRCFREQ_MHZ_MAX       250UL
 

@@ -33,9 +33,15 @@
  * ladder is instrumented exactly while it is being brought up.
  */
 TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_freq_step;
+/* Why the last rung change failed: 0xF1 mosc, 0xF2 MRCFREQ, 0xF3 lock
+ * timeout (low byte carries OSCSF).  Survives the fallback that would
+ * otherwise overwrite the step trail. */
+TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_freq_fail;
 #define STEP(n)  do { tiku_ra8p1_freq_step = (n); } while (0)
+#define FAILREC(v) do { tiku_ra8p1_freq_fail = (v); } while (0)
 #else
 #define STEP(n)  do { } while (0)
+#define FAILREC(v) do { } while (0)
 #endif
 
 /** @brief Rate the tree is running at now; the boot clock until it is raised. */
@@ -238,11 +244,11 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
      ((uint32_t)(cpu0div)     << RA8P1_SCKDIVCR2_CPUCK0_SHIFT))
 
 /*
- * Only rungs PROVEN on hardware are offered.  240 is; 480 and 1000 are
- * transcribed from the manual and are not -- 480 currently resets the part,
- * which is a bring-up problem rather than a table problem, and a `freq` verb
+ * Only rungs PROVEN on hardware are offered; today that is all three.  The
+ * flag stays because the next rung added starts unproven, and a `freq` verb
  * that resets the board is worse than one that refuses.  Build with
- * -DTIKU_RA8P1_FREQ_UNPROVEN=1 to select them while diagnosing.
+ * -DTIKU_RA8P1_FREQ_UNPROVEN=1 to select unproven entries while bringing
+ * one up.
  */
 
 /** @brief One selectable rung of the clock ladder. */
@@ -274,11 +280,11 @@ typedef struct {
 static const ra8p1_opoint_t opoints[] = {
     { 240U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_4,
       0U, RA8P1_CKDIV_2,  240U, DIV1, RA8P1_VSCR_VSCM_2, 120000000UL },
-    { 480U, 0U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
-      1U, RA8P1_CKDIV_4,  240U, DIV1, RA8P1_VSCR_VSCM_2, 120000000UL },
+    { 480U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
+      1U, RA8P1_CKDIV_4,  240U, DIV1, RA8P1_VSCR_VSCM_1, 120000000UL },
     /* SCICLK /8 would be 125, over its 120 ceiling; /10 = 100 is the fastest
      * legal setting at this rung, and the baud divisor follows sci_hz. */
-    { 1000U, 0U, RA8P1_PLIDIV_3, 250U, RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
+    { 1000U, 1U, RA8P1_PLIDIV_3, 250U, RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
       2U, RA8P1_CKDIV_10, 250U, DIV1, RA8P1_VSCR_VSCM_1, 100000000UL },
 };
 
@@ -301,6 +307,7 @@ static int pll_up(const ra8p1_opoint_t *op)
 
     STEP(1);
     if (tiku_cpu_ra8p1_mosc_start() != 0) {
+        FAILREC(0xF100UL);
         return -1;
     }
     STEP(2);
@@ -346,7 +353,7 @@ static int pll_up(const ra8p1_opoint_t *op)
     /* Undivided is safe at MOCO's 8 MHz: every ceiling in Table 9.2 is far
      * above it, so no domain is out of spec during the window. */
     TIKU_REG32(RA8P1_SCKDIVCR)  = 0UL;
-    TIKU_REG32(RA8P1_SCKDIVCR2) = 0UL;
+    TIKU_REG16(RA8P1_SCKDIVCR2) = 0U;
     TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_MOCO;
     while ((TIKU_REG8(RA8P1_SCKSCR) & RA8P1_SCKSCR_CKSEL_MASK) !=
            TIKU_RA8P1_CKSEL_MOCO) { }
@@ -357,13 +364,45 @@ static int pll_up(const ra8p1_opoint_t *op)
      * TOLD, so telling it after the clock rose would mean running a whole
      * window of fetches at too few waits.  (Going the other way the manual
      * inverts this; every rung here is entered from the boot clock, so this
-     * is always the speed-up order.) */
-    TIKU_REG32(RA8P1_MRCFREQ) = RA8P1_MRCFREQ_KEY | (uint32_t)op->mrc_mhz;
-    if ((TIKU_REG32(RA8P1_MRCFREQ) & RA8P1_MRCFREQ_MHZ_MASK) !=
-        (uint32_t)op->mrc_mhz) {
-        TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
-        clock_protect(0);
-        return -1;      /* notification did not land; do not raise the clock */
+     * is always the speed-up order.)
+     *
+     * Write-until-it-reads-back, which is the manual's own flow (Figure
+     * 60.5 loops the write, and the vendor BSP does the same): the
+     * notification can miss on a first attempt, and treating one miss as
+     * failure is why recipe-crossing rung changes refused while the same
+     * write from another rung sailed.  Extra MRAM gets the same telling --
+     * MRPCLK is half of MRICLK at every rung in this table. */
+    {
+        unsigned long tell;
+
+        for (tell = 100UL; tell != 0UL; tell--) {
+            TIKU_REG32(RA8P1_MRCFREQ) =
+                RA8P1_MRCFREQ_KEY | (uint32_t)op->mrc_mhz;
+            if ((TIKU_REG32(RA8P1_MRCFREQ) & RA8P1_MRCFREQ_MHZ_MASK) ==
+                (uint32_t)op->mrc_mhz) {
+                break;
+            }
+        }
+        if (tell == 0UL) {
+            TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
+            clock_protect(0);
+            FAILREC(0xF200UL);
+            return -1;  /* notification never landed; do not raise the clock */
+        }
+        for (tell = 100UL; tell != 0UL; tell--) {
+            TIKU_REG32(RA8P1_MREFREQ) =
+                RA8P1_MREFREQ_KEY | (uint32_t)(op->mrc_mhz / 2U);
+            if ((TIKU_REG32(RA8P1_MREFREQ) & RA8P1_MRCFREQ_MHZ_MASK) ==
+                (uint32_t)(op->mrc_mhz / 2U)) {
+                break;
+            }
+        }
+        if (tell == 0UL) {
+            TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
+            clock_protect(0);
+            FAILREC(0xF400UL);
+            return -1;
+        }
     }
     /* ICLK lands past half of SRAM's 250 MHz ceiling at every rung, so one
      * wait, which is the only setting this bit has. */
@@ -371,6 +410,25 @@ static int pll_up(const ra8p1_opoint_t *op)
     TIKU_REG8(RA8P1_SRAMWTSC) = (uint8_t)RA8P1_SRAMWTSC_WTEN;
 
     TIKU_REG8(RA8P1_PLLCR) = (uint8_t)RA8P1_PLLCR_PLLSTP;   /* stop first */
+    /*
+     * Wait for the stop to TAKE, not merely be requested.  Reprogramming
+     * a VCO that is still spinning down from the old multiplier is how
+     * every recipe-to-recipe transition (x40 to x250 and back) failed to
+     * relock while same-recipe changes sailed: the one path that worked
+     * crossed a VSCR transition whose settling wait supplied this gap by
+     * accident.  PLLSF clearing is the hardware saying the PLL is down.
+     */
+    {
+        unsigned long spd;
+
+        for (spd = 100000UL; spd != 0UL; spd--) {
+            if ((TIKU_REG8(RA8P1_OSCSF) & RA8P1_OSCSF_PLLSF) == 0U) {
+                break;
+            }
+        }
+    }
+    tiku_cpu_ra8p1_delay_us(100U);
+
     TIKU_REG32(RA8P1_PLLCCR) = RA8P1_PLLCCR_PLIDIV(op->plidiv) |
                                RA8P1_PLLCCR_PLLMULNF(op->pllmulnf) |
                                RA8P1_PLLCCR_PLLMUL((uint32_t)op->pllmul);
@@ -405,12 +463,22 @@ static int pll_up(const ra8p1_opoint_t *op)
          * and answering, which is what a failed rung change should leave. */
         TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
         clock_protect(0);
+        FAILREC(0xF300UL | TIKU_REG8(RA8P1_OSCSF));
         return -1;
     }
 
     STEP(8);
     TIKU_REG32(RA8P1_SCKDIVCR)  = SCKDIVCR_TREE(op->scale);
-    TIKU_REG32(RA8P1_SCKDIVCR2) = SCKDIVCR2_TREE(op->scale, op->cpuck0div);
+    /*
+     * 16-BIT, AND THE WIDTH IS LOAD-BEARING: SCKDIVCR2 is a 16-bit register
+     * at +0x024 and SCKSCR -- the system clock SOURCE -- is the byte at
+     * +0x026.  A 32-bit store here also writes 0x00 over SCKSCR, and CKSEL 0
+     * selects the HOCO, which this part keeps disabled -- a transient select
+     * of a dead oscillator on every rung change, losing nondeterministically
+     * above 240 MHz.
+     */
+    TIKU_REG16(RA8P1_SCKDIVCR2) =
+        (uint16_t)SCKDIVCR2_TREE(op->scale, op->cpuck0div);
     TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_PLL1P;
     /* Read back: the switch crosses into the clock domain being switched, and
      * continuing before it lands would run the next writes at an unknown
@@ -517,33 +585,49 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
      * back to the rung that was already proven, and only if THAT cannot be
      * re-established accept the parked tree and retune everything down to it.
      */
-    if (pll_up(op) != 0) {
-        if (cur_op == 0 || pll_up(cur_op) != 0) {
-            tiku_cpu_ra8p1_spin_invalidate();
-            (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
-            tiku_uart_init();
+    /*
+     * Atomic, and that closes the last nondeterminism.  An interrupt taken
+     * mid-change means exception entry through a half-reprogrammed machine:
+     * a parked 8 MHz tree, caches off inside the voltage transition, MRAM
+     * waits mid-retell.  Whether a tick landed in the window was the dice
+     * every rung change had been rolling.  The vendor BSP masks interrupts
+     * around its clock changes for the same reason.
+     */
+    {
+        uint32_t primask;
+
+        __asm__ volatile ("mrs %0, primask" : "=r" (primask));
+        __asm__ volatile ("cpsid i" ::: "memory");
+
+        if (pll_up(op) != 0) {
+            if (cur_op == 0 || pll_up(cur_op) != 0) {
+                tiku_cpu_ra8p1_spin_invalidate();
+                (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
+                tiku_uart_init();
+            }
+            if (primask == 0UL) {
+                __asm__ volatile ("cpsie i" ::: "memory");
+            }
+            return;
+        }
+        cur_op = op;
+
+        /* Still masked: the retune and console re-init below are part of the
+         * same not-yet-consistent window -- a tick against the stale reload
+         * or an RX against a half-initialised SCI is the same dice. */
+        tiku_cpu_ra8p1_spin_invalidate();
+        STEP(12);
+        (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
+        STEP(13);
+        tiku_uart_init();
+        STEP(14);
+
+        if (primask == 0UL) {
+            __asm__ volatile ("cpsie i" ::: "memory");
         }
         return;
     }
-    cur_op = op;
 
-    /* Everything the clock feeds is re-timed HERE, because this is the one
-     * place that knows the clock moved.  Leaving it to callers is how a port
-     * ends up with a tick at the wrong rate and a console at the wrong baud,
-     * each looking like its own bug.
-     *
-     * The delay-loop calibration is DISCARDED rather than recomputed: it is
-     * measured lazily against the tick, and the tick has just been retuned,
-     * so the next caller re-measures on a tree that has settled.  A cached
-     * figure from the previous rung would make every delay wrong by exactly
-     * the ratio between them -- which only ever bites on the SECOND change,
-     * and so survived a port that could only make one. */
-    tiku_cpu_ra8p1_spin_invalidate();
-    STEP(12);
-    (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
-    STEP(13);
-    tiku_uart_init();
-    STEP(14);
 }
 
 int tiku_cpu_freq_ra8p1_supported(unsigned int mhz)
@@ -584,7 +668,7 @@ unsigned long tiku_cpu_ra8p1_pclka_get_hz(void)
     /* PCLKA and CPUCLK0 divide the SAME source, so recover that source from
      * the core rate and its own divider before applying PCKA's. */
     unsigned long src = cpu_hz_now *
-        div_of(TIKU_REG32(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
+        div_of(TIKU_REG16(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
 
     return src / div_of(TIKU_REG32(RA8P1_SCKDIVCR) >>
                         RA8P1_SCKDIVCR_PCKA_SHIFT);
@@ -593,7 +677,7 @@ unsigned long tiku_cpu_ra8p1_pclka_get_hz(void)
 unsigned long tiku_cpu_ra8p1_bclk_get_hz(void)
 {
     unsigned long src = cpu_hz_now *
-        div_of(TIKU_REG32(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
+        div_of(TIKU_REG16(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
 
     return src / div_of(TIKU_REG32(RA8P1_SCKDIVCR) >>
                         RA8P1_SCKDIVCR_BCK_SHIFT);
@@ -602,7 +686,7 @@ unsigned long tiku_cpu_ra8p1_bclk_get_hz(void)
 unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void)
 {
     unsigned long src = cpu_hz_now *
-        div_of(TIKU_REG32(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
+        div_of(TIKU_REG16(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
 
     return src / div_of(TIKU_REG32(RA8P1_SCKDIVCR) >>
                         RA8P1_SCKDIVCR_PCKD_SHIFT);
