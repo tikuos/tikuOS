@@ -277,6 +277,14 @@ typedef struct {
  * input window reaches cleanly at 8 MHz (PLIDIV /3) times an integer 250 --
  * no fractional multiplier, and inside the 960-2400 VCO range.
  */
+/*
+ * No MOCO rung, and that is a decision rather than an omission.  Returning to
+ * the 8 MHz boot clock at runtime would put SCICLK at 8 MHz too, where the
+ * house 115200 misses by +8.5% -- far outside what a UART frames -- so the
+ * verb would trade the shell for the rung.  Nothing is lost by refusing it:
+ * 8 MHz IS the state the part boots in, before anything calls freq, so an
+ * idle-floor measurement simply declines to raise the clock.
+ */
 static const ra8p1_opoint_t opoints[] = {
     { 240U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_4,
       0U, RA8P1_CKDIV_2,  240U, DIV1, RA8P1_VSCR_VSCM_2, 120000000UL },
@@ -683,6 +691,15 @@ unsigned long tiku_cpu_ra8p1_bclk_get_hz(void)
                         RA8P1_SCKDIVCR_BCK_SHIFT);
 }
 
+unsigned long tiku_cpu_ra8p1_pclkb_get_hz(void)
+{
+    unsigned long src = cpu_hz_now *
+        div_of(TIKU_REG16(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
+
+    return src / div_of(TIKU_REG32(RA8P1_SCKDIVCR) >>
+                        RA8P1_SCKDIVCR_PCKB_SHIFT);
+}
+
 unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void)
 {
     unsigned long src = cpu_hz_now *
@@ -712,18 +729,61 @@ void tiku_cpu_boot_ra8p1_power_wfi_enter(void)
      * Deliberately not entered here, rather than mapped and hoped for.
      */
     /*
-     * Above 240 MHz the core must not enter Sleep at speed: the vendor's
-     * own BSP slows CPUCLK before every sleep ("Need to slow CPUCLK down
-     * before sleeping if it is above 240MHz") and the UM's low-power
-     * chapter hangs extra conditions on fast-clock transitions.  Observed
-     * here as exception-entry corruption moments after a rung change:
-     * wrong vector resolution and bus errors, i.e. a machine wrecked by
-     * its first idle.  Until the divider step-down dance is implemented
-     * and proven, a fast core idles awake -- correct first, frugal later.
+     * Above 240 MHz the core is stepped DOWN to ICLK for the duration of the
+     * sleep and restored on wake, which is what the vendor BSP does ("Need to
+     * slow CPUCLK down before sleeping if it is above 240MHz").
+     *
+     * NOT a correctness fix here, and the record should say so: with the
+     * SCKDIVCR2 store width corrected, sleeping at a full 1 GHz survives a
+     * soak of tick-paced idles with the step-down disabled.  An earlier
+     * session read a WFI gate as the cure for rung instability; it was only
+     * perturbing the window the width bug raced in.  This is kept because the
+     * vendor states it as a requirement -- a 40-iteration soak does not
+     * disprove a marginal effect -- and because idling a 1 GHz clock tree at
+     * ICLK should cost less.  Both claims are R9 PPK2 work; neither is
+     * measured yet.
+     *
+     * All four SCKDIVCR2 fields go to ICLK's divider rather than only the two
+     * the vendor writes: their shape leaves CPUCK1 and NPUCK at /1, which
+     * would stand the M33 at PLL1P against its 250 MHz ceiling.  Equal to
+     * ICLK satisfies every ordering rule at once and cannot exceed a ceiling
+     * that ICLK is already inside.
+     *
+     * A wake landing before the restore runs its handler at the reduced
+     * clock, which is the safe direction: exception entry is exactly what
+     * misbehaves at speed.
      */
+    uint16_t saved = 0U;
+    uint8_t  slowed = 0U;
+
     if (tiku_cpu_ra8p1_clock_get_hz() > 240000000UL) {
-        return;
+        uint32_t ick = (TIKU_REG32(RA8P1_SCKDIVCR) >>
+                        RA8P1_SCKDIVCR_ICK_SHIFT) & 0xFU;
+
+        saved  = TIKU_REG16(RA8P1_SCKDIVCR2);
+        slowed = 1U;
+        clock_protect(1);
+        TIKU_REG16(RA8P1_SCKDIVCR2) = (uint16_t)(
+            (ick << RA8P1_SCKDIVCR2_MRICK_SHIFT)  |
+            (ick << RA8P1_SCKDIVCR2_NPUCK_SHIFT)  |
+            (ick << RA8P1_SCKDIVCR2_CPUCK1_SHIFT) |
+            (ick << RA8P1_SCKDIVCR2_CPUCK0_SHIFT));
+        clock_protect(0);
     }
+
     __asm__ volatile ("dsb 0xF" ::: "memory");
     __asm__ volatile ("wfi" ::: "memory");
+
+    if (slowed) {
+        unsigned long settle;
+
+        clock_protect(1);
+        TIKU_REG16(RA8P1_SCKDIVCR2) = saved;
+        clock_protect(0);
+        /* Let the rail catch up before real work resumes, as on a rung
+         * change; NOPs only, and short because the PLL never moved. */
+        for (settle = 2000UL; settle != 0UL; settle--) {
+            __asm__ volatile ("nop");
+        }
+    }
 }

@@ -118,6 +118,13 @@ unsigned long tiku_cpu_ra8p1_clock_get_hz(void);
 unsigned long tiku_cpu_ra8p1_pclka_get_hz(void);
 
 /**
+ * @brief Peripheral clock B rate in Hz -- the CAC's measurable proxy.
+ *
+ * @return The rate PCLKB is running at
+ */
+unsigned long tiku_cpu_ra8p1_pclkb_get_hz(void);
+
+/**
  * @brief SCICLK rate in Hz -- what the console's baud divisor divides.
  *
  * A separate clock from PCLKA, with its own source select; they only coincide

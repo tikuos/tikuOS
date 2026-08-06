@@ -27,6 +27,11 @@
 #include <arch/stm32n6/tiku_cpu_freq_boot_arch.h> /* clock-tree read-back */
 #endif
 
+#if defined(PLATFORM_RA8P1)
+#include <arch/ra8p1/tiku_cpu_freq_boot_arch.h>   /* clock getters + CAC */
+#include <arch/ra8p1/tiku_ra8p1_regs.h>           /* CAC clock selectors */
+#endif
+
 #if defined(PLATFORM_AMBIQ) && defined(AM_PART_APOLLO510)
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>   /* HP identity probe */
 
@@ -178,6 +183,57 @@ static void freq_cmd_probe_n6(void)
 }
 #endif /* PLATFORM_STM32N6 */
 
+#if defined(PLATFORM_RA8P1)
+/*
+ * PCLKB is the measurable proxy for the core: the CAC cannot count CPUCLK0
+ * directly, and PCLKB divides from the same PLL1P at a ratio fixed per rung.
+ */
+
+/**
+ * @brief Measure the live tree against the crystal, on-chip.
+ *
+ * Counts one clock against another with no host stopwatch involved, so a rung
+ * that reports a rate it is not running at is caught rather than believed.
+ */
+static void freq_cmd_probe_ra8p1(void)
+{
+    unsigned long cpu = tiku_cpu_ra8p1_clock_get_hz();
+    unsigned long pclkb = tiku_cpu_ra8p1_pclkb_get_hz();
+    uint16_t count;
+    unsigned long measured;
+
+    SHELL_PRINTF("  CPUCLK0   %lu Hz (as configured)\n", cpu);
+    SHELL_PRINTF("  PCLKB     %lu Hz, SCICLK %lu Hz, BCLK %lu Hz\n", pclkb,
+                 tiku_cpu_ra8p1_sciclk_get_hz(),
+                 tiku_cpu_ra8p1_bclk_get_hz());
+
+    /*
+     * Widest reference window (/8192).  At /32 one count is 750 kHz, so a
+     * perfectly good tree reads a count low and looks 1.25% out -- the
+     * measurement's own quantisation, mistakeable for a clock error.  Here a
+     * count is ~2.9 kHz, and 62.5 MHz still lands well inside the 16-bit
+     * counter.  The multiply is widened because count x 24 MHz overflows 32
+     * bits by two orders of magnitude.
+     */
+    count = tiku_cpu_ra8p1_cac_measure(RA8P1_CAC_CLK_PCLKB,
+                                       RA8P1_CAC_CLK_MAIN, 3U);
+    if (count == 0U) {
+        SHELL_PRINTF("  CAC       measurement did not complete\n");
+        return;
+    }
+    measured = (unsigned long)(((unsigned long long)count *
+                                (unsigned long long)TIKU_BOARD_MOSC_HZ) /
+                               8192ULL);
+    {
+        long err = (long)measured - (long)pclkb;
+        long ppt = (pclkb != 0UL) ? ((err * 1000L) / (long)pclkb) : 0L;
+
+        SHELL_PRINTF("  CAC       PCLKB measured %lu Hz vs %lu expected"
+                     " (%ld ppt)\n", measured, pclkb, ppt);
+    }
+}
+#endif /* PLATFORM_RA8P1 */
+
 void
 tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
 {
@@ -202,6 +258,12 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         return;
     }
 #endif
+#if defined(PLATFORM_RA8P1)
+    if (strcmp(argv[1], "probe") == 0) {
+        freq_cmd_probe_ra8p1();
+        return;
+    }
+#endif
 
     /* Parse the requested core frequency in MHz (decimal). */
     p   = argv[1];
@@ -216,6 +278,9 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         SHELL_PRINTF("  no arg: show the core clock; probe: the clock tree;\n");
         SHELL_PRINTF("  <mhz>: 64 (HSI), any exact divisor of 1200 up to 600, "
                      "or 800 (overdrive).\n");
+#elif defined(PLATFORM_RA8P1)
+        SHELL_PRINTF("  no arg: show the core clock;\n");
+        SHELL_PRINTF("  <mhz>: 240 (boot default), 480 or 1000.\n");
 #else
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: request a frequency "
                      "(96, or turbo: 192 on Apollo4, 250 on Apollo510).\n");
