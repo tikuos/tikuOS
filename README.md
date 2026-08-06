@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
-  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350%20%7C%20nRF54L-red?style=flat-square" alt="MCU"></a>
+  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350%20%7C%20nRF54L%20%7C%20RA8P1-red?style=flat-square" alt="MCU"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
   <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-58%20commands-orange?style=flat-square" alt="Shell"></a>
   <a href="#networking"><img src="https://img.shields.io/badge/net-Wi--Fi%20%7C%20TLS%20%7C%20MQTT-brightgreen?style=flat-square" alt="Networking"></a>
@@ -40,6 +40,15 @@
 | **Raspberry Pi**<br><sub>32-bit · RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash | :green_circle: |
 | **Nordic**<br><sub>32-bit · Cortex-M33</sub> | nRF54L15 DK | 256 KB | 1.5 MB RRAM | :green_circle: |
 | | nRF54LM20-DK · 128 MHz + Axon NPU | 512 KB | 2 MB RRAM | :green_circle: |
+| **Renesas RA8**<br><sub>32-bit · Cortex-M85</sub> | EK-RA8P1 · M85 240/480/1000 MHz + Ethos-U55 | 1664 KB | 1 MB MRAM | :green_circle: |
+| **STMicro STM32N6**<br><sub>32-bit · Cortex-M55</sub> | Nucleo-144 N657X0-Q · up to 600 MHz | 3840 KB | 64 MB NOR | :yellow_circle: |
+
+:green_circle: verified by the TikuBench matrix &nbsp;·&nbsp;
+:yellow_circle: brought up, not yet in that matrix
+
+The RA8P1 also carries 64 MB of SDRAM and 64 MB of Octo-SPI NOR, both driven
+by the port; the STM32N6 has no internal NVM, so its durable store is the
+external NOR.
 
 ---
 
@@ -58,11 +67,17 @@ make flash MCU=rp2350                          # picotool, or copy the UF2 to RP
 
 # --- Nordic nRF54L (arm-none-eabi-gcc + nrfutil / SEGGER J-Link) ------------
 make flash MCU=nrf54lm20b TIKU_SHELL_ENABLE=1  # also nrf54lm20a / nrf54l15
+
+# --- Renesas EK-RA8P1 (arm-none-eabi-gcc + on-board J-Link OB) --------------
+make flash MCU=ra8p1 TIKU_SHELL_ENABLE=1       # boots at 240 MHz; `freq 1000`
+
+# --- ST Nucleo-N657X0-Q (arm-none-eabi-gcc + STM32CubeProgrammer) -----------
+make flash MCU=stm32n6 TIKU_SHELL_ENABLE=1
 ```
 
 The kernel, shell, VFS, BASIC, and networking are architecture-neutral — the
-same source tree targets all four families through a device/board header
-abstraction.
+same source tree targets all six families, from a 16-bit MSP430 at 8 KB of RAM
+to a 1 GHz Cortex-M85, through a device/board header abstraction.
 
 ---
 
@@ -248,7 +263,7 @@ tikuOS> changed /dev/gpio/1/3      # block until P1.3 changes
 
 | Flag | Effect |
 |------|--------|
-| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15`, `nrf54lm20a`, `nrf54lm20b` |
+| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15`, `nrf54lm20a`, `nrf54lm20b`, `ra8p1`, `stm32n6` |
 | `TIKU_SHELL_ENABLE=1` | Interactive shell (UART / USB-CDC / Telnet) |
 | `TIKU_SHELL_BASIC_ENABLE=1` | Tiku BASIC interpreter (needs `MEMORY_MODEL=large`) |
 | `TIKU_INIT_ENABLE=1` | FRAM/NVM-backed boot sequence (implies shell) |
