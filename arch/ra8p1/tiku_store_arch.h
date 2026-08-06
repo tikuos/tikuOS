@@ -54,7 +54,32 @@ typedef enum {
     TIKU_STORE_ERR_LEN,    /**< the length does not fit the staging disk  */
     TIKU_STORE_ERR_WRITE,  /**< the flash refused it                      */
     TIKU_STORE_ERR_VERIFY, /**< it read back differently than it went in  */
+    TIKU_STORE_BUSY,       /**< an import is running                      */
 } tiku_store_state_t;
+
+/**
+ * @brief Begin an import if the host has just written a commit record.
+ *
+ * @param lba    first block of the write that just completed
+ * @param blocks its length in blocks
+ * @return TIKU_STORE_BUSY once started, TIKU_STORE_IDLE for other writes,
+ *         or a negative-sense error state
+ */
+tiku_store_state_t tiku_ra8p1_store_begin(uint32_t lba, uint32_t blocks);
+
+/**
+ * @brief Advance an import by one step; call from the same pump as MSC.
+ *
+ * @param done receives payload bytes published so far; may be NULL
+ * @return 1 while more remains, 0 when idle or finished
+ */
+int tiku_ra8p1_store_step(uint32_t *done);
+
+/** @brief Non-zero while an import owns the staging window. */
+int tiku_ra8p1_store_busy(void);
+
+/** @brief The outcome of the last import. */
+tiku_store_state_t tiku_ra8p1_store_last(void);
 
 /**
  * @brief Act on a commit record if the host has just written one.

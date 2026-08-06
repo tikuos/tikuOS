@@ -19,6 +19,7 @@
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
 #include <kernel/usb/tiku_usbd_msc.h>
+#include "tiku_store_arch.h"
 
 /*
  * THE CLOCK QUESTION, SETTLED BY THE MANUAL RATHER THAN BY FAMILY RESEMBLANCE.
@@ -256,6 +257,10 @@ int tiku_ra8p1_usbhs_up(int want_high)
 #define USBD_REQ_MSC_GET_MAX_LUN   0xFEU
 #define USBD_REQ_MSC_RESET         0xFFU
 
+/* Standard feature selector 0 is ENDPOINT_HALT; recipient 2 is an endpoint. */
+#define USBD_FEATURE_EP_HALT       0x00U
+#define USBD_RECIP_ENDPOINT        0x02U
+
 #define USBD_EP0_MAXPACKET  64U
 
 #define USBD_CLASS_MSC      0x08U
@@ -339,7 +344,7 @@ static ep0_trace_t *tr;      /* the entry being filled, or NULL */
 static uint8_t  ep0_buf[80];
 /* Recovery counters live up here because EP0 raises them: the class reset
  * arrives on the control pipe, not the bulk one. */
-static uint32_t n_msc_reset, n_csw_fail;
+static uint32_t n_msc_reset, n_csw_fail, n_ep_halt, n_ep_unhalt;
 static volatile uint32_t n_irq, n_dvst;
 static uint8_t  last_ops[4];
 static uint8_t  last_op_i;
@@ -591,7 +596,7 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wlen)
 
 static void ep0_on_setup(uint16_t sts)
 {
-    uint16_t ctsq, req, val, len;
+    uint16_t ctsq, req, val, idx, len;
     uint8_t type, request;
 
     /*
@@ -626,6 +631,7 @@ static void ep0_on_setup(uint16_t sts)
 
     req     = TIKU_REG16(RA8P1_USBHS_USBREQ);
     val     = TIKU_REG16(RA8P1_USBHS_USBVAL);
+    idx     = TIKU_REG16(RA8P1_USBHS_USBINDX);
     len     = TIKU_REG16(RA8P1_USBHS_USBLENG);
     type    = (uint8_t)(req & 0xFFU);          /* bmRequestType */
     request = (uint8_t)(req >> 8);             /* bRequest      */
@@ -690,9 +696,36 @@ static void ep0_on_setup(uint16_t sts)
         ep0_send(ep0_buf, 1U, len);
         break;
 
-    case USBD_REQ_SET_INTERFACE:
     case USBD_REQ_CLEAR_FEATURE:
     case USBD_REQ_SET_FEATURE:
+        /*
+         * BULK-ONLY RECOVERY, STEP TWO.  After a stalled command the host
+         * clears the halt on each pipe before retrying, and clearing it means
+         * more than dropping the STALL response: the data toggle has to go
+         * back to DATA0, because the host restarts its own at DATA0 and a
+         * device that resumes mid-sequence NAKs every packet it is sent while
+         * looking perfectly healthy.  SQCLR is what makes the recovery real.
+         */
+        if ((type & 0x1FU) == USBD_RECIP_ENDPOINT &&
+            val == USBD_FEATURE_EP_HALT) {
+            uint8_t pipe = ((idx & 0x0FU) == 1U) ? MSC_PIPE_IN
+                                                 : MSC_PIPE_OUT;
+
+            if (request == USBD_REQ_CLEAR_FEATURE) {
+                pipe_pid(pipe, RA8P1_PIPECTR_PID_NAK);
+                TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe)) =
+                    (uint16_t)(RA8P1_PIPECTR_SQCLR | RA8P1_PIPECTR_PID_NAK);
+                pipe_pid(pipe, RA8P1_PIPECTR_PID_BUF);
+                n_ep_unhalt++;
+            } else {
+                pipe_pid(pipe, RA8P1_PIPECTR_PID_STALL);
+                n_ep_halt++;
+            }
+        }
+        ep0_ack();
+        break;
+
+    case USBD_REQ_SET_INTERFACE:
         ep0_ack();
         break;
 
@@ -844,7 +877,7 @@ static tiku_usbd_msc_t msc_medium = {
 };
 static uint8_t  msc_reply[TIKU_USBD_MSC_REPLY_MAX];
 static uint32_t n_cbw, n_rd, n_wr, n_bad;
-static uint32_t n_pkt_out, n_stall_out;
+static uint32_t n_pkt_out, n_stall_out, n_refused;
 static uint32_t last_wr_lba, last_wr_blocks;
 static uint16_t cfg_in, buf_in, maxp_in, cfg_out, buf_out, maxp_out;
 static uint16_t last_dtln;
@@ -1114,6 +1147,20 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     }
     n_cbw++;
     last_ops[last_op_i & 3u] = cbw.cdb[0];
+    /*
+     * ONE WRITER AT A TIME, ENFORCED HERE.  An import is reading the staging
+     * window for minutes; a host write landing in it meanwhile would be
+     * published as part of a model it was never part of.  NOT READY is the
+     * sense a host understands as "ask again shortly".
+     */
+    if (tiku_ra8p1_store_busy()) {
+        tiku_usbd_msc_fail(&msc_medium, TIKU_USBD_MSC_SENSE_NOTREADY,
+                           TIKU_USBD_MSC_ASC_NOT_READY);
+        tiku_usbd_msc_build_csw(csw, cbw.tag, cbw.host_len, 1U);
+        (void)pipe_write(csw, TIKU_USBD_MSC_CSW_LEN);
+        n_refused++;
+        return;
+    }
     last_op_i++;
 
     /* The SAME decoder the Apollo510 driver uses.  Two controllers, one
@@ -1133,6 +1180,11 @@ void tiku_ra8p1_usbhs_msc_poll(void)
          * on behalf of whoever asked. */
         last_wr_lba    = cmd.lba;
         last_wr_blocks = cmd.nblk;
+        /* A commit record starts an import; it does not run one here, where
+         * the CSW for this very write is still owed to the host. */
+        if (cmd.lba == tiku_ra8p1_store_commit_lba()) {
+            (void)tiku_ra8p1_store_begin(cmd.lba, cmd.nblk);
+        }
         break;
     case TIKU_USBD_MSC_ACT_REPLY:
         ok = pipe_write(msc_reply, cmd.len);
@@ -1141,7 +1193,14 @@ void tiku_ra8p1_usbhs_msc_poll(void)
         break;
     }
     if (!ok) {
+        /*
+         * A data phase that did not complete leaves the host expecting bytes
+         * that will never come; the transport's defined answer is to halt the
+         * pipe so the host stops waiting and starts recovery, which it cannot
+         * do while the device merely reports failure and stays ready.
+         */
         n_bad++;
+        pipe_pid(MSC_PIPE_IN, RA8P1_PIPECTR_PID_STALL);
     }
 
     tiku_usbd_msc_build_csw(csw, cbw.tag, cmd.residue, cmd.status);

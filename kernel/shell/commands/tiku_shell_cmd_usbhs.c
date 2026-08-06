@@ -35,6 +35,19 @@
  */
 
 /**
+ * @brief One turn of the disk and of any import running behind it.
+ *
+ * Both live on the same pump so an import advances between commands rather
+ * than instead of them: the store steps one erase sector, the transport
+ * refuses host writes meanwhile, and the disk never leaves the bus.
+ */
+static void usbhs_pump(void)
+{
+    tiku_ra8p1_usbhs_msc_poll();
+    (void)tiku_ra8p1_store_step(NULL);
+}
+
+/**
  * @brief Handle `usb up|down|info`.
  *
  * @param argc Argument count
@@ -54,7 +67,7 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
             SHELL_PRINTF("usb: bring-up failed (%d)\n", rc);
             return;
         }
-        (void)tiku_shell_add_pump(tiku_ra8p1_usbhs_msc_poll);
+        (void)tiku_shell_add_pump(usbhs_pump);
         (void)tiku_ra8p1_usbhs_attach(1);
         SHELL_PRINTF("usb: attached; the host should find a 64 MB disk\n");
         return;
@@ -62,7 +75,7 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
 
     if (argc >= 2u && tiku_cmd_streq(argv[1], "down")) {
         (void)tiku_ra8p1_usbhs_attach(0);
-        tiku_shell_remove_pump(tiku_ra8p1_usbhs_msc_poll);
+        tiku_shell_remove_pump(usbhs_pump);
         tiku_ra8p1_usbhs_down();
         SHELL_PRINTF("usb: detached\n");
         return;
@@ -112,6 +125,10 @@ void tiku_shell_cmd_store(uint8_t argc, const char *argv[])
     (void)argc;
     (void)argv;
 
+    if (tiku_ra8p1_store_busy()) {
+        SHELL_PRINTF("store: importing...\n");
+        return;
+    }
     if (!tiku_ra8p1_store_info(name, &len)) {
         SHELL_PRINTF("store: empty\n");
         SHELL_PRINTF("       write a model to the disk, then a commit record"

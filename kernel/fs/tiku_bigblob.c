@@ -64,6 +64,94 @@ static const bigblob_hdr_t *hdr_at(tiku_nvm_backend_t *be, uint32_t slot_off)
     return h;
 }
 
+/** @brief Payload ground covered per step; see the header for the sizing. */
+#define BIGBLOB_STEP  4096u
+
+int tiku_bigblob_open(tiku_nvm_backend_t *be, uint32_t slot_off,
+                      const char *name, const void *src, uint32_t len,
+                      tiku_bigblob_wr_t *w)
+{
+    size_t n;
+
+    if (be == NULL || be->write == NULL || be->erase == NULL || w == NULL ||
+        src == NULL || name == NULL || len == 0U) {
+        return TIKU_BIGBLOB_ERR_PARAM;
+    }
+    n = strlen(name);
+    if (n > TIKU_BIGBLOB_NAME_MAX) {
+        return TIKU_BIGBLOB_ERR_PARAM;
+    }
+    if ((uint32_t)be->size < slot_off + TIKU_BIGBLOB_HDR_BYTES ||
+        ((uint32_t)be->size - slot_off - TIKU_BIGBLOB_HDR_BYTES) < len) {
+        return TIKU_BIGBLOB_ERR_SPACE;
+    }
+
+    memset(w, 0, sizeof(*w));
+    w->be       = be;
+    w->src      = (const uint8_t *)src;
+    w->slot_off = slot_off;
+    w->len      = len;
+    memcpy(w->name, name, n);
+
+    /* Unpublish first: from here the slot reads as empty, so a power cut
+     * during the minutes that follow leaves no blob rather than a splice. */
+    if (be->erase(be, slot_off, TIKU_BIGBLOB_HDR_BYTES) != 0) {
+        return TIKU_BIGBLOB_ERR_IO;
+    }
+    w->active = 1U;
+    return TIKU_BIGBLOB_OK;
+}
+
+int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
+{
+    uint32_t payload, n;
+
+    if (w == NULL || !w->active) {
+        return TIKU_BIGBLOB_ERR_PARAM;
+    }
+    payload = w->slot_off + TIKU_BIGBLOB_HDR_BYTES;
+
+    if (w->done < w->len) {
+        n = w->len - w->done;
+        if (n > BIGBLOB_STEP) {
+            n = BIGBLOB_STEP;
+        }
+        /* Erase and program the same ground in one step, so the medium is
+         * never left erased-but-unwritten across a return to the caller. */
+        if (w->be->erase(w->be, payload + w->done, n) != 0 ||
+            w->be->write(w->be, payload + w->done, &w->src[w->done], n) != 0) {
+            w->active = 0U;
+            return TIKU_BIGBLOB_ERR_IO;
+        }
+        w->done += n;
+        if (done != NULL) {
+            *done = w->done;
+        }
+        return 1;
+    }
+
+    /* Publish, with the checksum of what the MEDIUM holds rather than of the
+     * caller's buffer, so a write that landed wrong is caught now. */
+    {
+        bigblob_hdr_t h;
+
+        memset(&h, 0, sizeof(h));
+        h.magic = BIGBLOB_MAGIC;
+        h.len   = w->len;
+        h.crc   = tiku_nvm_crc32(w->be->base + payload, w->len);
+        memcpy(h.name, w->name, sizeof(h.name));
+        if (w->be->write(w->be, w->slot_off, &h, sizeof(h)) != 0) {
+            w->active = 0U;
+            return TIKU_BIGBLOB_ERR_IO;
+        }
+    }
+    w->active = 0U;
+    if (done != NULL) {
+        *done = w->len;
+    }
+    return 0;
+}
+
 int tiku_bigblob_write(tiku_nvm_backend_t *be, uint32_t slot_off,
                        const char *name, const void *src, uint32_t len)
 {

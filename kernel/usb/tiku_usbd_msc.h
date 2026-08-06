@@ -65,10 +65,12 @@
 
 /** @brief Sense keys and additional sense codes this raises. */
 #define TIKU_USBD_MSC_SENSE_NONE       0x00u
+#define TIKU_USBD_MSC_SENSE_NOTREADY   0x02u
 #define TIKU_USBD_MSC_SENSE_HARDWARE   0x04u
 #define TIKU_USBD_MSC_SENSE_ILLEGAL    0x05u
 #define TIKU_USBD_MSC_ASC_OPCODE       0x20u   /* invalid command operation */
 #define TIKU_USBD_MSC_ASC_LBA_RANGE    0x21u   /* LBA out of range          */
+#define TIKU_USBD_MSC_ASC_NOT_READY    0x04u   /* becoming ready            */
 
 /** @brief A command wrapper, decoded.  @c cdb points into the caller's buffer. */
 typedef struct {

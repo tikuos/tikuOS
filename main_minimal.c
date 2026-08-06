@@ -1061,6 +1061,11 @@ int main(void)
         uint32_t mark = *cyc;
         uint32_t t0 = *cyc;
         uint32_t last_wr = 0xFFFFFFFFu;
+        unsigned last_import_busy = 0u;
+        static const char *const sname_done[7] = {
+            "idle", "DONE", "bad magic", "bad length",
+            "flash write failed", "verify failed", "busy"
+        };
 
         tiku_uart_printf("usbhs: serving; EP0 is on the interrupt, MSC on"
                          " this loop\n");
@@ -1083,6 +1088,17 @@ int main(void)
                 tiku_cpu_ra8p1_delay_us(10000u);
             }
             tiku_ra8p1_usbhs_msc_poll();
+            /* One erase sector per turn, interleaved with serving the disk. */
+            if (tiku_ra8p1_store_step(NULL) == 0 &&
+                last_import_busy) {
+                last_import_busy = 0u;
+                tiku_uart_printf("store: import -> %s\n",
+                                 sname_done[(unsigned)tiku_ra8p1_store_last()
+                                            < 7u
+                                   ? (unsigned)tiku_ra8p1_store_last() : 0u]);
+            } else if (tiku_ra8p1_store_busy()) {
+                last_import_busy = 1u;
+            }
 
             if ((*cyc - mark) < (5u * 240000000u)) {
                 continue;
@@ -1111,10 +1127,14 @@ int main(void)
                     };
                     tiku_store_state_t r;
 
-                    tiku_uart_printf("store: commit record seen, importing\n");
-                    r = tiku_ra8p1_store_on_write(wl, wb);
-                    tiku_uart_printf("store: import -> %s\n",
-                                     sname[(unsigned)r < 6u ? (unsigned)r : 0u]);
+                    tiku_uart_printf("store: commit record seen, importing"
+                                     " (the disk stays up)\n");
+                    r = tiku_ra8p1_store_begin(wl, wb);
+                    if (r != TIKU_STORE_BUSY) {
+                        tiku_uart_printf("store: import -> %s\n",
+                                         sname[(unsigned)r < 6u
+                                               ? (unsigned)r : 0u]);
+                    }
                 }
             }
             last_wr = wr;

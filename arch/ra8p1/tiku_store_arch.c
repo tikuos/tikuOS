@@ -49,6 +49,89 @@ uint32_t tiku_ra8p1_store_commit_lba(void)
     return (uint32_t)((STORE_STAGE_BYTES / STORE_BLOCK) - 1UL);
 }
 
+/*
+ * An import owns the staging window for as long as it runs, and the window is
+ * also the disk the host writes.  There is exactly one writer at a time and
+ * the medium cannot arbitrate, so the transport refuses host writes while
+ * this is set rather than letting the two interleave into a blob that is
+ * partly one model and partly the next.
+ */
+static tiku_bigblob_wr_t   store_wr;
+static tiku_store_state_t  store_last = TIKU_STORE_IDLE;
+static uint8_t             store_active;
+
+int tiku_ra8p1_store_busy(void)
+{
+    return (int)store_active;
+}
+
+tiku_store_state_t tiku_ra8p1_store_last(void)
+{
+    return store_last;
+}
+
+tiku_store_state_t tiku_ra8p1_store_begin(uint32_t lba, uint32_t blocks)
+{
+    const tiku_store_commit_t *c;
+    struct tiku_nvm_backend *be;
+    char name[TIKU_STORE_NAME_MAX + 1u];
+
+    (void)blocks;
+    if (store_active) {
+        return TIKU_STORE_BUSY;
+    }
+    if (lba != tiku_ra8p1_store_commit_lba()) {
+        return TIKU_STORE_IDLE;
+    }
+
+    c = (const tiku_store_commit_t *)(const void *)
+        (STORE_STAGE_BASE + ((uint32_t)lba * STORE_BLOCK));
+    if (c->magic != TIKU_STORE_MAGIC) {
+        store_last = TIKU_STORE_ERR_MAGIC;
+        return store_last;
+    }
+    if (c->len == 0UL || c->len > ((uint32_t)lba * STORE_BLOCK)) {
+        store_last = TIKU_STORE_ERR_LEN;
+        return store_last;
+    }
+    memcpy(name, c->name, sizeof(name));
+    name[TIKU_STORE_NAME_MAX] = '\0';
+
+    be = tiku_ra8p1_xflash_backend();
+    if (be == NULL ||
+        tiku_bigblob_open(be, STORE_SLOT_OFF, name,
+                          (const void *)STORE_STAGE_BASE, c->len,
+                          &store_wr) != TIKU_BIGBLOB_OK) {
+        store_last = TIKU_STORE_ERR_WRITE;
+        return store_last;
+    }
+    store_active = 1U;
+    store_last   = TIKU_STORE_BUSY;
+    return TIKU_STORE_BUSY;
+}
+
+int tiku_ra8p1_store_step(uint32_t *done)
+{
+    int r;
+
+    if (!store_active) {
+        return 0;
+    }
+    r = tiku_bigblob_step(&store_wr, done);
+    if (r > 0) {
+        return 1;
+    }
+    store_active = 0U;
+    if (r < 0) {
+        store_last = TIKU_STORE_ERR_WRITE;
+        return 0;
+    }
+    /* Verified from the medium before anything is told it succeeded. */
+    store_last = tiku_ra8p1_store_verify() ? TIKU_STORE_DONE
+                                           : TIKU_STORE_ERR_VERIFY;
+    return 0;
+}
+
 tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks)
 {
     const tiku_store_commit_t *c;

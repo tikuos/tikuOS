@@ -70,6 +70,54 @@ typedef struct {
     char     name[TIKU_BIGBLOB_NAME_MAX + 1u];
 } tiku_bigblob_info_t;
 
+/*
+ * A STREAMED WRITE, because a blocking one is a denial of service.
+ *
+ * Publishing a model-sized object takes minutes on this medium, and a device
+ * that stops answering for minutes is one a host resets.  So the write is a
+ * cursor the caller advances a step at a time, between whatever else it owes
+ * the world.  A step is one erase sector -- around twenty milliseconds here,
+ * which is inside every timeout that matters, where a whole erase block would
+ * be three hundred and is not.
+ *
+ * The one-shot form below remains for callers with nothing else to do.
+ */
+
+/** @brief A write in progress.  Fields are private; the API moves the cursor. */
+typedef struct {
+    tiku_nvm_backend_t *be;
+    const uint8_t      *src;
+    uint32_t            slot_off;
+    uint32_t            len;
+    uint32_t            done;
+    char                name[TIKU_BIGBLOB_NAME_MAX + 1u];
+    uint8_t             active;
+} tiku_bigblob_wr_t;
+
+/**
+ * @brief Begin a streamed write; unpublishes the slot immediately.
+ *
+ * @param be       backend to write through
+ * @param slot_off byte offset of the slot, erase-block aligned
+ * @param name     blob name
+ * @param src      payload, which must outlive the write
+ * @param len      payload bytes
+ * @param w        receives the cursor
+ * @return TIKU_BIGBLOB_OK, or a negative tiku_bigblob_err_t
+ */
+int tiku_bigblob_open(tiku_nvm_backend_t *be, uint32_t slot_off,
+                      const char *name, const void *src, uint32_t len,
+                      tiku_bigblob_wr_t *w);
+
+/**
+ * @brief Advance a streamed write by one step.
+ *
+ * @param w    the cursor
+ * @param done receives bytes written so far; may be NULL
+ * @return 1 while more remains, 0 when published, negative on error
+ */
+int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done);
+
 /**
  * @brief Write a blob into the slot at @p slot_off, replacing any previous.
  *
