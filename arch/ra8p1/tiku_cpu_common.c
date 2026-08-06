@@ -85,6 +85,11 @@ static int tick_can_advance(void)
     return 1;
 }
 
+void tiku_cpu_ra8p1_spin_invalidate(void)
+{
+    spin_per_ms = 0UL;
+}
+
 unsigned long tiku_cpu_ra8p1_spin_per_ms(void)
 {
     if (spin_per_ms != 0UL) {

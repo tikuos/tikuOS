@@ -82,29 +82,97 @@
 #define RA8P1_SCKDIVCR2_NPUCK_SHIFT   8U
 #define RA8P1_SCKDIVCR2_MRICK_SHIFT   12U
 
-/* PLL1 (UM 9.2.6-9.2.8).  PLLMUL is the multiplier minus one: 0x27 is x40. */
+/*
+ * PLL1 (UM 9.2.6-9.2.8, Table 9.1).  PLLMUL is the multiplier minus one:
+ * 0x27 is x40.
+ *
+ * The windows are what bound every operating point, so they are here rather
+ * than in whichever driver last needed them:
+ *
+ *   PLL input, after PLIDIV   8 to 24 MHz
+ *   multiplier                40 to 300, plus a fraction of 0/0.33/0.5/0.66
+ *   VCO                       960 to 2400 MHz
+ *   PLL1P out                 60 to 1200 MHz, BUT Table 9.2's note caps any
+ *                             PLL used as a clock source at 1 GHz
+ *
+ * x40 being the multiplier FLOOR is why the VCO cannot idle low: a 24 MHz
+ * reference at PLIDIV /1 pins it to 960 MHz minimum.  With PLODIVP bottoming
+ * out at /2, that makes 480 MHz the fastest PLL1P reachable without changing
+ * the multiplier -- and 1 GHz needs a 2000 MHz VCO, i.e. 8 MHz in (PLIDIV /3)
+ * times 250, out through /2.
+ */
 #define RA8P1_PLLCCR                (RA8P1_SYSC_BASE + 0x0ACUL)  /* 32-bit */
 #define RA8P1_PLLCCR2               (RA8P1_SYSC_BASE + 0x04CUL)  /* 16-bit */
 #define RA8P1_PLLCR                 (RA8P1_SYSC_BASE + 0x02AUL)  /* 8-bit  */
 #define RA8P1_PLLCR_PLLSTP          (1U << 0)   /* 1 = stopped             */
 #define RA8P1_PLLCCR_PLIDIV(n)      (((uint32_t)(n) & 0x3UL) << 0)
 #define RA8P1_PLLCCR_SRC_HOCO       (1UL << 4)  /* 0 = main oscillator     */
+#define RA8P1_PLLCCR_PLLMULNF(c)    (((uint32_t)(c) & 0x3UL) << 6)
 #define RA8P1_PLLCCR_PLLMUL(m)      ((((uint32_t)(m) - 1UL) & 0x1FFUL) << 8)
 #define RA8P1_PLLCCR2_PLODIVP(c)    (((uint16_t)(c) & 0xFU) << 0)
 #define RA8P1_PLLCCR2_PLODIVQ(c)    (((uint16_t)(c) & 0xFU) << 4)
 #define RA8P1_PLLCCR2_PLODIVR(c)    (((uint16_t)(c) & 0xFU) << 8)
-/** @brief PLL output-divider codes; note these are NOT the SCKDIVCR set. */
+
+/** @brief PLIDIV codes; /4 does NOT exist, unlike most dividers on this part. */
+#define RA8P1_PLIDIV_1              0x0U
+#define RA8P1_PLIDIV_2              0x1U
+#define RA8P1_PLIDIV_3              0x2U
+
+/** @brief PLLMULNF fraction codes, added to PLLMUL. */
+#define RA8P1_PLLMULNF_0            0x0U
+#define RA8P1_PLLMULNF_033          0x1U
+#define RA8P1_PLLMULNF_066          0x2U
+#define RA8P1_PLLMULNF_050          0x3U
+
+/*
+ * PLL output-divider codes; NOT the SCKDIVCR set, and NOT contiguous.
+ * There is no /1: P bottoms out at /2, which is the single fact that decides
+ * how fast this part can be clocked from a given VCO.  Q and R additionally
+ * offer /5 and /1.5, which P does not.
+ */
 #define RA8P1_PLODIV_2              0x1U
+#define RA8P1_PLODIV_3              0x2U
 #define RA8P1_PLODIV_4              0x3U
 #define RA8P1_PLODIV_6              0x5U
+#define RA8P1_PLODIV_8              0x7U
+#define RA8P1_PLODIV_16             0xFU
+
+/*
+ * Clock-tree restrictions (UM Table 9.2 notes).  Every one of these is a
+ * "the part works but is out of spec" rule rather than something a register
+ * refuses, so nothing reports a violation -- they are checked when a tree is
+ * built, or not at all:
+ *
+ *   ordering   CPUCLK0/CPUCLK1/NPUCLK/MRICLK all >= ICLK
+ *              CPUCLK0/CPUCLK1/NPUCLK        all >= MRICLK
+ *              ICLK >= MRPCLK, ICLK >= BCLK, ICLK >= PCLKA >= PCLKB
+ *              PCLKD >= PCLKA >= PCLKB
+ *   ratios     integer N:1 against ICLK (N <= 64); PCLKC/D/E may also be 1:N
+ *   mixing     if ANY SCKDIVCR/SCKDIVCR2 field selects /3 /6 /12 /24, no
+ *              other field may select /2 /4 /8 /16 /32 /64
+ *   source     PLSRCSEL must be 0 (main oscillator) when CPUCLK0 > 960 MHz
+ */
 
 /*
  * MRAM must be TOLD the frequency it is about to run at, before the clock
  * rises: MRCMHZ picks the read wait states (<=100 MHz none, <=200 one,
- * <=250 two).  Writes need the key in the top byte and must be 32-bit.
+ * <=250 two, and 250 is the ceiling -- above it the encoding is reserved,
+ * which is why MRICLK can never follow the core past 250).  Writes need the
+ * key in the top byte and must be 32-bit.  The value is the frequency in
+ * whole MHz, rounded UP.
+ *
+ * Ordering is directional and the two directions differ (UM 60.4.3): going
+ * FASTER, tell MRAM before the clock rises; going SLOWER, tell it after.
+ * The full procedure also disables the prefetch buffer across the change and
+ * reads MRCFREQ back to confirm it took -- a notification register that
+ * silently did not land would mean running at too few wait states.
  */
+#define RA8P1_MRCPFB                0x4013C000UL /* 8-bit, resets DISABLED */
+#define RA8P1_MRCPFB_MPFBEN         (1U << 0)
 #define RA8P1_MRCFREQ               0x4013C004UL
 #define RA8P1_MRCFREQ_KEY           (0x1EUL << 24)
+#define RA8P1_MRCFREQ_MHZ_MASK      0x3FFUL
+#define RA8P1_MRCFREQ_MHZ_MAX       250UL
 
 /*
  * The SCI has its OWN clock, SCICLK -- it is NOT PCLKA.  Both are MOCO at /1
@@ -131,6 +199,27 @@
 #define RA8P1_OCTACKCR_SEL_PLL1P 0x05U
 #define RA8P1_OCTACKCR_SREQ     (1U << 6)
 #define RA8P1_OCTACKCR_SRDY     (1U << 7)
+/*
+ * SCICKDIVCR and OCTACKDIVCR share one encoding, and it is NOT monotonic:
+ * /4 is 0x2 while /3 is 0x5.  Deriving a code by arithmetic on the divisor
+ * therefore produces a plausible wrong answer rather than a compile error,
+ * which is why every value in the set is spelled out here.
+ *
+ * Ceilings differ though (UM Table 9.2): SCICLK tops out at 120 MHz, OCTACLK
+ * at 333.33 -- and OM_SCLK is OCTACLK/2, itself capped at 166.67 and further
+ * bounded by whatever the fitted flash part allows (133 for the MX25LW).
+ */
+#define RA8P1_CKDIV_1           0x0U
+#define RA8P1_CKDIV_2           0x1U
+#define RA8P1_CKDIV_4           0x2U
+#define RA8P1_CKDIV_6           0x3U
+#define RA8P1_CKDIV_8           0x4U
+#define RA8P1_CKDIV_3           0x5U
+#define RA8P1_CKDIV_5           0x6U
+#define RA8P1_CKDIV_10          0x7U
+#define RA8P1_CKDIV_16          0x8U
+#define RA8P1_CKDIV_32          0x9U
+
 #define RA8P1_OCTACKDIV_1       0x0U
 #define RA8P1_SCICKCR_SREQ      (1U << 6)
 #define RA8P1_SCICKCR_SRDY      (1U << 7)

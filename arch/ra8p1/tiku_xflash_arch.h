@@ -120,6 +120,16 @@ int tiku_ra8p1_xflash_read(uint32_t addr, void *dst, uint8_t len);
 int tiku_ra8p1_xflash_opi_enter(void);
 
 /**
+ * @brief Is the flash currently talking 8D-8D-8D?
+ *
+ * The clock ladder asks: OCTACLK's divider is chosen once at OPI entry, so
+ * raising the core clock afterwards would overclock OM_SCLK.
+ *
+ * @return Non-zero when the device is in octal mode
+ */
+int tiku_ra8p1_xflash_in_opi(void);
+
+/**
  * @brief Pulse OM_RESET, returning the device to its power-on protocol.
  *
  * The unconditional escape hatch: the protocol-select bits in CR2 are

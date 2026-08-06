@@ -18,6 +18,7 @@
 #include "tiku_xflash_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
+#include "tiku_cpu_freq_boot_arch.h"
 #include <kernel/fs/tiku_nvm_backend.h>
 
 /*
@@ -152,6 +153,11 @@ void tiku_ra8p1_xflash_init(void)
  * preserved by read-modify-write, as at init.
  */
 
+int tiku_ra8p1_xflash_in_opi(void)
+{
+    return (int)xf_opi;
+}
+
 /** @brief Drive OM_RESET low and back, then wait out recovery. */
 void tiku_ra8p1_xflash_reset(void)
 {
@@ -163,16 +169,49 @@ void tiku_ra8p1_xflash_reset(void)
     tiku_cpu_ra8p1_delay_us(1000U);
 }
 
+/*
+ * OM_SCLK is OCTACLK/2 (UM Table 4.4) and three ceilings apply: OCTACLK
+ * 333.33, OCTADIVCLK 166.67, and the fitted MX25LW's own 133.  The part
+ * binds, so this targets OM_SCLK just under 125 -- where the DQS eye was
+ * calibrated -- rather than the fastest legal setting.  A hardcoded 1/1 is
+ * correct only while PLL1P is 240; deriving from the live rate is what stops
+ * a raised core clock driving the flash past its rating.
+ */
+
 /**
- * @brief Point OCTACLK at @p sel with divider 1/1, per the UM handshake.
+ * @brief The OCTACLK divider that keeps OM_SCLK inside every limit.
  *
- * The division ratio is left at 1/1 throughout, which is what lets the
- * MSTPCRB dance in steps 1-2 of the manual's procedure be skipped: it is
- * required only when changing away from 1/n, n != 1.
+ * @param src_hz  Rate of the clock OCTACLK is about to be pointed at
+ * @return An OCTACKDIVCR divider code
+ */
+static uint8_t xflash_octa_div(unsigned long src_hz)
+{
+    if (src_hz <= 250000000UL) {
+        return (uint8_t)RA8P1_CKDIV_1;      /* <=125 MHz OM_SCLK */
+    }
+    if (src_hz <= 500000000UL) {
+        return (uint8_t)RA8P1_CKDIV_2;
+    }
+    return (uint8_t)RA8P1_CKDIV_4;
+}
+
+/**
+ * @brief Point OCTACLK at @p sel, per the UM handshake.
+ *
+ * The MSTPCRB dance in steps 1-2 of the manual's procedure is skipped: it is
+ * required only when changing away from 1/n, n != 1, and every divider this
+ * selects is entered from the 1/1 reset value or from another 1/1 selection.
  */
 static int xflash_set_clock(uint8_t sel)
 {
     uint32_t spins;
+    uint8_t  divcode;
+
+    /* MOCO when that is the selection, otherwise the live PLL1P -- which is
+     * the core rate, since CPUCK0 divides PLL1P by one. */
+    divcode = (sel == RA8P1_OCTACKCR_SEL_MOCO)
+                  ? (uint8_t)RA8P1_CKDIV_1
+                  : xflash_octa_div(tiku_cpu_ra8p1_clock_get_hz());
 
     TIKU_REG16(RA8P1_PRCR_S) = RA8P1_PRCR_KEY | RA8P1_PRCR_PRC0;
 
@@ -189,7 +228,7 @@ static int xflash_set_clock(uint8_t sel)
 
     /* Source and divider are only writable while the ready flag is set --
      * that window is the whole point of the handshake. */
-    TIKU_REG8(RA8P1_OCTACKDIVCR) = (uint8_t)RA8P1_OCTACKDIV_1;
+    TIKU_REG8(RA8P1_OCTACKDIVCR) = divcode;
     TIKU_REG8(RA8P1_OCTACKCR) = (uint8_t)(RA8P1_OCTACKCR_SREQ | sel);
 
     TIKU_REG8(RA8P1_OCTACKCR) &= (uint8_t)~RA8P1_OCTACKCR_SREQ;

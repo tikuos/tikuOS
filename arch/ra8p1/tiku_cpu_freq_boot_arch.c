@@ -14,8 +14,15 @@
 #include "tiku_timer_arch.h"
 #include "tiku_uart_arch.h"
 #include "tiku_ra8p1_regs.h"
+#include "tiku_xflash_arch.h"
 
 #include <stdint.h>
+
+/** @brief Rate the tree is running at now; the boot clock until it is raised. */
+static unsigned long cpu_hz_now = TIKU_RA8P1_ICLK_BOOT_HZ;
+
+/** @brief SCICLK, which the console divides -- MOCO at /1 out of reset. */
+static unsigned long sci_hz_now = TIKU_RA8P1_MOCO_HZ;
 
 /**
  * @brief Turn a SCKDIVCR 4-bit field into the divisor it means.
@@ -58,6 +65,11 @@ static unsigned long src_hz_of(uint8_t cksel)
     case TIKU_RA8P1_CKSEL_LOCO:   return 32768UL;
     case TIKU_RA8P1_CKSEL_MAIN:   return TIKU_BOARD_MOSC_HZ;
     case TIKU_RA8P1_CKSEL_SUBCLK: return TIKU_BOARD_SUBCLK_HZ;
+    /* PLL1P is CPUCK0's source at every rung, and CPUCK0 divides it by one,
+     * so the rate the driver last established IS the source rate.  Before the
+     * PLL is raised this is the boot clock, which is also correct because the
+     * tree is not on PLL1P then. */
+    case TIKU_RA8P1_CKSEL_PLL1P:  return cpu_hz_now;
     default:                      return 0UL;
     }
 }
@@ -140,41 +152,100 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
     return count;
 }
 
-/**
- * @brief Divider codes for the 240 MHz tree, one field per clock domain.
+/*
+ * OPERATING POINTS.
  *
- * Every domain has its own ceiling (UM Table 9.2) and they differ by 4x:
- * ICLK 250, PCLKA 125, PCLKB 62.5, PCLKD 250.  Only power-of-two codes are
- * used because the manual forbids mixing them with the /3 /6 /12 /24 set.
+ * One table entry per rung, because the alternative -- a function per
+ * frequency -- is how the 240 path ended up with the ceilings, the wait
+ * states and the private clocks each written down in a different place.
+ * Every field here is derived from UM Table 9.2, and the constraints that
+ * bound them are listed beside the encodings in tiku_ra8p1_regs.h.
+ *
+ * The dividers are chosen so that everything except the core lands on the
+ * SAME rate at every rung.  That is not tidiness: it means a rung change
+ * cannot alter SDRAM timing, the flash eye, the console divisor or any
+ * peripheral's idea of time, so when a rung misbehaves the core clock is the
+ * only thing that changed.  It also makes the pair of benchmarks meaningful,
+ * since MRAM fetch is pinned while the core doubles.
  */
 #define DIV1  0U
 #define DIV2  1U
 #define DIV4  2U
+#define DIV8  3U
+#define DIV16 4U
 
-#define SCKDIVCR_240MHZ                                        \
-    (((uint32_t)DIV2 << RA8P1_SCKDIVCR_MRPCK_SHIFT) |  /* 120 */ \
-     ((uint32_t)DIV1 << RA8P1_SCKDIVCR_ICK_SHIFT)   |  /* 240 */ \
-     ((uint32_t)DIV1 << RA8P1_SCKDIVCR_PCKE_SHIFT)  |  /* 240 */ \
-     ((uint32_t)DIV2 << RA8P1_SCKDIVCR_BCK_SHIFT)   |  /* 120 */ \
-     ((uint32_t)DIV2 << RA8P1_SCKDIVCR_PCKA_SHIFT)  |  /* 120 */ \
-     ((uint32_t)DIV4 << RA8P1_SCKDIVCR_PCKB_SHIFT)  |  /*  60 */ \
-     ((uint32_t)DIV2 << RA8P1_SCKDIVCR_PCKC_SHIFT)  |  /* 120 */ \
-     ((uint32_t)DIV1 << RA8P1_SCKDIVCR_PCKD_SHIFT))    /* 240 */
+/**
+ * @brief SCKDIVCR word for a tree whose bus divisors scale with @p s.
+ *
+ * @param s  Scale: 1 at PLL1P 240, 2 at 480, 4 at 1000
+ */
+#define SCKDIVCR_TREE(s)                                                   \
+    (((uint32_t)(DIV2 + (s)) << RA8P1_SCKDIVCR_MRPCK_SHIFT) |  /* 120 */   \
+     ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR_ICK_SHIFT)   |  /* 240 */   \
+     ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR_PCKE_SHIFT)  |  /* 240 */   \
+     ((uint32_t)(DIV2 + (s)) << RA8P1_SCKDIVCR_BCK_SHIFT)   |  /* 120 */   \
+     ((uint32_t)(DIV2 + (s)) << RA8P1_SCKDIVCR_PCKA_SHIFT)  |  /* 120 */   \
+     ((uint32_t)(DIV4 + (s)) << RA8P1_SCKDIVCR_PCKB_SHIFT)  |  /*  60 */   \
+     ((uint32_t)(DIV2 + (s)) << RA8P1_SCKDIVCR_PCKC_SHIFT)  |  /* 120 */   \
+     ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR_PCKD_SHIFT))    /* 240 */
 
-#define SCKDIVCR2_240MHZ                                          \
-    (((uint32_t)DIV1 << RA8P1_SCKDIVCR2_MRICK_SHIFT)  |  /* 240 */ \
-     ((uint32_t)DIV2 << RA8P1_SCKDIVCR2_NPUCK_SHIFT)  |  /* 120 */ \
-     ((uint32_t)DIV1 << RA8P1_SCKDIVCR2_CPUCK1_SHIFT) |  /* 240 */ \
-     ((uint32_t)DIV1 << RA8P1_SCKDIVCR2_CPUCK0_SHIFT))   /* 240 */
+/*
+ * NPUCK sits at /1 relative to ICLK, not /2.  UM Table 9.2 requires
+ * NPUCLK >= ICLK, and the original tree had the NPU at 120 under a 240 ICLK
+ * -- out of spec, invisible because the Ethos-U55 is not driven yet, and
+ * exactly the kind of thing that would be blamed on the NPU bring-up.
+ */
+#define SCKDIVCR2_TREE(s)                                                    \
+    (((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_MRICK_SHIFT)  |  /* 240 */   \
+     ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_NPUCK_SHIFT)  |  /* 240 */   \
+     ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_CPUCK1_SHIFT) |  /* 240 */   \
+     ((uint32_t)DIV1         << RA8P1_SCKDIVCR2_CPUCK0_SHIFT))   /* = PLL1P */
 
-/** @brief Core rate the PLL tree above produces, in Hz. */
+/*
+ * Only rungs PROVEN on hardware are offered.  240 is; 480 and 1000 are
+ * transcribed from the manual and are not -- 480 currently resets the part,
+ * which is a bring-up problem rather than a table problem, and a `freq` verb
+ * that resets the board is worse than one that refuses.  Build with
+ * -DTIKU_RA8P1_FREQ_UNPROVEN=1 to select them while diagnosing.
+ */
+#ifndef TIKU_RA8P1_FREQ_UNPROVEN
+#define TIKU_RA8P1_FREQ_UNPROVEN 0
+#endif
+
+/** @brief One selectable rung of the clock ladder. */
+typedef struct {
+    unsigned int  mhz;        /**< core rate, and what `freq` names        */
+    uint8_t       proven;     /**< 1 when demonstrated on hardware         */
+    uint8_t       plidiv;     /**< PLL input divider code                  */
+    uint16_t      pllmul;     /**< PLL multiplier, whole part              */
+    uint8_t       pllmulnf;   /**< PLL multiplier fraction code            */
+    uint8_t       plodivp;    /**< PLL1P output divider code               */
+    uint8_t       scale;      /**< bus-divider scale; see SCKDIVCR_TREE    */
+    uint8_t       scickdiv;   /**< SCICLK divider code (ceiling 120 MHz)   */
+    uint16_t      mrc_mhz;    /**< what MRAM is told MRICLK will be        */
+} ra8p1_opoint_t;
+
+/*
+ * x40 is the multiplier FLOOR, so a 24 MHz reference at PLIDIV /1 pins the
+ * VCO at 960 MHz and 240 is simply 960/4.  480 is therefore one field --
+ * PLODIVP /4 -> /2 -- with every bus divisor doubled to stand still.
+ *
+ * 1000 cannot come off that VCO: PLODIVP has no /1, so 960/2 = 480 is the
+ * most it yields.  It needs a 2000 MHz VCO instead, which the 8-to-24 MHz
+ * input window reaches cleanly at 8 MHz (PLIDIV /3) times an integer 250 --
+ * no fractional multiplier, and inside the 960-2400 VCO range.
+ */
+static const ra8p1_opoint_t opoints[] = {
+    { 240U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_4,
+      0U, RA8P1_CKDIV_2,  240U },
+    { 480U, 0U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
+      1U, RA8P1_CKDIV_4,  240U },
+    { 1000U, 0U, RA8P1_PLIDIV_3, 250U, RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
+      2U, RA8P1_CKDIV_10, 250U },
+};
+
+/** @brief Core rate at the rung the port boots into. */
 #define RA8P1_PLL_CPU_HZ    240000000UL
-
-/** @brief Rate the tree is running at now; the boot clock until R4 raises it. */
-static unsigned long cpu_hz_now = TIKU_RA8P1_ICLK_BOOT_HZ;
-
-/** @brief SCICLK, which the console divides -- MOCO at /1 out of reset. */
-static unsigned long sci_hz_now = TIKU_RA8P1_MOCO_HZ;
 
 /**
  * @brief Bring PLL1 up on the main oscillator and switch the tree onto it.
@@ -185,9 +256,10 @@ static unsigned long sci_hz_now = TIKU_RA8P1_MOCO_HZ;
  *
  * @return 0 on success, -1 when the oscillator or the PLL never stabilised
  */
-static int pll_up_240(void)
+static int pll_up(const ra8p1_opoint_t *op)
 {
     unsigned long spins;
+    uint8_t       i;
 
     if (tiku_cpu_ra8p1_mosc_start() != 0) {
         return -1;
@@ -195,20 +267,71 @@ static int pll_up_240(void)
 
     clock_protect(1);
 
+    /*
+     * The prefetch buffer comes down across the change and goes back up
+     * after (UM 60.4.3).  The three read-backs are the manual's, and they are
+     * there because the disable has to be VISIBLE to the MRAM controller
+     * before the clock moves under it -- a posted write that is still in
+     * flight would not be.
+     */
+    TIKU_REG8(RA8P1_MRCPFB) = 0U;
+    for (i = 0U; i < 3U; i++) {
+        (void)TIKU_REG8(RA8P1_MRCPFB);
+    }
+
+    /*
+     * PARK ON MOCO BEFORE TOUCHING THE PLL, AND THAT IS NOT OPTIONAL.
+     *
+     * PLLCCR is not writable while the PLL runs, and the PLL cannot be
+     * stopped while the system clock is sourced from it -- so a rung change
+     * that goes straight to "stop the PLL" kills the clock it is executing
+     * on.  Raising the tree from the boot clock never met this, because the
+     * tree was still on MOCO; the SECOND change is where it bites, which is
+     * why a driver that could only make one change never saw it.
+     *
+     * The console rides SCICLK, so that has to come back to MOCO too or its
+     * source vanishes mid-sequence.  Bytes in flight are lost either way;
+     * the divisor is recomputed at the end.
+     */
+    TIKU_REG8(RA8P1_SCICKCR) |= (uint8_t)RA8P1_SCICKCR_SREQ;
+    while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) == 0U) { }
+    TIKU_REG8(RA8P1_SCICKDIVCR) = (uint8_t)RA8P1_CKDIV_1;
+    TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)(RA8P1_SCICKCR_SREQ |
+                                         RA8P1_SCICKSEL_MOCO);
+    TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)RA8P1_SCICKSEL_MOCO;
+    while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
+
+    /* Undivided is safe at MOCO's 8 MHz: every ceiling in Table 9.2 is far
+     * above it, so no domain is out of spec during the window. */
+    TIKU_REG32(RA8P1_SCKDIVCR)  = 0UL;
+    TIKU_REG32(RA8P1_SCKDIVCR2) = 0UL;
+    TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_MOCO;
+    while ((TIKU_REG8(RA8P1_SCKSCR) & RA8P1_SCKSCR_CKSEL_MASK) !=
+           TIKU_RA8P1_CKSEL_MOCO) { }
+    cpu_hz_now = TIKU_RA8P1_MOCO_HZ;
+
     /* Memory first.  MRAM picks its read wait states from the frequency it is
      * TOLD, so telling it after the clock rose would mean running a whole
-     * window of fetches at too few waits. */
-    TIKU_REG32(RA8P1_MRCFREQ) = RA8P1_MRCFREQ_KEY | 240UL;
-    /* ICLK lands at 240, past half of SRAM's 250 MHz ceiling, so one wait. */
+     * window of fetches at too few waits.  (Going the other way the manual
+     * inverts this; every rung here is entered from the boot clock, so this
+     * is always the speed-up order.) */
+    TIKU_REG32(RA8P1_MRCFREQ) = RA8P1_MRCFREQ_KEY | (uint32_t)op->mrc_mhz;
+    if ((TIKU_REG32(RA8P1_MRCFREQ) & RA8P1_MRCFREQ_MHZ_MASK) !=
+        (uint32_t)op->mrc_mhz) {
+        TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
+        clock_protect(0);
+        return -1;      /* notification did not land; do not raise the clock */
+    }
+    /* ICLK lands past half of SRAM's 250 MHz ceiling at every rung, so one
+     * wait, which is the only setting this bit has. */
     TIKU_REG8(RA8P1_SRAMWTSC) = (uint8_t)RA8P1_SRAMWTSC_WTEN;
 
     TIKU_REG8(RA8P1_PLLCR) = (uint8_t)RA8P1_PLLCR_PLLSTP;   /* stop first */
-    /* 24 MHz / 1 * 40 / 4 = 240.  x40 is the multiplier floor, so the output
-     * divider is what brings the VCO back down. */
-    TIKU_REG32(RA8P1_PLLCCR) = RA8P1_PLLCCR_PLIDIV(0) |
-                               RA8P1_PLLCCR_PLLMUL(40UL);
+    TIKU_REG32(RA8P1_PLLCCR) = RA8P1_PLLCCR_PLIDIV(op->plidiv) |
+                               RA8P1_PLLCCR_PLLMULNF(op->pllmulnf) |
+                               RA8P1_PLLCCR_PLLMUL((uint32_t)op->pllmul);
     TIKU_REG16(RA8P1_PLLCCR2) = (uint16_t)(
-        RA8P1_PLLCCR2_PLODIVP(RA8P1_PLODIV_4) |
+        RA8P1_PLLCCR2_PLODIVP(op->plodivp) |
         RA8P1_PLLCCR2_PLODIVQ(RA8P1_PLODIV_6) |
         RA8P1_PLLCCR2_PLODIVR(RA8P1_PLODIV_6));
     TIKU_REG8(RA8P1_PLLCR) = 0U;                            /* run */
@@ -219,12 +342,15 @@ static int pll_up_240(void)
         }
     }
     if (spins == 0UL) {
+        /* Left parked on MOCO with the tree undivided -- slow, but running
+         * and answering, which is what a failed rung change should leave. */
+        TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
         clock_protect(0);
         return -1;
     }
 
-    TIKU_REG32(RA8P1_SCKDIVCR)  = SCKDIVCR_240MHZ;
-    TIKU_REG32(RA8P1_SCKDIVCR2) = SCKDIVCR2_240MHZ;
+    TIKU_REG32(RA8P1_SCKDIVCR)  = SCKDIVCR_TREE(op->scale);
+    TIKU_REG32(RA8P1_SCKDIVCR2) = SCKDIVCR2_TREE(op->scale);
     TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_PLL1P;
     /* Read back: the switch crosses into the clock domain being switched, and
      * continuing before it lands would run the next writes at an unknown
@@ -237,38 +363,107 @@ static int pll_up_240(void)
      * The manual's handshake: request, wait ready, program, release, wait. */
     TIKU_REG8(RA8P1_SCICKCR) |= (uint8_t)RA8P1_SCICKCR_SREQ;
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) == 0U) { }
-    TIKU_REG8(RA8P1_SCICKDIVCR) = (uint8_t)RA8P1_SCICKDIV_2;   /* 240 -> 120 */
+    TIKU_REG8(RA8P1_SCICKDIVCR) = op->scickdiv;
     TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)(RA8P1_SCICKCR_SREQ |
                                          RA8P1_SCICKSEL_PLL1P);
     TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)RA8P1_SCICKSEL_PLL1P;  /* release */
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
-    sci_hz_now = RA8P1_PLL_CPU_HZ / 2UL;
+    /* Every rung divides SCICLK back to 120 MHz -- its Table 9.2 ceiling and
+     * the rate the console's divisor was proven against. */
+    sci_hz_now = 120000000UL;
+
+    /* Prefetch back on: above 100 MHz the manual requires it, and MRICLK is
+     * 240 or 250 at every rung here. */
+    TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
 
     clock_protect(0);
-    cpu_hz_now = RA8P1_PLL_CPU_HZ;
+    cpu_hz_now = (unsigned long)op->mhz * 1000000UL;
+    return 0;
+}
+
+/** @brief The rung currently established, for falling back to. */
+static const ra8p1_opoint_t *cur_op;
+
+/** @brief The table entry for @p mhz, or NULL when there is none. */
+static const ra8p1_opoint_t *opoint_of(unsigned int mhz)
+{
+    uint8_t i;
+
+    for (i = 0U; i < (uint8_t)(sizeof(opoints) / sizeof(opoints[0])); i++) {
+        if (opoints[i].mhz == mhz) {
+            if (opoints[i].proven || (TIKU_RA8P1_FREQ_UNPROVEN + 0)) {
+                return &opoints[i];
+            }
+            return 0;
+        }
+    }
     return 0;
 }
 
 void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
 {
+    const ra8p1_opoint_t *op = opoint_of(mhz);
+
     /* Any rate this port cannot produce is refused rather than approximated:
      * `freq` naming a rate the part is not running at is worse than a
      * refusal. */
-    if (mhz != 240U || pll_up_240() != 0) {
+    if (op == 0) {
         return;
     }
+
+    /*
+     * The octal flash picks its bus divider once, at OPI entry, from the
+     * PLL1P rate live then.  Moving PLL1P underneath it would overclock
+     * OM_SCLK past the device's rating and show up as corrupted reads rather
+     * than as a clock fault, so the rung is refused instead.  Re-dividing
+     * OCTACLK and re-centring the DQS eye across a live rung change is real
+     * work and belongs where it can be proven on hardware, not asserted here.
+     */
+    if (mhz != (unsigned int)(cpu_hz_now / 1000000UL) &&
+        tiku_ra8p1_xflash_in_opi()) {
+        return;
+    }
+
+    /*
+     * A rung change either takes effect or leaves the tree where it was.
+     *
+     * pll_up() parks on MOCO before it touches the PLL, so a failure exits
+     * with the tree at 8 MHz and every consumer still tuned for the old rate
+     * -- a console too fast to frame and a tick counting wrong.  That reads
+     * as a bricked board rather than as a refused request, which is how a
+     * PLL setting that simply did not lock came to look like a crash.  Fall
+     * back to the rung that was already proven, and only if THAT cannot be
+     * re-established accept the parked tree and retune everything down to it.
+     */
+    if (pll_up(op) != 0) {
+        if (cur_op == 0 || pll_up(cur_op) != 0) {
+            tiku_cpu_ra8p1_spin_invalidate();
+            (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
+            tiku_uart_init();
+        }
+        return;
+    }
+    cur_op = op;
 
     /* Everything the clock feeds is re-timed HERE, because this is the one
      * place that knows the clock moved.  Leaving it to callers is how a port
      * ends up with a tick at the wrong rate and a console at the wrong baud,
-     * each looking like its own bug. */
+     * each looking like its own bug.
+     *
+     * The delay-loop calibration is DISCARDED rather than recomputed: it is
+     * measured lazily against the tick, and the tick has just been retuned,
+     * so the next caller re-measures on a tree that has settled.  A cached
+     * figure from the previous rung would make every delay wrong by exactly
+     * the ratio between them -- which only ever bites on the SECOND change,
+     * and so survived a port that could only make one. */
+    tiku_cpu_ra8p1_spin_invalidate();
     (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
     tiku_uart_init();
 }
 
 int tiku_cpu_freq_ra8p1_supported(unsigned int mhz)
 {
-    return (mhz == 240U) ? 1 : 0;
+    return (opoint_of(mhz) != 0) ? 1 : 0;
 }
 
 void tiku_cpu_boot_ra8p1_init(void)

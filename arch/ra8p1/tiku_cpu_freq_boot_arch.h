@@ -155,6 +155,15 @@ unsigned long tiku_cpu_ra8p1_bclk_get_hz(void);
 unsigned long tiku_cpu_ra8p1_spin_per_ms(void);
 
 /**
+ * @brief Discard the delay-loop calibration so the next caller re-measures.
+ *
+ * Called when the clock tree moves.  The figure is measured against the tick
+ * and cached forever otherwise, so without this every delay after a second
+ * frequency change is wrong by the ratio between the two rates.
+ */
+void tiku_cpu_ra8p1_spin_invalidate(void);
+
+/**
  * @brief Enter Sleep mode (WFI) until any unmasked interrupt.
  *
  * Clocks keep running, so the tick, console RX and an armed htimer all wake
