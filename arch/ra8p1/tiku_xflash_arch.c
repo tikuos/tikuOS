@@ -872,6 +872,17 @@ static tiku_nvm_backend_t xf_backend = {
 
 tiku_nvm_backend_t *tiku_ra8p1_xflash_backend(void)
 {
+    /*
+     * OCTAL FIRST, ALWAYS, AND THAT IS A CORRECTNESS REQUIREMENT RATHER THAN
+     * A SPEED ONE.  DOPI moves bytes pair-swapped relative to single-bit SPI,
+     * so content written through this backend in one protocol reads back as
+     * nonsense in the other -- a stored object's header magic simply fails to
+     * match and the slot reports itself empty.  Entering here makes the
+     * protocol a property of the backend instead of a property of whatever
+     * the caller happened to do to the bus earlier.
+     */
+    (void)tiku_ra8p1_xflash_opi_enter();     /* idempotent once entered */
+
     /* Reads through this backend are pointer dereferences into the mapped
      * window, so the map has to be open before anyone holds the pointer. */
     if (tiku_ra8p1_xflash_mmap_enable() != TIKU_RA8P1_XFLASH_OK) {

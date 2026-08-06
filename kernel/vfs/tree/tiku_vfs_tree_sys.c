@@ -49,6 +49,9 @@
 #include "tiku_vfs_tree_emmc.h"      /* /sys/emmc -- on-board 8 GB eMMC      */
 #endif
 #include "tiku_vfs_tree_persist.h"
+#if (TIKU_DRV_USBHS_ENABLE + 0)
+#include "tiku_vfs_tree_usb.h"
+#endif
 #include "tiku_vfs_tree_watch.h"
 #include "tiku_vfs_tree_inittab.h"
 #if TIKU_SHELL_ENABLE
@@ -1264,6 +1267,12 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_children,     TIKU_VFS_TREE_BOOT_NCHILD },
     { "persist",  TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_persist_children,  TIKU_VFS_TREE_PERSIST_NCHILD },
+#if (TIKU_DRV_USBHS_ENABLE + 0)
+    { "usb",      TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_usb_children,      TIKU_VFS_TREE_USB_NCHILD },
+    { "store",    TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_store_children,    TIKU_VFS_TREE_STORE_NCHILD },
+#endif
     { "watch",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_watch_children,    TIKU_VFS_TREE_WATCH_NCHILD },
     { "vfs",      TIKU_VFS_DIR,  NULL, NULL,

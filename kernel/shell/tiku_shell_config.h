@@ -67,6 +67,16 @@
 #ifndef TIKU_SHELL_CMD_TRNG
 #define TIKU_SHELL_CMD_TRNG    1  /**< trng    - Dump hardware TRNG bytes */
 #endif
+#ifndef TIKU_SHELL_CMD_USBHS
+/* Auto-on where the build carries the USB-HS device driver; off elsewhere.
+ * TIKU_DRV_USBHS_ENABLE is a -D from the Makefile, so this resolves the same
+ * way in every translation unit regardless of include order. */
+#if (TIKU_DRV_USBHS_ENABLE + 0)
+#define TIKU_SHELL_CMD_USBHS   1  /**< usb, store - device disk + model store */
+#else
+#define TIKU_SHELL_CMD_USBHS   0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_XFLASH
 /* Auto-on where an XSPI NOR is wired; off elsewhere. */
 #if defined(PLATFORM_STM32N6)

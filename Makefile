@@ -221,7 +221,7 @@ BOARD_CAPS_nucleo_n657x0q      :=
 # header and a 5-inch display connector are all fitted -- but a cap declares
 # what a DRIVER may be gated on, and none of those has a driver yet.  Empty is
 # the accurate answer today; each entry lands with the driver that reads it.
-BOARD_CAPS_ek_ra8p1            :=
+BOARD_CAPS_ek_ra8p1            := USBHS
 # Empty because the board really is bare -- this is the row that makes every
 # storage/USB request for it fail at make time.  See S5 of the plan.
 BOARD_CAPS_tiku_bare           :=
@@ -313,6 +313,27 @@ $(error TIKU_DRV_USB_ENABLE=1 requires a board that switches the USB rails \
 VDDUSB33 / VDDUSB0P9, which the Apollo510 EVBs gate from board pads; a board \
 that does not route them enumerates nothing. Build with BOARD=apollo510_evb \
 or BOARD=apollo510b_evb, or drop TIKU_DRV_USB_ENABLE.)
+endif
+endif
+
+# The bring-up harness drives the USB-HS device unconditionally, so on a board
+# that routes the connector it turns the driver on for itself.  This must be
+# decided BEFORE the gate below reads it.  The kernel build keeps the driver
+# opt-in: there it would cost image on every board whether or not anyone
+# asked for it.
+ifeq ($(MINIMAL),1)
+ifneq ($(call board_has,USBHS),)
+TIKU_DRV_USBHS_ENABLE ?= 1
+endif
+endif
+
+ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
+ifeq ($(call board_has,USBHS),)
+$(error TIKU_DRV_USBHS_ENABLE=1 requires a board that routes the USB-HS \
+connector (currently BOARD=$(BOARD), MCU=$(MCU)). J7 on the EK-RA8P1 is the \
+only one; the controller has dedicated DP/DM pins, so a board that does not \
+route them enumerates nothing. Build with BOARD=ek_ra8p1, or drop \
+TIKU_DRV_USBHS_ENABLE.)
 endif
 endif
 
@@ -1546,10 +1567,16 @@ SRCS += arch/ra8p1/tiku_fault_arch.c
 SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+# The harness exercises the USB-HS disk and the model store, so it needs the
+# same sources the kernel build gates -- and the same gate, so a board without
+# the connector does not build code it cannot run.
+ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
-SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
-SRCS += kernel/fs/tiku_bigblob.c                # model-sized objects on flash
-SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
+SRCS += arch/ra8p1/tiku_store_arch.c
+SRCS += kernel/usb/tiku_usbd_msc.c
+SRCS += kernel/fs/tiku_bigblob.c
+CFLAGS += -DTIKU_DRV_USBHS_ENABLE=1
+endif
 # that masking the NVIC cannot silence a tick that is a CORE exception, and an
 # untested claim in a comment is worth nothing.
 SRCS += arch/ra8p1/tiku_crit_arch.c
@@ -1931,10 +1958,15 @@ SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
+SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
 SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 SRCS += kernel/fs/tiku_bigblob.c                # model-sized objects on flash
-SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
+SRCS += kernel/vfs/tree/tiku_vfs_tree_usb.c     # /sys/usb + /sys/store
+SRCS += kernel/shell/commands/tiku_shell_cmd_usbhs.c
+CFLAGS += -DTIKU_DRV_USBHS_ENABLE=1
+endif
 SRCS += arch/ra8p1/tiku_wake_arch.c
 SRCS += arch/ra8p1/tiku_htimer_arch.c
 SRCS += arch/ra8p1/tiku_gpio_irq_arch.c

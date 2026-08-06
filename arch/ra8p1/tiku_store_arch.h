@@ -75,6 +75,22 @@ tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks);
  */
 int tiku_ra8p1_store_restore(uint32_t *out_ms, uint32_t *out_len, char *name);
 
+/**
+ * @brief Name and length of the stored model, without reading its payload.
+ *
+ * @param name receives the name, TIKU_STORE_NAME_MAX + 1 bytes; may be NULL
+ * @param len  receives the payload length; may be NULL
+ * @return 1 when a model is stored, 0 when the slot is empty
+ */
+int tiku_ra8p1_store_info(char *name, uint32_t *len);
+
+/**
+ * @brief Re-derive the stored model's CRC and compare it with its header.
+ *
+ * @return 1 when the payload still matches, 0 otherwise
+ */
+int tiku_ra8p1_store_verify(void);
+
 /** @brief The sentinel block a commit record must be written to. */
 uint32_t tiku_ra8p1_store_commit_lba(void);
 

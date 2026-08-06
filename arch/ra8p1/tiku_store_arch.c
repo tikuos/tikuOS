@@ -93,6 +93,38 @@ tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks)
     return TIKU_STORE_DONE;
 }
 
+int tiku_ra8p1_store_info(char *name, uint32_t *len)
+{
+    struct tiku_nvm_backend *be = tiku_ra8p1_xflash_backend();
+    tiku_bigblob_info_t info;
+
+    if (be == NULL ||
+        tiku_bigblob_info(be, STORE_SLOT_OFF, &info) != TIKU_BIGBLOB_OK) {
+        if (name != NULL) { name[0] = '\0'; }
+        if (len  != NULL) { *len = 0U; }
+        return 0;
+    }
+    if (name != NULL) {
+        memcpy(name, info.name, TIKU_STORE_NAME_MAX + 1u);
+        name[TIKU_STORE_NAME_MAX] = '\0';
+    }
+    if (len != NULL) {
+        *len = info.len;
+    }
+    return 1;
+}
+
+int tiku_ra8p1_store_verify(void)
+{
+    struct tiku_nvm_backend *be = tiku_ra8p1_xflash_backend();
+
+    if (be == NULL) {
+        return 0;
+    }
+    return (tiku_bigblob_verify(be, STORE_SLOT_OFF) == TIKU_BIGBLOB_OK)
+           ? 1 : 0;
+}
+
 int tiku_ra8p1_store_restore(uint32_t *out_ms, uint32_t *out_len, char *name)
 {
     struct tiku_nvm_backend *be;

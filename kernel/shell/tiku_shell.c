@@ -81,6 +81,9 @@
 #if TIKU_SHELL_CMD_REBOOT
 #include "commands/tiku_shell_cmd_reboot.h"
 #endif
+#if TIKU_SHELL_CMD_USBHS
+#include "commands/tiku_shell_cmd_usbhs.h"
+#endif
 #if TIKU_SHELL_CMD_TRNG
 #include "commands/tiku_shell_cmd_trng.h"
 #include "commands/tiku_shell_cmd_xflash.h"
@@ -565,6 +568,10 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_REBOOT
     {"reboot",  "System reset",                tiku_shell_cmd_reboot},
+#endif
+#if TIKU_SHELL_CMD_USBHS
+    {"usb",     "USB device disk: up|down|info", tiku_shell_cmd_usb},
+    {"store",   "Model kept in external flash",  tiku_shell_cmd_store},
 #endif
 #if TIKU_SHELL_CMD_TRNG
     {"trng",    "Dump hardware TRNG bytes",    tiku_shell_cmd_trng},
