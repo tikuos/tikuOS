@@ -249,6 +249,31 @@
 #define RA8P1_SRAMWTSC_WTEN         (1U << 0)
 
 /*
+ * Dual-core control (UM 2.9.1).  CPU1 is the Cortex-M33; on this part it
+ * exists at all only because the K variant carries it (Table 1.15).
+ *
+ * Three of these bite if read casually.  ACTCSR and CRPT take a 0xA5 key in
+ * the upper byte of a 16-bit write, or the write is discarded silently.
+ * CPUWAIT resets to 0, which means "starts executing out of reset", so it
+ * must be raised BEFORE activation rather than after.  And INITVTOR resets
+ * to 0x0200_0000 -- the M85's own vector table -- so a CPU1 released without
+ * setting it runs the M85's image on an M33.
+ */
+#define RA8P1_CPU_CTRL_BASE     0x4000F000UL
+#define RA8P1_CPU1INITVTOR      (RA8P1_CPU_CTRL_BASE + 0x044UL) /* 32-bit */
+#define RA8P1_CPU1WAITCR        (RA8P1_CPU_CTRL_BASE + 0x054UL) /*  8-bit */
+#define RA8P1_CPU1ACTCSR        (RA8P1_CPU_CTRL_BASE + 0x064UL) /* 16-bit */
+#define RA8P1_CPU1CRPT          (RA8P1_CPU_CTRL_BASE + 0x844UL) /* 16-bit */
+#define RA8P1_CPUCTRL_KEY       (0xA5U << 8)
+#define RA8P1_CPUWAIT           (1U << 0)
+#define RA8P1_ACTCSR_ACTREQ     (1U << 0)
+#define RA8P1_ACTCSR_ACT        (1U << 7)
+#define RA8P1_CRPT_PROTECT      (1U << 0)
+
+#define RA8P1_CPU1_CTCM_SELF    0x00000000UL
+#define RA8P1_CPU1_STCM_SELF    0x20000000UL
+
+/*
  * Reset status (UM 6.2).  Note the offsets are NOT adjacent: RSTSR1 sits at
  * 0x0C0 while RSTSR0 and RSTSR2 are up at 0xA40/0xA44.
  */

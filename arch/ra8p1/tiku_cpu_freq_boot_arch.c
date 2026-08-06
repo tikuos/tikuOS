@@ -17,6 +17,9 @@
 #include "tiku_xflash_arch.h"
 #include "tiku_cache_arch.h"
 #include "tiku_cpu_common.h"
+#if (TIKU_DRV_CPU1_ENABLE + 0)
+#include "tiku_cpu1_arch.h"
+#endif
 
 #include <stdint.h>
 
@@ -283,8 +286,14 @@ typedef struct {
  * idle-floor measurement simply declines to raise the clock.
  */
 static const ra8p1_opoint_t opoints[] = {
+    /*
+     * Every rung runs at VSCR_1, including this one that VSCR_2 would carry:
+     * the voltage transition never completes while CPU1 is active, and a
+     * single boot-time setting removes runtime DVFS from every rung change.
+     * The 25 mV of static headroom VSCR_2 would save is R9's to measure.
+     */
     { 240U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_4,
-      0U, RA8P1_CKDIV_2,  240U, DIV1, RA8P1_VSCR_VSCM_2, 120000000UL },
+      0U, RA8P1_CKDIV_2,  240U, DIV1, RA8P1_VSCR_VSCM_1, 120000000UL },
     { 480U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
       1U, RA8P1_CKDIV_4,  240U, DIV1, RA8P1_VSCR_VSCM_1, 120000000UL },
     /* SCICLK /8 would be 125, over its 120 ceiling; /10 = 100 is the fastest
@@ -443,8 +452,20 @@ static int pll_up(const ra8p1_opoint_t *op)
     if ((TIKU_REG8(RA8P1_VSCR) & RA8P1_VSCR_VSCM_MASK) != op->vscm) {
         tiku_ra8p1_cache_disable();
         TIKU_REG8(RA8P1_VSCR) = op->vscm;
-        while ((TIKU_REG8(RA8P1_VSCR) & RA8P1_VSCR_VSCMTSF) != 0U) { }
+        /* Bounded: a transition that cannot finish must fail the rung change,
+         * not hang the machine that asked for it. */
+        for (spins = 4000000UL; spins != 0UL; spins--) {
+            if ((TIKU_REG8(RA8P1_VSCR) & RA8P1_VSCR_VSCMTSF) == 0U) {
+                break;
+            }
+        }
         tiku_ra8p1_cache_enable();
+        if (spins == 0UL) {
+            TIKU_REG8(RA8P1_MRCPFB) = (uint8_t)RA8P1_MRCPFB_MPFBEN;
+            clock_protect(0);
+            FAILREC(0xF500UL);
+            return -1;
+        }
     }
 
     TIKU_REG8(RA8P1_PLLCR) = 0U;                            /* run */
@@ -564,6 +585,21 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
         tiku_ra8p1_xflash_in_opi()) {
         return;
     }
+
+#if (TIKU_DRV_CPU1_ENABLE + 0)
+    /*
+     * Nor while the second core is active, which is the whole time it is: a
+     * rung change parks the tree on MOCO and reprogrammes the PLL, CPU1
+     * fetches through that same tree, a halted payload still FETCHES, and
+     * nothing returns CPU1 to power gating.  There is no window in which the
+     * tree can move underneath it, so launching CPU1 pins the rung until a
+     * reset -- a real constraint, refused rather than half-honoured.
+     */
+    if (mhz != (unsigned int)(cpu_hz_now / 1000000UL) &&
+        tiku_ra8p1_cpu1_active()) {
+        return;
+    }
+#endif
 
     /*
      * A rung change either takes effect or leaves the tree where it was.

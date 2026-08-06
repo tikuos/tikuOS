@@ -84,6 +84,9 @@
 #if TIKU_SHELL_CMD_USBHS
 #include "commands/tiku_shell_cmd_usbhs.h"
 #endif
+#if TIKU_SHELL_CMD_CPU1
+#include "commands/tiku_shell_cmd_cpu1.h"
+#endif
 #if TIKU_SHELL_CMD_TRNG
 #include "commands/tiku_shell_cmd_trng.h"
 #include "commands/tiku_shell_cmd_xflash.h"
@@ -572,6 +575,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_USBHS
     {"usb",     "USB device disk: up|down|info", tiku_shell_cmd_usb},
     {"store",   "Model kept in external flash",  tiku_shell_cmd_store},
+#endif
+#if TIKU_SHELL_CMD_CPU1
+    {"cpu1",    "Cortex-M33 core: start|stop|info", tiku_shell_cmd_cpu1},
 #endif
 #if TIKU_SHELL_CMD_TRNG
     {"trng",    "Dump hardware TRNG bytes",    tiku_shell_cmd_trng},

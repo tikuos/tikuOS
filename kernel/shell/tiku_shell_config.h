@@ -64,6 +64,16 @@
 #ifndef TIKU_SHELL_CMD_REBOOT
 #define TIKU_SHELL_CMD_REBOOT  1  /**< reboot  - System reset */
 #endif
+#ifndef TIKU_SHELL_CMD_CPU1
+/* Auto-on where the build carries the second-core driver; off elsewhere.
+ * TIKU_DRV_CPU1_ENABLE is a -D from the Makefile, so this resolves the same
+ * way in every translation unit regardless of include order. */
+#if (TIKU_DRV_CPU1_ENABLE + 0)
+#define TIKU_SHELL_CMD_CPU1    1  /**< cpu1    - the RA8P1 Cortex-M33 */
+#else
+#define TIKU_SHELL_CMD_CPU1    0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_TRNG
 #define TIKU_SHELL_CMD_TRNG    1  /**< trng    - Dump hardware TRNG bytes */
 #endif

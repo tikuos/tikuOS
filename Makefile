@@ -1967,6 +1967,11 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_usb.c     # /sys/usb + /sys/store
 SRCS += kernel/shell/commands/tiku_shell_cmd_usbhs.c
 CFLAGS += -DTIKU_DRV_USBHS_ENABLE=1
 endif
+ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
+SRCS += arch/ra8p1/tiku_cpu1_arch.c              # Cortex-M33 lifecycle
+SRCS += kernel/shell/commands/tiku_shell_cmd_cpu1.c
+CFLAGS += -DTIKU_DRV_CPU1_ENABLE=1
+endif
 SRCS += arch/ra8p1/tiku_wake_arch.c
 SRCS += arch/ra8p1/tiku_htimer_arch.c
 SRCS += arch/ra8p1/tiku_gpio_irq_arch.c
