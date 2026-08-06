@@ -67,6 +67,12 @@ BANNED = [
     (re.compile(r'\b(?:used to|predated|shipped because|never worked|turned out|'
                 r'which is the point|worth recording|the mistake (?:was|here))\b',
                 re.I), 'design history (git has it)'),
+    # A milestone used as a heading: "* U1: bring-up", "R7b: SDRAM".  Only the
+    # label form is matched.  A bare U3 or R7 is a board designator (the flash
+    # is U3, the eMMC U11) and R1b is an eMMC response type, so shape alone
+    # cannot separate those from plan names -- the trailing colon can.
+    (re.compile(r'^[ \t]*\*?[ \t]*[UR][0-9]{1,2}[a-c]?:[ \t]', re.M),
+     'milestone as a heading'),
 ]
 
 
@@ -182,6 +188,27 @@ def check(path):
     return out
 
 
+def untracked_sources():
+    """Source files git does not track, and which this check therefore skips.
+
+    Reported rather than ignored: the scope rule makes a brand-new file pass
+    by never being opened, which is the moment it has least been checked.
+    """
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "ls-files", "--others",
+                              "--exclude-standard"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0:
+        return []
+    exts = C_EXT + BLOCK_EXT + HASH_EXT
+    return [f for f in out.stdout.splitlines()
+            if f.endswith(exts)
+            and not f.startswith(tuple(SKIP_DIRS))
+            and not f.startswith(SKIP_PATHS)]
+
+
 def main():
     global ROOT
     argv = sys.argv[1:]
@@ -194,6 +221,15 @@ def main():
         if only and not any(path.startswith(p) for p in only):
             continue
         problems += check(path)
+    skipped = untracked_sources()
+    if skipped:
+        print("check_comment_style: NOT CHECKED -- untracked, so out of scope:")
+        for f in skipped[:10]:
+            print("  " + f)
+        if len(skipped) > 10:
+            print(f"  ... and {len(skipped) - 10} more")
+        print("  Stage them and run again; a new file otherwise passes unread.")
+
     if problems:
         print("check_comment_style: file headers are licence + author + 2-3 lines;")
         print("  doc comments are 2-3 lines of prose. Design history lives in git.")
