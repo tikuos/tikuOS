@@ -15,6 +15,7 @@
 #include "tiku_uart_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_xflash_arch.h"
+#include "tiku_cache_arch.h"
 
 #include <stdint.h>
 
@@ -103,7 +104,8 @@ static unsigned long src_hz_of(uint8_t cksel)
 static void clock_protect(int unlock)
 {
     TIKU_REG16(RA8P1_PRCR_S) = (uint16_t)(RA8P1_PRCR_KEY |
-                                          (unlock ? RA8P1_PRCR_PRC0 : 0U));
+                                          (unlock ? (RA8P1_PRCR_PRC0 |
+                                                     RA8P1_PRCR_PRC1) : 0U));
 }
 
 int tiku_cpu_ra8p1_mosc_start(void)
@@ -213,11 +215,11 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
  * -- out of spec, invisible because the Ethos-U55 is not driven yet, and
  * exactly the kind of thing that would be blamed on the NPU bring-up.
  */
-#define SCKDIVCR2_TREE(s)                                                    \
+#define SCKDIVCR2_TREE(s, cpu0div)                                                    \
     (((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_MRICK_SHIFT)  |  /* 240 */   \
      ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_NPUCK_SHIFT)  |  /* 240 */   \
      ((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_CPUCK1_SHIFT) |  /* 240 */   \
-     ((uint32_t)DIV1         << RA8P1_SCKDIVCR2_CPUCK0_SHIFT))   /* = PLL1P */
+     ((uint32_t)(cpu0div)     << RA8P1_SCKDIVCR2_CPUCK0_SHIFT))
 
 /*
  * Only rungs PROVEN on hardware are offered.  240 is; 480 and 1000 are
@@ -238,6 +240,9 @@ typedef struct {
     uint8_t       scale;      /**< bus-divider scale; see SCKDIVCR_TREE    */
     uint8_t       scickdiv;   /**< SCICLK divider code (ceiling 120 MHz)   */
     uint16_t      mrc_mhz;    /**< what MRAM is told MRICLK will be        */
+    uint8_t       cpuck0div;  /**< CPUCK0 divider code; /1 rides PLL1P     */
+    uint8_t       vscm;       /**< VDD target: VSCR_2 to 600, VSCR_1 above */
+    unsigned long sci_hz;     /**< what the divider makes SCICLK           */
 } ra8p1_opoint_t;
 
 /*
@@ -252,11 +257,13 @@ typedef struct {
  */
 static const ra8p1_opoint_t opoints[] = {
     { 240U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_4,
-      0U, RA8P1_CKDIV_2,  240U },
+      0U, RA8P1_CKDIV_2,  240U, DIV1, RA8P1_VSCR_VSCM_2, 120000000UL },
     { 480U, 0U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
-      1U, RA8P1_CKDIV_4,  240U },
+      1U, RA8P1_CKDIV_4,  240U, DIV1, RA8P1_VSCR_VSCM_2, 120000000UL },
+    /* SCICLK /8 would be 125, over its 120 ceiling; /10 = 100 is the fastest
+     * legal setting at this rung, and the baud divisor follows sci_hz. */
     { 1000U, 0U, RA8P1_PLIDIV_3, 250U, RA8P1_PLLMULNF_0, RA8P1_PLODIV_2,
-      2U, RA8P1_CKDIV_10, 250U },
+      2U, RA8P1_CKDIV_10, 250U, DIV1, RA8P1_VSCR_VSCM_1, 100000000UL },
 };
 
 /** @brief Core rate at the rung the port boots into. */
@@ -356,6 +363,20 @@ static int pll_up(const ra8p1_opoint_t *op)
         RA8P1_PLLCCR2_PLODIVQ(RA8P1_PLODIV_6) |
         RA8P1_PLLCCR2_PLODIVR(RA8P1_PLODIV_6));
     STEP(7);
+    /*
+     * VDD next, while the PLL is stopped and the tree is parked at 8 MHz --
+     * the one moment both voltage ranges are unconditionally in spec, so the
+     * same path serves raising and lowering.  The transition is asynchronous
+     * and the CM85 caches must be off while it is in flight (UM 11.7); TCM is
+     * not used by this port, so the cache is the whole of that obligation.
+     */
+    if ((TIKU_REG8(RA8P1_VSCR) & RA8P1_VSCR_VSCM_MASK) != op->vscm) {
+        tiku_ra8p1_cache_disable();
+        TIKU_REG8(RA8P1_VSCR) = op->vscm;
+        while ((TIKU_REG8(RA8P1_VSCR) & RA8P1_VSCR_VSCMTSF) != 0U) { }
+        tiku_ra8p1_cache_enable();
+    }
+
     TIKU_REG8(RA8P1_PLLCR) = 0U;                            /* run */
 
     for (spins = 4000000UL; spins != 0UL; spins--) {
@@ -373,13 +394,34 @@ static int pll_up(const ra8p1_opoint_t *op)
 
     STEP(8);
     TIKU_REG32(RA8P1_SCKDIVCR)  = SCKDIVCR_TREE(op->scale);
-    TIKU_REG32(RA8P1_SCKDIVCR2) = SCKDIVCR2_TREE(op->scale);
+    TIKU_REG32(RA8P1_SCKDIVCR2) = SCKDIVCR2_TREE(op->scale, op->cpuck0div);
     TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_PLL1P;
     /* Read back: the switch crosses into the clock domain being switched, and
      * continuing before it lands would run the next writes at an unknown
      * rate. */
     while ((TIKU_REG8(RA8P1_SCKSCR) & RA8P1_SCKSCR_CKSEL_MASK) !=
            TIKU_RA8P1_CKSEL_PLL1P) { }
+
+    /*
+     * NOPs, and nothing else, for 30 us (UM Figure 9.15).  The DCDC is
+     * settling into the stepped-up load, and the manual's word for what the
+     * core may do meanwhile is NOP -- no loads, no stores, no peripherals.
+     * Skipping this is not a latent risk but the observed failure: the core
+     * ran on into real work and died on corrupted fetches within the window,
+     * IACCVIOL + UNDEFINSTR, locked up inside its own fault recorder.
+     *
+     * Sized in iterations of a register-only loop at the NEW core rate: even
+     * fully dual-issued at one iteration per cycle, 120 x mhz iterations is
+     * 120 us -- four times the requirement, and still invisible next to the
+     * oscillator waits either side of it.
+     */
+    {
+        unsigned long settle = 120UL * (unsigned long)op->mhz;
+
+        while (settle-- != 0UL) {
+            __asm__ volatile ("nop");
+        }
+    }
     STEP(9);
 
     /* The console rides SCICLK, which is still on MOCO and would otherwise
@@ -392,10 +434,8 @@ static int pll_up(const ra8p1_opoint_t *op)
                                          RA8P1_SCICKSEL_PLL1P);
     TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)RA8P1_SCICKSEL_PLL1P;  /* release */
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
-    /* Every rung divides SCICLK back to 120 MHz -- its Table 9.2 ceiling and
-     * the rate the console's divisor was proven against. */
     STEP(10);
-    sci_hz_now = 120000000UL;
+    sci_hz_now = op->sci_hz;
 
     /* Prefetch back on: above 100 MHz the manual requires it, and MRICLK is
      * 240 or 250 at every rung here. */
@@ -483,8 +523,11 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
      * the ratio between them -- which only ever bites on the SECOND change,
      * and so survived a port that could only make one. */
     tiku_cpu_ra8p1_spin_invalidate();
+    STEP(12);
     (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
+    STEP(13);
     tiku_uart_init();
+    STEP(14);
 }
 
 int tiku_cpu_freq_ra8p1_supported(unsigned int mhz)
@@ -568,6 +611,19 @@ void tiku_cpu_boot_ra8p1_power_wfi_enter(void)
      * saving cannot be shown until R9 puts a PPK2 on the measurement header.
      * Deliberately not entered here, rather than mapped and hoped for.
      */
+    /*
+     * Above 240 MHz the core must not enter Sleep at speed: the vendor's
+     * own BSP slows CPUCLK before every sleep ("Need to slow CPUCLK down
+     * before sleeping if it is above 240MHz") and the UM's low-power
+     * chapter hangs extra conditions on fast-clock transitions.  Observed
+     * here as exception-entry corruption moments after a rung change:
+     * wrong vector resolution and bus errors, i.e. a machine wrecked by
+     * its first idle.  Until the divider step-down dance is implemented
+     * and proven, a fast core idles awake -- correct first, frugal later.
+     */
+    if (tiku_cpu_ra8p1_clock_get_hz() > 240000000UL) {
+        return;
+    }
     __asm__ volatile ("dsb 0xF" ::: "memory");
     __asm__ volatile ("wfi" ::: "memory");
 }

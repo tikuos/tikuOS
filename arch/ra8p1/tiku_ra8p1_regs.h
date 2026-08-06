@@ -41,6 +41,20 @@
 #define RA8P1_PRCR_S            (RA8P1_SYSC_BASE + 0x3FAUL)  /* 16-bit    */
 #define RA8P1_PRCR_KEY          0xA500U
 #define RA8P1_PRCR_PRC0         (1U << 0)   /* clock generation circuit    */
+#define RA8P1_PRCR_PRC1         (1U << 1)   /* low-power modes, incl. VSCR */
+
+/*
+ * Voltage scaling (UM 11.7).  VSCR_1 is 0.95 V and permits the full 1 GHz;
+ * VSCR_2, the reset default at 0.925 V, carries up to the 600 MHz class per
+ * the ch.70 current tables.  The transition is asynchronous: write VSCM,
+ * then wait for VSCMTSF to clear -- and the CM85 caches must be OFF while it
+ * is in flight (UM 11.7, stated for TCM and cache both).  PRC1 gates writes.
+ */
+#define RA8P1_VSCR              (RA8P1_SYSC_BASE + 0x014UL)  /* 8-bit */
+#define RA8P1_VSCR_VSCM_MASK    0x07U
+#define RA8P1_VSCR_VSCM_1       0x01U        /* 0.95 V: 800 MHz and 1 GHz  */
+#define RA8P1_VSCR_VSCM_2       0x02U        /* 0.925 V: reset default     */
+#define RA8P1_VSCR_VSCMTSF      (1U << 4)
 
 /* Main clock oscillator: the board's 24 MHz crystal (UM 9). */
 #define RA8P1_MOSCCR            (RA8P1_SYSC_BASE + 0x032UL)  /* 8-bit     */

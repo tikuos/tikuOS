@@ -157,8 +157,12 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
     tiku_clock_arch_time_t target = clock_ticks + t;
 
     while ((long)(target - clock_ticks) > 0) {
-        /* WFI, not a spin: only the tick ISR can end this wait. */
-        __asm__ volatile ("wfi");
+        /* WFI, not a spin: only the tick ISR can end this wait.  Except
+         * above 240 MHz, where entering Sleep at speed wrecks the machine
+         * -- see tiku_cpu_boot_ra8p1_power_wfi_enter() for the story. */
+        if (tiku_cpu_ra8p1_clock_get_hz() <= 240000000UL) {
+            __asm__ volatile ("wfi");
+        }
     }
 }
 
