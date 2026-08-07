@@ -187,23 +187,52 @@ static uint8_t xflash_octa_div(unsigned long src_hz)
     return (uint8_t)RA8P1_CKDIV_4;
 }
 
+/** @brief Both OSPI units, which the divider change has to stop together. */
+#define XF_MSTPB_BOTH   (RA8P1_MSTPB_OSPI0 | RA8P1_MSTPB_OSPI1)
+
+/** @brief Bring both OSPI units out of module stop, if they were put in. */
+static void xflash_mstp_restart(int stopped)
+{
+    if (!stopped) {
+        return;
+    }
+    TIKU_REG32(RA8P1_MSTPCRB) &= ~XF_MSTPB_BOTH;
+    (void)TIKU_REG32(RA8P1_MSTPCRB);
+    tiku_cpu_ra8p1_delay_us(30U);
+}
+
 /**
  * @brief Point OCTACLK at @p sel, per the UM handshake.
  *
- * The MSTPCRB dance in steps 1-2 of the manual's procedure is skipped.  It is
- * required when changing away from 1/n, n != 1 -- which the return to MOCO
- * does whenever the core runs above 250 MHz, where 1/2 or 1/4 is selected.
+ * @param sel  OCTACKCR source select
+ * @return TIKU_RA8P1_XFLASH_OK, or ERR_TIMEOUT if the handshake stalled
+ * @note Leaving a 1/n divider with n != 1 needs both OSPI units in module
+ *       stop first (UM 9.2.40); that is the return to MOCO from any rung
+ *       above 250 MHz, where xflash_octa_div() installs 1/2 or 1/4.  Module
+ *       stop retains internal state (UM 11.4), so the calibrated protocol
+ *       and DQS delay survive it.
  */
 static int xflash_set_clock(uint8_t sel)
 {
     uint32_t spins;
     uint8_t  divcode;
+    int      stopped = 0;
 
     /* MOCO when that is the selection, otherwise the live PLL1P -- which is
      * the core rate, since CPUCK0 divides PLL1P by one. */
     divcode = (sel == RA8P1_OCTACKCR_SEL_MOCO)
                   ? (uint8_t)RA8P1_CKDIV_1
                   : xflash_octa_div(tiku_cpu_ra8p1_clock_get_hz());
+
+    if ((TIKU_REG8(RA8P1_OCTACKDIVCR) & 0x0FU) !=
+        (uint8_t)RA8P1_OCTACKDIV_1) {
+        TIKU_REG32(RA8P1_MSTPCRB) |= XF_MSTPB_BOTH;
+        (void)TIKU_REG32(RA8P1_MSTPCRB);
+        /* UM Figure 11.2: 30 us of NOP after an MSTP change while CPUCLK0 is
+         * above the ICLK ceiling, which it is at every rung over 240. */
+        tiku_cpu_ra8p1_delay_us(30U);
+        stopped = 1;
+    }
 
     TIKU_REG16(RA8P1_PRCR_S) = RA8P1_PRCR_KEY | RA8P1_PRCR_PRC0;
 
@@ -215,6 +244,7 @@ static int xflash_set_clock(uint8_t sel)
     }
     if (spins == 0UL) {
         TIKU_REG16(RA8P1_PRCR_S) = RA8P1_PRCR_KEY;
+        xflash_mstp_restart(stopped);
         return TIKU_RA8P1_XFLASH_ERR_TIMEOUT;
     }
 
@@ -230,6 +260,8 @@ static int xflash_set_clock(uint8_t sel)
         }
     }
     TIKU_REG16(RA8P1_PRCR_S) = RA8P1_PRCR_KEY;
+
+    xflash_mstp_restart(stopped);
 
     return (spins != 0UL) ? TIKU_RA8P1_XFLASH_OK
                           : TIKU_RA8P1_XFLASH_ERR_TIMEOUT;
