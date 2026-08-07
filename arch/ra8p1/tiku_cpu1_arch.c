@@ -26,9 +26,9 @@
 
 /*
  * The payload, built for cortex-m33 by the sub-build in arch/ra8p1/cpu1/ and
- * wrapped into this image as bytes.  It is position-independent -- it derives
- * its own base from the PC -- so the two vector words are the only absolute
- * values, and they are patched at load time.
+ * wrapped into this image as bytes.  It links at the fixed SRAM carve and
+ * must be copied there; SP, reset and HardFault are patched into its vector
+ * table at load time.
  */
 extern const uint8_t _binary_tiku_cpu1_bin_start[];
 extern const uint8_t _binary_tiku_cpu1_bin_end[];
@@ -36,8 +36,8 @@ extern const uint8_t _binary_tiku_cpu1_bin_end[];
 #define CPU1_IMG_SIZE \
     ((uint32_t)(_binary_tiku_cpu1_bin_end - _binary_tiku_cpu1_bin_start))
 
-/** @brief The image's home; 128-byte aligned because INITVTOR drops [6:0]. */
-static uint8_t cpu1_area[TIKU_CPU1_AREA_SIZE] __attribute__((aligned(128)));
+/** @brief The image's home: the fixed SRAM carve the payload links at. */
+#define cpu1_area   ((uint8_t *)TIKU_CPU1_AREA_ADDR)
 
 /** @brief The shared page inside it. */
 #define CPU1_SH \
@@ -53,13 +53,72 @@ static uint8_t cpu1_running;
 static uint8_t cpu1_nmi_seeded;
 
 /*
- * A CPU1 lockup arrives here: CPUnLCKUPCR.OAD resets to 0, routing it to a
- * non-maskable interrupt, and the NMI vector otherwise resolves to the fault
- * recorder, which resets the board.  A coprocessor that wedges must not take
- * the application core with it.  Strong here, so the weak default stands in
- * builds without this driver.
+ * Counts NMIs, and -- measured on hardware -- a CPU1 LOCKUP raises none: the
+ * core stops fetching, the board keeps running, and nothing arrives here
+ * unarmed.  Fault reporting is therefore in-band (the payload's HardFault
+ * handler swaps the shared magic); this handler stays so an NMI from any
+ * armed source is counted rather than resetting the M85.  Strong here, so
+ * the weak default stands in builds without this driver.
  */
 TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
+
+/** @brief Faults the payload has reported through the shared magic. */
+TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_cpu1_fault_count;
+
+/** @brief Whether the current fault has been counted yet. */
+static uint8_t cpu1_fault_noticed;
+
+/** @brief Restart generation last written to a faulted core. */
+static uint32_t cpu1_restart_gen;
+
+/** @brief Doorbells taken since the last poll consumed one. */
+static volatile uint8_t cpu1_bell;
+
+/** @brief Doorbells seen in total, for observability. */
+volatile uint32_t tiku_ra8p1_cpu1_bell_count;
+
+/*
+ * The reply doorbell.  STA is read-only, so the acknowledge goes through
+ * CLR -- writing STA would clear nothing and this would re-enter forever.
+ */
+void tiku_ra8p1_ipc_handler(void)
+{
+    uint32_t sta = TIKU_REG32(RA8P1_IPC0STA0);
+
+    TIKU_REG32(RA8P1_IPC0CLR0) = (sta & 0xFFUL) | RA8P1_IPC_CLR_RCLR |
+                                 RA8P1_IPC_CLR_FCLR;
+    TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_IPC)) &= ~RA8P1_ICU_IELSR_IR;
+    (void)TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_IPC));
+    TIKU_REG32(RA8P1_NVIC_ICPR(RA8P1_ICU_SLOT_IPC / 32U)) =
+        (1UL << (RA8P1_ICU_SLOT_IPC % 32U));
+    __asm__ volatile ("dsb" ::: "memory");
+
+    cpu1_bell = 1U;
+    tiku_ra8p1_cpu1_bell_count++;
+}
+
+/** @brief Link the doorbell event to the NVIC and unmask it. */
+static void cpu1_bell_arm(void)
+{
+    TIKU_REG32(RA8P1_IPC0CLR0) = 0xFFUL | RA8P1_IPC_CLR_RCLR |
+                                 RA8P1_IPC_CLR_FCLR;
+    TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_IPC)) = RA8P1_EVENT_IPC_IRQ0;
+    (void)TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_IPC));
+    TIKU_REG32(RA8P1_NVIC_ICPR(RA8P1_ICU_SLOT_IPC / 32U)) =
+        (1UL << (RA8P1_ICU_SLOT_IPC % 32U));
+    TIKU_REG32(RA8P1_NVIC_ISER(RA8P1_ICU_SLOT_IPC / 32U)) =
+        (1UL << (RA8P1_ICU_SLOT_IPC % 32U));
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+}
+
+int tiku_ra8p1_cpu1_bell_take(void)
+{
+    if (!cpu1_bell) {
+        return 0;
+    }
+    cpu1_bell = 0U;
+    return 1;
+}
 
 void tiku_ra8p1_nmi_handler(void)
 {
@@ -108,8 +167,22 @@ int tiku_ra8p1_cpu1_running(void)
 
 uint32_t tiku_ra8p1_cpu1_magic(void)
 {
+    uint32_t m;
+
     cpu1_pull();
-    return CPU1_SH->magic;
+    m = CPU1_SH->magic;
+    /* Every observation path flows through here, so this is where a fault
+     * is counted -- once per fault, cleared when a payload runs again. */
+    if (m == TIKU_CPU1_MAGIC_FAULT) {
+        if (!cpu1_fault_noticed) {
+            cpu1_fault_noticed = 1U;
+            tiku_ra8p1_cpu1_fault_count++;
+            cpu1_running = 0U;
+        }
+    } else if (m == TIKU_CPU1_MAGIC) {
+        cpu1_fault_noticed = 0U;
+    }
+    return m;
 }
 
 uint32_t tiku_ra8p1_cpu1_heartbeat(void)
@@ -176,6 +249,17 @@ uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap)
     return len;
 }
 
+void tiku_ra8p1_cpu1_raw(uint32_t out[5])
+{
+    /* SRAM truth for both halves: drop every cached copy first. */
+    tiku_ra8p1_dcache_invalidate((void *)CPU1_SH, sizeof(tiku_cpu1_shared_t));
+    out[0] = CPU1_SH->halt;
+    out[1] = CPU1_SH->a2c_restart;
+    out[2] = CPU1_SH->a2c_seq;
+    out[3] = CPU1_SH->magic;
+    out[4] = CPU1_SH->heartbeat;
+}
+
 uint32_t tiku_ra8p1_cpu1_image_size(void)
 {
     return CPU1_IMG_SIZE;
@@ -229,6 +313,7 @@ int tiku_ra8p1_cpu1_start(void)
     if (!cpu1_nmi_seeded) {
         /* Warm-persist memory is not zeroed at a cold boot. */
         tiku_ra8p1_cpu1_nmi_count = 0U;
+        tiku_ra8p1_cpu1_fault_count = 0U;
         cpu1_nmi_seeded = 1U;
     }
 
@@ -239,18 +324,45 @@ int tiku_ra8p1_cpu1_start(void)
      * is executing at the time.
      */
     if (tiku_ra8p1_cpu1_active()) {
-        cpu1_set_halt(0UL);
+        /* A faulted payload is parked in its HardFault handler watching the
+         * restart word; changing it re-enters the reset path.  This is the
+         * owner deciding, which no register can do for it. */
+        if (tiku_ra8p1_cpu1_magic() == TIKU_CPU1_MAGIC_FAULT) {
+            uint32_t settle;
+
+            cpu1_restart_gen++;
+            CPU1_SH->a2c_restart = cpu1_restart_gen;
+            cpu1_push();
+            /* The reboot is not instant: the handler must notice the word
+             * and re-run the reset path.  Bounded, like the stop settle. */
+            for (settle = 0U; settle < 100U; settle++) {
+                for (i = 0U; i < 20000U; i++) {
+                    __asm__ volatile ("nop");
+                }
+                if (tiku_ra8p1_cpu1_magic() == TIKU_CPU1_MAGIC) {
+                    break;
+                }
+            }
+        } else {
+            cpu1_set_halt(0UL);
+        }
         cpu1_running = 1U;
+        /* A core in LOCKUP ignores both words, so the resume is confirmed
+         * against the heartbeat before it is reported. */
+        if (!tiku_ra8p1_cpu1_alive()) {
+            cpu1_running = 0U;
+            return TIKU_RA8P1_CPU1_ERR_DEAD;
+        }
         return TIKU_RA8P1_CPU1_OK;
     }
 
-    if (CPU1_IMG_SIZE == 0U || CPU1_IMG_SIZE > sizeof(cpu1_area)) {
+    if (CPU1_IMG_SIZE == 0U || CPU1_IMG_SIZE > TIKU_CPU1_AREA_SIZE) {
         return TIKU_RA8P1_CPU1_ERR_IMG;
     }
 
-    /* Zero before copy, always: a shorter image laid over a longer one
-     * otherwise leaves the previous tail live behind it. */
-    for (i = 0U; i < sizeof(cpu1_area); i++) {
+    /* Zeroed before the copy: a shorter image laid over a longer one would
+     * otherwise leave the previous tail live behind it. */
+    for (i = 0U; i < TIKU_CPU1_AREA_SIZE; i++) {
         cpu1_area[i] = 0U;
     }
     for (i = 0U; i < CPU1_IMG_SIZE; i++) {
@@ -258,19 +370,26 @@ int tiku_ra8p1_cpu1_start(void)
     }
     vec[0] = base + TIKU_CPU1_STACK_OFF;
     vec[1] = (base + TIKU_CPU1_RESET_OFF) | 1U;
+    /* HardFault only.  A fault taken while the HardFault is still active
+     * escalates to LOCKUP whatever the other vectors hold, which is why the
+     * handler exception-returns before anything else can fault. */
+    vec[3] = (base + TIKU_CPU1_FAULT_OFF) | 1U;
     cpu1_a2c_seq = 0U;
+    cpu1_restart_gen = 0U;
+    cpu1_bell = 0U;
+    cpu1_bell_arm();
 
     /* The image arrived through this core's write-back D-cache; CPU1 fetches
      * straight from SRAM and would see zeros. */
-    tiku_ra8p1_dcache_clean(cpu1_area, sizeof(cpu1_area));
+    tiku_ra8p1_dcache_clean(cpu1_area, TIKU_CPU1_AREA_SIZE);
     __asm__ volatile ("dsb" ::: "memory");
 
     /*
-     * VECTOR BASE BEFORE ACTIVATION, and the order is the whole of it.
-     * INITVTOR is latched as the core leaves reset, which activation
-     * triggers; set afterwards it changes nothing, and CPU1 boots from the
-     * register's reset value 0x0200_0000 -- the M85's own vector table.  An
-     * M33 running the M85's image shares its stack and paints it.
+     * The vector base is set before activation.  INITVTOR is latched as the
+     * core leaves reset, which activation triggers; set afterwards it
+     * changes nothing and CPU1 boots from the register's reset value
+     * 0x0200_0000, the M85's own vector table.  An M33 running the M85's
+     * image shares its stack and paints it.
      */
     cpu1_protect(1);
     TIKU_REG32(RA8P1_CPU1INITVTOR) = base;

@@ -272,6 +272,35 @@
 #define RA8P1_CRPT_PROTECT      (1U << 0)
 
 /*
+ * Inter-processor communication (UM 3).  IPC0* carries CPU1 -> CPU0 and
+ * IPC1* the other way; each direction has two four-deep 32-bit FIFOs plus
+ * eight software interrupt bits, and IPC_IRQ0 (event 0x05B) is the line the
+ * ICU can route to this core's NVIC.
+ *
+ * STA is READ-ONLY: the bits are set through ISET and cleared through CLR,
+ * so an ISR that tries to write STA clears nothing and the interrupt
+ * re-enters forever.
+ */
+#define RA8P1_IPC_BASE          0x40020000UL      /* secure view          */
+#define RA8P1_IPC0STA0          (RA8P1_IPC_BASE + 0x0C0UL)  /* CPU1->CPU0 */
+#define RA8P1_IPC0ISET0         (RA8P1_IPC_BASE + 0x0C4UL)
+#define RA8P1_IPC0TXD0          (RA8P1_IPC_BASE + 0x0C8UL)
+#define RA8P1_IPC0RXD0          (RA8P1_IPC_BASE + 0x0CCUL)
+#define RA8P1_IPC0CLR0          (RA8P1_IPC_BASE + 0x0D0UL)
+#define RA8P1_IPC1STA0          (RA8P1_IPC_BASE + 0x100UL)  /* CPU0->CPU1 */
+#define RA8P1_IPC1ISET0         (RA8P1_IPC_BASE + 0x104UL)
+#define RA8P1_IPC1TXD0          (RA8P1_IPC_BASE + 0x108UL)
+#define RA8P1_IPC1RXD0          (RA8P1_IPC_BASE + 0x10CUL)
+#define RA8P1_IPC1CLR0          (RA8P1_IPC_BASE + 0x110UL)
+#define RA8P1_IPC_IRQ(n)        (1UL << (n))      /* IRQ7..0, STA/ISET/CLR */
+#define RA8P1_IPC_STA_RDY       (1UL << 16)       /* FIFO not empty       */
+#define RA8P1_IPC_STA_FULL      (1UL << 17)
+#define RA8P1_IPC_STA_RERR      (1UL << 24)       /* read while empty     */
+#define RA8P1_IPC_STA_FERR      (1UL << 25)       /* write while full     */
+#define RA8P1_IPC_CLR_RCLR      (1UL << 24)
+#define RA8P1_IPC_CLR_FCLR      (1UL << 25)
+
+/*
  * Reset status (UM 6.2).  Note the offsets are NOT adjacent: RSTSR1 sits at
  * 0x0C0 while RSTSR0 and RSTSR2 are up at 0xA40/0xA44.
  */
@@ -452,7 +481,7 @@
 
 /*
  * The CFIFO port is the only way to reach the DCP's 64-byte buffer -- and the
- * ADDRESS TO USE DEPENDS ON THE ACCESS WIDTH, in the opposite direction to
+ * address to use depends on the access width, in the opposite direction to
  * what the names suggest.  With BIGEND=0 (little endian), UM Table 38.8 says
  * 8-bit access must go to CFIFO*HH* at 0x017 and calls CFIFOLL at 0x014
  * "access prohibited" -- 0x014 being exactly the offset the register is
@@ -808,6 +837,7 @@
 #define RA8P1_ICU_SLOT_HTIMER   2U
 #define RA8P1_ICU_SLOT_DMAC0    3U
 #define RA8P1_ICU_SLOT_USBHS    4U
+#define RA8P1_ICU_SLOT_IPC      5U
 
 /** @brief Event numbers this port links (UM Table 14.5). */
 #define RA8P1_EVENT_SCI8_RXI    0x2FCUL
@@ -819,6 +849,7 @@
  * assume one cause per edge.  0x2C1/0x2C2 are the D0/D1FIFO DMA requests,
  * which this port does not use. */
 #define RA8P1_EVENT_USBHS_USBIR 0x2C3UL
+#define RA8P1_EVENT_IPC_IRQ0    0x05BUL
 
 /*---------------------------------------------------------------------------*/
 /* GPT32 (UM 23) -- the htimer's counter and compare                          */

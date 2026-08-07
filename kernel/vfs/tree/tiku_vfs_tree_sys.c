@@ -26,6 +26,9 @@
 #include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
 #include <arch/nordic/tiku_radio_arch.h>        /* /sys/radio/mode (live)   */
 #endif
+#if (TIKU_HAS_COPROC + 0)
+#include "tiku_vfs_tree_coproc.h"
+#endif
 #if (TIKU_FLPR_ENABLE + 0)
 #include <arch/nordic/tiku_flpr_arch.h>         /* /sys/flpr coprocessor    */
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* TIKU_FLPR_MSG_CAP        */
@@ -1290,6 +1293,10 @@ static const tiku_vfs_node_t sys_children[] = {
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
     { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   8 },
+#endif
+#if (TIKU_HAS_COPROC + 0)
+    { "coproc",   TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_coproc_children,   TIKU_VFS_TREE_COPROC_NCHILD },
 #endif
 #if TIKU_INIT_ENABLE
     { "init",     TIKU_VFS_DIR,  NULL, NULL,

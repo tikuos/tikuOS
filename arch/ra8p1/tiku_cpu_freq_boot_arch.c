@@ -373,13 +373,21 @@ static int pll_up(const ra8p1_opoint_t *op)
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
     STEP(4);
 
-    /* Undivided is safe at MOCO's 8 MHz: every ceiling in Table 9.2 is far
-     * above it, so no domain is out of spec during the window. */
-    TIKU_REG32(RA8P1_SCKDIVCR)  = 0UL;
-    TIKU_REG16(RA8P1_SCKDIVCR2) = 0U;
+    /*
+     * The source moves before the dividers.  Undividing while the tree is
+     * still on PLL1P would run ICLK at the core rate, 1 GHz against its
+     * 250 MHz ceiling, and would put MRICLK and CPUCLK1 under ICLK, which
+     * UM 9.2.3 forbids.  Neither condition raises a fault; the symptom is a
+     * corrupted fetch.  The old divisors are safe against MOCO: every ratio
+     * in the table lands under 8 MHz.
+     */
     TIKU_REG8(RA8P1_SCKSCR) = (uint8_t)TIKU_RA8P1_CKSEL_MOCO;
     while ((TIKU_REG8(RA8P1_SCKSCR) & RA8P1_SCKSCR_CKSEL_MASK) !=
            TIKU_RA8P1_CKSEL_MOCO) { }
+    /* Now undivided is genuinely safe: every ceiling in Table 9.2 is far
+     * above MOCO's 8 MHz. */
+    TIKU_REG32(RA8P1_SCKDIVCR)  = 0UL;
+    TIKU_REG16(RA8P1_SCKDIVCR2) = 0U;
     cpu_hz_now = TIKU_RA8P1_MOCO_HZ;
     STEP(5);
 

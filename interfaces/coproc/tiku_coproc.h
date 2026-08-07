@@ -44,7 +44,9 @@ typedef enum {
     TIKU_COPROC_ABSENT = 0,     /**< no second engine in this build       */
     TIKU_COPROC_STOPPED,        /**< never launched, or payload parked    */
     TIKU_COPROC_STARTED,        /**< released, magic not published yet    */
-    TIKU_COPROC_RUNNING         /**< magic published and not parked       */
+    TIKU_COPROC_RUNNING,        /**< magic published and not parked       */
+    TIKU_COPROC_FAULTED         /**< payload reported a fault; start()
+                                     decides whether it restarts           */
 } tiku_coproc_state_t;
 
 /**

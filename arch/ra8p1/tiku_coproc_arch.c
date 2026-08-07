@@ -35,15 +35,22 @@ uint32_t tiku_coproc_flags(void)
 
 tiku_coproc_state_t tiku_coproc_state(void)
 {
+    uint32_t m;
+
     if (!tiku_ra8p1_cpu1_active()) {
         return TIKU_COPROC_STOPPED;
+    }
+    /* The magic first: a faulted payload still holds cpu1_running until the
+     * fault is noticed, and this read is what notices it. */
+    m = tiku_ra8p1_cpu1_magic();
+    if (m == TIKU_CPU1_MAGIC_FAULT) {
+        return TIKU_COPROC_FAULTED;
     }
     if (!tiku_ra8p1_cpu1_running()) {
         return TIKU_COPROC_STOPPED;         /* powered, payload parked */
     }
-    return (tiku_ra8p1_cpu1_magic() == TIKU_CPU1_MAGIC)
-               ? TIKU_COPROC_RUNNING
-               : TIKU_COPROC_STARTED;
+    return (m == TIKU_CPU1_MAGIC) ? TIKU_COPROC_RUNNING
+                                  : TIKU_COPROC_STARTED;
 }
 
 int tiku_coproc_start(void)
@@ -54,6 +61,8 @@ int tiku_coproc_start(void)
         return TIKU_COPROC_ERR_IMAGE;
     }
     if (rc != TIKU_RA8P1_CPU1_OK) {
+        /* ERR_DEAD folds in: a locked-up core is a state problem the
+         * caller cannot message its way out of. */
         return TIKU_COPROC_ERR_STATE;
     }
     coproc_seen_seq = tiku_ra8p1_cpu1_reply_seq();
@@ -96,8 +105,15 @@ int tiku_coproc_send(const void *data, uint32_t len)
 
 int tiku_coproc_poll(void)
 {
-    uint32_t seq = tiku_ra8p1_cpu1_reply_seq();
+    uint32_t seq;
 
+    /* The doorbell is the cheap path: no cache maintenance unless it rang.
+     * The sequence check stays as the authority, because a doorbell can be
+     * coalesced or arrive for a reply already collected. */
+    if (!tiku_ra8p1_cpu1_bell_take()) {
+        return 0;
+    }
+    seq = tiku_ra8p1_cpu1_reply_seq();
     if (seq == coproc_seen_seq) {
         return 0;
     }

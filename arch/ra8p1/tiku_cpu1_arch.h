@@ -26,6 +26,7 @@
 #define TIKU_RA8P1_CPU1_ERR_ACT    -1   /**< never left power gating */
 #define TIKU_RA8P1_CPU1_ERR_IMG    -2   /**< embedded image absent or too big */
 #define TIKU_RA8P1_CPU1_ERR_LEN    -3   /**< message longer than the mailbox */
+#define TIKU_RA8P1_CPU1_ERR_DEAD   -4   /**< locked up; a reset revives it */
 
 /**
  * @brief Load the payload and release CPU1, or resume one already running.
@@ -110,7 +111,25 @@ uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap);
  */
 uint32_t tiku_ra8p1_cpu1_image_size(void);
 
-/** @brief Non-maskable interrupts seen; a CPU1 lockup raises one. */
+/** @brief Non-maskable interrupts seen from armed sources; a CPU1 LOCKUP
+ *         raises none, so fault reporting is in-band. */
 extern volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
+
+/**
+ * @brief Consume a reply doorbell, if one has arrived.
+ *
+ * @return Non-zero when the payload has signalled since the last call
+ */
+int tiku_ra8p1_cpu1_bell_take(void);
+
+/** @brief Doorbells taken; 0 with a payload running means polling only. */
+extern volatile uint32_t tiku_ra8p1_cpu1_bell_count;
+
+/** @brief Faults the payload has reported; survives a warm reset. */
+extern volatile uint32_t tiku_ra8p1_cpu1_fault_count;
+
+/** @brief SRAM truth of the shared page: halt, restart, a2c_seq, magic,
+ *         heartbeat -- read fresh past every cached copy. */
+void tiku_ra8p1_cpu1_raw(uint32_t out[5]);
 
 #endif /* TIKU_RA8P1_CPU1_ARCH_H_ */

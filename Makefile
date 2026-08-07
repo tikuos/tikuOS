@@ -1971,10 +1971,13 @@ ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
 SRCS += arch/ra8p1/tiku_cpu1_arch.c              # Cortex-M33 lifecycle
 SRCS += kernel/shell/commands/tiku_shell_cmd_cpu1.c
 SRCS += arch/ra8p1/tiku_coproc_arch.c            # interfaces/coproc backend
+SRCS += kernel/vfs/tree/tiku_vfs_tree_coproc.c   # /sys/coproc
+SRCS += arch/ra8p1/cpu1/tiku_cpu1_sha256.c       # A/B kernel, M85 side
+SRCS += tikukits/crypto/p256/tiku_kits_crypto_p256.c  # verify baseline
 CFLAGS += -DTIKU_DRV_CPU1_ENABLE=1
 # Presence and capacity are -D globals so every translation unit resolves
 # them the same way; the backend asserts the cap against its own mailbox.
-CFLAGS += -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=48u
+CFLAGS += -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=192u
 # The payload is a separate link for the same ISA, so it uses the same
 # toolchain with its own flags -- notably soft-float, because CPACR is zero
 # out of reset and the first FP instruction would lock the core up.  -Os is
@@ -1982,8 +1985,12 @@ CFLAGS += -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=48u
 CPU1_BUILD    = $(BUILD_DIR)/cpu1
 CPU1_CFLAGS   = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -Os -Wall -Wextra \
                 -Werror -ffreestanding -fno-builtin -fno-common -nostdlib \
-                -nostartfiles -ffunction-sections -fdata-sections -MMD -MP
-CPU1_OBJS     = $(CPU1_BUILD)/tiku_cpu1_payload.o
+                -nostartfiles -ffunction-sections -fdata-sections -MMD -MP \
+                -I$(PROJ_DIR)
+CPU1_OBJS     = $(CPU1_BUILD)/tiku_cpu1_payload.o \
+                $(CPU1_BUILD)/tiku_cpu1_sha256.o \
+                $(CPU1_BUILD)/tiku_cpu1_libc.o \
+                $(CPU1_BUILD)/tiku_kits_crypto_p256.o
 TIKU_CPU1_IMG_O = $(CPU1_BUILD)/tiku_cpu1_img.o
 endif
 SRCS += arch/ra8p1/tiku_wake_arch.c
@@ -3350,6 +3357,10 @@ endif
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
 $(CPU1_BUILD)/%.o: arch/ra8p1/cpu1/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPU1_CFLAGS) -c -o $@ $<
+
+$(CPU1_BUILD)/tiku_kits_crypto_p256.o: tikukits/crypto/p256/tiku_kits_crypto_p256.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPU1_CFLAGS) -c -o $@ $<
 

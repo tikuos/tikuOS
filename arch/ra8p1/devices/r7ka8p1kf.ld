@@ -19,7 +19,11 @@ ENTRY(tiku_ra8p1_reset_handler)
 MEMORY
 {
     MRAM (rx)  : ORIGIN = 0x02000000, LENGTH = 1024K
-    SRAM (rwx) : ORIGIN = 0x22000000, LENGTH = 1664K
+    /* The first 16 KB belong to the CPU1 payload, which links at this fixed
+     * address so its compiler-generated absolute loads are simply correct.
+     * Keep in step with TIKU_CPU1_AREA_ADDR (tiku_cpu1_ipc.h) and the base
+     * in arch/ra8p1/cpu1/tiku_cpu1.ld. */
+    SRAM (rwx) : ORIGIN = 0x22004000, LENGTH = 1664K - 16K
 }
 
 /* "FRAM_*" vocabulary the kernel memory introspection speaks == MRAM here. */
@@ -195,6 +199,8 @@ SECTIONS
     /* The durable persist data must fit inside the reserved region. */
     ASSERT(__persistent_end <= __tiku_nvm_mram_end,
            "ERROR: durable .persistent overruns the reserved MRAM region")
+
+    PROVIDE(__tiku_cpu1_area = 0x22000000);
 
     /DISCARD/ :
     {
