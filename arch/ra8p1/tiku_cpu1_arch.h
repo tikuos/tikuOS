@@ -24,6 +24,8 @@
 /** @brief Start outcomes; ignoring these leaves a silently dead core. */
 #define TIKU_RA8P1_CPU1_OK          0
 #define TIKU_RA8P1_CPU1_ERR_ACT    -1   /**< never left power gating */
+#define TIKU_RA8P1_CPU1_ERR_IMG    -2   /**< embedded image absent or too big */
+#define TIKU_RA8P1_CPU1_ERR_LEN    -3   /**< message longer than the mailbox */
 
 /**
  * @brief Load the payload and release CPU1, or resume one already running.
@@ -68,6 +70,45 @@ uint32_t tiku_ra8p1_cpu1_magic(void);
  * @return A value that advances while the payload runs
  */
 uint32_t tiku_ra8p1_cpu1_heartbeat(void);
+
+/**
+ * @brief Is the payload both loaded and still executing?
+ *
+ * @return Non-zero when the magic is published and the heartbeat moves
+ */
+int tiku_ra8p1_cpu1_alive(void);
+
+/**
+ * @brief Hand a message to the payload.
+ *
+ * @param data  Bytes to send
+ * @param len   How many, at most TIKU_CPU1_MSG_CAP
+ * @return TIKU_RA8P1_CPU1_OK, ERR_LEN, or ERR_ACT when nothing is running
+ */
+int tiku_ra8p1_cpu1_send(const void *data, uint32_t len);
+
+/**
+ * @brief Sequence the payload has answered, for matching against a send.
+ *
+ * @return The reply sequence read out of the shared page
+ */
+uint32_t tiku_ra8p1_cpu1_reply_seq(void);
+
+/**
+ * @brief Collect the reply to the most recent send.
+ *
+ * @param out  Destination, or NULL to ask only for the length
+ * @param cap  Bytes available at @p out
+ * @return Bytes the payload replied, or 0 when it has not answered yet
+ */
+uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap);
+
+/**
+ * @brief Bytes of embedded payload the launch copies in.
+ *
+ * @return Size of the image built by arch/ra8p1/cpu1/
+ */
+uint32_t tiku_ra8p1_cpu1_image_size(void);
 
 /** @brief Non-maskable interrupts seen; a CPU1 lockup raises one. */
 extern volatile uint32_t tiku_ra8p1_cpu1_nmi_count;

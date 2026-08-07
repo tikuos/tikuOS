@@ -1970,7 +1970,21 @@ endif
 ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
 SRCS += arch/ra8p1/tiku_cpu1_arch.c              # Cortex-M33 lifecycle
 SRCS += kernel/shell/commands/tiku_shell_cmd_cpu1.c
+SRCS += arch/ra8p1/tiku_coproc_arch.c            # interfaces/coproc backend
 CFLAGS += -DTIKU_DRV_CPU1_ENABLE=1
+# Presence and capacity are -D globals so every translation unit resolves
+# them the same way; the backend asserts the cap against its own mailbox.
+CFLAGS += -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=48u
+# The payload is a separate link for the same ISA, so it uses the same
+# toolchain with its own flags -- notably soft-float, because CPACR is zero
+# out of reset and the first FP instruction would lock the core up.  -Os is
+# load-bearing: the code window is 32 bytes and -O2 overruns it.
+CPU1_BUILD    = $(BUILD_DIR)/cpu1
+CPU1_CFLAGS   = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -Os -Wall -Wextra \
+                -Werror -ffreestanding -fno-builtin -fno-common -nostdlib \
+                -nostartfiles -ffunction-sections -fdata-sections -MMD -MP
+CPU1_OBJS     = $(CPU1_BUILD)/tiku_cpu1_payload.o
+TIKU_CPU1_IMG_O = $(CPU1_BUILD)/tiku_cpu1_img.o
 endif
 SRCS += arch/ra8p1/tiku_wake_arch.c
 SRCS += arch/ra8p1/tiku_htimer_arch.c
@@ -3101,6 +3115,11 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 OBJS += $(TIKU_FLPR_IMG_O)
 endif
 
+ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
+# Embedded Cortex-M33 payload (recipes below `all:`, same reason).
+OBJS += $(TIKU_CPU1_IMG_O)
+endif
+
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 # Embedded loadable-module image (recipes below `all:`).
 OBJS += $(TIKU_MOD_IMG_O)
@@ -3320,6 +3339,34 @@ $(TIKU_FLPR_IMG_O): $(FLPR_BUILD)/tiku_flpr.bin
 	    tiku_flpr.bin tiku_flpr_img.o
 
 -include $(FLPR_OBJS:.o=.d)
+endif
+
+# ---------------------------------------------------------------------------
+# Cortex-M33 payload sub-build: same toolchain as the M85 image but its own
+# flags, linker script and link, flattened to a binary and wrapped as an ARM
+# object whose _binary_tiku_cpu1_bin_* symbols tiku_cpu1_arch.c copies from.
+# The wrap runs from INSIDE the build dir so the symbol names come from the
+# bare file name rather than a path carrying the MCU.
+# ---------------------------------------------------------------------------
+ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
+$(CPU1_BUILD)/%.o: arch/ra8p1/cpu1/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPU1_CFLAGS) -c -o $@ $<
+
+$(CPU1_BUILD)/tiku_cpu1.elf: $(CPU1_OBJS) arch/ra8p1/cpu1/tiku_cpu1.ld
+	$(CC) $(CPU1_CFLAGS) -T arch/ra8p1/cpu1/tiku_cpu1.ld \
+	    -Wl,--gc-sections -o $@ $(CPU1_OBJS)
+
+$(CPU1_BUILD)/tiku_cpu1.bin: $(CPU1_BUILD)/tiku_cpu1.elf
+	$(OBJCOPY) -O binary --gap-fill 0 $< $@
+	@echo "  [cpu1]  $$(stat -c%s $@) bytes"
+
+$(TIKU_CPU1_IMG_O): $(CPU1_BUILD)/tiku_cpu1.bin
+	cd $(CPU1_BUILD) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm \
+	    --rename-section .data=.rodata,alloc,load,readonly,data,contents \
+	    tiku_cpu1.bin tiku_cpu1_img.o
+
+-include $(CPU1_OBJS:.o=.d)
 endif
 
 # Loadable-module sub-build: separately-compiled ARM module at the NVM slot
