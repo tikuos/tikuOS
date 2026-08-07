@@ -34,17 +34,21 @@ static struct {
 /**
  * @brief Disable NVIC interrupts, keeping the requested sources enabled.
  *
- * The kernel tick runs on LPTIM1, so TIKU_CRIT_PRESERVE_HTIMER keeps that one
- * line alive; the other preserve flags have no interrupt-driven backend on
- * this port yet and so select nothing.
+ * The kernel tick and the htimer share LPTIM1 and its interrupt, so one
+ * line carries both and either preserve flag keeps it.
  *
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
+ * @note The tick and the htimer share LPTIM1 and one NVIC line, so either
+ *       TIKU_CRIT_PRESERVE_HTIMER or TIKU_CRIT_PRESERVE_TICK keeps it, and
+ *       keeping either keeps both.  Pin edges arrive on EXTI lines that go
+ *       down with everything else; UART, I2C and ADC are polled here.
  * @note DSB+ISB makes the disable architecturally visible before the section.
  */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     uint32_t keep[CRIT_NVIC_WORDS] = {0};
 
-    if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
+    if (preserve_mask & (TIKU_CRIT_PRESERVE_HTIMER |
+                         TIKU_CRIT_PRESERVE_TICK)) {
         keep[STM32N6_IRQ_LPTIM1 / 32U] |= (1UL << (STM32N6_IRQ_LPTIM1 % 32U));
     }
 

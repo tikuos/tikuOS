@@ -9,6 +9,7 @@
  *
  * SysTick is a core exception, so the tick needs no module-stop bit, no NVIC
  * line and no peripheral clock tree -- the least that can go wrong while the
+ * clock tree moves under it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -50,19 +51,12 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /**
  * @brief SysTick counts per tick at the boot clock.
  *
- * 8 MHz / 128 = 62500, inside SysTick's 24-bit reload.  At 1 GHz the same
- * tick would want 7.8M counts, which does not fit, so R4 must divide the
- * source or move the tick to ULPT/AGT.
+ * 8 MHz / 128 = 62500, inside SysTick's 24-bit reload.
+ * tiku_ra8p1_clock_arch_retune() reprograms the reload when the clock tree
+ * moves; at 1 GHz it is 7812500, still inside the 24 bits.
  */
 #define TIKU_CLOCK_ARCH_INTERVAL \
     (TIKU_RA8P1_ICLK_BOOT_HZ / TIKU_CLOCK_ARCH_SECOND)
-/*
- * The HAL types the fine counter as unsigned short, so the reload it reports
- * against must fit 16 bits.  At 8 MHz / 128 Hz the reload is 62500, which does
- * -- but at any clock above ~8.4 MHz it would not, and the value would wrap
- * silently mid-tick rather than fail.  R4 raises the clock, so this is a
- * link-time tripwire, not a comment.
- */
 /* The BOOT reload only.  A retune to a faster clock exceeds 16 bits, and
  * tiku_clock_arch_fine() shifts to compensate; SysTick's own 24 bits are the
  * limit that cannot be worked around. */
@@ -124,5 +118,15 @@ void tiku_clock_arch_delay(unsigned int i);
  *         (in which case the tick is left running at its previous rate).
  */
 int tiku_ra8p1_clock_arch_retune(unsigned long iclk_hz);
+
+/**
+ * @brief Re-derive the htimer's counts-per-microsecond from PCLKD.
+ *
+ * @note Must run on any rung change: PCLKD is 240 MHz at the 240 and 480
+ *       rungs and 250 MHz at 1000, so a stale scale is ~4% out.  An alarm
+ *       already programmed keeps its GPT count, so its deadline moves with
+ *       the clock exactly as the tick's does.
+ */
+void tiku_ra8p1_htimer_arch_retune(void);
 
 #endif /* TIKU_RA8P1_TIMER_ARCH_H_ */

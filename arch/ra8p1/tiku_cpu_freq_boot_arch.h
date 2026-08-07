@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_arch.h - RA8P1 clock state.
+ * tiku_cpu_freq_boot_arch.h - RA8P1 clock tree and operating points.
  *
- * R2 does not touch the clock tree.  The part comes out of reset on MOCO at
- * 8 MHz with every SCKDIVCR field zero, and every derived constant in the port
+ * MOSC and PLL bring-up, rung selection, the CAC cross-check, and the live
+ * ICLK/PCLKA/PCLKB/SCICLK/PCLKD/BCLK rates.  The part comes out of reset on
+ * MOCO at 8 MHz with every SCKDIVCR field zero.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -48,8 +49,8 @@ typedef struct {
 /**
  * @brief Start the board's main crystal oscillator.
  *
- * Needed both as the PLL's reference and as the CAC's, so it is the first
- * thing R4 brings up.
+ * Needed both as the PLL's reference and as the CAC's, so it is brought up
+ * before either.
  *
  * @return 0 when the oscillator reports stable, -1 when it never did
  */
@@ -58,7 +59,7 @@ int tiku_cpu_ra8p1_mosc_start(void);
 /**
  * @brief Count one clock against another, entirely on-chip.
  *
- * The reference is divided by 32 << (2 * ref_div), and the return is how many
+ * The reference is divided by the RCDS code below, and the return is how many
  * target-clock edges fell inside one such period -- so the target rate is
  * count * ref_hz / divider.
  *
@@ -91,8 +92,9 @@ int tiku_cpu_freq_ra8p1_supported(unsigned int mhz);
 /**
  * @brief Prepare whatever clock state the rest of the port depends on.
  *
- * Nothing, deliberately: R2 runs on the reset tree.  The call exists so the
- * boot sequence matches the other ports and R4 has one place to grow into.
+ * Nothing, deliberately: the boot path runs on the reset tree and the rung is
+ * chosen explicitly by tiku_cpu_freq_ra8p1_init().  The call exists so the
+ * boot sequence matches the other ports.
  */
 void tiku_cpu_boot_ra8p1_init(void);
 
@@ -106,7 +108,7 @@ void tiku_cpu_ra8p1_clock_probe(tiku_ra8p1_clock_t *out);
 /**
  * @brief Core clock rate in Hz.
  *
- * @return The rate implied by SCKSCR and SCKDIVCR, MOCO-derived until R4
+ * @return The rate the clock tree is configured for, in Hz
  */
 unsigned long tiku_cpu_ra8p1_clock_get_hz(void);
 
@@ -140,6 +142,17 @@ unsigned long tiku_cpu_ra8p1_sciclk_get_hz(void);
  * @return The rate PCLKD is running at
  */
 unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void);
+
+/**
+ * @brief ICLK rate in Hz, which is what SysTick counts.
+ *
+ * @note NOT the core rate.  SysTick's CLKSOURCE selects the processor clock,
+ *       and on this part that is ICLK, which the divider table pins near 240
+ *       at every rung while CPUCLK0 rides PLL1P.  A tick reload built from
+ *       the core rate runs slow by exactly the ratio between them.
+ * @return The rate ICLK is running at
+ */
+unsigned long tiku_cpu_ra8p1_iclk_get_hz(void);
 
 /**
  * @brief External bus clock (BCLK), which is also the SDRAM clock source.

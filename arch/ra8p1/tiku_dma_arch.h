@@ -7,8 +7,8 @@
  *
  * tiku_dma_arch.h - RA8P1 DMAC channel 0, software-triggered memcpy.
  *
- * Same API as the rp2350 and stm32n6 backends, so the peripheral test can be
- * one body rather than one per port.
+ * Word-count API shared with the rp2350 backend; the stm32n6 backend of the
+ * same name counts BYTES and numbers its error codes differently.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -57,6 +57,6 @@ int tiku_dma_arch_busy(void);
 int tiku_dma_arch_abort(void);
 
 /** @brief Channel-0 transfer-end ISR; installed on the ICU slot. */
-void tiku_ra8p1_dma_handler(void);
+void tiku_ra8p1_dmac0_handler(void);
 
 #endif /* TIKU_RA8P1_DMA_ARCH_H_ */

@@ -47,6 +47,14 @@ TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_freq_fail;
 #define FAILREC(v) do { } while (0)
 #endif
 
+/*
+ * The MINIMAL build links no htimer, so the rung change has nothing to
+ * retune; tiku_htimer_arch.c overrides this when it is present.
+ */
+__attribute__((weak)) void tiku_ra8p1_htimer_arch_retune(void)
+{
+}
+
 /** @brief Rate the tree is running at now; the boot clock until it is raised. */
 static unsigned long cpu_hz_now = TIKU_RA8P1_ICLK_BOOT_HZ;
 
@@ -80,9 +88,9 @@ static uint8_t div_of(uint32_t code)
 /**
  * @brief Rate of the selected system clock source, where it is knowable.
  *
- * MOCO, LOCO and the board's crystals are exact.  HOCO is option-trimmed and
- * the PLLs depend on registers R4 has not written, so those report 0 rather
- * than a plausible guess a wrong baud divisor could hide behind.
+ * MOCO, LOCO and the board's crystals are exact; PLL1P is the rate this
+ * driver last established.  HOCO is option-trimmed and PLL2 unprogrammed, so
+ * both report 0 rather than a guess a wrong baud divisor could hide behind.
  *
  * @param cksel  SCKSCR.CKSEL value
  * @return Source rate in Hz, or 0 when this port cannot yet derive it
@@ -198,18 +206,18 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
 /*
  * OPERATING POINTS.
  *
- * One table entry per rung, because the alternative -- a function per
- * frequency -- is how the 240 path ended up with the ceilings, the wait
- * states and the private clocks each written down in a different place.
- * Every field here is derived from UM Table 9.2, and the constraints that
- * bound them are listed beside the encodings in tiku_ra8p1_regs.h.
+ * One table entry per rung, so the ceilings, the wait states and the private
+ * clocks of a rung sit in one place.  Every field here is derived from UM
+ * Table 9.2, and the constraints that bound them are listed beside the
+ * encodings in tiku_ra8p1_regs.h.
  *
- * The dividers are chosen so that everything except the core lands on the
- * SAME rate at every rung.  That is not tidiness: it means a rung change
- * cannot alter SDRAM timing, the flash eye, the console divisor or any
- * peripheral's idea of time, so when a rung misbehaves the core clock is the
- * only thing that changed.  It also makes the pair of benchmarks meaningful,
- * since MRAM fetch is pinned while the core doubles.
+ * The bus divider CODES step with the rung, so 240 and 480 present an
+ * identical tree below the core: moving between those two cannot alter SDRAM
+ * timing, the console divisor or any peripheral's idea of time, so the core
+ * clock is the only thing that changes.  1000 is not twice 480, so the same
+ * step lands the buses at 125/250/62.5 MHz and SCICLK at 100 MHz instead.
+ * OCTACLK divides PLL1P on its own and tracks no rung at all, which is why a
+ * rung change is refused while the octal flash is in OPI mode.
  */
 #define DIV1  0U
 #define DIV2  1U
@@ -218,9 +226,13 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
 #define DIV16 4U
 
 /**
- * @brief SCKDIVCR word for a tree whose bus divisors scale with @p s.
+ * @brief SCKDIVCR word for a tree whose bus divisor codes step with @p s.
  *
- * @param s  Scale: 1 at PLL1P 240, 2 at 480, 4 at 1000
+ * The per-field rates annotated below are the 240 and 480 rungs.  At s = 2
+ * every code steps once more against 1000 MHz, so the fields read 250, 125
+ * and 62.5 instead.
+ *
+ * @param s  Divider-code step: 0 at PLL1P 240, 1 at 480, 2 at 1000
  */
 #define SCKDIVCR_TREE(s)                                                   \
     (((uint32_t)(DIV2 + (s)) << RA8P1_SCKDIVCR_MRPCK_SHIFT) |  /* 120 */   \
@@ -236,6 +248,10 @@ uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
  * NPUCK sits at /1 relative to ICLK, not /2: UM Table 9.2 requires
  * NPUCLK >= ICLK.  An NPU clocked below ICLK is out of spec and silent
  * about it while the Ethos-U55 is undriven.
+ *
+ * The annotated rates are the 240 and 480 rungs; at s = 2 each annotated
+ * field reads 250, which is what mrc_mhz carries for that rung.  CPUCK0
+ * takes its own divider and stays at the core rate.
  */
 #define SCKDIVCR2_TREE(s, cpu0div)                                                    \
     (((uint32_t)(DIV1 + (s)) << RA8P1_SCKDIVCR2_MRICK_SHIFT)  |  /* 240 */   \
@@ -625,7 +641,8 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
         if (pll_up(op) != 0) {
             if (cur_op == 0 || pll_up(cur_op) != 0) {
                 tiku_cpu_ra8p1_spin_invalidate();
-                (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
+                (void)tiku_ra8p1_clock_arch_retune(tiku_cpu_ra8p1_iclk_get_hz());
+                tiku_ra8p1_htimer_arch_retune();
                 tiku_uart_init();
             }
             if (primask == 0UL) {
@@ -640,7 +657,8 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
          * an RX against a half-initialised SCI. */
         tiku_cpu_ra8p1_spin_invalidate();
         STEP(12);
-        (void)tiku_ra8p1_clock_arch_retune(cpu_hz_now);
+        (void)tiku_ra8p1_clock_arch_retune(tiku_cpu_ra8p1_iclk_get_hz());
+        tiku_ra8p1_htimer_arch_retune();
         STEP(13);
         tiku_uart_init();
         STEP(14);
@@ -684,6 +702,15 @@ void tiku_cpu_ra8p1_clock_probe(tiku_ra8p1_clock_t *out)
 unsigned long tiku_cpu_ra8p1_clock_get_hz(void)
 {
     return cpu_hz_now;
+}
+
+unsigned long tiku_cpu_ra8p1_iclk_get_hz(void)
+{
+    unsigned long src = cpu_hz_now *
+        div_of(TIKU_REG16(RA8P1_SCKDIVCR2) >> RA8P1_SCKDIVCR2_CPUCK0_SHIFT);
+
+    return src / div_of(TIKU_REG32(RA8P1_SCKDIVCR) >>
+                        RA8P1_SCKDIVCR_ICK_SHIFT);
 }
 
 unsigned long tiku_cpu_ra8p1_pclka_get_hz(void)
@@ -739,9 +766,8 @@ void tiku_cpu_boot_ra8p1_power_wfi_enter(void)
      *
      * Software Standby (SSBY=1) would be deeper, but it stops the clocks, so
      * coming back needs a wake source the ICU is told to honour while stopped.
-     * Entering it before that is wired means a part that never wakes, and the
-     * saving cannot be shown until R9 puts a PPK2 on the measurement header.
-     * Deliberately not entered here, rather than mapped and hoped for.
+     * Entering it before that is wired means a part that never wakes, so it
+     * is deliberately not entered here rather than mapped and hoped for.
      */
     /*
      * Above 240 MHz the core is stepped DOWN to ICLK for the duration of the

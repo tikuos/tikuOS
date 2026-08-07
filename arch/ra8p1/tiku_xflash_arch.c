@@ -74,14 +74,6 @@ static uint8_t xf_dqs_width; /**< how many cells worked, i.e. margin */
 #define XF_LATE_REG   (xf_opi ? 4U : 0U)
 #define XF_LATE_ARRAY (xf_opi ? 20U : 8U)
 
-/*
- * Last controller state after a request, kept because the interesting failure
- * is not "the transaction errored" but "the transaction ran and the device
- * said nothing" -- which these separate.
- */
-uint32_t xf_last_ctl0;
-uint32_t xf_last_comstt;
-
 void tiku_ra8p1_xflash_init(void)
 {
     unsigned i;
@@ -198,9 +190,9 @@ static uint8_t xflash_octa_div(unsigned long src_hz)
 /**
  * @brief Point OCTACLK at @p sel, per the UM handshake.
  *
- * The MSTPCRB dance in steps 1-2 of the manual's procedure is skipped: it is
- * required only when changing away from 1/n, n != 1, and every divider this
- * selects is entered from the 1/1 reset value or from another 1/1 selection.
+ * The MSTPCRB dance in steps 1-2 of the manual's procedure is skipped.  It is
+ * required when changing away from 1/n, n != 1 -- which the return to MOCO
+ * does whenever the core runs above 250 MHz, where 1/2 or 1/4 is selected.
  */
 static int xflash_set_clock(uint8_t sel)
 {
@@ -728,8 +720,8 @@ int tiku_ra8p1_xflash_mmap_enable(void)
     }
 
     /* Prefetch on.  A mapped read without it re-sends command, address and
-     * twenty latency cycles for every burst the CPU asks for, which on a bus
-     * this fast is nearly all of the time. */
+     * the frame's latency cycles for every burst the CPU asks for, which on a
+     * bus this fast is nearly all of the time. */
     TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) =
         TIKU_REG32(RA8P1_OSPI_BMCFG(XF_UNIT, 0U)) | RA8P1_BMCFG_PREEN;
 

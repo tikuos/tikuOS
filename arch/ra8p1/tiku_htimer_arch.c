@@ -27,7 +27,12 @@
 /** @brief Alarms taken, for localising "the ISR never fired" reports. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
-/** @brief GPT counts per microsecond; PCLKD-derived, so it follows the tree. */
+/**
+ * @brief GPT counts per microsecond, derived from PCLKD.
+ *
+ * PCLKD is 240 MHz on the 240 and 480 rungs and 250 MHz on the 1000 rung, so
+ * a rung change makes this stale until tiku_ra8p1_htimer_arch_retune() runs.
+ */
 static uint32_t ht_per_us = 1U;
 
 /** @brief Whether an alarm is outstanding. */
@@ -38,7 +43,7 @@ static volatile uint8_t ht_armed;
  * @brief Clear a slot's ICU status flag and make the clear stick.
  *
  * The read-back is what stops the NVIC re-pending a slot whose clear had not
- * retired at exception return -- the console's double-byte bug, generalised.
+ * retired at exception return.
  *
  * @param slot  NVIC slot to acknowledge
  */
@@ -54,12 +59,17 @@ static void icu_ack(unsigned slot)
     __asm__ volatile ("dsb" ::: "memory");
 }
 
-void tiku_htimer_arch_init(void)
+void tiku_ra8p1_htimer_arch_retune(void)
 {
     unsigned long pclkd = tiku_cpu_ra8p1_pclkd_get_hz();
 
-    ht_armed = 0U;
     ht_per_us = (pclkd >= 1000000UL) ? (uint32_t)(pclkd / 1000000UL) : 1U;
+}
+
+void tiku_htimer_arch_init(void)
+{
+    ht_armed = 0U;
+    tiku_ra8p1_htimer_arch_retune();
 
     /* GTCLKCR strictly BEFORE the ungate: it is locked the moment MSTPE31
      * reads 0, and leaving it at its async reset default kills the block --

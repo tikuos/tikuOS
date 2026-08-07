@@ -8,7 +8,8 @@
  * tiku_crit_arch.c - RA8P1 critical sections over the NVIC.
  *
  * The kernel tick is SysTick, a core exception with no NVIC line, so masking
- * the NVIC never silences it -- TIKU_CRIT_PRESERVE_HTIMER therefore has
+ * the NVIC never silences it -- TIKU_CRIT_PRESERVE_TICK therefore needs
+ * nothing here.  TIKU_CRIT_PRESERVE_HTIMER keeps the GPT compare slot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,16 +35,29 @@ static struct {
  * @brief Disable NVIC interrupts, keeping the requested sources enabled.
  *
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
+ * @note TIKU_CRIT_PRESERVE_HTIMER is the only flag this backend maps; it
+ *       keeps the GPT compare slot alive.  The tick is SysTick, a core
+ *       exception with no NVIC line, so it runs either way and
+ *       TIKU_CRIT_PRESERVE_TICK needs nothing here.  UART, I2C and ADC are
+ *       polled on this port.
  * @note DSB+ISB makes the disable architecturally visible before the section.
  */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 {
-    (void)preserve_mask;    /* no NVIC-driven backend on this port yet */
+    uint32_t keep[CRIT_NVIC_WORDS] = {0};
+
+    if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
+        keep[RA8P1_ICU_SLOT_HTIMER / 32U] |=
+            (1UL << (RA8P1_ICU_SLOT_HTIMER % 32U));
+    }
 
     for (unsigned i = 0; i < CRIT_NVIC_WORDS; i++) {
+        uint32_t to_mask;
+
         crit_state.iser[i] = TIKU_REG32(RA8P1_NVIC_ISER(i));
-        if (crit_state.iser[i] != 0UL) {
-            TIKU_REG32(RA8P1_NVIC_ICER(i)) = crit_state.iser[i];
+        to_mask = crit_state.iser[i] & ~keep[i];
+        if (to_mask != 0UL) {
+            TIKU_REG32(RA8P1_NVIC_ICER(i)) = to_mask;
         }
     }
     __asm__ volatile ("dsb\n\tisb" ::: "memory");

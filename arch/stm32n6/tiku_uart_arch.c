@@ -112,13 +112,32 @@ void tiku_uart_puts(const char *s) {
 
 static void uart_check_overrun(void);
 
+#ifdef HAS_TESTS
+/** @brief Byte staged by tiku_uart_test_inject(), 0x100 when empty. */
+static unsigned int uart_injected = 0x100U;
+#endif
+
 uint8_t tiku_uart_rx_ready(void) {
     uart_check_overrun();
+#ifdef HAS_TESTS
+    if (uart_injected != 0x100U) {
+        return 1U;
+    }
+#endif
     return (TIKU_REG32(STM32N6_USART_ISR(UART_BASE)) & STM32N6_USART_ISR_RXNE) ? 1U : 0U;
 }
 
 int tiku_uart_getc(void) {
     uart_check_overrun();
+#ifdef HAS_TESTS
+    /* An injected byte is delivered before the hardware, and once only. */
+    if (uart_injected != 0x100U) {
+        int b = (int)(uart_injected & 0xFFU);
+
+        uart_injected = 0x100U;
+        return b;
+    }
+#endif
     if ((TIKU_REG32(STM32N6_USART_ISR(UART_BASE)) & STM32N6_USART_ISR_RXNE) == 0UL) {
         return -1;
     }
@@ -260,11 +279,6 @@ void tiku_uart_printf(const char *fmt, ...) {
 
 /** @brief Overruns seen since the counter was last reset. */
 static uint16_t uart_overruns;
-
-#ifdef HAS_TESTS
-/** @brief One byte staged by tiku_uart_test_inject(), 0x100 when empty. */
-static unsigned int uart_injected = 0x100U;
-#endif
 
 /**
  * @brief Fold a pending overrun into the counter and clear it in hardware.
