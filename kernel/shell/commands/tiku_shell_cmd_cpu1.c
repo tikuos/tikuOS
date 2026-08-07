@@ -81,7 +81,7 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
             SHELL_PRINTF("cpu1: start failed (%d)\n", rc);
             return;
         }
-        SHELL_PRINTF("cpu1: running; `freq` is pinned until reset\n");
+        SHELL_PRINTF("cpu1: running\n");
         return;
     }
 

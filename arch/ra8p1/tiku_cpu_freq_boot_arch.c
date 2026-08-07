@@ -17,9 +17,6 @@
 #include "tiku_xflash_arch.h"
 #include "tiku_cache_arch.h"
 #include "tiku_cpu_common.h"
-#if (TIKU_DRV_CPU1_ENABLE + 0)
-#include "tiku_cpu1_arch.h"
-#endif
 
 #include <stdint.h>
 
@@ -374,6 +371,11 @@ static int pll_up(const ra8p1_opoint_t *op)
     STEP(4);
 
     /*
+     * A second core may be fetching through this tree while it moves, so the
+     * ordering below is what keeps CPU1 alive across a rung change.  With the
+     * dividers written first, the down edge kills a running CPU1 while the
+     * M85 survives it.
+     *
      * The source moves before the dividers.  Undividing while the tree is
      * still on PLL1P would run ICLK at the core rate, 1 GHz against its
      * 250 MHz ceiling, and would put MRICLK and CPUCLK1 under ICLK, which
@@ -608,21 +610,6 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
         tiku_ra8p1_xflash_in_opi()) {
         return;
     }
-
-#if (TIKU_DRV_CPU1_ENABLE + 0)
-    /*
-     * Nor while the second core is active, which is the whole time it is: a
-     * rung change parks the tree on MOCO and reprogrammes the PLL, CPU1
-     * fetches through that same tree, a halted payload still FETCHES, and
-     * nothing returns CPU1 to power gating.  There is no window in which the
-     * tree can move underneath it, so launching CPU1 pins the rung until a
-     * reset -- a real constraint, refused rather than half-honoured.
-     */
-    if (mhz != (unsigned int)(cpu_hz_now / 1000000UL) &&
-        tiku_ra8p1_cpu1_active()) {
-        return;
-    }
-#endif
 
     /*
      * A rung change either takes effect or leaves the tree where it was.
