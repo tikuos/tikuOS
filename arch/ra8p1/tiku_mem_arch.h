@@ -7,8 +7,8 @@
  *
  * tiku_mem_arch.h - RA8P1 memory arch hooks.
  *
- * At R3 the durable region is SRAM that the reset handler's zero-fill skips:
- * warm-reset durable, NOT power-loss durable.  R6 adds the MRAM backing.
+ * The durable region is MRAM, byte-writable in place.  Writes land in the
+ * controller's 32-byte buffer and are committed by tiku_mem_arch_nvm_flush().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

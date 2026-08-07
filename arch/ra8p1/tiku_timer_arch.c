@@ -24,7 +24,7 @@
 /** @brief Monotonic tick counter, advanced by the SysTick exception. */
 static volatile tiku_clock_arch_time_t clock_ticks;
 
-/** @brief Reload currently programmed, so fine() can invert the down-counter. */
+/** @brief Reload programmed now, so fine() can invert the down-counter. */
 static uint32_t clock_reload = TIKU_CLOCK_ARCH_INTERVAL;
 
 /**
@@ -56,9 +56,9 @@ void tiku_clock_arch_init(void)
 {
     /*
      * From the LIVE clock, not TIKU_CLOCK_ARCH_INTERVAL.  The boot constant is
-     * an 8 MHz figure, and the kernel starts the tick AFTER the frequency
-     * request -- so using it silently undid R4's retune and left the tick 30x
-     * fast, with uptime racing and every timeout short by the same factor.
+     * an 8 MHz figure and the kernel starts the tick AFTER the frequency
+     * request, so the reload has to be derived here or the tick runs fast by
+     * the ratio between the live clock and 8 MHz.
      */
     unsigned long hz = tiku_cpu_ra8p1_clock_get_hz();
     unsigned long reload = hz / (unsigned long)TIKU_CLOCK_ARCH_SECOND;
@@ -150,11 +150,10 @@ uint32_t tiku_ra8p1_clock_arch_fine_hz(void)
 
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 {
-    /* DURATION, not a deadline -- that is the kernel contract, and reading it
-     * as absolute is a bug the Nordic port already made and recorded: any wait
-     * shorter than the current uptime returns instantly, so every tick-paced
-     * caller stops waiting once the system has been up a while.  Here it made
-     * all five software-timer tests fail at once. */
+    /* DURATION, not a deadline -- that is the kernel contract.  Read as
+     * absolute, any wait shorter than the current uptime returns instantly, so
+     * every tick-paced caller stops waiting once the system has been up a
+     * while. */
     tiku_clock_arch_time_t target = clock_ticks + t;
     uint32_t primask;
 

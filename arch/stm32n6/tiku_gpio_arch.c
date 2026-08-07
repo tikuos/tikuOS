@@ -8,7 +8,8 @@
  * tiku_gpio_arch.c - STM32N6 GPIO port driver.
  *
  * Direction, level, toggle and alternate-function select over the standard
- * STM32 GPIO block. Writes go through BSRR so no read-modify-write can race.
+ * STM32 GPIO block. Level changes go through BSRR so no read-modify-write can
+ * race; the configuration registers are read-modify-written.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

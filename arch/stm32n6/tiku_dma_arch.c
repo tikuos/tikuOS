@@ -36,9 +36,9 @@ void tiku_dma_arch_init(void) {
 
     /* The channel issues transactions with its own attributes, not the CPU's.
      * Three all have to match the memory the image occupies: secure (SECCFGR
-     * plus TR1 SSEC/DSEC), privileged, and the trusted CID -- the IAC latched
-     * a violation for every transfer until the CID was set, because a channel
-     * with filtering off emits CID 0 and only CID 1 passes RISAF's default. */
+     * plus TR1 SSEC/DSEC), privileged, and the trusted CID.  A channel with
+     * filtering off emits CID 0, only CID 1 passes RISAF's default, and every
+     * transfer that misses it raises an IAC violation. */
     TIKU_REG32(STM32N6_GPDMA_SECCFGR)  |= (1UL << DMA_CH);
     TIKU_REG32(STM32N6_GPDMA_PRIVCFGR) |= (1UL << DMA_CH);
     TIKU_REG32(STM32N6_GPDMA_CIDCFGR(DMA_CH)) =

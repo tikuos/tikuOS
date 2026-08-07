@@ -27,7 +27,9 @@
 /** @brief Alarms taken, for localising "the ISR never fired" reports. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
-/** @brief Absolute alarm time in counts since boot; 0 means nothing armed. */
+/**
+ * @brief Absolute alarm time in counts since boot; valid while htimer_armed.
+ */
 static volatile unsigned long long htimer_target;
 
 /** @brief Whether an alarm is outstanding. */

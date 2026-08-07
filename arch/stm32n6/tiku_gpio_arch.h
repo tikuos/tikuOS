@@ -61,8 +61,10 @@ void tiku_stm32n6_gpio_set(uint8_t port, uint8_t pin, uint8_t value);
  */
 void tiku_stm32n6_gpio_toggle(uint8_t port, uint8_t pin);
 
-/* Kernel-facing GPIO contract, shared with the other ports. Each returns 0 on
- * success and -1 when the port or pin is out of range. */
+/* Kernel-facing GPIO contract, shared with the other ports. All return -1 when
+ * the port or pin is out of range; the setters return 0 on success, read()
+ * returns the pin level and get_dir() returns 1 for an output pin, 0 for any
+ * other mode. */
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);

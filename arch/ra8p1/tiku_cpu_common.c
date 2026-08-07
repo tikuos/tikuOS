@@ -20,7 +20,7 @@
 
 #include <stdint.h>
 
-/** @brief Measured spin rate, 0 until the tick has been available to time it. */
+/** @brief Measured spin rate, 0 until the tick is available to time it. */
 static unsigned long spin_per_ms;
 
 /**
@@ -198,10 +198,7 @@ uint16_t tiku_cpu_ra8p1_reset_reason(void)
     /*
      * Report the MSP430 SYSRSTIV-style codes the kernel already speaks, as
      * nordic and ambiq do -- /sys/boot/reason renders those and nothing else.
-     * This returned a private TIKU_RA8P1_RESET_* bitmask until R6, which
-     * rendered as "unknown"; nothing caught it earlier because until the
-     * image moved into MRAM there was no way to come back from a reset and
-     * read it.
+     * A private code here renders as "unknown".
      *
      * Most specific first: a watchdog reset also raises the power-on flag.
      */

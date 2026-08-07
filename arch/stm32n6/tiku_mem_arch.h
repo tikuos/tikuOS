@@ -7,7 +7,7 @@
  *
  * tiku_mem_arch.h - STM32N6 memory helpers and the durable mirror.
  *
- * Durable state lives in SRAM and is mirrored to the last sector of the
+ * Durable state lives in SRAM and is mirrored to the last four sectors of the
  * external NOR, so it survives a power cycle rather than only a warm reset.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -60,9 +60,13 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 /**
  * @brief Commit the durable SRAM region to the flash mirror.
  *
- * The explicit durability checkpoint: once this returns, the state survives a
- * power cycle. Skipped when the mirror already matches, which costs an erase
- * cycle out of a finite budget for nothing.
+ * The explicit durability checkpoint: the state survives a power cycle once the
+ * mirror carries it. Skipped when the mirror already matches, which costs an
+ * erase cycle out of a finite budget for nothing.
+ *
+ * @note Failure is silent -- an XSPI that is not ready, a failed erase or a
+ *       failed program returns with the mirror stale or erased, and the only
+ *       signal is that tiku_mem_arch_nvm_program_count() did not advance.
  */
 void tiku_mem_arch_nvm_flush(void);
 

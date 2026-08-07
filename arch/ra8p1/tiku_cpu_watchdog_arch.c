@@ -7,8 +7,9 @@
  *
  * tiku_cpu_watchdog_arch.c - RA8P1 independent watchdog.
  *
- * Two hardware facts shape everything here.  IWDTCR is writable exactly ONCE
- * between reset and the first refresh (UM 29.3.2) -- so the period is chosen
+ * IWDTCR is writable exactly ONCE between reset and the first refresh
+ * (UM 29.3.2), and nothing but a reset stops the counter -- so the period is
+ * chosen on the first arm and every later call can only feed it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,9 +20,9 @@
 /**
  * @brief The (CKS, TOPS) pairs the hardware offers, coarsest last.
  *
- * IWDTCLK is 16.384 kHz, so `ticks` is directly comparable to the interval
- * the kernel asks for.  A table makes the quantisation visible: the period is
- * not a free parameter, only the nearest entry covering the request.
+ * IWDTCLK is 16.384 kHz, so `ticks` is directly comparable to the interval the
+ * kernel asks for.  The period is not a free parameter: the first entry in
+ * table order that covers the request wins, and the table is not sorted.
  */
 static const struct {
     uint8_t  cks;       /**< IWDTCR.CKS code                        */
@@ -55,7 +56,7 @@ static struct {
     tiku_wdt_interval_t interval;
 } wdt_state;
 
-/** @brief Refresh the down-counter: 0x00 then 0xFF, in that order (UM 29.2.1). */
+/** @brief Refresh the down-counter: 0x00 then 0xFF, in order (UM 29.2.1). */
 static void wdt_refresh(void)
 {
     TIKU_REG8(RA8P1_IWDT_RR) = 0x00U;
@@ -94,9 +95,10 @@ void tiku_cpu_ra8p1_watchdog_on_arch(tiku_wdt_clk_t src,
         return;
     }
 
-    /* Shortest period that still covers the request, so a caller asking for
-     * 2 s never silently gets 0.125 s.  If nothing covers it, the longest
-     * entry is the best the hardware can do. */
+    /* First table entry that covers the request, so a caller asking for 2 s
+     * never silently gets 0.125 s.  The table is not sorted by period, so a
+     * longer covering entry can win over a shorter one.  If nothing covers
+     * the request, the longest entry is the best the hardware can do. */
     for (i = 0; i < WDT_NPERIODS - 1U; i++) {
         uint32_t ticks = (uint32_t)wdt_periods[i].div * wdt_periods[i].count;
         if (ticks >= want) {

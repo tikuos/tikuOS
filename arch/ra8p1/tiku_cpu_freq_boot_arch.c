@@ -290,7 +290,6 @@ static const ra8p1_opoint_t opoints[] = {
      * Every rung runs at VSCR_1, including this one that VSCR_2 would carry:
      * the voltage transition never completes while CPU1 is active, and a
      * single boot-time setting removes runtime DVFS from every rung change.
-     * The 25 mV of static headroom VSCR_2 would save is R9's to measure.
      */
     { 240U, 1U, RA8P1_PLIDIV_1, 40U,  RA8P1_PLLMULNF_0, RA8P1_PLODIV_4,
       0U, RA8P1_CKDIV_2,  240U, DIV1, RA8P1_VSCR_VSCM_1, 120000000UL },

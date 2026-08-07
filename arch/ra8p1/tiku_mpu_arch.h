@@ -7,8 +7,8 @@
  *
  * tiku_mpu_arch.h - RA8P1 memory-protection contract.
  *
- * The Cortex-M85 carries a PMSAv8 MPU, but this port does not program regions
- * yet, so the calls report an unprotected map rather than a fabricated one.
+ * The Cortex-M85's PMSAv8 MPU carries W^X over the image, a stack guard, and
+ * an NVM region that is read-only outside a bracketed durable write.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -54,7 +54,10 @@ void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
  * @brief Make the durable region writable.
  *
  * @return State to hand back to tiku_mpu_arch_lock_nvm()
- * @note Durable data is SRAM here, so nothing is gated.
+ * @note Durable data is the MRAM carve, and two gates open together: the
+ *       MPU's NVM region and MRCPC1.MRCPSEN.  The region is read-only
+ *       outside the window, so an unbracketed store faults here rather than
+ *       corrupting a file; lock_nvm() flushes the MRAM program buffer.
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void);
 

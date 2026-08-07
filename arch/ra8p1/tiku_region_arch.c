@@ -28,10 +28,11 @@ extern uint32_t __stack;    /* top of SRAM; the stack grows down from here */
 #define RA8P1_STACK_RESERVE     (16UL * 1024UL)
 
 /**
- * @brief Where the stack may grow down to before it meets the free region.
+ * @brief Lowest address the stack painter fills down to.
  *
- * One constant, one boundary: a second answer here would let the painter and
- * the allocator disagree about who owns the top of SRAM.
+ * This reserve bounds the painter only.  The free/stack boundary the MPU
+ * enforces is a separate constant, MPU_STACK_RESERVED_BYTES in
+ * tiku_mpu_arch.c.
  *
  * @return Lowest address the stack may occupy
  */
@@ -43,8 +44,8 @@ uint32_t tiku_stack_arch_bottom(void)
 /*
  * The table answers "what kind of memory is this address" -- a property of the
  * address, not of who owns it.  So each bank is listed WHOLE: a static buffer
- * in .bss must classify as SRAM, and bounding the SRAM entry at _end instead
- * made tiku_arena_create() reject every caller-supplied static buffer.
+ * in .bss must classify as SRAM, and an SRAM entry bounded at _end makes
+ * tiku_arena_create() reject every caller-supplied static buffer.
  * Entries must also not overlap, because tiku_region_init() rejects an
  * overlapping table outright and installs NOTHING -- leaving every
  * classification to fail with no visible error.

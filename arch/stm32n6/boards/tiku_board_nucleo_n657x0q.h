@@ -22,8 +22,8 @@
 #define TIKU_BOARD_NAME             "STM32 Nucleo-144 N657X0-Q"
 
 /* All three user LEDs sit on GPIOG. The numbering here follows the board
- * silkscreen and ST's BSP, so LED3 on the board is LED3 in the shell; the
- * bring-up stub drove LED3, the green one on pin 0. */
+ * silkscreen and ST's BSP, so LED3 on the board -- the green one, on pin 0 --
+ * is LED3 in the shell. */
 #define TIKU_BOARD_LED_COUNT        3
 #define TIKU_BOARD_LED_PORT         STM32N6_GPIO_PORT_G
 

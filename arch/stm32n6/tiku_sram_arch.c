@@ -87,9 +87,9 @@ uint32_t tiku_stm32n6_sram_enabled_mask(void) {
 
 #include "tiku_uart_arch.h"
 
-/* One write/read per 64 KB is enough to find a bank edge, and the probe prints
- * a character per page before touching it, so a bus fault that wedges the core
- * is located by counting the characters that made it out. */
+/* One write/read per 64 KB is enough to find a bank edge.  Each page's result
+ * character is drained before the next access, so a page that wedges the bus
+ * is the first one with no character. */
 #define PROBE_STEP      (64UL * 1024UL)
 #define PROBE_PATTERN(a) ((uint32_t)(a) ^ 0xA5A5A5A5UL)
 

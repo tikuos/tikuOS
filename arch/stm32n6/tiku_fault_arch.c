@@ -22,10 +22,9 @@
 #include <kernel/memory/tiku_mem.h>
 
 /* SRAM does not survive the reset the handler forces -- the boot ROM clears
- * it, which was measured after a record left in the image window and then one
- * left in AXISRAM1 both came back blank. So the record rides the durable
- * mirror instead: .persistent, flushed to the NOR before the reset and
- * restored from it on the way back up. */
+ * it, and neither the image window nor AXISRAM1 is exempt. So the record
+ * rides the durable mirror instead: .persistent, flushed to the NOR before
+ * the reset and restored from it on the way back up. */
 static TIKU_DURABLE tiku_stm32n6_fault_record_t fault_rec;
 
 void tiku_stm32n6_fault_init(void) {

@@ -63,8 +63,8 @@ void tiku_ra8p1_cache_enable(void) {
 
 void tiku_ra8p1_cache_disable(void) {
     if (TIKU_REG32(RA8P1_SCB_CCR) & RA8P1_SCB_CCR_DC) {
-        /* Order matters: with the enable bit cleared first, a line dirtied
-         * between the clean and the disable would be lost. */
+        /* The enable bit drops before the clean, so no line can be dirtied
+         * after the walk has passed it. */
         TIKU_REG32(RA8P1_SCB_CCR) &= ~RA8P1_SCB_CCR_DC;
         __asm__ volatile ("dsb\n\tisb" ::: "memory");
         dcache_all(RA8P1_SCB_DCCISW);
@@ -121,9 +121,8 @@ void tiku_ra8p1_icache_invalidate(void) {
     if (!(TIKU_REG32(RA8P1_SCB_CCR) & RA8P1_SCB_CCR_IC)) {
         return;                                  /* nothing cached to drop */
     }
-    /* Whole-cache: the M85 has no invalidate-by-address for the I-side, and
-     * the callers of this (a freshly written code page, a loaded module) want
-     * everything stale gone rather than one line. */
+    /* Whole-cache: the callers of this (a freshly written code page, a loaded
+     * module) want everything stale gone rather than one line. */
     __asm__ volatile ("dsb" ::: "memory");
     TIKU_REG32(RA8P1_SCB_ICIALLU) = 0UL;
     __asm__ volatile ("dsb\n\tisb" ::: "memory");

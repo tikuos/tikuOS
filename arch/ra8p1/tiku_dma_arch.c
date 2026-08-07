@@ -94,20 +94,11 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
     dma_bytes = word_cnt * 4U;
 
     /*
-     * Cache discipline, and the order is load-bearing.  Two wrong versions
-     * came first, each failing in the opposite direction:
-     *
-     *   invalidate the destination only AFTER the transfer -- discards dirty
-     *   data belonging to whatever shares the first and last lines (it
-     *   silently reverted the test harness's own assertion counter);
-     *
-     *   clean-and-invalidate AFTER the transfer -- writes the CPU's stale
-     *   pre-transfer contents back OVER what the DMAC just wrote.
-     *
-     * The destination must be cleaned-and-invalidated BEFORE the transfer, so
-     * no dirty line survives to land on top of the DMA data, and invalidated
-     * after, to drop anything fetched while it ran.  The source is cleaned so
-     * the DMAC reads what the CPU wrote rather than what RAM held.
+     * Cache discipline, and the order is load-bearing.  The destination is
+     * cleaned-and-invalidated BEFORE the transfer so no dirty line survives to
+     * land on top of the DMA data, and invalidated after to drop anything
+     * fetched while it ran.  The source is cleaned so the DMAC reads what the
+     * CPU wrote rather than what RAM held.
      *
      * Both buffers must be cache-line aligned; a shared edge line makes no
      * maintenance sequence safe.
@@ -138,11 +129,9 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
 
     /*
      * Software trigger, and CLRS matters: with CLRS=0 the hardware clears
-     * SWREQ once the transfer STARTS, which moves exactly one unit and stops.
-     * The first version did that and the destination held one word of the
-     * source with the channel still enabled -- "busy never clears, buffers
-     * do not match".  CLRS=1 keeps the request asserted so the DMAC runs the
-     * count down to zero.
+     * SWREQ once the transfer STARTS, which moves exactly one unit and stops
+     * with the channel still enabled.  CLRS=1 keeps the request asserted so
+     * the DMAC runs the count down to zero.
      */
     TIKU_REG8(RA8P1_DMAC_DMREQ(DMA_CH)) = (uint8_t)(RA8P1_DMREQ_CLRS |
                                                     RA8P1_DMREQ_SWREQ);

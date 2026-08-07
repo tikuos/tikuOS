@@ -7,8 +7,9 @@
  *
  * tiku_htimer_config.h - RA8P1 high-resolution timer resolution.
  *
- * GPT0 counts PCLKD undivided, so the step is one core-clock period; the unit
- * stays microseconds to match every other port.
+ * GPT0 counts PCLKD, which the tree holds at 240 MHz on the 240 and 480 MHz
+ * rungs and 250 MHz on the 1000 MHz one, not at the core rate; the driver
+ * scales that count to the microsecond unit every other port reports.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

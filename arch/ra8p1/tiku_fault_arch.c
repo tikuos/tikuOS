@@ -152,20 +152,17 @@ void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
     /*
      * Clean the record out of the D-cache BEFORE resetting.
      *
-     * Warm SRAM survives a soft reset -- proven by writing a pattern over SWD
-     * and rebooting -- but the cache does not: SRAM here is write-back, so the
-     * store above sits in a dirty line and SYSRESETREQ discards it.  The
-     * record then reads as never written, which is exactly what it looked
-     * like: a perfect fault dump on the wire and nothing to show afterwards.
+     * Warm SRAM survives a soft reset but the cache does not: SRAM here is
+     * write-back, so the store above sits in a dirty line and SYSRESETREQ
+     * discards it.  The record then reads as never written.
      */
     tiku_ra8p1_dcache_clean(&fault_rec, sizeof(fault_rec));
 
     /*
-     * Reset, and that is new: the faulting instruction cannot be stepped over,
-     * so the old handler's record-and-return re-executed it forever.  Before
-     * R6 resetting was worse still -- it re-entered the factory image and the
-     * board was gone.  With the image in MRAM a reset is a recovery, and the
-     * record survives it in warm SRAM.
+     * Reset: the faulting instruction cannot be stepped over, so recording
+     * and returning would re-execute it forever.  The image lives in MRAM, so
+     * the reset re-enters it rather than the factory image, and the record
+     * survives it in warm SRAM.
      */
     TIKU_REG32(RA8P1_SCB_AIRCR) = RA8P1_AIRCR_VECTKEY |
                                   RA8P1_AIRCR_SYSRESETREQ;

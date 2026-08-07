@@ -7,8 +7,9 @@
  *
  * tiku_onewire_arch.h - RA8P1 1-Wire contract.
  *
- * No backend on this port yet: the calls exist so the kernel links, and each
- * reports failure rather than pretending a transfer happened.
+ * No backend on this port: the calls exist so the kernel links.  Only init
+ * and reset can report the absence -- they return an error; the writes are
+ * void and the reads hand back the idle-high bus pattern.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

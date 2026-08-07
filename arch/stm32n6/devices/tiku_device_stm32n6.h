@@ -32,8 +32,8 @@
 #define TIKU_DEVICE_HAS_PORT9       1   /* GPIOJ */
 #define TIKU_DEVICE_HAS_PORTJ       0   /* MSP430 port J has no STM32 analogue */
 
-/* HSE value ST documents for this family; the port runs from HSI and does not
- * program the tree, so no code depends on the crystal yet. */
+/* HSE value ST documents for this family. The clock tree is driven from HSI
+ * through PLL1, so no code reads the crystal. */
 #define TIKU_DEVICE_HAS_LFXT        0
 #define TIKU_DEVICE_HAS_HFXT        1
 #define TIKU_DEVICE_XOSC_HZ         48000000UL

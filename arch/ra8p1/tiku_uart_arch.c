@@ -7,8 +7,8 @@
  *
  * tiku_uart_arch.c - RA8P1 console on SCI8.
  *
- * The route to this channel is spread over three documents and worth naming
- * once: the kit manual puts the debugger's virtual COM port on PD02/PD03, the
+ * Transmit polls TDRE; receive is interrupt-driven into a ring.  The channel
+ * and its pins come from the board header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,10 +40,6 @@
 /** @brief Baud the console is currently programmed for. */
 static unsigned long uart_baud = TIKU_BOARD_UART_BAUD;
 
-/* Anchor the equation to the one value the manual publishes AND R1 measured
- * working on this board.  If PCLKA or the baud rate moves this assert stops
- * applying and should move with them -- but while both are at their R2 values
- * it is a direct check on the arithmetic above. */
 /* The manual publishes one worked example for this generator, and it is the
  * only external check on the arithmetic: 9600 from an 8 MHz SCICLK is CKS 0,
  * BRR 25 (UM Table 39.11).  Asserted against the formula rather than against
@@ -55,17 +51,15 @@ _Static_assert(SCI_BRR_FOR(8000000UL, 9600UL) == 25UL,
 /*
  * Received bytes are taken by an ISR into a ring, not polled by the shell.
  *
- * That is not a preference.  The scheduler idles in WFI between ticks, so a
- * polled reader samples the SCI at 128 Hz while characters arrive at ~960/s:
- * typing "help" delivered 'h' and lost "elp", every time.  A one-byte hardware
- * register cannot bridge that gap; a ring fed at character rate can.
+ * The scheduler idles in WFI between ticks, so a polled reader samples the SCI
+ * at 128 Hz while 8N1 characters arrive at ~11520/s at the board's 115200
+ * baud.  A one-byte hardware register cannot bridge that gap; a ring fed at
+ * character rate can.
  */
-/* 4096, matching the Nordic port and for its reason.  64 was both too small
- * and off by one -- a ring of N holds N-1, so the burst test's 64 bytes could
- * never fit -- but the size that matters is the one that rides out a pause:
- * a long crypto or NVM operation blocks the reader for tens of milliseconds,
- * and at 115200 (where R4 leaves this port) a small ring overflows on every
- * one.  Power of two; override with -DTIKU_UART_RX_RING=<N>. */
+/* A ring of N holds N-1.  The size that matters is the one that rides out a
+ * pause: a long crypto or NVM operation blocks the reader for tens of
+ * milliseconds, and at 115200 a small ring overflows on every one.  Power of
+ * two; override with -DTIKU_UART_RX_RING=<N>. */
 #ifndef TIKU_UART_RX_RING
 #define TIKU_UART_RX_RING   4096U
 #endif
@@ -98,18 +92,11 @@ static void icu_link(unsigned slot, uint32_t event)
 }
 
 /**
- * @brief SCI receive interrupt: take the byte before the next one lands.
- *
- * A full ring drops the NEW byte rather than the oldest.  Dropping the oldest
- * would corrupt a command line already half-typed; dropping the newest loses
- * the tail, which the user can see and retype.
- */
-/**
  * @brief Clear a slot's interrupt-status flag and make the clear STICK.
  *
  * The read-back is not decorative: without it the IELSR write may not have
  * retired when the handler returns, the NVIC re-pends, and one byte arrives
- * twice.  Hidden until the caches shortened the path to the exception return.
+ * twice.
  *
  * @param slot  NVIC slot to acknowledge
  */
@@ -140,6 +127,13 @@ void tiku_ra8p1_sci_eri_handler(void)
     icu_ack(UART_ERI_SLOT);
 }
 
+/**
+ * @brief SCI receive interrupt: take the byte before the next one lands.
+ *
+ * A full ring drops the NEW byte rather than the oldest.  Dropping the oldest
+ * would corrupt a command line already half-typed; dropping the newest loses
+ * the tail, which the user can see and retype.
+ */
 void tiku_ra8p1_sci_rxi_handler(void)
 {
     uint8_t b = (uint8_t)(TIKU_REG32(RA8P1_SCI_RDR(SCI)) & 0xFFUL);

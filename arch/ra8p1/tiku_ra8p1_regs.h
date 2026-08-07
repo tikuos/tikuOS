@@ -8,7 +8,8 @@
  * tiku_ra8p1_regs.h - RA8P1 register bases and the few bits the port needs.
  *
  * Every address here is from the RA8P1 Group User's Manual: Hardware
- * (R01UH1064EJ0130) or the Group Datasheet (R01DS0439EJ0110); the section is
+ * (R01UH1064EJ0130) or the Group Datasheet (R01DS0439EJ0110), with the
+ * section cited on each block; the Cortex-M85 blocks cite the Arm ARM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -249,15 +250,15 @@
 #define RA8P1_SRAMWTSC_WTEN         (1U << 0)
 
 /*
- * Dual-core control (UM 2.9.1).  CPU1 is the Cortex-M33; on this part it
- * exists at all only because the K variant carries it (Table 1.15).
+ * Dual-core control (UM 2.9.1).  CPU1 is the Cortex-M33, present only on the
+ * K variant of this part (Table 1.15).
  *
- * Three of these bite if read casually.  ACTCSR and CRPT take a 0xA5 key in
- * the upper byte of a 16-bit write, or the write is discarded silently.
- * CPUWAIT resets to 0, which means "starts executing out of reset", so it
- * must be raised BEFORE activation rather than after.  And INITVTOR resets
- * to 0x0200_0000 -- the M85's own vector table -- so a CPU1 released without
- * setting it runs the M85's image on an M33.
+ * ACTCSR and CRPT take a 0xA5 key in the upper byte of a 16-bit write, or the
+ * write is discarded silently.  CPUWAIT resets to 0, so an activated core
+ * begins executing at once, and the bit is sampled only as the core leaves
+ * reset -- raising it later cannot stall a core already running.  INITVTOR
+ * resets to 0x0200_0000, the M85's own vector table, so a CPU1 released
+ * without setting it runs the M85's image on an M33.
  */
 #define RA8P1_CPU_CTRL_BASE     0x4000F000UL
 #define RA8P1_CPU1INITVTOR      (RA8P1_CPU_CTRL_BASE + 0x044UL) /* 32-bit */
@@ -269,9 +270,6 @@
 #define RA8P1_ACTCSR_ACTREQ     (1U << 0)
 #define RA8P1_ACTCSR_ACT        (1U << 7)
 #define RA8P1_CRPT_PROTECT      (1U << 0)
-
-#define RA8P1_CPU1_CTCM_SELF    0x00000000UL
-#define RA8P1_CPU1_STCM_SELF    0x20000000UL
 
 /*
  * Reset status (UM 6.2).  Note the offsets are NOT adjacent: RSTSR1 sits at
@@ -401,7 +399,7 @@
 #define RA8P1_CDCTL0_PERMD      (1UL << 1)
 #define RA8P1_CDCTL0_CSSEL      (1UL << 3)   /* 0 = CS0, 1 = CS1 */
 
-/** @brief Module stop: OSPI0 is MSTPB16, OSPI1 (the board's flash) MSTPB17. */
+/** @brief Module stop: OSPI0 (the board's flash) is MSTPB16, OSPI1 MSTPB17. */
 #define RA8P1_MSTPB_OSPI0       (1UL << 16)
 #define RA8P1_MSTPB_OSPI1       (1UL << 17)
 /** @brief Module stop for the USB 2.0 high-speed controller (UM 11.2.7). */
@@ -605,7 +603,7 @@
 #define RA8P1_INTENB0_RSME       (1U << 14)
 #define RA8P1_INTENB0_VBSE       (1U << 15)
 
-/** @brief PSEL that selects the OSPI function on any pin (OM_1_* here). */
+/** @brief PSEL that selects the OSPI function on any pin (OM_0_* here). */
 #define RA8P1_PFS_PSEL_OSPI     0x1CUL
 
 /** @brief Macronix RDID reply: C2 = manufacturer, then type and density. */
@@ -653,8 +651,8 @@
 #define RA8P1_SDSR_MRSST        (1U << 2)
 #define RA8P1_SDSR_SRFST        (1U << 4)
 
-/* SDTR timing, all in SDCLK cycles.  Field encodings are value-minus-one for
- * CL/RP/RCD/RAI and a plain flag for WR (0 = 1 cycle, 1 = 2). */
+/* SDTR timing, all in SDCLK cycles.  RP/RCD/RAI encode value-minus-one, CL
+ * encodes the value itself, and WR is a plain flag (0 = 1 cycle, 1 = 2). */
 #define RA8P1_SDTR_CL(c)        (((uint32_t)(c) & 0x7UL) << 0)    /*  2:0 */
 #define RA8P1_SDTR_WR_2CYC      (1UL << 8)                        /*    8 */
 #define RA8P1_SDTR_RP(c)        ((((uint32_t)(c) - 1UL) & 0x7UL) << 9)  /* 11:9 */
@@ -842,8 +840,7 @@
  * MSTPE31 is 0 (UM 23.10.1).  BPEN=1 selects the synchronous PCLKD core
  * clock; the reset default is the ASYNC GPTCLK domain, and with GPTCLK at
  * the 8 MHz MOCO against a 120 MHz PCLKA bus the synchroniser drops every
- * register write -- the block reads as zeros and takes nothing, which cost
- * this port a full diagnostic pass to attribute.
+ * register write -- the block reads as zeros and takes nothing.
  */
 #define RA8P1_GPT_GTCLKCR       0x40323F10UL
 #define RA8P1_GPT_GTCLKCR_BPEN  (1UL << 0)
@@ -856,13 +853,14 @@
 #define RA8P1_MSTPE_GPT0        (1UL << 31)
 
 /*---------------------------------------------------------------------------*/
-/* Code MRAM programming (UM 60.4.2)                                          */
-/*                                                                            */
-/* No bootrom and no erase: an ordinary STR to an MRAM address enters a        */
-/* 32-byte program buffer, which commits when it fills, when a write leaves    */
-/* its 32-byte boundary, or on an explicit MRCFL flush.  Writes of 1..31 bytes */
-/* are legal -- barrier, then flush.  Both control registers are key-gated and */
-/* must be written 16 bits at a time or the write is dropped.                  */
+/* Code MRAM programming (UM 60.4.2)                                         */
+/*                                                                           */
+/* No bootrom and no erase: an ordinary STR to an MRAM address enters a      */
+/* 32-byte program buffer, which commits when it fills, when a write leaves  */
+/* its 32-byte boundary, or on an explicit MRCFL flush.  Writes of 1..31     */
+/* bytes are legal -- barrier, then flush.  MRCPC1, MRCBPROT1 and MRCFLR are */
+/* key-gated and must be written 16 bits at a time or the write is dropped;  */
+/* MRPSC and MRCPS are plain 8-bit and carry no key.                         */
 /*---------------------------------------------------------------------------*/
 #define RA8P1_MRAM_REG_BASE     0x4013C000UL
 #define RA8P1_MRPSC             (RA8P1_MRAM_REG_BASE + 0x2800UL) /* 8-bit  */
@@ -935,9 +933,9 @@
 /* IWDT (UM 29, "Independent Watchdog Timer")                                */
 /*                                                                           */
 /* Counts IWDTCLK = LOCO/2 = 16.384 kHz, which is why this and not WDT is the */
-/* kernel's watchdog: WDT counts PCLKB and would need re-arming every time R4 */
-/* moves the clock.  OFS0 reads 0xFFFFFFFF on this board -- MEASURED -- so    */
-/* IWDTSTRT is 1: register start mode, counting begins on the first refresh.  */
+/* kernel's watchdog: WDT counts PCLKB and so would need re-arming whenever   */
+/* the clock tree moves.  OFS0 reads 0xFFFFFFFF on this board -- MEASURED --  */
+/* so IWDTSTRT is 1: register start mode, counting begins on first refresh.   */
 /*---------------------------------------------------------------------------*/
 #define RA8P1_IWDT_BASE         0x40202200UL
 #define RA8P1_IWDT_RR           (RA8P1_IWDT_BASE + 0x00UL)  /* 8-bit  */
@@ -972,9 +970,9 @@
 #define RA8P1_NVIC_ICPR(i)      (0xE000E280UL + (4UL * (i)))
 /*
  * PMSAv8 MPU (Armv8.1-M ARM B11).  Region attributes here are also what set
- * CACHEABILITY through MAIR, which is why the MPU and the caches are one
- * milestone: enabling the M85's caches without programmed regions inherits
- * the default memory map's attributes.
+ * CACHEABILITY through MAIR, so the caches must not be enabled before the
+ * regions exist: without programmed regions the M85 inherits the default
+ * memory map's attributes.
  */
 #define RA8P1_MPU_BASE          0xE000ED90UL
 #define RA8P1_MPU_TYPE          (RA8P1_MPU_BASE + 0x00UL)  /* DREGION count */

@@ -9,6 +9,7 @@
  *
  * Two register views reach the same pin.  Configuration goes through PmnPFS,
  * which is per-pin and write-protected; the level goes through the port's
+ * PCNTR registers, which are per-port and need no unlock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

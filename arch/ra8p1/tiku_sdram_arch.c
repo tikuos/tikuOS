@@ -132,10 +132,6 @@ int tiku_ra8p1_sdram_init(void)
      * than the bus block -- the same one-layer-deeper placement as SCICKCR
      * and GTCLKCR -- AND it is a clock-generation register, so PRCR_S.PRC0
      * must be open or the write is DROPPED IN SILENCE.
-     *
-     * Measured, before this unlock existed: SDCKOCR read back 0 after being
-     * written, no clock reached the part, and every access returned whatever
-     * the bus last drove -- which looked exactly like a wiring fault.
      */
     TIKU_REG16(RA8P1_PRCR_S) = (uint16_t)(RA8P1_PRCR_KEY | RA8P1_PRCR_PRC0);
     TIKU_REG8(RA8P1_SDCKOCR) = (uint8_t)RA8P1_SDCKOCR_SDCKOEN;

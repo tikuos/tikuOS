@@ -7,9 +7,8 @@
  *
  * tiku_device_ra8p1.h - R7KA8P1KF silicon constants.
  *
- * Sizes and bases are the manual's; the SRAM extent is this board's, measured
- * with the debugger rather than taken from the capacity table, because the two
- * disagree at the top (see kintsugi/ra8p1-port.md, R1 log).
+ * Sizes and bases are the manual's; the SRAM extent is the datasheet's
+ * 1664 KB, which is the span this port places data in.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,15 +23,16 @@
 /* Memories                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Code MRAM: 1 MB at 0x0200_0000 (holds the factory image today). */
+/** @brief Code MRAM: 1 MB at 0x0200_0000; holds the image, the NVM region
+ *         and the durable carve. */
 #define TIKU_RA8P1_MRAM_BASE        0x02000000UL
 #define TIKU_RA8P1_MRAM_SIZE        (1024UL * 1024UL)
 
 /**
  * @brief User SRAM base and extent.
  *
- * R1 read/wrote up to 0x221C_0000, but the datasheet's 1664 KB ends at
- * 0x221A_0000; the smaller, provable figure is the one used.
+ * The datasheet's 1664 KB from the base, ending at 0x221A_0000.  The part
+ * still responds above that; nothing is placed there.
  */
 #define TIKU_RA8P1_SRAM_BASE        0x22000000UL
 #define TIKU_RA8P1_SRAM_SIZE        (1664UL * 1024UL)
@@ -40,8 +40,8 @@
 /**
  * @brief CM85 TCM window: recorded, not used.
  *
- * Responds at the base, but R1's probes of its extent disagreed, so nothing
- * is placed here until the TCM control registers are driven deliberately.
+ * Responds at the base.  Nothing is placed here: the TCM control registers
+ * are not driven by this port, so the usable extent is not established.
  */
 #define TIKU_RA8P1_TCM_BASE         0x20000000UL
 
@@ -53,8 +53,8 @@
  * @brief Peripheral clock A after reset, in Hz.
  *
  * SCKDIVCR reads 0 out of reset, so ICLK and PCLKA are both MOCO.  This is
- * MOCO's NOMINAL rate (spec 7.2/8.0/8.8); the board measures 8.330 MHz, so
- * everything derived from it inherits +-10% until R4's PLL.
+ * MOCO's NOMINAL rate (spec 7.2/8.0/8.8), so anything derived from it before
+ * the PLL is configured carries MOCO's +-10% spread.
  */
 #define TIKU_RA8P1_MOCO_HZ          8000000UL
 #define TIKU_RA8P1_PCLKA_BOOT_HZ    TIKU_RA8P1_MOCO_HZ
@@ -81,8 +81,7 @@
 #define TIKU_DEVICE_HAS_PORT9       1
 #define TIKU_DEVICE_HAS_PORTJ       0   /* MSP430 port J has no RA analogue */
 
-/* Both crystals are fitted on the EK (kit UM Table 8); neither is running
- * before R4, so nothing yet depends on either figure. */
+/* Both crystals are fitted on the EK (kit UM Table 8). */
 #define TIKU_DEVICE_HAS_LFXT        1
 #define TIKU_DEVICE_HAS_HFXT        1
 #define TIKU_DEVICE_XOSC_HZ         24000000UL
@@ -90,14 +89,13 @@
 #define TIKU_DEVICE_CS_TYPE_RA8P1   1
 #define TIKU_DEVICE_MAX_STABLE_MHZ  1000
 
-/* SRAM as the port uses it: the provable 1664 KB from the base, not the wider
- * span R1 could still read. */
+/* SRAM as the port uses it: 1664 KB from the base. */
 #define TIKU_DEVICE_RAM_START       TIKU_RA8P1_SRAM_BASE
 #define TIKU_DEVICE_RAM_SIZE        TIKU_RA8P1_SRAM_SIZE
 
 /*
- * The code MRAM: since R6 the image runs from it, `.persistent` lives in a
- * carve at its top, and the in-use figure derived from _etext is real.
+ * The code MRAM: the image runs from it, `.persistent` lives in a carve at
+ * its top, and the in-use figure is derived from _etext.
  */
 #define TIKU_DEVICE_FRAM_SIZE       TIKU_RA8P1_MRAM_SIZE
 #define TIKU_DEVICE_FRAM_START      TIKU_RA8P1_MRAM_BASE

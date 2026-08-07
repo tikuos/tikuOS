@@ -7,8 +7,8 @@
  *
  * tiku_mem_arch.c - STM32N6 memory helpers and the durable mirror.
  *
- * Durable state is an SRAM working copy mirrored to one NOR sector: restored
- * at boot if the CRC agrees, and written back at each explicit checkpoint.
+ * Durable state is an SRAM working copy mirrored to four NOR sectors:
+ * restored at boot if the CRC agrees, rewritten at each explicit flush.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,8 @@
 #include <kernel/memory/tiku_nvm_mirror.h>
 
 /* The durable region is the .uninit span the linker script carves; the mirror
- * holds a 16-byte header and then as much of it as fits one sector. */
+ * holds a 16-byte header and then as much of it as fits the four mirror
+ * sectors. */
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 
@@ -139,9 +140,10 @@ void tiku_mem_arch_nvm_flush(void) {
         }
     }
 
-    /* Header last: the image is programmed first, so a cut before the header
-     * lands leaves the old magic and the mirror simply reads as stale rather
-     * than as a header describing bytes that were never written. */
+    /* Header last: the sectors are erased and the image programmed first, so
+     * a cut before the header lands leaves an erased magic and the mirror
+     * reads as virgin rather than as a header describing bytes never
+     * written. */
     uint32_t hdr_out[4];
     hdr_out[TIKU_NVM_MIRROR_W_MAGIC] = TIKU_NVM_MIRROR_MAGIC_V2;
     hdr_out[TIKU_NVM_MIRROR_W_CRC]   = crc;

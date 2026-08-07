@@ -7,8 +7,9 @@
  *
  * tiku_spi_arch.h - RA8P1 SPI contract.
  *
- * No backend on this port yet: the calls exist so the kernel links, and each
- * reports failure rather than pretending a transfer happened.
+ * No backend on this port: the calls exist so the kernel links.  Every call
+ * with an error channel fails; tiku_spi_arch_transfer() has none and returns
+ * 0xFF, the value an idle MISO line reads.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

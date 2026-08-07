@@ -63,8 +63,9 @@ void tiku_stm32n6_cache_enable(void) {
 
 void tiku_stm32n6_cache_disable(void) {
     if (TIKU_REG32(STM32N6_SCB_CCR) & STM32N6_SCB_CCR_DC) {
-        /* Order matters: with the enable bit cleared first, a line dirtied
-         * between the clean and the disable would be lost. */
+        /* Order matters: cleaning while the cache is still enabled loses any
+         * line dirtied between the clean and the disable, so DC goes off
+         * first. */
         TIKU_REG32(STM32N6_SCB_CCR) &= ~STM32N6_SCB_CCR_DC;
         __asm__ volatile ("dsb\n\tisb" ::: "memory");
         dcache_all(STM32N6_SCB_DCCISW);

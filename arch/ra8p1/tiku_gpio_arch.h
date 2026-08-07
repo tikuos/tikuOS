@@ -61,8 +61,10 @@ void tiku_ra8p1_gpio_set(uint8_t port, uint8_t pin, uint8_t value);
  */
 void tiku_ra8p1_gpio_toggle(uint8_t port, uint8_t pin);
 
-/* Kernel-facing GPIO contract, shared with the other ports. Each returns 0 on
- * success and -1 when the port or pin is out of range. */
+/* Kernel-facing GPIO contract, shared with the other ports. -1 means the port
+ * or pin is out of range; otherwise set_output/set_input/write/toggle return
+ * 0, while read returns the pin level and get_dir the direction bit, 1 for
+ * output. */
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);

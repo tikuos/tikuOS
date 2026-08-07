@@ -22,7 +22,8 @@
 /** @brief Invalidate and enable both caches; idempotent. */
 void tiku_stm32n6_cache_enable(void);
 
-/** @brief Clean the data cache out to memory, then disable both caches. */
+/** @brief Disable both caches; the data cache is cleaned and invalidated
+ *         after its enable bit clears, so no line is dirtied in between. */
 void tiku_stm32n6_cache_disable(void);
 
 /**

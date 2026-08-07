@@ -24,9 +24,9 @@
 /**
  * @brief Bring up SCI8 at the board's console baud rate.
  *
- * The divisor is computed from the device's boot PCLKA constant, which is the
- * measured 8 MHz MOCO.  When R4 changes the clock this must be re-run, so it
- * is safe to call more than once.
+ * The divisor is computed from the port's current SCICLK, which is MOCO's
+ * nominal 8 MHz until a rung change moves it.  Re-run after any clock change;
+ * calling it more than once is safe.
  */
 void tiku_uart_init(void);
 

@@ -8,8 +8,8 @@
  * tiku_fault_arch.h - RA8P1 fault record.
  *
  * The handlers dump what they know, keep a record that outlives the reset they
- * then force, and reset -- which only became a recovery rather than a death
- * once R6 put the image in MRAM.
+ * then force, and reset -- a recovery rather than a death because the image
+ * lives in MRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

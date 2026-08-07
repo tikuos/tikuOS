@@ -36,9 +36,9 @@
 /**
  * @brief Console baud rate.
  *
- * The house 115200, reachable since R4 puts SCICLK on the PLL at 120 MHz.
- * The divisor comes from the live SCICLK, so this constant needs no second
- * value for the 8 MHz boot clock -- it is simply unreachable there.
+ * The house 115200, which needs SCICLK driven from the PLL.  The divisor
+ * comes from the live SCICLK, so this constant needs no second value for the
+ * 8 MHz boot clock -- it is simply unreachable there.
  */
 #ifndef TIKU_BOARD_UART_BAUD
 #define TIKU_BOARD_UART_BAUD        115200UL
@@ -48,9 +48,9 @@
 /* Oscillators fitted on the board                                           */
 /*                                                                           */
 /* Kit UM Table 8: E7/E11 tie P212/P213 to a 24 MHz crystal, E55/E56 tie      */
-/* P215/P214 to a 32.768 kHz sub-clock crystal.  Neither is running in R2 --  */
-/* the part boots on its internal MOCO -- but R4's PLL reference is this      */
-/* number, so it belongs to the board, not to the clock driver.               */
+/* P215/P214 to a 32.768 kHz sub-clock crystal.  The part boots on its        */
+/* internal MOCO, but the PLL reference is this number, so it belongs to the  */
+/* board rather than to the clock driver.                                     */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_MOSC_HZ          24000000UL
 #define TIKU_BOARD_SUBCLK_HZ        32768UL
@@ -71,7 +71,7 @@
 #define TIKU_BOARD_LED3_PIN         7U
 
 /* Active high: the MCU pin drives the anode through the series resistor, so a
- * 1 lights the LED.  Verified by eye on LED1 during R2's smoke test. */
+ * 1 lights the LED. */
 #include <arch/ra8p1/tiku_gpio_arch.h>
 
 #define TIKU_BOARD_LED1_INIT()   tiku_ra8p1_gpio_init_output(TIKU_BOARD_LED1_PORT, TIKU_BOARD_LED1_PIN)
@@ -92,8 +92,8 @@
 /*---------------------------------------------------------------------------*/
 /* User switches                                                             */
 /*                                                                           */
-/* Kit UM Table 25.  Both sit on deep-standby-capable IRQ lines, which is     */
-/* what makes them the wake source when R8 reaches low power.                 */
+/* Kit UM Table 25.  Both sit on deep-standby-capable IRQ lines, so either    */
+/* can serve as a wake source out of deep standby.                            */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_SW1_PORT         0U      /* P009, IRQ13-DS */
 #define TIKU_BOARD_SW1_PIN          9U

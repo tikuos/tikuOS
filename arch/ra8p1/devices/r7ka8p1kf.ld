@@ -139,14 +139,13 @@ SECTIONS
     /* -------- Warm-reset survivor state (SRAM) ----------------------- */
     /* `.uninit` and the WARM grade sit outside .bss so the reset handler's
      * zero-fill skips them: they survive a warm reset and are reseeded on a
-     * power cycle.  The DURABLE grade is NOT here any more -- as of R6 exact
-     * `.persistent` lives in MRAM below and survives power loss too.
+     * power cycle.  The DURABLE grade is not here: `.persistent` lives in
+     * MRAM below and survives power loss too.
      *
      * TIKU_PERSIST_WARM is "never mirrored, never MPU-protected", and its
      * callers write it unbracketed on purpose -- tiku_hang_boot_init() clears
      * the hang record at every boot.  Sweep it into the protected window and
-     * that write MemManage-faults before the shell ever starts, which is how
-     * this was found. */
+     * that write MemManage-faults before the shell ever starts. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
@@ -164,9 +163,9 @@ SECTIONS
 
     /* SRAM headroom: the stack budget the MPU actually programs
      * (MPU_STACK_RESERVED_BYTES 32 KB + MPU_STACK_GUARD_BYTES 4 KB in
-     * tiku_mpu_arch.c) must fit above the statics.  The old 16 KB figure here
-     * was smaller than what the MPU reserves, so the link could succeed while
-     * the guard region overlapped .uninit. */
+     * tiku_mpu_arch.c) must fit above the statics, so the figure below tracks
+     * that sum.  Below the 32 KB reserve the guard region overlaps .uninit
+     * and the link still succeeds. */
     ASSERT((__stack - _end) >= 0x9000,
            "ERROR: RA8P1 SRAM exhausted -- need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
 

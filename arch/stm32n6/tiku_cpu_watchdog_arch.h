@@ -39,7 +39,12 @@ typedef enum {
 /** @brief Timeout selector, in the kernel's interval-code units. */
 typedef uint16_t tiku_wdt_interval_t;
 
-/** @brief Stop the watchdog. */
+/**
+ * @brief Record the watchdog as off and feed it one last time.
+ *
+ * @note The IWDG keeps counting; only a reset clears it.  A caller that stops
+ *       kicking after this is still reset once the interval expires.
+ */
 void tiku_cpu_stm32n6_watchdog_off_arch(void);
 
 /**
@@ -53,7 +58,12 @@ void tiku_cpu_stm32n6_watchdog_off_arch(void);
 void tiku_cpu_stm32n6_watchdog_on_arch(tiku_wdt_clk_t src,
                                        tiku_wdt_interval_t interval);
 
-/** @brief Suspend watchdog counting across a long critical section. */
+/**
+ * @brief Grant a long critical section a fresh full interval to run in.
+ *
+ * @note The counter cannot be halted, so a section longer than one interval
+ *       is reset even while paused.
+ */
 void tiku_cpu_stm32n6_watchdog_pause_arch(void);
 
 /**

@@ -7,8 +7,9 @@
  *
  * tiku_xflash_arch.h - EK-RA8P1 Octo-SPI NOR (MX25LW51245G, 64 MB).
  *
- * Phase 1: controller and pins up, device identified over plain 1-1-1 SPI,
- * which is the mode the part powers up in.
+ * Controller and pin bring-up, identification over the plain 1-1-1 SPI the
+ * part powers up in, 8D-8D-8D entry with DQS calibration, and a memory-mapped
+ * read/write path exposed as an NVM backend.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,7 +38,7 @@ struct tiku_nvm_backend;
 #define TIKU_RA8P1_XFLASH_ADDR   0x90000000UL   /* OSPI0 CS1 */
 #define TIKU_RA8P1_XFLASH_BYTES  (64UL * 1024UL * 1024UL)
 
-/** @brief Bring up the OSPI1 controller and its pins.  Idempotent. */
+/** @brief Bring up the OSPI0 controller and its pins.  Idempotent. */
 void tiku_ra8p1_xflash_init(void);
 
 /**
@@ -76,10 +77,12 @@ int tiku_ra8p1_xflash_read_sfdp(uint32_t addr, void *dst, uint8_t len);
 /**
  * @brief Open the mapped window so the CPU can read flash as memory.
  *
- * Programs the command map with FAST READ 4B (0x0C, four address bytes, eight
- * dummy cycles) and enables read access for CS1.  Reads only: the window
- * stays write-disabled, so a stray store cannot start a program cycle.
+ * Programs the command map for whichever protocol is active -- FAST READ 4B
+ * in single-bit mode, 8DTRD under the octal frame -- and enables read access
+ * for CS1.
  *
+ * @note The window is left read-only, so a stray store cannot start a
+ *       program cycle; tiku_ra8p1_xflash_write() opens write access itself.
  * @return TIKU_RA8P1_XFLASH_OK, or a negative error code
  */
 int tiku_ra8p1_xflash_mmap_enable(void);
@@ -153,7 +156,8 @@ int tiku_ra8p1_xflash_dqs_shift(void);
 /** @brief How many delay cells worked -- the width of the eye, in cells. */
 int tiku_ra8p1_xflash_dqs_margin(void);
 
-/** @brief Erase granularities this driver issues, in bytes. */
+/** @brief Erase granularities (sector, block) and the program page, in
+ *         bytes. */
 #define TIKU_RA8P1_XFLASH_SECTOR  4096UL
 #define TIKU_RA8P1_XFLASH_BLOCK   65536UL
 #define TIKU_RA8P1_XFLASH_PAGE    256UL
@@ -161,9 +165,8 @@ int tiku_ra8p1_xflash_dqs_margin(void);
 /**
  * @brief Erase one 4 KB sector containing @p addr.
  *
- * Blocks until the device reports idle.  tSE is 25 ms typical but 400 ms
- * worst case, so the wait is sized from the datasheet maximum rather than
- * from what a healthy part happens to do.
+ * Blocks until the device reports idle, on a budget set well above the
+ * datasheet maximum so that a slow but healthy part is not failed.
  *
  * @param addr  Any address inside the sector
  * @return TIKU_RA8P1_XFLASH_OK, or a negative error code

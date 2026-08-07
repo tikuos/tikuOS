@@ -7,7 +7,7 @@
  *
  * tiku_mpu_arch.c - RA8P1 memory protection, PMSAv8 on the Cortex-M85.
  *
- * W^X over the SRAM-resident image, a stack guard, and the NVM window that
+ * W^X over the MRAM-resident image, a stack guard, and the NVM window that
  * brackets every durable write.  Region attributes also set cacheability.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -41,10 +41,9 @@ extern uint32_t __tiku_nvm_mram_end;
 #define MPU_RGN_COUNT       6U
 
 /*
- * Stack budget and guard width, taken from the RP2350 port's scars rather
- * than rediscovered: a 32-byte guard is LEAPT by a KB-sized frame -- SP lands
- * below it untouched and only a stray local inside the window ever faults.
- * A 4 KB guard cannot be jumped by any frame smaller than 4 KB.
+ * Stack budget and guard width: a 32-byte guard is LEAPT by a KB-sized frame
+ * -- SP lands below it untouched and only a stray local inside the window ever
+ * faults.  A 4 KB guard cannot be jumped by any frame smaller than 4 KB.
  */
 #define MPU_STACK_RESERVED_BYTES   32768U
 #define MPU_STACK_GUARD_BYTES      4096U
@@ -55,7 +54,8 @@ static uint16_t mpu_sam = TIKU_MPU_DEFAULT_SAM;
 /** @brief Bookkeeping CTL, mirroring MSP430's MPUCTL0 password|enable. */
 static uint16_t mpu_ctl;
 
-/** @brief Violation record, latched by the MemManage handler. */
+/** @brief Violation bits reported to the kernel; a fault resets before any
+ *         handler can set them, so this only ever reads back as cleared. */
 static uint16_t mpu_violations;
 
 /** @brief Make an MPU register write visible before the next access. */
@@ -94,7 +94,7 @@ static void mpu_region(uint32_t rgn, uintptr_t base, uintptr_t limit,
                                  RA8P1_MPU_RLAR_EN;
 }
 
-/** @brief Lowest address the stack may reach before it hits the guard. */
+/** @brief Base of the 4 KB guard; the stack may not descend below its top. */
 static uintptr_t guard_base(void)
 {
     return (uintptr_t)&__stack - MPU_STACK_RESERVED_BYTES;
@@ -161,14 +161,14 @@ void tiku_mpu_arch_init_segments(void)
 
     /* W^X: the image's text is read-only AND executable; everything else is
      * writable AND never executable.  The split is exact because the linker
-     * aligned _etext to the 32-byte granule.  Since R6 the text side lives in
-     * MRAM, so this region is also what keeps a stray store from rewriting
-     * the program image now that it is in writable non-volatile memory. */
+     * aligned _etext to the 32-byte granule.  The text side lives in MRAM,
+     * which is writable non-volatile memory, so this region is also what
+     * keeps a stray store from rewriting the program image. */
     mpu_region(MPU_RGN_TEXT, (uintptr_t)&__vectors_start, (uintptr_t)&_etext,
                RA8P1_MPU_RBAR_AP_RO, 0, RA8P1_MPU_ATTR_NORMAL);
-    /* One SRAM span now: .data, .bss, .uninit and the WARM survivors.  The
-     * durable grade left SRAM in R6, and WARM must stay writable -- callers
-     * write it unbracketed by design. */
+    /* One SRAM span: .data, .bss, .uninit and the WARM survivors.  No durable
+     * data lives in SRAM, and WARM must stay writable -- callers write it
+     * unbracketed by design. */
     mpu_region(MPU_RGN_DATA, (uintptr_t)&__data_start,
                (uintptr_t)&__uninit_end,
                RA8P1_MPU_RBAR_AP_RW, 1, RA8P1_MPU_ATTR_NORMAL);
@@ -309,8 +309,7 @@ void tiku_mpu_arch_enable_violation_nmi(void)
 }
 
 /*
- * The MemManage handler moved to tiku_fault_arch.c in R8, which dumps, records
- * and RESETS.  The old one here recorded and returned, so a store that can
- * never succeed re-executed forever -- and before R6 resetting instead would
- * have re-entered the factory image, which is why it could not.
+ * The MemManage handler lives in tiku_fault_arch.c: it dumps, records and
+ * RESETS.  Returning from an access violation instead re-executes a store that
+ * can never succeed, so a handler that records and returns spins forever.
  */

@@ -94,9 +94,8 @@ int tiku_ra8p1_mram_flush(void)
      * The store that filled the buffer is posted; a read of MRCPS -- a
      * different peripheral address -- can overtake it, observe ABUFEMP=1 for
      * a buffer that is about to be written, and skip the commit entirely.
-     * The write is then lost with rc=0 reported.  This is how it presented:
-     * long store runs committed fine and single-word cell writes silently did
-     * not, because only the short ones lose the race.
+     * The write is then lost with rc=0 reported; single-word writes are the
+     * exposed case, long store runs are not.
      */
     __asm__ volatile ("dsb" ::: "memory");
 
@@ -127,11 +126,9 @@ int tiku_ra8p1_mram_write(void *dst, const void *src, size_t len)
     }
 
     /*
-     * Plain stores, no per-byte status poll.  An earlier version checked
-     * ABUFFULL before every byte, which cost ~22 cycles each and made a
-     * 32-byte line 17.3 us instead of ~1 us -- eight times the write in
-     * bookkeeping.  The bus stalls a store the buffer cannot take, which is
-     * the check that was being duplicated in software.
+     * Plain stores, no per-byte status poll: the bus stalls a store the
+     * write buffer cannot take, so an ABUFFULL check before every byte adds
+     * ~22 cycles apiece for a condition the hardware already enforces.
      *
      * Word stores where the alignment allows, since the buffer takes them
      * whole: measured 174 counts for a granule against 468 byte-wise.

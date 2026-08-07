@@ -42,7 +42,10 @@ typedef struct {
 #define TIKU_XSPI_SECTOR_SIZE   4096U
 #define TIKU_XSPI_MFR_MACRONIX  0xC2U
 
-/* The memory-mapped window, for reference; this driver uses indirect access. */
+/* Base of the memory-mapped read window that tiku_xspi_mmap_enable()
+ * programs.  Erase and program run indirect, but the NVM region, the durable
+ * mirror and the driver's own cache invalidations all address the flash
+ * through this base. */
 #define TIKU_XSPI_MMAP_BASE     0x70000000UL
 
 /* Flash layout of the 64 MB device:
@@ -50,7 +53,7 @@ typedef struct {
  *   0x0000000  FSBL1     256 KB  the boot image; the ROM loads this one
  *   0x0040000  FSBL2     256 KB  the ROM's fallback search address
  *   0x0080000  /data       8 MB  the carved NVM region (tier + TFS store)
- *   0x0880000  unclaimed  ~55 MB model and blob space, for N6-11
+ *   0x0880000  unclaimed  ~55 MB model and blob space
  *   0x3FFB000  scratch     4 KB  what `xflash test` erases
  *   0x3FFC000  mirror     16 KB  the durable .uninit mirror
  *

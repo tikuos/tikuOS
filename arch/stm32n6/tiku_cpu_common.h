@@ -7,8 +7,8 @@
  *
  * tiku_cpu_common.h - STM32N6 busy-wait delays.
  *
- * Delays are cycle-counted loops scaled by TIKU_STM32N6_CPU_HZ, so their
- * accuracy is exactly the accuracy of that constant.
+ * Delays are calibrated spin loops driven by the iteration rate measured
+ * against LPTIM1, with a TIKU_STM32N6_CPU_HZ estimate before that measurement.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

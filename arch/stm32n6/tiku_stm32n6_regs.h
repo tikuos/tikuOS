@@ -110,8 +110,7 @@
 #define STM32N6_RCC_RSR_LPWRRSTF    (1UL << 30)
 
 /* LPTIM1 is the kernel time base. Its clock comes from CLKP, and CLKP is
- * pointed at HSI, so the tick does not move when the CPU clock does -- which
- * on this part is inherited from the boot ROM and not reproducible. */
+ * pointed at HSI, so the tick does not move when the CPU clock does. */
 #define STM32N6_RCC_CCIPR7          (STM32N6_RCC_BASE + 0x15CU)
 #define STM32N6_RCC_CCIPR12         (STM32N6_RCC_BASE + 0x170U)
 #define STM32N6_RCC_APB1LENR        (STM32N6_RCC_BASE + 0x264U)
@@ -255,8 +254,8 @@
 
 /* XSPI2 drives the board's 64 MB Macronix NOR through the XSPI I/O manager on
  * port 2. All eleven signals are GPION at AF9; the flash also answers at
- * 0x70000000 once memory-mapped mode is armed, which this driver does not
- * need because every access here is an explicit indirect transfer. */
+ * 0x70000000 once memory-mapped mode is armed; indirect transfers run with
+ * that mode disabled. */
 #define STM32N6_RCC_AHB4ENR_GPION   (1UL << 13)
 #define STM32N6_RCC_AHB5ENR_XSPI2   (1UL << 12)
 #define STM32N6_RCC_AHB5ENR_XSPIM   (1UL << 13)
@@ -358,8 +357,7 @@
 #define STM32N6_SCB_CCSIDR          0xE000ED80UL   /* selected cache's size */
 #define STM32N6_CACHE_LINE          32UL
 
-/* DWT cycle counter: a true count of core cycles, so the CPU rate can be
- * measured without assuming how many cycles an instruction takes. */
+/* Fault status and reset control. */
 #define STM32N6_SCB_CFSR            0xE000ED28UL   /* configurable fault st */
 #define STM32N6_SCB_HFSR            0xE000ED2CUL   /* hard fault status     */
 #define STM32N6_SCB_MMFAR           0xE000ED34UL   /* memmanage address     */
@@ -378,6 +376,9 @@
 #define STM32N6_CFSR_BFARVALID      (1UL << 15)
 #define STM32N6_CFSR_STKERR_MSK     ((1UL << 4) | (1UL << 12))
 
+/* DWT cycle counter: a true count of core cycles, so the CPU rate can be
+ * measured without assuming how many cycles an instruction takes.  DEMCR.TRCENA
+ * powers the block that holds it. */
 #define STM32N6_SCB_DEMCR           0xE000EDFCUL
 #define STM32N6_SCB_DEMCR_TRCENA    (1UL << 24)
 #define STM32N6_DWT_CTRL            0xE0001000UL

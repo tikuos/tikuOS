@@ -39,7 +39,13 @@ typedef enum {
 /** @brief Timeout selector, in IWDTCLK ticks (16.384 kHz). */
 typedef uint16_t tiku_wdt_interval_t;
 
-/** @brief Stop the watchdog. */
+/**
+ * @brief Record that the caller wants the watchdog off.
+ *
+ * @note Once refreshed the IWDT cannot be stopped or reconfigured until a
+ *       reset.  This feeds the counter once and then ignores kicks, so
+ *       unless the caller arms it again the part resets one interval later.
+ */
 void tiku_cpu_ra8p1_watchdog_off_arch(void);
 
 /**

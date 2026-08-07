@@ -136,11 +136,9 @@ SECTIONS
     ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
            "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS in tiku_xspi_arch.h AND the 4 in this ASSERT together")
 
-    /* The array ends at 0x343C0000 -- measured, not assumed. An access above
-     * it HANGS the bus rather than faulting: with real fault handlers now
-     * installed, a read there produced neither a dump nor a reset. So an
-     * oversized arena would wedge silently at boot; this makes it a link
-     * error instead. */
+    /* The array ends at 0x343C0000. An access above it HANGS the bus rather
+     * than faulting -- no fault dump, no reset -- so an oversized arena would
+     * wedge silently at boot; this makes it a link error instead. */
     ASSERT(__axisram_end <= 0x343C0000,
            "tier arena runs past the top of AXI SRAM; lower TIKU_TIER_SRAM_SIZE")
 
