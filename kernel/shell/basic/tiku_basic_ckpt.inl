@@ -218,7 +218,7 @@ basic_ckpt_fs(void)
 }
 
 /*
- * STREAM THE PAYLOAD, OR STAGE IT WHOLE?
+ * Stream the payload, OR STAGE IT WHOLE?
  *
  * Staging the whole image costs BASIC_CKPT_RGN_HDR + PAYLOAD_MAX of always-
  * resident RAM -- 12,534 B, which after the v0.06 SAVE/LOAD diet is the single

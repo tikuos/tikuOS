@@ -6,7 +6,7 @@
  *
  * tiku_fat.c - FAT32 reader.  See tiku_fat.h for why FAT32 and why read-only.
  *
- * NO HARDWARE HEADERS.  This compiles on a Linux host against loopback images
+ * No hardware headers.  This compiles on a Linux host against loopback images
  * written by mkfs.vfat, which is how it is regression-tested (tools/fat32).
  * If a hardware include ever appears here, that ability is gone and with it
  * the only cheap way to test a filesystem parser against a real one.

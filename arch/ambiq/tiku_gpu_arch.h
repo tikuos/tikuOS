@@ -94,7 +94,7 @@ tiku_gpu_err_t tiku_gpu_init(tiku_gpu_perf_t perf);
 /**
  * @brief Disable the NVIC line and power the GFX domain back off.
  *
- * CALL THIS AS SOON AS THE WORK IS DONE.  A powered-but-idle GFX domain costs
+ * Call this as soon as the work is done.  A powered-but-idle GFX domain costs
  * ~6.4 mA -- more than twice this SoC's entire idle current -- charged for every
  * microsecond the domain is up, drawing or not.
  *
@@ -318,7 +318,7 @@ tiku_gpu_err_t tiku_gpu_fill_circle(const tiku_gpu_surface_t *dst,
  * tiku_gpu_submit(), and awaited (CPU asleep) with tiku_gpu_wait().  @p buf MUST
  * be in SSRAM (the GPU reads it as a bus master) and 32-byte aligned.
  *
- * PUT MANY DRAWS IN ONE LIST.  cl_fill() appends 24 words per draw, so a list of
+ * Put many draws in one list.  cl_fill() appends 24 words per draw, so a list of
  * 24*N + 8 words carries N draws for one submit and one wake.  Batching is the
  * only power lever this GPU has: the ~6.4 mA standing cost is architectural, no
  * register reduces it, so the lever is time-powered.  Measured, solid fill of a

@@ -64,7 +64,7 @@ static int nvmr_bits_only_clear(const uint8_t *cur, const uint8_t *new_,
  * @return 0 on success, negative on a bad range or a flash failure
  */
 /*
- * WHY THE FAST PATH EXISTS.  A store format writes one gate word per directory
+ * Why the fast path exists.  A store format writes one gate word per directory
  * entry, ~2000 of them. Read-modify-erase-program per call would erase the same
  * sector hundreds of times over -- minutes of wall clock, and a chunk of a
  * finite erase budget spent on a fresh store. Erased NOR is all ones, so those

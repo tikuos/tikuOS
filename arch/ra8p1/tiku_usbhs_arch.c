@@ -22,7 +22,7 @@
 #include "tiku_store_arch.h"
 
 /*
- * THE CLOCK QUESTION, SETTLED BY THE MANUAL RATHER THAN BY FAMILY RESEMBLANCE.
+ * The clock comes from the manual, not from family resemblance.
  *
  * Every other fast peripheral on this part hides a private clock register
  * behind the PRCR lock -- SCICKCR, GTCLKCR, MRCPC1, SDCKOCR, OCTACKCR -- and
@@ -458,7 +458,7 @@ static void ep0_ack(void)
 }
 
 /*
- * THE DATA STAGE CANNOT BLOCK, BECAUSE IT RUNS IN THE ISR.
+ * The data stage cannot block, because it runs in the ISR.
  *
  * Queueing a packet only makes it available for the next IN token; the host
  * still has to ask, and it asks on its own schedule.  Waiting for that in
@@ -607,7 +607,7 @@ static void ep0_on_setup(uint16_t sts)
     uint8_t type, request;
 
     /*
-     * TRIGGER ON THE STAGE TRANSITION, NOT ON VALID.
+     * The trigger is the stage transition, not VALID.
      *
      * VALID is set when the setup PACKET arrives, but the manual is careful
      * about the order: the request parameters are stored "when the USBHS
@@ -766,7 +766,7 @@ static void ep0_on_setup(uint16_t sts)
 }
 
 /*
- * ONE EVENT LINE CARRIES EVERY SOURCE.  USBHS_USBIR aggregates VBUS, resume,
+ * One event line carries every source: USBHS_USBIR aggregates VBUS, resume,
  * frame, device state, control-stage and buffer interrupts, so an edge says
  * only "something happened" -- a handler that services one cause and returns
  * leaves the rest pending behind an edge that will not repeat, and the device
@@ -1013,7 +1013,8 @@ static uint32_t pipe_read(uint8_t *dst, uint32_t cap)
     }
 
     /*
-     * READING ALL OF IT IS WHAT RELEASES IT.  The manual is explicit: with
+     * The buffer is released by reading all of it.  The manual is explicit:
+     * with
      * RCNT = 0 the controller holds DTLN "until the CPU has read all of the
      * received data in the FIFO buffer (or until it has read a single plane
      * in double buffer mode)".  So a BCLR issued after a COMPLETE read does
@@ -1115,7 +1116,7 @@ static int msc_recv_blocks(uint32_t lba, uint32_t bytes)
         }
         n = pipe_read(&p[got], bytes - got);
         /*
-         * NO PROGRESS MEANS STOP.  A ready pipe that yields nothing is a
+         * No progress means stop.  A ready pipe that yields nothing is a
          * state this cannot argue its way out of, and continuing turns it
          * into a hang -- which is strictly worse than a failed command,
          * because the host cannot even time out and retry a device whose
@@ -1152,7 +1153,7 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     n_cbw++;
     last_ops[last_op_i & 3u] = cbw.cdb[0];
     /*
-     * ONE WRITER AT A TIME, ENFORCED HERE.  An import is reading the staging
+     * One writer at a time, enforced here.  An import is reading the staging
      * window for minutes; a host write landing in it meanwhile would be
      * published as part of a model it was never part of.  NOT READY is the
      * sense a host understands as "ask again shortly".

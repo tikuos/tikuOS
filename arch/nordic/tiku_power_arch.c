@@ -104,7 +104,7 @@ void tiku_nordic_cache_profile_read(uint32_t *hits, uint32_t *misses,
 /*---------------------------------------------------------------------------*/
 
 /*
- * INDUCTORDET IS ONLY MEANINGFUL WHILE THE CONVERTER IS OFF.  Datasheet
+ * INDUCTORDET is only meaningful while the converter is off.  Datasheet
  * 5.7.2.4.2: "The detection can only take place if the DC/DC converter is not
  * enabled (VREGMAIN.DCDCEN = 0)."
  *
@@ -156,7 +156,7 @@ int tiku_nordic_dcdc_probe_inductor(void)
 int tiku_nordic_dcdc_set(int on)
 {
     /*
-     * NO SOFTWARE GUARD, DELIBERATELY.  An earlier version refused to write
+     * No software guard, DELIBERATELY.  An earlier version refused to write
      * DCDCEN unless it had already seen an inductor, which was both wrong and
      * unnecessary: the SILICON does this check, at exactly the right moment.
      * Datasheet 5.7.2.4: "When enabling the DC/DC regulator, the device checks
@@ -220,7 +220,7 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us)
 /*---------------------------------------------------------------------------*/
 
 /*
- * WHY THESE EXIST.  Every core-power figure this port has published comes from a
+ * Why these exist.  Every core-power figure this port has published comes from a
  * register-only loop -- two instructions, no loads, no stores.  That is a
  * deliberate best case and it says nothing about what memory traffic costs,
  * which is most of what real code does and all of what a durability decision
@@ -647,7 +647,7 @@ void tiku_nordic_system_off(void)
 /*---------------------------------------------------------------------------*/
 
 /*
- * MEASURE THE CORE CLOCK AGAINST A CLOCK THAT CANNOT MOVE WITH IT.
+ * Measure the core clock against a clock that cannot move with it.
  *
  * SysTick is clocked from the processor clock; the GRTC's SYSCOUNTER runs at
  * 1 MHz from an entirely separate source.  Counting one against the other

@@ -904,8 +904,8 @@ static tiku_nvm_backend_t xf_backend = {
 tiku_nvm_backend_t *tiku_ra8p1_xflash_backend(void)
 {
     /*
-     * OCTAL FIRST, ALWAYS, AND THAT IS A CORRECTNESS REQUIREMENT RATHER THAN
-     * A SPEED ONE.  DOPI moves bytes pair-swapped relative to single-bit SPI,
+     * Octal is entered first, and for correctness rather than speed.  DOPI
+     * moves bytes pair-swapped relative to single-bit SPI,
      * so content written through this backend in one protocol reads back as
      * nonsense in the other -- a stored object's header magic simply fails to
      * match and the slot reports itself empty.  Entering here makes the

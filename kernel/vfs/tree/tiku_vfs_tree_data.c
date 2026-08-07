@@ -22,7 +22,7 @@
 #include "tiku.h"
 
 /*
- * THE STORE IS NOT A SHELL FEATURE.
+ * The store is not a shell feature.
  *
  * The file has two halves.  Everything down to the DYNAMIC-DIRECTORY OPS
  * banner -- the backing memory, the backend, the mount, and the

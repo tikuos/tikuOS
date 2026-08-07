@@ -709,7 +709,7 @@ static void ep0_setup(const uint8_t *p)
     switch (bRequest) {
     case 0x05:  /* SET_ADDRESS */
         /*
-         * THE CLASSIC TRAP.  The address must not take effect until the host
+         * The classic trap.  The address must not take effect until the host
          * has seen the status stage, because until then the host is still
          * talking to address 0.  MUSB's FADDR applies the moment it is
          * written, so the write is DEFERRED to the next EP0 interrupt --
@@ -1295,7 +1295,7 @@ static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
             USB->ADMACMPINTCLR = mask;
             USB->ADMAEN &= ~mask;
             /*
-             * HAND THE ENDPOINT BACK TO PIO.  Arming DMAReqEnab/DMAReqMode
+             * Hand the endpoint back to PIO.  Arming DMAReqEnab/DMAReqMode
              * puts the FIFO under the engine's control; leaving it there
              * means the very next PIO access -- the status wrapper, or the
              * next command wrapper -- meets a CSR that is still expecting a
@@ -1504,7 +1504,7 @@ static void msc_emmc_write(uint32_t lba, uint32_t bytes, uint32_t host_len)
 void tiku_usb_msc_poll(void)
 {
     /*
-     * SERVICE COMMANDS UNTIL THE HOST STOPS ASKING, not one per call.
+     * Service commands until the host stops asking, not one per call.
      *
      * Handling a single command per idle-hook invocation made throughput a
      * function of the scheduler's cadence rather than of the hardware:
@@ -1532,7 +1532,7 @@ void tiku_usb_msc_poll(void)
     for (burst = 0u; burst < 256u; burst++) {
         if (msc_poll_one()) { continue; }
         /*
-         * NOTHING WAITING IS NOT THE SAME AS NOTHING COMING.
+         * Nothing waiting is not the same as nothing coming.
          *
          * Bulk-Only Transport is strictly ping-pong at the command level: the
          * host will not send the next CBW until the CSW arrives.  Returning
@@ -1655,7 +1655,7 @@ static void bus_reset(void)
 /**
  * @brief The USB interrupt.  Bounded, allocation-free, and it never prints.
  *
- * READ EACH STATUS REGISTER EXACTLY ONCE.  They are read-to-clear; a second
+ * Read each status register exactly once.  They are read-to-clear; a second
  * read returns zero and loses whatever arrived in between.  Everything below
  * consults the locals, never the registers again.
  */

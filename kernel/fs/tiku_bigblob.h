@@ -21,7 +21,7 @@
 #include <kernel/fs/tiku_nvm_backend.h>
 
 /*
- * WHY NOT TFS, AND WHY NOT tiku_blob.
+ * Why not TFS, AND WHY NOT tiku_blob.
  *
  * Both exist and both are the right answer for what they were built for:
  * many small files on byte-writable NVM.  Neither fits a 62 MB model on NOR
@@ -71,7 +71,7 @@ typedef struct {
 } tiku_bigblob_info_t;
 
 /*
- * A STREAMED WRITE, because a blocking one is a denial of service.
+ * A streamed write, because a blocking one is a denial of service.
  *
  * Publishing a model-sized object takes minutes on this medium, and a device
  * that stops answering for minutes is one a host resets.  So the write is a

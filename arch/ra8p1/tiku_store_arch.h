@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 /*
- * WHY A COMMIT RECORD RATHER THAN A COMMAND.
+ * The store keeps a commit record, not a command.
  *
  * The board has no shell in this configuration and the host has no channel
  * to it except the disk itself, so the disk has to carry the instruction.

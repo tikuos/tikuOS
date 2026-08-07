@@ -84,7 +84,7 @@
 #endif
 
 /*
- * WHERE THE IMAGE COMES FROM.  A blob linked into the firmware would be
+ * Where the image comes from.  A blob linked into the firmware would be
  * counted TWICE -- once as .rodata in the code window, once as the reserved
  * slot it is copied into.  The image is therefore an ordinary store file, and
  * the embedded blob is only an optional
@@ -122,7 +122,7 @@
  *   rp2350      XIP from the 32 KB NVM carve
  *   MSP430      XIP from its 4 KB HIFRAM slot (natively executable; non-goal)
  *
- * WHY APOLLO510 IS THE EXCEPTION.  Its ITCM sits at 0x00000000 in a separate
+ * Why APOLLO510 is the exception.  Its ITCM sits at 0x00000000 in a separate
  * address space and is not even declared in the linker script's MEMORY block --
  * dedicated instruction memory that nothing else can use.  Spending it costs
  * nothing, which is what let the NVM carve go.  The window starts 4 KB in
@@ -130,7 +130,7 @@
  * a null pointer, by the loader's checks or the module's; it must match the
  * module's .ld exactly.
  *
- * THE POWER QUESTION IS NOW MEASURED, not inferred.  ITCM and DTCM power share
+ * The power question is now measured, not inferred.  ITCM and DTCM power share
  * one field, PWRCTRL->MEMPWREN.PWRENTCM, and nothing in arch/ambiq programs it,
  * so the reset default is what applies.  Arguing "the linker declares 512 KB
  * of DTCM, therefore PWRENTCM must be 7" would be unsound -- the port uses
@@ -166,7 +166,7 @@
  *   And apollo4l/4p simply have no idle instruction memory to spend: one 384 KB
  *   TCM at 0x10000000, already carrying .data, .bss, heap and stack.
  *
- * TWO ALTERNATIVES CONSIDERED AND REJECTED.  Punching a permanently executable
+ * Two alternatives considered and rejected.  Punching a permanently executable
  * hole in W^X recreates the exact write-then-execute primitive the hardening
  * removes.  Flipping a window's permissions in time instead (RW+XN to hold the
  * image, RO+X to run it, never both at once) preserves the invariant honestly --

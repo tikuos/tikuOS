@@ -68,7 +68,7 @@ static void process_line(const char *raw);
  * exactly this shape of producer: begin (reserve a run), append (bounded
  * chunks, so RAM stays independent of program size), commit (one atomic word).
  *
- * THE CRASH RULE IMPROVES.  The old order was gate-clear -> text -> len ->
+ * The crash rule improves.  The old order was gate-clear -> text -> len ->
  * magic: invalidate first, so a cut mid-SAVE left NO saved program.  A store
  * replace stages into a fresh run and flips the directory last, so a cut
  * mid-SAVE leaves the PREVIOUS program intact.  Same one-word commit, strictly

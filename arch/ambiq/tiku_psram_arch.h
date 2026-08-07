@@ -77,7 +77,7 @@
  *
  * Steps 1-19 are M1 (this file's first milestone).  20-21 are M2.
  *
- * THE CLOCK MODEL, derived from the HAL's own tables and to be confirmed by
+ * The clock model, derived from the HAL's own tables and to be confirmed by
  * measurement in M3 (`psrambench`), not asserted here:
  *
  *   IO clock output = source / (2 * CLKDIVn),  unless SDR250EN0 = 1,
@@ -127,7 +127,7 @@
  *   MR6  [7:0] ULPM: 0xF0 = half sleep, 0xC0 = deep power down
  *   MR8  [1:0] BL burst length, [3] RBX, [6] IOM (0=octal, 1=hex)
  *
- * THE M1 IDENTITY GATE, stated as numbers so it cannot be fudged:
+ * The M1 identity gate, stated as numbers so it cannot be fudged:
  *   MR1.VID    == 0x0D          (AP Memory)
  *   MR2.DENSITY == 0x6          (512 Mbit = 64 MB -- matches U14)
  *   MR2.GB     == 0x6           (die passed test)

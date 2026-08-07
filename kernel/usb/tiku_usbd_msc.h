@@ -20,7 +20,7 @@
 #include <stddef.h>
 
 /*
- * WHAT IS HERE AND WHAT IS DELIBERATELY NOT.
+ * What is here and what is deliberately not.
  *
  * Here: the parts every mass-storage device gets wrong in the same ways --
  * the CBW/CSW field layout, the SCSI replies a host needs to mount a volume,

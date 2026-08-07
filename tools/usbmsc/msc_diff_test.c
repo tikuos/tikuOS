@@ -9,7 +9,7 @@
  */
 
 /*
- * THE GATE THIS DISCHARGES.  U0 moved proven code out of a driver that only
+ * The gate this discharges.  U0 moved proven code out of a driver that only
  * an Apollo510 can exercise.  "It still compiles" is not evidence, and "the
  * new code passes its own tests" only says the new code agrees with itself.
  * What is wanted is that the extraction answers every input exactly as the

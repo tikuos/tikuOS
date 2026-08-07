@@ -33,7 +33,7 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * THE PADS ARE A BOARD FACT AND NOW LIVE IN THE BOARD HEADER.  They were
+ * The pads are a board fact and now live in the board header.  They were
  * hard-coded here, which silently made this driver Blue-EVB-only: RSTn is
  * GP13 on the Blue board and GP12 on the green one (table 0), so an eMMC
  * build for the green EVB drove a pad that is not its reset net.  The
@@ -69,7 +69,7 @@ _Static_assert(EMMC_PAD_D7 - EMMC_PAD_D4 == 3,
                "eMMC DAT4..DAT7 must be contiguous");
 
 /*
- * FUNCTION SELECT IS NOT UNIFORM ACROSS THIS BUS, AND ASSUMING IT WAS COST A
+ * Function select is not uniform across this bus, AND ASSUMING IT WAS COST A
  * DEBUGGING ROUND.  Read from am_hal_pin.h, not inferred:
  *
  *   GP84..GP88  (DAT0-3, CLK)  ->  FNCSEL 2   (AM_HAL_PIN_84_SDIF0_DAT0 = 2)
@@ -240,7 +240,7 @@ uint32_t tiku_emmc_scratch_lba(void)
 /* No EMMC_DATA_SPINS any more: data phases are bounded by TIME, below.     */
 
 /*
- * A SPIN COUNT IS NOT A TIME LIMIT, AND PRETENDING OTHERWISE COST A RUN.
+ * A spin count is not a time limit, AND PRETENDING OTHERWISE COST A RUN.
  *
  * The data phase originally waited a fixed 50000 iterations, which the
  * backoff schedule turns into roughly half a second.  That is comfortable at
@@ -981,7 +981,7 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     __DSB();
 
     /*
-     * GIVE THE CARD TIME TO ANSWER, OR IT WILL BE CUT OFF MID-WRITE.
+     * Give the card time to answer, OR IT WILL BE CUT OFF MID-WRITE.
      *
      * CLOCKCTRL.TIMEOUTCNT sets the DATA timeout as 2^(13+n) ticks of TMCLK,
      * whose rate CAPABILITIES0[7:0] reports (1 MHz here).  A software reset
@@ -990,7 +990,7 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
      * the worst case.  The spec's own maximum is what belongs here; the reset
      * default is not a considered value, it is the absence of one.
      *
-     * THIS BUG WAS LATENT FOR THREE RUNS.  A warm card answered inside 8 ms
+     * This bug was latent for three runs.  A warm card answered inside 8 ms
      * every time and the bench was bit-exact at 35.8 MB/s.  The first write
      * after a POWER CYCLE took longer -- a cold flash translation layer has
      * work to do -- and the controller cut the transfer off at 8545 us with
@@ -1195,7 +1195,7 @@ void tiku_emmc_init_time(uint32_t *ladder_us, uint32_t *total_us)
  * exactly the gap a sleep rung exists to fill -- the same argument the
  * PSRAM's half-sleep won on, with a number instead of an intuition.
  *
- * CMD5 IS NOT ISSUED FROM WHERE THE CARD USUALLY LIVES.  Sleep is only
+ * CMD5 is not issued from where the card usually lives.  Sleep is only
  * accepted in STANDBY, and normal operation leaves the card in TRANSFER, so
  * the sequence is deselect (CMD7 with RCA 0) -> CMD5 sleep.  Waking is the
  * mirror: CMD5 awake -> CMD7 select.  Getting this wrong does not produce an
@@ -1650,7 +1650,7 @@ void tiku_emmc_bench_run(void)
     if (base == 0u) { SHELL_PRINTF("bench: no scratch region\n"); return; }
 
     /*
-     * THE SPAN FOLLOWS THE WIRE.  At the identification setting the bus moves
+     * The span follows the wire.  At the identification setting the bus moves
      * about 50 KB/s, so the 512 KB span used at speed would be ten seconds per
      * leg and the better part of two minutes overall -- long enough that the
      * hang watchdog, not the card, would decide how the run ended.  When the
@@ -1732,7 +1732,7 @@ void tiku_emmc_bench_run(void)
         uint32_t lcg = 12345u, bad = 0u, acc = 0u, done = 0u;
 
         /*
-         * THE TIMER BRACKETS THE READ AND NOTHING ELSE.  The first draft of
+         * The timer brackets the read and nothing else.  The first draft of
          * this leg left the 512-byte verification inside the timed region
          * and reported 270 us/blk -- against 147 us/blk for the leg that
          * seeks across the whole 8 GB.  Random access over half a megabyte
@@ -1885,7 +1885,7 @@ void tiku_emmc_bench_run(void)
  * MSPI command queue drains SSRAM into the PSRAM, and the CPU touches the
  * bytes only to check them.
  *
- * WHY NO PATTERN IS WRITTEN FIRST.  The obvious gate would be to write a
+ * Why no pattern is written first.  The obvious gate would be to write a
  * known pattern and look for it at the far end, but that caps the demo at
  * the 512 KB scratch region and puts writes on a card whose contents are
  * not ours.  Instead the SOURCE checksum is accumulated from the bounce
@@ -1894,7 +1894,7 @@ void tiku_emmc_bench_run(void)
  * verifies the staging path against a known-good reference, needs no writes
  * at all, and works at any size the tier can hold.
  *
- * THE CHECKSUM IS NOT IN THE TRANSFER CLOCK.  Hashing 54 MB costs real time,
+ * The checksum is not in the transfer clock.  Hashing 54 MB costs real time,
  * and folding it into the staging measurement would understate the pipeline
  * exactly the way E3's first random-read leg understated latency.  Transfer
  * time and verification time are accumulated separately and both reported.

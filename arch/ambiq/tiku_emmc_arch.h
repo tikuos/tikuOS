@@ -31,7 +31,7 @@
  *   CMD           GP160               schematic and BSP agree
  *   RSTn          GP13                *** SCHEMATIC.  THE BSP SAYS 12. ***
  *
- * THE RESET PIN, RESOLVED THREE WAYS.  Yesterday a session was lost to
+ * The reset pin, RESOLVED THREE WAYS.  Yesterday a session was lost to
  * overriding a BSP with the wrong board's schematic, so this one is settled
  * carefully rather than confidently:
  *
@@ -155,7 +155,7 @@
  *   blocks/command    1               up to 65535     amortises the command
  *   byte path         CPU (PIO)       SDMA            frees the CPU
  *
- * ORDER IS NOT NEGOTIABLE, and each step is separately reversible:
+ * Order is not negotiable, and each step is separately reversible:
  *
  *   1. CMD6 BUS_WIDTH -- the CARD switches first.  CMD6 travels on the CMD
  *      line, which is 1 bit wide whatever the DAT lines are doing, so the
@@ -183,7 +183,7 @@
  * PSRAM driver got five bugs from deriving values that were there to be read;
  * this driver has already had one.  The habit is now to look.)
  *
- * OUT OF SCOPE, ON PURPOSE: HS200 and HS400 need a tuning procedure and 1.8 V
+ * Out of scope, ON PURPOSE: HS200 and HS400 need a tuning procedure and 1.8 V
  * signalling changes; DDR modes need a different clock relationship.  The
  * bench prints what it did NOT test so its table cannot be read as a ceiling.
  */

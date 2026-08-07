@@ -41,7 +41,7 @@
 #define TIKU_UART_RX_PAD       TIKU_BOARD_UART_RX_PIN
 
 /*
- * NO APOLLO4 BOARD WAS ON THE BENCH WHEN THE PADS MOVED OUT OF THIS FILE, and
+ * No APOLLO4 board was on the bench when the pads moved out of this file, and
  * a wrong console pad is the worst failure mode available here: the board
  * boots, runs, and says nothing, which reads as a dead image.  So the values
  * are pinned to exactly what this file used before the move.  If a board

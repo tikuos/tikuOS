@@ -39,7 +39,7 @@ typedef unsigned short tiku_clock_time_t;
 #endif
 
 /*
- * HOW LONG AN INTERVAL THIS TYPE CAN MEASURE.
+ * How long an interval this type can measure.
  *
  * The counter wraps, and the arithmetic below is wraparound-safe only for
  * intervals shorter than half its range: 256 s at 16 bits and 128 Hz, and a
@@ -47,7 +47,7 @@ typedef unsigned short tiku_clock_time_t;
  * encode once reported 92 s, and before that a 25 s turn reported 3 489 178,
  * both from taking one difference across a wrap.
  *
- * MEASURE LONG THINGS AS A SUM OF SHORT DIFFERENCES, each taken in the
+ * Measure long things as a sum of short differences, each taken in the
  * counter's own width, or use a cycle counter.  Widening this type is the
  * other option and costs a 16-bit MCU real work in every timer compare.
  */

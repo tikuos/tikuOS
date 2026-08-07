@@ -9,7 +9,7 @@
  */
 
 /*
- * THE POINT OF THIS FILE.  Mass storage is a wire format, and a wire format
+ * The point of this file.  Mass storage is a wire format, and a wire format
  * is nothing but byte offsets and endianness -- the class of thing that is
  * silent when wrong.  A CSW with its residue in the wrong byte order still
  * arrives; a READ CAPACITY off by one still mounts.  The host finds out
@@ -178,7 +178,7 @@ static void test_lba(void)
        "a zero-length range is allowed wherever it points");
 
     /*
-     * THE CASE THE GUARD EXISTS FOR.  The host controls both numbers, so it
+     * The case the guard exists for.  The host controls both numbers, so it
      * can name an LBA near 2^32; the sum then wraps small and the obvious
      * check waves it through.  Showing the naive version ACCEPT it is the
      * only way to know this test would notice if the guard were rewritten.

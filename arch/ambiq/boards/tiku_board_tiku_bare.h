@@ -39,7 +39,7 @@
 /* Console UART                                                              */
 /*---------------------------------------------------------------------------*/
 /*
- * THE ONE ASSUMPTION THIS HEADER MAKES, and it is deliberate: a board with no
+ * The one assumption this header makes, and it is deliberate: a board with no
  * console cannot report that it booted, so the proof this file exists to give
  * would be unobservable.  UART0 on pads 30/55 (FUNCSEL 4) is the Apollo510's
  * conventional UART0 pinout and matches the base EVB.

@@ -34,7 +34,7 @@
  *   RSTn        GP17         PLAIN GPIO, per the 510B BSP
  *   CE0         *** NOT DEFINED ON THIS BOARD ***
  *
- * READ THE LAST LINE AGAIN.  The 510B BSP does not define an MSPI1 chip
+ * Read the last line again.  The 510B BSP does not define an MSPI1 chip
  * select at all, and in am_bsp_mspi_pins_enable() Ambiq COMMENTED OUT the
  * CE pinconfig for module 1:
  *
@@ -42,7 +42,7 @@
  *
  * A vendor does that when the device is not on the variant.  Combined with
  * the owner finding no U12 on the board, the conclusion is that THE BLUE EVB
- * DOES NOT CARRY THE NOR, and this driver has never had a device to talk to.
+ * Does not carry the nor, and this driver has never had a device to talk to.
  *
  * BUT IT DOES HAVE A TARGET: the lab also has the **Apollo510 EVB (green)**,
  * which carries U12 per its own schematic.  On THAT board the pins are the

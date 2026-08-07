@@ -63,7 +63,7 @@ void tiku_sched_init(void)
     sched_state = TIKU_SCHED_RUNNING;
 
     /*
-     * IDLE SLEEPS BY DEFAULT.  With no hook installed an idle scheduler spins
+     * Idle sleeps by default.  With no hook installed an idle scheduler spins
      * the core at full speed -- measured on an nRF54LM20-DK at 6.76 mA doing
      * nothing against 1.54 mA in WFI, a factor of 4.4 paid continuously by
      * every board that never calls "sleep".

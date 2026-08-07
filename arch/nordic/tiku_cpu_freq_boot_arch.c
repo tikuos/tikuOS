@@ -63,7 +63,7 @@ void tiku_cpu_boot_nordic_init(void)
     tiku_nordic_dwt_init();
 
     /*
-     * THIS IS THE ONLY MOMENT THE FREQUENCY MAY BE SET.  The datasheet is
+     * This is the only moment the frequency may be set.  The datasheet is
      * explicit (5.5.3): "The device starts at 64 MHz.  For 128 MHz, it must be
      * configured when the CPU starts and before any peripherals that use the
      * high-frequency clock are enabled.  Changing the frequency on a running
@@ -146,7 +146,7 @@ void tiku_cpu_boot_nordic_init(void)
 }
 
 /*
- * THE PERIPHERAL CLOCK IS NOT THE CORE CLOCK.  This returned the core rate,
+ * The peripheral clock is not the core clock.  This returned the core rate,
  * which was wrong on any reading: the HFCLK controller hands the core
  * HCLK128M (64 or 128 MHz) and hands peripherals PCLK32M / PCLK16M / PCLK1M
  * (datasheet table 16).  Nothing on this part runs peripherals at 128 MHz.

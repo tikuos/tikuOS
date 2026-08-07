@@ -41,7 +41,7 @@
  *
  * D+/D- are dedicated PHY pins, not GPIO, so there is no pad configuration to
  * get wrong.  What there IS to get wrong: TWO EXTERNAL SUPPLY RAILS MUST BE
- * SWITCHED ON BY GPIO, and the two boards disagree about which GPIOs (as with
+ * Switched on by GPIO, and the two boards disagree about which GPIOs (as with
  * the NOR reset pin and the eMMC reset pin).  Verified against both the BSP
  * and the Blue board's schematic, which agree here:
  *

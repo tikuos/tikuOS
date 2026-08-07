@@ -901,7 +901,7 @@ int main(void)
              * or scheduler shares the CPU this has to become an interrupt.
              */
             /*
-             * BOUNDED BY TIME, NOT BY ITERATIONS.  A million turns of this
+             * Bounded by time, NOT BY ITERATIONS.  A million turns of this
              * loop is about a tenth of a second at 240 MHz, while the host
              * takes seconds just to start asking -- so an iteration count
              * silently decides how much of the enumeration gets serviced,
@@ -1042,7 +1042,7 @@ int main(void)
     }
 
     /*
-     * NOTHING BELOW MAY WRITE THE STAGING WINDOW OR THE FLASH SLOT.  Both
+     * Nothing below may write the staging window or the flash slot.  Both
      * now hold a real model, restored above, and a probe that fills either
      * with a test pattern destroys it at every boot -- silently, because the
      * pattern verifies against itself perfectly.  Exercise the store through

@@ -177,7 +177,7 @@ static void axons_diff(void)
  * host.  This is the first point where the NPU is in the loop, and it is the only
  * thing that can show the engine accepts a command buffer patched at runtime.
  *
- * HOW THE SUBSTITUTION WORKS.  The vendor's harness state is global rather than
+ * How the substitution works.  The vendor's harness state is global rather than
  * static, so AxonnnModelPrepare() runs exactly as the baked path runs it --
  * populating the model pointer and the test vectors -- and only then is the model
  * pointer repointed at a RAM COPY of the descriptor whose cmd_buffer_ptr is the
@@ -285,7 +285,7 @@ static int axons_store_register_syms(void)
  * than its weights.  A model-free image cannot carry them either, so they are
  * packed into a companion .kat file (tools/axonpack.py --kat) and read here.
  *
- * DELIBERATELY A SEPARATE FILE, NOT A SECTION OF THE .axm.  These are the test
+ * Deliberately a separate file, NOT A SECTION OF THE .axm.  These are the test
  * harness's known answers, not part of the model: a product provisions the
  * model and never the vectors.  Keeping them apart is what lets the shipping
  * path be the small one.
@@ -725,7 +725,7 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
     if (argc >= 2 && (strcmp(argv[1], "busy") == 0 ||
                       strcmp(argv[1], "hold") == 0) && argc >= 3) {
         /*
-         * SUSTAINED STATES FOR A CONTROLLED POWER MEASUREMENT.
+         * Sustained states for a controlled power measurement.
          *
          * A single inference is ~200 ms and a single intrinsic ~50 us, so
          * neither can be averaged by an external instrument without a marker
