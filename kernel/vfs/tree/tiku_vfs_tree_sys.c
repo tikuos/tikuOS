@@ -256,6 +256,13 @@ mem_tiers_read(char *buf, size_t max)
     uint8_t i;
     int n;
 
+    /* The tier wires itself on first use, so on a board where nothing has
+     * allocated yet every stats call fails and this node reads back EMPTY --
+     * which looks like "no tiers" rather than "none used".  Init is idempotent
+     * and costs nothing once done, so ask for it here: reading capacity must
+     * not depend on somebody having spent some first. */
+    (void)tiku_tier_init();
+
     for (i = 0; i < (uint8_t)(sizeof(tiers) / sizeof(tiers[0])); i++) {
         if (tiku_tier_stats(tiers[i].t, &st) != TIKU_MEM_OK) {
             continue;

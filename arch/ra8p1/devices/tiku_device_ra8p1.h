@@ -92,6 +92,10 @@
 /* SRAM as the port uses it: 1664 KB from the base. */
 #define TIKU_DEVICE_RAM_START       TIKU_RA8P1_SRAM_BASE
 #define TIKU_DEVICE_RAM_SIZE        TIKU_RA8P1_SRAM_SIZE
+/* What the M85 may actually use.  The first 16 KB of the bank is the CPU1
+ * payload area (TIKU_CPU1_AREA_SIZE), which the M85 linker starts above, so
+ * counting the whole bank overstates this core's SRAM by that much. */
+#define TIKU_DEVICE_RAM_USABLE      (TIKU_RA8P1_SRAM_SIZE - (16UL * 1024UL))
 
 /*
  * The code MRAM: the image runs from it, `.persistent` lives in a carve at
