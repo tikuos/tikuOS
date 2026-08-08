@@ -264,6 +264,8 @@ unsigned long tiku_cpu_aclk_hz(void) {
     return tiku_cpu_ambiq_aclk_get_hz();
 #elif defined(PLATFORM_NORDIC)
     return tiku_cpu_nordic_aclk_get_hz();
+#elif defined(PLATFORM_RA8P1)
+    return tiku_cpu_ra8p1_aclk_get_hz();
 #else
     return 0;
 #endif

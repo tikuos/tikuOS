@@ -708,6 +708,13 @@ unsigned long tiku_cpu_ra8p1_iclk_get_hz(void)
                         RA8P1_SCKDIVCR_ICK_SHIFT);
 }
 
+unsigned long tiku_cpu_ra8p1_aclk_get_hz(void)
+{
+    /* The LOCO is this part's always-on low-speed source: it runs from reset,
+     * no rung change touches it, and the IWDT counts it divided by two. */
+    return RA8P1_IWDTCLK_HZ * 2UL;
+}
+
 unsigned long tiku_cpu_ra8p1_pclka_get_hz(void)
 {
     /* PCLKA and CPUCLK0 divide the SAME source, so recover that source from

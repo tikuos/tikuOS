@@ -74,6 +74,13 @@
 #    define TIKU_TFS_MIN_SLOTS  256
 #  elif defined(PLATFORM_NORDIC)
 #    define TIKU_TFS_MIN_SLOTS  192
+#  elif defined(PLATFORM_RA8P1)
+     /* The 464 KB carve splits into a 32 KB tier and a 432 KB store, which
+      * mounts as 106 slots of 4 KB; 96 is the guarantee that leaves margin.
+      * Falling to the 16 below would hold the floor -- and every build-time
+      * fit proof that asserts against it -- an order of magnitude under what
+      * the carve delivers. */
+#    define TIKU_TFS_MIN_SLOTS  96
 #  else
 #    define TIKU_TFS_MIN_SLOTS  16
 #  endif

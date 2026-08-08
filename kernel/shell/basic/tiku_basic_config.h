@@ -55,7 +55,8 @@
 #endif
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+    defined(PLATFORM_RA8P1)
 /* Nordic runs the BIG tier too (2026-07: it previously ran the middle FRAM
  * tier, an MSP430-class 96-line BASIC on Ambiq-class silicon).  The LM20's
  * tier arena lives in its own 256 KB SRAM bank (RAM2), so it takes the
@@ -132,6 +133,12 @@
       * tiku_basic_arena.inl checks the arena against the pool, and the one in
       * tiku_basic_ckpt.inl checks the two slots against the tail. */
 #    define TIKU_BASIC_PROGRAM_LINES 1400
+#  elif defined(PLATFORM_RA8P1)
+     /* SRAM is not the constraint here (1.6 MB), the /data store is: the saved
+      * program and its checkpoint both come out of the same 106 slots, so the
+      * BIG 1024 would spend a third of the store on one program.  512 keeps
+      * the same slots-per-program share RP2350 runs at. */
+#    define TIKU_BASIC_PROGRAM_LINES 512
 #  elif defined(TIKU_BASIC_TIER_HUGE)
 #    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 320 KB NVM save tail
                                              * (apollo510 carries a larger tail

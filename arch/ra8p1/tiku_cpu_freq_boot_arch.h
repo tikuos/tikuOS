@@ -113,6 +113,13 @@ void tiku_cpu_ra8p1_clock_probe(tiku_ra8p1_clock_t *out);
 unsigned long tiku_cpu_ra8p1_clock_get_hz(void);
 
 /**
+ * @brief Auxiliary low-speed clock rate in Hz -- the LOCO.
+ *
+ * @return 32768, which no rung change alters
+ */
+unsigned long tiku_cpu_ra8p1_aclk_get_hz(void);
+
+/**
  * @brief Peripheral clock A rate in Hz -- what the SCI baud divisor uses.
  *
  * @return The rate implied by SCKSCR and SCKDIVCR

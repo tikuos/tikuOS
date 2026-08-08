@@ -1202,10 +1202,9 @@ CFLAGS += -DTIKU_TIER_SRAM_SIZE=1572864   # 1.5 MB tier arena above the window
 else ifeq ($(TIKU_PLATFORM),ra8p1)
 
 # R7KA8P1KF: Cortex-M85 with Helium, the same ISA the ASR and LLM kernels are
-# written against on the M55 parts.  R2 runs the whole image out of SRAM: the
-# 1 MB of code MRAM is real non-volatile memory, but writing it is R6's
-# milestone, and a port that cannot yet erase safely should not be linking
-# against the region it would erase.
+# written against on the M55 parts.  The image links into the 1 MB of code
+# MRAM, which is byte-writable in place, so a reset re-enters the image
+# rather than the factory one.
 CFLAGS  = -mcpu=cortex-m85 -mthumb
 CFLAGS += -mfpu=auto -mfloat-abi=hard
 CFLAGS += -Os -Wall -Wextra -Wno-psabi
@@ -1215,6 +1214,10 @@ CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_RA8P1=1
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
+# Without this the tier falls back to its 128-byte default and every arena
+# request lands in NVM, which is where BASIC's ~10 KB ask goes when it reports
+# an out-of-memory the 1.6 MB of SRAM plainly covers.
+CFLAGS += -DTIKU_TIER_SRAM_SIZE=262144     # 256 KB of the 1.6 MB SRAM
 
 else
 
