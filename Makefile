@@ -1589,6 +1589,7 @@ SRCS += arch/ra8p1/tiku_crt_early.c
 SRCS += arch/ra8p1/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ra8p1/tiku_cpu_common.c
 SRCS += arch/ra8p1/tiku_uart_arch.c
+SRCS += arch/ra8p1/tiku_trng_arch.c
 SRCS += arch/ra8p1/tiku_gpio_arch.c
 # The tick joins the minimal build here and nowhere else: R2's whole claim is
 # that it counts at 128 Hz against a wall clock, and MINIMAL is the build with
@@ -1974,6 +1975,7 @@ SRCS += arch/ra8p1/tiku_crt_early.c
 SRCS += arch/ra8p1/tiku_cpu_common.c
 SRCS += arch/ra8p1/tiku_cpu_freq_boot_arch.c
 SRCS += arch/ra8p1/tiku_uart_arch.c
+SRCS += arch/ra8p1/tiku_trng_arch.c
 SRCS += arch/ra8p1/tiku_gpio_arch.c
 SRCS += arch/ra8p1/tiku_crit_arch.c
 SRCS += arch/ra8p1/tiku_timer_arch.c

@@ -27,6 +27,13 @@
 /* nRF54L CRACEN ring-oscillator TRNG (AES-conditioned). */
 #include <arch/nordic/tiku_trng_arch.h>
 #define TIKU_SHELL_TRNG_HAVE 1
+#elif defined(PLATFORM_RA8P1) && TIKU_KIT_CRYPTO_ENABLE
+/* Software source: the RSIP's generator is not reachable without the vendor
+ * library, so entropy comes from oscillator disagreement conditioned with
+ * SHA-256 -- hence the crypto-kit dependency, as on MSP430. */
+#define TIKU_SHELL_TRNG_HAVE 1
+#include <arch/ra8p1/tiku_trng_arch.h>
+
 #elif defined(PLATFORM_STM32N6)
 /* STM32N6 RNG block: ring oscillators, NIST-configured by reset default. */
 #include <arch/stm32n6/tiku_trng_arch.h>
