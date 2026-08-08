@@ -32,6 +32,7 @@ static const char *npu_err(int rc)
     case TIKU_RA8P1_NPU_ERR_FAULT:   return "parse or bus fault";
     case TIKU_RA8P1_NPU_ERR_MISMATCH: return "output differs";
     case TIKU_RA8P1_NPU_ERR_IMAGE:   return "no usable model";
+    case TIKU_RA8P1_NPU_ERR_ARENA:   return "model arena too large";
     default:                       return "unknown";
     }
 }

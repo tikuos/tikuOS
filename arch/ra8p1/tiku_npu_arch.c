@@ -284,8 +284,13 @@ uint16_t tiku_ra8p1_npu_shram_kb(void)
  * loaded model, so these only have to admit the largest one this build accepts
  * A store file therefore cannot size SRAM at run time.
  */
+/*
+ * Sized to admit a 512x512 max-pool and a yolo-class network; the arena a
+ * packed model asks for is its input plus its output.  It costs .bss on a
+ * part with SRAM to spare.
+ */
 #ifndef TIKU_NPU_ARENA_MAX
-#define TIKU_NPU_ARENA_MAX  98304u
+#define TIKU_NPU_ARENA_MAX  393216u
 #endif
 #ifndef TIKU_NPU_CMS_MAX
 #define TIKU_NPU_CMS_MAX    4096u
@@ -386,8 +391,10 @@ int tiku_ra8p1_npu_load(const char *name)
     if (npu_rd32(h + 24) != TIKU_REG32(RA8P1_NPU_CONFIG)) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;
     }
-    if (g.arena > sizeof npu_arena || g.cms_len > sizeof npu_cms ||
-        g.wts_len > sizeof npu_wts ||
+    if (g.arena > sizeof npu_arena) {
+        return TIKU_RA8P1_NPU_ERR_ARENA;
+    }
+    if (g.cms_len > sizeof npu_cms || g.wts_len > sizeof npu_wts ||
         m.len < NPU_ETH_HDR + g.cms_len + g.wts_len) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;
     }

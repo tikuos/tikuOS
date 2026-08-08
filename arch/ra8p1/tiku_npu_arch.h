@@ -79,6 +79,7 @@ extern volatile uint32_t tiku_ra8p1_npu_irq_count;
 #define TIKU_RA8P1_NPU_ERR_FAULT   -5   /**< parse error or bus fault       */
 #define TIKU_RA8P1_NPU_ERR_MISMATCH -6  /**< ran, but disagreed with the M85 */
 #define TIKU_RA8P1_NPU_ERR_IMAGE   -7   /**< no usable model in the store   */
+#define TIKU_RA8P1_NPU_ERR_ARENA   -8   /**< model arena exceeds the build */
 
 /**
  * @brief Run the built-in max-pool stream and check it against the M85.
