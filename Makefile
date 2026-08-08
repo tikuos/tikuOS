@@ -1963,6 +1963,10 @@ SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
 SRCS += arch/ra8p1/tiku_npu_arch.c
+SRCS += arch/ra8p1/tiku_npu_iface.c              # interfaces/npu backend
+SRCS += kernel/vfs/tree/tiku_vfs_tree_npu.c      # /sys/npu
+# Presence is a -D global so every translation unit resolves it identically.
+CFLAGS += -DTIKU_HAS_NPU=1
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_npu.c
 endif
