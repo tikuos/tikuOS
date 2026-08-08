@@ -58,6 +58,12 @@
 /* --- SRAM boundaries --- */
 extern char __datastart;    /* first byte of .data (SRAM base) */
 extern char _end;           /* past last byte of .bss          */
+#if defined(TIKU_TIER_SRAM_DERIVED)
+/* The SRAM tier is carved by the linker, not declared in .bss, so _end does
+ * not account for it and the leftover below would report it as free. */
+extern char __tier_sram_start;
+extern char __tier_sram_end;
+#endif
 extern char __stack;        /* top of SRAM (stack origin)      */
 
 /* --- FRAM boundaries --- */
@@ -214,6 +220,14 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5lu total\n",
                  (unsigned long)sram_total);
     SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
+#if defined(TIKU_TIER_SRAM_DERIVED)
+    {
+        unsigned long tier_span = (unsigned long)
+            ((uintptr_t)&__tier_sram_end - (uintptr_t)&__tier_sram_start);
+        SHELL_PRINTF("  tier arena  %5lu\n", tier_span);
+        sram_static += tier_span;
+    }
+#endif
     /* What's left of SRAM after static data: hosts the stack and any
      * future heap. Not "reserved" in any protective sense — it's the
      * available pool. Stack-now / free-now under "Runtime" below

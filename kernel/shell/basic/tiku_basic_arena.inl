@@ -121,8 +121,16 @@
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_HIFRAM_SIZE,
                "BASIC arena does not fit the HIFRAM tier pool -- raise "
                "TIKU_TIER_HIFRAM_SIZE or lower TIKU_BASIC_PROGRAM_LINES");
-#elif defined(PLATFORM_NORDIC) || defined(PLATFORM_AMBIQ) || \
-      defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6)
+#elif defined(TIKU_TIER_SRAM_DERIVED)
+/* The SRAM tier is linker-derived on these parts, so there is no compile-time
+ * size to compare against.  The floor stands in for it, and the MCU's linker
+ * script asserts the carved span against the same figure; the two are separate
+ * literals, so a change to one needs the other. */
+_Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_MIN,
+               "BASIC arena does not fit the SRAM tier floor -- raise "
+               "TIKU_TIER_SRAM_MIN for this MCU in the Makefile, or lower "
+               "TIKU_BASIC_PROGRAM_LINES");
+#elif defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_SIZE,
                "BASIC arena does not fit the SRAM tier pool -- raise "
                "TIKU_TIER_SRAM_SIZE for this MCU in the Makefile, or lower "

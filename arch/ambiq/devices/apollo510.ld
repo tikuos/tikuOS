@@ -231,7 +231,35 @@ SECTIONS
     {
         KEEP(*(.resource_table))
         *(.shared*)
+        . = ALIGN(32);
+        __ssram_top = .;
     } > SSRAM
+
+    /*
+     * SRAM TIER -- the rest of the shared bank, less a small reserve.
+     *
+     * Derived rather than compiled in, for the reason the RA8P1 script gives:
+     * a constant has to be chosen per build configuration and silently stops
+     * matching the moment a .ssram buffer is added.  Placed after .shared so
+     * it clears every other tenant of the bank, including the WARM grade that
+     * sits past __ssram_end on this part.
+     *
+     * Being outside .ssram also keeps it out of the crt's zero loop
+     * (__ssram_start..__ssram_end), which the allocator has never needed --
+     * it does not promise zeroed memory.
+     */
+    /* Overridable so a link-contract test can squeeze the span from the top
+     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
+     * is required -- a bare --defsym symbol is not in scope for a script
+     * expression and errors out as undefined. */
+    TIKU_SSRAM_RESERVE = DEFINED(__tier_reserve_override)
+                       ? __tier_reserve_override : 32K;
+    __tier_sram_start = __ssram_top;
+    __tier_sram_end   = ORIGIN(SSRAM) + LENGTH(SSRAM) - TIKU_SSRAM_RESERVE;
+
+    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
+    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x50000,
+           "ERROR: Apollo SSRAM tier fell below its 320 KB floor -- a .ssram buffer grew into it")
 
     /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
     /* The MPU reserves 32 KB of stack budget + a 4 KB no-access guard below

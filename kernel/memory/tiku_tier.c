@@ -70,15 +70,7 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  * TIKU_TIER_SRAM_SIZE (default 128 bytes). tiku_tier_init() points
  * tier_state[TIKU_MEM_SRAM].buf at this array.
  */
-#if defined(PLATFORM_AMBIQ)
-/* Apollo510: the SRAM tier (large, volatile) lives in the 3 MB shared SRAM
- * (.ssram, powered + zeroed in tiku_crt_early.c), keeping the 512 KB DTCM for
- * hot data + stack. SSRAM is cacheable so access is fast in the common case;
- * the region table classifies it SRAM so the tier's sub-arenas validate. */
-static uint8_t __attribute__((section(".ssram"),
-                              aligned(TIKU_MEM_ARCH_ALIGNMENT)))
-    tier_sram_buf[TIKU_TIER_SRAM_SIZE];
-#elif defined(PLATFORM_STM32N6)
+#if defined(PLATFORM_STM32N6)
 /* STM32N6: the boot ROM copies the image into a 255 KB window part-way up the
  * AXI SRAM array, so the tier lives in .axisram -- the 2 MB above that window,
  * woken and zeroed in tiku_crt_early.c.  Same pattern as Ambiq's .ssram: the
@@ -96,9 +88,24 @@ static uint8_t __attribute__((section(".axisram"),
 static uint8_t __attribute__((section(".ram2"),
                               aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_sram_buf[TIKU_TIER_SRAM_SIZE];
+#elif defined(TIKU_TIER_SRAM_DERIVED)
+/* RA8P1, Apollo and RP2350: the linker carves the span from whatever .bss or
+ * .ssram left over, less a fixed reserve.  No array, so no size to keep in
+ * step with the build configuration, and nothing for the crt to zero -- the
+ * allocator does not promise zeroed memory. */
+extern uint8_t __tier_sram_start;
+extern uint8_t __tier_sram_end;
+#define TIER_SRAM_BUF  (&__tier_sram_start)
+#define TIER_SRAM_CAP  ((tiku_mem_arch_size_t)(&__tier_sram_end - \
+                                               &__tier_sram_start))
 #else
 static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_sram_buf[TIKU_TIER_SRAM_SIZE];
+#endif
+
+#ifndef TIER_SRAM_BUF
+#define TIER_SRAM_BUF  (tier_sram_buf)
+#define TIER_SRAM_CAP  ((tiku_mem_arch_size_t)TIKU_TIER_SRAM_SIZE)
 #endif
 
 /**
@@ -221,6 +228,24 @@ tiku_mem_err_t tiku_tier_detach_psram(int force)
         return TIKU_MEM_ERR_INVALID;    /* live allocations would be stranded */
     }
     tier_state[TIKU_MEM_PSRAM].initialized = 0;
+#if defined(TIKU_TIER_POISON)
+    /*
+     * On the parts whose tier the linker carves, the span sits outside the
+     * crt's zero loop, so its contents are whatever the last boot left.  The
+     * allocator does not promise zeroed memory: tiku_arena_alloc() has no
+     * memset and the NVM tier backing is documented unzeroed.  Filling with a
+     * value no caller could mistake for zero makes a caller that reads before
+     * it writes fail here rather than in the field.
+     */
+    {
+        size_t pi;
+        uint8_t *pb = TIER_SRAM_BUF;
+        for (pi = 0; pi < (size_t)TIER_SRAM_CAP; pi++) {
+            pb[pi] = 0xA5u;
+        }
+    }
+#endif
+
     tier_state[TIKU_MEM_PSRAM].buf         = NULL;
     tier_state[TIKU_MEM_PSRAM].capacity    = 0;
     tier_state[TIKU_MEM_PSRAM].offset      = 0;
@@ -237,8 +262,8 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_PSRAM].capacity    = 0;
     tier_state[TIKU_MEM_PSRAM].offset      = 0;
 
-    tier_state[TIKU_MEM_SRAM].buf         = tier_sram_buf;
-    tier_state[TIKU_MEM_SRAM].capacity    = TIKU_TIER_SRAM_SIZE;
+    tier_state[TIKU_MEM_SRAM].buf         = TIER_SRAM_BUF;
+    tier_state[TIKU_MEM_SRAM].capacity    = TIER_SRAM_CAP;
     tier_state[TIKU_MEM_SRAM].offset      = 0;
     tier_state[TIKU_MEM_SRAM].peak        = 0;
     tier_state[TIKU_MEM_SRAM].alloc_count = 0;

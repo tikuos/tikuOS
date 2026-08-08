@@ -999,12 +999,18 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # in the part's 520 KB SRAM. Gated on BASIC so non-BASIC builds keep the lean
 # default. A _Static_assert in tiku_basic_arena.inl now checks the two numbers
 # against each other at build time.
+# The tier is now carved by the linker from what .bss left over (rp2350.ld),
+# so the sizes this block used to pick per configuration are gone: the TLS and
+# cyw43 buffers are statics and get placed first, which is exactly what the
+# 128 KB HAS_TLS case was hand-computing.  What remains is the guaranteed
+# minimum, which must cover BASIC_ARENA_BYTES at the configured line count.
+TIKU_TIER_SRAM_MIN ?= 262144
+# Keep in step with the ASSERT in rp2350.ld, which checks the carved span
+# against the same figure; --defsym is not visible to a script expression.
+CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifeq ($(HAS_TLS),1)
-# HTTPS (HAS_TLS) adds the cert-TLS client's static buffers to .bss; trim the
-# BASIC tier to 128 KB so the cyw43 bring-up + stack keep their SRAM (the
-# 117 KB 512-line arena still fits, with 13.6 KB spare).
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=131072    # 128 KB: arena + TLS .bss + radio
 # TLS server flights are multi-KB; the lean 512 B TCP receive window turns
 # each one into fragile 512-byte stop-and-wait (a lost window-update ACK
 # stalls the handshake).  Widen the window so a flight streams in a couple of
@@ -1046,13 +1052,21 @@ CFLAGS += -DPLATFORM_AMBIQ=1
 # including BASIC's program arena (a 2048-line program needs ~195 KB). The mem
 # size type is 32-bit here (arch/ambiq/tiku_mem_arch.h), so multi-hundred-KB
 # tiers are fine.
-ifeq ($(MCU),apollo4p)
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=1703936   # 1.625 MB tier in the Plus's 2 MB SSRAM (4 MB MPU window; +~182 KB other .ssram still fits, ~206 KB spare)
-else ifeq ($(MCU),apollo4l)
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=524288    # 512 KB of the Lite's 1 MB mapped SSRAM
+# The tier is linker-derived, so this is the guaranteed minimum, not the size.
+# It must cover BASIC_ARENA_BYTES, which differs by part because the BASIC
+# capacity profile does; the 510 asks for more than the 4-series.
+ifeq ($(MCU),apollo510)
+TIKU_TIER_SRAM_MIN ?= 327680
+else ifeq ($(MCU),apollo510b)
+TIKU_TIER_SRAM_MIN ?= 327680
 else
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=1048576   # 1 MB of the 3 MB SSRAM (Apollo510)
+TIKU_TIER_SRAM_MIN ?= 262144
 endif
+# Keep in step with the ASSERT in this MCU's linker script, which checks the
+# carved span against the same figure; --defsym is not visible to a script
+# expression, so the number lives in two files.
+CFLAGS  += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS  += -DTIKU_TIER_SRAM_DERIVED=1
 CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
 # HTTPS over TCP on Ambiq -- two coupled fixes:
 # (1) BUF_PERSIST=0: put the RX ring + TX pool in regular ZERO-INITIALISED .bss,
@@ -1212,12 +1226,22 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -D$(DEVICE_DEFINE)=1
 CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DPLATFORM_RA8P1=1
+# The software entropy source conditions with SHA-256, so the crypto kit is
+# part of this platform rather than an opt-in: without it `trng` reports no
+# source and cert-TLS has no seed, which is not a choice worth offering on a
+# part whose hardware generator sits behind an unpublished vendor library.
+TIKU_KIT_CRYPTO_ENABLE := 1
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
-# Without this the tier falls back to its 128-byte default and every arena
-# request lands in NVM, which is where BASIC's ~10 KB ask goes when it reports
-# an out-of-memory the 1.6 MB of SRAM plainly covers.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=262144     # 256 KB of the 1.6 MB SRAM
+# The SRAM tier is carved by the linker from what .bss left over, so there is
+# no size on this line -- only the floor the BASIC arena is asserted against,
+# which r7ka8p1kf.ld also asserts the derived span never falls below.
+TIKU_TIER_SRAM_MIN ?= 262144
+# Keep in step with the ASSERT in this MCU's linker script, which checks the
+# carved span against the same figure; --defsym is not visible to a script
+# expression, so the number lives in two files.
+CFLAGS  += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS  += -DTIKU_TIER_SRAM_DERIVED=1
 
 else
 

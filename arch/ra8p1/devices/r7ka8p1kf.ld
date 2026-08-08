@@ -165,6 +165,41 @@ SECTIONS
     __end__ = .;
     PROVIDE(__heap_start = .);
 
+    /*
+     * SRAM TIER -- everything the statics did not take, less a fixed headroom.
+     *
+     * The tier is the only runtime way a program claims SRAM, so its size is
+     * derived here rather than compiled in: a constant would have to be picked
+     * per build configuration, because .bss differs by hundreds of KB between
+     * an NPU build and a default one, and whatever number was chosen would
+     * silently stop matching the moment a static buffer was added.
+     *
+     * Deriving it also keeps the span out of .bss, so the crt never zeroes it
+     * -- the allocator does not promise zeroed memory (tiku_arena_alloc has no
+     * memset) and at MOCO speeds zeroing a megabyte costs real boot time.
+     *
+     * TIKU_SRAM_HEADROOM is a small unallocated margin below the stack
+     * budget, not a growth area for statics: those land in .bss below the
+     * tier and shrink it rather than reaching here.  Nothing is placed in it,
+     * so it is kept to the smallest figure that still separates the tier from
+     * the stack's own reserve; the tier takes everything else.
+     */
+    /* Overridable so a link-contract test can squeeze the span from the top
+     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
+     * is required -- a bare --defsym symbol is not in scope for a script
+     * expression and errors out as undefined. */
+    TIKU_SRAM_HEADROOM = DEFINED(__tier_reserve_override)
+                       ? __tier_reserve_override : 32K;
+    __tier_sram_start = ALIGN(32);
+    __tier_sram_end   = __stack - 0x8000 - TIKU_SRAM_HEADROOM;
+
+    /* Keep the floor the BASIC arena is asserted against (TIKU_TIER_SRAM_MIN
+     * on the make line).  Without this a large enough .bss would shrink the
+     * tier below what BASIC carves and the failure would land at run time. */
+    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
+    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
+           "ERROR: RA8P1 SRAM tier fell below its 256 KB floor -- .bss grew into it; shrink a static buffer or lower TIKU_SRAM_HEADROOM")
+
     /* SRAM headroom: the stack budget the MPU actually programs
      * (MPU_STACK_RESERVED_BYTES 32 KB + MPU_STACK_GUARD_BYTES 4 KB in
      * tiku_mpu_arch.c) must fit above the statics, so the figure below tracks

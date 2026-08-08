@@ -248,6 +248,33 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
+    /*
+     * SRAM TIER -- what .bss left over, less a small reserve.
+     *
+     * Derived rather than compiled in.  A compiled-in size has to be chosen
+     * per build configuration by hand-computing what the cert-TLS and cyw43
+     * statics take; those are statics, so the linker places them first and
+     * the remainder is the answer.
+     *
+     * 0x9000, not 0x8000: the guard here sits below the 32 KB stack reserve
+     * (mpu_stack_guard_base() in tiku_mpu_arch.c subtracts both), unlike the
+     * RA8P1 where it is inside.  Using the wrong one parks the tier on the
+     * guard.  Being outside .bss also keeps the span out of the crt's zero
+     * loop, which the allocator has never needed.
+     */
+    /* Overridable so a link-contract test can squeeze the span from the top
+     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
+     * is required -- a bare --defsym symbol is not in scope for a script
+     * expression and errors out as undefined. */
+    TIKU_SRAM_HEADROOM = DEFINED(__tier_reserve_override)
+                       ? __tier_reserve_override : 32K;
+    __tier_sram_start = ALIGN(32);
+    __tier_sram_end   = __stack - 0x9000 - TIKU_SRAM_HEADROOM;
+
+    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
+    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
+           "ERROR: RP2350 SRAM tier fell below its 256 KB floor -- .bss grew into it")
+
     /* Sanity check: static data must clear the MPU's stack + guard reservation.
      * The ARMv8-M MPU (arch/arm-rp2350/tiku_mpu_arch.c) carves the top
      * MPU_STACK_RESERVED_BYTES (32 KB) for the descending stack plus a
