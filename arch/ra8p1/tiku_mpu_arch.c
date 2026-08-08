@@ -24,6 +24,7 @@
 extern uint32_t __vectors_start;
 extern uint32_t _etext;
 extern uint32_t __data_start;
+extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t __stack;
 extern uint32_t __tiku_nvmfs_base;
@@ -33,12 +34,13 @@ extern uint32_t __tiku_nvm_mram_end;
  * @brief Region indices.  Non-overlapping: overlap is implementation-defined.
  */
 #define MPU_RGN_TEXT        0U   /* MRAM vectors + text + rodata: RO, exec  */
-#define MPU_RGN_DATA        1U   /* data + bss + warm survivors: RW, XN     */
+#define MPU_RGN_DATA        1U   /* data + bss: RW, XN, cacheable           */
 #define MPU_RGN_NVM         2U   /* MRAM durable carve: RO outside the window */
 #define MPU_RGN_FREE        3U   /* SRAM above .uninit up to the guard      */
 #define MPU_RGN_GUARD       4U   /* RO trap under the stack                 */
 #define MPU_RGN_STACK       5U   /* the live stack                          */
-#define MPU_RGN_COUNT       6U
+#define MPU_RGN_WARM        6U   /* .uninit: RW, XN, non-cacheable          */
+#define MPU_RGN_COUNT       7U
 
 /*
  * Stack budget and guard width: a 32-byte guard is LEAPT by a KB-sized frame
@@ -166,11 +168,10 @@ void tiku_mpu_arch_init_segments(void)
      * keeps a stray store from rewriting the program image. */
     mpu_region(MPU_RGN_TEXT, (uintptr_t)&__vectors_start, (uintptr_t)&_etext,
                RA8P1_MPU_RBAR_AP_RO, 0, RA8P1_MPU_ATTR_NORMAL);
-    /* One SRAM span: .data, .bss, .uninit and the WARM survivors.  No durable
-     * data lives in SRAM, and WARM must stay writable -- callers write it
-     * unbracketed by design. */
+    /* .data and .bss: ordinary cacheable SRAM.  This stops at __uninit_start
+     * so the warm survivors can carry different attributes below. */
     mpu_region(MPU_RGN_DATA, (uintptr_t)&__data_start,
-               (uintptr_t)&__uninit_end,
+               (uintptr_t)&__uninit_start,
                RA8P1_MPU_RBAR_AP_RW, 1, RA8P1_MPU_ATTR_NORMAL);
     mpu_nvm_ap(RA8P1_MPU_RBAR_AP_RO);
     mpu_region(MPU_RGN_FREE, (uintptr_t)&__uninit_end, guard_base(),
@@ -181,6 +182,15 @@ void tiku_mpu_arch_init_segments(void)
     mpu_region(MPU_RGN_STACK, guard_base() + MPU_STACK_GUARD_BYTES,
                (uintptr_t)&__stack, RA8P1_MPU_RBAR_AP_RW, 1,
                RA8P1_MPU_ATTR_NORMAL);
+    /* .uninit and the WARM survivors, non-cacheable.  A reset discards dirty
+     * lines, so cached warm state reaches SRAM only once something happens to
+     * evict it, so the newest writes are the ones lost.  The grade promises
+     * survival, so the attribute belongs here rather than in a cache
+     * maintenance call every writer would have to remember.  It stays
+     * writable and unbracketed: tiku_hang_boot_init() stores here at boot. */
+    mpu_region(MPU_RGN_WARM, (uintptr_t)&__uninit_start,
+               (uintptr_t)&__uninit_end, RA8P1_MPU_RBAR_AP_RW, 1,
+               RA8P1_MPU_ATTR_NORMAL_NC);
 
     /* PRIVDEFENA keeps the default map alive underneath, so peripherals and
      * MRAM stay reachable without a region each.  HFNMIENA is deliberately
