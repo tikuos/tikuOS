@@ -75,10 +75,12 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_NPU
-/* Every RA8P1 carries the Ethos-U55, so this follows the platform rather than
- * a driver opt-in.  PLATFORM_RA8P1 is a -D from the Makefile, so it resolves
- * the same way in every translation unit regardless of include order. */
-#if defined(PLATFORM_RA8P1)
+/* Follows the driver opt-in, not the platform: every RA8P1 carries the
+ * Ethos-U55, but its static buffers are the largest .bss on the part and a
+ * build that never loads a model should not carry them.  TIKU_HAS_NPU is a -D
+ * from the Makefile, so it resolves the same way in every translation unit
+ * regardless of include order. */
+#if (TIKU_HAS_NPU + 0)
 #define TIKU_SHELL_CMD_NPU     1  /**< npu     - the RA8P1 Ethos-U55 */
 #else
 #define TIKU_SHELL_CMD_NPU     0

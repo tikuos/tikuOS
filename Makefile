@@ -337,6 +337,14 @@ TIKU_DRV_USBHS_ENABLE.)
 endif
 endif
 
+ifeq ($(TIKU_NPU_ENABLE),1)
+ifneq ($(TIKU_PLATFORM),ra8p1)
+$(error TIKU_NPU_ENABLE=1 requires a part with the Ethos-U55 (currently \
+MCU=$(MCU)). RA8P1 is the only one in this tree; elsewhere the flag would be \
+silently ignored and the build would claim an accelerator it has not got.)
+endif
+endif
+
 ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
 ifeq ($(call board_has,EMMC),)
 $(error TIKU_DRV_EMMC_ENABLE=1 requires a board with an eMMC fitted \
@@ -1986,6 +1994,10 @@ SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+# Opt-in: the driver's buffers are static, and at the ceiling a real network
+# needs they are the largest .bss on the part.  A build that never loads a
+# model should not carry them.
+ifeq ($(TIKU_NPU_ENABLE),1)
 SRCS += arch/ra8p1/tiku_npu_arch.c
 SRCS += arch/ra8p1/tiku_npu_iface.c              # interfaces/npu backend
 SRCS += kernel/vfs/tree/tiku_vfs_tree_npu.c      # /sys/npu
