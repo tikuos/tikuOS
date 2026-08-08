@@ -254,19 +254,21 @@ void tiku_uart_overrun_reset(void)
     uart_overruns = 0U;
 }
 
-/** @brief Emit an unsigned value in the given base, no padding. */
-static void uart_num(unsigned long v, unsigned base, int upper)
+/** @brief Emit an unsigned value in the given base, padded to @p width. */
+static void uart_num(unsigned long v, unsigned base, int upper,
+                     unsigned width, char pad)
 {
     char buf[24];
     int n = 0;
 
-    if (v == 0UL) { tiku_uart_putc('0'); return; }
+    if (v == 0UL) { buf[n++] = '0'; }
     while (v != 0UL && n < (int)sizeof buf) {
         unsigned d = (unsigned)(v % base);
         buf[n++] = (char)(d < 10U ? ('0' + d)
                                   : ((upper ? 'A' : 'a') + (d - 10U)));
         v /= base;
     }
+    while (width > (unsigned)n) { tiku_uart_putc(pad); width--; }
     while (n-- > 0) { tiku_uart_putc(buf[n]); }
 }
 
@@ -283,6 +285,17 @@ void tiku_uart_printf(const char *fmt, ...)
             continue;
         }
         fmt++;
+        /* Flags and width come before the conversion.  Skipping them leaves
+         * "%02u" unmatched, and an unmatched conversion prints its specifier
+         * without consuming its argument -- every later %s then reads one
+         * argument early and dereferences an integer. */
+        unsigned width = 0U;
+        char     pad   = ' ';
+        if (*fmt == '0') { pad = '0'; fmt++; }
+        while (*fmt >= '0' && *fmt <= '9') {
+            width = (width * 10U) + (unsigned)(*fmt - '0');
+            fmt++;
+        }
         int is_long = 0;
         while (*fmt == 'l') { is_long = 1; fmt++; }
         switch (*fmt) {
@@ -290,17 +303,19 @@ void tiku_uart_printf(const char *fmt, ...)
         case 'c': tiku_uart_putc((char)va_arg(ap, int)); break;
         case 'u':
             uart_num(is_long ? va_arg(ap, unsigned long)
-                             : (unsigned long)va_arg(ap, unsigned int), 10U, 0);
+                             : (unsigned long)va_arg(ap, unsigned int), 10U, 0,
+                     width, pad);
             break;
         case 'd': {
             long v = is_long ? va_arg(ap, long) : (long)va_arg(ap, int);
-            if (v < 0) { tiku_uart_putc('-'); v = -v; }
-            uart_num((unsigned long)v, 10U, 0);
+            if (v < 0) { tiku_uart_putc('-'); v = -v; width -= (width != 0U); }
+            uart_num((unsigned long)v, 10U, 0, width, pad);
             break;
         }
         case 'x':
             uart_num(is_long ? va_arg(ap, unsigned long)
-                             : (unsigned long)va_arg(ap, unsigned int), 16U, 0);
+                             : (unsigned long)va_arg(ap, unsigned int), 16U, 0,
+                     width, pad);
             break;
         case '%': tiku_uart_putc('%'); break;
         default:  tiku_uart_putc('%'); tiku_uart_putc(*fmt); break;
