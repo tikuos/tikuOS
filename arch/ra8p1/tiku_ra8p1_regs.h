@@ -838,6 +838,7 @@
 #define RA8P1_ICU_SLOT_DMAC0    3U
 #define RA8P1_ICU_SLOT_USBHS    4U
 #define RA8P1_ICU_SLOT_IPC      5U
+#define RA8P1_ICU_SLOT_NPU      6U
 
 /** @brief Event numbers this port links (UM Table 14.5). */
 #define RA8P1_EVENT_SCI8_RXI    0x2FCUL
@@ -1087,5 +1088,113 @@
 #define RA8P1_SCB_AIRCR         0xE000ED0CUL
 #define RA8P1_AIRCR_VECTKEY     0x05FA0000UL
 #define RA8P1_AIRCR_SYSRESETREQ (1UL << 2)
+
+/*---------------------------------------------------------------------------*/
+/* Ethos-U55 NPU (UM ch.19, and the Arm TRM the chapter defers to)           */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * UM Table 19.1 gives the specification and then points at the Arm TRM for the
+ * registers, so the offsets below are the TRM's, read back off the part rather
+ * than transcribed: ID and CONFIG are the two this port has confirmed.
+ *
+ * The domain is power-gated AND module-stopped out of reset, so every register
+ * here reads 0 until both are released, in the order UM 11.5.1 states.  That
+ * ordering is the whole of the bring-up: the module-stop bit must not move
+ * before the domain is powered (UM 11.2.6, MSTPA16 note 3).
+ */
+
+/** @brief NPUCBI, the NPU's 4 KB register window (UM Table, peripheral map). */
+#define RA8P1_NPU_BASE          0x40140000UL
+
+#define RA8P1_NPU_ID            (RA8P1_NPU_BASE + 0x000UL)
+#define RA8P1_NPU_STATUS        (RA8P1_NPU_BASE + 0x004UL)
+#define RA8P1_NPU_CMD           (RA8P1_NPU_BASE + 0x008UL)
+#define RA8P1_NPU_RESET         (RA8P1_NPU_BASE + 0x00CUL)
+#define RA8P1_NPU_QBASE         (RA8P1_NPU_BASE + 0x010UL)
+#define RA8P1_NPU_QREAD         (RA8P1_NPU_BASE + 0x018UL)
+#define RA8P1_NPU_QCONFIG       (RA8P1_NPU_BASE + 0x01CUL)
+#define RA8P1_NPU_QSIZE         (RA8P1_NPU_BASE + 0x020UL)
+#define RA8P1_NPU_PROT          (RA8P1_NPU_BASE + 0x024UL)
+#define RA8P1_NPU_CONFIG        (RA8P1_NPU_BASE + 0x028UL)
+
+/** @brief What a released NPU answers on this die; 0 means still gated. */
+#define RA8P1_NPU_ID_EXPECT     0x10104201UL
+
+/*
+ * CONFIG.macs_per_cc is a log2, so 8 means 256 MACs per cycle -- which is the
+ * count UM Table 19.1 states independently, and the pair agreeing is what
+ * confirms the window is the NPU rather than an aliased read.  The same 256
+ * picks Vela's accelerator configuration, so a wrong value here would compile
+ * a command stream the hardware cannot execute.
+ */
+#define RA8P1_NPU_CONFIG_MACS_SHIFT  0U
+#define RA8P1_NPU_CONFIG_MACS_MASK   0xFUL
+#define RA8P1_NPU_CONFIG_SHRAM_SHIFT 8U
+#define RA8P1_NPU_CONFIG_SHRAM_MASK  0xFFUL
+
+/** @brief Power gating for the NPU domain (UM 11.2.15); PDDE is inverted --
+ *         0 powers the domain ON.  Resets to 0x81: gated and held off. */
+#define RA8P1_PDCTRNPU          (RA8P1_SYSC_BASE + 0x114UL)   /* 8-bit */
+#define RA8P1_PDCTRNPU_PDDE     (1U << 0)   /* 1 = power OFF the domain    */
+#define RA8P1_PDCTRNPU_PDCSF    (1U << 6)   /* gating control in progress  */
+#define RA8P1_PDCTRNPU_PDPGSF   (1U << 7)   /* 1 = domain is gated off     */
+
+/** @brief MSTPCRA gates the NPU module itself (UM 11.2.6, MSTPA16).  Bits
+ *         21:17 read as 1 and must be written back as 1. */
+#define RA8P1_MSTPCRA           (RA8P1_MSTP_BASE + 0x00UL)
+#define RA8P1_MSTPA_NPU         (1UL << 16)
+
+/*
+ * AXI limits and region configuration.  The block powers up with these at
+ * zero, which encodes ONE outstanding read and ONE outstanding write, and a
+ * stream submitted against that faults its first data access rather than
+ * running slowly.  The Arm core driver's defaults are 32 outstanding reads
+ * and 16 writes, each stored minus one.
+ */
+#define RA8P1_NPU_AXI_LIMIT     0x0F1F0000UL
+/* Every region and the command queue on limit set 0.  The core driver's
+ * defaults spread them across sets 1-3, which reach the NPU's second AXI
+ * master -- the port wired to external flash here, and the wrong one for a
+ * model Vela laid out entirely in SRAM. */
+#define RA8P1_NPU_REGIONCFG_DEFAULT 0x00000000UL
+#define RA8P1_NPU_QCONFIG_DEFAULT   0UL
+#define RA8P1_NPU_AXI_LIMIT0    (RA8P1_NPU_BASE + 0x040UL)
+#define RA8P1_NPU_AXI_LIMIT1    (RA8P1_NPU_BASE + 0x044UL)
+#define RA8P1_NPU_AXI_LIMIT2    (RA8P1_NPU_BASE + 0x048UL)
+#define RA8P1_NPU_AXI_LIMIT3    (RA8P1_NPU_BASE + 0x04CUL)
+
+/** @brief ICU event for NPU_IRQ, to be routed to an NVIC line (UM ch.13). */
+#define RA8P1_ICU_EVENT_NPU_IRQ 0x067U
+
+/** @brief MOCO control (UM 9.2.18).  Power gating requires the MOCO to be
+ *         running, which is why the NPU bring-up reads it first. */
+#define RA8P1_MOCOCR            (RA8P1_SYSC_BASE + 0x038UL)   /* 8-bit */
+#define RA8P1_MOCOCR_MCSTP      (1U << 0)   /* 1 = MOCO stopped */
+
+/*
+ * Ethos-U55 CMD and STATUS, as far as this port relies on them.  The command
+ * stream itself is N2's business; N1 needs only the interrupt acknowledge.
+ */
+#define RA8P1_NPU_RESET_CPL     (1UL << 0)   /* 1 = privileged        */
+#define RA8P1_NPU_RESET_CSL     (1UL << 1)   /* 1 = non-secure        */
+#define RA8P1_NPU_STATUS_RESET  (1UL << 3)   /* reset in progress     */
+
+#define RA8P1_NPU_CMD_RUN       (1UL << 0)
+#define RA8P1_NPU_CMD_CLEAR_IRQ (1UL << 1)
+#define RA8P1_NPU_CMD_CLK_Q_EN  (1UL << 2)
+#define RA8P1_NPU_CMD_PWR_Q_EN  (1UL << 3)
+#define RA8P1_NPU_CMD_STOP_REQ  (1UL << 4)
+
+#define RA8P1_NPU_STATUS_STATE  (1UL << 0)   /* 1 = running          */
+#define RA8P1_NPU_STATUS_IRQ    (1UL << 1)
+#define RA8P1_NPU_STATUS_BUSERR (1UL << 2)
+#define RA8P1_NPU_STATUS_PARSE  (1UL << 4)   /* command parse error  */
+#define RA8P1_NPU_STATUS_END    (1UL << 5)   /* command end reached  */
+
+/* Queue and region base pointers; each base is a 64-bit pair. */
+#define RA8P1_NPU_QBASE_HI      (RA8P1_NPU_BASE + 0x014UL)
+#define RA8P1_NPU_QREGIONCFG    (RA8P1_NPU_BASE + 0x03CUL)
+#define RA8P1_NPU_BASEP(n)      (RA8P1_NPU_BASE + 0x080UL + (8UL * (n)))
 
 #endif /* TIKU_RA8P1_REGS_H_ */

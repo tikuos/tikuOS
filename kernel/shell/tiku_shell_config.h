@@ -74,6 +74,16 @@
 #define TIKU_SHELL_CMD_CPU1    0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_NPU
+/* Every RA8P1 carries the Ethos-U55, so this follows the platform rather than
+ * a driver opt-in.  PLATFORM_RA8P1 is a -D from the Makefile, so it resolves
+ * the same way in every translation unit regardless of include order. */
+#if defined(PLATFORM_RA8P1)
+#define TIKU_SHELL_CMD_NPU     1  /**< npu     - the RA8P1 Ethos-U55 */
+#else
+#define TIKU_SHELL_CMD_NPU     0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_TRNG
 #define TIKU_SHELL_CMD_TRNG    1  /**< trng    - Dump hardware TRNG bytes */
 #endif

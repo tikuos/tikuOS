@@ -92,6 +92,7 @@ void tiku_ra8p1_gpt0_ccmpa_handler(void)  __attribute__((weak, alias("ra8p1_defa
 void tiku_ra8p1_dmac0_handler(void)       __attribute__((weak, alias("ra8p1_default_handler")));
 void tiku_ra8p1_ipc_handler(void)         __attribute__((weak, alias("ra8p1_default_handler")));
 void tiku_ra8p1_usbhs_handler(void)       __attribute__((weak, alias("ra8p1_default_handler")));
+void tiku_ra8p1_npu_handler(void)         __attribute__((weak, alias("ra8p1_default_handler")));
 
 void tiku_ra8p1_startup(void);
 
@@ -180,7 +181,8 @@ const ra8p1_isr_t tiku_ra8p1_vectors[] = {
     tiku_ra8p1_dmac0_handler,
     tiku_ra8p1_usbhs_handler,
     tiku_ra8p1_ipc_handler,
-    DFL4, DFL4,
+    tiku_ra8p1_npu_handler,
+    DFL, DFL, DFL, DFL4,
     DFL16, DFL16, DFL16, DFL16, DFL16,
     DFL, DFL,
 };

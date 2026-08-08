@@ -1570,6 +1570,7 @@ SRCS += arch/ra8p1/tiku_fault_arch.c
 SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+SRCS += arch/ra8p1/tiku_npu_arch.c
 # The harness exercises the USB-HS disk and the model store, so it needs the
 # same sources the kernel build gates -- and the same gate, so a board without
 # the connector does not build code it cannot run.
@@ -1961,6 +1962,10 @@ SRCS += arch/ra8p1/tiku_dma_arch.c
 SRCS += arch/ra8p1/tiku_region_arch.c
 SRCS += arch/ra8p1/tiku_sdram_arch.c
 SRCS += arch/ra8p1/tiku_xflash_arch.c
+SRCS += arch/ra8p1/tiku_npu_arch.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_npu.c
+endif
 ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
 SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
