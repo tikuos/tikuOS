@@ -2173,6 +2173,7 @@ SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/memory/tiku_tier.c
+SRCS += kernel/memory/tiku_noheap.c
 SRCS += kernel/memory/tiku_nvm_region.c
 SRCS += kernel/memory/tiku_cache.c
 SRCS += kernel/memory/tiku_hibernate.c
