@@ -1026,8 +1026,6 @@ ifeq ($(HAS_TLS),1)
 # keeps the SRAM bump small (4 KB x 2 = 8 KB vs 512 B x 4).
 CFLAGS += -DTIKU_KITS_NET_TCP_RX_BUF_SIZE=4096
 CFLAGS += -DTIKU_KITS_NET_TCP_MAX_CONNS=2
-else
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=163840    # 160 KB: fits the 512-line BASIC arena
 endif
 endif
 
@@ -2007,6 +2005,7 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_npu.c      # /sys/npu
 CFLAGS += -DTIKU_HAS_NPU=1
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_npu.c
+endif
 endif
 ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
@@ -3257,7 +3256,14 @@ $(PLATFORM_STAMP):
 # same MCU drops that build dir's objects rather than shipping stale ones.  It
 # exists for host-side tooling links (see the packing-only code-cap override in
 # the Nordic linker script), not as a way to reshape a shipped image.
-$(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED)
+# The linker script is a real input: edit a carve, a region or an ASSERT in one
+# and the image must be re-linked.  Absent from this list, make sees main.elf
+# newer than every object and skips the link, so the edit has no effect and the
+# stale image is what gets tested.  Derived from LDFLAGS so a platform adding a
+# -T is covered without a second list to keep in step.
+TIKU_LDSCRIPTS := $(patsubst -T%,%,$(filter -T%,$(LDFLAGS)))
+
+$(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED) $(TIKU_LDSCRIPTS)
 	$(CC) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 $(BUILD_DIR)/%.o: %.c
