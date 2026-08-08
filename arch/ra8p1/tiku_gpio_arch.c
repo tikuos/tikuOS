@@ -102,15 +102,30 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin)
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val)
 {
     if (GPIO_BAD(port, pin)) { return -1; }
+    /* A write claims the pin as an output, which is what the interface means
+     * by it: PODR on a pin still configured as an input drives nothing, and
+     * the pin then reads back whatever the board holds it at.  Direction and
+     * level go into one PFS write so the pin never drives the wrong level
+     * first.  A pin that already drives skips the interlock, leaving the
+     * bit-bang path a single read. */
+    if ((TIKU_REG32(RA8P1_PORT_PCNTR1(port)) & (1UL << pin)) == 0UL) {
+        pfs_write(port, pin,
+                  RA8P1_PFS_PDR | ((val != 0U) ? RA8P1_PFS_PODR : 0UL));
+        return 0;
+    }
     tiku_ra8p1_gpio_set(port, pin, val);
     return 0;
 }
 
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin)
 {
+    uint32_t podr;
+
     if (GPIO_BAD(port, pin)) { return -1; }
-    tiku_ra8p1_gpio_toggle(port, pin);
-    return 0;
+    /* Through the write path, so a toggle claims the pin the same way. */
+    podr = TIKU_REG32(RA8P1_PORT_PCNTR1(port)) >> RA8P1_PORT_PODR_SHIFT;
+    return tiku_gpio_arch_write(port, pin,
+                                (podr & (1UL << pin)) ? 0U : 1U);
 }
 
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin)
