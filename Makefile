@@ -601,6 +601,19 @@ ifeq ($(_FLAG_GUARD),wiped)
 $(info [flags changed -> $(BUILD_DIR) objects wiped for a clean rebuild])
 endif
 
+# main.elf is one path shared by every MCU, while the flag guard above is
+# per build dir -- so an MCU switch trips neither stamp: the previous
+# target's image is newer than every object of the new one, make skips the
+# link, and the stale image is what gets sized, flashed and tested.  Record
+# which MCU linked it and drop it on a switch.
+_ELF_MCU_GUARD := $(shell \
+    if [ -f main.elf ] && [ "`cat .main-elf-mcu 2>/dev/null`" != "$(MCU)" ]; \
+    then rm -f main.elf main.hex; echo relink; fi; \
+    echo "$(MCU)" > .main-elf-mcu)
+ifeq ($(_ELF_MCU_GUARD),relink)
+$(info [MCU changed -> stale main.elf dropped, will relink for $(MCU)])
+endif
+
 # ---------------------------------------------------------------------------
 # App selection (mutually exclusive with tests and examples)
 #   make APP=cli MCU=msp430fr5994   — build with CLI app

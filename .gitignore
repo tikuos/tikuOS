@@ -104,3 +104,4 @@ experiments/
 # commit-msg hook.  House convention for this working copy, not part of the
 # OS, so a clone of TikuOS carries no opinion about how to write a commit.
 hygiene/
+.main-elf-mcu
