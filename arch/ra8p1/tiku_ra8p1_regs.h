@@ -1172,8 +1172,12 @@
 #define RA8P1_DRW_DLISTSTART    (RA8P1_DRW_BASE + 0xC8UL)
 #define RA8P1_DRW_COLKEY        (RA8P1_DRW_BASE + 0xE8UL)
 
-/* CONTROL: one enable per limiter, bits 0..5. */
+/* CONTROL: one enable per limiter, bits 0..5.  A QUAD bit couples a pair of
+ * limiters into one quadratic, which is how the engine draws a circle: the
+ * first of the pair carries the value and its x/y steps, the second carries
+ * the steps' own steps (UM 63.6.2.2). */
 #define RA8P1_DRW_CTL_LIMEN(n)  (1UL << (n))
+#define RA8P1_DRW_CTL_QUAD1     (1UL << 6)   /* couples limiters 1 and 2 */
 
 /* CONTROL2: framebuffer format lives in bit 8 and bits 21:20 together --
  * 0b001 selects 16 bpp RGB565, which is the format this port renders in. */

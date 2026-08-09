@@ -65,5 +65,24 @@ int tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
  */
 int tiku_drw_arch_wait(void);
 
+/**
+ * @brief Fill a circle with a solid colour.
+ *
+ * @note Blocks until the engine is idle.  The edge is one pixel of coverage
+ *       rather than a hard step, because the engine shapes it from the same
+ *       value it uses for alpha.
+ *
+ * @param fb     Framebuffer base, RGB565, 32-bit aligned
+ * @param pitch  Framebuffer width in pixels
+ * @param h      Framebuffer height in pixels
+ * @param cx     Centre x, in pixels
+ * @param cy     Centre y, in pixels
+ * @param r      Radius in pixels, at least one
+ * @param rgb565 Fill colour
+ * @return TIKU_DRW_OK, or a negative error
+ */
+int tiku_drw_arch_fill_circle(void *fb, uint32_t pitch, uint32_t h,
+                              int32_t cx, int32_t cy, uint32_t r,
+                              uint16_t rgb565);
 
 #endif /* TIKU_RA8P1_DRW_ARCH_H_ */

@@ -196,3 +196,70 @@ tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
     return tiku_drw_arch_wait();
 }
 
+int
+tiku_drw_arch_fill_circle(void *fb, uint32_t pitch, uint32_t h,
+                          int32_t cx, int32_t cy, uint32_t r,
+                          uint16_t rgb565)
+{
+    int32_t  bx, by, side;
+    long     k, s2;
+    uint32_t origin;
+
+    if (drw_id == 0U) {
+        return TIKU_DRW_ERR_STATE;
+    }
+    if (fb == 0 || r == 0U) {
+        return TIKU_DRW_ERR_INVALID;
+    }
+    bx   = cx - (int32_t)r;
+    by   = cy - (int32_t)r;
+    side = (int32_t)(r * 2U);
+    /* The engine does not clip, so the whole bounding square has to fit. */
+    if (bx < 0 || by < 0 ||
+        (uint32_t)(bx + side) > pitch || (uint32_t)(by + side) > h) {
+        return TIKU_DRW_ERR_INVALID;
+    }
+    if (tiku_drw_arch_wait() != TIKU_DRW_OK) {
+        return TIKU_DRW_ERR_TIMEOUT;
+    }
+
+    /*
+     * A quadratic limiter evaluates a*x^2 + b*y^2 + c*x + d*y + f over the
+     * bounding box (UM 63.6.2.2).  Negating the manual's circle equation
+     * makes the value positive INSIDE, which is the side that should be
+     * opaque, and the box is the circle's own square so the centre sits at
+     * (r,r): a = b = -1, c = d = 2r, f = -r^2.
+     *
+     * The scale is chosen so the value reaches full coverage exactly one
+     * pixel inside the edge, where it grows by about 2r per pixel -- which
+     * gives a hard circle with a single pixel of antialiasing rather than a
+     * disc that fades out over its whole radius.
+     */
+    k  = (long)DRW_ONE / (long)(r * 2U);
+    s2 = (long)r * (long)r;
+
+    TIKU_REG32(RA8P1_DRW_LSTART(0)) = (uint32_t)(-(k * s2));
+    TIKU_REG32(RA8P1_DRW_LXADD(0))  = (uint32_t)(k * (long)(r * 2U - 1U));
+    TIKU_REG32(RA8P1_DRW_LYADD(0))  = (uint32_t)(k * (long)(r * 2U - 1U));
+
+    TIKU_REG32(RA8P1_DRW_LSTART(1)) = (uint32_t)(k * (long)(r * 2U - 1U));
+    TIKU_REG32(RA8P1_DRW_LXADD(1))  = (uint32_t)(-(2L * k));
+    TIKU_REG32(RA8P1_DRW_LYADD(1))  = (uint32_t)(-(2L * k));
+
+    TIKU_REG32(RA8P1_DRW_COLOR1)   = drw_argb_from_565(rgb565);
+    TIKU_REG32(RA8P1_DRW_SIZE)     = ((uint32_t)side & 0xFFFFU) |
+                                     ((uint32_t)side << 16);
+    TIKU_REG32(RA8P1_DRW_PITCH)    = pitch & 0xFFFFU;
+    TIKU_REG32(RA8P1_DRW_CONTROL2) = RA8P1_DRW_CTL2_WRFMT_RGB565 |
+                                     RA8P1_DRW_CTL2_OVER;
+    TIKU_REG32(RA8P1_DRW_CONTROL)  = RA8P1_DRW_CTL_LIMEN(0) |
+                                     RA8P1_DRW_CTL_QUAD1;
+
+    origin = (uint32_t)(uintptr_t)fb +
+             (((uint32_t)by * pitch) + (uint32_t)bx) * 2U;
+
+    __asm__ volatile ("dsb" ::: "memory");
+    TIKU_REG32(RA8P1_DRW_ORIGIN) = origin;      /* starts the render */
+
+    return tiku_drw_arch_wait();
+}

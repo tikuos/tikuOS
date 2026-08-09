@@ -143,8 +143,27 @@ int
 tiku_display_arch_fill_circle(tiku_display_t *d, int16_t cx, int16_t cy,
                               uint16_t r, uint32_t colour)
 {
-    (void)d; (void)cx; (void)cy; (void)r; (void)colour;
-    return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    uint32_t bytes;
+    const void *rows;
+    int32_t top = (int32_t)cy - (int32_t)r;
+    int32_t rows_n = (int32_t)r * 2;
+    int rc;
+
+    if (top < 0 || (uint32_t)(top + rows_n) > d->h) {
+        return TIKU_DISPLAY_ERR_INVALID;
+    }
+    rows = row_span(d, (uint16_t)top, (uint16_t)rows_n, &bytes);
+    tiku_ra8p1_dcache_clean_invalidate(rows, bytes);
+
+    rc = tiku_drw_arch_fill_circle(d->fb, d->w, d->h, cx, cy, r,
+                                   rgb565_of(colour));
+
+    tiku_ra8p1_dcache_invalidate(rows, bytes);
+
+    if (rc == TIKU_DRW_ERR_INVALID) {
+        return TIKU_DISPLAY_ERR_INVALID;
+    }
+    return (rc == TIKU_DRW_OK) ? TIKU_DISPLAY_OK : TIKU_DISPLAY_ERR_STATE;
 }
 
 int
