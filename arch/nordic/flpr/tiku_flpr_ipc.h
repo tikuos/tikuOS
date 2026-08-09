@@ -41,6 +41,9 @@
  * main(), so the app can tell "started and running C code" from "started
  * but wedged in the crt".  The heartbeat then proves steady-state life. */
 #define TIKU_FLPR_MAGIC      0x464C5052u                 /* 'FLPR'         */
+/* Published by the trap handler instead of the boot magic: the payload has
+ * faulted, recorded why, and is waiting for CMD_RESTART. */
+#define TIKU_FLPR_MAGIC_FAULT 0x464C5021u                /* 'FLP!'         */
 
 /* Single-slot message mailboxes, one per direction.  Sender fills buf/len
  * then bumps seq (release order by construction on this uncached SRAM);
@@ -82,6 +85,13 @@ typedef struct {
 
     /* Beacon-offload telemetry (F4). */
     volatile uint32_t beacon_bursts;
+
+    /* Fault record, written by the trap handler before the fault park.
+     * fault_count survives restarts within one launch; the cause and epc
+     * describe the most recent trap only. */
+    volatile uint32_t fault_count;
+    volatile uint32_t fault_cause;      /* mcause                          */
+    volatile uint32_t fault_epc;        /* mepc                            */
 
     /* Connection controller (L6).  RX-probe (F-L6.1 step 0) proves the
      * FLPR can drive RADIO *RX* (the beacon is TX-only): listen on the adv
@@ -226,6 +236,9 @@ typedef struct {
  * The M33 times it against its own clock -- the VPR's mcycle proved unusable as
  * a timebase (see the pacing note in tiku_flpr_main.c). */
 #define TIKU_FLPR_CMD_SPIN        9u
+/* Leave the fault park: the trap handler re-enters _start, which re-runs the
+ * whole payload init.  Meaningful only while magic reads MAGIC_FAULT. */
+#define TIKU_FLPR_CMD_RESTART    10u
 #define TIKU_FLPR_RSP_PARKED  1u
 #define TIKU_FLPR_RSP_PULSE_DONE 2u
 #define TIKU_FLPR_RSP_BEACON_STOPPED 3u

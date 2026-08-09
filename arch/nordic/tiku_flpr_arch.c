@@ -78,6 +78,20 @@ int tiku_flpr_arch_start(void)
     }
 
     if (flpr_booted) {
+        /* A faulted payload sits in its trap park; CPURUN cannot restart
+         * the core, so the order is a software re-entry through _start. */
+        if (TIKU_FLPR_SHARED->magic == TIKU_FLPR_MAGIC_FAULT) {
+            uint32_t spin;
+
+            TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_RESTART;
+            __asm__ volatile ("dsb 0xF" ::: "memory");
+            for (spin = 0u; spin < 2000000u; spin++) {
+                if (TIKU_FLPR_SHARED->magic == TIKU_FLPR_MAGIC) {
+                    return 0;
+                }
+            }
+            return -1;
+        }
         /* Resume a parked firmware; already-running is a no-op. */
         if (TIKU_FLPR_SHARED->rsp == TIKU_FLPR_RSP_PARKED) {
             TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_RESUME;
@@ -116,6 +130,11 @@ int tiku_flpr_arch_start(void)
     tiku_nordic_nvic_enable(TIKU_NORDIC_IRQ_VPR00);
     flpr_booted = 1u;
     return 0;
+}
+
+uint32_t tiku_flpr_arch_magic(void)
+{
+    return flpr_booted ? TIKU_FLPR_SHARED->magic : 0u;
 }
 
 void tiku_flpr_arch_stop(void)

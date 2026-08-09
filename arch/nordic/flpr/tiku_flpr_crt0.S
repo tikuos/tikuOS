@@ -39,6 +39,13 @@ _start:
 
     la   sp, __stack_top
 
+    /* Trap vector, direct mode: without it a trap jumps through whatever
+     * mtvec reset to and the core is simply gone from the bus.  The stub
+     * below re-establishes the stack -- a trap may arrive with sp wrecked
+     * -- and never returns. */
+    la   t0, flpr_trap
+    csrw mtvec, t0
+
     /* Zero .bss (word-aligned by the linker script). */
     la   t0, __bss_start
     la   t1, __bss_end
@@ -55,3 +62,15 @@ _start:
     wfi
     j    3b
     .size _start, .-_start
+
+    .align 2
+    .globl flpr_trap
+    .type flpr_trap, @function
+flpr_trap:
+    la   sp, __stack_top
+    call tiku_flpr_fault
+1:
+    wfi
+    j    1b
+    .size flpr_trap, .-flpr_trap
+

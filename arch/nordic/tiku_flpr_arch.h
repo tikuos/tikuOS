@@ -35,6 +35,9 @@ void tiku_flpr_arch_stop(void);
 /** @brief 1 when CPURUN reads Running. */
 int tiku_flpr_arch_running(void);
 
+/** @brief The payload's boot/fault magic, raw; 0 before the first launch. */
+uint32_t tiku_flpr_arch_magic(void);
+
 /** @brief 1 when the firmware has stamped its magic (reached main()). */
 int tiku_flpr_arch_alive(void);
 

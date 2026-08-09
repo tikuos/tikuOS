@@ -1768,6 +1768,12 @@ endif
 SRCS += interfaces/bluetooth/tiku_ble_host.c
 # (SMP pairing crypto + engine build with the BLE_ADV capability above, so the
 #  central test peer gets them too -- not gated on the FLPR coprocessor.)
+# The portable coprocessor contract over the FLPR, plus /sys/coproc.  The
+# published message cap must match the FLPR mailbox; the backend's
+# _Static_assert holds the two together.
+SRCS += arch/nordic/tiku_coproc_arch.c           # interfaces/coproc backend
+SRCS += kernel/vfs/tree/tiku_vfs_tree_coproc.c   # /sys/coproc
+CFLAGS += -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=240u
 RISCV_PREFIX ?= temp/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-
 RISCV_CC      = $(RISCV_PREFIX)gcc
 FLPR_BUILD    = $(BUILD_DIR)/flpr

@@ -989,6 +989,45 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
 }
 
 /* Echo service: consume an app->flpr message, mirror it back, ring. */
+/**
+ * @brief Trap landing: record the fault, park, wait for a restart order.
+ *
+ * Stamps the fault magic so the owner's state() sees it, keeps the cause,
+ * then re-enters _start on CMD_RESTART.
+ *
+ * @note The VPR cannot be hardware-restarted -- CPURUN re-set resumes at
+ *       the current PC -- so recovery is this software re-entry.
+ */
+void tiku_flpr_main(void);
+
+__attribute__((used, noreturn))
+void tiku_flpr_fault(void)
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+    uint32_t cause, epc;
+
+    __asm__ volatile ("csrr %0, mcause" : "=r"(cause));
+    __asm__ volatile ("csrr %0, mepc"   : "=r"(epc));
+    sh->fault_cause = cause;
+    sh->fault_epc   = epc;
+    sh->fault_count = sh->fault_count + 1u;
+    sh->magic = TIKU_FLPR_MAGIC_FAULT;
+    __asm__ volatile ("fence" ::: "memory");
+
+    while (sh->cmd != TIKU_FLPR_CMD_RESTART) {
+    }
+    sh->cmd = 0u;
+    sh->rsp = 0u;
+    /* Re-run the payload by calling its entry directly.  The ARM cores need
+     * an exception return here, but this VPR runs fully polled with MIE
+     * clear, so a trap is only mepc/mcause set -- no sticky priority to
+     * escape, and a plain call re-establishes magic and the mailbox.  The
+     * stack was reset at flpr_trap; gp and .bss are still valid. */
+    tiku_flpr_main();
+    for (;;) {
+    }
+}
+
 static void flpr_echo_pump(tiku_flpr_shared_t *sh, uint32_t *last_seq)
 {
     uint32_t seq = sh->a2f_seq;
@@ -998,9 +1037,21 @@ static void flpr_echo_pump(tiku_flpr_shared_t *sh, uint32_t *last_seq)
         return;
     }
     *last_seq = seq;
+    /* The M85 writes buf and len before the seq that woke us; match that
+     * order here or the len from the previous message decides this one --
+     * a 6-byte NONCE reading as len 6 hides a 4-byte FLT!. */
+    __asm__ volatile ("fence" ::: "memory");
     len = sh->a2f_len;
     if (len > TIKU_FLPR_MSG_CAP) {
         len = TIKU_FLPR_MSG_CAP;
+    }
+    /* The contract suite's fault leg: the payload must be able to really
+     * die, so the message triggers an illegal instruction rather than
+     * setting a flag.  The trap lands in tiku_flpr_fault() via mtvec. */
+    if (len == 4u &&
+        sh->a2f_buf[0] == (uint8_t)'F' && sh->a2f_buf[1] == (uint8_t)'L' &&
+        sh->a2f_buf[2] == (uint8_t)'T' && sh->a2f_buf[3] == (uint8_t)'!') {
+        __asm__ volatile ("unimp");
     }
     for (i = 0u; i < len; i++) {
         sh->f2a_buf[i] = sh->a2f_buf[i];
@@ -1014,7 +1065,10 @@ void tiku_flpr_main(void)
 {
     tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
     volatile uint32_t pace;
-    uint32_t last_seq = 0u;
+    /* Start from the mailbox's current sequence, not zero: after a fault
+     * restart the FLT! message that killed the previous run is still in the
+     * buffer, and consuming it again would fault the payload in a loop. */
+    uint32_t last_seq = sh->a2f_seq;
 
     /* Enable the VPR's RT-peripheral interface (keyed VPRNORDICCTRL CSR,
      * 0x7C0: NORDICKEY=0x507D<<16 | ENABLERTPERIPH).  Until this runs, the
