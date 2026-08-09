@@ -2047,6 +2047,9 @@ endif
 ifeq ($(TIKU_DRV_GLCDC_ENABLE),1)
 SRCS += arch/ra8p1/tiku_glcdc_arch.c
 CFLAGS += -DTIKU_HAS_GLCDC=1
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_panel.c
+endif
 endif
 
 ifeq ($(TIKU_NPU_ENABLE),1)

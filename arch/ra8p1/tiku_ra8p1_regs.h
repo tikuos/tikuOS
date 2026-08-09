@@ -634,6 +634,7 @@
 
 /** @brief PSEL that selects the OSPI function on any pin (OM_0_* here). */
 #define RA8P1_PFS_PSEL_OSPI     0x1CUL
+#define RA8P1_PFS_PSEL_GLCDC    0x19UL
 
 /** @brief Macronix RDID reply: C2 = manufacturer, then type and density. */
 #define RA8P1_MX_MANUFACTURER   0xC2U
@@ -1055,20 +1056,56 @@
                                  (0x100UL * ((n) - 1UL)) + (off))
 #define RA8P1_GLCDC_GR_VEN(n)   RA8P1_GLCDC_GR(n, 0x00UL)
 #define RA8P1_GLCDC_GR_FLMRD(n) RA8P1_GLCDC_GR(n, 0x04UL)
+#define RA8P1_GLCDC_GR_FLM1(n)  RA8P1_GLCDC_GR(n, 0x08UL)
 #define RA8P1_GLCDC_GR_FLM2(n)  RA8P1_GLCDC_GR(n, 0x0CUL)  /* base address */
 #define RA8P1_GLCDC_GR_FLM3(n)  RA8P1_GLCDC_GR(n, 0x10UL)  /* line offset  */
 #define RA8P1_GLCDC_GR_FLM5(n)  RA8P1_GLCDC_GR(n, 0x18UL)  /* per-line/num */
 #define RA8P1_GLCDC_GR_FLM6(n)  RA8P1_GLCDC_GR(n, 0x1CUL)  /* format       */
 #define RA8P1_GLCDC_GR_AB1(n)   RA8P1_GLCDC_GR(n, 0x20UL)
+#define RA8P1_GLCDC_GR_AB2(n)   RA8P1_GLCDC_GR(n, 0x24UL)  /* vert window */
+#define RA8P1_GLCDC_GR_AB3(n)   RA8P1_GLCDC_GR(n, 0x28UL)  /* horiz window */
+#define RA8P1_GLCDC_OUT_BRIGHT1 (RA8P1_GLCDC_BASE + 0x13C8UL)
+#define RA8P1_GLCDC_OUT_BRIGHT2 (RA8P1_GLCDC_BASE + 0x13CCUL)
+#define RA8P1_GLCDC_OUT_CONTRAST (RA8P1_GLCDC_BASE + 0x13D0UL)
 #define RA8P1_GLCDC_GR_MON(n)   RA8P1_GLCDC_GR(n, 0x54UL)
 
 #define RA8P1_GLCDC_GR_VEN_PVEN   (1UL << 0)
 #define RA8P1_GLCDC_GR_FLMRD_RENB (1UL << 0)
 #define RA8P1_GLCDC_GR_FLM6_RGB565 (0UL << 28)  /* FORMAT[2:0] = 000 */
-#define RA8P1_GLCDC_GR_AB1_DISPSEL_FB (2UL << 0)
+/* DISPSEL 11 blends this layer over what is beneath it; 01 passes the lower
+ * layer through untouched; 00 -- the RESET VALUE -- paints the layer's own
+ * base colour, black, over everything beneath.  Layer 2 sits above layer 1
+ * in the blend chain, so a start that configures only layer 1 must set
+ * layer 2 to pass-through or the finished image is composited to black. */
+#define RA8P1_GLCDC_GR_AB1_DISPSEL_FB   (3UL << 0)
+#define RA8P1_GLCDC_GR_AB1_DISPSEL_PASS (1UL << 0)
+
+/* Output correction is a MULTIPLY, and its reset value is zero: left alone,
+ * every pixel is scaled to black and the panel shows nothing while every
+ * other register reads correct.  0x80 per channel is unity, 512 is the
+ * brightness midpoint. */
+#define RA8P1_GLCDC_CONTRAST_UNITY  0x00808080UL
+#define RA8P1_GLCDC_BRIGHT_MID      512UL
 
 /* System control: detection arm, interrupt enable, status and its clear.
  * The flag does not set unless the matching DTCTEN bit is armed first. */
+/* Timing-controller outputs.  The A pair carries the sync pulses and the B
+ * pair the data-enable window; SEL in each x2 register routes the signal to a
+ * physical TCON pin.  Without these the panel gets pixels and a clock but no
+ * valid sync or DE, and shows nothing at all. */
+#define RA8P1_GLCDC_OUT_VLATCH  (RA8P1_GLCDC_BASE + 0x13C0UL)
+#define RA8P1_GLCDC_OUT_SET     (RA8P1_GLCDC_BASE + 0x13C4UL)
+#define RA8P1_GLCDC_TCON_TIM    (RA8P1_GLCDC_BASE + 0x1404UL)
+#define RA8P1_GLCDC_TCON_STVA1  (RA8P1_GLCDC_BASE + 0x1408UL)
+#define RA8P1_GLCDC_TCON_STVA2  (RA8P1_GLCDC_BASE + 0x140CUL)
+#define RA8P1_GLCDC_TCON_STVB1  (RA8P1_GLCDC_BASE + 0x1410UL)
+#define RA8P1_GLCDC_TCON_STVB2  (RA8P1_GLCDC_BASE + 0x1414UL)
+#define RA8P1_GLCDC_TCON_STHA1  (RA8P1_GLCDC_BASE + 0x1418UL)
+#define RA8P1_GLCDC_TCON_STHA2  (RA8P1_GLCDC_BASE + 0x141CUL)
+#define RA8P1_GLCDC_TCON_STHB1  (RA8P1_GLCDC_BASE + 0x1420UL)
+#define RA8P1_GLCDC_TCON_STHB2  (RA8P1_GLCDC_BASE + 0x1424UL)
+#define RA8P1_GLCDC_TCON_DE     (RA8P1_GLCDC_BASE + 0x1428UL)
+
 #define RA8P1_GLCDC_SYS_DTCTEN  (RA8P1_GLCDC_BASE + 0x1440UL)
 #define RA8P1_GLCDC_SYS_INTEN   (RA8P1_GLCDC_BASE + 0x1444UL)
 #define RA8P1_GLCDC_SYS_STCLR   (RA8P1_GLCDC_BASE + 0x1448UL)
@@ -1083,6 +1120,11 @@
  * controller has no pixel clock, accepts every other write, and simply never
  * generates a frame.  CLKEN must be low while DCDR or CLKSEL change. */
 #define RA8P1_GLCDC_PANELCLK_DCDR(n) ((uint32_t)(n) & 0x3FUL)
+
+/* LCDCKCR source codes beyond MOCO; PLL1P is the core's own source, so it is
+ * running at every rung and needs no PLL of its own to be brought up. */
+#define RA8P1_LCDCKCR_SEL_PLL1P 0x5U
+#define RA8P1_LCDCKDIV_4        0x2U
 
 /*
  * LCDCLK (UM 9.2.53/9.2.58).  Changing source or divider is a handshake, not

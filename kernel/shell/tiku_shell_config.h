@@ -86,6 +86,15 @@
 #define TIKU_SHELL_CMD_NPU     0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_PANEL
+/* Follows the driver opt-in: the parallel RGB panel is an expansion board,
+ * and a build without the display controller has nothing to drive. */
+#if (TIKU_HAS_GLCDC + 0)
+#define TIKU_SHELL_CMD_PANEL   1  /**< panel   - the parallel RGB display */
+#else
+#define TIKU_SHELL_CMD_PANEL   0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_TRNG
 #define TIKU_SHELL_CMD_TRNG    1  /**< trng    - Dump hardware TRNG bytes */
 #endif

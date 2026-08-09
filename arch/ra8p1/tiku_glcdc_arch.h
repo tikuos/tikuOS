@@ -76,4 +76,23 @@ int tiku_glcdc_arch_underflow(void);
 /** @brief The LCDCLK frequency this driver configures, in Hz. */
 uint32_t tiku_glcdc_arch_pixel_hz(void);
 
+/**
+ * @brief Drive the board's parallel RGB panel from a framebuffer.
+ *
+ * Routes the 24 data lines and the timing signals to the controller, releases
+ * the panel's reset, lights the backlight and scans @p fb out at the panel's
+ * own timing.  Parallel, not MIPI: the DSI block stays stopped.
+ *
+ * @note Requires board switch SW4-6 OFF, and a core clock rung of 240 MHz --
+ *       the pixel clock divides PLL1P, which follows the rung.
+ *
+ * @param fb  RGB565 framebuffer of TIKU_GLCDC_PANEL_W x TIKU_GLCDC_PANEL_H
+ * @return TIKU_GLCDC_OK, or a negative error
+ */
+int tiku_glcdc_arch_panel_start(const void *fb);
+
+/** @brief The parallel panel's visible geometry. */
+#define TIKU_GLCDC_PANEL_W  1024U
+#define TIKU_GLCDC_PANEL_H  600U
+
 #endif /* TIKU_RA8P1_GLCDC_ARCH_H_ */
