@@ -173,7 +173,9 @@ uint32_t tiku_ra8p1_cpu1_magic(void)
     m = CPU1_SH->magic;
     /* Every observation path flows through here, so this is where a fault
      * is counted -- once per fault, cleared when a payload runs again. */
-    if (m == TIKU_CPU1_MAGIC_FAULT) {
+    if (m == TIKU_CPU1_MAGIC_FAULT || m == TIKU_CPU1_MAGIC_HANG) {
+        /* A WDT1 hang is a fault-class event to the owner: the payload is
+         * unusable and recovers by the same restart.  Counted once. */
         if (!cpu1_fault_noticed) {
             cpu1_fault_noticed = 1U;
             tiku_ra8p1_cpu1_fault_count++;
@@ -327,7 +329,8 @@ int tiku_ra8p1_cpu1_start(void)
         /* A faulted payload is parked in its HardFault handler watching the
          * restart word; changing it re-enters the reset path.  This is the
          * owner deciding, which no register can do for it. */
-        if (tiku_ra8p1_cpu1_magic() == TIKU_CPU1_MAGIC_FAULT) {
+        uint32_t rm = tiku_ra8p1_cpu1_magic();
+        if (rm == TIKU_CPU1_MAGIC_FAULT || rm == TIKU_CPU1_MAGIC_HANG) {
             uint32_t settle;
 
             cpu1_restart_gen++;
@@ -373,6 +376,7 @@ int tiku_ra8p1_cpu1_start(void)
     /* HardFault only.  A fault taken while the HardFault is still active
      * escalates to LOCKUP whatever the other vectors hold, which is why the
      * handler exception-returns before anything else can fault. */
+    vec[2] = (base + TIKU_CPU1_NMI_OFF) | 1U;
     vec[3] = (base + TIKU_CPU1_FAULT_OFF) | 1U;
     cpu1_a2c_seq = 0U;
     cpu1_restart_gen = 0U;

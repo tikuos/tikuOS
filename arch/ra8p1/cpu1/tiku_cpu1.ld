@@ -46,6 +46,13 @@ SECTIONS
     .fault BASE + 0x1800 : { KEEP(*(.cpu1_fault)) }
     __fault_end = ADDR(.fault) + SIZEOF(.fault);
 
+    /* WDT1 NMI handler, pinned where the loader points vector 2, in the gap
+     * between the fault handler and the shared page. */
+    .nmi BASE + 0x1880 : { KEEP(*(.cpu1_nmi)) }
+    __nmi_end = ADDR(.nmi) + SIZEOF(.nmi);
+    ASSERT(__fault_end <= BASE + 0x1880, "cpu1: fault handler overruns the NMI slot")
+    ASSERT(__nmi_end <= BASE + 0x1900, "cpu1: NMI handler overruns the shared page")
+
     /* TIKU_CPU1_SHARED_OFF.  Zero-filled here and by the loader; the two
      * halves of the struct sit on separate cache lines, which the header
      * asserts rather than this script. */

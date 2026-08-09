@@ -981,6 +981,51 @@
 #define RA8P1_IWDTCLK_HZ        16384UL
 
 /*---------------------------------------------------------------------------*/
+/* WDT0/WDT1 (UM 28, "Watchdog Timer")                                       */
+/*                                                                           */
+/* Two instances 0x100 apart: WDT0 for CPU0, WDT1 for CPU1 (the M33 the      */
+/* coprocessor runs).  WDT1 supervises the payload -- the payload refreshes  */
+/* it each loop pass, and a hang (spin with interrupts masked) stops the     */
+/* refresh, underflows, and fires an NMI to CPU1.  Register-start mode:      */
+/* OFS3 reads 0xFFFFFFFF on this board (MEASURED, like OFS0), so WDTSTRT1 is  */
+/* 1 and the config lives in these runtime registers, no option-memory write.*/
+/* WDTCR/WDTRR/WDTSR need their documented access width; a 32-bit AHB read of */
+/* the block returns bus-dependent bytes (why a raw dump does not match).     */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_WDT1_BASE         0x40202700UL
+#define RA8P1_WDT1_RR           (RA8P1_WDT1_BASE + 0x00UL)  /* 8-bit  refresh */
+#define RA8P1_WDT1_CR           (RA8P1_WDT1_BASE + 0x02UL)  /* 16-bit control */
+#define RA8P1_WDT1_SR           (RA8P1_WDT1_BASE + 0x04UL)  /* 16-bit status  */
+#define RA8P1_WDT1_RCR          (RA8P1_WDT1_BASE + 0x06UL)  /* 8-bit  reset   */
+
+/* WDTCR fields.  0x33F3 (reset) = TOPS 16384 x CKS /128, no window.  For hang
+ * supervision the counter must outlast the longest single payload op (the
+ * ~1 s verify batch), so CKS is widened to /8192: TOPS 16384 x 8192 at
+ * PCLKB <= 62.5 MHz is ~2.1 s. */
+#define RA8P1_WDT1_CR_TOPS_16384 (0x3U << 0)
+#define RA8P1_WDT1_CR_CKS_8192   (0x8U << 4)
+#define RA8P1_WDT1_CR_RPES_NONE  (0x3U << 8)   /* window end 0%   */
+#define RA8P1_WDT1_CR_RPSS_NONE  (0x3U << 12)  /* window start 100% */
+
+/* WDTRCR.RSTIRQS bit 7: 0 = interrupt (the NMI), 1 = reset.  Reset value is 1,
+ * so this must be cleared to keep an underflow off the system-reset path. */
+#define RA8P1_WDT1_RCR_RSTIRQS   (1U << 7)
+
+/* WDTSR flags. */
+#define RA8P1_WDT1_SR_UNDFF      (1U << 14)  /* underflow            */
+#define RA8P1_WDT1_SR_REFEF      (1U << 15)  /* refresh error        */
+
+/*
+ * ICU NMI block (UM 14).  ICU0 and ICU1 share this base; each CPU sees its
+ * own, so CPU1's payload writes these to reach ICU1.  WDT underflow/refresh
+ * error is bit 1 in each.
+ */
+#define RA8P1_ICU_NMIER         (RA8P1_ICU_BASE + 0x100UL)  /* enable */
+#define RA8P1_ICU_NMICLR        (RA8P1_ICU_BASE + 0x110UL)  /* clear  */
+#define RA8P1_ICU_NMISR         (RA8P1_ICU_BASE + 0x120UL)  /* status */
+#define RA8P1_ICU_NMI_WDT       (1UL << 1)   /* WDTEN / WDTCLR / WDTST */
+
+/*---------------------------------------------------------------------------*/
 /* Cortex-M85 core peripherals (Armv8.1-M, not part-specific)                */
 /*---------------------------------------------------------------------------*/
 #define RA8P1_SCB_VTOR          0xE000ED08UL

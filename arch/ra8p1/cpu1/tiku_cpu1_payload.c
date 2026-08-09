@@ -28,6 +28,20 @@
 #define CPU1_IPC0ISET0      0x400200C4UL
 #define CPU1_IPC_IRQ0       (1UL << 0)
 
+/* WDT1 (0x40202700) and ICU1's NMI block (ICU base 0x4000C000; each CPU sees
+ * its own).  UM 28 and 14; the transcription with reset values is in
+ * arch/ra8p1/tiku_ra8p1_regs.h, which this minimal payload does not include. */
+#define CPU1_WDT1_RR        0x40202700UL   /* 8-bit  refresh                 */
+#define CPU1_WDT1_CR        0x40202702UL   /* 16-bit control                 */
+#define CPU1_WDT1_RCR       0x40202706UL   /* 8-bit  RSTIRQS b7: 0=NMI,1=rst */
+#define CPU1_ICU1_NMIER     0x4000C100UL   /* bit1 WDTEN                      */
+#define CPU1_ICU1_NMICLR    0x4000C110UL   /* bit1 WDTCLR                     */
+#define CPU1_ICU1_NMISR     0x4000C120UL   /* bit1 WDTST                      */
+#define CPU1_WDT_NMI_BIT    (1UL << 1)
+/* WDTCR: TOPS 16384 x CKS /8192, no window -> ~2.1 s at PCLKB <= 62.5 MHz,
+ * which outlasts the longest single cpu1_serve so healthy work never trips it. */
+#define CPU1_WDT1_CR_VALUE  ((0x3U << 0) | (0x8U << 4) | (0x3U << 8) | (0x3U << 12))
+
 /**
  * @brief Tell the other core a reply is waiting.
  *
@@ -95,6 +109,27 @@ static void cpu1_cache_on(uint32_t base)
 #define CPU1_RETPSR_THUMB       0x01000000UL
 
 void cpu1_park(uint32_t base) __attribute__((used, noreturn));
+
+/** @brief Refresh WDT1: the 0x00-then-0xFF sequence reloads the down-counter. */
+static inline void cpu1_wdt_kick(void)
+{
+    *(volatile uint8_t *)CPU1_WDT1_RR = 0x00U;
+    *(volatile uint8_t *)CPU1_WDT1_RR = 0xFFU;
+}
+
+/**
+ * @brief Arm WDT1 to supervise this payload (register-start mode).
+ *
+ * @note WDTRCR clears RSTIRQS so an underflow is an NMI to THIS core, not a
+ *       system reset.  WDTCR is write-once; the first refresh starts counting.
+ */
+static inline void cpu1_wdt_arm(void)
+{
+    *(volatile uint32_t *)CPU1_ICU1_NMIER |= CPU1_WDT_NMI_BIT;
+    *(volatile uint8_t  *)CPU1_WDT1_RCR = 0x00U;
+    *(volatile uint16_t *)CPU1_WDT1_CR  = (uint16_t)CPU1_WDT1_CR_VALUE;
+    cpu1_wdt_kick();
+}
 
 /**
  * @brief Wait out the fault in Thread mode, then re-enter the reset path.
@@ -173,6 +208,47 @@ void cpu1_fault(void)
 }
 
 /**
+ * @brief WDT1 underflow (NMI): the payload wedged.  Record and hand back.
+ *
+ * @note Same exception-return discipline as cpu1_fault -- an NMI left active
+ *       makes the next fault a LOCKUP, so this returns to cpu1_park in Thread
+ *       mode rather than branching.  The owner sees MAGIC_HANG and restarts.
+ */
+__attribute__((section(".cpu1_nmi"), used, noreturn))
+void cpu1_nmi(void)
+{
+    uint32_t base = *(volatile uint32_t *)0xE000ED08UL;   /* VTOR */
+    volatile tiku_cpu1_shared_t *sh =
+        (volatile tiku_cpu1_shared_t *)(base + TIKU_CPU1_SHARED_OFF);
+    uint32_t *frame;
+
+    sh->magic = TIKU_CPU1_MAGIC_HANG;
+    __asm__ volatile ("dmb" ::: "memory");
+    /* Clear the WDT NMI status, or it re-fires the instant the handler returns. */
+    *(volatile uint32_t *)CPU1_ICU1_NMICLR = CPU1_WDT_NMI_BIT;
+
+    frame = (uint32_t *)((*(volatile uint32_t *)base) & ~7UL) - 8;
+    frame[0] = base;                              /* R0 -> cpu1_park arg  */
+    frame[1] = 0UL;
+    frame[2] = 0UL;
+    frame[3] = 0UL;
+    frame[4] = 0UL;                               /* R12                  */
+    frame[5] = 0UL;                               /* LR                   */
+    frame[6] = (uint32_t)&cpu1_park & ~1UL;       /* PC; T lives in xPSR  */
+    frame[7] = CPU1_RETPSR_THUMB;
+
+    __asm__ volatile ("mov  r1, #0\n\t"
+                      "msr  primask, r1\n\t"
+                      "msr  basepri, r1\n\t"
+                      "msr  msp, %0\n\t"
+                      "mvn  r0, #6\n\t"
+                      "dsb\n\tisb\n\t"
+                      "bx   r0"
+                      : : "r" (frame) : "r0", "r1", "memory");
+    __builtin_unreachable();
+}
+
+/**
  * @brief Answer one message: fault, hash chain, P-256 verify, or echo.
  *
  * @param sh  The shared page
@@ -195,6 +271,17 @@ static void cpu1_serve(volatile tiku_cpu1_shared_t *sh, uint32_t seq)
         sh->a2c_buf[0] == (uint8_t)'F' && sh->a2c_buf[1] == (uint8_t)'L' &&
         sh->a2c_buf[2] == (uint8_t)'T' && sh->a2c_buf[3] == (uint8_t)'!') {
         __asm__ volatile ("udf #0");
+    }
+    if (len == 4U &&
+        sh->a2c_buf[0] == (uint8_t)'H' && sh->a2c_buf[1] == (uint8_t)'A' &&
+        sh->a2c_buf[2] == (uint8_t)'N' && sh->a2c_buf[3] == (uint8_t)'G') {
+        /* Wedge: mask everything a payload can, then spin.  The heartbeat
+         * freezes and no fault is raised -- the case only WDT1 -> NMI catches
+         * (PRIMASK does not mask NMI).  Stops refreshing, so WDT1 underflows. */
+        __asm__ volatile ("cpsid i" ::: "memory");
+        for (;;) {
+            __asm__ volatile ("nop");
+        }
     }
     if (len == TIKU_CPU1_MSG_CAP &&
         sh->a2c_buf[0] == (uint8_t)TIKU_CPU1_WORK_MAGIC0 &&
@@ -307,6 +394,8 @@ void cpu1_reset(void)
      * still zero reads exactly like a launch that failed. */
     __asm__ volatile ("dmb" ::: "memory");
 
+    cpu1_wdt_arm();
+
     for (;;) {
         uint32_t seq;
 
@@ -321,6 +410,7 @@ void cpu1_reset(void)
             served = seq;
         }
 
+        cpu1_wdt_kick();
         beats++;
         sh->heartbeat = beats;
     }

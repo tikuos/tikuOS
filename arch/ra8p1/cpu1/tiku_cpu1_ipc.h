@@ -31,6 +31,7 @@
 #define TIKU_CPU1_AREA_SIZE     16384U
 #define TIKU_CPU1_RESET_OFF     0x40U    /* entry, patched into vector 1   */
 #define TIKU_CPU1_FAULT_OFF     0x1800U  /* HardFault, patched into vec 3  */
+#define TIKU_CPU1_NMI_OFF       0x1880U  /* WDT1 NMI, patched into vec 2   */
 #define TIKU_CPU1_SHARED_OFF    0x1900U  /* the struct below               */
 #define TIKU_CPU1_STACK_OFF     TIKU_CPU1_AREA_SIZE
 
@@ -46,6 +47,7 @@
 
 /** @brief What the fault handler swaps the magic to; the record itself. */
 #define TIKU_CPU1_MAGIC_FAULT   0x4D333321UL    /* '!33M' in memory order */
+#define TIKU_CPU1_MAGIC_HANG    0x4D333323UL    /* '#33M': WDT1 caught a spin */
 
 /** @brief Mailbox message that makes the payload fault itself, for the
  *         bench suite's fault leg.  Four bytes, "FLT!". */

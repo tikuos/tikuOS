@@ -43,7 +43,8 @@ tiku_coproc_state_t tiku_coproc_state(void)
     /* The magic first: a faulted payload still holds cpu1_running until the
      * fault is noticed, and this read is what notices it. */
     m = tiku_ra8p1_cpu1_magic();
-    if (m == TIKU_CPU1_MAGIC_FAULT) {
+    if (m == TIKU_CPU1_MAGIC_FAULT || m == TIKU_CPU1_MAGIC_HANG) {
+        /* A WDT1-caught hang is a fault-class state: unusable, restart it. */
         return TIKU_COPROC_FAULTED;
     }
     if (!tiku_ra8p1_cpu1_running()) {
