@@ -222,10 +222,20 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
 #if defined(TIKU_TIER_SRAM_DERIVED)
     {
-        unsigned long tier_span = (unsigned long)
-            ((uintptr_t)&__tier_sram_end - (uintptr_t)&__tier_sram_start);
+        uintptr_t tier_lo = (uintptr_t)&__tier_sram_start;
+        uintptr_t tier_hi = (uintptr_t)&__tier_sram_end;
+        uintptr_t bank_lo = (uintptr_t)&__datastart;
+        unsigned long tier_span = (unsigned long)(tier_hi - tier_lo);
+
         SHELL_PRINTF("  tier arena  %5lu\n", tier_span);
-        sram_static += tier_span;
+        /* Only the parts that carve the tier from the SAME bank as the
+         * statics (RA8P1, RP2350) may fold it into that bank's leftover.
+         * Ambiq and STM32N6 carve it from a second bank -- SSRAM, AXISRAM
+         * -- so folding it into the image bank's total underflows the
+         * stack+free line.  Its capacity is the runtime tier line below. */
+        if (tier_lo >= bank_lo && tier_hi <= bank_lo + sram_total) {
+            sram_static += tier_span;
+        }
     }
 #endif
     /* What's left of SRAM after static data: hosts the stack and any
