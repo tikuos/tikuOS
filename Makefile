@@ -353,6 +353,14 @@ would be silently ignored and the build would claim an accelerator it lacks.)
 endif
 endif
 
+ifeq ($(TIKU_DRV_GLCDC_ENABLE),1)
+ifneq ($(TIKU_PLATFORM),ra8p1)
+$(error TIKU_DRV_GLCDC_ENABLE=1 requires a part with the GLCDC (currently \
+MCU=$(MCU)). RA8P1 is the only one in this tree; elsewhere the flag would be \
+silently ignored and the build would claim a display controller it lacks.)
+endif
+endif
+
 ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
 ifeq ($(call board_has,EMMC),)
 $(error TIKU_DRV_EMMC_ENABLE=1 requires a board with an eMMC fitted \
@@ -2034,6 +2042,11 @@ SRCS += arch/ra8p1/tiku_xflash_arch.c
 ifeq ($(TIKU_DRV_DRW_ENABLE),1)
 SRCS += arch/ra8p1/tiku_drw_arch.c
 CFLAGS += -DTIKU_HAS_DRW=1
+endif
+
+ifeq ($(TIKU_DRV_GLCDC_ENABLE),1)
+SRCS += arch/ra8p1/tiku_glcdc_arch.c
+CFLAGS += -DTIKU_HAS_GLCDC=1
 endif
 
 ifeq ($(TIKU_NPU_ENABLE),1)
