@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_display.h - minimal GPU-accelerated compositor.
+ * tiku_display.h - portable control of one accelerated screen.
  *
- * One framebuffer surface over the Apollo510 GPU and display controller; draws
- * accumulate a damage rectangle and flush() pushes only that region, so a small
- * change costs a small transfer.  The framebuffer must live in SSRAM, never DTCM.
+ * Draws accumulate a damage rectangle and flush() makes exactly that region
+ * visible, whatever "visible" costs on the part: a transfer to the panel on
+ * one, a cache clean under a controller that scans continuously on another.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,75 +18,151 @@
 #define TIKU_DISPLAY_H_
 
 #include <stdint.h>
-#include <arch/ambiq/tiku_gpu_arch.h>
-#include <arch/ambiq/tiku_dc_arch.h>
+
+/** @brief Outcomes; a caller that only tests != OK still behaves. */
+#define TIKU_DISPLAY_OK              0
+#define TIKU_DISPLAY_ERR_STATE      -1  /**< not initialised, or busy      */
+#define TIKU_DISPLAY_ERR_INVALID    -2  /**< geometry or buffer refused    */
+#define TIKU_DISPLAY_ERR_UNSUPPORTED -3 /**< backend has no such primitive */
+
+/** @brief Framebuffer pixel layout, which differs by part. */
+typedef enum {
+    TIKU_DISPLAY_FMT_RGB565 = 0,   /**< 16 bpp                             */
+    TIKU_DISPLAY_FMT_RGBA8888      /**< 32 bpp                             */
+} tiku_display_fmt_t;
+
+/*
+ * Optional primitives.  A backend advertises only what its hardware really
+ * does; asking for one it lacks is refused rather than emulated, so a caller
+ * can tell "drew nothing" from "drew slowly in software".
+ */
+#define TIKU_DISPLAY_CAP_CIRCLE   (1u << 0)
+#define TIKU_DISPLAY_CAP_ROUNDED  (1u << 1)
 
 /**
- * @brief A GPU-backed screen: framebuffer + accumulated damage rectangle.
+ * @brief One screen: its framebuffer and the damage pending on it.
  *
- * Fields are internal; construct with tiku_display_init() and use the draw /
- * flush entry points. The damage rectangle is [dx0,dx1) x [dy0,dy1) and is
- * empty when @p dirty is 0.
+ * Construct with tiku_display_init(); the damage rectangle is
+ * [dx0,dx1) x [dy0,dy1) and is empty while @p dirty is zero.
  */
 typedef struct {
-    void    *fb;        /**< framebuffer base (SSRAM, RGBA8888)               */
-    uint16_t w;         /**< width in pixels                                  */
-    uint16_t h;         /**< height in pixels                                 */
-    uint16_t stride;    /**< bytes per row (w * 4)                            */
-    uint16_t dx0;       /**< damage min x (inclusive)                         */
-    uint16_t dy0;       /**< damage min y (inclusive)                         */
-    uint16_t dx1;       /**< damage max x (exclusive)                         */
-    uint16_t dy1;       /**< damage max y (exclusive)                         */
-    uint8_t  dirty;     /**< 1 if a region is pending flush                   */
+    void    *fb;        /**< framebuffer base, backend's native format     */
+    uint16_t w;         /**< width in pixels                               */
+    uint16_t h;         /**< height in pixels                              */
+    uint16_t stride;    /**< bytes per row                                 */
+    uint16_t dx0;       /**< damage min x (inclusive)                      */
+    uint16_t dy0;       /**< damage min y (inclusive)                      */
+    uint16_t dx1;       /**< damage max x (exclusive)                      */
+    uint16_t dy1;       /**< damage max y (exclusive)                      */
+    uint8_t  dirty;     /**< non-zero when a region awaits flush           */
+    uint8_t  fmt;       /**< tiku_display_fmt_t of @p fb                   */
 } tiku_display_t;
 
 /**
- * @brief Bring up the GPU + panel and bind a framebuffer.
+ * @brief Bring the screen up and bind a framebuffer to it.
  *
- * Powers the GFX domain, brings up the display path (DSI + NemaDC + panel),
- * and binds @p fb as the screen. @p fb MUST be a w*h*4-byte SSRAM buffer.
- * @return TIKU_DC_OK, or a DC/GPU error.
+ * @note @p fb must hold w * h pixels in tiku_display_format(), and must be
+ *       memory the display hardware can reach as a bus master.
+ *
+ * @param d  Screen to initialise
+ * @param fb Framebuffer base
+ * @param w  Width in pixels
+ * @param h  Height in pixels
+ * @return TIKU_DISPLAY_OK, or a negative error
  */
-tiku_dc_err_t tiku_display_init(tiku_display_t *d, void *fb,
-                                uint16_t w, uint16_t h);
+int tiku_display_init(tiku_display_t *d, void *fb, uint16_t w, uint16_t h);
 
-/** @brief Clear the whole screen to @p color (GPU fill); marks full damage. */
-tiku_gpu_err_t tiku_display_clear(tiku_display_t *d, uint32_t color);
-
-/** @brief Fill a rectangle (GPU) and extend the damage region. */
-tiku_gpu_err_t tiku_display_fill_rect(tiku_display_t *d,
-                                      int16_t x, int16_t y,
-                                      uint16_t w, uint16_t h, uint32_t color);
-
-/** @brief Fill a rounded rectangle (GPU) and extend the damage region. */
-tiku_gpu_err_t tiku_display_fill_rounded_rect(tiku_display_t *d,
-                                              int16_t x, int16_t y,
-                                              uint16_t w, uint16_t h,
-                                              uint16_t r, uint32_t color);
-
-/** @brief Fill a circle (GPU) and extend the damage region. */
-tiku_gpu_err_t tiku_display_fill_circle(tiku_display_t *d,
-                                        int16_t cx, int16_t cy,
-                                        uint16_t r, uint32_t color);
+/** @brief Which optional primitives this backend really has. */
+uint32_t tiku_display_caps(void);
 
 /**
- * @brief Blit a source surface onto the screen at (@p x, @p y) and damage it.
+ * @brief The screen's native size, which the panel fixes.
  *
- * @p src MUST be an SSRAM surface (see tiku_gpu_surface_t).
+ * @note Ask before allocating: a framebuffer of any other size is refused,
+ *       because a controller scanning the wrong geometry shows a smear
+ *       rather than reporting an error.
+ *
+ * @param w  Receives width in pixels, or NULL
+ * @param h  Receives height in pixels, or NULL
  */
-tiku_gpu_err_t tiku_display_blit(tiku_display_t *d,
-                                 const tiku_gpu_surface_t *src,
-                                 int16_t x, int16_t y, tiku_gpu_blend_t blend);
+void tiku_display_geometry(uint16_t *w, uint16_t *h);
+
+/** @brief Bytes per pixel of the native format. */
+uint16_t tiku_display_bpp(void);
+
+/** @brief The pixel layout this backend's framebuffer uses. */
+tiku_display_fmt_t tiku_display_format(void);
 
 /**
- * @brief Push the accumulated damage region to the panel and clear it.
+ * @brief Fill the whole screen and mark all of it damaged.
  *
- * A partial-rect transfer of exactly the damaged bounds (nothing if clean).
- * @return TIKU_DC_OK (also when there was nothing to flush).
+ * @param d      Screen
+ * @param colour Colour as ARGB8888, converted to the native format
+ * @return TIKU_DISPLAY_OK, or a negative error
  */
-tiku_dc_err_t tiku_display_flush(tiku_display_t *d);
+int tiku_display_clear(tiku_display_t *d, uint32_t colour);
 
-/** @brief Bounds of the pending damage; returns 0 if clean, 1 if dirty. */
+/**
+ * @brief Fill a rectangle and extend the damage region.
+ *
+ * @param d      Screen
+ * @param x      Left edge, may be negative
+ * @param y      Top edge, may be negative
+ * @param w      Width in pixels
+ * @param h      Height in pixels
+ * @param colour Colour as ARGB8888
+ * @return TIKU_DISPLAY_OK, or a negative error
+ */
+int tiku_display_fill_rect(tiku_display_t *d, int16_t x, int16_t y,
+                           uint16_t w, uint16_t h, uint32_t colour);
+
+/**
+ * @brief Fill a circle, where the backend advertises CAP_CIRCLE.
+ *
+ * @param d      Screen
+ * @param cx     Centre x
+ * @param cy     Centre y
+ * @param r      Radius in pixels
+ * @param colour Colour as ARGB8888
+ * @return TIKU_DISPLAY_OK, or TIKU_DISPLAY_ERR_UNSUPPORTED
+ */
+int tiku_display_fill_circle(tiku_display_t *d, int16_t cx, int16_t cy,
+                             uint16_t r, uint32_t colour);
+
+/**
+ * @brief Fill a rounded rectangle, where the backend advertises CAP_ROUNDED.
+ *
+ * @param d      Screen
+ * @param x      Left edge
+ * @param y      Top edge
+ * @param w      Width in pixels
+ * @param h      Height in pixels
+ * @param r      Corner radius
+ * @param colour Colour as ARGB8888
+ * @return TIKU_DISPLAY_OK, or TIKU_DISPLAY_ERR_UNSUPPORTED
+ */
+int tiku_display_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
+                                   uint16_t w, uint16_t h, uint16_t r,
+                                   uint32_t colour);
+
+/**
+ * @brief Make the damaged region visible and clear the damage.
+ *
+ * @param d  Screen
+ * @return TIKU_DISPLAY_OK, including when there was nothing to do
+ */
+int tiku_display_flush(tiku_display_t *d);
+
+/**
+ * @brief Bounds of the damage awaiting flush.
+ *
+ * @param d  Screen
+ * @param x  Receives left edge, or NULL
+ * @param y  Receives top edge, or NULL
+ * @param w  Receives width, or NULL
+ * @param h  Receives height, or NULL
+ * @return 1 when a region is pending, 0 when clean
+ */
 int tiku_display_damage_bounds(const tiku_display_t *d,
                                uint16_t *x, uint16_t *y,
                                uint16_t *w, uint16_t *h);

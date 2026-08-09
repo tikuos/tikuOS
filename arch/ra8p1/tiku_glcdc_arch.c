@@ -339,6 +339,17 @@ tiku_glcdc_arch_stop(void)
 }
 
 int
+tiku_glcdc_arch_rebind(const void *fb)
+{
+    if (!glcdc_running || fb == 0) {
+        return TIKU_GLCDC_ERR_STATE;
+    }
+    TIKU_REG32(RA8P1_GLCDC_GR_FLM2(1)) = (uint32_t)(uintptr_t)fb;
+    TIKU_REG32(RA8P1_GLCDC_GR_VEN(1))  = RA8P1_GLCDC_GR_VEN_PVEN;
+    return TIKU_GLCDC_OK;
+}
+
+int
 tiku_glcdc_arch_panel_start(const void *fb)
 {
     /* The panel's own timing; the demo runs the same numbers on this board. */
@@ -353,6 +364,11 @@ tiku_glcdc_arch_panel_start(const void *fb)
 
     if (fb == 0) {
         return TIKU_GLCDC_ERR_INVALID;
+    }
+    /* Already scanning: rebinding costs a register write and a frame, where
+     * a restart would blank the panel and re-run the reset dance. */
+    if (glcdc_running) {
+        return tiku_glcdc_arch_rebind(fb);
     }
 
     /* Panel reset low, backlight off, while the pins are still settling. */

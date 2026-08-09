@@ -5,36 +5,26 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_display.c - minimal GPU-accelerated compositor for tikuOS.
+ * tiku_display.c - damage tracking over whichever screen backend is built.
  *
- * See tiku_display.h. Draw operations render into an SSRAM framebuffer via the
- * from-scratch GPU driver and accumulate a bounding damage rectangle; flush()
- * pushes only that rectangle to the panel with a partial-rect DC transfer.
+ * Clipping and the damage rectangle are the same arithmetic on every part, so
+ * they live here; the backend sees only on-screen geometry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_display.h"
+#include "tiku_display_arch.h"
 
-/*---------------------------------------------------------------------------*/
-/* Helpers                                                                   */
-/*---------------------------------------------------------------------------*/
-
-/** Build a GPU surface descriptor for the whole screen framebuffer. */
-static tiku_gpu_surface_t
-screen_surface(const tiku_display_t *d)
-{
-    tiku_gpu_surface_t s;
-    s.base     = d->fb;
-    s.w        = d->w;
-    s.h        = d->h;
-    s.stride   = d->stride;
-    s.format   = TIKU_GPU_FMT_RGBA8888;
-    s.sampling = TIKU_GPU_SAMPLE_POINT;
-    return s;
-}
-
-/** Extend the damage rectangle to cover (x,y,w,h), clamped to the screen. */
+/**
+ * @brief Extend the damage rectangle to cover a region, clamped to the screen.
+ *
+ * @param d  Screen
+ * @param x  Region left, may be negative
+ * @param y  Region top, may be negative
+ * @param w  Region width
+ * @param h  Region height
+ */
 static void
 damage_add(tiku_display_t *d, int32_t x, int32_t y, int32_t w, int32_t h)
 {
@@ -58,107 +48,168 @@ damage_add(tiku_display_t *d, int32_t x, int32_t y, int32_t w, int32_t h)
     }
 }
 
+/**
+ * @brief Clip a rectangle to the screen for a backend that does not clip.
+ *
+ * @param d   Screen
+ * @param x   In/out left edge
+ * @param y   In/out top edge
+ * @param w   In/out width
+ * @param h   In/out height
+ * @return Non-zero when something remains to draw
+ */
+static int
+clip_rect(const tiku_display_t *d, int32_t *x, int32_t *y,
+          int32_t *w, int32_t *h)
+{
+    int32_t x1 = *x + *w, y1 = *y + *h;
+
+    if (*x < 0) { *x = 0; }
+    if (*y < 0) { *y = 0; }
+    if (x1 > (int32_t)d->w) { x1 = (int32_t)d->w; }
+    if (y1 > (int32_t)d->h) { y1 = (int32_t)d->h; }
+    *w = x1 - *x;
+    *h = y1 - *y;
+    return (*w > 0 && *h > 0);
+}
+
 /*---------------------------------------------------------------------------*/
 /* Lifecycle                                                                 */
 /*---------------------------------------------------------------------------*/
 
-tiku_dc_err_t
+int
 tiku_display_init(tiku_display_t *d, void *fb, uint16_t w, uint16_t h)
 {
-    tiku_dc_err_t err;
+    uint16_t bpp;
+
+    if (d == 0 || fb == 0 || w == 0u || h == 0u) {
+        return TIKU_DISPLAY_ERR_INVALID;
+    }
+    d->fmt = (uint8_t)tiku_display_arch_format();
+    bpp = (d->fmt == (uint8_t)TIKU_DISPLAY_FMT_RGB565) ? 2u : 4u;
 
     d->fb     = fb;
     d->w      = w;
     d->h      = h;
-    d->stride = (uint16_t)(w * 4u);
+    d->stride = (uint16_t)(w * bpp);
     d->dirty  = 0u;
     d->dx0 = d->dy0 = d->dx1 = d->dy1 = 0u;
 
-    if (tiku_gpu_init(TIKU_GPU_PERF_LP_96MHZ) != TIKU_GPU_OK) {
-        return TIKU_DC_ERR_POWER;
-    }
-    err = tiku_dc_init();
-    return err;
+    return tiku_display_arch_init(d);
+}
+
+uint32_t
+tiku_display_caps(void)
+{
+    return tiku_display_arch_caps();
+}
+
+tiku_display_fmt_t
+tiku_display_format(void)
+{
+    return tiku_display_arch_format();
+}
+
+void
+tiku_display_geometry(uint16_t *w, uint16_t *h)
+{
+    tiku_display_arch_geometry(w, h);
+}
+
+uint16_t
+tiku_display_bpp(void)
+{
+    return (tiku_display_arch_format() == TIKU_DISPLAY_FMT_RGB565) ? 2u : 4u;
 }
 
 /*---------------------------------------------------------------------------*/
 /* Drawing                                                                   */
 /*---------------------------------------------------------------------------*/
 
-tiku_gpu_err_t
-tiku_display_clear(tiku_display_t *d, uint32_t color)
+int
+tiku_display_clear(tiku_display_t *d, uint32_t colour)
 {
-    tiku_gpu_err_t err = tiku_gpu_fill(d->fb, d->w, d->h, d->stride, color);
+    if (d == 0 || d->fb == 0) {
+        return TIKU_DISPLAY_ERR_STATE;
+    }
     damage_add(d, 0, 0, (int32_t)d->w, (int32_t)d->h);
-    return err;
+    return tiku_display_arch_fill_rect(d, 0u, 0u, d->w, d->h, colour);
 }
 
-tiku_gpu_err_t
+int
 tiku_display_fill_rect(tiku_display_t *d, int16_t x, int16_t y,
-                       uint16_t w, uint16_t h, uint32_t color)
+                       uint16_t w, uint16_t h, uint32_t colour)
 {
-    tiku_gpu_surface_t s = screen_surface(d);
-    tiku_gpu_err_t err = tiku_gpu_fill_rect(&s, x, y, w, h, color);
+    int32_t cx = x, cy = y, cw = w, ch = h;
+
+    if (d == 0 || d->fb == 0) {
+        return TIKU_DISPLAY_ERR_STATE;
+    }
     damage_add(d, x, y, (int32_t)w, (int32_t)h);
-    return err;
+    if (!clip_rect(d, &cx, &cy, &cw, &ch)) {
+        return TIKU_DISPLAY_OK;             /* nothing on screen to draw */
+    }
+    return tiku_display_arch_fill_rect(d, (uint16_t)cx, (uint16_t)cy,
+                                       (uint16_t)cw, (uint16_t)ch, colour);
 }
 
-tiku_gpu_err_t
-tiku_display_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
-                               uint16_t w, uint16_t h, uint16_t r, uint32_t color)
-{
-    tiku_gpu_surface_t s = screen_surface(d);
-    tiku_gpu_err_t err = tiku_gpu_fill_rounded_rect(&s, x, y, w, h, r, color);
-    damage_add(d, x, y, (int32_t)w, (int32_t)h);
-    return err;
-}
-
-tiku_gpu_err_t
+int
 tiku_display_fill_circle(tiku_display_t *d, int16_t cx, int16_t cy,
-                         uint16_t r, uint32_t color)
+                         uint16_t r, uint32_t colour)
 {
-    tiku_gpu_surface_t s = screen_surface(d);
-    tiku_gpu_err_t err = tiku_gpu_fill_circle(&s, cx, cy, r, color);
+    if (d == 0 || d->fb == 0) {
+        return TIKU_DISPLAY_ERR_STATE;
+    }
+    if ((tiku_display_arch_caps() & TIKU_DISPLAY_CAP_CIRCLE) == 0u) {
+        return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    }
     damage_add(d, (int32_t)cx - (int32_t)r, (int32_t)cy - (int32_t)r,
                (int32_t)r * 2 + 1, (int32_t)r * 2 + 1);
-    return err;
+    return tiku_display_arch_fill_circle(d, cx, cy, r, colour);
 }
 
-tiku_gpu_err_t
-tiku_display_blit(tiku_display_t *d, const tiku_gpu_surface_t *src,
-                  int16_t x, int16_t y, tiku_gpu_blend_t blend)
+int
+tiku_display_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
+                               uint16_t w, uint16_t h, uint16_t r,
+                               uint32_t colour)
 {
-    tiku_gpu_surface_t s = screen_surface(d);
-    tiku_gpu_err_t err = tiku_gpu_blit(&s, src, x, y, blend);
-    damage_add(d, x, y, (int32_t)src->w, (int32_t)src->h);
-    return err;
+    if (d == 0 || d->fb == 0) {
+        return TIKU_DISPLAY_ERR_STATE;
+    }
+    if ((tiku_display_arch_caps() & TIKU_DISPLAY_CAP_ROUNDED) == 0u) {
+        return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    }
+    damage_add(d, x, y, (int32_t)w, (int32_t)h);
+    return tiku_display_arch_fill_rounded_rect(d, x, y, w, h, r, colour);
 }
 
 /*---------------------------------------------------------------------------*/
 /* Present                                                                   */
 /*---------------------------------------------------------------------------*/
 
-tiku_dc_err_t
+int
 tiku_display_flush(tiku_display_t *d)
 {
-    tiku_dc_err_t err;
+    int rc;
 
-    if (!d->dirty) {
-        return TIKU_DC_OK;
+    if (d == 0 || d->fb == 0) {
+        return TIKU_DISPLAY_ERR_STATE;
     }
-    err = tiku_dc_present_rect(d->fb, d->stride, d->dx0, d->dy0,
-                               (uint16_t)(d->dx1 - d->dx0),
-                               (uint16_t)(d->dy1 - d->dy0),
-                               TIKU_DC_FMT_RGBA8888);
+    if (!d->dirty) {
+        return TIKU_DISPLAY_OK;
+    }
+    rc = tiku_display_arch_present(d, d->dx0, d->dy0,
+                                   (uint16_t)(d->dx1 - d->dx0),
+                                   (uint16_t)(d->dy1 - d->dy0));
     d->dirty = 0u;
-    return err;
+    return rc;
 }
 
 int
 tiku_display_damage_bounds(const tiku_display_t *d, uint16_t *x, uint16_t *y,
                            uint16_t *w, uint16_t *h)
 {
-    if (!d->dirty) {
+    if (d == 0 || !d->dirty) {
         return 0;
     }
     if (x != (uint16_t *)0) { *x = d->dx0; }

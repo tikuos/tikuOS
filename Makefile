@@ -1950,7 +1950,9 @@ endif
 endif
 ifeq ($(TIKU_DRV_DC_ENABLE),1)
 SRCS += arch/ambiq/tiku_dc_arch.c
-SRCS += interfaces/display/tiku_display.c    # GPU-accelerated compositor
+SRCS += arch/ambiq/tiku_display_arch.c       # interfaces/display backend
+SRCS += interfaces/display/tiku_display.c    # portable damage tracking
+CFLAGS += -DTIKU_HAS_DISPLAY=1
 endif
 endif
 # No AmbiqSuite sources compiled in (de-SDK complete): system_apollo510.c,
@@ -2047,6 +2049,13 @@ endif
 ifeq ($(TIKU_DRV_GLCDC_ENABLE),1)
 SRCS += arch/ra8p1/tiku_glcdc_arch.c
 CFLAGS += -DTIKU_HAS_GLCDC=1
+# The portable screen needs both halves: the 2D engine draws, the controller
+# scans.  Only wire it when the drawing engine is in too.
+ifeq ($(TIKU_DRV_DRW_ENABLE),1)
+SRCS += arch/ra8p1/tiku_display_arch.c
+SRCS += interfaces/display/tiku_display.c
+CFLAGS += -DTIKU_HAS_DISPLAY=1
+endif
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_panel.c
 endif

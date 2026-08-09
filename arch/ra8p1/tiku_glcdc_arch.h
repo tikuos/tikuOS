@@ -91,6 +91,17 @@ uint32_t tiku_glcdc_arch_pixel_hz(void);
  */
 int tiku_glcdc_arch_panel_start(const void *fb);
 
+/**
+ * @brief Point the running layer at a different framebuffer.
+ *
+ * @note Takes effect at the next frame boundary, which is what makes it the
+ *       basis of page flipping as well as of re-binding.
+ *
+ * @param fb  RGB565 framebuffer of the panel's geometry
+ * @return TIKU_GLCDC_OK, or TIKU_GLCDC_ERR_STATE when nothing is running
+ */
+int tiku_glcdc_arch_rebind(const void *fb);
+
 /** @brief The parallel panel's visible geometry. */
 #define TIKU_GLCDC_PANEL_W  1024U
 #define TIKU_GLCDC_PANEL_H  600U
