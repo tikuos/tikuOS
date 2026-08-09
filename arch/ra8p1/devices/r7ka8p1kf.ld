@@ -178,11 +178,13 @@ SECTIONS
      * -- the allocator does not promise zeroed memory (tiku_arena_alloc has no
      * memset) and at MOCO speeds zeroing a megabyte costs real boot time.
      *
-     * TIKU_SRAM_HEADROOM is a small unallocated margin below the stack
-     * budget, not a growth area for statics: those land in .bss below the
-     * tier and shrink it rather than reaching here.  Nothing is placed in it,
-     * so it is kept to the smallest figure that still separates the tier from
-     * the stack's own reserve; the tier takes everything else.
+     * TIKU_SRAM_HEADROOM is the margin between the tier's top and the stack
+     * machinery: a stack frame striding past the 4 KB guard lands here, in
+     * unowned memory, before it lands on the tier.  No frame in the tree
+     * strides past the guard (arch/nordic/tiku_mpu_arch.c sizes both from
+     * BASIC's largest frames), so the figure is that same worst frame with
+     * margin -- defence for a frame class the tree does not yet contain,
+     * not a measured need.
      */
     /* Overridable so a link-contract test can squeeze the span from the top
      * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()

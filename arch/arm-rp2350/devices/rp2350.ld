@@ -262,7 +262,12 @@ SECTIONS
      * guard.  Being outside .bss also keeps the span out of the crt's zero
      * loop, which the allocator has never needed.
      */
-    /* Overridable so a link-contract test can squeeze the span from the top
+    /* The margin between the tier's top and the guard: a frame striding past
+     * the 4 KB guard lands here before it lands on the tier.  Sized to the
+     * same worst frame (BASIC's largest) that sized the stack budget; no
+     * frame in the tree strides past the guard today.
+     *
+     * Overridable so a link-contract test can squeeze the span from the top
      * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
      * is required -- a bare --defsym symbol is not in scope for a script
      * expression and errors out as undefined. */

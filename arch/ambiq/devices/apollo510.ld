@@ -248,7 +248,11 @@ SECTIONS
      * (__ssram_start..__ssram_end), which the allocator has never needed --
      * it does not promise zeroed memory.
      */
-    /* Overridable so a link-contract test can squeeze the span from the top
+    /* The reserve protects nothing here: the stack lives in TCM and nothing
+     * sits above the tier in this bank.  The figure is arbitrary, kept equal
+     * to the stack-side ports' margin; reclaim it if the capacity is wanted.
+     *
+     * Overridable so a link-contract test can squeeze the span from the top
      * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
      * is required -- a bare --defsym symbol is not in scope for a script
      * expression and errors out as undefined. */
