@@ -1026,6 +1026,57 @@
 #define RA8P1_ICU_NMI_WDT       (1UL << 1)   /* WDTEN / WDTCLR / WDTST */
 
 /*---------------------------------------------------------------------------*/
+/* DRW -- 2D drawing engine (UM 63)                                          */
+/*                                                                           */
+/* A D/AVE-class rasteriser: up to six "limiters" each describe a half plane */
+/* as a decision value that steps by a per-x and per-y increment across a    */
+/* bounding box; their intersection is the shape, and the clamped result is  */
+/* the pixel alpha.  The CPU computes the corner value and the increments.   */
+/*                                                                           */
+/* TWO TRAPS, both silent:                                                   */
+/*  - Offsets 0x00 and 0x04 are DIFFERENT registers by direction.  Writing   */
+/*    0x00 sets CONTROL, reading it returns STATUS; 0x04 is CONTROL2 for a   */
+/*    write and HWREVISION for a read.  A read-modify-write on either feeds  */
+/*    status bits back as control, so both are write-only shadows here.      */
+/*  - ORIGIN is the TRIGGER (UM 63.7.1): writing it starts the render, so it */
+/*    must be written LAST, after every other register is already set.       */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_DRW_BASE          0x40444000UL
+#define RA8P1_DRW_CONTROL       (RA8P1_DRW_BASE + 0x00UL)  /* W */
+#define RA8P1_DRW_STATUS        (RA8P1_DRW_BASE + 0x00UL)  /* R */
+#define RA8P1_DRW_CONTROL2      (RA8P1_DRW_BASE + 0x04UL)  /* W */
+#define RA8P1_DRW_HWREVISION    (RA8P1_DRW_BASE + 0x04UL)  /* R */
+#define RA8P1_DRW_LSTART(n)     (RA8P1_DRW_BASE + 0x10UL + (4UL * (n)))
+#define RA8P1_DRW_LXADD(n)      (RA8P1_DRW_BASE + 0x28UL + (4UL * (n)))
+#define RA8P1_DRW_LYADD(n)      (RA8P1_DRW_BASE + 0x40UL + (4UL * (n)))
+#define RA8P1_DRW_COLOR1        (RA8P1_DRW_BASE + 0x64UL)
+#define RA8P1_DRW_COLOR2        (RA8P1_DRW_BASE + 0x68UL)
+#define RA8P1_DRW_PATTERN       (RA8P1_DRW_BASE + 0x74UL)
+#define RA8P1_DRW_SIZE          (RA8P1_DRW_BASE + 0x78UL)
+#define RA8P1_DRW_PITCH         (RA8P1_DRW_BASE + 0x7CUL)
+#define RA8P1_DRW_ORIGIN        (RA8P1_DRW_BASE + 0x80UL)  /* W: STARTS render */
+#define RA8P1_DRW_IRQCTL        (RA8P1_DRW_BASE + 0xC0UL)
+#define RA8P1_DRW_CACHECTL      (RA8P1_DRW_BASE + 0xC4UL)
+#define RA8P1_DRW_DLISTSTART    (RA8P1_DRW_BASE + 0xC8UL)
+#define RA8P1_DRW_COLKEY        (RA8P1_DRW_BASE + 0xE8UL)
+
+/* CONTROL: one enable per limiter, bits 0..5. */
+#define RA8P1_DRW_CTL_LIMEN(n)  (1UL << (n))
+
+/* CONTROL2: framebuffer format lives in bit 8 and bits 21:20 together --
+ * 0b001 selects 16 bpp RGB565, which is the format this port renders in. */
+#define RA8P1_DRW_CTL2_WRFMT_RGB565  (1UL << 20)
+
+/* STATUS: the render is done when neither unit is busy.  DLISTACTIVE must
+ * also be clear before a new register-mode setup (UM 63.7.1). */
+#define RA8P1_DRW_ST_BUSYENUM   (1UL << 0)
+#define RA8P1_DRW_ST_BUSYWRITE  (1UL << 1)
+
+/** @brief Module stop: MSTPCRC.MSTPC6 gates the DRW; MSTPC4 gates the GLCDC. */
+#define RA8P1_MSTPCRC_DRW       (1UL << 6)
+#define RA8P1_MSTPCRC_GLCDC     (1UL << 4)
+
+/*---------------------------------------------------------------------------*/
 /* Cortex-M85 core peripherals (Armv8.1-M, not part-specific)                */
 /*---------------------------------------------------------------------------*/
 #define RA8P1_SCB_VTOR          0xE000ED08UL
@@ -1180,6 +1231,19 @@
 
 /** @brief Power gating for the NPU domain (UM 11.2.15); PDDE is inverted --
  *         0 powers the domain ON.  Resets to 0x81: gated and held off. */
+/*
+ * Graphics power domain (UM 11.2.14).  DRW, GLCDC, MIPI DSI and MIPI CSI all
+ * sit inside it and it is powered OFF at reset -- PDCTRGD reads 0x81, PDDE
+ * set and PDPGSF confirming the gate.  Releasing the module stop alone is not
+ * enough: with the domain down every register in the block reads back as zero
+ * with no fault, so the failure looks like an absent peripheral rather than a
+ * missing step.  Same shape and same bit layout as PDCTRNPU below.
+ */
+#define RA8P1_PDCTRGD           (RA8P1_SYSC_BASE + 0x110UL)   /* 8-bit */
+#define RA8P1_PDCTRGD_PDDE      (1U << 0)   /* 1 = power OFF the domain    */
+#define RA8P1_PDCTRGD_PDCSF     (1U << 6)   /* gating control in progress  */
+#define RA8P1_PDCTRGD_PDPGSF    (1U << 7)   /* 1 = domain is gated off     */
+
 #define RA8P1_PDCTRNPU          (RA8P1_SYSC_BASE + 0x114UL)   /* 8-bit */
 #define RA8P1_PDCTRNPU_PDDE     (1U << 0)   /* 1 = power OFF the domain    */
 #define RA8P1_PDCTRNPU_PDCSF    (1U << 6)   /* gating control in progress  */
