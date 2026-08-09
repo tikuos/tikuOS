@@ -86,6 +86,14 @@
 #define TIKU_SHELL_CMD_NPU     0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_CAM
+/* Follows the driver opt-in: the camera is an expansion board. */
+#if (TIKU_HAS_CAM + 0)
+#define TIKU_SHELL_CMD_CAM     1  /**< cam     - camera bring-up/capture */
+#else
+#define TIKU_SHELL_CMD_CAM     0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_PANEL
 /* Follows the driver opt-in: the parallel RGB panel is an expansion board,
  * and a build without the display controller has nothing to drive. */

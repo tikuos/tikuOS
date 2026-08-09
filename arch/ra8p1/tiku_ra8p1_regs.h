@@ -870,6 +870,24 @@
 #define RA8P1_GPT_GTCNT(n)      (RA8P1_GPT_BASE(n) + 0x48UL)
 #define RA8P1_GPT_GTCCRA(n)     (RA8P1_GPT_BASE(n) + 0x4CUL)
 #define RA8P1_GPT_GTPR(n)       (RA8P1_GPT_BASE(n) + 0x64UL)
+#define RA8P1_GPT_GTWP(n)       (RA8P1_GPT_BASE(n) + 0x00UL)
+#define RA8P1_GPT_GTIOR(n)      (RA8P1_GPT_BASE(n) + 0x34UL)
+#define RA8P1_GPT_GTUDDTYC(n)   (RA8P1_GPT_BASE(n) + 0x30UL)
+
+/* GTWP drops every other write until the key opens it. */
+#define RA8P1_GPT_GTWP_KEY      0xA500UL
+
+/* GTIOR.GTIOA[4:0]: initial level, cycle-end action, compare-match action.
+ * 0x09 = start low, high at compare match, low at cycle end -- a square-ish
+ * clock whose consumer PLL does not mind the duty.  OAE gates the pin. */
+#define RA8P1_GPT_GTIOA_CLK     0x09UL
+#define RA8P1_GPT_GTIOR_OAE     (1UL << 8)
+
+/** @brief Module stop: MSTPCRE.MSTPE19 gates GPT channel 12 (camera XCLK). */
+#define RA8P1_MSTPCRE_GPT12     (1UL << 19)
+
+/** @brief Pin function select for the GPT outputs. */
+#define RA8P1_PFS_PSEL_GPT      0x03UL
 #define RA8P1_GPT_GTCR_CST      (1UL << 0)     /* count start          */
 /*
  * GTCLKCR must be written BEFORE the module-stop release and is locked once
@@ -1272,6 +1290,92 @@
 /** @brief Module stop: MSTPCRC.MSTPC6 gates the DRW; MSTPC4 gates the GLCDC. */
 #define RA8P1_MSTPCRC_DRW       (1UL << 6)
 #define RA8P1_MSTPCRC_GLCDC     (1UL << 4)
+#define RA8P1_MSTPCRC_MIPI_CSI  (1UL << 17)  /* CSI receiver + VIN together */
+
+/*---------------------------------------------------------------------------*/
+/* MIPI D-PHY (UM 65), CSI-2 receiver (UM 67), video input VIN (UM 68)       */
+/*---------------------------------------------------------------------------*/
+
+/** @brief D-PHY, shared between DSI and CSI; CSI uses it as a receiver. */
+#define RA8P1_DPHY_BASE         0x40346C00UL
+#define RA8P1_DPHY_REFCR        (RA8P1_DPHY_BASE + 0x00UL)  /* ref frequency */
+#define RA8P1_DPHY_PLOCR        (RA8P1_DPHY_BASE + 0x08UL)  /* PLL stop      */
+#define RA8P1_DPHY_PWRCR        (RA8P1_DPHY_BASE + 0x10UL)  /* power enable  */
+#define RA8P1_DPHY_SFR          (RA8P1_DPHY_BASE + 0x1CUL)  /* status flags  */
+#define RA8P1_DPHY_OCR          (RA8P1_DPHY_BASE + 0x20UL)  /* operation en  */
+#define RA8P1_DPHY_TIM1         (RA8P1_DPHY_BASE + 0x24UL)  /* T_INIT        */
+#define RA8P1_DPHY_TIM2         (RA8P1_DPHY_BASE + 0x28UL)  /* clk prep/sett */
+#define RA8P1_DPHY_TIM3         (RA8P1_DPHY_BASE + 0x2CUL)  /* hs prep/sett  */
+#define RA8P1_DPHY_TIM4         (RA8P1_DPHY_BASE + 0x30UL)  /* clk zero..trl */
+#define RA8P1_DPHY_TIM5         (RA8P1_DPHY_BASE + 0x34UL)  /* hs zero..exit */
+#define RA8P1_DPHY_TIM6         (RA8P1_DPHY_BASE + 0x38UL)  /* T_LPX         */
+#define RA8P1_DPHY_MDC          (RA8P1_DPHY_BASE + 0x48UL)  /* master enable */
+
+#define RA8P1_DPHY_PWRCR_PWRSEN (1UL << 0)
+#define RA8P1_DPHY_SFR_PWRSF    (1UL << 0)
+#define RA8P1_DPHY_OCR_DPHYEN   (1UL << 0)
+
+/** @brief CSI-2 receiver; interrupt enables stay 0, this port polls. */
+#define RA8P1_CSI_BASE          0x40347000UL
+#define RA8P1_CSI_MCT0          (RA8P1_CSI_BASE + 0x010UL)
+#define RA8P1_CSI_MCT2          (RA8P1_CSI_BASE + 0x018UL)
+#define RA8P1_CSI_MCT3          (RA8P1_CSI_BASE + 0x01CUL)
+#define RA8P1_CSI_RTCT          (RA8P1_CSI_BASE + 0x028UL)
+#define RA8P1_CSI_RTST          (RA8P1_CSI_BASE + 0x02CUL)
+#define RA8P1_CSI_EPCT          (RA8P1_CSI_BASE + 0x040UL)
+#define RA8P1_CSI_EMCT          (RA8P1_CSI_BASE + 0x044UL)
+#define RA8P1_CSI_DTEL          (RA8P1_CSI_BASE + 0x060UL)
+#define RA8P1_CSI_DTEH          (RA8P1_CSI_BASE + 0x064UL)
+#define RA8P1_CSI_RXST          (RA8P1_CSI_BASE + 0x070UL)
+#define RA8P1_CSI_RXSC          (RA8P1_CSI_BASE + 0x074UL)
+#define RA8P1_CSI_DLST0         (RA8P1_CSI_BASE + 0x080UL)
+#define RA8P1_CSI_DLST1         (RA8P1_CSI_BASE + 0x090UL)
+#define RA8P1_CSI_VCST0         (RA8P1_CSI_BASE + 0x100UL)
+#define RA8P1_CSI_PMST          (RA8P1_CSI_BASE + 0x200UL)
+#define RA8P1_CSI_GSCT          (RA8P1_CSI_BASE + 0x280UL)
+
+#define RA8P1_CSI_MCT3_RXEN     (1UL << 0)
+#define RA8P1_CSI_RTST_VSRSTS   (1UL << 0)
+/* MCT0: two lanes, no zero-length output, error-frame notify, reserved-
+ * packet pass, generic CSI-2 rule (the manual: "set to 1 for this LSI"),
+ * 24-bit ECC check. */
+#define RA8P1_CSI_MCT0_2LANE    (2UL | (1UL << 16) | (1UL << 17) | \
+                                 (1UL << 19) | (1UL << 20) | (1UL << 24))
+
+/** @brief Video input unit: preclip, colour conversion, memory writer. */
+#define RA8P1_VIN_BASE          0x40347400UL
+#define RA8P1_VIN_MC            (RA8P1_VIN_BASE + 0x000UL)
+#define RA8P1_VIN_MS            (RA8P1_VIN_BASE + 0x004UL)
+#define RA8P1_VIN_FC            (RA8P1_VIN_BASE + 0x008UL)
+#define RA8P1_VIN_SLPRC         (RA8P1_VIN_BASE + 0x00CUL)
+#define RA8P1_VIN_ELPRC         (RA8P1_VIN_BASE + 0x010UL)
+#define RA8P1_VIN_SPPRC         (RA8P1_VIN_BASE + 0x014UL)
+#define RA8P1_VIN_EPPRC         (RA8P1_VIN_BASE + 0x018UL)
+#define RA8P1_VIN_CSI_IFMD      (RA8P1_VIN_BASE + 0x020UL)
+#define RA8P1_VIN_CSIFLD        (RA8P1_VIN_BASE + 0x024UL)
+#define RA8P1_VIN_IS            (RA8P1_VIN_BASE + 0x02CUL)
+#define RA8P1_VIN_MB1           (RA8P1_VIN_BASE + 0x030UL)
+#define RA8P1_VIN_MB2           (RA8P1_VIN_BASE + 0x034UL)
+#define RA8P1_VIN_MB3           (RA8P1_VIN_BASE + 0x038UL)
+#define RA8P1_VIN_LC            (RA8P1_VIN_BASE + 0x03CUL)
+#define RA8P1_VIN_IE            (RA8P1_VIN_BASE + 0x040UL)
+#define RA8P1_VIN_INTS          (RA8P1_VIN_BASE + 0x044UL)
+#define RA8P1_VIN_DMR           (RA8P1_VIN_BASE + 0x058UL)
+#define RA8P1_VIN_UVAOF         (RA8P1_VIN_BASE + 0x060UL)
+#define RA8P1_VIN_UDS_CTRL      (RA8P1_VIN_BASE + 0x080UL)
+
+#define RA8P1_VIN_MC_ME         (1UL << 0)
+#define RA8P1_VIN_MC_ST         (1UL << 22)
+#define RA8P1_VIN_FC_CC         (1UL << 1)
+#define RA8P1_VIN_INTS_FIS      (1UL << 4)   /* frame write complete */
+/* MC value for this pipeline: odd/even interlace handling, YCbCr422 8-bit
+ * in, dithering direction on; conversion stays enabled (BPS clear). */
+#define RA8P1_VIN_MC_CFG        ((1UL << 3) | (1UL << 16) | (1UL << 24))
+/* CSI_IFMD: virtual channel 0, data type YUV422 8-bit, zero-extension. */
+#define RA8P1_VIN_IFMD_CFG      ((0x1EUL << 8) | (1UL << 25))
+/* DMR: no further conversion after the colour-space core, alpha bit one,
+ * output byte swap on, spare alpha byte as the vendor ships it. */
+#define RA8P1_VIN_DMR_CFG       (0xAA000014UL)
 
 /*---------------------------------------------------------------------------*/
 /* Cortex-M85 core peripherals (Armv8.1-M, not part-specific)                */

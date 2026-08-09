@@ -93,6 +93,9 @@
 #if TIKU_SHELL_CMD_PANEL
 #include "commands/tiku_shell_cmd_panel.h"
 #endif
+#if TIKU_SHELL_CMD_CAM
+#include "commands/tiku_shell_cmd_cam.h"
+#endif
 #if TIKU_SHELL_CMD_TRNG
 #include "commands/tiku_shell_cmd_trng.h"
 #include "commands/tiku_shell_cmd_xflash.h"
@@ -587,6 +590,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_PANEL
     {"panel",   "parallel RGB display: paint a colour", tiku_shell_cmd_panel},
+#endif
+#if TIKU_SHELL_CMD_CAM
+    {"cam",     "camera: power, identify, capture", tiku_shell_cmd_cam},
 #endif
 #if TIKU_SHELL_CMD_NPU
     {"npu",     "Ethos-U55: release and report", tiku_shell_cmd_npu},

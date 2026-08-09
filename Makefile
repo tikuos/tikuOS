@@ -2041,6 +2041,18 @@ SRCS += arch/ra8p1/tiku_xflash_arch.c
 # model should not carry them.
 # The 2D drawing engine renders into memory and needs no panel, but a build
 # with no display has no use for it -- opt in, like the NPU.
+SRCS += arch/ra8p1/tiku_i2c_arch.c               # IIC1: camera + touch bus
+
+# Camera bring-up rides the same bus; opt-in like every expansion driver.
+ifeq ($(TIKU_DRV_CAM_ENABLE),1)
+SRCS += arch/ra8p1/tiku_camera_arch.c
+SRCS += arch/ra8p1/tiku_vin_arch.c
+CFLAGS += -DTIKU_HAS_CAM=1
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_cam.c
+endif
+endif
+
 ifeq ($(TIKU_DRV_DRW_ENABLE),1)
 SRCS += arch/ra8p1/tiku_drw_arch.c
 CFLAGS += -DTIKU_HAS_DRW=1

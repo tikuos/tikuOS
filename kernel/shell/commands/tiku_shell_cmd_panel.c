@@ -104,6 +104,12 @@ panel_ready(void)
     return 1;
 }
 
+tiku_display_t *
+tiku_shell_cmd_panel_display(void)
+{
+    return panel_ready() ? &panel_disp : (tiku_display_t *)0;
+}
+
 /**
  * @brief Draw the name in blocks, one rectangle per run of set bits.
  *
@@ -154,7 +160,7 @@ panel_draw_name(uint16_t scale, uint32_t colour)
 }
 
 void
-tiku_shell_cmd_panel(int argc, char **argv)
+tiku_shell_cmd_panel(uint8_t argc, const char *argv[])
 {
     uint32_t colour = 0x00FF0000u;
     unsigned c;
