@@ -536,6 +536,37 @@ device_id_read(char *buf, size_t max)
 }
 
 /**
+ * @brief Read handler for /sys/device/uid.
+ *
+ * The whole per-die identifier as hex, however many bytes this part has --
+ * /sys/device/id renders only the first two as a friendly name.  Empty when
+ * the part has no unique ID rather than inventing one.
+ *
+ * @param buf  Output buffer for the rendered text
+ * @param max  Capacity of @p buf in bytes
+ * @return Bytes written, or -1 on error
+ */
+static int
+device_uid_read(char *buf, size_t max)
+{
+    uint8_t  id[16];
+    uint8_t  n;
+    unsigned i;
+    int      used = 0;
+
+    n = tiku_common_unique_id(id, (uint8_t)sizeof(id));
+    for (i = 0U; i < (unsigned)n; i++) {
+        int w = snprintf(buf + used, max - (size_t)used, "%02x",
+                         (unsigned)id[i]);
+        if (w < 0 || (size_t)(used + w) >= max) {
+            return -1;
+        }
+        used += w;
+    }
+    return used + snprintf(buf + used, max - (size_t)used, "\n");
+}
+
+/**
  * @brief Read handler for /sys/device/mcu.
  *
  * Renders the silicon name from the selected device header
@@ -650,6 +681,7 @@ static const tiku_vfs_node_t sys_device_children[] = {
     { "name",    TIKU_VFS_FILE, device_name_read,    device_name_write, NULL, 0,
       NULL, NULL, TIKU_VFS_CAP_FS },   /* writes commit to the persistent store */
     { "id",      TIKU_VFS_FILE, device_id_read,      NULL,              NULL, 0 },
+    { "uid",     TIKU_VFS_FILE, device_uid_read,     NULL,              NULL, 0 },
     { "mcu",     TIKU_VFS_FILE, device_mcu_read,     NULL,              NULL, 0 },
     { "version", TIKU_VFS_FILE, device_version_read, NULL,              NULL, 0 },
 };
@@ -1237,7 +1269,7 @@ static const tiku_vfs_node_t sys_flpr_children[] = {
 
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
-    { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 4 },
+    { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 5 },
     { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0,
       &desc_uptime },
     { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0,
