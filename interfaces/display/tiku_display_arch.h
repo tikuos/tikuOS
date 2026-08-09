@@ -85,6 +85,19 @@ int tiku_display_arch_fill_rounded_rect(tiku_display_t *d,
                                         uint32_t colour);
 
 /**
+ * @brief Point the panel at a different framebuffer.
+ *
+ * @note A controller that scans memory retargets itself; one that transfers
+ *       rectangles has nothing to do, because its present already reads
+ *       whichever buffer the screen currently names.
+ *
+ * @param d   Screen
+ * @param fb  Buffer to show
+ * @return TIKU_DISPLAY_OK, or a negative error
+ */
+int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb);
+
+/**
  * @brief Make one region of the framebuffer visible on the glass.
  *
  * @param d  Screen

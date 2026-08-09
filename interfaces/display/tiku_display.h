@@ -38,6 +38,7 @@ typedef enum {
  */
 #define TIKU_DISPLAY_CAP_CIRCLE   (1u << 0)
 #define TIKU_DISPLAY_CAP_ROUNDED  (1u << 1)
+#define TIKU_DISPLAY_CAP_FLIP     (1u << 2)  /**< can swap whole buffers  */
 
 /**
  * @brief One screen: its framebuffer and the damage pending on it.
@@ -46,7 +47,8 @@ typedef enum {
  * [dx0,dx1) x [dy0,dy1) and is empty while @p dirty is zero.
  */
 typedef struct {
-    void    *fb;        /**< framebuffer base, backend's native format     */
+    void    *fb;        /**< where draws land; the back buffer when paired  */
+    void    *front;     /**< what the panel shows; equals fb when single    */
     uint16_t w;         /**< width in pixels                               */
     uint16_t h;         /**< height in pixels                              */
     uint16_t stride;    /**< bytes per row                                 */
@@ -72,7 +74,13 @@ typedef struct {
  */
 int tiku_display_init(tiku_display_t *d, void *fb, uint16_t w, uint16_t h);
 
-/** @brief Which optional primitives this backend really has. */
+/**
+ * @brief Which optional primitives this backend really has.
+ *
+ * @note Ask after tiku_display_init(): a capability can depend on resources
+ *       the screen only claims as it comes up, so the answer before then is
+ *       the conservative one.
+ */
 uint32_t tiku_display_caps(void);
 
 /**
@@ -144,6 +152,28 @@ int tiku_display_fill_circle(tiku_display_t *d, int16_t cx, int16_t cy,
 int tiku_display_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
                                    uint16_t w, uint16_t h, uint16_t r,
                                    uint32_t colour);
+
+/**
+ * @brief Pair two framebuffers so drawing never touches what is on show.
+ *
+ * @note Draws go to @p back from here on; @p front is what the panel shows
+ *       until the next flip.  Neither buffer's contents are copied, so a
+ *       caller that draws only differences must repaint after each flip.
+ *
+ * @param d      Screen
+ * @param front  Buffer to show now
+ * @param back   Buffer to draw into
+ * @return TIKU_DISPLAY_OK, or TIKU_DISPLAY_ERR_UNSUPPORTED without CAP_FLIP
+ */
+int tiku_display_set_buffers(tiku_display_t *d, void *front, void *back);
+
+/**
+ * @brief Show what was drawn and start drawing into the other buffer.
+ *
+ * @param d  Screen
+ * @return TIKU_DISPLAY_OK, or TIKU_DISPLAY_ERR_UNSUPPORTED without CAP_FLIP
+ */
+int tiku_display_flip(tiku_display_t *d);
 
 /**
  * @brief Make the damaged region visible and clear the damage.

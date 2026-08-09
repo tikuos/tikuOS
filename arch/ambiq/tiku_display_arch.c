@@ -64,7 +64,8 @@ tiku_display_arch_init(tiku_display_t *d)
 uint32_t
 tiku_display_arch_caps(void)
 {
-    return TIKU_DISPLAY_CAP_CIRCLE | TIKU_DISPLAY_CAP_ROUNDED;
+    return TIKU_DISPLAY_CAP_CIRCLE | TIKU_DISPLAY_CAP_ROUNDED |
+           TIKU_DISPLAY_CAP_FLIP;
 }
 
 tiku_display_fmt_t
@@ -113,6 +114,16 @@ tiku_display_arch_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
     tiku_gpu_surface_t s = screen_surface(d);
 
     return of_gpu(tiku_gpu_fill_rounded_rect(&s, x, y, w, h, r, colour));
+}
+
+int
+tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
+{
+    /* Nothing to retarget: this controller is handed an address on every
+     * transfer, so the next present reads whichever buffer the screen
+     * names by then. */
+    (void)d; (void)fb;
+    return TIKU_DISPLAY_OK;
 }
 
 int

@@ -89,6 +89,7 @@ tiku_display_init(tiku_display_t *d, void *fb, uint16_t w, uint16_t h)
     bpp = (d->fmt == (uint8_t)TIKU_DISPLAY_FMT_RGB565) ? 2u : 4u;
 
     d->fb     = fb;
+    d->front  = fb;             /* single-buffered until paired */
     d->w      = w;
     d->h      = h;
     d->stride = (uint16_t)(w * bpp);
@@ -181,6 +182,59 @@ tiku_display_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
     }
     damage_add(d, x, y, (int32_t)w, (int32_t)h);
     return tiku_display_arch_fill_rounded_rect(d, x, y, w, h, r, colour);
+}
+
+/*---------------------------------------------------------------------------*/
+/* Buffer pairing                                                            */
+/*---------------------------------------------------------------------------*/
+
+int
+tiku_display_set_buffers(tiku_display_t *d, void *front, void *back)
+{
+    int rc;
+
+    if (d == 0 || front == 0 || back == 0 || front == back) {
+        return TIKU_DISPLAY_ERR_INVALID;
+    }
+    if ((tiku_display_arch_caps() & TIKU_DISPLAY_CAP_FLIP) == 0u) {
+        return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    }
+    rc = tiku_display_arch_set_scanout(d, front);
+    if (rc != TIKU_DISPLAY_OK) {
+        return rc;
+    }
+    d->front = front;
+    d->fb    = back;
+    d->dirty = 0u;
+    return TIKU_DISPLAY_OK;
+}
+
+int
+tiku_display_flip(tiku_display_t *d)
+{
+    void *shown;
+    int rc;
+
+    if (d == 0 || d->fb == 0) {
+        return TIKU_DISPLAY_ERR_STATE;
+    }
+    if ((tiku_display_arch_caps() & TIKU_DISPLAY_CAP_FLIP) == 0u) {
+        return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    }
+    /* Publish what was drawn before showing it: on a scanning controller
+     * that is the cache clean, on a transferring one the transfer itself. */
+    rc = tiku_display_flush(d);
+    if (rc != TIKU_DISPLAY_OK) {
+        return rc;
+    }
+    rc = tiku_display_arch_set_scanout(d, d->fb);
+    if (rc != TIKU_DISPLAY_OK) {
+        return rc;
+    }
+    shown    = d->fb;
+    d->fb    = d->front;    /* draw into what has just left the glass */
+    d->front = shown;
+    return TIKU_DISPLAY_OK;
 }
 
 /*---------------------------------------------------------------------------*/

@@ -18,6 +18,10 @@
 #include "tiku_drw_arch.h"
 #include "tiku_glcdc_arch.h"
 #include "tiku_cache_arch.h"
+#include "tiku_sdram_arch.h"
+
+/** @brief Whether the external array is attached and can hold a second frame. */
+static uint8_t display_have_sdram;
 
 /**
  * @brief Narrow an ARGB8888 colour to the framebuffer's 565 layout.
@@ -49,21 +53,34 @@ tiku_display_arch_init(tiku_display_t *d)
     if (rc != TIKU_DRW_OK) {
         return TIKU_DISPLAY_ERR_STATE;
     }
+    /* Bring the external array into the allocator so a caller can hold a
+     * second frame.  A board without it still runs single-buffered, which
+     * is why this is not an error. */
+    if (!display_have_sdram &&
+        tiku_ra8p1_sdram_attach() == TIKU_RA8P1_SDRAM_OK) {
+        display_have_sdram = 1u;
+    }
     /* Publish the buffer before the controller starts scanning it, or the
      * first frames show whatever the tier held. */
     tiku_ra8p1_dcache_clean(d->fb, (uint32_t)d->stride * d->h);
 
-    return (tiku_glcdc_arch_panel_start(d->fb) == TIKU_GLCDC_OK)
+    return (tiku_glcdc_arch_panel_start(d->front) == TIKU_GLCDC_OK)
            ? TIKU_DISPLAY_OK : TIKU_DISPLAY_ERR_STATE;
 }
 
 uint32_t
 tiku_display_arch_caps(void)
 {
-    /* The 2D engine has circles and Beziers in hardware, but this port has
-     * only brought up and proved the rectangle path; claiming the rest
-     * would make the portable suite pass on work that does not exist. */
-    return 0u;
+    /* Beziers are still hardware this port has not brought up, so they stay
+     * unadvertised; rectangles and circles are proved by pixel count.
+     *
+     * Flipping is offered only when a second frame can actually be held:
+     * two frames of this panel are 2.4 MB and the SRAM tier is smaller than
+     * that, so without the external array the capability would be a promise
+     * no caller could keep.
+     */
+    return TIKU_DISPLAY_CAP_CIRCLE |
+           (display_have_sdram ? TIKU_DISPLAY_CAP_FLIP : 0u);
 }
 
 tiku_display_fmt_t
@@ -137,6 +154,16 @@ tiku_display_arch_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
 {
     (void)d; (void)x; (void)y; (void)w; (void)h; (void)r; (void)colour;
     return TIKU_DISPLAY_ERR_UNSUPPORTED;
+}
+
+int
+tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
+{
+    /* The buffer has to be in memory before the controller reads it, and
+     * the CPU may have written it without the engine's involvement. */
+    tiku_ra8p1_dcache_clean(fb, (uint32_t)d->stride * d->h);
+    return (tiku_glcdc_arch_rebind(fb) == TIKU_GLCDC_OK)
+           ? TIKU_DISPLAY_OK : TIKU_DISPLAY_ERR_STATE;
 }
 
 int
