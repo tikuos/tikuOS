@@ -130,7 +130,7 @@ _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_MIN,
                "BASIC arena does not fit the SRAM tier floor -- raise "
                "TIKU_TIER_SRAM_MIN for this MCU in the Makefile, or lower "
                "TIKU_BASIC_PROGRAM_LINES");
-#elif defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+#elif defined(PLATFORM_NORDIC)
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_SIZE,
                "BASIC arena does not fit the SRAM tier pool -- raise "
                "TIKU_TIER_SRAM_SIZE for this MCU in the Makefile, or lower "

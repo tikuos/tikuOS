@@ -70,16 +70,7 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  * TIKU_TIER_SRAM_SIZE (default 128 bytes). tiku_tier_init() points
  * tier_state[TIKU_MEM_SRAM].buf at this array.
  */
-#if defined(PLATFORM_STM32N6)
-/* STM32N6: the boot ROM copies the image into a 255 KB window part-way up the
- * AXI SRAM array, so the tier lives in .axisram -- the 2 MB above that window,
- * woken and zeroed in tiku_crt_early.c.  Same pattern as Ambiq's .ssram: the
- * image window keeps its .bss and stack, and the region table lists the arena
- * as a second SRAM region so tier sub-arenas validate. */
-static uint8_t __attribute__((section(".axisram"),
-                              aligned(TIKU_MEM_ARCH_ALIGNMENT)))
-    tier_sram_buf[TIKU_TIER_SRAM_SIZE];
-#elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
 /* nRF54LM20A: the SRAM tier lives in RAM2 (the upper 256 KB bank, linker
  * section .ram2 in nrf54lm20a.ld, zeroed by the crt and listed as a second
  * SRAM region so tier sub-arenas validate).  Keeps the primary bank's

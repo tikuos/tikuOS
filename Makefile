@@ -1230,7 +1230,12 @@ CFLAGS += -ffunction-sections -fdata-sections
 # tier arena takes 1.5 MB of that (linker section .axisram, woken and zeroed in
 # tiku_crt_early.c), which costs the image window nothing and leaves 512 KB of
 # the block for the NPU-side buffers N6-11 will want.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=1572864   # 1.5 MB tier arena above the window
+# The tier is linker-derived, so this is the guaranteed minimum, not the size.
+TIKU_TIER_SRAM_MIN ?= 262144
+# Keep in step with the ASSERT in stm32n657.ld, which checks the carved span
+# against the same figure; --defsym is not visible to a script expression.
+CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
 
 else ifeq ($(TIKU_PLATFORM),ra8p1)
 

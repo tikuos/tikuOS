@@ -118,7 +118,37 @@ SECTIONS
         *(.axisram*)
         . = ALIGN(4);
         __axisram_end = .;
+        . = ALIGN(32);
+        __axisram_top = .;
     } > AXISRAM
+
+    /*
+     * SRAM TIER -- the rest of this bank, less a small reserve.
+     *
+     * Derived rather than compiled in, for the reason the RA8P1 script gives:
+     * a constant has to be chosen per build configuration and silently stops
+     * matching the moment an .axisram buffer is added.  Being outside the
+     * section also keeps the span out of the crt's zero loop, which the
+     * allocator has never needed.
+     *
+     * The reserve protects nothing here: the stack lives in the image window
+     * and nothing sits above the tier in this bank.  The figure is arbitrary,
+     * kept equal to the stack-side ports' margin; reclaim it if the capacity
+     * is wanted.
+     *
+     * Overridable so a link-contract test can squeeze the span from the top
+     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
+     * is required -- a bare --defsym symbol is not in scope for a script
+     * expression and errors out as undefined. */
+    TIKU_AXISRAM_RESERVE = DEFINED(__tier_reserve_override)
+                         ? __tier_reserve_override : 32K;
+    __tier_sram_start = __axisram_top;
+    __tier_sram_end   = ORIGIN(AXISRAM) + LENGTH(AXISRAM)
+                      - TIKU_AXISRAM_RESERVE;
+
+    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
+    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
+           "ERROR: STM32N6 AXISRAM tier fell below its 256 KB floor -- an .axisram buffer grew into it")
 
     _end = __uninit_end;
     PROVIDE(end = _end);

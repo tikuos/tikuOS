@@ -20,8 +20,8 @@ extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t _end;       /* end of the image, including durable cells */
 extern uint32_t __stack;    /* top of the window; the stack grows down from here */
-extern uint32_t __axisram_start;    /* tier arena, above the image window */
-extern uint32_t __axisram_end;
+extern uint32_t __axisram_start;    /* bank base, above the image window */
+extern uint32_t __tier_sram_end;    /* top of the linker-carved tier span  */
 
 /* Headroom left for the stack between the free region and __stack. The whole
  * image lives in the same window as the heap on this part, so a region that
@@ -60,11 +60,14 @@ const struct tiku_mem_region *tiku_region_arch_get_table(
         stm32n6_region_table[idx].type = TIKU_MEM_REGION_SRAM;
         idx++;
 
-        /* The arena above the image window. Listed separately rather than
-         * merged with the block above because the two are not adjacent: the
-         * stack sits between them. */
+        /* The bank above the image window: any .axisram statics plus the
+         * linker-carved tier span.  Listed separately rather than merged
+         * with the block above because the two are not adjacent: the stack
+         * sits between them.  Bounded by the carve top, not the section end
+         * -- the section is empty now that the tier is carved outside it,
+         * and a section-bounded entry would register nothing. */
         uintptr_t arena_start = (uintptr_t)&__axisram_start;
-        uintptr_t arena_end   = (uintptr_t)&__axisram_end;
+        uintptr_t arena_end   = (uintptr_t)&__tier_sram_end;
         if (arena_end > arena_start) {
             stm32n6_region_table[idx].base = (const uint8_t *)arena_start;
             stm32n6_region_table[idx].size =
