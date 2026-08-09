@@ -766,6 +766,9 @@
 #define RA8P1_PFS_PSEL_SHIFT    24U                          /* PSEL[28:24] */
 #define RA8P1_PFS_PMR           (1UL << 16)                  /* peripheral  */
 #define RA8P1_PFS_PDR           (1UL << 2)                   /* 1 = output  */
+/* Open drain.  A bus with a pull-up needs the pin to release rather than
+ * drive high, or the line never reads low and every transfer times out. */
+#define RA8P1_PFS_NCODR         (1UL << 6)
 #define RA8P1_PFS_PODR          (1UL << 0)                   /* output data */
 #define RA8P1_PFS_PSEL_SCI      0x04UL                       /* UM Tbl 21.20 */
 
@@ -1136,6 +1139,67 @@
 #define RA8P1_LCDCKCR_SEL_MOCO  0x1U
 #define RA8P1_LCDCKCR_SREQ      (1U << 6)
 #define RA8P1_LCDCKCR_SRDY      (1U << 7)
+
+/*---------------------------------------------------------------------------*/
+/* IIC -- I2C bus interface (UM 40)                                          */
+/*                                                                           */
+/* Three channels 0x100 apart.  The camera and touch controller on the       */
+/* expansion boards share channel 1: SCL1 on P512, SDA1 on P511, both at     */
+/* peripheral select 00111b.                                                 */
+/*---------------------------------------------------------------------------*/
+#define RA8P1_IIC_BASE(n)       (0x4025E000UL + (0x100UL * (n)))
+#define RA8P1_IIC_CCR1(n)       (RA8P1_IIC_BASE(n) + 0x00UL)
+#define RA8P1_IIC_CCR2(n)       (RA8P1_IIC_BASE(n) + 0x01UL)
+#define RA8P1_IIC_MR1(n)        (RA8P1_IIC_BASE(n) + 0x02UL)
+#define RA8P1_IIC_MR2(n)        (RA8P1_IIC_BASE(n) + 0x03UL)
+#define RA8P1_IIC_MR3(n)        (RA8P1_IIC_BASE(n) + 0x04UL)
+#define RA8P1_IIC_FER(n)        (RA8P1_IIC_BASE(n) + 0x05UL)
+#define RA8P1_IIC_SER(n)        (RA8P1_IIC_BASE(n) + 0x06UL)
+#define RA8P1_IIC_IER(n)        (RA8P1_IIC_BASE(n) + 0x07UL)
+#define RA8P1_IIC_SR1(n)        (RA8P1_IIC_BASE(n) + 0x08UL)
+#define RA8P1_IIC_SR2(n)        (RA8P1_IIC_BASE(n) + 0x09UL)
+#define RA8P1_IIC_BRL(n)        (RA8P1_IIC_BASE(n) + 0x10UL)
+#define RA8P1_IIC_BRH(n)        (RA8P1_IIC_BASE(n) + 0x11UL)
+#define RA8P1_IIC_DRT(n)        (RA8P1_IIC_BASE(n) + 0x12UL)
+#define RA8P1_IIC_DRR(n)        (RA8P1_IIC_BASE(n) + 0x13UL)
+
+/* ICCR1: ICE enables the unit, IICRST resets it; the two together choose
+ * between a full reset and an internal one, so both are written explicitly. */
+#define RA8P1_IIC_CCR1_ICE      (1U << 7)
+#define RA8P1_IIC_CCR1_IICRST   (1U << 6)
+#define RA8P1_IIC_CCR1_SOWP     (1U << 4)
+
+/* ICCR2: the condition requests, and who drives the bus. */
+#define RA8P1_IIC_CCR2_ST       (1U << 1)
+#define RA8P1_IIC_CCR2_RS       (1U << 2)
+#define RA8P1_IIC_CCR2_SP       (1U << 3)
+#define RA8P1_IIC_CCR2_TRS      (1U << 5)
+#define RA8P1_IIC_CCR2_MST      (1U << 6)
+#define RA8P1_IIC_CCR2_BBSY     (1U << 7)
+
+/* ICSR2 flags.  NACKF is the one that matters most: a device that is absent
+ * answers nothing, and without checking it a transfer "succeeds" silently. */
+#define RA8P1_IIC_SR2_TMOF      (1U << 0)
+#define RA8P1_IIC_SR2_AL        (1U << 1)
+#define RA8P1_IIC_SR2_START     (1U << 2)
+#define RA8P1_IIC_SR2_STOP      (1U << 3)
+#define RA8P1_IIC_SR2_NACKF     (1U << 4)
+#define RA8P1_IIC_SR2_RDRF      (1U << 5)
+#define RA8P1_IIC_SR2_TEND      (1U << 6)
+#define RA8P1_IIC_SR2_TDRE      (1U << 7)
+
+/* ICMR3: WAIT holds the clock before the last byte so the master can send a
+ * NACK; RDRFS makes the receive flag rise at the right moment for that. */
+#define RA8P1_IIC_MR3_ACKBT     (1U << 3)
+#define RA8P1_IIC_MR3_ACKWP     (1U << 4)
+#define RA8P1_IIC_MR3_RDRFS     (1U << 5)
+#define RA8P1_IIC_MR3_WAIT      (1U << 6)
+
+/** @brief Module stop: MSTPCRB.MSTPB8 gates IIC1 (MSTPB9 is IIC0). */
+#define RA8P1_MSTPCRB_IIC1      (1UL << 8)
+
+/** @brief Pin function select for the IIC peripheral. */
+#define RA8P1_PFS_PSEL_IIC      0x07UL
 
 /*---------------------------------------------------------------------------*/
 /* DRW -- 2D drawing engine (UM 63)                                          */
