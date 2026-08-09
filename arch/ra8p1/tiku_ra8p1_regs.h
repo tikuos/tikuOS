@@ -1179,6 +1179,15 @@
  * 0b001 selects 16 bpp RGB565, which is the format this port renders in. */
 #define RA8P1_DRW_CTL2_WRFMT_RGB565  (1UL << 20)
 
+/*
+ * Blending is src*SF + dst*DF, and BOTH factors default to 1.0 -- so a fill
+ * left at reset ADDS to what is already there.  Over a black destination that
+ * is indistinguishable from replacing it, which is exactly how it hides.
+ * Inverting the destination factor makes it 1-1 = 0, giving an opaque write.
+ */
+#define RA8P1_DRW_CTL2_BDI           (1UL << 12)
+#define RA8P1_DRW_CTL2_OPAQUE        RA8P1_DRW_CTL2_BDI
+
 /* STATUS: the render is done when neither unit is busy.  DLISTACTIVE must
  * also be clear before a new register-mode setup (UM 63.7.1). */
 #define RA8P1_DRW_ST_BUSYENUM   (1UL << 0)
