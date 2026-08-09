@@ -180,7 +180,7 @@ tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
     TIKU_REG32(RA8P1_DRW_SIZE)     = (w & 0xFFFFU) | (rh << 16);
     TIKU_REG32(RA8P1_DRW_PITCH)    = pitch & 0xFFFFU;
     TIKU_REG32(RA8P1_DRW_CONTROL2) = RA8P1_DRW_CTL2_WRFMT_RGB565 |
-                                     RA8P1_DRW_CTL2_OPAQUE;
+                                     RA8P1_DRW_CTL2_OVER;
     TIKU_REG32(RA8P1_DRW_CONTROL)  = RA8P1_DRW_CTL_LIMEN(0) |
                                      RA8P1_DRW_CTL_LIMEN(1) |
                                      RA8P1_DRW_CTL_LIMEN(2) |
@@ -195,3 +195,4 @@ tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
 
     return tiku_drw_arch_wait();
 }
+

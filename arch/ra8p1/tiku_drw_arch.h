@@ -65,4 +65,5 @@ int tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
  */
 int tiku_drw_arch_wait(void);
 
+
 #endif /* TIKU_RA8P1_DRW_ARCH_H_ */

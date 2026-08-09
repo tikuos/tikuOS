@@ -1183,10 +1183,18 @@
  * Blending is src*SF + dst*DF, and BOTH factors default to 1.0 -- so a fill
  * left at reset ADDS to what is already there.  Over a black destination that
  * is indistinguishable from replacing it, which is exactly how it hides.
- * Inverting the destination factor makes it 1-1 = 0, giving an opaque write.
+ *
+ * Taking both factors from the limiters' alpha gives src*a + dst*(1-a): the
+ * ordinary over-composite.  A rectangle is unaffected, because its alpha is
+ * one across the whole bounding box -- but a SHAPE needs it, or every pixel
+ * of the bounding box is written and a circle comes out square.
  */
-#define RA8P1_DRW_CTL2_BDI           (1UL << 12)
-#define RA8P1_DRW_CTL2_OPAQUE        RA8P1_DRW_CTL2_BDI
+#define RA8P1_DRW_CTL2_BSF           (1UL << 9)   /* source factor = alpha  */
+#define RA8P1_DRW_CTL2_BDF           (1UL << 10)  /* dest factor  = alpha   */
+#define RA8P1_DRW_CTL2_BDI           (1UL << 12)  /* ...inverted, so 1-a    */
+#define RA8P1_DRW_CTL2_OVER          (RA8P1_DRW_CTL2_BSF | \
+                                      RA8P1_DRW_CTL2_BDF | \
+                                      RA8P1_DRW_CTL2_BDI)
 
 /* STATUS: the render is done when neither unit is busy.  DLISTACTIVE must
  * also be clear before a new register-mode setup (UM 63.7.1). */
