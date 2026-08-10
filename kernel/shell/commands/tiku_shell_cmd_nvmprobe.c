@@ -113,6 +113,71 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
         return;
     }
 
+    if (strcmp(sub, "tier") == 0) {
+        /*
+         * NVM-tier self-test: allocate from the tier, write through
+         * tiku_tier_nvm_write(), verify by plain readback, then confirm an
+         * over-capacity arena is refused.  The tier has no free, so each run
+         * consumes one 256 B arena until reboot.  "tier mark <txt>" writes
+         * <txt> instead of the fixed pattern and prints the block's region
+         * offset, so the bench can re-verify the bytes after a reset through
+         * the raw read path.
+         */
+        const char *txt = (argc >= 4u && strcmp(argv[2], "mark") == 0)
+                          ? argv[3] : "TIER-SELFTEST";
+        size_t len = strlen(txt);
+        tiku_mem_stats_t st0, st1;
+        tiku_arena_t ar, over;
+        uint8_t *blk;
+        int wr_ok, vf_ok, rf_ok;
+
+        if (len > 63u) {
+            len = 63u;
+        }
+        (void)tiku_tier_init();
+        if (tiku_tier_stats(TIKU_MEM_NVM, &st0) != TIKU_MEM_OK) {
+            SHELL_PRINTF("nvmprobe: tier not available\n");
+            return;
+        }
+        if (tiku_tier_arena_create(&ar, TIKU_MEM_NVM, 256u, 141u)
+            != TIKU_MEM_OK) {
+            SHELL_PRINTF("nvmprobe: tier arena create failed\n");
+            return;
+        }
+        blk = tiku_arena_alloc(&ar, 64u);
+        if (blk == NULL) {
+            SHELL_PRINTF("nvmprobe: tier arena alloc failed\n");
+            return;
+        }
+        wr_ok = (tiku_tier_nvm_write(blk, txt,
+                                     (tiku_mem_arch_size_t)len)
+                 == TIKU_MEM_OK);
+        vf_ok = (memcmp(blk, txt, len) == 0);
+        rf_ok = (tiku_tier_arena_create(&over, TIKU_MEM_NVM,
+                                        st0.total_bytes + 64u, 142u)
+                 != TIKU_MEM_OK);
+        (void)tiku_tier_stats(TIKU_MEM_NVM, &st1);
+        SHELL_PRINTF("nvmprobe: tier total=%lu used=%lu->%lu "
+                     "write=%s verify=%s refuse=%s\n",
+                     (unsigned long)st1.total_bytes,
+                     (unsigned long)st0.used_bytes,
+                     (unsigned long)st1.used_bytes,
+                     wr_ok ? "PASS" : "FAIL",
+                     vf_ok ? "PASS" : "FAIL",
+                     rf_ok ? "PASS" : "FAIL");
+        if (argc >= 4u && strcmp(argv[2], "mark") == 0) {
+            if (blk >= be->base && blk < be->base + be->size) {
+                SHELL_PRINTF("nvmprobe: tier mark @0x%lx len=%lu\n",
+                             (unsigned long)(blk - be->base),
+                             (unsigned long)len);
+            } else {
+                SHELL_PRINTF("nvmprobe: tier mark unmapped\n");
+            }
+        }
+        return;
+    }
+
     SHELL_PRINTF("usage: nvmprobe [info | read <off> <len> | "
-                 "write <off> <txt> | verify <off> <txt>]\n");
+                 "write <off> <txt> | verify <off> <txt> | "
+                 "tier [mark <txt>]]\n");
 }
