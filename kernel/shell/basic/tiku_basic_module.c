@@ -47,6 +47,24 @@ extern const uint8_t _binary_mod_demo_bin_end[];
  *       memory-mapped NVM, so the caller must not assume RAM.
  * @return 0 with @p src / @p len set, or -1 when no image is available at all.
  */
+/**
+ * @brief Whether a mapped image starts with a valid module header.
+ *
+ * Checked at the SOURCE before install or activate mutate anything: refusal
+ * must leave the resident module -- and the registrations pointing into its
+ * window -- intact, not discover the garbage after the copy clobbered them.
+ *
+ * @param src  Mapped image bytes, at least a header long
+ * @return Non-zero when magic and ABI match
+ */
+static int
+module_src_ok(const uint8_t *src)
+{
+    const tiku_module_header_t *h = (const tiku_module_header_t *)(uintptr_t)src;
+
+    return h->magic == TIKU_MODULE_MAGIC && h->abi_version == TIKU_MODULE_ABI;
+}
+
 static int
 module_image(const uint8_t **src, uint32_t *len, int seed)
 {
@@ -133,7 +151,7 @@ tiku_basic_module_activate(void)
         const uint8_t *src = NULL;
         uint32_t       len = 0u;
 
-        if (module_image(&src, &len, 0) != 0) {
+        if (module_image(&src, &len, 0) != 0 || !module_src_ok(src)) {
             return -1;
         }
         /* Resting state is RW+XN, but a previously activated module left the
@@ -215,7 +233,7 @@ tiku_basic_module_load(void)
         }
     }
 #endif
-    if (module_image(&src, &len, 1) != 0) {
+    if (module_image(&src, &len, 1) != 0 || !module_src_ok(src)) {
         return -1;
     }
 
