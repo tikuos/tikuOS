@@ -7,8 +7,9 @@
  *
  * tiku_vfs_tree_usb.c - /sys/usb and /sys/store VFS nodes.
  *
- * Read-only: these report what the controller and the store are, and every
- * value comes from hardware or from the medium rather than from a cache.
+ * Read-only, serving both device stacks (RA8P1 USBHS and Ambiq USB); the
+ * /sys/store model-store nodes are RA8P1-only.  Every value comes from
+ * hardware or the medium rather than from a cache.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,8 +20,12 @@
 
 #include "tiku_vfs_tree_usb.h"
 #include "tiku.h"
+#if (TIKU_DRV_USBHS_ENABLE + 0)
 #include <arch/ra8p1/tiku_usbhs_arch.h>
 #include <arch/ra8p1/tiku_store_arch.h>
+#else
+#include <arch/ambiq/tiku_usb_arch.h>
+#endif
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
@@ -36,6 +41,7 @@
  */
 static int usb_state_read(char *buf, size_t max)
 {
+#if (TIKU_DRV_USBHS_ENABLE + 0)
     static const char *const name[5] = {
         "powered", "default", "address", "configured", "suspend"
     };
@@ -46,6 +52,23 @@ static int usb_state_read(char *buf, size_t max)
     }
     d = (unsigned)tiku_ra8p1_usbhs_devstate();
     return snprintf(buf, max, "%s\n", name[d < 5u ? d : 4u]);
+#else
+    /* The Ambiq stack keeps no device-state enum; the same ladder is
+     * derived from what the host has been given so far. */
+    if (!tiku_usb_powered()) {
+        return snprintf(buf, max, "down\n");
+    }
+    if (!tiku_usb_attached()) {
+        return snprintf(buf, max, "powered\n");
+    }
+    if (tiku_usb_config() != 0u) {
+        return snprintf(buf, max, "configured\n");
+    }
+    if (tiku_usb_address() != 0u) {
+        return snprintf(buf, max, "address\n");
+    }
+    return snprintf(buf, max, "default\n");
+#endif
 }
 
 /**
@@ -58,7 +81,11 @@ static int usb_state_read(char *buf, size_t max)
 static int usb_speed_read(char *buf, size_t max)
 {
     static const char *const name[3] = { "none", "full", "high" };
+#if (TIKU_DRV_USBHS_ENABLE + 0)
     unsigned s = (unsigned)tiku_ra8p1_usbhs_speed();
+#else
+    unsigned s = (unsigned)tiku_usb_speed();
+#endif
 
     return snprintf(buf, max, "%s\n", name[s < 3u ? s : 0u]);
 }
@@ -72,8 +99,12 @@ static int usb_speed_read(char *buf, size_t max)
  */
 static int usb_addr_read(char *buf, size_t max)
 {
+#if (TIKU_DRV_USBHS_ENABLE + 0)
     return snprintf(buf, max, "%u\n",
                     (unsigned)tiku_ra8p1_usbhs_address());
+#else
+    return snprintf(buf, max, "%u\n", (unsigned)tiku_usb_address());
+#endif
 }
 
 /**
@@ -85,8 +116,12 @@ static int usb_addr_read(char *buf, size_t max)
  */
 static int usb_config_read(char *buf, size_t max)
 {
+#if (TIKU_DRV_USBHS_ENABLE + 0)
     return snprintf(buf, max, "%u\n",
                     (unsigned)tiku_ra8p1_usbhs_configured());
+#else
+    return snprintf(buf, max, "%u\n", (unsigned)tiku_usb_config());
+#endif
 }
 
 /*
@@ -104,13 +139,22 @@ static int usb_config_read(char *buf, size_t max)
  */
 static int usb_irq_read(char *buf, size_t max)
 {
+#if (TIKU_DRV_USBHS_ENABLE + 0)
     uint32_t irqs = 0, dvst = 0;
 
     tiku_ra8p1_usbhs_irq_stats(&irqs, &dvst);
     return snprintf(buf, max, "%lu %lu\n",
                     (unsigned long)irqs, (unsigned long)dvst);
+#else
+    tiku_usb_counters_t c;
+
+    tiku_usb_counters(&c);
+    return snprintf(buf, max, "%lu %lu\n",
+                    (unsigned long)c.irq, (unsigned long)c.setup);
+#endif
 }
 
+#if (TIKU_DRV_USBHS_ENABLE + 0)
 /**
  * @brief Read handler for /sys/usb/cbw.
  *
@@ -186,6 +230,8 @@ static int store_present_read(char *buf, size_t max)
                     tiku_ra8p1_store_verify() ? "ok" : "no");
 }
 
+#endif /* TIKU_DRV_USBHS_ENABLE (cbw + store) */
+
 /*---------------------------------------------------------------------------*/
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
@@ -196,7 +242,9 @@ const tiku_vfs_node_t tiku_vfs_tree_usb_children[] = {
     { "address", TIKU_VFS_FILE, usb_addr_read,   NULL, NULL, 0 },
     { "config",  TIKU_VFS_FILE, usb_config_read, NULL, NULL, 0 },
     { "irq",     TIKU_VFS_FILE, usb_irq_read,    NULL, NULL, 0 },
+#if (TIKU_DRV_USBHS_ENABLE + 0)
     { "cbw",     TIKU_VFS_FILE, usb_cbw_read,    NULL, NULL, 0 },
+#endif
 };
 
 _Static_assert(sizeof(tiku_vfs_tree_usb_children) /
@@ -204,6 +252,7 @@ _Static_assert(sizeof(tiku_vfs_tree_usb_children) /
                == TIKU_VFS_TREE_USB_NCHILD,
                "TIKU_VFS_TREE_USB_NCHILD out of sync");
 
+#if (TIKU_DRV_USBHS_ENABLE + 0)
 const tiku_vfs_node_t tiku_vfs_tree_store_children[] = {
     { "name",    TIKU_VFS_FILE, store_name_read,    NULL, NULL, 0 },
     { "bytes",   TIKU_VFS_FILE, store_bytes_read,   NULL, NULL, 0 },
@@ -214,3 +263,4 @@ _Static_assert(sizeof(tiku_vfs_tree_store_children) /
                sizeof(tiku_vfs_tree_store_children[0])
                == TIKU_VFS_TREE_STORE_NCHILD,
                "TIKU_VFS_TREE_STORE_NCHILD out of sync");
+#endif /* TIKU_DRV_USBHS_ENABLE */

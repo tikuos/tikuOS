@@ -1897,6 +1897,7 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 ifeq ($(TIKU_DRV_USB_ENABLE),1)
 SRCS += arch/ambiq/tiku_usb_arch.c
 SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
+SRCS += kernel/vfs/tree/tiku_vfs_tree_usb.c     # /sys/usb (no /sys/store here)
 CFLAGS += -DTIKU_DRV_USB_ENABLE=1
 endif
 ifeq ($(TIKU_DRV_EMMC_ENABLE),1)

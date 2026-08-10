@@ -23,7 +23,11 @@
  * Must equal the number of initialisers in tiku_vfs_tree_usb_children --
  * a _Static_assert beside the table catches a forgotten update.
  */
+#if (TIKU_DRV_USBHS_ENABLE + 0)
 #define TIKU_VFS_TREE_USB_NCHILD    6
+#else
+#define TIKU_VFS_TREE_USB_NCHILD    5   /* no MSC cbw counters on Ambiq */
+#endif
 
 /**
  * @brief Entry count of /sys/store.
