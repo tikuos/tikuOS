@@ -78,7 +78,7 @@ __flash_end   = ORIGIN(RRAM) + LENGTH(RRAM);
 __sram_start  = ORIGIN(SRAM);
 __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 
-/* Reserved durable-persist region at the top of RRAM (byte-writable NVM
+/* Persist partition at the top of RRAM (byte-writable NVM
  * behind the RRAMC WEN gate; exact `.persistent` lands here, durable in
  * place).  16 KB: persist cells + aliases + lc + inittab + headroom.
  * NOTE (2026-07-15 Ambiq-parity layout, kintsugi/memoryfix.md B.0): growing
@@ -132,19 +132,18 @@ __tiku_layout_code_cap     = DEFINED(__tiku_code_cap_override)
  * The L15 has no NPU, so it only ever needs ~140 KB; it carries the same cap
  * for family consistency, and the address space it gives up was idle anyway
  * (the freed NVM goes to the durable tier, which currently has no consumer). */
-__tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
-__tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
+__tiku_layout_persist_size = 0x4000;                        /* 16 KB partition */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
-__tiku_nvm_rram_size  = __tiku_layout_durable_size;
-__tiku_nvm_rram_start = __tiku_layout_durable_start;
+__tiku_nvm_rram_size  = __tiku_layout_persist_size;
+__tiku_nvm_rram_start = __tiku_layout_persist_start;
 __tiku_nvm_rram_end   = __tiku_layout_top;
 
 /* Carved NVM region (the tiku_nvm_region backend), Ambiq-style layout:
  * NVM tier at the front (32 KB) | TFS FS extent (all the rest,
  * TIKU_NVMFS_FS_BYTES -- BASIC's saved program and run-state checkpoint are
  * files in it, not a carved tail).  A byte-writable RRAM span just BELOW
- * the durable-persist region; written in place behind the WEN gate (no
+ * the persist partition; written in place behind the WEN gate (no
  * erase).  The 384 KB code window ends at the module slot (the ASSERT at the
  * bottom is the hard cap).
  * __tiku_nvmfs_size is an absolute symbol whose ADDRESS is the size. */
@@ -277,12 +276,12 @@ SECTIONS
     /* The RRAM code image (code + rodata + .data load copy) must not grow up
      * into the reserved NVM regions at the top of RRAM -- guard against the
      * lower of the two bases (the filestore). */
-    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_module_slot,
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_code_limit,
            "ERROR: RRAM image overruns the reserved NVM/persist regions")
 
-    /* The durable persist data must fit inside the reserved region. */
+    /* The persist-partition data must fit inside the reserved span. */
     ASSERT(__persistent_end <= __tiku_nvm_rram_end,
-           "ERROR: durable .persistent overruns the reserved RRAM region")
+           "ERROR: .persistent overruns the persist partition")
 
     /DISCARD/ :
     {

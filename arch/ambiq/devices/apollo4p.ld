@@ -50,7 +50,7 @@ MEMORY
 {
     /* Code window: a fixed 384 KB budget for code/rodata (the module slot is
      * 4 KB loadable-module slot carved off its top). Everything between the
-     * module slot and the 64 KB mirror becomes the carved NVM region, so the
+     * module slot and the 16 KB mirror becomes the carved NVM region, so the
      * NVM store/tier gets the bulk of MRAM. A region overflow here means code
      * outgrew its budget. */
     MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x60000   /* 384 KB code window (M4) */
@@ -70,23 +70,22 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = 0x00200000;
 __tiku_layout_code_cap     = ORIGIN(MRAM) + LENGTH(MRAM);  /* end of code */
-__tiku_layout_module_size  = 0x8000;                       /* 32 KB slot  */
-__tiku_layout_durable_size = 0x10000;                      /* 64 KB mirror */
+__tiku_layout_persist_size = 0x4000;                       /* 16 KB mirror */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
 /* Carved NVM store/tier region (substrate B): ALL MRAM between the module
- * slot and the 64 KB mirror -- ~1.34 MB on this part. Read in place by
+ * slot and the 16 KB mirror -- ~1.34 MB on this part. Read in place by
  * pointer (MPU region 0 maps all MRAM RO); written via the bootrom backend
  * (kernel/memory/tiku_nvm_region). The NVM memory tier and the file store ride
  * this. Base is PINNED (not derived from the code window) so the module-slot
  * carve cannot move the FS/persist layout. */
 /* (__tiku_nvmfs_base/__tiku_nvmfs_size come from the shared derivation.) */
 
-/* NVM mirror page (Proposal A, small hot state): 64 KB at the top of MRAM
+/* NVM mirror page (Proposal A, small hot state): 16 KB at the top of MRAM
  * (0x1F0000..0x200000), where tiku_mem_arch_nvm_flush() programs the .uninit
  * snapshot. Grown from 32 KB for more durable cells/aliases headroom. */
-__tiku_nvm_mram_start = __tiku_layout_durable_start;
-__tiku_nvm_mram_size  = __tiku_layout_durable_size;
+__tiku_nvm_mram_start = __tiku_layout_persist_start;
+__tiku_nvm_mram_size  = __tiku_layout_persist_size;
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 
@@ -258,11 +257,6 @@ SECTIONS
     /* The NVM mirror page must hold the magic word + the whole .uninit image. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 4),
            "ERROR: .uninit too large for the 32 KB NVM mirror page")
-
-    /* The module slot must sit exactly between the code window and the NVM
-     * region -- a hole in neither, an overlap with neither. */
-    ASSERT(__tiku_module_slot + __tiku_module_slot_size == __tiku_nvmfs_base,
-           "ERROR: module slot does not abut __tiku_nvmfs_base (layout drift)")
 
 
     /* .ssram must stay inside the 2 MB physical SSRAM (0x10060000..0x10260000);

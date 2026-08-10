@@ -74,19 +74,18 @@ __flash_end   = ORIGIN(FLASH) + LENGTH(FLASH);
  *
  * Size is one QSPI erase granule (4 KB) today; the arch driver commits
  * the mirror sector-by-sector, so growing it really is the one-number
- * change: raise __tiku_layout_durable_size below (in whole 4 KB
+ * change: raise __tiku_layout_persist_size below (in whole 4 KB
  * sectors) and flush, restore and the .uninit budget ASSERT follow. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(FLASH) + LENGTH(FLASH);
 __tiku_layout_code_cap     = ORIGIN(FLASH) + 0x60000;      /* 384 KB code */
-__tiku_layout_module_size  = 0x8000;                       /* 32 KB slot  */
-__tiku_layout_durable_size = 0x1000;                       /* 4 KB sector */
+__tiku_layout_persist_size = 0x1000;                       /* 4 KB sector */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
-__tiku_nvm_flash_size   = __tiku_layout_durable_size;
-__tiku_nvm_flash_start  = __tiku_layout_durable_start;
+__tiku_nvm_flash_size   = __tiku_layout_persist_size;
+__tiku_nvm_flash_start  = __tiku_layout_persist_start;
 __tiku_nvm_flash_end    = __tiku_layout_top;
-__tiku_nvm_flash_offset = __tiku_layout_durable_start - ORIGIN(FLASH);
+__tiku_nvm_flash_offset = __tiku_layout_persist_start - ORIGIN(FLASH);
 
 /* Carved NVM region (substrate B): a ~3.7 MB slice of QSPI flash just below the
  * 4 KB .uninit backup sector, owned by the /data file store + NVM tier via the
@@ -303,7 +302,7 @@ SECTIONS
 
     /* The flash image (code + rodata + the .data load copy) must not grow up
      * into the carved NVM region below the backup sector. */
-    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_module_slot,
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_code_limit,
            "ERROR: flash image overruns the carved NVM region")
 
     /DISCARD/ :

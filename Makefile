@@ -2440,6 +2440,12 @@ $(error TIKU_BASIC_MODULE_ENABLE=1: no module slot for MCU=$(MCU) \
         (supported: nrf54lm20a nrf54lm20b nrf54l15 rp2350 apollo510 \
         apollo510b apollo4l apollo4p msp430fr5994 msp430fr6989))
 endif
+# The slot is the top 32 KB of the code window, reserved at link time only
+# when this loader is in the build.  apollo510 executes modules from the
+# ITCM and MSP430 keeps its own HIFRAM scheme, so neither reserves anything.
+ifeq (,$(filter apollo510 apollo510b msp430fr5994 msp430fr6989,$(MCU)))
+LDFLAGS += -Wl,--defsym=__tiku_module_reserve=0x8000
+endif
 MOD_CFLAGS     = $(MOD_CPU_FLAGS) -Os -ffreestanding \
                  -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
                  -I kernel/shell/basic

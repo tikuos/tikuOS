@@ -48,9 +48,6 @@ extern uint32_t __sram_start;     /* DTCM base   */
 extern uint32_t __sram_end;       /* DTCM top (= __stack) */
 extern uint32_t __flash_start;    /* MRAM code window base */
 extern uint32_t __flash_end;      /* MRAM code window end (below the NVM mirror) */
-extern uint32_t __tiku_module_slot;      /* Tier-3 module slot base       */
-extern uint32_t __tiku_module_slot_size; /* ABSOLUTE: its ADDRESS is the  */
-                                         /* slot size (linker convention) */
 
 /**
  * @defgroup MPU_SSRAM_MAP Shared SRAM region constants
@@ -138,14 +135,6 @@ static volatile struct tiku_mpu_diag mpu_diag;
 #define MPU_REGION_SSRAM       6U
 #define MPU_REGION_MODULE      7U
 /** @} */
-
-/* Size of the Tier-3 module slot, taken FROM THE LINKER rather than
- * duplicated: __tiku_module_slot_size is an absolute symbol whose ADDRESS
- * is the size, so this can never drift from the carve again (it did: it
- * sat at 4 KB after the slot grew to 32 KB, leaving 28 KB of the slot
- * outside the MPU region and covered only by PRIVDEFENA's default map). */
-#define TIKU_MPU_MODULE_SLOT_BYTES \
-    ((uint32_t)(uintptr_t)&__tiku_module_slot_size)
 
 /**
  * @defgroup MPU_STACK_GUARD Stack guard sizing constants
@@ -369,10 +358,13 @@ void tiku_mpu_arch_init_segments(void) {
                    TIKU_MODULE_EXEC_ADDR + TIKU_MODULE_CARVE_SIZE - 1U,
                    0U /* RW */, 1U /* XN */);                   /* region 7 */
 #else
+        /* The slot address and size come from the SAME constants the loader
+         * installs with and the module links against (tiku_basic_module.h),
+         * so the region cannot drift from them; the loader checks that pair
+         * against the linker's __tiku_code_limit before any install. */
         mpu_region(MPU_REGION_MODULE,
-                   (uint32_t)(uintptr_t)&__tiku_module_slot,
-                   (uint32_t)(uintptr_t)&__tiku_module_slot +
-                       TIKU_MPU_MODULE_SLOT_BYTES - 1U,
+                   TIKU_MODULE_CARVE_ADDR,
+                   TIKU_MODULE_CARVE_ADDR + TIKU_MODULE_CARVE_SIZE - 1U,
                    1U /* RO */, 0U /* exec OK */);              /* region 7 */
 #endif
     }

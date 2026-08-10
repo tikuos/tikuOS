@@ -111,7 +111,7 @@ static uintptr_t guard_base(void)
 static void mpu_nvm_ap(uint32_t ap)
 {
     /*
-     * The whole reserved MRAM tail -- file store AND durable persist -- in one
+     * The whole reserved MRAM tail -- file store AND persist partition -- in one
      * region, because both need the same two things.
      *
      * Non-cacheable: this span IS the MRAM program path, and a D-cache line is

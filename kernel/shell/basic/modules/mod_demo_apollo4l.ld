@@ -23,16 +23,17 @@
  *   ...   .text / .rodata
  * No .data/.bss: the MVP module holds no writable state (pure handlers), so a
  * missing RAM/copy step cannot bite.  Keep in sync with the header + the
- * apollo4l/apollo4p device .ld (__tiku_module_slot).
+ * apollo4l/apollo4p code cap (slot = cap - 32 KB).
  */
 
 MEMORY
 {
-    /* Executable MRAM slot: 32 KB at the top of the (shrunk) code window --
-     * MRAM is executable but only bootrom-programmable, so the loader
-     * installs via tiku_nvm_mram_program instead of CPU stores.  Kept in
-     * sync with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */
-    CARVE (rx) : ORIGIN = 0x58000, LENGTH = 0x8000   /* 32 KB */
+    /* Executable MRAM slot: the top 32 KB of the code window (cap 0x78000
+     * less the module reserve) -- MRAM is executable but only
+     * bootrom-programmable, so the loader installs via
+     * tiku_nvm_mram_program instead of CPU stores.  Kept in sync with
+     * TIKU_MODULE_CARVE_ADDR. */
+    CARVE (rx) : ORIGIN = 0x70000, LENGTH = 0x8000   /* 32 KB */
 }
 
 ENTRY(module_init)

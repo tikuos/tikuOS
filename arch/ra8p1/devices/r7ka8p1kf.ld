@@ -35,26 +35,24 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 /*
  * Canonical NVM layout: inputs + the shared derivation (arch/common).
  *
- *   0x02000000  code            512 KB (largest image measured: 63 KB)
- *   0x02080000  module slot      32 KB (ARM-wide contract)
- *   0x02088000  NVM region      464 KB (tier + file store)
- *   0x020FC000  durable persist  16 KB (exact `.persistent`, in place)
+ *   0x02000000  code            384 KB (largest image measured: 79 KB)
+ *   0x02060000  NVM region      624 KB (32 KB tier + 592 KB file store)
+ *   0x020FC000  persist partition 16 KB (exact `.persistent`, in place)
  *   0x02100000  top
  *
  * Growing any of these MOVES every cell and file address, so an established
  * board re-primes once (/sys/persist reports primed != 0, /data empty).
  */
 __tiku_layout_top          = ORIGIN(MRAM) + LENGTH(MRAM);
-__tiku_layout_code_cap     = ORIGIN(MRAM) + 0x80000;        /* 512 KB code */
-__tiku_layout_module_size  = 0x8000;                        /* 32 KB slot  */
-__tiku_layout_durable_size = 0x4000;                        /* 16 KB persist */
+__tiku_layout_code_cap     = ORIGIN(MRAM) + 0x60000;        /* 384 KB code */
+__tiku_layout_persist_size = 0x4000;                        /* 16 KB partition */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
 /* Platform aliases.  The name matches Ambiq's, the meaning does not: there
  * the MRAM span is a MIRROR that SRAM `.persistent` is flushed into, here it
  * is where the durable data actually lives and is written in place. */
-__tiku_nvm_mram_size  = __tiku_layout_durable_size;
-__tiku_nvm_mram_start = __tiku_layout_durable_start;
+__tiku_nvm_mram_size  = __tiku_layout_persist_size;
+__tiku_nvm_mram_start = __tiku_layout_persist_start;
 __tiku_nvm_mram_end   = __tiku_layout_top;
 
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
@@ -210,7 +208,7 @@ SECTIONS
     ASSERT((__stack - _end) >= 0x9000,
            "ERROR: RA8P1 SRAM exhausted -- need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
 
-    /* -------- DURABLE persist (MRAM, byte-writable in place) --------- */
+    /* -------- Persist partition (MRAM, byte-writable in place) ------- */
     /* NOLOAD: not in the programmed image, so a reflash leaves it alone and
      * a virgin part leaves it blank for the persist-cell magic gates to prime
      * on first boot.
@@ -229,13 +227,14 @@ SECTIONS
     } > MRAM
 
     /* The MRAM image (code + rodata + .data load copy) must not grow up into
-     * the reserved module slot, NVM region or persist home above it. */
-    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_module_slot,
-           "ERROR: RA8P1 MRAM image overruns the reserved module/NVM/persist regions")
+     * the NVM region or persist partition above it -- nor into the Tier-3 module
+     * slot at the top of the window, in builds that reserve one. */
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_code_limit,
+           "ERROR: RA8P1 MRAM image overruns the code window (or its module reserve)")
 
-    /* The durable persist data must fit inside the reserved region. */
+    /* The persist-partition data must fit inside the reserved span. */
     ASSERT(__persistent_end <= __tiku_nvm_mram_end,
-           "ERROR: durable .persistent overruns the reserved MRAM region")
+           "ERROR: .persistent overruns the persist partition")
 
     PROVIDE(__tiku_cpu1_area = 0x22000000);
 

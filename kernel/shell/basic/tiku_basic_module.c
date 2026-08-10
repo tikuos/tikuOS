@@ -200,6 +200,21 @@ tiku_basic_module_load(void)
     const uint8_t *src = NULL;
     uint32_t       len = 0u;
 
+#if !TIKU_MODULE_EXEC_IN_RAM && !defined(PLATFORM_MSP430)
+    /*
+     * The slot has drifted from the link three separate times in this file's
+     * history (an MPU region a quarter of the slot, two module scripts linked
+     * for windows that had since moved).  The linker's __tiku_code_limit is
+     * where the reserve actually begins, so agree with it or install nothing.
+     */
+    {
+        extern uint8_t __tiku_code_limit;
+
+        if ((uintptr_t)&__tiku_code_limit != TIKU_MODULE_CARVE_ADDR) {
+            return -1;
+        }
+    }
+#endif
     if (module_image(&src, &len, 1) != 0) {
         return -1;
     }

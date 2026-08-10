@@ -86,19 +86,14 @@
  * REGION SIZE -- the compile-time mirror of what arch/common/tiku_nvm_layout.ld
  * carves at link time:
  *
- *     region = layout_top - layout_code_cap - layout_module_size
- *                         - layout_durable_size
+ *     region = layout_top - layout_code_cap - layout_persist_size
  *
  * The C side needs this as a constant because the file store's geometry (its
  * slot count, and on MSP430 its backing array) is fixed at compile time.  Keep
- * the two in step: if a device script changes one of the four inputs, change
+ * the two in step: if a device script changes one of the three inputs, change
  * the matching line here.  A mismatch is caught -- `df` prints the region size
  * the linker actually produced next to this expectation, and both the tier and
  * the /data mount refuse a region smaller than the two extents need.
- *
- * apollo510's module_size is 0: its Tier-3 module image is a store file that
- * executes from the ITCM (tiku_basic_module.h), so the 32 KB executable slot
- * every other ARM part still carves became region on this one.
  *
  * The code window is 0x60000 -- 384 KB -- on every part.  That is the point: a
  * code window is a contract about how much program a TikuOS image may be, not a
@@ -106,24 +101,29 @@
  * BLE), 121.6 KB (apollo4l/p), 122.6 KB (l15), 126.8 KB (lm20b + Axon driver),
  * 60.4 KB (rp2350) -- roughly 3x headroom everywhere.  Model weights and radio
  * firmware are store files, never .rodata, which is what keeps the window from
- * having to grow to fit a blob.
+ * having to grow to fit a blob.  The Tier-3 module slot is INSIDE that window
+ * (its top 32 KB, reserved only in loader builds), not an estate of its own,
+ * so it appears in none of the arithmetic here.
  *
- *   apollo510  0x800000 - 0x470000 - 0x0000 - 0x10000 = 0x380000  3584 KB
- *   apollo4l/p 0x200000 - 0x078000 - 0x8000 - 0x10000 = 0x170000  1472 KB
- *   rp2350     0x400000 - 0x060000 - 0x8000 - 0x01000 = 0x397000  3676 KB
- *   lm20       0x1FD000 - 0x060000 - 0x8000 - 0x04000 = 0x191000  1604 KB
- *   l15        0x17D000 - 0x060000 - 0x8000 - 0x04000 = 0x111000  1092 KB
+ *   apollo510  0x800000 - 0x470000 - 0x4000 = 0x38C000  3632 KB
+ *   apollo4l/p 0x200000 - 0x078000 - 0x4000 = 0x184000  1552 KB
+ *   rp2350     0x400000 - 0x060000 - 0x01000 = 0x39F000  3708 KB
+ *   lm20       0x1FD000 - 0x060000 - 0x04000 = 0x199000  1636 KB
+ *   l15        0x17D000 - 0x060000 - 0x04000 = 0x119000  1124 KB
+ *   ra8p1      0x100000 - 0x060000 - 0x04000 = 0x09C000   624 KB
  */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_NVM_REGION_BYTES  (3584u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (3632u * 1024u)
 #elif defined(PLATFORM_AMBIQ)
-#define TIKU_NVM_REGION_BYTES  (1472u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1552u * 1024u)
 #elif defined(PLATFORM_RP2350)
-#define TIKU_NVM_REGION_BYTES  (3676u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (3708u * 1024u)
 #elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-#define TIKU_NVM_REGION_BYTES  (1604u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1636u * 1024u)
 #elif defined(PLATFORM_NORDIC)
-#define TIKU_NVM_REGION_BYTES  (1092u * 1024u)
+#define TIKU_NVM_REGION_BYTES  (1124u * 1024u)
+#elif defined(PLATFORM_RA8P1)
+#define TIKU_NVM_REGION_BYTES  (624u * 1024u)
 #elif defined(PLATFORM_STM32N6)
 /* Not linker-carved: the region is a span of the external NOR, so this mirrors
  * TIKU_XSPI_REGION_ADDR/BYTES in arch/stm32n6/tiku_xspi_arch.h rather than a
@@ -139,9 +139,9 @@
  * Everything in the region above the tier extent.  0 where the file store rides
  * its own backing (msp430 FRAM / host).  Resulting sizes:
  *
- *   apollo510  3584 - 32 = 3552 KB      lm20  1604 - 32 = 1572 KB
- *   apollo4l/p 1472 - 32 = 1440 KB      l15   1092 - 32 = 1060 KB
- *   rp2350     3676 - 32 = 3644 KB
+ *   apollo510  3632 - 32 = 3600 KB      lm20   1636 - 32 = 1604 KB
+ *   apollo4l/p 1552 - 32 = 1520 KB      l15    1124 - 32 = 1092 KB
+ *   rp2350     3708 - 32 = 3676 KB      ra8p1   624 - 32 =  592 KB
  *
  * The store DERIVES its capacity from whichever of these the linker actually
  * carved -- there is no per-platform file count to keep in step any more, and

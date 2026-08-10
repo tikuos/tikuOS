@@ -16,7 +16,7 @@
 MEMORY
 {
     /* FRAM slot at the top of HIFRAM (R+W+X MPU segment); ends shy of CPU47.
-     * Kept in sync with __tiku_module_slot / TIKU_MODULE_CARVE_ADDR. */
+     * Kept in sync with TIKU_MODULE_CARVE_ADDR. */
     CARVE (rx) : ORIGIN = 0x43000, LENGTH = 0xFF0
 }
 

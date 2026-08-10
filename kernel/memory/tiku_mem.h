@@ -113,8 +113,8 @@
  *   MSP430        lower FRAM, in place (ample)     commit: at the store
  *   nordic        RRAM behind WEN, in place (16 KB) commit: at the store
  *   RP2350        SRAM, 4 KB flash-mirror sector    commit: at MPU relock
- *   Ambiq 4l/4p   SRAM, 64 KB MRAM mirror (8 KB MPU envelope) — at relock
- *   Ambiq 510     SRAM, 64 KB MRAM mirror           commit: at relock
+ *   Ambiq 4l/4p   SRAM, 16 KB MRAM mirror           commit: at relock
+ *   Ambiq 510     SRAM, 16 KB MRAM mirror           commit: at relock
  *   host          ordinary section (test harness; never durable)
  *
  * Anything placed here must fit the SMALLEST compiled target's budget or be
