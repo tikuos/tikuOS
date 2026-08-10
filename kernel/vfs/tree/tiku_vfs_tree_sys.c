@@ -254,6 +254,7 @@ mem_tiers_read(char *buf, size_t max)
         { TIKU_MEM_SRAM,   "sram"   },
         { TIKU_MEM_NVM,    "nvm"    },
         { TIKU_MEM_HIFRAM, "hifram" },
+        { TIKU_MEM_PSRAM,  "psram"  },   /* listed only while attached */
     };
     tiku_mem_stats_t st;
     size_t off = 0;
