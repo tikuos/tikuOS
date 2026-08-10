@@ -184,21 +184,14 @@ SECTIONS
      * margin -- defence for a frame class the tree does not yet contain,
      * not a measured need.
      */
-    /* Overridable so a link-contract test can squeeze the span from the top
-     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
-     * is required -- a bare --defsym symbol is not in scope for a script
-     * expression and errors out as undefined. */
-    TIKU_SRAM_HEADROOM = DEFINED(__tier_reserve_override)
-                       ? __tier_reserve_override : 32K;
-    __tier_sram_start = ALIGN(32);
-    __tier_sram_end   = __stack - 0x8000 - TIKU_SRAM_HEADROOM;
-
-    /* Keep the floor the BASIC arena is asserted against (TIKU_TIER_SRAM_MIN
-     * on the make line).  Without this a large enough .bss would shrink the
-     * tier below what BASIC carves and the failure would land at run time. */
-    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
-    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
-           "ERROR: RA8P1 SRAM tier fell below its 256 KB floor -- .bss grew into it; shrink a static buffer or lower TIKU_SRAM_HEADROOM")
+    /* The span limit is the stack top less the MPU stack budget (0x8000,
+     * MPU_STACK_RESERVED_BYTES in tiku_mpu_arch.c); the fragment applies the
+     * reserve, resolves the floor from the make line and asserts both. */
+    __tiku_tier_span_start      = ALIGN(32);
+    __tiku_tier_span_limit      = __stack - 0x8000;
+    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_floor_default   = 0x40000;
+    INCLUDE arch/common/tiku_sram_layout.ld
 
     /* SRAM headroom: the stack budget the MPU actually programs
      * (MPU_STACK_RESERVED_BYTES 32 KB + MPU_STACK_GUARD_BYTES 4 KB in

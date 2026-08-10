@@ -122,18 +122,13 @@ _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_HIFRAM_SIZE,
                "BASIC arena does not fit the HIFRAM tier pool -- raise "
                "TIKU_TIER_HIFRAM_SIZE or lower TIKU_BASIC_PROGRAM_LINES");
 #elif defined(TIKU_TIER_SRAM_DERIVED)
-/* The SRAM tier is linker-derived on these parts, so there is no compile-time
- * size to compare against.  The floor stands in for it, and the MCU's linker
- * script asserts the carved span against the same figure; the two are separate
- * literals, so a change to one needs the other. */
+/* The SRAM tier is linker-derived on the ARM parts, so there is no
+ * compile-time size to compare against; the floor stands in for it.  The
+ * same make-line figure travels to the linker as --defsym=__tier_sram_floor,
+ * where the carve fragment asserts the span against it. */
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_MIN,
                "BASIC arena does not fit the SRAM tier floor -- raise "
                "TIKU_TIER_SRAM_MIN for this MCU in the Makefile, or lower "
-               "TIKU_BASIC_PROGRAM_LINES");
-#elif defined(PLATFORM_NORDIC)
-_Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_SIZE,
-               "BASIC arena does not fit the SRAM tier pool -- raise "
-               "TIKU_TIER_SRAM_SIZE for this MCU in the Makefile, or lower "
                "TIKU_BASIC_PROGRAM_LINES");
 #endif
 
@@ -245,7 +240,7 @@ basic_alloc_state(void)
      * for BASIC_ARENA_BYTES), refuse here: on parts whose NVM is program-op
      * (RP2350 QSPI flash, Ambiq MRAM) the first store would hard-fault and
      * wedge the board at `basic` entry instead of failing cleanly.  The fix
-     * is to size TIKU_TIER_SRAM_SIZE for the part (see the Makefile). */
+     * is to raise TIKU_TIER_SRAM_MIN for the part (see the Makefile). */
     if (basic_arena.tier == TIKU_MEM_NVM) {
         return -1;
     }

@@ -1042,8 +1042,6 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # 128 KB HAS_TLS case was hand-computing.  What remains is the guaranteed
 # minimum, which must cover BASIC_ARENA_BYTES at the configured line count.
 TIKU_TIER_SRAM_MIN ?= 262144
-# Keep in step with the ASSERT in rp2350.ld, which checks the carved span
-# against the same figure; --defsym is not visible to a script expression.
 CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
@@ -1097,9 +1095,6 @@ TIKU_TIER_SRAM_MIN ?= 327680
 else
 TIKU_TIER_SRAM_MIN ?= 262144
 endif
-# Keep in step with the ASSERT in this MCU's linker script, which checks the
-# carved span against the same figure; --defsym is not visible to a script
-# expression, so the number lives in two files.
 CFLAGS  += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS  += -DTIKU_TIER_SRAM_DERIVED=1
 CFLAGS += -DTIKU_TIER_NVM_SIZE=16384      # 16 KB NVM tier
@@ -1193,45 +1188,36 @@ CFLAGS += --specs=nano.specs --specs=nosys.specs
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
-# SRAM (AUTO) tier size.  BASIC's program arena is the tier's ONLY consumer,
-# and its size is exact, not an estimate:
+# SRAM (AUTO) tier: linker-derived on nordic like the other ARM ports --
+# RAM2 after the AXON statics on LM20, the primary bank between .bss and the
+# MPU stack budget on L15.  The floor is the guaranteed minimum the BASIC
+# arena is asserted against, and the arena's size is exact, not an estimate:
 #
 #     BASIC_ARENA_BYTES = 148 * TIKU_BASIC_PROGRAM_LINES + 41344
 #
-# (the invariant 41 KB is mostly two fixed reserves -- 16 KB for DIMmed arrays
-# and 16 KB of big buffers -- carried whether a program uses them or not).
-# The tiku_mem.h default is 128 B, so `basic` OOMs at entry without an
-# override.  A _Static_assert in tiku_basic_arena.inl now checks the pool
-# against the request at BUILD time; before v0.06 nothing did, and a short
-# pool produced a clean build that failed on the board.
+# (the invariant 41 KB is mostly two fixed reserves -- 16 KB for DIMmed
+# arrays and 16 KB of big buffers -- carried whether a program uses them or
+# not).  LM20 1400 lines -> 248,544 B; L15 256 lines -> 79,232 B.  One L15
+# value regardless of TIKU_THREADS_ENABLE: the worker/TLS state threads add
+# is .bss and stack, NOT tier allocations, so lowering the floor does not
+# pay for it.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-# LM20, 1400 lines -> 248,544 B.  Its tier lives in RAM2 (the upper SRAM bank,
-# linker section .ram2) and so does not compete with the primary bank's
-# .bss/stack at all, which is why the LM20 can afford the largest program
-# capacity outside Apollo510: 248 KB of the 255 KB usable bank (the top 1 KB of
-# RAM2 is unbacked on this silicon), leaving ~5 KB of tier slack.  Threads make
-# no difference here.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=253952    # 248 KB tier arena in RAM2
+TIKU_TIER_SRAM_MIN ?= 253952
 else
-# L15, 256 lines -> 79,232 B.  One value regardless of TIKU_THREADS_ENABLE:
-# the worker/TLS state threads add is .bss and stack, NOT tier allocations, so
-# shrinking the tier does not pay for it.  The threaded build used to set
-# 65,536 here -- 13.7 KB short of the arena -- from a tally that counted the
-# line table, big buffers and string heap but missed the DIM reserve; `basic`
-# then failed at entry on any threaded L15 image.  96 KB in the single 240 KB
-# application bank still leaves ~56 KB above .bss for the stack, against the
-# linker's 36 KB floor.
-CFLAGS += -DTIKU_TIER_SRAM_SIZE=98304     # 96 KB: BIG-256 BASIC arena
+TIKU_TIER_SRAM_MIN ?= 98304
 endif
 endif
+TIKU_TIER_SRAM_MIN ?= 4096
+CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
 
 else ifeq ($(TIKU_PLATFORM),stm32n6)
 
 # STM32N657: Cortex-M55 with Helium, same core as Apollo510. The whole image
 # runs from the 255 KB SRAM window the boot ROM loads it into, so there is no
 # flash region and no XIP -- code, data and stack share that window.  The rest
-# of the 3.75 MB array is claimed separately (see TIKU_TIER_SRAM_SIZE below).
+# of the 3.75 MB array is claimed separately (the linker-carved tier below).
 CFLAGS  = -mcpu=cortex-m55 -mthumb
 CFLAGS += -mfpu=auto -mfloat-abi=hard
 CFLAGS += -Os -Wall -Wextra -Wno-psabi
@@ -1248,8 +1234,6 @@ CFLAGS += -ffunction-sections -fdata-sections
 # the block for the NPU-side buffers N6-11 will want.
 # The tier is linker-derived, so this is the guaranteed minimum, not the size.
 TIKU_TIER_SRAM_MIN ?= 262144
-# Keep in step with the ASSERT in stm32n657.ld, which checks the carved span
-# against the same figure; --defsym is not visible to a script expression.
 CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
 
@@ -1277,9 +1261,6 @@ CFLAGS += -ffunction-sections -fdata-sections
 # no size on this line -- only the floor the BASIC arena is asserted against,
 # which r7ka8p1kf.ld also asserts the derived span never falls below.
 TIKU_TIER_SRAM_MIN ?= 262144
-# Keep in step with the ASSERT in this MCU's linker script, which checks the
-# carved span against the same figure; --defsym is not visible to a script
-# expression, so the number lives in two files.
 CFLAGS  += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS  += -DTIKU_TIER_SRAM_DERIVED=1
 
@@ -1567,6 +1548,15 @@ LDFLAGS += -Tarch/msp430/devices/msp430fr6989_hifram.ld
 endif
 
 endif # TIKU_PLATFORM == msp430
+
+# The SRAM-tier floor is single-authored: the TIKU_TIER_SRAM_MIN the BASIC
+# arena is compile-time asserted against travels to the linker as
+# __tier_sram_floor, where arch/common/tiku_sram_layout.ld asserts the carved
+# span never falls below it (the device default stands in for builds that
+# bypass make).
+ifneq (,$(findstring TIKU_TIER_SRAM_DERIVED=1,$(CFLAGS)))
+LDFLAGS += -Wl,--defsym=__tier_sram_floor=$(TIKU_TIER_SRAM_MIN)
+endif
 
 # ---------------------------------------------------------------------------
 # Source files — core OS (always compiled)

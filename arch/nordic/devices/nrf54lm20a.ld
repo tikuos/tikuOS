@@ -243,8 +243,8 @@ SECTIONS
 
     /* -------- 5b. RAM2 large buffers (upper SRAM bank) ---------------- */
     /* NOLOAD: nothing to copy from the image; the crt zeroes exactly
-     * [__ram2_start, __ram2_end) at boot (like .bss -- the tier arena
-     * expects zeroed memory), leaving the rest of the bank untouched. */
+     * [__ram2_start, __ram2_end) at boot (like .bss), leaving the rest of
+     * the bank untouched. */
     .ram2 (NOLOAD) : ALIGN(8)
     {
         __ram2_start = .;
@@ -252,6 +252,17 @@ SECTIONS
         . = ALIGN(4);
         __ram2_end = .;
     } > SRAM2
+
+    /* The SRAM tier is the rest of the bank: named .ram2 statics (the AXON
+     * buffers) place first, the carve takes what they leave, so neither is
+     * ever hand-sized around the other.  No reserve -- no stack or guard
+     * lives above the span in this bank.  Not zeroed by the crt: the
+     * allocator does not promise zeroed memory. */
+    __tiku_tier_span_start      = ALIGN(__ram2_end, 32);
+    __tiku_tier_span_limit      = ORIGIN(SRAM2) + LENGTH(SRAM2);
+    __tiku_tier_reserve_default = 0;
+    __tiku_tier_floor_default   = 4K;
+    INCLUDE arch/common/tiku_sram_layout.ld
 
     /* -------- 6. DURABLE persist (RRAM, byte-writable NVM) ---------- */
     /* Exact `.persistent` lives at the reserved top of RRAM, written behind the

@@ -261,23 +261,15 @@ SECTIONS
      * guard.  Being outside .bss also keeps the span out of the crt's zero
      * loop, which the allocator has never needed.
      */
-    /* The margin between the tier's top and the guard: a frame striding past
-     * the 4 KB guard lands here before it lands on the tier.  Sized to the
-     * same worst frame (BASIC's largest) that sized the stack budget; no
-     * frame in the tree strides past the guard today.
-     *
-     * Overridable so a link-contract test can squeeze the span from the top
-     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
-     * is required -- a bare --defsym symbol is not in scope for a script
-     * expression and errors out as undefined. */
-    TIKU_SRAM_HEADROOM = DEFINED(__tier_reserve_override)
-                       ? __tier_reserve_override : 32K;
-    __tier_sram_start = ALIGN(32);
-    __tier_sram_end   = __stack - 0x9000 - TIKU_SRAM_HEADROOM;
-
-    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
-    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
-           "ERROR: RP2350 SRAM tier fell below its 256 KB floor -- .bss grew into it")
+    /* The reserve is the margin between the tier's top and the guard: a
+     * frame striding past the 4 KB guard lands there before it lands on the
+     * tier.  The fragment applies it, resolves the floor from the make line
+     * and asserts both. */
+    __tiku_tier_span_start      = ALIGN(32);
+    __tiku_tier_span_limit      = __stack - 0x9000;
+    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_floor_default   = 0x40000;
+    INCLUDE arch/common/tiku_sram_layout.ld
 
     /* Sanity check: static data must clear the MPU's stack + guard reservation.
      * The ARMv8-M MPU (arch/arm-rp2350/tiku_mpu_arch.c) carves the top

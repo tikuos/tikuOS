@@ -187,6 +187,15 @@ SECTIONS
     ASSERT((__stack - _end) >= 0x9000,
            "ERROR: SRAM exhausted — need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
 
+    /* The SRAM tier fills the single bank between the statics and the MPU
+     * stack budget.  No further reserve: the bank is tight (240 KB), and
+     * the floor plus the budget already carry the contract. */
+    __tiku_tier_span_start      = ALIGN(_end, 32);
+    __tiku_tier_span_limit      = __stack - 0x9000;
+    __tiku_tier_reserve_default = 0;
+    __tiku_tier_floor_default   = 4K;
+    INCLUDE arch/common/tiku_sram_layout.ld
+
     /* -------- 6. DURABLE persist (RRAM, byte-writable NVM) ---------- */
     /* Exact `.persistent` lives at the reserved top of RRAM, written behind the
      * RRAMC WEN gate (tiku_mpu_unlock_nvm/lock_nvm).  Unlike the SRAM-backed

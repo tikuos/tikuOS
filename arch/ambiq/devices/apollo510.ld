@@ -250,19 +250,12 @@ SECTIONS
     /* The reserve protects nothing here: the stack lives in TCM and nothing
      * sits above the tier in this bank.  The figure is arbitrary, kept equal
      * to the stack-side ports' margin; reclaim it if the capacity is wanted.
-     *
-     * Overridable so a link-contract test can squeeze the span from the top
-     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
-     * is required -- a bare --defsym symbol is not in scope for a script
-     * expression and errors out as undefined. */
-    TIKU_SSRAM_RESERVE = DEFINED(__tier_reserve_override)
-                       ? __tier_reserve_override : 32K;
-    __tier_sram_start = __ssram_top;
-    __tier_sram_end   = ORIGIN(SSRAM) + LENGTH(SSRAM) - TIKU_SSRAM_RESERVE;
-
-    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
-    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x50000,
-           "ERROR: Apollo SSRAM tier fell below its 320 KB floor -- a .ssram buffer grew into it")
+     */
+    __tiku_tier_span_start      = __ssram_top;
+    __tiku_tier_span_limit      = ORIGIN(SSRAM) + LENGTH(SSRAM);
+    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_floor_default   = 0x50000;
+    INCLUDE arch/common/tiku_sram_layout.ld
 
     /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
     /* The MPU reserves 32 KB of stack budget + a 4 KB no-access guard below

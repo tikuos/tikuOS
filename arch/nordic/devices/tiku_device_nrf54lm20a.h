@@ -122,9 +122,9 @@
 /**
  * @brief RAM2: the upper SRAM bank, used for large buffers (the tier arena).
  *
- * Its own linker region (SRAM2, section .ram2, zeroed by the crt) plus a second
- * SRAM entry in the region table so tier sub-arenas validate.  The top 1 KB is
- * reserved for margin, so 255 KB is exposed.
+ * Its own linker region (SRAM2) plus a second SRAM entry in the region table
+ * so tier sub-arenas validate.  Named .ram2 statics place first; the tier is
+ * carved from the rest.  The top 1 KB is margin, so 255 KB is exposed.
  *
  * @note THE TOP OF THE BANK IS NOT FULLY BACKED on this silicon: a CPU write to
  *       0x2007FF00 bus-faults (measured on the LM20-DK's nRF54LM20B eng sample

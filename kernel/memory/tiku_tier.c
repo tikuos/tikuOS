@@ -70,20 +70,12 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  * TIKU_TIER_SRAM_SIZE (default 128 bytes). tiku_tier_init() points
  * tier_state[TIKU_MEM_SRAM].buf at this array.
  */
-#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-/* nRF54LM20A: the SRAM tier lives in RAM2 (the upper 256 KB bank, linker
- * section .ram2 in nrf54lm20a.ld, zeroed by the crt and listed as a second
- * SRAM region so tier sub-arenas validate).  Keeps the primary bank's
- * .bss/stack budget untouched by the tier -- same pattern as Ambiq's .ssram.
- * The device macro comes from the make line, like PLATFORM_AMBIQ above. */
-static uint8_t __attribute__((section(".ram2"),
-                              aligned(TIKU_MEM_ARCH_ALIGNMENT)))
-    tier_sram_buf[TIKU_TIER_SRAM_SIZE];
-#elif defined(TIKU_TIER_SRAM_DERIVED)
-/* RA8P1, Apollo and RP2350: the linker carves the span from whatever .bss or
- * .ssram left over, less a fixed reserve.  No array, so no size to keep in
- * step with the build configuration, and nothing for the crt to zero -- the
- * allocator does not promise zeroed memory. */
+#if defined(TIKU_TIER_SRAM_DERIVED)
+/* Every ARM part: the linker carves the span from whatever its tier bank has
+ * left after the statics (arch/common/tiku_sram_layout.ld -- .bss on
+ * RA8P1/RP2350/L15, .ssram on Ambiq, .ram2 on LM20).  No array, so no size
+ * to keep in step with the build configuration, and nothing for the crt to
+ * zero -- the allocator does not promise zeroed memory. */
 extern uint8_t __tier_sram_start;
 extern uint8_t __tier_sram_end;
 #define TIER_SRAM_BUF  (&__tier_sram_start)

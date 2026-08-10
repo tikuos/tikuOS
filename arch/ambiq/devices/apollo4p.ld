@@ -236,19 +236,12 @@ SECTIONS
     /* The reserve protects nothing here: the stack lives in TCM and nothing
      * sits above the tier in this bank.  The figure is arbitrary, kept equal
      * to the stack-side ports' margin; reclaim it if the capacity is wanted.
-     *
-     * Overridable so a link-contract test can squeeze the span from the top
-     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
-     * is required -- a bare --defsym symbol is not in scope for a script
-     * expression and errors out as undefined. */
-    TIKU_SSRAM_RESERVE = DEFINED(__tier_reserve_override)
-                       ? __tier_reserve_override : 32K;
-    __tier_sram_start = __ssram_top;
-    __tier_sram_end   = ORIGIN(SSRAM) + LENGTH(SSRAM) - TIKU_SSRAM_RESERVE;
-
-    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
-    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
-           "ERROR: Apollo SSRAM tier fell below its 256 KB floor -- a .ssram buffer grew into it")
+     */
+    __tiku_tier_span_start      = __ssram_top;
+    __tiku_tier_span_limit      = ORIGIN(SSRAM) + LENGTH(SSRAM);
+    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_floor_default   = 0x40000;
+    INCLUDE arch/common/tiku_sram_layout.ld
 
     /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
     ASSERT((__stack - _end) >= 0x1000,
@@ -263,7 +256,7 @@ SECTIONS
      * the Plus's MPU region 1 is 4 MB so it already covers this.  If the SRAM
      * tier ever outgrows physical SSRAM, the tail would fault at runtime. */
     ASSERT(__ssram_end <= 0x10260000,
-           "ERROR: .ssram (SRAM tier) runs past the 2 MB physical SSRAM -- shrink TIKU_TIER_SRAM_SIZE")
+           "ERROR: .ssram (SRAM tier) runs past the 2 MB physical SSRAM -- shrink the .ssram statics")
 
     /DISCARD/ :
     {

@@ -135,20 +135,12 @@ SECTIONS
      * and nothing sits above the tier in this bank.  The figure is arbitrary,
      * kept equal to the stack-side ports' margin; reclaim it if the capacity
      * is wanted.
-     *
-     * Overridable so a link-contract test can squeeze the span from the top
-     * without editing this file: --defsym=__tier_reserve_override=N.  DEFINED()
-     * is required -- a bare --defsym symbol is not in scope for a script
-     * expression and errors out as undefined. */
-    TIKU_AXISRAM_RESERVE = DEFINED(__tier_reserve_override)
-                         ? __tier_reserve_override : 32K;
-    __tier_sram_start = __axisram_top;
-    __tier_sram_end   = ORIGIN(AXISRAM) + LENGTH(AXISRAM)
-                      - TIKU_AXISRAM_RESERVE;
-
-    /* Must equal TIKU_TIER_SRAM_MIN for this MCU in the Makefile. */
-    ASSERT((__tier_sram_end - __tier_sram_start) >= 0x40000,
-           "ERROR: STM32N6 AXISRAM tier fell below its 256 KB floor -- an .axisram buffer grew into it")
+     */
+    __tiku_tier_span_start      = __axisram_top;
+    __tiku_tier_span_limit      = ORIGIN(AXISRAM) + LENGTH(AXISRAM);
+    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_floor_default   = 0x40000;
+    INCLUDE arch/common/tiku_sram_layout.ld
 
     _end = __uninit_end;
     PROVIDE(end = _end);
@@ -170,7 +162,7 @@ SECTIONS
      * than faulting -- no fault dump, no reset -- so an oversized arena would
      * wedge silently at boot; this makes it a link error instead. */
     ASSERT(__axisram_end <= 0x343C0000,
-           "tier arena runs past the top of AXI SRAM; lower TIKU_TIER_SRAM_SIZE")
+           "tier arena runs past the top of AXI SRAM; shrink the .axisram statics")
 
     /DISCARD/ :
     {
