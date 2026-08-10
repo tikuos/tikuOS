@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_psram.c - /sys/psram VFS nodes (Apollo510 external 64 MB PSRAM).
  *
- * State, IO clock, device size and the shipped RXDQSDELAY tap, all read-only.
- * Every value comes from the driver's bookkeeping and nothing here touches the
- * device, so a read while it is down cannot fault.
+ * State (writable: the lifecycle verbs up/down/sleep/wake), IO clock, device
+ * size and the shipped RXDQSDELAY tap.  Reads come from driver bookkeeping
+ * only, so a read while the device is down cannot fault.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,6 +18,7 @@
 #include "tiku.h"
 #include <arch/ambiq/tiku_psram_arch.h>
 #include <stdio.h>
+#include <string.h>
 
 /** @brief The lifecycle rung, from driver bookkeeping only. */
 static int
@@ -54,8 +55,49 @@ psram_tap_read(char *buf, size_t max)
     return snprintf(buf, max, "%u\n", t);
 }
 
+/**
+ * @brief Write handler for /sys/psram/state: the lifecycle verbs.
+ *
+ * "up" runs the full bring-up at 192 MHz (identity, scan, XIP, tier attach);
+ * "down" refuses while tier allocations are live -- the no-dangling-pointer
+ * contract, surfaced as a failed write; "sleep"/"wake" drive half-sleep.
+ */
+static int
+psram_state_write(const char *buf, size_t len)
+{
+    char v[8];
+    size_t n = 0;
+
+    while (n < len && n < sizeof(v) - 1u &&
+           buf[n] != '\n' && buf[n] != '\r' && buf[n] != '\0') {
+        v[n] = buf[n];
+        n++;
+    }
+    v[n] = '\0';
+
+    if (strcmp(v, "up") == 0) {
+        return (tiku_psram_up(TIKU_PSRAM_CLK_192MHZ, 1) == TIKU_PSRAM_OK)
+               ? 0 : -1;
+    }
+    if (strcmp(v, "down") == 0) {
+        return (tiku_psram_down(0) == TIKU_PSRAM_OK) ? 0 : -1;
+    }
+    if (strcmp(v, "sleep") == 0) {
+        return (tiku_psram_halfsleep() == TIKU_PSRAM_OK) ? 0 : -1;
+    }
+    if (strcmp(v, "wake") == 0) {
+        if (tiku_psram_wake() != TIKU_PSRAM_OK) {
+            return -1;
+        }
+        (void)tiku_psram_xip_enable(1);   /* wake leaves XIP unmapped */
+        return 0;
+    }
+    return -1;
+}
+
 const tiku_vfs_node_t tiku_vfs_tree_psram_children[] = {
-    { "state", TIKU_VFS_FILE, psram_state_read, NULL, NULL, 0 },
+    { "state", TIKU_VFS_FILE, psram_state_read, psram_state_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_SYS },
     { "hz",    TIKU_VFS_FILE, psram_hz_read,    NULL, NULL, 0 },
     { "size",  TIKU_VFS_FILE, psram_size_read,  NULL, NULL, 0 },
     { "tap",   TIKU_VFS_FILE, psram_tap_read,   NULL, NULL, 0 },
