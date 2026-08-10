@@ -89,7 +89,7 @@
  * rebuilt from scratch by tiku_proc_vfs_get() on each call so the
  * tree reflects the current registry state.  Because the contents
  * change at runtime, the tables cannot be const; they carry the
- * TIKU_PERSIST_WARM grade and are written only inside the MPU-unlock
+ * TIKU_RETAINED grade and are written only inside the MPU-unlock
  * window of tiku_proc_vfs_get().
  *
  * WARM, not durable `.persistent`: these tables are REBUILT on every
@@ -109,10 +109,10 @@
 
 /*
  * Backing nodes for every per-pid directory's file children; build_pid_files()
- * fills one row.  WARM grade, so the writes need the MPU unlock the rebuild
+ * fills one row.  RETAINED grade, so the writes need the MPU unlock the rebuild
  * holds.
  */
-static TIKU_PERSIST_WARM tiku_vfs_node_t
+static TIKU_RETAINED tiku_vfs_node_t
     pid_files[TIKU_PROCESS_MAX][PROC_FILES_PER_PID];
 
 /*
@@ -129,7 +129,7 @@ static TIKU_PERSIST_WARM tiku_vfs_node_t
  * up to one directory per registered process.  Sized for the worst case, WARM
  * grade, and rewritten on each _get() call.
  */
-static TIKU_PERSIST_WARM tiku_vfs_node_t
+static TIKU_RETAINED tiku_vfs_node_t
     proc_children[TIKU_PROCESS_MAX + PROC_FIXED_KIDS];
 
 /*
@@ -145,7 +145,7 @@ static const char * const pid_names[] = {
  * The top-level /proc directory node handed back to the VFS, stamped at the end
  * of _get() to point at the child table with the freshly computed count.
  */
-static TIKU_PERSIST_WARM tiku_vfs_node_t
+static TIKU_RETAINED tiku_vfs_node_t
     proc_root;
 
 /*---------------------------------------------------------------------------*/
@@ -814,17 +814,17 @@ static const tiku_vfs_read_fn catalog_name_readers[PROC_CATALOG_VFS_MAX] = {
 
 /*
  * Backing nodes for each catalog entry's file children.  The inner dimension is
- * 1 because an entry currently exposes only its name.  WARM grade, written
+ * 1 because an entry currently exposes only its name.  RETAINED grade, written
  * inside the _get() unlock window.
  */
-static TIKU_PERSIST_WARM tiku_vfs_node_t
+static TIKU_RETAINED tiku_vfs_node_t
     catalog_entry_files[PROC_CATALOG_VFS_MAX][1];
 
 /*
  * Child-node table for /proc/catalog: slot 0 is the count file, the rest hold
- * one directory per populated entry.  WARM grade, rebuilt on each _get() call.
+ * one directory per populated entry.  RETAINED grade, rebuilt on each _get() call.
  */
-static TIKU_PERSIST_WARM tiku_vfs_node_t
+static TIKU_RETAINED tiku_vfs_node_t
     catalog_children[1 + PROC_CATALOG_VFS_MAX];
 
 /* Catalog entry directory names are reused from pid_names[] above. */

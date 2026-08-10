@@ -89,7 +89,7 @@ void tiku_cpu_nordic_watchdog_kick_arch(void)
  * still catches it -- but this port stops WDT30 at boot, so a detected hang
  * becomes an infinite 128 MHz spin at ~5.9 mA with a dead console.
  *
- * @note AIRCR.SYSRESETREQ is a warm reset, so the .persistent.warm culprit
+ * @note AIRCR.SYSRESETREQ is a warm reset, so the .retained culprit
  *       record written just before this call survives into the next boot and
  *       shows up at /sys/boot/hang.
  */

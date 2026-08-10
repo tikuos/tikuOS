@@ -183,14 +183,14 @@ SECTIONS
         *(.uninit*)
         /* DURABLE grade: exact-match .persistent -- this window is
          * MRAM-mirrored (and on apollo510 MPU-read-only outside unlock
-         * windows).  Exact match so the WARM grade below cannot be
+         * windows).  Exact match so the RETAINED grade below cannot be
          * wildcard-swallowed into it.  (The old EXCLUDE_FILE net-kit
          * routing is retired: net buffers are placed explicitly at
          * their declarations, so no net object emits .persistent.) */
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* NOTE: the WARM grade does NOT live here.  DTCM is wiped across
+        /* NOTE: the RETAINED grade does NOT live here.  DTCM is wiped across
          * every reset on this part (hardware-verified 2026-07-15: a J-Link
          * marker in DTCM reads back all-zeros after a reset while an SSRAM
          * marker survives -- the secure bootloader runs through TCM before
@@ -216,12 +216,12 @@ SECTIONS
         *(.ssram*)
         . = ALIGN(32);
         __ssram_end = .;
-        /* WARM grade (TIKU_PERSIST_WARM): survives warm resets, reseeded on
+        /* RETAINED grade: survives warm resets, reseeded on
          * power cycle (magic self-primes).  Placed AFTER __ssram_end so the
          * crt's .ssram zero loop (__ssram_start..__ssram_end) skips it, and
          * in SSRAM rather than DTCM because DTCM is wiped across every reset
          * on this part (hardware-verified; see the .uninit note above). */
-        *(.persistent.warm*)
+        *(.retained*)
     } > SSRAM
 
     /* NOLOAD catch so any Ambiq HAL .shared / .resource_table symbols
@@ -240,7 +240,7 @@ SECTIONS
      * Derived rather than compiled in, for the reason the RA8P1 script gives:
      * a constant has to be chosen per build configuration and silently stops
      * matching the moment a .ssram buffer is added.  Placed after .shared so
-     * it clears every other tenant of the bank, including the WARM grade that
+     * it clears every other tenant of the bank, including the RETAINED grade that
      * sits past __ssram_end on this part.
      *
      * Being outside .ssram also keeps it out of the crt's zero loop

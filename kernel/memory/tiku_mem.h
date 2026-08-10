@@ -64,10 +64,10 @@
  * warm reset, without earning a slot in the (small, wear-limited)
  * NVM mirror.  On RP2350 the net stack held exactly that shape via a
  * linker carve-out, which left one attribute meaning two different
- * things.  TIKU_PERSIST_WARM names the weaker grade explicitly:
+ * things.  TIKU_RETAINED names the weaker grade explicitly:
  *
  *   .persistent        survives power cycles (durable, mirrored/FRAM)
- *   TIKU_PERSIST_WARM  survives warm resets only; never mirrored,
+ *   TIKU_RETAINED  survives warm resets only; never mirrored,
  *                      never MPU-protected, costs zero NVM
  *
  * On MSP430 (FRAM in place, everything cheap and durable) WARM
@@ -98,9 +98,9 @@
  * next port.  Naming the exception costs a future port nothing.
  */
 #if defined(PLATFORM_MSP430)
-#define TIKU_PERSIST_WARM  __attribute__((section(".persistent")))
+#define TIKU_RETAINED  __attribute__((section(".persistent")))
 #else
-#define TIKU_PERSIST_WARM  __attribute__((section(".persistent.warm")))
+#define TIKU_RETAINED  __attribute__((section(".retained")))
 #endif
 
 /*

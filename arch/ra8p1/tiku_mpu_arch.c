@@ -182,7 +182,7 @@ void tiku_mpu_arch_init_segments(void)
     mpu_region(MPU_RGN_STACK, guard_base() + MPU_STACK_GUARD_BYTES,
                (uintptr_t)&__stack, RA8P1_MPU_RBAR_AP_RW, 1,
                RA8P1_MPU_ATTR_NORMAL);
-    /* .uninit and the WARM survivors, non-cacheable.  A reset discards dirty
+    /* .uninit and the RETAINED survivors, non-cacheable.  A reset discards dirty
      * lines, so cached warm state reaches SRAM only once something happens to
      * evict it, so the newest writes are the ones lost.  The grade promises
      * survival, so the attribute belongs here rather than in a cache

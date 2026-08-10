@@ -32,11 +32,11 @@
  * whatever it is explaining.  Only an unproven-rung build carries it, so the
  * ladder is instrumented exactly while it is being brought up.
  */
-TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_freq_step;
+TIKU_RETAINED volatile uint32_t tiku_ra8p1_freq_step;
 /* Why the last rung change failed: 0xF1 mosc, 0xF2 MRCFREQ, 0xF3 lock
  * timeout (low byte carries OSCSF).  Survives the fallback that would
  * otherwise overwrite the step trail. */
-TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_freq_fail;
+TIKU_RETAINED volatile uint32_t tiku_ra8p1_freq_fail;
 #define STEP(n)  do { tiku_ra8p1_freq_step = (n); } while (0)
 #define FAILREC(v) do { tiku_ra8p1_freq_fail = (v); } while (0)
 #else

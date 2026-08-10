@@ -13,7 +13,7 @@
 
 #include "tiku_hang.h"
 #include <kernel/process/tiku_process.h>
-#include <kernel/memory/tiku_mem.h>       /* TIKU_PERSIST_WARM */
+#include <kernel/memory/tiku_mem.h>       /* TIKU_RETAINED */
 #include <hal/tiku_compiler.h>            /* TIKU_WEAK */
 
 /* Set by call_process() to the thread currently on the CPU, cleared to NULL
@@ -31,12 +31,12 @@ struct tiku_hang_rec {
 };
 
 /*
- * Cross-reset record.  .persistent.warm survives a warm reset (the reset a
+ * Cross-reset record.  .retained survives a warm reset (the reset a
  * hang triggers) and, per tiku_mem.h, sits OUTSIDE the NVM mirror + MPU
  * windows -- so the detector can write it from the tick ISR as a plain,
  * unlocked SRAM store, no NVM program, no MPU unlock.
  */
-static TIKU_PERSIST_WARM struct tiku_hang_rec tiku_hang_warm;
+static TIKU_RETAINED struct tiku_hang_rec tiku_hang_warm;
 
 /* This boot's view, captured by tiku_hang_boot_init() (plain .bss, zeroed at
  * boot).  Reads go here so the record stays visible all boot even after the
@@ -88,7 +88,7 @@ void tiku_hang_record(const struct tiku_process *p)
 {
     const char *n = (p != NULL && p->name != NULL) ? p->name : "?";
     uint8_t i;
-    /* .persistent.warm is warm-surviving SRAM on Cortex-M but MPU-write-
+    /* .retained is warm-surviving SRAM on Cortex-M but MPU-write-
      * protected FRAM on MSP430, so open the NVM window before storing the
      * culprit -- otherwise the MPU silently drops the write and the recovery
      * boot finds no record. */

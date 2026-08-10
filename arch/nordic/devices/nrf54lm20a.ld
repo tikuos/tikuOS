@@ -23,18 +23,18 @@
  * RRAM) and the RAM2 upper bank (SRAM2, the tier arena).  The FLPR SRAM carve
  * (top 16 KB of the LOWER bank) is identical to the L15 -- same VPR core, same
  * carve address on every nordic part.  The reserved-NVM geometry at the top of
- * RRAM (32 KB filestore + 8 KB durable persist) is identical to the L15.
+ * RRAM (carved NVM region + 16 KB persist partition) is identical to the L15.
  *
  * Layout in RRAM (grows up from 0x0):
  *   0x00000000 .vectors     (Cortex-M33 vector table at the RRAM base, VTOR=0)
  *   0x00000xxx .text/.rodata (code + read-only data)
  *   0x000xxxxx .data (LMA)   (initialised-data image, copied to SRAM at boot)
  *   ...        <free RRAM>    (code budget grows toward the reserved NVM tail)
- *   top-40 KB  reserved      (32 KB filestore + 8 KB durable-persist, both
+ *   above code reserved      (carved NVM region + 16 KB persist partition,
  *                            byte-writable behind the RRAMC WEN gate)
  *
  * Layout in SRAM (stack grows down from the top):
- *   .data / .bss / .uninit / .persistent.warm / __stack
+ *   .data / .bss / .uninit / .retained / __stack
  *
  * Symbols exposed to the kernel mirror the L15 script and the other ARM ports.
  */
@@ -212,7 +212,7 @@ SECTIONS
     } > SRAM
 
     /* -------- 5. Warm-reset survivor state (SRAM) ------------------- */
-    /* The WARM grade (`.persistent.warm` + the net stack's transient pools)
+    /* The RETAINED grade (`.retained` + the net stack's transient pools)
      * plus `.uninit` live in SRAM: skipped by zero-init, survive a warm reset,
      * reseeded on a power cycle.  The DURABLE grade (exact `.persistent`) is
      * NOT here -- it lives in RRAM below and survives power loss too. */
@@ -222,9 +222,9 @@ SECTIONS
         *(.uninit*)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade only (EXCLUDE_FILE net routing retired: net kits
+        /* RETAINED grade only (EXCLUDE_FILE net routing retired: net kits
          * place their buffers explicitly at the declarations). */
-        *(.persistent.warm*)
+        *(.retained*)
     } > SRAM
 
     /* End of static allocations in the PRIMARY bank (the .ram2 section below

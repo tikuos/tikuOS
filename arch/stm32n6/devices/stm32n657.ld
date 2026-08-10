@@ -102,7 +102,7 @@ SECTIONS
         __uninit_start = .;
         *(.uninit*)
         *(.persistent)
-        *(.persistent.warm)
+        *(.retained)
         . = ALIGN(4);
         __uninit_end = .;
     } > SRAM

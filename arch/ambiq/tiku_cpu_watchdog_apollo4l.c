@@ -139,7 +139,7 @@ void tiku_cpu_ambiq_watchdog_kick_arch(void) {
 
 /*
  * Reset for the check-in hang watchdog (tiku_hang).  NVIC_SystemReset() is a
- * warm reset, so the .persistent.warm culprit record survives to the recovery
+ * warm reset, so the .retained culprit record survives to the recovery
  * boot.  This is a separate, software-driven path from the hardware WDT above.
  */
 #include "kernel/cpu/tiku_hang.h"

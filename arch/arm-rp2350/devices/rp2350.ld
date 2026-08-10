@@ -218,8 +218,8 @@ SECTIONS
         *(.uninit*)
         /* Durable cells (boot counter, aliases, persist cells) -- backed up to
          * the 4 KB flash sector and MPU-protected. */
-        /* DURABLE grade: exact-match `.persistent` only, so the WARM
-         * grade below (`.persistent.warm`) cannot be swallowed by a
+        /* DURABLE grade: exact-match `.persistent` only, so the RETAINED
+         * grade below (`.retained`) cannot be swallowed by a
          * wildcard into the mirrored window.  (The old
          * EXCLUDE_FILE(*tiku_kits_net_*.o) object-name routing is
          * retired: the net kits' transient buffers are now placed
@@ -228,11 +228,11 @@ SECTIONS
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade (TIKU_PERSIST_WARM): NOLOAD SRAM after
+        /* RETAINED grade: NOLOAD SRAM after
          * __uninit_end — survives warm resets, but sits outside the
          * backed-up + MPU-protected window.  Everything here chose the
          * grade on purpose at its declaration. */
-        *(.persistent.warm*)
+        *(.retained*)
     } > SRAM
 
     /* End of static allocations (heap-style growth would start here).

@@ -139,12 +139,12 @@ SECTIONS
     } > SRAM
 
     /* -------- Warm-reset survivor state (SRAM) ----------------------- */
-    /* `.uninit` and the WARM grade sit outside .bss so the reset handler's
+    /* `.uninit` and the RETAINED grade sit outside .bss so the reset handler's
      * zero-fill skips them: they survive a warm reset and are reseeded on a
      * power cycle.  The DURABLE grade is not here: `.persistent` lives in
      * MRAM below and survives power loss too.
      *
-     * TIKU_PERSIST_WARM is "never mirrored, never MPU-protected", and its
+     * TIKU_RETAINED is "never mirrored, never MPU-protected", and its
      * callers write it unbracketed on purpose -- tiku_hang_boot_init() clears
      * the hang record at every boot.  Sweep it into the protected window and
      * that write MemManage-faults before the shell ever starts. */
@@ -153,7 +153,7 @@ SECTIONS
         __uninit_start = .;
         *(.uninit*)
         . = ALIGN(32);
-        *(.persistent.warm*)
+        *(.retained*)
         . = ALIGN(32);
         __uninit_end = .;
     } > SRAM

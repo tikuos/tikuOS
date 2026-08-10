@@ -39,7 +39,7 @@
  *
  *   MSP430    TIKU_DURABLE -- FRAM in place, survives power cycles, and FRAM
  *             is ample there.
- *   Cortex-M  TIKU_PERSIST_WARM -- survives a warm reset, reseeds on a power
+ *   Cortex-M  TIKU_RETAINED -- survives a warm reset, reseeds on a power
  *             cycle.  The ring is LINE_SIZE-scaled (~2 KB at 256 B x 8 deep),
  *             which would consume half of RP2350's entire 4 KB durable-small
  *             budget -- not worth it for command history.
@@ -50,7 +50,7 @@
 #ifdef PLATFORM_MSP430
 #define HIST_PERSISTENT TIKU_DURABLE
 #else
-#define HIST_PERSISTENT TIKU_PERSIST_WARM
+#define HIST_PERSISTENT TIKU_RETAINED
 #endif
 
 /** Ring entry: one stored command line */

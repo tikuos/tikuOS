@@ -28,7 +28,7 @@
  * also mean opening the NVM window from inside a fault handler, which is the
  * last place to re-enter the MPU path.
  */
-static TIKU_PERSIST_WARM tiku_ra8p1_fault_record_t fault_rec;
+static TIKU_RETAINED tiku_ra8p1_fault_record_t fault_rec;
 
 void tiku_ra8p1_fault_init(void)
 {

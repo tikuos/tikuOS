@@ -27,17 +27,17 @@
  *   0x00000xxx .text/.rodata (code + read-only data)
  *   0x000xxxxx .data (LMA)   (initialised-data image, copied to SRAM at boot)
  *   ...        <free RRAM>    (code budget grows toward the reserved NVM tail)
- *   top-40 KB  reserved      (two byte-writable NVM regions written behind the
- *                            RRAMC WEN gate: a 32 KB filestore -- the
- *                            tiku_nvm_region backend / TFS /data / nvmprobe --
- *                            and, at the very top, an 8 KB durable-persist
- *                            region holding exact `.persistent`; symbols below)
+ *   above code reserved      (two byte-writable NVM spans behind the RRAMC
+ *                            WEN gate: the carved NVM region -- 32 KB tier +
+ *                            TFS /data -- and, at the very top, the 16 KB
+ *                            persist partition holding exact `.persistent`;
+ *                            symbols below)
  *
  * Layout in SRAM (stack grows down from the top):
  *   .data              (initialised RAM, copied from its RRAM LMA at boot)
  *   .bss               (zeroed at boot)
  *   .uninit/.persistent(skipped by zero-init: warm-reset survivor state)
- *   .persistent.warm   (warm-survivor SRAM, outside any future NVM mirror)
+ *   .retained   (warm-survivor SRAM, outside any future NVM mirror)
  *   __stack            (top of SRAM, grows downward)
  *
  * Symbols exposed to the kernel mirror the other ARM ports (see rp2350.ld):
@@ -160,7 +160,7 @@ SECTIONS
     } > SRAM
 
     /* -------- 5. Warm-reset survivor state (SRAM) ------------------- */
-    /* The WARM grade (`.persistent.warm` + the net stack's transient pools)
+    /* The RETAINED grade (`.retained` + the net stack's transient pools)
      * plus `.uninit` live in SRAM: skipped by zero-init, survive a warm reset,
      * reseeded on a power cycle.  The DURABLE grade (exact `.persistent`) is
      * NOT here -- it lives in RRAM below and survives power loss too. */
@@ -170,9 +170,9 @@ SECTIONS
         *(.uninit*)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade only (EXCLUDE_FILE net routing retired: net kits
+        /* RETAINED grade only (EXCLUDE_FILE net routing retired: net kits
          * place their buffers explicitly at the declarations). */
-        *(.persistent.warm*)
+        *(.retained*)
     } > SRAM
 
     /* End of static allocations. Aliases for whichever name libc/kernel use. */

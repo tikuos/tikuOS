@@ -162,20 +162,20 @@ SECTIONS
         __uninit_start = .;
         *(.uninit*)
         /* DURABLE grade: exact-match .persistent -- this window is
-         * MRAM-mirrored.  Exact match so the WARM grade below cannot
+         * MRAM-mirrored.  Exact match so the RETAINED grade below cannot
          * be wildcard-swallowed into it.  (The old EXCLUDE_FILE net-kit
          * routing is retired: net buffers are placed explicitly at
          * their declarations, so no net object emits .persistent.) */
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* WARM grade (TIKU_PERSIST_WARM): survives warm resets, but
+        /* RETAINED grade: survives warm resets, but
          * sits OUTSIDE the mirror and the MPU-RO window.  Everything
          * here chose the grade on purpose at its declaration. */
-        /* Pad to the full 8 KB MPU envelope FIRST: the WARM grade
+        /* Pad to the full 8 KB MPU envelope FIRST: the RETAINED grade
          * below must sit outside the read-only region. */
         . = __uninit_start + 8192;
-        *(.persistent.warm*)
+        *(.retained*)
     } > TCM
 
     ASSERT((__uninit_end - __uninit_start) <= 8192,

@@ -60,10 +60,10 @@ static uint8_t cpu1_nmi_seeded;
  * armed source is counted rather than resetting the M85.  Strong here, so
  * the weak default stands in builds without this driver.
  */
-TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
+TIKU_RETAINED volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
 
 /** @brief Faults the payload has reported through the shared magic. */
-TIKU_PERSIST_WARM volatile uint32_t tiku_ra8p1_cpu1_fault_count;
+TIKU_RETAINED volatile uint32_t tiku_ra8p1_cpu1_fault_count;
 
 /** @brief Whether the current fault has been counted yet. */
 static uint8_t cpu1_fault_noticed;
