@@ -225,6 +225,10 @@ static int
 nvmfree_read(char *buf, size_t max)
 {
     tiku_mem_stats_t st;
+    /* Same self-wire as /sys/mem/tiers: before the first allocation the tier
+     * is unwired and stats fail, so this node read 0 on a board with a full
+     * 32 KB tier free.  Init is idempotent. */
+    (void)tiku_tier_init();
     if (tiku_tier_stats(TIKU_MEM_NVM, &st) != TIKU_MEM_OK) {
         return snprintf(buf, max, "0\n");
     }

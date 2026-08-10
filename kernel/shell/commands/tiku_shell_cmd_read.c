@@ -32,12 +32,16 @@
  * static, not on the (small) shell-task stack, so the larger size is safe.
  * Override TIKU_SHELL_READ_MAX in the build to trade RAM for capacity. */
 #ifndef TIKU_SHELL_READ_MAX
-#  if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
+#  if defined(__MSP430__)
+#    define TIKU_SHELL_READ_MAX 512     /* = one MSP430 FRAM slot            */
+#  else
 #    define TIKU_SHELL_READ_MAX 8192    /* holds a whole file-store slot (4 KB)
                                          * plus headroom for the /sys/vfs/manifest
-                                         * dump; these parts have RAM to spare  */
-#  else
-#    define TIKU_SHELL_READ_MAX 512     /* = one MSP430 FRAM slot            */
+                                         * dump; every ARM part has the RAM.
+                                         * Keep the carve-out on MSP430, not an
+                                         * allow-list of big parts: a port left
+                                         * off such a list truncates cat of
+                                         * /data files at 512 bytes.           */
 #  endif
 #endif
 
