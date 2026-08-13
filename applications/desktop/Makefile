@@ -22,7 +22,7 @@ CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 UI      := src/tiku_desk_gfx.c src/tiku_desk_font.c src/tiku_desk_ui.c
 UI_O    := $(patsubst src/%.c,$(BUILD)/%.o,$(UI))
 
-RUNTIME   := src/tiku_desk_app.c
+RUNTIME   := src/tiku_desk_app.c src/tiku_desk_x11.c
 RUNTIME_O := $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 
 LIB_TRANSPORT := $(BUILD)/libtiku_desk_transport.a
