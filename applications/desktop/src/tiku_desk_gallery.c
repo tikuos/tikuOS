@@ -1,0 +1,179 @@
+/*
+ * Tiku Desktop -- graphical interface to TikuOS devices.
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_desk_gallery.c - every control in every state, on one surface.
+ *
+ * S1's exit test: this image is what gets held against an R5 screenshot, so it
+ * shows the states side by side rather than a pretty arrangement.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <stdio.h>
+#include <string.h>
+
+#include "tiku_desk_ui.h"
+
+#ifndef TIKU_DESK_NO_X11
+int tiku_desk_x11_show(const tiku_desk_surface_t *s, const char *title);
+#endif
+
+static const char *const MENUS[] = { "File", "Edit", "View", "Window" };
+static const char *const MENUITEMS[] = {
+    "New Window", "Open...", "-", "Get Info", "Duplicate", "-", "Close"
+};
+static const char *const COLS[] = { "Name", "Type", "Value" };
+static const int COLW[] = { 150, 90, 110 };
+static const char *const ROWS[][3] = {
+    { "uptime",     "u32",  "27996"    },
+    { "boot_count", "u32",  "182"      },
+    { "led0",       "bool", "1"        },
+    { "state",      "text", "up"       },
+    { "nvmfree",    "u32",  "32768"    },
+};
+
+/** @brief Draw the gallery into @p s. */
+static void
+gallery(tiku_desk_surface_t *s)
+{
+    const tiku_desk_font_t *f = tiku_desk_font_plain();
+    tiku_desk_rect_t win, c;
+    int y;
+
+    tiku_desk_fill(s, (tiku_desk_rect_t){ 0, 0, s->w, s->h },
+                   TIKU_DESK_C_BACKDROP);
+
+    win = (tiku_desk_rect_t){ 20, 20, s->w - 40, s->h - 40 };
+    c = tiku_desk_ui_window(s, win, "Widget Gallery", 1);
+
+    tiku_desk_ui_menubar(s, (tiku_desk_rect_t){ c.x, c.y, c.w, 18 },
+                         MENUS, 4, 1);
+    y = c.y + 30;
+
+    /* Buttons: normal, pressed, default, focused, disabled. */
+    tiku_desk_text(s, f, c.x, y + f->ascent, "Buttons", TIKU_DESK_C_TEXT);
+    y += 20;
+    tiku_desk_ui_button(s, (tiku_desk_rect_t){ c.x, y, 80, 24 }, "Cancel",
+                        TIKU_DESK_S_NORMAL);
+    tiku_desk_ui_button(s, (tiku_desk_rect_t){ c.x + 90, y, 80, 24 },
+                        "Pressed", TIKU_DESK_S_PRESSED);
+    tiku_desk_ui_button(s, (tiku_desk_rect_t){ c.x + 180, y - 3, 86, 30 },
+                        "Default", TIKU_DESK_S_DEFAULT);
+    tiku_desk_ui_button(s, (tiku_desk_rect_t){ c.x + 276, y, 80, 24 },
+                        "Focused", TIKU_DESK_S_FOCUS);
+    tiku_desk_ui_button(s, (tiku_desk_rect_t){ c.x + 366, y, 80, 24 },
+                        "Disabled", TIKU_DESK_S_DISABLED);
+    y += 40;
+
+    /* Checkboxes and radios. */
+    tiku_desk_text(s, f, c.x, y + f->ascent, "Controls", TIKU_DESK_C_TEXT);
+    y += 20;
+    tiku_desk_ui_checkbox(s, (tiku_desk_rect_t){ c.x, y, 120, 16 },
+                          "Show hidden", TIKU_DESK_S_ON);
+    tiku_desk_ui_checkbox(s, (tiku_desk_rect_t){ c.x + 130, y, 120, 16 },
+                          "Live update", TIKU_DESK_S_NORMAL);
+    tiku_desk_ui_checkbox(s, (tiku_desk_rect_t){ c.x + 260, y, 120, 16 },
+                          "Focused", TIKU_DESK_S_FOCUS | TIKU_DESK_S_ON);
+    y += 22;
+    tiku_desk_ui_radio(s, (tiku_desk_rect_t){ c.x, y, 100, 16 },
+                       "Icon view", TIKU_DESK_S_ON);
+    tiku_desk_ui_radio(s, (tiku_desk_rect_t){ c.x + 130, y, 100, 16 },
+                       "List view", TIKU_DESK_S_NORMAL);
+    tiku_desk_ui_radio(s, (tiku_desk_rect_t){ c.x + 260, y, 100, 16 },
+                       "Disabled", TIKU_DESK_S_DISABLED);
+    y += 32;
+
+    /* Text fields. */
+    tiku_desk_ui_textfield(s, (tiku_desk_rect_t){ c.x, y, 200, 20 },
+                           "/sys/device/name", -1, TIKU_DESK_S_NORMAL);
+    tiku_desk_ui_textfield(s, (tiku_desk_rect_t){ c.x + 210, y, 160, 20 },
+                           "tiku", 4, TIKU_DESK_S_FOCUS);
+    tiku_desk_ui_button(s, (tiku_desk_rect_t){ c.x + 380, y - 2, 66, 24 },
+                        "Write", TIKU_DESK_S_NORMAL);
+    y += 34;
+
+    /* A list view with headers, a selection and both scrollbars. */
+    {
+        tiku_desk_rect_t lv = { c.x, y, 350, 130 };
+        tiku_desk_rect_t body = { lv.x, lv.y + 18, lv.w - 15, lv.h - 18 - 15 };
+        int rowh = f->height + 4, i;
+
+        tiku_desk_ui_list_header(s, (tiku_desk_rect_t){ lv.x, lv.y,
+                                                        lv.w - 15, 18 },
+                                 COLS, COLW, 3, 0);
+        tiku_desk_ui_sunken(s, body, TIKU_DESK_C_DOC);
+        tiku_desk_clip_set(s, tiku_desk_inset(body, 2));
+        for (i = 0; i < 5; i++) {
+            tiku_desk_rect_t row = { body.x + 2, body.y + 2 + i * rowh,
+                                     body.w - 4, rowh };
+            int sel = (i == 2);
+            int cx = row.x, k;
+
+            tiku_desk_fill(s, row, sel ? TIKU_DESK_C_SELECT
+                                       : TIKU_DESK_C_DOC);
+            for (k = 0; k < 3; k++) {
+                tiku_desk_text(s, f, cx + 5,
+                               row.y + (rowh - f->height) / 2 + f->ascent,
+                               ROWS[i][k],
+                               sel ? TIKU_DESK_C_SELTEXT : TIKU_DESK_C_TEXT);
+                cx += COLW[k];
+            }
+        }
+        tiku_desk_clip_reset(s);
+        tiku_desk_ui_scrollbar(s, (tiku_desk_rect_t){ lv.x + lv.w - 15,
+                                                      lv.y + 18, 15,
+                                                      lv.h - 18 - 15 },
+                               0.25f, 0.55f, 0);
+        tiku_desk_ui_scrollbar(s, (tiku_desk_rect_t){ lv.x, lv.y + lv.h - 15,
+                                                      lv.w - 15, 15 },
+                               0.0f, 0.7f, 1);
+    }
+
+    /* A dropped menu, to show the panel and its highlight. */
+    tiku_desk_ui_menu(s, (tiku_desk_rect_t){ c.x + 380, y + 4, 150,
+                                             7 * (f->height + 6) + 4 },
+                      MENUITEMS, 7, 3);
+
+    /* An inactive window, for the tab comparison. */
+    {
+        tiku_desk_rect_t w2 = { c.x + 190, c.y + c.h - 96, 250, 86 };
+        tiku_desk_rect_t c2 = tiku_desk_ui_window(s, w2, "Inactive", 0);
+        tiku_desk_text(s, f, c2.x + 6, c2.y + 4 + f->ascent,
+                       "An unfocused window wears", TIKU_DESK_C_TEXT);
+        tiku_desk_text(s, f, c2.x + 6, c2.y + 4 + f->height + f->ascent,
+                       "the grey tab.", TIKU_DESK_C_TEXT);
+    }
+}
+
+int
+main(int argc, char **argv)
+{
+    tiku_desk_surface_t *s = tiku_desk_surface_new(760, 560,
+                                                   TIKU_DESK_C_BACKDROP);
+    const char *png = NULL;
+    int show = 1, i;
+
+    if (s == NULL) {
+        return 1;
+    }
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) { png = argv[++i]; }
+        else if (strcmp(argv[i], "-q") == 0)            { show = 0; }
+    }
+    gallery(s);
+
+    if (png != NULL && tiku_desk_surface_png(s, png) == 0) {
+        printf("wrote %s (%dx%d)\n", png, s->w, s->h);
+    }
+#ifndef TIKU_DESK_NO_X11
+    if (show) {
+        (void)tiku_desk_x11_show(s, "Tiku Desktop -- Widget Gallery");
+    }
+#else
+    (void)show;
+#endif
+    tiku_desk_surface_free(s);
+    return 0;
+}
