@@ -28,8 +28,9 @@ tiku_desk_app_registry_add(tiku_desk_app_registry_t *registry,
 
     if (registry == NULL || descriptor == NULL || descriptor->id == NULL ||
         descriptor->id[0] == '\0' || descriptor->name == NULL ||
-        descriptor->name[0] == '\0' || descriptor->start == NULL ||
-        descriptor->stop == NULL ||
+        descriptor->name[0] == '\0' ||
+        ((descriptor->start == NULL) != (descriptor->stop == NULL)) ||
+        (descriptor->start == NULL && descriptor->run == NULL) ||
         registry->count >= TIKU_DESK_APP_MAX) {
         return -1;
     }
@@ -90,6 +91,17 @@ tiku_desk_app_instance_start(tiku_desk_app_instance_t *instance,
     instance->state = state;
     instance->running = 1;
     return 0;
+}
+
+int
+tiku_desk_app_run(const tiku_desk_app_descriptor_t *descriptor,
+                  int argc, char **argv)
+{
+    if (descriptor == NULL || descriptor->run == NULL || argc < 0 ||
+        (argc > 0 && argv == NULL)) {
+        return -1;
+    }
+    return descriptor->run(argc, argv);
 }
 
 int

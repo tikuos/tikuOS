@@ -27,6 +27,7 @@ typedef struct {
     void (*stop)(void *state);
     int  (*event)(void *state, const tiku_desk_event_t *event);
     void (*tick)(void *state, int64_t now_us);
+    int  (*run)(int argc, char **argv); /* blocking compatibility entry */
 } tiku_desk_app_descriptor_t;
 
 typedef struct {
@@ -63,5 +64,9 @@ int tiku_desk_app_instance_event(tiku_desk_app_instance_t *instance,
 void tiku_desk_app_instance_tick(tiku_desk_app_instance_t *instance,
                                  int64_t now_us);
 void tiku_desk_app_instance_stop(tiku_desk_app_instance_t *instance);
+
+/** Run a registered command-style app through its compatibility entry. */
+int tiku_desk_app_run(const tiku_desk_app_descriptor_t *descriptor,
+                      int argc, char **argv);
 
 #endif /* TIKU_DESK_APP_H_ */

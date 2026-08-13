@@ -15,6 +15,7 @@ static int failures;
 static int window_events;
 static int window_destroys;
 static int allow_close;
+static int ran;
 
 static void
 check(int ok, const char *message)
@@ -85,14 +86,30 @@ window_destroy(tiku_desk_window_t *window, void *context)
     window_destroys++;
 }
 
+static int
+run(int argc, char **argv)
+{
+    ran++;
+    return (argc == 1 && argv != NULL) ? 7 : -1;
+}
+
 int
 main(void)
 {
     static const tiku_desk_app_descriptor_t dummy = {
-        "test.dummy", "Dummy", start, stop, event, tick
+        .id = "test.dummy", .name = "Dummy", .start = start, .stop = stop,
+        .event = event, .tick = tick
     };
     static const tiku_desk_app_descriptor_t duplicate = {
-        "test.dummy", "Duplicate", start, stop, event, tick
+        .id = "test.dummy", .name = "Duplicate", .start = start,
+        .stop = stop, .event = event, .tick = tick
+    };
+    static const tiku_desk_app_descriptor_t command = {
+        .id = "test.command", .name = "Command", .run = run
+    };
+    static const tiku_desk_app_descriptor_t incomplete = {
+        .id = "test.incomplete", .name = "Incomplete", .start = start,
+        .run = run
     };
     tiku_desk_app_registry_t registry;
     tiku_desk_app_instance_t instance = { 0 };
@@ -111,6 +128,14 @@ main(void)
           tiku_desk_app_registry_find(&registry, "test.dummy") == &dummy &&
           tiku_desk_app_registry_at(&registry, 0) == &dummy,
           "the registry finds the same descriptor by id and position");
+    check(tiku_desk_app_registry_add(&registry, &command) == 1,
+          "a command-style application registers beside embedded apps");
+    check(tiku_desk_app_registry_add(&registry, &incomplete) < 0,
+          "a partial embedded lifecycle is refused even with a command entry");
+    check(tiku_desk_app_run(
+              tiku_desk_app_registry_find(&registry, "test.command"),
+              1, (char *[]){ "command", NULL }) == 7 && ran == 1,
+          "the registry-selected command entry runs with its arguments");
 
     check(tiku_desk_app_instance_start(&instance, &dummy, NULL) == 0,
           "the runtime starts an application instance");
