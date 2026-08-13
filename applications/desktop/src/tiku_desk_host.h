@@ -35,4 +35,8 @@ int tiku_desk_host_poll(tiku_desk_host_t *host, tiku_desk_event_t *event);
 /** @brief Select the horizontal-resize pointer while a divider is hot. */
 void tiku_desk_host_set_resize_cursor(tiku_desk_host_t *host, int enabled);
 
+/** @brief Read the current pointer position and logical modifier state. */
+int tiku_desk_host_pointer(tiku_desk_host_t *host, int *x, int *y,
+                           unsigned *modifiers);
+
 #endif /* TIKU_DESK_HOST_H_ */

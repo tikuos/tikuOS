@@ -52,6 +52,9 @@ typedef enum {
 #define TIKU_DESK_KEY_TAB      13u
 #define TIKU_DESK_KEY_MENU     14u
 #define TIKU_DESK_KEY_F2       15u
+#define TIKU_DESK_KEY_SHIFT    16u
+#define TIKU_DESK_KEY_CMD      17u
+#define TIKU_DESK_KEY_OPTION   18u
 
 typedef struct {
     tiku_desk_event_type_t type;

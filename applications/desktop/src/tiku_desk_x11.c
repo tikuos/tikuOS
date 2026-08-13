@@ -67,6 +67,14 @@ event_key(KeySym keysym)
     case XK_Tab:       return TIKU_DESK_KEY_TAB;
     case XK_Menu:      return TIKU_DESK_KEY_MENU;
     case XK_F2:        return TIKU_DESK_KEY_F2;
+    case XK_Shift_L:
+    case XK_Shift_R:   return TIKU_DESK_KEY_SHIFT;
+    case XK_Control_L:
+    case XK_Control_R: return TIKU_DESK_KEY_CMD;
+    case XK_Alt_L:
+    case XK_Alt_R:
+    case XK_Meta_L:
+    case XK_Meta_R:    return TIKU_DESK_KEY_OPTION;
     default:
         if (keysym >= XK_A && keysym <= XK_Z) {
             return (unsigned)(keysym - XK_A + 'a');
@@ -262,6 +270,25 @@ tiku_desk_host_set_resize_cursor(tiku_desk_host_t *host, int enabled)
     } else {
         XUndefineCursor(host->display, host->window);
     }
+}
+
+int
+tiku_desk_host_pointer(tiku_desk_host_t *host, int *x, int *y,
+                       unsigned *modifiers)
+{
+    Window root, child;
+    int root_x, root_y, local_x, local_y;
+    unsigned state;
+
+    if (host == NULL || !XQueryPointer(host->display, host->window,
+                                       &root, &child, &root_x, &root_y,
+                                       &local_x, &local_y, &state)) {
+        return 0;
+    }
+    if (x != NULL) { *x = local_x; }
+    if (y != NULL) { *y = local_y; }
+    if (modifiers != NULL) { *modifiers = event_modifiers(state); }
+    return 1;
 }
 
 /**
