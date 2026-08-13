@@ -22,7 +22,7 @@ CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 UI      := src/tiku_desk_gfx.c src/tiku_desk_font.c src/tiku_desk_ui.c
 UI_O    := $(patsubst src/%.c,$(BUILD)/%.o,$(UI))
 
-RUNTIME   := src/tiku_desk_app.c src/tiku_desk_x11.c
+RUNTIME   := src/tiku_desk_app.c src/tiku_desk_window.c src/tiku_desk_x11.c
 RUNTIME_O := $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 
 LIB_TRANSPORT := $(BUILD)/libtiku_desk_transport.a
@@ -58,7 +58,7 @@ $(GALLERY): $(BUILD)/tiku_desk_gallery.o $(BUILD)/tiku_desk_x11.o $(LIB_UI)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lX11
 	@echo "built $@"
 
-$(TEST_APP): tests/test_app.c $(LIB_RUNTIME)
+$(TEST_APP): tests/test_app.c $(LIB_RUNTIME) $(LIB_UI)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: $(TEST_APP)
