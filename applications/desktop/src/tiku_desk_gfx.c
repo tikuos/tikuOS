@@ -19,6 +19,47 @@
 #include <stdlib.h>
 #include <string.h>
 
+int
+tiku_desk_scale_coord(int value, int native_extent, int logical_extent)
+{
+    if (native_extent <= 0 || logical_extent <= 0) { return value; }
+    if (value < 0) { return -1; }
+    if (value >= native_extent) { return logical_extent; }
+    return (int)((int64_t)value * logical_extent / native_extent);
+}
+
+void
+tiku_desk_scale_pixels(tiku_desk_rgb_t *destination,
+                       int destination_width, int destination_height,
+                       const tiku_desk_rgb_t *source,
+                       int source_width, int source_height)
+{
+    int x, y;
+
+    if (destination == NULL || source == NULL || destination_width <= 0 ||
+        destination_height <= 0 || source_width <= 0 || source_height <= 0) {
+        return;
+    }
+    if (destination_width == source_width &&
+        destination_height == source_height) {
+        memcpy(destination, source, (size_t)source_width * source_height *
+                                    sizeof *source);
+        return;
+    }
+    for (y = 0; y < destination_height; y++) {
+        int source_y = (int)((int64_t)y * source_height /
+                             destination_height);
+
+        for (x = 0; x < destination_width; x++) {
+            int source_x = (int)((int64_t)x * source_width /
+                                 destination_width);
+
+            destination[y * destination_width + x] =
+                source[source_y * source_width + source_x];
+        }
+    }
+}
+
 tiku_desk_surface_t *
 tiku_desk_surface_new(int w, int h, tiku_desk_rgb_t bg)
 {

@@ -1,5 +1,6 @@
 #include "tiku_desk_app.h"
 #include "tiku_desk_window.h"
+#include "tiku_desk_gfx.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -118,6 +119,19 @@ main(void)
     tiku_desk_window_t *window;
     tiku_desk_window_t *hit = NULL;
     tiku_desk_rect_t frame = { 220, 244, 560, 191 };
+    tiku_desk_rgb_t source[4] = { 1, 2, 3, 4 };
+    tiku_desk_rgb_t scaled[16] = { 0 };
+
+    check(tiku_desk_scale_coord(960, 1920, 1000) == 500 &&
+          tiku_desk_scale_coord(540, 1080, 680) == 340,
+          "maximized native input maps back to the logical desktop");
+    check(tiku_desk_scale_coord(-3, 1920, 1000) == -1 &&
+          tiku_desk_scale_coord(1920, 1920, 1000) == 1000,
+          "input outside the native window remains outside logically");
+    tiku_desk_scale_pixels(scaled, 4, 4, source, 2, 2);
+    check(scaled[0] == 1 && scaled[3] == 2 && scaled[12] == 3 &&
+          scaled[15] == 4,
+          "a resized host fills every native corner from the logical surface");
 
     tiku_desk_app_registry_init(&registry);
     check(tiku_desk_app_registry_add(&registry, &dummy) == 0,

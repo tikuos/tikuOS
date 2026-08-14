@@ -84,6 +84,15 @@ void tiku_desk_vline(tiku_desk_surface_t *s, int x, int y, int len,
                      tiku_desk_rgb_t c);
 void tiku_desk_pixel(tiku_desk_surface_t *s, int x, int y, tiku_desk_rgb_t c);
 
+/** @brief Map one native input coordinate into a logical surface. */
+int tiku_desk_scale_coord(int value, int native_extent, int logical_extent);
+
+/** @brief Scale a logical surface into a native 32-bit pixel buffer. */
+void tiku_desk_scale_pixels(tiku_desk_rgb_t *destination,
+                            int destination_width, int destination_height,
+                            const tiku_desk_rgb_t *source,
+                            int source_width, int source_height);
+
 /**
  * @brief Invert the pixels along a rectangle's outline.
  *
