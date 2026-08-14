@@ -13,9 +13,11 @@
  */
 
 #include <X11/Xlib.h>
+#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <X11/cursorfont.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,11 +31,48 @@ struct tiku_desk_host {
     XImage *image;
     Atom delete_window;
     Cursor resize_cursor;
+    int scale;
     int logical_width;
     int logical_height;
     int native_width;
     int native_height;
 };
+
+/** @brief Read the desktop's integer UI scale from its Xft DPI setting. */
+static int
+display_scale(Display *display)
+{
+    XrmDatabase database;
+    XrmValue value;
+    char *manager, *type = NULL;
+    double dpi = 96.0;
+    int scale;
+
+    manager = XResourceManagerString(display);
+    if (manager != NULL) {
+        XrmInitialize();
+        database = XrmGetStringDatabase(manager);
+        if (database != NULL &&
+            XrmGetResource(database, "Xft.dpi", "Xft.Dpi", &type,
+                           &value) && value.addr != NULL) {
+            dpi = strtod(value.addr, NULL);
+        }
+        if (database != NULL) { XrmDestroyDatabase(database); }
+    }
+    scale = (int)(dpi / 96.0 + 0.5);
+    if (scale < 1) { scale = 1; }
+    if (scale > 4) { scale = 4; }
+    return scale;
+}
+
+/** @brief Map a physical pointer position into the logical framebuffer. */
+static int
+logical_coord(int value, int native_extent, int logical_extent)
+{
+    if (value < 0) { return -1; }
+    if (value >= native_extent) { return logical_extent; }
+    return (int)((int64_t)value * logical_extent / native_extent);
+}
 
 /** @brief Replace the XImage after the window manager changes its size. */
 static int
@@ -61,6 +100,8 @@ resize_image(tiku_desk_host_t *host, int width, int height)
     host->image = image;
     host->native_width = width;
     host->native_height = height;
+    host->logical_width = (width + host->scale - 1) / host->scale;
+    host->logical_height = (height + host->scale - 1) / host->scale;
     return 0;
 }
 
@@ -134,9 +175,17 @@ tiku_desk_host_open(int width, int height, const char *title)
         return NULL;
     }
     screen = DefaultScreen(host->display);
+    host->scale = display_scale(host->display);
+    if (width > INT_MAX / host->scale ||
+        height > INT_MAX / host->scale) {
+        tiku_desk_host_close(host);
+        return NULL;
+    }
     host->window = XCreateSimpleWindow(host->display,
-        RootWindow(host->display, screen), 0, 0, (unsigned)width,
-        (unsigned)height, 0, BlackPixel(host->display, screen),
+        RootWindow(host->display, screen), 0, 0,
+        (unsigned)(width * host->scale),
+        (unsigned)(height * host->scale), 0,
+        BlackPixel(host->display, screen),
         WhitePixel(host->display, screen));
     XSelectInput(host->display, host->window,
                  ExposureMask | KeyPressMask | KeyReleaseMask |
@@ -149,14 +198,13 @@ tiku_desk_host_open(int width, int height, const char *title)
                (title != NULL) ? title : "TikuOS");
     XMapWindow(host->display, host->window);
     host->gc = XCreateGC(host->display, host->window, 0, NULL);
-    if (resize_image(host, width, height) != 0) {
+    if (resize_image(host, width * host->scale,
+                     height * host->scale) != 0) {
         tiku_desk_host_close(host);
         return NULL;
     }
     host->resize_cursor = XCreateFontCursor(host->display,
                                             XC_sb_h_double_arrow);
-    host->logical_width = width;
-    host->logical_height = height;
     return host;
 }
 
@@ -188,9 +236,9 @@ int
 tiku_desk_host_present(tiku_desk_host_t *host,
                        const tiku_desk_surface_t *surface)
 {
-    if (host == NULL || surface == NULL ||
+    if (host == NULL || surface == NULL || host->image == NULL ||
         surface->w != host->logical_width ||
-        surface->h != host->logical_height || host->image == NULL) {
+        surface->h != host->logical_height) {
         return -1;
     }
     tiku_desk_scale_pixels((tiku_desk_rgb_t *)host->image->data,
@@ -246,20 +294,24 @@ tiku_desk_host_poll(tiku_desk_host_t *host, tiku_desk_event_t *event)
         event->type = (native.type == ButtonPress)
                           ? TIKU_DESK_EVENT_POINTER_DOWN
                           : TIKU_DESK_EVENT_POINTER_UP;
-        event->x = tiku_desk_scale_coord(native.xbutton.x,
-            host->native_width, host->logical_width);
-        event->y = tiku_desk_scale_coord(native.xbutton.y,
-            host->native_height, host->logical_height);
+        event->x = logical_coord(native.xbutton.x, host->native_width,
+                                 host->logical_width);
+        event->y = logical_coord(native.xbutton.y, host->native_height,
+                                 host->logical_height);
         event->button = native.xbutton.button;
         event->modifiers = event_modifiers(native.xbutton.state);
         event->time_us = (int64_t)native.xbutton.time * 1000;
         break;
     case MotionNotify:
+        while (XCheckTypedWindowEvent(host->display, host->window,
+                                      MotionNotify, &native)) {
+            /* Only the newest position matters before the next frame. */
+        }
         event->type = TIKU_DESK_EVENT_POINTER_MOVE;
-        event->x = tiku_desk_scale_coord(native.xmotion.x,
-            host->native_width, host->logical_width);
-        event->y = tiku_desk_scale_coord(native.xmotion.y,
-            host->native_height, host->logical_height);
+        event->x = logical_coord(native.xmotion.x, host->native_width,
+                                 host->logical_width);
+        event->y = logical_coord(native.xmotion.y, host->native_height,
+                                 host->logical_height);
         event->modifiers = event_modifiers(native.xmotion.state);
         event->time_us = (int64_t)native.xmotion.time * 1000;
         break;
@@ -271,12 +323,13 @@ tiku_desk_host_poll(tiku_desk_host_t *host, tiku_desk_event_t *event)
         break;
     case ConfigureNotify:
         event->type = TIKU_DESK_EVENT_RESIZE;
-        event->width = native.xconfigure.width;
-        event->height = native.xconfigure.height;
-        if (event->width != host->native_width ||
-            event->height != host->native_height) {
-            (void)resize_image(host, event->width, event->height);
+        if (native.xconfigure.width != host->native_width ||
+            native.xconfigure.height != host->native_height) {
+            (void)resize_image(host, native.xconfigure.width,
+                               native.xconfigure.height);
         }
+        event->width = host->logical_width;
+        event->height = host->logical_height;
         break;
     case ClientMessage:
         if ((Atom)native.xclient.data.l[0] == host->delete_window) {
@@ -317,12 +370,12 @@ tiku_desk_host_pointer(tiku_desk_host_t *host, int *x, int *y,
         return 0;
     }
     if (x != NULL) {
-        *x = tiku_desk_scale_coord(local_x, host->native_width,
-                                   host->logical_width);
+        *x = logical_coord(local_x, host->native_width,
+                           host->logical_width);
     }
     if (y != NULL) {
-        *y = tiku_desk_scale_coord(local_y, host->native_height,
-                                   host->logical_height);
+        *y = logical_coord(local_y, host->native_height,
+                           host->logical_height);
     }
     if (modifiers != NULL) { *modifiers = event_modifiers(state); }
     return 1;

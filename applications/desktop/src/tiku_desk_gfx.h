@@ -60,6 +60,10 @@ typedef struct {
 /** @brief Allocate a surface and fill it with @p bg.  NULL on failure. */
 tiku_desk_surface_t *tiku_desk_surface_new(int w, int h, tiku_desk_rgb_t bg);
 
+/** @brief Replace a surface with a newly cleared framebuffer. */
+int tiku_desk_surface_resize(tiku_desk_surface_t *s, int w, int h,
+                             tiku_desk_rgb_t bg);
+
 void tiku_desk_surface_free(tiku_desk_surface_t *s);
 
 /** @brief Restrict drawing to @p r (intersected with the surface). */
@@ -84,10 +88,7 @@ void tiku_desk_vline(tiku_desk_surface_t *s, int x, int y, int len,
                      tiku_desk_rgb_t c);
 void tiku_desk_pixel(tiku_desk_surface_t *s, int x, int y, tiku_desk_rgb_t c);
 
-/** @brief Map one native input coordinate into a logical surface. */
-int tiku_desk_scale_coord(int value, int native_extent, int logical_extent);
-
-/** @brief Scale a logical surface into a native 32-bit pixel buffer. */
+/** @brief Expand a logical surface into a native framebuffer. */
 void tiku_desk_scale_pixels(tiku_desk_rgb_t *destination,
                             int destination_width, int destination_height,
                             const tiku_desk_rgb_t *source,

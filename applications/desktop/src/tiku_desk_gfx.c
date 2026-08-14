@@ -19,31 +19,42 @@
 #include <stdlib.h>
 #include <string.h>
 
-int
-tiku_desk_scale_coord(int value, int native_extent, int logical_extent)
-{
-    if (native_extent <= 0 || logical_extent <= 0) { return value; }
-    if (value < 0) { return -1; }
-    if (value >= native_extent) { return logical_extent; }
-    return (int)((int64_t)value * logical_extent / native_extent);
-}
-
 void
 tiku_desk_scale_pixels(tiku_desk_rgb_t *destination,
                        int destination_width, int destination_height,
                        const tiku_desk_rgb_t *source,
                        int source_width, int source_height)
 {
-    int x, y;
+    int scale, x, y, repeat;
 
     if (destination == NULL || source == NULL || destination_width <= 0 ||
         destination_height <= 0 || source_width <= 0 || source_height <= 0) {
         return;
     }
+    scale = destination_width / source_width;
+    if (scale > 1 && destination_width == source_width * scale &&
+        destination_height == source_height * scale) {
+        for (y = 0; y < source_height; y++) {
+            tiku_desk_rgb_t *row = destination +
+                (size_t)y * scale * destination_width;
+
+            for (x = 0; x < source_width; x++) {
+                for (repeat = 0; repeat < scale; repeat++) {
+                    row[x * scale + repeat] =
+                        source[(size_t)y * source_width + x];
+                }
+            }
+            for (repeat = 1; repeat < scale; repeat++) {
+                memcpy(row + (size_t)repeat * destination_width, row,
+                       (size_t)destination_width * sizeof *row);
+            }
+        }
+        return;
+    }
     if (destination_width == source_width &&
         destination_height == source_height) {
-        memcpy(destination, source, (size_t)source_width * source_height *
-                                    sizeof *source);
+        memcpy(destination, source,
+               (size_t)source_width * source_height * sizeof *source);
         return;
     }
     for (y = 0; y < destination_height; y++) {
@@ -54,8 +65,8 @@ tiku_desk_scale_pixels(tiku_desk_rgb_t *destination,
             int source_x = (int)((int64_t)x * source_width /
                                  destination_width);
 
-            destination[y * destination_width + x] =
-                source[source_y * source_width + source_x];
+            destination[(size_t)y * destination_width + x] =
+                source[(size_t)source_y * source_width + source_x];
         }
     }
 }
@@ -85,6 +96,33 @@ tiku_desk_surface_new(int w, int h, tiku_desk_rgb_t bg)
     }
     tiku_desk_clip_reset(s);
     return s;
+}
+
+int
+tiku_desk_surface_resize(tiku_desk_surface_t *s, int w, int h,
+                         tiku_desk_rgb_t bg)
+{
+    tiku_desk_rgb_t *pixels;
+    size_t i, count;
+
+    if (s == NULL || w <= 0 || h <= 0 ||
+        (size_t)w > SIZE_MAX / sizeof *pixels / (size_t)h) {
+        return -1;
+    }
+    count = (size_t)w * (size_t)h;
+    pixels = malloc(count * sizeof *pixels);
+    if (pixels == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; i++) {
+        pixels[i] = bg;
+    }
+    free(s->px);
+    s->px = pixels;
+    s->w = w;
+    s->h = h;
+    tiku_desk_clip_reset(s);
+    return 0;
 }
 
 void

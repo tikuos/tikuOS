@@ -118,20 +118,30 @@ main(void)
     tiku_desk_workspace_t *workspace;
     tiku_desk_window_t *window;
     tiku_desk_window_t *hit = NULL;
+    tiku_desk_surface_t *surface;
     tiku_desk_rect_t frame = { 220, 244, 560, 191 };
     tiku_desk_rgb_t source[4] = { 1, 2, 3, 4 };
     tiku_desk_rgb_t scaled[16] = { 0 };
 
-    check(tiku_desk_scale_coord(960, 1920, 1000) == 500 &&
-          tiku_desk_scale_coord(540, 1080, 680) == 340,
-          "maximized native input maps back to the logical desktop");
-    check(tiku_desk_scale_coord(-3, 1920, 1000) == -1 &&
-          tiku_desk_scale_coord(1920, 1920, 1000) == 1000,
-          "input outside the native window remains outside logically");
+    surface = tiku_desk_surface_new(2, 2, TIKU_DESK_C_PANEL);
+    check(surface != NULL &&
+          tiku_desk_surface_resize(surface, 4, 3,
+                                   TIKU_DESK_C_BACKDROP) == 0 &&
+          surface->w == 4 && surface->h == 3 &&
+          surface->clip.x == 0 && surface->clip.y == 0 &&
+          surface->clip.w == 4 && surface->clip.h == 3 &&
+          surface->px[0] == TIKU_DESK_C_BACKDROP &&
+          surface->px[11] == TIKU_DESK_C_BACKDROP,
+          "a resized shell redraws against the host's current frame");
+    check(tiku_desk_surface_resize(surface, 0, 3,
+                                   TIKU_DESK_C_BACKDROP) < 0 &&
+          surface->w == 4 && surface->h == 3,
+          "an invalid resize leaves the current framebuffer intact");
+    tiku_desk_surface_free(surface);
     tiku_desk_scale_pixels(scaled, 4, 4, source, 2, 2);
-    check(scaled[0] == 1 && scaled[3] == 2 && scaled[12] == 3 &&
-          scaled[15] == 4,
-          "a resized host fills every native corner from the logical surface");
+    check(scaled[0] == 1 && scaled[1] == 1 && scaled[4] == 1 &&
+          scaled[3] == 2 && scaled[12] == 3 && scaled[15] == 4,
+          "integer HiDPI expansion preserves sharp logical pixels");
 
     tiku_desk_app_registry_init(&registry);
     check(tiku_desk_app_registry_add(&registry, &dummy) == 0,
