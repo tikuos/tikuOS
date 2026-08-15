@@ -199,6 +199,79 @@ tiku_desk_pixel(tiku_desk_surface_t *s, int x, int y, tiku_desk_rgb_t c)
 }
 
 void
+tiku_desk_blit(tiku_desk_surface_t *dst, int x, int y,
+               const tiku_desk_surface_t *src)
+{
+    int y0, y1, x0, x1, row;
+
+    if (dst == NULL || src == NULL || dst->px == NULL || src->px == NULL) {
+        return;
+    }
+    x0 = x;
+    y0 = y;
+    x1 = x + src->w;
+    y1 = y + src->h;
+    /* The clip alone: it is held inside the surface, so trimming to it
+     * trims to the surface too. */
+    if (x0 < dst->clip.x)               { x0 = dst->clip.x; }
+    if (y0 < dst->clip.y)               { y0 = dst->clip.y; }
+    if (x1 > dst->clip.x + dst->clip.w) { x1 = dst->clip.x + dst->clip.w; }
+    if (y1 > dst->clip.y + dst->clip.h) { y1 = dst->clip.y + dst->clip.h; }
+    for (row = y0; row < y1; row++) {
+        memcpy(dst->px + (long)row * dst->w + x0,
+               src->px + (long)(row - y) * src->w + (x0 - x),
+               (size_t)(x1 - x0) * sizeof *dst->px);
+    }
+}
+
+void
+tiku_desk_copy_bits(tiku_desk_surface_t *s, tiku_desk_rect_t src, int dx,
+                    int dy)
+{
+    int y, x0, y0, x1, y1, w;
+
+    if (s == NULL || (dx == 0 && dy == 0) || src.w <= 0 || src.h <= 0) {
+        return;
+    }
+    /* Clipped on BOTH ends: the source is read from the surface and the
+     * destination is written into the clip, so a block that would run off
+     * either is trimmed before a single pixel moves.  The destination
+     * answers to the clip like every other way of drawing -- a list that
+     * slides its rows must not carry them over its own border. */
+    x0 = src.x;
+    y0 = src.y;
+    x1 = src.x + src.w;
+    y1 = src.y + src.h;
+    if (x0 < 0) { x0 = 0; }
+    if (y0 < 0) { y0 = 0; }
+    if (x1 > s->w) { x1 = s->w; }
+    if (y1 > s->h) { y1 = s->h; }
+    if (x0 + dx < s->clip.x) { x0 = s->clip.x - dx; }
+    if (y0 + dy < s->clip.y) { y0 = s->clip.y - dy; }
+    if (x1 + dx > s->clip.x + s->clip.w) { x1 = s->clip.x + s->clip.w - dx; }
+    if (y1 + dy > s->clip.y + s->clip.h) { y1 = s->clip.y + s->clip.h - dy; }
+    w = x1 - x0;
+    if (w <= 0 || y1 <= y0) {
+        return;
+    }
+    if (dy > 0) {
+        /* Downwards: the bottom scanline first, or the copy overwrites
+         * the rows it has not read yet. */
+        for (y = y1 - 1; y >= y0; y--) {
+            memmove(s->px + (long)(y + dy) * s->w + x0 + dx,
+                    s->px + (long)y * s->w + x0,
+                    (size_t)w * sizeof *s->px);
+        }
+    } else {
+        for (y = y0; y < y1; y++) {
+            memmove(s->px + (long)(y + dy) * s->w + x0 + dx,
+                    s->px + (long)y * s->w + x0,
+                    (size_t)w * sizeof *s->px);
+        }
+    }
+}
+
+void
 tiku_desk_fill(tiku_desk_surface_t *s, tiku_desk_rect_t r, tiku_desk_rgb_t c)
 {
     int x, y, x0, y0, x1, y1;

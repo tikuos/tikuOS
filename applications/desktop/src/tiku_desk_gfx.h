@@ -75,6 +75,30 @@ void tiku_desk_clip_reset(tiku_desk_surface_t *s);
 /** @brief Apply a BeOS tint to a colour (see the constants above). */
 tiku_desk_rgb_t tiku_desk_tint(tiku_desk_rgb_t c, float tint);
 
+/**
+ * @brief Move a block of pixels within the surface (CopyBits).
+ *
+ * What a list does when a row is inserted or removed: the rows below it are
+ * the same pixels a row further down or up.  Source and destination are both
+ * clipped, and the two may overlap.
+ *
+ * @param src Where the pixels are now.
+ * @param dx  How far right to put them, negative for left.
+ * @param dy  How far down, negative for up.
+ */
+void tiku_desk_copy_bits(tiku_desk_surface_t *s, tiku_desk_rect_t src,
+                         int dx, int dy);
+
+/**
+ * @brief Put one surface's pixels into another at @p x, @p y.
+ *
+ * How a window with pixels of its own reaches the screen: it keeps its
+ * content between frames and hands the whole thing over each time, so a
+ * frame that painted one row still shows the others.
+ */
+void tiku_desk_blit(tiku_desk_surface_t *dst, int x, int y,
+                    const tiku_desk_surface_t *src);
+
 void tiku_desk_fill(tiku_desk_surface_t *s, tiku_desk_rect_t r,
                     tiku_desk_rgb_t c);
 
