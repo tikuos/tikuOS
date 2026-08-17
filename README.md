@@ -52,6 +52,35 @@ external NOR.
 
 ---
 
+## Getting the Source
+
+```bash
+git clone --recurse-submodules https://github.com/tikuos/tikuOS.git
+cd tikuOS
+```
+
+`drivers/` is a submodule pointing at
+[tikuos/drivers](https://github.com/tikuos/drivers) — `--recurse-submodules` is
+what fills it in. On a clone made without it, run
+`git submodule update --init --recursive`. With `drivers/` absent the build
+still works: the Makefile's `HAS_DRIVERS` auto-detect falls back to the in-tree
+empty driver table.
+
+The Tracker application is a **separate, private repository** rather than a
+submodule, and `applications/tracker/` is git-ignored here on purpose. Clone it
+into place if you have access and need it:
+
+```bash
+git clone https://github.com/tikuos/tracker.git applications/tracker
+```
+
+Keeping it out of this index is deliberate: a public clone of tikuOS must never
+fail on a repository the person cloning cannot read. The other companion
+checkouts named in `.gitignore` — `TikuBench/`, `tikukits/`, `tikuConsole/` —
+follow the same rule. They live inside this tree but are versioned separately.
+
+---
+
 ## Quick Start
 
 ```bash
