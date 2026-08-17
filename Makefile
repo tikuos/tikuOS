@@ -293,6 +293,10 @@ BOARD_CAP_DEFINES := $(foreach c,$(BOARD_CAPS_$(BOARD)),-DTIKU_BOARD_HAS_$(c)=1)
 # ADD sources, include paths and -D macros; it may not patch mainline sources.
 # ---------------------------------------------------------------------------
 -include experiment/experiment.mk
+# Apps overlay: same contract, but for programs that RUN ON TikuOS (a
+# process + VFS client per app) rather than kernel features.  Exports
+# APPL_SRCS / APPL_CFLAGS, appended beside the experiment overlay's below.
+-include applications/applications.mk
 
 # Capability refusals -- asked HERE, not inside a platform block
 #
@@ -1927,6 +1931,8 @@ endif
 # opted in (see the overlay include above).
 SRCS   += $(EXP_SRCS)
 CFLAGS += $(EXP_CFLAGS)
+SRCS   += $(APPL_SRCS)
+CFLAGS += $(APPL_CFLAGS)
 
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c

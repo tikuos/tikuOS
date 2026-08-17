@@ -559,6 +559,101 @@ void tiku_vfs_unwatch_all(struct tiku_process *p);
 void tiku_vfs_notify(const tiku_vfs_node_t *node);
 
 /*---------------------------------------------------------------------------*/
+/* CHANGE RECORDS -- what changed, not merely that something did             */
+/*---------------------------------------------------------------------------*/
+/*
+ * A watch event says "this node was touched".  That is enough for a
+ * subscriber holding one node, and not enough for anything holding a
+ * LISTING: a browser cannot tell an appearing node from a changed one,
+ * so it has to re-read the whole namespace to find out, on every tick.
+ *
+ * The ring below answers the question instead.  Each notify appends
+ * {node, opcode, sequence}; a reader drains it and learns what happened
+ * and to which node.  Two properties make it cheap enough for a static
+ * device: it is fixed-size SRAM, and it DROPS rather than blocks --
+ * losing records is safe because the reader is told it happened and can
+ * fall back to a re-read, whereas blocking an ISR is not.
+ */
+
+/** @brief What happened to a node. */
+typedef enum {
+    TIKU_VFS_OP_CHANGED = 0,   /* value moved: a write, or a driver     */
+    TIKU_VFS_OP_CREATED,       /* appeared in a dynamic directory       */
+    TIKU_VFS_OP_REMOVED,       /* gone from a dynamic directory         */
+    TIKU_VFS_OP_MOVED          /* same node, new name                   */
+} tiku_vfs_op_t;
+
+/** @brief Change-ring capacity, in records. */
+#ifndef TIKU_VFS_EVENTS_MAX
+#define TIKU_VFS_EVENTS_MAX  16
+#endif
+
+/** @brief One change record. */
+typedef struct {
+    const tiku_vfs_node_t *node;
+    uint8_t                op;      /* tiku_vfs_op_t                    */
+    uint16_t               seq;     /* wraps; gaps mean records were lost */
+} tiku_vfs_change_t;
+
+/**
+ * @brief Ring the watchers of @p node AND record what happened.
+ *
+ * The opcode-carrying form of tiku_vfs_notify().  ISR-safe.  Plain
+ * tiku_vfs_notify() is this with TIKU_VFS_OP_CHANGED, which is what a
+ * value move is.
+ *
+ * @param node  The node that changed
+ * @param op    What happened to it
+ */
+void tiku_vfs_notify_op(const tiku_vfs_node_t *node, tiku_vfs_op_t op);
+
+/**
+ * @brief Take the pending change records, oldest first.
+ *
+ * Draining is destructive: a record is delivered once.  A reader that
+ * wants them shared should read /sys/vfs/events, which renders the same
+ * ring as text.
+ *
+ * @param out  Destination array (NULL to discard)
+ * @param max  Capacity of @p out
+ * @return Records written
+ */
+uint8_t tiku_vfs_events_take(tiku_vfs_change_t *out, uint8_t max);
+
+/**
+ * @brief How many records are waiting.
+ * @return Pending count in [0, TIKU_VFS_EVENTS_MAX]
+ */
+uint8_t tiku_vfs_events_pending(void);
+
+/**
+ * @brief How many records have been DROPPED because the ring was full.
+ *
+ * Non-zero tells a reader its picture is incomplete and it must re-read
+ * rather than trust the records it did get.  Silent loss is the failure
+ * this counter exists to prevent.
+ *
+ * @return Cumulative drops since boot
+ */
+uint16_t tiku_vfs_events_dropped(void);
+
+/**
+ * @brief The stable identity of @p node.
+ *
+ * The tree is static, so a node's address is its identity for the life of
+ * the boot -- the same value however the node is reached, and unchanged
+ * when its name or its value changes.  It is an opaque TOKEN: equality is
+ * the only operation defined on it.
+ *
+ * This is what lets a reader tell "the node I was looking at, renamed"
+ * from "a different node", which a path cannot express.
+ *
+ * @param node  Any node, or NULL
+ * @return The token, or 0 for NULL
+ */
+uint32_t tiku_vfs_node_id(const tiku_vfs_node_t *node);
+
+/*---------------------------------------------------------------------------*/
 /* INTROSPECTION — read-only views of VFS state                              */
 /*---------------------------------------------------------------------------*/
 
