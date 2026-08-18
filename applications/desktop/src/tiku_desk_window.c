@@ -67,9 +67,11 @@ tab_rect(const tiku_desk_window_t *window)
                                      window->title) +
                 (window->zoomable ? BUTTON + 8 : 0) + 4;
 
-    if (width > window->frame.w - 8) { width = window->frame.w - 8; }
+    if (width > window->frame.w) { width = window->frame.w; }
     if (width < 60) { width = 60; }
-    tab.x = window->frame.x + 4;
+    /* Flush with the window's left edge, as the original's tab sits --
+     * not floated a few pixels in. */
+    tab.x = window->frame.x;
     tab.y = window->frame.y;
     tab.w = width;
     tab.h = TIKU_DESK_WINDOW_TAB_H;
