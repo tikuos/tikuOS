@@ -58,7 +58,14 @@ static tiku_desk_rect_t
 tab_rect(const tiku_desk_window_t *window)
 {
     tiku_desk_rect_t tab;
-    int width = 24 + (int)strlen(window->title) * 7 + 2 * BUTTON;
+    /* MEASURED, not guessed: the tab is as wide as its title needs --
+     * the close button, the title in the bold face, the zoom button when
+     * there is one, and the breathing room the draw insets -- so the
+     * text on it is never clipped short of the window's own edge. */
+    int width = BUTTON + 16 +
+                tiku_desk_text_width(tiku_desk_font_bold(),
+                                     window->title) +
+                (window->zoomable ? BUTTON + 8 : 0) + 4;
 
     if (width > window->frame.w - 8) { width = window->frame.w - 8; }
     if (width < 60) { width = 60; }
