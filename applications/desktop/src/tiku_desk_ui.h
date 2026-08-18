@@ -108,6 +108,16 @@ void tiku_desk_ui_menubar(tiku_desk_surface_t *s, tiku_desk_rect_t r,
                           const char *const *items, int n, int active);
 
 /** @brief A dropped menu panel with @p n items; @p hot highlights one. */
+/** @brief Per-row art for a menu; drawn over the row's ground. */
+typedef void (*tiku_desk_ui_menu_icon_fn)(tiku_desk_surface_t *s, int index,
+                                          int x, int y, int size,
+                                          void *context);
+
+/** @brief The menu with an icon gutter; @p icon may be NULL for none. */
+void tiku_desk_ui_menu_icons(tiku_desk_surface_t *s, tiku_desk_rect_t r,
+                             const char *const *items, int n, int hot,
+                             tiku_desk_ui_menu_icon_fn icon, void *context);
+
 void tiku_desk_ui_menu(tiku_desk_surface_t *s, tiku_desk_rect_t r,
                        const char *const *items, int n, int hot);
 

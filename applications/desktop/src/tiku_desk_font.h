@@ -36,7 +36,22 @@ typedef struct tiku_desk_font {
     const struct tiku_desk_font *hi;
 } tiku_desk_font_t;
 
-/** @brief The 12 px UI face (BeOS drew its interface at this size). */
+/**
+ * @brief Choose the UI text size in pixels.
+ *
+ * Snaps down to the nearest baked face (10, 12, 14 or 16 px; BeOS drew
+ * its interface at 12).  The pointers already handed out follow the
+ * change, so everything laid out from font metrics resizes on its next
+ * paint.
+ *
+ * @return the size actually chosen.
+ */
+int tiku_desk_font_set_size(int px);
+
+/** @brief The size currently in force. */
+int tiku_desk_font_size(void);
+
+/** @brief The UI face at the chosen size (12 px until told otherwise). */
 const tiku_desk_font_t *tiku_desk_font_plain(void);
 
 /** @brief The bold face, for window titles and default-button labels. */

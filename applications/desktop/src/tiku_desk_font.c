@@ -16,16 +16,54 @@
 
 #include <string.h>
 
+/* The faces handed out are mutable copies with a STABLE address, so a
+ * caller that kept the pointer follows a size change instead of keeping
+ * yesterday's metrics. */
+static tiku_desk_font_t current_plain;
+static tiku_desk_font_t current_bold;
+static int current_size;
+
+int
+tiku_desk_font_set_size(int px)
+{
+    int i, best = 0, n = (int)(sizeof face_sizes / sizeof face_sizes[0]);
+
+    for (i = 1; i < n; i++) {
+        if (px >= face_sizes[i]) {
+            best = i;
+        }
+    }
+    current_plain = *plain_faces[best];
+    current_bold = *bold_faces[best];
+    current_size = face_sizes[best];
+    return current_size;
+}
+
+int
+tiku_desk_font_size(void)
+{
+    if (current_size == 0) {
+        (void)tiku_desk_font_set_size(12);
+    }
+    return current_size;
+}
+
 const tiku_desk_font_t *
 tiku_desk_font_plain(void)
 {
-    return &plain_font;
+    if (current_size == 0) {
+        (void)tiku_desk_font_set_size(12);
+    }
+    return &current_plain;
 }
 
 const tiku_desk_font_t *
 tiku_desk_font_bold(void)
 {
-    return &bold_font;
+    if (current_size == 0) {
+        (void)tiku_desk_font_set_size(12);
+    }
+    return &current_bold;
 }
 
 /** @brief Glyph for @p ch, or the space glyph when out of range. */

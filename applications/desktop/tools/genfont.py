@@ -103,13 +103,28 @@ def main():
               " */\n"
               "#ifndef TIKU_DESK_FONT_DATA_H_\n"
               "#define TIKU_DESK_FONT_DATA_H_\n\n")
-    plain_adv = render(pick(CANDIDATES), "plain_probe", open("/dev/null", "w"))
-    bold_adv = render(pick(BOLD), "bold_probe", open("/dev/null", "w"))
-    render(pick(CANDIDATES), "plain2x", out, size=SIZE * 2,
-           forced_adv=plain_adv)
-    render(pick(BOLD), "bold2x", out, size=SIZE * 2, forced_adv=bold_adv)
-    render(pick(CANDIDATES), "plain", out, hi="plain2x")
-    render(pick(BOLD), "bold", out, hi="bold2x")
+    sizes = (10, 12, 14, 16)
+    null = open("/dev/null", "w")
+    for px in sizes:
+        tag = "" if px == SIZE else str(px)
+        plain_adv = render(pick(CANDIDATES), "probe", null, size=px)
+        bold_adv = render(pick(BOLD), "probe", null, size=px)
+        render(pick(CANDIDATES), "plain%s2x" % tag, out, size=px * 2,
+               forced_adv=plain_adv)
+        render(pick(BOLD), "bold%s2x" % tag, out, size=px * 2,
+               forced_adv=bold_adv)
+        render(pick(CANDIDATES), "plain%s" % tag, out, size=px,
+               hi="plain%s2x" % tag)
+        render(pick(BOLD), "bold%s" % tag, out, size=px,
+               hi="bold%s2x" % tag)
+    out.write("/* Every size, smallest first, for the runtime picker. */\n")
+    out.write("static const int face_sizes[] = { %s };\n"
+              % ", ".join(str(px) for px in sizes))
+    for face in ("plain", "bold"):
+        out.write("static const tiku_desk_font_t *const %s_faces[] = {\n"
+                  "    %s\n};\n" % (face,
+                  ", ".join("&%s%s_font" % (face, "" if px == SIZE
+                                            else str(px)) for px in sizes)))
     out.write("#endif /* TIKU_DESK_FONT_DATA_H_ */\n")
 
 

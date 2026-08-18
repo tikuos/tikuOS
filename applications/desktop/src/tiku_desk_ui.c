@@ -477,11 +477,13 @@ tiku_desk_ui_menubar(tiku_desk_surface_t *s, tiku_desk_rect_t r,
 }
 
 void
-tiku_desk_ui_menu(tiku_desk_surface_t *s, tiku_desk_rect_t r,
-                  const char *const *items, int n, int hot)
+tiku_desk_ui_menu_icons(tiku_desk_surface_t *s, tiku_desk_rect_t r,
+                        const char *const *items, int n, int hot,
+                        tiku_desk_ui_menu_icon_fn icon, void *context)
 {
     const tiku_desk_font_t *f = tiku_desk_font_plain();
     int rowh = f->height + 6;
+    int indent = (icon != NULL) ? 20 : 0;
     int i;
 
     tiku_desk_fill(s, r, PANEL);
@@ -500,10 +502,24 @@ tiku_desk_ui_menu(tiku_desk_surface_t *s, tiku_desk_rect_t r,
         if (on) {
             tiku_desk_fill(s, row, TIKU_DESK_C_SELECT);
         }
-        tiku_desk_text(s, f, row.x + 8, row.y + (rowh - f->height) / 2 +
-                       f->ascent, items[i],
+        if (icon != NULL) {
+            icon(s, i, row.x + 4, row.y + (rowh - 16) / 2, 16, context);
+        }
+        /* The row is the label's world: a long one ends at the border
+         * instead of walking out of the menu. */
+        tiku_desk_clip_set(s, row);
+        tiku_desk_text(s, f, row.x + 8 + indent,
+                       row.y + (rowh - f->height) / 2 + f->ascent, items[i],
                        on ? TIKU_DESK_C_SELTEXT : TIKU_DESK_C_TEXT);
+        tiku_desk_clip_reset(s);
     }
+}
+
+void
+tiku_desk_ui_menu(tiku_desk_surface_t *s, tiku_desk_rect_t r,
+                  const char *const *items, int n, int hot)
+{
+    tiku_desk_ui_menu_icons(s, r, items, n, hot, NULL, NULL);
 }
 
 void
