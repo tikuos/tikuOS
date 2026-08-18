@@ -60,51 +60,73 @@ tiku_desk_text_height(const tiku_desk_font_t *f)
     return (f != NULL) ? f->height : 0;
 }
 
-/** @brief Blend @p c over the pixel at (x,y) with coverage @p a (0..255). */
+/** @brief Blend @p c over the NATIVE pixel at (x,y), coverage @p a. */
 static void
-blend(tiku_desk_surface_t *s, int x, int y, tiku_desk_rgb_t c, unsigned a)
+blend(tiku_desk_surface_t *s, int sc, int x, int y, tiku_desk_rgb_t c,
+      unsigned a)
 {
     tiku_desk_rgb_t d;
     unsigned dr, dg, db, sr, sg, sb;
+    long stride = (long)s->w * sc;
 
-    if (a == 0u || s == NULL ||
-        x < s->clip.x || y < s->clip.y ||
-        x >= s->clip.x + s->clip.w || y >= s->clip.y + s->clip.h) {
+    if (a == 0u ||
+        x < s->clip.x * sc || y < s->clip.y * sc ||
+        x >= (s->clip.x + s->clip.w) * sc ||
+        y >= (s->clip.y + s->clip.h) * sc) {
         return;
     }
     if (a >= 255u) {
-        s->px[(long)y * s->w + x] = c;
+        s->px[(long)y * stride + x] = c;
         return;
     }
-    d = s->px[(long)y * s->w + x];
+    d = s->px[(long)y * stride + x];
     dr = (d >> 16) & 0xFFu; dg = (d >> 8) & 0xFFu; db = d & 0xFFu;
     sr = (c >> 16) & 0xFFu; sg = (c >> 8) & 0xFFu; sb = c & 0xFFu;
     dr = (sr * a + dr * (255u - a)) / 255u;
     dg = (sg * a + dg * (255u - a)) / 255u;
     db = (sb * a + db * (255u - a)) / 255u;
-    s->px[(long)y * s->w + x] = TIKU_DESK_RGB(dr, dg, db);
+    s->px[(long)y * stride + x] = TIKU_DESK_RGB(dr, dg, db);
 }
 
 void
 tiku_desk_text(tiku_desk_surface_t *s, const tiku_desk_font_t *f, int x, int y,
                const char *text, tiku_desk_rgb_t c)
 {
-    int pen = x;
+    const tiku_desk_font_t *face;
+    int sc, rep, pen;
 
     if (s == NULL || f == NULL || text == NULL) {
         return;
     }
+    sc = (s->scale > 1) ? s->scale : 1;
+    /* An even scale draws the 2x face: half the replication, twice the
+     * detail.  The advances match by construction, so the layout the
+     * logical metrics promised is exactly the space this ink fills. */
+    face = f;
+    rep = sc;
+    if (sc > 1 && (sc & 1) == 0 && f->hi != NULL) {
+        face = f->hi;
+        rep = sc / 2;
+    }
+    pen = x * sc;
     for (; *text != '\0'; text++) {
-        const tiku_desk_glyph_t *g = glyph_of(f, (unsigned char)*text);
-        int gx, gy;
+        const tiku_desk_glyph_t *g = glyph_of(face, (unsigned char)*text);
+        int gx, gy, rx, ry;
 
         for (gy = 0; gy < g->h; gy++) {
-            const unsigned char *row = f->bits + g->off + (long)gy * g->w;
+            const unsigned char *row = face->bits + g->off + (long)gy * g->w;
             for (gx = 0; gx < g->w; gx++) {
-                blend(s, pen + g->ox + gx, y + g->oy + gy, c, row[gx]);
+                int nx = pen + (g->ox + gx) * rep;
+                int ny = y * sc + (g->oy + gy) * rep;
+
+                for (ry = 0; ry < rep; ry++) {
+                    for (rx = 0; rx < rep; rx++) {
+                        blend(s, sc, nx + rx, ny + ry, c, row[gx]);
+                    }
+                }
             }
         }
-        pen += g->adv;
+        pen += g->adv * rep;
     }
 }
 

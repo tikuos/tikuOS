@@ -52,13 +52,25 @@ typedef struct {
 } tiku_desk_rect_t;
 
 typedef struct {
-    tiku_desk_rgb_t  *px;        /* w*h pixels, row-major   */
-    int               w, h;
-    tiku_desk_rect_t  clip;
+    tiku_desk_rgb_t  *px;        /* native pixels, row-major */
+    int               w, h;      /* LOGICAL size             */
+    tiku_desk_rect_t  clip;      /* logical, like every rect */
+    /* Native pixels per logical pixel (0 reads as 1).  Every call here
+     * takes logical coordinates; a scaled surface simply keeps px at
+     * (w*scale) x (h*scale) and paints scale x scale blocks -- except
+     * text, which carries a real 2x face and gains true detail. */
+    int               scale;
 } tiku_desk_surface_t;
 
 /** @brief Allocate a surface and fill it with @p bg.  NULL on failure. */
 tiku_desk_surface_t *tiku_desk_surface_new(int w, int h, tiku_desk_rgb_t bg);
+
+/** @brief Give a surface @p scale native pixels per logical one. */
+int tiku_desk_surface_rescale(tiku_desk_surface_t *s, int scale,
+                              tiku_desk_rgb_t bg);
+
+/** @brief The logical pixel at (x, y), or 0 outside the surface. */
+tiku_desk_rgb_t tiku_desk_peek(const tiku_desk_surface_t *s, int x, int y);
 
 /** @brief Replace a surface with a newly cleared framebuffer. */
 int tiku_desk_surface_resize(tiku_desk_surface_t *s, int w, int h,

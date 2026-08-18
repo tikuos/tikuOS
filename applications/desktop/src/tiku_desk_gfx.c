@@ -71,11 +71,18 @@ tiku_desk_scale_pixels(tiku_desk_rgb_t *destination,
     }
 }
 
+/** @brief Native pixels per logical pixel; a zeroed surface reads as 1. */
+static int
+scale_of(const tiku_desk_surface_t *s)
+{
+    return (s != NULL && s->scale > 1) ? s->scale : 1;
+}
+
 tiku_desk_surface_t *
 tiku_desk_surface_new(int w, int h, tiku_desk_rgb_t bg)
 {
     tiku_desk_surface_t *s;
-    long i, n = (long)w * (long)h;
+    long i, n = (long)w * (long)h;   /* scale 1: native is logical */
 
     if (w <= 0 || h <= 0) {
         return NULL;
@@ -103,13 +110,16 @@ tiku_desk_surface_resize(tiku_desk_surface_t *s, int w, int h,
                          tiku_desk_rgb_t bg)
 {
     tiku_desk_rgb_t *pixels;
-    size_t i, count;
+    size_t i, count, sc;
 
-    if (s == NULL || w <= 0 || h <= 0 ||
-        (size_t)w > SIZE_MAX / sizeof *pixels / (size_t)h) {
+    if (s == NULL || w <= 0 || h <= 0) {
         return -1;
     }
-    count = (size_t)w * (size_t)h;
+    sc = (size_t)scale_of(s);
+    if ((size_t)w * sc > SIZE_MAX / sizeof *pixels / ((size_t)h * sc)) {
+        return -1;
+    }
+    count = (size_t)w * sc * (size_t)h * sc;
     pixels = malloc(count * sizeof *pixels);
     if (pixels == NULL) {
         return -1;
@@ -123,6 +133,29 @@ tiku_desk_surface_resize(tiku_desk_surface_t *s, int w, int h,
     s->h = h;
     tiku_desk_clip_reset(s);
     return 0;
+}
+
+int
+tiku_desk_surface_rescale(tiku_desk_surface_t *s, int scale,
+                          tiku_desk_rgb_t bg)
+{
+    if (s == NULL || scale < 1 || scale > 4) {
+        return -1;
+    }
+    s->scale = scale;
+    return tiku_desk_surface_resize(s, s->w, s->h, bg);
+}
+
+tiku_desk_rgb_t
+tiku_desk_peek(const tiku_desk_surface_t *s, int x, int y)
+{
+    int sc = scale_of(s);
+
+    if (s == NULL || s->px == NULL || x < 0 || y < 0 ||
+        x >= s->w || y >= s->h) {
+        return 0;
+    }
+    return s->px[(long)y * sc * ((long)s->w * sc) + (long)x * sc];
 }
 
 void
@@ -191,11 +224,22 @@ tiku_desk_tint(tiku_desk_rgb_t c, float tint)
 void
 tiku_desk_pixel(tiku_desk_surface_t *s, int x, int y, tiku_desk_rgb_t c)
 {
+    int sc, ry, rx;
+    long stride;
+
     if (s == NULL || x < s->clip.x || y < s->clip.y ||
         x >= s->clip.x + s->clip.w || y >= s->clip.y + s->clip.h) {
         return;
     }
-    s->px[(long)y * s->w + x] = c;
+    sc = scale_of(s);
+    stride = (long)s->w * sc;
+    for (ry = 0; ry < sc; ry++) {
+        tiku_desk_rgb_t *row = s->px + ((long)y * sc + ry) * stride +
+                               (long)x * sc;
+        for (rx = 0; rx < sc; rx++) {
+            row[rx] = c;
+        }
+    }
 }
 
 void
@@ -217,10 +261,33 @@ tiku_desk_blit(tiku_desk_surface_t *dst, int x, int y,
     if (y0 < dst->clip.y)               { y0 = dst->clip.y; }
     if (x1 > dst->clip.x + dst->clip.w) { x1 = dst->clip.x + dst->clip.w; }
     if (y1 > dst->clip.y + dst->clip.h) { y1 = dst->clip.y + dst->clip.h; }
-    for (row = y0; row < y1; row++) {
-        memcpy(dst->px + (long)row * dst->w + x0,
-               src->px + (long)(row - y) * src->w + (x0 - x),
-               (size_t)(x1 - x0) * sizeof *dst->px);
+    if (scale_of(dst) == scale_of(src)) {
+        int sc = scale_of(dst), sub;
+        long dstride = (long)dst->w * sc;
+        long sstride = (long)src->w * sc;
+
+        for (row = y0; row < y1; row++) {
+            for (sub = 0; sub < sc; sub++) {
+                memcpy(dst->px + ((long)row * sc + sub) * dstride +
+                       (long)x0 * sc,
+                       src->px + ((long)(row - y) * sc + sub) * sstride +
+                       (long)(x0 - x) * sc,
+                       (size_t)(x1 - x0) * sc * sizeof *dst->px);
+            }
+        }
+    } else {
+        /* Unequal scales: carry each source pixel over logically. */
+        int col;
+        int ss = scale_of(src);
+        long sstride = (long)src->w * ss;
+
+        for (row = y0; row < y1; row++) {
+            for (col = x0; col < x1; col++) {
+                tiku_desk_pixel(dst, col, row,
+                    src->px[(long)(row - y) * ss * sstride +
+                            (long)(col - x) * ss]);
+            }
+        }
     }
 }
 
@@ -254,19 +321,32 @@ tiku_desk_copy_bits(tiku_desk_surface_t *s, tiku_desk_rect_t src, int dx,
     if (w <= 0 || y1 <= y0) {
         return;
     }
-    if (dy > 0) {
-        /* Downwards: the bottom scanline first, or the copy overwrites
-         * the rows it has not read yet. */
-        for (y = y1 - 1; y >= y0; y--) {
-            memmove(s->px + (long)(y + dy) * s->w + x0 + dx,
-                    s->px + (long)y * s->w + x0,
-                    (size_t)w * sizeof *s->px);
-        }
-    } else {
-        for (y = y0; y < y1; y++) {
-            memmove(s->px + (long)(y + dy) * s->w + x0 + dx,
-                    s->px + (long)y * s->w + x0,
-                    (size_t)w * sizeof *s->px);
+    {
+        int sc = scale_of(s), sub;
+        long stride = (long)s->w * sc;
+
+        if (dy > 0) {
+            /* Downwards: the bottom scanline first, or the copy overwrites
+             * the rows it has not read yet. */
+            for (y = y1 - 1; y >= y0; y--) {
+                for (sub = sc - 1; sub >= 0; sub--) {
+                    memmove(s->px + ((long)(y + dy) * sc + sub) * stride +
+                            (long)(x0 + dx) * sc,
+                            s->px + ((long)y * sc + sub) * stride +
+                            (long)x0 * sc,
+                            (size_t)w * sc * sizeof *s->px);
+                }
+            }
+        } else {
+            for (y = y0; y < y1; y++) {
+                for (sub = 0; sub < sc; sub++) {
+                    memmove(s->px + ((long)(y + dy) * sc + sub) * stride +
+                            (long)(x0 + dx) * sc,
+                            s->px + ((long)y * sc + sub) * stride +
+                            (long)x0 * sc,
+                            (size_t)w * sc * sizeof *s->px);
+                }
+            }
         }
     }
 }
@@ -285,10 +365,15 @@ tiku_desk_fill(tiku_desk_surface_t *s, tiku_desk_rect_t r, tiku_desk_rgb_t c)
     y1 = r.y + r.h;
     if (x1 > s->clip.x + s->clip.w) { x1 = s->clip.x + s->clip.w; }
     if (y1 > s->clip.y + s->clip.h) { y1 = s->clip.y + s->clip.h; }
-    for (y = y0; y < y1; y++) {
-        tiku_desk_rgb_t *row = s->px + (long)y * s->w;
-        for (x = x0; x < x1; x++) {
-            row[x] = c;
+    {
+        int sc = scale_of(s);
+        long stride = (long)s->w * sc;
+
+        for (y = (long)y0 * sc; y < (long)y1 * sc; y++) {
+            tiku_desk_rgb_t *row = s->px + (long)y * stride;
+            for (x = (long)x0 * sc; x < (long)x1 * sc; x++) {
+                row[x] = c;
+            }
         }
     }
 }
@@ -415,7 +500,7 @@ tiku_desk_surface_png(const tiku_desk_surface_t *s, const char *path)
     unsigned char *raw, *z;
     size_t rawlen, zlen, off, i;
     unsigned long a = 1, b = 0;
-    int y, rc = -1;
+    int y, nw, nh, rc = -1;
 
     if (s == NULL || path == NULL) {
         return -1;
@@ -424,7 +509,12 @@ tiku_desk_surface_png(const tiku_desk_surface_t *s, const char *path)
     if (f == NULL) {
         return -1;
     }
-    rawlen = (size_t)s->h * (1u + (size_t)s->w * 3u);
+    {
+        int sc = scale_of(s);
+        nw = s->w * sc;
+        nh = s->h * sc;
+    }
+    rawlen = (size_t)nh * (1u + (size_t)nw * 3u);
     raw = malloc(rawlen);
     /* Stored deflate: 5 bytes of block header per 65535, plus zlib framing. */
     zlen = 2u + rawlen + 5u * (rawlen / 65535u + 1u) + 4u;
@@ -433,11 +523,11 @@ tiku_desk_surface_png(const tiku_desk_surface_t *s, const char *path)
         goto done;
     }
     off = 0;
-    for (y = 0; y < s->h; y++) {
+    for (y = 0; y < nh; y++) {
         int x;
         raw[off++] = 0;                       /* filter: none */
-        for (x = 0; x < s->w; x++) {
-            tiku_desk_rgb_t c = s->px[(long)y * s->w + x];
+        for (x = 0; x < nw; x++) {
+            tiku_desk_rgb_t c = s->px[(long)y * nw + x];
             raw[off++] = (unsigned char)((c >> 16) & 0xFFu);
             raw[off++] = (unsigned char)((c >> 8) & 0xFFu);
             raw[off++] = (unsigned char)(c & 0xFFu);
@@ -470,8 +560,8 @@ tiku_desk_surface_png(const tiku_desk_surface_t *s, const char *path)
     if (fwrite("\x89PNG\r\n\x1a\n", 1, 8, f) != 8u) {
         goto done;
     }
-    png_be32(ihdr, (unsigned long)s->w);
-    png_be32(ihdr + 4, (unsigned long)s->h);
+    png_be32(ihdr, (unsigned long)nw);
+    png_be32(ihdr + 4, (unsigned long)nh);
     ihdr[8] = 8;                              /* bit depth  */
     ihdr[9] = 2;                              /* truecolour */
     ihdr[10] = 0;
@@ -494,15 +584,23 @@ done:
 static void
 invert_pixel(tiku_desk_surface_t *s, int x, int y)
 {
-    tiku_desk_rgb_t *px;
+    int sc, ry, rx;
+    long stride;
 
     if (s == NULL || x < s->clip.x || x >= s->clip.x + s->clip.w ||
         y < s->clip.y || y >= s->clip.y + s->clip.h ||
         x < 0 || x >= s->w || y < 0 || y >= s->h) {
         return;
     }
-    px = &s->px[(size_t)y * (size_t)s->w + (size_t)x];
-    *px = (tiku_desk_rgb_t)(~(*px) & 0x00FFFFFFu);
+    sc = scale_of(s);
+    stride = (long)s->w * sc;
+    for (ry = 0; ry < sc; ry++) {
+        tiku_desk_rgb_t *row = s->px + ((long)y * sc + ry) * stride +
+                               (long)x * sc;
+        for (rx = 0; rx < sc; rx++) {
+            row[rx] = (tiku_desk_rgb_t)(~row[rx] & 0x00FFFFFFu);
+        }
+    }
 }
 
 void

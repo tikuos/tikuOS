@@ -17,10 +17,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ]
 BOLD = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]
 SIZE = 12
@@ -35,8 +37,8 @@ def pick(paths):
     raise SystemExit("genfont: no candidate font found")
 
 
-def render(path, name, out):
-    font = ImageFont.truetype(path, SIZE)
+def render(path, name, out, size=SIZE, forced_adv=None, hi=None):
+    font = ImageFont.truetype(path, size)
     asc, desc = font.getmetrics()
     height = asc + desc
     glyphs = []
@@ -44,7 +46,12 @@ def render(path, name, out):
 
     for cp in range(FIRST, LAST + 1):
         ch = chr(cp)
-        adv = int(round(font.getlength(ch)))
+        if forced_adv is not None:
+            # The 2x face advances exactly twice the 1x face, so text at
+            # scale 2 fills precisely the layout the 1x metrics promised.
+            adv = forced_adv[cp - FIRST] * 2
+        else:
+            adv = int(round(font.getlength(ch)))
         box = font.getbbox(ch)
         w = max(1, box[2] - box[0])
         h = max(1, box[3] - box[1])
@@ -63,7 +70,7 @@ def render(path, name, out):
         blob.extend(px)
 
     out.write("/* %s: %s at %d px, %d glyphs, %d bytes of coverage. */\n"
-              % (name, path.rsplit("/", 1)[-1], SIZE, len(glyphs), len(blob)))
+              % (name, path.rsplit("/", 1)[-1], size, len(glyphs), len(blob)))
     out.write("static const tiku_desk_glyph_t %s_glyphs[] = {\n" % name)
     for g in glyphs:
         out.write("    {%d,%d,%d,%d,%d,%d,%d},\n"
@@ -75,8 +82,10 @@ def render(path, name, out):
         out.write("    " + ",".join(str(b) for b in blob[i:i + 24]) + ",\n")
     out.write("};\n")
     out.write("static const tiku_desk_font_t %s_font = {\n"
-              "    %s_glyphs, %s_bits, %d, %d, %d, %d\n};\n\n"
-              % (name, name, name, len(glyphs), height, asc, FIRST))
+              "    %s_glyphs, %s_bits, %d, %d, %d, %d, %s\n};\n\n"
+              % (name, name, name, len(glyphs), height, asc, FIRST,
+                 ("&%s_font" % hi) if hi else "NULL"))
+    return [g["adv"] for g in glyphs]
 
 
 def main():
@@ -94,8 +103,13 @@ def main():
               " */\n"
               "#ifndef TIKU_DESK_FONT_DATA_H_\n"
               "#define TIKU_DESK_FONT_DATA_H_\n\n")
-    render(pick(CANDIDATES), "plain", out)
-    render(pick(BOLD), "bold", out)
+    plain_adv = render(pick(CANDIDATES), "plain_probe", open("/dev/null", "w"))
+    bold_adv = render(pick(BOLD), "bold_probe", open("/dev/null", "w"))
+    render(pick(CANDIDATES), "plain2x", out, size=SIZE * 2,
+           forced_adv=plain_adv)
+    render(pick(BOLD), "bold2x", out, size=SIZE * 2, forced_adv=bold_adv)
+    render(pick(CANDIDATES), "plain", out, hi="plain2x")
+    render(pick(BOLD), "bold", out, hi="bold2x")
     out.write("#endif /* TIKU_DESK_FONT_DATA_H_ */\n")
 
 

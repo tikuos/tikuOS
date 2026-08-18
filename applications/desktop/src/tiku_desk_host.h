@@ -22,6 +22,9 @@ tiku_desk_host_t *tiku_desk_host_open(int width, int height,
 /** @brief Release the native window and every platform resource it owns. */
 void tiku_desk_host_close(tiku_desk_host_t *host);
 
+/** @brief Native pixels per logical pixel of the display (1..4). */
+int tiku_desk_host_scale(const tiku_desk_host_t *host);
+
 /** @brief Copy the software surface into the native window. */
 int tiku_desk_host_present(tiku_desk_host_t *host,
                            const tiku_desk_surface_t *surface);

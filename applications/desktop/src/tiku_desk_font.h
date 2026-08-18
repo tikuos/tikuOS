@@ -23,13 +23,17 @@ typedef struct {
     int   off;         /* index into the blob   */
 } tiku_desk_glyph_t;
 
-typedef struct {
+typedef struct tiku_desk_font {
     const tiku_desk_glyph_t *glyphs;
     const unsigned char     *bits;
     int                      count;
     int                      height;   /* ascent + descent */
     int                      ascent;
     int                      first;
+    /* The same face at twice the pixel size, advances forced to exactly
+     * double, so a scaled surface can draw REAL detail into the same
+     * layout the logical metrics promised.  NULL on the 2x faces. */
+    const struct tiku_desk_font *hi;
 } tiku_desk_font_t;
 
 /** @brief The 12 px UI face (BeOS drew its interface at this size). */

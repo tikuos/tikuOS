@@ -48,6 +48,14 @@ display_scale(Display *display)
     double dpi = 96.0;
     int scale;
 
+    const char *forced = getenv("TIKU_DESK_SCALE");
+
+    if (forced != NULL && forced[0] != '\0') {
+        scale = atoi(forced);
+        if (scale < 1) { scale = 1; }
+        if (scale > 4) { scale = 4; }
+        return scale;
+    }
     manager = XResourceManagerString(display);
     if (manager != NULL) {
         XrmInitialize();
@@ -241,14 +249,35 @@ tiku_desk_host_present(tiku_desk_host_t *host,
         surface->h != host->logical_height) {
         return -1;
     }
-    tiku_desk_scale_pixels((tiku_desk_rgb_t *)host->image->data,
-                           host->native_width, host->native_height,
-                           surface->px, surface->w, surface->h);
+    if (surface->scale == host->scale && host->scale > 1) {
+        /* The surface already holds native pixels: rows go over 1:1. */
+        tiku_desk_rgb_t *out = (tiku_desk_rgb_t *)host->image->data;
+        long sw = (long)surface->w * surface->scale;
+        long sh = (long)surface->h * surface->scale;
+        long w = (sw < host->native_width) ? sw : host->native_width;
+        long h = (sh < host->native_height) ? sh : host->native_height;
+        long row;
+
+        for (row = 0; row < h; row++) {
+            memcpy(out + row * host->native_width, surface->px + row * sw,
+                   (size_t)w * sizeof *out);
+        }
+    } else {
+        tiku_desk_scale_pixels((tiku_desk_rgb_t *)host->image->data,
+                               host->native_width, host->native_height,
+                               surface->px, surface->w, surface->h);
+    }
     XPutImage(host->display, host->window, host->gc, host->image,
               0, 0, 0, 0, (unsigned)host->native_width,
               (unsigned)host->native_height);
     XFlush(host->display);
     return 0;
+}
+
+int
+tiku_desk_host_scale(const tiku_desk_host_t *host)
+{
+    return (host != NULL && host->scale > 1) ? host->scale : 1;
 }
 
 void
