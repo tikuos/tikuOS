@@ -344,6 +344,15 @@ tiku_desk_ui_textfield_sel(tiku_desk_surface_t *s, tiku_desk_rect_t r,
                            const char *text, int caret, int sel_a, int sel_b,
                            unsigned state)
 {
+    tiku_desk_ui_textfield_scroll(s, r, text, caret, sel_a, sel_b, state,
+                                  0);
+}
+
+void
+tiku_desk_ui_textfield_scroll(tiku_desk_surface_t *s, tiku_desk_rect_t r,
+                              const char *text, int caret, int sel_a,
+                              int sel_b, unsigned state, int scroll_px)
+{
     const tiku_desk_font_t *f = tiku_desk_font_plain();
     tiku_desk_rgb_t face = (state & TIKU_DESK_S_DISABLED)
                            ? PANEL : TIKU_DESK_C_DOC;
@@ -364,17 +373,17 @@ tiku_desk_ui_textfield_sel(tiku_desk_surface_t *s, tiku_desk_rect_t r,
              * the rounding of three separate advances. */
             tiku_desk_rect_t hl;
 
-            hl.x = r.x + 3 + text_offset(f, text, lo);
+            hl.x = r.x + 3 - scroll_px + text_offset(f, text, lo);
             hl.y = r.y + 2;
             hl.w = text_offset(f, text, hi) - text_offset(f, text, lo);
             hl.h = r.h - 4;
             tiku_desk_fill(s, hl, TIKU_DESK_C_SELECT);
         }
-        tiku_desk_text(s, f, r.x + 3, ty, text,
+        tiku_desk_text(s, f, r.x + 3 - scroll_px, ty, text,
                        (state & TIKU_DESK_S_DISABLED)
                        ? tiku_desk_tint(PANEL, 1.30f) : TIKU_DESK_C_TEXT);
         if (caret >= 0) {
-            tiku_desk_vline(s, r.x + 3 + text_offset(f, text, caret),
+            tiku_desk_vline(s, r.x + 3 - scroll_px + text_offset(f, text, caret),
                             r.y + 3, r.h - 6, TIKU_DESK_C_TEXT);
         }
     }

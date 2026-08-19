@@ -94,6 +94,17 @@ void tiku_desk_ui_textfield_sel(tiku_desk_surface_t *s, tiku_desk_rect_t r,
                                 int sel_b, unsigned state);
 
 /**
+ * @brief The selectable field, with its text slid left by @p scroll_px.
+ *
+ * For an editor that keeps its caret visible when the text outgrows the
+ * box: the caller decides the slide, this draws it.
+ */
+void tiku_desk_ui_textfield_scroll(tiku_desk_surface_t *s,
+                                   tiku_desk_rect_t r, const char *text,
+                                   int caret, int sel_a, int sel_b,
+                                   unsigned state, int scroll_px);
+
+/**
  * @brief A scrollbar with the knurled thumb.
  *
  * @param pos    Thumb start, 0..1 of the track.
