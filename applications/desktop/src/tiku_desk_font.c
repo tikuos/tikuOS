@@ -58,6 +58,22 @@ tiku_desk_font_plain(void)
 }
 
 const tiku_desk_font_t *
+tiku_desk_font_at(int px)
+{
+    int i, best = 0, n = (int)(sizeof face_sizes / sizeof face_sizes[0]);
+
+    if (current_size == 0) {
+        (void)tiku_desk_font_set_size(12);
+    }
+    for (i = 1; i < n; i++) {
+        if (px >= face_sizes[i]) {
+            best = i;
+        }
+    }
+    return plain_faces[best];
+}
+
+const tiku_desk_font_t *
 tiku_desk_font_bold(void)
 {
     if (current_size == 0) {

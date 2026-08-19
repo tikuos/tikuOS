@@ -57,6 +57,15 @@ const tiku_desk_font_t *tiku_desk_font_plain(void);
 /** @brief The bold face, for window titles and default-button labels. */
 const tiku_desk_font_t *tiku_desk_font_bold(void);
 
+/**
+ * @brief The plain face nearest @p px, WITHOUT changing the UI size.
+ *
+ * For chrome that wants a smaller face than the body -- a column title
+ * strip at three-quarters of the row text, say -- while the global size
+ * stays what the user chose.
+ */
+const tiku_desk_font_t *tiku_desk_font_at(int px);
+
 /** @brief Pixel width of @p text. */
 int tiku_desk_text_width(const tiku_desk_font_t *f, const char *text);
 
