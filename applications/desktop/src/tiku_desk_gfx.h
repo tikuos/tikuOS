@@ -26,15 +26,49 @@ typedef uint32_t tiku_desk_rgb_t;
 
 /* The R5 palette (R5-SPEC.md).  Every shade of the panel comes from
  * tiku_desk_tint() rather than a second constant. */
-#define TIKU_DESK_C_PANEL      TIKU_DESK_RGB(216, 216, 216)
-#define TIKU_DESK_C_DOC        TIKU_DESK_RGB(255, 255, 255)
-#define TIKU_DESK_C_TEXT       TIKU_DESK_RGB(0, 0, 0)
-#define TIKU_DESK_C_TAB        TIKU_DESK_RGB(255, 203, 0)
-#define TIKU_DESK_C_TAB_IDLE   TIKU_DESK_RGB(232, 232, 232)
-#define TIKU_DESK_C_SELECT     TIKU_DESK_RGB(51, 102, 152)
-#define TIKU_DESK_C_SELTEXT    TIKU_DESK_RGB(255, 255, 255)
-#define TIKU_DESK_C_FOCUS      TIKU_DESK_RGB(0, 0, 229)
-#define TIKU_DESK_C_BACKDROP   TIKU_DESK_RGB(51, 102, 152)
+/*
+ * The theme: every SEMANTIC colour the toolkit and its applications paint
+ * with, held in one runtime table (the Appearance Manager lesson: the
+ * appearance may change, the layout may not).  The names below keep their
+ * classic spellings but read through the live theme, so a swapped table
+ * recolours every widget without a caller changing -- and the default
+ * table IS the BeOS R5 look, which is what every pixel test pins.
+ *
+ * Only semantic colours live here.  Pictorial art (icon bodies, badge
+ * glyphs) and derived shades (tints, bevels) stay where they are painted:
+ * a theme names roles, not pixels.
+ */
+typedef struct {
+    tiku_desk_rgb_t panel;      /* control surfaces                     */
+    tiku_desk_rgb_t doc;        /* document/list ground                 */
+    tiku_desk_rgb_t text;       /* ink                                  */
+    tiku_desk_rgb_t tab;        /* the active window tab                */
+    tiku_desk_rgb_t tab_idle;
+    tiku_desk_rgb_t select;     /* selection ground                     */
+    tiku_desk_rgb_t seltext;    /* ink over a selection                 */
+    tiku_desk_rgb_t focus;      /* keyboard-navigation marks            */
+    tiku_desk_rgb_t backdrop;   /* the desktop behind everything        */
+    tiku_desk_rgb_t danger;     /* the stop severity                    */
+    tiku_desk_rgb_t note;       /* tooltip/expander paper               */
+} tiku_desk_theme_t;
+
+/** @brief The live theme.  Never NULL. */
+const tiku_desk_theme_t *tiku_desk_theme(void);
+
+/** @brief Swap the theme; NULL restores the default (the R5 look). */
+void tiku_desk_theme_set(const tiku_desk_theme_t *theme);
+
+#define TIKU_DESK_C_PANEL      (tiku_desk_theme()->panel)
+#define TIKU_DESK_C_DOC        (tiku_desk_theme()->doc)
+#define TIKU_DESK_C_TEXT       (tiku_desk_theme()->text)
+#define TIKU_DESK_C_TAB        (tiku_desk_theme()->tab)
+#define TIKU_DESK_C_TAB_IDLE   (tiku_desk_theme()->tab_idle)
+#define TIKU_DESK_C_SELECT     (tiku_desk_theme()->select)
+#define TIKU_DESK_C_SELTEXT    (tiku_desk_theme()->seltext)
+#define TIKU_DESK_C_FOCUS      (tiku_desk_theme()->focus)
+#define TIKU_DESK_C_BACKDROP   (tiku_desk_theme()->backdrop)
+#define TIKU_DESK_C_DANGER     (tiku_desk_theme()->danger)
+#define TIKU_DESK_C_NOTE       (tiku_desk_theme()->note)
 
 /* BeOS tint constants, so the code reads like the documentation. */
 #define TIKU_DESK_LIGHTEN_MAX  0.00f

@@ -54,6 +54,15 @@ int tiku_desk_font_size(void);
 /** @brief The UI face at the chosen size (12 px until told otherwise). */
 const tiku_desk_font_t *tiku_desk_font_plain(void);
 
+/*
+ * The METRIC REFERENCE rule (after Mac OS 8, which laid out everything
+ * against Chicago): all layout is computed against the plain face's
+ * metrics, and every other face the toolkit offers -- bold, sized -- must
+ * live within them (height within two pixels).  A display face may vary;
+ * the geometry it sits in may not.  tests/test_background.c holds the
+ * assertion.
+ */
+
 /** @brief The bold face, for window titles and default-button labels. */
 const tiku_desk_font_t *tiku_desk_font_bold(void);
 
