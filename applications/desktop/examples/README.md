@@ -70,6 +70,14 @@ chose. Republish whenever the state behind a row changes -- `counter.c`
 disables *Decrease* at zero, and `clock.c` re-marks *Show seconds* -- since
 the published set is a snapshot, not a live view.
 
+## Applications, next door
+
+`apps/` holds two written the same way, meant to be used rather than read:
+`tiku-edit`, a text editor that takes a file on the command line, and
+`tiku-term`, a terminal running a shell on a pty. The desktop offers both
+in the Deskbar's leaf menu when it finds them beside itself, so they can
+be started without a command line at all.
+
 ## Adding one
 
 Copy the closest example into `examples/`, add its name to
