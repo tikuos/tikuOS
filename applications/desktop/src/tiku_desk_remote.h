@@ -1,0 +1,155 @@
+/*
+ * Tiku Desktop -- graphical interface to TikuOS devices.
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_desk_remote.h - the window session: a process boundary that is a
+ * deployment property, not an application property.
+ *
+ * An application built on the toolkit may run LINKED into the desktop (the
+ * device deployment: one heap, one loop) or OUT OF PROCESS over this
+ * session (the hosted deployment: its faults are its own).  The contracts
+ * are the same either way -- a window is a surface plus an event route,
+ * menus travel as the plain tiku_desk_menuset_t they already are, and
+ * picks come back as commands.  Nothing here is X11 or POSIX-specific
+ * beyond a stream socket, which is what will let the same frames ride the
+ * device transport one day.
+ *
+ * The wire is little machine-endian structs on a local stream:
+ *   [u32 type][u32 payload length][payload]
+ * with both peers on one host; a version in HELLO guards the rest.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#ifndef TIKU_DESK_REMOTE_H_
+#define TIKU_DESK_REMOTE_H_
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "tiku_desk_event.h"
+#include "tiku_desk_window.h"
+
+#define TIKU_DESK_REMOTE_VERSION   1
+#define TIKU_DESK_REMOTE_SESSIONS  8
+#define TIKU_DESK_REMOTE_TITLE     64
+#define TIKU_DESK_REMOTE_MAX_DIM   1024
+
+/* Message types, client to desktop... */
+#define TIKU_DESK_RMSG_HELLO   1u   /* u32 version, char name[32]        */
+#define TIKU_DESK_RMSG_OPEN    2u   /* u32 id, i32 w, i32 h, title[64]   */
+#define TIKU_DESK_RMSG_FRAME   3u   /* u32 id, i32 w, i32 h, u32 px[w*h] */
+#define TIKU_DESK_RMSG_MENUS   4u   /* u32 id, tiku_desk_menuset_t       */
+#define TIKU_DESK_RMSG_CLOSE   5u   /* u32 id                            */
+/* ...and desktop to client. */
+#define TIKU_DESK_RMSG_EVENT   16u  /* u32 id, tiku_desk_event_t         */
+#define TIKU_DESK_RMSG_PICK    17u  /* u32 id, i32 command               */
+#define TIKU_DESK_RMSG_CLOSED  18u  /* u32 id: the user closed it        */
+
+/** @brief Where the desktop listens, under this user's HOME. */
+int tiku_desk_remote_path(char *out, size_t max);
+
+/*---------------------------------------------------------------------------*/
+/* The desktop's side: a listener whose sessions become windows.             */
+/*---------------------------------------------------------------------------*/
+
+typedef struct {
+    int                  fd;
+    int                  used;
+    char                 name[32];
+    uint32_t             win_id;        /* one window per session, for now */
+    struct tiku_desk_window *window;    /* not owned                       */
+    uint32_t            *frame;         /* latest pixels, w*h              */
+    int                  fw, fh;
+    tiku_desk_menuset_t  menus;
+    int                  has_menus;
+    int                  menus_fresh;   /* set when MENUS arrives          */
+    int                  opened;        /* OPEN seen, window wanted        */
+    int                  open_w, open_h;
+    char                 title[TIKU_DESK_REMOTE_TITLE];
+    /* Partial-read state: the wire is a stream and a FRAME is large. */
+    unsigned char       *buf;
+    size_t               got, want;
+    uint32_t             cur_type;
+} tiku_desk_remote_session_t;
+
+typedef struct {
+    int                        fd;      /* listening socket, or -1        */
+    char                       path[108];
+    tiku_desk_remote_session_t session[TIKU_DESK_REMOTE_SESSIONS];
+} tiku_desk_remote_listener_t;
+
+/** @brief Listen on the desk socket.  @return 0, or -1. */
+int tiku_desk_remote_listen(tiku_desk_remote_listener_t *listener);
+
+void tiku_desk_remote_shutdown(tiku_desk_remote_listener_t *listener);
+
+/**
+ * @brief Accept and read everything that is ready, without blocking.
+ *
+ * @return nonzero when anything changed (a session appeared or died, a
+ *         frame or menu set arrived) and a repaint is owed.
+ */
+int tiku_desk_remote_poll(tiku_desk_remote_listener_t *listener);
+
+/** @brief Send an input event to the session owning @p window. */
+void tiku_desk_remote_event(tiku_desk_remote_listener_t *listener,
+                            struct tiku_desk_window *window,
+                            const tiku_desk_event_t *event);
+
+/** @brief Send a menu pick to the session owning @p window. */
+void tiku_desk_remote_pick(tiku_desk_remote_listener_t *listener,
+                           struct tiku_desk_window *window, int command);
+
+/** @brief Tell the session its window was closed, and forget it. */
+void tiku_desk_remote_window_closed(tiku_desk_remote_listener_t *listener,
+                                    struct tiku_desk_window *window);
+
+/** @brief The session owning @p window, or NULL. */
+tiku_desk_remote_session_t *tiku_desk_remote_owner(
+    tiku_desk_remote_listener_t *listener, struct tiku_desk_window *window);
+
+/*---------------------------------------------------------------------------*/
+/* The application's side: the same contracts, backed by the wire.           */
+/*---------------------------------------------------------------------------*/
+
+typedef struct {
+    int      fd;
+    uint32_t next_id;
+} tiku_desk_remote_client_t;
+
+/**
+ * @brief Connect to the desktop, retrying briefly.
+ *
+ * The retry is what frees launch order: a client started a moment before
+ * the desktop still finds it.
+ *
+ * @return 0, or -1 when no desktop answered within @p wait_ms.
+ */
+int tiku_desk_remote_connect(tiku_desk_remote_client_t *client,
+                             const char *name, int wait_ms);
+
+void tiku_desk_remote_disconnect(tiku_desk_remote_client_t *client);
+
+/** @brief Ask for a window.  @return its id, or 0. */
+uint32_t tiku_desk_remote_open(tiku_desk_remote_client_t *client,
+                               const char *title, int w, int h);
+
+/** @brief Send the whole surface as the window's next frame. */
+int tiku_desk_remote_frame(tiku_desk_remote_client_t *client, uint32_t id,
+                           const uint32_t *px, int w, int h);
+
+/** @brief Publish menus for the window, as the plain data they are. */
+int tiku_desk_remote_menus(tiku_desk_remote_client_t *client, uint32_t id,
+                           const tiku_desk_menuset_t *menus);
+
+/**
+ * @brief Read one message if one is ready.
+ *
+ * @return the message type, 0 when nothing is ready, or -1 when the
+ *         desktop went away (which is the client's cue to exit).
+ */
+int tiku_desk_remote_read(tiku_desk_remote_client_t *client, uint32_t *id,
+                          tiku_desk_event_t *event, int *command);
+
+#endif /* TIKU_DESK_REMOTE_H_ */

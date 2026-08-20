@@ -22,7 +22,7 @@ CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 UI      := src/tiku_desk_gfx.c src/tiku_desk_theme.c src/tiku_desk_font.c src/tiku_desk_ui.c
 UI_O    := $(patsubst src/%.c,$(BUILD)/%.o,$(UI))
 
-RUNTIME   := src/tiku_desk_app.c src/tiku_desk_window.c src/tiku_desk_x11.c
+RUNTIME   := src/tiku_desk_app.c src/tiku_desk_window.c src/tiku_desk_remote.c src/tiku_desk_x11.c
 RUNTIME_O := $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 
 LIB_TRANSPORT := $(BUILD)/libtiku_desk_transport.a
@@ -31,10 +31,11 @@ LIB_RUNTIME   := $(BUILD)/libtiku_desk_runtime.a
 
 PROBE   := $(BUILD)/tiku-desk-probe
 GALLERY := $(BUILD)/tiku-desk-gallery
+ABOUTAPP := $(BUILD)/tiku-about-app
 TEST_APP := $(BUILD)/test-desk-app
 
 .PHONY: all clean run gallery font libs test
-all: libs $(PROBE) $(GALLERY)
+all: libs $(PROBE) $(GALLERY) $(ABOUTAPP)
 
 libs: $(LIB_TRANSPORT) $(LIB_UI) $(LIB_RUNTIME)
 
@@ -57,6 +58,9 @@ $(PROBE): $(BUILD)/tiku_desk_probe.o $(LIB_TRANSPORT)
 $(GALLERY): $(BUILD)/tiku_desk_gallery.o $(BUILD)/tiku_desk_x11.o $(LIB_UI)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lX11
 	@echo "built $@"
+
+$(ABOUTAPP): src/tiku_desk_about_app.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
+	$(CC) $(CFLAGS) -o $@ src/tiku_desk_about_app.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm
 
 $(TEST_APP): tests/test_app.c $(LIB_RUNTIME) $(LIB_UI)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
