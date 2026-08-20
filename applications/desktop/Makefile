@@ -36,12 +36,16 @@ ABOUTAPP := $(BUILD)/tiku-about-app
 # One binary per example, from one source file each.  The same file also
 # compiles into a desktop with -DTIKU_EXAMPLE_EMBED, which drops its main
 # and leaves the descriptor to be hosted in that process.
+# Applications, as opposed to examples: these are meant to be used.
+APP_NAMES := edit term
+APPS := $(patsubst %,$(BUILD)/tiku-%,$(APP_NAMES))
+
 EXAMPLE_NAMES := hello clock counter sketch
 EXAMPLES := $(patsubst %,$(BUILD)/tiku-example-%,$(EXAMPLE_NAMES))
 TEST_APP := $(BUILD)/test-desk-app
 
 .PHONY: all clean run gallery font libs test
-all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(EXAMPLES)
+all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(APPS) $(EXAMPLES)
 
 libs: $(LIB_TRANSPORT) $(LIB_UI) $(LIB_RUNTIME)
 
@@ -67,6 +71,14 @@ $(GALLERY): $(BUILD)/tiku_desk_gallery.o $(BUILD)/tiku_desk_x11.o $(LIB_UI)
 
 $(ABOUTAPP): src/tiku_desk_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
 	$(CC) $(CFLAGS) -o $@ src/tiku_desk_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm
+
+$(BUILD)/tiku-%: apps/tiku_%.c $(LIB_RUNTIME) $(LIB_UI) \
+                 $(LIB_TRANSPORT)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) \
+	      $(LDFLAGS) -lX11 -lm
+
+.PHONY: apps
+apps: $(APPS)
 
 $(BUILD)/tiku-example-%: examples/%.c $(LIB_RUNTIME) $(LIB_UI) \
                         $(LIB_TRANSPORT)
