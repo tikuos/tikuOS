@@ -24,6 +24,10 @@
  * every turn.  @return 0 when the desktop said goodbye or the app closed,
  * 1 when no desktop answered.
  */
+/* How long a client waits for the desktop before ticking anyway.  Short
+ * because tick is what drives a terminal's pty and a clock's minute. */
+#define TIKU_DESK_CLIENT_TICK_MS 10
+
 int tiku_desk_client_run(const tiku_desk_app_descriptor_t *app);
 
 /** @brief The same pump over an fd already in hand (a serial link). */

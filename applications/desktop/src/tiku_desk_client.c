@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include "tiku_desk_client.h"
@@ -111,7 +112,22 @@ pump(const tiku_desk_app_descriptor_t *app, client_ctx_t *ctx)
         if (done || dead) {
             break;
         }
-        usleep(30000);
+        {
+            /* Woken by the desktop rather than by a clock: a keystroke
+             * reaches the application as it arrives instead of at the
+             * end of whatever nap was already running.
+             *
+             * The timeout stays SHORT and unconditional because tick is
+             * how an application drives everything the session does not
+             * carry -- a terminal's pty, a clock's minute -- and this
+             * runtime cannot know what else it is waiting on. */
+            struct pollfd fds;
+
+            fds.fd = ctx->remote.fd;
+            fds.events = POLLIN;
+            fds.revents = 0;
+            (void)poll(&fds, 1, TIKU_DESK_CLIENT_TICK_MS);
+        }
     }
     if (app->stop != NULL) {
         app->stop(state);
