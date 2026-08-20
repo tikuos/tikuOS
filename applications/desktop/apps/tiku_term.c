@@ -1028,6 +1028,14 @@ const tiku_desk_app_descriptor_t tiku_term_app = {
     .pick = term_pick
 };
 
+#ifdef TIKU_APP_SO
+/* The one symbol a loader looks for; see tiku_desk_app.h. */
+const tiku_desk_app_export_t tiku_desk_app_v1 = {
+    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+    &tiku_term_app
+};
+#endif
+
 #ifndef TIKU_APP_EMBED
 int
 main(void)

@@ -87,6 +87,14 @@ const tiku_desk_app_descriptor_t tiku_example_hello = {
     .event = hello_event
 };
 
+#ifdef TIKU_APP_SO
+/* The one symbol a loader looks for; see tiku_desk_app.h. */
+const tiku_desk_app_export_t tiku_desk_app_v1 = {
+    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+    &tiku_example_hello
+};
+#endif
+
 #ifndef TIKU_EXAMPLE_EMBED
 int
 main(void)

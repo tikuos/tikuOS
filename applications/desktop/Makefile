@@ -22,8 +22,16 @@ CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 UI      := src/tiku_desk_gfx.c src/tiku_desk_theme.c src/tiku_desk_font.c src/tiku_desk_ui.c src/tiku_desk_about_app.c
 UI_O    := $(patsubst src/%.c,$(BUILD)/%.o,$(UI))
 
-RUNTIME   := src/tiku_desk_app.c src/tiku_desk_window.c src/tiku_desk_remote.c src/tiku_desk_conduct.c src/tiku_desk_client.c src/tiku_desk_x11.c
+RUNTIME   := src/tiku_desk_app.c src/tiku_desk_app_load.c src/tiku_desk_window.c src/tiku_desk_remote.c src/tiku_desk_conduct.c src/tiku_desk_client.c src/tiku_desk_x11.c
 RUNTIME_O := $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
+
+PIC_CORE_O    := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(CORE))
+PIC_UI_O      := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(UI))
+PIC_RUNTIME_O := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(RUNTIME))
+PIC_TRANSPORT := $(BUILD)/pic/libtiku_desk_transport.a
+PIC_UI        := $(BUILD)/pic/libtiku_desk_ui.a
+PIC_RUNTIME   := $(BUILD)/pic/libtiku_desk_runtime.a
+PIC_LIBS      := $(PIC_RUNTIME) $(PIC_UI) $(PIC_TRANSPORT)
 
 LIB_TRANSPORT := $(BUILD)/libtiku_desk_transport.a
 LIB_UI        := $(BUILD)/libtiku_desk_ui.a
@@ -40,12 +48,25 @@ ABOUTAPP := $(BUILD)/tiku-about-app
 APP_NAMES := edit term
 APPS := $(patsubst %,$(BUILD)/tiku-%,$(APP_NAMES))
 
+# The loadable form of every application and example: one artifact that
+# the desktop can open in its own process or start beside itself.
+# Named "apps", not "apps.d": the dependency-file include below globs
+# $(BUILD)/*.d, and a directory caught by that glob stops the build.
+APPS_D    := $(BUILD)/apps
+SO_NAMES  := edit term
+# Named for what they ARE, since the file name is the label a desktop
+# offers them under.
+SO_APPS   := $(APPS_D)/terminal.so $(APPS_D)/editor.so
+SO_EXAMPLES := $(patsubst %,$(APPS_D)/%.so,hello clock counter sketch)
+RUNNER    := $(BUILD)/tiku-run
+
 EXAMPLE_NAMES := hello clock counter sketch
 EXAMPLES := $(patsubst %,$(BUILD)/tiku-example-%,$(EXAMPLE_NAMES))
 TEST_APP := $(BUILD)/test-desk-app
 
 .PHONY: all clean run gallery font libs test
-all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(APPS) $(EXAMPLES)
+all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(APPS) $(EXAMPLES) \
+     $(SO_APPS) $(SO_EXAMPLES) $(RUNNER)
 
 libs: $(LIB_TRANSPORT) $(LIB_UI) $(LIB_RUNTIME)
 
@@ -53,6 +74,23 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 $(LIB_TRANSPORT): $(CORE_O)
+	$(AR) rcs $@ $^
+
+# The same sources again, position-independent, because a shared object
+# cannot link an archive of fixed-address code.
+$(BUILD)/pic/%.o: src/%.c | $(BUILD)/pic
+	$(CC) $(CFLAGS) -fPIC -MMD -MP -c -o $@ $<
+
+$(BUILD)/pic:
+	@mkdir -p $(BUILD)/pic
+
+$(PIC_TRANSPORT): $(PIC_CORE_O)
+	$(AR) rcs $@ $^
+
+$(PIC_UI): $(PIC_UI_O)
+	$(AR) rcs $@ $^
+
+$(PIC_RUNTIME): $(PIC_RUNTIME_O)
 	$(AR) rcs $@ $^
 
 $(LIB_UI): $(UI_O)
@@ -77,8 +115,31 @@ $(BUILD)/tiku-%: apps/tiku_%.c $(LIB_RUNTIME) $(LIB_UI) \
 	$(CC) $(CFLAGS) -o $@ $< $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) \
 	      $(LDFLAGS) -lX11 -lm
 
-.PHONY: apps
+.PHONY: apps loadable
 apps: $(APPS)
+
+loadable: $(SO_APPS) $(SO_EXAMPLES) $(RUNNER)
+
+$(APPS_D):
+	@mkdir -p $(APPS_D)
+
+$(APPS_D)/terminal.so: apps/tiku_term.c $(PIC_LIBS) | $(APPS_D)
+	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
+	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
+
+$(APPS_D)/editor.so: apps/tiku_edit.c $(PIC_LIBS) | $(APPS_D)
+	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
+	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
+
+$(APPS_D)/%.so: examples/%.c $(PIC_LIBS) | $(APPS_D)
+	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_EXAMPLE_EMBED -DTIKU_APP_SO \
+	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
+
+# Gives a loaded application a process of its own: the same file the
+# desktop can open in-process, started beside it instead.
+$(RUNNER): apps/tiku_run.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
+	$(CC) $(CFLAGS) -o $@ apps/tiku_run.c $(LIB_RUNTIME) $(LIB_UI) \
+	      $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm -ldl
 
 $(BUILD)/tiku-example-%: examples/%.c $(LIB_RUNTIME) $(LIB_UI) \
                         $(LIB_TRANSPORT)

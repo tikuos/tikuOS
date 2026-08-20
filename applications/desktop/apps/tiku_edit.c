@@ -209,8 +209,11 @@ paint(edit_state_t *st)
     tiku_desk_fill(st->surface, strip, TIKU_DESK_C_PANEL);
     tiku_desk_hline(st->surface, 0, strip.y, EDIT_W,
                     tiku_desk_tint(TIKU_DESK_C_PANEL, TIKU_DESK_DARKEN_2));
+    /* Marked in ASCII: the interface face carries no bullet, and a
+     * modified file that says nothing about it is the worst of the
+     * three states this line can be in. */
     snprintf(where, sizeof where, "%s%s  %d:%d  %s",
-             st->modified ? "\xe2\x97\x8f " : "",
+             st->modified ? "* " : "",
              st->path[0] != '\0' ? st->path : "untitled",
              st->cy + 1, st->cx + 1, st->note);
     tiku_desk_text(st->surface, small, MARGIN,
@@ -504,6 +507,14 @@ const tiku_desk_app_descriptor_t tiku_edit_app = {
     .event = edit_event,
     .pick = edit_pick
 };
+
+#ifdef TIKU_APP_SO
+/* The one symbol a loader looks for; see tiku_desk_app.h. */
+const tiku_desk_app_export_t tiku_desk_app_v1 = {
+    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+    &tiku_edit_app
+};
+#endif
 
 #ifndef TIKU_APP_EMBED
 int
