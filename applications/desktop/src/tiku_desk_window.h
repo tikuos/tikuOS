@@ -40,6 +40,46 @@ typedef int (*tiku_desk_window_close_fn)(tiku_desk_window_t *window,
 typedef void (*tiku_desk_window_destroy_fn)(tiku_desk_window_t *window,
                                              void *context);
 
+/*
+ * The published-menu protocol (phase two of the global menu bar): a window
+ * DESCRIBES its menus as plain data, and whoever owns the top of the
+ * screen renders whichever description the focused window published.  The
+ * publisher never draws and the bar owner never reaches into the
+ * publisher's widgets -- the description is the whole contract, which is
+ * what will let a device application's menus appear in a bar it does not
+ * own.  Entries at level 1 belong to the submenu of the nearest level-0
+ * entry above them.
+ */
+#define TIKU_DESK_MENUSET_MENUS 6
+#define TIKU_DESK_MENUSET_ITEMS 28
+#define TIKU_DESK_MENUSET_LABEL 44
+
+typedef struct {
+    char          label[TIKU_DESK_MENUSET_LABEL];
+    int           command;
+    char          sc;           /* shortcut character, 0 for none        */
+    unsigned      mods;
+    unsigned char enabled;
+    unsigned char marked;
+    unsigned char separator;
+    unsigned char level;        /* 0 top, 1 inside the submenu above     */
+} tiku_desk_menu_entry_t;
+
+typedef struct {
+    char                   title[TIKU_DESK_MENUSET_LABEL];
+    int                    nitem;
+    tiku_desk_menu_entry_t item[TIKU_DESK_MENUSET_ITEMS];
+} tiku_desk_menu_list_t;
+
+typedef struct {
+    int                   nmenu;
+    tiku_desk_menu_list_t menu[TIKU_DESK_MENUSET_MENUS];
+} tiku_desk_menuset_t;
+
+struct tiku_desk_window;
+typedef void (*tiku_desk_menu_pick_fn)(struct tiku_desk_window *window,
+                                       int command, void *context);
+
 struct tiku_desk_window {
     char                         title[TIKU_DESK_WINDOW_TITLE_MAX];
     tiku_desk_rect_t             frame;
@@ -54,6 +94,12 @@ struct tiku_desk_window {
     tiku_desk_window_destroy_fn  destroy;
     void                        *context;
     void                        *tag;
+    /* What the window says its menus are (the publish protocol above);
+     * has_menus 0 means it says nothing and the bar shows only its own. */
+    tiku_desk_menuset_t          menus;
+    int                          has_menus;
+    tiku_desk_menu_pick_fn       menu_pick;
+    void                        *menu_pick_context;
     tiku_desk_rect_t             saved_zoom;
     int                          zoom_valid;
 };
@@ -87,6 +133,16 @@ void tiku_desk_window_set_handlers(tiku_desk_window_t *window,
 int tiku_desk_window_send(tiku_desk_window_t *window,
                           const tiku_desk_event_t *event);
 tiku_desk_rect_t tiku_desk_window_content(const tiku_desk_window_t *window);
+
+/** @brief Publish (or clear, with NULL) the window's menu description. */
+void tiku_desk_window_publish_menus(struct tiku_desk_window *window,
+                                    const tiku_desk_menuset_t *menus,
+                                    tiku_desk_menu_pick_fn pick,
+                                    void *context);
+
+/** @brief The published description, or NULL when there is none. */
+const tiku_desk_menuset_t *tiku_desk_window_menus(
+    struct tiku_desk_window *window);
 void tiku_desk_window_set_size_controls(tiku_desk_window_t *window,
                                         int resizable, int zoomable);
 

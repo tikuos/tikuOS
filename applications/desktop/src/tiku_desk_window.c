@@ -532,3 +532,29 @@ tiku_desk_workspace_draw(tiku_desk_workspace_t *workspace)
         }
     }
 }
+
+void
+tiku_desk_window_publish_menus(struct tiku_desk_window *window,
+                               const tiku_desk_menuset_t *menus,
+                               tiku_desk_menu_pick_fn pick, void *context)
+{
+    if (window == NULL) {
+        return;
+    }
+    if (menus == NULL) {
+        window->has_menus = 0;
+        window->menu_pick = NULL;
+        window->menu_pick_context = NULL;
+        return;
+    }
+    window->menus = *menus;
+    window->has_menus = 1;
+    window->menu_pick = pick;
+    window->menu_pick_context = context;
+}
+
+const tiku_desk_menuset_t *
+tiku_desk_window_menus(struct tiku_desk_window *window)
+{
+    return (window != NULL && window->has_menus) ? &window->menus : NULL;
+}
