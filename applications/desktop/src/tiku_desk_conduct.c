@@ -17,12 +17,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -189,6 +191,66 @@ tiku_desk_conduct_listen(tiku_desk_conduct_t *c, const char *path,
     return 0;
 }
 
+int
+tiku_desk_conduct_adopt(tiku_desk_conduct_t *c, int fd, void *ctx,
+                        tiku_desk_conduct_inject_fn inject,
+                        tiku_desk_conduct_pixel_fn pixel,
+                        tiku_desk_conduct_text_fn text)
+{
+    if (c == NULL || fd < 0) {
+        return -1;
+    }
+    memset(c, 0, sizeof *c);
+    c->fd = -1;                 /* nothing to listen on: the line is it */
+    c->peer = fd;
+    c->ctx = ctx;
+    c->inject = inject;
+    c->pixel = pixel;
+    c->text = text;
+    (void)set_nonblock(fd);
+    return 0;
+}
+
+int
+tiku_desk_conduct_open_tty(const char *path, int baud)
+{
+    struct termios tio;
+    int fd;
+
+    if (path == NULL) {
+        return -1;
+    }
+    fd = open(path, O_RDWR | O_NOCTTY);
+    if (fd < 0) {
+        return -1;
+    }
+    if (tcgetattr(fd, &tio) == 0) {
+        cfmakeraw(&tio);
+        /* cfmakeraw leaves VMIN 1, VTIME 0, and it must STAY that way.
+         * With VMIN 0 a terminal read that has nothing to give returns
+         * ZERO -- which on a socket means the peer hung up, and this code
+         * reads both.  A line configured to poll would therefore look
+         * like a cable being unplugged on every quiet moment.  Being
+         * non-blocking is O_NONBLOCK's job; it reports EAGAIN, which is
+         * a different thing from end-of-file and must remain so. */
+        if (baud > 0) {
+            speed_t sp = (baud == 9600)     ? B9600
+                       : (baud == 19200)    ? B19200
+                       : (baud == 38400)    ? B38400
+                       : (baud == 57600)    ? B57600
+                       : (baud == 230400)   ? B230400
+                       : (baud == 460800)   ? B460800
+                       : (baud == 921600)   ? B921600
+                                            : B115200;
+
+            (void)cfsetispeed(&tio, sp);
+            (void)cfsetospeed(&tio, sp);
+        }
+        (void)tcsetattr(fd, TCSANOW, &tio);
+    }
+    return fd;
+}
+
 void
 tiku_desk_conduct_shutdown(tiku_desk_conduct_t *c)
 {
@@ -277,10 +339,10 @@ tiku_desk_conduct_poll(tiku_desk_conduct_t *c)
 {
     int injected = 0;
 
-    if (c == NULL || c->fd < 0) {
+    if (c == NULL || (c->fd < 0 && c->peer < 0)) {
         return 0;
     }
-    if (c->peer < 0) {
+    if (c->fd >= 0 && c->peer < 0) {
         int fd = accept(c->fd, NULL, NULL);
 
         if (fd >= 0) {
@@ -362,6 +424,22 @@ tiku_desk_conduct_connect(tiku_desk_conduct_client_t *c, const char *path,
             waited += 20;
         }
     }
+}
+
+int
+tiku_desk_conduct_connect_fd(tiku_desk_conduct_client_t *c, int fd)
+{
+    uint32_t version = TIKU_DESK_CONDUCT_VERSION;
+
+    if (c == NULL || fd < 0) {
+        return -1;
+    }
+    memset(c, 0, sizeof *c);
+    (void)signal(SIGPIPE, SIG_IGN);
+    (void)set_nonblock(fd);
+    c->fd = fd;
+    send_msg(fd, TIKU_DESK_CMSG_HELLO, &version, sizeof version);
+    return 0;
 }
 
 void

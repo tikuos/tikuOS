@@ -105,6 +105,31 @@ int tiku_desk_conduct_listen(tiku_desk_conduct_t *c, const char *path,
                              tiku_desk_conduct_pixel_fn pixel,
                              tiku_desk_conduct_text_fn text);
 
+/**
+ * @brief Speak the channel over an fd already in hand: a serial port, a
+ *        pty, a pipe -- the far end of a device's own line.
+ *
+ * There is no listening and no accepting here, because a cable is already
+ * connected or it is not.  This is the arrangement a real board is driven
+ * in: the shell on the device answers on its console line, and the driver
+ * is on the other end of the wire, wherever that is.
+ */
+int tiku_desk_conduct_adopt(tiku_desk_conduct_t *c, int fd, void *ctx,
+                            tiku_desk_conduct_inject_fn inject,
+                            tiku_desk_conduct_pixel_fn pixel,
+                            tiku_desk_conduct_text_fn text);
+
+/**
+ * @brief Open @p path as a raw serial line at @p baud.
+ *
+ * Raw, because the channel's bytes are not text and a line discipline
+ * that helpfully translates a carriage return corrupts a frame.  @p baud
+ * of 0 leaves the port's own speed alone, which is what a pty wants.
+ *
+ * @return the fd, or -1.
+ */
+int tiku_desk_conduct_open_tty(const char *path, int baud);
+
 void tiku_desk_conduct_shutdown(tiku_desk_conduct_t *c);
 
 /**
@@ -130,6 +155,9 @@ typedef struct {
 /** @brief Connect to a shell offering the channel, retrying briefly. */
 int tiku_desk_conduct_connect(tiku_desk_conduct_client_t *c,
                               const char *path, int wait_ms);
+
+/** @brief Drive over an fd already in hand -- the same cable, other end. */
+int tiku_desk_conduct_connect_fd(tiku_desk_conduct_client_t *c, int fd);
 
 void tiku_desk_conduct_disconnect(tiku_desk_conduct_client_t *c);
 
