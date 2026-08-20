@@ -75,6 +75,19 @@ const tiku_desk_font_t *tiku_desk_font_bold(void);
  */
 const tiku_desk_font_t *tiku_desk_font_at(int px);
 
+/**
+ * @brief A face whose every glyph advances the same width.
+ *
+ * For a terminal grid and nothing else: the interface is laid out
+ * against the proportional face above, and mixing the two breaks it.
+ *
+ * @param bold Nonzero for the heavier face.
+ */
+const tiku_desk_font_t *tiku_desk_font_mono(int bold);
+
+/** @brief The advance every glyph of the mono face has. */
+int tiku_desk_font_mono_cell(int bold);
+
 /** @brief Pixel width of @p text. */
 int tiku_desk_text_width(const tiku_desk_font_t *f, const char *text);
 

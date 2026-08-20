@@ -25,6 +25,23 @@ BOLD = [
     "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]
+# The terminal draws on a grid, so it needs a face whose advance is the
+# same for every glyph.  Nothing else in the interface uses it.
+MONO = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+    "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf",
+    "/usr/share/fonts/google-noto/NotoSansMono-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+]
+MONO_BOLD = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+    "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono-Bold.ttf",
+    "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Bold.ttf",
+    "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
+]
+MONO_SIZES = (13, 15)
 SIZE = 12
 FIRST, LAST = 32, 126
 
@@ -117,6 +134,25 @@ def main():
                hi="plain%s2x" % tag)
         render(pick(BOLD), "bold%s" % tag, out, size=px,
                hi="bold%s2x" % tag)
+    for px in MONO_SIZES:
+        # One advance for every glyph, taken from a character that has
+        # nothing narrow about it, so the grid is exact.
+        probe = ImageFont.truetype(pick(MONO), px)
+        cell = int(round(probe.getlength("M")))
+        render(pick(MONO), "mono%d" % px, out, size=px,
+               forced_adv=[cell // 2] * (LAST - FIRST + 1))
+        render(pick(MONO_BOLD), "monobold%d" % px, out, size=px,
+               forced_adv=[cell // 2] * (LAST - FIRST + 1))
+    out.write("/* The fixed-advance faces, smallest first. */\n")
+    out.write("static const int mono_sizes[] = { %s };\n"
+              % ", ".join(str(px) for px in MONO_SIZES))
+    out.write("static const tiku_desk_font_t *const mono_faces[] = {\n"
+              "    %s\n};\n"
+              % ", ".join("&mono%d_font" % px for px in MONO_SIZES))
+    out.write("static const tiku_desk_font_t *const monobold_faces[] = {\n"
+              "    %s\n};\n"
+              % ", ".join("&monobold%d_font" % px for px in MONO_SIZES))
+
     out.write("/* Every size, smallest first, for the runtime picker. */\n")
     out.write("static const int face_sizes[] = { %s };\n"
               % ", ".join(str(px) for px in sizes))

@@ -74,6 +74,30 @@ tiku_desk_font_at(int px)
 }
 
 const tiku_desk_font_t *
+tiku_desk_font_mono(int bold)
+{
+    /* Follows the interface size the user chose: the bigger the rest of
+     * the desktop is, the bigger a terminal's characters are. */
+    int i, best = 0, n = (int)(sizeof mono_sizes / sizeof mono_sizes[0]);
+
+    if (current_size == 0) {
+        (void)tiku_desk_font_set_size(12);
+    }
+    for (i = 1; i < n; i++) {
+        if (current_size >= mono_sizes[i] - 1) {
+            best = i;
+        }
+    }
+    return bold ? monobold_faces[best] : mono_faces[best];
+}
+
+int
+tiku_desk_font_mono_cell(int bold)
+{
+    return tiku_desk_text_width(tiku_desk_font_mono(bold), "M");
+}
+
+const tiku_desk_font_t *
 tiku_desk_font_bold(void)
 {
     if (current_size == 0) {
