@@ -476,7 +476,7 @@ draw_window(tiku_desk_workspace_t *workspace, tiku_desk_window_t *window,
 
         tiku_desk_clip_set(surface, label);
         (void)tiku_desk_text_centered(surface, font, label, window->title,
-                                      TIKU_DESK_C_TEXT);
+                                      TIKU_DESK_C_TABTEXT);
         tiku_desk_clip_reset(surface);
     }
     if (window->draw != NULL && content.w > 0 && content.h > 0) {

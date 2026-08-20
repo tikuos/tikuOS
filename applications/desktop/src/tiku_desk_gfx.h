@@ -50,6 +50,10 @@ typedef struct {
     tiku_desk_rgb_t backdrop;   /* the desktop behind everything        */
     tiku_desk_rgb_t danger;     /* the stop severity                    */
     tiku_desk_rgb_t note;       /* tooltip/expander paper               */
+    /* Ink over the active tab, split from the body ink so a dark theme
+     * can keep the yellow tab -- the Be identity -- and still label it
+     * legibly. */
+    tiku_desk_rgb_t tab_text;
 } tiku_desk_theme_t;
 
 /** @brief The live theme.  Never NULL. */
@@ -57,6 +61,9 @@ const tiku_desk_theme_t *tiku_desk_theme(void);
 
 /** @brief Swap the theme; NULL restores the default (the R5 look). */
 void tiku_desk_theme_set(const tiku_desk_theme_t *theme);
+
+/** @brief The built-in dark table: the same desktop after dusk. */
+const tiku_desk_theme_t *tiku_desk_theme_dark(void);
 
 #define TIKU_DESK_C_PANEL      (tiku_desk_theme()->panel)
 #define TIKU_DESK_C_DOC        (tiku_desk_theme()->doc)
@@ -69,6 +76,7 @@ void tiku_desk_theme_set(const tiku_desk_theme_t *theme);
 #define TIKU_DESK_C_BACKDROP   (tiku_desk_theme()->backdrop)
 #define TIKU_DESK_C_DANGER     (tiku_desk_theme()->danger)
 #define TIKU_DESK_C_NOTE       (tiku_desk_theme()->note)
+#define TIKU_DESK_C_TABTEXT    (tiku_desk_theme()->tab_text)
 
 /* BeOS tint constants, so the code reads like the documentation. */
 #define TIKU_DESK_LIGHTEN_MAX  0.00f
