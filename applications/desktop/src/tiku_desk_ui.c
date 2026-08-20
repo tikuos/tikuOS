@@ -392,9 +392,13 @@ tiku_desk_ui_textfield_scroll(tiku_desk_surface_t *s, tiku_desk_rect_t r,
 
 /** @brief A scrollbar arrow button with its triangle. */
 static void
-arrow_button(tiku_desk_surface_t *s, tiku_desk_rect_t r, int dir)
+arrow_button(tiku_desk_surface_t *s, tiku_desk_rect_t r, int dir, int can)
 {
     int cx = r.x + r.w / 2, cy = r.y + r.h / 2, i;
+    /* An arrow that cannot scroll any further says so by dimming: the
+     * glyph fades toward the panel while the button itself stays. */
+    tiku_desk_rgb_t ink = can ? DARK()
+                              : tiku_desk_tint(DARK(), TIKU_DESK_LIGHTEN_2);
 
     tiku_desk_fill(s, r, PANEL);
     tiku_desk_bevel(s, r, WHITE(), SHADOW());
@@ -402,10 +406,10 @@ arrow_button(tiku_desk_surface_t *s, tiku_desk_rect_t r, int dir)
     for (i = 0; i < 4; i++) {
         int len = 2 * i + 1;
         switch (dir) {
-        case 0: tiku_desk_hline(s, cx - i, cy - 2 + i, len, DARK()); break;
-        case 1: tiku_desk_hline(s, cx - i, cy + 2 - i, len, DARK()); break;
-        case 2: tiku_desk_vline(s, cx - 2 + i, cy - i, len, DARK()); break;
-        default: tiku_desk_vline(s, cx + 2 - i, cy - i, len, DARK()); break;
+        case 0: tiku_desk_hline(s, cx - i, cy - 2 + i, len, ink); break;
+        case 1: tiku_desk_hline(s, cx - i, cy + 2 - i, len, ink); break;
+        case 2: tiku_desk_vline(s, cx - 2 + i, cy - i, len, ink); break;
+        default: tiku_desk_vline(s, cx + 2 - i, cy - i, len, ink); break;
         }
     }
 }
@@ -421,18 +425,27 @@ tiku_desk_ui_scrollbar(tiku_desk_surface_t *s, tiku_desk_rect_t r, float pos,
     tiku_desk_fill(s, r, tiku_desk_tint(PANEL, TIKU_DESK_DARKEN_1));
     tiku_desk_bevel(s, r, SHADOW(), WHITE());
 
-    if (horiz) {
-        arrow_button(s, (tiku_desk_rect_t){ r.x, r.y, btn, btn }, 2);
-        arrow_button(s, (tiku_desk_rect_t){ r.x + r.w - btn, r.y, btn, btn },
-                     3);
-        track = (tiku_desk_rect_t){ r.x + btn, r.y, r.w - 2 * btn, r.h };
-        span = track.w;
-    } else {
-        arrow_button(s, (tiku_desk_rect_t){ r.x, r.y, btn, btn }, 0);
-        arrow_button(s, (tiku_desk_rect_t){ r.x, r.y + r.h - btn, btn, btn },
-                     1);
-        track = (tiku_desk_rect_t){ r.x, r.y + btn, r.w, r.h - 2 * btn };
-        span = track.h;
+    {
+        /* Whether each direction HAS anywhere to go: at an end the arrow
+         * pointing past it dims, and when everything fits both do. */
+        int can_back = frac < 1.0f && pos > 0.0f;
+        int can_on = frac < 1.0f && pos < 1.0f;
+
+        if (horiz) {
+            arrow_button(s, (tiku_desk_rect_t){ r.x, r.y, btn, btn }, 2,
+                         can_back);
+            arrow_button(s, (tiku_desk_rect_t){ r.x + r.w - btn, r.y, btn,
+                                                btn }, 3, can_on);
+            track = (tiku_desk_rect_t){ r.x + btn, r.y, r.w - 2 * btn, r.h };
+            span = track.w;
+        } else {
+            arrow_button(s, (tiku_desk_rect_t){ r.x, r.y, btn, btn }, 0,
+                         can_back);
+            arrow_button(s, (tiku_desk_rect_t){ r.x, r.y + r.h - btn, btn,
+                                                btn }, 1, can_on);
+            track = (tiku_desk_rect_t){ r.x, r.y + btn, r.w, r.h - 2 * btn };
+            span = track.h;
+        }
     }
     if (frac > 1.0f) { frac = 1.0f; }
     if (frac < 0.05f) { frac = 0.05f; }
