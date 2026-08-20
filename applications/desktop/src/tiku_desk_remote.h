@@ -35,12 +35,24 @@
 #define TIKU_DESK_REMOTE_TITLE     64
 #define TIKU_DESK_REMOTE_MAX_DIM   1024
 
+/*
+ * What a peer can do beyond version 1, sent in HELLO.  A shared surface
+ * means both ends are on one machine, which a local socket implies and a
+ * serial line denies; a peer that cannot share simply never claims it,
+ * and its frames keep being copied.
+ */
+#define TIKU_DESK_FEAT_SHARED_SURFACE 0x1u
+#define TIKU_DESK_REMOTE_BUFFERS      2
+#define TIKU_DESK_REMOTE_SHM_NAME     64
+
 /* Message types, client to desktop... */
 #define TIKU_DESK_RMSG_HELLO   1u   /* u32 version, char name[32]        */
 #define TIKU_DESK_RMSG_OPEN    2u   /* u32 id, i32 w, i32 h, title[64]   */
 #define TIKU_DESK_RMSG_FRAME   3u   /* u32 id, i32 w, i32 h, u32 px[w*h] */
 #define TIKU_DESK_RMSG_MENUS   4u   /* u32 id, tiku_desk_menuset_t       */
 #define TIKU_DESK_RMSG_CLOSE   5u   /* u32 id                            */
+#define TIKU_DESK_RMSG_SURFACE 6u   /* u32 id, i32 w, i32 h, name[64]    */
+#define TIKU_DESK_RMSG_READY   7u   /* u32 id, u32 buffer                */
 /* ...and desktop to client. */
 #define TIKU_DESK_RMSG_EVENT   16u  /* u32 id, tiku_desk_event_t         */
 #define TIKU_DESK_RMSG_PICK    17u  /* u32 id, i32 command               */
@@ -67,6 +79,14 @@ typedef struct {
     int                  opened;        /* OPEN seen, window wanted        */
     int                  open_w, open_h;
     char                 title[TIKU_DESK_REMOTE_TITLE];
+    /* A surface shared with the application: it paints into one buffer
+     * while the desktop shows the other, and a frame becomes a message
+     * saying which. */
+    struct tiku_desk_remote_listener *owner;
+    uint32_t            *shared;        /* mapped, or NULL            */
+    size_t               shared_bytes;
+    int                  shown;         /* buffer index being shown   */
+    unsigned             features;      /* what the peer said it can  */
     /* Partial-read state: the wire is a stream and a FRAME is large.
      * The header accumulates too -- a serial link has no peek. */
     unsigned char        hbuf[8];
@@ -76,7 +96,11 @@ typedef struct {
     uint32_t             cur_type;
 } tiku_desk_remote_session_t;
 
-typedef struct {
+typedef struct tiku_desk_remote_listener {
+    /* Shared surfaces mapped and not yet given back.  A count rather
+     * than a flag: a leak is invisible in a freed session, whose fields
+     * are cleared either way. */
+    int                        mapped;
     int                        fd;      /* listening socket, or -1        */
     char                       path[108];
     tiku_desk_remote_session_t session[TIKU_DESK_REMOTE_SESSIONS];
@@ -111,6 +135,18 @@ void tiku_desk_remote_pick(tiku_desk_remote_listener_t *listener,
 void tiku_desk_remote_window_closed(tiku_desk_remote_listener_t *listener,
                                     struct tiku_desk_window *window);
 
+/**
+ * @brief The pixels a session's window should show, or NULL.
+ *
+ * Shared when the peer could share, copied when it could not; a caller
+ * draws the same way either way.
+ */
+/** @brief Shared surfaces this listener still holds. */
+int tiku_desk_remote_mapped(const tiku_desk_remote_listener_t *listener);
+
+const uint32_t *tiku_desk_remote_pixels(
+    const tiku_desk_remote_session_t *session);
+
 /** @brief The session owning @p window, or NULL. */
 tiku_desk_remote_session_t *tiku_desk_remote_owner(
     tiku_desk_remote_listener_t *listener, struct tiku_desk_window *window);
@@ -122,6 +158,14 @@ tiku_desk_remote_session_t *tiku_desk_remote_owner(
 typedef struct {
     int           fd;
     uint32_t      next_id;
+    /* The surface this client shares with the desktop, when the link can
+     * carry a descriptor. */
+    uint32_t     *shared;
+    size_t        shared_bytes;
+    int           shared_w, shared_h;
+    int           next_buffer;
+    char          shm_name[TIKU_DESK_REMOTE_SHM_NAME];
+    unsigned      features;
     /* Header accumulation: the line has no peek. */
     unsigned char hbuf[8];
     size_t        hgot;
