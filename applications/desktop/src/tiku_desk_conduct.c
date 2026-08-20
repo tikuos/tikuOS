@@ -167,10 +167,19 @@ tiku_desk_conduct_listen(tiku_desk_conduct_t *c, const char *path,
         sizeof c->path) {
         return -1;
     }
+    /* Every directory on the way; see tiku_desk_remote_listen. */
     snprintf(dir, sizeof dir, "%s", c->path);
     slash = strrchr(dir, '/');
     if (slash != NULL) {
+        char *step;
+
         *slash = '\0';
+        for (step = strchr(dir + 1, '/'); step != NULL;
+             step = strchr(step + 1, '/')) {
+            *step = '\0';
+            (void)mkdir(dir, 0700);
+            *step = '/';
+        }
         (void)mkdir(dir, 0700);
     }
     (void)unlink(c->path);

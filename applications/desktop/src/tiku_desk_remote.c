@@ -117,11 +117,21 @@ tiku_desk_remote_listen(tiku_desk_remote_listener_t *listener)
                               sizeof listener->path) != 0) {
         return -1;
     }
-    /* The directory may not exist yet on a fresh home. */
+    /* EVERY directory on the way, not just the last: a fresh home has no
+     * .config either, and one mkdir of .config/tracker fails on the
+     * missing parent -- leaving a desktop no application can reach. */
     snprintf(dir, sizeof dir, "%s", listener->path);
     slash = strrchr(dir, '/');
     if (slash != NULL) {
+        char *step;
+
         *slash = '\0';
+        for (step = strchr(dir + 1, '/'); step != NULL;
+             step = strchr(step + 1, '/')) {
+            *step = '\0';
+            (void)mkdir(dir, 0700);
+            *step = '/';
+        }
         (void)mkdir(dir, 0700);
     }
     (void)unlink(listener->path);
