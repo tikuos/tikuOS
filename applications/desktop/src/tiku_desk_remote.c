@@ -17,6 +17,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <signal.h>
+
 #include "tiku_desk_remote.h"
 
 /** @brief One frame's ceiling, from the dimension cap. */
@@ -41,6 +43,9 @@ tiku_desk_remote_path(char *out, size_t max)
 static int
 set_nonblock(int fd)
 {
+    /* The line may die under us; a write then must report, not kill. */
+    (void)signal(SIGPIPE, SIG_IGN);
+
     int flags = fcntl(fd, F_GETFL, 0);
 
     return (flags >= 0) ? fcntl(fd, F_SETFL, flags | O_NONBLOCK) : -1;
@@ -53,7 +58,7 @@ send_all(int fd, const void *data, size_t n)
     const unsigned char *p = data;
 
     while (n > 0u) {
-        ssize_t wrote = send(fd, p, n, MSG_NOSIGNAL);
+        ssize_t wrote = write(fd, p, n);
 
         if (wrote <= 0) {
             if (wrote < 0 && (errno == EAGAIN || errno == EINTR)) {
@@ -243,19 +248,22 @@ session_read(tiku_desk_remote_session_t *s)
     for (;;) {
         if (s->want == 0u) {
             uint32_t head[2];
-            ssize_t got = recv(s->fd, head, sizeof head, MSG_PEEK);
 
-            if (got == 0) {
-                return -1;
+            while (s->hgot < sizeof s->hbuf) {
+                ssize_t got = read(s->fd, s->hbuf + s->hgot,
+                                   sizeof s->hbuf - s->hgot);
+
+                if (got == 0) {
+                    return -1;
+                }
+                if (got < 0) {
+                    return (errno == EAGAIN || errno == EWOULDBLOCK ||
+                            errno == EINTR) ? changed : -1;
+                }
+                s->hgot += (size_t)got;
             }
-            if (got < 0) {
-                return (errno == EAGAIN || errno == EWOULDBLOCK ||
-                        errno == EINTR) ? changed : -1;
-            }
-            if ((size_t)got < sizeof head) {
-                return changed; /* half a header: wait for the rest */
-            }
-            (void)recv(s->fd, head, sizeof head, 0);
+            memcpy(head, s->hbuf, sizeof head);
+            s->hgot = 0u;
             if (head[1] > REMOTE_MAX_PAYLOAD) {
                 return -1;      /* nonsense length: protect the shell */
             }
@@ -267,9 +275,18 @@ session_read(tiku_desk_remote_session_t *s)
             if (s->want > 0u && s->buf == NULL) {
                 return -1;
             }
+            if (s->want == 0u) {
+                int r = session_message(s);
+
+                if (r < 0) {
+                    return -1;
+                }
+                changed |= r;
+                continue;
+            }
         }
         while (s->got < s->want) {
-            ssize_t got = recv(s->fd, s->buf + s->got, s->want - s->got, 0);
+            ssize_t got = read(s->fd, s->buf + s->got, s->want - s->got);
 
             if (got == 0) {
                 return -1;
@@ -296,15 +313,29 @@ session_read(tiku_desk_remote_session_t *s)
 }
 
 int
+tiku_desk_remote_adopt(tiku_desk_remote_listener_t *listener, int fd)
+{
+    int i;
+
+    for (i = 0; i < TIKU_DESK_REMOTE_SESSIONS; i++) {
+        if (!listener->session[i].used) {
+            memset(&listener->session[i], 0, sizeof listener->session[i]);
+            listener->session[i].fd = fd;
+            listener->session[i].used = 1;
+            (void)set_nonblock(fd);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int
 tiku_desk_remote_poll(tiku_desk_remote_listener_t *listener)
 {
     int changed = 0;
     int i;
 
-    if (listener->fd < 0) {
-        return 0;
-    }
-    for (;;) {
+    while (listener->fd >= 0) {
         int fd = accept(listener->fd, NULL, NULL);
 
         if (fd < 0) {
@@ -327,10 +358,19 @@ tiku_desk_remote_poll(tiku_desk_remote_listener_t *listener)
     }
     for (i = 0; i < TIKU_DESK_REMOTE_SESSIONS; i++) {
         tiku_desk_remote_session_t *s = &listener->session[i];
+        int r;
 
-        if (s->used && session_read(s) < 0) {
+        if (!s->used) {
+            continue;
+        }
+        r = session_read(s);
+        if (r < 0) {
             session_free(s);
             changed = 1;
+        } else {
+            /* A frame that arrived and never marked a repaint is a
+             * window one event behind its own application. */
+            changed |= r;
         }
     }
     for (i = 0; i < TIKU_DESK_REMOTE_SESSIONS; i++) {
@@ -448,17 +488,27 @@ tiku_desk_remote_connect(tiku_desk_remote_client_t *client,
         usleep(100000);
         waited += 100;
     }
-    {
-        unsigned char payload[4 + 32];
-        uint32_t version = TIKU_DESK_REMOTE_VERSION;
+    return tiku_desk_remote_connect_fd(client, name, client->fd);
+}
 
-        memset(payload, 0, sizeof payload);
-        memcpy(payload, &version, 4);
-        snprintf((char *)payload + 4, 32, "%s",
-                 (name != NULL) ? name : "app");
-        send_msg(client->fd, TIKU_DESK_RMSG_HELLO, payload,
-                 sizeof payload);
+int
+tiku_desk_remote_connect_fd(tiku_desk_remote_client_t *client,
+                            const char *name, int fd)
+{
+    unsigned char payload[4 + 32];
+    uint32_t version = TIKU_DESK_REMOTE_VERSION;
+
+    if (fd < 0) {
+        return -1;
     }
+    client->fd = fd;
+    if (client->next_id == 0u) {
+        client->next_id = 1;
+    }
+    memset(payload, 0, sizeof payload);
+    memcpy(payload, &version, 4);
+    snprintf((char *)payload + 4, 32, "%s", (name != NULL) ? name : "app");
+    send_msg(client->fd, TIKU_DESK_RMSG_HELLO, payload, sizeof payload);
     (void)set_nonblock(client->fd);
     return 0;
 }
@@ -549,27 +599,34 @@ tiku_desk_remote_read(tiku_desk_remote_client_t *client, uint32_t *id,
     if (client->fd < 0) {
         return -1;
     }
-    got = recv(client->fd, head, sizeof head, MSG_PEEK);
-    if (got == 0) {
-        return -1;
+    /* The header accumulates across calls: a serial line has no peek. */
+    while (client->hgot < sizeof client->hbuf) {
+        got = read(client->fd, client->hbuf + client->hgot,
+                   sizeof client->hbuf - client->hgot);
+        if (got == 0) {
+            return -1;
+        }
+        if (got < 0) {
+            return (errno == EAGAIN || errno == EWOULDBLOCK ||
+                    errno == EINTR) ? 0 : -1;
+        }
+        client->hgot += (size_t)got;
     }
-    if (got < 0) {
-        return (errno == EAGAIN || errno == EWOULDBLOCK) ? 0 : -1;
-    }
-    if ((size_t)got < sizeof head) {
-        return 0;
-    }
+    memcpy(head, client->hbuf, sizeof head);
     {
-        size_t n = sizeof head + head[1];
-        unsigned char *buf = malloc(n);
+        size_t n = head[1];
+        unsigned char *buf;
         size_t at = 0;
 
-        if (buf == NULL || head[1] > 4096u) {
-            free(buf);
+        if (head[1] > 4096u) {
+            return -1;
+        }
+        buf = malloc((n > 0u) ? n : 1u);
+        if (buf == NULL) {
             return -1;
         }
         while (at < n) {
-            got = recv(client->fd, buf + at, n - at, 0);
+            got = read(client->fd, buf + at, n - at);
             if (got == 0) {
                 free(buf);
                 return -1;
@@ -584,18 +641,19 @@ tiku_desk_remote_read(tiku_desk_remote_client_t *client, uint32_t *id,
             }
             at += (size_t)got;
         }
+        client->hgot = 0u;
         if (id != NULL && head[1] >= 4u) {
-            memcpy(id, buf + 8, 4);
+            memcpy(id, buf, 4);
         }
         if (head[0] == TIKU_DESK_RMSG_EVENT && event != NULL &&
             head[1] >= 4u + sizeof *event) {
-            memcpy(event, buf + 12, sizeof *event);
+            memcpy(event, buf + 4, sizeof *event);
         }
         if (head[0] == TIKU_DESK_RMSG_PICK && command != NULL &&
             head[1] >= 8u) {
             int32_t c;
 
-            memcpy(&c, buf + 12, 4);
+            memcpy(&c, buf + 4, 4);
             *command = c;
         }
         free(buf);

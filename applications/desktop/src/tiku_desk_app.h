@@ -16,9 +16,26 @@
 
 #define TIKU_DESK_APP_MAX 16
 
-/* Runtime services are deliberately opaque here.  The lifecycle contract
- * does not expose runtime state, and services can grow behind this type. */
-typedef struct tiku_desk_app_services tiku_desk_app_services_t;
+#include "tiku_desk_window.h"
+
+/*
+ * The services an application draws THROUGH -- and the reason it never
+ * needs to know where it is running.  Linked into the desktop, these are
+ * backed by the workspace directly; out of process, by the window session
+ * over the desk socket.  Same calls, same order, same data; the process
+ * boundary is a deployment property.
+ */
+typedef struct tiku_desk_app_services {
+    void *ctx;
+    /** @brief Ask for a window.  @return its id, or 0. */
+    uint32_t (*open)(void *ctx, const char *title, int w, int h);
+    /** @brief The window's next frame, whole. */
+    int (*frame)(void *ctx, uint32_t id, const uint32_t *px, int w, int h);
+    /** @brief Publish the window's menus, as the plain data they are. */
+    int (*menus)(void *ctx, uint32_t id, const tiku_desk_menuset_t *set);
+    /** @brief Give the window back. */
+    void (*close)(void *ctx, uint32_t id);
+} tiku_desk_app_services_t;
 
 typedef struct {
     const char *id;                 /* stable machine-readable identity */
@@ -27,6 +44,9 @@ typedef struct {
     void (*stop)(void *state);
     int  (*event)(void *state, const tiku_desk_event_t *event);
     void (*tick)(void *state, int64_t now_us);
+    /* A pick from the window's published menus, wherever the bar
+     * lives.  @return nonzero when the application is done. */
+    int  (*pick)(void *state, uint32_t window, int command);
     int  (*run)(int argc, char **argv); /* blocking compatibility entry */
 } tiku_desk_app_descriptor_t;
 

@@ -3,13 +3,14 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_desk_about_app.c - the About box as a SEPARATE PROCESS.
+ * tiku_desk_about_app.c - the About panel as ONE descriptor.
  *
- * The thesis in one artifact: the same R5-mannered About panel that lives
- * linked into the Tracker desktop also runs here as its own binary,
- * speaking the window session over the desk socket -- a surface out,
- * events and menu picks back.  Its faults are its own; the desktop it
- * appears in never linked a line of it.
+ * The thesis in one artifact: this file draws through the services it is
+ * handed and never asks where it is running.  Linked into the desktop it
+ * is a window like any other; through tiku_desk_client_run it is its own
+ * process whose frames ride the session -- same code, same order, same
+ * data.  It also paints a small trail under the pointer, because a drag
+ * that crosses a process boundary should leave visible footprints.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,15 +20,23 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include "tiku_desk_about_app.h"
 #include "tiku_desk_gfx.h"
 #include "tiku_desk_font.h"
-#include "tiku_desk_remote.h"
 
 #define ABOUT_W 400
 #define ABOUT_H 210
 
 #define CMD_QUIT    1
 #define CMD_REFRESH 2
+
+typedef struct {
+    const tiku_desk_app_services_t *services;
+    tiku_desk_surface_t            *surface;
+    uint32_t                        id;
+    char                            kernel[96];
+    long                            shown_minute;
+} about_state_t;
 
 static long
 read_uptime(void)
@@ -43,8 +52,9 @@ read_uptime(void)
 }
 
 static void
-paint(tiku_desk_surface_t *s, const char *kernel)
+paint(about_state_t *st)
 {
+    tiku_desk_surface_t *s = st->surface;
     const tiku_desk_font_t *plain = tiku_desk_font_plain();
     const tiku_desk_font_t *big = tiku_desk_font_at(28);
     const tiku_desk_font_t *bold = tiku_desk_font_bold();
@@ -61,12 +71,12 @@ paint(tiku_desk_surface_t *s, const char *kernel)
         tiku_desk_fill(s, (tiku_desk_rect_t){ 18, base + 6, 96, 3 },
                        TIKU_DESK_C_TAB);
         tiku_desk_text(s, bold, 18, base + 14 + plain->ascent,
-                       "out of process", TIKU_DESK_C_TEXT);
+                       "one descriptor", TIKU_DESK_C_TEXT);
     }
     tiku_desk_text(s, bold, facts_x, y + plain->ascent,
-                   "About, from its own process", TIKU_DESK_C_TEXT);
+                   "About, wherever it runs", TIKU_DESK_C_TEXT);
     y += plain->height + 10;
-    tiku_desk_text(s, plain, facts_x, y + plain->ascent, kernel,
+    tiku_desk_text(s, plain, facts_x, y + plain->ascent, st->kernel,
                    TIKU_DESK_C_TEXT);
     y += plain->height + 10;
     {
@@ -78,46 +88,46 @@ paint(tiku_desk_surface_t *s, const char *kernel)
         tiku_desk_text(s, plain, facts_x, y + plain->ascent, line,
                        TIKU_DESK_C_TEXT);
     }
-    {
-        snprintf(line, sizeof line,
-                 "pid %ld: whose faults are whose", (long)getpid());
-        tiku_desk_text(s, plain, 18, ABOUT_H - 14, line,
-                       TIKU_DESK_C_TEXT);
-    }
+    snprintf(line, sizeof line, "pid %ld: whose faults are whose",
+             (long)getpid());
+    tiku_desk_text(s, plain, 18, ABOUT_H - 14, line, TIKU_DESK_C_TEXT);
 }
 
-int
-main(void)
+static void
+show(about_state_t *st)
 {
-    tiku_desk_remote_client_t client;
-    tiku_desk_surface_t *surface;
-    char kernel[96];
-    struct utsname un;
-    uint32_t id;
-    long shown_minute = -1;
+    (void)st->services->frame(st->services->ctx, st->id,
+                              st->surface->px, ABOUT_W, ABOUT_H);
+}
 
+static int
+about_start(void **state, const tiku_desk_app_services_t *services)
+{
+    about_state_t *st = calloc(1, sizeof *st);
+    struct utsname un;
+
+    if (st == NULL) {
+        return -1;
+    }
+    st->services = services;
+    st->shown_minute = -1;
     if (uname(&un) == 0) {
-        snprintf(kernel, sizeof kernel, "%s %s (%s)", un.sysname,
+        snprintf(st->kernel, sizeof st->kernel, "%s %s (%s)", un.sysname,
                  un.release, un.machine);
     } else {
-        snprintf(kernel, sizeof kernel, "unknown kernel");
+        snprintf(st->kernel, sizeof st->kernel, "unknown kernel");
     }
-    if (tiku_desk_remote_connect(&client, "about", 8000) != 0) {
-        fprintf(stderr, "about: no desktop answered\n");
-        return 1;
+    st->surface = tiku_desk_surface_new(ABOUT_W, ABOUT_H,
+                                        TIKU_DESK_C_PANEL);
+    if (st->surface == NULL) {
+        free(st);
+        return -1;
     }
-    surface = tiku_desk_surface_new(ABOUT_W, ABOUT_H, TIKU_DESK_C_PANEL);
-    if (surface == NULL) {
-        return 1;
-    }
-    id = tiku_desk_remote_open(&client, "About (remote)", ABOUT_W,
-                               ABOUT_H);
-    paint(surface, kernel);
-    (void)tiku_desk_remote_frame(&client, id, surface->px, ABOUT_W,
-                                 ABOUT_H);
+    st->id = services->open(services->ctx, "About (remote)", ABOUT_W,
+                            ABOUT_H);
+    paint(st);
+    show(st);
     {
-        /* The menus travel as the same plain data a linked-in window
-         * publishes -- the global bar cannot tell the difference. */
         tiku_desk_menuset_t menus;
 
         memset(&menus, 0, sizeof menus);
@@ -133,45 +143,97 @@ main(void)
                  sizeof menus.menu[0].item[1].label, "Quit");
         menus.menu[0].item[1].command = CMD_QUIT;
         menus.menu[0].item[1].enabled = 1;
-        (void)tiku_desk_remote_menus(&client, id, &menus);
+        (void)services->menus(services->ctx, st->id, &menus);
     }
-    for (;;) {
-        tiku_desk_event_t event;
-        uint32_t evid = 0;
-        int command = 0;
-        int type = tiku_desk_remote_read(&client, &evid, &event, &command);
-        long minute;
-
-        if (type < 0 || type == TIKU_DESK_RMSG_CLOSED) {
-            break;              /* the desktop went away, or said done */
-        }
-        if (type == TIKU_DESK_RMSG_PICK) {
-            if (command == CMD_QUIT) {
-                break;
-            }
-            if (command == CMD_REFRESH) {
-                paint(surface, kernel);
-                (void)tiku_desk_remote_frame(&client, id, surface->px,
-                                             ABOUT_W, ABOUT_H);
-            }
-        }
-        if (type == TIKU_DESK_RMSG_EVENT &&
-            event.type == TIKU_DESK_EVENT_KEY_DOWN &&
-            event.key == TIKU_DESK_KEY_ESCAPE) {
-            break;
-        }
-        minute = read_uptime() / 60;
-        if (minute != shown_minute) {
-            /* The uptime ticks from here, not from the compositor:
-             * liveness is the CLIENT's to prove. */
-            shown_minute = minute;
-            paint(surface, kernel);
-            (void)tiku_desk_remote_frame(&client, id, surface->px,
-                                         ABOUT_W, ABOUT_H);
-        }
-        usleep(30000);
-    }
-    tiku_desk_remote_disconnect(&client);
-    tiku_desk_surface_free(surface);
+    *state = st;
     return 0;
 }
+
+static void
+about_stop(void *state)
+{
+    about_state_t *st = state;
+
+    if (st != NULL) {
+        tiku_desk_surface_free(st->surface);
+        free(st);
+    }
+}
+
+static int
+about_event(void *state, const tiku_desk_event_t *event)
+{
+    about_state_t *st = state;
+
+    if (event->type == TIKU_DESK_EVENT_KEY_DOWN &&
+        event->key == TIKU_DESK_KEY_ESCAPE) {
+        return 1;
+    }
+    if (event->type == TIKU_DESK_EVENT_POINTER_DOWN ||
+        event->type == TIKU_DESK_EVENT_POINTER_MOVE ||
+        event->type == TIKU_DESK_EVENT_POINTER_UP) {
+        /* The footprint: a drag that crossed the boundary shows where it
+         * went.  UP stamps in the text ink so the end is tellable. */
+        tiku_desk_fill(st->surface, (tiku_desk_rect_t){ event->x - 2,
+                       event->y - 2, 5, 5 },
+                       event->type == TIKU_DESK_EVENT_POINTER_UP
+                           ? TIKU_DESK_C_TEXT : TIKU_DESK_C_TAB);
+        show(st);
+    }
+    return 0;
+}
+
+static void
+about_tick(void *state, int64_t now_us)
+{
+    about_state_t *st = state;
+    long minute = read_uptime() / 60;
+
+    (void)now_us;
+    if (minute != st->shown_minute) {
+        /* Only the uptime LINE repaints: a tick that repainted the whole
+         * panel would erase the pointer footprints, and liveness must
+         * not destroy evidence. */
+        const tiku_desk_font_t *plain = tiku_desk_font_plain();
+        int y = 20 + 2 * (plain->height + 10);
+        char line[64];
+        long up = read_uptime();
+
+        st->shown_minute = minute;
+        tiku_desk_fill(st->surface, (tiku_desk_rect_t){ 150, y,
+                       ABOUT_W - 150, plain->height + 2 },
+                       TIKU_DESK_C_PANEL);
+        snprintf(line, sizeof line, "up %ld day%s, %ld:%02ld",
+                 up / 86400, (up / 86400) == 1 ? "" : "s",
+                 (up % 86400) / 3600, (up % 3600) / 60);
+        tiku_desk_text(st->surface, plain, 150, y + plain->ascent, line,
+                       TIKU_DESK_C_TEXT);
+        show(st);
+    }
+}
+
+static int
+about_pick(void *state, uint32_t window, int command)
+{
+    about_state_t *st = state;
+
+    (void)window;
+    if (command == CMD_QUIT) {
+        return 1;
+    }
+    if (command == CMD_REFRESH) {
+        paint(st);
+        show(st);
+    }
+    return 0;
+}
+
+const tiku_desk_app_descriptor_t tiku_desk_about_app = {
+    .id = "org.tikuos.about",
+    .name = "About",
+    .start = about_start,
+    .stop = about_stop,
+    .event = about_event,
+    .tick = about_tick,
+    .pick = about_pick,
+};

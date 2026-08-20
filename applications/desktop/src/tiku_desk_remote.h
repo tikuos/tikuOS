@@ -67,7 +67,10 @@ typedef struct {
     int                  opened;        /* OPEN seen, window wanted        */
     int                  open_w, open_h;
     char                 title[TIKU_DESK_REMOTE_TITLE];
-    /* Partial-read state: the wire is a stream and a FRAME is large. */
+    /* Partial-read state: the wire is a stream and a FRAME is large.
+     * The header accumulates too -- a serial link has no peek. */
+    unsigned char        hbuf[8];
+    size_t               hgot;
     unsigned char       *buf;
     size_t               got, want;
     uint32_t             cur_type;
@@ -83,6 +86,9 @@ typedef struct {
 int tiku_desk_remote_listen(tiku_desk_remote_listener_t *listener);
 
 void tiku_desk_remote_shutdown(tiku_desk_remote_listener_t *listener);
+
+/** @brief Adopt an fd (a serial link, a pty) as a session directly. */
+int tiku_desk_remote_adopt(tiku_desk_remote_listener_t *listener, int fd);
 
 /**
  * @brief Accept and read everything that is ready, without blocking.
@@ -114,8 +120,11 @@ tiku_desk_remote_session_t *tiku_desk_remote_owner(
 /*---------------------------------------------------------------------------*/
 
 typedef struct {
-    int      fd;
-    uint32_t next_id;
+    int           fd;
+    uint32_t      next_id;
+    /* Header accumulation: the line has no peek. */
+    unsigned char hbuf[8];
+    size_t        hgot;
 } tiku_desk_remote_client_t;
 
 /**
@@ -128,6 +137,14 @@ typedef struct {
  */
 int tiku_desk_remote_connect(tiku_desk_remote_client_t *client,
                              const char *name, int wait_ms);
+
+/**
+ * @brief Speak the session over an fd already in hand -- a serial port,
+ *        a pty, a pipe.  The wire neither knows nor cares; this is how
+ *        the same frames will reach a device over its own link.
+ */
+int tiku_desk_remote_connect_fd(tiku_desk_remote_client_t *client,
+                                const char *name, int fd);
 
 void tiku_desk_remote_disconnect(tiku_desk_remote_client_t *client);
 
