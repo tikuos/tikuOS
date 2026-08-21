@@ -443,6 +443,12 @@ typedef struct {
     float                  trans[32];
 } cff_run_t;
 
+/**
+ * @brief Run a charstring.
+ *
+ * @return 0 malformed, 1 reached its end or returned, 2 saw an endchar --
+ *         which finishes the GLYPH, not merely the subroutine it was in.
+ */
 static int run_charstring(cff_run_t *run, const unsigned char *code,
                           size_t len);
 
@@ -742,11 +748,14 @@ run_op(cff_run_t *run, int op, const unsigned char **code, size_t *left)
             return 0;
         }
         run->depth++;
-        if (!run_charstring(run, body, body_len)) {
-            run->depth--;
+        n = run_charstring(run, body, body_len);
+        run->depth--;
+        if (n == 0) {
             return 0;
         }
-        run->depth--;
+        if (n == 2) {
+            return 3;           /* the subroutine ended the glyph */
+        }
         return 1;
     }
     case 11:                    /* return */
@@ -921,7 +930,7 @@ run_charstring(cff_run_t *run, const unsigned char *code, size_t len)
                 return 1;       /* return: back to the caller */
             }
             if (r == 3) {
-                return 1;       /* endchar: the glyph is done */
+                return 2;       /* endchar: nothing after this draws */
             }
         }
     }
@@ -1094,7 +1103,7 @@ tiku_desk_cff_outline(const tiku_desk_cff_t *cff, unsigned gid,
     run.lsubrs = fd_subrs_for(cff, gid);
     run.lbias = bias_of(run.lsubrs->count);
     run.gbias = bias_of(cff->gsubrs.count);
-    if (!run_charstring(&run, code, len)) {
+    if (run_charstring(&run, code, len) == 0) {
         return 0;
     }
     if (run.open) {

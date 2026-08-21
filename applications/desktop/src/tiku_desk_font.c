@@ -56,9 +56,15 @@ typedef struct {
     tiku_desk_font_t      face;
     tiku_desk_face_src_t *src;
     int                   px, bold, live;
+    unsigned              stamp;      /* when it was last handed out */
 } built_face_t;
 
 static built_face_t built[BUILT_MAX];
+static unsigned built_clock;
+/* A face handed out a moment ago but not yet copied into the pair in
+ * force.  Making the SECOND face of a pair must not take the first one
+ * out from under the caller, which is a zeroed face and a crash. */
+static const tiku_desk_font_t *built_pinned;
 static tiku_desk_ttf_t *file_regular;
 static tiku_desk_ttf_t *file_bold;
 static char file_family[64];
@@ -197,6 +203,7 @@ built_face(int px, int bold)
     for (i = 0; i < BUILT_MAX; i++) {
         if (built[i].live && built[i].px == px && built[i].bold == bold &&
             built[i].src != NULL && built[i].src->ttf == src) {
+            built[i].stamp = ++built_clock;
             return &built[i].face;
         }
         if (!built[i].live && spare < 0) {
@@ -204,16 +211,44 @@ built_face(int px, int bold)
         }
     }
     if (spare < 0) {
-        /* Every slot taken: the sizes in play have changed, so start the
-         * collection again rather than grow it without end. */
+        /*
+         * Every slot taken, so one has to go -- the one wanted longest
+         * ago.  ONE, not all of them: a face is handed out by address,
+         * and the caller of the moment is still holding two of these.
+         * Skip the pair in force, the face pinned by an adopt() half
+         * finished, and the two most recently asked for, which is what
+         * a caller can be holding across a call that lands here.
+         */
+        unsigned newest = 0, second = 0;
+
         for (i = 0; i < BUILT_MAX; i++) {
-            built_free(&built[i]);
+            if (built[i].stamp > newest) {
+                second = newest;
+                newest = built[i].stamp;
+            } else if (built[i].stamp > second) {
+                second = built[i].stamp;
+            }
         }
-        spare = 0;
+        for (i = 0; i < BUILT_MAX; i++) {
+            if (&built[i].face == built_pinned ||
+                built[i].src == current_plain.src ||
+                built[i].src == current_bold.src ||
+                built[i].stamp >= second) {
+                continue;
+            }
+            if (spare < 0 || built[i].stamp < built[spare].stamp) {
+                spare = i;
+            }
+        }
+        if (spare < 0) {
+            return NULL;        /* all spoken for: draw with what we had */
+        }
+        built_free(&built[spare]);
     }
     if (!built_make(&built[spare], src, px, bold)) {
         return NULL;
     }
+    built[spare].stamp = ++built_clock;
     return &built[spare].face;
 }
 
@@ -249,7 +284,9 @@ adopt(int family, int rung)
 
     if (using_files()) {
         plain = built_face(face_sizes[rung], 0);
+        built_pinned = plain;
         bold = built_face(face_sizes[rung], 1);
+        built_pinned = NULL;
     }
     if (plain == NULL || bold == NULL) {
         plain = plain_faces[family][rung];
@@ -525,6 +562,11 @@ face_glyph(const tiku_desk_font_t *f, unsigned cp, face_glyph_t *out)
         out->oy = g->oy;
         out->cover = g->cover;
         return 1;
+    }
+    if (f->glyphs == NULL || f->count <= 0) {
+        memset(out, 0, sizeof *out);
+        out->adv = f->height / 3 + 1;
+        return 0;               /* a face with nothing in it draws nothing */
     }
     {
         long i = (long)cp - (long)f->first;
