@@ -846,10 +846,15 @@ tiku_desk_ttf_open(const char *path)
     t->loca = table_of(t, dir, "loca", &t->loca_len);
     t->glyf = table_of(t, dir, "glyf", &t->glyf_len);
     {
-        /* The table's tag has a trailing space, which is easy to lose. */
+        /* The table's tag has a trailing space, which is easy to lose.
+         * CFF2 is the same outlines left variable: we draw its default
+         * instance, and it is opened by the same reader. */
         size_t cff_len = 0;
         size_t cff_off = table_of(t, dir, "CFF ", &cff_len);
 
+        if (cff_off == 0 || cff_len == 0) {
+            cff_off = table_of(t, dir, "CFF2", &cff_len);
+        }
         if (cff_off != 0 && cff_len != 0) {
             t->cff = tiku_desk_cff_open(t->data + cff_off, cff_len);
             t->cff_upem = tiku_desk_cff_upem(t->cff);

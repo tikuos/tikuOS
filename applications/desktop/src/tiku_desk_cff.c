@@ -23,10 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CFF_STACK      48       /* the Type 2 operand stack */
+#define CFF_STACK      520      /* the operand stack (CFF2 blends are wide) */
 #define CFF_MAX_DEPTH  10       /* subroutine calls within calls */
 #define CFF_MAX_STEMS  96
 #define CFF_MAX_OPS    100000   /* a charstring that never ends */
+#define CFF2_MAX_VS    64       /* variation subtables we keep a count for */
 
 typedef struct {
     const unsigned char *offsets;
@@ -49,6 +50,15 @@ struct tiku_desk_cff {
     size_t               fdselect;
     cff_index_t          fdsubrs[16];
     int                  fdcount;
+    /*
+     * A CFF2 face is the same machine with the outlines left variable.
+     * We draw the DEFAULT instance: the blend operator's deltas all fall
+     * away, and all that is needed of the variation store is how many of
+     * them each subtable carries, so the stack stays in step.
+     */
+    int                  cff2;
+    int                  region[CFF2_MAX_VS];
+    int                  nregion;
 };
 
 /* ------------------------------------------------------------ the bytes */
@@ -104,29 +114,36 @@ index_read_inner(const tiku_desk_cff_t *cff, size_t off, cff_index_t *out)
 {
     size_t last;
 
+    /* CFF2 counts its elements in FOUR bytes where CFF counts them in
+     * two -- the one change the container makes to an INDEX. */
+    size_t head = cff->cff2 ? 4u : 2u;
+
     memset(out, 0, sizeof *out);
-    if (!fits(cff, off, 2u)) {
+    if (!fits(cff, off, head)) {
         return 0;
     }
-    out->count = (int)rd16(cff->data + off);
-    if (out->count == 0) {
-        out->end = off + 2u;    /* an empty index is two bytes and no more */
+    out->count = cff->cff2 ? (int)rd32(cff->data + off)
+                           : (int)rd16(cff->data + off);
+    if (out->count <= 0) {
+        out->end = off + head;  /* an empty index is its count and no more */
+        out->count = 0;
         return 1;
     }
-    if (!fits(cff, off + 2u, 1u)) {
+    if (!fits(cff, off + head, 1u)) {
         return 0;
     }
-    out->offsize = (int)rd8(cff->data + off + 2u);
+    out->offsize = (int)rd8(cff->data + off + head);
     if (out->offsize < 1 || out->offsize > 4) {
         return 0;
     }
-    if (!fits(cff, off + 3u, (size_t)(out->count + 1) * (size_t)out->offsize)) {
+    if (!fits(cff, off + head + 1u,
+              (size_t)(out->count + 1) * (size_t)out->offsize)) {
         return 0;
     }
-    out->offsets = cff->data + off + 3u;
+    out->offsets = cff->data + off + head + 1u;
     /* Element offsets count from ONE, so the data pointer is one before
      * the first byte: element i runs [data+off(i), data+off(i+1)). */
-    out->data = cff->data + off + 3u +
+    out->data = cff->data + off + head + 1u +
                 (size_t)(out->count + 1) * (size_t)out->offsize - 1u;
     last = rdoff(out->offsets + (size_t)out->count * (size_t)out->offsize,
                  out->offsize);
@@ -212,7 +229,11 @@ dict_walk(const tiku_desk_cff_t *cff, size_t off, size_t len,
     while (i < end) {
         unsigned b0 = rd8(cff->data + i);
 
-        if (b0 <= 21u) {
+        /* Operators run 0-21 in CFF, with 12 the escape; CFF2 spends
+         * some of the bytes CFF left reserved -- vstore is 24 -- so the
+         * whole 0-27 band is operators here.  The operand encodings all
+         * begin at 28, so they are never mistaken for one. */
+        if (b0 <= 27u) {
             int op = (int)b0;
 
             i++;
@@ -325,6 +346,7 @@ typedef struct {
     size_t charstrings;
     size_t private_off, private_size;
     size_t fdarray, fdselect;
+    size_t vstore;
     float  matrix0;
     int    cid;
     int    charstring_type;
@@ -366,6 +388,11 @@ top_op(int op, const cff_dict_args_t *args, void *ctx)
     case 1237:                  /* FDSelect */
         if (args->count >= 1) {
             top->fdselect = as_offset(args->operand[0]);
+        }
+        break;
+    case 24:                    /* vstore (CFF2 variation store) */
+        if (args->count >= 1) {
+            top->vstore = as_offset(args->operand[0]);
         }
         break;
     default:
@@ -440,6 +467,8 @@ typedef struct {
     long                   ops;
     const cff_index_t     *lsubrs;
     int                    lbias, gbias;
+    int                    cff2;
+    int                    cur_regions;     /* deltas per blended value */
     float                  trans[32];
 } cff_run_t;
 
@@ -526,6 +555,9 @@ take_width(cff_run_t *run, int even)
 {
     int skip = 0;
 
+    if (run->cff2) {
+        return 0;               /* CFF2 charstrings carry no width */
+    }
     if (!run->width_done) {
         run->width_done = 1;
         if (even < 0) {
@@ -758,6 +790,36 @@ run_op(cff_run_t *run, int op, const unsigned char **code, size_t *left)
         }
         return 1;
     }
+    case 15:                    /* vsindex (CFF2): which deltas to expect */
+        if (run->cff2 && run->sp >= 1) {
+            int idx = (int)run->stack[run->sp - 1];
+
+            if (idx >= 0 && idx < run->cff->nregion) {
+                run->cur_regions = run->cff->region[idx];
+            }
+        }
+        run->sp = 0;
+        return 1;
+    case 16:                    /* blend (CFF2): keep the default, drop deltas */
+        if (run->cff2 && run->sp >= 1) {
+            int n = (int)run->stack[--run->sp];
+            int drop = n * run->cur_regions;
+
+            /* The n default values sit BELOW n*regions deltas; dropping
+             * the deltas leaves the defaults, which is the instance we
+             * draw.  A well-made charstring never underflows this. */
+            if (n < 0 || drop < 0) {
+                run->sp = 0;
+            } else {
+                if (drop > run->sp) {
+                    drop = run->sp;
+                }
+                run->sp -= drop;
+            }
+        } else {
+            run->sp = 0;
+        }
+        return 1;
     case 11:                    /* return */
         return 2;
     case 14:                    /* endchar */
@@ -946,7 +1008,12 @@ fd_subrs_for(const tiku_desk_cff_t *cff, unsigned gid)
     size_t off = cff->fdselect;
     unsigned fd = 0;
 
-    if (!cff->cid || off == 0u || !fits(cff, off, 1u)) {
+    if (off == 0u || !fits(cff, off, 1u)) {
+        /* No map: CFF2 and CID both keep their subrs in the first (only)
+         * Font DICT; plain CFF keeps them in the top-level Private. */
+        if (cff->cff2 || cff->cid) {
+            return (cff->fdcount > 0) ? &cff->fdsubrs[0] : &cff->lsubrs;
+        }
         return &cff->lsubrs;
     }
     if (rd8(cff->data + off) == 0u) {
@@ -1007,6 +1074,99 @@ read_fdarray(tiku_desk_cff_t *cff, size_t off)
     }
 }
 
+/**
+ * @brief Read a CFF2 variation store for its region counts.
+ *
+ * The default instance is all we draw, so the deltas themselves are of
+ * no use -- but a blend has to know how many of them to step over, and
+ * that count is per variation subtable.  vsindex picks the subtable.
+ */
+static void
+read_vstore(tiku_desk_cff_t *cff, size_t off)
+{
+    size_t ivs;
+    unsigned ivd_count, i;
+
+    if (off == 0u || !fits(cff, off, 2u)) {
+        return;
+    }
+    ivs = off + 2u;             /* past the uint16 length prefix */
+    if (!fits(cff, ivs, 8u) || rd16(cff->data + ivs) != 1u) {
+        return;                 /* only format 1 is defined */
+    }
+    ivd_count = rd16(cff->data + ivs + 6u);
+    for (i = 0; i < ivd_count && cff->nregion < CFF2_MAX_VS; i++) {
+        size_t rec = ivs + 8u + (size_t)i * 4u;
+        size_t ivd;
+
+        if (!fits(cff, rec, 4u)) {
+            break;
+        }
+        ivd = ivs + (size_t)rd32(cff->data + rec);
+        if (!fits(cff, ivd, 6u)) {
+            cff->region[cff->nregion++] = 0;
+            continue;
+        }
+        /* itemCount, wordDeltaCount, then regionIndexCount -- the k a
+         * blend against this subtable carries per value. */
+        cff->region[cff->nregion++] = (int)rd16(cff->data + ivd + 4u);
+    }
+}
+
+/**
+ * @brief Set up a CFF2 face: header, a bare Top DICT, and the rest.
+ *
+ * @return the face, or NULL.
+ */
+static tiku_desk_cff_t *
+cff2_open(tiku_desk_cff_t *cff)
+{
+    cff_top_t top;
+    cff_index_t gsubrs;
+    size_t hdr, td_len, td_off;
+
+    cff->cff2 = 1;              /* before any INDEX: its count is 32-bit now */
+    if (!fits(cff, 0u, 5u)) {
+        free(cff);
+        return NULL;
+    }
+    hdr = rd8(cff->data + 2);
+    td_len = rd16(cff->data + 3);
+    td_off = hdr;
+    if (hdr < 5u || !fits(cff, td_off, td_len)) {
+        free(cff);
+        return NULL;
+    }
+    memset(&top, 0, sizeof top);
+    top.charstring_type = 2;
+    /* The Top DICT is a bare dictionary here, not the one-element INDEX
+     * a plain CFF wraps it in. */
+    dict_walk(cff, td_off, td_len, top_op, &top);
+    /* The Global Subr INDEX follows the Top DICT. */
+    if (!index_read(cff, td_off + td_len, &gsubrs)) {
+        free(cff);
+        return NULL;
+    }
+    cff->gsubrs = gsubrs;
+    if (top.charstrings == 0u ||
+        !index_read(cff, top.charstrings, &cff->charstrings) ||
+        cff->charstrings.count == 0) {
+        free(cff);
+        return NULL;
+    }
+    cff->fdselect = top.fdselect;
+    read_fdarray(cff, top.fdarray);     /* CFF2 always keeps one */
+    read_vstore(cff, top.vstore);
+    if (top.matrix0 > 0.0f) {
+        float upem = 1.0f / top.matrix0;
+
+        if (upem >= 16.0f && upem <= 16384.0f) {
+            cff->upem = upem;
+        }
+    }
+    return cff;
+}
+
 tiku_desk_cff_t *
 tiku_desk_cff_open(const unsigned char *data, size_t len)
 {
@@ -1027,6 +1187,9 @@ tiku_desk_cff_open(const unsigned char *data, size_t len)
     cff->len = len;
     cff->upem = 1000.0f;
 
+    if (rd8(data) == 2u) {
+        return cff2_open(cff);  /* major version 2: the variable kind */
+    }
     hdr = rd8(data + 2);
     if (hdr < 4u || !fits(cff, hdr, 1u)) {
         free(cff);
@@ -1110,6 +1273,8 @@ tiku_desk_cff_outline(const tiku_desk_cff_t *cff, unsigned gid,
     run.lsubrs = fd_subrs_for(cff, gid);
     run.lbias = bias_of(run.lsubrs->count);
     run.gbias = bias_of(cff->gsubrs.count);
+    run.cff2 = cff->cff2;
+    run.cur_regions = (cff->nregion > 0) ? cff->region[0] : 0;
     if (run_charstring(&run, code, len) == 0) {
         return 0;
     }
