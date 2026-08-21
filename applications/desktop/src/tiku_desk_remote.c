@@ -27,6 +27,16 @@
 #define REMOTE_MAX_PAYLOAD \
     (12u + 4u * TIKU_DESK_REMOTE_MAX_DIM * TIKU_DESK_REMOTE_MAX_DIM)
 
+/**
+ * @brief What the desktop may send DOWN in one message.
+ *
+ * Frames go the other way, so nothing down here is large: an event, a
+ * pick, or a message a shell composed.  A quarter of a megabyte is room
+ * for a very talkative one and still a number, which is the point -- the
+ * client is reading it into a buffer before it has looked at it.
+ */
+#define REMOTE_MAX_DOWN (256u * 1024u)
+
 int
 tiku_desk_remote_path(char *out, size_t max)
 {
@@ -101,6 +111,11 @@ session_free(tiku_desk_remote_session_t *s)
     }
     free(s->frame);
     free(s->buf);
+    while (s->said_count > 0) {
+        tiku_desk_msg_free(s->said[s->said_head]);
+        s->said_head = (s->said_head + 1) % TIKU_DESK_REMOTE_SAID;
+        s->said_count--;
+    }
     memset(s, 0, sizeof *s);
     s->fd = -1;
 }
@@ -321,6 +336,22 @@ session_message(tiku_desk_remote_session_t *s)
             changed = 1;
         }
         break;
+    case TIKU_DESK_RMSG_SAY: {
+        tiku_desk_msg_t *m = tiku_desk_msg_unflatten(p, s->want, NULL);
+
+        if (m == NULL) {
+            break;              /* not a message: the rest of the link is */
+        }                       /* still good, so keep it and drop this   */
+        if (s->said_count >= TIKU_DESK_REMOTE_SAID) {
+            tiku_desk_msg_free(m);
+            s->said_lost++;     /* said, and counted, and let go */
+            break;
+        }
+        s->said[(s->said_head + s->said_count) % TIKU_DESK_REMOTE_SAID] = m;
+        s->said_count++;
+        changed = 1;
+        break;
+    }
     case TIKU_DESK_RMSG_CLOSE:
         return -1;              /* the client is done: drop the session */
     default:
@@ -566,6 +597,78 @@ tiku_desk_remote_window_closed(tiku_desk_remote_listener_t *listener,
 /* Client                                                                    */
 /*---------------------------------------------------------------------------*/
 
+/** @brief The session at @p index, when there is a live one. */
+static tiku_desk_remote_session_t *
+session_at(tiku_desk_remote_listener_t *listener, int index)
+{
+    if (listener == NULL || index < 0 || index >= TIKU_DESK_REMOTE_SESSIONS) {
+        return NULL;
+    }
+    return listener->session[index].used ? &listener->session[index] : NULL;
+}
+
+tiku_desk_msg_t *
+tiku_desk_remote_said(tiku_desk_remote_listener_t *listener, int index)
+{
+    tiku_desk_remote_session_t *s = session_at(listener, index);
+    tiku_desk_msg_t *m;
+
+    if (s == NULL || s->said_count == 0) {
+        return NULL;
+    }
+    m = s->said[s->said_head];
+    s->said_head = (s->said_head + 1) % TIKU_DESK_REMOTE_SAID;
+    s->said_count--;
+    return m;
+}
+
+int
+tiku_desk_remote_lost(const tiku_desk_remote_listener_t *listener, int index)
+{
+    if (listener == NULL || index < 0 ||
+        index >= TIKU_DESK_REMOTE_SESSIONS || !listener->session[index].used) {
+        return 0;
+    }
+    return listener->session[index].said_lost;
+}
+
+/**
+ * @brief Flatten @p m and send it as @p type down @p fd.
+ *
+ * The size is asked for first and the buffer taken to fit, so a message
+ * is never half-written onto a wire the other end is reading in frames.
+ */
+static int
+send_flat(int fd, uint32_t type, const tiku_desk_msg_t *m)
+{
+    size_t n = tiku_desk_msg_flat_size(m);
+    unsigned char *flat;
+
+    if (fd < 0 || n == 0u || n > REMOTE_MAX_PAYLOAD) {
+        return 0;
+    }
+    flat = malloc(n);
+    if (flat == NULL) {
+        return 0;
+    }
+    if (!tiku_desk_msg_flatten(m, flat, n, NULL)) {
+        free(flat);
+        return 0;
+    }
+    send_msg(fd, type, flat, (uint32_t)n);
+    free(flat);
+    return 1;
+}
+
+int
+tiku_desk_remote_tell(tiku_desk_remote_listener_t *listener, int index,
+                      const tiku_desk_msg_t *m)
+{
+    tiku_desk_remote_session_t *s = session_at(listener, index);
+
+    return (s != NULL) ? send_flat(s->fd, TIKU_DESK_RMSG_TELL, m) : 0;
+}
+
 int
 tiku_desk_remote_connect(tiku_desk_remote_client_t *client,
                          const char *name, int wait_ms)
@@ -616,10 +719,15 @@ tiku_desk_remote_connect_fd(tiku_desk_remote_client_t *client,
     if (fd < 0) {
         return -1;
     }
+    /*
+     * Start from nothing.  It mattered less when every field was a number
+     * a caller could be trusted to have zeroed; it matters now that the
+     * client HOLDS something -- the message it last heard -- because a
+     * pointer nobody set is one disconnect away from being freed.
+     */
+    memset(client, 0, sizeof *client);
     client->fd = fd;
-    if (client->next_id == 0u) {
-        client->next_id = 1;
-    }
+    client->next_id = 1;
     /* A shared surface means one machine.  A socket says so; a serial
      * line says the opposite, and getsockopt is how the difference is
      * asked rather than assumed. */
@@ -636,9 +744,31 @@ tiku_desk_remote_connect_fd(tiku_desk_remote_client_t *client,
     return 0;
 }
 
+int
+tiku_desk_remote_say(tiku_desk_remote_client_t *client,
+                     const tiku_desk_msg_t *m)
+{
+    return (client != NULL) ? send_flat(client->fd, TIKU_DESK_RMSG_SAY, m) : 0;
+}
+
+tiku_desk_msg_t *
+tiku_desk_remote_heard(tiku_desk_remote_client_t *client)
+{
+    tiku_desk_msg_t *m;
+
+    if (client == NULL) {
+        return NULL;
+    }
+    m = client->heard;
+    client->heard = NULL;
+    return m;
+}
+
 void
 tiku_desk_remote_disconnect(tiku_desk_remote_client_t *client)
 {
+    tiku_desk_msg_free(client->heard);
+    client->heard = NULL;
     if (client->shared != NULL) {
         (void)munmap(client->shared, client->shared_bytes);
         client->shared = NULL;
@@ -819,7 +949,7 @@ tiku_desk_remote_read(tiku_desk_remote_client_t *client, uint32_t *id,
         unsigned char *buf;
         size_t at = 0;
 
-        if (head[1] > 4096u) {
+        if (head[1] > REMOTE_MAX_DOWN) {
             return -1;
         }
         buf = malloc((n > 0u) ? n : 1u);
@@ -856,6 +986,11 @@ tiku_desk_remote_read(tiku_desk_remote_client_t *client, uint32_t *id,
 
             memcpy(&c, buf + 4, 4);
             *command = c;
+        }
+        if (head[0] == TIKU_DESK_RMSG_TELL) {
+            tiku_desk_msg_free(client->heard);   /* one at a time: a read */
+            client->heard =                      /* nobody took is a read */
+                tiku_desk_msg_unflatten(buf, n, NULL);  /* nobody wanted  */
         }
         free(buf);
     }

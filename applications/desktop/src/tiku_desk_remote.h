@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "tiku_desk_event.h"
+#include "tiku_desk_msg.h"
 #include "tiku_desk_window.h"
 
 #define TIKU_DESK_REMOTE_VERSION   1
@@ -45,6 +46,15 @@
 #define TIKU_DESK_REMOTE_BUFFERS      2
 #define TIKU_DESK_REMOTE_SHM_NAME     64
 
+/**
+ * How many messages a session may have said and not yet been asked for.
+ *
+ * The shell drains these every loop, so eight is a burst rather than a
+ * backlog.  Past eight the newest is let go and counted, because a queue
+ * that quietly forgets is worse than one that says how much it forgot.
+ */
+#define TIKU_DESK_REMOTE_SAID         8
+
 /* Message types, client to desktop... */
 #define TIKU_DESK_RMSG_HELLO   1u   /* u32 version, char name[32]        */
 #define TIKU_DESK_RMSG_OPEN    2u   /* u32 id, i32 w, i32 h, title[64]   */
@@ -53,9 +63,11 @@
 #define TIKU_DESK_RMSG_CLOSE   5u   /* u32 id                            */
 #define TIKU_DESK_RMSG_SURFACE 6u   /* u32 id, i32 w, i32 h, name[64]    */
 #define TIKU_DESK_RMSG_READY   7u   /* u32 id, u32 buffer                */
+#define TIKU_DESK_RMSG_SAY     8u   /* a flattened tiku_desk_msg_t       */
 /* ...and desktop to client. */
 #define TIKU_DESK_RMSG_EVENT   16u  /* u32 id, tiku_desk_event_t         */
 #define TIKU_DESK_RMSG_PICK    17u  /* u32 id, i32 command               */
+#define TIKU_DESK_RMSG_TELL    19u  /* a flattened tiku_desk_msg_t       */
 #define TIKU_DESK_RMSG_CLOSED  18u  /* u32 id: the user closed it        */
 
 /** @brief Where the desktop listens, under this user's HOME. */
@@ -94,6 +106,9 @@ typedef struct {
     unsigned char       *buf;
     size_t               got, want;
     uint32_t             cur_type;
+    /* What this session has said and nobody has taken yet. */
+    tiku_desk_msg_t     *said[TIKU_DESK_REMOTE_SAID];
+    int                  said_head, said_count, said_lost;
 } tiku_desk_remote_session_t;
 
 typedef struct tiku_desk_remote_listener {
@@ -147,6 +162,34 @@ int tiku_desk_remote_mapped(const tiku_desk_remote_listener_t *listener);
 const uint32_t *tiku_desk_remote_pixels(
     const tiku_desk_remote_session_t *session);
 
+/*---------------------------------------------------------------------------*/
+/* And one message type that is not a struct at all.                         */
+/*                                                                           */
+/* Everything above is a layout both ends were compiled against, which is    */
+/* right for a frame -- it is a million pixels and its shape never changes.  */
+/* It is wrong for anything a device might want to say that this build did   */
+/* not foresee.  These two carry a tiku_desk_msg_t instead: named, typed     */
+/* fields, and a reader that steps over what it does not know.  A device on  */
+/* the end of a cable running last month's firmware can be talked to over    */
+/* these without either end being rebuilt to match the other.                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Take the next message a session sent, or NULL.
+ *
+ * @return a message the CALLER frees.  Taking it makes room for another.
+ */
+tiku_desk_msg_t *tiku_desk_remote_said(tiku_desk_remote_listener_t *listener,
+                                       int index);
+
+/** @brief How many a session sent that did not fit, and were let go. */
+int tiku_desk_remote_lost(const tiku_desk_remote_listener_t *listener,
+                          int index);
+
+/** @brief Send @p m down to a session.  @return 1 when it went. */
+int tiku_desk_remote_tell(tiku_desk_remote_listener_t *listener, int index,
+                          const tiku_desk_msg_t *m);
+
 /** @brief The session owning @p window, or NULL. */
 tiku_desk_remote_session_t *tiku_desk_remote_owner(
     tiku_desk_remote_listener_t *listener, struct tiku_desk_window *window);
@@ -169,6 +212,8 @@ typedef struct {
     /* Header accumulation: the line has no peek. */
     unsigned char hbuf[8];
     size_t        hgot;
+    /* The message the last read brought up, until it is taken. */
+    tiku_desk_msg_t *heard;
 } tiku_desk_remote_client_t;
 
 /**
@@ -212,5 +257,18 @@ int tiku_desk_remote_menus(tiku_desk_remote_client_t *client, uint32_t id,
  */
 int tiku_desk_remote_read(tiku_desk_remote_client_t *client, uint32_t *id,
                           tiku_desk_event_t *event, int *command);
+
+/** @brief Say @p m to the desktop.  @return 1 when it went. */
+int tiku_desk_remote_say(tiku_desk_remote_client_t *client,
+                         const tiku_desk_msg_t *m);
+
+/**
+ * @brief Take the message the last read brought up, or NULL.
+ *
+ * Read answers TIKU_DESK_RMSG_TELL when there is one.
+ *
+ * @return a message the CALLER frees.
+ */
+tiku_desk_msg_t *tiku_desk_remote_heard(tiku_desk_remote_client_t *client);
 
 #endif /* TIKU_DESK_REMOTE_H_ */
