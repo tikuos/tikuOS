@@ -68,11 +68,19 @@ SIZE = 12
 # The 1x faces carry Latin-1, so a file called "caf\u00e9" draws its own name;
 # the 2x faces stay ASCII and the renderer falls back to the 1x glyph
 # replicated for the rest, which is legible where a blank was not.
-FIRST, LAST = 32, 0xFF
+# The 1x faces reach past Latin-1 to the scripts a device is most likely
+# to name a file in: Latin Extended-A (European accents), Greek, and
+# Cyrillic.  The stretch between -- Latin Extended-B, the phonetic
+# blocks, the combining marks we do not compose -- is baked blank, which
+# costs a table entry and one byte rather than a glyph.
+FIRST, LAST = 32, 0x4FF
 ASCII_LAST = 126
-# The C1 controls are not letters: baked blank rather than as whatever
-# .notdef the source face happens to carry.
-BLANK = range(0x7F, 0xA0)
+def is_blank(cp):
+    return (0x7F <= cp <= 0x9F or       # the C1 controls, which are not
+            0x180 <= cp <= 0x36F)       # letters; and the unbaked stretch
+
+
+BLANK = is_blank
 
 
 # name, regular, bold, and whether to bake the 2x faces.  All of them do:
@@ -112,7 +120,7 @@ def render(path, name, out, size=SIZE, forced_adv=None, hi=None,
 
     for cp in range(FIRST, last + 1):
         ch = chr(cp)
-        if cp in BLANK:
+        if BLANK(cp):
             glyphs.append({"cp": cp, "adv": 0, "w": 1, "h": 1,
                            "ox": 0, "oy": 0, "off": len(blob)})
             blob.append(0)
@@ -200,10 +208,15 @@ def main():
         # nothing narrow about it, so the grid is exact.
         probe = ImageFont.truetype(pick(MONO), px)
         cell = int(round(probe.getlength("M")))
-        render(pick(MONO), "mono%d" % px, out, size=px,
-               forced_adv=[cell // 2] * (LAST - FIRST + 1))
+        # The terminal's grid stays at Latin-1: it is a fixed cell per
+        # letter, and a person reads a device's files through the
+        # PROPORTIONAL face, which is the one that reaches wider.
+        mono_last = 0xFF
+        render(pick(MONO), "mono%d" % px, out, size=px, last=mono_last,
+               forced_adv=[cell // 2] * (mono_last - FIRST + 1))
         render(pick(MONO_BOLD), "monobold%d" % px, out, size=px,
-               forced_adv=[cell // 2] * (LAST - FIRST + 1))
+               last=mono_last,
+               forced_adv=[cell // 2] * (mono_last - FIRST + 1))
     out.write("/* The fixed-advance faces, smallest first. */\n")
     out.write("static const int mono_sizes[] = { %s };\n"
               % ", ".join(str(px) for px in MONO_SIZES))
