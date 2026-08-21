@@ -15,6 +15,42 @@
 
 #include <string.h>
 
+/*---------------------------------------------------------------------------*/
+/* How big a thing has to be                                                 */
+/*                                                                           */
+/* The constants that fall out at the default 12 px are the ones the         */
+/* interface was drawn with when they were written down: a 22-pixel row, a   */
+/* 26-pixel button.  Keeping them exact there is deliberate -- it is what    */
+/* lets every pinned pixel in the shell suite go on meaning what it meant.   */
+/*---------------------------------------------------------------------------*/
+
+int
+tiku_desk_ui_row_h(void)
+{
+    return tiku_desk_font_plain()->height + 7;      /* 22 at 12 px */
+}
+
+int
+tiku_desk_ui_button_h(void)
+{
+    return tiku_desk_font_plain()->height + 11;     /* 26 at 12 px */
+}
+
+int
+tiku_desk_ui_button_w(const char *label, int least)
+{
+    int want = tiku_desk_text_width(tiku_desk_font_plain(), label) +
+               2 * tiku_desk_font_plain()->height;
+
+    return (want > least) ? want : least;
+}
+
+int
+tiku_desk_ui_step_w(void)
+{
+    return tiku_desk_ui_button_h();                 /* square: 26 at 12 px */
+}
+
 #define PANEL   TIKU_DESK_C_PANEL
 
 /* The four shades every control is built from. */

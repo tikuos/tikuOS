@@ -14,9 +14,26 @@
 #include "tiku_desk_gfx.h"
 
 #define TIKU_DESK_WINDOW_MAX       16
-#define TIKU_DESK_WINDOW_TAB_H     21
 #define TIKU_DESK_WINDOW_BORDER     5
 #define TIKU_DESK_WINDOW_TITLE_MAX 160
+
+/**
+ * @brief How tall a window's tab is, for the face in force.
+ *
+ * It was 21 pixels, written down, which is what a 12-pixel bold face
+ * needs and what nothing else does: at 16 the title was drawn into a
+ * strip too short for it.  A tab is as tall as its title plus room, so
+ * it is asked for rather than assumed -- and at 12 px it still answers
+ * 21, which is why nothing that was pinned against it has moved.
+ *
+ * Every layout that reserves space for the tab must CALL this, including
+ * the ones that only add it up to size a frame; a caller that keeps its
+ * own copy is the bug this replaces.
+ */
+int tiku_desk_window_tab_h(void);
+
+/** @brief The side of a tab's close or zoom button, for that face. */
+int tiku_desk_window_tab_button(void);
 
 typedef enum {
     TIKU_DESK_HIT_NONE = 0,

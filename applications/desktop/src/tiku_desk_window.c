@@ -15,7 +15,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BUTTON 12
+/*
+ * The tab and its buttons, from the face rather than from memory.  The
+ * arithmetic is chosen to answer 21 and 12 at 12 px -- the numbers that
+ * were written here before -- so the default interface is pixel for
+ * pixel what it was, and only the other sizes change.
+ */
+int
+tiku_desk_window_tab_h(void)
+{
+    int want = tiku_desk_font_bold()->height + 6;   /* 21 at 12 px */
+    int least = tiku_desk_window_tab_button() + 6;
+
+    return (want > least) ? want : least;
+}
+
+int
+tiku_desk_window_tab_button(void)
+{
+    int side = tiku_desk_font_plain()->height - 3;  /* 12 at 12 px */
+
+    return (side > 8) ? side : 8;
+}
+
 #define MIN_WIDTH 180
 #define MIN_HEIGHT 90
 
@@ -62,10 +84,10 @@ tab_rect(const tiku_desk_window_t *window)
      * the close button, the title in the bold face, the zoom button when
      * there is one, and the breathing room the draw insets -- so the
      * text on it is never clipped short of the window's own edge. */
-    int width = BUTTON + 16 +
-                tiku_desk_text_width(tiku_desk_font_bold(),
-                                     window->title) +
-                (window->zoomable ? BUTTON + 8 : 0) + 4;
+    int btn = tiku_desk_window_tab_button();
+    int width = btn + 16 +
+                tiku_desk_text_width(tiku_desk_font_bold(), window->title) +
+                (window->zoomable ? btn + 8 : 0) + 4;
 
     if (width > window->frame.w) { width = window->frame.w; }
     if (width < 60) { width = 60; }
@@ -74,7 +96,7 @@ tab_rect(const tiku_desk_window_t *window)
     tab.x = window->frame.x;
     tab.y = window->frame.y;
     tab.w = width;
-    tab.h = TIKU_DESK_WINDOW_TAB_H;
+    tab.h = tiku_desk_window_tab_h();
     return tab;
 }
 
@@ -264,10 +286,10 @@ tiku_desk_window_content(const tiku_desk_window_t *window)
     tiku_desk_rect_t content;
 
     content.x = window->frame.x + TIKU_DESK_WINDOW_BORDER;
-    content.y = window->frame.y + TIKU_DESK_WINDOW_TAB_H +
+    content.y = window->frame.y + tiku_desk_window_tab_h() +
                 TIKU_DESK_WINDOW_BORDER;
     content.w = window->frame.w - 2 * TIKU_DESK_WINDOW_BORDER;
-    content.h = window->frame.h - TIKU_DESK_WINDOW_TAB_H -
+    content.h = window->frame.h - tiku_desk_window_tab_h() -
                 2 * TIKU_DESK_WINDOW_BORDER;
     if (content.w < 0) { content.w = 0; }
     if (content.h < 0) { content.h = 0; }
@@ -301,8 +323,12 @@ tiku_desk_workspace_hit(tiku_desk_workspace_t *workspace, int x, int y,
         tab = tab_rect(window);
         if (inside(tab, x, y)) {
             if (out != NULL) { *out = window; }
-            if (x < tab.x + BUTTON + 6) { return TIKU_DESK_HIT_CLOSE; }
-            if (window->zoomable && x > tab.x + tab.w - BUTTON - 6) {
+            int btn = tiku_desk_window_tab_button();
+
+            if (x < tab.x + btn + 6) {
+                return TIKU_DESK_HIT_CLOSE;
+            }
+            if (window->zoomable && x > tab.x + tab.w - btn - 6) {
                 return TIKU_DESK_HIT_ZOOM;
             }
             return TIKU_DESK_HIT_TAB;
@@ -362,10 +388,10 @@ tiku_desk_workspace_track(tiku_desk_workspace_t *workspace, int x, int y)
         if (window->frame.x + window->frame.w < 40) {
             window->frame.x = 40 - window->frame.w;
         }
-        if (window->frame.y + TIKU_DESK_WINDOW_TAB_H >
+        if (window->frame.y + tiku_desk_window_tab_h() >
             workspace->surface->h) {
             window->frame.y = workspace->surface->h -
-                              TIKU_DESK_WINDOW_TAB_H;
+                              tiku_desk_window_tab_h();
         }
     } else if (workspace->track_what == TIKU_DESK_HIT_RESIZE) {
         window->frame.w += dx;
@@ -403,7 +429,7 @@ tiku_desk_workspace_zoom(tiku_desk_workspace_t *workspace,
     wanted.h = fit_height + (was.h - content.h);
     max_width = workspace->surface->w - 10 - wanted.x;
     max_height = workspace->surface->h - 10 - wanted.y -
-                 TIKU_DESK_WINDOW_TAB_H;
+                 tiku_desk_window_tab_h();
     if (workspace->reserved.w > 0 && wanted.x < workspace->reserved.x) {
         int room = workspace->reserved.x - wanted.x - 5;
 
@@ -428,7 +454,8 @@ tiku_desk_workspace_zoom(tiku_desk_workspace_t *workspace,
 static void
 draw_button(tiku_desk_surface_t *surface, int x, int y, int zoom, int active)
 {
-    tiku_desk_rect_t button = { x, y, BUTTON, BUTTON };
+    int side = tiku_desk_window_tab_button();
+    tiku_desk_rect_t button = { x, y, side, side };
     tiku_desk_rgb_t face = active ? TIKU_DESK_C_TAB : TIKU_DESK_C_TAB_IDLE;
 
     tiku_desk_ui_tab_widget(surface, button,
@@ -442,9 +469,11 @@ draw_window(tiku_desk_workspace_t *workspace, tiku_desk_window_t *window,
     tiku_desk_surface_t *surface = workspace->surface;
     const tiku_desk_font_t *font = tiku_desk_font_bold();
     tiku_desk_rect_t tab = tab_rect(window);
+    int tab_h = tiku_desk_window_tab_h();
+    int btn = tiku_desk_window_tab_button();
     tiku_desk_rect_t body = { window->frame.x,
-        window->frame.y + TIKU_DESK_WINDOW_TAB_H - 1, window->frame.w,
-        window->frame.h - TIKU_DESK_WINDOW_TAB_H + 1 };
+        window->frame.y + tab_h - 1, window->frame.w,
+        window->frame.h - tab_h + 1 };
     tiku_desk_rect_t content = tiku_desk_window_content(window);
     tiku_desk_rgb_t tab_color = active ? TIKU_DESK_C_TAB
                                        : TIKU_DESK_C_TAB_IDLE;
@@ -462,17 +491,14 @@ draw_window(tiku_desk_workspace_t *workspace, tiku_desk_window_t *window,
         tiku_desk_tint(tab_color, TIKU_DESK_DARKEN_2));
     tiku_desk_hline(surface, tab.x + 1, tab.y + tab.h - 1, tab.w - 2,
                     tab_color);
-    draw_button(surface, tab.x + 4,
-                tab.y + (TIKU_DESK_WINDOW_TAB_H - BUTTON) / 2, 0, active);
+    draw_button(surface, tab.x + 4, tab.y + (tab_h - btn) / 2, 0, active);
     if (window->zoomable) {
-        draw_button(surface, tab.x + tab.w - BUTTON - 4,
-                    tab.y + (TIKU_DESK_WINDOW_TAB_H - BUTTON) / 2,
-                    1, active);
+        draw_button(surface, tab.x + tab.w - btn - 4,
+                    tab.y + (tab_h - btn) / 2, 1, active);
     }
     {
-        tiku_desk_rect_t label = { tab.x + BUTTON + 8, tab.y,
-            tab.w - BUTTON - 16 - (window->zoomable ? BUTTON + 8 : 0),
-            TIKU_DESK_WINDOW_TAB_H };
+        tiku_desk_rect_t label = { tab.x + btn + 8, tab.y,
+            tab.w - btn - 16 - (window->zoomable ? btn + 8 : 0), tab_h };
 
         tiku_desk_clip_set(surface, label);
         (void)tiku_desk_text_centered(surface, font, label, window->title,

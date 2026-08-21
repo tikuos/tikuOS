@@ -16,6 +16,39 @@
 #include "tiku_desk_font.h"
 #include "tiku_desk_gfx.h"
 
+/*---------------------------------------------------------------------------*/
+/* How big a thing has to be, given the letters that go in it.               */
+/*                                                                          */
+/* These used to be written down.  A list row was 22 pixels because 22 was  */
+/* what a 12-pixel face needed, and a stepper's halves were split at pixel  */
+/* 300 because that was where its plus sign happened to land.  Then the     */
+/* face became a preference and the numbers stayed -- so at 16 the words no */
+/* longer fitted their rows, and at 10 the plus sign moved LEFT of the      */
+/* split and every click on it was read as a minus.  A control that is not  */
+/* where the click is looked for is not a control.                          */
+/*                                                                          */
+/* So: ask.  Each answers exactly what was written down before at 12 px,    */
+/* which is the size the interface has always defaulted to, and the right   */
+/* number at every other.                                                   */
+/*---------------------------------------------------------------------------*/
+
+/** @brief One row of a list, with room above and below the letters. */
+int tiku_desk_ui_row_h(void);
+
+/** @brief A push button's height. */
+int tiku_desk_ui_button_h(void);
+
+/**
+ * @brief The width a button needs to hold @p label.
+ *
+ * @param least A floor, for a row of buttons that should match rather than
+ *              each shrink to its own word.  0 for none.
+ */
+int tiku_desk_ui_button_w(const char *label, int least);
+
+/** @brief A stepper's square half -- the - or the + of a value control. */
+int tiku_desk_ui_step_w(void);
+
 /** @brief Control states, combinable where it makes sense. */
 #define TIKU_DESK_S_NORMAL    0x00u
 #define TIKU_DESK_S_PRESSED   0x01u
