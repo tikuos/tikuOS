@@ -90,9 +90,13 @@ void tiku_desk_path_bounds(const tiku_desk_path_t *path, int *x0, int *y0,
 /**
  * @brief Coverage for the box @p x0,@p y0,@p w,@p h.
  *
+ * @param darken Nonzero to lift partial coverage toward ink, so a stem
+ *               reads solid at small sizes rather than washed out -- the
+ *               stem darkening a hinting library does.  Zero draws the
+ *               honest, linear coverage.
  * @return w*h bytes the caller frees, or NULL.
  */
 unsigned char *tiku_desk_path_render(const tiku_desk_path_t *path, int x0,
-                                     int y0, int w, int h);
+                                     int y0, int w, int h, int darken);
 
 #endif /* TIKU_DESK_GLYPHPATH_H_ */

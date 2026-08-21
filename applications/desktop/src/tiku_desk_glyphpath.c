@@ -440,7 +440,7 @@ accumulate(float *a, int w, int h, float x0, float y0, float x1, float y1)
 
 unsigned char *
 tiku_desk_path_render(const tiku_desk_path_t *path, int x0, int y0, int w,
-                      int h)
+                      int h, int darken)
 {
     unsigned char *out;
     float *a;
@@ -467,10 +467,28 @@ tiku_desk_path_render(const tiku_desk_path_t *path, int x0, int y0, int w,
         float acc = 0.0f;
 
         for (x = 0; x < w; x++) {
+            float cov;
             int v;
 
             acc += row[x];
-            v = (int)((acc < 0.0f ? -acc : acc) * 255.0f + 0.5f);
+            cov = (acc < 0.0f) ? -acc : acc;
+            if (cov > 1.0f) {
+                cov = 1.0f;
+            }
+            /*
+             * Stem darkening.  Analytic coverage is honest -- a stem half
+             * a pixel wide is drawn half grey -- but honest is washed out
+             * at ten and twelve pixels, where the baked faces (rendered
+             * by a hinting library) put down a solid stem.  a gentle
+             * lift, c(1 + 0.4(1-c)), brings partial coverage toward ink
+             * the way that library's gamma
+             * does, in one multiply and no table, and leaves nothing
+             * fully covered or fully clear where it was.
+             */
+            if (darken) {
+                cov = cov * (1.0f + 0.4f * (1.0f - cov));
+            }
+            v = (int)(cov * 255.0f + 0.5f);
             out[(size_t)y * (size_t)w + x] = (unsigned char)((v > 255) ? 255
                                                                       : v);
         }

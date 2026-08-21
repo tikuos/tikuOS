@@ -995,7 +995,15 @@ tiku_desk_ttf_render(const tiku_desk_ttf_t *ttf, unsigned cp, int px,
         tiku_desk_path_free(path);
         return 1;               /* nothing drawable: an advance and no ink */
     }
-    out->cover = tiku_desk_path_render(path, x0, y0, w, h);
+    {
+        /* The same switch the grid-fit answers to turns the darkening
+         * off as well, so TIKU_DESK_HINT=0 gives the honest linear
+         * coverage for measuring against. */
+        const char *off = getenv("TIKU_DESK_HINT");
+        int darken = !(off != NULL && off[0] == '0');
+
+        out->cover = tiku_desk_path_render(path, x0, y0, w, h, darken);
+    }
     tiku_desk_path_free(path);
     if (out->cover == NULL) {
         return 0;
