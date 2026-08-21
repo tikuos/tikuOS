@@ -41,9 +41,49 @@ MONO_BOLD = [
     "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
 ]
+# The other interface families the picker offers.  Both were chosen for
+# their metrics: at 10/12/14/16 px each sits within a pixel of DejaVu Sans,
+# so the layout computed against the reference face survives the switch.
+SERIF = [
+    "/usr/share/fonts/liberation-serif-fonts/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+]
+SERIF_BOLD = [
+    "/usr/share/fonts/liberation-serif-fonts/LiberationSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+]
+UIMONO = [
+    "/usr/share/fonts/source-foundry-hack-fonts/Hack-Regular.ttf",
+    "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+]
+UIMONO_BOLD = [
+    "/usr/share/fonts/source-foundry-hack-fonts/Hack-Bold.ttf",
+    "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
+]
+
 MONO_SIZES = (13, 15)
 SIZE = 12
 FIRST, LAST = 32, 126
+
+
+# name, regular, bold, and whether to bake the 2x faces.  Only the
+# default family carries them: they are four times the coverage of the 1x
+# face, and a family a person chose is drawn by replication on a scaled
+# surface, which the renderer already falls back to.
+FAMILIES = [
+    ("Sans",  CANDIDATES, BOLD,        True),
+    ("Serif", SERIF,      SERIF_BOLD,  False),
+    ("Mono",  UIMONO,     UIMONO_BOLD, False),
+]
+
+
+def face_name(family, kind, tag):
+    """The C identifier for one face.  Family 0 keeps the original names."""
+    if family == 0:
+        return "%s%s" % (kind, tag)
+    return "f%d_%s%s" % (family, kind, tag)
 
 
 def pick(paths):
@@ -122,18 +162,23 @@ def main():
               "#define TIKU_DESK_FONT_DATA_H_\n\n")
     sizes = (10, 12, 14, 16)
     null = open("/dev/null", "w")
-    for px in sizes:
-        tag = "" if px == SIZE else str(px)
-        plain_adv = render(pick(CANDIDATES), "probe", null, size=px)
-        bold_adv = render(pick(BOLD), "probe", null, size=px)
-        render(pick(CANDIDATES), "plain%s2x" % tag, out, size=px * 2,
-               forced_adv=plain_adv)
-        render(pick(BOLD), "bold%s2x" % tag, out, size=px * 2,
-               forced_adv=bold_adv)
-        render(pick(CANDIDATES), "plain%s" % tag, out, size=px,
-               hi="plain%s2x" % tag)
-        render(pick(BOLD), "bold%s" % tag, out, size=px,
-               hi="bold%s2x" % tag)
+    for family, (_, regular, bold, twice) in enumerate(FAMILIES):
+        for px in sizes:
+            tag = "" if px == SIZE else str(px)
+            plain_name = face_name(family, "plain", tag)
+            bold_name = face_name(family, "bold", tag)
+            hi_plain = hi_bold = None
+
+            if twice:
+                plain_adv = render(pick(regular), "probe", null, size=px)
+                bold_adv = render(pick(bold), "probe", null, size=px)
+                hi_plain, hi_bold = plain_name + "2x", bold_name + "2x"
+                render(pick(regular), hi_plain, out, size=px * 2,
+                       forced_adv=plain_adv)
+                render(pick(bold), hi_bold, out, size=px * 2,
+                       forced_adv=bold_adv)
+            render(pick(regular), plain_name, out, size=px, hi=hi_plain)
+            render(pick(bold), bold_name, out, size=px, hi=hi_bold)
     for px in MONO_SIZES:
         # One advance for every glyph, taken from a character that has
         # nothing narrow about it, so the grid is exact.
@@ -156,11 +201,18 @@ def main():
     out.write("/* Every size, smallest first, for the runtime picker. */\n")
     out.write("static const int face_sizes[] = { %s };\n"
               % ", ".join(str(px) for px in sizes))
+    out.write("/* The families, in the order the picker offers them. */\n")
+    out.write("static const char *const family_names[] = { %s };\n"
+              % ", ".join('"%s"' % f[0] for f in FAMILIES))
     for face in ("plain", "bold"):
-        out.write("static const tiku_desk_font_t *const %s_faces[] = {\n"
-                  "    %s\n};\n" % (face,
-                  ", ".join("&%s%s_font" % (face, "" if px == SIZE
-                                            else str(px)) for px in sizes)))
+        out.write("static const tiku_desk_font_t *const %s_faces[][%d] = {\n"
+                  % (face, len(sizes)))
+        for family in range(len(FAMILIES)):
+            out.write("    { %s },\n" % ", ".join(
+                "&%s_font" % face_name(family, face,
+                                       "" if px == SIZE else str(px))
+                for px in sizes))
+        out.write("};\n")
     out.write("#endif /* TIKU_DESK_FONT_DATA_H_ */\n")
 
 

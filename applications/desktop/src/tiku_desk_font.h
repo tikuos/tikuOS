@@ -54,6 +54,26 @@ int tiku_desk_font_size(void);
 /** @brief The UI face at the chosen size (12 px until told otherwise). */
 const tiku_desk_font_t *tiku_desk_font_plain(void);
 
+/** @brief How many interface families the toolkit carries. */
+int tiku_desk_font_family_count(void);
+
+/** @brief What family @p family is called, or NULL past the last. */
+const char *tiku_desk_font_family_name(int family);
+
+/**
+ * @brief Choose the family the interface is drawn in.
+ *
+ * Every family is baked at the same four sizes and within a pixel of the
+ * reference face's height, so a switch changes the letters and not the
+ * layout.  Out-of-range asks keep the family in force.
+ *
+ * @return the family actually chosen.
+ */
+int tiku_desk_font_set_family(int family);
+
+/** @brief The family in force. */
+int tiku_desk_font_family(void);
+
 /*
  * The METRIC REFERENCE rule (after Mac OS 8, which laid out everything
  * against Chicago): all layout is computed against the plain face's

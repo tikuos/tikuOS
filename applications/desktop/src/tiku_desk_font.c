@@ -22,21 +22,73 @@
 static tiku_desk_font_t current_plain;
 static tiku_desk_font_t current_bold;
 static int current_size;
+static int current_family;
 
-int
-tiku_desk_font_set_size(int px)
+#define FAMILY_COUNT ((int)(sizeof family_names / sizeof family_names[0]))
+#define SIZE_COUNT   ((int)(sizeof face_sizes / sizeof face_sizes[0]))
+
+/** @brief The rung nearest @p px, snapping down. */
+static int
+rung_of(int px)
 {
-    int i, best = 0, n = (int)(sizeof face_sizes / sizeof face_sizes[0]);
+    int i, best = 0;
 
-    for (i = 1; i < n; i++) {
+    for (i = 1; i < SIZE_COUNT; i++) {
         if (px >= face_sizes[i]) {
             best = i;
         }
     }
-    current_plain = *plain_faces[best];
-    current_bold = *bold_faces[best];
-    current_size = face_sizes[best];
+    return best;
+}
+
+/** @brief Put family @p family at rung @p rung into the faces handed out. */
+static void
+adopt(int family, int rung)
+{
+    current_plain = *plain_faces[family][rung];
+    current_bold = *bold_faces[family][rung];
+    current_family = family;
+    current_size = face_sizes[rung];
+}
+
+int
+tiku_desk_font_set_size(int px)
+{
+    adopt(current_family, rung_of(px));
     return current_size;
+}
+
+int
+tiku_desk_font_family_count(void)
+{
+    return FAMILY_COUNT;
+}
+
+const char *
+tiku_desk_font_family_name(int family)
+{
+    if (family < 0 || family >= FAMILY_COUNT) {
+        return NULL;
+    }
+    return family_names[family];
+}
+
+int
+tiku_desk_font_set_family(int family)
+{
+    if (current_size == 0) {
+        (void)tiku_desk_font_set_size(12);
+    }
+    if (family >= 0 && family < FAMILY_COUNT) {
+        adopt(family, rung_of(current_size));
+    }
+    return current_family;
+}
+
+int
+tiku_desk_font_family(void)
+{
+    return current_family;
 }
 
 int
@@ -60,17 +112,10 @@ tiku_desk_font_plain(void)
 const tiku_desk_font_t *
 tiku_desk_font_at(int px)
 {
-    int i, best = 0, n = (int)(sizeof face_sizes / sizeof face_sizes[0]);
-
     if (current_size == 0) {
         (void)tiku_desk_font_set_size(12);
     }
-    for (i = 1; i < n; i++) {
-        if (px >= face_sizes[i]) {
-            best = i;
-        }
-    }
-    return plain_faces[best];
+    return plain_faces[current_family][rung_of(px)];
 }
 
 const tiku_desk_font_t *
