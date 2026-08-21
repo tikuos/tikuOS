@@ -34,9 +34,6 @@ typedef struct tiku_desk_cff tiku_desk_cff_t;
 tiku_desk_cff_t *tiku_desk_cff_open(const unsigned char *data, size_t len);
 void tiku_desk_cff_close(tiku_desk_cff_t *cff);
 
-/** @brief How many glyphs the charstrings index holds. */
-int tiku_desk_cff_count(const tiku_desk_cff_t *cff);
-
 /**
  * @brief Run glyph @p gid's charstring into @p path.
  *

@@ -121,26 +121,6 @@ tiku_desk_path_failed(const tiku_desk_path_t *path)
     return (path == NULL) || path->failed;
 }
 
-int
-tiku_desk_path_empty(const tiku_desk_path_t *path)
-{
-    return (path == NULL) || path->count == 0;
-}
-
-void
-tiku_desk_path_here(const tiku_desk_path_t *path, float *x, float *y)
-{
-    if (path == NULL) {
-        return;
-    }
-    if (x != NULL) {
-        *x = path->x;
-    }
-    if (y != NULL) {
-        *y = path->y;
-    }
-}
-
 /** @brief Take note of a point for the outline's extent. */
 static void
 saw(tiku_desk_path_t *path, float x, float y)

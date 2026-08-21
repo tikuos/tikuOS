@@ -42,8 +42,6 @@ struct tiku_desk_cff {
     cff_index_t          charstrings;
     cff_index_t          gsubrs;
     cff_index_t          lsubrs;    /* the top-level Private DICT's */
-    float                nominal_width;
-    float                default_width;
     float                upem;
     /* CID-keyed fonts keep a Private DICT per group of glyphs. */
     int                  cid;
@@ -51,7 +49,6 @@ struct tiku_desk_cff {
     size_t               fdselect;
     cff_index_t          fdsubrs[16];
     int                  fdcount;
-    unsigned char        fdmap_ok;
 };
 
 /* ------------------------------------------------------------ the bytes */
@@ -401,10 +398,16 @@ private_op(int op, const cff_dict_args_t *args, void *ctx)
     }
 }
 
-/** @brief Read a Private DICT and the local subrs it points at. */
+/**
+ * @brief Read a Private DICT for the local subroutines it names.
+ *
+ * The width it also carries is not read: the charstring's idea of a
+ * glyph's advance and hmtx's are the same number in a well-made face,
+ * and hmtx is the one the rest of the sfnt is measured against.
+ */
 static void
 read_private(tiku_desk_cff_t *cff, size_t off, size_t size,
-             cff_index_t *subrs, float *nominal, float *dflt)
+             cff_index_t *subrs)
 {
     cff_private_t pv;
 
@@ -416,8 +419,6 @@ read_private(tiku_desk_cff_t *cff, size_t off, size_t size,
         return;
     }
     dict_walk(cff, off, size, private_op, &pv);
-    if (nominal != NULL) { *nominal = pv.nominal; }
-    if (dflt != NULL) { *dflt = pv.dflt; }
     if (pv.subrs != 0u) {
         (void)index_read(cff, off + pv.subrs, subrs);
     }
@@ -992,7 +993,7 @@ read_fdarray(tiku_desk_cff_t *cff, size_t off)
         memset(&sub, 0, sizeof sub);
         dict_walk(cff, (size_t)(dict - cff->data), len, top_op, &sub);
         read_private(cff, sub.private_off, sub.private_size,
-                     &cff->fdsubrs[i], NULL, NULL);
+                     &cff->fdsubrs[i]);
         cff->fdcount = i + 1;
     }
 }
@@ -1046,8 +1047,7 @@ tiku_desk_cff_open(const unsigned char *data, size_t len)
         free(cff);
         return NULL;
     }
-    read_private(cff, top.private_off, top.private_size, &cff->lsubrs,
-                 &cff->nominal_width, &cff->default_width);
+    read_private(cff, top.private_off, top.private_size, &cff->lsubrs);
     cff->cid = top.cid;
     cff->fdselect = top.fdselect;
     if (top.cid) {
@@ -1064,12 +1064,6 @@ void
 tiku_desk_cff_close(tiku_desk_cff_t *cff)
 {
     free(cff);
-}
-
-int
-tiku_desk_cff_count(const tiku_desk_cff_t *cff)
-{
-    return (cff != NULL) ? cff->charstrings.count : 0;
 }
 
 float

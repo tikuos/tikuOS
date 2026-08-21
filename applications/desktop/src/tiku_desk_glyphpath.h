@@ -67,9 +67,6 @@ void tiku_desk_path_reset(tiku_desk_path_t *path);
  */
 int tiku_desk_path_failed(const tiku_desk_path_t *path);
 
-/** @brief Whether any edge was laid down at all. */
-int tiku_desk_path_empty(const tiku_desk_path_t *path);
-
 void tiku_desk_path_move(tiku_desk_path_t *path, float x, float y);
 void tiku_desk_path_line(tiku_desk_path_t *path, float x, float y);
 void tiku_desk_path_quad(tiku_desk_path_t *path, float cx, float cy,
@@ -79,9 +76,6 @@ void tiku_desk_path_cubic(tiku_desk_path_t *path, float ax, float ay,
 
 /** @brief Shut the contour back to where the last move put the pen. */
 void tiku_desk_path_close(tiku_desk_path_t *path);
-
-/** @brief Where the pen is, which a charstring has to be told. */
-void tiku_desk_path_here(const tiku_desk_path_t *path, float *x, float *y);
 
 /**
  * @brief The whole outline's extent, in whole pixels, with a margin.
