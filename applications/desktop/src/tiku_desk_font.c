@@ -13,7 +13,10 @@
 
 #include "tiku_desk_font.h"
 #include "tiku_desk_font_data.h"
+#include "tiku_desk_ttf.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The faces handed out are mutable copies with a STABLE address, so a
@@ -23,6 +26,157 @@ static tiku_desk_font_t current_plain;
 static tiku_desk_font_t current_bold;
 static int current_size;
 static int current_family;
+
+/*
+ * A face read from a file.  The baked tables cannot hold one -- they are
+ * const, and a dropped face is not known until somebody drops it -- so a
+ * built face owns its glyphs and coverage and is rebuilt when the size
+ * changes.  Latin-1, as the baked faces carry: the same letters, from a
+ * different file.
+ */
+#define BUILT_FIRST 32
+#define BUILT_LAST  0xFF
+#define BUILT_COUNT (BUILT_LAST - BUILT_FIRST + 1)
+#define BUILT_MAX   6           /* faces alive at once: sizes x weights */
+
+typedef struct {
+    tiku_desk_font_t   face;
+    tiku_desk_glyph_t *glyphs;
+    unsigned char     *bits;
+    int                px, bold, live;
+} built_face_t;
+
+static built_face_t built[BUILT_MAX];
+static tiku_desk_ttf_t *file_regular;
+static tiku_desk_ttf_t *file_bold;
+static char file_family[64];
+
+/** @brief Give back what one built face holds. */
+static void
+built_free(built_face_t *b)
+{
+    free(b->glyphs);
+    free(b->bits);
+    memset(b, 0, sizeof *b);
+}
+
+/**
+ * @brief Rasterise every letter of @p ttf at @p px into @p b.
+ *
+ * @return 1 when the face is usable.
+ */
+static int
+built_make(built_face_t *b, const tiku_desk_ttf_t *ttf, int px, int bold)
+{
+    size_t used = 0, room = 4096u;
+    unsigned char *bits = malloc(room);
+    tiku_desk_glyph_t *glyphs = calloc(BUILT_COUNT, sizeof *glyphs);
+    int ascent = 0, height = 0, cp;
+
+    if (bits == NULL || glyphs == NULL) {
+        free(bits);
+        free(glyphs);
+        return 0;
+    }
+    for (cp = BUILT_FIRST; cp <= BUILT_LAST; cp++) {
+        tiku_desk_ttf_glyph_t g;
+        tiku_desk_glyph_t *slot = &glyphs[cp - BUILT_FIRST];
+
+        memset(&g, 0, sizeof g);
+        if (!tiku_desk_ttf_render(ttf, (unsigned)cp, px, &g)) {
+            /* Not in the file: no ink and no room, like a control. */
+            slot->cp = (short)cp;
+            slot->w = 1;
+            slot->h = 1;
+            slot->off = 0;
+            continue;
+        }
+        slot->cp = (short)cp;
+        slot->adv = (short)g.adv;
+        slot->w = (short)((g.w > 0) ? g.w : 1);
+        slot->h = (short)((g.h > 0) ? g.h : 1);
+        slot->ox = (short)g.ox;
+        slot->oy = (short)g.oy;
+        slot->off = (int)used;
+        {
+            size_t need = (size_t)slot->w * (size_t)slot->h;
+
+            while (used + need > room) {
+                unsigned char *grown = realloc(bits, room * 2u);
+
+                if (grown == NULL) {
+                    tiku_desk_ttf_free_glyph(&g);
+                    free(bits);
+                    free(glyphs);
+                    return 0;
+                }
+                bits = grown;
+                room *= 2u;
+            }
+            if (g.cover != NULL) {
+                memcpy(bits + used, g.cover, need);
+            } else {
+                memset(bits + used, 0, need);
+            }
+            used += need;
+        }
+        tiku_desk_ttf_free_glyph(&g);
+    }
+    tiku_desk_ttf_metrics(ttf, px, &ascent, &height);
+    b->glyphs = glyphs;
+    b->bits = bits;
+    b->px = px;
+    b->bold = bold;
+    b->live = 1;
+    b->face.glyphs = glyphs;
+    b->face.bits = bits;
+    b->face.count = BUILT_COUNT;
+    b->face.first = BUILT_FIRST;
+    b->face.ascent = (ascent > 0) ? ascent : px;
+    b->face.height = (height > 0) ? height : px + 2;
+    b->face.hi = NULL;          /* one face, replicated on a scaled screen */
+    return 1;
+}
+
+/** @brief The built face for @p px and @p bold, making it if need be. */
+static const tiku_desk_font_t *
+built_face(int px, int bold)
+{
+    const tiku_desk_ttf_t *src = (bold && file_bold != NULL) ? file_bold
+                                                            : file_regular;
+    int i, spare = -1;
+
+    if (src == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < BUILT_MAX; i++) {
+        if (built[i].live && built[i].px == px && built[i].bold == bold) {
+            return &built[i].face;
+        }
+        if (!built[i].live && spare < 0) {
+            spare = i;
+        }
+    }
+    if (spare < 0) {
+        /* Every slot taken: the sizes in play have changed, so start the
+         * collection again rather than grow it without end. */
+        for (i = 0; i < BUILT_MAX; i++) {
+            built_free(&built[i]);
+        }
+        spare = 0;
+    }
+    if (!built_make(&built[spare], src, px, bold)) {
+        return NULL;
+    }
+    return &built[spare].face;
+}
+
+/** @brief Whether the interface is drawn from files right now. */
+static int
+using_files(void)
+{
+    return file_regular != NULL;
+}
 
 #define FAMILY_COUNT ((int)(sizeof family_names / sizeof family_names[0]))
 #define SIZE_COUNT   ((int)(sizeof face_sizes / sizeof face_sizes[0]))
@@ -45,8 +199,18 @@ rung_of(int px)
 static void
 adopt(int family, int rung)
 {
-    current_plain = *plain_faces[family][rung];
-    current_bold = *bold_faces[family][rung];
+    const tiku_desk_font_t *plain = NULL, *bold = NULL;
+
+    if (using_files()) {
+        plain = built_face(face_sizes[rung], 0);
+        bold = built_face(face_sizes[rung], 1);
+    }
+    if (plain == NULL || bold == NULL) {
+        plain = plain_faces[family][rung];
+        bold = bold_faces[family][rung];
+    }
+    current_plain = *plain;
+    current_bold = *bold;
     current_family = family;
     current_size = face_sizes[rung];
 }
@@ -91,6 +255,70 @@ tiku_desk_font_family(void)
     return current_family;
 }
 
+const char *
+tiku_desk_font_current_family(void)
+{
+    if (using_files()) {
+        return file_family;
+    }
+    return family_names[current_family];
+}
+
+int
+tiku_desk_font_set_files(const char *regular, const char *bold)
+{
+    tiku_desk_ttf_t *r, *b = NULL;
+    int i;
+
+    if (regular == NULL) {
+        return 0;
+    }
+    r = tiku_desk_ttf_open(regular);
+    if (r == NULL) {
+        return 0;               /* what we cannot read, we do not adopt */
+    }
+    if (bold != NULL) {
+        b = tiku_desk_ttf_open(bold);
+    }
+    for (i = 0; i < BUILT_MAX; i++) {
+        built_free(&built[i]);
+    }
+    tiku_desk_ttf_close(file_regular);
+    tiku_desk_ttf_close(file_bold);
+    file_regular = r;
+    file_bold = b;
+    snprintf(file_family, sizeof file_family, "%s",
+             (tiku_desk_ttf_family(r) != NULL) ? tiku_desk_ttf_family(r)
+                                               : "");
+    if (current_size == 0) {
+        current_size = 12;
+    }
+    adopt(current_family, rung_of(current_size));
+    if (!using_files()) {
+        return 0;
+    }
+    return 1;
+}
+
+void
+tiku_desk_font_use_baked(void)
+{
+    int i;
+
+    for (i = 0; i < BUILT_MAX; i++) {
+        built_free(&built[i]);
+    }
+    tiku_desk_ttf_close(file_regular);
+    tiku_desk_ttf_close(file_bold);
+    file_regular = NULL;
+    file_bold = NULL;
+    file_family[0] = '\0';
+    if (current_size == 0) {
+        current_size = 12;
+    }
+    adopt(current_family, rung_of(current_size));
+}
+
 int
 tiku_desk_font_size(void)
 {
@@ -112,10 +340,20 @@ tiku_desk_font_plain(void)
 const tiku_desk_font_t *
 tiku_desk_font_at(int px)
 {
+    int rung;
+
     if (current_size == 0) {
         (void)tiku_desk_font_set_size(12);
     }
-    return plain_faces[current_family][rung_of(px)];
+    rung = rung_of(px);
+    if (using_files()) {
+        const tiku_desk_font_t *face = built_face(face_sizes[rung], 0);
+
+        if (face != NULL) {
+            return face;
+        }
+    }
+    return plain_faces[current_family][rung];
 }
 
 const tiku_desk_font_t *

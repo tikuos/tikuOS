@@ -74,6 +74,25 @@ int tiku_desk_font_set_family(int family);
 /** @brief The family in force. */
 int tiku_desk_font_family(void);
 
+/** @brief What the family in force is called, baked or dropped in. */
+const char *tiku_desk_font_current_family(void);
+
+/**
+ * @brief Draw the interface with faces read from files.
+ *
+ * For fonts a person dropped in the fonts folder: the file is parsed and
+ * rasterised here, so a device with no font library can be handed a face
+ * over a wire and draw with it.  @p bold may be NULL, and then the one
+ * face does both weights.
+ *
+ * @return 1 when the files could be read; the family in force is
+ *         unchanged when they could not.
+ */
+int tiku_desk_font_set_files(const char *regular, const char *bold);
+
+/** @brief Go back to the baked families. */
+void tiku_desk_font_use_baked(void);
+
 /*
  * The METRIC REFERENCE rule (after Mac OS 8, which laid out everything
  * against Chicago): all layout is computed against the plain face's
