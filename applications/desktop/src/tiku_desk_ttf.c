@@ -646,9 +646,20 @@ build_hint(tiku_desk_ttf_t *t, float scale, tiku_desk_hint_t *hint)
          * that band.  Close together, one line stands for both.
          */
         if (dc - dx >= 1.0f) {
-            hint->from[1] = t->zone_cap;
-            hint->shift[1] = (float)(int)(dc + 0.5f) - dc;
-            hint->zones = 2;
+            float other = (float)(int)(dc + 0.5f) - dc;
+            float stretch = (other - hint->shift[0]) / (dc - dx);
+
+            /*
+             * And only if the band between them keeps its proportions.
+             * The gap being a pixel wide is not enough: nudging the two
+             * ends a half pixel APART stretches everything in between by
+             * half again, and what lives in between is the accents.
+             */
+            if (stretch < 0.25f && stretch > -0.25f) {
+                hint->from[1] = t->zone_cap;
+                hint->shift[1] = other;
+                hint->zones = 2;
+            }
         }
     }
 }

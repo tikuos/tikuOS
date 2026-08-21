@@ -41,6 +41,7 @@ static int current_family;
 typedef struct {
     unsigned              cp;
     int                   used;
+    int                   present;    /* the FILE has it, ink or not */
     tiku_desk_ttf_glyph_t glyph;
 } cache_slot_t;
 
@@ -140,19 +141,24 @@ cache_glyph(tiku_desk_face_src_t *src, unsigned cp)
         return NULL;
     }
     if (slot->used) {
-        return (slot->glyph.w > 0) ? &slot->glyph : NULL;
+        return slot->present ? &slot->glyph : NULL;
     }
     memset(&slot->glyph, 0, sizeof slot->glyph);
-    if (!tiku_desk_ttf_render(src->ttf, cp, src->px, &slot->glyph)) {
-        /* Remembered as a miss, so a page full of a letter the face has
-         * not got is not a page full of parsing. */
+    /*
+     * Present and inkless is not the same as absent.  A space is a real
+     * glyph with a real advance and nothing to draw, and reading it as
+     * "the file has not got this" sends the width off to the baked face
+     * -- so every space in a dropped font would be the wrong width.
+     */
+    slot->present = tiku_desk_ttf_render(src->ttf, cp, src->px,
+                                         &slot->glyph) ? 1 : 0;
+    if (!slot->present) {
         memset(&slot->glyph, 0, sizeof slot->glyph);
-        slot->glyph.w = 0;
     }
     slot->cp = cp;
     slot->used = 1;
     src->filled++;
-    return (slot->glyph.w > 0) ? &slot->glyph : NULL;
+    return slot->present ? &slot->glyph : NULL;
 }
 
 /**
@@ -560,7 +566,7 @@ face_glyph(const tiku_desk_font_t *f, unsigned cp, face_glyph_t *out)
         out->h = g->h;
         out->ox = g->ox;
         out->oy = g->oy;
-        out->cover = g->cover;
+        out->cover = g->cover;      /* NULL for a space, which is right */
         return 1;
     }
     if (f->glyphs == NULL || f->count <= 0) {
