@@ -65,7 +65,14 @@ UIMONO_BOLD = [
 
 MONO_SIZES = (13, 15)
 SIZE = 12
-FIRST, LAST = 32, 126
+# The 1x faces carry Latin-1, so a file called "caf\u00e9" draws its own name;
+# the 2x faces stay ASCII and the renderer falls back to the 1x glyph
+# replicated for the rest, which is legible where a blank was not.
+FIRST, LAST = 32, 0xFF
+ASCII_LAST = 126
+# The C1 controls are not letters: baked blank rather than as whatever
+# .notdef the source face happens to carry.
+BLANK = range(0x7F, 0xA0)
 
 
 # name, regular, bold, and whether to bake the 2x faces.  Only the
@@ -94,15 +101,21 @@ def pick(paths):
     raise SystemExit("genfont: no candidate font found")
 
 
-def render(path, name, out, size=SIZE, forced_adv=None, hi=None):
+def render(path, name, out, size=SIZE, forced_adv=None, hi=None,
+           last=LAST):
     font = ImageFont.truetype(path, size)
     asc, desc = font.getmetrics()
     height = asc + desc
     glyphs = []
     blob = []
 
-    for cp in range(FIRST, LAST + 1):
+    for cp in range(FIRST, last + 1):
         ch = chr(cp)
+        if cp in BLANK:
+            glyphs.append({"cp": cp, "adv": 0, "w": 1, "h": 1,
+                           "ox": 0, "oy": 0, "off": len(blob)})
+            blob.append(0)
+            continue
         if forced_adv is not None:
             # The 2x face advances exactly twice the 1x face, so text at
             # scale 2 fills precisely the layout the 1x metrics promised.
@@ -170,13 +183,15 @@ def main():
             hi_plain = hi_bold = None
 
             if twice:
-                plain_adv = render(pick(regular), "probe", null, size=px)
-                bold_adv = render(pick(bold), "probe", null, size=px)
+                plain_adv = render(pick(regular), "probe", null, size=px,
+                                   last=ASCII_LAST)
+                bold_adv = render(pick(bold), "probe", null, size=px,
+                                  last=ASCII_LAST)
                 hi_plain, hi_bold = plain_name + "2x", bold_name + "2x"
                 render(pick(regular), hi_plain, out, size=px * 2,
-                       forced_adv=plain_adv)
+                       forced_adv=plain_adv, last=ASCII_LAST)
                 render(pick(bold), hi_bold, out, size=px * 2,
-                       forced_adv=bold_adv)
+                       forced_adv=bold_adv, last=ASCII_LAST)
             render(pick(regular), plain_name, out, size=px, hi=hi_plain)
             render(pick(bold), bold_name, out, size=px, hi=hi_bold)
     for px in MONO_SIZES:

@@ -151,15 +151,53 @@ tiku_desk_font_bold(void)
     return &current_bold;
 }
 
-/** @brief Glyph for @p ch, or the space glyph when out of range. */
-static const tiku_desk_glyph_t *
-glyph_of(const tiku_desk_font_t *f, unsigned char ch)
+/**
+ * @brief The next code point in @p text, stepping @p text past it.
+ *
+ * Names are UTF-8 -- a file called "caf\u00e9" is five bytes and four
+ * letters -- so the text path walks code points, not bytes.  A malformed
+ * sequence yields its lead byte rather than running off the end.
+ */
+static unsigned
+utf8_next(const char **text)
 {
-    int i = (int)ch - f->first;
+    const unsigned char *p = (const unsigned char *)*text;
+    unsigned cp = *p;
+    int extra;
 
-    if (i < 0 || i >= f->count) {
-        i = 0;
+    if (cp < 0x80u) {
+        extra = 0;
+    } else if ((cp & 0xE0u) == 0xC0u) {
+        cp &= 0x1Fu; extra = 1;
+    } else if ((cp & 0xF0u) == 0xE0u) {
+        cp &= 0x0Fu; extra = 2;
+    } else if ((cp & 0xF8u) == 0xF0u) {
+        cp &= 0x07u; extra = 3;
+    } else {
+        extra = 0;              /* a stray continuation byte stands alone */
     }
+    while (extra-- > 0 && (p[1] & 0xC0u) == 0x80u) {
+        cp = (cp << 6) | (unsigned)(*++p & 0x3Fu);
+    }
+    *text = (const char *)(p + 1);
+    return cp;
+}
+
+/** @brief Whether @p f carries @p cp at all. */
+static int
+face_has(const tiku_desk_font_t *f, unsigned cp)
+{
+    long i = (long)cp - (long)f->first;
+
+    return i >= 0 && i < (long)f->count;
+}
+
+/** @brief Glyph for @p cp, or the space glyph when it is not baked. */
+static const tiku_desk_glyph_t *
+glyph_of(const tiku_desk_font_t *f, unsigned cp)
+{
+    long i = face_has(f, cp) ? (long)cp - (long)f->first : 0;
+
     return &f->glyphs[i];
 }
 
@@ -171,8 +209,8 @@ tiku_desk_text_width(const tiku_desk_font_t *f, const char *text)
     if (f == NULL || text == NULL) {
         return 0;
     }
-    for (; *text != '\0'; text++) {
-        w += glyph_of(f, (unsigned char)*text)->adv;
+    while (*text != '\0') {
+        w += glyph_of(f, utf8_next(&text))->adv;
     }
     return w;
 }
@@ -215,8 +253,8 @@ void
 tiku_desk_text(tiku_desk_surface_t *s, const tiku_desk_font_t *f, int x, int y,
                const char *text, tiku_desk_rgb_t c)
 {
-    const tiku_desk_font_t *face;
-    int sc, rep, pen;
+    const tiku_desk_font_t *hi;
+    int sc, pen;
 
     if (s == NULL || f == NULL || text == NULL) {
         return;
@@ -225,16 +263,23 @@ tiku_desk_text(tiku_desk_surface_t *s, const tiku_desk_font_t *f, int x, int y,
     /* An even scale draws the 2x face: half the replication, twice the
      * detail.  The advances match by construction, so the layout the
      * logical metrics promised is exactly the space this ink fills. */
-    face = f;
-    rep = sc;
-    if (sc > 1 && (sc & 1) == 0 && f->hi != NULL) {
-        face = f->hi;
-        rep = sc / 2;
-    }
+    hi = (sc > 1 && (sc & 1) == 0) ? f->hi : NULL;
     pen = x * sc;
-    for (; *text != '\0'; text++) {
-        const tiku_desk_glyph_t *g = glyph_of(face, (unsigned char)*text);
-        int gx, gy, rx, ry;
+    while (*text != '\0') {
+        unsigned cp = utf8_next(&text);
+        const tiku_desk_glyph_t *logical = glyph_of(f, cp);
+        const tiku_desk_font_t *face = f;
+        const tiku_desk_glyph_t *g = logical;
+        int gx, gy, rx, ry, rep = sc;
+
+        /* The 2x face is a refinement, not a replacement: a letter it
+         * does not carry is drawn from the 1x face replicated -- chunky,
+         * where dropping to the 2x face's space glyph would be blank. */
+        if (hi != NULL && face_has(hi, cp)) {
+            face = hi;
+            g = glyph_of(hi, cp);
+            rep = sc / 2;
+        }
 
         for (gy = 0; gy < g->h; gy++) {
             const unsigned char *row = face->bits + g->off + (long)gy * g->w;
@@ -249,7 +294,9 @@ tiku_desk_text(tiku_desk_surface_t *s, const tiku_desk_font_t *f, int x, int y,
                 }
             }
         }
-        pen += g->adv * rep;
+        /* Always the logical advance: what the layout was measured
+         * against, whichever face happened to draw the letter. */
+        pen += logical->adv * sc;
     }
 }
 
