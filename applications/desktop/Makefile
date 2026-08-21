@@ -16,7 +16,7 @@ CFLAGS  += -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter -Isr
 LDFLAGS ?=
 
 BUILD   := build
-CORE    := src/tiku_desk_tx.c src/tiku_desk_session.c src/tiku_desk_ns.c
+CORE    := src/tiku_desk_tx.c src/tiku_desk_session.c src/tiku_desk_ns.c src/tiku_desk_msg.c
 CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 
 UI      := src/tiku_desk_gfx.c src/tiku_desk_theme.c src/tiku_desk_font.c src/tiku_desk_ttf.c src/tiku_desk_glyphpath.c src/tiku_desk_cff.c src/tiku_desk_ui.c src/tiku_desk_about_app.c
