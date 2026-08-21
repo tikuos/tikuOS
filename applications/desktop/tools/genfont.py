@@ -75,14 +75,15 @@ ASCII_LAST = 126
 BLANK = range(0x7F, 0xA0)
 
 
-# name, regular, bold, and whether to bake the 2x faces.  Only the
-# default family carries them: they are four times the coverage of the 1x
-# face, and a family a person chose is drawn by replication on a scaled
-# surface, which the renderer already falls back to.
+# name, regular, bold, and whether to bake the 2x faces.  All of them do:
+# a family is chosen to be looked at, and on a doubled screen replication
+# is visibly coarser than the real thing.  The 2x faces carry ASCII only
+# -- the rest falls back per glyph to the 1x face, which is what keeps
+# this from being four times the coverage of everything.
 FAMILIES = [
     ("Sans",  CANDIDATES, BOLD,        True),
-    ("Serif", SERIF,      SERIF_BOLD,  False),
-    ("Mono",  UIMONO,     UIMONO_BOLD, False),
+    ("Serif", SERIF,      SERIF_BOLD,  True),
+    ("Mono",  UIMONO,     UIMONO_BOLD, True),
 ]
 
 
