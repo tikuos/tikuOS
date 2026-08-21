@@ -15,6 +15,9 @@
 
 #include "tiku_desk_ttf.h"
 
+#include "tiku_desk_cff.h"
+#include "tiku_desk_glyphpath.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +39,16 @@ struct tiku_desk_ttf {
     int            ascent, descent;
     int            bold;
     char           family[64];
+    /* An OpenType file with PostScript outlines keeps them here instead
+     * of in glyf, and everything else about it is the same. */
+    tiku_desk_cff_t *cff;
+    float            cff_upem;
+    /* Where the lowercase and the capitals reach, in font units: the
+     * two lines a reader's eye follows, and so the two worth snapping
+     * to whole pixels.  Measured once, on the first glyph asked for. */
+    size_t           os2;
+    float            zone_x, zone_cap;
+    int              zones;
 };
 
 /* ---------------------------------------------------------------- bytes */
@@ -551,133 +564,114 @@ read_outline(const tiku_desk_ttf_t *t, unsigned g, ttf_outline_t *out,
     return read_composite(t, off, len, out, dx, dy, depth);
 }
 
-/* ------------------------------------------------------------ rasterising */
+/* --------------------------------------------------------------- hinting */
 
-/*
- * Signed area, accumulated per cell and resolved with a prefix sum -- the
- * same answer the icon renderer reaches for its paths, and for the same
- * reason: coverage that is computed rather than sampled has no jaggies to
- * average away, which matters most at the sizes an interface uses.
- */
-typedef struct {
-    float *a;
-    int    w, h;
-} ttf_raster_t;
-
-static void
-raster_line(ttf_raster_t *r, float x0, float y0, float x1, float y1)
+/** @brief How high glyph @p cp reaches, in font units.  0 when unknown. */
+static float
+glyph_top(const tiku_desk_ttf_t *t, unsigned cp)
 {
-    float dir = 1.0f, dxdy, x;
-    int y, ylast;
+    unsigned g = glyph_index(t, cp);
+    size_t off = 0;
 
-    if (y0 == y1) {
+    if (g == 0u || t->cff != NULL) {
+        return 0.0f;            /* charstrings carry no bounding box */
+    }
+    if (glyph_at(t, g, &off) < 10u) {
+        return 0.0f;
+    }
+    return (float)rds16(t->data + off + 8);      /* yMax */
+}
+
+/**
+ * @brief Find the x-height and cap height, once.
+ *
+ * The font's own OS/2 table states both, from version 2 on, and that is
+ * the designer's answer rather than ours.  Failing that we measure the
+ * two letters everyone measures.
+ */
+static void
+measure_zones(tiku_desk_ttf_t *t)
+{
+    if (t->zones) {
         return;
     }
-    if (y0 > y1) {
-        float t;
-
-        dir = -1.0f;
-        t = x0; x0 = x1; x1 = t;
-        t = y0; y0 = y1; y1 = t;
+    t->zones = 1;
+    if (t->os2 != 0 && fits(t, t->os2, 90u) &&
+        rd16(t->data + t->os2) >= 2u) {
+        t->zone_x = (float)rds16(t->data + t->os2 + 86);
+        t->zone_cap = (float)rds16(t->data + t->os2 + 88);
     }
-    dxdy = (x1 - x0) / (y1 - y0);
-    x = x0;
-    y = (int)y0;
-    if (y < 0) {
-        x -= y0 * dxdy;
-        y = 0;
+    if (t->zone_x <= 0.0f) {
+        t->zone_x = glyph_top(t, 'x');
     }
-    ylast = (int)(y1 + 0.9999f);
-    if (ylast > r->h) {
-        ylast = r->h;
+    if (t->zone_cap <= 0.0f) {
+        t->zone_cap = glyph_top(t, 'H');
     }
-    for (; y < ylast; y++) {
-        float top = ((float)y > y0) ? (float)y : y0;
-        float bot = ((float)(y + 1) < y1) ? (float)(y + 1) : y1;
-        float dy = bot - top;
-        float xnext = x + dxdy * dy;
-        float d = dy * dir;
-        float xa = (x < xnext) ? x : xnext;
-        float xb = (x < xnext) ? xnext : x;
-        float xaf = (float)(int)((xa < 0.0f) ? 0.0f : xa);
-        int xai = (int)xaf;
-        int xbi = (int)(xb + 0.9999f);
-        float *row = r->a + (size_t)y * (r->w + 2);
-
-        if (xai < 0) { xai = 0; }
-        if (xbi > r->w) { xbi = r->w; }
-        if (xai >= r->w) {
-            x = xnext;
-            continue;
-        }
-        if (xbi <= xai + 1) {
-            float mid = 0.5f * (x + xnext) - xaf;
-
-            if (mid < 0.0f) { mid = 0.0f; }
-            if (mid > 1.0f) { mid = 1.0f; }
-            row[xai] += d - d * mid;
-            row[xai + 1] += d * mid;
-        } else {
-            /* The span crosses cells: the first and last get the area of
-             * their corner triangles, the ones between get a full slice. */
-            float s = 1.0f / (xb - xa);
-            float xaff = xa - xaf;
-            float a0 = 0.5f * s * (1.0f - xaff) * (1.0f - xaff);
-            float xbf = xb - (float)xbi + 1.0f;
-            float am = 0.5f * s * xbf * xbf;
-            int xi;
-
-            row[xai] += d * a0;
-            if (xbi == xai + 2) {
-                row[xai + 1] += d * (1.0f - a0 - am);
-            } else {
-                float a1 = s * (1.5f - xaff);
-                float a2;
-
-                row[xai + 1] += d * (a1 - a0);
-                for (xi = xai + 2; xi < xbi - 1; xi++) {
-                    row[xi] += d * s;
-                }
-                a2 = a1 + (float)(xbi - xai - 3) * s;
-                row[xbi - 1] += d * (1.0f - a2 - am);
-            }
-            row[xbi] += d * am;
-        }
-        x = xnext;
+    /* A face whose zones we could not find -- a symbol font, a script
+     * with no such lines -- is drawn unhinted rather than wrongly. */
+    if (t->zone_x <= 0.0f || t->zone_cap <= t->zone_x) {
+        t->zone_x = 0.0f;
+        t->zone_cap = 0.0f;
     }
 }
 
+/** @brief The transform for @p px: scaled, and snapped where it counts. */
 static void
-raster_resolve(const ttf_raster_t *r, unsigned char *out)
+build_hint(tiku_desk_ttf_t *t, float scale, tiku_desk_hint_t *hint)
 {
-    int x, y;
+    const char *off = getenv("TIKU_DESK_HINT");
 
-    for (y = 0; y < r->h; y++) {
-        const float *row = r->a + (size_t)y * (r->w + 2);
-        float acc = 0.0f;
+    memset(hint, 0, sizeof *hint);
+    hint->scale = scale;
+    if (off != NULL && off[0] == '0') {
+        return;                 /* an escape hatch, and how we measure it */
+    }
+    measure_zones(t);
+    if (t->zone_x > 0.0f) {
+        float dx = t->zone_x * scale;
+        float dc = t->zone_cap * scale;
 
-        for (x = 0; x < r->w; x++) {
-            int v;
-
-            acc += row[x];
-            v = (int)((acc < 0.0f ? -acc : acc) * 255.0f + 0.5f);
-            out[(size_t)y * r->w + x] = (unsigned char)((v > 255) ? 255 : v);
+        /* Round the top of the lowercase and the top of the capitals to
+         * whole pixels; everything between the baseline and them comes
+         * along proportionally, and x is untouched throughout. */
+        hint->from[0] = t->zone_x;
+        hint->shift[0] = (float)(int)(dx + 0.5f) - dx;
+        hint->zones = 1;
+        /*
+         * The two lines are only worth treating as two if there is room
+         * between them.  Nudging a pair a third of a pixel apart in
+         * OPPOSITE directions stretches everything caught between by
+         * whatever ratio the gap happens to be, which wrecks the letters
+         * that live there -- accents especially, which sit exactly in
+         * that band.  Close together, one line stands for both.
+         */
+        if (dc - dx >= 1.0f) {
+            hint->from[1] = t->zone_cap;
+            hint->shift[1] = (float)(int)(dc + 0.5f) - dc;
+            hint->zones = 2;
         }
     }
 }
 
-/** @brief Walk one contour, flattening its curves into @p r. */
+/* -------------------------------------------------------------- emitting */
+
+/**
+ * @brief Push one contour into @p path, in device space.
+ *
+ * TrueType leaves the on-curve point between two off-curve ones implied,
+ * and a contour may open on an off-curve point, so the start has to be
+ * found before the walk rather than assumed.
+ */
 static void
-stroke_contour(ttf_raster_t *r, const ttf_point_t *p, int n)
+emit_contour(tiku_desk_path_t *path, const ttf_point_t *p, int n,
+             const tiku_desk_hint_t *hint)
 {
-    float sx, sy, cx = 0.0f, cy = 0.0f, px, py;
+    float sx, sy, cx = 0.0f, cy = 0.0f;
     int i, have_ctrl = 0;
 
     if (n < 2) {
         return;
     }
-    /* A contour may open on an off-curve point, in which case the start
-     * is the midpoint the format leaves implied. */
     if (p[0].on) {
         sx = p[0].x;
         sy = p[0].y;
@@ -691,8 +685,8 @@ stroke_contour(ttf_raster_t *r, const ttf_point_t *p, int n)
         sy = 0.5f * (p[0].y + p[n - 1].y);
         i = 0;
     }
-    px = sx;
-    py = sy;
+    tiku_desk_path_move(path, tiku_desk_hint_x(hint, sx),
+                        tiku_desk_hint_y(hint, sy));
     for (; i <= n; i++) {
         const ttf_point_t *q = &p[i % n];
         float qx = (i == n) ? sx : q->x;
@@ -701,20 +695,14 @@ stroke_contour(ttf_raster_t *r, const ttf_point_t *p, int n)
 
         if (!on) {
             if (have_ctrl) {
-                float mx = 0.5f * (cx + qx), my = 0.5f * (cy + qy);
-                int steps, s;
-                float x0 = px, y0 = py;
-
-                steps = 8;
-                for (s = 1; s <= steps; s++) {
-                    float u = (float)s / (float)steps, v = 1.0f - u;
-                    float bx = v * v * x0 + 2.0f * v * u * cx + u * u * mx;
-                    float by = v * v * y0 + 2.0f * v * u * cy + u * u * my;
-
-                    raster_line(r, px, py, bx, by);
-                    px = bx;
-                    py = by;
-                }
+                /* Two controls in a row: the midpoint between them is a
+                 * point on the curve, and the format leaves it out. */
+                tiku_desk_path_quad(path, tiku_desk_hint_x(hint, cx),
+                                    tiku_desk_hint_y(hint, cy),
+                                    tiku_desk_hint_x(hint,
+                                                     0.5f * (cx + qx)),
+                                    tiku_desk_hint_y(hint,
+                                                     0.5f * (cy + qy)));
             }
             cx = qx;
             cy = qy;
@@ -722,24 +710,34 @@ stroke_contour(ttf_raster_t *r, const ttf_point_t *p, int n)
             continue;
         }
         if (have_ctrl) {
-            int steps = 8, s;
-            float x0 = px, y0 = py;
-
-            for (s = 1; s <= steps; s++) {
-                float u = (float)s / (float)steps, v = 1.0f - u;
-                float bx = v * v * x0 + 2.0f * v * u * cx + u * u * qx;
-                float by = v * v * y0 + 2.0f * v * u * cy + u * u * qy;
-
-                raster_line(r, px, py, bx, by);
-                px = bx;
-                py = by;
-            }
+            tiku_desk_path_quad(path, tiku_desk_hint_x(hint, cx),
+                                tiku_desk_hint_y(hint, cy),
+                                tiku_desk_hint_x(hint, qx),
+                                tiku_desk_hint_y(hint, qy));
             have_ctrl = 0;
         } else {
-            raster_line(r, px, py, qx, qy);
-            px = qx;
-            py = qy;
+            tiku_desk_path_line(path, tiku_desk_hint_x(hint, qx),
+                                tiku_desk_hint_y(hint, qy));
         }
+    }
+    tiku_desk_path_close(path);
+}
+
+/** @brief Push a whole glyph's contours into @p path. */
+static void
+emit_outline(tiku_desk_path_t *path, const ttf_outline_t *outline,
+             const tiku_desk_hint_t *hint)
+{
+    int i, start = 0;
+
+    for (i = 0; i < outline->contours; i++) {
+        int end = outline->end[i];
+        int n = end - start + 1;
+
+        if (n > 1 && end < outline->n) {
+            emit_contour(path, &outline->pt[start], n, hint);
+        }
+        start = end + 1;
     }
 }
 
@@ -764,12 +762,13 @@ tiku_desk_ttf_is_font(const char *path)
     if (n != sizeof head) {
         return 0;
     }
-    /* Judged by what it holds: 1.0 outlines, Apple's "true", or a
-     * collection.  "OTTO" is a PostScript-outline face, which says so
-     * here rather than after a page of parsing. */
+    /* Judged by what it holds: 1.0 outlines, Apple's "true", a
+     * collection, or "OTTO" -- the same file with the other kind of
+     * outline in it. */
     return (rd32(head) == 0x00010000ul ||
             memcmp(head, "true", 4) == 0 ||
-            memcmp(head, "ttcf", 4) == 0);
+            memcmp(head, "ttcf", 4) == 0 ||
+            memcmp(head, "OTTO", 4) == 0);
 }
 
 tiku_desk_ttf_t *
@@ -821,9 +820,10 @@ tiku_desk_ttf_open(const char *path)
         return NULL;
     }
     if (rd32(t->data + dir) != 0x00010000ul &&
-        memcmp(t->data + dir, "true", 4) != 0) {
+        memcmp(t->data + dir, "true", 4) != 0 &&
+        memcmp(t->data + dir, "OTTO", 4) != 0) {
         tiku_desk_ttf_close(t);
-        return NULL;    /* OTTO and anything else: not our outlines */
+        return NULL;
     }
     head = table_of(t, dir, "head", NULL);
     hhea = table_of(t, dir, "hhea", NULL);
@@ -834,11 +834,24 @@ tiku_desk_ttf_open(const char *path)
     t->hmtx = table_of(t, dir, "hmtx", &t->hmtx_len);
     t->loca = table_of(t, dir, "loca", &t->loca_len);
     t->glyf = table_of(t, dir, "glyf", &t->glyf_len);
-    if (head == 0 || hhea == 0 || maxp == 0 || t->glyf == 0 ||
-        t->loca == 0 || t->hmtx == 0 ||
+    {
+        /* The table's tag has a trailing space, which is easy to lose. */
+        size_t cff_len = 0;
+        size_t cff_off = table_of(t, dir, "CFF ", &cff_len);
+
+        if (cff_off != 0 && cff_len != 0) {
+            t->cff = tiku_desk_cff_open(t->data + cff_off, cff_len);
+            t->cff_upem = tiku_desk_cff_upem(t->cff);
+        }
+    }
+    if (head == 0 || hhea == 0 || maxp == 0 || t->hmtx == 0 ||
         !fits(t, head, 54u) || !fits(t, hhea, 36u) || !fits(t, maxp, 6u)) {
         tiku_desk_ttf_close(t);
         return NULL;
+    }
+    if (t->cff == NULL && (t->glyf == 0 || t->loca == 0)) {
+        tiku_desk_ttf_close(t);
+        return NULL;            /* no outlines of either kind */
     }
     t->upem = (int)rd16(t->data + head + 18);
     t->long_loca = (rds16(t->data + head + 50) != 0);
@@ -850,6 +863,7 @@ tiku_desk_ttf_open(const char *path)
         tiku_desk_ttf_close(t);
         return NULL;
     }
+    t->os2 = os2;
     if (os2 != 0 && fits(t, os2, 64u)) {
         t->bold = (rd16(t->data + os2 + 62) & 32u) != 0u;   /* fsSelection */
     } else if (fits(t, head, 46u)) {
@@ -870,6 +884,7 @@ void
 tiku_desk_ttf_close(tiku_desk_ttf_t *ttf)
 {
     if (ttf != NULL) {
+        tiku_desk_cff_close(ttf->cff);
         free(ttf->data);
         free(ttf);
     }
@@ -916,10 +931,11 @@ tiku_desk_ttf_render(const tiku_desk_ttf_t *ttf, unsigned cp, int px,
                      tiku_desk_ttf_glyph_t *out)
 {
     static ttf_outline_t outline;       /* 48 KB: not on the stack */
+    tiku_desk_hint_t hint;
+    tiku_desk_path_t *path;
     unsigned g;
-    float scale, minx, miny, maxx, maxy;
-    int i, x0, y0, x1, y1, w, h;
-    ttf_raster_t r;
+    float scale;
+    int x0, y0, w, h;
 
     if (ttf == NULL || out == NULL || px <= 0 || px > TTF_MAX_SIZE) {
         return 0;
@@ -932,63 +948,42 @@ tiku_desk_ttf_render(const tiku_desk_ttf_t *ttf, unsigned cp, int px,
     scale = (float)px / (float)ttf->upem;
     out->adv = (int)((float)advance_of(ttf, g) * scale + 0.5f);
 
-    outline.n = 0;
-    outline.contours = 0;
-    if (!read_outline(ttf, g, &outline, 0.0f, 0.0f, 0) || outline.n == 0) {
-        return 1;               /* a space: an advance and no ink */
-    }
-    minx = maxx = outline.pt[0].x;
-    miny = maxy = outline.pt[0].y;
-    for (i = 1; i < outline.n; i++) {
-        if (outline.pt[i].x < minx) { minx = outline.pt[i].x; }
-        if (outline.pt[i].x > maxx) { maxx = outline.pt[i].x; }
-        if (outline.pt[i].y < miny) { miny = outline.pt[i].y; }
-        if (outline.pt[i].y > maxy) { maxy = outline.pt[i].y; }
-    }
-    /* Device space: y down from the baseline, and a pixel of margin so
-     * the accumulator's spill into the next cell has somewhere to go. */
-    x0 = (int)((minx * scale) < 0.0f ? (minx * scale) - 1.0f
-                                     : (minx * scale)) - 1;
-    x1 = (int)(maxx * scale + 0.9999f) + 1;
-    y0 = -(int)(maxy * scale + 0.9999f) - 1;
-    y1 = -(int)((miny * scale) < 0.0f ? (miny * scale) - 1.0f
-                                      : (miny * scale)) + 1;
-    w = x1 - x0;
-    h = y1 - y0;
-    if (w <= 0 || h <= 0 || w > TTF_MAX_SIZE || h > TTF_MAX_SIZE) {
-        return 1;
-    }
-    r.w = w;
-    r.h = h;
-    r.a = calloc((size_t)(w + 2) * (size_t)h, sizeof *r.a);
-    out->cover = calloc((size_t)w * (size_t)h, 1u);
-    if (r.a == NULL || out->cover == NULL) {
-        free(r.a);
-        free(out->cover);
-        out->cover = NULL;
-        return 0;
-    }
-    {
-        int start = 0;
-
-        for (i = 0; i < outline.contours; i++) {
-            int end = outline.end[i];
-            int n = end - start + 1;
-            ttf_point_t *p = &outline.pt[start];
-            int k;
-
-            if (n > 1 && end < outline.n) {
-                for (k = 0; k < n; k++) {
-                    p[k].x = p[k].x * scale - (float)x0;
-                    p[k].y = -(p[k].y * scale) - (float)y0;
-                }
-                stroke_contour(&r, p, n);
-            }
-            start = end + 1;
+    if (ttf->cff == NULL) {
+        outline.n = 0;
+        outline.contours = 0;
+        if (!read_outline(ttf, g, &outline, 0.0f, 0.0f, 0) ||
+            outline.n == 0) {
+            return 1;           /* a space: an advance and no ink */
         }
     }
-    raster_resolve(&r, out->cover);
-    free(r.a);
+    path = tiku_desk_path_new();
+    if (path == NULL) {
+        return 0;
+    }
+    if (ttf->cff != NULL) {
+        /* The charstrings have a unit of their own, which the FontMatrix
+         * states and which need not be the sfnt's. */
+        build_hint((tiku_desk_ttf_t *)ttf, (float)px /
+                   ((ttf->cff_upem > 0.0f) ? ttf->cff_upem
+                                           : (float)ttf->upem), &hint);
+        if (!tiku_desk_cff_outline(ttf->cff, g, &hint, path)) {
+            tiku_desk_path_free(path);
+            return 1;
+        }
+    } else {
+        build_hint((tiku_desk_ttf_t *)ttf, scale, &hint);
+        emit_outline(path, &outline, &hint);
+    }
+    tiku_desk_path_bounds(path, &x0, &y0, &w, &h);
+    if (tiku_desk_path_failed(path) || w <= 0 || h <= 0) {
+        tiku_desk_path_free(path);
+        return 1;               /* nothing drawable: an advance and no ink */
+    }
+    out->cover = tiku_desk_path_render(path, x0, y0, w, h);
+    tiku_desk_path_free(path);
+    if (out->cover == NULL) {
+        return 0;
+    }
     out->w = w;
     out->h = h;
     out->ox = x0;

@@ -23,6 +23,15 @@ typedef struct {
     int   off;         /* index into the blob   */
 } tiku_desk_glyph_t;
 
+/**
+ * @brief Where a face's glyphs come from, when they are not baked.
+ *
+ * A face read from a file rasterises what it is asked for and keeps it,
+ * so a dropped font draws any letter it HAS -- Greek, Cyrillic, kana --
+ * rather than the couple of hundred we would otherwise have guessed at.
+ */
+typedef struct tiku_desk_face_src tiku_desk_face_src_t;
+
 typedef struct tiku_desk_font {
     const tiku_desk_glyph_t *glyphs;
     const unsigned char     *bits;
@@ -34,6 +43,16 @@ typedef struct tiku_desk_font {
      * double, so a scaled surface can draw REAL detail into the same
      * layout the logical metrics promised.  NULL on the 2x faces. */
     const struct tiku_desk_font *hi;
+    /*
+     * NULL for a baked face; otherwise the file its glyphs are drawn
+     * from and the cache they are kept in.  LAST in the struct because
+     * the generated tables initialise the fields above it by position,
+     * and a baked face wants this one zero anyway.
+     *
+     * The cache is mutated through this pointer while the face itself
+     * stays const, which is how every caller holds one.
+     */
+    tiku_desk_face_src_t        *src;
 } tiku_desk_font_t;
 
 /**

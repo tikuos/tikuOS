@@ -19,7 +19,7 @@ BUILD   := build
 CORE    := src/tiku_desk_tx.c src/tiku_desk_session.c src/tiku_desk_ns.c
 CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 
-UI      := src/tiku_desk_gfx.c src/tiku_desk_theme.c src/tiku_desk_font.c src/tiku_desk_ttf.c src/tiku_desk_ui.c src/tiku_desk_about_app.c
+UI      := src/tiku_desk_gfx.c src/tiku_desk_theme.c src/tiku_desk_font.c src/tiku_desk_ttf.c src/tiku_desk_glyphpath.c src/tiku_desk_cff.c src/tiku_desk_ui.c src/tiku_desk_about_app.c
 UI_O    := $(patsubst src/%.c,$(BUILD)/%.o,$(UI))
 
 RUNTIME   := src/tiku_desk_app.c src/tiku_desk_app_load.c src/tiku_desk_window.c src/tiku_desk_remote.c src/tiku_desk_conduct.c src/tiku_desk_client.c src/tiku_desk_x11.c

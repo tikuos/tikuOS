@@ -34,16 +34,28 @@ static int current_family;
  * changes.  Latin-1, as the baked faces carry: the same letters, from a
  * different file.
  */
-#define BUILT_FIRST 32
-#define BUILT_LAST  0xFF
-#define BUILT_COUNT (BUILT_LAST - BUILT_FIRST + 1)
-#define BUILT_MAX   6           /* faces alive at once: sizes x weights */
+#define BUILT_MAX     6         /* faces alive at once: sizes x weights */
+#define CACHE_SLOTS   512       /* per face; a power of two */
+#define CACHE_CEILING 384       /* glyphs kept before the slate is wiped */
 
 typedef struct {
-    tiku_desk_font_t   face;
-    tiku_desk_glyph_t *glyphs;
-    unsigned char     *bits;
-    int                px, bold, live;
+    unsigned              cp;
+    int                   used;
+    tiku_desk_ttf_glyph_t glyph;
+} cache_slot_t;
+
+struct tiku_desk_face_src {
+    const tiku_desk_ttf_t *ttf;     /* borrowed; this module owns it */
+    int                    px;
+    int                    bold;
+    int                    filled;
+    cache_slot_t           slot[CACHE_SLOTS];
+};
+
+typedef struct {
+    tiku_desk_font_t      face;
+    tiku_desk_face_src_t *src;
+    int                   px, bold, live;
 } built_face_t;
 
 static built_face_t built[BUILT_MAX];
@@ -51,90 +63,123 @@ static tiku_desk_ttf_t *file_regular;
 static tiku_desk_ttf_t *file_bold;
 static char file_family[64];
 
+/** @brief Let go of every glyph a cache is holding. */
+static void
+cache_empty(tiku_desk_face_src_t *src)
+{
+    int i;
+
+    if (src == NULL) {
+        return;
+    }
+    for (i = 0; i < CACHE_SLOTS; i++) {
+        if (src->slot[i].used) {
+            tiku_desk_ttf_free_glyph(&src->slot[i].glyph);
+            src->slot[i].used = 0;
+        }
+    }
+    src->filled = 0;
+}
+
 /** @brief Give back what one built face holds. */
 static void
 built_free(built_face_t *b)
 {
-    free(b->glyphs);
-    free(b->bits);
+    if (b->src != NULL) {
+        cache_empty(b->src);
+        free(b->src);
+    }
     memset(b, 0, sizeof *b);
 }
 
+/** @brief Where @p cp lives, or would: open addressing, linear probe. */
+static cache_slot_t *
+cache_find(tiku_desk_face_src_t *src, unsigned cp)
+{
+    unsigned h = (cp * 2654435761u) & (unsigned)(CACHE_SLOTS - 1);
+    int step;
+
+    for (step = 0; step < CACHE_SLOTS; step++) {
+        cache_slot_t *slot = &src->slot[h];
+
+        if (!slot->used || slot->cp == cp) {
+            return slot;
+        }
+        h = (h + 1u) & (unsigned)(CACHE_SLOTS - 1);
+    }
+    return NULL;
+}
+
 /**
- * @brief Rasterise every letter of @p ttf at @p px into @p b.
+ * @brief The glyph for @p cp at this face's size, drawing it if need be.
+ *
+ * @return NULL when the file has no such letter.
+ */
+static const tiku_desk_ttf_glyph_t *
+cache_glyph(tiku_desk_face_src_t *src, unsigned cp)
+{
+    cache_slot_t *slot;
+
+    if (src == NULL || src->ttf == NULL) {
+        return NULL;
+    }
+    /* A page of Chinese is thousands of letters, and every one of them
+     * would be kept for ever otherwise.  Wiping the slate is cheaper to
+     * write than an eviction order, and a redraw refills what it uses. */
+    if (src->filled >= CACHE_CEILING) {
+        cache_empty(src);
+    }
+    slot = cache_find(src, cp);
+    if (slot == NULL) {
+        return NULL;
+    }
+    if (slot->used) {
+        return (slot->glyph.w > 0) ? &slot->glyph : NULL;
+    }
+    memset(&slot->glyph, 0, sizeof slot->glyph);
+    if (!tiku_desk_ttf_render(src->ttf, cp, src->px, &slot->glyph)) {
+        /* Remembered as a miss, so a page full of a letter the face has
+         * not got is not a page full of parsing. */
+        memset(&slot->glyph, 0, sizeof slot->glyph);
+        slot->glyph.w = 0;
+    }
+    slot->cp = cp;
+    slot->used = 1;
+    src->filled++;
+    return (slot->glyph.w > 0) ? &slot->glyph : NULL;
+}
+
+/**
+ * @brief Build the face for @p ttf at @p px: metrics now, glyphs later.
  *
  * @return 1 when the face is usable.
  */
 static int
 built_make(built_face_t *b, const tiku_desk_ttf_t *ttf, int px, int bold)
 {
-    size_t used = 0, room = 4096u;
-    unsigned char *bits = malloc(room);
-    tiku_desk_glyph_t *glyphs = calloc(BUILT_COUNT, sizeof *glyphs);
-    int ascent = 0, height = 0, cp;
+    tiku_desk_face_src_t *src = calloc(1u, sizeof *src);
+    int ascent = 0, height = 0;
 
-    if (bits == NULL || glyphs == NULL) {
-        free(bits);
-        free(glyphs);
+    if (src == NULL) {
         return 0;
     }
-    for (cp = BUILT_FIRST; cp <= BUILT_LAST; cp++) {
-        tiku_desk_ttf_glyph_t g;
-        tiku_desk_glyph_t *slot = &glyphs[cp - BUILT_FIRST];
-
-        memset(&g, 0, sizeof g);
-        if (!tiku_desk_ttf_render(ttf, (unsigned)cp, px, &g)) {
-            /* Not in the file: no ink and no room, like a control. */
-            slot->cp = (short)cp;
-            slot->w = 1;
-            slot->h = 1;
-            slot->off = 0;
-            continue;
-        }
-        slot->cp = (short)cp;
-        slot->adv = (short)g.adv;
-        slot->w = (short)((g.w > 0) ? g.w : 1);
-        slot->h = (short)((g.h > 0) ? g.h : 1);
-        slot->ox = (short)g.ox;
-        slot->oy = (short)g.oy;
-        slot->off = (int)used;
-        {
-            size_t need = (size_t)slot->w * (size_t)slot->h;
-
-            while (used + need > room) {
-                unsigned char *grown = realloc(bits, room * 2u);
-
-                if (grown == NULL) {
-                    tiku_desk_ttf_free_glyph(&g);
-                    free(bits);
-                    free(glyphs);
-                    return 0;
-                }
-                bits = grown;
-                room *= 2u;
-            }
-            if (g.cover != NULL) {
-                memcpy(bits + used, g.cover, need);
-            } else {
-                memset(bits + used, 0, need);
-            }
-            used += need;
-        }
-        tiku_desk_ttf_free_glyph(&g);
-    }
+    src->ttf = ttf;
+    src->px = px;
+    src->bold = bold;
     tiku_desk_ttf_metrics(ttf, px, &ascent, &height);
-    b->glyphs = glyphs;
-    b->bits = bits;
+    memset(b, 0, sizeof *b);
+    b->src = src;
     b->px = px;
     b->bold = bold;
     b->live = 1;
-    b->face.glyphs = glyphs;
-    b->face.bits = bits;
-    b->face.count = BUILT_COUNT;
-    b->face.first = BUILT_FIRST;
+    b->face.src = src;
+    b->face.glyphs = NULL;
+    b->face.bits = NULL;
+    b->face.count = 0;          /* nothing baked: it all comes from src */
+    b->face.first = 0;
     b->face.ascent = (ascent > 0) ? ascent : px;
     b->face.height = (height > 0) ? height : px + 2;
-    b->face.hi = NULL;          /* one face, replicated on a scaled screen */
+    b->face.hi = NULL;          /* one face; a scaled screen replicates */
     return 1;
 }
 
@@ -150,7 +195,8 @@ built_face(int px, int bold)
         return NULL;
     }
     for (i = 0; i < BUILT_MAX; i++) {
-        if (built[i].live && built[i].px == px && built[i].bold == bold) {
+        if (built[i].live && built[i].px == px && built[i].bold == bold &&
+            built[i].src != NULL && built[i].src->ttf == src) {
             return &built[i].face;
         }
         if (!built[i].live && spare < 0) {
@@ -421,22 +467,92 @@ utf8_next(const char **text)
     return cp;
 }
 
+typedef struct face_glyph face_glyph_t;
+static int face_glyph(const tiku_desk_font_t *f, unsigned cp,
+                      face_glyph_t *out);
+
+/** @brief The baked face this size and weight would otherwise use. */
+static const tiku_desk_font_t *
+baked_face(int px, int bold)
+{
+    int rung = rung_of(px);
+
+    return bold ? bold_faces[current_family][rung]
+                : plain_faces[current_family][rung];
+}
+
+/** @brief One glyph, whether it was baked or drawn a moment ago. */
+struct face_glyph {
+    int                  adv;
+    int                  w, h, ox, oy;
+    const unsigned char *cover;
+};
+
+/**
+ * @brief Fill @p out with @p cp from @p f.
+ *
+ * @return 1 when the face has that letter, 0 when it does not -- the
+ *         caller decides what a letter nobody has looks like.
+ */
+static int
+face_glyph(const tiku_desk_font_t *f, unsigned cp, face_glyph_t *out)
+{
+
+    if (f->src != NULL) {
+        const tiku_desk_ttf_glyph_t *g = cache_glyph(f->src, cp);
+
+        if (g == NULL) {
+            /*
+             * Not in the file -- so ask the baked face for it.  A face
+             * dropped in for one script has no business blanking every
+             * other: drop a Chinese font and the menus are still there,
+             * in the face they were in before.
+             */
+            const tiku_desk_font_t *baked = baked_face(f->src->px,
+                                                       f->src->bold);
+
+            if (baked != NULL && baked->glyphs != NULL) {
+                return face_glyph(baked, cp, out);
+            }
+            memset(out, 0, sizeof *out);
+            out->adv = f->height / 3 + 1;
+            return 0;
+        }
+        out->adv = g->adv;
+        out->w = g->w;
+        out->h = g->h;
+        out->ox = g->ox;
+        out->oy = g->oy;
+        out->cover = g->cover;
+        return 1;
+    }
+    {
+        long i = (long)cp - (long)f->first;
+        int have = (i >= 0 && i < (long)f->count);
+        const tiku_desk_glyph_t *g = &f->glyphs[have ? i : 0];
+
+        out->adv = g->adv;
+        out->w = g->w;
+        out->h = g->h;
+        out->ox = g->ox;
+        out->oy = g->oy;
+        out->cover = f->bits + g->off;
+        return have;
+    }
+}
+
 /** @brief Whether @p f carries @p cp at all. */
 static int
 face_has(const tiku_desk_font_t *f, unsigned cp)
 {
-    long i = (long)cp - (long)f->first;
+    if (f->src != NULL) {
+        return cache_glyph(f->src, cp) != NULL;
+    }
+    {
+        long i = (long)cp - (long)f->first;
 
-    return i >= 0 && i < (long)f->count;
-}
-
-/** @brief Glyph for @p cp, or the space glyph when it is not baked. */
-static const tiku_desk_glyph_t *
-glyph_of(const tiku_desk_font_t *f, unsigned cp)
-{
-    long i = face_has(f, cp) ? (long)cp - (long)f->first : 0;
-
-    return &f->glyphs[i];
+        return i >= 0 && i < (long)f->count;
+    }
 }
 
 int
@@ -448,7 +564,10 @@ tiku_desk_text_width(const tiku_desk_font_t *f, const char *text)
         return 0;
     }
     while (*text != '\0') {
-        w += glyph_of(f, utf8_next(&text))->adv;
+        face_glyph_t g;
+
+        (void)face_glyph(f, utf8_next(&text), &g);
+        w += g.adv;
     }
     return w;
 }
@@ -505,25 +624,25 @@ tiku_desk_text(tiku_desk_surface_t *s, const tiku_desk_font_t *f, int x, int y,
     pen = x * sc;
     while (*text != '\0') {
         unsigned cp = utf8_next(&text);
-        const tiku_desk_glyph_t *logical = glyph_of(f, cp);
-        const tiku_desk_font_t *face = f;
-        const tiku_desk_glyph_t *g = logical;
+        face_glyph_t logical, ink;
         int gx, gy, rx, ry, rep = sc;
 
+        (void)face_glyph(f, cp, &logical);
+        ink = logical;
         /* The 2x face is a refinement, not a replacement: a letter it
          * does not carry is drawn from the 1x face replicated -- chunky,
          * where dropping to the 2x face's space glyph would be blank. */
         if (hi != NULL && face_has(hi, cp)) {
-            face = hi;
-            g = glyph_of(hi, cp);
+            (void)face_glyph(hi, cp, &ink);
             rep = sc / 2;
         }
 
-        for (gy = 0; gy < g->h; gy++) {
-            const unsigned char *row = face->bits + g->off + (long)gy * g->w;
-            for (gx = 0; gx < g->w; gx++) {
-                int nx = pen + (g->ox + gx) * rep;
-                int ny = y * sc + (g->oy + gy) * rep;
+        for (gy = 0; ink.cover != NULL && gy < ink.h; gy++) {
+            const unsigned char *row = ink.cover + (long)gy * ink.w;
+
+            for (gx = 0; gx < ink.w; gx++) {
+                int nx = pen + (ink.ox + gx) * rep;
+                int ny = y * sc + (ink.oy + gy) * rep;
 
                 for (ry = 0; ry < rep; ry++) {
                     for (rx = 0; rx < rep; rx++) {
@@ -534,7 +653,7 @@ tiku_desk_text(tiku_desk_surface_t *s, const tiku_desk_font_t *f, int x, int y,
         }
         /* Always the logical advance: what the layout was measured
          * against, whichever face happened to draw the letter. */
-        pen += logical->adv * sc;
+        pen += logical.adv * sc;
     }
 }
 
