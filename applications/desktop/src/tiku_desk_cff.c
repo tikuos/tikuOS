@@ -1063,8 +1063,15 @@ tiku_desk_cff_open(const unsigned char *data, size_t len)
         read_fdarray(cff, top.fdarray);
     }
     if (top.matrix0 > 0.0f) {
-        /* The FontMatrix says how big a unit is; 0.001 is the usual. */
-        cff->upem = 1.0f / top.matrix0;
+        /* The FontMatrix says how big a unit is; 0.001 is the usual.
+         * Believe it only within reason: a matrix claiming a thousand
+         * units to the pixel would scale every coordinate out of the
+         * range an int can hold. */
+        float upem = 1.0f / top.matrix0;
+
+        if (upem >= 16.0f && upem <= 16384.0f) {
+            cff->upem = upem;
+        }
     }
     return cff;
 }

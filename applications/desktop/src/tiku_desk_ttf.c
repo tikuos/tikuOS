@@ -870,7 +870,7 @@ tiku_desk_ttf_open(const char *path)
     t->descent = rds16(t->data + hhea + 6);
     t->num_hmetrics = (int)rd16(t->data + hhea + 34);
     t->num_glyphs = (int)rd16(t->data + maxp + 4);
-    if (t->upem <= 0 || t->num_glyphs <= 0) {
+    if (t->upem < 16 || t->upem > 16384 || t->num_glyphs <= 0) {
         tiku_desk_ttf_close(t);
         return NULL;
     }

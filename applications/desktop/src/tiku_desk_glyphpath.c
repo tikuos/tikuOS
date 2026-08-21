@@ -17,6 +17,15 @@
 #define PATH_MAX_EDGES  20000
 #define PATH_MAX_STEPS  64
 #define PATH_MAX_SIZE   1024    /* pixels across; a glyph is not a poster */
+/*
+ * No coordinate past this is worth carrying.  A font states the size of
+ * its own em, and one that claims a thousandth of a pixel drives every
+ * coordinate into the billions -- where converting a float to an int is
+ * undefined, and lands on INT_MIN wherever the machine does not happen
+ * to saturate.  Every edge is squared up to this on the way in, so
+ * nothing downstream has to be clever.
+ */
+#define PATH_COORD_MAX  100000.0f
 
 typedef struct {
     float x0, y0, x1, y1;
@@ -121,6 +130,22 @@ tiku_desk_path_failed(const tiku_desk_path_t *path)
     return (path == NULL) || path->failed;
 }
 
+/** @brief @p v, brought back into the range an int can hold. */
+static float
+sane(float v)
+{
+    /* Written against the NOT of each test, so that a NaN -- which
+     * compares false with everything -- comes back as zero rather than
+     * through. */
+    if (!(v > -PATH_COORD_MAX)) {
+        return (v == v) ? -PATH_COORD_MAX : 0.0f;
+    }
+    if (!(v < PATH_COORD_MAX)) {
+        return PATH_COORD_MAX;
+    }
+    return v;
+}
+
 /** @brief Take note of a point for the outline's extent. */
 static void
 saw(tiku_desk_path_t *path, float x, float y)
@@ -138,6 +163,10 @@ edge(tiku_desk_path_t *path, float x0, float y0, float x1, float y1)
     if (path->failed) {
         return;
     }
+    x0 = sane(x0);
+    y0 = sane(y0);
+    x1 = sane(x1);
+    y1 = sane(y1);
     if (y0 == y1) {
         return;                 /* a flat edge covers nothing */
     }
@@ -334,12 +363,13 @@ accumulate(float *a, int w, int h, float x0, float y0, float x1, float y1)
     }
     dxdy = (x1 - x0) / (y1 - y0);
     x = x0;
-    y = (int)y0;
     if (y0 < 0.0f) {
         x -= y0 * dxdy;
         y = 0;
+    } else {
+        y = (int)((y0 > (float)h) ? (float)h : y0);
     }
-    ylast = (int)(y1 + 0.9999f);
+    ylast = (int)((y1 > (float)h) ? (float)h : y1 + 0.9999f);
     if (ylast > h) {
         ylast = h;
     }
@@ -355,8 +385,12 @@ accumulate(float *a, int w, int h, float x0, float y0, float x1, float y1)
         int xai, xbi;
         float *row = a + (size_t)y * (size_t)(w + 2);
 
-        if (xa < 0.0f) { xa = 0.0f; }
-        if (xb < 0.0f) { xb = 0.0f; }
+        /* Into the row before the casts, not after: past INT_MAX the
+         * conversion has no defined answer to clamp. */
+        if (!(xa > 0.0f)) { xa = 0.0f; }
+        if (!(xb > 0.0f)) { xb = 0.0f; }
+        if (xa > (float)w) { xa = (float)w; }
+        if (xb > (float)w) { xb = (float)w; }
         xaf = (float)(int)xa;
         xai = (int)xaf;
         xbi = (int)(xb + 0.9999f);
