@@ -329,6 +329,52 @@ session_message(tiku_remote_session_t *s)
             }
         }
         break;
+    case TIKU_RMSG_DRAW:
+        if (s->want >= 12u) {
+            int32_t w, h;
+            uint32_t id;
+
+            memcpy(&id, p, 4);
+            memcpy(&w, p + 4, 4);
+            memcpy(&h, p + 8, 4);
+            if (id == s->win_id && w >= 1 && h >= 1 &&
+                w <= TIKU_REMOTE_MAX_DIM && h <= TIKU_REMOTE_MAX_DIM) {
+                tiku_dl_t *dl = tiku_dl_unflatten(p + 12, s->want - 12u,
+                                                  NULL);
+
+                if (dl != NULL) {
+                    uint32_t *px = realloc(s->frame,
+                                           4u * (size_t)w * (size_t)h);
+
+                    if (px != NULL) {
+                        /*
+                         * Played into the SAME buffer a copied frame
+                         * lands in, so nothing downstream of here can
+                         * tell which way the window arrived -- which is
+                         * the point of putting this beside FRAME rather
+                         * than above it.
+                         */
+                        tiku_surface_t face;
+
+                        memset(px, 0, 4u * (size_t)w * (size_t)h);
+                        memset(&face, 0, sizeof face);
+                        face.px = px;
+                        face.w = w;
+                        face.h = h;
+                        face.scale = 1;
+                        face.clip.w = w;
+                        face.clip.h = h;
+                        (void)tiku_dl_play(dl, &face);
+                        s->frame = px;
+                        s->fw = w;
+                        s->fh = h;
+                        changed = 1;
+                    }
+                    tiku_dl_free(dl);
+                }
+            }
+        }
+        break;
     case TIKU_RMSG_MENUS:
         if (s->want >= 4u + sizeof(tiku_menuset_t)) {
             memcpy(&s->menus, p + 4, sizeof s->menus);
@@ -743,6 +789,39 @@ tiku_remote_connect_fd(tiku_remote_client_t *client,
     send_msg(client->fd, TIKU_RMSG_HELLO, payload, sizeof payload);
     (void)set_nonblock(client->fd);
     return 0;
+}
+
+int
+tiku_remote_draw(tiku_remote_client_t *client, uint32_t id,
+                      const tiku_dl_t *dl, int w, int h)
+{
+    size_t n;
+    unsigned char *payload;
+    int ok;
+
+    if (client == NULL || client->fd < 0 || dl == NULL ||
+        w < 1 || h < 1 || w > TIKU_REMOTE_MAX_DIM ||
+        h > TIKU_REMOTE_MAX_DIM) {
+        return 0;
+    }
+    n = tiku_dl_flat_size(dl);
+    if (12u + n > REMOTE_MAX_PAYLOAD) {
+        return 0;
+    }
+    payload = malloc(12u + n);
+    if (payload == NULL) {
+        return 0;
+    }
+    memcpy(payload, &id, 4);
+    memcpy(payload + 4, &w, 4);
+    memcpy(payload + 8, &h, 4);
+    ok = (n == 0u) || tiku_dl_flatten(dl, payload + 12, n, NULL);
+    if (ok) {
+        send_msg(client->fd, TIKU_RMSG_DRAW, payload,
+                 (uint32_t)(12u + n));
+    }
+    free(payload);
+    return ok;
 }
 
 int

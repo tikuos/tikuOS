@@ -1,0 +1,140 @@
+/*
+ * TikuOS kits -- the foundation TikuDesktop and TikuTracker
+ * both stand on.
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_dl.h - what was drawn, rather than what it came out as.
+ *
+ * A session hands its window over as PIXELS: a frame copied, or a surface
+ * shared when both ends are on one machine.  That is right for a machine
+ * talking to itself and wrong for the thing this interface is being built
+ * for.  A 372x302 window is 449,376 bytes; down a 115200 line that is
+ * thirty-nine seconds, and the shared-surface path cannot help -- sharing
+ * a surface means one machine, which a serial line denies.
+ *
+ * So: a third way to say what a window looks like.  Not the pixels but
+ * the CALLS -- twenty-one of them for that same window, around six
+ * hundred bytes, which is the difference between a tenth of a second and
+ * most of a minute.
+ *
+ * It is deliberately NOT an app_server.  Nothing here draws a line or a
+ * glyph on anybody's behalf: the commands are the ones the interface
+ * already has, semantic where the interface is semantic -- "a button,
+ * here, disabled, labelled this" -- so the stream is short because the
+ * vocabulary is high, not because it was compressed.
+ *
+ * And measuring stays where it is.  Every window in this interface lays
+ * itself out by asking how wide a piece of text is; a stream that had to
+ * ask the far end would pay a round trip per label, which is the mistake
+ * that made remote interfaces a byword.  The face tables are small and
+ * both ends carry them.
+ *
+ * The recorded form IS the wire form -- appending a command writes the
+ * bytes that will be sent -- so flattening is a copy and there is one
+ * description of a command rather than two that must be kept agreeing.
+ *
+ *   per command:  [u16 op][u16 length][payload]
+ *
+ * The length is what lets a player step over an op it does not know, so
+ * a newer end may draw with something an older one has never heard of
+ * and the older one draws the rest.  Same bargain as tiku_msg, for the
+ * same reason.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#ifndef TIKU_DL_H_
+#define TIKU_DL_H_
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "tiku_gfx.h"
+
+/** @brief Which face a piece of text is in; the far end resolves it. */
+typedef enum {
+    TIKU_DL_PLAIN = 0,
+    TIKU_DL_BOLD  = 1,
+    TIKU_DL_MONO  = 2,
+    TIKU_DL_MONO_BOLD = 3
+} tiku_dl_face_t;
+
+typedef struct tiku_dl tiku_dl_t;
+
+/** @brief An empty list.  NULL if there is no room for one. */
+tiku_dl_t *tiku_dl_new(void);
+void tiku_dl_free(tiku_dl_t *dl);
+
+/** @brief Empty it, keeping the room it has already taken. */
+void tiku_dl_clear(tiku_dl_t *dl);
+
+/** @brief How many commands are in it. */
+int tiku_dl_count(const tiku_dl_t *dl);
+
+/*---------------------------------------------------------------------------*/
+/* Recording.  Each mirrors the drawing call of the same name, and each     */
+/* returns 1 when it was written down and 0 when there was no room.          */
+/*---------------------------------------------------------------------------*/
+
+int tiku_dl_fill(tiku_dl_t *dl, tiku_rect_t r, tiku_rgb_t c);
+int tiku_dl_frame(tiku_dl_t *dl, tiku_rect_t r, tiku_rgb_t c);
+int tiku_dl_bevel(tiku_dl_t *dl, tiku_rect_t r, tiku_rgb_t light,
+                  tiku_rgb_t shadow);
+int tiku_dl_hline(tiku_dl_t *dl, int x, int y, int w, tiku_rgb_t c);
+int tiku_dl_vline(tiku_dl_t *dl, int x, int y, int h, tiku_rgb_t c);
+int tiku_dl_text(tiku_dl_t *dl, tiku_dl_face_t face, int x, int y,
+                 const char *text, tiku_rgb_t c);
+int tiku_dl_text_centered(tiku_dl_t *dl, tiku_dl_face_t face, tiku_rect_t r,
+                          const char *text, tiku_rgb_t c);
+int tiku_dl_clip_set(tiku_dl_t *dl, tiku_rect_t r);
+int tiku_dl_clip_reset(tiku_dl_t *dl);
+
+/* The controls.  These are why the stream is short: one command carries
+ * a button, bevels, label, state and all. */
+int tiku_dl_panel(tiku_dl_t *dl, tiku_rect_t r);
+int tiku_dl_raised(tiku_dl_t *dl, tiku_rect_t r);
+int tiku_dl_sunken(tiku_dl_t *dl, tiku_rect_t r, tiku_rgb_t face);
+int tiku_dl_button(tiku_dl_t *dl, tiku_rect_t r, const char *label,
+                   unsigned state);
+int tiku_dl_checkbox(tiku_dl_t *dl, tiku_rect_t r, const char *label,
+                     unsigned state);
+int tiku_dl_radio(tiku_dl_t *dl, tiku_rect_t r, const char *label,
+                  unsigned state);
+int tiku_dl_list_row(tiku_dl_t *dl, tiku_rect_t r, const char *text,
+                     int selected);
+
+/*---------------------------------------------------------------------------*/
+/* The wire, and the far end                                                 */
+/*---------------------------------------------------------------------------*/
+
+/** @brief How many bytes it would flatten to. */
+size_t tiku_dl_flat_size(const tiku_dl_t *dl);
+
+/**
+ * @brief Write it into @p buf.
+ *
+ * @param wrote Filled with how much was used; may be NULL.
+ * @return 1 when it fitted, 0 otherwise.
+ */
+int tiku_dl_flatten(const tiku_dl_t *dl, void *buf, size_t max, size_t *wrote);
+
+/**
+ * @brief Read a list out of @p buf.
+ *
+ * Every length is checked against what is left of the buffer before it is
+ * believed, and text is refused unless it ends where it says it does.
+ * These bytes arrive from a wire.
+ *
+ * @return a list the caller frees, or NULL if the bytes are not one.
+ */
+tiku_dl_t *tiku_dl_unflatten(const void *buf, size_t len, size_t *read);
+
+/**
+ * @brief Draw it into @p s.
+ *
+ * @return how many commands were carried out; commands whose op this
+ *         build does not know are stepped over and not counted.
+ */
+int tiku_dl_play(const tiku_dl_t *dl, tiku_surface_t *s);
+
+#endif /* TIKU_DL_H_ */

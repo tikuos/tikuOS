@@ -43,7 +43,8 @@ STORAGE     := storage/tiku_model.c storage/tiku_state.c \
 INTERFACE   := interface/tiku_gfx.c interface/tiku_theme.c \
                interface/tiku_font.c interface/tiku_ttf.c \
                interface/tiku_glyphpath.c interface/tiku_cff.c \
-               interface/tiku_ui.c interface/tiku_window.c \
+               interface/tiku_ui.c interface/tiku_dl.c \
+               interface/tiku_window.c \
                interface/tiku_x11.c
 TRANSLATION := translation/tiku_inflate.c translation/tiku_jpeg.c \
                translation/tiku_hvif.c translation/tiku_image.c \

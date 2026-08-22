@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "tiku_dl.h"
 #include "tiku_event.h"
 #include "tiku_msg.h"
 #include "tiku_window.h"
@@ -44,6 +45,15 @@
  * and its frames keep being copied.
  */
 #define TIKU_FEAT_SHARED_SURFACE 0x1u
+/*
+ * The peer can send what it DREW rather than what it came out as: a
+ * stream of drawing commands instead of a frame of pixels.  Claimed by
+ * whoever is doing the drawing, and worth claiming exactly when the link
+ * is slow -- a 372x302 window is 449,376 bytes as pixels and 350 as
+ * commands, which over a serial line is the difference between a tenth
+ * of a second and most of a minute.  See tiku_dl.h.
+ */
+#define TIKU_FEAT_COMMAND_STREAM 0x2u
 #define TIKU_REMOTE_BUFFERS      2
 #define TIKU_REMOTE_SHM_NAME     64
 
@@ -65,6 +75,7 @@
 #define TIKU_RMSG_SURFACE 6u   /* u32 id, i32 w, i32 h, name[64]    */
 #define TIKU_RMSG_READY   7u   /* u32 id, u32 buffer                */
 #define TIKU_RMSG_SAY     8u   /* a flattened tiku_msg_t       */
+#define TIKU_RMSG_DRAW    9u   /* u32 id, i32 w, i32 h, a tiku_dl_t */
 /* ...and desktop to client. */
 #define TIKU_RMSG_EVENT   16u  /* u32 id, tiku_event_t         */
 #define TIKU_RMSG_PICK    17u  /* u32 id, i32 command               */
@@ -245,6 +256,19 @@ uint32_t tiku_remote_open(tiku_remote_client_t *client,
 /** @brief Send the whole surface as the window's next frame. */
 int tiku_remote_frame(tiku_remote_client_t *client, uint32_t id,
                            const uint32_t *px, int w, int h);
+
+/**
+ * @brief Send what was DRAWN, and let the far end draw it.
+ *
+ * The same window as frame() would send, at a fraction of the bytes,
+ * because the commands are semantic: one of them is a whole button.
+ * The far end plays it into a surface of @p w by @p h and shows that,
+ * so nothing downstream of the session can tell which way it arrived.
+ *
+ * @return 1 when it went.
+ */
+int tiku_remote_draw(tiku_remote_client_t *client, uint32_t id,
+                          const tiku_dl_t *dl, int w, int h);
 
 /** @brief Publish menus for the window, as the plain data they are. */
 int tiku_remote_menus(tiku_remote_client_t *client, uint32_t id,
