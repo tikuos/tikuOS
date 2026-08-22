@@ -14,7 +14,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "tiku_dl.h"
 #include "tiku_gfx.h"
+
+/*
+ * Recording.  A surface may carry a display list, and then every drawing
+ * call writes itself down as well as painting -- one pass, two ways of
+ * saying what it did, so a stream cannot drift from the picture it is
+ * supposed to be of.
+ *
+ * Only the OUTERMOST call is written down.  A frame is four lines and a
+ * line is a fill, so without the depth the list would carry the frame AND
+ * everything the frame is made of, and the far end would draw it twice.
+ */
+int
+tiku_gfx_rec_enter(tiku_surface_t *s)
+{
+    if (s == NULL || s->record == NULL || s->record_depth > 0) {
+        return 0;
+    }
+    s->record_depth++;
+    return 1;
+}
+
+void
+tiku_gfx_rec_leave(tiku_surface_t *s, int on)
+{
+    if (on) {
+        s->record_depth--;
+    }
+}
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,6 +200,9 @@ tiku_surface_free(tiku_surface_t *s)
 void
 tiku_clip_reset(tiku_surface_t *s)
 {
+    if (s != NULL && s->record != NULL && s->record_depth == 0) {
+        (void)tiku_dl_clip_reset(s->record);
+    }
     if (s != NULL) {
         s->clip.x = 0;
         s->clip.y = 0;
@@ -186,6 +218,9 @@ tiku_clip_set(tiku_surface_t *s, tiku_rect_t r)
 
     if (s == NULL) {
         return;
+    }
+    if (s->record != NULL && s->record_depth == 0) {
+        (void)tiku_dl_clip_set(s->record, r);
     }
     x0 = (r.x > 0) ? r.x : 0;
     y0 = (r.y > 0) ? r.y : 0;
@@ -356,9 +391,14 @@ void
 tiku_fill(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c)
 {
     int x, y, x0, y0, x1, y1;
+    int rec;
 
     if (s == NULL) {
         return;
+    }
+    rec = tiku_gfx_rec_enter(s);
+    if (rec) {
+        (void)tiku_dl_fill(s->record, r, c);
     }
     x0 = (r.x > s->clip.x) ? r.x : s->clip.x;
     y0 = (r.y > s->clip.y) ? r.y : s->clip.y;
@@ -377,6 +417,7 @@ tiku_fill(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c)
             }
         }
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
@@ -384,7 +425,13 @@ tiku_hline(tiku_surface_t *s, int x, int y, int len,
                 tiku_rgb_t c)
 {
     tiku_rect_t r = { x, y, len, 1 };
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_hline(s->record, x, y, len, c);
+    }
     tiku_fill(s, r, c);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
@@ -392,32 +439,52 @@ tiku_vline(tiku_surface_t *s, int x, int y, int len,
                 tiku_rgb_t c)
 {
     tiku_rect_t r = { x, y, 1, len };
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_vline(s->record, x, y, len, c);
+    }
     tiku_fill(s, r, c);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
 tiku_frame(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c)
 {
+    int rec;
+
     if (r.w <= 0 || r.h <= 0) {
         return;
+    }
+    rec = tiku_gfx_rec_enter(s);
+    if (rec) {
+        (void)tiku_dl_frame(s->record, r, c);
     }
     tiku_hline(s, r.x, r.y, r.w, c);
     tiku_hline(s, r.x, r.y + r.h - 1, r.w, c);
     tiku_vline(s, r.x, r.y, r.h, c);
     tiku_vline(s, r.x + r.w - 1, r.y, r.h, c);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
 tiku_bevel(tiku_surface_t *s, tiku_rect_t r,
                 tiku_rgb_t light, tiku_rgb_t shadow)
 {
+    int rec;
+
     if (r.w <= 0 || r.h <= 0) {
         return;
+    }
+    rec = tiku_gfx_rec_enter(s);
+    if (rec) {
+        (void)tiku_dl_bevel(s->record, r, light, shadow);
     }
     tiku_hline(s, r.x, r.y, r.w - 1, light);
     tiku_vline(s, r.x, r.y, r.h - 1, light);
     tiku_hline(s, r.x, r.y + r.h - 1, r.w, shadow);
     tiku_vline(s, r.x + r.w - 1, r.y, r.h, shadow);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 tiku_rect_t

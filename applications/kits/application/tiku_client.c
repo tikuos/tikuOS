@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "tiku_client.h"
+#include "tiku_dl.h"
 #include "tiku_remote.h"
 
 typedef struct {
@@ -34,6 +35,30 @@ svc_frame(void *ctx, uint32_t id, const uint32_t *px, int w, int h)
 {
     client_ctx_t *c = ctx;
 
+    return tiku_remote_frame(&c->remote, id, px, w, h);
+}
+
+/**
+ * @brief Hand the window over the cheap way when the cheap way is whole.
+ *
+ * Three things have to be true to send commands: the far end has to be
+ * able to play them, the list has to describe the WHOLE window -- an
+ * icon in it and it does not -- and it has to actually be smaller, which
+ * for a window of four fills it is not.  Any of them false and the
+ * pixels go, and nothing above here notices either way.
+ */
+static int
+svc_present(void *ctx, uint32_t id, const struct tiku_dl *dl,
+            const uint32_t *px, int w, int h)
+{
+    client_ctx_t *c = ctx;
+    size_t frame = 4u * (size_t)w * (size_t)h;
+
+    if (dl != NULL && tiku_dl_misses(dl) == 0 &&
+        tiku_dl_flat_size(dl) * 2u < frame &&
+        tiku_remote_draw(&c->remote, id, dl, w, h)) {
+        return 1;
+    }
     return tiku_remote_frame(&c->remote, id, px, w, h);
 }
 
@@ -72,6 +97,7 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
     services.ctx = ctx;
     services.open = svc_open;
     services.frame = svc_frame;
+    services.present = svc_present;
     services.menus = svc_menus;
     services.close = svc_close;
     if (app->start != NULL && app->start(&state, &services) != 0) {

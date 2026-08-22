@@ -50,6 +50,7 @@ struct tiku_dl {
     unsigned char *b;
     size_t         n, cap;
     int            count;
+    int            missed;
 };
 
 /*---------------------------------------------------------------------------*/
@@ -183,6 +184,7 @@ tiku_dl_clear(tiku_dl_t *dl)
     if (dl != NULL) {
         dl->n = 0u;
         dl->count = 0;
+        dl->missed = 0;
     }
 }
 
@@ -190,6 +192,20 @@ int
 tiku_dl_count(const tiku_dl_t *dl)
 {
     return (dl != NULL) ? dl->count : 0;
+}
+
+void
+tiku_dl_miss(tiku_dl_t *dl)
+{
+    if (dl != NULL) {
+        dl->missed++;
+    }
+}
+
+int
+tiku_dl_misses(const tiku_dl_t *dl)
+{
+    return (dl != NULL) ? dl->missed : 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -554,7 +570,11 @@ face_of(unsigned char id)
     case TIKU_DL_BOLD:      return tiku_font_bold();
     case TIKU_DL_MONO:      return tiku_font_mono(0);
     case TIKU_DL_MONO_BOLD: return tiku_font_mono(1);
-    default:                return tiku_font_plain();
+    case TIKU_DL_PLAIN:     return tiku_font_plain();
+    default:
+        /* Past the four, the byte IS the size: the ladder starts at ten,
+         * so the two meanings cannot be confused. */
+        return tiku_font_at((int)id);
     }
 }
 

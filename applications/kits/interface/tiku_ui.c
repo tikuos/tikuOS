@@ -12,6 +12,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "tiku_dl.h"
 #include "tiku_ui.h"
 
 #include <string.h>
@@ -64,24 +65,42 @@ tiku_ui_step_w(void)
 void
 tiku_ui_panel(tiku_surface_t *s, tiku_rect_t r)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_panel(s->record, r);
+    }
     tiku_fill(s, r, PANEL);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
 tiku_ui_raised(tiku_surface_t *s, tiku_rect_t r)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_raised(s->record, r);
+    }
     tiku_fill(s, r, PANEL);
     tiku_bevel(s, r, WHITE(), SHADOW());
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
 tiku_ui_sunken(tiku_surface_t *s, tiku_rect_t r,
                     tiku_rgb_t face)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_sunken(s->record, r, face);
+    }
     tiku_fill(s, r, face);
     /* Sunken is the raised bevel inverted: shadow above, light below. */
     tiku_bevel(s, r, tiku_tint(PANEL, TIKU_DARKEN_3), WHITE());
     tiku_bevel(s, tiku_inset(r, 1), DARK(), PANEL);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 /**
@@ -103,6 +122,11 @@ void
 tiku_ui_button(tiku_surface_t *s, tiku_rect_t r,
                     const char *label, unsigned state)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_button(s->record, r, label, state);
+    }
     tiku_rect_t f = r;
     tiku_rgb_t text = (state & TIKU_S_DISABLED)
                            ? tiku_tint(PANEL, 1.30f)
@@ -148,6 +172,7 @@ tiku_ui_button(tiku_surface_t *s, tiku_rect_t r,
         }
         (void)tiku_text_centered(s, font, t, label, text);
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 /** @brief The 13x13 well shared by checkbox and radio. */
@@ -275,6 +300,11 @@ void
 tiku_ui_checkbox(tiku_surface_t *s, tiku_rect_t r,
                       const char *label, unsigned state)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_checkbox(s->record, r, label, state);
+    }
     tiku_rect_t b = box_rect(r);
     tiku_rgb_t text = (state & TIKU_S_DISABLED)
                            ? tiku_tint(PANEL, 1.30f) : TIKU_C_TEXT;
@@ -301,12 +331,18 @@ tiku_ui_checkbox(tiku_surface_t *s, tiku_rect_t r,
         tiku_text(s, f, b.x + b.w + 4,
                        r.y + (r.h - f->height) / 2 + f->ascent, label, text);
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
 tiku_ui_radio(tiku_surface_t *s, tiku_rect_t r,
                    const char *label, unsigned state)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_radio(s->record, r, label, state);
+    }
     tiku_rect_t b = box_rect(r);
     tiku_rgb_t text = (state & TIKU_S_DISABLED)
                            ? tiku_tint(PANEL, 1.30f) : TIKU_C_TEXT;
@@ -352,6 +388,7 @@ tiku_ui_radio(tiku_surface_t *s, tiku_rect_t r,
         tiku_text(s, f, b.x + b.w + 4,
                        r.y + (r.h - f->height) / 2 + f->ascent, label, text);
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
@@ -585,11 +622,17 @@ void
 tiku_ui_list_row(tiku_surface_t *s, tiku_rect_t r,
                       const char *text, int selected)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        (void)tiku_dl_list_row(s->record, r, text, selected);
+    }
     const tiku_font_t *f = tiku_font_plain();
 
     tiku_fill(s, r, selected ? TIKU_C_SELECT : TIKU_C_DOC);
     tiku_text(s, f, r.x + 4, r.y + (r.h - f->height) / 2 + f->ascent,
                    text, selected ? TIKU_C_SELTEXT : TIKU_C_TEXT);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void

@@ -18,6 +18,8 @@
 
 #define TIKU_APP_MAX 16
 
+struct tiku_dl;
+
 #include "tiku_window.h"
 
 /*
@@ -33,6 +35,23 @@ typedef struct tiku_app_services {
     uint32_t (*open)(void *ctx, const char *title, int w, int h);
     /** @brief The window's next frame, whole. */
     int (*frame)(void *ctx, uint32_t id, const uint32_t *px, int w, int h);
+    /**
+     * @brief The window's next frame as what was DRAWN, when it can be.
+     *
+     * Hand over both: the list recorded while painting and the pixels
+     * that painting produced.  Which one goes is not the application's
+     * business -- it depends on the link and on whether the list turned
+     * out to describe the whole window, and the answer can differ from
+     * one frame to the next.
+     *
+     * Appended to this struct rather than replacing frame(), so an
+     * application built against the older header still links and still
+     * works; it simply never gets the cheap path.
+     *
+     * @return 1 when the window was handed over by either road.
+     */
+    int (*present)(void *ctx, uint32_t id, const struct tiku_dl *dl,
+                   const uint32_t *px, int w, int h);
     /** @brief Publish the window's menus, as the plain data they are. */
     int (*menus)(void *ctx, uint32_t id, const tiku_menuset_t *set);
     /** @brief Give the window back. */

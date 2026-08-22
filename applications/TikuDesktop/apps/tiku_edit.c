@@ -18,6 +18,7 @@
 #include "tiku_app.h"
 #include "tiku_client.h"
 #include "tiku_font.h"
+#include "tiku_dl.h"
 #include "tiku_gfx.h"
 
 #define EDIT_W      560
@@ -39,6 +40,14 @@ typedef struct {
 typedef struct {
     const tiku_app_services_t *services;
     tiku_surface_t            *surface;
+    /*
+     * What the painting below wrote down as it went.  The editor does not
+     * paint twice for it: the surface records while it is drawn into, so
+     * there is one painting path and a stream cannot come to disagree
+     * with the picture.  NULL when the services this is running against
+     * have no use for one -- linked into a desktop, they do not.
+     */
+    tiku_dl_t                      *dl;
     uint32_t                        id;
     line_t                          line[LINES_MAX];
     int                             nline;
@@ -176,6 +185,13 @@ paint(edit_state_t *st)
     const tiku_font_t *small = tiku_font_at(11);
     int step = f->height + 2;
     int rows = rows_visible();
+
+    /* Painting and recording are the same pass; the list is emptied
+     * first because a frame is the whole window, not the difference. */
+    if (st->dl != NULL) {
+        tiku_dl_clear(st->dl);
+    }
+    st->surface->record = st->dl;
     tiku_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H };
     tiku_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
     char where[128];
@@ -219,8 +235,20 @@ paint(edit_state_t *st)
     tiku_text(st->surface, small, MARGIN,
                    strip.y + (STRIP_H - small->height) / 2 + small->ascent,
                    where, TIKU_C_TEXT);
-    (void)st->services->frame(st->services->ctx, st->id, st->surface->px,
-                              EDIT_W, EDIT_H);
+    st->surface->record = NULL;
+    /*
+     * Handed over BOTH ways, and the services layer picks: down a wire
+     * the commands go, in one process the pixels do, and this does not
+     * have to know which -- which is the same bargain the window session
+     * already makes about where the application is running.
+     */
+    if (st->services->present != NULL) {
+        (void)st->services->present(st->services->ctx, st->id, st->dl,
+                                    st->surface->px, EDIT_W, EDIT_H);
+    } else {
+        (void)st->services->frame(st->services->ctx, st->id,
+                                  st->surface->px, EDIT_W, EDIT_H);
+    }
 }
 
 static void
@@ -366,6 +394,10 @@ edit_start(void **state, const tiku_app_services_t *services)
     }
     st->services = services;
     st->surface = tiku_surface_new(EDIT_W, EDIT_H, TIKU_C_DOC);
+    /* Only worth keeping when something can use it; a NULL one simply
+     * means every frame goes over as pixels, which is what happens
+     * linked into a desktop anyway. */
+    st->dl = (services->present != NULL) ? tiku_dl_new() : NULL;
     if (st->surface == NULL) {
         free(st);
         return -1;
@@ -390,6 +422,7 @@ edit_stop(void *state)
 
     if (st != NULL) {
         lines_free(st);
+        tiku_dl_free(st->dl);
         tiku_surface_free(st->surface);
         free(st);
     }

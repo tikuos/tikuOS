@@ -51,7 +51,14 @@
 
 #include "tiku_gfx.h"
 
-/** @brief Which face a piece of text is in; the far end resolves it. */
+/**
+ * @brief Which face a piece of text is in; the far end resolves it.
+ *
+ * Four names, and then the ladder: any value past these is a PLAIN face
+ * at that many pixels, which works because the smallest face is ten.  So
+ * a status line set at eleven arrives at eleven rather than in whatever
+ * the body size happens to be.
+ */
 typedef enum {
     TIKU_DL_PLAIN = 0,
     TIKU_DL_BOLD  = 1,
@@ -70,6 +77,21 @@ void tiku_dl_clear(tiku_dl_t *dl);
 
 /** @brief How many commands are in it. */
 int tiku_dl_count(const tiku_dl_t *dl);
+
+/**
+ * @brief Note that something was drawn which this cannot carry.
+ *
+ * A recording surface calls it for a control with no command of its own.
+ * The list stays usable -- what IS recordable is still in it -- but a
+ * caller must not send it in place of the pixels, because it no longer
+ * describes the whole window.  Better than dropping the call silently
+ * and better than refusing to record at all: the decision belongs to
+ * whoever is about to put it on a wire.
+ */
+void tiku_dl_miss(tiku_dl_t *dl);
+
+/** @brief How many such calls there were.  0 means the list is whole. */
+int tiku_dl_misses(const tiku_dl_t *dl);
 
 /*---------------------------------------------------------------------------*/
 /* Recording.  Each mirrors the drawing call of the same name, and each     */

@@ -12,6 +12,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "tiku_dl.h"
 #include "tiku_font.h"
 #include "tiku_font_data.h"
 #include "tiku_ttf.h"
@@ -655,15 +656,66 @@ blend(tiku_surface_t *s, int sc, int x, int y, tiku_rgb_t c,
     s->px[(long)y * stride + x] = TIKU_RGB(dr, dg, db);
 }
 
+/**
+ * @brief How a stream names the face @p f, or -1 when it cannot.
+ *
+ * One byte carries two meanings, and they cannot be confused because the
+ * ladder starts at ten: 0 to 3 are the four faces the interface is
+ * DRAWN in, whatever size that currently is, and anything larger is a
+ * plain face at that many pixels -- which is how a status line set at
+ * eleven says so rather than arriving in the body size.
+ *
+ * -1 for a face this cannot name -- one read from a dropped file, say.
+ * The caller marks the list incomplete rather than guessing, because a
+ * guess here is a window that arrives in the wrong letters and says
+ * nothing about it.
+ */
+static int
+face_id(const tiku_font_t *f)
+{
+    int i;
+
+    if (f == tiku_font_bold()) {
+        return TIKU_DL_BOLD;
+    }
+    if (f == tiku_font_mono(0)) {
+        return TIKU_DL_MONO;
+    }
+    if (f == tiku_font_mono(1)) {
+        return TIKU_DL_MONO_BOLD;
+    }
+    if (f == tiku_font_plain()) {
+        return TIKU_DL_PLAIN;
+    }
+    for (i = 0; i < SIZE_COUNT; i++) {
+        if (face_sizes[i] > TIKU_DL_MONO_BOLD &&
+            tiku_font_at(face_sizes[i]) == f) {
+            return face_sizes[i];
+        }
+    }
+    return -1;
+}
+
 void
 tiku_text(tiku_surface_t *s, const tiku_font_t *f, int x, int y,
                const char *text, tiku_rgb_t c)
 {
     const tiku_font_t *hi;
     int sc, pen;
+    int rec;
 
     if (s == NULL || f == NULL || text == NULL) {
         return;
+    }
+    rec = tiku_gfx_rec_enter(s);
+    if (rec) {
+        int id = face_id(f);
+
+        if (id < 0) {
+            tiku_dl_miss(s->record);
+        } else {
+            (void)tiku_dl_text(s->record, (tiku_dl_face_t)id, x, y, text, c);
+        }
     }
     sc = (s->scale > 1) ? s->scale : 1;
     /* An even scale draws the 2x face: half the replication, twice the
@@ -704,6 +756,7 @@ tiku_text(tiku_surface_t *s, const tiku_font_t *f, int x, int y,
          * against, whichever face happened to draw the letter. */
         pen += logical.adv * sc;
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 int
@@ -715,7 +768,19 @@ tiku_text_centered(tiku_surface_t *s, const tiku_font_t *f,
     int x = r.x + (r.w - tw) / 2;
     /* Centre the ink, not the line box: R5 labels sit optically centred. */
     int y = r.y + (r.h - f->height) / 2 + f->ascent;
+    int rec = tiku_gfx_rec_enter(s);
 
+    if (rec) {
+        int id = face_id(f);
+
+        if (id < 0) {
+            tiku_dl_miss(s->record);
+        } else {
+            (void)tiku_dl_text_centered(s->record, (tiku_dl_face_t)id, r,
+                                        text, c);
+        }
+    }
     tiku_text(s, f, x, y, text, c);
+    tiku_gfx_rec_leave(s, rec);
     return x;
 }

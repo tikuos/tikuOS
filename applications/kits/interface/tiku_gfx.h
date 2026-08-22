@@ -111,6 +111,8 @@ typedef struct {
     int x, y, w, h;
 } tiku_rect_t;
 
+struct tiku_dl;
+
 typedef struct {
     tiku_rgb_t  *px;        /* native pixels, row-major */
     int               w, h;      /* LOGICAL size             */
@@ -120,7 +122,34 @@ typedef struct {
      * (w*scale) x (h*scale) and paints scale x scale blocks -- except
      * text, which carries a real 2x face and gains true detail. */
     int               scale;
+    /*
+     * When set, every drawing call below ALSO writes itself down here,
+     * so a window is recorded by the act of being drawn -- there is no
+     * second painting path for a stream to drift away from.  See
+     * tiku_dl.h; NULL, which it is for every surface that does not ask,
+     * costs one compare per call.
+     */
+    struct tiku_dl   *record;
+    /*
+     * How deep inside a recorded call we are.  A frame is four lines and
+     * a line is a fill, so without this the list would carry the frame
+     * AND everything the frame is made of, and the far end would draw it
+     * all twice.  Only the outermost call is written down.
+     */
+    int               record_depth;
 } tiku_surface_t;
+
+/*
+ * How a drawing call obeys a recording surface.  Not for applications --
+ * an application asks by setting `record` and then draws as it always
+ * did; these are what each call inside the kit uses to write itself
+ * down, and to keep the calls it is made of from writing themselves down
+ * on top of it.
+ *
+ * @return nonzero when this call is the outermost one and should record.
+ */
+int tiku_gfx_rec_enter(tiku_surface_t *s);
+void tiku_gfx_rec_leave(tiku_surface_t *s, int on);
 
 /** @brief Allocate a surface and fill it with @p bg.  NULL on failure. */
 tiku_surface_t *tiku_surface_new(int w, int h, tiku_rgb_t bg);

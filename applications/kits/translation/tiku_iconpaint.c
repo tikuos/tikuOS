@@ -9,6 +9,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "tiku_dl.h"
 #include "tiku_iconpaint.h"
 #include "tiku_icons.h"
 
@@ -72,6 +73,17 @@ paint(tiku_surface_t *s, const char *name, int x, int y, int size,
     /* Asked once for the whole icon, not per pixel: it cannot change
      * while one is being painted. */
     int mono = tiku_theme_achromatic();
+
+    /*
+     * The one thing a display list genuinely cannot carry.  Everything in
+     * the Interface kit reduces to primitives that record; an icon is a
+     * PICTURE, and the commands are drawing calls, not pixels.  So a
+     * window with an icon in it is told it is no longer whole, and
+     * whoever is about to put it on a wire sends the frame instead.
+     */
+    if (s != NULL && s->record != NULL && s->record_depth == 0) {
+        tiku_dl_miss(s->record);
+    }
 
     if (s == NULL || name == NULL || size <= 0) {
         return 0;
@@ -280,6 +292,9 @@ tiku_paint_image(tiku_surface_t *s, const tiku_image_t *im,
     if (s == NULL || im == NULL || im->px == NULL || im->w <= 0 ||
         im->h <= 0 || dst.w <= 0 || dst.h <= 0) {
         return;
+    }
+    if (s != NULL && s->record != NULL && s->record_depth == 0) {
+        tiku_dl_miss(s->record);        /* a thumbnail is a picture too */
     }
     for (py = 0; py < dst.h; py++) {
         int y = dst.y + py;
