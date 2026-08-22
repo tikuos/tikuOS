@@ -40,11 +40,11 @@ better = worse = same = 0
 deltas, worst_regress, best_gain = [], [], []
 for font in fonts:
     for px in sizes:
-        os.environ.pop("TIKU_DESK_HINT", None)
+        os.environ.pop("TIKU_HINT", None)
         on = mae_for(font, px)
-        os.environ["TIKU_DESK_HINT"] = "0"
+        os.environ["TIKU_HINT"] = "0"
         off = mae_for(font, px)
-        os.environ.pop("TIKU_DESK_HINT", None)
+        os.environ.pop("TIKU_HINT", None)
         if on is None or off is None:
             continue
         family, a = on

@@ -16,10 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "tiku_desk_app.h"
-#include "tiku_desk_client.h"
-#include "tiku_desk_font.h"
-#include "tiku_desk_gfx.h"
+#include "tiku_app.h"
+#include "tiku_client.h"
+#include "tiku_font.h"
+#include "tiku_gfx.h"
 
 #define SKETCH_W 320
 #define SKETCH_H 220
@@ -30,18 +30,18 @@
 #define CMD_INK   3
 
 typedef struct {
-    const tiku_desk_app_services_t *services;
-    tiku_desk_surface_t            *surface;
+    const tiku_app_services_t *services;
+    tiku_surface_t            *surface;
     uint32_t                        id;
     int                             drawing;
     int                             lx, ly;
     int                             dark_ink;
 } sketch_state_t;
 
-static tiku_desk_rgb_t
+static tiku_rgb_t
 ink_of(const sketch_state_t *st)
 {
-    return st->dark_ink ? TIKU_DESK_C_TEXT : TIKU_DESK_C_TAB;
+    return st->dark_ink ? TIKU_C_TEXT : TIKU_C_TAB;
 }
 
 static void
@@ -54,17 +54,17 @@ send(sketch_state_t *st)
 static void
 clear(sketch_state_t *st)
 {
-    tiku_desk_rect_t paper = { 0, STRIP_H, SKETCH_W, SKETCH_H - STRIP_H };
-    tiku_desk_rect_t strip = { 0, 0, SKETCH_W, STRIP_H };
+    tiku_rect_t paper = { 0, STRIP_H, SKETCH_W, SKETCH_H - STRIP_H };
+    tiku_rect_t strip = { 0, 0, SKETCH_W, STRIP_H };
 
-    tiku_desk_fill(st->surface, strip, TIKU_DESK_C_PANEL);
-    tiku_desk_hline(st->surface, 0, STRIP_H - 1, SKETCH_W,
-                    tiku_desk_tint(TIKU_DESK_C_PANEL,
-                                   TIKU_DESK_DARKEN_2));
-    (void)tiku_desk_text_centered(st->surface, tiku_desk_font_plain(),
+    tiku_fill(st->surface, strip, TIKU_C_PANEL);
+    tiku_hline(st->surface, 0, STRIP_H - 1, SKETCH_W,
+                    tiku_tint(TIKU_C_PANEL,
+                                   TIKU_DARKEN_2));
+    (void)tiku_text_centered(st->surface, tiku_font_plain(),
                                   strip, "drag to draw",
-                                  TIKU_DESK_C_TEXT);
-    tiku_desk_fill(st->surface, paper, TIKU_DESK_C_DOC);
+                                  TIKU_C_TEXT);
+    tiku_fill(st->surface, paper, TIKU_C_DOC);
 }
 
 /** @brief Lay a round nib along the segment from (@p ax, @p ay). */
@@ -86,8 +86,8 @@ stroke(sketch_state_t *st, int ax, int ay, int bx, int by)
         if (y < STRIP_H + 2) {
             continue;           /* the strip is not paper */
         }
-        tiku_desk_fill(st->surface,
-                       (tiku_desk_rect_t){ x - 1, y - 1, 3, 3 },
+        tiku_fill(st->surface,
+                       (tiku_rect_t){ x - 1, y - 1, 3, 3 },
                        ink_of(st));
     }
 }
@@ -95,7 +95,7 @@ stroke(sketch_state_t *st, int ax, int ay, int bx, int by)
 static void
 publish(sketch_state_t *st)
 {
-    tiku_desk_menuset_t menus;
+    tiku_menuset_t menus;
 
     memset(&menus, 0, sizeof menus);
     menus.nmenu = 1;
@@ -118,7 +118,7 @@ publish(sketch_state_t *st)
 }
 
 static int
-sketch_start(void **state, const tiku_desk_app_services_t *services)
+sketch_start(void **state, const tiku_app_services_t *services)
 {
     sketch_state_t *st = calloc(1, sizeof *st);
 
@@ -126,8 +126,8 @@ sketch_start(void **state, const tiku_desk_app_services_t *services)
         return -1;
     }
     st->services = services;
-    st->surface = tiku_desk_surface_new(SKETCH_W, SKETCH_H,
-                                        TIKU_DESK_C_DOC);
+    st->surface = tiku_surface_new(SKETCH_W, SKETCH_H,
+                                        TIKU_C_DOC);
     if (st->surface == NULL) {
         free(st);
         return -1;
@@ -146,25 +146,25 @@ sketch_stop(void *state)
     sketch_state_t *st = state;
 
     if (st != NULL) {
-        tiku_desk_surface_free(st->surface);
+        tiku_surface_free(st->surface);
         free(st);
     }
 }
 
 static int
-sketch_event(void *state, const tiku_desk_event_t *event)
+sketch_event(void *state, const tiku_event_t *event)
 {
     sketch_state_t *st = state;
 
     switch (event->type) {
-    case TIKU_DESK_EVENT_POINTER_DOWN:
+    case TIKU_EVENT_POINTER_DOWN:
         st->drawing = 1;
         st->lx = event->x;
         st->ly = event->y;
         stroke(st, event->x, event->y, event->x, event->y);
         send(st);
         break;
-    case TIKU_DESK_EVENT_POINTER_MOVE:
+    case TIKU_EVENT_POINTER_MOVE:
         /* Only while the button is down: a pointer crossing the window
          * on its way somewhere else is not a stroke. */
         if (st->drawing) {
@@ -174,15 +174,15 @@ sketch_event(void *state, const tiku_desk_event_t *event)
             send(st);
         }
         break;
-    case TIKU_DESK_EVENT_POINTER_UP:
+    case TIKU_EVENT_POINTER_UP:
         if (st->drawing) {
             stroke(st, st->lx, st->ly, event->x, event->y);
             st->drawing = 0;
             send(st);
         }
         break;
-    case TIKU_DESK_EVENT_KEY_DOWN:
-        if (event->key == TIKU_DESK_KEY_ESCAPE) {
+    case TIKU_EVENT_KEY_DOWN:
+        if (event->key == TIKU_KEY_ESCAPE) {
             return 1;
         }
         break;
@@ -215,7 +215,7 @@ sketch_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
-const tiku_desk_app_descriptor_t tiku_example_sketch = {
+const tiku_app_descriptor_t tiku_example_sketch = {
     .id = "org.tikuos.example.sketch",
     .name = "Sketch",
     .start = sketch_start,
@@ -225,9 +225,9 @@ const tiku_desk_app_descriptor_t tiku_example_sketch = {
 };
 
 #ifdef TIKU_APP_SO
-/* The one symbol a loader looks for; see tiku_desk_app.h. */
-const tiku_desk_app_export_t tiku_desk_app_v1 = {
-    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+/* The one symbol a loader looks for; see tiku_app.h. */
+const tiku_app_export_t tiku_app_v1 = {
+    TIKU_APP_ABI, (uint32_t)sizeof(tiku_app_descriptor_t),
     &tiku_example_sketch
 };
 #endif
@@ -236,6 +236,6 @@ const tiku_desk_app_export_t tiku_desk_app_v1 = {
 int
 main(void)
 {
-    return tiku_desk_client_run(&tiku_example_sketch);
+    return tiku_client_run(&tiku_example_sketch);
 }
 #endif

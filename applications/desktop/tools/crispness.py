@@ -40,11 +40,11 @@ n = 0
 crisper = softer = 0
 for font in fonts:
     for px in sizes:
-        os.environ.pop("TIKU_DESK_HINT", None)
+        os.environ.pop("TIKU_HINT", None)
         a, _ = cf.ours(font, px, cps)
-        os.environ["TIKU_DESK_HINT"] = "0"
+        os.environ["TIKU_HINT"] = "0"
         b, _ = cf.ours(font, px, cps)
-        os.environ.pop("TIKU_DESK_HINT", None)
+        os.environ.pop("TIKU_HINT", None)
         if a is None or b is None:
             continue
         try:

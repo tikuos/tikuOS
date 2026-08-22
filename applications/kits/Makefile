@@ -31,29 +31,29 @@ CFLAGS  += -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter \
 
 BUILD := build
 
-SUPPORT     := support/tiku_desk_msg.c support/tiku_trk_strings.c
-DEVICE      := device/tiku_desk_tx.c device/tiku_desk_session.c \
-               device/tiku_desk_ns.c
-STORAGE     := storage/tiku_trk_model.c storage/tiku_trk_state.c \
-               storage/tiku_trk_ident.c storage/tiku_trk_attr.c \
-               storage/tiku_trk_query.c storage/tiku_trk_fs.c \
-               storage/tiku_trk_backend_posix.c \
-               storage/tiku_trk_backend_tiku.c storage/tiku_trk_notify.c \
-               storage/tiku_trk_vdir.c storage/tiku_trk_volume.c
-INTERFACE   := interface/tiku_desk_gfx.c interface/tiku_desk_theme.c \
-               interface/tiku_desk_font.c interface/tiku_desk_ttf.c \
-               interface/tiku_desk_glyphpath.c interface/tiku_desk_cff.c \
-               interface/tiku_desk_ui.c interface/tiku_desk_window.c \
-               interface/tiku_desk_x11.c
-TRANSLATION := translation/tiku_trk_inflate.c translation/tiku_trk_jpeg.c \
-               translation/tiku_trk_hvif.c translation/tiku_trk_image.c \
-               translation/tiku_trk_thumb.c translation/tiku_trk_iconpaint.c \
-               translation/tiku_trk_icons.c translation/tiku_trk_fontdir.c
-APPLICATION := application/tiku_desk_app.c application/tiku_desk_app_load.c \
-               application/tiku_desk_remote.c \
-               application/tiku_desk_conduct.c \
-               application/tiku_desk_client.c \
-               application/tiku_desk_about_app.c
+SUPPORT     := support/tiku_msg.c support/tiku_strings.c
+DEVICE      := device/tiku_tx.c device/tiku_session.c \
+               device/tiku_ns.c
+STORAGE     := storage/tiku_model.c storage/tiku_state.c \
+               storage/tiku_ident.c storage/tiku_attr.c \
+               storage/tiku_query.c storage/tiku_fs.c \
+               storage/tiku_backend_posix.c \
+               storage/tiku_backend_tiku.c storage/tiku_notify.c \
+               storage/tiku_vdir.c storage/tiku_volume.c
+INTERFACE   := interface/tiku_gfx.c interface/tiku_theme.c \
+               interface/tiku_font.c interface/tiku_ttf.c \
+               interface/tiku_glyphpath.c interface/tiku_cff.c \
+               interface/tiku_ui.c interface/tiku_window.c \
+               interface/tiku_x11.c
+TRANSLATION := translation/tiku_inflate.c translation/tiku_jpeg.c \
+               translation/tiku_hvif.c translation/tiku_image.c \
+               translation/tiku_thumb.c translation/tiku_iconpaint.c \
+               translation/tiku_icons.c translation/tiku_fontdir.c
+APPLICATION := application/tiku_app.c application/tiku_app_load.c \
+               application/tiku_remote.c \
+               application/tiku_conduct.c \
+               application/tiku_client.c \
+               application/tiku_about_app.c
 
 KITS := support device storage interface translation application
 

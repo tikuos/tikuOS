@@ -1,7 +1,7 @@
 # Toolkit examples
 
 Four applications, smallest first. Each is one C file that defines a
-`tiku_desk_app_descriptor_t` and nothing else, so the same source runs two
+`tiku_app_descriptor_t` and nothing else, so the same source runs two
 ways: as its own process over the window session, or hosted inside a
 desktop that linked it.
 
@@ -38,7 +38,7 @@ backed by the session socket, and linked in they are backed by the
 workspace directly.
 
 ```c
-const tiku_desk_app_descriptor_t tiku_example_hello = {
+const tiku_app_descriptor_t tiku_example_hello = {
     .id = "org.tikuos.example.hello",
     .name = "Hello",
     .start = hello_start,       /* open windows, publish menus */
@@ -46,7 +46,7 @@ const tiku_desk_app_descriptor_t tiku_example_hello = {
     .event = hello_event        /* keys and the pointer        */
 };
 
-int main(void) { return tiku_desk_client_run(&tiku_example_hello); }
+int main(void) { return tiku_client_run(&tiku_example_hello); }
 ```
 
 `main` is compiled out by `-DTIKU_EXAMPLE_EMBED`, which leaves the
@@ -56,7 +56,7 @@ descriptor, a host runs it beside the desktop, and the code is the same.
 
 ## What an application owns
 
-Its pixels. `tiku_desk_surface_new` gives it a surface, it draws whatever
+Its pixels. `tiku_surface_new` gives it a surface, it draws whatever
 it likes, and `frame` hands a finished picture over. Nothing draws into
 another process's window, which is why a crashed application leaves a
 stale frame rather than a broken desktop.
@@ -64,7 +64,7 @@ stale frame rather than a broken desktop.
 Coordinates in events are relative to the window's **content**, so a hit
 test written once keeps working wherever the window is moved.
 
-Menus travel as plain data: fill in a `tiku_desk_menuset_t`, call `menus`,
+Menus travel as plain data: fill in a `tiku_menuset_t`, call `menus`,
 and picks come back through `pick` as the command numbers the application
 chose. Republish whenever the state behind a row changes -- `counter.c`
 disables *Decrease* at zero, and `clock.c` re-marks *Show seconds* -- since

@@ -15,10 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "tiku_desk_app.h"
-#include "tiku_desk_client.h"
-#include "tiku_desk_font.h"
-#include "tiku_desk_gfx.h"
+#include "tiku_app.h"
+#include "tiku_client.h"
+#include "tiku_font.h"
+#include "tiku_gfx.h"
 
 #define EDIT_W      560
 #define EDIT_H      400
@@ -37,8 +37,8 @@ typedef struct {
 } line_t;
 
 typedef struct {
-    const tiku_desk_app_services_t *services;
-    tiku_desk_surface_t            *surface;
+    const tiku_app_services_t *services;
+    tiku_surface_t            *surface;
     uint32_t                        id;
     line_t                          line[LINES_MAX];
     int                             nline;
@@ -56,7 +56,7 @@ static char edit_path[512];
 static int
 rows_visible(void)
 {
-    const tiku_desk_font_t *f = tiku_desk_font_plain();
+    const tiku_font_t *f = tiku_font_plain();
 
     return (EDIT_H - STRIP_H - MARGIN) / (f->height + 2);
 }
@@ -172,21 +172,21 @@ scroll_to_caret(edit_state_t *st)
 static void
 paint(edit_state_t *st)
 {
-    const tiku_desk_font_t *f = tiku_desk_font_plain();
-    const tiku_desk_font_t *small = tiku_desk_font_at(11);
+    const tiku_font_t *f = tiku_font_plain();
+    const tiku_font_t *small = tiku_font_at(11);
     int step = f->height + 2;
     int rows = rows_visible();
-    tiku_desk_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H };
-    tiku_desk_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
+    tiku_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H };
+    tiku_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
     char where[128];
     int i;
 
-    tiku_desk_fill(st->surface, page, TIKU_DESK_C_DOC);
+    tiku_fill(st->surface, page, TIKU_C_DOC);
     for (i = 0; i < rows && st->top + i < st->nline; i++) {
         int y = MARGIN + i * step;
 
-        tiku_desk_text(st->surface, f, MARGIN, y + f->ascent,
-                       st->line[st->top + i].text, TIKU_DESK_C_TEXT);
+        tiku_text(st->surface, f, MARGIN, y + f->ascent,
+                       st->line[st->top + i].text, TIKU_C_TEXT);
     }
     {
         /* The caret sits where the text before it ends, which is the only
@@ -201,14 +201,14 @@ paint(edit_state_t *st)
             }
             memcpy(head, st->line[st->cy].text, (size_t)cut);
             head[cut] = '\0';
-            tiku_desk_vline(st->surface,
-                            MARGIN + tiku_desk_text_width(f, head),
-                            MARGIN + row * step, step, TIKU_DESK_C_TEXT);
+            tiku_vline(st->surface,
+                            MARGIN + tiku_text_width(f, head),
+                            MARGIN + row * step, step, TIKU_C_TEXT);
         }
     }
-    tiku_desk_fill(st->surface, strip, TIKU_DESK_C_PANEL);
-    tiku_desk_hline(st->surface, 0, strip.y, EDIT_W,
-                    tiku_desk_tint(TIKU_DESK_C_PANEL, TIKU_DESK_DARKEN_2));
+    tiku_fill(st->surface, strip, TIKU_C_PANEL);
+    tiku_hline(st->surface, 0, strip.y, EDIT_W,
+                    tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
     /* Marked in ASCII: the interface face carries no bullet, and a
      * modified file that says nothing about it is the worst of the
      * three states this line can be in. */
@@ -216,9 +216,9 @@ paint(edit_state_t *st)
              st->modified ? "* " : "",
              st->path[0] != '\0' ? st->path : "untitled",
              st->cy + 1, st->cx + 1, st->note);
-    tiku_desk_text(st->surface, small, MARGIN,
+    tiku_text(st->surface, small, MARGIN,
                    strip.y + (STRIP_H - small->height) / 2 + small->ascent,
-                   where, TIKU_DESK_C_TEXT);
+                   where, TIKU_C_TEXT);
     (void)st->services->frame(st->services->ctx, st->id, st->surface->px,
                               EDIT_W, EDIT_H);
 }
@@ -226,7 +226,7 @@ paint(edit_state_t *st)
 static void
 publish(edit_state_t *st)
 {
-    tiku_desk_menuset_t menus;
+    tiku_menuset_t menus;
 
     memset(&menus, 0, sizeof menus);
     menus.nmenu = 1;
@@ -355,7 +355,7 @@ clamp_column(edit_state_t *st)
 }
 
 static int
-edit_start(void **state, const tiku_desk_app_services_t *services)
+edit_start(void **state, const tiku_app_services_t *services)
 {
     edit_state_t *st = calloc(1, sizeof *st);
     const char *slash;
@@ -365,7 +365,7 @@ edit_start(void **state, const tiku_desk_app_services_t *services)
         return -1;
     }
     st->services = services;
-    st->surface = tiku_desk_surface_new(EDIT_W, EDIT_H, TIKU_DESK_C_DOC);
+    st->surface = tiku_surface_new(EDIT_W, EDIT_H, TIKU_C_DOC);
     if (st->surface == NULL) {
         free(st);
         return -1;
@@ -390,21 +390,21 @@ edit_stop(void *state)
 
     if (st != NULL) {
         lines_free(st);
-        tiku_desk_surface_free(st->surface);
+        tiku_surface_free(st->surface);
         free(st);
     }
 }
 
 static int
-edit_event(void *state, const tiku_desk_event_t *event)
+edit_event(void *state, const tiku_event_t *event)
 {
     edit_state_t *st = state;
     int rows = rows_visible();
 
-    if (event->type != TIKU_DESK_EVENT_KEY_DOWN) {
+    if (event->type != TIKU_EVENT_KEY_DOWN) {
         return 0;
     }
-    if ((event->modifiers & TIKU_DESK_MOD_CMD) != 0u) {
+    if ((event->modifiers & TIKU_MOD_CMD) != 0u) {
         if (event->key == 's' || event->key == 'S') {
             (void)save(st);
             publish(st);
@@ -413,22 +413,22 @@ edit_event(void *state, const tiku_desk_event_t *event)
         return 0;
     }
     switch (event->key) {
-    case TIKU_DESK_KEY_ESCAPE:
+    case TIKU_KEY_ESCAPE:
         return 1;
-    case TIKU_DESK_KEY_RETURN:
+    case TIKU_KEY_RETURN:
         split_line(st);
         break;
-    case TIKU_DESK_KEY_BACKSPACE:
+    case TIKU_KEY_BACKSPACE:
         backspace(st);
         break;
-    case TIKU_DESK_KEY_LEFT:
+    case TIKU_KEY_LEFT:
         if (st->cx > 0) {
             st->cx--;
         } else if (st->cy > 0) {
             st->cx = st->line[--st->cy].len;
         }
         break;
-    case TIKU_DESK_KEY_RIGHT:
+    case TIKU_KEY_RIGHT:
         if (st->cx < st->line[st->cy].len) {
             st->cx++;
         } else if (st->cy + 1 < st->nline) {
@@ -436,29 +436,29 @@ edit_event(void *state, const tiku_desk_event_t *event)
             st->cx = 0;
         }
         break;
-    case TIKU_DESK_KEY_UP:
+    case TIKU_KEY_UP:
         if (st->cy > 0) {
             st->cy--;
             clamp_column(st);
         }
         break;
-    case TIKU_DESK_KEY_DOWN:
+    case TIKU_KEY_DOWN:
         if (st->cy + 1 < st->nline) {
             st->cy++;
             clamp_column(st);
         }
         break;
-    case TIKU_DESK_KEY_HOME:
+    case TIKU_KEY_HOME:
         st->cx = 0;
         break;
-    case TIKU_DESK_KEY_END:
+    case TIKU_KEY_END:
         st->cx = st->line[st->cy].len;
         break;
-    case TIKU_DESK_KEY_PAGE_UP:
+    case TIKU_KEY_PAGE_UP:
         st->cy = (st->cy > rows) ? st->cy - rows : 0;
         clamp_column(st);
         break;
-    case TIKU_DESK_KEY_PAGE_DOWN:
+    case TIKU_KEY_PAGE_DOWN:
         st->cy = (st->cy + rows < st->nline) ? st->cy + rows
                                              : st->nline - 1;
         clamp_column(st);
@@ -499,7 +499,7 @@ edit_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
-const tiku_desk_app_descriptor_t tiku_edit_app = {
+const tiku_app_descriptor_t tiku_edit_app = {
     .id = "org.tikuos.edit",
     .name = "Edit",
     .start = edit_start,
@@ -509,9 +509,9 @@ const tiku_desk_app_descriptor_t tiku_edit_app = {
 };
 
 #ifdef TIKU_APP_SO
-/* The one symbol a loader looks for; see tiku_desk_app.h. */
-const tiku_desk_app_export_t tiku_desk_app_v1 = {
-    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+/* The one symbol a loader looks for; see tiku_app.h. */
+const tiku_app_export_t tiku_app_v1 = {
+    TIKU_APP_ABI, (uint32_t)sizeof(tiku_app_descriptor_t),
     &tiku_edit_app
 };
 #endif
@@ -523,6 +523,6 @@ main(int argc, char **argv)
     if (argc > 1) {
         snprintf(edit_path, sizeof edit_path, "%s", argv[1]);
     }
-    return tiku_desk_client_run(&tiku_edit_app);
+    return tiku_client_run(&tiku_edit_app);
 }
 #endif

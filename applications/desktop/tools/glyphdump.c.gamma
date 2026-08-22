@@ -1,0 +1,16 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "tiku_desk_ttf.h"
+int main(int c,char**v){
+    tiku_desk_ttf_t*t=tiku_desk_ttf_open(v[1]); int px=atoi(v[2]),i;
+    if(!t){printf("REFUSED\n");return 1;}
+    printf("FAMILY %s\n", tiku_desk_ttf_family(t));
+    { int a=0,h=0; tiku_desk_ttf_metrics(t,px,&a,&h); printf("METRICS %d %d\n",a,h); }
+    for(i=3;i<c;i++){ unsigned cp=strtoul(v[i],0,16); tiku_desk_ttf_glyph_t g; int x,y;
+        if(!tiku_desk_ttf_render(t,cp,px,&g)){printf("GLYPH %x MISSING\n",cp);continue;}
+        printf("GLYPH %x %d %d %d %d %d\n",cp,g.adv,g.w,g.h,g.ox,g.oy);
+        for(y=0;y<g.h;y++){for(x=0;x<g.w;x++)printf("%d%s",g.cover[y*g.w+x],x+1<g.w?" ":"");printf("\n");}
+        tiku_desk_ttf_free_glyph(&g);}
+    return 0;
+}

@@ -15,8 +15,8 @@
  * Build it against the sanitisers, which is the point of it:
  *
  *   cc -g -fsanitize=address,undefined -I../src -o fontfuzz fontfuzz.c \
- *      ../src/tiku_desk_ttf.c ../src/tiku_desk_cff.c \
- *      ../src/tiku_desk_glyphpath.c
+ *      ../src/tiku_ttf.c ../src/tiku_cff.c \
+ *      ../src/tiku_glyphpath.c
  *   ./fontfuzz $(find /usr/share/fonts -name '*.ttf' -o -name '*.otf')
  *
  * The seed is fixed, so a failure is one anybody can have again.
@@ -27,24 +27,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "tiku_desk_ttf.h"
+#include "tiku_ttf.h"
 
 static unsigned long seed = 12345u;
 static unsigned long rnd(void){ seed = seed*6364136223846793005ul + 1442695040888963407ul; return seed >> 33; }
 
 static int try_file(const char *path, int *drew) {
-    tiku_desk_ttf_t *t = tiku_desk_ttf_open(path);
+    tiku_ttf_t *t = tiku_ttf_open(path);
     unsigned cp;
     if (!t) return 0;
     for (cp = 32; cp < 0x300; cp++) {
-        tiku_desk_ttf_glyph_t g;
-        if (tiku_desk_ttf_render(t, cp, 14, &g)) { if (g.cover) (*drew)++; tiku_desk_ttf_free_glyph(&g); }
+        tiku_ttf_glyph_t g;
+        if (tiku_ttf_render(t, cp, 14, &g)) { if (g.cover) (*drew)++; tiku_ttf_free_glyph(&g); }
     }
     for (cp = 0x4e00; cp < 0x4e40; cp++) {
-        tiku_desk_ttf_glyph_t g;
-        if (tiku_desk_ttf_render(t, cp, 14, &g)) { if (g.cover) (*drew)++; tiku_desk_ttf_free_glyph(&g); }
+        tiku_ttf_glyph_t g;
+        if (tiku_ttf_render(t, cp, 14, &g)) { if (g.cover) (*drew)++; tiku_ttf_free_glyph(&g); }
     }
-    tiku_desk_ttf_close(t);
+    tiku_ttf_close(t);
     return 1;
 }
 

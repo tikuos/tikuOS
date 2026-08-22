@@ -26,10 +26,10 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "tiku_desk_app.h"
-#include "tiku_desk_client.h"
-#include "tiku_desk_font.h"
-#include "tiku_desk_gfx.h"
+#include "tiku_app.h"
+#include "tiku_client.h"
+#include "tiku_font.h"
+#include "tiku_gfx.h"
 
 #define COLS      80
 #define ROWS      24
@@ -61,8 +61,8 @@ typedef enum {
 } scan_t;
 
 typedef struct {
-    const tiku_desk_app_services_t *services;
-    tiku_desk_surface_t            *surface;
+    const tiku_app_services_t *services;
+    tiku_surface_t            *surface;
     uint32_t                        id;
     int                             master;
     pid_t                           child;
@@ -91,17 +91,17 @@ typedef struct {
 } term_state_t;
 
 /* The ANSI eight, then the eight bright ones the bold attribute picks. */
-static const tiku_desk_rgb_t kAnsi[8] = {
-    TIKU_DESK_RGB(0, 0, 0),       TIKU_DESK_RGB(178, 24, 24),
-    TIKU_DESK_RGB(24, 154, 24),   TIKU_DESK_RGB(160, 132, 0),
-    TIKU_DESK_RGB(40, 90, 190),   TIKU_DESK_RGB(160, 60, 170),
-    TIKU_DESK_RGB(0, 150, 160),   TIKU_DESK_RGB(190, 190, 190)
+static const tiku_rgb_t kAnsi[8] = {
+    TIKU_RGB(0, 0, 0),       TIKU_RGB(178, 24, 24),
+    TIKU_RGB(24, 154, 24),   TIKU_RGB(160, 132, 0),
+    TIKU_RGB(40, 90, 190),   TIKU_RGB(160, 60, 170),
+    TIKU_RGB(0, 150, 160),   TIKU_RGB(190, 190, 190)
 };
-static const tiku_desk_rgb_t kBright[8] = {
-    TIKU_DESK_RGB(110, 110, 110), TIKU_DESK_RGB(230, 60, 60),
-    TIKU_DESK_RGB(50, 200, 50),   TIKU_DESK_RGB(210, 180, 20),
-    TIKU_DESK_RGB(80, 140, 240),  TIKU_DESK_RGB(210, 100, 220),
-    TIKU_DESK_RGB(40, 200, 210),  TIKU_DESK_RGB(255, 255, 255)
+static const tiku_rgb_t kBright[8] = {
+    TIKU_RGB(110, 110, 110), TIKU_RGB(230, 60, 60),
+    TIKU_RGB(50, 200, 50),   TIKU_RGB(210, 180, 20),
+    TIKU_RGB(80, 140, 240),  TIKU_RGB(210, 100, 220),
+    TIKU_RGB(40, 200, 210),  TIKU_RGB(255, 255, 255)
 };
 
 static int
@@ -570,11 +570,11 @@ feed(term_state_t *st, unsigned char ch)
     }
 }
 
-static tiku_desk_rgb_t
+static tiku_rgb_t
 ink_of(unsigned char index, unsigned char attr, int is_bg)
 {
     if (index > 7u) {
-        return is_bg ? TIKU_DESK_C_DOC : TIKU_DESK_C_TEXT;
+        return is_bg ? TIKU_C_DOC : TIKU_C_TEXT;
     }
     return ((attr & ATTR_BOLD) != 0u && !is_bg) ? kBright[index]
                                                 : kAnsi[index];
@@ -597,36 +597,36 @@ row_at(const term_state_t *st, int r)
 static void
 paint(term_state_t *st)
 {
-    const tiku_desk_font_t *plain = tiku_desk_font_mono(0);
-    const tiku_desk_font_t *bold = tiku_desk_font_mono(1);
-    const tiku_desk_font_t *small = tiku_desk_font_at(11);
+    const tiku_font_t *plain = tiku_font_mono(0);
+    const tiku_font_t *bold = tiku_font_mono(1);
+    const tiku_font_t *small = tiku_font_at(11);
     int w = width_px(st);
     int h = height_px(st);
-    tiku_desk_rect_t page = { 0, 0, w, h - STRIP_H };
-    tiku_desk_rect_t strip = { 0, h - STRIP_H, w, STRIP_H };
+    tiku_rect_t page = { 0, 0, w, h - STRIP_H };
+    tiku_rect_t strip = { 0, h - STRIP_H, w, STRIP_H };
     char note[96];
     int r, c;
 
-    tiku_desk_fill(st->surface, page, TIKU_DESK_C_DOC);
+    tiku_fill(st->surface, page, TIKU_C_DOC);
     for (r = 0; r < ROWS; r++) {
         const cell_t *line = row_at(st, r);
         int y = MARGIN + r * st->cell_h;
 
         for (c = 0; c < COLS; c++) {
             const cell_t *cell = &line[c];
-            tiku_desk_rgb_t fg = ink_of(cell->fg, cell->attr, 0);
-            tiku_desk_rgb_t bg = ink_of(cell->bg, cell->attr, 1);
+            tiku_rgb_t fg = ink_of(cell->fg, cell->attr, 0);
+            tiku_rgb_t bg = ink_of(cell->bg, cell->attr, 1);
             char one[2];
 
             if ((cell->attr & ATTR_REVERSE) != 0u) {
-                tiku_desk_rgb_t swap = fg;
+                tiku_rgb_t swap = fg;
 
                 fg = bg;
                 bg = swap;
             }
             if (cell->bg <= 7u || (cell->attr & ATTR_REVERSE) != 0u) {
-                tiku_desk_fill(st->surface,
-                               (tiku_desk_rect_t){ MARGIN + c * st->cell_w,
+                tiku_fill(st->surface,
+                               (tiku_rect_t){ MARGIN + c * st->cell_w,
                                                    y, st->cell_w,
                                                    st->cell_h }, bg);
             }
@@ -635,7 +635,7 @@ paint(term_state_t *st)
             }
             one[0] = cell->ch;
             one[1] = '\0';
-            tiku_desk_text(st->surface,
+            tiku_text(st->surface,
                            ((cell->attr & ATTR_BOLD) != 0u) ? bold : plain,
                            MARGIN + c * st->cell_w, y + plain->ascent, one,
                            fg);
@@ -644,23 +644,23 @@ paint(term_state_t *st)
     if (st->alive && st->cursor_on && st->view == 0) {
         /* A block where the next character will land, with whatever is
          * already there drawn back over it. */
-        tiku_desk_rect_t at = { MARGIN + st->col * st->cell_w,
+        tiku_rect_t at = { MARGIN + st->col * st->cell_w,
                                 MARGIN + st->row * st->cell_h,
                                 st->cell_w, st->cell_h };
 
-        tiku_desk_fill(st->surface, at, TIKU_DESK_C_SELECT);
+        tiku_fill(st->surface, at, TIKU_C_SELECT);
         if (st->cell[st->row][st->col].ch > ' ') {
             char one[2];
 
             one[0] = st->cell[st->row][st->col].ch;
             one[1] = '\0';
-            tiku_desk_text(st->surface, plain, at.x, at.y + plain->ascent,
-                           one, TIKU_DESK_C_SELTEXT);
+            tiku_text(st->surface, plain, at.x, at.y + plain->ascent,
+                           one, TIKU_C_SELTEXT);
         }
     }
-    tiku_desk_fill(st->surface, strip, TIKU_DESK_C_PANEL);
-    tiku_desk_hline(st->surface, 0, strip.y, w,
-                    tiku_desk_tint(TIKU_DESK_C_PANEL, TIKU_DESK_DARKEN_2));
+    tiku_fill(st->surface, strip, TIKU_C_PANEL);
+    tiku_hline(st->surface, 0, strip.y, w,
+                    tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
     if (!st->alive) {
         snprintf(note, sizeof note, "the shell has exited");
     } else if (st->view > 0) {
@@ -669,9 +669,9 @@ paint(term_state_t *st)
     } else {
         snprintf(note, sizeof note, "%dx%d  vt100", COLS, ROWS);
     }
-    tiku_desk_text(st->surface, small, MARGIN,
+    tiku_text(st->surface, small, MARGIN,
                    strip.y + (STRIP_H - small->height) / 2 + small->ascent,
-                   note, TIKU_DESK_C_TEXT);
+                   note, TIKU_C_TEXT);
     (void)st->services->frame(st->services->ctx, st->id, st->surface->px,
                               w, h);
     st->dirty = 0;
@@ -680,7 +680,7 @@ paint(term_state_t *st)
 static void
 publish(term_state_t *st)
 {
-    tiku_desk_menuset_t menus;
+    tiku_menuset_t menus;
 
     memset(&menus, 0, sizeof menus);
     menus.nmenu = 1;
@@ -779,7 +779,7 @@ send_bytes(term_state_t *st, const char *bytes, size_t n)
 }
 
 static int
-term_start(void **state, const tiku_desk_app_services_t *services)
+term_start(void **state, const tiku_app_services_t *services)
 {
     term_state_t *st = calloc(1, sizeof *st);
 
@@ -795,10 +795,10 @@ term_start(void **state, const tiku_desk_app_services_t *services)
     st->cursor_on = 1;
     /* Every glyph of this face advances the same width, so a column IS
      * that width and the grid is exact. */
-    st->cell_w = tiku_desk_font_mono_cell(0);
-    st->cell_h = tiku_desk_font_mono(0)->height + 1;
-    st->surface = tiku_desk_surface_new(width_px(st), height_px(st),
-                                        TIKU_DESK_C_DOC);
+    st->cell_w = tiku_font_mono_cell(0);
+    st->cell_h = tiku_font_mono(0)->height + 1;
+    st->surface = tiku_surface_new(width_px(st), height_px(st),
+                                        TIKU_C_DOC);
     if (st->surface == NULL) {
         free(st);
         return -1;
@@ -835,7 +835,7 @@ term_stop(void *state)
     if (st->master >= 0) {
         (void)close(st->master);
     }
-    tiku_desk_surface_free(st->surface);
+    tiku_surface_free(st->surface);
     free(st);
 }
 
@@ -893,28 +893,28 @@ scroll_view(term_state_t *st, int by)
 }
 
 static int
-term_event(void *state, const tiku_desk_event_t *event)
+term_event(void *state, const tiku_event_t *event)
 {
     term_state_t *st = state;
     const char *seq = NULL;
     char one;
 
-    if (event->type != TIKU_DESK_EVENT_KEY_DOWN) {
+    if (event->type != TIKU_EVENT_KEY_DOWN) {
         return 0;
     }
     /* Shift with a paging key looks at history rather than reaching the
      * shell, which is what a terminal has always done with it. */
-    if ((event->modifiers & TIKU_DESK_MOD_SHIFT) != 0u) {
-        if (event->key == TIKU_DESK_KEY_PAGE_UP) {
+    if ((event->modifiers & TIKU_MOD_SHIFT) != 0u) {
+        if (event->key == TIKU_KEY_PAGE_UP) {
             scroll_view(st, ROWS - 1);
             return 0;
         }
-        if (event->key == TIKU_DESK_KEY_PAGE_DOWN) {
+        if (event->key == TIKU_KEY_PAGE_DOWN) {
             scroll_view(st, -(ROWS - 1));
             return 0;
         }
     }
-    if ((event->modifiers & TIKU_DESK_MOD_CMD) != 0u) {
+    if ((event->modifiers & TIKU_MOD_CMD) != 0u) {
         /* Every control code, not a chosen few: the letter's place in
          * the alphabet IS the code, which is why Ctrl+C is 3. */
         unsigned k = event->key;
@@ -929,49 +929,49 @@ term_event(void *state, const tiku_desk_event_t *event)
         return 0;
     }
     switch (event->key) {
-    case TIKU_DESK_KEY_RETURN:
+    case TIKU_KEY_RETURN:
         one = '\r';
         send_bytes(st, &one, 1u);
         return 0;
-    case TIKU_DESK_KEY_BACKSPACE:
+    case TIKU_KEY_BACKSPACE:
         one = 0x7f;
         send_bytes(st, &one, 1u);
         return 0;
-    case TIKU_DESK_KEY_TAB:
+    case TIKU_KEY_TAB:
         one = '\t';
         send_bytes(st, &one, 1u);
         return 0;
-    case TIKU_DESK_KEY_ESCAPE:
+    case TIKU_KEY_ESCAPE:
         one = 0x1b;
         send_bytes(st, &one, 1u);
         return 0;
     /* The sequences a line editor listens for: without them there is no
      * history, and no cursor at all in a full-screen editor. */
-    case TIKU_DESK_KEY_UP:
+    case TIKU_KEY_UP:
         seq = "\x1b[A";
         break;
-    case TIKU_DESK_KEY_DOWN:
+    case TIKU_KEY_DOWN:
         seq = "\x1b[B";
         break;
-    case TIKU_DESK_KEY_RIGHT:
+    case TIKU_KEY_RIGHT:
         seq = "\x1b[C";
         break;
-    case TIKU_DESK_KEY_LEFT:
+    case TIKU_KEY_LEFT:
         seq = "\x1b[D";
         break;
-    case TIKU_DESK_KEY_HOME:
+    case TIKU_KEY_HOME:
         seq = "\x1b[H";
         break;
-    case TIKU_DESK_KEY_END:
+    case TIKU_KEY_END:
         seq = "\x1b[F";
         break;
-    case TIKU_DESK_KEY_DELETE:
+    case TIKU_KEY_DELETE:
         seq = "\x1b[3~";
         break;
-    case TIKU_DESK_KEY_PAGE_UP:
+    case TIKU_KEY_PAGE_UP:
         seq = "\x1b[5~";
         break;
-    case TIKU_DESK_KEY_PAGE_DOWN:
+    case TIKU_KEY_PAGE_DOWN:
         seq = "\x1b[6~";
         break;
     default:
@@ -1018,7 +1018,7 @@ term_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
-const tiku_desk_app_descriptor_t tiku_term_app = {
+const tiku_app_descriptor_t tiku_term_app = {
     .id = "org.tikuos.terminal",
     .name = "Terminal",
     .start = term_start,
@@ -1029,9 +1029,9 @@ const tiku_desk_app_descriptor_t tiku_term_app = {
 };
 
 #ifdef TIKU_APP_SO
-/* The one symbol a loader looks for; see tiku_desk_app.h. */
-const tiku_desk_app_export_t tiku_desk_app_v1 = {
-    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+/* The one symbol a loader looks for; see tiku_app.h. */
+const tiku_app_export_t tiku_app_v1 = {
+    TIKU_APP_ABI, (uint32_t)sizeof(tiku_app_descriptor_t),
     &tiku_term_app
 };
 #endif
@@ -1040,6 +1040,6 @@ const tiku_desk_app_export_t tiku_desk_app_v1 = {
 int
 main(void)
 {
-    return tiku_desk_client_run(&tiku_term_app);
+    return tiku_client_run(&tiku_term_app);
 }
 #endif

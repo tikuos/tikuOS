@@ -13,23 +13,23 @@
 
 #include <stdio.h>
 
-#include "tiku_desk_app.h"
-#include "tiku_desk_client.h"
+#include "tiku_app.h"
+#include "tiku_client.h"
 
 int
 main(int argc, char **argv)
 {
-    const tiku_desk_app_descriptor_t *app;
+    const tiku_app_descriptor_t *app;
     char why[256];
 
     if (argc < 2) {
         fprintf(stderr, "usage: tiku-run <application.so>\n");
         return 2;
     }
-    app = tiku_desk_app_load(argv[1], why, sizeof why);
+    app = tiku_app_load(argv[1], why, sizeof why);
     if (app == NULL) {
         fprintf(stderr, "tiku-run: %s: %s\n", argv[1], why);
         return 2;
     }
-    return tiku_desk_client_run(app);
+    return tiku_client_run(app);
 }

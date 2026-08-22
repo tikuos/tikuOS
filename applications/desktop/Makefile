@@ -81,16 +81,16 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 # they are made by going there, so make does not call them missing.
 $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(PIC_LIBS): libs ;
 
-$(PROBE): $(BUILD)/tiku_desk_probe.o $(LIB_TRANSPORT)
+$(PROBE): $(BUILD)/tiku_probe.o $(LIB_TRANSPORT)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "built $@"
 
-$(GALLERY): $(BUILD)/tiku_desk_gallery.o $(LIB_UI) $(LIB_TRANSPORT)
+$(GALLERY): $(BUILD)/tiku_gallery.o $(LIB_UI) $(LIB_TRANSPORT)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lX11
 	@echo "built $@"
 
-$(ABOUTAPP): src/tiku_desk_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
-	$(CC) $(CFLAGS) -o $@ src/tiku_desk_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm
+$(ABOUTAPP): src/tiku_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
+	$(CC) $(CFLAGS) -o $@ src/tiku_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm
 
 $(BUILD)/tiku-%: apps/tiku_%.c $(LIB_RUNTIME) $(LIB_UI) \
                  $(LIB_TRANSPORT)
@@ -143,7 +143,7 @@ gallery: $(GALLERY)
 
 # Regenerate the baked font (needs python3 + PIL; output is committed).
 font:
-	python3 tools/genfont.py > src/tiku_desk_font_data.h
+	python3 tools/genfont.py > src/tiku_font_data.h
 
 $(BUILD):
 	@mkdir -p $(BUILD)

@@ -22,38 +22,38 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "tiku_desk_ttf.h"
+#include "tiku_ttf.h"
 
 int
 main(int argc, char **argv)
 {
-    tiku_desk_ttf_t *ttf;
+    tiku_ttf_t *ttf;
     int px, i;
 
     if (argc < 4) {
         fprintf(stderr, "usage: %s <font> <px> <cp-hex>...\n", argv[0]);
         return 2;
     }
-    ttf = tiku_desk_ttf_open(argv[1]);
+    ttf = tiku_ttf_open(argv[1]);
     if (ttf == NULL) {
         printf("REFUSED %s\n", argv[1]);
         return 1;
     }
     px = atoi(argv[2]);
-    printf("FAMILY %s\n", tiku_desk_ttf_family(ttf));
+    printf("FAMILY %s\n", tiku_ttf_family(ttf));
     {
         int ascent = 0, height = 0;
 
-        tiku_desk_ttf_metrics(ttf, px, &ascent, &height);
+        tiku_ttf_metrics(ttf, px, &ascent, &height);
         printf("METRICS %d %d\n", ascent, height);
     }
     for (i = 3; i < argc; i++) {
         unsigned cp = (unsigned)strtoul(argv[i], NULL, 16);
-        tiku_desk_ttf_glyph_t g;
+        tiku_ttf_glyph_t g;
         int x, y;
 
         memset(&g, 0, sizeof g);
-        if (!tiku_desk_ttf_render(ttf, cp, px, &g)) {
+        if (!tiku_ttf_render(ttf, cp, px, &g)) {
             printf("GLYPH %x MISSING\n", cp);
             continue;
         }
@@ -65,8 +65,8 @@ main(int argc, char **argv)
             }
             printf("\n");
         }
-        tiku_desk_ttf_free_glyph(&g);
+        tiku_ttf_free_glyph(&g);
     }
-    tiku_desk_ttf_close(ttf);
+    tiku_ttf_close(ttf);
     return 0;
 }

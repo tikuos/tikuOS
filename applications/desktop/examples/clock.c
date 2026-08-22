@@ -16,17 +16,17 @@
 #include <string.h>
 #include <time.h>
 
-#include "tiku_desk_app.h"
-#include "tiku_desk_client.h"
-#include "tiku_desk_font.h"
-#include "tiku_desk_gfx.h"
+#include "tiku_app.h"
+#include "tiku_client.h"
+#include "tiku_font.h"
+#include "tiku_gfx.h"
 
 #define CLOCK_W 260
 #define CLOCK_H 140
 
 typedef struct {
-    const tiku_desk_app_services_t *services;
-    tiku_desk_surface_t            *surface;
+    const tiku_app_services_t *services;
+    tiku_surface_t            *surface;
     uint32_t                        id;
     int                             shown_second;
     int                             seconds;    /* show them, or not */
@@ -38,13 +38,13 @@ typedef struct {
 static void
 paint(clock_state_t *st)
 {
-    const tiku_desk_font_t *big = tiku_desk_font_at(34);
-    const tiku_desk_font_t *plain = tiku_desk_font_plain();
+    const tiku_font_t *big = tiku_font_at(34);
+    const tiku_font_t *plain = tiku_font_plain();
     time_t now = time(NULL);
     struct tm tmv;
     char face[32];
     char date[64];
-    tiku_desk_rect_t all = { 0, 0, CLOCK_W, CLOCK_H };
+    tiku_rect_t all = { 0, 0, CLOCK_W, CLOCK_H };
 
     (void)localtime_r(&now, &tmv);
     if (strftime(face, sizeof face,
@@ -55,19 +55,19 @@ paint(clock_state_t *st)
         date[0] = '\0';
     }
 
-    tiku_desk_fill(st->surface, all, TIKU_DESK_C_PANEL);
-    tiku_desk_bevel(st->surface, all,
-                    tiku_desk_tint(TIKU_DESK_C_PANEL,
-                                   TIKU_DESK_LIGHTEN_MAX),
-                    tiku_desk_tint(TIKU_DESK_C_PANEL, TIKU_DESK_DARKEN_2));
-    (void)tiku_desk_text_centered(st->surface, big,
-                                  (tiku_desk_rect_t){ 0, 24, CLOCK_W,
+    tiku_fill(st->surface, all, TIKU_C_PANEL);
+    tiku_bevel(st->surface, all,
+                    tiku_tint(TIKU_C_PANEL,
+                                   TIKU_LIGHTEN_MAX),
+                    tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    (void)tiku_text_centered(st->surface, big,
+                                  (tiku_rect_t){ 0, 24, CLOCK_W,
                                                       big->height },
-                                  face, TIKU_DESK_C_TEXT);
-    (void)tiku_desk_text_centered(st->surface, plain,
-                                  (tiku_desk_rect_t){ 0, 84, CLOCK_W,
+                                  face, TIKU_C_TEXT);
+    (void)tiku_text_centered(st->surface, plain,
+                                  (tiku_rect_t){ 0, 84, CLOCK_W,
                                                       plain->height },
-                                  date, TIKU_DESK_C_TEXT);
+                                  date, TIKU_C_TEXT);
     (void)st->services->frame(st->services->ctx, st->id, st->surface->px,
                               CLOCK_W, CLOCK_H);
 }
@@ -75,7 +75,7 @@ paint(clock_state_t *st)
 static void
 publish(clock_state_t *st)
 {
-    tiku_desk_menuset_t menus;
+    tiku_menuset_t menus;
 
     memset(&menus, 0, sizeof menus);
     menus.nmenu = 1;
@@ -96,7 +96,7 @@ publish(clock_state_t *st)
 }
 
 static int
-clock_start(void **state, const tiku_desk_app_services_t *services)
+clock_start(void **state, const tiku_app_services_t *services)
 {
     clock_state_t *st = calloc(1, sizeof *st);
 
@@ -105,8 +105,8 @@ clock_start(void **state, const tiku_desk_app_services_t *services)
     }
     st->services = services;
     st->shown_second = -1;
-    st->surface = tiku_desk_surface_new(CLOCK_W, CLOCK_H,
-                                        TIKU_DESK_C_PANEL);
+    st->surface = tiku_surface_new(CLOCK_W, CLOCK_H,
+                                        TIKU_C_PANEL);
     if (st->surface == NULL) {
         free(st);
         return -1;
@@ -124,7 +124,7 @@ clock_stop(void *state)
     clock_state_t *st = state;
 
     if (st != NULL) {
-        tiku_desk_surface_free(st->surface);
+        tiku_surface_free(st->surface);
         free(st);
     }
 }
@@ -153,11 +153,11 @@ clock_tick(void *state, int64_t now_us)
 }
 
 static int
-clock_event(void *state, const tiku_desk_event_t *event)
+clock_event(void *state, const tiku_event_t *event)
 {
     (void)state;
-    return event->type == TIKU_DESK_EVENT_KEY_DOWN &&
-           event->key == TIKU_DESK_KEY_ESCAPE;
+    return event->type == TIKU_EVENT_KEY_DOWN &&
+           event->key == TIKU_KEY_ESCAPE;
 }
 
 static int
@@ -178,7 +178,7 @@ clock_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
-const tiku_desk_app_descriptor_t tiku_example_clock = {
+const tiku_app_descriptor_t tiku_example_clock = {
     .id = "org.tikuos.example.clock",
     .name = "Clock",
     .start = clock_start,
@@ -189,9 +189,9 @@ const tiku_desk_app_descriptor_t tiku_example_clock = {
 };
 
 #ifdef TIKU_APP_SO
-/* The one symbol a loader looks for; see tiku_desk_app.h. */
-const tiku_desk_app_export_t tiku_desk_app_v1 = {
-    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+/* The one symbol a loader looks for; see tiku_app.h. */
+const tiku_app_export_t tiku_app_v1 = {
+    TIKU_APP_ABI, (uint32_t)sizeof(tiku_app_descriptor_t),
     &tiku_example_clock
 };
 #endif
@@ -200,6 +200,6 @@ const tiku_desk_app_export_t tiku_desk_app_v1 = {
 int
 main(void)
 {
-    return tiku_desk_client_run(&tiku_example_clock);
+    return tiku_client_run(&tiku_example_clock);
 }
 #endif

@@ -16,10 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "tiku_desk_app.h"
-#include "tiku_desk_client.h"
-#include "tiku_desk_font.h"
-#include "tiku_desk_gfx.h"
+#include "tiku_app.h"
+#include "tiku_client.h"
+#include "tiku_font.h"
+#include "tiku_gfx.h"
 
 #define COUNTER_W 280
 #define COUNTER_H 150
@@ -30,67 +30,67 @@
 #define CMD_RESET 4
 
 typedef struct {
-    const tiku_desk_app_services_t *services;
-    tiku_desk_surface_t            *surface;
+    const tiku_app_services_t *services;
+    tiku_surface_t            *surface;
     uint32_t                        id;
     int                             value;
     int                             held;   /* button drawn pressed */
 } counter_state_t;
 
 /* Where the two buttons are, in the window's own coordinates. */
-static const tiku_desk_rect_t MINUS = { 30, 86, 46, 30 };
-static const tiku_desk_rect_t PLUS = { 204, 86, 46, 30 };
+static const tiku_rect_t MINUS = { 30, 86, 46, 30 };
+static const tiku_rect_t PLUS = { 204, 86, 46, 30 };
 
 static int
-inside(tiku_desk_rect_t r, int x, int y)
+inside(tiku_rect_t r, int x, int y)
 {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
 static void
-button(tiku_desk_surface_t *s, tiku_desk_rect_t r, const char *label,
+button(tiku_surface_t *s, tiku_rect_t r, const char *label,
        int pressed)
 {
-    tiku_desk_rgb_t light = tiku_desk_tint(TIKU_DESK_C_PANEL,
-                                           TIKU_DESK_LIGHTEN_MAX);
-    tiku_desk_rgb_t dark = tiku_desk_tint(TIKU_DESK_C_PANEL,
-                                          TIKU_DESK_DARKEN_2);
+    tiku_rgb_t light = tiku_tint(TIKU_C_PANEL,
+                                           TIKU_LIGHTEN_MAX);
+    tiku_rgb_t dark = tiku_tint(TIKU_C_PANEL,
+                                          TIKU_DARKEN_2);
 
-    tiku_desk_fill(s, r, TIKU_DESK_C_PANEL);
-    tiku_desk_frame(s, r, dark);
+    tiku_fill(s, r, TIKU_C_PANEL);
+    tiku_frame(s, r, dark);
     /* Pressed is the same bevel with the light and dark swapped: the
      * control appears to go in, rather than being redrawn as a second
      * picture that has to be kept in step with the first. */
-    tiku_desk_bevel(s, tiku_desk_inset(r, 1), pressed ? dark : light,
+    tiku_bevel(s, tiku_inset(r, 1), pressed ? dark : light,
                     pressed ? light : dark);
-    (void)tiku_desk_text_centered(s, tiku_desk_font_bold(), r, label,
-                                  TIKU_DESK_C_TEXT);
+    (void)tiku_text_centered(s, tiku_font_bold(), r, label,
+                                  TIKU_C_TEXT);
 }
 
 static void
 paint(counter_state_t *st)
 {
-    const tiku_desk_font_t *big = tiku_desk_font_at(30);
-    tiku_desk_rect_t all = { 0, 0, COUNTER_W, COUNTER_H };
+    const tiku_font_t *big = tiku_font_at(30);
+    tiku_rect_t all = { 0, 0, COUNTER_W, COUNTER_H };
     char shown[32];
 
     snprintf(shown, sizeof shown, "%d", st->value);
-    tiku_desk_fill(st->surface, all, TIKU_DESK_C_PANEL);
-    tiku_desk_fill(st->surface, (tiku_desk_rect_t){ 30, 22, 220, 48 },
-                   TIKU_DESK_C_DOC);
-    tiku_desk_frame(st->surface, (tiku_desk_rect_t){ 30, 22, 220, 48 },
-                    tiku_desk_tint(TIKU_DESK_C_PANEL,
-                                   TIKU_DESK_DARKEN_2));
-    (void)tiku_desk_text_centered(st->surface, big,
-                                  (tiku_desk_rect_t){ 30, 30, 220,
+    tiku_fill(st->surface, all, TIKU_C_PANEL);
+    tiku_fill(st->surface, (tiku_rect_t){ 30, 22, 220, 48 },
+                   TIKU_C_DOC);
+    tiku_frame(st->surface, (tiku_rect_t){ 30, 22, 220, 48 },
+                    tiku_tint(TIKU_C_PANEL,
+                                   TIKU_DARKEN_2));
+    (void)tiku_text_centered(st->surface, big,
+                                  (tiku_rect_t){ 30, 30, 220,
                                                       big->height },
-                                  shown, TIKU_DESK_C_TEXT);
+                                  shown, TIKU_C_TEXT);
     button(st->surface, MINUS, "-", st->held == CMD_DOWN);
     button(st->surface, PLUS, "+", st->held == CMD_UP);
-    (void)tiku_desk_text_centered(st->surface,
-                                  tiku_desk_font_plain(),
-                                  (tiku_desk_rect_t){ 76, 92, 128, 18 },
-                                  "up / down keys", TIKU_DESK_C_TEXT);
+    (void)tiku_text_centered(st->surface,
+                                  tiku_font_plain(),
+                                  (tiku_rect_t){ 76, 92, 128, 18 },
+                                  "up / down keys", TIKU_C_TEXT);
     (void)st->services->frame(st->services->ctx, st->id, st->surface->px,
                               COUNTER_W, COUNTER_H);
 }
@@ -98,7 +98,7 @@ paint(counter_state_t *st)
 static void
 publish(counter_state_t *st)
 {
-    tiku_desk_menuset_t menus;
+    tiku_menuset_t menus;
 
     memset(&menus, 0, sizeof menus);
     menus.nmenu = 1;
@@ -139,7 +139,7 @@ change(counter_state_t *st, int by)
 }
 
 static int
-counter_start(void **state, const tiku_desk_app_services_t *services)
+counter_start(void **state, const tiku_app_services_t *services)
 {
     counter_state_t *st = calloc(1, sizeof *st);
 
@@ -147,8 +147,8 @@ counter_start(void **state, const tiku_desk_app_services_t *services)
         return -1;
     }
     st->services = services;
-    st->surface = tiku_desk_surface_new(COUNTER_W, COUNTER_H,
-                                        TIKU_DESK_C_PANEL);
+    st->surface = tiku_surface_new(COUNTER_W, COUNTER_H,
+                                        TIKU_C_PANEL);
     if (st->surface == NULL) {
         free(st);
         return -1;
@@ -167,18 +167,18 @@ counter_stop(void *state)
     counter_state_t *st = state;
 
     if (st != NULL) {
-        tiku_desk_surface_free(st->surface);
+        tiku_surface_free(st->surface);
         free(st);
     }
 }
 
 static int
-counter_event(void *state, const tiku_desk_event_t *event)
+counter_event(void *state, const tiku_event_t *event)
 {
     counter_state_t *st = state;
 
     switch (event->type) {
-    case TIKU_DESK_EVENT_POINTER_DOWN:
+    case TIKU_EVENT_POINTER_DOWN:
         /* Coordinates arrive relative to the window's CONTENT, so the
          * same hit test works wherever the window sits. */
         if (inside(PLUS, event->x, event->y)) {
@@ -189,7 +189,7 @@ counter_event(void *state, const tiku_desk_event_t *event)
             paint(st);
         }
         break;
-    case TIKU_DESK_EVENT_POINTER_UP:
+    case TIKU_EVENT_POINTER_UP:
         /* The press commits only if the release lands on the same
          * control: a drag away from a button is a cancelled press. */
         if (st->held == CMD_UP && inside(PLUS, event->x, event->y)) {
@@ -204,14 +204,14 @@ counter_event(void *state, const tiku_desk_event_t *event)
             paint(st);
         }
         break;
-    case TIKU_DESK_EVENT_KEY_DOWN:
-        if (event->key == TIKU_DESK_KEY_ESCAPE) {
+    case TIKU_EVENT_KEY_DOWN:
+        if (event->key == TIKU_KEY_ESCAPE) {
             return 1;
         }
-        if (event->key == TIKU_DESK_KEY_UP) {
+        if (event->key == TIKU_KEY_UP) {
             change(st, 1);
         }
-        if (event->key == TIKU_DESK_KEY_DOWN) {
+        if (event->key == TIKU_KEY_DOWN) {
             change(st, -1);
         }
         break;
@@ -245,7 +245,7 @@ counter_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
-const tiku_desk_app_descriptor_t tiku_example_counter = {
+const tiku_app_descriptor_t tiku_example_counter = {
     .id = "org.tikuos.example.counter",
     .name = "Counter",
     .start = counter_start,
@@ -255,9 +255,9 @@ const tiku_desk_app_descriptor_t tiku_example_counter = {
 };
 
 #ifdef TIKU_APP_SO
-/* The one symbol a loader looks for; see tiku_desk_app.h. */
-const tiku_desk_app_export_t tiku_desk_app_v1 = {
-    TIKU_DESK_APP_ABI, (uint32_t)sizeof(tiku_desk_app_descriptor_t),
+/* The one symbol a loader looks for; see tiku_app.h. */
+const tiku_app_export_t tiku_app_v1 = {
+    TIKU_APP_ABI, (uint32_t)sizeof(tiku_app_descriptor_t),
     &tiku_example_counter
 };
 #endif
@@ -266,6 +266,6 @@ const tiku_desk_app_export_t tiku_desk_app_v1 = {
 int
 main(void)
 {
-    return tiku_desk_client_run(&tiku_example_counter);
+    return tiku_client_run(&tiku_example_counter);
 }
 #endif

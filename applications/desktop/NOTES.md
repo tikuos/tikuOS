@@ -39,16 +39,16 @@ R5-SPEC.md holds the measured constants (tints, palette, metrics); every
 control derives from it rather than from a theme file.
 
 Built:
-- `tiku_desk_gfx`   surface, clip, fill/frame/bevel, tint, PNG writer
+- `tiku_gfx`   surface, clip, fill/frame/bevel, tint, PNG writer
                     (stored-deflate: no zlib dependency for screenshots)
-- `tiku_desk_font`  8-bit coverage glyphs baked by tools/genfont.py from
+- `tiku_font`  8-bit coverage glyphs baked by tools/genfont.py from
                     DejaVu Sans 12 px; blended against the destination so
                     labels antialias correctly over bevels and selections
-- `tiku_desk_ui`    button (normal/pressed/default/focus/disabled),
+- `tiku_ui`    button (normal/pressed/default/focus/disabled),
                     checkbox, radio, text field with caret, scrollbar with
                     the knurled thumb, menu bar, dropped menu, list rows +
                     sortable headers, window frame with the yellow tab
-- `tiku_desk_x11`   native window (plain Xlib, no toolkit)
+- `tiku_x11`   native window (plain Xlib, no toolkit)
 - `tiku-desk-gallery`  every control in every state; `-o FILE` dumps a PNG,
                     which IS the fidelity test artefact
 
