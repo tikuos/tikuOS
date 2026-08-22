@@ -1,0 +1,115 @@
+# The kits.
+#
+# Six libraries, in the sense BeOS meant: a kit is a group of headers and
+# one archive, named for the job it does, that an application links
+# without knowing what else links it.  The grouping is the directory --
+# BeOS did the same, and did NOT decorate its class names with the kit
+# they came from, which is why everything here shares one prefix.
+#
+# The order below is the dependency order, lowest first, and it is a DAG
+# rather than a stack:
+#
+#   support                      nothing at all
+#   device      -> support       the link to a TikuOS device
+#   storage     -> support       nodes, attributes, queries, volumes
+#   interface   -> support       pixels, faces, controls, windows
+#   translation -> interface, storage    pictures into bitmaps
+#   application -> interface, support, device   apps, windows, messages
+#
+# tools/check_kits.py holds that table and fails the build if an include
+# crosses it the wrong way.  The rule is the point of the arrangement:
+# without something checking it, a kit is a folder.
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+CC      ?= cc
+AR      ?= ar
+CFLAGS  ?= -O2 -g
+CFLAGS  += -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter \
+           -Isupport -Idevice -Istorage -Iinterface -Itranslation \
+           -Iapplication
+
+BUILD := build
+
+SUPPORT     := support/tiku_desk_msg.c support/tiku_trk_strings.c
+DEVICE      := device/tiku_desk_tx.c device/tiku_desk_session.c \
+               device/tiku_desk_ns.c
+STORAGE     := storage/tiku_trk_model.c storage/tiku_trk_state.c \
+               storage/tiku_trk_ident.c storage/tiku_trk_attr.c \
+               storage/tiku_trk_query.c storage/tiku_trk_fs.c \
+               storage/tiku_trk_backend_posix.c \
+               storage/tiku_trk_backend_tiku.c storage/tiku_trk_notify.c \
+               storage/tiku_trk_vdir.c storage/tiku_trk_volume.c
+INTERFACE   := interface/tiku_desk_gfx.c interface/tiku_desk_theme.c \
+               interface/tiku_desk_font.c interface/tiku_desk_ttf.c \
+               interface/tiku_desk_glyphpath.c interface/tiku_desk_cff.c \
+               interface/tiku_desk_ui.c interface/tiku_desk_window.c \
+               interface/tiku_desk_x11.c
+TRANSLATION := translation/tiku_trk_inflate.c translation/tiku_trk_jpeg.c \
+               translation/tiku_trk_hvif.c translation/tiku_trk_image.c \
+               translation/tiku_trk_thumb.c translation/tiku_trk_iconpaint.c \
+               translation/tiku_trk_icons.c translation/tiku_trk_fontdir.c
+APPLICATION := application/tiku_desk_app.c application/tiku_desk_app_load.c \
+               application/tiku_desk_remote.c \
+               application/tiku_desk_conduct.c \
+               application/tiku_desk_client.c \
+               application/tiku_desk_about_app.c
+
+KITS := support device storage interface translation application
+
+LIB_SUPPORT     := $(BUILD)/libtiku_support.a
+LIB_DEVICE      := $(BUILD)/libtiku_device.a
+LIB_STORAGE     := $(BUILD)/libtiku_storage.a
+LIB_INTERFACE   := $(BUILD)/libtiku_interface.a
+LIB_TRANSLATION := $(BUILD)/libtiku_translation.a
+LIB_APPLICATION := $(BUILD)/libtiku_application.a
+
+# In link order: a linker resolves left to right, so a kit must come
+# before the kits it draws on.
+LIBS := $(LIB_APPLICATION) $(LIB_TRANSLATION) $(LIB_INTERFACE) \
+        $(LIB_STORAGE) $(LIB_DEVICE) $(LIB_SUPPORT)
+
+PIC_LIBS := $(patsubst $(BUILD)/%,$(BUILD)/pic/%,$(LIBS))
+
+.PHONY: all libs pic clean check
+all: libs pic
+
+libs: $(LIBS)
+pic: $(PIC_LIBS)
+
+$(BUILD) $(BUILD)/pic:
+	@mkdir -p $@
+
+$(BUILD)/%.o: %.c | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
+# The same sources again, position-independent: a shared object cannot
+# link an archive of fixed-address code, and applications are loadable.
+$(BUILD)/pic/%.o: %.c | $(BUILD)/pic
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -fPIC -MMD -MP -c -o $@ $<
+
+define KIT_RULES
+$(BUILD)/libtiku_$(1).a: $$(patsubst %.c,$(BUILD)/%.o,$($(2)))
+	$$(AR) rcs $$@ $$^
+$(BUILD)/pic/libtiku_$(1).a: $$(patsubst %.c,$(BUILD)/pic/%.o,$($(2)))
+	@mkdir -p $$(dir $$@)
+	$$(AR) rcs $$@ $$^
+endef
+
+$(eval $(call KIT_RULES,support,SUPPORT))
+$(eval $(call KIT_RULES,device,DEVICE))
+$(eval $(call KIT_RULES,storage,STORAGE))
+$(eval $(call KIT_RULES,interface,INTERFACE))
+$(eval $(call KIT_RULES,translation,TRANSLATION))
+$(eval $(call KIT_RULES,application,APPLICATION))
+
+# What keeps a kit a kit.
+check:
+	@python3 tools/check_kits.py
+
+clean:
+	rm -rf $(BUILD)
+
+-include $(shell find $(BUILD) -name '*.d' 2>/dev/null)

@@ -12,30 +12,30 @@ CFLAGS  ?= -O2 -g
 # gnu11, not c11: strict C11 hides the POSIX/BSD declarations this needs
 # (getaddrinfo, cfmakeraw, clock_gettime) and the build fails on the seam
 # rather than on anything real.
-CFLAGS  += -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter -Isrc
+KITS    := ../kits
+CFLAGS  += -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter \
+           -Isrc -I$(KITS)/support -I$(KITS)/device -I$(KITS)/storage \
+           -I$(KITS)/interface -I$(KITS)/translation -I$(KITS)/application
 LDFLAGS ?=
 
 BUILD   := build
-CORE    := src/tiku_desk_tx.c src/tiku_desk_session.c src/tiku_desk_ns.c src/tiku_desk_msg.c
-CORE_O  := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE))
 
-UI      := src/tiku_desk_gfx.c src/tiku_desk_theme.c src/tiku_desk_font.c src/tiku_desk_ttf.c src/tiku_desk_glyphpath.c src/tiku_desk_cff.c src/tiku_desk_ui.c src/tiku_desk_about_app.c
-UI_O    := $(patsubst src/%.c,$(BUILD)/%.o,$(UI))
+# The toolkit moved out into the kits; what is left here is the samples
+# and the tools that exercise them.  The three names below are kept
+# because every rule downstream is written in terms of them -- they now
+# resolve to kit archives, in the order a linker wants them.
+KIT_BUILD     := $(KITS)/build
+LIB_RUNTIME   := $(KIT_BUILD)/libtiku_application.a
+LIB_UI        := $(KIT_BUILD)/libtiku_interface.a
+LIB_TRANSPORT := $(KIT_BUILD)/libtiku_storage.a $(KIT_BUILD)/libtiku_device.a \
+                 $(KIT_BUILD)/libtiku_support.a
 
-RUNTIME   := src/tiku_desk_app.c src/tiku_desk_app_load.c src/tiku_desk_window.c src/tiku_desk_remote.c src/tiku_desk_conduct.c src/tiku_desk_client.c src/tiku_desk_x11.c
-RUNTIME_O := $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
-
-PIC_CORE_O    := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(CORE))
-PIC_UI_O      := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(UI))
-PIC_RUNTIME_O := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(RUNTIME))
-PIC_TRANSPORT := $(BUILD)/pic/libtiku_desk_transport.a
-PIC_UI        := $(BUILD)/pic/libtiku_desk_ui.a
-PIC_RUNTIME   := $(BUILD)/pic/libtiku_desk_runtime.a
+PIC_RUNTIME   := $(KIT_BUILD)/pic/libtiku_application.a
+PIC_UI        := $(KIT_BUILD)/pic/libtiku_interface.a
+PIC_TRANSPORT := $(KIT_BUILD)/pic/libtiku_storage.a \
+                 $(KIT_BUILD)/pic/libtiku_device.a \
+                 $(KIT_BUILD)/pic/libtiku_support.a
 PIC_LIBS      := $(PIC_RUNTIME) $(PIC_UI) $(PIC_TRANSPORT)
-
-LIB_TRANSPORT := $(BUILD)/libtiku_desk_transport.a
-LIB_UI        := $(BUILD)/libtiku_desk_ui.a
-LIB_RUNTIME   := $(BUILD)/libtiku_desk_runtime.a
 
 PROBE   := $(BUILD)/tiku-desk-probe
 GALLERY := $(BUILD)/tiku-desk-gallery
@@ -68,42 +68,24 @@ TEST_APP := $(BUILD)/test-desk-app
 all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(APPS) $(EXAMPLES) \
      $(SO_APPS) $(SO_EXAMPLES) $(RUNNER)
 
-libs: $(LIB_TRANSPORT) $(LIB_UI) $(LIB_RUNTIME)
+# The kits are built where they live, by their own Makefile: this one
+# only says that nothing here can be built before they are.
+libs:
+	@$(MAKE) --no-print-directory -C $(KITS) libs pic
+
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
-$(LIB_TRANSPORT): $(CORE_O)
-	$(AR) rcs $@ $^
-
-# The same sources again, position-independent, because a shared object
-# cannot link an archive of fixed-address code.
-$(BUILD)/pic/%.o: src/%.c | $(BUILD)/pic
-	$(CC) $(CFLAGS) -fPIC -MMD -MP -c -o $@ $<
-
-$(BUILD)/pic:
-	@mkdir -p $(BUILD)/pic
-
-$(PIC_TRANSPORT): $(PIC_CORE_O)
-	$(AR) rcs $@ $^
-
-$(PIC_UI): $(PIC_UI_O)
-	$(AR) rcs $@ $^
-
-$(PIC_RUNTIME): $(PIC_RUNTIME_O)
-	$(AR) rcs $@ $^
-
-$(LIB_UI): $(UI_O)
-	$(AR) rcs $@ $^
-
-$(LIB_RUNTIME): $(RUNTIME_O)
-	$(AR) rcs $@ $^
+# The archives themselves are the kits' business; these say only that
+# they are made by going there, so make does not call them missing.
+$(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(PIC_LIBS): libs ;
 
 $(PROBE): $(BUILD)/tiku_desk_probe.o $(LIB_TRANSPORT)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "built $@"
 
-$(GALLERY): $(BUILD)/tiku_desk_gallery.o $(BUILD)/tiku_desk_x11.o $(LIB_UI)
+$(GALLERY): $(BUILD)/tiku_desk_gallery.o $(LIB_UI) $(LIB_TRANSPORT)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lX11
 	@echo "built $@"
 
