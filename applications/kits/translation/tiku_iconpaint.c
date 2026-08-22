@@ -69,6 +69,9 @@ paint(tiku_surface_t *s, const char *name, int x, int y, int size,
     const uint32_t *bmp;
     int row, col;
     unsigned m;
+    /* Asked once for the whole icon, not per pixel: it cannot change
+     * while one is being painted. */
+    int mono = tiku_theme_achromatic();
 
     if (s == NULL || name == NULL || size <= 0) {
         return 0;
@@ -105,6 +108,9 @@ paint(tiku_surface_t *s, const char *name, int x, int y, int size,
                              ((wash >> 8) & 0xFFu) * m;
                 unsigned b = (d & 0xFFu) * (255u - m) + (wash & 0xFFu) * m;
                 d = TIKU_RGB(r / 255u, g / 255u, b / 255u);
+            }
+            if (mono) {
+                d = tiku_grey(d);
             }
             tiku_pixel(s, px, py, d);
         }
@@ -294,9 +300,14 @@ tiku_paint_image(tiku_surface_t *s, const tiku_image_t *im,
             /* Transparent pixels leave the ground alone, so a picture with
              * a hole in it shows what is behind rather than black. */
             if ((p >> 24) != 0u) {
+                tiku_rgb_t c = TIKU_RGB((p >> 16) & 0xffu,
+                                             (p >> 8) & 0xffu, p & 0xffu);
+
+                /* A thumbnail is a picture too: on a desktop asked for
+                 * without colour it is the loudest thing on the screen
+                 * if it keeps its own. */
                 tiku_pixel(s, x, y,
-                                TIKU_RGB((p >> 16) & 0xffu,
-                                              (p >> 8) & 0xffu, p & 0xffu));
+                                tiku_theme_achromatic() ? tiku_grey(c) : c);
             }
         }
     }

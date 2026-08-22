@@ -66,6 +66,23 @@ void tiku_theme_set(const tiku_theme_t *theme);
 /** @brief The built-in dark table: the same desktop after dusk. */
 const tiku_theme_t *tiku_theme_dark(void);
 
+/** @brief The built-in table with no hue in it at all. */
+const tiku_theme_t *tiku_theme_mono(void);
+
+/**
+ * @brief Whether the live table names no hue anywhere.
+ *
+ * A theme names ROLES, and pictorial art -- icon bodies, thumbnails --
+ * is deliberately outside that: an icon is a picture, not a surface.
+ * But a desktop asked for without colour and then handed a red flower
+ * has not been given what it asked for, so the art asks this and drains
+ * itself.  Derived from the table, so it cannot disagree with it.
+ */
+int tiku_theme_achromatic(void);
+
+/** @brief @p c at its luminance: the same brightness, no hue. */
+tiku_rgb_t tiku_grey(tiku_rgb_t c);
+
 #define TIKU_C_PANEL      (tiku_theme()->panel)
 #define TIKU_C_DOC        (tiku_theme()->doc)
 #define TIKU_C_TEXT       (tiku_theme()->text)
