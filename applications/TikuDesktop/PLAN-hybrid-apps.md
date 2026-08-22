@@ -17,12 +17,12 @@ tracker `7a1b758`).
 
 ### Repos, branches, commit discipline
 
-- Toolkit: `applications/desktop/` inside the **tikuOS repo**
+- Toolkit: `applications/TikuDesktop/` inside the **tikuOS repo**
   (`/home/ambujv/Tiku/tikuOS`, branch `vfs-watch-wip`). The repo `.gitignore`
   covers `applications/`, so **new files need `git add -f`**, and a commit
-  should be verified with `git show HEAD:./applications/desktop/src/<file>`.
+  should be verified with `git show HEAD:./applications/TikuDesktop/src/<file>`.
   Do not touch the `drivers` WIP change.
-- Tracker: `applications/tracker/` is **its own repo**
+- Tracker: `applications/TikuTracker/` is **its own repo**
   (github.com/tikuos/tracker, branch `main`).
 - Commits: author `Ambuj Varshney <ambuj.varshney@proton.me>`, subject
   `Desktop:`/`Tracker:` + what now works, ≤5 one-line `- ` bullets, **no
@@ -36,7 +36,7 @@ tracker `7a1b758`).
 
 Per feature: failing/proving test → implement → **mutation test** (break the
 new code, confirm the specific test fails, restore) → full `make test` in
-`applications/tracker` ending `shell scripts hold in both front-ends` →
+`applications/TikuTracker` ending `shell scripts hold in both front-ends` →
 commit → push. `TRK_SHELL_ONLY=<name>.script bash tests/shell/run.sh` runs
 one lane. In the harness use `pkill -x`, never `pkill -f` (a `-f` pattern
 matches the wrapper shell's own command line and kills the session).
@@ -44,7 +44,7 @@ matches the wrapper shell's own command line and kills the session).
 ### Architecture as it stands
 
 - **Descriptor**: `tiku_app_descriptor_t`
-  (`applications/desktop/src/tiku_app.h`) — `{id, name, start, stop,
+  (`applications/TikuDesktop/src/tiku_app.h`) — `{id, name, start, stop,
   event, tick, pick, run}` against `tiku_app_services_t`
   `{ctx, open, frame, menus, close}`. `TIKU_APP_MAX` is 16;
   `tiku_app_registry_t` exists and is currently unused by the shells.
@@ -72,7 +72,7 @@ matches the wrapper shell's own command line and kills the session).
   `tiku_trk_deskbar_add_app()`; a pick arrives as `TIKU_TRK_DB_LAUNCH_APP`
   and runs through `tiku_trk_launch_run`. `TIKU_DESK_APPS` env overrides
   the search.
-- **Apps**: `applications/desktop/apps/tiku_edit.c`, `tiku_term.c` — single
+- **Apps**: `applications/TikuDesktop/apps/tiku_edit.c`, `tiku_term.c` — single
   files, descriptor + `main` guarded by `#ifndef TIKU_APP_EMBED`. Examples
   in `examples/` use `TIKU_EXAMPLE_EMBED` the same way.
 - **Test harness**: `tests/shell/run.sh` drives `build/dev/*` (in-process
@@ -110,7 +110,7 @@ the unconditional `usleep(30000)` with `poll()` on the session fd, timeout
 does not know the app's other fds, so ticks must keep their cadence even
 when the session is quiet. The drain loop above the nap is unchanged.
 
-**Proving test.** Extend `applications/tracker/tests/test_remote.c` (or a
+**Proving test.** Extend `applications/TikuTracker/tests/test_remote.c` (or a
 new `test_client_latency` in the same style): over a socketpair, send an
 EVENT to a client running the About descriptor and measure
 send→FRAME-arrival under 20 ms (generous; the nap made it 30–60 ms). Use a

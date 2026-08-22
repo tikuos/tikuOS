@@ -1,5 +1,6 @@
 /*
- * The new Tracker for TikuOS.
+ * TikuOS kits -- the foundation TikuDesktop and TikuTracker
+ * both stand on.
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
@@ -184,7 +185,7 @@ static const tiku_str_def_t tiku_str_defaults[] = {
     { "menu.day.hide", "Hide day of week" },
     { "menu.day.show", "Show day of week" },
     { "menu.deskbar_prefs", "Deskbar preferences…" },
-    { "menu.desktop_prefs", "Desktop preferences…" },
+    { "menu.desktop_prefs", "TikuDesktop preferences…" },
     { "menu.file", "File" },
     { "menu.find", "Find…" },
     { "menu.fonts", "Fonts…" },
@@ -202,7 +203,7 @@ static const tiku_str_def_t tiku_str_defaults[] = {
     { "menu.show_replicants", "Show replicants" },
     { "menu.shut_down", "Shut down…" },
     { "menu.templates", "Templates" },
-    { "menu.tracker_prefs", "Tracker preferences…" },
+    { "menu.tracker_prefs", "TikuTracker preferences…" },
     { "menu.window", "Window" },
     { "menu.zone.hide", "Hide time zone" },
     { "menu.zone.show", "Show time zone" },
@@ -232,13 +233,13 @@ static const tiku_str_def_t tiku_str_defaults[] = {
     { "prefs.deskbar.auto_raise", "Auto-raise" },
     { "prefs.deskbar.dock_location", "Dock location" },
     { "prefs.deskbar.dock_n", "Dock: %d" },
-    { "prefs.deskbar.edit_in_tracker", "Edit in Tracker…" },
+    { "prefs.deskbar.edit_in_tracker", "Edit in TikuTracker…" },
     { "prefs.deskbar.expand_new", "Expand new applications" },
     { "prefs.deskbar.font_size", "Font size" },
     { "prefs.deskbar.hide_app_names", "Hide application names" },
     { "prefs.deskbar.show_expander", "Show application expander" },
     { "prefs.deskbar.sort_apps", "Sort applications by name" },
-    { "prefs.deskbar.tracker_first", "Tracker always first" },
+    { "prefs.deskbar.tracker_first", "TikuTracker always first" },
     { "prefs.desktop.drop_hint", "Drop a picture in the Desktop to offer it here" },
     { "prefs.desktop.how_laid", "How it is laid" },
     { "prefs.desktop.mode.centred", "Centred" },
@@ -249,7 +250,7 @@ static const tiku_str_def_t tiku_str_defaults[] = {
     { "prefs.desktop.picture", "Picture" },
     { "prefs.fonts.family", "Family" },
     { "prefs.fonts.sample_body", "Handgloves 0123456789" },
-    { "prefs.fonts.sample_title", "TikuOS Tracker" },
+    { "prefs.fonts.sample_title", "TikuTracker" },
     { "prefs.fonts.size", "Size" },
     { "prefs.page.desktop", "Desktop" },
     { "prefs.page.mount", "Disk mount" },
@@ -264,9 +265,9 @@ static const tiku_str_def_t tiku_str_defaults[] = {
     { "status.nothing_matches", "nothing matches" },
     { "status.selected", "%d/%d selected" },
     { "title.deskbar_prefs", "Deskbar preferences" },
-    { "title.desktop_prefs", "Desktop preferences" },
+    { "title.desktop_prefs", "TikuDesktop preferences" },
     { "title.fonts", "Fonts" },
-    { "title.tracker_prefs", "Tracker preferences" },
+    { "title.tracker_prefs", "TikuTracker preferences" },
 };
 
 static const int tiku_str_default_count =

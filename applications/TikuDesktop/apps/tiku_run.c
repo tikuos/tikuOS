@@ -1,5 +1,5 @@
 /*
- * Tiku Desktop -- graphical interface to TikuOS devices.
+ * TikuDesktop -- graphical interface to TikuOS devices.
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *

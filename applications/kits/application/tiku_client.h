@@ -1,5 +1,6 @@
 /*
- * Tiku Desktop -- graphical interface to TikuOS devices.
+ * TikuOS kits -- the foundation TikuDesktop and TikuTracker
+ * both stand on.
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
