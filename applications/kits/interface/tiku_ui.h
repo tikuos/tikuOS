@@ -167,6 +167,18 @@ void tiku_ui_menu(tiku_surface_t *s, tiku_rect_t r,
                        const char *const *items, int n, int hot);
 
 /** @brief One list row: selected rows take the selection stripe. */
+/**
+ * @brief The mark on a menu row that opens a submenu.
+ *
+ * A small right-pointing triangle, set against the right edge of @p item
+ * and centred in it.  Drawn as horizontal runs rather than as a stroked
+ * outline: a two-pixel pen loses its point at a twelve-pixel row, and a
+ * run is a command the display list can carry, where a plotted pixel is
+ * not -- so a menu sent down a line arrives with its arrows on.
+ */
+void tiku_ui_submenu_arrow(tiku_surface_t *s, tiku_rect_t item,
+                           tiku_rgb_t c);
+
 void tiku_ui_list_row(tiku_surface_t *s, tiku_rect_t r,
                            const char *text, int selected);
 

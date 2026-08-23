@@ -619,6 +619,42 @@ tiku_ui_menu(tiku_surface_t *s, tiku_rect_t r,
 }
 
 void
+tiku_ui_submenu_arrow(tiku_surface_t *s, tiku_rect_t item, tiku_rgb_t c)
+{
+    int th, tw, mid, x, y, i;
+
+    if (s == NULL || item.h <= 0) {
+        return;
+    }
+    /*
+     * Half the row, forced odd so there is a single row at the point
+     * rather than a two-pixel blunt end, and never so small that the
+     * taper has nothing to happen in.
+     */
+    th = item.h / 2;
+    if ((th & 1) == 0) {
+        th--;
+    }
+    if (th < 5) {
+        th = 5;
+    }
+    tw = th / 2 + 1;
+    mid = th / 2;
+
+    /* Set against the right edge, at the same remove the label keeps
+     * from the left of the row. */
+    x = item.x + item.w - 8 - tw;
+    y = item.y + (item.h - th) / 2;
+
+    for (i = 0; i < th; i++) {
+        int d = (i > mid) ? i - mid : mid - i;
+        int len = tw - (d * (tw - 1)) / mid;
+
+        tiku_hline(s, x, y + i, len, c);
+    }
+}
+
+void
 tiku_ui_list_row(tiku_surface_t *s, tiku_rect_t r,
                       const char *text, int selected)
 {
