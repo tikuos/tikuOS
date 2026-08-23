@@ -87,6 +87,13 @@ static const float near_spine[] = { 385.67f, 118.15f, 385.67f, 701.63f };
 static const float near_diag1[] = { 133.02f, 264.02f, 638.33f, 555.76f };
 static const float near_diag2[] = { 638.33f, 264.02f, 133.02f, 555.76f };
 
+/* Its bounding box, which is what the mark is fitted to when it is the
+ * only thing drawn. */
+#define NEAR_X0 133.02f
+#define NEAR_Y0 118.15f
+#define NEAR_X1 638.33f
+#define NEAR_Y1 701.63f
+
 static const float far_hex[] = {
     638.33f, 322.37f, 890.98f, 468.24f, 890.98f, 759.98f,
     638.33f, 905.85f, 385.67f, 759.98f, 385.67f, 468.24f
@@ -107,21 +114,33 @@ static const float face[] = {
     385.67f, 468.24f, 638.33f, 322.37f, 638.33f, 555.76f, 385.67f, 701.63f
 };
 
-/** @brief Where the artwork sits on the surface, and how big. */
+/**
+ * @brief Where the artwork sits on the surface, and how big.
+ *
+ * The unit square is not always the whole of it.  When both cubes are
+ * drawn the artwork is laid out across the full 1024, but the near cube
+ * ALONE lives in x 133..638, y 118..701 -- half the width and three
+ * fifths of the height.  Mapping that through the full square would put
+ * a two-thirds-size mark in the corner of the room it was given and
+ * leave the rest of it empty -- which is not the size the caller asked
+ * for.  So the window into unit space is part of the fit: @c ox, @c oy
+ * and @c span say which square is being mapped onto @c side, and the
+ * near-only rendition names its own.
+ */
 typedef struct {
-    float x, y, side;
+    float x, y, side, ox, oy, span;
 } fit_t;
 
 static float
 at_x(const fit_t *f, float u)
 {
-    return f->x + u * f->side / U;
+    return f->x + (u - f->ox) * f->side / f->span;
 }
 
 static float
 at_y(const fit_t *f, float u)
 {
-    return f->y + u * f->side / U;
+    return f->y + (u - f->oy) * f->side / f->span;
 }
 
 /**
@@ -350,6 +369,52 @@ tiku_logo_paint_with(tiku_surface_t *s, tiku_rect_t r, unsigned flags,
     } else {
         tiku_logo_palette(0, 0.0f, &use);
     }
+    both = (side >= 32);
+    solid = (side < 22);
+
+    /*
+     * Which square of unit space is being shown.  Both cubes: the whole
+     * of it, as laid out.  The near cube on its own: its own bounds,
+     * squared off about their centre so the cube keeps its proportions
+     * and is merely bigger, not stretched.
+     */
+    if (both) {
+        f.ox = 0.0f;
+        f.oy = 0.0f;
+        f.span = U;
+    } else {
+        float bw = NEAR_X1 - NEAR_X0;
+        float bh = NEAR_Y1 - NEAR_Y0;
+        float b = (bw > bh) ? bw : bh;
+        float k;
+
+        /*
+         * Room for the stroke as well as the geometry.  A stroke is drawn
+         * half either side of the line it follows, so a fit made to the
+         * bare bounds hangs half a stroke past the rectangle the caller
+         * gave -- and a mark that paints outside its own box is one that
+         * will paint over its neighbour.
+         *
+         * The reservation has to be made in PIXELS rather than in units,
+         * because the stroke is not allowed thinner than a pixel: below
+         * about twenty-six the drawn line is wider than its share of the
+         * unit square, and a fit that reserved the unit width would still
+         * spill.  So the thin case is solved for what will actually be
+         * drawn -- one pixel -- and the rest divides as it scales.
+         *
+         * One pixel over that, half at each end, because the spine's cap
+         * is squared off exactly at the bounds and lands on the boundary:
+         * without the slack it rounds into the row past it.
+         */
+        k = ((float)side - 1.0f) / (b + STROKE);
+        if (STROKE * k < 1.0f) {
+            k = ((float)side - 2.0f) / b;
+        }
+        f.span = (float)side / k;
+        f.ox = NEAR_X0 - (f.span - bw) * 0.5f;
+        f.oy = NEAR_Y0 - (f.span - bh) * 0.5f;
+    }
+
     f.side = (float)side;
     f.x = (float)r.x + (float)(r.w - side) * 0.5f;
     f.y = (float)r.y + (float)(r.h - side) * 0.5f;
@@ -373,12 +438,10 @@ tiku_logo_paint_with(tiku_surface_t *s, tiku_rect_t r, unsigned flags,
      * line is not a faint line, it is a line that is missing in places,
      * and the mark comes apart into dashes.
      */
-    w = STROKE * (float)side / U;
+    w = STROKE * (float)side / f.span;
     if (w < 1.0f) {
         w = 1.0f;
     }
-    both = (side >= 32);
-    solid = (side < 22);
 
     /*
      * Small, the near cube is filled before it is drawn: at sixteen
