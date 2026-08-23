@@ -388,6 +388,60 @@ tiku_copy_bits(tiku_surface_t *s, tiku_rect_t src, int dx,
 }
 
 void
+tiku_veil(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c, float amount)
+{
+    int x, y, x0, y0, x1, y1, sc;
+    long stride;
+    unsigned a, inv, cr, cg, cb;
+
+    if (s == NULL || amount <= 0.0f) {
+        return;
+    }
+    if (amount > 1.0f) {
+        amount = 1.0f;
+    }
+    /*
+     * Eight bits of it, so the arithmetic below is integer.  A veil is
+     * laid over every pixel of a screen, and doing that in floating
+     * point once per channel is the difference between a fade that
+     * keeps up and one that stutters.
+     */
+    a = (unsigned)(amount * 255.0f + 0.5f);
+    if (a == 0u) {
+        return;
+    }
+    inv = 255u - a;
+    cr = ((c >> 16) & 0xFFu) * a;
+    cg = ((c >> 8) & 0xFFu) * a;
+    cb = (c & 0xFFu) * a;
+
+    x0 = (r.x > s->clip.x) ? r.x : s->clip.x;
+    y0 = (r.y > s->clip.y) ? r.y : s->clip.y;
+    x1 = r.x + r.w;
+    y1 = r.y + r.h;
+    if (x1 > s->clip.x + s->clip.w) { x1 = s->clip.x + s->clip.w; }
+    if (y1 > s->clip.y + s->clip.h) { y1 = s->clip.y + s->clip.h; }
+    sc = scale_of(s);
+    stride = (long)s->w * sc;
+    for (y = y0; y < y1; y++) {
+        int ry;
+
+        for (ry = 0; ry < sc; ry++) {
+            tiku_rgb_t *row = s->px + ((long)y * sc + ry) * stride;
+
+            for (x = x0 * sc; x < x1 * sc; x++) {
+                tiku_rgb_t p = row[x];
+                unsigned pr = (cr + ((p >> 16) & 0xFFu) * inv) / 255u;
+                unsigned pg = (cg + ((p >> 8) & 0xFFu) * inv) / 255u;
+                unsigned pb = (cb + (p & 0xFFu) * inv) / 255u;
+
+                row[x] = (tiku_rgb_t)((pr << 16) | (pg << 8) | pb);
+            }
+        }
+    }
+}
+
+void
 tiku_fill(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c)
 {
     int x, y, x0, y0, x1, y1;

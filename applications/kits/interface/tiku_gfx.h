@@ -200,6 +200,16 @@ void tiku_copy_bits(tiku_surface_t *s, tiku_rect_t src,
 void tiku_blit(tiku_surface_t *dst, int x, int y,
                     const tiku_surface_t *src);
 
+/**
+ * @brief Lay @p c over @p r at @p amount, 0 for nothing and 1 for solid.
+ *
+ * What a fill does not do: a fill replaces, this one mixes.  It is how a
+ * screen is taken to black and brought back again without the thing
+ * underneath having to be drawn twice.
+ */
+void tiku_veil(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c,
+               float amount);
+
 void tiku_fill(tiku_surface_t *s, tiku_rect_t r,
                     tiku_rgb_t c);
 
