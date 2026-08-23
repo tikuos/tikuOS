@@ -77,7 +77,7 @@ paint(about_state_t *st)
                         TIKU_LOGO_GROUND);
         base = 16 + mark + 12 + big->ascent;
 
-        tiku_text(s, big, 18, base, "Tiku", TIKU_C_TEXT);
+        tiku_text(s, big, 18, base, "TikuOS", TIKU_C_TEXT);
         tiku_fill(s, (tiku_rect_t){ 18, base + 6, 96, 3 },
                        TIKU_C_TAB);
         tiku_text(s, bold, 18, base + 14 + plain->ascent,
