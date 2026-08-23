@@ -23,6 +23,7 @@
 
 #include "tiku_about_app.h"
 #include "tiku_gfx.h"
+#include "tiku_logo.h"
 #include "tiku_font.h"
 
 #define ABOUT_W 400
@@ -66,7 +67,15 @@ paint(about_state_t *st)
     tiku_fill(s, (tiku_rect_t){ 0, 0, ABOUT_W, ABOUT_H },
                    TIKU_C_PANEL);
     {
-        int base = 22 + big->ascent;
+        /* The same mark the Deskbar wears and the desktop's own About
+         * puts up: this one runs in its own process and looks no
+         * different, which is the claim it exists to make. */
+        int mark = 72;
+        int base;
+
+        tiku_logo_paint(s, (tiku_rect_t){ 18, 16, mark, mark },
+                        TIKU_LOGO_GROUND);
+        base = 16 + mark + 12 + big->ascent;
 
         tiku_text(s, big, 18, base, "Tiku", TIKU_C_TEXT);
         tiku_fill(s, (tiku_rect_t){ 18, base + 6, 96, 3 },

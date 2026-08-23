@@ -43,7 +43,7 @@ STORAGE     := storage/tiku_model.c storage/tiku_state.c \
 INTERFACE   := interface/tiku_gfx.c interface/tiku_theme.c \
                interface/tiku_font.c interface/tiku_ttf.c \
                interface/tiku_glyphpath.c interface/tiku_cff.c \
-               interface/tiku_ui.c interface/tiku_dl.c \
+               interface/tiku_ui.c interface/tiku_dl.c interface/tiku_logo.c \
                interface/tiku_window.c \
                interface/tiku_x11.c
 TRANSLATION := translation/tiku_inflate.c translation/tiku_jpeg.c \
@@ -91,11 +91,22 @@ $(BUILD)/pic/%.o: %.c | $(BUILD)/pic
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fPIC -MMD -MP -c -o $@ $<
 
+#
+# The archive is REMOVED before it is made, every time.  `ar rcs` adds
+# members and never takes any away, so an archive built over an older one
+# keeps whatever used to be in it -- and a file MOVED from one kit to
+# another therefore ends up in both.  The linker then resolves it from
+# whichever archive comes first, which is the stale one, and the build
+# quietly runs code that is no longer in the tree.  It cost an afternoon
+# once; it costs an rm here.
+#
 define KIT_RULES
 $(BUILD)/libtiku_$(1).a: $$(patsubst %.c,$(BUILD)/%.o,$($(2)))
+	@rm -f $$@
 	$$(AR) rcs $$@ $$^
 $(BUILD)/pic/libtiku_$(1).a: $$(patsubst %.c,$(BUILD)/pic/%.o,$($(2)))
 	@mkdir -p $$(dir $$@)
+	@rm -f $$@
 	$$(AR) rcs $$@ $$^
 endef
 
