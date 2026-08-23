@@ -58,6 +58,16 @@ struct tiku_face_src {
 typedef struct {
     tiku_font_t      face;
     tiku_face_src_t *src;
+    /*
+     * The same face at twice the size, kept in the SAME slot as the one
+     * it belongs to.  It could have been another entry in this table --
+     * it is a face at a size like any other -- but faces are handed out
+     * by address and this table evicts, so a cross-entry pointer would
+     * one day be a face somebody else had taken over.  Owned here, freed
+     * here, and covered by the eviction guards the 1x face already has.
+     */
+    tiku_font_t      hiface;
+    tiku_face_src_t *hisrc;
     int                   px, bold, live;
     unsigned              stamp;      /* when it was last handed out */
 } built_face_t;
@@ -97,6 +107,10 @@ built_free(built_face_t *b)
     if (b->src != NULL) {
         cache_empty(b->src);
         free(b->src);
+    }
+    if (b->hisrc != NULL) {
+        cache_empty(b->hisrc);
+        free(b->hisrc);
     }
     memset(b, 0, sizeof *b);
 }
@@ -193,7 +207,40 @@ built_make(built_face_t *b, const tiku_ttf_t *ttf, int px, int bold)
     b->face.first = 0;
     b->face.ascent = (ascent > 0) ? ascent : px;
     b->face.height = (height > 0) ? height : px + 2;
-    b->face.hi = NULL;          /* one face; a scaled screen replicates */
+
+    /*
+     * And the same face again at twice the size, which is what a screen
+     * running at scale 2 actually has the pixels for.  Metrics only here
+     * -- its glyphs are drawn the first time one is asked for, as the 1x
+     * face's are, so a face nobody draws at scale costs one calloc.
+     *
+     * Its advances are never consulted: tiku_text() steps the pen by the
+     * LOGICAL advance whatever face drew the letter, so the line occupies
+     * exactly the space it was measured to.  What comes from here is ink
+     * and nothing else.
+     *
+     * If it cannot be had, the face keeps its 1x glyphs and a scaled
+     * screen replicates them, which is what happened before this existed.
+     */
+    b->face.hi = NULL;
+    b->hisrc = calloc(1u, sizeof *b->hisrc);
+    if (b->hisrc != NULL) {
+        int hi_ascent = 0, hi_height = 0;
+
+        b->hisrc->ttf = ttf;
+        b->hisrc->px = px * 2;
+        b->hisrc->bold = bold;
+        tiku_ttf_metrics(ttf, px * 2, &hi_ascent, &hi_height);
+        b->hiface.src = b->hisrc;
+        b->hiface.glyphs = NULL;
+        b->hiface.bits = NULL;
+        b->hiface.count = 0;
+        b->hiface.first = 0;
+        b->hiface.ascent = (hi_ascent > 0) ? hi_ascent : px * 2;
+        b->hiface.height = (hi_height > 0) ? hi_height : px * 2 + 2;
+        b->hiface.hi = NULL;    /* the ladder stops here */
+        b->face.hi = &b->hiface;
+    }
     return 1;
 }
 
