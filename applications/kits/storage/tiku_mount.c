@@ -490,8 +490,20 @@ mount_changes(tiku_backend_t *b, tiku_model_change_t *out, int max,
     for (i = 0; i < TIKU_MOUNT_MAX && n < max; i++) {
         int got, k, mine = 1;
 
-        if (!m->slot[i].live || m->slot[i].backend->ops->changes == NULL) {
+        if (!m->slot[i].live) {
             continue;
+        }
+        if (m->slot[i].backend->ops->changes == NULL) {
+            /*
+             * No ring to ask IS the "cannot tell" answer -- the same one
+             * a -1 carries, and it means the same thing for the whole
+             * namespace.  Skipping it instead let a POSIX root sit
+             * silent while a device answered, so this said "nothing
+             * changed, and that is complete" for everything -- and every
+             * local window stopped relisting the moment a board was
+             * mounted beside it.
+             */
+            return -1;
         }
         got = m->slot[i].backend->ops->changes(m->slot[i].backend, out + n,
                                                max - n, &mine);
@@ -788,6 +800,18 @@ tiku_backend_serving(tiku_backend_t *b, const char *path, char *local,
         return b;
     }
     return tiku_mount_route(b, path, local, max);
+}
+
+struct tiku_store *
+tiku_backend_store_for(tiku_backend_t *b, const char *path)
+{
+    char local[TIKU_PATH_MAX];
+    tiku_backend_t *on = tiku_backend_serving(b, path, local, sizeof local);
+
+    if (on == NULL || on->ops->state_store == NULL) {
+        return NULL;
+    }
+    return on->ops->state_store(on);
 }
 
 tiku_backend_t *

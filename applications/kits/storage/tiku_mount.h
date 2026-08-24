@@ -114,6 +114,22 @@ tiku_backend_t *tiku_backend_serving(tiku_backend_t *b, const char *path,
                                      char *local, size_t max);
 
 /**
+ * @brief The state store of whatever serves @p path.
+ *
+ * state_store() on the ops table takes no path, so a namespace cannot
+ * route it and answers for its ROOT -- which writes a device node's
+ * pose position into the local filesystem's attributes, under a name no
+ * local file has, and leaves the per-device sidecar the device backend
+ * opens unreachable.  Anything that knows WHICH node it is keeping
+ * state for asks here instead.
+ *
+ * @return the store, or NULL when nothing serves @p path or the store
+ *         that does keeps no state.
+ */
+struct tiku_store *tiku_backend_store_for(tiku_backend_t *b,
+                                          const char *path);
+
+/**
  * @brief Who serves @p path, and what it is called there.
  *
  * @param local Receives the path as the answering backend knows it;
