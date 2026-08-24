@@ -57,7 +57,7 @@ APPLICATION := application/tiku_app.c application/tiku_app_load.c \
                application/tiku_remote.c \
                application/tiku_conduct.c \
                application/tiku_client.c \
-               application/tiku_about_app.c
+               application/tiku_demo_app.c
 
 KITS := support device storage interface translation application
 

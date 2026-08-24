@@ -1,7 +1,7 @@
 # TikuDesktop -- host build of the app framework (Linux/Mac).
 #
 # Builds what the toolkit ships beside the shell: the headless probe, the
-# gallery, the About app, tiku-edit and tiku-term, the four examples, the
+# gallery, the demo app, tiku-edit and tiku-term, the four examples, the
 # loadable .so form of the applications and examples, and tiku-run.  The
 # desktop SHELL is not COMPILED here despite the directory name: it is one
 # of two front-ends over a shared core that lives in the separate
@@ -59,7 +59,7 @@ PIC_LIBS      := $(PIC_RUNTIME) $(PIC_UI) $(PIC_TRANSPORT)
 
 PROBE   := $(BUILD)/tiku-desk-probe
 GALLERY := $(BUILD)/tiku-desk-gallery
-ABOUTAPP := $(BUILD)/tiku-about-app
+DEMOAPP := $(BUILD)/tiku-demo-app
 
 # Applications, as opposed to examples: these are meant to be used.
 # One binary per name, from one source file each.  The same file also
@@ -86,7 +86,7 @@ EXAMPLES := $(patsubst %,$(BUILD)/tiku-example-%,$(EXAMPLE_NAMES))
 TEST_APP := $(BUILD)/test-desk-app
 
 .PHONY: all clean run gallery font libs test shell
-all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(APPS) $(EXAMPLES) \
+all: libs $(PROBE) $(GALLERY) $(DEMOAPP) $(APPS) $(EXAMPLES) \
      $(SO_APPS) $(SO_EXAMPLES) $(RUNNER) shell
 
 # The kits are built where they live, by their own Makefile: this one
@@ -130,8 +130,8 @@ $(GALLERY): $(BUILD)/tiku_gallery.o $(LIB_UI) $(LIB_TRANSPORT)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) -lX11
 	@echo "built $@"
 
-$(ABOUTAPP): src/tiku_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
-	$(CC) $(CFLAGS) -o $@ src/tiku_about_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm
+$(DEMOAPP): src/tiku_demo_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT)
+	$(CC) $(CFLAGS) -o $@ src/tiku_demo_main.c $(LIB_RUNTIME) $(LIB_UI) $(LIB_TRANSPORT) $(LDFLAGS) -lX11 -lm
 
 $(BUILD)/tiku-%: apps/tiku_%.c $(LIB_RUNTIME) $(LIB_UI) \
                  $(LIB_TRANSPORT)

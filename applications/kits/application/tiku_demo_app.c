@@ -4,7 +4,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_about_app.c - the About panel as ONE descriptor.
+ * tiku_demo_app.c - one descriptor, linked in or in its own process.
  *
  * The thesis in one artifact: this file draws through the services it is
  * handed and never asks where it is running.  Linked into the desktop it
@@ -21,13 +21,13 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
-#include "tiku_about_app.h"
+#include "tiku_demo_app.h"
 #include "tiku_gfx.h"
 #include "tiku_logo.h"
 #include "tiku_font.h"
 
-#define ABOUT_W 400
-#define ABOUT_H 210
+#define DEMO_W 400
+#define DEMO_H 210
 
 #define CMD_QUIT    1
 #define CMD_REFRESH 2
@@ -38,7 +38,7 @@ typedef struct {
     uint32_t                        id;
     char                            kernel[96];
     long                            shown_minute;
-} about_state_t;
+} demo_state_t;
 
 static long
 read_uptime(void)
@@ -54,7 +54,7 @@ read_uptime(void)
 }
 
 static void
-paint(about_state_t *st)
+paint(demo_state_t *st)
 {
     tiku_surface_t *s = st->surface;
     const tiku_font_t *plain = tiku_font_plain();
@@ -64,7 +64,7 @@ paint(about_state_t *st)
     int y = 20;
     char line[160];
 
-    tiku_fill(s, (tiku_rect_t){ 0, 0, ABOUT_W, ABOUT_H },
+    tiku_fill(s, (tiku_rect_t){ 0, 0, DEMO_W, DEMO_H },
                    TIKU_C_PANEL);
     {
         /* The same mark the Deskbar wears and the desktop's own About
@@ -84,7 +84,7 @@ paint(about_state_t *st)
                        "one descriptor", TIKU_C_TEXT);
     }
     tiku_text(s, bold, facts_x, y + plain->ascent,
-                   "About, wherever it runs", TIKU_C_TEXT);
+                   "The same descriptor, either way", TIKU_C_TEXT);
     y += plain->height + 10;
     tiku_text(s, plain, facts_x, y + plain->ascent, st->kernel,
                    TIKU_C_TEXT);
@@ -100,20 +100,20 @@ paint(about_state_t *st)
     }
     snprintf(line, sizeof line, "pid %ld: whose faults are whose",
              (long)getpid());
-    tiku_text(s, plain, 18, ABOUT_H - 14, line, TIKU_C_TEXT);
+    tiku_text(s, plain, 18, DEMO_H - 14, line, TIKU_C_TEXT);
 }
 
 static void
-show(about_state_t *st)
+show(demo_state_t *st)
 {
     (void)st->services->frame(st->services->ctx, st->id,
-                              st->surface->px, ABOUT_W, ABOUT_H);
+                              st->surface->px, DEMO_W, DEMO_H);
 }
 
 static int
-about_start(void **state, const tiku_app_services_t *services)
+demo_start(void **state, const tiku_app_services_t *services)
 {
-    about_state_t *st = calloc(1, sizeof *st);
+    demo_state_t *st = calloc(1, sizeof *st);
     struct utsname un;
 
     if (st == NULL) {
@@ -127,14 +127,14 @@ about_start(void **state, const tiku_app_services_t *services)
     } else {
         snprintf(st->kernel, sizeof st->kernel, "unknown kernel");
     }
-    st->surface = tiku_surface_new(ABOUT_W, ABOUT_H,
+    st->surface = tiku_surface_new(DEMO_W, DEMO_H,
                                         TIKU_C_PANEL);
     if (st->surface == NULL) {
         free(st);
         return -1;
     }
-    st->id = services->open(services->ctx, "About (remote)", ABOUT_W,
-                            ABOUT_H);
+    st->id = services->open(services->ctx, "Descriptor Demo", DEMO_W,
+                            DEMO_H);
     paint(st);
     show(st);
     {
@@ -160,9 +160,9 @@ about_start(void **state, const tiku_app_services_t *services)
 }
 
 static void
-about_stop(void *state)
+demo_stop(void *state)
 {
-    about_state_t *st = state;
+    demo_state_t *st = state;
 
     if (st != NULL) {
         tiku_surface_free(st->surface);
@@ -171,9 +171,9 @@ about_stop(void *state)
 }
 
 static int
-about_event(void *state, const tiku_event_t *event)
+demo_event(void *state, const tiku_event_t *event)
 {
-    about_state_t *st = state;
+    demo_state_t *st = state;
 
     if (event->type == TIKU_EVENT_KEY_DOWN &&
         event->key == TIKU_KEY_ESCAPE) {
@@ -194,9 +194,9 @@ about_event(void *state, const tiku_event_t *event)
 }
 
 static void
-about_tick(void *state, int64_t now_us)
+demo_tick(void *state, int64_t now_us)
 {
-    about_state_t *st = state;
+    demo_state_t *st = state;
     long minute = read_uptime() / 60;
 
     (void)now_us;
@@ -211,7 +211,7 @@ about_tick(void *state, int64_t now_us)
 
         st->shown_minute = minute;
         tiku_fill(st->surface, (tiku_rect_t){ 150, y,
-                       ABOUT_W - 150, plain->height + 2 },
+                       DEMO_W - 150, plain->height + 2 },
                        TIKU_C_PANEL);
         snprintf(line, sizeof line, "up %ld day%s, %ld:%02ld",
                  up / 86400, (up / 86400) == 1 ? "" : "s",
@@ -223,9 +223,9 @@ about_tick(void *state, int64_t now_us)
 }
 
 static int
-about_pick(void *state, uint32_t window, int command)
+demo_pick(void *state, uint32_t window, int command)
 {
-    about_state_t *st = state;
+    demo_state_t *st = state;
 
     (void)window;
     if (command == CMD_QUIT) {
@@ -238,12 +238,12 @@ about_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
-const tiku_app_descriptor_t tiku_about_app = {
-    .id = "org.tikuos.about",
-    .name = "About",
-    .start = about_start,
-    .stop = about_stop,
-    .event = about_event,
-    .tick = about_tick,
-    .pick = about_pick,
+const tiku_app_descriptor_t tiku_demo_app = {
+    .id = "org.tikuos.demo",
+    .name = "Demo",
+    .start = demo_start,
+    .stop = demo_stop,
+    .event = demo_event,
+    .tick = demo_tick,
+    .pick = demo_pick,
 };

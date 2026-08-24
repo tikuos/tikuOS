@@ -64,7 +64,7 @@ matches the wrapper shell's own command line and kills the session).
   `tiku_remote_adopt` / `connect_fd` carry sessions over any fd.
 - **Embedded host** (tracker repo, `src/shell/tiku_trk_desktop.c`):
   a **single-slot** `app.embed` struct hosts one descriptor when
-  `TIKU_EMBED_ABOUT` is set. Functions at (approx.) lines 1033–1160:
+  `TIKU_EMBED_DEMO` is set. Functions at (approx.) lines 1033–1160:
   `embed_window_draw`, `embed_svc_open/frame/menus/close`, `embed_menu_pick`,
   `embed_stop`, `embed_start`. Input routing: `embed_press` /
   `remote_press` fields forward POINTER_MOVE/UP to whoever took the DOWN.
@@ -116,7 +116,7 @@ when the session is quiet. The drain loop above the nap is unchanged.
 
 **Proving test.** Extend `applications/TikuTracker/tests/test_remote.c` (or a
 new `test_client_latency` in the same style): over a socketpair, send an
-EVENT to a client running the About descriptor and measure
+EVENT to a client running the demo descriptor and measure
 send→FRAME-arrival under 20 ms (generous; the nap made it 30–60 ms). Use a
 socketpair, not a pty, to keep it deterministic. Run it in the `test:`
 recipe.
@@ -216,7 +216,7 @@ Replace the hardcoded `known[]` table in `offer_companions` with a scan:
   not the app. `embed_menu_pick`, close-box handling, `embed_press`
   routing, and the tick loop iterate slots. `embed_press` becomes a slot
   pointer, mirroring `remote_press`.
-- `TIKU_EMBED_ABOUT` keeps working (About becomes just another slot) —
+- `TIKU_EMBED_DEMO` keeps working (the demo becomes just another slot) —
   `embedapp.script` must stay green unmodified; it is the regression net
   for this refactor.
 - In-process apps returning done from `event`/`pick` → `embed_stop(slot)`.
@@ -287,7 +287,7 @@ socket today) for out-of-process apps, keeping the process boundary.
   FRAME message**; then a pty pair asserts negotiation correctly falls back
   to FRAME (feature bit refused).
 - `remoteapp.script` unchanged — it must pass identically through the shm
-  path (the about app runs over a socket, so it will negotiate shm; the
+  path (the demo app runs over a socket, so it will negotiate shm; the
   drag-ink pixels are the proof the blit is live).
 - Valgrind or a session-count assert for the unmap-on-sweep path if cheap;
   otherwise a unit check that `session_free` leaves no mapping (track count
