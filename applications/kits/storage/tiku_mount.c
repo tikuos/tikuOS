@@ -50,10 +50,28 @@ id_slot(uint64_t id)
     return (s >= 0 && s < TIKU_MOUNT_MAX) ? s : -1;
 }
 
+/*
+ * Only ever for a backend already known to be one of these.  Every
+ * backend has an impl pointer and it is its OWN state, so a test of
+ * "impl is not null" says nothing at all -- it would hand a POSIX
+ * store's private struct back as a mount table and read whatever
+ * happened to be at those offsets.  The public entry points ask
+ * tiku_mount_is() first, which compares the ops table.
+ */
 static mount_impl_t *
 impl_of(const tiku_backend_t *b)
 {
     return (b != NULL) ? (mount_impl_t *)b->impl : NULL;
+}
+
+static const tiku_backend_ops_t mount_ops;
+
+/** @brief The mount table of @p b, or NULL when @p b is not a namespace. */
+static mount_impl_t *
+table_of(const tiku_backend_t *b)
+{
+    return (b != NULL && b->ops == &mount_ops) ? (mount_impl_t *)b->impl
+                                               : NULL;
 }
 
 /** @brief Whether @p prefix names @p path or an ancestor of it. */
@@ -634,7 +652,7 @@ int
 tiku_mount_add(tiku_backend_t *router, const char *prefix,
                tiku_backend_t *b, int owned)
 {
-    mount_impl_t *m = impl_of(router);
+    mount_impl_t *m = table_of(router);
     int i, spare = -1;
 
     if (m == NULL || b == NULL || !prefix_ok(prefix)) {
@@ -677,7 +695,7 @@ tiku_mount_add(tiku_backend_t *router, const char *prefix,
 int
 tiku_mount_remove(tiku_backend_t *router, const char *prefix)
 {
-    mount_impl_t *m = impl_of(router);
+    mount_impl_t *m = table_of(router);
     int i;
 
     if (m == NULL || prefix == NULL) {
@@ -708,7 +726,7 @@ tiku_mount_remove(tiku_backend_t *router, const char *prefix)
 int
 tiku_mount_count(const tiku_backend_t *router)
 {
-    const mount_impl_t *m = impl_of(router);
+    const mount_impl_t *m = table_of(router);
     int i, n = 0;
 
     if (m == NULL) {
@@ -725,13 +743,13 @@ tiku_mount_count(const tiku_backend_t *router)
 int
 tiku_mount_slots(const tiku_backend_t *router)
 {
-    return (impl_of(router) != NULL) ? TIKU_MOUNT_MAX : 0;
+    return (table_of(router) != NULL) ? TIKU_MOUNT_MAX : 0;
 }
 
 const char *
 tiku_mount_prefix_at(const tiku_backend_t *router, int i)
 {
-    const mount_impl_t *m = impl_of(router);
+    const mount_impl_t *m = table_of(router);
 
     if (m == NULL || i < 0 || i >= TIKU_MOUNT_MAX || !m->slot[i].live) {
         return NULL;
@@ -742,7 +760,7 @@ tiku_mount_prefix_at(const tiku_backend_t *router, int i)
 tiku_backend_t *
 tiku_mount_at(const tiku_backend_t *router, int i)
 {
-    const mount_impl_t *m = impl_of(router);
+    const mount_impl_t *m = table_of(router);
 
     if (m == NULL || i < 0 || i >= TIKU_MOUNT_MAX || !m->slot[i].live) {
         return NULL;
@@ -753,7 +771,7 @@ tiku_mount_at(const tiku_backend_t *router, int i)
 int
 tiku_mount_is(const tiku_backend_t *b)
 {
-    return b != NULL && b->ops == &mount_ops;
+    return table_of(b) != NULL;
 }
 
 tiku_backend_t *
@@ -776,7 +794,7 @@ tiku_backend_t *
 tiku_mount_route(const tiku_backend_t *router, const char *path, char *local,
                  size_t max)
 {
-    const mount_impl_t *m = impl_of(router);
+    const mount_impl_t *m = table_of(router);
     int slot;
 
     if (m == NULL || path == NULL) {
