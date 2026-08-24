@@ -1,5 +1,12 @@
 # Desktop — build notes
 
+Where the documents live: this directory holds the framework's own —
+R5-SPEC.md (the measured look) and PLAN-hybrid-apps.md (the descriptor
+model).  The desktop SHELL's architecture and specs live with its source
+in `../TikuTracker/spec/` — ARCH-runtime-boundaries.md for the shape,
+AGENT-SURFACE.md for the drivable surface — and `make shell` here brings
+the built binary back into `build/`.
+
 ## S0 (2026-08-11): session + namespace, hardware-proven
 
 Built `build/tiku-desk-probe`; warning-clean at -Wall -Wextra, libc only.
