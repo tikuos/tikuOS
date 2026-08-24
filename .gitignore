@@ -106,3 +106,8 @@ experiments/
 # OS, so a clone of TikuOS carries no opinion about how to write a commit.
 hygiene/
 .main-elf-mcu
+
+# Local archives of the working copy.  A tarball of the tree is somebody's
+# private snapshot before a large change; it is 80-odd MB of the same files
+# git already has, and it is never what a clone should carry.
+*.tar.gz

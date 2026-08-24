@@ -35,8 +35,11 @@ proven, so it is an optimisation, not a blocker.
 
 ## S1 (2026-08-11): interface layer + gallery
 
-R5-SPEC.md holds the measured constants (tints, palette, metrics); every
-control derives from it rather than from a theme file.
+R5-SPEC.md holds the measured constants (tints, palette, metrics).  Its
+palette is now the DEFAULT table in `../kits/interface/tiku_theme.c`,
+which every semantic colour reads through, so a swapped table recolours
+every control; the tints and metrics stay compiled in, because a theme
+names colour roles and layout never moves with it.
 
 Built:
 - `tiku_gfx`   surface, clip, fill/frame/bevel, tint, PNG writer

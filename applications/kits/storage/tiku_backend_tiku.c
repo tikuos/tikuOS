@@ -7,7 +7,7 @@
  * tiku_backend_tiku.c - a live device as a browsable volume.
  *
  * Rides the session/namespace client already proven against three boards
- * (applications/desktop): the manifest supplies structure, typed descriptors
+ * (kits/device): the manifest supplies structure, typed descriptors
  * and capabilities in one read, `cat`/`write` supply values, and `ls` supplies
  * the runtime contents of a dynamic store like /data.
  *

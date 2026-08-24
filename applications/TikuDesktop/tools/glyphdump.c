@@ -11,8 +11,9 @@
  * and the suite depends on none; this is how we check our own work
  * against one anyway, on a machine that happens to have it.
  *
- *   cc -I../src -o glyphdump glyphdump.c ../build/libtiku_desk_ui.a \
- *      ../build/libtiku_desk_runtime.a -lm
+ *   cc -I../../kits/interface -o glyphdump glyphdump.c \
+ *      ../../kits/build/libtiku_interface.a \
+ *      ../../kits/build/libtiku_support.a -lm
  *   ./glyphdump <font-file> <px> <codepoint-hex> [<codepoint-hex>...]
  *
  * SPDX-License-Identifier: Apache-2.0

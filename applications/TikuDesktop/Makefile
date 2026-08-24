@@ -1,8 +1,15 @@
-# Tiku Desktop -- host build (Linux/Mac).
+# TikuDesktop -- host build of the app framework (Linux/Mac).
 #
-# S0 builds the headless probe only; the SDL desktop links the same objects
-# once S1 lands.  Kept warning-clean at -Wall -Wextra, C11, no dependencies
-# beyond libc so the Emscripten step needs no untangling later.
+# Builds what the toolkit ships beside the shell: the headless probe, the
+# gallery, the About app, tiku-edit and tiku-term, the four examples, the
+# loadable .so form of the applications and examples, and tiku-run.  The
+# desktop SHELL is not built here despite the directory name -- it is
+# TikuTracker's build/TikuDesktop.
+#
+# Only the probe is still libc-only, and deliberately so: it is the one
+# binary that has to run on a machine with no display.  Everything that
+# draws links X11 and libm, and tiku-run adds libdl to open the .so form.
+# Kept warning-clean at -Wall -Wextra.
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
@@ -41,10 +48,11 @@ PROBE   := $(BUILD)/tiku-desk-probe
 GALLERY := $(BUILD)/tiku-desk-gallery
 ABOUTAPP := $(BUILD)/tiku-about-app
 
-# One binary per example, from one source file each.  The same file also
-# compiles into a desktop with -DTIKU_EXAMPLE_EMBED, which drops its main
-# and leaves the descriptor to be hosted in that process.
 # Applications, as opposed to examples: these are meant to be used.
+# One binary per name, from one source file each.  The same file also
+# builds a loadable .so with -DTIKU_APP_EMBED, which drops its main and
+# leaves the descriptor for whatever process opens it.  The examples
+# below are built the same way, under -DTIKU_EXAMPLE_EMBED.
 APP_NAMES := edit term
 APPS := $(patsubst %,$(BUILD)/tiku-%,$(APP_NAMES))
 
@@ -143,7 +151,7 @@ gallery: $(GALLERY)
 
 # Regenerate the baked font (needs python3 + PIL; output is committed).
 font:
-	python3 tools/genfont.py > src/tiku_font_data.h
+	python3 tools/genfont.py > $(KITS)/interface/tiku_font_data.h
 
 $(BUILD):
 	@mkdir -p $(BUILD)

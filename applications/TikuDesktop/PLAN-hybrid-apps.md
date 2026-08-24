@@ -17,10 +17,12 @@ tracker `7a1b758`).
 
 ### Repos, branches, commit discipline
 
-- Toolkit: `applications/TikuDesktop/` inside the **tikuOS repo**
-  (`/home/ambujv/Tiku/tikuOS`, branch `vfs-watch-wip`). The repo `.gitignore`
-  covers `applications/`, so **new files need `git add -f`**, and a commit
-  should be verified with `git show HEAD:./applications/TikuDesktop/src/<file>`.
+- Toolkit: `applications/kits/` inside the **tikuOS repo**
+  (`/home/ambujv/Tiku/tikuOS`, branch `vfs-watch-wip`). The toolkit moved
+  out into the six kits; what is left in `applications/TikuDesktop/` is the
+  samples, apps and tools that exercise them. The repo `.gitignore` covers
+  `applications/`, so **new files need `git add -f`**, and a commit should
+  be verified with `git show HEAD:./applications/kits/<kit>/<file>`.
   Do not touch the `drivers` WIP change.
 - Tracker: `applications/TikuTracker/` is **its own repo**
   (github.com/tikuos/tracker, branch `main`).
@@ -44,15 +46,17 @@ matches the wrapper shell's own command line and kills the session).
 ### Architecture as it stands
 
 - **Descriptor**: `tiku_app_descriptor_t`
-  (`applications/TikuDesktop/src/tiku_app.h`) — `{id, name, start, stop,
+  (`applications/kits/application/tiku_app.h`) — `{id, name, start, stop,
   event, tick, pick, run}` against `tiku_app_services_t`
   `{ctx, open, frame, menus, close}`. `TIKU_APP_MAX` is 16;
   `tiku_app_registry_t` exists and is currently unused by the shells.
 - **Out-of-process (the default today)**: `tiku_client_run(app)` in
-  `src/tiku_client.c` connects to `$HOME/.config/tracker/desk.sock`,
+  `applications/kits/application/tiku_client.c` connects to
+  `$HOME/.config/tracker/desk.sock`,
   pumps messages (drains **all** pending per turn — one-per-nap starved
   drags once), ticks, then `usleep(30000)` at line ~114.
-- **Wire** (`src/tiku_remote.h/.c`): `[u32 type][u32 len][payload]`,
+- **Wire** (`applications/kits/application/tiku_remote.h/.c`):
+  `[u32 type][u32 len][payload]`,
   fd-agnostic (`read`/`write`, header accumulation `hbuf[8]/hgot` — a pty
   has no peek). Client→desktop HELLO(1)/OPEN(2)/FRAME(3)/MENUS(4)/CLOSE(5);
   desktop→client EVENT(16)/PICK(17)/CLOSED(18). Version 1 checked in HELLO.
@@ -76,7 +80,7 @@ matches the wrapper shell's own command line and kills the session).
   files, descriptor + `main` guarded by `#ifndef TIKU_APP_EMBED`. Examples
   in `examples/` use `TIKU_EXAMPLE_EMBED` the same way.
 - **Test harness**: `tests/shell/run.sh` drives `build/dev/*` (in-process
-  script engine) and the shipping `build/desktop` via `trk-conduct`
+  script engine) and the shipping `build/TikuDesktop` via `trk-conduct`
   (conductor channel, `-conduct <socket>` / `-conduct-tty <tty>`). The
   shipping split is guarded by `tools/check_shipping.py` — the runner and
   loader added below are **product**, not test infrastructure, and must not
@@ -103,7 +107,7 @@ matches the wrapper shell's own command line and kills the session).
 **Goal.** Cut keystroke→repaint latency for out-of-process apps from a
 30 ms nap cycle to near-immediate, with no behavior change.
 
-**Change.** In `tiku_client_run_fd` (`src/tiku_client.c`), replace
+**Change.** In `tiku_client_run_fd` (`../kits/application/tiku_client.c`), replace
 the unconditional `usleep(30000)` with `poll()` on the session fd, timeout
 **10 ms**. The timeout must stay short and unconditional: `tick()` is how
 `tiku_term` pumps its pty and how the clock example repaints — the runtime
@@ -134,7 +138,7 @@ decided by which directory the file sits in — no prefs plumbing.
 
 ### B1. The export convention (toolkit)
 
-In `src/tiku_app.h` define:
+In `../kits/application/tiku_app.h` define:
 
 ```c
 #define TIKU_APP_ABI 1u
@@ -154,7 +158,7 @@ loudly rather than crashed into. Each app adds, under a new
 naming its descriptor. `main` stays under `#ifndef TIKU_APP_EMBED` —
 independent guards, one file, three build products.
 
-### B2. The loader (toolkit, `src/tiku_app_load.c` + decl in app.h)
+### B2. The loader (toolkit, `../kits/application/tiku_app_load.c` + decl in app.h)
 
 ```c
 const tiku_app_descriptor_t *tiku_app_load(const char *path,

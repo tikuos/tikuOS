@@ -9,12 +9,14 @@
 # The order below is the dependency order, lowest first, and it is a DAG
 # rather than a stack:
 #
-#   support                      nothing at all
-#   device      -> support       the link to a TikuOS device
-#   storage     -> support       nodes, attributes, queries, volumes
-#   interface   -> support       pixels, faces, controls, windows
-#   translation -> interface, storage    pictures into bitmaps
-#   application -> interface, support, device   apps, windows, messages
+#   support                              nothing at all
+#   device                               the link to a TikuOS device
+#   interface                            pixels, faces, controls, windows
+#   storage     -> support, device       nodes, attributes, queries, volumes
+#   translation -> support, storage,     pictures into bitmaps
+#                  interface
+#   application -> support, device,      apps, windows, messages
+#                  interface
 #
 # tools/check_kits.py holds that table and fails the build if an include
 # crosses it the wrong way.  The rule is the point of the arrangement:

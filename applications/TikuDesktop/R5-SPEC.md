@@ -1,7 +1,10 @@
 # The R5 look — measured spec
 
-The interface layer draws every pixel, so the look lives in this table
-rather than in a theme file.  Values come from the documented BeOS API
+The interface layer draws every pixel, and this table is the default
+theme rather than the only one — `../kits/interface/tiku_theme.c` holds
+these values in code, and every semantic colour reads through it, so
+another table recolours every widget without moving any layout at
+all.  Values come from the documented BeOS API
 (the `tint_color` constants and the standard control metrics), not from
 Haiku source.  Where a number is inference rather than documentation it
 is marked (~) and wants a screenshot calibration pass.

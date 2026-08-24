@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "tiku_desk_ttf.h"
+DELETE FILE — dead scratch copy of glyphdump.c against the removed tiku_desk_ttf_* API; glyphdump.c is the live tool. Also `git rm --cached applications/TikuDesktop/tools/glyphdump.c.gamma`.
 int main(int c,char**v){
     tiku_desk_ttf_t*t=tiku_desk_ttf_open(v[1]); int px=atoi(v[2]),i;
     if(!t){printf("REFUSED\n");return 1;}

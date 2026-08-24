@@ -14,9 +14,10 @@
  *
  * Build it against the sanitisers, which is the point of it:
  *
- *   cc -g -fsanitize=address,undefined -I../src -o fontfuzz fontfuzz.c \
- *      ../src/tiku_ttf.c ../src/tiku_cff.c \
- *      ../src/tiku_glyphpath.c
+ *   cc -g -fsanitize=address,undefined -I../../kits/interface \
+ *      -o fontfuzz fontfuzz.c ../../kits/interface/tiku_ttf.c \
+ *      ../../kits/interface/tiku_cff.c \
+ *      ../../kits/interface/tiku_glyphpath.c
  *   ./fontfuzz $(find /usr/share/fonts -name '*.ttf' -o -name '*.otf')
  *
  * The seed is fixed, so a failure is one anybody can have again.

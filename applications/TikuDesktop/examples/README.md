@@ -15,14 +15,14 @@ desktop that linked it.
 ## Building and running
 
 ```sh
-cd applications/desktop
+cd applications/TikuDesktop
 make examples                 # build/tiku-example-{hello,clock,counter,sketch}
 
 # in one terminal: a desktop to host them
-cd ../tracker && ./build/desktop ~/Desktop
+cd ../TikuTracker && ./build/TikuDesktop ~/Desktop
 
 # in another: any example, as its own process
-applications/desktop/build/tiku-example-sketch
+applications/TikuDesktop/build/tiku-example-sketch
 ```
 
 The application finds the desktop at `$HOME/.config/tracker/desk.sock`, and
@@ -72,11 +72,22 @@ the published set is a snapshot, not a live view.
 
 ## Applications, next door
 
-`apps/` holds two written the same way, meant to be used rather than read:
-`tiku-edit`, a text editor that takes a file on the command line, and
-`tiku-term`, a terminal running a shell on a pty. The desktop offers both
-in the Deskbar's leaf menu when it finds them beside itself, so they can
-be started without a command line at all.
+`apps/` holds two applications written the same way as the examples, meant
+to be used rather than read: `tiku_edit.c`, a text editor that takes a
+file on the command line, and `tiku_term.c`, a terminal running a shell on
+a pty. Each builds twice -- as a program of its own, `build/tiku-edit` and
+`build/tiku-term`, and as a loadable `build/apps/editor.so` and
+`build/apps/terminal.so`. Every example builds into that same directory.
+
+A desktop climbs from its own binary to `build/apps` -- or is told where
+it is by `$TIKU_APPS` -- and offers every `.so` it finds there under
+**Applications** in the Deskbar's leaf menu, under a name taken from the
+file itself, so they can be started without a command line at all. A pick
+is run through `build/tiku-run`, in a process of its own; a file moved
+into `build/apps/trusted/` is loaded into the desktop's own process
+instead. Where the file sits is the whole of the decision, since it is
+built the same way for both. `apps/tiku_run.c` is that runner, not an
+application.
 
 ## Adding one
 
