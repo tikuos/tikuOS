@@ -3,8 +3,11 @@
 # Builds what the toolkit ships beside the shell: the headless probe, the
 # gallery, the About app, tiku-edit and tiku-term, the four examples, the
 # loadable .so form of the applications and examples, and tiku-run.  The
-# desktop SHELL is not built here despite the directory name -- it is
-# TikuTracker's build/TikuDesktop.
+# desktop SHELL is not COMPILED here despite the directory name: it is one
+# of two front-ends over a shared core that lives in the separate
+# applications/TikuTracker repository.  `make shell` goes there for it and
+# brings the result back, so build/TikuDesktop under this directory is
+# where a reader looking for the shell now finds it.
 #
 # Only the probe is still libc-only, and deliberately so: it is the one
 # binary that has to run on a machine with no display.  Everything that
@@ -26,6 +29,16 @@ CFLAGS  += -std=gnu11 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter \
 LDFLAGS ?=
 
 BUILD   := build
+
+# Where the shell is really made.  Naming the two binaries rather than
+# asking for `all` keeps this to the two links that matter: going next
+# door for that whole tree's test suite as well would cost minutes and
+# build nothing this directory delivers.
+TRACKER       := ../TikuTracker
+SHELL_FROM    := $(TRACKER)/build/TikuDesktop
+SHELLDEV_FROM := $(TRACKER)/build/dev/TikuDesktop
+SHELL_HERE    := $(BUILD)/TikuDesktop
+SHELLDEV_HERE := $(BUILD)/dev/TikuDesktop
 
 # The toolkit moved out into the kits; what is left here is the samples
 # and the tools that exercise them.  The three names below are kept
@@ -72,14 +85,34 @@ EXAMPLE_NAMES := hello clock counter sketch
 EXAMPLES := $(patsubst %,$(BUILD)/tiku-example-%,$(EXAMPLE_NAMES))
 TEST_APP := $(BUILD)/test-desk-app
 
-.PHONY: all clean run gallery font libs test
+.PHONY: all clean run gallery font libs test shell
 all: libs $(PROBE) $(GALLERY) $(ABOUTAPP) $(APPS) $(EXAMPLES) \
-     $(SO_APPS) $(SO_EXAMPLES) $(RUNNER)
+     $(SO_APPS) $(SO_EXAMPLES) $(RUNNER) shell
 
 # The kits are built where they live, by their own Makefile: this one
 # only says that nothing here can be built before they are.
 libs:
 	@$(MAKE) --no-print-directory -C $(KITS) libs pic
+
+# After `libs`, and that ordering is load-bearing rather than tidy: the
+# Tracker tree builds the kits the same way this one does, so under
+# `make -j` the two sub-makes would be writing the same archives at the
+# same time.  Going through libs first leaves them up to date, and the
+# sub-make next door then finds nothing to do about them.
+#
+# Copied rather than linked: a symlink into another repository's build
+# directory dangles the moment that repository is cleaned, and points out
+# of this tree in a tarball.  Through a temporary name and a rename,
+# because overwriting a binary that is currently running is ETXTBSY while
+# replacing it is not.
+shell: libs
+	@$(MAKE) --no-print-directory -C $(TRACKER) \
+	    build/TikuDesktop build/dev/TikuDesktop
+	@mkdir -p $(BUILD)/dev
+	@cp -p $(SHELL_FROM) $(SHELL_HERE).new
+	@mv -f $(SHELL_HERE).new $(SHELL_HERE)
+	@cp -p $(SHELLDEV_FROM) $(SHELLDEV_HERE).new
+	@mv -f $(SHELLDEV_HERE).new $(SHELLDEV_HERE)
 
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
