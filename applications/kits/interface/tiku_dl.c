@@ -46,12 +46,42 @@
 #define OP_RADIO        21u
 #define OP_LIST_ROW     22u
 
+/* Art once, placements by reference: [u32 id][u16 len][hvif], then
+ * [u32 id][i16 x][i16 y][i16 size][u8 mix][u8 0][u32 wash]. */
+#define OP_ICON_ART     23u
+#define OP_ICON         24u
+
 struct tiku_dl {
     unsigned char *b;
     size_t         n, cap;
     int            count;
     int            missed;
+    int            icons;                    /* OP_ICON placements     */
+    int            arts;                     /* distinct OP_ICON_ARTs  */
+    uint32_t       art[TIKU_DL_ART_MAX];     /* their ids, for once-ness */
 };
+
+/** @brief The far end's rasteriser, injected by whoever links one. */
+static tiku_dl_icon_fn icon_painter;
+
+void
+tiku_dl_set_icon_painter(tiku_dl_icon_fn fn)
+{
+    icon_painter = fn;
+}
+
+/** @brief FNV-1a of the blob: the art's identity is its bytes. */
+static uint32_t
+art_id_of(const unsigned char *p, size_t n)
+{
+    uint32_t h = 2166136261u;
+    size_t i;
+
+    for (i = 0; i < n; i++) {
+        h = (h ^ (uint32_t)p[i]) * 16777619u;
+    }
+    return h;
+}
 
 /*---------------------------------------------------------------------------*/
 /* Bytes                                                                     */
@@ -185,6 +215,8 @@ tiku_dl_clear(tiku_dl_t *dl)
         dl->n = 0u;
         dl->count = 0;
         dl->missed = 0;
+        dl->icons = 0;
+        dl->arts = 0;
     }
 }
 
@@ -431,6 +463,74 @@ tiku_dl_list_row(tiku_dl_t *dl, tiku_rect_t r, const char *text,
 /* The wire                                                                  */
 /*---------------------------------------------------------------------------*/
 
+int
+tiku_dl_icon(tiku_dl_t *dl, const void *hvif, size_t hlen,
+             int x, int y, int size, unsigned mix, tiku_rgb_t wash)
+{
+    const unsigned char *blob = (const unsigned char *)hvif;
+    uint32_t id;
+    int i, have = 0;
+    unsigned char *p;
+
+    if (dl == NULL) {
+        return 0;
+    }
+    /*
+     * The contract is record-or-miss, never neither: every refusal below
+     * marks the list not-whole, so whoever is about to put it on a wire
+     * sends the frame instead of a window with a hole where art was.
+     */
+    if (blob == NULL || hlen == 0u || hlen > 0xFFF0u ||
+        size <= 0 || size > 1024) {
+        tiku_dl_miss(dl);
+        return 0;
+    }
+    id = art_id_of(blob, hlen);
+    for (i = 0; i < dl->arts; i++) {
+        if (dl->art[i] == id) {
+            have = 1;
+        }
+    }
+    if (!have) {
+        if (dl->arts >= TIKU_DL_ART_MAX) {
+            tiku_dl_miss(dl);
+            return 0;
+        }
+        p = begin(dl, OP_ICON_ART, 6u + hlen);
+        if (p == NULL) {
+            tiku_dl_miss(dl);
+            return 0;
+        }
+        put32(p, id);
+        put16(p + 4, (uint16_t)hlen);
+        memcpy(p + 6, blob, hlen);
+        dl->art[dl->arts++] = id;
+    }
+    p = begin(dl, OP_ICON, 16u);
+    if (p == NULL) {
+        /* The definition may already be in: harmless on its own, an
+         * unplaced piece of art draws nothing.  The PLACEMENT is what
+         * was lost, and that is a miss. */
+        tiku_dl_miss(dl);
+        return 0;
+    }
+    put32(p, id);
+    put16(p + 4, (uint16_t)(int16_t)x);
+    put16(p + 6, (uint16_t)(int16_t)y);
+    put16(p + 8, (uint16_t)(int16_t)size);
+    p[10] = (unsigned char)(mix > 255u ? 255u : mix);
+    p[11] = 0;
+    put32(p + 12, (uint32_t)wash);
+    dl->icons++;
+    return 1;
+}
+
+int
+tiku_dl_icons(const tiku_dl_t *dl)
+{
+    return (dl != NULL) ? dl->icons : 0;
+}
+
 size_t
 tiku_dl_flat_size(const tiku_dl_t *dl)
 {
@@ -466,6 +566,7 @@ fixed_payload(uint16_t op)
     case OP_CLIP_SET:
     case OP_PANEL:
     case OP_RAISED:      return 8;
+    case OP_ICON:        return 16;
     case OP_CLIP_RESET:  return 0;
     default:             return -1;
     }
@@ -526,6 +627,14 @@ tiku_dl_unflatten(const void *buf, size_t len, size_t *read)
         if (want >= 0 && (int)n != want) {
             return NULL;            /* a command the wrong size */
         }
+        if (op == OP_ICON_ART) {
+            /* The length inside must agree with the length outside, or
+             * the blob is not the bytes it claims: these arrive from a
+             * wire. */
+            if (n < 7u || (size_t)get16(p + at + 4u + 4u) != (size_t)n - 6u) {
+                return NULL;
+            }
+        }
         want = least_payload(op);
         if (want >= 0) {
             int start = text_at(op);
@@ -552,6 +661,24 @@ tiku_dl_unflatten(const void *buf, size_t len, size_t *read)
         dl->n = len;
     }
     dl->count = count;
+    /*
+     * The counters are rebuilt from the bytes, so a list that crossed a
+     * wire answers tiku_dl_icons() the same as the one that was recorded
+     * -- the gate that asks is on the SENDING side, but a fact that is
+     * true of a list should not depend on which end is holding it.
+     */
+    at = 0u;
+    while (at + 4u <= len) {
+        uint16_t op = get16(p + at);
+        uint16_t n = get16(p + at + 2);
+
+        if (op == OP_ICON) {
+            dl->icons++;
+        } else if (op == OP_ICON_ART && dl->arts < TIKU_DL_ART_MAX) {
+            dl->art[dl->arts++] = get32(p + at + 4);
+        }
+        at += 4u + (size_t)n;
+    }
     if (read != NULL) {
         *read = len;
     }
@@ -583,6 +710,19 @@ tiku_dl_play(const tiku_dl_t *dl, tiku_surface_t *s)
 {
     size_t at = 0u;
     int done = 0;
+    /*
+     * The art this list defined, id to bytes.  It points INTO the list,
+     * which owns its buffer for the whole of the play, so nothing is
+     * copied; and it is per-play, so a list is self-contained -- there
+     * is no cache on this end whose absence the far end could guess
+     * wrong about.
+     */
+    struct {
+        uint32_t             id;
+        const unsigned char *p;
+        size_t               len;
+    } art[TIKU_DL_ART_MAX];
+    int arts = 0;
 
     if (dl == NULL || s == NULL) {
         return 0;
@@ -627,6 +767,52 @@ tiku_dl_play(const tiku_dl_t *dl, tiku_surface_t *s)
             break;
         case OP_CLIP_RESET:
             tiku_clip_reset(s);
+            break;
+        case OP_ICON_ART:
+            /* A definition draws nothing; it is remembered for the
+             * placements after it.  A duplicate id keeps the FIRST
+             * definition, so a hostile list cannot redefine art that
+             * commands earlier in the same list were drawn with. */
+            if (n >= 7u && arts < TIKU_DL_ART_MAX) {
+                uint32_t aid = get32(a);
+                int k, dup = 0;
+
+                for (k = 0; k < arts; k++) {
+                    if (art[k].id == aid) {
+                        dup = 1;
+                    }
+                }
+                if (!dup) {
+                    art[arts].id = aid;
+                    art[arts].p = a + 6;
+                    art[arts].len = (size_t)get16(a + 4);
+                    arts++;
+                }
+            }
+            break;
+        case OP_ICON:
+            /* By reference into what THIS list defined.  An id nothing
+             * defined, or no rasteriser on this end, is stepped over --
+             * the format's ordinary answer to what an end cannot do. */
+            if (icon_painter != NULL) {
+                uint32_t aid = get32(a);
+                int k;
+
+                for (k = 0; k < arts; k++) {
+                    if (art[k].id == aid) {
+                        (void)icon_painter(s, art[k].p, art[k].len,
+                                           get_i16(a + 4), get_i16(a + 6),
+                                           get_i16(a + 8), a[10],
+                                           get32(a + 12));
+                        break;
+                    }
+                }
+                if (k == arts) {
+                    continue;   /* undefined: not carried out */
+                }
+            } else {
+                continue;       /* no rasteriser: not carried out */
+            }
             break;
         case OP_PANEL:
             tiku_ui_panel(s, get_rect(a));

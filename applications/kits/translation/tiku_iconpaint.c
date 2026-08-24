@@ -11,7 +11,10 @@
 
 #include "tiku_dl.h"
 #include "tiku_iconpaint.h"
+#include "tiku_hvif.h"
 #include "tiku_icons.h"
+
+#include <stdlib.h>
 
 /** @brief Blend one premultiplied source pixel over an opaque destination. */
 static tiku_rgb_t
@@ -74,15 +77,10 @@ paint(tiku_surface_t *s, const char *name, int x, int y, int size,
      * while one is being painted. */
     int mono = tiku_theme_achromatic();
 
-    /*
-     * The one thing a display list genuinely cannot carry.  Everything in
-     * the Interface kit reduces to primitives that record; an icon is a
-     * PICTURE, and the commands are drawing calls, not pixels.  So a
-     * window with an icon in it is told it is no longer whole, and
-     * whoever is about to put it on a wire sends the frame instead.
-     */
-    tiku_gfx_rec_miss(s);
-
+    /* What this says to a recording list is the ENTRY's business: an
+     * icon has a definition and records as a command now, so the miss
+     * this used to make would refuse exactly the lists the command
+     * exists to keep. */
     if (s == NULL || name == NULL || size <= 0) {
         return 0;
     }
@@ -128,32 +126,146 @@ paint(tiku_surface_t *s, const char *name, int x, int y, int size,
     return 1;
 }
 
+/**
+ * @brief Draw one icon command from a stream: tiku_dl's injected player.
+ *
+ * The blob crossed the wire; this end parses and rasterises it at the
+ * size asked for, then composites with the SAME loop paint() uses --
+ * over, then the wash, then this end's own achromatic answer -- so a
+ * played icon is the pixels drawing it here would have made.  Rendering
+ * per call rather than through the name cache, because a streamed blob
+ * has no name: it is its bytes.
+ */
+int
+tiku_icon_stream_play(tiku_surface_t *s, const void *hvif, size_t hlen,
+                      int x, int y, int size, unsigned mix,
+                      tiku_rgb_t wash)
+{
+    tiku_hvif_t *icon;
+    uint32_t *bmp;
+    int row, col;
+    int mono = tiku_theme_achromatic();
+
+    if (s == NULL || hvif == NULL || size <= 0 || size > 1024) {
+        return 0;
+    }
+    icon = tiku_hvif_parse(hvif, hlen, NULL, 0);
+    if (icon == NULL) {
+        return 0;
+    }
+    bmp = (uint32_t *)malloc((size_t)size * (size_t)size * 4u);
+    if (bmp == NULL || tiku_hvif_render(icon, bmp, size, size) != 0) {
+        free(bmp);
+        tiku_hvif_free(icon);
+        return 0;
+    }
+    tiku_hvif_free(icon);
+    if (mix > 255u) {
+        mix = 255u;
+    }
+    for (row = 0; row < size; row++) {
+        int py = y + row;
+
+        if (py < s->clip.y || py >= s->clip.y + s->clip.h ||
+            py < 0 || py >= s->h) {
+            continue;
+        }
+        for (col = 0; col < size; col++) {
+            int px = x + col;
+            uint32_t src = bmp[(size_t)row * (size_t)size + (size_t)col];
+            tiku_rgb_t d;
+
+            if (px < s->clip.x || px >= s->clip.x + s->clip.w ||
+                px < 0 || px >= s->w || ((src >> 24) & 0xFFu) == 0u) {
+                continue;
+            }
+            d = over(src, tiku_peek(s, px, py));
+            if (mix != 0u) {
+                unsigned r = ((d >> 16) & 0xFFu) * (255u - mix) +
+                             ((wash >> 16) & 0xFFu) * mix;
+                unsigned g = ((d >> 8) & 0xFFu) * (255u - mix) +
+                             ((wash >> 8) & 0xFFu) * mix;
+                unsigned b = (d & 0xFFu) * (255u - mix) +
+                             (wash & 0xFFu) * mix;
+
+                d = TIKU_RGB(r / 255u, g / 255u, b / 255u);
+            }
+            if (mono) {
+                d = tiku_grey(d);
+            }
+            tiku_pixel(s, px, py, d);
+        }
+    }
+    free(bmp);
+    return 1;
+}
+
+/**
+ * @brief Say to the list what the surface was just given.
+ *
+ * Called between rec_enter and rec_leave by the three icon entries, and
+ * only when the paint actually happened -- a name nothing carries put
+ * nothing on the surface, so there is nothing to say.  tiku_dl_icon
+ * keeps its own record-or-miss contract; the one failure it cannot see
+ * is a name with no blob behind it, and that is marked here.
+ */
+static void
+record_icon(tiku_surface_t *s, const char *name, int x, int y, int size,
+            unsigned mix, tiku_rgb_t wash, int painted)
+{
+    const tiku_icon_t *ic;
+
+    if (!painted) {
+        return;
+    }
+    ic = tiku_icons_find(name);
+    if (ic == NULL) {
+        tiku_dl_miss(s->record);
+        return;
+    }
+    (void)tiku_dl_icon(s->record, ic->data, ic->len, x, y, size, mix,
+                       wash);
+}
+
 int
 tiku_icon_paint(tiku_surface_t *s, const char *name, int x, int y,
                     int size)
 {
-    return paint(s, name, x, y, size, 0.0f, 0);
+    int rec = tiku_gfx_rec_enter(s);
+    int done = paint(s, name, x, y, size, 0.0f, 0);
+
+    if (rec) {
+        record_icon(s, name, x, y, size, 0u, 0u, done);
+    }
+    tiku_gfx_rec_leave(s, rec);
+    return done;
 }
 
 int
 tiku_icon_paint_dim(tiku_surface_t *s, const char *name, int x, int y,
                         int size, float mix, tiku_rgb_t wash)
 {
-    return paint(s, name, x, y, size, mix, wash);
+    int rec = tiku_gfx_rec_enter(s);
+    int done = paint(s, name, x, y, size, mix, wash);
+
+    if (rec) {
+        unsigned m;
+
+        if (mix < 0.0f) { mix = 0.0f; }
+        if (mix > 1.0f) { mix = 1.0f; }
+        m = (unsigned)(mix * 255.0f + 0.5f);
+        record_icon(s, name, x, y, size, m, wash, done);
+    }
+    tiku_gfx_rec_leave(s, rec);
+    return done;
 }
 
 int
 tiku_icon_paint_selected(tiku_surface_t *s, const char *name, int x,
                              int y, int size)
 {
-    /*
-     * Here rather than in paint(), because the washed-bitmap fast path
-     * below does not go through paint() at all -- so on a cache HIT the
-     * icon went onto the surface and the list said it was whole.  Which
-     * made it a fault that only appeared the second time an icon was
-     * drawn.
-     */
-    tiku_gfx_rec_miss(s);
+    int rec = tiku_gfx_rec_enter(s);
+    int done;
 
     /* The source's exact transform (IV-018): every channel multiplied to
      * 66% brightness (168/255) with the alpha kept -- a darkened icon, not
@@ -166,11 +278,18 @@ tiku_icon_paint_selected(tiku_surface_t *s, const char *name, int x,
         const uint32_t *w = tiku_icons_bitmap_washed(name, size,
             0x000000u, 87u);
 
-        if (w != NULL) {
-            return paint_bmp(s, w, x, y, size);
-        }
+        done = (w != NULL) ? paint_bmp(s, w, x, y, size)
+                           : paint(s, name, x, y, size, 0.341f,
+                                   TIKU_RGB(0, 0, 0));
     }
-    return paint(s, name, x, y, size, 0.341f, TIKU_RGB(0, 0, 0));
+    /* Recorded whichever internal road drew it, which is the fault the
+     * old arrangement had: the cached road never reached the place the
+     * saying was done. */
+    if (rec) {
+        record_icon(s, name, x, y, size, 87u, 0u, done);
+    }
+    tiku_gfx_rec_leave(s, rec);
+    return done;
 }
 
 void

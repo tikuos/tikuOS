@@ -72,6 +72,17 @@ void tiku_thumb_paint(tiku_surface_t *s,
 int tiku_icon_hit(const char *name, int size, int px, int py);
 
 /**
+ * @brief tiku_dl's icon player: a streamed blob, rasterised HERE.
+ *
+ * Register it with tiku_dl_set_icon_painter() in anything that plays
+ * display lists -- the injection is what lets the Interface kit carry
+ * icon commands without knowing what HVIF is.
+ */
+int tiku_icon_stream_play(tiku_surface_t *s, const void *hvif,
+                          size_t hlen, int x, int y, int size,
+                          unsigned mix, tiku_rgb_t wash);
+
+/**
  * @brief Blend @p c over the pixels of @p r at @p a / 255.
  *
  * The floor draws opaque colours; the tinted rubber band is the one place

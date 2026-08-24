@@ -126,6 +126,64 @@ int tiku_dl_list_row(tiku_dl_t *dl, tiku_rect_t r, const char *text,
                      int selected);
 
 /*---------------------------------------------------------------------------*/
+/* Pictures with a definition                                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief How many distinct pieces of art one list may define.
+ *
+ * A folder window has half a dozen; the cap is headroom, not a target.
+ * Past it the recorder marks the list not-whole rather than dropping
+ * art on the floor.
+ */
+#define TIKU_DL_ART_MAX 32
+
+/**
+ * @brief Record one icon: art defined once, then placed by reference.
+ *
+ * An icon is the one picture that does NOT have to travel as pixels,
+ * because it has a definition -- the HVIF blob -- and both ends carry
+ * the rasteriser.  So the art crosses once per list, a few hundred
+ * bytes, and every further placement of the same art is sixteen.  The
+ * receiver rasterises at its own end, which is what keeps the stream
+ * resolution-independent: a doubled screen draws a crisp icon beside
+ * its crisp text instead of blowing up the sender's pixels.
+ *
+ * The art's identity is a hash of the BLOB, not its name: a directory
+ * may replace a baked icon per device (tiku_icons_load_dir), and two
+ * different pictures under one name must not alias.
+ *
+ * The wash is the whole of the icon states: plain is no wash, dim is
+ * the caller's wash at the caller's strength, and selected is black at
+ * 87/255 -- the numbers tiku_iconpaint already draws with.
+ *
+ * @return 1 recorded whole.  0 means it was NOT recorded and the list
+ *         has been marked not-whole -- never neither, because a blit
+ *         whose definition was dropped is a hole in a list that still
+ *         claims to describe the window.
+ */
+int tiku_dl_icon(tiku_dl_t *dl, const void *hvif, size_t hlen,
+                 int x, int y, int size, unsigned mix, tiku_rgb_t wash);
+
+/** @brief How many icon placements the list carries.  0 means none. */
+int tiku_dl_icons(const tiku_dl_t *dl);
+
+/**
+ * @brief How the far end draws an icon command; @p mix/@p wash as above.
+ *
+ * Injected rather than called, because the rasteriser lives a kit ABOVE
+ * this one and the dependency only goes downward: whoever links both
+ * registers the painter once, the way the shells inject icon painters
+ * into their menus already.  With none registered an icon command is
+ * stepped over, which is the format's ordinary answer to what an end
+ * cannot do.
+ */
+typedef int (*tiku_dl_icon_fn)(tiku_surface_t *s, const void *hvif,
+                               size_t hlen, int x, int y, int size,
+                               unsigned mix, tiku_rgb_t wash);
+void tiku_dl_set_icon_painter(tiku_dl_icon_fn fn);
+
+/*---------------------------------------------------------------------------*/
 /* The wire, and the far end                                                 */
 /*---------------------------------------------------------------------------*/
 
