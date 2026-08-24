@@ -17,6 +17,8 @@
 #define TIKU_MODEL_H_
 
 #include <stddef.h>
+
+#include "tiku_ident.h"
 #include <stdint.h>
 
 #define TIKU_NAME_MAX  128
@@ -299,6 +301,18 @@ tiku_backend_t *tiku_backend_posix_open(void);
  * @param baud  Line rate.
  */
 tiku_backend_t *tiku_backend_tiku_open(const char *port, int baud);
+
+/**
+ * @brief The identity that backend bound to, or NULL if it is not one.
+ *
+ * Read once when the device was opened, so asking costs nothing; over
+ * the wire it would be a round trip per question.  What a board is
+ * CALLED lives in here, which is how a shell decides what to name it in
+ * the namespace -- and the header for that field says what the caller
+ * has to know: the name is user-settable, so two boards may answer to
+ * it, and nothing durable may be keyed on it.
+ */
+const tiku_identity_t *tiku_backend_tiku_identity(const tiku_backend_t *b);
 
 void tiku_backend_close(tiku_backend_t *b);
 

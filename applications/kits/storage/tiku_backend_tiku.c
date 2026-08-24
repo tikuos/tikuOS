@@ -552,7 +552,7 @@ tiku_backend_tiku_open(const char *port, int baud)
     return b;
 }
 
-/** @brief The identity this backend bound to (the roster and tests read it). */
+/** @brief The identity this backend bound to.  See tiku_model.h. */
 const tiku_identity_t *
 tiku_backend_tiku_identity(const tiku_backend_t *b)
 {
