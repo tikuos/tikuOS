@@ -63,11 +63,17 @@ svc_present(void *ctx, uint32_t id, const struct tiku_dl *dl,
      *
      * Zero features means the desktop has not answered yet, or is too
      * old to answer at all.  Both get the pixels, which every version
-     * has always understood.
+     * has always understood.  And a list carrying ICONS needs the far
+     * end to have claimed those separately: an end that plays streams
+     * but not icon commands would step over them and show a window
+     * with holes where its art was.
      */
     if (dl != NULL &&
         (tiku_remote_peer_features(&c->remote) &
              TIKU_FEAT_COMMAND_STREAM) != 0u &&
+        (tiku_dl_icons(dl) == 0 ||
+         (tiku_remote_peer_features(&c->remote) &
+              TIKU_FEAT_ICON_STREAM) != 0u) &&
         tiku_dl_misses(dl) == 0 &&
         tiku_dl_flat_size(dl) * 2u < frame &&
         tiku_remote_draw(&c->remote, id, dl, w, h)) {

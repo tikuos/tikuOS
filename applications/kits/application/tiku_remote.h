@@ -54,6 +54,14 @@
  * of a second and most of a minute.  See tiku_dl.h.
  */
 #define TIKU_FEAT_COMMAND_STREAM 0x2u
+/*
+ * The stream's icon commands are understood: art defined once per list
+ * as its HVIF bytes, placements by reference, rasterised at THIS end.
+ * Distinct from COMMAND_STREAM because an end can play one without the
+ * other -- and a sender whose list carries icons but whose peer never
+ * claimed this sends the pixels, exactly as it does for a miss.
+ */
+#define TIKU_FEAT_ICON_STREAM    0x4u
 #define TIKU_REMOTE_BUFFERS      2
 #define TIKU_REMOTE_SHM_NAME     64
 

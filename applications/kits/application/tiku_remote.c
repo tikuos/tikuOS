@@ -239,6 +239,7 @@ session_message(tiku_remote_session_t *s)
                 unsigned char reply[8];
                 uint32_t version = TIKU_REMOTE_VERSION;
                 uint32_t mine = TIKU_FEAT_COMMAND_STREAM |
+                                TIKU_FEAT_ICON_STREAM |
                                 TIKU_FEAT_SHARED_SURFACE;
 
                 memcpy(reply, &version, 4);
