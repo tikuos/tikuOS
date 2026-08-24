@@ -39,7 +39,8 @@ STORAGE     := storage/tiku_model.c storage/tiku_state.c \
                storage/tiku_query.c storage/tiku_fs.c \
                storage/tiku_backend_posix.c \
                storage/tiku_backend_tiku.c storage/tiku_notify.c \
-               storage/tiku_vdir.c storage/tiku_volume.c
+               storage/tiku_vdir.c storage/tiku_volume.c \
+               storage/tiku_mount.c
 INTERFACE   := interface/tiku_gfx.c interface/tiku_theme.c \
                interface/tiku_font.c interface/tiku_ttf.c \
                interface/tiku_glyphpath.c interface/tiku_cff.c \
