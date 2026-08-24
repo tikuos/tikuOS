@@ -685,15 +685,15 @@ tiku_mount_add(tiku_backend_t *router, const char *prefix,
     snprintf(m->slot[spare].prefix, sizeof m->slot[spare].prefix, "%s",
              prefix);
     /*
-     * The namespace answers for its ROOT's kind of storage.  tiku_fs
-     * asks the backend whether it is a device to decide whether a copy
-     * goes through the backend or through the local filesystem, and a
-     * namespace that said "not a device" over a device root would send
-     * every copy down the POSIX path.  Only the root: a device mounted
-     * under /devices does not make the local files into a device, and
-     * that is exactly the case a per-PATH answer has to serve -- which
-     * this one still cannot, and is why cross-mount copy is its own
-     * piece of work rather than something that falls out of here.
+     * The namespace answers for its ROOT's kind of storage.
+     *
+     * This is NOT how "is this path on a device" is answered any more --
+     * tiku_fs asks tiku_backend_serving() per path, because the router's
+     * one identity cannot speak for a board mounted beside a disk.  What
+     * is left needs exactly the root's answer and no other: the state
+     * sidecar is keyed by the device a SHELL is on, and a shell is on
+     * its root.  Naming it here keeps the two questions apart, so the
+     * next reader does not take this for the general one again.
      */
     if (prefix[0] == '/' && prefix[1] == '\0') {
         snprintf(router->devid, sizeof router->devid, "%s", b->devid);

@@ -339,14 +339,53 @@ tiku_fs_link_name(tiku_fs_t *fs, const char *dir, const char *name,
 /*---------------------------------------------------------------------------*/
 
 /** @brief Volume id of a path, or 0 when it cannot be told. */
+/**
+ * @brief Which store answers for @p path, and what it is called there.
+ *
+ * Not "which volume" -- that is st_dev's question and is asked elsewhere.
+ * This one decides whether the local filesystem calls in this file may be
+ * used at all: they may, for a path a POSIX store answers for, and they
+ * may not for anything else.
+ */
+static tiku_backend_t *
+store_of(const tiku_fs_t *fs, const char *path, char *local, size_t max)
+{
+    return tiku_backend_serving(fs->backend, path, local, max);
+}
+
+/**
+ * @brief Whether a DEVICE answers for @p path, rather than local files.
+ *
+ * Nearly everything in this file is about a local filesystem -- statvfs,
+ * the volumes scan, the Trash resolution, rename(2), opendir -- and each
+ * of those gates used to ask the shell's backend, as a whole, whether it
+ * was a device.
+ *
+ * With a namespace in the way that question has no whole answer.  The
+ * router carries its ROOT's identity, so with local files at the root
+ * every path under /devices/<board> looked local, and the gates opened
+ * on paths no local filesystem has: rename(2) on a device node, unlink()
+ * on a device node, a Trash offered for a store that has none.
+ *
+ * So it is asked per PATH, of whatever actually serves it.
+ */
+static int
+on_device(const tiku_fs_t *fs, const char *path)
+{
+    tiku_backend_t *on = store_of(fs, path, NULL, 0);
+
+    return on != NULL && on->devid[0] != '\0';
+}
+
 static unsigned long
 volume_of(tiku_fs_t *fs, const char *path)
 {
     struct stat st;
 
-    /* Device backends are one volume each; the backend identity IS the
-     * volume, so a drop inside a device is always a move. */
-    if (fs->backend->devid[0] != '\0') {
+    /* A device store is one volume; its identity IS the volume, so a
+     * drop inside one is always a move.  Asked of the store serving
+     * THIS path -- a namespace has no single answer. */
+    if (on_device(fs, path)) {
         return 1;
     }
     if (stat(path, &st) != 0) {
@@ -532,7 +571,7 @@ start(tiku_fs_t *fs, tiku_op_t op, const char *const *paths, int n,
             continue;
         }
         if ((op == TIKU_OP_TRASH || op == TIKU_OP_DELETE) &&
-            fs->backend->devid[0] == '\0') {
+            !on_device(fs, paths[i])) {
             /* And a whole VOLUME, out loud.  The copy/move gate above does
              * not run for these two ops, and a disk trashed as an ordinary
              * directory is a disk emptied: its own Trash is inside it, so
@@ -589,7 +628,9 @@ start(tiku_fs_t *fs, tiku_op_t op, const char *const *paths, int n,
         char why[200];
         int k;
 
-        if (fs->backend->devid[0] == '\0' &&
+        /* The volumes machinery is about LOCAL filesystems; the
+         * destination decides whether any of it applies. */
+        if (!on_device(fs, (dst != NULL) ? dst : paths[0]) &&
             tiku_volumes_scan(&vs) > 0) {
             if (dst != NULL &&
                 !tiku_volume_may_write(&vs, dst, 1, why, sizeof why)) {
@@ -625,7 +666,7 @@ start(tiku_fs_t *fs, tiku_op_t op, const char *const *paths, int n,
         }
     }
     if (op == TIKU_OP_COPY && dst != NULL &&
-        !tiku_fs_in_trash(fs, dst) && fs->backend->devid[0] == '\0') {
+        !tiku_fs_in_trash(fs, dst) && !on_device(fs, dst)) {
         /* Summed before a byte moves: a copy that runs out half way leaves
          * the user with a truncated tree AND less space than they started
          * with.  Skipped for the Trash, where a move is what happens, and
@@ -936,20 +977,6 @@ copy_pose_info(tiku_fs_t *fs, const char *src, const char *dst)
 }
 
 /**
- * @brief Which store answers for @p path, and what it is called there.
- *
- * Not "which volume" -- that is st_dev's question and is asked elsewhere.
- * This one decides whether the local filesystem calls in this file may be
- * used at all: they may, for a path a POSIX store answers for, and they
- * may not for anything else.
- */
-static tiku_backend_t *
-store_of(tiku_fs_t *fs, const char *path, char *local, size_t max)
-{
-    return tiku_backend_serving(fs->backend, path, local, max);
-}
-
-/**
  * @brief Copy one node from one store to another, through both of them.
  *
  * The only road between two stores is the backend contract, and it is
@@ -1029,9 +1056,11 @@ copy_bytes(tiku_fs_t *fs, const char *src, const char *dst, char *err,
     FILE *in, *out;
     size_t n;
 
-    /* Local files copy directly; a device file goes through the backend so
-     * its own transfer discipline applies. */
-    if (fs->backend->devid[0] != '\0') {
+    /* Local files copy directly; a device file goes through the backend
+     * so its own transfer discipline applies.  Both ends are on ONE store
+     * here -- a crossing was taken above -- so the source answers for
+     * both. */
+    if (on_device(fs, src)) {
         int len = fs->backend->ops->read(fs->backend, src, buf, sizeof buf);
         if (len < 0) {
             snprintf(err, errmax, "cannot read '%s'", src);
@@ -1466,7 +1495,7 @@ tiku_fs_check_move(tiku_fs_t *fs, const char *src, const char *dst_dir,
      * fallback copies every byte of the volume and then deletes what it
      * copied from.  Dragging a disk to the Trash must not empty the disk.
      */
-    if (fs->backend->devid[0] == '\0') {
+    if (!on_device(fs, src)) {
         tiku_volumes_t vs;
 
         if (tiku_volumes_scan(&vs) > 0 &&
@@ -1555,11 +1584,18 @@ make_path(const char *path)
 int
 tiku_fs_has_trash(const tiku_fs_t *fs)
 {
-    /* A device namespace has nowhere to put anything: its nodes are not
+    /*
+     * A device store has nowhere to put anything: its nodes are not
      * files.  Saying so is what lets the caller offer an honest "delete
-     * outright" rather than a Trash that silently destroys (FS-044). */
-    return (fs != NULL && fs->backend != NULL &&
-            fs->backend->devid[0] == '\0');
+     * outright" rather than a Trash that silently destroys (FS-044).
+     *
+     * This one is about the namespace as a WHOLE -- it takes no path, so
+     * it cannot be about anything else -- and it answers for the root,
+     * which is where a Trash would be.  Whether a particular ITEM can be
+     * trashed is a different question with a different answer, and it is
+     * asked where a path exists: tiku_fs_trash_dir() below.
+     */
+    return (fs != NULL && fs->backend != NULL && !on_device(fs, "/"));
 }
 
 /**
@@ -1647,8 +1683,7 @@ tiku_fs_trash_dirs(tiku_fs_t *fs, char out[][TIKU_PATH_MAX],
         !tiku_fs_has_trash(fs)) {
         return 0;
     }
-    if (fs->backend->devid[0] != '\0' ||
-        tiku_volumes_scan(&vs) <= 0) {
+    if (on_device(fs, "/") || tiku_volumes_scan(&vs) <= 0) {
         /* A device namespace has one Trash at most, and it is wherever the
          * item's own resolution puts it. */
         if (tiku_fs_trash_dir(fs, NULL, out[0], TIKU_PATH_MAX) ==
@@ -1719,7 +1754,11 @@ tiku_fs_trash_dir(tiku_fs_t *fs, const char *path, char *out,
     const char *home = getenv("HOME");
     struct stat rs, hs;
 
-    if (fs == NULL || out == NULL || !tiku_fs_has_trash(fs)) {
+    if (fs == NULL || out == NULL || path == NULL ||
+        !tiku_fs_has_trash(fs) || on_device(fs, path)) {
+        /* Per ITEM, not per namespace: with a board mounted beside the
+         * disk, the disk has a Trash and the board has none, and the
+         * question is which of them this path is on. */
         return -1;
     }
     /* Resolved from the ITEM's own filesystem, as Tracker resolves it from
@@ -2070,16 +2109,32 @@ step_one(tiku_fs_t *fs)
     }
     if (fs->prog.op == TIKU_OP_TRASH ||
         fs->prog.op == TIKU_OP_DELETE) {
-        if (fs->backend->devid[0] != '\0') {
-            /* A device store has rm and no trash; deletion is final and the
-             * UI must have said so before we got here. */
-            char cmd[TIKU_PATH_MAX];
-            snprintf(cmd, sizeof cmd, "%s", src);
-            if (unlink(cmd) != 0) {
-                fs->prog.failed++;
-            } else {
-                fs->prog.done++;
-            }
+        if (on_device(fs, src)) {
+            /*
+             * A device node is not a file, and nothing in the backend
+             * contract removes anything -- write is the whole of what a
+             * store can be asked to change.  So this cannot be done, and
+             * the only question is how it fails.
+             *
+             * It used to call unlink() with the path the NAMESPACE knows
+             * -- /devices/board1/gpio/17 -- which no local filesystem has
+             * ever heard of.  The kernel said ENOENT, and "no such file"
+             * reads as the item being already gone, which is the one
+             * thing it is not.
+             *
+             * Refused by name instead, the way a folder that cannot cross
+             * stores is refused: a limit that says what it is can be
+             * worked with, and a limit that reports somebody else's errno
+             * cannot.  Continuable, so the rest of a queue that spans a
+             * board and the disk still goes.
+             */
+            char msg[240];
+
+            snprintf(msg, sizeof msg,
+                     "\"%.60s\" is on a device: the connection can read "
+                     "and write its nodes, but not remove them.",
+                     leaf_of(src));
+            return fail_ask(fs, msg, 1);
         } else if (is_dir(src) && !fs->qexpanded[fs->qcursor]) {
             /* A folder goes children-first: each child is queued as an
              * item of its own, then the folder again, so a child that
@@ -2452,7 +2507,7 @@ tiku_fs_rename(tiku_fs_t *fs, const char *path, const char *new_name,
     if (!tiku_fs_name_ok(new_name, err, errmax)) {
         return -1;
     }
-    if (fs->backend->devid[0] == '\0') {
+    if (!on_device(fs, path)) {
         tiku_volumes_t vs;
         char why[200];
 
@@ -2615,7 +2670,7 @@ tiku_fs_new_from_template(tiku_fs_t *fs, const char *template_path,
     }
     /* Templates are host filesystem objects.  A device namespace has no
      * local tree to copy and must not fall through to the POSIX walkers. */
-    if (fs->backend == NULL || fs->backend->devid[0] != '\0' ||
+    if (fs->backend == NULL || on_device(fs, dst_dir) ||
         lstat(template_path, &st) != 0 ||
         (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode) &&
          !S_ISLNK(st.st_mode))) {
