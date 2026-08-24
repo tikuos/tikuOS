@@ -149,6 +149,15 @@ typedef struct {
  * @return nonzero when this call is the outermost one and should record.
  */
 int tiku_gfx_rec_enter(tiku_surface_t *s);
+/**
+ * @brief Say that pixels went here which no command can carry.
+ *
+ * Every painter of PICTURES owes the list this, and the ones that forgot
+ * are why it is one call rather than a hand-rolled test in each: a list
+ * missing a picture is a window that arrives looking finished and is not.
+ */
+void tiku_gfx_rec_miss(tiku_surface_t *s);
+
 void tiku_gfx_rec_leave(tiku_surface_t *s, int on);
 
 /** @brief Allocate a surface and fill it with @p bg.  NULL on failure. */

@@ -81,9 +81,7 @@ paint(tiku_surface_t *s, const char *name, int x, int y, int size,
      * window with an icon in it is told it is no longer whole, and
      * whoever is about to put it on a wire sends the frame instead.
      */
-    if (s != NULL && s->record != NULL && s->record_depth == 0) {
-        tiku_dl_miss(s->record);
-    }
+    tiku_gfx_rec_miss(s);
 
     if (s == NULL || name == NULL || size <= 0) {
         return 0;
@@ -148,6 +146,15 @@ int
 tiku_icon_paint_selected(tiku_surface_t *s, const char *name, int x,
                              int y, int size)
 {
+    /*
+     * Here rather than in paint(), because the washed-bitmap fast path
+     * below does not go through paint() at all -- so on a cache HIT the
+     * icon went onto the surface and the list said it was whole.  Which
+     * made it a fault that only appeared the second time an icon was
+     * drawn.
+     */
+    tiku_gfx_rec_miss(s);
+
     /* The source's exact transform (IV-018): every channel multiplied to
      * 66% brightness (168/255) with the alpha kept -- a darkened icon, not
      * a tinted one, so the art stays recognisable in any palette.  Derived
@@ -218,6 +225,8 @@ void
 tiku_paint_tint(tiku_surface_t *s, tiku_rect_t r,
                     tiku_rgb_t c, int a)
 {
+    tiku_gfx_rec_miss(s);   /* a wash over what is there has no op */
+
     int x, y;
     int cr = (int)((c >> 16) & 0xffu), cg = (int)((c >> 8) & 0xffu);
     int cb = (int)(c & 0xffu);
@@ -254,6 +263,12 @@ void
 tiku_paint_band(tiku_surface_t *s, tiku_rect_t r,
                     int transparent)
 {
+    /*
+     * No miss of its own: every road out of here is one -- the opaque
+     * band inverts, and the transparent one is five tints -- and each of
+     * those says so for itself.  Saying it again here would count one
+     * band as six.
+     */
     if (s == NULL || r.w <= 0 || r.h <= 0) {
         return;
     }

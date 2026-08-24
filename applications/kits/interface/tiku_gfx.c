@@ -38,6 +38,28 @@ tiku_gfx_rec_enter(tiku_surface_t *s)
 }
 
 void
+tiku_gfx_rec_miss(tiku_surface_t *s)
+{
+    /*
+     * The one call a painter of PICTURES owes the list.
+     *
+     * Everything in this kit reduces to commands that record; a picture
+     * does not, and a list that quietly leaves one out is worse than no
+     * list at all -- it is a window that arrives looking finished and is
+     * not.  So whoever writes pixels the vocabulary cannot say says so
+     * here, and whoever is about to put the list on a wire sends the
+     * frame instead.
+     *
+     * It lives beside rec_enter because the depth rule is the same one:
+     * a picture drawn INSIDE a command that is already being recorded is
+     * part of that command, and the outer op carries it.
+     */
+    if (s != NULL && s->record != NULL && s->record_depth == 0) {
+        tiku_dl_miss(s->record);
+    }
+}
+
+void
 tiku_gfx_rec_leave(tiku_surface_t *s, int on)
 {
     if (on) {
@@ -282,6 +304,8 @@ void
 tiku_blit(tiku_surface_t *dst, int x, int y,
                const tiku_surface_t *src)
 {
+    tiku_gfx_rec_miss(dst);  /* a surface copied in IS a picture */
+
     int y0, y1, x0, x1, row;
 
     if (dst == NULL || src == NULL || dst->px == NULL || src->px == NULL) {
@@ -331,6 +355,8 @@ void
 tiku_copy_bits(tiku_surface_t *s, tiku_rect_t src, int dx,
                     int dy)
 {
+    tiku_gfx_rec_miss(s);   /* moving pixels about is not a drawing the list can say */
+
     int y, x0, y0, x1, y1, w;
 
     if (s == NULL || (dx == 0 && dy == 0) || src.w <= 0 || src.h <= 0) {
@@ -390,6 +416,8 @@ tiku_copy_bits(tiku_surface_t *s, tiku_rect_t src, int dx,
 void
 tiku_veil(tiku_surface_t *s, tiku_rect_t r, tiku_rgb_t c, float amount)
 {
+    tiku_gfx_rec_miss(s);   /* a blend over what is already there has no op */
+
     int x, y, x0, y0, x1, y1, sc;
     long stride;
     unsigned a, inv, cr, cg, cb;
@@ -728,6 +756,8 @@ invert_pixel(tiku_surface_t *s, int x, int y)
 void
 tiku_invert_frame(tiku_surface_t *s, tiku_rect_t r)
 {
+    tiku_gfx_rec_miss(s);   /* an inversion is not a colour a command can name */
+
     int i;
 
     if (s == NULL || r.w <= 0 || r.h <= 0) {
