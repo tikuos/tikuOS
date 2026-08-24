@@ -14,6 +14,7 @@
  */
 
 #include "tiku_fs.h"
+#include "tiku_mount.h"
 #include "tiku_state.h"
 #include "tiku_volume.h"
 
@@ -934,6 +935,92 @@ copy_pose_info(tiku_fs_t *fs, const char *src, const char *dst)
     }
 }
 
+/**
+ * @brief Which store answers for @p path, and what it is called there.
+ *
+ * Not "which volume" -- that is st_dev's question and is asked elsewhere.
+ * This one decides whether the local filesystem calls in this file may be
+ * used at all: they may, for a path a POSIX store answers for, and they
+ * may not for anything else.
+ */
+static tiku_backend_t *
+store_of(tiku_fs_t *fs, const char *path, char *local, size_t max)
+{
+    return tiku_backend_serving(fs->backend, path, local, max);
+}
+
+/**
+ * @brief Copy one node from one store to another, through both of them.
+ *
+ * The only road between two stores is the backend contract, and it is
+ * narrow in two ways that decide what this can promise.
+ *
+ * Its read takes no OFFSET: a node's value comes back whole, into
+ * whatever buffer is offered.  So this carries what one buffer holds and
+ * REFUSES what it does not, because a copy that silently kept the first
+ * sixty-four kilobytes of a file would be worse than one that did not
+ * happen.  Lifting that means an offset in the ops table, which is a
+ * change to the seam rather than to this.
+ *
+ * And it has no way to make a directory or take one away -- write is the
+ * whole of what it can change -- so a FOLDER crossing between stores is
+ * refused rather than half-built.
+ */
+static int
+copy_across(tiku_fs_t *fs, tiku_backend_t *sb, const char *slocal,
+            tiku_backend_t *db, const char *dlocal, const char *src,
+            char *err, size_t errmax)
+{
+    static unsigned char across[64 * 1024];
+    tiku_model_t m;
+    int len;
+
+    /* Asked once and up front: what follows is one read and one write,
+     * so there is no middle to stop in. */
+    if (cancelled(fs)) {
+        snprintf(err, errmax, "cancelled");
+        return -2;
+    }
+    if (sb->ops->stat(sb, slocal, &m) != 0) {
+        snprintf(err, errmax, "cannot read '%.60s'", leaf_of(src));
+        return -1;
+    }
+    if (tiku_model_is_container(&m)) {
+        snprintf(err, errmax,
+                 "a folder cannot be copied between stores yet: the "
+                 "backend contract has no way to make one");
+        return -1;
+    }
+    if (m.facts.size > (int64_t)sizeof across) {
+        snprintf(err, errmax,
+                 "'%.40s' is too big to copy between stores: they are "
+                 "read whole, and this one is %lld bytes",
+                 leaf_of(src), (long long)m.facts.size);
+        return -1;
+    }
+    len = sb->ops->read(sb, slocal, across, sizeof across);
+    if (len < 0) {
+        snprintf(err, errmax, "cannot read '%.60s'", leaf_of(src));
+        return -1;
+    }
+    /*
+     * A short read where the entry said it was longer is a truncated
+     * copy waiting to happen, and the caller would never know: the write
+     * would succeed and the file would simply be wrong.
+     */
+    if (m.facts.size > 0 && (int64_t)len < m.facts.size) {
+        snprintf(err, errmax,
+                 "'%.40s' was read short, %d of %lld bytes", leaf_of(src),
+                 len, (long long)m.facts.size);
+        return -1;
+    }
+    if (db->ops->write == NULL) {
+        snprintf(err, errmax, "that store does not take writes");
+        return -1;
+    }
+    return db->ops->write(db, dlocal, across, (size_t)len, err, errmax);
+}
+
 static int
 copy_bytes(tiku_fs_t *fs, const char *src, const char *dst, char *err,
            size_t errmax)
@@ -1080,6 +1167,21 @@ copy_tree(tiku_fs_t *fs, const char *src, const char *dstpath, char *err,
     dev_t sdev;
     DIR *d;
     struct dirent *e;
+    {
+        /*
+         * Two different stores, so none of the local filesystem calls
+         * below apply: lstat would be asking this host about a path that
+         * lives on a board.  The backend contract is the only road, and
+         * copy_across says what it can and cannot carry.
+         */
+        char sl[TIKU_PATH_MAX], dl[TIKU_PATH_MAX];
+        tiku_backend_t *sb = store_of(fs, src, sl, sizeof sl);
+        tiku_backend_t *db = store_of(fs, dstpath, dl, sizeof dl);
+
+        if (sb != NULL && db != NULL && sb != db) {
+            return copy_across(fs, sb, sl, db, dl, src, err, errmax);
+        }
+    }
 
     /* The full destination PATH, not the folder: the name may have been
      * chosen by a collision answer, and recomputing it from the source
@@ -1213,6 +1315,36 @@ move_tree(tiku_fs_t *fs, const char *src, const char *dstpath, char *err,
     struct stat sst, dst_st;
     DIR *d;
     struct dirent *e;
+    {
+        /*
+         * Between two stores a move is a copy and then a delete, which is
+         * what it already is across a volume boundary -- but the delete
+         * can only be done where the local filesystem answers, because
+         * the backend contract has no way to take anything away.  So a
+         * move OFF a device is refused rather than left as a copy the
+         * user believes was a move.
+         */
+        char sl[TIKU_PATH_MAX], dl[TIKU_PATH_MAX];
+        tiku_backend_t *sb = store_of(fs, src, sl, sizeof sl);
+        tiku_backend_t *db = store_of(fs, dstpath, dl, sizeof dl);
+
+        if (sb != NULL && db != NULL && sb != db) {
+            int rc;
+
+            if (sb->devid[0] != '\0') {
+                snprintf(err, errmax,
+                         "'%.40s' can be copied off that store but not "
+                         "moved: nothing in the backend contract removes "
+                         "anything", leaf_of(src));
+                return -1;
+            }
+            rc = copy_across(fs, sb, sl, db, dl, src, err, errmax);
+            if (rc != 0) {
+                return rc;
+            }
+            return remove_tree(sl);
+        }
+    }
 
     if (stat(src, &sst) != 0) {
         snprintf(err, errmax, "cannot read '%.60s'", leaf_of(src));
