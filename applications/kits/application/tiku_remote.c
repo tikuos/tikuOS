@@ -227,6 +227,24 @@ session_message(tiku_remote_session_t *s)
             if (s->want >= 4u + 32u + 4u) {
                 memcpy(&s->features, p + 36, 4);
             }
+            {
+                /*
+                 * And say what THIS end can do, which nothing used to.
+                 * A client cannot choose what to send without it, and
+                 * the choice is not optional once the vocabulary can
+                 * grow: an op the far end has not got is stepped over,
+                 * so guessing wrong loses whatever it drew rather than
+                 * failing.
+                 */
+                unsigned char reply[8];
+                uint32_t version = TIKU_REMOTE_VERSION;
+                uint32_t mine = TIKU_FEAT_COMMAND_STREAM |
+                                TIKU_FEAT_SHARED_SURFACE;
+
+                memcpy(reply, &version, 4);
+                memcpy(reply + 4, &mine, 4);
+                send_msg(s->fd, TIKU_RMSG_WELCOME, reply, sizeof reply);
+            }
         }
         break;
     case TIKU_RMSG_SURFACE:
@@ -791,6 +809,12 @@ tiku_remote_connect_fd(tiku_remote_client_t *client,
     return 0;
 }
 
+unsigned
+tiku_remote_peer_features(const tiku_remote_client_t *client)
+{
+    return (client != NULL) ? client->peer_features : 0u;
+}
+
 int
 tiku_remote_draw(tiku_remote_client_t *client, uint32_t id,
                       const tiku_dl_t *dl, int w, int h)
@@ -1066,6 +1090,14 @@ tiku_remote_read(tiku_remote_client_t *client, uint32_t *id,
 
             memcpy(&c, buf + 4, 4);
             *command = c;
+        }
+        if (head[0] == TIKU_RMSG_WELCOME && head[1] >= 8u) {
+            uint32_t v, f;
+
+            memcpy(&v, buf, 4);
+            memcpy(&f, buf + 4, 4);
+            client->peer_version = (int)v;
+            client->peer_features = f;
         }
         if (head[0] == TIKU_RMSG_TELL) {
             tiku_msg_free(client->heard);   /* one at a time: a read */

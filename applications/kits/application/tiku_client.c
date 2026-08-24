@@ -54,7 +54,21 @@ svc_present(void *ctx, uint32_t id, const struct tiku_dl *dl,
     client_ctx_t *c = ctx;
     size_t frame = 4u * (size_t)w * (size_t)h;
 
-    if (dl != NULL && tiku_dl_misses(dl) == 0 &&
+    /*
+     * FOUR things, and the first is new: the far end has to have SAID it
+     * can play a stream.  It used to be assumed, which was survivable
+     * only while both ends were built together -- an end that cannot
+     * play a command steps over it (tiku_dl.h) and the window arrives
+     * missing whatever it drew, with the list still saying it is whole.
+     *
+     * Zero features means the desktop has not answered yet, or is too
+     * old to answer at all.  Both get the pixels, which every version
+     * has always understood.
+     */
+    if (dl != NULL &&
+        (tiku_remote_peer_features(&c->remote) &
+             TIKU_FEAT_COMMAND_STREAM) != 0u &&
+        tiku_dl_misses(dl) == 0 &&
         tiku_dl_flat_size(dl) * 2u < frame &&
         tiku_remote_draw(&c->remote, id, dl, w, h)) {
         return 1;

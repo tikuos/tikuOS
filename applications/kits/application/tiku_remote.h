@@ -80,6 +80,25 @@
 #define TIKU_RMSG_EVENT   16u  /* u32 id, tiku_event_t         */
 #define TIKU_RMSG_PICK    17u  /* u32 id, i32 command               */
 #define TIKU_RMSG_TELL    19u  /* a flattened tiku_msg_t       */
+/*
+ * The answer to a HELLO: what THIS end can do.
+ *
+ * Until this existed the features went one way only -- a client said what
+ * it could and the desktop never said anything back -- so a client had no
+ * way to find out whether the far end could play a command stream, and
+ * sent one anyway.  That was survivable while both ends were built
+ * together and stops being survivable the moment the vocabulary grows: an
+ * op an older end has never heard of is STEPPED OVER (see tiku_dl.h), so
+ * a window would arrive missing whatever that op drew, silently, with the
+ * list still claiming to be whole.
+ *
+ * Sent by the desktop when it takes a HELLO.  A client that predates it
+ * reads an unknown type and ignores it, which is what the length prefix
+ * is for; a desktop that predates it sends nothing and a client that
+ * wanted this learns the far end can do NOTHING beyond version 1, which
+ * is the safe answer rather than the optimistic one.
+ */
+#define TIKU_RMSG_WELCOME 20u  /* u32 version, u32 features         */
 #define TIKU_RMSG_CLOSED  18u  /* u32 id: the user closed it        */
 
 /** @brief Where the desktop listens, under this user's HOME. */
@@ -221,6 +240,14 @@ typedef struct {
     int           next_buffer;
     char          shm_name[TIKU_REMOTE_SHM_NAME];
     unsigned      features;
+    /*
+     * What the far end said IT can do, from the WELCOME -- zero until it
+     * has answered, and zero for ever against a desktop too old to.  Zero
+     * means "assume nothing", so what goes over is what every version has
+     * always understood.
+     */
+    unsigned      peer_features;
+    int           peer_version;
     /* Header accumulation: the line has no peek. */
     unsigned char hbuf[8];
     size_t        hgot;
@@ -238,6 +265,15 @@ typedef struct {
  */
 int tiku_remote_connect(tiku_remote_client_t *client,
                              const char *name, int wait_ms);
+
+/**
+ * @brief What the far end has said it can do, or 0 if it has not said.
+ *
+ * Read it before using anything the far end might not have: zero is not
+ * "no features", it is "no answer yet", and the two want the same
+ * conservative treatment.
+ */
+unsigned tiku_remote_peer_features(const tiku_remote_client_t *client);
 
 /**
  * @brief Speak the session over an fd already in hand -- a serial port,
