@@ -221,6 +221,32 @@ Replace the hardcoded `known[]` table in `offer_companions` with a scan:
   for this refactor.
 - In-process apps returning done from `event`/`pick` → `embed_stop(slot)`.
 
+**Measured 2026-08-25, against the tree as it stands.** The slot array
+above EXISTS (`embeds[TIKU_TRK_EMBED_MAX]`, per-slot services, ticks
+pumped for every running slot, pointer and key events routed to the
+focused slot, the close gesture and a done-returning `event`/`pick`
+reaching `embed_stop`) — the demo descriptor rides all of it.  What
+stands between here and "the shell's About is a descriptor" is exactly
+two things, and neither is the services contract:
+
+1. **Start-on-demand.** `embed_start` is called once, at boot, behind
+   `TIKU_EMBED_DEMO`.  A menu row needs `embed_open_or_raise(app,
+   descriptor)`: a running slot found by `descriptor->id` gets its
+   window activated; otherwise the descriptor starts.  Small, and the
+   registry idiom for it already exists on the blocking side.
+2. **Placement is the real design decision.** `embed_svc_open` cascades
+   windows by slot index; the About centres itself.  Converted naively,
+   the flagship window MOVES, and about.script's clock-sensitive fade
+   pixels re-anchor.  Either the contract grows a placement hint, or
+   the shell owns placement per descriptor id — decide this before
+   converting anything with a scripted pixel surface.
+
+The About conversion itself is then a rewrite of
+`tiku_trk_about_window.c` (388 lines: the R5 layout, the controller
+facts, the logo fade driven today by the shell's 75 ms periodic) into a
+descriptor whose `tick` owns the fade — with about.script and
+sysmenu.script as the regression net, and pixel-identity as the bar.
+
 ### B6. Tests
 
 - **Unit** `tests/test_appload.c` (tracker repo, links desktop libs like
