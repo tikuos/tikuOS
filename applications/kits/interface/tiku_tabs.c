@@ -13,6 +13,7 @@
 
 #include "tiku_tabs.h"
 #include "tiku_font.h"
+#include "tiku_dl.h"
 
 void
 tiku_tabs_init(tiku_tabs_t *t)
@@ -119,6 +120,9 @@ tiku_tabs_hit(const tiku_tabs_t *t, tiku_rect_t strip, int x, int y)
     return -1;
 }
 
+static void draw_strip(const tiku_tabs_t *t, tiku_surface_t *s,
+                       tiku_rect_t strip);
+
 void
 tiku_tabs_draw(const tiku_tabs_t *t, tiku_surface_t *s, tiku_rect_t strip)
 {
@@ -130,6 +134,45 @@ tiku_tabs_draw(const tiku_tabs_t *t, tiku_surface_t *s, tiku_rect_t strip)
     if (s == NULL || n <= 0) {
         return;
     }
+    {
+        int rec = tiku_gfx_rec_enter(s);
+
+        if (rec) {
+            /* The tabs BY NAME with the current one marked, rather than
+             * the fills and seams they are drawn from: which tab a window
+             * is showing is a fact, and a reader should not have to infer
+             * it from which rectangle is the brighter. */
+            char labels[TIKU_TABS_MAX * TIKU_TABS_LABEL_MAX];
+            size_t used = 0u;
+            int k;
+
+            for (k = 0; k < n; k++) {
+                size_t l = strlen(t->label[k]) + 1u;
+
+                if (used + l > sizeof labels) {
+                    break;
+                }
+                memcpy(labels + used, t->label[k], l);
+                used += l;
+            }
+            (void)tiku_dl_tabs(s->record, strip, n, t->current, labels,
+                               used);
+        }
+        draw_strip(t, s, strip);
+        tiku_gfx_rec_leave(s, rec);
+        return;
+    }
+}
+
+/** @brief The strip's actual pixels, once the recording is decided. */
+static void
+draw_strip(const tiku_tabs_t *t, tiku_surface_t *s, tiku_rect_t strip)
+{
+    const tiku_font_t *font = tiku_font_plain();
+    int n = t->count;
+    int seam = strip.y + strip.h - 1;
+    int i;
+
     /* The line the body's top edge sits on, under the whole strip.  The
      * current tab erases its own stretch of it, which is what "open to
      * the body" is drawn out of. */

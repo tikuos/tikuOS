@@ -122,6 +122,67 @@ int tiku_dl_checkbox(tiku_dl_t *dl, tiku_rect_t r, const char *label,
                      unsigned state);
 int tiku_dl_radio(tiku_dl_t *dl, tiku_rect_t r, const char *label,
                   unsigned state);
+/**
+ * @brief A gauge: how full it is, not the two rectangles it is made of.
+ *
+ * @p per_mille is the fill, 0..1000 -- a whole number because the wire
+ * carries no floats and a thousandth is finer than a bar can show.
+ */
+int tiku_dl_gauge(tiku_dl_t *dl, tiku_rect_t r, int per_mille);
+
+/** @brief A tip: the note box and the whole of what it says. */
+int tiku_dl_tip(tiku_dl_t *dl, tiku_rect_t r, const char *text);
+
+/**
+ * @brief A text field: where it is, what is in it, and its state.
+ *
+ * The noun an agent most needs after a button -- a place to type, and
+ * what is already typed there.
+ */
+int tiku_dl_textfield(tiku_dl_t *dl, tiku_rect_t r, const char *text,
+                      unsigned state);
+
+/**
+ * @brief A scrollbar, as its two numbers rather than its twenty-five
+ *        rectangles: where it sits and how much of the whole is shown.
+ */
+int tiku_dl_scrollbar(tiku_dl_t *dl, tiku_rect_t r, int pos_per_mille,
+                      int frac_per_mille, int horiz);
+
+/**
+ * @brief A slider: the track, and the value on its own scale.
+ */
+int tiku_dl_slider(tiku_dl_t *dl, tiku_rect_t r, int min, int max,
+                   int value);
+
+/**
+ * @brief A menu field: the choice it is showing, and its state.
+ *
+ * Its marker is a stroked triangle drawn pixel by pixel, and pixels are
+ * the one thing the list does not carry: recorded as its parts, the
+ * field arrived with no marker at all and nothing said so.
+ */
+int tiku_dl_menufield(tiku_dl_t *dl, tiku_rect_t r, const char *label,
+                      unsigned state);
+
+/**
+ * @brief A tab strip: the tabs by NAME, and which one is current.
+ *
+ * @p labels is @p count NUL-terminated strings one after another, which
+ * is how the strip already holds them.
+ */
+int tiku_dl_tabs(tiku_dl_t *dl, tiku_rect_t r, int count, int current,
+                 const char *labels, size_t labels_len);
+
+/**
+ * @brief The alert's icon, as WHICH icon rather than as its spans.
+ *
+ * The disc is drawn a horizontal line at a time; a warning arriving as
+ * sixty-six of those is the clearest case in the whole vocabulary of a
+ * picture the far end could have drawn itself from a single word.
+ */
+int tiku_dl_alert_icon(tiku_dl_t *dl, int cx, int cy, int kind);
+
 int tiku_dl_list_row(tiku_dl_t *dl, tiku_rect_t r, const char *text,
                      int selected);
 

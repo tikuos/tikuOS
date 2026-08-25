@@ -13,6 +13,7 @@
 
 #include "tiku_slider.h"
 #include "tiku_ui.h"
+#include "tiku_dl.h"
 #include "tiku_font.h"
 
 /** @brief The knob is square, so the travel is shorter than the track. */
@@ -138,9 +139,16 @@ void
 tiku_slider_draw(const tiku_slider_t *sl, tiku_surface_t *s, tiku_rect_t r)
 {
     tiku_rect_t groove, knob;
+    int rec;
 
     if (sl == NULL || s == NULL) {
         return;
+    }
+    rec = tiku_gfx_rec_enter(s);
+    if (rec) {
+        /* The value on its own scale, not a groove and a box: a reader
+         * that gets SUNKEN + RAISED learns nothing about the number. */
+        (void)tiku_dl_slider(s->record, r, sl->min, sl->max, sl->value);
     }
     /* The groove is a thin sunken line down the middle of the track; the
      * knob rides over it, which is what makes the track read as a rail
@@ -150,6 +158,7 @@ tiku_slider_draw(const tiku_slider_t *sl, tiku_surface_t *s, tiku_rect_t r)
     tiku_ui_sunken(s, groove, TIKU_C_DOC);
     knob = tiku_slider_knob(sl, r);
     tiku_ui_raised(s, knob);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 tiku_stepper_hit_t

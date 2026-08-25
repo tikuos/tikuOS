@@ -25,6 +25,9 @@
 #include "tiku_dl.h"
 #include "tiku_font.h"
 #include "tiku_ui.h"
+#include "tiku_slider.h"
+#include "tiku_alert.h"
+#include "tiku_tabs.h"
 
 /* The ops.  The number is part of the wire format; gaps are deliberate,
  * so the primitives and the controls stay legible as two groups. */
@@ -50,6 +53,23 @@
  * [u32 id][i16 x][i16 y][i16 size][u8 mix][u8 0][u32 wash]. */
 #define OP_ICON_ART     23u
 #define OP_ICON         24u
+
+/*
+ * The second round of control ops.  Every one of these replaces a run of
+ * rectangles that said only what a thing LOOKED like: the far end draws
+ * them from the kit it already has, and a reader that is not drawing at
+ * all -- an agent, a screen reader -- gets the noun instead of the
+ * spans.  A gauge was arriving as one grey box with no bar in it, and an
+ * alert's warning disc as sixty-six horizontal lines.
+ */
+#define OP_GAUGE        25u
+#define OP_TIP          26u
+#define OP_TEXTFIELD    27u
+#define OP_SCROLLBAR    28u
+#define OP_SLIDER       29u
+#define OP_ALERT_ICON   30u
+#define OP_TABS         31u
+#define OP_MENUFIELD    32u
 
 struct tiku_dl {
     unsigned char *b;
@@ -439,6 +459,106 @@ tiku_dl_button(tiku_dl_t *dl, tiku_rect_t r, const char *label,
 }
 
 int
+tiku_dl_gauge(tiku_dl_t *dl, tiku_rect_t r, int per_mille)
+{
+    unsigned char *p = begin(dl, OP_GAUGE, 10u);
+
+    if (p == NULL) {
+        return 0;
+    }
+    if (per_mille < 0) { per_mille = 0; }
+    if (per_mille > 1000) { per_mille = 1000; }
+    put_rect(p, r);
+    put16(p + 8, (uint16_t)per_mille);
+    return 1;
+}
+
+int
+tiku_dl_tip(tiku_dl_t *dl, tiku_rect_t r, const char *text)
+{
+    return labelled(dl, OP_TIP, r, text, 0u);
+}
+
+int
+tiku_dl_textfield(tiku_dl_t *dl, tiku_rect_t r, const char *text,
+                  unsigned state)
+{
+    return labelled(dl, OP_TEXTFIELD, r, text, state);
+}
+
+int
+tiku_dl_scrollbar(tiku_dl_t *dl, tiku_rect_t r, int pos_per_mille,
+                  int frac_per_mille, int horiz)
+{
+    unsigned char *p = begin(dl, OP_SCROLLBAR, 14u);
+
+    if (p == NULL) {
+        return 0;
+    }
+    put_rect(p, r);
+    put16(p + 8, (uint16_t)(pos_per_mille < 0 ? 0 : pos_per_mille));
+    put16(p + 10, (uint16_t)(frac_per_mille < 0 ? 0 : frac_per_mille));
+    put16(p + 12, (uint16_t)(horiz ? 1 : 0));
+    return 1;
+}
+
+int
+tiku_dl_slider(tiku_dl_t *dl, tiku_rect_t r, int min, int max, int value)
+{
+    unsigned char *p = begin(dl, OP_SLIDER, 14u);
+
+    if (p == NULL) {
+        return 0;
+    }
+    put_rect(p, r);
+    put16(p + 8, (uint16_t)(int16_t)min);
+    put16(p + 10, (uint16_t)(int16_t)max);
+    put16(p + 12, (uint16_t)(int16_t)value);
+    return 1;
+}
+
+int
+tiku_dl_menufield(tiku_dl_t *dl, tiku_rect_t r, const char *label,
+                  unsigned state)
+{
+    return labelled(dl, OP_MENUFIELD, r, label, state);
+}
+
+int
+tiku_dl_tabs(tiku_dl_t *dl, tiku_rect_t r, int count, int current,
+             const char *labels, size_t labels_len)
+{
+    unsigned char *p;
+
+    if (labels == NULL || labels_len == 0u || count <= 0) {
+        return 0;
+    }
+    p = begin(dl, OP_TABS, 12u + labels_len);
+    if (p == NULL) {
+        return 0;
+    }
+    put_rect(p, r);
+    put16(p + 8, (uint16_t)count);
+    put16(p + 10, (uint16_t)(int16_t)current);
+    memcpy(p + 12, labels, labels_len);
+    return 1;
+}
+
+int
+tiku_dl_alert_icon(tiku_dl_t *dl, int cx, int cy, int kind)
+{
+    unsigned char *p = begin(dl, OP_ALERT_ICON, 6u);
+
+    if (p == NULL) {
+        return 0;
+    }
+    put16(p, (uint16_t)(int16_t)cx);
+    put16(p + 2, (uint16_t)(int16_t)cy);
+    put16(p + 4, (uint16_t)kind);
+    return 1;
+}
+
+int
 tiku_dl_checkbox(tiku_dl_t *dl, tiku_rect_t r, const char *label,
                  unsigned state)
 {
@@ -567,6 +687,10 @@ fixed_payload(uint16_t op)
     case OP_PANEL:
     case OP_RAISED:      return 8;
     case OP_ICON:        return 16;
+    case OP_GAUGE:       return 10;
+    case OP_SCROLLBAR:
+    case OP_SLIDER:      return 14;
+    case OP_ALERT_ICON:  return 6;
     case OP_CLIP_RESET:  return 0;
     default:             return -1;
     }
@@ -582,7 +706,11 @@ least_payload(uint16_t op)
     case OP_BUTTON:
     case OP_CHECKBOX:
     case OP_RADIO:
-    case OP_LIST_ROW:      return 13;   /* 12 + a terminator     */
+    case OP_LIST_ROW:
+    case OP_TIP:
+    case OP_TEXTFIELD:     return 13;   /* 12 + a terminator     */
+    case OP_TABS:
+    case OP_MENUFIELD:     return 13;   /* 12 + a terminator     */
     default:               return -1;
     }
 }
@@ -826,6 +954,60 @@ tiku_dl_play(const tiku_dl_t *dl, tiku_surface_t *s)
         case OP_BUTTON:
             tiku_ui_button(s, get_rect(a), (const char *)(a + 12),
                            get32(a + 8));
+            break;
+        case OP_GAUGE:
+            tiku_ui_gauge(s, get_rect(a),
+                          (float)get16(a + 8) / 1000.0f);
+            break;
+        case OP_TIP:
+            tiku_ui_tip(s, get_rect(a), (const char *)(a + 12));
+            break;
+        case OP_TEXTFIELD: {
+            const char *text = (const char *)(a + 12);
+
+            /* Played with the caret past the end: the stream carries what
+             * the field SAYS, and where the caret was is the far end's
+             * own business -- it is not typing into this copy. */
+            tiku_ui_textfield(s, get_rect(a), text, (int)strlen(text),
+                              get32(a + 8));
+            break;
+        }
+        case OP_SCROLLBAR:
+            tiku_ui_scrollbar(s, get_rect(a),
+                              (float)get16(a + 8) / 1000.0f,
+                              (float)get16(a + 10) / 1000.0f,
+                              (int)get16(a + 12));
+            break;
+        case OP_SLIDER: {
+            tiku_slider_t sl;
+
+            tiku_slider_init(&sl, get_i16(a + 8), get_i16(a + 10),
+                             get_i16(a + 12), 1);
+            tiku_slider_draw(&sl, s, get_rect(a));
+            break;
+        }
+        case OP_MENUFIELD:
+            tiku_ui_menufield(s, get_rect(a), (const char *)(a + 12),
+                              get32(a + 8));
+            break;
+        case OP_TABS: {
+            tiku_tabs_t t;
+            const char *at = (const char *)(a + 12);
+            const unsigned char *end = a + n;
+            int n = (int)get16(a + 8), k;
+
+            tiku_tabs_init(&t);
+            for (k = 0; k < n && (const unsigned char *)at < end; k++) {
+                (void)tiku_tabs_add(&t, at);
+                at += strlen(at) + 1u;
+            }
+            (void)tiku_tabs_select(&t, (int)get_i16(a + 10));
+            tiku_tabs_draw(&t, s, get_rect(a));
+            break;
+        }
+        case OP_ALERT_ICON:
+            tiku_alert_icon_draw(s, get_i16(a), get_i16(a + 2),
+                                 (tiku_alert_kind_t)get16(a + 4));
             break;
         case OP_CHECKBOX:
             tiku_ui_checkbox(s, get_rect(a), (const char *)(a + 12),

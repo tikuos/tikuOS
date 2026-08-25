@@ -254,12 +254,16 @@ void
 tiku_ui_menufield(tiku_surface_t *s, tiku_rect_t r,
                        const char *label, unsigned state)
 {
+    int rec = tiku_gfx_rec_enter(s);
     const tiku_font_t *font = tiku_font_plain();
     tiku_rgb_t text = (state & TIKU_S_DISABLED)
                            ? tiku_tint(PANEL, 1.30f)
                            : TIKU_C_TEXT;
     int size, ax, ay, hin, vin, pen, i, y;
 
+    if (rec) {
+        (void)tiku_dl_menufield(s->record, r, label, state);
+    }
     tiku_fill(s, r, PANEL);
     tiku_frame(s, r, DARK());
     clip_corners(s, r, PANEL);
@@ -294,6 +298,7 @@ tiku_ui_menufield(tiku_surface_t *s, tiku_rect_t r,
             tiku_pixel(s, ax + size - hin - y, ay + vin + y + i, DARK());
         }
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void
@@ -427,6 +432,15 @@ tiku_ui_textfield_scroll(tiku_surface_t *s, tiku_rect_t r,
                               const char *text, int caret, int sel_a,
                               int sel_b, unsigned state, int scroll_px)
 {
+    int rec = tiku_gfx_rec_enter(s);
+
+    if (rec) {
+        /* What the field SAYS and whether it is focused or disabled --
+         * the noun an agent wants after a button.  The caret, the
+         * selection and the slide are this end's typing state, not facts
+         * about the field, so they stay here. */
+        (void)tiku_dl_textfield(s->record, r, text, state);
+    }
     const tiku_font_t *f = tiku_font_plain();
     tiku_rgb_t face = (state & TIKU_S_DISABLED)
                            ? PANEL : TIKU_C_DOC;
@@ -462,6 +476,7 @@ tiku_ui_textfield_scroll(tiku_surface_t *s, tiku_rect_t r,
         }
     }
     tiku_clip_reset(s);
+    tiku_gfx_rec_leave(s, rec);
 }
 
 /** @brief A scrollbar arrow button with its triangle. */
@@ -514,7 +529,9 @@ tiku_ui_tip(tiku_surface_t *s, tiku_rect_t r, const char *text)
     }
     rec = tiku_gfx_rec_enter(s);
     if (rec) {
-        (void)tiku_dl_fill(s->record, r, TIKU_C_NOTE);
+        /* With its TEXT: recorded as a bare fill, the whole point of a
+         * tip -- what it says -- never reached the far end at all. */
+        (void)tiku_dl_tip(s->record, r, text);
     }
     tiku_fill(s, r, TIKU_C_NOTE);
     tiku_frame(s, r, TIKU_C_TEXT);
@@ -528,14 +545,15 @@ tiku_ui_gauge(tiku_surface_t *s, tiku_rect_t r, float fraction)
     int rec = tiku_gfx_rec_enter(s);
     tiku_rect_t fill;
 
-    if (rec) {
-        /* Nothing in the display list describes a gauge, so what a remote
-         * reader gets is the two rectangles it is made of, recorded as
-         * themselves rather than missed. */
-        (void)tiku_dl_fill(s->record, r, TIKU_C_DOC);
-    }
     if (fraction < 0.0f) { fraction = 0.0f; }
     if (fraction > 1.0f) { fraction = 1.0f; }
+    if (rec) {
+        /* The gauge as its NUMBER.  Recorded as a bare fill it arrived as
+         * an EMPTY grey box: the frame and the bar are drawn by calls
+         * this one suppresses, so the far end saw a well with nothing in
+         * it whatever the value was. */
+        (void)tiku_dl_gauge(s->record, r, (int)(fraction * 1000.0f));
+    }
 
     tiku_fill(s, r, TIKU_C_DOC);
     tiku_frame(s, r, tiku_tint(PANEL, 1.40f));
@@ -551,6 +569,7 @@ void
 tiku_ui_scrollbar(tiku_surface_t *s, tiku_rect_t r, float pos,
                        float frac, int horiz)
 {
+    int rec = tiku_gfx_rec_enter(s);
     int btn = horiz ? r.h : r.w;
     tiku_rect_t track, thumb;
     int span, tlen, toff, i;
@@ -582,6 +601,13 @@ tiku_ui_scrollbar(tiku_surface_t *s, tiku_rect_t r, float pos,
     }
     if (frac > 1.0f) { frac = 1.0f; }
     if (frac < 0.05f) { frac = 0.05f; }
+    if (rec) {
+        /* Twenty-five rectangles said where the thumb happened to be
+         * drawn; these two numbers say where the VIEW is, which is the
+         * fact a reader wanted and the far end can draw from. */
+        (void)tiku_dl_scrollbar(s->record, r, (int)(pos * 1000.0f),
+                                (int)(frac * 1000.0f), horiz);
+    }
     tlen = (int)((float)span * frac);
     toff = (int)((float)(span - tlen) * pos);
     thumb = horiz
@@ -605,6 +631,7 @@ tiku_ui_scrollbar(tiku_surface_t *s, tiku_rect_t r, float pos,
             tiku_hline(s, thumb.x + 4, y + 1, thumb.w - 8, WHITE());
         }
     }
+    tiku_gfx_rec_leave(s, rec);
 }
 
 void

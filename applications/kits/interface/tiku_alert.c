@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "tiku_alert.h"
+#include "tiku_dl.h"
 #include "tiku_event.h"
 #include "tiku_font.h"
 #include "tiku_ui.h"
@@ -187,10 +188,16 @@ draw_disc(tiku_surface_t *surface, int cx, int cy, int r, tiku_rgb_t color)
  * a ringed disc with its mark, drawn from primitives so every target
  * carries it.
  */
-static void
-draw_alert_icon(tiku_surface_t *surface, int cx, int cy,
-                tiku_alert_kind_t kind)
+void
+tiku_alert_icon_draw(tiku_surface_t *surface, int cx, int cy,
+                     tiku_alert_kind_t kind)
 {
+    int rec = tiku_gfx_rec_enter(surface);
+
+    if (rec) {
+        (void)tiku_dl_alert_icon(surface->record, cx, cy, (int)kind);
+    }
+
     tiku_rgb_t body = (kind == TIKU_ALERT_STOP)
                                ? TIKU_C_DANGER
                          : (kind == TIKU_ALERT_WARN)
@@ -219,6 +226,7 @@ draw_alert_icon(tiku_surface_t *surface, int cx, int cy,
         tiku_fill(surface, (tiku_rect_t){ cx - 2, cy - 9, 4, 4 }, ink);
         tiku_fill(surface, (tiku_rect_t){ cx - 2, cy - 2, 4, 11 }, ink);
     }
+    tiku_gfx_rec_leave(surface, rec);
 }
 
 void
@@ -248,7 +256,7 @@ tiku_alert_draw(tiku_alert_t *a, tiku_surface_t *s, tiku_rect_t frame)
                                     frame.h - 6 };
 
         tiku_fill(s, stripe, tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_1));
-        draw_alert_icon(s, stripe.x + 26, frame.y + 36, a->kind);
+        tiku_alert_icon_draw(s, stripe.x + 26, frame.y + 36, a->kind);
     }
     text_y = frame.y + 24;
     {

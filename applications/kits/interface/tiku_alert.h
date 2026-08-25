@@ -97,4 +97,14 @@ int tiku_alert_key(tiku_alert_t *a, unsigned key);
 void tiku_alert_draw(tiku_alert_t *a, tiku_surface_t *s,
                      tiku_rect_t frame);
 
+/**
+ * @brief Just the kind-icon, centred on @p cx,@p cy.
+ *
+ * Public because the display list carries the icon as WHICH icon rather
+ * than as the sixty-six spans its disc is drawn from, and the far end
+ * needs the same painter to put it back.
+ */
+void tiku_alert_icon_draw(tiku_surface_t *s, int cx, int cy,
+                          tiku_alert_kind_t kind);
+
 #endif /* TIKU_ALERT_H_ */
