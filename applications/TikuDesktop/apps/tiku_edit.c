@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "tiku_app.h"
+#include "tiku_textview.h"
 #include "tiku_client.h"
 #include "tiku_font.h"
 #include "tiku_dl.h"
@@ -25,17 +26,11 @@
 #define EDIT_H      400
 #define STRIP_H     20
 #define MARGIN      6
-#define LINES_MAX   4000
 #define LINE_MAX    1024
 
 #define CMD_SAVE   1
 #define CMD_REVERT 2
 #define CMD_QUIT   3
-
-typedef struct {
-    char *text;                 /* NUL-terminated, owned */
-    int   len;
-} line_t;
 
 typedef struct {
     const tiku_app_services_t *services;
@@ -49,11 +44,10 @@ typedef struct {
      */
     tiku_dl_t                      *dl;
     uint32_t                        id;
-    line_t                          line[LINES_MAX];
-    int                             nline;
-    int                             cy, cx;     /* caret line, column */
-    int                             top;        /* first line drawn   */
-    int                             modified;
+    /* The text, the caret and the scroll are the kit's now: one
+     * document object every application that edits text can hold, rather
+     * than each one growing its own line array and its own caret rules. */
+    tiku_textview_t                 tv;
     int                             saved_shown;
     char                            path[512];
     char                            note[128];
@@ -70,34 +64,6 @@ rows_visible(void)
     return (EDIT_H - STRIP_H - MARGIN) / (f->height + 2);
 }
 
-static void
-line_set(line_t *l, const char *text, int len)
-{
-    char *copy = malloc((size_t)len + 1u);
-
-    if (copy == NULL) {
-        return;
-    }
-    memcpy(copy, text, (size_t)len);
-    copy[len] = '\0';
-    free(l->text);
-    l->text = copy;
-    l->len = len;
-}
-
-static void
-lines_free(edit_state_t *st)
-{
-    int i;
-
-    for (i = 0; i < st->nline; i++) {
-        free(st->line[i].text);
-        st->line[i].text = NULL;
-        st->line[i].len = 0;
-    }
-    st->nline = 0;
-}
-
 /** @brief Read @p path into the buffer.  A missing file is an empty one. */
 static void
 load(edit_state_t *st)
@@ -105,30 +71,23 @@ load(edit_state_t *st)
     FILE *f = fopen(st->path, "r");
     char buf[LINE_MAX];
 
-    lines_free(st);
     if (f != NULL) {
-        while (st->nline < LINES_MAX &&
-               fgets(buf, sizeof buf, f) != NULL) {
-            int len = (int)strlen(buf);
+        /* Read whole, then handed over in one piece: the splitting into
+         * lines is the document's own business now. */
+        static char whole[TIKU_TEXTVIEW_LINES_MAX * 8];
+        size_t got = fread(whole, 1u, sizeof whole - 1u, f);
 
-            while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
-                len--;
-            }
-            line_set(&st->line[st->nline++], buf, len);
-        }
+        whole[got] = '\0';
         (void)fclose(f);
-        snprintf(st->note, sizeof st->note, "%d line%s", st->nline,
-                 st->nline == 1 ? "" : "s");
+        tiku_textview_set(&st->tv, whole);
+        snprintf(st->note, sizeof st->note, "%d line%s",
+                 tiku_textview_lines(&st->tv),
+                 tiku_textview_lines(&st->tv) == 1 ? "" : "s");
     } else {
+        tiku_textview_set(&st->tv, "");
         snprintf(st->note, sizeof st->note, "new file");
     }
-    if (st->nline == 0) {
-        line_set(&st->line[st->nline++], "", 0);
-    }
-    st->cy = 0;
-    st->cx = 0;
-    st->top = 0;
-    st->modified = 0;
+    (void)buf;
 }
 
 /** @brief @return nonzero when every line reached the disk. */
@@ -147,8 +106,8 @@ save(edit_state_t *st)
         snprintf(st->note, sizeof st->note, "cannot write %s", st->path);
         return 0;
     }
-    for (i = 0; i < st->nline; i++) {
-        (void)fprintf(f, "%s\n", st->line[i].text);
+    for (i = 0; i < tiku_textview_lines(&st->tv); i++) {
+        (void)fprintf(f, "%s\n", tiku_textview_line(&st->tv, i));
     }
     /* The close is what can still fail -- a full disk reports here and
      * nowhere earlier -- so the saved state waits for it. */
@@ -156,26 +115,11 @@ save(edit_state_t *st)
         snprintf(st->note, sizeof st->note, "could not finish writing");
         return 0;
     }
-    st->modified = 0;
-    snprintf(st->note, sizeof st->note, "saved %d line%s", st->nline,
-             st->nline == 1 ? "" : "s");
+    tiku_textview_saved(&st->tv);
+    snprintf(st->note, sizeof st->note, "saved %d line%s",
+             tiku_textview_lines(&st->tv),
+             tiku_textview_lines(&st->tv) == 1 ? "" : "s");
     return 1;
-}
-
-static void
-scroll_to_caret(edit_state_t *st)
-{
-    int rows = rows_visible();
-
-    if (st->cy < st->top) {
-        st->top = st->cy;
-    }
-    if (st->cy >= st->top + rows) {
-        st->top = st->cy - rows + 1;
-    }
-    if (st->top < 0) {
-        st->top = 0;
-    }
 }
 
 static void
@@ -198,24 +142,31 @@ paint(edit_state_t *st)
     int i;
 
     tiku_fill(st->surface, page, TIKU_C_DOC);
-    for (i = 0; i < rows && st->top + i < st->nline; i++) {
+    for (i = 0; i < rows &&
+             tiku_textview_top(&st->tv) + i < tiku_textview_lines(&st->tv);
+         i++) {
         int y = MARGIN + i * step;
 
         tiku_text(st->surface, f, MARGIN, y + f->ascent,
-                       st->line[st->top + i].text, TIKU_C_TEXT);
+                       tiku_textview_line(&st->tv,
+                                          tiku_textview_top(&st->tv) + i),
+                       TIKU_C_TEXT);
     }
     {
         /* The caret sits where the text before it ends, which is the only
          * way a proportional face can place it. */
-        int row = st->cy - st->top;
+        int cy, cx, row;
         char head[LINE_MAX];
-        int cut = st->cx;
+        int cut;
 
+        tiku_textview_caret(&st->tv, &cy, &cx);
+        row = cy - tiku_textview_top(&st->tv);
+        cut = cx;
         if (row >= 0 && row < rows) {
-            if (cut > st->line[st->cy].len) {
-                cut = st->line[st->cy].len;
+            if (cut > tiku_textview_line_len(&st->tv, cy)) {
+                cut = tiku_textview_line_len(&st->tv, cy);
             }
-            memcpy(head, st->line[st->cy].text, (size_t)cut);
+            memcpy(head, tiku_textview_line(&st->tv, cy), (size_t)cut);
             head[cut] = '\0';
             tiku_vline(st->surface,
                             MARGIN + tiku_text_width(f, head),
@@ -228,10 +179,15 @@ paint(edit_state_t *st)
     /* Marked in ASCII: the interface face carries no bullet, and a
      * modified file that says nothing about it is the worst of the
      * three states this line can be in. */
-    snprintf(where, sizeof where, "%s%s  %d:%d  %s",
-             st->modified ? "* " : "",
-             st->path[0] != '\0' ? st->path : "untitled",
-             st->cy + 1, st->cx + 1, st->note);
+    {
+        int cy, cx;
+
+        tiku_textview_caret(&st->tv, &cy, &cx);
+        snprintf(where, sizeof where, "%s%s  %d:%d  %s",
+                 tiku_textview_modified(&st->tv) ? "* " : "",
+                 st->path[0] != '\0' ? st->path : "untitled",
+                 cy + 1, cx + 1, st->note);
+    }
     tiku_text(st->surface, small, MARGIN,
                    strip.y + (STRIP_H - small->height) / 2 + small->ascent,
                    where, TIKU_C_TEXT);
@@ -266,11 +222,13 @@ publish(edit_state_t *st)
     menus.menu[0].item[0].sc = 's';
     /* Offered disabled with nothing to save, so the row keeps its place
      * and its shortcut stays discoverable. */
-    menus.menu[0].item[0].enabled = (unsigned char)st->modified;
+    menus.menu[0].item[0].enabled =
+        (unsigned char)tiku_textview_modified(&st->tv);
     snprintf(menus.menu[0].item[1].label,
              sizeof menus.menu[0].item[1].label, "Revert");
     menus.menu[0].item[1].command = CMD_REVERT;
-    menus.menu[0].item[1].enabled = (unsigned char)st->modified;
+    menus.menu[0].item[1].enabled =
+        (unsigned char)tiku_textview_modified(&st->tv);
     snprintf(menus.menu[0].item[2].label,
              sizeof menus.menu[0].item[2].label, "Quit");
     menus.menu[0].item[2].command = CMD_QUIT;
@@ -278,107 +236,19 @@ publish(edit_state_t *st)
     (void)st->services->menus(st->services->ctx, st->id, &menus);
 }
 
+/**
+ * @brief Note that an edit happened: the menu may have to change.
+ *
+ * The document owns the modified flag; what this owns is the moment it
+ * FLIPS, because that is when Save and Revert become reachable and the
+ * menus have to be published again.
+ */
 static void
-touched(edit_state_t *st)
+touched(edit_state_t *st, int was)
 {
-    int was = st->modified;
-
-    st->modified = 1;
     st->note[0] = '\0';
-    if (!was) {
+    if (!was && tiku_textview_modified(&st->tv)) {
         publish(st);            /* Save and Revert become reachable */
-    }
-}
-
-static void
-insert_char(edit_state_t *st, char c)
-{
-    line_t *l = &st->line[st->cy];
-    char buf[LINE_MAX];
-
-    if (l->len + 1 >= LINE_MAX) {
-        return;
-    }
-    memcpy(buf, l->text, (size_t)st->cx);
-    buf[st->cx] = c;
-    memcpy(buf + st->cx + 1, l->text + st->cx,
-           (size_t)(l->len - st->cx));
-    line_set(l, buf, l->len + 1);
-    st->cx++;
-    touched(st);
-}
-
-static void
-split_line(edit_state_t *st)
-{
-    line_t *l = &st->line[st->cy];
-    int tail = l->len - st->cx;
-    int i;
-
-    if (st->nline + 1 >= LINES_MAX) {
-        return;
-    }
-    for (i = st->nline; i > st->cy + 1; i--) {
-        st->line[i] = st->line[i - 1];
-    }
-    memset(&st->line[st->cy + 1], 0, sizeof st->line[0]);
-    line_set(&st->line[st->cy + 1], l->text + st->cx, tail);
-    line_set(l, l->text, st->cx);
-    st->nline++;
-    st->cy++;
-    st->cx = 0;
-    touched(st);
-}
-
-static void
-join_previous(edit_state_t *st)
-{
-    line_t *prev = &st->line[st->cy - 1];
-    line_t *cur = &st->line[st->cy];
-    char buf[LINE_MAX];
-    int at = prev->len;
-    int i;
-
-    if (at + cur->len >= LINE_MAX) {
-        return;
-    }
-    memcpy(buf, prev->text, (size_t)at);
-    memcpy(buf + at, cur->text, (size_t)cur->len);
-    line_set(prev, buf, at + cur->len);
-    free(cur->text);
-    for (i = st->cy; i < st->nline - 1; i++) {
-        st->line[i] = st->line[i + 1];
-    }
-    memset(&st->line[st->nline - 1], 0, sizeof st->line[0]);
-    st->nline--;
-    st->cy--;
-    st->cx = at;
-    touched(st);
-}
-
-static void
-backspace(edit_state_t *st)
-{
-    line_t *l = &st->line[st->cy];
-    char buf[LINE_MAX];
-
-    if (st->cx > 0) {
-        memcpy(buf, l->text, (size_t)(st->cx - 1));
-        memcpy(buf + st->cx - 1, l->text + st->cx,
-               (size_t)(l->len - st->cx));
-        line_set(l, buf, l->len - 1);
-        st->cx--;
-        touched(st);
-    } else if (st->cy > 0) {
-        join_previous(st);
-    }
-}
-
-static void
-clamp_column(edit_state_t *st)
-{
-    if (st->cx > st->line[st->cy].len) {
-        st->cx = st->line[st->cy].len;
     }
 }
 
@@ -393,6 +263,7 @@ edit_start(void **state, const tiku_app_services_t *services)
         return -1;
     }
     st->services = services;
+    tiku_textview_init(&st->tv);
     st->surface = tiku_surface_new(EDIT_W, EDIT_H, TIKU_C_DOC);
     /* Only worth keeping when something can use it; a NULL one simply
      * means every frame goes over as pixels, which is what happens
@@ -421,7 +292,7 @@ edit_stop(void *state)
     edit_state_t *st = state;
 
     if (st != NULL) {
-        lines_free(st);
+        tiku_textview_free(&st->tv);
         tiku_dl_free(st->dl);
         tiku_surface_free(st->surface);
         free(st);
@@ -433,10 +304,12 @@ edit_event(void *state, const tiku_event_t *event)
 {
     edit_state_t *st = state;
     int rows = rows_visible();
+    int was_modified;
 
     if (event->type != TIKU_EVENT_KEY_DOWN) {
         return 0;
     }
+    was_modified = tiku_textview_modified(&st->tv);
     if ((event->modifiers & TIKU_MOD_CMD) != 0u) {
         if (event->key == 's' || event->key == 'S') {
             (void)save(st);
@@ -449,62 +322,53 @@ edit_event(void *state, const tiku_event_t *event)
     case TIKU_KEY_ESCAPE:
         return 1;
     case TIKU_KEY_RETURN:
-        split_line(st);
+        tiku_textview_newline(&st->tv);
         break;
     case TIKU_KEY_BACKSPACE:
-        backspace(st);
+        tiku_textview_backspace(&st->tv);
+        break;
+    case TIKU_KEY_DELETE:
+        tiku_textview_delete(&st->tv);
         break;
     case TIKU_KEY_LEFT:
-        if (st->cx > 0) {
-            st->cx--;
-        } else if (st->cy > 0) {
-            st->cx = st->line[--st->cy].len;
-        }
+        tiku_textview_move(&st->tv, TIKU_TEXTVIEW_LEFT);
         break;
     case TIKU_KEY_RIGHT:
-        if (st->cx < st->line[st->cy].len) {
-            st->cx++;
-        } else if (st->cy + 1 < st->nline) {
-            st->cy++;
-            st->cx = 0;
-        }
+        tiku_textview_move(&st->tv, TIKU_TEXTVIEW_RIGHT);
         break;
     case TIKU_KEY_UP:
-        if (st->cy > 0) {
-            st->cy--;
-            clamp_column(st);
-        }
+        tiku_textview_move(&st->tv, TIKU_TEXTVIEW_UP);
         break;
     case TIKU_KEY_DOWN:
-        if (st->cy + 1 < st->nline) {
-            st->cy++;
-            clamp_column(st);
-        }
+        tiku_textview_move(&st->tv, TIKU_TEXTVIEW_DOWN);
         break;
     case TIKU_KEY_HOME:
-        st->cx = 0;
+        tiku_textview_move(&st->tv, TIKU_TEXTVIEW_HOME);
         break;
     case TIKU_KEY_END:
-        st->cx = st->line[st->cy].len;
+        tiku_textview_move(&st->tv, TIKU_TEXTVIEW_END);
         break;
     case TIKU_KEY_PAGE_UP:
-        st->cy = (st->cy > rows) ? st->cy - rows : 0;
-        clamp_column(st);
+    case TIKU_KEY_PAGE_DOWN: {
+        /* A page is a screenful of lines, and the caret keeps its column
+         * where the line it lands on is long enough to hold it. */
+        int cy, cx;
+
+        tiku_textview_caret(&st->tv, &cy, &cx);
+        cy += (event->key == TIKU_KEY_PAGE_UP) ? -rows : rows;
+        tiku_textview_place(&st->tv, cy, cx);
         break;
-    case TIKU_KEY_PAGE_DOWN:
-        st->cy = (st->cy + rows < st->nline) ? st->cy + rows
-                                             : st->nline - 1;
-        clamp_column(st);
-        break;
+    }
     default:
         if (event->key >= 32u && event->key < 127u) {
-            insert_char(st, (char)event->key);
+            tiku_textview_insert(&st->tv, (char)event->key);
         } else {
             return 0;           /* not ours: no repaint owed */
         }
         break;
     }
-    scroll_to_caret(st);
+    touched(st, was_modified);
+    (void)tiku_textview_reveal(&st->tv, rows);
     paint(st);
     return 0;
 }
