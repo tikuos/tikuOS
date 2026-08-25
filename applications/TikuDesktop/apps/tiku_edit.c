@@ -22,6 +22,8 @@
 #include "tiku_font.h"
 #include "tiku_dl.h"
 #include "tiku_gfx.h"
+#include "tiku_syntax.h"
+#include "tiku_ui.h"
 
 #define EDIT_W      560
 #define EDIT_H      400
@@ -32,6 +34,7 @@
 #define CMD_SAVE   1
 #define CMD_REVERT 2
 #define CMD_QUIT   3
+#define CMD_SYNTAX 4
 
 typedef struct {
     const tiku_app_services_t *services;
@@ -57,6 +60,14 @@ typedef struct {
     int                             saved_shown;
     char                            path[512];
     char                            note[128];
+    /*
+     * Which language the document is written in, or none.  Taken from
+     * the file's name when it is opened and offered on the menu after
+     * that, because the name is the only thing that can honestly say --
+     * and because an editor started with nothing (which is how the
+     * desktop starts this one) has no name to go on and the person does.
+     */
+    tiku_syntax_lang_t              lang;
 } edit_state_t;
 
 /* The file named on the command line, before any state exists. */
@@ -153,10 +164,24 @@ paint(edit_state_t *st)
          i++) {
         int y = MARGIN + i * step;
 
-        tiku_text(st->surface, f, MARGIN, y + f->ascent,
-                       tiku_textview_line(&st->tv,
-                                          tiku_textview_top(&st->tv) + i),
-                       TIKU_C_TEXT);
+        const char *text = tiku_textview_line(&st->tv,
+                               tiku_textview_top(&st->tv) + i);
+
+        if (st->lang != TIKU_SYNTAX_NONE) {
+            /* Classified as it is painted, per visible line: nothing is
+             * kept, so nothing can fall out of step with the text.  An
+             * edit changes what the next frame paints and there is no
+             * second copy to remember to update. */
+            tiku_span_t span[64];
+            int n = tiku_syntax_spans(st->lang, text, span,
+                                      (int)(sizeof span / sizeof span[0]));
+
+            (void)tiku_ui_text_spans(st->surface, f, MARGIN, y + f->ascent,
+                                     text, span, n);
+        } else {
+            tiku_text(st->surface, f, MARGIN, y + f->ascent, text,
+                           TIKU_C_TEXT);
+        }
     }
     {
         /* The caret sits where the text before it ends, which is the only
@@ -230,7 +255,7 @@ publish(edit_state_t *st)
     memset(&menus, 0, sizeof menus);
     menus.nmenu = 1;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "File");
-    menus.menu[0].nitem = 3;
+    menus.menu[0].nitem = 4;
     snprintf(menus.menu[0].item[0].label,
              sizeof menus.menu[0].item[0].label, "Save");
     menus.menu[0].item[0].command = CMD_SAVE;
@@ -248,6 +273,18 @@ publish(edit_state_t *st)
              sizeof menus.menu[0].item[2].label, "Quit");
     menus.menu[0].item[2].command = CMD_QUIT;
     menus.menu[0].item[2].enabled = 1;
+    /*
+     * A settled row, marked when it is on.  The published protocol does
+     * carry a mark and the bar draws it, so the row keeps ONE name and
+     * says whether it holds -- rather than renaming itself, which reads
+     * as two different commands to anyone scanning the menu twice.
+     */
+    snprintf(menus.menu[0].item[3].label,
+             sizeof menus.menu[0].item[3].label, "Colour as BASIC");
+    menus.menu[0].item[3].command = CMD_SYNTAX;
+    menus.menu[0].item[3].enabled = 1;
+    menus.menu[0].item[3].marked =
+        (unsigned char)(st->lang != TIKU_SYNTAX_NONE);
     (void)st->services->menus(st->services->ctx, st->id, &menus);
 }
 
@@ -289,6 +326,10 @@ edit_start(void **state, const tiku_app_services_t *services)
         return -1;
     }
     snprintf(st->path, sizeof st->path, "%s", edit_path);
+    /* The name decides, once, before anything is drawn; after that the
+     * menu does.  A file called .bas opens coloured, and everything else
+     * opens as what it is -- prose. */
+    st->lang = tiku_syntax_of_path(st->path);
     load(st);
     slash = strrchr(st->path, '/');
     snprintf(title, sizeof title, "%s",
@@ -441,6 +482,13 @@ edit_pick(void *state, uint32_t window, int command)
         break;
     case CMD_REVERT:
         load(st);
+        break;
+    case CMD_SYNTAX:
+        st->lang = (st->lang == TIKU_SYNTAX_NONE) ? TIKU_SYNTAX_BASIC
+                                                  : TIKU_SYNTAX_NONE;
+        snprintf(st->note, sizeof st->note, "%s",
+                 (st->lang == TIKU_SYNTAX_NONE) ? "plain text"
+                                                : "coloured as BASIC");
         break;
     default:
         return 0;

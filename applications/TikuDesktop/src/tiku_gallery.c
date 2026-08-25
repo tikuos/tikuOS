@@ -18,6 +18,7 @@
 #include "tiku_tabs.h"
 #include "tiku_slider.h"
 #include "tiku_alert.h"
+#include "tiku_syntax.h"
 
 #ifndef TIKU_NO_X11
 int tiku_x11_show(const tiku_surface_t *s, const char *title);
@@ -192,6 +193,31 @@ gallery(tiku_surface_t *s)
                             "Cancel|Discard");
         }
         tiku_alert_draw(&ask, s, af);
+    }
+
+    /* A line of a program, so the code inks can be held against the
+     * rest of the palette: the four meanings on the document ground,
+     * beside the ordinary ink they have to stay apart from. */
+    {
+        static const char *const CODE[] = {
+            "10 REM a line of each kind",
+            "20 PRINT \"reserved, number, quoted, remark\"",
+            "30 LET A = &HFF : GOTO done"
+        };
+        tiku_rect_t page = { c.x + 12, c.y + c.h - 96, 170, 86 };
+        int k;
+
+        tiku_ui_sunken(s, page, TIKU_C_DOC);
+        for (k = 0; k < 3; k++) {
+            tiku_span_t span[64];
+            int n = tiku_syntax_spans(TIKU_SYNTAX_BASIC, CODE[k], span,
+                                      (int)(sizeof span / sizeof span[0]));
+
+            (void)tiku_ui_text_spans(s, f, page.x + 4,
+                                     page.y + 4 + k * (f->height + 2) +
+                                         f->ascent,
+                                     CODE[k], span, n);
+        }
     }
 
     /* An inactive window, for the tab comparison. */

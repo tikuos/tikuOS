@@ -44,6 +44,18 @@ BeOS derives every shade from one panel colour by tinting:
 | menu background     | 216,216,216     |                             |
 | menu selection      | 51,102,152 (~)  |                             |
 | desktop backdrop    | 51,102,152 (~)  | the classic blue-grey       |
+| code: reserved word | 0,0,176         | not R5: see below           |
+| code: number        | 0,112,96        |                             |
+| code: quoted text   | 160,32,32       |                             |
+| code: remark        | 96,112,96       |                             |
+
+The four code inks are ours, not R5's -- R5 had no code window to
+colour.  They are named here for the same reason every role above is:
+so that nothing paints a meaning from a literal, and so the dark and
+hue-free tables have to answer for them too.  The fifth shade a code
+window uses, the receded ink of a line number, is deliberately NOT a
+role: it is `tiku_dim(text, doc)`, ordinary ink standing halfway back
+toward the page, which is the one derivation that survives every table.
 
 ## Bevel language
 
