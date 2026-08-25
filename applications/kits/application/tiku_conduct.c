@@ -160,6 +160,8 @@ tiku_conduct_listen(tiku_conduct_t *c, const char *path,
     memset(c, 0, sizeof *c);
     c->fd = -1;
     c->peer = -1;
+    c->grant = TIKU_CONDUCT_GRANT_FULL;
+    snprintf(c->principal, sizeof c->principal, "unnamed");
     c->ctx = ctx;
     c->inject = inject;
     c->pixel = pixel;
@@ -213,6 +215,8 @@ tiku_conduct_adopt(tiku_conduct_t *c, int fd, void *ctx,
     memset(c, 0, sizeof *c);
     c->fd = -1;                 /* nothing to listen on: the line is it */
     c->peer = fd;
+    c->grant = TIKU_CONDUCT_GRANT_FULL;
+    snprintf(c->principal, sizeof c->principal, "unnamed");
     c->ctx = ctx;
     c->inject = inject;
     c->pixel = pixel;
@@ -282,6 +286,25 @@ tiku_conduct_shutdown(tiku_conduct_t *c)
 }
 
 /** @brief Serve one complete message.  @return nonzero if it injected. */
+void
+tiku_conduct_require(tiku_conduct_t *c, const char *full_token,
+                          const char *query_token)
+{
+    if (c == NULL) {
+        return;
+    }
+    c->required = 1;
+    snprintf(c->token_full, sizeof c->token_full, "%s",
+             (full_token != NULL) ? full_token : "");
+    snprintf(c->token_query, sizeof c->token_query, "%s",
+             (query_token != NULL) ? query_token : "");
+    /* A peer already connected is stripped back to nothing: whatever it
+     * was before names were required, it has not named itself yet. */
+    c->grant = TIKU_CONDUCT_GRANT_NONE;
+    snprintf(c->principal, sizeof c->principal, "unnamed");
+    c->subs = 0;
+}
+
 /** @brief One stable signature of a fact's text, for "did it change". */
 static uint32_t
 conduct_sig(const char *text)
@@ -387,10 +410,41 @@ conduct_message(tiku_conduct_t *c)
             if (version != TIKU_CONDUCT_VERSION) {
                 (void)close(c->peer);
                 c->peer = -1;
+                break;
+            }
+        }
+        if (c->required) {
+            /* Identity before reach: the token after the version is the
+             * session's name, and an unnamed or wrongly named peer gets
+             * exactly what a version mismatch gets -- nothing. */
+            char token[TIKU_CONDUCT_TOKEN];
+
+            token[0] = '\0';
+            if (c->want >= 4u + TIKU_CONDUCT_TOKEN) {
+                memcpy(token, p + 4, TIKU_CONDUCT_TOKEN);
+                token[TIKU_CONDUCT_TOKEN - 1] = '\0';
+            }
+            if (c->token_full[0] != '\0' &&
+                strcmp(token, c->token_full) == 0) {
+                c->grant = TIKU_CONDUCT_GRANT_FULL;
+                snprintf(c->principal, sizeof c->principal, "driver");
+            } else if (c->token_query[0] != '\0' &&
+                       strcmp(token, c->token_query) == 0) {
+                c->grant = TIKU_CONDUCT_GRANT_QUERY;
+                snprintf(c->principal, sizeof c->principal, "reader");
+            } else {
+                (void)close(c->peer);
+                c->peer = -1;
+                c->subs = 0;
             }
         }
         break;
     case TIKU_CMSG_INJECT:
+        if (c->grant < TIKU_CONDUCT_GRANT_FULL) {
+            /* A reader's credential provably cannot inject: the event is
+             * dropped here, before the shell ever sees it. */
+            break;
+        }
         if (c->want >= sizeof(tiku_event_t) && c->inject != NULL) {
             tiku_event_t ev;
 
@@ -400,6 +454,9 @@ conduct_message(tiku_conduct_t *c)
         }
         break;
     case TIKU_CMSG_QUERY:
+        if (c->grant < TIKU_CONDUCT_GRANT_QUERY) {
+            break;              /* unnamed: not even an answer of no */
+        }
         if (c->want >= 12u + TIKU_CONDUCT_ARG) {
             uint32_t what;
             int32_t a, b;
@@ -459,6 +516,9 @@ tiku_conduct_poll(tiku_conduct_t *c)
             c->peer = fd;
             c->hgot = c->got = c->want = 0u;
             c->subs = 0;
+            c->grant = c->required ? TIKU_CONDUCT_GRANT_NONE
+                                   : TIKU_CONDUCT_GRANT_FULL;
+            snprintf(c->principal, sizeof c->principal, "unnamed");
         }
     }
     while (c->peer >= 0) {
@@ -490,8 +550,8 @@ tiku_conduct_poll(tiku_conduct_t *c)
 /*---------------------------------------------------------------------------*/
 
 int
-tiku_conduct_connect(tiku_conduct_client_t *c, const char *path,
-                          int wait_ms)
+tiku_conduct_connect_as(tiku_conduct_client_t *c, const char *path,
+                             int wait_ms, const char *token)
 {
     struct sockaddr_un addr;
     int waited = 0;
@@ -509,16 +569,9 @@ tiku_conduct_connect(tiku_conduct_client_t *c, const char *path,
 
         if (fd >= 0) {
             if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0) {
-                uint32_t version = TIKU_CONDUCT_VERSION;
-
-                /* Non-blocking here too, so the bounded wait for an
-                 * answer can actually time out: a blocking read would
-                 * sit in the kernel and never let the clock run. */
-                (void)set_nonblock(fd);
-                c->fd = fd;
-                send_msg(fd, TIKU_CMSG_HELLO, &version,
-                         sizeof version);
-                return 0;
+                /* connect_fd_as sets non-blocking too, so the bounded
+                 * wait for an answer can actually time out. */
+                return tiku_conduct_connect_fd_as(c, fd, token);
             }
             (void)close(fd);
         }
@@ -539,8 +592,10 @@ tiku_conduct_connect(tiku_conduct_client_t *c, const char *path,
 }
 
 int
-tiku_conduct_connect_fd(tiku_conduct_client_t *c, int fd)
+tiku_conduct_connect_fd_as(tiku_conduct_client_t *c, int fd,
+                                const char *token)
 {
+    unsigned char hello[4 + TIKU_CONDUCT_TOKEN];
     uint32_t version = TIKU_CONDUCT_VERSION;
 
     if (c == NULL || fd < 0) {
@@ -550,8 +605,19 @@ tiku_conduct_connect_fd(tiku_conduct_client_t *c, int fd)
     (void)signal(SIGPIPE, SIG_IGN);
     (void)set_nonblock(fd);
     c->fd = fd;
-    send_msg(fd, TIKU_CMSG_HELLO, &version, sizeof version);
+    memcpy(hello, &version, 4);
+    memset(hello + 4, 0, TIKU_CONDUCT_TOKEN);
+    if (token != NULL) {
+        snprintf((char *)hello + 4, TIKU_CONDUCT_TOKEN, "%s", token);
+    }
+    send_msg(fd, TIKU_CMSG_HELLO, hello, sizeof hello);
     return 0;
+}
+
+int
+tiku_conduct_connect_fd(tiku_conduct_client_t *c, int fd)
+{
+    return tiku_conduct_connect_fd_as(c, fd, NULL);
 }
 
 void
@@ -700,4 +766,11 @@ tiku_conduct_told(tiku_conduct_client_t *c, char *name,
     }
     free(buf);
     return 0;                   /* the notice never came */
+}
+
+int
+tiku_conduct_connect(tiku_conduct_client_t *c, const char *path,
+                          int wait_ms)
+{
+    return tiku_conduct_connect_as(c, path, wait_ms, NULL);
 }

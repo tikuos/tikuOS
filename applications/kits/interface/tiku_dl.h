@@ -343,6 +343,21 @@ size_t tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max);
 size_t tiku_dl_say(const tiku_dl_t *dl, char *out, size_t max);
 
 /**
+ * @brief The same list as one machine line per CONTROL: kind, label,
+ *        rect and state, tab-separated -- the walkable form of the feed.
+ *
+ * Narration is for a person; this is for the party that wants to act on
+ * what it heard: a driver that clicks the button labelled Cancel needs
+ * the rect, not the prose.  Paint is skipped, text is a fact too (its
+ * rect is the pen position, width and height 0 -- the wire does not
+ * carry its metrics), and the closing confession line matches
+ * tiku_dl_say()'s.
+ *
+ * Line shape: <kind>\t"<label>"\t<x> <y> <w> <h>\t<state>\n
+ */
+size_t tiku_dl_facts(const tiku_dl_t *dl, char *out, size_t max);
+
+/**
  * @brief Read a list out of @p buf.
  *
  * Every length is checked against what is left of the buffer before it is

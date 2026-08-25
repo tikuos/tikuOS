@@ -198,6 +198,16 @@ void tiku_workspace_draw(tiku_workspace_t *workspace);
 size_t tiku_workspace_narrate(tiku_workspace_t *workspace,
                                    tiku_window_t *window,
                                    char *out, size_t max);
+
+/**
+ * @brief The same window as tiku_dl_facts() machine lines: kind, label,
+ *        rect, state -- for the party that wants to ACT on what it
+ *        heard rather than read it.  Same recording discipline as
+ *        narrate: the shown surface is never touched.
+ */
+size_t tiku_workspace_controls(tiku_workspace_t *workspace,
+                                    tiku_window_t *window,
+                                    char *out, size_t max);
 void tiku_workspace_set_backdrop(tiku_workspace_t *workspace,
     void (*draw)(tiku_surface_t *surface, void *context), void *context);
 int tiku_workspace_zoom(tiku_workspace_t *workspace,

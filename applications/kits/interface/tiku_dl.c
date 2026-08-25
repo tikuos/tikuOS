@@ -1312,3 +1312,68 @@ tiku_dl_say(const tiku_dl_t *dl, char *out, size_t max)
     }
     return used;
 }
+
+/** @brief The fact kinds by the nouns the narrator already speaks. */
+static const char *
+fact_noun(int kind)
+{
+    switch (kind) {
+    case TIKU_DL_FACT_TEXT:       return "text";
+    case TIKU_DL_FACT_BUTTON:     return "button";
+    case TIKU_DL_FACT_CHECKBOX:   return "checkbox";
+    case TIKU_DL_FACT_RADIO:      return "radio";
+    case TIKU_DL_FACT_LIST_ROW:   return "row";
+    case TIKU_DL_FACT_GAUGE:      return "gauge";
+    case TIKU_DL_FACT_TIP:        return "tip";
+    case TIKU_DL_FACT_TEXTFIELD:  return "field";
+    case TIKU_DL_FACT_SCROLLBAR:  return "scrollbar";
+    case TIKU_DL_FACT_SLIDER:     return "slider";
+    case TIKU_DL_FACT_ALERT_ICON: return "alert-icon";
+    case TIKU_DL_FACT_TABS:       return "tabs";
+    case TIKU_DL_FACT_MENUFIELD:  return "menufield";
+    case TIKU_DL_FACT_ICON:       return "icon";
+    default:                      return NULL;
+    }
+}
+
+size_t
+tiku_dl_facts(const tiku_dl_t *dl, char *out, size_t max)
+{
+    unsigned char *flat;
+    size_t n, used = 0u;
+
+    if (out == NULL || max == 0u) {
+        return 0u;
+    }
+    out[0] = '\0';
+    if (dl == NULL) {
+        return 0u;
+    }
+    n = tiku_dl_flat_size(dl);
+    flat = (n > 0u) ? malloc(n) : NULL;
+    if (flat != NULL) {
+        size_t at = 0u;
+        tiku_dl_fact_t f;
+
+        if (tiku_dl_flatten(dl, flat, n, NULL)) {
+            while (tiku_dl_read(flat, n, &at, &f)) {
+                const char *noun = fact_noun((int)f.kind);
+
+                if (noun == NULL) {
+                    continue;       /* paint: no meaning beyond itself */
+                }
+                say(out, max, &used, "%s\t\"%s\"\t%d %d %d %d\t%u\n",
+                    noun, (f.text != NULL) ? f.text : "",
+                    f.rect.x, f.rect.y, f.rect.w, f.rect.h, f.state);
+            }
+        }
+    }
+    free(flat);
+    if (tiku_dl_misses(dl) > 0 && used + 1u < max) {
+        used += (size_t)snprintf(out + used, max - used,
+                                 "(%d marks this window drew, the wire "
+                                 "could not carry)\n",
+                                 tiku_dl_misses(dl));
+    }
+    return used;
+}

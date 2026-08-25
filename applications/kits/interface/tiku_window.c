@@ -561,26 +561,25 @@ tiku_workspace_draw(tiku_workspace_t *workspace)
     }
 }
 
-size_t
-tiku_workspace_narrate(tiku_workspace_t *workspace,
-                            tiku_window_t *window, char *out, size_t max)
+/**
+ * @brief Draw @p window's content once onto a recording surface of the
+ *        workspace's size -- never the shown one -- and hand back the
+ *        list.  The shared first half of narrating and reciting facts.
+ */
+static tiku_dl_t *
+workspace_record(tiku_workspace_t *workspace, tiku_window_t *window)
 {
     tiku_surface_t *scratch;
     tiku_dl_t *dl;
     tiku_rect_t content;
-    size_t used;
 
-    if (out == NULL || max == 0u) {
-        return 0u;
-    }
-    out[0] = '\0';
     if (workspace == NULL || workspace->surface == NULL ||
         window == NULL || !window->open || window->draw == NULL) {
-        return 0u;
+        return NULL;
     }
     content = tiku_window_content(window);
     if (content.w <= 0 || content.h <= 0) {
-        return 0u;
+        return NULL;
     }
     /* The workspace's size but never its surface: an answer that painted
      * the shown pixels would be an observation that changes what it
@@ -588,21 +587,59 @@ tiku_workspace_narrate(tiku_workspace_t *workspace,
     scratch = tiku_surface_new(workspace->surface->w,
                                     workspace->surface->h, TIKU_C_PANEL);
     if (scratch == NULL) {
-        return 0u;
+        return NULL;
     }
     dl = tiku_dl_new();
     if (dl == NULL) {
         tiku_surface_free(scratch);
-        return 0u;
+        return NULL;
     }
     scratch->record = dl;
     tiku_clip_set(scratch, content);
     window->draw(window, scratch, content, window->context);
     tiku_clip_reset(scratch);
     scratch->record = NULL;
+    tiku_surface_free(scratch);
+    return dl;
+}
+
+size_t
+tiku_workspace_narrate(tiku_workspace_t *workspace,
+                            tiku_window_t *window, char *out, size_t max)
+{
+    tiku_dl_t *dl;
+    size_t used;
+
+    if (out == NULL || max == 0u) {
+        return 0u;
+    }
+    out[0] = '\0';
+    dl = workspace_record(workspace, window);
+    if (dl == NULL) {
+        return 0u;
+    }
     used = tiku_dl_say(dl, out, max);
     tiku_dl_free(dl);
-    tiku_surface_free(scratch);
+    return used;
+}
+
+size_t
+tiku_workspace_controls(tiku_workspace_t *workspace,
+                             tiku_window_t *window, char *out, size_t max)
+{
+    tiku_dl_t *dl;
+    size_t used;
+
+    if (out == NULL || max == 0u) {
+        return 0u;
+    }
+    out[0] = '\0';
+    dl = workspace_record(workspace, window);
+    if (dl == NULL) {
+        return 0u;
+    }
+    used = tiku_dl_facts(dl, out, max);
+    tiku_dl_free(dl);
     return used;
 }
 

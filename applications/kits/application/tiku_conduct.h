@@ -74,6 +74,16 @@
 #define TIKU_CONDUCT_SUBS     4
 #define TIKU_CONDUCT_TELL_MS  100
 
+/* Identity before reach.  A HELLO may carry a token after its version;
+ * when the shell was told to require one (tiku_conduct_require), the
+ * token is the peer's name and decides its GRANT -- what this session
+ * may do -- before anything else is served.  QUERY-only is a different
+ * grant from driving: a reader's credential provably cannot inject. */
+#define TIKU_CONDUCT_TOKEN       64
+#define TIKU_CONDUCT_GRANT_NONE   0   /* nothing until a named HELLO   */
+#define TIKU_CONDUCT_GRANT_QUERY  1   /* ask and watch, never inject   */
+#define TIKU_CONDUCT_GRANT_FULL   2   /* the driver's full surface     */
+
 /**
  * @brief What the shell answers a named text query with.
  *
@@ -116,6 +126,14 @@ typedef struct {
     uint32_t                    sub_sig[TIKU_CONDUCT_SUBS];
     int                         subs;
     int64_t                     told_at_us;
+    /* Who the peer is and what it may do.  Unconfigured, any peer that
+     * speaks the version drives fully -- the harness's own local lane.
+     * Configured, a session is NOTHING until its HELLO names it. */
+    int                         required;
+    char                        token_full[TIKU_CONDUCT_TOKEN];
+    char                        token_query[TIKU_CONDUCT_TOKEN];
+    int                         grant;
+    char                        principal[TIKU_CONDUCT_TOKEN];
 } tiku_conduct_t;
 
 /**
@@ -157,6 +175,18 @@ int tiku_conduct_open_tty(const char *path, int baud);
 void tiku_conduct_shutdown(tiku_conduct_t *c);
 
 /**
+ * @brief Require a named HELLO: @p full_token drives, @p query_token
+ *        asks and watches but provably cannot inject; either may be
+ *        NULL to offer no such grant.
+ *
+ * Once required, an unnamed or wrongly named peer is closed at HELLO --
+ * it gets exactly what a version mismatch gets, nothing -- and a peer
+ * already connected is stripped back to nothing until it names itself.
+ */
+void tiku_conduct_require(tiku_conduct_t *c, const char *full_token,
+                               const char *query_token);
+
+/**
  * @brief Accept and serve whatever is ready, without blocking.
  *
  * Injected events reach the shell through the inject callback during this
@@ -182,6 +212,14 @@ int tiku_conduct_connect(tiku_conduct_client_t *c,
 
 /** @brief Drive over an fd already in hand -- the same cable, other end. */
 int tiku_conduct_connect_fd(tiku_conduct_client_t *c, int fd);
+
+/** @brief Connect AS someone: the HELLO carries @p token as the name
+ *         this session offers.  NULL is the unnamed connect above. */
+int tiku_conduct_connect_as(tiku_conduct_client_t *c,
+                                 const char *path, int wait_ms,
+                                 const char *token);
+int tiku_conduct_connect_fd_as(tiku_conduct_client_t *c, int fd,
+                                    const char *token);
 
 void tiku_conduct_disconnect(tiku_conduct_client_t *c);
 
