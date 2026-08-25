@@ -483,24 +483,10 @@ tiku_ui_textfield_scroll(tiku_surface_t *s, tiku_rect_t r,
 static void
 arrow_button(tiku_surface_t *s, tiku_rect_t r, int dir, int can)
 {
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2, i;
-    /* An arrow that cannot scroll any further says so by dimming: the
-     * glyph fades toward the panel while the button itself stays. */
-    tiku_rgb_t ink = can ? DARK()
-                              : tiku_tint(DARK(), TIKU_LIGHTEN_2);
-
     tiku_fill(s, r, PANEL);
     tiku_bevel(s, r, WHITE(), SHADOW());
     tiku_frame(s, r, FRAME());
-    for (i = 0; i < 4; i++) {
-        int len = 2 * i + 1;
-        switch (dir) {
-        case 0: tiku_hline(s, cx - i, cy - 2 + i, len, ink); break;
-        case 1: tiku_hline(s, cx - i, cy + 2 - i, len, ink); break;
-        case 2: tiku_vline(s, cx - 2 + i, cy - i, len, ink); break;
-        default: tiku_vline(s, cx + 2 - i, cy - i, len, ink); break;
-        }
-    }
+    tiku_ui_arrow(s, r, dir, can);
 }
 
 tiku_rect_t
@@ -537,6 +523,30 @@ tiku_ui_tip(tiku_surface_t *s, tiku_rect_t r, const char *text)
     tiku_frame(s, r, TIKU_C_TEXT);
     tiku_text(s, f, r.x + 6, r.y + 3 + f->ascent, text, TIKU_C_TEXT);
     tiku_gfx_rec_leave(s, rec);
+}
+
+void
+tiku_ui_arrow(tiku_surface_t *s, tiku_rect_t r, int dir, int enabled)
+{
+    int cx = r.x + r.w / 2, cy = r.y + r.h / 2, i;
+    /* An arrow that cannot go any further says so by dimming: the glyph
+     * fades toward the panel while the button it sits on stays. */
+    tiku_rgb_t ink = enabled ? DARK()
+                             : tiku_tint(DARK(), TIKU_LIGHTEN_2);
+
+    if (s == NULL) {
+        return;
+    }
+    for (i = 0; i < 4; i++) {
+        int len = 2 * i + 1;
+
+        switch (dir) {
+        case 0: tiku_hline(s, cx - i, cy - 2 + i, len, ink); break;
+        case 1: tiku_hline(s, cx - i, cy + 2 - i, len, ink); break;
+        case 2: tiku_vline(s, cx - 2 + i, cy - i, len, ink); break;
+        default: tiku_vline(s, cx + 2 - i, cy - i, len, ink); break;
+        }
+    }
 }
 
 void

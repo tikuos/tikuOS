@@ -156,6 +156,20 @@ void tiku_ui_textfield_scroll(tiku_surface_t *s,
  * No state: a gauge shows a number somebody else owns.  Whether that is
  * bytes copied, memory in use or steps taken is the caller's business.
  */
+/**
+ * @brief The little triangle a stepper or a scrollbar end wears.
+ *
+ * @p dir is 0 up, 1 down, 2 left, 3 right; @p enabled false fades the
+ * glyph toward the panel.  That fade is the rule the scrollbar has
+ * always kept and the one thing an arrow owes the person pressing it: an
+ * arrow that cannot go any further has to SAY so, or it is a control
+ * that looks live and does nothing.
+ *
+ * The glyph only -- whatever chrome it sits on is the caller's, because
+ * a scrollbar end is a bevelled button and a stepper's is a raised one.
+ */
+void tiku_ui_arrow(tiku_surface_t *s, tiku_rect_t r, int dir, int enabled);
+
 void tiku_ui_gauge(tiku_surface_t *s, tiku_rect_t r, float fraction);
 
 /**

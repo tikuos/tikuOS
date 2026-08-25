@@ -212,6 +212,14 @@ tiku_stepper_draw(const tiku_slider_t *sl, tiku_surface_t *s, tiku_rect_t r)
     tiku_text(s, f, field.x + field.w - 6 - tiku_text_width(f, digits),
               field.y + (field.h - f->height) / 2 + f->ascent, digits,
               TIKU_C_TEXT);
+    /*
+     * The arrows, and each one dimmed when the value cannot move that
+     * way.  Drawn as raised boxes with nothing in them at first, which
+     * is a stepper whose arrows are not arrows: it looked pressable at
+     * both ends of its range and did nothing at either.
+     */
     tiku_ui_raised(s, up);
+    tiku_ui_arrow(s, up, 0, sl->value < sl->max);
     tiku_ui_raised(s, down);
+    tiku_ui_arrow(s, down, 1, sl->value > sl->min);
 }
