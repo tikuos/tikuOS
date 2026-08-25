@@ -221,6 +221,19 @@ Replace the hardcoded `known[]` table in `offer_companions` with a scan:
   for this refactor.
 - In-process apps returning done from `event`/`pick` → `embed_stop(slot)`.
 
+**Done 2026-08-25, later the same day:** both gaps below are closed and
+the About IS a descriptor now (`tiku_trk_about_app`, id
+`org.tikuos.about`, hosted through `embed_open_or_raise`).  The contract
+grew `place()` -- a window ROLE, not a coordinate, because an
+application does not know the screen -- and `resize()` for the About's
+refit when the face changes; both appended in the `present()` manner.
+Cmd-W became the runtime's key, decided before any application sees it.
+about.script pins real closure with a pixel (the title noun reads only
+the FOCUSED window, so alone it cannot tell closed from buried), and
+embedapp.script opens the About over the running demo, where slot one's
+cascade and the ANNOUNCE centring differ -- the one place an honoured
+role is distinguishable from a lucky default.
+
 **Measured 2026-08-25, against the tree as it stands.** The slot array
 above EXISTS (`embeds[TIKU_TRK_EMBED_MAX]`, per-slot services, ticks
 pumped for every running slot, pointer and key events routed to the

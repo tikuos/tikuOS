@@ -56,7 +56,35 @@ typedef struct tiku_app_services {
     int (*menus)(void *ctx, uint32_t id, const tiku_menuset_t *set);
     /** @brief Give the window back. */
     void (*close)(void *ctx, uint32_t id);
+    /**
+     * @brief Ask for a window ROLE, not a position.
+     *
+     * An application does not know the screen, so it cannot centre
+     * itself; what it knows is what KIND of window it opened, and the
+     * host owns where such a window goes.  ANNOUNCE is the R5 panel
+     * rule: centred, in the upper part of the screen, fixed size.
+     *
+     * Appended, like present(): a host built against the older header
+     * leaves it NULL, and an application must treat NULL as "the host
+     * decides everything" -- which was always true.
+     */
+    int (*place)(void *ctx, uint32_t id, int role);
+    /**
+     * @brief The window's content is now @p w by @p h.
+     *
+     * For a window whose size follows something that can change under
+     * it -- the About box refits when the user picks another face.  The
+     * host keeps the corner where it is: a window that re-placed itself
+     * would jump under the pointer.  Appended; NULL means the window
+     * keeps the size it opened at.
+     */
+    int (*resize)(void *ctx, uint32_t id, int w, int h);
 } tiku_app_services_t;
+
+/** @brief Window roles for place(). */
+enum {
+    TIKU_APP_PLACE_ANNOUNCE = 1   /* centred, upper third, fixed size */
+};
 
 typedef struct {
     const char *id;                 /* stable machine-readable identity */
