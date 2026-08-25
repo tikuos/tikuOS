@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "tiku_ui.h"
+#include "tiku_tabs.h"
 
 #ifndef TIKU_NO_X11
 int tiku_x11_show(const tiku_surface_t *s, const char *title);
@@ -129,6 +130,23 @@ gallery(tiku_surface_t *s)
         tiku_ui_scrollbar(s, (tiku_rect_t){ lv.x, lv.y + lv.h - 15,
                                                       lv.w - 15, 15 },
                                0.0f, 0.7f, 1);
+    }
+
+    /* A tab strip: the current tab lit and open to the panel below it. */
+    {
+        static tiku_tabs_t tabs;
+        tiku_rect_t strip = { c.x, y + 140, 350, 22 };
+        tiku_rect_t below = { strip.x, strip.y + strip.h, strip.w, 30 };
+
+        if (tiku_tabs_count(&tabs) == 0) {
+            tiku_tabs_init(&tabs);
+            (void)tiku_tabs_add(&tabs, "Information");
+            (void)tiku_tabs_add(&tabs, "Permissions");
+            (void)tiku_tabs_add(&tabs, "Attributes");
+            (void)tiku_tabs_select(&tabs, 1);
+        }
+        tiku_tabs_draw(&tabs, s, strip);
+        tiku_ui_sunken(s, below, TIKU_C_PANEL);
     }
 
     /* A dropped menu, to show the panel and its highlight. */
