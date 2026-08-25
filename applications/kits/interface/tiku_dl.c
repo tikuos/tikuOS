@@ -1218,12 +1218,14 @@ tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max)
                 (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
             break;
         case TIKU_DL_FACT_CHECKBOX:
-            say(out, max, &used, "checkbox \"%s\", %s\n", f.text,
-                (f.state & TIKU_S_ON) ? "on" : "off");
+            say(out, max, &used, "checkbox \"%s\", %s%s\n", f.text,
+                (f.state & TIKU_S_ON) ? "on" : "off",
+                (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
             break;
         case TIKU_DL_FACT_RADIO:
-            say(out, max, &used, "radio \"%s\", %s\n", f.text,
-                (f.state & TIKU_S_ON) ? "chosen" : "not chosen");
+            say(out, max, &used, "radio \"%s\", %s%s\n", f.text,
+                (f.state & TIKU_S_ON) ? "chosen" : "not chosen",
+                (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
             break;
         case TIKU_DL_FACT_LIST_ROW:
             say(out, max, &used, "row \"%s\"%s\n", f.text,
@@ -1236,8 +1238,9 @@ tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max)
             say(out, max, &used, "tip \"%s\"\n", f.text);
             break;
         case TIKU_DL_FACT_TEXTFIELD:
-            say(out, max, &used, "text field \"%s\"%s\n", f.text,
-                (f.state & TIKU_S_FOCUS) ? ", focused" : "");
+            say(out, max, &used, "text field \"%s\"%s%s\n", f.text,
+                (f.state & TIKU_S_FOCUS) ? ", focused" : "",
+                (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
             break;
         case TIKU_DL_FACT_SCROLLBAR:
             say(out, max, &used,
@@ -1269,7 +1272,8 @@ tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max)
             break;
         }
         case TIKU_DL_FACT_MENUFIELD:
-            say(out, max, &used, "menu field showing \"%s\"\n", f.text);
+            say(out, max, &used, "menu field showing \"%s\"%s\n", f.text,
+                (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
             break;
         case TIKU_DL_FACT_ICON:
             say(out, max, &used, "an icon\n");

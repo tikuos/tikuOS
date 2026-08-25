@@ -279,9 +279,23 @@ tiku_tint(tiku_rgb_t c, float tint)
     return TIKU_RGB(out[0], out[1], out[2]);
 }
 
+tiku_rgb_t
+tiku_dim(tiku_rgb_t ink, tiku_rgb_t ground)
+{
+    return TIKU_RGB(
+        (((ink >> 16) & 0xFFu) + ((ground >> 16) & 0xFFu)) / 2u,
+        (((ink >> 8) & 0xFFu) + ((ground >> 8) & 0xFFu)) / 2u,
+        ((ink & 0xFFu) + (ground & 0xFFu)) / 2u);
+}
+
 void
 tiku_pixel(tiku_surface_t *s, int x, int y, tiku_rgb_t c)
 {
+    /* Before the clip test, so a pixel clipped away still marks the list
+     * not-whole: the only primitive that forgot the one call a painter
+     * of pictures owes, and a marked menu row or a title tab's boxes
+     * crossed the wire looking finished with their marks missing. */
+    tiku_gfx_rec_miss(s);
     int sc, ry, rx;
     long stride;
 

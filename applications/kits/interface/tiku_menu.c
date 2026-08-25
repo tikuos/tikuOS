@@ -316,7 +316,11 @@ tiku_menu_item_at(const tiku_menu_t *m, tiku_rect_t frame,
         return -1;
     }
     for (i = 0; i < m->count; i++) {
-        int top = frame.y + tiku_menu_item_top(m, i);
+        /* The same +1 the draw uses to clear the frame's top bevel:
+         * without it every hit band sat one row above its painted band,
+         * so the last painted row of every item chose NOTHING and the
+         * bevel itself chose item zero. */
+        int top = frame.y + 1 + tiku_menu_item_top(m, i);
         int h = tiku_menu_item_height(m, i);
 
         if (y >= top && y < top + h) {
@@ -452,12 +456,12 @@ tiku_menu_draw(tiku_menu_t *m, tiku_surface_t *s,
             tiku_fill(s, r, TIKU_C_SELECT);
             ink = TIKU_C_SELTEXT;
         } else {
+            /* Disabled ink is the text pulled toward its own ground:
+             * tinting toward white receded on a light panel and ADVANCED
+             * on a dark one, so under the dusk table a greyed command
+             * was brighter than a pickable one. */
             ink = it->enabled ? TIKU_C_TEXT
-                              : tiku_tint(base, TIKU_DARKEN_MAX);
-            if (!it->enabled) {
-                /* Disabled text is the panel darkened, not grey-on-grey. */
-                ink = tiku_tint(TIKU_C_TEXT, 0.55f);
-            }
+                              : tiku_dim(TIKU_C_TEXT, base);
         }
         base_y = r.y + PAD_TOP + f->ascent;
         if (it->marked) {
@@ -472,7 +476,7 @@ tiku_menu_draw(tiku_menu_t *m, tiku_surface_t *s,
                               !it->enabled)) {
                 tiku_fill(s, (tiku_rect_t){r.x + PAD_LEFT,
                     r.y + 2, 14, 14}, it->enabled ? TIKU_C_SELECT :
-                    tiku_tint(TIKU_C_TEXT, 0.55f));
+                    tiku_dim(TIKU_C_TEXT, base));
             }
         }
         tiku_text(s, f, r.x + PAD_LEFT + (it->icon[0] != '\0' ? 18 : 0),

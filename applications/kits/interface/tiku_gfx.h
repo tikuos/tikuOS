@@ -186,6 +186,19 @@ void tiku_clip_reset(tiku_surface_t *s);
 tiku_rgb_t tiku_tint(tiku_rgb_t c, float tint);
 
 /**
+ * @brief Disabled ink: @p ink pulled halfway toward the @p ground under it.
+ *
+ * The one derivation that survives every theme.  tiku_tint() moves a
+ * colour toward white or toward black, and either direction INVERTS on
+ * one of the tables -- text tinted toward white recedes on a light panel
+ * and advances on a dark one, and a darkened panel disappears into the
+ * dusk table's own darkness.  The midpoint of ink and ground is half the
+ * enabled contrast wherever both came from the same theme, which is what
+ * "greyed out" has meant all along.
+ */
+tiku_rgb_t tiku_dim(tiku_rgb_t ink, tiku_rgb_t ground);
+
+/**
  * @brief Move a block of pixels within the surface (CopyBits).
  *
  * What a list does when a row is inserted or removed: the rows below it are

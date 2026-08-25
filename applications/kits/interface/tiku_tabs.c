@@ -126,10 +126,7 @@ static void draw_strip(const tiku_tabs_t *t, tiku_surface_t *s,
 void
 tiku_tabs_draw(const tiku_tabs_t *t, tiku_surface_t *s, tiku_rect_t strip)
 {
-    const tiku_font_t *font = tiku_font_plain();
     int n = (t != NULL) ? t->count : 0;
-    int seam = strip.y + strip.h - 1;
-    int i;
 
     if (s == NULL || n <= 0) {
         return;
