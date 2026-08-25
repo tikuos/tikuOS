@@ -16,6 +16,7 @@
 
 #include "tiku_ui.h"
 #include "tiku_tabs.h"
+#include "tiku_slider.h"
 
 #ifndef TIKU_NO_X11
 int tiku_x11_show(const tiku_surface_t *s, const char *title);
@@ -147,6 +148,30 @@ gallery(tiku_surface_t *s)
         }
         tiku_tabs_draw(&tabs, s, strip);
         tiku_ui_sunken(s, below, TIKU_C_PANEL);
+    }
+
+    /* A gauge, a slider, a stepper and a tip: the quantities. */
+    {
+        static tiku_slider_t vol, num;
+        tiku_rect_t g = { c.x + 380, y + 150, 150, 10 };
+        tiku_rect_t sr = { c.x + 380, y + 168, 150, 16 };
+        tiku_rect_t st = { c.x + 380, y + 192, 70, 20 };
+
+        if (vol.max == 0) {
+            tiku_slider_init(&vol, 0, 100, 65, 5);
+            tiku_slider_init(&num, 1, 99, 12, 1);
+        }
+        tiku_ui_gauge(s, g, 0.4f);
+        tiku_slider_draw(&vol, s, sr);
+        tiku_stepper_draw(&num, s, st);
+        {
+            const char *tip = "the whole of what would not fit";
+            tiku_rect_t tr = tiku_ui_tip_size(tip);
+
+            tr.x = c.x + 380;
+            tr.y = y + 218;
+            tiku_ui_tip(s, tr, tip);
+        }
     }
 
     /* A dropped menu, to show the panel and its highlight. */

@@ -145,6 +145,38 @@ void tiku_ui_textfield_scroll(tiku_surface_t *s,
  * @param frac   Thumb length, 0..1 of the track.
  * @param horiz  Non-zero for a horizontal bar.
  */
+/**
+ * @brief A gauge: how much of something is done or in use, as a bar.
+ *
+ * A sunken well with a proportional fill, which is the shape a bar is
+ * read in -- it fills toward full.  @p fraction is clamped to 0..1, so a
+ * caller handing over a ratio of counts does not have to guard the
+ * empty-denominator case before drawing.
+ *
+ * No state: a gauge shows a number somebody else owns.  Whether that is
+ * bytes copied, memory in use or steps taken is the caller's business.
+ */
+void tiku_ui_gauge(tiku_surface_t *s, tiku_rect_t r, float fraction);
+
+/**
+ * @brief How wide and tall a tip saying @p text needs to be.
+ *
+ * Given so a caller can place the box before drawing it -- a tip is put
+ * BESIDE the thing it explains, so where it goes depends on how big it
+ * is, and that sum should not be spelled out again at every call.
+ */
+tiku_rect_t tiku_ui_tip_size(const char *text);
+
+/**
+ * @brief A tip: the whole of something said beside what could not fit it.
+ *
+ * The note-coloured box every hover explanation wears, framed and with
+ * its text inset.  @p r is where it goes -- from tiku_ui_tip_size(),
+ * moved to sit beside the row or cell it belongs to; a caller that has
+ * pushed it back on-screen keeps whatever it decided.
+ */
+void tiku_ui_tip(tiku_surface_t *s, tiku_rect_t r, const char *text);
+
 void tiku_ui_scrollbar(tiku_surface_t *s, tiku_rect_t r,
                             float pos, float frac, int horiz);
 

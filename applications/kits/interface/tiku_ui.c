@@ -488,6 +488,65 @@ arrow_button(tiku_surface_t *s, tiku_rect_t r, int dir, int can)
     }
 }
 
+tiku_rect_t
+tiku_ui_tip_size(const char *text)
+{
+    const tiku_font_t *f = tiku_font_plain();
+    tiku_rect_t r = { 0, 0, 0, 0 };
+
+    if (text == NULL || text[0] == '\0') {
+        return r;
+    }
+    r.w = tiku_text_width(f, text) + 12;
+    r.h = f->height + 6;
+    return r;
+}
+
+void
+tiku_ui_tip(tiku_surface_t *s, tiku_rect_t r, const char *text)
+{
+    const tiku_font_t *f = tiku_font_plain();
+    int rec;
+
+    if (s == NULL || text == NULL || text[0] == '\0' ||
+        r.w <= 0 || r.h <= 0) {
+        return;
+    }
+    rec = tiku_gfx_rec_enter(s);
+    if (rec) {
+        (void)tiku_dl_fill(s->record, r, TIKU_C_NOTE);
+    }
+    tiku_fill(s, r, TIKU_C_NOTE);
+    tiku_frame(s, r, TIKU_C_TEXT);
+    tiku_text(s, f, r.x + 6, r.y + 3 + f->ascent, text, TIKU_C_TEXT);
+    tiku_gfx_rec_leave(s, rec);
+}
+
+void
+tiku_ui_gauge(tiku_surface_t *s, tiku_rect_t r, float fraction)
+{
+    int rec = tiku_gfx_rec_enter(s);
+    tiku_rect_t fill;
+
+    if (rec) {
+        /* Nothing in the display list describes a gauge, so what a remote
+         * reader gets is the two rectangles it is made of, recorded as
+         * themselves rather than missed. */
+        (void)tiku_dl_fill(s->record, r, TIKU_C_DOC);
+    }
+    if (fraction < 0.0f) { fraction = 0.0f; }
+    if (fraction > 1.0f) { fraction = 1.0f; }
+
+    tiku_fill(s, r, TIKU_C_DOC);
+    tiku_frame(s, r, tiku_tint(PANEL, 1.40f));
+    fill = (tiku_rect_t){ r.x + 1, r.y + 1,
+                          (int)((float)(r.w - 2) * fraction), r.h - 2 };
+    if (fill.w > 0 && fill.h > 0) {
+        tiku_fill(s, fill, TIKU_C_SELECT);
+    }
+    tiku_gfx_rec_leave(s, rec);
+}
+
 void
 tiku_ui_scrollbar(tiku_surface_t *s, tiku_rect_t r, float pos,
                        float frac, int horiz)

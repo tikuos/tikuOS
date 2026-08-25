@@ -49,6 +49,7 @@ INTERFACE   := interface/tiku_gfx.c interface/tiku_theme.c \
                interface/tiku_ui.c interface/tiku_dl.c interface/tiku_logo.c \
                interface/tiku_scroll.c interface/tiku_field.c \
                interface/tiku_menu.c interface/tiku_tabs.c \
+               interface/tiku_slider.c \
                interface/tiku_window.c \
                interface/tiku_x11.c
 TRANSLATION := translation/tiku_inflate.c translation/tiku_jpeg.c \
