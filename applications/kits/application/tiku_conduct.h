@@ -134,6 +134,11 @@ typedef struct {
     char                        token_query[TIKU_CONDUCT_TOKEN];
     int                         grant;
     char                        principal[TIKU_CONDUCT_TOKEN];
+    /* The session's spend.  A quota of 0 is no quota; past a set one
+     * the peer is closed -- a runaway driver is cut off rather than
+     * rationed, because a driver that has to be rationed is broken. */
+    long                        quota;
+    long                        spent;
 } tiku_conduct_t;
 
 /**
@@ -185,6 +190,15 @@ void tiku_conduct_shutdown(tiku_conduct_t *c);
  */
 void tiku_conduct_require(tiku_conduct_t *c, const char *full_token,
                                const char *query_token);
+
+/**
+ * @brief Cap what one session may do: after @p messages INJECTs and
+ *        QUERYs together, the peer is closed.  0 lifts the cap.
+ *
+ * Beside the counters, not instead of them: the point is that a
+ * runaway driver costs a bounded amount of shell, then costs nothing.
+ */
+void tiku_conduct_quota(tiku_conduct_t *c, long messages);
 
 /**
  * @brief Accept and serve whatever is ready, without blocking.

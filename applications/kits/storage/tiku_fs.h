@@ -453,4 +453,20 @@ int tiku_fs_redo(tiku_fs_t *fs, char *err, size_t errmax);
 /** @brief The menu word for @p op ("Copy", "Move to Trash", ...). */
 const char *tiku_fs_op_name(tiku_op_t op);
 
+/**
+ * @brief One path as one piece of text: a node's value, or a
+ *        container's children by name, joined with '|'.
+ *
+ * The path is answered by whatever backend serves it, which is the
+ * whole point: through a namespace, /devices/board1/sys/temp is a
+ * board's sensor and /home/me/note.txt is a local file, and a reader
+ * asking either is not told the difference.  A value is truncated to
+ * what fits and NUL-terminated -- this is a TEXT answer, not a
+ * transfer.
+ *
+ * @return 1 with @p out filled, 0 when nothing serves @p path.
+ */
+int tiku_backend_text(tiku_backend_t *b, const char *path,
+                      char *out, size_t max);
+
 #endif /* TIKU_FS_H_ */

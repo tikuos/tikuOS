@@ -305,6 +305,15 @@ tiku_conduct_require(tiku_conduct_t *c, const char *full_token,
     c->subs = 0;
 }
 
+void
+tiku_conduct_quota(tiku_conduct_t *c, long messages)
+{
+    if (c != NULL) {
+        c->quota = (messages > 0) ? messages : 0;
+        c->spent = 0;
+    }
+}
+
 /** @brief One stable signature of a fact's text, for "did it change". */
 static uint32_t
 conduct_sig(const char *text)
@@ -440,6 +449,19 @@ conduct_message(tiku_conduct_t *c)
         }
         break;
     case TIKU_CMSG_INJECT:
+    case TIKU_CMSG_QUERY:
+        if (c->quota > 0 && ++c->spent > c->quota) {
+            (void)close(c->peer);
+            c->peer = -1;
+            c->subs = 0;
+            return 0;
+        }
+        break;
+    default:
+        break;
+    }
+    switch (c->cur_type) {
+    case TIKU_CMSG_INJECT:
         if (c->grant < TIKU_CONDUCT_GRANT_FULL) {
             /* A reader's credential provably cannot inject: the event is
              * dropped here, before the shell ever sees it. */
@@ -519,6 +541,7 @@ tiku_conduct_poll(tiku_conduct_t *c)
             c->grant = c->required ? TIKU_CONDUCT_GRANT_NONE
                                    : TIKU_CONDUCT_GRANT_FULL;
             snprintf(c->principal, sizeof c->principal, "unnamed");
+            c->spent = 0;
         }
     }
     while (c->peer >= 0) {
