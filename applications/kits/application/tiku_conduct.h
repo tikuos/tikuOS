@@ -59,11 +59,20 @@
 #define TIKU_CMSG_INJECT  2u   /* tiku_event_t                  */
 #define TIKU_CMSG_QUERY   3u   /* u32 what, i32 a, i32 b, arg[64]    */
 /* Shell to driver. */
-#define TIKU_CMSG_ANSWER  16u  /* i32 ok, i32 num, text[512]         */
+#define TIKU_CMSG_ANSWER  16u  /* i32 ok, i32 num, text[]            */
+#define TIKU_CMSG_TOLD    17u  /* arg[64] names it, text[] says it   */
 
 /** @brief What a QUERY asks for. */
 #define TIKU_CQ_PIXEL     1u   /* a, b are x, y; the answer is num   */
 #define TIKU_CQ_TEXT      2u   /* arg names it; the answer is text   */
+
+/* How many named facts one driver may watch at once, and how often the
+ * shell looks for a change on its behalf.  Small on purpose: a watch
+ * costs the shell an evaluation per interval -- for "narrate", a full
+ * content draw -- and a driver watching everything is a driver that
+ * should have been polling. */
+#define TIKU_CONDUCT_SUBS     4
+#define TIKU_CONDUCT_TELL_MS  100
 
 /**
  * @brief What the shell answers a named text query with.
@@ -98,6 +107,15 @@ typedef struct {
     unsigned char              *buf;
     size_t                      got, want;
     uint32_t                    cur_type;
+    /* What the one driver asked to be told about: QUERY "~name" answers
+     * with the fact's current text AND registers it here; a change is
+     * then pushed as a TOLD frame on the same stream.  Watches live as
+     * long as the peer does and no longer. */
+    char                        sub_name[TIKU_CONDUCT_SUBS]
+                                        [TIKU_CONDUCT_ARG];
+    uint32_t                    sub_sig[TIKU_CONDUCT_SUBS];
+    int                         subs;
+    int64_t                     told_at_us;
 } tiku_conduct_t;
 
 /**
@@ -183,5 +201,21 @@ int tiku_conduct_inject(tiku_conduct_client_t *c,
 int tiku_conduct_query(tiku_conduct_client_t *c, uint32_t what,
                             int a, int b, const char *arg,
                             int *num, char *text, size_t max);
+
+/**
+ * @brief Wait to be TOLD: block until the shell pushes a watched fact's
+ *        new value, or @p wait_ms runs out.
+ *
+ * The other half of QUERY "~name": the driver stops asking and the shell
+ * speaks when the fact changes.  Bounded on purpose -- a driver that can
+ * hang is worse than one that fails, because it reports nothing and
+ * someone waits on it.
+ *
+ * @return nonzero when a TOLD arrived; @p name and @p text then say
+ *         which fact and what it says now.
+ */
+int tiku_conduct_told(tiku_conduct_client_t *c,
+                           char *name, size_t name_max,
+                           char *text, size_t text_max, int wait_ms);
 
 #endif /* TIKU_CONDUCT_H_ */

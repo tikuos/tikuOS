@@ -282,6 +282,95 @@ tiku_conduct_shutdown(tiku_conduct_t *c)
 }
 
 /** @brief Serve one complete message.  @return nonzero if it injected. */
+/** @brief One stable signature of a fact's text, for "did it change". */
+static uint32_t
+conduct_sig(const char *text)
+{
+    uint32_t h = UINT32_C(2166136261);
+
+    while (*text != '\0') {
+        h ^= (unsigned char)*text++;
+        h *= UINT32_C(16777619);
+    }
+    return h;
+}
+
+/** @brief Remember @p name as watched, seeded with its current text. */
+static int
+conduct_watch(tiku_conduct_t *c, const char *name, const char *now)
+{
+    int i;
+
+    for (i = 0; i < c->subs; i++) {
+        if (strcmp(c->sub_name[i], name) == 0) {
+            /* Watched twice is watched once, re-seeded: the answer the
+             * driver just got is the value changes are measured from. */
+            c->sub_sig[i] = conduct_sig(now);
+            return 1;
+        }
+    }
+    if (c->subs >= TIKU_CONDUCT_SUBS) {
+        return 0;
+    }
+    snprintf(c->sub_name[c->subs], sizeof c->sub_name[c->subs], "%s", name);
+    c->sub_sig[c->subs] = conduct_sig(now);
+    c->subs++;
+    return 1;
+}
+
+/** @brief A monotonic clock for the tell interval, in microseconds. */
+static int64_t
+conduct_now_us(void)
+{
+    struct timespec ts;
+
+    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+/**
+ * @brief Look at every watched fact and TELL the driver the ones that
+ *        changed, at most once per interval.
+ *
+ * The interval is the economy: evaluating a fact costs the shell what
+ * answering the query costs -- for a narration, a content draw -- so a
+ * quiet watch must not become a per-turn tax.
+ */
+static void
+conduct_tell(tiku_conduct_t *c)
+{
+    int64_t now;
+    int i;
+
+    if (c->peer < 0 || c->subs == 0 || c->text == NULL) {
+        return;
+    }
+    now = conduct_now_us();
+    if (now - c->told_at_us < (int64_t)TIKU_CONDUCT_TELL_MS * 1000) {
+        return;
+    }
+    c->told_at_us = now;
+    for (i = 0; i < c->subs; i++) {
+        char text[TIKU_CONDUCT_TEXT];
+        uint32_t sig;
+
+        text[0] = '\0';
+        if (!c->text(c->ctx, c->sub_name[i], text, sizeof text)) {
+            continue;           /* a fact gone quiet is not a change */
+        }
+        sig = conduct_sig(text);
+        if (sig != c->sub_sig[i]) {
+            unsigned char out[TIKU_CONDUCT_ARG + TIKU_CONDUCT_TEXT];
+
+            c->sub_sig[i] = sig;
+            memset(out, 0, TIKU_CONDUCT_ARG);
+            snprintf((char *)out, TIKU_CONDUCT_ARG, "%s", c->sub_name[i]);
+            memcpy(out + TIKU_CONDUCT_ARG, text, sizeof text);
+            send_msg(c->peer, TIKU_CMSG_TOLD, out, sizeof out);
+        }
+    }
+}
+
 static int
 conduct_message(tiku_conduct_t *c)
 {
@@ -330,6 +419,16 @@ conduct_message(tiku_conduct_t *c)
             if (what == TIKU_CQ_PIXEL && c->pixel != NULL) {
                 reply[1] = (int32_t)c->pixel(c->ctx, a, b);
                 reply[0] = 1;
+            } else if (what == TIKU_CQ_TEXT && c->text != NULL &&
+                       arg[0] == '~') {
+                /* The watched form of any named fact: answer its current
+                 * text AND remember it, so a change is pushed as a TOLD
+                 * frame instead of waiting to be asked for again.  An
+                 * unknown name, or a full watch table, is refused the
+                 * same way an unknown name always is: told, not guessed
+                 * at. */
+                reply[0] = (c->text(c->ctx, arg + 1, text, sizeof text) &&
+                            conduct_watch(c, arg + 1, text)) ? 1 : 0;
             } else if (what == TIKU_CQ_TEXT && c->text != NULL) {
                 reply[0] = c->text(c->ctx, arg, text, sizeof text) ? 1 : 0;
             }
@@ -359,6 +458,7 @@ tiku_conduct_poll(tiku_conduct_t *c)
             (void)set_nonblock(fd);
             c->peer = fd;
             c->hgot = c->got = c->want = 0u;
+            c->subs = 0;
         }
     }
     while (c->peer >= 0) {
@@ -368,6 +468,7 @@ tiku_conduct_poll(tiku_conduct_t *c)
         if (r < 0) {
             (void)close(c->peer);
             c->peer = -1;
+            c->subs = 0;        /* watches live as long as the peer */
             break;
         }
         if (r == 0) {
@@ -380,6 +481,7 @@ tiku_conduct_poll(tiku_conduct_t *c)
         injected |= conduct_message(c);
         c->want = 0u;
     }
+    conduct_tell(c);
     return injected;
 }
 
@@ -539,4 +641,63 @@ tiku_conduct_query(tiku_conduct_client_t *c, uint32_t what,
     }
     free(buf);
     return 0;                   /* it never answered */
+}
+
+int
+tiku_conduct_told(tiku_conduct_client_t *c, char *name,
+                       size_t name_max, char *text, size_t text_max,
+                       int wait_ms)
+{
+    unsigned char *buf = NULL;
+    size_t got = 0u, want = 0u;
+    uint32_t type = 0u;
+    unsigned char hbuf[8];
+    size_t hgot = 0u;
+    int waited;
+
+    if (c == NULL || c->fd < 0) {
+        return 0;
+    }
+    if (name != NULL && name_max > 0u) {
+        name[0] = '\0';
+    }
+    if (text != NULL && text_max > 0u) {
+        text[0] = '\0';
+    }
+    /* Nothing is sent: being told was arranged when the watch was asked
+     * for, and this only listens for it -- bounded, so a notice that
+     * never comes is a failure someone sees, not a driver that hangs. */
+    for (waited = 0; waited < wait_ms; ) {
+        int r = stream_read(c->fd, hbuf, &hgot, &buf, &got, &want, &type);
+
+        if (r < 0) {
+            free(buf);
+            return 0;
+        }
+        if (r == 0) {
+            struct timespec ts;
+
+            ts.tv_sec = 0;
+            ts.tv_nsec = 2 * 1000 * 1000;
+            (void)nanosleep(&ts, NULL);
+            waited += 2;
+            continue;
+        }
+        if (type == TIKU_CMSG_TOLD &&
+            want >= TIKU_CONDUCT_ARG + TIKU_CONDUCT_TEXT) {
+            if (name != NULL && name_max > 0u) {
+                snprintf(name, name_max, "%.*s", TIKU_CONDUCT_ARG,
+                         (const char *)buf);
+            }
+            if (text != NULL && text_max > 0u) {
+                snprintf(text, text_max, "%.*s", TIKU_CONDUCT_TEXT,
+                         (const char *)buf + TIKU_CONDUCT_ARG);
+            }
+            free(buf);
+            return 1;
+        }
+        want = 0u;              /* something else: keep listening */
+    }
+    free(buf);
+    return 0;                   /* the notice never came */
 }
