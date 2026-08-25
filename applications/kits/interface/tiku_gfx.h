@@ -55,6 +55,22 @@ typedef struct {
      * can keep the yellow tab -- the Be identity -- and still label it
      * legibly. */
     tiku_rgb_t tab_text;
+    /*
+     * Ink that carries MEANING rather than chrome: what a program's own
+     * words are made of, read on the document ground.  A code window is
+     * the first thing on this desktop whose colours say what something
+     * IS -- a word the language reserves, a number written down, text in
+     * quotes, a remark the machine ignores -- and the moment that lives
+     * in a literal instead of here, one table stops being a theme.
+     *
+     * Appended, like tab_text before them: the three tables initialise
+     * positionally, so a role inserted in the middle silently reassigns
+     * every value after it and still compiles.
+     */
+    tiku_rgb_t code_word;
+    tiku_rgb_t code_num;
+    tiku_rgb_t code_str;
+    tiku_rgb_t code_rem;
 } tiku_theme_t;
 
 /** @brief The live theme.  Never NULL. */
@@ -95,6 +111,10 @@ tiku_rgb_t tiku_grey(tiku_rgb_t c);
 #define TIKU_C_DANGER     (tiku_theme()->danger)
 #define TIKU_C_NOTE       (tiku_theme()->note)
 #define TIKU_C_TABTEXT    (tiku_theme()->tab_text)
+#define TIKU_C_CODE_WORD  (tiku_theme()->code_word)
+#define TIKU_C_CODE_NUM   (tiku_theme()->code_num)
+#define TIKU_C_CODE_STR   (tiku_theme()->code_str)
+#define TIKU_C_CODE_REM   (tiku_theme()->code_rem)
 
 /* BeOS tint constants, so the code reads like the documentation. */
 #define TIKU_LIGHTEN_MAX  0.00f
@@ -197,6 +217,49 @@ tiku_rgb_t tiku_tint(tiku_rgb_t c, float tint);
  * "greyed out" has meant all along.
  */
 tiku_rgb_t tiku_dim(tiku_rgb_t ink, tiku_rgb_t ground);
+
+/**
+ * @brief What a run of text MEANS, rather than what colour it is.
+ *
+ * A widget that paints meaning takes one of these and asks tiku_ink()
+ * for the shade; it never names a colour.  That is the difference
+ * between a code window this desktop can re-theme and a terminal's
+ * hard-wired ANSI table -- and it is what lets a reader be told a word
+ * is reserved rather than that it is blue.
+ */
+typedef enum {
+    TIKU_INK_PLAIN = 0,   /* the document's own ink                    */
+    TIKU_INK_FAINT,       /* receded: a line number, a gutter mark     */
+    TIKU_INK_WORD,        /* a word the language reserves              */
+    TIKU_INK_NUM,         /* a number written down                     */
+    TIKU_INK_STR,         /* text in quotes                            */
+    TIKU_INK_REMARK,      /* a remark the machine ignores              */
+    TIKU_INK_WRONG        /* what the reader must see is wrong         */
+} tiku_ink_t;
+
+/**
+ * @brief One run of @p len bytes that means @p ink.
+ *
+ * Runs are lengths, not offsets, so a table of them describes a line
+ * without repeating where the line starts -- and a run table that stops
+ * short of the line's end simply leaves the tail plain.
+ */
+typedef struct {
+    int        len;
+    tiku_ink_t ink;
+} tiku_span_t;
+
+/**
+ * @brief The shade @p which means, under the live theme.
+ *
+ * FAINT is derived rather than named: the document's ink pulled halfway
+ * toward the document's ground, by tiku_dim() -- the derivation that
+ * survives every table.  A line number is not a colour anybody chose; it
+ * is ordinary ink standing back, and it must stand back on a dark table
+ * too.  WRONG borrows the stop severity the theme already names, because
+ * a second red for the same meaning is how two reds drift apart.
+ */
+tiku_rgb_t tiku_ink(tiku_ink_t which);
 
 /**
  * @brief Move a block of pixels within the surface (CopyBits).

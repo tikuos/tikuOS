@@ -245,4 +245,26 @@ tiku_rect_t tiku_ui_window(tiku_surface_t *s,
                                      tiku_rect_t r, const char *title,
                                      int active);
 
+/**
+ * @brief Draw @p text at @p x, @p y (baseline) as runs that MEAN things.
+ *
+ * Each run takes its shade from tiku_ink(), so a highlighted line
+ * re-themes with everything else and carries no palette of its own.  A
+ * run table shorter than the line leaves the tail plain, and a NULL or
+ * empty one draws the whole line plain -- so a caller may pass whatever
+ * the classifier gave it without checking first.
+ *
+ * The runs are drawn as separate text calls, which is exactly how they
+ * cross the wire: one command per run, each carrying its own colour, the
+ * way every other coloured thing on this desktop travels.  A remote
+ * window is therefore highlighted without the protocol learning a word
+ * about syntax.  The cost is honest and worth naming: a narrated line
+ * arrives as several text facts rather than one.
+ *
+ * @return the total advance, so a caller can place what follows.
+ */
+int tiku_ui_text_spans(tiku_surface_t *s, const tiku_font_t *f,
+                            int x, int y, const char *text,
+                            const tiku_span_t *span, int n);
+
 #endif /* TIKU_UI_H_ */

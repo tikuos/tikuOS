@@ -288,6 +288,28 @@ tiku_dim(tiku_rgb_t ink, tiku_rgb_t ground)
         ((ink & 0xFFu) + (ground & 0xFFu)) / 2u);
 }
 
+tiku_rgb_t
+tiku_ink(tiku_ink_t which)
+{
+    switch (which) {
+    case TIKU_INK_FAINT:
+        /* Derived, not named: ordinary ink standing back on the ground it
+         * is read against.  A named grey would be right on one table and
+         * invisible on the other. */
+        return tiku_dim(TIKU_C_TEXT, TIKU_C_DOC);
+    case TIKU_INK_WORD:   return TIKU_C_CODE_WORD;
+    case TIKU_INK_NUM:    return TIKU_C_CODE_NUM;
+    case TIKU_INK_STR:    return TIKU_C_CODE_STR;
+    case TIKU_INK_REMARK: return TIKU_C_CODE_REM;
+    case TIKU_INK_WRONG:  return TIKU_C_DANGER;
+    case TIKU_INK_PLAIN:
+    default:
+        /* An ink this build does not know reads as the document's own,
+         * which is legible by construction -- never as nothing. */
+        return TIKU_C_TEXT;
+    }
+}
+
 void
 tiku_pixel(tiku_surface_t *s, int x, int y, tiku_rgb_t c)
 {

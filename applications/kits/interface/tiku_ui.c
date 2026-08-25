@@ -833,3 +833,71 @@ tiku_ui_window(tiku_surface_t *s, tiku_rect_t r,
     content.h = body.h - 2 * border;
     return content;
 }
+
+int
+tiku_ui_text_spans(tiku_surface_t *s, const tiku_font_t *f, int x, int y,
+                        const char *text, const tiku_span_t *span, int n)
+{
+    /* One run at a time, because tiku_text draws a whole string: the run
+     * is copied out so it can be terminated.  A run longer than this is
+     * split rather than dropped -- a line that cannot be copied whole is
+     * still a line somebody has to read. */
+    char run[256];
+    int at = 0, start = x;
+    int i = 0;
+
+    if (s == NULL || f == NULL || text == NULL) {
+        return 0;
+    }
+    for (;;) {
+        tiku_ink_t ink = TIKU_INK_PLAIN;
+        int len;
+
+        if (text[at] == '\0') {
+            break;
+        }
+        if (span != NULL && i < n) {
+            ink = span[i].ink;
+            len = span[i].len;
+            i++;
+        } else {
+            /* Past the table: the rest of the line is the document's own
+             * ink, which is what a short table promises. */
+            len = (int)strlen(text + at);
+        }
+        if (len <= 0) {
+            continue;
+        }
+        while (len > 0 && text[at] != '\0') {
+            int take = len;
+            int k;
+
+            if (take > (int)sizeof run - 1) {
+                int back = (int)sizeof run - 1;
+
+                /* Never cut a code point in half.  The font walks UTF-8,
+                 * so half a letter at the end of one chunk and its other
+                 * half at the head of the next draw as two fallback
+                 * glyphs of the wrong width -- a line that is correct
+                 * until it is long, which is the worst kind. */
+                while (back > 0 &&
+                       ((unsigned char)text[at + back] & 0xC0u) == 0x80u) {
+                    back--;
+                }
+                take = (back > 0) ? back : (int)sizeof run - 1;
+            }
+            for (k = 0; k < take && text[at + k] != '\0'; k++) {
+                run[k] = text[at + k];
+            }
+            run[k] = '\0';
+            if (k == 0) {
+                break;
+            }
+            tiku_text(s, f, x, y, run, tiku_ink(ink));
+            x += tiku_text_width(f, run);
+            at += k;
+            len -= k;
+        }
+    }
+    return x - start;
+}

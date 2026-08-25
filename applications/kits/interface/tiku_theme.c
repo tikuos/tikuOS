@@ -29,6 +29,10 @@ static const tiku_theme_t tiku_theme_r5 = {
     /* danger   */ TIKU_RGB(203, 48, 48),
     /* note     */ TIKU_RGB(255, 255, 200),
     /* tab_text */ TIKU_RGB(0, 0, 0),
+    /* code_word*/ TIKU_RGB(0, 0, 176),
+    /* code_num */ TIKU_RGB(0, 112, 96),
+    /* code_str */ TIKU_RGB(160, 32, 32),
+    /* code_rem */ TIKU_RGB(96, 112, 96),
 };
 
 /*
@@ -52,6 +56,10 @@ static const tiku_theme_t tiku_theme_dusk = {
     /* danger   */ TIKU_RGB(224, 82, 82),
     /* note     */ TIKU_RGB(72, 72, 46),
     /* tab_text */ TIKU_RGB(235, 221, 170),
+    /* code_word*/ TIKU_RGB(140, 170, 255),
+    /* code_num */ TIKU_RGB(120, 208, 184),
+    /* code_str */ TIKU_RGB(236, 150, 140),
+    /* code_rem */ TIKU_RGB(136, 156, 136),
 };
 
 const tiku_theme_t *
@@ -87,6 +95,15 @@ static const tiku_theme_t tiku_theme_grey = {
     /* danger   */ TIKU_RGB(64, 64, 64),
     /* note     */ TIKU_RGB(240, 240, 240),
     /* tab_text */ TIKU_RGB(0, 0, 0),
+    /* Without hue the four code inks can only part by LUMINANCE, so they
+     * are spread across the range the white document leaves: the ink
+     * itself stays 0, a reserved word sits just off it, and a remark
+     * stands furthest back -- which is the ordering the coloured tables
+     * mean anyway. */
+    /* code_word*/ TIKU_RGB(32, 32, 32),
+    /* code_num */ TIKU_RGB(96, 96, 96),
+    /* code_str */ TIKU_RGB(64, 64, 64),
+    /* code_rem */ TIKU_RGB(144, 144, 144),
 };
 
 const tiku_theme_t *
