@@ -360,6 +360,19 @@ tiku_model_icon_name(const tiku_model_t *m)
     default:
         break;
     }
+    {
+        /*
+         * The TYPE is asked before the execute bit, so a program this
+         * system built keeps the application art instead of falling to
+         * the generic executable one.  The other way round, every
+         * TikuOS application looked exactly like /bin/ls.
+         */
+        int app = type_row(m->type);
+
+        if (app >= 0 && strcmp(kTypes[app].icon, "application") == 0) {
+            return "application";
+        }
+    }
     if (m->facts.perm & TIKU_P_EXEC) {
         return "executable";
     }

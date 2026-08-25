@@ -18,6 +18,22 @@
 #include <dlfcn.h>
 #include <stdio.h>
 
+/*
+ * The stamp that says "a TikuOS application built this".
+ *
+ * A listing cannot tell tiku-term from /bin/ls: both are executables, and
+ * the type of a file here is decided by its NAME, which a program does
+ * not have an extension for.  Reading the whole binary looking for a
+ * descriptor id would cost megabytes per row.
+ *
+ * So the build says it instead, in a section of its own: a reader opens
+ * the file, walks the section table -- a few hundred bytes near the head
+ * -- and knows.  Anything that links this kit carries it, which is
+ * exactly the set of things that ARE TikuOS applications.
+ */
+__attribute__((used, section(".tikuos")))
+static const char tiku_app_stamp_load[] = "TikuOS-application-1";
+
 const tiku_app_descriptor_t *
 tiku_app_load(const char *path, char *err, size_t max)
 {

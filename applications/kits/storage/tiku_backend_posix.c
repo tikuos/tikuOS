@@ -135,6 +135,90 @@ type_by_name(const char *name)
     return "application/octet-stream";
 }
 
+/**
+ * @brief Whether @p path is an executable this system BUILT.
+ *
+ * Every TikuOS application carries a ".tikuos" section, put there by the
+ * application kit it links.  Finding it costs the ELF header and the
+ * section table -- a few hundred bytes off the front of the file -- and
+ * never the body, so a listing can ask this of every program it shows.
+ *
+ * Deliberately not a guess: no reading the name for a prefix, no
+ * scanning megabytes for a descriptor id.  A file either carries the
+ * stamp or it does not.
+ */
+static int
+is_tiku_app(const char *path)
+{
+    unsigned char h[64];
+    FILE *f = fopen(path, "rb");
+    unsigned long shoff, stroff = 0;
+    unsigned shentsize, shnum, shstrndx, i;
+    int found = 0;
+
+    if (f == NULL) {
+        return 0;
+    }
+    if (fread(h, 1u, sizeof h, f) != sizeof h ||
+        h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F' ||
+        h[4] != 2 /* 64-bit; the only shape this ships */ ||
+        h[5] != 1 /* little-endian */) {
+        (void)fclose(f);
+        return 0;
+    }
+    shoff = 0;
+    for (i = 0; i < 8u; i++) {
+        shoff |= (unsigned long)h[40 + i] << (8u * i);
+    }
+    shentsize = (unsigned)h[58] | ((unsigned)h[59] << 8);
+    shnum = (unsigned)h[60] | ((unsigned)h[61] << 8);
+    shstrndx = (unsigned)h[62] | ((unsigned)h[63] << 8);
+    if (shoff == 0 || shentsize < 64u || shnum == 0u ||
+        shstrndx >= shnum || shnum > 4096u) {
+        (void)fclose(f);
+        return 0;
+    }
+    {
+        /* The section-name table's own header, to find the names. */
+        unsigned char sh[64];
+
+        if (fseek(f, (long)(shoff + (unsigned long)shstrndx * shentsize),
+                  SEEK_SET) != 0 ||
+            fread(sh, 1u, sizeof sh, f) != sizeof sh) {
+            (void)fclose(f);
+            return 0;
+        }
+        for (i = 0; i < 8u; i++) {
+            stroff |= (unsigned long)sh[24 + i] << (8u * i);
+        }
+    }
+    for (i = 0; i < shnum && !found; i++) {
+        unsigned char sh[64];
+        unsigned long name_at = 0;
+        char name[16];
+        size_t got;
+
+        if (fseek(f, (long)(shoff + (unsigned long)i * shentsize),
+                  SEEK_SET) != 0 ||
+            fread(sh, 1u, sizeof sh, f) != sizeof sh) {
+            break;
+        }
+        name_at = (unsigned long)sh[0] | ((unsigned long)sh[1] << 8) |
+                  ((unsigned long)sh[2] << 16) |
+                  ((unsigned long)sh[3] << 24);
+        if (fseek(f, (long)(stroff + name_at), SEEK_SET) != 0) {
+            break;
+        }
+        got = fread(name, 1u, sizeof name - 1u, f);
+        name[got] = '\0';
+        if (strcmp(name, ".tikuos") == 0) {
+            found = 1;
+        }
+    }
+    (void)fclose(f);
+    return found;
+}
+
 static void
 from_stat(tiku_model_t *m, const char *path, const struct stat *st,
           int is_link)
@@ -188,6 +272,12 @@ from_stat(tiku_model_t *m, const char *path, const struct stat *st,
     snprintf(m->type, sizeof m->type, "%s",
              m->kind == TIKU_KIND_ROOT ? "application/x-vnd.Be-root"
              : S_ISDIR(st->st_mode) ? "application/x-vnd.Be-directory"
+             /* An executable this system built says so for itself, and
+              * gets the application type rather than the blob one: it is
+              * the difference between a program a person can start and
+              * whatever else happens to carry the execute bit. */
+             : ((m->facts.perm & TIKU_P_EXEC) && is_tiku_app(path))
+                                  ? "application/x-vnd.be-app"
                                   : type_by_name(m->name));
 }
 
