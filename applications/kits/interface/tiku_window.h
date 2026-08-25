@@ -65,7 +65,10 @@ typedef void (*tiku_window_destroy_fn)(tiku_window_t *window,
  * publisher never draws and the bar owner never reaches into the
  * publisher's widgets -- the description is the whole contract, which is
  * what will let a device application's menus appear in a bar it does not
- * own.  Entries at level 1 belong to the submenu of the nearest level-0
+ * own.  One level of submenu is all this carries, and deliberately: a
+ * published menu is a description an application hands over, not a tree
+ * it drives, and every menu any application here has wanted is one deep.
+ * Entries at level 1 belong to the submenu of the nearest level-0
  * entry above them.
  */
 #define TIKU_MENUSET_MENUS 6
