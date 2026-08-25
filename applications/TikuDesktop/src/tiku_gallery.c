@@ -17,6 +17,7 @@
 #include "tiku_ui.h"
 #include "tiku_tabs.h"
 #include "tiku_slider.h"
+#include "tiku_alert.h"
 
 #ifndef TIKU_NO_X11
 int tiku_x11_show(const tiku_surface_t *s, const char *title);
@@ -178,6 +179,20 @@ gallery(tiku_surface_t *s)
     tiku_ui_menu(s, (tiku_rect_t){ c.x + 380, y + 4, 150,
                                              7 * (f->height + 6) + 4 },
                       MENUITEMS, 7, 3);
+
+    /* The question: the kit's alert, drawn small over the corner. */
+    {
+        static tiku_alert_t ask;
+        tiku_rect_t af = { c.x + 470, c.y + c.h - 130, 300, 110 };
+
+        if (!ask.open) {
+            tiku_alert_open(&ask, TIKU_ALERT_WARN, 0,
+                            "Discard unsaved changes? "
+                            "Two voices: summary bold, detail plain.",
+                            "Cancel|Discard");
+        }
+        tiku_alert_draw(&ask, s, af);
+    }
 
     /* An inactive window, for the tab comparison. */
     {

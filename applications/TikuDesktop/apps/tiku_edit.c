@@ -17,6 +17,7 @@
 
 #include "tiku_app.h"
 #include "tiku_textview.h"
+#include "tiku_alert.h"
 #include "tiku_client.h"
 #include "tiku_font.h"
 #include "tiku_dl.h"
@@ -48,6 +49,11 @@ typedef struct {
      * document object every application that edits text can hold, rather
      * than each one growing its own line array and its own caret rules. */
     tiku_textview_t                 tv;
+    /* The question the close gesture asks while there are unsaved
+     * changes.  The kit's own alert, held over this window's content:
+     * an application no longer needs a shell to be able to ask. */
+    tiku_alert_t                    ask;
+    tiku_rect_t                     ask_frame;
     int                             saved_shown;
     char                            path[512];
     char                            note[128];
@@ -191,6 +197,15 @@ paint(edit_state_t *st)
     tiku_text(st->surface, small, MARGIN,
                    strip.y + (STRIP_H - small->height) / 2 + small->ascent,
                    where, TIKU_C_TEXT);
+    if (st->ask.open) {
+        int aw, ah;
+
+        tiku_alert_size(&aw, &ah);
+        if (aw > EDIT_W - 16) { aw = EDIT_W - 16; }
+        st->ask_frame = (tiku_rect_t){ (EDIT_W - aw) / 2,
+                                       (EDIT_H - ah) / 3, aw, ah };
+        tiku_alert_draw(&st->ask, st->surface, st->ask_frame);
+    }
     st->surface->record = NULL;
     /*
      * Handed over BOTH ways, and the services layer picks: down a wire
@@ -306,6 +321,35 @@ edit_event(void *state, const tiku_event_t *event)
     int rows = rows_visible();
     int was_modified;
 
+    if (st->ask.open) {
+        int at = -1;
+
+        if (event->type == TIKU_EVENT_KEY_DOWN) {
+            at = tiku_alert_key(&st->ask, event->key);
+        } else if (event->type == TIKU_EVENT_POINTER_DOWN) {
+            at = tiku_alert_button_at(&st->ask,
+                     st->ask_frame.w, st->ask_frame.h,
+                     event->x - st->ask_frame.x,
+                     event->y - st->ask_frame.y);
+            if (at >= 0) {
+                st->ask.chosen = at;
+            }
+        } else {
+            return 0;
+        }
+        if (at < 0) {
+            return 0;           /* not the question's key: ignored */
+        }
+        tiku_alert_reset(&st->ask);
+        /* Right to left: Cancel(0) stays, Discard(1) goes.  A save road
+         * would go here the day the editor grows one for a file it can
+         * name; the untitled one it is launched as has nowhere to save. */
+        if (at == 1) {
+            return 1;           /* done: the host closes the window */
+        }
+        paint(st);
+        return 0;
+    }
     if (event->type != TIKU_EVENT_KEY_DOWN) {
         return 0;
     }
@@ -320,6 +364,16 @@ edit_event(void *state, const tiku_event_t *event)
     }
     switch (event->key) {
     case TIKU_KEY_ESCAPE:
+        if (tiku_textview_modified(&st->tv)) {
+            /* The question, not the guillotine: closing must not be the
+             * one gesture that silently destroys typing. */
+            tiku_alert_open(&st->ask, TIKU_ALERT_WARN, 0,
+                            "Discard unsaved changes? "
+                            "The window has changes nothing has saved.",
+                            "Cancel|Discard");
+            paint(st);
+            return 0;
+        }
         return 1;
     case TIKU_KEY_RETURN:
         tiku_textview_newline(&st->tv);
