@@ -42,9 +42,14 @@
 
 #include "tiku_event.h"
 
-#define TIKU_CONDUCT_VERSION 1
+/* Version 2: the answer's text grew from 512 to 2048 so a whole window's
+ * narration fits it.  The framing did not change shape, but a driver
+ * built to the old size would misread the new answers, and the HELLO
+ * check exists exactly so a mismatched pairing is refused, not half
+ * served. */
+#define TIKU_CONDUCT_VERSION 2
 #define TIKU_CONDUCT_ARG     64
-#define TIKU_CONDUCT_TEXT    512
+#define TIKU_CONDUCT_TEXT    2048
 /* How long a driver waits for the one answer before calling the question
  * failed.  Generous next to a loop turn, short next to a person. */
 #define TIKU_CONDUCT_ANSWER_MS 4000

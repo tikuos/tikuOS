@@ -176,6 +176,28 @@ void tiku_workspace_end_track(tiku_workspace_t *workspace);
 int tiku_workspace_tracking(const tiku_workspace_t *workspace);
 
 void tiku_workspace_draw(tiku_workspace_t *workspace);
+
+/**
+ * @brief Say what @p window shows, as the plain lines of
+ *        tiku_dl_narrate(), into @p out.
+ *
+ * The window's content is drawn once onto a recording surface of the
+ * workspace's size -- never the shown one, so answering does not repaint
+ * what it observes -- and the recorded list is narrated with no pixel
+ * consulted.  A window that strokes marks the wire cannot carry gets a
+ * closing line saying so, because a narration that silently omits what
+ * was drawn is worse than one that confesses.
+ *
+ * This is the reader's door: an assistive reader, an agent, or a test on
+ * the far end of the conductor channel hears a window it has never seen
+ * pixels of.
+ *
+ * @return the bytes written, 0 (and an empty @p out) when there is
+ *         nothing to narrate -- no window, no draw, no room.
+ */
+size_t tiku_workspace_narrate(tiku_workspace_t *workspace,
+                                   tiku_window_t *window,
+                                   char *out, size_t max);
 void tiku_workspace_set_backdrop(tiku_workspace_t *workspace,
     void (*draw)(tiku_surface_t *surface, void *context), void *context);
 int tiku_workspace_zoom(tiku_workspace_t *workspace,

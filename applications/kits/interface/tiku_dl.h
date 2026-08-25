@@ -329,6 +329,20 @@ int tiku_dl_read(const void *buf, size_t len, size_t *at,
 size_t tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max);
 
 /**
+ * @brief Narrate @p dl itself: flatten it and speak the lines, and when
+ *        the list is not whole, say so as a closing line rather than
+ *        letting what was stroked from bare pixels go silently missing.
+ *
+ * The composition every narrating caller wants: a shell that just drew a
+ * window onto a recording surface hands the list here and gets the plain
+ * lines back.
+ *
+ * @return the bytes written, 0 (and an empty @p out) when there is
+ *         nothing to say or no room to say it.
+ */
+size_t tiku_dl_say(const tiku_dl_t *dl, char *out, size_t max);
+
+/**
  * @brief Read a list out of @p buf.
  *
  * Every length is checked against what is left of the buffer before it is

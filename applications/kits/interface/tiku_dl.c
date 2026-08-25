@@ -1282,3 +1282,33 @@ tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max)
     }
     return used;
 }
+
+size_t
+tiku_dl_say(const tiku_dl_t *dl, char *out, size_t max)
+{
+    unsigned char *flat;
+    size_t n, used = 0u;
+
+    if (out == NULL || max == 0u) {
+        return 0u;
+    }
+    out[0] = '\0';
+    if (dl == NULL) {
+        return 0u;
+    }
+    n = tiku_dl_flat_size(dl);
+    flat = (n > 0u) ? malloc(n) : NULL;
+    if (flat != NULL && tiku_dl_flatten(dl, flat, n, NULL)) {
+        used = tiku_dl_narrate(flat, n, out, max);
+    }
+    free(flat);
+    if (tiku_dl_misses(dl) > 0 && used + 1u < max) {
+        /* Confessed, not omitted: a reader must be told there was more
+         * than it heard. */
+        used += (size_t)snprintf(out + used, max - used,
+                                 "(%d marks this window drew, the wire "
+                                 "could not carry)\n",
+                                 tiku_dl_misses(dl));
+    }
+    return used;
+}

@@ -11,6 +11,7 @@
 
 #include "tiku_window.h"
 #include "tiku_ui.h"
+#include "tiku_dl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -558,6 +559,51 @@ tiku_workspace_draw(tiku_workspace_t *workspace)
                         workspace->order[i] == workspace->focused);
         }
     }
+}
+
+size_t
+tiku_workspace_narrate(tiku_workspace_t *workspace,
+                            tiku_window_t *window, char *out, size_t max)
+{
+    tiku_surface_t *scratch;
+    tiku_dl_t *dl;
+    tiku_rect_t content;
+    size_t used;
+
+    if (out == NULL || max == 0u) {
+        return 0u;
+    }
+    out[0] = '\0';
+    if (workspace == NULL || workspace->surface == NULL ||
+        window == NULL || !window->open || window->draw == NULL) {
+        return 0u;
+    }
+    content = tiku_window_content(window);
+    if (content.w <= 0 || content.h <= 0) {
+        return 0u;
+    }
+    /* The workspace's size but never its surface: an answer that painted
+     * the shown pixels would be an observation that changes what it
+     * observes, the same rule the pixel query lives by. */
+    scratch = tiku_surface_new(workspace->surface->w,
+                                    workspace->surface->h, TIKU_C_PANEL);
+    if (scratch == NULL) {
+        return 0u;
+    }
+    dl = tiku_dl_new();
+    if (dl == NULL) {
+        tiku_surface_free(scratch);
+        return 0u;
+    }
+    scratch->record = dl;
+    tiku_clip_set(scratch, content);
+    window->draw(window, scratch, content, window->context);
+    tiku_clip_reset(scratch);
+    scratch->record = NULL;
+    used = tiku_dl_say(dl, out, max);
+    tiku_dl_free(dl);
+    tiku_surface_free(scratch);
+    return used;
 }
 
 void
