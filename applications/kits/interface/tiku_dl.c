@@ -19,6 +19,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1027,4 +1029,252 @@ tiku_dl_play(const tiku_dl_t *dl, tiku_surface_t *s)
         done++;
     }
     return done;
+}
+
+/*---------------------------------------------------------------------------*
+ * The reader                                                                 *
+ *---------------------------------------------------------------------------*/
+
+/** @brief The op's kind, for a reader that is not drawing. */
+static tiku_dl_fact_kind_t
+fact_kind(uint16_t op)
+{
+    switch (op) {
+    case OP_TEXT:
+    case OP_TEXT_CENTERED: return TIKU_DL_FACT_TEXT;
+    case OP_BUTTON:        return TIKU_DL_FACT_BUTTON;
+    case OP_CHECKBOX:      return TIKU_DL_FACT_CHECKBOX;
+    case OP_RADIO:         return TIKU_DL_FACT_RADIO;
+    case OP_LIST_ROW:      return TIKU_DL_FACT_LIST_ROW;
+    case OP_GAUGE:         return TIKU_DL_FACT_GAUGE;
+    case OP_TIP:           return TIKU_DL_FACT_TIP;
+    case OP_TEXTFIELD:     return TIKU_DL_FACT_TEXTFIELD;
+    case OP_SCROLLBAR:     return TIKU_DL_FACT_SCROLLBAR;
+    case OP_SLIDER:        return TIKU_DL_FACT_SLIDER;
+    case OP_ALERT_ICON:    return TIKU_DL_FACT_ALERT_ICON;
+    case OP_TABS:          return TIKU_DL_FACT_TABS;
+    case OP_MENUFIELD:     return TIKU_DL_FACT_MENUFIELD;
+    case OP_ICON:          return TIKU_DL_FACT_ICON;
+    default:               return TIKU_DL_FACT_PAINT;
+    }
+}
+
+int
+tiku_dl_read(const void *buf, size_t len, size_t *at, tiku_dl_fact_t *out)
+{
+    const unsigned char *b = (const unsigned char *)buf;
+    const unsigned char *a;
+    uint16_t op, n;
+
+    if (buf == NULL || at == NULL || out == NULL || *at + 4u > len) {
+        return 0;
+    }
+    op = get16(b + *at);
+    n = get16(b + *at + 2);
+    if (len - *at - 4u < (size_t)n) {
+        return 0;                   /* a body the stream does not hold */
+    }
+    a = b + *at + 4;
+    *at += 4u + (size_t)n;
+
+    memset(out, 0, sizeof *out);
+    out->kind = fact_kind(op);
+
+    switch (op) {
+    case OP_TEXT:
+        if (n < 10u || memchr(a + 9, '\0', n - 9u) == NULL) {
+            return 0;
+        }
+        out->rect = (tiku_rect_t){ get_i16(a), get_i16(a + 2), 0, 0 };
+        out->text = (const char *)(a + 9);
+        return 1;
+    case OP_TEXT_CENTERED:
+        if (n < 14u || memchr(a + 13, '\0', n - 13u) == NULL) {
+            return 0;
+        }
+        out->rect = get_rect(a);
+        out->text = (const char *)(a + 13);
+        return 1;
+    case OP_BUTTON:
+    case OP_CHECKBOX:
+    case OP_RADIO:
+    case OP_LIST_ROW:
+    case OP_TIP:
+    case OP_TEXTFIELD:
+    case OP_MENUFIELD:
+        if (n < 13u || memchr(a + 12, '\0', n - 12u) == NULL) {
+            return 0;
+        }
+        out->rect = get_rect(a);
+        out->state = get32(a + 8);
+        out->text = (const char *)(a + 12);
+        return 1;
+    case OP_GAUGE:
+        if (n < 10u) {
+            return 0;
+        }
+        out->rect = get_rect(a);
+        out->v1 = (int)get16(a + 8);
+        return 1;
+    case OP_SCROLLBAR:
+        if (n < 14u) {
+            return 0;
+        }
+        out->rect = get_rect(a);
+        out->v1 = (int)get16(a + 8);
+        out->v2 = (int)get16(a + 10);
+        out->v3 = (int)get16(a + 12);
+        return 1;
+    case OP_SLIDER:
+        if (n < 14u) {
+            return 0;
+        }
+        out->rect = get_rect(a);
+        out->v1 = get_i16(a + 8);
+        out->v2 = get_i16(a + 10);
+        out->v3 = get_i16(a + 12);
+        return 1;
+    case OP_ALERT_ICON:
+        if (n < 6u) {
+            return 0;
+        }
+        out->rect = (tiku_rect_t){ get_i16(a), get_i16(a + 2), 0, 0 };
+        out->v1 = (int)get16(a + 4);
+        return 1;
+    case OP_TABS:
+        if (n < 13u || memchr(a + 12, '\0', n - 12u) == NULL) {
+            return 0;
+        }
+        out->rect = get_rect(a);
+        out->v1 = (int)get16(a + 8);
+        out->v2 = get_i16(a + 10);
+        out->text = (const char *)(a + 12);
+        /* The names must all TERMINATE inside the payload, counted here
+         * so the narrator and every other reader may walk them without
+         * re-checking. */
+        {
+            const char *p = out->text;
+            const char *end = (const char *)a + n;
+            int k;
+
+            for (k = 0; k < out->v1; k++) {
+                const char *z = memchr(p, '\0', (size_t)(end - p));
+
+                if (z == NULL) {
+                    return 0;
+                }
+                p = z + 1;
+            }
+        }
+        return 1;
+    default:
+        /* Paint, icons and anything newer than this reader: the rect
+         * where one exists, and no further claim. */
+        if (n >= 8u) {
+            out->rect = get_rect(a);
+        }
+        return 1;
+    }
+}
+
+/** @brief Append to the narration, stopping cleanly at the buffer's end. */
+static void
+say(char *out, size_t max, size_t *used, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (*used >= max) {
+        return;
+    }
+    va_start(ap, fmt);
+    n = vsnprintf(out + *used, max - *used, fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        *used += ((size_t)n < max - *used) ? (size_t)n : max - *used - 1u;
+    }
+}
+
+size_t
+tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max)
+{
+    size_t at = 0, used = 0;
+    tiku_dl_fact_t f;
+
+    if (out == NULL || max == 0) {
+        return 0;
+    }
+    out[0] = '\0';
+    while (tiku_dl_read(buf, len, &at, &f)) {
+        switch (f.kind) {
+        case TIKU_DL_FACT_PAINT:
+            break;                  /* strokes: nothing to act on */
+        case TIKU_DL_FACT_TEXT:
+            say(out, max, &used, "text \"%s\"\n", f.text);
+            break;
+        case TIKU_DL_FACT_BUTTON:
+            say(out, max, &used, "button \"%s\"%s%s\n", f.text,
+                (f.state & TIKU_S_DEFAULT) ? ", the default" : "",
+                (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
+            break;
+        case TIKU_DL_FACT_CHECKBOX:
+            say(out, max, &used, "checkbox \"%s\", %s\n", f.text,
+                (f.state & TIKU_S_ON) ? "on" : "off");
+            break;
+        case TIKU_DL_FACT_RADIO:
+            say(out, max, &used, "radio \"%s\", %s\n", f.text,
+                (f.state & TIKU_S_ON) ? "chosen" : "not chosen");
+            break;
+        case TIKU_DL_FACT_LIST_ROW:
+            say(out, max, &used, "row \"%s\"%s\n", f.text,
+                f.state ? ", selected" : "");
+            break;
+        case TIKU_DL_FACT_GAUGE:
+            say(out, max, &used, "gauge at %d%%\n", (f.v1 + 5) / 10);
+            break;
+        case TIKU_DL_FACT_TIP:
+            say(out, max, &used, "tip \"%s\"\n", f.text);
+            break;
+        case TIKU_DL_FACT_TEXTFIELD:
+            say(out, max, &used, "text field \"%s\"%s\n", f.text,
+                (f.state & TIKU_S_FOCUS) ? ", focused" : "");
+            break;
+        case TIKU_DL_FACT_SCROLLBAR:
+            say(out, max, &used,
+                "scrollbar, %d%% along, %d%% of the whole shown\n",
+                (f.v1 + 5) / 10, (f.v2 + 5) / 10);
+            break;
+        case TIKU_DL_FACT_SLIDER:
+            say(out, max, &used, "slider at %d of %d..%d\n",
+                f.v3, f.v1, f.v2);
+            break;
+        case TIKU_DL_FACT_ALERT_ICON:
+            say(out, max, &used, "%s\n",
+                (f.v1 == 2) ? "a stop"
+                : (f.v1 == 1) ? "a warning" : "a notice");
+            break;
+        case TIKU_DL_FACT_TABS: {
+            const char *p = f.text;
+            int k;
+
+            say(out, max, &used, "tabs:");
+            for (k = 0; k < f.v1; k++) {
+                say(out, max, &used, " \"%s\"", p);
+                if (k == f.v2) {
+                    say(out, max, &used, " (current)");
+                }
+                p += strlen(p) + 1u;
+            }
+            say(out, max, &used, "\n");
+            break;
+        }
+        case TIKU_DL_FACT_MENUFIELD:
+            say(out, max, &used, "menu field showing \"%s\"\n", f.text);
+            break;
+        case TIKU_DL_FACT_ICON:
+            say(out, max, &used, "an icon\n");
+            break;
+        }
+    }
+    return used;
 }

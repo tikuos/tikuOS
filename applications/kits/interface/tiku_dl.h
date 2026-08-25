@@ -259,6 +259,75 @@ size_t tiku_dl_flat_size(const tiku_dl_t *dl);
  */
 int tiku_dl_flatten(const tiku_dl_t *dl, void *buf, size_t max, size_t *wrote);
 
+/*---------------------------------------------------------------------------*
+ * Reading the stream, without drawing it.
+ *
+ * The whole point of a semantic wire is that a reader who is not putting
+ * pixels anywhere -- an agent, a screen reader, a test -- can take the
+ * window as FACTS.  This is that reader: an iterator that hands back each
+ * command as what it says, and a narrator that turns a stream into plain
+ * lines a person or a program can take at face value.
+ *---------------------------------------------------------------------------*/
+
+/** @brief What kind of fact a command is, once read. */
+typedef enum {
+    TIKU_DL_FACT_PAINT = 0,     /* a stroke of paint: no meaning beyond it */
+    TIKU_DL_FACT_TEXT,          /* words on the window                     */
+    TIKU_DL_FACT_BUTTON,
+    TIKU_DL_FACT_CHECKBOX,
+    TIKU_DL_FACT_RADIO,
+    TIKU_DL_FACT_LIST_ROW,
+    TIKU_DL_FACT_GAUGE,
+    TIKU_DL_FACT_TIP,
+    TIKU_DL_FACT_TEXTFIELD,
+    TIKU_DL_FACT_SCROLLBAR,
+    TIKU_DL_FACT_SLIDER,
+    TIKU_DL_FACT_ALERT_ICON,
+    TIKU_DL_FACT_TABS,
+    TIKU_DL_FACT_MENUFIELD,
+    TIKU_DL_FACT_ICON
+} tiku_dl_fact_kind_t;
+
+/**
+ * @brief One command, as the facts it carries.
+ *
+ * @p text points INTO the caller's buffer and lives as long as it does.
+ * For TABS it is the first of @p v1 names laid end to end.  The three
+ * numbers are the op's own: a gauge's fill in thousandths; a slider's
+ * min, max and value; a scrollbar's position and fraction in thousandths
+ * and whether it lies down; a tab strip's count and current.
+ */
+typedef struct {
+    tiku_dl_fact_kind_t kind;
+    tiku_rect_t         rect;
+    const char         *text;
+    unsigned            state;
+    int                 v1, v2, v3;
+} tiku_dl_fact_t;
+
+/**
+ * @brief Read the next command from a flattened stream.
+ *
+ * @p at is the cursor, 0 to start; it advances past what was read.  A
+ * command whose payload is malformed -- text with no terminator, a body
+ * shorter than its op requires -- stops the read rather than inventing a
+ * fact.  @return 1 with @p out filled, 0 at the end or on malformation.
+ */
+int tiku_dl_read(const void *buf, size_t len, size_t *at,
+                 tiku_dl_fact_t *out);
+
+/**
+ * @brief Say what the stream shows, one fact per line, into @p out.
+ *
+ * Paint is skipped: the narration is what a reader could ACT on -- the
+ * words, the controls with their labels and states, the values.  This is
+ * the window narrated from the wire alone, no pixels consulted, which is
+ * the claim the whole stream exists to make good.
+ *
+ * @return the length written (truncated to @p max - 1 when it must be).
+ */
+size_t tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max);
+
 /**
  * @brief Read a list out of @p buf.
  *
