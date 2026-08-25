@@ -137,6 +137,28 @@ typedef struct {
     uint32_t            *shared;        /* mapped, or NULL            */
     size_t               shared_bytes;
     int                  shown;         /* buffer index being shown   */
+    /*
+     * WHICH of the two arrivals is the newer one.  A session may send
+     * both kinds: pixels (copied into `frame`, or written by the
+     * application into `shared` and announced with a READY), and command
+     * lists (played into `frame`).  Nonzero means a list was the last
+     * thing to arrive, so `frame` is the window and the shared buffer is
+     * a stale earlier copy of it.
+     *
+     * Without this the two sources disagree silently and the shared one
+     * always wins: an application whose frames go as lists -- which is
+     * every application, the moment the desktop claims the feature --
+     * would paint into a buffer nothing looks at and its window would
+     * stand at whatever it drew first.
+     */
+    int                  list_fresh;
+    /*
+     * The geometry the shared mapping was made at.  fw/fh follow
+     * whichever arrival is newest, and a list's are its own -- so the
+     * mapping's size has to be kept apart from them, or the stride used
+     * to read it comes from a frame that was never in it.
+     */
+    int                  sw, sh;
     unsigned             features;      /* what the peer said it can  */
     /* Partial-read state: the wire is a stream and a FRAME is large.
      * The header accumulates too -- a serial link has no peek. */

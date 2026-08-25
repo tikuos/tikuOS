@@ -270,9 +270,23 @@ session_message(tiku_remote_session_t *s)
                 int fd = shm_open(name, O_RDWR, 0600);
 
                 if (fd >= 0) {
-                    void *at = mmap(NULL, bytes, PROT_READ, MAP_SHARED,
-                                    fd, 0);
+                    /*
+                     * The peer's numbers are checked against the object
+                     * they name, not taken on trust: a SURFACE that says
+                     * 400x210 over an object holding one small buffer
+                     * would map short and every read past it would be
+                     * somebody else's memory.  Refused rather than
+                     * half-mapped, which is what this channel does with
+                     * everything it cannot believe.
+                     */
+                    struct stat sb;
+                    void *at = MAP_FAILED;
 
+                    if (fstat(fd, &sb) == 0 && sb.st_size >= 0 &&
+                        (size_t)sb.st_size >= bytes) {
+                        at = mmap(NULL, bytes, PROT_READ, MAP_SHARED,
+                                  fd, 0);
+                    }
                     (void)close(fd);
                     /* Unlinked once mapped: the mapping keeps it alive,
                      * and a name left behind outlives the window. */
@@ -285,7 +299,13 @@ session_message(tiku_remote_session_t *s)
                         }
                         s->fw = w;
                         s->fh = h;
+                        s->sw = w;
+                        s->sh = h;
                         s->shown = 0;
+                        /* The mapping is the window again: fw/fh now
+                         * describe it, and a list drawn before it is
+                         * a frame ago. */
+                        s->list_fresh = 0;
                     }
                 }
             }
@@ -301,6 +321,16 @@ session_message(tiku_remote_session_t *s)
              * copied: the window draws out of the application's own
              * pixels. */
             s->shown = (index < TIKU_REMOTE_BUFFERS) ? (int)index : 0;
+            /*
+             * Back to the MAPPING's geometry.  A DRAW or FRAME since the
+             * surface arrived left fw/fh at that list's own size, and
+             * the shared read strides by them -- so re-enabling it
+             * without restoring them reads the mapping at a stride it
+             * was never made with.
+             */
+            s->fw = s->sw;
+            s->fh = s->sh;
+            s->list_fresh = 0;
             changed = 1;
         }
         break;
@@ -343,6 +373,7 @@ session_message(tiku_remote_session_t *s)
                     s->frame = px;
                     s->fw = w;
                     s->fh = h;
+                    s->list_fresh = 1;   /* the copy IS `frame` */
                     changed = 1;
                 }
             }
@@ -387,6 +418,7 @@ session_message(tiku_remote_session_t *s)
                         s->frame = px;
                         s->fw = w;
                         s->fh = h;
+                        s->list_fresh = 1;
                         changed = 1;
                     }
                     tiku_dl_free(dl);
@@ -578,7 +610,7 @@ tiku_remote_pixels(const tiku_remote_session_t *session)
     if (session == NULL) {
         return NULL;
     }
-    if (session->shared != NULL) {
+    if (session->shared != NULL && !session->list_fresh) {
         size_t one = (size_t)session->fw * (size_t)session->fh;
 
         return session->shared + (size_t)session->shown * one;
