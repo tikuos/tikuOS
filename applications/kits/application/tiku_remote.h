@@ -94,6 +94,7 @@
 #define TIKU_RMSG_READY   7u   /* u32 id, u32 buffer                */
 #define TIKU_RMSG_SAY     8u   /* a flattened tiku_msg_t       */
 #define TIKU_RMSG_DRAW    9u   /* u32 id, i32 w, i32 h, a tiku_dl_t */
+#define TIKU_RMSG_RAISE   10u  /* u32 id: bring that window forward  */
 /* ...and desktop to client. */
 #define TIKU_RMSG_EVENT   16u  /* u32 id, tiku_event_t         */
 #define TIKU_RMSG_PICK    17u  /* u32 id, i32 command               */
@@ -134,6 +135,7 @@ int tiku_remote_path(char *out, size_t max);
  */
 typedef struct tiku_remote_window {
     struct tiku_remote_session *session; /* the row's way back        */
+    int                  wants_front;   /* a RAISE the shell owes it   */
     uint32_t             win_id;        /* what the application calls it */
     struct tiku_window *window;    /* not owned                       */
     uint32_t            *frame;         /* latest pixels, w*h              */
@@ -385,6 +387,9 @@ int tiku_remote_draw(tiku_remote_client_t *client, uint32_t id,
 /** @brief Publish menus for the window, as the plain data they are. */
 /** @brief Give back ONE window; the session stays. */
 void tiku_remote_close_window(tiku_remote_client_t *client, uint32_t id);
+
+/** @brief Ask for one of this session's windows to come to the front. */
+void tiku_remote_raise(tiku_remote_client_t *client, uint32_t id);
 
 int tiku_remote_menus(tiku_remote_client_t *client, uint32_t id,
                            const tiku_menuset_t *menus);

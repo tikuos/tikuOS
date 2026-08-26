@@ -120,6 +120,15 @@ svc_menus(void *ctx, uint32_t id, const tiku_menuset_t *set)
     return tiku_remote_menus(&c->remote, id, set);
 }
 
+static int
+svc_raise(void *ctx, uint32_t id)
+{
+    client_ctx_t *c = ctx;
+
+    tiku_remote_raise(&c->remote, id);
+    return 0;
+}
+
 static void
 svc_close(void *ctx, uint32_t id)
 {
@@ -187,6 +196,7 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
     services.menus = svc_menus;
     services.close = svc_close;
     services.pick = svc_pick;
+    services.raise_window = svc_raise;
     if (app->start != NULL && app->start(&state, &services) != 0) {
         tiku_remote_disconnect(&ctx->remote);
         return 1;

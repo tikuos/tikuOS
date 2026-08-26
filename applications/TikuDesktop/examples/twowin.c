@@ -33,6 +33,7 @@
 
 #define CMD_COUNT 1
 #define CMD_CLOSE 2
+#define CMD_OTHER 3
 
 typedef struct {
     uint32_t             id;
@@ -99,7 +100,7 @@ publish(twowin_state_t *st, pane_t *p)
     menus.nmenu = 1;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "%s",
              p->label);
-    menus.menu[0].nitem = 2;
+    menus.menu[0].nitem = 3;
     snprintf(menus.menu[0].item[0].label,
              sizeof menus.menu[0].item[0].label, "%s typed %d",
              p->label, p->typed);
@@ -109,6 +110,12 @@ publish(twowin_state_t *st, pane_t *p)
              sizeof menus.menu[0].item[1].label, "Close %s", p->label);
     menus.menu[0].item[1].command = CMD_CLOSE;
     menus.menu[0].item[1].enabled = 1;
+    /* The row that reaches the application's OTHER window: what a
+     * Window menu is, in the smallest form that can be proven. */
+    snprintf(menus.menu[0].item[2].label,
+             sizeof menus.menu[0].item[2].label, "Show the other one");
+    menus.menu[0].item[2].command = CMD_OTHER;
+    menus.menu[0].item[2].enabled = 1;
     (void)st->services->menus(st->services->ctx, p->id, &menus);
 }
 
@@ -223,8 +230,20 @@ twowin_pick(void *state, uint32_t window, int command)
     twowin_state_t *st = state;
     pane_t *p = pane_of(st, window);
 
-    if (p != NULL && command == CMD_CLOSE) {
+    if (p == NULL) {
+        return 0;
+    }
+    if (command == CMD_CLOSE) {
         return drop(st, p);
+    }
+    if (command == CMD_OTHER) {
+        pane_t *other = &st->pane[(p == &st->pane[0]) ? 1 : 0];
+
+        if (other->surface != NULL &&
+            st->services->raise_window != NULL) {
+            (void)st->services->raise_window(st->services->ctx,
+                                             other->id);
+        }
     }
     return 0;
 }

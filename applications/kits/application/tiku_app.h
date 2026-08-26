@@ -113,6 +113,23 @@ typedef struct tiku_app_services {
      */
     int (*pick)(void *ctx, uint32_t id, int mode, const char *start,
                 const char *name);
+    /**
+     * @brief Bring this window of mine to the front.
+     *
+     * What an application knows that the host does not: which of its
+     * own windows the person just asked for.  Picking a file already
+     * open, or a row of a Window menu, means THAT window -- and without
+     * this the application's only way to answer is to open a second
+     * window onto the same thing, which is the bug every multi-window
+     * application has had since the first one.
+     *
+     * It moves a window in front of other windows; it does not steal
+     * anything from an application the person is using, because the
+     * gesture that reaches it was made in this application.
+     *
+     * Appended, like place(): a host that predates it leaves it NULL.
+     */
+    int (*raise_window)(void *ctx, uint32_t id);
 } tiku_app_services_t;
 
 /** @brief Which question pick() asks. */

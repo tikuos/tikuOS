@@ -485,6 +485,16 @@ session_message(tiku_remote_session_t *s)
             }
         }
         break;
+    case TIKU_RMSG_RAISE:
+        /* The application asking for one of ITS windows: noted here,
+         * done by the shell, which is the only side that knows what
+         * being in front means. */
+        win = (s->want >= 4u) ? session_window(s, id_of(p)) : NULL;
+        if (win != NULL) {
+            win->wants_front = 1;
+            changed = 1;
+        }
+        break;
     case TIKU_RMSG_MENUS:
         /* Onto the window the id names.  Menus that ignored it landed
          * on whichever window the session happened to be, so an
@@ -688,6 +698,7 @@ tiku_remote_poll(tiku_remote_listener_t *listener)
 
             changed |= win->opened && win->window == NULL;
             changed |= win->menus_fresh;
+            changed |= win->wants_front;
         }
     }
     return changed;
@@ -1072,6 +1083,15 @@ tiku_remote_close_window(tiku_remote_client_t *client, uint32_t id)
         return;
     }
     send_msg(client->fd, TIKU_RMSG_CLOSE, &id, 4);
+}
+
+void
+tiku_remote_raise(tiku_remote_client_t *client, uint32_t id)
+{
+    if (client == NULL || client->fd < 0) {
+        return;
+    }
+    send_msg(client->fd, TIKU_RMSG_RAISE, &id, 4);
 }
 
 /**
