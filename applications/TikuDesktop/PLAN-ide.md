@@ -68,9 +68,11 @@ The gaps, each a kit change with its own proving test:
   `tiku_trk_app.c` has no window layer at all and cannot host
   applications.  "Both placements" is real and both are done:
   `apps/trusted/*.so` runs in process, `apps/*.so` through the runner.
-- **G2 — list group headers.**  `tiku_list` has no notion of a
-  heading row.  Add non-selectable heading rows (drawn in the label
-  style, skipped by arrow travel) to the interface kit.
+- **G2 — list group headers.**  CLOSED 2026-08-27 (kits `38744f3`).
+  `tiku_list_set_heading()`: a heading keeps its place in the one index
+  space but cannot be picked by any road, travel steps over it,
+  spelling passes it by, and it crosses the wire as WORDS rather than
+  as a row a reader would try to open.
 - **G3 — stateful syntax for C.**  `tiku_syntax.h` documents its
   line-local contract as a fact about BASIC and says a language with
   block comments could not use the signature.  It is right.  Add a
@@ -78,11 +80,11 @@ The gaps, each a kit change with its own proving test:
   a block comment, or not), have textview cache each line's entry
   state and re-classify forward from an edit only until the state
   stops changing.  BASIC keeps the line-local road untouched.
-- **G4 — app-internal window addressing.**  The Window menu and the
-  message-row links need "raise window N of mine" and "open file F,
-  then place the caret" as ordinary operations inside one app.  This
-  is IDE-internal bookkeeping (a table of open editors by path), not
-  new kit API — listed because it is where multi-window apps rot.
+- **G4 — app-internal window addressing.**  HALF CLOSED.  The table of
+  open editors by path is in `tiku_ide.c`, and raising turned out to
+  need kit API after all (`raise_window()`, P2).  What is left is the
+  message-row link: "open file F, then place the caret", which P3
+  needs.
 
 ## 3. The project IS a folder, and the project file is facts
 
@@ -122,10 +124,21 @@ Project… is the shell's ordinary Open panel pointed at a
   both be clicked, and Cmd-W is the runtime's close for EMBEDDED
   windows only -- a remote window gets the key, which is why the
   terminal still has Ctrl-W.
-- **P2 — the project window.**  Parse `project.tiku` (G2 headers),
-  Open Project… through the panel, rows open editor windows (one per
-  file, re-pick raises), Window menu tracks them, dirty markers,
-  the one closing question.  Scripts: open, edit, mark, raise, close.
+- **P2 — the project window.**  DONE 2026-08-27 (kits `e71d4eb`,
+  tracker `51cb555`).  `apps/tiku_ide.c` is the application, built as
+  `IDE.so` (the name matters: the Applications menu labels a row from
+  the FILE name, upper-casing only its first letter).
+  `ideproject.script` proves it out of process, through the runner.
+  One gap it turned up and closed: an application could not bring its
+  OWN window forward, so a file already open could only be opened
+  twice -- `raise_window()` was appended to the services and `RAISE`
+  added to the wire (kits `4224966`..).  Facts worth keeping: the
+  remote cap is 4 windows a session, so the IDE holds at most three
+  editors; a script drives the project list by KEYBOARD (Down skips
+  the group name, Return opens), which needs no coordinates and proves
+  the heading rule end to end; and an editor window's tab can sit under
+  the shell's own folder window, so the Window menu -- not
+  `click-window` -- is how a script reaches one.
 - **P3 — the message window.**  Fed by the one backend that already
   exists and is proven: Run of a BASIC file through `tiku-basic`
   (absolute `$TIKU_BASIC`, as runbas.script does).  Output lines
