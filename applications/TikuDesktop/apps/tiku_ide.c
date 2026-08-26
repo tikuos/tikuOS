@@ -19,6 +19,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -773,8 +774,11 @@ message_take(ide_t *st, const char *line)
     if (st->nmsg >= IDE_MSGS) {
         return;
     }
+    /* The marker is not always at the head of the row: a PRINT that
+     * ended in a semicolon leaves the line open, and the error is
+     * written onto the end of it -- "value: ? division by zero". */
     if (sscanf(line, "at line %u", &n) == 1 && st->nmsg > 0 &&
-        st->msg[st->nmsg - 1].text[0] == '?') {
+        strstr(st->msg[st->nmsg - 1].text, "? ") != NULL) {
         m = &st->msg[st->nmsg - 1];
         m->line = (int)n;
         snprintf(m->file, sizeof m->file, "%s", st->child_file);
@@ -802,7 +806,7 @@ message_take(ide_t *st, const char *line)
 static int
 line_of_number(const tiku_textview_t *tv, int want)
 {
-    int i;
+    int i, found = -1;
 
     for (i = 0; i < tiku_textview_lines(tv); i++) {
         const char *p = tiku_textview_line(tv, i);
@@ -817,10 +821,13 @@ line_of_number(const tiku_textview_t *tv, int want)
         }
         got = strtol(p, &end, 10);
         if (end != p && got == (long)want) {
-            return i;
+            /* The LAST of them: storing a line REPLACES one already
+             * numbered the same, so a file with the number twice ran
+             * the second and the first was never in the program. */
+            found = i;
         }
     }
-    return -1;
+    return found;
 }
 
 /**
@@ -882,10 +889,10 @@ run_file(ide_t *st, const char *path)
     st->run_from = 0;           /* the first tick says when */
     st->nmsg = 0;
     st->partial[0] = '\0';
-    messages_open(st);
+    /* No window yet: a run that says nothing has nothing to show, and
+     * a message window standing empty is furniture. */
     (void)tiku_list_set_count(&st->msg_list, 0);
     messages_paint(st);
-    messages_publish(st);
 }
 
 /** @brief Open the file a message was about, at the line it named. */
@@ -941,6 +948,12 @@ message_follow(ide_t *st)
 static void
 messages_show(ide_t *st)
 {
+    if (st->nmsg > 0) {
+        messages_open(st);      /* now there is something to put in it */
+    }
+    if (st->msg_surface == NULL) {
+        return;
+    }
     (void)tiku_list_set_count(&st->msg_list, st->nmsg);
     messages_paint(st);
     messages_publish(st);
@@ -990,6 +1003,11 @@ ide_tick(void *state, int64_t now_us)
     }
     for (;;) {
         n = read(st->child_fd, buf, sizeof buf - 1u);
+        if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+            errno != EINTR) {
+            n = 0;              /* a broken pipe is a finished run */
+            break;
+        }
         if (n <= 0) {
             break;
         }
@@ -1060,6 +1078,14 @@ ide_stop(void *state)
 
     if (st == NULL) {
         return;
+    }
+    if (st->running) {
+        /* A run outliving the application it was started from is a
+         * program nobody is listening to. */
+        (void)kill(st->child, SIGTERM);
+        (void)waitpid(st->child, NULL, 0);
+        (void)close(st->child_fd);
+        st->running = 0;
     }
     for (i = 0; i < IDE_EDITS; i++) {
         tiku_surface_free(st->edit[i].surface);
