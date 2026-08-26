@@ -152,8 +152,16 @@ tiku_syntax_of_path(const char *path)
             return TIKU_SYNTAX_BASIC;
         }
     }
+    if (n >= 2u && path[n - 2] == '.' &&
+        (up((unsigned char)path[n - 1]) == 'C' ||
+         up((unsigned char)path[n - 1]) == 'H')) {
+        return TIKU_SYNTAX_C;
+    }
     return TIKU_SYNTAX_NONE;
 }
+
+static int basic_spans(tiku_syntax_lang_t lang, const char *line,
+                       tiku_span_t *out, int max);
 
 /*---------------------------------------------------------------------------*/
 /* Telling a line apart                                                      */
@@ -324,6 +332,195 @@ label_at(const char *p)
     return (i >= 2 && p[i] == ':') ? i + 1 : 0;
 }
 
+/*---------------------------------------------------------------------------*/
+/* C                                                                         */
+/*---------------------------------------------------------------------------*/
+
+/* The words C reserves, and no more: a table with a library's names in
+ * it would paint an ordinary variable called `count` as if the language
+ * had claimed it. */
+static const char *const c_word[] = {
+    "auto", "break", "case", "char", "const", "continue", "default",
+    "do", "double", "else", "enum", "extern", "float", "for", "goto",
+    "if", "inline", "int", "long", "register", "restrict", "return",
+    "short", "signed", "sizeof", "static", "struct", "switch",
+    "typedef", "union", "unsigned", "void", "volatile", "while",
+    "_Alignas", "_Alignof", "_Atomic", "_Bool", "_Complex", "_Generic",
+    "_Noreturn", "_Static_assert", "_Thread_local"
+};
+
+/** @brief Whether @p p starts a word C reserves, and how long it is. */
+static int
+c_word_at(const char *p, int len)
+{
+    size_t i;
+
+    for (i = 0; i < sizeof c_word / sizeof c_word[0]; i++) {
+        if ((int)strlen(c_word[i]) == len &&
+            strncmp(p, c_word[i], (size_t)len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** @brief How many bytes of a C name start at @p p, or 0. */
+static int
+c_name_at(const char *p)
+{
+    int i = 0;
+
+    if (!is_alpha((unsigned char)p[0]) && p[0] != '_') {
+        return 0;
+    }
+    while (is_word_cont((unsigned char)p[i]) || p[i] == '_') {
+        i++;
+    }
+    return i;
+}
+
+/**
+ * @brief Tell one line of C apart, carrying a block remark across.
+ *
+ * @return the number of runs written; @p left takes what this line
+ *         leaves open.
+ */
+static int
+c_spans(const char *line, tiku_syntax_state_t in,
+        tiku_syntax_state_t *left, tiku_span_t *out, int max)
+{
+    spans_t s;
+    tiku_syntax_state_t state = in;
+    int i = 0;
+    int at_head = 1;            /* nothing but blanks seen yet */
+
+    s.out = out;
+    s.max = max;
+    s.n = 0;
+    while (line[i] != '\0') {
+        char c = line[i];
+
+        if (state == TIKU_SYNTAX_BLOCK) {
+            /* Inside a remark opened on an earlier line: everything is
+             * the remark until it closes, and if it does not close the
+             * next line begins inside it too. */
+            int run = 0;
+
+            while (line[i + run] != '\0') {
+                if (line[i + run] == '*' && line[i + run + 1] == '/') {
+                    run += 2;
+                    state = TIKU_SYNTAX_OPEN;
+                    break;
+                }
+                run++;
+            }
+            if (!push(&s, TIKU_INK_REMARK, run)) {
+                break;
+            }
+            i += run;
+            continue;
+        }
+        if (c == ' ' || c == '\t') {
+            if (!push(&s, TIKU_INK_PLAIN, 1)) {
+                break;
+            }
+            i++;
+            continue;
+        }
+        if (c == '/' && line[i + 1] == '/') {
+            /* To the end of the line, and no further: this is the one
+             * remark C does not carry. */
+            if (!push(&s, TIKU_INK_REMARK, (int)strlen(line + i))) {
+                break;
+            }
+            i += (int)strlen(line + i);
+            at_head = 0;
+            continue;
+        }
+        if (c == '/' && line[i + 1] == '*') {
+            state = TIKU_SYNTAX_BLOCK;
+            at_head = 0;
+            i += 2;
+            if (!push(&s, TIKU_INK_REMARK, 2)) {
+                break;
+            }
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            /* A character is text in quotes too, and an unclosed one
+             * ends with the line rather than eating the next -- the
+             * same answer BASIC gives, and for the same reason. */
+            int len = 1;
+
+            while (line[i + len] != '\0') {
+                if (line[i + len] == '\\' && line[i + len + 1] != '\0') {
+                    len += 2;
+                    continue;
+                }
+                if (line[i + len] == c) {
+                    len++;
+                    break;
+                }
+                len++;
+            }
+            if (!push(&s, TIKU_INK_STR, len)) {
+                break;
+            }
+            i += len;
+            at_head = 0;
+            continue;
+        }
+        if (at_head && c == '#') {
+            /* What the preprocessor was told, which is not the language
+             * underneath it but is reserved all the same. */
+            int len = 1 + c_name_at(line + i + 1);
+
+            if (!push(&s, TIKU_INK_WORD, len)) {
+                break;
+            }
+            i += len;
+            at_head = 0;
+            continue;
+        }
+        if (is_digit((unsigned char)c)) {
+            int len = number_at(line + i);
+
+            if (len <= 0) {
+                len = 1;
+            }
+            if (!push(&s, TIKU_INK_NUM, len)) {
+                break;
+            }
+            i += len;
+            at_head = 0;
+            continue;
+        }
+        {
+            int len = c_name_at(line + i);
+
+            if (len > 0) {
+                if (!push(&s, c_word_at(line + i, len) ? TIKU_INK_WORD
+                                                       : TIKU_INK_PLAIN,
+                          len)) {
+                    break;
+                }
+                i += len;
+                at_head = 0;
+                continue;
+            }
+        }
+        if (!push(&s, TIKU_INK_PLAIN, 1)) {
+            break;
+        }
+        i++;
+        at_head = 0;
+    }
+    if (left != NULL) {
+        *left = state;
+    }
+    return s.n;
+}
+
 /**
  * @brief Fold the @p len bytes at @p p into @p buf, upper-cased.
  *
@@ -352,6 +549,34 @@ fold(const char *p, int len, char *buf, size_t max)
 int
 tiku_syntax_spans(tiku_syntax_lang_t lang, const char *line,
                   tiku_span_t *out, int max)
+{
+    /* The line-local road, unchanged: a language that carries nothing
+     * needs to be asked nothing. */
+    return tiku_syntax_spans_on(lang, line, TIKU_SYNTAX_OPEN, NULL, out,
+                                max);
+}
+
+int
+tiku_syntax_spans_on(tiku_syntax_lang_t lang, const char *line,
+                     tiku_syntax_state_t in,
+                     tiku_syntax_state_t *out_state, tiku_span_t *out,
+                     int max)
+{
+    if (out_state != NULL) {
+        *out_state = TIKU_SYNTAX_OPEN;
+    }
+    if (line == NULL || out == NULL || max <= 0) {
+        return 0;
+    }
+    if (lang == TIKU_SYNTAX_C) {
+        return c_spans(line, in, out_state, out, max);
+    }
+    return basic_spans(lang, line, out, max);
+}
+
+static int
+basic_spans(tiku_syntax_lang_t lang, const char *line, tiku_span_t *out,
+            int max)
 {
     spans_t s;
     int i = 0;

@@ -22,14 +22,21 @@
  * treat as a variable teaches the reader something false about their own
  * program, and they will believe it, because the machine said it.
  *
- * CLASSIFICATION IS LINE-LOCAL, and that is a fact about BASIC rather
- * than a simplification: a remark runs to the end of its line, a quoted
- * string is closed by the line's end if the quote never comes, and there
- * is no continuation and no block comment.  Nothing carries across, so
- * a line can be told apart on its own -- which is what lets a window
- * classify only the lines it is showing, and never re-scan a document to
- * paint one row.  A language with block comments could not use this
- * signature, and should not pretend to.
+ * CLASSIFICATION IS LINE-LOCAL FOR BASIC, and that is a fact about the
+ * language rather than a simplification: a remark runs to the end of its
+ * line, a quoted string is closed by the line's end if the quote never
+ * comes, and there is no continuation and no block comment.  Nothing
+ * carries across, so a line can be told apart on its own -- which is
+ * what lets a window classify only the lines it is showing, and never
+ * re-scan a document to paint one row.
+ *
+ * C CANNOT USE THAT SIGNATURE, exactly as this file always said: a
+ * block remark opened on one line is still open on the next, and no
+ * amount of looking at the second line can tell you so.  What carries
+ * is one small thing -- whether the line BEGAN inside a remark -- and it
+ * is carried explicitly, in and out, by tiku_syntax_spans_on().  A
+ * caller that colours C must therefore know where its lines start from,
+ * which is a cost the language imposes and this file will not hide.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,8 +48,21 @@
 /** @brief The languages this build can tell apart. */
 typedef enum {
     TIKU_SYNTAX_NONE = 0,   /* prose: every byte is the document's ink */
-    TIKU_SYNTAX_BASIC       /* TikuOS BASIC                            */
+    TIKU_SYNTAX_BASIC,      /* TikuOS BASIC                            */
+    TIKU_SYNTAX_C           /* C, which carries a remark between lines */
 } tiku_syntax_lang_t;
+
+/**
+ * @brief What a line was left in the middle of.
+ *
+ * The whole of what one line of C tells the next.  It is small on
+ * purpose: a state that grew to hold nesting, or a string continued by
+ * a backslash, would be a parser pretending to be a highlighter.
+ */
+typedef unsigned tiku_syntax_state_t;
+
+#define TIKU_SYNTAX_OPEN   0u   /* nothing carried in                  */
+#define TIKU_SYNTAX_BLOCK  1u   /* a block remark is still open        */
 
 /**
  * @brief Tell @p line apart into runs of meaning, into @p out.
@@ -63,6 +83,24 @@ int tiku_syntax_spans(tiku_syntax_lang_t lang, const char *line,
                       tiku_span_t *out, int max);
 
 /**
+ * @brief Tell @p line apart, saying what it was begun in and what it
+ *        leaves behind.
+ *
+ * The same answer as tiku_syntax_spans() for a language that carries
+ * nothing, which is why that one is still the whole of the BASIC road.
+ *
+ * @param in    what the line before this one left open.
+ * @param out_state where this line's own leaving is written, when given.
+ *              A caller painting a window walks from a line it knows the
+ *              state of -- the document's first, which is OPEN -- and
+ *              carries the answer forward.
+ */
+int tiku_syntax_spans_on(tiku_syntax_lang_t lang, const char *line,
+                         tiku_syntax_state_t in,
+                         tiku_syntax_state_t *out_state,
+                         tiku_span_t *out, int max);
+
+/**
  * @brief Whether @p name is a word TikuOS BASIC reserves.
  *
  * Case-insensitive, and the whole word must match -- PRINTER is not
@@ -76,9 +114,10 @@ int tiku_syntax_basic_word(const char *name);
  * @brief The language a file called @p path is written in.
  *
  * By its suffix, because that is the only thing a name can honestly
- * say: ".bas" is BASIC and everything else is prose.  Sniffing the
- * contents would guess, and a guess that highlights an ordinary letter
- * as a program is the lie this whole file exists to avoid.
+ * say: ".bas" is BASIC, ".c" and ".h" are C, and everything else is
+ * prose.  Sniffing the contents would guess, and a guess that
+ * highlights an ordinary letter as a program is the lie this whole file
+ * exists to avoid.
  */
 tiku_syntax_lang_t tiku_syntax_of_path(const char *path);
 

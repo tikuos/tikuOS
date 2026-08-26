@@ -194,8 +194,29 @@ paint(edit_state_t *st)
     tiku_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
     char where[128];
     int i;
+    tiku_syntax_state_t carry = TIKU_SYNTAX_OPEN;
 
     tiku_fill(st->surface, page, TIKU_C_DOC);
+    /*
+     * What the first line SHOWN was begun in.  BASIC carries nothing,
+     * so this stays OPEN and the walk below does not run; C carries a
+     * remark between its lines, and a window that started classifying
+     * at its own top would paint the inside of a remark as language.
+     */
+    if (st->lang == TIKU_SYNTAX_C) {
+        tiku_span_t span[64];
+
+        for (i = 0; i < tiku_textview_top(&st->tv); i++) {
+            const char *before = tiku_textview_line(&st->tv, i);
+
+            if (before == NULL) {
+                break;
+            }
+            (void)tiku_syntax_spans_on(st->lang, before, carry, &carry,
+                                       span,
+                                       (int)(sizeof span / sizeof span[0]));
+        }
+    }
     for (i = 0; i < rows &&
              tiku_textview_top(&st->tv) + i < tiku_textview_lines(&st->tv);
          i++) {
@@ -210,7 +231,8 @@ paint(edit_state_t *st)
              * edit changes what the next frame paints and there is no
              * second copy to remember to update. */
             tiku_span_t span[64];
-            int n = tiku_syntax_spans(st->lang, text, span,
+            int n = tiku_syntax_spans_on(st->lang, text, carry, &carry,
+                                      span,
                                       (int)(sizeof span / sizeof span[0]));
 
             (void)tiku_ui_text_spans(st->surface, f, MARGIN, y + f->ascent,

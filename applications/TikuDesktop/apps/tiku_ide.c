@@ -294,10 +294,7 @@ edit_of_id(ide_t *st, uint32_t id)
 static tiku_syntax_lang_t
 lang_of(const char *name)
 {
-    const char *dot = strrchr(name, '.');
-
-    return (dot != NULL && strcmp(dot, ".bas") == 0) ? TIKU_SYNTAX_BASIC
-                                                     : TIKU_SYNTAX_NONE;
+    return tiku_syntax_of_path(name);
 }
 
 static void
@@ -307,15 +304,38 @@ edit_paint(ide_t *st, edit_t *e)
     tiku_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H };
     tiku_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
     int rows = (EDIT_H - STRIP_H - MARGIN) / (f->height + 2);
+    tiku_syntax_state_t carry = TIKU_SYNTAX_OPEN;
+    int top = tiku_textview_top(&e->tv);
     int i;
     char where[160];
 
     if (e->surface == NULL) {
         return;
     }
+    /*
+     * C carries a remark between lines, so the first line SHOWN cannot
+     * be told apart on its own: the walk starts at the document's own
+     * beginning, where the state is known, and comes forward.  Nothing
+     * is cached, because a cache of this would have to be invalidated
+     * by every edit and the arithmetic of that is worth more than the
+     * walk -- a document is bounded, and a window is redrawn by hand.
+     */
+    if (e->lang == TIKU_SYNTAX_C) {
+        tiku_span_t span[64];
+
+        for (i = 0; i < top; i++) {
+            const char *text = tiku_textview_line(&e->tv, i);
+
+            if (text == NULL) {
+                break;
+            }
+            (void)tiku_syntax_spans_on(e->lang, text, carry, &carry, span,
+                                       (int)(sizeof span / sizeof span[0]));
+        }
+    }
     tiku_ui_sunken(e->surface, page, TIKU_C_DOC);
     for (i = 0; i < rows; i++) {
-        int line = tiku_textview_top(&e->tv) + i;
+        int line = top + i;
         const char *text = tiku_textview_line(&e->tv, line);
         int y = MARGIN + i * (f->height + 2);
 
@@ -324,7 +344,8 @@ edit_paint(ide_t *st, edit_t *e)
         }
         if (e->lang != TIKU_SYNTAX_NONE) {
             tiku_span_t span[64];
-            int n = tiku_syntax_spans(e->lang, text, span,
+            int n = tiku_syntax_spans_on(e->lang, text, carry, &carry,
+                                      span,
                                       (int)(sizeof span / sizeof span[0]));
 
             (void)tiku_ui_text_spans(e->surface, f, MARGIN, y + f->ascent,
