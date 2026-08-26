@@ -695,13 +695,22 @@ edit_event(void *state, const tiku_event_t *event)
         tiku_textview_place(&st->tv, cy, cx);
         break;
     }
-    default:
-        if (event->key >= 32u && event->key < 127u) {
-            tiku_textview_insert(&st->tv, (char)event->key);
+    default: {
+        /* The typed CHARACTER rides in text; the key is the folded
+         * keysym shortcuts match on, and the fold loses the case that
+         * Shift put there. */
+        unsigned ch = (unsigned char)event->text[0];
+
+        if (ch == 0u) {
+            ch = event->key;
+        }
+        if (ch >= 32u && ch < 127u) {
+            tiku_textview_insert(&st->tv, (char)ch);
         } else {
             return 0;           /* not ours: no repaint owed */
         }
         break;
+    }
     }
     touched(st, was_modified);
     (void)tiku_textview_reveal(&st->tv, rows);

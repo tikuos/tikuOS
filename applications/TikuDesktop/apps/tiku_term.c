@@ -974,12 +974,21 @@ term_event(void *state, const tiku_event_t *event)
     case TIKU_KEY_PAGE_DOWN:
         seq = "\x1b[6~";
         break;
-    default:
-        if (event->key >= 32u && event->key < 127u) {
-            one = (char)event->key;
+    default: {
+        /* The typed CHARACTER rides in text; the key is the folded
+         * keysym shortcuts match on, and the fold loses the case that
+         * Shift put there. */
+        unsigned ch = (unsigned char)event->text[0];
+
+        if (ch == 0u) {
+            ch = event->key;
+        }
+        if (ch >= 32u && ch < 127u) {
+            one = (char)ch;
             send_bytes(st, &one, 1u);
         }
         return 0;
+    }
     }
     send_bytes(st, seq, strlen(seq));
     return 0;
