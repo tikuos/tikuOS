@@ -165,6 +165,23 @@ Project… is the shell's ordinary Open panel pointed at a
   invalidate.  `ccolour.script` proves it the only way pixels can be:
   the same word twice, one glyph two rows apart, in two colours.
 - **P5 — Build.**  DECIDED AND DONE 2026-08-27 (`64b92cf`), see §7.
+- **P6 — the cold start.**  DONE 2026-08-27, and it exists because the
+  method missed something: every proof PLANTED a project first, so an
+  IDE that could not create anything passed every test and fell over
+  the moment a person launched it.  A fixture proves a road exists; it
+  also hides the road's absence.  New Project… writes the description
+  through the shell's Save panel, named for the folder that holds it;
+  New Project… over one that already exists OPENS it, because a person
+  naming an existing project is not asking to empty it (the panel's own
+  replace question still stands in the way).  New File…/Add File… put a
+  file IN the project by APPENDING to the description -- never
+  rewriting it, which would silently drop every line this build does
+  not know -- and the file must live in the project's folder, because
+  the description names its files relatively and a project is a folder
+  somebody can move.  The editor opens on the new file at once.  And
+  the door §1 promised but nothing built: two clicks on a row open it,
+  as Return does.  `idenew.script` is the cold start, start to finish,
+  with NOTHING planted.
 
 Each phase is small enough for the house method to hold whole:
 proving script first, mutation by name, full suite, both repos.

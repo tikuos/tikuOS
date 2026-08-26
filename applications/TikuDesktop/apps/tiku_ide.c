@@ -63,6 +63,16 @@
 #define CMD_RUN      5
 #define CMD_FOLLOW   6
 #define CMD_BUILD    7
+#define CMD_NEWPROJ  8
+#define CMD_NEWFILE  9
+#define CMD_ADDFILE  10
+
+/* Which question the shell's panel is answering, when it answers. */
+enum {
+    ASK_OPEN = 0,               /* Open Project…: the path IS a project */
+    ASK_NEWPROJ,                /* New Project…: make it, then open it  */
+    ASK_FILE                    /* New/Add File…: put it in the project */
+};
 #define CMD_WINDOW   64         /* +i: the i'th editor of the Window menu */
 
 /** @brief One line of the project window: a file, or a group's name. */
@@ -155,6 +165,16 @@ typedef struct {
     tiku_alert_t               ask;
     tiku_rect_t                ask_frame;
     char                            note[128];
+    /* The project FILE itself, because adding to a project means
+     * appending to the file that describes it -- appending, so the
+     * lines this build does not know survive being edited by it. */
+    char                            proj_file[512];
+    int                             asked;      /* which question, ASK_* */
+    /* The click before this one, because opening by mouse is two of
+     * them: the same row, close together.  The host synthesises no
+     * double-click event, and the row's own clock is the event's. */
+    int                             click_row;
+    int64_t                         click_at;
     /* What the last run said, and the window it says it in.  The
      * window arrives when there is something to put in it: a message
      * window standing empty is furniture. */
@@ -581,11 +601,27 @@ project_paint(ide_t *st)
     tiku_fill(st->proj_surface, strip, TIKU_C_PANEL);
     if (st->note[0] != '\0') {
         snprintf(says, sizeof says, "%s", st->note);
-    } else if (st->proj.nrow == 0) {
-        snprintf(says, sizeof says, "no project open");
+    } else if (st->proj_file[0] == '\0') {
+        snprintf(says, sizeof says,
+                 "no project open -- the Project menu starts one");
     } else {
-        snprintf(says, sizeof says, "%d file%s", st->proj.nrow,
-                 st->proj.nrow == 1 ? "" : "s");
+        /* FILES, not rows: a group's name is furniture, and a project
+         * holding one heading and nothing under it is empty. */
+        int files = 0;
+        int i;
+
+        for (i = 0; i < st->proj.nrow; i++) {
+            files += !st->proj.row[i].heading;
+        }
+        if (files == 0) {
+            snprintf(says, sizeof says,
+                     "%s: empty -- New File… adds one",
+                     (st->proj.title[0] != '\0') ? st->proj.title
+                                                 : "a project");
+        } else {
+            snprintf(says, sizeof says, "%d file%s", files,
+                     files == 1 ? "" : "s");
+        }
     }
     tiku_text(st->proj_surface, f, MARGIN,
                    strip.y + (STRIP_H - f->height) / 2 + f->ascent,
@@ -622,9 +658,26 @@ project_publish(ide_t *st)
     menus.nmenu = 2;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "Project");
     snprintf(menus.menu[0].item[0].label,
-             sizeof menus.menu[0].item[0].label, "Open Project…");
-    menus.menu[0].item[0].command = CMD_OPEN;
+             sizeof menus.menu[0].item[0].label, "New Project…");
+    menus.menu[0].item[0].command = CMD_NEWPROJ;
     menus.menu[0].item[0].enabled = 1;
+    snprintf(menus.menu[0].item[1].label,
+             sizeof menus.menu[0].item[1].label, "Open Project…");
+    menus.menu[0].item[1].command = CMD_OPEN;
+    menus.menu[0].item[1].enabled = 1;
+    /* The two roads a file takes INTO a project: made new, or already
+     * on disk and brought in.  Neither means anything without a project
+     * for it to land in, and the rows say so by dimming. */
+    snprintf(menus.menu[0].item[2].label,
+             sizeof menus.menu[0].item[2].label, "New File…");
+    menus.menu[0].item[2].command = CMD_NEWFILE;
+    menus.menu[0].item[2].enabled =
+        (unsigned char)(st->proj_file[0] != '\0');
+    snprintf(menus.menu[0].item[3].label,
+             sizeof menus.menu[0].item[3].label, "Add File…");
+    menus.menu[0].item[3].command = CMD_ADDFILE;
+    menus.menu[0].item[3].enabled =
+        (unsigned char)(st->proj_file[0] != '\0');
     {
         /* Run is offered for the row the list is standing on, and only
          * when its NAME says the interpreter would know what to do
@@ -635,31 +688,31 @@ project_publish(ide_t *st)
                    lang_of(st->proj.row[row].name) == TIKU_SYNTAX_BASIC &&
                    !st->running);
 
-        snprintf(menus.menu[0].item[1].label,
-                 sizeof menus.menu[0].item[1].label, "Run%s%s",
+        snprintf(menus.menu[0].item[4].label,
+                 sizeof menus.menu[0].item[4].label, "Run%s%s",
                  (row >= 0 && row < st->proj.nrow &&
                   !st->proj.row[row].heading) ? " " : "",
                  (row >= 0 && row < st->proj.nrow &&
                   !st->proj.row[row].heading) ? st->proj.row[row].name
                                               : "");
-        menus.menu[0].item[1].command = CMD_RUN;
-        menus.menu[0].item[1].enabled = (unsigned char)can;
+        menus.menu[0].item[4].command = CMD_RUN;
+        menus.menu[0].item[4].enabled = (unsigned char)can;
     }
     /* Build names what it is FOR, because that is the decision the
      * project already made and the one a person needs to see before
      * they trust what comes back. */
-    snprintf(menus.menu[0].item[2].label,
-             sizeof menus.menu[0].item[2].label, "Build for %s",
+    snprintf(menus.menu[0].item[5].label,
+             sizeof menus.menu[0].item[5].label, "Build for %s",
              (st->proj.target[0] != '\0') ? st->proj.target
                                           : "nothing yet");
-    menus.menu[0].item[2].command = CMD_BUILD;
-    menus.menu[0].item[2].enabled =
+    menus.menu[0].item[5].command = CMD_BUILD;
+    menus.menu[0].item[5].enabled =
         (unsigned char)(st->proj.nrow > 0 && !st->running);
-    snprintf(menus.menu[0].item[3].label,
-             sizeof menus.menu[0].item[3].label, "Close Project");
-    menus.menu[0].item[3].command = CMD_SHUT;
-    menus.menu[0].item[3].enabled = 1;
-    menus.menu[0].nitem = 4;
+    snprintf(menus.menu[0].item[6].label,
+             sizeof menus.menu[0].item[6].label, "Close Project");
+    menus.menu[0].item[6].command = CMD_SHUT;
+    menus.menu[0].item[6].enabled = 1;
+    menus.menu[0].nitem = 7;
 
     snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "Window");
     for (i = 0; i < IDE_EDITS && n < TIKU_MENUSET_ITEMS; i++) {
@@ -736,7 +789,107 @@ project_take(ide_t *st, const char *path)
         snprintf(dir, sizeof dir, ".");
     }
     (void)project_parse(&st->proj, whole, dir);
+    snprintf(st->proj_file, sizeof st->proj_file, "%s", path);
     project_show(st);
+}
+
+/**
+ * @brief Put @p path into the project, making the file when it is new.
+ *
+ * The description is APPENDED to, never rewritten: a rewrite from what
+ * this build parsed would silently drop every line it did not know,
+ * which is exactly the forward road the skipping rule keeps open.
+ */
+static void
+project_add_file(ide_t *st, const char *path)
+{
+    size_t dirlen = strlen(st->proj.dir);
+    const char *leaf;
+    FILE *f;
+    int i;
+
+    if (st->proj_file[0] == '\0') {
+        return;                 /* no project to put it in */
+    }
+    /* Inside the project's own folder, because the description names
+     * its files RELATIVELY -- a project is a folder somebody can move,
+     * and a file outside it would be left behind. */
+    if (strncmp(path, st->proj.dir, dirlen) != 0 ||
+        path[dirlen] != '/') {
+        snprintf(st->note, sizeof st->note,
+                 "a project's files live in its folder");
+        project_paint(st);
+        return;
+    }
+    leaf = path + dirlen + 1;
+    for (i = 0; i < st->proj.nrow; i++) {
+        if (!st->proj.row[i].heading &&
+            strcmp(st->proj.row[i].path, path) == 0) {
+            edit_open(st, &st->proj.row[i]);
+            return;             /* already listed: adding means opening */
+        }
+    }
+    f = fopen(path, "a");       /* made when new, kept when not */
+    if (f != NULL) {
+        (void)fclose(f);
+    }
+    f = fopen(st->proj_file, "a");
+    if (f == NULL) {
+        snprintf(st->note, sizeof st->note, "cannot write the project");
+        project_paint(st);
+        return;
+    }
+    (void)fprintf(f, "file %s\n", leaf);
+    (void)fclose(f);
+    project_take(st, st->proj_file);
+    for (i = 0; i < st->proj.nrow; i++) {
+        if (!st->proj.row[i].heading &&
+            strcmp(st->proj.row[i].path, path) == 0) {
+            tiku_list_select_only(&st->tv_list, i);
+            edit_open(st, &st->proj.row[i]);
+            return;
+        }
+    }
+}
+
+/** @brief Make a project where the person said, and open it. */
+static void
+project_create(ide_t *st, const char *path)
+{
+    FILE *probe = fopen(path, "r");
+    char dir[512];
+    char *slash;
+
+    if (probe != NULL) {
+        /* Already there: making it again would empty it, and a person
+         * naming an existing project almost always means to OPEN it. */
+        (void)fclose(probe);
+        project_take(st, path);
+        return;
+    }
+    snprintf(dir, sizeof dir, "%s", path);
+    slash = strrchr(dir, '/');
+    if (slash != NULL) {
+        *slash = '\0';
+    } else {
+        snprintf(dir, sizeof dir, ".");
+    }
+    {
+        FILE *f = fopen(path, "w");
+        const char *leaf = strrchr(dir, '/');
+
+        if (f == NULL) {
+            snprintf(st->note, sizeof st->note, "cannot write %s", path);
+            project_paint(st);
+            return;
+        }
+        /* Named for the folder that holds it, which is the one name
+         * already chosen; a person who wants another edits the line. */
+        (void)fprintf(f, "title %s\ngroup Sources\n",
+                      (leaf != NULL) ? leaf + 1 : dir);
+        (void)fclose(f);
+    }
+    project_take(st, path);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1260,6 +1413,7 @@ ide_start(void **state, const tiku_app_services_t *services)
         return -1;
     }
     tiku_list_init(&st->tv_list, 1);
+    st->click_row = -1;
     st->proj_id = services->open(services->ctx, "Project", IDE_W, IDE_H);
     project_paint(st);
     project_publish(st);
@@ -1416,11 +1570,23 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
         return 0;
     }
     if (event->type == TIKU_EVENT_POINTER_DOWN) {
-        tiku_list_click(&st->tv_list,
-                        tiku_list_at(&st->tv_list, project_body(),
-                                     event->x, event->y),
-                        event->modifiers);
+        int row = tiku_list_at(&st->tv_list, project_body(), event->x,
+                               event->y);
+
+        /* The second click of two on the same row OPENS it, exactly as
+         * Return does: a person with a mouse is owed the same door. */
+        if (row >= 0 && row == st->click_row &&
+            event->time_us - st->click_at < 400000 &&
+            tiku_list_chosen(&st->tv_list) == row) {
+            st->click_row = -1;
+            open_chosen(st);
+            return 0;
+        }
+        st->click_row = row;
+        st->click_at = event->time_us;
+        tiku_list_click(&st->tv_list, row, event->modifiers);
         project_paint(st);
+        project_publish(st);    /* Run follows the row it would run */
         return 0;
     }
     if (event->key == TIKU_KEY_RETURN) {
@@ -1456,8 +1622,35 @@ ide_pick(void *state, uint32_t window, int command)
     switch (command) {
     case CMD_OPEN:
         if (st->services->pick != NULL) {
+            st->asked = ASK_OPEN;
             (void)st->services->pick(st->services->ctx, st->proj_id,
                                      TIKU_APP_PICK_OPEN, NULL, NULL);
+        }
+        break;
+    case CMD_NEWPROJ:
+        if (st->services->pick != NULL) {
+            st->asked = ASK_NEWPROJ;
+            /* The shell's own Save panel names the place and the file;
+             * the offered name is the one the opener looks for. */
+            (void)st->services->pick(st->services->ctx, st->proj_id,
+                                     TIKU_APP_PICK_SAVE, NULL,
+                                     "project.tiku");
+        }
+        break;
+    case CMD_NEWFILE:
+        if (st->services->pick != NULL && st->proj_file[0] != '\0') {
+            st->asked = ASK_FILE;
+            (void)st->services->pick(st->services->ctx, st->proj_id,
+                                     TIKU_APP_PICK_SAVE, st->proj.dir,
+                                     "untitled.bas");
+        }
+        break;
+    case CMD_ADDFILE:
+        if (st->services->pick != NULL && st->proj_file[0] != '\0') {
+            st->asked = ASK_FILE;
+            (void)st->services->pick(st->services->ctx, st->proj_id,
+                                     TIKU_APP_PICK_OPEN, st->proj.dir,
+                                     NULL);
         }
         break;
     case CMD_SAVE:
@@ -1537,8 +1730,19 @@ ide_picked(void *state, uint32_t window, const char *path)
     ide_t *st = state;
 
     (void)window;
-    if (path != NULL) {
+    if (path == NULL || path[0] == '\0') {
+        return;
+    }
+    switch (st->asked) {
+    case ASK_NEWPROJ:
+        project_create(st, path);
+        break;
+    case ASK_FILE:
+        project_add_file(st, path);
+        break;
+    default:
         project_take(st, path);
+        break;
     }
 }
 
