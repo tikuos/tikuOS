@@ -296,28 +296,51 @@ void
 tiku_thumb_paint(tiku_surface_t *s, const tiku_image_t *th,
                      int x, int y, int size)
 {
+    uint32_t scaled[TIKU_DL_PICTURE_MAX];
     int py, px;
 
     if (s == NULL || th == NULL || th->px == NULL || size <= 0) {
         return;
     }
+    if ((long)size * (long)size > TIKU_DL_PICTURE_MAX) {
+        /* Too big to travel as one picture, and too big for the buffer
+         * that scales it: drawn straight, and the recorder is told by
+         * tiku_pixel that the list is not whole. */
+        for (py = 0; py < size; py++) {
+            long sy = (long)py * th->h / size;
+
+            for (px = 0; px < size; px++) {
+                long sx = (long)px * th->w / size;
+                uint32_t p = th->px[sy * th->w + sx];
+
+                if ((p >> 24) != 0u) {
+                    tiku_pixel(s, x + px, y + py,
+                                    TIKU_RGB((p >> 16) & 0xffu,
+                                                  (p >> 8) & 0xffu,
+                                                  p & 0xffu));
+                }
+            }
+        }
+        return;
+    }
+    /*
+     * Scaled HERE and drawn as the picture it became, so what crosses
+     * the wire is what a person sees: the far end draws a bitmap rather
+     * than re-deriving a scale it would have to agree with.  The
+     * transparent margin travels with it, which is what makes the
+     * thumbnail sit ON the row instead of inside a square of its own
+     * (IV-034).
+     */
     for (py = 0; py < size; py++) {
         long sy = (long)py * th->h / size;
 
         for (px = 0; px < size; px++) {
             long sx = (long)px * th->w / size;
-            uint32_t p = th->px[sy * th->w + sx];
 
-            /* The transparent margin is left alone rather than painted:
-             * that is what makes the thumbnail sit ON the row instead of
-             * inside a square of its own (IV-034). */
-            if ((p >> 24) != 0u) {
-                tiku_pixel(s, x + px, y + py,
-                                TIKU_RGB((p >> 16) & 0xffu,
-                                              (p >> 8) & 0xffu, p & 0xffu));
-            }
+            scaled[py * size + px] = th->px[sy * th->w + sx];
         }
     }
+    tiku_picture(s, x, y, size, size, scaled);
 }
 
 int

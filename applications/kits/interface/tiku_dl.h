@@ -230,6 +230,41 @@ int tiku_dl_icon(tiku_dl_t *dl, const void *hvif, size_t hlen,
 int tiku_dl_icons(const tiku_dl_t *dl);
 
 /**
+ * @brief How many PICTURES the list carries.
+ *
+ * A far end that cannot play them must be told to take the pixels
+ * instead, the same way icon commands are gated: a peer that stepped
+ * over a picture would draw a window with a hole where the picture was
+ * and nothing would say so.
+ */
+int tiku_dl_pictures(const tiku_dl_t *dl);
+
+/**
+ * @brief The most pixels one picture command may carry.
+ *
+ * A thumbnail and an icon fit; a wallpaper does not, and must not --
+ * a window whose picture is most of its area is a window the pixel
+ * path was always going to win, and a list bigger than the frame it
+ * describes is a list nobody should send.
+ */
+#define TIKU_DL_PICTURE_MAX 4096
+
+/**
+ * @brief A bitmap of @p w by @p h at @p x, @p y, with its own mask.
+ *
+ * The pixels are ARGB: a byte of alpha and three of colour, and a
+ * pixel whose alpha is zero is not painted at all.  That is what makes
+ * a thumbnail sit ON a row rather than inside a square of its own, and
+ * it is why the mask travels with the picture rather than being
+ * reconstructed at the far end.
+ *
+ * @return 1 recorded whole.  0 means it was NOT recorded -- too many
+ *         pixels, or no room -- and the caller owes the list a miss.
+ */
+int tiku_dl_picture(tiku_dl_t *dl, int x, int y, int w, int h,
+                    const uint32_t *px);
+
+/**
  * @brief How the far end draws an icon command; @p mix/@p wash as above.
  *
  * Injected rather than called, because the rasteriser lives a kit ABOVE
@@ -285,6 +320,7 @@ typedef enum {
     TIKU_DL_FACT_ALERT_ICON,
     TIKU_DL_FACT_TABS,
     TIKU_DL_FACT_MENUFIELD,
+    TIKU_DL_FACT_PICTURE,       /* a bitmap with its own mask              */
     TIKU_DL_FACT_ICON
 } tiku_dl_fact_kind_t;
 

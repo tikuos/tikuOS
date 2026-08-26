@@ -61,6 +61,14 @@
  * other -- and a sender whose list carries icons but whose peer never
  * claimed this sends the pixels, exactly as it does for a miss.
  */
+/*
+ * The peer can play a PICTURE command -- a small bitmap with its own
+ * mask.  Separate from the command stream for the same reason icons
+ * are: an end may play one without the other, and an end that stepped
+ * over a picture would draw a window with a hole where the picture was
+ * and nothing would say so.
+ */
+#define TIKU_FEAT_PICTURE_STREAM 0x8u
 #define TIKU_FEAT_ICON_STREAM    0x4u
 #define TIKU_REMOTE_BUFFERS      2
 #define TIKU_REMOTE_SHM_NAME     64

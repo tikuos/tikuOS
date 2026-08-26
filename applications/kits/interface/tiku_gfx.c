@@ -337,6 +337,44 @@ tiku_pixel(tiku_surface_t *s, int x, int y, tiku_rgb_t c)
 }
 
 void
+tiku_picture(tiku_surface_t *s, int x, int y, int w, int h,
+                  const uint32_t *px)
+{
+    int py, sx;
+
+    if (s == NULL || px == NULL || w < 1 || h < 1) {
+        return;
+    }
+    {
+        /*
+         * Recorded at the OUTERMOST call only, like every other command:
+         * a picture drawn inside a control that is already recording is
+         * part of that control.  Entering also puts the pixels below out
+         * of the recorder's reach, so they neither double-record nor --
+         * since tiku_pixel confesses what it cannot carry -- mark a
+         * miss for a picture that WAS carried.
+         */
+        int rec = tiku_gfx_rec_enter(s);
+
+        if (rec && !tiku_dl_picture(s->record, x, y, w, h, px)) {
+            tiku_dl_miss(s->record);
+        }
+        for (py = 0; py < h; py++) {
+            for (sx = 0; sx < w; sx++) {
+                uint32_t v = px[(size_t)py * (size_t)w + sx];
+
+                if ((v >> 24) != 0u) {
+                    tiku_pixel(s, x + sx, y + py,
+                        TIKU_RGB((v >> 16) & 0xffu, (v >> 8) & 0xffu,
+                                      v & 0xffu));
+                }
+            }
+        }
+        tiku_gfx_rec_leave(s, rec);
+    }
+}
+
+void
 tiku_blit(tiku_surface_t *dst, int x, int y,
                const tiku_surface_t *src)
 {

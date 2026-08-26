@@ -262,6 +262,19 @@ typedef struct {
 tiku_rgb_t tiku_ink(tiku_ink_t which);
 
 /**
+ * @brief Draw a @p w by @p h ARGB bitmap at @p x, @p y.
+ *
+ * A pixel with no alpha is not painted, so a picture carries its own
+ * shape rather than a square of ground around it.  Small pictures --
+ * icons, thumbnails -- record themselves as a PICTURE the far end can
+ * draw; one too big for a command marks the list not-whole, because a
+ * window arriving with a hole where a picture was is exactly what the
+ * miss counter is for.
+ */
+void tiku_picture(tiku_surface_t *s, int x, int y, int w, int h,
+                       const uint32_t *px);
+
+/**
  * @brief Move a block of pixels within the surface (CopyBits).
  *
  * What a list does when a row is inserted or removed: the rows below it are

@@ -90,6 +90,12 @@ svc_present(void *ctx, uint32_t id, const struct tiku_dl *dl,
         (tiku_dl_icons(dl) == 0 ||
          (tiku_remote_peer_features(&c->remote) &
               TIKU_FEAT_ICON_STREAM) != 0u) &&
+        /* A list carrying PICTURES needs the far end to have claimed
+         * those too: one that stepped over them would show a window
+         * with holes where its thumbnails were. */
+        (tiku_dl_pictures(dl) == 0 ||
+         (tiku_remote_peer_features(&c->remote) &
+              TIKU_FEAT_PICTURE_STREAM) != 0u) &&
         tiku_dl_misses(dl) == 0 &&
         tiku_dl_flat_size(dl) * 2u < frame &&
         tiku_remote_draw(&c->remote, id, dl, w, h)) {

@@ -72,6 +72,7 @@
 #define OP_ALERT_ICON   30u
 #define OP_TABS         31u
 #define OP_MENUFIELD    32u
+#define OP_PICTURE      33u
 
 struct tiku_dl {
     unsigned char *b;
@@ -79,6 +80,7 @@ struct tiku_dl {
     int            count;
     int            missed;
     int            icons;                    /* OP_ICON placements     */
+    int            pictures;                 /* OP_PICTURE bitmaps     */
     int            arts;                     /* distinct OP_ICON_ARTs  */
     uint32_t       art[TIKU_DL_ART_MAX];     /* their ids, for once-ness */
 };
@@ -238,6 +240,7 @@ tiku_dl_clear(tiku_dl_t *dl)
         dl->count = 0;
         dl->missed = 0;
         dl->icons = 0;
+        dl->pictures = 0;
         dl->arts = 0;
     }
 }
@@ -653,6 +656,45 @@ tiku_dl_icons(const tiku_dl_t *dl)
     return (dl != NULL) ? dl->icons : 0;
 }
 
+int
+tiku_dl_pictures(const tiku_dl_t *dl)
+{
+    return (dl != NULL) ? dl->pictures : 0;
+}
+
+int
+tiku_dl_picture(tiku_dl_t *dl, int x, int y, int w, int h,
+                const uint32_t *px)
+{
+    unsigned char *p;
+    size_t n;
+    int i;
+
+    if (dl == NULL || px == NULL || w < 1 || h < 1) {
+        return 0;
+    }
+    if ((long)w * (long)h > TIKU_DL_PICTURE_MAX) {
+        /* Refused rather than truncated: half a picture drawn as if it
+         * were the whole one is the lie the miss counter exists for, and
+         * the caller marks one. */
+        return 0;
+    }
+    n = 8u + 4u * (size_t)w * (size_t)h;
+    p = begin(dl, OP_PICTURE, n);
+    if (p == NULL) {
+        return 0;
+    }
+    put16(p, (uint16_t)(int16_t)x);
+    put16(p + 2, (uint16_t)(int16_t)y);
+    put16(p + 4, (uint16_t)w);
+    put16(p + 6, (uint16_t)h);
+    for (i = 0; i < w * h; i++) {
+        put32(p + 8 + 4 * (size_t)i, px[i]);
+    }
+    dl->pictures++;
+    return 1;
+}
+
 size_t
 tiku_dl_flat_size(const tiku_dl_t *dl)
 {
@@ -765,6 +807,23 @@ tiku_dl_unflatten(const void *buf, size_t len, size_t *read)
                 return NULL;
             }
         }
+        if (op == OP_PICTURE) {
+            /* The pixels inside must be the pixels the header claims,
+             * and there must not be more of them than one command may
+             * carry: these arrive from a wire. */
+            uint16_t iw, ih;
+
+            if (n < 8u) {
+                return NULL;
+            }
+            iw = get16(p + at + 4u + 4u);
+            ih = get16(p + at + 4u + 6u);
+            if (iw < 1u || ih < 1u ||
+                (long)iw * (long)ih > TIKU_DL_PICTURE_MAX ||
+                (size_t)n != 8u + 4u * (size_t)iw * (size_t)ih) {
+                return NULL;
+            }
+        }
         want = least_payload(op);
         if (want >= 0) {
             int start = text_at(op);
@@ -804,6 +863,8 @@ tiku_dl_unflatten(const void *buf, size_t len, size_t *read)
 
         if (op == OP_ICON) {
             dl->icons++;
+        } else if (op == OP_PICTURE) {
+            dl->pictures++;
         } else if (op == OP_ICON_ART && dl->arts < TIKU_DL_ART_MAX) {
             dl->art[dl->arts++] = get32(p + at + 4);
         }
@@ -917,6 +978,33 @@ tiku_dl_play(const tiku_dl_t *dl, tiku_surface_t *s)
                     art[arts].p = a + 6;
                     art[arts].len = (size_t)get16(a + 4);
                     arts++;
+                }
+            }
+            break;
+        case OP_PICTURE:
+            if (n >= 8u) {
+                int iw = (int)get16(a + 4), ih = (int)get16(a + 6);
+                int ix = get_i16(a), iy = get_i16(a + 2);
+                int py, px;
+
+                if ((long)iw * (long)ih <= TIKU_DL_PICTURE_MAX &&
+                    (size_t)n == 8u + 4u * (size_t)iw * (size_t)ih) {
+                    for (py = 0; py < ih; py++) {
+                        for (px = 0; px < iw; px++) {
+                            uint32_t v = get32(a + 8 +
+                                4u * ((size_t)py * (size_t)iw + px));
+
+                            /* The mask travels with the picture: a
+                             * pixel with no alpha is not painted, which
+                             * is what lets a thumbnail sit on a row
+                             * rather than in a square of its own. */
+                            if ((v >> 24) != 0u) {
+                                tiku_pixel(s, ix + px, iy + py,
+                                    TIKU_RGB((v >> 16) & 0xffu,
+                                             (v >> 8) & 0xffu, v & 0xffu));
+                            }
+                        }
+                    }
                 }
             }
             break;
@@ -1052,6 +1140,7 @@ fact_kind(uint16_t op)
     case OP_SCROLLBAR:     return TIKU_DL_FACT_SCROLLBAR;
     case OP_SLIDER:        return TIKU_DL_FACT_SLIDER;
     case OP_ALERT_ICON:    return TIKU_DL_FACT_ALERT_ICON;
+    case OP_PICTURE:       return TIKU_DL_FACT_PICTURE;
     case OP_TABS:          return TIKU_DL_FACT_TABS;
     case OP_MENUFIELD:     return TIKU_DL_FACT_MENUFIELD;
     case OP_ICON:          return TIKU_DL_FACT_ICON;
@@ -1081,6 +1170,19 @@ tiku_dl_read(const void *buf, size_t len, size_t *at, tiku_dl_fact_t *out)
     out->kind = fact_kind(op);
 
     switch (op) {
+    case OP_PICTURE:
+        if (n < 8u) {
+            return 0;
+        }
+        out->rect = (tiku_rect_t){ get_i16(a), get_i16(a + 2),
+                                        (int)get16(a + 4),
+                                        (int)get16(a + 6) };
+        out->v1 = (int)get16(a + 4);
+        out->v2 = (int)get16(a + 6);
+        if ((size_t)n != 8u + 4u * (size_t)out->v1 * (size_t)out->v2) {
+            return 0;               /* not the pixels it claims */
+        }
+        return 1;
     case OP_TEXT:
         if (n < 10u || memchr(a + 9, '\0', n - 9u) == NULL) {
             return 0;
@@ -1275,6 +1377,9 @@ tiku_dl_narrate(const void *buf, size_t len, char *out, size_t max)
             say(out, max, &used, "menu field showing \"%s\"%s\n", f.text,
                 (f.state & TIKU_S_DISABLED) ? ", disabled" : "");
             break;
+        case TIKU_DL_FACT_PICTURE:
+            say(out, max, &used, "a picture, %d by %d\n", f.v1, f.v2);
+            break;
         case TIKU_DL_FACT_ICON:
             say(out, max, &used, "an icon\n");
             break;
@@ -1331,6 +1436,7 @@ fact_noun(int kind)
     case TIKU_DL_FACT_ALERT_ICON: return "alert-icon";
     case TIKU_DL_FACT_TABS:       return "tabs";
     case TIKU_DL_FACT_MENUFIELD:  return "menufield";
+    case TIKU_DL_FACT_PICTURE:    return "picture";
     case TIKU_DL_FACT_ICON:       return "icon";
     default:                      return NULL;
     }
