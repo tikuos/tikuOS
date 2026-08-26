@@ -123,6 +123,37 @@ now_us(void)
     return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
+/**
+ * @brief Ask the shell to let the person pick a file.
+ *
+ * Over SAY, the road that already carries a self-describing message
+ * upward: the answer comes back over TELL, and neither direction needs
+ * an op of its own for one question.
+ */
+static int
+svc_pick(void *ctx, uint32_t id, int mode, const char *start,
+         const char *name)
+{
+    client_ctx_t *c = ctx;
+    tiku_msg_t *m = tiku_msg_new(TIKU_MSG_PICK);
+    int sent;
+
+    if (m == NULL) {
+        return 0;
+    }
+    (void)tiku_msg_add_int32(m, "window", (int32_t)id);
+    (void)tiku_msg_add_int32(m, "mode", (int32_t)mode);
+    if (start != NULL) {
+        (void)tiku_msg_add_string(m, "start", start);
+    }
+    if (name != NULL) {
+        (void)tiku_msg_add_string(m, "name", name);
+    }
+    sent = tiku_remote_say(&c->remote, m);
+    tiku_msg_free(m);
+    return sent;
+}
+
 static int
 pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
 {
@@ -136,6 +167,7 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
     services.present = svc_present;
     services.menus = svc_menus;
     services.close = svc_close;
+    services.pick = svc_pick;
     if (app->start != NULL && app->start(&state, &services) != 0) {
         tiku_remote_disconnect(&ctx->remote);
         return 1;
@@ -167,6 +199,27 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
             if (type == TIKU_RMSG_PICK && app->pick != NULL &&
                 app->pick(state, id, command)) {
                 done = 1;
+            }
+            if (type == TIKU_RMSG_TELL) {
+                /* The shell said something.  One thing is worth hearing
+                 * today: the path a pick() ended in. */
+                tiku_msg_t *heard = tiku_remote_heard(&ctx->remote);
+
+                if (heard != NULL) {
+                    if (tiku_msg_what(heard) == TIKU_MSG_PICKED &&
+                        app->picked != NULL) {
+                        const char *path =
+                            tiku_msg_find_string(heard, "path", 0);
+                        int32_t win = 0;
+
+                        (void)tiku_msg_find_int32(heard, "window", 0,
+                                                  &win);
+                        if (path != NULL) {
+                            app->picked(state, (uint32_t)win, path);
+                        }
+                    }
+                    tiku_msg_free(heard);
+                }
             }
         }
         if (app->tick != NULL) {

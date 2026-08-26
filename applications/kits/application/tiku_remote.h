@@ -235,6 +235,23 @@ const uint32_t *tiku_remote_pixels(
 /* these without either end being rebuilt to match the other.                */
 /*---------------------------------------------------------------------------*/
 
+/*
+ * The two messages an application and its shell exchange over SAY and
+ * TELL to get a file picked.  They ride the general road rather than
+ * ops of their own: SAY and TELL already carry a self-describing
+ * message either way, and a third pattern for one question would be a
+ * third thing to keep in step.
+ *
+ * ASK   what = TIKU_MSG_PICK    int32 "window", int32 "mode",
+ *                               string "start", string "name"
+ * ANSWER what = TIKU_MSG_PICKED int32 "window", string "path"
+ *
+ * An old peer that does not know them steps over them, which is what
+ * the unknown-op rules above already promise.
+ */
+#define TIKU_MSG_PICK   0x7069636bu   /* 'pick' */
+#define TIKU_MSG_PICKED 0x70696b64u   /* 'pikd' */
+
 /**
  * @brief Take the next message a session sent, or NULL.
  *

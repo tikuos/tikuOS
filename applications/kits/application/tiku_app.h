@@ -79,7 +79,41 @@ typedef struct tiku_app_services {
      * keeps the size it opened at.
      */
     int (*resize)(void *ctx, uint32_t id, int w, int h);
+    /**
+     * @brief Ask the SHELL to let the user pick a file, and answer later.
+     *
+     * The application does not draw a file panel and does not learn to
+     * walk a filesystem: it says which kind of question it is asking
+     * (TIKU_APP_PICK_OPEN or _SAVE), where to start, and -- saving -- a
+     * name to offer.  The shell puts up ITS panel, the one the person
+     * already knows, over the namespace the shell already holds.  Which
+     * is why a device's files are pickable by an application that never
+     * heard of devices: the mount table is the shell's, and so is the
+     * panel that walks it.
+     *
+     * IT DOES NOT BLOCK, and must not: a shell that stopped to ask a
+     * question would stop for every other window with it, which is the
+     * same reason the kit's alert is drawn by the application over its
+     * own surface rather than asked for through here.  The answer
+     * arrives later at the descriptor's picked() -- possibly many frames
+     * later, and possibly never, because a person who closes the panel
+     * has answered nothing and is owed no answer.
+     *
+     * Appended in the manner of present(): a host that predates it
+     * leaves it NULL, and an application offers what it offers through
+     * this only when it is there.
+     *
+     * @return nonzero when the question was put; zero when the shell
+     *         could not ask it, which today means it is asking one
+     *         already.
+     */
+    int (*pick)(void *ctx, uint32_t id, int mode, const char *start,
+                const char *name);
 } tiku_app_services_t;
+
+/** @brief Which question pick() asks. */
+#define TIKU_APP_PICK_OPEN 0
+#define TIKU_APP_PICK_SAVE 1
 
 /** @brief Window roles for place(). */
 enum {
@@ -97,6 +131,20 @@ typedef struct {
      * lives.  @return nonzero when the application is done. */
     int  (*pick)(void *state, uint32_t window, int command);
     int  (*run)(int argc, char **argv); /* blocking compatibility entry */
+    /**
+     * @brief The path the person chose, for a pick() this window asked.
+     *
+     * Called from the shell's own loop rather than from inside pick(),
+     * so an application must be able to hear it at any time and must
+     * not assume it is still in whatever state it was when it asked.  A
+     * cancelled panel never calls this -- the same silence the shell's
+     * own askers get, and a window that changes nothing on cancel needs
+     * nothing else.
+     *
+     * Appended: an application that never asks leaves it NULL, and a
+     * host must check before calling.
+     */
+    void (*picked)(void *state, uint32_t window, const char *path);
 } tiku_app_descriptor_t;
 
 /*
