@@ -156,10 +156,15 @@ Project… is the shell's ordinary Open panel pointed at a
   so a run is bounded and the stop is SAID.  The caret is proven
   without inventing UI for the test: type a letter, save, and read
   where it landed.
-- **P4 — C colouring (G3).**  Stateful classifier, C table (keywords,
-  strings, `//` and `/* */`, numbers), editor windows colour `.c`/`.h`.
-  Colouring only — no compile, no promises the backend hasn't made.
-- **P5 — the backend decision (§7), then Build.**  Not planned here.
+- **P4 — C colouring (G3).**  DONE 2026-08-27 (kits `59b2c53`).
+  `tiku_syntax_spans_on()` takes what the line before left open and says
+  what this one leaves; the line-local road is untouched, because BASIC
+  carries nothing and is asked nothing.  Both the IDE and the simple
+  editor walk from the document's start so the first line SHOWN knows
+  what it began in — nothing is cached, so there is nothing to
+  invalidate.  `ccolour.script` proves it the only way pixels can be:
+  the same word twice, one glyph two rows apart, in two colours.
+- **P5 — Build.**  DECIDED AND DONE 2026-08-27 (`64b92cf`), see §7.
 
 Each phase is small enough for the house method to hold whole:
 proving script first, mutation by name, full suite, both repos.
@@ -176,13 +181,37 @@ The application is **TikuIDE** (`apps/tiku_ide.c`, menu row "IDE")
 until DECISIONS.md says otherwise.  The simple editor keeps its name
 and its job.
 
-## 7. The deferred decision, stated so it stays visible
+## 7. The decision, taken
 
-What Build MEANS is not decided: native board modules (the Tier-3
-TMOD road — `kernel/shell/basic/tiku_basic_module.h`, per-board `.ld`,
-cross-gcc the top Makefile already detects, image installed from a
-store file by `MODLOAD`), or a host-side C harness first, or BASIC
-only for a while.  The UI above touches that decision at exactly one
-point — the message shape `{text, file?, line?}` — and at no other.
-When the decision is taken it goes in DECISIONS.md, and P5 gets its
-own plan.
+**Build means: ask the compiler the project's `target` names whether the
+project's C is good, and say whatever it says.**  Taken 2026-08-27.
+
+The project file already carried a `target` line, skipped as an unknown
+line until something could act on it; it names the toolchain now, from
+the same set the tree's own Makefile detects (`host` → `cc`, `rp2350`
+and the other ARM parts → `arm-none-eabi-gcc`, `msp430` →
+`msp430-elf-gcc`).  A compiler's complaint is the same three things a
+run's is, so the message window shows both without knowing the
+difference — which is what the contract was for.
+
+What it is NOT, and why.  It does not yet make a board IMAGE.  The
+Tier-3 TMOD road is real and waiting (`tiku_basic_module.h`, per-board
+`.ld`, `MODLOAD` installing from a store file), but it needs a
+cross-toolchain and a board, and THIS MACHINE HAS NEITHER — no
+`arm-none-eabi-gcc`, no `msp430-elf-gcc`.  Building an image that
+nothing here could compile, link, deploy or run would be a claim the
+suite cannot check, which is the one kind of work this project does not
+do.  So Build asks the question it can answer honestly, and a target
+nothing knows — or a toolchain that is not installed — is SAID rather
+than silently passed.
+
+The step after this one is therefore not a UI step at all: install a
+cross-toolchain, and Build grows from "does this compile" to "here is
+the image", with `target` already saying which and the message window
+already able to show what goes wrong.
+
+One thing the C road needed that BASIC did not: a compiler counts the
+LINES OF THE FILE, while a BASIC program's lines wear their own numbers
+and are not in file order.  A message says which kind it carries;
+getting that wrong lands the caret somewhere plausible and wrong, which
+is worse than not moving at all.
