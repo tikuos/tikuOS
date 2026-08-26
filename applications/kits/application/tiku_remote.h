@@ -35,6 +35,8 @@
 
 #define TIKU_REMOTE_VERSION   1
 #define TIKU_REMOTE_SESSIONS  8
+/* Windows one out-of-process application may hold at once. */
+#define TIKU_REMOTE_WINDOWS   4
 #define TIKU_REMOTE_TITLE     64
 #define TIKU_REMOTE_MAX_DIM   1024
 
@@ -124,11 +126,15 @@ int tiku_remote_path(char *out, size_t max);
 /* The desktop's side: a listener whose sessions become windows.             */
 /*---------------------------------------------------------------------------*/
 
-typedef struct {
-    int                  fd;
-    int                  used;
-    char                 name[32];
-    uint32_t             win_id;        /* one window per session, for now */
+/*
+ * ONE WINDOW of a session.  A session was a window for as long as an
+ * application only ever had one; an application with several is asking
+ * for the id it is already given on every message to MEAN something,
+ * and everything a window has of its own lives here.
+ */
+typedef struct tiku_remote_window {
+    struct tiku_remote_session *session; /* the row's way back        */
+    uint32_t             win_id;        /* what the application calls it */
     struct tiku_window *window;    /* not owned                       */
     uint32_t            *frame;         /* latest pixels, w*h              */
     int                  fw, fh;
@@ -141,7 +147,6 @@ typedef struct {
     /* A surface shared with the application: it paints into one buffer
      * while the desktop shows the other, and a frame becomes a message
      * saying which. */
-    struct tiku_remote_listener *owner;
     uint32_t            *shared;        /* mapped, or NULL            */
     size_t               shared_bytes;
     int                  shown;         /* buffer index being shown   */
@@ -167,6 +172,18 @@ typedef struct {
      * to read it comes from a frame that was never in it.
      */
     int                  sw, sh;
+} tiku_remote_window_t;
+
+typedef struct tiku_remote_session {
+    int                  fd;
+    int                  used;
+    char                 name[32];
+    struct tiku_remote_listener *owner;
+    /* The windows this application holds.  Small on purpose: a menuset
+     * is carried by value, so a row is ten kilobytes, and an
+     * application wanting more than a handful of windows at once is
+     * asking for something this desktop has not agreed to yet. */
+    tiku_remote_window_t win[TIKU_REMOTE_WINDOWS];
     unsigned             features;      /* what the peer said it can  */
     /* Partial-read state: the wire is a stream and a FRAME is large.
      * The header accumulates too -- a serial link has no peek. */
@@ -228,8 +245,12 @@ void tiku_remote_window_closed(tiku_remote_listener_t *listener,
 /** @brief Shared surfaces this listener still holds. */
 int tiku_remote_mapped(const tiku_remote_listener_t *listener);
 
+/** @brief The window @p w belongs to, or NULL. */
+tiku_remote_window_t *tiku_remote_window_of(
+    tiku_remote_listener_t *listener, const struct tiku_window *w);
+
 const uint32_t *tiku_remote_pixels(
-    const tiku_remote_session_t *session);
+    const tiku_remote_window_t *win);
 
 /*---------------------------------------------------------------------------*/
 /* And one message type that is not a struct at all.                         */
@@ -362,6 +383,9 @@ int tiku_remote_draw(tiku_remote_client_t *client, uint32_t id,
                           const tiku_dl_t *dl, int w, int h);
 
 /** @brief Publish menus for the window, as the plain data they are. */
+/** @brief Give back ONE window; the session stays. */
+void tiku_remote_close_window(tiku_remote_client_t *client, uint32_t id);
+
 int tiku_remote_menus(tiku_remote_client_t *client, uint32_t id,
                            const tiku_menuset_t *menus);
 

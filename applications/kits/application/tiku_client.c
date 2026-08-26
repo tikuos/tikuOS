@@ -36,14 +36,22 @@ static const char tiku_app_stamp_client[] = "TikuOS-application-1";
 
 typedef struct {
     tiku_remote_client_t remote;
+    /* Windows this application is holding.  The session ends when the
+     * last one goes -- which for an application with one window is the
+     * moment its window is closed, exactly as before. */
+    int                       windows;
 } client_ctx_t;
 
 static uint32_t
 svc_open(void *ctx, const char *title, int w, int h)
 {
     client_ctx_t *c = ctx;
+    uint32_t id = tiku_remote_open(&c->remote, title, w, h);
 
-    return tiku_remote_open(&c->remote, title, w, h);
+    if (id != 0u) {
+        c->windows++;
+    }
+    return id;
 }
 
 static int
@@ -115,9 +123,14 @@ svc_menus(void *ctx, uint32_t id, const tiku_menuset_t *set)
 static void
 svc_close(void *ctx, uint32_t id)
 {
-    (void)ctx;
-    (void)id;
-    /* One window per session today: closing is leaving. */
+    client_ctx_t *c = ctx;
+
+    /* The window is given back by NAME; leaving is what happens when
+     * the last one has gone, which the pump decides. */
+    tiku_remote_close_window(&c->remote, id);
+    if (c->windows > 0) {
+        c->windows--;
+    }
 }
 
 static int64_t
@@ -194,9 +207,24 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
             if (type == 0) {
                 break;
             }
-            if (type < 0 || type == TIKU_RMSG_CLOSED) {
+            if (type < 0) {
                 dead = 1;
                 break;
+            }
+            if (type == TIKU_RMSG_CLOSED) {
+                /* The runtime took a window.  An application holding
+                 * others keeps going; the last one going is the end. */
+                if (app->closed != NULL) {
+                    app->closed(state, id);
+                }
+                if (ctx->windows > 0) {
+                    ctx->windows--;
+                }
+                if (ctx->windows <= 0) {
+                    dead = 1;
+                    break;
+                }
+                continue;
             }
             if (type == TIKU_RMSG_EVENT &&
                 tiku_app_deliver_event(app, state, id, &event)) {

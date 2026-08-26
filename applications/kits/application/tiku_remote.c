@@ -101,16 +101,49 @@ send_msg(int fd, uint32_t type, const void *payload, uint32_t n)
 /* Listener                                                                  */
 /*---------------------------------------------------------------------------*/
 
-static void session_unmap(tiku_remote_session_t *s);
+static void window_unmap(tiku_remote_window_t *win);
+
+/** @brief The row this session knows as @p id, or NULL. */
+static tiku_remote_window_t *
+session_window(tiku_remote_session_t *s, uint32_t id)
+{
+    int j;
+
+    for (j = 0; s != NULL && j < TIKU_REMOTE_WINDOWS; j++) {
+        if (s->win[j].opened && s->win[j].win_id == id) {
+            return &s->win[j];
+        }
+    }
+    return NULL;
+}
+
+/** @brief A free row of @p s, or NULL when it is holding its share. */
+static tiku_remote_window_t *
+session_window_free(tiku_remote_session_t *s)
+{
+    int j;
+
+    for (j = 0; s != NULL && j < TIKU_REMOTE_WINDOWS; j++) {
+        if (!s->win[j].opened) {
+            return &s->win[j];
+        }
+    }
+    return NULL;
+}
 
 static void
 session_free(tiku_remote_session_t *s)
 {
-    session_unmap(s);
+    int j;
+
+    for (j = 0; j < TIKU_REMOTE_WINDOWS; j++) {
+        window_unmap(&s->win[j]);
+        free(s->win[j].frame);
+        s->win[j].frame = NULL;
+    }
     if (s->fd >= 0) {
         (void)close(s->fd);
     }
-    free(s->frame);
     free(s->buf);
     while (s->said_count > 0) {
         tiku_msg_free(s->said[s->said_head]);
@@ -192,16 +225,26 @@ tiku_remote_shutdown(tiku_remote_listener_t *listener)
 
 /** @brief Give back a shared surface, if this session had one. */
 static void
-session_unmap(tiku_remote_session_t *s)
+window_unmap(tiku_remote_window_t *win)
 {
-    if (s->shared != NULL) {
-        (void)munmap(s->shared, s->shared_bytes);
-        s->shared = NULL;
-        s->shared_bytes = 0u;
-        if (s->owner != NULL) {
-            s->owner->mapped--;
+    if (win->shared != NULL) {
+        (void)munmap(win->shared, win->shared_bytes);
+        win->shared = NULL;
+        win->shared_bytes = 0u;
+        if (win->session != NULL && win->session->owner != NULL) {
+            win->session->owner->mapped--;
         }
     }
+}
+
+/** @brief The window id every addressed message carries first. */
+static uint32_t
+id_of(const unsigned char *p)
+{
+    uint32_t id;
+
+    memcpy(&id, p, 4);
+    return id;
 }
 
 /** @brief Apply one complete message to its session. */
@@ -209,6 +252,7 @@ static int
 session_message(tiku_remote_session_t *s)
 {
     const unsigned char *p = s->buf;
+    tiku_remote_window_t *win;
     int changed = 0;
 
     switch (s->cur_type) {
@@ -264,7 +308,11 @@ session_message(tiku_remote_session_t *s)
                 h > TIKU_REMOTE_MAX_DIM) {
                 return -1;
             }
-            session_unmap(s);
+            win = session_window(s, id);
+            if (win == NULL) {
+                break;          /* a surface for no window of ours */
+            }
+            window_unmap(win);
             {
                 size_t bytes = 4u * (size_t)w * (size_t)h *
                                TIKU_REMOTE_BUFFERS;
@@ -293,20 +341,20 @@ session_message(tiku_remote_session_t *s)
                      * and a name left behind outlives the window. */
                     (void)shm_unlink(name);
                     if (at != MAP_FAILED) {
-                        s->shared = at;
-                        s->shared_bytes = bytes;
+                        win->shared = at;
+                        win->shared_bytes = bytes;
                         if (s->owner != NULL) {
                             s->owner->mapped++;
                         }
-                        s->fw = w;
-                        s->fh = h;
-                        s->sw = w;
-                        s->sh = h;
-                        s->shown = 0;
+                        win->fw = w;
+                        win->fh = h;
+                        win->sw = w;
+                        win->sh = h;
+                        win->shown = 0;
                         /* The mapping is the window again: fw/fh now
                          * describe it, and a list drawn before it is
                          * a frame ago. */
-                        s->list_fresh = 0;
+                        win->list_fresh = 0;
                     }
                 }
             }
@@ -314,14 +362,15 @@ session_message(tiku_remote_session_t *s)
         }
         break;
     case TIKU_RMSG_READY:
-        if (s->want >= 8u && s->shared != NULL) {
+        win = (s->want >= 8u) ? session_window(s, id_of(p)) : NULL;
+        if (win != NULL && win->shared != NULL) {
             uint32_t index;
 
             memcpy(&index, p + 4, 4);
             /* Which half of the shared surface to show.  Nothing is
              * copied: the window draws out of the application's own
              * pixels. */
-            s->shown = (index < TIKU_REMOTE_BUFFERS) ? (int)index : 0;
+            win->shown = (index < TIKU_REMOTE_BUFFERS) ? (int)index : 0;
             /*
              * Back to the MAPPING's geometry.  A DRAW or FRAME since the
              * surface arrived left fw/fh at that list's own size, and
@@ -329,9 +378,9 @@ session_message(tiku_remote_session_t *s)
              * without restoring them reads the mapping at a stride it
              * was never made with.
              */
-            s->fw = s->sw;
-            s->fh = s->sh;
-            s->list_fresh = 0;
+            win->fw = win->sw;
+            win->fh = win->sh;
+            win->list_fresh = 0;
             changed = 1;
         }
         break;
@@ -339,42 +388,52 @@ session_message(tiku_remote_session_t *s)
         if (s->want >= 12u + TIKU_REMOTE_TITLE) {
             int32_t w, h;
 
-            memcpy(&s->win_id, p, 4);
             memcpy(&w, p + 4, 4);
             memcpy(&h, p + 8, 4);
-            memcpy(s->title, p + 12, TIKU_REMOTE_TITLE);
-            s->title[TIKU_REMOTE_TITLE - 1] = '\0';
             if (w < 1 || h < 1 || w > TIKU_REMOTE_MAX_DIM ||
                 h > TIKU_REMOTE_MAX_DIM) {
                 return -1;
             }
-            s->open_w = w;
-            s->open_h = h;
-            s->opened = 1;
+            /* An OPEN naming a window this session already holds is
+             * that window again, not a second one: the id is the
+             * application's own word for it. */
+            win = session_window(s, id_of(p));
+            if (win == NULL) {
+                win = session_window_free(s);
+            }
+            if (win == NULL) {
+                break;          /* holding its share already */
+            }
+            win->session = s;
+            win->win_id = id_of(p);
+            memcpy(win->title, p + 12, TIKU_REMOTE_TITLE);
+            win->title[TIKU_REMOTE_TITLE - 1] = '\0';
+            win->open_w = w;
+            win->open_h = h;
+            win->opened = 1;
             changed = 1;
         }
         break;
     case TIKU_RMSG_FRAME:
         if (s->want >= 12u) {
             int32_t w, h;
-            uint32_t id;
 
-            memcpy(&id, p, 4);
             memcpy(&w, p + 4, 4);
             memcpy(&h, p + 8, 4);
-            if (id == s->win_id && w >= 1 && h >= 1 &&
+            win = session_window(s, id_of(p));
+            if (win != NULL && w >= 1 && h >= 1 &&
                 w <= TIKU_REMOTE_MAX_DIM &&
                 h <= TIKU_REMOTE_MAX_DIM &&
                 s->want >= 12u + 4u * (size_t)w * (size_t)h) {
-                uint32_t *px = realloc(s->frame,
+                uint32_t *px = realloc(win->frame,
                                        4u * (size_t)w * (size_t)h);
 
                 if (px != NULL) {
                     memcpy(px, p + 12, 4u * (size_t)w * (size_t)h);
-                    s->frame = px;
-                    s->fw = w;
-                    s->fh = h;
-                    s->list_fresh = 1;   /* the copy IS `frame` */
+                    win->frame = px;
+                    win->fw = w;
+                    win->fh = h;
+                    win->list_fresh = 1;   /* the copy IS `frame` */
                     changed = 1;
                 }
             }
@@ -383,18 +442,17 @@ session_message(tiku_remote_session_t *s)
     case TIKU_RMSG_DRAW:
         if (s->want >= 12u) {
             int32_t w, h;
-            uint32_t id;
 
-            memcpy(&id, p, 4);
             memcpy(&w, p + 4, 4);
             memcpy(&h, p + 8, 4);
-            if (id == s->win_id && w >= 1 && h >= 1 &&
+            win = session_window(s, id_of(p));
+            if (win != NULL && w >= 1 && h >= 1 &&
                 w <= TIKU_REMOTE_MAX_DIM && h <= TIKU_REMOTE_MAX_DIM) {
                 tiku_dl_t *dl = tiku_dl_unflatten(p + 12, s->want - 12u,
                                                   NULL);
 
                 if (dl != NULL) {
-                    uint32_t *px = realloc(s->frame,
+                    uint32_t *px = realloc(win->frame,
                                            4u * (size_t)w * (size_t)h);
 
                     if (px != NULL) {
@@ -416,10 +474,10 @@ session_message(tiku_remote_session_t *s)
                         face.clip.w = w;
                         face.clip.h = h;
                         (void)tiku_dl_play(dl, &face);
-                        s->frame = px;
-                        s->fw = w;
-                        s->fh = h;
-                        s->list_fresh = 1;
+                        win->frame = px;
+                        win->fw = w;
+                        win->fh = h;
+                        win->list_fresh = 1;
                         changed = 1;
                     }
                     tiku_dl_free(dl);
@@ -428,10 +486,15 @@ session_message(tiku_remote_session_t *s)
         }
         break;
     case TIKU_RMSG_MENUS:
-        if (s->want >= 4u + sizeof(tiku_menuset_t)) {
-            memcpy(&s->menus, p + 4, sizeof s->menus);
-            s->has_menus = 1;
-            s->menus_fresh = 1;
+        /* Onto the window the id names.  Menus that ignored it landed
+         * on whichever window the session happened to be, so an
+         * application with two published one menu twice. */
+        win = (s->want >= 4u + sizeof(tiku_menuset_t))
+                  ? session_window(s, id_of(p)) : NULL;
+        if (win != NULL) {
+            memcpy(&win->menus, p + 4, sizeof win->menus);
+            win->has_menus = 1;
+            win->menus_fresh = 1;
             changed = 1;
         }
         break;
@@ -452,6 +515,24 @@ session_message(tiku_remote_session_t *s)
         break;
     }
     case TIKU_RMSG_CLOSE:
+        /* Naming a window gives back THAT window; naming nothing is the
+         * application leaving, which is what an older client sends and
+         * what the last window going still means. */
+        if (s->want >= 4u) {
+            win = session_window(s, id_of(p));
+            if (win != NULL) {
+                window_unmap(win);
+                free(win->frame);
+                win->frame = NULL;
+                win->opened = 0;
+                win->has_menus = 0;
+                win->menus_fresh = 0;
+                /* The window itself is the desktop's to close; it sees
+                 * the row go quiet on the next reconcile. */
+                changed = 1;
+            }
+            break;
+        }
         return -1;              /* the client is done: drop the session */
     default:
         break;
@@ -596,27 +677,34 @@ tiku_remote_poll(tiku_remote_listener_t *listener)
         }
     }
     for (i = 0; i < TIKU_REMOTE_SESSIONS; i++) {
-        if (listener->session[i].used) {
-            changed |= listener->session[i].opened &&
-                       listener->session[i].window == NULL;
-            changed |= listener->session[i].menus_fresh;
+        int j;
+
+        if (!listener->session[i].used) {
+            continue;
+        }
+        for (j = 0; j < TIKU_REMOTE_WINDOWS; j++) {
+            const tiku_remote_window_t *win =
+                &listener->session[i].win[j];
+
+            changed |= win->opened && win->window == NULL;
+            changed |= win->menus_fresh;
         }
     }
     return changed;
 }
 
 const uint32_t *
-tiku_remote_pixels(const tiku_remote_session_t *session)
+tiku_remote_pixels(const tiku_remote_window_t *win)
 {
-    if (session == NULL) {
+    if (win == NULL) {
         return NULL;
     }
-    if (session->shared != NULL && !session->list_fresh) {
-        size_t one = (size_t)session->fw * (size_t)session->fh;
+    if (win->shared != NULL && !win->list_fresh) {
+        size_t one = (size_t)win->fw * (size_t)win->fh;
 
-        return session->shared + (size_t)session->shown * one;
+        return win->shared + (size_t)win->shown * one;
     }
-    return session->frame;
+    return win->frame;
 }
 
 int
@@ -635,9 +723,37 @@ tiku_remote_owner(tiku_remote_listener_t *listener,
         return NULL;
     }
     for (i = 0; i < TIKU_REMOTE_SESSIONS; i++) {
-        if (listener->session[i].used &&
-            listener->session[i].window == window) {
-            return &listener->session[i];
+        int j;
+
+        if (!listener->session[i].used) {
+            continue;
+        }
+        for (j = 0; j < TIKU_REMOTE_WINDOWS; j++) {
+            if (listener->session[i].win[j].window == window) {
+                return &listener->session[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+tiku_remote_window_t *
+tiku_remote_window_of(tiku_remote_listener_t *listener,
+                           const struct tiku_window *window)
+{
+    int i, j;
+
+    if (listener == NULL || window == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < TIKU_REMOTE_SESSIONS; i++) {
+        if (!listener->session[i].used) {
+            continue;
+        }
+        for (j = 0; j < TIKU_REMOTE_WINDOWS; j++) {
+            if (listener->session[i].win[j].window == window) {
+                return &listener->session[i].win[j];
+            }
         }
     }
     return NULL;
@@ -648,48 +764,57 @@ tiku_remote_event(tiku_remote_listener_t *listener,
                        struct tiku_window *window,
                        const tiku_event_t *event)
 {
-    tiku_remote_session_t *s = tiku_remote_owner(listener,
-                                                           window);
+    tiku_remote_window_t *win = tiku_remote_window_of(listener,
+                                                                window);
     unsigned char payload[4 + sizeof *event];
 
-    if (s == NULL) {
+    if (win == NULL || win->session == NULL) {
         return;
     }
-    memcpy(payload, &s->win_id, 4);
+    memcpy(payload, &win->win_id, 4);
     memcpy(payload + 4, event, sizeof *event);
-    send_msg(s->fd, TIKU_RMSG_EVENT, payload, sizeof payload);
+    send_msg(win->session->fd, TIKU_RMSG_EVENT, payload,
+             sizeof payload);
 }
 
 void
 tiku_remote_pick(tiku_remote_listener_t *listener,
                       struct tiku_window *window, int command)
 {
-    tiku_remote_session_t *s = tiku_remote_owner(listener,
-                                                           window);
+    tiku_remote_window_t *win = tiku_remote_window_of(listener,
+                                                                window);
     unsigned char payload[8];
     int32_t c = command;
 
-    if (s == NULL) {
+    if (win == NULL || win->session == NULL) {
         return;
     }
-    memcpy(payload, &s->win_id, 4);
+    memcpy(payload, &win->win_id, 4);
     memcpy(payload + 4, &c, 4);
-    send_msg(s->fd, TIKU_RMSG_PICK, payload, sizeof payload);
+    send_msg(win->session->fd, TIKU_RMSG_PICK, payload,
+             sizeof payload);
 }
 
 void
 tiku_remote_window_closed(tiku_remote_listener_t *listener,
                                struct tiku_window *window)
 {
-    tiku_remote_session_t *s = tiku_remote_owner(listener,
-                                                           window);
+    tiku_remote_window_t *win = tiku_remote_window_of(listener,
+                                                                window);
 
-    if (s == NULL) {
+    if (win == NULL || win->session == NULL) {
         return;
     }
-    send_msg(s->fd, TIKU_RMSG_CLOSED, &s->win_id, 4);
-    s->window = NULL;
-    s->opened = 0;
+    send_msg(win->session->fd, TIKU_RMSG_CLOSED, &win->win_id, 4);
+    /* The ROW is given back, not the session: an application whose
+     * second window was closed still has its first. */
+    window_unmap(win);
+    free(win->frame);
+    win->frame = NULL;
+    win->window = NULL;
+    win->opened = 0;
+    win->has_menus = 0;
+    win->menus_fresh = 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -938,6 +1063,15 @@ tiku_remote_open(tiku_remote_client_t *client, const char *title,
              (title != NULL) ? title : "");
     send_msg(client->fd, TIKU_RMSG_OPEN, payload, sizeof payload);
     return id;
+}
+
+void
+tiku_remote_close_window(tiku_remote_client_t *client, uint32_t id)
+{
+    if (client == NULL || client->fd < 0) {
+        return;
+    }
+    send_msg(client->fd, TIKU_RMSG_CLOSE, &id, 4);
 }
 
 /**
