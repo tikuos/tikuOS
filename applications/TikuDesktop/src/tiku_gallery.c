@@ -232,6 +232,18 @@ gallery(tiku_surface_t *s)
         }
     }
 
+    /* The group box, holding the code block it sits beside: a boundary
+     * with its own name, etched rather than raised. */
+    {
+        tiku_rect_t gb = { c.x + 190, c.y + c.h - 200, 250, 96 };
+        tiku_rect_t in = tiku_ui_group(s, gb, "Described panel");
+        tiku_ui_checkbox(s, (tiku_rect_t){ in.x, in.y, 120,
+                                                     tiku_ui_row_h() },
+                              "Lamp", TIKU_S_ON);
+        tiku_ui_gauge(s, (tiku_rect_t){ in.x, in.y + tiku_ui_row_h() + 6,
+                                                  in.w, 12 }, 0.35f);
+    }
+
     /* An inactive window, for the tab comparison. */
     {
         tiku_rect_t w2 = { c.x + 190, c.y + c.h - 96, 250, 86 };

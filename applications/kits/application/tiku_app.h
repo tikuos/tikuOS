@@ -103,9 +103,13 @@ typedef struct tiku_app_services {
      * leaves it NULL, and an application offers what it offers through
      * this only when it is there.
      *
-     * @return nonzero when the question was put; zero when the shell
-     *         could not ask it, which today means it is asking one
-     *         already.
+     * @return nonzero when the question was put -- or, out of process,
+     *         when it was CARRIED: a shell already asking one refuses
+     *         it there too, but the refusal cannot ride back through a
+     *         return value that has already returned.  Either way the
+     *         honest reading is the same: an answer may come, and may
+     *         not, and an application that does nothing until picked()
+     *         is called needs no more than that.
      */
     int (*pick)(void *ctx, uint32_t id, int mode, const char *start,
                 const char *name);
