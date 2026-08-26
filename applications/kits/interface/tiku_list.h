@@ -81,6 +81,11 @@ typedef struct {
     char    typed[32];
     int64_t typed_at;
     unsigned char sel[TIKU_LIST_MAX];
+    /* Which rows are HEADINGS: furniture among the rows rather than
+     * rows of their own.  A byte a row, beside the selection, because
+     * the alternative is a second list of positions that drifts out of
+     * step with this one the first time the rows change. */
+    unsigned char head[TIKU_LIST_MAX];
 } tiku_list_t;
 
 /** @brief An empty list.  @p single nonzero holds one row at a time. */
@@ -121,6 +126,25 @@ tiku_rect_t tiku_list_row_rect(const tiku_list_t *l, tiku_rect_t body,
 
 /** @brief Which row @p x, @p y lands on in @p body, or -1 for none. */
 int tiku_list_at(const tiku_list_t *l, tiku_rect_t body, int x, int y);
+
+/**
+ * @brief Make @p row a HEADING, or an ordinary row again.
+ *
+ * A heading names the rows under it -- Sources, Headers, Notes.  It is
+ * still a row of the one index space, so nothing here has two numbering
+ * schemes to get wrong; what it is not is PICKABLE.  It cannot be
+ * selected by any road (a click, a range, select-all, inverting), the
+ * cursor steps over it rather than onto it, and spelling a name passes
+ * it by -- because a person travelling a list with the arrow keys is
+ * looking for something to open, and stopping them on a word they
+ * cannot open is the list wasting their time.
+ *
+ * Set the headings AFTER tiku_list_set_count(): a shrinking list
+ * forgets the rows it no longer has, headings among them.
+ */
+void tiku_list_set_heading(tiku_list_t *l, int row, int heading);
+
+int tiku_list_is_heading(const tiku_list_t *l, int row);
 
 int tiku_list_selected(const tiku_list_t *l, int row);
 int tiku_list_selection_count(const tiku_list_t *l);
@@ -213,6 +237,10 @@ int tiku_list_scroll_to(tiku_list_t *l, int top, tiku_rect_t body);
  * is told its name and whether it is picked.  A caller that wants
  * columns, art or a second line ignores this and draws from
  * tiku_list_row_rect(), which is what it is there for.
+ *
+ * A heading crosses as WORDS rather than as a row, which is what it
+ * is: a reader counting the rows of a list should not be told about
+ * furniture it cannot pick.
  */
 void tiku_list_draw(const tiku_list_t *l, tiku_surface_t *s,
                     tiku_rect_t body, tiku_list_name_fn name, void *ctx);

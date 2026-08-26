@@ -79,6 +79,7 @@ tiku_list_set_count(tiku_list_t *l, int count)
      * row will land. */
     for (i = count; i < l->count && i < TIKU_LIST_MAX; i++) {
         l->sel[i] = 0u;
+        l->head[i] = 0u;
     }
     l->count = count;
     if (l->cursor >= count) {
@@ -157,6 +158,30 @@ tiku_list_at(const tiku_list_t *l, tiku_rect_t body, int x, int y)
     return (row >= 0 && row < l->count) ? row : -1;
 }
 
+void
+tiku_list_set_heading(tiku_list_t *l, int row, int heading)
+{
+    if (l == NULL || row < 0 || row >= l->count) {
+        return;
+    }
+    l->head[row] = (unsigned char)(heading ? 1 : 0);
+    if (l->head[row]) {
+        /* A row that BECOMES furniture stops being picked, or the
+         * selection would hold something no gesture could let go of. */
+        l->sel[row] = 0u;
+        if (l->cursor == row) {
+            l->cursor = -1;
+        }
+        repair(l, -1);
+    }
+}
+
+int
+tiku_list_is_heading(const tiku_list_t *l, int row)
+{
+    return (l != NULL && row >= 0 && row < l->count && l->head[row]);
+}
+
 int
 tiku_list_selected(const tiku_list_t *l, int row)
 {
@@ -199,7 +224,8 @@ tiku_list_chosen(const tiku_list_t *l)
 void
 tiku_list_select_only(tiku_list_t *l, int row)
 {
-    if (l == NULL || row < 0 || row >= l->count) {
+    if (l == NULL || row < 0 || row >= l->count ||
+        tiku_list_is_heading(l, row)) {
         return;
     }
     memset(l->sel, 0, (size_t)l->count);
@@ -221,12 +247,19 @@ tiku_list_select_all(tiku_list_t *l)
         tiku_list_select_only(l, 0);
         return;
     }
-    memset(l->sel, 1, (size_t)l->count);
+    {
+        int i;
+
+        for (i = 0; i < l->count; i++) {
+            l->sel[i] = (unsigned char)!l->head[i];
+        }
+    }
     /* Both anchors are re-taken, not merely filled in when missing: one
      * left over from an earlier click would make the next shift-click
      * reach from a row that has nothing to do with this selection. */
     l->pivot = 0;
     l->last_added = l->count - 1;
+    repair(l, -1);
 }
 
 void
@@ -254,7 +287,7 @@ tiku_list_invert(tiku_list_t *l)
     l->pivot = -1;
     l->last_added = -1;
     for (i = 0; i < l->count; i++) {
-        l->sel[i] = (unsigned char)!l->sel[i];
+        l->sel[i] = (unsigned char)(!l->sel[i] && !l->head[i]);
     }
     if (l->sel[0]) {
         l->pivot = 0;
@@ -280,6 +313,9 @@ range(tiku_list_t *l, int a, int b, int on)
     lo = (a < b) ? a : b;
     hi = (a < b) ? b : a;
     for (i = lo; i <= hi; i++) {
+        if (l->head[i]) {
+            continue;       /* reached OVER, not taken */
+        }
         l->sel[i] = (unsigned char)(on ? 1 : 0);
     }
     l->last_added = b;
@@ -298,6 +334,11 @@ tiku_list_click(tiku_list_t *l, int row, unsigned modifiers)
          * it means "none of them". */
         tiku_list_select_none(l);
         l->cursor = -1;
+        return;
+    }
+    if (tiku_list_is_heading(l, row)) {
+        /* Furniture, not a row: pressing the word that NAMES a group
+         * neither picks anything nor lets go of what is picked. */
         return;
     }
     toggle = (modifiers & TIKU_MOD_CMD) != 0u;
@@ -349,14 +390,48 @@ tiku_list_click(tiku_list_t *l, int row, unsigned modifiers)
     repair(l, row);
 }
 
+/**
+ * @brief The first row at or past @p from that can be landed on.
+ *
+ * Travel goes ON in the direction it was already going, and only then
+ * turns back: HOME onto a heading means the first row UNDER it, not the
+ * nothing that lies before it.
+ *
+ * @return that row, or -1 when the list is all furniture.
+ */
+static int
+landable(const tiku_list_t *l, int from, int dir)
+{
+    int i;
+
+    for (i = from; i >= 0 && i < l->count; i += dir) {
+        if (!l->head[i]) {
+            return i;
+        }
+    }
+    for (i = from; i >= 0 && i < l->count; i -= dir) {
+        if (!l->head[i]) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 /** @brief Move the cursor to @p to, taking the selection with it. */
 static void
 go(tiku_list_t *l, int to, unsigned modifiers, tiku_rect_t body)
 {
+    int dir;
+
     if (l->count == 0) {
         return;
     }
+    dir = (to >= l->cursor) ? 1 : -1;
     to = clampi(to, 0, l->count - 1);
+    to = landable(l, to, dir);
+    if (to < 0) {
+        return;             /* nothing here a cursor could stand on */
+    }
     l->cursor = to;
     if ((modifiers & TIKU_MOD_SHIFT) != 0u && !l->single) {
         int from = (l->pivot >= 0) ? l->pivot : to;
@@ -466,8 +541,8 @@ tiku_list_typeahead(tiku_list_t *l, char ch, int64_t now,
         const char *n = name(ctx, i);
         size_t k;
 
-        if (n == NULL) {
-            continue;
+        if (n == NULL || l->head[i]) {
+            continue;       /* furniture is not what a name spells to */
         }
         for (k = 0; k < used; k++) {
             if (n[k] == '\0' ||
@@ -541,6 +616,18 @@ tiku_list_draw(const tiku_list_t *l, tiku_surface_t *s, tiku_rect_t body,
             break;
         }
         n = name(ctx, row);
+        if (l->head[row]) {
+            /* Words, not a row: the group's NAME, in the face labels
+             * wear, over the paper the rows stand on. */
+            tiku_rect_t r = tiku_list_row_rect(l, body, row);
+            const tiku_font_t *f = tiku_font_bold();
+
+            tiku_fill(s, r, TIKU_C_DOC);
+            tiku_text(s, f, r.x + 4,
+                           r.y + (r.h - f->height) / 2 + f->ascent,
+                           (n != NULL) ? n : "", TIKU_C_TEXT);
+            continue;
+        }
         tiku_ui_list_row(s, tiku_list_row_rect(l, body, row),
                          (n != NULL) ? n : "", tiku_list_selected(l, row));
     }
