@@ -901,3 +901,58 @@ tiku_ui_text_spans(tiku_surface_t *s, const tiku_font_t *f, int x, int y,
     }
     return x - start;
 }
+
+tiku_rect_t
+tiku_ui_group(tiku_surface_t *s, tiku_rect_t r, const char *label)
+{
+    const tiku_font_t *f = tiku_font_plain();
+    tiku_rect_t in = r;
+    int top, gap = 0, lx;
+
+    if (s == NULL) {
+        return in;
+    }
+    /* The line sits on the words' middle, so the label straddles it --
+     * which is what makes the gap read as cut for them. */
+    top = r.y + f->height / 2;
+    lx = r.x + 10;
+    if (label != NULL && label[0] != '\0') {
+        gap = tiku_text_width(f, label) + 8;
+    }
+    /*
+     * Etched, not raised: dark line then light line, the groove the
+     * bevel language already spells for a sunken edge.  Drawn as four
+     * sides rather than a frame call because the top has a hole in it.
+     */
+    if (gap > 0) {
+        tiku_hline(s, r.x, top, lx - r.x - 4, DARK());
+        tiku_hline(s, r.x, top + 1, lx - r.x - 4, WHITE());
+        tiku_hline(s, lx + gap - 4, top, r.x + r.w - (lx + gap - 4),
+                        DARK());
+        tiku_hline(s, lx + gap - 4, top + 1,
+                        r.x + r.w - (lx + gap - 4), WHITE());
+    } else {
+        tiku_hline(s, r.x, top, r.w, DARK());
+        tiku_hline(s, r.x, top + 1, r.w, WHITE());
+    }
+    tiku_hline(s, r.x, r.y + r.h - 2, r.w, DARK());
+    tiku_hline(s, r.x, r.y + r.h - 1, r.w, WHITE());
+    tiku_vline(s, r.x, top, r.y + r.h - top - 1, DARK());
+    tiku_vline(s, r.x + 1, top, r.y + r.h - top - 1, WHITE());
+    tiku_vline(s, r.x + r.w - 2, top, r.y + r.h - top - 1, DARK());
+    tiku_vline(s, r.x + r.w - 1, top, r.y + r.h - top - 1, WHITE());
+    if (gap > 0) {
+        tiku_text(s, f, lx, r.y + f->ascent, label, TIKU_C_TEXT);
+    }
+    in.x = r.x + 8;
+    in.y = r.y + f->height + 4;
+    in.w = r.w - 16;
+    in.h = r.h - (in.y - r.y) - 8;
+    if (in.w < 0) {
+        in.w = 0;
+    }
+    if (in.h < 0) {
+        in.h = 0;
+    }
+    return in;
+}

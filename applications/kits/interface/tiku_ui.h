@@ -263,6 +263,22 @@ tiku_rect_t tiku_ui_window(tiku_surface_t *s,
  *
  * @return the total advance, so a caller can place what follows.
  */
+/**
+ * @brief A frame around a block of controls, with @p label notched into
+ *        its top edge.
+ *
+ * The etched box the toolkit never had: two hairlines, light under
+ * dark, so it reads as a groove rather than as another raised panel --
+ * a group is a boundary, not a surface, and a raised one would fight
+ * the controls standing on it.  The label sits in a gap cut in the top
+ * line, which is what makes the line read as belonging to the words.
+ *
+ * @return the rect INSIDE the frame, so a caller lays its controls in
+ *         what came back rather than working out the inset twice.
+ */
+tiku_rect_t tiku_ui_group(tiku_surface_t *s, tiku_rect_t r,
+                               const char *label);
+
 int tiku_ui_text_spans(tiku_surface_t *s, const tiku_font_t *f,
                             int x, int y, const char *text,
                             const tiku_span_t *span, int n);
