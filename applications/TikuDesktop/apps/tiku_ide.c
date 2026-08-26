@@ -20,6 +20,7 @@
  */
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,8 @@
  * the messages are two of them. */
 #define IDE_EDITS  2
 #define IDE_MSGS   200
+/* How long a run may take before it is stopped rather than trusted. */
+#define IDE_RUN_LIMIT_US 30000000
 
 #define CMD_OPEN     1
 #define CMD_QUIT     2
@@ -128,6 +131,7 @@ typedef struct {
     pid_t                           child;
     char                            child_file[512];
     char                            partial[160];
+    int64_t                         run_from;   /* when it started */
 } ide_t;
 
 static void project_paint(ide_t *st);
@@ -875,6 +879,7 @@ run_file(ide_t *st, const char *path)
     (void)fcntl(fds[0], F_SETFL, O_NONBLOCK);
     st->child_fd = fds[0];
     st->running = 1;
+    st->run_from = 0;           /* the first tick says when */
     st->nmsg = 0;
     st->partial[0] = '\0';
     messages_open(st);
@@ -919,7 +924,13 @@ message_follow(ide_t *st)
     }
     at = line_of_number(&e->tv, m->line);
     if (at >= 0) {
+        const tiku_font_t *f = tiku_font_plain();
+
         tiku_textview_place(&e->tv, at, 0);
+        /* Placing the caret does not move the PAGE, and a caret below
+         * the window is a jump that looks like nothing happening. */
+        (void)tiku_textview_reveal(&e->tv,
+            (EDIT_H - STRIP_H - MARGIN) / (f->height + 2));
         edit_paint(st, e);
     }
     if (st->services->raise_window != NULL) {
@@ -954,8 +965,27 @@ ide_tick(void *state, int64_t now_us)
     ssize_t n = -1;
     int heard = 0;
 
-    (void)now_us;
     if (st == NULL || !st->running) {
+        return;
+    }
+    if (st->run_from == 0) {
+        st->run_from = now_us;
+    }
+    /*
+     * BOUNDED, because a program is something somebody may have written
+     * wrong: the interpreter stops its own endless loops, but a program
+     * waiting for INPUT waits for a person who is not there, and an
+     * application that sat on that would say "running…" until it was
+     * killed.
+     */
+    if (now_us - st->run_from > IDE_RUN_LIMIT_US) {
+        (void)kill(st->child, SIGTERM);
+        (void)waitpid(st->child, NULL, 0);
+        st->running = 0;
+        (void)close(st->child_fd);
+        st->child_fd = -1;
+        message_take(st, "? the run was stopped: it did not finish");
+        messages_show(st);
         return;
     }
     for (;;) {
