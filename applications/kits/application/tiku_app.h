@@ -149,6 +149,32 @@ typedef struct {
      * host must check before calling.
      */
     void (*picked)(void *state, uint32_t window, const char *path);
+    /**
+     * @brief An event, and the WINDOW of this application it landed in.
+     *
+     * Every other call the host makes says which window it means;
+     * event() alone did not, which is why an application could hold two
+     * windows and not tell their keys apart.  A host calls this when it
+     * is there and event() when it is not, so an application with one
+     * window needs neither to know nor to change.
+     *
+     * @return nonzero when the application is done, as event() does.
+     */
+    int  (*event_in)(void *state, uint32_t window,
+                     const tiku_event_t *event);
+    /**
+     * @brief The window has GONE -- the runtime took it, not the
+     *        application.
+     *
+     * Closing is the runtime's gesture (a title bar, Cmd-W, the shell
+     * shutting down), so an application learns about it rather than
+     * decides it.  An application that holds several windows must hear
+     * this or it will paint into one that is not there.
+     *
+     * Appended: an application with one window may leave it NULL, and a
+     * host must check before calling.
+     */
+    void (*closed)(void *state, uint32_t window);
 } tiku_app_descriptor_t;
 
 /*
@@ -205,6 +231,19 @@ const tiku_app_descriptor_t *tiku_app_registry_at(
 int tiku_app_instance_start(tiku_app_instance_t *instance,
                                  const tiku_app_descriptor_t *descriptor,
                                  const tiku_app_services_t *services);
+/**
+ * @brief Hand @p event to @p descriptor, saying which window it landed in.
+ *
+ * The one place that decides between event_in() and event(), so a host
+ * asks rather than choosing: an application is entitled to the same
+ * answer wherever it is running.
+ *
+ * @return nonzero when the application says it is done.
+ */
+int tiku_app_deliver_event(const tiku_app_descriptor_t *descriptor,
+                                void *state, uint32_t window,
+                                const tiku_event_t *event);
+
 int tiku_app_instance_event(tiku_app_instance_t *instance,
                                  const tiku_event_t *event);
 void tiku_app_instance_tick(tiku_app_instance_t *instance,

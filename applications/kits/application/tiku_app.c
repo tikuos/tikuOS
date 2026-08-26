@@ -122,6 +122,26 @@ tiku_app_run(const tiku_app_descriptor_t *descriptor,
 }
 
 int
+tiku_app_deliver_event(const tiku_app_descriptor_t *descriptor,
+                            void *state, uint32_t window,
+                            const tiku_event_t *event)
+{
+    if (descriptor == NULL || event == NULL) {
+        return 0;
+    }
+    /* ONE place decides which call an application gets.  A host that
+     * decided for itself would be a second answer to the question, and
+     * the two would disagree on the day one of them was changed. */
+    if (descriptor->event_in != NULL) {
+        return descriptor->event_in(state, window, event);
+    }
+    if (descriptor->event != NULL) {
+        return descriptor->event(state, event);
+    }
+    return 0;
+}
+
+int
 tiku_app_instance_event(tiku_app_instance_t *instance,
                              const tiku_event_t *event)
 {

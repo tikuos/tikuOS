@@ -198,8 +198,8 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
                 dead = 1;
                 break;
             }
-            if (type == TIKU_RMSG_EVENT && app->event != NULL &&
-                app->event(state, &event)) {
+            if (type == TIKU_RMSG_EVENT &&
+                tiku_app_deliver_event(app, state, id, &event)) {
                 done = 1;
             }
             if (type == TIKU_RMSG_PICK && app->pick != NULL &&

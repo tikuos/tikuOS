@@ -95,7 +95,7 @@ SO_NAMES  := edit term
 # Named for what they ARE, since the file name is the label a desktop
 # offers them under.
 SO_APPS   := $(APPS_D)/terminal.so $(APPS_D)/editor.so
-SO_EXAMPLES := $(patsubst %,$(APPS_D)/%.so,hello clock counter sketch)
+SO_EXAMPLES := $(patsubst %,$(APPS_D)/%.so,hello clock counter sketch twowin)
 RUNNER    := $(BUILD)/tiku-run
 
 EXAMPLE_NAMES := hello clock counter sketch
