@@ -11,9 +11,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "tiku_app.h"
 #include "tiku_textview.h"
@@ -37,6 +42,7 @@
 #define CMD_SYNTAX 4
 #define CMD_OPEN   5
 #define CMD_SAVEAS 6
+#define CMD_RUN    7
 
 typedef struct {
     const tiku_app_services_t *services;
@@ -74,17 +80,40 @@ typedef struct {
      * the ask is not remembered by the panel and the answer arrives
      * later, so what to DO with a path is remembered here. */
     int                             pick_save;
+    /*
+     * What the last run said, and the run itself while it lives.  The
+     * program runs in the interpreter a BOARD runs -- tiku-basic, the
+     * kernel's own engine compiled for the host -- as a child on the
+     * far end of a pipe, the way the terminal next door holds its
+     * shell.  The pane exists while there are lines to show.
+     */
+    char                            out[48][96];
+    int                             out_count;
+    int                             running;
+    int                             child_fd;
+    pid_t                           child;
+    char                            out_partial[96];
 } edit_state_t;
 
 /* The file named on the command line, before any state exists. */
 static char edit_path[512];
 
 static int
-rows_visible(void)
+out_pane_h(const edit_state_t *st)
 {
     const tiku_font_t *f = tiku_font_plain();
 
-    return (EDIT_H - STRIP_H - MARGIN) / (f->height + 2);
+    if (st == NULL || (st->out_count == 0 && !st->running)) {
+        return 0;               /* no run yet: the page is all editor */
+    }
+    return 7 * (f->height + 2) + 8;
+}
+
+static int
+rows_visible_of(const edit_state_t *st)
+{
+    return (EDIT_H - STRIP_H - MARGIN - out_pane_h(st)) /
+           (tiku_font_plain()->height + 2);
 }
 
 /** @brief Read @p path into the buffer.  A missing file is an empty one. */
@@ -151,7 +180,8 @@ paint(edit_state_t *st)
     const tiku_font_t *f = tiku_font_plain();
     const tiku_font_t *small = tiku_font_at(11);
     int step = f->height + 2;
-    int rows = rows_visible();
+    int rows = rows_visible_of(st);
+    int pane_h = out_pane_h(st);
 
     /* Painting and recording are the same pass; the list is emptied
      * first because a frame is the whole window, not the difference. */
@@ -159,7 +189,8 @@ paint(edit_state_t *st)
         tiku_dl_clear(st->dl);
     }
     st->surface->record = st->dl;
-    tiku_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H };
+    tiku_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H - pane_h };
+    tiku_rect_t pane = { 0, EDIT_H - STRIP_H - pane_h, EDIT_W, pane_h };
     tiku_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
     char where[128];
     int i;
@@ -210,6 +241,26 @@ paint(edit_state_t *st)
                             MARGIN + row * step, step, TIKU_C_TEXT);
         }
     }
+    if (pane_h > 0) {
+        /* What the run said, newest lines last: a well of its own, with
+         * the words in the OUTPUT ink so a reader is told these came
+         * from the program rather than being part of it. */
+        int fit = (pane.h - 8) / step;
+        int first = (st->out_count > fit) ? st->out_count - fit : 0;
+        int k;
+
+        tiku_ui_sunken(st->surface, pane, TIKU_C_DOC);
+        for (k = first; k < st->out_count; k++) {
+            tiku_text(st->surface, f, pane.x + MARGIN,
+                           pane.y + 4 + (k - first) * step + f->ascent,
+                           st->out[k], tiku_ink(TIKU_INK_REMARK));
+        }
+        if (st->running && st->out_count == 0) {
+            tiku_text(st->surface, f, pane.x + MARGIN,
+                           pane.y + 4 + f->ascent, "running…",
+                           tiku_dim(TIKU_C_TEXT, TIKU_C_DOC));
+        }
+    }
     tiku_fill(st->surface, strip, TIKU_C_PANEL);
     tiku_hline(st->surface, 0, strip.y, EDIT_W,
                     tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
@@ -250,6 +301,165 @@ paint(edit_state_t *st)
     } else {
         (void)st->services->frame(st->services->ctx, st->id,
                                   st->surface->px, EDIT_W, EDIT_H);
+    }
+}
+
+static void paint(edit_state_t *st);
+
+/** @brief Append one finished line of the child's output to the pane. */
+static void
+out_line(edit_state_t *st, const char *line)
+{
+    if (st->out_count >= (int)(sizeof st->out / sizeof st->out[0])) {
+        /* Full: the oldest line goes, because the newest is the one a
+         * person watching a run is waiting for. */
+        memmove(st->out[0], st->out[1],
+                sizeof st->out - sizeof st->out[0]);
+        st->out_count--;
+    }
+    snprintf(st->out[st->out_count], sizeof st->out[0], "%s", line);
+    st->out_count++;
+}
+
+/**
+ * @brief Run the document in the interpreter a board runs.
+ *
+ * The text is written to its file first (or a scratch one when it has
+ * no name yet), because the interpreter reads a FILE -- what runs is
+ * what would run tomorrow, not a copy that only ever existed in this
+ * window.  The sandbox the program's VFS lands in is the file's own
+ * folder: a program that writes /led writes beside its source, where
+ * its author can look at it.
+ */
+static void
+run_program(edit_state_t *st)
+{
+    char file[560];
+    char box[560];
+    const char *tool;
+    int fds[2];
+    const char *slash;
+
+    if (st->running) {
+        snprintf(st->note, sizeof st->note, "already running");
+        return;
+    }
+    if (st->path[0] != '\0') {
+        (void)save(st);
+        snprintf(file, sizeof file, "%s", st->path);
+    } else {
+        FILE *f;
+        int i;
+
+        snprintf(file, sizeof file, "/tmp/tiku_edit_run.bas");
+        f = fopen(file, "w");
+        if (f == NULL) {
+            snprintf(st->note, sizeof st->note, "cannot write the scratch");
+            return;
+        }
+        for (i = 0; i < tiku_textview_lines(&st->tv); i++) {
+            (void)fprintf(f, "%s\n", tiku_textview_line(&st->tv, i));
+        }
+        (void)fclose(f);
+    }
+    snprintf(box, sizeof box, "%s", file);
+    slash = strrchr(box, '/');
+    if (slash != NULL && slash != box) {
+        box[slash - box] = '\0';
+    } else {
+        snprintf(box, sizeof box, "/tmp");
+    }
+    tool = getenv("TIKU_BASIC");
+    if (tool == NULL || tool[0] == '\0') {
+        tool = "tiku-basic";
+    }
+    if (pipe(fds) != 0) {
+        snprintf(st->note, sizeof st->note, "cannot make the pipe");
+        return;
+    }
+    st->child = fork();
+    if (st->child < 0) {
+        (void)close(fds[0]);
+        (void)close(fds[1]);
+        snprintf(st->note, sizeof st->note, "cannot start the run");
+        return;
+    }
+    if (st->child == 0) {
+        (void)dup2(fds[1], 1);
+        (void)dup2(fds[1], 2);
+        (void)close(fds[0]);
+        (void)close(fds[1]);
+        (void)execlp(tool, tool, file, box, (char *)NULL);
+        /* Reached only when the interpreter is not there to run. */
+        fprintf(stderr, "cannot run %s\n", tool);
+        _exit(127);
+    }
+    (void)close(fds[1]);
+    (void)fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    st->child_fd = fds[0];
+    st->running = 1;
+    st->out_count = 0;
+    st->out_partial[0] = '\0';
+    snprintf(st->note, sizeof st->note, "running");
+}
+
+/** @brief Hear what the run has said since the last frame. */
+static void
+edit_tick(void *state, int64_t now_us)
+{
+    edit_state_t *st = state;
+    char buf[256];
+    ssize_t n;
+    int heard = 0;
+
+    (void)now_us;
+    if (st == NULL || !st->running) {
+        return;
+    }
+    for (;;) {
+        n = read(st->child_fd, buf, sizeof buf - 1u);
+        if (n <= 0) {
+            break;
+        }
+        buf[n] = '\0';
+        {
+            char *p = buf;
+
+            while (*p != '\0') {
+                size_t used = strlen(st->out_partial);
+
+                if (*p == '\n') {
+                    out_line(st, st->out_partial);
+                    st->out_partial[0] = '\0';
+                } else if (used + 1u < sizeof st->out_partial) {
+                    st->out_partial[used] = *p;
+                    st->out_partial[used + 1u] = '\0';
+                }
+                p++;
+            }
+        }
+        heard = 1;
+    }
+    if (n == 0) {
+        /* The pipe closed: the run is over, and its verdict is worth a
+         * line of its own. */
+        int status = 0;
+
+        if (st->out_partial[0] != '\0') {
+            out_line(st, st->out_partial);
+            st->out_partial[0] = '\0';
+        }
+        (void)waitpid(st->child, &status, 0);
+        st->running = 0;
+        (void)close(st->child_fd);
+        st->child_fd = -1;
+        snprintf(st->note, sizeof st->note, "%s",
+                 (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+                     ? "finished" : "stopped");
+        heard = 1;
+    }
+    if (heard) {
+        paint(st);
     }
 }
 
@@ -296,16 +506,25 @@ publish(edit_state_t *st)
      * the host has one: an application started by a host that cannot
      * ask has no business showing rows it could not honour.
      */
+    /* Run is offered where it can be honest: a document the editor
+     * knows is BASIC, run by the interpreter a board runs. */
+    menus.menu[0].nitem = 5;
+    snprintf(menus.menu[0].item[4].label,
+             sizeof menus.menu[0].item[4].label, "Run");
+    menus.menu[0].item[4].command = CMD_RUN;
+    menus.menu[0].item[4].sc = 'r';
+    menus.menu[0].item[4].enabled =
+        (unsigned char)(st->lang == TIKU_SYNTAX_BASIC && !st->running);
     if (st->services->pick != NULL) {
-        menus.menu[0].nitem = 6;
-        snprintf(menus.menu[0].item[4].label,
-                 sizeof menus.menu[0].item[4].label, "Open…");
-        menus.menu[0].item[4].command = CMD_OPEN;
-        menus.menu[0].item[4].enabled = 1;
+        menus.menu[0].nitem = 7;
         snprintf(menus.menu[0].item[5].label,
-                 sizeof menus.menu[0].item[5].label, "Save as…");
-        menus.menu[0].item[5].command = CMD_SAVEAS;
+                 sizeof menus.menu[0].item[5].label, "Open…");
+        menus.menu[0].item[5].command = CMD_OPEN;
         menus.menu[0].item[5].enabled = 1;
+        snprintf(menus.menu[0].item[6].label,
+                 sizeof menus.menu[0].item[6].label, "Save as…");
+        menus.menu[0].item[6].command = CMD_SAVEAS;
+        menus.menu[0].item[6].enabled = 1;
     }
     (void)st->services->menus(st->services->ctx, st->id, &menus);
 }
@@ -381,7 +600,7 @@ static int
 edit_event(void *state, const tiku_event_t *event)
 {
     edit_state_t *st = state;
-    int rows = rows_visible();
+    int rows = rows_visible_of(st);
     int was_modified;
 
     if (st->ask.open) {
@@ -505,6 +724,11 @@ edit_pick(void *state, uint32_t window, int command)
     case CMD_REVERT:
         load(st);
         break;
+    case CMD_RUN:
+        if (st->lang == TIKU_SYNTAX_BASIC) {
+            run_program(st);
+        }
+        break;
     case CMD_OPEN:
     case CMD_SAVEAS:
         if (st->services->pick != NULL) {
@@ -577,6 +801,7 @@ const tiku_app_descriptor_t tiku_edit_app = {
     .stop = edit_stop,
     .event = edit_event,
     .pick = edit_pick,
+    .tick = edit_tick,
     .picked = edit_picked
 };
 

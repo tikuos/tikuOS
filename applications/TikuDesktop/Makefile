@@ -59,6 +59,23 @@ PIC_LIBS      := $(PIC_RUNTIME) $(PIC_UI) $(PIC_TRANSPORT)
 
 PROBE   := $(BUILD)/tiku-desk-probe
 GALLERY := $(BUILD)/tiku-desk-gallery
+
+# The board's own BASIC interpreter, compiled for the host: the editor
+# runs a program by running this, so what its output pane shows is what
+# a board would do -- not a re-implementation that agrees on good days.
+BASICHOST := $(BUILD)/tiku-basic
+BASIC_GATES := -DTIKU_BASIC_GPIO_ENABLE=0 -DTIKU_BASIC_ADC_ENABLE=0 \
+               -DTIKU_BASIC_I2C_ENABLE=0 -DTIKU_BASIC_LED_ENABLE=0 \
+               -DTIKU_BASIC_RTC_ENABLE=0 -DTIKU_BASIC_NET_ENABLE=0 \
+               -DTIKU_BASIC_BLE_ENABLE=0 -DTIKU_BASIC_JSON_ENABLE=0 \
+               -DTIKU_BASIC_CRYPTO_ENABLE=0 -DTIKU_BASIC_HTTPS_ENABLE=0 \
+               -DTIKU_BASIC_REBOOT_ENABLE=0 -DTIKU_BASIC_PEEK_POKE_ENABLE=0 \
+               -DTIKU_BASIC_MODULE_ENABLE=0 -DTIKU_BASIC_FILE_ENABLE=0
+
+$(BASICHOST): basichost/tiku_basic_host.c ../../kernel/shell/basic/tiku_basic.c | $(BUILD)
+	$(CC) -O2 -std=gnu11 -o $@ basichost/tiku_basic_host.c \
+	    ../../kernel/shell/basic/tiku_basic.c \
+	    -Ibasichost -I../../ -I../../kernel/shell/basic $(BASIC_GATES)
 DEMOAPP := $(BUILD)/tiku-demo-app
 
 # Applications, as opposed to examples: these are meant to be used.
@@ -86,7 +103,7 @@ EXAMPLES := $(patsubst %,$(BUILD)/tiku-example-%,$(EXAMPLE_NAMES))
 TEST_APP := $(BUILD)/test-desk-app
 
 .PHONY: all clean run gallery font libs test shell
-all: libs $(PROBE) $(GALLERY) $(DEMOAPP) $(APPS) $(EXAMPLES) \
+all: libs $(PROBE) $(GALLERY) $(DEMOAPP) $(APPS) $(EXAMPLES) $(BASICHOST) \
      $(SO_APPS) $(SO_EXAMPLES) $(RUNNER) shell
 
 # The kits are built where they live, by their own Makefile: this one
