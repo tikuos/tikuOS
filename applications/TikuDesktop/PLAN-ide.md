@@ -80,11 +80,10 @@ The gaps, each a kit change with its own proving test:
   a block comment, or not), have textview cache each line's entry
   state and re-classify forward from an edit only until the state
   stops changing.  BASIC keeps the line-local road untouched.
-- **G4 — app-internal window addressing.**  HALF CLOSED.  The table of
-  open editors by path is in `tiku_ide.c`, and raising turned out to
-  need kit API after all (`raise_window()`, P2).  What is left is the
-  message-row link: "open file F, then place the caret", which P3
-  needs.
+- **G4 — app-internal window addressing.**  CLOSED.  The table of open
+  editors by path is in `tiku_ide.c`; raising needed kit API after all
+  (`raise_window()`, P2); and "open file F, then place the caret" is
+  `message_follow()` (P3), which opens or raises and then reveals.
 
 ## 3. The project IS a folder, and the project file is facts
 
@@ -139,11 +138,24 @@ Project… is the shell's ordinary Open panel pointed at a
   the heading rule end to end; and an editor window's tab can sit under
   the shell's own folder window, so the Window menu -- not
   `click-window` -- is how a script reaches one.
-- **P3 — the message window.**  Fed by the one backend that already
-  exists and is proven: Run of a BASIC file through `tiku-basic`
-  (absolute `$TIKU_BASIC`, as runbas.script does).  Output lines
-  become rows; a planted syntax error proves the file:line link jumps.
-  This closes the message contract (§1) before any C exists.
+- **P3 — the message window.**  DONE 2026-08-27 (kits `a6ed5bc`,
+  tracker `5244524`).  Project → Run puts the chosen file on the
+  interpreter a board runs, as a child on a pipe pumped from `tick()`
+  (which IS called out of process, so the IDE can do this through the
+  runner).  `idemessages.script` proves it.  The contract is closed:
+  a message is `{text, file, line}` and nothing else.  What it took:
+  the interpreter names no FILE and reports an error as TWO lines --
+  `? syntax` then `at line 250` -- so the annotation is folded onto the
+  error row (only onto a row that began with `?`, so a program printing
+  those words keeps them) and the file comes from what was run; a BASIC
+  line WEARS its number, so the text line is found by scanning rather
+  than by a table that could drift.  Two faults found and fixed while
+  building: `tiku_textview_place()` does not move the page, so a caret
+  below the window looked like nothing happening; and a program waiting
+  on `INPUT` never ends -- the interpreter's own guard cannot fire --
+  so a run is bounded and the stop is SAID.  The caret is proven
+  without inventing UI for the test: type a letter, save, and read
+  where it landed.
 - **P4 — C colouring (G3).**  Stateful classifier, C table (keywords,
   strings, `//` and `/* */`, numbers), editor windows colour `.c`/`.h`.
   Colouring only — no compile, no promises the backend hasn't made.
