@@ -19,6 +19,7 @@
 #include "tiku_slider.h"
 #include "tiku_alert.h"
 #include "tiku_syntax.h"
+#include "tiku_list.h"
 
 #ifndef TIKU_NO_X11
 int tiku_x11_show(const tiku_surface_t *s, const char *title);
@@ -102,17 +103,28 @@ gallery(tiku_surface_t *s)
     {
         tiku_rect_t lv = { c.x, y, 350, 130 };
         tiku_rect_t body = { lv.x, lv.y + 18, lv.w - 15, lv.h - 18 - 15 };
+        tiku_rect_t rows = tiku_inset(body, 2);
         int rowh = f->height + 4, i;
+        /* A real list: it holds which row is picked and which is first,
+         * and it says where each row goes.  The three columns are still
+         * painted here, because what a row LOOKS like is the caller's --
+         * which is the whole bargain the widget is built on. */
+        static tiku_list_t list;
 
+        if (tiku_list_count(&list) == 0) {
+            tiku_list_init(&list, 1);
+            tiku_list_set_row_h(&list, rowh);
+            (void)tiku_list_set_count(&list, 5);
+            tiku_list_select_only(&list, 2);
+        }
         tiku_ui_list_header(s, (tiku_rect_t){ lv.x, lv.y,
                                                         lv.w - 15, 18 },
                                  COLS, COLW, 3, 0);
         tiku_ui_sunken(s, body, TIKU_C_DOC);
         tiku_clip_set(s, tiku_inset(body, 2));
         for (i = 0; i < 5; i++) {
-            tiku_rect_t row = { body.x + 2, body.y + 2 + i * rowh,
-                                     body.w - 4, rowh };
-            int sel = (i == 2);
+            tiku_rect_t row = tiku_list_row_rect(&list, rows, i);
+            int sel = tiku_list_selected(&list, i);
             int cx = row.x, k;
 
             tiku_fill(s, row, sel ? TIKU_C_SELECT
