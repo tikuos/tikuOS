@@ -62,11 +62,12 @@ services→pick, alerts inside the app's own window.
 
 The gaps, each a kit change with its own proving test:
 
-- **G1 — two windows from one app.**  The descriptor API is per-id
-  everywhere, but no shipped app opens a second window; the desktops'
-  bookkeeping has never been exercised past one.  Prove it FIRST with
-  a spike (a throwaway two-window app + script) before any IDE code
-  exists, in both front-ends and both placements (in-process, .so).
+- **G1 — two windows from one app.**  CLOSED, see P1.  One correction
+  to this plan's premise: there is ONE host, the desktop shell, and
+  "both front-ends" is the suite's two script lanes, not two hosts --
+  `tiku_trk_app.c` has no window layer at all and cannot host
+  applications.  "Both placements" is real and both are done:
+  `apps/trusted/*.so` runs in process, `apps/*.so` through the runner.
 - **G2 — list group headers.**  `tiku_list` has no notion of a
   heading row.  Add non-selectable heading rows (drawn in the label
   style, skipped by arrow travel) to the interface kit.
@@ -104,9 +105,23 @@ Project… is the shell's ordinary Open panel pointed at a
 
 ## 4. Phases, in order, each ending green and committed
 
-- **P1 — the two-window spike (G1).**  Throwaway app, script proving
-  both windows draw, take keys separately, publish separate menus, and
-  close separately.  What breaks in the desktops gets fixed HERE.
+- **P1 — the two-window spike (G1).**  DONE 2026-08-27 (kits `4224966`,
+  tracker `78f9ccf`).  `examples/twowin.c` holds two windows;
+  `twowin.script` proves them in process and `twowinremote.script`
+  through the runner, over the wire.  What it found, all of it fixed:
+  `event()` carried no window id, so an application could not tell its
+  own windows' keys apart (`event_in()` appended, plus `closed()` for
+  the window the runtime takes); BOTH hosts tagged the workspace window
+  with the APPLICATION, so a second `open()` silently returned the
+  first window wearing a second name; the embed host discarded the id
+  in frame/menus/place/resize, and passed a hardcoded `1` to `pick()`;
+  `close()` was a no-op in process and "closing is leaving" out of it;
+  a session WAS a window, so out of process the second window quietly
+  replaced the first.  Two facts worth keeping: windows of one
+  application are placed side by side because overlapping tabs cannot
+  both be clicked, and Cmd-W is the runtime's close for EMBEDDED
+  windows only -- a remote window gets the key, which is why the
+  terminal still has Ctrl-W.
 - **P2 — the project window.**  Parse `project.tiku` (G2 headers),
   Open Project… through the panel, rows open editor windows (one per
   file, re-pick raises), Window menu tracks them, dirty markers,
