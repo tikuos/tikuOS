@@ -62,6 +62,7 @@
 #define CMD_SHUT     4
 #define CMD_RUN      5
 #define CMD_FOLLOW   6
+#define CMD_BUILD    7
 #define CMD_WINDOW   64         /* +i: the i'th editor of the Window menu */
 
 /** @brief One line of the project window: a file, or a group's name. */
@@ -74,10 +75,42 @@ typedef struct {
 typedef struct {
     char  title[64];
     char  dir[512];             /* what the file's own paths are from */
+    char  target[32];           /* what the program is being built FOR */
     int   nrow;
     int   unknown;              /* lines this build did not know */
     prow_t row[IDE_ROWS];
 } project_t;
+
+/**
+ * @brief The compiler a target is built with.
+ *
+ * The names the tree's own Makefile already detects, so a project says
+ * what it is FOR and the toolchain follows from that rather than from
+ * a path somebody typed.  A target this build has never heard of gets
+ * no compiler and is told so; a compiler that is not installed says so
+ * itself, through the same road every other failure takes.
+ */
+static const char *
+compiler_for(const char *target)
+{
+    static const struct { const char *target, *cc; } WHICH[] = {
+        { "host",      "cc"                 },
+        { "rp2350",    "arm-none-eabi-gcc"  },
+        { "ambiq",     "arm-none-eabi-gcc"  },
+        { "nordic",    "arm-none-eabi-gcc"  },
+        { "stm32n6",   "arm-none-eabi-gcc"  },
+        { "ra8p1",     "arm-none-eabi-gcc"  },
+        { "msp430",    "msp430-elf-gcc"     }
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof WHICH / sizeof WHICH[0]; i++) {
+        if (strcmp(target, WHICH[i].target) == 0) {
+            return WHICH[i].cc;
+        }
+    }
+    return NULL;
+}
 
 /** @brief One editor window: its file, its text, and its window. */
 typedef struct {
@@ -100,7 +133,12 @@ typedef struct {
 typedef struct {
     char text[160];
     char file[512];             /* empty when it names nowhere */
-    int  line;                  /* the program's own line, or 0 */
+    int  line;                  /* the line, or 0 for none */
+    /* WHAT the line counts.  A compiler counts the lines of the file; a
+     * BASIC program's lines wear their own numbers and are not in file
+     * order at all.  Getting this wrong lands the caret somewhere
+     * plausible and wrong, which is worse than not moving. */
+    int  numbered;              /* nonzero: the line is a BASIC number */
 } msg_t;
 
 typedef struct {
@@ -132,11 +170,13 @@ typedef struct {
     pid_t                           child;
     char                            child_file[512];
     char                            partial[160];
+    int                             child_numbered; /* a BASIC run */
     int64_t                         run_from;   /* when it started */
 } ide_t;
 
 static void project_paint(ide_t *st);
 static void project_publish(ide_t *st);
+static void messages_show(ide_t *st);
 
 /*---------------------------------------------------------------------------*/
 /* The project file                                                          */
@@ -224,6 +264,14 @@ project_parse(project_t *pj, const char *text, const char *dir)
         }
         if (strcmp(kind, "title") == 0) {
             (void)tail(rest, pj->title, sizeof pj->title);
+            p = line_end(p);
+            continue;
+        }
+        if (strcmp(kind, "target") == 0) {
+            /* What the program is FOR.  It was an unknown line until
+             * something could act on it, which is exactly what the
+             * skipping rule is for. */
+            (void)word(rest, pj->target, sizeof pj->target);
             p = line_end(p);
             continue;
         }
@@ -597,11 +645,21 @@ project_publish(ide_t *st)
         menus.menu[0].item[1].command = CMD_RUN;
         menus.menu[0].item[1].enabled = (unsigned char)can;
     }
+    /* Build names what it is FOR, because that is the decision the
+     * project already made and the one a person needs to see before
+     * they trust what comes back. */
     snprintf(menus.menu[0].item[2].label,
-             sizeof menus.menu[0].item[2].label, "Close Project");
-    menus.menu[0].item[2].command = CMD_SHUT;
-    menus.menu[0].item[2].enabled = 1;
-    menus.menu[0].nitem = 3;
+             sizeof menus.menu[0].item[2].label, "Build for %s",
+             (st->proj.target[0] != '\0') ? st->proj.target
+                                          : "nothing yet");
+    menus.menu[0].item[2].command = CMD_BUILD;
+    menus.menu[0].item[2].enabled =
+        (unsigned char)(st->proj.nrow > 0 && !st->running);
+    snprintf(menus.menu[0].item[3].label,
+             sizeof menus.menu[0].item[3].label, "Close Project");
+    menus.menu[0].item[3].command = CMD_SHUT;
+    menus.menu[0].item[3].enabled = 1;
+    menus.menu[0].nitem = 4;
 
     snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "Window");
     for (i = 0; i < IDE_EDITS && n < TIKU_MENUSET_ITEMS; i++) {
@@ -802,6 +860,7 @@ message_take(ide_t *st, const char *line)
         strstr(st->msg[st->nmsg - 1].text, "? ") != NULL) {
         m = &st->msg[st->nmsg - 1];
         m->line = (int)n;
+        m->numbered = 1;
         snprintf(m->file, sizeof m->file, "%s", st->child_file);
         {
             char whole[160];
@@ -814,6 +873,30 @@ message_take(ide_t *st, const char *line)
     m = &st->msg[st->nmsg++];
     memset(m, 0, sizeof *m);
     snprintf(m->text, sizeof m->text, "%s", line);
+    if (st->child_numbered) {
+        return;                 /* BASIC says where on its own line */
+    }
+    /*
+     * A compiler says where at the HEAD of what it says --
+     * "file.c:12:5: error: ..." -- so the place and the words arrive
+     * together and there is nothing to fold.  The file is taken as
+     * written: a compiler asked about a path answers about that path.
+     */
+    {
+        const char *colon = strchr(line, ':');
+        unsigned at = 0u;
+
+        if (colon != NULL && colon != line &&
+            sscanf(colon + 1, "%u", &at) == 1 && at > 0u) {
+            size_t len = (size_t)(colon - line);
+
+            if (len < sizeof m->file) {
+                memcpy(m->file, line, len);
+                m->file[len] = '\0';
+                m->line = (int)at;
+            }
+        }
+    }
 }
 
 /**
@@ -900,9 +983,12 @@ run_file(ide_t *st, const char *path)
         (void)close(fds[0]);
         (void)close(fds[1]);
         (void)execlp(tool, tool, path, box, (char *)NULL);
+        /* A tool that is not installed says so through the same pipe
+         * everything else does, and becomes a message like any other. */
         fprintf(stderr, "cannot run %s\n", tool);
         _exit(127);
     }
+    st->child_numbered = 1;     /* BASIC names its own lines */
     (void)close(fds[1]);
     (void)fcntl(fds[0], F_SETFL, O_NONBLOCK);
     st->child_fd = fds[0];
@@ -913,6 +999,95 @@ run_file(ide_t *st, const char *path)
     /* No window yet: a run that says nothing has nothing to show, and
      * a message window standing empty is furniture. */
     (void)tiku_list_set_count(&st->msg_list, 0);
+    messages_paint(st);
+}
+
+/**
+ * @brief Ask the compiler the project's target names whether its C is
+ *        good, and say whatever it says.
+ *
+ * What BUILD means, today: the check, not the image.  Making an image
+ * for a board needs a toolchain for that board, and a project asking
+ * for one this machine has not got is told so rather than shown a
+ * silence it could mistake for success.
+ */
+static void
+build_project(ide_t *st)
+{
+    const char *cc = compiler_for(st->proj.target);
+    char inc[560];
+    const char *argv[IDE_ROWS + 8];
+    int argc = 0;
+    int fds[2];
+    int i, any = 0;
+
+    if (st->running) {
+        return;
+    }
+    st->nmsg = 0;
+    st->partial[0] = '\0';
+    st->child_numbered = 0;     /* a compiler counts the file's lines */
+    (void)tiku_list_set_count(&st->msg_list, 0);
+    if (st->proj.target[0] == '\0') {
+        message_take(st, "? this project does not say what it is for");
+        messages_show(st);
+        return;
+    }
+    if (cc == NULL) {
+        char says[160];
+
+        snprintf(says, sizeof says,
+                 "? nothing here knows how to build for %s",
+                 st->proj.target);
+        message_take(st, says);
+        messages_show(st);
+        return;
+    }
+    snprintf(inc, sizeof inc, "-I%s", st->proj.dir);
+    argv[argc++] = cc;
+    argv[argc++] = "-fsyntax-only";
+    argv[argc++] = inc;
+    for (i = 0; i < st->proj.nrow && argc < IDE_ROWS + 6; i++) {
+        const prow_t *row = &st->proj.row[i];
+        size_t n = strlen(row->name);
+
+        if (row->heading || n < 3u ||
+            strcmp(row->name + n - 2, ".c") != 0) {
+            continue;
+        }
+        argv[argc++] = row->path;
+        any = 1;
+    }
+    argv[argc] = NULL;
+    if (!any) {
+        message_take(st, "? this project has no C in it to build");
+        messages_show(st);
+        return;
+    }
+    if (pipe(fds) != 0) {
+        return;
+    }
+    st->child = fork();
+    if (st->child < 0) {
+        (void)close(fds[0]);
+        (void)close(fds[1]);
+        return;
+    }
+    if (st->child == 0) {
+        (void)dup2(fds[1], 1);
+        (void)dup2(fds[1], 2);
+        (void)close(fds[0]);
+        (void)close(fds[1]);
+        (void)execvp(cc, (char *const *)argv);
+        fprintf(stderr, "cannot run %s\n", cc);
+        _exit(127);
+    }
+    (void)close(fds[1]);
+    (void)fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    st->child_fd = fds[0];
+    st->running = 1;
+    st->run_from = 0;
+    st->child_file[0] = '\0';
     messages_paint(st);
 }
 
@@ -950,7 +1125,8 @@ message_follow(ide_t *st)
     if (e == NULL) {
         return;
     }
-    at = line_of_number(&e->tv, m->line);
+    /* A compiler counted the lines of the file; BASIC named one. */
+    at = m->numbered ? line_of_number(&e->tv, m->line) : m->line - 1;
     if (at >= 0) {
         const tiku_font_t *f = tiku_font_plain();
 
@@ -1319,6 +1495,10 @@ ide_pick(void *state, uint32_t window, int command)
         }
         break;
     }
+    case CMD_BUILD:
+        build_project(st);
+        project_publish(st);
+        break;
     case CMD_FOLLOW:
         message_follow(st);
         break;
