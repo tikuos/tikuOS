@@ -35,6 +35,8 @@
 #define CMD_REVERT 2
 #define CMD_QUIT   3
 #define CMD_SYNTAX 4
+#define CMD_OPEN   5
+#define CMD_SAVEAS 6
 
 typedef struct {
     const tiku_app_services_t *services;
@@ -68,6 +70,10 @@ typedef struct {
      * desktop starts this one) has no name to go on and the person does.
      */
     tiku_syntax_lang_t              lang;
+    /* Which question the shell's panel is answering, when it answers:
+     * the ask is not remembered by the panel and the answer arrives
+     * later, so what to DO with a path is remembered here. */
+    int                             pick_save;
 } edit_state_t;
 
 /* The file named on the command line, before any state exists. */
@@ -285,6 +291,22 @@ publish(edit_state_t *st)
     menus.menu[0].item[3].enabled = 1;
     menus.menu[0].item[3].marked =
         (unsigned char)(st->lang != TIKU_SYNTAX_NONE);
+    /*
+     * Opening and saving-as are the SHELL's panel, offered only where
+     * the host has one: an application started by a host that cannot
+     * ask has no business showing rows it could not honour.
+     */
+    if (st->services->pick != NULL) {
+        menus.menu[0].nitem = 6;
+        snprintf(menus.menu[0].item[4].label,
+                 sizeof menus.menu[0].item[4].label, "Open…");
+        menus.menu[0].item[4].command = CMD_OPEN;
+        menus.menu[0].item[4].enabled = 1;
+        snprintf(menus.menu[0].item[5].label,
+                 sizeof menus.menu[0].item[5].label, "Save as…");
+        menus.menu[0].item[5].command = CMD_SAVEAS;
+        menus.menu[0].item[5].enabled = 1;
+    }
     (void)st->services->menus(st->services->ctx, st->id, &menus);
 }
 
@@ -483,6 +505,28 @@ edit_pick(void *state, uint32_t window, int command)
     case CMD_REVERT:
         load(st);
         break;
+    case CMD_OPEN:
+    case CMD_SAVEAS:
+        if (st->services->pick != NULL) {
+            char dir[512];
+            const char *slash;
+
+            /* Start where this document lives, or at the home the shell
+             * would have chosen anyway. */
+            snprintf(dir, sizeof dir, "%s", st->path);
+            slash = strrchr(dir, '/');
+            if (slash != NULL && slash != dir) {
+                dir[slash - dir] = '\0';
+            } else {
+                dir[0] = '\0';
+            }
+            st->pick_save = (command == CMD_SAVEAS);
+            (void)st->services->pick(st->services->ctx, st->id,
+                st->pick_save ? TIKU_APP_PICK_SAVE : TIKU_APP_PICK_OPEN,
+                (dir[0] != '\0') ? dir : NULL,
+                st->pick_save ? "untitled" : NULL);
+        }
+        break;
     case CMD_SYNTAX:
         st->lang = (st->lang == TIKU_SYNTAX_NONE) ? TIKU_SYNTAX_BASIC
                                                   : TIKU_SYNTAX_NONE;
@@ -498,13 +542,42 @@ edit_pick(void *state, uint32_t window, int command)
     return 0;
 }
 
+/**
+ * @brief The path the person chose, some frames after the asking.
+ *
+ * Opening reads the file and re-reads its NAME for the language, so a
+ * .bas file arrives coloured without anybody asking twice.  Saving-as
+ * takes the name first and then writes, so a failed write leaves the
+ * document pointing where it was told rather than where it was.
+ */
+static void
+edit_picked(void *state, uint32_t window, const char *path)
+{
+    edit_state_t *st = state;
+
+    (void)window;
+    if (st == NULL || path == NULL || path[0] == '\0') {
+        return;
+    }
+    snprintf(st->path, sizeof st->path, "%s", path);
+    st->lang = tiku_syntax_of_path(st->path);
+    if (st->pick_save) {
+        (void)save(st);
+    } else {
+        load(st);
+    }
+    publish(st);
+    paint(st);
+}
+
 const tiku_app_descriptor_t tiku_edit_app = {
     .id = "org.tikuos.edit",
     .name = "Edit",
     .start = edit_start,
     .stop = edit_stop,
     .event = edit_event,
-    .pick = edit_pick
+    .pick = edit_pick,
+    .picked = edit_picked
 };
 
 #ifdef TIKU_APP_SO
