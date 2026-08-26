@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "tiku_alert.h"
 #include "tiku_app.h"
 #include "tiku_client.h"
 #include "tiku_font.h"
@@ -81,6 +82,12 @@ typedef struct {
     tiku_list_t                tv_list;
     project_t                       proj;
     edit_t                          edit[IDE_EDITS];
+    /* The question closing asks while there is work nothing has saved.
+     * ONE question for the whole project, naming what is at stake: a
+     * question per window is a person pressing the same button three
+     * times without reading it. */
+    tiku_alert_t               ask;
+    tiku_rect_t                ask_frame;
     char                            note[128];
 } ide_t;
 
@@ -470,6 +477,17 @@ project_paint(ide_t *st)
     tiku_text(st->proj_surface, f, MARGIN,
                    strip.y + (STRIP_H - f->height) / 2 + f->ascent,
                    says, TIKU_C_TEXT);
+    if (st->ask.open) {
+        int aw, ah;
+
+        tiku_alert_size(&aw, &ah);
+        if (aw > IDE_W - 16) {
+            aw = IDE_W - 16;
+        }
+        st->ask_frame = (tiku_rect_t){ (IDE_W - aw) / 2,
+                                            (IDE_H - ah) / 3, aw, ah };
+        tiku_alert_draw(&st->ask, st->proj_surface, st->ask_frame);
+    }
     (void)st->services->frame(st->services->ctx, st->proj_id,
                               st->proj_surface->px, IDE_W, IDE_H);
 }
@@ -632,6 +650,33 @@ open_chosen(ide_t *st)
     }
 }
 
+/**
+ * @brief Name what closing would throw away, or say there is nothing.
+ *
+ * @return the number of documents holding unsaved work.
+ */
+static int
+unsaved(const ide_t *st, char *out, size_t max)
+{
+    int i, n = 0;
+    size_t used = 0u;
+
+    if (max > 0u) {
+        out[0] = '\0';
+    }
+    for (i = 0; i < IDE_EDITS; i++) {
+        const edit_t *e = &st->edit[i];
+
+        if (e->surface == NULL || !tiku_textview_modified(&e->tv)) {
+            continue;
+        }
+        used += (size_t)snprintf(out + used, (used < max) ? max - used : 0u,
+                                 "%s%s", (n > 0) ? ", " : "", e->name);
+        n++;
+    }
+    return n;
+}
+
 static int
 ide_event(void *state, uint32_t window, const tiku_event_t *event)
 {
@@ -640,6 +685,29 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
 
     if (event->type != TIKU_EVENT_KEY_DOWN &&
         event->type != TIKU_EVENT_POINTER_DOWN) {
+        return 0;
+    }
+    if (st->ask.open && window == st->proj_id) {
+        int at = -1;
+
+        if (event->type == TIKU_EVENT_KEY_DOWN) {
+            at = tiku_alert_key(&st->ask, event->key);
+        } else {
+            at = tiku_alert_button_at(&st->ask, st->ask_frame.w,
+                     st->ask_frame.h, event->x - st->ask_frame.x,
+                     event->y - st->ask_frame.y);
+            if (at >= 0) {
+                st->ask.chosen = at;
+            }
+        }
+        if (at < 0) {
+            return 0;           /* not the question's key: ignored */
+        }
+        tiku_alert_reset(&st->ask);
+        if (at == 1) {
+            return 1;           /* Discard: the project, and all of it */
+        }
+        project_paint(st);      /* Cancel: everything stands */
         return 0;
     }
     if (e != NULL) {
@@ -726,8 +794,29 @@ ide_pick(void *state, uint32_t window, int command)
             edit_drop(st, e);
         }
         break;
-    case CMD_SHUT:
-        return 1;               /* the project, and everything in it */
+    case CMD_SHUT: {
+        char names[192];
+
+        if (unsaved(st, names, sizeof names) == 0) {
+            return 1;           /* nothing at stake: closing is closing */
+        }
+        {
+            char says[320];
+
+            snprintf(says, sizeof says,
+                     "Close the project? %s %s changes nothing has "
+                     "saved.", names,
+                     (strchr(names, ',') != NULL) ? "hold" : "holds");
+            tiku_alert_open(&st->ask, TIKU_ALERT_WARN, 0, says,
+                            "Cancel|Discard");
+        }
+        if (st->services->raise_window != NULL) {
+            (void)st->services->raise_window(st->services->ctx,
+                                             st->proj_id);
+        }
+        project_paint(st);
+        break;
+    }
     default:
         break;
     }
