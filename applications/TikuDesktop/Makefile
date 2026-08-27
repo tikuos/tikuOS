@@ -95,8 +95,9 @@ APPS_D    := $(BUILD)/apps
 SO_NAMES  := edit term
 # Named for what they ARE, since the file name is the label a desktop
 # offers them under.
+PROG_D    := $(APPS_D)/programming
 SO_APPS   := $(APPS_D)/terminal.so $(APPS_D)/editor.so \
-             $(APPS_D)/TikuBasic.so $(APPS_D)/TikuC.so
+             $(PROG_D)/TikuBasic.so $(PROG_D)/TikuC.so
 SO_EXAMPLES := $(patsubst %,$(APPS_D)/%.so,hello clock counter sketch twowin)
 RUNNER    := $(BUILD)/tiku-run
 
@@ -169,13 +170,19 @@ $(APPS_D)/terminal.so: apps/tiku_term.c $(PIC_LIBS) | $(APPS_D)
 	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
 	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
 
-$(APPS_D)/TikuBasic.so: apps/tiku_ide.c $(PIC_LIBS) | $(APPS_D)
+# Built INTO apps/programming/, because where a file is installed is
+# where it is offered -- a build that put these beside the editor would
+# put them in the Applications menu on every machine that runs it.
+$(PROG_D):
+	@mkdir -p $(PROG_D)
+
+$(PROG_D)/TikuBasic.so: apps/tiku_ide.c $(PIC_LIBS) | $(PROG_D)
 	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
 	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
 
 # The same source wearing its other name: what differs is what it puts
 # forward, and a copy would only learn to disagree.
-$(APPS_D)/TikuC.so: apps/tiku_ide.c $(PIC_LIBS) | $(APPS_D)
+$(PROG_D)/TikuC.so: apps/tiku_ide.c $(PIC_LIBS) | $(PROG_D)
 	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
 	      -DTIKU_IDE_C \
 	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
