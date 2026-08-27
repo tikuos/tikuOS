@@ -584,7 +584,10 @@ tiku_ui_scrollbar(tiku_surface_t *s, tiku_rect_t r, float pos,
     tiku_rect_t track, thumb;
     int span, tlen, toff, i;
 
-    tiku_fill(s, r, tiku_tint(PANEL, TIKU_DARKEN_1));
+    /* The track a full shade down: one step from the panel read as the
+     * panel, and a scrollbar nobody can see is a listing nobody knows
+     * is longer than its window. */
+    tiku_fill(s, r, tiku_tint(PANEL, 1.18f));
     tiku_bevel(s, r, SHADOW(), WHITE());
 
     {
