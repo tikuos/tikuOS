@@ -194,9 +194,14 @@ templates.  Each is a later argument, not a forgotten one.
 
 ## 6. Naming
 
-The application is **TikuIDE** (`apps/tiku_ide.c`, menu row "IDE")
-until DECISIONS.md says otherwise.  The simple editor keeps its name
-and its job.
+The application is **TikuBasic** (`apps/tiku_ide.c`, artifact
+`TikuBasic.so`), renamed from TikuIDE on 2026-08-27: BASIC first,
+rather than generic.  The focus shows in the menu too -- Build appears
+only when a project's `target` line says what it is being built for,
+so a plain BASIC project is never offered a road nobody asked for.
+The C machinery underneath (the syntax carry, the compiler road) stays
+in the kit, waiting rather than showing.  The simple editor keeps its
+name and its job.
 
 ## 7. The decision, taken
 

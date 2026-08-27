@@ -3,7 +3,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ide.c - a place to work on a PROGRAM rather than on a file.
+ * tiku_ide.c - TikuBasic: a place to work on a BASIC program.
  *
  * The project window lists what the program is made of, grouped the way
  * the project file groups it; opening a row opens an editor window of
@@ -751,7 +751,7 @@ project_publish(ide_t *st)
     menus.nmenu = 2;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "Project");
     snprintf(menus.menu[0].item[0].label,
-             sizeof menus.menu[0].item[0].label, "About TikuIDE");
+             sizeof menus.menu[0].item[0].label, "About TikuBasic");
     menus.menu[0].item[0].command = CMD_ABOUT;
     menus.menu[0].item[0].enabled = 1;
     snprintf(menus.menu[0].item[1].label,
@@ -798,18 +798,27 @@ project_publish(ide_t *st)
     /* Build names what it is FOR, because that is the decision the
      * project already made and the one a person needs to see before
      * they trust what comes back. */
-    snprintf(menus.menu[0].item[6].label,
-             sizeof menus.menu[0].item[6].label, "Build for %s",
-             (st->proj.target[0] != '\0') ? st->proj.target
-                                          : "nothing yet");
-    menus.menu[0].item[6].command = CMD_BUILD;
-    menus.menu[0].item[6].enabled =
-        (unsigned char)(st->proj.nrow > 0 && !st->running);
-    snprintf(menus.menu[0].item[7].label,
-             sizeof menus.menu[0].item[7].label, "Close Project");
-    menus.menu[0].item[7].command = CMD_SHUT;
-    menus.menu[0].item[7].enabled = 1;
-    menus.menu[0].nitem = 8;
+    {
+        /* BASIC first: Build appears only when a project SAYS what it
+         * is being built for.  A menu offering a road nobody asked for
+         * is a generic tool wearing a focused name. */
+        int at = 6;
+
+        if (st->proj.target[0] != '\0') {
+            snprintf(menus.menu[0].item[at].label,
+                     sizeof menus.menu[0].item[at].label, "Build for %s",
+                     st->proj.target);
+            menus.menu[0].item[at].command = CMD_BUILD;
+            menus.menu[0].item[at].enabled =
+                (unsigned char)(st->proj.nrow > 0 && !st->running);
+            at++;
+        }
+        snprintf(menus.menu[0].item[at].label,
+                 sizeof menus.menu[0].item[at].label, "Close Project");
+        menus.menu[0].item[at].command = CMD_SHUT;
+        menus.menu[0].item[at].enabled = 1;
+        menus.menu[0].nitem = at + 1;
+    }
 
     snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "Window");
     for (i = 0; i < IDE_EDITS && n < TIKU_MENUSET_ITEMS; i++) {
@@ -1519,7 +1528,7 @@ announce_paint(tiku_surface_t *sf)
     tiku_fill(sf, all, TIKU_C_PANEL);
     tiku_logo_paint(sf, mark, 0u);
     (void)tiku_text_centered(sf, big,
-        (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, "TikuIDE",
+        (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, "TikuBasic",
         TIKU_C_TEXT);
     (void)tiku_text_centered(sf, f,
         (tiku_rect_t){ 0, 130, SPLASH_W, f->height },
@@ -1550,7 +1559,7 @@ about_open(ide_t *st)
         return;
     }
     st->about_id = st->services->open(st->services->ctx,
-                                      "About TikuIDE", SPLASH_W,
+                                      "About TikuBasic", SPLASH_W,
                                       SPLASH_H);
     if (st->about_id == 0u) {
         tiku_surface_free(st->about_surface);
@@ -1623,7 +1632,7 @@ ide_start(void **state, const tiku_app_services_t *services)
     st->splash_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
                                                TIKU_C_PANEL);
     if (st->splash_surface != NULL) {
-        st->splash_id = services->open(services->ctx, "TikuIDE",
+        st->splash_id = services->open(services->ctx, "TikuBasic",
                                        SPLASH_W, SPLASH_H);
         announce_paint(st->splash_surface);
         (void)services->frame(services->ctx, st->splash_id,
@@ -2061,8 +2070,8 @@ ide_closed(void *state, uint32_t window)
 }
 
 const tiku_app_descriptor_t tiku_ide_app = {
-    .id = "org.tikuos.ide",
-    .name = "TikuIDE",
+    .id = "org.tikuos.tikubasic",
+    .name = "TikuBasic",
     .start = ide_start,
     .stop = ide_stop,
     .pick = ide_pick,
