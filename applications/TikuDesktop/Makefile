@@ -105,8 +105,18 @@ EXAMPLE_NAMES := hello clock counter sketch
 EXAMPLES := $(patsubst %,$(BUILD)/tiku-example-%,$(EXAMPLE_NAMES))
 TEST_APP := $(BUILD)/test-desk-app
 
-.PHONY: all clean run gallery font libs test shell
-all: libs $(PROBE) $(GALLERY) $(DEMOAPP) $(APPS) $(EXAMPLES) $(BASICHOST) \
+.PHONY: all clean run gallery font libs test shell sweep-legacy
+
+# Names this tree used to build ELSEWHERE: swept before anything else,
+# because a menu grown from a directory listing shows the past beside
+# the present -- an IDE.so left over from before the rename, or a
+# TikuBasic.so from before the tools moved into programming/, is a row
+# in the wrong menu on every machine that ever built the old tree.
+sweep-legacy:
+	@rm -f $(APPS_D)/IDE.so $(APPS_D)/TikuIDE.so \
+	       $(APPS_D)/TikuBasic.so $(APPS_D)/TikuC.so
+
+all: sweep-legacy libs $(PROBE) $(GALLERY) $(DEMOAPP) $(APPS) $(EXAMPLES) $(BASICHOST) \
      $(SO_APPS) $(SO_EXAMPLES) $(RUNNER) shell
 
 # The kits are built where they live, by their own Makefile: this one
