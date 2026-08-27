@@ -4,7 +4,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_plaque.c - painting the plaque.
+ * tiku_splash.c - painting the splash screen.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -12,10 +12,10 @@
 
 #include "tiku_font.h"
 #include "tiku_logo.h"
-#include "tiku_plaque.h"
+#include "tiku_splash.h"
 #include "tiku_ui.h"
 
-/** @brief The artwork band's height, as a share of the plaque's. */
+/** @brief The artwork band's height, as a share of the splash screen's. */
 static int
 band_h(int h)
 {
@@ -28,7 +28,7 @@ band_h(int h)
  *
  * A sweep rather than a picture, because a picture has its colours
  * baked in and this band re-themes with the mark the day the palettes
- * do.  The mark sits where the old plaques put their artwork's eye:
+ * do.  The mark sits where the old splash screens put their artwork's eye:
  * right of centre, large enough to be the point.
  */
 static void
@@ -70,10 +70,49 @@ band_paint(tiku_surface_t *s, int w, int h)
     tiku_hline(s, 1, h, w - 2, tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
 }
 
+/**
+ * @brief The person's own picture, scaled to COVER the band.
+ *
+ * Covered, not fitted: a band with bars down its sides is a picture
+ * apologising for its shape.  What the crop loses at an edge the fill
+ * of the band is worth.
+ */
+static void
+art_paint(tiku_surface_t *s, int w, int h,
+          const tiku_surface_t *art)
+{
+    int x, y;
+    float scale, sw, sh;
+    float off_x, off_y;
+
+    if (art->w < 1 || art->h < 1) {
+        return;
+    }
+    sw = (float)w / (float)art->w;
+    sh = (float)h / (float)art->h;
+    scale = (sw > sh) ? sw : sh;
+    off_x = ((float)art->w - (float)w / scale) / 2.0f;
+    off_y = ((float)art->h - (float)h / scale) / 2.0f;
+    for (y = 1; y < h; y++) {
+        for (x = 1; x < w - 1; x++) {
+            int ax = (int)(off_x + (float)x / scale);
+            int ay = (int)(off_y + (float)y / scale);
+
+            if (ax < 0) { ax = 0; }
+            if (ay < 0) { ay = 0; }
+            if (ax >= art->w) { ax = art->w - 1; }
+            if (ay >= art->h) { ay = art->h - 1; }
+            tiku_pixel(s, x, y, art->px[ay * art->w + ax]);
+        }
+    }
+    tiku_hline(s, 1, h, w - 2, tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+}
+
 void
-tiku_plaque_paint(tiku_surface_t *s, const char *name,
+tiku_splash_paint(tiku_surface_t *s, const char *name,
                        const char *const *lines, int nlines,
-                       const char *version, const char *status)
+                       const char *version, const char *status,
+                       const tiku_surface_t *art)
 {
     const tiku_font_t *big = tiku_font_at(26);
     const tiku_font_t *f = tiku_font_plain();
@@ -86,24 +125,28 @@ tiku_plaque_paint(tiku_surface_t *s, const char *name,
     all = (tiku_rect_t){ 0, 0, s->w, s->h };
     band = band_h(s->h);
     x = 18;
-    /* The plaque is paper, edged once: a window that is not a window,
+    /* The splash screen is paper, edged once: a window that is not a window,
      * announcing that it will not be staying. */
     tiku_fill(s, all, TIKU_C_DOC);
     tiku_frame(s, all, tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
-    band_paint(s, s->w, band);
+    if (art != NULL) {
+        art_paint(s, s->w, band, art);
+    } else {
+        band_paint(s, s->w, band);
+    }
     /* The name, big, at the left under the artwork. */
     y = band + 12;
     tiku_text(s, big, x, y + big->ascent, name, TIKU_C_TEXT);
     y += big->height + 6;
     /* What is being gathered, said right under the name -- the one part
-     * of the old plaques that was never decoration. */
+     * of the old splash screens that was never decoration. */
     if (status != NULL) {
         tiku_text(s, f, x, y + f->ascent, status,
                        tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
     }
     y += f->height + 10;
     /* The small lines, as a block: who it is by, what it stands on. */
-    for (i = 0; i < nlines && i < TIKU_PLAQUE_LINES; i++) {
+    for (i = 0; i < nlines && i < TIKU_SPLASH_LINES; i++) {
         if (lines[i] == NULL) {
             break;
         }

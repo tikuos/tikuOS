@@ -41,8 +41,9 @@
 #include "tiku_gfx.h"
 #include "tiku_list.h"
 #include "tiku_iconpaint.h"
+#include "tiku_image.h"
 #include "tiku_logo.h"
-#include "tiku_plaque.h"
+#include "tiku_splash.h"
 #include "tiku_syntax.h"
 #include "tiku_textview.h"
 #include "tiku_ui.h"
@@ -217,6 +218,9 @@ typedef struct {
     tiku_surface_t            *splash_surface;
     int64_t                         splash_from;
     int                             splash_stage;
+    /* The person's own banner, when they have put one where this
+     * program looks; NULL wears the built-in sweep. */
+    tiku_surface_t            *splash_art;
     /* The About box: the same announcement, standing until somebody
      * has read it.  One of it, raised when asked for again. */
     uint32_t                        about_id;
@@ -244,7 +248,8 @@ static void project_paint(ide_t *st);
 static void project_publish(ide_t *st);
 static void messages_show(ide_t *st);
 static void splash_drop(ide_t *st);
-static void announce_paint(tiku_surface_t *sf, const char *status);
+static void announce_paint_art(tiku_surface_t *sf, const char *status,
+                               const tiku_surface_t *art);
 
 /*---------------------------------------------------------------------------*/
 /* The project file                                                          */
@@ -1486,7 +1491,7 @@ ide_tick(void *state, int64_t now_us)
         /* The splash leaves on its own: an announcement is not a door
          * somebody should have to close.  While it stands, the status
          * line along its bottom says what is being gathered -- which is
-         * what those plaques were FOR, and the one part of them that
+         * what those splash screens were FOR, and the one part of them that
          * was never decoration. */
         static const char *const STAGE[] = {
             "waking the interpreter…",
@@ -1507,7 +1512,8 @@ ide_tick(void *state, int64_t now_us)
             }
             if (stage != st->splash_stage) {
                 st->splash_stage = stage;
-                announce_paint(st->splash_surface, STAGE[stage]);
+                announce_paint_art(st->splash_surface, STAGE[stage],
+                                   st->splash_art);
                 (void)st->services->frame(st->services->ctx,
                                           st->splash_id,
                                           st->splash_surface->px,
@@ -1585,9 +1591,48 @@ ide_tick(void *state, int64_t now_us)
     }
 }
 
-/** @brief This program's plaque: its name, and the words that are true. */
+/**
+ * @brief The banner the person chose, when they chose one.
+ *
+ * The picture is looked for where the desktop already keeps a person's
+ * replacements -- ~/.config/<name>/splash.bmp (or .png) -- so choosing
+ * a banner is putting a file there, the same gesture that replaces an
+ * icon.  A picture that will not load is simply not worn.
+ */
+static tiku_surface_t *
+splash_art_load(void)
+{
+    static const char *const KIND[] = { "bmp", "png" };
+    const char *home = getenv("HOME");
+    size_t k;
+
+    for (k = 0; home != NULL && k < sizeof KIND / sizeof KIND[0]; k++) {
+        char at[512];
+        tiku_image_t img;
+        tiku_surface_t *art;
+        int i;
+
+        snprintf(at, sizeof at, "%s/.config/%s/splash.%s", home,
+                 APP_NAME, KIND[k]);
+        if (tiku_image_load(at, &img) != TIKU_IMG_OK) {
+            continue;
+        }
+        art = tiku_surface_new(img.w, img.h, TIKU_C_DOC);
+        if (art != NULL) {
+            for (i = 0; i < img.w * img.h; i++) {
+                art->px[i] = img.px[i] & 0x00ffffffu;
+            }
+        }
+        tiku_image_free(&img);
+        return art;
+    }
+    return NULL;
+}
+
+/** @brief This program's splash screen: its name, and the words that are true. */
 static void
-announce_paint(tiku_surface_t *sf, const char *status)
+announce_paint_art(tiku_surface_t *sf, const char *status,
+                   const tiku_surface_t *art)
 {
     static const char *const LINES[] = {
         "by Ambuj Varshney",
@@ -1595,9 +1640,9 @@ announce_paint(tiku_surface_t *sf, const char *status)
         "drawn with the six kits"
     };
 
-    tiku_plaque_paint(sf, APP_NAME, LINES,
+    tiku_splash_paint(sf, APP_NAME, LINES,
                            (int)(sizeof LINES / sizeof LINES[0]),
-                           "TikuOS 0.06", status);
+                           "TikuOS 0.06", status, art);
 }
 
 /**
@@ -1630,7 +1675,7 @@ about_open(ide_t *st)
         st->about_surface = NULL;
         return;
     }
-    announce_paint(st->about_surface, NULL);
+    announce_paint_art(st->about_surface, NULL, st->splash_art);
     (void)st->services->frame(st->services->ctx, st->about_id,
                               st->about_surface->px, SPLASH_W,
                               SPLASH_H);
@@ -1693,12 +1738,14 @@ ide_start(void **state, const tiku_app_services_t *services)
      * sequence rather than a pile -- and the splash's session row
      * frees before the project takes one, so every window stands where
      * it would have without the announcement. */
+    st->splash_art = splash_art_load();
     st->splash_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
                                                TIKU_C_PANEL);
     if (st->splash_surface != NULL) {
         st->splash_id = services->open(services->ctx, APP_NAME,
                                        SPLASH_W, SPLASH_H);
-        announce_paint(st->splash_surface, "waking the interpreter…");
+        announce_paint_art(st->splash_surface, "waking the interpreter…",
+                           st->splash_art);
         (void)services->frame(services->ctx, st->splash_id,
                               st->splash_surface->px, SPLASH_W,
                               SPLASH_H);
@@ -1741,6 +1788,7 @@ ide_stop(void *state)
     tiku_surface_free(st->msg_surface);
     tiku_surface_free(st->splash_surface);
     tiku_surface_free(st->about_surface);
+    tiku_surface_free(st->splash_art);
     tiku_surface_free(st->proj_surface);
     free(st);
 }

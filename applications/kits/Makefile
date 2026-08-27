@@ -52,7 +52,7 @@ INTERFACE   := interface/tiku_gfx.c interface/tiku_theme.c \
                interface/tiku_slider.c interface/tiku_colors.c \
                interface/tiku_textview.c interface/tiku_alert.c \
                interface/tiku_syntax.c interface/tiku_list.c \
-               interface/tiku_plaque.c \
+               interface/tiku_splash.c \
                interface/tiku_layout.c interface/tiku_form.c \
                interface/tiku_window.c \
                interface/tiku_x11.c
