@@ -199,6 +199,7 @@ static const tiku_str_def_t tiku_str_defaults[] = {
     { "menu.no_add_ons", "No add-ons" },
     { "menu.open_with", "Open with" },
     { "menu.power_off", "Power off" },
+    { "menu.programming", "Programming" },
     { "menu.restart", "Restart system" },
     { "menu.seconds.hide", "Hide seconds" },
     { "menu.seconds.show", "Show seconds" },
