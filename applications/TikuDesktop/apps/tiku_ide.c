@@ -74,8 +74,9 @@
 
 #define MSG_W      420
 #define MSG_H      220
-#define SPLASH_W   280
-#define SPLASH_H   170
+#define SPLASH_W   400
+#define SPLASH_H   230
+#define SPLASH_ART 148          /* the art field's width, on the left */
 /* How long the splash stands before leaving on its own. */
 #define SPLASH_US  2500000
 
@@ -214,6 +215,7 @@ typedef struct {
     uint32_t                        splash_id;
     tiku_surface_t            *splash_surface;
     int64_t                         splash_from;
+    int                             splash_stage;
     /* The About box: the same announcement, standing until somebody
      * has read it.  One of it, raised when asked for again. */
     uint32_t                        about_id;
@@ -241,6 +243,7 @@ static void project_paint(ide_t *st);
 static void project_publish(ide_t *st);
 static void messages_show(ide_t *st);
 static void splash_drop(ide_t *st);
+static void announce_paint(tiku_surface_t *sf, const char *status);
 
 /*---------------------------------------------------------------------------*/
 /* The project file                                                          */
@@ -1480,11 +1483,35 @@ ide_tick(void *state, int64_t now_us)
     }
     if (st->splash_surface != NULL) {
         /* The splash leaves on its own: an announcement is not a door
-         * somebody should have to close. */
+         * somebody should have to close.  While it stands, the status
+         * line along its bottom says what is being gathered -- which is
+         * what those plaques were FOR, and the one part of them that
+         * was never decoration. */
+        static const char *const STAGE[] = {
+            "waking the interpreter…",
+            "reading the kits…",
+            "opening the project window…"
+        };
+        int stage;
+
         if (st->splash_from == 0) {
             st->splash_from = now_us;
         } else if (now_us - st->splash_from > SPLASH_US) {
             splash_drop(st);
+        } else {
+            stage = (int)((now_us - st->splash_from) /
+                          (SPLASH_US / 3 + 1));
+            if (stage > 2) {
+                stage = 2;
+            }
+            if (stage != st->splash_stage) {
+                st->splash_stage = stage;
+                announce_paint(st->splash_surface, STAGE[stage]);
+                (void)st->services->frame(st->services->ctx,
+                                          st->splash_id,
+                                          st->splash_surface->px,
+                                          SPLASH_W, SPLASH_H);
+            }
         }
     }
     if (!st->running) {
@@ -1559,22 +1586,63 @@ ide_tick(void *state, int64_t now_us)
 
 /** @brief Paint the announcement: the mark, the name, the line. */
 static void
-announce_paint(tiku_surface_t *sf)
+announce_paint(tiku_surface_t *sf, const char *status)
 {
-    const tiku_font_t *big = tiku_font_at(24);
+    const tiku_font_t *big = tiku_font_at(28);
     const tiku_font_t *f = tiku_font_plain();
     tiku_rect_t all = { 0, 0, SPLASH_W, SPLASH_H };
-    tiku_rect_t mark = { (SPLASH_W - 72) / 2, 14, 72, 72 };
+    tiku_rect_t art = { 0, 0, SPLASH_ART, SPLASH_H };
+    tiku_rect_t mark = { (SPLASH_ART - 96) / 2,
+                              (SPLASH_H - 96) / 2 - 10, 96, 96 };
+    tiku_logo_palette_t pal;
+    int x = SPLASH_ART + 18;
+    int y;
 
-    tiku_fill(sf, all, TIKU_C_PANEL);
+    tiku_logo_palette(0, 0.0f, &pal);
+    /* The plaque: paper, edged once, the way a window that is not a
+     * window announces that it will not be staying. */
+    tiku_fill(sf, all, TIKU_C_DOC);
+    tiku_frame(sf, all, tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    /* The art field: the mark's own filled-face colour, edge to edge,
+     * with the mark large upon it. */
+    tiku_fill(sf, (tiku_rect_t){ art.x + 1, art.y + 1, art.w - 1,
+                                      art.h - 2 }, pal.tint);
+    tiku_vline(sf, art.x + art.w, art.y + 1, art.h - 2,
+                    tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
     tiku_logo_paint(sf, mark, 0u);
-    (void)tiku_text_centered(sf, big,
-        (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, APP_NAME,
-        TIKU_C_TEXT);
-    (void)tiku_text_centered(sf, f,
-        (tiku_rect_t){ 0, 130, SPLASH_W, f->height },
-        "programs for little machines",
-        tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    /* The name, over its rule. */
+    y = 34;
+    tiku_text(sf, big, x, y + big->ascent, APP_NAME, TIKU_C_TEXT);
+    y += big->height + 6;
+    tiku_hline(sf, x, y, SPLASH_W - x - 18, pal.accent);
+    y += 10;
+    tiku_text(sf, f, x, y + f->ascent, "programs for little machines",
+                   tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    y += f->height + 4;
+    tiku_text(sf, f, x, y + f->ascent, "on TikuOS",
+                   tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    /* The credits, small and true: who by, and what it stands on. */
+    y += f->height + 18;
+    tiku_text(sf, f, x, y + f->ascent, "by Ambuj Varshney",
+                   TIKU_C_TEXT);
+    y += f->height + 3;
+    tiku_text(sf, f, x, y + f->ascent,
+                   "the interpreter is the board's own",
+                   tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    y += f->height + 3;
+    tiku_text(sf, f, x, y + f->ascent, "drawn with the six kits",
+                   tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    if (status != NULL) {
+        /* What is being gathered, along the bottom, where those
+         * programs always said it. */
+        tiku_hline(sf, 1, SPLASH_H - 22, SPLASH_W - 2,
+                        tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_1));
+        tiku_fill(sf, (tiku_rect_t){ 1, SPLASH_H - 21, SPLASH_W - 2,
+                                          20 }, TIKU_C_PANEL);
+        tiku_text(sf, f, 8,
+                       SPLASH_H - 21 + (20 - f->height) / 2 + f->ascent,
+                       status, tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+    }
 }
 
 /**
@@ -1607,7 +1675,7 @@ about_open(ide_t *st)
         st->about_surface = NULL;
         return;
     }
-    announce_paint(st->about_surface);
+    announce_paint(st->about_surface, NULL);
     (void)st->services->frame(st->services->ctx, st->about_id,
                               st->about_surface->px, SPLASH_W,
                               SPLASH_H);
@@ -1675,7 +1743,7 @@ ide_start(void **state, const tiku_app_services_t *services)
     if (st->splash_surface != NULL) {
         st->splash_id = services->open(services->ctx, APP_NAME,
                                        SPLASH_W, SPLASH_H);
-        announce_paint(st->splash_surface);
+        announce_paint(st->splash_surface, "waking the interpreter…");
         (void)services->frame(services->ctx, st->splash_id,
                               st->splash_surface->px, SPLASH_W,
                               SPLASH_H);
