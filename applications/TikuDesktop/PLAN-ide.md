@@ -200,8 +200,13 @@ rather than generic.  The focus shows in the menu too -- Build appears
 only when a project's `target` line says what it is being built for,
 so a plain BASIC project is never offered a road nobody asked for.
 The C machinery underneath (the syntax carry, the compiler road) stays
-in the kit, waiting rather than showing.  The simple editor keeps its
-name and its job.
+in the kit -- and since 2026-08-27 it SHOWS somewhere of its own:
+**TikuC** (`TikuC.so`), the same `tiku_ide.c` compiled with
+`TIKU_IDE_C`.  One source, two personalities, because a copy would only
+learn to disagree.  TikuC offers no Run row (nothing runs a C program
+yet) and offers Build WITHOUT being asked -- a project naming no target
+is asked about on this machine.  The simple editor keeps its name and
+its job.
 
 ## 7. The decision, taken
 

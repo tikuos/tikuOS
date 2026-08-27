@@ -3,7 +3,13 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ide.c - TikuBasic: a place to work on a BASIC program.
+ * tiku_ide.c - TikuBasic and TikuC: a place to work on a PROGRAM.
+ *
+ * ONE source, two personalities: built plain it is TikuBasic, built
+ * with TIKU_IDE_C it is TikuC.  The difference is what each puts
+ * forward -- Run for the interpreter, Build for the compiler -- and
+ * nothing else, because two applications that drifted apart would be
+ * the second implementation this tree does not keep.
  *
  * The project window lists what the program is made of, grouped the way
  * the project file groups it; opening a row opens an editor window of
@@ -39,6 +45,19 @@
 #include "tiku_syntax.h"
 #include "tiku_textview.h"
 #include "tiku_ui.h"
+
+/* Which program this build of the source IS. */
+#ifdef TIKU_IDE_C
+#define APP_NAME      "TikuC"
+#define APP_ABOUT     "About TikuC"
+#define APP_ID        "org.tikuos.tikuc"
+#define APP_NEW_FILE  "untitled.c"
+#else
+#define APP_NAME      "TikuBasic"
+#define APP_ABOUT     "About TikuBasic"
+#define APP_ID        "org.tikuos.tikubasic"
+#define APP_NEW_FILE  "untitled.bas"
+#endif
 
 #define IDE_W      320
 #define IDE_H      300
@@ -751,7 +770,7 @@ project_publish(ide_t *st)
     menus.nmenu = 2;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "Project");
     snprintf(menus.menu[0].item[0].label,
-             sizeof menus.menu[0].item[0].label, "About TikuBasic");
+             sizeof menus.menu[0].item[0].label, APP_ABOUT);
     menus.menu[0].item[0].command = CMD_ABOUT;
     menus.menu[0].item[0].enabled = 1;
     snprintf(menus.menu[0].item[1].label,
@@ -776,9 +795,14 @@ project_publish(ide_t *st)
     menus.menu[0].item[4].enabled =
         (unsigned char)(st->proj_file[0] != '\0');
     {
+    int mrow = 5;
+#ifndef TIKU_IDE_C
+    {
         /* Run is offered for the row the list is standing on, and only
          * when its NAME says the interpreter would know what to do
-         * with it -- the same thing the editor's own Run asks. */
+         * with it -- the same thing the editor's own Run asks.  TikuC
+         * does not offer it: nothing here runs a C program yet, and a
+         * row that could never be taken is furniture. */
         int row = tiku_list_chosen(&st->tv_list);
         int can = (row >= 0 && row < st->proj.nrow &&
                    !st->proj.row[row].heading &&
@@ -794,20 +818,28 @@ project_publish(ide_t *st)
                                               : "");
         menus.menu[0].item[5].command = CMD_RUN;
         menus.menu[0].item[5].enabled = (unsigned char)can;
+        mrow = 6;
     }
+#endif
     /* Build names what it is FOR, because that is the decision the
      * project already made and the one a person needs to see before
      * they trust what comes back. */
     {
         /* BASIC first: Build appears only when a project SAYS what it
          * is being built for.  A menu offering a road nobody asked for
-         * is a generic tool wearing a focused name. */
-        int at = 6;
+         * is a generic tool wearing a focused name.  TikuC builds by
+         * DEFAULT -- asking the compiler is what it is here for -- and
+         * a project naming no target is asked about on this machine. */
+        int at = mrow;
 
-        if (st->proj.target[0] != '\0') {
+#ifndef TIKU_IDE_C
+        if (st->proj.target[0] != '\0')
+#endif
+        {
             snprintf(menus.menu[0].item[at].label,
                      sizeof menus.menu[0].item[at].label, "Build for %s",
-                     st->proj.target);
+                     (st->proj.target[0] != '\0') ? st->proj.target
+                                                  : "host");
             menus.menu[0].item[at].command = CMD_BUILD;
             menus.menu[0].item[at].enabled =
                 (unsigned char)(st->proj.nrow > 0 && !st->running);
@@ -818,6 +850,7 @@ project_publish(ide_t *st)
         menus.menu[0].item[at].command = CMD_SHUT;
         menus.menu[0].item[at].enabled = 1;
         menus.menu[0].nitem = at + 1;
+    }
     }
 
     snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "Window");
@@ -1273,7 +1306,15 @@ run_file(ide_t *st, const char *path)
 static void
 build_project(ide_t *st)
 {
-    const char *cc = compiler_for(st->proj.target);
+    const char *cc;
+
+#ifdef TIKU_IDE_C
+    /* No target line means this machine: the check is the point. */
+    if (st->proj.target[0] == '\0') {
+        snprintf(st->proj.target, sizeof st->proj.target, "host");
+    }
+#endif
+    cc = compiler_for(st->proj.target);
     char inc[560];
     const char *argv[IDE_ROWS + 8];
     int argc = 0;
@@ -1528,7 +1569,7 @@ announce_paint(tiku_surface_t *sf)
     tiku_fill(sf, all, TIKU_C_PANEL);
     tiku_logo_paint(sf, mark, 0u);
     (void)tiku_text_centered(sf, big,
-        (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, "TikuBasic",
+        (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, APP_NAME,
         TIKU_C_TEXT);
     (void)tiku_text_centered(sf, f,
         (tiku_rect_t){ 0, 130, SPLASH_W, f->height },
@@ -1559,7 +1600,7 @@ about_open(ide_t *st)
         return;
     }
     st->about_id = st->services->open(st->services->ctx,
-                                      "About TikuBasic", SPLASH_W,
+                                      APP_ABOUT, SPLASH_W,
                                       SPLASH_H);
     if (st->about_id == 0u) {
         tiku_surface_free(st->about_surface);
@@ -1632,7 +1673,7 @@ ide_start(void **state, const tiku_app_services_t *services)
     st->splash_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
                                                TIKU_C_PANEL);
     if (st->splash_surface != NULL) {
-        st->splash_id = services->open(services->ctx, "TikuBasic",
+        st->splash_id = services->open(services->ctx, APP_NAME,
                                        SPLASH_W, SPLASH_H);
         announce_paint(st->splash_surface);
         (void)services->frame(services->ctx, st->splash_id,
@@ -1934,7 +1975,7 @@ ide_pick(void *state, uint32_t window, int command)
             st->asked = ASK_FILE;
             (void)st->services->pick(st->services->ctx, st->proj_id,
                                      TIKU_APP_PICK_SAVE, st->proj.dir,
-                                     "untitled.bas");
+                                     APP_NEW_FILE);
         }
         break;
     case CMD_ADDFILE:
@@ -2070,8 +2111,8 @@ ide_closed(void *state, uint32_t window)
 }
 
 const tiku_app_descriptor_t tiku_ide_app = {
-    .id = "org.tikuos.tikubasic",
-    .name = "TikuBasic",
+    .id = APP_ID,
+    .name = APP_NAME,
     .start = ide_start,
     .stop = ide_stop,
     .pick = ide_pick,
