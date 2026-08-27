@@ -91,7 +91,6 @@ tikuConsole/
 # cloned in place, not a submodule -- so it must stay out of this index.  Left
 # untracked instead, `git add -A` records it as a bare gitlink with no
 # .gitmodules entry, and it clones as an empty directory for everyone else.
-applications/
 
 # Python bytecode cache
 __pycache__/
@@ -112,3 +111,8 @@ experiments/
 # OS, so a clone of TikuOS carries no opinion about how to write a commit.
 hygiene/
 .main-elf-mcu
+
+# Local archives of the working copy.  A tarball of the tree is somebody's
+# private snapshot before a large change; it is 80-odd MB of the same files
+# git already has, and it is never what a clone should carry.
+*.tar.gz
