@@ -98,6 +98,7 @@
 #define CMD_FOLLOW   6
 #define CMD_BUILD    7
 #define CMD_ABOUT    11
+#define CMD_OPENFILE 12
 #define CMD_NEWPROJ  8
 #define CMD_NEWFILE  9
 #define CMD_ADDFILE  10
@@ -106,7 +107,8 @@
 enum {
     ASK_OPEN = 0,               /* Open Project…: the path IS a project */
     ASK_NEWPROJ,                /* New Project…: make it, then open it  */
-    ASK_FILE                    /* New/Add File…: put it in the project */
+    ASK_FILE,                   /* New/Add File…: put it in the project */
+    ASK_EDIT                    /* Open File…: just an editor on it     */
 };
 #define CMD_WINDOW   64         /* +i: the i'th editor of the Window menu */
 
@@ -686,6 +688,15 @@ edit_open(ide_t *st, const prow_t *row)
     snprintf(e->name, sizeof e->name, "%s", row->name);
     e->lang = lang_of(e->name);
     edit_load(e);
+    if (e->lang == TIKU_SYNTAX_BASIC) {
+        /* A program is CONTINUED, not reread from the top: the caret
+         * lands at the end of the last line, so the first Return is
+         * already the next numbered line. */
+        int last = tiku_textview_lines(&e->tv) - 1;
+
+        tiku_textview_place(&e->tv, last,
+                            tiku_textview_line_len(&e->tv, last));
+    }
     if (e->lang == TIKU_SYNTAX_BASIC &&
         tiku_textview_lines(&e->tv) <= 1 &&
         tiku_textview_line_len(&e->tv, 0) == 0) {
@@ -908,12 +919,18 @@ project_publish(ide_t *st)
     menus.menu[1].item[0].command = CMD_NEWFILE;
     menus.menu[1].item[0].enabled =
         (unsigned char)(st->proj_file[0] != '\0');
+    /* Open File… asks for no project at all: an editor on the file,
+     * and nothing written anywhere.  Reading is not joining. */
     snprintf(menus.menu[1].item[1].label,
-             sizeof menus.menu[1].item[1].label, "Add File…");
-    menus.menu[1].item[1].command = CMD_ADDFILE;
-    menus.menu[1].item[1].enabled =
+             sizeof menus.menu[1].item[1].label, "Open File…");
+    menus.menu[1].item[1].command = CMD_OPENFILE;
+    menus.menu[1].item[1].enabled = 1;
+    snprintf(menus.menu[1].item[2].label,
+             sizeof menus.menu[1].item[2].label, "Add File…");
+    menus.menu[1].item[2].command = CMD_ADDFILE;
+    menus.menu[1].item[2].enabled =
         (unsigned char)(st->proj_file[0] != '\0');
-    menus.menu[1].nitem = 2;
+    menus.menu[1].nitem = 3;
 
     snprintf(menus.menu[2].title, sizeof menus.menu[2].title, "Window");
     for (i = 0; i < IDE_EDITS && n < TIKU_MENUSET_ITEMS; i++) {
@@ -2115,6 +2132,15 @@ ide_pick(void *state, uint32_t window, int command)
                                      APP_NEW_FILE);
         }
         break;
+    case CMD_OPENFILE:
+        if (st->services->pick != NULL) {
+            st->asked = ASK_EDIT;
+            (void)st->services->pick(st->services->ctx, st->proj_id,
+                                     TIKU_APP_PICK_OPEN,
+                                     (st->proj_file[0] != '\0')
+                                         ? st->proj.dir : NULL, NULL);
+        }
+        break;
     case CMD_ADDFILE:
         if (st->services->pick != NULL && st->proj_file[0] != '\0') {
             st->asked = ASK_FILE;
@@ -2210,6 +2236,19 @@ ide_picked(void *state, uint32_t window, const char *path)
     case ASK_FILE:
         project_add_file(st, path);
         break;
+    case ASK_EDIT: {
+        /* An editor on the file, wherever it lives: opening is not
+         * adding, and a file already open comes forward. */
+        prow_t want;
+        const char *slash = strrchr(path, '/');
+
+        memset(&want, 0, sizeof want);
+        snprintf(want.path, sizeof want.path, "%s", path);
+        snprintf(want.name, sizeof want.name, "%s",
+                 (slash != NULL) ? slash + 1 : path);
+        edit_open(st, &want);
+        break;
+    }
     default:
         project_take(st, path);
         break;

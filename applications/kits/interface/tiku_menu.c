@@ -634,9 +634,26 @@ tiku_menubar_draw(tiku_menubar_t *b, tiku_surface_t *s,
             ink = TIKU_C_SELTEXT;
         }
         if (b->menu[i]->mark) {
-            tiku_logo_paint(s, (tiku_rect_t){ tx + LABEL_SPACING,
-                                 frame.y + (frame.h - 13) / 2, 12, 12 },
-                                 0u);
+            /* The mark in the TITLE'S OWN INK, one colour: at twelve
+             * pixels the coloured faces melt into the bar, and a mark
+             * nobody can see is worse than none.  Line-work only -- the
+             * grounds take the row's colour, so the cubes are drawn on
+             * the bar rather than boxed onto it. */
+            tiku_logo_palette_t mono;
+            tiku_rgb_t bg = (i == b->open) ? TIKU_C_SELECT
+                                                : TIKU_C_PANEL;
+
+            mono.ground = bg;
+            mono.tint = bg;
+            mono.dark = ink;
+            mono.grey = ink;
+            mono.accent = ink;
+            mono.mix_a = ink;
+            mono.mix_b = ink;
+            tiku_logo_paint_with(s, (tiku_rect_t){ tx + LABEL_SPACING,
+                                      frame.y + (frame.h - 13) / 2, 12,
+                                      12 },
+                                      0u, &mono, 1.0f);
         }
         tiku_text(s, f,
                        tx + LABEL_SPACING + 2 +
