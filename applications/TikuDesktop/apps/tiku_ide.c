@@ -611,6 +611,46 @@ edit_save(edit_t *e)
 }
 
 /**
+ * @brief Put the digits of a line number, and its blank, into @p tv.
+ */
+static void
+type_number(tiku_textview_t *tv, int n)
+{
+    char digits[16];
+    int i;
+
+    snprintf(digits, sizeof digits, "%d ", n);
+    for (i = 0; digits[i] != '\0'; i++) {
+        tiku_textview_insert(tv, digits[i]);
+    }
+}
+
+/**
+ * @brief The number the line AFTER line @p at should wear.
+ *
+ * The interpreter's own habit: count by tens, so a line can always be
+ * put between two others later.  A line wearing no number offers none.
+ *
+ * @return the next number, or 0 for none.
+ */
+static int
+next_number(const tiku_textview_t *tv, int at)
+{
+    const char *p = tiku_textview_line(tv, at);
+    long n;
+    char *end;
+
+    if (p == NULL) {
+        return 0;
+    }
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    n = strtol(p, &end, 10);
+    return (end != p && n > 0 && n < 99990) ? (int)n + 10 : 0;
+}
+
+/**
  * @brief Open @p row's file, or bring its window forward.
  *
  * A file already open is RAISED: opening it twice would give a person
@@ -646,6 +686,15 @@ edit_open(ide_t *st, const prow_t *row)
     snprintf(e->name, sizeof e->name, "%s", row->name);
     e->lang = lang_of(e->name);
     edit_load(e);
+    if (e->lang == TIKU_SYNTAX_BASIC &&
+        tiku_textview_lines(&e->tv) <= 1 &&
+        tiku_textview_line_len(&e->tv, 0) == 0) {
+        /* A fresh page of BASIC begins where every line of it must:
+         * with a number.  Counted by tens, the interpreter's own
+         * habit, so a line can always be put between two others. */
+        type_number(&e->tv, 10);
+        tiku_textview_saved(&e->tv);    /* offered, not yet work */
+    }
     e->w = EDIT_W;
     e->h = EDIT_H;
     e->surface = tiku_surface_new(EDIT_W, EDIT_H, TIKU_C_PANEL);
@@ -776,7 +825,7 @@ project_publish(ide_t *st)
     int i, n = 0;
 
     memset(&menus, 0, sizeof menus);
-    menus.nmenu = 2;
+    menus.nmenu = 3;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "Project");
     snprintf(menus.menu[0].item[0].label,
              sizeof menus.menu[0].item[0].label, APP_ABOUT);
@@ -790,21 +839,8 @@ project_publish(ide_t *st)
              sizeof menus.menu[0].item[2].label, "Open Project…");
     menus.menu[0].item[2].command = CMD_OPEN;
     menus.menu[0].item[2].enabled = 1;
-    /* The two roads a file takes INTO a project: made new, or already
-     * on disk and brought in.  Neither means anything without a project
-     * for it to land in, and the rows say so by dimming. */
-    snprintf(menus.menu[0].item[3].label,
-             sizeof menus.menu[0].item[3].label, "New File…");
-    menus.menu[0].item[3].command = CMD_NEWFILE;
-    menus.menu[0].item[3].enabled =
-        (unsigned char)(st->proj_file[0] != '\0');
-    snprintf(menus.menu[0].item[4].label,
-             sizeof menus.menu[0].item[4].label, "Add File…");
-    menus.menu[0].item[4].command = CMD_ADDFILE;
-    menus.menu[0].item[4].enabled =
-        (unsigned char)(st->proj_file[0] != '\0');
     {
-    int mrow = 5;
+    int mrow = 3;
 #ifndef TIKU_IDE_C
     {
         /* Run is offered for the row the list is standing on, and only
@@ -818,16 +854,16 @@ project_publish(ide_t *st)
                    lang_of(st->proj.row[row].name) == TIKU_SYNTAX_BASIC &&
                    !st->running);
 
-        snprintf(menus.menu[0].item[5].label,
-                 sizeof menus.menu[0].item[5].label, "Run%s%s",
+        snprintf(menus.menu[0].item[mrow].label,
+                 sizeof menus.menu[0].item[mrow].label, "Run%s%s",
                  (row >= 0 && row < st->proj.nrow &&
                   !st->proj.row[row].heading) ? " " : "",
                  (row >= 0 && row < st->proj.nrow &&
                   !st->proj.row[row].heading) ? st->proj.row[row].name
                                               : "");
-        menus.menu[0].item[5].command = CMD_RUN;
-        menus.menu[0].item[5].enabled = (unsigned char)can;
-        mrow = 6;
+        menus.menu[0].item[mrow].command = CMD_RUN;
+        menus.menu[0].item[mrow].enabled = (unsigned char)can;
+        mrow++;
     }
 #endif
     /* Build names what it is FOR, because that is the decision the
@@ -862,7 +898,24 @@ project_publish(ide_t *st)
     }
     }
 
-    snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "Window");
+    /* The two roads a file takes INTO a project, in a menu of their
+     * own: File is where hands look for files, and Project is about
+     * the project.  Neither road means anything without a project for
+     * it to land in, and the rows say so by dimming. */
+    snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "File");
+    snprintf(menus.menu[1].item[0].label,
+             sizeof menus.menu[1].item[0].label, "New File…");
+    menus.menu[1].item[0].command = CMD_NEWFILE;
+    menus.menu[1].item[0].enabled =
+        (unsigned char)(st->proj_file[0] != '\0');
+    snprintf(menus.menu[1].item[1].label,
+             sizeof menus.menu[1].item[1].label, "Add File…");
+    menus.menu[1].item[1].command = CMD_ADDFILE;
+    menus.menu[1].item[1].enabled =
+        (unsigned char)(st->proj_file[0] != '\0');
+    menus.menu[1].nitem = 2;
+
+    snprintf(menus.menu[2].title, sizeof menus.menu[2].title, "Window");
     for (i = 0; i < IDE_EDITS && n < TIKU_MENUSET_ITEMS; i++) {
         edit_t *e = &st->edit[i];
 
@@ -872,21 +925,21 @@ project_publish(ide_t *st)
         /* The mark is the DOCUMENT's, not the window's: a person
          * looking for where their unsaved work is should find it in the
          * list of windows rather than by opening each one. */
-        snprintf(menus.menu[1].item[n].label,
-                 sizeof menus.menu[1].item[n].label, "%s%s", e->name,
+        snprintf(menus.menu[2].item[n].label,
+                 sizeof menus.menu[2].item[n].label, "%s%s", e->name,
                  tiku_textview_modified(&e->tv) ? " (changed)" : "");
-        menus.menu[1].item[n].command = CMD_WINDOW + i;
-        menus.menu[1].item[n].enabled = 1;
+        menus.menu[2].item[n].command = CMD_WINDOW + i;
+        menus.menu[2].item[n].enabled = 1;
         n++;
     }
     if (n == 0) {
-        snprintf(menus.menu[1].item[0].label,
-                 sizeof menus.menu[1].item[0].label, "No open files");
-        menus.menu[1].item[0].command = 0;
-        menus.menu[1].item[0].enabled = 0;
+        snprintf(menus.menu[2].item[0].label,
+                 sizeof menus.menu[2].item[0].label, "No open files");
+        menus.menu[2].item[0].command = 0;
+        menus.menu[2].item[0].enabled = 0;
         n = 1;
     }
-    menus.menu[1].nitem = n;
+    menus.menu[2].nitem = n;
     (void)st->services->menus(st->services->ctx, st->proj_id, &menus);
 }
 
@@ -1930,7 +1983,20 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
             ch = event->key;
         }
         if (event->key == TIKU_KEY_RETURN) {
+            int cy, cx, n;
+
+            tiku_textview_caret(&e->tv, &cy, &cx);
             tiku_textview_newline(&e->tv);
+            /* The next line's number, already typed: the numbers are
+             * the language's bookkeeping, and bookkeeping is what a
+             * machine is FOR.  A line wearing none offers none, so
+             * prose in a .bas file is not fought over. */
+            if (e->lang == TIKU_SYNTAX_BASIC) {
+                n = next_number(&e->tv, cy);
+                if (n > 0) {
+                    type_number(&e->tv, n);
+                }
+            }
         } else if (event->key == TIKU_KEY_BACKSPACE) {
             tiku_textview_backspace(&e->tv);
         } else if (ch >= 32u && ch < 127u) {

@@ -64,6 +64,10 @@ typedef struct tiku_menu {
     int              height;
     int              open_index;        /* item whose submenu is showing    */
     int              hot;               /* item under the pointer, or -1    */
+    /* Nonzero: the bar draws the system's mark before this title.  The
+     * mark, not an icon by name, because the one menu that wears it is
+     * the system's own and the drawing already lives in this kit. */
+    int              mark;
 } tiku_menu_t;
 
 /** @brief Empty it, keeping the title. */

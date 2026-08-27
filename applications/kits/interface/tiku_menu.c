@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "tiku_logo.h"
 #include "tiku_menu.h"
 #include "tiku_ui.h"
 
@@ -566,7 +567,8 @@ title_width(const tiku_menu_t *m)
 {
     const tiku_font_t *f = tiku_font_plain();
 
-    return tiku_text_width(f, m->title) + 2 * LABEL_SPACING + 4;
+    return tiku_text_width(f, m->title) + 2 * LABEL_SPACING + 4 +
+           (m->mark ? 14 : 0);
 }
 
 int
@@ -631,7 +633,14 @@ tiku_menubar_draw(tiku_menubar_t *b, tiku_surface_t *s,
             tiku_fill(s, t, TIKU_C_SELECT);
             ink = TIKU_C_SELTEXT;
         }
-        tiku_text(s, f, tx + LABEL_SPACING + 2,
+        if (b->menu[i]->mark) {
+            tiku_logo_paint(s, (tiku_rect_t){ tx + LABEL_SPACING,
+                                 frame.y + (frame.h - 13) / 2, 12, 12 },
+                                 0u);
+        }
+        tiku_text(s, f,
+                       tx + LABEL_SPACING + 2 +
+                           (b->menu[i]->mark ? 14 : 0),
                        frame.y + (frame.h - f->height) / 2 + f->ascent,
                        b->menu[i]->title, ink);
         tx += w;
