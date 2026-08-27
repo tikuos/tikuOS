@@ -44,7 +44,12 @@
 #define EDIT_W     460
 #define EDIT_H     300
 #define STRIP_H    22
+#define TOOLBAR_H  30
 #define MARGIN     6
+
+/* The editor toolbar's two buttons, in the window's own coordinates. */
+#define TB_SAVE  (tiku_rect_t){ 6, 4, 64, 22 }
+#define TB_RUN   (tiku_rect_t){ 78, 4, 64, 22 }
 
 #define MSG_W      420
 #define MSG_H      220
@@ -132,6 +137,7 @@ compiler_for(const char *target)
 typedef struct {
     uint32_t             id;
     tiku_surface_t *surface;    /* NULL when the seat is free */
+    int                  w, h;       /* the window's CURRENT content */
     tiku_textview_t tv;
     tiku_syntax_lang_t   lang;
     char                 path[512];
@@ -386,9 +392,10 @@ static void
 edit_paint(ide_t *st, edit_t *e)
 {
     const tiku_font_t *f = tiku_font_plain();
-    tiku_rect_t page = { 0, 0, EDIT_W, EDIT_H - STRIP_H };
-    tiku_rect_t strip = { 0, EDIT_H - STRIP_H, EDIT_W, STRIP_H };
-    int rows = (EDIT_H - STRIP_H - MARGIN) / (f->height + 2);
+    tiku_rect_t bar = { 0, 0, e->w, TOOLBAR_H };
+    tiku_rect_t page = { 0, TOOLBAR_H, e->w, e->h - STRIP_H - TOOLBAR_H };
+    tiku_rect_t strip = { 0, e->h - STRIP_H, e->w, STRIP_H };
+    int rows = (e->h - STRIP_H - TOOLBAR_H - MARGIN) / (f->height + 2);
     tiku_syntax_state_t carry = TIKU_SYNTAX_OPEN;
     int top = tiku_textview_top(&e->tv);
     int i;
@@ -418,11 +425,18 @@ edit_paint(ide_t *st, edit_t *e)
                                        (int)(sizeof span / sizeof span[0]));
         }
     }
+    /* The toolbar: the two gestures a person reaches for while a hand
+     * is on the mouse, as buttons rather than a trip to the menu. */
+    tiku_fill(e->surface, bar, TIKU_C_PANEL);
+    tiku_ui_button(e->surface, TB_SAVE, "Save", 0u);
+    if (e->lang == TIKU_SYNTAX_BASIC) {
+        tiku_ui_button(e->surface, TB_RUN, "Run", 0u);
+    }
     tiku_ui_sunken(e->surface, page, TIKU_C_DOC);
     for (i = 0; i < rows; i++) {
         int line = top + i;
         const char *text = tiku_textview_line(&e->tv, line);
-        int y = MARGIN + i * (f->height + 2);
+        int y = TOOLBAR_H + MARGIN + i * (f->height + 2);
 
         if (text == NULL) {
             break;
@@ -465,7 +479,7 @@ edit_paint(ide_t *st, edit_t *e)
             head[cut] = '\0';
             tiku_vline(e->surface,
                             MARGIN + tiku_text_width(f, head),
-                            MARGIN + row * (f->height + 2),
+                            TOOLBAR_H + MARGIN + row * (f->height + 2),
                             f->height + 2, TIKU_C_TEXT);
         }
     }
@@ -477,7 +491,7 @@ edit_paint(ide_t *st, edit_t *e)
                    strip.y + (STRIP_H - f->height) / 2 + f->ascent,
                    where, TIKU_C_TEXT);
     (void)st->services->frame(st->services->ctx, e->id, e->surface->px,
-                              EDIT_W, EDIT_H);
+                              e->w, e->h);
 }
 
 static void
@@ -577,6 +591,8 @@ edit_open(ide_t *st, const prow_t *row)
     snprintf(e->name, sizeof e->name, "%s", row->name);
     e->lang = lang_of(e->name);
     edit_load(e);
+    e->w = EDIT_W;
+    e->h = EDIT_H;
     e->surface = tiku_surface_new(EDIT_W, EDIT_H, TIKU_C_PANEL);
     if (e->surface == NULL) {
         return;
@@ -592,6 +608,10 @@ edit_open(ide_t *st, const prow_t *row)
     }
     edit_paint(st, e);
     edit_publish(st, e);
+    if (st->services->sizeable != NULL) {
+        /* An editor's page is the one window a person grows. */
+        (void)st->services->sizeable(st->services->ctx, e->id);
+    }
     project_paint(st);          /* the Window menu grew */
     project_publish(st);
 }
@@ -1337,7 +1357,7 @@ message_follow(ide_t *st)
         /* Placing the caret does not move the PAGE, and a caret below
          * the window is a jump that looks like nothing happening. */
         (void)tiku_textview_reveal(&e->tv,
-            (EDIT_H - STRIP_H - MARGIN) / (f->height + 2));
+            (e->h - STRIP_H - TOOLBAR_H - MARGIN) / (f->height + 2));
         edit_paint(st, e);
     }
     if (st->services->raise_window != NULL) {
@@ -1541,6 +1561,15 @@ splash_drop(ide_t *st)
     st->services->close(st->services->ctx, st->splash_id);
     tiku_surface_free(st->splash_surface);
     st->splash_surface = NULL;
+    /* The splash leaving is the project window arriving: its session
+     * row frees first, so the project stands exactly where it would
+     * have without the announcement. */
+    if (st->proj_id == 0u) {
+        st->proj_id = st->services->open(st->services->ctx, "Project",
+                                         IDE_W, IDE_H);
+        project_paint(st);
+        project_publish(st);
+    }
 }
 
 static int
@@ -1554,13 +1583,16 @@ ide_start(void **state, const tiku_app_services_t *services)
     st->services = services;
     tiku_list_init(&st->tv_list, 1);
     st->click_row = -1;
-    st->proj_id = services->open(services->ctx, "Project", IDE_W, IDE_H);
-    project_paint(st);
-    project_publish(st);
-    /* The name last, over its own mark: opened AFTER the project so it
-     * arrives in front of what it announces -- and so its session row
-     * frees back to the one the first editor will take, keeping every
-     * later window where it always was. */
+    st->proj_surface = tiku_surface_new(IDE_W, IDE_H, TIKU_C_PANEL);
+    if (st->proj_surface == NULL) {
+        free(st);
+        return -1;
+    }
+    /* The announcement first, ALONE: the project window arrives when
+     * the splash leaves (splash_drop), so what a person sees is a
+     * sequence rather than a pile -- and the splash's session row
+     * frees before the project takes one, so every window stands where
+     * it would have without the announcement. */
     st->splash_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
                                                TIKU_C_PANEL);
     if (st->splash_surface != NULL) {
@@ -1575,12 +1607,13 @@ ide_start(void **state, const tiku_app_services_t *services)
                                   TIKU_APP_PLACE_ANNOUNCE);
         }
     }
-    st->proj_surface = tiku_surface_new(IDE_W, IDE_H, TIKU_C_PANEL);
-    if (st->proj_surface == NULL) {
-        free(st);
-        return -1;
+    if (st->splash_surface == NULL) {
+        /* No announcement to wait for: the project arrives now. */
+        st->proj_id = services->open(services->ctx, "Project", IDE_W,
+                                     IDE_H);
+        project_paint(st);
+        project_publish(st);
     }
-
     *state = st;
     return 0;
 }
@@ -1658,7 +1691,8 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
     edit_t *e = edit_of_id(st, window);
 
     if (event->type != TIKU_EVENT_KEY_DOWN &&
-        event->type != TIKU_EVENT_POINTER_DOWN) {
+        event->type != TIKU_EVENT_POINTER_DOWN &&
+        event->type != TIKU_EVENT_RESIZE) {
         return 0;
     }
     if (window == st->about_id && st->about_surface != NULL) {
@@ -1697,11 +1731,51 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
         project_paint(st);      /* Cancel: everything stands */
         return 0;
     }
+    if (e != NULL && event->type == TIKU_EVENT_RESIZE) {
+        /* The person let go of the corner: repaint at the size the
+         * window now is, and the next frame hands it over. */
+        int w = (event->width > 160) ? event->width : 160;
+        int h = (event->height > 100) ? event->height : 100;
+        tiku_surface_t *grown = tiku_surface_new(w, h,
+                                                      TIKU_C_PANEL);
+
+        if (grown != NULL) {
+            tiku_surface_free(e->surface);
+            e->surface = grown;
+            e->w = w;
+            e->h = h;
+            edit_paint(st, e);
+        }
+        return 0;
+    }
     if (e != NULL) {
         /* An editor window: the document takes it. */
         unsigned ch = (unsigned char)event->text[0];
 
         if (event->type == TIKU_EVENT_POINTER_DOWN) {
+            tiku_rect_t save_b = TB_SAVE;
+            tiku_rect_t run_b = TB_RUN;
+
+            if (event->x >= save_b.x && event->x < save_b.x + save_b.w &&
+                event->y >= save_b.y && event->y < save_b.y + save_b.h) {
+                (void)edit_save(e);
+                edit_paint(st, e);
+                edit_publish(st, e);
+                project_publish(st);
+                return 0;
+            }
+            if (e->lang == TIKU_SYNTAX_BASIC &&
+                event->x >= run_b.x && event->x < run_b.x + run_b.w &&
+                event->y >= run_b.y && event->y < run_b.y + run_b.h) {
+                /* What is run is what is on disk, so the button saves
+                 * first -- the same rule the menu's Run keeps. */
+                (void)edit_save(e);
+                edit_paint(st, e);
+                edit_publish(st, e);
+                run_file(st, e->path);
+                project_publish(st);
+                return 0;
+            }
             return 0;
         }
         if (ch == 0u) {
