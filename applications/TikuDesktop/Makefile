@@ -94,7 +94,7 @@ APPS_D    := $(BUILD)/apps
 SO_NAMES  := edit term
 # Named for what they ARE, since the file name is the label a desktop
 # offers them under.
-SO_APPS   := $(APPS_D)/terminal.so $(APPS_D)/editor.so $(APPS_D)/IDE.so
+SO_APPS   := $(APPS_D)/terminal.so $(APPS_D)/editor.so $(APPS_D)/TikuIDE.so
 SO_EXAMPLES := $(patsubst %,$(APPS_D)/%.so,hello clock counter sketch twowin)
 RUNNER    := $(BUILD)/tiku-run
 
@@ -167,7 +167,7 @@ $(APPS_D)/terminal.so: apps/tiku_term.c $(PIC_LIBS) | $(APPS_D)
 	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
 	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
 
-$(APPS_D)/IDE.so: apps/tiku_ide.c $(PIC_LIBS) | $(APPS_D)
+$(APPS_D)/TikuIDE.so: apps/tiku_ide.c $(PIC_LIBS) | $(APPS_D)
 	$(CC) $(CFLAGS) -fPIC -shared -DTIKU_APP_EMBED -DTIKU_APP_SO \
 	      -o $@ $< $(PIC_LIBS) $(LDFLAGS) -lX11 -lm
 

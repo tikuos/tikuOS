@@ -34,6 +34,7 @@
 #include "tiku_font.h"
 #include "tiku_gfx.h"
 #include "tiku_list.h"
+#include "tiku_logo.h"
 #include "tiku_syntax.h"
 #include "tiku_textview.h"
 #include "tiku_ui.h"
@@ -47,6 +48,10 @@
 
 #define MSG_W      420
 #define MSG_H      220
+#define SPLASH_W   280
+#define SPLASH_H   170
+/* How long the splash stands before leaving on its own. */
+#define SPLASH_US  2500000
 
 #define IDE_ROWS   64
 /* A session may hold four windows over the wire, and the project and
@@ -175,6 +180,12 @@ typedef struct {
      * double-click event, and the row's own clock is the event's. */
     int                             click_row;
     int64_t                         click_at;
+    /* The splash: the application's name, shown while it arrives and
+     * gone before it matters.  A key or a click sends it away early,
+     * because a person who is already working is not an audience. */
+    uint32_t                        splash_id;
+    tiku_surface_t            *splash_surface;
+    int64_t                         splash_from;
     /* What the last run said, and the window it says it in.  The
      * window arrives when there is something to put in it: a message
      * window standing empty is furniture. */
@@ -197,6 +208,7 @@ typedef struct {
 static void project_paint(ide_t *st);
 static void project_publish(ide_t *st);
 static void messages_show(ide_t *st);
+static void splash_drop(ide_t *st);
 
 /*---------------------------------------------------------------------------*/
 /* The project file                                                          */
@@ -1357,7 +1369,19 @@ ide_tick(void *state, int64_t now_us)
     ssize_t n = -1;
     int heard = 0;
 
-    if (st == NULL || !st->running) {
+    if (st == NULL) {
+        return;
+    }
+    if (st->splash_surface != NULL) {
+        /* The splash leaves on its own: an announcement is not a door
+         * somebody should have to close. */
+        if (st->splash_from == 0) {
+            st->splash_from = now_us;
+        } else if (now_us - st->splash_from > SPLASH_US) {
+            splash_drop(st);
+        }
+    }
+    if (!st->running) {
         return;
     }
     if (st->run_from == 0) {
@@ -1427,6 +1451,18 @@ ide_tick(void *state, int64_t now_us)
     }
 }
 
+/** @brief Let the splash go, whoever asked. */
+static void
+splash_drop(ide_t *st)
+{
+    if (st->splash_surface == NULL) {
+        return;
+    }
+    st->services->close(st->services->ctx, st->splash_id);
+    tiku_surface_free(st->splash_surface);
+    st->splash_surface = NULL;
+}
+
 static int
 ide_start(void **state, const tiku_app_services_t *services)
 {
@@ -1436,16 +1472,48 @@ ide_start(void **state, const tiku_app_services_t *services)
         return -1;
     }
     st->services = services;
-    st->proj_surface = tiku_surface_new(IDE_W, IDE_H, TIKU_C_PANEL);
-    if (st->proj_surface == NULL) {
-        free(st);
-        return -1;
-    }
     tiku_list_init(&st->tv_list, 1);
     st->click_row = -1;
     st->proj_id = services->open(services->ctx, "Project", IDE_W, IDE_H);
     project_paint(st);
     project_publish(st);
+    /* The name last, over its own mark: opened AFTER the project so it
+     * arrives in front of what it announces -- and so its session row
+     * frees back to the one the first editor will take, keeping every
+     * later window where it always was. */
+    st->splash_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
+                                               TIKU_C_PANEL);
+    if (st->splash_surface != NULL) {
+        const tiku_font_t *big = tiku_font_at(24);
+        const tiku_font_t *f = tiku_font_plain();
+        tiku_rect_t all = { 0, 0, SPLASH_W, SPLASH_H };
+        tiku_rect_t mark = { (SPLASH_W - 72) / 2, 14, 72, 72 };
+
+        st->splash_id = services->open(services->ctx, "TikuIDE",
+                                       SPLASH_W, SPLASH_H);
+        tiku_fill(st->splash_surface, all, TIKU_C_PANEL);
+        tiku_logo_paint(st->splash_surface, mark, 0u);
+        (void)tiku_text_centered(st->splash_surface, big,
+            (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, "TikuIDE",
+            TIKU_C_TEXT);
+        (void)tiku_text_centered(st->splash_surface, f,
+            (tiku_rect_t){ 0, 130, SPLASH_W, f->height },
+            "programs for little machines",
+            tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+        (void)services->frame(services->ctx, st->splash_id,
+                              st->splash_surface->px, SPLASH_W,
+                              SPLASH_H);
+        if (services->place != NULL) {
+            (void)services->place(services->ctx, st->splash_id,
+                                  TIKU_APP_PLACE_ANNOUNCE);
+        }
+    }
+    st->proj_surface = tiku_surface_new(IDE_W, IDE_H, TIKU_C_PANEL);
+    if (st->proj_surface == NULL) {
+        free(st);
+        return -1;
+    }
+
     *state = st;
     return 0;
 }
@@ -1471,6 +1539,7 @@ ide_stop(void *state)
         tiku_surface_free(st->edit[i].surface);
     }
     tiku_surface_free(st->msg_surface);
+    tiku_surface_free(st->splash_surface);
     tiku_surface_free(st->proj_surface);
     free(st);
 }
@@ -1522,6 +1591,11 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
 
     if (event->type != TIKU_EVENT_KEY_DOWN &&
         event->type != TIKU_EVENT_POINTER_DOWN) {
+        return 0;
+    }
+    if (window == st->splash_id && st->splash_surface != NULL) {
+        splash_drop(st);        /* a person already working is not an
+                                 * audience */
         return 0;
     }
     if (st->ask.open && window == st->proj_id) {
@@ -1793,6 +1867,11 @@ ide_closed(void *state, uint32_t window)
         tiku_surface_free(st->msg_surface);
         st->msg_surface = NULL;
         st->msg_id = 0u;
+        return;
+    }
+    if (window == st->splash_id && st->splash_surface != NULL) {
+        tiku_surface_free(st->splash_surface);
+        st->splash_surface = NULL;
     }
 }
 
