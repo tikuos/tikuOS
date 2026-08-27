@@ -130,6 +130,20 @@ typedef struct tiku_app_services {
      * Appended, like place(): a host that predates it leaves it NULL.
      */
     int (*raise_window)(void *ctx, uint32_t id);
+    /**
+     * @brief Let the PERSON resize this window of mine.
+     *
+     * Windows arrive fixed, because most of an application's windows
+     * are panels whose layout IS their size.  A window that can grow --
+     * an editor's page -- says so, and from then on the runtime owns
+     * the corner and the application hears TIKU_EVENT_RESIZE with the
+     * content's new size, repaints at it, and hands the next frame
+     * over as usual.
+     *
+     * Appended, like the rest: a host that predates it leaves it NULL,
+     * and such a window simply stays the size it opened at.
+     */
+    int (*sizeable)(void *ctx, uint32_t id);
 } tiku_app_services_t;
 
 /** @brief Which question pick() asks. */

@@ -495,6 +495,13 @@ session_message(tiku_remote_session_t *s)
             changed = 1;
         }
         break;
+    case TIKU_RMSG_SIZEABLE:
+        win = (s->want >= 4u) ? session_window(s, id_of(p)) : NULL;
+        if (win != NULL) {
+            win->wants_size = 1;
+            changed = 1;
+        }
+        break;
     case TIKU_RMSG_MENUS:
         /* Onto the window the id names.  Menus that ignored it landed
          * on whichever window the session happened to be, so an
@@ -537,8 +544,14 @@ session_message(tiku_remote_session_t *s)
                 win->opened = 0;
                 win->has_menus = 0;
                 win->menus_fresh = 0;
-                /* The window itself is the desktop's to close; it sees
-                 * the row go quiet on the next reconcile. */
+                /* The window itself is the desktop's to close.  Moved
+                 * ASIDE rather than left in place: an OPEN in this same
+                 * batch may take the row, and a stale pointer under a
+                 * new tenant reads as a window already made. */
+                if (win->window != NULL && win->reap == NULL) {
+                    win->reap = win->window;
+                    win->window = NULL;
+                }
                 changed = 1;
             }
             break;
@@ -699,6 +712,8 @@ tiku_remote_poll(tiku_remote_listener_t *listener)
             changed |= win->opened && win->window == NULL;
             changed |= win->menus_fresh;
             changed |= win->wants_front;
+            changed |= win->reap != NULL;
+            changed |= win->wants_size;
         }
     }
     return changed;
@@ -1092,6 +1107,15 @@ tiku_remote_raise(tiku_remote_client_t *client, uint32_t id)
         return;
     }
     send_msg(client->fd, TIKU_RMSG_RAISE, &id, 4);
+}
+
+void
+tiku_remote_sizeable(tiku_remote_client_t *client, uint32_t id)
+{
+    if (client == NULL || client->fd < 0) {
+        return;
+    }
+    send_msg(client->fd, TIKU_RMSG_SIZEABLE, &id, 4);
 }
 
 /**

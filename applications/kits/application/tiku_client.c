@@ -129,6 +129,15 @@ svc_raise(void *ctx, uint32_t id)
     return 0;
 }
 
+static int
+svc_sizeable(void *ctx, uint32_t id)
+{
+    client_ctx_t *c = ctx;
+
+    tiku_remote_sizeable(&c->remote, id);
+    return 0;
+}
+
 static void
 svc_close(void *ctx, uint32_t id)
 {
@@ -197,6 +206,7 @@ pump(const tiku_app_descriptor_t *app, client_ctx_t *ctx)
     services.close = svc_close;
     services.pick = svc_pick;
     services.raise_window = svc_raise;
+    services.sizeable = svc_sizeable;
     if (app->start != NULL && app->start(&state, &services) != 0) {
         tiku_remote_disconnect(&ctx->remote);
         return 1;
