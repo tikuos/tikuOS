@@ -423,6 +423,35 @@ edit_paint(ide_t *st, edit_t *e)
                            TIKU_C_TEXT);
         }
     }
+    {
+        /* The caret, without which a person cannot know where their
+         * typing will land.  It sits where the text before it ends,
+         * which is the only way a proportional face can place it. */
+        int cy, cx, row;
+        char head[256];
+        int cut;
+
+        tiku_textview_caret(&e->tv, &cy, &cx);
+        row = cy - top;
+        cut = cx;
+        if (row >= 0 && row < rows) {
+            const char *text = tiku_textview_line(&e->tv, cy);
+            int len = tiku_textview_line_len(&e->tv, cy);
+
+            if (cut > len) {
+                cut = len;
+            }
+            if (cut > (int)sizeof head - 1) {
+                cut = (int)sizeof head - 1;
+            }
+            memcpy(head, (text != NULL) ? text : "", (size_t)cut);
+            head[cut] = '\0';
+            tiku_vline(e->surface,
+                            MARGIN + tiku_text_width(f, head),
+                            MARGIN + row * (f->height + 2),
+                            f->height + 2, TIKU_C_TEXT);
+        }
+    }
     tiku_fill(e->surface, strip, TIKU_C_PANEL);
     snprintf(where, sizeof where, "%s%s  %d lines", e->name,
              tiku_textview_modified(&e->tv) ? " (changed)" : "",
