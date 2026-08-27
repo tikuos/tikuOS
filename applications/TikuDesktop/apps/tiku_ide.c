@@ -68,6 +68,7 @@
 #define CMD_RUN      5
 #define CMD_FOLLOW   6
 #define CMD_BUILD    7
+#define CMD_ABOUT    11
 #define CMD_NEWPROJ  8
 #define CMD_NEWFILE  9
 #define CMD_ADDFILE  10
@@ -186,6 +187,10 @@ typedef struct {
     uint32_t                        splash_id;
     tiku_surface_t            *splash_surface;
     int64_t                         splash_from;
+    /* The About box: the same announcement, standing until somebody
+     * has read it.  One of it, raised when asked for again. */
+    uint32_t                        about_id;
+    tiku_surface_t            *about_surface;
     /* What the last run said, and the window it says it in.  The
      * window arrives when there is something to put in it: a message
      * window standing empty is furniture. */
@@ -699,25 +704,29 @@ project_publish(ide_t *st)
     menus.nmenu = 2;
     snprintf(menus.menu[0].title, sizeof menus.menu[0].title, "Project");
     snprintf(menus.menu[0].item[0].label,
-             sizeof menus.menu[0].item[0].label, "New Project…");
-    menus.menu[0].item[0].command = CMD_NEWPROJ;
+             sizeof menus.menu[0].item[0].label, "About TikuIDE");
+    menus.menu[0].item[0].command = CMD_ABOUT;
     menus.menu[0].item[0].enabled = 1;
     snprintf(menus.menu[0].item[1].label,
-             sizeof menus.menu[0].item[1].label, "Open Project…");
-    menus.menu[0].item[1].command = CMD_OPEN;
+             sizeof menus.menu[0].item[1].label, "New Project…");
+    menus.menu[0].item[1].command = CMD_NEWPROJ;
     menus.menu[0].item[1].enabled = 1;
+    snprintf(menus.menu[0].item[2].label,
+             sizeof menus.menu[0].item[2].label, "Open Project…");
+    menus.menu[0].item[2].command = CMD_OPEN;
+    menus.menu[0].item[2].enabled = 1;
     /* The two roads a file takes INTO a project: made new, or already
      * on disk and brought in.  Neither means anything without a project
      * for it to land in, and the rows say so by dimming. */
-    snprintf(menus.menu[0].item[2].label,
-             sizeof menus.menu[0].item[2].label, "New File…");
-    menus.menu[0].item[2].command = CMD_NEWFILE;
-    menus.menu[0].item[2].enabled =
-        (unsigned char)(st->proj_file[0] != '\0');
     snprintf(menus.menu[0].item[3].label,
-             sizeof menus.menu[0].item[3].label, "Add File…");
-    menus.menu[0].item[3].command = CMD_ADDFILE;
+             sizeof menus.menu[0].item[3].label, "New File…");
+    menus.menu[0].item[3].command = CMD_NEWFILE;
     menus.menu[0].item[3].enabled =
+        (unsigned char)(st->proj_file[0] != '\0');
+    snprintf(menus.menu[0].item[4].label,
+             sizeof menus.menu[0].item[4].label, "Add File…");
+    menus.menu[0].item[4].command = CMD_ADDFILE;
+    menus.menu[0].item[4].enabled =
         (unsigned char)(st->proj_file[0] != '\0');
     {
         /* Run is offered for the row the list is standing on, and only
@@ -729,31 +738,31 @@ project_publish(ide_t *st)
                    lang_of(st->proj.row[row].name) == TIKU_SYNTAX_BASIC &&
                    !st->running);
 
-        snprintf(menus.menu[0].item[4].label,
-                 sizeof menus.menu[0].item[4].label, "Run%s%s",
+        snprintf(menus.menu[0].item[5].label,
+                 sizeof menus.menu[0].item[5].label, "Run%s%s",
                  (row >= 0 && row < st->proj.nrow &&
                   !st->proj.row[row].heading) ? " " : "",
                  (row >= 0 && row < st->proj.nrow &&
                   !st->proj.row[row].heading) ? st->proj.row[row].name
                                               : "");
-        menus.menu[0].item[4].command = CMD_RUN;
-        menus.menu[0].item[4].enabled = (unsigned char)can;
+        menus.menu[0].item[5].command = CMD_RUN;
+        menus.menu[0].item[5].enabled = (unsigned char)can;
     }
     /* Build names what it is FOR, because that is the decision the
      * project already made and the one a person needs to see before
      * they trust what comes back. */
-    snprintf(menus.menu[0].item[5].label,
-             sizeof menus.menu[0].item[5].label, "Build for %s",
+    snprintf(menus.menu[0].item[6].label,
+             sizeof menus.menu[0].item[6].label, "Build for %s",
              (st->proj.target[0] != '\0') ? st->proj.target
                                           : "nothing yet");
-    menus.menu[0].item[5].command = CMD_BUILD;
-    menus.menu[0].item[5].enabled =
+    menus.menu[0].item[6].command = CMD_BUILD;
+    menus.menu[0].item[6].enabled =
         (unsigned char)(st->proj.nrow > 0 && !st->running);
-    snprintf(menus.menu[0].item[6].label,
-             sizeof menus.menu[0].item[6].label, "Close Project");
-    menus.menu[0].item[6].command = CMD_SHUT;
-    menus.menu[0].item[6].enabled = 1;
-    menus.menu[0].nitem = 7;
+    snprintf(menus.menu[0].item[7].label,
+             sizeof menus.menu[0].item[7].label, "Close Project");
+    menus.menu[0].item[7].command = CMD_SHUT;
+    menus.menu[0].item[7].enabled = 1;
+    menus.menu[0].nitem = 8;
 
     snprintf(menus.menu[1].title, sizeof menus.menu[1].title, "Window");
     for (i = 0; i < IDE_EDITS && n < TIKU_MENUSET_ITEMS; i++) {
@@ -1451,6 +1460,77 @@ ide_tick(void *state, int64_t now_us)
     }
 }
 
+/** @brief Paint the announcement: the mark, the name, the line. */
+static void
+announce_paint(tiku_surface_t *sf)
+{
+    const tiku_font_t *big = tiku_font_at(24);
+    const tiku_font_t *f = tiku_font_plain();
+    tiku_rect_t all = { 0, 0, SPLASH_W, SPLASH_H };
+    tiku_rect_t mark = { (SPLASH_W - 72) / 2, 14, 72, 72 };
+
+    tiku_fill(sf, all, TIKU_C_PANEL);
+    tiku_logo_paint(sf, mark, 0u);
+    (void)tiku_text_centered(sf, big,
+        (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, "TikuIDE",
+        TIKU_C_TEXT);
+    (void)tiku_text_centered(sf, f,
+        (tiku_rect_t){ 0, 130, SPLASH_W, f->height },
+        "programs for little machines",
+        tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+}
+
+/**
+ * @brief The About box: the announcement again, for as long as it is
+ *        wanted this time.
+ *
+ * Asked for while already standing, it comes FORWARD rather than
+ * doubling -- the same rule every window of this application keeps.
+ */
+static void
+about_open(ide_t *st)
+{
+    if (st->about_surface != NULL) {
+        if (st->services->raise_window != NULL) {
+            (void)st->services->raise_window(st->services->ctx,
+                                             st->about_id);
+        }
+        return;
+    }
+    st->about_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
+                                              TIKU_C_PANEL);
+    if (st->about_surface == NULL) {
+        return;
+    }
+    st->about_id = st->services->open(st->services->ctx,
+                                      "About TikuIDE", SPLASH_W,
+                                      SPLASH_H);
+    if (st->about_id == 0u) {
+        tiku_surface_free(st->about_surface);
+        st->about_surface = NULL;
+        return;
+    }
+    announce_paint(st->about_surface);
+    (void)st->services->frame(st->services->ctx, st->about_id,
+                              st->about_surface->px, SPLASH_W,
+                              SPLASH_H);
+    if (st->services->place != NULL) {
+        (void)st->services->place(st->services->ctx, st->about_id,
+                                  TIKU_APP_PLACE_ANNOUNCE);
+    }
+}
+
+static void
+about_drop(ide_t *st)
+{
+    if (st->about_surface == NULL) {
+        return;
+    }
+    st->services->close(st->services->ctx, st->about_id);
+    tiku_surface_free(st->about_surface);
+    st->about_surface = NULL;
+}
+
 /** @brief Let the splash go, whoever asked. */
 static void
 splash_drop(ide_t *st)
@@ -1484,22 +1564,9 @@ ide_start(void **state, const tiku_app_services_t *services)
     st->splash_surface = tiku_surface_new(SPLASH_W, SPLASH_H,
                                                TIKU_C_PANEL);
     if (st->splash_surface != NULL) {
-        const tiku_font_t *big = tiku_font_at(24);
-        const tiku_font_t *f = tiku_font_plain();
-        tiku_rect_t all = { 0, 0, SPLASH_W, SPLASH_H };
-        tiku_rect_t mark = { (SPLASH_W - 72) / 2, 14, 72, 72 };
-
         st->splash_id = services->open(services->ctx, "TikuIDE",
                                        SPLASH_W, SPLASH_H);
-        tiku_fill(st->splash_surface, all, TIKU_C_PANEL);
-        tiku_logo_paint(st->splash_surface, mark, 0u);
-        (void)tiku_text_centered(st->splash_surface, big,
-            (tiku_rect_t){ 0, 94, SPLASH_W, big->height }, "TikuIDE",
-            TIKU_C_TEXT);
-        (void)tiku_text_centered(st->splash_surface, f,
-            (tiku_rect_t){ 0, 130, SPLASH_W, f->height },
-            "programs for little machines",
-            tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
+        announce_paint(st->splash_surface);
         (void)services->frame(services->ctx, st->splash_id,
                               st->splash_surface->px, SPLASH_W,
                               SPLASH_H);
@@ -1540,6 +1607,7 @@ ide_stop(void *state)
     }
     tiku_surface_free(st->msg_surface);
     tiku_surface_free(st->splash_surface);
+    tiku_surface_free(st->about_surface);
     tiku_surface_free(st->proj_surface);
     free(st);
 }
@@ -1591,6 +1659,14 @@ ide_event(void *state, uint32_t window, const tiku_event_t *event)
 
     if (event->type != TIKU_EVENT_KEY_DOWN &&
         event->type != TIKU_EVENT_POINTER_DOWN) {
+        return 0;
+    }
+    if (window == st->about_id && st->about_surface != NULL) {
+        if (event->type == TIKU_EVENT_KEY_DOWN &&
+            (event->key == TIKU_KEY_ESCAPE ||
+             event->key == TIKU_KEY_RETURN)) {
+            about_drop(st);     /* read, and put away */
+        }
         return 0;
     }
     if (window == st->splash_id && st->splash_surface != NULL) {
@@ -1729,6 +1805,9 @@ ide_pick(void *state, uint32_t window, int command)
             (void)st->services->pick(st->services->ctx, st->proj_id,
                                      TIKU_APP_PICK_OPEN, NULL, NULL);
         }
+        break;
+    case CMD_ABOUT:
+        about_open(st);
         break;
     case CMD_NEWPROJ:
         if (st->services->pick != NULL) {
@@ -1872,6 +1951,11 @@ ide_closed(void *state, uint32_t window)
     if (window == st->splash_id && st->splash_surface != NULL) {
         tiku_surface_free(st->splash_surface);
         st->splash_surface = NULL;
+        return;
+    }
+    if (window == st->about_id && st->about_surface != NULL) {
+        tiku_surface_free(st->about_surface);
+        st->about_surface = NULL;
     }
 }
 
