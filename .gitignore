@@ -90,7 +90,7 @@ tikuConsole/
 # cloned in place, not a submodule -- so it must stay out of this index.  Left
 # untracked instead, `git add -A` records it as a bare gitlink with no
 # .gitmodules entry, and it clones as an empty directory for everyone else.
-applications/tracker/
+applications/
 
 # Python bytecode cache
 __pycache__/
