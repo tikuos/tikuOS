@@ -181,7 +181,19 @@ Project… is the shell's ordinary Open panel pointed at a
   somebody can move.  The editor opens on the new file at once.  And
   the door §1 promised but nothing built: two clicks on a row open it,
   as Return does.  `idenew.script` is the cold start, start to finish,
-  with NOTHING planted.
+  with NOTHING planted.  Deepened 2026-08-27: the name the person
+  types now names the FOLDER -- New Project… makes `<name>/` holding
+  the description AND the first source file (`main.bas`, `main.c` for
+  TikuC), and the editor is open on that file before anything was ever
+  saved; the proof is the Open panel itself, which lists only what is
+  on disk, visited BEFORE the first save so a source file the editor
+  would have written into being cannot stand in for one that was made.
+  Editors open at 620×420 -- half the screen, not a peephole.  One
+  fault this road surfaced, worth its lesson: `project_take` was
+  handed `st->proj_file` as its `path` and snprintf'd the buffer onto
+  ITSELF, which is undefined and in practice emptied it -- so Open
+  File… forgot the project's folder.  A function that stores a path a
+  caller may own must copy aside, or decline the self-write.
 
 Each phase is small enough for the house method to hold whole:
 proving script first, mutation by name, full suite, both repos.

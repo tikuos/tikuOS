@@ -29,6 +29,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -54,17 +56,21 @@
 #define APP_ABOUT     "About TikuC"
 #define APP_ID        "org.tikuos.tikuc"
 #define APP_NEW_FILE  "untitled.c"
+#define APP_MAIN_FILE "main.c"
 #else
 #define APP_NAME      "TikuBasic"
 #define APP_ABOUT     "About TikuBasic"
 #define APP_ID        "org.tikuos.tikubasic"
 #define APP_NEW_FILE  "untitled.bas"
+#define APP_MAIN_FILE "main.bas"
 #endif
 
 #define IDE_W      320
 #define IDE_H      300
-#define EDIT_W     460
-#define EDIT_H     300
+/* An editor is where the WORK happens, so it opens at half the screen
+ * rather than at a peephole somebody enlarges every single time. */
+#define EDIT_W     620
+#define EDIT_H     420
 #define STRIP_H    22
 #define TOOLBAR_H  30
 #define MARGIN     6
@@ -1007,7 +1013,11 @@ project_take(ide_t *st, const char *path)
         snprintf(dir, sizeof dir, ".");
     }
     (void)project_parse(&st->proj, whole, dir);
-    snprintf(st->proj_file, sizeof st->proj_file, "%s", path);
+    /* Copied ASIDE first: a caller may hand this the very buffer it is
+     * about to be written into, and printf over itself is nothing. */
+    if (path != st->proj_file) {
+        snprintf(st->proj_file, sizeof st->proj_file, "%s", path);
+    }
     project_show(st);
 }
 
@@ -1070,44 +1080,64 @@ project_add_file(ide_t *st, const char *path)
     }
 }
 
-/** @brief Make a project where the person said, and open it. */
+/**
+ * @brief Make a project where the person said, and open it.
+ *
+ * A project IS a folder: the name the person typed becomes a folder of
+ * that name, holding the description and the program's first source
+ * file -- which opens, because a person who just made a project is
+ * there to write it.  A name that already means something is OPENED
+ * rather than emptied: an existing description as itself, an existing
+ * folder by the description inside it.
+ */
 static void
 project_create(ide_t *st, const char *path)
 {
-    FILE *probe = fopen(path, "r");
-    char dir[512];
-    char *slash;
+    char projfile[560];
+    char mainfile[560];
+    struct stat sb;
+    const char *leaf = strrchr(path, '/');
+    int i;
 
-    if (probe != NULL) {
-        /* Already there: making it again would empty it, and a person
-         * naming an existing project almost always means to OPEN it. */
-        (void)fclose(probe);
+    leaf = (leaf != NULL) ? leaf + 1 : path;
+    if (stat(path, &sb) == 0 && !S_ISDIR(sb.st_mode)) {
+        /* An existing FILE: the person picked a description itself. */
         project_take(st, path);
         return;
     }
-    snprintf(dir, sizeof dir, "%s", path);
-    slash = strrchr(dir, '/');
-    if (slash != NULL) {
-        *slash = '\0';
-    } else {
-        snprintf(dir, sizeof dir, ".");
+    if (stat(path, &sb) != 0 && mkdir(path, 0777) != 0) {
+        snprintf(st->note, sizeof st->note, "cannot make %s", path);
+        project_paint(st);
+        return;
     }
-    {
-        FILE *f = fopen(path, "w");
-        const char *leaf = strrchr(dir, '/');
+    snprintf(projfile, sizeof projfile, "%s/project.tiku", path);
+    snprintf(mainfile, sizeof mainfile, "%s/%s", path, APP_MAIN_FILE);
+    if (stat(projfile, &sb) != 0) {
+        FILE *f = fopen(projfile, "w");
 
         if (f == NULL) {
-            snprintf(st->note, sizeof st->note, "cannot write %s", path);
+            snprintf(st->note, sizeof st->note, "cannot write %s",
+                     projfile);
             project_paint(st);
             return;
         }
-        /* Named for the folder that holds it, which is the one name
-         * already chosen; a person who wants another edits the line. */
-        (void)fprintf(f, "title %s\ngroup Sources\n",
-                      (leaf != NULL) ? leaf + 1 : dir);
+        (void)fprintf(f, "title %s\ngroup Sources\nfile %s\n", leaf,
+                      APP_MAIN_FILE);
         (void)fclose(f);
+        f = fopen(mainfile, "a");
+        if (f != NULL) {
+            (void)fclose(f);
+        }
     }
-    project_take(st, path);
+    project_take(st, projfile);
+    for (i = 0; i < st->proj.nrow; i++) {
+        if (!st->proj.row[i].heading &&
+            strcmp(st->proj.row[i].name, APP_MAIN_FILE) == 0) {
+            tiku_list_select_only(&st->tv_list, i);
+            edit_open(st, &st->proj.row[i]);
+            break;
+        }
+    }
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2121,7 +2151,7 @@ ide_pick(void *state, uint32_t window, int command)
              * the offered name is the one the opener looks for. */
             (void)st->services->pick(st->services->ctx, st->proj_id,
                                      TIKU_APP_PICK_SAVE, NULL,
-                                     "project.tiku");
+                                     "untitled");
         }
         break;
     case CMD_NEWFILE:
