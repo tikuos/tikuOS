@@ -51,7 +51,8 @@ LIB_TRANSPORT := $(KIT_BUILD)/libtiku_storage.a $(KIT_BUILD)/libtiku_device.a \
                  $(KIT_BUILD)/libtiku_support.a
 
 PIC_RUNTIME   := $(KIT_BUILD)/pic/libtiku_application.a
-PIC_UI        := $(KIT_BUILD)/pic/libtiku_interface.a
+PIC_UI        := $(KIT_BUILD)/pic/libtiku_interface.a \
+                 $(KIT_BUILD)/pic/libtiku_translation.a
 PIC_TRANSPORT := $(KIT_BUILD)/pic/libtiku_storage.a \
                  $(KIT_BUILD)/pic/libtiku_device.a \
                  $(KIT_BUILD)/pic/libtiku_support.a

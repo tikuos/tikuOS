@@ -34,6 +34,7 @@
 #include "tiku_font.h"
 #include "tiku_gfx.h"
 #include "tiku_list.h"
+#include "tiku_iconpaint.h"
 #include "tiku_logo.h"
 #include "tiku_syntax.h"
 #include "tiku_textview.h"
@@ -47,9 +48,10 @@
 #define TOOLBAR_H  30
 #define MARGIN     6
 
-/* The editor toolbar's two buttons, in the window's own coordinates. */
-#define TB_SAVE  (tiku_rect_t){ 6, 4, 64, 22 }
-#define TB_RUN   (tiku_rect_t){ 78, 4, 64, 22 }
+/* The editor toolbar's two tools, in the window's own coordinates. */
+#define TB_ICON  24
+#define TB_SAVE  (tiku_rect_t){ 8, 3, TB_ICON, TB_ICON }
+#define TB_RUN   (tiku_rect_t){ 44, 3, TB_ICON, TB_ICON }
 
 #define MSG_W      420
 #define MSG_H      220
@@ -426,11 +428,36 @@ edit_paint(ide_t *st, edit_t *e)
         }
     }
     /* The toolbar: the two gestures a person reaches for while a hand
-     * is on the mouse, as buttons rather than a trip to the menu. */
+     * is on the mouse, as PICTURES -- a toolbar of worded buttons is a
+     * second menu, and the reach was the point. */
     tiku_fill(e->surface, bar, TIKU_C_PANEL);
-    tiku_ui_button(e->surface, TB_SAVE, "Save", 0u);
+    {
+        tiku_rect_t sv = TB_SAVE;
+
+        (void)tiku_icon_paint(e->surface, "floppy", sv.x, sv.y,
+                                  TB_ICON);
+    }
     if (e->lang == TIKU_SYNTAX_BASIC) {
-        tiku_ui_button(e->surface, TB_RUN, "Run", 0u);
+        /* The run arrow, drawn rather than baked: rows of the triangle
+         * every player has worn since tape. */
+        tiku_rect_t rn = TB_RUN;
+        tiku_rgb_t go = TIKU_RGB(52, 140, 62);
+        int i;
+
+        for (i = 0; i < TB_ICON - 6; i++) {
+            int half = (i < (TB_ICON - 6) / 2)
+                           ? i
+                           : (TB_ICON - 7 - i);
+
+            tiku_hline(e->surface, rn.x + 4,
+                            rn.y + 3 + i, 2 + half * 2, go);
+        }
+    }
+    {
+        /* A thin rule under the tools, so the bar reads as furniture
+         * rather than as the top of the page. */
+        tiku_hline(e->surface, 0, TOOLBAR_H - 1, e->w,
+                        tiku_tint(TIKU_C_PANEL, TIKU_DARKEN_2));
     }
     tiku_ui_sunken(e->surface, page, TIKU_C_DOC);
     for (i = 0; i < rows; i++) {
