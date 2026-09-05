@@ -2269,6 +2269,11 @@ SRCS += kernel/scheduler/tiku_sched.c
 # The console line: one SLIP decoder dispatching whole frames by channel
 # (the IP stack, a desktop's window session) beside the shell's text.
 SRCS += kernel/console/tiku_console.c
+# The link under a session: whole messages on any medium.  The console
+# backend rides a marked channel; unreferenced in a build with no link
+# consumer, so --gc-sections drops it and the image is unchanged.
+SRCS += kernel/link/tiku_link.c
+SRCS += kernel/link/tiku_link_console.c
 SRCS += kernel/vfs/tiku_vfs.c
 SRCS += kernel/vfs/tiku_vfs_cache.c
 SRCS += kernel/vfs/tiku_vfs_tree.c

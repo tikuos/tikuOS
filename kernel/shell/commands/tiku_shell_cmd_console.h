@@ -19,9 +19,9 @@
 /**
  * @brief List the console's channels and its frame counters.
  *
- * `console` prints every registered channel with its match and buffer,
- * then the frames delivered per channel and the stray, oversize and
- * phantom counts since boot.
+ * `console` prints the registered channels and the frame counters
+ * (stray, oversize, phantom) since boot.  `console echo on` arms a link on
+ * a spare channel that echoes every message it receives; `off` releases it.
  */
 void tiku_shell_cmd_console(uint8_t argc, const char *argv[]);
 
