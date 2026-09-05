@@ -160,6 +160,9 @@
 #include <experiment/asr/tiku_shell_cmd_asr.h>  /* overlay repo, see Makefile */
 #endif
 #endif
+#if TIKU_APPL_GUI
+#include "tiku_draw.h"          /* applications overlay: frames on the console */
+#endif
 #if TIKU_SHELL_CMD_NVMPROBE
 #include "commands/tiku_shell_cmd_nvmprobe.h"
 #endif
@@ -1543,6 +1546,13 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
             if (ch < 0) {
                 break;
             }
+#if TIKU_APPL_GUI
+            /* A host desktop's window session rides the console in
+             * marked frames, cut out here before any mode sees them. */
+            if (tiku_draw_frame_byte(ch)) {
+                continue;
+            }
+#endif
 #if TIKU_SHELL_CMD_SLIP
             if (tiku_shell_cmd_slip_active()
 #if TIKU_SHELL_TCP_ENABLE
