@@ -115,6 +115,22 @@ void tiku_console_remove_channel(uint8_t value, uint8_t mask);
 int  tiku_console_send_frame(uint8_t marker, const void *head, size_t hlen,
                              const void *body, size_t blen);
 
+/**
+ * @brief Open a frame on the channel @p marker names: END, the marker.
+ *
+ * For a sender composing a frame from more parts than send_frame takes,
+ * such as a header, a message and a trailer.  Close it with frame_end.
+ *
+ * @return 0, or -1 when there is no wire
+ */
+int  tiku_console_frame_begin(uint8_t marker);
+
+/** @brief @p len bytes of @p bytes into the open frame, escaped. */
+void tiku_console_frame_put(const void *bytes, size_t len);
+
+/** @brief Close the open frame: END. */
+void tiku_console_frame_end(void);
+
 /** @brief Write @p len raw bytes of text to the wire. */
 void tiku_console_write(const void *bytes, size_t len);
 

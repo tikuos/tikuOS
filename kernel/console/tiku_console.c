@@ -207,21 +207,42 @@ put_escaped(const uint8_t *p, size_t len)
 }
 
 int
-tiku_console_send_frame(uint8_t marker, const void *head, size_t hlen,
-                        const void *body, size_t blen)
+tiku_console_frame_begin(uint8_t marker)
 {
     if (wire->putc == (void (*)(char))0) {
         return -1;
     }
     put(TIKU_CONSOLE_END);
     put(marker);
-    if (head != (const void *)0) {
-        put_escaped((const uint8_t *)head, hlen);
+    return 0;
+}
+
+void
+tiku_console_frame_put(const void *bytes, size_t len)
+{
+    if (bytes != (const void *)0 && wire->putc != (void (*)(char))0) {
+        put_escaped((const uint8_t *)bytes, len);
     }
-    if (body != (const void *)0) {
-        put_escaped((const uint8_t *)body, blen);
+}
+
+void
+tiku_console_frame_end(void)
+{
+    if (wire->putc != (void (*)(char))0) {
+        put(TIKU_CONSOLE_END);
     }
-    put(TIKU_CONSOLE_END);
+}
+
+int
+tiku_console_send_frame(uint8_t marker, const void *head, size_t hlen,
+                        const void *body, size_t blen)
+{
+    if (tiku_console_frame_begin(marker) != 0) {
+        return -1;
+    }
+    tiku_console_frame_put(head, hlen);
+    tiku_console_frame_put(body, blen);
+    tiku_console_frame_end();
     return 0;
 }
 

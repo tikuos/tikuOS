@@ -6,7 +6,8 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_shell_cmd_console.c - "console" command: the line's channels and
- * counters, as one line per channel and one of totals.
+ * counters, as one line per channel, one of the decoder's totals and one
+ * of the link's.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,7 +23,7 @@
 #define ECHO_MARKER 0xF2u
 static tiku_link_console_t echo_state;
 static tiku_link_t *echo_link;
-static uint8_t echo_buf[256];
+static uint8_t echo_buf[256u + TIKU_LINK_CONSOLE_OVERHEAD];
 
 /** @brief Send a received message straight back. */
 static void
@@ -53,6 +54,7 @@ void
 tiku_shell_cmd_console(uint8_t argc, const char *argv[])
 {
     const tiku_console_stats_t *st = tiku_console_stats();
+    const tiku_link_console_stats_t *lk = tiku_link_console_stats();
     uint8_t slot;
 
     if (argc >= 2 && argv[1][0] == 'e') {          /* console echo [on|off] */
@@ -76,4 +78,10 @@ tiku_shell_cmd_console(uint8_t argc, const char *argv[])
                  (unsigned long)st->stray_end,
                  (unsigned long)st->oversize,
                  (unsigned long)st->phantom);
+    SHELL_PRINTF("link: rx=%lu tx=%lu bad=%lu dup=%lu reject=%lu acked=%lu "
+                 "gap=%lu\n",
+                 (unsigned long)lk->rx, (unsigned long)lk->tx,
+                 (unsigned long)lk->bad, (unsigned long)lk->dup,
+                 (unsigned long)lk->reject, (unsigned long)lk->acked,
+                 (unsigned long)lk->gap);
 }
