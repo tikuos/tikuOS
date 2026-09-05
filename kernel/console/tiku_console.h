@@ -47,6 +47,17 @@
 #define TIKU_CONSOLE_FRAME_TTL (30u * TIKU_CLOCK_SECOND)
 #endif
 
+/**
+ * @brief How often the console's own pump drains the wire, in ticks.
+ *
+ * A build with a shell reads the wire from the shell's poll loop.  One
+ * without runs a process of the console's own at this cadence, for as long
+ * as a channel or a text sink is registered.
+ */
+#ifndef TIKU_CONSOLE_POLL_TICKS
+#define TIKU_CONSOLE_POLL_TICKS (TIKU_CLOCK_SECOND / 20)
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* THE WIRE                                                                  */
 /*---------------------------------------------------------------------------*/
@@ -155,10 +166,24 @@ void tiku_console_set_text_sink(tiku_console_text_fn fn, void *ctx);
 /**
  * @brief Drain the wire: frames to their channels, text to the sink.
  *
- * For a caller that owns the console but does not read the keyboard (a
- * blocking builtin keeping the IP stack fed, or a build without a shell).
+ * For a caller that owns the console but does not read the keyboard, such
+ * as a blocking builtin keeping the IP stack fed.  A build without a shell
+ * calls this from the console's own process, see tiku_console_pumping.
  */
 void tiku_console_pump(void);
+
+/**
+ * @brief Whether the console's own pump process is running.
+ *
+ * In a build without a shell the first channel or text sink registered
+ * starts it and the last removed ends it, so a build that registers nothing
+ * runs no process.  Always 0 with a shell built, whose loop reads the wire.
+ */
+uint8_t tiku_console_pumping(void);
+
+/** @brief The pump process, defined in a build without a shell. */
+struct tiku_process;
+extern struct tiku_process tiku_console_process;
 
 /*---------------------------------------------------------------------------*/
 /* OBSERVABILITY                                                             */

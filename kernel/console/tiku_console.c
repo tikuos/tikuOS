@@ -17,8 +17,12 @@
 #include "tiku_console.h"
 #include "tiku.h"
 
-#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
+#if defined(TIKU_CONSOLE_USB)
 #include <arch/arm-rp2350/tiku_usb_cdc_arch.h>
+#endif
+#if !TIKU_SHELL_ENABLE
+#include <kernel/process/tiku_process.h>
+#include <kernel/timers/tiku_timer.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -66,6 +70,106 @@ static struct {
     size_t     len;
     tiku_clock_time_t opened;
 } rx;
+
+/*---------------------------------------------------------------------------*/
+/* THE PUMP WITHOUT A SHELL                                                  */
+/*---------------------------------------------------------------------------*/
+
+#if !TIKU_SHELL_ENABLE
+
+/*
+ * A build with a shell reads the wire from the shell's poll loop, and every
+ * frame met on the way is dispatched there.  Without one, this process
+ * drains the wire at the same cadence for as long as a channel or a text
+ * sink is registered, so a build with no line editor still carries a
+ * desktop's window session; a poll drains it at once.  The first listener
+ * starts it and the last to leave ends it, so a build that registers
+ * nothing runs no process and arms no timer.
+ */
+static struct tiku_timer pump_timer;
+
+TIKU_PROCESS(tiku_console_process, "Console");
+
+/** @brief Whether anyone would take what the wire carries. */
+static uint8_t
+listening(void)
+{
+    return n_channels > 0u || text_fn != (tiku_console_text_fn)0;
+}
+
+/** @brief Drain the wire once; the polled USB stack is serviced first. */
+static void
+service(void)
+{
+#if defined(TIKU_CONSOLE_USB)
+    tiku_usb_cdc_poll();
+#endif
+    tiku_console_pump();
+}
+
+TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
+{
+    (void)data;
+
+    TIKU_PROCESS_BEGIN();
+    tiku_timer_set_event(&pump_timer, TIKU_CONSOLE_POLL_TICKS);
+    while (listening()) {
+        TIKU_PROCESS_WAIT_EVENT();
+        if (ev == TIKU_EVENT_TIMER) {
+            /* From now, not from the last start: the spacing is drain to
+             * drain, and a start past a stalled clock reads as due at
+             * once. */
+            tiku_timer_restart(&pump_timer);
+        }
+        service();
+    }
+    tiku_timer_stop(&pump_timer);
+    TIKU_PROCESS_END();
+}
+
+/** @brief A listener registered: run the pump unless it already is. */
+static void
+pump_start(void)
+{
+    if (!tiku_process_is_running(&tiku_console_process)) {
+        tiku_process_start(&tiku_console_process, (tiku_event_data_t)0);
+    }
+}
+
+/** @brief A listener left: the pump looks again and ends if it was the last. */
+static void
+pump_wake(void)
+{
+    if (tiku_process_is_running(&tiku_console_process)) {
+        tiku_process_poll(&tiku_console_process);
+    }
+}
+
+uint8_t
+tiku_console_pumping(void)
+{
+    return tiku_process_is_running(&tiku_console_process);
+}
+
+#else
+
+static void
+pump_start(void)
+{
+}
+
+static void
+pump_wake(void)
+{
+}
+
+uint8_t
+tiku_console_pumping(void)
+{
+    return 0u;
+}
+
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* THE WIRE                                                                  */
@@ -134,6 +238,7 @@ tiku_console_add_channel(uint8_t value, uint8_t mask, uint8_t keep_first,
     channels[i].buf = buf;
     channels[i].cap = cap;
     channels[i].used = 1u;
+    pump_start();
     return 0;
 }
 
@@ -154,6 +259,7 @@ tiku_console_remove_channel(uint8_t value, uint8_t mask)
                 rx.len = 0u;
                 rx.esc = 0u;
             }
+            pump_wake();
         }
     }
 }
@@ -377,6 +483,11 @@ tiku_console_set_text_sink(tiku_console_text_fn fn, void *ctx)
 {
     text_fn = fn;
     text_ctx = ctx;
+    if (fn != (tiku_console_text_fn)0) {
+        pump_start();
+    } else {
+        pump_wake();
+    }
 }
 
 void
@@ -427,4 +538,5 @@ tiku_console_reset(void)
     rx.closing = 0u;
     rx.cur = (channel_t *)0;
     rx.len = 0u;
+    pump_wake();
 }
