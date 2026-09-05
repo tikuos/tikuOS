@@ -163,27 +163,28 @@ void tiku_shell_remove_pump(tiku_shell_pump_fn fn);
 
 #if TIKU_SHELL_CMD_SLIP
 /**
- * @brief Drain the shared UART through the SLIP demux from a blocking builtin.
+ * @brief Drain the console wire from a blocking builtin.
  *
  * For a long-running builtin that busy-waits and thereby starves the shell's
  * main loop: call this in the wait loop so SLIP frames keep reaching the IP
- * stack.  Safe to call when no bytes are pending.
+ * stack.  Safe to call when no bytes are pending; keystrokes met are dropped.
  *
- * @note Reuses the main loop's demux and its persistent frame buffer, so frames
+ * @note The console's decoder keeps its state across calls, so frames
  *       arriving across many calls reassemble correctly.
  */
 void tiku_shell_net_pump(void);
 
 /**
- * @brief SLIP-aware non-blocking getc for a blocking builtin that needs input.
+ * @brief Console-aware non-blocking getc for a blocking builtin that needs
+ *        input.
  *
  * Like tiku_shell_net_pump(), but for a builtin that ALSO reads the keyboard
- * while a SLIP link is up.  Services the shared UART, routes SLIP frame bytes
- * to the IP stack, and returns the next genuine console byte or -1.
+ * while a SLIP link is up.  Frame bytes go to their channel and the next
+ * genuine console byte, or -1, comes back.
  *
  * @note Routing the frame bytes away is what stops a teardown or a
  *       retransmitted packet being mistaken for keystrokes and wedging the line
- *       editor.  Degenerates to a plain non-blocking getc when SLIP is inactive.
+ *       editor.  With no channel registered every byte is a keystroke.
  */
 int tiku_shell_net_getc(void);
 #endif

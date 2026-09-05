@@ -2266,6 +2266,9 @@ SRCS += kernel/process/tiku_process.c
 SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/process/tiku_lc_persist.c
 SRCS += kernel/scheduler/tiku_sched.c
+# The console line: one SLIP decoder dispatching whole frames by channel
+# (the IP stack, a desktop's window session) beside the shell's text.
+SRCS += kernel/console/tiku_console.c
 SRCS += kernel/vfs/tiku_vfs.c
 SRCS += kernel/vfs/tiku_vfs_cache.c
 SRCS += kernel/vfs/tiku_vfs_tree.c
@@ -2304,6 +2307,7 @@ SRCS += kernel/shell/tiku_shell.c
 SRCS += kernel/shell/tiku_shell_pump.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_ps.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_info.c
+SRCS += kernel/shell/commands/tiku_shell_cmd_console.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_kill.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c

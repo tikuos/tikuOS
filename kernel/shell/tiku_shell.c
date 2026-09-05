@@ -31,6 +31,7 @@
 #include <kernel/timers/tiku_htimer.h>   /* htimer self-test command */
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>    /* liveness kick in net_getc waits */
+#include <kernel/console/tiku_console.h> /* the wire's text, frames cut out */
 #if TIKU_SHELL_CMD_JOBS
 #include "tiku_shell_jobs.h"
 #endif
@@ -44,10 +45,6 @@
 #endif
 #if defined(TIKU_CONSOLE_USB)
 #include <arch/arm-rp2350/tiku_usb_cdc_arch.h>  /* usbcdc backend + poll pump */
-#endif
-#if TIKU_SHELL_CMD_SLIP
-#include <tikukits/net/slip/tiku_kits_net_slip.h>   /* SLIP framing constants */
-#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>   /* tiku_kits_net_ipv4_input */
 #endif
 #if TIKU_SHELL_NET_TEST
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>     /* udp_init (+ echo port 7) */
@@ -65,6 +62,9 @@
 #endif
 #if TIKU_SHELL_CMD_INFO
 #include "commands/tiku_shell_cmd_info.h"
+#endif
+#if TIKU_SHELL_CMD_CONSOLE
+#include "commands/tiku_shell_cmd_console.h"
 #endif
 #if TIKU_SHELL_CMD_TIMER
 #include "commands/tiku_shell_cmd_timer.h"
@@ -159,9 +159,6 @@
 #if defined(TIKU_EXP_ASR)
 #include <experiment/asr/tiku_shell_cmd_asr.h>  /* overlay repo, see Makefile */
 #endif
-#endif
-#if TIKU_APPL_GUI
-#include "tiku_draw.h"          /* applications overlay: frames on the console */
 #endif
 #if TIKU_SHELL_CMD_NVMPROBE
 #include "commands/tiku_shell_cmd_nvmprobe.h"
@@ -347,124 +344,54 @@ static void shell_print_prompt(void) {
     SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS:%s> " SH_RST, tiku_shell_cwd_get());
 }
 
-#if TIKU_SHELL_CMD_SLIP
-/*
- * SLIP RX demultiplexer.  While SLIP mode is on the shell shares the UART
- * with the IP stack: a 0xC0-delimited frame is reassembled (with SLIP
- * un-escaping) and handed to tiku_kits_net_ipv4_input(); any byte outside a
- * frame is an ordinary keystroke.  Returns 1 if the byte was consumed as part
- * of a SLIP frame, 0 if it should fall through to the line editor.
+/**
+ * @brief The next keystroke for the line editor, or -1 when there is none.
+ *
+ * A telnet client that owns the line supplies its TCP bytes.  Otherwise the
+ * console hands over the wire's text, every frame met on the way already
+ * dispatched to its channel (the IP stack, a desktop's window session).
  */
-static uint8_t shell_net_demux(int ch) {
-    /* END (0xC0) is a frame delimiter, never an open/close parity toggle, and
-     * the byte *after* an END decides frame-vs-console: an IPv4 packet always
-     * begins 0x4N, so a post-END byte that is not 0x4N is console text. This
-     * makes the decoder self-synchronising -- a stray or duplicated END (line
-     * garbage, or the multiple ENDs a port reopen emits) can neither strand the
-     * parser mid-frame nor divert a typed command into the frame buffer.
-     * Returns 1 if the byte was consumed as SLIP, 0 to pass to the line editor. */
-    static uint8_t  armed;     /* saw an END; next byte decides frame vs console */
-    static uint8_t  in_frame;  /* collecting a frame */
-    static uint8_t  esc;
-    static uint16_t flen;
-    static uint8_t  fbuf[TIKU_KITS_NET_MTU];
-    static tiku_clock_time_t frame_t0;  /* when the current frame opened */
-    uint8_t b;
+static int
+shell_getc(void)
+{
+    const tiku_shell_io_t *io = tiku_shell_io_get_backend();
 
-    if (ch == TIKU_KITS_NET_SLIP_END) {        /* 0xC0 frame delimiter */
-        if (in_frame && flen > 0) {
-            tiku_kits_net_ipv4_input(fbuf, flen);
-        }
-        in_frame = 0;
-        armed    = 1;          /* a frame *may* follow; the next byte decides */
-        flen     = 0;
-        esc      = 0;
-        return 1;
+    if (io == (const tiku_shell_io_t *)0) {
+        return -1;
     }
-
-    b = (uint8_t)ch;
-
-    if (armed) {               /* first byte after an END */
-        armed = 0;
-        if ((b & 0xF0u) == 0x40u) {            /* IPv4 version nibble -> frame */
-            in_frame = 1;
-            frame_t0 = tiku_clock_time();
-        } else {
-            return 0;                          /* stray END -> keystroke */
-        }
+#if TIKU_SHELL_TCP_ENABLE
+    if (io == &tiku_shell_io_tcp) {
+        return tiku_shell_io_getc();
     }
-    if (!in_frame) {
-        return 0;                              /* keystroke -> line editor */
-    }
-    /* Phantom-frame guard: a frame whose closing END was lost (observed on
-     * hardware after an RX outage mid-frame) would otherwise swallow every
-     * subsequent keystroke as payload, forever.  The threshold must dwarf a
-     * LEGITIMATE frame's lifetime: frame bytes drain from the RX ring through
-     * this demux, and the draining pump legitimately pauses for seconds
-     * mid-frame during TLS crypto (a 1 s guard dropped live frames and
-     * sprayed their payload into the console).  Nothing legitimate keeps one
-     * frame open for 30 s -- the cert fetch deadline itself is 20 s -- so
-     * this only catches true debris, at the cost of a console that takes up
-     * to 30 s to self-recover after an RX outage. */
-    if ((tiku_clock_time_t)(tiku_clock_time() - frame_t0)
-        > (tiku_clock_time_t)(30 * TIKU_CLOCK_SECOND)) {
-        in_frame = 0;
-        esc      = 0;
-        flen     = 0;
-        return 0;
-    }
-    if (esc) {
-        esc = 0;
-        if (b == TIKU_KITS_NET_SLIP_ESC_END)      b = TIKU_KITS_NET_SLIP_END;
-        else if (b == TIKU_KITS_NET_SLIP_ESC_ESC) b = TIKU_KITS_NET_SLIP_ESC;
-        else if (b == TIKU_KITS_NET_SLIP_ESC_NUL) b = 0x00u;
-    } else if (b == TIKU_KITS_NET_SLIP_ESC) {  /* 0xDB */
-        esc = 1;
-        return 1;
-    }
-    if (flen < (uint16_t)sizeof fbuf) {
-        fbuf[flen++] = b;
-    }
-    return 1;
+#endif
+    return tiku_console_getc();
 }
 
+#if TIKU_SHELL_CMD_SLIP
 /*
- * Drain the shared UART through the SLIP demux on behalf of a blocking
- * builtin (e.g. BASIC HTTPGET$) that has taken over the shell loop.  While
- * such a builtin busy-waits, the main loop's demux is not running, so without
- * this incoming SLIP frames (DNS reply, TCP/TLS data) are never delivered to
- * the IP stack.  Crucially it reuses shell_net_demux, whose frame buffer is
- * static: a frame that arrives across many calls (the bytes trickle in at the
- * line rate, far slower than this is polled) is reassembled correctly, rather
- * than being shredded the way a caller-local accumulator would.
+ * Drain the wire on behalf of a blocking builtin (e.g. BASIC HTTPGET$) that
+ * has taken over the shell loop.  While such a builtin busy-waits, the main
+ * loop is not running, so without this incoming SLIP frames (DNS reply,
+ * TCP/TLS data) are never delivered to the IP stack.  The console's decoder
+ * keeps its state across calls, so a frame that arrives across many calls
+ * (the bytes trickle in at the line rate) is reassembled correctly.
  */
 void
 tiku_shell_net_pump(void)
 {
-    int ch;
-    while (tiku_shell_io_rx_ready()) {
-        ch = tiku_shell_io_getc();
-        if (ch < 0) {
-            break;
-        }
-        (void)shell_net_demux(ch);
-    }
+    tiku_console_pump();
 }
 
 /*
- * SLIP-aware non-blocking getc -- see the header.  A blocking builtin that
+ * Console-aware non-blocking getc -- see the header.  A blocking builtin that
  * reads the keyboard while a SLIP link is up (the BASIC REPL / INPUT after a
- * BROWSE) calls this instead of tiku_shell_io_getc(): it routes SLIP frame
- * bytes (a closed connection's lingering teardown / retransmits) into the IP
- * stack, where they are consumed and ACKed, rather than letting them land in
- * the line editor as garbage and wedge the console.  Only bytes the demux
- * classifies as console (return 0) are handed back; if SLIP is not currently
- * active every byte is a keystroke, so it behaves like a plain getc.
+ * BROWSE) calls this instead of tiku_shell_io_getc(): frame bytes (a closed
+ * connection's lingering teardown / retransmits) go to their channel rather
+ * than landing in the line editor as garbage and wedging the console.
  */
 int
 tiku_shell_net_getc(void)
 {
-    int ch;
     /* A blocking builtin's input wait is liveness, not a hang: the BASIC
      * REPL prompt, INPUT, DELAY and the RUN loop's Ctrl-C poll all spin on
      * this call for unbounded time INSIDE one dispatch of the shell process,
@@ -473,17 +400,7 @@ tiku_shell_net_getc(void)
      * pumps do, or the detector blames the shell and warm-resets ~2 s into
      * any quiet BASIC prompt. */
     tiku_watchdog_kick();
-    while (tiku_shell_io_rx_ready()) {
-        ch = tiku_shell_io_getc();
-        if (ch < 0) {
-            break;
-        }
-        if (tiku_shell_cmd_slip_active() && shell_net_demux(ch)) {
-            continue;          /* consumed as a SLIP frame byte, not input */
-        }
-        return ch;             /* genuine console keystroke */
-    }
-    return -1;
+    return shell_getc();
 }
 #endif
 
@@ -577,6 +494,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_INFO
     {"info",    "Device, CPU, uptime, clock",  tiku_shell_cmd_info},
+#endif
+#if TIKU_SHELL_CMD_CONSOLE
+    {"console", "The line's channels, counters", tiku_shell_cmd_console},
 #endif
 #if TIKU_SHELL_CMD_FREE
     {"free",    "Memory usage (SRAM/" TIKU_DEVICE_NVM_LABEL ")", tiku_shell_cmd_free},
@@ -1514,60 +1434,20 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #if TIKU_SHELL_TCP_ENABLE && TIKU_SHELL_NET_TEST && TIKU_SHELL_CMD_SLIP
         /* Net-test telnet: the console wire is the SLIP transport carrying
          * the telnet TCP, but a connected client makes the TCP backend
-         * active -- so the per-backend drain below stops reading the wire,
-         * which would starve telnet RX.  Pump the wire through the SLIP
-         * demux here so the telnet transport keeps flowing; console
-         * keystrokes are dropped while the remote client owns the line
-         * editor.  The wire follows the console: the USB CDC port on an
-         * RP2350 native-USB build, the UART everywhere else (it must match
-         * SLIP_WIRE_* in tiku_kits_net_slip.c, where the TX side lives). */
-#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
-#define SHELL_SLIP_WIRE_IO tiku_shell_io_usbcdc
-#else
-#define SHELL_SLIP_WIRE_IO tiku_shell_io_uart
-#endif
+         * active -- so the drain below reads the client, not the wire,
+         * which would starve telnet RX.  Pump the wire here so the telnet
+         * transport keeps flowing; console keystrokes are dropped while
+         * the remote client owns the line editor. */
         if (tiku_shell_cmd_slip_active() &&
             tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
-            while (SHELL_SLIP_WIRE_IO.rx_ready()) {
-                int uch = SHELL_SLIP_WIRE_IO.getc();
-                if (uch < 0) {
-                    break;
-                }
-                (void)shell_net_demux(uch);
-            }
+            tiku_console_pump();
         }
 #endif
 
-        /* Drain all available characters from the backend.  In SLIP mode the
-         * shell shares the UART: complete 0xC0 frames are routed to the IP
-         * stack, while ordinary keystrokes still reach the line editor below. */
-        while (tiku_shell_io_rx_ready()) {
-            ch = tiku_shell_io_getc();
-            if (ch < 0) {
-                break;
-            }
-#if TIKU_APPL_GUI
-            /* A host desktop's window session rides the console in
-             * marked frames, cut out here before any mode sees them. */
-            if (tiku_draw_frame_byte(ch)) {
-                continue;
-            }
-#endif
-#if TIKU_SHELL_CMD_SLIP
-            if (tiku_shell_cmd_slip_active()
-#if TIKU_SHELL_TCP_ENABLE
-                /* When a telnet client owns the line editor, getc() returns
-                 * its TCP bytes -- those are NOT SLIP frames, so must not go
-                 * to the demux (which is mid-frame for the UART transport and
-                 * would swallow them).  The UART SLIP transport is drained
-                 * separately above. */
-                && tiku_shell_io_get_backend() != &tiku_shell_io_tcp
-#endif
-                && shell_net_demux(ch)) {
-                continue;
-            }
-#endif
-
+        /* Drain every keystroke.  The console cuts the wire's frames out
+         * before a byte reaches here: IP packets go to the stack and a
+         * desktop's window session to its channel. */
+        while ((ch = shell_getc()) >= 0) {
 #if TIKU_SHELL_CMD_WATCH
             /* A live watch is streaming: keystrokes are routed to
              * the mode — Ctrl+C cancels it, everything else is

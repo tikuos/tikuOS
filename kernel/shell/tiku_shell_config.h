@@ -49,6 +49,9 @@
 #ifndef TIKU_SHELL_CMD_HTIMER
 #define TIKU_SHELL_CMD_HTIMER  1  /**< htimer  - Hardware-timer self-test */
 #endif
+#ifndef TIKU_SHELL_CMD_CONSOLE
+#define TIKU_SHELL_CMD_CONSOLE 1  /**< console - The line's channels, counters */
+#endif
 #ifndef TIKU_SHELL_CMD_TIMER
 #define TIKU_SHELL_CMD_TIMER   1  /**< timer   - Software timer status */
 #endif

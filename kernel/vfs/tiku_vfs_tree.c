@@ -29,6 +29,7 @@
 #include "tree/tiku_vfs_tree_data.h"
 #if TIKU_APPL_GUI
 #include "tiku_gui.h"           /* applications overlay: /gui */
+#include "tiku_draw.h"          /* applications overlay: its console channel */
 #define ROOT_SLOTS 5
 #else
 #define ROOT_SLOTS 4
@@ -113,8 +114,10 @@ tiku_vfs_tree_init(void)
     n_root = 4;
 #endif
 #if TIKU_APPL_GUI
-    /* /gui: the forms a process publishes for a host desktop to draw. */
+    /* /gui: the forms a process publishes for a host desktop to draw, and
+     * the console channel that desktop's window session rides. */
     root_children[n_root++] = *tiku_gui_vfs_get();
+    tiku_draw_init();
 #endif
 
     vfs_root = (tiku_vfs_node_t){
