@@ -27,6 +27,12 @@
 #include "tree/tiku_vfs_tree_boot.h"
 #include "tree/tiku_vfs_tree_dev.h"
 #include "tree/tiku_vfs_tree_data.h"
+#if TIKU_APPL_GUI
+#include "tiku_gui.h"           /* applications overlay: /gui */
+#define ROOT_SLOTS 5
+#else
+#define ROOT_SLOTS 4
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* VFS TREE                                                                  */
@@ -49,7 +55,7 @@
  * .persistent (FRAM) to spare SRAM -- written only inside the init-time MPU
  * unlock window below.
  */
-static TIKU_DURABLE tiku_vfs_node_t root_children[4];
+static TIKU_DURABLE tiku_vfs_node_t root_children[ROOT_SLOTS];
 
 /** Mutable root node (FRAM, written at init): name "" so that
  *  resolving "/" yields it directly. */
@@ -105,6 +111,10 @@ tiku_vfs_tree_init(void)
      * shell concern. */
     root_children[3] = *tiku_vfs_tree_data_get();
     n_root = 4;
+#endif
+#if TIKU_APPL_GUI
+    /* /gui: the forms a process publishes for a host desktop to draw. */
+    root_children[n_root++] = *tiku_gui_vfs_get();
 #endif
 
     vfs_root = (tiku_vfs_node_t){
