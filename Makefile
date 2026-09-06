@@ -2274,6 +2274,18 @@ SRCS += kernel/console/tiku_console.c
 # consumer, so --gc-sections drops it and the image is unchanged.
 SRCS += kernel/link/tiku_link.c
 SRCS += kernel/link/tiku_link_console.c
+# The BLE link: a board's window session over the BLE serial facade, the
+# Nordic UART Service byte pipe.  Kernel code over a kernel interface; the
+# applications overlay registers it (TIKU_APPL_GUI_BLE) and nothing else
+# references it.  It needs a radio under the facade.
+ifeq ($(TIKU_LINK_BLE_ENABLE),1)
+ifeq ($(filter 1,$(TIKU_FLPR_ENABLE) $(TIKU_DRV_BLE_EM9305_ENABLE)),)
+$(error TIKU_LINK_BLE_ENABLE=1 needs the BLE serial facade under it; on \
+nordic add TIKU_FLPR_ENABLE=1)
+endif
+CFLAGS += -DTIKU_LINK_BLE_ENABLE=1
+SRCS   += kernel/link/tiku_link_ble.c
+endif
 SRCS += kernel/vfs/tiku_vfs.c
 SRCS += kernel/vfs/tiku_vfs_cache.c
 SRCS += kernel/vfs/tiku_vfs_tree.c
