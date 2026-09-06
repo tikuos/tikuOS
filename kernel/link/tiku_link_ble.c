@@ -156,6 +156,12 @@ service(tiku_link_ble_t *l)
 {
     uint8_t up = (tiku_ble_serial_ready() != 0) ? 1u : 0u;
 
+    /* What the link confers follows the pipe's standing: a central that has
+     * paired and runs the link encrypted may actuate hardware, a stranger
+     * may not, whatever address it shows. */
+    l->link.cap = (tiku_ble_serial_secured() != 0) ? TIKU_VFS_CAP_HW
+                                                   : TIKU_VFS_CAP_NONE;
+
     if (up && l->state != TIKU_LINK_BLE_UP) {
         l->state = TIKU_LINK_BLE_UP;        /* a fresh central: fresh stream */
         rewind_stream(l);
@@ -196,10 +202,14 @@ TIKU_PROCESS_THREAD(tiku_link_ble_process, ev, data)
     tiku_timer_set_event(&poll_timer, TIKU_LINK_BLE_POLL_TICKS);
     while (active != (tiku_link_ble_t *)0) {
         TIKU_PROCESS_WAIT_EVENT();
-        if (ev == TIKU_EVENT_TIMER) {
-            tiku_timer_restart(&poll_timer);
-        }
         tiku_link_ble_service();
+        if (ev == TIKU_EVENT_TIMER) {
+            /* From now, at the pace the pipe's standing asks for. */
+            tiku_timer_set_event(&poll_timer,
+                                 tiku_ble_serial_connected()
+                                     ? TIKU_LINK_BLE_LINK_TICKS
+                                     : TIKU_LINK_BLE_POLL_TICKS);
+        }
     }
     tiku_timer_stop(&poll_timer);
     TIKU_PROCESS_END();
@@ -248,7 +258,7 @@ tiku_link_ble_open(tiku_link_ble_t *l, const char *name,
     l->cap = cap;
     l->link.ops = &ble_ops;
     l->link.ctx = l;
-    l->link.cap = TIKU_VFS_CAP_NONE;        /* over the air, nothing */
+    l->link.cap = TIKU_VFS_CAP_NONE;        /* until a central pairs */
     if (tiku_ble_serial_start(name) != 0) {
         return (tiku_link_t *)0;
     }

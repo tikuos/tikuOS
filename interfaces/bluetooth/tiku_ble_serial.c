@@ -86,6 +86,24 @@ tiku_ble_serial_ready(void)
 }
 
 int
+tiku_ble_serial_secured(void)
+{
+    return 0;                       /* the EM9305 host reports no encryption */
+}
+
+int
+tiku_ble_serial_connected(void)
+{
+    return tiku_ble_uart_connected() ? 1 : 0;
+}
+
+int
+tiku_ble_serial_secure_state(void)
+{
+    return 0;
+}
+
+int
 tiku_ble_serial_send(const uint8_t *data, uint16_t len)
 {
     uint16_t          i, prev;
@@ -180,6 +198,7 @@ tiku_ble_serial_beacon(const char *name)
 #include <interfaces/bluetooth/tiku_ble_adv.h> /* R7 radio-ownership arbiter  */
 #include <kernel/cpu/tiku_common.h>            /* unique id -> AdvA           */
 #include <interfaces/bluetooth/tiku_ble_host.h>  /* Phase B: M33 ATT/GATT host */
+#include <interfaces/bluetooth/tiku_ble_bond.h>  /* a central seen before      */
 #include <kernel/cpu/tiku_watchdog.h>          /* kick while draining the slot */
 #include <string.h>
 
@@ -200,6 +219,13 @@ static uint8_t s_advlen;
 static uint8_t s_rsplen;
 static uint8_t s_rx[BLE_SERIAL_RXBUF];             /* buffered NUS RX bytes   */
 static uint8_t s_rx_len;
+/* The connection's standing: a central seen (its addresses taken), a key
+ * agreed or recalled, and the link encrypted under it. */
+static uint8_t s_ltk[16];
+static uint8_t s_conn_seen;
+static uint8_t s_smp_armed;
+static uint8_t s_paired;
+static uint8_t s_enc;
 
 /* The SCAN_RSP a discovering host gets: the NUS service UUID.  It must NOT
  * repeat the advert's own data -- a scanner's duplicate filter drops such a
@@ -323,14 +349,56 @@ static void serial_drain_tx(void)
 {
     uint8_t  frag[32], llid;
     uint16_t fl;
-    while ((fl = tiku_ble_host_next_tx(frag, sizeof(frag), &llid)) > 0u) {
-        while (tiku_flpr_arch_conn_send(frag, fl, llid) == -2 &&
-               tiku_flpr_arch_conn_active()) {
-            tiku_watchdog_kick();
+    do {
+        while ((fl = tiku_ble_host_next_tx(frag, sizeof(frag), &llid)) > 0u) {
+            while (tiku_flpr_arch_conn_send(frag, fl, llid) == -2 &&
+                   tiku_flpr_arch_conn_active()) {
+                tiku_watchdog_kick();
+            }
+            if (!tiku_flpr_arch_conn_active()) {
+                return;
+            }
         }
-        if (!tiku_flpr_arch_conn_active()) {
-            break;
+        /* TX drained: the pairing engine may hold a reply of its own. */
+    } while (tiku_ble_host_smp_pump() != 0);
+}
+
+/**
+ * @brief Pairing and encryption for whoever connected.  A central the bond
+ *        store knows gets no pairing, only the encryption it asks for under
+ *        the key it holds; a stranger gets the responder, and its key is
+ *        stored once agreed so it is known next time.
+ */
+static void serial_secure_service(void)
+{
+    uint8_t inita[6], adva[6], types;
+
+    if (!tiku_flpr_arch_conn_active()) {
+        s_conn_seen = 0u;
+        s_smp_armed = 0u;
+        s_paired = 0u;
+        s_enc = 0u;
+        return;
+    }
+    if (!s_conn_seen) {
+        s_conn_seen = 1u;
+        types = tiku_flpr_arch_conn_addrs(inita, adva);
+        if (tiku_ble_bond_find(inita, (uint8_t)(types & 1u), s_ltk)) {
+            s_paired = 1u;
+        } else {
+            tiku_ble_host_smp_start(inita, (uint8_t)(types & 1u),
+                                    adva, (uint8_t)((types >> 1) & 1u));
+            s_smp_armed = 1u;
         }
+    }
+    if (s_smp_armed && !s_paired && tiku_ble_host_smp_state() == 2 &&
+        tiku_ble_host_smp_ltk(s_ltk) == 0) {
+        s_paired = 1u;
+        types = tiku_flpr_arch_conn_addrs(inita, adva);
+        (void)tiku_ble_bond_store(inita, (uint8_t)(types & 1u), s_ltk);
+    }
+    if (s_paired && !s_enc && tiku_flpr_arch_enc_service(s_ltk)) {
+        s_enc = 1u;
     }
 }
 
@@ -344,6 +412,7 @@ tiku_ble_serial_service(void)
     int      n;
     uint16_t m;
 
+    serial_secure_service();
     if (!tiku_flpr_arch_conn_active()) {
         return;
     }
@@ -374,6 +443,27 @@ tiku_ble_serial_ready(void)
     tiku_ble_serial_service();                 /* pump the L2CAP <-> host loop */
     return (tiku_flpr_arch_conn_active() &&
             tiku_ble_host_subscribed()) ? 1 : 0;
+}
+
+int
+tiku_ble_serial_secured(void)
+{
+    return (s_enc && tiku_flpr_arch_conn_active()) ? 1 : 0;
+}
+
+int
+tiku_ble_serial_connected(void)
+{
+    return tiku_flpr_arch_conn_active() ? 1 : 0;
+}
+
+int
+tiku_ble_serial_secure_state(void)
+{
+    if (!tiku_flpr_arch_conn_active()) {
+        return 0;
+    }
+    return s_enc ? 3 : (s_paired ? 2 : (s_smp_armed ? 1 : 0));
 }
 
 int
@@ -432,6 +522,9 @@ int  tiku_ble_serial_available(void) { return 0; }
 int  tiku_ble_serial_start(const char *name) { (void)name; return -1; }
 void tiku_ble_serial_stop(void) { }
 int  tiku_ble_serial_ready(void) { return 0; }
+int  tiku_ble_serial_secured(void) { return 0; }
+int  tiku_ble_serial_connected(void) { return 0; }
+int  tiku_ble_serial_secure_state(void) { return 0; }
 void tiku_ble_serial_service(void) { }
 int  tiku_ble_serial_rx_ready(void) { return 0; }
 int  tiku_ble_serial_send(const uint8_t *data, uint16_t len)

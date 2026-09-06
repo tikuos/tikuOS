@@ -71,6 +71,24 @@ void tiku_ble_serial_stop(void);
 int tiku_ble_serial_ready(void);
 
 /**
+ * @brief 1 when the connected central has paired (or is bonded from before)
+ *        and the link runs encrypted under that key; 0 otherwise, including
+ *        while it is still being agreed.
+ *
+ * The backend answers a central's pairing itself and keeps the key, so a
+ * central seen before skips pairing; what a link confers to what crosses
+ * it follows this, not the address alone.
+ */
+int tiku_ble_serial_secured(void);
+
+/** @brief 1 while a central holds the link, subscribed or not. */
+int tiku_ble_serial_connected(void);
+
+/** @brief Where the connection's security stands: 0 none, 1 pairing,
+ *         2 key agreed or recalled, 3 encrypted under it. */
+int tiku_ble_serial_secure_state(void);
+
+/**
  * @brief Pump the stack once (drain events/RX, service TX acks).  Cheap and
  *        non-blocking; ready()/recv()/send() all call it, so an app that polls
  *        any of them need not call this explicitly.

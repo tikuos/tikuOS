@@ -135,11 +135,18 @@ static void bleadv_dbg(void)
                  (unsigned long)NRF_CLOCK_S->XO.RUN,
                  (unsigned long)NRF_CLOCK_S->PLL.RUN,
                  (unsigned long)NRF_OSCILLATORS_S->PLL.CURRENTFREQ);
-    SHELL_PRINTF("RADIO: state=%lu mode=%lu txpower=%lx datawhite=%lx\n",
-                 (unsigned long)NRF_RADIO_S->STATE,
-                 (unsigned long)NRF_RADIO_S->MODE,
-                 (unsigned long)NRF_RADIO_S->TXPOWER,
-                 (unsigned long)NRF_RADIO_S->DATAWHITE);
+    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
+        /* The radio may be the coprocessor's just now, and then it is
+         * non-secure: a read through the secure alias is a bus fault. */
+        SHELL_PRINTF("RADIO: held by %s; registers not read\n",
+                     tiku_ble_adv_owner_str());
+    } else {
+        SHELL_PRINTF("RADIO: state=%lu mode=%lu txpower=%lx datawhite=%lx\n",
+                     (unsigned long)NRF_RADIO_S->STATE,
+                     (unsigned long)NRF_RADIO_S->MODE,
+                     (unsigned long)NRF_RADIO_S->TXPOWER,
+                     (unsigned long)NRF_RADIO_S->DATAWHITE);
+    }
     SHELL_PRINTF("FACADE: active=%d name=%s interval=%u bursts=%lu\n",
                  tiku_ble_adv_active(), tiku_ble_adv_name(),
                  (unsigned)tiku_ble_adv_interval_ms(),

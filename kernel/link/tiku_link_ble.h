@@ -30,9 +30,17 @@
 #define TIKU_LINK_BLE_CHUNK 64u
 #endif
 
-/** @brief How often the pipe is serviced while a link is open. */
+/** @brief How often the pipe is serviced while a link is open and no
+ *         central holds it. */
 #ifndef TIKU_LINK_BLE_POLL_TICKS
 #define TIKU_LINK_BLE_POLL_TICKS (TIKU_CLOCK_SECOND / 20)
+#endif
+
+/** @brief How often it is serviced while a central holds it: a pairing
+ *         exchange and the pipe's one-fragment mailbox both want an answer
+ *         within a connection interval. */
+#ifndef TIKU_LINK_BLE_LINK_TICKS
+#define TIKU_LINK_BLE_LINK_TICKS 1u
 #endif
 
 typedef enum {
@@ -67,6 +75,8 @@ typedef struct {
 /**
  * @brief Start advertising as @p name and open the link over whoever
  *        connects and subscribes.  One link at a time: the radio is one.
+ *        The link confers TIKU_VFS_CAP_HW while its central has paired and
+ *        runs it encrypted, nothing otherwise; read it with tiku_link_cap().
  *
  * @param buf  Where a received message is gathered, @p cap bytes.
  * @return the link, or NULL when the facade refuses or one is already open.
