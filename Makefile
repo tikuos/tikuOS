@@ -3070,6 +3070,20 @@ CFLAGS += -DTIKU_KITS_NET_WIFI_ENABLE=1
 SRCS   += $(wildcard tikukits/net/wifi/*.c)
 endif
 endif
+# The IP link: a board's window session over a TCP connection it dials to a
+# desktop.  A kit above the TCP transport, which it enables; the applications
+# overlay registers it (TIKU_APPL_GUI_IP) and nothing else references it.
+ifeq ($(TIKU_KITS_NET_LINK_IP_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_LINK_IP_ENABLE=1 -DTIKU_KITS_NET_TCP_ENABLE=1
+SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
+SRCS   += tikukits/net/link/tiku_kits_net_link_ip.c
+endif
+endif
+ifneq ($(TIKU_KIT_NET_ENABLE),1)
+ifeq ($(TIKU_KITS_NET_LINK_IP_ENABLE),1)
+$(error TIKU_KITS_NET_LINK_IP_ENABLE=1 needs the net kit under it; add \
+TIKU_KIT_NET_ENABLE=1)
+endif
 endif
 
 # Bluetooth Low Energy protocol stack: driver-agnostic. Pulled in
