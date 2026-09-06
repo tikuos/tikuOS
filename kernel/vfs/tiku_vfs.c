@@ -933,13 +933,83 @@ void tiku_vfs_unwatch_all(struct tiku_process *p)
  *
  * @param node  The node that changed
  */
-void tiku_vfs_notify(const tiku_vfs_node_t *node)
+/*---------------------------------------------------------------------------*/
+/* CHANGE RING                                                               */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * A fixed ring in SRAM.  Full means the OLDEST record is dropped and the
+ * drop counter rises: a reader that sees a non-zero drop count knows its
+ * picture is incomplete and re-reads, which is recoverable.  Blocking an
+ * ISR to preserve a record is not.
+ */
+static tiku_vfs_change_t vfs_events[TIKU_VFS_EVENTS_MAX];
+static uint8_t  vfs_ev_head;      /* next write slot                       */
+static uint8_t  vfs_ev_count;
+static uint16_t vfs_ev_seq;
+static uint16_t vfs_ev_dropped;
+
+uint32_t tiku_vfs_node_id(const tiku_vfs_node_t *node)
+{
+    /* The address IS the identity -- the tree is static, so it is stable for
+     * the life of the boot and equal for the same node however it was
+     * reached.  Handed out as a token, not as something to dereference. */
+    return (uint32_t)(uintptr_t)node;
+}
+
+static void vfs_events_push(const tiku_vfs_node_t *node, uint8_t op)
+{
+    tiku_vfs_change_t *r;
+
+    if (vfs_ev_count >= TIKU_VFS_EVENTS_MAX) {
+        /* Drop the oldest and say so, rather than the newest in silence:
+         * the recent records are the ones a reader can still act on. */
+        vfs_ev_dropped++;
+        vfs_ev_count--;
+    }
+    r = &vfs_events[vfs_ev_head];
+    r->node = node;
+    r->op = op;
+    r->seq = vfs_ev_seq++;
+    vfs_ev_head = (uint8_t)((vfs_ev_head + 1u) % TIKU_VFS_EVENTS_MAX);
+    vfs_ev_count++;
+}
+
+uint8_t tiku_vfs_events_take(tiku_vfs_change_t *out, uint8_t max)
+{
+    uint8_t n = 0;
+    uint8_t tail;
+
+    while (vfs_ev_count > 0u && n < max) {
+        tail = (uint8_t)((vfs_ev_head + TIKU_VFS_EVENTS_MAX - vfs_ev_count) %
+                         TIKU_VFS_EVENTS_MAX);
+        if (out != NULL) {
+            out[n] = vfs_events[tail];
+        }
+        vfs_ev_count--;
+        n++;
+    }
+    return n;
+}
+
+uint8_t tiku_vfs_events_pending(void)
+{
+    return vfs_ev_count;
+}
+
+uint16_t tiku_vfs_events_dropped(void)
+{
+    return vfs_ev_dropped;
+}
+
+void tiku_vfs_notify_op(const tiku_vfs_node_t *node, tiku_vfs_op_t op)
 {
     int8_t i;
 
     if (node == NULL) {
         return;
     }
+    vfs_events_push(node, (uint8_t)op);
 
 #if TIKU_VFS_CACHE_ENABLE
     /* A change means any cached rendering is stale -- drop it before
@@ -952,6 +1022,17 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node)
             tiku_process_post_node(watch_table[i].proc, TIKU_EVENT_VFS, node);
         }
     }
+}
+
+/*
+ * tiku_vfs_write() and every driver already call tiku_vfs_notify(), so
+ * making it the CHANGED case of the opcode form is what fills the ring
+ * without touching any of those call sites -- a value move recorded as what
+ * it is, by the code that already reports it.
+ */
+void tiku_vfs_notify(const tiku_vfs_node_t *node)
+{
+    tiku_vfs_notify_op(node, TIKU_VFS_OP_CHANGED);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1214,9 +1295,13 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                        VFS_NAME_OF(vfs_ecost_names, d->ecost));
     }
 
-    m = snprintf(dst, room, "%s\t%c\t%s\t%s\t%s\n",
+    /* The id is what lets a reader tell "the node I had, renamed" from "a
+     * different node" -- a path cannot express that, and a reader without it
+     * has to guess from the name. */
+    m = snprintf(dst, room, "%s\t%c\t%s\t%s\t%s\t%08lx\n",
                  path, (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm, meta,
-                 vfs_cap_name(n->req_cap));
+                 vfs_cap_name(n->req_cap),
+                 (unsigned long)tiku_vfs_node_id(n));
     if (m > 0) {
         s->off += (size_t)m;
     }
@@ -1267,7 +1352,8 @@ int tiku_vfs_manifest(char *buf, size_t max)
 
     /* Self-describing header row. */
     m = snprintf(buf, max,
-                 "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])\n");
+                 "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])"
+                 "\tcap\tid\n");
     if (m > 0) {
         s.off += (size_t)m;
     }

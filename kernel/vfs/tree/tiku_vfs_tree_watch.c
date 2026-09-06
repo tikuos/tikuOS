@@ -231,6 +231,63 @@ vfs_cache_misses_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
+/* /sys/vfs/events — what changed, drained by reading                        */
+/*---------------------------------------------------------------------------*/
+/*
+ * The change ring rendered as text.  Reading it is the drain, which is why
+ * this is a node and not a shell mode: an agent already knows how to read a
+ * file, and doing so does not take the shell away from anything else.
+ *
+ * One record per line: <op> <id> <seq>.  The trailing summary line reports
+ * how many records have been LOST to a full ring since boot -- a reader that
+ * sees it rise knows its picture is incomplete and must re-read rather than
+ * trust what it just drained.
+ */
+
+/** Op names, indexed by tiku_vfs_op_t. */
+static const char *const vfs_op_names[] = {
+    "changed", "created", "removed", "moved"
+};
+
+static int
+vfs_events_read(char *buf, size_t max)
+{
+    tiku_vfs_change_t rec[TIKU_VFS_EVENTS_MAX];
+    uint8_t n, i;
+    int off = 0;
+
+    n = tiku_vfs_events_take(rec, (uint8_t)(sizeof rec / sizeof rec[0]));
+    for (i = 0; i < n; i++) {
+        const char *op = (rec[i].op < (sizeof vfs_op_names /
+                                       sizeof vfs_op_names[0]))
+                             ? vfs_op_names[rec[i].op] : "?";
+
+        off += snprintf(buf + off, (off < (int)max) ? max - (size_t)off : 0u,
+                        "%s\t%08lx\t%u\n", op,
+                        (unsigned long)tiku_vfs_node_id(rec[i].node),
+                        (unsigned)rec[i].seq);
+    }
+    off += snprintf(buf + off, (off < (int)max) ? max - (size_t)off : 0u,
+                    "# %u drained, %u dropped\n", (unsigned)n,
+                    (unsigned)tiku_vfs_events_dropped());
+    return off;
+}
+
+/** @brief Read handler for /sys/vfs/events_pending — how many are waiting. */
+static int
+vfs_events_pending_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", (unsigned)tiku_vfs_events_pending());
+}
+
+/** @brief Read handler for /sys/vfs/events_dropped. */
+static int
+vfs_events_dropped_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%u\n", (unsigned)tiku_vfs_events_dropped());
+}
+
+/*---------------------------------------------------------------------------*/
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
@@ -271,10 +328,11 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
 /*
  * Manifest schema version -- bump when the manifest LINE FORMAT changes so an
  * external agent consuming /sys/vfs/manifest can pin or adapt instead of
- * silently mis-parsing.  rev 2 = the five-column form (path type perms meta
- * cap); rev 1 was the pre-capability four-column form.
+ * silently mis-parsing.  rev 3 = the six-column form (path type perms
+ * meta cap id), which adds the stable per-node identity; rev 2 was the
+ * five-column form; rev 1 was the pre-capability four-column form.
  */
-#define TIKU_VFS_MANIFEST_REV  2u
+#define TIKU_VFS_MANIFEST_REV  3u
 
 /**
  * @brief Read handler for /sys/vfs/manifest_rev.
@@ -296,6 +354,11 @@ const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
     { "depth",        TIKU_VFS_FILE, vfs_depth_read,        NULL, NULL, 0 },
     { "manifest",     TIKU_VFS_FILE, vfs_manifest_read,     NULL, NULL, 0 },
     { "manifest_rev", TIKU_VFS_FILE, vfs_manifest_rev_read, NULL, NULL, 0 },
+    { "events",       TIKU_VFS_FILE, vfs_events_read,       NULL, NULL, 0 },
+    { "events_pending", TIKU_VFS_FILE, vfs_events_pending_read,
+      NULL, NULL, 0 },
+    { "events_dropped", TIKU_VFS_FILE, vfs_events_dropped_read,
+      NULL, NULL, 0 },
     { "cache",        TIKU_VFS_DIR,  NULL, NULL, vfs_cache_children,
       sizeof(vfs_cache_children) / sizeof(vfs_cache_children[0]) },
 };
