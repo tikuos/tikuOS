@@ -139,6 +139,20 @@ static void bleadv_dbg(void)
                  (unsigned long)tiku_radio_arch_dbg_xo_stat,
                  (unsigned long)tiku_radio_arch_dbg_xo_wait,
                  (unsigned long)tiku_radio_arch_dbg_xo_restarts);
+    {
+        uint32_t isr = 0u, addr = 0u, crcok = 0u;
+
+        tiku_radio_arch_scan_counts(&isr, &addr, &crcok);
+        uint32_t bad = 0u, kind = 0u, named = 0u, kept = 0u;
+
+        tiku_ble_adv_scan_drops(&bad, &kind, &named, &kept);
+        SHELL_PRINTF("SCAN  : isr=%lu addr=%lu crcok=%lu\n",
+                     (unsigned long)isr, (unsigned long)addr,
+                     (unsigned long)crcok);
+        SHELL_PRINTF("REPORT: kept=%lu drop ctx=%lu kind=%lu name=%lu\n",
+                     (unsigned long)kept, (unsigned long)bad,
+                     (unsigned long)kind, (unsigned long)named);
+    }
     SHELL_PRINTF("WINDOW: hw=%lu forced=%lu (forced!=0 => DPPI window dead)\n",
                  (unsigned long)tiku_radio_arch_dbg_win_hw,
                  (unsigned long)tiku_radio_arch_dbg_win_forced);

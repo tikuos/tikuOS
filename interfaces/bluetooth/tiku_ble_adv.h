@@ -233,4 +233,13 @@ const tiku_ble_adv_report_t *tiku_ble_adv_last_scan_best(void);
 }
 #endif
 
+
+/**
+ * @brief Where a scan's reports went: dropped for a context with no table,
+ *        for a PDU kind or length this does not read, by the name filter,
+ *        or kept as a new device.  Any pointer may be NULL.
+ */
+void tiku_ble_adv_scan_drops(uint32_t *ctx_bad, uint32_t *kind,
+                             uint32_t *named, uint32_t *kept);
+
 #endif /* TIKU_BLE_ADV_H_ */

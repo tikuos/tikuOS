@@ -34,8 +34,16 @@
  */
 #ifdef TIKU_CLOCK_CONF_TIME_T
 typedef TIKU_CLOCK_CONF_TIME_T tiku_clock_time_t;
-#else
+#elif defined(PLATFORM_MSP430)
 typedef unsigned short tiku_clock_time_t;
+#else
+/* The same width tiku.h configures, decided here too because this header
+ * is reachable without it: an include guard locks the FIRST typedef in, so
+ * a translation unit that reaches this file first would otherwise size
+ * every struct tiku_timer it declares 4 bytes short of the one the timer
+ * subsystem writes -- and the timer's own stores then land past the end of
+ * the caller's object. */
+typedef unsigned long tiku_clock_time_t;
 #endif
 
 /*

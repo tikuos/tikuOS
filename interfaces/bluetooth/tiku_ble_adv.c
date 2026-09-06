@@ -480,6 +480,20 @@ static void scan_parse_mfr_tk(const uint8_t *ad, uint8_t ad_len, char *out)
 /** @brief The largest payload a legacy advertising PDU carries. */
 #define SCAN_PDU_MAX 37u
 
+/* Where the reports go: a scan that hears (the RX counters rise) and
+ * reports nothing is one of these, and the summary alone cannot say
+ * which. */
+static uint32_t scan_drop_ctx, scan_drop_kind, scan_drop_name, scan_kept;
+
+void tiku_ble_adv_scan_drops(uint32_t *ctx_bad, uint32_t *kind, uint32_t *named,
+                             uint32_t *kept)
+{
+    if (ctx_bad != (uint32_t *)0) { *ctx_bad = scan_drop_ctx; }
+    if (kind != (uint32_t *)0)    { *kind = scan_drop_kind; }
+    if (named != (uint32_t *)0)   { *named = scan_drop_name; }
+    if (kept != (uint32_t *)0)    { *kept = scan_kept; }
+}
+
 static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
 {
     struct scan_ctx *ctx = (struct scan_ctx *)ud;
@@ -495,6 +509,7 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
      * board, which reads to every later test as a dead radio. */
     if (ctx == (struct scan_ctx *)0 ||
         ctx->out == (tiku_ble_adv_report_t *)0 || ctx->max == 0u) {
+        scan_drop_ctx++;
         return;
     }
 
@@ -504,6 +519,7 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
     if (len < 6u ||
         !(type == 0u || type == 1u || type == 2u || type == 4u ||
           type == 6u)) {
+        scan_drop_kind++;
         return;
     }
     /* A legacy advertising payload is at most 37 bytes.  The AD walk below
@@ -528,6 +544,7 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
         }
     }
     if (ctx->plen != 0u && strncmp(name, ctx->prefix, ctx->plen) != 0) {
+        scan_drop_name++;
         return;
     }
 
@@ -542,6 +559,7 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
             return;
         }
         slot = &ctx->out[ctx->count++];
+        scan_kept++;
         memcpy(slot->addr, adva, 6u);
         slot->rssi = rssi;
         slot->adv_type = type;
@@ -624,6 +642,7 @@ int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
 #define OBSERVE_MAX_REPORTS  12u
 static tiku_ble_adv_report_t bg_reports[OBSERVE_MAX_REPORTS];
 static struct scan_ctx       bg_ctx;
+
 static struct tiku_timer     observe_timer;
 static tiku_clock_time_t     observe_deadline;
 static uint8_t               observe_forever;

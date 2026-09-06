@@ -489,6 +489,19 @@ static volatile uint8_t  scan_active;   /* ISR may re-arm while set        */
 static volatile uint8_t  scan_chan;
 static volatile uint32_t scan_isr_count;
 static volatile uint32_t scan_addr_evts, scan_crcok_evts;
+
+void tiku_radio_arch_scan_counts(uint32_t *isr, uint32_t *addr, uint32_t *crcok)
+{
+    if (isr != (uint32_t *)0) {
+        *isr = scan_isr_count;
+    }
+    if (addr != (uint32_t *)0) {
+        *addr = scan_addr_evts;
+    }
+    if (crcok != (uint32_t *)0) {
+        *crcok = scan_crcok_evts;
+    }
+}
 /* EVERY radio RX DMA target must hold [S0][LEN][S1 slot] + PCNF1.MAXLEN
  * (80 since DLE, Phase F1) = 83 bytes: the RADIO writes up to MAXLEN
  * payload bytes on ANY address-matched reception -- CRC pass NOT required

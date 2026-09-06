@@ -341,6 +341,17 @@ int tiku_radio_arch_extadv_burst(const uint8_t *addr,
 extern uint32_t tiku_radio_arch_dbg_aux_us;
 
 /**
+ * @brief The RX engine's own account of a scan: interrupts serviced,
+ *        address matches, and packets whose CRC held.
+ *
+ * Armed but silent (isr rising, addr 0) is a different fault from heard
+ * but corrupt (addr rising, crcok 0), and the summary count alone cannot
+ * tell them apart.  Any pointer may be NULL.
+ */
+void tiku_radio_arch_scan_counts(uint32_t *isr, uint32_t *addr,
+                                 uint32_t *crcok);
+
+/**
  * @brief Session-scoped Constant Latency hold (nRF54L15 erratum 20).
  *
  * A duty-cycled radio user must hold Constant Latency across the SLEEPS between
