@@ -114,6 +114,18 @@ static void flpr_beacon_burst(void)
     uint32_t c, spin;
 
     flpr_hfclk_kick();
+    /* The burst's own contract, whatever the radio was left doing: an
+     * advertise session before it leaves a turnaround to RX armed on
+     * DISABLED, under which the first channel's end opens a receiver that
+     * never closes and the other two channels never transmit. */
+    r->SHORTS = (1u << 0) | (1u << 19);       /* READY_START, PHYEND_DISABLE */
+    r->EVENTS_DISABLED = 0u;
+    r->TASKS_DISABLE = 1u;
+    for (spin = 0u; spin < 8000u; spin++) {
+        if (r->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
     for (c = 0u; c < 3u; c++) {
         r->FREQUENCY = beacon_freq[c];
         r->DATAWHITE = 0x00890000u | (0x40u | beacon_widx[c]);
