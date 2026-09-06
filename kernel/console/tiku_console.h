@@ -160,6 +160,17 @@ int  tiku_console_getc(void);
 /** @brief Text bytes go here when the wire is pumped; return is ignored. */
 typedef int (*tiku_console_text_fn)(void *ctx, int ch);
 
+/**
+ * @brief Text for the shell that did not come down the wire: a desk on a
+ *        link, say.  Served by tiku_console_getc() before the wire, as
+ *        text, so a frame decoder never sees it.
+ * @return bytes taken; the rest had no room and are dropped
+ */
+size_t tiku_console_inject(const uint8_t *bytes, size_t len);
+
+/** @brief Whether the last byte tiku_console_getc() returned was injected. */
+uint8_t tiku_console_from_inject(void);
+
 /** @brief Install where pumped text goes; NULL discards it. */
 void tiku_console_set_text_sink(tiku_console_text_fn fn, void *ctx);
 

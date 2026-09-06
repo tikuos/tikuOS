@@ -263,6 +263,9 @@ tiku_link_ble_open(tiku_link_ble_t *l, const char *name,
         return (tiku_link_t *)0;
     }
     active = l;
+    /* Registered, so `ps` lists it and a pid names it; the registry keeps
+     * the slot across closes, and a reopen only starts it again. */
+    (void)tiku_process_register("BLE link", &tiku_link_ble_process);
     if (!tiku_process_is_running(&tiku_link_ble_process)) {
         tiku_process_start(&tiku_link_ble_process, (tiku_event_data_t)0);
     }

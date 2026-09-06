@@ -131,6 +131,9 @@ TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
 static void
 pump_start(void)
 {
+    /* Registered, so /proc names it; the registry keeps the slot across
+     * ends, and a later listener only starts it again. */
+    (void)tiku_process_register("Console", &tiku_console_process);
     if (!tiku_process_is_running(&tiku_console_process)) {
         tiku_process_start(&tiku_console_process, (tiku_event_data_t)0);
     }
@@ -459,9 +462,45 @@ sort_byte(uint8_t b)
     return 1u;
 }
 
+/* Text handed in beside the wire, waiting for the shell. */
+#define INJECT_CAP 256u
+static uint8_t  inject_ring[INJECT_CAP];
+static uint16_t inject_head, inject_tail;
+static uint8_t  from_inject;
+
+size_t
+tiku_console_inject(const uint8_t *bytes, size_t len)
+{
+    size_t i;
+
+    for (i = 0; i < len; i++) {
+        uint16_t next = (uint16_t)((inject_head + 1u) % INJECT_CAP);
+
+        if (next == inject_tail) {
+            break;
+        }
+        inject_ring[inject_head] = bytes[i];
+        inject_head = next;
+    }
+    return i;
+}
+
+uint8_t
+tiku_console_from_inject(void)
+{
+    return from_inject;
+}
+
 int
 tiku_console_getc(void)
 {
+    if (inject_head != inject_tail) {
+        uint8_t c = inject_ring[inject_tail];
+
+        inject_tail = (uint16_t)((inject_tail + 1u) % INJECT_CAP);
+        from_inject = 1u;
+        return (int)c;
+    }
     if (wire->getc == (int (*)(void))0) {
         return -1;
     }
@@ -472,6 +511,7 @@ tiku_console_getc(void)
             break;
         }
         if (!sort_byte((uint8_t)ch)) {
+            from_inject = 0u;
             return ch;
         }
     }
