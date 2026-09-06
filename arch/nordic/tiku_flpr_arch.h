@@ -173,15 +173,39 @@ typedef struct {
  * @param adv      Connectable ADV PDU ([S0=0x40][LEN][S1][AdvA][AD...]).
  * @param adv_len  Bytes in @p adv (<= 48).
  * @param addr     AdvA to match in the CONNECT_IND (6 bytes).
+ * @param rsp      SCAN_RSP PDU answering a SCAN_REQ; 0 length leaves the
+ *                 controller mirroring the advert, which a scanner's
+ *                 duplicate filter may drop as a repeat.
+ * @param rsp_len  bytes in @p rsp.
  * @param out      Filled with the parsed CONNECT_IND when connected.
  * @return 0 connected (out filled), -1 not running / bad args, -2 gave up.
  */
 int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
+                                const uint8_t *rsp, uint32_t rsp_len,
                                 const uint8_t *addr,
                                 tiku_flpr_conn_info_t *out);
 
 /** @brief 1 while the FLPR is holding a live connection (step 1b). */
 int tiku_flpr_arch_conn_active(void);
+
+/**
+ * @brief Advertising telemetry for the last (or running) advertise session.
+ *
+ * @param tx      ADV_IND PDUs transmitted.
+ * @param scanreq SCAN_REQs addressed to this advertiser.
+ * @param scanrsp SCAN_RSPs transmitted in reply.
+ * @param other   other CRC-good PDUs seen in the post-ADV window.
+ */
+void tiku_flpr_arch_adv_counts(uint32_t *tx, uint32_t *scanreq,
+                               uint32_t *scanrsp, uint32_t *other);
+
+/** @brief The last SCAN_RSP's access address, TIMER10 ticks (2 MHz) after
+ *         the request's end; a scanner's own request reads ~395 here. */
+uint32_t tiku_flpr_arch_adv_tifs(void);
+
+/** @brief TIMER10 ticks from a SCAN_REQ's end to the reply's TXEN, handed
+ *         to the controller at the next advertise; 0 = its own figure. */
+extern uint32_t tiku_flpr_arch_adv_txen_ticks;
 
 /** @brief Raw conn_state: 0 advertising, 1 connected, 2 gave up, 3 ended. */
 uint32_t tiku_flpr_arch_conn_state(void);
@@ -258,6 +282,7 @@ uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it);
  * @return 0 shipped, -1 not running / bad args.  Poll conn_active().
  */
 int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
+                              const uint8_t *rsp, uint32_t rsp_len,
                               const uint8_t *addr);
 
 /** @brief 1 once the central subscribed to NUS TX notifications. */

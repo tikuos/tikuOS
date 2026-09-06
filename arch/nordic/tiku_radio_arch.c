@@ -1089,6 +1089,34 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
  *         Latency(2) Timeout(2) ChM(5) Hop:5|SCA:3 (1).
  */
 
+/* T_IFS the SCAN_RSP turnaround is programmed with.  Settable because the
+ * RADIO's TIFS is not the number that lands on air: the measured gap runs
+ * short of it, and a scan response outside the scanner's 150 us +/- 2 window
+ * is never received -- which leaves a host holding the advert, waiting for
+ * the pair it needs before it will report the device at all. */
+uint32_t tiku_radio_arch_connadv_tifs_cfg = 150u;
+/* Ticks of TIMER10 from the end of a SCAN_REQ to the TXEN that answers it.
+ * The RADIO's TIFS does not govern the PHYEND_DISABLE + DISABLED_TXEN chain
+ * on this part: the reply left at the ramp's own pace, ~58 us after the
+ * request, outside the 150 +/- 2 a scanner listens in.  So the timer fires
+ * TXEN instead, at this many ticks after the request's PHYEND cleared it,
+ * and the fast ramp-up (40 us) puts the first bit at T_IFS.  The figure is
+ * what a second radio scanning this one (tiku_radio_arch_scanreq_probe)
+ * reads as the spec's 150 us; this radio's own capture of the reply reads
+ * 40 ticks more, its receive and transmit events firing at different points
+ * in a packet.  Settable so it can be trimmed on hardware. */
+uint32_t tiku_radio_arch_connadv_txen_ticks = 200u;
+/* The PDU type the probe advertises with: 0 ADV_IND, 2 ADV_NONCONN_IND, 6
+ * ADV_SCAN_IND -- to tell a host that objects to one type from a host that
+ * objects to this radio. */
+uint32_t tiku_radio_arch_connadv_pdu_type;
+/* TIMER10 ticks per millisecond, measured against the kernel clock at every
+ * probe: the number every T_IFS figure here is read in. */
+uint32_t tiku_radio_arch_dbg_connadv_ticks_per_ms;
+uint32_t tiku_radio_arch_dbg_connadv_rxtifs;
+uint32_t tiku_radio_arch_dbg_connadv_rxtifs_n;
+uint32_t tiku_radio_arch_dbg_connadv_rxtifs_min;
+uint32_t tiku_radio_arch_dbg_connadv_rxtifs_max;
 uint32_t tiku_radio_arch_dbg_connadv_tx;      /* ADV_INDs transmitted     */
 uint32_t tiku_radio_arch_dbg_connadv_scanreq; /* SCAN_REQs heard (for us) */
 uint32_t tiku_radio_arch_dbg_connadv_rsp;     /* SCAN_RSPs launched (L2)  */
@@ -1106,12 +1134,30 @@ uint32_t tiku_radio_arch_dbg_connadv_rxother; /* CRC-OK, not for us       */
  * would chain a garbage TX).  After a launched response, the short is
  * cleared during the TX (post-READY) so its own DISABLED cannot chain.
  *
- * The T_IFS oracle is hardware: TIMER10 free-runs; DPPI ch3 captures
- * CC[3] on every PHYEND (last one before the response = RX end), ch4
- * captures CC[4] on every ADDRESS (last one = the local TX's access-address
- * end = T_IFS + 40 us of preamble+AA).  gap = CC4 - CC3 - 40. */
+ * The T_IFS oracle is hardware: TIMER10 is cleared by every PHYEND (ch3)
+ * and captured into CC[4] by every ADDRESS (ch4), so after the response
+ * CC[4] = its access-address end since the request's end = T_IFS + 40 us
+ * of preamble+AA; the same capture after a request reads the scanner's own
+ * T_IFS.  COMPARE[0] on ch5 is the TXEN that answers. */
+/* Before a received packet is parsed.  The bytes land within a tick of
+ * PHYEND, but the buffer is ordinary memory the DMA writes behind the
+ * compiler's back: a header byte loaded for the PREVIOUS packet is reused
+ * for this one unless something tells the compiler memory has changed.  The
+ * barrier is that something; the wait is for the short's DISABLED. */
+static void connadv_landed(void)
+{
+    uint32_t spin;
+    for (spin = 0u; spin < 40000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+}
+
 #define CONNADV_DPPI_CH_PHYEND 3u
 #define CONNADV_DPPI_CH_ADDR   4u
+#define CONNADV_DPPI_CH_TXEN   5u
 
 int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
                                   uint8_t ad_len, uint8_t lldata[22],
@@ -1128,7 +1174,7 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
 
     /* ADV_IND + SCAN_RSP share the body; only the header type differs. */
     (void)tiku_radio_arch_adv_build(adv, addr, ad, ad_len);
-    adv[0] = 0x40u;                            /* ADV_IND, TxAdd=1         */
+    adv[0] = (uint8_t)(0x40u | tiku_radio_arch_connadv_pdu_type);
     (void)tiku_radio_arch_adv_build(rsp, addr, ad, ad_len);
     rsp[0] = 0x44u;                            /* SCAN_RSP, TxAdd=1        */
 
@@ -1136,27 +1182,51 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
     tiku_radio_arch_dbg_connadv_scanreq = 0u;
     tiku_radio_arch_dbg_connadv_rsp = 0u;
     tiku_radio_arch_dbg_connadv_tifs = 0u;
+    tiku_radio_arch_dbg_connadv_rxtifs = 0u;
+    tiku_radio_arch_dbg_connadv_rxtifs_n = 0u;
+    tiku_radio_arch_dbg_connadv_rxtifs_min = 0xFFFFFFFFu;
+    tiku_radio_arch_dbg_connadv_rxtifs_max = 0u;
     tiku_radio_arch_dbg_connadv_rxother = 0u;
 
     radio_constlat_enter();                    /* erratum 20 bracket       */
     radio_xo_observe();
     radio_hfclk_kick();
-    RADIO->TIFS = 150u;                        /* hardware T_IFS spacing   */
+    RADIO->TIFS = tiku_radio_arch_connadv_tifs_cfg;
 
-    /* T_IFS measurement fabric: free-running 1 MHz TIMER10 + captures. */
+    /* TIMER10: the T_IFS clock.  Every PHYEND clears it, so a capture on the
+     * next ADDRESS reads the gap between one packet's end and the next's
+     * access address, and COMPARE[0] fires the reply's TXEN at a fixed
+     * distance from the request's end -- on a DPPI channel left DISABLED
+     * until a request that deserves an answer has landed. */
     NRF_TIMER10_S->TASKS_STOP  = 1u;
     NRF_TIMER10_S->TASKS_CLEAR = 1u;
     NRF_TIMER10_S->MODE      = 0u;
     NRF_TIMER10_S->BITMODE   = 3u;
     NRF_TIMER10_S->PRESCALER = 4u;
     NRF_TIMER10_S->SHORTS    = 0u;
-    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[3] = CONNADV_DPPI_CH_PHYEND | (1u << 31);
+    NRF_TIMER10_S->TASKS_START = 1u;
+    {   /* Its rate, against the kernel clock: four ticks, then a capture. */
+        tiku_clock_time_t c0 = tiku_clock_time();
+        while ((tiku_clock_time_t)(tiku_clock_time() - c0) < 1u) {
+        }
+        NRF_TIMER10_S->TASKS_CLEAR = 1u;
+        c0 = tiku_clock_time();
+        while ((tiku_clock_time_t)(tiku_clock_time() - c0) < 4u) {
+        }
+        NRF_TIMER10_S->TASKS_CAPTURE[5] = 1u;
+        tiku_radio_arch_dbg_connadv_ticks_per_ms =
+            (NRF_TIMER10_S->CC[5] * (uint32_t)TIKU_CLOCK_SECOND) / 4000u;
+    }
+    NRF_TIMER10_S->CC[0] = tiku_radio_arch_connadv_txen_ticks;
+    NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CLEAR      = CONNADV_DPPI_CH_PHYEND | (1u << 31);
     NRF_TIMER10_S->SUBSCRIBE_CAPTURE[4] = CONNADV_DPPI_CH_ADDR   | (1u << 31);
+    NRF_TIMER10_S->PUBLISH_COMPARE[0]   = CONNADV_DPPI_CH_TXEN   | (1u << 31);
     RADIO->PUBLISH_PHYEND  = CONNADV_DPPI_CH_PHYEND | (1u << 31);
     RADIO->PUBLISH_ADDRESS = CONNADV_DPPI_CH_ADDR   | (1u << 31);
+    RADIO->SUBSCRIBE_TXEN  = CONNADV_DPPI_CH_TXEN   | (1u << 31);
     NRF_DPPIC10_S->CHENSET = (1u << CONNADV_DPPI_CH_PHYEND) |
                              (1u << CONNADV_DPPI_CH_ADDR);
-    NRF_TIMER10_S->TASKS_START = 1u;
 
     while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span && !got) {
         uint32_t spin;
@@ -1182,72 +1252,101 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
         tiku_radio_arch_dbg_connadv_tx++;
 
         /* RX leg is ramping (hardware short).  Swap to the response
-         * shorts -- the RX's own disable now chains a T_IFS-spaced TXEN
-         * -- and hand the DMA its buffer, inside the ramp. */
-        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 2) | (1u << 4);
+         * shorts -- the RX's own end now chains a T_IFS-spaced TXEN --
+         * and hand the DMA its buffer, inside the ramp.  The window is
+         * watched on PHYEND, the packet's own end: it precedes whatever
+         * the chain does next, so one wait works for every chain and it
+         * leaves the whole T_IFS to decide what to answer with. */
+        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
         RADIO->PACKETPTR = (uint32_t)rx;
+        RADIO->EVENTS_PHYEND = 0u;
+        RADIO->EVENTS_END = 0u;
         RADIO->EVENTS_DISABLED = 0u;
-        (void)RADIO->EVENTS_DISABLED;
+        NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+        (void)RADIO->EVENTS_PHYEND;
 
         /* Listen ~2 ms: a central answers at 150 us; SCAN_REQs from
          * ambient scanners arrive constantly and prove the window. */
         for (spin = 0u; spin < 260000u; spin++) {
-            if (RADIO->EVENTS_DISABLED != 0u) {
+            if (RADIO->EVENTS_PHYEND != 0u) {
                 break;
             }
         }
-        if (RADIO->EVENTS_DISABLED == 0u) {
-            RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
-            RADIO->TASKS_DISABLE = 1u;         /* short cleared FIRST      */
+        if (RADIO->EVENTS_PHYEND == 0u) {
+            RADIO->TASKS_DISABLE = 1u;         /* window idle: rotate      */
             for (spin = 0u; spin < 40000u; spin++) {
                 if (RADIO->EVENTS_DISABLED != 0u) {
                     break;
                 }
             }
         } else {
-            uint8_t type = (uint8_t)(rx[0] & 0x0Fu);
-            uint8_t forus = (RADIO->EVENTS_CRCOK != 0u &&
-                             memcmp(&rx[9], addr, 6u) == 0) ? 1u : 0u;
+            uint8_t type, forus;
+            connadv_landed();
+            type = (uint8_t)(rx[0] & 0x0Fu);
+            forus = (RADIO->EVENTS_CRCOK != 0u &&
+                     memcmp(&rx[9], addr, 6u) == 0) ? 1u : 0u;
 
+            {   /* The request's own T_IFS: its ADDRESS, counted from the
+                 * ADV_IND's end.  A scanner keeps the spec's 150, so this
+                 * is the yardstick the reply below is judged by. */
+                uint32_t rxgap = NRF_TIMER10_S->CC[4];
+                if (forus && type == 0x03u && rx[1] == 12u &&
+                    rxgap > 40u && rxgap < 4000u) {
+                    uint32_t t = rxgap - 40u;
+                    tiku_radio_arch_dbg_connadv_rxtifs = t;
+                    tiku_radio_arch_dbg_connadv_rxtifs_n++;
+                    if (t < tiku_radio_arch_dbg_connadv_rxtifs_min) {
+                        tiku_radio_arch_dbg_connadv_rxtifs_min = t;
+                    }
+                    if (t > tiku_radio_arch_dbg_connadv_rxtifs_max) {
+                        tiku_radio_arch_dbg_connadv_rxtifs_max = t;
+                    }
+                }
+            }
             if (forus && type == 0x03u && rx[1] == 12u) {
-                /* SCAN_REQ for us: the T_IFS TX is already counting
-                 * down in hardware -- give it the SCAN_RSP.  Snapshot
-                 * the RX-end capture NOW (the response's own PHYEND
-                 * will overwrite CC[3]), wait for the ramp (READY),
-                 * then clear the DISABLED_TXEN short DURING the TX so
-                 * its end cannot chain another. */
-                uint32_t rx_end = NRF_TIMER10_S->CC[3];
+                /* SCAN_REQ for this advertiser: the timer restarted at its
+                 * end and COMPARE[0] is on its way.  Give the DMA the
+                 * SCAN_RSP and open the channel that lets the compare fire
+                 * TXEN; close it again once TXEN has fired, so the reply's
+                 * own end can chain nothing. */
                 RADIO->PACKETPTR = (uint32_t)rsp;
                 RADIO->EVENTS_READY = 0u;
+                RADIO->EVENTS_TXREADY = 0u;
                 RADIO->EVENTS_DISABLED = 0u;
                 (void)RADIO->EVENTS_DISABLED;
+                NRF_DPPIC10_S->CHENSET = (1u << CONNADV_DPPI_CH_TXEN);
                 tiku_radio_arch_dbg_connadv_scanreq++;
                 for (spin = 0u; spin < 100000u; spin++) {
-                    if (RADIO->EVENTS_READY != 0u) {
+                    if (RADIO->EVENTS_READY != 0u ||
+                        RADIO->EVENTS_TXREADY != 0u) {
                         break;
                     }
                 }
-                RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+                NRF_DPPIC10_S->CHENCLR = (1u << CONNADV_DPPI_CH_TXEN);
                 for (spin = 0u; spin < 400000u; spin++) {
                     if (RADIO->EVENTS_DISABLED != 0u) {
                         break;
                     }
                 }
                 if (RADIO->EVENTS_DISABLED != 0u) {
-                    /* CC[4] = the local TX's ADDRESS = first bit + 40 us of
-                     * preamble+AA; T_IFS = first bit - RX end. */
-                    uint32_t gap = NRF_TIMER10_S->CC[4] - rx_end;
+                    /* CC[4] = the reply's ADDRESS since the request's end
+                     * = first bit + 40 us of preamble+AA. */
+                    uint32_t gap = NRF_TIMER10_S->CC[4];
                     tiku_radio_arch_dbg_connadv_rsp++;
-                    if (gap > 40u && gap < 1000u) {
+                    if (gap > 40u && gap < 4000u) {
                         tiku_radio_arch_dbg_connadv_tifs = gap - 40u;
+                    }
+                } else {
+                    RADIO->TASKS_DISABLE = 1u;   /* TXEN never came      */
+                    for (spin = 0u; spin < 40000u; spin++) {
+                        if (RADIO->EVENTS_DISABLED != 0u) {
+                            break;
+                        }
                     }
                 }
             } else {
-                /* Not a matching SCAN_REQ: kill the pending auto-TX.  Clear
-                 * the short BEFORE disabling -- the disable's DISABLED
-                 * event would otherwise chain a garbage TX. */
-                RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
-                RADIO->TASKS_DISABLE = 1u;
+                /* Anything else: the packet's end already disabled the
+                 * radio, and no channel is open for the compare to fire. */
                 for (spin = 0u; spin < 40000u; spin++) {
                     if (RADIO->EVENTS_DISABLED != 0u) {
                         break;
@@ -1264,13 +1363,18 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
         chan = (uint8_t)((chan + 1u) % 3u);
     }
 
-    /* Unwire the measurement fabric + TIFS. */
+    /* Unwire it all: a stale SUBSCRIBE_TXEN would let any later TIMER10
+     * use fire the radio. */
     RADIO->PUBLISH_PHYEND  = 0u;
     RADIO->PUBLISH_ADDRESS = 0u;
-    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[3] = 0u;
+    RADIO->SUBSCRIBE_TXEN  = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CLEAR      = 0u;
     NRF_TIMER10_S->SUBSCRIBE_CAPTURE[4] = 0u;
+    NRF_TIMER10_S->PUBLISH_COMPARE[0]   = 0u;
+    NRF_TIMER10_S->EVENTS_COMPARE[0]    = 0u;
     NRF_DPPIC10_S->CHENCLR = (1u << CONNADV_DPPI_CH_PHYEND) |
-                             (1u << CONNADV_DPPI_CH_ADDR);
+                             (1u << CONNADV_DPPI_CH_ADDR) |
+                             (1u << CONNADV_DPPI_CH_TXEN);
     NRF_TIMER10_S->TASKS_STOP = 1u;
     RADIO->TIFS = 0u;
 
@@ -3463,6 +3567,257 @@ int tiku_radio_arch_extadv_burst(const uint8_t *addr,
     RADIO->PCNF1 = pcnf1_saved;
     radio_constlat_exit();
     return rc;
+}
+
+/*
+ * An active scanner, as a yardstick: listen for an advertiser by name, send
+ * it a SCAN_REQ, and capture when its SCAN_RSP comes back.  The request goes
+ * out through the same timer-driven TXEN the advertiser answers with, and
+ * the timer, cleared by the request's own PHYEND, is read at the reply's
+ * ADDRESS -- so `gap` is the reply's first bit + 40 us of preamble+AA, on a
+ * clock the advertiser under test has no hand in.
+ */
+uint32_t tiku_radio_arch_dbg_scanreq_adv;    /* ADV_INDs from the target   */
+uint32_t tiku_radio_arch_dbg_scanreq_sent;   /* SCAN_REQs sent             */
+uint32_t tiku_radio_arch_dbg_scanreq_rsp;    /* SCAN_RSPs received         */
+uint32_t tiku_radio_arch_dbg_scanreq_gap_min;
+uint32_t tiku_radio_arch_dbg_scanreq_gap_max;
+uint32_t tiku_radio_arch_dbg_scanreq_gap_sum;
+uint32_t tiku_radio_arch_dbg_scanreq_crcbad; /* replies with a bad CRC   */
+uint32_t tiku_radio_arch_dbg_scanreq_wrong;  /* other packets in the window*/
+uint32_t tiku_radio_arch_dbg_scanreq_silent; /* windows with nothing in   */
+uint8_t  tiku_radio_arch_dbg_scanreq_pkt[3][16]; /* the first three heard */
+
+
+int tiku_radio_arch_scanreq_probe(const uint8_t *scana, const char *name,
+                                  uint32_t ms)
+{
+    static uint8_t req[16] __attribute__((aligned(4)));
+    static uint8_t rx[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
+    tiku_clock_time_t t0 = tiku_clock_time();
+    tiku_clock_time_t span =
+        (tiku_clock_time_t)((ms * (uint32_t)TIKU_CLOCK_SECOND) / 1000u);
+    size_t nlen = strlen(name);
+    uint8_t chan = 0u;
+    uint8_t target[6];
+    uint8_t have_target = 0u;
+
+    req[0] = 0xC3u;                            /* SCAN_REQ, TxAdd=1, RxAdd=1 */
+    req[1] = 12u;
+    req[2] = scana[0];                         /* erratum-49 S1 slot       */
+    memcpy(&req[3], scana, 6u);                /* ScanA                    */
+
+    tiku_radio_arch_dbg_scanreq_adv = 0u;
+    tiku_radio_arch_dbg_scanreq_sent = 0u;
+    tiku_radio_arch_dbg_scanreq_rsp = 0u;
+    tiku_radio_arch_dbg_scanreq_gap_min = 0xFFFFFFFFu;
+    tiku_radio_arch_dbg_scanreq_gap_max = 0u;
+    tiku_radio_arch_dbg_scanreq_gap_sum = 0u;
+    tiku_radio_arch_dbg_scanreq_crcbad = 0u;
+    tiku_radio_arch_dbg_scanreq_wrong = 0u;
+    tiku_radio_arch_dbg_scanreq_silent = 0u;
+    memset(tiku_radio_arch_dbg_scanreq_pkt, 0, sizeof tiku_radio_arch_dbg_scanreq_pkt);
+
+    radio_constlat_enter();
+    radio_xo_observe();
+    radio_hfclk_kick();
+    RADIO->TIFS = 0u;
+
+    NRF_TIMER10_S->TASKS_STOP  = 1u;
+    NRF_TIMER10_S->TASKS_CLEAR = 1u;
+    NRF_TIMER10_S->MODE      = 0u;
+    NRF_TIMER10_S->BITMODE   = 3u;
+    NRF_TIMER10_S->PRESCALER = 4u;
+    NRF_TIMER10_S->SHORTS    = 0u;
+    NRF_TIMER10_S->CC[0] = tiku_radio_arch_connadv_txen_ticks;
+    NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CLEAR      = CONNADV_DPPI_CH_PHYEND | (1u << 31);
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[4] = CONNADV_DPPI_CH_ADDR   | (1u << 31);
+    NRF_TIMER10_S->PUBLISH_COMPARE[0]   = CONNADV_DPPI_CH_TXEN   | (1u << 31);
+    RADIO->PUBLISH_PHYEND  = CONNADV_DPPI_CH_PHYEND | (1u << 31);
+    RADIO->PUBLISH_ADDRESS = CONNADV_DPPI_CH_ADDR   | (1u << 31);
+    RADIO->SUBSCRIBE_TXEN  = CONNADV_DPPI_CH_TXEN   | (1u << 31);
+    NRF_DPPIC10_S->CHENCLR = (1u << CONNADV_DPPI_CH_TXEN);
+    NRF_DPPIC10_S->CHENSET = (1u << CONNADV_DPPI_CH_PHYEND) |
+                             (1u << CONNADV_DPPI_CH_ADDR);
+    NRF_TIMER10_S->TASKS_START = 1u;
+
+    while ((tiku_clock_time_t)(tiku_clock_time() - t0) < span) {
+        uint32_t spin;
+        uint8_t type, plen, match = 0u;
+
+        tiku_watchdog_kick();
+        /* Listen on one advertising channel for ~4 ms. */
+        RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
+        RADIO->FREQUENCY = adv_freq[chan];
+        RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
+        RADIO->PACKETPTR = (uint32_t)rx;
+        RADIO->EVENTS_PHYEND   = 0u;
+        RADIO->EVENTS_END      = 0u;
+        RADIO->EVENTS_DISABLED = 0u;
+        RADIO->EVENTS_CRCOK    = 0u;
+        NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
+        (void)RADIO->EVENTS_PHYEND;
+        RADIO->TASKS_RXEN = 1u;
+        for (spin = 0u; spin < 520000u; spin++) {
+            if (RADIO->EVENTS_PHYEND != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_PHYEND == 0u) {
+            RADIO->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            chan = (uint8_t)((chan + 1u) % 3u);
+            continue;
+        }
+        connadv_landed();
+        type = (uint8_t)(rx[0] & 0x0Fu);
+        plen = rx[1];
+        if (RADIO->EVENTS_CRCOK != 0u && type == 0x00u && plen >= 6u &&
+            plen <= 37u) {
+            /* ADV_IND: is the complete local name ours? */
+            uint8_t i = 9u, end = (uint8_t)(3u + plen);
+            while (i + 1u < end) {
+                uint8_t l = rx[i], t = rx[i + 1u];
+                if (l == 0u || (uint8_t)(i + 1u + l) > end) {
+                    break;
+                }
+                if (t == 0x09u && (size_t)(l - 1u) >= nlen &&
+                    memcmp(&rx[i + 2u], name, nlen) == 0) {
+                    match = 1u;
+                    break;
+                }
+                i = (uint8_t)(i + 1u + l);
+            }
+        }
+        if (!match) {
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            continue;                          /* same channel, listen on  */
+        }
+        tiku_radio_arch_dbg_scanreq_adv++;
+        memcpy(target, &rx[3], 6u);
+        have_target = 1u;
+        memcpy(&req[9], target, 6u);           /* AdvA                     */
+
+        /* The request: the timer is running from the ADV_IND's end. */
+        RADIO->PACKETPTR = (uint32_t)req;
+        RADIO->EVENTS_READY = 0u;
+        RADIO->EVENTS_TXREADY = 0u;
+        RADIO->EVENTS_DISABLED = 0u;
+        (void)RADIO->EVENTS_DISABLED;
+        NRF_DPPIC10_S->CHENSET = (1u << CONNADV_DPPI_CH_TXEN);
+        for (spin = 0u; spin < 100000u; spin++) {
+            if (RADIO->EVENTS_READY != 0u || RADIO->EVENTS_TXREADY != 0u) {
+                break;
+            }
+        }
+        NRF_DPPIC10_S->CHENCLR = (1u << CONNADV_DPPI_CH_TXEN);
+        for (spin = 0u; spin < 400000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_DISABLED == 0u) {
+            RADIO->TASKS_DISABLE = 1u;
+            continue;
+        }
+        tiku_radio_arch_dbg_scanreq_sent++;
+
+        /* The reply: the timer restarted at the request's end.  Listen
+         * ~600 us, wide enough for any turnaround. */
+        RADIO->PACKETPTR = (uint32_t)rx;
+        RADIO->EVENTS_PHYEND   = 0u;
+        RADIO->EVENTS_END      = 0u;
+        RADIO->EVENTS_DISABLED = 0u;
+        RADIO->EVENTS_CRCOK    = 0u;
+        (void)RADIO->EVENTS_PHYEND;
+        RADIO->TASKS_RXEN = 1u;
+        for (spin = 0u; spin < 80000u; spin++) {
+            if (RADIO->EVENTS_PHYEND != 0u) {
+                break;
+            }
+        }
+        if (RADIO->EVENTS_PHYEND != 0u) {
+            connadv_landed();
+        }
+        if (RADIO->EVENTS_PHYEND != 0u && RADIO->EVENTS_CRCOK != 0u &&
+            (rx[0] & 0x0Fu) == 0x04u && memcmp(&rx[3], target, 6u) == 0) {
+            uint32_t gap = NRF_TIMER10_S->CC[4];
+            tiku_radio_arch_dbg_scanreq_rsp++;
+            if (gap < tiku_radio_arch_dbg_scanreq_gap_min) {
+                tiku_radio_arch_dbg_scanreq_gap_min = gap;
+            }
+            if (gap > tiku_radio_arch_dbg_scanreq_gap_max) {
+                tiku_radio_arch_dbg_scanreq_gap_max = gap;
+            }
+            tiku_radio_arch_dbg_scanreq_gap_sum += gap;
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        } else {
+            if (RADIO->EVENTS_PHYEND == 0u) {
+                tiku_radio_arch_dbg_scanreq_silent++;
+            } else if (RADIO->EVENTS_CRCOK == 0u) {
+                tiku_radio_arch_dbg_scanreq_crcbad++;
+            } else {
+                if (tiku_radio_arch_dbg_scanreq_wrong < 3u) {
+                    memcpy(tiku_radio_arch_dbg_scanreq_pkt
+                               [tiku_radio_arch_dbg_scanreq_wrong], rx, 16u);
+                }
+                tiku_radio_arch_dbg_scanreq_wrong++;
+            }
+            RADIO->TASKS_DISABLE = 1u;
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (RADIO->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+        }
+        chan = (uint8_t)((chan + 1u) % 3u);
+    }
+
+    RADIO->PUBLISH_PHYEND  = 0u;
+    RADIO->PUBLISH_ADDRESS = 0u;
+    RADIO->SUBSCRIBE_TXEN  = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CLEAR      = 0u;
+    NRF_TIMER10_S->SUBSCRIBE_CAPTURE[4] = 0u;
+    NRF_TIMER10_S->PUBLISH_COMPARE[0]   = 0u;
+    NRF_TIMER10_S->EVENTS_COMPARE[0]    = 0u;
+    NRF_DPPIC10_S->CHENCLR = (1u << CONNADV_DPPI_CH_PHYEND) |
+                             (1u << CONNADV_DPPI_CH_ADDR) |
+                             (1u << CONNADV_DPPI_CH_TXEN);
+    NRF_TIMER10_S->TASKS_STOP = 1u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    {
+        uint32_t spin;
+        for (spin = 0u; spin < 40000u; spin++) {
+            if (RADIO->EVENTS_DISABLED != 0u) {
+                break;
+            }
+        }
+    }
+    RADIO->SHORTS = (1u << 0) | (1u << 19);
+    radio_constlat_exit();
+    return have_target ? 0 : -1;
+}
+
+uint8_t tiku_radio_arch_scanrsp_build(uint8_t *pdu, const uint8_t *addr,
+                                     const uint8_t *sd, uint8_t sd_len)
+{
+    uint8_t n = tiku_radio_arch_adv_build(pdu, addr, sd, sd_len);
+    pdu[0] = 0x44u;                            /* SCAN_RSP, TxAdd = random   */
+    return n;
 }
 
 uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,

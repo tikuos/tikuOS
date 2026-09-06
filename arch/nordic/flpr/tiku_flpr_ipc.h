@@ -186,13 +186,33 @@ typedef struct {
      * from "executed less" (see experiments/power/experiment1). */
     volatile uint32_t spin_iters;       /* M33->FLPR: outer passes requested   */
     volatile uint32_t spin_passes;      /* FLPR->M33: outer passes retired     */
+
+    /* Advertising telemetry.  A central that INITIATES answers an ADV_IND
+     * with a CONNECT_IND and never scans; a host stack DISCOVERING sends a
+     * SCAN_REQ first and expects a SCAN_RSP at T_IFS.  Counting the two
+     * apart is what tells an unanswered scan from a link that never came. */
+    volatile uint32_t adv_tx;           /* ADV_IND PDUs transmitted            */
+    volatile uint32_t adv_scanreq;      /* SCAN_REQs addressed to this AdvA    */
+    volatile uint32_t adv_scanrsp;      /* SCAN_RSPs transmitted in reply      */
+    volatile uint32_t adv_rxother;      /* other CRC-good PDUs in the window   */
+    volatile uint32_t adv_tifs;         /* last reply's ADDRESS, TIMER10 ticks */
+                                        /* since the request's end             */
 } tiku_flpr_shared_t;
 
-/* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + the AdvA. */
+/* CMD_CONN_ADV input (in a2f_buf): connectable ADV PDU + the AdvA, and the
+ * SCAN_RSP to answer a SCAN_REQ with.  The response is its own PDU rather
+ * than a mirror of the advert because a scanner's duplicate filter drops a
+ * response that repeats the advert byte for byte; rsp_len 0 falls back to
+ * mirroring it. */
 typedef struct {
     uint32_t adv_len;                   /* bytes in adv[] ([S0][LEN][S1]..) */
     uint8_t  addr[6];                   /* AdvA to match in the CONNECT_IND */
     uint8_t  adv[48];
+    uint32_t rsp_len;                   /* bytes in rsp[]; 0 = mirror adv   */
+    uint8_t  rsp[48];
+    uint32_t txen_ticks;                /* TIMER10 ticks from a SCAN_REQ's  */
+                                        /* end to the reply's TXEN; 0 =     */
+                                        /* the controller's own figure      */
 } tiku_flpr_conn_t;
 
 /* Cooperative park/resume protocol.  Hardware truths this encodes:

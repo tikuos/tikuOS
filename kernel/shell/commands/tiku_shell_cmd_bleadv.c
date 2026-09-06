@@ -87,6 +87,23 @@ static void bleadv_fmt_addr(char *out, const uint8_t addr[6])
 /* SHELL_PRINTF has no %02X: format @p n bytes of @p b as hex into @p out.
  * @p msb_first prints b[n-1]..b[0] (display order for little-endian fields
  * like the access address); else b[0]..b[n-1]. */
+/* The SCAN_RSP the FLPR advertisers answer a SCAN_REQ with.  It carries the
+ * NUS service UUID rather than a copy of the advert: a scanner's duplicate
+ * filter drops a response that repeats the advert byte for byte, and a host
+ * that reports a device only once it has both never reports it at all. */
+static uint8_t bleadv_flpr_scanrsp(uint8_t *rsp, const uint8_t *addr)
+{
+    static const uint8_t nus_svc[16] = {
+        0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+        0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu };
+    uint8_t sd[18];
+
+    sd[0] = 17u;                                 /* length: type + UUID       */
+    sd[1] = 0x07u;                               /* complete 128-bit list     */
+    memcpy(&sd[2], nus_svc, 16u);
+    return tiku_radio_arch_scanrsp_build(rsp, addr, sd, 18u);
+}
+
 static void bleadv_fmt_hex(char *out, const uint8_t *b, int n, int msb_first)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -441,7 +458,16 @@ static void bleadv_connprobe(unsigned secs)
     } else {
         SHELL_PRINTF("no CONNECT_IND in %u s\n", secs);
     }
-    SHELL_PRINTF("  adv_tx=%lu scan_req=%lu scan_rsp=%lu tifs=%luus"
+    SHELL_PRINTF("  timer10 %lu ticks/ms; txen at %lu ticks\n",
+                 (unsigned long)tiku_radio_arch_dbg_connadv_ticks_per_ms,
+                 (unsigned long)tiku_radio_arch_connadv_txen_ticks);
+    SHELL_PRINTF("  rx_tifs=%lu ticks last, %lu..%lu over %lu (a scanner's"
+                 " own; the spec says 150 us)\n",
+                 (unsigned long)tiku_radio_arch_dbg_connadv_rxtifs,
+                 (unsigned long)tiku_radio_arch_dbg_connadv_rxtifs_min,
+                 (unsigned long)tiku_radio_arch_dbg_connadv_rxtifs_max,
+                 (unsigned long)tiku_radio_arch_dbg_connadv_rxtifs_n);
+    SHELL_PRINTF("  adv_tx=%lu scan_req=%lu scan_rsp=%lu tifs=%lu ticks"
                  " rx_other=%lu\n",
                  (unsigned long)tiku_radio_arch_dbg_connadv_tx,
                  (unsigned long)tiku_radio_arch_dbg_connadv_scanreq,
@@ -853,8 +879,8 @@ static void bleadv_flprrx(void)
  * connection.  Connect from a central (`bleadv central` on the peer). */
 static void bleadv_flpradv(void)
 {
-    uint8_t addr[6], ad[31], adv[48];
-    uint8_t adlen = 0u, advlen;
+    uint8_t addr[6], ad[31], adv[48], rsp[48];
+    uint8_t adlen = 0u, advlen, rsplen;
     static const char nm[] = "TIKU-CONN";
     tiku_flpr_conn_info_t info;
     int rc;
@@ -876,6 +902,7 @@ static void bleadv_flpradv(void)
     memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
     adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
     advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    rsplen = bleadv_flpr_scanrsp(rsp, addr);
     adv[0] = 0x40u;                              /* ADV_IND (connectable)    */
 
     SHELL_PRINTF("FLPR advertising 'TIKU-CONN' (connectable) ~8 s -- connect"
@@ -883,7 +910,8 @@ static void bleadv_flpradv(void)
     tiku_radio_arch_init();
     NRF_RADIO_S->TIFS = 150u;                    /* T_IFS turnaround (hold)  */
     tiku_radio_arch_constlat_hold(1);
-    rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
+    rc = tiku_flpr_arch_conn_capture(adv, advlen, rsp, rsplen,
+                                     addr, &info);
     if (rc == -1) {
         tiku_radio_arch_constlat_hold(0);
         SHELL_PRINTF("FLPR not running\n");
@@ -997,9 +1025,9 @@ static void bleadv_flpr_drain_tx(void)
 
 static void bleadv_flprnus(uint8_t req_cpu)
 {
-    uint8_t addr[6], ad[31], adv[48];
+    uint8_t addr[6], ad[31], adv[48], rsp[48];
     uint8_t cpu_sent = 0u;
-    uint8_t adlen = 0u, advlen;
+    uint8_t adlen = 0u, advlen, rsplen;
     static const char nm[] = "TIKU-CONN";
     tiku_flpr_conn_info_t info;
     int rc;
@@ -1021,6 +1049,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
     memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
     adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
     advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    rsplen = bleadv_flpr_scanrsp(rsp, addr);
     adv[0] = 0x40u;
 
     SHELL_PRINTF("FLPR NUS pipe: advertising 'TIKU-CONN' -- connect a NUS"
@@ -1028,11 +1057,26 @@ static void bleadv_flprnus(uint8_t req_cpu)
     tiku_radio_arch_init();
     NRF_RADIO_S->TIFS = 150u;
     tiku_radio_arch_constlat_hold(1);
-    rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
+    rc = tiku_flpr_arch_conn_capture(adv, advlen, rsp, rsplen,
+                                     addr, &info);
     if (rc != 0) {
+        uint32_t atx = 0u, sq = 0u, sr = 0u, ot = 0u;
         tiku_radio_arch_constlat_hold(0);
+        tiku_flpr_arch_adv_counts(&atx, &sq, &sr, &ot);
         SHELL_PRINTF("no NUS client connected (rc=%d)\n", rc);
+        SHELL_PRINTF("  adv: tx=%lu scan_req=%lu scan_rsp=%lu other=%lu"
+                     " rsp_at=%lu\n",
+                     (unsigned long)atx, (unsigned long)sq,
+                     (unsigned long)sr, (unsigned long)ot,
+                     (unsigned long)tiku_flpr_arch_adv_tifs());
         return;
+    }
+    {
+        uint32_t atx = 0u, sq = 0u, sr = 0u, ot = 0u;
+        tiku_flpr_arch_adv_counts(&atx, &sq, &sr, &ot);
+        SHELL_PRINTF("  adv: tx=%lu scan_req=%lu scan_rsp=%lu other=%lu\n",
+                     (unsigned long)atx, (unsigned long)sq,
+                     (unsigned long)sr, (unsigned long)ot);
     }
     SHELL_PRINTF("  connected; M33 NUS host live (ATT on M33), echoing"
                  " RX->TX ~15 s...\n");
@@ -1193,8 +1237,8 @@ static void bleadv_flprnus(uint8_t req_cpu)
  * and encrypt with the stored LTK. */
 static void bleadv_flprpair(uint8_t bond_mode)
 {
-    uint8_t addr[6], ad[31], adv[48];
-    uint8_t adlen = 0u, advlen;
+    uint8_t addr[6], ad[31], adv[48], rsp[48];
+    uint8_t adlen = 0u, advlen, rsplen;
     static const char nm[] = "TIKU-PAIR";
     tiku_flpr_conn_info_t info;
     int rc;
@@ -1216,6 +1260,7 @@ static void bleadv_flprpair(uint8_t bond_mode)
     memcpy(&ad[adlen], nm, sizeof(nm) - 1u);
     adlen = (uint8_t)(adlen + sizeof(nm) - 1u);
     advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
+    rsplen = bleadv_flpr_scanrsp(rsp, addr);
     adv[0] = 0x40u;                               /* ADV_IND, random TxAdd    */
 
     {   /* Print the AdvA so a peer can connect scan-BY-ADDRESS to it. */
@@ -1227,7 +1272,8 @@ static void bleadv_flprpair(uint8_t bond_mode)
     tiku_radio_arch_init();
     NRF_RADIO_S->TIFS = 150u;
     tiku_radio_arch_constlat_hold(1);
-    rc = tiku_flpr_arch_conn_capture(adv, advlen, addr, &info);
+    rc = tiku_flpr_arch_conn_capture(adv, advlen, rsp, rsplen,
+                                     addr, &info);
     if (rc != 0) {
         tiku_radio_arch_constlat_hold(0);
         SHELL_PRINTF("no central connected (rc=%d)\n", rc);
@@ -1392,6 +1438,16 @@ static void bleadv_serial(unsigned secs)
         }
         tiku_watchdog_kick();
     }
+    {
+        uint32_t atx = 0u, sq = 0u, sr = 0u, ot = 0u;
+        tiku_flpr_arch_adv_counts(&atx, &sq, &sr, &ot);
+        SHELL_PRINTF("  adv: tx=%lu scan_req=%lu scan_rsp=%lu other=%lu"
+                     " rsp_at=%lu state=%lu\n",
+                     (unsigned long)atx, (unsigned long)sq,
+                     (unsigned long)sr, (unsigned long)ot,
+                     (unsigned long)tiku_flpr_arch_adv_tifs(),
+                     (unsigned long)tiku_flpr_arch_conn_state());
+    }
     tiku_ble_serial_stop();
     SHELL_PRINTF("serial done: %lu link-ups, %lu echoed\n",
                  (unsigned long)connects, (unsigned long)echoed);
@@ -1432,6 +1488,12 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         return;
     }
     if (strcmp(argv[1], "flprnus") == 0) {
+        if (argc >= 3) {                          /* ticks to the reply's TXEN */
+            long c = strtol(argv[2], (char **)0, 10);
+            if (c >= 20 && c <= 2000) {
+                tiku_flpr_arch_adv_txen_ticks = (uint32_t)c;
+            }
+        }
         bleadv_flprnus(0u);
         return;
     }
@@ -1572,11 +1634,74 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         bleadv_conn(s);
         return;
     }
+    if (strcmp(argv[1], "scanreq") == 0) {        /* the yardstick scanner    */
+        uint8_t scana[6];
+        unsigned s = 10u;
+        const char *nm = (argc >= 3) ? argv[2] : "TIKU";
+        if (argc >= 4) {
+            long v = strtol(argv[3], (char **)0, 10);
+            if (v > 0 && v <= 120) { s = (unsigned)v; }
+        }
+        if (argc >= 5) {                          /* ticks to the request's TXEN */
+            long c = strtol(argv[4], (char **)0, 10);
+            if (c >= 20 && c <= 2000) {
+                tiku_radio_arch_connadv_txen_ticks = (uint32_t)c;
+            }
+        }
+        tiku_common_unique_id(scana, 6u);
+        scana[5] |= 0xC0u;
+        tiku_radio_arch_init();
+        SHELL_PRINTF("scanning for '%s' and asking it for %u s...\n", nm, s);
+        (void)tiku_radio_arch_scanreq_probe(scana, nm, s * 1000u);
+        SHELL_PRINTF("  adv=%lu req=%lu rsp=%lu gap=%lu..%lu ticks, mean %lu"
+                     " (a scanner's own request reads ~395)\n",
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_adv,
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_sent,
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_rsp,
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_gap_min,
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_gap_max,
+                     (unsigned long)(tiku_radio_arch_dbg_scanreq_rsp ?
+                        tiku_radio_arch_dbg_scanreq_gap_sum /
+                        tiku_radio_arch_dbg_scanreq_rsp : 0u));
+        SHELL_PRINTF("  windows: silent=%lu crc_bad=%lu other=%lu\n",
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_silent,
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_crcbad,
+                     (unsigned long)tiku_radio_arch_dbg_scanreq_wrong);
+        {
+            char hx[50];
+            unsigned k;
+            for (k = 0u; k < 3u && k < tiku_radio_arch_dbg_scanreq_wrong; k++) {
+                bleadv_fmt_hex(hx, tiku_radio_arch_dbg_scanreq_pkt[k], 16, 0);
+                SHELL_PRINTF("  heard: %s\n", hx);
+            }
+        }
+        return;
+    }
     if (strcmp(argv[1], "connprobe") == 0) {
         unsigned s = 20u;
         if (argc >= 3) {
             long v = strtol(argv[2], (char **)0, 10);
             if (v > 0 && v <= 120) { s = (unsigned)v; }
+        }
+        if (argc >= 4) {                          /* sweep the turnaround   */
+            long t = strtol(argv[3], (char **)0, 10);
+            if (t >= 100 && t <= 250) {
+                tiku_radio_arch_connadv_tifs_cfg = (uint32_t)t;
+            }
+        }
+        if (argc >= 5) {                          /* ticks to the reply's TXEN */
+            long c = strtol(argv[4], (char **)0, 10);
+            if (c >= 20 && c <= 2000) {
+                tiku_radio_arch_connadv_txen_ticks = (uint32_t)c;
+            }
+        }
+        tiku_radio_arch_connadv_pdu_type = 0x00u;
+        if (argc >= 6) {                          /* the PDU type to send   */
+            if (strcmp(argv[5], "nonconn") == 0) {
+                tiku_radio_arch_connadv_pdu_type = 0x02u;
+            } else if (strcmp(argv[5], "scan") == 0) {
+                tiku_radio_arch_connadv_pdu_type = 0x06u;
+            }
         }
         bleadv_connprobe(s);
         return;

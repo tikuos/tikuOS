@@ -194,10 +194,29 @@ tiku_ble_serial_beacon(const char *name)
 
 static uint8_t s_started;
 static uint8_t s_adv[48];                          /* stored for re-advertise */
+static uint8_t s_rsp[48];                          /* its SCAN_RSP            */
 static uint8_t s_addr[6];
 static uint8_t s_advlen;
+static uint8_t s_rsplen;
 static uint8_t s_rx[BLE_SERIAL_RXBUF];             /* buffered NUS RX bytes   */
 static uint8_t s_rx_len;
+
+/* The SCAN_RSP a discovering host gets: the NUS service UUID.  It must NOT
+ * repeat the advert's own data -- a scanner's duplicate filter drops such a
+ * response, and a host that reports a device only once the pair is complete
+ * then never reports it at all. */
+static uint8_t ble_serial_scanrsp(uint8_t *rsp, const uint8_t *addr)
+{
+    static const uint8_t nus_svc[16] = {
+        0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
+        0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu };
+    uint8_t sd[18];
+
+    sd[0] = 17u;                               /* length: type + 16-byte UUID */
+    sd[1] = 0x07u;                             /* complete 128-bit UUID list  */
+    memcpy(&sd[2], nus_svc, 16u);
+    return tiku_radio_arch_scanrsp_build(rsp, addr, sd, 18u);
+}
 
 int
 tiku_ble_serial_available(void)
@@ -208,8 +227,8 @@ tiku_ble_serial_available(void)
 int
 tiku_ble_serial_start(const char *name)
 {
-    uint8_t     addr[6], ad[31], adv[48];
-    uint8_t     adlen = 0u, advlen, nl;
+    uint8_t     addr[6], ad[31], adv[48], rsp[48];
+    uint8_t     adlen = 0u, advlen, rsplen, nl;
     const char *nm = (name != (const char *)0 && name[0] != '\0')
                      ? name : "tikuOS";
     int         rc;
@@ -232,13 +251,15 @@ tiku_ble_serial_start(const char *name)
     adlen = (uint8_t)(adlen + nl);
     advlen = tiku_radio_arch_adv_build(adv, addr, ad, adlen);
     adv[0] = 0x40u;                            /* ADV_IND (connectable)       */
+    rsplen = ble_serial_scanrsp(rsp, addr);
 
     tiku_radio_arch_init();                    /* static link cfg (secure)    */
     NRF_RADIO_S->TIFS = 150u;                  /* T_IFS turnaround            */
     tiku_radio_arch_constlat_hold(1);
     tiku_ble_host_reset();                     /* Phase B: fresh ATT server   */
     s_rx_len = 0u;
-    rc = tiku_flpr_arch_conn_start(adv, advlen, addr);   /* non-blocking      */
+    rc = tiku_flpr_arch_conn_start(adv, advlen, rsp, rsplen,
+                                   addr);            /* non-blocking      */
     if (rc != 0) {
         tiku_radio_arch_constlat_hold(0);
         tiku_ble_adv_conn_release();
@@ -251,6 +272,11 @@ tiku_ble_serial_start(const char *name)
     }
     memcpy(s_adv, adv, advlen);
     s_advlen = advlen;
+    if (rsplen > (uint8_t)sizeof(s_rsp)) {
+        rsplen = (uint8_t)sizeof(s_rsp);
+    }
+    memcpy(s_rsp, rsp, rsplen);
+    s_rsplen = rsplen;
     memcpy(s_addr, addr, 6u);
     s_started = 1u;
     return 0;
@@ -274,7 +300,8 @@ static void serial_reconnect(void)
         NRF_RADIO_S->TIFS = 150u;
         tiku_ble_host_reset();                 /* fresh ATT server for the next */
         s_rx_len = 0u;
-        (void)tiku_flpr_arch_conn_start(s_adv, s_advlen, s_addr);
+        (void)tiku_flpr_arch_conn_start(s_adv, s_advlen, s_rsp, s_rsplen,
+                                        s_addr);
     }
 }
 

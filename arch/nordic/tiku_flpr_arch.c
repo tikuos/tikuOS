@@ -404,11 +404,28 @@ int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us)
  * stop() flips them back to Secure. */
 static void flpr_radio_ns(int on)
 {
+    /* SPU10 slots: 2 = DPPIC10, 5 = TIMER10, 10 = RADIO; the timer and the
+     * DPPI go with the radio because the advertiser's scan response is
+     * timed by them. */
+    /* The DPPI channels the reply rides (3 PHYEND, 4 ADDRESS, 5 TXEN) carry
+     * a security attribute of their own: a channel left secure never meets
+     * a non-secure publisher, and the compare fires into nothing. */
+    uint32_t ch;
     if (on) {
         NRF_SPU10_S->PERIPH[10].PERM &= ~((1u << 4) | (1u << 5));
+        NRF_SPU10_S->PERIPH[5].PERM  &= ~((1u << 4) | (1u << 5));
+        NRF_SPU10_S->PERIPH[2].PERM  &= ~((1u << 4) | (1u << 5));
         NRF_SPU20_S->PERIPH[7].PERM  &= ~((1u << 4) | (1u << 5));
+        for (ch = 3u; ch <= 5u; ch++) {
+            NRF_SPU10_S->FEATURE.DPPIC.CH[ch] &= ~(1u << 4);
+        }
     } else {
+        for (ch = 3u; ch <= 5u; ch++) {
+            NRF_SPU10_S->FEATURE.DPPIC.CH[ch] |= (1u << 4);
+        }
         NRF_SPU10_S->PERIPH[10].PERM |= (1u << 4) | (1u << 5);
+        NRF_SPU10_S->PERIPH[5].PERM  |= (1u << 4) | (1u << 5);
+        NRF_SPU10_S->PERIPH[2].PERM  |= (1u << 4) | (1u << 5);
         NRF_SPU20_S->PERIPH[7].PERM  |= (1u << 4) | (1u << 5);
     }
     __asm__ volatile ("dsb 0xF" ::: "memory");
@@ -512,7 +529,32 @@ int tiku_flpr_arch_rxprobe(uint32_t *addr_evts, uint32_t *crcok_evts,
 /* Connection controller (L6 F-L6.1 step 1a): FLPR advertises + captures     */
 /*---------------------------------------------------------------------------*/
 
+/* Stage the SCAN_RSP a SCAN_REQ is answered with.  An empty one leaves the
+ * controller mirroring the advert, which a scanner's duplicate filter can
+ * drop as a repeat -- so every advertiser a foreign host must find supplies
+ * its own. */
+uint32_t tiku_flpr_arch_adv_txen_ticks;      /* 0 = the controller's own */
+
+static void flpr_conn_set_scanrsp(volatile tiku_flpr_conn_t *in,
+                                  const uint8_t *rsp, uint32_t rsp_len)
+{
+    uint32_t i;
+
+    in->txen_ticks = tiku_flpr_arch_adv_txen_ticks;
+
+    if (rsp == (const uint8_t *)0 || rsp_len == 0u ||
+        rsp_len > sizeof(in->rsp)) {
+        in->rsp_len = 0u;
+        return;
+    }
+    in->rsp_len = rsp_len;
+    for (i = 0u; i < rsp_len; i++) {
+        in->rsp[i] = rsp[i];
+    }
+}
+
 int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
+                                const uint8_t *rsp, uint32_t rsp_len,
                                 const uint8_t *addr,
                                 tiku_flpr_conn_info_t *out)
 {
@@ -532,6 +574,7 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
     for (i = 0u; i < adv_len; i++) {
         in->adv[i] = adv[i];
     }
+    flpr_conn_set_scanrsp(in, rsp, rsp_len);
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
 
@@ -689,6 +732,29 @@ void tiku_flpr_arch_conn_phy_diag(uint32_t *mode, uint32_t *addr,
     }
 }
 
+/* Advertising telemetry: what the advertiser sent and what answered it. */
+void tiku_flpr_arch_adv_counts(uint32_t *tx, uint32_t *scanreq,
+                               uint32_t *scanrsp, uint32_t *other)
+{
+    if (tx != (uint32_t *)0) {
+        *tx = TIKU_FLPR_SHARED->adv_tx;
+    }
+    if (scanreq != (uint32_t *)0) {
+        *scanreq = TIKU_FLPR_SHARED->adv_scanreq;
+    }
+    if (scanrsp != (uint32_t *)0) {
+        *scanrsp = TIKU_FLPR_SHARED->adv_scanrsp;
+    }
+    if (other != (uint32_t *)0) {
+        *other = TIKU_FLPR_SHARED->adv_rxother;
+    }
+}
+
+uint32_t tiku_flpr_arch_adv_tifs(void)
+{
+    return TIKU_FLPR_SHARED->adv_tifs;
+}
+
 /* Phase A telemetry: LL updates the FLPR applied this connection. */
 uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
 {
@@ -752,6 +818,7 @@ void tiku_flpr_arch_conn_stop(void)
 /* Non-blocking advertise+hold: flip NS, ship the ADV PDU, return.  The FLPR
  * advertises then holds autonomously; poll conn_active() for the link. */
 int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
+                              const uint8_t *rsp, uint32_t rsp_len,
                               const uint8_t *addr)
 {
     volatile tiku_flpr_conn_t *in =
@@ -770,6 +837,7 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
     for (i = 0u; i < adv_len; i++) {
         in->adv[i] = adv[i];
     }
+    flpr_conn_set_scanrsp(in, rsp, rsp_len);
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
     return 0;

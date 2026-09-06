@@ -33,6 +33,45 @@ void tiku_radio_arch_init(void);
 uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,
                                   const uint8_t *ad, uint8_t ad_len);
 
+/**
+ * @brief Build the SCAN_RSP that answers a SCAN_REQ.
+ *
+ * Same PDU shape as the advert under type 4.
+ *
+ * @note Give it data the advert does NOT carry: a scanner's duplicate filter
+ *       drops a response that repeats the advert byte for byte, and a host
+ *       waiting to pair the two then never reports the device at all.
+ *
+ * @param pdu     Output buffer (>= 40 bytes, RAM: the radio DMAs from it)
+ * @param addr    6-byte advertiser address (little-endian, random static)
+ * @param sd      scan-response AD structures
+ * @param sd_len  AD length in bytes (capped at 31)
+ * @return Total bytes written to @p pdu.
+ */
+/**
+ * @brief An active scanner as a yardstick: send SCAN_REQs to the advertiser
+ *        named @p name and capture when its SCAN_RSP arrives, on this
+ *        radio's own clock.  Counts and the gap (TIMER10 ticks from the
+ *        request's end to the reply's access address) are in the
+ *        tiku_radio_arch_dbg_scanreq_* globals.
+ * @return 0 when the advertiser was heard at all, -1 otherwise
+ */
+int tiku_radio_arch_scanreq_probe(const uint8_t *scana, const char *name,
+                                  uint32_t ms);
+extern uint32_t tiku_radio_arch_dbg_scanreq_adv;
+extern uint32_t tiku_radio_arch_dbg_scanreq_sent;
+extern uint32_t tiku_radio_arch_dbg_scanreq_rsp;
+extern uint32_t tiku_radio_arch_dbg_scanreq_gap_min;
+extern uint32_t tiku_radio_arch_dbg_scanreq_gap_max;
+extern uint32_t tiku_radio_arch_dbg_scanreq_gap_sum;
+extern uint32_t tiku_radio_arch_dbg_scanreq_crcbad;
+extern uint32_t tiku_radio_arch_dbg_scanreq_wrong;
+extern uint32_t tiku_radio_arch_dbg_scanreq_silent;
+extern uint8_t  tiku_radio_arch_dbg_scanreq_pkt[3][16];
+
+uint8_t tiku_radio_arch_scanrsp_build(uint8_t *pdu, const uint8_t *addr,
+                                     const uint8_t *sd, uint8_t sd_len);
+
 /** @brief Transmit @p pdu on all three advertising channels (blocking). */
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len);
 
@@ -162,6 +201,18 @@ uint32_t tiku_radio_arch_state(void);
 int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
                                   uint8_t ad_len, uint8_t lldata[22],
                                   uint32_t ms);
+/** @brief T_IFS programmed for the SCAN_RSP turnaround (default 150 us). */
+extern uint32_t tiku_radio_arch_connadv_tifs_cfg;
+/** @brief TIMER10 ticks from a SCAN_REQ's end to the TXEN answering it. */
+extern uint32_t tiku_radio_arch_connadv_txen_ticks;
+/** @brief PDU type the probe advertises with (0 ADV_IND, 2 NONCONN, 6 SCAN). */
+extern uint32_t tiku_radio_arch_connadv_pdu_type;
+/** @brief TIMER10 ticks per millisecond, measured at the last probe. */
+extern uint32_t tiku_radio_arch_dbg_connadv_ticks_per_ms;
+extern uint32_t tiku_radio_arch_dbg_connadv_rxtifs;
+extern uint32_t tiku_radio_arch_dbg_connadv_rxtifs_n;
+extern uint32_t tiku_radio_arch_dbg_connadv_rxtifs_min;
+extern uint32_t tiku_radio_arch_dbg_connadv_rxtifs_max;
 extern uint32_t tiku_radio_arch_dbg_connadv_tx;
 extern uint32_t tiku_radio_arch_dbg_connadv_scanreq;
 extern uint32_t tiku_radio_arch_dbg_connadv_rsp;   /* SCAN_RSPs (L2)     */

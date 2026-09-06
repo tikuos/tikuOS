@@ -210,6 +210,8 @@ static void flpr_rxprobe(tiku_flpr_shared_t *sh)
  * the M33 advertising phase in tiku_radio_arch_connect; the M33 set the
  * static packet format + adv-AA/CRC before the NS flip. */
 static uint8_t conn_adv[48] __attribute__((aligned(4)));
+/* The SCAN_RSP answering a SCAN_REQ: the ADV_IND payload under PDU type 4. */
+static uint8_t conn_rsp[48] __attribute__((aligned(4)));
 /* RX DMA target: must hold [S0][LEN][S1] + PCNF1.MAXLEN (80 since DLE/F1)
  * = 83 bytes.  At 48 this overflowed 35 bytes into the NEXT .bss object on
  * every address-matched long/garbage reception (CRC pass not required) --
@@ -828,13 +830,100 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     sh->conn_state = 3u;                         /* link ended               */
 }
 
+/* Idle iterations between advertising events, and the span of the advDelay.
+ * The three channels themselves take ~8 ms, so this sets the advertising
+ * interval near 100 ms: back-to-back events are BELOW the 20 ms the spec
+ * floors advertising at, and a host scanner given no gap between them
+ * reports the device only occasionally.  ~4100 iterations per millisecond
+ * at the contended coprocessor rate. */
+#define FLPR_ADV_GAP_ITERS    840000u
+#define FLPR_ADV_DELAY_ITERS  210000u
+
+/* The SCAN_RSP turnaround is TIMER10's, not a shortcut's: every PHYEND
+ * clears the timer over DPPI, and COMPARE[0] fires the RADIO's TXEN this
+ * many ticks after a request's end, on a channel opened only for a request
+ * this advertiser answers.  The RADIO's TIFS does not govern the
+ * PHYEND_DISABLE + DISABLED_TXEN chain on this part -- the reply left at
+ * the ramp's own pace, ~58 us, and a scanner listens at 150 +/- 2.  The
+ * timer counts at 2 MHz.  The figure is the one a SECOND radio, scanning
+ * this one with `bleadv scanreq`, reads as the spec's 150 us; the
+ * advertiser's own capture of its reply reads 40 ticks more, because its
+ * receive and transmit events do not fire at the same point in a packet. */
+#define FLPR_ADV_TXEN_TICKS  200u
+#define FLPR_DPPI_CH_PHYEND  3u
+#define FLPR_DPPI_CH_ADDR    4u
+#define FLPR_DPPI_CH_TXEN    5u
+
+/** @brief Wire TIMER10 and DPPIC10 for the timed reply (or unwire, on 0). */
+static void flpr_conn_adv_timing(NRF_RADIO_Type *r, uint32_t txen_ticks)
+{
+    NRF_TIMER_Type *t = NRF_TIMER10_NS;
+    NRF_DPPIC_Type *d = NRF_DPPIC10_NS;
+
+    if (txen_ticks == 0u) {
+        r->PUBLISH_PHYEND  = 0u;
+        r->PUBLISH_ADDRESS = 0u;
+        r->SUBSCRIBE_TXEN  = 0u;
+        t->SUBSCRIBE_CLEAR      = 0u;
+        t->SUBSCRIBE_CAPTURE[4] = 0u;
+        t->PUBLISH_COMPARE[0]   = 0u;
+        d->CHENCLR = (1u << FLPR_DPPI_CH_PHYEND) | (1u << FLPR_DPPI_CH_ADDR) |
+                     (1u << FLPR_DPPI_CH_TXEN);
+        t->TASKS_STOP = 1u;
+        return;
+    }
+    t->TASKS_STOP  = 1u;
+    t->TASKS_CLEAR = 1u;
+    t->MODE      = 0u;
+    t->BITMODE   = 3u;
+    t->PRESCALER = 4u;
+    t->SHORTS    = 0u;
+    t->CC[0] = txen_ticks;
+    t->EVENTS_COMPARE[0] = 0u;
+    t->SUBSCRIBE_CLEAR      = FLPR_DPPI_CH_PHYEND | (1u << 31);
+    t->SUBSCRIBE_CAPTURE[4] = FLPR_DPPI_CH_ADDR   | (1u << 31);
+    t->PUBLISH_COMPARE[0]   = FLPR_DPPI_CH_TXEN   | (1u << 31);
+    r->PUBLISH_PHYEND  = FLPR_DPPI_CH_PHYEND | (1u << 31);
+    r->PUBLISH_ADDRESS = FLPR_DPPI_CH_ADDR   | (1u << 31);
+    r->SUBSCRIBE_TXEN  = FLPR_DPPI_CH_TXEN   | (1u << 31);
+    d->CHENCLR = (1u << FLPR_DPPI_CH_TXEN);
+    d->CHENSET = (1u << FLPR_DPPI_CH_PHYEND) | (1u << FLPR_DPPI_CH_ADDR);
+    t->TASKS_START = 1u;
+}
+
+/**
+ * @brief Is the packet just received a SCAN_REQ addressed to this advertiser?
+ *
+ * Runs inside the T_IFS window the reply has to meet, so it decides on the
+ * length byte before touching the address: a CONNECT_IND (34) and a SCAN_REQ
+ * (12) part company on the second byte.
+ *
+ * @param addr the advertiser address to match at conn_rx[9..14].
+ * @return 1 when a SCAN_RSP is owed, 0 otherwise.
+ */
+static uint8_t flpr_conn_scanreq_for(const uint8_t *addr)
+{
+    uint32_t i;
+
+    if (NRF_RADIO_NS->EVENTS_CRCOK == 0u ||
+        conn_rx[1] != 12u || (conn_rx[0] & 0x0Fu) != 0x03u) {
+        return 0u;
+    }
+    for (i = 0u; i < 6u; i++) {
+        if (conn_rx[9u + i] != addr[i]) {
+            return 0u;
+        }
+    }
+    return 1u;
+}
+
 static void flpr_conn_adv(tiku_flpr_shared_t *sh)
 {
     NRF_RADIO_Type *r = NRF_RADIO_NS;
     const volatile tiku_flpr_conn_t *in =
         (const volatile tiku_flpr_conn_t *)sh->a2f_buf;
     uint8_t  addr[6];
-    uint32_t alen = in->adv_len, i, spin, attempt;
+    uint32_t alen = in->adv_len, rlen, i, spin, attempt;
     uint32_t lcg;
     uint8_t  chan = 0u, connected = 0u;
 
@@ -854,6 +943,18 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
     for (i = 0u; i < alen; i++) {
         conn_adv[i] = in->adv[i];
     }
+    rlen = in->rsp_len;
+    if (rlen == 0u || rlen > sizeof(conn_rsp)) {
+        rlen = alen;                             /* no response given: mirror */
+        for (i = 0u; i < rlen; i++) {
+            conn_rsp[i] = in->adv[i];
+        }
+    } else {
+        for (i = 0u; i < rlen; i++) {
+            conn_rsp[i] = in->rsp[i];
+        }
+    }
+    conn_rsp[0] = 0x44u;                         /* SCAN_RSP, TxAdd = random */
     for (i = 0u; i < 6u; i++) {
         addr[i] = in->addr[i];
     }
@@ -861,7 +962,14 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
     sh->conn_events = 0u;
     sh->conn_cm = 0u;                            /* Phase A telemetry         */
     sh->conn_cu = 0u;
+    sh->adv_tx = 0u;
+    sh->adv_scanreq = 0u;
+    sh->adv_scanrsp = 0u;
+    sh->adv_rxother = 0u;
+    sh->adv_tifs = 0u;
     flpr_hfclk_kick();
+    flpr_conn_adv_timing(r, (in->txen_ticks != 0u) ? in->txen_ticks
+                                                   : FLPR_ADV_TXEN_TICKS);
 
     for (attempt = 0u; attempt < 4000u && !connected; attempt++) {
         /* HFCLK kick per 3-channel cycle -- the beacon-proven per-burst
@@ -883,29 +991,83 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
                 break;                          /* TX done, RX ramping      */
             }
         }
-        /* Hand the RX leg its buffer; drop the turnaround short. */
+        sh->adv_tx++;
+        /* Hand the RX leg its buffer.  The packet's own end disables the
+         * radio and restarts TIMER10; whether the compare then fires a
+         * reply is decided below, with the whole T_IFS in hand. */
         r->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
         r->PACKETPTR = (uint32_t)conn_rx;
+        r->EVENTS_PHYEND   = 0u;
+        r->EVENTS_END      = 0u;
         r->EVENTS_DISABLED = 0u;
         r->EVENTS_CRCOK    = 0u;
-        (void)r->EVENTS_DISABLED;
+        NRF_TIMER10_NS->EVENTS_COMPARE[0] = 0u;
+        (void)r->EVENTS_PHYEND;
         for (spin = 0u; spin < 20000u; spin++) {
-            if (r->EVENTS_DISABLED != 0u) {
+            if (r->EVENTS_PHYEND != 0u) {
                 break;                          /* a packet ended           */
             }
         }
-        if (r->EVENTS_DISABLED == 0u) {
+        if (r->EVENTS_PHYEND != 0u) {
+            /* The buffer is ordinary memory the DMA writes behind the
+             * compiler's back: without a barrier a header loaded for the
+             * packet BEFORE is reused for this one. */
+            for (spin = 0u; spin < 8000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            __asm__ volatile ("fence iorw, iorw" ::: "memory");
+        }
+        if (r->EVENTS_PHYEND == 0u) {
             r->TASKS_DISABLE = 1u;              /* window idle: rotate      */
             for (spin = 0u; spin < 8000u; spin++) {
                 if (r->EVENTS_DISABLED != 0u) {
                     break;
                 }
             }
+        } else if (flpr_conn_scanreq_for(addr)) {
+            /* A SCAN_REQ this advertiser owes an answer: hand the DMA the
+             * SCAN_RSP and open the channel that lets the compare fire
+             * TXEN; close it once TXEN has fired, so the reply's own end
+             * chains nothing. */
+            r->PACKETPTR = (uint32_t)conn_rsp;
+            r->EVENTS_READY = 0u;
+            r->EVENTS_DISABLED = 0u;
+            (void)r->EVENTS_DISABLED;
+            NRF_DPPIC10_NS->CHENSET = (1u << FLPR_DPPI_CH_TXEN);
+            sh->adv_scanreq++;
+            for (spin = 0u; spin < 20000u; spin++) {
+                if (r->EVENTS_READY != 0u) {
+                    break;
+                }
+            }
+            NRF_DPPIC10_NS->CHENCLR = (1u << FLPR_DPPI_CH_TXEN);
+            for (spin = 0u; spin < 40000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {
+                    break;
+                }
+            }
+            if (r->EVENTS_DISABLED != 0u) {
+                sh->adv_scanrsp++;
+                sh->adv_tifs = NRF_TIMER10_NS->CC[4];
+            } else {
+                r->TASKS_DISABLE = 1u;          /* TXEN never came          */
+                for (spin = 0u; spin < 8000u; spin++) {
+                    if (r->EVENTS_DISABLED != 0u) {
+                        break;
+                    }
+                }
+            }
         } else if (r->EVENTS_CRCOK != 0u &&
                    (conn_rx[0] & 0x0Fu) == 0x05u && conn_rx[1] == 34u) {
             uint8_t match = 1u;
-            for (spin = 0u; spin < 200u; spin++) {   /* DMA settle         */
+            for (spin = 0u; spin < 8000u; spin++) {
+                if (r->EVENTS_DISABLED != 0u) {   /* the short's disable  */
+                    break;
+                }
             }
+            __asm__ volatile ("fence iorw, iorw" ::: "memory");
             for (i = 0u; i < 6u; i++) {
                 if (conn_rx[9u + i] != addr[i]) {     /* AdvA at rx[9..14]  */
                     match = 0u;
@@ -944,31 +1106,24 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
                     (uint8_t)(((conn_rx[0] & 0x40u) ? 0x01u : 0x00u) |
                               ((conn_rx[0] & 0x80u) ? 0x02u : 0x00u));
                 connected = 1u;
-            } else {
-                r->TASKS_DISABLE = 1u;
-                for (spin = 0u; spin < 8000u; spin++) {
-                    if (r->EVENTS_DISABLED != 0u) {
-                        break;
-                    }
-                }
             }
         } else {
-            r->TASKS_DISABLE = 1u;
             for (spin = 0u; spin < 8000u; spin++) {
-                if (r->EVENTS_DISABLED != 0u) {
+                if (r->EVENTS_DISABLED != 0u) {   /* the short's disable  */
                     break;
                 }
+            }
+            if (r->EVENTS_CRCOK != 0u) {
+                sh->adv_rxother++;              /* someone else's traffic   */
             }
         }
         if (!connected) {
             chan = (uint8_t)((chan + 1u) % 3u);
-            /* advDelay after each 3-channel event: 0..~16k idle iters
-             * (~0..4 ms at the contended FLPR rate) breaks any phase lock
-             * with a scanner's window rotation (see seed comment above). */
+            /* The gap, and the advDelay after each 3-channel event. */
             if (chan == 0u) {
                 uint32_t d;
                 lcg = lcg * 1103515245u + 12345u;
-                d = (lcg >> 16) & 0x3FFFu;
+                d = FLPR_ADV_GAP_ITERS + ((lcg >> 8) % FLPR_ADV_DELAY_ITERS);
                 for (spin = 0u; spin < d; spin++) {
                     if (r->EVENTS_DISABLED == 0xFFFFFFFFu) {
                         break;                   /* never true: keep the read */
@@ -980,6 +1135,7 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
             break;
         }
     }
+    flpr_conn_adv_timing(r, 0u);                 /* nothing may fire TXEN    */
     if (connected) {
         sh->conn_state = 1u;                     /* connected -> M33 sees it */
         flpr_conn_hold(sh);                      /* then hold autonomously   */
