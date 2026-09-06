@@ -477,6 +477,9 @@ static void scan_parse_mfr_tk(const uint8_t *ad, uint8_t ad_len, char *out)
  * advertisers before the sought device is heard (the reason the TikuBench
  * reverse-nonce oracle needs this).  Nameless PDUs (incl. ADV_DIRECT_IND,
  * whose payload carries TargetA, not AD) are dropped while filtering. */
+/** @brief The largest payload a legacy advertising PDU carries. */
+#define SCAN_PDU_MAX 37u
+
 static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
 {
     struct scan_ctx *ctx = (struct scan_ctx *)ud;
@@ -486,6 +489,15 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
     char name[TIKU_BLE_ADV_NAME_CAP + 1];
     uint8_t i;
 
+    /* A drain runs from a timer callback and from teardown, so this must
+     * survive a context whose table is not there: without the check the
+     * slot store below writes through a null base and the fault parks the
+     * board, which reads to every later test as a dead radio. */
+    if (ctx == (struct scan_ctx *)0 ||
+        ctx->out == (tiku_ble_adv_report_t *)0 || ctx->max == 0u) {
+        return;
+    }
+
     /* Only PDUs whose payload begins with AdvA: ADV_IND(0),
      * ADV_DIRECT_IND(1), ADV_NONCONN_IND(2), SCAN_RSP(4), ADV_SCAN_IND(6);
      * and a plausible length. */
@@ -493,6 +505,13 @@ static void scan_cb(const uint8_t *buf, uint8_t len, int8_t rssi, void *ud)
         !(type == 0u || type == 1u || type == 2u || type == 4u ||
           type == 6u)) {
         return;
+    }
+    /* A legacy advertising payload is at most 37 bytes.  The AD walk below
+     * runs to len-6, so a larger LENGTH -- which no producer's buffer can
+     * hold -- would read past the packet; keep the sighting, bound the
+     * walk. */
+    if (len > SCAN_PDU_MAX) {
+        len = SCAN_PDU_MAX;
     }
 
     /* Parse the Local Name up front: the insert-time filter needs it, and

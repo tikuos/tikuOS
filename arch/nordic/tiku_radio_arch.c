@@ -543,6 +543,11 @@ void tiku_nordic_radio_isr(void)
                 n = 44u;                /* bound to the ring entry          */
             }
             memcpy(scan_ring[scan_head].buf, scan_rxbuf, (size_t)(3u + n));
+            /* The stored LENGTH must describe what this entry HOLDS, not
+             * what the air claimed.  A consumer walks the AD structures at
+             * buf[9] for LENGTH-6 bytes, so an on-air 255 sends it far
+             * past the 48-byte entry and into whatever follows it. */
+            scan_ring[scan_head].buf[1] = n;
             scan_ring[scan_head].rssi =
                 (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
             scan_head = next;
