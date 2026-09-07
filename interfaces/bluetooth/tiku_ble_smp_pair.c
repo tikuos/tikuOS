@@ -31,8 +31,10 @@
 
 /* Local pairing parameters: NoInputNoOutput -> Just Works, SC bit set. */
 #define SMP_IO_CAP     0x03u                 /* NoInputNoOutput               */
+#define SMP_IO_DISPLAY 0x01u                 /* DisplayYesNo -> Numeric Comp. */
 #define SMP_OOB        0x00u                 /* no OOB                        */
 #define SMP_AUTHREQ    0x08u                 /* SC=1, no MITM/bonding/keypress*/
+#define SMP_AUTHREQ_MITM 0x0Cu               /* SC=1, MITM=1 (authenticated)  */
 #define SMP_MAX_KEY    0x10u                 /* 16-byte key                   */
 
 #define SMP_FAIL_CONFIRM   0x04u             /* Confirm Value Failed          */
@@ -57,6 +59,9 @@ typedef struct {
     uint8_t  iocap_a[3], iocap_b[3];         /* [io_cap, oob, authreq] each   */
     uint8_t  confirm_peer[16];               /* Cb received (initiator verify)*/
     uint8_t  have_dhkey;                     /* ECDH done                     */
+    uint8_t  numcmp;                          /* Numeric Comparison method     */
+    uint8_t  have_compare;                    /* the six-digit value is ready  */
+    uint32_t compare;                         /* g2 mod 10^6 (both sides equal)*/
     uint8_t  last_rx_op;                      /* last processed opcode (dedup) */
 
     uint8_t  outq[OUTQ_DEPTH][TIKU_BLE_SMP_PDU_MAX];
@@ -65,6 +70,17 @@ typedef struct {
 } smp_ctx_t;
 
 static smp_ctx_t sc;
+
+/* Method preference, set before start() and outliving reset(): 0 = Just
+ * Works (unauthenticated), 1 = Numeric Comparison (both peers show the
+ * same six digits; a man in the middle makes the two differ). */
+static uint8_t s_numcmp;
+
+/* The io_cap / authreq a role advertises, per the chosen method. */
+static uint8_t method_iocap(void) { return s_numcmp ? SMP_IO_DISPLAY
+                                                     : SMP_IO_CAP; }
+static uint8_t method_authreq(void) { return s_numcmp ? SMP_AUTHREQ_MITM
+                                                      : SMP_AUTHREQ; }
 
 /* --- little helpers ----------------------------------------------------- */
 
@@ -142,7 +158,7 @@ static void build_pair_cmd(uint8_t opcode)          /* Request or Response   */
 {
     uint8_t p[7];
     p[0] = opcode;
-    p[1] = SMP_IO_CAP; p[2] = SMP_OOB; p[3] = SMP_AUTHREQ;
+    p[1] = method_iocap(); p[2] = SMP_OOB; p[3] = method_authreq();
     p[4] = SMP_MAX_KEY; p[5] = 0x00u; p[6] = 0x00u;   /* no key distribution  */
     outq_push(p, 7u);
 }
@@ -216,16 +232,32 @@ int tiku_ble_smp_pair_start(tiku_ble_smp_role_t role,
         return -1;
     }
 
+    sc.numcmp = s_numcmp;
     sc.state = TIKU_BLE_SMP_STATE_PAIRING;
     if (role == TIKU_BLE_SMP_ROLE_INITIATOR) {
-        sc.iocap_a[0] = SMP_IO_CAP; sc.iocap_a[1] = SMP_OOB;
-        sc.iocap_a[2] = SMP_AUTHREQ;
+        sc.iocap_a[0] = method_iocap(); sc.iocap_a[1] = SMP_OOB;
+        sc.iocap_a[2] = method_authreq();
         build_pair_cmd(SMP_PAIRING_REQUEST);      /* kick off the exchange    */
     } else {
-        sc.iocap_b[0] = SMP_IO_CAP; sc.iocap_b[1] = SMP_OOB;
-        sc.iocap_b[2] = SMP_AUTHREQ;
+        sc.iocap_b[0] = method_iocap(); sc.iocap_b[1] = SMP_OOB;
+        sc.iocap_b[2] = method_authreq();
     }
     return 0;
+}
+
+/* Numeric Comparison value: Va = Vb = g2(PKa_x, PKb_x, Na, Nb) mod 10^6,
+ * with both nonces in hand.  A man in the middle holds a different public
+ * key to each side, so the two values diverge -- the check the user (or a
+ * two-board suite) makes before trusting the link. */
+static void compute_compare(void)
+{
+    const uint8_t *pka_x = (sc.role == TIKU_BLE_SMP_ROLE_INITIATOR)
+                           ? &sc.pk_local[0] : &sc.pk_peer[0];
+    const uint8_t *pkb_x = (sc.role == TIKU_BLE_SMP_ROLE_INITIATOR)
+                           ? &sc.pk_peer[0] : &sc.pk_local[0];
+
+    sc.compare = tiku_ble_smp_g2(pka_x, pkb_x, sc.na, sc.nb) % 1000000u;
+    sc.have_compare = 1u;
 }
 
 /* --- initiator (central) receive path ----------------------------------- */
@@ -257,6 +289,7 @@ static void feed_initiator(uint8_t op, const uint8_t *pdu, uint16_t len)
         if (memcmp(cb, sc.confirm_peer, 16) != 0) {
             fail(SMP_FAIL_CONFIRM); return;
         }
+        if (sc.numcmp) { compute_compare(); }     /* both nonces in hand      */
         derive_keys();
         {   /* Ea = f6(MacKey, Na, Nb, 0, IOcapA, A, B). */
             uint8_t ea[16], z[16];
@@ -308,6 +341,7 @@ static void feed_responder(uint8_t op, const uint8_t *pdu, uint16_t len)
     case SMP_PAIRING_RANDOM:
         if (len < 17u) { return; }
         memcpy(sc.na, &pdu[1], 16);
+        if (sc.numcmp) { compute_compare(); }     /* both nonces known now    */
         derive_keys();                            /* both nonces known now    */
         build_random(sc.nb);                      /* send Nb                  */
         break;
@@ -392,5 +426,21 @@ int tiku_ble_smp_pair_ltk(uint8_t ltk[16])
         return -1;
     }
     memcpy(ltk, sc.ltk, 16);
+    return 0;
+}
+
+void tiku_ble_smp_pair_set_method(int numeric_compare)
+{
+    s_numcmp = numeric_compare ? 1u : 0u;
+}
+
+int tiku_ble_smp_pair_compare_value(uint32_t *out)
+{
+    if (!sc.have_compare) {
+        return -1;
+    }
+    if (out != (uint32_t *)0) {
+        *out = sc.compare;
+    }
     return 0;
 }

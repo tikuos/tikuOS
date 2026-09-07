@@ -75,4 +75,21 @@ tiku_ble_smp_state_t tiku_ble_smp_pair_state(void);
  */
 int tiku_ble_smp_pair_ltk(uint8_t ltk[16]);
 
+/**
+ * @brief Choose the pairing method for the NEXT tiku_ble_smp_pair_start().
+ *        0 = Just Works (unauthenticated, the default); non-zero = LE-SC
+ *        Numeric Comparison (both peers derive the same six-digit value;
+ *        both roles must select it).  Persists across reset().
+ */
+void tiku_ble_smp_pair_set_method(int numeric_compare);
+
+/**
+ * @brief The Numeric Comparison value, once both nonces are exchanged.
+ *        A matching pairing yields the same value on both peers; a man in
+ *        the middle makes them differ.
+ * @return 0 and the six-digit value in @p out, or -1 if not yet available
+ *         (Just Works, or the exchange has not reached the nonce stage).
+ */
+int tiku_ble_smp_pair_compare_value(uint32_t *out);
+
 #endif /* TIKU_BLE_SMP_PAIR_H_ */

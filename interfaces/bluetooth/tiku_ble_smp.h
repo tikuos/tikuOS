@@ -62,6 +62,16 @@ void tiku_ble_smp_f6(const uint8_t w[16], const uint8_t n1[16],
                      uint8_t a2t, const uint8_t a2[6], uint8_t out[16]);
 
 /**
+ * @brief SMP g2: the numeric-comparison value function.
+ *
+ * AES-CMAC_X(U || V || Y) keyed by X (Na); the caller takes the returned
+ * 32-bit value modulo one million for the six digits both peers display.
+ * @return the low 32 bits of the CMAC (spec: g2 mod 2^32).
+ */
+uint32_t tiku_ble_smp_g2(const uint8_t u[32], const uint8_t v[32],
+                         const uint8_t x[16], const uint8_t y[16]);
+
+/**
  * @brief Crypto self-test: AES-CMAC RFC-4493 KAT, f4/f5/f6 spec KATs, and a
  *        P-256 ECDH round-trip.
  * @return bitmask of passes: bit0 CMAC KAT, bit1 ECDH match, bit2 f4/f5/f6

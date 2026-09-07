@@ -178,6 +178,23 @@ void tiku_ble_smp_f6(const uint8_t w[16], const uint8_t n1[16],
     swap_ip(out, 16);
 }
 
+/* g2: the numeric-comparison value function.  AES-CMAC_X(U || V || Y),
+ * keyed by X (Na); the six-digit value both sides show is the low 32 bits
+ * of the result taken modulo one million.  The low 32 bits are the last
+ * four bytes of the big-endian CMAC, so no output swap is needed. */
+uint32_t tiku_ble_smp_g2(const uint8_t u[32], const uint8_t v[32],
+                         const uint8_t x[16], const uint8_t y[16])
+{
+    uint8_t m[80], xs[16], out[16];
+    swap(&m[0], u, 32);
+    swap(&m[32], v, 32);
+    swap(&m[64], y, 16);
+    swap(xs, x, 16);
+    (void)tiku_ble_smp_aes_cmac(xs, m, 80u, out);
+    return ((uint32_t)out[12] << 24) | ((uint32_t)out[13] << 16) |
+           ((uint32_t)out[14] << 8) | (uint32_t)out[15];
+}
+
 /* --- self-test --------------------------------------------------------- */
 
 int tiku_ble_smp_selftest(void)
@@ -250,6 +267,13 @@ int tiku_ble_smp_selftest(void)
             memcmp(ltk, ltk_exp, 16) == 0 &&
             memcmp(of6, f6_exp, 16) == 0) {
             result |= 4;                           /* bit2: f4/f5/f6 KATs     */
+        }
+
+        /* g2 KAT (Core Spec Vol 3, Part H, 2.2.9): U, V and X as f4's,
+         * Y = n2, six-digit source value 0x2f9ed5ba (cross-checked vs an
+         * independent AES-CMAC). */
+        if (tiku_ble_smp_g2(u, v, x, n2) == 0x2f9ed5bau) {
+            result |= 8;                           /* bit3: g2 KAT            */
         }
     }
 

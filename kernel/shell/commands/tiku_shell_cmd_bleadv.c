@@ -607,7 +607,7 @@ static void bleadv_central(unsigned secs, uint8_t updates)
  * (TIKU-PAIR), connect, and drive LE Secure Connections "Just Works" to a
  * shared LTK; print the LTK (the peripheral prints its own -- a two-board
  * suite asserts they match). */
-static void bleadv_censmp(unsigned secs)
+static void bleadv_censmp(unsigned secs, uint8_t numcmp)
 {
     uint8_t addr[6];
     tiku_radio_ll_conn_stats_t st;
@@ -622,6 +622,7 @@ static void bleadv_censmp(unsigned secs)
     addr[5] |= 0xC0u;                             /* static random address    */
     bleadv_fmt_addr(addrstr, addr);
     tiku_ble_smp_pair_reset();                    /* clear any prior LTK/state */
+    tiku_ble_smp_pair_set_method(numcmp);         /* Just Works / Numeric Comp */
     tiku_radio_arch_central_smp(1u);              /* arm the initiator        */
     SHELL_PRINTF("CENTRAL %s: scanning for TIKU-PAIR, LE-SC pairing up to"
                  " %u s...\n", addrstr, secs);
@@ -632,6 +633,12 @@ static void bleadv_censmp(unsigned secs)
                  (unsigned long)st.events, (unsigned long)st.rx_ok,
                  st.events ? (unsigned long)(st.rx_ok * 100u / st.events)
                            : 0ul);
+    {   /* Numeric Comparison: the six digits the peer prints too. */
+        uint32_t cmp;
+        if (numcmp && tiku_ble_smp_pair_compare_value(&cmp) == 0) {
+            SHELL_PRINTF("  COMPARE: %06lu\n", (unsigned long)cmp);
+        }
+    }
     if (tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_DONE) {
         uint8_t ltk[16], sk[16];
         char hx[40];
@@ -1016,9 +1023,11 @@ static void bleadv_smp(void)
                  (r & 4) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
     SHELL_PRINTF("  P-256 ECDH (round-trip):   %s\n",
                  (r & 2) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
-    if (r == 7) {
-        SHELL_PRINTF(SH_GREEN "  crypto foundation OK (CMAC + f4/f5/f6 + ECDH)"
-                     " -- SMP pairing buildable\n" SH_RST);
+    SHELL_PRINTF("  g2 numeric-compare (KAT):  %s\n",
+                 (r & 8) ? SH_GREEN "PASS" SH_RST : SH_RED "FAIL" SH_RST);
+    if (r == 15) {
+        SHELL_PRINTF(SH_GREEN "  crypto foundation OK (CMAC + f4/f5/f6 + g2 +"
+                     " ECDH)\n" SH_RST);
     }
 }
 
@@ -1253,7 +1262,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
  * suite asserts they match).  @p bond_mode: remember the LTK against the
  * central's address and, on a reconnect from a known central, SKIP pairing
  * and encrypt with the stored LTK. */
-static void bleadv_flprpair(uint8_t bond_mode)
+static void bleadv_flprpair(uint8_t bond_mode, uint8_t numcmp)
 {
     uint8_t addr[6], ad[31], adv[48], rsp[48];
     uint8_t adlen = 0u, advlen, rsplen;
@@ -1315,6 +1324,7 @@ static void bleadv_flprpair(uint8_t bond_mode)
                          " -- skipping pairing\n", inita[5], inita[4], inita[3],
                          inita[2], inita[1], inita[0]);
         } else {
+            tiku_ble_smp_pair_set_method(numcmp);  /* Just Works / Num Comp */
             tiku_ble_host_smp_start(inita, (uint8_t)(types & 1u),
                                     adva, (uint8_t)((types >> 1) & 1u));
             SHELL_PRINTF("  connected; responder armed (central %02x%02x%02x%02x"
@@ -1341,7 +1351,12 @@ static void bleadv_flprpair(uint8_t bond_mode)
              * re-request (dup Ea -> engine re-emits Eb).  It exits when the
              * central tears the link down, not the instant pairing ends. */
             if (tiku_ble_host_smp_state() >= 2 && !paired) {
+                uint32_t cmp;
                 paired = 1;
+                if (numcmp &&
+                    tiku_ble_smp_pair_compare_value(&cmp) == 0) {
+                    SHELL_PRINTF("  COMPARE: %06lu\n", (unsigned long)cmp);
+                }
                 (void)tiku_ble_host_smp_ltk(ltk);
             }
             /* Fresh pairing done: remember the LTK so the NEXT reconnect from
@@ -1520,7 +1535,8 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         return;
     }
     if (strcmp(argv[1], "flprpair") == 0) {       /* Phase E: SMP responder    */
-        bleadv_flprpair(0u);
+        uint8_t nc = (argc >= 3 && strcmp(argv[2], "numcmp") == 0) ? 1u : 0u;
+        bleadv_flprpair(0u, nc);
         return;
     }
     if (strcmp(argv[1], "flprbond") == 0) {       /* bonding: remember/reuse   */
@@ -1529,7 +1545,7 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             SHELL_PRINTF("bonds cleared\n");
             return;
         }
-        bleadv_flprpair(1u);
+        bleadv_flprpair(1u, 0u);
         return;
     }
     if (strcmp(argv[1], "serial") == 0) {
@@ -1605,11 +1621,16 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "censmp") == 0) {         /* Phase E: SMP initiator    */
         unsigned s = 30u;
-        if (argc >= 3) {
-            long v = strtol(argv[2], (char **)0, 10);
-            if (v > 0 && v <= 600) { s = (unsigned)v; }
+        uint8_t nc = 0u, a;
+        for (a = 2u; a < argc; a++) {
+            if (strcmp(argv[a], "numcmp") == 0) {
+                nc = 1u;
+            } else {
+                long v = strtol(argv[a], (char **)0, 10);
+                if (v > 0 && v <= 600) { s = (unsigned)v; }
+            }
         }
-        bleadv_censmp(s);
+        bleadv_censmp(s, nc);
         return;
     }
     if (strcmp(argv[1], "cenbond") == 0) {        /* bonding: pair/reuse LTK   */
