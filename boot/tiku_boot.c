@@ -37,6 +37,10 @@
 #endif
 #elif defined(PLATFORM_AMBIQ)
 #include "arch/ambiq/tiku_uart_arch.h"
+#elif defined(PLATFORM_NORDIC)
+#if defined(TIKU_CONSOLE_USB)
+#include "arch/nordic/tiku_usb_cdc_arch.h"
+#endif
 #endif
 
 

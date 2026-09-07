@@ -79,9 +79,9 @@ ifeq ($(filter uart usb both,$(TIKU_CONSOLE)),)
 $(error TIKU_CONSOLE must be uart, usb, or both (got '$(TIKU_CONSOLE)'))
 endif
 ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
-ifneq ($(TIKU_PLATFORM),rp2350)
-$(error TIKU_CONSOLE=$(TIKU_CONSOLE) (USB CDC console) is only supported on \
-rp2350; this build is $(TIKU_PLATFORM). Use TIKU_CONSOLE=uart, or MCU=rp2350)
+ifeq ($(filter rp2350 nrf54lm20a nrf54lm20b,$(MCU)),)
+$(error TIKU_CONSOLE=$(TIKU_CONSOLE) (USB CDC console) is supported on rp2350 \
+and nrf54lm20a/b; this build is $(MCU). Use TIKU_CONSOLE=uart)
 endif
 endif
 
@@ -1705,6 +1705,16 @@ else ifeq ($(TIKU_PLATFORM),nordic)
 # remaining HAL files (crit/wake/mem/mpu/region/watchdog + driver stubs) are
 # added below as the kernel needs them.
 SRCS += arch/nordic/tiku_cpu_common.c
+# Console backend: the nRF54LM20's own USB port for TIKU_CONSOLE=usb|both.
+ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
+SRCS   += arch/nordic/tiku_usbhs_arch.c
+SRCS   += arch/nordic/tiku_usbhs_dev.c
+SRCS   += arch/nordic/tiku_usb_cdc_arch.c
+CFLAGS += -DTIKU_CONSOLE_USB=1
+ifeq ($(TIKU_CONSOLE),both)
+CFLAGS += -DTIKU_CONSOLE_BOTH=1
+endif
+endif
 SRCS += arch/nordic/tiku_crt_early.c
 SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
 SRCS += arch/nordic/tiku_power_arch.c
@@ -2550,8 +2560,10 @@ endif
 ifneq (,$(findstring TIKU_SHELL_CMD_USBPROBE=1,$(EXTRA_CFLAGS)))
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_usbprobe.c
+ifeq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS += arch/nordic/tiku_usbhs_arch.c
 SRCS += arch/nordic/tiku_usbhs_dev.c
+endif
 else
 $(warning usbprobe: the USB block exists only on nrf54lm20a/b -- skipped)
 endif

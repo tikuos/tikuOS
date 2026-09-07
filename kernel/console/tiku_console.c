@@ -18,7 +18,11 @@
 #include "tiku.h"
 
 #if defined(TIKU_CONSOLE_USB)
+#if defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_usb_cdc_arch.h>
+#else
 #include <arch/arm-rp2350/tiku_usb_cdc_arch.h>
+#endif
 #endif
 #if !TIKU_SHELL_ENABLE
 #include <kernel/process/tiku_process.h>

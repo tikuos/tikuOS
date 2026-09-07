@@ -134,6 +134,32 @@ void tiku_nordic_usbhs_dev_irq(void);
 /** @brief Whether device mode is running. */
 uint8_t tiku_nordic_usbhs_dev_started(void);
 
+/*---------------------------------------------------------------------------*/
+/* CDC-ACM DATA PATH                                                         */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Bytes the host wrote, delivered from the interrupt. */
+typedef void (*tiku_nordic_usbhs_cdc_rx_fn)(const uint8_t *data, uint32_t len);
+/** @brief The last packet given to _cdc_send() has left; from the interrupt. */
+typedef void (*tiku_nordic_usbhs_cdc_done_fn)(void);
+
+/** @brief Register the class layer's callbacks; either may be NULL. */
+void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,
+                                    tiku_nordic_usbhs_cdc_done_fn on_tx_done);
+
+/** @brief Configured by the host AND a terminal holds DTR: the port is open. */
+uint8_t tiku_nordic_usbhs_dev_cdc_open(void);
+
+/**
+ * @brief Send one packet (at most 64 bytes) on the bulk IN endpoint.
+ * @return 0 when taken, -1 while the previous one is still on the wire or
+ *         the device is not configured.  Completion arrives on_tx_done.
+ */
+int tiku_nordic_usbhs_dev_cdc_send(const uint8_t *data, uint32_t len);
+
+/** @brief Whether a bulk IN packet is still on the wire. */
+uint8_t tiku_nordic_usbhs_dev_cdc_sending(void);
+
 /** @brief What enumeration has reached: the counts, the speed the host
  *         settled on, the assigned address and the chosen configuration. */
 void tiku_nordic_usbhs_dev_stats(uint32_t *setup, uint32_t *reset,

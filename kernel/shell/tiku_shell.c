@@ -44,7 +44,11 @@
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* tiku_kits_net_process */
 #endif
 #if defined(TIKU_CONSOLE_USB)
-#include <arch/arm-rp2350/tiku_usb_cdc_arch.h>  /* usbcdc backend + poll pump */
+#if defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_usb_cdc_arch.h>
+#else
+#include <arch/arm-rp2350/tiku_usb_cdc_arch.h>
+#endif
 #endif
 #if TIKU_SHELL_NET_TEST
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>     /* udp_init (+ echo port 7) */

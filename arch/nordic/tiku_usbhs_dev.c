@@ -79,6 +79,16 @@
 /* EP0's packet size is an enumeration in the control register: 0 is 64. */
 #define DEPCTL0_MPS_64      0u
 
+#define DEPCTL_TYPE_BULK    (2ul << DEPCTL_EPTYPE_SHIFT)
+#define DAINT_IN(n)         (1ul << (n))
+#define DAINT_OUT(n)        (1ul << (16u + (n)))
+#define DOEPTSIZ_XFER_MASK  0x7FFFFul
+
+/* The CDC endpoints the configuration descriptor promises. */
+#define EP_BULK_OUT         2u
+#define EP_BULK_IN          3u
+#define EP_BULK_IN_FIFO     3u            /* DIEPTXF[2]                    */
+
 /*---------------------------------------------------------------------------*/
 /* CONFIG                                                                    */
 /*---------------------------------------------------------------------------*/
@@ -145,12 +155,17 @@ static const uint8_t str_prod[30] = { 30, 0x03, 'T',0,'i',0,'k',0,'u',0,'O',0,
 /* The core writes these by DMA, so they are word-aligned and never on the
  * stack.  The setup buffer holds the three packets the core is armed for. */
 static uint32_t setup_buf[6];
-static uint8_t  ep0_in_buf[USB_EP0_MPS] __attribute__((aligned(4)));
+#define EP0_IN_CAP          128u
+static uint8_t  ep0_in_buf[EP0_IN_CAP] __attribute__((aligned(4)));
 static uint8_t  serial_buf[26] __attribute__((aligned(4)));
 
 static uint8_t  s_started;
+static uint8_t  s_dtr;          /* the host opened the port (DTR)           */
+static uint8_t  s_ep0_out_data; /* a class request's OUT data stage is due  */
+static uint8_t  s_in_busy;      /* a bulk IN transfer is on the wire        */
+static tiku_nordic_usbhs_cdc_rx_fn   s_on_rx;
+static tiku_nordic_usbhs_cdc_done_fn s_on_tx_done;
 static uint8_t  s_address;      /* the address the host assigned            */
-static uint8_t  s_pending_addr; /* applied after the status stage           */
 static uint8_t  s_configured;
 static uint32_t s_n_setup, s_n_reset, s_n_enum, s_speed;
 static uint32_t s_n_tx, s_n_in_done, s_n_out_done;
@@ -198,16 +213,23 @@ static void ep0_arm_setup(void)
     NRF_USBHSCORE_S->DOEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
-/** @brief Queue @p len bytes on EP0 IN; a zero length is the status stage. */
+/** @brief Queue @p len bytes on EP0 IN, as many packets as they take; a
+ *         zero length is the status stage. */
 static void ep0_tx(const void *data, uint32_t len)
 {
-    if (len > USB_EP0_MPS) {
-        len = USB_EP0_MPS;
+    uint32_t pkts;
+
+    if (len > EP0_IN_CAP) {
+        len = EP0_IN_CAP;
     }
     if (len > 0u && data != (const void *)0) {
         memcpy(ep0_in_buf, data, len);
     }
-    NRF_USBHSCORE_S->DIEPTSIZ0 = (1ul << DIEPTSIZ_PKTCNT_SHIFT) | len;
+    pkts = (len + USB_EP0_MPS - 1u) / USB_EP0_MPS;
+    if (pkts == 0u) {
+        pkts = 1u;
+    }
+    NRF_USBHSCORE_S->DIEPTSIZ0 = (pkts << DIEPTSIZ_PKTCNT_SHIFT) | len;
     NRF_USBHSCORE_S->DIEPDMA0  = (uint32_t)ep0_in_buf;
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
     s_n_tx++;
@@ -248,6 +270,34 @@ static uint16_t serial_desc(void)
 }
 
 /*---------------------------------------------------------------------------*/
+/* CDC DATA ENDPOINTS                                                        */
+/*---------------------------------------------------------------------------*/
+
+static uint8_t out_pkt[USB_BULK_MPS] __attribute__((aligned(4)));
+static uint8_t in_pkt[USB_BULK_MPS] __attribute__((aligned(4)));
+
+/** @brief Arm the bulk OUT endpoint for one packet from the host. */
+static void cdc_out_arm(void)
+{
+    NRF_USBHSCORE_S->DOEPTSIZ2 = (1ul << DOEPTSIZ_PKTCNT_SHIFT) | USB_BULK_MPS;
+    NRF_USBHSCORE_S->DOEPDMA2  = (uint32_t)out_pkt;
+    NRF_USBHSCORE_S->DOEPCTL2 |= DEPCTL_EPENA | DEPCTL_CNAK;
+}
+
+/** @brief Activate the two bulk endpoints and start listening. */
+static void cdc_endpoints_open(void)
+{
+    NRF_USBHSCORE_S->DOEPCTL2 = DEPCTL_USBACTEP | DEPCTL_TYPE_BULK |
+                                DEPCTL_SETD0PID | USB_BULK_MPS;
+    NRF_USBHSCORE_S->DIEPCTL3 = DEPCTL_USBACTEP | DEPCTL_TYPE_BULK |
+                                DEPCTL_SETD0PID | USB_BULK_MPS |
+                                ((uint32_t)EP_BULK_IN_FIFO << DEPCTL_TXFNUM_SHIFT);
+    NRF_USBHSCORE_S->DAINTMSK |= DAINT_OUT(EP_BULK_OUT) | DAINT_IN(EP_BULK_IN);
+    s_in_busy = 0u;
+    cdc_out_arm();
+}
+
+/*---------------------------------------------------------------------------*/
 /* EP0 CONTROL                                                               */
 /*---------------------------------------------------------------------------*/
 
@@ -265,19 +315,49 @@ static void ep0_setup(void)
     memcpy(s_log_req[s_log_head], p, 8u);
     s_log_ans[s_log_head] = 0xFFFFu;          /* stalled unless answered   */
 
-    if ((req_type & 0x60u) != 0u) {          /* class or vendor: later      */
-        if ((req_type & 0x80u) == 0u && length == 0u) {
-            ep0_tx((const void *)0, 0u);     /* accept and say nothing      */
-            ep0_arm_setup();
-            return;
+    if ((req_type & 0x60u) == 0x20u) {       /* CDC class requests          */
+        static const uint8_t line_coding[7] = {
+            0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08 };   /* 115200 8N1  */
+
+        switch (req) {
+        case 0x22:                           /* SET_CONTROL_LINE_STATE      */
+            s_dtr = (uint8_t)(value & 1u);
+            ep0_tx((const void *)0, 0u);
+            break;
+        case 0x20:                           /* SET_LINE_CODING: 7 bytes OUT */
+            /* The data lands in the armed setup buffer; its arrival is the
+             * cue for the status stage, so nothing is sent yet. */
+            s_ep0_out_data = 1u;
+            break;
+        case 0x21:                           /* GET_LINE_CODING             */
+            ep0_tx(line_coding, (length < 7u) ? length : 7u);
+            break;
+        default:
+            if ((req_type & 0x80u) == 0u && length == 0u) {
+                ep0_tx((const void *)0, 0u); /* accept and say nothing      */
+            } else {
+                ep0_stall();
+                return;
+            }
+            break;
         }
+        s_log_head = (uint8_t)((s_log_head + 1u) % LOG_N);
+        ep0_arm_setup();
+        return;
+    }
+    if ((req_type & 0x60u) != 0u) {          /* vendor: nothing to say      */
         ep0_stall();
         return;
     }
 
     switch (req) {
     case 0x05:                               /* SET_ADDRESS                 */
-        s_pending_addr = (uint8_t)(value & 0x7Fu);
+        /* The core wants the address before the status stage goes out; it
+         * finishes the exchange at the old one itself.  Applied after, the
+         * host's first request at the new address met nothing. */
+        s_address = (uint8_t)(value & 0x7Fu);
+        NRF_USBHSCORE_S->DCFG = (NRF_USBHSCORE_S->DCFG & ~DCFG_DEVADDR_MASK) |
+                                ((uint32_t)s_address << DCFG_DEVADDR_SHIFT);
         ep0_tx((const void *)0, 0u);
         break;
     case 0x06: {                             /* GET_DESCRIPTOR              */
@@ -313,6 +393,9 @@ static void ep0_setup(void)
         break;
     case 0x09:                               /* SET_CONFIGURATION           */
         s_configured = (uint8_t)(value & 0xFFu);
+        if (s_configured != 0u) {
+            cdc_endpoints_open();
+        }
         ep0_tx((const void *)0, 0u);
         break;
     case 0x00: {                             /* GET_STATUS                  */
@@ -341,8 +424,10 @@ void tiku_nordic_usbhs_dev_irq(void)
         NRF_USBHSCORE_S->GINTSTS = GINT_USBRST;
         s_n_reset++;
         s_address = 0u;
-        s_pending_addr = 0u;
         s_configured = 0u;
+        s_dtr = 0u;
+        s_in_busy = 0u;
+        s_ep0_out_data = 0u;
         NRF_USBHSCORE_S->DCFG &= ~DCFG_DEVADDR_MASK;
         NRF_USBHSCORE_S->DCTL |= DCTL_CGNPINNAK | DCTL_CGOUTNAK;
         fifo_flush();
@@ -356,32 +441,61 @@ void tiku_nordic_usbhs_dev_irq(void)
             (NRF_USBHSCORE_S->DIEPCTL0 & ~3ul) | DEPCTL0_MPS_64;
     }
     if ((sts & GINT_OEPINT) != 0u) {
-        uint32_t oi = NRF_USBHSCORE_S->DOEPINT0;
+        uint32_t daint = NRF_USBHSCORE_S->DAINT;
 
-        NRF_USBHSCORE_S->DOEPINT0 = oi;
-        if ((oi & DOEPINT_SETUP) != 0u) {
-            ep0_setup();
-        } else if ((oi & DEPINT_XFERCOMPL) != 0u) {
-            s_n_out_done++;
-            ep0_arm_setup();
+        if ((daint & DAINT_OUT(0)) != 0u) {
+            uint32_t oi = NRF_USBHSCORE_S->DOEPINT0;
+
+            NRF_USBHSCORE_S->DOEPINT0 = oi;
+            if ((oi & DOEPINT_SETUP) != 0u) {
+                ep0_setup();
+            } else if ((oi & DEPINT_XFERCOMPL) != 0u) {
+                s_n_out_done++;
+                if (s_ep0_out_data != 0u) {
+                    /* The class request's data stage arrived; answer it. */
+                    s_ep0_out_data = 0u;
+                    ep0_tx((const void *)0, 0u);
+                }
+                ep0_arm_setup();
+            }
+        }
+        if ((daint & DAINT_OUT(EP_BULK_OUT)) != 0u) {
+            uint32_t oi = NRF_USBHSCORE_S->DOEPINT2;
+
+            NRF_USBHSCORE_S->DOEPINT2 = oi;
+            if ((oi & DEPINT_XFERCOMPL) != 0u) {
+                uint32_t left = NRF_USBHSCORE_S->DOEPTSIZ2 & DOEPTSIZ_XFER_MASK;
+                uint32_t got = USB_BULK_MPS - left;
+
+                if (got > 0u && s_on_rx != (tiku_nordic_usbhs_cdc_rx_fn)0) {
+                    s_on_rx(out_pkt, got);
+                }
+                cdc_out_arm();
+            }
         }
     }
     if ((sts & GINT_IEPINT) != 0u) {
-        uint32_t ii = NRF_USBHSCORE_S->DIEPINT0;
+        uint32_t daint = NRF_USBHSCORE_S->DAINT;
 
-        NRF_USBHSCORE_S->DIEPINT0 = ii;
-        s_last_diepint = ii;
-        if ((ii & DEPINT_XFERCOMPL) != 0u) {
-            s_n_in_done++;
-            s_tsiz_after = NRF_USBHSCORE_S->DIEPTSIZ0;
-            /* The address takes effect only once its status stage is on the
-             * wire; applying it earlier loses the host. */
-            if (s_pending_addr != 0u) {
-                NRF_USBHSCORE_S->DCFG =
-                    (NRF_USBHSCORE_S->DCFG & ~DCFG_DEVADDR_MASK) |
-                    ((uint32_t)s_pending_addr << DCFG_DEVADDR_SHIFT);
-                s_address = s_pending_addr;
-                s_pending_addr = 0u;
+        if ((daint & DAINT_IN(0)) != 0u) {
+            uint32_t ii = NRF_USBHSCORE_S->DIEPINT0;
+
+            NRF_USBHSCORE_S->DIEPINT0 = ii;
+            s_last_diepint = ii;
+            if ((ii & DEPINT_XFERCOMPL) != 0u) {
+                s_n_in_done++;
+                s_tsiz_after = NRF_USBHSCORE_S->DIEPTSIZ0;
+            }
+        }
+        if ((daint & DAINT_IN(EP_BULK_IN)) != 0u) {
+            uint32_t ii = NRF_USBHSCORE_S->DIEPINT3;
+
+            NRF_USBHSCORE_S->DIEPINT3 = ii;
+            if ((ii & DEPINT_XFERCOMPL) != 0u) {
+                s_in_busy = 0u;
+                if (s_on_tx_done != (tiku_nordic_usbhs_cdc_done_fn)0) {
+                    s_on_tx_done();
+                }
             }
         }
     }
@@ -481,6 +595,8 @@ void tiku_nordic_usbhs_dev_stop(void)
     s_started = 0u;
     s_configured = 0u;
     s_address = 0u;
+    s_dtr = 0u;
+    s_in_busy = 0u;
 }
 
 void tiku_nordic_usbhs_dev_trace(uint8_t *setup8, uint32_t *tx,
@@ -528,4 +644,38 @@ void tiku_nordic_usbhs_dev_stats(uint32_t *setup, uint32_t *reset,
 uint8_t tiku_nordic_usbhs_dev_started(void)
 {
     return s_started;
+}
+
+void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,
+                                    tiku_nordic_usbhs_cdc_done_fn on_tx_done)
+{
+    s_on_rx = on_rx;
+    s_on_tx_done = on_tx_done;
+}
+
+uint8_t tiku_nordic_usbhs_dev_cdc_open(void)
+{
+    return (uint8_t)(s_started != 0u && s_configured != 0u && s_dtr != 0u);
+}
+
+int tiku_nordic_usbhs_dev_cdc_send(const uint8_t *data, uint32_t len)
+{
+    uint32_t pkts;
+
+    if (s_in_busy != 0u || s_configured == 0u || len == 0u ||
+        len > USB_BULK_MPS) {
+        return -1;
+    }
+    memcpy(in_pkt, data, len);
+    pkts = (len + USB_BULK_MPS - 1u) / USB_BULK_MPS;
+    s_in_busy = 1u;
+    NRF_USBHSCORE_S->DIEPTSIZ3 = (pkts << DIEPTSIZ_PKTCNT_SHIFT) | len;
+    NRF_USBHSCORE_S->DIEPDMA3  = (uint32_t)in_pkt;
+    NRF_USBHSCORE_S->DIEPCTL3 |= DEPCTL_EPENA | DEPCTL_CNAK;
+    return 0;
+}
+
+uint8_t tiku_nordic_usbhs_dev_cdc_sending(void)
+{
+    return s_in_busy;
 }
