@@ -2546,6 +2546,16 @@ else
 $(warning cryptoprobe: needs TIKU_CRACEN_PK_ENABLE=1 (CRACEN PK) -- skipped)
 endif
 endif
+# USB high-speed bring-up probe (nRF54LM20A/B) -- opt-in.
+ifneq (,$(findstring TIKU_SHELL_CMD_USBPROBE=1,$(EXTRA_CFLAGS)))
+ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
+SRCS += kernel/shell/commands/tiku_shell_cmd_usbprobe.c
+SRCS += arch/nordic/tiku_usbhs_arch.c
+else
+$(warning usbprobe: the USB block exists only on nrf54lm20a/b -- skipped)
+endif
+endif
+
 ifneq (,$(findstring TIKU_SHELL_CMD_AXONSPROBE=1,$(EXTRA_CFLAGS)))
 ifeq ($(MCU),nrf54lm20b)
 SRCS += kernel/shell/commands/tiku_shell_cmd_axonsprobe.c

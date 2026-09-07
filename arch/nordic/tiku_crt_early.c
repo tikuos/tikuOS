@@ -99,6 +99,10 @@ void tiku_nordic_radio_isr(void)           __attribute__((weak, alias("nordic_de
 /* Axon NPU (nRF54LM20B only; IRQn 86).  The slot is wired on every nordic
  * device -- it stays the default handler unless a probe/driver overrides. */
 void tiku_nordic_axons_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
+/* USB high speed: the DWC2 core's interrupt (90) and the VBUS regulator's
+ * (289, nRF54LM20 only -- past the nRF54L15's table). */
+void tiku_nordic_usbhs_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
+void tiku_nordic_vregusb_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Factory trim application + silicon errata (minimal SystemInit)            */
@@ -386,7 +390,9 @@ __attribute__((section(".vectors"), used)) = {
     [16 +   0 ... 16 +  75] = nordic_default_handler,
     [16 +  86] = tiku_nordic_axons_isr,        /* AXONS_IRQn      = 86 (LM20B) */
     [16 +  77 ... 16 +  85] = nordic_default_handler,
-    [16 +  87 ... 16 + 132] = nordic_default_handler,
+    [16 +  90] = tiku_nordic_usbhs_isr,        /* USBHS_IRQn      = 90        */
+    [16 +  87 ... 16 +  89] = nordic_default_handler,
+    [16 +  91 ... 16 + 132] = nordic_default_handler,
     [16 + 134 ... 16 + 137] = nordic_default_handler,
     [16 + 139 ... 16 + 197] = nordic_default_handler,
     [16 + 199 ... 16 + 201] = nordic_default_handler,
@@ -396,5 +402,10 @@ __attribute__((section(".vectors"), used)) = {
     [16 + 261 ... 16 + 267] = nordic_default_handler,
     /* Upper bound tracks the device IRQ count (271 on nRF54L15, 289 on the
      * nRF54LM20A) so every remaining external slot is filled. */
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+    [16 + 289] = tiku_nordic_vregusb_isr,      /* VREGUSB_IRQn    = 289       */
+    [16 + 269 ... 16 + 288] = nordic_default_handler,
+#else
     [16 + 269 ... 16 + (NORDIC_NUM_EXT_IRQS - 1)] = nordic_default_handler,
+#endif
 };

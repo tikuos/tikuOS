@@ -237,6 +237,9 @@
 #ifndef TIKU_SHELL_CMD_AXONSPROBE
 #define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe- Axon NPU bring-up probe (opt-in) */
 #endif
+#ifndef TIKU_SHELL_CMD_USBPROBE
+#define TIKU_SHELL_CMD_USBPROBE 0 /**< usbprobe- USB high-speed bring-up probe (opt-in) */
+#endif
 #ifndef TIKU_SHELL_CMD_READ
 #define TIKU_SHELL_CMD_READ    1  /**< read    - Read value from VFS node */
 #endif
@@ -563,6 +566,12 @@
 #undef  TIKU_SHELL_CMD_RFTEST
 #define TIKU_SHELL_CMD_RFTEST 0
 #endif
+/* The probe drives the USB block directly, so it needs a part that has one. */
+#if TIKU_SHELL_CMD_USBPROBE && !(TIKU_DEVICE_HAS_USBHS + 0)
+#undef  TIKU_SHELL_CMD_USBPROBE
+#define TIKU_SHELL_CMD_USBPROBE 0
+#endif
+
 #if TIKU_SHELL_CMD_BLEADV && !(TIKU_HAS_BLE_ADV + 0)
 #undef  TIKU_SHELL_CMD_BLEADV
 #define TIKU_SHELL_CMD_BLEADV 0

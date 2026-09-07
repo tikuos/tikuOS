@@ -44,6 +44,10 @@
  *
  * @note The port-to-base-pointer mapping lives in the GPIO arch layer.
  */
+/* USB 2.0 high-speed device: a Synopsys DWC2 core behind the Nordic
+ * wrapper, with its own VBUS regulator. */
+#define TIKU_DEVICE_HAS_USBHS       1
+
 #define TIKU_DEVICE_HAS_PORT1       1   /* P0 */
 #define TIKU_DEVICE_HAS_PORT2       1   /* P1 */
 #define TIKU_DEVICE_HAS_PORT3       1   /* P2 */
