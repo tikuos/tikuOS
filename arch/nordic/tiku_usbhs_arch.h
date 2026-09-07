@@ -147,6 +147,9 @@ typedef void (*tiku_nordic_usbhs_cdc_done_fn)(void);
 void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,
                                     tiku_nordic_usbhs_cdc_done_fn on_tx_done);
 
+/** @brief Configured by the host: the bulk endpoints are live. */
+uint8_t tiku_nordic_usbhs_dev_cdc_configured(void);
+
 /** @brief Configured by the host AND a terminal holds DTR: the port is open. */
 uint8_t tiku_nordic_usbhs_dev_cdc_open(void);
 

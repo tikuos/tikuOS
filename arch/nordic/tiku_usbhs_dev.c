@@ -653,6 +653,11 @@ void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,
     s_on_tx_done = on_tx_done;
 }
 
+uint8_t tiku_nordic_usbhs_dev_cdc_configured(void)
+{
+    return (uint8_t)(s_started != 0u && s_configured != 0u);
+}
+
 uint8_t tiku_nordic_usbhs_dev_cdc_open(void)
 {
     return (uint8_t)(s_started != 0u && s_configured != 0u && s_dtr != 0u);

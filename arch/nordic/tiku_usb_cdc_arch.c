@@ -56,8 +56,12 @@ static void tx_kick(void)
 {
     uint16_t n = 0u;
 
+    /* Configured is enough to send: a host that has not opened the port
+     * reads nothing and the ring drops its oldest, which costs no one
+     * anything, while a host whose serial layer leaves DTR low (the bench
+     * does, for the probe rigs it shares) still gets its answers. */
     if (tiku_nordic_usbhs_dev_cdc_sending() != 0u ||
-        tiku_nordic_usbhs_dev_cdc_open() == 0u) {
+        tiku_nordic_usbhs_dev_cdc_configured() == 0u) {
         return;
     }
     while (n < TX_CHUNK && tx_tail != tx_head) {
