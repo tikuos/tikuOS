@@ -832,13 +832,20 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             break;
         }
     }
-    /* F2: if this link switched PHYs, put the RADIO back on 1M before
-     * handing it on -- the advertising channels are 1M-only, and leaked 2M
-     * MODE/PCNF0 makes the next ADV session inaudible to every scanner. */
-    if (sh->conn_phy != 0u) {
-        r->MODE  = 3u;
-        r->PCNF0 = (8u << 0) | (1u << 8) | (1u << 20);
-    }
+    /* The advertising static config, restored before the radio is handed
+     * on: a connection reprograms the access address (BASE0/PREFIX0) and
+     * CRC init to its data values, and a beacon or advertise that follows
+     * would transmit on the advertising channels yet be undecodable to
+     * every scanner filtering for 0x8E89BED6 / 0x555555.  The next owner
+     * (the M33 beacon offload runs adv init only once a boot) inherits
+     * these registers, so the coprocessor leaves them advertising-ready.
+     * MODE/PCNF0 go back to 1M too -- a PHY-switched link left them at 2M,
+     * and the advertising channels are 1M only. */
+    r->MODE    = 3u;
+    r->PCNF0   = (8u << 0) | (1u << 8) | (1u << 20);
+    r->BASE0   = 0x89BED600u;                    /* access addr 0x8E89BED6   */
+    r->PREFIX0 = 0x0000008Eu;
+    r->CRCINIT = 0x00555555u;                    /* advertising CRC init     */
     sh->conn_state = 3u;                         /* link ended               */
 }
 
