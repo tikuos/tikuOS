@@ -106,4 +106,51 @@ void tiku_nordic_usbhs_read(tiku_nordic_usbhs_regs_t *out);
 void tiku_nordic_usbhs_counts(uint32_t *core_irqs, uint32_t *vbus_irqs,
                               uint32_t *gintsts_seen);
 
+/*---------------------------------------------------------------------------*/
+/* DEVICE MODE (tiku_usbhs_dev.c)                                            */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Configure device mode on a core already brought up, arm EP0 and
+ *        present the pull-up so the host begins enumeration.
+ * @return 0, or -1 if the core is not idle (bring it up first).
+ */
+int tiku_nordic_usbhs_dev_start(void);
+
+/**
+ * @brief As tiku_nordic_usbhs_dev_start(), choosing the PHY's data width
+ *        and turnaround time: @p phyif16 below zero keeps the reset value,
+ *        @p trdtim above 15 keeps it.
+ */
+int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
+                                    uint32_t devspd);
+
+/** @brief Remove the pull-up and mask the core's interrupts. */
+void tiku_nordic_usbhs_dev_stop(void);
+
+/** @brief Service the core's interrupt in device mode. */
+void tiku_nordic_usbhs_dev_irq(void);
+
+/** @brief Whether device mode is running. */
+uint8_t tiku_nordic_usbhs_dev_started(void);
+
+/** @brief What enumeration has reached: the counts, the speed the host
+ *         settled on, the assigned address and the chosen configuration. */
+void tiku_nordic_usbhs_dev_stats(uint32_t *setup, uint32_t *reset,
+                                 uint32_t *enum_done, uint32_t *speed,
+                                 uint8_t *address, uint8_t *configured);
+
+/** @brief The last control request seen and what the IN endpoint did with
+ *         its answer: for telling a request that never arrived from one
+ *         whose data never left. */
+void tiku_nordic_usbhs_dev_trace(uint8_t *setup8, uint32_t *tx,
+                                 uint32_t *in_done, uint32_t *out_done,
+                                 uint32_t *tsiz, uint32_t *ctl, uint32_t *iint);
+
+/** @brief Where the control buffer is, what it held when a transfer was
+ *         armed, and whether the core's counter drained: for telling bad
+ *         data from data the core never fetched. */
+void tiku_nordic_usbhs_dev_dma(uint32_t *addr, uint32_t *tsiz_after,
+                               uint32_t *armed_len, uint8_t *armed8);
+
 #endif /* TIKU_USBHS_ARCH_H_ */

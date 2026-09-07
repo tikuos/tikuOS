@@ -84,6 +84,10 @@ void tiku_nordic_usbhs_isr(void)
 
     s_core_irqs++;
     s_gintsts_seen |= sts;
+    if (tiku_nordic_usbhs_dev_started() != 0u) {
+        tiku_nordic_usbhs_dev_irq();
+        return;
+    }
     NRF_USBHSCORE_S->GINTSTS = sts;          /* write-1-to-clear          */
     NRF_USBHSCORE_S->GINTMSK = 0u;           /* nothing services it yet   */
 }

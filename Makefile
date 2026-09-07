@@ -2551,6 +2551,7 @@ ifneq (,$(findstring TIKU_SHELL_CMD_USBPROBE=1,$(EXTRA_CFLAGS)))
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_usbprobe.c
 SRCS += arch/nordic/tiku_usbhs_arch.c
+SRCS += arch/nordic/tiku_usbhs_dev.c
 else
 $(warning usbprobe: the USB block exists only on nrf54lm20a/b -- skipped)
 endif

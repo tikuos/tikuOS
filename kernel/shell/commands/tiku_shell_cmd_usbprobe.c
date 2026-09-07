@@ -131,7 +131,7 @@ tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[])
 {
     if (argc < 2) {
         SHELL_PRINTF("usage: usbprobe regs|vbus|up|down|live [n]"
-                     "|try <en> <first> [fsel]\n");
+                     "|dev|enum|try <en> <first> [fsel]\n");
         return;
     }
     if (strcmp(argv[1], "regs") == 0) {
@@ -154,6 +154,58 @@ tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[])
                                        : "core never went idle (rc -1)");
         if (rc == 0) {
             usbprobe_regs();
+        }
+        return;
+    }
+    if (strcmp(argv[1], "dev") == 0) {
+        int phyif = (argc >= 3) ? (int)strtol(argv[2], (char **)0, 0) : -1;
+        uint32_t trd = (argc >= 4)
+                       ? (uint32_t)strtoul(argv[3], (char **)0, 0) : 0xFFu;
+        uint32_t spd = (argc >= 5)
+                       ? (uint32_t)strtoul(argv[4], (char **)0, 0) : 0u;
+        int rc = tiku_nordic_usbhs_dev_start_cfg(phyif, trd, spd);
+
+        SHELL_PRINTF("%s\n", (rc == 0) ? "device mode up, pull-up presented"
+                                        : "core not idle (usbprobe up first)");
+        return;
+    }
+    if (strcmp(argv[1], "enum") == 0) {
+        uint32_t setup = 0u, rst = 0u, ed = 0u, spd = 0u;
+        uint8_t addr = 0u, cfg = 0u;
+
+        tiku_nordic_usbhs_dev_stats(&setup, &rst, &ed, &spd, &addr, &cfg);
+        SHELL_PRINTF("ENUM : setup=%lu resets=%lu enumdone=%lu speed=%s\n",
+                     (unsigned long)setup, (unsigned long)rst,
+                     (unsigned long)ed, speed_str(spd << 1));
+        SHELL_PRINTF("     : address=%u configuration=%u started=%u\n",
+                     (unsigned)addr, (unsigned)cfg,
+                     (unsigned)tiku_nordic_usbhs_dev_started());
+        {
+            uint8_t su[8];
+            uint32_t tx = 0u, ind = 0u, outd = 0u, tz = 0u, ct = 0u, ii = 0u;
+
+            tiku_nordic_usbhs_dev_trace(su, &tx, &ind, &outd, &tz, &ct, &ii);
+            SHELL_PRINTF("SETUP: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                         su[0], su[1], su[2], su[3], su[4], su[5], su[6],
+                         su[7]);
+            SHELL_PRINTF("EP0  : tx=%lu in_done=%lu out_done=%lu\n",
+                         (unsigned long)tx, (unsigned long)ind,
+                         (unsigned long)outd);
+            SHELL_PRINTF("     : dieptsiz=%lx diepctl=%lx diepint=%lx\n",
+                         (unsigned long)tz, (unsigned long)ct,
+                         (unsigned long)ii);
+            {
+                uint32_t ad = 0u, ta = 0u, al = 0u;
+                uint8_t b8[8];
+
+                tiku_nordic_usbhs_dev_dma(&ad, &ta, &al, b8);
+                SHELL_PRINTF("DMA  : buf=%lx armed_len=%lu tsiz_after=%lx\n",
+                             (unsigned long)ad, (unsigned long)al,
+                             (unsigned long)ta);
+                SHELL_PRINTF("     : bytes %02x %02x %02x %02x %02x %02x"
+                             " %02x %02x\n", b8[0], b8[1], b8[2], b8[3],
+                             b8[4], b8[5], b8[6], b8[7]);
+            }
         }
         return;
     }
