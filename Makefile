@@ -2556,6 +2556,22 @@ else
 $(warning cryptoprobe: needs TIKU_CRACEN_PK_ENABLE=1 (CRACEN PK) -- skipped)
 endif
 endif
+# USB mass storage (nRF54LM20A/B) -- opt-in second face of the DWC2 core.
+# Mutually exclusive with the USB CDC console: both provide the device ISR.
+ifeq ($(TIKU_USBHS_MSC),1)
+ifeq ($(filter nrf54lm20a nrf54lm20b,$(MCU)),)
+$(error TIKU_USBHS_MSC=1 needs MCU=nrf54lm20a or nrf54lm20b)
+endif
+ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
+$(error TIKU_USBHS_MSC=1 and TIKU_CONSOLE=$(TIKU_CONSOLE) both claim the USB device; build mass storage with TIKU_CONSOLE=uart)
+endif
+SRCS   += arch/nordic/tiku_usbhs_arch.c
+SRCS   += arch/nordic/tiku_usbhs_msc.c
+SRCS   += kernel/usb/tiku_usbd_msc.c
+SRCS   += kernel/shell/commands/tiku_shell_cmd_usbmsc.c
+CFLAGS += -DTIKU_USBHS_MSC=1
+endif
+
 # USB high-speed bring-up probe (nRF54LM20A/B) -- opt-in.
 ifneq (,$(findstring TIKU_SHELL_CMD_USBPROBE=1,$(EXTRA_CFLAGS)))
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))

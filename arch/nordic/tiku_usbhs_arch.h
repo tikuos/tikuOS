@@ -196,4 +196,23 @@ void tiku_nordic_usbhs_dev_dma(uint32_t *addr, uint32_t *tsiz_after,
  *         answer is the byte count sent, or 0xFFFF for a stall. */
 void tiku_nordic_usbhs_dev_log(uint8_t index, uint8_t *req8, uint16_t *ans);
 
+
+/*---------------------------------------------------------------------------*/
+/* MASS STORAGE (a second face for the core; its own build)                  */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Present the SCSI disk: device mode, endpoints, pull-up.  0 on ok. */
+int tiku_nordic_usbhs_msc_start(void);
+
+/** @brief Drop the pull-up and stop mass storage. */
+void tiku_nordic_usbhs_msc_stop(void);
+
+/** @brief Copy up to @p n bytes of block @p lba from the disk; returns the
+ *         count, so a host write can be confirmed on the board. */
+uint32_t tiku_nordic_usbhs_msc_peek(uint32_t lba, uint8_t *dst, uint32_t n);
+
+/** @brief Command/read/write/bad/interrupt counts and the configured value. */
+void tiku_nordic_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
+                                 uint32_t *bad, uint32_t *irq, uint8_t *cfg);
+
 #endif /* TIKU_USBHS_ARCH_H_ */

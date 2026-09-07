@@ -173,6 +173,9 @@
 #if TIKU_SHELL_CMD_AXONSPROBE
 #include "commands/tiku_shell_cmd_axonsprobe.h"
 #endif
+#if TIKU_SHELL_CMD_USBMSC
+#include "commands/tiku_shell_cmd_usbmsc.h"
+#endif
 #if TIKU_SHELL_CMD_USBPROBE
 #include "commands/tiku_shell_cmd_usbprobe.h"
 #endif
@@ -666,6 +669,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_USBPROBE
     {"usbprobe","USB high-speed probe",       tiku_shell_cmd_usbprobe},
+#endif
+#if TIKU_SHELL_CMD_USBMSC
+    {"usbmsc",  "USB mass storage disk",       tiku_shell_cmd_usbmsc},
 #endif
 #if TIKU_SHELL_CMD_BLEADV
     {"bleadv",  "BLE beacon (nRF54L)",        tiku_shell_cmd_bleadv},

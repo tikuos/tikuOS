@@ -237,6 +237,14 @@
 #ifndef TIKU_SHELL_CMD_AXONSPROBE
 #define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe- Axon NPU bring-up probe (opt-in) */
 #endif
+#ifndef TIKU_SHELL_CMD_USBMSC
+#if defined(TIKU_USBHS_MSC)
+#define TIKU_SHELL_CMD_USBMSC 1  /**< usbmsc - present the board as a disk */
+#else
+#define TIKU_SHELL_CMD_USBMSC 0
+#endif
+#endif
+
 #ifndef TIKU_SHELL_CMD_USBPROBE
 #define TIKU_SHELL_CMD_USBPROBE 0 /**< usbprobe- USB high-speed bring-up probe (opt-in) */
 #endif
