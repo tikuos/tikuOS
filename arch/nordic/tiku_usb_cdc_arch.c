@@ -29,11 +29,13 @@
 /* CONFIG                                                                    */
 /*---------------------------------------------------------------------------*/
 
-#define TX_RING     512u                    /* power of two              */
-#define RX_RING     1024u
-#define TX_CHUNK    63u                     /* under the packet size, so no
-                                             * transfer ends on a full
-                                             * packet and needs a ZLP     */
+#define TX_RING     1024u                   /* powers of two             */
+#define RX_RING     2048u
+#define TX_CHUNK    511u                    /* at most; a chunk stays one
+                                             * byte under the packet size
+                                             * in force, so no transfer
+                                             * ends on a full packet and
+                                             * needs a ZLP after it      */
 #define FLUSH_SPINS 4000000u
 
 /*---------------------------------------------------------------------------*/
@@ -55,6 +57,11 @@ static uint8_t  chunk[TX_CHUNK];
 static void tx_kick(void)
 {
     uint16_t n = 0u;
+    uint16_t lim = (uint16_t)(tiku_nordic_usbhs_dev_cdc_mps() - 1u);
+
+    if (lim > TX_CHUNK) {
+        lim = TX_CHUNK;
+    }
 
     /* Configured is enough to send: a host that has not opened the port
      * reads nothing and the ring drops its oldest, which costs no one
@@ -64,7 +71,7 @@ static void tx_kick(void)
         tiku_nordic_usbhs_dev_cdc_configured() == 0u) {
         return;
     }
-    while (n < TX_CHUNK && tx_tail != tx_head) {
+    while (n < lim && tx_tail != tx_head) {
         chunk[n++] = tx[tx_tail];
         tx_tail = (uint16_t)((tx_tail + 1u) & (TX_RING - 1u));
     }
@@ -84,7 +91,7 @@ static uint8_t out_ready(void)
 {
     uint16_t used = (uint16_t)((rx_head - rx_tail) & (RX_RING - 1u));
 
-    return (uint8_t)((RX_RING - 1u - used) >= 64u);
+    return (uint8_t)((RX_RING - 1u - used) >= tiku_nordic_usbhs_dev_cdc_mps());
 }
 
 static void on_rx(const uint8_t *data, uint32_t len)

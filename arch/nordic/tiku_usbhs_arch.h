@@ -169,6 +169,10 @@ int tiku_nordic_usbhs_dev_cdc_send(const uint8_t *data, uint32_t len);
 /** @brief Whether a bulk IN packet is still on the wire. */
 uint8_t tiku_nordic_usbhs_dev_cdc_sending(void);
 
+/** @brief The bulk packet size in force: 512 at high speed, else 64. */
+uint32_t tiku_nordic_usbhs_dev_cdc_mps(void);
+
+
 /** @brief What enumeration has reached: the counts, the speed the host
  *         settled on, the assigned address and the chosen configuration. */
 void tiku_nordic_usbhs_dev_stats(uint32_t *setup, uint32_t *reset,

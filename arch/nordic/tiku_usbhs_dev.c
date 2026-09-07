@@ -94,14 +94,18 @@
 /*---------------------------------------------------------------------------*/
 
 #define USB_EP0_MPS         64u
-#define USB_BULK_MPS        64u
+#define USB_BULK_MPS        64u           /* full speed, and the descriptor
+                                             * as written; high speed
+                                             * rewrites it to 512        */
+#define USB_BULK_MPS_HS     512u
+static uint32_t s_bulk_mps = USB_BULK_MPS;
 
 /* FIFO layout in words, inside the 3040 the core reports.  The receive FIFO
  * is shared by every OUT endpoint; each IN endpoint gets its own. */
-#define FIFO_RX_WORDS       256u
+#define FIFO_RX_WORDS       384u          /* two 512-byte packets + setup */
 #define FIFO_EP0IN_WORDS    64u
 #define FIFO_EP1IN_WORDS    64u
-#define FIFO_EP3IN_WORDS    128u
+#define FIFO_EP3IN_WORDS    256u          /* two 512-byte packets         */
 
 #define USBHS_SPINS         2000000u
 
@@ -123,7 +127,7 @@ static const uint8_t dev_desc[18] = {
 };
 
 #define CONF_TOTAL_LEN 75
-static const uint8_t conf_desc[CONF_TOTAL_LEN] = {
+static uint8_t conf_desc[CONF_TOTAL_LEN] = {
     9, 0x02, CONF_TOTAL_LEN, 0x00, 0x02, 0x01, 0x00, 0x80, 50,
     /* CDC association, two interfaces from #0 */
     8, 0x0B, 0x00, 0x02, 0x02, 0x02, 0x00, 0x00,
@@ -301,17 +305,38 @@ static uint16_t serial_desc(void)
 /* CDC DATA ENDPOINTS                                                        */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Write @p mps into every bulk endpoint descriptor of the
+ *         configuration (bLength 7, type 5, attributes bulk). */
+static void bulk_desc_set_mps(uint32_t mps)
+{
+    uint32_t i = 0u;
+
+    while (i + 7u <= sizeof conf_desc) {
+        uint8_t len = conf_desc[i];
+
+        if (len < 2u) {
+            break;
+        }
+        if (len == 7u && conf_desc[i + 1u] == 0x05u &&
+            (conf_desc[i + 3u] & 0x03u) == 0x02u) {
+            conf_desc[i + 4u] = (uint8_t)(mps & 0xFFu);
+            conf_desc[i + 5u] = (uint8_t)(mps >> 8);
+        }
+        i += len;
+    }
+}
+
 /* Two OUT buffers so the endpoint is re-armed on the alternate before the
  * received bytes are copied out, not after, closing the window a single
  * buffer left open while it was busy. */
-static uint8_t out_pkt[2][USB_BULK_MPS] __attribute__((aligned(4)));
+static uint8_t out_pkt[2][USB_BULK_MPS_HS] __attribute__((aligned(4)));
 static uint8_t s_out_cur;
-static uint8_t in_pkt[USB_BULK_MPS] __attribute__((aligned(4)));
+static uint8_t in_pkt[USB_BULK_MPS_HS] __attribute__((aligned(4)));
 
 /** @brief Arm the bulk OUT endpoint for one packet into the current buffer. */
 static void cdc_out_arm(void)
 {
-    NRF_USBHSCORE_S->DOEPTSIZ2 = (1ul << DOEPTSIZ_PKTCNT_SHIFT) | USB_BULK_MPS;
+    NRF_USBHSCORE_S->DOEPTSIZ2 = (1ul << DOEPTSIZ_PKTCNT_SHIFT) | s_bulk_mps;
     NRF_USBHSCORE_S->DOEPDMA2  = (uint32_t)out_pkt[s_out_cur];
     NRF_USBHSCORE_S->DOEPCTL2 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
@@ -320,9 +345,9 @@ static void cdc_out_arm(void)
 static void cdc_endpoints_open(void)
 {
     NRF_USBHSCORE_S->DOEPCTL2 = DEPCTL_USBACTEP | DEPCTL_TYPE_BULK |
-                                DEPCTL_SETD0PID | USB_BULK_MPS;
+                                DEPCTL_SETD0PID | s_bulk_mps;
     NRF_USBHSCORE_S->DIEPCTL3 = DEPCTL_USBACTEP | DEPCTL_TYPE_BULK |
-                                DEPCTL_SETD0PID | USB_BULK_MPS |
+                                DEPCTL_SETD0PID | s_bulk_mps |
                                 ((uint32_t)EP_BULK_IN_FIFO << DEPCTL_TXFNUM_SHIFT);
     NRF_USBHSCORE_S->DAINTMSK |= DAINT_OUT(EP_BULK_OUT) | DAINT_IN(EP_BULK_IN);
     s_in_busy = 0u;
@@ -475,6 +500,11 @@ void tiku_nordic_usbhs_dev_irq(void)
         s_speed = (NRF_USBHSCORE_S->DSTS >> 1) & 0x3u;
         NRF_USBHSCORE_S->DIEPCTL0 =
             (NRF_USBHSCORE_S->DIEPCTL0 & ~3ul) | DEPCTL0_MPS_64;
+        /* Bulk packets are 512 bytes at high speed, 64 below it; the host
+         * controller sends the speed's size whatever the descriptor says,
+         * and a packet wider than the endpoint is babble, never taken. */
+        s_bulk_mps = (s_speed == 0u) ? USB_BULK_MPS_HS : USB_BULK_MPS;
+        bulk_desc_set_mps(s_bulk_mps);
     }
     if ((sts & GINT_OEPINT) != 0u) {
         uint32_t daint = NRF_USBHSCORE_S->DAINT;
@@ -501,7 +531,7 @@ void tiku_nordic_usbhs_dev_irq(void)
             NRF_USBHSCORE_S->DOEPINT2 = oi;
             if ((oi & DEPINT_XFERCOMPL) != 0u) {
                 uint32_t left = NRF_USBHSCORE_S->DOEPTSIZ2 & DOEPTSIZ_XFER_MASK;
-                uint32_t got = USB_BULK_MPS - left;
+                uint32_t got = s_bulk_mps - left;
                 uint8_t  done = s_out_cur;
 
                 if (got > 0u && s_on_rx != (tiku_nordic_usbhs_cdc_rx_fn)0) {
@@ -735,11 +765,11 @@ int tiku_nordic_usbhs_dev_cdc_send(const uint8_t *data, uint32_t len)
     uint32_t pkts;
 
     if (s_in_busy != 0u || s_configured == 0u || len == 0u ||
-        len > USB_BULK_MPS) {
+        len > s_bulk_mps) {
         return -1;
     }
     memcpy(in_pkt, data, len);
-    pkts = (len + USB_BULK_MPS - 1u) / USB_BULK_MPS;
+    pkts = (len + s_bulk_mps - 1u) / s_bulk_mps;
     s_in_busy = 1u;
     NRF_USBHSCORE_S->DIEPTSIZ3 = (pkts << DIEPTSIZ_PKTCNT_SHIFT) | len;
     NRF_USBHSCORE_S->DIEPDMA3  = (uint32_t)in_pkt;
@@ -751,3 +781,9 @@ uint8_t tiku_nordic_usbhs_dev_cdc_sending(void)
 {
     return s_in_busy;
 }
+
+uint32_t tiku_nordic_usbhs_dev_cdc_mps(void)
+{
+    return s_bulk_mps;
+}
+
