@@ -153,4 +153,8 @@ void tiku_nordic_usbhs_dev_trace(uint8_t *setup8, uint32_t *tx,
 void tiku_nordic_usbhs_dev_dma(uint32_t *addr, uint32_t *tsiz_after,
                                uint32_t *armed_len, uint8_t *armed8);
 
+/** @brief One entry of the control-request log, oldest at index 0; the
+ *         answer is the byte count sent, or 0xFFFF for a stall. */
+void tiku_nordic_usbhs_dev_log(uint8_t index, uint8_t *req8, uint16_t *ans);
+
 #endif /* TIKU_USBHS_ARCH_H_ */

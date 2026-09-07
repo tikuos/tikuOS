@@ -160,6 +160,13 @@ static uint32_t s_tsiz_after;      /* the counter once the core was done   */
 static uint8_t  s_armed_bytes[8];  /* what the buffer held at arming       */
 static uint32_t s_armed_len;
 
+/* The last few control requests and what each was answered with: enough to
+ * read the conversation rather than infer it from a single snapshot. */
+#define LOG_N 8u
+static uint8_t  s_log_req[LOG_N][8];
+static uint16_t s_log_ans[LOG_N];
+static uint8_t  s_log_head;
+
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
@@ -204,6 +211,7 @@ static void ep0_tx(const void *data, uint32_t len)
     NRF_USBHSCORE_S->DIEPDMA0  = (uint32_t)ep0_in_buf;
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
     s_n_tx++;
+    s_log_ans[s_log_head] = (uint16_t)len;
     if (len > 0u) {
         memcpy(s_armed_bytes, ep0_in_buf, (len < 8u) ? len : 8u);
         s_armed_len = len;
@@ -254,6 +262,8 @@ static void ep0_setup(void)
 
     s_n_setup++;
     memcpy(s_last_setup, p, 8u);
+    memcpy(s_log_req[s_log_head], p, 8u);
+    s_log_ans[s_log_head] = 0xFFFFu;          /* stalled unless answered   */
 
     if ((req_type & 0x60u) != 0u) {          /* class or vendor: later      */
         if ((req_type & 0x80u) == 0u && length == 0u) {
@@ -315,6 +325,7 @@ static void ep0_setup(void)
         ep0_stall();
         return;
     }
+    s_log_head = (uint8_t)((s_log_head + 1u) % LOG_N);
     ep0_arm_setup();
 }
 
@@ -431,6 +442,14 @@ int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
     NRF_USBHSCORE_S->DIEPTXF[0] = (FIFO_EP1IN_WORDS << 16) | base;
     base += FIFO_EP1IN_WORDS;
     NRF_USBHSCORE_S->DIEPTXF[2] = (FIFO_EP3IN_WORDS << 16) | base;
+    base += FIFO_EP3IN_WORDS;
+
+    /* The endpoint-info RAM lives above the data FIFOs, in the same block.
+     * Left at its reset value it overlaps them, and the packets the core
+     * builds are corrupted even though the memory they came from is
+     * right.  The depth is the core's own (GHWCFG3). */
+    NRF_USBHSCORE_S->GDFIFOCFG =
+        (base << 16) | ((NRF_USBHSCORE_S->GHWCFG3 >> 16) & 0xFFFFu);
     fifo_flush();
 
     NRF_USBHSCORE_S->DIEPMSK  = DEPINT_XFERCOMPL;
@@ -475,6 +494,14 @@ void tiku_nordic_usbhs_dev_trace(uint8_t *setup8, uint32_t *tx,
     if (tsiz != (uint32_t *)0)   { *tsiz = s_last_dieptsiz; }
     if (ctl != (uint32_t *)0)    { *ctl = s_last_diepctl; }
     if (iint != (uint32_t *)0)   { *iint = s_last_diepint; }
+}
+
+void tiku_nordic_usbhs_dev_log(uint8_t index, uint8_t *req8, uint16_t *ans)
+{
+    uint8_t i = (uint8_t)((s_log_head + index) % LOG_N);
+
+    if (req8 != (uint8_t *)0) { memcpy(req8, s_log_req[i], 8u); }
+    if (ans != (uint16_t *)0) { *ans = s_log_ans[i]; }
 }
 
 void tiku_nordic_usbhs_dev_dma(uint32_t *addr, uint32_t *tsiz_after,

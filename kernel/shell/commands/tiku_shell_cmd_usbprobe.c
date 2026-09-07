@@ -209,6 +209,24 @@ tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[])
         }
         return;
     }
+    if (strcmp(argv[1], "log") == 0) {
+        uint8_t i;
+
+        for (i = 0u; i < 8u; i++) {
+            uint8_t q[8];
+            uint16_t ans = 0u;
+
+            tiku_nordic_usbhs_dev_log(i, q, &ans);
+            if (q[0] == 0u && q[1] == 0u && q[6] == 0u && q[7] == 0u) {
+                continue;
+            }
+            SHELL_PRINTF("REQ%u : %02x %02x val=%02x%02x len=%u -> %s%u\n",
+                         (unsigned)i, q[0], q[1], q[3], q[2],
+                         (unsigned)(q[6] | ((unsigned)q[7] << 8)),
+                         (ans == 0xFFFFu) ? "STALL " : "", (unsigned)ans);
+        }
+        return;
+    }
     if (strcmp(argv[1], "live") == 0) {
         uint32_t n = (argc >= 3)
                      ? (uint32_t)strtoul(argv[2], (char **)0, 0) : 30u;
