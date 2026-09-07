@@ -30,7 +30,7 @@
 /*---------------------------------------------------------------------------*/
 
 #define TX_RING     512u                    /* power of two              */
-#define RX_RING     256u
+#define RX_RING     1024u
 #define TX_CHUNK    63u                     /* under the packet size, so no
                                              * transfer ends on a full
                                              * packet and needs a ZLP     */
@@ -78,6 +78,15 @@ static void on_tx_done(void)
     tx_kick();
 }
 
+/** @brief Room in the receive ring for a whole OUT packet: the device layer
+ *         asks before it re-arms, so a full ring NAKs rather than drops. */
+static uint8_t out_ready(void)
+{
+    uint16_t used = (uint16_t)((rx_head - rx_tail) & (RX_RING - 1u));
+
+    return (uint8_t)((RX_RING - 1u - used) >= 64u);
+}
+
 static void on_rx(const uint8_t *data, uint32_t len)
 {
     uint32_t i;
@@ -100,7 +109,7 @@ static void on_rx(const uint8_t *data, uint32_t len)
 
 void tiku_usb_cdc_init(void)
 {
-    tiku_nordic_usbhs_dev_cdc_bind(on_rx, on_tx_done);
+    tiku_nordic_usbhs_dev_cdc_bind(on_rx, on_tx_done, out_ready);
     (void)tiku_nordic_usbhs_vbus_start();
 }
 
@@ -191,6 +200,7 @@ int tiku_usb_cdc_getc(void)
     }
     c = rx[rx_tail];
     rx_tail = (uint16_t)((rx_tail + 1u) & (RX_RING - 1u));
+    tiku_nordic_usbhs_dev_cdc_out_resume();   /* room freed: take more */
     return (int)c;
 }
 

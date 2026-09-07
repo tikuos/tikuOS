@@ -163,8 +163,10 @@ static uint8_t  s_started;
 static uint8_t  s_dtr;          /* the host opened the port (DTR)           */
 static uint8_t  s_ep0_out_data; /* a class request's OUT data stage is due  */
 static uint8_t  s_in_busy;      /* a bulk IN transfer is on the wire        */
-static tiku_nordic_usbhs_cdc_rx_fn   s_on_rx;
-static tiku_nordic_usbhs_cdc_done_fn s_on_tx_done;
+static tiku_nordic_usbhs_cdc_rx_fn    s_on_rx;
+static tiku_nordic_usbhs_cdc_done_fn  s_on_tx_done;
+static tiku_nordic_usbhs_cdc_ready_fn s_out_ready;   /* room for a packet? */
+static uint8_t s_out_paused;
 static uint8_t  s_address;      /* the address the host assigned            */
 static uint8_t  s_configured;
 static uint32_t s_n_setup, s_n_reset, s_n_enum, s_speed;
@@ -242,6 +244,32 @@ static void ep0_tx(const void *data, uint32_t len)
     s_last_diepctl  = NRF_USBHSCORE_S->DIEPCTL0;
 }
 
+/* A new SETUP means the host abandoned any transfer in flight.  If the
+ * previous status or data IN never completed -- its EPENA still set -- the
+ * next IN armed on top of it wedges, and the host reports a protocol error
+ * on alternate control writes.  Disable the endpoint and flush its FIFO so
+ * the new transfer starts clean. */
+static void ep0_in_reset(void)
+{
+    uint32_t spin;
+
+    if ((NRF_USBHSCORE_S->DIEPCTL0 & DEPCTL_EPENA) != 0u) {
+        NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_EPDIS | DEPCTL_SNAK;
+        for (spin = 0u; spin < USBHS_SPINS; spin++) {
+            if ((NRF_USBHSCORE_S->DIEPCTL0 & DEPCTL_EPENA) == 0u) {
+                break;
+            }
+        }
+    }
+    NRF_USBHSCORE_S->GRSTCTL = GRSTCTL_TXFFLSH;      /* EP0 IN FIFO (num 0) */
+    for (spin = 0u; spin < USBHS_SPINS; spin++) {
+        if ((NRF_USBHSCORE_S->GRSTCTL & GRSTCTL_TXFFLSH) == 0u) {
+            break;
+        }
+    }
+    NRF_USBHSCORE_S->DIEPINT0 = 0xFFFFFFFFul;
+}
+
 static void ep0_stall(void)
 {
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_STALL;
@@ -273,14 +301,18 @@ static uint16_t serial_desc(void)
 /* CDC DATA ENDPOINTS                                                        */
 /*---------------------------------------------------------------------------*/
 
-static uint8_t out_pkt[USB_BULK_MPS] __attribute__((aligned(4)));
+/* Two OUT buffers so the endpoint is re-armed on the alternate before the
+ * received bytes are copied out, not after, closing the window a single
+ * buffer left open while it was busy. */
+static uint8_t out_pkt[2][USB_BULK_MPS] __attribute__((aligned(4)));
+static uint8_t s_out_cur;
 static uint8_t in_pkt[USB_BULK_MPS] __attribute__((aligned(4)));
 
-/** @brief Arm the bulk OUT endpoint for one packet from the host. */
+/** @brief Arm the bulk OUT endpoint for one packet into the current buffer. */
 static void cdc_out_arm(void)
 {
     NRF_USBHSCORE_S->DOEPTSIZ2 = (1ul << DOEPTSIZ_PKTCNT_SHIFT) | USB_BULK_MPS;
-    NRF_USBHSCORE_S->DOEPDMA2  = (uint32_t)out_pkt;
+    NRF_USBHSCORE_S->DOEPDMA2  = (uint32_t)out_pkt[s_out_cur];
     NRF_USBHSCORE_S->DOEPCTL2 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
@@ -294,6 +326,8 @@ static void cdc_endpoints_open(void)
                                 ((uint32_t)EP_BULK_IN_FIFO << DEPCTL_TXFNUM_SHIFT);
     NRF_USBHSCORE_S->DAINTMSK |= DAINT_OUT(EP_BULK_OUT) | DAINT_IN(EP_BULK_IN);
     s_in_busy = 0u;
+    s_out_cur = 0u;
+    s_out_paused = 0u;
     cdc_out_arm();
 }
 
@@ -311,6 +345,7 @@ static void ep0_setup(void)
     uint16_t length = (uint16_t)(p[6] | ((uint16_t)p[7] << 8));
 
     s_n_setup++;
+    ep0_in_reset();                          /* clean IN before the reply */
     memcpy(s_last_setup, p, 8u);
     memcpy(s_log_req[s_log_head], p, 8u);
     s_log_ans[s_log_head] = 0xFFFFu;          /* stalled unless answered   */
@@ -428,6 +463,7 @@ void tiku_nordic_usbhs_dev_irq(void)
         s_dtr = 0u;
         s_in_busy = 0u;
         s_ep0_out_data = 0u;
+        s_out_paused = 0u;
         NRF_USBHSCORE_S->DCFG &= ~DCFG_DEVADDR_MASK;
         NRF_USBHSCORE_S->DCTL |= DCTL_CGNPINNAK | DCTL_CGOUTNAK;
         fifo_flush();
@@ -466,11 +502,21 @@ void tiku_nordic_usbhs_dev_irq(void)
             if ((oi & DEPINT_XFERCOMPL) != 0u) {
                 uint32_t left = NRF_USBHSCORE_S->DOEPTSIZ2 & DOEPTSIZ_XFER_MASK;
                 uint32_t got = USB_BULK_MPS - left;
+                uint8_t  done = s_out_cur;
 
                 if (got > 0u && s_on_rx != (tiku_nordic_usbhs_cdc_rx_fn)0) {
-                    s_on_rx(out_pkt, got);
+                    s_on_rx(out_pkt[done], got);
                 }
-                cdc_out_arm();
+                /* Re-arm on the other buffer while the sink can take a
+                 * packet; else leave it un-armed so the endpoint NAKs and
+                 * the host holds its data -- flow control, not a drop. */
+                if (s_out_ready == (tiku_nordic_usbhs_cdc_ready_fn)0 ||
+                    s_out_ready() != 0u) {
+                    s_out_cur ^= 1u;
+                    cdc_out_arm();
+                } else {
+                    s_out_paused = 1u;
+                }
             }
         }
     }
@@ -647,10 +693,31 @@ uint8_t tiku_nordic_usbhs_dev_started(void)
 }
 
 void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,
-                                    tiku_nordic_usbhs_cdc_done_fn on_tx_done)
+                                    tiku_nordic_usbhs_cdc_done_fn on_tx_done,
+                                    tiku_nordic_usbhs_cdc_ready_fn out_ready)
 {
     s_on_rx = on_rx;
     s_on_tx_done = on_tx_done;
+    s_out_ready = out_ready;
+}
+
+void tiku_nordic_usbhs_dev_cdc_out_resume(void)
+{
+    uint32_t pm;
+
+    if (s_out_paused == 0u) {
+        return;
+    }
+    pm = tiku_nordic_get_primask();
+    tiku_nordic_disable_irq();
+    if (s_out_paused != 0u &&
+        (s_out_ready == (tiku_nordic_usbhs_cdc_ready_fn)0 ||
+         s_out_ready() != 0u)) {
+        s_out_paused = 0u;
+        s_out_cur ^= 1u;
+        cdc_out_arm();
+    }
+    tiku_nordic_set_primask(pm);
 }
 
 uint8_t tiku_nordic_usbhs_dev_cdc_configured(void)

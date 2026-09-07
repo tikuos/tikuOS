@@ -142,10 +142,16 @@ uint8_t tiku_nordic_usbhs_dev_started(void);
 typedef void (*tiku_nordic_usbhs_cdc_rx_fn)(const uint8_t *data, uint32_t len);
 /** @brief The last packet given to _cdc_send() has left; from the interrupt. */
 typedef void (*tiku_nordic_usbhs_cdc_done_fn)(void);
+/** @brief Non-zero if the sink can take another whole OUT packet now. */
+typedef uint8_t (*tiku_nordic_usbhs_cdc_ready_fn)(void);
 
-/** @brief Register the class layer's callbacks; either may be NULL. */
+/** @brief Register the class layer's callbacks; any may be NULL. */
 void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,
-                                    tiku_nordic_usbhs_cdc_done_fn on_tx_done);
+                                    tiku_nordic_usbhs_cdc_done_fn on_tx_done,
+                                    tiku_nordic_usbhs_cdc_ready_fn out_ready);
+
+/** @brief Re-arm OUT after the sink drained; call from thread context. */
+void tiku_nordic_usbhs_dev_cdc_out_resume(void);
 
 /** @brief Configured by the host: the bulk endpoints are live. */
 uint8_t tiku_nordic_usbhs_dev_cdc_configured(void);
