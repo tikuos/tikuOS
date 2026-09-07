@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_read.c - "read" command implementation
  *
- * Reads a VFS node and prints its value.  Works with any readable
- * node: /sys/uptime, /sys/mem/sram, /dev/led0, etc.
+ * Reads a VFS node and prints its value, or with a line number and a
+ * byte budget one page of whole lines of it, so a reader whose medium
+ * carries a bounded reply walks a large node page by page.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,6 +22,8 @@
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/shell/tiku_shell_cwd.h>
 #include <kernel/vfs/tiku_vfs.h>
+#include <stdlib.h>
+#include <string.h>
 
 /*---------------------------------------------------------------------------*/
 /* CONFIG                                                                    */
@@ -49,15 +52,53 @@
 /* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Narrow @p buf to one page of whole lines.
+ *
+ * Skips @p line lines, then keeps lines while they fit in @p bytes -- the
+ * first line always, so a line wider than the budget still prints whole
+ * rather than never.  The page is NUL-terminated in place.
+ *
+ * @return The page's first byte.
+ */
+static char *
+read_page(char *buf, int n, unsigned long line, unsigned long bytes)
+{
+    char *p = buf, *end = buf + n, *stop;
+
+    while (line > 0ul && p < end) {
+        char *nl = memchr(p, '\n', (size_t)(end - p));
+
+        p = (nl != NULL) ? nl + 1 : end;
+        line--;
+    }
+    stop = p;
+    while (stop < end) {
+        char *nl = memchr(stop, '\n', (size_t)(end - stop));
+        char *next = (nl != NULL) ? nl + 1 : end;
+
+        if ((unsigned long)(next - p) > bytes && stop > p) {
+            break;
+        }
+        stop = next;
+        if (nl == NULL) {
+            break;
+        }
+    }
+    *stop = '\0';
+    return p;
+}
+
 void
 tiku_shell_cmd_read(uint8_t argc, const char *argv[])
 {
     char         resolved[TIKU_SHELL_CWD_SIZE];
     static char  buf[TIKU_SHELL_READ_MAX + 1];   /* +1 for the NUL terminator */
+    const char  *out = buf;
     int          n;
 
     if (argc < 2) {
-        SHELL_PRINTF("Usage: read <path>\n");
+        SHELL_PRINTF("Usage: read <path> [line [bytes]]\n");
         return;
     }
 
@@ -72,14 +113,30 @@ tiku_shell_cmd_read(uint8_t argc, const char *argv[])
         return;
     }
 
+    /* A renderer says how much it had, snprintf-style: past the buffer
+     * the node arrives cut, and the cut is what is printed and paged. */
+    if (n > (int)sizeof(buf) - 1) {
+        n = (int)sizeof(buf) - 1;
+    }
     buf[n] = '\0';
-    SHELL_PRINTF("%s", buf);
+    if (argc >= 3) {
+        /* A page: whole lines from the given one, within the byte budget
+         * (the whole buffer without one).  A reader walks a node with a
+         * rising line number and stops at an empty page. */
+        unsigned long line  = strtoul(argv[2], (char **)0, 10);
+        unsigned long bytes = (argc >= 4) ? strtoul(argv[3], (char **)0, 10)
+                                          : (unsigned long)sizeof(buf);
+
+        out = read_page(buf, n, line, bytes);
+        n = (int)strlen(out);
+    }
+    SHELL_PRINTF("%s", out);
 
     /* Finish on a newline so the next prompt starts on its own line.  Files
      * often have no trailing newline and /sys values never do, so without this
      * the value glues to the prompt ("aatikuOS:/>").  Skip it when the content
      * already ends in '\n' to avoid a blank line. */
-    if (n == 0 || buf[n - 1] != '\n') {
+    if (n == 0 || out[n - 1] != '\n') {
         SHELL_PRINTF("\n");
     }
 }

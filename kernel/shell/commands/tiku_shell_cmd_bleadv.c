@@ -119,6 +119,16 @@ static void bleadv_fmt_hex(char *out, const uint8_t *b, int n, int msb_first)
 /* Bring-up visibility: silicon identification words that gate the errata
  * workarounds (see tiku_crt_early.c), clock-tuning state the radio depends
  * on, and RADIO readbacks.  Everything here is a plain register read. */
+/**
+ * @brief Whether the RADIO answers on the secure alias.  The SPU is the
+ *        authority, not the facade's owner: any path that lends the radio
+ *        to the coprocessor flips its security attribute.
+ */
+static uint8_t radio_is_ours(void)
+{
+    return (NRF_SPU10_S->PERIPH[10].PERM & (1u << 4)) != 0u;
+}
+
 static void bleadv_dbg(void)
 {
     SHELL_PRINTF("FICR : part=%lx rev=%lx trimv=%lx\n",
@@ -135,11 +145,12 @@ static void bleadv_dbg(void)
                  (unsigned long)NRF_CLOCK_S->XO.RUN,
                  (unsigned long)NRF_CLOCK_S->PLL.RUN,
                  (unsigned long)NRF_OSCILLATORS_S->PLL.CURRENTFREQ);
-    if (tiku_ble_adv_owner() != TIKU_BLE_ADV_OWNER_IDLE) {
-        /* The radio may be the coprocessor's just now, and then it is
-         * non-secure: a read through the secure alias is a bus fault. */
-        SHELL_PRINTF("RADIO: held by %s; registers not read\n",
-                     tiku_ble_adv_owner_str());
+    if (!radio_is_ours()) {
+        /* The radio is the coprocessor's just now, whoever asked for it --
+         * the facade, the BLE link, a session -- and so non-secure: a read
+         * through the secure alias is a bus fault. */
+        SHELL_PRINTF("RADIO: non-secure (the coprocessor's, for %s); "
+                     "registers not read\n", tiku_ble_adv_owner_str());
     } else {
         SHELL_PRINTF("RADIO: state=%lu mode=%lu txpower=%lx datawhite=%lx\n",
                      (unsigned long)NRF_RADIO_S->STATE,
