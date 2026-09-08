@@ -1710,6 +1710,7 @@ ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS   += arch/nordic/tiku_usbhs_arch.c
 SRCS   += arch/nordic/tiku_usbhs_dev.c
 SRCS   += arch/nordic/tiku_usb_cdc_arch.c
+SRCS   += kernel/usb/tiku_usbd_ctrl.c
 CFLAGS += -DTIKU_CONSOLE_USB=1
 ifeq ($(TIKU_CONSOLE),both)
 CFLAGS += -DTIKU_CONSOLE_BOTH=1
@@ -2568,6 +2569,7 @@ endif
 SRCS   += arch/nordic/tiku_usbhs_arch.c
 SRCS   += arch/nordic/tiku_usbhs_msc.c
 SRCS   += kernel/usb/tiku_usbd_msc.c
+SRCS   += kernel/usb/tiku_usbd_ctrl.c
 SRCS   += kernel/shell/commands/tiku_shell_cmd_usbmsc.c
 CFLAGS += -DTIKU_USBHS_MSC=1
 endif
@@ -2579,6 +2581,7 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_usbprobe.c
 ifeq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS += arch/nordic/tiku_usbhs_arch.c
 SRCS += arch/nordic/tiku_usbhs_dev.c
+SRCS += kernel/usb/tiku_usbd_ctrl.c
 endif
 else
 $(warning usbprobe: the USB block exists only on nrf54lm20a/b -- skipped)

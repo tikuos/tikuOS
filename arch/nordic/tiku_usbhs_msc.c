@@ -23,6 +23,7 @@
 #include <arch/nordic/tiku_nordic_core.h>
 #include <kernel/cpu/tiku_common.h>
 #include <kernel/usb/tiku_usbd_msc.h>
+#include <kernel/usb/tiku_usbd_ctrl.h>
 
 #include <string.h>
 
@@ -105,36 +106,14 @@ static tiku_usbd_msc_t msc_medium = {
 /* DESCRIPTORS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* pid.codes 1209:0002 -- a distinct product from the console (0001), so a
- * host tells the two faces apart. */
-static const uint8_t dev_desc[18] = {
-    18, 0x01,
-    0x00, 0x02,
-    0x00, 0x00, 0x00,           /* class at the interface, not the device   */
-    USB_EP0_MPS,
-    0x09, 0x12,                 /* idVendor  0x1209                          */
-    0x02, 0x00,                 /* idProduct 0x0002                          */
-    0x00, 0x01,
-    0x01, 0x02, 0x03,
-    0x01
-};
-
-#define CONF_TOTAL_LEN 32
-static uint8_t conf_desc[CONF_TOTAL_LEN] = {
-    9, 0x02, CONF_TOTAL_LEN, 0x00, 0x01, 0x01, 0x00, 0x80, 50,
-    /* Interface 0: mass storage / SCSI transparent / Bulk-Only Transport */
-    9, 0x04, 0x00, 0x00, 0x02, 0x08, 0x06, 0x50, 0x00,
-    /* Bulk OUT (EP2) then bulk IN (EP3) */
-    7, 0x05, 0x02, 0x02, USB_BULK_MPS, 0x00, 0x00,
-    7, 0x05, 0x83, 0x02, USB_BULK_MPS, 0x00, 0x00
-};
-
-static const uint8_t str_lang[4]  = { 4, 0x03, 0x09, 0x04 };
-static const uint8_t str_mfr[14]  = { 14, 0x03, 'T',0,'i',0,'k',0,'u',0,
-                                      'O',0,'S',0 };
-static const uint8_t str_prod[24] = { 24, 0x03, 'T',0,'i',0,'k',0,'u',0,'O',0,
-                                      'S',0,' ',0,'D',0,'i',0,'s',0,'k',0 };
+/* Built by the shared core from the identity and the endpoint numbers; the
+ * configuration is RAM because its bulk packet size follows the speed. */
+static uint8_t dev_desc[TIKU_USBD_DEVICE_LEN];
+static uint8_t conf_desc[TIKU_USBD_MSC_CONFIG_LEN];
+static uint8_t str_mfr[16], str_prod[32];
 static uint8_t serial_buf[26] __attribute__((aligned(4)));
+static tiku_usbd_desc_set_t s_set;
+static tiku_usbd_ctrl_t     s_ctrl;
 
 /*---------------------------------------------------------------------------*/
 /* STATE                                                                     */
@@ -216,25 +195,6 @@ static void ep0_in_reset(void)
         }
     }
     NRF_USBHSCORE_S->DIEPINT0 = 0xFFFFFFFFul;
-}
-
-static uint16_t serial_desc(void)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    uint8_t id[6];
-    uint16_t n = 2u;
-    uint8_t i;
-
-    tiku_common_unique_id(id, 6u);
-    for (i = 0u; i < 6u; i++) {
-        serial_buf[n++] = (uint8_t)hex[(id[i] >> 4) & 0xFu];
-        serial_buf[n++] = 0u;
-        serial_buf[n++] = (uint8_t)hex[id[i] & 0xFu];
-        serial_buf[n++] = 0u;
-    }
-    serial_buf[0] = (uint8_t)n;
-    serial_buf[1] = 0x03u;
-    return n;
 }
 
 static void fifo_flush(void)
@@ -351,88 +311,37 @@ static void msc_endpoints_open(void)
 static void ep0_setup(void)
 {
     const uint8_t *p = (const uint8_t *)setup_buf;
-    uint8_t  req_type = p[0], req = p[1];
-    uint16_t value = (uint16_t)(p[2] | ((uint16_t)p[3] << 8));
-    uint16_t length = (uint16_t)(p[6] | ((uint16_t)p[7] << 8));
+    tiku_usbd_ctrl_out_t d;
 
     ep0_in_reset();
+    tiku_usbd_ctrl_setup(&s_ctrl, p, &d);
 
-    if ((req_type & 0x60u) == 0x20u) {       /* mass-storage class requests */
-        switch (req) {
-        case 0xFF:                           /* Bulk-Only Mass Storage Reset */
-            s_bot = BOT_CBW;
-            bulk_out_arm(cbw_buf, TIKU_USBD_MSC_BLOCK);
-            ep0_tx((const void *)0, 0u);
-            break;
-        case 0xFE: {                         /* Get Max LUN: one LUN, so 0   */
-            static const uint8_t max_lun = 0u;
-
-            ep0_tx(&max_lun, (length < 1u) ? length : 1u);
-            break;
-        }
-        default:
-            ep0_stall();
-            return;
-        }
-        ep0_arm_setup();
-        return;
-    }
-    if ((req_type & 0x60u) != 0u) {
-        ep0_stall();
-        return;
-    }
-
-    switch (req) {
-    case 0x05:                               /* SET_ADDRESS (before status) */
-        s_address = (uint8_t)(value & 0x7Fu);
+    if ((d.effects & TIKU_USBD_FX_ADDRESS) != 0u) {   /* before the status */
+        s_address = d.address;
         NRF_USBHSCORE_S->DCFG = (NRF_USBHSCORE_S->DCFG & ~DCFG_DEVADDR_MASK) |
                                 ((uint32_t)s_address << DCFG_DEVADDR_SHIFT);
-        ep0_tx((const void *)0, 0u);
-        break;
-    case 0x06: {                             /* GET_DESCRIPTOR              */
-        const uint8_t *d = (const uint8_t *)0;
-        uint16_t n = 0u;
-
-        switch (value >> 8) {
-        case 1: d = dev_desc;  n = sizeof dev_desc;  break;
-        case 2: d = conf_desc; n = sizeof conf_desc; break;
-        case 3:
-            switch (value & 0xFFu) {
-            case 0: d = str_lang; n = sizeof str_lang; break;
-            case 1: d = str_mfr;  n = sizeof str_mfr;  break;
-            case 2: d = str_prod; n = sizeof str_prod; break;
-            case 3: n = serial_desc(); d = serial_buf; break;
-            default: break;
-            }
-            break;
-        default: break;
-        }
-        if (d == (const uint8_t *)0) {
-            ep0_stall();
-            return;
-        }
-        if (n > length) {
-            n = length;
-        }
-        ep0_tx(d, n);
-        break;
     }
-    case 0x08:                               /* GET_CONFIGURATION           */
-        ep0_tx(&s_configured, 1u);
-        break;
-    case 0x09:                               /* SET_CONFIGURATION           */
-        s_configured = (uint8_t)(value & 0xFFu);
+    if ((d.effects & TIKU_USBD_FX_CONFIG) != 0u) {
+        s_configured = d.config;
         if (s_configured != 0u) {
             msc_endpoints_open();
         }
+    }
+    if ((d.effects & TIKU_USBD_FX_CLASS_RESET) != 0u) {
+        s_bot = BOT_CBW;                     /* back to waiting for a CBW   */
+        bulk_out_arm(cbw_buf, TIKU_USBD_MSC_BLOCK);
+    }
+
+    switch (d.action) {
+    case TIKU_USBD_CTRL_REPLY:
+        ep0_tx(d.data, d.len);
+        break;
+    case TIKU_USBD_CTRL_STATUS:
         ep0_tx((const void *)0, 0u);
         break;
-    case 0x00: {                             /* GET_STATUS                  */
-        static const uint8_t st[2] = { 0u, 0u };
-
-        ep0_tx(st, (length < 2u) ? length : 2u);
+    case TIKU_USBD_CTRL_ACCEPT_OUT:
+        ep0_tx((const void *)0, 0u);         /* no data stage the disk keeps */
         break;
-    }
     default:
         ep0_stall();
         return;
@@ -452,6 +361,7 @@ void tiku_nordic_usbhs_dev_irq(void)
 
     if ((sts & GINT_USBRST) != 0u) {
         NRF_USBHSCORE_S->GINTSTS = GINT_USBRST;
+        tiku_usbd_ctrl_init(&s_ctrl, &s_set);
         s_address = 0u;
         s_configured = 0u;
         s_bot = BOT_CBW;
@@ -467,6 +377,8 @@ void tiku_nordic_usbhs_dev_irq(void)
         speed = (NRF_USBHSCORE_S->DSTS >> 1) & 0x3u;
         NRF_USBHSCORE_S->DIEPCTL0 = (NRF_USBHSCORE_S->DIEPCTL0 & ~3ul);
         s_bulk_mps = (speed == 0u) ? USB_BULK_MPS_HS : USB_BULK_MPS;
+        tiku_usbd_desc_set_bulk_mps(conf_desc, sizeof conf_desc,
+                                    (uint16_t)s_bulk_mps);
     }
     if ((sts & GINT_OEPINT) != 0u) {
         uint32_t daint = NRF_USBHSCORE_S->DAINT;
@@ -539,6 +451,31 @@ int tiku_nordic_usbhs_msc_start(void)
 
     if ((NRF_USBHSCORE_S->GRSTCTL & GRSTCTL_AHBIDLE) == 0u) {
         return -1;
+    }
+    {
+        uint8_t id[6];
+        uint16_t n;
+
+        tiku_usbd_device_desc(dev_desc, TIKU_USBD_PID_DISK, 0, USB_EP0_MPS);
+        tiku_usbd_msc_config(conf_desc, EP_BULK_OUT, EP_BULK_IN, USB_BULK_MPS);
+        s_set.device = dev_desc;
+        s_set.config = conf_desc;
+        s_set.config_len = sizeof conf_desc;
+        s_set.string[0] = tiku_usbd_string_lang(&n);
+        s_set.string_len[0] = n;
+        s_set.string[1] = str_mfr;
+        s_set.string_len[1] = tiku_usbd_string_ascii(str_mfr, sizeof str_mfr,
+                                                     "TikuOS");
+        s_set.string[2] = str_prod;
+        s_set.string_len[2] = tiku_usbd_string_ascii(str_prod, sizeof str_prod,
+                                                     "TikuOS Disk");
+        tiku_common_unique_id(id, 6u);
+        s_set.string[3] = serial_buf;
+        s_set.string_len[3] = tiku_usbd_string_serial(serial_buf,
+                                                      sizeof serial_buf, id, 6u);
+        s_set.klass = TIKU_USBD_CLASS_MSC;
+        s_set.self_powered = 0u;
+        tiku_usbd_ctrl_init(&s_ctrl, &s_set);
     }
     NRF_USBHSCORE_S->GUSBCFG |= GUSBCFG_FORCEDEVMODE;
     NRF_USBHSCORE_S->GAHBCFG = GAHBCFG_DMAEN | GAHBCFG_HBSTLEN_I4;

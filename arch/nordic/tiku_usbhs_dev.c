@@ -23,6 +23,7 @@
 #include <arch/nordic/tiku_device_select.h>
 #include <arch/nordic/tiku_nordic_core.h>
 #include <kernel/cpu/tiku_common.h>
+#include <kernel/usb/tiku_usbd_ctrl.h>
 
 #include <string.h>
 
@@ -113,44 +114,14 @@ static uint32_t s_bulk_mps = USB_BULK_MPS;
 /* DESCRIPTORS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* pid.codes 1209:0001, as the other two TikuOS device stacks use. */
-static const uint8_t dev_desc[18] = {
-    18, 0x01,
-    0x00, 0x02,                 /* USB 2.00                                 */
-    0xEF, 0x02, 0x01,           /* misc / common class / interface assoc.   */
-    USB_EP0_MPS,
-    0x09, 0x12,                 /* idVendor  0x1209                         */
-    0x01, 0x00,                 /* idProduct 0x0001                         */
-    0x00, 0x01,                 /* bcdDevice 1.00                           */
-    0x01, 0x02, 0x03,
-    0x01
-};
-
-#define CONF_TOTAL_LEN 75
-static uint8_t conf_desc[CONF_TOTAL_LEN] = {
-    9, 0x02, CONF_TOTAL_LEN, 0x00, 0x02, 0x01, 0x00, 0x80, 50,
-    /* CDC association, two interfaces from #0 */
-    8, 0x0B, 0x00, 0x02, 0x02, 0x02, 0x00, 0x00,
-    /* Interface 0: communications, abstract control model */
-    9, 0x04, 0x00, 0x00, 0x01, 0x02, 0x02, 0x00, 0x00,
-    5, 0x24, 0x00, 0x10, 0x01,
-    5, 0x24, 0x01, 0x00, 0x01,
-    4, 0x24, 0x02, 0x02,
-    5, 0x24, 0x06, 0x00, 0x01,
-    /* Notification endpoint, IN 1 */
-    7, 0x05, 0x81, 0x03, 0x08, 0x00, 0x10,
-    /* Interface 1: the data class, two bulk endpoints */
-    9, 0x04, 0x01, 0x00, 0x02, 0x0A, 0x00, 0x00, 0x00,
-    7, 0x05, 0x02, 0x02, USB_BULK_MPS, 0x00, 0x00,
-    7, 0x05, 0x83, 0x02, USB_BULK_MPS, 0x00, 0x00
-};
-
-static const uint8_t str_lang[4]  = { 4, 0x03, 0x09, 0x04 };
-static const uint8_t str_mfr[14]  = { 14, 0x03, 'T',0,'i',0,'k',0,'u',0,
-                                      'O',0,'S',0 };
-static const uint8_t str_prod[30] = { 30, 0x03, 'T',0,'i',0,'k',0,'u',0,'O',0,
-                                      'S',0,' ',0,'C',0,'o',0,'n',0,'s',0,
-                                      'o',0,'l',0,'e',0 };
+/* Built once from the identity and the endpoint numbers by the shared core
+ * (kernel/usb), the same bytes this port shipped by hand; the configuration
+ * lives in RAM because its bulk packet size follows the negotiated speed. */
+static uint8_t dev_desc[TIKU_USBD_DEVICE_LEN];
+static uint8_t conf_desc[TIKU_USBD_CDC_CONFIG_LEN];
+static uint8_t str_mfr[16], str_prod[32];
+static tiku_usbd_desc_set_t s_set;
+static tiku_usbd_ctrl_t     s_ctrl;
 
 /*---------------------------------------------------------------------------*/
 /* STATE                                                                     */
@@ -282,49 +253,11 @@ static void ep0_stall(void)
 }
 
 /** @brief The device's serial string, built from the factory device id. */
-static uint16_t serial_desc(void)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    uint8_t id[6];
-    uint16_t n = 2u;
-    uint8_t i;
-
-    tiku_common_unique_id(id, 6u);
-    for (i = 0u; i < 6u; i++) {
-        serial_buf[n++] = (uint8_t)hex[(id[i] >> 4) & 0xFu];
-        serial_buf[n++] = 0u;
-        serial_buf[n++] = (uint8_t)hex[id[i] & 0xFu];
-        serial_buf[n++] = 0u;
-    }
-    serial_buf[0] = (uint8_t)n;
-    serial_buf[1] = 0x03u;
-    return n;
-}
 
 /*---------------------------------------------------------------------------*/
 /* CDC DATA ENDPOINTS                                                        */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Write @p mps into every bulk endpoint descriptor of the
- *         configuration (bLength 7, type 5, attributes bulk). */
-static void bulk_desc_set_mps(uint32_t mps)
-{
-    uint32_t i = 0u;
-
-    while (i + 7u <= sizeof conf_desc) {
-        uint8_t len = conf_desc[i];
-
-        if (len < 2u) {
-            break;
-        }
-        if (len == 7u && conf_desc[i + 1u] == 0x05u &&
-            (conf_desc[i + 3u] & 0x03u) == 0x02u) {
-            conf_desc[i + 4u] = (uint8_t)(mps & 0xFFu);
-            conf_desc[i + 5u] = (uint8_t)(mps >> 8);
-        }
-        i += len;
-    }
-}
 
 /* Two OUT buffers so the endpoint is re-armed on the alternate before the
  * received bytes are copied out, not after, closing the window a single
@@ -365,9 +298,7 @@ static void cdc_endpoints_open(void)
 static void ep0_setup(void)
 {
     const uint8_t *p = (const uint8_t *)setup_buf;
-    uint8_t  req_type = p[0], req = p[1];
-    uint16_t value = (uint16_t)(p[2] | ((uint16_t)p[3] << 8));
-    uint16_t length = (uint16_t)(p[6] | ((uint16_t)p[7] << 8));
+    tiku_usbd_ctrl_out_t d;
 
     s_n_setup++;
     ep0_in_reset();                          /* clean IN before the reply */
@@ -375,95 +306,38 @@ static void ep0_setup(void)
     memcpy(s_log_req[s_log_head], p, 8u);
     s_log_ans[s_log_head] = 0xFFFFu;          /* stalled unless answered   */
 
-    if ((req_type & 0x60u) == 0x20u) {       /* CDC class requests          */
-        static const uint8_t line_coding[7] = {
-            0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08 };   /* 115200 8N1  */
+    tiku_usbd_ctrl_setup(&s_ctrl, p, &d);
 
-        switch (req) {
-        case 0x22:                           /* SET_CONTROL_LINE_STATE      */
-            s_dtr = (uint8_t)(value & 1u);
-            ep0_tx((const void *)0, 0u);
-            break;
-        case 0x20:                           /* SET_LINE_CODING: 7 bytes OUT */
-            /* The data lands in the armed setup buffer; its arrival is the
-             * cue for the status stage, so nothing is sent yet. */
-            s_ep0_out_data = 1u;
-            break;
-        case 0x21:                           /* GET_LINE_CODING             */
-            ep0_tx(line_coding, (length < 7u) ? length : 7u);
-            break;
-        default:
-            if ((req_type & 0x80u) == 0u && length == 0u) {
-                ep0_tx((const void *)0, 0u); /* accept and say nothing      */
-            } else {
-                ep0_stall();
-                return;
-            }
-            break;
-        }
-        s_log_head = (uint8_t)((s_log_head + 1u) % LOG_N);
-        ep0_arm_setup();
-        return;
-    }
-    if ((req_type & 0x60u) != 0u) {          /* vendor: nothing to say      */
-        ep0_stall();
-        return;
-    }
-
-    switch (req) {
-    case 0x05:                               /* SET_ADDRESS                 */
-        /* The core wants the address before the status stage goes out; it
-         * finishes the exchange at the old one itself.  Applied after, the
-         * host's first request at the new address met nothing. */
-        s_address = (uint8_t)(value & 0x7Fu);
+    /* Effects first: the core wants the address before the status stage
+     * goes out (it finishes the exchange at the old one itself), and the
+     * endpoints must exist before the host is told the configuration took. */
+    if ((d.effects & TIKU_USBD_FX_ADDRESS) != 0u) {
+        s_address = d.address;
         NRF_USBHSCORE_S->DCFG = (NRF_USBHSCORE_S->DCFG & ~DCFG_DEVADDR_MASK) |
                                 ((uint32_t)s_address << DCFG_DEVADDR_SHIFT);
-        ep0_tx((const void *)0, 0u);
-        break;
-    case 0x06: {                             /* GET_DESCRIPTOR              */
-        const uint8_t *d = (const uint8_t *)0;
-        uint16_t n = 0u;
-
-        switch (value >> 8) {
-        case 1: d = dev_desc;  n = sizeof dev_desc;  break;
-        case 2: d = conf_desc; n = sizeof conf_desc; break;
-        case 3:
-            switch (value & 0xFFu) {
-            case 0: d = str_lang; n = sizeof str_lang; break;
-            case 1: d = str_mfr;  n = sizeof str_mfr;  break;
-            case 2: d = str_prod; n = sizeof str_prod; break;
-            case 3: n = serial_desc(); d = serial_buf; break;
-            default: break;
-            }
-            break;
-        default: break;
-        }
-        if (d == (const uint8_t *)0) {
-            ep0_stall();
-            return;
-        }
-        if (n > length) {
-            n = length;
-        }
-        ep0_tx(d, n);
-        break;
     }
-    case 0x08:                               /* GET_CONFIGURATION           */
-        ep0_tx(&s_configured, 1u);
-        break;
-    case 0x09:                               /* SET_CONFIGURATION           */
-        s_configured = (uint8_t)(value & 0xFFu);
+    if ((d.effects & TIKU_USBD_FX_CONFIG) != 0u) {
+        s_configured = d.config;
         if (s_configured != 0u) {
             cdc_endpoints_open();
         }
+    }
+    if ((d.effects & TIKU_USBD_FX_LINE_STATE) != 0u) {
+        s_dtr = d.dtr;
+    }
+
+    switch (d.action) {
+    case TIKU_USBD_CTRL_REPLY:
+        ep0_tx(d.data, d.len);
+        break;
+    case TIKU_USBD_CTRL_STATUS:
         ep0_tx((const void *)0, 0u);
         break;
-    case 0x00: {                             /* GET_STATUS                  */
-        static const uint8_t zero[2] = { 0u, 0u };
-
-        ep0_tx(zero, 2u);
+    case TIKU_USBD_CTRL_ACCEPT_OUT:
+        /* The data lands in the armed setup buffer; its arrival is the
+         * cue for the status stage, so nothing is sent yet. */
+        s_ep0_out_data = 1u;
         break;
-    }
     default:
         ep0_stall();
         return;
@@ -483,6 +357,7 @@ void tiku_nordic_usbhs_dev_irq(void)
     if ((sts & GINT_USBRST) != 0u) {
         NRF_USBHSCORE_S->GINTSTS = GINT_USBRST;
         s_n_reset++;
+        tiku_usbd_ctrl_init(&s_ctrl, &s_set);
         s_address = 0u;
         s_configured = 0u;
         s_dtr = 0u;
@@ -504,7 +379,8 @@ void tiku_nordic_usbhs_dev_irq(void)
          * controller sends the speed's size whatever the descriptor says,
          * and a packet wider than the endpoint is babble, never taken. */
         s_bulk_mps = (s_speed == 0u) ? USB_BULK_MPS_HS : USB_BULK_MPS;
-        bulk_desc_set_mps(s_bulk_mps);
+        tiku_usbd_desc_set_bulk_mps(conf_desc, sizeof conf_desc,
+                                    (uint16_t)s_bulk_mps);
     }
     if ((sts & GINT_OEPINT) != 0u) {
         uint32_t daint = NRF_USBHSCORE_S->DAINT;
@@ -592,6 +468,32 @@ int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
     /* The core is already powered and out of reset (tiku_nordic_usbhs_up). */
     if ((NRF_USBHSCORE_S->GRSTCTL & GRSTCTL_AHBIDLE) == 0u) {
         return -1;
+    }
+    {
+        uint8_t id[6];
+        uint16_t n;
+
+        tiku_usbd_device_desc(dev_desc, TIKU_USBD_PID_CONSOLE, 1, USB_EP0_MPS);
+        tiku_usbd_cdc_config(conf_desc, 1u, EP_BULK_OUT, EP_BULK_IN,
+                             USB_BULK_MPS);
+        s_set.device = dev_desc;
+        s_set.config = conf_desc;
+        s_set.config_len = sizeof conf_desc;
+        s_set.string[0] = tiku_usbd_string_lang(&n);
+        s_set.string_len[0] = n;
+        s_set.string[1] = str_mfr;
+        s_set.string_len[1] = tiku_usbd_string_ascii(str_mfr, sizeof str_mfr,
+                                                     "TikuOS");
+        s_set.string[2] = str_prod;
+        s_set.string_len[2] = tiku_usbd_string_ascii(str_prod, sizeof str_prod,
+                                                     "TikuOS Console");
+        tiku_common_unique_id(id, 6u);
+        s_set.string[3] = serial_buf;
+        s_set.string_len[3] = tiku_usbd_string_serial(serial_buf,
+                                                      sizeof serial_buf, id, 6u);
+        s_set.klass = TIKU_USBD_CLASS_CDC;
+        s_set.self_powered = 0u;
+        tiku_usbd_ctrl_init(&s_ctrl, &s_set);
     }
 
     /* The PHY's data width is selectable on this integration, and the

@@ -6,7 +6,7 @@
 # checked here, so a regression cannot hide behind "the test has its own copy".
 CFLAGS ?= -std=c99 -Wall -Wextra -Werror -O1 -g -I../..
 
-all: msc_host_test msc_diff_test
+all: msc_host_test msc_diff_test ctrl_host_test
 
 msc_host_test: msc_host_test.c ../../kernel/usb/tiku_usbd_msc.c \
                ../../kernel/usb/tiku_usbd_msc.h
@@ -20,11 +20,17 @@ msc_diff_test: msc_diff_test.c ref_original.c ref_original.h \
 	$(CC) $(CFLAGS) -o $@ msc_diff_test.c ref_original.c \
 	      ../../kernel/usb/tiku_usbd_msc.c
 
-check: msc_host_test msc_diff_test
+ctrl_host_test: ctrl_host_test.c ../../kernel/usb/tiku_usbd_ctrl.c \
+                ../../kernel/usb/tiku_usbd_ctrl.h
+	$(CC) $(CFLAGS) -o $@ ctrl_host_test.c ../../kernel/usb/tiku_usbd_ctrl.c
+
+check: msc_host_test msc_diff_test ctrl_host_test
 	./msc_host_test
 	@echo
 	./msc_diff_test
+	@echo
+	./ctrl_host_test
 
 clean:
-	rm -f msc_host_test msc_diff_test
+	rm -f msc_host_test msc_diff_test ctrl_host_test
 .PHONY: all check clean
