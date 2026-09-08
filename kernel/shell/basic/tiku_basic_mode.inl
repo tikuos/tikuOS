@@ -141,6 +141,56 @@ tiku_basic_mode_active(void)
     return basic_mode_on ? 1 : 0;
 }
 
+/*
+ * The stream a link drives the mode from.  Everything the interpreter
+ * reads or writes goes through it while it is set, and the swap is made
+ * only around the mode's own hooks: the shell writes its own output
+ * through its own backend, in its own part of the loop, so the two are
+ * never interleaved.
+ */
+static const tiku_shell_io_t *basic_stream;
+static const tiku_shell_io_t *basic_stream_under;
+
+void
+tiku_basic_mode_set_stream(const tiku_shell_io_t *io)
+{
+    basic_stream = io;
+}
+
+int
+tiku_basic_mode_streamed(void)
+{
+    return (basic_stream != (const tiku_shell_io_t *)0) ? 1 : 0;
+}
+
+static void basic_mode_feed_char_inner(int ch);
+static void basic_mode_tick_inner(void);
+
+/** @brief Put the stream in front for the length of one hook. */
+static void
+stream_take(void)
+{
+    if (basic_stream == (const tiku_shell_io_t *)0) {
+        return;
+    }
+    basic_stream_under = tiku_shell_io_get_backend();
+    if (basic_stream_under != basic_stream) {
+        tiku_shell_io_set_backend(basic_stream);
+    }
+}
+
+/** @brief And give the console back. */
+static void
+stream_give(void)
+{
+    if (basic_stream == (const tiku_shell_io_t *)0 ||
+        basic_stream_under == (const tiku_shell_io_t *)0) {
+        return;
+    }
+    tiku_shell_io_set_backend(basic_stream_under);
+    basic_stream_under = (const tiku_shell_io_t *)0;
+}
+
 /**
  * @brief Feed one console byte to the mode (called by the shell poll loop
  *        for every byte while tiku_basic_mode_active()).
@@ -155,6 +205,14 @@ tiku_basic_mode_feed_char(int ch)
     if (!basic_mode_on) {
         return;
     }
+    stream_take();
+    basic_mode_feed_char_inner(ch);
+    stream_give();
+}
+
+static void
+basic_mode_feed_char_inner(int ch)
+{
 
     /* A program is executing: keystrokes are discarded except Ctrl-C, which
      * breaks it (mirrors the old RUN-loop Ctrl-C poll).  INPUT takes over the
@@ -256,11 +314,20 @@ tiku_basic_mode_on_vfs(const void *node)
 void
 tiku_basic_mode_tick(void)
 {
-    int budget;
-
     if (!basic_mode_on || !basic_running) {
         return;
     }
+    stream_take();
+    basic_mode_tick_inner();
+    stream_give();
+}
+
+/** @brief One batch of the running program, through whatever is in front. */
+static void
+basic_mode_tick_inner(void)
+{
+    int budget;
+
 #if TIKU_BASIC_ONCHG_EVENT
     /* F2 self-heal: the shell's rules engine does a wholesale unwatch_all() on
      * re-arm, dropping the ON CHANGE subscriptions too.  Re-arm each active

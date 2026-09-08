@@ -1486,7 +1486,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
              * shell's line editor and command dispatch are bypassed until the
              * mode exits.  Mirrors the modal feel of the old blocking REPL
              * while the shell loop stays event-driven underneath. */
-            if (tiku_basic_mode_active()) {
+            if (tiku_basic_mode_active() && !tiku_basic_mode_streamed()) {
                 tiku_basic_mode_feed_char(ch);
                 continue;
             }
@@ -1553,8 +1553,12 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
 #if TIKU_SHELL_CMD_BASIC
                     /* `basic` entered its own mode and printed the BASIC prompt;
-                     * don't also print the shell prompt. */
-                    if (tiku_basic_mode_active()) {
+                     * don't also print the shell prompt.  A mode driven from
+                     * a stream prints ITS prompt down the stream and has not
+                     * taken this line, so the shell's own prompt still ends
+                     * a command here. */
+                    if (tiku_basic_mode_active() &&
+                        !tiku_basic_mode_streamed()) {
                         streaming = 1;
                     }
 #endif

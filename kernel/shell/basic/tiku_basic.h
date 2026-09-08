@@ -17,6 +17,7 @@
 #ifndef TIKU_BASIC_H_
 #define TIKU_BASIC_H_
 
+#include <kernel/shell/tiku_shell_io.h>
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -54,6 +55,17 @@ int tiku_basic_mode_active(void);
 
 /** @brief Feed one console byte to the mode's line editor (poll-loop hook). */
 void tiku_basic_mode_feed_char(int ch);
+
+/**
+ * @brief Drive the mode from @p io instead of the console, NULL to undo.
+ *
+ * The shell keeps its own line while a stream is set, so the namespace
+ * still answers while a program runs.
+ */
+void tiku_basic_mode_set_stream(const tiku_shell_io_t *io);
+
+/** @brief Non-zero while the mode is driven from a stream, not the console. */
+int tiku_basic_mode_streamed(void);
 
 /** @brief Advance a running program by up to one batch of steps (poll-loop hook). */
 void tiku_basic_mode_tick(void);
