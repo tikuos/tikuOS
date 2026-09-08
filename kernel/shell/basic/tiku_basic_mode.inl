@@ -148,11 +148,15 @@ tiku_basic_mode_active(void)
  * through its own backend, in its own part of the loop, so the two are
  * never interleaved.
  */
+static void basic_mode_feed_char_inner(int ch);
+static void basic_mode_tick_inner(void);
+
+#if TIKU_SHELL_ENABLE
 static const tiku_shell_io_t *basic_stream;
 static const tiku_shell_io_t *basic_stream_under;
 
 void
-tiku_basic_mode_set_stream(const tiku_shell_io_t *io)
+tiku_basic_mode_set_stream(const struct tiku_shell_io *io)
 {
     basic_stream = io;
 }
@@ -163,8 +167,6 @@ tiku_basic_mode_streamed(void)
     return (basic_stream != (const tiku_shell_io_t *)0) ? 1 : 0;
 }
 
-static void basic_mode_feed_char_inner(int ch);
-static void basic_mode_tick_inner(void);
 
 /** @brief Put the stream in front for the length of one hook. */
 static void
@@ -187,9 +189,30 @@ stream_give(void)
         basic_stream_under == (const tiku_shell_io_t *)0) {
         return;
     }
-    tiku_shell_io_set_backend(basic_stream_under);
+        tiku_shell_io_set_backend(basic_stream_under);
     basic_stream_under = (const tiku_shell_io_t *)0;
 }
+#else
+/*
+ * No shell to take the console from: the interpreter built for a host
+ * has one console and it is its own, so there is nothing to hand over
+ * and nothing to hand back.
+ */
+void
+tiku_basic_mode_set_stream(const struct tiku_shell_io *io)
+{
+    (void)io;
+}
+
+int
+tiku_basic_mode_streamed(void)
+{
+    return 0;
+}
+
+static void stream_take(void) { }
+static void stream_give(void) { }
+#endif
 
 /**
  * @brief Feed one console byte to the mode (called by the shell poll loop

@@ -44,7 +44,7 @@
  * tiku_shell_io_set_backend().  The CLI never touches hardware
  * directly — all I/O goes through these three function pointers.
  */
-typedef struct {
+typedef struct tiku_shell_io {
     void    (*putc)(char c);        /**< Transmit one raw byte */
     uint8_t (*rx_ready)(void);      /**< Non-zero when getc has data */
     int     (*getc)(void);          /**< Read one byte, -1 if empty */
