@@ -3365,6 +3365,13 @@ TARGET = main.elf
 lint:
 	@rc=0; \
 	 ./tools/check_durable_placement.sh || rc=1; \
+	 if command -v cc >/dev/null 2>&1; then \
+	   $(MAKE) -s -C tools/usbmsc check >/dev/null 2>&1 \
+	     && echo "usb host checks: OK (tools/usbmsc: BOT/SCSI, control, diff)" \
+	     || { echo "usb host checks: FAILED -- cd tools/usbmsc && make check"; rc=1; }; \
+	 else \
+	   echo "usb host checks: SKIPPED -- no host C compiler"; \
+	 fi; \
 	 if [ -x ./hygiene/check_comment_style.py ]; then \
 	   ./hygiene/check_comment_style.py || rc=1; \
 	 else \
