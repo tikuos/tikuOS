@@ -132,6 +132,11 @@ static tiku_usbd_ctrl_t     s_ctrl;
 static uint32_t setup_buf[6];
 #define EP0_IN_CAP          128u
 static uint8_t  ep0_in_buf[EP0_IN_CAP] __attribute__((aligned(4)));
+/* A control write's data stage lands here, NOT in the buffer armed for a
+ * SETUP packet: read as a setup, its completion can carry the SETUP bit
+ * and be taken for a new request, which answers the old one twice.  A
+ * board rebooting with the cable in wedges within a cycle or two of it. */
+static uint8_t  ep0_out_buf[64] __attribute__((aligned(4)));
 static uint8_t  serial_buf[26] __attribute__((aligned(4)));
 
 static uint8_t  s_started;
@@ -245,6 +250,19 @@ static void ep0_in_reset(void)
     NRF_USBHSCORE_S->DIEPINT0 = 0xFFFFFFFFul;
 }
 
+/** @brief Arm EP0 OUT for a control write's data stage. */
+static void ep0_arm_data_out(void)
+{
+    /* A WHOLE packet, never the exact byte count: the core takes an OUT
+     * transfer size in multiples of the endpoint's packet size and refuses
+     * a short one outright.  The data ends the transfer by being short. */
+    NRF_USBHSCORE_S->DOEPTSIZ0 = (1ul << DOEPTSIZ_SUPCNT_SHIFT) |
+                                 (1ul << DOEPTSIZ_PKTCNT_SHIFT) |
+                                 (uint32_t)USB_EP0_MPS;
+    NRF_USBHSCORE_S->DOEPDMA0  = (uint32_t)ep0_out_buf;
+    NRF_USBHSCORE_S->DOEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
+}
+
 static void ep0_stall(void)
 {
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_STALL;
@@ -334,10 +352,12 @@ static void ep0_setup(void)
         ep0_tx((const void *)0, 0u);
         break;
     case TIKU_USBD_CTRL_ACCEPT_OUT:
-        /* The data lands in the armed setup buffer; its arrival is the
-         * cue for the status stage, so nothing is sent yet. */
+        /* Its arrival is the cue for the status stage, so nothing is sent
+         * yet -- and it is read as DATA, on a buffer of its own. */
         s_ep0_out_data = 1u;
-        break;
+        s_log_head = (uint8_t)((s_log_head + 1u) % LOG_N);
+        ep0_arm_data_out();
+        return;
     default:
         ep0_stall();
         return;
@@ -555,7 +575,17 @@ int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
 
     ep0_arm_setup();
 
-    /* Present the pull-up: from here the host sees a device and starts. */
+    /*
+     * Make the detach visible before presenting the pull-up.  A board that
+     * reboots with the cable in comes back too quickly for the host to see
+     * it leave: the host goes on addressing the device it enumerated
+     * before, while this side has restarted at address zero, and every
+     * control transfer then times out with the device apparently present.
+     * Holding the pull-up down for longer than the host's reset detection
+     * makes the reboot a disconnect, and the host enumerates it afresh.
+     */
+    NRF_USBHSCORE_S->DCTL |= DCTL_SFTDISCON;
+    tiku_common_delay_ms(20u);
     NRF_USBHSCORE_S->DCTL &= ~DCTL_SFTDISCON;
     s_started = 1u;
     return 0;
