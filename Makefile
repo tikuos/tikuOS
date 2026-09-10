@@ -3372,6 +3372,13 @@ lint:
 	   $(MAKE) -s -C tools/usbmsc check >/dev/null 2>&1 \
 	     && echo "usb host checks: OK (tools/usbmsc: BOT/SCSI, control, diff)" \
 	     || { echo "usb host checks: FAILED -- cd tools/usbmsc && make check"; rc=1; }; \
+	   for t in cpu_clock cpu_settings; do \
+	     cc -Wall -Wextra -I. -o /tmp/tiku_$${t}_test tools/$${t}_test.c \
+	       >/dev/null 2>&1 && /tmp/tiku_$${t}_test >/dev/null 2>&1 \
+	       && echo "$${t} host test: OK" \
+	       || { echo "$${t} host test: FAILED -- tools/$${t}_test.c"; rc=1; }; \
+	     rm -f /tmp/tiku_$${t}_test; \
+	   done; \
 	 else \
 	   echo "usb host checks: SKIPPED -- no host C compiler"; \
 	 fi; \
