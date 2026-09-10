@@ -74,6 +74,9 @@
 #include <stdio.h>
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_RAM_USABLE */
 #include <kernel/memory/tiku_nvm_region.h> /* the carved region: nvm_map */
+#if TIKU_SHELL_ENABLE
+#include "tiku_vfs_tree_data.h"   /* mounted file-store slot accounting */
+#endif
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <stdlib.h>                  /* strtoul: /sys/radio/beacon interval */
 #include <string.h>                  /* strchr/strcmp: beacon write parse   */
@@ -758,6 +761,35 @@ sram_map_read(char *buf, size_t max)
 }
 
 /**
+ * @brief Report Store occupancy from its allocation bitmap, when mounted.
+ * Used includes metadata and slot slack; free is unallocated slot space.
+ * A streamed write's staged slots count too, until committed or aborted.
+ */
+static void
+nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
+{
+#if TIKU_SHELL_ENABLE
+    tiku_tfs_t *fs = tiku_vfs_tree_data_store();
+    unsigned long freeb = 0UL;
+    unsigned s;
+
+    if (fs != NULL && fs->mounted && fs->be->size == size) {
+        for (s = 0; s < fs->nslots; s++) {
+            if ((fs->slot_used[s / 8u] & (1u << (s % 8u))) == 0u) {
+                freeb += (unsigned long)TIKU_TFS_SLOT_BYTES;
+            }
+        }
+        if (freeb <= size) {
+            map_line(buf, max, at, "store\t%lu\t%lu\n",
+                     size, size - freeb, 0UL);
+            return;
+        }
+    }
+#endif
+    map_line(buf, max, at, "store\t%lu\n", size, 0UL, 0UL);
+}
+
+/**
  * @brief Read handler for /sys/mem/nvm_map: the non-volatile memory by
  *        estate, in the order they lie: code | module | region | persist.
  *
@@ -800,9 +832,9 @@ nvm_map_read(char *buf, size_t max)
             used = (unsigned long)st.used_bytes;
         }
         map_line(buf, max, &at, "tier\t%lu\t%lu\n", tier, used, 0UL);
-        map_line(buf, max, &at, "store\t%lu\n",
-                 ((unsigned long)rgn->size > tier)
-                     ? (unsigned long)rgn->size - tier : 0UL, 0UL, 0UL);
+        nvm_store_map(buf, max, &at,
+                      ((unsigned long)rgn->size > tier)
+                          ? (unsigned long)rgn->size - tier : 0UL);
     }
     if (&__tiku_layout_persist_size != (char *)0) {
         map_line(buf, max, &at, "persist\t%lu\n",
