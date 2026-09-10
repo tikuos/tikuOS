@@ -73,6 +73,7 @@
 #include <kernel/scheduler/tiku_sched.h>
 #include <stdio.h>
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_RAM_USABLE */
+#include <kernel/memory/tiku_nvm_region.h> /* the carved region: nvm_map */
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <stdlib.h>                  /* strtoul: /sys/radio/beacon interval */
 #include <string.h>                  /* strchr/strcmp: beacon write parse   */
@@ -191,6 +192,23 @@ sram_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n",
                     (unsigned long)TIKU_DEVICE_RAM_USABLE);
+}
+
+/**
+ * @brief Read handler for /sys/mem/kind: what the NVM actually IS.
+ *
+ * The kernel carries every non-volatile memory under the FRAM_* names,
+ * but nothing a person reads should call RRAM "FRAM".  Asked from off
+ * the board, this says the technology instead of guessing at it.
+ *
+ * @param buf  Output buffer for the rendered text
+ * @param max  Capacity of @p buf in bytes
+ * @return Bytes written, or -1 on error
+ */
+static int
+mem_kind_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", TIKU_DEVICE_NVM_LABEL);
 }
 
 /**
@@ -636,6 +654,9 @@ static const tiku_vfs_desc_t desc_mem_static =     /* sram, nvm: fixed sizes */
 static const tiku_vfs_desc_t desc_mem_live =       /* free, used: vary, cheap */
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_BYTES,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_mem_map =        /* one fact a line */
+    TIKU_VFS_DESC(TIKU_VFS_T_STR, TIKU_VFS_U_NONE,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 static const tiku_vfs_desc_t desc_freq =
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_HERTZ,
                   TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE);
@@ -658,10 +679,144 @@ static int stack_free_read(char *buf, size_t max)
     return snprintf(buf, max, "%lu\n", (unsigned long)tiku_stack_free());
 }
 
+/*---------------------------------------------------------------------------*/
+/* /sys/mem/sram_map, /sys/mem/nvm_map -- each memory by estate               */
+/*---------------------------------------------------------------------------*/
+
+/* Weak: a part whose linker does not carve an estate leaves its symbol
+ * at address 0, and that estate is left out rather than misreported. */
+extern char _etext __attribute__((weak));
+extern char __datastart __attribute__((weak));
+extern char __sram_start __attribute__((weak));
+extern char __sram_end __attribute__((weak));
+extern char __tier_sram_start __attribute__((weak));
+extern char __tier_sram_end __attribute__((weak));
+extern char __tiku_layout_code_cap __attribute__((weak));
+extern char __tiku_code_limit __attribute__((weak));
+extern char __tiku_layout_persist_size __attribute__((weak));
+
+/** @brief Append one line; @p at tracks the fill so nothing overruns. */
+static void
+map_line(char *buf, size_t max, size_t *at, const char *fmt,
+         unsigned long a, unsigned long b, unsigned long c)
+{
+    int n;
+
+    if (*at >= max) {
+        return;
+    }
+    n = snprintf(buf + *at, max - *at, fmt, a, b, c);
+    *at += (n > 0) ? (size_t)n : 0u;
+}
+
+/**
+ * @brief Read handler for /sys/mem/sram_map: the RAM by estate.
+ *
+ * The primary bank, what the image's statics take of it, the pool the
+ * stack grows in with its live headroom, and the tier arena with WHICH
+ * bank holds it: a part may carve the tier from a second bank.
+ */
+static int
+sram_map_read(char *buf, size_t max)
+{
+    size_t at = 0u;
+    unsigned long lo = (unsigned long)(uintptr_t)&__sram_start;
+    unsigned long hi = (unsigned long)(uintptr_t)&__sram_end;
+    unsigned long tlo = (unsigned long)(uintptr_t)&__tier_sram_start;
+    unsigned long thi = (unsigned long)(uintptr_t)&__tier_sram_end;
+    tiku_mem_stats_t st;
+
+    buf[0] = '\0';
+    map_line(buf, max, &at, "bank\t%lu\n",
+             (hi > lo) ? hi - lo : (unsigned long)TIKU_DEVICE_RAM_USABLE,
+             0UL, 0UL);
+    if (&__datastart != (char *)0) {
+        map_line(buf, max, &at, "static\t%lu\n",
+                 (unsigned long)((uintptr_t)&_end - (uintptr_t)&__datastart),
+                 0UL, 0UL);
+    }
+    map_line(buf, max, &at, "stack\t%lu\t%lu\n",
+             (unsigned long)((uintptr_t)&__stack - (uintptr_t)&_end),
+             (unsigned long)tiku_stack_free(), 0UL);
+    if (thi > tlo) {
+        unsigned long used = 0UL;
+
+        (void)tiku_tier_init();
+        if (tiku_tier_stats(TIKU_MEM_SRAM, &st) == TIKU_MEM_OK) {
+            used = (unsigned long)st.used_bytes;
+        }
+        /* Inside the primary bank, or a bank of its own: the one fact
+         * that says whether the arena is part of the bank above. */
+        map_line(buf, max, &at, "tier\t%lu\t%lu\t%lu\n", thi - tlo, used,
+                 (tlo >= lo && thi <= hi) ? 1UL : 2UL);
+    }
+#if defined(TIKU_DEVICE_RAM2_SIZE)
+    map_line(buf, max, &at, "bank2\t%lu\n",
+             (unsigned long)TIKU_DEVICE_RAM2_SIZE, 0UL, 0UL);
+#endif
+    return (int)at;
+}
+
+/**
+ * @brief Read handler for /sys/mem/nvm_map: the non-volatile memory by
+ *        estate, in the order they lie: code | module | region | persist.
+ *
+ * The region is the tier at its front and the file store behind it, as
+ * df reports them; a part whose linker carves none of this says only
+ * what it is and how big.
+ */
+static int
+nvm_map_read(char *buf, size_t max)
+{
+    size_t at = 0u;
+    unsigned long cap = (unsigned long)(uintptr_t)&__tiku_layout_code_cap;
+    unsigned long lim = (unsigned long)(uintptr_t)&__tiku_code_limit;
+    unsigned long text = (unsigned long)(uintptr_t)&_etext;
+    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+
+    buf[0] = '\0';
+    at += (size_t)snprintf(buf, max, "kind\t%s\ntotal\t%lu\n",
+                           TIKU_DEVICE_NVM_LABEL,
+                           (unsigned long)TIKU_DEVICE_FRAM_SIZE);
+    if (cap != 0UL) {
+        unsigned long in_use = (text > (unsigned long)TIKU_DEVICE_FRAM_START &&
+                                text <= (unsigned long)TIKU_DEVICE_FRAM_END)
+                               ? text - (unsigned long)TIKU_DEVICE_FRAM_START
+                               : 0UL;
+
+        map_line(buf, max, &at, "code\t%lu\t%lu\n",
+                 (lim != 0UL) ? lim : cap, in_use, 0UL);
+        if (lim != 0UL && cap > lim) {
+            map_line(buf, max, &at, "module\t%lu\n", cap - lim, 0UL, 0UL);
+        }
+    }
+    if (rgn != NULL && rgn->size > 0u) {
+        unsigned long tier = (unsigned long)TIKU_NVM_TIER_BYTES;
+        unsigned long used = 0UL;
+        tiku_mem_stats_t st;
+
+        (void)tiku_tier_init();
+        if (tiku_tier_stats(TIKU_MEM_NVM, &st) == TIKU_MEM_OK) {
+            used = (unsigned long)st.used_bytes;
+        }
+        map_line(buf, max, &at, "tier\t%lu\t%lu\n", tier, used, 0UL);
+        map_line(buf, max, &at, "store\t%lu\n",
+                 ((unsigned long)rgn->size > tier)
+                     ? (unsigned long)rgn->size - tier : 0UL, 0UL, 0UL);
+    }
+    if (&__tiku_layout_persist_size != (char *)0) {
+        map_line(buf, max, &at, "persist\t%lu\n",
+                 (unsigned long)(uintptr_t)&__tiku_layout_persist_size,
+                 0UL, 0UL);
+    }
+    return (int)at;
+}
+
 /** /sys/mem directory table — sizes (sram, nvm) + live (free, used) */
 static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
+    { "kind", TIKU_VFS_FILE, mem_kind_read,  NULL, NULL, 0, &desc_mem_static },
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },
     { "nvmfree", TIKU_VFS_FILE, nvmfree_read, NULL, NULL, 0, &desc_mem_live },
@@ -669,6 +824,10 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "failed",  TIKU_VFS_FILE, mem_failed_read, NULL, NULL, 0, &desc_mem_live },
     { "stack_free", TIKU_VFS_FILE, stack_free_read, NULL, NULL, 0,
       &desc_mem_live },
+    { "sram_map", TIKU_VFS_FILE, sram_map_read, NULL, NULL, 0,
+      &desc_mem_map },
+    { "nvm_map",  TIKU_VFS_FILE, nvm_map_read,  NULL, NULL, 0,
+      &desc_mem_map },
 };
 
 /** /sys/cpu directory table */
@@ -1285,7 +1444,7 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
-    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 8 },
+    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 11 },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_power_children,    TIKU_VFS_TREE_POWER_NCHILD },
