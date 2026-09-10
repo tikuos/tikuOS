@@ -55,6 +55,19 @@ void tiku_cpu_boot_init(void);
  */
 void tiku_cpu_freq_init(unsigned int cpu_freq);
 
+/** @brief Frequency-change policy: "reboot" or "fixed" (no live retuning). */
+const char *tiku_cpu_freq_change_mode(void);
+/** @brief Enumerate selectable rates in Hz; zero terminates the list. */
+unsigned long tiku_cpu_freq_available(unsigned int index);
+/** @brief Saved next-boot rate, or the current rate on fixed platforms. */
+unsigned long tiku_cpu_freq_target_hz(void);
+/** @brief Save a supported rate in Hz; return -1 on rejection or failure. */
+int tiku_cpu_freq_target_set(unsigned long hz);
+/** @brief Apply a restored preference during boot, before peripherals start. */
+void tiku_cpu_freq_boot_apply(void);
+/** @brief Arch boot-only target application; never called by a VFS write. */
+void tiku_cpu_freq_boot_set(unsigned long hz);
+
 /*---------------------------------------------------------------------------*/
 /* CLOCK RATE QUERIES                                                        */
 /*---------------------------------------------------------------------------*/

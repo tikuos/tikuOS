@@ -1115,6 +1115,28 @@ void tiku_cpu_freq_msp430_init(unsigned int freq_mhz)
     cpu_freq_msp430_init(freq_mhz, TIKU_CLK_DIV_1, false, false);
 }
 
+/** @brief Divide only MCLK before peripheral init; keep the 8 MHz DCO. */
+void tiku_cpu_msp430_boot_divide(unsigned long hz)
+{
+    unsigned int div;
+    if (g_smclk_hz != 8000000UL) return;
+    switch (hz) {
+    case 8000000UL: div = 0; break;
+    case 4000000UL: div = 1; break;
+    case 2000000UL: div = 2; break;
+    case 1000000UL: div = 3; break;
+    default: return;
+    }
+    TIKU_CS_UNLOCK();
+#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
+    CSCTL5 = (CSCTL5 & ~0x0007U) | div;
+#else
+    CSCTL3 = (CSCTL3 & ~0x0007U) | div;
+#endif
+    TIKU_CS_LOCK();
+    g_mclk_hz = hz;
+}
+
 unsigned long tiku_cpu_msp430_clock_get_hz(void)
 {
     return g_mclk_hz;
@@ -1129,5 +1151,4 @@ unsigned long tiku_cpu_msp430_smclk_get_hz(void)
 {
     return g_smclk_hz;
 }
-
 

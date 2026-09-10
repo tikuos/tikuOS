@@ -67,6 +67,7 @@
 #include "tiku.h"
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_common.h>
+#include <hal/tiku_cpu.h>
 #include <kernel/cpu/tiku_rtc.h>
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/process/tiku_process.h>
@@ -632,9 +633,7 @@ device_version_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/cpu/freq.
  *
- * Renders the configured CPU frequency (TIKU_MAIN_CPU_HZ) in Hz ("8000000\n").
- * This is the build-time constant; compare it with /sys/boot/clock/mclk, the
- * live measurement, to spot a DCO that failed to reach its target.
+ * Renders the actual CPU frequency in Hz, not the build-time constant.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -643,8 +642,63 @@ device_version_read(char *buf, size_t max)
 static int
 cpu_freq_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%lu\n", (unsigned long)TIKU_MAIN_CPU_HZ);
+    return snprintf(buf, max, "%lu\n", tiku_cpu_mclk_hz());
 }
+
+/** @brief Read the validated next-boot target (current rate if fixed). */
+static int cpu_target_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%lu\n", tiku_cpu_freq_target_hz());
+}
+
+/** @brief Enumerate safe selectable rates in Hz on a single line. */
+static int cpu_available_read(char *buf, size_t max)
+{
+    unsigned int i;
+    size_t at = 0;
+    for (i = 0; i < 32; i++) {
+        unsigned long hz = tiku_cpu_freq_available(i);
+        int n;
+        if (hz == 0) break;
+        if (at >= max) return -1;
+        n = snprintf(buf + at, max - at, "%s%lu", i ? " " : "", hz);
+        if (n < 0 || (size_t)n >= max - at) return -1;
+        at += (size_t)n;
+    }
+    if (at + 1 >= max) return -1;
+    buf[at++] = '\n';
+    buf[at] = '\0';
+    return (int)at;
+}
+
+/** @brief Report whether changing a rate needs a reboot or is unsupported. */
+static int cpu_mode_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", tiku_cpu_freq_change_mode());
+}
+
+#if defined(PLATFORM_NORDIC) || defined(PLATFORM_RP2350) || \
+    defined(PLATFORM_AMBIQ) || defined(PLATFORM_MSP430) || \
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1)
+/** @brief Save a strictly parsed Hz target; never retune a running CPU. */
+static int cpu_target_write(const char *buf, size_t len)
+{
+    unsigned long hz = 0;
+    size_t i;
+    if (len && buf[len - 1] == '\n') len--;
+    if (len == 0 || len > 10) return -1;
+    for (i = 0; i < len; i++) {
+        if (buf[i] < '0' || buf[i] > '9') return -1;
+        if (hz > (1000000000UL - (unsigned long)(buf[i] - '0')) / 10UL)
+            return -1;
+        hz = hz * 10UL + (unsigned long)(buf[i] - '0');
+    }
+    return tiku_cpu_freq_target_set(hz);
+}
+#define CPU_TARGET_WRITE cpu_target_write
+#else
+#define CPU_TARGET_WRITE NULL
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* NODE TABLES                                                               */
@@ -662,7 +716,7 @@ static const tiku_vfs_desc_t desc_mem_map =        /* one fact a line */
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 static const tiku_vfs_desc_t desc_freq =
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_HERTZ,
-                  TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE);
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 static const tiku_vfs_desc_t desc_idle =
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_COUNT,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
@@ -865,6 +919,10 @@ static const tiku_vfs_node_t sys_mem_children[] = {
 /** /sys/cpu directory table */
 static const tiku_vfs_node_t sys_cpu_children[] = {
     { "freq", TIKU_VFS_FILE, cpu_freq_read, NULL, NULL, 0, &desc_freq },
+    { "freq_available", TIKU_VFS_FILE, cpu_available_read, NULL, NULL, 0 },
+    { "freq_target", TIKU_VFS_FILE, cpu_target_read, CPU_TARGET_WRITE,
+      NULL, 0, &desc_freq, NULL, TIKU_VFS_CAP_SYS },
+    { "freq_change_mode", TIKU_VFS_FILE, cpu_mode_read, NULL, NULL, 0 },
 };
 
 /** /sys/sched directory table */
@@ -1477,7 +1535,8 @@ static const tiku_vfs_node_t sys_children[] = {
     { "cold_boots", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
     { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 11 },
-    { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children, 1 },
+    { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children,
+      sizeof sys_cpu_children / sizeof sys_cpu_children[0] },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_power_children,    TIKU_VFS_TREE_POWER_NCHILD },
 #if (TIKU_DRV_GPU_ENABLE + 0)

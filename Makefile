@@ -1600,6 +1600,7 @@ endif
 else ifeq ($(TIKU_PLATFORM),nordic)
 SRCS += arch/nordic/tiku_crt_early.c
 SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
+SRCS += arch/nordic/tiku_cpu_settings_arch.c
 SRCS += arch/nordic/tiku_cpu_common.c
 SRCS += arch/nordic/tiku_power_arch.c
 SRCS += arch/nordic/tiku_uart_arch.c
@@ -1718,6 +1719,7 @@ endif
 endif
 SRCS += arch/nordic/tiku_crt_early.c
 SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
+SRCS += arch/nordic/tiku_cpu_settings_arch.c
 SRCS += arch/nordic/tiku_power_arch.c
 SRCS += arch/nordic/tiku_timer_arch.c
 SRCS += arch/nordic/tiku_gpio_arch.c
@@ -2162,6 +2164,7 @@ SRCS += arch/msp430/tiku_nvm_region_msp430.c
 endif
 SRCS += boot/tiku_boot.c
 SRCS += hal/tiku_cpu.c
+SRCS += kernel/cpu/tiku_cpu_settings.c
 # Portable u8 vector kernels: Helium/MVE when -mcpu has it (Apollo510 M55),
 # bit-identical scalar elsewhere. Unreferenced kernels are gc-section'd away.
 SRCS += hal/tiku_simd.c

@@ -40,10 +40,10 @@ void tiku_cpu_boot_stm32n6_init(void);
 /**
  * @brief CPU clock rate in Hz, measured against LPTIM1.
  *
- * Measured once per boot on first call after the tick starts; before that the
- * compile-time fallback is reported.
+ * Measured once per clock configuration after the tick starts; before that
+ * the actual RCC clock tree is decoded.
  *
- * @return Measured rate, or TIKU_STM32N6_CPU_HZ until LPTIM1 runs
+ * @return Measured rate, or the clock-tree rate until LPTIM1 runs
  */
 unsigned long tiku_cpu_stm32n6_clock_get_hz(void);
 
@@ -119,5 +119,10 @@ void tiku_cpu_freq_stm32n6_init(unsigned int mhz);
  * @return 1 when supported, 0 otherwise
  */
 int tiku_cpu_freq_stm32n6_supported(unsigned int mhz);
+
+/** @brief Whether the existing PLL/voltage permits a core-only boot change. */
+int tiku_cpu_stm32n6_boot_rate_supported(unsigned long hz);
+/** @brief Boot-only IC1 change; leave PLL, bus, XSPI clocks and voltage alone. */
+void tiku_cpu_stm32n6_boot_divide(unsigned long hz);
 
 #endif /* TIKU_STM32N6_CPU_FREQ_BOOT_ARCH_H_ */

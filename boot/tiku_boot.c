@@ -117,6 +117,11 @@ tiku_cpu_full_init(unsigned int cpu_freq)
     }
     MAIN_PRINTF("Boot: Memory done\n");
 
+    /* Mirrored preferences are now restored. Apply before timers and normal
+     * peripherals are initialized. Nordic selected its rate earlier from
+     * directly mapped RRAM, so this hook is a no-op there. */
+    tiku_cpu_freq_boot_apply();
+
     /* Peripheral initialization stage */
     current_boot_stage = TIKU_BOOT_STAGE_PERIPHERALS;
     MAIN_PRINTF("Boot: Peripherals init\n");

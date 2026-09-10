@@ -125,10 +125,13 @@ unsigned long tiku_cpu_stm32n6_clock_get_hz(void) {
     if (stm32n6_measured_hz == 0UL) {
         stm32n6_measured_hz = cpu_measure_hz();
     }
-    /* Before LPTIM1 runs there is nothing to measure against; report the
-     * compile-time figure and try again on the next call. */
-    return (stm32n6_measured_hz != 0UL) ? stm32n6_measured_hz
-                                        : TIKU_STM32N6_CPU_HZ;
+    /* Before the reference timer runs, decode the actual clock tree. */
+    if (stm32n6_measured_hz == 0UL) {
+        tiku_stm32n6_clock_t p;
+        tiku_cpu_stm32n6_clock_probe(&p);
+        return p.cpu_hz;
+    }
+    return stm32n6_measured_hz;
 }
 
 unsigned long tiku_cpu_stm32n6_spin_per_ms(void) {
@@ -351,6 +354,52 @@ void tiku_cpu_freq_stm32n6_init(unsigned int mhz) {
     }
     stm32n6_measured_hz = 0UL;
     stm32n6_spin_per_ms = 0UL;      /* re-measure against the new rate */
+}
+
+int tiku_cpu_stm32n6_boot_rate_supported(unsigned long hz) {
+    static unsigned long boot_pll, boot_ceiling;
+    static int captured;
+    if (!captured) {
+        tiku_stm32n6_clock_t p;
+        tiku_cpu_stm32n6_clock_probe(&p);
+        /* Snapshot during boot preference handling. A later shell clock
+         * experiment must not advertise choices the next boot cannot use. */
+        if (p.pll1_ready && p.pll1_src == 0 && p.pll1_frac == 0) {
+            boot_pll = p.pll1_hz;
+            boot_ceiling = p.vos_high ? 800000000UL : 600000000UL;
+        }
+        captured = 1;
+    }
+    return hz >= 100000000UL && hz <= boot_ceiling && boot_pll >= hz
+        && boot_pll % hz == 0 && boot_pll / hz <= 256UL;
+}
+
+void tiku_cpu_stm32n6_boot_divide(unsigned long hz) {
+    tiku_stm32n6_clock_t p;
+    unsigned long div;
+    if (!tiku_cpu_stm32n6_boot_rate_supported(hz)) return;
+    tiku_cpu_stm32n6_clock_probe(&p);
+    /* The NOR mirror has already been restored. Only park the CPU; no PLL
+     * retune or bus switch may disturb the still-mapped external memory. */
+    clk_select_source(STM32N6_CLKSRC_HSI, 0);
+    if (((TIKU_REG32(STM32N6_RCC_CFGR1) >> STM32N6_CFGR1_CPUSWS_POS) & 3UL)
+        != STM32N6_CLKSRC_HSI) {
+        /* The park did not take, and the core may be on either source:
+         * every cached rate below is now a guess, so drop them. */
+        stm32n6_measured_hz = 0UL;
+        stm32n6_spin_per_ms = 0UL;
+        return;
+    }
+    div = (hz != 0UL) ? p.pll1_hz / hz : 0UL;
+    if (div >= 1UL && div <= 256UL) {
+        TIKU_REG32(STM32N6_RCC_DIVENR) &= ~1UL;
+        clk_set_ic(1U, (unsigned int)div);
+    }
+    /* A divider outside the register's range would be written as a
+     * borrowed word over IC_SEL: leave IC1 as it was found instead. */
+    clk_select_source(STM32N6_CLKSRC_IC, 0);
+    stm32n6_measured_hz = 0UL;
+    stm32n6_spin_per_ms = 0UL;
 }
 
 void tiku_cpu_stm32n6_clock_probe(tiku_stm32n6_clock_t *out) {

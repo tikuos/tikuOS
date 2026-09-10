@@ -17,6 +17,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_rp2350_regs.h"
 #include "tiku_cpu_common.h"
+#include "tiku_cpu_freq_boot_arch.h"
 #include <kernel/scheduler/tiku_sched.h>
 #include <stdint.h>
 
@@ -53,7 +54,8 @@ void tiku_clock_arch_init(void) {
     g_seconds = 0UL;
 
     /* SysTick reload value: CPU clock cycles per tick - 1. */
-    uint32_t reload = (TIKU_CLOCK_ARCH_INTERVAL) - 1U;
+    uint32_t reload = tiku_cpu_rp2350_clock_get_hz() /
+                      TIKU_CLOCK_ARCH_SECOND - 1U;
     /* Clamp to the 24-bit reload register width. */
     if (reload > 0x00FFFFFFU) {
         reload = 0x00FFFFFFU;

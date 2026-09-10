@@ -24,7 +24,7 @@
 #define TIKU_PLL_CK64M           0x3UL       /* OSCILLATORS_PLL_FREQ_CK64M  */
 
 /*
- * CORE FREQUENCY: 64 or 128 MHz, CHOSEN AT BUILD TIME, APPLIED ONCE AT BOOT.
+ * CORE FREQUENCY: 64 or 128 MHz, SELECTED AND APPLIED ONCE AT BOOT.
  *
  * Those are the only two the silicon offers.  The CPU runs from HCLK128M, and
  * the other rails the HFCLK controller produces (PCLK32M / PCLK16M / PCLK1M)
@@ -40,24 +40,13 @@
  * claim can be MEASURED on a given workload rather than assumed, which is what
  * the TikuBench power suite does with it.
  */
-#ifndef TIKU_NORDIC_CPU_MHZ
-#define TIKU_NORDIC_CPU_MHZ      128
-#endif
-#if (TIKU_NORDIC_CPU_MHZ != 64) && (TIKU_NORDIC_CPU_MHZ != 128)
-#error "TIKU_NORDIC_CPU_MHZ must be 64 or 128 -- the part supports nothing else"
-#endif
-
-#if (TIKU_NORDIC_CPU_MHZ == 128)
-#define TIKU_PLL_WANT            TIKU_PLL_CK128M
-#else
-#define TIKU_PLL_WANT            TIKU_PLL_CK64M
-#endif
-
 static volatile int tiku_nordic_clock_fault;
 
 void tiku_cpu_boot_nordic_init(void)
 {
     uint32_t spin;
+    uint32_t want = tiku_cpu_nordic_target_hz() == 64000000UL
+                        ? TIKU_PLL_CK64M : TIKU_PLL_CK128M;
 
     /* SysTick-based delays need no setup; call retained for API symmetry. */
     tiku_nordic_dwt_init();
@@ -83,13 +72,13 @@ void tiku_cpu_boot_nordic_init(void)
      * latch the clock fault -- delays still time correctly, because they read
      * CURRENTFREQ rather than this request.
      */
-    NRF_OSCILLATORS_S->PLL.FREQ = TIKU_PLL_WANT;
+    NRF_OSCILLATORS_S->PLL.FREQ = want;
     spin = TIKU_NORDIC_XOSTART_SPIN;
-    while ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) != TIKU_PLL_WANT &&
+    while ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) != want &&
            spin != 0U) {
         spin--;
     }
-    if ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) != TIKU_PLL_WANT) {
+    if ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) != want) {
         tiku_nordic_clock_fault = 1;
     }
 
@@ -181,8 +170,8 @@ int tiku_cpu_nordic_clock_has_fault(void)
  *
  * @note The core clock and the MCU power domain are the same rail (HCLK128M),
  *       so there is no sanctioned sequence for moving it once peripherals hold
- *       clock requests.  Frequency is selected at BUILD time via
- *       TIKU_NORDIC_CPU_MHZ and applied once in tiku_cpu_boot_nordic_init();
+ *       clock requests. A saved preference overrides TIKU_NORDIC_CPU_MHZ
+ *       only at the next tiku_cpu_boot_nordic_init();
  *       the shell's "freq" reports the request was not applied, because
  *       tiku_cpu_mclk_hz() reads the hardware.
  */

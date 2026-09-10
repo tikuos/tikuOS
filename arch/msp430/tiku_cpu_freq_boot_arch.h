@@ -19,6 +19,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/** @brief Boot-only MCLK divider change; preserves SMCLK and ACLK. */
+void tiku_cpu_msp430_boot_divide(unsigned long hz);
+
 /*---------------------------------------------------------------------------*/
 /* TYPE DEFINITIONS                                                         */
 /*---------------------------------------------------------------------------*/

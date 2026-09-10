@@ -19,18 +19,24 @@
 
 #include "tiku_cpu_common.h"
 #include <string.h>
+#include <hal/tiku_cpu.h>
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE CONSTANTS                                                        */
 /*---------------------------------------------------------------------------*/
 
-/** Approximate loop iterations per millisecond at 8MHz */
-#define TIKU_DELAY_LOOPS_PER_MS    1000
+/* Busy-delay loop counts scale from the original 8 MHz calibration. These
+ * remain approximate: loop overhead limits accuracy at the lowest rates. */
 
-/** Approximate loop iterations per microsecond at 8MHz.
- *  At 8 MHz each NOP is ~125 ns; one loop iteration (NOP + branch)
- *  is ~2 cycles = 250 ns, so 4 iterations per microsecond. */
-#define TIKU_DELAY_LOOPS_PER_US    4
+/** @brief The rate to scale a busy delay by, 8 MHz before clock setup. */
+static unsigned long delay_hz(void)
+{
+    unsigned long hz = tiku_cpu_mclk_hz();
+
+    /* Called before cpu_freq_msp430_init() the live rate reads zero, and
+     * a delay scaled from that is a thousand times too short. */
+    return hz ? hz : 8000000UL;
+}
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE TYPES                                                            */
@@ -70,10 +76,12 @@
 void tiku_cpu_msp430_delay_ms(unsigned int ms)
 {
     unsigned int i, j;
+    unsigned int loops = (unsigned int)(delay_hz() / 8000UL);
+    if (!loops) loops = 1;
 
     for (i = 0; i < ms; i++) {
 
-        for (j = 0; j < TIKU_DELAY_LOOPS_PER_MS; j++) {
+        for (j = 0; j < loops; j++) {
 
             __no_operation();
 
@@ -89,9 +97,11 @@ void tiku_cpu_msp430_delay_ms(unsigned int ms)
 void tiku_cpu_msp430_delay_us(unsigned int us)
 {
     unsigned int i;
+    unsigned int loops = (unsigned int)(delay_hz() / 2000000UL);
+    if (!loops) loops = 1;
 
     while (us--) {
-        for (i = 0; i < TIKU_DELAY_LOOPS_PER_US; i++) {
+        for (i = 0; i < loops; i++) {
             __no_operation();
         }
     }

@@ -16,6 +16,7 @@
 
 #include <stddef.h>
 #include "tiku_cpu.h"
+#include <kernel/cpu/tiku_cpu_settings.h>
 
 #if defined(PLATFORM_MSP430)
 #include <msp430.h>    /* MSP430 intrinsics for interrupt state management */
@@ -170,6 +171,87 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
     tiku_cpu_freq_stm32n6_init(cpu_freq);
 #elif defined(PLATFORM_RA8P1)
     tiku_cpu_freq_ra8p1_init(cpu_freq);
+#endif
+}
+
+const char *tiku_cpu_freq_change_mode(void) {
+    return tiku_cpu_freq_available(1) != 0UL ? "reboot" : "fixed";
+}
+
+unsigned long tiku_cpu_freq_available(unsigned int index) {
+#if defined(PLATFORM_NORDIC)
+    return index == 0 ? 64000000UL : index == 1 ? 128000000UL : 0UL;
+#elif defined(PLATFORM_RP2350)
+    static const unsigned long rates[] = {
+        12000000UL, 48000000UL, 100000000UL, 125000000UL,
+        133000000UL, 150000000UL
+    };
+    return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
+#elif defined(PLATFORM_AMBIQ)
+#if defined(AM_PART_APOLLO4L)
+    return index == 0 ? 96000000UL : index == 1 ? 192000000UL : 0UL;
+#else
+    return index == 0 ? 96000000UL : index == 1 ? 250000000UL : 0UL;
+#endif
+#elif defined(PLATFORM_RA8P1)
+    static const unsigned long rates[] = {
+        240000000UL, 480000000UL, 1000000000UL
+    };
+    return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
+#elif defined(PLATFORM_MSP430)
+    /* Keep the board's 8 MHz UART/peripheral clock untouched. */
+    if (tiku_cpu_smclk_hz() != 8000000UL)
+        return index == 0 ? tiku_cpu_mclk_hz() : 0UL;
+    return index < 4 ? (1000000UL << index) : 0UL;
+#elif defined(PLATFORM_STM32N6)
+    static const unsigned long rates[] = {
+        100000000UL, 150000000UL, 200000000UL, 300000000UL,
+        400000000UL, 600000000UL, 800000000UL
+    };
+    unsigned int i;
+    for (i = 0; i < sizeof rates / sizeof rates[0]; i++) {
+        if (tiku_cpu_stm32n6_boot_rate_supported(rates[i])) {
+            if (index == 0) return rates[i];
+            index--;
+        }
+    }
+    return 0UL;
+#else
+    return index == 0 ? tiku_cpu_mclk_hz() : 0UL;
+#endif
+}
+
+unsigned long tiku_cpu_freq_target_hz(void) {
+#if defined(PLATFORM_NORDIC)
+    return tiku_cpu_nordic_target_hz();
+#else
+    return tiku_cpu_settings_target();
+#endif
+}
+
+int tiku_cpu_freq_target_set(unsigned long hz) {
+#if defined(PLATFORM_NORDIC)
+    return tiku_cpu_nordic_target_set(hz);
+#else
+    return tiku_cpu_settings_save(hz);
+#endif
+}
+
+void tiku_cpu_freq_boot_apply(void) {
+#if !defined(PLATFORM_NORDIC)
+    tiku_cpu_settings_boot();
+#endif
+}
+
+void tiku_cpu_freq_boot_set(unsigned long hz) {
+#if defined(PLATFORM_MSP430)
+    tiku_cpu_msp430_boot_divide(hz);
+#elif defined(PLATFORM_STM32N6)
+    tiku_cpu_stm32n6_boot_divide(hz);
+#elif !defined(PLATFORM_NORDIC)
+    tiku_cpu_freq_init((unsigned int)(hz / 1000000UL));
+#else
+    (void)hz;
 #endif
 }
 
