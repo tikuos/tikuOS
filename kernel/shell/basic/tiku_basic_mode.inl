@@ -242,6 +242,7 @@ basic_mode_feed_char_inner(int ch)
      * console itself via a nested read_line, so it is not reached here. */
     if (basic_running) {
         if (ch == BASIC_CTRL_C) {
+            basic_mode_pos = 0;
             SHELL_PRINTF(SH_YELLOW "^C break at line %u" SH_RST "\n",
                          (unsigned)basic_pc);
             /* An orderly break drops the checkpoint, same as program end and
@@ -252,6 +253,27 @@ basic_mode_feed_char_inner(int ch)
             basic_run_end();
             basic_mode_after_program();
         }
+#if TIKU_BASIC_DEBUG_ENABLE
+        else if (basic_debug_on && basic_debug_paused) {
+            if (ch == '\r' || ch == '\n') {
+                const char *p = basic_mode_line;
+                basic_mode_line[basic_mode_pos] = '\0';
+                if (basic_debug_overflow) {
+                    SHELL_PRINTF("[TDBG ERROR command-too-long]\n");
+                } else if (basic_mode_pos && match_kw(&p, "DEBUG")) {
+                    basic_debug_command(p);
+                }
+                basic_mode_pos = 0;
+                basic_debug_overflow = 0;
+            } else if (ch >= 32 && ch < 127 &&
+                       basic_mode_pos + 1 <
+                           (uint16_t)sizeof(basic_mode_line)) {
+                basic_mode_line[basic_mode_pos++] = (char)ch;
+            } else if (ch >= 32 && ch < 127) {
+                basic_debug_overflow = 1;
+            }
+        }
+#endif
         return;
     }
 
@@ -365,10 +387,16 @@ basic_mode_tick_inner(void)
     }
 #endif
     for (budget = TIKU_BASIC_MODE_BATCH; budget > 0 && basic_running; budget--) {
+        if (basic_debug_before_step()) { break; }
         if (basic_run_step() != BASIC_STEP_RUNNING) {
             basic_run_end();
             break;
         }
+#if TIKU_BASIC_DEBUG_ENABLE
+        if (basic_debug_on && basic_debug_steps > 0 && !basic_wait_pending) {
+            basic_debug_steps--;
+        }
+#endif
     }
     if (basic_running) {
         /* F1: still running after this batch -- the yield boundary IS the
@@ -376,7 +404,7 @@ basic_mode_tick_inner(void)
          * on FRAM-class NVM, at most one per TIKU_BASIC_CKPT_INTERVAL_S on the
          * program-op media), snapshot the reified state so a power cut resumes
          * from at most one batch / one interval back. */
-        if (basic_ckpt_armed && basic_ckpt_due()) {
+        if (basic_ckpt_armed && basic_ckpt_due() && !basic_debug_parked()) {
             if (basic_ckpt_save() == 0) {
                 basic_ckpt_mark();
             }
@@ -424,6 +452,7 @@ tiku_basic_mode_enter(void)
     basic_run_shell_mode    = 1;      /* step machine: shell loop owns Ctrl-C */
     basic_mode_exit_pending = 0;
     basic_quit              = 0;
+    basic_debug_reset();
     basic_auto_active       = 0;
 
     SHELL_PRINTF(SH_CYAN SH_BOLD "Tiku BASIC" SH_RST
@@ -451,6 +480,7 @@ tiku_basic_mode_run_saved(void)
     if (basic_session_begin() != 0) {
         return -1;
     }
+    basic_debug_reset();              /* no console here to answer a pause */
     if (basic_load_from_persist() != 0) {
         return -1;                    /* "no saved program" already printed */
     }
@@ -490,6 +520,7 @@ tiku_basic_mode_resume_saved(void)
     if (basic_session_begin() != 0) {
         return -1;
     }
+    basic_debug_reset();              /* no console here to answer a pause */
     if (basic_load_from_persist() != 0) {
         return -1;                    /* "no saved program" already printed */
     }

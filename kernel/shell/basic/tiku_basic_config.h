@@ -16,6 +16,11 @@
 #ifndef TIKU_BASIC_CONFIG_H_
 #define TIKU_BASIC_CONFIG_H_
 
+/* Line debugger: bounded state, no expression evaluation or memory writes. */
+#ifndef TIKU_BASIC_DEBUG_ENABLE
+#define TIKU_BASIC_DEBUG_ENABLE 1
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* MEMORY TIER -- drives the default limits below                            */
 /*---------------------------------------------------------------------------*/

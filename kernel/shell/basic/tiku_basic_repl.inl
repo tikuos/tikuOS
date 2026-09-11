@@ -54,6 +54,8 @@ process_line(const char *raw)
     /* Direct commands first; they can't be statements. */
     {
         const char *q = p;
+        if (match_kw(&q, "DEBUG")) { basic_debug_command(q); return; }
+        q = p;
         if (match_kw(&q, "BYE") || match_kw(&q, "EXIT") ||
             match_kw(&q, "QUIT")) {
             basic_quit = 1;
@@ -62,7 +64,10 @@ process_line(const char *raw)
         q = p;
         if (match_kw(&q, "LIST"))  { prog_list();   return; }
         q = p;
-        if (match_kw(&q, "NEW"))   { prog_clear(); basic_clear_vars(); basic_ckpt_invalidate(); SHELL_PRINTF("ok\n"); return; }
+        if (match_kw(&q, "NEW"))   {
+            basic_debug_reset(); prog_clear(); basic_clear_vars();
+            basic_ckpt_invalidate(); SHELL_PRINTF("ok\n"); return;
+        }
         q = p;
         if (match_kw(&q, "RUN")) {
             /* `RUN RESUME` (F1): continue a checkpointed program mid-loop from

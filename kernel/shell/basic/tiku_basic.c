@@ -132,6 +132,7 @@
 #include "tiku_basic_import.inl"      /* IMPORT (needs renum + subs + persist) */
 #include "tiku_basic_named_slots.inl"
 #include "tiku_basic_dispatch.inl"
+#include "tiku_basic_debug.inl"
 #include "tiku_basic_run.inl"
 #include "tiku_basic_repl.inl"
 #include "tiku_basic_shell.inl"

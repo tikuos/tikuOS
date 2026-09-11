@@ -123,6 +123,7 @@ basic_run_begin(void)
      * once without tripping "array already DIMmed". */
     basic_clear_vars();
     basic_pc = prog[idx].number;
+    basic_debug_begin();
     return 0;
 }
 
@@ -281,6 +282,7 @@ exec_resume:
 static void
 basic_run_end(void)
 {
+    basic_debug_end();
     basic_running      = 0;
     basic_wait_pending = 0;      /* a Ctrl-C break may land mid-park */
     basic_wait_sleep_s = 0;
@@ -317,6 +319,7 @@ basic_run_resume(void)
     basic_wait_sleep_s = 0;
     basic_stmt_depth   = 0;
     basic_in_reactive  = 0;
+    basic_debug_begin();         /* a resumed run is a run, and is watched */
     return 0;
 }
 
