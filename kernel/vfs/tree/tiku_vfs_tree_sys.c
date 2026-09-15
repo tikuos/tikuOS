@@ -73,6 +73,10 @@
 #include <kernel/process/tiku_process.h>
 #include <kernel/scheduler/tiku_sched.h>
 #include <stdio.h>
+#include <string.h>
+#if (TIKU_VFS_CONFIG_ENABLE + 0)
+static int cfg_managed_write(uint32_t, const char *, size_t, int *);
+#endif
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_RAM_USABLE */
 #include <kernel/memory/tiku_nvm_region.h> /* the carved region: nvm_map */
 #if TIKU_SHELL_ENABLE
@@ -469,8 +473,8 @@ version_read(char *buf, size_t max)
 
 /**
  * Maximum stored device-name length, excluding the terminator.
- * Sized to fit a typical mDNS hostname; longer writes are silently
- * truncated to this length rather than rejected.
+ * Sized to fit a typical mDNS hostname; a longer plain write is
+ * truncated to it, while a longer managed one is refused.
  */
 #define DEVICE_NAME_MAX  31
 
@@ -498,7 +502,7 @@ TIKU_PERSIST_CELL(device_name_cell, device_name_persist,
 static int
 device_name_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "%s\n", device_name_persist);
+    return snprintf(buf, max, "%.*s\n", DEVICE_NAME_MAX, device_name_persist);
 }
 
 /**
@@ -518,6 +522,10 @@ device_name_write(const char *buf, size_t len)
     char tmp[DEVICE_NAME_MAX + 1];
     size_t i;
     size_t copy_len;
+#if (TIKU_VFS_CONFIG_ENABLE + 0)
+    int managed_rc;
+    if (cfg_managed_write(1, buf, len, &managed_rc)) return managed_rc;
+#endif
 
     /* Strip a trailing newline (shell typically appends one) */
     if (len > 0 && buf[len - 1] == '\n') {
@@ -685,6 +693,10 @@ static int cpu_target_write(const char *buf, size_t len)
 {
     unsigned long hz = 0;
     size_t i;
+#if (TIKU_VFS_CONFIG_ENABLE + 0)
+    int managed_rc;
+    if (cfg_managed_write(2, buf, len, &managed_rc)) return managed_rc;
+#endif
     if (len && buf[len - 1] == '\n') len--;
     if (len == 0 || len > 10) return -1;
     for (i = 0; i < len; i++) {
@@ -698,6 +710,10 @@ static int cpu_target_write(const char *buf, size_t len)
 #define CPU_TARGET_WRITE cpu_target_write
 #else
 #define CPU_TARGET_WRITE NULL
+#endif
+
+#if (TIKU_VFS_CONFIG_ENABLE + 0)
+#include "tiku_vfs_config_service.inl"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -1567,6 +1583,10 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_children,     TIKU_VFS_TREE_BOOT_NCHILD },
     { "persist",  TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_persist_children,  TIKU_VFS_TREE_PERSIST_NCHILD },
+#if (TIKU_VFS_CONFIG_ENABLE + 0)
+    { "config", TIKU_VFS_DIR, NULL, NULL, cfg_children,
+      sizeof cfg_children / sizeof cfg_children[0] },
+#endif
 #if (TIKU_DRV_USBHS_ENABLE + 0) || (TIKU_DRV_USB_ENABLE + 0)
     { "usb",      TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_usb_children,      TIKU_VFS_TREE_USB_NCHILD },
@@ -1652,6 +1672,9 @@ tiku_vfs_tree_sys_init(void)
     /* Validate/prime the device name ("tiku" until renamed via
      * /sys/device/name). */
     (void)tiku_persist_cell_init(&device_name_cell);
+#if (TIKU_VFS_CONFIG_ENABLE + 0)
+    cfg_service_init();
+#endif
 
 #if (TIKU_HAS_BLE_ADV + 0)
     /* R7: background-observer scan data -> /sys/radio/scan namespace

@@ -609,6 +609,11 @@ const char *tiku_vfs_strerror(int status)
     case TIKU_VFS_E2BIG:  return "E2BIG";
     case TIKU_VFS_EIO:    return "EIO";
     case TIKU_VFS_EPERM:  return "EPERM";
+    case TIKU_VFS_ECONFLICT: return "ECONFLICT";
+    case TIKU_VFS_ESTALE: return "ESTALE";
+    case TIKU_VFS_EBUSY: return "EBUSY";
+    case TIKU_VFS_ENOTSUP: return "ENOTSUP";
+    case TIKU_VFS_ECORRUPT: return "ECORRUPT";
     default:              return "E?";
     }
 }

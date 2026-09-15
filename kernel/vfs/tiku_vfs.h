@@ -48,6 +48,11 @@ enum {
     TIKU_VFS_ERANGE  = -5,   /**< value out of range / numeric overflow      */
     TIKU_VFS_E2BIG   = -6,   /**< (reserved) buffer too small to hold value  */
     TIKU_VFS_EIO     = -7,   /**< (reserved) backend / hardware error        */
+    TIKU_VFS_ECONFLICT = -9, /**< configuration revision/value conflict */
+    TIKU_VFS_ESTALE = -10,  /**< expired request or storage incarnation */
+    TIKU_VFS_EBUSY = -11,   /**< operation already in progress */
+    TIKU_VFS_ENOTSUP = -12, /**< recovery unavailable/not enrolled */
+    TIKU_VFS_ECORRUPT = -13,/**< invalid/incompatible durable state */
     TIKU_VFS_EPERM   = -8    /**< denied by policy: caller lacks the node's
                                   required capability (see tiku_vfs_cap_t)    */
 };

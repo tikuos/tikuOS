@@ -2301,6 +2301,13 @@ CFLAGS += -DTIKU_LINK_BLE_ENABLE=1
 SRCS   += kernel/link/tiku_link_ble.c
 endif
 SRCS += kernel/vfs/tiku_vfs.c
+# Recovery is opt-in while physical power-cut qualification is pending. The
+# first adapter uses direct FRAM/RRAM only, never whole-region flash mirrors.
+TIKU_VFS_CONFIG ?= 0
+ifeq ($(TIKU_VFS_CONFIG),1)
+CFLAGS += -DTIKU_VFS_CONFIG_ENABLE=1 -DTIKU_SHELL_LINE_SIZE=256
+SRCS += kernel/vfs/tiku_vfs_config.c
+endif
 SRCS += kernel/vfs/tiku_vfs_cache.c
 SRCS += kernel/vfs/tiku_vfs_tree.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_sys.c
