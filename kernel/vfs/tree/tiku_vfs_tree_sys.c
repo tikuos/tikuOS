@@ -766,6 +766,9 @@ extern char __tier_sram_start __attribute__((weak));
 extern char __tier_sram_end __attribute__((weak));
 extern char __tiku_layout_code_cap __attribute__((weak));
 extern char __tiku_code_limit __attribute__((weak));
+extern char __data_load __attribute__((weak));
+extern char __data_start __attribute__((weak));
+extern char __data_end __attribute__((weak));
 extern char __tiku_layout_persist_size __attribute__((weak));
 
 /** @brief Append one line; @p at tracks the fill so nothing overruns. */
@@ -874,6 +877,15 @@ nvm_map_read(char *buf, size_t max)
     unsigned long cap = (unsigned long)(uintptr_t)&__tiku_layout_code_cap;
     unsigned long lim = (unsigned long)(uintptr_t)&__tiku_code_limit;
     unsigned long text = (unsigned long)(uintptr_t)&_etext;
+    unsigned long load = (unsigned long)(uintptr_t)&__data_load;
+    /* Where the image ENDS, not where .text ends: .rodata and .data's
+     * load copy sit after _etext in the same window, and on a part with
+     * a lot of rodata that is most of it.  A script without __data_load
+     * is read as it was, to _etext. */
+    unsigned long image = (load != 0UL)
+        ? load + ((unsigned long)(uintptr_t)&__data_end -
+                  (unsigned long)(uintptr_t)&__data_start)
+        : text;
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
 
     buf[0] = '\0';
@@ -881,13 +893,20 @@ nvm_map_read(char *buf, size_t max)
                            TIKU_DEVICE_NVM_LABEL,
                            (unsigned long)TIKU_DEVICE_FRAM_SIZE);
     if (cap != 0UL) {
-        unsigned long in_use = (text > (unsigned long)TIKU_DEVICE_FRAM_START &&
-                                text <= (unsigned long)TIKU_DEVICE_FRAM_END)
-                               ? text - (unsigned long)TIKU_DEVICE_FRAM_START
+        unsigned long end = (lim != 0UL) ? lim : cap;
+        unsigned long in_use = (image > (unsigned long)TIKU_DEVICE_FRAM_START &&
+                                image <= (unsigned long)TIKU_DEVICE_FRAM_END)
+                               ? image - (unsigned long)TIKU_DEVICE_FRAM_START
                                : 0UL;
 
+        /* A SIZE, like every other line here.  The limit is a linker
+         * address -- the end of the window -- and written raw it read
+         * as a 4.4 MB code estate on a 3.9 MB part, which is what made
+         * the four estates sum to twice the memory they lie in. */
         map_line(buf, max, &at, "code\t%lu\t%lu\n",
-                 (lim != 0UL) ? lim : cap, in_use, 0UL);
+                 (end > (unsigned long)TIKU_DEVICE_FRAM_START)
+                     ? end - (unsigned long)TIKU_DEVICE_FRAM_START : end,
+                 in_use, 0UL);
         if (lim != 0UL && cap > lim) {
             map_line(buf, max, &at, "module\t%lu\n", cap - lim, 0UL, 0UL);
         }

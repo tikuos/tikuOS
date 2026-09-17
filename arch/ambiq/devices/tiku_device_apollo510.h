@@ -102,6 +102,8 @@
  */
 #define TIKU_DEVICE_RAM_SIZE        (512UL * 1024UL) /**< 512 KB DTCM. */
 #define TIKU_DEVICE_RAM_START       0x20000000UL     /**< DTCM base address. */
+#define TIKU_DEVICE_RAM2_START      0x20080000UL     /**< Shared SRAM base (SSRAM). */
+#define TIKU_DEVICE_RAM2_SIZE       (3UL * 1024UL * 1024UL) /**< 3 MB SSRAM: the tier arena's bank. */
 
 /**
  * @brief Non-volatile memory (MRAM) map.
