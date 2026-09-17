@@ -19,7 +19,7 @@
  *   ITCM   : 256 KB at 0x00000000   (not used at bring-up — see .text)
  *   MRAM   : 4 MB   at 0x00400000   (flash; low 64 KB reserved for the SBL)
  *   DTCM   : 512 KB at 0x20000000   (.data / .bss / heap / stack)
- *   SSRAM  : 3 MB   at 0x20080000   (shared SRAM — unused at bring-up)
+ *   SSRAM  : 3 MB   at 0x20080000   (shared SRAM: .ssram buffers, .retained, SRAM tier)
  *
  * Unlike the RP2350 port there is NO .boot2 / .image_def header: the
  * on-silicon Secure Boot Loader (resident in MRAM 0x400000..0x410000)
@@ -48,7 +48,7 @@ MEMORY
      * here means code outgrew its budget -- do NOT raise it to fit data. */
     MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x60000   /* 384 KB code window (M4) */
     TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM: .data/.bss/heap/stack    */
-    SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM (unused at bring-up) */
+    SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM: buffers, retained, tier */
 }
 
 __flash_start = ORIGIN(MRAM);
