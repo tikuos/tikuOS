@@ -24,17 +24,9 @@
 #define TIKU_NVMFS_MSP430_BYTES  8192u
 #endif
 
-/* The region span.  On the supported HIFRAM parts it is PINNED to a fixed
- * address held back from HIFRAM by the device linker fragment (just below
- * the Tier-3 module slot), so /data keeps its address across reflashes --
- * every other platform's region is address-stable, and before this pin a
- * rebuild could silently relocate the span (it was a .persistent array
- * whose address moved with the build; the FS then found garbage at the new
- * address and re-primed empty).  The pinned span lives in MPU segment 3
- * (HIFRAM, R+W+X), so in-place writes behave exactly as before.
- *
- * Parts without a pinned carve (FR2433-class, host harness) keep the
- * legacy floating .persistent array. */
+/* This backend is pinned below the module slot, in writable HIFRAM.
+ * MSP430 /data instead uses data_tfs_region in tiku_vfs_tree_data.c;
+ * the NVM tier also has its own lower-FRAM array. */
 #if defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
 #define TIKU_NVMFS_MSP430_BASE  0x41000u   /* fr5994: below the 0x43000 slot */
 #elif defined(TIKU_DEVICE_MSP430FR6989) || defined(__MSP430FR6989__)
@@ -45,7 +37,7 @@
 /* The held-back carve is 8 KB; growing TIKU_NVMFS_MSP430_BYTES past it
  * requires holding back more HIFRAM in the device linker fragment too. */
 _Static_assert(TIKU_NVMFS_MSP430_BYTES <= 8192u,
-               "pinned msp430 /data region: grow the linker carve first");
+               "pinned msp430 NVM region: grow the linker carve first");
 #define nvmfs_region  ((uint8_t *)TIKU_NVMFS_MSP430_BASE)
 #else
 static uint8_t __attribute__((section(".persistent")))

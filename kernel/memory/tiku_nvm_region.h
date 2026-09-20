@@ -7,9 +7,8 @@
  *
  * tiku_nvm_region.h - the board's carved, memory-mapped NVM region.
  *
- * A linker-carved span of FRAM/MRAM/Flash exposed as one tiku_nvm_backend_t:
- * reads are a pointer dereference into be->base, writes go through be->write
- * inside an unlock window.  The NVM tier and the file store both ride it.
+ * A carved span read through be->base and written through be->write in an
+ * unlock window. ARM tiers and stores use it; MSP430 keeps separate arrays.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,65 +19,12 @@
 #include "kernel/fs/tiku_nvm_backend.h"
 
 /*
- * Region layout -- TWO extents, in address order, and nothing else:
- *
- *     [ tier | file store (/data) ]
- *      32 KB   absorbs the rest
- *
- * The NVM memory tier bump-allocates from the FRONT of the region; the file
- * store owns everything above it.  That is the whole layout.  The rule that
- * keeps it that way:
- *
- *     Fixed extents are platform CONTRACTS.  Everything feature-shaped is a
- *     named file in one self-describing store.
- *
- * The tier extent is fixed because it IS a contract (32 KB on every part --
- * see below).  Nothing else qualifies: BASIC's saved program and run-state
- * checkpoint are ordinary files (prog.bas, prog.ckpt).  Spanned files and
- * streamed writes are what make that workable -- a file can exceed one slot and
- * be replaced in place without a RAM copy of the whole thing, so a fixed extent
- * buys nothing a name does not.
- *
- * The file store's extent is DERIVED (region - tier), not hand-written, so the
- * two extents always tile the region exactly.  Deriving the FS rather than the
- * tier makes idle space structurally impossible: whatever the code window frees
- * goes to files, the one extent that can actually spend it.
- */
-
-/*
- * TIER EXTENT -- one number, every platform.
- *
- * 32 KB of region-backed NVM scratch is the PORTABLE CONTRACT: code that asks
- * the NVM tier for <= 32 KB runs on every TikuOS platform, the same way the
- * 4 KB RP2350 durable window sets the ceiling for TIKU_DURABLE.  The figure is
- * set by the smallest member of the family -- MSP430, whose HIFRAM tier has
- * shipped at 32 KB since the tier was introduced (TIKU_TIER_HIFRAM_SIZE) and
- * cannot exceed 64 KB at all, because tiku_mem_arch_size_t is 16-bit there.
- *
- * What the extent is FOR (it is deliberately small -- see the ledger note in
- * the layout comment above):
- *   1. staging scratch for the machinery that manages the region itself --
- *      TFS shadow slots, the RP2350 multi-sector mirror rebuild, and the
- *      planned extent-header rewrite;
- *   2. headroom for a whole module image (32 KB == TIKU_MODULE_CARVE_SIZE), so
- *      a Tier-3 module arriving over a link could be staged in full before it
- *      is committed.  NOTE: no code does this today -- a module image is a
- *      store file (mod.bin) that the store itself streams, and each install
- *      backend stages privately (Nordic/MSP430 store straight through, Ambiq
- *      via a 256 B buffer, RP2350 via its own 4 KB static).  This is why the
- *      size was chosen, not a use that exists;
- *   3. the portable <= 32 KB allocation promise above.
- * It is NOT a durable heap for applications: an anonymous NVM allocation has
- * no name and no validity gate, so nothing can recover it after a reset.  Data
- * that must survive with its identity intact belongs in a FILE (/data) or in a
- * named TIKU_PERSIST_CELL -- both of which carry the gate discipline the raw
- * tier cannot.
- */
-/*
- * Unconditional: this is the SIZE of the tier extent, not a claim that the
- * board has one.  Whether a region exists is answered at run time by
- * tiku_nvm_backend_get(), so the constant needs no platform list -- it is only
- * ever consulted on the path where a backend was already found.
+ * Region-backed ARM ports reserve 32 KB for the NVM tier and give the rest
+ * to /data. The backend's actual size determines whether that split fits.
+ * MSP430 instead has a separate lower-FRAM tier and static /data array;
+ * neither uses its pinned region backend. HIFRAM is a different tier.
+ * Anonymous tier allocations have no recovery identity: use a file or cell
+ * for named persistent data.
  */
 #define TIKU_NVM_TIER_BYTES  (32u * 1024u)
 

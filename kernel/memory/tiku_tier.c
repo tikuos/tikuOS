@@ -94,9 +94,8 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 /**
  * @brief Backing store for the NVM tier, on the one architecture that needs it.
  *
- * MSP430's FRAM is unified with the code estate, so there is no region to
- * carve and TIKU_DURABLE puts this array in genuinely non-volatile memory.
- * Every other board takes its NVM tier from the carved region.
+ * MSP430 uses a durable array separate from its pinned region backend.
+ * Other boards take their NVM tier from the carved region.
  */
 /* No untagged fallback: a tier promising survival across power loss must never
  * quietly be RAM, so a board with neither unified FRAM nor a carved region has
@@ -734,44 +733,41 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
     if (dst == NULL || src == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
-    /* Ask the backend, do not consult a platform list: if this board carved a
-     * region its writes go through the program path, and the same code is
-     * correct on a board that has not carved one. */
+    /* A backend owns only its validated address range. */
     {
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
 
         if (rgn != NULL && rgn->base != NULL && rgn->write != NULL) {
             uintptr_t d = (uintptr_t)dst;
             uintptr_t b = (uintptr_t)rgn->base;
-            if (d < b || (size_t)(d - b) > rgn->size ||
-                (size_t)len > rgn->size - (size_t)(d - b)) {
-                return TIKU_MEM_ERR_INVALID;     /* dst not in the region */
-            }
-            {
+            if (d >= b && (d - b) <= rgn->size &&
+                (size_t)len <= rgn->size - (size_t)(d - b)) {
                 uint16_t mpu = tiku_mpu_unlock_nvm();
                 int rc = rgn->write((tiku_nvm_backend_t *)rgn,
                                     (size_t)(d - b), src, (size_t)len);
-                tiku_mpu_lock_nvm(mpu);
-                return (rc == 0) ? TIKU_MEM_OK : TIKU_MEM_ERR_INVALID;
+                if (rc != 0) {
+                    /* Restore protection without another program attempt. */
+                    tiku_mpu_arch_lock_nvm(mpu);
+                    return TIKU_MEM_ERR_IO;
+                }
+                return tiku_mpu_lock_nvm_status(mpu);
             }
-        }
-        if (rgn != NULL) {
-            /* A region exists but its backend cannot write: a direct CPU store
-             * would bus-fault on program-op NVM, so fail rather than fall
-             * through to the in-place copy below. */
-            return TIKU_MEM_ERR_INVALID;
         }
     }
 
 #ifdef PLATFORM_MSP430
-    /* Unified FRAM: byte-writable in place, and the only architecture where an
-     * NVM-tier write is a plain store. */
+    /* The lower-FRAM tier is a separate owner and needs an MPU window. */
     {
+        uintptr_t d = (uintptr_t)dst;
+        uintptr_t b = (uintptr_t)tier_nvm_buf;
+        if (d < b || (d - b) > sizeof tier_nvm_buf ||
+            (size_t)len > sizeof tier_nvm_buf - (size_t)(d - b)) {
+            return TIKU_MEM_ERR_INVALID;
+        }
         uint16_t mpu = tiku_mpu_unlock_nvm();
-        memcpy(dst, src, (size_t)len);
-        tiku_mpu_lock_nvm(mpu);
+        tiku_mem_arch_nvm_write(dst, src, len);
+        return tiku_mpu_lock_nvm_status(mpu);
     }
-    return TIKU_MEM_OK;
 #else
     /* No region and no unified FRAM: this board has no NVM tier, so there is
      * nowhere for this write to go.  Returning OK here would report a durable
