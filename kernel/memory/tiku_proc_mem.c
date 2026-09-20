@@ -121,7 +121,10 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
     /* Flush and destroy all attached cached regions */
     for (i = 0; i < pmem->cache_count; i++) {
         if (pmem->caches[i] != NULL && pmem->caches[i]->active) {
-            tiku_cache_flush(pmem->caches[i]);
+            tiku_mem_err_t status = tiku_cache_flush(pmem->caches[i]);
+            if (status != TIKU_MEM_OK) {
+                return status;
+            }
             tiku_cache_destroy(pmem->caches[i]);
         }
         pmem->caches[i] = NULL;
@@ -154,7 +157,7 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
  *
  * SRAM and NVM go straight to their arena; HIFRAM returns NULL unless one was
  * attached, deliberately, so a placement bug surfaces rather than falling
- * through.  AUTO prefers HIFRAM for large requests, then SRAM, then NVM.
+ * through. AUTO uses only arenas backed by SRAM or HIFRAM.
  *
  * @param pmem  Active process memory context
  * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
@@ -193,23 +196,35 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
         return NULL;
 
     case TIKU_MEM_AUTO:
-        /* Prefer HIFRAM for large requests if attached, then SRAM,
-         * then NVM. Mirrors the tier-allocator AUTO policy. */
-        if (size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
-            pmem->hifram_arena.active) {
+        /* Use local capacity and inspect backing tiers, not field names. */
+        if (TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0 &&
+            size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
+            pmem->hifram_arena.active &&
+            pmem->hifram_arena.tier == TIKU_MEM_HIFRAM) {
             ptr = tiku_arena_alloc(&pmem->hifram_arena, size);
             if (ptr != NULL) {
                 return ptr;
             }
         }
-        if (pmem->sram_arena.active) {
+        if (pmem->sram_arena.active &&
+            (pmem->sram_arena.tier == TIKU_MEM_SRAM ||
+             pmem->sram_arena.tier == TIKU_MEM_HIFRAM)) {
             ptr = tiku_arena_alloc(&pmem->sram_arena, size);
             if (ptr != NULL) {
                 return ptr;
             }
         }
-        if (pmem->nvm_arena.active) {
-            return tiku_arena_alloc(&pmem->nvm_arena, size);
+        if (pmem->nvm_arena.active &&
+            (pmem->nvm_arena.tier == TIKU_MEM_SRAM ||
+             pmem->nvm_arena.tier == TIKU_MEM_HIFRAM)) {
+            ptr = tiku_arena_alloc(&pmem->nvm_arena, size);
+            if (ptr != NULL) {
+                return ptr;
+            }
+        }
+        if (pmem->hifram_arena.active &&
+            pmem->hifram_arena.tier == TIKU_MEM_HIFRAM) {
+            return tiku_arena_alloc(&pmem->hifram_arena, size);
         }
         return NULL;
 

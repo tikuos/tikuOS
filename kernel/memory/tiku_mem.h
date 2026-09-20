@@ -176,7 +176,7 @@ typedef enum {
 typedef enum {
     TIKU_MEM_SRAM   = 0, /**< Fast, volatile — for hot/temporary data */
     TIKU_MEM_NVM    = 1, /**< Persistent, slower writes — for cold/stable data */
-    TIKU_MEM_AUTO   = 2, /**< OS selects: prefers SRAM, falls back to NVM/HIFRAM */
+    TIKU_MEM_AUTO   = 2, /**< OS selects directly writable SRAM or HIFRAM only */
     TIKU_MEM_HIFRAM = 3, /**< Upper FRAM bank (FR5994/FR6989, MEMORY_MODEL=large) */
     TIKU_MEM_PSRAM  = 4  /**< External PSRAM aperture, late-attached: it exists only while the device is
                               attached and mapped.  Volatile, and never chosen by
@@ -1580,8 +1580,8 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
  * @brief Allocate within a process context (bounds-checked).
  *
  * Picks the arena for the requested tier.  AUTO prefers HIFRAM when attached
- * and the request is large enough, then SRAM, then NVM; asking for HIFRAM
- * directly requires an earlier attach.
+ * and the request is large enough, then directly writable local SRAM/HIFRAM.
+ * Protected NVM requires an explicit request, regardless of the arena name.
  *
  * @param pmem  Active process memory context
  * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)

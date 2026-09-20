@@ -234,13 +234,7 @@ basic_alloc_state(void)
         }
     }
 
-    /* The arena is BASIC's hot working set -- the line table, variables and
-     * stacks are written on every statement.  It MUST be byte-writable RAM.
-     * If AUTO fell back to the NVM tier (because the SRAM tier was too small
-     * for BASIC_ARENA_BYTES), refuse here: on parts whose NVM is program-op
-     * (RP2350 QSPI flash, Ambiq MRAM) the first store would hard-fault and
-     * wedge the board at `basic` entry instead of failing cleanly.  The fix
-     * is to raise TIKU_TIER_SRAM_MIN for the part (see the Makefile). */
+    /* Defend against custom allocator descriptors; AUTO itself excludes NVM. */
     if (basic_arena.tier == TIKU_MEM_NVM) {
         return -1;
     }

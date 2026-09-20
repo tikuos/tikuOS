@@ -8,8 +8,8 @@
  * tiku_tier.c - tier-aware memory allocator.
  *
  * Carves a buffer from the caller's chosen memory type (SRAM, NVM or AUTO) and
- * initialises an arena or pool over it.  AUTO prefers SRAM and falls back to NVM,
- * so a caller can express intent without managing raw buffers.
+ * initialises an arena or pool over it. AUTO selects only directly writable
+ * SRAM or eligible HIFRAM; protected NVM requires an explicit request.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -337,7 +337,7 @@ tiku_mem_err_t tiku_tier_reset(void)
  *
  * Prefers HIFRAM when it is available, has room, and the request meets the
  * threshold -- which keeps small objects off the 20-bit pointer path -- then
- * SRAM, then NVM.  Concrete tiers pass through unchanged.
+ * SRAM, then remaining HIFRAM. No eligible space resolves to AUTO and fails.
  */
 static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
                                      tiku_mem_arch_size_t size)
@@ -364,7 +364,7 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
     }
 #endif
 
-    /* Prefer SRAM if it has room; fall back to NVM */
+    /* Small allocations prefer SRAM. */
     if (tier_state[TIKU_MEM_SRAM].initialized &&
         aligned <= tier_state[TIKU_MEM_SRAM].capacity -
                    tier_state[TIKU_MEM_SRAM].offset) {
@@ -372,21 +372,15 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
     }
 
 #if TIKU_TIER_HIFRAM_AVAILABLE
-    /* Last-resort capacity check: NVM full but HIFRAM has room (a
-     * sub-threshold size that no longer fits anywhere else).  Without
-     * it AUTO would return NVM unconditionally and fail the carve with
-     * HIFRAM capacity sitting idle. */
-    if (tier_state[TIKU_MEM_NVM].initialized &&
-        aligned > tier_state[TIKU_MEM_NVM].capacity -
-                  tier_state[TIKU_MEM_NVM].offset &&
-        tier_state[TIKU_MEM_HIFRAM].initialized &&
+    /* HIFRAM can also satisfy a small request when SRAM is full. */
+    if (tier_state[TIKU_MEM_HIFRAM].initialized &&
         aligned <= tier_state[TIKU_MEM_HIFRAM].capacity -
                    tier_state[TIKU_MEM_HIFRAM].offset) {
         return TIKU_MEM_HIFRAM;
     }
 #endif
 
-    return TIKU_MEM_NVM;
+    return TIKU_MEM_AUTO;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -406,10 +400,14 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
 static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
                                  tiku_mem_arch_size_t size)
 {
-    tier_pool_state_t *ts = &tier_state[tier];
+    tier_pool_state_t *ts;
     tiku_mem_arch_size_t aligned = align_up(size);
     uint8_t *ptr;
 
+    if (tier == TIKU_MEM_AUTO || (unsigned)tier >= TIKU_MEM_TIER_COUNT) {
+        return NULL;
+    }
+    ts = &tier_state[tier];
     if (!ts->initialized) {
         ts->fail_count++;
         return NULL;
