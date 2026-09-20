@@ -78,7 +78,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
     tiku_mpu_arch_lock_nvm(gate);           /* restore WEN */
 }
 
-void tiku_mem_arch_nvm_flush(void)
+int tiku_mem_arch_nvm_flush_status(void)
 {
     /* RRAM writes are unbuffered (WRITEBUFSIZE = 0 in tiku_mem_arch_init) and
      * nvm_write already spins on RRAMC.READY, so there is no deferred write
@@ -87,4 +87,11 @@ void tiku_mem_arch_nvm_flush(void)
     while ((NRF_RRAMC_S->READY & TIKU_RRAMC_READY_BIT) == 0UL) {
         /* spin until RRAMC is ready */
     }
+    return 0;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_mem_arch_nvm_flush(void)
+{
+    (void)tiku_mem_arch_nvm_flush_status();
 }

@@ -97,5 +97,6 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  *       window.  A no-op where NVM writes are already durable (MSP430 FRAM).
  */
 void tiku_mem_arch_nvm_flush(void);
+int tiku_mem_arch_nvm_flush_status(void);
 
 #endif /* TIKU_RP2350_MEM_ARCH_H_ */

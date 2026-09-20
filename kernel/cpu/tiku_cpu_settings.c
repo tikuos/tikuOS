@@ -68,7 +68,7 @@ static int committed(void)
         memcmp(image + gate, &saved_clock_cell_gate,
                sizeof saved_clock_cell_gate) == 0;
 #else
-    return 1; /* Direct NVM: RA8P1 additionally checks its flush counter. */
+    return 1; /* Direct NVM completion comes from the checked cell commit. */
 #endif
 }
 
@@ -96,23 +96,13 @@ unsigned long tiku_cpu_settings_target(void)
 int tiku_cpu_settings_save(unsigned long hz)
 {
     uint32_t value[2];
-    uint32_t previous[2];
-#if defined(PLATFORM_RA8P1)
-    uint32_t programs = tiku_mem_arch_nvm_program_count();
-#endif
     if (!ready || !supported(hz)) return -1;
     value[0] = (uint32_t)hz;
     value[1] = ~value[0];
-    memcpy(previous, &saved_clock, sizeof previous);
-    tiku_persist_cell_commit(&saved_clock_cell, value, sizeof value);
-    if (!committed()
-#if defined(PLATFORM_RA8P1)
-        || programs == tiku_mem_arch_nvm_program_count()
-#endif
-        ) {
-        /* Do not leave a failed request queued in SRAM for a later,
-         * unrelated persistence flush to silently commit. */
-        tiku_persist_cell_commit(&saved_clock_cell, previous, sizeof previous);
+    if (tiku_persist_cell_commit_status(&saved_clock_cell, value, sizeof value)
+            != TIKU_MEM_OK || !committed()) {
+        /* Completion is uncertain; do not issue a second write as rollback. */
+        restored = 0;
         return -1;
     }
     restored = 1;

@@ -89,4 +89,11 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len);
 
+#if !defined(PLATFORM_MSP430)
+/** @brief Zero for completed/no work, negative if completion was not established. */
+int tiku_mem_arch_nvm_flush_status(void);
+/** @brief Unchecked compatibility wrapper for the checked flush. */
+void tiku_mem_arch_nvm_flush(void);
+#endif
+
 #endif /* TIKU_MEM_HAL_H_ */

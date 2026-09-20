@@ -46,8 +46,7 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
      * outer window already held by the caller survives this. */
     saved = tiku_mpu_unlock_nvm();
     memcpy(be->base + off, src, len);       /* MRAM in place, no erase */
-    tiku_mpu_lock_nvm(saved);               /* flushes the write buffer */
-    return 0;
+    return tiku_mpu_lock_nvm_status(saved) == TIKU_MEM_OK ? 0 : -1;
 }
 
 static tiku_nvm_backend_t g_region;

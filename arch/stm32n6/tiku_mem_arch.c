@@ -121,12 +121,15 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
     __asm__ volatile ("dsb" ::: "memory");
 }
 
-void tiku_mem_arch_nvm_flush(void) {
+int tiku_mem_arch_nvm_flush_status(void) {
     if (!tiku_xspi_ready()) {
-        return;
+        return -1;
     }
 
-    size_t   len = mem_uninit_size();
+    size_t len = (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
+    if (len > MIRROR_IMAGE_MAX) {
+        return -1;
+    }
     uint32_t crc = tiku_nvm_crc32(&__uninit_start, len);
 
     /* Skip a mirror that already matches: an erase costs one cycle of a finite
@@ -136,7 +139,7 @@ void tiku_mem_arch_nvm_flush(void) {
         if (hdr[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2 &&
             hdr[TIKU_NVM_MIRROR_W_LEN]   == (uint32_t)len &&
             hdr[TIKU_NVM_MIRROR_W_CRC]   == crc) {
-            return;
+            return 0;
         }
     }
 
@@ -153,19 +156,32 @@ void tiku_mem_arch_nvm_flush(void) {
     for (unsigned i = 0U; i < TIKU_XSPI_MIRROR_SECTORS; i++) {
         if (tiku_xspi_erase_sector(TIKU_XSPI_MIRROR_ADDR +
                                    (i * TIKU_XSPI_SECTOR_SIZE)) != TIKU_XSPI_OK) {
-            return;
+            goto failed;
         }
     }
     if (tiku_xspi_program(TIKU_XSPI_MIRROR_ADDR + TIKU_NVM_MIRROR_HDR_BYTES,
                           &__uninit_start, (uint32_t)len) != TIKU_XSPI_OK) {
-        return;
+        goto failed;
     }
     if (tiku_xspi_program(TIKU_XSPI_MIRROR_ADDR, hdr_out,
                           sizeof(hdr_out)) != TIKU_XSPI_OK) {
-        return;
+        goto failed;
+    }
+    if (tiku_xspi_mmap_enable() != TIKU_XSPI_OK) {
+        return -1;
     }
     mem_program_count++;
-    (void)tiku_xspi_mmap_enable();      /* leave reads cheap again */
+    return 0;
+
+failed:
+    (void)tiku_xspi_mmap_enable();
+    return -1;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_mem_arch_nvm_flush(void)
+{
+    (void)tiku_mem_arch_nvm_flush_status();
 }
 
 int tiku_mem_arch_nvm_restore_status(void) {

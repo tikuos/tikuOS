@@ -236,14 +236,15 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * @note MRAM is direct-write.  The bootrom helper works in 32-bit words and
  *       requires a 16-byte-aligned source.
  */
-void tiku_mem_arch_nvm_flush(void) {
+int tiku_mem_arch_nvm_flush_status(void) {
     size_t   n = uninit_bytes();
     size_t   snap_bytes, prog_bytes;
     uint32_t dst_word_off, primask;
     int      changed;
+    int      rc = 0;
 
     if (n > (TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES)) {
-        n = TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES;
+        return -1;
     }
 
     /* Compose the IMAGE first (header words filled only when a program
@@ -252,7 +253,7 @@ void tiku_mem_arch_nvm_flush(void) {
     snap_bytes = TIKU_NVM_MIRROR_HDR_BYTES + n;
     prog_bytes = (snap_bytes + 15U) & ~((size_t)15U);
     if (prog_bytes > TIKU_NVM_MRAM_BYTES) {
-        prog_bytes = TIKU_NVM_MRAM_BYTES;
+        return -1;
     }
     if (prog_bytes > snap_bytes) {
         memset((uint8_t *)g_nvm_snap + snap_bytes, 0xFFu, prog_bytes - snap_bytes);
@@ -301,7 +302,7 @@ void tiku_mem_arch_nvm_flush(void) {
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
     __asm__ volatile ("cpsid i" ::: "memory");
     if (changed) {
-        (void)NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
+        rc = NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
                                (uint32_t)(uintptr_t)g_nvm_snap, dst_word_off,
                                (uint32_t)(prog_bytes / 4U));
     }
@@ -311,8 +312,15 @@ void tiku_mem_arch_nvm_flush(void) {
      * reads of the mirror see the new data. */
     if (changed) {
         tiku_cpu_dcache_invalidate((const void *)__tiku_nvm_mram_start, prog_bytes);
-        g_nvm_flush_programs++;
+        if (rc == 0) { g_nvm_flush_programs++; }
     }
+    return rc == 0 ? 0 : -1;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_mem_arch_nvm_flush(void)
+{
+    (void)tiku_mem_arch_nvm_flush_status();
 }
 
 /*---------------------------------------------------------------------------*/

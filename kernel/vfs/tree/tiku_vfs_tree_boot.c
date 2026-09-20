@@ -249,7 +249,10 @@ tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max)
     /* Push the freshly-computed lifetime back to FRAM so a
      * subsequent power loss does not lose the time covered by
      * this run. The cell write owns the MPU unlock window. */
-    tiku_persist_cell_write_u32(&lifetime_cell, lifetime);
+    if (tiku_persist_cell_write_u32_status(&lifetime_cell, lifetime)
+            != TIKU_MEM_OK) {
+        return TIKU_VFS_EIO;
+    }
 
     return snprintf(buf, max, "%lu\n", (unsigned long)lifetime);
 }
@@ -538,6 +541,7 @@ tiku_vfs_tree_boot_init(void)
     (void)tiku_persist_cell_init(&boot_count_cell);
     (void)tiku_persist_cell_init(&lifetime_cell);
 
+    /* Unchecked boot diagnostic: boot continues if the counter cannot persist. */
     tiku_persist_cell_write_u32(&boot_count_cell,
                                 boot_count_persist + 1U);
     boot_count_value = boot_count_persist;

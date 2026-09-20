@@ -246,7 +246,7 @@ tiku_shell_cmd_ntp_tick(void)
                 /* Set the system wall clock so date-dependent consumers (TLS
                  * certificate validity, /sys/time, BASIC DATE$/NOW) have a real
                  * time without a separate `write /sys/time`. */
-                tiku_rtc_set_seconds((uint32_t)ts);
+                int saved = tiku_rtc_set_seconds_status((uint32_t)ts);
                 SHELL_PRINTF("ntp: %u-", (unsigned)tm.year);
                 ntp_put2(tm.month);
                 SHELL_PRINTF("-");
@@ -257,8 +257,9 @@ tiku_shell_cmd_ntp_tick(void)
                 ntp_put2(tm.minute);
                 SHELL_PRINTF(":");
                 ntp_put2(tm.second);
-                SHELL_PRINTF(" UTC  stratum %u  (clock set)\n",
-                             (unsigned)tiku_kits_time_ntp_get_stratum());
+                SHELL_PRINTF(" UTC  stratum %u  (%s)\n",
+                             (unsigned)tiku_kits_time_ntp_get_stratum(),
+                             saved == 0 ? "clock set" : "clock persistence failed");
             } else {
                 SHELL_PRINTF("ntp: reply parse error\n");
             }

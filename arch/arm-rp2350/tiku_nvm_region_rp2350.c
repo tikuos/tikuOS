@@ -29,7 +29,7 @@ extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its ADDRESS == size */
 
 /* Proven boot-ROM flash sector commit (arch/arm-rp2350/tiku_mem_arch.c):
  * erase + program one 4 KB sector with XIP suspended and interrupts masked. */
-extern void tiku_rp2350_flash_commit_sector(uint32_t flash_offset,
+extern int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
                                             const uint8_t *src, size_t len);
 
 #define RP2350_XIP_BASE   0x10000000UL
@@ -88,8 +88,11 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
          * erase + reprogram the sector (flash_offset is sector-aligned). */
         memcpy(nvmr_sector, be->base + sec_base, RP2350_SECTOR);
         memcpy(nvmr_sector + in_sec, s, n);
-        tiku_rp2350_flash_commit_sector(region_flash_off + (uint32_t)sec_base,
-                                        nvmr_sector, RP2350_SECTOR);
+        if (tiku_rp2350_flash_commit_sector_status(
+                region_flash_off + (uint32_t)sec_base,
+                nvmr_sector, RP2350_SECTOR) != 0) {
+            return -1;
+        }
         off += n;
         s   += n;
     }

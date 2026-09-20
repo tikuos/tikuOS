@@ -63,14 +63,22 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
     }
 }
 
-void tiku_mem_arch_nvm_flush(void)
+int tiku_mem_arch_nvm_flush_status(void)
 {
     /* No mirror to copy -- but a real commit to make.  A store leaves its
      * bytes in the controller's 32-byte buffer and READS BACK from there, so
      * without this the caller cannot tell a durable write from a lost one. */
     if (tiku_ra8p1_mram_flush() == TIKU_RA8P1_MRAM_OK) {
         ra8p1_nvm_programs++;
+        return 0;
     }
+    return -1;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_mem_arch_nvm_flush(void)
+{
+    (void)tiku_mem_arch_nvm_flush_status();
 }
 
 uint32_t tiku_mem_arch_nvm_program_count(void)

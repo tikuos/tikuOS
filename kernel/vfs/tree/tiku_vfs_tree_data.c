@@ -77,6 +77,7 @@ static uint8_t             data_fs_ready;
 static int
 data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 {
+    if (off > be->size || len > be->size - off) { return -1; }
     return (tiku_tier_nvm_write((uint8_t *)be->base + off, src, len)
             == TIKU_MEM_OK) ? 0 : -1;
 }
@@ -187,15 +188,15 @@ static uint8_t             data_fs_ready;
  * @param off  Byte offset within the backing store
  * @param src  Source bytes to program
  * @param len  Number of bytes to write
- * @return 0 always (the in-place copy cannot fail)
+ * @return Zero on completion, negative on an invalid range or flush failure
  */
 static int
 data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 {
+    if (off > be->size || len > be->size - off) { return -1; }
     uint16_t mpu = tiku_mpu_unlock_nvm();
-    memcpy(be->base + off, src, len);
-    tiku_mpu_lock_nvm(mpu);
-    return 0;
+    tiku_mem_arch_nvm_write(be->base + off, src, (tiku_mem_arch_size_t)len);
+    return tiku_mpu_lock_nvm_status(mpu) == TIKU_MEM_OK ? 0 : -1;
 }
 
 /**

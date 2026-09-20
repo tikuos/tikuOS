@@ -28,7 +28,7 @@ static int cfg_io_write(void *ctx, unsigned bank, size_t off,
         return -1;
     saved = tiku_mpu_unlock_nvm();
     tiku_mem_arch_nvm_write(cfg_banks[bank] + off, in, (tiku_mem_arch_size_t)n);
-    tiku_mpu_lock_nvm(saved);
+    if (tiku_mpu_lock_nvm_status(saved) != 0) return -1;
     return memcmp(cfg_banks[bank] + off, in, n) ? -1 : 0;
 }
 static int cfg_name_normalize(const char *p, size_t n, char out[TIKU_CFG_VALUE])

@@ -158,7 +158,8 @@ typedef enum {
     TIKU_MEM_ERR_INVALID = -1,  /**< Invalid argument (NULL pointer, etc.) */
     TIKU_MEM_ERR_NOMEM  = -2,   /**< Out of memory */
     TIKU_MEM_ERR_FULL   = -3,   /**< Store is full (no free slots) */
-    TIKU_MEM_ERR_NOT_FOUND = -4 /**< Key not found in store */
+    TIKU_MEM_ERR_NOT_FOUND = -4, /**< Key not found in store */
+    TIKU_MEM_ERR_IO    = -5    /**< Persistence completion not established */
 } tiku_mem_err_t;
 
 /*---------------------------------------------------------------------------*/
@@ -905,7 +906,7 @@ uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c);
 uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c);
 
 /**
- * @brief Update a cell's value (gate untouched).
+ * @brief Unchecked cell update; use the status variant to verify completion.
  *
  * Copies min(@p len, cell size) bytes under one MPU unlock window.
  * Use after cell_init() has validated the gate; for a self-
@@ -919,11 +920,10 @@ void tiku_persist_cell_write(const tiku_persist_cell_t *c,
                              const void *src, uint16_t len);
 
 /**
- * @brief Update a cell's value, then stamp the gate (in that order).
+ * @brief Unchecked cell commit; data precedes the gate store.
  *
- * The self-validating write: data stores complete before the gate store, so a
- * cut inside the window leaves either the old state or a fully written value,
- * never a stamped gate over torn defaults.
+ * Wide writes invalidate the gate before copying. Flush errors are discarded;
+ * neither the previous value nor the saved mirror is guaranteed on failure.
  *
  * @param c    Cell descriptor
  * @param src  New value bytes
@@ -933,7 +933,7 @@ void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
                               const void *src, uint16_t len);
 
 /**
- * @brief Convenience word write for uint32_t cells.
+ * @brief Unchecked word write for uint32_t cells.
  *
  * Equivalent to tiku_persist_cell_write(c, &v, 4).  Single store on
  * 32-bit targets; two word stores on MSP430 (see the atomicity note
@@ -944,6 +944,18 @@ void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
  */
 void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
                                  uint32_t v);
+
+/**
+ * @brief Checked cell updates; existing void entry points discard errors.
+ * An error may leave the working copy and gate changed and media uncertain.
+ * These calls do not roll back or retry a failed write.
+ */
+tiku_mem_err_t tiku_persist_cell_write_status(const tiku_persist_cell_t *c,
+                                              const void *src, uint16_t len);
+tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
+                                               const void *src, uint16_t len);
+tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
+                                                  uint32_t v);
 
 /**
  * @brief Number of cells validated by cell_init() this boot.
@@ -1056,11 +1068,14 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm);
 uint16_t tiku_mpu_unlock_nvm(void);
 
 /**
- * @brief Restore MPU state after an NVM write
+ * @brief Restore MPU state after an unchecked NVM flush
  *
  * @param saved_state  Value returned by a prior tiku_mpu_unlock_nvm()
  */
 void tiku_mpu_lock_nvm(uint16_t saved_state);
+
+/** @brief Flush and always restore protection; ERR_IO means completion is uncertain. */
+tiku_mem_err_t tiku_mpu_lock_nvm_status(uint16_t saved_state);
 
 /**
  * @brief Execute a function with NVM unlocked, interrupts disabled

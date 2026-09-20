@@ -49,6 +49,9 @@ uint32_t tiku_rtc_get_seconds(void);
  */
 void tiku_rtc_set_seconds(uint32_t epoch_seconds);
 
+/** @brief Set the clock; return zero on persistence completion, negative on failure. */
+int tiku_rtc_set_seconds_status(uint32_t epoch_seconds);
+
 /**
  * @brief True iff the RTC has been set at least once since the
  *        chip was first programmed.

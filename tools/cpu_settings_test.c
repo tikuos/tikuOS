@@ -20,14 +20,15 @@ uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c)
 {
     return *c->gate == c->key;
 }
-void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
-                              const void *src, uint16_t len)
+tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
+                                               const void *src, uint16_t len)
 {
     writes++;
     if (!fail_write) {
         memcpy(c->data, src, len);
         *c->gate = c->key;
     }
+    return fail_write ? TIKU_MEM_ERR_IO : TIKU_MEM_OK;
 }
 
 int main(void)
@@ -51,7 +52,9 @@ int main(void)
     fixed = 0;
     assert(tiku_cpu_settings_save(999999999UL) == -1);
     fail_write = 1;
+    int before = writes;
     assert(tiku_cpu_settings_save(150000000UL) == -1);
+    assert(writes == before + 1); /* No blind retry or rollback write. */
     fail_write = 0;
     /* Both a corrupt gate and a torn value must leave the boot clock alone. */
     saved_clock_cell_gate = 0;

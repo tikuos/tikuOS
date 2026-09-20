@@ -116,7 +116,6 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
     tiku_hibernate_marker_t existing;
     tiku_mem_arch_size_t out_len;
     tiku_mem_err_t err;
-    uint16_t mpu_state;
 
     if (fram_buf == NULL) {
         return TIKU_MEM_ERR_INVALID;
@@ -146,17 +145,14 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
     marker.crc       = tiku_nvm_crc32(&marker.boot_count,
                                       2 * sizeof(uint32_t));
 
-    /* Single MPU-unlocked section for cache flush + marker write */
-    mpu_state = tiku_mpu_unlock_nvm();
-
-    /* Flush all dirty caches to FRAM */
-    tiku_cache_flush_all();
+    /* Each operation owns its window; a failed flush must not be retried here. */
+    err = tiku_cache_flush_all();
 
     /* Write the hibernate marker */
-    err = tiku_persist_write(&hibernate_store, TIKU_HIBERNATE_KEY,
-                              (const uint8_t *)&marker, sizeof(marker));
-
-    tiku_mpu_lock_nvm(mpu_state);
+    if (err == TIKU_MEM_OK) {
+        err = tiku_persist_write(&hibernate_store, TIKU_HIBERNATE_KEY,
+                                  (const uint8_t *)&marker, sizeof(marker));
+    }
 
     return err;
 }

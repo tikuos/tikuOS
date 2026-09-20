@@ -97,15 +97,22 @@ tiku_rtc_get_seconds(void)
  *
  * @param epoch_seconds  Desired wall-clock time, seconds since epoch.
  */
-void
-tiku_rtc_set_seconds(uint32_t epoch_seconds)
+int
+tiku_rtc_set_seconds_status(uint32_t epoch_seconds)
 {
     uint32_t now = (uint32_t)tiku_clock_seconds();
 
-    tiku_persist_cell_commit(&rtc_cell, &epoch_seconds,
-                             (uint16_t)sizeof(epoch_seconds));
+    tiku_mem_err_t status = tiku_persist_cell_commit_status(
+        &rtc_cell, &epoch_seconds, (uint16_t)sizeof(epoch_seconds));
     rtc_uptime_base = now;
     rtc_boot_initialized = 1U;
+    return status == TIKU_MEM_OK ? 0 : -1;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_rtc_set_seconds(uint32_t epoch_seconds)
+{
+    (void)tiku_rtc_set_seconds_status(epoch_seconds);
 }
 
 /**

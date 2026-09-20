@@ -69,6 +69,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  *       signal is that tiku_mem_arch_nvm_program_count() did not advance.
  */
 void tiku_mem_arch_nvm_flush(void);
+int tiku_mem_arch_nvm_flush_status(void);
 
 /**
  * @brief What the boot-time mirror restore found.

@@ -215,13 +215,13 @@ const uint8_t *tiku_mem_arch_nvm_mirror(void)
  * @param src           SRAM buffer to program (must be at least len bytes).
  * @param len           Number of bytes to program (typically one sector).
  */
-static void flash_commit_sector(uint32_t flash_offset,
+static int flash_commit_sector(uint32_t flash_offset,
                                 const uint8_t *src,
                                 size_t        len) {
     uint32_t primask;
 
     if (!rom_flash_ready()) {
-        return;     /* boot ROM didn't expose flash ops -- skip */
+        return -1;
     }
 
     /* Save and mask PRIMASK; restore at the end. */
@@ -238,6 +238,9 @@ static void flash_commit_sector(uint32_t flash_offset,
 
     /* Restore PRIMASK. */
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+    /* ROM calls have no result; verify through XIP after cache flush/remap. */
+    return memcmp((const void *)(uintptr_t)(0x10000000UL + flash_offset),
+                   src, len) == 0 ? 0 : -1;
 }
 
 /**
@@ -253,7 +256,13 @@ static void flash_commit_sector(uint32_t flash_offset,
  */
 void tiku_rp2350_flash_commit_sector(uint32_t flash_offset,
                                      const uint8_t *src, size_t len) {
-    flash_commit_sector(flash_offset, src, len);
+    (void)flash_commit_sector(flash_offset, src, len); /* Unchecked compatibility. */
+}
+
+int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
+                                           const uint8_t *src, size_t len)
+{
+    return flash_commit_sector(flash_offset, src, len);
 }
 
 /**
@@ -426,10 +435,10 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * @brief Flush the SRAM .uninit region to the flash mirror sector.
  *
  * Snapshots the whole region with the magic word prepended into g_flush_buf,
- * then erases and programs the 4 KB mirror sector.  This is the explicit
- * durability checkpoint: once it returns, every write survives a power cycle.
+ * then erases and programs the mirror sectors. Returns failure if completion
+ * cannot be established; a failed write may leave a partial mirror.
  */
-void tiku_mem_arch_nvm_flush(void) {
+int tiku_mem_arch_nvm_flush_status(void) {
     /* Snapshot the live .uninit region and commit it to the flash
      * mirror.  This is the explicit durability checkpoint: every kernel
      * write to .persistent / .uninit eventually flows through this on
@@ -452,8 +461,10 @@ void tiku_mem_arch_nvm_flush(void) {
     uint32_t crc;
     uint32_t off;
 
-    if (uninit_size > mirror_bytes - TIKU_NVM_MIRROR_HDR_BYTES) {
-        uninit_size = mirror_bytes - TIKU_NVM_MIRROR_HDR_BYTES;
+    if (mirror_bytes < TIKU_NVM_MIRROR_HDR_BYTES ||
+        mirror_bytes % RP2350_NVM_SECTOR_SIZE != 0 ||
+        uninit_size > mirror_bytes - TIKU_NVM_MIRROR_HDR_BYTES) {
+        return -1;
     }
 
     /* Dirty check (same policy as the Ambiq backends): skip the erase+
@@ -474,7 +485,7 @@ void tiku_mem_arch_nvm_flush(void) {
         mirror[TIKU_NVM_MIRROR_W_LEN]   == (uint32_t)uninit_size &&
         memcmp(uninit, mirror8 + TIKU_NVM_MIRROR_HDR_BYTES,
                uninit_size) == 0) {
-        return;
+        return 0;
     }
 
     crc = tiku_nvm_crc32(uninit, (uint32_t)uninit_size);
@@ -499,9 +510,18 @@ void tiku_mem_arch_nvm_flush(void) {
             hdr[TIKU_NVM_MIRROR_W_LEN]   = (uint32_t)uninit_size;
             hdr[TIKU_NVM_MIRROR_W_RSVD]  = 0xFFFFFFFFu;
         }
-        flash_commit_sector((uint32_t)(uintptr_t)&__tiku_nvm_flash_offset
+        if (flash_commit_sector((uint32_t)(uintptr_t)&__tiku_nvm_flash_offset
                                 + off,
-                            g_flush_buf, RP2350_NVM_SECTOR_SIZE);
+                            g_flush_buf, RP2350_NVM_SECTOR_SIZE) != 0) {
+            return -1;
+        }
     }
     g_nvm_flush_programs++;
+    return 0;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_mem_arch_nvm_flush(void)
+{
+    (void)tiku_mem_arch_nvm_flush_status();
 }

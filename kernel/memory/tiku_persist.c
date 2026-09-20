@@ -71,6 +71,7 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t i;
     tiku_mem_arch_size_t count;
+    tiku_mem_err_t status;
 
     if (store == NULL) {
         return TIKU_MEM_ERR_INVALID;
@@ -100,11 +101,11 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
         }
         store->count = count;
 
-        tiku_mpu_lock_nvm(mpu_saved);
+        status = tiku_mpu_lock_nvm_status(mpu_saved);
         tiku_atomic_exit();
     }
 
-    return TIKU_MEM_OK;
+    return status;
 }
 
 /**
@@ -189,9 +190,9 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
             }
         }
 
-        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_mem_err_t status = tiku_mpu_lock_nvm_status(mpu_saved);
         tiku_atomic_exit();
-        return err;
+        return status == TIKU_MEM_OK ? err : status;
     }
 }
 
@@ -282,11 +283,10 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
         entry->value_len = data_len;
         entry->write_count++;
 
-        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_mem_err_t status = tiku_mpu_lock_nvm_status(mpu_saved);
         tiku_atomic_exit();
+        return status;
     }
-
-    return TIKU_MEM_OK;
 }
 
 /**
@@ -323,11 +323,10 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
         memset(entry, 0, sizeof(tiku_persist_entry_t));
         store->count--;
 
-        tiku_mpu_lock_nvm(mpu_saved);
+        tiku_mem_err_t status = tiku_mpu_lock_nvm_status(mpu_saved);
         tiku_atomic_exit();
+        return status;
     }
-
-    return TIKU_MEM_OK;
 }
 
 /**
@@ -481,7 +480,7 @@ uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
                                 (const uint8_t *)c->def, n);
     }
     *c->gate = c->key;          /* commit point */
-    tiku_mpu_lock_nvm(saved);
+    tiku_mpu_lock_nvm(saved);   /* Unchecked: init reports priming, not completion. */
     tiku_atomic_exit();
 
     cell_primed++;
@@ -510,14 +509,15 @@ uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c)
  * @param src  New value bytes
  * @param len  Bytes to copy (clamped to the cell size)
  */
-void tiku_persist_cell_write(const tiku_persist_cell_t *c,
-                             const void *src, uint16_t len)
+tiku_mem_err_t tiku_persist_cell_write_status(const tiku_persist_cell_t *c,
+                                              const void *src, uint16_t len)
 {
-    TIKU_MEM_KERNEL_ONLY_VOID();
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     uint16_t saved;
+    tiku_mem_err_t status;
 
-    if (c == NULL || src == NULL) {
-        return;
+    if (c == NULL || src == NULL || c->data == NULL || c->gate == NULL) {
+        return TIKU_MEM_ERR_INVALID;
     }
     if (len > c->size) {
         len = c->size;
@@ -533,8 +533,9 @@ void tiku_persist_cell_write(const tiku_persist_cell_t *c,
     if (CELL_CAN_TEAR(len)) {
         *c->gate = c->key;      /* revalidate: value fully written   */
     }
-    tiku_mpu_lock_nvm(saved);
+    status = tiku_mpu_lock_nvm_status(saved);
     tiku_atomic_exit();
+    return status;
 }
 
 /**
@@ -544,14 +545,15 @@ void tiku_persist_cell_write(const tiku_persist_cell_t *c,
  * @param src  New value bytes
  * @param len  Bytes to copy (clamped to the cell size)
  */
-void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
-                              const void *src, uint16_t len)
+tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
+                                               const void *src, uint16_t len)
 {
-    TIKU_MEM_KERNEL_ONLY_VOID();
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     uint16_t saved;
+    tiku_mem_err_t status;
 
-    if (c == NULL || src == NULL) {
-        return;
+    if (c == NULL || src == NULL || c->data == NULL || c->gate == NULL) {
+        return TIKU_MEM_ERR_INVALID;
     }
     if (len > c->size) {
         len = c->size;
@@ -566,8 +568,9 @@ void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
     tiku_mem_arch_nvm_write((uint8_t *)c->data,
                             (const uint8_t *)src, len);
     *c->gate = c->key;          /* commit point — after the data */
-    tiku_mpu_lock_nvm(saved);
+    status = tiku_mpu_lock_nvm_status(saved);
     tiku_atomic_exit();
+    return status;
 }
 
 /**
@@ -580,14 +583,15 @@ void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
  * @param c  Cell descriptor (size must be 4)
  * @param v  New value
  */
-void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
-                                 uint32_t v)
+tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
+                                                  uint32_t v)
 {
-    TIKU_MEM_KERNEL_ONLY_VOID();
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     uint16_t saved;
+    tiku_mem_err_t status;
 
-    if (c == NULL) {
-        return;
+    if (c == NULL || c->data == NULL || c->gate == NULL) {
+        return TIKU_MEM_ERR_INVALID;
     }
 
     tiku_atomic_enter();
@@ -609,8 +613,29 @@ void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
                                 (c->size < sizeof(uint32_t))
                                     ? c->size : (uint16_t)sizeof(uint32_t));
     }
-    tiku_mpu_lock_nvm(saved);
+    status = tiku_mpu_lock_nvm_status(saved);
     tiku_atomic_exit();
+    return status;
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_persist_cell_write(const tiku_persist_cell_t *c,
+                             const void *src, uint16_t len)
+{
+    (void)tiku_persist_cell_write_status(c, src, len);
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
+                              const void *src, uint16_t len)
+{
+    (void)tiku_persist_cell_commit_status(c, src, len);
+}
+
+/** @brief Unchecked compatibility wrapper. */
+void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c, uint32_t v)
+{
+    (void)tiku_persist_cell_write_u32_status(c, v);
 }
 
 /**

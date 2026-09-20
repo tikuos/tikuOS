@@ -100,8 +100,15 @@ uint16_t tiku_mpu_unlock_nvm(void)
  */
 void tiku_mpu_lock_nvm(uint16_t saved_state)
 {
-    tiku_mem_arch_nvm_flush();
+    /* Unchecked compatibility path. */
+    (void)tiku_mpu_lock_nvm_status(saved_state);
+}
+
+tiku_mem_err_t tiku_mpu_lock_nvm_status(uint16_t saved_state)
+{
+    int rc = tiku_mem_arch_nvm_flush_status();
     tiku_mpu_arch_lock_nvm(saved_state);
+    return rc == 0 ? TIKU_MEM_OK : TIKU_MEM_ERR_IO;
 }
 
 /*

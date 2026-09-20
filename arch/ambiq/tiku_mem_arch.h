@@ -93,6 +93,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * am_hal_mram for full power-cycle durability; for now this is a no-op.
  */
 void tiku_mem_arch_nvm_flush(void);
+int tiku_mem_arch_nvm_flush_status(void);
 
 /**
  * @brief Program an arbitrary MRAM span via the on-chip bootrom.

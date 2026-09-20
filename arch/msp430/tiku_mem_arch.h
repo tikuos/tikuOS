@@ -104,6 +104,11 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * exists for parity with ports whose .persistent state is mirrored to a flash
  * sector needing an explicit erase and program per unlock window.
  */
-static inline void tiku_mem_arch_nvm_flush(void) { /* no-op */ }
+static inline int tiku_mem_arch_nvm_flush_status(void) { return 0; }
+/** @brief Unchecked compatibility wrapper; FRAM writes complete in place. */
+static inline void tiku_mem_arch_nvm_flush(void)
+{
+    (void)tiku_mem_arch_nvm_flush_status();
+}
 
 #endif /* TIKU_MEM_ARCH_H_ */

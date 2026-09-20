@@ -64,6 +64,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
  * power cut would lose.
  */
 void tiku_mem_arch_nvm_flush(void);
+int tiku_mem_arch_nvm_flush_status(void);
 
 /**
  * @brief Count of successful MRAM commits since boot.

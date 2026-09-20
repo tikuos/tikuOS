@@ -183,7 +183,10 @@ tiku_mem_err_t tiku_cache_flush(tiku_cached_region_t *region)
     tiku_mem_arch_nvm_write(region->fram_backing,
                              region->sram_cache,
                              region->size);
-    tiku_mpu_lock_nvm(saved);
+    tiku_mem_err_t status = tiku_mpu_lock_nvm_status(saved);
+    if (status != TIKU_MEM_OK) {
+        return status;
+    }
 
     region->dirty = 0;
 
@@ -226,11 +229,18 @@ tiku_mem_err_t tiku_cache_flush_all(void)
             tiku_mem_arch_nvm_write(r->fram_backing,
                                      r->sram_cache,
                                      r->size);
-            r->dirty = 0;
         }
     }
 
-    tiku_mpu_lock_nvm(saved);
+    tiku_mem_err_t status = tiku_mpu_lock_nvm_status(saved);
+    if (status != TIKU_MEM_OK) {
+        return status;
+    }
+    for (i = 0; i < cache_count; i++) {
+        if (cache_table[i]->active) {
+            cache_table[i]->dirty = 0;
+        }
+    }
 
     return TIKU_MEM_OK;
 }

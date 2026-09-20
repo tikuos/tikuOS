@@ -36,6 +36,6 @@ typedef uint32_t tiku_mem_arch_size_t;
  * lock-NVM path sees a prototype rather than an implicit declaration.
  */
 void tiku_mem_arch_nvm_flush(void);
+int tiku_mem_arch_nvm_flush_status(void);
 
 #endif /* TIKU_NORDIC_MEM_ARCH_H_ */
-
