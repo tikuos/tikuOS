@@ -105,7 +105,8 @@ mrambench_time(void)
     }
 
     tpus = dwt_hz / 1000000UL;   /* DWT ticks per microsecond */
-    SHELL_PRINTF("MRAM program (bootrom nv_program_main2), best of 4:\n");
+    SHELL_PRINTF("MRAM program (bootrom nv_program_main2), %u legs, best of 4:\n",
+                 (unsigned)n);
     SHELL_PRINTF("  DWT rate %lu Hz (~%lu ticks/us)\n", dwt_hz, tpus);
     for (i = 0U; i < n; i++) {
         unsigned long us = tpus ? ((unsigned long)rows[i].cycles / tpus) : 0UL;

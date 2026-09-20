@@ -298,10 +298,9 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
 
     if (dwt_hz_out) { *dwt_hz_out = 0UL; }
     if (rows == NULL || max == 0U) { return 0U; }
-    /* The live image sits in [0, 4 + uninit) at the bottom; refuse if it would
-     * reach into the upper-half scratch window (keeps the bench non-destructive
-     * to durable state and power-cut-safe -- the magic+data stay intact). */
-    if ((4U + uninit_bytes()) > bench_off) { return 0U; }
+    /* Keep the header and live image below the scratch window. */
+    if (bench_off < TIKU_NVM_MIRROR_HDR_BYTES ||
+        uninit_bytes() > bench_off - TIKU_NVM_MIRROR_HDR_BYTES) { return 0U; }
 
     /* Enable + zero the DWT cycle counter. */
     TIKU_SCB_DEMCR |= (1UL << 24);     /* TRCENA */
@@ -323,6 +322,10 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
             (uint32_t)(((mirror + bench_off) - AMBIQ_MRAM_BASE) >> 2);
         uint32_t w;
 
+        if (sizes[i] > sizeof g_nvm_snap ||
+            sizes[i] > TIKU_NVM_MRAM_BYTES - bench_off) {
+            continue;
+        }
         /* Varied source pattern (bit transitions) so the measurement cannot
          * land on an all-identical fast path. Clobbers the staging buffer;
          * the closing lock_nvm flush recomposes it. */

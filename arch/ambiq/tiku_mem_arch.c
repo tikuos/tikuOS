@@ -348,7 +348,8 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
 
     if (dwt_hz_out) { *dwt_hz_out = 0UL; }
     if (rows == NULL || max == 0U) { return 0U; }
-    if ((4U + uninit_bytes()) > bench_off) { return 0U; }   /* image too large */
+    if (bench_off < TIKU_NVM_MIRROR_HDR_BYTES ||
+        uninit_bytes() > bench_off - TIKU_NVM_MIRROR_HDR_BYTES) { return 0U; }
 
     TIKU_SCB_DEMCR |= (1UL << 24);     /* TRCENA */
     TIKU_DWT_CYCCNT = 0U;
@@ -366,6 +367,10 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
             (uint32_t)(((mirror + bench_off) - AMBIQ_MRAM_BASE) >> 2);
         uint32_t w;
 
+        if (sizes[i] > sizeof g_nvm_snap ||
+            sizes[i] > TIKU_NVM_MRAM_BYTES - bench_off) {
+            continue;
+        }
         for (w = 0U; w < words; w++) {
             g_nvm_snap[w] = 0xA5A50000UL ^ (uint32_t)(w * 2654435761UL);
         }
