@@ -247,9 +247,9 @@ SECTIONS
     ASSERT((__stack - _end) >= 0x1000,
            "ERROR: TCM exhausted -- less than 4 KB free for stack")
 
-    /* The NVM mirror page must hold the magic word + the whole .uninit image. */
-    ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 4),
-           "ERROR: .uninit too large for the 32 KB NVM mirror page")
+    /* The mirror holds the 16-byte V2 header and the whole .uninit image. */
+    ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),
+           "ERROR: .uninit too large for the 16 KB NVM mirror page")
 
 
     /* .ssram must stay inside the 2 MB physical SSRAM (0x10060000..0x10260000);
