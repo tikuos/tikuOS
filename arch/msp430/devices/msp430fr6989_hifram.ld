@@ -5,78 +5,52 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * msp430fr6989_hifram.ld - FR6989 HIFRAM end-marker override.
- *
- * Adds the __hifram_end symbol the stock script omits, so `free` can report
- * actual HIFRAM usage rather than only total reachability, and holds back the
- * top 4 KB as the Tier-3 module slot.  Always on for FR6989.
+ * msp430fr6989_hifram.ld - Fixed persistent data and HIFRAM reservations.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/*
- * Why this exists
- * ===============
- * FR6989 has 80 KB of HIFRAM at 0x10000+ but the toolchain's stock
- * msp430fr6989.ld provides no end-of-HIFRAM symbol — only
- * __high_bssstart / __high_bssend for .upper.bss are exposed, which
- * doesn't help when .upper.text or .upper.rodata extend past
- * .upper.bss in HIFRAM.
- *
- * Without an end marker the kernel's `free` shell command can only
- * report total HIFRAM reachability and not actual usage. Same gap
- * the FR5994 override fixes, same fix here. (FR6989 doesn't need
- * the SRAM merging that FR5994 does — FR6989 only has 2 KB of SRAM
- * and no LEA peripheral, so the stock RAM region is already optimal.
- * Besides the marker, this file also re-declares HIFRAM to hold back
- * the top 4 KB as the Tier-3 module slot.)
- *
- * Implementation notes
- * ====================
- * msp430-elf-gcc 9.3 *replaces* the spec-default linker script when
- * `-T` is passed, rather than augmenting it. The fragment below
- * INCLUDEs the stock script verbatim, then adds a NOLOAD marker
- * section that targets HIFRAM. Multiple SECTIONS commands in a
- * single linker script are merged in declaration order, so the
- * marker lands after every standard HIFRAM-targeted section
- * (.upper.rodata, .upper.bss, .upper.text). __hifram_end captures
- * the location counter at marker entry — the end of all
- * HIFRAM-resident sections.
- *
- * Wired in from the Makefile when MCU=msp430fr6989. No flag is
- * needed to disable it; the override is always-on for FR6989.
- */
+/* This origin preserves the minimal large-model firmware profile. Other
+ * installed images require an object-by-object ELF comparison before reuse.
+ * A matching origin alone does not guarantee a matching persistent format. */
+PROVIDE(__tiku_fr6989_persistent_base = 0x4c6c);
+
+MEMORY {
+  FRAM (rx) : ORIGIN = 0x4400, LENGTH = 0xbb80
+}
+
+/* Consume persistent inputs before the stock script packs .either sections.
+ * The lower-bank prefix before the fixed origin is not allocated. An address
+ * override must come from the reference firmware, not available free space. */
+SECTIONS {
+  .persistent __tiku_fr6989_persistent_base :
+  {
+    . = ALIGN(2);
+    __persistent_start = .;
+    *(.persistent)
+    . = ALIGN(2);
+    __persistent_end = .;
+  } > FRAM
+}
+INSERT BEFORE .lower.rodata;
 
 INCLUDE msp430fr6989.ld
 
-/* Held-back HIFRAM top ("last MEMORY declaration of a given name wins",
- * region-by-region): the stock script maps HIFRAM 0x10000..0x23FF7.
- * The top 12 KB is reserved, out of the linker's reach:
- *   0x21000..0x23000  pinned /data region (tiku_nvm_region_msp430.c) --
- *                     a FIXED address, so /data survives reflashes
- *   0x23000..0x23FF0  Tier-3 loadable-module slot (tiku_basic_module.h;
- *                     stops shy of the CPU47 region end)
- * Keep in sync with TIKU_NVMFS_MSP430_BASE. */
+ASSERT((__tiku_fr6989_persistent_base & 1) == 0,
+       "FR6989 persistent origin must be word aligned")
+ASSERT(__tiku_fr6989_persistent_base >= ORIGIN(FRAM) &&
+       __persistent_end <= ORIGIN(FRAM) + LENGTH(FRAM),
+       "FR6989 persistent span must fit lower FRAM")
+
+/* 0x21000..0x23000 is the pinned backend, separate from the static /data
+ * array. 0x23000..0x23ff0 is the module slot, below the CPU47 boundary.
+ * Neither reservation is available to linked sections. */
 MEMORY {
   HIFRAM (rxw) : ORIGIN = 0x00010000, LENGTH = 0x00011000
 }
 
-/*
- * Corrected high-bss clear size -- see the detailed note in
- * msp430fr5994_8k_ram.ld.  The crt clears __high_bsssize bytes from
- * __high_bssstart, which must be the exact byte count to the end of
- * .upper.bss content: too large stomps the first opcode of the
- * following .upper.text function (the odd-start ALIGN-pad overshoot);
- * too small leaves live kernel .bss (process list, event queue, tick
- * counters) as stale FRAM garbage and wedges boot (what
- * __high_bssend - __high_bssstart does once .upper.bss is large --
- * the linker appends orphan .upper.bss input past the __high_bssend
- * marker, so end-start covers only part of the section; confirmed on
- * fr5994 with BASIC's ~64 KB arena).  (__high_bsssize) below is
- * robust against both.  This is DISTINCT from the historical fr6989
- * large-bss boot-loop -- a WDT timeout during the clear, fixed in
- * tiku_crt_early.c.
- */
+/* Exclude leading alignment and include orphan .upper.bss inputs in the
+ * startup clear. The following code must not be cleared. */
 __high_bsssize = ADDR(.upper.bss) + SIZEOF(.upper.bss) - __high_bssstart;
 
 SECTIONS {

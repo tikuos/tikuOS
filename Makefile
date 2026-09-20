@@ -1003,10 +1003,14 @@ endif
 # TikuOS does not use LEA today, so by default we pre-include
 # arch/msp430/devices/msp430fr5994_8k_ram.ld which redefines the
 # RAM region to swallow LEARAM/LEASTACK and gives the kernel the full
-# 8 KB. Set LEA_ENABLE=1 to fall back to the stock 4 KB layout if you
-# bring up an LEA-using driver later.
+# 8 KB. LEA needs a custom script preserving the same FRAM reservations.
 # ---------------------------------------------------------------------------
 LEA_ENABLE ?= 0
+ifeq ($(MCU),msp430fr5994)
+ifeq ($(LEA_ENABLE),1)
+$(error LEA_ENABLE=1 on FR5994 needs a LEA-aware custom linker script preserving the pinned NVM region, module slot and high-BSS bounds)
+endif
+endif
 
 # ---------------------------------------------------------------------------
 # Flags
@@ -1543,10 +1547,8 @@ CFLAGS  += -DTIKU_FR5994_LEA_DISABLED=1
 endif
 endif
 
-# FR6989: HIFRAM end-marker only (no SRAM merging needed — FR6989
-# has 2 KB of SRAM and no LEA peripheral, so the stock RAM region
-# is already optimal). The override adds .upper_end_marker so
-# __hifram_end resolves and `free` can report HIFRAM in-use bytes.
+# FR6989: fixed persistent origin, backend/module exclusions and HIFRAM marker.
+# Existing board data requires comparison with its installed firmware ELF.
 ifeq ($(MCU),msp430fr6989)
 LDFLAGS += -Tarch/msp430/devices/msp430fr6989_hifram.ld
 endif

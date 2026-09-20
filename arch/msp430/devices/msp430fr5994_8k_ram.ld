@@ -9,7 +9,7 @@
  *
  * Collapses the stock script's three SRAM regions (RAM + LEARAM + LEASTACK)
  * into one 8 KB RAM region, since TikuOS does not use the LEA peripheral.
- * Wired in by the Makefile unless LEA_ENABLE=1 restores the stock layout.
+ * The Makefile refuses LEA_ENABLE=1 until a compatible custom layout exists.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -57,8 +57,7 @@
  *   ifeq ($(LEA_ENABLE),0)
  *   LDFLAGS += -Tarch/msp430/devices/msp430fr5994_8k_ram.ld
  *
- * To get the stock 4 KB + LEA layout back:
- *   make MCU=msp430fr5994 LEA_ENABLE=1
+ * LEA_ENABLE=1 requires a custom layout retaining the FRAM reservations below.
  */
 
 INCLUDE msp430fr5994.ld
@@ -69,9 +68,8 @@ MEMORY {
   LEASTACK      : ORIGIN = 0x3C00, LENGTH = 0
   /* Held-back HIFRAM top: the stock script maps HIFRAM 0x10000..0x43FF7.
    * The top 12 KB is reserved, out of the linker's reach:
-   *   0x41000..0x43000  pinned /data region (tiku_nvm_region_msp430.c) --
-   *                     a FIXED address, so /data survives reflashes
-   *                     instead of moving with every build
+   *   0x41000..0x43000  pinned backend (tiku_nvm_region_msp430.c)
+   *                     separate from the static MSP430 /data array
    *   0x43000..0x43FF0  Tier-3 loadable-module slot
    *                     (TIKU_MODULE_CARVE_ADDR/SIZE; stops shy of the
    *                     odd CPU47 region end)
