@@ -79,9 +79,7 @@ static int cfg_managed_write(uint32_t, const char *, size_t, int *);
 #endif
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_RAM_USABLE */
 #include <kernel/memory/tiku_nvm_region.h> /* the carved region: nvm_map */
-#if TIKU_SHELL_ENABLE
-#include "tiku_vfs_tree_data.h"   /* mounted file-store slot accounting */
-#endif
+#include "tiku_vfs_tree_data.h"   /* backing extents and mounted occupancy */
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <stdlib.h>                  /* strtoul: /sys/radio/beacon interval */
 #include <string.h>                  /* strchr/strcmp: beacon write parse   */
@@ -176,8 +174,7 @@ time_write(const char *buf, size_t len)
     if (!seen_digit) {
         return TIKU_VFS_EINVAL;
     }
-    tiku_rtc_set_seconds(v);
-    return 0;
+    return tiku_rtc_set_seconds_status(v) == 0 ? 0 : TIKU_VFS_EIO;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -544,10 +541,8 @@ device_name_write(const char *buf, size_t len)
         tmp[i] = buf[i];
     }
     tmp[copy_len] = '\0';
-    tiku_persist_cell_write(&device_name_cell, tmp,
-                            (uint16_t)(copy_len + 1));
-
-    return 0;
+    return tiku_persist_cell_write_status(&device_name_cell, tmp,
+               (uint16_t)(copy_len + 1)) == TIKU_MEM_OK ? 0 : TIKU_VFS_EIO;
 }
 
 /**
@@ -800,8 +795,17 @@ sram_map_read(char *buf, size_t max)
     unsigned long hi = (unsigned long)(uintptr_t)&__sram_end;
     unsigned long tlo = (unsigned long)(uintptr_t)&__tier_sram_start;
     unsigned long thi = (unsigned long)(uintptr_t)&__tier_sram_end;
+    unsigned long gap_lo = (unsigned long)(uintptr_t)&_end;
+    unsigned long gap_hi = (unsigned long)(uintptr_t)&__stack;
+    unsigned long stack = gap_hi > gap_lo ? gap_hi - gap_lo : 0UL;
+    unsigned long overlap_lo = tlo > gap_lo ? tlo : gap_lo;
+    unsigned long overlap_hi = thi < gap_hi ? thi : gap_hi;
     tiku_mem_stats_t st;
 
+    if (thi > tlo && overlap_hi > overlap_lo) {
+        stack -= overlap_hi - overlap_lo;
+    }
+    if (max == 0) { return 0; }
     buf[0] = '\0';
     map_line(buf, max, &at, "bank\t%lu\n",
              (hi > lo) ? hi - lo : (unsigned long)TIKU_DEVICE_RAM_USABLE,
@@ -812,7 +816,7 @@ sram_map_read(char *buf, size_t max)
                  0UL, 0UL);
     }
     map_line(buf, max, &at, "stack\t%lu\t%lu\n",
-             (unsigned long)((uintptr_t)&__stack - (uintptr_t)&_end),
+             stack,
              (unsigned long)tiku_stack_free(), 0UL);
     if (thi > tlo) {
         unsigned long used = 0UL;
@@ -842,7 +846,7 @@ static void
 nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
 {
 #if TIKU_SHELL_ENABLE
-    tiku_tfs_t *fs = tiku_vfs_tree_data_store();
+    tiku_tfs_t *fs = tiku_vfs_tree_data_store_if_mounted();
     unsigned long freeb = 0UL;
     unsigned s;
 
@@ -886,8 +890,8 @@ nvm_map_read(char *buf, size_t max)
         ? load + ((unsigned long)(uintptr_t)&__data_end -
                   (unsigned long)(uintptr_t)&__data_start)
         : text;
-    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
 
+    if (max == 0) { return 0; }
     buf[0] = '\0';
     at += (size_t)snprintf(buf, max, "kind\t%s\ntotal\t%lu\n",
                            TIKU_DEVICE_NVM_LABEL,
@@ -911,19 +915,20 @@ nvm_map_read(char *buf, size_t max)
             map_line(buf, max, &at, "module\t%lu\n", cap - lim, 0UL, 0UL);
         }
     }
-    if (rgn != NULL && rgn->size > 0u) {
-        unsigned long tier = (unsigned long)TIKU_NVM_TIER_BYTES;
+    {
+        unsigned long tier = 0UL;
         unsigned long used = 0UL;
         tiku_mem_stats_t st;
+        tiku_data_df_t extents;
 
         (void)tiku_tier_init();
         if (tiku_tier_stats(TIKU_MEM_NVM, &st) == TIKU_MEM_OK) {
+            tier = (unsigned long)st.total_bytes;
             used = (unsigned long)st.used_bytes;
         }
         map_line(buf, max, &at, "tier\t%lu\t%lu\n", tier, used, 0UL);
-        nvm_store_map(buf, max, &at,
-                      ((unsigned long)rgn->size > tier)
-                          ? (unsigned long)rgn->size - tier : 0UL);
+        tiku_vfs_tree_data_extents(&extents);
+        nvm_store_map(buf, max, &at, (unsigned long)extents.fs_bytes);
     }
     if (&__tiku_layout_persist_size != (char *)0) {
         map_line(buf, max, &at, "persist\t%lu\n",

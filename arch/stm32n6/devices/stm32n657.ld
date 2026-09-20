@@ -102,6 +102,7 @@ SECTIONS
         __uninit_start = .;
         *(.uninit*)
         *(.persistent)
+        /* Retained state is also mirrored here. Moving it changes saved offsets. */
         *(.retained)
         . = ALIGN(4);
         __uninit_end = .;

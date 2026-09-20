@@ -503,6 +503,19 @@ tiku_vfs_tree_data_get(void)
 
 #endif /* TIKU_SHELL_ENABLE -- VFS presentation ends here */
 
+void tiku_vfs_tree_data_extents(tiku_data_df_t *out)
+{
+    if (out != NULL) {
+        memset(out, 0, sizeof *out);
+        data_fill_extents(out);
+    }
+}
+
+tiku_tfs_t *tiku_vfs_tree_data_store_if_mounted(void)
+{
+    return data_fs_ready && data_fs.mounted ? &data_fs : NULL;
+}
+
 tiku_tfs_t *
 tiku_vfs_tree_data_store(void)
 {

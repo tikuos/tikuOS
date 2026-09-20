@@ -58,6 +58,9 @@ typedef struct {
  */
 int tiku_vfs_tree_data_df(tiku_data_df_t *out);
 
+/** @brief Read backing extents without mounting or formatting the store. */
+void tiku_vfs_tree_data_extents(tiku_data_df_t *out);
+
 /**
  * @brief The mounted /data store itself (mounts on first use).
  *
@@ -72,5 +75,8 @@ int tiku_vfs_tree_data_df(tiku_data_df_t *out);
  *         too small, or the mount failed).
  */
 tiku_tfs_t *tiku_vfs_tree_data_store(void);
+
+/** @brief Return an already mounted store, or NULL; never mounts or formats. */
+tiku_tfs_t *tiku_vfs_tree_data_store_if_mounted(void);
 
 #endif /* TIKU_VFS_TREE_DATA_H_ */
