@@ -42,15 +42,12 @@
  */
 
 /*
- * TIKU_SECTION(name) -- a section attribute spelled the way this object
- * format takes it.  ELF takes a bare name; Mach-O, which the host kernel
- * tests meet on a Mac, insists on "segment,section" and refuses the bare
- * form at compile time.  The host build is the only Mach-O consumer and
- * on it a section is an ordinary section -- never durable -- exactly as
- * the DURABLE contract below says, so a private __DATA segment section
- * keeps the name for the tests' layout checks and promises nothing.
- * Every grade macro spells its section through this, and nothing else
- * in the tree spells one (tools/check_durable_placement.sh).
+ * TIKU_SECTION(name) -- a section attribute spelled for the object format.
+ * ELF takes a bare name; Mach-O, which the host kernel tests meet on a
+ * Mac, insists on "segment,section".  The host is the only Mach-O
+ * consumer, and there a section is never durable (the DURABLE contract
+ * below), so one private __DATA section serves every grade.  Every
+ * grade macro spells its section through this, and nothing else does.
  */
 #if defined(__APPLE__) && defined(__MACH__)
 /* A Mach-O section name takes no '.', and at most sixteen characters:
