@@ -4046,9 +4046,14 @@ PORT ?= $(shell \
 		vid=$$(cat "/sys/class/tty/$$(basename $$dev)/device/../idVendor" 2>/dev/null); \
 		if [ "$$vid" = "0451" ] || [ "$$vid" = "2047" ]; then echo "$$dev"; exit 0; fi; \
 	done; \
-	for p in /dev/ttyACM* /dev/tty.usbmodem*; do \
+	for p in /dev/ttyACM* /dev/cu.usbmodem*; do \
 		[ -e "$$p" ] && { echo "$$p"; exit 0; }; \
 	done)
+# macOS: /dev/cu.* not /dev/tty.*.  A tty.* node blocks on open until
+# carrier detect, which a USB CDC console never asserts, so a write to it
+# -- the flash rule's `sleep off` -- hangs forever; cu.* opens at once.
+# And the guess is only a guess: with two boards on the bus it picks the
+# first, so a flash of one board should always say PORT= for that board.
 
 monitor:
 	@if [ -z "$(PORT)" ]; then \
