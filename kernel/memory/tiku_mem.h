@@ -41,10 +41,30 @@
  * @{
  */
 
+/*
+ * TIKU_SECTION(name) -- a section attribute spelled the way this object
+ * format takes it.  ELF takes a bare name; Mach-O, which the host kernel
+ * tests meet on a Mac, insists on "segment,section" and refuses the bare
+ * form at compile time.  The host build is the only Mach-O consumer and
+ * on it a section is an ordinary section -- never durable -- exactly as
+ * the DURABLE contract below says, so a private __DATA segment section
+ * keeps the name for the tests' layout checks and promises nothing.
+ * Every grade macro spells its section through this, and nothing else
+ * in the tree spells one (tools/check_durable_placement.sh).
+ */
+#if defined(__APPLE__) && defined(__MACH__)
+/* A Mach-O section name takes no '.', and at most sixteen characters:
+ * every grade lands in one private data section, which is all a host
+ * that is never durable has to offer. */
+#define TIKU_SECTION(name)  __attribute__((section("__DATA,__tiku_grade")))
+#else
+#define TIKU_SECTION(name)  __attribute__((section(name)))
+#endif
+
 #if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
-#define TIKU_HIFRAM      __attribute__((section(".upper.data")))
-#define TIKU_HIFRAM_RO   __attribute__((section(".upper.rodata")))
-#define TIKU_HIFRAM_BSS  __attribute__((section(".upper.bss")))
+#define TIKU_HIFRAM      TIKU_SECTION(".upper.data")
+#define TIKU_HIFRAM_RO   TIKU_SECTION(".upper.rodata")
+#define TIKU_HIFRAM_BSS  TIKU_SECTION(".upper.bss")
 #else
 #define TIKU_HIFRAM
 #define TIKU_HIFRAM_RO
@@ -98,9 +118,9 @@
  * next port.  Naming the exception costs a future port nothing.
  */
 #if defined(PLATFORM_MSP430)
-#define TIKU_RETAINED  __attribute__((section(".persistent")))
+#define TIKU_RETAINED  TIKU_SECTION(".persistent")
 #else
-#define TIKU_RETAINED  __attribute__((section(".retained")))
+#define TIKU_RETAINED  TIKU_SECTION(".retained")
 #endif
 
 /*
@@ -126,7 +146,7 @@
  * because per-file "#ifdef MSP430 ... #else empty" copies of it are
  * exactly how state ends up silently volatile on some platforms.
  */
-#define TIKU_DURABLE  __attribute__((section(".persistent")))
+#define TIKU_DURABLE  TIKU_SECTION(".persistent")
 
 /*
  * TIKU_FRAM_SPILL — MSP430-only CAPACITY spill, NOT a durability claim.
@@ -139,7 +159,7 @@
  * you do not need after a reset.
  */
 #ifdef PLATFORM_MSP430
-#define TIKU_FRAM_SPILL  __attribute__((section(".persistent")))
+#define TIKU_FRAM_SPILL  TIKU_SECTION(".persistent")
 #else
 #define TIKU_FRAM_SPILL
 #endif
@@ -872,7 +892,7 @@ typedef struct {
  * @param def_len  Bytes of @p def_ptr to copy (0 with NULL)
  */
 #define TIKU_PERSIST_CELL(cell, var, key_val, def_ptr, def_len)        \
-    static uint32_t __attribute__((section(".persistent")))            \
+    static uint32_t TIKU_SECTION(".persistent")                        \
         cell##_gate;                                                   \
     static const tiku_persist_cell_t cell = {                          \
         &(var), &cell##_gate, (def_ptr),                               \
