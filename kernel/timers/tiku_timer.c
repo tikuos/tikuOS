@@ -263,7 +263,18 @@ tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t) {
 
 /*---------------------------------------------------------------------------*/
 
-void tiku_timer_request_poll(void) { tiku_process_poll(&tiku_timer_process); }
+/*
+ * Only while a timer exists.  The tick asks on every interrupt, and a
+ * poll with nothing to expire is a queue entry for nothing: 128 a second
+ * on an idle board, one of them always coalesced in the queue -- which
+ * is a queue that is never empty, and a wake the idle loop pays each
+ * tick.  A timer inserted after this read polls from timer_insert().
+ */
+void tiku_timer_request_poll(void) {
+  if (timer_list != NULL) {
+    tiku_process_poll(&tiku_timer_process);
+  }
+}
 
 /*---------------------------------------------------------------------------*/
 

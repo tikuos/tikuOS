@@ -282,10 +282,21 @@ uint16_t tiku_sched_idle_count(void)
     return idle_count;
 }
 
-/** @brief Wake the timer management process to check for expired timers. */
+/**
+ * @brief The tick: wake the timer process if a timer exists, and give
+ *        the kernel thread its turn.
+ *
+ * With workers, the tick IS preemption: a spinning worker is only ever
+ * displaced because the kernel thread is woken here.  That wake used to
+ * ride on the timer poll, which the tick made whether or not a timer
+ * existed; now the poll is only for a timer, so the wake is its own.
+ */
 void tiku_sched_notify(void)
 {
     tiku_timer_request_poll();
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    tiku_thread_kernel_wake();
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
