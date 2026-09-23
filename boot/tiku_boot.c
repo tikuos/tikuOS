@@ -234,12 +234,9 @@ tiku_boot_init_memory(void)
      * process memory, etc.) work without relying on a lazy first-touch init.
      * tiku_tier_init is idempotent, so BASIC's later lazy call is a no-op.
      *
-     * Every platform with a carved NVM region does this, because since v0.06
-     * the NVM tier is a DECLARED extent of fixed size (TIKU_NVM_TIER_BYTES)
-     * rather than whatever was left over -- so it should exist from boot, and
-     * `free` should be able to report it without something having touched
-     * BASIC first.  RP2350 needed it even before that, having no BASIC in its
-     * build to trigger the lazy path at all.
+     * Every platform with a carved NVM region does this: the layout service
+     * decides the tier's extent here, before any consumer allocates, and
+     * `free` can report it without something having touched BASIC first.
      * (MSP430 keeps its existing lazy init until validated there.) */
     (void)tiku_tier_init();
 #endif

@@ -19,8 +19,8 @@
 #include "kernel/fs/tiku_nvm_backend.h"
 
 /*
- * Region-backed ARM ports reserve 32 KB for the NVM tier and give the rest
- * to /data. The backend's actual size determines whether that split fits.
+ * Region-backed ARM ports give the NVM tier the front of the region, 32 KB
+ * unless the layout service's nvm.tier knob says otherwise, and /data the rest.
  * MSP430 instead has a separate lower-FRAM tier and static /data array;
  * neither uses its pinned region backend. HIFRAM is a different tier.
  * Anonymous tier allocations have no recovery identity: use a file or cell

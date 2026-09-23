@@ -153,6 +153,9 @@
 #include "commands/tiku_shell_cmd_df.h"
 #include "commands/tiku_shell_cmd_fat.h"
 #endif
+#if TIKU_SHELL_CMD_LAYOUT
+#include "commands/tiku_shell_cmd_layout.h"
+#endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #if defined(TIKU_EXP_LLM)
 #include <experiment/llm/tiku_shell_cmd_llm.h>  /* overlay repo, see Makefile */
@@ -642,6 +645,10 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_DF
     {"df",      "/data file-store usage",      tiku_shell_cmd_df},
     {"mkfs",    "Format /data: mkfs [--erase-data]", tiku_shell_cmd_mkfs},
+#endif
+#if TIKU_SHELL_CMD_LAYOUT
+    {"layout",  "Memory budgets: layout [show|limits|plan|stage|...]",
+     tiku_shell_cmd_layout},
 #endif
 #if TIKU_SHELL_CMD_FAT
     {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},

@@ -82,19 +82,26 @@ tiku_tfs_t *tiku_vfs_tree_data_store_if_mounted(void);
 /**
  * @brief Why /data is not mounted, in words, or NULL when it is.
  *
- * Tries the mount first if nothing has; a refusal stays until mkfs or a
- * reboot, so the answer does not change under a reader's feet.
+ * Tries the mount first if nothing has; a refusal stays until mkfs, a layout
+ * resume or a reboot, so the answer does not change under a reader's feet.
  */
 const char *tiku_vfs_tree_data_why(void);
 
 /** @brief Probe the /data extent without mounting.  @return 0 or -1. */
 int tiku_vfs_tree_data_probe(tiku_tfs_probe_t *out);
 
+/** @brief 1 when the region holds nothing store-shaped anywhere, else 0. */
+int tiku_vfs_tree_data_untouched(void);
+
+/** @brief Forget a refusal so the next access to /data mounts again. */
+void tiku_vfs_tree_data_retry(void);
+
 /**
  * @brief Format /data on request, whatever the extent holds.
  *
  * Erases every file.  The only path besides first-boot provisioning that
- * writes a new store.  @return 0 when the store is ready, -1 otherwise.
+ * writes a new store.  @return 0 when the store is ready, -2 while a layout
+ * change waits to be resumed, -1 otherwise.
  */
 int tiku_vfs_tree_data_format(void);
 

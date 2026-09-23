@@ -38,6 +38,7 @@
 #include "kernel/fs/tiku_tfs.h"
 #include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm, tiku_tier_nvm_write */
 #include "kernel/memory/tiku_nvm_region.h"
+#include "kernel/memory/tiku_layout.h"
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL fallback */
 
 /*---------------------------------------------------------------------------*/
@@ -92,37 +93,27 @@ static int
 data_bind(tiku_nvm_backend_t *region, size_t *base)
 {
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+    size_t at = (size_t)tiku_layout_base();
 
-    if (rgn == NULL || rgn->base == NULL ||
-        rgn->size <= (size_t)TIKU_NVM_TIER_BYTES) {
+    if (rgn == NULL || rgn->base == NULL || rgn->size <= at) {
         return 0;
     }
-    /* FS extent: EVERYTHING above the tier, measured from the region the linker
-     * actually carved rather than from a constant describing it.
-     *
-     * The old form anchored the store to the top of the region and took a
-     * compile-time length, so a carve that disagreed with the C mirror silently
-     * lost the difference -- the failure that left 676 KB idle on an nRF54LM20.
-     * Now the only fixed number is the tier, which IS a platform contract, and
-     * the store takes the remainder: a bigger carve becomes more files (the
-     * store derives its capacity from this size), and a smaller one is caught by
-     * the floor check inside the mount rather than by arithmetic here. */
-    data_be.base  = rgn->base + TIKU_NVM_TIER_BYTES;
-    data_be.size  = rgn->size - TIKU_NVM_TIER_BYTES;
+    /* The tier takes the front of the region up to the layout's base and the
+     * store everything behind it; the mount enforces the store's floor. */
+    data_be.base  = rgn->base + at;
+    data_be.size  = rgn->size - at;
     data_be.write = data_be_write;
     data_be.erase = NULL;
     data_be.ctx   = NULL;
     *region = *rgn;
-    *base   = (size_t)TIKU_NVM_TIER_BYTES;
+    *base   = at;
     return 1;
 }
 
 /**
  * @brief Report how the carved region is divided, for `df`.
  *
- * The extents are compile-time constants and the region size is whatever the
- * linker carved, so `df` publishes both plus their difference: `idle_bytes`
- * must read 0, or TIKU_NVM_REGION_BYTES is out of step with the linker script.
+ * The tier and the store tile the region, so `idle_bytes` is always 0.
  *
  * @param out  Snapshot to fill in (extent fields only).
  */
@@ -130,17 +121,69 @@ static void
 data_fill_extents(tiku_data_df_t *out)
 {
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+    uint32_t at = tiku_layout_base();
 
     out->region_bytes = (rgn != NULL) ? (uint32_t)rgn->size : 0u;
-    out->tier_bytes   = (uint32_t)TIKU_NVM_TIER_BYTES;
-    out->fs_bytes     = (out->region_bytes > (uint32_t)TIKU_NVM_TIER_BYTES)
-                        ? (out->region_bytes - (uint32_t)TIKU_NVM_TIER_BYTES)
-                        : 0u;
-    /* Idle space is now STRUCTURALLY zero -- the two extents are the tier and
-     * "everything else", so they tile the carve by construction rather than by
-     * a table being kept in step.  The field stays because df prints it and a
-     * non-zero value would mean this arithmetic broke. */
+    out->tier_bytes   = (out->region_bytes > at) ? at : out->region_bytes;
+    out->fs_bytes     = out->region_bytes - out->tier_bytes;
     out->idle_bytes   = 0u;
+}
+
+/**
+ * @brief Whether the store may be created at @p base without being asked.
+ *
+ * Only when the layout service found nothing store-shaped in the region.
+ */
+static int
+data_may_create(const tiku_nvm_backend_t *region, size_t base)
+{
+    return tiku_layout_state()->store == TIKU_LAYOUT_STORE_PROVISION &&
+           tiku_tfs_may_provision(region, base, TIKU_TFS_LOCATE_STEP);
+}
+
+/** @brief Why the layout service holds the store, or NULL when it does not. */
+static const char *
+data_held(void)
+{
+    const tiku_layout_state_t *ls = tiku_layout_state();
+
+    if (ls->store != TIKU_LAYOUT_STORE_HELD) {
+        return NULL;
+    }
+    switch (ls->held) {
+    case TIKU_LAYOUT_HELD_TORN:
+        return "the store has lost its header but still holds files";
+    case TIKU_LAYOUT_HELD_GEOMETRY:
+        return "the store was formatted for a region of another size";
+    case TIKU_LAYOUT_HELD_VERSION:
+        return "the store is in another format version";
+    case TIKU_LAYOUT_HELD_AMBIGUOUS:
+        return "more than one store header lies in the region";
+    case TIKU_LAYOUT_HELD_INTERRUPTED:
+        return "a layout change was interrupted (see layout status)";
+    case TIKU_LAYOUT_HELD_IO:
+        return "the layout record could not be written";
+    case TIKU_LAYOUT_HELD_ELSEWHERE:
+    default:
+        return "another store header lies elsewhere in the region";
+    }
+}
+
+/** @brief Whether a layout change is waiting to be resumed. */
+static int
+data_interrupted(void)
+{
+    const tiku_layout_state_t *ls = tiku_layout_state();
+
+    return ls->store == TIKU_LAYOUT_STORE_HELD &&
+           ls->held == TIKU_LAYOUT_HELD_INTERRUPTED;
+}
+
+/** @brief Record @p base as the store's home once a store exists there. */
+static void
+data_adopt(size_t base)
+{
+    (void)tiku_layout_adopt((uint32_t)base);
 }
 
 #else  /* MSP430 FRAM / host: a static backing array */
@@ -226,6 +269,34 @@ data_fill_extents(tiku_data_df_t *out)
     out->idle_bytes   = 0u;
 }
 
+/** @brief Create the store only in an array with nothing store-shaped in it. */
+static int
+data_may_create(const tiku_nvm_backend_t *region, size_t base)
+{
+    return tiku_tfs_may_provision(region, base, TIKU_TFS_LOCATE_STEP);
+}
+
+/** @brief No layout service holds a static array's store. */
+static const char *
+data_held(void)
+{
+    return NULL;
+}
+
+/** @brief No layout change can be pending on a static array. */
+static int
+data_interrupted(void)
+{
+    return 0;
+}
+
+/** @brief A static array's store has no base to record. */
+static void
+data_adopt(size_t base)
+{
+    (void)base;
+}
+
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -235,7 +306,7 @@ data_fill_extents(tiku_data_df_t *out)
 /* The mount never formats.  A store is created without asking only on a
  * region with nothing store-shaped in it; anything else leaves /data absent,
  * with the probe kept so df can say why, until mkfs formats on request. */
-enum { DATA_UNTRIED = 0, DATA_READY, DATA_ABSENT, DATA_REFUSED };
+enum { DATA_UNTRIED = 0, DATA_READY, DATA_ABSENT, DATA_REFUSED, DATA_HELD };
 static uint8_t          data_state;
 static tiku_tfs_probe_t data_probe;
 static int8_t           data_mount_rc;
@@ -262,10 +333,16 @@ data_tfs_ensure(void)
         data_state = DATA_ABSENT;
         return -1;
     }
+    if (data_held() != NULL) {
+        data_state = DATA_HELD;
+        return -1;
+    }
     rc = tiku_tfs_mount(&data_fs, &data_be);
-    if (rc == TFS_ERR_NOSTORE &&
-        tiku_tfs_may_provision(&region, base, TIKU_TFS_LOCATE_STEP)) {
+    if (rc == TFS_ERR_NOSTORE && data_may_create(&region, base)) {
         rc = tiku_tfs_format(&data_fs);
+        if (rc == TFS_OK) {
+            data_adopt(base);
+        }
     }
     if (rc == TFS_OK) {
         data_state = DATA_READY;
@@ -288,6 +365,9 @@ tiku_vfs_tree_data_why(void)
     }
     if (data_state == DATA_ABSENT) {
         return "no NVM region on this part";
+    }
+    if (data_state == DATA_HELD) {
+        return data_held();
     }
     switch (data_probe.kind) {
     case TFS_PROBE_TORN:
@@ -322,19 +402,40 @@ tiku_vfs_tree_data_probe(tiku_tfs_probe_t *out)
 }
 
 int
+tiku_vfs_tree_data_untouched(void)
+{
+    tiku_nvm_backend_t region;
+    size_t base;
+
+    return data_bind(&region, &base) &&
+           tiku_tfs_may_provision(&region, base, TIKU_TFS_LOCATE_STEP);
+}
+
+void
+tiku_vfs_tree_data_retry(void)
+{
+    if (data_state != DATA_READY) {
+        data_state = DATA_UNTRIED;
+    }
+}
+
+int
 tiku_vfs_tree_data_format(void)
 {
     tiku_nvm_backend_t region;
     size_t base;
 
+    if (data_interrupted()) {
+        return -2;
+    }
     if (!data_bind(&region, &base)) {
         return -1;
     }
-    (void)base;
     if (tiku_tfs_init(&data_fs, &data_be) != TFS_OK) {
         data_state = DATA_UNTRIED;
         return -1;
     }
+    data_adopt(base);
     data_state = DATA_READY;
     return 0;
 }

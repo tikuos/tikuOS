@@ -128,6 +128,7 @@ tiku_shell_cmd_mkfs(uint8_t argc, const char *argv[])
 {
     tiku_tfs_probe_t p;
     int erase = (argc >= 2u && strcmp(argv[1], "--erase-data") == 0);
+    int rc;
 
     if (argc >= 2u && !erase) {
         SHELL_PRINTF("Usage: mkfs [--erase-data]\n");
@@ -143,12 +144,18 @@ tiku_shell_cmd_mkfs(uint8_t argc, const char *argv[])
         SHELL_PRINTF(SH_RED "mkfs: the extent is too small for a store\n" SH_RST);
         return;
     }
-    if (p.kind != TFS_PROBE_BLANK && !erase) {
+    if (!tiku_vfs_tree_data_untouched() && !erase) {
         SHELL_PRINTF("mkfs: formatting erases every file; "
                      "run 'mkfs --erase-data' to proceed\n");
         return;
     }
-    if (tiku_vfs_tree_data_format() != 0) {
+    rc = tiku_vfs_tree_data_format();
+    if (rc == -2) {
+        SHELL_PRINTF(SH_RED "mkfs: a layout change was interrupted; "
+                     "resume it with 'layout resume'\n" SH_RST);
+        return;
+    }
+    if (rc != 0) {
         SHELL_PRINTF(SH_RED "mkfs: format failed\n" SH_RST);
         return;
     }

@@ -79,6 +79,7 @@ static int cfg_managed_write(uint32_t, const char *, size_t, int *);
 #endif
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_RAM_USABLE */
 #include <kernel/memory/tiku_nvm_region.h> /* the carved region: nvm_map */
+#include "tiku_vfs_tree_layout.h"
 #include "tiku_vfs_tree_data.h"   /* backing extents and mounted occupancy */
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <stdlib.h>                  /* strtoul: /sys/radio/beacon interval */
@@ -954,7 +955,13 @@ static const tiku_vfs_node_t sys_mem_children[] = {
       &desc_mem_map },
     { "nvm_map",  TIKU_VFS_FILE, nvm_map_read,  NULL, NULL, 0,
       &desc_mem_map },
+#if !defined(PLATFORM_MSP430)
+    { "layout",   TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_layout_children, TIKU_VFS_TREE_LAYOUT_NCHILD },
+#endif
 };
+
+#define SYS_MEM_NCHILD  (sizeof sys_mem_children / sizeof sys_mem_children[0])
 
 /** /sys/cpu directory table */
 static const tiku_vfs_node_t sys_cpu_children[] = {
@@ -1574,7 +1581,8 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
-    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children, 11 },
+    { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children,
+      SYS_MEM_NCHILD },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children,
       sizeof sys_cpu_children / sizeof sys_cpu_children[0] },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,

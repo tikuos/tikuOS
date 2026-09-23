@@ -1185,8 +1185,8 @@ uint32_t tiku_mpu_get_last_fault_addr(void);
 
 /*
  * MSP430's NVM tier is this lower-FRAM array, separate from its HIFRAM tier
- * and pinned backend. ARM uses TIKU_NVM_TIER_BYTES in an adequate region.
- * Query tier statistics for available capacity; 32 KB is not a cross-port minimum.
+ * and pinned backend. ARM takes the front of its region, as the layout service
+ * sizes it. Query tier statistics for capacity; there is no cross-port minimum.
  */
 
 /** Size of the NVM tier backing pool in bytes. Override at compile time. */

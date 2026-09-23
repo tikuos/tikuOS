@@ -20,6 +20,7 @@
 
 #include "tiku_mem.h"
 #include "tiku_nvm_region.h"
+#include "tiku_layout.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -264,15 +265,19 @@ static void tier_wire_all(void)
          * anywhere: it gets a working NVM tier the moment it supplies a
          * backend, and an honestly absent one until then.
          *
-         * The tier owns a FIXED 32 KB extent at the front (the portable
-         * allocation contract); the file store absorbs the remainder. */
+         * The tier owns the front of the region up to the store's base, as
+         * the layout service decided at boot.  A held store publishes no
+         * tier: bytes whose owner is unknown are not handed out. */
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+        const tiku_layout_state_t *ls = tiku_layout_state();
 
-        if (rgn != NULL && rgn->base != NULL &&
-            rgn->size > (size_t)TIKU_NVM_TIER_BYTES) {
+        if (rgn != NULL && rgn->base != NULL && ls->tier != 0u &&
+            rgn->size > (size_t)ls->tier &&
+            (ls->store == TIKU_LAYOUT_STORE_READY ||
+             ls->store == TIKU_LAYOUT_STORE_PROVISION)) {
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
             tier_state[TIKU_MEM_NVM].capacity =
-                (tiku_mem_arch_size_t)TIKU_NVM_TIER_BYTES;
+                (tiku_mem_arch_size_t)ls->tier;
             tier_state[TIKU_MEM_NVM].initialized = 1;
         } else {
             /* NOT initialized, rather than an empty-but-present tier: the

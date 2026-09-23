@@ -263,6 +263,9 @@
 #ifndef TIKU_SHELL_CMD_DF
 #define TIKU_SHELL_CMD_DF      1  /**< df      - /data file-store usage */
 #endif
+#ifndef TIKU_SHELL_CMD_LAYOUT
+#define TIKU_SHELL_CMD_LAYOUT  1  /**< layout  - memory budgets for next boot */
+#endif
 #ifndef TIKU_SHELL_CMD_SLEEP
 #define TIKU_SHELL_CMD_SLEEP   1  /**< sleep   - Enter low-power idle mode */
 #endif
@@ -609,6 +612,12 @@
 #if TIKU_SHELL_CMD_BLE && !(TIKU_DRV_BLE_EM9305_ENABLE + 0)
 #undef  TIKU_SHELL_CMD_BLE
 #define TIKU_SHELL_CMD_BLE 0
+#endif
+
+/* layout divides the carved NVM region; MSP430 keeps fixed arrays instead. */
+#if TIKU_SHELL_CMD_LAYOUT && defined(PLATFORM_MSP430)
+#undef  TIKU_SHELL_CMD_LAYOUT
+#define TIKU_SHELL_CMD_LAYOUT 0
 #endif
 
 /* mrambench drives the Ambiq bootrom MRAM programmer. */
