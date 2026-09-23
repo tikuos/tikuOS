@@ -342,7 +342,7 @@ int tiku_shell_fat_stage_prefix(const char *path, uint32_t bytes)
     if (tiku_fat_verify(&s_fs, &f) != TIKU_FAT_OK) { return -1; }
     if ((uint64_t)nsec * 512u > f.size + 511u) { return -1; }
     s_pfx_left = nsec;
-    tiku_emmc_stage_open();
+    if (tiku_emmc_stage_open() != TIKU_EMMC_OK) { return -1; }
     (void)tiku_fat_runs(&s_fs, &f, prefix_cb, 0);
     if (s_pfx_left != 0u) {
         (void)tiku_emmc_stage_close(0u, &src, &dst, &rd_us, &wr_us);
@@ -399,7 +399,11 @@ static void cmd_stage(const char *path)
 
     SHELL_PRINTF("fat stage %s: %lu bytes\n", path, (unsigned long)f.size);
     s_stage_sec = 0u; s_stage_runs = 0u; s_stage_bad = 0;
-    tiku_emmc_stage_open();
+    if (tiku_emmc_stage_open() != TIKU_EMMC_OK) {
+        SHELL_PRINTF("  FAILED: the SRAM tier cannot lend the 512 KB"
+                     " bounce buffer\n");
+        return;
+    }
     rc = tiku_fat_runs(&s_fs, &f, stage_cb, (void *)0);
     if (rc != TIKU_FAT_OK || s_stage_bad) {
         SHELL_PRINTF("  FAILED during the walk (%s)\n",

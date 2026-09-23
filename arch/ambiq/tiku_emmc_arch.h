@@ -214,6 +214,7 @@ typedef enum {
     TIKU_EMMC_ERR_ID,       /**< identity implausible                       */
     TIKU_EMMC_ERR_ARG,      /**< bad argument, incl. a forbidden CMD6 index */
     TIKU_EMMC_ERR_STATE,    /**< card not in the state the operation needs  */
+    TIKU_EMMC_ERR_NOMEM,    /**< the SRAM tier could not lend the buffer    */
 } tiku_emmc_err_t;
 
 /** @brief Decoded identity -- the day-one trophy. */
@@ -322,7 +323,8 @@ void tiku_emmc_regs(uint32_t *out, unsigned n);
  *
  * DWT-timed, work-denominated and checksum-gated, like `psrambench`.  Writes
  * touch the scratch region and nowhere else, and a leg that cannot prove its
- * bytes reports FAIL instead of a bandwidth.
+ * bytes reports FAIL instead of a bandwidth.  Its 512 KB buffer is lent by
+ * the SRAM tier for the run.
  *
  * @note The run prints what it did NOT measure, so the table cannot be read
  *       as a ceiling.
@@ -384,15 +386,17 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba);
  * all a raw address can express; a FILE may be fragmented, so its extents are
  * fed in one at a time and appended to the PSRAM image in order.
  *
- *   open()            XIP down, counters and the source hash reset
+ *   open()            borrow the bounce buffer, XIP down, counters reset
  *   chunk(lba, nsec)  append one contiguous extent
- *   close(...)        read the image back OUT of the PSRAM, hash it, XIP up
+ *   close(...)        read the image back OUT of the PSRAM, hash it, XIP up,
+ *                     give the buffer back
  *
  * close() hashes the PSRAM rather than the bounce buffer on purpose: hashing
  * on the way in would only prove the card was read correctly, not that the
- * bytes are where the tier will look for them.
+ * bytes are where the tier will look for them.  open() fails with NOMEM when
+ * the SRAM tier cannot lend 512 KB; a loan it made is held until close().
  */
-void tiku_emmc_stage_open(void);
+tiku_emmc_err_t tiku_emmc_stage_open(void);
 tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec);
 tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
                                       uint32_t *dst, uint32_t *rd_us,

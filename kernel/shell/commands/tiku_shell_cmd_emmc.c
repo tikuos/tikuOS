@@ -55,7 +55,7 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
      *   power emmc off    release the SDIO0 domain
      */
     static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
-                                      "CMD", "ID", "ARG", "STATE" };
+                                      "CMD", "ID", "ARG", "STATE", "NOMEM" };
     tiku_emmc_id_t id;
     tiku_emmc_err_t rc;
 

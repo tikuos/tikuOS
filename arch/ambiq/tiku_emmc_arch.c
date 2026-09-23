@@ -24,6 +24,7 @@
 #include "apollo510.h"
 #include "hal/tiku_cpu.h"                /* dcache clean/invalidate: DMA     */
 #include <kernel/cpu/tiku_hang.h>
+#include <kernel/memory/tiku_mem.h>      /* the bounce buffer is a tier loan */
 #include <string.h>
 
 #include <kernel/shell/tiku_shell_io.h>  /* the bench reports via SHELL_PRINTF */
@@ -1558,15 +1559,48 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
 #define BENCH_BYTES   (BENCH_BLOCKS * TIKU_EMMC_BLOCK_SIZE)
 
 /*
- * In SSRAM, not DTCM.  Half a megabyte is most of the 512 KB tightly-coupled
- * bank, and SSRAM is where this part's large DMA-touched buffers already
- * live.  The +4 is deliberate headroom for the unaligned leg below.
+ * Borrowed from the SRAM tier for one operation and given back after it.  As
+ * a static buffer it took 512 KB from the tier in every image with the driver
+ * in it, used or not.  The tier is SSRAM, where this part's large DMA-touched
+ * buffers live.  The +4 is deliberate headroom for the unaligned leg below.
  */
-static uint8_t s_bench_buf[BENCH_BYTES + 4u]
-    __attribute__((section(".ssram"), aligned(32)));
+#define BENCH_LOAN    (BENCH_BYTES + 4u)
+static uint8_t *s_bench_buf;
 
 /** A small DTCM buffer, existing only to answer the reachability question. */
 static uint8_t s_dtcm_buf[4096] __attribute__((aligned(32)));
+
+/** @brief Borrow the bounce buffer, keeping one already held.  1 = held. */
+static int bench_buf_borrow(void)
+{
+    if (s_bench_buf == NULL) {
+        s_bench_buf = (uint8_t *)tiku_tier_borrow(TIKU_MEM_SRAM, BENCH_LOAN,
+                                                  32u);
+    }
+    return s_bench_buf != NULL;
+}
+
+/** @brief Give the bounce buffer back to the tier. */
+static void bench_buf_return(void)
+{
+    if (s_bench_buf != NULL) {
+        (void)tiku_tier_return(TIKU_MEM_SRAM, s_bench_buf);
+        s_bench_buf = NULL;
+    }
+}
+
+/** @brief Say that the tier could not lend the buffer, and what it had. */
+static void bench_buf_refused(const char *who)
+{
+    tiku_mem_stats_t st;
+    unsigned long room = 0ul;
+
+    if (tiku_tier_stats(TIKU_MEM_SRAM, &st) == TIKU_MEM_OK) {
+        room = (unsigned long)(st.total_bytes - st.used_bytes);
+    }
+    SHELL_PRINTF("%s: the SRAM tier cannot lend %lu KB (%lu KB free)\n", who,
+                 (unsigned long)(BENCH_LOAN / 1024u), room / 1024u);
+}
 
 /** Pattern byte for scratch-region offset @p a under seed @p s. */
 static inline uint8_t bench_pat(uint32_t a, uint32_t s)
@@ -1585,7 +1619,8 @@ static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                          int exact, tiku_emmc_err_t rc)
 {
     static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
-                                      "CMD", "ID", "ARG", "STATE" };
+                                      "CMD", "ID", "ARG", "STATE", "NOMEM" };
+    const unsigned n_en = (unsigned)(sizeof en / sizeof en[0]);
     unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
     unsigned long kbps;
 
@@ -1601,7 +1636,7 @@ static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                      "intstat %08lx%s%s%s%s%s%s\n", leg,
                      (unsigned long)(bytes / 1024u),
                      (unsigned long)cyc_to_us(cyc),
-                     en[(unsigned)rc < 8u ? (unsigned)rc : 0u],
+                     en[(unsigned)rc < n_en ? (unsigned)rc : 0u],
                      (unsigned long)e,
                      (e & (1u << 16)) ? " CMD-TIMEOUT" : "",
                      (e & (1u << 17)) ? " CMD-CRC"     : "",
@@ -1648,6 +1683,7 @@ void tiku_emmc_bench_run(void)
     if (!s_up) { SHELL_PRINTF("bench: emmc not up\n"); return; }
     base = tiku_emmc_scratch_lba();
     if (base == 0u) { SHELL_PRINTF("bench: no scratch region\n"); return; }
+    if (!bench_buf_borrow()) { bench_buf_refused("bench"); return; }
 
     /*
      * The span follows the wire.  At the identification setting the bus moves
@@ -1869,6 +1905,7 @@ void tiku_emmc_bench_run(void)
 
     SHELL_PRINTF("  not tested: HS200/HS400, DDR, ADMA2, CMD23 set-block-count,"
                  " cache/reliable-write\n");
+    bench_buf_return();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1928,8 +1965,10 @@ static uint32_t stage_hash(const uint8_t *p, uint32_t n, uint32_t h)
 static uint32_t s_stg_off, s_stg_src, s_stg_rd, s_stg_wr;
 static int      s_stg_xip;
 
-void tiku_emmc_stage_open(void)
+tiku_emmc_err_t tiku_emmc_stage_open(void)
 {
+    s_stg_xip = 0;
+    if (!bench_buf_borrow()) { return TIKU_EMMC_ERR_NOMEM; }
     cyc_enable();
     s_stg_off = 0u;
     s_stg_src = 2166136261u;
@@ -1937,12 +1976,14 @@ void tiku_emmc_stage_open(void)
     s_stg_wr  = 0u;
     s_stg_xip = tiku_psram_xip_enabled();
     if (s_stg_xip) { (void)tiku_psram_xip_enable(0); }
+    return TIKU_EMMC_OK;
 }
 
 tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec)
 {
     uint32_t left = nsec;
 
+    if (s_bench_buf == NULL) { return TIKU_EMMC_ERR_NOMEM; }
     while (left != 0u) {
         uint32_t n = (left > (STAGE_CHUNK / TIKU_EMMC_BLOCK_SIZE))
                      ? (STAGE_CHUNK / TIKU_EMMC_BLOCK_SIZE) : left;
@@ -1989,12 +2030,14 @@ tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
                                       uint32_t *wr_us)
 {
     uint32_t h = 2166136261u, off;
-    tiku_emmc_err_t rc = TIKU_EMMC_OK;
+    tiku_emmc_err_t rc = (s_bench_buf != NULL) ? TIKU_EMMC_OK
+                                               : TIKU_EMMC_ERR_NOMEM;
 
     /* Read the staged image back OUT of the PSRAM and hash that.  Hashing
      * the bounce buffer on the way in would only prove the card was read;
      * this proves the bytes are where the tier will look for them. */
-    for (off = 0u; off < total_bytes; off += STAGE_CHUNK) {
+    for (off = 0u; rc == TIKU_EMMC_OK && off < total_bytes;
+         off += STAGE_CHUNK) {
         uint32_t n = ((total_bytes - off) < STAGE_CHUNK)
                      ? (total_bytes - off) : STAGE_CHUNK;
         /* Same short-chunk rule as the write path: the queue needs
@@ -2013,6 +2056,7 @@ tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
     if (dst)   { *dst   = h; }
     if (rd_us) { *rd_us = cyc_to_us(s_stg_rd); }
     if (wr_us) { *wr_us = cyc_to_us(s_stg_wr); }
+    bench_buf_return();
     return rc;
 }
 
@@ -2039,6 +2083,7 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
         SHELL_PRINTF("stage: source range past end of card\n");
         return;
     }
+    if (!bench_buf_borrow()) { bench_buf_refused("stage"); return; }
 
     cyc_enable();
     /* The command queue moves bytes the CPU cannot see: XIP has to come down
@@ -2099,6 +2144,7 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
     }
 
     if (xip_was) { (void)tiku_psram_xip_enable(1); }
+    bench_buf_return();
 
     if (rc != TIKU_EMMC_OK) {
         SHELL_PRINTF("stage: FAILED rc=%d  intstat %08lx\n", (int)rc,
@@ -2181,6 +2227,7 @@ void tiku_emmc_diag_run(void)
         }
     }
     SHELL_PRINTF("  setup: 4 x single-block write ok\n");
+    if (!bench_buf_borrow()) { bench_buf_refused("diag"); return; }
 
     /*
      * Each case names its three variables and its verdict.  The time column is
@@ -2220,6 +2267,7 @@ void tiku_emmc_diag_run(void)
             }
         }
     }
+    bench_buf_return();
 }
 
 uint32_t tiku_emmc_last_error(void) { return s_last_err; }
