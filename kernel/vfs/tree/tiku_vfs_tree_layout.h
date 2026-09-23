@@ -24,11 +24,11 @@
  * Must equal the number of initialisers in tiku_vfs_tree_layout_children;
  * a _Static_assert in the .c catches a forgotten update.
  */
-#define TIKU_VFS_TREE_LAYOUT_NCHILD  7
+#define TIKU_VFS_TREE_LAYOUT_NCHILD  8
 
 /**
  * @brief /sys/mem/layout children: caps, current, pending, status, stage,
- *        cancel, resume.
+ *        cancel, resume, recover.
  */
 extern const tiku_vfs_node_t tiku_vfs_tree_layout_children[];
 

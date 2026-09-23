@@ -24,6 +24,7 @@
 
 #include "tiku_shell_cmd_layout.h"
 #include <kernel/memory/tiku_layout.h>
+#include <kernel/fs/tiku_tfs.h>
 #include <kernel/vfs/tree/tiku_vfs_tree_data.h>
 #include <stdint.h>
 #include <string.h>
@@ -71,7 +72,7 @@ layout_cat(char *out, size_t cap, size_t *at, const char *s)
 }
 
 /**
- * @brief Turn "k=v ... --erase --expect G:R --op N" into the service's text.
+ * @brief Turn knob values and --identity/--expect/--op/--erase into service text.
  *
  * @return 0, or -1 on a malformed or overlong argument list.
  */
@@ -89,12 +90,19 @@ layout_request_text(uint8_t argc, const char *argv[], char *out, size_t cap)
             rc = layout_cat(out, cap, &at, "method=erase");
         } else if (strcmp(argv[i], "--expect") == 0 && i + 1u < argc) {
             rc = layout_cat(out, cap, &at, "expect=");
+            if (rc != 0) { return -1; }
             at--;                                /* no space after the '=' */
             rc |= layout_cat(out, cap, &at, argv[++i]);
         } else if (strcmp(argv[i], "--op") == 0 && i + 1u < argc) {
             rc = layout_cat(out, cap, &at, "op=");
+            if (rc != 0) { return -1; }
             at--;
             rc |= layout_cat(out, cap, &at, argv[++i]);
+        } else if (strcmp(argv[i], "--identity") == 0 && i + 1u < argc) {
+            rc = layout_cat(out, cap, &at, "identity=");
+            if (rc != 0) { return -1; }
+            at--;
+            rc = layout_cat(out, cap, &at, argv[++i]);
         } else if (argv[i][0] == '-') {
             return -1;
         } else {
@@ -153,6 +161,10 @@ layout_refusal(const char *verb, int rc, const tiku_layout_plan_t *plan)
         SHELL_PRINTF(SH_RED "layout %s: operation id already names another "
                      "request" SH_RST "\n", verb);
         break;
+    case TIKU_LAYOUT_E_RECOVERY:
+        SHELL_PRINTF("layout %s: ownership is unavailable; inspect 'layout "
+                     "inspect', then explicitly recover the known store\n", verb);
+        break;
     default:
         SHELL_PRINTF(SH_RED "layout %s: %s" SH_RST "\n", verb,
                      tiku_layout_err_name(rc));
@@ -205,6 +217,9 @@ layout_status(void)
         SHELL_PRINTF("the store was found at %lu, not where the record "
                      "said\n", (unsigned long)st->tier);
     }
+    if (st->store == TIKU_LAYOUT_STORE_HELD) {
+        SHELL_PRINTF("NVM tier withheld; resolve the hold before using /data.\n");
+    }
     if (st->outcome_op != 0u) {
         SHELL_PRINTF("at boot: operation %lu %s\n",
                      (unsigned long)st->outcome_op,
@@ -213,8 +228,13 @@ layout_status(void)
     if (valid && r->phase == TIKU_LAYOUT_PHASE_REWRITING) {
         SHELL_PRINTF(SH_RED "operation %lu was interrupted while rewriting "
                      "/data" SH_RST "\n", (unsigned long)r->op);
-        SHELL_PRINTF("  'layout resume %lu' finishes it; its files were "
-                     "already given up\n", (unsigned long)r->op);
+        if (st->held == TIKU_LAYOUT_HELD_INTERRUPTED) {
+            SHELL_PRINTF("  'layout resume %lu' finishes it; its files were "
+                         "already given up\n", (unsigned long)r->op);
+        } else {
+            SHELL_PRINTF("  resume is refused until the image contract and "
+                         "layout bounds match\n");
+        }
     } else if (valid && r->receipt_op != 0u) {
         SHELL_PRINTF("last:    operation %lu %s\n",
                      (unsigned long)r->receipt_op,
@@ -230,10 +250,13 @@ layout_show(void)
     tiku_layout_knob_t k;
     int valid = layout_have_record();
     unsigned i;
+    char identity[33];
 
     SHELL_PRINTF("layout %lu:%lu (generation:revision)\n",
                  valid ? (unsigned long)r->generation : 0UL,
                  valid ? (unsigned long)r->revision : 0UL);
+    tiku_layout_identity_text(r->identity, identity);
+    SHELL_PRINTF("identity %s\n", valid ? identity : "none (recover first)");
     for (i = 0u; i < TIKU_LAYOUT_KNOBS_MAX; i++) {
         uint32_t now, next;
 
@@ -272,14 +295,15 @@ layout_request(uint8_t argc, const char *argv[], int stage)
     if (argc < 3u || layout_request_text(argc, argv, text, sizeof text) != 0 ||
         tiku_layout_parse(text, &req) != 0 || req.n == 0u) {
         SHELL_PRINTF("Usage: layout %s <knob>=<value> ... [--erase]%s\n", verb,
-                     stage ? " --expect G:R --op N" : "");
+                     stage ? " --expect G:R --op N --identity HEX32" : "");
         return;
     }
-    if (stage && req.op == 0u) {
+    if (stage && (req.op == 0u || !req.has_expect)) {
         const tiku_layout_record_t *r = tiku_layout_record();
 
         SHELL_PRINTF("layout stage: name the operation with --op N and the "
-                     "layout you saw with --expect %lu:%lu\n",
+                     "layout you saw with --expect %lu:%lu and --identity HEX32 "
+                     "from 'layout show'\n",
                      layout_have_record() ? (unsigned long)r->generation : 0UL,
                      layout_have_record() ? (unsigned long)r->revision : 0UL);
         return;
@@ -291,7 +315,12 @@ layout_request(uint8_t argc, const char *argv[], int stage)
         return;
     }
     if (stage && tiku_layout_record()->op != req.op) {
-        SHELL_PRINTF("layout stage: nothing changes; nothing staged\n");
+        if (tiku_layout_record()->receipt_op == req.op) {
+            SHELL_PRINTF("layout stage: operation %lu already finished; nothing staged\n",
+                         (unsigned long)req.op);
+        } else {
+            SHELL_PRINTF("layout stage: nothing changes; nothing staged\n");
+        }
         return;
     }
     if (plan.effect == TIKU_LAYOUT_EFFECT_NONE && !stage) {
@@ -325,7 +354,8 @@ layout_op_arg(const char *s, uint32_t *op)
         return -1;
     }
     for (; *s != '\0'; s++) {
-        if (*s < '0' || *s > '9' || v > 429496728u) {
+        if (*s < '0' || *s > '9' ||
+            v > (UINT32_MAX - (uint32_t)(*s - '0')) / 10u) {
             return -1;
         }
         v = v * 10u + (uint32_t)(*s - '0');
@@ -355,12 +385,35 @@ tiku_shell_cmd_layout(uint8_t argc, const char *argv[])
         layout_limits();
     } else if (strcmp(sub, "status") == 0) {
         layout_status();
+    } else if (strcmp(sub, "inspect") == 0) {
+        const tiku_layout_env_t *e = tiku_layout_env();
+        tiku_tfs_cand_t candidates[8];
+        int n = tiku_tfs_locate(&e->region, e->step, candidates, 8);
+        SHELL_PRINTF("Candidates only, not proof of ownership; no bytes changed.\n");
+        for (int i = 0; i < n && i < 8; i++) {
+            SHELL_PRINTF("  %lu %s\n", (unsigned long)candidates[i].off,
+                         tiku_tfs_probe_name(candidates[i].kind));
+        }
+        SHELL_PRINTF("%d candidate(s)%s\n", n, n > 8 ? " (first 8 shown)" : "");
+    } else if (strcmp(sub, "recover") == 0) {
+        tiku_layout_request_t q;
+        if (argc != 4u || strcmp(argv[3], "--accept-layout") != 0 ||
+            tiku_layout_parse(argv[2], &q) != 0 || q.n != 1u ||
+            q.kv[0].id != TIKU_KNOB_NVM_TIER) {
+            SHELL_PRINTF("Usage: layout recover nvm.tier=<known-store-offset> "
+                         "--accept-layout\nNo files are formatted. Verify the "
+                         "offset from your previous layout, not a scan alone.\n");
+            return;
+        }
+        rc = tiku_layout_recover(q.kv[0].value);
+        SHELL_PRINTF("layout recover: %s%s\n", tiku_layout_err_name(rc),
+                     rc == TIKU_LAYOUT_OK ? "; reboot to activate" : "");
     } else if (strcmp(sub, "plan") == 0) {
         layout_request(argc, argv, 0);
     } else if (strcmp(sub, "stage") == 0) {
         layout_request(argc, argv, 1);
     } else if (strcmp(sub, "cancel") == 0 || strcmp(sub, "resume") == 0) {
-        if (argc < 3u || layout_op_arg(argv[2], &op) != 0) {
+            if (argc != 3u || layout_op_arg(argv[2], &op) != 0) {
             SHELL_PRINTF("Usage: layout %s <operation>\n", sub);
             return;
         }
@@ -379,10 +432,10 @@ tiku_shell_cmd_layout(uint8_t argc, const char *argv[])
         }
         SHELL_PRINTF("layout %s: operation %lu %s\n", sub, (unsigned long)op,
                      (sub[0] == 'c') ? "cancelled"
-                                     : "finished; /data is formatted");
+                                     : "finished; reboot to activate /data and the NVM tier");
     } else {
         SHELL_PRINTF("Usage: layout [show|limits|status|plan|stage|cancel|"
-                     "resume]\n");
+                     "resume|inspect|recover]\n");
     }
 }
 

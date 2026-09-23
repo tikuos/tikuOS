@@ -172,11 +172,12 @@ typedef enum {
 /** @brief What the first bytes of an extent say about a store there. */
 typedef enum {
     TFS_PROBE_COMPATIBLE = 0, /**< mounts as it is                            */
-    TFS_PROBE_BLANK,          /**< nothing store-shaped: no header, no entry  */
+    TFS_PROBE_BLANK,          /**< full probe: entire extent is 00 or FF      */
     TFS_PROBE_TORN,           /**< header gone, geometry or entries remain    */
     TFS_PROBE_GEOMETRY,       /**< formatted for an extent of another size    */
     TFS_PROBE_VERSION,        /**< written in another format version          */
-    TFS_PROBE_TOOSMALL        /**< the extent cannot hold the smallest store  */
+    TFS_PROBE_TOOSMALL,       /**< the extent cannot hold the smallest store  */
+    TFS_PROBE_UNKNOWN         /**< nonblank bytes with no recognizable store */
 } tfs_probe_kind_t;
 
 /** @brief One probe's findings; every field is read, nothing is written. */
@@ -303,8 +304,8 @@ int tiku_tfs_locate(const tiku_nvm_backend_t *region, size_t step,
 /**
  * @brief Whether a store may be created at @p base_off without asking.
  *
- * True only when the full probe at the base finds nothing store-shaped and no
- * header of any kind lies anywhere in @p region.
+ * True only when the whole region is uniformly 0x00 or 0xFF and the extent
+ * at the base can hold a store; missing headers alone are not blank media.
  */
 int tiku_tfs_may_provision(const tiku_nvm_backend_t *region, size_t base_off,
                            size_t step);

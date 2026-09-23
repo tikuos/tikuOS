@@ -57,6 +57,8 @@ layout_vfs_err(int rc)
     case TIKU_LAYOUT_E_LOSS:
     case TIKU_LAYOUT_E_REUSED: return TIKU_VFS_ECONFLICT;
     case TIKU_LAYOUT_E_IO:     return TIKU_VFS_EIO;
+    case TIKU_LAYOUT_E_ENTROPY: return TIKU_VFS_EIO;
+    case TIKU_LAYOUT_E_RECOVERY: return TIKU_VFS_ECONFLICT;
     case TIKU_LAYOUT_E_PHASE:  return TIKU_VFS_ENOENT;
     default:                   return TIKU_VFS_ERR;
     }
@@ -89,7 +91,8 @@ layout_op(const char *buf, size_t len, uint32_t *op)
         return -1;
     }
     for (; i < len; i++) {
-        if (buf[i] < '0' || buf[i] > '9' || v > 429496728u) {
+        if (buf[i] < '0' || buf[i] > '9' ||
+            v > (UINT32_MAX - (uint32_t)(buf[i] - '0')) / 10u) {
             return -1;
         }
         v = v * 10u + (uint32_t)(buf[i] - '0');
@@ -138,6 +141,7 @@ layout_current_read(char *buf, size_t max)
     size_t at = 0u;
     unsigned i;
     int valid = tiku_layout_have_record();
+    char identity[33];
 
     if (max == 0u) {
         return 0;
@@ -146,6 +150,8 @@ layout_current_read(char *buf, size_t max)
     LAYOUT_PUT(buf, max, &at, "generation\t%lu\nrevision\t%lu\n",
                valid ? (unsigned long)r->generation : 0UL,
                valid ? (unsigned long)r->revision : 0UL);
+    tiku_layout_identity_text(r->identity, identity);
+    LAYOUT_PUT(buf, max, &at, "identity\t%s\n", valid ? identity : "none");
     for (i = 0u; i < TIKU_LAYOUT_KNOBS_MAX; i++) {
         if (tiku_layout_knob_env(e, i, &k)) {
             uint32_t v = valid
@@ -209,7 +215,7 @@ layout_status_read(char *buf, size_t max)
                tiku_layout_held_name(st->held),
                (st->record < 3u) ? rec_names[st->record] : "-");
     LAYOUT_PUT(buf, max, &at, "tier\t%lu\ncorrected\t%u\n",
-               (unsigned long)tiku_layout_base(), (unsigned)st->corrected);
+               (unsigned long)st->tier, (unsigned)st->corrected);
     LAYOUT_PUT(buf, max, &at, "phase\t%s\n",
                (valid && r->phase == TIKU_LAYOUT_PHASE_REWRITING)
                    ? "rewriting" : "none");
@@ -233,7 +239,7 @@ layout_status_read(char *buf, size_t max)
 /* WRITES                                                                    */
 /*---------------------------------------------------------------------------*/
 
-/** @brief stage: "op=N expect=G:R method=erase nvm.tier=V", for next boot. */
+/** @brief stage: "op=N identity=HEX32 expect=G:R method=erase nvm.tier=V". */
 static int
 layout_stage_write(const char *buf, size_t len)
 {
@@ -261,7 +267,7 @@ layout_cancel_write(const char *buf, size_t len)
     return layout_vfs_err(tiku_layout_cancel_env(tiku_layout_env(), op));
 }
 
-/** @brief resume: the interrupted operation's id; /data mounts after it. */
+/** @brief resume: the interrupted operation's id; reboot before using /data. */
 static int
 layout_resume_write(const char *buf, size_t len)
 {
@@ -276,6 +282,32 @@ layout_resume_write(const char *buf, size_t len)
         tiku_vfs_tree_data_retry();
     }
     return layout_vfs_err(rc);
+}
+
+/** Explicit ownership recovery, never discovery or implicit formatting. */
+static int
+layout_recover_write(const char *buf, size_t len)
+{
+    char text[128];
+    tiku_layout_request_t q;
+    const char suffix[] = " confirm=accept-layout";
+    size_t n;
+    if (layout_text(buf, len, text, sizeof text) != 0) {
+        return TIKU_VFS_EINVAL;
+    }
+    n = strlen(text);
+    while (n && (text[n-1] == '\n' || text[n-1] == '\r')) { text[--n] = '\0'; }
+    if (n < sizeof suffix - 1u ||
+        strcmp(text + n - (sizeof suffix - 1u), suffix) != 0) {
+        return TIKU_VFS_EINVAL;
+    }
+    text[n - (sizeof suffix - 1u)] = '\0';
+    if (tiku_layout_parse(text, &q) != 0 || q.n != 1u ||
+        q.kv[0].id != TIKU_KNOB_NVM_TIER || q.op != 0u ||
+        q.has_expect || q.method != TIKU_LAYOUT_METHOD_NONE) {
+        return TIKU_VFS_EINVAL;
+    }
+    return layout_vfs_err(tiku_layout_recover(q.kv[0].value));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -294,6 +326,8 @@ const tiku_vfs_node_t tiku_vfs_tree_layout_children[] = {
     { "cancel",  TIKU_VFS_FILE, NULL, layout_cancel_write, NULL, 0, NULL, NULL,
       LAYOUT_CAP },
     { "resume",  TIKU_VFS_FILE, NULL, layout_resume_write, NULL, 0, NULL, NULL,
+      LAYOUT_CAP },
+    { "recover", TIKU_VFS_FILE, NULL, layout_recover_write, NULL, 0, NULL, NULL,
       LAYOUT_CAP },
 };
 

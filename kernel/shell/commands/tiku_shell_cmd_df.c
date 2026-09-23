@@ -130,7 +130,7 @@ tiku_shell_cmd_mkfs(uint8_t argc, const char *argv[])
     int erase = (argc >= 2u && strcmp(argv[1], "--erase-data") == 0);
     int rc;
 
-    if (argc >= 2u && !erase) {
+    if (argc > 2u || (argc >= 2u && !erase)) {
         SHELL_PRINTF("Usage: mkfs [--erase-data]\n");
         return;
     }
@@ -153,6 +153,15 @@ tiku_shell_cmd_mkfs(uint8_t argc, const char *argv[])
     if (rc == -2) {
         SHELL_PRINTF(SH_RED "mkfs: a layout change was interrupted; "
                      "resume it with 'layout resume'\n" SH_RST);
+        return;
+    }
+    if (rc == -3) {
+        SHELL_PRINTF(SH_RED "mkfs: formatted, but layout recovery failed; "
+                     "inspect 'layout status' before retrying recovery\n" SH_RST);
+        return;
+    }
+    if (rc == 1) {
+        SHELL_PRINTF("mkfs: /data formatted; reboot to activate the layout\n");
         return;
     }
     if (rc != 0) {

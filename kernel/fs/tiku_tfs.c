@@ -627,6 +627,20 @@ static void tfs_classify(const uint8_t *base, size_t size, int full,
     if (out->kind == TFS_PROBE_BLANK && out->live != 0u) {
         out->kind = TFS_PROBE_TORN;          /* entries outlived their header */
     }
+    if (out->kind == TFS_PROBE_BLANK) {
+        /* Absence of recognizable metadata is not evidence of virgin media. */
+        uint8_t fill = base[0];
+        if (fill != 0u && fill != 0xFFu) {
+            out->kind = TFS_PROBE_UNKNOWN;
+        } else {
+            for (k = 1u; k < size; k++) {
+                if (base[k] != fill) {
+                    out->kind = TFS_PROBE_UNKNOWN;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 int tiku_tfs_probe(const tiku_nvm_backend_t *be, tiku_tfs_probe_t *out)
@@ -681,7 +695,19 @@ int tiku_tfs_may_provision(const tiku_nvm_backend_t *region, size_t base_off,
     if (tiku_tfs_probe(&at, &p) != TFS_OK || p.kind != TFS_PROBE_BLANK) {
         return 0;
     }
-    return tiku_tfs_locate(region, step, NULL, 0) == 0;
+    /* A static array may be initialized only if the WHOLE backing region is
+     * blank, not just the guessed store suffix. Region-backed /data additionally
+     * requires explicit ownership; this predicate grants none. */
+    (void)step;
+    if (base_off != 0u) {
+        size_t i;
+        for (i = 0u; i < base_off; i++) {
+            if (region->base[i] != at.base[0]) {
+                return 0;
+            }
+        }
+    }
+    return 1;
 }
 
 const char *tiku_tfs_probe_name(tfs_probe_kind_t kind)
@@ -693,6 +719,7 @@ const char *tiku_tfs_probe_name(tfs_probe_kind_t kind)
     case TFS_PROBE_GEOMETRY:   return "geometry";
     case TFS_PROBE_VERSION:    return "version";
     case TFS_PROBE_TOOSMALL:   return "too small";
+    case TFS_PROBE_UNKNOWN:    return "unknown nonblank data";
     }
     return "unknown";
 }

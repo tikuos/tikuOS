@@ -25,8 +25,9 @@
 /* KNOBS, RECORD AND RESULTS                                                 */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_LAYOUT_SCHEMA     1u
+#define TIKU_LAYOUT_SCHEMA     2u
 #define TIKU_LAYOUT_KNOBS_MAX  8u
+#define TIKU_LAYOUT_ID_BYTES  16u
 
 /** @brief Knob identities; stored in the record, so never renumbered. */
 typedef enum {
@@ -66,7 +67,9 @@ typedef enum {
     TIKU_LAYOUT_E_IO      =  -8,    /**< a record or store write failed       */
     TIKU_LAYOUT_E_PHASE   = -10,    /**< no such interrupted operation        */
     TIKU_LAYOUT_E_REUSED  = -11,    /**< the operation id names other content */
-    TIKU_LAYOUT_CANCELLED = -12     /**< receipt: the request was cancelled   */
+    TIKU_LAYOUT_CANCELLED = -12,    /**< receipt: the request was cancelled   */
+    TIKU_LAYOUT_E_RECOVERY = -13,   /**< explicit ownership recovery required */
+    TIKU_LAYOUT_E_ENTROPY = -14     /**< cannot create a fresh identity       */
 } tiku_layout_err_t;
 
 /** @brief One knob and its value, as the record stores it. */
@@ -93,6 +96,11 @@ typedef struct {
     uint32_t         src_base;   /**< rewriting: the store's old offset     */
     uint32_t         dst_base;   /**< rewriting: the store's new offset     */
     uint32_t         receipt_op; /**< the last operation that ended         */
+    uint8_t          identity[TIKU_LAYOUT_ID_BYTES]; /**< recovery incarnation */
+    uint32_t         request_gen; /**< original expectation, including retries */
+    uint32_t         request_rev;
+    uint8_t          request_n;   /**< pending[] retained for the last receipt */
+    uint8_t          request_method;
     int16_t          receipt;    /**< how it ended: a tiku_layout_err_t     */
     uint8_t          n_applied;
     uint8_t          n_pending;
@@ -105,7 +113,7 @@ typedef struct {
 typedef enum {
     TIKU_LAYOUT_STORE_NONE      = 0, /**< no carved region on this part      */
     TIKU_LAYOUT_STORE_READY     = 1, /**< a compatible store at the base     */
-    TIKU_LAYOUT_STORE_PROVISION = 2, /**< a blank region; create on first use */
+    TIKU_LAYOUT_STORE_PROVISION = 2, /**< a wholly blank region; create on use */
     TIKU_LAYOUT_STORE_HELD      = 3  /**< unavailable; see the reason         */
 } tiku_layout_store_t;
 
@@ -118,7 +126,10 @@ typedef enum {
     TIKU_LAYOUT_HELD_AMBIGUOUS,      /**< several headers, no record to pick */
     TIKU_LAYOUT_HELD_ELSEWHERE,      /**< the only header is not usable      */
     TIKU_LAYOUT_HELD_INTERRUPTED,    /**< a rewrite stopped part way         */
-    TIKU_LAYOUT_HELD_IO              /**< a write failed during boot         */
+    TIKU_LAYOUT_HELD_IO,             /**< a write failed during boot         */
+    TIKU_LAYOUT_HELD_CONTROL,        /**< missing/invalid ownership record   */
+    TIKU_LAYOUT_HELD_CONTRACT,       /**< record belongs to another image    */
+    TIKU_LAYOUT_HELD_REBOOT          /**< recovered; reboot before publishing */
 } tiku_layout_held_t;
 
 /** @brief How the record read at boot. */
@@ -134,7 +145,7 @@ typedef struct {
     uint8_t  store;         /**< tiku_layout_store_t                       */
     uint8_t  held;          /**< tiku_layout_held_t                        */
     uint8_t  record;        /**< tiku_layout_record_state_t                */
-    uint8_t  corrected;     /**< 1 when the medium overrode the record     */
+    uint8_t  corrected;     /**< reserved legacy field; always zero       */
     int16_t  outcome;       /**< result of an operation run this boot      */
     uint32_t outcome_op;    /**< its identity, 0 when none ran             */
 } tiku_layout_state_t;
@@ -144,8 +155,10 @@ typedef struct {
     uint32_t         op;
     uint32_t         expect_gen;
     uint32_t         expect_rev;
+    uint8_t          identity[TIKU_LAYOUT_ID_BYTES];
     uint8_t          method;     /**< tiku_layout_method_t */
     uint8_t          n;
+    uint8_t          has_expect; /**< explicit expectation, not omitted 0:0 */
     tiku_layout_kv_t kv[TIKU_LAYOUT_KNOBS_MAX];
 } tiku_layout_request_t;
 
@@ -188,6 +201,8 @@ typedef struct {
     void  *write_ctx;
     uint32_t default_tier;
     uint32_t step;
+    int (*random)(void *ctx, uint8_t *out, size_t len); /**< explicit recovery only */
+    void *random_ctx;
 } tiku_layout_env_t;
 
 /*---------------------------------------------------------------------------*/
@@ -197,8 +212,8 @@ typedef struct {
 /**
  * @brief Decide the split and the store's state; run a staged operation.
  *
- * Reads the record, locates the store, and runs a staged request before any
- * consumer starts.  A record the medium contradicts is corrected from it.
+ * A valid, image-compatible record establishes ownership, and a region that is
+ * blank end to end is provisioned.  Anything else is held with no NVM tier.
  */
 int tiku_layout_boot_env(const tiku_layout_env_t *env, tiku_layout_state_t *st);
 
@@ -223,6 +238,16 @@ int tiku_layout_cancel_env(const tiku_layout_env_t *env, uint32_t op);
 int tiku_layout_resume_env(const tiku_layout_env_t *env,
                            tiku_layout_state_t *st, uint32_t op);
 
+/**
+ * @brief Explicitly accept a compatible store at a user-selected offset.
+ *
+ * Never formats or scans for ownership. Creates a fresh random identity;
+ * unavailable entropy or a failed commit leaves the store held. Only allowed
+ * while boot has withheld the tier. Reboot is required before normal use.
+ */
+int tiku_layout_recover_env(const tiku_layout_env_t *env,
+                            tiku_layout_state_t *st, uint32_t base);
+
 /** @brief Knob @p i's bounds on this environment; 0 past the last knob. */
 int tiku_layout_knob_env(const tiku_layout_env_t *env, unsigned i,
                          tiku_layout_knob_t *out);
@@ -234,7 +259,7 @@ uint32_t tiku_layout_kv_get(const tiku_layout_kv_t *kv, uint8_t n,
 /** @brief Set @p r's check over its other fields, as a commit does. */
 void tiku_layout_seal(tiku_layout_record_t *r);
 
-/** @brief Parse "op=7 expect=3:5 method=erase nvm.tier=16384".  @return 0/-1. */
+/** @brief Parse key=value controls, including identity=HEX32. @return 0/-1. */
 int tiku_layout_parse(const char *text, tiku_layout_request_t *req);
 
 /** @brief A short word for a result, a store state or a held reason. */
@@ -261,18 +286,23 @@ int tiku_layout_have_record(void);
 /** @brief This board's environment, for the shell and the VFS nodes. */
 const tiku_layout_env_t *tiku_layout_env(void);
 
-/** @brief Where the store belongs: the boot's tier, else the record's. */
+/** @brief Store offset for binding/explicit format; not an allocatable tier size. */
 uint32_t tiku_layout_base(void);
 
 /**
  * @brief Take the store just created at @p base as the applied one.
  *
- * Called after provisioning or an explicit format; records the base so a later
- * boot need not search.  @return 0, or -1 when the record write failed.
+ * Called after an explicit format. Keeps an existing compatible identity;
+ * otherwise performs explicit recovery and withholds the tier until reboot.
+ * @return TIKU_LAYOUT_OK, or a negative result (including entropy/write failure).
  */
 int tiku_layout_adopt(uint32_t base);
 
 /** @brief Resume the interrupted operation @p op on this board. */
 int tiku_layout_resume(uint32_t op);
+int tiku_layout_recover(uint32_t base);
+
+/** @brief Render an identity into a 33-byte lowercase hexadecimal string. */
+void tiku_layout_identity_text(const uint8_t id[TIKU_LAYOUT_ID_BYTES], char out[33]);
 
 #endif /* TIKU_LAYOUT_H_ */

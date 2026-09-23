@@ -90,7 +90,7 @@ const char *tiku_vfs_tree_data_why(void);
 /** @brief Probe the /data extent without mounting.  @return 0 or -1. */
 int tiku_vfs_tree_data_probe(tiku_tfs_probe_t *out);
 
-/** @brief 1 when the region holds nothing store-shaped anywhere, else 0. */
+/** @brief 1 when the whole medium behind /data is blank, else 0. */
 int tiku_vfs_tree_data_untouched(void);
 
 /** @brief Forget a refusal so the next access to /data mounts again. */
@@ -99,9 +99,9 @@ void tiku_vfs_tree_data_retry(void);
 /**
  * @brief Format /data on request, whatever the extent holds.
  *
- * Erases every file.  The only path besides first-boot provisioning that
- * writes a new store.  @return 0 when the store is ready, -2 while a layout
- * change waits to be resumed, -1 otherwise.
+ * Erases every file. @return 0 ready, 1 reboot required after recovery,
+ * -2 interrupted layout, -3 formatted but ownership recovery failed,
+ * -1 otherwise. Region-backed stores require explicit erase consent.
  */
 int tiku_vfs_tree_data_format(void);
 

@@ -132,7 +132,7 @@ data_fill_extents(tiku_data_df_t *out)
 /**
  * @brief Whether the store may be created at @p base without being asked.
  *
- * Only when the layout service found nothing store-shaped in the region.
+ * Only when boot found the whole region blank; a missing header alone is not.
  */
 static int
 data_may_create(const tiku_nvm_backend_t *region, size_t base)
@@ -163,6 +163,12 @@ data_held(void)
         return "a layout change was interrupted (see layout status)";
     case TIKU_LAYOUT_HELD_IO:
         return "the layout record could not be written";
+    case TIKU_LAYOUT_HELD_CONTROL:
+        return "layout ownership is missing; inspect then use layout recover";
+    case TIKU_LAYOUT_HELD_CONTRACT:
+        return "layout belongs to another image; explicit recovery required";
+    case TIKU_LAYOUT_HELD_REBOOT:
+        return "layout recovered; reboot before using /data and the NVM tier";
     case TIKU_LAYOUT_HELD_ELSEWHERE:
     default:
         return "another store header lies elsewhere in the region";
@@ -180,10 +186,10 @@ data_interrupted(void)
 }
 
 /** @brief Record @p base as the store's home once a store exists there. */
-static void
+static int
 data_adopt(size_t base)
 {
-    (void)tiku_layout_adopt((uint32_t)base);
+    return tiku_layout_adopt((uint32_t)base);
 }
 
 #else  /* MSP430 FRAM / host: a static backing array */
@@ -269,7 +275,7 @@ data_fill_extents(tiku_data_df_t *out)
     out->idle_bytes   = 0u;
 }
 
-/** @brief Create the store only in an array with nothing store-shaped in it. */
+/** @brief Create the store only in an entirely, uniformly blank static array. */
 static int
 data_may_create(const tiku_nvm_backend_t *region, size_t base)
 {
@@ -291,10 +297,11 @@ data_interrupted(void)
 }
 
 /** @brief A static array's store has no base to record. */
-static void
+static int
 data_adopt(size_t base)
 {
     (void)base;
+    return 0;
 }
 
 #endif
@@ -304,15 +311,15 @@ data_adopt(size_t base)
 /*---------------------------------------------------------------------------*/
 
 /* The mount never formats.  A store is created without asking only on a
- * region with nothing store-shaped in it; anything else leaves /data absent,
- * with the probe kept so df can say why, until mkfs formats on request. */
+ * region or array that is blank end to end; anything else leaves /data absent,
+ * with the reason kept so df can say why, until mkfs formats on request. */
 enum { DATA_UNTRIED = 0, DATA_READY, DATA_ABSENT, DATA_REFUSED, DATA_HELD };
 static uint8_t          data_state;
 static tiku_tfs_probe_t data_probe;
 static int8_t           data_mount_rc;
 
 /**
- * @brief Mount /data once; provision a blank region; otherwise refuse.
+ * @brief Mount /data once; provision a wholly blank medium; otherwise refuse.
  *
  * @return 0 once the store is ready, -1 while it is absent or refused.
  */
@@ -341,7 +348,7 @@ data_tfs_ensure(void)
     if (rc == TFS_ERR_NOSTORE && data_may_create(&region, base)) {
         rc = tiku_tfs_format(&data_fs);
         if (rc == TFS_OK) {
-            data_adopt(base);
+            if (data_adopt(base) != 0) { rc = TFS_ERR_IO; }
         }
     }
     if (rc == TFS_OK) {
@@ -380,6 +387,8 @@ tiku_vfs_tree_data_why(void)
         return "the region is too small for a store";
     case TFS_PROBE_BLANK:
         return "another store header lies elsewhere in the region";
+    case TFS_PROBE_UNKNOWN:
+        return "nonblank data with unrecognized metadata; left untouched";
     case TFS_PROBE_COMPATIBLE:
     default:
         break;
@@ -407,8 +416,7 @@ tiku_vfs_tree_data_untouched(void)
     tiku_nvm_backend_t region;
     size_t base;
 
-    return data_bind(&region, &base) &&
-           tiku_tfs_may_provision(&region, base, TIKU_TFS_LOCATE_STEP);
+    return data_bind(&region, &base) && data_may_create(&region, base);
 }
 
 void
@@ -428,6 +436,7 @@ tiku_vfs_tree_data_format(void)
     if (data_interrupted()) {
         return -2;
     }
+    if (data_fs.wr_open) { return -1; }
     if (!data_bind(&region, &base)) {
         return -1;
     }
@@ -435,7 +444,14 @@ tiku_vfs_tree_data_format(void)
         data_state = DATA_UNTRIED;
         return -1;
     }
-    data_adopt(base);
+    if (data_adopt(base) != 0) {
+        data_state = DATA_HELD;
+        return -3;                  /* formatted, but control not committed */
+    }
+    if (data_held() != NULL) {
+        data_state = DATA_HELD;
+        return 1;                   /* recovery requires a reboot */
+    }
     data_state = DATA_READY;
     return 0;
 }

@@ -7,8 +7,8 @@
  *
  * tiku_layout.c - staged memory budgets and the boot that applies them.
  *
- * The record says what is applied and what is requested; the medium says where
- * the store is.  Boot reconciles the two before any consumer allocates.
+ * The record establishes ownership; a region with nothing on it is provisioned
+ * on first use.  A found header never grants ownership: that takes recovery.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -160,7 +160,11 @@ tiku_layout_seal(tiku_layout_record_t *r)
 static int
 rec_valid(const tiku_layout_record_t *r)
 {
+    static const uint8_t zero[TIKU_LAYOUT_ID_BYTES];
     return r->schema == TIKU_LAYOUT_SCHEMA && r->check == rec_sum(r) &&
+           memcmp(r->identity, zero, sizeof zero) != 0 &&
+           r->request_n <= TIKU_LAYOUT_KNOBS_MAX &&
+           r->request_method <= TIKU_LAYOUT_METHOD_ERASE &&
            r->n_applied <= TIKU_LAYOUT_KNOBS_MAX &&
            r->n_pending <= TIKU_LAYOUT_KNOBS_MAX &&
            r->phase <= TIKU_LAYOUT_PHASE_REWRITING &&
@@ -176,6 +180,9 @@ contract_of(const tiku_layout_env_t *e)
 
     h = fnv(h, TIKU_LAYOUT_SCHEMA);
     h = fnv(h, (uint32_t)e->region.size);
+    h = fnv(h, (uint32_t)(uintptr_t)e->region.base);
+    h = fnv(h, e->step);
+    h = fnv(h, e->default_tier);
     h = fnv(h, (uint32_t)tiku_tfs_region_size());
     h = fnv(h, (uint32_t)TIKU_TFS_SLOT_BYTES);
     for (i = 0u; i < KNOB_COUNT; i++) {
@@ -194,12 +201,10 @@ rec_fresh(const tiku_layout_env_t *e, tiku_layout_record_t *r)
 }
 
 static int
-commit(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
+commit(const tiku_layout_env_t *e, tiku_layout_record_t *r)
 {
-    tiku_layout_record_t w = *r;
-
-    tiku_layout_seal(&w);
-    return (e->commit(e->commit_ctx, &w) == 0) ? TIKU_LAYOUT_OK
+    tiku_layout_seal(r);
+    return (e->commit != NULL && e->commit(e->commit_ctx, r) == 0) ? TIKU_LAYOUT_OK
                                                : TIKU_LAYOUT_E_IO;
 }
 
@@ -334,14 +339,29 @@ check_kvs(const tiku_layout_env_t *e, const tiku_layout_record_t *r,
     return TIKU_LAYOUT_OK;
 }
 
-/** @brief The record as the service acts on it: valid, or a fresh one. */
-static void
-rec_current(const tiku_layout_env_t *e, tiku_layout_record_t *r)
+/** Validate an extent before any pointer arithmetic or persistent write. */
+static int
+base_valid(const tiku_layout_env_t *e, uint32_t base)
 {
-    *r = *e->rec;
+    tiku_layout_knob_t k;
+    return tiku_layout_knob_env(e, 0u, &k) && base >= k.floor &&
+           base <= k.ceiling && base % k.step == 0u;
+}
+
+static int
+record_usable(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
+{
     if (!rec_valid(r)) {
-        rec_fresh(e, r);
+        return TIKU_LAYOUT_E_RECOVERY;
     }
+    if (r->contract != contract_of(e)) {
+        return TIKU_LAYOUT_E_STALE;
+    }
+    if (r->n_applied != 1u || r->applied[0].id != TIKU_KNOB_NVM_TIER ||
+        !base_valid(e, r->applied[0].value)) {
+        return TIKU_LAYOUT_E_RECOVERY;
+    }
+    return TIKU_LAYOUT_OK;
 }
 
 int
@@ -353,14 +373,18 @@ tiku_layout_plan_env(const tiku_layout_env_t *e,
     tiku_tfs_probe_t p;
     int rc;
 
-    if (e == NULL || req == NULL || plan == NULL) {
+    if (e == NULL || e->rec == NULL || req == NULL || plan == NULL) {
         return TIKU_LAYOUT_E_INVAL;
     }
     memset(plan, 0, sizeof *plan);
     if (req->method > TIKU_LAYOUT_METHOD_ERASE) {
         return TIKU_LAYOUT_E_INVAL;
     }
-    rec_current(e, &r);
+    r = *e->rec;
+    rc = record_usable(e, &r);
+    if (rc != TIKU_LAYOUT_OK) {
+        return rc;
+    }
     rc = check_kvs(e, &r, req->kv, req->n, plan);
     if (rc != TIKU_LAYOUT_OK || plan->effect != TIKU_LAYOUT_EFFECT_STORE) {
         return rc;
@@ -385,11 +409,12 @@ same_request(const tiku_layout_record_t *r, const tiku_layout_request_t *req)
 {
     uint8_t i;
 
-    if (r->n_pending != req->n || r->method != req->method) {
+    if (r->request_n != req->n || r->request_method != req->method ||
+        r->request_gen != req->expect_gen || r->request_rev != req->expect_rev) {
         return 0;
     }
     for (i = 0u; i < req->n; i++) {
-        if (tiku_layout_kv_get(r->pending, r->n_pending, req->kv[i].id,
+        if (tiku_layout_kv_get(r->pending, r->request_n, req->kv[i].id,
                                ~req->kv[i].value) != req->kv[i].value) {
             return 0;
         }
@@ -406,11 +431,24 @@ tiku_layout_stage_env(const tiku_layout_env_t *e,
     uint8_t i;
     int rc;
 
-    if (e == NULL || req == NULL || plan == NULL || req->op == 0u) {
+    if (e == NULL || e->rec == NULL || req == NULL || plan == NULL ||
+        req->op == 0u || !req->has_expect || req->n == 0u || req->n > TIKU_LAYOUT_KNOBS_MAX ||
+        req->method > TIKU_LAYOUT_METHOD_ERASE) {
         return TIKU_LAYOUT_E_INVAL;
     }
     memset(plan, 0, sizeof *plan);
-    rec_current(e, &r);
+    r = *e->rec;
+    rc = record_usable(e, &r);
+    if (rc != TIKU_LAYOUT_OK) {
+        return rc;
+    }
+    if (memcmp(req->identity, r.identity, sizeof r.identity) != 0) {
+        return TIKU_LAYOUT_E_STALE;
+    }
+    rc = check_kvs(e, &r, req->kv, req->n, plan);
+    if (rc != TIKU_LAYOUT_OK) {
+        return rc;
+    }
     if (r.phase != TIKU_LAYOUT_PHASE_NONE) {
         return TIKU_LAYOUT_E_BUSY;
     }
@@ -421,7 +459,7 @@ tiku_layout_stage_env(const tiku_layout_env_t *e,
         return same_request(&r, req) ? TIKU_LAYOUT_OK : TIKU_LAYOUT_E_REUSED;
     }
     if (req->op == r.receipt_op) {
-        return r.receipt;                        /* it already ended */
+        return same_request(&r, req) ? r.receipt : TIKU_LAYOUT_E_REUSED;
     }
     if (req->expect_gen != r.generation || req->expect_rev != r.revision) {
         return TIKU_LAYOUT_E_STALE;
@@ -430,12 +468,19 @@ tiku_layout_stage_env(const tiku_layout_env_t *e,
     if (rc != TIKU_LAYOUT_OK || plan->effect == TIKU_LAYOUT_EFFECT_NONE) {
         return rc;                               /* a no-op writes nothing */
     }
+    if (r.revision == UINT32_MAX || r.generation == UINT32_MAX) {
+        return TIKU_LAYOUT_E_RANGE;              /* never wrap replay counters */
+    }
     r.n_pending = 0u;
     for (i = 0u; i < req->n; i++) {
         kv_set(r.pending, &r.n_pending, req->kv[i].id, req->kv[i].value);
     }
     r.op       = req->op;
     r.method   = req->method;
+    r.request_n = req->n;
+    r.request_method = req->method;
+    r.request_gen = req->expect_gen;
+    r.request_rev = req->expect_rev;
     r.revision++;
     r.contract = contract_of(e);
     return commit(e, &r);
@@ -446,10 +491,13 @@ tiku_layout_cancel_env(const tiku_layout_env_t *e, uint32_t op)
 {
     tiku_layout_record_t r;
 
-    if (e == NULL) {
+    if (e == NULL || e->rec == NULL) {
         return TIKU_LAYOUT_E_INVAL;
     }
     r = *e->rec;
+    if (record_usable(e, &r) != TIKU_LAYOUT_OK) {
+        return TIKU_LAYOUT_E_RECOVERY;
+    }
     if (!rec_valid(&r) || r.n_pending == 0u || r.op != op ||
         r.phase != TIKU_LAYOUT_PHASE_NONE) {
         return TIKU_LAYOUT_E_PHASE;
@@ -459,7 +507,7 @@ tiku_layout_cancel_env(const tiku_layout_env_t *e, uint32_t op)
     r.receipt_op = op;
     r.op         = 0u;
     r.method     = TIKU_LAYOUT_METHOD_NONE;
-    r.revision++;
+    if (r.revision != UINT32_MAX) { r.revision++; }
     return commit(e, &r);
 }
 
@@ -479,8 +527,13 @@ refuse(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     r->receipt_op  = r->op;
     r->op          = 0u;
     r->method      = TIKU_LAYOUT_METHOD_NONE;
-    r->revision++;
-    (void)commit(e, r);
+    if (r->revision != UINT32_MAX) { r->revision++; }
+    if (commit(e, r) != TIKU_LAYOUT_OK) {
+        st->store = TIKU_LAYOUT_STORE_HELD;
+        st->held = TIKU_LAYOUT_HELD_IO;
+        st->tier = 0u;
+        st->outcome = TIKU_LAYOUT_E_IO;
+    }
 }
 
 /**
@@ -500,6 +553,13 @@ finish_rewrite(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     sub_ctx_t c;
     uint32_t dst = r->dst_base;
     tiku_layout_record_t done;
+
+    if (record_usable(e, r) != TIKU_LAYOUT_OK ||
+        !base_valid(e, r->src_base) || !base_valid(e, dst) ||
+        applied_tier(e, r) != dst || r->src_base == dst ||
+        r->op == 0u || r->n_pending != 0u || e->write == NULL) {
+        return TIKU_LAYOUT_E_STALE;
+    }
 
     st->store = TIKU_LAYOUT_STORE_HELD;
     st->held  = TIKU_LAYOUT_HELD_INTERRUPTED;
@@ -555,6 +615,10 @@ boot_request(const tiku_layout_env_t *e, tiku_layout_record_t *r,
         refuse(e, r, st, rc);
         return;
     }
+    if (r->generation == UINT32_MAX) {
+        refuse(e, r, st, TIKU_LAYOUT_E_RANGE);
+        return;
+    }
     src = applied_tier(e, r);
     dst = tiku_layout_kv_get(r->pending, r->n_pending, TIKU_KNOB_NVM_TIER, src);
     if (src != dst && !store_empty(e, src, &p) &&
@@ -608,99 +672,23 @@ held_for(tfs_probe_kind_t kind)
     }
 }
 
-/** @brief Headers found in the region, counted by what they are. */
-typedef struct {
-    int      n;              /**< every header, or more than CAND_MAX     */
-    int      compat;         /**< compatible with this image's geometry  */
-    int      torn;           /**< geometry left behind without a magic   */
-    uint32_t compat_off;     /**< the first compatible one's offset      */
-} census_t;
-
-#define CAND_MAX  8
-
-static void
-census(const tiku_layout_env_t *e, census_t *c)
-{
-    tiku_tfs_cand_t cand[CAND_MAX];
-    int i;
-
-    memset(c, 0, sizeof *c);
-    c->n = tiku_tfs_locate(&e->region, e->step, cand, CAND_MAX);
-    for (i = 0; i < c->n && i < CAND_MAX; i++) {
-        if (cand[i].kind == TFS_PROBE_COMPATIBLE) {
-            if (c->compat++ == 0) {
-                c->compat_off = cand[i].off;
-            }
-        } else if (cand[i].kind == TFS_PROBE_TORN) {
-            c->torn++;
-        }
-    }
-    if (c->n > CAND_MAX) {
-        c->compat = CAND_MAX + 1;                /* too many to choose from */
-    }
-}
-
-/** @brief Record @p base as the applied split, when the record lacks it. */
-static void
-remember_base(const tiku_layout_env_t *e, tiku_layout_record_t *r,
-              uint32_t base)
-{
-    tiku_layout_record_t w = *r;
-
-    if (tiku_layout_kv_get(r->applied, r->n_applied, TIKU_KNOB_NVM_TIER,
-                           ~base) == base && r->contract == contract_of(e)) {
-        return;
-    }
-    kv_set(w.applied, &w.n_applied, TIKU_KNOB_NVM_TIER, base);
-    w.contract = contract_of(e);
-    if (commit(e, &w) == TIKU_LAYOUT_OK) {
-        *r = w;
-    }
-}
-
-/**
- * @brief Find the store for the applied split.
- *
- * A record's base wins when a compatible store is there.  Otherwise a lone
- * compatible header with no torn one is adopted, a region with nothing
- * store-shaped is provisioned, and anything else is held.
- */
+/** @brief Probe only the extent named by validated ownership metadata. */
 static void
 boot_store(const tiku_layout_env_t *e, tiku_layout_record_t *r,
            tiku_layout_state_t *st)
 {
     tiku_tfs_probe_t p;
-    census_t c;
     uint32_t base = applied_tier(e, r);
-    int have_record = (st->record != TIKU_LAYOUT_RECORD_ABSENT);
 
     probe_at(e, base, &p);
-    if (p.kind == TFS_PROBE_COMPATIBLE && have_record) {
+    if (p.kind == TFS_PROBE_COMPATIBLE) {
         st->tier  = base;
         st->store = TIKU_LAYOUT_STORE_READY;
         return;
     }
-    census(e, &c);
-    if (c.n == 0 && p.kind == TFS_PROBE_BLANK) {
-        st->tier  = base;
-        st->store = TIKU_LAYOUT_STORE_PROVISION;
-        return;
-    }
-    if (c.compat == 1 && c.torn == 0 &&
-        (p.kind == TFS_PROBE_COMPATIBLE || p.kind == TFS_PROBE_BLANK)) {
-        remember_base(e, r, c.compat_off);
-        st->tier      = c.compat_off;
-        st->store     = TIKU_LAYOUT_STORE_READY;
-        st->corrected = (c.compat_off != base) ? 1u : 0u;
-        return;
-    }
     st->tier  = 0u;
     st->store = TIKU_LAYOUT_STORE_HELD;
-    st->held  = (c.compat > 1) ? TIKU_LAYOUT_HELD_AMBIGUOUS
-              : (p.kind != TFS_PROBE_BLANK &&
-                 p.kind != TFS_PROBE_COMPATIBLE) ? held_for(p.kind)
-              : (c.torn > 0) ? TIKU_LAYOUT_HELD_TORN
-              : TIKU_LAYOUT_HELD_ELSEWHERE;
+    st->held  = held_for(p.kind);
 }
 
 int
@@ -715,7 +703,6 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
     r = *e->rec;
     if (!rec_valid(&r)) {
         st->record = TIKU_LAYOUT_RECORD_ABSENT;
-        rec_fresh(e, &r);
     } else if (r.contract != contract_of(e)) {
         st->record = TIKU_LAYOUT_RECORD_FOREIGN;
     } else {
@@ -725,17 +712,26 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
         st->store = TIKU_LAYOUT_STORE_NONE;
         return TIKU_LAYOUT_OK;
     }
+    if (st->record == TIKU_LAYOUT_RECORD_ABSENT &&
+        tiku_tfs_may_provision(&e->region, e->default_tier, e->step)) {
+        /* Nothing on the medium to own: the first use creates the store. */
+        st->tier  = e->default_tier;
+        st->store = TIKU_LAYOUT_STORE_PROVISION;
+        return TIKU_LAYOUT_OK;
+    }
+    if (record_usable(e, &r) != TIKU_LAYOUT_OK) {
+        st->store = TIKU_LAYOUT_STORE_HELD;
+        st->held = (st->record == TIKU_LAYOUT_RECORD_FOREIGN)
+                 ? TIKU_LAYOUT_HELD_CONTRACT : TIKU_LAYOUT_HELD_CONTROL;
+        return TIKU_LAYOUT_OK;
+    }
     if (st->record != TIKU_LAYOUT_RECORD_ABSENT &&
         r.phase == TIKU_LAYOUT_PHASE_REWRITING) {
         st->store = TIKU_LAYOUT_STORE_HELD;
         st->held  = TIKU_LAYOUT_HELD_INTERRUPTED;
         return TIKU_LAYOUT_OK;
     }
-    if (st->record == TIKU_LAYOUT_RECORD_FOREIGN && r.n_pending != 0u) {
-        /* Staged under another image: its bounds are not this image's. */
-        r.contract = contract_of(e);
-        refuse(e, &r, st, TIKU_LAYOUT_E_STALE);
-    } else if (st->record != TIKU_LAYOUT_RECORD_ABSENT && r.n_pending != 0u) {
+    if (r.n_pending != 0u) {
         boot_request(e, &r, st);
         if (r.phase == TIKU_LAYOUT_PHASE_REWRITING ||
             st->store != TIKU_LAYOUT_STORE_NONE) {
@@ -752,7 +748,7 @@ tiku_layout_resume_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
 {
     tiku_layout_record_t r;
 
-    if (e == NULL || st == NULL) {
+    if (e == NULL || e->rec == NULL || st == NULL) {
         return TIKU_LAYOUT_E_INVAL;
     }
     r = *e->rec;
@@ -760,7 +756,53 @@ tiku_layout_resume_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
         r.op != op || op == 0u) {
         return TIKU_LAYOUT_E_PHASE;
     }
+    if (record_usable(e, &r) != TIKU_LAYOUT_OK) {
+        return TIKU_LAYOUT_E_STALE;
+    }
     return finish_rewrite(e, &r, st);
+}
+
+int
+tiku_layout_recover_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
+                        uint32_t base)
+{
+    tiku_layout_record_t r;
+    tiku_nvm_backend_t be;
+    tiku_tfs_t fs;
+    sub_ctx_t c;
+    static const uint8_t zero[TIKU_LAYOUT_ID_BYTES];
+    int rc;
+
+    if (e == NULL || e->rec == NULL || st == NULL || !base_valid(e, base)) {
+        return TIKU_LAYOUT_E_RANGE;
+    }
+    if ((st->store != TIKU_LAYOUT_STORE_PROVISION &&
+         (st->store != TIKU_LAYOUT_STORE_HELD || st->tier != 0u)) ||
+        st->held == TIKU_LAYOUT_HELD_REBOOT ||
+        (record_usable(e, e->rec) == TIKU_LAYOUT_OK &&
+         (e->rec->phase != TIKU_LAYOUT_PHASE_NONE || e->rec->n_pending != 0u))) {
+        return TIKU_LAYOUT_E_BUSY;
+    }
+    sub_backend(e, base, &c, &be);
+    if (tiku_tfs_mount(&fs, &be) != TFS_OK) {
+        return TIKU_LAYOUT_E_RECOVERY;
+    }
+    rec_fresh(e, &r);
+    if (e->random == NULL ||
+        e->random(e->random_ctx, r.identity, sizeof r.identity) != 0 ||
+        memcmp(r.identity, zero, sizeof zero) == 0 ||
+        memcmp(r.identity, e->rec->identity, sizeof r.identity) == 0) {
+        return TIKU_LAYOUT_E_ENTROPY;
+    }
+    kv_set(r.applied, &r.n_applied, TIKU_KNOB_NVM_TIER, base);
+    rc = commit(e, &r);
+    if (rc != TIKU_LAYOUT_OK) {
+        st->held = TIKU_LAYOUT_HELD_IO;
+        return rc;
+    }
+    st->record = TIKU_LAYOUT_RECORD_VALID;
+    st->held = TIKU_LAYOUT_HELD_REBOOT;
+    return TIKU_LAYOUT_OK;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -823,6 +865,7 @@ int
 tiku_layout_parse(const char *text, tiku_layout_request_t *req)
 {
     const char *p = text;
+    unsigned seen = 0u;
 
     if (text == NULL || req == NULL) {
         return -1;
@@ -852,18 +895,34 @@ tiku_layout_parse(const char *text, tiku_layout_request_t *req)
         val  = eq + 1;
         vlen = (size_t)(p - val);
         if (tok_is(key, klen, "op")) {
-            if (parse_u32(val, vlen, &req->op) != 0) {
+            if ((seen & 1u) || parse_u32(val, vlen, &req->op) != 0) {
                 return -1;
             }
+            seen |= 1u;
         } else if (tok_is(key, klen, "expect")) {
             const char *colon = memchr(val, ':', vlen);
-            if (colon == NULL ||
+            if ((seen & 2u) || colon == NULL ||
                 parse_u32(val, (size_t)(colon - val), &req->expect_gen) != 0 ||
                 parse_u32(colon + 1, vlen - (size_t)(colon - val) - 1u,
                           &req->expect_rev) != 0) {
                 return -1;
             }
+            seen |= 2u;
+            req->has_expect = 1u;
+        } else if (tok_is(key, klen, "identity")) {
+            if ((seen & 4u) || vlen != 2u * TIKU_LAYOUT_ID_BYTES) {
+                return -1;
+            }
+            seen |= 4u;
+            for (i = 0u; i < TIKU_LAYOUT_ID_BYTES; i++) {
+                char byte[4] = { '0', 'x', val[2u*i], val[2u*i+1u] };
+                uint32_t v;
+                if (parse_u32(byte, sizeof byte, &v) != 0) { return -1; }
+                req->identity[i] = (uint8_t)v;
+            }
         } else if (tok_is(key, klen, "method")) {
+            if (seen & 8u) { return -1; }
+            seen |= 8u;
             if (tok_is(val, vlen, "erase")) {
                 req->method = TIKU_LAYOUT_METHOD_ERASE;
             } else if (tok_is(val, vlen, "none")) {
@@ -890,6 +949,18 @@ tiku_layout_parse(const char *text, tiku_layout_request_t *req)
     return 0;
 }
 
+void
+tiku_layout_identity_text(const uint8_t id[TIKU_LAYOUT_ID_BYTES], char out[33])
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned i;
+    for (i = 0; i < TIKU_LAYOUT_ID_BYTES; i++) {
+        out[2u*i] = hex[id[i] >> 4];
+        out[2u*i+1u] = hex[id[i] & 15u];
+    }
+    out[32] = '\0';
+}
+
 const char *
 tiku_layout_err_name(int err)
 {
@@ -906,6 +977,8 @@ tiku_layout_err_name(int err)
     case TIKU_LAYOUT_E_PHASE:   return "no-such-operation";
     case TIKU_LAYOUT_E_REUSED:  return "op-reused";
     case TIKU_LAYOUT_CANCELLED: return "cancelled";
+    case TIKU_LAYOUT_E_RECOVERY: return "recovery-required";
+    case TIKU_LAYOUT_E_ENTROPY: return "entropy-unavailable";
     default:                    return "unknown";
     }
 }
@@ -932,6 +1005,9 @@ tiku_layout_held_name(uint8_t held)
     case TIKU_LAYOUT_HELD_ELSEWHERE:   return "elsewhere";
     case TIKU_LAYOUT_HELD_INTERRUPTED: return "interrupted";
     case TIKU_LAYOUT_HELD_IO:          return "io";
+    case TIKU_LAYOUT_HELD_CONTROL:     return "control-missing";
+    case TIKU_LAYOUT_HELD_CONTRACT:    return "foreign-contract";
+    case TIKU_LAYOUT_HELD_REBOOT:      return "reboot-required";
     default:                           return "-";
     }
 }
@@ -945,8 +1021,21 @@ tiku_layout_held_name(uint8_t held)
 #include "tiku_mem.h"
 #include "tiku_nvm_region.h"
 
+#if defined(PLATFORM_AMBIQ)
+#include <arch/ambiq/tiku_trng_arch.h>
+#elif defined(PLATFORM_NORDIC)
+#include <arch/nordic/tiku_trng_arch.h>
+#elif defined(PLATFORM_RP2350)
+#include <arch/arm-rp2350/tiku_trng_arch.h>
+#elif defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_trng_arch.h>
+#elif defined(PLATFORM_RA8P1) && TIKU_KIT_CRYPTO_ENABLE
+#include <arch/ra8p1/tiku_trng_arch.h>
+#endif
+
 static TIKU_DURABLE tiku_layout_record_t layout_rec;
-TIKU_PERSIST_CELL(layout_cell, layout_rec, 0x4C41594FUL, NULL, 0);
+TIKU_PERSIST_CELL(layout_cell, layout_rec, 0x4C415932UL, NULL, 0);
+static const tiku_layout_record_t absent_record;
 
 static tiku_layout_env_t   board_env;
 static tiku_layout_state_t board_state;
@@ -956,10 +1045,27 @@ static uint8_t             board_booted;
 static int
 board_commit(void *ctx, const tiku_layout_record_t *r)
 {
+    int ok;
     (void)ctx;
-    return (tiku_persist_cell_commit_status(&layout_cell, r,
+    ok = (tiku_persist_cell_commit_status(&layout_cell, r,
                                             (uint16_t)sizeof *r)
-            == TIKU_MEM_OK) ? 0 : -1;
+            == TIKU_MEM_OK);
+    board_env.rec = ok ? &layout_rec : &absent_record;
+    return ok ? 0 : -1;
+}
+
+/** Called only by explicit recovery, once normal board startup is complete. */
+static int
+board_random(void *ctx, uint8_t *out, size_t len)
+{
+    (void)ctx;
+#if defined(TIKU_TRNG_OK)
+    return tiku_trng_arch_read_bytes(out, len) == TIKU_TRNG_OK ? 0 : -1;
+#else
+    (void)out;
+    (void)len;
+    return -1;                  /* no clock/time/pseudo-random fallback */
+#endif
 }
 
 /** @brief Write into the region through the owning backend. */
@@ -986,12 +1092,13 @@ tiku_layout_boot(void)
         return;
     }
     board_booted = 1u;
-    (void)tiku_persist_cell_init(&layout_cell);
     rgn = tiku_nvm_backend_get();
     memset(&board_env, 0, sizeof board_env);
-    board_env.rec          = &layout_rec;
+    board_env.rec          = tiku_persist_cell_valid(&layout_cell)
+                           ? &layout_rec : &absent_record;
     board_env.commit       = board_commit;
     board_env.write        = board_write;
+    board_env.random       = board_random;
     board_env.default_tier = (uint32_t)TIKU_NVM_TIER_BYTES;
     board_env.step         = (uint32_t)TIKU_TFS_LOCATE_STEP;
     if (rgn != NULL && rgn->base != NULL) {
@@ -1012,14 +1119,14 @@ const tiku_layout_record_t *
 tiku_layout_record(void)
 {
     tiku_layout_boot();
-    return &layout_rec;
+    return board_env.rec;
 }
 
 int
 tiku_layout_have_record(void)
 {
     tiku_layout_boot();
-    return rec_valid(&layout_rec);
+    return rec_valid(board_env.rec);
 }
 
 const tiku_layout_env_t *
@@ -1036,8 +1143,8 @@ tiku_layout_base(void)
     if (board_state.tier != 0u) {
         return board_state.tier;
     }
-    if (rec_valid(&layout_rec)) {
-        return applied_tier(&board_env, &layout_rec);
+    if (record_usable(&board_env, board_env.rec) == TIKU_LAYOUT_OK) {
+        return applied_tier(&board_env, board_env.rec);
     }
     return board_env.default_tier;
 }
@@ -1045,23 +1152,49 @@ tiku_layout_base(void)
 int
 tiku_layout_adopt(uint32_t base)
 {
-    tiku_layout_record_t r;
-
     tiku_layout_boot();
-    rec_current(&board_env, &r);
-    remember_base(&board_env, &r, base);
+    /* mkfs is explicit erase consent, but never resets an existing identity. */
+    if (record_usable(&board_env, board_env.rec) != TIKU_LAYOUT_OK) {
+        int provisioned = (board_state.store == TIKU_LAYOUT_STORE_PROVISION &&
+                           board_state.tier == base);
+        int rc = tiku_layout_recover_env(&board_env, &board_state, base);
+
+        if (rc == TIKU_LAYOUT_OK && provisioned) {
+            /* The tier was published at this base from boot: nothing waits. */
+            board_state.store = TIKU_LAYOUT_STORE_READY;
+            board_state.held  = TIKU_LAYOUT_HELD_NONE;
+        }
+        return rc;
+    }
+    if (applied_tier(&board_env, board_env.rec) != base) { return -1; }
+    if (board_state.tier == 0u) {
+        board_state.held = TIKU_LAYOUT_HELD_REBOOT;
+        return 0;
+    }
     board_state.tier  = base;
     board_state.store = TIKU_LAYOUT_STORE_READY;
     board_state.held  = TIKU_LAYOUT_HELD_NONE;
-    return (tiku_layout_kv_get(layout_rec.applied, layout_rec.n_applied,
-                               TIKU_KNOB_NVM_TIER, ~base) == base) ? 0 : -1;
+    return 0;
 }
 
 int
 tiku_layout_resume(uint32_t op)
 {
+    int rc;
     tiku_layout_boot();
-    return tiku_layout_resume_env(&board_env, &board_state, op);
+    rc = tiku_layout_resume_env(&board_env, &board_state, op);
+    if (rc == TIKU_LAYOUT_OK) {
+        board_state.store = TIKU_LAYOUT_STORE_HELD;
+        board_state.held = TIKU_LAYOUT_HELD_REBOOT;
+        board_state.tier = 0u;
+    }
+    return rc;
+}
+
+int tiku_layout_recover(uint32_t base)
+{
+    tiku_layout_boot();
+    return tiku_layout_recover_env(&board_env, &board_state, base);
 }
 
 #endif /* !TIKU_LAYOUT_CORE_ONLY */
