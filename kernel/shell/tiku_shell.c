@@ -641,6 +641,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_DF
     {"df",      "/data file-store usage",      tiku_shell_cmd_df},
+    {"mkfs",    "Format /data: mkfs [--erase-data]", tiku_shell_cmd_mkfs},
 #endif
 #if TIKU_SHELL_CMD_FAT
     {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},

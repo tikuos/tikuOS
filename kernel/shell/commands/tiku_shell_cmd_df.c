@@ -24,6 +24,7 @@
 #include "tiku.h"
 #include <stdint.h>
 #include <stdio.h>      /* snprintf */
+#include <string.h>     /* strcmp */
 
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
@@ -69,7 +70,12 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
     (void)argv;
 
     if (tiku_vfs_tree_data_df(&s) != 0) {
-        SHELL_PRINTF(SH_RED "df: /data file store unavailable\n" SH_RST);
+        const char *why = tiku_vfs_tree_data_why();
+
+        SHELL_PRINTF(SH_RED "df: /data unavailable: %s\n" SH_RST,
+                     (why != NULL) ? why : "the store did not mount");
+        SHELL_PRINTF("  'mkfs' shows what the extent holds; "
+                     "'mkfs --erase-data' formats it\n");
         return;
     }
 
@@ -115,4 +121,36 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
             SHELL_PRINTF("\n");
         }
     }
+}
+
+void
+tiku_shell_cmd_mkfs(uint8_t argc, const char *argv[])
+{
+    tiku_tfs_probe_t p;
+    int erase = (argc >= 2u && strcmp(argv[1], "--erase-data") == 0);
+
+    if (argc >= 2u && !erase) {
+        SHELL_PRINTF("Usage: mkfs [--erase-data]\n");
+        return;
+    }
+    if (tiku_vfs_tree_data_probe(&p) != 0) {
+        SHELL_PRINTF(SH_RED "mkfs: no /data extent on this part\n" SH_RST);
+        return;
+    }
+    SHELL_PRINTF("/data extent: %s, %lu live entries\n",
+                 tiku_tfs_probe_name(p.kind), (unsigned long)p.live);
+    if (p.kind == TFS_PROBE_TOOSMALL) {
+        SHELL_PRINTF(SH_RED "mkfs: the extent is too small for a store\n" SH_RST);
+        return;
+    }
+    if (p.kind != TFS_PROBE_BLANK && !erase) {
+        SHELL_PRINTF("mkfs: formatting erases every file; "
+                     "run 'mkfs --erase-data' to proceed\n");
+        return;
+    }
+    if (tiku_vfs_tree_data_format() != 0) {
+        SHELL_PRINTF(SH_RED "mkfs: format failed\n" SH_RST);
+        return;
+    }
+    SHELL_PRINTF("mkfs: /data formatted\n");
 }

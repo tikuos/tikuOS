@@ -164,8 +164,38 @@ typedef enum {
     TFS_ERR_NOTFOUND  = -6,  /**< no such file */
     TFS_ERR_IO        = -7,  /**< backend write failed */
     TFS_ERR_CORRUPT   = -8,  /**< on-NVM structure failed validation */
-    TFS_ERR_BUSY      = -9   /**< another writer holds the store (see below) */
+    TFS_ERR_BUSY      = -9,  /**< another writer holds the store (see below) */
+    TFS_ERR_NOSTORE   = -10, /**< no store header here; tiku_tfs_probe() says why */
+    TFS_ERR_GEOMETRY  = -11  /**< a store for another extent or format version */
 } tfs_err_t;
+
+/** @brief What the first bytes of an extent say about a store there. */
+typedef enum {
+    TFS_PROBE_COMPATIBLE = 0, /**< mounts as it is                            */
+    TFS_PROBE_BLANK,          /**< nothing store-shaped: no header, no entry  */
+    TFS_PROBE_TORN,           /**< header gone, geometry or entries remain    */
+    TFS_PROBE_GEOMETRY,       /**< formatted for an extent of another size    */
+    TFS_PROBE_VERSION,        /**< written in another format version          */
+    TFS_PROBE_TOOSMALL        /**< the extent cannot hold the smallest store  */
+} tfs_probe_kind_t;
+
+/** @brief One probe's findings; every field is read, nothing is written. */
+typedef struct {
+    tfs_probe_kind_t kind;
+    uint32_t version;   /**< recorded format version, 0 without a header  */
+    uint32_t nfiles;    /**< recorded file count, or derived without one  */
+    uint16_t live;      /**< live directory entries found (full probe)    */
+    uint32_t bytes;     /**< their content bytes, for a compatible store  */
+} tiku_tfs_probe_t;
+
+/** @brief A store header found by tiku_tfs_locate(). */
+typedef struct {
+    uint32_t         off;   /**< byte offset of its header in the region */
+    tfs_probe_kind_t kind;  /**< COMPATIBLE, TORN, GEOMETRY or VERSION   */
+} tiku_tfs_cand_t;
+
+/** @brief Granularity at which a store may begin inside a carved region. */
+#define TIKU_TFS_LOCATE_STEP  4096u
 
 /*---------------------------------------------------------------------------*/
 /* MOUNT STATE (in SRAM; rebuilt at mount, never persisted)                  */
@@ -232,12 +262,55 @@ typedef struct tiku_tfs {
 /** @brief NVM bytes the store needs (size the backend region to at least this). */
 size_t tiku_tfs_region_size(void);
 
-/** @brief Mount an existing store; format if the superblock is absent/invalid.
- *         @return TFS_OK or a negative tfs_err_t. */
+/**
+ * @brief Mount the store @p be holds.  Never formats.
+ *
+ * A missing header is TFS_ERR_NOSTORE and a header for another geometry or
+ * version is TFS_ERR_GEOMETRY; tiku_tfs_probe() tells the caller which case
+ * it met, and only an explicit tiku_tfs_format() or tiku_tfs_init() writes.
+ *
+ * @return TFS_OK or a negative tfs_err_t.
+ */
 int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be);
 
-/** @brief Wipe and (re)format the store. */
+/** @brief Wipe and reformat a store bound by a previous mount or init. */
 int tiku_tfs_format(tiku_tfs_t *fs);
+
+/** @brief Bind @p be and format it: the explicit way to create a store. */
+int tiku_tfs_init(tiku_tfs_t *fs, tiku_nvm_backend_t *be);
+
+/**
+ * @brief Classify the store at the start of @p be without writing anything.
+ *
+ * Reads the header and counts live directory entries, so a store that lost
+ * only its header reads as torn and a report can name the files at stake.
+ *
+ * @return TFS_OK, or TFS_ERR_INVAL for a NULL argument.
+ */
+int tiku_tfs_probe(const tiku_nvm_backend_t *be, tiku_tfs_probe_t *out);
+
+/**
+ * @brief List every store header in @p region, at @p step granularity.
+ *
+ * Headers only: a candidate is a header at an offset whose remaining extent
+ * could hold a store.  Fills at most @p max entries of @p out.
+ *
+ * @return The number of candidates found, or TFS_ERR_INVAL.
+ */
+int tiku_tfs_locate(const tiku_nvm_backend_t *region, size_t step,
+                    tiku_tfs_cand_t *out, int max);
+
+/**
+ * @brief Whether a store may be created at @p base_off without asking.
+ *
+ * True only when the full probe at the base finds nothing store-shaped and no
+ * header of any kind lies anywhere in @p region.
+ */
+int tiku_tfs_may_provision(const tiku_nvm_backend_t *region, size_t base_off,
+                           size_t step);
+
+/** @brief A short name for a probe kind, for reports. */
+const char *tiku_tfs_probe_name(tfs_probe_kind_t kind);
 
 /** @brief Create an empty file. TFS_ERR_EXISTS if it already exists. */
 int tiku_tfs_create(tiku_tfs_t *fs, const char *name);

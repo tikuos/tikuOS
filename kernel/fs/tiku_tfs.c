@@ -31,9 +31,9 @@
  * Every dirent and slot offset is a function of the geometry, so a store
  * written with one geometry must never be parsed with another: the magic would
  * still match while every offset had moved, and the mount would either report
- * corruption or hand back another file's bytes.  Recording the geometry the
- * store was formatted with, and refusing to mount anything else, is what makes
- * a capacity change self-migrating -- it reads as virgin and reformats.
+ * corruption or hand back another file's bytes.  The mount therefore refuses a
+ * store whose recorded geometry differs, and leaves the decision to reformat to
+ * an explicit caller.
  *
  * WHY UNPACKED, having previously been four bit-fields in one word.  The packed
  * word was exactly full ([31:28] version, [27:16] MAX_FILES, [15:5]
@@ -367,33 +367,62 @@ static unsigned tfs_fit(size_t ext)
     return n;
 }
 
-/** @brief Adopt the geometry implied by @p ext.  Returns 0 if it is too small. */
-static int tfs_derive(tiku_tfs_t *fs, size_t ext)
+/** @brief The two geometry values that depend on the extent. */
+typedef struct {
+    uint16_t nfiles;
+    uint32_t data_off;
+} tfs_geom_t;
+
+/** @brief Geometry for an extent of @p ext bytes.  Returns 0 if too small. */
+static int tfs_geom_for(size_t ext, tfs_geom_t *g)
 {
     unsigned n = tfs_fit(ext);
 
     if (n < (unsigned)TIKU_TFS_MIN_SLOTS) {
         return 0;               /* carve shrank below what this class promises */
     }
-    fs->nfiles   = (uint16_t)n;
-    fs->nslots   = (uint16_t)(n + 1u);
-    fs->data_off = (uint32_t)TIKU_TFS_DATA_OFF_FOR(n);
+    g->nfiles   = (uint16_t)n;
+    g->data_off = (uint32_t)TIKU_TFS_DATA_OFF_FOR(n);
     return 1;
+}
+
+/** @brief Adopt the geometry implied by @p ext.  Returns 0 if it is too small. */
+static int tfs_derive(tiku_tfs_t *fs, size_t ext)
+{
+    tfs_geom_t g;
+
+    if (!tfs_geom_for(ext, &g)) {
+        return 0;
+    }
+    fs->nfiles   = g.nfiles;
+    fs->nslots   = (uint16_t)(g.nfiles + 1u);
+    fs->data_off = g.data_off;
+    return 1;
+}
+
+/** @brief Descriptor value for word @p w under geometry @p g. */
+static uint32_t tfs_word_for(const tfs_geom_t *g, unsigned w)
+{
+    switch (w) {
+    case TFS_SB_VER_W:   return (uint32_t)TFS_FMT_VERSION;
+    case TFS_SB_FILES_W: return (uint32_t)g->nfiles;
+    case TFS_SB_SLOT_W:  return (uint32_t)TFS_SLOT_BYTES;
+    case TFS_SB_NAME_W:  return (uint32_t)TIKU_TFS_NAME_MAX;
+    case TFS_SB_SECT_W:  return (uint32_t)TIKU_TFS_SECT;
+    case TFS_SB_DE_W:    return (uint32_t)TFS_DE_BYTES;
+    case TFS_SB_DATA_W:  return g->data_off;
+    default:             return 0u;              /* padding stays zero */
+    }
 }
 
 /** @brief This store's geometry descriptor value for word @p w. */
 static uint32_t tfs_sb_word(tiku_tfs_t *fs, unsigned w)
 {
-    switch (w) {
-    case TFS_SB_VER_W:   return (uint32_t)TFS_FMT_VERSION;
-    case TFS_SB_FILES_W: return (uint32_t)fs->nfiles;
-    case TFS_SB_SLOT_W:  return (uint32_t)TFS_SLOT_BYTES;
-    case TFS_SB_NAME_W:  return (uint32_t)TIKU_TFS_NAME_MAX;
-    case TFS_SB_SECT_W:  return (uint32_t)TIKU_TFS_SECT;
-    case TFS_SB_DE_W:    return (uint32_t)TFS_DE_BYTES;
-    case TFS_SB_DATA_W:  return fs->data_off;
-    default:             return 0u;              /* padding stays zero */
-    }
+    tfs_geom_t g;
+
+    g.nfiles   = fs->nfiles;
+    g.data_off = fs->data_off;
+    return tfs_word_for(&g, w);
 }
 
 /**
@@ -437,7 +466,7 @@ int tiku_tfs_format(tiku_tfs_t *fs)
         return TFS_ERR_NOSPACE;
     }
     /* Reformatting under an open writer would erase the directory it is about
-     * to commit into.  (mount() reaches format() with wr_open already cleared.) */
+     * to commit into. */
     if (fs->wr_open) {
         return TFS_ERR_BUSY;
     }
@@ -480,8 +509,11 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (!tfs_derive(fs, be->size)) {
         return TFS_ERR_NOSPACE;
     }
-    if (rd32(fs, TFS_SB_MAGIC_W * 4u) != TFS_MAGIC || !tfs_sb_matches(fs)) {
-        return tiku_tfs_format(fs);          /* virgin / different geometry */
+    if (rd32(fs, TFS_SB_MAGIC_W * 4u) != TFS_MAGIC) {
+        return TFS_ERR_NOSTORE;
+    }
+    if (!tfs_sb_matches(fs)) {
+        return TFS_ERR_GEOMETRY;
     }
     /* Rebuild the data-slot allocation map from the live directory. Every run
      * is bounds-checked and claimed slot by slot, so an overlap between two
@@ -506,6 +538,163 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     }
     fs->mounted = 1;
     return TFS_OK;
+}
+
+int tiku_tfs_init(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
+{
+    if (fs == NULL || be == NULL || be->base == NULL || be->write == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    fs->be = be;
+    fs->mounted = 0;
+    fs->wr_open = 0;
+    return tiku_tfs_format(fs);
+}
+
+/** @brief Alignment-safe 32-bit read at @p off from an unmounted extent. */
+static uint32_t rd32_at(const uint8_t *base, size_t off)
+{
+    uint32_t v;
+    memcpy(&v, base + off, sizeof v);
+    return v;
+}
+
+/**
+ * @brief Classify the store at @p base; @p full also counts live entries.
+ *
+ * Every count read from the medium is clamped to what @p size can hold
+ * before it indexes anything.
+ */
+static void tfs_classify(const uint8_t *base, size_t size, int full,
+                         tiku_tfs_probe_t *out)
+{
+    tfs_geom_t g;
+    uint32_t   w[TFS_SB_WORDS];
+    unsigned   i;
+    int        match = 1;
+    size_t     scan = 0u;
+    size_t     fits;
+    size_t     k;
+
+    memset(out, 0, sizeof *out);
+    if (!tfs_geom_for(size, &g)) {
+        out->kind = TFS_PROBE_TOOSMALL;
+        return;
+    }
+    for (i = 0u; i < TFS_SB_WORDS; i++) {
+        w[i] = rd32_at(base, (size_t)i * 4u);
+        if (i != TFS_SB_MAGIC_W && w[i] != tfs_word_for(&g, i)) {
+            match = 0;
+        }
+    }
+    fits = (size - TFS_SB_BYTES) / TFS_DE_BYTES;
+    if (w[TFS_SB_MAGIC_W] == TFS_MAGIC) {
+        out->version = w[TFS_SB_VER_W];
+        out->nfiles  = w[TFS_SB_FILES_W];
+        out->kind = (w[TFS_SB_VER_W] != TFS_FMT_VERSION) ? TFS_PROBE_VERSION
+                  : match ? TFS_PROBE_COMPATIBLE : TFS_PROBE_GEOMETRY;
+        scan = ((size_t)w[TFS_SB_FILES_W] < fits) ? (size_t)w[TFS_SB_FILES_W]
+                                                   : fits;
+    } else {
+        out->nfiles = g.nfiles;
+        out->kind   = match ? TFS_PROBE_TORN : TFS_PROBE_BLANK;
+        scan = g.nfiles;
+    }
+    if (!full) {
+        return;
+    }
+    for (k = 0u; k < scan && out->live < 0xFFFFu; k++) {
+        size_t de = TFS_DIR_OFF + k * TFS_DE_BYTES;
+
+        if (rd32_at(base, de + TFS_DE_GATE) != TFS_GATE) {
+            continue;
+        }
+        out->live++;
+        if (out->kind == TFS_PROBE_COMPATIBLE) {
+            uint32_t run = rd32_at(base, de + TFS_DE_SLOT);
+            unsigned f = TFS_RUN_FIRST(run), sp = TFS_RUN_SPAN(run);
+            uint32_t n;
+
+            if (sp == 0u || f > g.nfiles || sp > g.nfiles + 1u - f) {
+                continue;                     /* the mount will call it corrupt */
+            }
+            n = rd32_at(base, g.data_off + (size_t)f * TFS_SLOT_BYTES + TFS_SL_LEN);
+            if ((size_t)n <= TFS_RUN_CAP(sp)) {
+                out->bytes += n;
+            }
+        }
+    }
+    if (out->kind == TFS_PROBE_BLANK && out->live != 0u) {
+        out->kind = TFS_PROBE_TORN;          /* entries outlived their header */
+    }
+}
+
+int tiku_tfs_probe(const tiku_nvm_backend_t *be, tiku_tfs_probe_t *out)
+{
+    if (be == NULL || be->base == NULL || out == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    tfs_classify(be->base, be->size, 1, out);
+    return TFS_OK;
+}
+
+int tiku_tfs_locate(const tiku_nvm_backend_t *region, size_t step,
+                    tiku_tfs_cand_t *out, int max)
+{
+    size_t off = 0u;
+    int    n = 0;
+
+    if (region == NULL || region->base == NULL || step == 0u) {
+        return TFS_ERR_INVAL;
+    }
+    while (off < region->size && region->size - off >= TFS_MIN_REGION) {
+        tiku_tfs_probe_t p;
+
+        tfs_classify(region->base + off, region->size - off, 0, &p);
+        if (p.kind != TFS_PROBE_BLANK && p.kind != TFS_PROBE_TOOSMALL) {
+            if (out != NULL && n < max) {
+                out[n].off  = (uint32_t)off;
+                out[n].kind = p.kind;
+            }
+            n++;
+        }
+        if (step > region->size - off) {
+            break;
+        }
+        off += step;
+    }
+    return n;
+}
+
+int tiku_tfs_may_provision(const tiku_nvm_backend_t *region, size_t base_off,
+                           size_t step)
+{
+    tiku_nvm_backend_t at;
+    tiku_tfs_probe_t   p;
+
+    if (region == NULL || region->base == NULL || base_off >= region->size) {
+        return 0;
+    }
+    at = *region;
+    at.base = region->base + base_off;
+    at.size = region->size - base_off;
+    if (tiku_tfs_probe(&at, &p) != TFS_OK || p.kind != TFS_PROBE_BLANK) {
+        return 0;
+    }
+    return tiku_tfs_locate(region, step, NULL, 0) == 0;
+}
+
+const char *tiku_tfs_probe_name(tfs_probe_kind_t kind)
+{
+    switch (kind) {
+    case TFS_PROBE_COMPATIBLE: return "compatible";
+    case TFS_PROBE_BLANK:      return "blank";
+    case TFS_PROBE_TORN:       return "torn";
+    case TFS_PROBE_GEOMETRY:   return "geometry";
+    case TFS_PROBE_VERSION:    return "version";
+    case TFS_PROBE_TOOSMALL:   return "too small";
+    }
+    return "unknown";
 }
 
 int tiku_tfs_create(tiku_tfs_t *fs, const char *name)

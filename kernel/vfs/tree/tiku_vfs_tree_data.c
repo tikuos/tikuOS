@@ -70,7 +70,6 @@
 
 static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
-static uint8_t             data_fs_ready;
 
 /* Program through the region backend (MRAM bootrom); it brackets its own NVM
  * window, so reads stay plain pointer derefs into the FS extent. */
@@ -83,27 +82,20 @@ data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 }
 
 /**
- * @brief Lazily mount the /data file store over the carved NVM region.
+ * @brief Point data_be at the file-store extent of the carved region.
  *
- * Idempotent: returns immediately once mounted.  Locates the region backend
- * (MRAM), places the FS extent above the tier extent, and mounts the TFS over
- * it.
- *
- * @return 0 once the store is ready; -1 if the region is absent or too small
- *         to hold the FS extent, or the TFS mount fails.
+ * @param region Out: the whole region, for the provisioning check.
+ * @param base   Out: the store's offset inside it.
+ * @return 1 when a region large enough exists, else 0.
  */
 static int
-data_tfs_ensure(void)
+data_bind(tiku_nvm_backend_t *region, size_t *base)
 {
-    const tiku_nvm_backend_t *rgn;
+    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
 
-    if (data_fs_ready) {
-        return 0;
-    }
-    rgn = tiku_nvm_backend_get();
     if (rgn == NULL || rgn->base == NULL ||
         rgn->size <= (size_t)TIKU_NVM_TIER_BYTES) {
-        return -1;
+        return 0;
     }
     /* FS extent: EVERYTHING above the tier, measured from the region the linker
      * actually carved rather than from a constant describing it.
@@ -120,11 +112,9 @@ data_tfs_ensure(void)
     data_be.write = data_be_write;
     data_be.erase = NULL;
     data_be.ctx   = NULL;
-    if (tiku_tfs_mount(&data_fs, &data_be) != TFS_OK) {
-        return -1;
-    }
-    data_fs_ready = 1;
-    return 0;
+    *region = *rgn;
+    *base   = (size_t)TIKU_NVM_TIER_BYTES;
+    return 1;
 }
 
 /**
@@ -175,7 +165,6 @@ static DATA_TFS_SECTION uint8_t
     data_tfs_region[TIKU_TFS_EXTENT_FOR_SLOTS(DATA_TFS_SLOTS)];
 static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
-static uint8_t             data_fs_ready;
 
 /**
  * @brief NVM backend write callback for the /data file store (FRAM/host).
@@ -200,29 +189,23 @@ data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 }
 
 /**
- * @brief Lazily mount the Tiku File Store backing /data (FRAM/host).
+ * @brief Point data_be at the static backing array, which is its own region.
  *
- * Idempotent: returns immediately once mounted.  On first call it wires
- * the NVM backend to the static backing array and mounts the store.
- *
- * @return 0 if the store is mounted (or already was), -1 on mount failure
+ * @param region Out: the array as a region, for the provisioning check.
+ * @param base   Out: always 0.
+ * @return 1.
  */
 static int
-data_tfs_ensure(void)
+data_bind(tiku_nvm_backend_t *region, size_t *base)
 {
-    if (data_fs_ready) {
-        return 0;
-    }
     data_be.base  = data_tfs_region;
     data_be.size  = sizeof data_tfs_region;
     data_be.write = data_be_write;
     data_be.erase = NULL;
     data_be.ctx   = NULL;
-    if (tiku_tfs_mount(&data_fs, &data_be) != TFS_OK) {
-        return -1;
-    }
-    data_fs_ready = 1;
-    return 0;
+    *region = data_be;
+    *base   = 0u;
+    return 1;
 }
 
 /**
@@ -244,6 +227,117 @@ data_fill_extents(tiku_data_df_t *out)
 }
 
 #endif
+
+/*---------------------------------------------------------------------------*/
+/* MOUNT POLICY -- one rule for every platform                               */
+/*---------------------------------------------------------------------------*/
+
+/* The mount never formats.  A store is created without asking only on a
+ * region with nothing store-shaped in it; anything else leaves /data absent,
+ * with the probe kept so df can say why, until mkfs formats on request. */
+enum { DATA_UNTRIED = 0, DATA_READY, DATA_ABSENT, DATA_REFUSED };
+static uint8_t          data_state;
+static tiku_tfs_probe_t data_probe;
+static int8_t           data_mount_rc;
+
+/**
+ * @brief Mount /data once; provision a blank region; otherwise refuse.
+ *
+ * @return 0 once the store is ready, -1 while it is absent or refused.
+ */
+static int
+data_tfs_ensure(void)
+{
+    tiku_nvm_backend_t region;
+    size_t base;
+    int rc;
+
+    if (data_state == DATA_READY) {
+        return 0;
+    }
+    if (data_state != DATA_UNTRIED) {
+        return -1;
+    }
+    if (!data_bind(&region, &base)) {
+        data_state = DATA_ABSENT;
+        return -1;
+    }
+    rc = tiku_tfs_mount(&data_fs, &data_be);
+    if (rc == TFS_ERR_NOSTORE &&
+        tiku_tfs_may_provision(&region, base, TIKU_TFS_LOCATE_STEP)) {
+        rc = tiku_tfs_format(&data_fs);
+    }
+    if (rc == TFS_OK) {
+        data_state = DATA_READY;
+        return 0;
+    }
+    data_mount_rc = (int8_t)rc;
+    (void)tiku_tfs_probe(&data_be, &data_probe);
+    data_state = DATA_REFUSED;
+    return -1;
+}
+
+const char *
+tiku_vfs_tree_data_why(void)
+{
+    if (data_state == DATA_UNTRIED) {
+        (void)data_tfs_ensure();
+    }
+    if (data_state == DATA_READY) {
+        return NULL;
+    }
+    if (data_state == DATA_ABSENT) {
+        return "no NVM region on this part";
+    }
+    switch (data_probe.kind) {
+    case TFS_PROBE_TORN:
+        return "the store has lost its header but still holds files";
+    case TFS_PROBE_GEOMETRY:
+        return "the store was formatted for a region of another size";
+    case TFS_PROBE_VERSION:
+        return "the store is in another format version";
+    case TFS_PROBE_TOOSMALL:
+        return "the region is too small for a store";
+    case TFS_PROBE_BLANK:
+        return "another store header lies elsewhere in the region";
+    case TFS_PROBE_COMPATIBLE:
+    default:
+        break;
+    }
+    return (data_mount_rc == TFS_ERR_CORRUPT)
+        ? "the store's directory is inconsistent" : "the store did not mount";
+}
+
+int
+tiku_vfs_tree_data_probe(tiku_tfs_probe_t *out)
+{
+    tiku_nvm_backend_t region;
+    size_t base;
+
+    if (out == NULL || !data_bind(&region, &base)) {
+        return -1;
+    }
+    (void)base;
+    return (tiku_tfs_probe(&data_be, out) == TFS_OK) ? 0 : -1;
+}
+
+int
+tiku_vfs_tree_data_format(void)
+{
+    tiku_nvm_backend_t region;
+    size_t base;
+
+    if (!data_bind(&region, &base)) {
+        return -1;
+    }
+    (void)base;
+    if (tiku_tfs_init(&data_fs, &data_be) != TFS_OK) {
+        data_state = DATA_UNTRIED;
+        return -1;
+    }
+    data_state = DATA_READY;
+    return 0;
+}
 
 /*===========================================================================*/
 /* VFS PRESENTATION -- shell-gated.  Everything ABOVE this line is the store   */
@@ -513,7 +607,7 @@ void tiku_vfs_tree_data_extents(tiku_data_df_t *out)
 
 tiku_tfs_t *tiku_vfs_tree_data_store_if_mounted(void)
 {
-    return data_fs_ready && data_fs.mounted ? &data_fs : NULL;
+    return (data_state == DATA_READY && data_fs.mounted) ? &data_fs : NULL;
 }
 
 tiku_tfs_t *
