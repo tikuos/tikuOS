@@ -1291,6 +1291,29 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
                                       uint8_t id);
 
 /**
+ * @brief Lend @p size bytes of a tier's free room to one operation.
+ *
+ * For a buffer a command needs only while it runs, where a carve would hold
+ * it until reboot.  The loan sits at the top of the free room: carves made
+ * meanwhile still come from the bottom, refused only where they would reach
+ * it.  One loan per tier at a time, and NVM lends nothing.
+ *
+ * @param tier   SRAM, HIFRAM or PSRAM
+ * @param size   Bytes wanted
+ * @param align  Alignment of the start, a power of two (32 for DMA)
+ * @return The buffer, or NULL when the room is short or a loan is out
+ */
+void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
+                       tiku_mem_arch_size_t align);
+
+/**
+ * @brief Give back the loan tiku_tier_borrow() made from @p tier.
+ *
+ * @return TIKU_MEM_OK, or TIKU_MEM_ERR_INVALID when @p p is not that loan
+ */
+tiku_mem_err_t tiku_tier_return(tiku_mem_tier_t tier, void *p);
+
+/**
  * @brief Query which memory tier a pointer belongs to
  *
  * Checks the tier allocator's own backing pools first, then falls
@@ -1306,6 +1329,8 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 
 /**
  * @brief Get usage statistics for a tier's backing pool
+ *
+ * A loan counts as used while it is out.
  *
  * @param tier   Memory tier to query (SRAM or NVM, not AUTO)
  * @param stats  Output statistics

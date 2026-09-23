@@ -144,6 +144,7 @@ typedef struct {
     uint8_t              *buf;         /**< Backing pool start */
     tiku_mem_arch_size_t  capacity;    /**< Total pool size in bytes */
     tiku_mem_arch_size_t  offset;      /**< Current bump position */
+    tiku_mem_arch_size_t  lent;        /**< Bytes on loan at the top */
     tiku_mem_arch_size_t  peak;        /**< Lifetime high-water mark */
     tiku_mem_arch_size_t  alloc_count; /**< Number of sub-allocations */
     tiku_mem_arch_size_t  fail_count;  /**< Carves refused for lack of room */
@@ -158,6 +159,20 @@ typedef struct {
  * In .bss, so every field starts at zero before init runs.
  */
 static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
+
+/** @brief Bytes a carve may still take: the free room below any loan. */
+static tiku_mem_arch_size_t tier_room(const tier_pool_state_t *ts)
+{
+    return ts->capacity - ts->lent - ts->offset;
+}
+
+/** @brief Record a new high-water mark; a loan counts while it is out. */
+static void tier_note_peak(tier_pool_state_t *ts)
+{
+    if (ts->offset + ts->lent > ts->peak) {
+        ts->peak = ts->offset + ts->lent;
+    }
+}
 
 /*---------------------------------------------------------------------------*/
 /* TIER INIT                                                                 */
@@ -195,6 +210,7 @@ tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size)
     tier_state[TIKU_MEM_PSRAM].buf         = (uint8_t *)base;
     tier_state[TIKU_MEM_PSRAM].capacity    = size;
     tier_state[TIKU_MEM_PSRAM].offset      = 0;
+    tier_state[TIKU_MEM_PSRAM].lent        = 0;
     tier_state[TIKU_MEM_PSRAM].peak        = 0;
     tier_state[TIKU_MEM_PSRAM].alloc_count = 0;
     tier_state[TIKU_MEM_PSRAM].fail_count  = 0;
@@ -207,10 +223,36 @@ tiku_mem_err_t tiku_tier_detach_psram(int force)
     if (!tier_state[TIKU_MEM_PSRAM].initialized) {
         return TIKU_MEM_OK;             /* already gone: idempotent */
     }
-    if (tier_state[TIKU_MEM_PSRAM].offset != 0u && !force) {
+    if ((tier_state[TIKU_MEM_PSRAM].offset != 0u ||
+         tier_state[TIKU_MEM_PSRAM].lent != 0u) && !force) {
         return TIKU_MEM_ERR_INVALID;    /* live allocations would be stranded */
     }
     tier_state[TIKU_MEM_PSRAM].initialized = 0;
+    tier_state[TIKU_MEM_PSRAM].buf         = NULL;
+    tier_state[TIKU_MEM_PSRAM].capacity    = 0;
+    tier_state[TIKU_MEM_PSRAM].offset      = 0;
+    tier_state[TIKU_MEM_PSRAM].lent        = 0;
+    return TIKU_MEM_OK;
+}
+
+static void tier_wire_all(void)
+{
+    /* PSRAM: never wired at boot -- it is a LATE-ATTACH tier owned by the
+     * PSRAM lifecycle (tiku_tier_attach_psram).  A tiku_tier_reset() drops
+     * any attachment, which is correct: reset means clean slate. */
+    tier_state[TIKU_MEM_PSRAM].initialized = 0;
+    tier_state[TIKU_MEM_PSRAM].buf         = NULL;
+    tier_state[TIKU_MEM_PSRAM].capacity    = 0;
+    tier_state[TIKU_MEM_PSRAM].offset      = 0;
+    tier_state[TIKU_MEM_PSRAM].lent        = 0;
+
+    tier_state[TIKU_MEM_SRAM].buf         = TIER_SRAM_BUF;
+    tier_state[TIKU_MEM_SRAM].capacity    = TIER_SRAM_CAP;
+    tier_state[TIKU_MEM_SRAM].offset      = 0;
+    tier_state[TIKU_MEM_SRAM].lent        = 0;
+    tier_state[TIKU_MEM_SRAM].peak        = 0;
+    tier_state[TIKU_MEM_SRAM].alloc_count = 0;
+    tier_state[TIKU_MEM_SRAM].initialized = 1;
 #if defined(TIKU_TIER_POISON)
     /*
      * On the parts whose tier the linker carves, the span sits outside the
@@ -228,29 +270,6 @@ tiku_mem_err_t tiku_tier_detach_psram(int force)
         }
     }
 #endif
-
-    tier_state[TIKU_MEM_PSRAM].buf         = NULL;
-    tier_state[TIKU_MEM_PSRAM].capacity    = 0;
-    tier_state[TIKU_MEM_PSRAM].offset      = 0;
-    return TIKU_MEM_OK;
-}
-
-static void tier_wire_all(void)
-{
-    /* PSRAM: never wired at boot -- it is a LATE-ATTACH tier owned by the
-     * PSRAM lifecycle (tiku_tier_attach_psram).  A tiku_tier_reset() drops
-     * any attachment, which is correct: reset means clean slate. */
-    tier_state[TIKU_MEM_PSRAM].initialized = 0;
-    tier_state[TIKU_MEM_PSRAM].buf         = NULL;
-    tier_state[TIKU_MEM_PSRAM].capacity    = 0;
-    tier_state[TIKU_MEM_PSRAM].offset      = 0;
-
-    tier_state[TIKU_MEM_SRAM].buf         = TIER_SRAM_BUF;
-    tier_state[TIKU_MEM_SRAM].capacity    = TIER_SRAM_CAP;
-    tier_state[TIKU_MEM_SRAM].offset      = 0;
-    tier_state[TIKU_MEM_SRAM].peak        = 0;
-    tier_state[TIKU_MEM_SRAM].alloc_count = 0;
-    tier_state[TIKU_MEM_SRAM].initialized = 1;
 
 #ifdef PLATFORM_MSP430
     /* Unified FRAM: the pool above is the NVM, and it is really non-volatile. */
@@ -291,6 +310,7 @@ static void tier_wire_all(void)
     }
 #endif
     tier_state[TIKU_MEM_NVM].offset      = 0;
+    tier_state[TIKU_MEM_NVM].lent        = 0;
     tier_state[TIKU_MEM_NVM].peak        = 0;
     tier_state[TIKU_MEM_NVM].alloc_count = 0;
 
@@ -298,6 +318,7 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_HIFRAM].buf         = tier_hifram_buf;
     tier_state[TIKU_MEM_HIFRAM].capacity    = TIKU_TIER_HIFRAM_SIZE;
     tier_state[TIKU_MEM_HIFRAM].offset      = 0;
+    tier_state[TIKU_MEM_HIFRAM].lent        = 0;
     tier_state[TIKU_MEM_HIFRAM].peak        = 0;
     tier_state[TIKU_MEM_HIFRAM].alloc_count = 0;
     tier_state[TIKU_MEM_HIFRAM].initialized = 1;
@@ -363,24 +384,21 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
     if (TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0 &&
         size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
         tier_state[TIKU_MEM_HIFRAM].initialized &&
-        aligned <= tier_state[TIKU_MEM_HIFRAM].capacity -
-                   tier_state[TIKU_MEM_HIFRAM].offset) {
+        aligned <= tier_room(&tier_state[TIKU_MEM_HIFRAM])) {
         return TIKU_MEM_HIFRAM;
     }
 #endif
 
     /* Small allocations prefer SRAM. */
     if (tier_state[TIKU_MEM_SRAM].initialized &&
-        aligned <= tier_state[TIKU_MEM_SRAM].capacity -
-                   tier_state[TIKU_MEM_SRAM].offset) {
+        aligned <= tier_room(&tier_state[TIKU_MEM_SRAM])) {
         return TIKU_MEM_SRAM;
     }
 
 #if TIKU_TIER_HIFRAM_AVAILABLE
     /* HIFRAM can also satisfy a small request when SRAM is full. */
     if (tier_state[TIKU_MEM_HIFRAM].initialized &&
-        aligned <= tier_state[TIKU_MEM_HIFRAM].capacity -
-                   tier_state[TIKU_MEM_HIFRAM].offset) {
+        aligned <= tier_room(&tier_state[TIKU_MEM_HIFRAM])) {
         return TIKU_MEM_HIFRAM;
     }
 #endif
@@ -418,7 +436,7 @@ static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
         return NULL;
     }
 
-    if (aligned > ts->capacity - ts->offset) {
+    if (aligned > tier_room(ts)) {
         ts->fail_count++;
         return NULL;
     }
@@ -426,12 +444,64 @@ static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
     ptr = ts->buf + ts->offset;
     ts->offset += aligned;
     ts->alloc_count++;
-
-    if (ts->offset > ts->peak) {
-        ts->peak = ts->offset;
-    }
+    tier_note_peak(ts);
 
     return ptr;
+}
+
+/*---------------------------------------------------------------------------*/
+/* LOAN FROM THE TOP OF A TIER                                               */
+/*---------------------------------------------------------------------------*/
+
+void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
+                       tiku_mem_arch_size_t align)
+{
+    TIKU_MEM_KERNEL_ONLY(NULL);
+    tier_pool_state_t *ts;
+    uintptr_t top, at;
+
+    /* NVM is written through tiku_tier_nvm_write(), so a plain buffer
+     * there would be a trap for the borrower rather than a loan. */
+    if (tier == TIKU_MEM_AUTO || tier == TIKU_MEM_NVM ||
+        (unsigned)tier >= TIKU_MEM_TIER_COUNT || size == 0u ||
+        align == 0u || (align & (align - 1u)) != 0u) {
+        return NULL;
+    }
+    ts = &tier_state[tier];
+    if (!ts->initialized || ts->lent != 0u) {
+        return NULL;
+    }
+    if (size > tier_room(ts)) {
+        ts->fail_count++;
+        return NULL;
+    }
+    top = (uintptr_t)ts->buf + ts->capacity;
+    at = (top - size) & ~(uintptr_t)(align - 1u);
+    if (at < (uintptr_t)ts->buf + ts->offset) {
+        ts->fail_count++;               /* the alignment slack did not fit */
+        return NULL;
+    }
+    ts->lent = (tiku_mem_arch_size_t)(top - at);
+    tier_note_peak(ts);
+    return (void *)at;
+}
+
+tiku_mem_err_t tiku_tier_return(tiku_mem_tier_t tier, void *p)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    tier_pool_state_t *ts;
+
+    if (tier == TIKU_MEM_AUTO || (unsigned)tier >= TIKU_MEM_TIER_COUNT ||
+        p == NULL) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    ts = &tier_state[tier];
+    if (!ts->initialized || ts->lent == 0u ||
+        (uint8_t *)p != ts->buf + (ts->capacity - ts->lent)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    ts->lent = 0u;
+    return TIKU_MEM_OK;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -708,7 +778,7 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
     }
 
     stats->total_bytes = ts->capacity;
-    stats->used_bytes  = ts->offset;
+    stats->used_bytes  = ts->offset + ts->lent;
     stats->peak_bytes  = ts->peak;
     stats->alloc_count = ts->alloc_count;
     stats->fail_count  = ts->fail_count;
