@@ -274,6 +274,23 @@ endif
 # precisely the kind of quiet half-failure this stage exists to remove.
 BOARD_CAP_DEFINES := $(foreach c,$(BOARD_CAPS_$(BOARD)),-DTIKU_BOARD_HAS_$(c)=1)
 
+# A part the board declares gets its driver by default; =0 leaves it out.
+# These were opt-in from their bring-ups, when the eMMC driver kept a static
+# 512 KB buffer that the SRAM tier paid for in every image carrying it.  The
+# tier now lends that buffer to the operation using it.  Decided before the
+# overlays below, so an overlay sees the answer; MINIMAL builds stay bare.
+ifneq ($(MINIMAL),1)
+ifneq ($(call board_has,EMMC),)
+TIKU_DRV_EMMC_ENABLE ?= 1
+endif
+ifneq ($(call board_has,PSRAM),)
+TIKU_DRV_PSRAM_ENABLE ?= 1
+endif
+ifneq ($(call board_has,NOR),)
+TIKU_DRV_NOR_ENABLE ?= 1
+endif
+endif
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Private experiment overlay
@@ -1905,13 +1922,14 @@ SRCS += arch/ambiq/tiku_mpu_arch.c
 SRCS += arch/ambiq/tiku_region_arch.c
 SRCS += arch/ambiq/tiku_nvm_region_apollo510.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
-# External octal-DDR PSRAM on MSPI0 (EVB U14, 64 MB).  Opt-in: it is board
-# hardware, not silicon, so a target without the part must not carry the
-# driver.  The -D is a capability macro so the shell command can gate on it
-# regardless of include order (see kernel/shell/tiku_shell_config.h).
-# External octal NOR flash on MSPI1 (EVB U12, 8 MB).  Opt-in board hardware,
-# same reasoning as the PSRAM: the -D is a capability macro so the shell
-# command can gate on it regardless of include order.
+# External octal-DDR PSRAM on MSPI0 (EVB U14, 64 MB).  Board hardware, not
+# silicon: on by default where BOARD_CAPS declares the part, and a target
+# without it must not carry the driver.  The -D is a capability macro so the
+# shell command can gate on it regardless of include order (see
+# kernel/shell/tiku_shell_config.h).
+# External octal NOR flash on MSPI1 (EVB U12, 8 MB).  Board hardware, same
+# reasoning as the PSRAM: the -D is a capability macro so the shell command
+# can gate on it regardless of include order.
 # On-board eMMC on SDIO0 (EVB U11, 8 GB).  Present on BOTH Apollo510 EVBs.
 ifeq ($(TIKU_DRV_USB_ENABLE),1)
 SRCS += arch/ambiq/tiku_usb_arch.c
