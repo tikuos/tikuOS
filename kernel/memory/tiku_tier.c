@@ -292,8 +292,7 @@ static void tier_wire_all(void)
 
         if (rgn != NULL && rgn->base != NULL && ls->tier != 0u &&
             rgn->size > (size_t)ls->tier &&
-            (ls->store == TIKU_LAYOUT_STORE_READY ||
-             ls->store == TIKU_LAYOUT_STORE_PROVISION)) {
+            ls->store == TIKU_LAYOUT_STORE_READY) {
             tier_state[TIKU_MEM_NVM].buf      = rgn->base;
             tier_state[TIKU_MEM_NVM].capacity =
                 (tiku_mem_arch_size_t)ls->tier;

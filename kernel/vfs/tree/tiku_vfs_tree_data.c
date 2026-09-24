@@ -132,13 +132,15 @@ data_fill_extents(tiku_data_df_t *out)
 /**
  * @brief Whether the store may be created at @p base without being asked.
  *
- * Only when boot found the whole region blank; a missing header alone is not.
+ * Region-backed stores are provisioned by boot before publishing their tier.
+ * Mounting never completes a partial initialization or guesses ownership.
  */
 static int
 data_may_create(const tiku_nvm_backend_t *region, size_t base)
 {
-    return tiku_layout_state()->store == TIKU_LAYOUT_STORE_PROVISION &&
-           tiku_tfs_may_provision(region, base, TIKU_TFS_LOCATE_STEP);
+    (void)region;
+    (void)base;
+    return 0;
 }
 
 /** @brief Why the layout service holds the store, or NULL when it does not. */
@@ -162,9 +164,11 @@ data_held(void)
     case TIKU_LAYOUT_HELD_INTERRUPTED:
         return "a layout change was interrupted (see layout status)";
     case TIKU_LAYOUT_HELD_IO:
-        return "the layout record could not be written";
+        return "store or layout initialization could not be persisted";
+    case TIKU_LAYOUT_HELD_ENTROPY:
+        return "ownership identity unavailable; restart to retry blank-media setup";
     case TIKU_LAYOUT_HELD_CONTROL:
-        return "layout ownership is missing; inspect then use layout recover";
+        return "layout ownership is missing; recover only at a verified previous offset";
     case TIKU_LAYOUT_HELD_CONTRACT:
         return "layout belongs to another image; explicit recovery required";
     case TIKU_LAYOUT_HELD_REBOOT:
@@ -386,7 +390,7 @@ tiku_vfs_tree_data_why(void)
     case TFS_PROBE_TOOSMALL:
         return "the region is too small for a store";
     case TFS_PROBE_BLANK:
-        return "another store header lies elsewhere in the region";
+        return "blank store extent without permission to initialize; left untouched";
     case TFS_PROBE_UNKNOWN:
         return "nonblank data with unrecognized metadata; left untouched";
     case TFS_PROBE_COMPATIBLE:

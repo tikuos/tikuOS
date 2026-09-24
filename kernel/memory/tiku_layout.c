@@ -7,8 +7,8 @@
  *
  * tiku_layout.c - staged memory budgets and the boot that applies them.
  *
- * The record establishes ownership; a region with nothing on it is provisioned
- * on first use.  A found header never grants ownership: that takes recovery.
+ * The record establishes ownership; a wholly blank region is provisioned
+ * before publishing its tier. A found header never grants ownership.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -223,7 +223,7 @@ sub_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 {
     const sub_ctx_t *c = (const sub_ctx_t *)be->ctx;
 
-    if (off > be->size || len > be->size - off) {
+    if (off > be->size || len > be->size - off || c->e->write == NULL) {
         return -1;
     }
     return c->e->write(c->e->write_ctx, c->off + off, src, len);
@@ -691,6 +691,67 @@ boot_store(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     st->held  = held_for(p.kind);
 }
 
+/** @brief Obtain a new ownership identity before changing any store bytes. */
+static int
+fresh_identity(const tiku_layout_env_t *e, tiku_layout_record_t *r)
+{
+    static const uint8_t zero[TIKU_LAYOUT_ID_BYTES];
+
+    if (e->random == NULL ||
+        e->random(e->random_ctx, r->identity, sizeof r->identity) != 0 ||
+        memcmp(r->identity, zero, sizeof zero) == 0 ||
+        memcmp(r->identity, e->rec->identity, sizeof r->identity) == 0) {
+        return TIKU_LAYOUT_E_ENTROPY;
+    }
+    return TIKU_LAYOUT_OK;
+}
+
+/** @brief Finish blank-media setup before any consumer can write the tier.
+ *
+ * No record is published until formatting and the checked commit succeed.
+ * An interrupted format/commit that leaves nonblank, unowned bytes is held on
+ * the next boot, never adopted by scanning. Existing owned boots need no RNG.
+ */
+static void
+boot_provision(const tiku_layout_env_t *e, tiku_layout_state_t *st)
+{
+    tiku_layout_record_t r;
+    tiku_nvm_backend_t be;
+    tiku_tfs_t fs;
+    sub_ctx_t c;
+    int rc;
+
+    st->store = TIKU_LAYOUT_STORE_HELD;
+    st->held = TIKU_LAYOUT_HELD_IO;
+    st->outcome = TIKU_LAYOUT_E_IO;
+    if (!base_valid(e, e->default_tier)) {
+        st->held = TIKU_LAYOUT_HELD_GEOMETRY;
+        st->outcome = TIKU_LAYOUT_E_RANGE;
+        return;
+    }
+    rec_fresh(e, &r);
+    rc = fresh_identity(e, &r);
+    if (rc != TIKU_LAYOUT_OK) {
+        st->held = TIKU_LAYOUT_HELD_ENTROPY;
+        st->outcome = (int16_t)rc;
+        return;
+    }
+    sub_backend(e, e->default_tier, &c, &be);
+    if (tiku_tfs_mount(&fs, &be) != TFS_ERR_NOSTORE ||
+        tiku_tfs_format(&fs) != TFS_OK) {
+        return;
+    }
+    kv_set(r.applied, &r.n_applied, TIKU_KNOB_NVM_TIER, e->default_tier);
+    if (commit(e, &r) != TIKU_LAYOUT_OK) {
+        return;
+    }
+    st->record = TIKU_LAYOUT_RECORD_VALID;
+    st->tier = e->default_tier;
+    st->store = TIKU_LAYOUT_STORE_READY;
+    st->held = TIKU_LAYOUT_HELD_NONE;
+    st->outcome = TIKU_LAYOUT_OK;
+}
+
 int
 tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
 {
@@ -714,9 +775,7 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
     }
     if (st->record == TIKU_LAYOUT_RECORD_ABSENT &&
         tiku_tfs_may_provision(&e->region, e->default_tier, e->step)) {
-        /* Nothing on the medium to own: the first use creates the store. */
-        st->tier  = e->default_tier;
-        st->store = TIKU_LAYOUT_STORE_PROVISION;
+        boot_provision(e, st);
         return TIKU_LAYOUT_OK;
     }
     if (record_usable(e, &r) != TIKU_LAYOUT_OK) {
@@ -770,7 +829,6 @@ tiku_layout_recover_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
     tiku_nvm_backend_t be;
     tiku_tfs_t fs;
     sub_ctx_t c;
-    static const uint8_t zero[TIKU_LAYOUT_ID_BYTES];
     int rc;
 
     if (e == NULL || e->rec == NULL || st == NULL || !base_valid(e, base)) {
@@ -788,12 +846,8 @@ tiku_layout_recover_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
         return TIKU_LAYOUT_E_RECOVERY;
     }
     rec_fresh(e, &r);
-    if (e->random == NULL ||
-        e->random(e->random_ctx, r.identity, sizeof r.identity) != 0 ||
-        memcmp(r.identity, zero, sizeof zero) == 0 ||
-        memcmp(r.identity, e->rec->identity, sizeof r.identity) == 0) {
-        return TIKU_LAYOUT_E_ENTROPY;
-    }
+    rc = fresh_identity(e, &r);
+    if (rc != TIKU_LAYOUT_OK) { return rc; }
     kv_set(r.applied, &r.n_applied, TIKU_KNOB_NVM_TIER, base);
     rc = commit(e, &r);
     if (rc != TIKU_LAYOUT_OK) {
@@ -1008,6 +1062,7 @@ tiku_layout_held_name(uint8_t held)
     case TIKU_LAYOUT_HELD_CONTROL:     return "control-missing";
     case TIKU_LAYOUT_HELD_CONTRACT:    return "foreign-contract";
     case TIKU_LAYOUT_HELD_REBOOT:      return "reboot-required";
+    case TIKU_LAYOUT_HELD_ENTROPY:     return "entropy-unavailable";
     default:                           return "-";
     }
 }
@@ -1054,7 +1109,8 @@ board_commit(void *ctx, const tiku_layout_record_t *r)
     return ok ? 0 : -1;
 }
 
-/** Called only by explicit recovery, once normal board startup is complete. */
+/** Polled, lazily initialized RNG: fresh provisioning and explicit recovery.
+ * Existing owned boots never need entropy. No time/PRNG fallback is allowed. */
 static int
 board_random(void *ctx, uint8_t *out, size_t len)
 {
@@ -1155,16 +1211,7 @@ tiku_layout_adopt(uint32_t base)
     tiku_layout_boot();
     /* mkfs is explicit erase consent, but never resets an existing identity. */
     if (record_usable(&board_env, board_env.rec) != TIKU_LAYOUT_OK) {
-        int provisioned = (board_state.store == TIKU_LAYOUT_STORE_PROVISION &&
-                           board_state.tier == base);
-        int rc = tiku_layout_recover_env(&board_env, &board_state, base);
-
-        if (rc == TIKU_LAYOUT_OK && provisioned) {
-            /* The tier was published at this base from boot: nothing waits. */
-            board_state.store = TIKU_LAYOUT_STORE_READY;
-            board_state.held  = TIKU_LAYOUT_HELD_NONE;
-        }
-        return rc;
+        return tiku_layout_recover_env(&board_env, &board_state, base);
     }
     if (applied_tier(&board_env, board_env.rec) != base) { return -1; }
     if (board_state.tier == 0u) {

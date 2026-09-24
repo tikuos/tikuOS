@@ -113,7 +113,7 @@ typedef struct {
 typedef enum {
     TIKU_LAYOUT_STORE_NONE      = 0, /**< no carved region on this part      */
     TIKU_LAYOUT_STORE_READY     = 1, /**< a compatible store at the base     */
-    TIKU_LAYOUT_STORE_PROVISION = 2, /**< a wholly blank region; create on use */
+    TIKU_LAYOUT_STORE_PROVISION = 2, /**< legacy value; never publish its tier */
     TIKU_LAYOUT_STORE_HELD      = 3  /**< unavailable; see the reason         */
 } tiku_layout_store_t;
 
@@ -129,7 +129,8 @@ typedef enum {
     TIKU_LAYOUT_HELD_IO,             /**< a write failed during boot         */
     TIKU_LAYOUT_HELD_CONTROL,        /**< missing/invalid ownership record   */
     TIKU_LAYOUT_HELD_CONTRACT,       /**< record belongs to another image    */
-    TIKU_LAYOUT_HELD_REBOOT          /**< recovered; reboot before publishing */
+    TIKU_LAYOUT_HELD_REBOOT,         /**< recovered; reboot before publishing */
+    TIKU_LAYOUT_HELD_ENTROPY         /**< no fresh provisioning identity      */
 } tiku_layout_held_t;
 
 /** @brief How the record read at boot. */
@@ -201,7 +202,7 @@ typedef struct {
     void  *write_ctx;
     uint32_t default_tier;
     uint32_t step;
-    int (*random)(void *ctx, uint8_t *out, size_t len); /**< explicit recovery only */
+    int (*random)(void *ctx, uint8_t *out, size_t len); /**< provision/recovery */
     void *random_ctx;
 } tiku_layout_env_t;
 
@@ -212,8 +213,9 @@ typedef struct {
 /**
  * @brief Decide the split and the store's state; run a staged operation.
  *
- * A valid, image-compatible record establishes ownership, and a region that is
- * blank end to end is provisioned.  Anything else is held with no NVM tier.
+ * Blank media gets a store and checked ownership before its tier is published.
+ * Entropy/write failures and unowned nonblank regions expose no NVM tier.
+ * Existing image-compatible ownership needs no boot-time entropy.
  */
 int tiku_layout_boot_env(const tiku_layout_env_t *env, tiku_layout_state_t *st);
 
