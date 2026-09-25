@@ -92,6 +92,10 @@ __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 /* The Cortex-M loads the initial SP from vector entry 0. Place it at the very
  * top of TCM and let the stack grow downward toward .bss. */
 __stack       = __sram_end;
+__tiku_stack_bottom = __stack - 32K;
+__tiku_stack_guard_start = __tiku_stack_bottom - 4K;
+__ssram_bank_start = ORIGIN(SSRAM);
+__ssram_bank_end = ORIGIN(SSRAM) + LENGTH(SSRAM);
 
 SECTIONS
 {
@@ -201,6 +205,14 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
+    /* Starts after the full 8K MPU envelope and all retained state. */
+    __tier_sram_extra_start = ALIGN(_end, 32);
+    __tier_sram_extra_end = __tiku_stack_guard_start;
+    ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
+           "ERROR: TCM statics overlap the stack guard")
+    ASSERT((__tiku_stack_guard_start & 0xFFF) == 0,
+           "ERROR: Apollo4 stack guard must be 4K aligned")
+
     /* Shared SRAM (2 MB at 0x10060000). Holds the large volatile tier backing
      * buffers (.ssram) -- 1.5 MB SRAM tier + the 64 KB MRAM-mirror staging
      * buffer -- zero-initialised by the reset handler. ALIGN(32) for a PMSAv7
@@ -222,7 +234,7 @@ SECTIONS
     } > SSRAM
 
     /*
-     * SRAM TIER -- the rest of the shared bank, less a small reserve.
+     * PRIMARY SRAM TIER SPAN -- the rest of the shared bank.
      *
      * Derived rather than compiled in, for the reason the RA8P1 script gives:
      * a constant has to be chosen per build configuration and silently stops
@@ -233,19 +245,15 @@ SECTIONS
      * (__ssram_start..__ssram_end), which the allocator has never needed --
      * it does not promise zeroed memory.
      */
-    /* The reserve protects nothing here: the stack lives in TCM and nothing
-     * sits above the tier in this bank.  The figure is arbitrary, kept equal
-     * to the stack-side ports' margin; reclaim it if the capacity is wanted.
-     */
+    /* No tail reserve: the stack and its guard live in TCM, not SSRAM. */
     __tiku_tier_span_start      = __ssram_top;
     __tiku_tier_span_limit      = ORIGIN(SSRAM) + LENGTH(SSRAM);
-    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_reserve_default = 0;
     __tiku_tier_floor_default   = 0x40000;
     INCLUDE arch/common/tiku_sram_layout.ld
 
-    /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
-    ASSERT((__stack - _end) >= 0x1000,
-           "ERROR: TCM exhausted -- less than 4 KB free for stack")
+    ASSERT(_end <= __tiku_stack_guard_start,
+           "ERROR: TCM exhausted -- need 32K stack plus 4K guard")
 
     /* The mirror holds the 16-byte V2 header and the whole .uninit image. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),

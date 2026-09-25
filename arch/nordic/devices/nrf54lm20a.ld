@@ -159,6 +159,8 @@ __tiku_nvm_rram_end   = __tiku_layout_top;
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */
 __stack = __sram_end;
+__tiku_stack_bottom = __stack - 32K;
+__tiku_stack_guard_start = __tiku_stack_bottom - 4K;
 
 SECTIONS
 {
@@ -238,8 +240,15 @@ SECTIONS
     /* SRAM headroom: the ARMv8-M MPU stack budget (32 KB reserve + 4 KB
      * RO guard, programmed in tiku_mpu_arch.c) must fit above the statics
      * -- rp2350-parity sizing. */
-    ASSERT((__stack - _end) >= 0x9000,
+    ASSERT(_end <= __tiku_stack_guard_start,
            "ERROR: SRAM exhausted — need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
+
+    /* A second backing span of the SRAM tier, never crossing the guard or
+     * coprocessor carve. Its size follows the actual linked statics. */
+    __tier_sram_extra_start = ALIGN(_end, 32);
+    __tier_sram_extra_end = __tiku_stack_guard_start;
+    ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
+           "ERROR: lower SRAM tier overlaps stack guard")
 
     /* -------- 5b. RAM2 large buffers (upper SRAM bank) ---------------- */
     /* NOLOAD: nothing to copy from the image; the crt zeroes exactly

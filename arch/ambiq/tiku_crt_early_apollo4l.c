@@ -95,9 +95,7 @@ void tiku_ambiq_gpio0_isr(void)            __attribute__((weak, alias("ambiq_def
  * startup there is no EPU power-state, no Low-Overhead-Branch and no
  * SecureFault.
  *
- * @note The shared SRAM banks are powered on here when the build places statics
- *       in .ssram; the minimal/smoke build keeps .ssram empty and leaves SSRAM
- *       unpowered.
+ * @note Shared SRAM is powered for the allocator even when .ssram is empty.
  */
 void tiku_ambiq_reset_handler(void) __attribute__((naked, section(".text"), used));
 
@@ -131,15 +129,9 @@ void tiku_ambiq_reset_handler(void) {
         *dst++ = 0U;
     }
 
-    /* Power up the shared SRAM before touching .ssram. Apollo4 Lite has two
-     * 1 MB SSRAM groups; the SBL may leave them off, so enable both
-     * (PWRENSSRAM = ALL = 0x3) and bound-wait on SSRAMPWRST so a stuck power
-     * FSM can't hang the boot. Done only when the build actually places statics
-     * in .ssram (the SRAM tier's backing pool) -- the minimal/smoke build keeps
-     * .ssram empty and stays low-power. The cache is still off here, so this
-     * write and the zero-init below reach SSRAM directly. Mirrors the apollo510
-     * sequence (tiku_crt_early.c), which powers three groups. */
-    if (&__ssram_start < &__ssram_end) {
+    /* Power the shared bank even if .ssram is empty: the linker-derived
+     * allocator lives outside that section. Cache is still off here. */
+    {
         PWRCTRL->SSRAMPWREN_b.PWRENSSRAM = 0x3u;   /* both 1 MB groups */
         {
             uint32_t guard = 1000000u;

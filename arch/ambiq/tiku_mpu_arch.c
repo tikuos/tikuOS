@@ -46,6 +46,8 @@ extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t __sram_start;     /* DTCM base   */
 extern uint32_t __sram_end;       /* DTCM top (= __stack) */
+extern uint32_t __tiku_stack_bottom;
+extern uint32_t __tiku_stack_guard_start;
 extern uint32_t __flash_start;    /* MRAM code window base */
 extern uint32_t __flash_end;      /* MRAM code window end (below the NVM mirror) */
 
@@ -136,21 +138,7 @@ static volatile struct tiku_mpu_diag mpu_diag;
 #define MPU_REGION_MODULE      7U
 /** @} */
 
-/**
- * @defgroup MPU_STACK_GUARD Stack guard sizing constants
- * @brief The guard sits MPU_STACK_RESERVED_BYTES below __sram_end so a
- *        descending stack that overruns the budget trips a MemManage fault
- *        rather than silently corrupting .bss or .uninit. Generous (512 KB
- *        DTCM) so deep BASIC expression stacks don't false-trip it.
- * @{
- */
-#define MPU_STACK_RESERVED_BYTES   32768U
-/* 4 KB, not 32 B: a stack-overflow frame is KB-sized (BASIC), so a narrow
- * guard is LEAPT -- the descending SP skips the 32-byte hole and lands in
- * .bss below without ever touching a guarded address (the RP2350 reset-loop
- * class).  A guard at least as wide as the largest frame cannot be jumped. */
-#define MPU_STACK_GUARD_BYTES      4096U
-/** @} */
+/* The linker owns the 32K stack and 4K guard boundaries. */
 
 /** @brief CFSR/MMFSR bit 7: MMFAR holds a valid fault address */
 #define TIKU_MMFSR_MMARVALID       (1UL << 7)   /* CFSR/MMFSR: MMFAR valid */
@@ -181,6 +169,12 @@ static volatile struct tiku_mpu_diag mpu_diag;
  */
 static void mpu_region(uint32_t rnr, uint32_t base, uint32_t limit_incl,
                        uint32_t ro, uint32_t xn) {
+    if (limit_incl < base) {
+        ARM_MPU_ClrRegion(rnr);
+        __DSB();
+        __ISB();
+        return;
+    }
     ARM_MPU_SetRegion(rnr,
         ARM_MPU_RBAR(base, ARM_MPU_SH_NON, ro, 1U, xn),
         ARM_MPU_RLAR(limit_incl, 0U));
@@ -211,15 +205,12 @@ static void mpu_set_nvm(void) {
 /**
  * @brief Compute the base address of the 4 KB stack-guard region
  *
- * Returns __sram_end minus the reserved stack budget minus the guard
- * size. The result is the base of the read-only trip region (MPU region
- * 4) that catches stack overflows before they corrupt .bss or .uninit.
+ * Uses the same linker boundary that stops TCM allocations.
  *
  * @return Base address of the stack-guard region
  */
 static inline uint32_t mpu_stack_guard_base(void) {
-    return (uint32_t)(uintptr_t)&__sram_end -
-           MPU_STACK_RESERVED_BYTES - MPU_STACK_GUARD_BYTES;
+    return (uint32_t)(uintptr_t)&__tiku_stack_guard_start;
 }
 
 /**
@@ -228,7 +219,7 @@ static inline uint32_t mpu_stack_guard_base(void) {
  * painting up to the SP stays strictly inside the live-stack window.
  */
 uint32_t tiku_stack_arch_bottom(void) {
-    return mpu_stack_guard_base() + MPU_STACK_GUARD_BYTES;
+    return (uint32_t)(uintptr_t)&__tiku_stack_bottom;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -326,10 +317,10 @@ void tiku_mpu_arch_init_segments(void) {
                    (uint32_t)(uintptr_t)&__uninit_end,
                    guard - 1U, 0U, 1U);                         /* region 3 */
         mpu_region(MPU_REGION_STACK_GUARD,
-                   guard, guard + MPU_STACK_GUARD_BYTES - 1U,
+                   guard, (uint32_t)(uintptr_t)&__tiku_stack_bottom - 1U,
                    1U /* RO */, 1U /* XN */);                   /* region 4 */
         mpu_region(MPU_REGION_SRAM_TOP,
-                   guard + MPU_STACK_GUARD_BYTES,
+                   (uint32_t)(uintptr_t)&__tiku_stack_bottom,
                    (uint32_t)(uintptr_t)&__sram_end - 1U,
                    0U, 1U);                                     /* region 5 */
         mpu_region(MPU_REGION_SSRAM,

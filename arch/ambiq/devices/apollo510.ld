@@ -91,6 +91,10 @@ __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 /* The Cortex-M loads the initial SP from vector entry 0. Place it at
  * the very top of DTCM and let the stack grow downward toward .bss. */
 __stack       = __sram_end;
+__tiku_stack_bottom = __stack - 32K;
+__tiku_stack_guard_start = __tiku_stack_bottom - 4K;
+__ssram_bank_start = ORIGIN(SSRAM);
+__ssram_bank_end = ORIGIN(SSRAM) + LENGTH(SSRAM);
 
 SECTIONS
 {
@@ -206,6 +210,12 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
+    /* Volatile CPU working memory, outside the durable overlay and guard. */
+    __tier_sram_extra_start = ALIGN(_end, 32);
+    __tier_sram_extra_end = __tiku_stack_guard_start;
+    ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
+           "ERROR: DTCM statics overlap the stack guard")
+
     /* Shared SRAM (3 MB at 0x20080000), powered in tiku_crt_early.c. Holds the
      * large volatile tier backing buffers (.ssram), zero-initialised by the
      * reset handler after the SSRAM is powered. ALIGN(32) for an MPU region
@@ -235,7 +245,7 @@ SECTIONS
     } > SSRAM
 
     /*
-     * SRAM TIER -- the rest of the shared bank, less a small reserve.
+     * PRIMARY SRAM TIER SPAN -- the rest of the shared bank.
      *
      * Derived rather than compiled in, for the reason the RA8P1 script gives:
      * a constant has to be chosen per build configuration and silently stops
@@ -247,23 +257,15 @@ SECTIONS
      * (__ssram_start..__ssram_end), which the allocator has never needed --
      * it does not promise zeroed memory.
      */
-    /* The reserve protects nothing here: the stack lives in TCM and nothing
-     * sits above the tier in this bank.  The figure is arbitrary, kept equal
-     * to the stack-side ports' margin; reclaim it if the capacity is wanted.
-     */
+    /* No tail reserve: the stack and its guard live in TCM, not SSRAM. */
     __tiku_tier_span_start      = __ssram_top;
     __tiku_tier_span_limit      = ORIGIN(SSRAM) + LENGTH(SSRAM);
-    __tiku_tier_reserve_default = 32K;
+    __tiku_tier_reserve_default = 0;
     __tiku_tier_floor_default   = 0x50000;
     INCLUDE arch/common/tiku_sram_layout.ld
 
-    /* Sanity: leave >=4 KB between end-of-statics and the stack top. */
-    /* The MPU reserves 32 KB of stack budget + a 4 KB no-access guard below
-     * the stack top (tiku_mpu_arch.c).  Statics that reach into that band
-     * pass a naive headroom check and then MemManage-fault at boot -- the
-     * assert must cover the full reservation, not 4 KB. */
-    ASSERT((__stack - _end) >= 0xA000,
-           "ERROR: DTCM exhausted — less than 4 KB free for stack")
+    ASSERT(_end <= __tiku_stack_guard_start,
+           "ERROR: DTCM exhausted — need 32K stack plus 4K guard")
 
     /* The mirror holds the 16-byte V2 header and the whole .uninit image. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),

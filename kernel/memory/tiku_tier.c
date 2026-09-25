@@ -74,7 +74,8 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 #if defined(TIKU_TIER_SRAM_DERIVED)
 /* Every ARM part: the linker carves the span from whatever its tier bank has
  * left after the statics (arch/common/tiku_sram_layout.ld -- .bss on
- * RA8P1/RP2350/L15, .ssram on Ambiq, .ram2 on LM20).  No array, so no size
+ * RA8P1/RP2350/L15, .ssram on Ambiq, .ram2 on LM20). Apollo and LM20 also
+ * expose spare lower RAM through the additional span below. No array, so no size
  * to keep in step with the build configuration, and nothing for the crt to
  * zero -- the allocator does not promise zeroed memory. */
 extern uint8_t __tier_sram_start;
@@ -90,6 +91,16 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 #ifndef TIER_SRAM_BUF
 #define TIER_SRAM_BUF  (tier_sram_buf)
 #define TIER_SRAM_CAP  ((tiku_mem_arch_size_t)TIKU_TIER_SRAM_SIZE)
+#endif
+
+#if defined(TIKU_TIER_SRAM_EXTRA)
+#ifndef TIER_SRAM_EXTRA_BUF
+extern uint8_t __tier_sram_extra_start;
+extern uint8_t __tier_sram_extra_end;
+#define TIER_SRAM_EXTRA_BUF (&__tier_sram_extra_start)
+#define TIER_SRAM_EXTRA_CAP ((tiku_mem_arch_size_t)(\
+    (uintptr_t)&__tier_sram_extra_end - (uintptr_t)&__tier_sram_extra_start))
+#endif
 #endif
 
 /**
@@ -160,6 +171,29 @@ typedef struct {
  */
 static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
 
+#if defined(TIKU_TIER_SRAM_EXTRA)
+/* One additional, disjoint SRAM span. No overhead on single-span targets. */
+static tier_pool_state_t sram_extra;
+static tiku_mem_arch_size_t sram_peak;
+#endif
+
+/** @brief Resolve a concrete tier's backing span, without merging addresses. */
+static tier_pool_state_t *tier_span(tiku_mem_tier_t tier, uint8_t index)
+{
+    if (tier == TIKU_MEM_AUTO || (unsigned)tier >= TIKU_MEM_TIER_COUNT) {
+        return NULL;
+    }
+    if (index == 0u) {
+        return &tier_state[tier];
+    }
+#if defined(TIKU_TIER_SRAM_EXTRA)
+    if (tier == TIKU_MEM_SRAM && index == 1u) {
+        return &sram_extra;
+    }
+#endif
+    return NULL;
+}
+
 /** @brief Bytes a carve may still take: the free room below any loan. */
 static tiku_mem_arch_size_t tier_room(const tier_pool_state_t *ts)
 {
@@ -172,6 +206,30 @@ static void tier_note_peak(tier_pool_state_t *ts)
     if (ts->offset + ts->lent > ts->peak) {
         ts->peak = ts->offset + ts->lent;
     }
+#if defined(TIKU_TIER_SRAM_EXTRA)
+    if (ts == &tier_state[TIKU_MEM_SRAM] || ts == &sram_extra) {
+        tiku_mem_arch_size_t used = tier_state[TIKU_MEM_SRAM].offset +
+            tier_state[TIKU_MEM_SRAM].lent + sram_extra.offset + sram_extra.lent;
+        if (used > sram_peak) {
+            sram_peak = used;
+        }
+    }
+#endif
+}
+
+/** @brief Best fitting single span; keep larger spans available for big arenas. */
+static tier_pool_state_t *tier_fit(tiku_mem_tier_t tier,
+                                    tiku_mem_arch_size_t size)
+{
+    tier_pool_state_t *best = NULL, *ts;
+    uint8_t i;
+    for (i = 0; (ts = tier_span(tier, i)) != NULL; i++) {
+        if (ts->initialized && size <= tier_room(ts) &&
+            (best == NULL || tier_room(ts) < tier_room(best))) {
+            best = ts;
+        }
+    }
+    return best;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -252,7 +310,15 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_SRAM].lent        = 0;
     tier_state[TIKU_MEM_SRAM].peak        = 0;
     tier_state[TIKU_MEM_SRAM].alloc_count = 0;
+    tier_state[TIKU_MEM_SRAM].fail_count  = 0;
     tier_state[TIKU_MEM_SRAM].initialized = 1;
+#if defined(TIKU_TIER_SRAM_EXTRA)
+    memset(&sram_extra, 0, sizeof sram_extra);
+    sram_extra.buf = TIER_SRAM_EXTRA_BUF;
+    sram_extra.capacity = TIER_SRAM_EXTRA_CAP;
+    sram_extra.initialized = 1;
+    sram_peak = 0;
+#endif
 #if defined(TIKU_TIER_POISON)
     /*
      * On the parts whose tier the linker carves, the span sits outside the
@@ -264,9 +330,12 @@ static void tier_wire_all(void)
      */
     {
         size_t pi;
-        uint8_t *pb = TIER_SRAM_BUF;
-        for (pi = 0; pi < (size_t)TIER_SRAM_CAP; pi++) {
-            pb[pi] = 0xA5u;
+        uint8_t si;
+        tier_pool_state_t *span;
+        for (si = 0; (span = tier_span(TIKU_MEM_SRAM, si)) != NULL; si++) {
+            for (pi = 0; pi < (size_t)span->capacity; pi++) {
+                span->buf[pi] = 0xA5u;
+            }
         }
     }
 #endif
@@ -312,6 +381,7 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_NVM].lent        = 0;
     tier_state[TIKU_MEM_NVM].peak        = 0;
     tier_state[TIKU_MEM_NVM].alloc_count = 0;
+    tier_state[TIKU_MEM_NVM].fail_count  = 0;
 
 #if TIKU_TIER_HIFRAM_AVAILABLE
     tier_state[TIKU_MEM_HIFRAM].buf         = tier_hifram_buf;
@@ -320,6 +390,7 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_HIFRAM].lent        = 0;
     tier_state[TIKU_MEM_HIFRAM].peak        = 0;
     tier_state[TIKU_MEM_HIFRAM].alloc_count = 0;
+    tier_state[TIKU_MEM_HIFRAM].fail_count  = 0;
     tier_state[TIKU_MEM_HIFRAM].initialized = 1;
 #endif
 }
@@ -389,8 +460,7 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
 #endif
 
     /* Small allocations prefer SRAM. */
-    if (tier_state[TIKU_MEM_SRAM].initialized &&
-        aligned <= tier_room(&tier_state[TIKU_MEM_SRAM])) {
+    if (aligned >= size && tier_fit(TIKU_MEM_SRAM, aligned) != NULL) {
         return TIKU_MEM_SRAM;
     }
 
@@ -420,7 +490,7 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
  * @return Pointer to the sub-buffer, or NULL
  */
 static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
-                                 tiku_mem_arch_size_t size)
+                                  tiku_mem_arch_size_t size, int span_index)
 {
     tier_pool_state_t *ts;
     tiku_mem_arch_size_t aligned = align_up(size);
@@ -429,14 +499,11 @@ static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
     if (tier == TIKU_MEM_AUTO || (unsigned)tier >= TIKU_MEM_TIER_COUNT) {
         return NULL;
     }
-    ts = &tier_state[tier];
-    if (!ts->initialized) {
-        ts->fail_count++;
-        return NULL;
-    }
-
-    if (aligned > tier_room(ts)) {
-        ts->fail_count++;
+    ts = span_index < 0 ? tier_fit(tier, aligned) :
+                         tier_span(tier, (uint8_t)span_index);
+    if (aligned < size || ts == NULL || !ts->initialized ||
+        aligned > tier_room(ts)) {
+        tier_state[tier].fail_count++;
         return NULL;
     }
 
@@ -452,12 +519,14 @@ static uint8_t *tier_bump_alloc(tiku_mem_tier_t tier,
 /* LOAN FROM THE TOP OF A TIER                                               */
 /*---------------------------------------------------------------------------*/
 
-void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
-                       tiku_mem_arch_size_t align)
+static void *tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
+                         tiku_mem_arch_size_t align, int span_index)
 {
     TIKU_MEM_KERNEL_ONLY(NULL);
     tier_pool_state_t *ts;
-    uintptr_t top, at;
+    tier_pool_state_t *best = NULL;
+    uintptr_t top, at, chosen = 0u;
+    uint8_t i;
 
     /* NVM is written through tiku_tier_nvm_write(), so a plain buffer
      * there would be a trap for the borrower rather than a loan. */
@@ -466,41 +535,63 @@ void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
         align == 0u || (align & (align - 1u)) != 0u) {
         return NULL;
     }
-    ts = &tier_state[tier];
-    if (!ts->initialized || ts->lent != 0u) {
+    for (i = 0; (ts = tier_span(tier, i)) != NULL; i++) {
+        /* Preserve the contract: one outstanding loan per TIER. */
+        if (ts->lent != 0u) {
+            return NULL;
+        }
+        if ((span_index >= 0 && i != span_index) ||
+            !ts->initialized || size > tier_room(ts)) {
+            continue;
+        }
+        top = (uintptr_t)ts->buf + ts->capacity;
+        at = (top - size) & ~(uintptr_t)(align - 1u);
+        if (at >= (uintptr_t)ts->buf + ts->offset &&
+            (best == NULL || tier_room(ts) < tier_room(best))) {
+            best = ts;
+            chosen = at;
+        }
+    }
+    if (best == NULL) {
+        tier_state[tier].fail_count++;
         return NULL;
     }
-    if (size > tier_room(ts)) {
-        ts->fail_count++;
-        return NULL;
-    }
-    top = (uintptr_t)ts->buf + ts->capacity;
-    at = (top - size) & ~(uintptr_t)(align - 1u);
-    if (at < (uintptr_t)ts->buf + ts->offset) {
-        ts->fail_count++;               /* the alignment slack did not fit */
-        return NULL;
-    }
-    ts->lent = (tiku_mem_arch_size_t)(top - at);
-    tier_note_peak(ts);
-    return (void *)at;
+    best->lent = (tiku_mem_arch_size_t)(
+        (uintptr_t)best->buf + best->capacity - chosen);
+    tier_note_peak(best);
+    return (void *)chosen;
+}
+
+void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
+                       tiku_mem_arch_size_t align)
+{
+    return tier_borrow(tier, size, align, -1);
+}
+
+void *tiku_tier_borrow_span(tiku_mem_tier_t tier, uint8_t span_index,
+                            tiku_mem_arch_size_t size, tiku_mem_arch_size_t align)
+{
+    return tier_borrow(tier, size, align, span_index);
 }
 
 tiku_mem_err_t tiku_tier_return(tiku_mem_tier_t tier, void *p)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tier_pool_state_t *ts;
+    uint8_t i;
 
     if (tier == TIKU_MEM_AUTO || (unsigned)tier >= TIKU_MEM_TIER_COUNT ||
         p == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
-    ts = &tier_state[tier];
-    if (!ts->initialized || ts->lent == 0u ||
-        (uint8_t *)p != ts->buf + (ts->capacity - ts->lent)) {
-        return TIKU_MEM_ERR_INVALID;
+    for (i = 0; (ts = tier_span(tier, i)) != NULL; i++) {
+        if (ts->initialized && ts->lent != 0u &&
+            (uint8_t *)p == ts->buf + (ts->capacity - ts->lent)) {
+            ts->lent = 0u;
+            return TIKU_MEM_OK;
+        }
     }
-    ts->lent = 0u;
-    return TIKU_MEM_OK;
+    return TIKU_MEM_ERR_INVALID;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -522,22 +613,23 @@ tiku_mem_err_t tiku_tier_return(tiku_mem_tier_t tier, void *p)
  *         arguments, TIKU_MEM_ERR_NOMEM if the resolved tier lacks
  *         room (or is not initialized, e.g. HIFRAM on a small build)
  */
-tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
+static tiku_mem_err_t tier_arena_create(tiku_arena_t *arena,
                                        tiku_mem_tier_t tier,
                                        tiku_mem_arch_size_t size,
-                                       uint8_t id)
+                                       uint8_t id, int span_index)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_tier_t resolved;
     tiku_mem_arch_size_t aligned;
     uint8_t *buf;
 
-    if (arena == NULL || size == 0) {
+    if (arena == NULL || size == 0 ||
+        (span_index >= 0 && tier_span(tier, (uint8_t)span_index) == NULL)) {
         return TIKU_MEM_ERR_INVALID;
     }
 
-    resolved = resolve_tier(tier, size);
-    buf = tier_bump_alloc(resolved, size);
+    resolved = span_index < 0 ? resolve_tier(tier, size) : tier;
+    buf = tier_bump_alloc(resolved, size, span_index);
 
     if (buf == NULL) {
         return TIKU_MEM_ERR_NOMEM;
@@ -567,6 +659,19 @@ tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
     arena->tier     = resolved;
 
     return TIKU_MEM_OK;
+}
+
+tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena, tiku_mem_tier_t tier,
+                                      tiku_mem_arch_size_t size, uint8_t id)
+{
+    return tier_arena_create(arena, tier, size, id, -1);
+}
+
+tiku_mem_err_t tiku_tier_arena_create_span(tiku_arena_t *arena,
+        tiku_mem_tier_t tier, uint8_t span_index, tiku_mem_arch_size_t size,
+        uint8_t id)
+{
+    return tier_arena_create(arena, tier, size, id, span_index);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -630,7 +735,7 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
     total = aligned_blk * block_count;
 
     resolved = resolve_tier(tier, total);
-    buf = tier_bump_alloc(resolved, total);
+    buf = tier_bump_alloc(resolved, total, -1);
 
     if (buf == NULL) {
         return TIKU_MEM_ERR_NOMEM;
@@ -693,15 +798,16 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
      * every concrete tier (SRAM, NVM, HIFRAM) and skips AUTO, which
      * never has its own backing pool. */
     for (i = 0; i < TIKU_MEM_TIER_COUNT; i++) {
+        uint8_t si;
+        tier_pool_state_t *ts;
         if (i == TIKU_MEM_AUTO) {
             continue;
         }
-        if (tier_state[i].initialized) {
-            uintptr_t pool_start = (uintptr_t)tier_state[i].buf;
+        for (si = 0; (ts = tier_span((tiku_mem_tier_t)i, si)) != NULL; si++) {
+            uintptr_t pool_start = (uintptr_t)ts->buf;
 
-            if (addr >= pool_start &&
-                (addr - pool_start) <
-                    (uintptr_t)tier_state[i].capacity) {
+            if (ts->initialized && addr >= pool_start &&
+                (addr - pool_start) < (uintptr_t)ts->capacity) {
                 *out_tier = (tiku_mem_tier_t)i;
                 return TIKU_MEM_OK;
             }
@@ -781,7 +887,36 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
     stats->peak_bytes  = ts->peak;
     stats->alloc_count = ts->alloc_count;
     stats->fail_count  = ts->fail_count;
+#if defined(TIKU_TIER_SRAM_EXTRA)
+    if (tier == TIKU_MEM_SRAM) {
+        stats->total_bytes += sram_extra.capacity;
+        stats->used_bytes += sram_extra.offset + sram_extra.lent;
+        stats->alloc_count += sram_extra.alloc_count;
+        stats->fail_count += sram_extra.fail_count;
+        stats->peak_bytes = sram_peak;
+    }
+#endif
 
+    return TIKU_MEM_OK;
+}
+
+tiku_mem_err_t tiku_tier_span_stats(tiku_mem_tier_t tier, uint8_t index,
+                                    const uint8_t **base,
+                                    tiku_mem_stats_t *stats)
+{
+    const tier_pool_state_t *ts = tier_span(tier, index);
+    if (base == NULL || stats == NULL) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    if (ts == NULL || !ts->initialized) {
+        return TIKU_MEM_ERR_NOT_FOUND;
+    }
+    *base = ts->buf;
+    stats->total_bytes = ts->capacity;
+    stats->used_bytes = ts->offset + ts->lent;
+    stats->peak_bytes = ts->peak;
+    stats->alloc_count = ts->alloc_count;
+    stats->fail_count = ts->fail_count;
     return TIKU_MEM_OK;
 }
 

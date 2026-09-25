@@ -54,24 +54,9 @@
 #define MPU_RAM_SIZE      ARM_MPU_REGION_SIZE_2MB
 #endif
 
-/** Stack guard placed this far below the stack top (mirrors the apollo510
- *  budget); the kernel's stack stays well within 32 KB.  4 KB wide, not 32 B:
- *  a KB-sized overflow frame leaps a narrow guard -- the descending SP skips
- *  the hole into .bss -- so it must be as wide as the largest frame. */
-#define MPU_STACK_RESERVED_BYTES  32768U
-#define MPU_STACK_GUARD_BYTES     4096U
-
-/** Top of TCM = stack base (apollo4l.ld); the guard sits below it. */
-extern uint32_t __sram_end;
-
-/** Base of the stack-guard region.  ONE expression shared by the region arming
- *  below and tiku_stack_arch_bottom(), so guard placement and paint bound
- *  cannot diverge.  PMSAv7 needs a 4 KB region 4 KB aligned, and RESERVED and
- *  GUARD are 4 KB multiples, so the align-down keeps >= 32 KB of stack. */
-#define MPU_STACK_GUARD_BASE()                                              \
-    (((uint32_t)(uintptr_t)&__sram_end                                      \
-      - MPU_STACK_RESERVED_BYTES - MPU_STACK_GUARD_BYTES)                   \
-     & ~(MPU_STACK_GUARD_BYTES - 1U))
+/* Linker-owned 32K stack and 4K guard; the script asserts 4K alignment. */
+extern uint32_t __tiku_stack_bottom;
+extern uint32_t __tiku_stack_guard_start;
 
 /**
  * Stack-paint floor for /sys/mem/stack_free (kernel/cpu/tiku_stack): the first
@@ -80,7 +65,7 @@ extern uint32_t __sram_end;
  */
 uint32_t tiku_stack_arch_bottom(void)
 {
-    return MPU_STACK_GUARD_BASE() + MPU_STACK_GUARD_BYTES;
+    return (uint32_t)(uintptr_t)&__tiku_stack_bottom;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -200,15 +185,13 @@ void tiku_mpu_arch_init_segments(void) {
         ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_FULL, 1U, 0U, 0U, 0U, 0U,
                      MPU_RAM_SIZE));
 
-    /* Region 2: 4 KB stack guard, MPU_STACK_RESERVED_BYTES below the stack
+    /* Region 2: 4 KB stack guard, below the 32 KB stack
      * top -- no access, execute-never. PMSAv7 gives the highest-numbered region
      * precedence on overlap, so this overrides region 1's RW for its 4 KB:
      * a stack that overflows past its budget faults here before it can reach
      * .data/.bss/.uninit far below. */
     {
-        /* Base from the shared macro (also the stack-paint floor's anchor)
-         * -- see MPU_STACK_GUARD_BASE() above for the alignment rationale. */
-        uint32_t guard = MPU_STACK_GUARD_BASE();
+        uint32_t guard = (uint32_t)(uintptr_t)&__tiku_stack_guard_start;
         ARM_MPU_SetRegion(
             ARM_MPU_RBAR(MPU_REGION_STACK_GUARD, guard),
             ARM_MPU_RASR(1U /* XN */, ARM_MPU_AP_NONE, 1U, 0U, 0U, 0U, 0U,

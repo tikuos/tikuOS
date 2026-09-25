@@ -107,6 +107,8 @@ __tiku_nvm_rram_end   = __tiku_layout_top;
 /* The Cortex-M loads the initial SP from vector[0]; place it at the top of
  * SRAM and let the stack grow down toward .bss. */
 __stack = __sram_end;
+__tiku_stack_bottom = __stack - 32K;
+__tiku_stack_guard_start = __tiku_stack_bottom - 4K;
 
 SECTIONS
 {
@@ -184,14 +186,14 @@ SECTIONS
     /* SRAM headroom: the ARMv8-M MPU stack budget (32 KB reserve + 4 KB
      * RO guard, programmed in tiku_mpu_arch.c) must fit above the statics
      * -- rp2350-parity sizing. */
-    ASSERT((__stack - _end) >= 0x9000,
+    ASSERT(_end <= __tiku_stack_guard_start,
            "ERROR: SRAM exhausted — need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
 
     /* The SRAM tier fills the single bank between the statics and the MPU
      * stack budget.  No further reserve: the bank is tight (240 KB), and
      * the floor plus the budget already carry the contract. */
     __tiku_tier_span_start      = ALIGN(_end, 32);
-    __tiku_tier_span_limit      = __stack - 0x9000;
+    __tiku_tier_span_limit      = __tiku_stack_guard_start;
     __tiku_tier_reserve_default = 0;
     __tiku_tier_floor_default   = 4K;
     INCLUDE arch/common/tiku_sram_layout.ld

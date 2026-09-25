@@ -1561,8 +1561,8 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
 /*
  * Borrowed from the SRAM tier for one operation and given back after it.  As
  * a static buffer it took 512 KB from the tier in every image with the driver
- * in it, used or not.  The tier is SSRAM, where this part's large DMA-touched
- * buffers live.  The +4 is deliberate headroom for the unaligned leg below.
+ * in it, used or not. Pin to SRAM span 0 (SSRAM), where this part's large
+ * DMA-touched buffers live. The +4 is headroom for the unaligned leg below.
  */
 #define BENCH_LOAN    (BENCH_BYTES + 4u)
 static uint8_t *s_bench_buf;
@@ -1574,8 +1574,8 @@ static uint8_t s_dtcm_buf[4096] __attribute__((aligned(32)));
 static int bench_buf_borrow(void)
 {
     if (s_bench_buf == NULL) {
-        s_bench_buf = (uint8_t *)tiku_tier_borrow(TIKU_MEM_SRAM, BENCH_LOAN,
-                                                  32u);
+        s_bench_buf = (uint8_t *)tiku_tier_borrow_span(TIKU_MEM_SRAM, 0,
+                                                       BENCH_LOAN, 32u);
     }
     return s_bench_buf != NULL;
 }

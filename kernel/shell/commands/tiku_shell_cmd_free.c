@@ -65,6 +65,8 @@ extern char __tier_sram_start;
 extern char __tier_sram_end;
 #endif
 extern char __stack;        /* top of SRAM (stack origin)      */
+extern char __tiku_stack_bottom __attribute__((weak));
+extern char __tiku_stack_guard_start __attribute__((weak));
 
 /* --- FRAM boundaries --- */
 extern char _etext;         /* past last byte of .text         */
@@ -125,7 +127,7 @@ stack_used(void)
         return top - sp;
     }
     return 0;
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
     /* Cortex-M: 32-bit SP. Truncated to uint16_t -- the peak usage a
      * microcontroller realistically reports fits comfortably. */
     uintptr_t sp;
@@ -153,6 +155,11 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     unsigned long sram_static;
     unsigned long fram_total;
     unsigned long fram_used;
+    unsigned long stack_budget;
+    uintptr_t stack_bottom = (uintptr_t)&__tiku_stack_bottom;
+    uintptr_t guard_start = (uintptr_t)&__tiku_stack_guard_start;
+    int bounded_stack = guard_start >= (uintptr_t)&_end &&
+        stack_bottom >= guard_start && stack_bottom <= (uintptr_t)&__stack;
     uint8_t proc_count = 0;
 
     (void)argc;
@@ -222,28 +229,33 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
 #if defined(TIKU_TIER_SRAM_DERIVED)
     {
-        uintptr_t tier_lo = (uintptr_t)&__tier_sram_start;
-        uintptr_t tier_hi = (uintptr_t)&__tier_sram_end;
         uintptr_t bank_lo = (uintptr_t)&__datastart;
-        unsigned long tier_span = (unsigned long)(tier_hi - tier_lo);
-
-        SHELL_PRINTF("  tier arena  %5lu\n", tier_span);
-        /* Only the parts that carve the tier from the SAME bank as the
-         * statics (RA8P1, RP2350) may fold it into that bank's leftover.
-         * Ambiq and STM32N6 carve it from a second bank -- SSRAM, AXISRAM
-         * -- so folding it into the image bank's total underflows the
-         * stack+free line.  Its capacity is the runtime tier line below. */
-        if (tier_lo >= bank_lo && tier_hi <= bank_lo + sram_total) {
-            sram_static += tier_span;
+        const uint8_t *base;
+        tiku_mem_stats_t st;
+        uint8_t si;
+        (void)tiku_tier_init();
+        for (si = 0; tiku_tier_span_stats(TIKU_MEM_SRAM, si, &base, &st)
+                     == TIKU_MEM_OK; si++) {
+            uintptr_t start = (uintptr_t)base;
+            int primary = start >= bank_lo && start <= bank_lo + sram_total &&
+                          st.total_bytes <= bank_lo + sram_total - start;
+            SHELL_PRINTF("  tier bank%u  %5lu\n", primary ? 1u : 2u,
+                         (unsigned long)st.total_bytes);
+            if (primary) { sram_static += st.total_bytes; }
         }
     }
 #endif
-    /* What's left of SRAM after static data: hosts the stack and any
-     * future heap. Not "reserved" in any protective sense — it's the
-     * available pool. Stack-now / free-now under "Runtime" below
-     * partition this number. */
-    SHELL_PRINTF("  stack+free  %5lu\n",
-                 (unsigned long)(sram_total - sram_static));
+    stack_budget = sram_total > sram_static ? sram_total - sram_static : 0UL;
+    if (bounded_stack) {
+        unsigned long reserved = (uintptr_t)&__stack - guard_start;
+        SHELL_PRINTF("  unassigned  %5lu\n",
+                     stack_budget > reserved ? stack_budget - reserved : 0UL);
+        stack_budget = (uintptr_t)&__stack - stack_bottom;
+        SHELL_PRINTF("  stack       %5lu\n", stack_budget);
+        SHELL_PRINTF("  guard       %5lu\n", (unsigned long)(stack_bottom - guard_start));
+    } else {
+        SHELL_PRINTF("  stack+free  %5lu\n", stack_budget);
+    }
 
     SHELL_PRINTF(SH_BOLD "%s" SH_RST "  %5lu total"
 #if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
@@ -311,8 +323,8 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                          sram_tier.peak_bytes);
         }
     }
-    SHELL_PRINTF("  free now    " SH_BOLD "%5lu" SH_RST "\n",
-                 (unsigned long)(sram_total - sram_static - stack_used()));
+    SHELL_PRINTF("  stack free  " SH_BOLD "%5lu" SH_RST "\n",
+                 stack_budget > stack_used() ? stack_budget - stack_used() : 0UL);
 
     /* FRAM: unallocated + tier allocator */
     SHELL_PRINTF(SH_BOLD "%s" SH_RST "\n", TIKU_DEVICE_NVM_LABEL);

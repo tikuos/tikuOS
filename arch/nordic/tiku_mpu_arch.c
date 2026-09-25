@@ -158,8 +158,8 @@ void tiku_mpu_arch_enable_irq(void)  { /* no MPU violation IRQ on this port */ }
 
 /* Stack budget + guard (rp2350-proven values; keep in lockstep with the
  * TikuBench MPU test constants there). */
-#define NRF_MPU_STACK_RESERVED_BYTES  32768U
-#define NRF_MPU_STACK_GUARD_BYTES     4096U
+extern uint32_t __tiku_stack_bottom;
+extern uint32_t __tiku_stack_guard_start;
 
 extern uint32_t __sram_start;
 extern uint32_t __stack;
@@ -193,8 +193,8 @@ static void nrf_mpu_program_regions(void)
 {
     uint32_t sram_base  = (uint32_t)(uintptr_t)&__sram_start;
     uint32_t stack_top  = (uint32_t)(uintptr_t)&__stack;
-    uint32_t guard_end  = stack_top - NRF_MPU_STACK_RESERVED_BYTES;
-    uint32_t guard_base = guard_end - NRF_MPU_STACK_GUARD_BYTES;
+    uint32_t guard_end  = (uint32_t)(uintptr_t)&__tiku_stack_bottom;
+    uint32_t guard_base = (uint32_t)(uintptr_t)&__tiku_stack_guard_start;
 
     /* MAIR0 attr 0 = Normal memory, non-cacheable (0x44). */
     NRF_SCS_MPU_MAIR0 = 0x44UL;
@@ -291,7 +291,7 @@ void     tiku_mpu_arch_enable_violation_nmi(void)  { /* no violation NMI  */ }
 extern uint32_t __sram_end;
 uint32_t tiku_stack_arch_bottom(void)
 {
-    return (uint32_t)(uintptr_t)&__stack - NRF_MPU_STACK_RESERVED_BYTES;
+    return (uint32_t)(uintptr_t)&__tiku_stack_bottom;
 }
 
 /**

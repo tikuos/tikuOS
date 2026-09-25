@@ -51,7 +51,7 @@ static const uint8_t panel_glyphs[6][8] = {
 };
 
 /**
- * @brief Claim a framebuffer of the screen's own size.
+ * @brief Claim a framebuffer from the peripheral-accessible primary SRAM span.
  *
  * @return Base address, or NULL when no tier has room
  */
@@ -70,7 +70,7 @@ panel_claim(void)
     bytes = (uint32_t)w * h * tiku_display_bpp();
 
     if (tiku_tier_init() != TIKU_MEM_OK ||
-        tiku_tier_arena_create(&arena, TIKU_MEM_SRAM, bytes, 70)
+        tiku_tier_arena_create_span(&arena, TIKU_MEM_SRAM, 0, bytes, 70)
             != TIKU_MEM_OK) {
         return 0;
     }

@@ -191,7 +191,7 @@ typedef enum {
  * record it for introspection.
  */
 typedef enum {
-    TIKU_MEM_SRAM   = 0, /**< Fast, volatile — for hot/temporary data */
+    TIKU_MEM_SRAM   = 0, /**< Volatile working memory; may span multiple banks */
     TIKU_MEM_NVM    = 1, /**< Persistent, slower writes — for cold/stable data */
     TIKU_MEM_AUTO   = 2, /**< OS selects directly writable SRAM or HIFRAM only */
     TIKU_MEM_HIFRAM = 3, /**< Upper FRAM bank (FR5994/FR6989, MEMORY_MODEL=large) */
@@ -1271,6 +1271,17 @@ tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
                                        uint8_t id);
 
 /**
+ * @brief Allocate from exactly one backing span, never falling back elsewhere.
+ *
+ * Requires a concrete tier, not AUTO. On Apollo, SRAM span 0 is shared SRAM;
+ * use it for peripheral buffers that cannot live in CPU-local TCM (span 1).
+ * Span selection alone does not guarantee DMA alignment or cache coherence.
+ */
+tiku_mem_err_t tiku_tier_arena_create_span(tiku_arena_t *arena,
+        tiku_mem_tier_t tier, uint8_t span_index, tiku_mem_arch_size_t size,
+        uint8_t id);
+
+/**
  * @brief Create a pool backed by the specified memory tier
  *
  * Allocates a buffer from the tier's backing pool and initializes
@@ -1307,6 +1318,15 @@ void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
                        tiku_mem_arch_size_t align);
 
 /**
+ * @brief Lend from exactly one span, with the same one-loan-per-tier rule.
+ *
+ * No fallback to another span; return with tiku_tier_return(). On Apollo,
+ * SRAM span 0 preserves shared-SRAM placement for peripheral transfers.
+ */
+void *tiku_tier_borrow_span(tiku_mem_tier_t tier, uint8_t span_index,
+                            tiku_mem_arch_size_t size, tiku_mem_arch_size_t align);
+
+/**
  * @brief Give back the loan tiku_tier_borrow() made from @p tier.
  *
  * @return TIKU_MEM_OK, or TIKU_MEM_ERR_INVALID when @p p is not that loan
@@ -1330,7 +1350,8 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 /**
  * @brief Get usage statistics for a tier's backing pool
  *
- * A loan counts as used while it is out.
+ * Totals cover all backing spans; a loan counts as used while it is out.
+ * Free capacity can be split: a single allocation must fit in one span.
  *
  * @param tier   Memory tier to query (SRAM or NVM, not AUTO)
  * @param stats  Output statistics
@@ -1339,6 +1360,17 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
  */
 tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
                                 tiku_mem_stats_t *stats);
+
+/**
+ * @brief Inspect one contiguous backing span; NOT_FOUND ends enumeration.
+ *
+ * Tier totals aggregate spans, but each allocation must fit within one span.
+ * Index zero is the primary span. This does not initialise or change the tier.
+ * Failed whole-tier requests are counted on the primary span.
+ */
+tiku_mem_err_t tiku_tier_span_stats(tiku_mem_tier_t tier, uint8_t index,
+                                    const uint8_t **base,
+                                    tiku_mem_stats_t *stats);
 
 /**
  * @brief Write into NVM-tier memory through the correct backing path.

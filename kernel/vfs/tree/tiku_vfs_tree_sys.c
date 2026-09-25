@@ -349,9 +349,9 @@ extern char __stack;
 /**
  * @brief Read handler for /sys/mem/free.
  *
- * Renders the live gap in bytes between the stack pointer -- read straight out
- * of the SP register, so it includes the VFS path's own frames -- and the end
- * of static data.  "0\n" means the stack has already met .bss/.data.
+ * Reports live SP headroom above static data, including this handler's frames.
+ * Nordic and Apollo use their explicit stack floor, excluding allocator space.
+ * Returns zero when the stack has reached that lower bound.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -369,7 +369,15 @@ mem_free_read(char *buf, size_t max)
         return snprintf(buf, max, "%u\n", sp - end_addr);
     }
     return snprintf(buf, max, "0\n");
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#elif defined(PLATFORM_NORDIC) || defined(PLATFORM_AMBIQ)
+    /* Lower-bank allocator space is not usable stack headroom. */
+    extern char __tiku_stack_bottom;
+    uintptr_t sp;
+    uintptr_t bottom = (uintptr_t)&__tiku_stack_bottom;
+    __asm__ volatile ("mov %0, sp" : "=r"(sp));
+    return snprintf(buf, max, "%lu\n",
+                    sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
+#elif defined(PLATFORM_RP2350)
     /* Cortex-M: 32-bit SP. The stack grows down from __stack toward
      * _end; live free space is (SP - _end). */
     uintptr_t sp;
@@ -760,6 +768,8 @@ extern char __sram_start __attribute__((weak));
 extern char __sram_end __attribute__((weak));
 extern char __tier_sram_start __attribute__((weak));
 extern char __tier_sram_end __attribute__((weak));
+extern char __tiku_stack_bottom __attribute__((weak));
+extern char __tiku_stack_guard_start __attribute__((weak));
 extern char __tiku_layout_code_cap __attribute__((weak));
 extern char __tiku_code_limit __attribute__((weak));
 extern char __data_load __attribute__((weak));
@@ -799,13 +809,16 @@ sram_map_read(char *buf, size_t max)
     unsigned long gap_lo = (unsigned long)(uintptr_t)&_end;
     unsigned long gap_hi = (unsigned long)(uintptr_t)&__stack;
     unsigned long stack = gap_hi > gap_lo ? gap_hi - gap_lo : 0UL;
-    unsigned long overlap_lo = tlo > gap_lo ? tlo : gap_lo;
-    unsigned long overlap_hi = thi < gap_hi ? thi : gap_hi;
+    unsigned long bottom = (unsigned long)(uintptr_t)&__tiku_stack_bottom;
+    unsigned long guard = (unsigned long)(uintptr_t)&__tiku_stack_guard_start;
+    unsigned long primary_tier = 0UL;
+    unsigned long static_lo = (unsigned long)(uintptr_t)&__datastart;
+    unsigned long statics = gap_lo >= static_lo ? gap_lo - static_lo : 0UL;
+    int bounded = guard >= gap_lo && bottom >= guard && bottom <= gap_hi;
     tiku_mem_stats_t st;
+    const uint8_t *base;
+    uint8_t si;
 
-    if (thi > tlo && overlap_hi > overlap_lo) {
-        stack -= overlap_hi - overlap_lo;
-    }
     if (max == 0) { return 0; }
     buf[0] = '\0';
     map_line(buf, max, &at, "bank\t%lu\n",
@@ -813,24 +826,34 @@ sram_map_read(char *buf, size_t max)
              0UL, 0UL);
     if (&__datastart != (char *)0) {
         map_line(buf, max, &at, "static\t%lu\n",
-                 (unsigned long)((uintptr_t)&_end - (uintptr_t)&__datastart),
+                 statics,
                  0UL, 0UL);
     }
-    map_line(buf, max, &at, "stack\t%lu\t%lu\n",
-             stack,
-             (unsigned long)tiku_stack_free(), 0UL);
     if (thi > tlo) {
-        unsigned long used = 0UL;
-
         (void)tiku_tier_init();
-        if (tiku_tier_stats(TIKU_MEM_SRAM, &st) == TIKU_MEM_OK) {
-            used = (unsigned long)st.used_bytes;
+        for (si = 0; tiku_tier_span_stats(TIKU_MEM_SRAM, si, &base, &st)
+                     == TIKU_MEM_OK; si++) {
+            unsigned long start = (unsigned long)(uintptr_t)base;
+            int primary = start >= lo && start <= hi &&
+                          st.total_bytes <= hi - start;
+            if (st.total_bytes == 0u) { continue; }
+            if (primary) { primary_tier += st.total_bytes; }
+            map_line(buf, max, &at, "tier\t%lu\t%lu\t%lu\n",
+                     st.total_bytes, st.used_bytes, primary ? 1UL : 2UL);
         }
-        /* Inside the primary bank, or a bank of its own: the one fact
-         * that says whether the arena is part of the bank above. */
-        map_line(buf, max, &at, "tier\t%lu\t%lu\t%lu\n", thi - tlo, used,
-                 (tlo >= lo && thi <= hi) ? 1UL : 2UL);
     }
+    if (bounded) {
+        unsigned long assigned = statics + primary_tier + gap_hi - guard;
+        stack = gap_hi - bottom;
+        map_line(buf, max, &at, "guard\t%lu\n", bottom - guard, 0UL, 0UL);
+        map_line(buf, max, &at, "unassigned\t%lu\n",
+                 hi - lo > assigned ? hi - lo - assigned : 0UL, 0UL, 0UL);
+    } else {
+        /* Older ports have no explicit guard symbols; retain their format. */
+        stack = stack >= primary_tier ? stack - primary_tier : 0UL;
+    }
+    map_line(buf, max, &at, "stack\t%lu\t%lu\n", stack,
+             (unsigned long)tiku_stack_free(), 0UL);
 #if defined(TIKU_DEVICE_RAM2_SIZE)
     map_line(buf, max, &at, "bank2\t%lu\n",
              (unsigned long)TIKU_DEVICE_RAM2_SIZE, 0UL, 0UL);

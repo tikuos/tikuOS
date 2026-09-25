@@ -21,18 +21,20 @@
 /** Bounds of the NOLOAD .uninit section in TCM (apollo4l.ld). */
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
+extern uint8_t __tier_sram_extra_start, __tier_sram_extra_end;
+extern uint8_t __ssram_bank_start, __ssram_bank_end;
 
 /** @brief Statically-allocated region table, built once on first call. */
-static tiku_mem_region_t       s_regions[5];
+static tiku_mem_region_t       s_regions[6];
 /** @brief Number of valid entries in s_regions; 0 until first call. */
 static tiku_mem_arch_size_t    s_region_count;
 
 /**
  * @brief Return the Apollo4 Lite physical memory-region table.
  *
- * Built lazily from linker symbols, then cached. Layout: TCM SRAM (RAM start ->
- * .uninit), NVM overlay on .uninit (omitted if empty), shared SRAM (1 MB @
- * 0x10060000), MRAM flash (above the boot region), and the peripheral aperture.
+ * Includes TCM statics, the durable overlay, free TCM below the guard,
+ * shared SRAM (1 MiB Lite / 2 MiB Plus), MRAM and peripherals.
+ * Bank and allocator boundaries come from the linker.
  *
  * @param count  Output: number of entries (may be NULL)
  * @return Pointer to the static region table (never NULL)
@@ -62,9 +64,20 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
             idx++;
         }
 
-        /* Shared SRAM (1 MB at 0x10060000). Hosts the large SRAM tier. */
-        s_regions[idx].base = (const uint8_t *)0x10060000UL;
-        s_regions[idx].size = (tiku_mem_arch_size_t)(1UL * 1024UL * 1024UL);
+        /* Starts beyond the entire 8K MPU envelope, not just its contents. */
+        if ((uintptr_t)&__tier_sram_extra_end >
+            (uintptr_t)&__tier_sram_extra_start) {
+            s_regions[idx].base = &__tier_sram_extra_start;
+            s_regions[idx].size = (uintptr_t)&__tier_sram_extra_end -
+                                 (uintptr_t)&__tier_sram_extra_start;
+            s_regions[idx].type = TIKU_MEM_REGION_SRAM;
+            idx++;
+        }
+
+        /* The linker owns the Lite/Plus shared-bank geometry. */
+        s_regions[idx].base = &__ssram_bank_start;
+        s_regions[idx].size = (uintptr_t)&__ssram_bank_end -
+                             (uintptr_t)&__ssram_bank_start;
         s_regions[idx].type = TIKU_MEM_REGION_SRAM;
         idx++;
 
