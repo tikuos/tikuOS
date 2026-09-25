@@ -50,8 +50,9 @@ typedef enum {
 
 /** @brief Operation phase kept in the record across a reboot. */
 typedef enum {
-    TIKU_LAYOUT_PHASE_NONE      = 0,
-    TIKU_LAYOUT_PHASE_REWRITING = 1 /**< authorisation consumed, not finished */
+    TIKU_LAYOUT_PHASE_NONE         = 0,
+    TIKU_LAYOUT_PHASE_REWRITING    = 1, /**< authorisation consumed, not finished */
+    TIKU_LAYOUT_PHASE_PROVISIONING = 2  /**< owned blank region, store unwritten */
 } tiku_layout_phase_t;
 
 /** @brief Results and receipts.  Receipts are stored, so never renumbered. */

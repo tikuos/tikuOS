@@ -167,7 +167,7 @@ rec_valid(const tiku_layout_record_t *r)
            r->request_method <= TIKU_LAYOUT_METHOD_ERASE &&
            r->n_applied <= TIKU_LAYOUT_KNOBS_MAX &&
            r->n_pending <= TIKU_LAYOUT_KNOBS_MAX &&
-           r->phase <= TIKU_LAYOUT_PHASE_REWRITING &&
+           r->phase <= TIKU_LAYOUT_PHASE_PROVISIONING &&
            r->method <= TIKU_LAYOUT_METHOD_ERASE;
 }
 
@@ -706,50 +706,102 @@ fresh_identity(const tiku_layout_env_t *e, tiku_layout_record_t *r)
     return TIKU_LAYOUT_OK;
 }
 
-/** @brief Finish blank-media setup before any consumer can write the tier.
+/**
+ * @brief Write the store the record already owns, then mark the record done.
  *
- * No record is published until formatting and the checked commit succeed.
- * An interrupted format/commit that leaves nonblank, unowned bytes is held on
- * the next boot, never adopted by scanning. Existing owned boots need no RNG.
+ * Runs on a fresh provisioning and on every boot that finds one unfinished:
+ * the format is repeatable, so a reset part way through costs nothing.
+ */
+static void
+finish_provision(const tiku_layout_env_t *e, tiku_layout_record_t *r,
+                 tiku_layout_state_t *st)
+{
+    tiku_nvm_backend_t be;
+    tiku_tfs_t fs;
+    sub_ctx_t c;
+    uint32_t base = applied_tier(e, r);
+
+    st->store   = TIKU_LAYOUT_STORE_HELD;
+    st->held    = TIKU_LAYOUT_HELD_IO;
+    st->tier    = 0u;
+    st->outcome = TIKU_LAYOUT_E_IO;
+    sub_backend(e, base, &c, &be);
+    if (tiku_tfs_init(&fs, &be) != TFS_OK) {
+        return;
+    }
+    r->phase = TIKU_LAYOUT_PHASE_NONE;
+    if (commit(e, r) != TIKU_LAYOUT_OK) {
+        return;
+    }
+    st->record  = TIKU_LAYOUT_RECORD_VALID;
+    st->tier    = base;
+    st->store   = TIKU_LAYOUT_STORE_READY;
+    st->held    = TIKU_LAYOUT_HELD_NONE;
+    st->outcome = TIKU_LAYOUT_OK;
+}
+
+/**
+ * @brief An empty store at the default base in an otherwise blank region.
+ *
+ * Only a provisioning whose last record write was cut leaves this: the store
+ * holds no file, so writing it again loses nothing.
+ */
+static int
+provision_cut(const tiku_layout_env_t *e)
+{
+    tiku_tfs_probe_t p;
+    size_t i;
+
+    if (!base_valid(e, e->default_tier) ||
+        tiku_tfs_locate(&e->region, e->step, NULL, 0) != 1) {
+        return 0;
+    }
+    probe_at(e, e->default_tier, &p);
+    if (p.kind != TFS_PROBE_COMPATIBLE || p.live != 0u) {
+        return 0;
+    }
+    for (i = 1u; i < e->default_tier; i++) {
+        if (e->region.base[i] != e->region.base[0]) {
+            return 0;
+        }
+    }
+    return e->region.base[0] == 0x00u || e->region.base[0] == 0xFFu;
+}
+
+/**
+ * @brief Take ownership of a blank region, then write its store.
+ *
+ * The record is committed as provisioning before any store byte is written,
+ * so a reset in between leaves an owned region the next boot finishes rather
+ * than an unowned store it must hold.  Entropy failure touches nothing.
  */
 static void
 boot_provision(const tiku_layout_env_t *e, tiku_layout_state_t *st)
 {
     tiku_layout_record_t r;
-    tiku_nvm_backend_t be;
-    tiku_tfs_t fs;
-    sub_ctx_t c;
     int rc;
 
-    st->store = TIKU_LAYOUT_STORE_HELD;
-    st->held = TIKU_LAYOUT_HELD_IO;
+    st->store   = TIKU_LAYOUT_STORE_HELD;
+    st->held    = TIKU_LAYOUT_HELD_IO;
     st->outcome = TIKU_LAYOUT_E_IO;
     if (!base_valid(e, e->default_tier)) {
-        st->held = TIKU_LAYOUT_HELD_GEOMETRY;
+        st->held    = TIKU_LAYOUT_HELD_GEOMETRY;
         st->outcome = TIKU_LAYOUT_E_RANGE;
         return;
     }
     rec_fresh(e, &r);
     rc = fresh_identity(e, &r);
     if (rc != TIKU_LAYOUT_OK) {
-        st->held = TIKU_LAYOUT_HELD_ENTROPY;
+        st->held    = TIKU_LAYOUT_HELD_ENTROPY;
         st->outcome = (int16_t)rc;
         return;
     }
-    sub_backend(e, e->default_tier, &c, &be);
-    if (tiku_tfs_mount(&fs, &be) != TFS_ERR_NOSTORE ||
-        tiku_tfs_format(&fs) != TFS_OK) {
-        return;
-    }
     kv_set(r.applied, &r.n_applied, TIKU_KNOB_NVM_TIER, e->default_tier);
+    r.phase = TIKU_LAYOUT_PHASE_PROVISIONING;
     if (commit(e, &r) != TIKU_LAYOUT_OK) {
         return;
     }
-    st->record = TIKU_LAYOUT_RECORD_VALID;
-    st->tier = e->default_tier;
-    st->store = TIKU_LAYOUT_STORE_READY;
-    st->held = TIKU_LAYOUT_HELD_NONE;
-    st->outcome = TIKU_LAYOUT_OK;
+    finish_provision(e, &r, st);
 }
 
 int
@@ -774,7 +826,8 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
         return TIKU_LAYOUT_OK;
     }
     if (st->record == TIKU_LAYOUT_RECORD_ABSENT &&
-        tiku_tfs_may_provision(&e->region, e->default_tier, e->step)) {
+        (tiku_tfs_may_provision(&e->region, e->default_tier, e->step) ||
+         provision_cut(e))) {
         boot_provision(e, st);
         return TIKU_LAYOUT_OK;
     }
@@ -782,6 +835,10 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
         st->store = TIKU_LAYOUT_STORE_HELD;
         st->held = (st->record == TIKU_LAYOUT_RECORD_FOREIGN)
                  ? TIKU_LAYOUT_HELD_CONTRACT : TIKU_LAYOUT_HELD_CONTROL;
+        return TIKU_LAYOUT_OK;
+    }
+    if (r.phase == TIKU_LAYOUT_PHASE_PROVISIONING) {
+        finish_provision(e, &r, st);             /* a reset cut the first boot */
         return TIKU_LAYOUT_OK;
     }
     if (st->record != TIKU_LAYOUT_RECORD_ABSENT &&
