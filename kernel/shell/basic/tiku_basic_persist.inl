@@ -97,9 +97,9 @@ basic_prog_fs(void)
 /**
  * @brief Begin replacing the saved program, reserving @p max bytes.
  *
- * @p max is the platform's committed capacity rather than the actual length,
- * so every SAVE reserves the same run length and replacement ping-pongs
- * between two equal runs instead of leaving ragged holes in the store.
+ * @p max is what this save will write, measured first.  Reserving the whole
+ * capacity bought nothing once a commit keeps only the slots it filled, and a
+ * small SAVE then failed on any store without that much contiguous room.
  */
 static int
 basic_prog_begin(size_t max)
@@ -200,14 +200,13 @@ static int
 basic_prog_store(const char *text, size_t len)
 {
 #if BASIC_NVM_ON_REGION
-    /* Bound by the platform's committed program capacity, which is also the
-     * reservation every SAVE takes (see basic_prog_begin). */
+    /* Bound by the platform's committed program capacity. */
     if (len > TIKU_BASIC_SAVE_BUF_BYTES) {
         return -1;
     }
     /* Whole-blob path, kept for the /data/basic VFS bridge, which supplies a
      * complete image.  SAVE itself streams -- see basic_save_to_persist. */
-    if (basic_prog_begin(TIKU_BASIC_SAVE_BUF_BYTES) != 0 ||
+    if (basic_prog_begin(len) != 0 ||
         basic_prog_append(text, len) != 0) {
         basic_prog_discard();
         return -1;
@@ -311,6 +310,69 @@ static BASIC_SCRATCH char basic_persist_scratch[BASIC_SCRATCH_BYTES];
 static char basic_load_line[TIKU_BASIC_LINE_MAX + 16];
 #endif
 
+#if BASIC_NVM_ON_REGION
+/**
+ * @brief One pass over the program in LIST order through the bounded chunk.
+ *
+ * With @p emit the chunk goes to the open SAVE whenever it could not hold
+ * another maximum-length line; without, the bytes are only counted.
+ * @return 0, -1 on a write or format failure, -2 when the program would pass
+ *         TIKU_BASIC_SAVE_BUF_BYTES.  @p total_out gets the bytes serialized.
+ */
+static int
+basic_save_pass(int emit, size_t *total_out)
+{
+    char *const  chunk   = basic_persist_scratch;
+    const size_t cap     = sizeof basic_persist_scratch;
+    const size_t line_hw = (size_t)TIKU_BASIC_LINE_MAX + 16u;  /* worst line */
+    size_t       fill    = 0;   /* serialized, not yet written to NVM */
+    size_t       total   = 0;   /* already written to the slot        */
+    uint16_t     cur     = 0;
+
+    for (;;) {
+        int idx = prog_next_index(cur);
+        int n;
+
+        if (idx < 0) {
+            break;
+        }
+        if (cap - fill < line_hw) {              /* flush before it cannot fit */
+            if (emit && basic_prog_append(chunk, fill) != 0) {
+                return -1;
+            }
+            total += fill;
+            fill   = 0;
+        }
+        if (total + fill + line_hw > TIKU_BASIC_SAVE_BUF_BYTES) {
+            return -2;
+        }
+        /* Number, then the DETOKENIZED body: the on-media format stays
+         * plain text, so pre-A2 saves load unchanged and LOAD re-crunches. */
+        n = snprintf(chunk + fill, cap - fill, "%u ",
+                     (unsigned)prog[idx].number);
+        if (n < 0 || (size_t)n >= cap - fill) {
+            return -1;
+        }
+        fill += (size_t)n;
+        n = basic_detok(chunk + fill, cap - fill, prog[idx].text);
+        if (n < 0 || (size_t)n + 1u >= cap - fill) {
+            return -1;
+        }
+        fill += (size_t)n;
+        chunk[fill++] = '\n';
+        if (prog[idx].number == 0xFFFFu) {
+            break;
+        }
+        cur = (uint16_t)(prog[idx].number + 1);
+    }
+    if (fill > 0u && emit && basic_prog_append(chunk, fill) != 0) {
+        return -1;
+    }
+    *total_out = total + fill;
+    return 0;
+}
+#endif
+
 /**
  * @brief Serialise the in-memory program in ascending order and
  *        commit it to FRAM under BASIC_PERSIST_KEY.
@@ -333,80 +395,25 @@ basic_save_to_persist(void)
      * could not do that -- it cleared its magic before the first byte, because
      * a shadow needed a second slot and the reserved tail held only one.
      *
-     * The size bound is still TIKU_BASIC_SAVE_BUF_BYTES: it is the platform's
-     * committed capacity and the reservation each SAVE takes, so a program
-     * cannot grow past what the checkpoint's sizing assumed.
+     * The same pass runs twice: once to measure, so the store reserves what
+     * this save writes, then to write.  The size bound is still
+     * TIKU_BASIC_SAVE_BUF_BYTES, so a program cannot grow past what the
+     * checkpoint's sizing assumed.
      */
-    char *const  chunk   = basic_persist_scratch;
-    const size_t cap     = sizeof basic_persist_scratch;
-    const size_t line_hw = (size_t)TIKU_BASIC_LINE_MAX + 16u;  /* worst line */
-    size_t       fill    = 0;   /* serialized, not yet written to NVM */
-    size_t       total   = 0;   /* already written to the slot        */
-    uint16_t     cur     = 0;
-    int          err     = 0;
+    size_t total = 0;
+    int    rc    = basic_save_pass(0, &total);
 
-    if (basic_prog_begin(TIKU_BASIC_SAVE_BUF_BYTES) != 0) {
-        basic_report(TIKU_BASIC_ERR_IO, "save failed");
+    if (rc == 0) {
+        rc = (basic_prog_begin(total) == 0) ? basic_save_pass(1, &total) : -1;
+        if (rc != 0) {
+            basic_prog_discard();        /* previous saved program survives */
+        }
+    }
+    if (rc == -2) {
+        basic_report(TIKU_BASIC_ERR_IO, "save: program too large for slot");
         return -1;
     }
-    for (;;) {
-        int idx = prog_next_index(cur);
-        int n;
-
-        if (idx < 0) {
-            break;
-        }
-        if (cap - fill < line_hw) {              /* flush before it cannot fit */
-            if (basic_prog_append(chunk, fill) != 0) {
-                err = 1;
-                break;
-            }
-            total += fill;
-            fill   = 0;
-        }
-        if (total + fill + line_hw > TIKU_BASIC_SAVE_BUF_BYTES) {
-            /* Release the staged run before bailing: the writer holds a
-             * reservation in the store's RAM allocation map, so returning
-             * without it strands those slots until the next mount -- and every
-             * later SAVE this boot then fails for space. */
-            basic_prog_discard();
-            basic_report(TIKU_BASIC_ERR_IO, "save: program too large for slot");
-            return -1;
-        }
-        /* Number, then the DETOKENIZED body: the on-media format stays
-         * plain text, so pre-A2 saves load unchanged and LOAD re-crunches. */
-        n = snprintf(chunk + fill, cap - fill, "%u ",
-                     (unsigned)prog[idx].number);
-        if (n < 0 || (size_t)n >= cap - fill) {
-            err = 1;
-            break;
-        }
-        fill += (size_t)n;
-        n = basic_detok(chunk + fill, cap - fill, prog[idx].text);
-        if (n < 0 || (size_t)n + 1u >= cap - fill) {
-            err = 1;
-            break;
-        }
-        fill += (size_t)n;
-        chunk[fill++] = '\n';
-        if (prog[idx].number == 0xFFFFu) {
-            break;
-        }
-        cur = (uint16_t)(prog[idx].number + 1);
-    }
-    if (!err && fill > 0u) {
-        if (basic_prog_append(chunk, fill) != 0) {
-            err = 1;
-        } else {
-            total += fill;
-        }
-    }
-    if (err) {
-        basic_prog_discard();        /* previous saved program survives */
-        basic_report(TIKU_BASIC_ERR_IO, "save failed");
-        return -1;
-    }
-    if (basic_prog_commit() != 0) {
+    if (rc != 0 || basic_prog_commit() != 0) {
         /* tiku_tfs_commit() leaves the writer active on its error returns, so
          * the reservation needs releasing here too. */
         basic_prog_discard();

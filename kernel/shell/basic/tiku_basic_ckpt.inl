@@ -298,6 +298,13 @@ ckpt_w(basic_ckpt_wr_t *w, const void *src, size_t n)
 #if BASIC_CKPT_STREAMING
     const uint8_t *p = (const uint8_t *)src;
 
+    if (w->base == NULL) {                      /* measuring: count only */
+        if (w->pos + n > w->limit) {
+            w->err = 1;
+        }
+        w->pos += n;
+        return;
+    }
     while (n > 0u) {
         size_t k;
 
@@ -440,7 +447,7 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 {
     uint16_t i;
     uint8_t  u8;
-    uint32_t pid = basic_prog_identity();
+    uint32_t pid = (w->base != NULL) ? basic_prog_identity() : 0u;
 
     ckpt_w(w, &pid, sizeof(pid));            /* program this state belongs to */
     ckpt_w(w, &basic_pc, sizeof(basic_pc));
@@ -850,14 +857,18 @@ basic_ckpt_save(void)
     if (basic_ckpt_wr.active) {
         tiku_tfs_abort(&basic_ckpt_wr);   /* an abandoned save, released */
     }
-    /* Reserve the worst-case image every time, so the checkpoint ping-pongs
-     * between two equal-length runs instead of leaving ragged holes in a store
-     * it rewrites every few seconds. */
-    if (tiku_tfs_open_w(fs, &basic_ckpt_wr, BASIC_CKPT_FILE,
-                        BASIC_CKPT_IMG_MAX) != TFS_OK) {
+    /* The file reserves what this checkpoint writes: the worst case (256 KB on
+     * an Apollo510) failed on a store without that much contiguous room, and
+     * a commit keeps only the slots it filled anyway. */
+#if BASIC_CKPT_STREAMING
+    memset(&w, 0, sizeof w);              /* base NULL: measure the payload */
+    w.limit = BASIC_CKPT_PAYLOAD_MAX;
+    basic_ckpt_write(&w);
+    if (w.err ||
+        tiku_tfs_open_w(fs, &basic_ckpt_wr, BASIC_CKPT_FILE,
+                        w.pos + BASIC_CKPT_TRAILER) != TFS_OK) {
         return -1;
     }
-#if BASIC_CKPT_STREAMING
     /* Payload appended in bounded chunks -- RAM cost is one chunk regardless of
      * program size -- then the trailer. TFS's dirent flip is the commit point,
      * so a cut anywhere before it leaves the PREVIOUS checkpoint intact (the
@@ -888,7 +899,12 @@ basic_ckpt_save(void)
     w.err  = 0;
     basic_ckpt_write(&w);
     if (w.err ||
-        tiku_tfs_write_chunk(&basic_ckpt_wr, basic_ckpt_scratch, w.pos) != TFS_OK) {
+        tiku_tfs_open_w(fs, &basic_ckpt_wr, BASIC_CKPT_FILE,
+                        w.pos + BASIC_CKPT_TRAILER) != TFS_OK) {
+        return -1;
+    }
+    if (tiku_tfs_write_chunk(&basic_ckpt_wr, basic_ckpt_scratch,
+                             w.pos) != TFS_OK) {
         tiku_tfs_abort(&basic_ckpt_wr);
         return -1;
     }
