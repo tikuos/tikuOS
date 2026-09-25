@@ -886,6 +886,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
 {
     tiku_tfs_t *fs;
     int         i;
+    unsigned    keep;
 
     if (w == NULL || !w->active) {
         return TFS_ERR_INVAL;
@@ -894,6 +895,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
     if (wr32(fs, slot_off(fs, w->first) + TFS_SL_LEN, (uint32_t)w->off)) {
         return TFS_ERR_IO;
     }
+    keep = run_span_for(w->off);        /* the slots the content reached */
     i = tfs_find(fs, w->name);
     if (i < 0) {
         char nb[TIKU_TFS_NAME_MAX];
@@ -910,7 +912,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
         if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME,
                nb, TIKU_TFS_NAME_MAX) ||
             wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-                 TFS_RUN_MAKE(w->first, w->span)) ||
+                 TFS_RUN_MAKE(w->first, keep)) ||
             wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
             return TFS_ERR_IO;
         }
@@ -919,10 +921,18 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
          * A power cut before it leaves the dirent on the OLD run. */
         uint32_t old = de_run(fs, (unsigned)i);
         if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-                 TFS_RUN_MAKE(w->first, w->span))) {
+                 TFS_RUN_MAKE(w->first, keep))) {
             return TFS_ERR_IO;
         }
         run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);  /* reclaim */
+    }
+    /* Only now that the directory names the short run does the unused tail go
+     * back.  A writer that reserved its worst case (BASIC's SAVE and checkpoint
+     * take 256 KB on the Apollo510) kept all of it for a few hundred bytes.
+     * The content starts at the run's first slot, so the tail is its high
+     * end; the map is RAM only, and a remount derives the same from the run. */
+    if (keep < w->span) {
+        run_mark(fs, w->first + keep, w->span - keep, 0);
     }
     w->active = 0;
     fs->wr_open = 0;
@@ -1174,6 +1184,21 @@ int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
                     n++;
                 }
             }
+        }
+    }
+    return n;
+}
+
+size_t tiku_tfs_used_slots(tiku_tfs_t *fs)
+{
+    unsigned s;
+    size_t n = 0;
+    if (fs == NULL || !fs->mounted) {
+        return 0;
+    }
+    for (s = 0; s < fs->nslots; s++) {
+        if (bm_get(fs->slot_used, s)) {
+            n++;
         }
     }
     return n;

@@ -342,7 +342,8 @@ typedef struct {
  *
  * Produces a file in bounded chunks, for payloads larger than RAM or arriving
  * incrementally.  Nothing in the directory changes until tiku_tfs_commit().
- * @p max_len reserves a span and is kept; commit records the bytes appended.
+ * @p max_len reserves a span while the write is open; commit keeps only the
+ * slots the appended bytes reach and records their length.
  *
  * @return TFS_OK, or TFS_ERR_NOSPACE / _TOOBIG / _NAMELEN / _INVAL.
  */
@@ -355,7 +356,8 @@ int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len);
 /**
  * @brief Publish an open write: length word, then ONE atomic dirent update.
  *
- * The old run is reclaimed only after the dirent points at the new one.
+ * The dirent names only the slots the content reached.  The old run and the
+ * reservation's unused tail are reclaimed only after it does.
  * @return TFS_OK, or a negative error (the write stays open on failure).
  */
 int tiku_tfs_commit(tiku_tfs_wr_t *w);
@@ -396,5 +398,8 @@ int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
 
 /** @brief Number of free directory slots. */
 size_t tiku_tfs_free_files(tiku_tfs_t *fs);
+
+/** @brief Data slots in use, an open write's reservation included. */
+size_t tiku_tfs_used_slots(tiku_tfs_t *fs);
 
 #endif /* TIKU_TFS_H_ */
