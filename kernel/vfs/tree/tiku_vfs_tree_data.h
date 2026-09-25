@@ -37,10 +37,12 @@ const tiku_vfs_node_t *tiku_vfs_tree_data_get(void);
  */
 typedef struct {
     uint32_t    used_bytes;  /**< sum of live file content lengths    */
-    uint32_t    cap_bytes;   /**< capacity = max_files * slot_bytes   */
+    uint32_t    cap_bytes;   /**< capacity = total_slots * slot_bytes */
     uint16_t    used_files;  /**< live file count                     */
     uint16_t    max_files;   /**< directory slot count                */
-    uint16_t    slot_bytes;  /**< per-file content slot size          */
+    uint16_t    used_slots;  /**< data slots held, open writes too    */
+    uint16_t    total_slots; /**< data slots in the store             */
+    uint16_t    slot_bytes;  /**< per-slot content size               */
     const char *backing;     /**< "MRAM" / "FRAM" / "RAM*" (volatile) */
     /* Carved-region accounting, so region space cannot go idle unnoticed.
      * Zero on parts whose store rides its own backing array (MSP430 / host). */

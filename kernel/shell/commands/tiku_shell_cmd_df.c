@@ -79,11 +79,12 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Block accounting: one fixed slot per file. */
-    used  = (uint32_t)s.used_files * (uint32_t)s.slot_bytes;
+    /* Slots, not files: a file holds as many slots as its content needs, and
+     * the store's allocation map counts them.  Files stays its own column. */
+    used  = (uint32_t)s.used_slots * (uint32_t)s.slot_bytes;
     avail = (s.cap_bytes > used) ? (s.cap_bytes - used) : 0u;
-    pct   = (s.max_files != 0u)
-            ? (unsigned)((uint32_t)s.used_files * 100u / s.max_files) : 0u;
+    pct   = (s.total_slots != 0u)
+            ? (unsigned)((uint32_t)s.used_slots * 100u / s.total_slots) : 0u;
 
     df_hsize(sz, sizeof sz, s.cap_bytes);
     df_hsize(us, sizeof us, used);
@@ -99,8 +100,9 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
                  "Backing");
     SHELL_PRINTF("%-10s %8s %8s %8s %5s %7s  %s\n",
                  "/data", sz, us, av, pc, fl, s.backing);
-    SHELL_PRINTF("  %s of file data stored; slot %u B\n",
-                 st, (unsigned)s.slot_bytes);
+    SHELL_PRINTF("  %u of %u slots in use, %s of file data stored; slot %u B\n",
+                 (unsigned)s.used_slots, (unsigned)s.total_slots, st,
+                 (unsigned)s.slot_bytes);
 
     /* Carved-region breakdown: how the NVM region divides into the tier extent
      * and this file store.  "idle" is the point of printing it -- the two

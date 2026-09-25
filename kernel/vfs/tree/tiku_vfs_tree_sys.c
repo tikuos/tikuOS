@@ -871,15 +871,12 @@ nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
 {
 #if TIKU_SHELL_ENABLE
     tiku_tfs_t *fs = tiku_vfs_tree_data_store_if_mounted();
-    unsigned long freeb = 0UL;
-    unsigned s;
+    unsigned long freeb;
 
     if (fs != NULL && fs->mounted && fs->be->size == size) {
-        for (s = 0; s < fs->nslots; s++) {
-            if ((fs->slot_used[s / 8u] & (1u << (s % 8u))) == 0u) {
-                freeb += (unsigned long)TIKU_TFS_SLOT_BYTES;
-            }
-        }
+        /* The store's own count, the same df reports. */
+        freeb = (unsigned long)(fs->nslots - tiku_tfs_used_slots(fs)) *
+                (unsigned long)TIKU_TFS_SLOT_BYTES;
         if (freeb <= size) {
             map_line(buf, max, at, "store\t%lu\t%lu\n",
                      size, size - freeb, 0UL);

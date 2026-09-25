@@ -696,8 +696,10 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     out->used_files = acc.files;
     out->used_bytes = acc.bytes;
     out->max_files  = data_fs.nfiles;          /* derived at mount */
+    out->used_slots = (uint16_t)tiku_tfs_used_slots(&data_fs);
+    out->total_slots = data_fs.nslots;
     out->slot_bytes = (uint16_t)TIKU_TFS_SLOT_DATA;
-    out->cap_bytes  = (uint32_t)data_fs.nfiles * (uint32_t)TIKU_TFS_SLOT_DATA;
+    out->cap_bytes  = (uint32_t)data_fs.nslots * (uint32_t)TIKU_TFS_SLOT_DATA;
     /* One source of truth for what to CALL the NVM: the device header's
      * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash), never a per-platform
      * ladder here -- a second copy is exactly how the two drift apart. */
