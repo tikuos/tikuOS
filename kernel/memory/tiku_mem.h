@@ -146,6 +146,14 @@
 #define TIKU_DURABLE  TIKU_SECTION(".persistent")
 
 /*
+ * TIKU_DURABLE_FIRST — the one durable object every image finds in the same
+ * place: each linker script puts its section before anything TIKU_DURABLE
+ * places by link order.  Exactly one object, the layout record that proves
+ * who owns /data; a second would share the place by link order again.
+ */
+#define TIKU_DURABLE_FIRST  TIKU_SECTION(".persistent.layout")
+
+/*
  * TIKU_FRAM_SPILL — MSP430-only CAPACITY spill, NOT a durability claim.
  *
  * Big working buffers (TLS records, TCP pools) cannot fit MSP430's 8 KB SRAM,

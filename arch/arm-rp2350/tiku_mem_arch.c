@@ -204,6 +204,14 @@ const uint8_t *tiku_mem_arch_nvm_mirror(void)
     return (const uint8_t *)__tiku_nvm_flash_start;
 }
 
+/** @brief The mirror's image when it checks out (see tiku_mem_hal.h). */
+const uint8_t *tiku_mem_arch_durable(size_t *len)
+{
+    return tiku_nvm_mirror_image(__tiku_nvm_flash_start,
+                                 (size_t)(uintptr_t)&__tiku_nvm_flash_size,
+                                 len);
+}
+
 /**
  * @brief Erase and program one flash sector via boot-ROM helpers.
  *

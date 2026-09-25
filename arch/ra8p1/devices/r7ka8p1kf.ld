@@ -214,6 +214,9 @@ SECTIONS
     .persistent __tiku_nvm_mram_start (NOLOAD) : ALIGN(32)
     {
         __persistent_start = .;
+        /* TIKU_DURABLE_FIRST: the layout record opens the partition, at the
+         * one offset every image agrees on; the rest follow link order. */
+        KEEP(*(.persistent.layout))
         *(.persistent)
         . = ALIGN(32);
         __persistent_end = .;
@@ -228,6 +231,12 @@ SECTIONS
     /* The persist-partition data must fit inside the reserved span. */
     ASSERT(__persistent_end <= __tiku_nvm_mram_end,
            "ERROR: .persistent overruns the persist partition")
+
+    /* The layout record opens the durable image in every build, so an image
+     * with other durable variables still reads it where the last one wrote. */
+    ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __persistent_start)
+           == __persistent_start,
+           "ERROR: tiku_layout_pin does not open .persistent (TIKU_DURABLE_FIRST holds one object)")
 
     PROVIDE(__tiku_cpu1_area = 0x22000000);
 

@@ -184,6 +184,9 @@ SECTIONS
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
+        /* TIKU_DURABLE_FIRST: the layout record opens the mirrored image, at
+         * the one offset every image agrees on; the rest follow link order. */
+        KEEP(*(.persistent.layout))
         *(.uninit*)
         /* DURABLE grade: exact-match .persistent -- this window is
          * MRAM-mirrored (and on apollo510 MPU-read-only outside unlock
@@ -270,6 +273,12 @@ SECTIONS
     /* The mirror holds the 16-byte V2 header and the whole .uninit image. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),
            "ERROR: .uninit too large for the 16 KB NVM mirror page (mem port C)")
+
+    /* The layout record opens the durable image in every build, so an image
+     * with other durable variables still reads it where the last one wrote. */
+    ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
+           == __uninit_start,
+           "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")
 
     /DISCARD/ :
     {

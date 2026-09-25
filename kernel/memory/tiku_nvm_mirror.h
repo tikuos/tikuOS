@@ -90,4 +90,28 @@ static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
     return crc ^ 0xFFFFFFFFU;
 }
 
+/**
+ * @brief The image a mirror holds, or NULL when it holds none that checks.
+ *
+ * Only a V2 mirror qualifies: its length must fit in @p cap, the mirror's size
+ * with the header, and its CRC must match.  The boot restore and the layout
+ * service's search for an older image's record read the same verdict.
+ */
+static inline const uint8_t *
+tiku_nvm_mirror_image(const uint32_t *hdr, size_t cap, size_t *len)
+{
+    const uint8_t *img = (const uint8_t *)hdr + TIKU_NVM_MIRROR_HDR_BYTES;
+    size_t n = (size_t)hdr[TIKU_NVM_MIRROR_W_LEN];
+
+    *len = 0u;
+    if (hdr[TIKU_NVM_MIRROR_W_MAGIC] != TIKU_NVM_MIRROR_MAGIC_V2 ||
+        cap < TIKU_NVM_MIRROR_HDR_BYTES ||
+        n > cap - TIKU_NVM_MIRROR_HDR_BYTES ||
+        tiku_nvm_crc32(img, n) != hdr[TIKU_NVM_MIRROR_W_CRC]) {
+        return NULL;
+    }
+    *len = n;
+    return img;
+}
+
 #endif /* TIKU_NVM_MIRROR_H_ */

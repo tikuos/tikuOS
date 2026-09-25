@@ -147,6 +147,13 @@ void tiku_mem_arch_init(void) {
     tiku_mpu_arch_lock_nvm(mpu_saved);
 }
 
+/** @brief The mirror's image when it checks out (see tiku_mem_hal.h). */
+const uint8_t *tiku_mem_arch_durable(size_t *len)
+{
+    return tiku_nvm_mirror_image(__tiku_nvm_mram_start, TIKU_NVM_MRAM_BYTES,
+                                 len);
+}
+
 /** @brief Zero-fill a buffer via a volatile pointer (defeats optimization). */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     volatile uint8_t *p = buf;

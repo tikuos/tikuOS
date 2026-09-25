@@ -17,6 +17,7 @@
 #ifndef TIKU_MEM_HAL_H_
 #define TIKU_MEM_HAL_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -94,6 +95,14 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 int tiku_mem_arch_nvm_flush_status(void);
 /** @brief Unchecked compatibility wrapper for the checked flush. */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief The durable image as last persisted, read-only.
+ *
+ * A mirror port returns its mirror's image when that checks out; an in-place
+ * port returns its persist partition.  NULL, with *len 0, when there is none.
+ */
+const uint8_t *tiku_mem_arch_durable(size_t *len);
 #endif
 
 #endif /* TIKU_MEM_HAL_H_ */

@@ -205,6 +205,11 @@ typedef struct {
     uint32_t step;
     int (*random)(void *ctx, uint8_t *out, size_t len); /**< provision/recovery */
     void *random_ctx;
+    /* The durable image as last persisted, searched only when the record in
+     * its fixed place does not validate: an image from before the place was
+     * fixed left it wherever its own durable variables did.  NULL: none. */
+    const uint8_t *durable;
+    size_t         durable_len;
 } tiku_layout_env_t;
 
 /*---------------------------------------------------------------------------*/

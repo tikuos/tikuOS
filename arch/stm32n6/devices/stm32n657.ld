@@ -100,6 +100,9 @@ SECTIONS
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
+        /* TIKU_DURABLE_FIRST: the layout record opens the mirrored image, at
+         * the one offset every image agrees on; the rest follow link order. */
+        KEEP(*(.persistent.layout))
         *(.uninit*)
         *(.persistent)
         /* Retained state is also mirrored here. Moving it changes saved offsets. */
@@ -158,6 +161,12 @@ SECTIONS
      * in tiku_mem_arch.c silently drop the tail. Move both. */
     ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
            "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS in tiku_xspi_arch.h AND the 4 in this ASSERT together")
+
+    /* The layout record opens the durable image in every build, so an image
+     * with other durable variables still reads it where the last one wrote. */
+    ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
+           == __uninit_start,
+           "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")
 
     /* The array ends at 0x343C0000. An access above it HANGS the bus rather
      * than faulting -- no fault dump, no reset -- so an oversized arena would

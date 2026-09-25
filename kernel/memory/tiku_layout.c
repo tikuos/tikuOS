@@ -191,6 +191,48 @@ contract_of(const tiku_layout_env_t *e)
     return h;
 }
 
+/**
+ * @brief Find this region's record at another offset of the durable image.
+ *
+ * Before the record had a fixed place, each image put it wherever its own
+ * durable variables left room.  One distinct record written for this region
+ * is adopted; two are not ours to choose between, so neither is taken.
+ */
+static int
+rec_rescue(const tiku_layout_env_t *e, tiku_layout_record_t *out)
+{
+    tiku_layout_record_t c, pick;
+    uint32_t contract = contract_of(e);
+    uint16_t schema;
+    size_t off;
+    int found = 0;
+
+    if (e->durable == NULL || e->durable_len < sizeof c) {
+        return 0;
+    }
+    for (off = 0u; off <= e->durable_len - sizeof c; off += 4u) {
+        memcpy(&schema, e->durable + off, sizeof schema);
+        if (schema != TIKU_LAYOUT_SCHEMA) {
+            continue;
+        }
+        memcpy(&c, e->durable + off, sizeof c);
+        if (!rec_valid(&c) || c.contract != contract) {
+            continue;
+        }
+        if (found && (c.check != pick.check ||
+                      memcmp(c.identity, pick.identity,
+                             sizeof c.identity) != 0)) {
+            return 0;
+        }
+        pick  = c;
+        found = 1;
+    }
+    if (found) {
+        *out = pick;
+    }
+    return found;
+}
+
 /** @brief A fresh record for this image. */
 static void
 rec_fresh(const tiku_layout_env_t *e, tiku_layout_record_t *r)
@@ -814,6 +856,12 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
     }
     memset(st, 0, sizeof *st);
     r = *e->rec;
+    /* A record an older image left elsewhere moves into the fixed place, or
+     * the boot holds as it would with none: nothing adopts it in RAM only. */
+    if (!rec_valid(&r) && rec_rescue(e, &r) &&
+        commit(e, &r) != TIKU_LAYOUT_OK) {
+        r = *e->rec;
+    }
     if (!rec_valid(&r)) {
         st->record = TIKU_LAYOUT_RECORD_ABSENT;
     } else if (r.contract != contract_of(e)) {
@@ -1145,24 +1193,49 @@ tiku_layout_held_name(uint8_t held)
 #include <arch/ra8p1/tiku_trng_arch.h>
 #endif
 
-static TIKU_DURABLE tiku_layout_record_t layout_rec;
-TIKU_PERSIST_CELL(layout_cell, layout_rec, 0x4C415932UL, NULL, 0);
+/* The record and its gate at the one durable offset every image agrees on:
+ * each linker script places this grade first and ASSERTs this object opens the
+ * image.  `pinned` is stamped before the first commit and never cleared; from
+ * then on a record found anywhere else is stale, so the search for one an
+ * older image left never runs again. */
+typedef struct {
+    uint32_t             pinned;
+    uint32_t             gate;
+    tiku_layout_record_t rec;
+} layout_pin_t;
+
+#define LAYOUT_PINNED  0x4C415950UL         /* "LAYP" */
+
+TIKU_DURABLE_FIRST layout_pin_t tiku_layout_pin;
+static const tiku_persist_cell_t layout_cell = {
+    &tiku_layout_pin.rec, &tiku_layout_pin.gate, NULL,
+    (uint16_t)sizeof tiku_layout_pin.rec, 0u, 0x4C415932UL
+};
+/* A word cell that is its own gate: holding its key is its whole value. */
+static const tiku_persist_cell_t pin_cell = {
+    &tiku_layout_pin.pinned, &tiku_layout_pin.pinned, NULL,
+    (uint16_t)sizeof tiku_layout_pin.pinned, 0u, LAYOUT_PINNED
+};
 static const tiku_layout_record_t absent_record;
 
 static tiku_layout_env_t   board_env;
 static tiku_layout_state_t board_state;
 static uint8_t             board_booted;
 
-/** @brief Commit the record through the checked cell write. */
+/** @brief Stamp the record's place once, then commit it through the cell. */
 static int
 board_commit(void *ctx, const tiku_layout_record_t *r)
 {
-    int ok;
+    int ok = 1;
     (void)ctx;
-    ok = (tiku_persist_cell_commit_status(&layout_cell, r,
-                                            (uint16_t)sizeof *r)
-            == TIKU_MEM_OK);
-    board_env.rec = ok ? &layout_rec : &absent_record;
+    if (!tiku_persist_cell_valid(&pin_cell)) {
+        ok = (tiku_persist_cell_write_u32_status(&pin_cell, LAYOUT_PINNED)
+                == TIKU_MEM_OK);
+    }
+    ok = ok && (tiku_persist_cell_commit_status(&layout_cell, r,
+                                                  (uint16_t)sizeof *r)
+                  == TIKU_MEM_OK);
+    board_env.rec = ok ? &tiku_layout_pin.rec : &absent_record;
     return ok ? 0 : -1;
 }
 
@@ -1208,7 +1281,10 @@ tiku_layout_boot(void)
     rgn = tiku_nvm_backend_get();
     memset(&board_env, 0, sizeof board_env);
     board_env.rec          = tiku_persist_cell_valid(&layout_cell)
-                           ? &layout_rec : &absent_record;
+                           ? &tiku_layout_pin.rec : &absent_record;
+    if (!tiku_persist_cell_valid(&pin_cell)) {
+        board_env.durable = tiku_mem_arch_durable(&board_env.durable_len);
+    }
     board_env.commit       = board_commit;
     board_env.write        = board_write;
     board_env.random       = board_random;
@@ -1219,6 +1295,8 @@ tiku_layout_boot(void)
         board_env.region.size = rgn->size;
     }
     (void)tiku_layout_boot_env(&board_env, &board_state);
+    board_env.durable     = NULL;       /* a view for this boot's search only */
+    board_env.durable_len = 0u;
 }
 
 const tiku_layout_state_t *

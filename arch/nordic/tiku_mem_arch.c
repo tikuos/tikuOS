@@ -21,6 +21,10 @@
 
 #define TIKU_RRAMC_READY_BIT   (1UL << 0)   /* RRAMC.READY: 1 = idle/ready */
 
+/* The persist partition (nrf54l15.ld / nrf54lm20a.ld); .persistent is in it. */
+extern const uint8_t __tiku_nvm_rram_start[];
+extern const uint8_t __tiku_nvm_rram_end[];
+
 void tiku_mem_arch_init(void)
 {
     /* Unbuffered writes: each store commits directly to RRAM (no write buffer
@@ -28,6 +32,13 @@ void tiku_mem_arch_init(void)
     uint32_t cfg = NRF_RRAMC_S->CONFIG;
     cfg &= ~(0x3FUL << 8);      /* clear WRITEBUFSIZE (bits 8..13) -> 0       */
     NRF_RRAMC_S->CONFIG = cfg;
+}
+
+/** @brief The persist partition: durable variables live there in place. */
+const uint8_t *tiku_mem_arch_durable(size_t *len)
+{
+    *len = (size_t)(__tiku_nvm_rram_end - __tiku_nvm_rram_start);
+    return __tiku_nvm_rram_start;
 }
 
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)

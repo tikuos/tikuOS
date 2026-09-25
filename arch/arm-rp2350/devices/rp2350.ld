@@ -215,6 +215,9 @@ SECTIONS
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
+        /* TIKU_DURABLE_FIRST: the layout record opens the mirrored image, at
+         * the one offset every image agrees on; the rest follow link order. */
+        KEEP(*(.persistent.layout))
         *(.uninit*)
         /* Durable cells (boot counter, aliases, persist cells) -- backed up to
          * the 4 KB flash sector and MPU-protected. */
@@ -291,6 +294,12 @@ SECTIONS
      * driver. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_flash_size - 16),
            "ERROR: .uninit region exceeds the 4 KB flash backup sector minus its 16-byte V2 header")
+
+    /* The layout record opens the durable image in every build, so an image
+     * with other durable variables still reads it where the last one wrote. */
+    ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
+           == __uninit_start,
+           "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")
 
     /* The flash image (code + rodata + the .data load copy) must not grow up
      * into the carved NVM region below the backup sector. */

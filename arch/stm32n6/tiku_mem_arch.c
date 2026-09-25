@@ -86,6 +86,16 @@ void tiku_mem_arch_init(void) {
     mem_restore_status = TIKU_NVM_RESTORE_V2_OK;
 }
 
+/** @brief The mirror's image when it checks out (see tiku_mem_hal.h). */
+const uint8_t *tiku_mem_arch_durable(size_t *len) {
+    *len = 0u;
+    if (!tiku_xspi_ready() || tiku_xspi_mmap_enable() != TIKU_XSPI_OK) {
+        return NULL;
+    }
+    return tiku_nvm_mirror_image((const uint32_t *)(const void *)MIRROR_PTR,
+                                 TIKU_XSPI_MIRROR_BYTES, len);
+}
+
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     if (buf == NULL) {
         return;
