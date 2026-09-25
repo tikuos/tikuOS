@@ -23,8 +23,16 @@
 #if TIKU_SHELL_CMD_FAT
 
 #include <arch/ambiq/tiku_emmc_arch.h>
-#include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
 #include <kernel/cpu/tiku_hang.h>
+/* `fat hash` needs SHA-256, which a build links only with the crypto kit:
+ * the whole kit, or the share BASIC takes.  The Makefile passes one of these
+ * with the sources, so a build without them keeps the command and says so. */
+#if (TIKU_KIT_CRYPTO_ENABLE + 0) || (TIKU_BASIC_CRYPTO_ENABLE + 0)
+#define FAT_HASH 1
+#include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
+#else
+#define FAT_HASH 0
+#endif
 #if (TIKU_DRV_USB_ENABLE + 0)
 #include <arch/ambiq/tiku_usb_arch.h>
 #endif
@@ -159,6 +167,7 @@ static void cmd_ls(const char *path)
 /* F3 -- READ A FILE THROUGH THE CHAIN                                       */
 /*---------------------------------------------------------------------------*/
 
+#if FAT_HASH
 /* One sector at a time keeps this off the big buffers the other subsystems
  * own; the read path is FAT-bound, not buffer-bound. */
 static uint8_t s_hashbuf[4096];
@@ -215,6 +224,13 @@ static void cmd_hash(const char *path)
     }
     SHELL_PRINTF("\n");
 }
+#else
+static void cmd_hash(const char *path)
+{
+    SHELL_PRINTF("fat hash %s: this build has no SHA-256 (the crypto kit)\n",
+                 path);
+}
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* EXTENTS -- what F4's staging path will hand to the block layer            */
