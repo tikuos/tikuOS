@@ -1576,6 +1576,12 @@ endif
 
 endif # TIKU_PLATFORM == msp430
 
+# Every Cortex-M script collects the persist-cell table (.tiku_cells), so boot
+# can carry cells by key across an update that moves them (tiku_mem.h).
+ifneq ($(TIKU_PLATFORM),msp430)
+CFLAGS += -DTIKU_CELL_TABLE=1
+endif
+
 # The SRAM-tier floor is single-authored: the TIKU_TIER_SRAM_MIN the BASIC
 # arena is compile-time asserted against travels to the linker as
 # __tier_sram_floor, where arch/common/tiku_sram_layout.ld asserts the carved
@@ -2293,6 +2299,7 @@ SRCS += kernel/memory/tiku_mem.c
 SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
+SRCS += kernel/memory/tiku_persist_move.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/memory/tiku_tier.c
 SRCS += kernel/memory/tiku_layout.c

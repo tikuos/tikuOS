@@ -315,4 +315,10 @@ void tiku_mem_init(void)
      * place.  Subsequent persist / lc-persist / init writes go through
      * tiku_mpu_unlock_nvm() / lock_nvm() to bracket their changes. */
     tiku_mpu_init();
+
+#if defined(TIKU_CELL_TABLE) && TIKU_CELL_TABLE
+    /* Before any cell is read: cells an update moved are carried to their
+     * new places by key (tiku_persist_move_boot, tiku_mem.h). */
+    tiku_persist_move_boot();
+#endif
 }

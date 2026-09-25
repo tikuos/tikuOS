@@ -151,6 +151,13 @@ const uint8_t *tiku_mem_arch_durable(size_t *len)
                                  len);
 }
 
+/** @brief The .uninit window durable variables live in (see tiku_mem_hal.h). */
+uint8_t *tiku_mem_arch_durable_live(size_t *len)
+{
+    *len = (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
+    return (uint8_t *)&__uninit_start;
+}
+
 /** @brief Zero-fill a buffer via a volatile pointer (defeats optimization). */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     volatile uint8_t *p = buf;

@@ -902,7 +902,21 @@ typedef struct {
     static const tiku_persist_cell_t cell = {                          \
         &(var), &cell##_gate, (def_ptr),                               \
         (uint16_t)sizeof(var), (def_len), (key_val)                    \
-    }
+    };                                                                 \
+    static const tiku_persist_cell_t *const cell##_entry               \
+        TIKU_CELL_TABLE_ATTR = &(cell)
+
+/*
+ * TIKU_CELL_TABLE — builds whose linker scripts collect `.tiku_cells` between
+ * __tiku_cells_start and __tiku_cells_end (every Cortex-M port; the Makefile
+ * defines it) get a table of every cell, so boot can find each one by its key
+ * after an update moves it.  Elsewhere the entry is an unused constant.
+ */
+#if defined(TIKU_CELL_TABLE) && TIKU_CELL_TABLE
+#define TIKU_CELL_TABLE_ATTR  __attribute__((section(".tiku_cells"), used))
+#else
+#define TIKU_CELL_TABLE_ATTR  __attribute__((unused))
+#endif
 
 /**
  * @brief Validate a cell's gate; prime defaults on a virgin NVM.
@@ -1001,6 +1015,67 @@ uint8_t tiku_persist_cell_count(void);
  * @return Count of cell_init() calls that returned 1 since reset
  */
 uint8_t tiku_persist_cell_primed(void);
+
+/*
+ * CELLS ACROSS A LAYOUT CHANGE
+ *
+ * A cell sits where link order put it, so an update that adds or drops any
+ * durable variable moves it and its gate reads wrong: the value re-primes.
+ * Each image therefore records where it keeps every cell (a manifest in its
+ * own durable image).  The first boot of an image whose layout differs finds
+ * the manifest the last image wrote in the durable image as last persisted,
+ * and moves each cell whose key and size still match, value first, gate
+ * last; every other cell's gate is cleared, so it re-primes rather than
+ * trusting bytes the last image used for something else.  The old manifest
+ * is invalidated before anything is written and the new one after, so a cut
+ * part way loses values but never mixes them.
+ */
+
+/** @brief Where one cell lives, as offsets into the durable image. */
+typedef struct {
+    uint32_t key;
+    uint16_t gate;
+    uint16_t data;
+    uint16_t size;
+    uint16_t rsvd;
+} tiku_persist_where_t;
+
+#define TIKU_PERSIST_MANIFEST_MAX    24u
+#define TIKU_PERSIST_MANIFEST_MAGIC  0x4D4C4543UL   /* "CELM" */
+
+/** @brief Every cell of one image, as that image laid them out. */
+typedef struct {
+    uint32_t             magic;   /**< TIKU_PERSIST_MANIFEST_MAGIC       */
+    uint16_t             count;   /**< entries in use                    */
+    uint16_t             rsvd;
+    uint32_t             check;   /**< FNV-1a over count and the entries */
+    tiku_persist_where_t at[TIKU_PERSIST_MANIFEST_MAX];
+} tiku_persist_manifest_t;
+
+/** @brief What a move works on; boot fills it from the linker and the HAL. */
+typedef struct {
+    const tiku_persist_cell_t *const *cells;  /**< this image's cells     */
+    size_t                     n_cells;
+    uint8_t                   *live;          /**< where they live now    */
+    size_t                     live_len;
+    const uint8_t             *old;     /**< durable image as last persisted */
+    size_t                     old_len;
+    tiku_persist_manifest_t   *manifest;      /**< this image's, in live  */
+} tiku_persist_move_env_t;
+
+/**
+ * @brief Move each cell to where this image keeps it, then record the layout.
+ *
+ * @return Cells moved (0 when the layout is the recorded one), or -1 when
+ *         the write window did not complete.
+ */
+int tiku_persist_move(const tiku_persist_move_env_t *e);
+
+/** @brief tiku_persist_move() for this image; tiku_mem_init() calls it. */
+void tiku_persist_move_boot(void);
+
+/** @brief What this boot's move returned (0 where there is no cell table). */
+int tiku_persist_moved(void);
 
 /*---------------------------------------------------------------------------*/
 /* MPU (MEMORY PROTECTION UNIT)                                              */

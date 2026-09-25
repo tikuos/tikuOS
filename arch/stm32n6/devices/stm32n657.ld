@@ -57,6 +57,12 @@ SECTIONS
         . = ALIGN(4);
         *(.text .text.*)
         *(.rodata .rodata.*)
+        /* Persist-cell table: boot carries each cell by its key when an
+         * update moves it (tiku_persist_move_boot, tiku_mem.h). */
+        . = ALIGN(4);
+        __tiku_cells_start = .;
+        KEEP(*(.tiku_cells))
+        __tiku_cells_end = .;
         *(.glue_7) *(.glue_7t)
         . = ALIGN(4);
     } > SRAM

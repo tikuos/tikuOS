@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_persist.c - /sys/persist VFS nodes.
  *
- * Two read-only counters: how many magic-gated persist cells validated this boot,
- * and how many had to be primed to defaults.  `primed` is the diagnostic -- 0 on
- * an established device, so non-zero means NVM content was lost or moved.
+ * Read-only counters: how many magic-gated persist cells validated this boot,
+ * how many were primed to defaults (0 on an established device, so non-zero
+ * means NVM content was lost), and how many this boot carried to new places.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/persist/cells, /sys/persist/primed                                   */
+/* /sys/persist/cells, primed, moved                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -63,6 +63,18 @@ persist_primed_read(char *buf, size_t max)
                     (unsigned)tiku_persist_cell_primed());
 }
 
+/**
+ * @brief Read handler for /sys/persist/moved.
+ *
+ * Cells this boot carried to the places an updated image keeps them: 0 when
+ * the layout was the recorded one, -1 when the move's write did not finish.
+ */
+static int
+persist_moved_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%d\n", tiku_persist_moved());
+}
+
 /*---------------------------------------------------------------------------*/
 /* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
@@ -70,12 +82,13 @@ persist_primed_read(char *buf, size_t max)
 /*
  * /sys/persist directory table, exported so tiku_vfs_tree_sys.c can attach it
  * as the "persist" directory; the entry count travels as
- * TIKU_VFS_TREE_PERSIST_NCHILD (asserted below).  Both nodes are read-only --
+ * TIKU_VFS_TREE_PERSIST_NCHILD (asserted below).  Every node is read-only --
  * the counters are facts about this boot, not knobs.
  */
 const tiku_vfs_node_t tiku_vfs_tree_persist_children[] = {
     { "cells",  TIKU_VFS_FILE, persist_cells_read,  NULL, NULL, 0 },
     { "primed", TIKU_VFS_FILE, persist_primed_read, NULL, NULL, 0 },
+    { "moved",  TIKU_VFS_FILE, persist_moved_read,  NULL, NULL, 0 },
 };
 
 _Static_assert(sizeof(tiku_vfs_tree_persist_children) /

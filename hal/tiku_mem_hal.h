@@ -103,6 +103,12 @@ void tiku_mem_arch_nvm_flush(void);
  * port returns its persist partition.  NULL, with *len 0, when there is none.
  */
 const uint8_t *tiku_mem_arch_durable(size_t *len);
+
+/**
+ * @brief Where durable variables live now: .uninit on a mirror port, the
+ *        persist partition's .persistent on an in-place one.
+ */
+uint8_t *tiku_mem_arch_durable_live(size_t *len);
 #endif
 
 #endif /* TIKU_MEM_HAL_H_ */

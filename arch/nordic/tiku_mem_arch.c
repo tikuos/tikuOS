@@ -24,6 +24,8 @@
 /* The persist partition (nrf54l15.ld / nrf54lm20a.ld); .persistent is in it. */
 extern const uint8_t __tiku_nvm_rram_start[];
 extern const uint8_t __tiku_nvm_rram_end[];
+extern uint8_t __persistent_start[];
+extern uint8_t __persistent_end[];
 
 void tiku_mem_arch_init(void)
 {
@@ -39,6 +41,13 @@ const uint8_t *tiku_mem_arch_durable(size_t *len)
 {
     *len = (size_t)(__tiku_nvm_rram_end - __tiku_nvm_rram_start);
     return __tiku_nvm_rram_start;
+}
+
+/** @brief .persistent, which opens the partition (see tiku_mem_hal.h). */
+uint8_t *tiku_mem_arch_durable_live(size_t *len)
+{
+    *len = (size_t)(__persistent_end - __persistent_start);
+    return __persistent_start;
 }
 
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)

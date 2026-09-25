@@ -23,6 +23,8 @@ static uint32_t ra8p1_nvm_programs;
 /* The persist partition (r7ka8p1kf.ld); .persistent is in it. */
 extern const uint8_t __tiku_nvm_mram_start[];
 extern const uint8_t __tiku_nvm_mram_end[];
+extern uint8_t __persistent_start[];
+extern uint8_t __persistent_end[];
 
 void tiku_mem_arch_init(void)
 {
@@ -36,6 +38,13 @@ const uint8_t *tiku_mem_arch_durable(size_t *len)
 {
     *len = (size_t)(__tiku_nvm_mram_end - __tiku_nvm_mram_start);
     return __tiku_nvm_mram_start;
+}
+
+/** @brief .persistent, which opens the partition (see tiku_mem_hal.h). */
+uint8_t *tiku_mem_arch_durable_live(size_t *len)
+{
+    *len = (size_t)(__persistent_end - __persistent_start);
+    return __persistent_start;
 }
 
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)

@@ -49,13 +49,12 @@ typedef struct {
  */
 static TIKU_DURABLE alias_slot_t alias_table[TIKU_SHELL_ALIAS_MAX];
 
-/**
- * FRAM cell (.persistent): validity gate for alias_table.
- *
- * Holds ALIAS_MAGIC once the table has been primed.  Any other value, including
- * the all-ones or all-zeros of a fresh FRAM, triggers a one-time re-init.
+/*
+ * The table is a persist cell gated by ALIAS_MAGIC: a fresh or foreign gate
+ * primes every slot empty, and an update that moves the table carries the
+ * aliases to its new place by that key (tiku_persist_move, tiku_mem.h).
  */
-static TIKU_DURABLE uint32_t alias_magic;
+TIKU_PERSIST_CELL(alias_cell, alias_table, ALIAS_MAGIC, NULL, 0);
 
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */
@@ -107,32 +106,15 @@ find_free_slot(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Validate the FRAM magic word; prime the table on first boot.
+ * @brief Validate the table's gate; prime every slot empty when it fails.
  *
- * Returns immediately when alias_magic already matches, so it is idempotent and
- * cheap on every boot.  Otherwise every slot is emptied and the magic stamped
- * inside one unlock bracket, so the prime runs at most once per FRAM lifetime.
+ * Idempotent and cheap on every boot: a gate holding ALIAS_MAGIC keeps the
+ * table as it is, so the prime runs once per durable lifetime.
  */
 void
 tiku_shell_alias_init(void)
 {
-    uint16_t mpu_saved;
-    uint8_t i;
-
-    if (alias_magic == ALIAS_MAGIC) {
-        return;
-    }
-
-    /* Virgin FRAM (or different magic from a previous build).
-     * Zero every slot's name byte and stamp the magic, so this
-     * never re-inits again. */
-    mpu_saved = tiku_mpu_unlock_nvm();
-    for (i = 0; i < TIKU_SHELL_ALIAS_MAX; i++) {
-        alias_table[i].name[0] = '\0';
-        alias_table[i].body[0] = '\0';
-    }
-    alias_magic = ALIAS_MAGIC;
-    tiku_mpu_lock_nvm(mpu_saved);
+    (void)tiku_persist_cell_init(&alias_cell);
 }
 
 /**
