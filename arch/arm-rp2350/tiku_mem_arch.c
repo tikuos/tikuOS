@@ -314,8 +314,8 @@ void tiku_rp2350_flash_program(uint32_t flash_offset,
  * sector for a valid magic word and copies the snapshot back into the SRAM
  * .uninit region, so persistent state survives a full power cycle.
  *
- * @note With the magic absent (fresh chip or post-erase) .uninit is left
- *       untouched and per-subsystem first-boot logic handles it.
+ * @note With no image that checks out (fresh chip, post-erase, torn flush)
+ *       .uninit is zeroed and per-subsystem first-boot logic handles it.
  */
 void tiku_mem_arch_init(void) {
     const uint32_t *flash = (const uint32_t *)__tiku_nvm_flash_start;
@@ -328,8 +328,8 @@ void tiku_mem_arch_init(void) {
 
     /* V2 mirrors are CRC-validated: a power cut during the (NON-atomic
      * on NOR: erase, then program) flush leaves an image that fails the
-     * check and is NOT restored -- .uninit keeps its NOLOAD value and
-     * per-subsystem first-boot priming runs.  V1 (pre-CRC) mirrors are
+     * check and is NOT restored -- .uninit is zeroed and per-subsystem
+     * first-boot priming runs.  V1 (pre-CRC) mirrors are
      * accepted once for seamless upgrade; the first flush rewrites V2.
      *
      * The restore memcpys write .uninit.  At FIRST boot the MPU is not
@@ -340,23 +340,15 @@ void tiku_mem_arch_init(void) {
      * the ARCH window: no flush side-effects, nest-safe. */
     {
         uint16_t mpu_saved = tiku_mpu_arch_unlock_nvm();
+        size_t len;
+        const uint8_t *img = tiku_mem_arch_durable(&len);
 
-    if (flash[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2) {
-        size_t len = (size_t)flash[TIKU_NVM_MIRROR_W_LEN];
-        const uint8_t *img =
-            (const uint8_t *)__tiku_nvm_flash_start +
-            TIKU_NVM_MIRROR_HDR_BYTES;
-        if (len <= (uint32_t)(uintptr_t)&__tiku_nvm_flash_size
-                       - TIKU_NVM_MIRROR_HDR_BYTES &&
-            tiku_nvm_crc32(img, len) == flash[TIKU_NVM_MIRROR_W_CRC]) {
-            if (uninit_size > len) {
-                uninit_size = len;
-            }
-            memcpy(&__uninit_start, img, uninit_size);
-            g_nvm_restore = TIKU_NVM_RESTORE_V2_OK;
-        } else {
-            g_nvm_restore = TIKU_NVM_RESTORE_CRC_FAIL;
+    if (img != NULL) {
+        memcpy(&__uninit_start, img, (uninit_size < len) ? uninit_size : len);
+        if (uninit_size > len) {  /* this image grew: new cells start blank */
+            memset(&__uninit_start + len, 0, uninit_size - len);
         }
+        g_nvm_restore = TIKU_NVM_RESTORE_V2_OK;
     } else if (flash[0] == TIKU_NVM_MIRROR_MAGIC_V1) {
         if (uninit_size > (RP2350_NVM_SECTOR_SIZE - 4U)) {
             uninit_size = (RP2350_NVM_SECTOR_SIZE - 4U);
@@ -364,7 +356,12 @@ void tiku_mem_arch_init(void) {
         memcpy(&__uninit_start, (const uint8_t *)&flash[1], uninit_size);
         g_nvm_restore = TIKU_NVM_RESTORE_V1;
     } else {
-        g_nvm_restore = TIKU_NVM_RESTORE_VIRGIN;
+        /* A fresh part or a torn flush: a warm reset keeps SRAM, so zero
+         * .uninit rather than let a value from before it pass as restored. */
+        memset(&__uninit_start, 0, uninit_size);
+        g_nvm_restore =
+            (flash[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2)
+                ? TIKU_NVM_RESTORE_CRC_FAIL : TIKU_NVM_RESTORE_VIRGIN;
     }
 
         tiku_mpu_arch_lock_nvm(mpu_saved);

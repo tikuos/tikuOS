@@ -197,13 +197,13 @@ SECTIONS
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* NOTE: the RETAINED grade does NOT live here.  DTCM is wiped across
-         * every reset on this part (hardware-verified 2026-07-15: a J-Link
-         * marker in DTCM reads back all-zeros after a reset while an SSRAM
-         * marker survives -- the secure bootloader runs through TCM before
-         * the crt).  DURABLE (.persistent above) only survives because the
-         * MRAM mirror restores it; WARM has no mirror, so it lives in the
-         * retained SSRAM instead -- see .ssram below. */
+        /* NOTE: the RETAINED grade does NOT live here.  The secure bootloader
+         * runs through low DTCM before the crt and clears it (a J-Link marker
+         * there read back zero after a reset, 2026-07-15), but not all of
+         * DTCM: a record at 0x2004435c survived one (2026-09-25).  So DURABLE
+         * is only what the MRAM mirror restores (tiku_mem_arch_init zeroes
+         * .uninit when it holds no image), and WARM, which has no mirror,
+         * lives in the retained SSRAM instead -- see .ssram below. */
     } > TCM
 
     /* End of static allocations / start of the _sbrk heap. Aliases for
@@ -232,8 +232,8 @@ SECTIONS
         /* RETAINED grade: survives warm resets, reseeded on
          * power cycle (magic self-primes).  Placed AFTER __ssram_end so the
          * crt's .ssram zero loop (__ssram_start..__ssram_end) skips it, and
-         * in SSRAM rather than DTCM because DTCM is wiped across every reset
-         * on this part (hardware-verified; see the .uninit note above). */
+         * in SSRAM rather than DTCM because the bootloader clears part of
+         * DTCM on every reset (see the .uninit note above). */
         *(.retained*)
     } > SSRAM
 

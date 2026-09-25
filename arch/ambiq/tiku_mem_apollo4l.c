@@ -95,12 +95,14 @@ static size_t uninit_bytes(void) {
  * @brief Restore .uninit state from the MRAM mirror on boot
  *
  * Checks word[0] of the reserved MRAM page for TIKU_NVM_MAGIC and, on a match,
- * copies the stored .uninit image back into RAM before subsystem init.  On a
- * fresh chip the magic is absent and .uninit keeps its NOLOAD value.
+ * copies the stored .uninit image back into RAM before subsystem init.  With
+ * no image that checks out, .uninit is zeroed and each cell primes its default.
  */
 void tiku_mem_arch_init(void) {
     const uint32_t *mirror = (const uint32_t *)__tiku_nvm_mram_start;
+    const uint8_t *img;
     size_t n = uninit_bytes();
+    size_t len;
     uint16_t mpu_saved;
 
     /* The restore memcpys write .uninit.  At FIRST boot the MPU is not
@@ -112,25 +114,13 @@ void tiku_mem_arch_init(void) {
      * with the ARCH window (no flush side-effects; nest-safe). */
     mpu_saved = tiku_mpu_arch_unlock_nvm();
 
-    if (mirror[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2) {
-        size_t len = (size_t)mirror[TIKU_NVM_MIRROR_W_LEN];
-        const uint8_t *img =
-            (const uint8_t *)__tiku_nvm_mram_start + TIKU_NVM_MIRROR_HDR_BYTES;
-        if (len <= (TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES) &&
-            tiku_nvm_crc32(img, len) == mirror[TIKU_NVM_MIRROR_W_CRC]) {
-            if (n > len) {
-                n = len;
-            }
-            memcpy(&__uninit_start, img, n);
-            g_nvm_restore = TIKU_NVM_RESTORE_V2_OK;
-        } else {
-            /* Torn program (power cut mid-flush) or rot: the magic word
-             * survived but the image does not check out.  DO NOT restore
-             * — .uninit keeps its NOLOAD value and every subsystem's
-             * "gate invalid -> prime default" path runs.  Crash-
-             * consistent by construction, never silently corrupt. */
-            g_nvm_restore = TIKU_NVM_RESTORE_CRC_FAIL;
+    img = tiku_nvm_mirror_image(mirror, TIKU_NVM_MRAM_BYTES, &len);
+    if (img != NULL) {
+        memcpy(&__uninit_start, img, (n < len) ? n : len);
+        if (n > len) {          /* this image grew: its new cells start blank */
+            memset(&__uninit_start + len, 0, n - len);
         }
+        g_nvm_restore = TIKU_NVM_RESTORE_V2_OK;
     } else if (mirror[0] == TIKU_NVM_MIRROR_MAGIC_V1) {
         /* Legacy pre-CRC mirror: accept it once (best effort, exactly
          * the old behavior) so an upgrade keeps boot_count/RTC/aliases;
@@ -141,7 +131,14 @@ void tiku_mem_arch_init(void) {
         memcpy(&__uninit_start, (const uint8_t *)&mirror[1], n);
         g_nvm_restore = TIKU_NVM_RESTORE_V1;
     } else {
-        g_nvm_restore = TIKU_NVM_RESTORE_VIRGIN;
+        /* A fresh part, or a flush torn by a power cut (the magic survived,
+         * the image does not check out).  A reset does not clear .uninit, so
+         * zero it: every "gate invalid -> prime default" path then runs, and
+         * nothing from before the reset passes for a restored value. */
+        memset(&__uninit_start, 0, n);
+        g_nvm_restore =
+            (mirror[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2)
+                ? TIKU_NVM_RESTORE_CRC_FAIL : TIKU_NVM_RESTORE_VIRGIN;
     }
 
     tiku_mpu_arch_lock_nvm(mpu_saved);
