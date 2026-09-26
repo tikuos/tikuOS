@@ -181,7 +181,7 @@ int tiku_persist_move(const tiku_persist_move_env_t *e)
         return -1;
     }
     manifest_build(e, &cur);
-    if (manifest_ok(e->manifest, e->live_len) &&
+    if (e->preserve == NULL && manifest_ok(e->manifest, e->live_len) &&
         e->manifest->count == cur.count && e->manifest->check == cur.check &&
         memcmp(e->manifest->at, cur.at,
                (size_t)cur.count * sizeof cur.at[0]) == 0) {
@@ -221,14 +221,16 @@ int tiku_persist_move(const tiku_persist_move_env_t *e)
             move_word(e->live + offs[k], 0u);
         }
     }
-    /* With the old layout known, a cell it did not carry starts fresh: its
-     * gate here may be a leftover from an image before that one, over bytes
-     * the last image has since used for something else. */
-    for (i = 0; n_offs > 0 && i < cur.count; i++) {
+    /* A missing manifest can be an interrupted move. No unmatched gate is
+     * evidence of a valid value, even on a first manifest-aware boot. */
+    for (i = 0; i < cur.count; i++) {
         memcpy(&key, e->live + cur.at[i].gate, sizeof key);
         if (!moving[i] && key == cur.at[i].key) {
             move_word(e->live + cur.at[i].gate, 0u);
         }
+    }
+    if (e->preserve != NULL) {
+        e->preserve(e->preserve_ctx);
     }
     for (i = 0; i < cur.count; i++) {
         uint8_t *data = e->live + cur.at[i].data;
@@ -267,6 +269,7 @@ int tiku_persist_moved(void)
 }
 
 #if defined(TIKU_CELL_TABLE) && TIKU_CELL_TABLE
+#include "tiku_layout.h"
 /* The table every TIKU_PERSIST_CELL adds itself to (the linker scripts). */
 extern const tiku_persist_cell_t *const __tiku_cells_start[];
 extern const tiku_persist_cell_t *const __tiku_cells_end[];
@@ -274,15 +277,40 @@ extern const tiku_persist_cell_t *const __tiku_cells_end[];
 /* Where this image keeps its cells; rewritten only when that changes. */
 static TIKU_DURABLE tiku_persist_manifest_t cell_manifest;
 
+/** @brief Capture ownership and cells before a shared durable-image rewrite. */
+int tiku_persist_move_boot_env(tiku_persist_move_env_t *e)
+{
+    tiku_layout_record_t record;
+    int result;
+
+    if (e == NULL) {
+        return -1;
+    }
+    e->preserve = NULL;
+    e->preserve_ctx = NULL;
+    if (tiku_layout_capture_record(e->old, e->old_len, &record)) {
+        e->preserve = tiku_layout_restore_record;
+        e->preserve_ctx = &record;
+    }
+    result = tiku_persist_move(e);
+    if (e->preserve != NULL) {
+        tiku_layout_restore_complete(result);
+    }
+    e->preserve = NULL;
+    e->preserve_ctx = NULL;
+    return result;
+}
+
 void tiku_persist_move_boot(void)
 {
     tiku_persist_move_env_t e;
 
+    memset(&e, 0, sizeof e);
     e.cells    = __tiku_cells_start;
     e.n_cells  = (size_t)(__tiku_cells_end - __tiku_cells_start);
     e.live     = tiku_mem_arch_durable_live(&e.live_len);
     e.old      = tiku_mem_arch_durable(&e.old_len);
     e.manifest = &cell_manifest;
-    move_result = tiku_persist_move(&e);
+    move_result = tiku_persist_move_boot_env(&e);
 }
 #endif

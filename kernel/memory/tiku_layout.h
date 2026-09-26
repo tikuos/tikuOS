@@ -282,6 +282,16 @@ const char *tiku_layout_held_name(uint8_t held);
 /** @brief Run the boot decision once; later calls return at once. */
 void tiku_layout_boot(void);
 
+/** @brief Capture legacy ownership (or absence) before rewriting its image. */
+int tiku_layout_capture_record(const uint8_t *image, size_t len,
+                               tiku_layout_record_t *out);
+
+/** @brief Restore a captured record inside the cell mover's write window. */
+void tiku_layout_restore_record(void *record);
+
+/** @brief Withhold ownership when the combined restore did not complete. */
+void tiku_layout_restore_complete(int move_result);
+
 /** @brief The boot's findings (runs the boot first if it has not run). */
 const tiku_layout_state_t *tiku_layout_state(void);
 

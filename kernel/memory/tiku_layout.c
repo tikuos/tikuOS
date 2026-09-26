@@ -1221,6 +1221,66 @@ static const tiku_layout_record_t absent_record;
 static tiku_layout_env_t   board_env;
 static tiku_layout_state_t board_state;
 static uint8_t             board_booted;
+static uint8_t             board_restore_failed;
+
+/** @brief Capture ownership or its absence before rewriting the old image. */
+int
+tiku_layout_capture_record(const uint8_t *image, size_t len,
+                           tiku_layout_record_t *out)
+{
+    tiku_layout_env_t e;
+    const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
+
+    if (out == NULL || rgn == NULL || tiku_persist_cell_valid(&pin_cell)) {
+        return 0;
+    }
+    memset(out, 0, sizeof *out);
+    if (tiku_persist_cell_valid(&layout_cell) &&
+        rec_valid(&tiku_layout_pin.rec)) {
+        *out = tiku_layout_pin.rec;
+        return 1;
+    }
+    memset(&e, 0, sizeof e);
+    e.region = *rgn;
+    e.default_tier = TIKU_NVM_TIER_BYTES;
+    e.step = TIKU_TFS_LOCATE_STEP;
+    e.durable = image;
+    e.durable_len = len;
+    (void)rec_rescue(&e, out);
+    /* Pin even an absent/ambiguous result: truncating the old image must not
+     * turn two conflicting records into one acceptable candidate later. */
+    return 1;
+}
+
+/** @brief Install the captured decision without flushing the shared image. */
+void
+tiku_layout_restore_record(void *record)
+{
+    uint32_t word = LAYOUT_PINNED;
+
+    /* The caller captured both this record and the cell values before any
+     * writes. One final flush commits their shared durable image. */
+    board_restore_failed = 1u;
+    tiku_mem_arch_nvm_write((uint8_t *)&tiku_layout_pin.pinned,
+                            (const uint8_t *)&word, sizeof word);
+    word = 0u;
+    tiku_mem_arch_nvm_write((uint8_t *)&tiku_layout_pin.gate,
+                            (const uint8_t *)&word, sizeof word);
+    if (rec_valid(record)) {
+        tiku_mem_arch_nvm_write((uint8_t *)&tiku_layout_pin.rec,
+                                record, sizeof tiku_layout_pin.rec);
+        word = layout_cell.key;
+        tiku_mem_arch_nvm_write((uint8_t *)&tiku_layout_pin.gate,
+                                (const uint8_t *)&word, sizeof word);
+    }
+}
+
+/** @brief Do not publish a record whose combined flush failed. */
+void
+tiku_layout_restore_complete(int move_result)
+{
+    board_restore_failed = (move_result < 0);
+}
 
 /** @brief Stamp the record's place once, then commit it through the cell. */
 static int
@@ -1293,6 +1353,15 @@ tiku_layout_boot(void)
     if (rgn != NULL && rgn->base != NULL) {
         board_env.region.base = rgn->base;
         board_env.region.size = rgn->size;
+    }
+    if (board_restore_failed) {
+        memset(&board_state, 0, sizeof board_state);
+        board_state.store = TIKU_LAYOUT_STORE_HELD;
+        board_state.held = TIKU_LAYOUT_HELD_IO;
+        board_env.rec = &absent_record;
+        board_env.durable = NULL;
+        board_env.durable_len = 0u;
+        return;
     }
     (void)tiku_layout_boot_env(&board_env, &board_state);
     board_env.durable     = NULL;       /* a view for this boot's search only */

@@ -1026,9 +1026,10 @@ uint8_t tiku_persist_cell_primed(void);
  * the manifest the last image wrote in the durable image as last persisted,
  * and moves each cell whose key and size still match, value first, gate
  * last; every other cell's gate is cleared, so it re-primes rather than
- * trusting bytes the last image used for something else.  The old manifest
- * is invalidated before anything is written and the new one after, so a cut
- * part way loses values but never mixes them.
+ * trusting bytes the last image used for something else. Missing or damaged
+ * manifests also reset unverified cells, including on upgrades from images
+ * without manifests. Interrupted moves may lose values, never validate them
+ * by a leftover gate alone.
  */
 
 /** @brief Where one cell lives, as offsets into the durable image. */
@@ -1061,6 +1062,10 @@ typedef struct {
     const uint8_t             *old;     /**< durable image as last persisted */
     size_t                     old_len;
     tiku_persist_manifest_t   *manifest;      /**< this image's, in live  */
+    /* Optional control-record restore, after snapshotting cells and retiring
+     * old manifests. Runs inside the write window; must not flush or relock. */
+    void (*preserve)(void *ctx);
+    void *preserve_ctx;
 } tiku_persist_move_env_t;
 
 /**
@@ -1070,6 +1075,9 @@ typedef struct {
  *         the write window did not complete.
  */
 int tiku_persist_move(const tiku_persist_move_env_t *e);
+
+/** @brief Move cells and preserve legacy layout ownership in one image. */
+int tiku_persist_move_boot_env(tiku_persist_move_env_t *e);
 
 /** @brief tiku_persist_move() for this image; tiku_mem_init() calls it. */
 void tiku_persist_move_boot(void);
