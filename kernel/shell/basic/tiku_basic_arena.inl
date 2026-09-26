@@ -8,7 +8,7 @@
  * tiku_basic_arena.inl - arena allocation for the BASIC working set.
  *
  * Not a standalone unit; included from tiku_basic.c.  Computes the footprint from
- * the configured limits, then lazily allocates every table out of the AUTO tier.
+ * the configured limits, then lazily reserves default working memory.
  * Each session resets and re-allocates, so the feature set costs no permanent BSS.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -92,7 +92,7 @@
 /*
  * THE ARENA MUST FIT ITS TIER POOL -- AT BUILD TIME.
  *
- * basic_alloc_state() asks the AUTO tier for BASIC_ARENA_BYTES in one carve.
+ * basic_alloc_state() requests BASIC_ARENA_BYTES in one contiguous reservation.
  * Two numbers therefore have to agree, and until v0.06 nothing compared them:
  * this figure, computed from the capacity macros below, and the tier pool size
  * the Makefile passes per MCU.  When the pool was too small the build stayed
@@ -103,19 +103,12 @@
  * tallied the line table, big buffers and string heap but omitted the 16 KB
  * DIM array reserve).
  *
- * The arena is the ONLY production consumer of the tier pool -- the other
- * potential one, tiku_proc_mem, has no callers outside its own module -- so
- * these asserts are exact today, not merely necessary.  If a second consumer
- * ever appears, the pool has to cover both and this becomes a lower bound.
- *
- * Which pool applies follows AUTO's resolution order (HIFRAM -> SRAM -> NVM,
- * kernel/memory/tiku_tier.c): on MSP430 the request clears the 1 KB HIFRAM
- * threshold and lands in the upper FRAM bank; on the ARM parts no HIFRAM tier
- * exists, so it lands in SRAM.  AUTO's third option, NVM, is deliberately
- * refused in basic_alloc_state() -- the arena is rewritten on every statement
- * and a store into MRAM or QSPI flash would fault -- so it is never a
- * legitimate home and is not asserted against.  Host builds have no
- * meaningful pool and are left alone.
+ * These checks establish a capacity floor, not available space at runtime:
+ * other allocations and loans can consume the same backing. The default
+ * working request preserves AUTO's eligible-HIFRAM/SRAM preference and never
+ * selects protected NVM or external memory. On eligible MSP430 large-model
+ * builds the arena exceeds the HIFRAM threshold; on ARM it uses SRAM. Host
+ * builds have no linker-derived capacity and are left alone.
  */
 #if defined(PLATFORM_MSP430)
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_HIFRAM_SIZE,
@@ -201,7 +194,7 @@ basic_clear_vars(void)
  * @brief Allocate (or reset) the BASIC working-set arena and bind
  *        each sub-region to its global pointer.
  *
- * On FR5994 with MEMORY_MODEL=large the AUTO-tier request routes to
+ * On FR5994 with MEMORY_MODEL=large the default working request routes to
  * HIFRAM (the threshold is 1 KB); on smaller parts it falls back to
  * SRAM.
  *
@@ -216,8 +209,7 @@ basic_alloc_state(void)
         (void)tiku_arena_reset(&basic_arena);
     } else {
         (void)tiku_tier_init();
-        if (tiku_tier_arena_create(&basic_arena, TIKU_MEM_AUTO,
-                                    BASIC_ARENA_BYTES, 0xBAu)
+        if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, 0xBAu, NULL)
             != TIKU_MEM_OK) {
             return -1;
         }
@@ -234,7 +226,7 @@ basic_alloc_state(void)
         }
     }
 
-    /* Defend against custom allocator descriptors; AUTO itself excludes NVM. */
+    /* Defend against custom allocators; working requests themselves exclude NVM. */
     if (basic_arena.tier == TIKU_MEM_NVM) {
         return -1;
     }

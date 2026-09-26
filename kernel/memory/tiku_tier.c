@@ -446,13 +446,12 @@ static tiku_mem_tier_t resolve_tier(tiku_mem_tier_t tier,
 
     aligned = align_up(size);
 
-#if TIKU_TIER_HIFRAM_AVAILABLE
+#if TIKU_TIER_HIFRAM_AVAILABLE && TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0
     /* Route bulk allocations to HIFRAM if the threshold is met and
      * the HIFRAM tier has room. This is the main AUTO win on
      * FR5994/FR6989: a 16 KB ML feature table no longer competes
      * with the kernel's 4-8 KB SRAM budget. */
-    if (TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0 &&
-        size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
+    if (size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
         tier_state[TIKU_MEM_HIFRAM].initialized &&
         aligned <= tier_room(&tier_state[TIKU_MEM_HIFRAM])) {
         return TIKU_MEM_HIFRAM;
@@ -762,6 +761,243 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
     }
 
     return err;
+}
+
+/*---------------------------------------------------------------------------*/
+/* WORKING-MEMORY REQUESTS                                                    */
+/*---------------------------------------------------------------------------*/
+
+/* Preview a reservation before changing any offset, loan, or output object. */
+typedef struct {
+    tier_pool_state_t *span;
+    uint8_t *ptr;
+    tiku_mem_arch_size_t consumed;
+    tiku_mem_tier_t tier;
+} work_reservation_t;
+
+/** @brief Validate the request; all working buffers are naturally aligned. */
+static int work_request(const tiku_mem_request_t *request,
+                         tiku_mem_arch_size_t *alignment, uint16_t *flags)
+{
+    *alignment = request != NULL ? request->alignment : 0u;
+    *flags = request != NULL ? request->flags : 0u;
+    if ((*flags & ~TIKU_MEM_ALLOW_EXTERNAL) != 0u ||
+        (*alignment != 0u && (*alignment & (*alignment - 1u)) != 0u)) {
+        return 0;
+    }
+    if (*alignment < TIKU_MEM_ARCH_ALIGNMENT) {
+        *alignment = TIKU_MEM_ARCH_ALIGNMENT;
+    }
+    return 1;
+}
+
+/** @brief Round without saturation: a smaller result is never usable capacity. */
+static int work_round(tiku_mem_arch_size_t size, tiku_mem_arch_size_t alignment,
+                       tiku_mem_arch_size_t *rounded)
+{
+    const tiku_mem_arch_size_t max = (tiku_mem_arch_size_t)~(tiku_mem_arch_size_t)0;
+    const tiku_mem_arch_size_t mask = alignment - 1u;
+    if (size > max - mask) {
+        return 0;
+    }
+    *rounded = (size + mask) & ~mask;
+    return 1;
+}
+
+/** @brief Best fitting aligned span in one tier, without reserving anything. */
+static int work_fit(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
+                     tiku_mem_arch_size_t alignment, int loan,
+                     work_reservation_t *out)
+{
+    tier_pool_state_t *ts;
+    tiku_mem_arch_size_t best_room = 0;
+    uint8_t i;
+    int found = 0;
+
+    if (loan) {
+        for (i = 0; (ts = tier_span(tier, i)) != NULL; i++) {
+            if (ts->lent != 0u) {
+                return 0; /* The slot belongs to the tier, not the span. */
+            }
+        }
+    }
+    for (i = 0; (ts = tier_span(tier, i)) != NULL; i++) {
+        uintptr_t base, bottom, top, at;
+        const uintptr_t mask = (uintptr_t)alignment - 1u;
+        tiku_mem_arch_size_t room;
+
+        if (!ts->initialized || ts->buf == NULL || ts->offset > ts->capacity ||
+            ts->lent > ts->capacity - ts->offset) {
+            continue;
+        }
+        base = (uintptr_t)ts->buf;
+        if (ts->capacity > UINTPTR_MAX - base) {
+            continue;
+        }
+        bottom = base + ts->offset;
+        top = base + ts->capacity - ts->lent;
+        room = ts->capacity - ts->offset - ts->lent;
+        if (size > room) {
+            continue;
+        }
+        if (loan) {
+            at = (top - size) & ~mask;
+            if (at < bottom) {
+                continue;
+            }
+        } else {
+            if (bottom > UINTPTR_MAX - mask) {
+                continue;
+            }
+            at = (bottom + mask) & ~mask;
+            if (at > top || size > top - at) {
+                continue;
+            }
+        }
+        if (!found || room < best_room) {
+            /* Containment above proves these differences fit the size type. */
+            out->span = ts;
+            out->ptr = (uint8_t *)at;
+            out->consumed = (tiku_mem_arch_size_t)(loan ? top - at :
+                                                   at - bottom + size);
+            out->tier = tier;
+            best_room = room;
+            found = 1;
+        }
+    }
+    return found;
+}
+
+/** @brief Preserve AUTO's internal order; external storage is an opt-in last. */
+static int work_select(tiku_mem_arch_size_t size, tiku_mem_arch_size_t policy_size,
+                        tiku_mem_arch_size_t alignment, uint16_t flags, int loan,
+                        work_reservation_t *out)
+{
+#if TIKU_TIER_HIFRAM_AVAILABLE && TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0
+    if (policy_size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
+        work_fit(TIKU_MEM_HIFRAM, size, alignment, loan, out)) {
+        return 1;
+    }
+#else
+    (void)policy_size;
+#endif
+    if (work_fit(TIKU_MEM_SRAM, size, alignment, loan, out)) {
+        return 1;
+    }
+#if TIKU_TIER_HIFRAM_AVAILABLE
+    if (work_fit(TIKU_MEM_HIFRAM, size, alignment, loan, out)) {
+        return 1;
+    }
+#endif
+    return (flags & TIKU_MEM_ALLOW_EXTERNAL) != 0u &&
+           work_fit(TIKU_MEM_PSRAM, size, alignment, loan, out);
+}
+
+/** @brief Reserve checked backing after control-block initialization succeeded. */
+static void work_commit(const work_reservation_t *r)
+{
+    r->span->offset += r->consumed;
+    r->span->alloc_count++;
+    tier_note_peak(r->span);
+}
+
+tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
+        tiku_mem_arch_size_t size, uint8_t id, const tiku_mem_request_t *request)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    tiku_mem_arch_size_t alignment, capacity;
+    uint16_t flags;
+    work_reservation_t r;
+    tiku_arena_t ready = {0};
+
+    if (arena == NULL || size == 0u || !work_request(request, &alignment, &flags)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    if (!work_round(size, TIKU_MEM_ARCH_ALIGNMENT, &capacity) ||
+        !work_select(capacity, size, alignment, flags, 0, &r)) {
+        return TIKU_MEM_ERR_NOMEM;
+    }
+    ready.buf = r.ptr;
+    ready.capacity = capacity;
+    ready.id = id;
+    ready.active = 1u;
+    ready.tier = r.tier;
+    work_commit(&r);
+    *arena = ready;
+    return TIKU_MEM_OK;
+}
+
+tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
+        tiku_mem_arch_size_t block_size, tiku_mem_arch_size_t block_count,
+        uint8_t id, const tiku_mem_request_t *request)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    const tiku_mem_arch_size_t max = (tiku_mem_arch_size_t)~(tiku_mem_arch_size_t)0;
+    tiku_mem_arch_size_t alignment, stride, total;
+    uint16_t flags;
+    work_reservation_t r;
+    tiku_pool_t ready = {0};
+    tiku_mem_err_t err;
+
+    if (pool == NULL || block_size == 0u || block_count == 0u ||
+        !work_request(request, &alignment, &flags)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    /* On a host, pointer alignment may exceed the MCU-oriented HAL default. */
+    if (alignment < __alignof__(void *)) {
+        alignment = __alignof__(void *);
+    }
+    if (block_size < sizeof(void *)) {
+        block_size = sizeof(void *);
+    }
+    if (!work_round(block_size, alignment, &stride) || stride > max / block_count) {
+        return TIKU_MEM_ERR_NOMEM;
+    }
+    total = stride * block_count;
+    if (!work_select(total, total, alignment, flags, 0, &r)) {
+        return TIKU_MEM_ERR_NOMEM;
+    }
+    /* This is always CPU working storage: the free list uses ordinary stores. */
+    err = tiku_pool_create(&ready, r.ptr, stride, block_count, id);
+    if (err != TIKU_MEM_OK) {
+        return err;
+    }
+    ready.tier = r.tier;
+    work_commit(&r);
+    *pool = ready;
+    return TIKU_MEM_OK;
+}
+
+void *tiku_mem_borrow(tiku_mem_arch_size_t size, const tiku_mem_request_t *request)
+{
+    TIKU_MEM_KERNEL_ONLY(NULL);
+    tiku_mem_arch_size_t alignment;
+    uint16_t flags;
+    work_reservation_t r;
+
+    if (size == 0u || !work_request(request, &alignment, &flags) ||
+        !work_select(size, size, alignment, flags, 1, &r)) {
+        return NULL;
+    }
+    r.span->lent = r.consumed;
+    tier_note_peak(r.span);
+    return r.ptr;
+}
+
+tiku_mem_err_t tiku_mem_return(void *ptr)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    unsigned tier;
+    if (ptr == NULL) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    for (tier = 0; tier < TIKU_MEM_TIER_COUNT; tier++) {
+        if (tier != TIKU_MEM_AUTO && tier != TIKU_MEM_NVM &&
+            tiku_tier_return((tiku_mem_tier_t)tier, ptr) == TIKU_MEM_OK) {
+            return TIKU_MEM_OK;
+        }
+    }
+    return TIKU_MEM_ERR_INVALID;
 }
 
 /*---------------------------------------------------------------------------*/

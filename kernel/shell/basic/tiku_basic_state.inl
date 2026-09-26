@@ -43,7 +43,7 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 
 /* All program / state storage lives in a kernel arena rather than
- * BSS. The arena is allocated lazily from the AUTO tier on the first
+ * BSS. The arena is allocated lazily with a default working request on the first
  * `basic` invocation, sized to hold the line table, the variable
  * table, and the GOSUB stack with alignment slack. Subsequent
  * invocations reset the arena and re-allocate, achieving the

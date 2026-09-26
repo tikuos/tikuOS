@@ -1246,6 +1246,72 @@ uint32_t tiku_mpu_get_violation_count(void);
 uint32_t tiku_mpu_get_last_fault_addr(void);
 
 /*---------------------------------------------------------------------------*/
+/* WORKING-MEMORY REQUESTS                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Requirements for CPU working storage, independent of its technology.
+ *
+ * A NULL request or zero initialization selects the default SRAM/HIFRAM policy.
+ * Initialize the tiers before use. No request selects protected NVM, initializes
+ * an external controller, or promises zeroed, persistent or DMA-safe memory.
+ */
+typedef struct {
+    tiku_mem_arch_size_t alignment; /**< 0: natural; otherwise power of two */
+    uint16_t flags;                 /**< TIKU_MEM_ALLOW_EXTERNAL or zero */
+} tiku_mem_request_t;
+
+#define TIKU_MEM_REQUEST_DEFAULT  { 0, 0 }
+#define TIKU_MEM_ALLOW_EXTERNAL   0x0001u
+
+/**
+ * @brief Create a working arena; prefer this over named tiers in applications.
+ *
+ * Request alignment applies to the backing base, not individual arena objects.
+ * Ordinary tiku_arena_alloc() still guarantees only natural alignment.
+ * @note External backing is considered last with explicit permission. Arena reset
+ * does not return backing capacity or unblock external-memory detach.
+ *
+ * @param arena Output, unchanged on failure. Do not overwrite an active arena.
+ * @return OK, INVALID for bad arguments, or NOMEM when no eligible span fits.
+ */
+tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
+        tiku_mem_arch_size_t size, uint8_t id,
+        const tiku_mem_request_t *request);
+
+/**
+ * @brief Create a working pool with every block aligned to the request.
+ *
+ * Includes padding and free-list pointer alignment in the block stride.
+ * Freeing all blocks does not release the pool's backing reservation. The
+ * output is unchanged on failure; do not overwrite an active pool.
+ * @return OK, INVALID for bad arguments, or NOMEM for insufficient capacity.
+ */
+tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
+        tiku_mem_arch_size_t block_size, tiku_mem_arch_size_t block_count,
+        uint8_t id, const tiku_mem_request_t *request);
+
+/**
+ * @brief Borrow an aligned CPU buffer, skipping tiers with an outstanding loan.
+ *
+ * Shares the legacy one-loan-per-tier limit across all spans and APIs. External
+ * memory requires permission. Return the exact base with tiku_mem_return().
+ * @return A buffer of at least size bytes, or NULL on invalid/unavailable input.
+ */
+void *tiku_mem_borrow(tiku_mem_arch_size_t size,
+                      const tiku_mem_request_t *request);
+
+/**
+ * @brief Return a current new or legacy loan without naming its physical tier.
+ *
+ * All users must stop accessing the buffer first. A stale pointer after address
+ * reuse cannot be detected. Forced detach/reset also invalidates outstanding
+ * pointers. This is not a general free for arena or pool backing.
+ * @return OK, or INVALID if ptr is not the exact base of a current loan.
+ */
+tiku_mem_err_t tiku_mem_return(void *ptr);
+
+/*---------------------------------------------------------------------------*/
 /* TIER ALLOCATOR                                                            */
 /*---------------------------------------------------------------------------*/
 

@@ -197,8 +197,8 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
 
     case TIKU_MEM_AUTO:
         /* Use local capacity and inspect backing tiers, not field names. */
-        if (TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0 &&
-            size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
+#if TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0
+        if (size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
             pmem->hifram_arena.active &&
             pmem->hifram_arena.tier == TIKU_MEM_HIFRAM) {
             ptr = tiku_arena_alloc(&pmem->hifram_arena, size);
@@ -206,6 +206,7 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
                 return ptr;
             }
         }
+#endif
         if (pmem->sram_arena.active &&
             (pmem->sram_arena.tier == TIKU_MEM_SRAM ||
              pmem->sram_arena.tier == TIKU_MEM_HIFRAM)) {
