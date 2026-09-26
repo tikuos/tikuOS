@@ -653,6 +653,7 @@ static tiku_mem_err_t tier_arena_create(tiku_arena_t *arena,
     arena->capacity = aligned;
     arena->offset   = 0;
     arena->peak     = 0;
+    arena->fail     = 0;
     arena->count    = 0;
     arena->id       = id;
     arena->active   = 1;
