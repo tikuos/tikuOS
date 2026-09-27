@@ -62,8 +62,12 @@ typedef struct {
 /**
  * @brief Load and validate the init table from NVM.
  *
- * Call once during boot, after the NVM region map is initialised.
- * Auto-initialises the table on first boot (blank NVM).
+ * Call once during boot, after the NVM region map is initialised.  A blank
+ * table, or one that fails the checks, is primed empty; a missing or undersized
+ * region disables the table.
+ *
+ * @note A power loss during an add or an enable leaves the old table; during a
+ *       replace or a remove it can leave the table empty, never torn.
  */
 void tiku_init_load(void);
 
@@ -86,7 +90,7 @@ uint8_t tiku_init_run_all(void);
  * @param seq   Boot sequence number (lower = earlier)
  * @param name  Entry name (max TIKU_INIT_NAME_SIZE-1 chars)
  * @param cmd   Shell command string (max TIKU_INIT_CMD_SIZE-1 chars)
- * @return 0 on success, -1 if table is full
+ * @return 0 on success, -1 if the table is full or unusable or the write fails
  */
 int8_t tiku_init_add(uint8_t seq, const char *name, const char *cmd);
 
@@ -94,7 +98,8 @@ int8_t tiku_init_add(uint8_t seq, const char *name, const char *cmd);
  * @brief Remove an entry by name.
  *
  * @param name  Entry name to remove
- * @return 0 on success, -1 if not found
+ * @return 0 on success, -1 if not found, the table is unusable or the write
+ *         fails
  */
 int8_t tiku_init_remove(const char *name);
 
@@ -103,7 +108,8 @@ int8_t tiku_init_remove(const char *name);
  *
  * @param name  Entry name
  * @param en    1 = enable, 0 = disable
- * @return 0 on success, -1 if not found
+ * @return 0 on success, -1 if not found, the table is unusable or the write
+ *         fails
  */
 int8_t tiku_init_enable(const char *name, uint8_t en);
 
