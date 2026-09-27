@@ -88,15 +88,16 @@ static int writable(tiku_nvm_backend_t *be, uint32_t off,
     return TIKU_BIGBLOB_OK;
 }
 
-/** @brief Verify the payload, then publish metadata followed by its magic. */
+/** @brief Verify the medium against the source's CRC, then publish the
+ *  metadata followed by its magic. */
 static int publish(tiku_nvm_backend_t *be, uint32_t off, const char *name,
-                   const uint8_t *src, uint32_t len)
+                   uint32_t src_crc, uint32_t len)
 {
     bigblob_hdr_t h;
     memset(&h, 0, sizeof(h));
     h.magic = BIGBLOB_MAGIC;
     h.len = len;
-    h.crc = tiku_nvm_crc32(src, len);
+    h.crc = src_crc;
     if (h.crc != tiku_nvm_crc32(be->base + off + TIKU_BIGBLOB_HDR_BYTES, len)) {
         return TIKU_BIGBLOB_ERR_CRC;
     }
@@ -127,6 +128,7 @@ int tiku_bigblob_open(tiku_nvm_backend_t *be, uint32_t slot_off,
     w->src      = (const uint8_t *)src;
     w->slot_off = slot_off;
     w->len      = len;
+    w->crc      = 0xFFFFFFFFU;
     memcpy(w->name, name, strlen(name));
 
     /* Unpublish first: from here the slot reads as empty, so a power cut
@@ -159,6 +161,10 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
             w->active = 0U;
             return TIKU_BIGBLOB_ERR_IO;
         }
+        /* The source's CRC grows with each chunk, so the last step reads the
+         * medium once; a second pass over a model-sized source would hold the
+         * pump past the hang detector's limit. */
+        w->crc = tiku_nvm_crc32_update(w->crc, &w->src[w->done], n);
         w->done += n;
         if (done != NULL) {
             *done = w->done;
@@ -169,7 +175,8 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
     /* Compare with the source: checksumming only the medium would silently
      * accept a misprogrammed payload as the intended object. */
     {
-        int rc = publish(w->be, w->slot_off, w->name, w->src, w->len);
+        int rc = publish(w->be, w->slot_off, w->name, w->crc ^ 0xFFFFFFFFU,
+                         w->len);
         w->active = 0U;
         if (rc != TIKU_BIGBLOB_OK) return rc;
     }
@@ -201,7 +208,7 @@ int tiku_bigblob_write(tiku_nvm_backend_t *be, uint32_t slot_off,
         return TIKU_BIGBLOB_ERR_IO;
     }
 
-    return publish(be, slot_off, name, (const uint8_t *)src, len);
+    return publish(be, slot_off, name, tiku_nvm_crc32(src, len), len);
 }
 
 int tiku_bigblob_info(tiku_nvm_backend_t *be, uint32_t slot_off,

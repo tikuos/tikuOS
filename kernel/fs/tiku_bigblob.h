@@ -90,6 +90,7 @@ typedef struct {
     uint32_t            slot_off;
     uint32_t            len;
     uint32_t            done;
+    uint32_t            crc;
     char                name[TIKU_BIGBLOB_NAME_MAX + 1u];
     uint8_t             active;
 } tiku_bigblob_wr_t;

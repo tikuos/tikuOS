@@ -64,13 +64,14 @@ typedef enum {
 } tiku_nvm_restore_t;
 
 /**
- * @brief CRC-32 (reflected, poly 0xEDB88320, init/final 0xFFFFFFFF).
+ * @brief Continue a CRC-32 over the next bytes of a stream.
  *
- * A nibble-table implementation: 64 bytes of table and about two lookups per
- * byte, small enough to inline in every mirror backend and fast enough that a
- * whole 4 KB sector costs well under a millisecond.
+ * Takes and returns the running state: start it at 0xFFFFFFFF and finish it
+ * with the same mask, as tiku_nvm_crc32() does, so a payload programmed in
+ * chunks is checksummed once as the chunks pass rather than in a second pass.
  */
-static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
+static inline uint32_t tiku_nvm_crc32_update(uint32_t crc, const void *data,
+                                             size_t len)
 {
     static const uint32_t nib[16] = {
         0x00000000U, 0x1DB71064U, 0x3B6E20C8U, 0x26D930ACU,
@@ -79,7 +80,6 @@ static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
         0x9B64C2B0U, 0x86D3D2D4U, 0xA00AE278U, 0xBDBDF21CU
     };
     const uint8_t *p = (const uint8_t *)data;
-    uint32_t crc = 0xFFFFFFFFU;
     size_t i;
 
     for (i = 0; i < len; i++) {
@@ -87,7 +87,19 @@ static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
         crc = (crc >> 4) ^ nib[crc & 0x0FU];
         crc = (crc >> 4) ^ nib[crc & 0x0FU];
     }
-    return crc ^ 0xFFFFFFFFU;
+    return crc;
+}
+
+/**
+ * @brief CRC-32 (reflected, poly 0xEDB88320, init/final 0xFFFFFFFF).
+ *
+ * A nibble-table implementation: 64 bytes of table and about two lookups per
+ * byte, small enough to inline in every mirror backend and fast enough that a
+ * whole 4 KB sector costs well under a millisecond.
+ */
+static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
+{
+    return tiku_nvm_crc32_update(0xFFFFFFFFU, data, len) ^ 0xFFFFFFFFU;
 }
 
 /**
