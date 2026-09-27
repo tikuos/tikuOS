@@ -902,7 +902,7 @@ static void work_commit(const work_reservation_t *r)
 }
 
 tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
-        tiku_mem_arch_size_t size, uint8_t id, const tiku_mem_request_t *request)
+        tiku_mem_arch_size_t size, const tiku_mem_request_t *options)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     tiku_mem_arch_size_t alignment, capacity;
@@ -910,7 +910,7 @@ tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
     work_reservation_t r;
     tiku_arena_t ready = {0};
 
-    if (arena == NULL || size == 0u || !work_request(request, &alignment, &flags)) {
+    if (arena == NULL || size == 0u || !work_request(options, &alignment, &flags)) {
         return TIKU_MEM_ERR_INVALID;
     }
     if (!work_round(size, TIKU_MEM_ARCH_ALIGNMENT, &capacity) ||
@@ -919,7 +919,6 @@ tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
     }
     ready.buf = r.ptr;
     ready.capacity = capacity;
-    ready.id = id;
     ready.active = 1u;
     ready.tier = r.tier;
     work_commit(&r);
@@ -929,7 +928,7 @@ tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
 
 tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
         tiku_mem_arch_size_t block_size, tiku_mem_arch_size_t block_count,
-        uint8_t id, const tiku_mem_request_t *request)
+        const tiku_mem_request_t *options)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     const tiku_mem_arch_size_t max = (tiku_mem_arch_size_t)~(tiku_mem_arch_size_t)0;
@@ -940,7 +939,7 @@ tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
     tiku_mem_err_t err;
 
     if (pool == NULL || block_size == 0u || block_count == 0u ||
-        !work_request(request, &alignment, &flags)) {
+        !work_request(options, &alignment, &flags)) {
         return TIKU_MEM_ERR_INVALID;
     }
     /* On a host, pointer alignment may exceed the MCU-oriented HAL default. */
@@ -958,7 +957,7 @@ tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
         return TIKU_MEM_ERR_NOMEM;
     }
     /* This is always CPU working storage: the free list uses ordinary stores. */
-    err = tiku_pool_create(&ready, r.ptr, stride, block_count, id);
+    err = tiku_pool_create(&ready, r.ptr, stride, block_count, 0);
     if (err != TIKU_MEM_OK) {
         return err;
     }
@@ -968,14 +967,14 @@ tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
     return TIKU_MEM_OK;
 }
 
-void *tiku_mem_borrow(tiku_mem_arch_size_t size, const tiku_mem_request_t *request)
+void *tiku_mem_borrow(tiku_mem_arch_size_t size, const tiku_mem_request_t *options)
 {
     TIKU_MEM_KERNEL_ONLY(NULL);
     tiku_mem_arch_size_t alignment;
     uint16_t flags;
     work_reservation_t r;
 
-    if (size == 0u || !work_request(request, &alignment, &flags) ||
+    if (size == 0u || !work_request(options, &alignment, &flags) ||
         !work_select(size, size, alignment, flags, 1, &r)) {
         return NULL;
     }

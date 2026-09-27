@@ -439,7 +439,7 @@ typedef struct {
     tiku_mem_arch_size_t  peak;      /**< Lifetime high-water mark */
     tiku_mem_arch_size_t  count;     /**< Allocations since last reset */
     tiku_mem_arch_size_t  fail;      /**< Refused allocations (no room) */
-    uint8_t               id;        /**< Arena identifier for debugging */
+    uint8_t               id;        /**< Legacy label; working API sets zero */
     uint8_t               active;    /**< Non-zero if initialized */
     tiku_mem_tier_t       tier;      /**< Memory tier (SRAM or NVM) */
 } tiku_arena_t;
@@ -557,7 +557,7 @@ typedef struct {
     void                 *free_head;   /**< Head of embedded freelist */
     tiku_mem_arch_size_t  used_count;  /**< Currently allocated blocks */
     tiku_mem_arch_size_t  peak_count;  /**< Lifetime high-water mark */
-    uint8_t               id;          /**< Pool identifier for debugging */
+    uint8_t               id;          /**< Legacy label; working API sets zero */
     uint8_t               active;      /**< Non-zero if initialized */
     uint8_t               nvm;         /**< Non-zero: the backing is NVM-tier, so freelist
                                             writes route through
@@ -1253,11 +1253,15 @@ uint32_t tiku_mpu_get_last_fault_addr(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Requirements for CPU working storage, independent of its technology.
+ * @brief Optional allocation settings for ordinary CPU working memory.
  *
- * A NULL request or zero initialization selects the default SRAM/HIFRAM policy.
- * Initialize the tiers before use. No request selects protected NVM, initializes
- * an external controller, or promises zeroed, persistent or DMA-safe memory.
+ * NULL, or a zeroed structure, means natural alignment and automatic placement
+ * in internal memory (SRAM, eligible TCM, or CPU-writable upper FRAM).  External
+ * memory is used only with TIKU_MEM_ALLOW_EXTERNAL, and only after internal.
+ *
+ * @note Initialize the tiers first.  Arenas, pools and loans share this type,
+ *       and none of them selects protected NVM, starts an external controller,
+ *       or promises zeroed, persistent or DMA-safe memory.
  */
 typedef struct {
     tiku_mem_arch_size_t alignment; /**< 0: natural; otherwise power of two */
@@ -1270,39 +1274,54 @@ typedef struct {
 /**
  * @brief Create a working arena; prefer this over named tiers in applications.
  *
- * Request alignment applies to the backing base, not individual arena objects.
- * Ordinary tiku_arena_alloc() still guarantees only natural alignment.
- * @note External backing is considered last with explicit permission. Arena reset
- * does not return backing capacity or unblock external-memory detach.
+ * The alignment option applies to the backing base; tiku_arena_alloc() still
+ * guarantees only natural alignment for each object.  The control block's
+ * legacy id is set to zero.
+ *
+ * @note External backing is considered last and only with permission.  Arena
+ *       reset does not return backing capacity or unblock external-memory
+ *       detach.
  *
  * @param arena Output, unchanged on failure. Do not overwrite an active arena.
+ * @param size Number of bytes requested; must be nonzero.
+ * @param options Allocation options, or NULL for standard alignment and
+ *                automatically selected internal memory.
  * @return OK, INVALID for bad arguments, or NOMEM when no eligible span fits.
  */
 tiku_mem_err_t tiku_mem_arena_create(tiku_arena_t *arena,
-        tiku_mem_arch_size_t size, uint8_t id,
-        const tiku_mem_request_t *request);
+        tiku_mem_arch_size_t size, const tiku_mem_request_t *options);
 
 /**
- * @brief Create a working pool with every block aligned to the request.
+ * @brief Create a working pool with aligned fixed-size blocks.
  *
- * Includes padding and free-list pointer alignment in the block stride.
- * Freeing all blocks does not release the pool's backing reservation. The
- * output is unchanged on failure; do not overwrite an active pool.
+ * The block stride includes padding and free-list pointer alignment.  Freeing
+ * every block does not release the backing reservation.  The control block's
+ * legacy id is set to zero.
+ *
+ * @param pool Output control block, unchanged on failure; do not overwrite an
+ *             active pool.
+ * @param block_size Requested bytes per block; must be nonzero.
+ * @param block_count Number of blocks; must be nonzero.
+ * @param options Allocation options, or NULL for standard alignment and
+ *                automatically selected internal memory.
  * @return OK, INVALID for bad arguments, or NOMEM for insufficient capacity.
  */
 tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
         tiku_mem_arch_size_t block_size, tiku_mem_arch_size_t block_count,
-        uint8_t id, const tiku_mem_request_t *request);
+        const tiku_mem_request_t *options);
 
 /**
  * @brief Borrow an aligned CPU buffer, skipping tiers with an outstanding loan.
  *
  * Shares the legacy one-loan-per-tier limit across all spans and APIs. External
  * memory requires permission. Return the exact base with tiku_mem_return().
+ * @param size Number of bytes requested; must be nonzero.
+ * @param options Allocation options, or NULL for standard alignment and
+ *                automatically selected internal memory.
  * @return A buffer of at least size bytes, or NULL on invalid/unavailable input.
  */
 void *tiku_mem_borrow(tiku_mem_arch_size_t size,
-                      const tiku_mem_request_t *request);
+                      const tiku_mem_request_t *options);
 
 /**
  * @brief Return a current new or legacy loan without naming its physical tier.
@@ -1464,10 +1483,11 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
 /**
  * @brief Lend @p size bytes of a tier's free room to one operation.
  *
- * For a buffer a command needs only while it runs, where a carve would hold
- * it until reboot.  The loan sits at the top of the free room: carves made
- * meanwhile still come from the bottom, refused only where they would reach
- * it.  One loan per tier at a time, and NVM lends nothing.
+ * For a buffer a command needs only while it runs, where a carve would hold it
+ * until reboot.  The loan sits at the top of the free room, and carves made
+ * meanwhile are refused only where they would reach it.
+ *
+ * @note One loan per tier at a time; NVM lends nothing.
  *
  * @param tier   SRAM, HIFRAM or PSRAM
  * @param size   Bytes wanted

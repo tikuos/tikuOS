@@ -209,7 +209,7 @@ basic_alloc_state(void)
         (void)tiku_arena_reset(&basic_arena);
     } else {
         (void)tiku_tier_init();
-        if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, 0xBAu, NULL)
+        if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, NULL)
             != TIKU_MEM_OK) {
             return -1;
         }
