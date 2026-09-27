@@ -100,7 +100,7 @@ typedef struct {
  * @param be       backend to write through
  * @param slot_off byte offset of the slot, erase-block aligned
  * @param name     blob name
- * @param src      payload, which must outlive the write
+ * @param src      payload, unchanged and valid until publication completes
  * @param len      payload bytes
  * @param w        receives the cursor
  * @return TIKU_BIGBLOB_OK, or a negative tiku_bigblob_err_t
