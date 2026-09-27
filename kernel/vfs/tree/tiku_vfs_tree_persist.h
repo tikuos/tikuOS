@@ -26,7 +26,7 @@
  * tiku_vfs_tree_persist_children — bump it when adding a node there
  * (a _Static_assert in the .c catches a forgotten update).
  */
-#define TIKU_VFS_TREE_PERSIST_NCHILD  3
+#define TIKU_VFS_TREE_PERSIST_NCHILD  4
 
 /**
  * @brief /sys/persist children: cells, primed.

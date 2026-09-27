@@ -1085,6 +1085,9 @@ void tiku_persist_move_boot(void);
 /** @brief What this boot's move returned (0 where there is no cell table). */
 int tiku_persist_moved(void);
 
+/** @brief The layout this image records for its cells, or NULL for none. */
+const tiku_persist_manifest_t *tiku_persist_manifest(void);
+
 /*---------------------------------------------------------------------------*/
 /* MPU (MEMORY PROTECTION UNIT)                                              */
 /*---------------------------------------------------------------------------*/

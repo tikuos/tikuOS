@@ -268,6 +268,13 @@ int tiku_persist_moved(void)
     return move_result;
 }
 
+#if !(defined(TIKU_CELL_TABLE) && TIKU_CELL_TABLE)
+const tiku_persist_manifest_t *tiku_persist_manifest(void)
+{
+    return NULL;                        /* no table, so no record kept */
+}
+#endif
+
 #if defined(TIKU_CELL_TABLE) && TIKU_CELL_TABLE
 #include "tiku_layout.h"
 /* The table every TIKU_PERSIST_CELL adds itself to (the linker scripts). */
@@ -312,5 +319,11 @@ void tiku_persist_move_boot(void)
     e.old      = tiku_mem_arch_durable(&e.old_len);
     e.manifest = &cell_manifest;
     move_result = tiku_persist_move_boot_env(&e);
+}
+
+const tiku_persist_manifest_t *tiku_persist_manifest(void)
+{
+    return (cell_manifest.magic == TIKU_PERSIST_MANIFEST_MAGIC)
+           ? &cell_manifest : NULL;
 }
 #endif
