@@ -364,12 +364,13 @@ void tiku_process_exit(struct tiku_process *p)
         }
     }
     queue_purge_process_locked(p);
+    tiku_timer_cancel_process(p);
 
     tiku_atomic_exit();
 
-    /* Notify other processes (e.g. timer process) so they can
-     * clean up resources belonging to the exited process.  The
-     * data pointer carries the exited process's identity. */
+    /* Tell other processes it has exited; the data pointer carries its
+     * identity.  The broadcast can be dropped or arrive after a restart, so
+     * cleanup that must happen (its timers) is done above. */
     tiku_process_post_proc(TIKU_PROCESS_BROADCAST, TIKU_EVENT_EXITED, p);
 
     /* Supervision: per the process's restart policy, bring it straight back

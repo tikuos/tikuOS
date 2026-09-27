@@ -84,6 +84,9 @@ struct tiku_timer {
  */
 void tiku_timer_init(void);
 
+/** @brief Internal lifecycle hook: cancel an owner's timers before restart. */
+void tiku_timer_cancel_process(const struct tiku_process *owner);
+
 /**
  * @brief Set a callback timer
  * @param t     Timer structure (caller-owned, must persist)
@@ -109,10 +112,10 @@ void tiku_timer_set_callback(struct tiku_timer *t, tiku_clock_time_t ticks,
  * @param t     Timer structure (caller-owned, must persist)
  * @param ticks Interval in clock ticks
  *
- * Posts TIKU_EVENT_TIMER to the calling process when
- * the timer expires. The event data pointer will be `t`.
+ * Posts TIKU_EVENT_TIMER to the calling process when the timer expires, with
+ * `t` as the event data.  A full event queue leaves the timer armed until a
+ * later poll can post it; the owner's exit cancels the timer and its event.
  *
- * Example:
  * @code
  *   static struct tiku_timer my_timer;
  *   tiku_timer_set_event(&my_timer, TIKU_CLOCK_SECOND);

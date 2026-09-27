@@ -90,32 +90,12 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
   struct tiku_timer *t;
   struct tiku_timer *prev;
 
+  (void)data;
+
   TIKU_PROCESS_BEGIN();
 
   while (1) {
     TIKU_PROCESS_YIELD();
-
-    /*
-     * Handle process exit: remove all timers belonging to
-     * the exited process.
-     */
-    if (ev == TIKU_EVENT_EXITED) {
-      struct tiku_process *dead = tiku_event_proc(ev, data);
-      struct tiku_timer **pp = &timer_list;
-
-      while (*pp != NULL) {
-        if ((*pp)->p == dead) {
-          struct tiku_timer *victim = *pp;
-          TIMER_PRINTF("Cleanup: removed timer for exited process\n");
-          *pp = victim->next;
-          victim->next = NULL;
-          victim->active = 0;
-        } else {
-          pp = &(*pp)->next;
-        }
-      }
-      continue;
-    }
 
     if (ev != TIKU_EVENT_POLL) {
       continue;
@@ -143,6 +123,14 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
     for (t = timer_list; t != NULL; t = t->next) {
       if (timer_is_due(t, tiku_clock_time())) {
 
+        /* Queue pressure must not consume an expiration. Leave the timer
+         * armed and retry on the next poll; never spin on a full queue. */
+        if (t->mode == TIKU_TIMER_MODE_EVENT && t->p != NULL &&
+            !tiku_process_post(t->p, TIKU_EVENT_TIMER, t)) {
+          prev = t;
+          continue;
+        }
+
         /* Remove from list before dispatching */
         if (prev != NULL) {
           prev->next = t->next;
@@ -159,9 +147,6 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
           TIKU_PROCESS_CONTEXT_BEGIN(t->p);
           t->func(t->ptr);
           TIKU_PROCESS_CONTEXT_END(t->p);
-        } else if (t->mode == TIKU_TIMER_MODE_EVENT && t->p != NULL) {
-          TIMER_PRINTF("Expired: event posted to %s\n", t->p->name);
-          tiku_process_post(t->p, TIKU_EVENT_TIMER, t);
         }
 
         /* Restart scan — list may have changed */
@@ -182,6 +167,23 @@ void tiku_timer_init(void) {
   timer_list = NULL;
   tiku_process_start(&tiku_timer_process, NULL);
   TIMER_PRINTF("Init complete\n");
+}
+
+/* Called synchronously during exit, before supervision can reuse the owner.
+ * A queued EXITED notification may be delayed or dropped and carries no owner
+ * generation, so it cannot safely perform this cleanup. */
+void tiku_timer_cancel_process(const struct tiku_process *owner) {
+  struct tiku_timer **pp = &timer_list;
+  while (*pp != NULL) {
+    if ((*pp)->p == owner) {
+      struct tiku_timer *t = *pp;
+      *pp = t->next;
+      t->next = NULL;
+      t->active = 0;
+    } else {
+      pp = &(*pp)->next;
+    }
+  }
 }
 
 /*---------------------------------------------------------------------------*/
