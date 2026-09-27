@@ -623,6 +623,9 @@ BUILD_DIR = build/$(MCU)
 # alternative is a stale object that silently disagrees with the build rules
 # that produced its siblings.
 # ---------------------------------------------------------------------------
+# Both guards below delete build outputs; a `make options` query builds
+# nothing, so it runs neither.
+ifneq ($(MAKECMDGOALS),options)
 BUILD_FLAGS_STAMP := $(BUILD_DIR)/.buildflags
 _FLAG_GUARD := $(shell mkdir -p $(BUILD_DIR); \
     { printf '%s\n' "$(MAKEOVERRIDES)"; cksum $(firstword $(MAKEFILE_LIST)); } \
@@ -649,6 +652,7 @@ _ELF_MCU_GUARD := $(shell \
     echo "$(MCU)" > .main-elf-mcu)
 ifeq ($(_ELF_MCU_GUARD),relink)
 $(info [MCU changed -> stale main.elf dropped, will relink for $(MCU)])
+endif
 endif
 
 # ---------------------------------------------------------------------------
@@ -3384,6 +3388,13 @@ ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 OBJS += $(TIKU_MOD_IMG_O)
 endif
 
+# Build identity, read back as /sys/device/build and /sys/device/board.  The
+# source is generated on every build and rewritten only when it changes
+# (recipes in tools/firmware_options.mk).
+TIKU_BUILD_ID_C := $(BUILD_DIR)/generated/tiku_build_id.c
+TIKU_BUILD_ID_O := $(BUILD_DIR)/generated/tiku_build_id.o
+OBJS += $(TIKU_BUILD_ID_O)
+
 # Header-dependency tracking.  Each compile emits a .d next to its .o (via
 # -MMD -MP in the rules above) listing every header it pulled in; pull those
 # back in so editing a header rebuilds exactly the objects that include it --
@@ -3459,8 +3470,11 @@ endif
 # timestamp advances and forces a relink.
 PLATFORM_STAMP = build/.platform-stamp
 
+# A `make options` query builds nothing, so it leaves the stamp alone.
+ifneq ($(MAKECMDGOALS),options)
 ifneq ($(TIKU_PLATFORM),$(shell cat $(PLATFORM_STAMP) 2>/dev/null))
 $(shell mkdir -p build && echo $(TIKU_PLATFORM) > $(PLATFORM_STAMP))
+endif
 endif
 
 $(PLATFORM_STAMP):
@@ -4111,3 +4125,9 @@ monitor:
 		echo "  sudo apt install picocom"; \
 		exit 1; \
 	fi
+
+# ---------------------------------------------------------------------------
+# The knobs a tool may offer, resolved for this configuration: `make options`.
+# Last, so every default above is already decided.
+# ---------------------------------------------------------------------------
+include tools/firmware_options.mk

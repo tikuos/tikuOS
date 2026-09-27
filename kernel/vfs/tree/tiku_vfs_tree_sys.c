@@ -638,6 +638,33 @@ device_version_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", TIKU_VERSION);
 }
 
+/* Written into every image by the build (tools/firmware_options.mk); weak so
+ * an image linked some other way still reads "unknown". */
+extern const char tiku_build_id[] __attribute__((weak));
+extern const char tiku_build_board[] __attribute__((weak));
+
+/**
+ * @brief Read handler for /sys/device/build.
+ *
+ * The commit the image was built from, with a + when tracked files differed
+ * from it, then a checksum of its build options: two images agree here only
+ * if they came from the same source built the same way.
+ */
+static int
+device_build_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n",
+                    (tiku_build_id != NULL) ? tiku_build_id : "unknown");
+}
+
+/** @brief Read handler for /sys/device/board: the board it was built for. */
+static int
+device_board_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n",
+                    (tiku_build_board != NULL) ? tiku_build_board : "unknown");
+}
+
 /*---------------------------------------------------------------------------*/
 /* /sys/cpu/freq                                                             */
 /*---------------------------------------------------------------------------*/
@@ -1005,6 +1032,8 @@ static const tiku_vfs_node_t sys_device_children[] = {
     { "uid",     TIKU_VFS_FILE, device_uid_read,     NULL,              NULL, 0 },
     { "mcu",     TIKU_VFS_FILE, device_mcu_read,     NULL,              NULL, 0 },
     { "version", TIKU_VFS_FILE, device_version_read, NULL,              NULL, 0 },
+    { "build",   TIKU_VFS_FILE, device_build_read,   NULL,              NULL, 0 },
+    { "board",   TIKU_VFS_FILE, device_board_read,   NULL,              NULL, 0 },
 };
 
 /*
@@ -1590,7 +1619,7 @@ static const tiku_vfs_node_t sys_flpr_children[] = {
 
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
-    { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 5 },
+    { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 7 },
     { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0,
       &desc_uptime },
     { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0,
