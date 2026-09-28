@@ -225,12 +225,18 @@ static void stream_give(void) { }
 void
 tiku_basic_mode_feed_char(int ch)
 {
-    if (!basic_mode_on) {
+    if (!basic_mode_on || !basic_reclaim_available()) {
         return;
     }
+#if BASIC_RECLAIM_ENABLE
+    basic_reclaim_entered++;
+#endif
     stream_take();
     basic_mode_feed_char_inner(ch);
     stream_give();
+#if BASIC_RECLAIM_ENABLE
+    basic_reclaim_entered--;
+#endif
 }
 
 static void
@@ -333,6 +339,7 @@ basic_mode_feed_char_inner(int ch)
 void
 tiku_basic_mode_on_vfs(const void *node)
 {
+    if (!basic_reclaim_available()) return;
 #if TIKU_BASIC_ONCHG_EVENT
     int i;
     if (!basic_running) {
@@ -359,12 +366,18 @@ tiku_basic_mode_on_vfs(const void *node)
 void
 tiku_basic_mode_tick(void)
 {
-    if (!basic_mode_on || !basic_running) {
+    if (!basic_mode_on || !basic_running || !basic_reclaim_available()) {
         return;
     }
+#if BASIC_RECLAIM_ENABLE
+    basic_reclaim_entered++;
+#endif
     stream_take();
     basic_mode_tick_inner();
     stream_give();
+#if BASIC_RECLAIM_ENABLE
+    basic_reclaim_entered--;
+#endif
 }
 
 /** @brief One batch of the running program, through whatever is in front. */

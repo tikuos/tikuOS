@@ -29,12 +29,14 @@
 static long
 basic_peek(long addr)
 {
+    BASIC_RECLAIM_EXTERNAL();
     return (long)(*(volatile uint8_t *)(unsigned long)addr);
 }
 
 static void
 basic_poke(long addr, long val)
 {
+    BASIC_RECLAIM_EXTERNAL();
     *(volatile uint8_t *)(unsigned long)addr = (uint8_t)val;
 }
 

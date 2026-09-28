@@ -1460,6 +1460,7 @@ parse_strprim(const char **p, char *out, size_t cap)
                 basic_ext_tab[i].kind == 2u &&
                 match_kw(p, basic_ext_tab[i].name)) {
                 if (cap > 0u) out[0] = '\0';
+                BASIC_RECLAIM_EXTERNAL();
                 basic_ext_tab[i].u.strfn(p, out, cap);
                 return basic_error ? -1 : 0;
             }

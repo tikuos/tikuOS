@@ -156,6 +156,9 @@
 #if TIKU_SHELL_CMD_LAYOUT
 #include "commands/tiku_shell_cmd_layout.h"
 #endif
+#if TIKU_MEM_RECLAIM_ENABLE
+#include "commands/tiku_shell_cmd_reclaim.h"
+#endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #if defined(TIKU_EXP_LLM)
 #include <experiment/llm/tiku_shell_cmd_llm.h>  /* overlay repo, see Makefile */
@@ -649,6 +652,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_LAYOUT
     {"layout",  "Memory budgets: layout [show|limits|plan|stage|...]",
      tiku_shell_cmd_layout},
+#endif
+#if TIKU_MEM_RECLAIM_ENABLE
+    {"mem", "Reconstruction: mem reclaim [status|owners|mode|retry]", tiku_shell_cmd_reclaim},
 #endif
 #if TIKU_SHELL_CMD_FAT
     {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},

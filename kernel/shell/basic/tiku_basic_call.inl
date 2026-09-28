@@ -747,6 +747,7 @@ expr_call(const char **p, long *out_v)
                     if (!parse_call_2arg(p, &args[0], &args[1])) return 1;
                     break;
                 }
+                BASIC_RECLAIM_EXTERNAL();
                 if (basic_ext_tab[i].u.nfn(args,
                                            (int)basic_ext_tab[i].arity,
                                            &out) != 0) {

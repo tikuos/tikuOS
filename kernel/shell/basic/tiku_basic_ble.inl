@@ -26,6 +26,7 @@
 static void
 exec_bleadv(const char **p)
 {
+    BASIC_RECLAIM_EXTERNAL();
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
     skip_ws(p);
@@ -90,6 +91,7 @@ exec_bleoff(const char **p)
 static void
 exec_blebeacon(const char **p)
 {
+    BASIC_RECLAIM_EXTERNAL();
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
     long        ms = 0;
@@ -173,6 +175,7 @@ exec_blebeacon(const char **p)
 static void
 exec_bleobserve(const char **p)
 {
+    BASIC_RECLAIM_EXTERNAL();
     long secs = 0;
     skip_ws(p);
     if (match_kw(p, "OFF")) {

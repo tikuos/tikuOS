@@ -282,6 +282,18 @@ typedef struct {
 } basic_ckpt_wr_t;
 typedef struct { const uint8_t *base; size_t pos, len; int err; } basic_ckpt_rd_t;
 
+#if BASIC_RECLAIM_ENABLE
+/* Re-run the value serializer into one selected output window. No NVM writes
+ * occur here; the owner writes at most one chunk per scheduler callback.
+ * This trades bounded rescanning for avoiding a whole-state RAM buffer. */
+static struct {
+    int active;
+    uint8_t *out;
+    size_t start, size;
+    uint32_t identity;
+} basic_ckpt_window;
+#endif
+
 #if BASIC_CKPT_STREAMING
 /* Defined after basic_crc32_step, which it folds each chunk into. */
 static int ckpt_flush(basic_ckpt_wr_t *w);
@@ -295,6 +307,22 @@ static int ckpt_flush(basic_ckpt_wr_t *w);
 static void
 ckpt_w(basic_ckpt_wr_t *w, const void *src, size_t n)
 {
+#if BASIC_RECLAIM_ENABLE
+    if (basic_ckpt_window.active) {
+        size_t end, first, last;
+        if (w->pos > BASIC_CKPT_PAYLOAD_MAX ||
+            n > BASIC_CKPT_PAYLOAD_MAX - w->pos) { w->err = 1; return; }
+        end = w->pos + n;
+        first = w->pos > basic_ckpt_window.start ? w->pos : basic_ckpt_window.start;
+        last = basic_ckpt_window.start + basic_ckpt_window.size;
+        if (end < last) last = end;
+        if (basic_ckpt_window.out && first < last)
+            memcpy(basic_ckpt_window.out + first - basic_ckpt_window.start,
+                   (const uint8_t *)src + first - w->pos, last - first);
+        w->pos = end;
+        return;
+    }
+#endif
 #if BASIC_CKPT_STREAMING
     const uint8_t *p = (const uint8_t *)src;
 
@@ -448,6 +476,9 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     uint16_t i;
     uint8_t  u8;
     uint32_t pid = (w->base != NULL) ? basic_prog_identity() : 0u;
+#if BASIC_RECLAIM_ENABLE
+    if (basic_ckpt_window.active) pid = basic_ckpt_window.identity;
+#endif
 
     ckpt_w(w, &pid, sizeof(pid));            /* program this state belongs to */
     ckpt_w(w, &basic_pc, sizeof(basic_pc));

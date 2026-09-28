@@ -182,9 +182,10 @@ typedef enum {
     TIKU_MEM_OK         = 0,    /**< Operation succeeded */
     TIKU_MEM_ERR_INVALID = -1,  /**< Invalid argument (NULL pointer, etc.) */
     TIKU_MEM_ERR_NOMEM  = -2,   /**< Out of memory */
-    TIKU_MEM_ERR_FULL   = -3,   /**< Store is full (no free slots) */
+    TIKU_MEM_ERR_FULL   = -3,   /**< No free metadata record or store slot */
     TIKU_MEM_ERR_NOT_FOUND = -4, /**< Key not found in store */
-    TIKU_MEM_ERR_IO    = -5    /**< Persistence completion not established */
+    TIKU_MEM_ERR_IO    = -5,   /**< Persistence completion not established */
+    TIKU_MEM_ERR_BUSY  = -6    /**< Live objects or an operation prevent release */
 } tiku_mem_err_t;
 
 /*---------------------------------------------------------------------------*/
@@ -249,6 +250,13 @@ typedef struct {
  * violation counted) instead of corrupting silently.  Flag-off builds
  * compile the guard to nothing — byte-identical binaries.
  */
+#if defined(TIKU_MEM_RECLAIM_ENABLE) && TIKU_MEM_RECLAIM_ENABLE
+#define TIKU_MEM_EXCEPTION_GUARD(retval) \
+    do { if (TIKU_MEM_ARCH_IN_EXCEPTION()) return retval; } while (0)
+#else
+#define TIKU_MEM_EXCEPTION_GUARD(retval) do { } while (0)
+#endif
+
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 int tiku_thread_in_kernel(void);           /* kernel/threads/tiku_thread.c */
 void     tiku_mem_guard_note_violation(void);
@@ -266,6 +274,7 @@ uint32_t tiku_mem_guard_violations(void);
 
 #define TIKU_MEM_KERNEL_ONLY(retval)              \
     do {                                          \
+        TIKU_MEM_EXCEPTION_GUARD(retval);         \
         if (!tiku_thread_in_kernel()) {           \
             tiku_mem_guard_note_violation();      \
             return retval;                        \
@@ -273,14 +282,15 @@ uint32_t tiku_mem_guard_violations(void);
     } while (0)
 #define TIKU_MEM_KERNEL_ONLY_VOID()               \
     do {                                          \
+        TIKU_MEM_EXCEPTION_GUARD();               \
         if (!tiku_thread_in_kernel()) {           \
             tiku_mem_guard_note_violation();      \
             return;                               \
         }                                         \
     } while (0)
 #else
-#define TIKU_MEM_KERNEL_ONLY(retval)      do { } while (0)
-#define TIKU_MEM_KERNEL_ONLY_VOID()       do { } while (0)
+#define TIKU_MEM_KERNEL_ONLY(retval)      TIKU_MEM_EXCEPTION_GUARD(retval)
+#define TIKU_MEM_KERNEL_ONLY_VOID()       TIKU_MEM_EXCEPTION_GUARD()
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -432,6 +442,12 @@ tiku_mem_err_t tiku_region_get_type(const uint8_t *ptr,
  * offset.  There is no individual free -- everything is discarded at once by
  * tiku_arena_reset(), and `peak` survives that so it stays a lifetime maximum.
  */
+/** Private reservation identity. Zero denotes caller-owned backing. */
+typedef struct {
+    uint32_t generation;
+    uint16_t slot_plus_one;
+} tiku_mem_backing_t;
+
 typedef struct {
     uint8_t              *buf;       /**< Backing buffer (caller-provided) */
     tiku_mem_arch_size_t  capacity;  /**< Buffer size in bytes */
@@ -442,6 +458,8 @@ typedef struct {
     uint8_t               id;        /**< Legacy label; working API sets zero */
     uint8_t               active;    /**< Non-zero if initialized */
     tiku_mem_tier_t       tier;      /**< Memory tier (SRAM or NVM) */
+    tiku_mem_backing_t    backing;   /**< Private; do not copy a live descriptor */
+    const uint8_t       *claim_base; /**< Original registered range, or NULL */
 } tiku_arena_t;
 
 /*---------------------------------------------------------------------------*/
@@ -504,6 +522,11 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size);
  */
 tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena);
 
+/** Release an empty arena's backing. Reset first after its users have stopped.
+ * Caller-owned buffers are not freed; only this arena's region claim is removed.
+ * A nonempty arena returns BUSY. Destroy does not erase the buffer. */
+tiku_mem_err_t tiku_arena_destroy(tiku_arena_t *arena);
+
 /**
  * @brief Securely reset an arena, zeroing all memory before reclaiming.
  *
@@ -565,6 +588,8 @@ typedef struct {
                                             direct CPU store. */
     tiku_mem_tier_t       tier;        /**< Memory tier (SRAM or NVM) */
     tiku_mem_arch_size_t  fail;        /**< Refused allocations (exhausted) */
+    tiku_mem_backing_t    backing;     /**< Private; do not copy a live descriptor */
+    uint8_t               reset_failed; /**< Freelist unavailable; retry reset */
 } tiku_pool_t;
 
 /*---------------------------------------------------------------------------*/
@@ -678,6 +703,10 @@ tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pool is NULL
  */
 tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool);
+
+/** Release a pool with no allocated blocks. Free/reset alone retains backing.
+ * Caller-owned buffers are not freed. Nonempty pools return BUSY. */
+tiku_mem_err_t tiku_pool_destroy(tiku_pool_t *pool);
 
 /*---------------------------------------------------------------------------*/
 /* PERSISTENT NVM KEY-VALUE STORE                                            */
@@ -1259,17 +1288,64 @@ uint32_t tiku_mpu_get_last_fault_addr(void);
  * in internal memory (SRAM, eligible TCM, or CPU-writable upper FRAM).  External
  * memory is used only with TIKU_MEM_ALLOW_EXTERNAL, and only after internal.
  *
- * @note Initialize the tiers first.  Arenas, pools and loans share this type,
+ * @note Initialize the tiers first. Arenas and pools share this type,
  *       and none of them selects protected NVM, starts an external controller,
  *       or promises zeroed, persistent or DMA-safe memory.
  */
+typedef enum {
+    TIKU_MEM_CLASS_DEFAULT = 0,
+    TIKU_MEM_TRANSIENT = 1,  /**< Creator releases backing in any order */
+    TIKU_MEM_RESTARTABLE = 2,/**< Registered owner; requires TIKU_MEM_RECLAIM_ENABLE */
+    TIKU_MEM_FIXED = 3      /**< Lower placement; release in reverse address order */
+} tiku_mem_class_t;
+
+typedef struct {
+    uint32_t generation;
+    uint16_t slot_plus_one;
+} tiku_mem_owner_t;
+
 typedef struct {
     tiku_mem_arch_size_t alignment; /**< 0: natural; otherwise power of two */
     uint16_t flags;                 /**< TIKU_MEM_ALLOW_EXTERNAL or zero */
+    tiku_mem_class_t allocation_class; /**< DEFAULT: owned RESTARTABLE, otherwise TRANSIENT */
+    tiku_mem_owner_t owner;         /**< Zero, or a handle registered through tiku_reclaim.h */
+    uint16_t owner_slot;            /**< Must be zero without an owner */
 } tiku_mem_request_t;
 
-#define TIKU_MEM_REQUEST_DEFAULT  { 0, 0 }
+#define TIKU_MEM_REQUEST_DEFAULT  { 0 }
 #define TIKU_MEM_ALLOW_EXTERNAL   0x0001u
+
+#ifndef TIKU_MEM_MAX_RESERVATIONS
+#ifdef PLATFORM_MSP430
+#define TIKU_MEM_MAX_RESERVATIONS 8
+#else
+#define TIKU_MEM_MAX_RESERVATIONS 32
+#endif
+#endif
+
+/** Raw free gaps include alignment gaps, even if class placement excludes them. */
+typedef struct {
+    tiku_mem_arch_size_t free_bytes;
+    tiku_mem_arch_size_t largest_gap;
+    tiku_mem_arch_size_t split_free;
+    tiku_mem_arch_size_t live_bytes;
+    tiku_mem_arch_size_t held_bytes;
+    uint16_t live_records;
+} tiku_mem_space_t;
+tiku_mem_err_t tiku_tier_span_space(tiku_mem_tier_t tier, uint8_t span_index,
+                                    tiku_mem_space_t *space);
+
+typedef struct {
+    tiku_mem_backing_t handle;
+    tiku_mem_owner_t owner;
+    uint16_t owner_slot;
+    tiku_mem_tier_t tier;
+    tiku_mem_arch_size_t offset, length, alignment;
+    uint8_t span_index, kind, allocation_class, state; /**< 1 live, 2 held, 3 initializing */
+} tiku_mem_reservation_info_t;
+/** Set cursor to zero, then call until NOT_FOUND. Does not read backing memory. */
+tiku_mem_err_t tiku_mem_reservation_next(uint16_t *cursor,
+                                         tiku_mem_reservation_info_t *info);
 
 /**
  * @brief Create a working arena; prefer this over named tiers in applications.
@@ -1310,28 +1386,12 @@ tiku_mem_err_t tiku_mem_pool_create(tiku_pool_t *pool,
         tiku_mem_arch_size_t block_size, tiku_mem_arch_size_t block_count,
         const tiku_mem_request_t *options);
 
-/**
- * @brief Borrow an aligned CPU buffer, skipping tiers with an outstanding loan.
- *
- * Shares the legacy one-loan-per-tier limit across all spans and APIs. External
- * memory requires permission. Return the exact base with tiku_mem_return().
- * @param size Number of bytes requested; must be nonzero.
- * @param options Allocation options, or NULL for standard alignment and
- *                automatically selected internal memory.
- * @return A buffer of at least size bytes, or NULL on invalid/unavailable input.
- */
-void *tiku_mem_borrow(tiku_mem_arch_size_t size,
-                      const tiku_mem_request_t *options);
-
-/**
- * @brief Return a current new or legacy loan without naming its physical tier.
- *
- * All users must stop accessing the buffer first. A stale pointer after address
- * reuse cannot be detected. Forced detach/reset also invalidates outstanding
- * pointers. This is not a general free for arena or pool backing.
- * @return OK, or INVALID if ptr is not the exact base of a current loan.
- */
-tiku_mem_err_t tiku_mem_return(void *ptr);
+/** A temporary arena; not a third allocator or a per-tier exclusive slot. */
+typedef tiku_arena_t tiku_mem_workspace_t;
+tiku_mem_err_t tiku_mem_workspace_open(tiku_mem_workspace_t *workspace,
+        tiku_mem_arch_size_t size, const tiku_mem_request_t *options);
+/** Stop all users first. Reset objects, then return the whole reservation. */
+tiku_mem_err_t tiku_mem_workspace_close(tiku_mem_workspace_t *workspace);
 
 /*---------------------------------------------------------------------------*/
 /* TIER ALLOCATOR                                                            */
@@ -1349,12 +1409,10 @@ tiku_mem_err_t tiku_mem_return(void *ptr);
  *   tiku_tier_arena_create(&arena, TIKU_MEM_SRAM, 64, 1);
  *   void *p = tiku_arena_alloc(&arena, 16);        // normal arena API
  *
- * NVM-backed pools: tiku_pool_alloc() and tiku_pool_free() write
- * freelist pointers into the block memory. When the pool resides in
- * NVM, the caller must bracket these calls with tiku_mpu_unlock_nvm()
- * / tiku_mpu_lock_nvm(), or use tiku_mpu_scoped_write(). The tier
- * allocator handles MPU unlock only during pool creation (freelist
- * construction).
+ * NVM-backed pools: creation, reset and free initialize/update free-list links
+ * through the checked NVM write path, including protection and commit status.
+ * Allocation reads the next link and updates ordinary descriptor metadata.
+ * These calls do not persist the pool's control structure or user payload.
  */
 
 /** Size of the SRAM tier backing pool in bytes. Override at compile time. */
@@ -1414,9 +1472,9 @@ tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size);
 /**
  * @brief Detach the PSRAM tier (power-down path).
  *
- * Refused while sub-allocations are outstanding unless @p force: a bump
- * allocator cannot free piecemeal, so an orderly shutdown drops the tier whole
- * and every pointer into it dies with the power.
+ * Returns BUSY while any backing reservation remains, including an empty arena
+ * or pool. Destroy those reservations before ordinary detach. Forced detach
+ * invalidates handles without accessing backing; stop all users beforehand.
  */
 tiku_mem_err_t tiku_tier_detach_psram(int force);
 
@@ -1453,12 +1511,25 @@ tiku_mem_err_t tiku_tier_arena_create(tiku_arena_t *arena,
  * @brief Allocate from exactly one backing span, never falling back elsewhere.
  *
  * Requires a concrete tier, not AUTO. On Apollo, SRAM span 0 is shared SRAM;
- * use it for peripheral buffers that cannot live in CPU-local TCM (span 1).
+ * select it when a driver requires shared SRAM instead of CPU-local TCM.
  * Span selection alone does not guarantee DMA alignment or cache coherence.
  */
 tiku_mem_err_t tiku_tier_arena_create_span(tiku_arena_t *arena,
         tiku_mem_tier_t tier, uint8_t span_index, tiku_mem_arch_size_t size,
-        uint8_t id);
+        tiku_mem_arch_size_t alignment, uint8_t id);
+
+/** Explicit placement with class/alignment options. ALLOW_EXTERNAL is invalid:
+ * the selected tier already specifies storage. No fallback for a span request. */
+tiku_mem_err_t tiku_tier_arena_create_opts(tiku_arena_t *arena,
+        tiku_mem_tier_t tier, tiku_mem_arch_size_t size, uint8_t id,
+        const tiku_mem_request_t *options);
+tiku_mem_err_t tiku_tier_arena_create_span_opts(tiku_arena_t *arena,
+        tiku_mem_tier_t tier, uint8_t span_index, tiku_mem_arch_size_t size,
+        uint8_t id, const tiku_mem_request_t *options);
+tiku_mem_err_t tiku_tier_pool_create_opts(tiku_pool_t *pool,
+        tiku_mem_tier_t tier, tiku_mem_arch_size_t block_size,
+        tiku_mem_arch_size_t block_count, uint8_t id,
+        const tiku_mem_request_t *options);
 
 /**
  * @brief Create a pool backed by the specified memory tier
@@ -1481,39 +1552,6 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
                                       uint8_t id);
 
 /**
- * @brief Lend @p size bytes of a tier's free room to one operation.
- *
- * For a buffer a command needs only while it runs, where a carve would hold it
- * until reboot.  The loan sits at the top of the free room, and carves made
- * meanwhile are refused only where they would reach it.
- *
- * @note One loan per tier at a time; NVM lends nothing.
- *
- * @param tier   SRAM, HIFRAM or PSRAM
- * @param size   Bytes wanted
- * @param align  Alignment of the start, a power of two (32 for DMA)
- * @return The buffer, or NULL when the room is short or a loan is out
- */
-void *tiku_tier_borrow(tiku_mem_tier_t tier, tiku_mem_arch_size_t size,
-                       tiku_mem_arch_size_t align);
-
-/**
- * @brief Lend from exactly one span, with the same one-loan-per-tier rule.
- *
- * No fallback to another span; return with tiku_tier_return(). On Apollo,
- * SRAM span 0 preserves shared-SRAM placement for peripheral transfers.
- */
-void *tiku_tier_borrow_span(tiku_mem_tier_t tier, uint8_t span_index,
-                            tiku_mem_arch_size_t size, tiku_mem_arch_size_t align);
-
-/**
- * @brief Give back the loan tiku_tier_borrow() made from @p tier.
- *
- * @return TIKU_MEM_OK, or TIKU_MEM_ERR_INVALID when @p p is not that loan
- */
-tiku_mem_err_t tiku_tier_return(tiku_mem_tier_t tier, void *p);
-
-/**
  * @brief Query which memory tier a pointer belongs to
  *
  * Checks the tier allocator's own backing pools first, then falls
@@ -1530,7 +1568,7 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 /**
  * @brief Get usage statistics for a tier's backing pool
  *
- * Totals cover all backing spans; a loan counts as used while it is out.
+ * Totals cover all backing spans; all live reservations count as used.
  * Free capacity can be split: a single allocation must fit in one span.
  *
  * @param tier   Memory tier to query (SRAM or NVM, not AUTO)
@@ -1776,6 +1814,10 @@ typedef struct {
                                         /**< Process's cached regions */
     uint8_t               cache_count;  /**< Number of attached caches */
     uint8_t               active;       /**< Non-zero if context is live */
+#if TIKU_MEM_RECLAIM_ENABLE
+    tiku_mem_owner_t       owner;        /**< Explicit registered process owner */
+    uint16_t              owner_key_base;
+#endif
 } tiku_proc_mem_t;
 
 /*---------------------------------------------------------------------------*/
@@ -1802,6 +1844,19 @@ tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
                                      tiku_mem_tier_t tier,
                                      tiku_mem_arch_size_t sram_size,
                                      tiku_mem_arch_size_t nvm_size);
+
+#if TIKU_MEM_RECLAIM_ENABLE
+/* Owned contexts use three stable keys (SRAM, NVM, optional HIFRAM). The owner
+ * must be a registered process. Attached caches are not supported: close them
+ * before binding ownership and keep snapshot/cache control outside these spans.
+ * During restore, an initializer failure is handled by the owner's cleanup and
+ * held-slot retry, not by creating another context over partial live claims. */
+tiku_mem_err_t tiku_proc_mem_set_owner(tiku_proc_mem_t *, tiku_mem_owner_t,
+                                       uint16_t key_base);
+tiku_mem_err_t tiku_proc_mem_create_owned(tiku_proc_mem_t *, uint8_t pid,
+    tiku_mem_tier_t, tiku_mem_arch_size_t sram_size, tiku_mem_arch_size_t nvm_size,
+    tiku_mem_owner_t, uint16_t key_base);
+#endif
 
 /**
  * @brief Destroy a process memory context

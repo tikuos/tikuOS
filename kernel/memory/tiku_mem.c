@@ -20,6 +20,7 @@
 #include "tiku_mem.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "tiku_mem_internal.h"
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE HELPERS                                                           */
@@ -68,12 +69,19 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
     if (arena == NULL || buf == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
+    if (tiku_backing_output_busy(arena)) {
+        return TIKU_MEM_ERR_BUSY;
+    }
 
     /* Align the buffer base up to the platform's required alignment. */
     {
         uintptr_t raw     = (uintptr_t)buf;
         uintptr_t mask    = (uintptr_t)(TIKU_MEM_ARCH_ALIGNMENT - 1U);
-        uintptr_t aligned = (raw + mask) & ~mask;
+        uintptr_t aligned;
+        if (raw > UINTPTR_MAX - mask || size > UINTPTR_MAX - raw) {
+            return TIKU_MEM_ERR_INVALID;
+        }
+        aligned = (raw + mask) & ~mask;
         tiku_mem_arch_size_t adj = (tiku_mem_arch_size_t)(aligned - raw);
 
         if (size <= adj) {       /* misaligned base leaves no usable span */
@@ -89,6 +97,8 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
     arena->id       = 0;
     arena->active   = 1;
     arena->tier     = TIKU_MEM_SRAM;
+    arena->backing = (tiku_mem_backing_t){0};
+    arena->claim_base = NULL;
 
     return TIKU_MEM_OK;
 }
@@ -111,46 +121,66 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
 tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
                                  tiku_mem_arch_size_t size, uint8_t id)
 {
+    tiku_arena_t ready;
+    tiku_mem_err_t err;
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
-    if (arena == NULL || buf == NULL) {
-        return TIKU_MEM_ERR_INVALID;
+    if (arena == NULL || tiku_backing_output_busy(arena)) {
+        return arena == NULL ? TIKU_MEM_ERR_INVALID : TIKU_MEM_ERR_BUSY;
     }
-
-    /* Determine which memory tier the buffer resides in.
-     * Both SRAM and NVM are valid backing stores — the tier is
-     * recorded so callers can introspect placement later. */
+    err = tiku_arena_create_raw(&ready, buf, size);
+    if (err != TIKU_MEM_OK) {
+        return err;
+    }
     if (tiku_region_contains(buf, size, TIKU_MEM_REGION_SRAM)) {
-        arena->tier = TIKU_MEM_SRAM;
+        ready.tier = TIKU_MEM_SRAM;
     } else if (tiku_region_contains(buf, size, TIKU_MEM_REGION_NVM)) {
-        arena->tier = TIKU_MEM_NVM;
+        ready.tier = TIKU_MEM_NVM;
     } else {
         return TIKU_MEM_ERR_INVALID;
     }
-    tiku_region_claim(buf, size, id);
-
-    /* Align the buffer base up to the platform's required alignment.
-     * The claim covers the original range; the arena uses the aligned
-     * subset so every returned pointer is naturally aligned. */
-    {
-        uintptr_t raw     = (uintptr_t)buf;
-        uintptr_t mask    = (uintptr_t)(TIKU_MEM_ARCH_ALIGNMENT - 1U);
-        uintptr_t aligned = (raw + mask) & ~mask;
-        tiku_mem_arch_size_t adj = (tiku_mem_arch_size_t)(aligned - raw);
-
-        if (size <= adj) {       /* misaligned base leaves no usable span */
-            return TIKU_MEM_ERR_INVALID;
-        }
-        arena->buf      = (uint8_t *)aligned;
-        arena->capacity = size - adj;
+    err = tiku_region_claim(buf, size, id);
+    if (err != TIKU_MEM_OK) {
+        return err;
     }
-    arena->offset   = 0;
-    arena->peak     = 0;
-    arena->fail     = 0;
-    arena->count    = 0;
-    arena->id       = id;
-    arena->active   = 1;
-
+    ready.claim_base = buf;
+    ready.id = id;
+    *arena = ready;
     return TIKU_MEM_OK;
+}
+
+static int arena_valid(const tiku_arena_t *arena)
+{
+    return arena != NULL && arena->active && arena->buf != NULL &&
+           arena->offset <= arena->capacity &&
+           tiku_backing_check(arena, arena->backing, TIKU_BACKING_ARENA);
+}
+
+tiku_mem_err_t tiku_arena_destroy(tiku_arena_t *arena)
+{
+    tiku_mem_err_t err;
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    if (!arena_valid(arena)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    if (arena->offset != 0u || arena->count != 0u) {
+        return TIKU_MEM_ERR_BUSY;
+    }
+    if (arena->backing.slot_plus_one != 0u) {
+        if (tiku_backing_release == NULL) return TIKU_MEM_ERR_INVALID;
+        err = tiku_backing_release(arena, arena->backing, TIKU_BACKING_ARENA);
+        if (err != TIKU_MEM_OK) return err;
+    } else if (arena->claim_base != NULL) {
+        err = tiku_region_unclaim(arena->claim_base);
+        if (err != TIKU_MEM_OK) return err;
+    }
+    *arena = (tiku_arena_t){0};
+    return TIKU_MEM_OK;
+}
+
+tiku_mem_err_t tiku_mem_workspace_close(tiku_mem_workspace_t *workspace)
+{
+    tiku_mem_err_t err = tiku_arena_reset(workspace);
+    return err == TIKU_MEM_OK ? tiku_arena_destroy(workspace) : err;
 }
 
 /**
@@ -170,14 +200,14 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
     tiku_mem_arch_size_t aligned;
     void *ptr;
 
-    if (arena == NULL || !arena->active || size == 0) {
+    if (!arena_valid(arena) || size == 0 || !tiku_backing_can_mutate(arena->backing)) {
         return NULL;
     }
 
     aligned = align_up(size);
 
     /* Check for overflow: would the new offset exceed capacity? */
-    if (aligned > arena->capacity - arena->offset) {
+    if (aligned < size || aligned > arena->capacity - arena->offset) {
         arena->fail++;
         return NULL;
     }
@@ -208,9 +238,10 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
-    if (arena == NULL) {
+    if (!arena_valid(arena)) {
         return TIKU_MEM_ERR_INVALID;
     }
+    if (!tiku_backing_can_mutate(arena->backing)) return TIKU_MEM_ERR_BUSY;
 
     arena->offset = 0;
     arena->count  = 0;
@@ -227,9 +258,10 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
-    if (arena == NULL) {
+    if (!arena_valid(arena)) {
         return TIKU_MEM_ERR_INVALID;
     }
+    if (!tiku_backing_can_mutate(arena->backing)) return TIKU_MEM_ERR_BUSY;
 
     /* Delegate to the arch layer for a platform-optimized secure wipe. */
     tiku_mem_arch_secure_wipe(arena->buf, arena->capacity);
@@ -250,7 +282,7 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
                                 tiku_mem_stats_t *stats)
 {
-    if (arena == NULL || stats == NULL) {
+    if (!arena_valid(arena) || stats == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
 

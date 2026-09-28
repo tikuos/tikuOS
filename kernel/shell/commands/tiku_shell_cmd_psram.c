@@ -125,6 +125,7 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
         p2 = (uint8_t *)tiku_arena_alloc(&ar, N - 64u);
         if (!p2) {
             SHELL_PRINTF("tier: alloc failed\n");
+            (void)tiku_mem_workspace_close(&ar);
             return;
         }
         SHELL_PRINTF("tier: 32 MB arena, buf %08lx -- filling\n",
@@ -143,6 +144,7 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
                      " sleeping...\n", (unsigned long)sum1);
         if (tiku_psram_halfsleep() != TIKU_PSRAM_OK) {
             SHELL_PRINTF("tier: sleep failed\n");
+            (void)tiku_mem_workspace_close(&ar);
             return;
         }
         {   /* hold half sleep long enough to mean something */
@@ -154,6 +156,8 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
         }
         if (tiku_psram_wake() != TIKU_PSRAM_OK) {
             SHELL_PRINTF("tier: wake failed\n");
+            /* Release metadata only; the aperture may not be readable. */
+            (void)tiku_mem_workspace_close(&ar);
             return;
         }
         (void)tiku_psram_xip_enable(1);
@@ -166,6 +170,8 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
                      " %s\n", (unsigned long)sum2,
                      (sum1 == sum2) ? "RETAINED, gate PASSES"
                                     : "LOST -- gate FAILS");
+        if (tiku_mem_workspace_close(&ar) != TIKU_MEM_OK)
+            SHELL_PRINTF("tier: workspace release failed\n");
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "speed") && argc >= 4) {

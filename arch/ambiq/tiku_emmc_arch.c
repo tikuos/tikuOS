@@ -24,7 +24,7 @@
 #include "apollo510.h"
 #include "hal/tiku_cpu.h"                /* dcache clean/invalidate: DMA     */
 #include <kernel/cpu/tiku_hang.h>
-#include <kernel/memory/tiku_mem.h>      /* the bounce buffer is a tier loan */
+#include <kernel/memory/tiku_mem.h>      /* operation-scoped bounce workspace */
 #include <string.h>
 
 #include <kernel/shell/tiku_shell_io.h>  /* the bench reports via SHELL_PRINTF */
@@ -1559,47 +1559,49 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
 #define BENCH_BYTES   (BENCH_BLOCKS * TIKU_EMMC_BLOCK_SIZE)
 
 /*
- * Borrowed from the SRAM tier for one operation and given back after it.  As
+ * Reserved from the SRAM tier for one operation and released after it. As
  * a static buffer it took 512 KB from the tier in every image with the driver
  * in it, used or not. Pin to SRAM span 0 (SSRAM), where this part's large
  * DMA-touched buffers live. The +4 is headroom for the unaligned leg below.
  */
-#define BENCH_LOAN    (BENCH_BYTES + 4u)
+#define BENCH_WORKSPACE_BYTES (BENCH_BYTES + 4u)
 static uint8_t *s_bench_buf;
+static tiku_mem_workspace_t s_bench_workspace;
 
 /** A small DTCM buffer, existing only to answer the reachability question. */
 static uint8_t s_dtcm_buf[4096] __attribute__((aligned(32)));
 
-/** @brief Borrow the bounce buffer, keeping one already held.  1 = held. */
-static int bench_buf_borrow(void)
+/** @brief Reserve exclusive staging capacity for one operation. */
+static int bench_workspace_open(void)
 {
-    if (s_bench_buf == NULL) {
-        s_bench_buf = (uint8_t *)tiku_tier_borrow_span(TIKU_MEM_SRAM, 0,
-                                                       BENCH_LOAN, 32u);
-    }
+    if (s_bench_buf != NULL) return 0;
+    if (tiku_tier_arena_create_span(&s_bench_workspace, TIKU_MEM_SRAM, 0,
+            BENCH_WORKSPACE_BYTES, 32u, 0) != TIKU_MEM_OK) return 0;
+    s_bench_buf = tiku_arena_alloc(&s_bench_workspace, BENCH_WORKSPACE_BYTES);
+    if (s_bench_buf == NULL) (void)tiku_mem_workspace_close(&s_bench_workspace);
     return s_bench_buf != NULL;
 }
 
 /** @brief Give the bounce buffer back to the tier. */
-static void bench_buf_return(void)
+static void bench_workspace_close(void)
 {
     if (s_bench_buf != NULL) {
-        (void)tiku_tier_return(TIKU_MEM_SRAM, s_bench_buf);
-        s_bench_buf = NULL;
+        if (tiku_mem_workspace_close(&s_bench_workspace) == TIKU_MEM_OK)
+            s_bench_buf = NULL;
     }
 }
 
-/** @brief Say that the tier could not lend the buffer, and what it had. */
+/** @brief Report a refused span-zero workspace, without adding other spans. */
 static void bench_buf_refused(const char *who)
 {
-    tiku_mem_stats_t st;
+    tiku_mem_space_t space;
     unsigned long room = 0ul;
 
-    if (tiku_tier_stats(TIKU_MEM_SRAM, &st) == TIKU_MEM_OK) {
-        room = (unsigned long)(st.total_bytes - st.used_bytes);
+    if (tiku_tier_span_space(TIKU_MEM_SRAM, 0, &space) == TIKU_MEM_OK) {
+        room = (unsigned long)space.free_bytes;
     }
-    SHELL_PRINTF("%s: the SRAM tier cannot lend %lu KB (%lu KB free)\n", who,
-                 (unsigned long)(BENCH_LOAN / 1024u), room / 1024u);
+    SHELL_PRINTF("%s: staging workspace busy or unavailable: %lu KB (%lu KB free in span 0)\n", who,
+                 (unsigned long)(BENCH_WORKSPACE_BYTES / 1024u), room / 1024u);
 }
 
 /** Pattern byte for scratch-region offset @p a under seed @p s. */
@@ -1683,7 +1685,7 @@ void tiku_emmc_bench_run(void)
     if (!s_up) { SHELL_PRINTF("bench: emmc not up\n"); return; }
     base = tiku_emmc_scratch_lba();
     if (base == 0u) { SHELL_PRINTF("bench: no scratch region\n"); return; }
-    if (!bench_buf_borrow()) { bench_buf_refused("bench"); return; }
+    if (!bench_workspace_open()) { bench_buf_refused("bench"); return; }
 
     /*
      * The span follows the wire.  At the identification setting the bus moves
@@ -1905,7 +1907,7 @@ void tiku_emmc_bench_run(void)
 
     SHELL_PRINTF("  not tested: HS200/HS400, DDR, ADMA2, CMD23 set-block-count,"
                  " cache/reliable-write\n");
-    bench_buf_return();
+    bench_workspace_close();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1968,7 +1970,7 @@ static int      s_stg_xip;
 tiku_emmc_err_t tiku_emmc_stage_open(void)
 {
     s_stg_xip = 0;
-    if (!bench_buf_borrow()) { return TIKU_EMMC_ERR_NOMEM; }
+    if (!bench_workspace_open()) { return TIKU_EMMC_ERR_NOMEM; }
     cyc_enable();
     s_stg_off = 0u;
     s_stg_src = 2166136261u;
@@ -2056,7 +2058,7 @@ tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
     if (dst)   { *dst   = h; }
     if (rd_us) { *rd_us = cyc_to_us(s_stg_rd); }
     if (wr_us) { *wr_us = cyc_to_us(s_stg_wr); }
-    bench_buf_return();
+    bench_workspace_close();
     return rc;
 }
 
@@ -2083,7 +2085,7 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
         SHELL_PRINTF("stage: source range past end of card\n");
         return;
     }
-    if (!bench_buf_borrow()) { bench_buf_refused("stage"); return; }
+    if (!bench_workspace_open()) { bench_buf_refused("stage"); return; }
 
     cyc_enable();
     /* The command queue moves bytes the CPU cannot see: XIP has to come down
@@ -2144,7 +2146,7 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
     }
 
     if (xip_was) { (void)tiku_psram_xip_enable(1); }
-    bench_buf_return();
+    bench_workspace_close();
 
     if (rc != TIKU_EMMC_OK) {
         SHELL_PRINTF("stage: FAILED rc=%d  intstat %08lx\n", (int)rc,
@@ -2227,7 +2229,7 @@ void tiku_emmc_diag_run(void)
         }
     }
     SHELL_PRINTF("  setup: 4 x single-block write ok\n");
-    if (!bench_buf_borrow()) { bench_buf_refused("diag"); return; }
+    if (!bench_workspace_open()) { bench_buf_refused("diag"); return; }
 
     /*
      * Each case names its three variables and its verdict.  The time column is
@@ -2267,7 +2269,7 @@ void tiku_emmc_diag_run(void)
             }
         }
     }
-    bench_buf_return();
+    bench_workspace_close();
 }
 
 uint32_t tiku_emmc_last_error(void) { return s_last_err; }

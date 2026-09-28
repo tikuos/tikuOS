@@ -117,11 +117,12 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
         /*
          * NVM-tier self-test: allocate from the tier, write through
          * tiku_tier_nvm_write(), verify by plain readback, then confirm an
-         * over-capacity arena is refused.  The tier has no free, so each run
-         * consumes one 256 B arena until reboot.  "tier mark <txt>" writes
+         * over-capacity arena is refused, then releases its backing.
+         * "tier mark <txt>" writes
          * <txt> instead of the fixed pattern and prints the block's region
          * offset, so the bench can re-verify the bytes after a reset through
-         * the raw read path.
+         * the raw read path. Released bytes are not erased, but another
+         * allocation can overwrite them; this is not persistent file storage.
          */
         const char *txt = (argc >= 4u && strcmp(argv[2], "mark") == 0)
                           ? argv[3] : "TIER-SELFTEST";
@@ -147,6 +148,7 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
         blk = tiku_arena_alloc(&ar, 64u);
         if (blk == NULL) {
             SHELL_PRINTF("nvmprobe: tier arena alloc failed\n");
+            (void)tiku_mem_workspace_close(&ar);
             return;
         }
         wr_ok = (tiku_tier_nvm_write(blk, txt,
@@ -154,8 +156,9 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
                  == TIKU_MEM_OK);
         vf_ok = (memcmp(blk, txt, len) == 0);
         rf_ok = (tiku_tier_arena_create(&over, TIKU_MEM_NVM,
-                                        st0.total_bytes + 64u, 142u)
+                                        st0.total_bytes, 142u)
                  != TIKU_MEM_OK);
+        if (!rf_ok) (void)tiku_arena_destroy(&over);
         (void)tiku_tier_stats(TIKU_MEM_NVM, &st1);
         SHELL_PRINTF("nvmprobe: tier total=%lu used=%lu->%lu "
                      "write=%s verify=%s refuse=%s\n",
@@ -174,6 +177,8 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
                 SHELL_PRINTF("nvmprobe: tier mark unmapped\n");
             }
         }
+        if (tiku_mem_workspace_close(&ar) != TIKU_MEM_OK)
+            SHELL_PRINTF("nvmprobe: workspace release failed\n");
         return;
     }
 

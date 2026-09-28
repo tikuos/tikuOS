@@ -2306,6 +2306,15 @@ SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/memory/tiku_persist_move.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/memory/tiku_tier.c
+# Reconstruction stays opt-in until production owner/hardware qualification.
+TIKU_MEM_RECLAIM_ENABLE ?= 0
+ifeq ($(TIKU_MEM_RECLAIM_ENABLE),1)
+ifeq ($(TIKU_PLATFORM),msp430)
+$(error TIKU_MEM_RECLAIM_ENABLE is not qualified for MSP430; the ordinary reclaimable allocator remains available)
+endif
+CFLAGS += -DTIKU_MEM_RECLAIM_ENABLE=1
+SRCS += kernel/memory/tiku_reclaim.c
+endif
 SRCS += kernel/memory/tiku_layout.c
 SRCS += kernel/memory/tiku_noheap.c
 SRCS += kernel/memory/tiku_nvm_region.c
@@ -2579,6 +2588,9 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_irq.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_tree.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_clear.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_echo.c
+ifeq ($(TIKU_MEM_RECLAIM_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_reclaim.c
+endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_lcd.c
 SRCS += kernel/shell/tiku_shell_alias.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_alias.c

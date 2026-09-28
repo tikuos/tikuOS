@@ -323,8 +323,7 @@ void tiku_emmc_regs(uint32_t *out, unsigned n);
  *
  * DWT-timed, work-denominated and checksum-gated, like `psrambench`.  Writes
  * touch the scratch region and nowhere else, and a leg that cannot prove its
- * bytes reports FAIL instead of a bandwidth.  Its 512 KB buffer is lent by
- * the SRAM tier for the run.
+ * bytes reports FAIL.  Its 512 KB buffer is an SRAM-tier workspace for the run.
  *
  * @note The run prints what it did NOT measure, so the table cannot be read
  *       as a ceiling.

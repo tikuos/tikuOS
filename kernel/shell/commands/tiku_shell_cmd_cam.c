@@ -40,22 +40,24 @@ cam_claim(void)
 {
     static tiku_arena_t arena;
     static void *buf;
-    uint32_t bytes = (uint32_t)TIKU_CAM_QVGA_W * TIKU_CAM_QVGA_H * 2U + 64U;
+    uint32_t bytes = (uint32_t)TIKU_CAM_QVGA_W * TIKU_CAM_QVGA_H * 2U;
+    const tiku_mem_request_t options = {.alignment = 64};
     uint8_t *raw;
 
     if (buf != 0) {
         return buf;
     }
     if (tiku_tier_init() != TIKU_MEM_OK ||
-        tiku_tier_arena_create(&arena, TIKU_MEM_SRAM, bytes, 70)
+        tiku_tier_arena_create_opts(&arena, TIKU_MEM_SRAM, bytes, 70, &options)
             != TIKU_MEM_OK) {
         return 0;
     }
     raw = (uint8_t *)tiku_arena_alloc(&arena, bytes);
     if (raw == 0) {
+        (void)tiku_mem_workspace_close(&arena);
         return 0;
     }
-    buf = (void *)(((uintptr_t)raw + 63U) & ~(uintptr_t)63U);
+    buf = raw;
     return buf;
 }
 

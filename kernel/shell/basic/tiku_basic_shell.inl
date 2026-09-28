@@ -28,6 +28,10 @@
 static int
 basic_session_begin(void)
 {
+    if (!basic_reclaim_available()) {
+        SHELL_PRINTF("? basic: memory reconstruction in progress\n");
+        return -1;
+    }
     /* Register the native builtin words ONCE, before any dispatch can reach
      * the registry fallthroughs.  Extensions are firmware config, not session
      * state, so they live across sessions; the guard makes re-entry a no-op. */

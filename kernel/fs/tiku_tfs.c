@@ -18,6 +18,57 @@
 
 #include <string.h>
 
+/* Handles live outside mapped storage. The list also lets mount() check for a
+ * lease without reading an uninitialised caller-supplied filesystem object. */
+#if TIKU_TFS_HOLD_ENABLE
+static tiku_tfs_hold_t *tfs_holds;
+static int tfs_handle_held(const tiku_tfs_t *fs)
+{
+    const tiku_tfs_hold_t *h;
+    for (h = tfs_holds; h; h = h->next) if (h->fs == fs) return 1;
+    return 0;
+}
+static int tfs_backing_held(const tiku_nvm_backend_t *be)
+{
+    const tiku_tfs_hold_t *h;
+    if (!be || !be->base) return 0;
+    for (h = tfs_holds; h; h = h->next) {
+        const tiku_nvm_backend_t *other = h->fs->be;
+        uintptr_t a = (uintptr_t)be->base, b = (uintptr_t)other->base;
+        if (a <= b ? b - a < be->size : a - b < other->size) return 1;
+    }
+    return 0;
+}
+static int tfs_held(const tiku_tfs_t *fs)
+{ return tfs_handle_held(fs) || tfs_backing_held(fs->be); }
+int tiku_tfs_hold(tiku_tfs_t *fs, tiku_tfs_hold_t *hold)
+{
+    tiku_tfs_hold_t *h;
+    if (!fs || !fs->mounted || !hold) return TFS_ERR_INVAL;
+    if (fs->wr_open) return TFS_ERR_BUSY;
+    for (h = tfs_holds; h; h = h->next) if (h == hold) return TFS_ERR_BUSY;
+    hold->fs = fs; hold->next = tfs_holds; tfs_holds = hold;
+    return TFS_OK;
+}
+int tiku_tfs_release(tiku_tfs_hold_t *hold)
+{
+    tiku_tfs_hold_t **h;
+    for (h = &tfs_holds; *h; h = &(*h)->next) if (*h == hold) {
+        *h = hold->next; hold->fs = NULL; hold->next = NULL;
+        return TFS_OK;
+    }
+    return TFS_ERR_INVAL;
+}
+#else
+static int tfs_held(const tiku_tfs_t *fs) { (void)fs; return 0; }
+static int tfs_handle_held(const tiku_tfs_t *fs) { (void)fs; return 0; }
+static int tfs_backing_held(const tiku_nvm_backend_t *be) { (void)be; return 0; }
+int tiku_tfs_hold(tiku_tfs_t *fs, tiku_tfs_hold_t *hold)
+{ (void)fs; (void)hold; return TFS_ERR_INVAL; }
+int tiku_tfs_release(tiku_tfs_hold_t *hold)
+{ (void)hold; return TFS_ERR_INVAL; }
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* ON-NVM LAYOUT                                                             */
 /*---------------------------------------------------------------------------*/
@@ -462,12 +513,13 @@ int tiku_tfs_format(tiku_tfs_t *fs)
     if (fs == NULL || fs->be == NULL || fs->be->base == NULL) {
         return TFS_ERR_INVAL;
     }
+    if (tfs_held(fs)) return TFS_ERR_BUSY;
     if (!tfs_derive(fs, fs->be->size)) {
         return TFS_ERR_NOSPACE;
     }
     /* Reformatting under an open writer would erase the directory it is about
      * to commit into. */
-    if (fs->wr_open) {
+    if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
     }
     /* Invalidate the magic FIRST.  The descriptor is several words now, so
@@ -501,6 +553,7 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (fs == NULL || be == NULL || be->base == NULL || be->write == NULL) {
         return TFS_ERR_INVAL;
     }
+    if (tfs_handle_held(fs) || tfs_backing_held(be)) return TFS_ERR_BUSY;
     fs->be = be;
     fs->mounted = 0;
     fs->wr_open = 0;          /* a remount abandons any half-open writer */
@@ -545,6 +598,7 @@ int tiku_tfs_init(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (fs == NULL || be == NULL || be->base == NULL || be->write == NULL) {
         return TFS_ERR_INVAL;
     }
+    if (tfs_handle_held(fs) || tfs_backing_held(be)) return TFS_ERR_BUSY;
     fs->be = be;
     fs->mounted = 0;
     fs->wr_open = 0;
@@ -733,6 +787,7 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     if (fs == NULL || !fs->mounted || name == NULL) {
         return TFS_ERR_INVAL;
     }
+    if (tfs_held(fs)) return TFS_ERR_BUSY;
     nl = strlen(name);
     if (nl == 0 || nl >= TIKU_TFS_NAME_MAX) {
         return TFS_ERR_NAMELEN;
@@ -817,7 +872,7 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
      *
      * Readers are unaffected: they map in place and never take this.
      */
-    if (fs->wr_open) {
+    if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
     }
 
@@ -872,6 +927,7 @@ int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len)
     if (w == NULL || !w->active || (len && data == NULL)) {
         return TFS_ERR_INVAL;
     }
+    if (tfs_held(w->fs)) return TFS_ERR_BUSY;
     if (len > w->cap - w->off) {
         return TFS_ERR_TOOBIG;
     }
@@ -892,6 +948,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
         return TFS_ERR_INVAL;
     }
     fs = w->fs;
+    if (tfs_held(fs)) return TFS_ERR_BUSY;
     if (wr32(fs, slot_off(fs, w->first) + TFS_SL_LEN, (uint32_t)w->off)) {
         return TFS_ERR_IO;
     }
@@ -1070,7 +1127,7 @@ int tiku_tfs_delete(tiku_tfs_t *fs, const char *name)
     /* Does not go through open_w, so it needs the interlock explicitly: a
      * delete during someone else's stream could reclaim slots that stream has
      * staged into. */
-    if (fs->wr_open) {
+    if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
     }
     i = tfs_find(fs, name);

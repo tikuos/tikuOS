@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_sched.h"
+#include "kernel/memory/tiku_reclaim_internal.h"
 #include "../timers/tiku_htimer.h"
 #include <hal/tiku_cpu.h>
 #include <kernel/cpu/tiku_hang.h>          /* check-in watchdog heartbeat */
@@ -120,6 +121,9 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
  */
 uint8_t tiku_sched_run_once(void)
 {
+#if TIKU_MEM_RECLAIM_ENABLE
+    tiku_mem_reclaim_poll();
+#endif
     /* Dispatch one event from the queue */
     return tiku_process_run();
 }
@@ -179,7 +183,11 @@ void tiku_sched_loop(void)
         tiku_atomic_enter();
 
         if (!tiku_sched_has_pending() &&
-            (idle_tick_wakes || !tiku_timer_any_pending())) {
+            (idle_tick_wakes || (!tiku_timer_any_pending()
+#if TIKU_MEM_RECLAIM_ENABLE
+                                && !tiku_mem_reclaim_pending()
+#endif
+                                ))) {
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
             if (tiku_thread_worker_ready()) {
                 /* Not idle — hand the CPU to the ready workers.  The
@@ -203,6 +211,9 @@ void tiku_sched_loop(void)
                  * with NO timers armed the per-tick cadence is kept
                  * (it is what paces uptime and the counted-idle tests). */
                 if (idle_tick_wakes &&
+#if TIKU_MEM_RECLAIM_ENABLE
+                    !tiku_mem_reclaim_pending() &&
+#endif
                     idle_hook != (tiku_sched_idle_hook_t)0 &&
                     tiku_timer_any_pending()) {
                     tiku_clock_time_t ahead = (tiku_clock_time_t)

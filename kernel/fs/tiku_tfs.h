@@ -256,6 +256,27 @@ typedef struct tiku_tfs {
     uint8_t  mounted;
 } tiku_tfs_t;
 
+/* Keep lease machinery out of constrained builds that do not use it. */
+#ifndef TIKU_TFS_HOLD_ENABLE
+#if defined(TIKU_MEM_RECLAIM_ENABLE) && TIKU_MEM_RECLAIM_ENABLE
+#define TIKU_TFS_HOLD_ENABLE 1
+#else
+#define TIKU_TFS_HOLD_ENABLE 0
+#endif
+#endif
+
+/* A short-lived read lease prevents writes, deletes, format and remount while
+ * a consumer reconstructs RAM from mapped files. Keep the handle in stable
+ * storage and release it explicitly. This is not protection against raw NVM
+ * access or reboot. Multiple readers may hold a store; writers return BUSY.
+ * With TIKU_TFS_HOLD_ENABLE=0, hold/release return TFS_ERR_INVAL. */
+typedef struct tiku_tfs_hold {
+    tiku_tfs_t *fs;
+    struct tiku_tfs_hold *next;
+} tiku_tfs_hold_t;
+int tiku_tfs_hold(tiku_tfs_t *fs, tiku_tfs_hold_t *hold);
+int tiku_tfs_release(tiku_tfs_hold_t *hold);
+
 /*---------------------------------------------------------------------------*/
 /* API                                                                       */
 /*---------------------------------------------------------------------------*/

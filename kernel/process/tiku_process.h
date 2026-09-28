@@ -222,7 +222,8 @@ typedef enum {
 typedef enum {
     TIKU_EXIT_NONE   = 0,  /**< running / never exited */
     TIKU_EXIT_DONE   = 1,  /**< finished cleanly */
-    TIKU_EXIT_FAILED = 2   /**< failed (tiku_process_fail) */
+    TIKU_EXIT_FAILED = 2,  /**< failed (tiku_process_fail) */
+    TIKU_EXIT_RECLAIM = 3  /**< validated owner reconstruction; not a crash */
 } tiku_exit_reason_t;
 
 /*---------------------------------------------------------------------------*/

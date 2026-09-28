@@ -428,6 +428,7 @@ exec_stmt(const char **p)
             if (basic_ext_tab[i].name[0] != '\0' &&
                 basic_ext_tab[i].kind == 0u &&
                 match_kw(p, basic_ext_tab[i].name)) {
+                BASIC_RECLAIM_EXTERNAL();
                 basic_ext_tab[i].u.stmt(p);
                 return;
             }

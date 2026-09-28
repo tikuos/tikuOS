@@ -23,6 +23,7 @@
 #include "tiku_basic_config.h"
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/memory/tiku_mem.h>
+#include <kernel/memory/tiku_reclaim.h>
 #include <kernel/timers/tiku_clock.h>
 #include <hal/tiku_cpu.h>                /* SLEEP -> real low-power idle */
 #include <stdio.h>
@@ -101,6 +102,7 @@
 
 #include "tiku_basic_cursor.inl"      /* parse-cursor vocabulary (before all parsers) */
 #include "tiku_basic_state.inl"
+#include "tiku_basic_reclaim_state.inl"
 #include "tiku_basic_token.inl"       /* A2: keyword crunch (before all users) */
 #include "tiku_basic_arena.inl"
 #include "tiku_basic_persist.inl"
@@ -137,3 +139,4 @@
 #include "tiku_basic_repl.inl"
 #include "tiku_basic_shell.inl"
 #include "tiku_basic_mode.inl"
+#include "tiku_basic_reclaim.inl"

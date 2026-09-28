@@ -70,11 +70,12 @@ panel_claim(void)
     bytes = (uint32_t)w * h * tiku_display_bpp();
 
     if (tiku_tier_init() != TIKU_MEM_OK ||
-        tiku_tier_arena_create_span(&arena, TIKU_MEM_SRAM, 0, bytes, 70)
+        tiku_tier_arena_create_span(&arena, TIKU_MEM_SRAM, 0, bytes, 0, 70)
             != TIKU_MEM_OK) {
         return 0;
     }
     fb = tiku_arena_alloc(&arena, bytes);
+    if (fb == NULL) (void)tiku_mem_workspace_close(&arena);
     return fb;
 }
 

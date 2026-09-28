@@ -104,7 +104,7 @@
  * DIM array reserve).
  *
  * These checks establish a capacity floor, not available space at runtime:
- * other allocations and loans can consume the same backing. The default
+ * other allocations can consume the same backing. The default
  * working request preserves AUTO's eligible-HIFRAM/SRAM preference and never
  * selects protected NVM or external memory. On eligible MSP430 large-model
  * builds the arena exceeds the HIFRAM threshold; on ARM it uses SRAM. Host
@@ -209,7 +209,15 @@ basic_alloc_state(void)
         (void)tiku_arena_reset(&basic_arena);
     } else {
         (void)tiku_tier_init();
+#if BASIC_RECLAIM_ENABLE
+        tiku_mem_request_t options = {0};
+        if (basic_reclaim_register() != 0) return -1;
+        options.owner = basic_reclaim_owner;
+        options.owner_slot = 1;
+        if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, &options)
+#else
         if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, NULL)
+#endif
             != TIKU_MEM_OK) {
             return -1;
         }
@@ -221,6 +229,10 @@ basic_alloc_state(void)
      * from the bump pointer, not self-declared.  Idempotent. */
     {
         struct tiku_process *self = TIKU_THIS();
+#if BASIC_RECLAIM_ENABLE
+        if (self) basic_reclaim_process = self;
+        self = basic_reclaim_process;
+#endif
         if (self != NULL) {
             tiku_process_attach_mem_arena(self, &basic_arena);
         }
@@ -318,6 +330,13 @@ basic_alloc_state(void)
      * line table here, then reset every variable via the shared helper (which
      * also rewinds to the mark just captured -- a no-op on this first pass). */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
+#if BASIC_RECLAIM_ENABLE
+    /* Eligibility may be inspected at the prompt, before the first RUN. */
+    for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++)
+        memset(&basic_everys[i], 0, sizeof basic_everys[i]);
+    for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++)
+        memset(&basic_onchgs[i], 0, sizeof basic_onchgs[i]);
+#endif
     basic_line_index_ok = 0;                  /* A3: line index not built yet */
     basic_symreg_ok     = 0;                  /* A3 #2: SUB/label registry too */
     basic_clear_vars();

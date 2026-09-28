@@ -19,6 +19,8 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_mem.h"
+#include "tiku_mem_internal.h"
+#include "tiku_reclaim_internal.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -42,18 +44,26 @@
  *         or both sizes are zero, or the tier-allocator error from the
  *         arena that could not be created
  */
-tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
+static tiku_mem_err_t proc_mem_create(tiku_proc_mem_t *pmem,
                                      uint8_t pid,
                                      tiku_mem_tier_t tier,
                                      tiku_mem_arch_size_t sram_size,
-                                     tiku_mem_arch_size_t nvm_size)
+                                     tiku_mem_arch_size_t nvm_size,
+                                     const tiku_mem_request_t *owned)
 {
     tiku_mem_err_t err;
     tiku_mem_tier_t sram_tier;
     tiku_mem_tier_t nvm_tier;
 
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+
     if (pmem == NULL || (sram_size == 0 && nvm_size == 0)) {
         return TIKU_MEM_ERR_INVALID;
+    }
+    if (tiku_backing_output_busy(&pmem->sram_arena) ||
+        tiku_backing_output_busy(&pmem->nvm_arena) ||
+        tiku_backing_output_busy(&pmem->hifram_arena)) {
+        return TIKU_MEM_ERR_BUSY;
     }
 
     memset(pmem, 0, sizeof(*pmem));
@@ -73,8 +83,8 @@ tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
 
     /* Create SRAM arena if requested */
     if (sram_size > 0) {
-        err = tiku_tier_arena_create(&pmem->sram_arena, sram_tier,
-                                      sram_size, pid);
+        err = tiku_tier_arena_create_opts(&pmem->sram_arena, sram_tier,
+                                           sram_size, pid, owned);
         if (err != TIKU_MEM_OK) {
             return err;
         }
@@ -82,29 +92,67 @@ tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
 
     /* Create NVM arena if requested */
     if (nvm_size > 0) {
-        err = tiku_tier_arena_create(&pmem->nvm_arena, nvm_tier,
-                                      nvm_size, pid);
+        tiku_mem_request_t options = TIKU_MEM_REQUEST_DEFAULT;
+        if (owned) { options = *owned; options.owner_slot++; }
+        err = tiku_tier_arena_create_opts(&pmem->nvm_arena, nvm_tier,
+                                           nvm_size, pid, owned ? &options : NULL);
         if (err != TIKU_MEM_OK) {
             /* Roll back the SRAM arena if it was created */
             if (sram_size > 0) {
-                tiku_arena_reset(&pmem->sram_arena);
-                pmem->sram_arena.active = 0;
+#if TIKU_MEM_RECLAIM_ENABLE
+                /* A held restore owns partial claims until stopped cleanup;
+                 * public destroy must not bypass the coordinator's fence. */
+                if (owned && !tiku_mem_owner_available(owned->owner)) return err;
+#endif
+                tiku_mem_err_t rollback = tiku_arena_destroy(&pmem->sram_arena);
+                if (rollback != TIKU_MEM_OK) return rollback;
             }
             return err;
         }
     }
 
     pmem->active = 1;
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (owned) { pmem->owner = owned->owner; pmem->owner_key_base = owned->owner_slot; }
+#endif
 
     return TIKU_MEM_OK;
 }
+
+tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem, uint8_t pid,
+    tiku_mem_tier_t tier, tiku_mem_arch_size_t sram_size, tiku_mem_arch_size_t nvm_size)
+{ return proc_mem_create(pmem, pid, tier, sram_size, nvm_size, NULL); }
+
+#if TIKU_MEM_RECLAIM_ENABLE
+tiku_mem_err_t tiku_proc_mem_set_owner(tiku_proc_mem_t *pmem, tiku_mem_owner_t owner,
+                                       uint16_t key_base)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    if (!pmem || !pmem->active || pmem->cache_count || !key_base || key_base > UINT16_MAX - 2u ||
+        pmem->owner.slot_plus_one || !tiku_reclaim_process_owner_valid(owner, pmem, sizeof *pmem))
+        return TIKU_MEM_ERR_INVALID;
+    return tiku_reclaim_context_tag(pmem, owner, key_base);
+}
+
+tiku_mem_err_t tiku_proc_mem_create_owned(tiku_proc_mem_t *pmem, uint8_t pid,
+    tiku_mem_tier_t tier, tiku_mem_arch_size_t sram_size, tiku_mem_arch_size_t nvm_size,
+    tiku_mem_owner_t owner, uint16_t key_base)
+{
+    tiku_mem_request_t options = TIKU_MEM_REQUEST_DEFAULT;
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    if (!key_base || key_base > UINT16_MAX - 2u ||
+        !tiku_reclaim_process_owner_valid(owner, pmem, sizeof *pmem)) return TIKU_MEM_ERR_INVALID;
+    options.owner = owner; options.owner_slot = key_base;
+    return proc_mem_create(pmem, pid, tier, sram_size, nvm_size, &options);
+}
+#endif
 
 /**
  * @brief Destroy a process memory context.
  *
  * Flushes and destroys every attached cache first, so a dirty page is persisted
- * rather than silently lost, then resets each arena.  Reset is not a secure
- * wipe, and the tier allocator being bump-only means capacity is not reclaimed.
+ * rather than silently lost, then releases every owned arena's backing.
+ * The caller must first stop all users of these objects. This is not a wipe.
  *
  * @param pmem  Context to destroy
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
@@ -113,10 +161,16 @@ tiku_mem_err_t tiku_proc_mem_create(tiku_proc_mem_t *pmem,
 tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
 {
     uint8_t i;
+    tiku_arena_t *arenas[3];
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
 
     if (pmem == NULL || !pmem->active) {
         return TIKU_MEM_ERR_INVALID;
     }
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (pmem->owner.slot_plus_one && !tiku_mem_owner_available(pmem->owner))
+        return TIKU_MEM_ERR_BUSY;
+#endif
 
     /* Flush and destroy all attached cached regions */
     for (i = 0; i < pmem->cache_count; i++) {
@@ -125,26 +179,22 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
             if (status != TIKU_MEM_OK) {
                 return status;
             }
-            tiku_cache_destroy(pmem->caches[i]);
+            status = tiku_cache_destroy(pmem->caches[i]);
+            if (status != TIKU_MEM_OK) return status;
         }
         pmem->caches[i] = NULL;
     }
     pmem->cache_count = 0;
 
-    /* Reset arenas (reclaim all allocations) */
-    if (pmem->sram_arena.active) {
-        tiku_arena_reset(&pmem->sram_arena);
-        pmem->sram_arena.active = 0;
-    }
-
-    if (pmem->nvm_arena.active) {
-        tiku_arena_reset(&pmem->nvm_arena);
-        pmem->nvm_arena.active = 0;
-    }
-
-    if (pmem->hifram_arena.active) {
-        tiku_arena_reset(&pmem->hifram_arena);
-        pmem->hifram_arena.active = 0;
+    arenas[0] = &pmem->sram_arena;
+    arenas[1] = &pmem->nvm_arena;
+    arenas[2] = &pmem->hifram_arena;
+    for (i = 0; i < 3; i++) {
+        if (arenas[i]->active) {
+            tiku_mem_err_t status = tiku_arena_reset(arenas[i]);
+            if (status == TIKU_MEM_OK) status = tiku_arena_destroy(arenas[i]);
+            if (status != TIKU_MEM_OK) return status;
+        }
     }
 
     pmem->active = 0;
@@ -248,6 +298,7 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
 tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
                                             tiku_mem_arch_size_t size)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (pmem == NULL || !pmem->active || size == 0) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -259,6 +310,14 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
         return TIKU_MEM_ERR_INVALID;
     }
 
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (pmem->owner.slot_plus_one) {
+        tiku_mem_request_t options = TIKU_MEM_REQUEST_DEFAULT;
+        options.owner = pmem->owner; options.owner_slot = (uint16_t)(pmem->owner_key_base + 2u);
+        return tiku_tier_arena_create_opts(&pmem->hifram_arena, TIKU_MEM_HIFRAM,
+                                           size, pmem->pid, &options);
+    }
+#endif
     return tiku_tier_arena_create(&pmem->hifram_arena,
                                    TIKU_MEM_HIFRAM, size, pmem->pid);
 }
@@ -276,10 +335,14 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
 tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
                                            tiku_cached_region_t *region)
 {
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (pmem == NULL || !pmem->active ||
         region == NULL || !region->active) {
         return TIKU_MEM_ERR_INVALID;
     }
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (pmem->owner.slot_plus_one) return TIKU_MEM_ERR_INVALID;
+#endif
 
     if (pmem->cache_count >= TIKU_PROC_MEM_MAX_CACHES) {
         return TIKU_MEM_ERR_FULL;

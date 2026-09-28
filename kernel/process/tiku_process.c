@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_process.h"
+#include "kernel/memory/tiku_reclaim_internal.h"
 #include <kernel/memory/tiku_mem.h> /* measured accounting (attached arena) */
 #include <hal/tiku_compiler.h>
 #include <hal/tiku_cpu.h>
@@ -283,6 +284,9 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     if (p->is_running) {
         return;
     }
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (!tiku_mem_reclaim_process_start_allowed(p)) return;
+#endif
 
     /* Protect list modification — an ISR could post a broadcast event
      * midway through linking a new node into the list. */
@@ -305,6 +309,10 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
 
     tiku_atomic_exit();
 
+#if TIKU_MEM_RECLAIM_ENABLE
+    /* Bind the new instance before INIT's queue-full synchronous fallback. */
+    tiku_mem_reclaim_process_started(p);
+#endif
     PROCESS_PRINTF("Started: %s\n", p->name);
 
     /* Ensure INIT is delivered even if the queue is full. */
@@ -344,6 +352,12 @@ void tiku_process_exit(struct tiku_process *p)
     if (!p->is_running) {
         return;
     }
+    if (p->exit_reason == TIKU_EXIT_RECLAIM) {
+#if TIKU_MEM_RECLAIM_ENABLE
+        if (!tiku_mem_reclaim_process_exit_valid(p))
+#endif
+            p->exit_reason = TIKU_EXIT_FAILED;
+    }
 
     PROCESS_PRINTF("Exited: %s\n", p->name);
 
@@ -377,6 +391,9 @@ void tiku_process_exit(struct tiku_process *p)
      * as a fresh instance (same pid) instead of leaving recovery to a human
      * or a whole-board reboot.  NEVER (the default) makes this a no-op, so
      * unsupervised processes are unaffected. */
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (tiku_mem_reclaim_process_exit(p)) return;
+#endif
     supervisor_on_exit(p);
 }
 
@@ -393,18 +410,17 @@ void tiku_process_exit(struct tiku_process *p)
  * window -- trips the burst cap: the policy is forced to NEVER so the run loop
  * can't spin on a process that fails immediately on every restart.
  */
-static void supervisor_on_exit(struct tiku_process *p)
+/* Shared with held restore failures: charge a crash without immediately
+ * starting another instance over partially initialized objects. */
+#if TIKU_MEM_RECLAIM_ENABLE
+int
+#else
+static int
+#endif
+tiku_process_restart_charge(struct tiku_process *p)
 {
     tiku_clock_time_t now;
-
-    if (p->restart == (uint8_t)TIKU_RESTART_NEVER) {
-        return;
-    }
-    if (p->restart == (uint8_t)TIKU_RESTART_ON_FAILURE &&
-        p->exit_reason != (uint8_t)TIKU_EXIT_FAILED) {
-        return;                     /* clean exit + ON_FAILURE -> leave stopped */
-    }
-
+    if (p->restart == (uint8_t)TIKU_RESTART_NEVER) return 0;
     now = tiku_clock_time();
     /* A restart spaced further than the window from the last one starts a
      * fresh burst -- only a genuine storm accumulates toward the cap. */
@@ -416,7 +432,7 @@ static void supervisor_on_exit(struct tiku_process *p)
         /* Give up rather than loop: leave STOPPED and disarm supervision
          * until something re-arms it. */
         p->restart = (uint8_t)TIKU_RESTART_NEVER;
-        return;
+        return 0;
     }
 
     p->restart_burst++;
@@ -424,7 +440,15 @@ static void supervisor_on_exit(struct tiku_process *p)
         p->restart_total++;
     }
     p->restart_at = now;
+    return 1;
+}
 
+static void supervisor_on_exit(struct tiku_process *p)
+{
+    if (p->restart == (uint8_t)TIKU_RESTART_NEVER) return;
+    if (p->restart == (uint8_t)TIKU_RESTART_ON_FAILURE &&
+        p->exit_reason != (uint8_t)TIKU_EXIT_FAILED) return;
+    if (!tiku_process_restart_charge(p)) return;
     tiku_process_start(p, p->init_data);        /* fresh instance, same pid */
 }
 
@@ -468,7 +492,7 @@ uint16_t tiku_process_restarts(const struct tiku_process *p)
  * @param p    Target process (or TIKU_PROCESS_BROADCAST)
  * @param ev   Event identifier
  * @param data Event data
- * @return 1 if event posted, 0 if queue full
+ * @return 1 if event posted, 0 if queue full or the target is reconstruction-gated
  */
 uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
                           tiku_event_data_t data)
@@ -478,6 +502,12 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
 
     tiku_atomic_enter();
 
+#if TIKU_MEM_RECLAIM_ENABLE
+    if (p != TIKU_PROCESS_BROADCAST && !tiku_mem_reclaim_process_dispatch(p, ev)) {
+        tiku_atomic_exit();
+        return 0;
+    }
+#endif
     /* System events may use every slot; user-range events stop
      * TIKU_QUEUE_RESERVE short so an application flood can never
      * drop a kernel event (see TIKU_QUEUE_RESERVE). */
@@ -508,6 +538,21 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
 
     return ret;
 }
+
+#if TIKU_MEM_RECLAIM_ENABLE
+int tiku_process_reclaim_quiet(const struct tiku_process *p)
+{
+    unsigned i; int quiet = 1;
+    tiku_atomic_enter();
+    for (i = 0; i < q_len; i++) {
+        const struct event_item *item = &queue[(q_head + i) % TIKU_QUEUE_SIZE];
+        if (item->ev == TIKU_EVENT_POLL || event_is_stale(item->p, item->generation)) continue;
+        if (item->p == p || item->p == TIKU_PROCESS_BROADCAST) { quiet = 0; break; }
+    }
+    tiku_atomic_exit();
+    return quiet;
+}
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* TYPED EVENT PAYLOADS                                                       */
@@ -796,6 +841,9 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
     char ret;
 
     if (p->is_running && p->thread) {
+#if TIKU_MEM_RECLAIM_ENABLE
+        if (!tiku_mem_reclaim_process_dispatch(p, ev)) return;
+#endif
         if (ev == TIKU_EVENT_FORCE_EXIT) {
             if (tiku_current_process == p) {
                 tiku_current_process = NULL;
@@ -814,11 +862,20 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
              * process flagged itself FAILED (tiku_process_fail).  This is the
              * signal ON_FAILURE supervision keys on in tiku_process_exit(). */
             if (p->exit_reason != (uint8_t)TIKU_EXIT_FAILED) {
+#if TIKU_MEM_RECLAIM_ENABLE
+                if (p->exit_reason == (uint8_t)TIKU_EXIT_RECLAIM) {
+                    if (!tiku_mem_reclaim_process_exit_valid(p))
+                        p->exit_reason = (uint8_t)TIKU_EXIT_FAILED;
+                } else
+#endif
                 p->exit_reason = (uint8_t)TIKU_EXIT_DONE;
             }
             tiku_current_process = NULL;
             tiku_process_exit(p);
         } else {
+#if TIKU_MEM_RECLAIM_ENABLE
+            tiku_mem_reclaim_process_yielded(p);
+#endif
             /* Distinguish a voluntary yield (immediately runnable)
              * from a blocked wait (parked until an event arrives).
              * A blocked process that owns an armed timer is SLEEPING

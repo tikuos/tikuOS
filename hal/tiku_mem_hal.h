@@ -20,6 +20,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Reconstruction's short metadata transitions rely on kernel-only mutation.
+ * Cortex-M exposes exception context independently of the worker scheduler.
+ * Host tests may supply a predicate without embedding target assembly. */
+#ifndef TIKU_MEM_ARCH_IN_EXCEPTION
+#if defined(__arm__) || defined(__thumb__)
+static inline int tiku_mem_arch_in_exception(void)
+{
+    uint32_t ipsr;
+    __asm__ volatile ("mrs %0, ipsr" : "=r" (ipsr));
+    return ipsr != 0u;
+}
+#define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_mem_arch_in_exception()
+#else
+#define TIKU_MEM_ARCH_IN_EXCEPTION() 0
+#endif
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PLATFORM ROUTING                                                          */
 /*---------------------------------------------------------------------------*/

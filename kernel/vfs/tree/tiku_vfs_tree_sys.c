@@ -267,7 +267,7 @@ nvmfree_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/tiers.
  *
- * One line per available tier with the MEASURED bump-allocator state (capacity,
+ * One line per available tier with the measured reservation state (capacity,
  * used, lifetime peak, carve count, refused carves) from tiku_tier_stats().
  * Unavailable tiers, such as HIFRAM on parts without one, are omitted.
  */
@@ -293,23 +293,67 @@ mem_tiers_read(char *buf, size_t max)
     (void)tiku_tier_init();
 
     for (i = 0; i < (uint8_t)(sizeof(tiers) / sizeof(tiers[0])); i++) {
+        tiku_mem_space_t space, total = {0};
+        uint8_t si;
         if (tiku_tier_stats(tiers[i].t, &st) != TIKU_MEM_OK) {
             continue;
         }
-        n = snprintf(buf + off, (off < max) ? max - off : 0,
-                     "%s total=%lu used=%lu peak=%lu allocs=%lu fail=%lu\n",
+        for (si = 0; tiku_tier_span_space(tiers[i].t, si, &space) == TIKU_MEM_OK; si++) {
+            total.free_bytes += space.free_bytes;
+            total.split_free += space.split_free;
+            total.live_bytes += space.live_bytes;
+            total.held_bytes += space.held_bytes;
+            if (space.largest_gap > total.largest_gap) total.largest_gap = space.largest_gap;
+        }
+        if (off >= max) return -1;
+        n = snprintf(buf + off, max - off,
+                     "%s total=%lu used=%lu peak=%lu allocs=%lu fail=%lu "
+                     "free=%lu largest=%lu split=%lu live=%lu held=%lu\n",
                      tiers[i].name,
                      (unsigned long)st.total_bytes,
                      (unsigned long)st.used_bytes,
                      (unsigned long)st.peak_bytes,
                      (unsigned long)st.alloc_count,
-                     (unsigned long)st.fail_count);
-        if (n < 0) {
+                     (unsigned long)st.fail_count,
+                     (unsigned long)total.free_bytes,
+                     (unsigned long)total.largest_gap,
+                     (unsigned long)total.split_free,
+                     (unsigned long)total.live_bytes,
+                     (unsigned long)total.held_bytes);
+        if (n < 0 || (size_t)n >= max - off) {
             return -1;
         }
         off += (size_t)n;
     }
     return (int)off;
+}
+
+/** Bounded diagnostic snapshot. A short buffer is an error, not a full list. */
+static int mem_reservations_read(char *buf, size_t max)
+{
+    static const char *const names[] = {"sram", "nvm", "auto", "hifram", "psram"};
+    uint16_t cursor = 0;
+    tiku_mem_reservation_info_t r;
+    size_t at = 0;
+    while (tiku_mem_reservation_next(&cursor, &r) == TIKU_MEM_OK) {
+        int n;
+        if (at >= max) return -1;
+        n = snprintf(buf + at, max - at,
+                     "%u:%lu %s:%u %s %s off=%lu len=%lu align=%lu state=%s owner=%u:%lu key=%u\n",
+                     (unsigned)r.handle.slot_plus_one, (unsigned long)r.handle.generation,
+                     names[r.tier], (unsigned)r.span_index,
+                     r.kind == 1 ? "arena" : "pool",
+                     r.allocation_class == TIKU_MEM_FIXED ? "fixed" :
+                     r.allocation_class == TIKU_MEM_RESTARTABLE ? "restartable" : "transient",
+                     (unsigned long)r.offset, (unsigned long)r.length,
+                     (unsigned long)r.alignment,
+                     r.state == 1 ? "live" : r.state == 2 ? "held" : "initializing",
+                     (unsigned)r.owner.slot_plus_one, (unsigned long)r.owner.generation,
+                     (unsigned)r.owner_slot);
+        if (n < 0 || (size_t)n >= max - at) return -1;
+        at += (size_t)n;
+    }
+    return (int)at;
 }
 
 /**
@@ -986,6 +1030,8 @@ nvm_map_read(char *buf, size_t max)
     return (int)at;
 }
 
+#include "tiku_vfs_tree_mem_reclaim.inl"
+
 /** /sys/mem directory table — sizes (sram, nvm) + live (free, used) */
 static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
@@ -994,7 +1040,12 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },
     { "nvmfree", TIKU_VFS_FILE, nvmfree_read, NULL, NULL, 0, &desc_mem_live },
-    { "tiers",   TIKU_VFS_FILE, mem_tiers_read,  NULL, NULL, 0, &desc_mem_live },
+    { "tiers",   TIKU_VFS_FILE, mem_tiers_read,  NULL, NULL, 0, &desc_mem_map },
+    { "reservations", TIKU_VFS_FILE, mem_reservations_read, NULL, NULL, 0, &desc_mem_map },
+#if TIKU_MEM_RECLAIM_ENABLE
+    { "reclaim", TIKU_VFS_DIR, NULL, NULL, mem_reclaim_children,
+      sizeof mem_reclaim_children / sizeof mem_reclaim_children[0] },
+#endif
     { "failed",  TIKU_VFS_FILE, mem_failed_read, NULL, NULL, 0, &desc_mem_live },
     { "stack_free", TIKU_VFS_FILE, stack_free_read, NULL, NULL, 0,
       &desc_mem_live },
