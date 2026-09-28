@@ -52,7 +52,7 @@ typedef struct {
     uint16_t owners, touched, done, old_rebound;
     unsigned count, depth, boundary, turn;
     uint8_t active, ticket, tier_cursor, span_cursor, searching, committed;
-    uint8_t fault, credits, fast_path;
+    uint8_t fault, credits, fast_path, replans;
 } job_t;
 static owner_t owners[TIKU_MEM_MAX_OWNERS];
 static ticket_t tickets[TIKU_MEM_MAX_TICKETS];
@@ -499,6 +499,22 @@ static int freeze(void)
     return 1;
 }
 
+/* The span moved between the snapshot and the freeze: nobody has been asked
+ * to stop, so take a fresh snapshot and plan again. Bounded per job. */
+static int replan(void)
+{
+    ticket_t *t = &tickets[job.ticket];
+    unsigned i;
+    if (job.replans >= TIKU_MEM_RECLAIM_PLAN_ATTEMPTS) return 0;
+    job.replans++; counters.replanned++;
+    for (i = 0; i < N; i++) (void)tiku_reclaim_record(i, &job.snapshot[i]);
+    job.tier_cursor = 0; job.boundary = 0; job.owners = 0; job.count = 0;
+    job.searching = 0; job.depth = 0; job.fast_path = 0;
+    job.span_cursor = t->request.placement == TIKU_MEM_PLACE_SPAN ?
+                      t->request.span_index : 0;
+    return 1;
+}
+
 static int fast_layout(int high)
 {
     unsigned i, j;
@@ -623,7 +639,7 @@ static int candidate(void)
     request = &job.layout[job.count];
     *request = t->result; request->tier = tier; request->span_index = job.span_cursor;
     if (fast_layout(0) || fast_layout(1)) {
-        if (!freeze()) end_job(TIKU_MEM_RECLAIM_CHANGED);
+        if (!freeze() && !replan()) end_job(TIKU_MEM_RECLAIM_CHANGED);
         return 1;
     }
     search_start();
@@ -633,7 +649,10 @@ static int candidate(void)
 static void plan_step(void)
 {
     unsigned work;
-    if (!snapshot_unchanged()) { end_job(TIKU_MEM_RECLAIM_CHANGED); return; }
+    if (!snapshot_unchanged()) {
+        if (!replan()) end_job(TIKU_MEM_RECLAIM_CHANGED);
+        return;
+    }
     if (!job.searching) {
         if (candidate() < 0) end_job(TIKU_MEM_RECLAIM_NO_LAYOUT);
         return;
@@ -644,7 +663,7 @@ static void plan_step(void)
             counters.search_limited++; end_job(TIKU_MEM_RECLAIM_SEARCH_LIMITED); return;
         }
         if (job.depth > job.count) {
-            if (!freeze()) end_job(TIKU_MEM_RECLAIM_CHANGED);
+            if (!freeze() && !replan()) end_job(TIKU_MEM_RECLAIM_CHANGED);
             return;
         }
         object = job.order[job.depth];
@@ -1046,11 +1065,11 @@ int tiku_mem_reclaim_read(const char *entry, char *buf, size_t max)
         tiku_mem_reclaim_stats_t s;
         tiku_mem_reclaim_stats(&s);
         if (!report_line(buf, max, &at,
-            "direct=%lu low=%lu high=%lu searched=%lu search_limit=%lu completed=%lu cancelled=%lu refused=%lu faults=%lu restored_slots=%lu metadata=%lu\n",
+            "direct=%lu low=%lu high=%lu searched=%lu search_limit=%lu completed=%lu cancelled=%lu refused=%lu faults=%lu restored_slots=%lu replanned=%lu metadata=%lu\n",
             (unsigned long)s.direct, (unsigned long)s.layout_low, (unsigned long)s.layout_high,
             (unsigned long)s.searched, (unsigned long)s.search_limited, (unsigned long)s.completed,
             (unsigned long)s.cancelled, (unsigned long)s.refused, (unsigned long)s.faults,
-            (unsigned long)s.restored_slots,
+            (unsigned long)s.restored_slots, (unsigned long)s.replanned,
             (unsigned long)s.metadata_bytes)) return -1;
     } else return -1;
     return (int)at;

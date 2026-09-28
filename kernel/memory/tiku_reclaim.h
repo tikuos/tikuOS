@@ -21,6 +21,10 @@
 #ifndef TIKU_MEM_RECLAIM_SEARCH_LIMIT
 #define TIKU_MEM_RECLAIM_SEARCH_LIMIT 4096u
 #endif
+/** Plans retaken after the span moved under the planner, per job. */
+#ifndef TIKU_MEM_RECLAIM_PLAN_ATTEMPTS
+#define TIKU_MEM_RECLAIM_PLAN_ATTEMPTS 4u
+#endif
 #ifndef TIKU_MEM_RECLAIM_STEPS
 #define TIKU_MEM_RECLAIM_STEPS 16u
 #endif
@@ -114,7 +118,7 @@ typedef struct {
 typedef struct {
     uint32_t direct, layout_low, layout_high, searched, search_limited;
     uint32_t completed, cancelled, refused, faults;
-    uint32_t restored_slots;
+    uint32_t restored_slots, replanned;
     size_t metadata_bytes;
 } tiku_mem_reclaim_stats_t;
 
