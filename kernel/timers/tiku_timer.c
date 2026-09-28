@@ -19,6 +19,7 @@
 #include "tiku_timer.h"
 #include "tiku_crit.h"
 #include "tiku.h"
+#include "kernel/memory/tiku_reclaim_internal.h"
 #include <stddef.h>
 
 /*---------------------------------------------------------------------------*/
@@ -40,6 +41,20 @@ static uint16_t timer_fire_count;
  */
 static inline int timer_is_due(struct tiku_timer *t, tiku_clock_time_t now) {
   return (tiku_clock_time_t)(now - t->start) >= t->interval;
+}
+
+/*
+ * An expiration whose owner is reconstruction-gated stays armed until the
+ * gate lifts; it is not pending work, so the idle loop may sleep on it.
+ */
+static int timer_held(const struct tiku_timer *t) {
+#if TIKU_MEM_RECLAIM_ENABLE
+  return t->mode == TIKU_TIMER_MODE_EVENT && t->p != NULL &&
+         !tiku_mem_reclaim_process_dispatch(t->p, TIKU_EVENT_TIMER);
+#else
+  (void)t;
+  return 0;
+#endif
 }
 
 /**
@@ -124,9 +139,10 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
       if (timer_is_due(t, tiku_clock_time())) {
 
         /* Queue pressure must not consume an expiration. Leave the timer
-         * armed and retry on the next poll; never spin on a full queue. */
+         * armed and retry on the next poll; never spin on a full queue.
+         * A reconstruction-gated owner keeps its expiration the same way. */
         if (t->mode == TIKU_TIMER_MODE_EVENT && t->p != NULL &&
-            !tiku_process_post(t->p, TIKU_EVENT_TIMER, t)) {
+            (timer_held(t) || !tiku_process_post(t->p, TIKU_EVENT_TIMER, t))) {
           prev = t;
           continue;
         }
@@ -289,7 +305,7 @@ int tiku_timer_work_pending(void) {
   tiku_clock_time_t now = tiku_clock_time();
 
   for (t = timer_list; t != NULL; t = t->next) {
-    if (timer_is_due(t, now)) {
+    if (timer_is_due(t, now) && !timer_held(t)) {
       return 1;
     }
   }

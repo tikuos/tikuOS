@@ -151,7 +151,8 @@ int tiku_mem_reclaim_process_dispatch(const struct tiku_process *p, unsigned ev)
     if (oi < 0 || !process_gated((unsigned)oi)) return 1;
     if (job.fault || owners[oi].process_generation != p->generation ||
         !(job.touched & (1u << oi)) || (job.done & (1u << oi))) return 0;
-    return ev == TIKU_EVENT_POLL || ev == TIKU_EVENT_INIT;
+    return ev == TIKU_EVENT_POLL || ev == TIKU_EVENT_INIT ||
+           ev == TIKU_EVENT_TIMER;
 }
 
 static tiku_mem_owner_result_t process_step(unsigned oi)

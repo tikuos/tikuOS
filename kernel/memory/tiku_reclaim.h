@@ -130,7 +130,8 @@ int tiku_mem_owner_available(tiku_mem_owner_t);
 /* A process queries stable actions on POLL/INIT; events carry no action pointer.
  * PREPARE: save state, call ready(), then immediately TIKU_PROCESS_EXIT().
  * ABORT/RESTORE: reconstruct if rebuilding, then acknowledge DONE. WAIT yields;
- * BUSY refuses PREPARE. Other ordinary events are gated until job completion. */
+ * BUSY refuses PREPARE. TIMER reaches the gated instance; other ordinary
+ * events wait for job completion. */
 tiku_mem_err_t tiku_mem_owner_process_action(tiku_mem_owner_t, tiku_mem_owner_action_t *);
 tiku_mem_err_t tiku_mem_owner_process_ready(tiku_mem_owner_t, tiku_mem_job_t);
 tiku_mem_err_t tiku_mem_owner_process_ack(tiku_mem_owner_t,
