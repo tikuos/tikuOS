@@ -1235,7 +1235,9 @@ ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 TIKU_TIER_SRAM_MIN ?= 253952
 else
-TIKU_TIER_SRAM_MIN ?= 98304
+# 92 KB: the reservation table (TIKU_MEM_MAX_RESERVATIONS records) is a
+# static in the primary bank, and the 96 KB floor left no room for it.
+TIKU_TIER_SRAM_MIN ?= 94208
 endif
 endif
 TIKU_TIER_SRAM_MIN ?= 4096
