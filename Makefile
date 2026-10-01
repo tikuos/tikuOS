@@ -1413,11 +1413,12 @@ ifeq ($(TIKU_PLATFORM),msp430)
 $(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part; MSP430 \
 stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
 endif
-ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b ra8p1,$(MCU)),)
-$(error TIKU_THREADS_ENABLE=1 needs a supported Cortex-M part -- \
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b ra8p1 esp32c61,$(MCU)),)
+$(error TIKU_THREADS_ENABLE=1 needs a supported part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
-nrf54l15/nrf54lm20a (M33), ra8p1 (M85); $(MCU) has no thread backend. The \
-switcher is generic Cortex-M asm (kernel/threads/tiku_thread_cortexm.inl); \
+nrf54l15/nrf54lm20a (M33), ra8p1 (M85), esp32c61 (RISC-V); $(MCU) has no \
+thread backend. The Cortex-M switcher is generic asm \
+(kernel/threads/tiku_thread_cortexm.inl); \
 adding a part = a two-line shim that names its PendSV vector symbol (plus a \
 custom cycle source if the part's DWT freezes standalone), and proving the \
 torture suite)
@@ -2279,6 +2280,14 @@ SRCS += arch/esp32c61/tiku_onewire_arch.c
 SRCS += arch/esp32c61/tiku_flash_arch.c
 SRCS += arch/esp32c61/tiku_nvm_region_esp32c61.c
 SRCS += arch/esp32c61/tiku_trng_arch.c
+SRCS += arch/esp32c61/tiku_fault_arch.c
+ifeq ($(TIKU_THREADS_ENABLE),1)
+SRCS += kernel/threads/tiku_thread.c
+SRCS += arch/esp32c61/tiku_thread_arch.c
+endif
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_diag.c
+endif
 
 else
 

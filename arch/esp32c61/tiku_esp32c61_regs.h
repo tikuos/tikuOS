@@ -52,6 +52,11 @@
 #define ESP32C61_CSR_MINTTHRESH     0x347
 #define ESP32C61_CSR_MINTSTATUS     0xFB1
 
+/* PMP entry 0: binds machine mode only when locked, and stays locked. */
+#define ESP32C61_CSR_PMPCFG0        0x3A0
+#define ESP32C61_CSR_PMPADDR0       0x3B0
+#define ESP32C61_PMP_LOCK_NAPOT     0x98UL      /* L | A=NAPOT, no R/W/X */
+
 /*---------------------------------------------------------------------------*/
 /* ROM ENTRY POINTS (esp32c61.rom.ld)                                        */
 /*---------------------------------------------------------------------------*/
@@ -226,10 +231,14 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_INTMTX_MAP(src)    (ESP32C61_INTMTX_BASE + 4UL * (src))
 #define ESP32C61_INTMTX_SOURCES     66U
 
+#define ESP32C61_SRC_FROM_CPU0      19U     /* raised by software, below */
 #define ESP32C61_SRC_GPIO           27U
 #define ESP32C61_SRC_UART0          40U
 #define ESP32C61_SRC_USB_JTAG       44U
 #define ESP32C61_SRC_SYSTIMER(n)    (52U + (n))
+
+/* Software's own interrupt source: 1 raises it, 0 drops it. */
+#define ESP32C61_INTPRI_FROM_CPU0   0x600C5090UL
 
 /* CPU line n is CLIC id n + 16; the ids below 16 are the core's own. */
 #define ESP32C61_CLIC_BASE          0x20800000UL

@@ -15,6 +15,19 @@
 
 #include <stdint.h>
 
+/* The trap frame, in words: every integer register but zero, sp, gp and tp,
+ * then the CSRs mret depends on.  A thread switch resumes another frame. */
+#define TIKU_ESP32C61_F_RA          0U
+#define TIKU_ESP32C61_F_A0          6U
+#define TIKU_ESP32C61_F_MEPC        28U
+#define TIKU_ESP32C61_F_MSTATUS     29U
+#define TIKU_ESP32C61_F_MCAUSE      30U
+#define TIKU_ESP32C61_FRAME_WORDS   32U
+#define TIKU_ESP32C61_FRAME_BYTES   (TIKU_ESP32C61_FRAME_WORDS * 4U)
+
+/* Handlers never nest (MIE stays off in them), so one stack serves all. */
+#define TIKU_ESP32C61_ISR_STACK_WORDS 512U
+
 /** @brief Image entry the ROM jumps to (ENTRY in the linker script). */
 void tiku_esp32c61_reset_handler(void);
 
@@ -25,18 +38,25 @@ void tiku_esp32c61_c_start(void) __attribute__((noreturn));
 void tiku_esp32c61_trap_entry(void);
 
 /**
- * @brief Handle one trap; exceptions print a [TM:FAULT] line and park.
+ * @brief Handle one trap; exceptions print a [TM:FAULT] line, then go to
+ *        tiku_esp32c61_fault().
  *
- * @param frame  Saved caller-saved registers, ra first
+ * @param frame  The saved context
+ * @return The frame to resume
  */
-void tiku_esp32c61_trap(uint32_t *frame);
+uint32_t *tiku_esp32c61_trap(uint32_t *frame);
 
 /**
  * @brief Interrupt hook, weak until the interrupt layer provides it.
  *
- * @param line   CPU interrupt line from mcause
- * @param frame  Saved caller-saved registers
+ * @param id     CLIC id from mcause
+ * @param frame  The saved context
+ * @return The frame to resume
  */
-void tiku_esp32c61_irq_dispatch(uint32_t line, uint32_t *frame);
+uint32_t *tiku_esp32c61_irq_dispatch(uint32_t id, uint32_t *frame);
+
+/** @brief After an exception's dump: parks unless the kernel takes it. */
+void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause)
+    __attribute__((noreturn));
 
 #endif /* TIKU_ESP32C61_CRT_EARLY_H_ */

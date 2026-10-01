@@ -86,32 +86,56 @@ struct _reent *__getreent(void) {
 /* TRAPS                                                                     */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Handlers run here, not on whichever stack was interrupted. */
+static uint32_t isr_stack[TIKU_ESP32C61_ISR_STACK_WORDS]
+    __attribute__((aligned(16), used));
+
 /**
- * @brief Trap entry: the caller-saved registers to the stack, then C.
+ * @brief Trap entry: the whole context to the stack, then C on the ISR stack.
  *
  * Exceptions and non-vectored interrupts both land here, 64-byte aligned as
- * CLIC mode requires; tiku_esp32c61_trap() decides which it was.
+ * CLIC mode requires.  tiku_esp32c61_trap() returns the frame to resume --
+ * the same one, or another thread's -- and that is what mret goes back to.
  */
 __attribute__((naked, aligned(64)))
 void tiku_esp32c61_trap_entry(void) {
     __asm__ volatile (
-        "addi sp, sp, -64\n"
-        "sw ra,  0(sp)\n"  "sw t0,  4(sp)\n"  "sw t1,  8(sp)\n"
-        "sw t2, 12(sp)\n"  "sw a0, 16(sp)\n"  "sw a1, 20(sp)\n"
-        "sw a2, 24(sp)\n"  "sw a3, 28(sp)\n"  "sw a4, 32(sp)\n"
-        "sw a5, 36(sp)\n"  "sw a6, 40(sp)\n"  "sw a7, 44(sp)\n"
-        "sw t3, 48(sp)\n"  "sw t4, 52(sp)\n"  "sw t5, 56(sp)\n"
-        "sw t6, 60(sp)\n"
+        "addi sp, sp, -128\n"
+        "sw ra,   0(sp)\n" "sw t0,   4(sp)\n" "sw t1,   8(sp)\n"
+        "sw t2,  12(sp)\n" "sw s0,  16(sp)\n" "sw s1,  20(sp)\n"
+        "sw a0,  24(sp)\n" "sw a1,  28(sp)\n" "sw a2,  32(sp)\n"
+        "sw a3,  36(sp)\n" "sw a4,  40(sp)\n" "sw a5,  44(sp)\n"
+        "sw a6,  48(sp)\n" "sw a7,  52(sp)\n" "sw s2,  56(sp)\n"
+        "sw s3,  60(sp)\n" "sw s4,  64(sp)\n" "sw s5,  68(sp)\n"
+        "sw s6,  72(sp)\n" "sw s7,  76(sp)\n" "sw s8,  80(sp)\n"
+        "sw s9,  84(sp)\n" "sw s10, 88(sp)\n" "sw s11, 92(sp)\n"
+        "sw t3,  96(sp)\n" "sw t4, 100(sp)\n" "sw t5, 104(sp)\n"
+        "sw t6, 108(sp)\n"
+        "csrr t0, mepc\n"    "sw t0, 112(sp)\n"
+        "csrr t0, mstatus\n" "sw t0, 116(sp)\n"
+        "csrr t0, mcause\n"  "sw t0, 120(sp)\n"
         "mv a0, sp\n"
+        "la sp, isr_stack + %0\n"
         "call tiku_esp32c61_trap\n"
-        "lw ra,  0(sp)\n"  "lw t0,  4(sp)\n"  "lw t1,  8(sp)\n"
-        "lw t2, 12(sp)\n"  "lw a0, 16(sp)\n"  "lw a1, 20(sp)\n"
-        "lw a2, 24(sp)\n"  "lw a3, 28(sp)\n"  "lw a4, 32(sp)\n"
-        "lw a5, 36(sp)\n"  "lw a6, 40(sp)\n"  "lw a7, 44(sp)\n"
-        "lw t3, 48(sp)\n"  "lw t4, 52(sp)\n"  "lw t5, 56(sp)\n"
-        "lw t6, 60(sp)\n"
-        "addi sp, sp, 64\n"
-        "mret\n");
+        "mv sp, a0\n"
+        /* mcause after mstatus: with the CLIC it carries the interrupt level
+         * mret restores, and aliases the MPIE/MPP bits mstatus just set. */
+        "lw t0, 116(sp)\n"   "csrw mstatus, t0\n"
+        "lw t0, 120(sp)\n"   "csrw mcause, t0\n"
+        "lw t0, 112(sp)\n"   "csrw mepc, t0\n"
+        "lw ra,   0(sp)\n" "lw t0,   4(sp)\n" "lw t1,   8(sp)\n"
+        "lw t2,  12(sp)\n" "lw s0,  16(sp)\n" "lw s1,  20(sp)\n"
+        "lw a0,  24(sp)\n" "lw a1,  28(sp)\n" "lw a2,  32(sp)\n"
+        "lw a3,  36(sp)\n" "lw a4,  40(sp)\n" "lw a5,  44(sp)\n"
+        "lw a6,  48(sp)\n" "lw a7,  52(sp)\n" "lw s2,  56(sp)\n"
+        "lw s3,  60(sp)\n" "lw s4,  64(sp)\n" "lw s5,  68(sp)\n"
+        "lw s6,  72(sp)\n" "lw s7,  76(sp)\n" "lw s8,  80(sp)\n"
+        "lw s9,  84(sp)\n" "lw s10, 88(sp)\n" "lw s11, 92(sp)\n"
+        "lw t3,  96(sp)\n" "lw t4, 100(sp)\n" "lw t5, 104(sp)\n"
+        "lw t6, 108(sp)\n"
+        "addi sp, sp, 128\n"
+        "mret\n"
+        :: "i" (TIKU_ESP32C61_ISR_STACK_WORDS * 4));
 }
 
 /** @brief One character straight into UART0's FIFO, bounded. */
@@ -163,33 +187,48 @@ static const char *trap_kind(uint32_t code) {
 
 /** @brief Default for interrupts until the interrupt layer claims them. */
 __attribute__((weak))
-void tiku_esp32c61_irq_dispatch(uint32_t line, uint32_t *frame) {
+uint32_t *tiku_esp32c61_irq_dispatch(uint32_t line, uint32_t *frame) {
     (void)line;
+    return frame;
+}
+
+/** @brief Default after the dump: park.  The kernel records and resets. */
+__attribute__((weak, noreturn))
+void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause) {
     (void)frame;
+    (void)cause;
+    for (;;) {
+        __asm__ volatile ("wfi");
+    }
 }
 
 /**
- * @brief Exceptions are reported and parked; interrupts are dispatched.
+ * @brief Exceptions are reported and handed on; interrupts are dispatched.
  *
- * @param frame  The registers the entry saved: ra first, t6 last
+ * @param frame  The context the entry saved (TIKU_ESP32C61_F_* words)
+ * @return The frame to resume: @p frame, or a thread switch's choice
  */
 __attribute__((used))
-void tiku_esp32c61_trap(uint32_t *frame) {
-    uint32_t cause = ESP32C61_CSR_READ(mcause);
+uint32_t *tiku_esp32c61_trap(uint32_t *frame) {
+    uint32_t cause = frame[TIKU_ESP32C61_F_MCAUSE];
 
     if (cause & 0x80000000UL) {
-        tiku_esp32c61_irq_dispatch(cause & 0xFFFUL, frame);
-        return;
+        return tiku_esp32c61_irq_dispatch(cause & 0xFFFUL, frame);
     }
     trap_puts("\r\n[TM:FAULT] ");
     trap_puts(trap_kind(cause & 0xFFFUL));
     trap_field("mcause", cause);
     trap_field("mtval", ESP32C61_CSR_READ(mtval));
-    trap_field("pc", ESP32C61_CSR_READ(mepc));
-    trap_field("ra", frame[0]);
-    trap_field("sp", (uint32_t)(uintptr_t)frame + 64UL);
+    trap_field("pc", frame[TIKU_ESP32C61_F_MEPC]);
+    trap_field("ra", frame[TIKU_ESP32C61_F_RA]);
+    trap_field("sp", (uint32_t)(uintptr_t)frame + TIKU_ESP32C61_FRAME_BYTES);
     trap_puts("\r\n");
-    for (;;) {
-        __asm__ volatile ("wfi");
+    /* Let the dump leave the FIFO before whatever follows resets the chip. */
+    for (unsigned long spins = 2000000UL; spins > 0UL; spins--) {
+        if (ESP32C61_UART_TXCNT(TIKU_REG32(ESP32C61_UART_STATUS(
+                ESP32C61_UART0_BASE))) == 0UL) {
+            break;
+        }
     }
+    tiku_esp32c61_fault(frame, cause);
 }

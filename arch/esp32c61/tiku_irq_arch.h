@@ -25,13 +25,19 @@
 #define TIKU_ESP32C61_LINE_HTIMER   11U
 #define TIKU_ESP32C61_LINE_GPIO     12U
 #define TIKU_ESP32C61_LINE_UART0    13U
+#define TIKU_ESP32C61_LINE_SWITCH   14U     /* worker threads' context switch */
 
-/* Levels run 1..7; the timers outrank everything that may join them. */
+/* Levels run 1..7; the timers outrank everything that may join them, and
+ * the context switch yields to everything, as PendSV does. */
 #define TIKU_ESP32C61_LEVEL_TIMER   7U
 #define TIKU_ESP32C61_LEVEL_DEFAULT 3U
+#define TIKU_ESP32C61_LEVEL_SWITCH  1U
 
 /** @brief A line's handler; the source is cleared inside it, not after. */
 typedef void (*tiku_esp32c61_isr_t)(void);
+
+/** @brief A switching handler: given the saved frame, the frame to resume. */
+typedef uint32_t *(*tiku_esp32c61_switch_t)(uint32_t *frame);
 
 /** @brief mstatus.MIE off. @return Its previous state, for _mie_restore() */
 static inline uint32_t tiku_esp32c61_mie_off(void) {
@@ -59,6 +65,10 @@ void tiku_esp32c61_irq_init(void);
  */
 void tiku_esp32c61_irq_attach(unsigned line, unsigned source,
                               unsigned level, tiku_esp32c61_isr_t isr);
+
+/** @brief As _attach(), for the one handler that may resume another frame. */
+void tiku_esp32c61_irq_attach_switch(unsigned line, unsigned source,
+                                     unsigned level, tiku_esp32c61_switch_t fn);
 
 /** @brief Enable one line. @param line  0..31 */
 void tiku_esp32c61_irq_enable(unsigned line);

@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_diag.c - "diag" command (STM32N6).
+ * tiku_shell_cmd_diag.c - "diag" command (STM32N6, RA8P1, ESP32-C61).
  *
  * Exercises the parts of the port that only prove themselves by going wrong:
  * the fault handlers, the EXTI lines and the watchdog.
@@ -238,3 +238,86 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
 }
 
 #endif /* PLATFORM_RA8P1 */
+
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_fault_arch.h>
+#include <arch/esp32c61/tiku_cpu_common.h>
+#include <arch/esp32c61/tiku_cpu_watchdog_arch.h>
+
+/** @brief Report the stored fault record, or say there is none. */
+static void diag_fault_show(void) {
+    const tiku_esp32c61_fault_record_t *f = tiku_esp32c61_fault_last();
+
+    if (f->magic != TIKU_ESP32C61_FAULT_MAGIC) {
+        SHELL_PRINTF("  no fault recorded\n");
+        return;
+    }
+    SHELL_PRINTF("  last %s (#%lu)\n",
+                 tiku_esp32c61_fault_kind_name(f->mcause & 0xFFFUL),
+                 (unsigned long)f->count);
+    SHELL_PRINTF("    mcause %08lx  mtval %08lx\n",
+                 (unsigned long)f->mcause, (unsigned long)f->mtval);
+    SHELL_PRINTF("    pc     %08lx  ra    %08lx  sp %08lx\n",
+                 (unsigned long)f->pc, (unsigned long)f->ra,
+                 (unsigned long)f->sp);
+}
+
+/* Inside the PMP NULL guard; volatile so the compiler sees an address, not a
+ * constant it can reason about. */
+static volatile uintptr_t diag_unmapped = 0x10UL;
+
+/** @brief Take one exception on purpose, so the record can be seen working. */
+static void diag_fault_force(const char *which) {
+    SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
+                 " then shows it\n", which);
+    if (strcmp(which, "illegal") == 0) {
+        __asm__ volatile ("unimp");
+    } else if (strcmp(which, "load") == 0) {
+        (void)*(volatile uint32_t *)diag_unmapped;
+    } else if (strcmp(which, "store") == 0) {
+        *(volatile uint32_t *)diag_unmapped = 0UL;
+    } else {
+        SHELL_PRINTF("  kinds: illegal | load | store\n");
+        return;
+    }
+    SHELL_PRINTF("  (no fault taken -- unexpected)\n");
+}
+
+/** @brief Show the last reset's cause, or arm the watchdog and starve it. */
+static void diag_wdt(uint8_t argc, const char *argv[]) {
+    if (argc >= 3 && strcmp(argv[2], "bite") == 0) {
+        /* ~1 s, never fed again: the reset that follows is the proof, and
+         * the ROM then names the TIMG0 watchdog as its cause. */
+        SHELL_PRINTF("  wdt: arming ~1 s and not feeding it; expect a reset\n");
+        tiku_cpu_esp32c61_watchdog_on_arch(TIKU_WDT_SRC_ACLK, 32768U);
+        for (;;) {
+        }
+    }
+    SHELL_PRINTF("  wdt: last reset rom code %lu%s\n",
+                 (unsigned long)tiku_cpu_esp32c61_reset_code(),
+                 (tiku_cpu_esp32c61_reset_reason() & TIKU_ESP32C61_RESET_WATCHDOG)
+                     ? "  (a watchdog)" : "");
+}
+
+void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
+    if (argc >= 2 && strcmp(argv[1], "fault") == 0) {
+        if (argc >= 3) {
+            diag_fault_force(argv[2]);
+        } else {
+            diag_fault_show();
+        }
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "clear") == 0) {
+        tiku_esp32c61_fault_clear();
+        SHELL_PRINTF("  fault record cleared\n");
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "wdt") == 0) {
+        diag_wdt(argc, argv);
+        return;
+    }
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | wdt [bite]\n");
+    diag_fault_show();
+}
+#endif /* PLATFORM_ESP32C61 */

@@ -8,15 +8,16 @@
  * tiku_mpu_arch.c - ESP32-C61 memory protection: the portable state machine.
  *
  * The MSP430-style segment mask is a software shadow, so the portable MPU
- * tests run one state machine; nothing enforces it yet.  PMP binds machine
- * mode only through a locked entry, and a locked entry cannot reopen for a
- * durable write until reset.
+ * tests run one state machine.  PMP binds machine mode only through a locked
+ * entry, which cannot reopen for a durable write, so it enforces one rule
+ * that never needs to: a NULL guard over the first 4 KB.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <hal/tiku_mpu_hal.h>
 #include "tiku_mpu_arch.h"
+#include "tiku_esp32c61_regs.h"
 
 /** @brief WRITE bits across the three SAM segment fields (MSP430 model,
  *         the 0x0222 the other ports' shadows use). */
@@ -53,8 +54,18 @@ void tiku_mpu_arch_disable_irq(void) {
 void tiku_mpu_arch_enable_irq(void) {
 }
 
+/**
+ * @brief The shadow's default, and the NULL guard.
+ *
+ * Nothing lives below 4 KB, yet the bus answers loads there with silence, so
+ * a NULL dereference would read zeros on.  Locked: a second call is a no-op.
+ */
 void tiku_mpu_arch_init_segments(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
+    ESP32C61_CSR_WRITE(ESP32C61_CSR_PMPADDR0, (0x1000UL / 8UL) - 1UL);
+    ESP32C61_CSR_WRITE(ESP32C61_CSR_PMPCFG0,
+                       (ESP32C61_CSR_READ(ESP32C61_CSR_PMPCFG0) & ~0xFFUL) |
+                       ESP32C61_PMP_LOCK_NAPOT);
 }
 
 /** @brief Restore the default (read+exec, no write) SAM policy. */

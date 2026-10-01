@@ -23,6 +23,10 @@ static tiku_esp32c61_isr_t irq_isr[ESP32C61_CLIC_LINES];
 static volatile uint32_t   irq_on;
 static volatile uint32_t   irq_spurious;
 
+/* The switching handler and its line; one, as there is one PendSV. */
+static tiku_esp32c61_switch_t irq_switch;
+static uint32_t irq_switch_line = ESP32C61_CLIC_LINES;
+
 /** @brief One line's IE bit, then a read back so the write has landed. */
 static void line_ie(unsigned line, int on) {
     uint32_t a = ESP32C61_CLIC_CTRL(ESP32C61_CLIC_LINE_ID(line));
@@ -44,6 +48,8 @@ void tiku_esp32c61_irq_init(void) {
         irq_isr[i] = NULL;
     }
     irq_on = 0UL;
+    irq_switch = NULL;
+    irq_switch_line = ESP32C61_CLIC_LINES;
     /* Whatever the ROM routed goes: a source raises nothing until attached. */
     for (unsigned s = 0U; s < ESP32C61_INTMTX_SOURCES; s++) {
         TIKU_REG32(ESP32C61_INTMTX_MAP(s)) = 0UL;
@@ -76,6 +82,13 @@ void tiku_esp32c61_irq_attach(unsigned line, unsigned source,
     ctrl |= ESP32C61_CLIC_MODE_M | (ctl << ESP32C61_CLIC_CTL_POS);
     TIKU_REG32(ESP32C61_CLIC_CTRL(id)) = ctrl;
     TIKU_REG32(ESP32C61_INTMTX_MAP(source)) = id;
+}
+
+void tiku_esp32c61_irq_attach_switch(unsigned line, unsigned source,
+                                     unsigned level, tiku_esp32c61_switch_t fn) {
+    tiku_esp32c61_irq_attach(line, source, level, NULL);
+    irq_switch_line = line;
+    irq_switch = fn;
 }
 
 void tiku_esp32c61_irq_enable(unsigned line) {
@@ -127,15 +140,18 @@ uint32_t tiku_esp32c61_irq_spurious(void) {
  * @brief Every interrupt arrives here from the trap path.
  *
  * @param id     The CLIC id from mcause: line + 16
- * @param frame  The saved registers, unused by the lines
+ * @param frame  The saved context
+ * @return The frame to resume: @p frame, unless the switcher picks another
  */
-void tiku_esp32c61_irq_dispatch(uint32_t id, uint32_t *frame) {
+uint32_t *tiku_esp32c61_irq_dispatch(uint32_t id, uint32_t *frame) {
     uint32_t line = id - ESP32C61_CLIC_LINE_ID(0U);
 
-    (void)frame;
+    if (line == irq_switch_line && irq_switch != NULL) {
+        return irq_switch(frame);
+    }
     if (line < ESP32C61_CLIC_LINES && irq_isr[line] != NULL) {
         irq_isr[line]();
-        return;
+        return frame;
     }
     /* Unclaimed: quiet the id, or a level source takes the core forever. */
     irq_spurious++;
@@ -145,4 +161,5 @@ void tiku_esp32c61_irq_dispatch(uint32_t id, uint32_t *frame) {
     if (id < ESP32C61_CLIC_LINE_ID(ESP32C61_CLIC_LINES)) {
         TIKU_REG32(ESP32C61_CLIC_CTRL(id)) &= ~ESP32C61_CLIC_IE;
     }
+    return frame;
 }

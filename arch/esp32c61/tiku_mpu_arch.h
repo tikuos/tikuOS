@@ -8,7 +8,7 @@
  * tiku_mpu_arch.h - ESP32-C61 memory-protection contract.
  *
  * The segment mask is a software shadow of the MSP430 model the portable
- * tests check; PMP does not enforce it yet.
+ * tests check; PMP enforces only a NULL guard over the first 4 KB.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
