@@ -1,5 +1,5 @@
 /*
- * Tiku Operating System v0.06 -- minimal smoke test (ARM ports).
+ * Tiku Operating System v0.06 -- minimal smoke test (ARM and RISC-V ports).
  *
  * No kernel, scheduler or shell: brings up clocks and console, then prints a
  * heartbeat and toggles an LED in a loop.  If this does not print, the failure
@@ -1158,6 +1158,296 @@ int main(void)
                          (unsigned int)tiku_clock_arch_time());
 
         tiku_ra8p1_gpio_toggle(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
+        i++;
+    }
+
+    return 0;
+}
+
+#elif defined(PLATFORM_ESP32C61)
+
+#include "arch/esp32c61/tiku_cpu_freq_boot_arch.h"
+#include "arch/esp32c61/tiku_cpu_common.h"
+#include "arch/esp32c61/tiku_uart_arch.h"
+#include "arch/esp32c61/tiku_gpio_arch.h"
+#include "arch/esp32c61/tiku_esp32c61_regs.h"
+#include "arch/esp32c61/tiku_device_select.h"
+#include "arch/esp32c61/tiku_irq_arch.h"
+#include "arch/esp32c61/tiku_timer_arch.h"
+#include "arch/esp32c61/tiku_flash_arch.h"
+#include "hal/tiku_crit_hal.h"
+#include "kernel/timers/tiku_crit.h"
+#include "kernel/timers/tiku_htimer.h"
+
+extern volatile uint32_t tiku_htimer_arch_isr_count;
+
+/* Dim on purpose: the LED sits under the user's eye on the desk. */
+#define TIKU_MIN_RGB_LEVEL  16U
+
+/** @brief The extensions misa reports, one letter per set bit. */
+static void min_print_isa(uint32_t misa)
+{
+    tiku_uart_puts("isa=rv32");
+    for (unsigned b = 0U; b < 26U; b++) {
+        if (misa & (1UL << b)) {
+            tiku_uart_putc((char)('a' + b));
+        }
+    }
+    tiku_uart_printf("  misa=0x%lx\n", (unsigned long)misa);
+}
+
+/** @brief Busy-wait on SYSTIMER alone, so no tick is needed to end it. */
+static void min_spin_us(unsigned long us)
+{
+    uint64_t t0 = tiku_cpu_esp32c61_systimer();
+
+    while (tiku_cpu_esp32c61_systimer() - t0 <
+           (uint64_t)us * (ESP32C61_SYSTIMER_HZ / 1000000UL)) {
+    }
+}
+
+/**
+ * @brief The interrupt layer's claims, each measured on SYSTIMER.
+ *
+ * Every wait is bounded by SYSTIMER, never by the tick, so a silent tick
+ * reads as FAIL instead of a hang.
+ */
+static void min_tick_tests(void)
+{
+    tiku_clock_arch_time_t a, b, c;
+    uint64_t t0, t1;
+
+    tiku_uart_printf("clic: config=0x%lx info=0x%lx (ctlbits=%u ids=%u) "
+                     "mintthresh=0x%lx\n",
+                     (unsigned long)TIKU_REG32(ESP32C61_CLIC_CONFIG),
+                     (unsigned long)TIKU_REG32(ESP32C61_CLIC_INFO),
+                     (unsigned)((TIKU_REG32(ESP32C61_CLIC_INFO) >> 21) & 0xFU),
+                     (unsigned)(TIKU_REG32(ESP32C61_CLIC_INFO) & 0x1FFFU),
+                     (unsigned long)ESP32C61_CSR_READ(ESP32C61_CSR_MINTTHRESH));
+
+    tiku_clock_arch_init();
+    tiku_htimer_arch_init();
+    ESP32C61_CSR_SET(mstatus, ESP32C61_MSTATUS_MIE);
+
+    /* Rate: two seconds of crystal time should hold 256 ticks. */
+    a = tiku_clock_arch_time();
+    min_spin_us(2000000UL);
+    b = tiku_clock_arch_time();
+    tiku_uart_printf("tick: %u ticks in 2 s of SYSTIMER (expect %u) %s\n",
+                     (unsigned)(b - a), 2U * TIKU_CLOCK_ARCH_SECOND,
+                     ((b - a) >= 255U && (b - a) <= 257U) ? "PASS" : "FAIL");
+
+    /* A masked window holds the count still, and the first tick after it
+     * counts every tick the window hid. */
+    a = tiku_clock_arch_time();
+    tiku_crit_arch_mask_irqs(0U);
+    min_spin_us(40000UL);
+    b = tiku_clock_arch_time();
+    tiku_crit_arch_unmask_irqs();
+    min_spin_us(1000UL);
+    c = tiku_clock_arch_time();
+    tiku_uart_printf("crit: %u ticks inside a 40 ms masked window (expect 0), "
+                     "%u after it (expect 5) %s\n",
+                     (unsigned)(b - a), (unsigned)(c - a),
+                     (b == a && (c - a) >= 5U && (c - a) <= 6U) ? "PASS"
+                                                                : "FAIL");
+
+    a = tiku_clock_arch_time();
+    tiku_crit_arch_mask_irqs(TIKU_CRIT_PRESERVE_TICK);
+    min_spin_us(40000UL);
+    b = tiku_clock_arch_time();
+    tiku_crit_arch_unmask_irqs();
+    tiku_uart_printf("crit: %u ticks inside a window preserving the tick "
+                     "(expect 5) %s\n", (unsigned)(b - a),
+                     ((b - a) >= 5U && (b - a) <= 6U) ? "PASS" : "FAIL");
+
+    /* The alarm: 2000 us ahead, then one already in the past. */
+    for (unsigned k = 0U; k < 2U; k++) {
+        uint32_t n0 = tiku_htimer_arch_isr_count;
+        tiku_htimer_clock_t when = (tiku_htimer_clock_t)
+            (tiku_htimer_arch_now() + (k == 0U ? 2000U : (uint16_t)-500));
+        unsigned long spins = 0UL;
+
+        t0 = tiku_cpu_esp32c61_systimer();
+        tiku_htimer_arch_schedule(when);
+        do {
+            t1 = tiku_cpu_esp32c61_systimer();
+        } while (tiku_htimer_arch_isr_count == n0 &&
+                 t1 - t0 < 10UL * (ESP32C61_SYSTIMER_HZ / 1000UL) &&
+                 ++spins != 0UL);
+        tiku_uart_printf("htimer: %s alarm fired after %lu us (expect %s) %s\n",
+                         k == 0U ? "+2000 us" : "past", (unsigned long)
+                         ((t1 - t0) / (ESP32C61_SYSTIMER_HZ / 1000000UL)),
+                         k == 0U ? "~2000" : "~0",
+                         tiku_htimer_arch_isr_count != n0 ? "PASS" : "FAIL");
+    }
+
+    /* The kernel's wait sleeps in wfi until the tick ends it. */
+    t0 = tiku_cpu_esp32c61_systimer();
+    tiku_clock_arch_wait(TIKU_CLOCK_ARCH_SECOND);
+    t1 = tiku_cpu_esp32c61_systimer();
+    tiku_uart_printf("wait: %u ticks took %lu us (expect ~1000000)\n",
+                     TIKU_CLOCK_ARCH_SECOND, (unsigned long)
+                     ((t1 - t0) / (ESP32C61_SYSTIMER_HZ / 1000000UL)));
+
+    {
+        unsigned short f0 = tiku_clock_arch_fine();
+        min_spin_us(100UL);
+        unsigned short f1 = tiku_clock_arch_fine();
+        tiku_uart_printf("fine: max=%d  %u -> %u after 100 us  spurious=%lu\n",
+                         tiku_clock_arch_fine_max(), (unsigned)f0,
+                         (unsigned)f1,
+                         (unsigned long)tiku_esp32c61_irq_spurious());
+    }
+}
+
+/** @brief Microseconds on SYSTIMER since @p t0. */
+static unsigned long min_us_since(uint64_t t0)
+{
+    return (unsigned long)((tiku_cpu_esp32c61_systimer() - t0) /
+                           (ESP32C61_SYSTIMER_HZ / 1000000UL));
+}
+
+/**
+ * @brief The flash layer's claims, on the scratch sector only.
+ *
+ * Reads go through the mapped window, so every check after a write also
+ * proves the invalidate: a stale cache line would show the old bytes.
+ */
+static void min_flash_tests(void)
+{
+    static uint8_t pat[300];
+    const uint8_t *w;
+    uint32_t base = TIKU_FLASH_SCRATCH_ADDR;
+    unsigned bad = 0U;
+    uint64_t t0;
+    int rc;
+
+    t0 = tiku_cpu_esp32c61_systimer();
+    rc = tiku_flash_init();
+    tiku_uart_printf("flash: init rc=%d in %lu us  jedec=0x%lx\n", rc,
+                     min_us_since(t0), (unsigned long)tiku_flash_jedec_id());
+    if (rc != TIKU_FLASH_OK) {
+        return;
+    }
+    w = tiku_flash_map(0UL);
+    tiku_uart_printf("flash: offset 0 reads %02x %02x %02x %02x "
+                     "(a factory image opens with e9)\n",
+                     w[0], w[1], w[2], w[3]);
+
+    t0 = tiku_cpu_esp32c61_systimer();
+    rc = tiku_flash_erase_sector(base);
+    w = tiku_flash_map(base);
+    for (unsigned i = 0U; i < TIKU_FLASH_SECTOR_SIZE; i++) {
+        bad += (w[i] != 0xFFU);
+    }
+    tiku_uart_printf("flash: erase rc=%d in %lu us, %u bytes not 0xff %s\n",
+                     rc, min_us_since(t0), bad, (rc == 0 && bad == 0U)
+                     ? "PASS" : "FAIL");
+
+    /* An odd start and an odd length, from an odd source: every alignment
+     * path the program call has. */
+    for (unsigned i = 0U; i < sizeof pat; i++) {
+        pat[i] = (uint8_t)(i * 7U + 3U);
+    }
+    t0 = tiku_cpu_esp32c61_systimer();
+    rc = tiku_flash_program(base + 5U, &pat[1], 251U);
+    bad = 0U;
+    for (unsigned i = 0U; i < 251U; i++) {
+        bad += (w[5U + i] != pat[1U + i]);
+    }
+    bad += (w[4] != 0xFFU) + (w[256] != 0xFFU);
+    tiku_uart_printf("flash: program 251 B at +5 rc=%d in %lu us, %u wrong %s\n",
+                     rc, min_us_since(t0), bad, (rc == 0 && bad == 0U)
+                     ? "PASS" : "FAIL");
+
+    /* Bits only clear: programming zeros over the pattern lands, ones do not
+     * come back. */
+    pat[0] = 0x00U;
+    rc = tiku_flash_program(base + 5U, &pat[0], 1U);
+    tiku_uart_printf("flash: clear-only program reads %02x (expect 00) %s\n",
+                     w[5], (rc == 0 && w[5] == 0x00U) ? "PASS" : "FAIL");
+    (void)tiku_flash_erase_sector(base);
+}
+
+int main(void)
+{
+    static const uint8_t rgb[4][3] = {
+        {TIKU_MIN_RGB_LEVEL, 0U, 0U}, {0U, TIKU_MIN_RGB_LEVEL, 0U},
+        {0U, 0U, TIKU_MIN_RGB_LEVEL}, {0U, 0U, 0U}};
+    uint8_t mac[6];
+
+    /* Watchdogs before anything that waits: a flash boot leaves them armed
+     * and nothing in this image feeds them. */
+    tiku_cpu_boot_esp32c61_init();
+    tiku_uart_init();
+    tiku_esp32c61_gpio_init_output(TIKU_BOARD_RGB_LED_GPIO);
+
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (ESP32-C61-DevKitC) ---\n");
+    min_print_isa(ESP32C61_CSR_READ(misa));
+    tiku_uart_printf("mvendorid=0x%lx marchid=0x%lx mimpid=0x%lx\n",
+                     (unsigned long)ESP32C61_CSR_READ(mvendorid),
+                     (unsigned long)ESP32C61_CSR_READ(marchid),
+                     (unsigned long)ESP32C61_CSR_READ(mimpid));
+    tiku_uart_printf("reset=0x%x (rom code %u)  watchdogs armed at entry=0x%x\n",
+                     (unsigned int)tiku_cpu_esp32c61_reset_reason(),
+                     (unsigned int)tiku_cpu_esp32c61_reset_code(),
+                     (unsigned int)tiku_cpu_esp32c61_wdt_found());
+    (void)tiku_cpu_esp32c61_unique_id(mac, sizeof mac);
+    tiku_uart_printf("mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    /* Every rate the tree makes, each measured against SYSTIMER and its
+     * delay checked against the same clock, ending where it began. */
+    static const unsigned int ladder[] = {160U, 80U, 40U, 20U, 10U, 160U};
+    for (unsigned k = 0U; k < sizeof ladder / sizeof ladder[0]; k++) {
+        tiku_esp32c61_clock_t tree;
+        uint64_t t0, t1;
+
+        (void)tiku_cpu_freq_esp32c61_set(ladder[k]);
+        tiku_cpu_esp32c61_clock_probe(&tree);
+        t0 = tiku_cpu_esp32c61_systimer();
+        tiku_cpu_esp32c61_delay_us(10000U);
+        t1 = tiku_cpu_esp32c61_systimer();
+        tiku_uart_printf("freq %u MHz: measured %lu Hz (fault=%d)  root=%u "
+                         "cpu/%u ahb/%u apb/%u  delay_us(10000)=%lu us\n",
+                         ladder[k], tiku_cpu_esp32c61_clock_get_hz(),
+                         tiku_cpu_esp32c61_clock_has_fault(),
+                         (unsigned)tree.root, (unsigned)tree.cpu_div,
+                         (unsigned)tree.ahb_div, (unsigned)tree.apb_div,
+                         (unsigned long)((t1 - t0) /
+                                         (ESP32C61_SYSTIMER_HZ / 1000000UL)));
+    }
+
+    min_tick_tests();
+    min_flash_tests();
+
+    unsigned long clk = tiku_cpu_esp32c61_clock_get_hz();
+    int           fault = tiku_cpu_esp32c61_clock_has_fault();
+
+    /* Paced by the tick alone, asleep in wfi between ticks: the line every
+     * second of wall clock is the tick's claim, and systimer its witness. */
+    uint32_t i = 0;
+    tiku_clock_arch_time_t next = tiku_clock_arch_time();
+    while (1) {
+        uint64_t t = tiku_cpu_esp32c61_systimer();
+
+        tiku_uart_printf(
+            "TikuOS minimal: hello #%u  clk=%u Hz  fault=%d  uptime=%lu s  "
+            "ticks=%lu  systimer=%lu ms\n",
+            (unsigned int)i,
+            (unsigned int)clk,
+            fault,
+            tiku_clock_arch_seconds(),
+            (unsigned long)tiku_clock_arch_time(),
+            (unsigned long)(t / (ESP32C61_SYSTIMER_HZ / 1000UL)));
+
+        tiku_esp32c61_rgb_set(TIKU_BOARD_RGB_LED_GPIO, rgb[i & 3U][0],
+                              rgb[i & 3U][1], rgb[i & 3U][2]);
+        next += TIKU_CLOCK_ARCH_SECOND;
+        while ((long)(tiku_clock_arch_time() - next) < 0) {
+            __asm__ volatile ("wfi");
+        }
         i++;
     }
 

@@ -63,6 +63,11 @@ else ifeq ($(MCU),ra8p1)
 # nothing is programmed into it until R6 establishes how to write it safely --
 # until then the image is loaded into SRAM and run from there.
 TIKU_PLATFORM := ra8p1
+else ifeq ($(MCU),esp32c61)
+# ESP32-C61 (ESP32-C61-DevKitC): one RISC-V core, the first non-Arm 32-bit
+# port.  The ROM loads the image into SRAM, where it runs whole; flash is
+# storage, not a code window.
+TIKU_PLATFORM := esp32c61
 else
 TIKU_PLATFORM := msp430
 endif
@@ -128,13 +133,14 @@ DEFAULT_BOARD_nrf54lm20a    := nrf54lm20_dk
 DEFAULT_BOARD_nrf54lm20b    := nrf54lm20_dk
 DEFAULT_BOARD_stm32n6       := nucleo_n657x0q
 DEFAULT_BOARD_ra8p1         := ek_ra8p1
+DEFAULT_BOARD_esp32c61      := esp32c61_devkitc
 
 # BOARD -> the macro its header is selected by, and the platform it belongs to.
 # Adding a board means adding one row to each table plus a board header.
 KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
                 fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
-                nucleo_n657x0q ek_ra8p1 tiku_bare
+                nucleo_n657x0q ek_ra8p1 esp32c61_devkitc tiku_bare
 
 BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
@@ -153,6 +159,7 @@ BOARD_DEFINE_nrf54l15_dk       := TIKU_BOARD_NRF54L15_DK
 BOARD_DEFINE_nrf54lm20_dk      := TIKU_BOARD_NRF54LM20_DK
 BOARD_DEFINE_nucleo_n657x0q    := TIKU_BOARD_NUCLEO_N657X0Q
 BOARD_DEFINE_ek_ra8p1          := TIKU_BOARD_EK_RA8P1
+BOARD_DEFINE_esp32c61_devkitc  := TIKU_BOARD_ESP32C61_DEVKITC
 
 BOARD_PLATFORM_fr2433_launchpad  := msp430
 BOARD_PLATFORM_fr5969_launchpad  := msp430
@@ -169,6 +176,7 @@ BOARD_PLATFORM_nrf54l15_dk       := nordic
 BOARD_PLATFORM_nrf54lm20_dk      := nordic
 BOARD_PLATFORM_nucleo_n657x0q    := stm32n6
 BOARD_PLATFORM_ek_ra8p1          := ra8p1
+BOARD_PLATFORM_esp32c61_devkitc  := esp32c61
 
 # ---------------------------------------------------------------------------
 # Board capabilities -- what is FITTED on the PCB, not what the silicon can do
@@ -222,6 +230,9 @@ BOARD_CAPS_nucleo_n657x0q      :=
 # what a DRIVER may be gated on, and none of those has a driver yet.  Empty is
 # the accurate answer today; each entry lands with the driver that reads it.
 BOARD_CAPS_ek_ra8p1            := USBHS
+# ESP32-C61-DevKitC: the RGB LED and the console bridge are board-header facts;
+# nothing on it is driver-gated yet.
+BOARD_CAPS_esp32c61_devkitc    :=
 # Empty because the board really is bare -- this is the row that makes every
 # storage/USB request for it fail at make time.  See S5 of the plan.
 BOARD_CAPS_tiku_bare           :=
@@ -503,6 +514,8 @@ DEVICE_DEFINE = TIKU_DEVICE_$(DEVICE_UPPER)
 # nrf54l15:  arm-none-eabi-gcc auto-detected from PATH (Cortex-M33)
 # stm32n6:   arm-none-eabi-gcc auto-detected from PATH (Cortex-M55)
 # ra8p1:     arm-none-eabi-gcc auto-detected from PATH (Cortex-M85)
+# esp32c61:  riscv32-esp-elf-gcc from PATH, else where ESP-IDF's installer
+#            puts it (~/.espressif/tools/riscv32-esp-elf/<ver>/riscv32-esp-elf)
 # ---------------------------------------------------------------------------
 ifneq (,$(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1))
 
@@ -511,6 +524,24 @@ TOOLCHAIN_PREFIX ?= arm-none-eabi-
 TOOLCHAIN_DIR    ?= $(shell \
 	p=$$(command -v $(TOOLCHAIN_PREFIX)gcc 2>/dev/null) && dirname $$(dirname "$$p") \
 	|| echo "/usr")
+CC      = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gcc
+OBJCOPY = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)objcopy
+SIZE    = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)size
+GDB     = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gdb
+MSP430_SUPPORT_DIR :=
+
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+
+# Espressif's crosstool-NG GCC: it carries newlib-nano for the rv32imac
+# multilib the C61 runs, which a bare riscv64-elf GCC does not.  The newest
+# version installed wins.
+TOOLCHAIN_PREFIX ?= riscv32-esp-elf-
+TOOLCHAIN_DIR    ?= $(shell \
+	p=$$(command -v $(TOOLCHAIN_PREFIX)gcc 2>/dev/null) \
+	  && { dirname $$(dirname "$$p"); exit 0; }; \
+	d=$$(ls -d $(HOME)/.espressif/tools/riscv32-esp-elf/*/riscv32-esp-elf \
+	  2>/dev/null | sort | tail -1); \
+	[ -n "$$d" ] && echo "$$d" || echo "/usr")
 CC      = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gcc
 OBJCOPY = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)objcopy
 SIZE    = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)size
@@ -1299,6 +1330,24 @@ TIKU_TIER_SRAM_MIN ?= 262144
 CFLAGS  += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS  += -DTIKU_TIER_SRAM_DERIVED=1
 
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+
+# ESP32-C61: one RV32IMAC core.  The image runs whole from the 320 KB of HP
+# SRAM the ROM loads it into, so code, data, stack and the tier share it.
+ESP32C61_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
+CFLAGS  = $(ESP32C61_ARCH)
+CFLAGS += -Os -Wall -Wextra
+CFLAGS += --specs=nano.specs
+CFLAGS += -D$(DEVICE_DEFINE)=1
+CFLAGS += -D$(TIKU_BOARD_DEFINE)=1
+CFLAGS += -DPLATFORM_ESP32C61=1
+CFLAGS += -I$(PROJ_DIR)
+CFLAGS += -ffunction-sections -fdata-sections
+# The tier is what SRAM holds past the image, so its floor is small here.
+TIKU_TIER_SRAM_MIN ?= 32768
+CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -1517,6 +1566,20 @@ LDLIBS   = -Wl,--start-group
 LDLIBS  += -lm -lc -lgcc
 LDLIBS  += -Wl,--end-group
 
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+
+LDFLAGS  = $(ESP32C61_ARCH)
+LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
+# Code and data share one SRAM, so the single segment is RWX by design.
+LDFLAGS += -Wl,--no-warn-rwx-segments
+LDFLAGS += -Tarch/esp32c61/devices/esp32c61.ld
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-u,tiku_autostart_processes
+LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+LDLIBS   = -Wl,--start-group
+LDLIBS  += -lm -lc -lgcc
+LDLIBS  += -Wl,--end-group
+
 else
 
 LDFLAGS  = -mmcu=$(MCU)
@@ -1609,8 +1672,8 @@ endif
 MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
-ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1),)
-$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, MCU=nrf54lm20a, MCU=stm32n6, or MCU=ra8p1)
+ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1 esp32c61),)
+$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, MCU=nrf54lm20a, MCU=stm32n6, MCU=ra8p1, or MCU=esp32c61)
 endif
 
 # Use the minimal entry point and exactly the arch files it needs.
@@ -1679,6 +1742,20 @@ endif
 # that masking the NVIC cannot silence a tick that is a CORE exception, and an
 # untested claim in a comment is worth nothing.
 SRCS += arch/ra8p1/tiku_crit_arch.c
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+SRCS += arch/esp32c61/tiku_crt_early.c
+SRCS += arch/esp32c61/tiku_cpu_freq_boot_arch.c
+SRCS += arch/esp32c61/tiku_cpu_common.c
+SRCS += arch/esp32c61/tiku_uart_arch.c
+SRCS += arch/esp32c61/tiku_gpio_arch.c
+# The interrupt layer joins for the same reason as the RA8P1 tick: its rate,
+# its masking and its catch-up are claims MINIMAL measures with nothing else
+# running.
+SRCS += arch/esp32c61/tiku_irq_arch.c
+SRCS += arch/esp32c61/tiku_timer_arch.c
+SRCS += arch/esp32c61/tiku_htimer_arch.c
+SRCS += arch/esp32c61/tiku_crit_arch.c
+SRCS += arch/esp32c61/tiku_flash_arch.c
 else
 SRCS += arch/arm-rp2350/tiku_crt_early.c
 SRCS += arch/arm-rp2350/tiku_cpu_freq_boot_arch.c
@@ -2175,6 +2252,33 @@ ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_diag.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_sdram.c
 endif
+
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+
+# ESP32-C61 arch.  Backends land here as they are written; what is absent is
+# absent, so the link names it rather than a stub hiding it.
+SRCS += arch/esp32c61/tiku_crt_early.c
+SRCS += arch/esp32c61/tiku_cpu_freq_boot_arch.c
+SRCS += arch/esp32c61/tiku_cpu_common.c
+SRCS += arch/esp32c61/tiku_uart_arch.c
+SRCS += arch/esp32c61/tiku_gpio_arch.c
+SRCS += arch/esp32c61/tiku_irq_arch.c
+SRCS += arch/esp32c61/tiku_timer_arch.c
+SRCS += arch/esp32c61/tiku_htimer_arch.c
+SRCS += arch/esp32c61/tiku_crit_arch.c
+SRCS += arch/esp32c61/tiku_wake_arch.c
+SRCS += arch/esp32c61/tiku_cpu_watchdog_arch.c
+SRCS += arch/esp32c61/tiku_mem_arch.c
+SRCS += arch/esp32c61/tiku_mpu_arch.c
+SRCS += arch/esp32c61/tiku_region_arch.c
+SRCS += arch/esp32c61/tiku_gpio_irq_arch.c
+SRCS += arch/esp32c61/tiku_adc_arch.c
+SRCS += arch/esp32c61/tiku_i2c_arch.c
+SRCS += arch/esp32c61/tiku_spi_arch.c
+SRCS += arch/esp32c61/tiku_onewire_arch.c
+SRCS += arch/esp32c61/tiku_flash_arch.c
+SRCS += arch/esp32c61/tiku_nvm_region_esp32c61.c
+SRCS += arch/esp32c61/tiku_trng_arch.c
 
 else
 
@@ -3473,6 +3577,11 @@ else ifeq ($(TIKU_PLATFORM),stm32n6)
 TARGET_BIN    = main.bin
 TARGET_SIGNED = main.signed.bin
 all: $(TARGET) $(TARGET_BIN) $(TARGET_SIGNED) size
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+# The ROM loads Espressif's image format, segments and an entry point, not a
+# bare binary; esptool writes it from the ELF.
+TARGET_BIN = main.bin
+all: $(TARGET) $(TARGET_BIN) size
 else
 all: $(TARGET) size
 endif
@@ -3589,6 +3698,20 @@ $(TARGET_SIGNED): $(TARGET_BIN)
 	@$(STM32N6_SIGN) -bin $< -nk -of 0x80000000 -t fsbl -hv 2.3 -align -s -o $@ \
 	    < /dev/null > /dev/null
 	@echo "  [sign]  $< -> $@"
+endif
+
+# ESP32-C61: the ELF as an image the ROM's loader accepts.  A recipe that
+# names the fix rather than a 127 from the shell when esptool is missing.
+ifeq ($(TIKU_PLATFORM),esp32c61)
+ESPTOOL ?= esptool
+$(TARGET_BIN): $(TARGET)
+	@command -v $(ESPTOOL) > /dev/null || { \
+	    echo "esp32c61: esptool not found -- brew install esptool, or"; \
+	    echo "  pip install esptool, or point at it: ESPTOOL=/path/esptool"; \
+	    exit 1; }
+	@$(ESPTOOL) --chip esp32c61 elf2image --flash-mode dio \
+	    --flash-size 8MB -o $@ $< > /dev/null
+	@echo "  [image] $< -> $@"
 endif
 
 # nRF54L15: Intel HEX for nrfutil to program into RRAM.
@@ -4058,6 +4181,29 @@ debug: all
 erase:
 	@echo "ra8p1: nothing to erase -- the image lives in SRAM, so a power"
 	@echo "  cycle already clears it and the factory MRAM image boots."
+
+else ifeq ($(TIKU_PLATFORM),esp32c61)
+
+# The development loop: the image into SRAM through the ROM loader, and run.
+# Flash -- and whatever boots from it -- is untouched, so a reset brings that
+# back.  ESP_PORT names the port; by default the chip's own USB-Serial/JTAG
+# (303a:1001), else the CP2102N console bridge (10c4:ea60), whose RTS and DTR
+# esptool drives to enter the loader: slower, but either works.
+ESP_PORT ?= $(firstword \
+    $(shell python3 -m serial.tools.list_ports -q 303A:1001 2>/dev/null) \
+    $(shell python3 -m serial.tools.list_ports -q 10C4:EA60 2>/dev/null))
+flash: all
+	@test -n "$(ESP_PORT)" || { \
+	    echo "esp32c61: no Espressif USB-Serial/JTAG or CP2102N port found;"; \
+	    echo "  plug in either connector, or name it: make flash ESP_PORT=..."; \
+	    exit 1; }
+	$(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) --no-stub load-ram $(TARGET_BIN)
+
+run: flash
+
+erase:
+	@echo "esp32c61: nothing to erase -- the image lives in SRAM, so a reset"
+	@echo "  already clears it and what is in flash boots."
 
 else
 
