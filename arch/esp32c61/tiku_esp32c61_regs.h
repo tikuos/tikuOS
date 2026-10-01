@@ -96,6 +96,27 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_CACHE_SUSPEND  ((uint32_t (*)(void))0x40000698UL)
 #define ESP32C61_ROM_CACHE_RESUME   ((void (*)(uint32_t))0x4000069CUL)
 #define ESP32C61_ROM_CACHE_INVAL    ((int (*)(uint32_t, uint32_t))0x40000634UL)
+#define ESP32C61_ROM_CACHE_WB_INVAL ((int (*)(uint32_t, uint32_t))0x40000640UL)
+
+/* ROM SPI user commands, for devices on the MSPI bus other than the flash:
+ * the PSRAM's reset, identity and mode changes go out through these. */
+typedef struct {
+    uint16_t  cmd;
+    uint16_t  cmd_bits;
+    uint32_t *addr;
+    uint32_t  addr_bits;
+    uint32_t *tx;
+    uint32_t  tx_bits;
+    uint32_t *rx;
+    uint32_t  rx_bits;
+    uint32_t  dummy_bits;
+} esp32c61_rom_spi_cmd_t;
+#define ESP32C61_ROM_SPI_CMD_CONFIG ((void (*)(int, esp32c61_rom_spi_cmd_t *))0x40000114UL)
+#define ESP32C61_ROM_SPI_CMD_START  ((void (*)(int, uint8_t *, uint16_t, uint8_t, int))0x40000118UL)
+#define ESP32C61_ROM_SPI_SET_MODE   ((void (*)(int, int))0x4000011CUL)
+#define ESP32C61_ROM_SPI_QIO_PINS   ((void (*)(uint8_t, uint32_t))0x40000178UL)
+#define ESP32C61_ROM_SPI_MODE_QIO   0
+#define ESP32C61_ROM_SPI_MODE_SLOW  5           /* plain SPI, one line */
 
 #define ESP32C61_RESET_POWERON      1U
 #define ESP32C61_RESET_SW_SYS       3U
@@ -449,6 +470,45 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_LP_CLK_CONF        (ESP32C61_LP_CLKRST_BASE + 0x00UL)
 #define ESP32C61_LP_FAST_SEL_MSK    (3UL << 2)
 #define ESP32C61_LP_FAST_RC_FAST    (0UL << 2)
+
+/*---------------------------------------------------------------------------*/
+/* MSPI -- SPI0 serves cache misses to flash (CS0) and PSRAM (CS1); SPI1     */
+/* sends user commands.  The MMU marks a PSRAM page with bit 9.              */
+/*---------------------------------------------------------------------------*/
+
+#define ESP32C61_MSPI0_BASE         0x60002000UL
+#define ESP32C61_MSPI1_BASE         0x60003000UL
+#define ESP32C61_SPI0_CACHE_SCTRL   (ESP32C61_MSPI0_BASE + 0x040UL)
+#define ESP32C61_SCTRL_SRAM_QIO     (1UL << 2)
+#define ESP32C61_SCTRL_RD_DUMMY     (1UL << 4)
+#define ESP32C61_SCTRL_USR_RCMD     (1UL << 5)
+#define ESP32C61_SCTRL_RDUMMY_POS   6U          /* [11:6] cycles - 1 */
+#define ESP32C61_SCTRL_ADDR_POS     14U         /* [19:14] bits - 1 */
+#define ESP32C61_SCTRL_USR_WCMD     (1UL << 20)
+#define ESP32C61_SCTRL_MODE_MSK     ((3UL << 1) | (0x3FUL << 6) | (0x3FUL << 14))
+#define ESP32C61_SPI0_SRAM_DRD_CMD  (ESP32C61_MSPI0_BASE + 0x048UL)
+#define ESP32C61_SPI0_SRAM_DWR_CMD  (ESP32C61_MSPI0_BASE + 0x04CUL)
+#define ESP32C61_SPI0_CMD_BITS_POS  28U         /* [31:28] bits - 1 */
+#define ESP32C61_SPI0_SRAM_CLK      (ESP32C61_MSPI0_BASE + 0x050UL)
+#define ESP32C61_SPI0_SMEM_ECC_CTRL (ESP32C61_MSPI0_BASE + 0x174UL)
+#define ESP32C61_SMEM_PAGE_POS      18U         /* [19:18] 256 << n */
+#define ESP32C61_SPI0_SMEM_AC       (ESP32C61_MSPI0_BASE + 0x1A0UL)
+#define ESP32C61_SMEM_CS_SETUP      (1UL << 0)
+#define ESP32C61_SMEM_CS_HOLD       (1UL << 1)
+#define ESP32C61_SMEM_SPLIT_TRANS   (1UL << 31)
+#define ESP32C61_SPI1_CTRL          (ESP32C61_MSPI1_BASE + 0x008UL)
+#define ESP32C61_SPI1_FCMD_QUAD     (1UL << 8)
+#define ESP32C61_SPI1_CLOCK         (ESP32C61_MSPI1_BASE + 0x014UL)
+#define ESP32C61_SPI1_MISC          (ESP32C61_MSPI1_BASE + 0x034UL)
+#define ESP32C61_MMU_ACCESS_PSRAM   (1UL << 9)
+/* PMA, the attribute checker beside the PMP: the ROM's entry 15 makes the
+ * whole external window read/execute, as flash; a lower entry, which wins,
+ * opens the PSRAM pages for writes. */
+#define ESP32C61_CSR_PMACFG13       0xBCD
+#define ESP32C61_CSR_PMAADDR13      0xBDD
+#define ESP32C61_PMA_NAPOT_RWX      0xC000001DUL    /* NAPOT, R, W, X, on */
+#define ESP32C61_IO_MUX_MCU_SEL_MSK (7UL << 12)
+#define ESP32C61_IO_MUX_FUN_IE      (1UL << 9)
 
 /* LP AON stores survive deep sleep.  The ROM reads two of them on the way
  * back: 8 bit 0 says the sleep was deep, 6 holds a wake stub (none here). */

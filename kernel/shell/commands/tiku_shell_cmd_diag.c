@@ -244,6 +244,8 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
 #include <arch/esp32c61/tiku_cpu_common.h>
 #include <arch/esp32c61/tiku_cpu_watchdog_arch.h>
 #include <arch/esp32c61/tiku_sleep_arch.h>
+#include <arch/esp32c61/tiku_psram_arch.h>
+#include <arch/esp32c61/tiku_cpu_freq_boot_arch.h>
 #include <arch/esp32c61/tiku_esp32c61_regs.h>
 
 /** @brief Report the stored fault record, or say there is none. */
@@ -333,7 +335,55 @@ static void diag_sleep(void) {
     }
 }
 
+/** @brief Bring the PSRAM up and check every word of it, or attach it. */
+static void diag_psram(uint8_t argc, const char *argv[]) {
+    volatile uint32_t *w = (volatile uint32_t *)TIKU_ESP32C61_PSRAM_BASE;
+    tiku_esp32c61_psram_err_t rc;
+    uint32_t words, bad = 0UL;
+    uint64_t t0, t1, t2;
+
+    if (argc >= 3 && strcmp(argv[2], "attach") == 0) {
+        rc = tiku_esp32c61_psram_attach();
+        SHELL_PRINTF("  psram: attach %d\n", (int)rc);
+        return;
+    }
+    rc = tiku_esp32c61_psram_init();
+    SHELL_PRINTF("  psram: init %d  id %06lx  %lu KB at %08lx\n", (int)rc,
+                 (unsigned long)tiku_esp32c61_psram_id(),
+                 (unsigned long)(tiku_esp32c61_psram_size() / 1024UL),
+                 (unsigned long)TIKU_ESP32C61_PSRAM_BASE);
+    if (rc != TIKU_ESP32C61_PSRAM_OK) {
+        return;
+    }
+    /* Destructive: an address-unique word everywhere, written back past
+     * the cache, then read and checked. */
+    words = tiku_esp32c61_psram_size() / 4UL;
+    t0 = tiku_cpu_esp32c61_systimer();
+    for (uint32_t i = 0UL; i < words; i++) {
+        w[i] = (i * 2654435761UL) ^ 0x55AA55AAUL;
+    }
+    (void)ESP32C61_ROM_CACHE_WB_INVAL(TIKU_ESP32C61_PSRAM_BASE,
+                                      tiku_esp32c61_psram_size());
+    t1 = tiku_cpu_esp32c61_systimer();
+    for (uint32_t i = 0UL; i < words; i++) {
+        if (w[i] != ((i * 2654435761UL) ^ 0x55AA55AAUL)) {
+            bad++;
+        }
+    }
+    t2 = tiku_cpu_esp32c61_systimer();
+    SHELL_PRINTF("  psram: %lu words, %lu bad; write %lu KB/s, read %lu KB/s\n",
+                 (unsigned long)words, (unsigned long)bad,
+                 (unsigned long)((uint64_t)words * 4ULL * 16000ULL / 1024ULL /
+                                 ((t1 - t0) / 1000ULL + 1ULL)),
+                 (unsigned long)((uint64_t)words * 4ULL * 16000ULL / 1024ULL /
+                                 ((t2 - t1) / 1000ULL + 1ULL)));
+}
+
 void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
+    if (argc >= 2 && strcmp(argv[1], "psram") == 0) {
+        diag_psram(argc, argv);
+        return;
+    }
     if (argc >= 2 && strcmp(argv[1], "fault") == 0) {
         if (argc >= 3) {
             diag_fault_force(argv[2]);
@@ -356,7 +406,7 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
         return;
     }
     SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | wdt [bite]"
-                 " | sleep\n");
+                 " | sleep | psram [attach]\n");
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C61 */
