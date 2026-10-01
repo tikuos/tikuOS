@@ -54,7 +54,10 @@ match_kw_no_ws(const char **q, const char *kw)
 /* Rewrite line numbers inside a body string. Walks the source and
  * looks for `GOTO`/`GOSUB`/`THEN`/`ELSE` followed by a digit run;
  * each digit run gets remapped via the (old_nos, new_nos) tables.
- * Quoted strings ("...") are skipped without modification.
+ * Quoted strings ("...", a backslash keeping the byte after it inside, as
+ * the string parser reads them) are copied unchanged, and so is the rest
+ * of a line after REM, an apostrophe or DATA, which the crunch stores raw.
+ * A spelled-out word counts only where no word character runs into it.
  *
  * After GOTO/GOSUB comma-separated number lists are also accepted, to
  * cover `ON expr GOTO l1, l2, ...`.
@@ -77,9 +80,31 @@ renum_rewrite_body(const char *src, char *dst, size_t cap,
         if (*p == '"') {
             EMIT_CHAR(*p);
             p++;
-            while (*p && *p != '"') { EMIT_CHAR(*p); p++; }
+            while (*p && *p != '"') {
+                if (*p == '\\' && p[1]) { EMIT_CHAR(*p); p++; }
+                EMIT_CHAR(*p);
+                p++;
+            }
             if (*p) { EMIT_CHAR(*p); p++; }
             continue;
+        }
+        /* A remark or DATA: the rest of the line is not code.  The
+         * apostrophe is one wherever it stands, as the crunch takes it. */
+        if (*p == '\'') {
+            while (*p) { EMIT_CHAR(*p); p++; }
+            break;
+        }
+        if (out > dst && is_word_cont(out[-1])) {
+            EMIT_CHAR(*p);      /* inside a word: no keyword starts here */
+            p++;
+            continue;
+        }
+        {
+            const char *r = p;
+            if (match_kw_no_ws(&r, "REM") || match_kw_no_ws(&r, "DATA")) {
+                while (*p) { EMIT_CHAR(*p); p++; }
+                break;
+            }
         }
         /* Detect GOTO / GOSUB / THEN / ELSE keywords (word-bounded). */
         {
