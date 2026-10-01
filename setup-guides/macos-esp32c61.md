@@ -2,8 +2,8 @@
 
 This guide gets tikuOS building and running on Espressif's **ESP32-C61-DevKitC**
 (the chip is the **ESP32-C61**, a RISC-V processor). No debugger probe and no
-drivers: the board's own USB port loads the program, and its second USB port is
-the console.
+drivers: the board's own USB port installs the program, and its second USB port
+is the console.
 
 > 🧭 **New here?** Do [Part 0 of the README](README.md) first (Command Line
 > Tools + Homebrew). This guide assumes it's done.
@@ -98,7 +98,24 @@ When it finishes you'll see a **Build Summary** and two new files:
 
 ---
 
-## Step 4 — Open the console, then load tikuOS
+## Step 4 — Keep a copy of the factory flash
+
+The board ships with Espressif's LED-blink demo in its flash, and Step 5
+replaces it. A backup takes a minute (use your own `usbmodem` name):
+
+```bash
+esptool -p /dev/cu.usbmodem1201 read-flash 0 0x200000 factory_flash_2MB.bin
+```
+
+To put the demo back later:
+
+```bash
+esptool -p /dev/cu.usbmodem1201 write-flash 0 factory_flash_2MB.bin
+```
+
+---
+
+## Step 5 — Open the console, then install tikuOS
 
 Use two Terminal tabs.
 
@@ -108,17 +125,18 @@ Use two Terminal tabs.
 screen /dev/cu.usbserial-110 115200
 ```
 
-(Use your own `usbserial` name from "What you need".) The screen stays blank for
-now. That's expected.
+(Use your own `usbserial` name from "What you need".) The screen may stay blank
+for now. That's expected.
 
-**Tab 2 — load tikuOS.** From the `tikuOS` folder:
+**Tab 2 — install tikuOS.** From the `tikuOS` folder:
 
 ```bash
 make MCU=esp32c61 flash
 ```
 
-`esptool` finds the **USB** port by itself, loads the image into the chip's RAM
-and starts it. Within a second, Tab 1 shows the tikuOS banner and a prompt:
+`esptool` finds the **USB** port by itself, writes the image to the start of
+the flash and resets the chip, which boots it. Tab 1 shows the tikuOS banner
+and a prompt:
 
 ```
   ESP32-C61  |  SRAM 327680B  flash 8192KB
@@ -138,33 +156,18 @@ freq probe
 
 To leave `screen`, press **Ctrl-A**, then **K**, then **Y**.
 
-> 🧠 **Why open the console first?** Two reasons. tikuOS prints its banner the
-> moment it starts, so an open console catches it. And the image lives in
-> **RAM**: it never touches the board's flash, so a reset or an unplug brings
-> back whatever was in flash before (out of the box, Espressif's LED-blink
-> demo). Just run `make MCU=esp32c61 flash` again.
+> 🧠 **From now on the board boots tikuOS by itself** — unplug it, plug it
+> into a USB charger, press RESET: the chip's boot ROM copies tikuOS from flash
+> into its RAM and runs it. Files you write under `/data` stay too.
+
+> ⚡ **The fast loop.** `make MCU=esp32c61 flash RAM=1` loads the image straight
+> into RAM and runs it, without touching flash. A reset then boots whatever is
+> in flash again.
 
 > 🔌 **The console and resets.** The UART bridge's control lines are wired to
 > the chip's reset pin. A terminal that opens the port normally (like `screen`)
 > leaves the chip alone. A tool that drops the DTR line while holding RTS
-> restarts the chip, which wipes a RAM-loaded tikuOS. If the banner never
-> comes, open the console first and load again.
-
----
-
-## Optional — keep a copy of the factory flash
-
-Nothing in this guide writes to flash, but a backup costs one minute:
-
-```bash
-esptool -p /dev/cu.usbmodem1201 read-flash 0 0x200000 factory_flash_2MB.bin
-```
-
-To restore it later:
-
-```bash
-esptool -p /dev/cu.usbmodem1201 write-flash 0 factory_flash_2MB.bin
-```
+> restarts the chip, which wipes a tikuOS loaded with `RAM=1`.
 
 ---
 
@@ -174,6 +177,6 @@ esptool -p /dev/cu.usbmodem1201 write-flash 0 factory_flash_2MB.bin
 |---|---|
 | `make` says the RISC-V compiler is missing | Redo Step 1, and check the folder name is exactly `~/.espressif/tools/riscv32-esp-elf/esp-16.1.0_20260609/`. |
 | `esptool` reports `Resource busy` | The **USB** port re-appears each time the chip resets. Wait a second and run `make MCU=esp32c61 flash` again. |
-| `make flash` can't find the board | Check the **USB** port (not the UART one) is plugged in: `ls /dev/cu.usbmodem*`. You can also name it: `make MCU=esp32c61 flash ESP_PORT=/dev/cu.usbmodem1201`. |
-| The console shows Espressif's boot log, then blink messages | The chip restarted and ran the program in flash. Load tikuOS again with the console already open. |
+| `make flash` can't find the board | With the **USB** port missing, `make flash` uses the **UART** port instead (slower, same result). If neither is found, name one: `make MCU=esp32c61 flash ESP_PORT=/dev/cu.usbmodem1201`. |
+| The console shows Espressif's boot log, then blink messages | The factory demo is still in flash: run `make MCU=esp32c61 flash`. |
 | The console shows nothing at all | Check the console is on the **UART** port and set to 115200 baud. |

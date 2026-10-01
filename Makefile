@@ -4184,11 +4184,12 @@ erase:
 
 else ifeq ($(TIKU_PLATFORM),esp32c61)
 
-# The development loop: the image into SRAM through the ROM loader, and run.
-# Flash -- and whatever boots from it -- is untouched, so a reset brings that
-# back.  ESP_PORT names the port; by default the chip's own USB-Serial/JTAG
-# (303a:1001), else the CP2102N console bridge (10c4:ea60), whose RTS and DTR
-# esptool drives to enter the loader: slower, but either works.
+# The image goes to flash offset 0, where the ROM loads it into SRAM at every
+# reset as it would a bootloader: the board then boots tikuOS on its own, and
+# what was there before is gone.  RAM=1 is the development loop instead: the
+# image into SRAM through the ROM loader and run, flash untouched.  ESP_PORT
+# names the port; by default the chip's own USB-Serial/JTAG (303a:1001), else
+# the CP2102N console bridge (10c4:ea60), whose RTS and DTR esptool drives.
 ESP_PORT ?= $(firstword \
     $(shell python3 -m serial.tools.list_ports -q 303A:1001 2>/dev/null) \
     $(shell python3 -m serial.tools.list_ports -q 10C4:EA60 2>/dev/null))
@@ -4197,13 +4198,18 @@ flash: all
 	    echo "esp32c61: no Espressif USB-Serial/JTAG or CP2102N port found;"; \
 	    echo "  plug in either connector, or name it: make flash ESP_PORT=..."; \
 	    exit 1; }
+ifeq ($(RAM),1)
 	$(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) --no-stub load-ram $(TARGET_BIN)
+else
+	$(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) write-flash \
+	    --flash-mode dio --flash-size 8MB 0x0 $(TARGET_BIN)
+endif
 
 run: flash
 
 erase:
-	@echo "esp32c61: nothing to erase -- the image lives in SRAM, so a reset"
-	@echo "  already clears it and what is in flash boots."
+	@echo "esp32c61: not erased -- write-flash replaces the boot image, and"
+	@echo "  erasing /data or the durable mirror is not a build step."
 
 else
 
