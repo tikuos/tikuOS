@@ -54,7 +54,7 @@
 #define TIKU_DEVICE_FRAM_SIZE       0x00800000UL
 #define TIKU_DEVICE_FRAM_START      0x42000000UL
 #define TIKU_DEVICE_FRAM_END        0x427FFFFFUL
-#define TIKU_DEVICE_NVM_LABEL       "flash"
+#define TIKU_DEVICE_NVM_LABEL       "Flash"
 
 /* The init table's durable region: a 4-byte header and 8 entries of 66
  * bytes is 532, rounded up to 64-byte alignment as on the other parts. */

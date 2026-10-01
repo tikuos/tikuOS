@@ -24,9 +24,11 @@
 /* Bounded so a dead or unclocked UART cannot hang the caller forever. */
 #define UART_TX_SPINS           2000000UL
 
-/* Received bytes wait here; a power of two so the index wraps by mask. */
+/* Received bytes wait here; a power of two so the index wraps by mask.  The
+ * console link keeps two 260-byte frames in flight while the board echoes
+ * one back: 256 bytes overran on every burst, 2 KB holds ~178 ms at 115200. */
 #ifndef TIKU_UART_RXBUF_SIZE
-#define TIKU_UART_RXBUF_SIZE    256U
+#define TIKU_UART_RXBUF_SIZE    2048U
 #endif
 #if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1U)) != 0
 #error "TIKU_UART_RXBUF_SIZE must be a power of two"

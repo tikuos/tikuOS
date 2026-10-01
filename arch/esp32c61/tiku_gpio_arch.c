@@ -140,12 +140,22 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
     return 0;
 }
 
+/** @brief Make @p n an output unless it is one, keeping a driven level. */
+static void gpio_claim(uint8_t n) {
+    if ((TIKU_REG32(ESP32C61_GPIO_ENABLE) & (1UL << n)) == 0UL) {
+        tiku_esp32c61_gpio_init_output(n);
+    }
+}
+
+/* Write and toggle claim the pin as an output first, as every port does: a
+ * level written to an input is otherwise held nowhere. */
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     int n = tiku_esp32c61_gpio_num(port, pin);
 
     if (n < 0) {
         return -1;
     }
+    gpio_claim((uint8_t)n);
     tiku_esp32c61_gpio_set((uint8_t)n, val);
     return 0;
 }
@@ -156,6 +166,7 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
     if (n < 0) {
         return -1;
     }
+    gpio_claim((uint8_t)n);
     tiku_esp32c61_gpio_toggle((uint8_t)n);
     return 0;
 }
