@@ -94,6 +94,19 @@ static int supported(unsigned long hz)
     return 0;
 }
 
+/** @brief The advertised choice a measured rate stands for, within 1 %. */
+static unsigned long as_choice(unsigned long hz)
+{
+    unsigned int i;
+    for (i = 0; i < 32; i++) {
+        unsigned long candidate = tiku_cpu_freq_available(i);
+        if (!candidate) break;
+        if ((hz > candidate ? hz - candidate : candidate - hz) <=
+            candidate / 100UL) return candidate;
+    }
+    return hz;
+}
+
 unsigned long tiku_cpu_settings_target(void)
 {
     if (ready && restored && tiku_persist_cell_valid(&saved_clock_cell) &&
@@ -124,7 +137,9 @@ void tiku_cpu_settings_boot(void)
 {
     unsigned long target;
     if (ready) return;
-    boot_default = tiku_cpu_mclk_hz();
+    /* A port that measures its clock (ESP32-C61, STM32N6) reads 160009999
+     * for its 160 MHz; the default is the choice that stands for. */
+    boot_default = as_choice(tiku_cpu_mclk_hz());
     restored = 1;
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
     defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
