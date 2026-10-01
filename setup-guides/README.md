@@ -14,14 +14,15 @@ should see after each step. Copy, paste, press Enter, check the result, move on.
 
 ## Which guide do I need?
 
-tikuOS runs on three different families of chips. Pick the board you actually
-have in your hand:
+tikuOS runs on several families of chips; these four have Mac guides. Pick the
+board you actually have in your hand:
 
 | I have this board… | Chip family | Open this guide |
 |---|---|---|
 | TI **MSP430** LaunchPad (FR5994 or FR6989) | MSP430 (16-bit) | [macos-msp430.md](macos-msp430.md) |
 | **Raspberry Pi Pico 2** / Pico 2 W | RP2350 (Arm Cortex-M33) | [macos-rp2350-pico.md](macos-rp2350-pico.md) |
 | **Ambiq Apollo** EVB (Apollo510, Apollo4 Lite/Plus, Apollo510 Blue) | Apollo (Arm Cortex-M4/M55) | [macos-apollo.md](macos-apollo.md) |
+| Espressif **ESP32-C61-DevKitC** | ESP32-C61 (RISC-V) | [macos-esp32c61.md](macos-esp32c61.md) |
 
 You can install more than one — they don't conflict. The Raspberry Pi and Ambiq
 guides even share the same Arm compiler, so if you set up one, the other is
