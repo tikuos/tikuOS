@@ -20,8 +20,8 @@
 
 #include "tiku_basic.h"
 #include "tiku_basic_ext.h"           /* native builtin registry (Tier 2) */
+#include <kernel/shell/tiku_shell.h>  /* first: the device's NVM label wins */
 #include "tiku_basic_config.h"
-#include <kernel/shell/tiku_shell.h>
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_reclaim.h>
 #include <kernel/timers/tiku_clock.h>
