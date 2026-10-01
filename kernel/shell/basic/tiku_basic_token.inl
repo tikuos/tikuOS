@@ -19,7 +19,8 @@
  *     match (PRINTER / TOTAL / FORI never fold -- same word-boundary rule
  *     match_kw itself applies, so semantics are unchanged).
  *   - A trailing '$' joins the word first (STR$ folds; A$ does not).
- *   - Nothing folds inside "..." string literals.
+ *   - Nothing folds inside "..." string literals, which end where the
+ *     string parser ends them: a backslash keeps the byte after it inside.
  *   - After REM (or the ' alias) and after DATA, the rest of the line is
  *     stored raw: comment text and DATA items are data, not keywords.
  *   - Outside those raw regions, stray bytes >= 0x80 in the input are
@@ -179,7 +180,11 @@ basic_crunch(char *dst, size_t cap, const char *src)
         if (in_str) {
             dst[o++] = c;
             src++;
-            if (c == '"') in_str = 0;
+            if (c == '\\' && *src != '\0' && o + 1u < cap) {
+                dst[o++] = *src++;          /* the escaped byte stays inside */
+            } else if (c == '"') {
+                in_str = 0;
+            }
             continue;
         }
         if (c == '"') {
@@ -289,6 +294,13 @@ basic_detok(char *dst, size_t cap, const char *src)
             continue;
         }
         if (o + 2u > cap) break;
+        if (in_str && b == '\\' && src[1] != '\0') {
+            if (o + 3u > cap) break;
+            dst[o++] = (char)b;             /* the escaped byte stays inside */
+            dst[o++] = src[1];
+            src += 2;
+            continue;
+        }
         if (!raw && b == '"') in_str = !in_str;
         dst[o++] = (char)b;
         src++;
@@ -311,6 +323,11 @@ basic_detok_print(const char *src)
             SHELL_PRINTF("%s", basic_tok_tab[b - BASIC_TOK_BASE]);
             if (b == BASIC_TOK_BYTE(REM) || b == BASIC_TOK_BYTE(DATA)) raw = 1;
             src++;
+            continue;
+        }
+        if (in_str && b == '\\' && src[1] != '\0') {
+            SHELL_PRINTF("%c%c", (char)b, src[1]);  /* escaped: stays inside */
+            src += 2;
             continue;
         }
         if (!raw && b == '"') in_str = !in_str;
