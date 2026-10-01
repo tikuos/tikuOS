@@ -39,7 +39,8 @@
  *   word 0  TIKU_NVM_MIRROR_MAGIC_V2
  *   word 1  CRC-32 (reflected, poly 0xEDB88320) over the image bytes
  *   word 2  image length in bytes (the .uninit size at flush time)
- *   word 3  0xFFFFFFFF (reserved; the erased-flash value)
+ *   word 3  0xFFFFFFFF (reserved; the erased-flash value), or where a port
+ *           keeps two mirror slots, the slot's generation (ESP32-C61)
  */
 
 /** Header word indices. */

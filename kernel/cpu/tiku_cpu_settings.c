@@ -54,9 +54,11 @@ static int committed(void)
     header = __tiku_nvm_mram_start;
     capacity = (uintptr_t)&__tiku_nvm_mram_size;
 #elif defined(PLATFORM_ESP32C61)
+    /* Two slots take turns; the image is the newer one that checks. */
+    image = tiku_mem_arch_durable(&len);
+    if (image == NULL) return 0;
     header = (const uint32_t *)(const void *)
-             tiku_flash_map(TIKU_FLASH_MIRROR_ADDR);
-    if (header == NULL) return 0;
+             (image - TIKU_NVM_MIRROR_HDR_BYTES);
     capacity = TIKU_FLASH_MIRROR_BYTES;
 #else
     if (tiku_xspi_mmap_enable() != TIKU_XSPI_OK) return 0;

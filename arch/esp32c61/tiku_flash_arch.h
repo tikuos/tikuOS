@@ -39,8 +39,9 @@ typedef enum {
  *   0x000000  boot        2 MB  the boot image; the factory app lives here
  *   0x200000  /data       5 MB  the carved NVM region (tier + TFS store)
  *   0x700000  unclaimed  ~1 MB
- *   0x7FB000  scratch     4 KB  what tests may erase
- *   0x7FC000  mirror     16 KB  the durable .uninit mirror
+ *   0x7F7000  scratch     4 KB  what tests may erase
+ *   0x7F8000  mirror 1   16 KB  the durable .uninit mirror, two slots
+ *   0x7FC000  mirror 0   16 KB  written in turn (tiku_mem_arch.c)
  *
  * The region starts past the 2 MB a factory backup covers, and on a 64 KB
  * boundary, the MMU's page. */
@@ -49,8 +50,11 @@ typedef enum {
 #define TIKU_FLASH_REGION_BYTES     (5UL * 1024UL * 1024UL)
 #define TIKU_FLASH_MIRROR_SECTORS   4U
 #define TIKU_FLASH_MIRROR_BYTES     (TIKU_FLASH_SECTOR_SIZE * TIKU_FLASH_MIRROR_SECTORS)
-#define TIKU_FLASH_MIRROR_ADDR      (TIKU_FLASH_SIZE_BYTES - TIKU_FLASH_MIRROR_BYTES)
-#define TIKU_FLASH_SCRATCH_ADDR     (TIKU_FLASH_MIRROR_ADDR - TIKU_FLASH_SECTOR_SIZE)
+#define TIKU_FLASH_MIRROR_SLOTS     2U
+#define TIKU_FLASH_MIRROR_SLOT(i)   (TIKU_FLASH_SIZE_BYTES - \
+                                     ((i) + 1UL) * TIKU_FLASH_MIRROR_BYTES)
+#define TIKU_FLASH_SCRATCH_ADDR     (TIKU_FLASH_SIZE_BYTES - TIKU_FLASH_SECTOR_SIZE - \
+                                     TIKU_FLASH_MIRROR_SLOTS * TIKU_FLASH_MIRROR_BYTES)
 
 /**
  * @brief Attach the part, lift write protection, map it, read its identity.
