@@ -63,6 +63,11 @@
 #endif
 #include "apollo510.h"                       /* PWRCTRL / CLKGEN for `floor` */
 #endif
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_sleep_arch.h>
+#include <arch/esp32c61/tiku_cpu_common.h>
+#include <arch/esp32c61/tiku_esp32c61_regs.h>
+#endif
 
 static int streq(const char *a, const char *b)
 {
@@ -82,6 +87,7 @@ static uint32_t parse_u32(const char *tok)
 }
 
 /** @brief Parse "on"/"1" and "off"/"0"; -1 if neither. */
+static int parse_on_off(const char *tok) __attribute__((unused));
 static int parse_on_off(const char *tok)
 {
     if (streq(tok, "on") || streq(tok, "1")) {
@@ -150,6 +156,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         power_report();
         return;
     }
+    (void)argv;     /* read only by the platform branches below */
 
 #if defined(PLATFORM_NORDIC)
     if (streq(argv[1], "stat")) {
@@ -439,6 +446,39 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("dcdc: %s\n", tiku_nordic_dcdc_enabled() ? "on" : "off");
         return;
     }
+#endif
+
+#if defined(PLATFORM_ESP32C61)
+    /* Deep sleep is the C61's only sleep that saves anything: the HP domain
+     * powers down, SRAM with it, and the wake is a reset.  `off` checkpoints
+     * durable state first; `why` says what ended the last one. */
+    if (streq(argv[1], "why")) {
+        uint32_t w = tiku_esp32c61_wake_cause();
+
+        SHELL_PRINTF("reset: rom code %lu%s\n",
+                     (unsigned long)tiku_cpu_esp32c61_reset_code(),
+                     tiku_esp32c61_sleep_missed()
+                         ? " (a deep sleep that failed, reset late)" : "");
+        SHELL_PRINTF("wake: %s%s%s%s%s\n", w ? "" : "none (not a sleep wake)",
+                     (w & ESP32C61_PMU_WAKE_TIMER) ? " timer" : "",
+                     (w & ESP32C61_PMU_WAKE_EXT1)  ? " ext1"  : "",
+                     (w & ESP32C61_PMU_WAKE_GPIO)  ? " gpio"  : "",
+                     (w & ESP32C61_PMU_WAKE_UART0) ? " uart0" : "");
+        return;
+    }
+    if (streq(argv[1], "off")) {
+        uint32_t ms = (argc >= 3) ? parse_u32(argv[2]) : 0u;
+
+        if (ms == 0u) {
+            SHELL_PRINTF("deep sleep -- wake by RESET only\n");
+        } else {
+            SHELL_PRINTF("deep sleep for %lu ms -- the wake is a reset\n",
+                         (unsigned long)ms);
+        }
+        tiku_esp32c61_deep_sleep((uint64_t)ms * 1000ULL);
+    }
+    SHELL_PRINTF("Usage: power [why | off [ms]]\n");
+    return;
 #endif
 
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)

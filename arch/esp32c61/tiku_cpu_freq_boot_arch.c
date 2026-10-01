@@ -17,6 +17,7 @@
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_esp32c61_regs.h"
 #include "tiku_irq_arch.h"
+#include "tiku_sleep_arch.h"
 
 static unsigned long cpu_hz = TIKU_ESP32C61_CPU_HZ;
 static int           cpu_hz_fault = 1;
@@ -120,6 +121,15 @@ void tiku_cpu_boot_esp32c61_init(void) {
     mwdt_off(ESP32C61_TIMG0_BASE, TIKU_ESP32C61_WDT_MWDT0);
     mwdt_off(ESP32C61_TIMG1_BASE, TIKU_ESP32C61_WDT_MWDT1);
     lp_wdt_off();
+    /* The LP side's fast clock -- the PMU's own -- from RC_FAST, as IDF sets
+     * it: the reset default is the crystal, which stops when the part
+     * sleeps, and the PMU that would wake it stops with it. */
+    TIKU_REG32(ESP32C61_LP_CLK_CONF) =
+        (TIKU_REG32(ESP32C61_LP_CLK_CONF) & ~ESP32C61_LP_FAST_SEL_MSK) |
+        ESP32C61_LP_FAST_RC_FAST;
+#ifndef TIKU_MINIMAL
+    tiku_esp32c61_sleep_boot();
+#endif
     tiku_esp32c61_irq_init();
     measure_cpu_hz();
 }

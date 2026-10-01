@@ -243,6 +243,8 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
 #include <arch/esp32c61/tiku_fault_arch.h>
 #include <arch/esp32c61/tiku_cpu_common.h>
 #include <arch/esp32c61/tiku_cpu_watchdog_arch.h>
+#include <arch/esp32c61/tiku_sleep_arch.h>
+#include <arch/esp32c61/tiku_esp32c61_regs.h>
 
 /** @brief Report the stored fault record, or say there is none. */
 static void diag_fault_show(void) {
@@ -299,6 +301,38 @@ static void diag_wdt(uint8_t argc, const char *argv[]) {
                      ? "  (a watchdog)" : "");
 }
 
+/** @brief Show how the last boot began and the PMU's sleep settings; the
+ *         sleep itself is `power off`. */
+static void diag_sleep(void) {
+    static const struct {
+        const char *name;
+        uint32_t    reg;
+    } regs[] = {
+        { "pd top",     ESP32C61_PMU_PD_TOP_CNTL },
+        { "pd hp-aon",  ESP32C61_PMU_PD_HPAON_CNTL },
+        { "pd hp-cpu",  ESP32C61_PMU_PD_HPCPU_CNTL },
+        { "pd wifi",    ESP32C61_PMU_PD_HPWIFI_CNTL },
+        { "pd lp-peri", ESP32C61_PMU_PD_LPPERI_CNTL },
+        { "pd mem",     ESP32C61_PMU_PD_MEM_CNTL },
+        { "hp slp dig", ESP32C61_PMU_HP_SLP_DIG_POWER },
+        { "lp slp dig", ESP32C61_PMU_LP_SLP_DIG_POWER },
+        { "lp slp reg", ESP32C61_PMU_LP_SLP_REGULATOR0 },
+        { "wake ena",   ESP32C61_PMU_SLP_CNTL2 },
+    };
+
+    SHELL_PRINTF("  boot: rom code %lu  wake cause %08lx%s\n",
+                 (unsigned long)tiku_cpu_esp32c61_reset_code(),
+                 (unsigned long)tiku_esp32c61_wake_cause(),
+                 tiku_esp32c61_sleep_missed() ? "  (last sleep MISSED)" : "");
+    SHELL_PRINTF("  lp timer: %lu Hz, at %lu\n",
+                 (unsigned long)tiku_esp32c61_lp_hz(),
+                 (unsigned long)tiku_esp32c61_lp_ticks());
+    for (unsigned i = 0U; i < sizeof regs / sizeof regs[0]; i++) {
+        SHELL_PRINTF("  %-10s %08lx\n", regs[i].name,
+                     (unsigned long)TIKU_REG32(regs[i].reg));
+    }
+}
+
 void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "fault") == 0) {
         if (argc >= 3) {
@@ -317,7 +351,12 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
         diag_wdt(argc, argv);
         return;
     }
-    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | wdt [bite]\n");
+    if (argc >= 2 && strcmp(argv[1], "sleep") == 0) {
+        diag_sleep();
+        return;
+    }
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | wdt [bite]"
+                 " | sleep\n");
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C61 */

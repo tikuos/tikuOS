@@ -292,8 +292,12 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_RWDT_WPROTECT      (ESP32C61_LP_WDT_BASE + 0x18UL)
 #define ESP32C61_SWD_CONFIG         (ESP32C61_LP_WDT_BASE + 0x1CUL)
 #define ESP32C61_SWD_WPROTECT       (ESP32C61_LP_WDT_BASE + 0x20UL)
+#define ESP32C61_RWDT_CONFIG1       (ESP32C61_LP_WDT_BASE + 0x04UL)  /* stage 0 */
+#define ESP32C61_RWDT_FEED          (ESP32C61_LP_WDT_BASE + 0x14UL)
 #define ESP32C61_RWDT_EN            (1UL << 31)
+#define ESP32C61_RWDT_STG0_SYS_RESET (3UL << 28)        /* HP only: LP kept */
 #define ESP32C61_RWDT_FLASHBOOT     (1UL << 12)
+#define ESP32C61_RWDT_PAUSE_IN_SLP  (1UL << 9)
 #define ESP32C61_SWD_DISABLE        (1UL << 30)
 #define ESP32C61_SWD_AUTO_FEED      (1UL << 18)
 
@@ -316,5 +320,139 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_EFUSE_BASE         0x600B4800UL
 #define ESP32C61_EFUSE_MAC0         (ESP32C61_EFUSE_BASE + 0x44UL)
 #define ESP32C61_EFUSE_MAC1         (ESP32C61_EFUSE_BASE + 0x48UL)
+/* Block 1's version gates the factory sleep trims in the word after it. */
+#define ESP32C61_EFUSE_SYS2         (ESP32C61_EFUSE_BASE + 0x4CUL)
+#define ESP32C61_EFUSE_BLK_VER_POS  8U                  /* [12:8] major.minor */
+#define ESP32C61_EFUSE_SYS3         (ESP32C61_EFUSE_BASE + 0x50UL)
+#define ESP32C61_EFUSE_DSLP_DBG_POS   11U               /* [14:11] */
+#define ESP32C61_EFUSE_DSLP_DBIAS_POS 15U               /* [19:15] */
+
+/*---------------------------------------------------------------------------*/
+/* PMU -- the power state machine: what each domain does asleep, and waking  */
+/*---------------------------------------------------------------------------*/
+
+#define ESP32C61_PMU_BASE           0x600B0000UL
+/* The HP system awake: what the PMU restores on every wake. */
+#define ESP32C61_PMU_HP_ACT_ICG_MODEM  (ESP32C61_PMU_BASE + 0x00CUL)
+#define ESP32C61_PMU_HP_ACT_CLK_POWER  (ESP32C61_PMU_BASE + 0x014UL)
+#define ESP32C61_PMU_HP_ACT_SYSCLK     (ESP32C61_PMU_BASE + 0x024UL)
+#define ESP32C61_PMU_ICG_SYSCLK_EN  (1UL << 27)         /* HP sysclk: running */
+#define ESP32C61_PMU_XPD_PLL_ALL    (7UL << 28)         /* bb_i2c, pll_i2c, pll */
+#define ESP32C61_PMU_MODEM_CODE_ACTIVE (2UL << 30)
+/* The HP system asleep. */
+#define ESP32C61_PMU_HP_SLP_DIG_POWER  (ESP32C61_PMU_BASE + 0x068UL)
+#define ESP32C61_PMU_HP_SLP_ICG_FUNC   (ESP32C61_PMU_BASE + 0x06CUL)
+#define ESP32C61_PMU_HP_SLP_ICG_APB    (ESP32C61_PMU_BASE + 0x070UL)
+#define ESP32C61_PMU_HP_SLP_ICG_MODEM  (ESP32C61_PMU_BASE + 0x074UL)
+#define ESP32C61_PMU_HP_SLP_SYSCNTL    (ESP32C61_PMU_BASE + 0x078UL)
+#define ESP32C61_PMU_HP_SLP_CLK_POWER  (ESP32C61_PMU_BASE + 0x07CUL)
+#define ESP32C61_PMU_HP_SLP_BIAS       (ESP32C61_PMU_BASE + 0x080UL)
+#define ESP32C61_PMU_HP_SLP_SYSCLK     (ESP32C61_PMU_BASE + 0x08CUL)
+#define ESP32C61_PMU_HP_SLP_REGULATOR0 (ESP32C61_PMU_BASE + 0x090UL)
+#define ESP32C61_PMU_HP_SLP_REGULATOR1 (ESP32C61_PMU_BASE + 0x094UL)
+#define ESP32C61_PMU_HP_SLP_XTAL       (ESP32C61_PMU_BASE + 0x098UL)
+/* The LP system awake and asleep. */
+#define ESP32C61_PMU_LP_ACT_DIG_POWER  (ESP32C61_PMU_BASE + 0x0A8UL)
+#define ESP32C61_PMU_LP_ACT_CLK_POWER  (ESP32C61_PMU_BASE + 0x0ACUL)
+#define ESP32C61_PMU_LP_SLP_REGULATOR0 (ESP32C61_PMU_BASE + 0x0B4UL)
+#define ESP32C61_PMU_LP_SLP_REGULATOR1 (ESP32C61_PMU_BASE + 0x0B8UL)
+#define ESP32C61_PMU_LP_SLP_XTAL       (ESP32C61_PMU_BASE + 0x0BCUL)
+#define ESP32C61_PMU_LP_SLP_DIG_POWER  (ESP32C61_PMU_BASE + 0x0C0UL)
+#define ESP32C61_PMU_LP_SLP_CLK_POWER  (ESP32C61_PMU_BASE + 0x0C4UL)
+#define ESP32C61_PMU_LP_SLP_BIAS       (ESP32C61_PMU_BASE + 0x0C8UL)
+
+/* HP dig power: the domains powered down asleep. */
+#define ESP32C61_PMU_PD_VDD_SPI     (1UL << 21)
+#define ESP32C61_PMU_PD_WIFI        (1UL << 27)
+#define ESP32C61_PMU_PD_CPU         (1UL << 29)
+#define ESP32C61_PMU_PD_HP_AON      (1UL << 30)
+#define ESP32C61_PMU_PD_TOP         (1UL << 31)
+#define ESP32C61_PMU_I2C_ISO_EN     (1UL << 26)         /* HP clk power */
+#define ESP32C61_PMU_I2C_RETENTION  (1UL << 27)
+#define ESP32C61_PMU_UART_WAKE_EN   (1UL << 24)         /* HP syscntl */
+#define ESP32C61_PMU_PAD_SLP_SEL    (1UL << 27)
+#define ESP32C61_PMU_PAUSE_WDT      (1UL << 28)
+#define ESP32C61_PMU_CPU_STALL      (1UL << 29)
+#define ESP32C61_PMU_SYSCLK_SLP_SEL (1UL << 28)         /* HP sysclk: switch */
+#define ESP32C61_PMU_ICG_SLP_SEL    (1UL << 29)         /*   and gate asleep */
+#define ESP32C61_PMU_XPD_XTAL       (1UL << 31)         /* HP and LP xtal */
+#define ESP32C61_PMU_LP_PERI_PD     (1UL << 31)         /* LP dig power */
+#define ESP32C61_PMU_XPD_FOSC       (1UL << 30)         /* LP clk power */
+/* Bias, both systems: debug attenuation [29:26], current off, bias asleep. */
+#define ESP32C61_PMU_DBG_ATTEN_POS  26U
+#define ESP32C61_PMU_DBG_ATTEN_MSK  (0xFUL << 26)
+#define ESP32C61_PMU_PD_CUR         (1UL << 30)
+#define ESP32C61_PMU_BIAS_SLEEP     (1UL << 31)
+#define ESP32C61_PMU_HP_REG_CONNECT (1UL << 15)         /* HP regulator0 */
+#define ESP32C61_PMU_HP_REG_XPD     (1UL << 18)
+#define ESP32C61_PMU_LP_REG_XPD     (1UL << 22)         /* LP regulator0 */
+#define ESP32C61_PMU_REG_DBIAS_POS  27U                 /* [31:27], both */
+
+/* Wake-path timing: power-up waits, isolation and reset waits, clocks. */
+#define ESP32C61_PMU_WAIT_TIMER0    (ESP32C61_PMU_BASE + 0x0ECUL)
+#define ESP32C61_PMU_WAIT_TIMER1    (ESP32C61_PMU_BASE + 0x0F0UL)
+#define ESP32C61_PMU_WAIT_TIMER2    (ESP32C61_PMU_BASE + 0x0F4UL)
+#define ESP32C61_PMU_CK_WAIT        (ESP32C61_PMU_BASE + 0x120UL)
+/* Immediate updates: the PMU latches new clock-gate settings on these. */
+#define ESP32C61_PMU_IMM_SLEEP_SYSCLK (ESP32C61_PMU_BASE + 0x0D0UL)
+#define ESP32C61_PMU_UPDATE_ICG_SWITCH (1UL << 28)
+#define ESP32C61_PMU_IMM_MODEM_ICG  (ESP32C61_PMU_BASE + 0x0DCUL)
+#define ESP32C61_PMU_UPDATE_ICG_MODEM (1UL << 31)
+
+/* Power-domain forces, six bits each, set at reset: a forced domain never
+ * powers down, so a "deep" sleep keeps it on and resumes instead. */
+#define ESP32C61_PMU_PD_TOP_CNTL    (ESP32C61_PMU_BASE + 0x0F8UL)
+#define ESP32C61_PMU_PD_HPAON_CNTL  (ESP32C61_PMU_BASE + 0x0FCUL)
+#define ESP32C61_PMU_PD_HPCPU_CNTL  (ESP32C61_PMU_BASE + 0x100UL)
+#define ESP32C61_PMU_PD_HPWIFI_CNTL (ESP32C61_PMU_BASE + 0x108UL)
+#define ESP32C61_PMU_PD_LPPERI_CNTL (ESP32C61_PMU_BASE + 0x10CUL)
+#define ESP32C61_PMU_PD_MEM_CNTL    (ESP32C61_PMU_BASE + 0x110UL)
+#define ESP32C61_PMU_PD_FORCE_MSK   0x3FUL
+#define ESP32C61_PMU_MEM_NO_ISO_MSK (0xFUL << 24)
+
+/* Sleep request, wake enables and causes. */
+#define ESP32C61_PMU_SLP_CNTL0      (ESP32C61_PMU_BASE + 0x124UL)
+#define ESP32C61_PMU_SLEEP_REQ      (1UL << 31)
+#define ESP32C61_PMU_SLP_CNTL1      (ESP32C61_PMU_BASE + 0x128UL)  /* rejects */
+#define ESP32C61_PMU_SLP_CNTL2      (ESP32C61_PMU_BASE + 0x12CUL)  /* wakes */
+#define ESP32C61_PMU_SLP_CNTL3      (ESP32C61_PMU_BASE + 0x130UL)
+#define ESP32C61_PMU_SLP_CNTL4      (ESP32C61_PMU_BASE + 0x134UL)
+#define ESP32C61_PMU_REJECT_CLR     (1UL << 31)
+#define ESP32C61_PMU_SLP_CNTL5      (ESP32C61_PMU_BASE + 0x138UL)
+#define ESP32C61_PMU_SLP_CNTL7      (ESP32C61_PMU_BASE + 0x140UL)
+#define ESP32C61_PMU_WAKE_CAUSE     (ESP32C61_PMU_BASE + 0x144UL)
+#define ESP32C61_PMU_HP_INT_CLR     (ESP32C61_PMU_BASE + 0x16CUL)
+#define ESP32C61_PMU_INT_WAKE_REJECT (3UL << 30)
+#define ESP32C61_PMU_WAKE_EXT1      (1UL << 1)
+#define ESP32C61_PMU_WAKE_GPIO      (1UL << 2)
+#define ESP32C61_PMU_WAKE_TIMER     (1UL << 4)
+#define ESP32C61_PMU_WAKE_UART0     (1UL << 6)
+
+/*---------------------------------------------------------------------------*/
+/* LP timer -- the always-on count deep sleep wakes on                       */
+/*---------------------------------------------------------------------------*/
+
+#define ESP32C61_LP_TIMER_BASE      0x600B0C00UL
+#define ESP32C61_LP_TIMER_TAR0_LO   (ESP32C61_LP_TIMER_BASE + 0x00UL)
+#define ESP32C61_LP_TIMER_TAR0_HI   (ESP32C61_LP_TIMER_BASE + 0x04UL)
+#define ESP32C61_LP_TIMER_TAR_EN    (1UL << 31)         /* in TAR0_HI */
+#define ESP32C61_LP_TIMER_UPDATE    (ESP32C61_LP_TIMER_BASE + 0x10UL)
+#define ESP32C61_LP_TIMER_SNAPSHOT  (1UL << 27)
+#define ESP32C61_LP_TIMER_BUF0_LO   (ESP32C61_LP_TIMER_BASE + 0x14UL)
+#define ESP32C61_LP_TIMER_BUF0_HI   (ESP32C61_LP_TIMER_BASE + 0x18UL)
+#define ESP32C61_LP_TIMER_INT_CLR   (ESP32C61_LP_TIMER_BASE + 0x34UL)
+#define ESP32C61_LP_TIMER_WAKE_CLR  (1UL << 31)
+
+/* LP clocks: the slow clock counts the LP timer, the fast one clocks the
+ * PMU and LP peripherals -- from the crystal at reset (XTAL/2). */
+#define ESP32C61_LP_CLKRST_BASE     0x600B0400UL
+#define ESP32C61_LP_CLK_CONF        (ESP32C61_LP_CLKRST_BASE + 0x00UL)
+#define ESP32C61_LP_FAST_SEL_MSK    (3UL << 2)
+#define ESP32C61_LP_FAST_RC_FAST    (0UL << 2)
+
+/* LP AON stores survive deep sleep.  The ROM reads two of them on the way
+ * back: 8 bit 0 says the sleep was deep, 6 holds a wake stub (none here). */
+#define ESP32C61_LP_AON_BASE        0x600B1000UL
+#define ESP32C61_LP_AON_STORE(n)    (ESP32C61_LP_AON_BASE + 4UL * (n))
 
 #endif /* TIKU_ESP32C61_REGS_H_ */

@@ -2281,6 +2281,7 @@ SRCS += arch/esp32c61/tiku_flash_arch.c
 SRCS += arch/esp32c61/tiku_nvm_region_esp32c61.c
 SRCS += arch/esp32c61/tiku_trng_arch.c
 SRCS += arch/esp32c61/tiku_fault_arch.c
+SRCS += arch/esp32c61/tiku_sleep_arch.c
 ifeq ($(TIKU_THREADS_ENABLE),1)
 SRCS += kernel/threads/tiku_thread.c
 SRCS += arch/esp32c61/tiku_thread_arch.c
