@@ -61,7 +61,7 @@
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1)
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
 /* Nordic runs the BIG tier too (2026-07: it previously ran the middle FRAM
  * tier, an MSP430-class 96-line BASIC on Ambiq-class silicon).  The LM20's
  * tier arena lives in its own 256 KB SRAM bank (RAM2), so it takes the
@@ -71,6 +71,15 @@
 #define TIKU_BASIC_TIER_BIG  1
 #elif defined(TIKU_MEMORY_MODEL_LARGE)
 #define TIKU_BASIC_TIER_FRAM 1
+#endif
+
+/* The ESP32-C61 runs its image from its 320 KB SRAM, leaving the SRAM tier no
+ * room for a BIG arena; the arena lives in the in-package PSRAM instead, which
+ * BASIC attaches and its request admits (TIKU_MEM_ALLOW_EXTERNAL).  The floor
+ * is the smallest PSRAM the part ships with. */
+#if defined(PLATFORM_ESP32C61)
+#define TIKU_BASIC_ARENA_EXTERNAL     1
+#define TIKU_BASIC_ARENA_EXTERNAL_MIN (2UL * 1024UL * 1024UL)
 #endif
 
 /* Apollo510 (Apollo5) has the most RAM of the BIG-class parts -- 512 KB TCM

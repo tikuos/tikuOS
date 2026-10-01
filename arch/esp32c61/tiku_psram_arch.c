@@ -41,6 +41,7 @@
 
 static uint32_t psram_id;
 static uint32_t psram_bytes;
+static uint8_t  psram_attached;
 
 /** @brief Clock register value for MSPI core / @p div. */
 static uint32_t mspi_clock(uint32_t div) {
@@ -189,13 +190,14 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
 tiku_esp32c61_psram_err_t tiku_esp32c61_psram_attach(void) {
     tiku_esp32c61_psram_err_t rc = tiku_esp32c61_psram_init();
 
-    if (rc != TIKU_ESP32C61_PSRAM_OK) {
+    if (rc != TIKU_ESP32C61_PSRAM_OK || psram_attached) {
         return rc;
     }
     if (tiku_tier_attach_psram((void *)TIKU_ESP32C61_PSRAM_BASE,
                                (tiku_mem_arch_size_t)psram_bytes) != TIKU_MEM_OK) {
         return TIKU_ESP32C61_PSRAM_MAP;
     }
+    psram_attached = 1U;
     return TIKU_ESP32C61_PSRAM_OK;
 }
 

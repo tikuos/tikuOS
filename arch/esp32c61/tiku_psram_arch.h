@@ -35,7 +35,7 @@ typedef enum {
  */
 tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void);
 
-/** @brief Init, then hand the mapped bytes to the PSRAM tier. */
+/** @brief Init, then hand the mapped bytes to the PSRAM tier; idempotent. */
 tiku_esp32c61_psram_err_t tiku_esp32c61_psram_attach(void);
 
 /** @brief The device's 24-bit ID (MFID, KGD, density), 0 before init. */

@@ -89,6 +89,11 @@
         BASIC_ARENA_BIGBUF_BYTES +                                          \
         128u))   /* alignment headroom */
 
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_psram_arch.h>
+#define BASIC_EXTERNAL_ATTACH() ((void)tiku_esp32c61_psram_attach())
+#endif
+
 /*
  * THE ARENA MUST FIT ITS TIER POOL -- AT BUILD TIME.
  *
@@ -110,7 +115,13 @@
  * builds the arena exceeds the HIFRAM threshold; on ARM it uses SRAM. Host
  * builds have no linker-derived capacity and are left alone.
  */
-#if defined(PLATFORM_MSP430)
+#if defined(TIKU_BASIC_ARENA_EXTERNAL)
+/* External memory holds the arena, so the SRAM floor does not bound it; the
+ * smallest PSRAM the part ships with does. */
+_Static_assert(BASIC_ARENA_BYTES <= TIKU_BASIC_ARENA_EXTERNAL_MIN,
+               "BASIC arena does not fit the smallest external memory -- "
+               "lower TIKU_BASIC_PROGRAM_LINES");
+#elif defined(PLATFORM_MSP430)
 _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_HIFRAM_SIZE,
                "BASIC arena does not fit the HIFRAM tier pool -- raise "
                "TIKU_TIER_HIFRAM_SIZE or lower TIKU_BASIC_PROGRAM_LINES");
@@ -209,11 +220,18 @@ basic_alloc_state(void)
         (void)tiku_arena_reset(&basic_arena);
     } else {
         (void)tiku_tier_init();
-#if BASIC_RECLAIM_ENABLE
+#if BASIC_RECLAIM_ENABLE || defined(TIKU_BASIC_ARENA_EXTERNAL)
         tiku_mem_request_t options = {0};
+#if defined(TIKU_BASIC_ARENA_EXTERNAL)
+        /* SRAM first if the arena fits there, the external memory if not. */
+        BASIC_EXTERNAL_ATTACH();
+        options.flags = TIKU_MEM_ALLOW_EXTERNAL;
+#endif
+#if BASIC_RECLAIM_ENABLE
         if (basic_reclaim_register() != 0) return -1;
         options.owner = basic_reclaim_owner;
         options.owner_slot = 1;
+#endif
         if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, &options)
 #else
         if (tiku_mem_arena_create(&basic_arena, BASIC_ARENA_BYTES, NULL)
