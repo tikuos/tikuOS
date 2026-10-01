@@ -21,6 +21,8 @@
 #if defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_xspi_arch.h>
 #include <arch/stm32n6/tiku_sram_arch.h>
+#elif defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_flash_arch.h>
 #endif
 #include <kernel/cpu/tiku_stack.h>   /* stack-paint for /sys/mem/stack_free */
 #include "kernel/cpu/tiku_common.h"
@@ -146,7 +148,7 @@ tiku_cpu_full_init(unsigned int cpu_freq)
     current_boot_stage = TIKU_BOOT_STAGE_COMPLETE;
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_ESP32C61)
     /* The ARM reset handlers mask IRQs (cpsid i in tiku_crt_early.c) so no
      * ISR can fire into half-initialized kernel state.  Everything an ISR
      * touches now exists -- tiku_sched_init() just built the process queue --
@@ -223,13 +225,17 @@ tiku_boot_init_memory(void)
      * failure is not fatal -- the image runs from SRAM and the durable region
      * simply keeps its reset contents. */
     (void)tiku_xspi_init();
+#elif defined(PLATFORM_ESP32C61)
+    /* The flash likewise: the mirror is restored from it. */
+    (void)tiku_flash_init();
 #endif
 
     /* Initialize memory subsystem (arch-specific setup + module state) */
     tiku_mem_init();
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+    defined(PLATFORM_ESP32C61)
     /* Bring up the tier allocator at boot so tier-backed allocations (per-
      * process memory, etc.) work without relying on a lazy first-touch init.
      * tiku_tier_init is idempotent, so BASIC's later lazy call is a no-op.

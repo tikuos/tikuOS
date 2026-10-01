@@ -29,6 +29,8 @@
 #include <arch/stm32n6/tiku_spi_arch.h>
 #elif defined(PLATFORM_RA8P1)
 #include <arch/ra8p1/tiku_spi_arch.h>
+#elif defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_spi_arch.h>
 #endif
 
 #endif /* TIKU_SPI_HAL_H_ */

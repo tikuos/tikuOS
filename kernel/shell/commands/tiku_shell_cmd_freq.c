@@ -32,6 +32,10 @@
 #include <arch/ra8p1/tiku_ra8p1_regs.h>           /* CAC clock selectors */
 #endif
 
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_cpu_freq_boot_arch.h> /* clock-tree read-back */
+#endif
+
 #if defined(PLATFORM_AMBIQ) && defined(AM_PART_APOLLO510)
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>   /* HP identity probe */
 
@@ -183,6 +187,23 @@ static void freq_cmd_probe_n6(void)
 }
 #endif /* PLATFORM_STM32N6 */
 
+#if defined(PLATFORM_ESP32C61)
+/** @brief The PCR tree read back: root, each divider, and the measured core. */
+static void freq_cmd_probe_c61(void)
+{
+    static const char *const root[4] = {"XTAL", "RC_FAST", "PLL 160 MHz", "?"};
+    tiku_esp32c61_clock_t c;
+
+    tiku_cpu_esp32c61_clock_probe(&c);
+    SHELL_PRINTF("  root      %s\n", root[c.root & 3u]);
+    SHELL_PRINTF("  CPU       %lu Hz (/%u), %lu Hz measured\n",
+                 c.cpu_hz, (unsigned)c.cpu_div, tiku_cpu_mclk_hz());
+    SHELL_PRINTF("  AHB       %lu Hz (/%u)\n", c.ahb_hz, (unsigned)c.ahb_div);
+    SHELL_PRINTF("  APB       %lu Hz (/%u of AHB)\n", c.apb_hz,
+                 (unsigned)c.apb_div);
+}
+#endif /* PLATFORM_ESP32C61 */
+
 #if defined(PLATFORM_RA8P1)
 /*
  * PCLKB is the measurable proxy for the core: the CAC cannot count CPUCLK0
@@ -264,6 +285,12 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         return;
     }
 #endif
+#if defined(PLATFORM_ESP32C61)
+    if (strcmp(argv[1], "probe") == 0) {
+        freq_cmd_probe_c61();
+        return;
+    }
+#endif
 
     /* Parse the requested core frequency in MHz (decimal). */
     p   = argv[1];
@@ -281,6 +308,9 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
 #elif defined(PLATFORM_RA8P1)
         SHELL_PRINTF("  no arg: show the core clock;\n");
         SHELL_PRINTF("  <mhz>: 240 (boot default), 480 or 1000.\n");
+#elif defined(PLATFORM_ESP32C61)
+        SHELL_PRINTF("  no arg: show the core clock; probe: the clock tree;\n");
+        SHELL_PRINTF("  <mhz>: 10, 20 or 40 (crystal), 80 or 160 (PLL).\n");
 #else
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: request a frequency "
                      "(96, or turbo: 192 on Apollo4, 250 on Apollo510).\n");

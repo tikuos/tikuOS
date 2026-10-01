@@ -95,6 +95,14 @@
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
+/* ESP32-C61 (RISC-V) — console over UART0, the DevKitC's CP2102N bridge     */
+/*---------------------------------------------------------------------------*/
+
+#elif defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
+
+/*---------------------------------------------------------------------------*/
 /* Fallback: no platform defined — suppress output                           */
 /*---------------------------------------------------------------------------*/
 

@@ -75,6 +75,10 @@
  * TIKU_XSPI_REGION_ADDR/BYTES in arch/stm32n6/tiku_xspi_arch.h rather than a
  * device script.  8 MB is what TIKU_TFS_MAX_SLOTS can address at a 4 KB slot. */
 #define TIKU_NVM_REGION_BYTES  (8192u * 1024u)
+#elif defined(PLATFORM_ESP32C61)
+/* Not linker-carved either: a span of the external flash, mirroring
+ * TIKU_FLASH_REGION_BYTES in arch/esp32c61/tiku_flash_arch.h. */
+#define TIKU_NVM_REGION_BYTES  (5120u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif

@@ -29,6 +29,8 @@
 #include "arch/stm32n6/tiku_cpu_watchdog_arch.h"
 #elif defined(PLATFORM_RA8P1)
 #include "arch/ra8p1/tiku_cpu_watchdog_arch.h"
+#elif defined(PLATFORM_ESP32C61)
+#include "arch/esp32c61/tiku_cpu_watchdog_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -164,6 +166,20 @@
     tiku_cpu_ra8p1_watchdog_pause_arch()
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_ra8p1_watchdog_resume_arch(kick)
+#elif defined(PLATFORM_ESP32C61)
+/* Stage 0 could interrupt instead of reset, but interval mode stays absent
+ * until something on this port asks for it. */
+#define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
+#define tiku_watchdog_arch_on(src, isel) \
+    tiku_cpu_esp32c61_watchdog_on_arch((src), (isel))
+#define tiku_watchdog_arch_off() \
+    tiku_cpu_esp32c61_watchdog_off_arch()
+#define tiku_watchdog_arch_kick() \
+    tiku_cpu_esp32c61_watchdog_kick_arch()
+#define tiku_watchdog_arch_pause() \
+    tiku_cpu_esp32c61_watchdog_pause_arch()
+#define tiku_watchdog_arch_resume(kick) \
+    tiku_cpu_esp32c61_watchdog_resume_arch(kick)
 #endif
 
 #endif /* TIKU_WATCHDOG_HAL_H_ */

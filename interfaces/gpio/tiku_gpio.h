@@ -26,6 +26,8 @@
 #include <arch/nordic/tiku_gpio_arch.h>
 #elif defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_gpio_arch.h>
+#elif defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_gpio_arch.h>
 #else
 #include <arch/msp430/tiku_gpio_arch.h>
 #endif

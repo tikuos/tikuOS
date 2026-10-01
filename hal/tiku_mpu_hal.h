@@ -35,6 +35,8 @@
 #include "arch/stm32n6/tiku_mpu_arch.h"
 #elif defined(PLATFORM_RA8P1)
 #include "arch/ra8p1/tiku_mpu_arch.h"
+#elif defined(PLATFORM_ESP32C61)
+#include "arch/esp32c61/tiku_mpu_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

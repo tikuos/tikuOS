@@ -15,6 +15,8 @@ extern tiku_nvm_restore_t tiku_mem_arch_nvm_restore_status(void);
 
 #if defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_xspi_arch.h>
+#elif defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_flash_arch.h>
 #endif
 #if defined(PLATFORM_RA8P1)
 extern uint32_t tiku_mem_arch_nvm_program_count(void);
@@ -35,7 +37,7 @@ static int ready, restored;
 static int committed(void)
 {
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_STM32N6)
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
     extern unsigned char __uninit_start;
     const uint32_t *header;
     const unsigned char *image;
@@ -51,6 +53,11 @@ static int committed(void)
     extern uint32_t __tiku_nvm_mram_start[], __tiku_nvm_mram_size;
     header = __tiku_nvm_mram_start;
     capacity = (uintptr_t)&__tiku_nvm_mram_size;
+#elif defined(PLATFORM_ESP32C61)
+    header = (const uint32_t *)(const void *)
+             tiku_flash_map(TIKU_FLASH_MIRROR_ADDR);
+    if (header == NULL) return 0;
+    capacity = TIKU_FLASH_MIRROR_BYTES;
 #else
     if (tiku_xspi_mmap_enable() != TIKU_XSPI_OK) return 0;
     header = (const uint32_t *)(TIKU_XSPI_MMAP_BASE + TIKU_XSPI_MIRROR_ADDR);
@@ -118,7 +125,7 @@ void tiku_cpu_settings_boot(void)
     boot_default = tiku_cpu_mclk_hz();
     restored = 1;
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_STM32N6)
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
     /* A bad mirror may leave old NOLOAD SRAM intact after a warm reset.
      * Never mistake that working copy for a successfully restored setting. */
     restored = tiku_mem_arch_nvm_restore_status() == TIKU_NVM_RESTORE_V2_OK &&

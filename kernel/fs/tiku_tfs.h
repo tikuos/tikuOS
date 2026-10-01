@@ -50,7 +50,7 @@
  */
 #  if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_RA8P1)
+      defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
 #    define TIKU_TFS_MAX_SLOTS  2048
 #  else
 #    define TIKU_TFS_MAX_SLOTS  32      /* msp430/host: 4 bytes of bitmap */
@@ -67,7 +67,7 @@
  * the derived count, which is not a compile-time value any more.
  */
 #  if defined(AM_PART_APOLLO510) || defined(PLATFORM_RP2350) || \
-      defined(PLATFORM_STM32N6)
+      defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
 #    define TIKU_TFS_MIN_SLOTS  512
 #  elif defined(PLATFORM_AMBIQ) || defined(TIKU_DEVICE_NRF54LM20A) || \
         defined(TIKU_DEVICE_NRF54LM20B)
@@ -99,7 +99,8 @@
  * reach a neighbour file's sector.  MSP430 FRAM and host keep 512 B: their
  * store is a modest in-place FRAM array, not a region extent.
  */
-#  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6)
+#  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_ESP32C61)
 #    define TIKU_TFS_SLOT_DATA  4092   /**< 4 B length + 4092 = 4096 (one sector) */
 #  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC) || \
        defined(PLATFORM_RA8P1)
@@ -114,7 +115,8 @@
  * cut during one file's write then cannot corrupt a neighbor file. Byte/word-
  * writable NVM (FRAM/MRAM, no erase) uses plain 4-byte alignment. */
 #ifndef TIKU_TFS_SECT
-#  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6)
+#  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6) || \
+      defined(PLATFORM_ESP32C61)
 #    define TIKU_TFS_SECT  4096u
 #  else
 #    define TIKU_TFS_SECT  4u

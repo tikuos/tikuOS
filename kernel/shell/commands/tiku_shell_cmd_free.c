@@ -138,6 +138,15 @@ stack_used(void)
         return (used > 0xFFFFU) ? 0xFFFFU : (uint16_t)used;
     }
     return 0;
+#elif defined(PLATFORM_ESP32C61)
+    uintptr_t sp;
+    uintptr_t top = (uintptr_t)&__stack;
+    __asm__ volatile ("mv %0, sp" : "=r"(sp));
+    if (sp < top) {
+        uintptr_t used = top - sp;
+        return (used > 0xFFFFU) ? 0xFFFFU : (uint16_t)used;
+    }
+    return 0;
 #else
     return 0;   /* host fallback */
 #endif

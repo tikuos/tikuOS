@@ -38,6 +38,10 @@
 /* STM32N6 RNG block: ring oscillators, NIST-configured by reset default. */
 #include <arch/stm32n6/tiku_trng_arch.h>
 #define TIKU_SHELL_TRNG_HAVE 1
+#elif defined(PLATFORM_ESP32C61)
+/* ESP32-C61 LP RNG: a generator that noise samples feed while enabled. */
+#include <arch/esp32c61/tiku_trng_arch.h>
+#define TIKU_SHELL_TRNG_HAVE 1
 #elif defined(PLATFORM_MSP430) && TIKU_KIT_CRYPTO_ENABLE
 /* Software entropy source; only linked when the crypto kit (SHA-256
  * conditioner) is compiled in. */

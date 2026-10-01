@@ -56,6 +56,10 @@ static inline void tiku_arm_disable_irq(void) {
 static inline void tiku_arm_enable_irq(void) {
     __asm__ volatile ("cpsie i" ::: "memory");
 }
+#elif defined(PLATFORM_ESP32C61)
+#include "arch/esp32c61/tiku_cpu_freq_boot_arch.h"
+#include "arch/esp32c61/tiku_irq_arch.h"
+#include <stdint.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -99,6 +103,14 @@ void tiku_atomic_enter(void) {
     tiku_atomic_gie_saved = (pm == 0);  /* 1 if IRQs were enabled */
   }
   tiku_atomic_nesting++;
+#elif defined(PLATFORM_ESP32C61)
+  /* mstatus.MIE plays GIE's part: cleared in one instruction that also
+   * returns what it was. */
+  uint32_t mie = tiku_esp32c61_mie_off();
+  if (tiku_atomic_nesting == 0) {
+    tiku_atomic_gie_saved = (mie != 0);
+  }
+  tiku_atomic_nesting++;
 #endif
 }
 
@@ -110,6 +122,8 @@ void tiku_atomic_exit(void) {
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
       defined(PLATFORM_RA8P1)
     tiku_arm_enable_irq();
+#elif defined(PLATFORM_ESP32C61)
+    tiku_esp32c61_mie_restore(ESP32C61_MSTATUS_MIE);
 #endif
   }
 }
@@ -125,6 +139,8 @@ void tiku_cpu_irq_enable(void) {
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
       defined(PLATFORM_RA8P1)
     tiku_arm_enable_irq();
+#elif defined(PLATFORM_ESP32C61)
+    tiku_esp32c61_mie_restore(ESP32C61_MSTATUS_MIE);
 #endif
 }
 
@@ -135,6 +151,8 @@ void tiku_cpu_irq_disable(void) {
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
       defined(PLATFORM_RA8P1)
     tiku_arm_disable_irq();
+#elif defined(PLATFORM_ESP32C61)
+    (void)tiku_esp32c61_mie_off();
 #endif
 }
 
@@ -155,6 +173,8 @@ void tiku_cpu_boot_init(void) {
     tiku_cpu_boot_stm32n6_init();
 #elif defined(PLATFORM_RA8P1)
     tiku_cpu_boot_ra8p1_init();
+#elif defined(PLATFORM_ESP32C61)
+    tiku_cpu_boot_esp32c61_init();
 #endif
 }
 
@@ -171,6 +191,9 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
     tiku_cpu_freq_stm32n6_init(cpu_freq);
 #elif defined(PLATFORM_RA8P1)
     tiku_cpu_freq_ra8p1_init(cpu_freq);
+#elif defined(PLATFORM_ESP32C61)
+    /* An unsupported rate is ignored: the tree keeps what it runs at. */
+    (void)tiku_cpu_freq_esp32c61_set(cpu_freq);
 #endif
 }
 
@@ -196,6 +219,12 @@ unsigned long tiku_cpu_freq_available(unsigned int index) {
 #elif defined(PLATFORM_RA8P1)
     static const unsigned long rates[] = {
         240000000UL, 480000000UL, 1000000000UL
+    };
+    return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
+#elif defined(PLATFORM_ESP32C61)
+    /* The crystal divided, then the PLL divided: every rate the tree makes. */
+    static const unsigned long rates[] = {
+        10000000UL, 20000000UL, 40000000UL, 80000000UL, 160000000UL
     };
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
 #elif defined(PLATFORM_MSP430)
@@ -268,6 +297,8 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
     (void)addr; (void)len;            /* caches are not enabled on this port */
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_clean(addr, len);
+#elif defined(PLATFORM_ESP32C61)
+    (void)addr; (void)len;            /* SRAM is uncached; no flash data yet */
 #endif
 }
 
@@ -284,6 +315,8 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
     (void)addr; (void)len;            /* caches are not enabled on this port */
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_invalidate(addr, len);
+#elif defined(PLATFORM_ESP32C61)
+    (void)addr; (void)len;            /* SRAM is uncached; no flash data yet */
 #endif
 }
 
@@ -314,6 +347,8 @@ unsigned long tiku_cpu_mclk_hz(void) {
     return tiku_cpu_stm32n6_clock_get_hz();
 #elif defined(PLATFORM_RA8P1)
     return tiku_cpu_ra8p1_clock_get_hz();
+#elif defined(PLATFORM_ESP32C61)
+    return tiku_cpu_esp32c61_clock_get_hz();   /* measured against SYSTIMER */
 #else
     return 0;
 #endif
@@ -332,6 +367,8 @@ unsigned long tiku_cpu_smclk_hz(void) {
     return tiku_cpu_stm32n6_smclk_get_hz();
 #elif defined(PLATFORM_RA8P1)
     return tiku_cpu_ra8p1_pclka_get_hz();
+#elif defined(PLATFORM_ESP32C61)
+    return tiku_cpu_esp32c61_smclk_get_hz();
 #else
     return 0;
 #endif
@@ -362,6 +399,8 @@ int tiku_cpu_clock_has_fault(void) {
     return tiku_cpu_ambiq_clock_has_fault() ? 1 : 0;
 #elif defined(PLATFORM_NORDIC)
     return tiku_cpu_nordic_clock_has_fault() ? 1 : 0;
+#elif defined(PLATFORM_ESP32C61)
+    return tiku_cpu_esp32c61_clock_has_fault() ? 1 : 0;
 #else
     return 0;
 #endif
@@ -437,6 +476,18 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         default:
             return NULL;
     }
+#elif defined(PLATFORM_ESP32C61)
+    switch (mode) {
+        case TIKU_CPU_IDLE_LIGHT:
+        case TIKU_CPU_IDLE_DEEP:
+        case TIKU_CPU_IDLE_DEEPEST:
+            /* Plain WFI: the SYSTIMER tick and any enabled line wake the
+             * core.  Light and deep sleep through the PMU land later. */
+            return tiku_cpu_boot_esp32c61_power_wfi_enter;
+        case TIKU_CPU_IDLE_OFF:
+        default:
+            return NULL;
+    }
 #else
     (void)mode;
     return NULL;
@@ -451,7 +502,7 @@ int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode) {
     return mode != TIKU_CPU_IDLE_DEEPEST;
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_RA8P1)
+      defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
     /* Every supported mode is a WFI variant; any enabled interrupt
      * (SysTick / STIMER tick included) wakes the core. */
     (void)mode;
@@ -473,7 +524,7 @@ const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode) {
     }
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_RA8P1)
+      defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:   return "WFI";
         case TIKU_CPU_IDLE_DEEP:    return "WFI";
@@ -526,6 +577,16 @@ const char *tiku_cpu_idle_mode_desc(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
             return "WFI (Cortex-M33 wait-for-interrupt)";
+        case TIKU_CPU_IDLE_OFF:
+        default:
+            return "off (busy-wait)";
+    }
+#elif defined(PLATFORM_ESP32C61)
+    switch (mode) {
+        case TIKU_CPU_IDLE_LIGHT:
+        case TIKU_CPU_IDLE_DEEP:
+        case TIKU_CPU_IDLE_DEEPEST:
+            return "WFI (RISC-V wait-for-interrupt)";
         case TIKU_CPU_IDLE_OFF:
         default:
             return "off (busy-wait)";

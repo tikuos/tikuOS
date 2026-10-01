@@ -432,6 +432,14 @@ mem_free_read(char *buf, size_t max)
                         (unsigned long)(sp - end_addr));
     }
     return snprintf(buf, max, "0\n");
+#elif defined(PLATFORM_ESP32C61)
+    /* The tier span ends where the stack's reserve begins, so the headroom
+     * is SP down to that edge, not down to _end. */
+    uintptr_t sp;
+    uintptr_t bottom = (uintptr_t)tiku_stack_arch_bottom();
+    __asm__ volatile ("mv %0, sp" : "=r"(sp));
+    return snprintf(buf, max, "%lu\n",
+                    sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
 #else
     /* Host fallback: report 0. */
     (void)max;
