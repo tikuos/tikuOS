@@ -295,7 +295,7 @@ static void diag_wdt(uint8_t argc, const char *argv[]) {
     }
     SHELL_PRINTF("  wdt: last reset rom code %lu%s\n",
                  (unsigned long)tiku_cpu_esp32c61_reset_code(),
-                 (tiku_cpu_esp32c61_reset_reason() & TIKU_ESP32C61_RESET_WATCHDOG)
+                 (tiku_cpu_esp32c61_reset_reason() == 0x0016U)
                      ? "  (a watchdog)" : "");
 }
 

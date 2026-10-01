@@ -61,14 +61,9 @@ uint32_t tiku_cpu_esp32c61_reset_code(void) {
 }
 
 uint16_t tiku_cpu_esp32c61_reset_reason(void) {
+    /* The MSP430 SYSRSTIV-style codes the kernel speaks, as the other ports
+     * report them: /sys/boot/reason renders those and nothing else. */
     switch (tiku_cpu_esp32c61_reset_code()) {
-    case ESP32C61_RESET_POWERON:
-        return TIKU_ESP32C61_RESET_POWER;
-    case ESP32C61_RESET_SW_SYS:
-    case ESP32C61_RESET_SW_CPU:
-        return TIKU_ESP32C61_RESET_SOFT;
-    case ESP32C61_RESET_DEEPSLEEP:
-        return TIKU_ESP32C61_RESET_DEEPSLEEP;
     case ESP32C61_RESET_TG0_WDT_SYS:
     case ESP32C61_RESET_TG1_WDT_SYS:
     case ESP32C61_RESET_RTC_WDT_SYS:
@@ -77,15 +72,19 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void) {
     case ESP32C61_RESET_RTC_WDT_RTC:
     case ESP32C61_RESET_TG1_WDT_CPU:
     case ESP32C61_RESET_SUPER_WDT:
-        return TIKU_ESP32C61_RESET_WATCHDOG;
-    case ESP32C61_RESET_BROWNOUT:
-        return TIKU_ESP32C61_RESET_BROWNOUT;
+        return 0x0016U;     /* wdt-timeout */
+    case ESP32C61_RESET_SW_SYS:
+    case ESP32C61_RESET_SW_CPU:
+        return 0x0006U;     /* sw-bor: a reboot, or the reset after a fault */
     case ESP32C61_RESET_USB_UART:
     case ESP32C61_RESET_USB_JTAG:
-        return TIKU_ESP32C61_RESET_HOST;
-    case ESP32C61_RESET_CPU_LOCKUP:
-        return TIKU_ESP32C61_RESET_LOCKUP;
+        return 0x0014U;     /* sw-por: the host reset the chip */
+    case ESP32C61_RESET_DEEPSLEEP:
+        return 0x0008U;     /* lpm5-wake */
+    case ESP32C61_RESET_BROWNOUT:
+        return 0x0002U;     /* brownout */
     default:
-        return 0U;
+        /* The EN pin reads as power-on too; the ROM code keeps the rest. */
+        return 0x0000U;     /* none */
     }
 }

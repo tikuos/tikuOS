@@ -42,7 +42,7 @@ void tiku_cpu_esp32c61_delay_ms(unsigned int ms);
 uint8_t tiku_cpu_esp32c61_unique_id(uint8_t *buf, uint8_t len);
 
 /**
- * @brief Why the part last reset, as TIKU_ESP32C61_RESET_* bits.
+ * @brief Why the part last reset, as an MSP430 SYSRSTIV-style code.
  *
  * The ROM's own code, which says more, is tiku_cpu_esp32c61_reset_code().
  */
@@ -50,13 +50,5 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void);
 
 /** @brief The ROM's reset code (ESP32C61_RESET_* in the register header). */
 uint32_t tiku_cpu_esp32c61_reset_code(void);
-
-#define TIKU_ESP32C61_RESET_POWER       0x0001U
-#define TIKU_ESP32C61_RESET_SOFT        0x0002U
-#define TIKU_ESP32C61_RESET_WATCHDOG    0x0004U
-#define TIKU_ESP32C61_RESET_DEEPSLEEP   0x0008U
-#define TIKU_ESP32C61_RESET_BROWNOUT    0x0010U
-#define TIKU_ESP32C61_RESET_HOST        0x0020U /* esptool, USB or JTAG */
-#define TIKU_ESP32C61_RESET_LOCKUP      0x0040U
 
 #endif /* TIKU_ESP32C61_CPU_COMMON_H_ */
