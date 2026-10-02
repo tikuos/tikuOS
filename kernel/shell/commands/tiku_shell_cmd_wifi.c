@@ -66,6 +66,7 @@ static void put_bssid(const uint8_t bssid[6])
  */
 static void wifi_help(void)
 {
+    SHELL_PRINTF("wifi on | off            Power the radio up or down\n");
     SHELL_PRINTF("wifi status              Driver state + MAC + link\n");
     SHELL_PRINTF("wifi scan                Trigger active scan\n");
     SHELL_PRINTF("wifi list                Show cached scan results\n");
@@ -285,6 +286,23 @@ static void wifi_up(void)
 }
 #endif
 
+/**
+ * @brief Power the radio up or down through tiku_wireless_power().
+ *
+ * Up may take a while: the ESP32-C61 calibrates its RF on the way.  A radio
+ * that is always on (the CYW43) refuses down.
+ */
+static void wifi_power(uint8_t on)
+{
+    int rc = tiku_wireless_power(on);
+
+    if (rc == TIKU_DRV_OK) {
+        SHELL_PRINTF("wifi: radio %s\n", on ? "on" : "off");
+    } else {
+        SHELL_PRINTF("wifi: power %s failed (%d)\n", on ? "on" : "off", rc);
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 
 void
@@ -295,7 +313,9 @@ tiku_shell_cmd_wifi(uint8_t argc, const char *argv[])
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
     if (str_eq(argv[1], "up")) { wifi_up(); return; }
 #endif
-    if      (str_eq(argv[1], "status"))     wifi_status();
+    if      (str_eq(argv[1], "on"))         wifi_power(1U);
+    else if (str_eq(argv[1], "off"))        wifi_power(0U);
+    else if (str_eq(argv[1], "status"))     wifi_status();
     else if (str_eq(argv[1], "scan"))       wifi_scan();
     else if (str_eq(argv[1], "list"))       wifi_list();
     else if (str_eq(argv[1], "connect"))    wifi_connect(argc, argv,

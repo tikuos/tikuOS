@@ -28,11 +28,12 @@
  * The /proc/wifi subtree is only compiled when a wireless driver is
  * present.  The interface header lives in interfaces/wireless/
  * regardless, but the readers below call tiku_wireless_status(),
- * which only links when a driver (today the CYW43439) provides the
- * implementation.  PROC_WIFI_ENABLED gates both the readers and the
- * directory entry so a radio-less build carries no dead code.
+ * which only links when a driver (the CYW43439, the ESP32-C61's radio)
+ * provides the implementation.  PROC_WIFI_ENABLED gates both the readers
+ * and the directory entry so a radio-less build carries no dead code.
  */
-#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
+#if (defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE) || \
+    (defined(TIKU_DRV_WIFI_ESP_ENABLE) && TIKU_DRV_WIFI_ESP_ENABLE)
 #define PROC_WIFI_ENABLED 1
 #include <interfaces/wireless/tiku_wireless.h>
 #else

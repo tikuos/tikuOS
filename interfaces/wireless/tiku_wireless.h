@@ -126,6 +126,13 @@ uint8_t tiku_wireless_scan_results(tiku_wireless_ap_t *out,
  */
 int tiku_wireless_status(tiku_wireless_status_t *out);
 
+/**
+ * @brief Power the radio up or down.  Up does whatever bring-up the radio
+ *        needs (RF calibration, on the ESP32-C61); down gives its memory
+ *        back.  @return TIKU_DRV_OK; a radio that is always on refuses down
+ */
+int tiku_wireless_power(uint8_t on);
+
 /** Auth flavors for tiku_wireless_connect_auth. */
 typedef enum {
     TIKU_WIRELESS_AUTH_WPA2_PSK = 0,   /* default — IEEE 802.11i RSN  */

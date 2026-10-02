@@ -2532,10 +2532,9 @@ endif
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
 endif
-# The wifi shell command needs the CYW43 driver — only compile it
-# when the driver is enabled. (The shell config gates the table
-# entry the same way.)
-ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+# The wifi shell command needs a Wi-Fi driver -- only compile it when
+# one is enabled. (The shell config gates the table entry the same way.)
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
 endif
 ifeq ($(TIKU_DRV_WIFI_CYW43_BT_ENABLE),1)
