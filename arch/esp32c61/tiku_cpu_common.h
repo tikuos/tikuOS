@@ -51,4 +51,8 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void);
 /** @brief The ROM's reset code (ESP32C61_RESET_* in the register header). */
 uint32_t tiku_cpu_esp32c61_reset_code(void);
 
+/** @brief Code just written through the cache becomes what the core fetches:
+ *         every line written back and dropped, then fence.i. */
+void tiku_cpu_esp32c61_icache_invalidate(void);
+
 #endif /* TIKU_ESP32C61_CPU_COMMON_H_ */

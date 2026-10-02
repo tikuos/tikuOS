@@ -19,6 +19,11 @@
 /** Where the PSRAM appears: the MMU window past the flash's 8 MB. */
 #define TIKU_ESP32C61_PSRAM_BASE    0x42800000UL
 
+/** Tier-3 modules run from the PSRAM's first 32 KB; with the loader in the
+ *  build, the tier is handed only what lies past it. */
+#define TIKU_ESP32C61_MODULE_WINDOW       TIKU_ESP32C61_PSRAM_BASE
+#define TIKU_ESP32C61_MODULE_WINDOW_BYTES 0x8000UL
+
 typedef enum {
     TIKU_ESP32C61_PSRAM_OK      =  0,
     TIKU_ESP32C61_PSRAM_ABSENT  = -1,   /**< no answer on chip select 1 */

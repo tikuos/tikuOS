@@ -58,6 +58,7 @@ static inline void tiku_arm_enable_irq(void) {
 }
 #elif defined(PLATFORM_ESP32C61)
 #include "arch/esp32c61/tiku_cpu_freq_boot_arch.h"
+#include "arch/esp32c61/tiku_cpu_common.h"
 #include "arch/esp32c61/tiku_irq_arch.h"
 #include <stdint.h>
 #endif
@@ -325,6 +326,8 @@ void tiku_cpu_icache_invalidate(void) {
     tiku_cpu_ambiq_icache_invalidate();
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_icache_invalidate();
+#elif defined(PLATFORM_ESP32C61)
+    tiku_cpu_esp32c61_icache_invalidate();
 #endif
     /* MSP430 / RP2350 / nRF54L M33: no instruction cache -- no-op. */
 }

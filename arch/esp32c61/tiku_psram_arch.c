@@ -166,7 +166,7 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
     psram_spi0_phases();
     ESP32C61_CSR_WRITE(ESP32C61_CSR_PMAADDR13,
                        (TIKU_ESP32C61_PSRAM_BASE | (psram_bytes / 2UL - 1UL)) >> 2);
-    ESP32C61_CSR_WRITE(ESP32C61_CSR_PMACFG13, ESP32C61_PMA_NAPOT_RWX);
+    ESP32C61_CSR_WRITE(ESP32C61_CSR_PMACFG13, ESP32C61_PMA_NAPOT_RW);
     if (ESP32C61_ROM_MMU_SET(0UL, ESP32C61_MMU_ACCESS_PSRAM,
                              TIKU_ESP32C61_PSRAM_BASE, 0UL, 64UL,
                              psram_bytes / 0x10000UL, 0UL) != 0) {
@@ -189,12 +189,18 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
 
 tiku_esp32c61_psram_err_t tiku_esp32c61_psram_attach(void) {
     tiku_esp32c61_psram_err_t rc = tiku_esp32c61_psram_init();
+    uintptr_t base = TIKU_ESP32C61_PSRAM_BASE;
+    uint32_t bytes = psram_bytes;
 
     if (rc != TIKU_ESP32C61_PSRAM_OK || psram_attached) {
         return rc;
     }
-    if (tiku_tier_attach_psram((void *)TIKU_ESP32C61_PSRAM_BASE,
-                               (tiku_mem_arch_size_t)psram_bytes) != TIKU_MEM_OK) {
+#if defined(TIKU_BASIC_MODULE_ENABLE) && TIKU_BASIC_MODULE_ENABLE
+    base += TIKU_ESP32C61_MODULE_WINDOW_BYTES;
+    bytes -= TIKU_ESP32C61_MODULE_WINDOW_BYTES;
+#endif
+    if (tiku_tier_attach_psram((void *)base, (tiku_mem_arch_size_t)bytes) !=
+        TIKU_MEM_OK) {
         return TIKU_ESP32C61_PSRAM_MAP;
     }
     psram_attached = 1U;

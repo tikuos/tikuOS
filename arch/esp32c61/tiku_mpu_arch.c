@@ -18,6 +18,7 @@
 #include <hal/tiku_mpu_hal.h>
 #include "tiku_mpu_arch.h"
 #include "tiku_esp32c61_regs.h"
+#include "tiku_psram_arch.h"
 
 /** @brief WRITE bits across the three SAM segment fields (MSP430 model,
  *         the 0x0222 the other ports' shadows use). */
@@ -115,7 +116,13 @@ void tiku_mpu_arch_clear_violation_flags(void) {
 void tiku_mpu_arch_enable_violation_nmi(void) {
 }
 
-/** @brief No RAM execution window to open: modules are not loaded here yet. */
+/** @brief The module window, W^X: writable to load, then run but never
+ *         written -- PMA entry 12 outranks the PSRAM's read/write/execute. */
 void tiku_mpu_arch_module_window_exec(int enable) {
-    (void)enable;
+    ESP32C61_CSR_WRITE(ESP32C61_CSR_PMAADDR12,
+                       (TIKU_ESP32C61_MODULE_WINDOW |
+                        (TIKU_ESP32C61_MODULE_WINDOW_BYTES / 2UL - 1UL)) >> 2);
+    ESP32C61_CSR_WRITE(ESP32C61_CSR_PMACFG12, enable ? ESP32C61_PMA_NAPOT_RX
+                                                     : ESP32C61_PMA_NAPOT_RW);
+    __asm__ volatile ("fence.i" ::: "memory");
 }

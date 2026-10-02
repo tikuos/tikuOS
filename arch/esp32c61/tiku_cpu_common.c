@@ -88,3 +88,8 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void) {
         return 0x0000U;     /* none */
     }
 }
+
+void tiku_cpu_esp32c61_icache_invalidate(void) {
+    ESP32C61_ROM_CACHE_WB_INVAL_ALL();
+    __asm__ volatile ("fence.i" ::: "memory");
+}

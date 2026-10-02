@@ -2635,15 +2635,23 @@ MOD_CPU_FLAGS  = -mmcu=msp430fr6989 -mlarge
 MOD_LDS        = kernel/shell/basic/modules/mod_demo_msp430fr6989.ld
 MOD_LDFLAGS    =
 MOD_EMBED      = carray
+else ifeq ($(MCU),esp32c61)
+# RISC-V, run from a PSRAM window.  No small-data section: the module cannot
+# lean on the firmware's gp, so every global it touches is addressed in full.
+MOD_CPU_FLAGS  = -march=rv32imac_zicsr_zifencei -mabi=ilp32 \
+                 -msmall-data-limit=0 -DPLATFORM_ESP32C61
+MOD_LDS        = kernel/shell/basic/modules/mod_demo_esp32c61.ld
+MOD_EMBED      = carray
 else
 $(error TIKU_BASIC_MODULE_ENABLE=1: no module slot for MCU=$(MCU) \
         (supported: nrf54lm20a nrf54lm20b nrf54l15 rp2350 apollo510 \
-        apollo510b apollo4l apollo4p msp430fr5994 msp430fr6989))
+        apollo510b apollo4l apollo4p msp430fr5994 msp430fr6989 esp32c61))
 endif
 # The slot is the top 32 KB of the code window, reserved at link time only
 # when this loader is in the build.  apollo510 executes modules from the
-# ITCM and MSP430 keeps its own HIFRAM scheme, so neither reserves anything.
-ifeq (,$(filter apollo510 apollo510b msp430fr5994 msp430fr6989,$(MCU)))
+# ITCM, the ESP32-C61 from its PSRAM, and MSP430 keeps its own HIFRAM scheme,
+# so none of them reserves anything.
+ifeq (,$(filter apollo510 apollo510b msp430fr5994 msp430fr6989 esp32c61,$(MCU)))
 LDFLAGS += -Wl,--defsym=__tiku_module_reserve=0x8000
 endif
 MOD_CFLAGS     = $(MOD_CPU_FLAGS) -Os -ffreestanding \

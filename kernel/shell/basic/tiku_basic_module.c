@@ -9,7 +9,8 @@
  *
  * The image is a store file; where a part still installs into NVM, the 16-byte
  * header is invalidated first and written last, so a cut leaves an invalid magic
- * rather than a torn module.  Apollo510 instead copies it into the ITCM to run.
+ * rather than a torn module.  Apollo510 and the ESP32-C61 instead copy it into
+ * RAM to run (the ITCM, the PSRAM).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,6 +18,10 @@
 #include <kernel/shell/basic/tiku_basic_module.h>
 
 #if TIKU_BASIC_MODULE_ENABLE
+
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_psram_arch.h>
+#endif
 
 #include <kernel/memory/tiku_mem.h>  /* WEN gate (nordic) / bootrom programmer
                                       * prototype via hal/tiku_mem_hal.h (510) */
@@ -140,8 +145,8 @@ tiku_basic_module_activate(void)
 #if TIKU_MODULE_EXEC_IN_RAM
     /*
      * Materialise the image into the execution window, then run it there.  The
-     * window is RAM (ITCM) so this must happen after every reset -- the module's
-     * durability now lives in the store file, not in the window.
+     * window is RAM (ITCM, PSRAM) so this must happen after every reset -- the
+     * module's durability now lives in the store file, not in the window.
      *
      * The image is linked FOR this address, so a plain copy is enough: no
      * relocation, no fixups.  That is also the reason the window cannot simply
@@ -154,6 +159,12 @@ tiku_basic_module_activate(void)
         if (module_image(&src, &len, 0) != 0 || !module_src_ok(src)) {
             return -1;
         }
+#if defined(PLATFORM_ESP32C61)
+        /* The window is the PSRAM's, which may not be up yet this boot. */
+        if (tiku_esp32c61_psram_init() != TIKU_ESP32C61_PSRAM_OK) {
+            return -1;
+        }
+#endif
         /* Resting state is RW+XN, but a previously activated module left the
          * window RO+X -- make it writable again before copying over it. */
         tiku_mpu_module_window_exec(0);
@@ -186,7 +197,7 @@ tiku_basic_module_activate(void)
     if (hdr->init_off < sizeof(tiku_module_header_t) ||
         hdr->init_off >= TIKU_MODULE_CARVE_SIZE ||
         (img_len != 0u && hdr->init_off >= img_len) ||
-#if defined(__MSP430__)
+#if defined(__MSP430__) || defined(__riscv)
         (hdr->init_off & 1u) != 0u) {
 #else
         (hdr->init_off & 1u) == 0u) {

@@ -97,6 +97,7 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_CACHE_RESUME   ((void (*)(uint32_t))0x4000069CUL)
 #define ESP32C61_ROM_CACHE_INVAL    ((int (*)(uint32_t, uint32_t))0x40000634UL)
 #define ESP32C61_ROM_CACHE_WB_INVAL ((int (*)(uint32_t, uint32_t))0x40000640UL)
+#define ESP32C61_ROM_CACHE_WB_INVAL_ALL ((void (*)(void))0x40000650UL)
 
 /* ROM SPI user commands, for devices on the MSPI bus other than the flash:
  * the PSRAM's reset, identity and mode changes go out through these. */
@@ -503,10 +504,16 @@ typedef struct {
 #define ESP32C61_MMU_ACCESS_PSRAM   (1UL << 9)
 /* PMA, the attribute checker beside the PMP: the ROM's entry 15 makes the
  * whole external window read/execute, as flash; a lower entry, which wins,
- * opens the PSRAM pages for writes. */
+ * makes the PSRAM pages data -- written, never run. */
 #define ESP32C61_CSR_PMACFG13       0xBCD
 #define ESP32C61_CSR_PMAADDR13      0xBDD
-#define ESP32C61_PMA_NAPOT_RWX      0xC000001DUL    /* NAPOT, R, W, X, on */
+/* Entry 12, above 13, holds the module window to W^X: written, or run. */
+#define ESP32C61_CSR_PMACFG12       0xBCC
+#define ESP32C61_CSR_PMAADDR12      0xBDC
+#define ESP32C61_PMA_NAPOT_RW       0xC0000019UL    /* NAPOT, R, W, on */
+#define ESP32C61_PMA_NAPOT_RX       0xC0000015UL    /* NAPOT, R, X, on */
+#define ESP32C61_PMA_W              (1UL << 3)
+#define ESP32C61_PMA_X              (1UL << 2)
 #define ESP32C61_IO_MUX_MCU_SEL_MSK (7UL << 12)
 #define ESP32C61_IO_MUX_FUN_IE      (1UL << 9)
 

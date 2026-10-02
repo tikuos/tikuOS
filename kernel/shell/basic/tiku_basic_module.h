@@ -41,8 +41,9 @@
  *     from RRAM -- which is byte-writable, so install is a store loop
  *     behind the WEN gate.
  *   apollo510/510b:     NO NVM slot -- the image is copied into the ITCM and
- *     run from there (TIKU_MODULE_EXEC_ADDR).  This is the one part where a RAM
- *     execution window has been measured, so it is the one part that uses one.
+ *     run from there (TIKU_MODULE_EXEC_ADDR), a RAM window measured to work.
+ *   esp32c61:           NO NVM slot either -- copied into a 32 KB window at
+ *     the base of the in-package PSRAM and run from there.
  *   apollo4l/4p:        same MRAM personality as apollo510 (bootrom-programmed,
  *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
  *     0x18000-based code window.  The unified CACHECTRL cache is flushed
@@ -77,6 +78,10 @@
 #elif defined(TIKU_DEVICE_MSP430FR6989) || defined(__MSP430FR6989__)
 #define TIKU_MODULE_CARVE_ADDR  0x23000u
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
+#elif defined(PLATFORM_ESP32C61)
+/* DELIBERATELY UNDEFINED, as on apollo510: no NVM carve.  The image runs from
+ * a 32 KB window at the base of the in-package PSRAM (TIKU_MODULE_EXEC_ADDR
+ * below), copied there from its store file at every activate. */
 #elif defined(PLATFORM_NORDIC)
 /* nRF54L15 and nRF54LM20 alike: RRAM slot at the top of the shared 384 KB
  * code window.  Both parts use the SAME slot address, so one module image
@@ -127,9 +132,10 @@
  * unavoidable; nothing requires it to be in NVM.  The plan once read as "move
  * every platform's window into RAM and delete the NVM carve".  Measurement
  * turned that into a per-platform answer, because the condition that makes a
- * RAM window free holds on exactly one part:
+ * RAM window free holds on exactly two parts:
  *
  *   apollo510   ITCM window at 0x1000, NO NVM carve (module_size = 0)
+ *   esp32c61    PSRAM window at 0x42800000, NO NVM carve
  *   apollo4l/p  XIP from the 32 KB NVM carve
  *   nRF54L15    XIP from the 32 KB NVM carve
  *   nRF54LM20   XIP from the 32 KB NVM carve
@@ -143,6 +149,11 @@
  * rather than at ITCM base so no module address can be zero and be mistaken for
  * a null pointer, by the loader's checks or the module's; it must match the
  * module's .ld exactly.
+ *
+ * Why the ESP32-C61 is the other.  Its 2 MB of in-package PSRAM is RAM no
+ * kernel code depends on, so 32 KB of it costs 1.6% of a tier, where a flash
+ * carve would need erase-and-gate installs through the ROM.  PMA entry 12
+ * flips the window between read/write and read/execute in time.
  *
  * The power question is now measured, not inferred.  ITCM and DTCM power share
  * one field, PWRCTRL->MEMPWREN.PWRENTCM, and nothing in arch/ambiq programs it,
@@ -202,16 +213,19 @@
 #if defined(AM_PART_APOLLO510)
 #define TIKU_MODULE_EXEC_IN_RAM  1
 #define TIKU_MODULE_EXEC_ADDR    0x00001000u   /* ITCM + 4 KB (mod_demo_apollo510.ld) */
+#elif defined(PLATFORM_ESP32C61)
+#define TIKU_MODULE_EXEC_IN_RAM  1
+#define TIKU_MODULE_EXEC_ADDR    0x42800000u   /* PSRAM base (mod_demo_esp32c61.ld) */
 #else
 #define TIKU_MODULE_EXEC_IN_RAM  0
 #define TIKU_MODULE_EXEC_ADDR    TIKU_MODULE_CARVE_ADDR
 #endif
 
 /* Entry-offset convention: ARM Thumb entry addresses carry bit0 SET so
- * the loader can branch (carve_base + init_off) directly; MSP430 has no
- * Thumb bit and entry offsets are plain (even) byte offsets.  Modules
- * use this macro so one source builds for either CPU. */
-#if defined(__MSP430__)
+ * the loader can branch (carve_base + init_off) directly; MSP430 and RISC-V
+ * have no Thumb bit and entry offsets are plain (even) byte offsets.  Modules
+ * use this macro so one source builds for any of the CPUs. */
+#if defined(__MSP430__) || defined(__riscv)
 #define TIKU_MODULE_INIT_OFF(off)  (off)
 #else
 #define TIKU_MODULE_INIT_OFF(off)  ((off) | 1u)
