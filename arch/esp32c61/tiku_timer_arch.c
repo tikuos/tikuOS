@@ -64,6 +64,31 @@ void tiku_esp32c61_alarm_disarm(unsigned n) {
     tiku_esp32c61_mie_restore(s);
 }
 
+uint64_t tiku_esp32c61_alarm_due(uint64_t now) {
+    uint32_t conf = TIKU_REG32(ESP32C61_SYSTIMER_CONF);
+    uint32_t ena = TIKU_REG32(ESP32C61_SYSTIMER_INT_ENA);
+    uint32_t raw = TIKU_REG32(ESP32C61_SYSTIMER_INT_RAW);
+    uint64_t due = ~0ULL, at;
+
+    for (unsigned n = TIKU_ESP32C61_ALARM_TICK;
+         n <= TIKU_ESP32C61_ALARM_HTIMER; n++) {
+        if ((conf & ESP32C61_SYSTIMER_ALARM_EN(n)) == 0UL ||
+            (ena & ESP32C61_SYSTIMER_INT(n)) == 0UL) {
+            continue;
+        }
+        if ((raw & ESP32C61_SYSTIMER_INT(n)) != 0UL) {
+            return now;                 /* fired, not yet taken */
+        }
+        at = ((uint64_t)(TIKU_REG32(ESP32C61_SYSTIMER_TARGET_HI(n)) &
+                         0xFFFFFUL) << 32) |
+             TIKU_REG32(ESP32C61_SYSTIMER_TARGET_LO(n));
+        if (at > now && at < due) {     /* a past one-shot is spent */
+            due = at;
+        }
+    }
+    return due;
+}
+
 /**
  * @brief Count every tick due by @p now; how many were counted.
  */

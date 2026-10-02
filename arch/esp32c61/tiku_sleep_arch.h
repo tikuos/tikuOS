@@ -35,6 +35,28 @@ uint32_t tiku_esp32c61_lp_hz(void);
  */
 void tiku_esp32c61_deep_sleep(uint64_t us) __attribute__((noreturn));
 
+/** @brief Light sleep may also end on GPIO9 held low (the BOOT pin). */
+#define TIKU_ESP32C61_NAP_PIN   (1U << 0)
+
+/**
+ * @brief Light sleep: the core stalls and the PLL stops, while the crystal,
+ *        UART0 and SYSTIMER run on -- RAM, time and console input survive.
+ *
+ * Ends after @p us (0: no timer), on a byte arriving at UART0, which is kept,
+ * or with @p flags TIKU_ESP32C61_NAP_PIN on GPIO9 low.  Returns the PMU's
+ * wake cause (ESP32C61_PMU_WAKE_*), 0 when a waiting wake refused the sleep.
+ */
+uint32_t tiku_esp32c61_light_sleep(uint64_t us, unsigned flags);
+
+/**
+ * @brief The idle hook for `sleep lpm3`: light sleep until the next SYSTIMER
+ *        deadline, or wfi when that is too near to pay for the way in.
+ *
+ * Only timers and console bytes end it.  Other interrupts wait for the next
+ * deadline, which is why it is chosen, never the default.
+ */
+void tiku_esp32c61_light_idle(void);
+
 /** @brief Latch why this boot began; once, early in every boot. */
 void tiku_esp32c61_sleep_boot(void);
 

@@ -153,6 +153,11 @@ typedef struct {
 #define ESP32C61_UART_TXCNT(s)      (((s) >> 16) & 0xFFUL)
 #define ESP32C61_UART_FIFO_DEPTH    128UL
 #define ESP32C61_UART_CONF1(b)      ((b) + 0x24UL)
+/* Waking from light sleep: mode 1 wakes on bytes received, so the UART must
+ * keep its clock asleep, and the byte that woke it is kept. */
+#define ESP32C61_UART_SLEEP_CONF2(b) ((b) + 0x38UL)
+#define ESP32C61_UART_WK_MSK        ((3UL << 26) | (0xFFUL << 10))
+#define ESP32C61_UART_WK_RX_BYTES(n) ((1UL << 26) | ((uint32_t)(n) << 10))
 #define ESP32C61_UART_RXFULL_MSK    0xFFUL      /* RX threshold, bytes */
 #define ESP32C61_UART_TOUT_CONF(b)  ((b) + 0x64UL)
 #define ESP32C61_UART_TOUT_EN       (1UL << 0)
@@ -181,6 +186,8 @@ typedef struct {
 #define ESP32C61_GPIO_PIN_TYPE_MSK  (7UL << 7)
 #define ESP32C61_GPIO_PIN_ENA_MSK   (0x1FUL << 13)
 #define ESP32C61_GPIO_PIN_ENA_PCPU  (1UL << 13)
+#define ESP32C61_GPIO_PIN_LOW_LEVEL (4UL << 7)  /* the type a wake needs */
+#define ESP32C61_GPIO_PIN_WAKEUP    (1UL << 10)
 #define ESP32C61_GPIO_OUT_SEL(n)    (ESP32C61_GPIO_BASE + 0xAD4UL + 4UL * (n))
 #define ESP32C61_GPIO_SIG_OUT       256UL   /* plain GPIO_OUT drives the pin */
 #define ESP32C61_GPIO_COUNT         30U
@@ -358,6 +365,7 @@ typedef struct {
 #define ESP32C61_PMU_HP_ACT_ICG_MODEM  (ESP32C61_PMU_BASE + 0x00CUL)
 #define ESP32C61_PMU_HP_ACT_CLK_POWER  (ESP32C61_PMU_BASE + 0x014UL)
 #define ESP32C61_PMU_HP_ACT_SYSCLK     (ESP32C61_PMU_BASE + 0x024UL)
+#define ESP32C61_PMU_HP_ACT_REGULATOR0 (ESP32C61_PMU_BASE + 0x028UL)
 #define ESP32C61_PMU_ICG_SYSCLK_EN  (1UL << 27)         /* HP sysclk: running */
 #define ESP32C61_PMU_XPD_PLL_ALL    (7UL << 28)         /* bb_i2c, pll_i2c, pll */
 #define ESP32C61_PMU_MODEM_CODE_ACTIVE (2UL << 30)
@@ -374,6 +382,7 @@ typedef struct {
 #define ESP32C61_PMU_HP_SLP_REGULATOR1 (ESP32C61_PMU_BASE + 0x094UL)
 #define ESP32C61_PMU_HP_SLP_XTAL       (ESP32C61_PMU_BASE + 0x098UL)
 /* The LP system awake and asleep. */
+#define ESP32C61_PMU_LP_ACT_REGULATOR0 (ESP32C61_PMU_BASE + 0x09CUL)
 #define ESP32C61_PMU_LP_ACT_DIG_POWER  (ESP32C61_PMU_BASE + 0x0A8UL)
 #define ESP32C61_PMU_LP_ACT_CLK_POWER  (ESP32C61_PMU_BASE + 0x0ACUL)
 #define ESP32C61_PMU_LP_SLP_REGULATOR0 (ESP32C61_PMU_BASE + 0x0B4UL)
@@ -409,6 +418,12 @@ typedef struct {
 #define ESP32C61_PMU_HP_REG_XPD     (1UL << 18)
 #define ESP32C61_PMU_LP_REG_XPD     (1UL << 22)         /* LP regulator0 */
 #define ESP32C61_PMU_REG_DBIAS_POS  27U                 /* [31:27], both */
+#define ESP32C61_PMU_REG_DBIAS_MSK  (0x1FUL << 27)
+#define ESP32C61_PMU_DRV_B_MSK      (0xFUL << 28)       /* LP regulator1 */
+/* Function clocks a sleep may keep running (HP sleep ICG). */
+#define ESP32C61_ICG_UART0          (1UL << 3)
+#define ESP32C61_ICG_SYSTIMER       (1UL << 18)
+#define ESP32C61_ICG_IOMUX          (1UL << 28)
 
 /* Wake-path timing: power-up waits, isolation and reset waits, clocks. */
 #define ESP32C61_PMU_WAIT_TIMER0    (ESP32C61_PMU_BASE + 0x0ECUL)
@@ -443,6 +458,10 @@ typedef struct {
 #define ESP32C61_PMU_SLP_CNTL5      (ESP32C61_PMU_BASE + 0x138UL)
 #define ESP32C61_PMU_SLP_CNTL7      (ESP32C61_PMU_BASE + 0x140UL)
 #define ESP32C61_PMU_WAKE_CAUSE     (ESP32C61_PMU_BASE + 0x144UL)
+#define ESP32C61_PMU_REJECT_CAUSE   (ESP32C61_PMU_BASE + 0x148UL)
+#define ESP32C61_PMU_INT_RAW        (ESP32C61_PMU_BASE + 0x160UL)
+#define ESP32C61_PMU_INT_WAKE       (1UL << 31)
+#define ESP32C61_PMU_INT_REJECT     (1UL << 30)
 #define ESP32C61_PMU_HP_INT_CLR     (ESP32C61_PMU_BASE + 0x16CUL)
 #define ESP32C61_PMU_INT_WAKE_REJECT (3UL << 30)
 #define ESP32C61_PMU_WAKE_EXT1      (1UL << 1)

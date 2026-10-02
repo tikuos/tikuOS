@@ -207,6 +207,25 @@ static void clock_tree_set(uint32_t root, uint32_t cpu_div, uint32_t ahb_div) {
     }
 }
 
+uint32_t tiku_cpu_esp32c61_clock_park(void) {
+    tiku_esp32c61_clock_t now;
+
+    tiku_cpu_esp32c61_clock_probe(&now);
+    clock_tree_set(ESP32C61_PCR_SOC_CLK_XTAL, 1UL, 1UL);
+    ESP32C61_ROM_SET_CPU_MHZ(40U);
+    return ((uint32_t)now.root << 16) | ((uint32_t)now.cpu_div << 8) |
+           now.ahb_div;
+}
+
+void tiku_cpu_esp32c61_clock_unpark(uint32_t saved) {
+    tiku_esp32c61_clock_t now;
+
+    clock_tree_set((saved >> 16) & 0xFFUL, (saved >> 8) & 0xFFUL,
+                   saved & 0xFFUL);
+    tiku_cpu_esp32c61_clock_probe(&now);
+    ESP32C61_ROM_SET_CPU_MHZ((uint32_t)(now.cpu_hz / 1000000UL));
+}
+
 int tiku_cpu_freq_esp32c61_set(unsigned int mhz) {
     if (!tiku_cpu_freq_esp32c61_supported(mhz)) {
         return -1;

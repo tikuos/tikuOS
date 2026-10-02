@@ -72,6 +72,14 @@ typedef struct {
 /** @brief Read the clock tree into @p out. */
 void tiku_cpu_esp32c61_clock_probe(tiku_esp32c61_clock_t *out);
 
+/**
+ * @brief Move the core onto the crystal for a sleep that stops the PLL, and
+ *        back: park returns the tree as it was, unpark restores it, and the
+ *        rate measured at the last change stands -- no 2 ms re-measurement.
+ */
+uint32_t tiku_cpu_esp32c61_clock_park(void);
+void tiku_cpu_esp32c61_clock_unpark(uint32_t saved);
+
 /** @brief 1 when @p mhz is a core rate the tree makes exactly. */
 int tiku_cpu_freq_esp32c61_supported(unsigned int mhz);
 

@@ -60,6 +60,7 @@ static inline void tiku_arm_enable_irq(void) {
 #include "arch/esp32c61/tiku_cpu_freq_boot_arch.h"
 #include "arch/esp32c61/tiku_cpu_common.h"
 #include "arch/esp32c61/tiku_irq_arch.h"
+#include "arch/esp32c61/tiku_sleep_arch.h"
 #include <stdint.h>
 #endif
 
@@ -482,11 +483,14 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
 #elif defined(PLATFORM_ESP32C61)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:
+            /* Plain WFI: the SYSTIMER tick and any enabled line wake the
+             * core. */
+            return tiku_cpu_boot_esp32c61_power_wfi_enter;
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
-            /* Plain WFI: the SYSTIMER tick and any enabled line wake the
-             * core.  Light and deep sleep through the PMU land later. */
-            return tiku_cpu_boot_esp32c61_power_wfi_enter;
+            /* PMU light sleep to the next timer deadline: timers and console
+             * bytes end it, other interrupts wait -- so chosen, not default. */
+            return tiku_esp32c61_light_idle;
         case TIKU_CPU_IDLE_OFF:
         default:
             return NULL;
@@ -525,9 +529,17 @@ const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_OFF:
         default:                    return "off";
     }
+#elif defined(PLATFORM_ESP32C61)
+    switch (mode) {
+        case TIKU_CPU_IDLE_LIGHT:   return "WFI";
+        case TIKU_CPU_IDLE_DEEP:    return "light sleep";
+        case TIKU_CPU_IDLE_DEEPEST: return "light sleep";
+        case TIKU_CPU_IDLE_OFF:
+        default:                    return "off";
+    }
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
+      defined(PLATFORM_RA8P1)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:   return "WFI";
         case TIKU_CPU_IDLE_DEEP:    return "WFI";
@@ -587,9 +599,10 @@ const char *tiku_cpu_idle_mode_desc(tiku_cpu_idle_mode_t mode) {
 #elif defined(PLATFORM_ESP32C61)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:
+            return "WFI (RISC-V wait-for-interrupt)";
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
-            return "WFI (RISC-V wait-for-interrupt)";
+            return "light sleep (core and PLL off; timers and console wake it)";
         case TIKU_CPU_IDLE_OFF:
         default:
             return "off (busy-wait)";

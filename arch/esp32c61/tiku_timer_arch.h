@@ -66,6 +66,10 @@ unsigned short         tiku_clock_arch_fine(void);
 /** @brief Sub-tick range. @return One more than the maximum fine value */
 int                    tiku_clock_arch_fine_max(void);
 
+/** @brief The earliest count an armed SYSTIMER alarm (tick or htimer) waits
+ *         for after @p now: @p now when one has fired untaken, ~0 if none. */
+uint64_t               tiku_esp32c61_alarm_due(uint64_t now);
+
 /** @brief Clock-source fault; the crystal has no fallback. @return NONE */
 unsigned char          tiku_clock_arch_fault(void);
 

@@ -66,6 +66,7 @@
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_sleep_arch.h>
 #include <arch/esp32c61/tiku_cpu_common.h>
+#include <arch/esp32c61/tiku_cpu_freq_boot_arch.h>
 #include <arch/esp32c61/tiku_esp32c61_regs.h>
 #endif
 
@@ -449,9 +450,25 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
 #endif
 
 #if defined(PLATFORM_ESP32C61)
-    /* Deep sleep is the C61's only sleep that saves anything: the HP domain
-     * powers down, SRAM with it, and the wake is a reset.  `off` checkpoints
-     * durable state first; `why` says what ended the last one. */
+    /* Deep sleep powers the HP domain down, SRAM with it, and the wake is a
+     * reset: `off` checkpoints durable state first, and `why` says what ended
+     * the last one.  `nap` is light sleep, which keeps everything and
+     * returns -- early on a keystroke, or on GPIO9 low with `pin`. */
+    if (streq(argv[1], "nap") && argc >= 3) {
+        uint32_t ms = parse_u32(argv[2]);
+        unsigned flags = (argc >= 4 && streq(argv[3], "pin")) ?
+                         TIKU_ESP32C61_NAP_PIN : 0U;
+        uint64_t t0 = tiku_cpu_esp32c61_systimer();
+        uint32_t w = tiku_esp32c61_light_sleep((uint64_t)ms * 1000ULL, flags);
+        uint64_t dt = tiku_cpu_esp32c61_systimer() - t0;
+
+        SHELL_PRINTF("nap: %lu us,%s%s%s%s\n", (unsigned long)(dt / 16ULL),
+                     w ? " woke by" : " refused: a wake was waiting",
+                     (w & ESP32C61_PMU_WAKE_TIMER) ? " timer" : "",
+                     (w & ESP32C61_PMU_WAKE_UART0) ? " uart0" : "",
+                     (w & ESP32C61_PMU_WAKE_GPIO)  ? " gpio"  : "");
+        return;
+    }
     if (streq(argv[1], "why")) {
         uint32_t w = tiku_esp32c61_wake_cause();
 
@@ -477,7 +494,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         }
         tiku_esp32c61_deep_sleep((uint64_t)ms * 1000ULL);
     }
-    SHELL_PRINTF("Usage: power [why | off [ms]]\n");
+    SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms> [pin]]\n");
     return;
 #endif
 
