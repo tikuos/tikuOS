@@ -50,6 +50,16 @@ typedef struct {
      * transport state is ready to send/recv. 0 during bring-up.
      */
     int (*is_ready)(void);
+
+    /**
+     * Optional: wait up to @p ms for a packet while the stack expects a
+     * reply.  A controller running as a worker thread needs the CPU in
+     * that time; NULL means the stack just sleeps.
+     */
+    void (*wait)(uint16_t ms);
+
+    /** Optional: the controller firmware's version string (NULL: none). */
+    const char *(*version)(void);
 } tiku_bt_transport_t;
 
 /**

@@ -5,11 +5,12 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_bt.h - "bt" shell command (CYW43439 Bluetooth)
+ * tiku_shell_cmd_bt.h - "bt" shell command (the BLE host stack)
  *
- * Compiled in only when both TIKU_DRV_WIFI_CYW43_ENABLE and
- * TIKU_DRV_WIFI_CYW43_BT_ENABLE are set; the table entry in
- * tiku_shell.c is gated identically.
+ * Compiled in with a radio under the host stack: the CYW43439's BT extension
+ * (TIKU_DRV_WIFI_CYW43_BT_ENABLE) or the ESP32-C61's controller
+ * (TIKU_DRV_BLE_ESP_ENABLE); the table entry in tiku_shell.c is gated
+ * identically.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

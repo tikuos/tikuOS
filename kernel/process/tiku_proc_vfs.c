@@ -41,12 +41,13 @@
 #endif
 
 /*
- * The /proc/bt subtree mirrors /proc/wifi but pulls from the CYW43
- * Bluetooth driver via the driver-agnostic tiku_bt API.  Gated on
- * the separate BT extension flag (Wi-Fi and BT can be built
- * independently) so non-BT builds get no /proc/bt directory at all.
+ * The /proc/bt subtree mirrors /proc/wifi but pulls from the radio under
+ * the BLE host stack (the CYW43's BT extension, the ESP32-C61's controller)
+ * via the driver-agnostic tiku_bt API, so non-BT builds get no /proc/bt
+ * directory at all.
  */
-#if defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && TIKU_DRV_WIFI_CYW43_BT_ENABLE
+#if (defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && TIKU_DRV_WIFI_CYW43_BT_ENABLE) \
+    || (defined(TIKU_DRV_BLE_ESP_ENABLE) && TIKU_DRV_BLE_ESP_ENABLE)
 #define PROC_BT_ENABLED 1
 #include <interfaces/bluetooth/tiku_bt.h>
 #else

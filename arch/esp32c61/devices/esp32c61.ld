@@ -53,8 +53,10 @@ SECTIONS
     {
         KEEP(*(.text.entry))
         *(.text .text.*)
-        /* Code a library marks as needing RAM, should XIP hold the rest. */
+        /* Code a library marks as needing RAM, should XIP hold the rest
+         * (the BLE controller's hot paths always stay here). */
         *(.iram1 .iram1.*)
+        *(.high_perf_code_iram1 .high_perf_code_iram1.*)
         . = ALIGN(4);
     } > SRAM
 
@@ -80,6 +82,7 @@ SECTIONS
         . = ALIGN(4);
         __data_start = .;
         *(.data .data.*)
+        *(.dram1 .dram1.*)
         /* gp sits 2 KB into the small data so one signed 12-bit offset
          * reaches all of it. */
         . = ALIGN(8);

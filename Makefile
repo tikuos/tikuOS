@@ -2547,7 +2547,7 @@ endif
 ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
 endif
-ifeq ($(TIKU_DRV_WIFI_CYW43_BT_ENABLE),1)
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_bt.c
 endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
@@ -3344,11 +3344,10 @@ endif
 endif
 
 # Bluetooth Low Energy protocol stack: driver-agnostic. Pulled in
-# whenever a Bluetooth-capable driver is enabled. Today that's only
-# TIKU_DRV_WIFI_CYW43_BT_ENABLE (CYW43439 BTSDIO transport); a future
-# UART-HCI driver for Nordic / ESP32 / TI parts would set its own
-# enable flag and we'd OR it in here.
-ifeq ($(TIKU_DRV_WIFI_CYW43_BT_ENABLE),1)
+# whenever a driver gives it a transport: the CYW43439's BTSDIO
+# (TIKU_DRV_WIFI_CYW43_BT_ENABLE) or the ESP32-C61 controller's in-memory
+# HCI (TIKU_DRV_BLE_ESP_ENABLE).
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
 include $(wildcard $(PROJ_DIR)/tikukits/net/bluetooth/build.mk)
 endif
 

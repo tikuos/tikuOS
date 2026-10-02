@@ -15,6 +15,9 @@
 #include "tiku_shell_cmd_bt.h"
 #include <kernel/shell/tiku_shell.h>
 #include <interfaces/bluetooth/tiku_bt.h>
+#if TIKU_DRV_BLE_ESP_ENABLE
+#include <drivers/wifi/esp/tiku_drv_ble_esp.h>
+#endif
 
 /*---------------------------------------------------------------------------*/
 
@@ -52,7 +55,10 @@ static void put_hex4(uint16_t w)
  */
 static void bt_help(void)
 {
-    SHELL_PRINTF("bt status               CYW43 BT subsystem: MAC + version\n");
+#if TIKU_DRV_BLE_ESP_ENABLE
+    SHELL_PRINTF("bt on | off             Power the BLE controller up / down\n");
+#endif
+    SHELL_PRINTF("bt status               The radio: address + version\n");
     SHELL_PRINTF("bt advertise <name>     Start GAP advertising with local name\n");
     SHELL_PRINTF("bt advertise stop       Stop GAP advertising\n");
     SHELL_PRINTF("bt scan                 Start LE scan (clears cache)\n");
@@ -88,6 +94,8 @@ static const char *hci_version_name(uint8_t v)
     case 0x0B: return "5.2";
     case 0x0C: return "5.3";
     case 0x0D: return "5.4";
+    case 0x0E: return "6.0";
+    case 0x0F: return "6.1";
     default:   return "?";
     }
 }
@@ -111,7 +119,7 @@ static void put_name(const char *s, uint8_t n)
 }
 
 /**
- * @brief Handle "bt status": print the CYW43 BT subsystem information.
+ * @brief Handle "bt status": print what the radio under the stack reports.
  *
  * When the controller is ready, prints the BD_ADDR, HCI and LMP versions
  * (with Core Spec names), manufacturer, firmware string, and current
@@ -119,6 +127,24 @@ static void put_name(const char *s, uint8_t n)
  */
 static void bt_status(void)
 {
+#if TIKU_DRV_BLE_ESP_ENABLE
+    tiku_drv_ble_esp_status_t es;
+
+    tiku_drv_ble_esp_status(&es);
+    if (!es.up) {
+        SHELL_PRINTF("BT: off (bt on brings it up; library %s)\n",
+                     es.version);
+        return;
+    }
+    SHELL_PRINTF("Heap:     %lu of %lu bytes in use, %lu at most\n",
+                 (unsigned long)es.heap_used, (unsigned long)es.heap_size,
+                 (unsigned long)es.heap_peak);
+    SHELL_PRINTF("IRQs:     %lu\n", (unsigned long)es.irqs);
+    if (es.rx_dropped != 0U) {
+        SHELL_PRINTF("Dropped:  %lu HCI packets\n",
+                     (unsigned long)es.rx_dropped);
+    }
+#endif
     if (tiku_bt_is_ready() == 0) {
         SHELL_PRINTF("BT: not ready (bring-up failed or not built in)\n");
         return;
@@ -158,6 +184,8 @@ static void bt_status(void)
                 SHELL_PRINTF(" (Broadcom)");
             else if (v.manufacturer == 0x0131U)
                 SHELL_PRINTF(" (Cypress/Infineon)");
+            else if (v.manufacturer == 0x02E5U)
+                SHELL_PRINTF(" (Espressif)");
             tiku_shell_io_putc('\n');
         }
         SHELL_PRINTF("BTFW:     %s\n", tiku_bt_fw_version());
@@ -596,6 +624,15 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_help();
         return;
     }
+#if TIKU_DRV_BLE_ESP_ENABLE
+    if (str_eq(argv[1], "on") || str_eq(argv[1], "off")) {
+        int rc = tiku_drv_ble_esp_power(str_eq(argv[1], "on") ? 1U : 0U);
+
+        SHELL_PRINTF(rc == 0 ? "BT: %s\n" : "BT: %s failed (%d)\n",
+                     argv[1], rc);
+        return;
+    }
+#endif
     if (str_eq(argv[1], "status")) {
         bt_status();
         return;
