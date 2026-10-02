@@ -47,8 +47,9 @@
 #if PUMP_HAS_TCP
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
 #endif
-#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
-#include <drivers/wifi/cyw43/whd.h>
+#if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless.h>
+#define PUMP_HAS_WIFI 1
 #endif
 
 /** @brief ASCII ETX — the console break byte. */
@@ -62,12 +63,12 @@ int tiku_shell_pump_net(void (*periodic)(void))
 {
     tiku_watchdog_kick();
 
-#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
-    /* Drive the WiFi RX drain every call: the cyw43_runner process is
-     * starved while the caller busy-waits, so without this the chip's
-     * F2 FIFO fills and inbound segments (SYN-ACK, CONNACK, data)
-     * never reach the TCP stack — connects would always time out. */
-    (void)whd_drain_rx();
+#if defined(PUMP_HAS_WIFI)
+    /* Drive the WiFi RX every call: the radio's runner is starved while the
+     * caller busy-waits (on the ESP32-C61 the radio's own task too), so
+     * without this inbound segments (SYN-ACK, CONNACK, data) never reach
+     * the TCP stack -- connects would always time out. */
+    (void)tiku_wireless_rx_poll();
 #endif
 
 #if PUMP_HAS_TCP

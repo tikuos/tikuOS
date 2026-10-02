@@ -85,8 +85,10 @@
 #include <tikukits/net/ipv4/tiku_kits_net_dns.h>
 #include <tikukits/net/tls/x509/tiku_kits_crypto_x509.h>
 #include <tikukits/net/tls/tls13/tiku_kits_crypto_tls13.h>
+#if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless.h>     /* rx_poll in the pump  */
+#endif
 #if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
-#include <drivers/wifi/cyw43/whd.h>                /* whd_drain_rx in pump */
 #include <arch/arm-rp2350/tiku_trng_arch.h>        /* TLS entropy          */
 #endif
 #endif

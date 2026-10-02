@@ -154,6 +154,13 @@ int tiku_wireless_tx_eth(const uint8_t *frame, uint16_t len);
  */
 int tiku_wireless_set_rx(tiku_wireless_rx_t cb, void *ctx);
 
+/**
+ * @brief For a caller that waits on the network without returning to the
+ *        scheduler (BASIC's HTTPGET$): let the radio run, then hand the
+ *        receiver what came in, now.  Kernel thread only.  @return Frames
+ */
+int tiku_wireless_rx_poll(void);
+
 /** Auth flavors for tiku_wireless_connect_auth. */
 typedef enum {
     TIKU_WIRELESS_AUTH_WPA2_PSK = 0,   /* default — IEEE 802.11i RSN  */

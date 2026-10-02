@@ -177,9 +177,10 @@ static void basic_tls13_dbg(const char *m)
  * so a tight loop calling it every iteration would blow through them (the
  * same trap as dns_poll).
  *
- * RX delivery is transport-specific. On WiFi the radio RX is a separate channel
- * (cyw43 SPI), drained via whd_drain_rx(); the console UART is unrelated, so it
- * also drop a stray keystroke that would otherwise pile up. On a SLIP build the
+ * RX delivery is transport-specific. On WiFi the radio RX is a separate channel,
+ * delivered via tiku_wireless_rx_poll() (which also lends the CPU to a radio
+ * whose task is a worker); the console UART is unrelated, so it also drops a
+ * stray keystroke that would otherwise pile up. On a SLIP build the
  * console UART *is* the IP transport, and the shell loop that normally runs the
  * shared RX demux is blocked inside this builtin -- so it drives that same demux
  * here via tiku_shell_net_pump().  It must be the shell's demux (not a private
@@ -195,8 +196,8 @@ basic_https_pump(void)
     static tiku_clock_time_t last_tcp;
     tiku_clock_time_t now = tiku_clock_time();
     tiku_watchdog_kick();
-#if defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE
-    (void)whd_drain_rx();
+#if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
+    (void)tiku_wireless_rx_poll();
     if (tiku_shell_io_rx_ready()) (void)tiku_shell_io_getc();
 #elif TIKU_SHELL_CMD_SLIP
     tiku_shell_net_pump();          /* shell's persistent SLIP demux -> ipv4_input */
