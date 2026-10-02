@@ -3266,6 +3266,12 @@ ifneq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE)),)
 CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
 endif
+# Nothing above, the IP link or the net test brings TCP: tell the code, or
+# IPv4 hands TCP segments to a tcp_input no source here defines.
+ifeq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
+                 $(TIKU_KITS_NET_LINK_IP_ENABLE) $(TIKU_SHELL_NET_TEST)),)
+CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=0
+endif
 ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
 # Same guard as the full-net branch below: the kit flag auto-enables the
@@ -3303,9 +3309,9 @@ ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_HTTP_ENABLE=1
 endif
 endif
-# WiFi link backend: requires both the CYW43 driver and the net kit.
-# Compiled only when the build wires both submodules together.
-ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
+# WiFi link backend: the net kit over tiku_wireless, with either radio driver
+# (the CYW43439 or the ESP32-C61's own).
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
 ifeq ($(TIKU_KITS_NET_WIFI_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_WIFI_ENABLE=1
 SRCS   += $(wildcard tikukits/net/wifi/*.c)
