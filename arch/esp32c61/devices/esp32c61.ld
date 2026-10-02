@@ -7,8 +7,9 @@
  *
  * esp32c61.ld - ESP32-C61 linker script.
  *
- * The whole image lives in HP SRAM, where the ROM loads it and jumps to the
- * entry; flash is storage, never a code window.
+ * The image lives in HP SRAM, where the ROM loads it and jumps to the entry.
+ * Flash is storage, and a code window only for what a build places in XIP
+ * below (the radio's libraries): `make` writes that part as xip.bin.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,6 +31,9 @@ ENTRY(tiku_esp32c61_reset_handler)
 MEMORY
 {
     SRAM (rwx) : ORIGIN = 0x40800000, LENGTH = 0x4C000
+    /* Flash 1 MB on, through the 1:1 map, below /data at 2 MB.  Empty unless
+     * a driver registers a fragment placing an output section .xip* here. */
+    XIP (rx)   : ORIGIN = 0x42100000, LENGTH = 0xF0000
 }
 
 __sram_start = ORIGIN(SRAM);
@@ -37,10 +41,16 @@ __sram_end   = ORIGIN(SRAM) + LENGTH(SRAM);
 
 SECTIONS
 {
+    /* The XIP fragments drivers registered (TIKU_XIP_LDS), generated into
+     * the build directory; first, so their patterns claim their sections. */
+    INCLUDE tiku_xip.ld
+
     .text :
     {
         KEEP(*(.text.entry))
         *(.text .text.*)
+        /* Code a library marks as needing RAM, should XIP hold the rest. */
+        *(.iram1 .iram1.*)
         . = ALIGN(4);
     } > SRAM
 

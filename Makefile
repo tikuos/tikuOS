@@ -1574,6 +1574,8 @@ LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
 # Code and data share one SRAM, so the single segment is RWX by design.
 LDFLAGS += -Wl,--no-warn-rwx-segments
 LDFLAGS += -Tarch/esp32c61/devices/esp32c61.ld
+# Where the arch script finds tiku_xip.ld, generated below the driver includes.
+LDFLAGS += -L$(BUILD_DIR)
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-u,tiku_autostart_processes
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
@@ -3636,6 +3638,19 @@ $(PLATFORM_STAMP):
 # -T is covered without a second list to keep in step.
 TIKU_LDSCRIPTS := $(patsubst -T%,%,$(filter -T%,$(LDFLAGS)))
 
+ifeq ($(TIKU_PLATFORM),esp32c61)
+# What the arch script INCLUDEs: one line per fragment a driver registered in
+# TIKU_XIP_LDS, none otherwise.  Rewritten only when its text changes, so an
+# unchanged build does not relink.
+TIKU_XIP_LD := $(BUILD_DIR)/tiku_xip.ld
+$(shell mkdir -p $(BUILD_DIR) && \
+    printf '%s\n' '/* generated: the XIP fragments drivers registered */' \
+        $(foreach f,$(TIKU_XIP_LDS),'INCLUDE $(f)') > $(TIKU_XIP_LD).new && \
+    { cmp -s $(TIKU_XIP_LD).new $(TIKU_XIP_LD) || \
+      mv $(TIKU_XIP_LD).new $(TIKU_XIP_LD); })
+TIKU_LDSCRIPTS += $(TIKU_XIP_LD) $(TIKU_XIP_LDS)
+endif
+
 $(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED) $(TIKU_LDSCRIPTS)
 	$(CC) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
@@ -3722,16 +3737,32 @@ endif
 
 # ESP32-C61: the ELF as an image the ROM's loader accepts.  A recipe that
 # names the fix rather than a 127 from the shell when esptool is missing.
+# Sections a driver placed in the XIP window (.xip*) leave the boot image
+# and go raw to xip.bin, written at flash 1 MB beside it.  objcopy's warning
+# about the XIP segment left empty in the SRAM copy is kept to a log: that
+# emptiness is the copy's purpose.
 ifeq ($(TIKU_PLATFORM),esp32c61)
 ESPTOOL ?= esptool
+TARGET_XIP := xip.bin
+XIP_FLASH_OFFSET := 0x100000
 $(TARGET_BIN): $(TARGET)
 	@command -v $(ESPTOOL) > /dev/null || { \
 	    echo "esp32c61: esptool not found -- brew install esptool, or"; \
 	    echo "  pip install esptool, or point at it: ESPTOOL=/path/esptool"; \
 	    exit 1; }
-	@$(ESPTOOL) --chip esp32c61 elf2image --flash-mode dio \
-	    --flash-size 8MB -o $@ $< > /dev/null
-	@echo "  [image] $< -> $@"
+	@if $(SIZE) -A $< | grep -q '^\.xip'; then \
+	    $(OBJCOPY) -R '.xip*' $< $(BUILD_DIR)/main.sram.elf \
+	        2> $(BUILD_DIR)/xip-split.log || \
+	        { cat $(BUILD_DIR)/xip-split.log; exit 1; }; \
+	    $(ESPTOOL) --chip esp32c61 elf2image --flash-mode dio \
+	        --flash-size 8MB -o $@ $(BUILD_DIR)/main.sram.elf > /dev/null && \
+	    $(OBJCOPY) -O binary -j '.xip*' $< $(TARGET_XIP) && \
+	    echo "  [image] $< -> $@ + $(TARGET_XIP) (flash $(XIP_FLASH_OFFSET))"; \
+	else \
+	    $(ESPTOOL) --chip esp32c61 elf2image --flash-mode dio \
+	        --flash-size 8MB -o $@ $< > /dev/null && \
+	    echo "  [image] $< -> $@"; \
+	fi
 endif
 
 # nRF54L15: Intel HEX for nrfutil to program into RRAM.
@@ -4218,12 +4249,19 @@ flash: all
 	    echo "esp32c61: no Espressif USB-Serial/JTAG or CP2102N port found;"; \
 	    echo "  plug in either connector, or name it: make flash ESP_PORT=..."; \
 	    exit 1; }
-ifeq ($(RAM),1)
-	$(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) --no-stub load-ram $(TARGET_BIN)
-else
-	$(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) write-flash \
-	    --flash-mode dio --flash-size 8MB 0x0 $(TARGET_BIN)
-endif
+	@xip=""; if $(SIZE) -A $(TARGET) | grep -q '^\.xip'; then \
+	    xip="$(XIP_FLASH_OFFSET) $(TARGET_XIP)"; fi; \
+	if [ "$(RAM)" = "1" ]; then \
+	    if [ -n "$$xip" ]; then \
+	        $(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) write-flash \
+	            --flash-mode dio --flash-size 8MB $$xip || exit 1; \
+	    fi; \
+	    $(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) --no-stub load-ram \
+	        $(TARGET_BIN); \
+	else \
+	    $(ESPTOOL) --chip esp32c61 -p $(ESP_PORT) write-flash \
+	        --flash-mode dio --flash-size 8MB 0x0 $(TARGET_BIN) $$xip; \
+	fi
 
 run: flash
 
