@@ -3355,6 +3355,7 @@ endif
 
 ifeq ($(TIKU_KIT_CRYPTO_ENABLE),1)
 CFLAGS += -DTIKU_KIT_CRYPTO_ENABLE=1
+SRCS   += $(wildcard tikukits/crypto/sha1/*.c)
 SRCS   += $(wildcard tikukits/crypto/sha256/*.c)
 SRCS   += $(wildcard tikukits/crypto/sha384/*.c)
 SRCS   += $(wildcard tikukits/crypto/base64/*.c)
@@ -3363,6 +3364,8 @@ SRCS   += $(wildcard tikukits/crypto/gcm/*.c)
 SRCS   += $(wildcard tikukits/crypto/aes128/*.c)
 SRCS   += $(wildcard tikukits/crypto/hkdf/*.c)
 SRCS   += $(wildcard tikukits/crypto/hmac/*.c)
+SRCS   += $(wildcard tikukits/crypto/pbkdf2/*.c)
+SRCS   += $(wildcard tikukits/crypto/aeskw/*.c)
 SRCS   += $(wildcard tikukits/crypto/x25519/*.c)
 SRCS   += $(wildcard tikukits/crypto/p256/*.c)
 SRCS   += $(wildcard tikukits/crypto/p384/*.c)
