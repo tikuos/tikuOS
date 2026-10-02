@@ -34,9 +34,11 @@ typedef unsigned long tiku_clock_arch_time_t;
 /** @brief SYSTIMER counts per tick: 125000 at 128 Hz, exact. */
 #define TIKU_CLOCK_ARCH_INTERVAL (16000000UL / TIKU_CLOCK_ARCH_SECOND)
 
-/* The alarms: the tick owns 0, the high-resolution timer 1. */
+/* The alarms: the tick owns 0, the high-resolution timer 1, and 2 is a
+ * driver's own (the radio's timers). */
 #define TIKU_ESP32C61_ALARM_TICK    0U
 #define TIKU_ESP32C61_ALARM_HTIMER  1U
+#define TIKU_ESP32C61_ALARM_DRIVER  2U
 
 /*---------------------------------------------------------------------------*/
 /* HAL entry points                                                          */
@@ -66,8 +68,8 @@ unsigned short         tiku_clock_arch_fine(void);
 /** @brief Sub-tick range. @return One more than the maximum fine value */
 int                    tiku_clock_arch_fine_max(void);
 
-/** @brief The earliest count an armed SYSTIMER alarm (tick or htimer) waits
- *         for after @p now: @p now when one has fired untaken, ~0 if none. */
+/** @brief The earliest count an armed SYSTIMER alarm waits for after
+ *         @p now: @p now when one has fired untaken, ~0 if none. */
 uint64_t               tiku_esp32c61_alarm_due(uint64_t now);
 
 /** @brief Clock-source fault; the crystal has no fallback. @return NONE */

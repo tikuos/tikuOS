@@ -71,7 +71,7 @@ uint64_t tiku_esp32c61_alarm_due(uint64_t now) {
     uint64_t due = ~0ULL, at;
 
     for (unsigned n = TIKU_ESP32C61_ALARM_TICK;
-         n <= TIKU_ESP32C61_ALARM_HTIMER; n++) {
+         n <= TIKU_ESP32C61_ALARM_DRIVER; n++) {
         if ((conf & ESP32C61_SYSTIMER_ALARM_EN(n)) == 0UL ||
             (ena & ESP32C61_SYSTIMER_INT(n)) == 0UL) {
             continue;

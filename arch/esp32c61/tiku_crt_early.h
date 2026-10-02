@@ -55,6 +55,9 @@ uint32_t *tiku_esp32c61_trap(uint32_t *frame);
  */
 uint32_t *tiku_esp32c61_irq_dispatch(uint32_t id, uint32_t *frame);
 
+/** @brief Non-zero while a handler runs: the stack is the ISR stack. */
+int tiku_esp32c61_in_isr(void);
+
 /** @brief After an exception's dump: parks unless the kernel takes it. */
 void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause)
     __attribute__((noreturn));

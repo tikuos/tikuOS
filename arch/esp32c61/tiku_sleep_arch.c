@@ -46,6 +46,7 @@ static uint32_t lp_hz;
 static uint32_t wake_cause;
 static uint8_t  sleep_missed;
 static uint64_t boot_lp;
+static volatile uint8_t sleep_holds;    /* takers that need the PLL on */
 
 uint64_t tiku_esp32c61_lp_ticks(void) {
     uint32_t lo, hi;
@@ -375,15 +376,26 @@ uint32_t tiku_esp32c61_light_sleep(uint64_t us, unsigned flags) {
     return cause;
 }
 
+void tiku_esp32c61_sleep_hold(int on) {
+    uint32_t m = tiku_esp32c61_mie_off();
+
+    if (on) {
+        sleep_holds++;
+    } else if (sleep_holds != 0U) {
+        sleep_holds--;
+    }
+    tiku_esp32c61_mie_restore(m);
+}
+
 void tiku_esp32c61_light_idle(void) {
     uint64_t now = tiku_cpu_esp32c61_systimer();
     uint64_t due = tiku_esp32c61_alarm_due(now), us;
 
-    /* A byte already held would refuse the sleep, and a DMA copy would stop
-     * with its clock: wfi until their interrupts instead. */
+    /* A byte already held would refuse the sleep, and a DMA copy or a held
+     * radio would stop with its clock: wfi until their interrupts instead. */
     if (ESP32C61_UART_RXCNT(TIKU_REG32(ESP32C61_UART_STATUS(
             ESP32C61_UART0_BASE))) != 0UL || tiku_dma_arch_busy() ||
-        due < now + LIGHT_IDLE_MIN_US * 16ULL) {
+        sleep_holds != 0U || due < now + LIGHT_IDLE_MIN_US * 16ULL) {
         __asm__ volatile ("wfi" ::: "memory");
         return;
     }

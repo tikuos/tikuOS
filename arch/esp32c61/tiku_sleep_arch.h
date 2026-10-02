@@ -57,6 +57,10 @@ uint32_t tiku_esp32c61_light_sleep(uint64_t us, unsigned flags);
  */
 void tiku_esp32c61_light_idle(void);
 
+/** @brief Keep the light-sleep idle to wfi while held (the radio's PLL
+ *         clocks), counted.  @param on  Non-zero to take, 0 to give back */
+void tiku_esp32c61_sleep_hold(int on);
+
 /** @brief Latch why this boot began; once, early in every boot. */
 void tiku_esp32c61_sleep_boot(void);
 

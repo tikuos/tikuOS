@@ -27,6 +27,8 @@
 #define TIKU_ESP32C61_LINE_UART0    13U
 #define TIKU_ESP32C61_LINE_SWITCH   14U     /* worker threads' context switch */
 #define TIKU_ESP32C61_LINE_DMA      15U     /* AHB DMA channel 0, copy done */
+#define TIKU_ESP32C61_LINE_RADIO    16U     /* the radio's: its timer, then */
+#define TIKU_ESP32C61_LINES_RADIO   4U      /* what its libraries ask for */
 
 /* Levels run 1..7; the timers outrank everything that may join them, and
  * the context switch yields to everything, as PendSV does. */
@@ -82,6 +84,20 @@ uint32_t tiku_esp32c61_irq_enabled(void);
 
 /** @brief Make exactly @p lines enabled. @param lines  One bit per line */
 void tiku_esp32c61_irq_set_enabled(uint32_t lines);
+
+/** @brief Disable those of @p lines that are on. @return Those, to give
+ *         _release(); lines enabled meanwhile stay as they are. */
+uint32_t tiku_esp32c61_irq_hold(uint32_t lines);
+
+/** @brief Enable again the lines _hold() returned. @param held  That set */
+void tiku_esp32c61_irq_release(uint32_t held);
+
+/** @brief Mark @p line's handler as code in flash: held while a flash
+ *         write suspends the cache.  @param on  Non-zero to mark, 0 to clear */
+void tiku_esp32c61_irq_mark_flash(unsigned line, int on);
+
+/** @brief The lines marked so, one bit each. @return The set */
+uint32_t tiku_esp32c61_irq_flash_lines(void);
 
 /** @brief Interrupts that arrived on a line no handler claimed. */
 uint32_t tiku_esp32c61_irq_spurious(void);

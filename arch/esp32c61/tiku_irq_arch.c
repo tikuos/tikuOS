@@ -22,6 +22,7 @@
 static tiku_esp32c61_isr_t irq_isr[ESP32C61_CLIC_LINES];
 static volatile uint32_t   irq_on;
 static volatile uint32_t   irq_spurious;
+static volatile uint32_t   irq_flash;   /* lines whose handlers run in flash */
 
 /* The switching handler and its line; one, as there is one PendSV. */
 static tiku_esp32c61_switch_t irq_switch;
@@ -48,6 +49,7 @@ void tiku_esp32c61_irq_init(void) {
         irq_isr[i] = NULL;
     }
     irq_on = 0UL;
+    irq_flash = 0UL;
     irq_switch = NULL;
     irq_switch_line = ESP32C61_CLIC_LINES;
     /* Whatever the ROM routed goes: a source raises nothing until attached. */
@@ -130,6 +132,51 @@ void tiku_esp32c61_irq_set_enabled(uint32_t lines) {
     }
     irq_on = lines;
     tiku_esp32c61_mie_restore(s);
+}
+
+uint32_t tiku_esp32c61_irq_hold(uint32_t lines) {
+    uint32_t s = tiku_esp32c61_mie_off();
+    uint32_t held = irq_on & lines;
+
+    for (unsigned i = 0U; i < ESP32C61_CLIC_LINES; i++) {
+        if (held & (1UL << i)) {
+            line_ie(i, 0);
+        }
+    }
+    irq_on &= ~held;
+    tiku_esp32c61_mie_restore(s);
+    return held;
+}
+
+void tiku_esp32c61_irq_release(uint32_t held) {
+    uint32_t s = tiku_esp32c61_mie_off();
+
+    for (unsigned i = 0U; i < ESP32C61_CLIC_LINES; i++) {
+        if (held & (1UL << i)) {
+            line_ie(i, 1);
+        }
+    }
+    irq_on |= held;
+    tiku_esp32c61_mie_restore(s);
+}
+
+void tiku_esp32c61_irq_mark_flash(unsigned line, int on) {
+    uint32_t s;
+
+    if (line >= ESP32C61_CLIC_LINES) {
+        return;
+    }
+    s = tiku_esp32c61_mie_off();
+    if (on) {
+        irq_flash |= 1UL << line;
+    } else {
+        irq_flash &= ~(1UL << line);
+    }
+    tiku_esp32c61_mie_restore(s);
+}
+
+uint32_t tiku_esp32c61_irq_flash_lines(void) {
+    return irq_flash;
 }
 
 uint32_t tiku_esp32c61_irq_spurious(void) {

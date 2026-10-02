@@ -138,6 +138,14 @@ void tiku_esp32c61_trap_entry(void) {
         :: "i" (TIKU_ESP32C61_ISR_STACK_WORDS * 4));
 }
 
+int tiku_esp32c61_in_isr(void) {
+    uintptr_t sp;
+
+    __asm__ volatile ("mv %0, sp" : "=r" (sp));
+    return sp >= (uintptr_t)isr_stack &&
+           sp < (uintptr_t)isr_stack + sizeof isr_stack;
+}
+
 /** @brief One character straight into UART0's FIFO, bounded. */
 static void trap_putc(char c) {
     for (unsigned long spins = 200000UL; spins > 0UL; spins--) {

@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "tiku_flash_arch.h"
+#include "tiku_irq_arch.h"
 #include "tiku_esp32c61_regs.h"
 
 #define ROM_OK          0
@@ -101,9 +102,19 @@ tiku_flash_err_t tiku_flash_read(uint32_t addr, void *buf, uint32_t len) {
     return TIKU_FLASH_OK;
 }
 
+/**
+ * @brief Hold what may not run while the cache is suspended: handlers whose
+ *        code is in flash, and the thread switch, which could resume a
+ *        thread there.  @return The lines held, for the release
+ */
+static uint32_t flash_quiet(void) {
+    return tiku_esp32c61_irq_hold(tiku_esp32c61_irq_flash_lines() |
+                                  (1UL << TIKU_ESP32C61_LINE_SWITCH));
+}
+
 tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr) {
     uint32_t sector = addr / TIKU_FLASH_SECTOR_SIZE;
-    uint32_t autoload;
+    uint32_t autoload, held;
     int rc;
 
     if (!flash_up) {
@@ -112,11 +123,13 @@ tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr) {
     if (addr >= TIKU_FLASH_SIZE_BYTES) {
         return TIKU_FLASH_ERR_PARAM;
     }
+    held = flash_quiet();
     autoload = ESP32C61_ROM_CACHE_SUSPEND();
     rc = ESP32C61_ROM_FLASH_ERASE(sector);
     ESP32C61_ROM_CACHE_RESUME(autoload);
     (void)ESP32C61_ROM_CACHE_INVAL(window(sector * TIKU_FLASH_SECTOR_SIZE),
                                    TIKU_FLASH_SECTOR_SIZE);
+    tiku_esp32c61_irq_release(held);
     return rc == ROM_OK ? TIKU_FLASH_OK : TIKU_FLASH_ERR_IO;
 }
 
@@ -148,7 +161,7 @@ static int program_words(uint32_t addr, const uint8_t *src, uint32_t len) {
 tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len) {
     const uint8_t *s = (const uint8_t *)buf;
     uint32_t start = addr, total = len;
-    uint32_t autoload;
+    uint32_t autoload, held;
     int rc = ROM_OK;
 
     if (!flash_up) {
@@ -157,6 +170,7 @@ tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len
     if (buf == NULL || !in_part(addr, len)) {
         return TIKU_FLASH_ERR_PARAM;
     }
+    held = flash_quiet();
     autoload = ESP32C61_ROM_CACHE_SUSPEND();
     while (len > 0UL && rc == ROM_OK) {
         uint32_t off = addr & 3UL;
@@ -188,5 +202,6 @@ tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len
     ESP32C61_ROM_CACHE_RESUME(autoload);
     (void)ESP32C61_ROM_CACHE_INVAL(window(start & ~3UL),
                                    ((start & 3UL) + total + 3UL) & ~3UL);
+    tiku_esp32c61_irq_release(held);
     return rc == ROM_OK ? TIKU_FLASH_OK : TIKU_FLASH_ERR_IO;
 }

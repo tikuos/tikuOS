@@ -435,6 +435,9 @@ typedef struct {
 #define ESP32C61_PMU_WAIT_TIMER2    (ESP32C61_PMU_BASE + 0x0F4UL)
 #define ESP32C61_PMU_CK_WAIT        (ESP32C61_PMU_BASE + 0x120UL)
 /* Immediate updates: the PMU latches new clock-gate settings on these. */
+#define ESP32C61_PMU_IMM_HP_CK_POWER (ESP32C61_PMU_BASE + 0x0CCUL)
+#define ESP32C61_PMU_TIE_HIGH_BB_I2C  (1UL << 28)    /* baseband analog I2C */
+#define ESP32C61_PMU_TIE_HIGH_PLL_I2C (1UL << 29)    /* BBPLL's analog I2C */
 #define ESP32C61_PMU_IMM_SLEEP_SYSCLK (ESP32C61_PMU_BASE + 0x0D0UL)
 #define ESP32C61_PMU_UPDATE_ICG_SWITCH (1UL << 28)
 #define ESP32C61_PMU_IMM_MODEM_ICG  (ESP32C61_PMU_BASE + 0x0DCUL)
