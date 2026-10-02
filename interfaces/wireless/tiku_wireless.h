@@ -133,6 +133,27 @@ int tiku_wireless_status(tiku_wireless_status_t *out);
  */
 int tiku_wireless_power(uint8_t on);
 
+/**
+ * @brief A received Ethernet II frame (destination, source, ethertype, the
+ *        payload), lent for the call only, delivered in the kernel thread.
+ */
+typedef void (*tiku_wireless_rx_t)(const uint8_t *frame, uint16_t len,
+                                   void *ctx);
+
+/**
+ * @brief Send one Ethernet II frame on the network joined; the radio adds
+ *        the 802.11 framing.  @return TIKU_DRV_OK; TIKU_DRV_ERR_INVALID for
+ *        a bad frame or no link; TIKU_DRV_ERR_TIMEOUT when it cannot take it
+ */
+int tiku_wireless_tx_eth(const uint8_t *frame, uint16_t len);
+
+/**
+ * @brief Hand each received frame to @p cb (NULL: drop them), in the kernel
+ *        thread.  One receiver; a second call replaces the first.
+ *        @return TIKU_DRV_OK, or TIKU_DRV_ERR_NOT_PRESENT
+ */
+int tiku_wireless_set_rx(tiku_wireless_rx_t cb, void *ctx);
+
 /** Auth flavors for tiku_wireless_connect_auth. */
 typedef enum {
     TIKU_WIRELESS_AUTH_WPA2_PSK = 0,   /* default — IEEE 802.11i RSN  */
