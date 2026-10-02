@@ -26,6 +26,7 @@
 #define TIKU_ESP32C61_LINE_GPIO     12U
 #define TIKU_ESP32C61_LINE_UART0    13U
 #define TIKU_ESP32C61_LINE_SWITCH   14U     /* worker threads' context switch */
+#define TIKU_ESP32C61_LINE_DMA      15U     /* AHB DMA channel 0, copy done */
 
 /* Levels run 1..7; the timers outrank everything that may join them, and
  * the context switch yields to everything, as PendSV does. */

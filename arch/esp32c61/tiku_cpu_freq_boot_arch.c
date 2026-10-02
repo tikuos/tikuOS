@@ -127,6 +127,11 @@ void tiku_cpu_boot_esp32c61_init(void) {
     TIKU_REG32(ESP32C61_LP_CLK_CONF) =
         (TIKU_REG32(ESP32C61_LP_CLK_CONF) & ~ESP32C61_LP_FAST_SEL_MSK) |
         ESP32C61_LP_FAST_RC_FAST;
+    /* Every bus master reaches all memory; the core's own fences are the
+     * PMP and PMA entries. */
+    TIKU_REG32(ESP32C61_HP_APM_FUNC_CTRL) = 0UL;
+    TIKU_REG32(ESP32C61_LP_APM_FUNC_CTRL) = 0UL;
+    TIKU_REG32(ESP32C61_CPU_APM_FUNC_CTRL) = 0UL;
 #ifndef TIKU_MINIMAL
     tiku_esp32c61_sleep_boot();
 #endif

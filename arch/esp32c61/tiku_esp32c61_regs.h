@@ -96,6 +96,7 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_CACHE_SUSPEND  ((uint32_t (*)(void))0x40000698UL)
 #define ESP32C61_ROM_CACHE_RESUME   ((void (*)(uint32_t))0x4000069CUL)
 #define ESP32C61_ROM_CACHE_INVAL    ((int (*)(uint32_t, uint32_t))0x40000634UL)
+#define ESP32C61_ROM_CACHE_WB       ((int (*)(uint32_t, uint32_t))0x4000063CUL)
 #define ESP32C61_ROM_CACHE_WB_INVAL ((int (*)(uint32_t, uint32_t))0x40000640UL)
 #define ESP32C61_ROM_CACHE_WB_INVAL_ALL ((void (*)(void))0x40000650UL)
 
@@ -265,6 +266,9 @@ typedef struct {
 #define ESP32C61_SRC_UART0          40U
 #define ESP32C61_SRC_USB_JTAG       44U
 #define ESP32C61_SRC_SYSTIMER(n)    (52U + (n))
+/* The matrix's own map, not IDF's interrupts.h: that enum lists a temperature
+ * sensor at 56 that has no map register, so it runs one high from there. */
+#define ESP32C61_SRC_DMA_IN0        58U     /* AHB DMA, channel 0's RX side */
 
 /* Software's own interrupt source: 1 raises it, 0 drops it. */
 #define ESP32C61_INTPRI_FROM_CPU0   0x600C5090UL
@@ -535,6 +539,61 @@ typedef struct {
 #define ESP32C61_PMA_X              (1UL << 2)
 #define ESP32C61_IO_MUX_MCU_SEL_MSK (7UL << 12)
 #define ESP32C61_IO_MUX_FUN_IE      (1UL << 9)
+
+/* APM: access filters on the bus masters, on at reset.  With no trusted and
+ * untrusted worlds here, they come off at boot, as IDF does without its TEE:
+ * left on, the DMA cannot read even its own descriptors. */
+#define ESP32C61_HP_APM_FUNC_CTRL   0x600990C4UL
+#define ESP32C61_LP_APM_FUNC_CTRL   0x600B38C4UL
+#define ESP32C61_CPU_APM_FUNC_CTRL  0x6009A0C4UL
+
+/*---------------------------------------------------------------------------*/
+/* AHB DMA -- channel pair 0 in memory mode: its TX side reads the source,   */
+/* its RX side writes the destination, both walking descriptor lists.        */
+/*---------------------------------------------------------------------------*/
+
+#define ESP32C61_DMA_BASE           0x60080000UL
+#define ESP32C61_DMA_IN_INT_ST      (ESP32C61_DMA_BASE + 0x004UL)
+#define ESP32C61_DMA_IN_INT_ENA     (ESP32C61_DMA_BASE + 0x008UL)
+#define ESP32C61_DMA_IN_INT_CLR     (ESP32C61_DMA_BASE + 0x00CUL)
+#define ESP32C61_DMA_IN_SUC_EOF     (1UL << 1)
+/* Error EOF, a bad descriptor, a bus error response. */
+#define ESP32C61_DMA_IN_FAULTS      ((1UL << 2) | (1UL << 3) | (1UL << 7))
+#define ESP32C61_DMA_IN_INT_ALL     0xFFUL
+#define ESP32C61_DMA_OUT_INT_CLR    (ESP32C61_DMA_BASE + 0x03CUL)
+#define ESP32C61_DMA_OUT_INT_ALL    0x3FUL
+#define ESP32C61_DMA_MISC_CONF      (ESP32C61_DMA_BASE + 0x064UL)
+#define ESP32C61_DMA_MISC_CLK_EN    (1UL << 3)
+#define ESP32C61_DMA_IN_CONF0       (ESP32C61_DMA_BASE + 0x070UL)
+#define ESP32C61_DMA_IN_RST         (1UL << 0)
+#define ESP32C61_DMA_INDSCR_BURST   (1UL << 2)
+#define ESP32C61_DMA_MEM_TRANS      (1UL << 4)
+#define ESP32C61_DMA_IN_BURST_MSK   (3UL << 6)          /* 0 single, 2 INCR8 */
+#define ESP32C61_DMA_IN_BURST_32    (2UL << 6)
+#define ESP32C61_DMA_IN_LINK        (ESP32C61_DMA_BASE + 0x080UL)
+#define ESP32C61_DMA_INLINK_STOP    (1UL << 1)
+#define ESP32C61_DMA_INLINK_START   (1UL << 2)
+#define ESP32C61_DMA_IN_PERI_SEL    (ESP32C61_DMA_BASE + 0x0A0UL)
+#define ESP32C61_DMA_OUT_CONF0      (ESP32C61_DMA_BASE + 0x0D0UL)
+#define ESP32C61_DMA_OUT_RST        (1UL << 0)
+#define ESP32C61_DMA_OUT_EOF_MODE   (1UL << 3)
+#define ESP32C61_DMA_OUTDSCR_BURST  (1UL << 4)
+#define ESP32C61_DMA_OUT_BURST_MSK  (3UL << 8)
+#define ESP32C61_DMA_OUT_BURST_32   (2UL << 8)
+#define ESP32C61_DMA_OUT_LINK       (ESP32C61_DMA_BASE + 0x0E0UL)
+#define ESP32C61_DMA_OUTLINK_STOP   (1UL << 0)
+#define ESP32C61_DMA_OUTLINK_START  (1UL << 1)
+#define ESP32C61_DMA_OUT_PERI_SEL   (ESP32C61_DMA_BASE + 0x100UL)
+#define ESP32C61_DMA_IN_LINK_ADDR   (ESP32C61_DMA_BASE + 0x3ACUL)
+#define ESP32C61_DMA_OUT_LINK_ADDR  (ESP32C61_DMA_BASE + 0x3B8UL)
+/* The span the engine may touch: SRAM and the flash and PSRAM windows. */
+#define ESP32C61_DMA_MEM_START      (ESP32C61_DMA_BASE + 0x3C4UL)
+#define ESP32C61_DMA_MEM_END        (ESP32C61_DMA_BASE + 0x3C8UL)
+/* Memory mode needs both sides on one peripheral id nothing else uses. */
+#define ESP32C61_DMA_M2M_PERI       15UL
+#define ESP32C61_PCR_GDMA_CONF      (ESP32C61_PCR_BASE + 0x090UL)
+#define ESP32C61_PCR_GDMA_CLK_EN    (1UL << 0)
+#define ESP32C61_PCR_GDMA_RST       (1UL << 1)
 
 /* LP AON stores survive deep sleep.  The ROM reads two of them on the way
  * back: 8 bit 0 says the sleep was deep, 6 holds a wake stub (none here). */

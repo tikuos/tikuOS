@@ -24,6 +24,7 @@
 #include "tiku_esp32c61_regs.h"
 #include "tiku_mem_arch.h"
 #include "tiku_timer_arch.h"
+#include "tiku_dma_arch.h"
 
 #define RC_FAST_HZ      17500000UL  /* the PMU's work clock, nominal */
 
@@ -378,9 +379,10 @@ void tiku_esp32c61_light_idle(void) {
     uint64_t now = tiku_cpu_esp32c61_systimer();
     uint64_t due = tiku_esp32c61_alarm_due(now), us;
 
-    /* A byte already held would refuse the sleep: wfi until its interrupt. */
+    /* A byte already held would refuse the sleep, and a DMA copy would stop
+     * with its clock: wfi until their interrupts instead. */
     if (ESP32C61_UART_RXCNT(TIKU_REG32(ESP32C61_UART_STATUS(
-            ESP32C61_UART0_BASE))) != 0UL ||
+            ESP32C61_UART0_BASE))) != 0UL || tiku_dma_arch_busy() ||
         due < now + LIGHT_IDLE_MIN_US * 16ULL) {
         __asm__ volatile ("wfi" ::: "memory");
         return;
