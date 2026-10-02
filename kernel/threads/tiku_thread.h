@@ -42,7 +42,8 @@ typedef enum {
     TIKU_THREAD_UNUSED  = 0,   /**< Slot never started                    */
     TIKU_THREAD_READY   = 1,   /**< Runnable, waiting for the CPU         */
     TIKU_THREAD_RUNNING = 2,   /**< Currently on the CPU                  */
-    TIKU_THREAD_DONE    = 3    /**< Exited; joinable                      */
+    TIKU_THREAD_DONE    = 3,   /**< Exited; joinable                      */
+    TIKU_THREAD_BLOCKED = 4    /**< In tiku_thread_wait(): off the CPU    */
 } tiku_thread_state_t;
 
 /**
@@ -63,6 +64,9 @@ typedef struct tiku_thread {
     unsigned long long   cycles;      /**< DWT cycles consumed (total)    */
     unsigned long long   budget;      /**< Cycle ceiling; 0 = unlimited   */
     uint16_t             switches;    /**< Times scheduled onto the CPU   */
+    uint8_t              slot;        /**< Index in the scheduler's table */
+    uint8_t              timed;       /**< A wait with a deadline         */
+    unsigned long        wake_at;     /**< That deadline, in clock ticks  */
 } tiku_thread_t;
 
 /*---------------------------------------------------------------------------*/
@@ -120,6 +124,37 @@ void tiku_thread_exit(void);
  * @return 0 when joined, -1 if @p t was never started
  */
 int tiku_thread_join(tiku_thread_t *t);
+
+/*---------------------------------------------------------------------------*/
+/* WAIT QUEUES (any thread, the kernel's included; wake from anywhere)       */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Who is blocked on one object: a bit per worker slot, and bit 7 for
+ *        the kernel thread.  Zero-initialised is empty.
+ */
+typedef struct {
+    volatile uint8_t waiters;
+} tiku_waitq_t;
+
+/** @brief The kernel thread's bit in tiku_waitq_t.waiters. */
+#define TIKU_WAITQ_KERNEL   0x80u
+
+/**
+ * @brief Block the caller on @p q until a wake, or for @p ticks (0: no limit).
+ *
+ * Call inside exactly one tiku_atomic_enter(), with the condition just found
+ * false, and test it again on return: the kernel thread also returns on any
+ * event post.  A worker sleeps off the CPU; the kernel hands the CPU to ready
+ * workers, else idles in the CPU's wait.  @return 0 once the deadline passed
+ */
+int tiku_thread_wait(tiku_waitq_t *q, unsigned long ticks);
+
+/** @brief Wake one waiter, workers before the kernel; safe from an ISR. */
+void tiku_thread_wake_one(tiku_waitq_t *q);
+
+/** @brief Wake every waiter; safe from an ISR. */
+void tiku_thread_wake_all(tiku_waitq_t *q);
 
 /*---------------------------------------------------------------------------*/
 /* INTROSPECTION                                                             */

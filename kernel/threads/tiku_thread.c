@@ -20,6 +20,7 @@
 
 #include "tiku_thread.h"
 #include <hal/tiku_cpu.h>            /* tiku_atomic_enter/exit */
+#include <kernel/timers/tiku_clock.h>  /* wait deadlines */
 
 /*---------------------------------------------------------------------------*/
 /* ARCH BACKEND INTERFACE (arch/<family>/tiku_thread_arch.c)                 */
@@ -88,6 +89,26 @@ static int worker_runnable(const tiku_thread_t *t)
            (t->budget == 0ull || t->cycles < t->budget);
 }
 
+/**
+ * @brief Make runnable every worker whose wait deadline has come.  Its bit
+ *        stays in the queue: that is how the wait tells a timeout.  Called
+ *        from the switch and from the kernel's ready check, so a deadline is
+ *        seen even while no switch happens.
+ */
+static void wake_due(void)
+{
+    uint8_t i;
+
+    for (i = 0; i < TIKU_THREADS_MAX; i++) {
+        tiku_thread_t *t = s_threads[i];
+
+        if (t != (tiku_thread_t *)0 && t->state == TIKU_THREAD_BLOCKED &&
+            t->timed && !TIKU_CLOCK_LT(tiku_clock_time(), t->wake_at)) {
+            t->state = TIKU_THREAD_READY;
+        }
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 /* THE SWITCH (called from the PendSV switcher with IRQs implicitly          */
 /* serialised — PendSV is the lowest-priority exception)                     */
@@ -146,6 +167,8 @@ uint32_t *tiku_thread_switch(uint32_t *old_sp)
             s_canary_faults++;
         }
     }
+
+    wake_due();
 
     /* Pick the incoming context: the next READY, in-budget worker from
      * the round-robin cursor.  An exhausted worker is skipped here, so it
@@ -213,6 +236,8 @@ int tiku_thread_start(tiku_thread_t *t, void (*entry)(void *), void *arg)
     }
     s_threads[slot] = t;
 
+    t->slot  = (uint8_t)slot;
+    t->timed = 0;
     t->entry = entry;
     t->arg   = arg;
     t->stack_base[0] = THREAD_CANARY;
@@ -283,6 +308,10 @@ uint16_t tiku_thread_switches(const tiku_thread_t *t)
 int tiku_thread_worker_ready(void)
 {
     uint8_t i;
+
+    tiku_atomic_enter();
+    wake_due();
+    tiku_atomic_exit();
     for (i = 0; i < TIKU_THREADS_MAX; i++) {
         if (worker_runnable(s_threads[i])) {
             return 1;
@@ -393,6 +422,104 @@ int tiku_thread_budget_exhausted(const tiku_thread_t *t)
 uint16_t tiku_thread_canary_faults(void)
 {
     return s_canary_faults;
+}
+
+/*---------------------------------------------------------------------------*/
+/* WAIT QUEUES                                                               */
+/*---------------------------------------------------------------------------*/
+
+int tiku_thread_wait(tiku_waitq_t *q, unsigned long ticks)
+{
+    tiku_thread_t *self = s_current;
+    tiku_clock_time_t until = (tiku_clock_time_t)(tiku_clock_time() + ticks);
+    uint8_t bit = (self == (tiku_thread_t *)0) ? TIKU_WAITQ_KERNEL
+                                              : (uint8_t)(1u << self->slot);
+
+    q->waiters |= bit;
+    if (self != (tiku_thread_t *)0) {
+        /* Off the CPU until a wake clears the bit, or the switcher sees the
+         * deadline; the switch fires as the atomic section opens. */
+        self->timed = (uint8_t)(ticks != 0u);
+        self->wake_at = until;
+        self->state = TIKU_THREAD_BLOCKED;
+        tiku_thread_arch_pend();
+        tiku_atomic_exit();
+        tiku_atomic_enter();
+        self->timed = 0;
+    } else {
+        tiku_cpu_idle_enter_t wfi = tiku_cpu_idle_hook(TIKU_CPU_IDLE_LIGHT);
+
+        /* The kernel has nothing else to run meanwhile: workers get the CPU
+         * if any is ready, else the CPU waits for the next interrupt.  Any
+         * event post brings it back for the caller to look again. */
+        while ((q->waiters & bit) != 0u &&
+               (ticks == 0u || TIKU_CLOCK_LT(tiku_clock_time(), until))) {
+            if (tiku_thread_worker_ready()) {
+                tiku_thread_kernel_block();
+            } else if (wfi != (tiku_cpu_idle_enter_t)0) {
+                wfi();
+            }
+            tiku_atomic_exit();
+            tiku_atomic_enter();
+            if (s_kernel_ready && (q->waiters & bit) != 0u) {
+                break;                  /* an event post: let it be seen */
+            }
+        }
+    }
+    if ((q->waiters & bit) == 0u) {
+        return 1;                       /* woken */
+    }
+    q->waiters &= (uint8_t)~bit;
+    return ticks == 0u || TIKU_CLOCK_LT(tiku_clock_time(), until);
+}
+
+/** @brief Clear @p bits' waiters from @p q and make each runnable. */
+static void waitq_release(tiku_waitq_t *q, uint8_t bits)
+{
+    uint8_t i;
+
+    q->waiters &= (uint8_t)~bits;
+    for (i = 0; i < TIKU_THREADS_MAX; i++) {
+        tiku_thread_t *t = s_threads[i];
+
+        if ((bits & (1u << i)) != 0u && t != (tiku_thread_t *)0 &&
+            t->state == TIKU_THREAD_BLOCKED) {
+            t->state = TIKU_THREAD_READY;
+        }
+    }
+    if ((bits & TIKU_WAITQ_KERNEL) != 0u) {
+        tiku_thread_kernel_wake();
+    }
+    tiku_thread_arch_pend();
+}
+
+void tiku_thread_wake_one(tiku_waitq_t *q)
+{
+    uint8_t m, bit = 0u, i;
+
+    tiku_atomic_enter();
+    m = q->waiters;
+    for (i = 0; i < TIKU_THREADS_MAX && bit == 0u; i++) {
+        if ((m & (1u << i)) != 0u) {
+            bit = (uint8_t)(1u << i);
+        }
+    }
+    if (bit == 0u) {
+        bit = (uint8_t)(m & TIKU_WAITQ_KERNEL);
+    }
+    if (bit != 0u) {
+        waitq_release(q, bit);
+    }
+    tiku_atomic_exit();
+}
+
+void tiku_thread_wake_all(tiku_waitq_t *q)
+{
+    tiku_atomic_enter();
+    if (q->waiters != 0u) {
+        waitq_release(q, q->waiters);
+    }
+    tiku_atomic_exit();
 }
 
 /*---------------------------------------------------------------------------*/
