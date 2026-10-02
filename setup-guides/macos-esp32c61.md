@@ -96,6 +96,17 @@ When it finishes you'll see a **Build Summary** and two new files:
 
 **✅ Checkpoint:** run `ls main.bin` — if it prints `main.bin`, the build worked.
 
+**Bigger builds.** The kernel runs from the chip's 320 KB of SRAM. A build too
+big for that (BASIC with HTTPS, say) can run part of its code straight from
+flash and keep its big buffers in the 2 MB PSRAM — two switches:
+
+```bash
+make MCU=esp32c61 TIKU_ESP32C61_XIP_CODE=1 TIKU_ESP32C61_PSRAM_DATA=1 ...
+```
+
+The code that moves then lives in a second image, **`xip.bin`**, which
+`make flash` writes beside `main.bin` (the Wi-Fi driver's libraries use it too).
+
 ---
 
 ## Step 4 — Keep a copy of the factory flash
@@ -180,3 +191,5 @@ To leave `screen`, press **Ctrl-A**, then **K**, then **Y**.
 | `make flash` can't find the board | With the **USB** port missing, `make flash` uses the **UART** port instead (slower, same result). If neither is found, name one: `make MCU=esp32c61 flash ESP_PORT=/dev/cu.usbmodem1201`. |
 | The console shows Espressif's boot log, then blink messages | The factory demo is still in flash: run `make MCU=esp32c61 flash`. |
 | The console shows nothing at all | Check the console is on the **UART** port and set to 115200 baud. |
+| The console says `xip.bin in flash is not this build's` | Only `main.bin` was loaded: run `make MCU=esp32c61 flash` (with the same switches as the build), which writes both images. |
+| The console says `psram: ... cannot run without it` | The build keeps buffers in PSRAM (`TIKU_ESP32C61_PSRAM_DATA=1`) and this chip has none, or it did not answer: build without that switch. |

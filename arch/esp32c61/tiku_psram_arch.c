@@ -16,6 +16,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <hal/tiku_printf_hal.h>
 
 #include "tiku_psram_arch.h"
 #include "tiku_esp32c61_regs.h"
@@ -187,9 +190,42 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
     return TIKU_ESP32C61_PSRAM_OK;
 }
 
+/* psram_data.ld's bounds, defined only when buffers live in PSRAM. */
+extern char __tiku_psram_data_start[] __attribute__((weak));
+extern char __tiku_psram_data_end[] __attribute__((weak));
+
+/** @brief An address the compiler cannot reason about: two weak symbols
+ *         may both be absent, and so equal. */
+static uintptr_t opaque(const void *p) {
+    uintptr_t a = (uintptr_t)p;
+
+    __asm__ volatile ("" : "+r"(a));
+    return a;
+}
+
+void tiku_esp32c61_psram_data_boot(void) {
+    uintptr_t start = opaque(__tiku_psram_data_start);
+    uintptr_t end = opaque(__tiku_psram_data_end);
+    tiku_esp32c61_psram_err_t rc;
+
+    if (start == end) {
+        return;
+    }
+    rc = tiku_esp32c61_psram_init();
+    if (rc != TIKU_ESP32C61_PSRAM_OK ||
+        end > TIKU_ESP32C61_PSRAM_BASE + psram_bytes) {
+        TIKU_PRINTF("psram: %d -- this build keeps buffers there, and cannot "
+                    "run without it\n", (int)rc);
+        for (;;) {
+        }
+    }
+    memset((void *)start, 0, end - start);
+}
+
 tiku_esp32c61_psram_err_t tiku_esp32c61_psram_attach(void) {
     tiku_esp32c61_psram_err_t rc = tiku_esp32c61_psram_init();
     uintptr_t base = TIKU_ESP32C61_PSRAM_BASE;
+    uintptr_t data_end = opaque(__tiku_psram_data_end);
     uint32_t bytes = psram_bytes;
 
     if (rc != TIKU_ESP32C61_PSRAM_OK || psram_attached) {
@@ -199,6 +235,10 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_attach(void) {
     base += TIKU_ESP32C61_MODULE_WINDOW_BYTES;
     bytes -= TIKU_ESP32C61_MODULE_WINDOW_BYTES;
 #endif
+    if (data_end > base) {
+        bytes -= (uint32_t)(data_end - base);
+        base = data_end;
+    }
     if (tiku_tier_attach_psram((void *)base, (tiku_mem_arch_size_t)bytes) !=
         TIKU_MEM_OK) {
         return TIKU_ESP32C61_PSRAM_MAP;

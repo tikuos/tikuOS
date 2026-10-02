@@ -2286,6 +2286,16 @@ SRCS += arch/esp32c61/tiku_fault_arch.c
 SRCS += arch/esp32c61/tiku_sleep_arch.c
 SRCS += arch/esp32c61/tiku_psram_arch.c
 SRCS += arch/esp32c61/tiku_dma_arch.c
+SRCS += arch/esp32c61/tiku_xip_arch.c
+# Room for big profiles (HTTPS): kernel code from flash -- BASIC, the shell's
+# commands, the IP stack, TLS and crypto run in the XIP window (xip_code.ld)
+# -- and big buffers in PSRAM (psram_data.ld).  Each opt-in.
+ifeq ($(TIKU_ESP32C61_XIP_CODE),1)
+TIKU_XIP_LDS += arch/esp32c61/xip_code.ld
+endif
+ifeq ($(TIKU_ESP32C61_PSRAM_DATA),1)
+TIKU_PSRAM_LDS += arch/esp32c61/psram_data.ld
+endif
 ifeq ($(TIKU_THREADS_ENABLE),1)
 SRCS += kernel/threads/tiku_thread.c
 SRCS += arch/esp32c61/tiku_thread_arch.c
@@ -3647,16 +3657,23 @@ $(PLATFORM_STAMP):
 TIKU_LDSCRIPTS := $(patsubst -T%,%,$(filter -T%,$(LDFLAGS)))
 
 ifeq ($(TIKU_PLATFORM),esp32c61)
-# What the arch script INCLUDEs: one line per fragment a driver registered in
-# TIKU_XIP_LDS, none otherwise.  Rewritten only when its text changes, so an
-# unchanged build does not relink.
+# Any XIP part opens with the arch's header (xip_head.ld, tiku_xip_header.c),
+# which tells an xip.bin left by another build apart.
+ifneq ($(strip $(TIKU_XIP_LDS)),)
+TIKU_XIP_LDS := arch/esp32c61/xip_head.ld $(TIKU_XIP_LDS)
+SRCS += arch/esp32c61/tiku_xip_header.c
+endif
+# What the arch script INCLUDEs: one line per XIP or PSRAM fragment the
+# build registered, none otherwise.  Rewritten only when its text changes, so
+# an unchanged build does not relink.
 TIKU_XIP_LD := $(BUILD_DIR)/tiku_xip.ld
 $(shell mkdir -p $(BUILD_DIR) && \
-    printf '%s\n' '/* generated: the XIP fragments drivers registered */' \
-        $(foreach f,$(TIKU_XIP_LDS),'INCLUDE $(f)') > $(TIKU_XIP_LD).new && \
+    printf '%s\n' '/* generated: the XIP and PSRAM fragments registered */' \
+        $(foreach f,$(TIKU_XIP_LDS) $(TIKU_PSRAM_LDS),'INCLUDE $(f)') \
+        > $(TIKU_XIP_LD).new && \
     { cmp -s $(TIKU_XIP_LD).new $(TIKU_XIP_LD) || \
       mv $(TIKU_XIP_LD).new $(TIKU_XIP_LD); })
-TIKU_LDSCRIPTS += $(TIKU_XIP_LD) $(TIKU_XIP_LDS)
+TIKU_LDSCRIPTS += $(TIKU_XIP_LD) $(TIKU_XIP_LDS) $(TIKU_PSRAM_LDS)
 endif
 
 $(TARGET): $(OBJS) $(PLATFORM_STAMP) $(NOSYS_FIXED) $(TIKU_LDSCRIPTS)

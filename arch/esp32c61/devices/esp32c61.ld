@@ -34,6 +34,9 @@ MEMORY
     /* Flash 1 MB on, through the 1:1 map, below /data at 2 MB.  Empty unless
      * a driver registers a fragment placing an output section .xip* here. */
     XIP (rx)   : ORIGIN = 0x42100000, LENGTH = 0xF0000
+    /* PSRAM past the module window, once the boot has mapped it.  Empty
+     * unless psram_data.ld places buffers here (TIKU_ESP32C61_PSRAM_DATA). */
+    PSRAM (rw) : ORIGIN = 0x42808000, LENGTH = 0x1F8000
 }
 
 __sram_start = ORIGIN(SRAM);
@@ -41,8 +44,9 @@ __sram_end   = ORIGIN(SRAM) + LENGTH(SRAM);
 
 SECTIONS
 {
-    /* The XIP fragments drivers registered (TIKU_XIP_LDS), generated into
-     * the build directory; first, so their patterns claim their sections. */
+    /* The XIP and PSRAM fragments a build registered (TIKU_XIP_LDS,
+     * TIKU_PSRAM_LDS), generated into the build directory; first, so their
+     * patterns claim their sections. */
     INCLUDE tiku_xip.ld
 
     .text :

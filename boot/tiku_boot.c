@@ -23,6 +23,8 @@
 #include <arch/stm32n6/tiku_sram_arch.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_flash_arch.h>
+#include <arch/esp32c61/tiku_psram_arch.h>
+#include <arch/esp32c61/tiku_xip_arch.h>
 #endif
 #include <kernel/cpu/tiku_stack.h>   /* stack-paint for /sys/mem/stack_free */
 #include "kernel/cpu/tiku_common.h"
@@ -265,6 +267,14 @@ tiku_boot_init_peripherals(void)
     /* After the console exists: the probe reports as it walks, and nothing
      * owns the banks it writes to yet. */
     tiku_stm32n6_sram_probe();
+#endif
+
+#if defined(PLATFORM_ESP32C61)
+    /* After the console exists, before anything calls into the XIP image or
+     * touches PSRAM: kernel code in flash and an xip.bin from another build,
+     * or buffers in PSRAM and no PSRAM, halt here saying so. */
+    tiku_esp32c61_xip_require();
+    tiku_esp32c61_psram_data_boot();
 #endif
 
 #if defined(TIKU_CONSOLE_USB)
