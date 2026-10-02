@@ -8,7 +8,9 @@
  * tiku_flash_arch.c - ESP32-C61 external flash over the ROM's routines.
  *
  * Erase and program go through SPI1 with the cache suspended, then the bytes
- * they touched are invalidated in the window so the next read sees them.
+ * they touched are invalidated in the window so the next read sees them.  A
+ * source the ROM cannot read meanwhile -- flash or PSRAM -- is copied to SRAM
+ * a piece at a time first.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,9 +29,14 @@
 /* Words for a source the ROM cannot read in place: it loads whole words. */
 #define STAGE_WORDS     16U
 
+/* Bytes of a source outside SRAM copied at a time, cache on, before going
+ * down: flash and PSRAM do not answer while the cache is suspended. */
+#define PIECE_BYTES     256U
+
 static uint8_t  flash_up;
 static uint32_t flash_id;
 static uint32_t flash_stage[STAGE_WORDS];
+static uint32_t flash_piece[PIECE_BYTES / 4U];
 
 /** @brief The window address of flash offset @p addr. */
 static uint32_t window(uint32_t addr) {
@@ -158,6 +165,38 @@ static int program_words(uint32_t addr, const uint8_t *src, uint32_t len) {
     return ROM_OK;
 }
 
+/** @brief Whether [p, p + len) lies in SRAM, which the ROM's routines can
+ *         read with the cache suspended. */
+static int in_sram(const void *p, uint32_t len) {
+    uintptr_t a = (uintptr_t)p;
+
+    return a >= ESP32C61_HP_SRAM_BASE && a < ESP32C61_HP_SRAM_END &&
+           len <= ESP32C61_HP_SRAM_END - a;
+}
+
+/**
+ * @brief Program from a source outside SRAM -- the image's flash constants,
+ *        or PSRAM: each piece is copied to SRAM with the cache on, then goes
+ *        down as an SRAM source would.
+ */
+static tiku_flash_err_t program_pieces(uint32_t addr, const uint8_t *s,
+                                       uint32_t len) {
+    while (len > 0UL) {
+        uint32_t n = len > PIECE_BYTES ? PIECE_BYTES : len;
+        tiku_flash_err_t rc;
+
+        memcpy(flash_piece, s, n);
+        rc = tiku_flash_program(addr, flash_piece, n);
+        if (rc != TIKU_FLASH_OK) {
+            return rc;
+        }
+        addr += n;
+        s    += n;
+        len  -= n;
+    }
+    return TIKU_FLASH_OK;
+}
+
 tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len) {
     const uint8_t *s = (const uint8_t *)buf;
     uint32_t start = addr, total = len;
@@ -169,6 +208,9 @@ tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len
     }
     if (buf == NULL || !in_part(addr, len)) {
         return TIKU_FLASH_ERR_PARAM;
+    }
+    if (!in_sram(buf, len)) {
+        return program_pieces(addr, s, len);
     }
     held = flash_quiet();
     autoload = ESP32C61_ROM_CACHE_SUSPEND();

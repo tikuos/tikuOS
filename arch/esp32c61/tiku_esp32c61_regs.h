@@ -498,6 +498,11 @@ typedef struct {
 #define ESP32C61_LP_FAST_SEL_MSK    (3UL << 2)
 #define ESP32C61_LP_FAST_RC_FAST    (0UL << 2)
 
+/* HP SRAM, all of it: what the CPU reads without the cache -- so the one
+ * source a flash write may read while the cache is suspended. */
+#define ESP32C61_HP_SRAM_BASE       0x40800000UL
+#define ESP32C61_HP_SRAM_END        0x40850000UL
+
 /*---------------------------------------------------------------------------*/
 /* MSPI -- SPI0 serves cache misses to flash (CS0) and PSRAM (CS1); SPI1     */
 /* sends user commands.  The MMU marks a PSRAM page with bit 9.              */
