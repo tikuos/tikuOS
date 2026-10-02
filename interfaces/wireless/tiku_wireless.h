@@ -146,7 +146,8 @@ typedef enum {
  *        JOINED (or FAILED). Caller observes via tiku_wireless_status.
  *
  * @param ssid  Network SSID (1..32 chars, null-terminated)
- * @param psk   WPA2 passphrase (8..63 chars, null-terminated)
+ * @param psk   WPA2 passphrase (8..63 chars, null-terminated); empty joins
+ *              an open network, on a radio that can (the ESP32-C61's)
  * @return TIKU_DRV_OK on enqueue; TIKU_DRV_ERR_INVALID on bad args
  *         or radio-not-up; TIKU_DRV_ERR_TIMEOUT if a join is already
  *         in flight.

@@ -70,7 +70,8 @@ static void wifi_help(void)
     SHELL_PRINTF("wifi status              Driver state + MAC + link\n");
     SHELL_PRINTF("wifi scan                Trigger active scan\n");
     SHELL_PRINTF("wifi list                Show cached scan results\n");
-    SHELL_PRINTF("wifi connect SSID PSK    Join WPA2-PSK network\n");
+    SHELL_PRINTF("wifi connect SSID PSK    Join WPA2-PSK network "
+                 "(PSK \"\": an open one)\n");
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
     SHELL_PRINTF("wifi up                  Bring the IP stack up over WiFi (DHCP)\n");
 #endif
@@ -160,8 +161,8 @@ static void wifi_connect(uint8_t argc, const char *argv[],
     if (rc == 0) {
         SHELL_PRINTF("wifi: %s join requested (ssid=\"%s\"); "
                      "watch 'wifi status' for result.\n",
-                     (auth == TIKU_WIRELESS_AUTH_WPA3_SAE)
-                         ? "WPA3-SAE" : "WPA2-PSK",
+                     (auth == TIKU_WIRELESS_AUTH_WPA3_SAE) ? "WPA3-SAE" :
+                     argv[3][0] == '\0' ? "open" : "WPA2-PSK",
                      argv[2]);
     } else {
         SHELL_PRINTF("wifi: connect rejected (rc=%d) — radio not up, "
