@@ -136,9 +136,10 @@ static void bt_status(void)
                      es.version);
         return;
     }
-    SHELL_PRINTF("Heap:     %lu of %lu bytes in use, %lu at most\n",
-                 (unsigned long)es.heap_used, (unsigned long)es.heap_size,
-                 (unsigned long)es.heap_peak);
+    SHELL_PRINTF("Heap:     %lu of %lu bytes in use, %lu at most, %lu "
+                 "refused\n", (unsigned long)es.heap_used,
+                 (unsigned long)es.heap_size, (unsigned long)es.heap_peak,
+                 (unsigned long)es.heap_refused);
     SHELL_PRINTF("IRQs:     %lu\n", (unsigned long)es.irqs);
     if (es.rx_dropped != 0U) {
         SHELL_PRINTF("Dropped:  %lu HCI packets\n",
