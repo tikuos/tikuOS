@@ -218,6 +218,19 @@ void tiku_sched_loop(void)
                     tiku_timer_any_pending()) {
                     tiku_clock_time_t ahead = (tiku_clock_time_t)
                         (tiku_timer_next_expiration() - tiku_clock_time());
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+                    unsigned long at;
+
+                    /* A blocked worker's wait deadline counts as a timer:
+                     * stretching past it would make its timeout late. */
+                    if (tiku_thread_next_deadline(&at)) {
+                        tiku_clock_time_t t = (tiku_clock_time_t)
+                            ((tiku_clock_time_t)at - tiku_clock_time());
+                        if (t < ahead) {
+                            ahead = t;
+                        }
+                    }
+#endif
                     if (ahead > 1u) {
                         stretched =
                             (uint8_t)tiku_clock_tickless_begin(ahead);

@@ -271,6 +271,27 @@ void tiku_thread_exit(void)
     }
 }
 
+int tiku_thread_forget(tiku_thread_t *t)
+{
+    int rc = -1;
+    uint8_t i;
+
+    if (t == (tiku_thread_t *)0) {
+        return -1;
+    }
+    tiku_atomic_enter();
+    if (t->state == TIKU_THREAD_DONE || t->state == TIKU_THREAD_UNUSED) {
+        for (i = 0; i < TIKU_THREADS_MAX; i++) {
+            if (s_threads[i] == t) {
+                s_threads[i] = (tiku_thread_t *)0;
+            }
+        }
+        rc = 0;
+    }
+    tiku_atomic_exit();
+    return rc;
+}
+
 int tiku_thread_join(tiku_thread_t *t)
 {
     if (t == (tiku_thread_t *)0 || t->state == TIKU_THREAD_UNUSED) {
@@ -318,6 +339,36 @@ int tiku_thread_worker_ready(void)
         }
     }
     return 0;
+}
+
+tiku_thread_t *tiku_thread_self(void)
+{
+    return s_current;
+}
+
+int tiku_thread_next_deadline(unsigned long *at)
+{
+    tiku_clock_time_t now = tiku_clock_time();
+    int found = 0;
+    uint8_t i;
+
+    for (i = 0; i < TIKU_THREADS_MAX; i++) {
+        tiku_thread_t *t = s_threads[i];
+
+        if (t != (tiku_thread_t *)0 && t->state == TIKU_THREAD_BLOCKED &&
+            t->timed) {
+            tiku_clock_time_t w = (tiku_clock_time_t)t->wake_at;
+
+            if (!found || TIKU_CLOCK_LT(w, (tiku_clock_time_t)*at)) {
+                *at = w;
+                found = 1;
+            }
+        }
+    }
+    if (found && TIKU_CLOCK_LT((tiku_clock_time_t)*at, now)) {
+        *at = now;                      /* already due: no sleep at all */
+    }
+    return found;
 }
 
 uint8_t tiku_thread_count(void)

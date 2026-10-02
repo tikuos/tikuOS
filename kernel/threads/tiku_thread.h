@@ -115,6 +115,13 @@ void tiku_thread_yield(void);
 void tiku_thread_exit(void);
 
 /**
+ * @brief Forget a finished worker: its slot empties, so its control block and
+ *        stack may be freed or reused.  A worker whose memory goes away must
+ *        be forgotten first.  @return 0, or -1 while @p t has not finished
+ */
+int tiku_thread_forget(tiku_thread_t *t);
+
+/**
  * @brief Wait until @p t exits (kernel-thread context).
  *
  * Cooperative: spins yielding the CPU to workers, servicing nothing —
@@ -168,6 +175,16 @@ uint16_t tiku_thread_switches(const tiku_thread_t *t);
 
 /** @brief Non-zero if any worker is READY to run. */
 int tiku_thread_worker_ready(void);
+
+/** @brief The worker on the CPU, or NULL in the kernel thread (an ISR sees
+ *         whoever it interrupted). */
+tiku_thread_t *tiku_thread_self(void);
+
+/**
+ * @brief The nearest deadline a blocked worker waits for, so a tickless idle
+ *        does not sleep past it.  @return 1 with @p at set, 0 when none waits
+ */
+int tiku_thread_next_deadline(unsigned long *at);
 
 /** @brief Count of stack-canary violations detected at switch time. */
 uint16_t tiku_thread_canary_faults(void);
