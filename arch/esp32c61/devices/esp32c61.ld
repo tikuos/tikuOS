@@ -54,9 +54,11 @@ SECTIONS
         KEEP(*(.text.entry))
         *(.text .text.*)
         /* Code a library marks as needing RAM, should XIP hold the rest
-         * (the BLE controller's hot paths always stay here). */
+         * (the BLE controller's hot paths and the coexistence library's
+         * always stay here). */
         *(.iram1 .iram1.*)
         *(.high_perf_code_iram1 .high_perf_code_iram1.*)
+        *(.coexiram .coexiram.*)
         . = ALIGN(4);
     } > SRAM
 
