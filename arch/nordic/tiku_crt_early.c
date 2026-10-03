@@ -298,6 +298,16 @@ void tiku_nordic_reset_handler(void)
     tiku_nordic_apply_trims();
     tiku_nordic_sysinit_errata();
 
+#if !defined(NRF_SKIP_GLITCHDETECTOR_DISABLE)
+    /* The voltage glitch detector comes up enabled from every reset and
+     * draws about 180 uA in every power state, System OFF included.  The
+     * MDK SystemInit disables it (product specification 7.8.2); define
+     * NRF_SKIP_GLITCHDETECTOR_DISABLE to keep it on as a fault-injection
+     * countermeasure. */
+    NRF_GLITCHDET_S->CONFIG =
+        GLITCHDET_CONFIG_ENABLE_Disable << GLITCHDET_CONFIG_ENABLE_Pos;
+#endif
+
     /* Copy .data (RRAM load image -> SRAM). */
     {
         uint32_t *src = &__data_load;
