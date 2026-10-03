@@ -24,6 +24,9 @@
 #if defined(PLATFORM_RP2350)
 extern void tiku_cpu_rp2350_reboot_to_bootsel(void);
 #endif
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_cpu_common.h>
+#endif
 #if defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>
 #if (TIKU_DRV_EMMC_ENABLE + 0)
@@ -80,6 +83,12 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
     }
 #endif
     tiku_cpu_freq_ambiq_init(96u);     /* HP -> LP, the SBL's own state    */
+#endif
+#if defined(PLATFORM_ESP32C61)
+    /* A reset that cuts a cache fetch short wedges the C61's ROM, so the
+     * arch stops the cache before it bites -- from SRAM, which this
+     * command, run from flash in a big build, is not. */
+    tiku_cpu_esp32c61_restart(1);
 #endif
 
     /*

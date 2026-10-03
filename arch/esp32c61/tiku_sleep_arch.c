@@ -311,9 +311,7 @@ void tiku_esp32c61_deep_sleep(uint64_t us) {
     target = tiku_cpu_esp32c61_systimer();
     while (tiku_cpu_esp32c61_systimer() - target < 16000000ULL) {
     }
-    ESP32C61_ROM_SOFTWARE_RESET();
-    for (;;) {
-    }
+    tiku_cpu_esp32c61_restart(0);
 }
 
 uint32_t tiku_esp32c61_light_sleep(uint64_t us, unsigned flags) {

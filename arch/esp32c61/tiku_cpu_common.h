@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.h - ESP32-C61 delays, reset cause and identity.
+ * tiku_cpu_common.h - ESP32-C61 delays, resets and identity.
  *
  * Delays count mcycle against the measured core clock, so they hold at
  * whatever rate the clock tree runs.
@@ -54,5 +54,19 @@ uint32_t tiku_cpu_esp32c61_reset_code(void);
 /** @brief Code just written through the cache becomes what the core fetches:
  *         every line written back and dropped, then fence.i. */
 void tiku_cpu_esp32c61_icache_invalidate(void);
+
+/**
+ * @brief Reset the HP system with the cache stopped first.
+ *
+ * An HP reset that cuts a cache fetch from flash short leaves the cache
+ * unable to fetch again: the ROM's first read of the image header stalls,
+ * and its boot watchdog loops until EN or power.  So interrupts go off,
+ * the console drains and the cache stops, all from SRAM.
+ *
+ * @param by_watchdog  Non-zero: a TG0 bite, so the next boot reads a
+ *                     watchdog reset, as a reboot does elsewhere; zero: the
+ *                     ROM's software reset
+ */
+__attribute__((noreturn)) void tiku_cpu_esp32c61_restart(int by_watchdog);
 
 #endif /* TIKU_ESP32C61_CPU_COMMON_H_ */

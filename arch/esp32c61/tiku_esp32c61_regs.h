@@ -99,6 +99,8 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_CACHE_WB       ((int (*)(uint32_t, uint32_t))0x4000063CUL)
 #define ESP32C61_ROM_CACHE_WB_INVAL ((int (*)(uint32_t, uint32_t))0x40000640UL)
 #define ESP32C61_ROM_CACHE_WB_INVAL_ALL ((void (*)(void))0x40000650UL)
+/* Off, every tag invalid: the cache as a reset should find it. */
+#define ESP32C61_ROM_CACHE_DISABLE  ((uint32_t (*)(void))0x40000690UL)
 
 /* ROM SPI user commands, for devices on the MSPI bus other than the flash:
  * the PSRAM's reset, identity and mode changes go out through these. */

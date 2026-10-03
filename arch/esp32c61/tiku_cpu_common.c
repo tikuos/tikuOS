@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - ESP32-C61 delays, reset cause and identity.
+ * tiku_cpu_common.c - ESP32-C61 delays, resets and identity.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,7 +13,9 @@
 #include <stdint.h>
 #include "tiku_cpu_common.h"
 #include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_cpu_watchdog_arch.h"
 #include "tiku_esp32c61_regs.h"
+#include "tiku_irq_arch.h"
 
 void tiku_cpu_esp32c61_delay_us(unsigned int us) {
     /* Cycles per 1/64 us: a measured rate is no whole number of MHz, and
@@ -92,4 +94,27 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void) {
 void tiku_cpu_esp32c61_icache_invalidate(void) {
     ESP32C61_ROM_CACHE_WB_INVAL_ALL();
     __asm__ volatile ("fence.i" ::: "memory");
+}
+
+void tiku_cpu_esp32c61_restart(int by_watchdog) {
+    uint32_t us;
+
+    (void)tiku_esp32c61_mie_off();
+    /* The console's FIFO out, but bounded: a reset must not hang on it. */
+    for (us = 0UL; us < 20000UL &&
+         ESP32C61_UART_TXCNT(TIKU_REG32(ESP32C61_UART_STATUS(
+             ESP32C61_UART0_BASE))) != 0UL; us += 10UL) {
+        tiku_cpu_esp32c61_delay_us(10U);
+    }
+    tiku_cpu_esp32c61_delay_us(200U);   /* the last byte leaves the shifter */
+    /* Nothing below touches flash or PSRAM. */
+    (void)ESP32C61_ROM_CACHE_DISABLE();
+    if (by_watchdog) {
+        /* About 2 ms: a hold of one tick never fires. */
+        tiku_cpu_esp32c61_watchdog_on_arch(TIKU_WDT_SRC_ACLK, 64U);
+    } else {
+        ESP32C61_ROM_SOFTWARE_RESET();
+    }
+    for (;;) {
+    }
 }

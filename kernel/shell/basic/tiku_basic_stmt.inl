@@ -1066,6 +1066,9 @@ static void
 exec_reboot(void)
 {
     SHELL_PRINTF(SH_YELLOW "Rebooting..." SH_RST "\n");
+#if defined(PLATFORM_ESP32C61)
+    tiku_cpu_esp32c61_restart(1);       /* as the shell's reboot does */
+#endif
     tiku_watchdog_config(TIKU_WDT_MODE_WATCHDOG, TIKU_WDT_SRC_ACLK,
                          TIKU_WDT_INTERVAL_64, 0, 1);
     for (;;) { /* wait for the watchdog to fire */ }

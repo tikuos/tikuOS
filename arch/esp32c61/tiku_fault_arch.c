@@ -14,6 +14,7 @@
  */
 
 #include "tiku_fault_arch.h"
+#include "tiku_cpu_common.h"
 #include "tiku_crt_early.h"
 #include "tiku_mem_arch.h"
 #include "tiku_esp32c61_regs.h"
@@ -70,7 +71,5 @@ void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause) {
     (void)tiku_mem_arch_nvm_flush_status();
     /* The faulting instruction cannot be stepped over, so returning would
      * fault again forever. */
-    ESP32C61_ROM_SOFTWARE_RESET();
-    for (;;) {
-    }
+    tiku_cpu_esp32c61_restart(0);
 }

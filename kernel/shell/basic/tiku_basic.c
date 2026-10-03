@@ -47,6 +47,9 @@
 #endif
 #if TIKU_BASIC_REBOOT_ENABLE
 #include <kernel/cpu/tiku_watchdog.h>
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_cpu_common.h>
+#endif
 #endif
 #if TIKU_BASIC_LED_ENABLE
 #include <interfaces/led/tiku_led.h>
