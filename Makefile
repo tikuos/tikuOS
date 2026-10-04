@@ -2550,6 +2550,9 @@ endif
 ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_bt.c
 endif
+ifeq ($(TIKU_DRV_SDR_ESP_ENABLE),1)
+SRCS += kernel/shell/commands/tiku_shell_cmd_sdr.c
+endif
 SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
 SRCS += kernel/shell/tiku_shell_cwd.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c

@@ -128,6 +128,9 @@
 #if TIKU_SHELL_CMD_BT
 #include "commands/tiku_shell_cmd_bt.h"
 #endif
+#if TIKU_SHELL_CMD_SDR
+#include "commands/tiku_shell_cmd_sdr.h"
+#endif
 #if TIKU_SHELL_CMD_INIT
 #include "commands/tiku_shell_cmd_init.h"
 #endif
@@ -566,6 +569,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_BT
     {"bt",      "CYW43 BT: status",             tiku_shell_cmd_bt},
+#endif
+#if TIKU_SHELL_CMD_SDR
+    {"sdr",     "Radio receiver: I/Q snapshots", tiku_shell_cmd_sdr},
 #endif
 #if TIKU_SHELL_CMD_CALC
     {"calc",    "Integer arithmetic",          tiku_shell_cmd_calc},

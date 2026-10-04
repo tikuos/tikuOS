@@ -206,6 +206,14 @@
 #define TIKU_SHELL_CMD_BT      0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_SDR
+/* Auto-on with the ESP32-C61's radio built as a receiver (raw I/Q). */
+#if defined(TIKU_DRV_SDR_ESP_ENABLE) && (TIKU_DRV_SDR_ESP_ENABLE == 1)
+#define TIKU_SHELL_CMD_SDR     1
+#else
+#define TIKU_SHELL_CMD_SDR     0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_LS
 #define TIKU_SHELL_CMD_LS      1  /**< ls      - List VFS directory contents */
 #endif
