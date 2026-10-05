@@ -7,8 +7,8 @@
  *
  * tiku_gpio_arch.h - MSP430 GPIO port access
  *
- * Provides runtime access to any GPIO port/pin by number.
- * Ports are 1-based (P1..P4, PJ on FR5969).  Pin is 0-7.
+ * Provides runtime access to any GPIO port/pin by number.  Ports are the
+ * device header's P1..P9 (1-based) and PJ as port 0xFF.  Pin is 0-7.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

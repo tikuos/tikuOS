@@ -26,7 +26,7 @@
  *        register (GPIO->PINCFG0[pad]).
  * @{
  */
-#define TIKU_GPIO_FNCSEL_GPIO      3u           /**< FNCSEL[2:0] = GPIO       */
+#define TIKU_GPIO_FNCSEL_GPIO      3u           /**< FNCSEL[3:0] = GPIO       */
 #define TIKU_GPIO_INPEN            (1u << 4)    /**< INPEN[4] input enable    */
 #define TIKU_GPIO_OUTCFG_PUSHPULL  (1u << 8)    /**< OUTCFG[9:8] = push-pull  */
 #define TIKU_GPIO_OUTCFG_MSK       (3u << 8)    /**< OUTCFG field mask        */
@@ -134,4 +134,12 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
     return (int8_t)(((&GPIO->PINCFG0)[pad] & TIKU_GPIO_OUTCFG_MSK) ? 1 : 0);
+}
+
+/** @brief Report whether a (port, pin) pad's FNCSEL selects a peripheral. */
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin) {
+    uint32_t pad;
+    if (ambiq_pad_of(port, pin, &pad)) { return -1; }
+    return (((&GPIO->PINCFG0)[pad] & GPIO_PINCFG0_FNCSEL0_Msk) !=
+            TIKU_GPIO_FNCSEL_GPIO) ? 1 : 0;
 }

@@ -21,6 +21,9 @@
 /** @brief Highest GP index exposed on the Pico 2 W header (GP0..GP29). */
 #define MAX_GP_PIN  29U
 
+/** @brief GPIOn_CTRL.FUNCSEL field mask (the low five bits). */
+#define IO_CTRL_FUNCSEL_MSK  0x1FU
+
 /**
  * @brief Map a (port, pin) tuple to a flat SIO GP index (0..MAX_GP_PIN).
  *
@@ -246,4 +249,26 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
         return -1;
     }
     return (_RP2350_REG(RP2350_SIO_GPIO_OE) & (1U << gp)) ? 1 : 0;
+}
+
+/**
+ * @brief HAL: report whether a (port, pin) is routed to a peripheral.
+ *
+ * Reads GPIOn_CTRL.FUNCSEL: SIO and the null (disconnected) function count as
+ * GPIO, every other function as a peripheral.  The pin is only read.
+ *
+ * @param port  GPIO port number (1-based, 1..4).
+ * @param pin   Bit position within the port (0..7).
+ * @return      1 if routed to a peripheral, 0 otherwise, -1 on out-of-range.
+ */
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin) {
+    int8_t gp = gp_index(port, pin);
+    uint32_t funcsel;
+    if (gp < 0) {
+        return -1;
+    }
+    funcsel = _RP2350_REG(RP2350_IO_BANK0_GPIO_CTRL((uint32_t)gp)) &
+              IO_CTRL_FUNCSEL_MSK;
+    return (funcsel != RP2350_IO_FUNC_SIO && funcsel != RP2350_IO_FUNC_NULL) ?
+           1 : 0;
 }

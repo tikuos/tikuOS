@@ -26,6 +26,8 @@
 #include <arch/nordic/tiku_gpio_arch.h>
 #elif defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_gpio_arch.h>
+#elif defined(PLATFORM_RA8P1)
+#include <arch/ra8p1/tiku_gpio_arch.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_gpio_arch.h>
 #else
@@ -46,8 +48,8 @@
 
 /**
  * @brief Configure a pin as digital output.
- * @param port Port number (1..N for numbered ports; 0xFF for port J)
- * @param pin  Pin within port (0..7)
+ * @param port Platform port number (see tiku_gpio_geometry.h); 0xFF for port J
+ * @param pin  Pin within port (see tiku_gpio_geometry.h for the platform width)
  * @return TIKU_GPIO_OK or TIKU_GPIO_ERR_INVALID
  */
 static inline int tiku_gpio_dir_out(uint8_t port, uint8_t pin)
@@ -56,7 +58,10 @@ static inline int tiku_gpio_dir_out(uint8_t port, uint8_t pin)
 }
 
 /**
- * @brief Configure a pin as digital input with pull-up.
+ * @brief Configure a pin as a digital input.
+ *
+ * The MSP430 and RP2350 ports also enable the pin's pull-up; the other ports
+ * do not set one.
  */
 static inline int tiku_gpio_dir_in(uint8_t port, uint8_t pin)
 {

@@ -238,3 +238,21 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
     /* Output if the OUTCFG field is non-zero (push-pull / open-drain). */
     return (int8_t)(((&GPIO->PINCFG0)[pad] & TIKU_GPIO_OUTCFG_MSK) ? 1 : 0);
 }
+
+/**
+ * @brief Report whether a (port, pin) pad is routed to a peripheral
+ *
+ * Reads the FNCSEL field of GPIO->PINCFG[pad]: any function other than GPIO
+ * is a peripheral's.  The pad configuration is only read.
+ *
+ * @param port  1-based port number
+ * @param pin   Pin index within the port (0-7)
+ * @return 1 if routed to a peripheral, 0 for a GPIO pad, -1 if port/pin is
+ *         invalid
+ */
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin) {
+    uint32_t pad;
+    if (ambiq_pad_of(port, pin, &pad)) { return -1; }
+    return (((&GPIO->PINCFG0)[pad] & GPIO_PINCFG0_FNCSEL0_Msk) !=
+            TIKU_GPIO_FNCSEL_GPIO) ? 1 : 0;
+}

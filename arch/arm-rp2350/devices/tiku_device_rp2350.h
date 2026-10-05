@@ -32,13 +32,14 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Virtual GPIO port availability flags.
+ * @brief MSP430-style GPIO port presence flags.
  *
- * The RP2350 has a single user-visible GPIO bank with 48 pins on the larger
- * packages, modelled as four virtual ports of 8 so the /dev/gpio/{1..4}/{0..7}
- * layout keeps working: port 1 = GP0..7, 2 = GP8..15, 3 = GP16..23, 4 = GP24..31.
+ * /dev/gpio takes its layout from tiku_gpio_geometry.h rather than from these
+ * flags: virtual ports of eight over the one user GPIO bank, port 1 = GP0..7,
+ * 2 = GP8..15, 3 = GP16..23 and 4 = GP24..29.
  *
- * @note Bank 0 has more pins, but only the lowest 32 are exposed per-port.
+ * @note Bank 0 has 48 pins on the larger packages; GP30 and above are not
+ *       exposed.
  */
 #define TIKU_DEVICE_HAS_PORT1       1
 #define TIKU_DEVICE_HAS_PORT2       1

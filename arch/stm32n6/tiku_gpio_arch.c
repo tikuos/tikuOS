@@ -17,12 +17,14 @@
 #include "tiku_gpio_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/* Ports A..Q. AHB4ENR carries one enable bit per port at the port index. */
+/* Ports A..H and N..Q. There are no GPIOI..GPIOM register blocks.
+ * ST cmsis-device-n6/Include/stm32n657xx.h is the register-map reference. */
 #define STM32N6_GPIO_PORT_MAX   16U
 #define STM32N6_GPIO_PIN_MAX    15U
 
 static uint8_t gpio_valid(uint8_t port, uint8_t pin) {
-    return (port <= STM32N6_GPIO_PORT_MAX && pin <= STM32N6_GPIO_PIN_MAX);
+    return ((port <= 7U || (port >= 13U && port <= STM32N6_GPIO_PORT_MAX)) &&
+            pin <= STM32N6_GPIO_PIN_MAX);
 }
 
 /* Set the two-bit field for one pin in a MODER/OSPEEDR/PUPDR-shaped register. */
@@ -35,7 +37,7 @@ static void gpio_field2(uint32_t reg, uint8_t pin, uint32_t value) {
 }
 
 void tiku_stm32n6_gpio_clock_enable(uint8_t port) {
-    if (port > STM32N6_GPIO_PORT_MAX) {
+    if (!gpio_valid(port, 0)) {
         return;
     }
     TIKU_REG32(STM32N6_RCC_AHB4ENR) |= (1UL << port);
@@ -140,4 +142,21 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
     }
     uint32_t mode = (TIKU_REG32(STM32N6_GPIO_MODER(port)) >> ((uint32_t)pin * 2U)) & 3UL;
     return (mode == STM32N6_GPIO_MODE_OUTPUT) ? 1 : 0;
+}
+
+/* Alternate-function mode is a peripheral's.  A port whose clock is off reads
+ * as unassigned rather than being clocked, and analog mode counts as
+ * unassigned: MODER alone cannot tell an ADC input from an idle analog pin. */
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin) {
+    uint32_t mode;
+
+    if (!gpio_valid(port, pin)) {
+        return -1;
+    }
+    if ((TIKU_REG32(STM32N6_RCC_AHB4ENR) & (1UL << port)) == 0UL) {
+        return 0;
+    }
+    mode = (TIKU_REG32(STM32N6_GPIO_MODER(port)) >> ((uint32_t)pin * 2U)) &
+           3UL;
+    return (mode == STM32N6_GPIO_MODE_ALT) ? 1 : 0;
 }

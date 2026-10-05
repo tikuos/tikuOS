@@ -21,6 +21,12 @@
 #define GPIO_BAD(port, pin) \
     (((port) > RA8P1_PORT_MAX) || ((pin) > 15U))
 
+/** @brief PmnPFS.ISEL: the pin feeds an IRQn input. */
+#define PFS_ISEL    (1UL << 14)
+
+/** @brief PmnPFS.ASEL: the pin is an analog input. */
+#define PFS_ASEL    (1UL << 15)
+
 /**
  * @brief Write one PmnPFS register through the protect interlock.
  *
@@ -140,4 +146,15 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin)
 {
     if (GPIO_BAD(port, pin)) { return -1; }
     return (int8_t)((TIKU_REG32(RA8P1_PORT_PCNTR1(port)) >> pin) & 1UL);
+}
+
+/*
+ * PmnPFS gives a pin away three ways: PMR to the peripheral PSEL names, ASEL
+ * to an analog input and ISEL to an IRQn input.  The register is only read.
+ */
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin)
+{
+    if (GPIO_BAD(port, pin)) { return -1; }
+    return ((TIKU_REG32(RA8P1_PFS(port, pin)) &
+             (RA8P1_PFS_PMR | PFS_ASEL | PFS_ISEL)) != 0UL) ? 1 : 0;
 }

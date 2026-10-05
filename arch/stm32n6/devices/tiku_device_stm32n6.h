@@ -18,9 +18,10 @@
 
 #define TIKU_DEVICE_NAME            "STM32N657"
 
-/* GPIO ports are letters A..Q, and the VFS port index is that letter's
- * position, so /dev/gpio/6 is GPIOG -- the port carrying the Nucleo LEDs.
- * Index 0 (GPIOA) has no VFS node because the tree numbers ports from 1. */
+/* GPIO ports are letters A..H and N..Q; the STM32N657 has no GPIOI..GPIOM.
+ * /dev/gpio takes its numbering from tiku_gpio_geometry.h rather than from
+ * these flags: a port's number is its letter's position, so /dev/gpio/6 is
+ * GPIOG, the port carrying the Nucleo LEDs, and GPION..GPIOQ are 13..16. */
 #define TIKU_DEVICE_HAS_PORT1       1   /* GPIOB */
 #define TIKU_DEVICE_HAS_PORT2       1   /* GPIOC */
 #define TIKU_DEVICE_HAS_PORT3       1   /* GPIOD */
@@ -28,8 +29,8 @@
 #define TIKU_DEVICE_HAS_PORT5       1   /* GPIOF */
 #define TIKU_DEVICE_HAS_PORT6       1   /* GPIOG */
 #define TIKU_DEVICE_HAS_PORT7       1   /* GPIOH */
-#define TIKU_DEVICE_HAS_PORT8       1   /* GPIOI */
-#define TIKU_DEVICE_HAS_PORT9       1   /* GPIOJ */
+#define TIKU_DEVICE_HAS_PORT8       1   /* no GPIOI on this part */
+#define TIKU_DEVICE_HAS_PORT9       1   /* no GPIOJ on this part */
 #define TIKU_DEVICE_HAS_PORTJ       0   /* MSP430 port J has no STM32 analogue */
 
 /* HSE value ST documents for this family. The clock tree is driven from HSI

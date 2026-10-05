@@ -7,7 +7,7 @@
  *
  * tiku_gpio_arch.h - ESP32-C61 GPIO, and the board's addressable RGB LED.
  *
- * One bank, GPIO0..GPIO29, is the kernel's port 0.
+ * One bank, GPIO0..GPIO29, maps to the kernel's ports 1..4 in groups of eight.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,5 +49,6 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
+int    tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin);
 
 #endif /* TIKU_ESP32C61_GPIO_ARCH_H_ */

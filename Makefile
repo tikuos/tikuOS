@@ -2413,6 +2413,7 @@ CFLAGS += -DTIKU_DRV_DC_ENABLE=1
 endif
 
 SRCS += interfaces/led/tiku_led.c
+SRCS += interfaces/gpio/tiku_gpio_owner.c
 SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/bus/tiku_spi_bus.c
 ifeq ($(TIKU_PLATFORM),msp430)

@@ -31,22 +31,22 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Virtual GPIO port availability flags.
+ * @brief MSP430-style GPIO port presence flags.
  *
- * Apollo510 has 100+ pads; four virtual ports of 8 pins each (pads 0..31) are
- * exposed through /dev/gpio/{1..4}/{0..7} to match the MSP430/RP2350 layout.
- * Board LEDs (pads 89/92/165) sit above this range and use raw pad numbers.
+ * /dev/gpio takes its layout from tiku_gpio_geometry.h rather than from these
+ * flags: virtual ports 1..28 of eight pads each cover pads 0..223, with
+ * pad = (port - 1) * 8 + pin, so the board LEDs' pads are inside that range.
  */
-#define TIKU_DEVICE_HAS_PORT1       1  /**< Virtual port 1 (pads 0..7). */
-#define TIKU_DEVICE_HAS_PORT2       1  /**< Virtual port 2 (pads 8..15). */
-#define TIKU_DEVICE_HAS_PORT3       1  /**< Virtual port 3 (pads 16..23). */
-#define TIKU_DEVICE_HAS_PORT4       1  /**< Virtual port 4 (pads 24..31). */
-#define TIKU_DEVICE_HAS_PORT5       0  /**< Not exposed in VFS view. */
-#define TIKU_DEVICE_HAS_PORT6       0  /**< Not exposed in VFS view. */
-#define TIKU_DEVICE_HAS_PORT7       0  /**< Not exposed in VFS view. */
-#define TIKU_DEVICE_HAS_PORT8       0  /**< Not exposed in VFS view. */
-#define TIKU_DEVICE_HAS_PORT9       0  /**< Not exposed in VFS view. */
-#define TIKU_DEVICE_HAS_PORTJ       0  /**< Not exposed in VFS view. */
+#define TIKU_DEVICE_HAS_PORT1       1
+#define TIKU_DEVICE_HAS_PORT2       1
+#define TIKU_DEVICE_HAS_PORT3       1
+#define TIKU_DEVICE_HAS_PORT4       1
+#define TIKU_DEVICE_HAS_PORT5       0
+#define TIKU_DEVICE_HAS_PORT6       0
+#define TIKU_DEVICE_HAS_PORT7       0
+#define TIKU_DEVICE_HAS_PORT8       0
+#define TIKU_DEVICE_HAS_PORT9       0
+#define TIKU_DEVICE_HAS_PORTJ       0
 
 /*---------------------------------------------------------------------------*/
 /* CRYSTAL OSCILLATOR                                                        */

@@ -18,6 +18,9 @@
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_esp32c61_regs.h"
 
+/** @brief GPIO_FUNCn_OUT_SEL_CFG.OUT_SEL: the matrix signal driving the pin. */
+#define GPIO_OUT_SEL_MSK    0x1FFUL
+
 /** @brief IO_MUX: function GPIO, drive strength 2, input as asked. */
 static void gpio_mux(uint8_t pin, int input) {
     uint32_t mux = TIKU_REG32(ESP32C61_IO_MUX_GPIO(pin));
@@ -187,4 +190,27 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
         return -1;
     }
     return (TIKU_REG32(ESP32C61_GPIO_ENABLE) >> n) & 1UL ? 1 : 0;
+}
+
+/* A peripheral holds the pin when IO_MUX selects a function other than GPIO,
+ * or when its output is enabled with the matrix routing a signal other than
+ * GPIO_OUT to it.  Both registers are only read. */
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin) {
+    int n = tiku_esp32c61_gpio_num(port, pin);
+    uint32_t mcu_sel;
+    uint32_t out_sel;
+
+    if (n < 0) {
+        return -1;
+    }
+    mcu_sel = (TIKU_REG32(ESP32C61_IO_MUX_GPIO(n)) &
+               ESP32C61_IO_MUX_MCU_SEL_MSK) >> ESP32C61_IO_MUX_MCU_SEL_POS;
+    if (mcu_sel != ESP32C61_IO_MUX_FUNC_GPIO) {
+        return 1;
+    }
+    if ((TIKU_REG32(ESP32C61_GPIO_ENABLE) & (1UL << n)) == 0UL) {
+        return 0;
+    }
+    out_sel = TIKU_REG32(ESP32C61_GPIO_OUT_SEL(n)) & GPIO_OUT_SEL_MSK;
+    return (out_sel != ESP32C61_GPIO_SIG_OUT) ? 1 : 0;
 }

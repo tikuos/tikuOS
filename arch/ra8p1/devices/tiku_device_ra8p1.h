@@ -65,10 +65,10 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * I/O ports.  The manual names them PORT0..PORT9 then PORTA..PORTD, and the
- * VFS gpio tree numbers its nodes 1..9 -- so /dev/gpio/6 is PORT6, the one
- * carrying LED1.  PORTA..PORTD have no node under that numbering; the LED
- * interface reaches PA07 through the board macros instead.
+ * I/O ports.  The manual names them PORT0..PORT9 then PORTA..PORTD, and
+ * /dev/gpio numbers them 0..13 from tiku_gpio_geometry.h rather than from
+ * these flags -- so /dev/gpio/6 is PORT6, the one carrying LED1, and PA07 is
+ * /dev/gpio/10/7.
  */
 #define TIKU_DEVICE_HAS_PORT1       1
 #define TIKU_DEVICE_HAS_PORT2       1

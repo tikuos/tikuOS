@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.c - nRF54L GPIO primitives (P0/P1/P2).
+ * tiku_gpio_arch.c - nRF54L GPIO primitives (P0..P2, and P3 on the nRF54LM20).
  *
  * Outputs drive through OUTSET/OUTCLR, inputs read from IN, and each pin is
  * configured through PIN_CNF[].  Helpers take a physical port number matching the
@@ -15,6 +15,7 @@
  */
 
 #include <arch/nordic/tiku_gpio_arch.h>
+#include <arch/nordic/tiku_device_select.h>
 #include <arch/nordic/tiku_nordic_mdk.h>
 
 /*---------------------------------------------------------------------------*/
@@ -133,16 +134,17 @@ uint8_t tiku_nordic_gpio_read(uint8_t port, uint8_t pin)
 /*---------------------------------------------------------------------------*/
 
 /*
- * The VFS/shell layer uses 1-based virtual ports (port 1 = P0, 2 = P1, 3 = P2)
- * matching TIKU_DEVICE_HAS_PORT1..3.  These wrappers translate to the physical
+ * The VFS/shell layer uses 1-based ports (1 = P0 through 4 = P3 where present)
+ * matching TIKU_DEVICE_HAS_PORT1..4. These wrappers translate to the physical
  * (0-based) port the helpers above take, validate the range, and return the
  * int8_t status the HAL expects (0 = ok, -1 = out of range).
  */
 
-/** @brief Valid virtual port (1..3) and pin (0..31)? */
+/** @brief Valid virtual port (1..3 or 1..4) and pin (0..31)? */
 static int tiku_nordic_gpio_valid(uint8_t port, uint8_t pin)
 {
-    return (port >= 1u && port <= 3u && pin <= 31u);
+    return (port >= 1u && port <= (TIKU_DEVICE_HAS_PORT4 ? 4u : 3u) &&
+            pin <= 31u);
 }
 
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin)
@@ -211,4 +213,21 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin)
     }
     /* 1 = output, 0 = input. */
     return (int8_t)((g->DIR >> pin) & 0x1u);
+}
+
+int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin)
+{
+    NRF_GPIO_Type *g;
+    uint32_t ctrlsel;
+
+    if (!tiku_nordic_gpio_valid(port, pin)) {
+        return -1;
+    }
+    g = tiku_nordic_gpio_base((uint8_t)(port - 1u));
+    if (g == (NRF_GPIO_Type *)0) {
+        return -1;
+    }
+    ctrlsel = (g->PIN_CNF[pin] & GPIO_PIN_CNF_CTRLSEL_Msk) >>
+              GPIO_PIN_CNF_CTRLSEL_Pos;
+    return (ctrlsel != GPIO_PIN_CNF_CTRLSEL_GPIO) ? 1 : 0;
 }
