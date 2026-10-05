@@ -7,8 +7,9 @@
  *
  * tiku_crt_early.c - STM32N6 (Cortex-M55) startup.
  *
- * A vector table at the image base, which the boot ROM reads for the initial
- * SP and entry point, and a reset handler that runs .data/.bss and calls main.
+ * The vector table at the image base and the reset handler: it sets SP,
+ * prepares .data, .bss and .axisram, enables the caches and the fault
+ * handlers, and calls main().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,16 +40,15 @@ extern int main(void);
 
 typedef void (*stm32n6_isr_t)(void);
 
-/* Vector table size drives its own alignment: 176 entries is 704 bytes, so the
- * table is aligned to 1024, which VTOR requires and the load address already
- * satisfies. */
+/* 160 external IRQs after the 16 system vectors: 176 entries, 704 bytes.
+ * VTOR needs the table aligned to the next power of two, 1024, which the
+ * image base meets. */
 #define STM32N6_NUM_EXT_IRQS    160
 
 /**
  * @brief Default handler: park the core on an unhandled exception.
  *
- * Spinning on WFE keeps the core quiet and lands a debugger halt on a
- * recognisable PC instead of a random instruction stream.
+ * Spins on WFE, so a debugger halt lands on this function.
  */
 static void stm32n6_default_handler(void) {
     while (1) {
@@ -74,12 +74,12 @@ void tiku_stm32n6_debug_handler(void)       __attribute__((weak, alias("stm32n6_
 void tiku_stm32n6_pendsv_handler(void)      __attribute__((weak, alias("stm32n6_default_handler")));
 void tiku_stm32n6_systick_handler(void)     __attribute__((weak, alias("stm32n6_default_handler")));
 
-/* External IRQs the port wires. The timer driver supplies the real LPTIM1
- * handler; the weak stub keeps builds that leave it out linking. */
+/* External IRQs the port wires.  tiku_timer_arch.c and tiku_dma_arch.c define
+ * the real handlers; a build without one links the default handler. */
 void tiku_stm32n6_lptim1_isr(void)          __attribute__((weak, alias("stm32n6_default_handler")));
 void tiku_stm32n6_gpdma_ch0_isr(void)       __attribute__((weak, alias("stm32n6_default_handler")));
 
-/* One EXTI vector per line, so a handler never has to scan for its own line. */
+/* One EXTI vector per line; tiku_gpio_irq_arch.c defines the handlers. */
 #define EXTI_WEAK(n) \
     void tiku_stm32n6_exti##n##_isr(void) __attribute__((weak, alias("stm32n6_default_handler")));
 EXTI_WEAK(0)  EXTI_WEAK(1)  EXTI_WEAK(2)  EXTI_WEAK(3)
@@ -91,12 +91,13 @@ EXTI_WEAK(12) EXTI_WEAK(13) EXTI_WEAK(14) EXTI_WEAK(15)
 void tiku_stm32n6_startup(void);
 
 /**
- * @brief Image entry point: establish the stack, then run the C startup.
+ * @brief Image entry point: set the stack, then run the C startup.
  *
  * The boot ROM jumps here without loading SP from vector word 0, so SP must
  * be set before any compiler-generated prologue can push to it.
  *
- * @note Naked and assembly-only, the sole defined use of the attribute.
+ * @note Naked: the body is basic assembly only, the one use GCC defines for
+ *       the attribute.
  */
 __attribute__((naked, section(".text"), used))
 void tiku_stm32n6_reset_handler(void) {
@@ -108,6 +109,7 @@ void tiku_stm32n6_reset_handler(void) {
         ".ltorg\n");
 }
 
+/** @brief C startup, entered from the reset handler; calls main(). */
 void tiku_stm32n6_startup(void) {
     /* The core resets with interrupts enabled; mask them until the kernel is
      * ready to take one. */
@@ -131,18 +133,18 @@ void tiku_stm32n6_startup(void) {
         *b = 0UL;
     }
 
-    /* Before the arena is zeroed, not after: the banks it lives in come out of
-     * reset shut down, and a write to a shut-down bank is swallowed silently
-     * rather than faulting, so the zeroing would simply not happen. */
+    /* The SRAM banks come out of reset shut down, and a write to a shut-down
+     * bank is dropped without a fault, so they are powered before the
+     * .axisram zero loop below. */
     tiku_stm32n6_sram_init();
 
-    /* Both caches: the ROM's dev-boot path hands over with them off, and the
-     * flash-boot path keeps only the I-cache -- so neither state can be
-     * assumed. Before the arena zero loop, which then runs write-allocated. */
+    /* The ROM's dev-boot path hands over with both caches off and its
+     * flash-boot path with only the I-cache on; this enables whichever is off.
+     * The .axisram zero loop below then runs through the D-cache. */
     tiku_stm32n6_cache_enable();
 
-    /* Before any driver runs: a bus or usage error that escalates to
-     * HardFault loses the status bits that say what it actually was. */
+    /* Before any driver runs, so a driver's MemManage, BusFault or
+     * UsageFault reaches its own handler. */
     tiku_stm32n6_fault_init();
 
     for (uint32_t *a = &__axisram_start; a < &__axisram_end; a++) {
@@ -159,11 +161,11 @@ void tiku_stm32n6_startup(void) {
 /**
  * @brief Cortex-M55 vector table, placed at the image base.
  *
- * Word 0 is the initial SP and word 1 the reset handler; the boot ROM reads
- * both, and the function pointer carries the Thumb bit the core requires.
+ * Word 0 is the initial SP and word 1 the reset handler, the entry the boot
+ * ROM jumps to; the function pointer carries the Thumb bit the core requires.
  */
-/* The named handlers below deliberately override the default fill at their
- * index, which is exactly what -Woverride-init warns about. */
+/* The named handlers below override the default fill at their index, which
+ * -Woverride-init warns about. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverride-init"
 __attribute__((section(".vectors"), used, aligned(1024)))
@@ -183,8 +185,8 @@ const stm32n6_isr_t tiku_stm32n6_vectors[16 + STM32N6_NUM_EXT_IRQS] = {
     tiku_stm32n6_pendsv_handler,
     tiku_stm32n6_systick_handler,
 
-    /* Every external IRQ gets the default handler. A zero-filled tail would
-     * send an unexpected interrupt to address 0 instead of parking it. */
+    /* Every external IRQ defaults to stm32n6_default_handler; a zero entry
+     * would send an unexpected interrupt to address 0. */
     DFL16, DFL16, DFL16, DFL16, DFL16,
     DFL16, DFL16, DFL16, DFL16, DFL16,
 

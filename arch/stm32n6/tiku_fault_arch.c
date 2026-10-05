@@ -7,8 +7,8 @@
  *
  * tiku_fault_arch.c - STM32N6 CPU fault capture.
  *
- * The handlers print through a spin-bounded UART, push a record into the NOR
- * mirror -- SRAM does not survive the reset they force -- and then reset.
+ * The handlers print through the spin-bounded UART, flush a record to the NOR
+ * mirror, and reset the part.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,16 +21,14 @@
 #include "tiku_uart_arch.h"
 #include <kernel/memory/tiku_mem.h>
 
-/* SRAM does not survive the reset the handler forces -- the boot ROM clears
- * it, and neither the image window nor AXISRAM1 is exempt. So the record
- * rides the durable mirror instead: .persistent, flushed to the NOR before
- * the reset and restored from it on the way back up. */
+/* SRAM does not survive the reset the handler forces: the boot ROM clears
+ * it, the image window and AXISRAM1 included.  The record is durable: the
+ * handler flushes it to the NOR mirror and boot restores it from there. */
 static TIKU_DURABLE tiku_stm32n6_fault_record_t fault_rec;
 
 void tiku_stm32n6_fault_init(void) {
-    /* Without these a bus or usage error escalates straight to HardFault and
-     * its own status bits never get written, which loses the one field that
-     * says what actually went wrong. */
+    /* With one of these handlers disabled, its faults escalate to HardFault
+     * and are recorded as kind hardfault. */
     TIKU_REG32(STM32N6_SCB_SHCSR) |= STM32N6_SCB_SHCSR_MEMFAULTENA |
                                      STM32N6_SCB_SHCSR_BUSFAULTENA |
                                      STM32N6_SCB_SHCSR_USGFAULTENA;
@@ -110,8 +108,8 @@ void tiku_stm32n6_fault_body(const uint32_t *frame, uint32_t kind) {
         addr = TIKU_REG32(STM32N6_SCB_BFAR);
     }
 
-    /* A stacking error means the frame push faulted, so the words it points at
-     * are whatever was already there; recorded as zero rather than as fiction. */
+    /* A stacking error means the frame push faulted and the words at frame
+     * are stale; the record holds 0 for pc, lr and psr. */
     int frame_ok = (frame != NULL) && ((cfsr & STM32N6_CFSR_STKERR_MSK) == 0UL);
 
     if (fault_rec.magic != TIKU_STM32N6_FAULT_MAGIC) {
@@ -138,14 +136,13 @@ void tiku_stm32n6_fault_body(const uint32_t *frame, uint32_t kind) {
     fault_putstr("\r\n");
     fault_drain();
 
-    /* Push the record to the NOR before resetting: SRAM will not survive what
-     * comes next. The flush is the same bounded, polled path the durable store
-     * uses, and a failure here costs only the record -- the dump is already
-     * out on the wire. */
+    /* The record reaches the NOR before the reset, through the bounded,
+     * polled flush the durable store uses; a failed flush loses the record,
+     * and the dump has already gone out on the UART. */
     tiku_mem_arch_nvm_flush();
 
-    /* The faulting instruction cannot be stepped over, so returning would
-     * fault again forever; the record and the dump are the whole yield. */
+    /* Returning would re-run the faulting instruction and fault again, so
+     * the handler resets the part. */
     TIKU_REG32(STM32N6_SCB_AIRCR) = STM32N6_SCB_AIRCR_VECTKEY |
                                     STM32N6_SCB_AIRCR_SYSRESETREQ;
     __asm__ volatile ("dsb" ::: "memory");
@@ -153,9 +150,9 @@ void tiku_stm32n6_fault_body(const uint32_t *frame, uint32_t kind) {
     }
 }
 
-/* Naked entry shims. EXC_RETURN bit 2 says which stack holds the frame, and
- * no C prologue may run first: if the fault was a stack overflow, the
- * prologue's own push would fault again and lose the original. */
+/* Naked entry shims.  EXC_RETURN bit 2 says which stack holds the frame, and
+ * no C prologue may run first: after a stack overflow, the prologue's own
+ * push would fault again and lose the original fault. */
 #define FAULT_SHIM(fn, kindval)                                               \
     __attribute__((naked)) void fn(void) {                                    \
         __asm__ volatile (                                                    \

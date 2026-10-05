@@ -8,7 +8,7 @@
  * tiku_mem_arch.h - STM32N6 memory helpers and the durable mirror.
  *
  * Durable state lives in SRAM and is mirrored to the last four sectors of the
- * external NOR, so it survives a power cycle rather than only a warm reset.
+ * external NOR; what was last flushed survives resets and power cycles.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@
 #define TIKU_STM32N6_MEM_ARCH_H_
 
 #include <stdint.h>
-#include <stddef.h>   /* NULL -- kept in the mem-HAL chain like the other ports */
+#include <stddef.h>   /* NULL, for files that reach it through the mem HAL */
 
 /** @brief Word alignment the allocator rounds to. */
 #define TIKU_MEM_ARCH_ALIGNMENT  4U
@@ -25,11 +25,19 @@
 /** @brief Size type for arch memory calls. */
 typedef uint32_t tiku_mem_arch_size_t;
 
-/** @brief Prepare arch-level memory state; nothing to unlock on this part. */
+/**
+ * @brief Restore the durable region from the NOR mirror.
+ *
+ * Copies the mirror's image over the region when its header and CRC check
+ * out; tiku_mem_arch_nvm_restore_status() reports what was found.
+ *
+ * @note Call after tiku_xspi_init(); with the XSPI not ready the region keeps
+ *       its reset contents and the status reads virgin.
+ */
 void tiku_mem_arch_init(void);
 
 /**
- * @brief Overwrite a buffer so its contents cannot be recovered.
+ * @brief Zero a buffer with writes the compiler cannot remove.
  *
  * @param buf  Buffer to wipe; NULL is ignored
  * @param len  Length in bytes
@@ -58,17 +66,26 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
 /**
- * @brief Commit the durable SRAM region to the flash mirror.
+ * @brief Commit the durable SRAM region to the NOR mirror.
  *
- * The explicit durability checkpoint: the state survives a power cycle once the
- * mirror carries it. Skipped when the mirror already matches, which costs an
- * erase cycle out of a finite budget for nothing.
+ * tiku_mem_arch_nvm_flush_status() with its result discarded.  A mirror that
+ * already holds the region's length and CRC is not rewritten.
  *
- * @note Failure is silent -- an XSPI that is not ready, a failed erase or a
- *       failed program returns with the mirror stale or erased, and the only
- *       signal is that tiku_mem_arch_nvm_program_count() did not advance.
+ * @note After a failure the mirror is stale or erased, and
+ *       tiku_mem_arch_nvm_program_count() has not advanced.
  */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief Commit the durable SRAM region to the NOR mirror.
+ *
+ * Returns at once when the mirror already holds the region's length and CRC;
+ * otherwise erases the four mirror sectors and programs the image, then the
+ * header.
+ *
+ * @return 0 when the mirror matches the region, -1 when the XSPI is not
+ *         ready, the region is larger than the mirror, or a step fails
+ */
 int tiku_mem_arch_nvm_flush_status(void);
 
 /**

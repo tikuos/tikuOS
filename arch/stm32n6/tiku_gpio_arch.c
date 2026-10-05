@@ -22,12 +22,13 @@
 #define STM32N6_GPIO_PORT_MAX   16U
 #define STM32N6_GPIO_PIN_MAX    15U
 
+/** @brief 1 when @p port is A..H or N..Q and @p pin is 0..15. */
 static uint8_t gpio_valid(uint8_t port, uint8_t pin) {
     return ((port <= 7U || (port >= 13U && port <= STM32N6_GPIO_PORT_MAX)) &&
             pin <= STM32N6_GPIO_PIN_MAX);
 }
 
-/* Set the two-bit field for one pin in a MODER/OSPEEDR/PUPDR-shaped register. */
+/** @brief Set one pin's two-bit field in a MODER/OSPEEDR/PUPDR register. */
 static void gpio_field2(uint32_t reg, uint8_t pin, uint32_t value) {
     uint32_t shift = (uint32_t)pin * 2U;
     uint32_t v = TIKU_REG32(reg);
@@ -50,9 +51,9 @@ void tiku_stm32n6_gpio_init_output(uint8_t port, uint8_t pin) {
         return;
     }
     tiku_stm32n6_gpio_clock_enable(port);
-    TIKU_REG32(STM32N6_GPIO_BSRR(port)) = (1UL << (pin + 16U));   /* start low */
-    TIKU_REG32(STM32N6_GPIO_OTYPER(port)) &= ~(1UL << pin);       /* push-pull */
-    gpio_field2(STM32N6_GPIO_PUPDR(port), pin, 0UL);              /* no pull */
+    TIKU_REG32(STM32N6_GPIO_BSRR(port)) = (1UL << (pin + 16U)); /* start low */
+    TIKU_REG32(STM32N6_GPIO_OTYPER(port)) &= ~(1UL << pin);     /* push-pull */
+    gpio_field2(STM32N6_GPIO_PUPDR(port), pin, 0UL);            /* no pull */
     gpio_field2(STM32N6_GPIO_MODER(port), pin, STM32N6_GPIO_MODE_OUTPUT);
 }
 
@@ -71,7 +72,7 @@ void tiku_stm32n6_gpio_init_alt(uint8_t port, uint8_t pin, uint8_t af) {
     TIKU_REG32(reg) = v;
 
     TIKU_REG32(STM32N6_GPIO_OTYPER(port)) &= ~(1UL << pin);
-    gpio_field2(STM32N6_GPIO_OSPEEDR(port), pin, 2UL);            /* high speed */
+    gpio_field2(STM32N6_GPIO_OSPEEDR(port), pin, 2UL);          /* high speed */
     gpio_field2(STM32N6_GPIO_MODER(port), pin, STM32N6_GPIO_MODE_ALT);
 }
 
@@ -93,7 +94,7 @@ void tiku_stm32n6_gpio_toggle(uint8_t port, uint8_t pin) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Kernel-facing contract                                                    */
+/* KERNEL-FACING CONTRACT                                                    */
 /*---------------------------------------------------------------------------*/
 
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin) {
@@ -117,9 +118,9 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     if (!gpio_valid(port, pin)) {
         return -1;
     }
-    /* A write leaves the pin a push-pull output, as on the other ports.  BSRR
-     * takes the level before MODER switches the pin, so it never drives the
-     * other level first; a pin that already drives costs one read. */
+    /* A write leaves the pin a push-pull output.  BSRR takes the level
+     * before MODER switches the pin, so the pin never drives the other level
+     * first. */
     if (tiku_gpio_arch_get_dir(port, pin) != 1) {
         tiku_stm32n6_gpio_clock_enable(port);
         tiku_stm32n6_gpio_set(port, pin, val);
@@ -155,9 +156,9 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin) {
     return (mode == STM32N6_GPIO_MODE_OUTPUT) ? 1 : 0;
 }
 
-/* Alternate-function mode is a peripheral's.  A port whose clock is off reads
- * as unassigned rather than being clocked, and analog mode counts as
- * unassigned: MODER alone cannot tell an ADC input from an idle analog pin. */
+/* A pin in alternate-function mode belongs to a peripheral.  A port whose
+ * clock is off reads as unassigned and stays unclocked.  Analog mode reads as
+ * unassigned: MODER cannot tell an ADC input from an idle analog pin. */
 int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin) {
     uint32_t mode;
 

@@ -7,8 +7,8 @@
  *
  * tiku_htimer_config.h - STM32N6 high-resolution timer resolution.
  *
- * LPTIM1 counts at 500 kHz, so the finest step this port can report is 2 us;
- * the unit stays microseconds to match every other port.
+ * The high-resolution timer counts microseconds; LPTIM1 runs at 500 kHz, so
+ * its times advance in 2 us steps.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

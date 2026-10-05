@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_layout.ld - the ONE canonical NVM layout derivation (ARM).
+ * tiku_nvm_layout.ld - NVM layout derivation shared by the ARM ports.
  *
- * Every ARM platform divides NVM the same way -- code, NVM region, persist
- * partition -- and this fragment holds that arithmetic once.  The input/output
- * symbol contract is below.
+ * Splits a part's non-volatile memory into the code window, the NVM region
+ * and the persist partition, and fails the link when they do not fit.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,20 +18,20 @@
  *
  *     [boot] code window | NVM region | persist partition   (top)
  *
- * This fragment holds the arithmetic ONCE.  A device script defines three
- * input symbols, INCLUDEs this file, then aliases the generic outputs to
- * its platform's historical symbol names (rram/mram/flash):
+ * A device script defines three input symbols, INCLUDEs this file, then
+ * aliases the generic outputs to its platform's own symbol names
+ * (rram/mram/flash).  MSP430 does not use this file.
  *
- *   inputs (define BEFORE the INCLUDE):
+ *   inputs (defined before the INCLUDE):
  *     __tiku_layout_top           end of usable NVM (absolute address)
  *     __tiku_layout_code_cap      end of the code estate = NVM region base
- *     __tiku_layout_persist_size  persist partition bytes (16 KB in-place RRAM,
- *                                 64 KB MRAM mirror, 4 KB flash sector)
+ *     __tiku_layout_persist_size  persist partition bytes (16 KB, or one
+ *                                 4 KB flash sector on the RP2350)
  *
  *   optional (--defsym from the build, not the device script):
- *     __tiku_module_reserve       bytes at the TOP of the code window kept
- *                                 for the Tier-3 module slot, present only
- *                                 when the loader is compiled in
+ *     __tiku_module_reserve       bytes at the top of the code window kept
+ *                                 for the module slot, present only when
+ *                                 the module loader is compiled in
  *
  *   outputs:
  *     __tiku_code_limit           where the image must end: code_cap less
@@ -40,16 +39,11 @@
  *     __tiku_layout_persist_start (top - persist_size)
  *     __tiku_nvmfs_base / __tiku_nvmfs_end / __tiku_nvmfs_size
  *
- * The Tier-3 module slot is NOT an estate.  It lives inside the code
- * window's guaranteed slack -- [code_cap - 32 KB, code_cap) -- and exists
- * only in builds that compile the loader, so a build without it pays
- * nothing and no fixed address ever moves with a feature flag.  The C-side
- * addresses live in kernel/shell/basic/tiku_basic_module.h; keep them equal
- * to code_cap - 32 KB per platform.
- *
- * The ASSERTs stitch every seam, so a script that edits one number cannot
- * silently open a gap or an overlap.  MSP430 does not use this file: its
- * unified FRAM is a genuinely different design (see the device fragments).
+ * The module slot is the top of the code window, [code_cap - 32 KB,
+ * code_cap), and exists only in builds that compile the loader; without it
+ * the reserve is 0 and no other address changes.  The C-side slot addresses
+ * in kernel/shell/basic/tiku_basic_module.h must equal code_cap - 32 KB on
+ * each platform.
  */
 
 __tiku_layout_persist_start = __tiku_layout_top - __tiku_layout_persist_size;
@@ -63,32 +57,25 @@ __tiku_code_limit           = __tiku_layout_code_cap -
                                ? __tiku_module_reserve : 0);
 
 /*
- * ORDERING FIRST -- this is the check that can actually fail.
- *
- * Linker expressions are UNSIGNED: if the code estate grows past the persist
- * partition, the subtraction that computes the region size WRAPS to an enormous
- * positive number rather than falling to zero, so a `size > 0` check passes
- * and the build ships a region whose size is nonsense.  Comparing the
- * addresses in order cannot wrap, so that is what is checked, before
- * anything is derived from them.
+ * Linker arithmetic is unsigned: when the code estate grows past the persist
+ * partition, __tiku_nvmfs_size wraps to a huge value and passes the floor
+ * check below.  These two comparisons of addresses cannot wrap, and they fail
+ * the link in that case.
  */
 ASSERT(__tiku_layout_persist_start < __tiku_layout_top,
        "NVM layout: persist partition is larger than the whole NVM")
 ASSERT(__tiku_layout_code_cap < __tiku_layout_persist_start,
        "NVM layout: code window overruns the persist partition (the region size would WRAP, not shrink) -- shrink the code window")
 
-/* A module reserve larger than the window would wrap code_limit the same
- * way; images are asserted against code_limit per device, so pin it here. */
+/* A module reserve larger than code_cap wraps __tiku_code_limit the same
+ * way, and each device script asserts its image against that limit. */
 ASSERT(__tiku_code_limit <= __tiku_layout_code_cap,
        "NVM layout: module reserve exceeds the code window")
 
 /*
- * FLOOR.  A region merely being non-empty is not useful: it must hold the NVM
- * tier (a 32 KB portable contract) plus a store worth mounting.  The exact
- * requirement is per-platform and lives in C, where tiku_tfs_mount() enforces
- * TIKU_TFS_MIN_SLOTS against the carve it is actually handed; this is the crude
- * backstop that catches a grossly mis-sized window at LINK time, on the four
- * platforms that are not on anyone's bench.
+ * Floor: the region holds the 32 KB NVM tier and a file store, and the link
+ * fails below 64 KB.  The exact per-platform minimum is checked at run time,
+ * where tiku_tfs_mount() enforces TIKU_TFS_MIN_SLOTS on the carve it is given.
  */
 ASSERT(__tiku_nvmfs_size >= 64 * 1024,
        "NVM layout: region too small to hold the 32 KB tier and a file store")

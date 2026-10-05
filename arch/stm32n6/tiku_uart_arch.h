@@ -7,8 +7,8 @@
  *
  * tiku_uart_arch.h - STM32N6 console on USART1, the ST-LINK virtual COM port.
  *
- * TX is PE5 and RX is PE6, both alternate function 7. Transmit is polled, so
- * output is safe from any context including a fault handler.
+ * TX is PE5 and RX is PE6, both alternate function 7.  Transmit is polled with
+ * a bounded wait, so output works from any context, a fault handler included.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,13 +21,15 @@
 /**
  * @brief Bring up USART1 at the board's console baud rate.
  *
- * Clocks USART1 from HSI so the baud divisor does not depend on whatever the
- * boot ROM left in the bus clock tree.
+ * Clocks USART1 from HSI, so the baud divisor does not change with the bus
+ * clocks.
  */
 void tiku_uart_init(void);
 
 /**
- * @brief Write one character, blocking until the transmit register is free.
+ * @brief Write one character, waiting for room in the transmit FIFO.
+ *
+ * After 2000000 polls without room the character is dropped.
  *
  * @param c  Character to send
  */
@@ -43,8 +45,8 @@ void tiku_uart_puts(const char *s);
 /**
  * @brief Formatted output over USART1.
  *
- * Supports %s %c %d %u %x %% with an optional width and 'l' modifier, which
- * covers the kernel's output without linking newlib's printf.
+ * Supports %s %c %d %u %x %% with an optional 0 flag, width and 'l'
+ * modifier, and expands '\n' to CR LF; newlib's printf is not used.
  *
  * @param fmt  Format string; NULL is ignored
  */
@@ -65,9 +67,9 @@ uint8_t tiku_uart_rx_ready(void);
 int tiku_uart_getc(void);
 
 /**
- * @brief Count of receive overruns since the last reset of the counter.
+ * @brief Count of receive overruns since the counter was last zeroed.
  *
- * @return Overruns observed
+ * @return Overruns observed, saturating at 0xFFFF
  */
 uint16_t tiku_uart_overrun_count(void);
 

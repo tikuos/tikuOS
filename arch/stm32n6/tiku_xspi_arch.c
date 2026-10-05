@@ -7,8 +7,8 @@
  *
  * tiku_xspi_arch.c - STM32N6 external NOR flash over XSPI2, indirect mode.
  *
- * Single-lane SPI at 50 MHz: the part answers there from power-up with no mode
- * switch, and the speed needs no OTP fuse, which on this device is permanent.
+ * Single-lane SPI at 50 MHz: the part answers in that mode from power-up, and
+ * 50 MHz needs no OTP fuse.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,15 +20,15 @@
 #include "tiku_gpio_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/* IC3 carries the XSPI kernel clock. PLL1 runs at 1200 MHz, so a divider of 24
- * gives the 50 MHz ST uses for the conservative case; their 200 MHz variant
- * pairs with an OTP fuse this port will not burn. */
+/* IC3 carries the XSPI kernel clock.  With PLL1 at 1200 MHz a divider of 24
+ * gives the 50 MHz ST uses without the VDDIO3_HSLV fuse; ST's 200 MHz
+ * setting needs that fuse. */
 #define XSPI_IC_INDEX       3U
 #define XSPI_IC_DIVIDER     24U
 #define XSPI_CLOCK_HZ       50000000UL
 
-/* Standard SPI-mode opcodes with 32-bit addressing; the 3-byte forms cannot
- * reach past 16 MB of a 64 MB part. */
+/* Standard SPI-mode opcodes with 32-bit addressing; the 3-byte forms reach
+ * only the first 16 MB of the part. */
 #define CMD_READ_ID         0x9FU
 #define CMD_READ_STATUS     0x05U
 #define CMD_WRITE_ENABLE    0x06U
@@ -39,13 +39,14 @@
 #define STATUS_WIP          0x01U   /* write in progress */
 #define STATUS_WEL          0x02U   /* write enable latch */
 
-/* Bounded so a wedged device costs an error rather than the caller. */
+/* Polls before a wait returns TIKU_XSPI_ERR_TIMEOUT. */
 #define XSPI_SPINS          2000000UL
-/* A 4 KB sector erase is specified in hundreds of milliseconds, so the busy
- * wait needs far more headroom than a transfer does. */
+/* Status reads while an erase or a page program runs: a 4 KB sector erase is
+ * specified in hundreds of milliseconds. */
 #define XSPI_ERASE_SPINS    200000000UL
 
-/** @brief Set once init has completed, so later calls can refuse early. */
+/** @brief 1 after a successful init; until then most calls return
+ *         TIKU_XSPI_ERR_STATE. */
 static uint8_t xspi_ready;
 
 /** @brief Set while the memory-mapped window is live. */
@@ -63,13 +64,13 @@ static int xspi_wait(uint32_t reg, uint32_t mask, int want_set,
     return 0;
 }
 
-/** @brief Clear the latched transfer flags and park the peripheral. */
+/** @brief Clear the latched transfer flags. */
 static void xspi_finish(void) {
     TIKU_REG32(STM32N6_XSPI_FCR) = STM32N6_XSPI_FCR_ALL;
 }
 
 /**
- * @brief Run one indirect transfer.
+ * @brief Run one indirect transfer, taking the mapped window down first.
  *
  * Writing the instruction starts a command that carries no address; otherwise
  * the address register write is what launches it.
@@ -147,7 +148,7 @@ static tiku_xspi_err_t xspi_status(uint8_t *out) {
 /**
  * @brief Wait until the device reports no write in progress.
  *
- * @param spins  Bound, generous enough for the slowest erase
+ * @param spins  Status reads before giving up
  * @return TIKU_XSPI_OK, or a timeout
  */
 static tiku_xspi_err_t xspi_wait_idle(unsigned long spins) {
@@ -164,7 +165,12 @@ static tiku_xspi_err_t xspi_wait_idle(unsigned long spins) {
     return TIKU_XSPI_ERR_TIMEOUT;
 }
 
-/** @brief Arm the write-enable latch the device requires before it changes. */
+/**
+ * @brief Set the write-enable latch the device needs before it changes.
+ *
+ * @return TIKU_XSPI_OK, a transfer error, or TIKU_XSPI_ERR_STATE when WEL
+ *         reads back clear
+ */
 static tiku_xspi_err_t xspi_write_enable(void) {
     tiku_xspi_err_t rc = xspi_xfer(CMD_WRITE_ENABLE, 0U, 0, NULL, 0U, 1);
     if (rc != TIKU_XSPI_OK) {
@@ -198,8 +204,8 @@ tiku_xspi_err_t tiku_xspi_init(void) {
     (void)TIKU_REG32(STM32N6_RCC_AHB5ENR);
 
     /* Declare the VDDIO3 rail valid and select its 1.8 V range, then wait for
-     * the monitor: until this lands the XSPI pads are unpowered and the flash
-     * cannot answer at all. */
+     * the monitor: until then the XSPI pads are unpowered and the flash
+     * cannot answer. */
     TIKU_REG32(STM32N6_PWR_SVMCR3) |= STM32N6_PWR_SVMCR3_VDDIO3SV |
                                       STM32N6_PWR_SVMCR3_VDDIO3VRSEL;
     (void)xspi_wait(STM32N6_PWR_SVMCR3, STM32N6_PWR_SVMCR3_VDDIO3RDY, 1,
@@ -229,8 +235,8 @@ tiku_xspi_err_t tiku_xspi_init(void) {
 
     xspi_ready = 1U;
 
-    /* An identity that does not name Macronix means the wiring or the clock is
-     * wrong, and every later call would be guesswork. */
+    /* A manufacturer byte other than Macronix's fails the init and leaves the
+     * driver unusable. */
     tiku_xspi_id_t id;
     tiku_xspi_err_t rc = tiku_xspi_read_id(&id);
     if (rc != TIKU_XSPI_OK) {
@@ -296,8 +302,8 @@ tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr) {
     }
     rc = xspi_wait_idle(XSPI_ERASE_SPINS);
 
-    /* The data cache can hold the old sector via the memory-mapped alias; a
-     * reader would then see pre-erase bytes and, worse, trust a stale CRC. */
+    /* The D-cache can hold the old sector through the memory-mapped alias,
+     * and a reader would see pre-erase bytes and a stale CRC. */
     tiku_stm32n6_dcache_invalidate(
         (const void *)(uintptr_t)(TIKU_XSPI_MMAP_BASE +
                                   (addr & ~(TIKU_XSPI_SECTOR_SIZE - 1UL))),
@@ -318,8 +324,8 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
     uint32_t start_addr = addr;
     uint32_t total_len  = len;
     while (len > 0U) {
-        /* A program never crosses a page boundary: the device wraps within the
-         * page instead of advancing, which would silently corrupt the start. */
+        /* Each program stays within one page: the device wraps at the page
+         * end and would overwrite the start of the page. */
         uint32_t room = TIKU_XSPI_PAGE_SIZE - (addr % TIKU_XSPI_PAGE_SIZE);
         uint32_t n    = (len < room) ? len : room;
 
@@ -344,7 +350,8 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
         p    += n;
         len  -= n;
     }
-    /* Same staleness hazard as erase, over exactly the bytes programmed. */
+    /* Drop the programmed bytes from the D-cache, as erase does for its
+     * sector. */
     tiku_stm32n6_dcache_invalidate(
         (const void *)(uintptr_t)(TIKU_XSPI_MMAP_BASE + start_addr),
         total_len);
@@ -355,11 +362,9 @@ tiku_xspi_err_t tiku_xspi_mmap_enable(void) {
     if (!xspi_ready) {
         return TIKU_XSPI_ERR_STATE;
     }
-    /* Already up: say so rather than fall through to the busy wait. In mapped
-     * mode the controller reports busy for as long as the window is live, so
-     * the wait below could only ever time out -- which turned a redundant
-     * enable into a spurious failure for every caller that opens the window
-     * defensively before reading through it. */
+    /* An open window returns TIKU_XSPI_OK at once: in mapped mode the
+     * controller reports busy while the window is live, and the busy wait
+     * below would time out. */
     if (xspi_mmap) {
         return TIKU_XSPI_OK;
     }
@@ -368,8 +373,7 @@ tiku_xspi_err_t tiku_xspi_mmap_enable(void) {
     }
     xspi_finish();
 
-    /* The window replays one read command for every fetch, so the command
-     * shape is programmed once here rather than per access. */
+    /* The window issues this read command for every fetch. */
     TIKU_REG32(STM32N6_XSPI_CCR) = STM32N6_XSPI_CCR_IMODE_1L |
                                    STM32N6_XSPI_CCR_ADMODE_1L |
                                    STM32N6_XSPI_CCR_ADSIZE_32 |

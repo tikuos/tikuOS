@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.h - STM32N6 I2C contract.
+ * tiku_i2c_arch.h - STM32N6 I2C stub.
  *
- * No backend on this port yet: the calls exist so the kernel links, and each
- * reports failure rather than pretending a transfer happened.
+ * This port has no I2C driver: every call returns TIKU_I2C_ERR_PARAM and
+ * moves no data.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,44 +18,24 @@
 
 #include <interfaces/bus/tiku_i2c_bus.h>
 
-/** @brief Configure a bus. @param config  Requested settings @return Error */
+/** @brief Ignores @p config and returns TIKU_I2C_ERR_PARAM. */
 int  tiku_i2c_arch_init(const tiku_i2c_config_t *config);
 
-/** @brief Release the bus. */
+/** @brief Does nothing. */
 void tiku_i2c_arch_close(void);
 
-/**
- * @brief Write bytes to a device.
- *
- * @param addr  7-bit address
- * @param buf   Bytes to send
- * @param len   Length
- * @return TIKU_I2C_OK, or an error
- */
+/** @brief Sends nothing and returns TIKU_I2C_ERR_PARAM. */
 int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
 
-/**
- * @brief Read bytes from a device.
- *
- * @param addr  7-bit address
- * @param buf   Receives the bytes
- * @param len   Length
- * @return TIKU_I2C_OK, or an error
- */
+/** @brief Leaves @p buf untouched and returns TIKU_I2C_ERR_PARAM. */
 int  tiku_i2c_arch_read (uint8_t addr, uint8_t *buf, uint16_t len);
 
-/** @brief Test for a device. @param addr  7-bit address @return Error */
+/** @brief Probes nothing and returns TIKU_I2C_ERR_PARAM. */
 int  tiku_i2c_arch_probe(uint8_t addr);
 
 /**
- * @brief Write then read without releasing the bus.
- *
- * @param addr    7-bit address
- * @param tx_buf  Bytes to send
- * @param tx_len  Send length
- * @param rx_buf  Receives the reply
- * @param rx_len  Reply length
- * @return TIKU_I2C_OK, or an error
+ * @brief Sends nothing, leaves @p rx_buf untouched and returns
+ *        TIKU_I2C_ERR_PARAM.
  */
 int  tiku_i2c_arch_write_read(uint8_t addr,
                               const uint8_t *tx_buf, uint16_t tx_len,

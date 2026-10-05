@@ -7,8 +7,9 @@
  *
  * tiku_nvm_region_stm32n6.c - STM32N6 external-NOR region backend.
  *
- * Implements tiku_nvm_backend_get() over a span of the XSPI2 NOR: reads are
- * pointer dereferences through the memory-mapped window, writes program it.
+ * Implements tiku_nvm_backend_get() over the 8 MB NVM region of the XSPI2 NOR:
+ * reads are pointer dereferences through the memory-mapped window, and writes
+ * program the flash.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,9 +28,8 @@
 #define NVMR_DBG(...)  do { } while (0)
 #endif
 
-/* One sector of staging for the erase path. It sits in the image window's .bss
- * rather than the arena because the region backend runs before the tier is
- * anyone's to allocate from. */
+/* One sector of staging for region_write(), in the image window's .bss: the
+ * region backend runs before the tier allocator is up. */
 static uint8_t nvmr_sector[TIKU_XSPI_SECTOR_SIZE] __attribute__((aligned(4)));
 
 /**
@@ -43,8 +43,8 @@ static uint8_t nvmr_sector[TIKU_XSPI_SECTOR_SIZE] __attribute__((aligned(4)));
 static int nvmr_bits_only_clear(const uint8_t *cur, const uint8_t *new_,
                                 size_t len) {
     for (size_t i = 0U; i < len; i++) {
-        /* A program can turn a 1 into a 0 but never the reverse, so the write
-         * lands as-is exactly when it asks for no bit that is already 0. */
+        /* A program turns 1s into 0s and never the reverse, so the write
+         * needs no erase when it asks for no 1 where the flash holds a 0. */
         if ((uint8_t)(cur[i] & new_[i]) != new_[i]) {
             return 0;
         }
@@ -55,25 +55,16 @@ static int nvmr_bits_only_clear(const uint8_t *cur, const uint8_t *new_,
 /**
  * @brief Backend write: program @p len bytes at @p off within the region.
  *
- * Must be called inside the NVM window (tiku_tier_nvm_write provides it).
+ * Bytes that only clear bits are programmed in place; otherwise the sector is
+ * read, erased and programmed back, and a power cut during that erase loses
+ * the whole 4 KB sector, one TFS slot.
  *
  * @param be   Backend; its base is the memory-mapped region address
  * @param off  Byte offset into the region
  * @param src  Source bytes
  * @param len  Byte count
- * @return 0 on success, negative on a bad range or a flash failure
- */
-/*
- * Why the fast path exists.  A store format writes one gate word per directory
- * entry, ~2000 of them. Read-modify-erase-program per call would erase the same
- * sector hundreds of times over -- minutes of wall clock, and a chunk of a
- * finite erase budget spent on a fresh store. Erased NOR is all ones, so those
- * writes need no erase at all, and the slow path is reached only by a genuine
- * overwrite.
- *
- * ATOMICITY. Erase is sector-granular, so as on RP2350 the store's gate-last
- * guarantee degrades to "survives a clean reboot; a power cut during an erase
- * can lose that sector". TFS slots are one sector here for that reason.
+ * @return 0 on success, -1 on a bad range or a flash failure
+ * @note Call inside the NVM window; tiku_tier_nvm_write() opens it.
  */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len) {
@@ -91,8 +82,8 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
         return 0;
     }
 
-    /* Indirect commands cannot run while the window is mapped, so it comes
-     * down once for the whole call rather than per sector. */
+    /* Indirect commands cannot run while the window is mapped; it comes down
+     * once for the whole call. */
     if (tiku_xspi_mmap_disable() != TIKU_XSPI_OK) {
         NVMR_DBG("nvmr: mmap_disable failed\n");
         return -1;
@@ -109,8 +100,8 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
             n = end - off;
         }
 
-        /* Read only the target bytes first: the common case needs nothing
-         * else, and a whole-sector read would dominate a 4-byte gate write. */
+        /* Only the target bytes are read first.  Writes into erased flash,
+         * such as a store format's gate words, need nothing more. */
         if (tiku_xspi_read(flash, nvmr_sector, (uint32_t)n) != TIKU_XSPI_OK) {
             NVMR_DBG("nvmr: read %08lx failed\n", (unsigned long)flash);
             rc = -1;
@@ -156,15 +147,17 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
     return rc;
 }
 
-/** @brief The region descriptor, populated on first use. */
+/** @brief The region descriptor, filled by tiku_nvm_backend_get(). */
 static tiku_nvm_backend_t g_region;
 
 /**
- * @brief Return the NOR-backed region, or NULL before the flash is up.
+ * @brief Return the NOR-backed region.
  *
- * The base is the memory-mapped address of the region, so a caller reads it by
- * dereferencing; a failed XSPI init leaves every consumer to see no region
- * rather than a window that answers with garbage.
+ * The base is the region's memory-mapped address; callers read it by
+ * dereferencing.
+ *
+ * @return The region, or NULL when the XSPI is not ready or its window
+ *         cannot open
  */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void) {
     if (!tiku_xspi_ready()) {

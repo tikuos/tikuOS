@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.c - STM32N6 ADC, unimplemented.
+ * tiku_adc_arch.c - STM32N6 ADC stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no ADC driver: every call returns TIKU_ADC_ERR_PARAM, and
+ * tiku_adc_arch_read() also stores 0 in *value.  tiku_adc_arch_close() does
+ * nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -19,9 +19,8 @@
 
 #include "tiku_stm32n6_regs.h"
 
-/* STM32N6 has more than 32 external IRQs -- LPTIM1 alone is 136 -- so the
- * snapshot spans five NVIC words rather than the single one a smaller part
- * needs. */
+/* Five NVIC words cover IRQs 0 to 159, which hold every line this port
+ * enables; LPTIM1 is IRQ 136. */
 #define CRIT_NVIC_WORDS     5U
 
 /**
@@ -34,14 +33,13 @@ static struct {
 /**
  * @brief Disable NVIC interrupts, keeping the requested sources enabled.
  *
- * The kernel tick and the htimer share LPTIM1 and its interrupt, so one
- * line carries both and either preserve flag keeps it.
+ * Saves the enable words and clears every enabled line that is not kept.
  *
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
- * @note The tick and the htimer share LPTIM1 and one NVIC line, so either
- *       TIKU_CRIT_PRESERVE_HTIMER or TIKU_CRIT_PRESERVE_TICK keeps it, and
- *       keeping either keeps both.  Pin edges arrive on EXTI lines that go
- *       down with everything else; UART, I2C and ADC are polled here.
+ * @note The tick and the htimer share LPTIM1 and one NVIC line: either
+ *       TIKU_CRIT_PRESERVE_HTIMER or TIKU_CRIT_PRESERVE_TICK keeps both.
+ *       Every other flag keeps nothing: the EXTI pin lines are masked, the
+ *       UART is polled, and there is no I2C or ADC driver.
  * @note DSB+ISB makes the disable architecturally visible before the section.
  */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {

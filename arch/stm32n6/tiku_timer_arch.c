@@ -8,7 +8,7 @@
  * tiku_timer_arch.c - STM32N6 kernel clock on LPTIM1.
  *
  * LPTIM1 is clocked from HSI through CLKP and reloads at the tick rate, so
- * time stays correct regardless of what clock the boot ROM left the CPU on.
+ * the tick does not follow changes to the CPU clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -65,10 +65,10 @@ void tiku_clock_arch_init(void) {
         ((uint32_t)TIKU_STM32N6_LPTIM_PRESC_LOG2 << STM32N6_LPTIM_CFGR_PRESC_POS);
 
     /* ARR and DIER writes cross into the LPTIM kernel-clock domain and take
-     * effect only when ARROK / DIEROK confirm the transfer, so each write is
-     * confirmed before the counter starts -- otherwise CNTSTRT can run the
-     * timer with the reset ARR and the interrupt enable never lands. Bounded:
-     * a wedged sync then costs a beat, not the boot. */
+     * effect when ARROK / DIEROK confirm the transfer.  Each is confirmed
+     * before CNTSTRT, which would otherwise start the timer with the reset ARR
+     * and without the interrupt enable.  Each wait gives up after 100000
+     * polls. */
     TIKU_REG32(STM32N6_LPTIM_ICR(LPTIM))  = STM32N6_LPTIM_ICR_ARRMCF;
     TIKU_REG32(STM32N6_LPTIM_CR(LPTIM))   = STM32N6_LPTIM_CR_ENABLE;
 
@@ -100,9 +100,10 @@ void tiku_clock_arch_init(void) {
 }
 
 /**
- * @brief LPTIM1 autoreload interrupt: advance the tick and second counters.
+ * @brief LPTIM1 interrupt: dispatch the htimer compare, then advance the tick
+ *        and second counters on autoreload.
  *
- * Overrides the weak stub the vector table starts with.
+ * Replaces the weak alias in tiku_crt_early.c.
  */
 void tiku_stm32n6_lptim1_isr(void) {
     uint32_t isr = TIKU_REG32(STM32N6_LPTIM_ISR(LPTIM));
@@ -126,9 +127,8 @@ void tiku_stm32n6_lptim1_isr(void) {
          * program may now fit. */
         tiku_stm32n6_htimer_on_tick();
 
-        /* Wake the scheduler so expired software timers dispatch on the next
-         * pass -- without this the shell's poll timer expires unseen and the
-         * console never reads a byte. */
+        /* Wake the scheduler, so expired software timers, the shell's poll
+         * timer among them, dispatch on the next pass. */
         tiku_sched_notify();
     }
 }

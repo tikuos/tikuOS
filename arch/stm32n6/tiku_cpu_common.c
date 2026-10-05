@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - STM32N6 busy-wait delays.
+ * tiku_cpu_common.c - STM32N6 busy-wait delays, unique ID and reset cause.
  *
- * Scaled by the measured CPU rate once LPTIM1 is running, falling back to the
- * compile-time estimate before that -- the inherited clock varies per boot.
+ * Delays scale with the spin rate measured against LPTIM1, or with the
+ * compile-time TIKU_STM32N6_CPU_HZ estimate before LPTIM1 runs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,10 +20,10 @@
 /**
  * @brief Spin for a given number of loop iterations.
  *
- * One subs/bne pair. The core retires it at about one cycle per iteration,
- * so the count is calibrated directly rather than converted from cycles.
+ * One subs/bne pair per iteration; callers take the count from the measured
+ * spin rate.
  *
- * @param iters  Iterations to run; zero still costs one pass
+ * @param iters  Iterations to run; zero runs one
  */
 static void cpu_spin(unsigned long iters) {
     if (iters == 0UL) {
@@ -37,14 +37,14 @@ static void cpu_spin(unsigned long iters) {
         : "cc");
 }
 
-/** @brief Spin iterations per millisecond, measured rather than derived. */
+/** @brief Spin iterations per millisecond: tiku_cpu_stm32n6_spin_per_ms(). */
 static unsigned long cpu_iters_per_ms(void) {
     return tiku_cpu_stm32n6_spin_per_ms();
 }
 
 void tiku_cpu_stm32n6_delay_us(unsigned int us) {
     unsigned long per_ms = cpu_iters_per_ms();
-    /* Split so the multiply cannot overflow on long waits. */
+    /* Whole milliseconds first, so the multiply below cannot overflow. */
     while (us >= 1000U) {
         cpu_spin(per_ms);
         us -= 1000U;
@@ -75,9 +75,9 @@ uint16_t tiku_cpu_stm32n6_reset_reason(void) {
     }
     rsr = TIKU_REG32(STM32N6_RCC_RSR);
 
-    /* The flags stay set until RMVF clears them, so without this the next
-     * boot would see every cause since power-on.  RMVF goes back to 0 in case
-     * it holds the flags clear while it is set. */
+    /* The flags accumulate until RMVF clears them; clearing them here leaves
+     * the next boot only its own cause.  RMVF goes back to 0 in case it holds
+     * the flags clear while it is set. */
     TIKU_REG32(STM32N6_RCC_RSR) = STM32N6_RCC_RSR_RMVF;
     TIKU_REG32(STM32N6_RCC_RSR) = 0UL;
 

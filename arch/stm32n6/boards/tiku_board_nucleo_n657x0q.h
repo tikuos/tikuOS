@@ -21,9 +21,9 @@
 
 #define TIKU_BOARD_NAME             "STM32 Nucleo-144 N657X0-Q"
 
-/* All three user LEDs sit on GPIOG. The numbering here follows the board
- * silkscreen and ST's BSP, so LED3 on the board -- the green one, on pin 0 --
- * is LED3 in the shell. */
+/* All three user LEDs sit on GPIOG.  TIKU_BOARD_LEDn follows the board
+ * silkscreen and ST's BSP: board LED3, the green one on pin 0, is
+ * TIKU_BOARD_LED3, LED index 2 and /dev/led2. */
 #define TIKU_BOARD_LED_COUNT        3
 #define TIKU_BOARD_LED_PORT         STM32N6_GPIO_PORT_G
 
@@ -45,8 +45,8 @@
 #define TIKU_BOARD_LED3_OFF()       tiku_stm32n6_gpio_set(TIKU_BOARD_LED_PORT, TIKU_BOARD_LED3_PIN, 0)
 #define TIKU_BOARD_LED3_TOGGLE()    tiku_stm32n6_gpio_toggle(TIKU_BOARD_LED_PORT, TIKU_BOARD_LED3_PIN)
 
-/* USART1 reaches the host as the ST-LINK virtual COM port. The UART driver
- * configures both pins itself, so the board hook has nothing to add. */
+/* USART1 reaches the host as the ST-LINK virtual COM port.  The UART driver
+ * configures both pins, so TIKU_BOARD_UART_PINS_INIT() is empty. */
 #define TIKU_BOARD_UART_PORT        STM32N6_GPIO_PORT_E
 #define TIKU_BOARD_UART_TX_PIN      STM32N6_USART1_TX_PIN
 #define TIKU_BOARD_UART_RX_PIN      STM32N6_USART1_RX_PIN
@@ -62,12 +62,12 @@
 #define TIKU_BOARD_BTN2_INIT()      do { } while (0)
 #define TIKU_BOARD_BTN2_PRESSED()   (0)
 
-/* Backscatter, ADC, I2C, one-wire and SPI have no arch backend on this port
- * yet, so nothing is claimed for them. Each turns on with its driver. */
+/* This port has no backscatter, ADC, I2C, one-wire or SPI driver: the
+ * AVAILABLE flags are 0 and the port and pin numbers below are placeholders. */
 #define TIKU_BOARD_BSCAT_PORT       0U
 #define TIKU_BOARD_BSCAT_PIN        0U
 #define TIKU_BOARD_ADC_AVAILABLE    0
-#define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic */
+#define TIKU_BOARD_I2C_BRW_100K     1   /* placeholder; no I2C driver */
 #define TIKU_BOARD_OW_AVAILABLE     0
 #define TIKU_BOARD_OW_PIN           0U
 #define TIKU_BOARD_I2C0_SDA_PIN     0U

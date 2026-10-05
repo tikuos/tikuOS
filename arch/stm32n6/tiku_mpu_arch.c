@@ -5,18 +5,17 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.c - STM32N6 memory protection, not yet programmed.
+ * tiku_mpu_arch.c - STM32N6 memory-protection stub.
  *
- * The whole image lives in one SRAM window that the boot ROM already marked
- * read-write-execute, so there is nothing this layer can usefully divide yet.
+ * No MPU region is programmed.  get_ctl and the violation flags read 0, the
+ * segment access mask lives in a variable, and the other calls do nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_mpu_arch.h"
 
-/* Reported mask. Kept in a variable so set/get agree, which is what callers
- * check; it does not reach the PMSAv8 registers. */
+/* Segment access mask for get_sam and set_sam; no MPU register holds it. */
 static uint16_t mpu_sam = TIKU_MPU_DEFAULT_SAM;
 
 uint16_t tiku_mpu_arch_get_sam(void) {
@@ -28,7 +27,7 @@ void tiku_mpu_arch_set_sam(uint16_t sam) {
 }
 
 uint16_t tiku_mpu_arch_get_ctl(void) {
-    /* Zero reads as "MPU disabled", which is the truth on this port. */
+    /* 0: the MPU is disabled. */
     return 0U;
 }
 
@@ -50,7 +49,7 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
 }
 
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
-    /* Durable data is ordinary SRAM here, so it is already writable. */
+    /* Durable data is SRAM here and always writable. */
     return mpu_sam;
 }
 

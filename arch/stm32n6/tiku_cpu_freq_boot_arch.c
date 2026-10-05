@@ -7,8 +7,8 @@
  *
  * tiku_cpu_freq_boot_arch.c - STM32N6 clock tree: state, measurement, control.
  *
- * Measures the core rate with the DWT cycle counter against LPTIM1, and moves
- * it between 10 MHz and 800 MHz, raising the core rail when overdrive needs it.
+ * Measures the core rate with the DWT cycle counter against LPTIM1, sets it
+ * from PLL1 or HSI, and raises the core rail for the 800 MHz overdrive.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +20,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/* Bounded so a dead oscillator surfaces as a fault rather than a hang. */
+/* HSIRDY polls before tiku_cpu_boot_stm32n6_init() gives up. */
 #define HSI_READY_SPINS     1000000UL
 
 void tiku_cpu_boot_stm32n6_init(void) {
@@ -34,19 +34,20 @@ void tiku_cpu_boot_stm32n6_init(void) {
     }
 }
 
-/** @brief CPU rate measured against LPTIM1; 0 until measured once. */
+/** @brief CPU rate measured against LPTIM1; 0 until measured, and again
+ *         after each clock change. */
 static unsigned long stm32n6_measured_hz;
 
-/** @brief Delay-loop iterations per millisecond, measured alongside the rate. */
+/** @brief Delay-loop iterations per millisecond, measured with the rate. */
 static unsigned long stm32n6_spin_per_ms;
 
 /**
- * @brief Burn a fixed number of delay-loop iterations.
+ * @brief Run @p iters iterations of the delay loop.
  *
- * How many cycles the pair costs depends on alignment and whether the fetch
- * hits a cache, which is why the loop rate is measured rather than assumed.
+ * The cycles per iteration depend on alignment and cache hits;
+ * cpu_measure_hz() times the loop against LPTIM1.
  *
- * @param iters  Iterations to run
+ * @param iters  Iterations to run; must not be 0
  */
 static void cpu_cal_spin(unsigned long iters) {
     __asm__ volatile (
@@ -57,7 +58,7 @@ static void cpu_cal_spin(unsigned long iters) {
         : "cc");
 }
 
-/** @brief Two agreeing reads of the LPTIM counter, which is asynchronous. */
+/** @brief Read the LPTIM1 counter until two reads agree; it is asynchronous. */
 static uint32_t cpu_lptim_count(void) {
     uint32_t a, b;
     do {
@@ -70,8 +71,8 @@ static uint32_t cpu_lptim_count(void) {
 /**
  * @brief Measure the core clock and the delay-loop rate against LPTIM1.
  *
- * Counts DWT core cycles and loop iterations over the same window, so the
- * clock comes out exact and the loop rate comes out measured, not derived.
+ * Counts DWT core cycles and delay-loop iterations over one window of 2000
+ * LPTIM1 counts, and stores the loop rate in stm32n6_spin_per_ms.
  *
  * @return Core rate in Hz, or 0 when LPTIM1 or the cycle counter is unusable
  */
@@ -81,7 +82,8 @@ static unsigned long cpu_measure_hz(void) {
         return 0UL;
     }
 
-    TIKU_REG32(STM32N6_DWT_LAR)   = STM32N6_DWT_LAR_KEY;   /* harmless if RAZ/WI */
+    /* The LAR unlock is harmless where LAR reads as zero and ignores writes. */
+    TIKU_REG32(STM32N6_DWT_LAR)   = STM32N6_DWT_LAR_KEY;
     TIKU_REG32(STM32N6_SCB_DEMCR) |= STM32N6_SCB_DEMCR_TRCENA;
     TIKU_REG32(STM32N6_DWT_CTRL)  |= STM32N6_DWT_CTRL_CYCCNTENA;
 
@@ -125,7 +127,7 @@ unsigned long tiku_cpu_stm32n6_clock_get_hz(void) {
     if (stm32n6_measured_hz == 0UL) {
         stm32n6_measured_hz = cpu_measure_hz();
     }
-    /* Before the reference timer runs, decode the actual clock tree. */
+    /* Until LPTIM1 runs, the rate is decoded from the clock tree. */
     if (stm32n6_measured_hz == 0UL) {
         tiku_stm32n6_clock_t p;
         tiku_cpu_stm32n6_clock_probe(&p);
@@ -153,20 +155,21 @@ int tiku_cpu_stm32n6_clock_has_fault(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Core frequency                                                            */
+/* CORE FREQUENCY                                                            */
 /*---------------------------------------------------------------------------*/
 
 /* PLL1 runs from HSI with a fixed /4 reference, so the VCO is 16 MHz x N.
- * N=75 gives the 1200 MHz ST ships on this board; N=100 gives 1600 MHz, the
- * only VCO from which 800 MHz falls out on an integer IC1 divider. */
+ * N=75 gives the 1200 MHz ST ships on this board; N=100 gives 1600 MHz, which
+ * IC1 divides by 2 for the 800 MHz overdrive. */
 #define PLL_REF_DIV_M       4U
 #define PLL_N_NOMINAL       75U      /* 1200 MHz VCO */
 #define PLL_N_OVERDRIVE     100U     /* 1600 MHz VCO */
 #define PLL_VCO_NOMINAL_MHZ 1200U
 #define PLL_OVERDRIVE_MHZ   800U
 
-/* Buses are held at ST's proven rates whatever the core does, so raising the
- * core never over-clocks a peripheral: SYSCLK 400 MHz, AHB half of it. */
+/* Bus dividers for each VCO: IC2 and IC11 give 400 MHz at both, and IC6
+ * stays at or below ST's 300 MHz, so a core-rate change never over-clocks a
+ * bus.  SYSCLK is 400 MHz and AHB half of it. */
 #define BUS_IC2_AT_1200     3U       /* 400 MHz */
 #define BUS_IC6_AT_1200     4U       /* 300 MHz */
 #define BUS_IC11_AT_1200    3U       /* 400 MHz */
@@ -174,7 +177,7 @@ int tiku_cpu_stm32n6_clock_has_fault(void) {
 #define BUS_IC6_AT_1600     6U       /* 267 MHz, under ST's 300 */
 #define BUS_IC11_AT_1600    4U       /* 400 MHz */
 
-/* Bounded so a PLL that never locks costs a boot message, not the system. */
+/* Polls of a clock status bit before a wait gives up. */
 #define CLK_SWITCH_SPINS    1000000UL
 
 /** @brief Wait for a register bit, returning 0 if it never appears. */
@@ -327,7 +330,7 @@ void tiku_cpu_freq_stm32n6_init(unsigned int mhz) {
 
     TIKU_REG32(STM32N6_RCC_CR) |= STM32N6_RCC_CR_PLL1ON;
     if (!clk_wait_set(STM32N6_RCC_SR, STM32N6_RCC_SR_PLL1RDY)) {
-        /* No lock: stay on HSI rather than switch to a dead clock. */
+        /* No lock: the core and buses stay on HSI. */
         clk_set_voltage(0);
         stm32n6_measured_hz = 0UL;
     stm32n6_spin_per_ms = 0UL;
@@ -339,7 +342,7 @@ void tiku_cpu_freq_stm32n6_init(unsigned int mhz) {
     clk_set_ic(6U,  overdrive ? BUS_IC6_AT_1600  : BUS_IC6_AT_1200);
     clk_set_ic(11U, overdrive ? BUS_IC11_AT_1600 : BUS_IC11_AT_1200);
 
-    /* AHB at half of SYSCLK, APB buses undivided -- ST's ratios. */
+    /* AHB at half of SYSCLK and the APB buses undivided, ST's ratios. */
     uint32_t cfgr2 = TIKU_REG32(STM32N6_RCC_CFGR2);
     cfgr2 &= ~(STM32N6_CFGR2_HPRE_MSK | STM32N6_CFGR2_PPRE1_MSK |
                STM32N6_CFGR2_PPRE2_MSK | STM32N6_CFGR2_PPRE4_MSK |
@@ -362,8 +365,9 @@ int tiku_cpu_stm32n6_boot_rate_supported(unsigned long hz) {
     if (!captured) {
         tiku_stm32n6_clock_t p;
         tiku_cpu_stm32n6_clock_probe(&p);
-        /* Snapshot during boot preference handling. A later shell clock
-         * experiment must not advertise choices the next boot cannot use. */
+        /* Captured once, at the first call during boot preference handling,
+         * so the rates offered after a shell clock change are the ones the
+         * next boot can set. */
         if (p.pll1_ready && p.pll1_src == 0 && p.pll1_frac == 0) {
             boot_pll = p.pll1_hz;
             boot_ceiling = p.vos_high ? 800000000UL : 600000000UL;
@@ -379,24 +383,24 @@ void tiku_cpu_stm32n6_boot_divide(unsigned long hz) {
     unsigned long div;
     if (!tiku_cpu_stm32n6_boot_rate_supported(hz)) return;
     tiku_cpu_stm32n6_clock_probe(&p);
-    /* The NOR mirror has already been restored. Only park the CPU; no PLL
-     * retune or bus switch may disturb the still-mapped external memory. */
+    /* Runs after the NOR mirror is restored, with the XSPI window still
+     * mapped: only the core is parked on HSI, and PLL1 and the buses do not
+     * change. */
     clk_select_source(STM32N6_CLKSRC_HSI, 0);
     if (((TIKU_REG32(STM32N6_RCC_CFGR1) >> STM32N6_CFGR1_CPUSWS_POS) & 3UL)
         != STM32N6_CLKSRC_HSI) {
-        /* The park did not take, and the core may be on either source:
-         * every cached rate below is now a guess, so drop them. */
+        /* The park did not take and the core's source is unknown: the
+         * cached rates are cleared and IC1 is left alone. */
         stm32n6_measured_hz = 0UL;
         stm32n6_spin_per_ms = 0UL;
         return;
     }
     div = (hz != 0UL) ? p.pll1_hz / hz : 0UL;
+    /* IC1 holds dividers 1 to 256; any other value leaves IC1 as it is. */
     if (div >= 1UL && div <= 256UL) {
         TIKU_REG32(STM32N6_RCC_DIVENR) &= ~1UL;
         clk_set_ic(1U, (unsigned int)div);
     }
-    /* A divider outside the register's range would be written as a
-     * borrowed word over IC_SEL: leave IC1 as it was found instead. */
     clk_select_source(STM32N6_CLKSRC_IC, 0);
     stm32n6_measured_hz = 0UL;
     stm32n6_spin_per_ms = 0UL;
@@ -429,8 +433,8 @@ void tiku_cpu_stm32n6_clock_probe(tiku_stm32n6_clock_t *out) {
                                   & 0xFFUL) + 1UL);
     out->ahb_div    = 1UL << ((cfgr2 >> STM32N6_CFGR2_HPRE_POS) & 7UL);
 
-    /* Reference is the selected source divided by M; only HSI is used here,
-     * so anything else reports a zero VCO rather than a guess. */
+    /* The reference is the PLL1 source divided by M.  Only an HSI source is
+     * decoded; any other reports pll1_hz 0. */
     unsigned long ref = (out->pll1_src == 0U && out->pll1_m != 0U)
                         ? (tiku_cpu_stm32n6_smclk_get_hz() / out->pll1_m) : 0UL;
     unsigned long post = (unsigned long)(out->pll1_p1 ? out->pll1_p1 : 1U) *

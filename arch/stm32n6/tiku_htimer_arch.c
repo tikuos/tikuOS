@@ -24,7 +24,7 @@
 /* The counter runs at 500 kHz, so one count is 2 us. */
 #define US_PER_COUNT    (1000000UL / TIKU_STM32N6_LPTIM_HZ)
 
-/** @brief Alarms taken, for localising "the ISR never fired" reports. */
+/** @brief Compare interrupts taken since boot. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
 /**
@@ -39,7 +39,7 @@ static volatile uint8_t htimer_armed;
 static unsigned long long htimer_counts_now(void) {
     unsigned long ticks;
     uint32_t cnt;
-    /* Re-read if the tick advanced mid-sample, or the two halves disagree. */
+    /* Re-read when the tick advanced between the two reads. */
     do {
         ticks = tiku_clock_arch_time();
         cnt   = tiku_clock_arch_fine();
@@ -72,8 +72,8 @@ static void htimer_try_arm(void) {
     unsigned long long tgt = htimer_target;
 
     if (tgt <= now) {
-        /* Already due: fire on the next compare match by arming at the
-         * current count, which matches within this period. */
+        /* Already due: arm one count ahead, the earliest match the compare
+         * can make. */
         tgt = now + 1ULL;
     }
     if ((tgt - now) >= TIKU_CLOCK_ARCH_INTERVAL) {

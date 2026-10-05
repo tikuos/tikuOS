@@ -7,8 +7,8 @@
  *
  * tiku_sram_arch.h - STM32N6 internal SRAM banks.
  *
- * The boot ROM leaves most of the 3.75 MB array clock-gated and held in reset;
- * the image window it loads into is a small part of what the part has.
+ * The boot ROM leaves most of the 3.75 MB AXI SRAM array clock-gated and held
+ * in reset; tiku_stm32n6_sram_init() enables every bank.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,29 +18,34 @@
 
 #include <stdint.h>
 
-/* The AXI SRAM array is one contiguous span; the image window the boot ROM
- * loads into sits inside it, which is why the arena is described as the two
- * pieces either side rather than as one region. */
+/*
+ * AXI SRAM address map.  The array is one contiguous span, and the image
+ * window the boot ROM loads into (0x34180400..0x341C0000) sits inside it:
+ *
+ *   SRAM_BASE..SRAM_END          the whole backed array
+ *   SRAM_LOW_BASE..SRAM_LOW_END  below the image window
+ *   ROM_KEEP_BASE..ROM_KEEP_END  the first 24 KB of AXISRAM2, where the ROM
+ *                                keeps its context and traces
+ *   __stack..SRAM_HIGH_END       above the image window
+ *
+ * Addresses run on to 0x34400000, but an access past 0x343C0000 hangs the
+ * bus with no fault and no reset.
+ */
 #define TIKU_STM32N6_SRAM_BASE      0x34000000UL
 #define TIKU_STM32N6_SRAM_END       0x343C0000UL
-
-/* Below the ROM's download buffer: the ROM keeps its context and traces in the
- * first 24 KB of AXISRAM2, so the reclaimable part starts above them. */
 #define TIKU_STM32N6_SRAM_LOW_BASE  0x34000000UL
 #define TIKU_STM32N6_SRAM_LOW_END   0x34180000UL
 #define TIKU_STM32N6_ROM_KEEP_BASE  0x34100000UL
 #define TIKU_STM32N6_ROM_KEEP_END   0x34106000UL
-
-/* Above the image window (__stack), up to the top of the backed array.  The
- * address range runs on to 0x34400000, but an access past 0x343C0000 HANGS
- * the bus rather than faulting -- no fault dump, no reset. */
 #define TIKU_STM32N6_SRAM_HIGH_END  0x343C0000UL
 
 /**
- * @brief Clock and un-reset every internal SRAM bank.
+ * @brief Clock every internal SRAM bank, release its reset and lift AXISRAM3..6
+ *        out of shutdown.
  *
- * Runs before the memory subsystem so the banks answer by the time the region
- * table describes them. Idempotent.
+ * Repeat calls leave the banks as they are.
+ *
+ * @note Call before anything touches .axisram or the tier span.
  */
 void tiku_stm32n6_sram_init(void);
 
@@ -56,7 +61,8 @@ uint32_t tiku_stm32n6_sram_enabled_mask(void);
  * @brief Walk every bank writing and re-reading a unique word per 64 KB.
  *
  * Destructive.  Each page's result character is drained before the next
- * access, so the page that bus-faults is the first one with no character.
+ * access, so a page that hangs or faults the bus is the first one with no
+ * character.
  */
 void tiku_stm32n6_sram_probe(void);
 #endif

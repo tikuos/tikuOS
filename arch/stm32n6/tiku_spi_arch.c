@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - STM32N6 SPI, unimplemented.
+ * tiku_spi_arch.c - STM32N6 SPI stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no SPI driver: tiku_spi_arch_transfer() returns 0xFF, the
+ * idle level of MISO, every other call returns TIKU_SPI_ERR_PARAM and moves
+ * no data, and tiku_spi_arch_close() does nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

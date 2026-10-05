@@ -7,8 +7,8 @@
  *
  * tiku_xspi_arch.h - STM32N6 external NOR flash over XSPI2.
  *
- * Reads are cheap; a program writes at most one page and can only clear bits,
- * so setting them again costs a sector erase from a finite budget.
+ * A page program writes at most 256 bytes and only clears bits; setting bits
+ * again takes a sector erase, and each sector endures a finite number of them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,9 +20,9 @@
 
 /** @brief Result of an XSPI operation. */
 typedef enum {
-    TIKU_XSPI_OK = 0,
+    TIKU_XSPI_OK = 0,       /**< success                                   */
     TIKU_XSPI_ERR_ARG,      /**< bad argument or range                     */
-    TIKU_XSPI_ERR_TIMEOUT,  /**< a transfer or a busy wait never finished  */
+    TIKU_XSPI_ERR_TIMEOUT,  /**< a wait timed out or a transfer failed     */
     TIKU_XSPI_ERR_ID,       /**< the device answered with a wrong identity */
     TIKU_XSPI_ERR_PROGRAM,  /**< the device reported erase/program failure */
     TIKU_XSPI_ERR_STATE,    /**< called before a successful init           */
@@ -35,36 +35,37 @@ typedef struct {
     uint8_t capacity;   /**< capacity code            */
 } tiku_xspi_id_t;
 
-/* MX25UM51245G: 64 MB, 256-byte pages, 4 KB sectors. Addresses are 32-bit
- * because 64 MB does not fit the legacy 24-bit command set. */
+/* MX25UM51245G geometry: 64 MB, 256-byte pages, 4 KB sectors.  Addresses are
+ * 32-bit: 64 MB does not fit the 24-bit command set. */
 #define TIKU_XSPI_SIZE_BYTES    0x04000000UL
 #define TIKU_XSPI_PAGE_SIZE     256U
 #define TIKU_XSPI_SECTOR_SIZE   4096U
 #define TIKU_XSPI_MFR_MACRONIX  0xC2U
 
-/* Base of the memory-mapped read window that tiku_xspi_mmap_enable()
- * programs.  Erase and program run indirect, but the NVM region, the durable
- * mirror and the driver's own cache invalidations all address the flash
- * through this base. */
+/**
+ * @brief Base of the memory-mapped read window tiku_xspi_mmap_enable() opens.
+ *
+ * Erase and program run indirect; the NVM region, the durable mirror and the
+ * driver's cache invalidations address the flash through this base.
+ */
 #define TIKU_XSPI_MMAP_BASE     0x70000000UL
 
 /* Flash layout of the 64 MB device:
  *
  *   0x0000000  FSBL1     256 KB  the boot image; the ROM loads this one
  *   0x0040000  FSBL2     256 KB  the ROM's fallback search address
- *   0x0080000  /data       8 MB  the carved NVM region (tier + TFS store)
+ *   0x0080000  region      8 MB  the NVM region (tier + TFS store, /data)
  *   0x0880000  unclaimed  ~55 MB model and blob space
  *   0x3FFB000  scratch     4 KB  what `xflash test` erases
  *   0x3FFC000  mirror     16 KB  the durable .uninit mirror
  *
- * The region is 8 MB rather than the whole device because TFS addresses at
- * most TIKU_TFS_MAX_SLOTS slots and formatting writes a gate word per
- * directory entry: 8 MB uses that ceiling exactly. Growing it is this one
- * constant plus the mirror of it in tiku_nvm_region.h.
+ * The region is 8 MB, what TIKU_TFS_MAX_SLOTS slots of 4 KB can address.
+ * TIKU_NVM_REGION_BYTES in kernel/memory/tiku_nvm_region.h holds the same
+ * size and must change with it.
  *
- * The mirror is four sectors against a durable region under nine: the headroom
- * is deliberate, and the linker script asserts the region still fits, because
- * a mirror one byte too small loses the tail of durable state in silence. */
+ * The mirror is four sectors: a 16-byte header, then the .uninit image.  The
+ * linker script fails the link when .uninit outgrows them; its bound is
+ * spelled out there and must equal TIKU_XSPI_MIRROR_SECTORS. */
 #define TIKU_XSPI_BOOT_SLOT_BYTES   0x40000UL
 #define TIKU_XSPI_REGION_ADDR       0x80000UL
 #define TIKU_XSPI_REGION_BYTES      (8UL * 1024UL * 1024UL)
@@ -76,15 +77,17 @@ typedef struct {
 /**
  * @brief Bring up XSPI2, its I/O manager and the pins, then read the identity.
  *
- * @return TIKU_XSPI_OK, or an error leaving the driver unusable
+ * @return TIKU_XSPI_OK, or TIKU_XSPI_ERR_TIMEOUT or TIKU_XSPI_ERR_ID with the
+ *         driver left unusable
  */
 tiku_xspi_err_t tiku_xspi_init(void);
 
 /**
  * @brief Read the JEDEC identity.
  *
- * @param out  Receives the identity; must not be NULL
- * @return TIKU_XSPI_OK, or an error
+ * @param out  Receives the identity
+ * @return TIKU_XSPI_OK, TIKU_XSPI_ERR_ARG for NULL @p out,
+ *         TIKU_XSPI_ERR_STATE before init, or TIKU_XSPI_ERR_TIMEOUT
  */
 tiku_xspi_err_t tiku_xspi_read_id(tiku_xspi_id_t *out);
 
@@ -121,17 +124,18 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len);
 /**
  * @brief Map the flash into the address space for pointer reads.
  *
- * Indirect commands cannot run while the window is live, so the write paths
- * take it down and put it back.
+ * Indirect commands cannot run while the window is live: every read, erase
+ * and program takes it down and leaves it down for the caller to reopen.
  *
- * @return TIKU_XSPI_OK, or an error
+ * @return TIKU_XSPI_OK, TIKU_XSPI_ERR_STATE before init, or
+ *         TIKU_XSPI_ERR_TIMEOUT
  */
 tiku_xspi_err_t tiku_xspi_mmap_enable(void);
 
 /**
  * @brief Take the memory-mapped window down so indirect commands can run.
  *
- * @return TIKU_XSPI_OK, or an error
+ * @return TIKU_XSPI_OK
  */
 tiku_xspi_err_t tiku_xspi_mmap_disable(void);
 

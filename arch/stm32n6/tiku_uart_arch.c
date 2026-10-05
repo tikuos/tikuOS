@@ -26,14 +26,15 @@
 
 #define UART_BASE               STM32N6_USART1_BASE
 
-/* Bounded so a dead or unclocked USART cannot hang the caller forever. */
+/* Polls before tiku_uart_putc() drops a character: a dead or unclocked
+ * USART never frees the transmit FIFO. */
 #define UART_TX_SPINS           2000000UL
 
 /**
  * @brief HSI frequency reaching the USART, in Hz.
  *
- * HSIDIV is read rather than written: the boot ROM may already be running the
- * system from HSI, and changing the divider would move every other clock.
+ * HSIDIV is only read: changing it would move every other clock that runs
+ * from HSI.
  */
 static unsigned long uart_hsi_hz(void) {
     uint32_t div = (TIKU_REG32(STM32N6_RCC_HSICFGR) & STM32N6_RCC_HSICFGR_DIV_MSK)
@@ -42,9 +43,8 @@ static unsigned long uart_hsi_hz(void) {
 }
 
 void tiku_uart_init(void) {
-    /* HSI must be running before it can clock the USART. The wait is bounded:
-     * a console that never opens is bad, but a boot that never returns is
-     * worse, and the divisor below is right whenever the clock is actually up. */
+    /* HSI must run before it can clock the USART.  The wait gives up after
+     * 1000000 polls, and boot continues without a working console. */
     TIKU_REG32(STM32N6_RCC_CR) |= STM32N6_RCC_CR_HSION;
     for (unsigned long spins = 1000000UL; spins > 0UL; spins--) {
         if (TIKU_REG32(STM32N6_RCC_SR) & STM32N6_RCC_SR_HSIRDY) {
@@ -66,13 +66,13 @@ void tiku_uart_init(void) {
     TIKU_REG32(STM32N6_RCC_APB2ENR) |= STM32N6_RCC_APB2ENR_USART1;
     (void)TIKU_REG32(STM32N6_RCC_APB2ENR);
 
-    TIKU_REG32(STM32N6_USART_CR1(UART_BASE)) = 0UL;    /* disable while configuring */
+    TIKU_REG32(STM32N6_USART_CR1(UART_BASE)) = 0UL;    /* disable first */
     TIKU_REG32(STM32N6_USART_CR2(UART_BASE)) = 0UL;    /* 1 stop bit */
     TIKU_REG32(STM32N6_USART_CR3(UART_BASE)) = 0UL;    /* no flow control */
     TIKU_REG32(STM32N6_USART_PRESC(UART_BASE)) = 0UL;  /* no kernel prescaler */
 
-    /* Oversampling by 16, so BRR is simply the clock divided by the baud rate.
-     * Rounded to nearest to keep the error inside the 8-bit frame budget. */
+    /* Oversampling by 16: BRR is the clock divided by the baud rate, rounded
+     * to nearest to keep the error within an 8-bit frame's tolerance. */
     unsigned long clk = uart_hsi_hz();
     unsigned long brr = (clk + (TIKU_BOARD_UART_BAUD / 2UL)) / TIKU_BOARD_UART_BAUD;
     if (brr < 16UL) {
@@ -80,9 +80,9 @@ void tiku_uart_init(void) {
     }
     TIKU_REG32(STM32N6_USART_BRR(UART_BASE)) = (uint32_t)brr;
 
-    /* FIFO mode: the RX FIFO rides out the gap between shell polls, where a
-     * single RDR drops the second of two closely spaced characters. RXNE and
-     * TXE keep their bit positions as RXFNE/TXFNF, so the polled paths hold. */
+    /* FIFO mode: the RX FIFO holds what arrives between shell polls; with a
+     * single RDR the second of two closely spaced characters overruns.  In
+     * FIFO mode RXNE and TXE become RXFNE and TXFNF, at the same bits. */
     TIKU_REG32(STM32N6_USART_CR1(UART_BASE)) =
         STM32N6_USART_CR1_FIFOEN |
         STM32N6_USART_CR1_UE | STM32N6_USART_CR1_TE | STM32N6_USART_CR1_RE;
@@ -145,14 +145,14 @@ int tiku_uart_getc(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Lightweight printf                                                        */
+/* LIGHTWEIGHT PRINTF                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Emit an unsigned value in the given base with optional padding.
  *
- * Digits are rendered least significant first into a local buffer and then
- * replayed in order, which keeps newlib's printf out of the link.
+ * Digits go least significant first into a local buffer, then out in
+ * reverse.
  *
  * @param v      Value to print
  * @param base   Numeric base, 10 or 16
@@ -274,7 +274,7 @@ void tiku_uart_printf(const char *fmt, ...) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Receive overruns                                                          */
+/* RECEIVE OVERRUNS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Overruns seen since the counter was last reset. */

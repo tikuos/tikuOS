@@ -7,8 +7,8 @@
  *
  * tiku_timer_arch.h - STM32N6 kernel clock on LPTIM1.
  *
- * LPTIM1 runs from HSI by way of CLKP, so the tick holds even though the CPU
- * clock is inherited from the boot ROM and varies between resets.
+ * LPTIM1 runs from HSI by way of CLKP, so the tick rate does not change with
+ * the CPU clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,8 +21,8 @@
 /**
  * @brief Monotonic tick count since boot.
  *
- * At 128 Hz a 32-bit counter wraps in about 387 days, so comparisons use the
- * wraparound-safe TIKU_CLOCK_LT / TIKU_CLOCK_GT macros.
+ * At 128 Hz a 32-bit counter wraps in about 388 days; compare ticks with the
+ * wraparound-safe TIKU_CLOCK_LT and TIKU_CLOCK_DIFF (tiku_clock.h).
  */
 #ifndef TIKU_CLOCK_ARCH_TIME_T_DEFINED
 typedef unsigned long tiku_clock_arch_time_t;
@@ -35,27 +35,27 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /**
  * @brief System tick frequency in Hz; must be a power of two.
  *
- * 128 Hz matches every other port, giving a 7.8 ms tick.
+ * The default 128 Hz gives a 7.8 ms tick.
  */
 #ifndef TIKU_CLOCK_ARCH_CONF_SECOND
 #define TIKU_CLOCK_ARCH_CONF_SECOND 128
 #endif
 
-/** @brief Resolved tick frequency -- use this, not the CONF_ form. */
+/** @brief Tick frequency in Hz; code reads this, not the CONF_ form. */
 #define TIKU_CLOCK_ARCH_SECOND  TIKU_CLOCK_ARCH_CONF_SECOND
 
-/* HSI is 64 MHz and the LPTIM prescaler divides by 128, so the counter runs at
- * 500 kHz. Deliberately not derived from TIKU_MAIN_CPU_HZ: on this part that
- * number is an estimate, and the whole point of LPTIM1 is to not depend on it. */
+/** @brief LPTIM1 prescaler as log2: 7 divides the 64 MHz HSI by 128. */
 #define TIKU_STM32N6_LPTIM_PRESC_LOG2   7U      /* divide by 128 */
+
+/** @brief LPTIM1 count rate, 500 kHz from HSI, independent of the CPU clock. */
 #define TIKU_STM32N6_LPTIM_HZ           (64000000UL >> TIKU_STM32N6_LPTIM_PRESC_LOG2)
 
-/** @brief LPTIM1 counts per tick; 500000/128 = 3906, for 128.0 Hz. */
+/** @brief LPTIM1 counts per tick: 500000 / 128 = 3906, a 128.008 Hz tick. */
 #define TIKU_CLOCK_ARCH_INTERVAL \
     (TIKU_STM32N6_LPTIM_HZ / TIKU_CLOCK_ARCH_SECOND)
 
 /*---------------------------------------------------------------------------*/
-/* HAL entry points                                                          */
+/* HAL ENTRY POINTS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Start LPTIM1 and zero the tick and seconds counters. */

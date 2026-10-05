@@ -7,8 +7,8 @@
  *
  * tiku_cpu_watchdog_arch.c - STM32N6 independent watchdog (IWDG).
  *
- * Counts off the LSI, so it survives every change to the system clock; once
- * started nothing but a reset stops it, which is what shapes the API below.
+ * Counts off the LSI, independent of the system clock.  Once started, only a
+ * reset stops it, so off and pause feed the counter and record the request.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,13 +16,13 @@
 #include "tiku_cpu_watchdog_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/** @brief Widest reload the 12-bit down-counter accepts. */
+/** @brief Largest reload the 12-bit down-counter accepts. */
 #define IWDG_RLR_MAX    4095UL
 
 /** @brief Slowest prescaler code; the divider it selects is 4 << code. */
 #define IWDG_PR_MAX     6U
 
-/** @brief Last requested state, so queries answer consistently. */
+/** @brief Last requested state; running gates every feed. */
 static struct {
     uint8_t             running;
     uint8_t             paused;
@@ -32,8 +32,8 @@ static struct {
 
 /** @brief Wait for a pending register write to cross into the LSI domain. */
 static void wdt_sync(void) {
-    /* Bounded: a stopped LSI would otherwise hang here forever, and a
-     * watchdog that cannot be programmed is not worth wedging the boot for. */
+    /* Bounded: with the LSI stopped BUSY never clears, and the call returns
+     * with the write still pending. */
     for (unsigned long spins = 2000000UL; spins > 0UL; spins--) {
         if ((TIKU_REG32(STM32N6_IWDG_SR) & STM32N6_IWDG_SR_BUSY) == 0UL) {
             return;
@@ -42,10 +42,8 @@ static void wdt_sync(void) {
 }
 
 void tiku_cpu_stm32n6_watchdog_off_arch(void) {
-    /* There is no stop. The reference manual is explicit that only a reset
-     * clears the IWDG, so the honest behaviour is to feed it once more and
-     * record that the caller wanted it off: nothing resets by surprise, and a
-     * later query does not claim a watchdog that is in fact still counting. */
+    /* Only a reset stops the IWDG, so off feeds it once more and records
+     * that the caller wanted it off. */
     if (wdt_state.running) {
         TIKU_REG32(STM32N6_IWDG_KR) = STM32N6_IWDG_KR_FEED;
     }
@@ -89,8 +87,8 @@ void tiku_cpu_stm32n6_watchdog_on_arch(tiku_wdt_clk_t src,
 }
 
 void tiku_cpu_stm32n6_watchdog_pause_arch(void) {
-    /* Nothing halts the counter, so the closest a pause can get is a fresh
-     * full interval: the section that follows has that long to finish. */
+    /* Nothing halts the counter: a pause feeds it, and the section that
+     * follows has one full interval to finish. */
     if (wdt_state.running) {
         TIKU_REG32(STM32N6_IWDG_KR) = STM32N6_IWDG_KR_FEED;
     }

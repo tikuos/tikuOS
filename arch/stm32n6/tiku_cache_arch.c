@@ -7,8 +7,8 @@
  *
  * tiku_cache_arch.c - Cortex-M55 cache control for the STM32N6.
  *
- * Geometry is read from CCSIDR rather than assumed, and the set/way loops
- * derive their shifts from it, so a different cache build still walks cleanly.
+ * The set/way loops read the set and way counts from CCSIDR; the set index
+ * is shifted by 5, the Cortex-M55's 32-byte line.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,7 +31,8 @@ static void dcache_all(uint32_t op) {
     uint32_t ways   = (ccsidr >> 3)  & 0x3FFUL;
 
     /* Ways pack against bit 31, so their shift is however many leading zero
-     * bits the way count leaves free; sets sit just above the line offset. */
+     * bits the way count leaves free; sets sit directly above the line
+     * offset. */
     uint32_t wshift = (uint32_t)__builtin_clz((ways == 0UL) ? 1UL : ways);
 
     for (uint32_t s = 0UL; s <= sets; s++) {
@@ -45,8 +46,8 @@ static void dcache_all(uint32_t op) {
 void tiku_stm32n6_cache_enable(void) {
     uint32_t ccr = TIKU_REG32(STM32N6_SCB_CCR);
 
-    /* Both caches hold junk after power-up, so each is invalidated before its
-     * enable bit lands; an already-on cache is left exactly as it is. */
+    /* Cache contents are undefined after power-up, so each cache is
+     * invalidated before it is enabled; a cache already on is left as it is. */
     if ((ccr & STM32N6_SCB_CCR_IC) == 0UL) {
         TIKU_REG32(STM32N6_SCB_ICIALLU) = 0UL;
         __asm__ volatile ("dsb\n\tisb" ::: "memory");
@@ -63,9 +64,8 @@ void tiku_stm32n6_cache_enable(void) {
 
 void tiku_stm32n6_cache_disable(void) {
     if (TIKU_REG32(STM32N6_SCB_CCR) & STM32N6_SCB_CCR_DC) {
-        /* Order matters: cleaning while the cache is still enabled loses any
-         * line dirtied between the clean and the disable, so DC goes off
-         * first. */
+        /* DC is cleared before the clean: a line dirtied between a clean
+         * and the disable would be lost. */
         TIKU_REG32(STM32N6_SCB_CCR) &= ~STM32N6_SCB_CCR_DC;
         __asm__ volatile ("dsb\n\tisb" ::: "memory");
         dcache_all(STM32N6_SCB_DCCISW);
@@ -93,7 +93,7 @@ uint32_t tiku_stm32n6_cache_state(void) {
  */
 static void dcache_range(uint32_t op, const void *addr, size_t len) {
     if ((TIKU_REG32(STM32N6_SCB_CCR) & STM32N6_SCB_CCR_DC) == 0UL) {
-        return;                                  /* nothing cached to maintain */
+        return;                                  /* nothing to maintain */
     }
     uintptr_t p   = (uintptr_t)addr & ~(STM32N6_CACHE_LINE - 1UL);
     uintptr_t end = (uintptr_t)addr + len;

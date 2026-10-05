@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_arch.h - STM32N6 memory-protection contract.
+ * tiku_mpu_arch.h - STM32N6 memory-protection stub.
  *
- * The Cortex-M55 carries a PMSAv8 MPU, but this port does not program regions
- * yet, so the calls report an unprotected map rather than a fabricated one.
+ * This port programs no region of the Cortex-M55's PMSAv8 MPU: the calls
+ * report a disabled MPU and keep the segment access mask in a variable.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,56 +18,52 @@
 
 #include <stdint.h>
 
-/** @brief Segment access mask reported when no regions are programmed. */
+/** @brief Segment access mask tiku_mpu_arch_get_sam() returns until set. */
 #define TIKU_MPU_DEFAULT_SAM    0x0555U
 
-/** @brief Segment access mask. @return The current mask */
+/** @brief Stored segment access mask. @return The mask last set */
 uint16_t tiku_mpu_arch_get_sam(void);
 
-/** @brief Set the segment access mask. @param sam  New mask */
+/** @brief Store the segment access mask; no MPU register changes. */
 void     tiku_mpu_arch_set_sam(uint16_t sam);
 
-/** @brief MPU control word. @return Control register image */
+/** @brief MPU control word. @return 0: the MPU is disabled */
 uint16_t tiku_mpu_arch_get_ctl(void);
 
-/** @brief Mask MPU violation interrupts. */
+/** @brief Does nothing: interrupts are not masked. */
 void     tiku_mpu_arch_disable_irq(void);
 
-/** @brief Unmask MPU violation interrupts. */
+/** @brief Does nothing. */
 void     tiku_mpu_arch_enable_irq(void);
 
-/** @brief Build the segment layout from the linker symbols. */
+/** @brief Does nothing: no MPU region is programmed. */
 void     tiku_mpu_arch_init_segments(void);
 
-/** @brief Apply the default protection policy. */
+/** @brief Does nothing; the stored mask keeps its value. */
 void     tiku_mpu_arch_set_default_protection(void);
 
-/**
- * @brief Set permissions on one segment.
- *
- * @param seg   Segment index
- * @param perm  Permission bits
- */
+/** @brief Ignores @p seg and @p perm; the stored mask keeps its value. */
 void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 
 /**
  * @brief Make the durable region writable.
  *
- * @return State to hand back to tiku_mpu_arch_lock_nvm()
- * @note Durable data is SRAM here, so nothing is gated.
+ * Durable data is SRAM here and always writable, so nothing changes.
+ *
+ * @return The stored segment access mask, for tiku_mpu_arch_lock_nvm()
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void);
 
-/** @brief Restore protection. @param saved_state  Value from unlock */
+/** @brief Ignores @p saved_state; nothing changes. */
 void     tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 
-/** @brief Violation flags. @return Latched violation bits */
+/** @brief Violation flags. @return 0: no violation is ever latched */
 uint16_t tiku_mpu_arch_get_violation_flags(void);
 
-/** @brief Clear latched violation flags. */
+/** @brief Does nothing: no violation is latched. */
 void     tiku_mpu_arch_clear_violation_flags(void);
 
-/** @brief Route violations to the NMI handler. */
+/** @brief Does nothing. */
 void     tiku_mpu_arch_enable_violation_nmi(void);
 
 #endif /* TIKU_STM32N6_MPU_ARCH_H_ */

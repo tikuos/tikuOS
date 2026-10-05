@@ -7,8 +7,8 @@
  *
  * tiku_gpio_irq_arch.c - STM32N6 EXTI edge-interrupt backend.
  *
- * One EXTI line per pin NUMBER, shared across ports: line 13 can serve PA13 or
- * PC13 but never both, which is the choice EXTICR records.
+ * One EXTI line per pin number, shared across ports: line 13 serves PA13 or
+ * PC13, not both, and EXTICR records which.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,13 +23,13 @@
 #include "tiku_gpio_irq_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/** @brief Port armed on each line, so the ISR reports what the caller asked. */
+/** @brief Port armed on each line; the ISR posts it with the pin. */
 static uint8_t exti_port_for_line[16];
 
-/** @brief Bitmap of armed lines, so a disable can refuse another port's line. */
+/** @brief Bitmap of armed lines; disable refuses another port's line. */
 static uint16_t exti_armed;
 
-/** @brief Per-line delivery count; the only proof a handler actually ran. */
+/** @brief Per-line count of handler runs since boot. */
 static volatile uint32_t exti_hits[16];
 
 uint32_t tiku_stm32n6_exti_hits(uint8_t line) {
@@ -49,8 +49,8 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) 
     TIKU_REG32(STM32N6_RCC_APB4HENR) |= STM32N6_RCC_APB4HENR_SYSCFGEN;
     (void)TIKU_REG32(STM32N6_RCC_APB4HENR);
 
-    /* The line watches the pad, so the pin has to be an input; whatever pull
-     * the board fits decides the idle level, so none is forced here. */
+    /* The line watches the pad, so the pin becomes an input.  PUPDR is left
+     * as it is, and the board's resistors set the idle level. */
     uint32_t moder = TIKU_REG32(STM32N6_GPIO_MODER(port));
     moder &= ~(3UL << (pin * 2U));
     TIKU_REG32(STM32N6_GPIO_MODER(port)) = moder;
@@ -65,7 +65,7 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) 
 
     uint32_t bit = 1UL << pin;
 
-    /* The image runs secure with no non-secure world at all, so a line left
+    /* The image runs secure and has no non-secure world: a line left
      * non-secure would target a vector table that does not exist. */
     TIKU_REG32(STM32N6_EXTI_SECCFGR1)  |= bit;
     TIKU_REG32(STM32N6_EXTI_PRIVCFGR1) |= bit;
@@ -81,8 +81,8 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) 
         TIKU_REG32(STM32N6_EXTI_FTSR1) &= ~bit;
     }
 
-    /* Drop whatever the pad did while it was being configured, so arming does
-     * not deliver an edge nobody caused. */
+    /* Clear edges latched while the pad was being configured, so arming
+     * delivers no stale edge. */
     TIKU_REG32(STM32N6_EXTI_RPR1) = bit;
     TIKU_REG32(STM32N6_EXTI_FPR1) = bit;
 
@@ -93,9 +93,9 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) 
 
     uint32_t irq = (uint32_t)STM32N6_IRQ_EXTI0 + pin;
 
-    /* Claim the interrupt for the secure state before enabling it: left
-     * targeting non-secure, it is delivered to a vector table that does not
-     * exist and the line just pends forever. */
+    /* ITNS is cleared before the enable: an IRQ that targets the non-secure
+     * state, which this image does not have, is never taken and stays
+     * pending. */
     TIKU_REG32(STM32N6_NVIC_ITNS(irq / 32U)) &= ~(1UL << (irq % 32U));
     TIKU_REG32(STM32N6_NVIC_ICPR(irq / 32U)) = (1UL << (irq % 32U));
     TIKU_REG32(STM32N6_NVIC_ISER(irq / 32U)) = (1UL << (irq % 32U));
@@ -108,8 +108,8 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
     }
     uint32_t bit = 1UL << pin;
 
-    /* The line is shared between ports, so disarming one the caller does not
-     * own would silently break whoever does. */
+    /* Lines are shared between ports: a line armed for another port stays
+     * armed, and the call fails. */
     if ((exti_armed & bit) != 0U && exti_port_for_line[pin] != port) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
@@ -131,8 +131,8 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
 static void exti_dispatch(uint8_t line) {
     uint32_t bit = 1UL << line;
 
-    /* Cleared before the post: an edge arriving during the post must leave the
-     * flag set so the line is serviced again rather than swallowed. */
+    /* The flags are cleared before the post, so an edge that arrives during
+     * the post sets them again and is serviced. */
     TIKU_REG32(STM32N6_EXTI_RPR1) = bit;
     TIKU_REG32(STM32N6_EXTI_FPR1) = bit;
 
@@ -142,7 +142,7 @@ static void exti_dispatch(uint8_t line) {
                       TIKU_GPIO_IRQ_PACK(exti_port_for_line[line], line));
 }
 
-/* One vector per line on this part, so each handler knows its own line. */
+/* One vector per line: each handler passes its own line number. */
 #define EXTI_ISR(n)                                                           \
     void tiku_stm32n6_exti##n##_isr(void) { exti_dispatch(n); }
 

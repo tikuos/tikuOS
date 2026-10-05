@@ -7,8 +7,8 @@
  *
  * tiku_wake_arch.c - STM32N6 wake-source reporting.
  *
- * Nothing is armed to wake the part yet, so the report is empty rather than
- * a list the hardware would not honour.
+ * This port arms no wake source: tiku_wake_arch_query() reports an empty
+ * set.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +20,8 @@
 /**
  * @brief Report which sources could wake the part.
  *
- * @param out  Receives the source set; left empty on this port
+ * @param out  Receives an empty set: sources 0 and every gpio_ie mask 0;
+ *             NULL is ignored
  */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     if (out == NULL) {

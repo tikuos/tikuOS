@@ -24,7 +24,7 @@
 /** @brief Pin to TIM1 channel, from ST's mapping for this package. */
 static const uint8_t pwm_pins[PWM_CHANS] = { 9U, 11U, 13U, 14U };
 
-/** @brief Duty last requested per channel, so a read-back matches. */
+/** @brief Duty last requested per channel, as get_duty() returns it. */
 static uint16_t pwm_duty[PWM_CHANS];
 
 /** @brief Counter wrap shared by every channel. */
@@ -48,8 +48,8 @@ static unsigned pwm_channel_of(uint8_t pin) {
 /**
  * @brief Clock reaching the timer, in Hz.
  *
- * TIM1 hangs off APB2, which this port programs undivided from AHB, so the
- * timer sees the AHB rate the clock driver reports.
+ * TIM1 is on APB2, which this port runs undivided from AHB: the timer clock
+ * is PLL1 / IC2 / the AHB prescaler.  0 when the tree reads back unusable.
  */
 static unsigned long pwm_tim_clock_hz(void) {
     tiku_stm32n6_clock_t c;
@@ -102,8 +102,8 @@ int tiku_pwm_arch_init(uint8_t gpio_pin, uint32_t freq_hz, uint16_t duty_u16) {
     TIKU_REG32(STM32N6_TIM_PSC(TIM)) = (uint32_t)psc;
     TIKU_REG32(STM32N6_TIM_ARR(TIM)) = (uint32_t)pwm_top;
 
-    /* PWM mode 1 with the compare register preloaded, so a duty change lands
-     * on a period boundary rather than mid-pulse. */
+    /* PWM mode 1 with the compare register preloaded, so a duty change takes
+     * effect at the next period boundary. */
     uint32_t ccmr_shift = ((ch - 1U) & 1U) ? 8U : 0U;
     uint32_t ccmr_reg   = (ch <= 2U) ? STM32N6_TIM_CCMR1(TIM)
                                      : STM32N6_TIM_CCMR2(TIM);

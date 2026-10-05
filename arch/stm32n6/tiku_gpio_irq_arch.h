@@ -7,8 +7,8 @@
  *
  * tiku_gpio_irq_arch.h - STM32N6 EXTI edge interrupts.
  *
- * Beyond the HAL entry points, a per-line delivery count: proving a line fired
- * needs evidence the handler ran, not just that the flag moved.
+ * Declares the per-line count of handler runs; the HAL entry points are in
+ * hal/tiku_gpio_irq_hal.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

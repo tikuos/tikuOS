@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.h - STM32N6 1-Wire contract.
+ * tiku_onewire_arch.h - STM32N6 1-Wire stub.
  *
- * No backend on this port yet: the calls exist so the kernel links, and each
- * reports failure rather than pretending a transfer happened.
+ * This port has no 1-Wire driver: init and reset fail, writes do nothing,
+ * and reads return the idle-high bus.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,25 +18,25 @@
 
 #include <interfaces/onewire/tiku_onewire.h>
 
-/** @brief Claim the 1-Wire pin. @return TIKU_OW_OK, or an error */
+/** @brief Claims no pin and returns TIKU_OW_ERR_PARAM. */
 int     tiku_onewire_arch_init(void);
 
-/** @brief Release the pin. */
+/** @brief Does nothing. */
 void    tiku_onewire_arch_close(void);
 
-/** @brief Send a reset pulse. @return TIKU_OW_OK when a device answers */
+/** @brief Sends no pulse and returns TIKU_OW_ERR_NO_DEVICE. */
 int     tiku_onewire_arch_reset(void);
 
-/** @brief Send one bit. @param bit  Value */
+/** @brief Does nothing. */
 void    tiku_onewire_arch_write_bit(uint8_t bit);
 
-/** @brief Read one bit. @return The bit */
+/** @brief Returns 1, the idle bus level. */
 uint8_t tiku_onewire_arch_read_bit(void);
 
-/** @brief Send one byte. @param byte  Value */
+/** @brief Does nothing. */
 void    tiku_onewire_arch_write_byte(uint8_t byte);
 
-/** @brief Read one byte. @return The byte */
+/** @brief Returns 0xFF, the idle bus level. */
 uint8_t tiku_onewire_arch_read_byte(void);
 
 #endif /* TIKU_STM32N6_ONEWIRE_ARCH_H_ */

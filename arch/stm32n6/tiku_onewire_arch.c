@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.c - STM32N6 1-Wire, unimplemented.
+ * tiku_onewire_arch.c - STM32N6 1-Wire stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no 1-Wire driver: init returns TIKU_OW_ERR_PARAM, reset
+ * returns TIKU_OW_ERR_NO_DEVICE, writes do nothing, and reads return the
+ * idle-high bus, 1 for a bit and 0xFF for a byte.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

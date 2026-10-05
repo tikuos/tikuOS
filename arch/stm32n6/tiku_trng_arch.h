@@ -19,28 +19,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define TIKU_TRNG_OK             0
-#define TIKU_TRNG_ERR_INVALID   -1
-#define TIKU_TRNG_ERR_TIMEOUT   -2
-#define TIKU_TRNG_ERR_NOT_READY -3
+#define TIKU_TRNG_OK             0  /**< success                         */
+#define TIKU_TRNG_ERR_INVALID   -1  /**< NULL destination                */
+#define TIKU_TRNG_ERR_TIMEOUT   -2  /**< no word ready in time           */
+#define TIKU_TRNG_ERR_NOT_READY -3  /**< not returned on this port       */
 
-/** @brief Clock and start the generator; safe to call more than once. */
+/** @brief Clock the RNG, pulse its conditioning reset and enable it. */
 void tiku_trng_arch_init(void);
 
 /**
- * @brief Read one random word.
+ * @brief Read one random word, starting the generator on first use.
  *
- * @param out  Receives the word; must not be NULL
- * @return TIKU_TRNG_OK, or a negative error
+ * A latched seed or clock error reconditions the generator before the read.
+ *
+ * @param out  Receives the word
+ * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID for NULL @p out, or
+ *         TIKU_TRNG_ERR_TIMEOUT
  */
 int tiku_trng_arch_read_u32(uint32_t *out);
 
 /**
  * @brief Fill a buffer with random bytes.
  *
- * @param buf  Destination; must not be NULL
+ * @param buf  Destination
  * @param len  Byte count
- * @return TIKU_TRNG_OK, or a negative error
+ * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID for NULL @p buf, or the first
+ *         error of tiku_trng_arch_read_u32(), with @p buf partly filled
  */
 int tiku_trng_arch_read_bytes(uint8_t *buf, size_t len);
 

@@ -7,8 +7,9 @@
  *
  * tiku_otp_tool.c - one-shot provisioning: the VDDIO3_HSLV fuse.
  *
- * OTP is permanent, so this file compiles only under TIKU_N6_OTP_TOOL=1,
- * touches exactly one bit of one word, and refuses anything unexpected.
+ * Compiled only with TIKU_N6_OTP_TOOL=1: an OTP bit cannot be cleared.  It
+ * sets bit 15 of fuse word 124, and writes nothing when that bit is already
+ * set, the word is locked or the read fails.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,10 +21,10 @@
 #include "tiku_stm32n6_regs.h"
 #include "tiku_uart_arch.h"
 
-/* The boot ROM decides the VDDIO3 pad range from this fuse. The rail on this
- * board is fixed 1.8 V, so without it the ROM probes the boot flash with
- * 3.3 V-range input thresholds and hears nothing; the register sequence
- * mirrors ST's HAL_BSEC_OTP_Read/Program exactly. */
+/* The boot ROM sets the VDDIO3 pad range from this fuse.  The board's rail is
+ * a fixed 1.8 V: with the fuse clear, the ROM reads the boot flash with
+ * 3.3 V-range input thresholds and gets no response.  The register sequence
+ * follows ST's HAL_BSEC_OTP_Read/Program. */
 #define OTP_FUSE_ID         124U
 #define OTP_BIT_HSLV_VDDIO3 (1UL << 15)
 
@@ -52,7 +53,7 @@
 
 #define OTP_SPINS           4000000UL
 
-/** @brief Wait for the controller to go idle; 0 on timeout. */
+/** @brief Wait for the controller to go idle; 1 when idle, 0 on timeout. */
 static int otp_wait_idle(void) {
     for (unsigned long spins = OTP_SPINS; spins > 0UL; spins--) {
         if ((TIKU_REG32(BSEC_OTPSR) & OTPSR_BUSY) == 0UL) {
@@ -66,7 +67,8 @@ static int otp_wait_idle(void) {
  * @brief Reload one fuse word into its shadow and read it.
  *
  * @param out  Receives the fuse value
- * @return 0 on success, negative on lock, timeout or reload error
+ * @return 0, -1 when reload is sticky-locked, -2 on a timeout, or -3 on a
+ *         reload error
  */
 static int otp_read(uint32_t *out) {
     if (TIKU_REG32(BSEC_SRLOCK(OTP_FUSE_ID / 32U)) &
@@ -90,8 +92,8 @@ static int otp_read(uint32_t *out) {
 /**
  * @brief Burn VDDIO3_HSLV if it is not already set, then verify.
  *
- * Prints every step; a second run is a clean no-op because the bit reads
- * back set.
+ * Prints every step over the UART; with the bit already set it writes
+ * nothing.
  */
 void tiku_stm32n6_otp_burn_hslv(void) {
     TIKU_REG32(RCC_APB4HENR) |= APB4H_SYSCFGEN | APB4H_BSECEN;
@@ -122,7 +124,7 @@ void tiku_stm32n6_otp_burn_hslv(void) {
     TIKU_REG32(BSEC_WDR) = want;
     uint32_t cr = TIKU_REG32(BSEC_OTPCR);
     cr &= ~(OTPCR_ADDR_MSK | OTPCR_PROG | OTPCR_PPLOCK);
-    cr |= OTP_FUSE_ID | OTPCR_PROG;             /* PPLOCK clear: normal program */
+    cr |= OTP_FUSE_ID | OTPCR_PROG;     /* PPLOCK clear: normal program */
     TIKU_REG32(BSEC_OTPCR) = cr;
 
     if (!otp_wait_idle()) {

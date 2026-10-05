@@ -7,8 +7,8 @@
  *
  * tiku_sram_arch.c - STM32N6 internal SRAM banks.
  *
- * The boot ROM needs only the bank it loads the image into, so it leaves the
- * rest clock-gated and in reset; this claims them for the running system.
+ * The boot ROM leaves every bank but the one it loads the image into
+ * clock-gated and in reset; tiku_stm32n6_sram_init() enables them all.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,9 +23,9 @@
 #define RCC_AHB2ENR     (STM32N6_RCC_BASE + 0x254U)
 #define RCC_AHB2ENR_RAMCFGEN    (1UL << 12)
 
-/* RAMCFG governs the per-bank shutdown. Banks 3..6 back the NPU and come out
- * of reset powered down, so clearing SRAMSD is what actually makes them
- * answer; a bank left shut down reads as zero and swallows writes. */
+/* RAMCFG holds the per-bank shutdown bit.  Banks 3..6, the NPU-side banks,
+ * come out of reset shut down; until SRAMSD is cleared they read as zero and
+ * drop writes. */
 #define RAMCFG_BASE     0x42023000UL
 #define RAMCFG_CR(bank)     (RAMCFG_BASE + (0x80UL * ((bank) - 1U)))
 #define RAMCFG_ERKEYR(bank) (RAMCFG_CR(bank) + 0x28U)
@@ -33,24 +33,23 @@
 #define RAMCFG_ERKEY_1      0xCAUL
 #define RAMCFG_ERKEY_2      0x53UL
 
-/* AXISRAM3..6 are bits 0..3 and AXISRAM1/2 bits 7/8, an ordering that comes
- * from the bank numbering rather than the address map. AHBSRAM1/2 (bits 4/5)
- * are claimed too; they are small and sit in a different address range. */
+/* RCC_MEMENR bits: AXISRAM3..6 are 0..3, AHBSRAM1/2 are 4/5 and AXISRAM1/2
+ * are 7/8.  The AHB SRAMs are small and sit in a different address range. */
 #define SRAM_BANK_MASK  ((1UL << 0) | (1UL << 1) | (1UL << 2) | (1UL << 3) | \
                          (1UL << 4) | (1UL << 5) | (1UL << 7) | (1UL << 8))
 
 /** @brief RCC_MEMENR as read back after the last enable. */
 static uint32_t sram_enabled_mask;
 
-/** @brief Let a bank's supply settle after its shutdown bit is lifted. */
+/** @brief Spin while a bank's supply settles after SRAMSD is cleared. */
 static void sram_settle(void) {
     for (volatile unsigned i = 0U; i < 200U; i++) {
     }
 }
 
 void tiku_stm32n6_sram_init(void) {
-    /* Clock first, then release the reset: a bank still in reset ignores the
-     * clock, and one clocked but reset answers reads as zero. */
+    /* Clock first, then release the reset; a bank held in reset reads as
+     * zero. */
     TIKU_REG32(RCC_MEMENR)  |= SRAM_BANK_MASK;
     (void)TIKU_REG32(RCC_MEMENR);
 
@@ -63,8 +62,8 @@ void tiku_stm32n6_sram_init(void) {
 
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
 
-    /* Banks 1 and 2 are already awake -- the ROM ran from bank 2 -- so only
-     * the NPU-side banks need lifting out of shutdown. */
+    /* Banks 1 and 2 are awake, since the ROM runs from bank 2; banks 3..6
+     * are lifted out of shutdown. */
     for (unsigned bank = 3U; bank <= 6U; bank++) {
         TIKU_REG32(RAMCFG_ERKEYR(bank)) = RAMCFG_ERKEY_1;
         TIKU_REG32(RAMCFG_ERKEYR(bank)) = RAMCFG_ERKEY_2;
@@ -93,9 +92,8 @@ uint32_t tiku_stm32n6_sram_enabled_mask(void) {
 #define PROBE_STEP      (64UL * 1024UL)
 #define PROBE_PATTERN(a) ((uint32_t)(a) ^ 0xA5A5A5A5UL)
 
-/* The array as measured: everything except the ROM's kept context and traces
- * and the image window itself. The top bound is where a write bus-faults, so
- * these ranges are the whole of what the part actually backs. */
+/* The array minus the 64 KB page holding the ROM's kept context and traces,
+ * and minus the image window.  0x343C0000 is the top of the backed array. */
 static const struct {
     uint32_t    lo;
     uint32_t    hi;
@@ -139,7 +137,7 @@ void tiku_stm32n6_sram_probe(void) {
         for (uint32_t a = probe_ranges[r].lo; a < probe_ranges[r].hi;
              a += PROBE_STEP) {
             /* The character goes out before the next access, so a page that
-             * bus-faults is found by counting what got out. */
+             * hangs or faults the bus is found by counting what got out. */
             volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)a;
             *p = PROBE_PATTERN(a);
             __asm__ volatile ("dsb" ::: "memory");

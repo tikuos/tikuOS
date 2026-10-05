@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 
+/** @brief The 32-bit register at address @p a, as a volatile lvalue. */
 #define TIKU_REG32(a)               (*(volatile uint32_t *)(uintptr_t)(a))
 
 /* Reset and clock control. */
@@ -92,8 +93,8 @@
 
 /* Cortex-M NVIC. One ISER/ICER word per 32 IRQs. */
 #define STM32N6_NVIC_ISER(n)        (0xE000E100UL + ((n) * 4U))
-/* Armv8-M interrupt target: a set bit sends the IRQ to the non-secure state,
- * which this image does not have, so the vector would simply never run. */
+/* Armv8-M interrupt target: a set bit routes the IRQ to the non-secure state,
+ * which this image does not have, and its vector never runs. */
 #define STM32N6_NVIC_ITNS(n)        (0xE000E380UL + ((n) * 4U))
 #define STM32N6_NVIC_ISPR(n)        (0xE000E200UL + ((n) * 4U))
 #define STM32N6_NVIC_ICER(n)        (0xE000E180UL + ((n) * 4U))
@@ -150,11 +151,11 @@
 
 #define STM32N6_IRQ_LPTIM1          136U
 
-/* HPDMA: sixteen channels, 0x80 apart. Driven through the SECURE alias (bit
- * 28 set): the image lives at 0x341xxxxx, the secure alias of AXISRAM, so the
- * channel must issue secure transactions (SECCFGR + TR1 SSEC/DSEC) or RISAF
- * filters them to read-as-zero / write-ignored -- and the SECCFGR write itself
- * is only accepted when it arrives as a secure access. */
+/* HPDMA1, which the STM32N6_GPDMA_* names address: sixteen channels, 0x80
+ * apart, reached through the secure alias (bit 28 set).  The image runs from
+ * 0x341xxxxx, the secure alias of AXISRAM, so a channel must issue secure
+ * transactions (SECCFGR + TR1 SSEC/DSEC); RISAF reads non-secure ones as zero
+ * and drops their writes.  SECCFGR accepts only a secure write. */
 #define STM32N6_RCC_AHB5ENR         (STM32N6_RCC_BASE + 0x260U)
 #define STM32N6_RCC_AHB5ENR_HPDMA1  (1UL << 0)
 
@@ -174,9 +175,9 @@
 #define STM32N6_GPDMA_LLR(c)        (STM32N6_GPDMA_CH(c) + 0xCCU)
 #define STM32N6_GPDMA_CIDCFGR(c)    (STM32N6_GPDMA_CH(c) + 0x54U)
 
-/* With CFEN clear a channel emits CID 0 whatever SCID says; the CPU and the
- * trusted domain are CID 1, which is the only CID RISAF's default rule passes
- * when no region is configured -- and the boot ROM configures none. */
+/* With CFEN clear a channel emits CID 0 whatever SCID holds.  The CPU and the
+ * trusted domain are CID 1, the only CID RISAF's default rule passes when no
+ * region is configured; the boot ROM configures none. */
 #define STM32N6_GPDMA_CID_CFEN      (1UL << 0)
 #define STM32N6_GPDMA_CID_SCID_POS  4U
 #define STM32N6_GPDMA_CID_TRUSTED   1UL
@@ -200,18 +201,17 @@
 #define STM32N6_GPDMA_MEMCPY_CH     0U
 #define STM32N6_IRQ_GPDMA1_CH0      68U   /* HPDMA1_CH0 */
 
-/* EXTI gives every line its own vector on this part, so a handler always knows
- * which line it is for without scanning a shared pending register. */
+/* EXTI gives every line its own vector: line n is IRQ STM32N6_IRQ_EXTI0 + n. */
 #define STM32N6_IRQ_EXTI0           20U
 
-/* EXTI. EXTICR selects which PORT drives each line; the line NUMBER is always
- * the pin number, so PC13 and PA13 contend for line 13. */
+/* EXTI.  EXTICR selects the port that drives each line; the line number is
+ * the pin number, so PC13 and PA13 share line 13. */
 #define STM32N6_RCC_APB4HENR        (STM32N6_RCC_BASE + 0x278U)
 #define STM32N6_RCC_APB4HENR_SYSCFGEN (1UL << 0)
 
-/* The SECURE alias: the image runs secure and marks its lines secure, and a
- * secure line's configuration is not writable through the non-secure view --
- * the same trap the GPDMA channel hit. */
+/* EXTI through its secure alias: the image runs secure and marks its lines
+ * secure, and a secure line's configuration is not writable through the
+ * non-secure view. */
 #define STM32N6_EXTI_BASE           0x56025000UL
 #define STM32N6_EXTI_RTSR1          (STM32N6_EXTI_BASE + 0x000U)
 #define STM32N6_EXTI_FTSR1          (STM32N6_EXTI_BASE + 0x004U)
@@ -271,8 +271,8 @@
 
 /* The XSPI2 pads live in the VDDIO3 supply domain, which comes up unpowered:
  * the rail has to be declared valid and its range selected before the pins
- * drive anything. This board supplies 1.8 V, which is what ST's own board
- * code selects -- the range bit is only dangerous on a 3.3 V rail. */
+ * drive anything.  This board supplies 1.8 V, the range ST's board code
+ * selects; VDDIO3VRSEL is unsafe only on a 3.3 V rail. */
 #define STM32N6_PWR_SVMCR3          (STM32N6_PWR_BASE + 0x03CU)
 #define STM32N6_PWR_SVMCR3_VDDIO3SV (1UL << 9)
 #define STM32N6_PWR_SVMCR3_VDDIO3RDY (1UL << 17)
@@ -372,16 +372,15 @@
 #define STM32N6_SCB_AIRCR           0xE000ED0CUL
 #define STM32N6_SCB_AIRCR_VECTKEY   0x05FA0000UL
 #define STM32N6_SCB_AIRCR_SYSRESETREQ (1UL << 2)
-/* MMFSR.MMARVALID and BFSR.BFARVALID say the address registers mean anything;
- * MMFSR.MSTKERR / BFSR.STKERR say the frame push itself failed, so the stacked
- * PC and LR are not to be believed. */
+/* MMFSR.MMARVALID and BFSR.BFARVALID mark the address registers valid.
+ * MMFSR.MSTKERR and BFSR.STKERR mean the exception frame push failed, so the
+ * stacked PC and LR are not valid. */
 #define STM32N6_CFSR_MMARVALID      (1UL << 7)
 #define STM32N6_CFSR_BFARVALID      (1UL << 15)
 #define STM32N6_CFSR_STKERR_MSK     ((1UL << 4) | (1UL << 12))
 
-/* DWT cycle counter: a true count of core cycles, so the CPU rate can be
- * measured without assuming how many cycles an instruction takes.  DEMCR.TRCENA
- * powers the block that holds it. */
+/* DWT cycle counter: counts core cycles; timed against LPTIM1 it gives the
+ * CPU rate.  DEMCR.TRCENA powers the block that holds it. */
 #define STM32N6_SCB_DEMCR           0xE000EDFCUL
 #define STM32N6_SCB_DEMCR_TRCENA    (1UL << 24)
 #define STM32N6_DWT_CTRL            0xE0001000UL

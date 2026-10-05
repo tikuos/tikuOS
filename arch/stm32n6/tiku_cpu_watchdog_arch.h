@@ -7,8 +7,8 @@
  *
  * tiku_cpu_watchdog_arch.h - STM32N6 independent watchdog.
  *
- * The IWDG counts off the LSI, so it outlives any system-clock change; once
- * started nothing but a reset stops it, which is why there is no true off.
+ * The IWDG counts off the LSI and keeps its rate through system-clock
+ * changes; once started, only a reset stops it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -36,13 +36,13 @@ typedef enum {
 } tiku_wdt_clk_t;
 #endif
 
-/** @brief Timeout selector, in the kernel's interval-code units. */
+/** @brief Watchdog timeout, in LSI ticks on this port. */
 typedef uint16_t tiku_wdt_interval_t;
 
 /**
  * @brief Record the watchdog as off and feed it one last time.
  *
- * @note The IWDG keeps counting; only a reset clears it.  A caller that stops
+ * @note The IWDG keeps counting; only a reset stops it.  A caller that stops
  *       kicking after this is still reset once the interval expires.
  */
 void tiku_cpu_stm32n6_watchdog_off_arch(void);
@@ -50,10 +50,10 @@ void tiku_cpu_stm32n6_watchdog_off_arch(void);
 /**
  * @brief Start the watchdog.
  *
- * @param src       Clock source request
- * @param interval  Timeout in LSI ticks (~32 kHz), as on Nordic
- * @note Arms the IWDG. Nothing but a reset stops it again, so off/pause feed
- *       the counter rather than pretending to halt it.
+ * @param src       Recorded only: the IWDG always counts off the LSI
+ * @param interval  Timeout in LSI ticks (32 kHz); 0 counts as 1
+ * @note Once armed, the IWDG runs until the next reset; off and pause feed
+ *       the counter and cannot halt it.
  */
 void tiku_cpu_stm32n6_watchdog_on_arch(tiku_wdt_clk_t src,
                                        tiku_wdt_interval_t interval);
@@ -67,9 +67,9 @@ void tiku_cpu_stm32n6_watchdog_on_arch(tiku_wdt_clk_t src,
 void tiku_cpu_stm32n6_watchdog_pause_arch(void);
 
 /**
- * @brief Resume watchdog counting.
+ * @brief Clear the paused state; the counter never stopped.
  *
- * @param kick_on_resume  Non-zero to reload the counter first
+ * @param kick_on_resume  Non-zero to reload the counter
  */
 void tiku_cpu_stm32n6_watchdog_resume_arch(int kick_on_resume);
 

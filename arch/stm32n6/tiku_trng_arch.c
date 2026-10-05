@@ -16,7 +16,7 @@
 #include "tiku_trng_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/* Bounded so a stalled generator returns an error rather than the caller. */
+/* Polls per word before a read returns TIKU_TRNG_ERR_TIMEOUT. */
 #define TRNG_SPINS      200000UL
 
 /** @brief Whether the block has been brought up this boot. */
@@ -46,8 +46,8 @@ void tiku_trng_arch_init(void) {
 /**
  * @brief Clear a latched seed or clock error and restart conditioning.
  *
- * A seed error means the words behind it are suspect, so the generator is
- * reconditioned rather than read again.
+ * A seed error makes the queued words suspect; the generator is reconditioned
+ * before the next read.
  */
 static void trng_recover(void) {
     TIKU_REG32(STM32N6_RNG_SR) &= ~(STM32N6_RNG_SR_SEIS | STM32N6_RNG_SR_CEIS);

@@ -7,8 +7,9 @@
  *
  * tiku_region_arch.c - STM32N6 memory region table.
  *
- * One SRAM window holds the whole image, with the durable cells reported as a
- * second region so the persist API accepts them.
+ * Three regions: free SRAM between the image and the stack reserve, the AXI
+ * SRAM above the image window, and the durable cells, tagged NVM so the
+ * persist API accepts them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,24 +20,23 @@
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t _end;       /* end of the image, including durable cells */
-extern uint32_t __stack;    /* top of the window; the stack grows down from here */
+extern uint32_t __stack;    /* top of the window; the stack grows down */
 extern uint32_t __axisram_start;    /* bank base, above the image window */
 extern uint32_t __tier_sram_end;    /* top of the linker-carved tier span  */
 
-/* Headroom left for the stack between the free region and __stack. The whole
- * image lives in the same window as the heap on this part, so a region that
- * ran to the top would hand the allocator the stack. */
+/* Headroom for the stack between the free region and __stack: the image,
+ * the free region and the stack share one window. */
 #define STM32N6_STACK_RESERVE   (16UL * 1024UL)
 
-/** @brief Built on first call; zero count means not yet populated. */
+/** @brief Region table, built on the first call; a count of 0 means unbuilt. */
 static tiku_mem_region_t stm32n6_region_table[3];
 static tiku_mem_arch_size_t stm32n6_region_count;
 
 /**
  * @brief Report the memory map, building it once on first use.
  *
- * The durable overlay is tagged NVM so the persist API accepts cells placed in
- * it, even though on this part it is SRAM and survives only a warm reset.
+ * The durable cells are tagged NVM so the persist API accepts them; they are
+ * SRAM, carried across resets by the NOR mirror.
  *
  * @param count  Receives the number of valid entries
  * @return The region table
@@ -46,9 +46,8 @@ const struct tiku_mem_region *tiku_region_arch_get_table(
     if (stm32n6_region_count == 0U) {
         uintptr_t uninit_start = (uintptr_t)&__uninit_start;
         uintptr_t uninit_end   = (uintptr_t)&__uninit_end;
-        /* Free SRAM starts past the image, not at the window base: on this
-         * part the code, data and durable cells all sit inside the same
-         * window, so anything lower is the running image. */
+        /* Free SRAM starts at _end: code, data and the durable cells sit
+         * below it in the same window. */
         uintptr_t free_start   = (uintptr_t)&_end;
         uintptr_t free_top     = (uintptr_t)&__stack - STM32N6_STACK_RESERVE;
         tiku_mem_arch_size_t idx = 0U;
@@ -60,12 +59,10 @@ const struct tiku_mem_region *tiku_region_arch_get_table(
         stm32n6_region_table[idx].type = TIKU_MEM_REGION_SRAM;
         idx++;
 
-        /* The bank above the image window: any .axisram statics plus the
-         * linker-carved tier span.  Listed separately rather than merged
-         * with the block above because the two are not adjacent: the stack
-         * sits between them.  Bounded by the carve top, not the section end
-         * -- the section is empty now that the tier is carved outside it,
-         * and a section-bounded entry would register nothing. */
+        /* The AXI SRAM above the image window: the .axisram statics and the
+         * tier span, a separate entry because the stack lies between it and
+         * the block above.  It runs to __tier_sram_end, since the tier span
+         * lies past the end of the .axisram section. */
         uintptr_t arena_start = (uintptr_t)&__axisram_start;
         uintptr_t arena_end   = (uintptr_t)&__tier_sram_end;
         if (arena_end > arena_start) {

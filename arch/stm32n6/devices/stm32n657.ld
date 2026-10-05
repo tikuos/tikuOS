@@ -8,7 +8,7 @@
  * stm32n657.ld - STM32N657 (NUCLEO-N657X0-Q) linker script.
  *
  * The part has no internal flash: the boot ROM loads one signed image into
- * SRAM and jumps to it, so code, data and stack all live in that window.
+ * an SRAM window and jumps to it, so code, data and stack live in that window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,16 +18,18 @@
  *   0x34180400  image base, 255 KB  -- the window the boot ROM loads an FSBL
  *                                      into, per the CubeProgrammer device DB
  *                                      (Embedded SRAM, 0x3FC00 bytes, RWE)
+ *   0x341C0000  AXI SRAM, 2 MB      -- .axisram, then the SRAM tier span
  *
- * Layout in that window:
- *   0x34180400  .vectors    Cortex-M55 table; the ROM reads word 0 as the
- *                           initial SP and word 1 as the entry point, so it
- *                           must come first and stay 1 KB aligned
- *   0x341804c0  .text/.rodata
+ * Layout in the image window:
+ *   0x34180400  .vectors    Cortex-M55 table, 704 bytes, 1 KB aligned for
+ *                           VTOR; the ROM jumps to the entry in word 1 and
+ *                           does not load SP from word 0
+ *   0x341806c0  .text/.rodata
  *               .data       load address equals run address: the image is
  *                           loaded whole, so the startup copy is a no-op
  *               .bss        zeroed by the reset handler
- *   0x341C0000  __stack     top of the window, growing down toward .bss
+ *               .uninit     durable cells, not zeroed
+ *   0x341C0000  __stack     top of the window, growing down toward _end
  *
  * Symbols the kernel expects:
  *   __stack, _end, __data_load, __data_start, __data_end,
@@ -67,7 +69,8 @@ SECTIONS
         . = ALIGN(4);
     } > SRAM
 
-    /* ARM unwind tables: kept so a fault handler can walk the stack. */
+    /* ARM unwind tables, bounded by __exidx_start and __exidx_end for the
+     * libgcc unwinder. */
     .ARM.exidx :
     {
         __exidx_start = .;
@@ -75,7 +78,7 @@ SECTIONS
         __exidx_end = .;
     } > SRAM
 
-    /* End of .text: /sys/mem/free reports image size from this. */
+    /* End of code and read-only data; the `free` command reads it. */
     _etext = .;
 
     .data :
@@ -100,28 +103,27 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
-    /* Durable cells. Outside .bss so the reset handler's zero-fill skips them,
-     * which is what lets a value survive a warm reset; the XSPI backend
-     * mirrors this span into the NOR, so it survives power loss too. */
+    /* Durable cells, outside .bss so the reset handler does not zero them.
+     * The boot ROM clears SRAM on a system reset; tiku_mem_arch.c mirrors
+     * this span to the NOR on each flush and restores it at boot. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
         /* TIKU_DURABLE_FIRST: the layout record opens the mirrored image, at
-         * the one offset every image agrees on; the rest follow link order. */
+         * an offset every image shares; the rest follow link order. */
         KEEP(*(.persistent.layout))
         *(.uninit*)
         *(.persistent)
-        /* Retained state is also mirrored here. Moving it changes saved offsets. */
+        /* Retained state is mirrored here too; moving it changes the saved
+         * offsets. */
         *(.retained)
         . = ALIGN(4);
         __uninit_end = .;
     } > SRAM
 
-    /* The AXI SRAM array runs on past the image window the boot ROM loads
-     * into, so the tier arena lives above __stack rather than competing with
-     * .bss for the 255 KB the ROM copies. NOLOAD: the ROM copies the image
-     * only, and tiku_stm32n6_sram_init() has to wake the banks before the
-     * startup code may zero this. */
+    /* The AXI SRAM above __stack, past the image window the boot ROM loads.
+     * NOLOAD: the ROM copies the image only.  tiku_stm32n6_sram_init() must
+     * power the banks before the startup code zeroes this section. */
     .axisram (NOLOAD) : ALIGN(32)
     {
         __axisram_start = .;
@@ -133,18 +135,13 @@ SECTIONS
     } > AXISRAM
 
     /*
-     * SRAM TIER -- the rest of this bank, less a small reserve.
+     * SRAM tier: the rest of the AXI SRAM above .axisram, less a 32 KB
+     * reserve.  The span lies outside every output section, so the startup
+     * code does not zero it, and it moves up as .axisram grows.
      *
-     * Derived rather than compiled in, for the reason the RA8P1 script gives:
-     * a constant has to be chosen per build configuration and silently stops
-     * matching the moment an .axisram buffer is added.  Being outside the
-     * section also keeps the span out of the crt's zero loop, which the
-     * allocator has never needed.
-     *
-     * The reserve protects nothing here: the stack lives in the image window
-     * and nothing sits above the tier in this bank.  The figure is arbitrary,
-     * kept equal to the stack-side ports' margin; reclaim it if the capacity
-     * is wanted.
+     * The reserve guards nothing here: the stack is in the image window and
+     * nothing sits above the tier in this bank.  A smaller reserve gives the
+     * tier the difference.
      */
     __tiku_tier_span_start      = __axisram_top;
     __tiku_tier_span_limit      = ORIGIN(AXISRAM) + LENGTH(AXISRAM);
@@ -158,25 +155,23 @@ SECTIONS
     __stack = __sram_end;
 
     /* The durable region is mirrored into four 4 KB NOR sectors less a
-     * 16-byte header. A region that outgrows that would lose its tail at
-     * runtime with nothing to show for it, so it is a link error instead.
+     * 16-byte header; a larger region fails the link.
      *
-     * The bound is spelled out here AND as TIKU_XSPI_MIRROR_SECTORS in
-     * tiku_xspi_arch.h; the linker cannot see the header, so raising one
-     * without the other either keeps this failing or lets the runtime clamp
-     * in tiku_mem_arch.c silently drop the tail. Move both. */
+     * The 4 here must equal TIKU_XSPI_MIRROR_SECTORS in tiku_xspi_arch.h,
+     * which the linker cannot read.  With only this bound raised, a larger
+     * region links and tiku_mem_arch_nvm_flush_status() refuses to mirror
+     * any of it. */
     ASSERT((__uninit_end - __uninit_start) <= (4 * 4096 - 16),
            "durable .uninit exceeds the NOR mirror; raise TIKU_XSPI_MIRROR_SECTORS in tiku_xspi_arch.h AND the 4 in this ASSERT together")
 
-    /* The layout record opens the durable image in every build, so an image
-     * with other durable variables still reads it where the last one wrote. */
+    /* The layout record opens the durable image in every build, so images
+     * with different durable variables find it at the same offset. */
     ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
            == __uninit_start,
            "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")
 
-    /* The array ends at 0x343C0000. An access above it HANGS the bus rather
-     * than faulting -- no fault dump, no reset -- so an oversized arena would
-     * wedge silently at boot; this makes it a link error instead. */
+    /* The array ends at 0x343C0000.  An access above it hangs the bus with
+     * no fault and no reset, so .axisram past that address fails the link. */
     ASSERT(__axisram_end <= 0x343C0000,
            "tier arena runs past the top of AXI SRAM; shrink the .axisram statics")
 

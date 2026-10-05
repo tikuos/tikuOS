@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - STM32N6 I2C, unimplemented.
+ * tiku_i2c_arch.c - STM32N6 I2C stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no I2C driver: every call returns TIKU_I2C_ERR_PARAM and
+ * moves no data, and tiku_i2c_arch_close() does nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
