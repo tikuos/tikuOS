@@ -66,15 +66,40 @@ uint8_t tiku_cpu_stm32n6_unique_id(uint8_t *buf, uint8_t len) {
 }
 
 uint16_t tiku_cpu_stm32n6_reset_reason(void) {
-    uint32_t rsr = TIKU_REG32(STM32N6_RCC_RSR);
-    uint16_t out = 0U;
+    static uint16_t captured;
+    static uint8_t  captured_valid;
+    uint32_t rsr;
 
-    if (rsr & STM32N6_RCC_RSR_PINRSTF)  out |= TIKU_STM32N6_RESET_PIN;
-    if (rsr & STM32N6_RCC_RSR_PORRSTF)  out |= TIKU_STM32N6_RESET_POWER;
-    if (rsr & STM32N6_RCC_RSR_SFTRSTF)  out |= TIKU_STM32N6_RESET_SOFT;
-    if (rsr & (STM32N6_RCC_RSR_IWDGRSTF | STM32N6_RCC_RSR_WWDGRSTF)) {
-        out |= TIKU_STM32N6_RESET_WATCHDOG;
+    if (captured_valid) {
+        return captured;
     }
-    if (rsr & STM32N6_RCC_RSR_LPWRRSTF) out |= TIKU_STM32N6_RESET_LOWPOWER;
-    return out;
+    rsr = TIKU_REG32(STM32N6_RCC_RSR);
+
+    /* The flags stay set until RMVF clears them, so without this the next
+     * boot would see every cause since power-on.  RMVF goes back to 0 in case
+     * it holds the flags clear while it is set. */
+    TIKU_REG32(STM32N6_RCC_RSR) = STM32N6_RCC_RSR_RMVF;
+    TIKU_REG32(STM32N6_RCC_RSR) = 0UL;
+
+    /* Most specific first.  PINRSTF comes last, since a reset from inside the
+     * chip can drive NRST and raise it too, and a power-on raises BORRSTF and
+     * PINRSTF along with PORRSTF. */
+    if (rsr & (STM32N6_RCC_RSR_IWDGRSTF | STM32N6_RCC_RSR_WWDGRSTF)) {
+        captured = 0x0016U;     /* wdt-timeout */
+    } else if (rsr & (STM32N6_RCC_RSR_SFTRSTF | STM32N6_RCC_RSR_LCKRSTF |
+                      STM32N6_RCC_RSR_LPWRRSTF)) {
+        /* sw-bor: SYSRESETREQ, a CPU lockup after a fault, or an illegal
+         * Stop or Standby entry */
+        captured = 0x0006U;
+    } else if (rsr & STM32N6_RCC_RSR_PORRSTF) {
+        captured = 0x0000U;     /* none: power-on */
+    } else if (rsr & STM32N6_RCC_RSR_BORRSTF) {
+        captured = 0x0002U;     /* brownout */
+    } else if (rsr & STM32N6_RCC_RSR_PINRSTF) {
+        captured = 0x0004U;     /* rstnmi: the NRST pin */
+    } else {
+        captured = 0x0000U;
+    }
+    captured_valid = 1U;
+    return captured;
 }

@@ -148,10 +148,10 @@ static inline uint16_t tiku_common_bswap16(uint16_t val)
 uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len);
 
 /**
- * @brief Return the raw reset-cause value captured at boot.
+ * @brief Cause of the last reset, as an MSP430 SYSRSTIV code.
  *
- * The meaning of the returned value is platform-specific
- * (e.g. SYSRSTIV on MSP430).
+ * MSP430 returns SYSRSTIV itself; every other port maps its reset flags onto
+ * those codes, which /sys/boot decodes.
  */
 uint16_t tiku_common_reset_reason(void);
 

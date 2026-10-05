@@ -152,13 +152,13 @@ uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len)
 }
 
 /**
- * @brief Return the raw reset-cause register value captured at boot.
+ * @brief Return the cause of the last reset as a SYSRSTIV code.
  *
  * Ports whose cause register clears, on read or for the next boot, keep the
  * value from the first call; the others read a register that stays latched
  * until the next reset.  /sys/boot/rstiv and /sys/boot/reason render it.
  *
- * @return Raw reset-cause value (always even on MSP430).
+ * @return SYSRSTIV-style code (always even).
  * @see tiku_common_unique_id()
  */
 uint16_t tiku_common_reset_reason(void)

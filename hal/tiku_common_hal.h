@@ -35,8 +35,10 @@
 
 /**
  * @def tiku_common_arch_reset_reason()
- * @brief Cause of the last reset in the port's own encoding: an MSP430
- *        SYSRSTIV-style code on most ports.
+ * @brief Cause of the last reset, as an MSP430 SYSRSTIV code.
+ *
+ * MSP430 returns SYSRSTIV itself; every other port maps its reset flags onto
+ * those codes, which /sys/boot decodes.
  */
 
 #if defined(PLATFORM_MSP430)

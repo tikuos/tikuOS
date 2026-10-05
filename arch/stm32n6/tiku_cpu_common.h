@@ -45,17 +45,15 @@ void tiku_cpu_stm32n6_delay_us(unsigned int us);
 uint8_t  tiku_cpu_stm32n6_unique_id(uint8_t *buf, uint8_t len);
 
 /**
- * @brief Why the part last reset, from the RCC reset status flags.
+ * @brief Why the part last reset, as the SYSRSTIV-style code /sys/boot
+ *        decodes.
  *
- * @return Bit field of TIKU_STM32N6_RESET_* causes
+ * The first call reads the RCC reset flags and clears them for the next
+ * boot; later calls return the same code.
+ *
+ * @return 0x0016 watchdog, 0x0006 software reset, lockup or illegal
+ *         low-power entry, 0x0002 brownout, 0x0004 NRST pin, 0 power-on
  */
 uint16_t tiku_cpu_stm32n6_reset_reason(void);
-
-/** @brief Reset causes reported by tiku_cpu_stm32n6_reset_reason(). */
-#define TIKU_STM32N6_RESET_PIN      0x0001U
-#define TIKU_STM32N6_RESET_POWER    0x0002U
-#define TIKU_STM32N6_RESET_SOFT     0x0004U
-#define TIKU_STM32N6_RESET_WATCHDOG 0x0008U
-#define TIKU_STM32N6_RESET_LOWPOWER 0x0010U
 
 #endif /* TIKU_STM32N6_CPU_COMMON_H_ */

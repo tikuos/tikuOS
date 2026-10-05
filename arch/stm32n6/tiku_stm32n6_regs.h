@@ -100,8 +100,11 @@
 #define STM32N6_NVIC_ICPR(n)        (0xE000E280UL + ((n) * 4U))
 #define STM32N6_NVIC_IPR(irq)       (0xE000E400UL + (irq))
 
-/* Reset cause flags, latched across a reset. */
+/* Reset cause flags, latched across a reset until RMVF clears them. */
 #define STM32N6_RCC_RSR             (STM32N6_RCC_BASE + 0x034U)
+#define STM32N6_RCC_RSR_RMVF        (1UL << 16)
+#define STM32N6_RCC_RSR_LCKRSTF     (1UL << 17)
+#define STM32N6_RCC_RSR_BORRSTF     (1UL << 21)
 #define STM32N6_RCC_RSR_PINRSTF     (1UL << 22)
 #define STM32N6_RCC_RSR_PORRSTF     (1UL << 23)
 #define STM32N6_RCC_RSR_SFTRSTF     (1UL << 24)

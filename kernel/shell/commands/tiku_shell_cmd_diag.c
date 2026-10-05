@@ -26,6 +26,7 @@
 #include <hal/tiku_gpio_irq_hal.h>
 #include <arch/stm32n6/tiku_gpio_irq_arch.h>
 #include <kernel/process/tiku_process.h>
+#include <kernel/cpu/tiku_common.h>   /* tiku_common_reset_reason */
 
 /** @brief The board's USER button: PC13, active high behind a pull-down. */
 #define DIAG_BTN_PORT   2U
@@ -116,15 +117,18 @@ static void diag_exti(uint8_t argc, const char *argv[]) {
 static void diag_wdt(uint8_t argc, const char *argv[]) {
     if (argc >= 3 && strcmp(argv[2], "bite") == 0) {
         /* ~1 s at 32 kHz. Nothing kicks it afterwards, so the reset that
-         * follows is the proof; RCC_RSR then names the IWDG as the cause. */
+         * follows is the proof; the reset reason then names the watchdog. */
         SHELL_PRINTF("  wdt: arming ~1 s and not feeding it; expect a reset\n");
         tiku_cpu_stm32n6_watchdog_on_arch(TIKU_WDT_SRC_ACLK, 32000U);
         for (;;) {
         }
     }
-    SHELL_PRINTF("  wdt: RCC_RSR %08lx%s\n",
-                 (unsigned long)TIKU_REG32(STM32N6_RCC_RSR),
-                 (TIKU_REG32(STM32N6_RCC_RSR) & STM32N6_RCC_RSR_IWDGRSTF)
+    /* Tested through the SYSRSTIV-style code that /sys/boot decodes (0x0016
+     * is a watchdog timeout), not RCC_RSR, which the port may have cleared
+     * when it latched that code. */
+    SHELL_PRINTF("  wdt: last reset code 0x%04x%s\n",
+                 (unsigned)tiku_common_reset_reason(),
+                 (tiku_common_reset_reason() == 0x0016U)
                      ? "  (last reset was the IWDG)" : "");
 }
 

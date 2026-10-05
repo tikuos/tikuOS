@@ -45,10 +45,11 @@ static uint16_t boot_reset_cause;
  * @brief Decode a raw SYSRSTIV value to its short name.
  *
  * Decodes the causes in the table (TI SLAU367): power faults, watchdog
- * variants, FRAM errors, security violations and software resets.  Any other
- * value renders as "unknown"; /sys/boot/rstiv shows it raw.
+ * variants, FRAM errors, password and MPU segment violations, and software
+ * resets.  Any other value renders as "unknown"; /sys/boot/rstiv shows it raw.
  *
- * @param iv  Raw SYSRSTIV value (even; FR5994 reports 0x0000..0x002E)
+ * @param iv  Raw SYSRSTIV value (even; FR5994 reports 0x0000..0x002E, and
+ *            FR6989 adds 0x0030)
  * @return Static string naming the cause; never NULL
  */
 static const char *
@@ -69,7 +70,14 @@ reset_cause_str(uint16_t iv)
     case 0x001C: return "fram-bit-err";
     case 0x001E: return "periph-fetch";
     case 0x0020: return "pmm-pwviol";
-    case 0x0024: return "fll-unlock";
+    case 0x0022: return "mpu-pwviol";
+    case 0x0024: return "cs-pwviol";
+    case 0x0026: return "mpu-seg-ip";
+    case 0x0028: return "mpu-seg-info";
+    case 0x002A: return "mpu-seg1";
+    case 0x002C: return "mpu-seg2";
+    case 0x002E: return "mpu-seg3";
+    case 0x0030: return "fram-acctime";
     default:     return "unknown";
     }
 }

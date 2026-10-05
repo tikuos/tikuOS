@@ -641,6 +641,8 @@
 #define RP2350_WD_CTRL_PAUSE_JTAG   (1U << 24)
 #define RP2350_WD_CTRL_ENABLE       (1U << 30)
 #define RP2350_WD_CTRL_TRIGGER      (1U << 31)
+#define RP2350_WD_REASON_TIMER      (1U << 0)   /* the count ran out       */
+#define RP2350_WD_REASON_FORCE      (1U << 1)   /* CTRL.TRIGGER was set    */
 
 /*---------------------------------------------------------------------------*/
 /* TICKS BLOCK (per-block tick generators on RP2350 — datasheet §10.6)       */

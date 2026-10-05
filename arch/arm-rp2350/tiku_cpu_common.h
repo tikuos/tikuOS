@@ -53,11 +53,10 @@ uint8_t  tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len);
 /**
  * @brief Return the reset cause for the most recent boot.
  *
- * Returns 0 on a cold power-on boot; non-zero values encode the
- * watchdog or external reset reason (mirrors WD_REASON). The kernel
- * exposes this at /sys/boot/reason.
+ * WD_REASON mapped onto the SYSRSTIV-style codes /sys/boot/reason decodes.
  *
- * @return 0 for cold boot; non-zero for watchdog/external reset.
+ * @return 0x0016 after a watchdog timeout, 0x0006 after a forced watchdog
+ *         reset, 0 after any other reset
  */
 uint16_t tiku_cpu_rp2350_reset_reason(void);
 

@@ -126,20 +126,25 @@ uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len) {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Return the reset reason as a 16-bit MSP430-compatible code.
+ * @brief Return the reset reason as an MSP430 SYSRSTIV-style code.
  *
- * Reads WD_REASON: bit 0 = watchdog timeout, bit 1 = watchdog force.
- * Only the low byte is used; 0 means cold boot. The value is compatible
- * with the MSP430 SYSRSTIV encoding that the rest of the kernel uses.
+ * Maps WD_REASON onto the codes /sys/boot decodes: a watchdog timeout, a
+ * forced watchdog reset, or neither.
  *
- * @return 16-bit reset reason code; 0 on cold boot
+ * @return 0x0016 after a timeout, 0x0006 after a forced reset, else 0
  */
 uint16_t tiku_cpu_rp2350_reset_reason(void) {
-    /* WD_REASON: bit 0 = TIMEOUT, bit 1 = FORCE. Higher bits report
-     * other reset sources on a future revision.  The low byte maps
-     * directly so callers see a 16-bit value compatible with MSP430
-     * SYSRSTIV. 0 means cold boot. */
-    return (uint16_t)(_RP2350_REG(RP2350_WD_REASON) & 0xFFU);
+    uint32_t r = _RP2350_REG(RP2350_WD_REASON);
+
+    /* The hardware clears both bits on any reset the watchdog did not cause,
+     * a debugger's warm reset included, so the register needs no clearing. */
+    if (r & RP2350_WD_REASON_TIMER) {
+        return 0x0016U;     /* wdt-timeout, which `reboot` also uses */
+    }
+    if (r & RP2350_WD_REASON_FORCE) {
+        return 0x0006U;     /* sw-bor: CTRL.TRIGGER, as the BOOTSEL fallback */
+    }
+    return 0x0000U;         /* none: a reset the watchdog did not cause */
 }
 
 /*---------------------------------------------------------------------------*/
